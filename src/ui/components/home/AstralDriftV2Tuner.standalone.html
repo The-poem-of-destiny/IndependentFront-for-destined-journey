@@ -2663,13 +2663,72 @@
       // has to earn its way up, so a weak GPU never pays for a resolution it cannot hold
       // even for the first second.
       // ==================================================================================
+      //
+      // ----------------------------------------------------------------------------------
+      // STARTUP FLICKER (reported 2026-08-10: "blinks 8-10 times at about twice a second,
+      // then completely normal"). Diagnosed, fixed here, and worth reading before touching
+      // any of this, because the governor was only half of it.
+      //
+      // MECHANISM. The scale starts at 1 and can only climb in 7% steps, one step per 900 ms
+      // window, so a machine at devicePixelRatio 2 takes ELEVEN steps to reach its own
+      // ratio, and one at 1.5 takes six. Every step calls applyScale(), and applyScale()
+      // calls renderer.setSize(), which writes canvas.width/height — and writing those
+      // attributes REALLOCATES AND CLEARS THE DRAWING BUFFER. In the old ordering that
+      // happened AFTER composer.render() had already run for the frame, so the cleared
+      // buffer was what the compositor had to show until the next 30 fps tick ~33 ms later.
+      // One black frame per step. Eleven steps, then the scale is pinned at governor.max,
+      // Math.abs(next - scale) > 0.01 stops being true, applyScale() is never called again —
+      // which is exactly the reported "then completely normal, with no further blinking".
+      //
+      // That last detail is what rules out the obvious suspect. Warmup spikes (lazy shader
+      // compilation, first uploads) would predict flicker that SETTLES; a monotone ratchet
+      // into a hard ceiling predicts a burst that stops dead. It stops dead.
+      //
+      // THREE FIXES, and only the first one is about the flash:
+      //   1. The governor now decides BEFORE composer.render() instead of after, so a resize
+      //      is always followed by a draw in the same frame and an empty buffer is never
+      //      presented. This alone would fix the symptom.
+      //   2. The pipeline is warmed (renderer.compile + two throwaway composer frames) and
+      //      the governor ignores the first second and a half, so its first decisions are
+      //      not measurements of the shader compiler.
+      //   3. Steps up must be EARNED TWICE and are bigger when they come, which cuts a
+      //      dpr-2 climb from eleven reallocations to four. Steps DOWN are unchanged and
+      //      still immediate: dropping frames is a visible failure and the measurement that
+      //      says so is unambiguous, where a fast window is only ever an invitation.
+      //
+      // Steady-state behaviour is deliberately untouched — same budget, same 0.86 down-step,
+      // same clamp, same measurement.
+      //
+      // PROVENANCE. This was diagnosed in AstralDriftHomeParticles.standalone.html and
+      // ported verbatim to the rest of the family. The three regions it touches were
+      // byte-identical in every file that carries a governor, which is why the port is a
+      // copy rather than an adaptation — and why it is worth keeping them that way. Change
+      // one, change all of them.
+      // ==================================================================================
       const FRAME_INTERVAL_MS = 1000 / 30;
+      // 1.5 s, not 1 s: the warmup renders below make the first frames cheap on a fast
+      // machine, but on a slow one shader compilation can still spill past a second, and a
+      // spike that lands just outside the grace buys a pointless down-step.
+      const GOVERNOR_GRACE_MS = 1500;
       const governor = {
         scale: 1,
         min: 0.5,
         max: Math.min(devicePixelRatio, 2),
         samples: [],
-        lastAdjust: 0,
+        // "Last window consumed", not "last change applied". Every evaluation that clears
+        // the 900 ms gate takes the window, whether or not it moves the scale — see the
+        // note in considerScale for why that distinction is load-bearing.
+        lastWindow: 0,
+        // Stamped just before the loop starts, AFTER the warmup renders — not here at build
+        // time, which would spend the whole grace window on module loading and texture
+        // baking and leave nothing of it for the frames that actually matter.
+        // performance.now() and the rAF timestamps this gets compared against share a time
+        // origin, so they are directly comparable; the 0 that the first manual animate()
+        // call carries reads as "long before the start" and is skipped, which is what we
+        // want anyway.
+        started: 0,
+        // Consecutive 900 ms windows that have asked to go up. Reset by anything else.
+        upStreak: 0,
       };
       governor.scale = Math.min(1, governor.max);
 
@@ -2707,16 +2766,49 @@
       }
 
       function considerScale(medianMs, now) {
-        if (now - governor.lastAdjust < 900) return;
+        // Startup grace. The first second and a half of a fresh page is its least
+        // trustworthy measurement — shader programs are still being compiled on first use,
+        // buffers and textures are still uploading, and the tab is still competing with its
+        // own load — and it is also the window in which a wrong decision is most visible.
+        // Measuring is free; acting on it this early is guessing.
+        if (now - governor.started < GOVERNOR_GRACE_MS) return;
+        if (now - governor.lastWindow < 900) return;
+        // EVERY evaluation that gets this far consumes the window, pass or no pass.
+        //
+        // The first draft only stamped this when the scale actually moved, and that quietly
+        // destroyed the "earn it twice" rule below: a window that raised the streak to 1
+        // without stepping left the gate open, so the very next frame 33 ms later raised it
+        // to 2 and stepped. Two consecutive FRAMES is not two consecutive windows, and the
+        // result was the same one-step-per-900ms ratchet the rule exists to prevent. Caught
+        // by replaying this function against hand-made timings; reading it proves nothing,
+        // because the bug is in what the code does NOT write.
+        governor.lastWindow = now;
         const budget = FRAME_INTERVAL_MS * 0.72; // leave headroom for the compositor
         let next = governor.scale;
-        if (medianMs > budget) next = governor.scale * 0.86;
-        else if (medianMs < budget * 0.55) next = governor.scale * 1.07;
+        if (medianMs > budget) {
+          // Down is urgent and unconditional. Unchanged from the original.
+          governor.upStreak = 0;
+          next = governor.scale * 0.86;
+        } else if (medianMs < budget * 0.55) {
+          // Up has to be earned twice. A single fast window is not evidence a machine can
+          // hold a higher resolution — it is evidence that one window was cheap — and the
+          // old code treated the two as the same thing, which is what turned an honest
+          // measurement into an eleven-step ratchet.
+          governor.upStreak += 1;
+          // Bigger step, taken less often: the same climb in four reallocations instead of
+          // eleven. Each one is a render-target rebuild, so fewer is better even now that
+          // none of them is visible.
+          if (governor.upStreak >= 2) next = governor.scale * 1.22;
+        } else {
+          governor.upStreak = 0;
+        }
         next = THREE.MathUtils.clamp(next, governor.min, governor.max);
         if (Math.abs(next - governor.scale) > 0.01) {
           governor.scale = next;
           applyScale();
-          governor.lastAdjust = now;
+          // Every step is re-earned from scratch, so a run of cheap windows cannot bank
+          // credit and fire several steps back to back.
+          governor.upStreak = 0;
         }
       }
 
@@ -2945,16 +3037,33 @@
         bloom.radius = 0.86;
         gradePass.uniforms.uTime.value = time;
 
-        composer.render();
-
-        // ---- governor + readout
-        const cost = performance.now() - frameStart;
-        governor.samples.push(cost);
-        if (governor.samples.length > 24) governor.samples.shift();
+        // THE GOVERNOR DECIDES BEFORE THE RENDER, NOT AFTER IT.
+        //
+        // This is the ordering fix for the startup flicker (see the long note on the
+        // governor). applyScale() writes canvas.width/height, which reallocates and clears
+        // the drawing buffer; run after composer.render() that cleared buffer is what gets
+        // composited, and the next draw is a 30 fps tick away, so every scale step showed as
+        // one black frame. Deciding first means a resize is always followed immediately by
+        // the draw that refills it.
+        //
+        // The median is one frame stale as a result. That is a non-issue for a median of 24
+        // and worth naming so nobody "fixes" it back: the sample this frame would have added
+        // cannot move a 24-sample median enough to change any decision.
         if (governor.samples.length === 24) {
           const sorted = [...governor.samples].sort((a, b) => a - b);
           considerScale(sorted[12], frameStamp);
         }
+
+        composer.render();
+
+        // ---- governor sampling + readout
+        //
+        // A frame in which applyScale() ran carries the render-target rebuild in its cost.
+        // That is honest — the rebuild really did happen — and one inflated sample in
+        // twenty-four cannot move the median, so it is left in rather than special-cased.
+        const cost = performance.now() - frameStart;
+        governor.samples.push(cost);
+        if (governor.samples.length > 24) governor.samples.shift();
         fpsWindowFrames += 1;
         if (frameStamp - fpsWindowStart > 500) {
           const fps = (fpsWindowFrames * 1000) / (frameStamp - fpsWindowStart);
@@ -2973,6 +3082,26 @@
       setupDials();
       // Runs once at load, which also applies every default — an untouched bench is v2.
       setupTuning();
+      // Warm the pipeline before the loop is allowed to measure anything.
+      //
+      // three compiles a shader program the first time a material is actually rendered, and
+      // this scene carries a lot of them, plus first uploads for every buffer and baked
+      // texture in the file. Whichever frames pay that are tens of milliseconds, and under
+      // the old ordering those were the first frames the governor sampled — so its opening
+      // decisions were a measurement of the shader compiler rather than of the frame.
+      //
+      // renderer.compile() covers the scene's own materials; it does NOT cover the composer
+      // passes, which are full-screen quads that live outside the scene graph. Hence the two
+      // throwaway composer frames: the first compiles the bloom/grade/FXAA/output chain, the
+      // second runs it with everything already resident. They draw the same t=0 picture the
+      // first real frame would, so there is nothing to see.
+      renderer.compile(scene, camera);
+      composer.render();
+      composer.render();
+
+      // The grace window is measured from HERE, so it covers the first real frames rather
+      // than being eaten by module loading.
+      governor.started = performance.now();
       animate();
 
       // Handles for the offscreen probe harness (screenshot + benchmark without a visible

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
-    <title>Astral Drift Home — tuner</title>
+    <title>Astral Drift Home — particles</title>
     <style>
       /*
         ASTRAL DRIFT — HOME LAYOUT STUDY. Prototype, not shipped chrome.
@@ -57,6 +57,67 @@
         over the disc and the flank arcs are hidden there rather than solved; the bloom is
         still tuned for the dark palette and blooms too hot in chart mode at high `bloom`;
         nothing here is wired to Vue, reduced-motion, or the lazy-load path yet.
+
+        ----------------------------------------------------------------------------------
+
+        PARTICLE PASS (this file only — AstralDriftHomeTuner is unchanged on disk).
+
+        Two point systems were added and nothing else was touched, so a diff against the
+        tuner is exactly the new work. Both exist to answer the same complaint about the
+        engraved layer: the registers and the magic circle are perfectly still SURFACES.
+        They breathe and they carry a running charge, but nothing ever LEAVES them, so they
+        read as printed on the disc rather than as burning on it.
+
+          5a. RUNE SPARKLES (`runeSparks`, 2400 points). Glints shed from the two rune
+              bands. Each spark is bound to ONE GLYPH CELL for its whole existence — it
+              re-derives that cell's seed with the register's own hash and inherits the
+              same `breath` and the same travelling-charge `travel` term. So a spark is
+              not sprinkled near the band, it is thrown off a specific rune, and it flares
+              when that rune's charge sweeps past. Copying those two formulas is deliberate
+              coupling: if the register's brightness law is ever retuned, this file has to
+              be retuned with it or the sparks stop agreeing with what they come off.
+
+          5b. CIRCLE CHARGE MOTES (`circleMotes`, 2600 points, one merged system with an
+              `aKind` attribute). A comet trail riding the circle's existing travelling
+              charge, plus embers drifting off the five pentagram chord intersections. The
+              two halves are one buffer because they share a palette, a lifetime model and
+              a dial; splitting them would mean two draw calls to say one thing.
+
+        BOTH WERE TUNED TWICE (2026-08-10) and the round trip is the useful record.
+
+        Pass 1 was correct and invisible at 1280x720, for an arithmetic reason rather than a
+        taste one: this camera resolves about 52 px per world unit at the disc, so the
+        original ~0.016-0.018 world sprite radii landed under a pixel and every particle sat
+        pinned to the 1 px floor. Pass 2 fixed the visibility with three changes — a
+        MOMENTARY FLARE at each particle's ignition (peripheral vision keeps events and
+        discards steady drift, which is why a brighter CONSTANT glow would not have worked),
+        MOTION AMPLITUDE (~3x, so a particle leaves the bloom of the line it came off
+        instead of being absorbed by it), and size — but the size lever overshot badly,
+        putting 20 px blobs in a frame whose largest star is 5 px. At that scale the sprites
+        stop being sparks and become objects sitting in front of the picture.
+
+        Pass 3 put size back on the galaxy's own ruler and left everything else alone. A
+        disc star is 0.012-0.108 world units (typical ~0.028), clamped at 7 px; both systems
+        now crowd at 0.022-0.024 with a pow(x,3) hero tail under 2x a typical star, and the
+        light that was coming from area now comes from PEAK VALUE — the multipliers went up
+        by roughly the factor the areas came down. In an additive frame with a bloom chain
+        that is the better currency anyway: a small hot point blooms into a glint, where a
+        large dim one only ever looks like a smudge.
+
+        One trap worth keeping in view: in pass 2 the flare and the fade-in envelope
+        overlapped, and their product cancelled the pop to nothing. Both curves looked right
+        in isolation. The envelope ramp is now deliberately much shorter than the flare
+        decay, and the flare is a brightness event with only a small size bump.
+
+        Both follow the tuning sliders LIVE — radii/z/tilt go in as uniforms read fresh
+        every frame, so dragging `rune2 R` drags its sparks with it. Nothing is snapshotted
+        at build time. Intensity is `dials.runes` and `dials.circle` respectively, and both
+        multiply the final colour, so a dial at 0 emits pure black into an additive blend,
+        which is genuinely off rather than merely dim.
+
+        NOT DONE HERE: no new HUD rows. The particle counts, lifetimes and drift speeds are
+        literals in the two build functions. If this direction is kept, they want sliders
+        the same way the radii got them.
 
         ----------------------------------------------------------------------------------
 
@@ -3117,6 +3178,498 @@
         return { points, material };
       }
 
+      // ==================================================================================
+      // Layer 3f — rune sparkles. (Particle pass; header note 5a.)
+      //
+      // Glints shed from the two rune registers. The load-bearing idea is that a spark is
+      // NOT decoration scattered near a band — it belongs to ONE GLYPH CELL and inherits
+      // that cell's brightness, its breath rate and its share of the travelling charge, by
+      // re-deriving them from the register's own formulas. That is what makes the band read
+      // as burning rather than as printed: the sparks arrive where the runes are bright and
+      // flare in step with the charge sweeping past.
+      //
+      // Everything about a spark is computed in the vertex shader from three numbers baked
+      // once into `position` (see below) plus uTime, so respawn costs nothing and there is
+      // never a buffer upload. Only the BAND GEOMETRY comes in as uniforms — refreshed from
+      // `tuning` every frame by sync(), so the sparks follow the R and z sliders live.
+      //
+      // `position` is a carrier, not a location. The vertex shader never uses it as one:
+      //   x = base band-uv (0..1 round the ring)   y = lifetime phase   z = per-spark seed
+      // It has to be called `position` because that is the attribute three reads to decide
+      // how many points to draw.
+      // ==================================================================================
+      function buildRuneSparks(registers) {
+        // BUFFED after looking at the first pass at 1280x720 (2026-08-10). It was correct
+        // and it was invisible, for a measurable reason: sparks were authored at ~0.016
+        // world radius in a scene whose galaxy points are 0.022-0.077 and whose dust is
+        // allowed 26 px. At this camera uProjScale/-z is about 52 px per world unit, so
+        // 0.016 resolved to 0.8 px — i.e. every spark was clamped to the 1 px floor and the
+        // whole layer was grey dust. Three changes, in the order they mattered: an IGNITION
+        // FLARE (a momentary event is what the eye catches; steady drift of small dots is
+        // exactly what peripheral vision is built to discard), bigger off-plane travel so a
+        // spark separates from the glyph it came off instead of sitting on it, and size —
+        // which then had to be walked back to the galaxy's own scale, with the light it was
+        // carrying moved into peak brightness instead. See gl_PointSize below.
+        const PER_BAND = 1200;
+        const COUNT = PER_BAND * 2; // two bands; `band` is used as a mix() factor below
+        const LIFE = 6.0; // seconds, before phase offset — shorter, so ignitions are frequent
+
+        const carrier = new Float32Array(COUNT * 3);
+        const params = new Float32Array(COUNT * 2);
+        for (let index = 0; index < COUNT; index += 1) {
+          const band = index < PER_BAND ? 0 : 1;
+          carrier[index * 3] = Math.random();
+          // Phase is uniform over the whole life, which is what stops the field pulsing as
+          // one sheet — the failure a shared spawn time always produces.
+          carrier[index * 3 + 1] = Math.random();
+          carrier[index * 3 + 2] = Math.random() * 97.3 + 0.13;
+          params[index * 2] = Math.random();
+          params[index * 2 + 1] = band;
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(carrier, 3));
+        geometry.setAttribute('aSpark', new THREE.BufferAttribute(params, 2));
+
+        // Read straight off the live registers rather than repeating their literals. These
+        // four are build-time constants over there (no slider touches them), so reading them
+        // once is enough — and it makes it impossible for the sparks to disagree with the
+        // band they come off.
+        const a = registers[0].material.uniforms;
+        const b = registers[1].material.uniforms;
+
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uProjScale,
+            uDial: { value: 1 },
+            uLife: { value: LIFE },
+            // Startup values only, matching TUNING_DEFAULTS — sync() overwrites all three
+            // on the first frame. Kept in step so this is not a lie about where they sit.
+            uBandR: { value: new THREE.Vector2(galaxy.radius * 1.5, galaxy.radius * 1.17) },
+            uBandZ: { value: new THREE.Vector2(6.0, 0.4) },
+            uBandDepth: { value: galaxy.radius * 0.09 },
+            uSpin: { value: new THREE.Vector2(a.uSpin.value, b.uSpin.value) },
+            uRunRate: { value: new THREE.Vector2(a.uRunRate.value, b.uRunRate.value) },
+            uRepeat: { value: new THREE.Vector2(a.uRepeat.value, b.uRepeat.value) },
+            uCols: { value: glyphAtlas.cols },
+            uTintA: { value: a.uTint.value.clone() },
+            uTintB: { value: b.uTint.value.clone() },
+            uHot: { value: PALETTE.coreHot.clone() },
+          },
+          vertexShader: /* glsl */ `
+            ${HASH_HEAD}
+            attribute vec2 aSpark; // x: size random 0..1, y: band index (0 or 1)
+            uniform float uTime;
+            uniform float uProjScale;
+            uniform float uDial;
+            uniform float uLife;
+            uniform vec2 uBandR;
+            uniform vec2 uBandZ;
+            uniform float uBandDepth;
+            uniform vec2 uSpin;
+            uniform vec2 uRunRate;
+            uniform vec2 uRepeat;
+            uniform float uCols;
+            uniform vec3 uTintA;
+            uniform vec3 uTintB;
+            uniform vec3 uHot;
+            varying vec3 vColor;
+
+            const float TAU_F = 6.28318530718;
+
+            void main() {
+              float base = position.x;
+              float phase = position.y;
+              float seed = position.z;
+              float band = aSpark.y;
+
+              float radius0 = mix(uBandR.x, uBandR.y, band);
+              float zBase = mix(uBandZ.x, uBandZ.y, band);
+              float spin = mix(uSpin.x, uSpin.y, band);
+              float run = mix(uRunRate.x, uRunRate.y, band);
+              float repeat = mix(uRepeat.x, uRepeat.y, band);
+
+              float life = fract(uTime / uLife + phase);
+
+              // WHICH RUNE THIS SPARK CAME OFF, and why the cell index is a constant.
+              //
+              // The register samples its atlas at turn = vUv.x + uSpin*uTime, so a glyph
+              // fixed in atlas space DRIFTS to vUv.x = base - uSpin*t. A spark that stays
+              // on its glyph has to drift the same way — and once it does, the register's
+              // own cell index, floor(turn_register * repeat * cols), comes out constant
+              // for the whole life. One spark, one rune. Drop the drift and the spark
+              // would slide across the register's glyphs and inherit a different
+              // brightness every few seconds, which reads as flickering noise.
+              float turn = base - spin * uTime;
+              float cell = floor(base * repeat * uCols);
+              float cellSeed = hash11(cell + band * 31.7);
+
+              // The register's brightness law, copied verbatim so a spark is as bright as
+              // the rune that threw it. Retune one and this has to be retuned with it.
+              float breath = 0.5 + 0.5 * sin(uTime * (0.28 + cellSeed * 0.85) + cellSeed * 24.0);
+              float bright = (0.3 + pow(cellSeed, 1.7) * 1.5) * (0.45 + 0.55 * breath);
+
+              // ...and the register's travelling charge, on the spark's CURRENT band-uv.
+              // This is the beat: the charge sweeps the ring and the band throws sparks.
+              float head = fract(uTime * run);
+              float around = abs(fract(turn - head + 0.5) - 0.5);
+              float travel = pow(max(0.0, 1.0 - around * 9.0), 3.0);
+
+              // Scatter across the band, then creep radially and lift off the plane. All
+              // three are in band-depth / world units, so they stay proportionate when the
+              // R sliders move the register somewhere else.
+              float across = (hash11(seed * 7.3) - 0.5) * uBandDepth * 0.85;
+              float creep = (hash11(seed * 3.1) - 0.32) * uBandDepth * 2.6;
+              float radius = radius0 + across + creep * life;
+
+              // Drift is mostly toward the camera side. The registers already sit in FRONT
+              // of the disc (positive z in the group), so sparks falling backward would
+              // just disappear into the galaxy; a fifth of them go that way anyway, and
+              // less far, so the shower has a back edge instead of a floor.
+              //
+              // Roughly 3x the first pass's travel. At the old amplitude a spark never got
+              // more than a band-depth away from the glyph that threw it, so the shower sat
+              // INSIDE the register's own bloom and read as the band being slightly fuzzy.
+              // pow(life, 0.72) rather than a linear ramp: an ejection is fast at the start
+              // and coasts, and the fast part is what registers as being thrown.
+              float lift = 0.85 + hash11(seed * 11.7) * 2.4;
+              lift *= hash11(seed * 5.9) < 0.2 ? -0.45 : 1.0;
+              float wobble = sin(uTime * (0.7 + cellSeed * 1.3) + seed * 17.0) * 0.06;
+
+              // An ARC, not a spine: the spark also slides along the ring as it leaves.
+              // Tiny in absolute terms — a hundredth of a lap over a whole life — but
+              // without it every spark stands radially off the band and the register grows
+              // a hedgehog.
+              float sweep = (hash11(seed * 15.1) - 0.45) * 0.012;
+              float angle = (turn + sweep * life) * TAU_F;
+              vec3 pos = vec3(
+                cos(angle) * radius,
+                sin(angle) * radius,
+                zBase + lift * pow(life, 0.72) + wobble
+              );
+
+              // Fast ignition, long decay: nothing in an additive frame may pop out of
+              // existence, because there is no depth buffer to hide the discontinuity.
+              // The ramp is deliberately SHORT (0.02 of a life, ~4 frames at the 30 fps cap)
+              // so it does not eat the flare below — with the old 0.09 ramp the envelope was
+              // still climbing while the flare was already decaying, and the two cancelled
+              // into nothing. That cancellation is the trap here: both curves look right in
+              // isolation and their product is a shrug.
+              float env = smoothstep(0.0, 0.02, life) * (1.0 - smoothstep(0.16, 1.0, life));
+              // IGNITION FLARE — the single change that took this layer from "faint dust"
+              // to legible. A spark is briefly hot and briefly large as it comes off the
+              // rune, then settles. Momentary events survive peripheral vision; a steady
+              // drift of small dots is precisely what peripheral vision throws away.
+              float flare = pow(1.0 - smoothstep(0.0, 0.12, life), 2.0);
+              // Peaked twinkle rather than a raw sine: pow() spends most of the cycle dim
+              // and a short part of it bright, which reads as GLINTING. A sine reads as
+              // breathing, which the registers already do — two breathing layers on top of
+              // each other is just one softer layer.
+              float twinkle = pow(0.5 + 0.5 * sin(uTime * (1.9 + seed * 4.2) + seed * 41.0), 2.4);
+
+              // Brightness is where the size cut is paid back. A sprite at 0.022 covers a
+              // fifth of the area it did at 0.05, so holding the same peak VALUE would be a
+              // fifth of the light; these multipliers are up by roughly that factor. In an
+              // additive frame with a bloom chain that is the better trade anyway — a small
+              // hot point blooms into a glint, where a large dim one only ever looks like a
+              // smudge. This is the "compensate with brightness, not size" rule made real.
+              vec3 tint = mix(uTintA, uTintB, band);
+              vColor = (
+                  tint * bright * (0.5 + 2.6 * twinkle)
+                + uHot * travel * 5.0
+                + uHot * flare * 5.5
+              ) * env * uDial;
+
+              vec4 viewPos = modelViewMatrix * vec4(pos, 1.0);
+              gl_Position = projectionMatrix * viewPos;
+              // Real projection uniform, not the 300.0/-z idiom: at this camera that idiom
+              // yields sub-pixel sprites and the system renders as nothing at all.
+              //
+              // SIZED OFF THE GALAXY, not off a guess. buildGalaxy authors
+              //   aScalar.z = 0.022 + pow(rand, 3) * 0.055   ->  0.0220 / 0.0289 / 0.0770
+              //                                                  (p10 / median / max)
+              //   world size = aScalar.z * (0.55 + q * 0.85)  ->  0.0121 min, ~0.0282
+              //                                                   typical, 0.1078 max
+              // so a disc star is 0.012-0.108 world units and is clamped at 7 px.
+              //
+              // This crowd therefore sits at 0.022 — the galaxy's own dense band — and the
+              // pow(x, 3) hero tail tops out at 0.048, under 2x a typical star. The middle
+              // round of this file overshot to 0.05/0.39 and put 20 px blobs in a frame
+              // whose largest star is 5 px; the sprites stopped being sparks and became
+              // objects. Heavy-tailing is still worth keeping at this scale: it is what
+              // lets the crowd read as one substance rather than as a uniform stipple.
+              //
+              // The flare is now a BRIGHTNESS event with only a small size bump (peak
+              // factor ~1.45). Size was the wrong currency for it — a pop that doubles the
+              // radius quadruples the area and reads as something arriving, where a pop
+              // that raises the peak value reads as something igniting, which is the thing.
+              float size = (0.022 + pow(aSpark.x, 3.0) * 0.026) * (0.6 + env * 0.4 + flare * 0.45);
+              // 9 rather than the galaxy's 7 only so a hero mid-flare is not clipped at
+              // dpr 2, where uProjScale doubles. Steady-state never approaches it.
+              gl_PointSize = clamp(size * uProjScale / -viewPos.z, 1.0, 9.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            ${POINT_HEAD}
+            varying vec3 vColor;
+
+            void main() {
+              gl_FragColor = vec4(vColor * sprite(gl_PointCoord) * 2.0, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+
+        const points = new THREE.Points(geometry, material);
+        points.frustumCulled = false;
+
+        // Live-follow the tuner. Read every frame rather than snapshotted at build: the
+        // whole point of this file's sliders is dragging a register and watching what moves
+        // with it, and sparks left behind at the old radius would read as a bug.
+        const sync = () => {
+          material.uniforms.uBandR.value.set(
+            galaxy.radius * tuning.rune1R,
+            galaxy.radius * tuning.rune2R,
+          );
+          material.uniforms.uBandZ.value.set(tuning.rune1Z, tuning.rune2Z);
+          material.uniforms.uBandDepth.value = galaxy.radius * TUNE_BAND_DEPTH;
+        };
+
+        return { points, material, sync, count: COUNT };
+      }
+
+      // ==================================================================================
+      // Layer 3g — magic circle charge motes. (Particle pass; header note 5b.)
+      //
+      // Two populations in ONE buffer, told apart by an `aKind` attribute:
+      //
+      //   kind 0, THE COMET TRAIL — motes riding the circle's existing travelling charge.
+      //     Each one holds a fixed lag behind the head, so the trail is rigid and the whole
+      //     thing sweeps the ring once per lap with the charge it belongs to. It reads as
+      //     the head having mass.
+      //   kind 1, EMBERS — slow drift off the five points where the pentagram's chords
+      //     cross. Those five points are where the figure's lines actually MEET, so light
+      //     collecting and coming off there reads as the drawing carrying current, where
+      //     embers scattered anywhere on the quad would read as dust.
+      //
+      // One system because they share a palette, a lifetime model and a dial; two would be
+      // two draw calls to say one thing.
+      //
+      // TWO SIGNS ARE LOAD-BEARING AND NEITHER IS OBVIOUS:
+      //   - The circle's charge is driven by the UNROTATED quad coordinate (the shader
+      //     reads vPos, not the spun ps), so the comet trail must NOT be spun or it would
+      //     slide off its own head as the pentagram turns.
+      //   - The star IS spun, but the drawn figure turns the OTHER WAY from uSpin: the
+      //     shader rotates the sample point by +uSpin*t, which rotates the shape by -uSpin*t.
+      //     Get this backwards and the embers counter-rotate against the vertices they are
+      //     supposed to be leaving.
+      // ==================================================================================
+      function buildCircleMotes(circle) {
+        // BUFFED alongside the sparks (2026-08-10), and this layer had it worse: it sits on
+        // top of the circle's own bloom, so anything dimmer than the stroke it rides simply
+        // gets absorbed by the halo. A much longer and wider tail, a near-white bead at the
+        // head, and an ignition flash on each ember. Sprite size stays on the galaxy's
+        // ruler (see gl_PointSize below) — the brightness multipliers carry it instead.
+        const COMETS = 1500;
+        const EMBERS = 1100;
+        const COUNT = COMETS + EMBERS;
+        // Trail length as a fraction of a lap. 0.075 was about 27 degrees of arc — short
+        // enough that at this radius it read as a slightly thicker bit of ring rather than
+        // as something travelling. 0.16 is a 58-degree comet with a visible head and end.
+        const TAIL_TURNS = 0.16;
+        const EMBER_LIFE = 7.0;
+
+        const carrier = new Float32Array(COUNT * 3);
+        const params = new Float32Array(COUNT * 2);
+        for (let index = 0; index < COUNT; index += 1) {
+          const isEmber = index >= COMETS;
+          // Comets: lag behind the head, biased toward the head so the trail tapers by
+          // DENSITY as well as by brightness. A uniform lag gives an even bar of light.
+          // Embers: which of the five intersections this one belongs to.
+          carrier[index * 3] = isEmber ? Math.random() : Math.pow(Math.random(), 1.6);
+          carrier[index * 3 + 1] = Math.random();
+          carrier[index * 3 + 2] = Math.random() * 97.3 + 0.13;
+          params[index * 2] = Math.random();
+          params[index * 2 + 1] = isEmber ? 1 : 0;
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(carrier, 3));
+        geometry.setAttribute('aMote', new THREE.BufferAttribute(params, 2));
+
+        const circleUniforms = circle.material.uniforms;
+
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uProjScale,
+            uDial: { value: 1 },
+            // Startup value only; sync() overwrites from `tuning` on the first frame.
+            uRadius: { value: galaxy.radius * 1.5 },
+            uSpin: { value: circleUniforms.uSpin.value },
+            uRunRate: { value: circleUniforms.uRunRate.value },
+            uTail: { value: TAIL_TURNS },
+            uEmberLife: { value: EMBER_LIFE },
+            uTint: { value: PALETTE.coreGold.clone() },
+            uHot: { value: PALETTE.coreHot.clone() },
+          },
+          vertexShader: /* glsl */ `
+            ${HASH_HEAD}
+            attribute vec2 aMote; // x: size random 0..1, y: kind (0 comet, 1 ember)
+            uniform float uTime;
+            uniform float uProjScale;
+            uniform float uDial;
+            uniform float uRadius;
+            uniform float uSpin;
+            uniform float uRunRate;
+            uniform float uTail;
+            uniform float uEmberLife;
+            uniform vec3 uTint;
+            uniform vec3 uHot;
+            varying vec3 vColor;
+
+            const float TAU_F = 6.28318530718;
+            // The pentagram's chords cross at radius RAD / phi^2 and 36 degrees off the
+            // outer vertices. Both numbers are properties of the figure the circle shader
+            // draws, not free parameters.
+            const float INNER = 0.381966;
+            const float HALF_STEP = 0.62831853; // TAU / 10, i.e. 36 degrees
+
+            void main() {
+              float param = position.x;
+              float phase = position.y;
+              float seed = position.z;
+              float kind = aMote.y;
+
+              // ---- kind 0: comet trail on the running charge -------------------------
+              float head = fract(uTime * uRunRate);
+              float lag = param;
+              float cAngle = (head - lag * uTail) * TAU_F;
+              // The tail frays as it ages: spread grows with lag, so the head is a tight
+              // bead and the end dissolves into the ring instead of stopping.
+              float fray = lag * lag * uRadius * 0.13;
+              float cRadius =
+                uRadius
+                + (hash11(seed * 4.1) - 0.5) * fray * 2.0
+                + (hash11(seed * 2.7) - 0.5) * uRadius * 0.012;
+              vec3 cPos = vec3(
+                cos(cAngle) * cRadius,
+                sin(cAngle) * cRadius,
+                (hash11(seed * 9.3) - 0.5) * fray
+              );
+              // The bead: the leading few percent of the trail, near-white and fat. A comet
+              // without a hard head is a smear, and a smear on an already-glowing ring is
+              // invisible. pow 9 keeps it to a genuine point rather than a bright half.
+              float bead = pow(1.0 - lag, 9.0);
+              // Falloff softened from pow 2.4 so the tail actually carries its new length
+              // instead of dying in the first third of it.
+              float cEnv =
+                pow(1.0 - lag, 1.5)
+                * (0.6 + 0.6 * sin(uTime * (2.4 + seed * 3.1) + seed * 29.0));
+
+              // ---- kind 1: embers off the five chord intersections -------------------
+              float k = floor(param * 5.0);
+              float a0 = k * (TAU_F / 5.0) + 1.57079632679 + HALF_STEP;
+              float spun = a0 - uSpin * uTime + (hash11(seed * 6.1) - 0.5) * 0.05;
+              float life = fract(uTime / uEmberLife + phase);
+              vec2 root = vec2(cos(spun), sin(spun)) * (uRadius * INNER);
+              vec2 outward = normalize(root);
+              vec2 tangent = vec2(-outward.y, outward.x);
+              // Travel roughly tripled. The intersections sit at 0.38 of the circle's
+              // radius, so at the old amplitude an ember never left the pentagram's own
+              // line weight; now it climbs a good way toward the ring and the gap between
+              // the two is what reads as the figure venting.
+              float rise = life * uRadius * (0.16 + hash11(seed * 8.3) * 0.4);
+              float sway = sin(life * 3.1 + seed * 13.0) * uRadius * 0.06;
+              vec3 ePos = vec3(
+                root + outward * rise + tangent * sway,
+                life * uRadius * (0.05 + hash11(seed * 12.7) * 0.16)
+              );
+              // The star's own breath, copied from the circle shader, so the embers swell
+              // and fade with the figure they come off rather than on their own schedule.
+              float starBreath = 0.78 + 0.22 * sin(uTime * 0.34 + 1.7);
+              // Same ignition flash the sparks got, and for the same reason: the eye finds
+              // the moment something LIGHTS, not the minute it spends drifting.
+              float eFlare = pow(1.0 - smoothstep(0.0, 0.14, life), 2.0);
+              float eEnv =
+                smoothstep(0.0, 0.03, life)
+                * (1.0 - smoothstep(0.25, 1.0, life))
+                * starBreath
+                * (0.45 + 0.9 * pow(0.5 + 0.5 * sin(uTime * (1.3 + seed * 2.2) + seed * 23.0), 2.0));
+
+              vec3 pos = mix(cPos, ePos, kind);
+              float env = mix(cEnv, eEnv, kind);
+
+              // Head near-white cooling into the figure's own gold down the trail; embers
+              // ignite hot and cool as they leave. Same exposure logic as the galaxy: hue
+              // travel is what stops a single-colour system reading as a smudge.
+              // Raised to pay for the size cut below, same trade as the sparks: this layer
+              // has to out-read the circle's own bloom, and it now has to do it on a
+              // galaxy-star-sized sprite. Peak value, not area.
+              vec3 cColor = mix(uHot, uTint, smoothstep(0.0, 0.4, lag)) * 3.6 + uHot * bead * 5.5;
+              vec3 eColor = mix(uHot, uTint, smoothstep(0.0, 0.25, life)) * 2.4
+                          + uHot * eFlare * 4.0;
+              vColor = mix(cColor, eColor, kind) * env * uDial;
+
+              vec4 viewPos = modelViewMatrix * vec4(pos, 1.0);
+              gl_Position = projectionMatrix * viewPos;
+              // Matched to the galaxy's own stars (0.012-0.108 world units, typical 0.028,
+              // clamped at 7 px) exactly as the sparks are: crowd at 0.024, pow(x, 3) hero
+              // tail to 0.054. The comet HEAD is the one thing allowed to run a little
+              // larger — it is a single focal point rather than a population, and a comet
+              // whose head is the same size as its tail is a smear.
+              float size =
+                (0.024 + pow(aMote.x, 3.0) * 0.03)
+                * mix(0.55 + pow(1.0 - lag, 2.0) * 0.75, 0.6 + eEnv * 0.4 + eFlare * 0.5, kind);
+              gl_PointSize = clamp(size * uProjScale / -viewPos.z, 1.0, 9.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            ${POINT_HEAD}
+            varying vec3 vColor;
+
+            void main() {
+              gl_FragColor = vec4(vColor * sprite(gl_PointCoord) * 2.0, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+
+        const points = new THREE.Points(geometry, material);
+        points.frustumCulled = false;
+
+        // The motes live in their own group, NOT parented to the circle mesh, and this is
+        // the one deliberate deviation from "parent the points to the circle mesh".
+        //
+        // That mesh is a unit quad blown up by (radius*2)/0.9 — roughly 17x. Inheriting it
+        // would multiply every world-unit number inside the shader (drift, lift, fray, the
+        // point-size world radius) by that scale, so the tuning would silently depend on
+        // the circle's radius. Copying position and rotation only gives the same placement
+        // and the same tilt in undistorted world units, with the radius arriving as a
+        // uniform where it can be reasoned about.
+        const group = new THREE.Group();
+        group.add(points);
+
+        const sync = () => {
+          group.position.copy(circle.mesh.position);
+          group.rotation.copy(circle.mesh.rotation);
+          material.uniforms.uRadius.value = galaxy.radius * tuning.circleR;
+          // uSpin/uRunRate are build-time constants on the circle, but reading them back
+          // each frame costs nothing and means the two can never drift apart by hand.
+          material.uniforms.uSpin.value = circleUniforms.uSpin.value;
+          material.uniforms.uRunRate.value = circleUniforms.uRunRate.value;
+        };
+
+        return { group, points, material, sync, count: COUNT, comets: COMETS, embers: EMBERS };
+      }
+
       const storm = buildStorm();
       const stars = buildStars();
       const veils = buildVeils();
@@ -3215,6 +3768,20 @@
       ];
       for (const register of runeRegisters) galaxy.group.add(register.mesh);
       for (const rail of runeRails) galaxy.group.add(rail.mesh);
+
+      // The particle pass. Both go into the galaxy group, so they inherit the disc's tilt
+      // and the layout offset for free and can never separate from the engraved work they
+      // come off. Built here, AFTER the registers and the circle, because each one reads
+      // its source's uniforms rather than repeating that source's literals.
+      //
+      // Neither is sync()ed at build time: sync() reads `tuning`, which is declared much
+      // further down, and touching it up here would be a temporal-dead-zone throw. The
+      // frame loop calls both before the first render, so nothing is ever drawn stale.
+      const runeSparks = buildRuneSparks(runeRegisters);
+      galaxy.group.add(runeSparks.points);
+      const circleMotes = buildCircleMotes(magicCircle);
+      galaxy.group.add(circleMotes.group);
+
       const core = buildCore();
       // The two arcs, re-authored as the UI column's flanks (see header note 3). They are
       // built at the origin running along local X and then stood up by `rot`; placeLayout()
@@ -3397,8 +3964,8 @@
       //      is always followed by a draw in the same frame and an empty buffer is never
       //      presented. This alone would fix the symptom.
       //   2. The pipeline is warmed (renderer.compile + two throwaway composer frames) and
-      //      the governor ignores the first second and a half, so its first decisions are
-      //      not measurements of the shader compiler.
+      //      the governor ignores the first second, so its first decisions are not
+      //      measurements of the shader compiler.
       //   3. Steps up must be EARNED TWICE and are bigger when they come, which cuts a
       //      dpr-2 climb from eleven reallocations to four. Steps DOWN are unchanged and
       //      still immediate: dropping frames is a visible failure and the measurement that
@@ -3407,11 +3974,14 @@
       // Steady-state behaviour is deliberately untouched — same budget, same 0.86 down-step,
       // same clamp, same measurement.
       //
-      // PROVENANCE. This was diagnosed in AstralDriftHomeParticles.standalone.html and
-      // ported verbatim to the rest of the family. The three regions it touches were
-      // byte-identical in every file that carries a governor, which is why the port is a
-      // copy rather than an adaptation — and why it is worth keeping them that way. Change
-      // one, change all of them.
+      // PROVENANCE. This was diagnosed here and ported to every other file in this directory
+      // that carries the same governor: AstralDriftHome, AstralDriftHomeTuner, AstralDriftV2,
+      // AstralDriftV2Tuner, AstralDrift, ObsidianAstrolabeV2 and MagicCircle — eight files in
+      // total, all fixed. Seven of them were byte-identical in the three regions this touches,
+      // so that port is a copy rather than an adaptation; MagicCircle is the same three fixes
+      // in different vocabulary (`renderScale.value`, `considerRenderScale`,
+      // `applyRenderScale`) because it predates the AstralDrift line. Keep them in step:
+      // change one, change all.
       // ==================================================================================
       const FRAME_INTERVAL_MS = 1000 / 30;
       // 1.5 s, not 1 s: the warmup renders below make the first frames cheap on a fast
@@ -3428,12 +3998,11 @@
         // note in considerScale for why that distinction is load-bearing.
         lastWindow: 0,
         // Stamped just before the loop starts, AFTER the warmup renders — not here at build
-        // time, which would spend the whole grace window on module loading and texture
-        // baking and leave nothing of it for the frames that actually matter.
-        // performance.now() and the rAF timestamps this gets compared against share a time
-        // origin, so they are directly comparable; the 0 that the first manual animate()
-        // call carries reads as "long before the start" and is skipped, which is what we
-        // want anyway.
+        // time, which would spend the whole grace window on module loading and glyph baking
+        // and leave nothing of it for the frames that actually matter. performance.now() and
+        // the rAF timestamps this gets compared against share a time origin, so they are
+        // directly comparable; the 0 that the first manual animate() call carries reads as
+        // "long before the start" and is skipped, which is what we want anyway.
         started: 0,
         // Consecutive 900 ms windows that have asked to go up. Reset by anything else.
         upStreak: 0,
@@ -3479,11 +4048,11 @@
       }
 
       function considerScale(medianMs, now) {
-        // Startup grace. The first second and a half of a fresh page is its least
-        // trustworthy measurement — shader programs are still being compiled on first use,
-        // buffers and textures are still uploading, and the tab is still competing with its
-        // own load — and it is also the window in which a wrong decision is most visible.
-        // Measuring is free; acting on it this early is guessing.
+        // Startup grace. The first second of a fresh page is its least trustworthy
+        // measurement — shader programs are still being compiled on first use, buffers and
+        // textures are still uploading, and the tab is still competing with its own load —
+        // and it is also the second in which a wrong decision is most visible. Measuring is
+        // free; acting on it this early is guessing.
         if (now - governor.started < GOVERNOR_GRACE_MS) return;
         if (now - governor.lastWindow < 900) return;
         // EVERY evaluation that gets this far consumes the window, pass or no pass.
@@ -3873,6 +4442,16 @@
         for (const register of runeRegisters) register.material.uniforms.uDial.value = dials.runes;
         for (const rail of runeRails) rail.material.uniforms.uDial.value = dials.runes;
         magicCircle.material.uniforms.uDial.value = dials.circle;
+        // The particle pass rides the dials of the layer it is shed from — one control per
+        // idea, not one per object. Both shaders multiply their FINAL colour by uDial, so a
+        // dial at 0 emits pure black into an additive blend: off, not merely dim.
+        runeSparks.material.uniforms.uDial.value = dials.runes;
+        circleMotes.material.uniforms.uDial.value = dials.circle;
+        // ...and pick up wherever the tuner has dragged the bands and the figure to. Ordered
+        // AFTER the group rotations above and before render, so a slider moved mid-frame is
+        // never one frame out of step with the geometry it belongs to.
+        runeSparks.sync();
+        circleMotes.sync();
         core.material.uniforms.uDial.value = dials.galaxy;
         for (const arc of arcs) arc.material.uniforms.uDial.value = dials.arc;
         for (const material of veils.materials) material.uniforms.uDial.value = dials.veils;
@@ -3927,13 +4506,15 @@
       setupPointer();
       setupDials();
       setupTuning();
+
       // Warm the pipeline before the loop is allowed to measure anything.
       //
       // three compiles a shader program the first time a material is actually rendered, and
-      // this scene carries a lot of them, plus first uploads for every buffer and baked
-      // texture in the file. Whichever frames pay that are tens of milliseconds, and under
-      // the old ordering those were the first frames the governor sampled — so its opening
-      // decisions were a measurement of the shader compiler rather than of the frame.
+      // this scene carries seventeen of them (two more since the particle pass), plus first
+      // uploads for a 120k-point disc, the glyph atlas and the baked veil volume. Whichever
+      // frames pay that are tens of milliseconds, and under the old ordering those were the
+      // first frames the governor sampled — so its opening decisions were a measurement of
+      // the shader compiler rather than of the frame.
       //
       // renderer.compile() covers the scene's own materials; it does NOT cover the composer
       // passes, which are full-screen quads that live outside the scene graph. Hence the two
@@ -3977,6 +4558,8 @@
           magicCircle,
           runeRegisters,
           runeRails,
+          runeSparks,
+          circleMotes,
           core,
           arcs,
           meteors,
