@@ -9,6 +9,18 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 升级/升层属性点系统 —— 引擎自动发放 + UI 自由分配 ｜ ✅ 待真机（2026-08-10）
+
+ADR-11 补课：此前 `level`/`tier` 只有 AI 经 `update_character` 一条改动路径，「升级送点、升层加属性」没有任何确定性逻辑。现在归 Code：
+
+- **升级发点**：玩家角色 `level` 提升 N 级 → `freeAttrPoints +N`（`applyUpdateCharacter` 落地后钩子，仅 `type==='player'`）。
+- **升层加属性**：玩家角色 `tier` 提升 N 层 → 五维各 +N，按**新层级** `attributeCap` 封顶；钳制只封顶不回削（delta 五维加法不钳上限，已超上限的属性升层时不得被静默压低）。
+- **双重发放 guard**：AI 在同一 patch 里显式写了 `freeAttrPoints` / `attributes` 时对应自动发放跳过；降级降层不回收；NPC/怪物/召唤不发。
+- **分配入口**：新模块 `src/sillytavern/attribute-allocation.ts` 的 `allocateAttributePoint(saveId, charName, attr)` —— 校验点数 > 0 与层级上限，经 `commitChatState`（ADR-21 唯一写入口）提交 delta patch `{attributes:{[attr]:1}, freeAttrPoints:-1}`；patch 刻意不含 `level`/`tier`，分配永不触发自动发放。
+- **UI**：`StatusOverview.vue` 属性区在 `freeAttrPoints > 0` 时出「自由点 N」徽章 + 每维「+」按钮（达层级上限禁用带 tooltip，层级配置未知不禁用）；单飞请求防最后一点双花；失败走既有 toast。`game-store.allocateAttrPoint` 成功后 `refreshFromDb()` 回读。
+
+测试：state-manager +8 条 / attribute-allocation 新建 7 条 / game-store +5 条 / StatusOverview.attrpoints 新建 7 条。全量 7369 passed / 9 skipped，tsc、vue-tsc、eslint 全绿。真机走查未做。交接文档：`docs/planning/2026-08-10-level-attr-points-handoff.md`。
+
 ### Phase 7e 八套主题完整融合 —— 响应式边框归属与 16:9 真机矩阵 ｜ ✅ 完成（2026-08-08）
 
 以已打磨的青花瓷与血色玻璃窗为结构基准，完成羊皮纸、翡翠、月白、极光、星仪、青铜、夜樱与深海八套游戏页主题。根因修复不是逐分辨率补丁：各个实时 DOM 区域统一拥有自己的边框和接缝，背景素材只作为区域内等比裁切的纹理或装饰，不再让带框 16:9 大图与响应式 UI 争夺边界。翡翠版本移除非等比拉伸；极光左右栏恢复真实半透明磨砂；所有主题的输入区、导航栏、叙事区和状态栏接缝均收进所属布局区域。

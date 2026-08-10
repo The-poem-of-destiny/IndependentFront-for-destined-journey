@@ -824,6 +824,169 @@ describe('StateManager', () => {
       // 默认五维全 10：str 10+5=15，dex 10-2=8，con/int/spi 未提及不变
       expect(char.attributes).toEqual({ str: 15, dex: 8, con: 10, int: 10, spi: 10 });
     });
+
+    // ===== 升级 / 升层自动加点（ADR-11：数值规则归 Code）=====
+
+    describe('升级/升层自动加点', () => {
+      it('delta level +1 → 主角自由属性点 +1', async () => {
+        const char = buildMockCharacter({ id: 'char-001', level: 3, freeAttrPoints: 0 });
+        vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+        const sm = new StateManager({ saveId: 'save-001' });
+        const result = await sm.commitChatState([
+          {
+            op: 'update_character',
+            target: 'characters.Test Hero',
+            value: { level: 1 },
+            metadata: { delta: true },
+          },
+        ]);
+
+        expect(result.success).toBe(true);
+        expect(char.level).toBe(4);
+        expect(char.freeAttrPoints).toBe(1);
+      });
+
+      it('set 模式 level 4→6 → 自由属性点 +2（按差值发放）', async () => {
+        const char = buildMockCharacter({ id: 'char-001', level: 4, freeAttrPoints: 1 });
+        vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+        const sm = new StateManager({ saveId: 'save-001' });
+        const result = await sm.commitChatState([
+          { op: 'update_character', target: 'characters.Test Hero', value: { level: 6 } },
+        ]);
+
+        expect(result.success).toBe(true);
+        expect(char.freeAttrPoints).toBe(3);
+      });
+
+      it('patch 自己写了 freeAttrPoints → 不再叠加（双重发放 guard）', async () => {
+        const char = buildMockCharacter({ id: 'char-001', level: 3, freeAttrPoints: 0 });
+        vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+        const sm = new StateManager({ saveId: 'save-001' });
+        const result = await sm.commitChatState([
+          {
+            op: 'update_character',
+            target: 'characters.Test Hero',
+            value: { level: 4, freeAttrPoints: 5 },
+          },
+        ]);
+
+        expect(result.success).toBe(true);
+        expect(char.freeAttrPoints).toBe(5); // AI 给的 5，不是 5+1
+      });
+
+      it('NPC / 怪物升级 → 不发放自由属性点', async () => {
+        const npc = buildMockCharacter({
+          id: 'char-npc',
+          name: 'NPC甲',
+          type: 'npc',
+          level: 3,
+          freeAttrPoints: 0,
+        });
+        const monster = buildMockCharacter({
+          id: 'char-mon',
+          name: '哥布林',
+          type: 'monster',
+          level: 3,
+          freeAttrPoints: 0,
+        });
+        vi.mocked(db.getCharacters).mockResolvedValue([npc, monster]);
+
+        const sm = new StateManager({ saveId: 'save-001' });
+        const result = await sm.commitChatState([
+          { op: 'update_character', target: 'characters.NPC甲', value: { level: 5 } },
+          { op: 'update_character', target: 'characters.哥布林', value: { level: 5 } },
+        ]);
+
+        expect(result.success).toBe(true);
+        expect(npc.freeAttrPoints).toBe(0);
+        expect(monster.freeAttrPoints).toBe(0);
+      });
+
+      it('tier +1 → 五维各 +1', async () => {
+        const char = buildMockCharacter({
+          id: 'char-001',
+          tier: 1,
+          attributes: { str: 5, dex: 5, con: 5, int: 5, spi: 5 },
+        });
+        vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+        const sm = new StateManager({ saveId: 'save-001' });
+        const result = await sm.commitChatState([
+          {
+            op: 'update_character',
+            target: 'characters.Test Hero',
+            value: { tier: 1 },
+            metadata: { delta: true },
+          },
+        ]);
+
+        expect(result.success).toBe(true);
+        expect(char.tier).toBe(2);
+        expect(char.attributes).toEqual({ str: 6, dex: 6, con: 6, int: 6, spi: 6 });
+      });
+
+      it('tier 升级加点钳到**新层级**上限（T1→T2 上限 10）', async () => {
+        const char = buildMockCharacter({
+          id: 'char-001',
+          tier: 1,
+          attributes: { str: 10, dex: 8, con: 9, int: 10, spi: 7 },
+        });
+        vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+        const sm = new StateManager({ saveId: 'save-001' });
+        const result = await sm.commitChatState([
+          { op: 'update_character', target: 'characters.Test Hero', value: { tier: 2 } },
+        ]);
+
+        expect(result.success).toBe(true);
+        // T2 attributeCap=10：已到 10 的原地不动，其余各 +1
+        expect(char.attributes).toEqual({ str: 10, dex: 9, con: 10, int: 10, spi: 8 });
+      });
+
+      it('patch 同时写了 attributes → 升层不再自动加（双重发放 guard）', async () => {
+        const char = buildMockCharacter({
+          id: 'char-001',
+          tier: 1,
+          attributes: { str: 5, dex: 5, con: 5, int: 5, spi: 5 },
+        });
+        vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+        const sm = new StateManager({ saveId: 'save-001' });
+        const result = await sm.commitChatState([
+          {
+            op: 'update_character',
+            target: 'characters.Test Hero',
+            value: { tier: 2, attributes: { str: 8 } },
+          },
+        ]);
+
+        expect(result.success).toBe(true);
+        expect(char.attributes).toEqual({ str: 8, dex: 5, con: 5, int: 5, spi: 5 });
+      });
+
+      it('降级 / 降层 → 不回收点数、不扣属性', async () => {
+        const char = buildMockCharacter({
+          id: 'char-001',
+          level: 6,
+          tier: 3,
+          freeAttrPoints: 2,
+          attributes: { str: 9, dex: 9, con: 9, int: 9, spi: 9 },
+        });
+        vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+        const sm = new StateManager({ saveId: 'save-001' });
+        const result = await sm.commitChatState([
+          { op: 'update_character', target: 'characters.Test Hero', value: { level: 4, tier: 2 } },
+        ]);
+
+        expect(result.success).toBe(true);
+        expect(char.freeAttrPoints).toBe(2);
+        expect(char.attributes).toEqual({ str: 9, dex: 9, con: 9, int: 9, spi: 9 });
+      });
+    });
   });
 
   // ===================================================================

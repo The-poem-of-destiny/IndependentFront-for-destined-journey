@@ -23,6 +23,8 @@ import {
 } from '@engine/database';
 import { saveMessage, getMessages, saveSaveSlot } from '@engine/database';
 import { createStateManager } from '@engine/state-manager';
+import { allocateAttributePoint } from '@engine/attribute-allocation';
+import type { AllocatableAttr } from '@engine/attribute-allocation';
 import { detach } from './db-write';
 import type { CombatEvent } from '@engine/combat-v2-types';
 
@@ -769,6 +771,34 @@ export const useGameStore = defineStore('game', () => {
     saveProfile.value = null;
   }
 
+  /**
+   * 花掉 1 点自由属性点（玩家在状态总览里点「+」）。
+   *
+   * 本层只做「谁」的解析与回读：校验（有没有点 / 到没到层级上限）与落库全在引擎的
+   * `allocateAttributePoint` 里（ADR-11 数值规则归 Code、ADR-21 写入走 StateManager）。
+   * 成功后走 `refreshFromDb()` —— 引擎直写 Dexie，不回读的话面板上的属性与剩余点数
+   * 都还是旧值，玩家会以为点了没反应。
+   *
+   * 失败原因原样交回调用方（组件转 toast），本层不自己弹提示。
+   */
+  async function allocateAttrPoint(
+    attr: AllocatableAttr,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const saveId = activeSaveId.value;
+    if (!saveId) return { ok: false, error: '无活跃存档' };
+    const p = player.value;
+    if (!p) return { ok: false, error: '找不到主角' };
+
+    try {
+      const result = await allocateAttributePoint(saveId, p.name, attr);
+      if (result.ok) await refreshFromDb();
+      return result;
+    } catch (err) {
+      console.error('[game-store] 分配自由属性点失败:', err);
+      return { ok: false, error: '属性点分配失败' };
+    }
+  }
+
   // === 快照回退 (快照面板 + 右键回退重发) ===
 
   /** 右键「回退」：撤回当前回合 → 恢复上一轮快照 + 把这轮玩家输入回填输入框。
@@ -904,6 +934,7 @@ export const useGameStore = defineStore('game', () => {
     recordEjsUiLog,
     persistMessage,
     restoreMessages,
+    allocateAttrPoint,
     rollbackOneTurn,
     restoreToSnapshot,
   };
