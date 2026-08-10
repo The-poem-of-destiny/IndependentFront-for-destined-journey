@@ -544,6 +544,16 @@ const collapsed = ref(false);
   }
 }
 
+@media (max-height: 720px) and (min-width: 961px) {
+  .combat-command-table {
+    grid-template-rows: minmax(6.5rem, auto) minmax(9rem, 1fr) minmax(6.5rem, auto);
+  }
+
+  .combat-unit-row {
+    padding-block: var(--theme-spacing-xs);
+  }
+}
+
 @media (max-width: 960px) {
   .combat-overlay {
     padding: 0;
