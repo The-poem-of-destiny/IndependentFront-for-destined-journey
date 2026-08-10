@@ -7,7 +7,8 @@
  *   3. unwireObject 拆除后订阅不再触发
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
+import { installProductionScriptBackend, resetScriptBackend } from './script-backend';
 import {
   getEffectWiring,
   peekEffectWiring,
@@ -19,6 +20,15 @@ import {
   ownerKeyOf,
 } from './effect-wiring';
 import type { CharacterState, GameEvent } from './types';
+
+// 接线要真的执行 init 脚本 —— 没有隔离就全是 no-op，断言会静默变成空转
+beforeAll(async () => {
+  expect(await installProductionScriptBackend()).toBe(true);
+});
+
+afterAll(() => {
+  resetScriptBackend();
+});
 
 function mockEvent(type: string, data: Record<string, unknown> = {}): GameEvent {
   return {

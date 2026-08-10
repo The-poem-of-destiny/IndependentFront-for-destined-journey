@@ -451,6 +451,23 @@ suffix = /view?filename=x
 
 **严重度：中** · **区域：`src/sillytavern/script-executor.ts`** · **已修正（严重度由高下调）**
 
+> ✅ **已修复（2026-08-10）** —— `executeScript` 迁到 QuickJS(wasm) realm 隔离
+> （`script-backend.ts` + `script-quickjs-backend.ts`）。`new Function` 那条路径**已删除**，
+> 未装隔离时 fail-closed（脚本一行不跑），刻意不保留任何可安装的 Legacy 实现。
+>
+> 验收实测（`script-quickjs-backend.test.ts`，19 条）：构造器逃逸只拿到 guest 自己的全局
+> —— 用一个只存在于宿主的哨兵证明拿不到宿主 realm；`fetch` / `indexedDB` / `XMLHttpRequest` /
+> `WebSocket` / `process` / `require` 全部不可达；`while(true)` 在 53ms 被中断且不毒化后端
+> （旧实现在每次读档时冻死标签页那条意外面一并消失）；脚本之间零泄漏。
+>
+> 兼容性代价为零：宿主闭包一行没改（`buildSandbox()` 仍是 $ API 唯一真源，副作用照旧经它落进
+> `ScriptEffects`），既有 54 条 script-executor 用例**未改一行断言**即在真隔离上通过。
+> 每次执行约 0.47ms。
+>
+> 🔴 **本条的修复不改变 SEC-09 / SEC-04 的结论** —— 那两条与本条无关，仍按发行形态待裁定。
+> 另注意「同源代码执行清单」里的 **COR-30**（`effect-runtime.ts:309` 那把上了膛的枪）**仍在**：
+> 它是死代码，但谁接线谁就开出第二条同源代码执行路径。
+
 ### 证据
 
 [`script-executor.ts:174`](../../src/sillytavern/script-executor.ts) 附近的注释自陈了前提：
