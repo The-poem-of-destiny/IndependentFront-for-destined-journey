@@ -325,7 +325,7 @@ function handleKeydown(e: KeyboardEvent) {
       <div class="section-label">快捷拼装</div>
 
       <!-- 步骤 1：我方单位 -->
-      <div class="step-row">
+      <div class="step-row step-unit">
         <label class="step-label">单位</label>
         <select
           v-model="selectedUnitId"
@@ -358,7 +358,7 @@ function handleKeydown(e: KeyboardEvent) {
       </div>
 
       <!-- 步骤 3：技能/道具选择（仅 skill/item 显示） -->
-      <div v-if="activeTab?.needsDetail" class="step-row">
+      <div v-if="activeTab?.needsDetail" class="step-row step-detail">
         <label class="step-label">{{ selectedAction === 'skill' ? '技能' : '道具' }}</label>
         <select
           v-model="selectedDetail"
@@ -382,7 +382,11 @@ function handleKeydown(e: KeyboardEvent) {
       </div>
 
       <!-- 步骤 4：目标选择（普攻必选；攻击型技能可选） -->
-      <div v-if="activeTab?.needsTarget" class="step-row">
+      <div
+        v-if="activeTab?.needsTarget"
+        class="step-row step-target"
+        :class="{ 'without-detail': !activeTab.needsDetail }"
+      >
         <label class="step-label">目标</label>
         <select
           v-model="selectedTargetId"
@@ -405,42 +409,55 @@ function handleKeydown(e: KeyboardEvent) {
 
     <!-- ═══ 自由文本框 + 发送 + 结束回合 ═══ -->
     <div class="input-section">
-      <textarea
-        v-model="inputText"
-        class="combat-textarea"
-        :class="{ 'is-locked': isLocked }"
-        :disabled="isLocked"
-        placeholder="描述我方行动…（可点上方拼装直接执行，也可手打如“攻击骷髅兵”；“结束回合”放弃当前单位剩余行动）"
-        rows="2"
-        @keydown="handleKeydown"
-      />
-      <button
-        class="end-turn-btn"
-        :class="{ 'is-disabled': isLocked }"
-        :disabled="isLocked"
-        @click="handleEndTurn"
-      >
-        结束回合
-      </button>
-      <button
-        class="send-btn"
-        :class="{ 'is-disabled': !canSend }"
-        :disabled="!canSend"
-        @click="handleSend"
-      >
-        发送
-      </button>
+      <div class="section-label input-section-label">
+        行动指令 <span>可输入自定义指令 · Ctrl / ⌘ + Enter 发送</span>
+      </div>
+      <div class="input-controls">
+        <textarea
+          v-model="inputText"
+          class="combat-textarea"
+          :class="{ 'is-locked': isLocked }"
+          :disabled="isLocked"
+          placeholder="描述我方行动…（可点左侧拼装直接执行，也可手打如“攻击骷髅兵”）"
+          rows="2"
+          @keydown="handleKeydown"
+        />
+        <div class="input-actions">
+          <button
+            class="end-turn-btn"
+            :class="{ 'is-disabled': isLocked }"
+            :disabled="isLocked"
+            @click="handleEndTurn"
+          >
+            结束回合
+          </button>
+          <button
+            class="send-btn"
+            :class="{ 'is-disabled': !canSend }"
+            :disabled="!canSend"
+            @click="handleSend"
+          >
+            发送
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
 .combat-action-bar {
-  display: flex;
-  flex-direction: column;
-  gap: var(--theme-spacing-sm);
-  padding: var(--theme-spacing-md);
-  background: var(--theme-bg-secondary, var(--theme-card-bg));
+  display: grid;
+  grid-template-columns: minmax(34rem, 1.15fr) minmax(24rem, 0.85fr);
+  gap: var(--theme-spacing-md);
+  padding: var(--theme-spacing-md) var(--theme-spacing-lg);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--theme-primary) 4%, transparent),
+      transparent 45%
+    ),
+    var(--theme-surface-muted);
   border-top: 1px solid var(--theme-card-border);
   position: relative;
 }
@@ -459,6 +476,7 @@ function handleKeydown(e: KeyboardEvent) {
   justify-content: center;
   z-index: 2;
   pointer-events: none;
+  background: color-mix(in srgb, var(--theme-content-bg) 48%, transparent);
 }
 
 .lock-hint {
@@ -468,37 +486,82 @@ function handleKeydown(e: KeyboardEvent) {
   background: var(--theme-card-bg);
   padding: var(--theme-spacing-sm) var(--theme-spacing-lg);
   border-radius: var(--theme-radius-sm);
-  border: 1px solid var(--theme-card-border);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 28%, var(--theme-card-border));
   letter-spacing: 0.05em;
 }
 
 /* ═══ 快捷拼装区 ═══ */
 .assemble-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--theme-spacing-xs);
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.8fr) minmax(16rem, 1.35fr) minmax(10rem, 1fr) auto;
+  grid-template-rows: auto auto auto;
+  gap: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-sm);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: color-mix(in srgb, var(--theme-card-bg) 82%, var(--theme-content-bg));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-text-primary) 4%, transparent);
 }
 
 .section-label {
-  font-size: 0.8rem;
-  color: var(--theme-text-muted);
-  font-weight: 500;
-  margin-bottom: var(--theme-spacing-xs);
-}
-
-.step-row {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: var(--theme-spacing-sm);
+  font-family: var(--theme-font-title);
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, var(--theme-card-border), transparent);
+}
+
+.step-row {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--theme-spacing-xs);
   min-height: 36px; /* 触摸目标 ≥ 36px */
 }
 
+.step-unit {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.step-actions {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.step-detail {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.step-target {
+  grid-column: 3;
+  grid-row: 3;
+}
+
+.step-target.without-detail {
+  grid-row: 2;
+}
+
 .step-label {
-  flex-shrink: 0;
-  width: 3em;
-  font-size: 0.85rem;
-  color: var(--theme-text-secondary, var(--theme-text-muted));
-  text-align: right;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--theme-text-muted);
+  text-align: left;
+  letter-spacing: 0.04em;
 }
 
 .step-select {
@@ -509,7 +572,7 @@ function handleKeydown(e: KeyboardEvent) {
   background: var(--theme-card-bg);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-sm);
-  color: var(--theme-text);
+  color: var(--theme-text-primary);
   font-size: 0.88rem;
   font-family: var(--theme-font-body);
   cursor: pointer;
@@ -520,9 +583,10 @@ function handleKeydown(e: KeyboardEvent) {
   border-color: var(--theme-primary);
 }
 
-.step-select:focus {
+.step-select:focus-visible {
   outline: none;
   border-color: var(--theme-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 18%, transparent);
 }
 
 .step-select:disabled {
@@ -532,12 +596,12 @@ function handleKeydown(e: KeyboardEvent) {
 
 /* ── 行动 Tab ── */
 .step-actions {
-  align-items: flex-start;
+  align-items: stretch;
 }
 
 .action-tabs {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(3.5rem, 1fr));
   gap: var(--theme-spacing-xs);
 }
 
@@ -548,7 +612,7 @@ function handleKeydown(e: KeyboardEvent) {
   background: var(--theme-card-bg);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-sm);
-  color: var(--theme-text-secondary, var(--theme-text));
+  color: var(--theme-text-secondary);
   font-size: 0.85rem;
   font-family: var(--theme-font-body);
   cursor: pointer;
@@ -561,6 +625,11 @@ function handleKeydown(e: KeyboardEvent) {
 .action-tab:hover:not(:disabled) {
   border-color: var(--theme-primary);
   color: var(--theme-primary);
+}
+
+.action-tab:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
 }
 
 /* selected 态：primary 8% 染底（design §4.2） */
@@ -578,21 +647,34 @@ function handleKeydown(e: KeyboardEvent) {
 
 /* ── 注入按钮 ── */
 .inject-btn {
-  align-self: flex-end;
-  min-height: 36px;
+  grid-column: 4;
+  grid-row: 2;
+  align-self: end;
+  min-height: 44px;
   padding: var(--theme-spacing-xs) var(--theme-spacing-lg);
   background: var(--theme-primary);
-  border: none;
+  border: 1px solid var(--theme-primary);
   border-radius: var(--theme-radius-sm);
-  color: var(--theme-btn-text, #fff);
+  color: var(--theme-primary-text);
   font-size: 0.85rem;
   font-family: var(--theme-font-body);
+  font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
-  transition: opacity var(--theme-transition-fast);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--theme-primary) 12%, transparent);
+  transition:
+    filter var(--theme-transition-fast),
+    box-shadow var(--theme-transition-fast);
 }
 
 .inject-btn:hover:not(:disabled) {
-  opacity: 0.85;
+  filter: brightness(1.08);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--theme-primary) 22%, transparent);
+}
+
+.inject-btn:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
 }
 
 .inject-btn:disabled {
@@ -602,29 +684,54 @@ function handleKeydown(e: KeyboardEvent) {
 
 /* ═══ 文本框 + 发送 ═══ */
 .input-section {
+  min-width: 0;
   display: flex;
+  flex-direction: column;
   gap: var(--theme-spacing-sm);
-  align-items: flex-end;
+  padding: var(--theme-spacing-sm);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: color-mix(in srgb, var(--theme-card-bg) 82%, var(--theme-content-bg));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-text-primary) 4%, transparent);
+}
+
+.input-section-label span {
+  color: var(--theme-text-muted);
+  font-family: var(--theme-font-body);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  opacity: 0.75;
+}
+
+.input-controls {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--theme-spacing-sm);
+  align-items: stretch;
 }
 
 .combat-textarea {
-  flex: 1;
-  min-height: 56px;
+  width: 100%;
+  min-height: 5rem;
+  max-height: 8rem;
   resize: vertical;
   padding: var(--theme-spacing-sm);
   background: var(--theme-card-bg);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-sm);
-  color: var(--theme-text);
+  color: var(--theme-text-primary);
   font-size: 0.9rem;
   font-family: var(--theme-font-body);
   line-height: 1.5;
   transition: border-color var(--theme-transition-fast);
 }
 
-.combat-textarea:focus {
+.combat-textarea:focus-visible {
   outline: none;
   border-color: var(--theme-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 18%, transparent);
 }
 
 .combat-textarea::placeholder {
@@ -632,11 +739,17 @@ function handleKeydown(e: KeyboardEvent) {
   opacity: 0.7;
 }
 
+.input-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(5.5rem, 1fr));
+  gap: var(--theme-spacing-sm);
+}
+
 /* ── 结束回合按钮（secondary 变体：design §4.1）──
    与「发送」（primary 实心）区分主次：结束回合是放弃语义，用描边次级样式 */
 .end-turn-btn {
   flex-shrink: 0;
-  min-height: 36px;
+  min-height: 44px;
   min-width: 64px;
   padding: var(--theme-spacing-sm) var(--theme-spacing-lg);
   background: var(--theme-card-bg);
@@ -651,8 +764,13 @@ function handleKeydown(e: KeyboardEvent) {
     border-color var(--theme-transition-fast);
 }
 
+.end-turn-btn:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
+}
+
 .end-turn-btn:hover:not(:disabled) {
-  background: var(--theme-surface-muted, var(--theme-card-bg));
+  background: var(--theme-surface-muted);
   border-color: var(--theme-primary);
 }
 
@@ -663,28 +781,96 @@ function handleKeydown(e: KeyboardEvent) {
 
 .send-btn {
   flex-shrink: 0;
-  min-height: 36px;
+  min-height: 44px;
   min-width: 64px;
   padding: var(--theme-spacing-sm) var(--theme-spacing-lg);
   background: var(--theme-primary);
-  border: none;
+  border: 1px solid var(--theme-primary);
   border-radius: var(--theme-radius-sm);
-  color: var(--theme-btn-text, #fff);
+  color: var(--theme-primary-text);
   font-size: 0.9rem;
   font-family: var(--theme-font-body);
   font-weight: 600;
   cursor: pointer;
-  transition: opacity var(--theme-transition-fast);
+  transition: filter var(--theme-transition-fast);
 }
 
 .send-btn:hover:not(:disabled) {
-  opacity: 0.85;
+  filter: brightness(1.08);
+}
+
+.send-btn:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
 }
 
 /* 用 .is-disabled 类避开全局 .disabled 陷阱（CLAUDE.md 编码模式） */
 .send-btn.is-disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .lock-overlay {
+    background: var(--theme-content-bg);
+  }
+}
+
+@media (max-width: 1200px) {
+  .combat-action-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .combat-textarea {
+    min-height: 4.5rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .combat-action-bar {
+    padding: var(--theme-spacing-sm);
+  }
+
+  .assemble-section {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+  }
+
+  .step-unit,
+  .step-actions,
+  .step-detail,
+  .step-target,
+  .step-target.without-detail,
+  .inject-btn {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .action-tabs {
+    grid-template-columns: repeat(3, minmax(4rem, 1fr));
+  }
+
+  .input-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .input-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .input-section-label span {
+    display: none;
+  }
+}
+
+@media (max-height: 720px) and (min-width: 1201px) {
+  .combat-action-bar {
+    padding-block: var(--theme-spacing-sm);
+  }
+
+  .combat-textarea {
+    min-height: 4rem;
+  }
 }
 
 /* ── prefers-reduced-motion（design §6.3）── */

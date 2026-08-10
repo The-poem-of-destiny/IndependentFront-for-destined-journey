@@ -63,7 +63,7 @@ const collapsed = ref(false);
           >
         </div>
 
-        <div v-else class="combat-panel">
+        <div v-else class="combat-panel" :class="{ 'is-ready': ready }">
           <button
             class="combat-collapse-btn"
             title="收起面板"
@@ -112,36 +112,58 @@ const collapsed = ref(false);
           <template v-else>
             <CombatHeader />
 
-            <div v-if="enemies.length" class="combat-units combat-enemies">
-              <span class="combat-side-label">【敌方】</span>
-              <div class="combat-unit-row">
-                <CombatUnitCard
-                  v-for="p in enemies"
-                  :key="p.id"
-                  :unit="p"
-                  :is-current-turn="game.combatCurrentUnitId === p.id"
-                />
-              </div>
-            </div>
+            <main class="combat-command-table">
+              <section
+                v-if="enemies.length"
+                class="combat-roster combat-roster-enemy"
+                aria-labelledby="combat-enemy-label"
+              >
+                <div class="combat-side-plaque combat-side-plaque-enemy">
+                  <span id="combat-enemy-label">敌方</span>
+                  <span class="combat-side-emblem" aria-hidden="true">◇</span>
+                </div>
+                <div class="combat-unit-row">
+                  <CombatUnitCard
+                    v-for="p in enemies"
+                    :key="p.id"
+                    :unit="p"
+                    :is-current-turn="game.combatCurrentUnitId === p.id"
+                  />
+                </div>
+              </section>
 
-            <CombatMessageFlow :entries="game.combatLog" class="combat-flow" />
+              <section class="combat-ledger" aria-labelledby="combat-ledger-label">
+                <div class="combat-ledger-heading">
+                  <span id="combat-ledger-label">战斗记录</span>
+                </div>
+                <CombatMessageFlow :entries="game.combatLog" class="combat-flow" />
+              </section>
 
-            <div v-if="allies.length" class="combat-units combat-allies">
-              <span class="combat-side-label">【我方】</span>
-              <div class="combat-unit-row">
-                <CombatUnitCard
-                  v-for="p in allies"
-                  :key="p.id"
-                  :unit="p"
-                  :is-current-turn="game.combatCurrentUnitId === p.id"
-                />
-              </div>
-            </div>
+              <section
+                v-if="allies.length"
+                class="combat-roster combat-roster-allies"
+                aria-labelledby="combat-ally-label"
+              >
+                <div class="combat-side-plaque combat-side-plaque-allies">
+                  <span id="combat-ally-label">我方</span>
+                  <span class="combat-side-emblem" aria-hidden="true">◇</span>
+                </div>
+                <div class="combat-unit-row">
+                  <CombatUnitCard
+                    v-for="p in allies"
+                    :key="p.id"
+                    :unit="p"
+                    :is-current-turn="game.combatCurrentUnitId === p.id"
+                  />
+                </div>
+              </section>
+            </main>
 
             <CombatActionBar />
 
             <!-- T16 §3.5：跳过 / 重开战斗（战斗内任何时候可用，不受敌方回合锁影响） -->
             <div class="combat-panel-actions">
+              <span class="combat-panel-actions-label">战斗控制</span>
               <AppButton variant="ghost" size="sm" @click="skipOpen = true">跳过战斗</AppButton>
               <AppButton variant="ghost" size="sm" @click="restartOpen = true">重开战斗</AppButton>
             </div>
@@ -175,24 +197,58 @@ const collapsed = ref(false);
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: var(--theme-overlay-bg, rgba(0, 0, 0, 0.7));
+  background: var(--theme-overlay-bg);
   backdrop-filter: blur(4px);
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: center;
-  padding: var(--theme-spacing-lg);
+  padding: var(--theme-spacing-md);
 }
 .combat-panel {
-  width: 100%;
-  max-width: 1100px;
-  background: var(--theme-content-bg);
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-xl);
+  --combat-inlay: color-mix(in srgb, var(--theme-primary) 38%, var(--theme-card-border));
+  width: min(100%, 100rem);
+  height: min(60rem, calc(100dvh - var(--theme-spacing-md) - var(--theme-spacing-md)));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--theme-primary) 5%, transparent),
+      transparent 18%
+    ),
+    var(--theme-content-bg);
+  border: 1px solid var(--combat-inlay);
+  border-radius: var(--theme-radius-md);
   box-shadow: var(--theme-shadow-lg);
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   overflow: hidden;
   position: relative;
+  isolation: isolate;
+}
+.combat-panel::before,
+.combat-panel::after {
+  content: '';
+  position: absolute;
+  z-index: 6;
+  width: var(--theme-spacing-xl);
+  height: var(--theme-spacing-xl);
+  pointer-events: none;
+}
+.combat-panel::before {
+  top: var(--theme-spacing-xs);
+  left: var(--theme-spacing-xs);
+  border-top: 1px solid var(--theme-primary);
+  border-left: 1px solid var(--theme-primary);
+}
+.combat-panel::after {
+  right: var(--theme-spacing-xs);
+  bottom: var(--theme-spacing-xs);
+  border-right: 1px solid var(--theme-primary);
+  border-bottom: 1px solid var(--theme-primary);
+}
+.combat-panel.is-ready {
+  display: flex;
+  height: auto;
+  min-height: min(36rem, calc(100dvh - var(--theme-spacing-md) - var(--theme-spacing-md)));
 }
 
 /* ── 折叠按钮（右上角；就绪态与开打态共用）── */
@@ -200,14 +256,14 @@ const collapsed = ref(false);
   position: absolute;
   top: var(--theme-spacing-sm);
   right: var(--theme-spacing-sm);
-  z-index: 5;
-  width: 28px;
-  height: 28px;
+  z-index: 7;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--theme-card-bg) 88%, transparent);
+  border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-sm);
   color: var(--theme-text-muted);
   font-size: 0.875rem;
@@ -219,9 +275,13 @@ const collapsed = ref(false);
     color var(--theme-transition-fast);
 }
 .combat-collapse-btn:hover {
-  background: var(--theme-surface-hover, rgba(128, 128, 128, 0.15));
-  border-color: var(--theme-card-border);
-  color: var(--theme-text-primary);
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  border-color: var(--theme-primary);
+  color: var(--theme-primary);
+}
+.combat-collapse-btn:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
 }
 
 /* ── 折叠小条（收起时游戏仍锁定，重新展开的入口）── */
@@ -236,7 +296,7 @@ const collapsed = ref(false);
   padding: var(--theme-spacing-sm) var(--theme-spacing-lg);
   background: var(--theme-content-bg);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-lg);
+  border-radius: var(--theme-radius-md);
   box-shadow: var(--theme-shadow-lg);
   z-index: 1001;
 }
@@ -248,34 +308,40 @@ const collapsed = ref(false);
 
 /* ── F2 就绪态面板 ── */
 .combat-ready {
-  display: flex;
-  flex-direction: column;
+  width: min(48rem, 100%);
+  margin: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--theme-spacing-md);
-  padding: var(--theme-spacing-xl);
+  padding: var(--theme-spacing-2xl);
 }
 .combat-ready-title {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: var(--theme-spacing-sm);
   font-family: var(--theme-font-title);
-  font-size: 1.125rem;
+  font-size: 1.35rem;
   font-weight: 700;
   color: var(--theme-text-primary);
+  padding-bottom: var(--theme-spacing-md);
+  border-bottom: 1px solid var(--combat-inlay);
 }
 .combat-title-icon {
   color: var(--theme-primary);
   font-size: 1rem;
 }
 .combat-ready-meta {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: var(--theme-spacing-sm);
 }
 .combat-ready-meta-item {
   font-size: 0.8125rem;
-  color: var(--theme-text-secondary, var(--theme-text));
+  color: var(--theme-text-secondary);
   padding: var(--theme-spacing-xs) var(--theme-spacing-sm);
-  background: var(--theme-card-bg);
+  background: var(--theme-surface-muted);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-sm);
 }
@@ -283,10 +349,11 @@ const collapsed = ref(false);
   display: flex;
   flex-direction: column;
   gap: var(--theme-spacing-xs);
-  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  padding: var(--theme-spacing-md);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-md);
   background: var(--theme-card-bg);
+  box-shadow: var(--paper-stack);
 }
 .combat-ready-names {
   font-size: 0.8125rem;
@@ -294,52 +361,151 @@ const collapsed = ref(false);
   line-height: 1.6;
 }
 .combat-ready-brief {
+  grid-column: 1 / -1;
   font-size: 0.8125rem;
-  color: var(--theme-text-secondary, var(--theme-text));
+  color: var(--theme-text-secondary);
   line-height: 1.7;
-  border-left: 0; /* 禁侧边条（design 绝对禁令）：用整圈边框 + 染底 */
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-md);
-  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  padding: var(--theme-spacing-md);
   background: color-mix(in srgb, var(--theme-primary) 4%, var(--theme-card-bg));
 }
-.combat-units {
-  padding: var(--theme-spacing-sm) var(--theme-spacing-lg);
-  border-bottom: 1px solid var(--theme-card-border);
-  display: flex;
-  flex-direction: column;
-  gap: var(--theme-spacing-xs);
-  flex-shrink: 0;
+.combat-ready .combat-panel-actions {
+  grid-column: 1 / -1;
 }
 .combat-side-label {
   font-size: 0.75rem;
   color: var(--theme-text-muted);
   font-weight: 600;
-  font-family: system-ui, sans-serif;
+  font-family: var(--theme-font-body);
+}
+
+/* ── Command Table 主体：敌方 / 日志 / 我方 ── */
+.combat-command-table {
+  min-height: 0;
+  padding: var(--theme-spacing-sm);
+  display: grid;
+  grid-template-rows: minmax(7.5rem, auto) minmax(9rem, 1fr) minmax(7.5rem, auto);
+  gap: var(--theme-spacing-xs);
+  overflow: auto;
+  background: color-mix(in srgb, var(--theme-window-bg) 74%, var(--theme-content-bg));
+}
+
+.combat-roster {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 6.75rem minmax(0, 1fr);
+  border: 1px solid var(--combat-inlay);
+  background: color-mix(in srgb, var(--theme-card-bg) 74%, var(--theme-content-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-card-border) 50%, transparent);
+}
+
+.combat-side-plaque {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--theme-spacing-sm);
+  border: 1px solid var(--theme-card-border);
+  margin: var(--theme-spacing-xs);
+  font-family: var(--theme-font-title);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.combat-side-plaque-enemy {
+  color: var(--theme-error);
+  background: color-mix(in srgb, var(--theme-error) 8%, var(--theme-surface-muted));
+  border-color: color-mix(in srgb, var(--theme-error) 42%, var(--theme-card-border));
+}
+
+.combat-side-plaque-allies {
+  color: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 7%, var(--theme-surface-muted));
+  border-color: color-mix(in srgb, var(--theme-primary) 42%, var(--theme-card-border));
+}
+
+.combat-side-emblem {
+  color: currentColor;
+  font-size: 1rem;
+  opacity: 0.35;
 }
 .combat-unit-row {
   display: flex;
+  align-items: stretch;
   gap: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-md);
   overflow-x: auto;
+  scrollbar-width: thin;
 }
 .combat-unit-row > * {
-  flex: 1 1 220px;
-  min-width: 220px;
+  flex: 0 1 21rem;
+  min-width: 18rem;
+}
+
+.combat-ledger {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid var(--combat-inlay);
+  background: color-mix(in srgb, var(--theme-content-bg) 88%, var(--theme-card-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-card-border) 50%, transparent);
+}
+
+.combat-ledger-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-md);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-lg);
+  font-family: var(--theme-font-title);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--theme-primary);
+  letter-spacing: 0.08em;
+}
+
+.combat-ledger-heading::before,
+.combat-ledger-heading::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, var(--theme-primary) 35%, var(--theme-card-border))
+  );
+}
+
+.combat-ledger-heading::after {
+  background: linear-gradient(
+    to left,
+    transparent,
+    color-mix(in srgb, var(--theme-primary) 35%, var(--theme-card-border))
+  );
 }
 .combat-flow {
-  flex: 1;
   min-height: 0;
+  border-top: 1px solid var(--theme-card-border);
 }
 
 /* T16 §3.5：面板底部操作行（跳过/重开战斗） */
 .combat-panel-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: var(--theme-spacing-sm);
   padding: var(--theme-spacing-xs) var(--theme-spacing-lg);
   border-top: 1px solid var(--theme-card-border);
-  background: var(--theme-bg-secondary, var(--theme-card-bg));
+  background: var(--theme-title-bar-bg);
   flex-shrink: 0;
+}
+
+.combat-panel-actions-label {
+  margin-right: auto;
+  color: var(--theme-text-muted);
+  font-family: var(--theme-font-body);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
 }
 
 .combat-confirm-text {
@@ -366,11 +532,102 @@ const collapsed = ref(false);
 .combat-overlay-leave-to .combat-panel {
   transform: scale(0.97);
 }
+
+@media (prefers-reduced-transparency: reduce) {
+  .combat-overlay {
+    backdrop-filter: none;
+  }
+
+  .combat-panel,
+  .combat-collapse-btn {
+    background: var(--theme-content-bg);
+  }
+}
+
+@media (max-width: 960px) {
+  .combat-overlay {
+    padding: 0;
+  }
+
+  .combat-panel,
+  .combat-panel.is-ready {
+    width: 100%;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    border-top: 0;
+    border-bottom: 0;
+  }
+
+  .combat-command-table {
+    padding: var(--theme-spacing-xs);
+  }
+
+  .combat-roster {
+    grid-template-columns: 5rem minmax(0, 1fr);
+  }
+
+  .combat-side-plaque {
+    font-size: 0.9375rem;
+  }
+
+  .combat-unit-row {
+    padding: var(--theme-spacing-sm);
+  }
+
+  .combat-unit-row > * {
+    flex-basis: 19rem;
+    min-width: 17rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .combat-ready {
+    grid-template-columns: 1fr;
+    padding: var(--theme-spacing-xl) var(--theme-spacing-lg);
+  }
+
+  .combat-ready-title,
+  .combat-ready-meta,
+  .combat-ready-brief {
+    grid-column: 1;
+  }
+
+  .combat-command-table {
+    grid-template-rows: auto minmax(12rem, 1fr) auto;
+  }
+
+  .combat-roster {
+    grid-template-columns: 1fr;
+  }
+
+  .combat-side-plaque {
+    min-height: 2.5rem;
+    grid-auto-flow: column;
+    place-content: center;
+    gap: var(--theme-spacing-sm);
+    margin-bottom: 0;
+  }
+
+  .combat-unit-row > * {
+    min-width: 15rem;
+  }
+
+  .combat-ledger-heading {
+    padding: var(--theme-spacing-xs) var(--theme-spacing-md);
+  }
+
+  .combat-panel-actions-label {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .combat-overlay-enter-active,
   .combat-overlay-leave-active,
   .combat-overlay-enter-active .combat-panel,
-  .combat-overlay-leave-active .combat-panel {
+  .combat-overlay-leave-active .combat-panel,
+  .combat-collapse-btn {
     transition: none;
   }
 }

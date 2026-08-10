@@ -113,6 +113,7 @@ const buffChips = computed(() =>
       'is-dead': isDead,
       'is-incapacitated': isIncapacitated,
     }"
+    :aria-current="isCurrentTurn ? 'step' : undefined"
   >
     <!-- ── 名字行 ── -->
     <div class="unit-header">
@@ -131,7 +132,12 @@ const buffChips = computed(() =>
         <span v-if="isLowHp" class="mark mark-low-hp">⚠ 低血</span>
         <span v-if="isDead" class="mark mark-dead">已倒下</span>
         <span v-else-if="isIncapacitated" class="mark mark-incapacitated">无法行动</span>
-        <button class="detail-toggle" type="button" @click="expanded = !expanded">
+        <button
+          class="detail-toggle"
+          type="button"
+          :aria-expanded="expanded"
+          @click="expanded = !expanded"
+        >
           {{ expanded ? '收起' : '详情' }}
         </button>
       </div>
@@ -139,9 +145,27 @@ const buffChips = computed(() =>
 
     <!-- ── HP / MP / SP 资源条 ── -->
     <div class="unit-resources" :class="{ 'hp-flashing': isLowHp }">
-      <ResourceBar label="HP" :current="unit.hp" :max="unit.maxHp" color="var(--theme-hp)" />
-      <ResourceBar label="MP" :current="unit.mp" :max="unit.maxMp" color="var(--theme-mp)" />
-      <ResourceBar label="SP" :current="unit.sp" :max="unit.maxSp" color="var(--theme-sp)" />
+      <ResourceBar
+        label="HP"
+        :current="unit.hp"
+        :max="unit.maxHp"
+        color="var(--theme-hp)"
+        show-values
+      />
+      <ResourceBar
+        label="MP"
+        :current="unit.mp"
+        :max="unit.maxMp"
+        color="var(--theme-mp)"
+        show-values
+      />
+      <ResourceBar
+        label="SP"
+        :current="unit.sp"
+        :max="unit.maxSp"
+        color="var(--theme-sp)"
+        show-values
+      />
     </div>
 
     <!-- ── Buff chips（每个 buff 和它的剩余回合小标成组渲染） ── -->
@@ -184,18 +208,31 @@ const buffChips = computed(() =>
 <style scoped>
 .combat-unit-card {
   position: relative;
-  background: var(--theme-card-bg);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--theme-primary) 3%, transparent),
+      transparent 42%
+    ),
+    var(--theme-card-bg);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-md);
-  padding: var(--theme-spacing-md);
+  border-radius: var(--theme-radius-sm);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-text-primary) 5%, transparent);
   transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast),
     box-shadow 0.15s ease,
     opacity 0.2s ease;
 }
 
 /* 当前行动者：环绕光晕（design §4.2 选中态） */
 .combat-unit-card.is-current-turn {
-  box-shadow: 0 0 0 1px var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 7%, var(--theme-card-bg));
+  border-color: var(--theme-primary);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--theme-primary) 45%, transparent),
+    0 0 14px color-mix(in srgb, var(--theme-primary) 18%, transparent);
 }
 
 /* 无法行动（非死亡）：降低存在感 */
@@ -214,7 +251,7 @@ const buffChips = computed(() =>
   align-items: center;
   justify-content: space-between;
   gap: var(--theme-spacing-sm);
-  margin-bottom: var(--theme-spacing-sm);
+  margin-bottom: var(--theme-spacing-xs);
 }
 
 .unit-name-row {
@@ -235,7 +272,7 @@ const buffChips = computed(() =>
 .unit-name {
   font-family: var(--theme-font-title);
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.875rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -258,7 +295,7 @@ const buffChips = computed(() =>
 .unit-marks {
   display: flex;
   align-items: center;
-  gap: var(--theme-spacing-xs);
+  gap: 2px;
   flex-shrink: 0;
 }
 
@@ -277,8 +314,8 @@ const buffChips = computed(() =>
 }
 
 .mark-dead {
-  color: #fff;
-  background: color-mix(in srgb, var(--theme-error) 70%, transparent);
+  color: var(--theme-error);
+  background: color-mix(in srgb, var(--theme-error) 16%, transparent);
   border: 1px solid var(--theme-error);
 }
 
@@ -297,28 +334,37 @@ const buffChips = computed(() =>
 
 /* 详情展开开关（触摸目标 ≥ 36px） */
 .detail-toggle {
-  min-height: 22px;
-  padding: 0 8px;
+  min-height: 36px;
+  padding: 0 var(--theme-spacing-sm);
   font-size: 0.7rem;
   font-weight: 600;
-  font-family: system-ui, sans-serif;
+  font-family: var(--theme-font-body);
   color: var(--theme-primary);
   background: color-mix(in srgb, var(--theme-primary) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, transparent);
   border-radius: var(--theme-radius-full);
   cursor: pointer;
-  transition: opacity var(--theme-transition-fast);
+  transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast),
+    color var(--theme-transition-fast);
 }
 
 .detail-toggle:hover {
-  opacity: 0.8;
+  background: color-mix(in srgb, var(--theme-primary) 14%, transparent);
+  border-color: var(--theme-primary);
+}
+
+.detail-toggle:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
 }
 
 /* ── 详情展开区（设计 §3.3：五维 + 技能 + Lv）── */
 .unit-detail {
   margin-top: var(--theme-spacing-sm);
   padding-top: var(--theme-spacing-sm);
-  border-top: 1px dashed var(--theme-card-border);
+  border-top: 1px solid var(--theme-card-border);
   display: flex;
   flex-direction: column;
   gap: var(--theme-spacing-xs);
@@ -367,7 +413,7 @@ const buffChips = computed(() =>
   padding: 1px 8px;
   font-size: 0.7rem;
   color: var(--theme-text-secondary, var(--theme-text-muted));
-  background: var(--theme-bg-secondary, var(--theme-card-bg));
+  background: var(--theme-surface-muted);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-full);
 }
@@ -382,7 +428,7 @@ const buffChips = computed(() =>
 .unit-resources {
   display: flex;
   flex-direction: column;
-  gap: var(--theme-spacing-xs);
+  gap: calc(var(--theme-spacing-xs) / 2);
 }
 
 /* 低血时 HP 条闪烁动画 */
@@ -406,14 +452,14 @@ const buffChips = computed(() =>
   flex-wrap: wrap;
   align-items: center;
   gap: var(--theme-spacing-xs);
-  margin-top: var(--theme-spacing-sm);
+  margin-top: var(--theme-spacing-xs);
 }
 
 /* BuffChip + 剩余回合小标 成组紧挨（不换行） */
 .buff-group {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: calc(var(--theme-spacing-xs) / 2);
   white-space: nowrap;
 }
 
