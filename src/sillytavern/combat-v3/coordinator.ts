@@ -519,16 +519,38 @@ interface RouteCtx {
 type DiceSupplier = () => { outputId: string; dice: number[] };
 
 /**
- * **内核当前正在行动的单位** id（供续骰恢复 / rejection 兜底用）。
+ * 内核处在**某个单位的回合之中**的 phase —— 只有这几个 phase 下 `currentTurnIndex`
+ * 才真的指向「该被问下一条命令的那个单位」。
+ */
+const UNIT_TURN_PHASES: ReadonlySet<string> = new Set([
+  'UnitTurnOpen',
+  'SlotConsume',
+  'MoraleCheck',
+  'UnitTurnClose',
+]);
+
+/**
+ * 续骰 / rejection 恢复时该问哪个单位（COR-12）。
  *
- * 🔴 COR-13 姊妹条 COR-12（2026-08-09 审查）：这里此前返回的是 `initiativeOrder[0]`
- * ——「先攻首位」而不是「当前行动者」。SupplyDice 续骰**由谁触发就该恢复给谁**
- * （attackHit / intentCheck / statusContest / procCheck 任一通道耗尽都会续骰），
- * 而回合中触发它的多半不是首位。带着错误行动者的下一条命令会被 `consumeSlot`
- * 以 `INVALID_PHASE` 拒绝，coordinator 随即跳出、以空补丁**放弃整场战斗**。
+ * **回合中**（`UNIT_TURN_PHASES`）用 `initiativeOrder[currentTurnIndex]`：
+ * SupplyDice 续骰由谁触发就该恢复给谁（attackHit / intentCheck / statusContest /
+ * procCheck 任一通道耗尽都会续骰），而回合中触发它的多半不是先攻首位。此前一律返回
+ * `initiativeOrder[0]`，于是下一条命令带着错误行动者 → `consumeSlot` 以 `INVALID_PHASE`
+ * 拒绝 → coordinator 跳出并以空补丁**放弃整场战斗**。
  *
- * 经 Initiative 阶段恢复的续骰不受影响（那一步会把 currentTurnIndex 归零），
- * 所以两者在开局是同一个值 —— 这正是它能一直藏着的原因。
+ * 🔴 **其余 phase 一律退回 `initiativeOrder[0]`，因为那时 `currentTurnIndex` 是陈旧的**
+ * （2026-08-10 审查逮到 —— 初版这里没有分流，在最常见的那条续骰路径上反而更差）：
+ *
+ *   - `unit-turn.ts` 收尾最后一个单位时 `nextIndex >= order.length` → **不写**
+ *     `currentTurnIndex`，它停在 `len-1`；`round.ts` 的 open/close 都不碰它。
+ *   - `initiative.ts` 骰子耗尽时 `return out` **早于** `out.currentTurnIndex = 0`。
+ *   - `reduceSupplyDice` 原样保留 phase、零推进。
+ *
+ * 于是 initiative 通道耗尽（它只有 10 颗，4 个单位打到第 3 轮必然发生）走到这里时，
+ * phase 仍是 `Initiative` 而索引是**上一轮先攻末位**。两个值其实都只是猜——正确行动者要等
+ * 内核用新骰子重掷先攻才知道——但上一轮首位（先攻修正不变）比上一轮末位更可能仍是首位。
+ * 这条路上不做「改进」，保持既有行为。
+ *
  * 索引钳制与 `phases/unit-turn.ts` 的 `currentUnitId` 一致（那边吃 CombatState，
  * 这边只拿得到 CombatView，故不能直接复用）。
  */
@@ -536,6 +558,7 @@ export function currentInitiative(session: CombatSession): string {
   const view = session.snapshot();
   const order = view.initiativeOrder;
   if (order.length === 0) return '';
+  if (!UNIT_TURN_PHASES.has(view.phase)) return order[0] ?? '';
   return order[Math.min(view.currentTurnIndex, order.length - 1)] ?? '';
 }
 

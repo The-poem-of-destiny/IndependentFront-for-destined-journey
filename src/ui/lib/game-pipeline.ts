@@ -28,6 +28,7 @@ import type {
   WorkshopProject,
   CharacterState,
   ChatMessage,
+  SystemEvent,
 } from '@engine/types';
 import type {
   ImageGenFailure,
@@ -237,6 +238,19 @@ export class GamePipeline {
     // 开场 prompt 作为真正的用户消息渲染 + 注入历史，让下游 Agent 能读到装备/技能/背景/命定核心等
     const ok = await this.run(prompt, onStoryChunk, /* isUserMessage */ !promptAlreadyRendered);
     if (ok) return;
+
+    // 🔴 COR-02：存档已切走就到此为止。下面两行读的是 `this.game.messages`（此刻已是新存档的）、
+    // 写的是 `releaseOpeningPromptClaim` → `patchSaveMetadata` → **activeSave**（也是新存档）。
+    // 失败场景：新建存档 A 开场生成中 → 回首页 → 打开同样刚开场的存档 B（B 自己的开场还在飞、
+    // 尚无 assistant 正文）→ A 这一路判定「什么都没产出」，把 **B 的** openingPromptConsumed
+    // 归还成 false → B 下次挂载重放开场，同一段叙事写两遍。
+    if (!this.ownsActiveSave) {
+      console.warn('[GamePipeline] 存档已切换，不归还开场认领（那会写到别的存档上）', {
+        pipelineSaveId: this.saveId,
+        activeSaveId: this.game.activeSaveId,
+      });
+      return;
+    }
 
     // 只有「一句叙事都没产出」才归还认领：API 抽风不该把开场永久烧掉。
     // 已经有 assistant 正文时保持已消费，重跑会把那段叙事再写一遍。
@@ -486,6 +500,26 @@ export class GamePipeline {
       return null;
     }
     return this.game.addMessage(content, role);
+  }
+
+  /**
+   * 系统消息（char_gen 卡片等）的唯一出口 —— 同一道存档归属闸（COR-02）。
+   *
+   * 🔴 单开一个方法而不是只在调用点写 `if`：`game-store.addSystemMessage` 与
+   * `addMessage` 落到**同一个** `persistMessage`（`saveId: activeSaveId.value`），
+   * 所以它是与正文完全等价的一条落库路径。初版只收编了 `addMessage`，
+   * 这一条就是绕过闸门的那个洞（2026-08-10 审查逮到）。
+   */
+  private emitSystemMessage(event: SystemEvent): void {
+    if (!this.ownsActiveSave) {
+      console.warn('[GamePipeline] 存档已切换，丢弃孤儿系统消息', {
+        pipelineSaveId: this.saveId,
+        activeSaveId: this.game.activeSaveId,
+        type: event.type,
+      });
+      return;
+    }
+    this.game.addSystemMessage(event);
   }
 
   // ===== 私有方法 =====
@@ -1354,14 +1388,16 @@ export class GamePipeline {
         // rawResponse 直接就是 AI 返回的字符串正文（流式模式下也是完整文本）
         const { content, options } = extractStoryOptions(result.rawResponse || '');
         if (!content) throw new Error('story produced no player-visible narrative');
-        this.game.setPendingOptions(options);
         // 🖼 记下这条消息 —— 情景插画按 (saveId, messageId, occurrence) 反查挂回正文（D2）。
         // 从 messages 末尾去捞是个会被别的写入者破坏的假设，所以让 addMessage 交回来。
         const message = this.emitMessage(content, 'assistant');
         // null = 存档已切走，这条正文没写进去（COR-02）。此时**不能**记
         // lastStoryMessage —— 它是情景插画反查锚点，指向一条不存在的消息只会
         // 让后续开火挂到空处。
+        // 🔴 `setPendingOptions` 也必须留在闸门**之后**：孤儿回合的行动选项照样会铺进
+        // 新存档的输入区（2026-08-10 审查逮到，初版把它写在了闸门之前）。
         if (!message) break;
+        this.game.setPendingOptions(options);
         this.lastStoryMessage = {
           id: message.id,
           turn: message.turn ?? 0,
@@ -1916,11 +1952,21 @@ export class GamePipeline {
           stateManager,
         });
         this.game.clearAgentStatus('char_gen');
-        if (result.character) {
+        if (result.character && !this.ownsActiveSave) {
+          // 🔴 COR-02：存档已切走 —— 这个 NPC 属于上一个存档，既不进内存角色表也不进聊天流。
+          // 侧链**不响应 abort**（`getClientFactory` 包出来的客户端只转发入参 signal，
+          // 而 `run()` 的 abortController 只交给了 story），所以离开游戏页之后它照样会跑完
+          // 并走到这里 —— 闸门是这条路上唯一拦得住的东西。
+          console.warn('[GamePipeline] 存档已切换，丢弃孤儿 char_gen 结果', {
+            pipelineSaveId: this.saveId,
+            activeSaveId: this.game.activeSaveId,
+            characterName: result.character.name,
+          });
+        } else if (result.character) {
           // 添加新角色到 store
           this.game.characters.push(result.character);
           // 添加系统通知（非 assistant 叙事气泡）
-          this.game.addSystemMessage({
+          this.emitSystemMessage({
             type: 'char_gen',
             characterName: result.character.name,
             race: result.character.race,

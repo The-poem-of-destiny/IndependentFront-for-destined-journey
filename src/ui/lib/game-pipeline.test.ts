@@ -641,6 +641,60 @@ describe('COR-02：存档归属闸', () => {
 
     expect(refreshFromDb).not.toHaveBeenCalled();
   });
+
+  // 🔴 以下四条是 2026-08-10 审查轮补的 —— 初版闸门只收编了 `addMessage`，
+  // 而「本轮结果的投影」不止正文一条。
+
+  it('🔴 系统消息（char_gen 卡片）同样过闸 —— 它与正文落到同一个 persistMessage', () => {
+    const addSystemMessage = vi.fn();
+    const pipeline = makePipeline({ addSystemMessage, activeSaveId: 'another-save' });
+
+    (pipeline as any).emitSystemMessage({
+      type: 'char_gen',
+      characterName: '琴师',
+      narrative: '一位琴师加入了队伍',
+    });
+
+    expect(addSystemMessage).not.toHaveBeenCalled();
+  });
+
+  it('存档没变时系统消息照常写入', () => {
+    const addSystemMessage = vi.fn();
+    const pipeline = makePipeline({ addSystemMessage });
+
+    (pipeline as any).emitSystemMessage({
+      type: 'char_gen',
+      characterName: '琴师',
+      narrative: '一位琴师加入了队伍',
+    });
+
+    expect(addSystemMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 正文被丢弃时行动选项也不铺进新存档的输入区', async () => {
+    const setPendingOptions = vi.fn();
+    const pipeline = makePipeline({ setPendingOptions, activeSaveId: 'another-save' });
+
+    await (pipeline as any).handleAgentResult(
+      makeResult('story', '<maintext>正文</maintext><options>1. 前进</options>'),
+    );
+
+    expect(setPendingOptions).not.toHaveBeenCalled();
+  });
+
+  it('🔴 存档已切走时不归还开场认领 —— 那会把别的存档的开场重放一遍', async () => {
+    const releaseOpeningPromptClaim = vi.fn(async () => true);
+    const pipeline = makePipeline({
+      openingPrompt: 'OPENING',
+      markOpeningPromptConsumed: vi.fn(async () => true),
+      releaseOpeningPromptClaim,
+      activeSaveId: 'another-save',
+    });
+
+    await pipeline.sendOpeningPrompt();
+
+    expect(releaseOpeningPromptClaim).not.toHaveBeenCalled();
+  });
 });
 
 describe('buildContext — EJS 两轴注入 (工坊 P2 / ADR-30)', () => {

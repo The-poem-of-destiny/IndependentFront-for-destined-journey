@@ -170,8 +170,35 @@
 | COR-13  | `applyBuffTick` 跳过「召唤时限」，到期所有权独占归 `expireSummonedUnits`                                                   |
 | TEST-01 | CI 的 types job 末尾补 `npm run build`（八道闸门 → 九道）                                                                  |
 
-每条都配了**先证伪再修**的回归测试：临时撤掉修复后逐条确认变红（SEC-09 / COR-12 除外 —— 前者的
-5 条用例本身就是新写的行为断言，后者是纯函数级断言，端到端的 `INVALID_PHASE → abandon` 后果未复现）。
+每条都配了**先证伪再修**的回归测试：临时撤掉修复后逐条确认变红。
+
+> 🔴 **修复本身又过了一轮对抗审查（2026-08-10），逮到 5 处并已一并收口** —— 记在这里是因为
+> 其中两条正是「修一半比不修更糟」的形状：
+>
+> 1. **COR-12 的初版在最常发生的那条续骰路径上是净退步。** `initiative` 通道只有 10 颗骰，
+>    4 个单位打到第 3 轮必然耗尽；而 `initiative.ts` 骰子耗尽时 `return out` **早于**
+>    `currentTurnIndex = 0`，`unit-turn` 收尾最后一位时又不写该字段，`reduceSupplyDice` 零推进
+>    —— 于是那条路上拿到的是**上一轮先攻末位**，比旧代码的「上一轮首位」更不可能对。
+>    现在按 phase 分流：只有回合中（`UnitTurnOpen`/`SlotConsume`/`MoraleCheck`/`UnitTurnClose`）
+>    才信 `currentTurnIndex`，其余一律退回 `initiativeOrder[0]`。初版注释里那句「Initiative
+>    阶段恢复不受影响」是**假的**（归零发生在下一次 dispatch 里面，而取值在那之前）。
+> 2. **COR-02 的闸门漏了 `addSystemMessage`。** 它与 `addMessage` 落到同一个 `persistMessage`
+>    （`saveId: activeSaveId.value`），所以 char_gen 的 NPC 卡片照样能写进后来打开的存档；
+>    同一段的 `characters.push` 也一样。已补 `emitSystemMessage` 同闸 + 整块守卫。
+> 3. **`sendOpeningPrompt` 收尾会写到别的存档上** —— 它读 `this.game.messages`、经
+>    `releaseOpeningPromptClaim` → `patchSaveMetadata` 写 `activeSave`。两个都刚开场的存档交错时，
+>    A 会把 **B 的** `openingPromptConsumed` 归还成 false，B 下次挂载把开场叙事写两遍。
+> 4. **`setPendingOptions` 写在闸门之前** —— 孤儿回合的行动选项照样铺进新存档的输入区。
+> 5. **COR-08 的初版实现选了最贵的那种**：每条目求值一遍 `stats` 的**源码字面量**（词法+语法+
+>    字节码），实测 109 条目 / 57KB stats 是 626ms，而 `JSON.parse` 同语义只要 191ms —— pass
+>    天花板是 5000ms，撞上去的后果是剩余条目**静默回退原文**。且那句 `evalVoid` 的返回值**没查**，
+>    重建失败会让本条目读到上一条的残留。现在从 guest 侧一个不可写不可配置的母本 `JSON.parse`，
+>    并用 `defineProperty` 让失败变响（顺带堵掉「条目把 `stats` 钉成不可配置」那条复活路径）。
+>
+> **仍未做、需要裁定的一条**：侧链（char_gen / item_gen / craft_gen）**不响应 abort**
+> —— `getClientFactory` 包出来的客户端只转发入参 `signal`，而 `run()` 的 `abortController`
+> 只交给了 story。接上它会顺带改变「停止生成」按钮的语义（当前是让侧链跑完），属于产品决定，
+> 故只登记不动手。数据安全那一半已由上面第 2 条的闸门兜住。
 
 **仍未处理**（各自的理由见正文）
 
