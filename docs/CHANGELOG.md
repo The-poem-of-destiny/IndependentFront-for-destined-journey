@@ -9,6 +9,71 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 战斗 Agent 会话模式改造 ｜ ✅ 7397 tests 全绿，待真机（2026-08-09）
+
+设计: `docs/planning/2026-08-09-combat-agent-session-revamp-design.md`（决策调查在
+`-design.md`，实施编排在 `-implementation-plan.md`）。lean-delegation 波 1-6 / T1-T17，
+**7397 tests 全绿（288 文件 / 9 跳过）**。真机 debug 暴露的 8 个战斗问题本轮修复。
+
+**核心改造（引擎侧 `src/sillytavern/combat-v3/`）**
+
+- **持久会话（§2.1）**：整场战斗一个 client + 一条消息数组贯穿，system 只发一次、
+  前缀稳定 → LLM 前缀缓存命中。回合压缩不做（战斗不会拖很久）。
+- **工具链规范化（§2.2-§2.3）**：查询类（get_combat_state / get_character /
+  get_inventory / get_unit_detail）与命令类（declare_attack / declare_action /
+  pass_slot / flee / submit_adjudication / write_summary）**分流**——查询返回数据、
+  命令产 Command，两者永不混淆。根治「查询工具被误当 Command 静默 pass」。get_character
+  加 skills+装备字段；新增 get_unit_detail（五维+技能+装备一把抓）；get_hp_percent 删除。
+- **submit_adjudication 补执行端（§2.4）**：toolCallToCommandSync 加 case → Adjudicate
+  Command → 已就绪的内核 evaluateAdjudication 六步验证链（divinity≥5 法则级门槛）。
+- **结算演绎（§2.5）**：数字即时（Code 卡片）+ AI 叙事补上——内核算完汇总结算事实串喂
+  同一持久会话、AI 写一句结果句以 v3_narrative 流式进 combatLog；纯叙事增强不产 Command、
+  不改状态、失败静默降级。
+- **终局落库回写（§2.6）**：遍历最终 CombatState.units 按 characterId 匹配存档角色，
+  覆写 hp/mp/sp/statusEffects，**与 FP patch 合并进同一次 commitChatState**（A2-1 整场
+  只 commit 一次）；召唤物跳过。根治「战斗打完角色伤势不持久化」。否决方案 2（AI 报
+  HP 交给 vars_update）——HP 是账务字段，数据字典铁律③。
+- **system prompt 迁移（§2.7）**：coordinator 硬编码 125 字删除，改从 agent-config.json
+  读 combat_v3.systemPrompt（持久会话适配版全文 1776 字，按时间线分章：开局/回合内/
+  大方向/结束/演绎契约）。
+- **write_summary 改造（T11）**：不再返回占位 Choose，真·终局摘要收集进
+  CombatSessionHandle.summary，终局回注正文。
+
+**前端侧（`src/ui/`）**
+
+- **CombatPanel 重写 v3（§3.1/§3.3）**：四个组件改读 `v3ActiveCombat`（units 字典 +
+  initiativeOrder 投影，不写 v3→v2 适配层）；单位卡片外层 HP/MP/SP/状态/战意 + 详情展开
+  五维/技能。
+- **v3_units_snapshot 事件（§3.4/T13）**：CombatOpened 后补发完整 units 字典 → store
+  填充 v3ActiveCombat.units。根治「面板弹出来是空的」。
+- **玩家输入桥时序修复（T15 根因/T16）**：`setCombatCoordinator` 提前到 runCombatV3
+  **之前**（此前玩家首决策永久挂起）+ `v3_awaiting_player_input` 补 emit 源（player 阵营
+  路由时 emit，敌方不 emit）。
+- **玩家输入 submitCombatCommand（§3.2/T14）**：四步拼装直接产结构化 Command；
+  自由文本过新增 `parsePlayerInput` 规则解析器（6 类规则 + 明确拒绝，绝不静默 fallback）；
+  移除 v2 submitCombatInput。
+- **跳过/重开战斗（§3.5/T16）**：进战斗前 createSnapshot('pre-combat', totalTurns)；
+  「跳过战斗」（无经验可自由编写战斗过程）与「重开战斗」（restoreSnapshot → 重触发
+  combat_trigger）按钮带确认弹窗。
+
+**Bug 修复清单（设计 §四，8 项）**
+
+| #   | 问题                                           | 修复                                      |
+| --- | ---------------------------------------------- | ----------------------------------------- |
+| 1   | 战斗 Agent 提示词缺失（125 字硬编码）          | §2.7 迁 agent-config.json + 补全 1776 字  |
+| 2   | 查询工具被误当 Command（get_character → pass） | §2.2 查询/命令分流                        |
+| 3   | 战斗面板不弹出（v3_combat_started units 空）   | §3.4 + T13 v3_units_snapshot + 输入桥时序 |
+| 4   | v3 数据流未接进 CombatPanel                    | §3.1 组件切 v3 数据源                     |
+| 5   | 阵营误判（非 player 全当 enemy）               | 已修（allies/enemies），待真机验证        |
+| 6   | submit_adjudication 静默变 pass                | §2.4 补执行端                             |
+| 7   | 战斗 HP/MP/SP 不落库                           | §2.6 终局覆写回写                         |
+| 8   | get_hp_percent 冗余                            | §2.2 删除                                 |
+
+🔴 **未做真机走查**：战斗面板弹出、敌方 AI 决策、结算演绎、跳过/重开战斗均为测试验证。
+顺手发现未动的问题：① `users.fp` 的 FP patch 在 StateManager 无 handler（全仓仅一处，
+疑似 FP 从未真正落库）；② UI 侧 abandon（handle.abandon 塞 PassAttack 回 pendingResolve）
+不会真正终结旧战斗，被放弃的战斗在后台空挂、下一场会顶掉旧句柄（既有 abandon 机制设计限制）。
+
 ### 图像 v2 — ComfyUI 本地后端 + 提示词方言系统 ｜ ✅ 真机全过（2026-08-08）
 
 设计: `docs/planning/2026-08-08-comfyui-image-provider-design.md`（C1–C16）。

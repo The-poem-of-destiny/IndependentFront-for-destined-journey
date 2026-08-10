@@ -363,7 +363,8 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'get_character',
-      description: '查询角色数据。可用于查重（避免重名）、获取角色属性用于制作检定等。',
+      description:
+        '查询角色数据。返回角色属性、技能列表（skills）与已装备物品（equipment，含槽位）。可用于查重（避免重名）、获取角色属性用于制作检定、读取技能/装备用于战斗决策等。',
       parameters: {
         type: 'object',
         properties: {
@@ -372,6 +373,24 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
             description: '角色名（兼容旧 UUID）。不填则返回所有角色列表。',
           },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_unit_detail',
+      description:
+        '查询当前战斗单位详情：五维属性（attributes，str/dex/con/int/spi）+ 技能列表（skills）+ 已装备物品（equipment，含槽位）一把抓。战斗决策时优先用它拿当前单位的完整面板数据（技能列表开局已注入，中途技能不变可只查一次）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          characterId: {
+            type: 'string',
+            description: '单位/角色名（兼容旧 UUID）',
+          },
+        },
+        required: ['characterId'],
       },
     },
   },
@@ -598,7 +617,9 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
   item_gen: ['get_script_reference', 'get_character', 'get_inventory'],
   vars_update: ['get_script_reference', 'get_character', 'get_inventory'],
   // Combat Agent V3（M2 新增，对应 v3 内核）— 见 docs/reference/combat-system-architecture-v3.md §4.4
-  //   v3 工具集只有 6+4 个（6 个战斗工具 + 4 个只读）。v2 的 ['combat'] 已随 M5 真正退役删除。
+  //   v3 工具集 6+4 个（6 个战斗工具 + 4 个只读查询；get_hp_percent 已删除，面板自带 HP%；
+  //   get_unit_detail 为 combat session revamp §2.2 新增，五维+技能+装备一把抓）。
+  //   v2 的 ['combat'] 已随 M5 真正退役删除。
   combat_v3: [
     // 战斗控制（一次工具调用 = 一个 Command）
     'declare_attack',
@@ -609,9 +630,9 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'write_summary',
     // 只读查询（复用现有）
     'get_character',
-    'get_hp_percent',
     'get_inventory',
     'get_combat_state',
+    'get_unit_detail',
   ],
 };
 
@@ -822,6 +843,28 @@ export async function executeToolCall(
           location: char.location,
           occupation: char.occupation,
           identity: char.identity,
+          // 🆕 combat session revamp §2.2: 技能列表（declare_attack 的 skillName 来源）
+          skills: (char.skills ?? []).map((s) => ({
+            name: s.name,
+            type: s.type,
+            description: s.description,
+            cost: s.cost,
+            cooldown: s.cooldown,
+            maxCooldown: s.maxCooldown,
+            effects: s.effects ?? {},
+            skillPower: s.skillPower,
+            relevantAttribute: s.relevantAttribute,
+          })),
+          // 🆕 combat session revamp §2.2: 已装备物品（inventory 中 equippedSlot 非空）
+          equipment: (char.inventory ?? [])
+            .filter((i) => i.equippedSlot)
+            .map((i) => ({
+              name: i.name,
+              slot: i.equippedSlot,
+              rarity: i.rarity ?? '普通',
+              effects: i.effects ?? {},
+              description: i.description ?? '',
+            })),
         };
       }
       // Return list of all character IDs/names for dedup
@@ -833,6 +876,47 @@ export async function executeToolCall(
           type: c.type,
           tier: c.tier,
         })),
+      };
+    }
+    // 🆕 combat session revamp §2.2: 当前单位详情一把抓（五维+技能+装备聚合）。
+    //   与 get_character 的区别：这是战斗单位详情（attributes/skills/equipment 聚合），
+    //   后者是通用角色查询。skills/equipment 形状与 get_character（T3）保持一致。
+    case 'get_unit_detail': {
+      const char = findCharacter(args.characterId, context);
+      if (!char) return { found: false, characterId: args.characterId };
+      return {
+        found: true,
+        id: char.id,
+        name: char.name,
+        race: char.race,
+        type: char.type,
+        tier: char.tier,
+        tierName: char.tierName,
+        level: char.level,
+        // 五维（战斗内"最终"属性值投影自角色 attributes）
+        attributes: char.attributes,
+        // 技能列表（declare_attack 的 skillName 来源）
+        skills: (char.skills ?? []).map((s) => ({
+          name: s.name,
+          type: s.type,
+          description: s.description,
+          cost: s.cost,
+          cooldown: s.cooldown,
+          maxCooldown: s.maxCooldown,
+          effects: s.effects ?? {},
+          skillPower: s.skillPower,
+          relevantAttribute: s.relevantAttribute,
+        })),
+        // 已装备物品（inventory 中 equippedSlot 非空）
+        equipment: (char.inventory ?? [])
+          .filter((i) => i.equippedSlot)
+          .map((i) => ({
+            name: i.name,
+            slot: i.equippedSlot,
+            rarity: i.rarity ?? '普通',
+            effects: i.effects ?? {},
+            description: i.description ?? '',
+          })),
       };
     }
     case 'get_hp_percent': {

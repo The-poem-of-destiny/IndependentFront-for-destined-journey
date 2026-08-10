@@ -3,9 +3,18 @@
  * CombatActionBar.vue — 战斗操作栏（M5 前端战斗面板 P4 子组件，B+C 混合操作）
  *
  * 快捷拼装助手 + 自由文本框。玩家通过四步选择（单位→行动类型→技能/道具→目标）
- * 拼装出自然语言指令注入文本框，可在发送前自由编辑。也可跳过拼装直接手打。
+ * 拼装出结构化 v3 Command 直接提交（T14）；自由文本框可手打描述，经引擎的
+ * 文本→Command 解析器转 Command 后提交 —— 禁止把自由文本直接当 Command 喂内核。
  *
- * 数据来源：useGameStore（activeCombat / combatAwaitingInput / characters / submitCombatInput）
+ * 数据来源：useGameStore（v3ActiveCombat / combatAwaitingInput / characters /
+ * submitCombatCommand）。敌我单位从 v3ActiveCombat.units 字典按 initiativeOrder
+ * + side 投影（决策 A2，见 combat-v3-projection.ts）。
+ *
+ * T14（设计 2026-08-09 §3.2「玩家输入：统一 AI 解析意图」）：
+ * - 拼装 UI 能确定意图/目标/技能时 → 直接产结构化 Command（不经过文本解析）
+ * - 自由文本 → parsePlayerInput（@engine/combat-v3 的规则解析器，意图复用
+ *   v2 的 parseIntentionFromInput；解析失败明确拒绝并 toast，不清空输入）
+ * - v2 的 submitCombatInput（文本）已移除，store 侧 v2 提交链路一并删除
  *
  * 设计规范遵循 docs/design.md：
  * - 间距用 --theme-spacing-* 变量（§3）
@@ -20,9 +29,13 @@
 
 import { ref, computed, watch } from 'vue';
 import { useGameStore } from '../../../stores/game-store';
-import type { CharacterState, CombatParticipant, Skill, InventoryItem } from '@engine/types';
+import { useUIStore } from '../../../stores/ui-store';
+import { parsePlayerInput, type PlayerCommand, type PlayerParseCtx } from '@engine/combat-v3';
+import type { CharacterState, Skill, InventoryItem } from '@engine/types';
+import { projectUnitsBySide, type V3Unit } from './combat-v3-projection';
 
 const game = useGameStore();
+const ui = useUIStore();
 
 // ════════════════════════════════════════
 //  派生状态
@@ -34,19 +47,15 @@ const awaiting = computed(() => game.combatAwaitingInput);
 /** 整个操作栏是否禁用（敌方回合或非战斗态） */
 const isLocked = computed(() => !awaiting.value);
 
-/** 我方参战单位列表 */
-const allyUnits = computed<CombatParticipant[]>(() => {
-  const combat = game.activeCombat;
-  if (!combat) return [];
-  return combat.participants.filter((p) => p.side === 'ally' && p.hp > 0);
-});
+/** 我方参战单位列表（v3：player 阵营 + 存活） */
+const allyUnits = computed<V3Unit[]>(() =>
+  projectUnitsBySide(game.v3ActiveCombat, 'player').filter((u) => u.hp > 0),
+);
 
-/** 敌方参战单位列表（选目标用） */
-const enemyUnits = computed<CombatParticipant[]>(() => {
-  const combat = game.activeCombat;
-  if (!combat) return [];
-  return combat.participants.filter((p) => p.side === 'enemy' && p.hp > 0);
-});
+/** 敌方参战单位列表（选目标用，v3：enemy 阵营 + 存活） */
+const enemyUnits = computed<V3Unit[]>(() =>
+  projectUnitsBySide(game.v3ActiveCombat, 'enemy').filter((u) => u.hp > 0),
+);
 
 // ════════════════════════════════════════
 //  四步拼装状态
@@ -96,18 +105,6 @@ const availableItems = computed<InventoryItem[]>(() => {
   );
 });
 
-// ── 武器名（从 inventory 中找 equippedSlot 为武器槽的物品）──
-const WEAPON_SLOTS = ['weapon', '武器'] as const;
-
-const weaponName = computed<string>(() => {
-  const char = selectedCharacter.value;
-  if (!char) return '武器';
-  const weapon = (char.inventory ?? []).find(
-    (item) => item.equippedSlot && WEAPON_SLOTS.includes(item.equippedSlot as any),
-  );
-  return weapon?.name ?? '武器';
-});
-
 // ════════════════════════════════════════
 //  行动类型 Tab 定义
 // ════════════════════════════════════════
@@ -123,7 +120,9 @@ interface ActionTab {
 
 const ACTION_TABS: readonly ActionTab[] = [
   { type: 'attack', label: '普攻', needsTarget: true, needsDetail: false },
-  { type: 'skill', label: '技能', needsTarget: false, needsDetail: true },
+  // T14：技能也需要目标 —— v3 的 DeclareAttack 必须有 targetId（skill 是 payload 字段），
+  // 否则四步拼装无法确定 Command，只能退回文本解析
+  { type: 'skill', label: '技能', needsTarget: true, needsDetail: true },
   { type: 'item', label: '道具', needsTarget: false, needsDetail: true },
   { type: 'defend', label: '防御', needsTarget: false, needsDetail: false },
   { type: 'flee', label: '逃跑', needsTarget: false, needsDetail: false },
@@ -163,67 +162,105 @@ function selectAction(type: ActionType) {
 }
 
 // ════════════════════════════════════════
-//  拼装模板
+//  拼装 → 结构化 Command（T14）
 // ════════════════════════════════════════
 
-/** 获取单位显示名（优先用 CombatParticipant.name） */
-function unitName(charId: string): string {
-  const combat = game.activeCombat;
-  const p = combat?.participants.find((pt) => pt.characterId === charId);
-  return p?.name ?? findCharacter(charId)?.name ?? '未知单位';
+/**
+ * 当前可行动的 actor id。
+ * 拼装选择锁定在 awaiting.unitId（watch），用户手动改 select 时以其选择为准；
+ * 兜底退回 awaiting 的 unitId。
+ */
+function currentActorId(): string {
+  return selectedUnitId.value || awaiting.value?.unitId || '';
 }
 
-/** 获取目标显示名 */
-function targetName(): string {
-  if (!selectedTargetId.value) return '敌人';
-  const p = enemyUnits.value.find((e) => e.characterId === selectedTargetId.value);
-  return p?.name ?? '敌人';
-}
-
-/** 拼装自然语言指令，注入文本框 */
-function assembleAndInject() {
-  if (!selectedUnitId.value || !selectedAction.value) return;
-
-  const me = unitName(selectedUnitId.value);
-  let text = '';
+/**
+ * 四步拼装 → v3 Command（不经过文本解析；store 的 submitCombatCommand 会补
+ * commandId + expectedRevision）。字段不全（缺目标/缺技能）→ null，由 canAssemble
+ * 在按钮层拦掉，这里只做防御性返回。
+ */
+function assembleCommand(): PlayerCommand | null {
+  if (!selectedUnitId.value || !selectedAction.value) return null;
+  const actorId = currentActorId();
+  if (!actorId) return null;
 
   switch (selectedAction.value) {
     case 'attack':
-      text = `${me}挥舞${weaponName.value}攻击${targetName()}`;
-      break;
-
+      if (!selectedTargetId.value) return null;
+      return {
+        kind: 'DeclareAttack',
+        actorId,
+        cost: 'attack',
+        payload: { targetId: selectedTargetId.value, intentionLevel: '常规' },
+      };
     case 'skill': {
-      if (!selectedDetail.value) return;
-      // 判断技能是否攻击型：技能名含"攻击/斩/击/刺/射/轰/术"等关键字启发式判断
-      const isAttackSkill = /攻|斩|击|刺|射|轰|术|爆|裂|波/.test(selectedDetail.value);
-      if (isAttackSkill && activeTab.value?.needsTarget) {
-        // 攻击型技能 — 需要目标就带目标
-        text = `${me}施展${selectedDetail.value}，攻向${targetName()}`;
-      } else {
-        text = `${me}施展${selectedDetail.value}`;
-      }
-      break;
+      if (!selectedDetail.value || !selectedTargetId.value) return null;
+      return {
+        kind: 'DeclareAttack',
+        actorId,
+        cost: 'attack',
+        payload: {
+          targetId: selectedTargetId.value,
+          skill: selectedDetail.value,
+          intentionLevel: '常规',
+        },
+      };
     }
-
-    case 'item': {
-      if (!selectedDetail.value) return;
-      text = `${me}使用${selectedDetail.value}`;
-      break;
-    }
-
+    case 'item':
+      if (!selectedDetail.value) return null;
+      return {
+        kind: 'DeclareAction',
+        actorId,
+        cost: 'action',
+        payload: { actionType: 'item', description: selectedDetail.value },
+      };
     case 'defend':
-      text = `${me}举盾防御`;
-      break;
-
+      return { kind: 'DeclareAction', actorId, cost: 'action', payload: { actionType: 'defend' } };
     case 'flee':
-      text = `${me}尝试撤退`;
-      break;
+      return { kind: 'Flee', actorId, cost: 'both', payload: {} };
   }
+}
 
-  if (text) {
-    // 追加而非覆盖（允许玩家连续拼装多句）
-    inputText.value = inputText.value ? `${inputText.value}；${text}` : text;
-  }
+/** 拼装四步是否已完整（按钮可用性） */
+const canAssemble = computed(() => {
+  if (isLocked.value || !selectedUnitId.value || !selectedAction.value) return false;
+  if (activeTab.value?.needsDetail && !selectedDetail.value) return false;
+  if (activeTab.value?.needsTarget && !selectedTargetId.value) return false;
+  return true;
+});
+
+/** 执行拼装：产 Command → submitCombatCommand → 清空子选择（保留单位，可连续行动） */
+function executeAssembled() {
+  const cmd = assembleCommand();
+  if (!cmd) return;
+  void game.submitCombatCommand(cmd);
+  selectedAction.value = '';
+  selectedDetail.value = '';
+  selectedTargetId.value = '';
+}
+
+// ════════════════════════════════════════
+//  自由文本 → Command 解析（T14，设计 §3.2）
+// ════════════════════════════════════════
+
+/** 构造解析上下文：当前行动者 + 在场存活单位 + 当前选中角色的技能/道具名单 */
+function parseCtx(): PlayerParseCtx {
+  return {
+    actorId: currentActorId(),
+    units: [...allyUnits.value, ...enemyUnits.value].map((u) => ({
+      id: u.id,
+      name: u.name,
+      side: u.side,
+    })),
+    skills: selectedCharacter.value
+      ? (selectedCharacter.value.skills ?? []).filter((s) => s.type === 'active').map((s) => s.name)
+      : [],
+    items: selectedCharacter.value
+      ? (selectedCharacter.value.inventory ?? [])
+          .filter((i) => (i.type === 'consumable' || i.type === 'material') && i.quantity > 0)
+          .map((i) => i.name)
+      : [],
+  };
 }
 
 // ════════════════════════════════════════
@@ -235,7 +272,14 @@ const canSend = computed(() => inputText.value.trim().length > 0 && !isLocked.va
 function handleSend() {
   const text = inputText.value.trim();
   if (!text || isLocked.value) return;
-  game.submitCombatInput(text);
+  const result = parsePlayerInput(text, parseCtx());
+  if (!result.ok) {
+    // 解析失败：明确拒绝并 toast，不清空输入（玩家可修改重发）。
+    // 🔴 绝不把自由文本直接当 Command 喂内核（设计 §3.2）。
+    ui.toast(result.reason, 'warning');
+    return;
+  }
+  void game.submitCombatCommand(result.command);
   inputText.value = '';
   // 拼装状态保留（同单位可能多次行动），文本框清空
 }
@@ -270,7 +314,7 @@ function handleKeydown(e: KeyboardEvent) {
           aria-label="选择我方单位"
         >
           <option value="" disabled>选择单位…</option>
-          <option v-for="u in allyUnits" :key="u.characterId" :value="u.characterId">
+          <option v-for="u in allyUnits" :key="u.id" :value="u.id">
             {{ u.name }}（HP {{ u.hp }}/{{ u.maxHp }}）
           </option>
         </select>
@@ -327,19 +371,15 @@ function handleKeydown(e: KeyboardEvent) {
           aria-label="选择目标"
         >
           <option value="" disabled>选择目标…</option>
-          <option v-for="e in enemyUnits" :key="e.characterId" :value="e.characterId">
+          <option v-for="e in enemyUnits" :key="e.id" :value="e.id">
             {{ e.name }}（HP {{ e.hp }}/{{ e.maxHp }}）
           </option>
         </select>
       </div>
 
-      <!-- 注入按钮 -->
-      <button
-        class="inject-btn"
-        :disabled="isLocked || !selectedAction || !selectedUnitId"
-        @click="assembleAndInject"
-      >
-        注入文本框
+      <!-- 执行拼装按钮（T14：直接提交结构化 Command，不再注入文本框） -->
+      <button class="inject-btn" :disabled="!canAssemble" @click="executeAssembled">
+        执行行动
       </button>
     </div>
 
@@ -350,7 +390,7 @@ function handleKeydown(e: KeyboardEvent) {
         class="combat-textarea"
         :class="{ 'is-locked': isLocked }"
         :disabled="isLocked"
-        placeholder="描述我方行动…（可点上方拼装，也可直接手打）"
+        placeholder="描述我方行动…（可点上方拼装直接执行，也可手打如“攻击骷髅兵”）"
         rows="2"
         @keydown="handleKeydown"
       />

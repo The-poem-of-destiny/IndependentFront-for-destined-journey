@@ -15,7 +15,7 @@
  */
 
 import type { CombatEvent } from '../combat-v2-types';
-import type { DomainEvent, MoraleState } from './types';
+import type { CombatUnitView, DomainEvent, MoraleState } from './types';
 
 /**
  * 把一段 DomainEvent[] 投影为一组前端 CombatEvent（保持顺序）。
@@ -23,11 +23,23 @@ import type { DomainEvent, MoraleState } from './types';
  * 每个 DomainEvent 变体都有对应的 CombatEvent 目标（映射表 plan §4.6）。
  * 部分结算类事件（SettlementCommitted → v3_settlement）携带终局数据。
  * 纯函数，无副作用。
+ *
+ * T13（设计 2026-08-09 §3.1）：opts.units 可选 —— 传入时在 CombatOpened 之后补发一条
+ * v3_units_snapshot（开局单位字典整体快照，让面板有数据）。缺省不传则行为与 T13 前
+ * 逐字节一致（一一对应、无多产事件），coordinator 在首次 dispatch 时传
+ * session.snapshot().units。
  */
-export function projectToUi(events: readonly DomainEvent[]): CombatEvent[] {
+export function projectToUi(
+  events: readonly DomainEvent[],
+  opts?: { units?: Readonly<Record<string, CombatUnitView>> },
+): CombatEvent[] {
   const out: CombatEvent[] = [];
   for (const evt of events) {
     out.push(mapEvent(evt));
+    // v3_combat_started 先落 store（创建 v3ActiveCombat），快照随后填充 units —— 顺序不可换
+    if (evt.kind === 'CombatOpened' && opts?.units) {
+      out.push({ type: 'v3_units_snapshot', units: { ...opts.units } });
+    }
   }
   return out;
 }

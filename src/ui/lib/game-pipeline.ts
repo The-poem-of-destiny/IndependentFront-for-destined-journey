@@ -185,6 +185,14 @@ export class GamePipeline {
   private ejsRejectToasted = new Set<string>();
   /** Q-01: v3 战斗真实骰源（drawDice）的 outputId 计数器，区分每次续杯 */
   private _diceDrawSeq = 0;
+  /**
+   * T16（设计 2026-08-09 §3.5）：最近一次 combat_trigger marker 的存档副本。
+   *
+   * coordinator 句柄的 `restart` 回调（重开战斗）拿它重新走 handleCombatTriggerV3
+   * —— store 层接触不到 pipeline，重触发必须由本实例完成（它持有 marker 与全部
+   * 引擎依赖）。整场战斗生命周期内有效；下次 combat_trigger 覆盖。
+   */
+  private _lastCombatMarker: CombatTriggerMarker | null = null;
 
   /**
    * 取 EJS `ui.log` 调试日志快照（能力面 §3.11）。
@@ -1576,35 +1584,37 @@ export class GamePipeline {
         return null;
       }
 
+      // T16 §3.5：存档本次 combat marker，供「重开战斗」restart 回调重新走本函数。
+      this._lastCombatMarker = marker;
+
       // 前端 Command 桥：pending resolver，store.submitCombatCommand → coordinator.submit → resolve
       let pendingResolve: ((c: CombatCommand) => void) | null = null;
       const waitForCommand = () =>
         new Promise<CombatCommand>((resolve) => (pendingResolve = resolve));
 
-      const result = await runCombatV3({
-        saveId: this.saveId,
-        bundle,
-        deps: {
-          clientFactory: this.getClientFactory(),
-          endpoint,
-          stateManager: this.getStateManager(),
-          characters: this.game.characters,
-          variables: context.variables,
-          context,
-          submitCommand: async () => {}, // 等待态由 v3_awaiting_player_input 事件驱动 store
-          waitForCommand,
-          abandon: () => {},
-          // 真实随机源（Q-01）：唯一注入点，委托 dice.ts 的 rollDice（内核禁 Math.random）。
-          // 每次续杯调用会换一批新骰（BeginOutput 后再取，outputId 用计数器区分）。
-          drawDice: () => ({
-            outputId: `draw-${++this._diceDrawSeq}`,
-            dice: rollDice(60, 20),
-          }),
-        },
-        onCombatEvent: (evt) => this.game.applyCombatEvent(evt),
-      });
+      // ── 🔴 T16 时序修复（玩家首决策永久挂起的根因）────────────────────────────
+      // 此前 setCombatCoordinator 在 `await runCombatV3(...)` **之后**才执行，而
+      // coordinator 的 waitForCommand（玩家单位轮次）依赖 store 经
+      // combatCoordinator.submit 喂入 pendingResolve —— 战斗一开局玩家就永远等不到
+      // 自己的回合（pendingResolve 有值但没人能 resolve）。必须把句柄挂到 store 的
+      // **开战之前**：战斗进行中 submit/abandon 才可用。clearAgentStatus/exitCombat/
+      // 摘要回注仍保留在 runCombatV3 完成之后（闭包引用关系不变）。
+      // ────────────────────────────────────────────────────────────────────────────
 
-      // 暴露 coordinator 句柄给 store（前端提交/放弃）
+      // ② pre-combat 快照（设计 §3.5）：openCombat 之前留档开战前状态（角色/对话/变量），
+      //    供「重开战斗」restoreSnapshot 回到开战前。totalTurns 取当前回合数（照
+      //    advanceTurn 先例：save.metadata.totalTurns = 已完成回合数 = 当前回合）。
+      let preSnapshotId: string | null = null;
+      try {
+        const turn = this.game.activeSave?.metadata?.totalTurns ?? 0;
+        // 照 advanceTurn 的先例直接 createStateManager(...) 调（getStateManager 是窄化包装）
+        const snap = await createStateManager(this.saveId).createSnapshot('pre-combat', turn);
+        preSnapshotId = snap.id;
+      } catch (err) {
+        console.warn('[GamePipeline] pre-combat 快照失败（重开战斗不可用，不阻塞开战）:', err);
+      }
+
+      // 暴露 coordinator 句柄给 store（前端提交/放弃/重开）。🔴 必须在 runCombatV3 之前。
       this.game.setCombatCoordinator({
         submit: async (cmd: CombatCommand) => {
           if (pendingResolve) {
@@ -1628,6 +1638,40 @@ export class GamePipeline {
           }
         },
         waitForCommand,
+        // §3.5 重开战斗：store.restartCombat 恢复 pre-combat 快照后调它重新走本函数。
+        //    拿本场 marker 重触发 combat（角色/对话/状态已随快照回滚，这里重建战斗）。
+        preSnapshotId,
+        restart: async () => {
+          if (this._lastCombatMarker) {
+            await this.handleCombatTriggerV3(this._lastCombatMarker, '');
+          }
+        },
+      });
+
+      const result = await runCombatV3({
+        saveId: this.saveId,
+        bundle,
+        deps: {
+          clientFactory: this.getClientFactory(),
+          endpoint,
+          stateManager: this.getStateManager(),
+          characters: this.game.characters,
+          variables: context.variables,
+          context,
+          // 2026-08-09 §2.7: 战斗 Agent 的 systemPrompt 从 agent-config 读（此前恒 undefined，
+          // routeEnemyCommand 回退硬编码 125 字）。照 char_gen/craft_gen 从 chainData 取 configs 的先例。
+          configs: this.chainData?.agentConfigs,
+          submitCommand: async () => {}, // 等待态由 v3_awaiting_player_input 事件驱动 store
+          waitForCommand,
+          abandon: () => {},
+          // 真实随机源（Q-01）：唯一注入点，委托 dice.ts 的 rollDice（内核禁 Math.random）。
+          // 每次续杯调用会换一批新骰（BeginOutput 后再取，outputId 用计数器区分）。
+          drawDice: () => ({
+            outputId: `draw-${++this._diceDrawSeq}`,
+            dice: rollDice(60, 20),
+          }),
+        },
+        onCombatEvent: (evt) => this.game.applyCombatEvent(evt),
       });
 
       this.game.clearAgentStatus('combat_v3');

@@ -8,6 +8,10 @@
  *   - runCombatV3(opts)：从 openCombat 驱动完整战斗循环直到结束
  *   - routeRequiredInput(req)：RequiredInput 路由（A2-3，穷尽 switch，never 兜底）
  *   - 终局：Dispatch RequestSettlement → 翻译 DomainEvent → StatePatch[] → 一次 commitChatState
+ *     （T10 §2.6：合并单位资源/状态覆写回写，战斗后角色伤势持久化）
+ *   - 终局摘要（T11 §2.2）：write_summary 不再返回占位 Choose —— AI 调 write_summary(text)
+ *     时 text 收集进 combatSession.summary，终局经 narrativeSummary 回注正文（game-pipeline
+ *     的 【战斗摘要】assistant 消息）；无摘要时兜底「战斗结束（reason）」
  *   - abandon()：丢弃 session、FP 不落库、解除 isGenerating（C4 修复）
  *
  * 内核不存 Promise，所有异步性在 coordinator 侧（架构 §十四 14.2）。
@@ -34,17 +38,27 @@ import { projectToAgent } from './projection-agent';
 import { projectToUi } from './projection-ui';
 import { lookupSummon } from './summon-pool';
 import { runCharGenForCombat } from '../char-gen-agent';
-import { getToolsForAgent } from '../agent-tools';
+import { getToolsForAgent, executeToolCall } from '../agent-tools';
 import type {
   CombatCommand,
   CombatDefinitionBundle,
   CombatSession,
+  CombatUnitView,
   DomainEvent,
+  ProposedAdjudication,
   RequiredInput,
   SummonedUnitDefinition,
 } from './types';
 import type { CombatClient, CombatEvent } from '../combat-v2-types';
-import type { ApiEndpoint, StatePatch, AgentContext, IntentionLevel } from '../types';
+import type {
+  ApiEndpoint,
+  AgentContext,
+  AgentConfig,
+  CombatParticipant,
+  IntentionLevel,
+  StatePatch,
+  ToolResult,
+} from '../types';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 类型定义
@@ -80,6 +94,21 @@ export interface RunCombatV3Opts {
     characters: Array<Record<string, unknown>>;
     variables?: Record<string, unknown>;
     context: AgentContext;
+    // Agent 配置（agent-config.json 经 game-pipeline 透传）。routeEnemyCommand 用它读
+    // combat_v3.systemPrompt（设计 2026-08-09 §2.7）；routeCharGenRequest 也用它喂
+    // runCharGenForCombat 的 base.configs（M3.5 召唤链）。
+    configs?: AgentConfig[];
+    // 叙事通道（设计 2026-08-09 §2.5 声明/结算演绎）：runCombatV3 注入 emitNarration，
+    // 经 RouteCtx.onNarration 转发声明演绎（assistant content）与结算结果句，以
+    // v3_narrative 投进 combatLog（game-store 已消费该事件）。测试可注入捕获；
+    // 省略时 routeEnemyCommand 不产生叙事事件（直捣路由的测试可不管叙事）。
+    onNarration?: (text: string) => void;
+    // 玩家输入等待事件通道（T16，设计 2026-08-09 §3.1）：路由到玩家单位需要输入时，
+    // 经 RouteCtx.onCombatEvent emit v3_awaiting_player_input，game-store 的
+    // v3_awaiting_player_input case 据此置 combatAwaitingInput（UI 显示「等待玩家输入」）。
+    // 仅 player 阵营 emit；敌方走 routeEnemyCommand 不 emit。runCombatV3 把顶层
+    // opts.onCombatEvent 注入 routingDeps，省略时路由不产生等待事件（直捣路由测试可不管）。
+    onCombatEvent?: (evt: CombatEvent) => void;
     // 玩家 Command 路由 → game-store
     submitCommand: (cmd: CombatCommand) => Promise<void>;
     waitForCommand: () => Promise<CombatCommand>;
@@ -97,6 +126,15 @@ export interface RunCombatV3Opts {
 const MAX_DISPATCH_STEPS = 500;
 /** 敌方 Agent 工具调用预算（一次工具调用 = 一个 Command，单位内最多攻击+动作+pass） */
 const MAX_TOOL_ROUNDS = 8;
+
+/**
+ * 战斗 Agent 的 system prompt 兜底（2026-08-09 改造后仅 configs 缺失时使用）：
+ * 主来源是 agent-config.json 的 `agents.combat_v3.systemPrompt`（经 ctx.configs 传入，
+ * 由 game-pipeline 的 chainData.agentConfigs 透传）。取不到时回退到这段历史文本，
+ * 保证无配置环境下仍有防御性提示（行为与改造前逐字一致）。
+ */
+const FALLBACK_COMBAT_SYSTEM_PROMPT =
+  '你是战斗决策 Agent。根据战斗面板为敌方单位决定动作。一次只提交一个 Command 对应的工具（declare_attack / declare_action / pass_slot / flee / write_summary），禁止传骰值。';
 
 // 局部确定性 id 计数器（避免 Math.random，铁律 1）
 let _idSeq = 0;
@@ -116,7 +154,7 @@ function nextCmdId(prefix: string): string {
  *   1. openCombat 建 session
  *   2. 首个 SupplyDice 喂 60 颗骰（deps.drawDice 提供）
  *   3. 循环 dispatch：无 requiredInput 且未终局则自动推进；有 requiredInput 则 route；到 Terminal dispatch RequestSettlement
- *   4. 终局：翻译 DomainEvent → StatePatch[] → 一次 commitChatState → 摘要回注
+ *   4. 终局：翻译 DomainEvent → StatePatch[]（含 T10 §2.6 单位资源/状态覆写回写）→ 一次 commitChatState → 摘要回注
  */
 export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result> {
   const { deps } = opts;
@@ -125,8 +163,31 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
   // 骰子供应（必填依赖 drawDice；BeginOutput 走 getDice 续杯）
   const getDice = (): { outputId: string; dice: number[] } => deps.drawDice();
 
+  // 持久会话句柄（设计 2026-08-09 §2.1 决策 1A）：整场战斗一个 client + 消息累积，
+  // 前缀稳定 → LLM 前缀缓存命中。routeEnemyCommand 经 ctx.combatSession 读/写它；
+  // summary 字段是终局摘要收集变量（T11，write_summary 改造）。
+  const combatSession: CombatSessionHandle = { messages: [], client: null, summary: '' };
+
+  // 叙事 emit 通道（设计 2026-08-09 §2.5）：声明演绎（routeEnemyCommand 的 assistant
+  // content）经 RouteCtx.onNarration 转发到这里，结算结果句由结算短调用直接喂进来；
+  // 统一以 v3_narrative 投进 combatLog（game-store 已消费，渲染成 combatLog narrative 行）。
+  const emitNarration = (text: string): void => {
+    const trimmed = (text ?? '').trim();
+    if (!trimmed || !opts.onCombatEvent) return;
+    opts.onCombatEvent({ type: 'v3_narrative', text: trimmed, round: session.snapshot().round });
+  };
+  // 把叙事通道装进依赖袋：decideForUnit / routeRequiredInput 构造 RouteCtx 时经
+  // `...deps` 展开自动带上 onNarration（T7 既有的 spread 约定），两处路由的声明演绎
+  // 都能经它投进 combatLog，无需逐个调用点传参。
+  // T16：玩家输入等待事件通道一并注入（= 顶层 opts.onCombatEvent），两处 player 分支
+  // emit v3_awaiting_player_input（仅 player 阵营）。
+  const routingDeps: RunCombatV3Opts['deps'] = {
+    ...deps,
+    onNarration: emitNarration,
+    onCombatEvent: opts.onCombatEvent,
+  };
+
   const allEvents: DomainEvent[] = [];
-  const summaryText = '';
   const loot: unknown[] = [];
 
   // 首次注骰
@@ -152,7 +213,7 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
         payload: { settlementId: `settle-${opts.saveId}` },
       });
       allEvents.push(...settleTrans.events);
-      emitEvents(opts, settleTrans.events);
+      emitEvents(opts, settleTrans.events, session);
       if (settleTrans.rejection) {
         break;
       }
@@ -161,13 +222,45 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
 
     const trans = session.dispatch(currentCommand);
     allEvents.push(...trans.events);
-    emitEvents(opts, trans.events);
+    emitEvents(opts, trans.events, session);
 
     if (trans.rejection) {
       // stale / 非法：本命令作废，重新按当前单位决定（不该发生，熔断保护）
+      console.log(
+        'DEBUG rej steps=',
+        steps,
+        'code=',
+        trans.rejection.code,
+        'msg=',
+        String(trans.rejection.message),
+        'phase=',
+        session.snapshot().phase,
+        'kind=',
+        (currentCommand as { kind?: string }).kind,
+        'actor=',
+        (currentCommand as { actorId?: string }).actorId,
+      );
       if (steps > 3) break;
-      currentCommand = await decideForUnit(firstInitiative(session), session, deps, opts.saveId);
+      currentCommand = await decideForUnit(
+        firstInitiative(session),
+        session,
+        routingDeps,
+        opts.saveId,
+        combatSession,
+      );
       continue;
+    }
+
+    // 结算演绎（设计 2026-08-09 §2.5）：数字卡片已由上面的 emitEvents 立即弹出
+    // （v3_action），这里把本次 dispatch 的结算事实串（命中/评级/伤害）喂同一持久
+    // 会话，AI 写一句结果句，以 v3_narrative 流式进 combatLog（卡片先显示数字、叙事
+    // 随后补上）。纯叙事增强三条铁则：不产 Command、不改战斗状态（不影响内核判定
+    // 与 Command 消费）；串行 await 保证 append 顺序与主决策消息不错位（前缀稳定）；
+    // 失败（无 client / 调用抛错 / 空输出）在 narrateSettlement 内静默降级不注入。
+    const facts = collectSettlementFacts(trans.events);
+    if (facts.length > 0) {
+      const sentence = await narrateSettlement(facts, combatSession);
+      emitNarration(sentence);
     }
 
     if (trans.requiredInput) {
@@ -175,13 +268,14 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
         trans.requiredInput,
         session,
         {
-          ...deps,
+          ...routingDeps,
           saveId: opts.saveId,
           onPanel: (panel) => {
             if (opts.onCombatEvent) {
               opts.onCombatEvent({ type: 'v3_dice_epoch', outputId: `panel-${panel.length}` });
             }
           },
+          combatSession,
         },
         getDice,
       );
@@ -192,7 +286,13 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
     // kernel 未自动推进）。此时按当前先攻首位单位决定其第一个动作，dispatch 时 kernel 会
     // auto 推进 CombatOpen→…→SlotConsume 并消费它。
     if (!trans.terminal) {
-      currentCommand = await decideForUnit(firstInitiative(session), session, deps, opts.saveId);
+      currentCommand = await decideForUnit(
+        firstInitiative(session),
+        session,
+        routingDeps,
+        opts.saveId,
+        combatSession,
+      );
       continue;
     }
 
@@ -226,17 +326,30 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
 
   // 终局落库（唯一一次 commitChatState）——A2-1 要求整场只 commit 一次。
   // FP 净变动 = 终局快照 − 开战快照（架构 §十二 12.2 Δ = snapshot.FP − 初始 FP）。
+  const finalSnapshot = session.snapshot();
   const initialFp = opts.bundle.resourceSnapshots.FP;
-  const finalFp = session.snapshot().resourceSnapshots.FP;
+  const finalFp = finalSnapshot.resourceSnapshots.FP;
   const fpDelta = finalFp - initialFp;
-  const patches = toPatches(allEvents, opts.bundle, fpDelta);
+  // T10（设计 2026-08-09 §2.6 方案 1）：终局 Code 覆写回写 —— 把战斗结束时的单位
+  // 资源（hp/mp/sp）与状态效果按 characterId 匹配存档角色，生成 StatePatch 与 FP
+  // patch **合并进同一次 commitChatState**（A2-1：整场只 commit 一次，不开第二次）。
+  // 召唤物（characterId 匹配不到存档角色）跳过，不硬造角色。
+  const patches = [
+    ...toPatches(allEvents, opts.bundle, fpDelta),
+    ...buildUnitPersistPatches(finalSnapshot.units, deps.characters, opts.bundle.participants),
+  ];
   if (deps.stateManager) {
     await deps.stateManager.commitChatState(patches);
   }
 
+  // T11（设计 2026-08-09 §2.2 write_summary 改造）：终局摘要回注正文 —— 用 AI 经
+  // write_summary(text) 收集进 combatSession.summary 的文本；没有摘要（AI 从未调 /
+  // 全部空文本）→ 兜底「战斗结束（reason）」非空文本，game-pipeline 照常注入，不崩。
+  const collectedSummary = (combatSession.summary ?? '').trim();
+
   return {
     narrativeSummary:
-      summaryText || `战斗结束（${session.snapshot().terminal?.reason ?? 'terminal'}）`,
+      collectedSummary || `战斗结束（${session.snapshot().terminal?.reason ?? 'terminal'}）`,
     patches,
     totalExp: 0,
     totalFp: finalFp,
@@ -249,6 +362,38 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
 // ──────────────────────────────────────────────────────────────────────────────
 // RequiredInput 路由（A2-3 穷尽 switch）
 // ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 战斗 Agent 持久会话消息（设计 2026-08-09 §2.1 决策 1A）：
+ * agent-client ChatRequest.messages 的等价形状（含工具往返字段）。模块局部类型，
+ * 非全局；对应全局契约在 agent-client 的 ChatRequest.messages 与
+ * combat-v2-types 的 CombatClient.chatWithTools.request.messages。
+ */
+interface CombatAgentMessage {
+  role: string;
+  content: string | null;
+  tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
+  tool_call_id?: string;
+  name?: string;
+}
+
+/**
+ * 持久会话句柄（决策 1A）：一场战斗一个 client + 一条消息数组，挂在 coordinator 闭包。
+ *  - messages：整场战斗累积的对话（system 只 append 一次；每回合 user → 工具往返 → assistant）
+ *  - client：整场战斗复用的 combat_v3 client（首次需要时经 clientFactory 建，之后不再新建）
+ * 省略（直捣路由的测试）时 routeEnemyCommand 回退到调用内的临时句柄，行为与一次性会话等价。
+ */
+interface CombatSessionHandle {
+  messages: CombatAgentMessage[];
+  client: CombatClient | null;
+  /**
+   * 终局摘要收集（T11，设计 2026-08-09 §2.2 write_summary 改造）：AI 调
+   * write_summary(text) 时经 collectSummaryFromToolCalls 存入；终局时
+   * runCombatV3 用它回注正文（narrativeSummary）。多段调用追加合并；
+   * 缺省空串（没有摘要时终局走兜底文本）。
+   */
+  summary?: string;
+}
 
 interface RouteCtx {
   submitCommand: (cmd: CombatCommand) => Promise<void>;
@@ -264,6 +409,24 @@ interface RouteCtx {
   configs?: import('../types').AgentConfig[];
   worldBooks?: import('../types').WorldBook[];
   presets?: import('../types').AgentPreset[];
+  /**
+   * 持久会话句柄（设计 2026-08-09 §2.1 决策 1A）：整场战斗一个 client + 一条消息数组，
+   * 由 runCombatV3 闭包持有并注入；routeEnemyCommand 读/写。省略时回退到调用内的
+   * 临时句柄（一次性会话行为，直捣路由的测试可用）。
+   */
+  combatSession?: CombatSessionHandle;
+  /**
+   * 声明演绎通道（设计 2026-08-09 §2.5）：routeEnemyCommand 拿到 assistant 正文
+   * （1-3 句战斗演绎，随 declare_attack 工具调用一并产出）时回调；runCombatV3 注入
+   * emitNarration（emit v3_narrative）投进 combatLog。可省略（不关心叙事的直捣测试）。
+   */
+  onNarration?: (text: string) => void;
+  /**
+   * 玩家输入等待事件通道（T16，设计 2026-08-09 §3.1）：玩家单位轮到需要输入时 emit
+   * v3_awaiting_player_input，game-store 据此置 combatAwaitingInput。由 runCombatV3
+   * 经 routingDeps 注入（= opts.onCombatEvent）。仅 player 阵营 emit；可省略。
+   */
+  onCombatEvent?: (evt: CombatEvent) => void;
 }
 
 /** 骰子供应回调类型（闭包传入） */
@@ -277,30 +440,43 @@ function firstInitiative(session: CombatSession): string {
 /**
  * 决定某个单位的第一个/下一个动作 Command（按阵营分流：玩家 → store；敌方 → Agent）。
  * 与 routeRequiredInput 的 PlayerCommand 分支共用逻辑。
+ * combatSession：持久会话句柄（决策 1A），透传给 routeEnemyCommand；可省略（一次性会话）。
  */
 function decideForUnit(
   unitId: string,
   session: CombatSession,
   deps: RunCombatV3Opts['deps'],
   saveId: string,
+  combatSession?: CombatSessionHandle,
 ): Promise<CombatCommand> {
   const snapshot = session.snapshot();
   const unit = snapshot.units[unitId];
   const rev = snapshot.revision;
   const unitName = unit?.name ?? unitId;
-  const ctx: RouteCtx = { ...deps, saveId };
+  const ctx: RouteCtx = { ...deps, saveId, combatSession };
   if (unit?.side === 'player') {
     return Promise.resolve().then(async () => {
+      // T16：轮到玩家单位需要输入 → emit 等待事件（store 置 combatAwaitingInput）。
+      // 仅 player 阵营 emit；必须抢在 submitCommand/waitForCommand 之前（UI 据此亮
+      // 「等待玩家输入」，随后 submit 才有消费者）。
+      ctx.onCombatEvent?.({
+        type: 'v3_awaiting_player_input',
+        unit: unitName,
+        unitId,
+        round: snapshot.round,
+      });
       await deps.submitCommand(nearestCommand(rev, unitId, unitName));
       // UI 提交的 command 可能 revision 过期，统一修正为内核当前值（乐观并发契约）
       return freshRevision(deps.waitForCommand(), session);
     });
   }
+  // 敌方 → 战斗 Agent：声明演绎（narration）已由 routeEnemyCommand 经 ctx.onNarration
+  // 投进 combatLog，这里只取 command 进内核（§2.5）。
   return routeEnemyCommand(
     { kind: 'PlayerCommand', unitId, unitName, round: snapshot.round },
     session,
     ctx,
-  );
+  ).then((res) => res.command);
 }
 
 /** 把前端返回的 Command 的 expectedRevision 修正为内核当前 revision（防 stale） */
@@ -328,14 +504,22 @@ export async function routeRequiredInput(
       const unit = session.snapshot().units[req.unitId];
       const side = unit ? unit.side : undefined;
       if (side === 'player') {
+        // T16：玩家单位轮次 → emit 等待事件（store 置 combatAwaitingInput），
+        // 抢在 submitCommand/waitForCommand 之前。仅 player 阵营 emit。
+        ctx.onCombatEvent?.({
+          type: 'v3_awaiting_player_input',
+          unit: req.unitName,
+          unitId: req.unitId,
+          round: session.snapshot().round,
+        });
         // → game-store，等前端（Promise 在 coordinator 侧）；修正 revision
         await ctx.submitCommand(
           nearestCommand(session.snapshot().revision, req.unitId, req.unitName),
         );
         return freshRevision(ctx.waitForCommand(), session);
       }
-      // 敌方 → 战斗 Agent
-      return routeEnemyCommand(req, session, ctx);
+      // 敌方 → 战斗 Agent（声明演绎经 ctx.onNarration 进 combatLog，这里只取 command）
+      return (await routeEnemyCommand(req, session, ctx)).command;
     }
     case 'BeginOutput': {
       // 注骰：调 getDice 取新 60 颗 → SupplyDice
@@ -455,45 +639,312 @@ function clampSummon(
   return next;
 }
 
-/** 敌方 PlayerCommand → 战斗 Agent（chatWithTools）+ 工具调用 → Command */
-async function routeEnemyCommand(
+/**
+ * 战斗 Agent 的 system prompt 解析（设计 2026-08-09 §2.7）：
+ * 主来源 agent-config 的 `agents.combat_v3.systemPrompt`（从 configs 按 agentId 找，
+ * 照 char_gen/item_gen 读 configs 的先例）；取不到（未透传 / 字段缺失或全空白）时
+ * 回退 FALLBACK_COMBAT_SYSTEM_PROMPT，保证无配置环境下行为与改造前一致。
+ */
+function combatSystemPrompt(ctx: RouteCtx): string {
+  const cfg = ctx.configs?.find((c) => c.agentId === 'combat_v3');
+  const prompt = cfg?.systemPrompt;
+  return prompt && prompt.trim().length > 0 ? prompt : FALLBACK_COMBAT_SYSTEM_PROMPT;
+}
+
+/**
+ * 敌方 PlayerCommand → 战斗 Agent（chatWithTools）+ 工具调用 → Command
+ *
+ * 持久会话（设计 2026-08-09 §2.1 决策 1A）：整场战斗一个 client + 一条消息数组
+ * （ctx.combatSession，由 runCombatV3 闭包持有）。system 只 append 一次；每回合
+ * append user(轮到X+面板) → chatWithTools（回合内工具往返在 agent-client 内部循环）
+ * → 按 result.toolCalls 把工具往返回流进持久数组 → append 最终 assistant 正文。
+ * 前缀稳定 → LLM 前缀缓存命中；查询结果保留进历史（决策 3）。
+ * 省略 combatSession（直捣路由的测试）→ 调用内临时句柄，一次性会话行为。
+ * 导出供测试直捣（先例：routeRequiredInput）。
+ *
+ * 返回值（设计 2026-08-09 §2.5）：{ command, narration }——
+ *   - command：照旧进内核（lastCommandFromResult，只认命令类工具结果）
+ *   - narration：声明演绎 = assistant content（1-3 句战斗演绎，随命令工具一并产出），
+ *     同时经 ctx.onNarration 投进 combatLog（v3_narrative）；空正文时为空串。
+ */
+export async function routeEnemyCommand(
   req: Extract<RequiredInput, { kind: 'PlayerCommand' }>,
   session: CombatSession,
   ctx: RouteCtx,
-): Promise<CombatCommand> {
+): Promise<{ command: CombatCommand; narration: string }> {
   const panel = projectToAgent(session.snapshot());
   if (ctx.onPanel) ctx.onPanel(panel);
 
-  const client = ctx.clientFactory('combat_v3', ctx.endpoint, ctx.saveId);
-  if (!client.chatWithTools) {
+  const handle = ctx.combatSession ?? { messages: [], client: null };
+  // client 只建一次：整场战斗复用同一 combat_v3 client，不再每单位每行动新建
+  if (!handle.client) {
+    handle.client = ctx.clientFactory('combat_v3', ctx.endpoint, ctx.saveId);
+  }
+  const client = handle.client;
+  if (!client || !client.chatWithTools) {
     // 无 agent → 让敌方过（defensive：pass 攻击槽推进）
-    return nextPass(session, 'attack');
+    return { command: nextPass(session, 'attack'), narration: '' };
   }
 
+  const messages = handle.messages;
+  // system 只 append 一次（整场战斗开头的首个敌方决策时注入）
+  if (messages.length === 0) {
+    messages.push({ role: 'system', content: combatSystemPrompt(ctx) });
+  }
+  // 每回合 append user（轮到X + 面板）
+  messages.push({
+    role: 'user',
+    content: `轮到敌方「${req.unitName}」行动（我方单位由玩家控制）。\n\n${panel}`,
+  });
+
+  // 🔴 tools 必须显式注入（2026-08-08 真机 bug）：此前 `tools: undefined` 且
+  //    agent-client 不自动注入 → 模型收不到 declare_attack 的 schema → 只能文本猜
+  //    参数名（target≠targetName）→ toolCalls 空 → 战斗 agent 每步 pass → abandon。
+  //    先例：char_gen/item_gen/craft_gen 都在调用点显式 getToolsForAgent()，照抄。
   const result = await client.chatWithTools(
     {
-      messages: [
-        {
-          role: 'system',
-          content:
-            '你是战斗决策 Agent。根据战斗面板为敌方单位决定动作。一次只提交一个 Command 对应的工具（declare_attack / declare_action / pass_slot / flee / write_summary），禁止传骰值。',
-        },
-        {
-          role: 'user',
-          content: `轮到敌方「${req.unitName}」行动（我方单位由玩家控制）。\n\n${panel}`,
-        },
-      ],
-      // 🔴 tools 必须显式注入（2026-08-08 真机 bug）：此前 `tools: undefined` 且
-      //    agent-client 不自动注入 → 模型收不到 declare_attack 的 schema → 只能文本猜
-      //    参数名（target≠targetName）→ toolCalls 空 → 战斗 agent 每步 pass → abandon。
-      //    先例：char_gen/item_gen/craft_gen 都在调用点显式 getToolsForAgent()，照抄。
+      // 传持久数组本身：chatWithTools 内部 `const conversation = [...request.messages]`
+      // 复制后在其副本上做回合内往返，不会改写我们的数组，只读引用无副作用。
+      messages,
       tools: getToolsForAgent('combat_v3'),
     },
-    (name, args) => toolCallToCommand(name, args, session.snapshot().revision, req.unitId),
+    // 查询/命令分流（设计 2026-08-09 §2.2 决策 3C，问题 2 根治）：命令类 → toolCallToCommand
+    // 产 Command；查询类 → executeCombatQuery 返回数据给模型、不产 Command；收集类
+    // （write_summary，T11）→ collectCombatSummary 返回确认、text 由 collectSummaryFromToolCalls
+    // 收集。三类工具永不落 toolCallToCommand 的 default 变静默 pass。
+    (name, args) => {
+      if (isCombatQueryTool(name)) {
+        return executeCombatQuery(name, args, session, ctx);
+      }
+      if (name === 'write_summary') {
+        // T11：write_summary 是收尾收集动作，不产 Command —— 返回确认 ToolResult 给
+        // 模型即可（text 的收集在下方统一扫描 result.toolCalls 做，单一收集点）。
+        return Promise.resolve(collectCombatSummary(args));
+      }
+      return toolCallToCommand(name, args, session.snapshot().revision, req.unitId);
+    },
     { maxRounds: MAX_TOOL_ROUNDS },
   );
 
-  return lastCommandFromResult(result, session.snapshot().revision, req.unitId);
+  // T11（设计 2026-08-09 §2.2 write_summary 改造）：终局摘要收集 —— 扫描本次回合的
+  // 工具调用，把 write_summary(text) 收进 combatSession.summary（终局回注正文用）。
+  // 放在统一收口处而非 executor 内部：真实 agent-client 会执行 executor，但测试 mock
+  // （不执行 executor、直接回 toolCalls 的先例）同样要能收集 —— 单一收集点不依赖
+  // executor 是否被调。
+  collectSummaryFromToolCalls(result.toolCalls ?? [], handle);
+
+  // 工具往返回流持久数组（决策 1A/3）：回合内的 assistant(tool_calls) ↔ tool 结果消息
+  // 只活在 chatWithTools 的内部副本里，这里按 result.toolCalls（name/args/result 按执行序）
+  // 重建回流 —— 查询工具结果（get_* 数据）随之完整保留进历史，后续轮次可见。重建消息对
+  // API 合法：tool_call_id ↔ assistant.tool_calls.id 一一对应（id 用确定性序号，铁律 1）。
+  appendToolRoundtrip(messages, result.toolCalls ?? []);
+  // 最终决策正文（assistant content，含声明演绎）也保留进历史
+  const finalText = result.output ?? result.rawResponse;
+  const narration = (finalText ?? '').trim();
+  if (narration.length > 0) {
+    messages.push({ role: 'assistant', content: narration });
+  }
+  // 声明演绎（§2.5）：随 declare_attack 的 assistant content 一起产出 → 投进 combatLog
+  if (narration.length > 0) {
+    ctx.onNarration?.(narration);
+  }
+
+  return {
+    command: lastCommandFromResult(result, session.snapshot().revision, req.unitId),
+    narration,
+  };
+}
+
+/**
+ * 工具往返回流（决策 1A/3）：把一次 chatWithTools 回合内执行过的工具调用按执行序重建为
+ * assistant(tool_calls) + tool 消息对，append 进持久消息数组。查询工具结果（get_* 返回的
+ * 数据）随 tool 消息内容完整保留，后续轮次可见。tool_call_id 用确定性序号（铁律 1：
+ * 本文件零 Math.random），与 nextCmdId 同源，全局唯一。
+ */
+function appendToolRoundtrip(
+  messages: CombatAgentMessage[],
+  toolCalls: Array<{ name: string; arguments: unknown; result?: unknown }>,
+): void {
+  for (const tc of toolCalls) {
+    const id = nextCmdId('combat-tc');
+    const argsStr =
+      typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments ?? {});
+    messages.push({
+      role: 'assistant',
+      content: null,
+      tool_calls: [{ id, type: 'function', function: { name: tc.name, arguments: argsStr } }],
+    });
+    messages.push({
+      role: 'tool',
+      tool_call_id: id,
+      name: tc.name,
+      content: JSON.stringify(tc.result ?? {}),
+    });
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 结算演绎（设计 2026-08-09 §2.5：数字即时 + AI 叙事补上）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 一次攻击动作的结算事实（形状对齐 v3_action 卡片载荷，projection-ui.ts）：
+ * 从 DomainEvent 的 AttackDeclared / AttackResolved / DamageApplied 三个阶段事件
+ * 按攻击对（attackerId + targetId）汇总成一条。纯数据，无随机/无 I/O。
+ */
+export interface SettlementActionFact {
+  attackerId: string;
+  targetId: string;
+  /** 技能名（AttackDeclared.skill，未指定时缺省） */
+  skill?: string;
+  /** AttackResolved：检定值 / 评级 / 是否命中 */
+  checkValue?: number;
+  rating?: string;
+  hit?: boolean;
+  /** DamageApplied：减免前伤害 / 最终伤害 / 伤害类型 / 目标 HP 前后 */
+  preReduction?: number;
+  final?: number;
+  damageType?: string;
+  targetHpBefore?: number;
+  targetHpAfter?: number;
+}
+
+/**
+ * 从一段 dispatch 的 DomainEvent[] 汇总结算事实串（§2.5）：
+ * 每一条 AttackDeclared 开一条 fact；后续同攻击对的 AttackResolved / DamageApplied
+ * 按「未填该阶段字段」匹配就近合并（同一 dispatch 内的连击各自成行）。
+ * 无攻击结算事件（pass / 注骰 / settle 等）→ 返回空数组，调用方不触发短调用。
+ * 纯函数，导出供测试直捣。
+ */
+export function collectSettlementFacts(events: readonly DomainEvent[]): SettlementActionFact[] {
+  const facts: SettlementActionFact[] = [];
+  for (const evt of events) {
+    switch (evt.kind) {
+      case 'AttackDeclared':
+        facts.push({ attackerId: evt.attackerId, targetId: evt.targetId, skill: evt.skill });
+        break;
+      case 'AttackResolved': {
+        const fact =
+          facts.find(
+            (f) =>
+              f.attackerId === evt.attackerId &&
+              f.targetId === evt.targetId &&
+              f.checkValue === undefined,
+          ) ?? facts.find((f) => f.attackerId === evt.attackerId && f.targetId === evt.targetId);
+        if (fact) {
+          fact.checkValue = evt.checkValue;
+          fact.rating = evt.rating;
+          fact.hit = evt.hit;
+        } else {
+          facts.push({
+            attackerId: evt.attackerId,
+            targetId: evt.targetId,
+            checkValue: evt.checkValue,
+            rating: evt.rating,
+            hit: evt.hit,
+          });
+        }
+        break;
+      }
+      case 'DamageApplied': {
+        const fact =
+          facts.find(
+            (f) => f.attackerId === evt.attackerId && f.targetId === evt.targetId && f.final === undefined,
+          ) ?? facts.find((f) => f.attackerId === evt.attackerId && f.targetId === evt.targetId);
+        if (fact) {
+          fact.preReduction = evt.preReduction;
+          fact.final = evt.final;
+          fact.damageType = evt.damageType;
+          fact.targetHpBefore = evt.targetHpBefore;
+          fact.targetHpAfter = evt.targetHpAfter;
+        } else {
+          facts.push({
+            attackerId: evt.attackerId,
+            targetId: evt.targetId,
+            preReduction: evt.preReduction,
+            final: evt.final,
+            damageType: evt.damageType,
+            targetHpBefore: evt.targetHpBefore,
+            targetHpAfter: evt.targetHpAfter,
+          });
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return facts;
+}
+
+/**
+ * 结算事实串 → 喂给 AI 的文本（§2.5）。含命中/评级/伤害/HP 等确定性数字——
+ * 这些数字只给 AI 当事实依据，契约要求结果句**不重复**数值（面板卡片已展示）。
+ * 纯函数，导出供测试直捣。
+ */
+export function buildSettlementFactText(facts: readonly SettlementActionFact[]): string {
+  if (facts.length === 0) return '';
+  const lines = facts.map((f) => {
+    const parts: string[] = [`「${f.attackerId}」攻击「${f.targetId}」`];
+    if (f.skill) parts.push(`技能：${f.skill}`);
+    if (typeof f.checkValue === 'number' && f.rating !== undefined) {
+      parts.push(`检定 ${f.checkValue}（${f.rating}）${f.hit === true ? '，命中' : '，未命中'}`);
+    }
+    if (typeof f.final === 'number') {
+      const typePart = f.damageType ? `（${f.damageType}）` : '';
+      parts.push(`造成 ${f.final} 点伤害${typePart}`);
+      if (typeof f.targetHpBefore === 'number' && typeof f.targetHpAfter === 'number') {
+        parts.push(`目标 HP：${f.targetHpBefore} → ${f.targetHpAfter}`);
+      }
+    }
+    return parts.join('，');
+  });
+  return `- ${lines.join('\n- ')}`;
+}
+
+/**
+ * 结算演绎短调用（§2.5）：把结算事实串喂同一持久会话，AI 写一句结果句。
+ *
+ * 纯叙事增强，三条铁则：
+ *  - **不产 Command、不改战斗状态**：结算调用只读，不影响内核判定 / Command 消费。
+ *  - **走 client.chat（非工具路径）**：结果句是纯文本一句话，无需工具；也不消费主决策
+ *    的 chatWithTools 工具轮预算。chat 收到的持久数组（含 tool 往返消息）对 API 合法：
+ *    appendToolRoundtrip 保证每条 tool 消息都有对应 assistant.tool_calls。
+ *  - **失败优雅降级**：无会话 / 无 client / 调用抛错 / 空输出 → 返回 ''，调用方不注入。
+ *
+ * 持久会话契约（决策 1A）：结算 user(事实串) 与 assistant(结果句) 都 append 进
+ * handle.messages——与主决策消息同一数组、串行追加 → 前缀稳定、不错位。失败时回滚
+ * user 消息（pop），数组保持失败前原样，不污染后续决策的前缀。
+ * client 由主决策（routeEnemyCommand）惰性建；整场只有玩家行动、敌方从未行动时
+ * client 为 null → 结算叙事静默跳过（无 agent 会话的降级形态）。
+ */
+async function narrateSettlement(
+  facts: readonly SettlementActionFact[],
+  handle: CombatSessionHandle,
+): Promise<string> {
+  const factText = buildSettlementFactText(facts);
+  const client = handle.client;
+  if (!factText || !client || typeof client.chat !== 'function') return '';
+  const messages = handle.messages;
+  const userContent =
+    `【内核结算完成】本次行动已由代码结算（数字由战斗面板展示，叙事勿重复数值）。\n` +
+    `${factText}\n\n按演绎契约写一句结果句（命中/伤害/受击反应）。`;
+  messages.push({ role: 'user', content: userContent });
+  try {
+    const result = await client.chat(
+      messages as unknown as Array<{ role: string; content: string }>,
+    );
+    const sentence = (result.output ?? result.rawResponse ?? '').trim();
+    if (sentence.length > 0) {
+      messages.push({ role: 'assistant', content: sentence });
+      return sentence;
+    }
+    messages.pop(); // 空输出（含 result.error 的失败形态）→ 回滚 user 消息
+    return '';
+  } catch {
+    messages.pop(); // 调用抛错 → 回滚 user 消息，战斗主流程不受影响
+    return '';
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -517,6 +968,104 @@ function toIntention(v: unknown): IntentionLevel {
     if (hit) return hit;
   }
   return '常规';
+}
+
+/**
+ * 查询类工具名单（设计 2026-08-09 §2.2 决策 3C）：只读查询，返回数据给模型，**不产 Command**。
+ * 与命令类（5 个：declare_attack / declare_action / pass_slot / flee / submit_adjudication）
+ * 严格分流 —— 查询工具永不落 toolCallToCommand 的 default 变静默 pass。
+ * write_summary 自成**收集类**（T11）：既非查询也非命令，executor 分流到 collectCombatSummary，
+ * 由 collectSummaryFromToolCalls 收集进 combatSession.summary（详见 routeEnemyCommand）。
+ * get_unit_detail（T8 已实现于 agent-tools.ts）在波 3（T7）补进名单：战斗内调用走查询分支
+ * 而非命令分支（否则落 toolCallToCommand default → 静默 pass）。
+ */
+const COMBAT_QUERY_TOOLS = new Set([
+  'get_combat_state',
+  'get_character',
+  'get_inventory',
+  'get_unit_detail',
+]);
+
+function isCombatQueryTool(name: string): boolean {
+  return COMBAT_QUERY_TOOLS.has(name);
+}
+
+/**
+ * 查询类工具执行（设计 2026-08-09 §2.2）：返回数据给模型，**不产 Command**。
+ *
+ * 数据来源复用现有实现，不重造：
+ *   - get_character / get_inventory / get_unit_detail → agent-tools.executeToolCall（角色/背包/
+ *     单位详情数据的唯一真源，形状与 char_gen / item_gen / craft_gen 各链一致；T3 已给
+ *     get_character 补 skills/equipment，T8 已实现 get_unit_detail 五维+技能+装备聚合）。
+ *   - get_combat_state → projection-agent.projectToAgent（与每回合注入的 {战况总览} 同源；
+ *     agent-tools 里的 get_combat_state 仍是 M4 占位 throw，战斗内快照以本 session 为准）。
+ *
+ * 未知查询工具 → throw（chatWithTools 会把异常包成 {"error": …} tool 消息回喂模型，可行动），
+ * 永不静默 pass。ToolExecutionContext 的 characters/variables 取自 ctx.context（AgentContext），
+ * 照 char_gen/craft_gen 读 context 的先例；context 缺失时兜底空表（查询返回 found:false）。
+ */
+async function executeCombatQuery(
+  name: string,
+  args: Record<string, any>,
+  session: CombatSession,
+  ctx: RouteCtx,
+): Promise<ToolResult> {
+  switch (name) {
+    case 'get_combat_state':
+      return { combatState: projectToAgent(session.snapshot()) };
+    case 'get_character':
+    case 'get_inventory':
+    case 'get_unit_detail':
+      return executeToolCall(name, args, {
+        saveId: ctx.saveId,
+        characters: ctx.context?.characters ?? [],
+        variables: ctx.context?.variables ?? {},
+      });
+    default:
+      throw new Error(
+        `未知查询工具「${name}」，可用: ${[...COMBAT_QUERY_TOOLS].join(', ')}`,
+      );
+  }
+}
+
+/**
+ * write_summary 工具执行（T11，设计 2026-08-09 §2.2 改造）：返回确认 ToolResult 给模型，
+ * **不产 Command**（终局由内核判定，write_summary 只是收尾叙事；text 的收集由
+ * collectSummaryFromToolCalls 统一做，这里只回确认，避免双收集）。schema：agent-tools.ts
+ * 的 write_summary 定义（参数 text ≤500 字）。
+ */
+function collectCombatSummary(args: Record<string, any>): ToolResult {
+  const text = typeof args.text === 'string' ? args.text.trim() : '';
+  return { summary_collected: true, chars: text.length };
+}
+
+/**
+ * 终局摘要统一收集（T11，设计 2026-08-09 §2.2 write_summary 改造）：
+ * 扫描一次 chatWithTools 回合内执行过的工具调用，把 write_summary(text) 收集进
+ * combatSession.summary（追加合并：AI 可能分次补全）。args 形状与 toolCallToCommandSync
+ * 的解析口径一致（字符串 JSON 或对象）。空文本跳过（不写空值，保持「无摘要」语义）。
+ * 纯函数副作用仅 handle.summary 一处，导出不必要（仅 routeEnemyCommand 调用）。
+ */
+function collectSummaryFromToolCalls(
+  toolCalls: ReadonlyArray<{ name: string; arguments: unknown }>,
+  handle: CombatSessionHandle,
+): void {
+  for (const tc of toolCalls) {
+    if (tc.name !== 'write_summary') continue;
+    let args: Record<string, any> = {};
+    if (typeof tc.arguments === 'string') {
+      try {
+        args = JSON.parse(tc.arguments) as Record<string, any>;
+      } catch {
+        args = {};
+      }
+    } else if (tc.arguments && typeof tc.arguments === 'object') {
+      args = tc.arguments as Record<string, any>;
+    }
+    const text = typeof args.text === 'string' ? args.text.trim() : '';
+    if (text.length === 0) continue;
+    handle.summary = handle.summary ? `${handle.summary}\n${text}` : text;
+  }
 }
 
 /** 一次 v3 工具调用 → 内核 Command（toolExecutor） */
@@ -600,16 +1149,48 @@ function toolCallToCommandSync(
         cost: 'both',
         payload: {} as Record<string, never>,
       };
-    // write_summary 不产 Command（供 summary 收集）→ 占位 Choose 防卡死
-    case 'write_summary':
+    // submit_adjudication（设计 2026-08-09 §2.4 补执行端）：schema 有（agent-tools.ts:522）、
+    // 原本无 case → 落 default 静默 pass。翻译成 Adjudicate Command，由 reducer 消费
+    // Adjudicate 时走 evaluateAdjudication 内核实锤（六步边界验证，reducer.ts adjudicate()）。
+    // 字段翻译：schema 声明的 effectDescription/divinity/verifiableBounds/requestedRuleOverride/
+    // reason 照透传；schema 没声明的 requestId 给确定性默认（照 routeAdjudication 的 adj- 前缀）。
+    // verifiableBounds 是 AI 自由填的 object → 保守归一化：缺 targetLegal/invariantCompliant
+    // 给拒绝倾向默认（false / []），避免 evaluateAdjudication 解构 undefined 崩内核。
+    case 'submit_adjudication': {
+      const actorName = (args.actorName as string | undefined) ?? actorId;
+      const rawVb = (args.verifiableBounds ?? {}) as Record<string, unknown>;
+      const verifiableBounds: ProposedAdjudication['verifiableBounds'] = {
+        targetLegal: typeof rawVb.targetLegal === 'boolean' ? rawVb.targetLegal : false,
+        invariantCompliant: Array.isArray(rawVb.invariantCompliant)
+          ? (rawVb.invariantCompliant as ProposedAdjudication['verifiableBounds']['invariantCompliant'])
+          : [],
+      };
+      const nr = rawVb.numericalRange;
+      if (nr && typeof nr === 'object' && 'min' in nr && 'max' in nr) {
+        verifiableBounds.numericalRange = nr as { min: number; max: number };
+      }
       return {
         commandId: id,
         expectedRevision: revision,
-        kind: 'Choose',
-        actorId,
+        kind: 'Adjudicate',
+        actorId: actorName,
         cost: 'none',
-        payload: { choiceId: 'write_summary', option: 'summary' },
+        payload: {
+          requestId: `adj-${actorName}`,
+          adjudication: {
+            effectDescription: (args.effectDescription as string | undefined) ?? '',
+            divinity: (args.divinity as number | undefined) ?? 0,
+            verifiableBounds,
+            requestedRuleOverride: args.requestedRuleOverride as string | undefined,
+            reason: (args.reason as string | undefined) ?? '',
+          },
+        },
       };
+    }
+    // write_summary 不在此翻译（T11，设计 2026-08-09 §2.2）：它是收尾收集动作、不产
+    // Command —— 由 routeEnemyCommand 的 executor 分流到 collectCombatSummary（返回确认
+    // ToolResult），text 经 collectSummaryFromToolCalls 收集进 combatSession.summary。
+    // 落到这里（executor 分流遗漏 / 直捣调用）→ default 防御性 pass，不静默产出 Choose。
     default:
       return nextPassCommand(revision, actorId, 'attack');
   }
@@ -628,7 +1209,7 @@ function mapActionType(t: string): 'item' | 'move' | 'focus' | 'defend' {
   }
 }
 
-/** 从 chatWithTools 最终结果提取最后一条工具调用 → Command */
+/** 从 chatWithTools 最终结果提取最后一条**命令类**工具调用 → Command */
 function lastCommandFromResult(
   result: {
     toolCalls?: Array<{ name: string; arguments: unknown }>;
@@ -638,19 +1219,25 @@ function lastCommandFromResult(
   actorId: string,
 ): CombatCommand {
   const calls = result.toolCalls ?? [];
-  const last = calls[calls.length - 1];
-  if (!last) return nextPassCommand(revision, actorId, 'attack');
+  // 只认命令类工具结果（设计 2026-08-09 §2.2 决策 3C）：查询工具（get_*）返回的是数据、
+  // 不产 Command；write_summary（T11）是收尾收集动作、同样不产 Command。从末尾跳过这两类
+  // 调用、取最后一条命令类调用（AI 可能先查后动）；一条命令都没有（纯查询/纯 summary
+  // 收尾 / 无工具调用）→ 防御性 pass 推进（AI 未做决定）。
+  const lastCommandCall = [...calls]
+    .reverse()
+    .find((c) => !isCombatQueryTool(c.name) && c.name !== 'write_summary');
+  if (!lastCommandCall) return nextPassCommand(revision, actorId, 'attack');
   let args: Record<string, any> = {};
-  if (typeof last.arguments === 'string') {
+  if (typeof lastCommandCall.arguments === 'string') {
     try {
-      args = JSON.parse(last.arguments) as Record<string, any>;
+      args = JSON.parse(lastCommandCall.arguments) as Record<string, any>;
     } catch {
       args = {};
     }
-  } else if (last.arguments && typeof last.arguments === 'object') {
-    args = last.arguments as Record<string, any>;
+  } else if (lastCommandCall.arguments && typeof lastCommandCall.arguments === 'object') {
+    args = lastCommandCall.arguments as Record<string, any>;
   }
-  return toolCallToCommandSync(last.name, args, revision, actorId);
+  return toolCallToCommandSync(lastCommandCall.name, args, revision, actorId);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -703,9 +1290,15 @@ function supplyCommand(
   };
 }
 
-function emitEvents(opts: RunCombatV3Opts, events: readonly DomainEvent[]): void {
+function emitEvents(
+  opts: RunCombatV3Opts,
+  events: readonly DomainEvent[],
+  session: CombatSession,
+): void {
   if (opts.onCombatEvent && events.length > 0) {
-    for (const evt of projectToUi(events)) {
+    // T13：把当前单位字典投影进投影 A —— 首次 dispatch（含 CombatOpened）时补发
+    // v3_units_snapshot，前端面板拿到开局单位快照（设计 2026-08-09 §3.1）
+    for (const evt of projectToUi(events, { units: session.snapshot().units })) {
       opts.onCombatEvent(evt);
     }
   }
@@ -745,4 +1338,80 @@ function toPatches(
       value: Math.round(fpDelta),
     } as unknown as StatePatch,
   ];
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 终局落库回写（设计 2026-08-09 §2.6 方案 1：战斗后角色伤势持久化）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 终局单位 → 存档角色的覆写 StatePatch（T10，设计 2026-08-09 §2.6 方案 1）。
+ *
+ * 现状背景：v3 战斗全程纯内存，终局 toPatches 只落 FP，HP/MP/SP/状态不落库 →
+ * 战斗打完角色伤势不持久化。本函数把战斗结束时的单位资源/状态回写到存档角色。
+ *
+ * 规则（照 §2.6 定案）：
+ *  - 按 characterId（= unit.id）匹配存档角色（deps.characters）：先按 id、再按 name
+ *    （名字是逻辑键，铁律 1；生产 characterId = char.id，测试/回放 characterId = name）。
+ *  - 匹配到 → set_hp/set_mp/set_sp 覆写资源（走 StateManager 既有 op，handler 内
+ *    clamp 到 [0, 对应 max]，与 set_hp 语义一致）；statusEffects 差量同步：
+ *    终局集合逐个 add_status_effect（同名合并/刷新），初始有而终局无的补
+ *    remove_status_effect（覆写语义：战斗中移除的效果不残留存档）。
+ *  - 匹配不到（召唤物，无对应存档角色）→ **跳过**，不硬造角色。
+ *  - 全部走 StateManager 既有 op，不新增 op（ADR-21 唯一写入口，patch 形状照
+ *    state-manager 的 set_* / add_remove_status_effect 契约）。
+ *
+ * 纯函数，导出供测试直捣。铁律：不产 id（铁律 1）；不改账务字段以外的结构。
+ */
+export function buildUnitPersistPatches(
+  units: Readonly<Record<string, CombatUnitView>>,
+  characters: ReadonlyArray<Record<string, unknown>>,
+  participants: readonly CombatParticipant[],
+): StatePatch[] {
+  const patches: StatePatch[] = [];
+  for (const unit of Object.values(units)) {
+    const saved = findSavedCharacter(characters, unit);
+    if (!saved) continue; // 召唤物（无对应存档角色）→ 跳过，不硬造角色
+    const name = saved.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+
+    // 资源覆写（handler 内 clamp 到 [0, 对应 max]）
+    patches.push({ op: 'set_hp', target: `characters.${name}`, value: unit.hp });
+    patches.push({ op: 'set_mp', target: `characters.${name}`, value: unit.mp });
+    patches.push({ op: 'set_sp', target: `characters.${name}`, value: unit.sp });
+
+    // statusEffects 差量同步（覆写语义）：
+    // ① 初始有、终局无 → remove（战斗中移除的效果不残留存档）
+    const initialEffects = participants.find((p) => p.characterId === unit.id)?.statusEffects ?? [];
+    const finalNames = new Set(unit.statusEffects.map((fx) => fx.name));
+    for (const fx of initialEffects) {
+      if (!finalNames.has(fx.name)) {
+        patches.push({
+          op: 'remove_status_effect',
+          target: `characters.${name}`,
+          value: { name: fx.name },
+        });
+      }
+    }
+    // ② 终局有 → add（同名合并/刷新，照 add_status_effect 的既有叠加语义）
+    for (const fx of unit.statusEffects) {
+      patches.push({ op: 'add_status_effect', target: `characters.${name}`, value: fx });
+    }
+  }
+  return patches;
+}
+
+/**
+ * 按 characterId（= unit.id）在存档角色里找匹配（设计 2026-08-09 §2.6）。
+ * 生产路径 characterId = char.id（characterToCombatParticipant）；测试/回放路径
+ * characterId = name（名字是逻辑键，铁律 1）→ 先 id 后 name 双兜底。
+ */
+function findSavedCharacter(
+  characters: ReadonlyArray<Record<string, unknown>>,
+  unit: CombatUnitView,
+): Record<string, unknown> | undefined {
+  return (
+    characters.find((c) => c?.id === unit.id) ??
+    characters.find((c) => c?.name === unit.id || c?.name === unit.name)
+  );
 }

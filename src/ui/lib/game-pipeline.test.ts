@@ -44,7 +44,7 @@ vi.mock('@engine/database', () => ({
 }));
 
 // 工坊 P2 (D5): EJS 差量落库走 createStateManager(...).commitChatState —— 拦下来验载荷
-const { commitSpy, advanceTurnSpy, toastSpy } = vi.hoisted(() => ({
+const { commitSpy, advanceTurnSpy, toastSpy, createSnapshotSpy, runCombatV3Mock } = vi.hoisted(() => ({
   commitSpy: vi.fn(async () => ({
     success: true,
     patchesApplied: 0,
@@ -52,14 +52,23 @@ const { commitSpy, advanceTurnSpy, toastSpy } = vi.hoisted(() => ({
     errors: [] as string[],
   })),
   advanceTurnSpy: vi.fn(async () => {}),
+  createSnapshotSpy: vi.fn(async () => ({ id: 'snap-pre-combat', reason: 'pre-combat', turn: 0 }) as any),
   toastSpy: vi.fn(),
+  runCombatV3Mock: vi.fn(),
 }));
 
 vi.mock('@engine/state-manager', () => ({
   createStateManager: vi.fn(() => ({
     commitChatState: commitSpy,
     advanceTurn: advanceTurnSpy,
+    createSnapshot: createSnapshotSpy,
   })),
+}));
+
+// T16：handleCombatTriggerV3 的动态 import('@engine/combat-v3') 被替换为可编排的 fake ——
+// 断言 setCombatCoordinator 在 runCombatV3 **之前**挂好（玩家首决策挂起的根因修复）。
+vi.mock('@engine/combat-v3', () => ({
+  runCombatV3: runCombatV3Mock,
 }));
 
 vi.mock('../stores/ui-store', () => ({
@@ -1208,5 +1217,140 @@ describe('handleSceneImages — 三档分流', () => {
 
     await pipeline.handleSceneImages([{ type: 'scene_image' }]);
     expect((sceneImageStore.generate.mock.calls[0][0] as any).rating).toBe('sensitive');
+  });
+});
+
+// ===== T16：combat_v3 玩家输入桥时序 + pre-combat 快照 =====
+// 设计 2026-08-09 §3.5：handleCombatTriggerV3 必须在 `await runCombatV3(...)` **之前**
+// setCombatCoordinator —— 此前句柄在战斗结束后才挂，waitForCommand（玩家首决策）永远
+// 没人 resolve（T15 确认的「面板不弹」疑似根因）。顺带验证 pre-combat 快照在开战前打上。
+describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
+  /** 最小 player 角色桩（characterToCombatParticipant 消费的字段） */
+  function playerCharStub() {
+    return {
+      id: 'hero',
+      name: '理查德',
+      type: 'player',
+      tier: 1,
+      level: 1,
+      attributes: { str: 5, dex: 5, con: 5, int: 5, spi: 5 },
+      hp: 100,
+      maxHp: 100,
+      mp: 50,
+      maxMp: 50,
+      sp: 50,
+      maxSp: 50,
+      inventory: [],
+      skills: [],
+      statusEffects: [],
+    };
+  }
+
+  beforeEach(() => {
+    runCombatV3Mock.mockReset();
+    createSnapshotSpy.mockClear();
+  });
+
+  it('setCombatCoordinator 在 runCombatV3 之前挂好；战斗中句柄可完成 submit→waitForCommand 往返；pre-combat 快照已打', async () => {
+    // 句柄形状照 game-store 的 combatCoordinator（submit/abandon/waitForCommand/preSnapshotId/restart）
+    // 🔴 用 holder 对象而不是裸 let：直接 `coordinatorHandle = h` 会让 TS 的 CFA 把变量收窄
+    //    成回调参数的类型（甚至 never），属性访问跟着报错。
+    const holder: {
+      handle: {
+        submit?: (c: never) => Promise<void>;
+        waitForCommand?: () => Promise<never>;
+        preSnapshotId?: string | null;
+      } | null;
+    } = { handle: null };
+
+    const gameStore = makeGameStore({
+      characters: [playerCharStub()],
+      enterCombat: vi.fn(),
+      exitCombat: vi.fn(),
+      applyCombatEvent: vi.fn(),
+      updateAgentStatus: vi.fn(),
+      clearAgentStatus: vi.fn(),
+      setCombatCoordinator: vi.fn((h: unknown) => (holder.handle = h as never)),
+      addMessage: vi.fn(),
+      // totalTurns=3 → pre-combat 快照 turn 应为 3（照 advanceTurn 先例：已完成回合数 = 当前回合）
+      activeSave: { id: 's', metadata: { totalTurns: 3 } },
+    });
+    const pipeline = makePipeline(gameStore, {
+      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
+    });
+
+    // fake runCombatV3：断言时序（句柄已挂）+ 用句柄完成一次「等待 → 提交」往返
+    runCombatV3Mock.mockImplementation(async () => {
+      // 🔴 时序修复契约：战斗进行中 coordinator 句柄已在 store 上
+      expect(holder.handle).not.toBeNull();
+      // 模拟玩家回合：waitForCommand 挂起 → handle.submit 喂入 → resolve
+      const p = holder.handle!.waitForCommand!();
+      await holder.handle!.submit!({
+        commandId: 'ui-1',
+        expectedRevision: 0,
+        kind: 'PassAttack',
+        actorId: '甲',
+        cost: 'attack',
+        payload: {},
+      } as never);
+      await p;
+      return {
+        narrativeSummary: 'ok',
+        patches: [],
+        totalExp: 0,
+        totalFp: 0,
+        loot: [],
+        rounds: 1,
+        outcome: 'ally_win',
+      };
+    });
+
+    const result = await (pipeline as any).handleCombatTrigger(
+      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
+      '',
+    );
+
+    expect(result?.outcome).toBe('ally_win');
+    // 时序修复：句柄在 runCombatV3 之前已挂（fake 内部断言成立）
+    expect(gameStore.setCombatCoordinator).toHaveBeenCalled();
+    // pre-combat 快照：createSnapshot('pre-combat', 当前回合数)
+    expect(createSnapshotSpy).toHaveBeenCalledWith('pre-combat', 3);
+    expect(holder.handle?.preSnapshotId).toBe('snap-pre-combat');
+    // 终局后的清理仍在 runCombatV3 完成之后执行（顺序未被提前破坏）
+    expect(gameStore.exitCombat).toHaveBeenCalled();
+  });
+
+  it('无活跃存档回合数时 pre-combat 快照 turn 兜底 0（不阻塞开战）', async () => {
+    const gameStore = makeGameStore({
+      characters: [playerCharStub()],
+      enterCombat: vi.fn(),
+      exitCombat: vi.fn(),
+      applyCombatEvent: vi.fn(),
+      updateAgentStatus: vi.fn(),
+      clearAgentStatus: vi.fn(),
+      setCombatCoordinator: vi.fn(),
+      addMessage: vi.fn(),
+      activeSave: null, // activeSave 缺省 → 回合数兜底 0
+    });
+    const pipeline = makePipeline(gameStore, {
+      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
+    });
+    runCombatV3Mock.mockResolvedValue({
+      narrativeSummary: 'ok',
+      patches: [],
+      totalExp: 0,
+      totalFp: 0,
+      loot: [],
+      rounds: 1,
+      outcome: 'ally_win',
+    });
+
+    const result = await (pipeline as any).handleCombatTrigger(
+      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
+      '',
+    );
+
+    expect(result?.outcome).toBe('ally_win');
+    expect(createSnapshotSpy).toHaveBeenCalledWith('pre-combat', 0);
   });
 });

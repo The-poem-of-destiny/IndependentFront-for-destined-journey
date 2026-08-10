@@ -223,6 +223,100 @@ describe('复用工具回归保护', () => {
     expect(r.name).toBe('同一个键');
   });
 
+  it('get_character 返回 skills 与已装备物品（combat session revamp §2.2）', async () => {
+    const char = makeCharacter({
+      id: 'uuid_skills',
+      name: '剑士',
+      skills: [
+        {
+          name: '烈焰斩',
+          description: '以火焰强化武器挥出斩击。',
+          type: 'active',
+          cost: { type: 'MP', amount: 10 },
+          cooldown: 0,
+          maxCooldown: 3,
+          effects: { 灼烧: '命中后附加灼烧' },
+          skillPower: 40,
+          relevantAttribute: 'str',
+        },
+        { name: '战斗直觉', description: '预判敌人动作。', type: 'passive' },
+      ],
+      inventory: [
+        {
+          name: '精铁长剑',
+          quantity: 1,
+          equippedSlot: '武器',
+          rarity: '稀有',
+          effects: { 锋利: '伤害+5' },
+        },
+        { name: '皮甲', quantity: 1, equippedSlot: '身体', rarity: '优良' },
+        { name: '治疗药水', quantity: 3, type: '消耗品' }, // 躺背包 → 不出现在 equipment
+      ],
+    });
+
+    const r = await executeToolCall('get_character', { characterId: '剑士' }, makeCtx([char]));
+
+    const skills = r.skills as Array<{ name: string; type: string }>;
+    expect(skills.map((s) => s.name)).toEqual(['烈焰斩', '战斗直觉']);
+    expect(skills[0]).toMatchObject({ type: 'active', cost: { type: 'MP', amount: 10 } });
+
+    const equipment = r.equipment as Array<{ name: string; slot: string }>;
+    expect(equipment).toHaveLength(2);
+    expect(equipment[0]).toMatchObject({ name: '精铁长剑', slot: '武器', rarity: '稀有' });
+    expect(equipment[1]).toMatchObject({ name: '皮甲', slot: '身体' });
+  });
+
+  it('get_unit_detail 返回五维+技能+装备的聚合形状（combat session revamp §2.2）', async () => {
+    const char = makeCharacter({
+      id: 'uuid_unit',
+      name: '敌方首领',
+      attributes: { str: 16, dex: 12, con: 14, int: 8, spi: 10 },
+      skills: [
+        {
+          name: '裂地斩',
+          type: 'active',
+          description: '以巨力砸向地面。',
+          cost: { type: 'MP', amount: 8 },
+          cooldown: 0,
+          maxCooldown: 2,
+          effects: { 眩晕: '命中附加眩晕' },
+          skillPower: 50,
+          relevantAttribute: 'str',
+        },
+        { name: '钢铁皮肤', description: '硬化表皮。', type: 'passive' },
+      ],
+      inventory: [
+        { name: '巨剑', quantity: 1, equippedSlot: '武器', rarity: '史诗', effects: { 锋利: '伤害+8' } },
+        { name: '重甲', quantity: 1, equippedSlot: '身体', rarity: '稀有' },
+        { name: '治疗药水', quantity: 2, type: '消耗品' }, // 躺背包 → 不出现在 equipment
+      ],
+    });
+
+    const r = await executeToolCall('get_unit_detail', { characterId: '敌方首领' }, makeCtx([char]));
+
+    expect(r.found).toBe(true);
+    // 五维
+    expect(r.attributes).toEqual({ str: 16, dex: 12, con: 14, int: 8, spi: 10 });
+    // 技能
+    const skills = r.skills as Array<{ name: string; type: string }>;
+    expect(skills.map((s) => s.name)).toEqual(['裂地斩', '钢铁皮肤']);
+    expect(skills[0]).toMatchObject({
+      type: 'active',
+      cost: { type: 'MP', amount: 8 },
+      skillPower: 50,
+    });
+    // 装备（只含已装备，躺背包不出现）
+    const equipment = r.equipment as Array<{ name: string; slot: string }>;
+    expect(equipment.map((e) => e.name)).toEqual(['巨剑', '重甲']);
+    expect(equipment[0]).toMatchObject({ slot: '武器', rarity: '史诗' });
+  });
+
+  it('get_unit_detail 未命中返回 found:false', async () => {
+    const r = await executeToolCall('get_unit_detail', { characterId: '不存在的单位' }, makeCtx([]));
+    expect(r.found).toBe(false);
+    expect(r.characterId).toBe('不存在的单位');
+  });
+
   it('get_hp_percent 按角色名寻址', async () => {
     const char = makeCharacter({ id: 'uuid_hp', name: '测试员', hp: 30, maxHp: 100 });
     const ctx = makeCtx([char]);

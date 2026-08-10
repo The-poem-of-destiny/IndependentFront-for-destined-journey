@@ -8,11 +8,10 @@ const game = useGameStore();
   <div class="combat-header">
     <div class="combat-title">
       <i class="fa-solid fa-hand-fist combat-title-icon" />
-      <span class="combat-type">{{ game.activeCombat?.combatType ?? '战斗' }}</span>
-      <span class="combat-round">第 {{ game.activeCombat?.round ?? 1 }} 回合</span>
-      <span v-if="game.activeCombat?.environment" class="combat-env"
-        >· {{ game.activeCombat.environment }}</span
-      >
+      <!-- v3 CombatView 无 combatType / environment 字段（开战 bundle 不投影），
+           类型固定显示「战斗」，回合读 v3ActiveCombat.round -->
+      <span class="combat-type">战斗</span>
+      <span class="combat-round">第 {{ game.v3ActiveCombat?.round ?? 1 }} 回合</span>
     </div>
     <div class="combat-status">
       <span v-if="game.combatAwaitingInput" class="combat-your-turn">轮到你了</span>
@@ -42,8 +41,7 @@ const game = useGameStore();
   color: var(--theme-primary);
   font-size: 0.875rem;
 }
-.combat-round,
-.combat-env {
+.combat-round {
   font-size: 0.75rem;
   color: var(--theme-text-muted);
   font-family: system-ui, sans-serif;

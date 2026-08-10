@@ -106,13 +106,15 @@ export const useGameStore = defineStore('game', () => {
   } | null>(null);
   /** 当前行动者 characterId（turn_started 事件更新，单位卡片高亮用） */
   const combatCurrentUnitId = ref<string | null>(null);
-  /** runner 注册的玩家文本提交器（pipeline 通过 registerSubmitter 挂入；runner emit 时持有 pendingResolver） */
-  const combatSubmitter = ref<((text: string) => void) | null>(null);
-  /** 🆕 v3：Coordinator 句柄（submitCommand / abandon），供前端 Command 路由与放弃（C4） */
+  /** 🆕 v3：Coordinator 句柄（submitCommand / abandon / 重开），供前端 Command 路由与放弃（C4）
+   *  T16 §3.5：+preSnapshotId（pre-combat 快照，重开战斗 restoreSnapshot 用）与
+   *  +restart（重开战斗回调 —— pipeline 持有 combat marker，重触发归它）。 */
   const combatCoordinator = ref<{
     submit?: (cmd: CombatCommand) => Promise<void>;
     abandon?: () => void;
     waitForCommand?: () => Promise<CombatCommand>;
+    preSnapshotId?: string | null;
+    restart?: () => Promise<void>;
   } | null>(null);
 
   /** 战斗开始：清空面板状态（activeCombat 由 combat_started 事件填；v3 清 v3 ref） */
@@ -120,7 +122,6 @@ export const useGameStore = defineStore('game', () => {
     combatLog.value = [];
     combatAwaitingInput.value = null;
     combatCurrentUnitId.value = null;
-    combatSubmitter.value = null;
     v3ActiveCombat.value = null;
   }
 
@@ -156,10 +157,17 @@ export const useGameStore = defineStore('game', () => {
           combatId: evt.combatId,
           initiativeOrder: evt.unitNames,
           currentTurnIndex: 0,
-          units: {},
+          // T13：载荷里带 units（其他 emit 源的兼容路径）就一并填，不再留空字典
+          units: evt.units ? { ...evt.units } : {},
           resourceSnapshots: { FP: 0 },
         };
         combatLog.value.push({ id, kind: 'round_divider', round: evt.round });
+        break;
+      // 🆕 T13（设计 2026-08-09 §3.1）：开局单位字典整体快照 → 填充 v3ActiveCombat.units
+      case 'v3_units_snapshot':
+        if (v3ActiveCombat.value) {
+          v3ActiveCombat.value = { ...v3ActiveCombat.value, units: { ...evt.units } };
+        }
         break;
       case 'v3_round_started':
         combatLog.value.push({ id, kind: 'round_divider', round: evt.round });
@@ -206,11 +214,6 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  /** pipeline 收到 runner registerSubmitter → 挂入 store */
-  function setCombatSubmitter(submit: (text: string) => void) {
-    combatSubmitter.value = submit;
-  }
-
   /** v3：controller 挂 Coordinator 句柄（game-pipeline 在 coordinator 启动时挂） */
   function setCombatCoordinator(handle: unknown) {
     combatCoordinator.value = handle as never;
@@ -242,13 +245,47 @@ export const useGameStore = defineStore('game', () => {
     if (c?.abandon) c.abandon();
   }
 
-  /** 玩家发送战斗指令（CombatActionBar 调用）→ 转发 runner → resolve pendingResolver */
-  function submitCombatInput(text: string) {
-    const s = combatSubmitter.value;
-    if (s) {
-      s(text);
-      combatAwaitingInput.value = null;
+  /** v3：跳过战斗（设计 2026-08-09 §3.5）——abandonCombat 的包装。
+   *  战斗被放弃后：session 丢弃、FP 不落库（coordinator abandon 路径）、面板关闭
+   *  （v3ActiveCombat=null → isInCombat=false）。确认弹窗文案由组件负责。 */
+  function skipCombat() {
+    abandonCombat();
+  }
+
+  /** v3：重开战斗（设计 2026-08-09 §3.5）——abandonCombat() → restoreSnapshot(pre-combat
+   *  快照) → 重新触发 combat_trigger。
+   *
+   *  流程：① 放弃当前战斗（面板关闭、不落库）② 恢复开战前快照（角色/对话/状态/变量
+   *  整表覆写回开战前，HP 等天然一致）③ 调 coordinator 句柄的 restart 回调重触发 ——
+   *  pipeline 持有 combat marker（本 store 接触不到 pipeline），经它重新走
+   *  handleCombatTriggerV3 重建战斗。确认弹窗文案由组件负责。 */
+  async function restartCombat(): Promise<{ ok: boolean; error?: string }> {
+    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' };
+    const coordinator = combatCoordinator.value;
+    const preSnapshotId = coordinator?.preSnapshotId ?? null;
+    const restartFn = coordinator?.restart;
+    abandonCombat(); // ① 丢弃 session → 面板关闭 → 不落库
+    if (!preSnapshotId) return { ok: false, error: '没有 pre-combat 快照，无法重开' };
+
+    // ② 恢复开战前快照（照 rollbackOneTurn 的恢复姿势：整表替换角色内存态 + 同步 + 对齐）
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.restoreSnapshot(preSnapshotId);
+    if (!result.success) return { ok: false, error: result.errors.join('; ') || '恢复快照失败' };
+    characters.value = (await getCharacters(activeSaveId.value)) as CharacterState[];
+    await refreshFromDb();
+    await restoreMessages();
+    const lastMsg = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant').pop();
+    turnCounter = lastMsg?.turn ?? 0;
+
+    // ③ 重触发 combat_trigger（pipeline 持 marker；异常不阻断恢复本身）
+    if (restartFn) {
+      try {
+        await restartFn();
+      } catch (err) {
+        console.warn('[GameStore] 重开战斗重触发失败:', err);
+      }
     }
+    return { ok: true };
   }
 
   /** 战斗结束：清空面板（activeCombat=null → isInCombat=false） */
@@ -257,7 +294,6 @@ export const useGameStore = defineStore('game', () => {
     combatLog.value = [];
     combatAwaitingInput.value = null;
     combatCurrentUnitId.value = null;
-    combatSubmitter.value = null;
     combatCoordinator.value = null;
     v3ActiveCombat.value = null;
   }
@@ -906,11 +942,11 @@ export const useGameStore = defineStore('game', () => {
     combatCoordinator,
     enterCombat,
     applyCombatEvent,
-    setCombatSubmitter,
     setCombatCoordinator,
     submitCombatCommand,
     abandonCombat,
-    submitCombatInput,
+    skipCombat,
+    restartCombat,
     exitCombat,
     saveProfile,
     fp,

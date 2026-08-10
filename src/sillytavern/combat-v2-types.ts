@@ -23,7 +23,7 @@ import type {
   CombatType,
   ReadonlyHookSet,
 } from './types';
-import type { EffectAutomaton } from './combat-v3/types';
+import type { CombatUnitView, EffectAutomaton } from './combat-v3/types';
 import type { EventBus } from './game-event';
 
 // ========== CombatClient / CombatClientResult（原出自 combat-runner.ts） ==========
@@ -32,7 +32,17 @@ import type { EventBus } from './game-event';
 export interface CombatClient {
   chatWithTools?: (
     request: {
-      messages: Array<{ role: string; content: string }>;
+      /**
+       * 完整对话历史（决策 1A 持久会话）：除 system/user/assistant 正文外还承载工具往返消息
+       * （assistant.tool_calls + tool 结果）。形状对齐 agent-client ChatRequest.messages。
+       */
+      messages: Array<{
+        role: string;
+        content: string | null;
+        tool_calls?: unknown[];
+        tool_call_id?: string;
+        name?: string;
+      }>;
       tools?: unknown;
       tool_choice?: string;
     },
@@ -49,6 +59,12 @@ export interface CombatClientResult {
   cacheHit: boolean;
   duration: number;
   error?: string;
+  /**
+   * 🆕 决策 1A 持久会话：chatWithTools 回合内的工具往返历史（name/arguments/result 按执行序）。
+   * 生产来自 agent-client 的 AgentResult.toolCalls；coordinator 用它把工具往返回流进
+   * 持久消息数组（查询结果随之保留进历史）。仅 chatWithTools 路径填充。
+   */
+  toolCalls?: Array<{ name: string; arguments: unknown; result?: unknown }>;
 }
 
 /**
@@ -68,7 +84,16 @@ export type CombatEvent =
   // 🆕 v3 扩展变体（M2，投影 A projectToUi 输出）——v2 仍发老变体，这些只在 v3 路径出现。
   //    前端组件按需消费，不强制全改；game-store.applyCombatEvent 对老变体的 v2 分支保留。
   // ─────────────────────────────────────────────────────────────
-  | { type: 'v3_combat_started'; combatId: string; round: number; unitNames: string[] }
+  | {
+      type: 'v3_combat_started';
+      combatId: string;
+      round: number;
+      unitNames: string[];
+      /** 可选：开战单位字典（T13；主通道是独立的 v3_units_snapshot，这里留兼容载荷） */
+      units?: Record<string, CombatUnitView>;
+    }
+  /** 🆕 T13（设计 2026-08-09 §3.1）：开局单位字典整体快照 —— CombatOpened 投影时补发，让面板有数据 */
+  | { type: 'v3_units_snapshot'; units: Record<string, CombatUnitView> }
   | { type: 'v3_turn_started'; unit: string; unitId: string; round: number }
   | { type: 'v3_turn_ended'; unit: string; unitId: string; round: number }
   | { type: 'v3_round_started'; round: number }

@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { projectToUi } from './projection-ui';
-import type { DomainEvent } from './types';
+import type { CombatUnitView, DomainEvent } from './types';
 
 /** 覆盖 29 个 DomainEvent 变体的样本集（M1 已有的 + M2 扩展的结构占位） */
 const ALL_EVENTS: DomainEvent[] = [
@@ -100,6 +100,60 @@ describe('映射正确性', () => {
       unitNames: ['甲'],
     });
     expect(out[1]).toEqual({ type: 'v3_round_started', round: 3 });
+  });
+
+  it('T13：CombatOpened 且传 units → 补发 v3_units_snapshot（紧随 v3_combat_started，内容完整）', () => {
+    const units: Record<string, CombatUnitView> = {
+      甲: {
+        id: '甲',
+        name: '甲',
+        side: 'player',
+        tier: 1,
+        hp: 100,
+        maxHp: 100,
+        mp: 50,
+        maxMp: 50,
+        sp: 50,
+        maxSp: 50,
+        attacksRemaining: 1,
+        actionsRemaining: 1,
+        canAct: true,
+        morale: 'steady',
+        statusEffects: [],
+      },
+      乙: {
+        id: '乙',
+        name: '乙',
+        side: 'enemy',
+        tier: 3,
+        hp: 320,
+        maxHp: 320,
+        mp: 0,
+        maxMp: 0,
+        sp: 0,
+        maxSp: 0,
+        attacksRemaining: 1,
+        actionsRemaining: 1,
+        canAct: true,
+        morale: 'steady',
+        statusEffects: [],
+      },
+    };
+    const out = projectToUi(
+      [{ kind: 'CombatOpened', combatId: 'c', combatType: '标准', unitIds: ['甲', '乙'], bundleHash: 'h' }],
+      { units },
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0].type).toBe('v3_combat_started'); // 快照必须紧随其后（store 先建对象再填 units）
+    expect(out[1]).toEqual({ type: 'v3_units_snapshot', units });
+  });
+
+  it('T13：不传 units → 不产 v3_units_snapshot（与 T13 前逐字节一致，A2-6 一一对应保持）', () => {
+    const out = projectToUi([
+      { kind: 'CombatOpened', combatId: 'c', combatType: '标准', unitIds: ['甲'], bundleHash: 'h' },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe('v3_combat_started');
   });
 
   it('DamageApplied → v3_action（合并成动作卡片载荷）', () => {

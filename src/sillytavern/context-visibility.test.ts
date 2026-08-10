@@ -283,7 +283,7 @@ describe('buildZoneContext', () => {
       ],
     });
     const zones = buildZoneContext(ctx);
-    const names = zones.npc.content.characters.map((c) => c.name);
+    const names = zones.npc.content.characters.map((c: CharacterState) => c.name);
     expect(names).toContain('凯恩'); // player 恒在场
     expect(names).toContain('在场的老铁匠');
     expect(names).not.toContain('离队的老约翰'); // present=false 被过滤
