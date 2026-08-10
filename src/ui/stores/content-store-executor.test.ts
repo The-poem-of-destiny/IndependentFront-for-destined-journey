@@ -364,6 +364,39 @@ describe('content-store 执行器 —— 3. 卸载（快照回滚）', () => {
     const second = await c.uninstallPack({ confirmEdits: true });
     expect(second.ok).toBe(true);
   });
+
+  // 🔴 COR-07（2026-08-09 审查）：装/卸互斥。两条路径失败时都走 rollbackTo(snapshot)
+  // → importAllData 的**整库还原**，所以并发跑一次就可能把另一次已提交的操作连同存档
+  // 一起退回去。而两个 UI 入口（DataSection / ContentStatusBanner）各有各的本地 busy
+  // ref，互相看不见 —— store 这道锁是唯一拦得住的地方。
+  it('🔴 装包进行中再发一次装包 → busy（互斥在第一个 await 之前就已置位）', async () => {
+    const c = useContentStore();
+    const first = c.installPack(makePack()); // 刻意不 await
+    const second = await c.installPack(makePack());
+
+    expect(second.ok).toBe(false);
+    expect(second.status).toBe('busy');
+    expect((await first).ok).toBe(true);
+  });
+
+  it('🔴 装包进行中发卸载 → busy（此前 uninstallPack 只写不读这把锁）', async () => {
+    const c = useContentStore();
+    await c.installPack(makePack());
+
+    const installing = c.installPack(makePack(), { confirmConflicts: true }); // 不 await
+    const uninstalling = await c.uninstallPack({ confirmEdits: true });
+
+    expect(uninstalling.ok).toBe(false);
+    expect(uninstalling.status).toBe('busy');
+    await installing;
+  });
+
+  it('锁在每条出口都放开：装包完成后仍可卸载', async () => {
+    const c = useContentStore();
+    await c.installPack(makePack());
+    const outcome = await c.uninstallPack({ confirmEdits: true });
+    expect(outcome.status).toBe('uninstalled');
+  });
 });
 
 describe('content-store 执行器 —— 4. 占位建档 → 装包 → 存档存活（D43）', () => {

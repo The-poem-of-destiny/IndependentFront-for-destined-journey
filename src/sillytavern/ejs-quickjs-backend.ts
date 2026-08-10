@@ -365,6 +365,16 @@ export class QuickJsBackend implements EjsBackend {
 
     try {
       this.installCapabilities(context, ctx, rngRef, capsRef);
+      // 🔴 COR-08（2026-08-09 审查）：只读轴 `stats` 必须**每条目重建**。
+      // installCapabilities 每趟只编组一次，而 runEntry 的 restore() 只回滚 vars 与 _local
+      // —— 于是条目 A 的 `stats.主角.背包.push('污染')` 会漏给同一趟里后面每一条，
+      // 连 A 自己抛错被回滚、原文注入的情况都不例外（对只读轴的写活了下来，进了提示词）。
+      // Legacy 后端相反（`deepClone(ctx.stats)` 每条目一份），两个后端因此给出不同答案
+      // 且**双方都报 ok:true**。后果不是被攻击，是 AI 收到一份伪造的上下文且无从复现
+      // —— 换个后端就好了、改一下条目顺序也可能就好了。
+      // 编组走宿主而不是 guest 里存一份 JSON：guest 侧那份能被条目自己改掉。
+      // 走到这里说明 installCapabilities 没抛，即 stats 一定可序列化；`?? '{}'` 只是兜底。
+      const statsJson = toGuestJson(ctx.stats ?? {}) ?? '{}';
 
       for (const entry of entries) {
         // pass 天花板：剩余条目一律回退，不再进 guest
@@ -377,7 +387,7 @@ export class QuickJsBackend implements EjsBackend {
           });
           continue;
         }
-        out.push(this.runEntry(runtime, context, entry, ctx, rngRef, capsRef));
+        out.push(this.runEntry(runtime, context, entry, ctx, rngRef, capsRef, statsJson));
       }
 
       // 草稿整体回传（pass 内一直留在 guest，到这里才过境一次）
@@ -585,6 +595,9 @@ globalThis.engine = __ejsData.engine;`,
    * 3. **异步条目照跑**。body 统一包进 async IIFE 并 pump 微任务队列；
    *    曾经直接塞进同步 IIFE，`await` 一律 `SyntaxError`（真机语料 3 条）。
    * 4. **interrupt 全程装着**（含快照与回滚）。见下方 deadline 那段的说明。
+   * 5. **`stats` 逐条目重建**（COR-08）。只读轴是活的客体对象，没 freeze 也没 proxy；
+   *    整趟只编组一次时，一条目的手滑赋值会静默污染其后所有条目 —— 而 Legacy 每条目
+   *    深拷贝一份。两个后端因此对同一份语料给出不同答案且都报 `ok: true`。
    */
   private runEntry(
     runtime: QuickJsRuntimeLike,
@@ -593,6 +606,7 @@ globalThis.engine = __ejsData.engine;`,
     ctx: EjsEvalContext,
     rngRef: { current: EjsRng },
     capsRef: { current: EjsCapabilities },
+    statsJson: string,
   ): EjsEntryOutcome {
     const source = entry.content ?? '';
     // 不变式 1：与 Legacy 同口径的逐条目种子
@@ -607,6 +621,11 @@ globalThis.engine = __ejsData.engine;`,
     // interrupt 一次开口的机会都没有 —— 「可中断」这个卖点在那两个窗口里整个是假的。
     const deadline = Date.now() + this.budget.entryTimeoutMs;
     runtime.setInterruptHandler(() => Date.now() > deadline);
+
+    // 不变式 5（COR-08）：只读轴 `stats` 每条目从宿主重建，条目之间零泄漏。
+    // 放在 interrupt 装好**之后** —— 这一句同样在跑 guest 代码（对象字面量求值），
+    // 与快照那句同理，不该开一个没有中断的窗口。
+    this.evalVoid(context, `globalThis.stats = ${statsJson};`);
 
     // 不变式 2：guest 侧 vars + 宿主侧 _local 双快照（`local.*` 走桥接直写宿主，不在 guest 树里）
     const localSnapshot = toGuestJson(ctx.vars?.[LOCAL_ROOT] ?? null);

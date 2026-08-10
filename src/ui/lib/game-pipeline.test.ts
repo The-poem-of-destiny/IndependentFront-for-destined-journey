@@ -95,6 +95,9 @@ import { preCheckPlot, postCheckPlot } from '@engine/plot-engine';
 
 function makeGameStore(overrides: Record<string, any> = {}) {
   return {
+    // 🔴 必须与 makePipeline 的 saveId 一致：COR-02 之后管线拿它判「本轮结果还属不属于
+    // 当前打开的存档」，对不上就丢弃正文 —— 桩里漏了这一格，7 条既有用例会一起变红。
+    activeSaveId: 'save-test',
     messages: [],
     characters: [],
     saveProfile: null,
@@ -585,6 +588,58 @@ describe('handleAgentResult — story 正文投影', () => {
       ),
     ).rejects.toThrow('no player-visible narrative');
     expect(addMessage).not.toHaveBeenCalled();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// COR-02（2026-08-09 审查）：孤儿回合不许写进后来打开的那个存档
+// ══════════════════════════════════════════════════════════════════════════
+describe('COR-02：存档归属闸', () => {
+  // 失败场景：存档 A 生成中（story 在飞，约 20 秒）→ 玩家点「← 首页」→ 打开存档 B。
+  // GamePage 无 KeepAlive，卸载即销毁；但在飞的 run() 仍会走到 handleAgentResult →
+  // game.addMessage(...)，而 game-store 是从 **store** 取存档号的
+  // （`saveId: activeSaveId.value`）—— 为 A 生成的正文于是落进 B 并永久留在 B 的历史里。
+
+  it('🔴 store 已切到别的存档 → 本轮正文被丢弃，不写进那个存档', async () => {
+    const addMessage = vi.fn((content: string) => ({ id: 'm1', turn: 1, content }));
+    const pipeline = makePipeline({ addMessage, activeSaveId: 'another-save' });
+
+    await (pipeline as any).handleAgentResult(
+      makeResult('story', '<maintext>为存档 A 生成的正文</maintext>'),
+    );
+
+    expect(addMessage).not.toHaveBeenCalled();
+  });
+
+  it('🔴 被丢弃时不留下 lastStoryMessage —— 插画锚点不能指向一条不存在的消息', async () => {
+    const pipeline = makePipeline({
+      addMessage: vi.fn((content: string) => ({ id: 'm1', turn: 1, content })),
+      activeSaveId: 'another-save',
+    });
+
+    await (pipeline as any).handleAgentResult(makeResult('story', '<maintext>正文</maintext>'));
+
+    expect((pipeline as any).lastStoryMessage).toBeNull();
+  });
+
+  it('存档没变时照常写入（闸门不误伤正常回合）', async () => {
+    const addMessage = vi.fn((content: string) => ({ id: 'm1', turn: 1, content }));
+    const pipeline = makePipeline({ addMessage }); // activeSaveId 默认 = 'save-test'
+
+    await (pipeline as any).handleAgentResult(makeResult('story', '<maintext>正文</maintext>'));
+
+    expect(addMessage).toHaveBeenCalledWith('正文', 'assistant');
+    expect((pipeline as any).lastStoryMessage).toMatchObject({ id: 'm1' });
+  });
+
+  it('存档已切走时不替新存档跑 refreshFromDb', async () => {
+    const refreshFromDb = vi.fn(async () => {});
+    const pipeline = makePipeline({ refreshFromDb, activeSaveId: 'another-save' });
+
+    // run() 的 finally 一定会执行；这里让管线在早期就失败，只验回读没被触发
+    await pipeline.run('输入');
+
+    expect(refreshFromDb).not.toHaveBeenCalled();
   });
 });
 

@@ -304,7 +304,7 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
         continue;
       }
       const cmds = await decideForUnit(
-        firstInitiative(session),
+        currentInitiative(session),
         session,
         routingDeps,
         opts.saveId,
@@ -355,15 +355,17 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
     }
 
     // 无 requiredInput 且未终局 → 唯一真实场景就是 SupplyDice 刚喂完（phase 仍 CombatOpen，
-    // kernel 未自动推进）。此时按当前先攻首位单位决定其第一个动作，dispatch 时 kernel 会
+    // kernel 未自动推进）。此时按**内核当前行动单位**决定其下一个动作，dispatch 时 kernel 会
     // auto 推进 CombatOpen→…→SlotConsume 并消费它。队列优先（同 requiredInput 的兜底）。
+    // 🔴 COR-12：这里曾写「先攻首位」，续骰由回合中的非首位单位触发时会带着错误行动者
+    // 往下走 → INVALID_PHASE → 整场战斗以空补丁放弃。见 currentInitiative 的注释。
     if (!trans.terminal) {
       if (pendingCommands.length > 0) {
         currentCommand = nextPending(pendingCommands, session);
         continue;
       }
       const cmds = await decideForUnit(
-        firstInitiative(session),
+        currentInitiative(session),
         session,
         routingDeps,
         opts.saveId,
@@ -516,9 +518,25 @@ interface RouteCtx {
 /** 骰子供应回调类型（闭包传入） */
 type DiceSupplier = () => { outputId: string; dice: number[] };
 
-/** 先攻首位单位 id（供初值 / rejection 兜底用） */
-function firstInitiative(session: CombatSession): string {
-  return session.snapshot().initiativeOrder[0] ?? '';
+/**
+ * **内核当前正在行动的单位** id（供续骰恢复 / rejection 兜底用）。
+ *
+ * 🔴 COR-13 姊妹条 COR-12（2026-08-09 审查）：这里此前返回的是 `initiativeOrder[0]`
+ * ——「先攻首位」而不是「当前行动者」。SupplyDice 续骰**由谁触发就该恢复给谁**
+ * （attackHit / intentCheck / statusContest / procCheck 任一通道耗尽都会续骰），
+ * 而回合中触发它的多半不是首位。带着错误行动者的下一条命令会被 `consumeSlot`
+ * 以 `INVALID_PHASE` 拒绝，coordinator 随即跳出、以空补丁**放弃整场战斗**。
+ *
+ * 经 Initiative 阶段恢复的续骰不受影响（那一步会把 currentTurnIndex 归零），
+ * 所以两者在开局是同一个值 —— 这正是它能一直藏着的原因。
+ * 索引钳制与 `phases/unit-turn.ts` 的 `currentUnitId` 一致（那边吃 CombatState，
+ * 这边只拿得到 CombatView，故不能直接复用）。
+ */
+export function currentInitiative(session: CombatSession): string {
+  const view = session.snapshot();
+  const order = view.initiativeOrder;
+  if (order.length === 0) return '';
+  return order[Math.min(view.currentTurnIndex, order.length - 1)] ?? '';
 }
 
 /**

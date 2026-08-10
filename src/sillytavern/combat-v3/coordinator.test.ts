@@ -15,6 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildUnitPersistPatches,
+  currentInitiative,
   resolveUnitIdByName,
   runCombatV3,
   UnsupportedInM2,
@@ -128,6 +129,32 @@ function atkTurn(): CombatCommand[] {
     },
   ];
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// COR-12（2026-08-09 审查）：续骰 / rejection 恢复必须指向**内核当前行动单位**
+// ══════════════════════════════════════════════════════════════════════════
+describe('COR-12：恢复用的是当前行动单位，不是先攻首位', () => {
+  /** 只喂 initiativeOrder + currentTurnIndex 的最小 session 替身 */
+  const sessionWith = (order: string[], idx: number) =>
+    ({ snapshot: () => ({ initiativeOrder: order, currentTurnIndex: idx }) }) as never;
+
+  it('🔴 回合中（游标非 0）返回当前单位 —— 修复前返回 initiativeOrder[0]', () => {
+    // 这正是那条 bug 的形状：乙 正在行动时骰子耗尽 → 续骰 → 恢复却问 甲，
+    // 于是下一条命令带着错误行动者，consumeSlot 以 INVALID_PHASE 拒绝，
+    // coordinator 跳出并以空补丁放弃整场战斗。
+    expect(currentInitiative(sessionWith(['甲', '乙', '丙'], 1))).toBe('乙');
+    expect(currentInitiative(sessionWith(['甲', '乙', '丙'], 2))).toBe('丙');
+  });
+
+  it('游标为 0 时与旧行为一致（Initiative 阶段恢复会归零 —— 这条 bug 藏这么久的原因）', () => {
+    expect(currentInitiative(sessionWith(['甲', '乙'], 0))).toBe('甲');
+  });
+
+  it('游标越界钳到末位、空序列返回空串（对齐 phases/unit-turn 的 currentUnitId）', () => {
+    expect(currentInitiative(sessionWith(['甲', '乙'], 9))).toBe('乙');
+    expect(currentInitiative(sessionWith([], 0))).toBe('');
+  });
+});
 
 describe('A2-1：终局一次 commitChatState', () => {
   it('甲攻击乙 → 乙死亡 → hp_zero → settle → 只 commit 一次', async () => {

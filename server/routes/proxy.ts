@@ -46,23 +46,39 @@ export function stripHopHeaders(src: Headers): Record<string, string> {
  */
 export async function forward(c: Context, suffix: string): Promise<Response> {
   const baseRaw = c.req.header('X-Target-Base-URL');
-  const base = baseRaw?.trim().replace(/\/+$/, '');
-  if (!base) {
+  const trimmed = baseRaw?.trim();
+  if (!trimmed) {
     return c.json({ error: "missing 'X-Target-Base-URL' header" }, 400);
   }
-  if (!/^https?:\/\//i.test(base)) {
+  if (!/^https?:\/\//i.test(trimmed)) {
     return c.json({ error: 'invalid X-Target-Base-URL (must start with http/https)' }, 400);
   }
 
+  // 🔒 SEC-09（2026-08-09 审查实测）：base 必须先规范化掉 query 与 fragment，再拼 suffix。
+  //
+  // 上游 URL 是 `${base}${suffix}` 的**字符串直接相加**，而各路由（尤其 image.ts 的 comfy
+  // 三条）依赖「suffix 由服务端决定」来限定上游路径。这个依赖此前不成立：base 末尾放一个
+  // `#`，整段 suffix 就落进 fragment、永远不会发给服务端 ——
+  //   base   = http://127.0.0.1:5173/data/C:/Users/x/.ssh/id_rsa#
+  //   suffix = /view?filename=x
+  //   → pathname = /data/C:/Users/x/.ssh/id_rsa，hostname 仍是 127.0.0.1（黑名单只查这个）
+  // 于是 BFF 从「只能打上游 API 的固定几条路径」变成任意主机 + 任意路径的取回器。
+  //
+  // 这里**规范化而不是拒绝**：能走到这一步的 base 本来就带不了合法的 query/fragment
+  // （拼上 suffix 之后必然是垃圾 URL），剃掉它们不会弄坏任何一次真实调用。
+  // 用 `parsed.href` 而不是 `origin + pathname` —— 后者会丢掉 userinfo。
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return c.json({ error: 'invalid X-Target-Base-URL (unparsable)' }, 400);
+  }
+  parsed.search = '';
+  parsed.hash = '';
+  const base = parsed.href.replace(/\/+$/, '');
+
   // 🔒 P1-03 SSRF 防护：拒绝云元数据端点（见 SSRF_BLOCKLIST 注释）
-  const host = (() => {
-    try {
-      return new URL(base).hostname;
-    } catch {
-      return '';
-    }
-  })();
-  if (SSRF_BLOCKLIST.has(host)) {
+  if (SSRF_BLOCKLIST.has(parsed.hostname)) {
     return c.json({ error: 'blocked target by SSRF protection' }, 403);
   }
 

@@ -151,6 +151,39 @@
 
 ---
 
+## 修复状态（2026-08-10 更新）
+
+> 本节只记「本报告登记的条目现在是什么状态」，各条的分析原文一字未改。
+
+**已收口**
+
+| ID      | 收口方式                                                                                                                   |
+| ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| SEC-02  | `executeScript` 迁进 QuickJS realm，`new Function` 那条路径已删、fail-closed（见该条正文的 ✅ 块）                         |
+| BLK-01  | `setCombatCoordinator` 已移到 `await runCombatV3(...)` **之前**（`game-pipeline.ts`），死锁解除                            |
+| SEC-09  | `forward()` 先 `new URL` 规范化掉 base 的 query/fragment 再拼 suffix；解析不了的 base 400。5 条回归在 `server-app.test.ts` |
+| SEC-03  | `/data` 读路径套上写路径那道 `relative()` 包含校验，删掉已成死代码的 `'..'` 判断                                           |
+| COR-02  | `GamePage.onUnmounted` 先 `pipeline?.abort()`；管线内新增存档归属闸（`emitMessage` / `refreshFromDb`）                     |
+| COR-07  | `installPack` 的互斥改为第一个 await 之前**同步**置位 + 外层 finally 放锁；`uninstallPack` 补读锁（新增 `busy` 状态）      |
+| COR-08  | `stats` 改为**每条目**从宿主 JSON 重建；`ejs-backend-parity.test.ts` 补两条跨条目用例                                      |
+| COR-12  | 续骰 / rejection 恢复改用内核当前行动单位（`currentInitiative`），不再是 `initiativeOrder[0]`                              |
+| COR-13  | `applyBuffTick` 跳过「召唤时限」，到期所有权独占归 `expireSummonedUnits`                                                   |
+| TEST-01 | CI 的 types job 末尾补 `npm run build`（八道闸门 → 九道）                                                                  |
+
+每条都配了**先证伪再修**的回归测试：临时撤掉修复后逐条确认变红（SEC-09 / COR-12 除外 —— 前者的
+5 条用例本身就是新写的行为断言，后者是纯函数级断言，端到端的 `INVALID_PHASE → abandon` 后果未复现）。
+
+**仍未处理**（各自的理由见正文）
+
+- **SEC-04** —— 需要先裁定发行形态（带不带本地 BFF），不是代码问题。
+- **SEC-05** —— 写入口的来源校验会改变 dev 工具的可达性，留给维护者决定口径。
+- **COR-01 / COR-03 / COR-04 / COR-05 / COR-06** —— 都要改数据模型或补新的写入路径（字段级补丁 / 分钟制记账 / `status-api` 接线 / `detachItemWiring` / 标记落库），不属于「照着结论改一处」那一类。
+- **PERF-02** —— 要动 BeautifierFrame 的 postMessage 桥，回归面比看上去大。
+- **SEC-06 / PERF-01 / SEC-07 / SEC-08** —— 维护者已裁定**无限期搁置**，不修。
+- 文末「登记但未展开」那 24 条 —— 报告本身建议先各自复核再动手。
+
+---
+
 ## 优先级总表
 
 「置信度」列：**已确认** = 对抗复核后原样成立；**已修正** = 成立但机理/严重度经复核修正；**未复核** = 仅单 Agent 提出。

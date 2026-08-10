@@ -1108,13 +1108,19 @@ export const useContentStore = defineStore('content', () => {
         validationErrors: [],
       };
 
-    const pack = detach(rawPack) as ContentPack;
-    // 已装同 id → 用旧包 payload 现算基线（D18 hash 分工：冲突判定从 payload 现算）。
-    // 升级的 diff 展示由 upgradePack 单独提供（UI 层按 packId 分流）；installPack 本身
-    // 只负责「装这一版」—— 旧基线用于四态规则判「现 hash = 基线 → updated 静默覆盖」。
-    const existing = await getDatabase().contentPacks.get(pack.packId);
-
+    // 🔴 COR-07（2026-08-09 审查）：互斥必须**同步**置位 —— 就在读到 `execBusy` 之后、
+    // 第一个 await 之前。此前它设在 `:1138`，与上面那次读之间隔着三次真实 await
+    // （contentPacks.get / loadPlaceholderHashes / buildCurrentLibrary 的四次 toArray），
+    // 两次调用可以双双读到 false 双双放行。而两条路径失败时都走
+    // `rollbackTo(snapshot)` → `importAllData(snapshot)`，那是**整库还原**不是范围化撤销
+    // —— 一次失败的安装回滚能把另一次已经提交的卸载连同存档一起退回去。
+    execBusy = true;
     try {
+      const pack = detach(rawPack) as ContentPack;
+      // 已装同 id → 用旧包 payload 现算基线（D18 hash 分工：冲突判定从 payload 现算）。
+      // 升级的 diff 展示由 upgradePack 单独提供（UI 层按 packId 分流）；installPack 本身
+      // 只负责「装这一版」—— 旧基线用于四态规则判「现 hash = 基线 → updated 静默覆盖」。
+      const existing = await getDatabase().contentPacks.get(pack.packId);
       const packBaseline = existing ? buildPackBaseline(existing.payload) : {};
       // 🔴 先装载占位基线（D20：占位 hash 清单是四态规则的操作数；T15 产出前文件 404 → 空基线，
       //    首安装覆盖占位书会退化为 conflicted —— D42 面占位清单落地后自动补上。）
@@ -1135,7 +1141,6 @@ export const useContentStore = defineStore('content', () => {
         };
       }
 
-      execBusy = true;
       const snapshot = await exportAllData();
       try {
         const notes = await applyInstall(
@@ -1165,12 +1170,11 @@ export const useContentStore = defineStore('content', () => {
         );
         await rollbackTo(snapshot);
         throw err;
-      } finally {
-        execBusy = false;
       }
-    } catch (err) {
-      // 回滚在内部已做；这里再包一层让调用方拿到结构化错误
-      throw err;
+    } finally {
+      // 每一条出口都要放锁：needs_confirmation 早退（UI 稍后带确认重入）、
+      // 计划阶段抛错、写入失败回滚后抛出 —— 少放一条就是把工坊永久锁死。
+      execBusy = false;
     }
   }
 
@@ -1245,6 +1249,13 @@ export const useContentStore = defineStore('content', () => {
     const active = getActivePackRecord();
     if (!active) {
       return { ok: false, status: 'no_pack' };
+    }
+    // 🔴 COR-07：此前这里**只写不读** —— 卸载会径直跑在一次进行中的安装旁边，
+    // 而两者失败时都用 exportAllData 快照做整库还原。两个 UI 入口
+    // （DataSection / ContentStatusBanner）各有各的本地 busy ref，互相看不见，
+    // 所以这道锁是唯一拦得住跨入口并发的地方。
+    if (execBusy) {
+      return { ok: false, status: 'busy' };
     }
     const installedPack = active.payload;
     execBusy = true;
@@ -1447,7 +1458,8 @@ export interface PackInstallOutcome {
 /** 卸载结果 */
 export interface PackUninstallOutcome {
   ok: boolean;
-  status: 'no_pack' | 'needs_confirmation' | 'uninstalled';
+  /** `busy`：另一次装/卸正在进行（COR-07；与 PackInstallOutcome 的同名状态同义） */
+  status: 'no_pack' | 'needs_confirmation' | 'uninstalled' | 'busy';
   plan?: PackUninstallPlan;
   notes?: WorkshopNote[];
 }

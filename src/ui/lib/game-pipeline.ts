@@ -27,6 +27,7 @@ import type {
   MemoryRecord,
   WorkshopProject,
   CharacterState,
+  ChatMessage,
 } from '@engine/types';
 import type {
   ImageGenFailure,
@@ -265,7 +266,7 @@ export class GamePipeline {
 
       // 添加用户消息（非用户消息仅注入 context 不渲染）
       if (isUserMessage) {
-        this.game.addMessage(userInput, 'user');
+        this.emitMessage(userInput, 'user');
       }
       this.game.setPendingOptions([]); // 新一轮开始，清掉上一轮的行动选项
       this.game.clearAgentLog();
@@ -355,13 +356,15 @@ export class GamePipeline {
         return false;
       }
       console.error('[GamePipeline] 管线运行失败:', err);
-      this.game.addMessage('[系统] AI 调用失败，请检查 API 配置后重试。', 'assistant');
+      this.emitMessage('[系统] AI 调用失败，请检查 API 配置后重试。', 'assistant');
       return false;
     } finally {
       // 🆕 管线中 StateManager / 侧链 (char_gen/item_gen/craft_gen) 直接写 Dexie，
       // 这里统一回读，让 Pinia 内存态（characters/metadata/saveProfile）与 DB 对齐，
       // DebugPanel 导出和右侧状态栏才能拿到最新数据。abort/报错时部分 patch 可能已提交，同样需要回读。
-      await this.game.refreshFromDb();
+      // 🔴 COR-02：存档已切走时**不回读** —— refreshFromDb 读的是 store 里那个（新的）
+      // activeSaveId，孤儿回合替新存档跑一次回读没有意义，还会跟新存档自己的加载打架。
+      if (this.ownsActiveSave) await this.game.refreshFromDb();
       // 🎵 配乐放在**回读之后**才触发。
       //
       // story 在 Stage 1 就写下了标记，但那时 player.location / character.present
@@ -455,6 +458,34 @@ export class GamePipeline {
   abort(): void {
     this.abortController?.abort();
     this.game.isGenerating = false;
+  }
+
+  /**
+   * 本管线是否仍属于当前打开的存档（COR-02）。
+   *
+   * abort 不是瞬时的 —— 在飞的 fetch 要等 AbortError 冒出来，已经开始的 await 链
+   * 还会往下走几步。这道检查是漏网写入的第二道闸：`game-store` 的
+   * `addMessage` / `persistMessage` 从 **store** 取 `activeSaveId`，所以一旦玩家在
+   * 生成中途切到别的存档，孤儿回合的正文会以那个存档的 saveId 落库。
+   */
+  private get ownsActiveSave(): boolean {
+    return this.game.activeSaveId === this.saveId;
+  }
+
+  /**
+   * 正文写入的唯一出口 —— 存档已切走就丢弃（COR-02）。
+   * 返回 null 表示「这条没写进去」，调用方需要 message.id 时必须处理。
+   */
+  private emitMessage(content: string, role: 'user' | 'assistant'): ChatMessage | null {
+    if (!this.ownsActiveSave) {
+      console.warn('[GamePipeline] 存档已切换，丢弃孤儿消息', {
+        pipelineSaveId: this.saveId,
+        activeSaveId: this.game.activeSaveId,
+        role,
+      });
+      return null;
+    }
+    return this.game.addMessage(content, role);
   }
 
   // ===== 私有方法 =====
@@ -1077,7 +1108,7 @@ export class GamePipeline {
                 `[GamePipeline] 状态提交失败 ${result.errors.length}/${patches.length} 条:`,
                 result.errors,
               );
-              this.game.addMessage(
+              this.emitMessage(
                 `[系统] 部分状态未能写入 (${result.errors.length} 条): ${result.errors.join('；')}`,
                 'assistant',
               );
@@ -1297,10 +1328,7 @@ export class GamePipeline {
 
       onStateCommitError: (source, errors) => {
         console.error(`[GamePipeline] ${source} 状态提交失败:`, errors);
-        this.game.addMessage(
-          `[系统] ${source} 部分状态未能写入: ${errors.join('；')}`,
-          'assistant',
-        );
+        this.emitMessage(`[系统] ${source} 部分状态未能写入: ${errors.join('；')}`, 'assistant');
       },
 
       // === Marker 回调 ===
@@ -1329,7 +1357,11 @@ export class GamePipeline {
         this.game.setPendingOptions(options);
         // 🖼 记下这条消息 —— 情景插画按 (saveId, messageId, occurrence) 反查挂回正文（D2）。
         // 从 messages 末尾去捞是个会被别的写入者破坏的假设，所以让 addMessage 交回来。
-        const message = this.game.addMessage(content, 'assistant');
+        const message = this.emitMessage(content, 'assistant');
+        // null = 存档已切走，这条正文没写进去（COR-02）。此时**不能**记
+        // lastStoryMessage —— 它是情景插画反查锚点，指向一条不存在的消息只会
+        // 让后续开火挂到空处。
+        if (!message) break;
         this.lastStoryMessage = {
           id: message.id,
           turn: message.turn ?? 0,
@@ -1515,7 +1547,7 @@ export class GamePipeline {
       '【系统】v2 战斗引擎已退役删除。若非显式切换，战斗请走 v3（当前 AppSettings.combatEngineVersion）' +
       `。当前设置被显式打回 'v2'，本场战斗不执行。`;
     console.warn('[GamePipeline] combat v2 分支已退役，返回优雅提示而非真实开局');
-    this.game.addMessage(message, 'assistant');
+    this.emitMessage(message, 'assistant');
     return {
       narrativeSummary: message,
       patches: [],
@@ -1792,7 +1824,7 @@ export class GamePipeline {
       this.game.clearAgentStatus('combat_v3');
       this.game.exitCombat(); // 战斗结束关面板（终局已由 onCombatEvent 置 v3ActiveCombat）
       if (result.narrativeSummary) {
-        this.game.addMessage(`【战斗摘要】${result.narrativeSummary}`, 'assistant');
+        this.emitMessage(`【战斗摘要】${result.narrativeSummary}`, 'assistant');
       }
       const summary: CombatSummaryResult = {
         narrativeSummary: result.narrativeSummary,
@@ -1844,7 +1876,7 @@ export class GamePipeline {
         });
         this.game.clearAgentStatus('craft_gen');
         if (result.narrative) {
-          this.game.addMessage(result.narrative, 'assistant');
+          this.emitMessage(result.narrative, 'assistant');
         }
       } catch (err) {
         this.game.clearAgentStatus('craft_gen', String(err));
