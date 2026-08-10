@@ -240,6 +240,10 @@ function getDefaults(): UiSettings {
     // 不做"强制关闭系统偏好"）。判定与写入见 lib/reduced-motion.ts。
     reducedMotion: false,
 
+    // 开发者模式 —— 默认关闭。只控制诊断入口与原始技术细节；玩家可见的回合活动账本
+    // 始终保留游戏语言，不随这个开关消失或变成控制台。
+    developerMode: false,
+
     // 消息 & 系统事件可见性
     systemEventsVisible: true,
     systemEventFilters: {

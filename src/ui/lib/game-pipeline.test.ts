@@ -44,22 +44,28 @@ vi.mock('@engine/database', () => ({
 }));
 
 // 工坊 P2 (D5): EJS 差量落库走 createStateManager(...).commitChatState —— 拦下来验载荷
-const { commitSpy, advanceTurnSpy, toastSpy, createSnapshotSpy, runCombatV3Mock } = vi.hoisted(
-  () => ({
-    commitSpy: vi.fn(async () => ({
-      success: true,
-      patchesApplied: 0,
-      eventsGenerated: [],
-      errors: [] as string[],
-    })),
-    advanceTurnSpy: vi.fn(async () => {}),
-    createSnapshotSpy: vi.fn(
-      async () => ({ id: 'snap-pre-combat', reason: 'pre-combat', turn: 0 }) as any,
-    ),
-    toastSpy: vi.fn(),
-    runCombatV3Mock: vi.fn(),
-  }),
-);
+const {
+  commitSpy,
+  advanceTurnSpy,
+  toastSpy,
+  createSnapshotSpy,
+  runCombatV3Mock,
+  callImagePromptAgentMock,
+} = vi.hoisted(() => ({
+  commitSpy: vi.fn(async () => ({
+    success: true,
+    patchesApplied: 0,
+    eventsGenerated: [],
+    errors: [] as string[],
+  })),
+  advanceTurnSpy: vi.fn(async () => {}),
+  createSnapshotSpy: vi.fn(
+    async () => ({ id: 'snap-pre-combat', reason: 'pre-combat', turn: 0 }) as any,
+  ),
+  toastSpy: vi.fn(),
+  runCombatV3Mock: vi.fn(),
+  callImagePromptAgentMock: vi.fn(),
+}));
 
 vi.mock('@engine/state-manager', () => ({
   createStateManager: vi.fn(() => ({
@@ -73,6 +79,10 @@ vi.mock('@engine/state-manager', () => ({
 // 断言 setCombatCoordinator 在 runCombatV3 **之前**挂好（玩家首决策挂起的根因修复）。
 vi.mock('@engine/combat-v3', () => ({
   runCombatV3: runCombatV3Mock,
+}));
+
+vi.mock('@engine/image-prompt-agent', () => ({
+  callImagePromptAgent: callImagePromptAgentMock,
 }));
 
 vi.mock('../stores/ui-store', () => ({
@@ -119,6 +129,10 @@ function makeGameStore(overrides: Record<string, any> = {}) {
     setPendingOptions: vi.fn(),
     clearAgentLog: vi.fn(),
     clearAllAgentStatus: vi.fn(),
+    startAgentActivityRun: vi.fn(() => 'activity-test'),
+    finishAgentActivityRun: vi.fn(),
+    markAgentActivityStopping: vi.fn(),
+    recordAgentToolActivity: vi.fn(),
     updateAgentStatus: vi.fn(),
     clearAgentStatus: vi.fn(),
     addAgentLogEntry: vi.fn(),
@@ -486,6 +500,24 @@ describe('buildContext — plotSettings (步5)', () => {
       '上一轮输入',
       '上一轮正文',
     ]);
+  });
+
+  it('重试时从历史排除触发消息，只通过 userInput 注入一次', () => {
+    const pipeline = makePipeline({
+      messages: [
+        { id: 'u1', role: 'user', content: '上一轮输入', timestamp: 1 },
+        { id: 'a1', role: 'assistant', content: '上一轮正文', timestamp: 2 },
+        { id: 'u2', role: 'user', content: '需要重试的输入', timestamp: 3 },
+      ],
+    });
+
+    const ctx = (pipeline as any).buildContext('需要重试的输入', 'u2');
+
+    expect(ctx.userInput).toBe('需要重试的输入');
+    expect(ctx.history.map((message: { id: string }) => message.id)).toEqual(['u1', 'a1']);
+    expect(
+      ctx.history.filter((message: { content: string }) => message.content === '需要重试的输入'),
+    ).toHaveLength(0);
   });
 
   it('读取 activeSave.metadata.plotSettings', () => {
@@ -1220,6 +1252,79 @@ describe('withImagePromptSystem', () => {
     const out = withImagePromptSystem([cfg({ agentId: 'story' })], '方言写的');
     expect(out).toHaveLength(2);
     expect(out[1]).toMatchObject({ agentId: 'image_prompt', systemPrompt: '方言写的' });
+  });
+});
+
+describe('runImagePromptAgent — activity ledger', () => {
+  beforeEach(() => {
+    callImagePromptAgentMock.mockReset();
+  });
+
+  it('registers and settles a standalone image_prompt step around the Agent call', async () => {
+    const gameStore = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore({
+        apiPool: [{ id: 'ep-image', name: 'image', model: 'image-model' }],
+      }),
+      saveId: 'save-test',
+    });
+    (pipeline as any).ensureChainData = vi.fn(async () => ({
+      agentConfigs: [],
+      worldBooks: [],
+      presets: [],
+    }));
+    callImagePromptAgentMock.mockResolvedValue({
+      ok: true,
+      value: {
+        scenePrompt: 'moonlit tavern',
+        sceneNegative: '',
+        desc: '月下旅店',
+      },
+    });
+
+    await pipeline.runImagePromptAgent({
+      intent: '月下的旅店',
+      characters: [],
+      narrative: '旅店安静地立在月色里。',
+      rating: 'general',
+    });
+
+    expect(gameStore.startAgentActivityRun).toHaveBeenCalledWith(undefined, true);
+    expect(gameStore.updateAgentStatus).toHaveBeenCalledWith('image_prompt', 'activity-test');
+    expect(callImagePromptAgentMock).toHaveBeenCalledOnce();
+    expect(gameStore.clearAgentStatus).toHaveBeenCalledWith(
+      'image_prompt',
+      undefined,
+      'activity-test',
+    );
+  });
+
+  it("keeps an older turn's callbacks bound to their original activity run", () => {
+    const gameStore = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    const events = (pipeline as any).buildEventHandlers('activity-old');
+
+    // abort() unlocks input immediately, so a newer turn can own the instance before
+    // the older callbacks finish. Those late callbacks must not land in the new ledger.
+    (pipeline as any).activeRunId = 'activity-new';
+    events.onAgentStart('story', { apiEndpointId: 'ep-story', model: 'story-model' });
+    events.onToolCall('story', 'lookup_lore', { name: '旧城' }, { found: true });
+    events.onAgentError('story', '已取消');
+
+    expect(gameStore.updateAgentStatus).toHaveBeenCalledWith('story', 'activity-old');
+    expect(gameStore.recordAgentToolActivity).toHaveBeenCalledWith(
+      'story',
+      'lookup_lore',
+      { name: '旧城' },
+      { found: true },
+      'activity-old',
+    );
+    expect(gameStore.clearAgentStatus).toHaveBeenCalledWith('story', '已取消', 'activity-old');
   });
 });
 

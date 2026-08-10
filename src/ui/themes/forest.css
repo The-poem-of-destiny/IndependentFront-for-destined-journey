@@ -171,8 +171,7 @@
   background: var(--forest-gold-line);
 }
 
-:root[data-theme='forest'] body .game-page-layout .top-btn,
-:root[data-theme='forest'] body .game-page-layout .agent-indicator {
+:root[data-theme='forest'] body .game-page-layout .top-btn {
   border: 1px solid transparent;
   border-radius: 5px;
 }

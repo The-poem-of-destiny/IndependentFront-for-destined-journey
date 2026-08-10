@@ -9,6 +9,9 @@ import type {
   PlotOutline,
   CombatState,
   SaveProfile,
+  AgentResult,
+  AgentActivityRun,
+  AgentActivityStep,
 } from '@engine/types';
 import type { CombatView, CombatCommand } from '@engine/combat-v3';
 import {
@@ -27,6 +30,7 @@ import { allocateAttributePoint } from '@engine/attribute-allocation';
 import type { AllocatableAttr } from '@engine/attribute-allocation';
 import { detach } from './db-write';
 import type { CombatEvent } from '@engine/combat-v2-types';
+import { agentActivityLabel, presentToolActivity } from '../lib/agent-activity';
 
 /** 单条 Agent 调试日志（含完整请求/响应上下文） */
 export interface DebugAgentEntry {
@@ -40,6 +44,8 @@ export interface DebugAgentEntry {
   rawResponse: string;
   /** 🆕 DeepSeek 思维链（reasoning_content），可能为空 */
   reasoning?: string;
+  /** Agentic 工具往返；只在开发调试面板展示。 */
+  toolCalls?: AgentResult['toolCalls'];
   error?: string;
   tokensUsed: number;
   cacheHit: boolean;
@@ -360,44 +366,130 @@ export const useGameStore = defineStore('game', () => {
     return char?.thoughts ?? '';
   }
 
-  const agentStatus = ref<{ agentId: string; label: string; startedAt: number } | null>(null);
-  const agentDurations = ref<{ agentId: string; label: string; elapsed: number }[]>([]);
+  // === 玩家可见的回合活动 ===
+  const agentActivityRuns = ref<AgentActivityRun[]>([]);
+  let activitySequence = 0;
 
-  const AGENT_LABELS: Record<string, string> = {
-    memory_recall: '检索记忆',
-    plot_pre_check: '剧情检查',
-    story: '生成正文',
-    request_dispatcher: '请求调度',
-    vars_update: '更新状态',
-    memory_summary: '压缩记忆',
-    plot_post_check: '剧情修正',
-    craft_gen: '制作中',
-    char_gen: '角色生成',
-    item_gen: '物品生成',
-  };
+  const currentAgentActivityRun = computed(
+    () =>
+      [...agentActivityRuns.value]
+        .reverse()
+        .find((run) => run.status === 'running' || run.status === 'stopping') ?? null,
+  );
 
-  function updateAgentStatus(agentId: string) {
-    agentStatus.value = {
-      agentId,
-      label: AGENT_LABELS[agentId] ?? agentId,
-      startedAt: Date.now(),
-    };
+  function activityRun(runId?: string): AgentActivityRun | undefined {
+    if (runId) return agentActivityRuns.value.find((run) => run.id === runId);
+    return currentAgentActivityRun.value ?? undefined;
   }
 
-  function clearAgentStatus(agentId: string, _error?: string) {
-    if (agentStatus.value && agentStatus.value.agentId === agentId) {
-      const elapsed = Date.now() - agentStatus.value.startedAt;
-      agentDurations.value = [
-        ...agentDurations.value.slice(-9), // keep last 9 to avoid overflow
-        { agentId, label: agentStatus.value.label, elapsed },
-      ];
-      agentStatus.value = null;
+  function startAgentActivityRun(sourceMessageId?: string, standalone = false): string {
+    const id = `activity-${Date.now()}-${++activitySequence}`;
+    agentActivityRuns.value.push({
+      id,
+      sourceMessageId:
+        sourceMessageId ??
+        [...messages.value].reverse().find((msg) => msg.role === 'user')?.id ??
+        null,
+      status: 'running',
+      startedAt: Date.now(),
+      standalone,
+      steps: [],
+    });
+    return id;
+  }
+
+  function ensureActivityRun(runId?: string): AgentActivityRun {
+    const existing = activityRun(runId);
+    if (existing) return existing;
+    const createdId = startAgentActivityRun(undefined, true);
+    return activityRun(createdId)!;
+  }
+
+  function updateAgentStatus(agentId: string, runId?: string): string | undefined {
+    const run = ensureActivityRun(runId);
+    if (run.status === 'stopping') return undefined;
+    const existing = [...run.steps]
+      .reverse()
+      .find((step) => step.agentId === agentId && step.status === 'running');
+    if (existing) return existing.id;
+
+    const occurrence = run.steps.filter((step) => step.agentId === agentId).length + 1;
+    const step: AgentActivityStep = {
+      id: `${run.id}:${agentId}:${occurrence}`,
+      agentId,
+      label: agentActivityLabel(agentId),
+      status: 'running',
+      startedAt: Date.now(),
+      tools: [],
+    };
+    run.steps.push(step);
+    return step.id;
+  }
+
+  function clearAgentStatus(agentId: string, error?: string, runId?: string) {
+    const run = activityRun(runId);
+    if (!run) return;
+    const step = [...run.steps]
+      .reverse()
+      .find((entry) => entry.agentId === agentId && entry.status === 'running');
+    if (!step) return;
+    step.status = error ? 'failed' : 'completed';
+    step.completedAt = Date.now();
+
+    if (run.standalone && !run.steps.some((entry) => entry.status === 'running')) {
+      finishAgentActivityRun(run.id, error ? 'failed' : 'completed');
+    }
+  }
+
+  function recordAgentToolActivity(
+    agentId: string,
+    toolName: string,
+    args: unknown,
+    result: unknown,
+    runId?: string,
+  ) {
+    const run = ensureActivityRun(runId);
+    let step = [...run.steps]
+      .reverse()
+      .find((entry) => entry.agentId === agentId && entry.status === 'running');
+    if (!step) {
+      updateAgentStatus(agentId, run.id);
+      step = [...run.steps]
+        .reverse()
+        .find((entry) => entry.agentId === agentId && entry.status === 'running');
+    }
+    if (!step) return;
+    const sequence = step.tools.length + 1;
+    step.tools.push(
+      presentToolActivity(toolName, args, result, `${step.id}:tool:${sequence}`, Date.now()),
+    );
+  }
+
+  function markAgentActivityStopping(runId: string) {
+    const run = activityRun(runId);
+    if (run?.status === 'running') run.status = 'stopping';
+  }
+
+  function finishAgentActivityRun(
+    runId: string,
+    status: 'completed' | 'failed' | 'cancelled',
+    message?: string,
+  ) {
+    const run = activityRun(runId);
+    if (!run || ['completed', 'failed', 'cancelled'].includes(run.status)) return;
+    const completedAt = Date.now();
+    run.status = status;
+    run.completedAt = completedAt;
+    run.message = message;
+    for (const step of run.steps) {
+      if (step.status !== 'running') continue;
+      step.status = status === 'completed' ? 'completed' : status;
+      step.completedAt = completedAt;
     }
   }
 
   function clearAllAgentStatus() {
-    agentStatus.value = null;
-    agentDurations.value = [];
+    agentActivityRuns.value = [];
   }
 
   // === UI 布局状态 (Phase 7e) ===
@@ -1057,8 +1149,12 @@ export const useGameStore = defineStore('game', () => {
     pendingItemFocus,
     focusItem,
     clearItemFocus,
-    agentStatus,
-    agentDurations,
+    agentActivityRuns,
+    currentAgentActivityRun,
+    startAgentActivityRun,
+    finishAgentActivityRun,
+    markAgentActivityStopping,
+    recordAgentToolActivity,
     updateAgentStatus,
     clearAgentStatus,
     clearAllAgentStatus,

@@ -227,7 +227,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── ToastContainer.vue
 │   │   └── form/ (Input/Select/Stepper/Cascader/KeyValue)
 │   ├── home/HomePage.vue            ← 游戏标题画面
-│   ├── settings/                    ← [Q-25] 13 个分区**全部**是一行子组件
+│   ├── settings/                    ← [Q-25] 14 个分区**全部**是一行子组件
 │   │   ├── SettingsPage.vue         ← 纯壳层（1995 → 约 415 行）：页头 + 主导航 + Agent 子导航
 │   │   │                               只留 activeSection / activeAgent / selectSection /
 │   │   │                               selectAgent / restoreAgent / agentModelOf 与
@@ -284,10 +284,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               [图像 v1] +本存档插画用量与清理。🔴 这一行**刻意不在图像分区**：
 │   │   │                               用量是**每存档**的数字，而图像分区是全局设置；且「清理」与
 │   │   │                               旁边那些清除动作是同一类事，放一起才找得到
+│   │   ├── DeveloperSection.vue     ← 开发者模式开关 + 诊断能力说明 + 导出隐私警告
 │   │   ├── AboutSection.vue
 │   │   ├── AudioSection.vue         ← [Audio] 音频分区（壳层 + 5 子组件）
 │   │   ├── AssetSection.vue         ← [素材] 素材分区壳层 + 4 子组件
-│   │   └── image/                   ← [图像 v1] 第 13 分区（壳层 + 3 张卡）
+│   │   └── image/                   ← [图像 v1] 图像生成分区（壳层 + 3 张卡）
 │   │       ├── ImageSection.vue     ← 分区壳。**单根** section.centered（.centered 是 SettingsPage 的
 │   │       │                           scoped 规则，只够得到子组件根节点；多根会在宽屏摊满整行，
 │   │       │                           ApiSection 真机走查栽过一次）
@@ -440,7 +441,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 └── styles/                          ← base.css / transitions.css / utilities.css
 ```
 
-### 设置页 13 分区
+### 设置页 14 分区
 
 | 分区           | 内容                                                                                                                                                                                                                                                                                                                                            |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -456,6 +457,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | 🖼 素材         | 导入条 + 素材库（按角色分组/扁平表/多选批删）+ 变体抽屉（设主图/裁剪/改名）                                                                                                                                                                                                                                                                     |
 | 🖼 图像生成     | 三张卡：提示词生成（`image_prompt` 的模型/温度/世界书存 `agents` 袋子；systemPrompt 按方言存 `imageDialectOverrides`）/ 出图（后端 + 方言选择 + 三档开关 + per-provider 参数与限额，存 `UiSettings` 的 `imageNovelai`/`imageComfy` 袋）/ 视觉预设（角色初始设定存 Dexie `imagePresets`；本档外貌存 `characterAppearances`，含「存为初始设定」） |
 | 💾 存档数据    | 导出/导入/清除（排除音频库与素材库，各有独立导出口）                                                                                                                                                                                                                                                                                            |
+| 🛠 开发者模式   | 持久开关（默认关闭）；控制调试工具栏、原始 Agent 请求/响应、reasoning、工具 payload、诊断导出与 `Alt + Shift + D` 抽屉                                                                                                                                                                                                                          |
 | ℹ 关于         | 引擎版本/技术栈/统计                                                                                                                                                                                                                                                                                                                            |
 
 ### 预设系统（正文 Agent 专用）

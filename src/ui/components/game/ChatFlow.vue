@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import InputBar from './InputBar.vue';
-import type { ChatMessage, SystemEvent } from '@engine/types';
+import type { AgentActivityRun, ChatMessage, SystemEvent } from '@engine/types';
 import { escapeHtml } from '@engine/beautifier';
 import { splitSceneImageSegments } from '@engine/image-segments';
 import { useSettingsStore } from '../../stores/settings-store';
@@ -13,6 +13,7 @@ import { computeConversationalDepths } from '../../lib/chat-depth';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import BeautifiedNarrative from './BeautifiedNarrative.vue';
+import TurnActivityLedger from './TurnActivityLedger.vue';
 import CraftSystemCard from './cards/CraftSystemCard.vue';
 import CharGenSystemCard from './cards/CharGenSystemCard.vue';
 import CombatSystemCard from './cards/CombatSystemCard.vue';
@@ -39,6 +40,7 @@ const emit = defineEmits<{
   send: [content: string];
   'select-option': [text: string];
   stop: [];
+  'retry-turn': [messageId: string];
 }>();
 
 const settings = useSettingsStore();
@@ -51,6 +53,16 @@ const container = ref<HTMLDivElement>();
 const expandedIds = ref<Record<string, boolean>>({});
 const pinnedToBottom = ref(true);
 const messageDepths = computed(() => computeConversationalDepths(props.messages ?? []));
+const activityRunsByMessage = computed(() => {
+  const grouped = new Map<string, AgentActivityRun[]>();
+  for (const run of game.agentActivityRuns ?? []) {
+    if (!run.sourceMessageId) continue;
+    const runs = grouped.get(run.sourceMessageId);
+    if (runs) runs.push(run);
+    else grouped.set(run.sourceMessageId, [run]);
+  }
+  return grouped;
+});
 
 /** 滚到底部（进存档 / 新消息 / 快照回退时调用）。nextTick 等本轮 DOM 落定。 */
 function scrollToBottom() {
@@ -71,6 +83,13 @@ watch(
 watch(
   () => props.messages,
   () => scrollToBottom(),
+);
+
+watch(
+  () => props.streamingText,
+  () => {
+    if (pinnedToBottom.value) handleNarrativeResize();
+  },
 );
 
 function formatTime(ts?: number): string {
@@ -182,6 +201,21 @@ const latestUserMsg = computed<ChatMessage | undefined>(() => {
   }
   return undefined;
 });
+
+function activityRunsForMessage(messageId: string) {
+  return activityRunsByMessage.value.get(messageId) ?? [];
+}
+
+function canRetryRun(run: AgentActivityRun): boolean {
+  const messageId = run.sourceMessageId;
+  if (!messageId || props.isGenerating || (run.status !== 'failed' && run.status !== 'cancelled')) {
+    return false;
+  }
+  const messageRuns = activityRunsForMessage(messageId);
+  return (
+    latestUserMsg.value?.id === messageId && messageRuns[messageRuns.length - 1]?.id === run.id
+  );
+}
 
 /** 「回退」项的文案：assistant = 回退本轮；user = 回退到这条输入 */
 function rollbackLabel(msg: ChatMessage): string {
@@ -343,20 +377,30 @@ onUnmounted(() => {
 
       <template v-for="msg in messages" :key="msg.id">
         <!-- 用户消息 -->
-        <div
-          v-if="msg.role === 'user'"
-          class="bubble-row bubble-row-player"
-          :title="ctxHint(msg)"
-          @contextmenu="onContextMenu($event, msg)"
-        >
-          <div class="bubble bubble-player">
-            <span class="bubble-prefix">你:</span>
-            <!-- 内容先过 escapeHtml()，再只把换行还原成 <br>。别把 escapeHtml 摘掉 -->
-            <!-- eslint-disable-next-line vue/no-v-html -->
-            <span class="bubble-text" v-html="escapeHtml(msg.content).replace(/\n/g, '<br>')" />
-            <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
+        <template v-if="msg.role === 'user'">
+          <div
+            class="bubble-row bubble-row-player"
+            :title="ctxHint(msg)"
+            @contextmenu="onContextMenu($event, msg)"
+          >
+            <div class="bubble bubble-player">
+              <span class="bubble-prefix">你:</span>
+              <!-- 内容先过 escapeHtml()，再只把换行还原成 <br>。别把 escapeHtml 摘掉 -->
+              <!-- eslint-disable-next-line vue/no-v-html -->
+              <span class="bubble-text" v-html="escapeHtml(msg.content).replace(/\n/g, '<br>')" />
+              <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
+            </div>
           </div>
-        </div>
+
+          <TurnActivityLedger
+            v-for="run in activityRunsForMessage(msg.id)"
+            :key="run.id"
+            :run="run"
+            :can-retry="canRetryRun(run)"
+            @retry="emit('retry-turn', msg.id)"
+            @resize="handleNarrativeResize"
+          />
+        </template>
 
         <!-- AI 叙事消息 — 只渲染美化正文 -->
         <!-- data-message-id 是 CG 图鉴「跳回那条消息」的锚点（§10.3），别删 -->
@@ -431,10 +475,6 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <div v-if="isGenerating" class="chat-loading">
-        <span class="loading-dot">·</span> AI 正在生成...
-      </div>
-
       <!-- 🆕 流式正文实时渲染 -->
       <div v-if="isGenerating && streamingText" class="bubble-row bubble-row-narrative">
         <div class="bubble bubble-narrative-full">
@@ -448,7 +488,12 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <InputBar :disabled="isGenerating" @send="(c) => emit('send', c)" @stop="emit('stop')" />
+    <InputBar
+      :disabled="isGenerating"
+      :stopping="game.currentAgentActivityRun?.status === 'stopping'"
+      @send="(c) => emit('send', c)"
+      @stop="emit('stop')"
+    />
 
     <!-- 右键菜单（回退只在最新一条；配图哪条都行，off 档下整项不出现） -->
     <Teleport to="body">
@@ -656,26 +701,6 @@ onUnmounted(() => {
   color: var(--theme-text-muted);
   margin-top: 4px;
 }
-.chat-loading {
-  text-align: center;
-  color: var(--theme-text-muted);
-  font-size: 0.8125rem;
-  padding: 8px;
-}
-.loading-dot {
-  animation: pulse 1s infinite;
-  display: inline-block;
-}
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 0.3;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
 /* ===== 流式正文 ===== */
 .streaming-content {
   /* 流式渲染时使用闪烁光标提示正在输出 */

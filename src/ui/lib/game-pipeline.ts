@@ -160,6 +160,8 @@ export class GamePipeline {
   private saveId: string;
   private orch: AgentOrchestrator | null = null;
   private abortController: AbortController | null = null;
+  /** 当前 run 的所有权标识；abort 后直到 finally 收尾前都保持，防止旧 run 清掉新 run。 */
+  private activeRunId: string | null = null;
   /**
    * 本管线跑到第几轮（run() 每次进入自增）。
    *
@@ -286,6 +288,7 @@ export class GamePipeline {
     userInput: string,
     onStoryChunk?: StoryChunkCallback,
     isUserMessage = true,
+    sourceMessageId?: string,
   ): Promise<boolean> {
     console.log(
       '[GamePipeline] run() called — userInput length:',
@@ -295,20 +298,29 @@ export class GamePipeline {
     );
     console.log('[GamePipeline] userInput preview:', userInput.slice(0, 300));
     const mySeq = ++this.runSeq;
-    this.abortController = new AbortController();
+    const controller = new AbortController();
+    this.abortController = controller;
     this.game.isGenerating = true;
+    let activityRunId: string | null = null;
+    let activityOutcome: 'completed' | 'failed' | 'cancelled' = 'failed';
+    let activityMessage: string | undefined;
 
     try {
       // 1. 先快照既有历史；当前输入只走 userInput，避免同时出现在 NARRATIVE 与 USER_INPUT。
-      const context = this.buildContext(userInput);
+      const existingSourceMessageId = isUserMessage
+        ? undefined
+        : (sourceMessageId ??
+          [...this.game.messages].reverse().find((message) => message.role === 'user')?.id);
+      const context = this.buildContext(userInput, existingSourceMessageId);
 
       // 添加用户消息（非用户消息仅注入 context 不渲染）
-      if (isUserMessage) {
-        this.emitMessage(userInput, 'user');
-      }
+      const boundSourceMessageId = isUserMessage
+        ? (this.emitMessage(userInput, 'user')?.id ?? undefined)
+        : existingSourceMessageId;
+      activityRunId = this.game.startAgentActivityRun(boundSourceMessageId);
+      this.activeRunId = activityRunId;
       this.game.setPendingOptions([]); // 新一轮开始，清掉上一轮的行动选项
       this.game.clearAgentLog();
-      this.game.clearAllAgentStatus();
 
       // 2. 构建 endpoints & context
       const endpoints = this.buildEndpoints();
@@ -354,7 +366,7 @@ export class GamePipeline {
         presets,
         worldBooks,
       };
-      const events = this.buildEventHandlers();
+      const events = this.buildEventHandlers(activityRunId);
       this.orch = new AgentOrchestrator(options, events);
 
       // 4. 运行管线
@@ -369,6 +381,13 @@ export class GamePipeline {
         console.warn(
           '[GamePipeline] 管线未完成 (status=' + orchResult.status + ')，跳过回合推进/快照',
         );
+        if (controller.signal.aborted) {
+          activityOutcome = 'cancelled';
+          activityMessage = '本回合已停下，可以再次尝试。';
+        } else {
+          activityOutcome = 'failed';
+          activityMessage = '世界的回应在此中断，可以再次尝试。';
+        }
         return false;
       }
 
@@ -386,15 +405,19 @@ export class GamePipeline {
         console.warn('[GamePipeline] advanceTurn 失败（不阻塞本轮）:', err);
       }
 
+      activityOutcome = 'completed';
       return true;
     } catch (err) {
       // Abort 错误不视为真正的失败
       if ((err as Error)?.name === 'AbortError') {
         console.log('[GamePipeline] 管线已中止');
+        activityOutcome = 'cancelled';
+        activityMessage = '本回合已停下，可以再次尝试。';
         return false;
       }
       console.error('[GamePipeline] 管线运行失败:', err);
-      this.emitMessage('[系统] AI 调用失败，请检查 API 配置后重试。', 'assistant');
+      activityOutcome = 'failed';
+      activityMessage = '世界的回应在此中断，可以检查设置后再次尝试。';
       return false;
     } finally {
       // 🆕 管线中 StateManager / 侧链 (char_gen/item_gen/craft_gen) 直接写 Dexie，
@@ -410,6 +433,12 @@ export class GamePipeline {
       // 再经这里的 refreshFromDb 才更新。而**转场恰恰是唯一真正该换歌的时刻**：
       // 在 Stage 1 播，正文已经进了熔火裂谷，BGM 还在放上一座城的曲子。
       this.flushPendingAudio();
+      if (activityRunId) {
+        this.game.finishAgentActivityRun(activityRunId, activityOutcome, activityMessage);
+      }
+      if (this.activeRunId === activityRunId) {
+        this.activeRunId = null;
+      }
       // 🔴 只有「我还是当前那一轮」才收拾这两样 —— 否则会解锁新一轮的输入框，
       // 并且把新一轮的控制器抹成 null（「停止生成」从此静默失效）。见 runSeq 的注释。
       if (this.runSeq === mySeq) {
@@ -498,8 +527,27 @@ export class GamePipeline {
 
   /** 中止当前管线运行 */
   abort(): void {
+    if (this.activeRunId) this.game.markAgentActivityStopping(this.activeRunId);
     this.abortController?.abort();
     this.game.isGenerating = false;
+  }
+
+  private updateAgentActivityStatus(agentId: string, runActivityId?: string): void {
+    if (runActivityId === undefined) {
+      this.game.updateAgentStatus(agentId);
+      return;
+    }
+    this.game.updateAgentStatus(agentId, runActivityId);
+  }
+
+  private clearAgentActivityStatus(agentId: string, error?: string, runActivityId?: string): void {
+    if (runActivityId !== undefined) {
+      this.game.clearAgentStatus(agentId, error, runActivityId);
+    } else if (error !== undefined) {
+      this.game.clearAgentStatus(agentId, error);
+    } else {
+      this.game.clearAgentStatus(agentId);
+    }
   }
 
   /**
@@ -722,10 +770,10 @@ export class GamePipeline {
     })) as ApiEndpoint[];
   }
 
-  private buildContext(userInput: string): AgentContext {
+  private buildContext(userInput: string, excludeMessageId?: string): AgentContext {
     // 构建历史消息（只取 user/assistant，不含 system）
     const history = this.game.messages
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.id !== excludeMessageId)
       .map((m) => ({ ...m }));
 
     // 步5: 读存档级剧情配置（捏人页 startJourney 落 metadata.plotSettings）；老存档无字段 → off 兜底
@@ -956,7 +1004,7 @@ export class GamePipeline {
   /** 创建 AgentClient 工厂 —— 供 craft_gen / char_gen / item_gen 链使用。
    *  🆕 包裹一层 LogClient：拦截 chat / chatWithTools，自动写 agentLog，
    *  让侧链 Agent 在 DebugPanel 可见（否则绕过 orchestrator 时无日志）。 */
-  private getClientFactory() {
+  private getClientFactory(runActivityId = this.activeRunId ?? undefined) {
     const saveId = this.saveId;
     const game = this.game;
     // 🔴 侧链的取消信号（2026-08-10）。此前侧链**完全不响应 abort**：下面的包装层把
@@ -997,6 +1045,7 @@ export class GamePipeline {
               cacheHitTokens?: number;
               cacheMissTokens?: number;
               completionTokens?: number;
+              toolCalls?: AgentResult['toolCalls'];
               error?: string;
               duration?: number;
             }
@@ -1017,6 +1066,7 @@ export class GamePipeline {
           messages: (messages ?? []).map((m) => ({ role: m.role, content: m.content })),
           rawResponse: result?.rawResponse ?? result?.output ?? '',
           reasoning: result?.reasoning,
+          toolCalls: result?.toolCalls,
           error: result?.error,
           tokensUsed: result?.tokensUsed ?? 0,
           cacheHit: result?.cacheHit ?? false,
@@ -1063,10 +1113,29 @@ export class GamePipeline {
           const t0 = startTs();
           let result: any;
           try {
-            result = await real.chatWithTools(request, toolExecutor, {
-              ...options,
-              signal: options?.signal ?? turnSignal,
-            });
+            result = await real.chatWithTools(
+              request,
+              async (name: string, args: Record<string, any>) => {
+                try {
+                  const toolResult = await toolExecutor(name, args);
+                  game.recordAgentToolActivity(agentId, name, args, toolResult, runActivityId);
+                  return toolResult;
+                } catch (error) {
+                  game.recordAgentToolActivity(
+                    agentId,
+                    name,
+                    args,
+                    { error: error instanceof Error ? error.message : String(error) },
+                    runActivityId,
+                  );
+                  throw error;
+                }
+              },
+              {
+                ...options,
+                signal: options?.signal ?? turnSignal,
+              },
+            );
           } catch (err: any) {
             record(
               extractMessages(request),
@@ -1324,7 +1393,7 @@ export class GamePipeline {
     }
   }
 
-  private buildEventHandlers(): OrchestratorEvents {
+  private buildEventHandlers(runActivityId?: string): OrchestratorEvents {
     return {
       // 🎵 配乐：只暂存，**不在 Stage 1 就播** —— 见 run() 末尾的说明
       onPlayAudio: (marker) => {
@@ -1344,7 +1413,7 @@ export class GamePipeline {
       // === Stage 回调 ===
       onAgentStart: (agentId, config) => {
         console.log(`[GamePipeline] Agent 开始: ${agentId}`);
-        this.game.updateAgentStatus(agentId);
+        this.game.updateAgentStatus(agentId, runActivityId);
         // 初始化日志空条目 (等 complete 时补全 messages + result)
         this.game.addAgentLogEntry({
           agentId,
@@ -1361,7 +1430,7 @@ export class GamePipeline {
         });
       },
       onAgentComplete: async (result) => {
-        this.game.clearAgentStatus(result.agentId, result.error);
+        this.game.clearAgentStatus(result.agentId, result.error, runActivityId);
         // 补全本轮已启动日志的剩余字段（保留 onAgentStart 写入的占位条目）
         const prev = this.game.agentLog.find((e) => e.agentId === result.agentId);
         this.game.addAgentLogEntry({
@@ -1374,6 +1443,7 @@ export class GamePipeline {
           messages: result.requestMessages ?? prev?.messages ?? [],
           rawResponse: result.rawResponse,
           reasoning: result.reasoning,
+          toolCalls: result.toolCalls,
           error: result.error,
           tokensUsed: result.tokensUsed,
           cacheHit: result.cacheHit,
@@ -1386,7 +1456,7 @@ export class GamePipeline {
       },
       onAgentError: (agentId, error) => {
         console.error(`[GamePipeline] Agent 错误: ${agentId}`, error);
-        this.game.clearAgentStatus(agentId, error);
+        this.game.clearAgentStatus(agentId, error, runActivityId);
         // 补充错误日志
         const prev = this.game.agentLog.find((e) => e.agentId === agentId);
         this.game.addAgentLogEntry({
@@ -1405,6 +1475,10 @@ export class GamePipeline {
         });
       },
 
+      onToolCall: (agentId, toolName, args, result) => {
+        this.game.recordAgentToolActivity(agentId, toolName, args, result, runActivityId);
+      },
+
       onStateCommitError: (source, errors) => {
         console.error(`[GamePipeline] ${source} 状态提交失败:`, errors);
         this.emitMessage(`[系统] ${source} 部分状态未能写入: ${errors.join('；')}`, 'assistant');
@@ -1415,13 +1489,13 @@ export class GamePipeline {
         return await this.handleCombatTrigger(marker, storyOutput);
       },
       onCraftGenRequest: async (markers, _varsOutput, ctx) => {
-        await this.handleCraftGen(markers, ctx);
+        await this.handleCraftGen(markers, ctx, runActivityId);
       },
       onCharGenRequest: async (markers, _varsOutput, ctx) => {
-        await this.handleCharGen(markers, ctx);
+        await this.handleCharGen(markers, ctx, runActivityId);
       },
       onItemGenRequest: async (markers, _varsOutput, ctx) => {
-        await this.handleItemGen(markers, ctx);
+        await this.handleItemGen(markers, ctx, runActivityId);
       },
     };
   }
@@ -1934,7 +2008,11 @@ export class GamePipeline {
   }
 
   /** 处理制作生成链 */
-  private async handleCraftGen(markers: CraftGenRequestMarker[], ctx: AgentContext) {
+  private async handleCraftGen(
+    markers: CraftGenRequestMarker[],
+    ctx: AgentContext,
+    runActivityId?: string,
+  ) {
     const endpoint = this.getEndpointForAgent('craft_gen');
     if (!endpoint) {
       console.warn('[GamePipeline] craft_gen 跳过: 未配置 API endpoint');
@@ -1942,13 +2020,13 @@ export class GamePipeline {
     }
 
     const { runCraftGenChain } = await import('@engine/craft-gen-chain');
-    const clientFactory = this.getClientFactory();
+    const clientFactory = this.getClientFactory(runActivityId);
     const stateManager = this.getStateManager();
 
     // 真机修(2026-07-17): try/catch 进循环 — 单制作链失败不阻断后续
     for (const marker of markers) {
       try {
-        this.game.updateAgentStatus('craft_gen');
+        this.updateAgentActivityStatus('craft_gen', runActivityId);
         const request = {
           saveId: this.saveId,
           marker,
@@ -1963,24 +2041,28 @@ export class GamePipeline {
           clientFactory,
           stateManager,
         });
-        this.game.clearAgentStatus('craft_gen');
+        this.clearAgentActivityStatus('craft_gen', undefined, runActivityId);
         if (result.narrative) {
           this.emitMessage(result.narrative, 'assistant');
         }
       } catch (err) {
         if (isAbortError(err)) {
-          this.game.clearAgentStatus('craft_gen');
+          this.clearAgentActivityStatus('craft_gen', undefined, runActivityId);
           console.log('[GamePipeline] craft_gen 链已取消（离开游戏页 / 停止生成）');
           break;
         }
-        this.game.clearAgentStatus('craft_gen', String(err));
+        this.clearAgentActivityStatus('craft_gen', String(err), runActivityId);
         console.error('[GamePipeline] craft_gen 链失败，继续处理剩余请求:', err);
       }
     }
   }
 
   /** 处理角色生成链 */
-  private async handleCharGen(markers: CharGenRequestMarker[], ctx: AgentContext) {
+  private async handleCharGen(
+    markers: CharGenRequestMarker[],
+    ctx: AgentContext,
+    runActivityId?: string,
+  ) {
     const endpoint = this.getEndpointForAgent('char_gen');
     if (!endpoint) {
       console.warn('[GamePipeline] char_gen 跳过: 未配置 API endpoint');
@@ -1988,13 +2070,13 @@ export class GamePipeline {
     }
 
     const { runCharGenChain } = await import('@engine/char-gen-agent');
-    const clientFactory = this.getClientFactory();
+    const clientFactory = this.getClientFactory(runActivityId);
     const stateManager = this.getStateManager();
 
     // 真机修(2026-07-17): try/catch 进循环 — 单 NPC 链失败(如输出截断)不再连锁抛弃后续请求
     for (const marker of markers) {
       try {
-        this.game.updateAgentStatus('char_gen');
+        this.updateAgentActivityStatus('char_gen', runActivityId);
         const charGenRequest = {
           saveId: this.saveId,
           marker,
@@ -2009,7 +2091,7 @@ export class GamePipeline {
           clientFactory,
           stateManager,
         });
-        this.game.clearAgentStatus('char_gen');
+        this.clearAgentActivityStatus('char_gen', undefined, runActivityId);
         if (result.character && !this.ownsActiveSave) {
           // 🔴 COR-02：存档已切走 —— 这个 NPC 属于上一个存档，既不进内存角色表也不进聊天流。
           // 侧链**不响应 abort**（`getClientFactory` 包出来的客户端只转发入参 signal，
@@ -2037,11 +2119,11 @@ export class GamePipeline {
         if (isAbortError(err)) {
           // 取消不是失败：清干净状态并**跳出整个循环** —— 剩下的标记只会各自再被
           // 掐一次，徒增日志噪声（信号已经拉了，重试没有意义）
-          this.game.clearAgentStatus('char_gen');
+          this.clearAgentActivityStatus('char_gen', undefined, runActivityId);
           console.log('[GamePipeline] char_gen 链已取消（离开游戏页 / 停止生成）');
           break;
         }
-        this.game.clearAgentStatus('char_gen', String(err));
+        this.clearAgentActivityStatus('char_gen', String(err), runActivityId);
         console.error(
           `[GamePipeline] char_gen 链失败 (${marker.attributes?.characterName ?? '未知角色'})，继续处理剩余请求:`,
           err,
@@ -2064,6 +2146,7 @@ export class GamePipeline {
   private async handleItemGen(
     markers: import('@engine/types').ItemGenRequestMarker[],
     ctx: AgentContext,
+    runActivityId?: string,
   ) {
     if (markers.length === 0) return;
     const endpoint = this.getEndpointForAgent('item_gen');
@@ -2073,7 +2156,7 @@ export class GamePipeline {
     }
 
     const { runItemGenChain } = await import('@engine/item-gen-chain');
-    const clientFactory = this.getClientFactory();
+    const clientFactory = this.getClientFactory(runActivityId);
     const stateManager = this.getStateManager();
     const storyOutput = ctx.agentOutputs?.get('story') ?? '';
 
@@ -2086,7 +2169,7 @@ export class GamePipeline {
     const size = GamePipeline.ITEM_GEN_BATCH_SIZE;
     for (let start = 0; start < markers.length; start += size) {
       const batch = markers.slice(start, start + size);
-      this.game.updateAgentStatus('item_gen');
+      this.updateAgentActivityStatus('item_gen', runActivityId);
       try {
         const request = {
           saveId: this.saveId,
@@ -2103,16 +2186,16 @@ export class GamePipeline {
           clientFactory,
           stateManager,
         });
-        this.game.clearAgentStatus('item_gen');
+        this.clearAgentActivityStatus('item_gen', undefined, runActivityId);
         // 物品数据已由 stateManager 落库；run() finally 的 refreshFromDb() 会把
         // 最新 characters（含新物品/装备）回读进 Pinia，前端面板随之刷新。
       } catch (err) {
         if (isAbortError(err)) {
-          this.game.clearAgentStatus('item_gen');
+          this.clearAgentActivityStatus('item_gen', undefined, runActivityId);
           console.log('[GamePipeline] item_gen 链已取消（离开游戏页 / 停止生成）');
           break;
         }
-        this.game.clearAgentStatus('item_gen', String(err));
+        this.clearAgentActivityStatus('item_gen', String(err), runActivityId);
         console.error('[GamePipeline] item_gen 批量链失败（本批不落库，下回合重试）:', err);
       }
     }
@@ -2152,6 +2235,10 @@ export class GamePipeline {
     const endpoint = this.getEndpointForAgent('image_prompt');
     if (!endpoint) return fail('未配置 API endpoint');
 
+    const activityRunId = this.activeRunId ?? this.game.startAgentActivityRun(undefined, true);
+    this.game.updateAgentStatus('image_prompt', activityRunId);
+    let activityError: string | undefined;
+
     try {
       // 手动档可能在任何时候点（甚至本会话还没跑过一轮），chainData 不能假定已就绪
       const chain = await this.ensureChainData();
@@ -2167,12 +2254,16 @@ export class GamePipeline {
           presets: chain.presets,
           ...(signal ? { signal } : {}),
         },
-        { clientFactory: this.getClientFactory() },
+        { clientFactory: this.getClientFactory(activityRunId) },
       );
+      if (!result.ok) activityError = result.detail;
       return result.ok ? result.value : result;
     } catch (err) {
+      activityError = err instanceof Error ? err.message : String(err);
       console.error('[GamePipeline] image_prompt 侧链失败:', err);
-      return fail(err instanceof Error ? err.message : String(err));
+      return fail(activityError);
+    } finally {
+      this.game.clearAgentStatus('image_prompt', activityError, activityRunId);
     }
   }
 

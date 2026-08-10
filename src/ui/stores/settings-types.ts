@@ -185,6 +185,8 @@ export type UiSettings = {
   hoverDelayMs: number;
   /** 额外强制开启「减少动态效果」；系统偏好始终独立生效 */
   reducedMotion: boolean;
+  /** 解锁调试入口与原始 Agent 诊断；默认关闭，不影响玩家可见的语义活动账本 */
+  developerMode: boolean;
 
   // ═══ 消息 & 系统事件可见性 ═══
   systemEventsVisible: boolean;
