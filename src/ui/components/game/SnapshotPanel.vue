@@ -92,33 +92,33 @@ watch(
     <div v-if="game.isInCombat" class="combat-warn">⚠ 战斗进行中，恢复已禁用</div>
 
     <div v-if="snapshots.length > 0" class="snapshot-list">
-      <div
-        v-for="snap in snapshots"
-        :key="snap.id"
-        class="snapshot-card"
-        :class="{ current: currentSnapshotId === snap.id }"
-      >
-        <div class="snap-header">
-          <span class="snap-turn">第 {{ snap.turn }} 回合</span>
-          <span class="snap-reason">{{ reasonLabel[snap.reason] ?? snap.reason }}</span>
-          <span v-if="currentSnapshotId === snap.id" class="snap-current">当前</span>
+      <div v-for="snap in snapshots" :key="snap.id" class="snap-row">
+        <div class="snap-gutter" aria-hidden="true">
+          <span class="snap-node" :class="{ active: currentSnapshotId === snap.id }"></span>
         </div>
-        <div class="snap-meta">
-          <span v-if="playerOf(snap)" class="snap-player">
-            {{ playerOf(snap)!.name }} · HP {{ playerOf(snap)!.hp }}/{{ playerOf(snap)!.maxHp }}
-          </span>
-          <span class="snap-game-time">{{ gameTimeText(snap) }}</span>
-        </div>
-        <div class="snap-realtime">存档于 {{ timeText(snap.createdAt) }}</div>
-        <div class="snap-actions">
-          <AppButton
-            variant="secondary"
-            size="sm"
-            :disabled="game.isInCombat || currentSnapshotId === snap.id || restoring"
-            @click="restore(snap)"
-          >
-            恢复到此
-          </AppButton>
+        <div class="snapshot-card" :class="{ current: currentSnapshotId === snap.id }">
+          <div class="snap-header">
+            <span class="snap-turn">第 {{ snap.turn }} 回合</span>
+            <span class="snap-reason">{{ reasonLabel[snap.reason] ?? snap.reason }}</span>
+            <span v-if="currentSnapshotId === snap.id" class="snap-current">当前</span>
+          </div>
+          <div class="snap-meta">
+            <span v-if="playerOf(snap)" class="snap-player">
+              {{ playerOf(snap)!.name }} · HP {{ playerOf(snap)!.hp }}/{{ playerOf(snap)!.maxHp }}
+            </span>
+            <span class="snap-game-time">{{ gameTimeText(snap) }}</span>
+          </div>
+          <div class="snap-realtime">存档于 {{ timeText(snap.createdAt) }}</div>
+          <div class="snap-actions">
+            <AppButton
+              variant="secondary"
+              size="sm"
+              :disabled="game.isInCombat || currentSnapshotId === snap.id || restoring"
+              @click="restore(snap)"
+            >
+              恢复到此
+            </AppButton>
+          </div>
         </div>
       </div>
     </div>
@@ -132,8 +132,8 @@ watch(
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 8px;
-  gap: 8px;
+  padding: var(--theme-spacing-sm);
+  gap: var(--theme-spacing-sm);
 }
 .panel-header {
   display: flex;
@@ -141,8 +141,10 @@ watch(
   gap: 2px;
 }
 .panel-title {
+  font-family: var(--theme-font-title);
   font-size: 0.8125rem;
   font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--theme-text-primary);
 }
 .panel-hint {
@@ -151,36 +153,96 @@ watch(
 }
 .combat-warn {
   font-size: 0.75rem;
-  color: var(--theme-danger, #e5484d);
-  padding: 6px 8px;
-  background: var(--theme-surface-muted);
-  border-radius: var(--theme-radius-sm, 4px);
+  padding: 6px var(--theme-spacing-sm);
+  border-radius: var(--theme-radius-sm);
+  background: color-mix(in srgb, var(--theme-warning) 12%, transparent);
+  color: var(--theme-warning);
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 30%, transparent);
 }
+
+/* ===== 回合时间轴 ===== */
 .snapshot-list {
   flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
+.snap-row {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  column-gap: var(--theme-spacing-sm);
+}
+/* 卡片外边距计入网格轨道高度，连接线因而跨行连续 */
+.snap-row:not(:last-child) .snapshot-card {
+  margin-bottom: var(--theme-spacing-sm);
+}
+.snap-gutter {
+  position: relative;
+}
+/* 竖向连接线：首行自节点起、末行至节点止，不留悬空端 */
+.snap-gutter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--theme-card-border);
+}
+.snap-row:first-child .snap-gutter::before {
+  top: 15px;
+}
+.snap-row:last-child .snap-gutter::before {
+  bottom: calc(100% - 15px);
+}
+.snap-node {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  margin-left: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--theme-radius-full);
+  border: 1px solid var(--theme-card-border);
+  background: var(--theme-surface-muted);
+  transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
+}
+.snap-node.active {
+  background: var(--theme-primary);
+  border-color: var(--theme-primary);
+}
+
+/* ===== 快照卡片 ===== */
 .snapshot-card {
   background: var(--theme-card-bg);
-  padding: 8px 10px;
-  border-radius: var(--theme-radius-sm, 4px);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  border-radius: var(--theme-radius-md);
   border: 1px solid var(--theme-card-border);
+  box-shadow: var(--paper-stack);
+  transition:
+    background var(--theme-transition-fast),
+    box-shadow var(--theme-transition-fast);
 }
 .snapshot-card.current {
-  border-color: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  box-shadow:
+    0 0 0 1px var(--theme-primary),
+    var(--paper-stack);
 }
 .snap-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: var(--theme-spacing-sm);
+  margin-bottom: var(--theme-spacing-xs);
 }
 .snap-turn {
+  font-family: var(--theme-font-title);
   font-size: 0.8125rem;
   font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--theme-text-primary);
 }
 .snap-reason {
@@ -188,19 +250,20 @@ watch(
   padding: 1px 6px;
   background: var(--theme-surface-muted);
   color: var(--theme-text-muted);
-  border-radius: 3px;
+  border-radius: var(--theme-radius-sm);
 }
 .snap-current {
   font-size: 0.625rem;
   padding: 1px 6px;
-  background: var(--theme-primary);
-  color: var(--theme-on-primary, #fff);
-  border-radius: 3px;
+  border-radius: var(--theme-radius-sm);
   margin-left: auto;
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+  color: var(--theme-primary);
 }
 .snap-meta {
   display: flex;
-  gap: 10px;
+  gap: var(--theme-spacing-md);
   font-size: 0.6875rem;
   color: var(--theme-text-secondary);
   margin-bottom: 2px;
@@ -214,13 +277,25 @@ watch(
   margin-top: 6px;
 }
 .empty {
-  padding: 24px;
+  padding: 32px 0;
   text-align: center;
   color: var(--theme-text-muted);
   font-size: 0.8125rem;
+  font-style: italic;
+}
+.empty::before {
+  content: '—';
+  display: block;
+  margin-bottom: var(--theme-spacing-sm);
+  font-size: 1.25rem;
+  opacity: 0.3;
 }
 .error {
   font-size: 0.75rem;
-  color: var(--theme-danger, #e5484d);
+  padding: 6px var(--theme-spacing-sm);
+  border-radius: var(--theme-radius-sm);
+  background: color-mix(in srgb, var(--theme-error) 12%, transparent);
+  color: var(--theme-error);
+  border: 1px solid color-mix(in srgb, var(--theme-error) 30%, transparent);
 }
 </style>
