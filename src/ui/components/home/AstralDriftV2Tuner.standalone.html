@@ -4,9 +4,22 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
-    <title>Astral Drift v2 — runed</title>
+    <title>Astral Drift v2 — tuner</title>
     <style>
       /*
+        ASTRAL DRIFT v2 TUNER — the tuning playground for AstralDriftV2.standalone.html.
+
+        Identical to that file at load: every slider added here starts at the value v2 is
+        built with, so an untouched tuner IS v2. The extra HUD block drives the radius,
+        depth-plane offset and tilt of the magic circle and of each rune ring, because those
+        are the numbers that can only be found by eye. Nothing here writes anything back —
+        dial a figure in, read the numbers off the HUD, and copy them into AstralDriftV2 by
+        hand. This file is a bench, not a source of truth.
+
+        Everything below is the v2 header, and all of it still applies.
+
+        ----------------------------------------------------------------------------------
+
         ASTRAL DRIFT v2 — the drift with runes. Read this before changing it.
 
         v1 of this file (AstralDrift.standalone.html) is unchanged on disk. The only thing
@@ -236,6 +249,30 @@
         font-size: 10px;
         letter-spacing: 0.04em;
       }
+
+      /* Tuner only — the bench block below the shipped dials. */
+      .hud-sep {
+        height: 1px;
+        margin: 2px 0 1px;
+        background: rgba(120, 170, 235, 0.16);
+      }
+
+      .hud-head {
+        color: #6f88ac;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      /* Wider label column than the shipped dials: "circle tiltX" does not fit in 62px, and
+         a wrapped label pushes its own slider out of line with the rest of the block. */
+      .hud-row.tune {
+        grid-template-columns: 76px 116px 46px;
+      }
+
+      .hud-row.tune span:last-child {
+        color: #ffd7a3;
+      }
     </style>
     <script type="importmap">
       {
@@ -284,6 +321,72 @@
         <div class="hud-row">
           <span>circle</span><input id="dial-circle" type="range" min="0" max="200" value="100" />
           <span id="val-circle">1.00</span>
+        </div>
+        <div class="hud-sep"></div>
+        <div class="hud-head">tuning</div>
+        <div class="hud-row tune">
+          <span>circle R</span
+          ><input id="tune-circleR" type="range" min="0.80" max="2.40" step="0.01" value="1.50" />
+          <span id="tval-circleR">1.500</span>
+        </div>
+        <div class="hud-row tune">
+          <span>circle z</span
+          ><input id="tune-circleZ" type="range" min="-4.00" max="1.00" step="0.05" value="-1.00" />
+          <span id="tval-circleZ">-1.00</span>
+        </div>
+        <div class="hud-row tune">
+          <span>circle tiltX</span
+          ><input
+            id="tune-circleTiltX"
+            type="range"
+            min="-0.90"
+            max="0.90"
+            step="0.01"
+            value="0"
+          />
+          <span id="tval-circleTiltX">0.00</span>
+        </div>
+        <div class="hud-row tune">
+          <span>circle tiltY</span
+          ><input
+            id="tune-circleTiltY"
+            type="range"
+            min="-0.90"
+            max="0.90"
+            step="0.01"
+            value="0"
+          />
+          <span id="tval-circleTiltY">0.00</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rune1 R</span
+          ><input id="tune-rune1R" type="range" min="1.00" max="2.40" step="0.005" value="1.50" />
+          <span id="tval-rune1R">1.500</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rune1 z</span
+          ><input id="tune-rune1Z" type="range" min="-4.00" max="1.00" step="0.05" value="0" />
+          <span id="tval-rune1Z">0.00</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rune2 R</span
+          ><input id="tune-rune2R" type="range" min="1.00" max="2.40" step="0.005" value="1.665" />
+          <span id="tval-rune2R">1.665</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rune2 z</span
+          ><input id="tune-rune2Z" type="range" min="-4.00" max="1.00" step="0.05" value="0" />
+          <span id="tval-rune2Z">0.00</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rail R</span
+          ><input id="tune-railR" type="range" min="1.00" max="2.40" step="0.005" value="1.82" />
+          <span id="tval-railR">1.820</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rail z</span
+          ><input id="tune-railZ" type="range" min="-4.00" max="1.00" step="0.05" value="0" />
+          <span id="tval-railZ">0.00</span>
         </div>
         <div class="hud-hint">move the pointer to parallax · T title · H panel</div>
       </div>
@@ -2659,6 +2762,125 @@
         });
       }
 
+      // ==================================================================================
+      // Tuning bench — TUNER ONLY. None of this exists in AstralDriftV2.
+      //
+      // These are the numbers that cannot be reasoned to: how far out the figure wants to
+      // sit, how far below the disc plane it reads as a platform rather than as a second
+      // disc, and where each rune ring lands on it. Every slider starts at the value v2 is
+      // built with, so an untouched bench renders v2 exactly.
+      //
+      // Rebuilds run on 'input' and nowhere else. Doing the radius work per frame would be
+      // fewer lines and would throw away two annuli every frame for the 99.9% of frames in
+      // which nothing moved — and the cost would show up in the same HUD readout being used
+      // to judge the composition.
+      //
+      // One thing the bench cannot hold constant: a glyph cell is
+      // circumference / (32 * repeat) wide, so moving a register outward stretches its runes
+      // (`repeat` stays fixed here — it has to be an integer or the seam at uv.x = 1 tears a
+      // glyph in half). Stretched glyphs at the extremes are expected; when a radius is
+      // settled on, re-pick `repeat` back in the v2 file.
+      // ==================================================================================
+      const TUNE_BAND_DEPTH = 0.09; // register depth, in galaxy radii — held fixed
+      const TUNE_RAIL_HALF_WIDTH = 0.028; // world units, as the rail is built
+
+      const tuning = {
+        circleR: 1.5,
+        circleZ: -1.0,
+        circleTiltX: 0,
+        circleTiltY: 0,
+        rune1R: 1.5,
+        rune1Z: 0,
+        rune2R: 1.665,
+        rune2Z: 0,
+        railR: 1.82,
+        railZ: 0,
+      };
+      const tuningSync = {};
+
+      // Dispose before replacing: the old attribute buffers live on the GPU and nothing else
+      // holds a reference, so skipping this leaks a set of VBOs per slider tick — and a
+      // slider tick is cheap to produce by the hundred.
+      function retuneAnnulus(mesh, inner, outer) {
+        mesh.geometry.dispose();
+        mesh.geometry = buildAnnulus(inner, outer);
+      }
+
+      function applyCircleRadius() {
+        // Radius is carried entirely by mesh scale — the circle sits at quad radius 0.9, so
+        // there is no geometry to rebuild here at all.
+        magicCircle.mesh.scale.setScalar((galaxy.radius * tuning.circleR * 2.0) / 0.9);
+      }
+
+      function applyRegisterRadius(index) {
+        const center = index === 0 ? tuning.rune1R : tuning.rune2R;
+        const half = TUNE_BAND_DEPTH * 0.5;
+        retuneAnnulus(
+          runeRegisters[index].mesh,
+          galaxy.radius * (center - half),
+          galaxy.radius * (center + half),
+        );
+      }
+
+      function applyRailRadius() {
+        const radius = galaxy.radius * tuning.railR;
+        retuneAnnulus(
+          runeRails[0].mesh,
+          radius - TUNE_RAIL_HALF_WIDTH,
+          radius + TUNE_RAIL_HALF_WIDTH,
+        );
+      }
+
+      // One binder for all ten rows. Range/step live in the input attributes, so the only
+      // things that vary per row are the readout precision and what to do with the value.
+      function bindTuner(key, digits, apply) {
+        const input = document.querySelector('#tune-' + key);
+        const label = document.querySelector('#tval-' + key);
+        const sync = () => {
+          tuning[key] = Number(input.value);
+          label.textContent = tuning[key].toFixed(digits);
+          apply();
+        };
+        tuningSync[key] = sync;
+        input.addEventListener('input', sync);
+        sync();
+      }
+
+      // Programmatic entry point for the probe harness. It goes through the slider so the
+      // control, the readout and the scene can never disagree.
+      function setTuning(key, value) {
+        const input = document.querySelector('#tune-' + key);
+        if (!input || !tuningSync[key]) return false;
+        input.value = String(value);
+        tuningSync[key]();
+        return true;
+      }
+
+      function setupTuning() {
+        bindTuner('circleR', 3, applyCircleRadius);
+        bindTuner('circleZ', 2, () => {
+          magicCircle.mesh.position.z = tuning.circleZ;
+        });
+        bindTuner('circleTiltX', 2, () => {
+          magicCircle.mesh.rotation.x = tuning.circleTiltX;
+        });
+        bindTuner('circleTiltY', 2, () => {
+          magicCircle.mesh.rotation.y = tuning.circleTiltY;
+        });
+        bindTuner('rune1R', 3, () => applyRegisterRadius(0));
+        bindTuner('rune1Z', 2, () => {
+          runeRegisters[0].mesh.position.z = tuning.rune1Z;
+        });
+        bindTuner('rune2R', 3, () => applyRegisterRadius(1));
+        bindTuner('rune2Z', 2, () => {
+          runeRegisters[1].mesh.position.z = tuning.rune2Z;
+        });
+        bindTuner('railR', 3, applyRailRadius);
+        bindTuner('railZ', 2, () => {
+          runeRails[0].mesh.position.z = tuning.railZ;
+        });
+      }
+
       const statFps = document.querySelector('#stat-fps');
       const statMs = document.querySelector('#stat-ms');
       const statCalls = document.querySelector('#stat-calls');
@@ -2749,6 +2971,8 @@
       resize();
       setupPointer();
       setupDials();
+      // Runs once at load, which also applies every default — an untouched bench is v2.
+      setupTuning();
       animate();
 
       // Handles for the offscreen probe harness (screenshot + benchmark without a visible
@@ -2767,6 +2991,11 @@
         resize,
         applyScale,
         dials,
+        // Tuner only. `tuning` is the live values (read them off to copy back into v2);
+        // setTuning(key, value) is how the harness moves one, since writing the object
+        // directly would leave the slider and the scene behind.
+        tuning,
+        setTuning,
         glyphAtlas,
         layers: {
           storm,
