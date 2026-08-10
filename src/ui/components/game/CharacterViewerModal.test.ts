@@ -17,6 +17,9 @@ import { reactive } from 'vue';
 import { createDefaultCharacterState } from '@engine/types';
 import type { AssetMetaRecord, AssetType, CharacterState } from '@engine/types';
 import CharacterViewerModal from './CharacterViewerModal.vue';
+// 源码断言用（jsdom 不算布局，某些 CSS 不变式只能这么钉）——
+// 同 ApiSection.image-endpoint.test.ts 的 `?raw` 先例
+import viewerSource from '@ui/components/game/CharacterViewerModal.vue?raw';
 
 let mockGame: any;
 let mockAssets: any;
@@ -119,6 +122,18 @@ describe('CharacterViewerModal — 开合', () => {
     const w = viewer();
     await flushPromises();
     (document.querySelector('.head-close') as HTMLElement).click();
+    expect(w.emitted('close')).toHaveLength(1);
+  });
+
+  /**
+   * ★ 本弹窗走 AppModal 的 `bare` 档（不画页头），而 `bare` **不该**顺手废掉 Esc ——
+   * design.md §4.5 要求必须支持。这里从查看器这一端把整条链钉住
+   * （AppModal 那一端另有 AppModal.test.ts）。
+   */
+  it('★ Esc 关闭（bare 档不许把 Esc 一起关掉）', async () => {
+    const w = viewer();
+    await flushPromises();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(w.emitted('close')).toHaveLength(1);
   });
 });
@@ -283,6 +298,34 @@ describe('CharacterViewerModal — 页签', () => {
     expect(document.querySelector('.fx-detail')?.textContent).toContain('受法则庇护');
   });
 
+  /**
+   * ★ 遗留状态效果整键缺 `remainingTime` / `stacks`（state-manager 自己有一句注释
+   * 点名这种行存在）。严格判 `null` 时它会掉进模板串，界面上写的是「undefined小时」。
+   */
+  it('★ remainingTime / stacks 缺席 → 不许把 undefined 印到界面上', async () => {
+    await open('状态', {
+      statusEffects: [
+        {
+          name: '古旧诅咒',
+          description: '来历不明',
+          category: '减益',
+          timeUnit: '小时',
+          source: '',
+          effects: {},
+        } as never,
+      ],
+    });
+    expect(document.querySelector('.fx-time')?.textContent?.trim()).toBe('永久');
+
+    (document.querySelector('.fx-chip-btn') as HTMLElement).click();
+    await flushPromises();
+    const meta = document.querySelector('.fx-detail-meta')?.textContent ?? '';
+    expect(meta).toContain('层数 1');
+    expect(meta).toContain('剩余 永久');
+    // 整个弹窗里一处都不许出现这个词
+    expect(document.querySelector('.viewer')?.textContent).not.toContain('undefined');
+  });
+
   it('技能页空态用装饰空态文案，不是「暂无数据」', async () => {
     await open('技能');
     expect(document.querySelector('.empty-tab')?.textContent).toContain('未修得一技');
@@ -356,5 +399,76 @@ describe('CharacterViewerModal — 跟着数据走', () => {
     await flushPromises();
     expect(document.querySelector('.purse')).toBeNull();
     expect(document.querySelector('.aff-block')).not.toBeNull();
+  });
+
+  it('切页签时相册的放大格收起（回相册不该有一格还摊着）', async () => {
+    mockAssets.assets = [makeRow('维奥莱塔', '立绘', 'base')];
+    viewer();
+    await flushPromises();
+    const clickTab = async (label: string) => {
+      const b = [...document.querySelectorAll('.viewer .tab-item')].find(
+        (n) => n.textContent?.trim() === label,
+      ) as HTMLElement;
+      b.click();
+      await flushPromises();
+    };
+    await clickTab('相册');
+    (document.querySelector('.album-tile') as HTMLElement).click();
+    await flushPromises();
+    expect(document.querySelector('.album-tile.focused')).not.toBeNull();
+
+    await clickTab('档案');
+    await clickTab('相册');
+    expect(document.querySelector('.album-tile.focused')).toBeNull();
+  });
+});
+
+describe('CharacterViewerModal — 无障碍', () => {
+  /**
+   * ★ `.viewer-scroll` 是弹窗里唯一的滚动容器（外面几层全 `overflow: hidden`），
+   * 而某些页签下它里面一个可聚焦元素都没有（没登神条目、没心里话、只有一段长背景）。
+   * 没有 `tabindex` 的话那段文字只有鼠标读得到。
+   */
+  it('★ 滚动区可聚焦且带 role/label —— 否则键盘用户读不到长背景故事', async () => {
+    mockGame.characters = [makeChar({ background: '边'.repeat(800) })];
+    viewer();
+    await flushPromises();
+    const scroll = document.querySelector('.viewer-scroll') as HTMLElement;
+    expect(scroll.getAttribute('tabindex')).toBe('0');
+    expect(scroll.getAttribute('role')).toBe('region');
+    expect(scroll.getAttribute('aria-label')).toContain('维奥莱塔');
+  });
+
+  it('展开控件报 aria-expanded（登神条目 / 状态效果）', async () => {
+    mockGame.characters = [
+      makeChar({
+        ascension: {
+          enabled: true,
+          elements: [],
+          authority: [],
+          law: [{ name: '秩序', description: 'x', effects: [], costDescription: '' }],
+          deityPosition: '',
+          divineKingdom: { name: '', description: '' },
+        },
+      }),
+    ];
+    viewer();
+    await flushPromises();
+    const head = document.querySelector('.asc-entry-head') as HTMLElement;
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    head.click();
+    await flushPromises();
+    expect(document.querySelector('.asc-entry-head')?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  /**
+   * ★ jsdom 不算布局，所以这条只能断言源码 —— 但它挡的是一次真机逮到的缺陷:
+   * `.viewer-body` 少了 `min-height: 0` 时，窄屏（竖向叠栏）下本栏会撑到内容的自然
+   * 高度，把 `.viewer-scroll` 的内部滚动整个作废，弹窗底部内容被切掉且滚不到。
+   * 同 ApiSection.image-endpoint.test.ts 的源码断言先例。
+   */
+  it('★ .viewer-body 保留 min-height: 0（窄屏内部滚动的命门，jsdom 测不到）', () => {
+    const rule = viewerSource.slice(viewerSource.indexOf('.viewer-body {'));
+    expect(rule.slice(0, rule.indexOf('}'))).toContain('min-height: 0');
   });
 });

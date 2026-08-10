@@ -312,13 +312,15 @@ const viewingName = ref<string | null>(null);
         </div>
 
         <div v-if="presentChars.length" class="scene-npc-list">
+          <!-- 点开角色查看器。⚠️ **这一行不加 `title`**: 它已经挂着心声悬停气泡，
+               再给一个原生 tooltip 会在同一次悬停里冒出两层浮层（本文件里其它
+               带 `title` 的都是没有气泡的控件）。可点性靠 hover 态与 `<button>` 本身表达。 -->
           <button
             v-for="char in presentChars"
             :key="char.id"
             class="scene-npc-item"
             :class="{ hovered: thoughtPop.key.value === char.id }"
             :aria-describedby="thoughtPop.key.value === char.id ? 'npc-thought-pop' : undefined"
-            :title="`查看 ${char.name} 的档案`"
             @click="viewingName = char.name"
             @mouseenter="thoughtPop.onEnter($event, char.id)"
             @mouseleave="thoughtPop.hide"

@@ -26,6 +26,28 @@ import type {
 // 头部
 // ═══════════════════════════════════════════════════════════
 
+/**
+ * 「这个字段名义上是 `string[]`，实际可能是任何东西」的收敛器。
+ *
+ * 🔴 为什么需要它: `identity` / `occupation` 在 `state-manager` 的
+ * `update_character` 白名单里，落库走的是一句裸 `Object.assign` —— **零类型校验**。
+ * char-gen 那条路会把它归一成数组，`vars_update` 那条路不会。于是
+ * `(char.identity ?? []).join(...)` 会炸: `??` 只兜 null/undefined，一个**字符串**
+ * 照样往下走，`.join is not a function` 直接从 `mount` 里抛出来 —— 整个弹窗打不开，
+ * 而不是少显示一行。（审查逮到的，已实测。）
+ */
+function joinLoose(value: unknown, sep = ' / '): string {
+  if (Array.isArray(value)) return value.filter((v) => typeof v === 'string').join(sep);
+  return typeof value === 'string' ? value : '';
+}
+
+/** 同上: 名义上是 `string` 的叙事字段可能躺着数字/对象，`.trim()` 会当场抛 */
+function textLoose(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number') return String(value);
+  return '';
+}
+
 export interface SubtitleSegment {
   text: string;
   /** `tier` 那一段要按层级着色；其余是普通文字。**不靠字符串比对认它** */
@@ -48,15 +70,13 @@ export interface SubtitleSegment {
 export function buildSubtitleSegments(char: CharacterState): SubtitleSegment[] {
   const tierLabel = getTierConfig(char.tier)?.name ?? char.tierName;
   const raw: SubtitleSegment[] = [
-    { text: char.race, kind: 'plain' },
-    { text: (char.identity ?? []).join(' / '), kind: 'plain' },
-    { text: (char.occupation ?? []).join(' / '), kind: 'plain' },
-    { text: tierLabel, kind: 'tier' },
+    { text: textLoose(char.race), kind: 'plain' },
+    { text: joinLoose(char.identity), kind: 'plain' },
+    { text: joinLoose(char.occupation), kind: 'plain' },
+    { text: textLoose(tierLabel), kind: 'tier' },
     { text: char.level ? `Lv ${char.level}` : '', kind: 'plain' },
   ];
-  return raw
-    .map((seg) => ({ ...seg, text: (seg.text ?? '').trim() }))
-    .filter((seg) => seg.text !== '');
+  return raw.map((seg) => ({ ...seg, text: seg.text.trim() })).filter((seg) => seg.text !== '');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -99,14 +119,17 @@ export interface ProfileField {
  * （见 char-gen-agent.ts 的 `customFields`），而 M6 那轮升格没带上它。所以这里
  * 必须防 `unknown` —— 扩展位是 `Record<string, any>`，里面完全可能躺着数组或对象，
  * 直接插值会渲染成 `[object Object]`。
+ *
+ * 🔴 另外三行**同样**要过 `textLoose`: 它们名义上是 `string?`，但与 `identity` 一样
+ * 经 `update_character` 的裸 `Object.assign` 落库、零校验。此前这里对扩展位那一行
+ * 设了防、对紧挨着的三个正式字段没设 —— 而 `.trim()` 碰上数字就当场抛。
  */
 export function buildProfileFields(char: CharacterState): ProfileField[] {
-  const likes = char.customFields?.likes;
   const raw: ProfileField[] = [
-    { label: '性格', text: char.personality ?? '' },
-    { label: '喜爱', text: typeof likes === 'string' ? likes : '' },
-    { label: '外貌', text: char.appearance ?? '' },
-    { label: '着装', text: char.outfit ?? '' },
+    { label: '性格', text: textLoose(char.personality) },
+    { label: '喜爱', text: textLoose(char.customFields?.likes) },
+    { label: '外貌', text: textLoose(char.appearance) },
+    { label: '着装', text: textLoose(char.outfit) },
   ];
   return raw.map((f) => ({ label: f.label, text: f.text.trim() })).filter((f) => f.text !== '');
 }
@@ -150,10 +173,10 @@ const ASCENSION_META = [
 
 function toEntry(d: ElementDetail | AuthorityDetail | LawDetail): AscensionEntry {
   return {
-    name: d.name,
-    description: d.description ?? '',
-    effects: d.effects ?? [],
-    cost: 'costDescription' in d ? (d.costDescription ?? '') : '',
+    name: textLoose(d.name),
+    description: textLoose(d.description),
+    effects: Array.isArray(d.effects) ? d.effects.filter((e) => typeof e === 'string') : [],
+    cost: 'costDescription' in d ? textLoose(d.costDescription) : '',
   };
 }
 
@@ -163,6 +186,11 @@ function toEntry(d: ElementDetail | AuthorityDetail | LawDetail): AscensionEntry
  * 🔴 三个字段自 Phase 9 起是**数组**（此前是 Record）。存量存档里可能还躺着旧形状，
  * 而 `Object.values` 对两者都成立、`.map` 只对数组成立 —— 所以这里统一先摊平。
  * 不做这一步的症状不是空白，是 `.map is not a function` 把整个弹窗打成白屏。
+ *
+ * 🔴 **裸字符串条目要收下，不能丢**（审查逮到）: `ascension` 同样在
+ * `update_character` 白名单里、零校验落库，AI 完全写得出 `elements: ['空间','时间']`。
+ * 按「只要对象」过滤的话，一个真有两个要素的角色会显示成 `0/3` +「尚未踏上长阶」——
+ * 静默丢数据比显示得不完整糟得多，所以字符串按「只有名字的条目」收。
  */
 export function buildAscensionTracks(char: CharacterState): AscensionTrack[] {
   const asc = char.ascension;
@@ -176,8 +204,14 @@ export function buildAscensionTracks(char: CharacterState): AscensionTrack[] {
     return {
       ...meta,
       entries: list
-        .filter((d): d is ElementDetail => Boolean(d) && typeof d === 'object')
-        .map(toEntry),
+        .map((d) =>
+          typeof d === 'string'
+            ? { name: d.trim(), description: '', effects: [], cost: '' }
+            : d && typeof d === 'object'
+              ? toEntry(d as ElementDetail)
+              : null,
+        )
+        .filter((e): e is AscensionEntry => e !== null && e.name !== ''),
     };
   });
 }
@@ -250,12 +284,19 @@ export interface AlbumGroup {
  *
  * 组内: 主图（无变体）在前，其余按变体名升序、同名按 `createdAt` —— 与
  * `buildAssetIndex` 的 `compareStable` 同一条口径，于是刷新两次顺序不变。
+ *
+ * 🔴 **一个 (类型, 变体) 只出一格**（审查逮到）: 格子按行 `id` 做 key，但图是按
+ * `(名字, 类型, 变体)` 重新解析的 —— 索引对同一个位只认一个胜出行
+ * （`buildAssetIndex` 明写了撞车规则）。不去重就会出现**两格标题相同、图也相同**的
+ * 并排格子，而它们在界面上无从区分；日后相册长出「删除 / 设为主图」这类按钮时，
+ * 用户点的是哪一行就说不清了。排序在前、去重在后，所以留下的恰是索引会选中的那一行。
  */
 export function buildAlbumGroups(rows: readonly AssetMetaRecord[], name: string): AlbumGroup[] {
   const mine = rows.filter((r) => r.name === name);
   const groups: AlbumGroup[] = [];
 
   for (const type of ASSET_TYPES) {
+    const seen = new Set<string>();
     const tiles = mine
       .filter((r) => r.type === type)
       .sort((a, b) => {
@@ -265,6 +306,13 @@ export function buildAlbumGroups(rows: readonly AssetMetaRecord[], name: string)
         if (av !== bv) return av === '' ? -1 : bv === '' ? 1 : av < bv ? -1 : 1;
         if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
         return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      })
+      // 同位撞车时留排序后的第一行 —— 与 compareStable 的胜者同一个
+      .filter((r) => {
+        const slot = r.variant ?? '';
+        if (seen.has(slot)) return false;
+        seen.add(slot);
+        return true;
       })
       .map<AlbumTile>((r) => ({
         id: r.id,

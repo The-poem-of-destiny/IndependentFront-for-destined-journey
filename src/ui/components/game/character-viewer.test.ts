@@ -76,6 +76,26 @@ describe('buildSubtitleSegments', () => {
     ).toEqual(['兽人']);
   });
 
+  /**
+   * ★ `identity` / `occupation` 名义上是 `string[]`，但 `state-manager` 的
+   * `update_character` 白名单落库走裸 `Object.assign`、零校验，`vars_update` 那条路
+   * 不做归一化。`(x ?? []).join()` 只兜 null/undefined —— 一个**字符串**会让
+   * `.join is not a function` 从 mount 里抛出来，整个弹窗打不开。
+   */
+  it('★ identity 是字符串（AI 直接写了一个词）→ 当一段用，不抛', () => {
+    const c = char({ tier: 0, tierName: '', level: 0 });
+    (c as unknown as Record<string, unknown>).identity = '酒馆老板';
+    expect(texts(c)).toEqual(['人类', '酒馆老板']);
+  });
+
+  it('★ occupation 是数字 / 混着非字符串 → 静默跳过，不渲染 [object Object]', () => {
+    const c = char({ tier: 0, tierName: '', level: 0 });
+    (c as unknown as Record<string, unknown>).occupation = 42;
+    expect(texts(c)).toEqual(['人类']);
+    (c as unknown as Record<string, unknown>).occupation = ['商人', { x: 1 }, null];
+    expect(texts(c)).toEqual(['人类', '商人']);
+  });
+
   it('多身份 / 多职业各自用 / 连起来', () => {
     expect(
       texts(
@@ -140,6 +160,22 @@ describe('buildProfileFields', () => {
     const fields = buildProfileFields(char({ customFields: { likes: ['秩序', '矿石'] } }));
     expect(fields).toEqual([]);
   });
+
+  /**
+   * ★ 三个正式字段与上面那个扩展位**同样**没有校验（`update_character` 裸
+   * `Object.assign`），而 `.trim()` 碰上数字会当场抛、把整个弹窗带走。
+   */
+  it('★ personality 是数字 → 转成字符串显示，绝不抛', () => {
+    const c = char();
+    (c as unknown as Record<string, unknown>).personality = 42;
+    expect(buildProfileFields(c)).toEqual([{ label: '性格', text: '42' }]);
+  });
+
+  it('★ appearance 是对象 → 当没有（不渲染 [object Object]）', () => {
+    const c = char();
+    (c as unknown as Record<string, unknown>).appearance = { hair: '银白' };
+    expect(buildProfileFields(c)).toEqual([]);
+  });
 });
 
 describe('buildAscensionTracks', () => {
@@ -195,6 +231,39 @@ describe('buildAscensionTracks', () => {
     };
     const tracks = buildAscensionTracks(legacy);
     expect(tracks[2].entries.map((e) => e.name)).toEqual(['镇压与秩序']);
+  });
+
+  /**
+   * ★ `ascension` 同样零校验落库，AI 写得出 `elements: ['空间','时间']`。
+   * 按「只要对象」过滤会让一个真有两个要素的角色显示成 `0/3` +「尚未踏上长阶」——
+   * 静默丢数据比显示得不完整糟得多。
+   */
+  it('★ 裸字符串条目当「只有名字的条目」收下，不静默丢掉', () => {
+    const c = char();
+    (c.ascension as unknown as Record<string, unknown>).elements = ['空间', '时间'];
+    const tracks = buildAscensionTracks(c);
+    expect(tracks[0].entries.map((e) => e.name)).toEqual(['空间', '时间']);
+    expect(tracks[0].entries[0]).toEqual({
+      name: '空间',
+      description: '',
+      effects: [],
+      cost: '',
+    });
+    expect(hasAnyAscension(tracks)).toBe(true);
+  });
+
+  it('无名条目（空串 / 空对象 / null）不占格', () => {
+    const c = char();
+    (c.ascension as unknown as Record<string, unknown>).law = ['  ', {}, null, '秩序'];
+    expect(buildAscensionTracks(c)[2].entries.map((e) => e.name)).toEqual(['秩序']);
+  });
+
+  it('effects 不是数组时当空 —— 模板要 v-for 它', () => {
+    const c = char();
+    (c.ascension as unknown as Record<string, unknown>).law = [
+      { name: '秩序', description: 'x', effects: '定身' },
+    ];
+    expect(buildAscensionTracks(c)[2].entries[0].effects).toEqual([]);
   });
 
   it('整个 ascension 缺失（旧数据 / 怪物）也给三条空轨道', () => {
@@ -265,7 +334,13 @@ describe('buildAlbumGroups', () => {
     expect(groups[0].tiles[0].variant).toBeUndefined();
   });
 
-  it('同变体撞车时按 createdAt → id 稳定排序（刷新两次顺序不变）', () => {
+  /**
+   * ★ 格子按行 id 做 key，图却按 `(名字, 类型, 变体)` 重新解析 —— 而索引对同一个位
+   * 只认一个胜出行。不去重就是两格标题相同、图也相同，且界面上无从区分
+   * （日后加「删除 / 设为主图」按钮时就说不清点的是哪一行了）。
+   * 留下的必须是 `compareStable` 的胜者: createdAt 最早、同 createdAt 按 id 升序。
+   */
+  it('★ 同位撞车只出一格，且留的是索引会选中的那一行', () => {
     const groups = buildAlbumGroups(
       [
         row({ id: 'z', variant: '微笑', createdAt: 5 }),
@@ -274,6 +349,22 @@ describe('buildAlbumGroups', () => {
       ],
       '维奥莱塔',
     );
-    expect(groups[0].tiles.map((t) => t.id)).toEqual(['m', 'a', 'z']);
+    expect(groups[0].tiles.map((t) => t.id)).toEqual(['m']);
+  });
+
+  it('主图撞车同样只出一格', () => {
+    const groups = buildAlbumGroups(
+      [row({ id: 'late', createdAt: 9 }), row({ id: 'early', createdAt: 1 })],
+      '维奥莱塔',
+    );
+    expect(groups[0].tiles.map((t) => t.id)).toEqual(['early']);
+  });
+
+  it('不同变体互不影响（去重只按位，不按类型整体）', () => {
+    const groups = buildAlbumGroups(
+      [row({ id: 'b' }), row({ id: 'v1', variant: '微笑' }), row({ id: 'v2', variant: '大笑' })],
+      '维奥莱塔',
+    );
+    expect(groups[0].tiles.map((t) => t.id)).toEqual(['b', 'v2', 'v1']);
   });
 });

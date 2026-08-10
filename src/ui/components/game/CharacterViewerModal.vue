@@ -100,6 +100,11 @@ watch(
   },
 );
 
+/** 离开相册页也把放大格收起来 —— 否则回到相册时还有一格摊着，像是没关掉的抽屉 */
+watch(activeTab, () => {
+  focusedTile.value = null;
+});
+
 // ═══ 画像 ═══
 // 解构而不是留着整个对象: 模板里只有**顶层** ref 会自动解包，
 // `portrait.url` 那种写法会把 Ref 对象本身插进 `src`
@@ -141,11 +146,27 @@ function chipType(fx: StatusEffect): 'buff' | 'debuff' | 'special' {
   if (fx.category === '减益') return 'debuff';
   return 'special';
 }
+/**
+ * 🔴 `== null` 而不是 `=== null` —— 这里**必须**把 `undefined` 一起收掉。
+ *
+ * `remainingTime` 名义上是 `number | null`，但存量数据里有整键缺席的行
+ * （state-manager 自己就有一句注释点名「遗留数据 remainingTime === undefined」）。
+ * 严格判 `null` 时 `undefined` 会一路掉到末尾那句模板串，界面上写的是
+ * **「undefined小时」** —— 这条是审查逮到的，而且是**对着邻居退步**:
+ * CharacterListPanel / StatusOverview 用的是 `v-if === null` + `v-else-if < 999`
+ * 且**没有 v-else**，那种写法碰到 undefined 只是不显示，不会把这个词印出来。
+ */
 function durationText(fx: StatusEffect): string {
-  if (fx.remainingTime === null) return '永久';
+  if (fx.remainingTime == null) return '永久';
   // 999 是"实际上不会走完"的约定值（同 CharacterListPanel），照数字显示只会让人以为是 bug
   if (fx.remainingTime >= 999) return '长期';
-  return `${fx.remainingTime}${fx.timeUnit}`;
+  return `${fx.remainingTime}${fx.timeUnit ?? ''}`;
+}
+
+/** 同上一条的同类: `stacks` 缺席的遗留行不该在详情里印出「层数 undefined」 */
+function stacksText(fx: StatusEffect): string {
+  const now = fx.stacks ?? 1;
+  return fx.maxStacks ? `${now}/${fx.maxStacks}` : `${now}`;
 }
 
 // ═══ 相册 ═══
@@ -201,7 +222,16 @@ function toggleTile(tile: AlbumTile) {
 
         <AppTabs :tabs="TABS" :active="activeTab" @select="activeTab = $event" />
 
-        <div class="viewer-scroll">
+        <!-- 🔴 `tabindex="0"` 不是装饰: 这是弹窗里**唯一**的滚动容器（外面几层全是
+             `overflow: hidden`），而某些页签下它里面一个可聚焦元素都没有 —— 比如没有
+             登神条目、没有心里话、只有一段长背景故事的角色。那时键盘用户按 PageDown
+             会往上找祖先，而祖先都不滚，于是那段文字**只有鼠标能读到**。 -->
+        <div
+          class="viewer-scroll"
+          tabindex="0"
+          role="region"
+          :aria-label="`${char.name} 的档案内容`"
+        >
           <!-- ─────── 档案 ─────── -->
           <template v-if="activeTab === 'profile'">
             <!-- 好感度: 中线为 0，正向右生长、负向左生长（同场景栏那一条的口径） -->
@@ -374,10 +404,7 @@ function toggleTile(tile: AlbumTile) {
                     <div class="fx-detail-name">{{ fx.name }}</div>
                     <p v-if="fx.description" class="fx-detail-desc">{{ fx.description }}</p>
                     <div class="fx-detail-meta">
-                      <span
-                        >层数 {{ fx.stacks
-                        }}<template v-if="fx.maxStacks">/{{ fx.maxStacks }}</template></span
-                      >
+                      <span>层数 {{ stacksText(fx) }}</span>
                       <span>剩余 {{ durationText(fx) }}</span>
                       <span v-if="fx.source">来源 {{ fx.source }}</span>
                     </div>
@@ -528,12 +555,17 @@ function toggleTile(tile: AlbumTile) {
   right: var(--theme-spacing-md);
 }
 
-/* 画像栏 —— 42% 是让 4:5 立绘在常见桌面下几乎不被裁；再宽信息面就要折行 */
+/**
+ * 画像栏 —— 42% 是让 4:5 立绘在常见桌面下几乎不被裁；再宽信息面就要折行。
+ *
+ * 同 `.viewer-body`：**不设 background**。画框自己的底
+ * （`CharacterPortrait` 的 `.portrait-frame`，`fill` 档只撤掉边框/圆角/阴影、保留底）
+ * 已经铺满本栏，这里再铺一层是重复，且会盖掉主题给 `.modal-content` 的处理。
+ */
 .viewer-portrait {
   flex: 0 0 42%;
   min-width: 0;
   overflow: hidden;
-  background: var(--theme-surface-muted);
   border-right: 1px solid var(--theme-card-border);
 }
 .portrait-initials {
@@ -561,7 +593,16 @@ function toggleTile(tile: AlbumTile) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--theme-card-bg);
+  /**
+   * 🔴 **不设 background** —— 让 `.modal-content` 的主题处理透上来。
+   *
+   * 审查逮到的: 铺一层不透明底会把每个主题给 `.modal-content` 的处理整个盖掉
+   * （indigo 的 frosted + `backdrop-filter: blur(20px)`、sakura 的漆器底纹）。
+   * 缺省档下 `.modal-content` 的底本来就是 `--theme-card-bg`，所以撤掉它在无主题
+   * 覆盖时**逐像素等价**，只在有覆盖时才变 —— 而那正是主题想要的样子。
+   * 先例就在隔壁: `.char-panel` 一样不设底，crimson 还在那个前提上做了
+   * `:has(.char-panel)` 的整套液态玻璃。
+   */
 }
 
 .viewer-head {
