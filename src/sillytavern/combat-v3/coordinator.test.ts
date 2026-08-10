@@ -1619,8 +1619,7 @@ describe('EndTurn：end_turn 工具调用翻译', () => {
       summary: '',
     };
     const ctx: Parameters<typeof routeEnemyCommand>[2] = {
-      clientFactory: () =>
-        fakeEnemyClient([{ name: 'end_turn', args: { actorName: '乙' } }]),
+      clientFactory: () => fakeEnemyClient([{ name: 'end_turn', args: { actorName: '乙' } }]),
       endpoint: opts.deps.endpoint,
       saveId: 's1',
       submitCommand: async () => undefined,

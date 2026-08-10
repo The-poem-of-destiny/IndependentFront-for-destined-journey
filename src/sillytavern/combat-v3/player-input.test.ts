@@ -189,24 +189,32 @@ describe('parsePlayerInput — 默认目标（无点名时打敌方存活首位�
 
   it('「对妲丽安施展治疗术」→ 有名字命中时不默认，目标=妲丽安（友方治疗）', () => {
     const cmd = expectAttack(
-      parsePlayerInput('对妲丽安施展治疗术', ctx({
-        skills: ['治疗术'],
-        units: [
-          { id: '艾萨', name: '艾萨', side: 'player' },
-          { id: '妲丽安', name: '妲丽安', side: 'player' },
-          { id: '骷髅兵', name: '骷髅兵', side: 'enemy' },
-        ],
-      })),
+      parsePlayerInput(
+        '对妲丽安施展治疗术',
+        ctx({
+          skills: ['治疗术'],
+          units: [
+            { id: '艾萨', name: '艾萨', side: 'player' },
+            { id: '妲丽安', name: '妲丽安', side: 'player' },
+            { id: '骷髅兵', name: '骷髅兵', side: 'enemy' },
+          ],
+        }),
+      ),
     );
     expect(cmd.payload.skill).toBe('治疗术');
     expect(cmd.payload.targetId).toBe('妲丽安');
   });
 
   it('攻击意图但场上没有敌方存活单位 → 拒绝（不产出指向自己的攻击）', () => {
-    const r = parsePlayerInput('攻击', ctx({ units: [
-      { id: '艾萨', name: '艾萨', side: 'player' },
-      { id: '艾达', name: '艾达', side: 'player' },
-    ] }));
+    const r = parsePlayerInput(
+      '攻击',
+      ctx({
+        units: [
+          { id: '艾萨', name: '艾萨', side: 'player' },
+          { id: '艾达', name: '艾达', side: 'player' },
+        ],
+      }),
+    );
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toContain('没有可攻击的敌方单位');
