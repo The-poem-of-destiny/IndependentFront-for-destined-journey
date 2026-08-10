@@ -481,6 +481,11 @@ export class GamePipeline {
       // 侧链: 情景插画的中文 → danbooru 转换（图像生成 D28）。不进主 DAG、也不进设置页
       // Agent 子导航（D53）—— 但它的 systemPrompt/世界书/采样参数照旧从这里装配。
       'image_prompt',
+      // 侧链: 战斗决策（combat-v3 Coordinator 在战斗会话中按 RequiredInput.PlayerCommand
+      // 唤起，不走主 DAG）。systemPrompt/模型/温度/世界书照旧从这里装配 —— coordinator
+      // 按 agentId === 'combat_v3' 从 ctx.configs 读（见 combat-v3/coordinator.ts 的
+      // combatSystemPrompt），设置页 Agent 子导航可编辑。
+      'combat_v3',
     ];
 
     // 复用 buildEndpoints() 的映射结果（ApiEntry.model → ApiEndpoint.defaultModel）

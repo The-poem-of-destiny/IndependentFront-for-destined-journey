@@ -1,5 +1,5 @@
 /**
- * 11 个 Agent 的清单（Q-25 第 9 步）。
+ * 12 个 Agent 的清单（Q-25 第 9 步）。
  *
  * 为什么单独一个文件：它有**两个**消费者，且分居两侧 ——
  *   · 设置页壳层的 Agent 子导航（`.sub-nav`，它是三栏布局里 `.settings-content` 的
@@ -42,6 +42,12 @@ export const AGENT_LIST: readonly AgentListEntry[] = [
     id: 'craft_gen',
     name: '制作生成',
     desc: '处理制作意图，调用 $craft 工具生成创意效果',
+    stage: 1,
+  },
+  {
+    id: 'combat_v3',
+    name: '战斗决策',
+    desc: '战斗侧链 Agent：内核主持战斗流程，它做敌方单位战术决策并输出结算演绎',
     stage: 1,
   },
   {

@@ -275,6 +275,35 @@ describe('buildAgentConfigs — selected system core visibility', () => {
   });
 });
 
+describe('buildAgentConfigs — combat_v3 侧链装配', () => {
+  it('agentConfigs 包含 combat_v3，systemPrompt 来自设置覆写', () => {
+    const pipeline = makePipeline();
+    const settings = (pipeline as any).settings.settings;
+    patchAgentSettings(settings, 'combat_v3', {
+      systemPrompt: '你是战斗决策 Agent（设置页覆写）',
+    });
+
+    const configs = (pipeline as any).buildAgentConfigs({});
+    const combat = configs.find((config: any) => config.agentId === 'combat_v3');
+
+    expect(combat).toBeDefined();
+    expect(combat.systemPrompt).toBe('你是战斗决策 Agent（设置页覆写）');
+  });
+
+  it('未覆写时 systemPrompt 回落默认层（agent-config.json 的 combat_v3）', () => {
+    const pipeline = makePipeline();
+    const defaultPrompt = '你是《命定之诗》战斗决策 Agent。';
+
+    const configs = (pipeline as any).buildAgentConfigs({
+      combat_v3: { systemPrompt: defaultPrompt },
+    });
+    const combat = configs.find((config: any) => config.agentId === 'combat_v3');
+
+    expect(combat).toBeDefined();
+    expect(combat.systemPrompt).toBe(defaultPrompt);
+  });
+});
+
 describe('collectSelectedSystemCoreWorkshopBookIds', () => {
   it('returns only selected, enabled workshop books whose project has the system/core tag', () => {
     const entry = (projectId: string, uid: number, enabled = true) => ({

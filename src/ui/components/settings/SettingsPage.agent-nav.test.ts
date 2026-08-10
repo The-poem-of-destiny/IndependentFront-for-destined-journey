@@ -30,6 +30,14 @@ describe('resolveAgentSelection', () => {
     expect(resolveAgentSelection('image_prompt')).toBeNull();
   });
 
+  it('combat_v3 在清单里 —— 战斗侧链不进主 DAG，但设置页要能选中编辑（接线修复）', () => {
+    expect(AGENT_LIST.some((a) => a.id === 'combat_v3')).toBe(true);
+    expect(resolveAgentSelection('combat_v3')).toBe('combat_v3');
+    const entry = AGENT_LIST.find((a) => a.id === 'combat_v3');
+    expect(entry?.name).toBeTruthy();
+    expect(entry?.desc).toBeTruthy();
+  });
+
   it('空值一律 null，不抛', () => {
     expect(resolveAgentSelection(null)).toBeNull();
     expect(resolveAgentSelection(undefined)).toBeNull();
