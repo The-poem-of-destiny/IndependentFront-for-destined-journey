@@ -15,6 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildUnitPersistPatches,
+  resolveUnitIdByName,
   runCombatV3,
   UnsupportedInM2,
   type RunCombatV3Opts,
@@ -1980,3 +1981,201 @@ const FOCUS_EFFECT = {
   source: '',
   effects: {},
 } satisfies StatusEffect;
+
+// ══════════════════════════════════════════════════════════════════════════
+// 名字 → id 解析（2026-08-10 真机根因修复）
+// 背景：面板（projectToAgent）给敌方 Agent 显示展示名（中文），内核 units 的 key 是
+// characterId（生产路径 = char.id UUID）。Agent 抄名字回来调 declare_attack → 修复前
+// 被直接当 actorId 用 → 内核 TARGET_NOT_PRESENT rejection → 连续 4 次 abandon。
+// 修复：toolCallToCommand / lastCommandFromResult 过 resolveUnitIdByName 反查回 id。
+// ══════════════════════════════════════════════════════════════════════════
+describe('resolveUnitIdByName：中文名 → 单位 id（exact 优先，模糊兜底）', () => {
+  const units = {
+    'uuid-player': { id: 'uuid-player', name: '奥利雅思' },
+    'uuid-enemy': { id: 'uuid-enemy', name: '两栖洞穴魔物' },
+  } as unknown as Record<string, CombatUnitView>;
+
+  it('exact：面板回流的展示名精确命中', () => {
+    expect(resolveUnitIdByName(units, '两栖洞穴魔物')).toBe('uuid-enemy');
+    expect(resolveUnitIdByName(units, '奥利雅思')).toBe('uuid-player');
+  });
+
+  it('已是 id（units 里有这把 key）→ 原样返回，不误伤内核/工具链给的单位 id', () => {
+    expect(resolveUnitIdByName(units, 'uuid-enemy')).toBe('uuid-enemy');
+    expect(resolveUnitIdByName(units, 'uuid-player')).toBe('uuid-player');
+  });
+
+  it('去空白：面板/模型折叠或插入空白后仍能命中', () => {
+    expect(resolveUnitIdByName(units, '两栖 洞穴魔物')).toBe('uuid-enemy');
+    expect(resolveUnitIdByName(units, '奥 利 雅 思')).toBe('uuid-player');
+  });
+
+  it('包含兜底：名字带别名/前后缀修饰仍能命中', () => {
+    expect(resolveUnitIdByName(units, '两栖洞穴魔物·队长')).toBe('uuid-enemy');
+    expect(resolveUnitIdByName(units, '洞穴魔物')).toBe('uuid-enemy');
+  });
+
+  it('查不到 → 返回原值（现状兜底，不抛错、不猜）', () => {
+    expect(resolveUnitIdByName(units, '不存在的单位')).toBe('不存在的单位');
+    expect(resolveUnitIdByName(units, '')).toBe('');
+  });
+});
+
+describe('敌方 Agent 中文名 → Command UUID（TARGET_NOT_PRESENT 根因回归）', () => {
+  /**
+   * 中文名 + UUID characterId 的战场。玩家 +1 先攻：开战前 coordinator 的「先攻首位」
+   * 预判用的是 participant 声明序（玩家在前）——掷先攻后玩家仍第一（11 vs 10），
+   * 预判与实际一致；敌方活到第 2 位轮次，战斗 Agent 才会被真实问到。
+   */
+  function nameResolveBundle() {
+    return mkBundle({
+      combatId: 'coord-name-resolve',
+      participants: [
+        mkParticipant('uuid-player', {
+          characterId: 'uuid-player',
+          name: '奥利雅思',
+          hp: 999999,
+          maxHp: 999999, // 扛住敌方每轮攻击，让战斗推进到玩家轮次
+          fixedInitiativeBonus: 1, // 盖过平手名字排序，玩家稳定先动（见上方注释）
+        }),
+        mkParticipant('uuid-enemy', {
+          side: 'enemy',
+          characterId: 'uuid-enemy',
+          name: '两栖洞穴魔物',
+          // 血线设计（60 颗默认骰带内打完，避开既有的 BeginOutput 回滚协调缺口）：
+          // 玩家每击 ≈665（850 初始 × 评级 1.0 × 防御减免 2000/2300 × dr 0.9）；
+          // 300 防御 → R1 剩 335（33.5% > 30% 战意阈值，不会 morale_routed 提前终局），
+          // R2 打死 → 全场共 3 次攻击 = 6 颗 intentCheck ≤ 通道 7 颗，无需续杯。
+          hp: 1000,
+          maxHp: 1000,
+          defense: 300,
+        }),
+      ],
+    });
+  }
+
+  it('routeEnemyCommand（无 executor 的 mock，lastCommandFromResult 路径）：产出 Command 的 actorId/targetId 为 UUID', async () => {
+    const { routeEnemyCommand } = await import('./coordinator');
+    const { openCombat } = await import('./index');
+    const session = openCombat({ kind: 'new', bundle: nameResolveBundle() } as never);
+    const ctx: Parameters<typeof routeEnemyCommand>[2] = {
+      clientFactory: () =>
+        ({
+          chatWithTools: async () => ({
+            output: null,
+            rawResponse: '',
+            toolCalls: [
+              {
+                name: 'declare_attack',
+                arguments: { actorName: '两栖洞穴魔物', targetName: '奥利雅思' },
+              },
+            ],
+          }),
+          chat: async () => ({ output: null, rawResponse: '' }),
+        }) as never,
+      endpoint: { id: 'ep' } as never,
+      saveId: 's1',
+      submitCommand: async () => undefined,
+      waitForCommand: async () => {
+        throw new Error('unused');
+      },
+      abandon: () => undefined,
+      context: {} as never,
+    };
+    const res = await routeEnemyCommand(
+      { kind: 'PlayerCommand', unitId: 'uuid-enemy', unitName: '两栖洞穴魔物', round: 1 },
+      session,
+      ctx,
+    );
+    expect(res.command.kind).toBe('DeclareAttack');
+    expect(res.command.actorId).toBe('uuid-enemy');
+    const payload = (res.command as { payload?: { targetId?: string } }).payload;
+    expect(payload?.targetId).toBe('uuid-player');
+  });
+
+  it('真实 runCombatV3：敌方全程用中文名声明 attack+action → 战斗正常结算、不再 TARGET_NOT_PRESENT abandon', async () => {
+    const { opts } = mkOpts();
+    opts.bundle = nameResolveBundle();
+    // 玩家每回合：攻击「两栖洞穴魔物」+ 放弃动作槽（UUID 键；commandId 每回合唯一防幂等重放）
+    opts.deps.waitForCommand = (() => {
+      let q: CombatCommand[] = [];
+      let n = 0;
+      return async () => {
+        if (q.length === 0) {
+          q = [
+            {
+              commandId: `p-atk-${++n}`,
+              expectedRevision: -1,
+              kind: 'DeclareAttack',
+              actorId: 'uuid-player',
+              cost: 'attack',
+              payload: { targetId: 'uuid-enemy', intentionLevel: '常规' },
+            },
+            {
+              commandId: `p-act-${++n}`,
+              expectedRevision: -1,
+              kind: 'PassAction',
+              actorId: 'uuid-player',
+              cost: 'action',
+              payload: {} as Record<string, never>,
+            },
+          ];
+        }
+        return q.shift()!;
+      };
+    })();
+    // 敌方脚本（按调用序循环）：攻击槽用中文名声明攻击，动作槽用中文名声明专注
+    const scripts = [
+      [{ name: 'declare_attack', args: { actorName: '两栖洞穴魔物', targetName: '奥利雅思' } }],
+      [{ name: 'declare_action', args: { actorName: '两栖洞穴魔物', actionType: '专注' } }],
+    ];
+    const history: Array<{ name: string; args: Record<string, any>; result: unknown }> = [];
+    let callIdx = 0;
+    opts.deps.clientFactory = () =>
+      ({
+        chatWithTools: async (
+          _req: unknown,
+          toolExecutor: (n: string, a: Record<string, any>) => Promise<unknown>,
+        ) => {
+          const script = scripts[callIdx % scripts.length] ?? [];
+          callIdx++;
+          for (const step of script) {
+            const result = await toolExecutor(step.name, step.args);
+            history.push({ name: step.name, args: step.args, result });
+          }
+          // 照 enemyTurnOpts 先例：工具调用条目字段名是 arguments（agent-client 契约），
+          // 不是 args —— 否则 lastCommandFromResult 解析出空 args，targetName 落空。
+          return {
+            output: 'ok',
+            rawResponse: '',
+            toolCalls: history.slice(-script.length).map((h) => ({
+              name: h.name,
+              arguments: h.args,
+              result: h.result,
+            })),
+          } as never;
+        },
+        chat: async () => ({ output: null, rawResponse: '' }) as never,
+      }) as never;
+    const commit = opts.deps.stateManager!.commitChatState;
+    const abandon = opts.deps.abandon;
+
+    const result = await runCombatV3(opts);
+
+    // 敌方真的被询问过（玩家先动但一刀打不死 3000 血 → 敌方每回合都有轮次）
+    expect(history.length).toBeGreaterThanOrEqual(2);
+    // 攻击声明：actorId/targetId 都是 UUID 而不是中文名（修复前这里是「两栖洞穴魔物」→ TARGET_NOT_PRESENT）
+    const atk = history.find((h) => h.name === 'declare_attack');
+    expect(atk?.result).toMatchObject({ kind: 'DeclareAttack', actorId: 'uuid-enemy' });
+    expect((atk?.result as { payload?: { targetId?: string } }).payload?.targetId).toBe(
+      'uuid-player',
+    );
+    // 动作声明：actorId 解析成 UUID
+    const act = history.find((h) => h.name === 'declare_action');
+    expect(act?.result).toMatchObject({ kind: 'DeclareAction', actorId: 'uuid-enemy' });
+    // 战斗正常走到结算：不再因 TARGET_NOT_PRESENT 连续 rejection → abandon
+    expect(abandon).not.toHaveBeenCalled();
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(result.outcome).toBe('ally_win');
+  });
+});

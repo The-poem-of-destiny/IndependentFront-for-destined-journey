@@ -830,7 +830,7 @@ export async function routeEnemyCommand(
         // 模型即可（text 的收集在下方统一扫描 result.toolCalls 做，单一收集点）。
         return Promise.resolve(collectCombatSummary(args));
       }
-      return toolCallToCommand(name, args, session.snapshot().revision, req.unitId);
+      return toolCallToCommand(name, args, session.snapshot().revision, req.unitId, session);
     },
     { maxRounds: MAX_TOOL_ROUNDS },
   );
@@ -859,7 +859,7 @@ export async function routeEnemyCommand(
   }
 
   return {
-    command: lastCommandFromResult(result, session.snapshot().revision, req.unitId),
+    command: lastCommandFromResult(result, session.snapshot().revision, req.unitId, session),
     narration,
   };
 }
@@ -1178,14 +1178,61 @@ function collectSummaryFromToolCalls(
   }
 }
 
-/** 一次 v3 工具调用 → 内核 Command（toolExecutor） */
+/**
+ * 名字 → 单位 id 解析（数据字典铁律 ①：逻辑键 = 名字，AI 永不产 id，Code 负责解析）。
+ *
+ * 背景（2026-08-10 真机复现）：战斗面板（projectToAgent）给敌方 Agent 显示的是展示名
+ * （中文），而内核 units 的 key 是 characterId（生产路径 = char.id，UUID）。Agent 从面板
+ * 抄名字回来调 declare_attack(actorName="两栖洞穴魔物")，此前被 toolCallToCommandSync
+ * 直接当 actorId 用 → 内核 TARGET_NOT_PRESENT rejection → 连续 4 次 abandon
+ * （`if (steps > 3) break`）→ 战斗必被放弃。本函数把名字反查回在场单位的 id。
+ *
+ * 匹配顺序（exact 优先，模糊兜底，最少侵入）：
+ *   ① 已是 id（units 里直接有这把 key）→ 原样返回，不误伤内核/工具链给的单位 id
+ *   ② exact：展示名精确命中（面板正常回流的主路径）
+ *   ③ 去空白：面板/模型可能折叠或插入空白
+ *   ④ 包含：名字带别名/前后缀修饰（任一侧包含另一侧；两侧都要求长度 ≥2 防误伤）
+ * 查不到 → 返回原值（现状兜底：可能是 id 本身，不抛错、不猜）。
+ *
+ * 纯函数，导出供测试直捣（先例：buildUnitPersistPatches）。
+ */
+export function resolveUnitIdByName(
+  units: Readonly<Record<string, CombatUnitView>>,
+  name: string,
+): string {
+  if (name.length === 0 || units[name]) return name;
+  const compact = (s: string): string => s.replace(/\s+/g, '');
+  const exact = Object.values(units).find((u) => u.name === name);
+  if (exact) return exact.id;
+  const want = compact(name);
+  const byCompact = Object.values(units).find((u) => compact(u.name) === want);
+  if (byCompact) return byCompact.id;
+  if (want.length >= 2) {
+    const byIncludes = Object.values(units).find(
+      (u) =>
+        compact(u.name).length >= 2 &&
+        (compact(u.name).includes(want) || want.includes(compact(u.name))),
+    );
+    if (byIncludes) return byIncludes.id;
+  }
+  return name;
+}
+
+/** 从战斗会话构造名字 → id 解析器（取快照在场单位，每次决策时最新） */
+function makeUnitNameResolver(session: CombatSession): (name: string) => string {
+  const units = session.snapshot().units;
+  return (name: string) => resolveUnitIdByName(units, name);
+}
+
+/** 一次 v3 工具调用 → 内核 Command（toolExecutor）。session 用于把 Agent 报的名字解析成单位 id */
 async function toolCallToCommand(
   name: string,
   args: Record<string, any>,
   revision: number,
   actorId: string,
+  session: CombatSession,
 ): Promise<CombatCommand> {
-  return toolCallToCommandSync(name, args, revision, actorId);
+  return toolCallToCommandSync(name, args, revision, actorId, makeUnitNameResolver(session));
 }
 
 function toolCallToCommandSync(
@@ -1193,18 +1240,23 @@ function toolCallToCommandSync(
   args: Record<string, any>,
   revision: number,
   actorId: string,
+  resolveUnitId?: (name: string) => string,
 ): CombatCommand {
   const id = nextCmdId(`tool-${name}`);
+  // 名字 → id 解析（铁律 ①：AI 报名字，Code 解析成 id）。不传解析器（直捣测试 /
+  // 旧调用）→ 原值透传，行为与现状一致；传了而名字查不到 → 解析器返回原值，同样透传。
+  const resolve = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.length > 0 && resolveUnitId ? resolveUnitId(v) : undefined;
   switch (name) {
     case 'declare_attack':
       return {
         commandId: id,
         expectedRevision: revision,
         kind: 'DeclareAttack',
-        actorId: (args.actorName as string) ?? actorId,
+        actorId: resolve(args.actorName) ?? actorId,
         cost: 'attack',
         payload: {
-          targetId: (args.targetName as string) ?? '',
+          targetId: resolve(args.targetName) ?? '',
           skill: args.skillName as string | undefined,
           intentionLevel: toIntention(args.intentionLevel),
           costs: args.costs as { mp?: number; sp?: number } | undefined,
@@ -1217,7 +1269,7 @@ function toolCallToCommandSync(
           commandId: id,
           expectedRevision: revision,
           kind: 'DeclareBlock',
-          actorId: (args.actorName as string) ?? actorId,
+          actorId: resolve(args.actorName) ?? actorId,
           cost: 'action',
           payload: { choiceId: undefined },
         };
@@ -1226,7 +1278,7 @@ function toolCallToCommandSync(
         commandId: id,
         expectedRevision: revision,
         kind: 'DeclareAction',
-        actorId: (args.actorName as string) ?? actorId,
+        actorId: resolve(args.actorName) ?? actorId,
         cost: 'action',
         payload: { actionType: mapActionType(t), description: undefined },
       };
@@ -1237,7 +1289,7 @@ function toolCallToCommandSync(
           commandId: id,
           expectedRevision: revision,
           kind: 'PassAction',
-          actorId: (args.actorName as string) ?? actorId,
+          actorId: resolve(args.actorName) ?? actorId,
           cost: 'action',
           payload: {} as Record<string, never>,
         };
@@ -1246,7 +1298,7 @@ function toolCallToCommandSync(
         commandId: id,
         expectedRevision: revision,
         kind: 'PassAttack',
-        actorId: (args.actorName as string) ?? actorId,
+        actorId: resolve(args.actorName) ?? actorId,
         cost: 'attack',
         payload: {} as Record<string, never>,
       };
@@ -1255,7 +1307,7 @@ function toolCallToCommandSync(
         commandId: id,
         expectedRevision: revision,
         kind: 'Flee',
-        actorId: (args.actorName as string) ?? actorId,
+        actorId: resolve(args.actorName) ?? actorId,
         cost: 'both',
         payload: {} as Record<string, never>,
       };
@@ -1327,6 +1379,7 @@ function lastCommandFromResult(
   },
   revision: number,
   actorId: string,
+  session: CombatSession,
 ): CombatCommand {
   const calls = result.toolCalls ?? [];
   // 只认命令类工具结果（设计 2026-08-09 §2.2 决策 3C）：查询工具（get_*）返回的是数据、
@@ -1347,7 +1400,13 @@ function lastCommandFromResult(
   } else if (lastCommandCall.arguments && typeof lastCommandCall.arguments === 'object') {
     args = lastCommandCall.arguments as Record<string, any>;
   }
-  return toolCallToCommandSync(lastCommandCall.name, args, revision, actorId);
+  return toolCallToCommandSync(
+    lastCommandCall.name,
+    args,
+    revision,
+    actorId,
+    makeUnitNameResolver(session),
+  );
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
