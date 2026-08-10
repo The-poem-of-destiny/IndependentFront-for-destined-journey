@@ -1,5 +1,64 @@
 # Theme implementation design QA
 
+## 2026-08-10 Nocturne Sakura raden implementation
+
+Date: 2026-08-10
+
+final result: passed
+
+### Target and state
+
+- Source visual truth: `artifacts/theme-looks/nocturne-sakura/refinement-2026-08-10/hybrid-makie-raden-polished-final.png` (1672 x 941).
+- Live implementation: `artifacts/theme-looks/nocturne-sakura/implementation-2026-08-10/qa-fix-wide-1672x941-v2.png` (1672 x 941 CSS viewport, DPR 1).
+- Responsive implementation: `artifacts/theme-looks/nocturne-sakura/implementation-2026-08-10/final-responsive-1024x768.png` (1024 x 768 CSS viewport, DPR 1).
+- State: test save, Sakura theme, Character scene tab, and unfocused message input.
+
+### Comparison evidence
+
+- Full source-left/live-right comparison: `artifacts/theme-looks/nocturne-sakura/implementation-2026-08-10/qa-final-full-side-by-side.png`.
+- Left-frame detail: `artifacts/theme-looks/nocturne-sakura/implementation-2026-08-10/qa-final-focus-left-frame.png`.
+- Narrative and composer detail: `artifacts/theme-looks/nocturne-sakura/implementation-2026-08-10/qa-final-focus-narrative-input.png`.
+- Status-frame detail: `artifacts/theme-looks/nocturne-sakura/implementation-2026-08-10/qa-final-focus-status.png`.
+
+The live theme now uses a clean matte indigo-black message well without wallpaper, petals, a tinted message card, or decorative text interference. Mother-of-pearl cherry-blossom inlays belong to the surrounding scene, narrative, portrait, and status frames. Gold powder appears only as a rare accent inside authored raster details and never as a continuous border. Semantic HP, MP, SP, and EXP colors remain intact.
+
+### Iteration history
+
+1. The baseline retained the former full-screen pink blossom plate, purple message card, and continuous gold seams. These were replaced with frame-owned raden assets, a matte narrative well, and smoke-metal structural seams.
+2. The first implementation pass placed the lower branch too high and underscaled the wide-layout portrait and player copy. The branch was mirrored and lowered away from the empty-state label; wide typography and portrait scale were increased while the compact values were restored below 1100 px.
+3. The final pass verified both reference-size and responsive layouts, visible input focus, scene-tab interaction, and asset transparency. No actionable P0, P1, or P2 issue remains.
+
+### Fidelity surfaces
+
+- Typography: existing Noto families and application hierarchy are preserved; player copy is tuned for the wide layout and restored to compact scale responsively.
+- Spacing and layout: the existing three-column play-area topology is unchanged, and neither final viewport has document, chat, or status-panel overflow.
+- Colors: matte indigo-black narrative surfaces, restrained plum controls, pearl highlights, and semantic resource bars match the approved direction.
+- Image assets: the branch, corner inlay, and seal are real alpha-clean raster assets with no visible chroma fringe; each belongs to a frame or control surface.
+- Copy: unchanged.
+
+### Interaction and runtime evidence
+
+- Exercised scene tabs and input focus; selection and focus feedback remained visible without geometry changes.
+- Browser output contained only the test save's pre-existing unconfigured-Agent errors. No theme, asset, CSS, or layout error was emitted.
+- P3: the application chrome keeps the product's established typography density and top-bar height instead of reproducing the conceptual mock pixel-for-pixel. This is an intentional product constraint and does not alter the approved material or frame treatment.
+
+## 2026-08-10 Jade Conservatory tool-rail backing correction
+
+Date: 2026-08-10
+
+final result: passed
+
+The full-height tool rail had been repeating the button-scale polished-jade plaque asset independently of the framed parchment buttons. The rail now uses one quiet live-color backing while each tool and collapse control continues to own its parchment texture and jade frame.
+
+### Evidence
+
+- Desktop implementation: `artifacts/theme-looks/jade-conservatory/tool-rail-backing-fixed-1280.png`.
+- Tool-rail detail: `artifacts/theme-looks/jade-conservatory/tool-rail-backing-fixed-detail.png`.
+- Tall-viewport stress capture: `artifacts/theme-looks/jade-conservatory/tool-rail-backing-fixed-tall.png`.
+- Responsive implementation: `artifacts/theme-looks/jade-conservatory/tool-rail-backing-fixed-1024.png`.
+- Live computed styles reported `background-image: none` on the rail at 1280 x 720, 1280 x 1600, and 1024 x 768. All 13 controls retained the parchment texture and jade border image; the pre-fix and post-fix desktop button rectangles were identical.
+- No document or rail horizontal overflow occurred. Browser output added only the expected Vite hot-update message to the test save's pre-existing unconfigured-Agent errors.
+
 ## 2026-08-09 Jade Conservatory reference-match addendum
 
 Date: 2026-08-09
@@ -40,6 +99,7 @@ The final live composition matches the reference's continuous paper-and-jade app
 6. The complete identity row and status hierarchy were restored and the right ledger's scroll origin was verified.
 7. The right-ledger vertical landmarks were aligned to the reference, and scene/status tab connectors were placed on their source-specific edges.
 8. The stretched polished-jade raster behind the composer was removed without changing its outer frame, parchment field, send button, or tab geometry.
+9. The button-scale polished-jade raster repeated behind the full-height tool rail was removed without changing the independently framed parchment buttons.
 
 ### Findings
 

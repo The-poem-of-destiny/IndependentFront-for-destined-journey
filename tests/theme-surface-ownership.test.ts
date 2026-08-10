@@ -15,6 +15,7 @@ const REVIEWED_THEMES = [
 
 const OWNERSHIP_MARKER = 'Live-region ownership correction.';
 const JADE_FIDELITY_MARKER = 'Jade Conservatory reference-fidelity pass';
+const NOCTURNE_FIDELITY_MARKER = 'Nocturne Sakura raden fidelity pass';
 
 function readRule(css: string, selector: string): string {
   const start = css.indexOf(selector);
@@ -160,6 +161,68 @@ describe('play-area theme surface ownership', () => {
     expect(sendButtonRule).toContain('background-image: var(--forest-jade-tab)');
   });
 
+  it('forest keeps button-scale artwork off the full-height tool rail', () => {
+    const integrationCss = readFileSync(
+      join(UI_ROOT, 'styles', 'integrated-game-surfaces.css'),
+      'utf8',
+    );
+    const fidelityCss = integrationCss.slice(integrationCss.indexOf(JADE_FIDELITY_MARKER));
+    const railRule = readRule(
+      fidelityCss,
+      ":root[data-theme='forest'] body .game-page-layout .side-toolbar {",
+    );
+    const buttonRule = readRule(
+      fidelityCss,
+      ":root[data-theme='forest'] body .game-page-layout .top-btn,",
+    );
+
+    expect(railRule).toContain('background-image: none');
+    expect(railRule).not.toContain('var(--forest-jade-tab)');
+    expect(railRule).not.toContain('background-size: 100% 88px');
+    expect(buttonRule).toContain('var(--forest-parchment-texture)');
+    expect(buttonRule).toContain('var(--forest-jade-frame)');
+  });
+
+  it('forest keeps a desktop half-width rail with text-safe buttons', () => {
+    const integrationCss = readFileSync(
+      join(UI_ROOT, 'styles', 'integrated-game-surfaces.css'),
+      'utf8',
+    );
+    const fidelityCss = integrationCss.slice(integrationCss.indexOf(JADE_FIDELITY_MARKER));
+    const railWidthRule = readRule(
+      fidelityCss,
+      ":root[data-theme='forest'] body .game-page-layout .game-body {",
+    );
+    const collapseRule = readRule(
+      fidelityCss,
+      ":root[data-theme='forest'] body .game-page-layout .side-toolbar > .collapse-toggle {",
+    );
+    const collapsedRailRule = readRule(
+      fidelityCss,
+      ":root[data-theme='forest'] body .game-page-layout .game-body.rail-collapsed {",
+    );
+    const labelRule = readRule(
+      fidelityCss,
+      ":root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-label {",
+    );
+    const buttonRule = readRule(
+      fidelityCss,
+      ":root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn {",
+    );
+
+    expect(railWidthRule).toContain('--rail-w: 2.7rem');
+    expect(fidelityCss).toMatch(
+      /@media \(min-width: 1200px\) \{[\s\S]*?--rail-w: 2\.7rem;[\s\S]*?\}/,
+    );
+    expect(collapsedRailRule).toContain('--rail-w: 2.7rem');
+    expect(collapseRule).toContain('display: none');
+    expect(labelRule).toContain('display: inline !important');
+    expect(buttonRule).toContain('margin-inline: 1px');
+    expect(buttonRule).toContain('padding: 4px 0');
+    expect(buttonRule).toContain('border-image-width: 3px');
+    expect(fidelityCss).not.toContain('> .tool-btn > .tool-label');
+  });
+
   it('forest exposes the generated material assets through theme tokens', () => {
     const themeCss = readFileSync(join(UI_ROOT, 'themes', 'forest.css'), 'utf8');
 
@@ -167,6 +230,66 @@ describe('play-area theme surface ownership', () => {
     expect(themeCss).toContain('jade-panel-frame.png');
     expect(themeCss).toContain('jade-tab-polished.png');
     expect(themeCss).toContain('jade-binding-clasp.png');
+  });
+
+  it('sakura keeps the message surface clean while its live frame owns the inlay', () => {
+    const themeCss = readFileSync(join(UI_ROOT, 'themes', 'sakura.css'), 'utf8');
+    const fidelityStart = themeCss.indexOf(NOCTURNE_FIDELITY_MARKER);
+    const fidelityCss = themeCss.slice(fidelityStart);
+    const chatRule = readRule(
+      fidelityCss,
+      ":root[data-theme='sakura'] body .game-page-layout .chat-flow {",
+    );
+    const playerMessageRule = readRule(
+      fidelityCss,
+      ":root[data-theme='sakura'] body .game-page-layout .bubble-player {",
+    );
+    const cornerRule = readRule(
+      fidelityCss,
+      ":root[data-theme='sakura'] body .game-page-layout .chat-flow::before,",
+    );
+
+    expect(fidelityStart).toBeGreaterThanOrEqual(0);
+    expect(chatRule).toContain('background-color: #06080c');
+    expect(chatRule).toContain('animation: none');
+    expect(chatRule).not.toContain('var(--sakura-petals)');
+    expect(chatRule).not.toContain('var(--sakura-field)');
+    expect(playerMessageRule).toContain('background: transparent');
+    expect(playerMessageRule).toContain('border: 0');
+    expect(playerMessageRule).toContain('box-shadow: none');
+    expect(cornerRule).toContain('var(--sakura-raden-corner)');
+    expect(cornerRule).toContain('pointer-events: none');
+  });
+
+  it('sakura keeps shell and rare gold accents on authored frame nodes', () => {
+    const themeCss = readFileSync(join(UI_ROOT, 'themes', 'sakura.css'), 'utf8');
+    const fidelityCss = themeCss.slice(themeCss.indexOf(NOCTURNE_FIDELITY_MARKER));
+    const branchRule = readRule(
+      fidelityCss,
+      ":root[data-theme='sakura'] body .game-page-layout .scene-panel::before {",
+    );
+    const titleRule = readRule(
+      fidelityCss,
+      ":root[data-theme='sakura'] body .game-page-layout .top-title {",
+    );
+    const composerAccentRule = readRule(
+      fidelityCss,
+      ":root[data-theme='sakura'] body .game-page-layout .input-bar::after {",
+    );
+    const topFrameRule = readRule(
+      fidelityCss,
+      ":root[data-theme='sakura'] body .game-page-layout .top-bar {",
+    );
+
+    expect(themeCss).toContain('raden-sakura-branch.png');
+    expect(themeCss).toContain('raden-corner-inlay.png');
+    expect(themeCss).toContain('raden-seal-accent.png');
+    expect(branchRule).toContain('var(--sakura-raden-branch)');
+    expect(branchRule).toContain('pointer-events: none');
+    expect(titleRule).toContain('var(--sakura-raden-seal)');
+    expect(composerAccentRule).toContain('var(--sakura-raden-seal)');
+    expect(topFrameRule).toContain('var(--sakura-frame-line)');
+    expect(topFrameRule).not.toContain('var(--sakura-gold)');
   });
 
   it('keeps Orrery artwork frame-free and uniformly covered', () => {

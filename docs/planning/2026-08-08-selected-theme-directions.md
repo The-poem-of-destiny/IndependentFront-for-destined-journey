@@ -80,7 +80,7 @@ The interface is a jade-framed herbarium cabinet inside a quiet conservatory. Wa
 ### Component mapping
 
 - Top bar: a continuous paper-and-jade archive beam with a centered conversation label and one thin brass seam.
-- Tool rail: stacked specimen plaques with quiet jade borders; icons and labels remain dark verdigris.
+- Tool rail: a half-width stack of compact icon-and-text specimen plaques with quiet jade borders. Slimmer frame insets keep every two-character label visible, while the expand/collapse control is omitted. Smaller viewports retain the text-safe rail width. A quiet live-color rail backs the independently framed parchment buttons; no button-scale plaque raster repeats behind the column.
 - Scene/status ledgers: warm botanical-paper inserts separated by live jade rails. The default avatar uses a circular herbarium-medallion frame; imported large portraits remain rectangular.
 - Tabs: separated polished-jade specimen labels joined by tiny brass clips. Inactive, hover, focus, and active states keep identical geometry; selection changes only luminance, saturation, text weight, and the brass connector.
 - Composer: an outer notebook border frames one parchment input field; no decorative panel raster is stretched across the bar. The send control remains a compact polished-jade plaque.
@@ -92,7 +92,7 @@ Hover lifts only the inner paper label through a quiet highlight; no control tra
 
 ### Acceptance and rejection criteria
 
-Accept only if the interface reads as one archival cabinet, the paper remains warm and readable, the main message box reads as a bound notebook, the composer keeps a clean parchment field inside its outer frame, the polished jade rails and buttons stay structural, and every tab position keeps a stable frame. Reject a flat paper-only reskin, mint monochrome, translucent glass everywhere, leafy wallpaper, scrapbook clutter, soft neumorphic blobs, heavy gold, floating modern cards, open jewelry-like binding rings, repeated hinges down the full rails, stretched panel artwork behind the input, or tabs whose selected state shifts or breaks the brass joins.
+Accept only if the interface reads as one archival cabinet, the paper remains warm and readable, the main message box reads as a bound notebook, the composer keeps a clean parchment field inside its outer frame, the polished jade rails and buttons stay structural, the compact tool rail remains fixed at half width without a collapse control, and every tab position keeps a stable frame. Reject a flat paper-only reskin, mint monochrome, translucent glass everywhere, leafy wallpaper, scrapbook clutter, soft neumorphic blobs, heavy gold, floating modern cards, open jewelry-like binding rings, repeated hinges down the full rails, stretched panel artwork behind the input, repeated or stretched button artwork behind the tool rail, or tabs whose selected state shifts or breaks the brass joins.
 
 ## 4. Aurora Frostglass / 极光霜晶
 
@@ -199,7 +199,7 @@ Accept only if leather grain, machined brass, aligned chassis seams, and precisi
 
 Theme ID: `sakura`
 
-Selected reference: `artifacts/theme-looks/nocturne-sakura/look-5.png`
+Selected reference: `artifacts/theme-looks/nocturne-sakura/refinement-2026-08-10/hybrid-makie-raden-polished-final.png`
 
 ### Visual thesis
 
@@ -209,25 +209,25 @@ The UI is a black-lacquer writing casket under moonlight. Pearl-pink blossom inl
 
 - Base: deep black/plum lacquer with controlled satin-to-gloss response and faint violet undertone.
 - Central light: a subtle moonlit indigo vignette from the upper center, creating a reading pool without becoming a gradient decoration on every surface.
-- Ornament: sparse cherry branches and individual petals, concentrated at selected corners and left rail base. Empty black space is essential.
-- Structure: hairline aged-gold joinery with muted rose inner edges.
+- Ornament: sparse mother-of-pearl raden blossom inlay, concentrated in one asymmetric lower-left branch, two short narrative-frame corner caps, and one upper-right portrait flourish. Empty black space is essential.
+- Structure: smoky lacquer frame lines with muted rose inner edges. Maki-e gold powder appears only at a few authored junctions inside the raster accents; it never becomes a continuous border.
 - Controls: lacquer plates with pearl-pink type/indicator details; active elements may use mother-of-pearl color shift without glow.
 
 ### Component mapping
 
-- Top bar: nearly black lacquer with a minimal centered gold rule and small petal/flower detail.
-- Tool rail: muted plum plates; bottom corner carries the strongest branch cluster.
-- Central narrative: coolest indigo-black field, few drifting petals, no large branch crossing text.
-- Right status: plum avatar panel with sparse blossom corners and pink-accented resource housing.
+- Top bar: nearly black lacquer with a centered raden seal and quiet smoke-metal rules; no gold band.
+- Tool rail: muted plum plates; the adjacent left ledger owns the strongest lower-left raden branch cluster.
+- Central narrative: a clean, matte indigo-black field. Message copy has no tinted card fill, petals, wallpaper, or decorative art behind it; small shell caps belong only to the outer frame corners.
+- Right status: plum avatar panel with one upper-right raden flourish and pink-accented resource housing.
 - Input: connected lacquer writing tray with a pearl-pink send control.
 
 ### Interaction language
 
-Hover reveals a narrow lacquer reflection and gently brightens the pearl accent. Active tabs use a precise pink underline/inlay, never a filled pink rectangle. Optional petals drift as one sparse authored motion and stop under reduced motion. Focus uses a pale pearl outline visible on black.
+Hover reveals a narrow lacquer reflection and gently brightens the pearl accent. Active tabs use a precise pink underline/inlay, never a filled pink rectangle. The approved direction has no drifting petals in the message field. Focus uses a pale pearl outline visible on black.
 
 ### Acceptance and rejection criteria
 
-Accept only if lacquer depth, moonlit central field, negative space, and sparse petals are unmistakable. Reject magenta UI chrome, blossom wallpaper, sakura clip-art, pink glow, over-bright text, branches crossing interactive content, or gold ornament dense enough to resemble the bronze themes.
+Accept only if lacquer depth, a clean moonlit message field, negative space, frame-owned mother-of-pearl inlay, and rare maki-e powder junctions are unmistakable. Reject magenta UI chrome, blossom wallpaper, petals or decorative art behind message copy, generic sakura clip-art, pink glow, over-bright text, branches crossing interactive content, continuous gold bands, repeated gold borders, glitter fields, or ornament dense enough to resemble the bronze themes.
 
 ## 8. Abyssal Cathedral / 深海圣堂
 
