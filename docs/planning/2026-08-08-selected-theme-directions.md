@@ -63,35 +63,36 @@ Decision: retain the current minimal token-only implementation as a fallback. No
 
 Theme ID: `forest`
 
-Selected reference: `artifacts/theme-looks/jade-conservatory/look-4.png`
+Selected reference: `artifacts/theme-looks/jade-conservatory/prototype-4-herbarium-archive.png`
 
 ### Visual thesis
 
-The interface is a pale carved-jade conservatory screen: botanical latticework forms the load-bearing frame while warm botanical paper carries content. The selected direction is ornamental but hushed; it must feel mineral and hand-carved, not like mint-colored plastic or a generic garden webpage.
+The interface is a jade-framed herbarium cabinet inside a quiet conservatory. Warm specimen paper carries the reading surfaces while slim jade rails, tiny brass clips, and sparse pressed-botanical linework provide the structure. The selected direction is archival and tactile rather than scenic or ornate; it must feel like a fantasy botanist's working cabinet, not a mint-colored webpage.
 
 ### Material and depth model
 
-- Base: botanical paper in warm off-white, with almost imperceptible fiber variation.
-- Structure: celadon and pale-jade lattice with shallow relief. Broad flat areas are satin-matte; raised leaf and vine edges catch a quiet cool highlight.
-- Central motif: a rounded rectangular jade frame with carved foliage concentrated at corners and vertical seams. The narrative center stays largely empty.
-- Metal seam: hairline aged gold appears only at structural joins and selected-state accents.
-- Controls: recessed jade frames surrounding paper inserts. Corners are gently squared/rounded like carved panels, not pill-shaped.
+- Base: warm cotton specimen paper with almost imperceptible fiber variation and high text contrast.
+- Structure: slim celadon-jade label rails and panel seams. Controls use polished, translucent jade with restrained highlights; the outer application shell remains quiet.
+- Central motif: a connected botanical archive cabinet built around a bound parchment notebook. Jade edge rails and four antique-brass barrel hinges, one near each corner, frame the narrative center while sparse line-drawn sprigs occupy only quiet margins.
+- Metal seam: one aged-brass tone appears as hairline joins, label clips, and selected-state accents.
+- Controls: shallow jade specimen labels holding paper inserts. Corners stay nearly square and never become pills.
 
 ### Component mapping
 
-- Top bar: a continuous pale-jade beam with a centered recessed conversation plaque and very sparse vine jointing.
-- Tool rail: stacked jade plaques with carved dividers; icons and labels remain dark verdigris.
-- Scene/status ledgers: botanical-paper inserts held by jade frames. Header and avatar frames inherit the leaf-lattice silhouette.
-- Tabs: connected framed cells. The active cell uses a slightly warmer paper fill and deeper verdigris line; dimensions remain fixed.
-- Resource/attribute blocks: muted inset jade tracks and small carved cells, preserving semantic bar colors.
+- Top bar: a continuous paper-and-jade archive beam with a centered conversation label and one thin brass seam.
+- Tool rail: stacked specimen plaques with quiet jade borders; icons and labels remain dark verdigris.
+- Scene/status ledgers: warm botanical-paper inserts separated by live jade rails. The default avatar uses a circular herbarium-medallion frame; imported large portraits remain rectangular.
+- Tabs: separated polished-jade specimen labels joined by tiny brass clips. Inactive, hover, focus, and active states keep identical geometry; selection changes only luminance, saturation, text weight, and the brass connector.
+- Composer: an outer notebook border frames one parchment input field; no decorative panel raster is stretched across the bar. The send control remains a compact polished-jade plaque.
+- Resource/attribute blocks: muted inset jade tracks and compact archival cells, preserving semantic bar colors.
 
 ### Interaction language
 
-Hover raises only the carved ridge through a soft cool highlight. Active states deepen the inset shadow and verdigris stroke. Focus rings must remain visible on pale surfaces. Reduced-transparency mode removes any glass haze while preserving the carved hierarchy.
+Hover lifts only the inner paper label through a quiet highlight; no control translates or changes size. Active states use a warmer sheet, deeper verdigris stroke, and restrained brass underline. Focus rings remain clearly visible on pale surfaces. Reduced-transparency mode preserves the same paper-and-jade hierarchy without relying on blur.
 
 ### Acceptance and rejection criteria
 
-Accept only if the frame reads as carved mineral, leaf relief is visible without competing with content, and the whole interface remains calmer than Qinghua porcelain. Reject mint monochrome, translucent green glass everywhere, leafy wallpaper, soft neumorphic blobs, heavy gold, or a clinical white center disconnected from the jade chassis.
+Accept only if the interface reads as one archival cabinet, the paper remains warm and readable, the main message box reads as a bound notebook, the composer keeps a clean parchment field inside its outer frame, the polished jade rails and buttons stay structural, and every tab position keeps a stable frame. Reject a flat paper-only reskin, mint monochrome, translucent glass everywhere, leafy wallpaper, scrapbook clutter, soft neumorphic blobs, heavy gold, floating modern cards, open jewelry-like binding rings, repeated hinges down the full rails, stretched panel artwork behind the input, or tabs whose selected state shifts or breaks the brass joins.
 
 ## 4. Aurora Frostglass / 极光霜晶
 

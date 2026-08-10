@@ -1,28 +1,28 @@
-/* ===== Jade Conservatory (翡翠温室) — carved mineral lattice and botanical paper ===== */
+/* ===== Jade Conservatory (翡翠温室) — jade-framed herbarium cabinet ===== */
 [data-theme='forest'] {
-  --theme-window-bg: #dce5d7;
-  --theme-window-border: #9daf9d;
-  --theme-content-bg: #edf2e9;
-  --theme-card-bg: rgba(247, 246, 237, 0.94);
-  --theme-card-border: #aebdac;
-  --theme-surface-muted: #dde5d9;
+  --theme-window-bg: #e5e6dc;
+  --theme-window-border: #91a293;
+  --theme-content-bg: #f2eee3;
+  --theme-card-bg: rgba(247, 243, 232, 0.96);
+  --theme-card-border: #abb6a8;
+  --theme-surface-muted: #dfe5da;
   --theme-overlay-bg: rgba(31, 50, 39, 0.38);
 
-  --theme-title-bar-bg: #d3dfd0;
+  --theme-title-bar-bg: #e0e5da;
   --theme-title-bar-text: #27382d;
   --theme-title-bar-icon: #526b59;
   --theme-title-bar-btn-hover: rgba(60, 104, 78, 0.09);
-  --theme-tab-bar-bg: #d7e1d3;
+  --theme-tab-bar-bg: #e2e4d8;
   --theme-tab-text: #526b59;
   --theme-tab-active-text: #233c2e;
   --theme-tab-indicator: #4c755f;
   --theme-tab-hover-bg: rgba(76, 117, 95, 0.09);
 
-  --theme-text-primary: #26372c;
-  --theme-text-secondary: #455a4b;
-  --theme-text-muted: #5c7060;
+  --theme-text-primary: #2d3d32;
+  --theme-text-secondary: #4a5d50;
+  --theme-text-muted: #627165;
 
-  --theme-primary: #4c755f;
+  --theme-primary: #4f705a;
   --theme-primary-text: #f8fcf8;
   --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 16%, transparent);
   --theme-success: #3f7554;
@@ -49,23 +49,29 @@
   --theme-currency-silver: #6f7d76;
   --theme-currency-copper: #9b6548;
 
-  --theme-shadow-sm: 0 2px 4px rgba(43, 64, 49, 0.11);
-  --theme-shadow-md: 0 3px 8px rgba(43, 64, 49, 0.14);
-  --theme-shadow-lg: 0 6px 16px rgba(43, 64, 49, 0.2);
-  --paper-stack: 0 1px 0 rgba(255, 255, 247, 0.72), 0 3px 7px rgba(43, 64, 49, 0.12);
+  --theme-shadow-sm: 0 2px 4px rgba(50, 66, 53, 0.1);
+  --theme-shadow-md: 0 3px 8px rgba(50, 66, 53, 0.13);
+  --theme-shadow-lg: 0 6px 16px rgba(50, 66, 53, 0.18);
+  --paper-stack: 0 1px 0 rgba(255, 253, 245, 0.76), 0 3px 7px rgba(61, 72, 59, 0.1);
 
-  --forest-paper: rgba(246, 244, 234, 0.9);
-  --forest-paper-dense: rgba(247, 246, 238, 0.965);
-  --forest-jade: #cfddcc;
-  --forest-jade-deep: #91a991;
-  --forest-ridge: rgba(255, 255, 247, 0.74);
-  --forest-recess: rgba(53, 83, 63, 0.24);
-  --forest-verdigris: #4c755f;
-  --forest-gold: #9b7c48;
-  --forest-gold-line: rgba(155, 124, 72, 0.46);
+  --forest-paper: rgba(244, 240, 228, 0.94);
+  --forest-paper-dense: rgba(248, 244, 234, 0.98);
+  --forest-jade: #cbd6c8;
+  --forest-jade-deep: #849888;
+  --forest-ridge: rgba(255, 253, 246, 0.82);
+  --forest-recess: rgba(58, 78, 63, 0.22);
+  --forest-verdigris: #4f705a;
+  --forest-gold: #987742;
+  --forest-gold-line: rgba(152, 119, 66, 0.48);
   --forest-chassis: url('../assets/themes/forest/jade-conservatory-chassis.webp');
   --forest-chassis-overlay: url('../assets/themes/forest/jade-conservatory-chassis-overlay.webp');
-  --forest-avatar-medallion: url('../assets/themes/forest/jade-avatar-medallion.webp');
+  --forest-parchment-texture: url('../assets/themes/forest/herbarium-parchment.webp');
+  --forest-jade-frame: url('../assets/themes/forest/jade-panel-frame.png');
+  --forest-jade-tab: url('../assets/themes/forest/jade-tab-polished.png');
+  --forest-binding-clasp: url('../assets/themes/forest/jade-binding-clasp.png');
+  --forest-tab-connector: url('../assets/themes/forest/jade-tab-connector.png');
+  --forest-avatar-medallion: url('../assets/themes/forest/herbarium-leaf-medallion.png');
+  --forest-herbarium-sprig: url('../assets/themes/forest/herbarium-sprig.png');
 }
 
 /* One authored relief plane carries the conservatory. It keeps its aspect

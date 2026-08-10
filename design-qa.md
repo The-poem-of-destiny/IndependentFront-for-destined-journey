@@ -1,5 +1,62 @@
 # Theme implementation design QA
 
+## 2026-08-09 Jade Conservatory reference-match addendum
+
+Date: 2026-08-09
+
+final result: passed
+
+### Target and state
+
+- Selected source: `artifacts/theme-looks/jade-conservatory/prototype-4-herbarium-archive.png` (1672 x 941).
+- Live implementation: the real Vue play area with the `测试旅者` save, toolbar expanded, scene `角色` tab active, status `装备` tab active, both ledgers expanded, and the status ledger scrolled to its top.
+- Desktop comparison viewport: 1680 x 945 CSS pixels. The implementation capture is resized by less than 0.5% to the source dimensions only inside the combined comparison image.
+- Responsive stress viewport: 1024 x 768 CSS pixels.
+
+### Comparison evidence
+
+- Final implementation: `artifacts/theme-looks/jade-conservatory/input-frame-removed-1680.png`.
+- Composer detail: `artifacts/theme-looks/jade-conservatory/input-frame-removed-detail.png`.
+- Source-left/live-right full comparison: `artifacts/theme-looks/jade-conservatory/input-frame-removed-comparison.jpg`.
+- Responsive implementation: `artifacts/theme-looks/jade-conservatory/input-frame-removed-1024.png`.
+
+The final live composition matches the reference's continuous paper-and-jade application frame, polished jade plaques, bound parchment narrative folio, four corner-anchored antique-brass barrel hinges, botanical medallion, status-ledger hierarchy, and brass tab connectors. The composer keeps the outer notebook border, parchment field, and compact jade send plaque while omitting the stretched decorative raster behind them. The right ledger's identity row, portrait, nameplate, attribute section, inventory header, and inventory tabs were measured and aligned independently rather than judged from a screenshot alone.
+
+### Interaction and responsive evidence
+
+- Exercised all four scene tabs and all four status tabs at both viewports. Every click selected the requested index; no tab changed its x, y, width, or height; neither tab row overflowed.
+- Verified hover material brightening and keyboard `:focus-visible` outline without geometry changes.
+- Collapsed and restored the tool rail, attribute ledger, and inventory ledger. No document or panel horizontal overflow appeared.
+- At 1024 x 768, the document and game body remained horizontally contained. The status ledger intentionally retained 32 px of vertical scroll for its complete content.
+- Browser console contained only the test save's expected unconfigured-Agent pipeline messages. No theme, asset, CSS, or interaction error was emitted.
+
+### Comparison history
+
+1. The initial live theme was a flat mint paper treatment and failed the source's material hierarchy.
+2. Macro geometry was aligned to the source's toolbar, scene ledger, folio, and status ledger proportions.
+3. Generated parchment, polished jade, botanical, brass, and medallion assets replaced flat CSS approximations.
+4. The narrative surface became a bound notebook with live jade rails and four corner-anchored antique-brass barrel hinges; full-rail repetition was reduced and the open C-ring experiment was rejected as too jewelry-like.
+5. Typography, rail scale, portrait scale, and panel spacing were calibrated at the source viewport.
+6. The complete identity row and status hierarchy were restored and the right ledger's scroll origin was verified.
+7. The right-ledger vertical landmarks were aligned to the reference, and scene/status tab connectors were placed on their source-specific edges.
+8. The stretched polished-jade raster behind the composer was removed without changing its outer frame, parchment field, send button, or tab geometry.
+
+### Findings
+
+- P0: none.
+- P1: none.
+- P2: none.
+- P3: generated paper fibers and botanical strokes do not reproduce the source's individual random marks pixel-for-pixel; their density, placement, contrast, and material role match and do not affect layout or interaction fidelity.
+
+### Verification
+
+- `npm.cmd run test -- --run tests/theme-surface-ownership.test.ts tests/theme-fonts-invariant.test.ts`: 29 passed.
+- `npm.cmd run test -- --run`: 7,338 passed, 9 skipped.
+- `npm.cmd run typecheck`: passed.
+- `npm.cmd run typecheck:vue`: passed.
+- `npm.cmd run lint`: passed with zero warnings.
+- `npm.cmd run build`: passed; existing chunk-size and mixed dynamic/static import warnings remain unchanged.
+
 Date: 2026-08-08
 
 final result: passed
