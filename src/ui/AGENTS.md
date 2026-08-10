@@ -23,6 +23,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── useMapMarkers.ts             ← 地图标记 CRUD + Overlay 同步
 │   ├── useHoverPopup.ts             ← 悬停浮层唯一实现（读 settings.hoverDelayMs）
 │   ├── useAssetImage.ts             ← [素材] 渲染缝：(name,type?) → {url,isVideo,row}，世代号守卫 + 引用计数索引
+│   │                                   `options.variant` 指定表情/差分（与 name/type 同属"要解析什么"，
+│   │                                   故收 getter）—— 位置参数已被注入缝占了，在 options 包**后面**
+│   │                                   再挂位置参数是读者陷阱
 │   ├── usePlayerPortrait.ts         ← [Q-25] 玩家画像位：立牌链渲染 + 定点导入 + 裁剪台开关
 │   │                                   （文案一律出自 game/portrait-messages.ts，本层只决定"做什么"）
 │   ├── useSceneImageUrls.ts         ← [图像 v1] 插画字节 → object URL（正文与 CG 图鉴共用一份缓存）
@@ -218,9 +221,16 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 ├── components/
 │   ├── shared/                      ← 通用组件
 │   │   ├── AppButton / AppModal / AppCard / AppTabs / ResourceBar / QualityBadge / BuffChip
+│   │   │     AppModal 的 `size` 多一档 `full`（通栏两栏版式：**定死高度**而不是给
+│   │   │     max-height，里面"左栏铺满 + 右栏自己滚"要一个能百分比化的高度），
+│   │   │     另有 `bare`：不画页头、body 不留内边距，**Esc 与点遮罩照旧生效**
+│   │   │     （🔴 别写成 `closable: false` —— 那会顺手废掉 design.md §4.5 要求的 Esc）
 │   │   ├── AvatarPanel.vue          ← 头像（4 尺寸 × circle/square + video prop）
-│   │   ├── AssetMedia.vue           ← [素材] 命中铺满/没命中交回插槽兜底
+│   │   ├── AssetMedia.vue           ← [素材] 命中铺满/没命中交回插槽兜底；`variant` 可指定表情/差分
+│   │   │                               （⚠️ 不是精确寻址：该变体缺席会退回主图、再退类型链下一档）
 │   │   ├── CharacterPortrait.vue    ← [素材] 顶对齐大画像位（纯呈现组件，不碰 store）
+│   │   │                               `fill` 档把**尺寸**交回外层容器（撤掉 4:5 与 24rem 上限），
+│   │   │                               取景夹逼与焦点缩放两条铁律不变；`overflow:hidden` 必须留
 │   │   ├── PortraitSettingsDialog.vue ← [素材] 画像唯一调节面（取景三滑块 + 换图）
 │   │   ├── AssetCropEditor.vue      ← [素材] 裁剪台（一张源图烘出立绘+头像两份真字节）
 │   │   ├── WorkshopEnableList.vue   ← [工坊] 项目粒度启用列表（捏人页与游戏页共用）
@@ -378,6 +388,25 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                  一个能开始花钱的入口，是「关掉了但没完全关掉」那类最招人烦的 bug
 │   │   │                               锚点是 anchorKind:'message-end'，不做选中文本锚定（原文一改就丢）
 │   │   ├── StatusHUD.vue / StatusOverview.vue / ItemsPanel.vue / CharacterListPanel.vue
+│   │   ├── CharacterViewerModal.vue ← 非玩家角色的**通栏档案**（左画像 + 右信息面 6 页签：
+│   │   │                               档案/状态/装备/技能/背包/相册）。入口是场景栏「在场」那一行
+│   │   │                               🔴 分工按**角色归属**不按内容：StatusOverview 是**玩家自己的**面，
+│   │   │                                  本弹窗是**别人的**面。字段重叠但变更理由不同，不共用组件
+│   │   │                               🔴 画像位只认 `立绘bg → 立绘`，**刻意不复用**共享的两条链 ——
+│   │   │                                  那两条都以 `头像` 收尾，而一整栏高的位置上，一张 1:1 证件照
+│   │   │                                  拉满看起来像 bug；这一位宁可空着走首字母兜底
+│   │   │                               🔴 收的是**名字**不是角色对象：每次从 store 回查（M4 起名字唯一），
+│   │   │                                  否则提交换掉整份 characters 后弹窗停在提交前的数值
+│   │   │                               🔴 不占 `game.activeModal`（那是页面级弹窗的单选位），
+│   │   │                                  它是场景栏自己的一层
+│   │   │                               🔴 `.viewer-body` 的 `min-height: 0` 不是洁癖: 少了它窄屏那一档
+│   │   │                                  （竖向叠栏）内部滚动作废，弹窗底部内容被切掉且滚不到
+│   │   ├── character-viewer.ts       ← 上者的展示层判定（纯函数，不 mount 可测）：副标题分段 /
+│   │   │                               好感度视图 / 档案四行 / 登神三轨 / 装备背包分家 / 相册分组
+│   │   │                               🔴 层级名由 `tier` 反查 TIER_CONFIGS，`tierName` 只当兜底 ——
+│   │   │                                  两者会不一致（真机上一位 T5 贤者自称「普通」）
+│   │   │                               🔴 登神三字段自 Phase 9 是数组，存量存档可能仍是 Record：
+│   │   │                                  统一先摊平，不摊的表现不是少一行而是白屏
 │   │   ├── portrait-messages.ts     ← [Q-25] 画像导入路径的文案层（纯函数，零副作用，不 mount 可测）
 │   │   ├── QuestsPanel.vue / PlotPanel.vue / MemoryPanel.vue / SnapshotPanel.vue / MiniPlayer.vue
 │   │   ├── SceneImageSegment.vue    ← [图像 v1] 正文里一格插画的六种样子。**不判定**该显示什么

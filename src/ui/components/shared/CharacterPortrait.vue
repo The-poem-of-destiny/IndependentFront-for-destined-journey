@@ -39,8 +39,17 @@ const props = withDefaults(
      * 调节中的实时预览直接把草稿传进来即可（本组件不区分草稿与落库值）。
      */
     framing?: AssetFraming | null;
+    /**
+     * 撑满外层容器，而不是自己定 4:5 与 24rem 上限。
+     *
+     * 本组件的常态是**画框自己定尺寸/比例**（见下面 `.portrait-frame` 的说明）——
+     * 状态栏那一位就靠它保证「一张角色立牌该长什么样」全站只有一个答案。
+     * 但角色查看器的画像位是一整栏（高度由弹窗给、宽度由布局给），4:5 会在里面
+     * 留出两条空带。这一档只放开**尺寸**，取景与焦点缩放那两条铁律照旧。
+     */
+    fill?: boolean;
   }>(),
-  { src: null, video: false, framing: null },
+  { src: null, video: false, framing: null, fill: false },
 );
 
 /** 真正交给 CSS 的那一份，**永远夹逼过** */
@@ -59,7 +68,7 @@ const mediaStyle = computed(() => {
 </script>
 
 <template>
-  <div class="character-portrait">
+  <div class="character-portrait" :class="{ 'portrait-fill': fill }">
     <!-- 画框: overflow 归它，尺寸/比例归它；里面的媒体只管铺满 -->
     <div class="portrait-frame">
       <video
@@ -114,5 +123,24 @@ const mediaStyle = computed(() => {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/**
+ * `fill` 档 —— 尺寸交回外层容器。
+ *
+ * 比例、上限、圆角、边框全部撤掉（外层是一整栏，里面再画一层框就成了双层边），
+ * 但 `overflow: hidden` 必须留着: 焦点缩放靠 `transform: scale()`，没有它放大的图
+ * 会溢出栏外盖住旁边的信息面。
+ */
+.portrait-fill,
+.portrait-fill .portrait-frame {
+  height: 100%;
+}
+.portrait-fill .portrait-frame {
+  aspect-ratio: auto;
+  max-height: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 </style>

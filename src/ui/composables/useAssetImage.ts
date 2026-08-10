@@ -79,6 +79,18 @@ export interface AssetImageSource {
 export interface UseAssetImageOptions {
   /** 注入缝；缺省即 asset-store 单例（只在缺省时才会去碰 Pinia） */
   source?: AssetImageSource;
+  /**
+   * 情绪/表情变体（D11），缺省 / `''` = 要主图。
+   *
+   * 为什么住在 options 里而不是第三个位置参数: 位置参数已经被注入缝占了，而在
+   * 一个 options 包**后面**再挂位置参数是纯粹的读者陷阱。它跟 `name` / `type`
+   * 一样是"要解析什么"的一部分，所以同样收 getter（`MaybeRefOrGetter`）。
+   *
+   * ⚠️ **变体缺席不是失败**: `resolveAsset` 会退回该类型的主图，再退回类型链下一档
+   * （见 asset-resolve.ts 的 `pickFromSlot`）。要"这一格必须正是这张"的调用方，
+   * 得自己核对 `row`。
+   */
+  variant?: MaybeRefOrGetter<string | undefined>;
 }
 
 export interface UseAssetImage {
@@ -149,7 +161,7 @@ function sharedIndexes(source: AssetImageSource): ComputedRef<readonly AssetInde
  * @param name 角色名，**原样比较**（D2）。空串 / null / undefined → `url` 恒 null
  * @param type 单个类型（精确匹配）或类型链（按序降级）；缺省走脸位链
  *   `头像 → 立绘 → 立绘bg`（{@link DEFAULT_ASSET_TYPE}）
- * @param options 注入缝，生产不传
+ * @param options `source` 是注入缝（生产不传）；`variant` 是要哪个变体（生产会传）
  */
 export function useAssetImage(
   name: MaybeRefOrGetter<string | null | undefined>,
@@ -166,7 +178,12 @@ export function useAssetImage(
     const raw = toValue(name);
     // 空名字不是错误，是「这个位没人」—— 静默给 null，不抛也不打日志（§3 的静默口径）
     if (raw === null || raw === undefined || raw === '') return null;
-    return resolveAsset(indexes.value, raw, toValue(type) ?? DEFAULT_ASSET_TYPE);
+    return resolveAsset(
+      indexes.value,
+      raw,
+      toValue(type) ?? DEFAULT_ASSET_TYPE,
+      toValue(options.variant),
+    );
   });
 
   /**

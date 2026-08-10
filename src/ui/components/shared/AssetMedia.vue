@@ -26,13 +26,22 @@ const props = withDefaults(
     name?: string | null;
     /** 单个类型（精确匹配）或类型链（按序降级） */
     type: AssetType | readonly AssetType[];
+    /**
+     * 情绪/表情变体（D11）；缺省 = 主图。
+     *
+     * ⚠️ **不是精确寻址**: 该类型没有这个变体时会退回主图、再退回类型链下一档
+     * （asset-resolve 的 `pickFromSlot`）。一格一定要显示"那一行"的调用方
+     * （相册之类）得自己保证传进来的三元组存在。
+     */
+    variant?: string;
   }>(),
-  { name: '' },
+  { name: '', variant: undefined },
 );
 
 const { url, isVideo } = useAssetImage(
   () => props.name,
   () => props.type,
+  { variant: () => props.variant },
 );
 </script>
 
