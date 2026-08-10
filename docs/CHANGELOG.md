@@ -9,6 +9,79 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 设置 store 启动任务绕开密钥保护闸门 ｜ ✅ 已修（2026-08-10）
+
+追 `settings-store.test.ts` 那条负载敏感偶发失败时挖出来的**真实数据丢失缺陷**。
+
+**根因（一个，两个症状）**：store 构造期那个 `setTimeout(0)` 启动任务，
+① 用**裸 `localStorage.setItem`** 落盘，绕开了 `saveNow()` 的 `settingsPersistenceEnabled` 闸门；
+② 是**无主**的 —— 不随 store 销毁取消。
+
+**症状 1（生产，会丢数据）**：老档案的 API Key 唯一副本还在 localStorage，
+`settingsPersistenceEnabled` 要等 `initApiSecrets()` 把 Dexie 那份**回读验证**过才放行。
+而这个启动任务只要撞上一个 `presets` 键（连空数组都算，`migratePresetsMirrorToDexie` 的早退分支
+也会 `persist()`）就会在验证之前把**脱敏后的** apiPool 写回去。此后 Dexie 若写不进
+（无痕模式 / 配额 / IndexedDB 不可用），密钥就永久没了 —— 正是那道闸门存在的全部理由。
+实测：构造 store、不调 `initApiSecrets`、推进几个宏任务，localStorage 里的 `sk-only-copy` 当场变成 `""`。
+
+**症状 2（测试，那条偶发失败）**：任务落地时经
+`loadAgentProjectDefaults → content-store → beautifier-store.refreshPresetRules` 调
+`useSettingsStore().saveNow()` —— 而那个 `useSettingsStore()` 解析的是**当时活跃的 pinia**。
+于是上一轮用例的启动任务，在下一轮 `beforeEach` 的 `await` 窗口里，把**上一轮**那份脱敏快照
+写回了刚清空的 localStorage；新 store 构造时读到它，`apiPool[0]` 成了上一轮 `apiKey: ''` 的条目，
+`saveApiEntry` 于是把新条目 push 到 index 1 —— 断言读 `apiPool[0].apiKey` 就是 `''`。
+CPU 高负载把启动任务拖慢到刚好落进那个窗口，所以只在全量 + 竞争下复现。
+
+**改动**
+
+- 启动任务的 persist 回调改走 `saveNow()`（闸门恢复）。闸门关着时只在内存里删 `presets`，
+  等 `doInitApiSecrets` 验证通过后那次 `persistRedactedSettings()` 一并落盘 —— 自愈，且幂等。
+- 加 `onScopeDispose`：`$dispose()` / HMR 时 `clearTimeout` + 置取消位，任务不再写。
+- 测试侧：`afterEach` 销毁 store；**`store_.clear()` 移到所有 `await` 之后、紧贴 store 构造**
+  （窗口宽度归零，才是真正的兜底 —— 用例内部自建的 store 不归 `afterEach` 管）。
+
+**验收**：两条新回归测试用宏任务推进**强制交错**，不靠负载；对 fix 前的代码**确定性变红**
+（实测 2 failed），对 fix 后全绿。全量 **7529 passed / 9 skipped**，
+并在原复现命令（全量 + typecheck:vue + lint + build 并行抢 CPU）下连跑多轮无失败。
+
+### SEC-02 收口 —— 词条脚本迁入 QuickJS 隔离 ｜ ✅ 7527 tests 全绿，待真机（2026-08-10）
+
+2026-08-09 审查唯一一条**越红线 ③**（窃取 API Key）的发现。`executeScript` 原先用 `new Function` +
+13 个同名形参遮蔽，在**应用同源主线程**上跑 AI 产出的效果脚本 —— 文件里当年就写着
+`({}).constructor.constructor("return globalThis")()` 能拿回真全局，并注明「正式接通前必须替换」；
+而 Q-07 早已接通（读档 / 装卸物品 / 状态到期三条路都会执行），那句注释留到了审查当天。
+逃逸之后 `indexedDB` → Dexie → `apiEndpoints.apiKey`，应用无任何 CSP，`fetch` 直接出网。
+
+**改动**
+
+- 新增 `script-backend.ts`（接缝 + `FailClosedScriptBackend` + 单例 + `installProductionScriptBackend()`）
+  与 `script-quickjs-backend.ts`（QuickJS(wasm) realm 隔离，一次脚本一个 runtime+context，
+  墙钟 50ms / 内存 32MB / 微任务抽干 / 句柄释放）。`main.ts` 在启动时装配，失败弹不消失的 error toast。
+- `script-executor.ts` 的 `new Function` 路径**整段删除**，那句过期注释一并删掉。新增 `$call` 深度护栏（8 层）。
+- 🔴 与 `ejs-backend.ts` **刻意不同：不留 Legacy**，`setScriptBackend` 也不导出 ——
+  脚本执行面就是 SEC-02 本身，留一个可安装的 `new Function` 等于把刚拆掉的枪放回抽屉。
+  装不上 = **fail-closed**（脚本一行不跑），不回落。
+
+**兼容性（这次改动的全部风险所在）**
+
+guest 面由后端**从 `buildSandbox()` 推导**，不另列名单；宿主闭包一行没改，所以 `_parentScripts`
+盖章、`$call` 递归合并、`$event.on` 的 handle 编号仍在宿主侧原样发生。既有 54 条 script-executor
+用例**未改一行断言**即在真隔离上通过。宿主全局仍显式遮蔽成 `undefined`（保真旧的形参遮蔽，
+`if (window)` 这类防御性写法不至于整段中断），但 `Function`/`globalThis`/`eval` 刻意不遮蔽 ——
+在 realm 里它们够不到宿主，留着更兼容。另补了 QuickJS 不自带的 `console` 门面。
+
+**实测验收**（`script-quickjs-backend.test.ts` 19 条，含反假绿哨兵）
+
+构造器逃逸只拿到 guest 全局（用只存在于宿主的哨兵证明拿不到宿主 realm，且**对照实验确认旧实现
+确实把哨兵值原样交了出来**）· `fetch`/`indexedDB`/`XHR`/`WebSocket`/`process`/`require` 全不可达 ·
+`while(true)` 53ms 被中断且不毒化后端 · 脚本间零泄漏（含内建原型）· guest 改原型不波及宿主 ·
+每次执行约 0.47ms（200 次 93ms）。
+
+闸门：tsc / vue-tsc / eslint / **7527 passed·9 skipped（294 文件）** / `vite build` 全绿；
+knip 相对干净树**零新增死代码**。
+
+> ✅ 上述改动放大出来的那条 `settings-store.test.ts` 偶发失败已定位并修复，见下一条。
+
 ### 升级/升层属性点系统 —— 引擎自动发放 + UI 自由分配 ｜ ✅ 待真机（2026-08-10）
 
 ADR-11 补课：此前 `level`/`tier` 只有 AI 经 `update_character` 一条改动路径，「升级送点、升层加属性」没有任何确定性逻辑。现在归 Code：

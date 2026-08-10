@@ -30,13 +30,28 @@ vi.stubGlobal('localStorage', {
 describe('settings-store', () => {
   let store: ReturnType<typeof useSettingsStore>;
   beforeEach(async () => {
-    store_.clear();
     await getDatabase().apiEndpoints.clear();
+    // 🔴 清 localStorage 必须**紧贴 store 构造**，中间不许有 await。
+    //
+    //    此前它在 `await` 之前，于是留出了一个让出事件循环的窗口 —— 上一轮 store
+    //    构造期那个 `setTimeout(0)` 启动任务会在窗口里落地。它经
+    //    `loadAgentProjectDefaults → content-store → beautifier-store.refreshPresetRules`
+    //    调 `useSettingsStore().saveNow()`，而那个 `useSettingsStore()` 解析的是
+    //    **当时活跃的 pinia**（还是上一轮的），于是把上一轮那份**脱敏**快照写回了
+    //    刚清空的 localStorage。下一个 store 构造时读到它，`apiPool[0]` 成了上一轮的
+    //    `apiKey: ''` 条目，`saveApiEntry` 于是把新条目 push 到 index 1 ——
+    //    「API 密钥写入 Dexie…」那条用例便以 `apiPool[0].apiKey === ''` 偶发失败。
+    //    只在全量 + CPU 高负载下复现（启动任务被拖慢到刚好落在这个窗口里）。
+    store_.clear();
     setActivePinia(createPinia());
     store = useSettingsStore();
   });
 
   afterEach(async () => {
+    // 销毁本轮 store：取消它构造期那个 `setTimeout(0)` 启动任务，少一个游荡的写入者。
+    // （只能覆盖 beforeEach 建的这一个 —— 用例内部自建的 store 各自负责，
+    //   所以上面 beforeEach 的「清空紧贴构造」才是真正的兜底。）
+    store?.$dispose();
     await getDatabase().apiEndpoints.clear();
   });
 
@@ -255,5 +270,91 @@ describe('settings-store', () => {
     expect(store.settings.plotTabooContent).toBe('');
     expect(store.settings.plotChapterCount).toBe(0);
     expect(store.settings.plotEventsPerChapter).toBe(0);
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // 构造期启动任务（`setTimeout(0)`）的两条回归
+  //
+  // 同一个根因的两个症状：那个任务此前**绕开 `saveNow()` 直接写 localStorage**，
+  // 而且**无主** —— 不随 store 销毁而取消。
+  // 两条都用宏任务推进强制交错，不依赖机器负载。
+  // ═══════════════════════════════════════════════════════════
+  const drainMacrotasks = async (n: number) => {
+    for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
+  };
+
+  it('启动任务不得在密钥迁移验证通过之前覆写 localStorage（老档唯一副本保护）', async () => {
+    // 老档：密钥的**唯一副本**还在 localStorage；另有一个 presets 键触发镜像迁移。
+    store_.set(
+      'fated-poem-settings',
+      JSON.stringify({
+        presets: [],
+        apiPool: [
+          {
+            id: 'legacy-1',
+            name: 'legacy',
+            baseUrl: 'https://legacy.example.test',
+            apiKey: 'sk-only-copy',
+            maskedKey: 'sk-***copy',
+            model: 'legacy-model',
+            models: ['legacy-model'],
+            apiType: 'chat',
+          },
+        ],
+      }),
+    );
+    setActivePinia(createPinia());
+    const legacyStore = useSettingsStore();
+
+    // 刻意**不**调 initApiSecrets —— 模拟启动任务先于迁移落地那一拍
+    await drainMacrotasks(6);
+
+    // 🔴 迁移尚未验证，localStorage 仍是唯一副本，一个字节都不许动。
+    //    此前这里会被写成 `apiKey: ""`：Dexie 若写不进（无痕 / 配额 / IndexedDB 不可用），
+    //    用户的密钥就永久没了。
+    expect(localStorage.getItem('fated-poem-settings')).toContain('sk-only-copy');
+
+    // 迁移跑完之后才允许脱敏落盘，且运行时仍读得到
+    const outcome = await legacyStore.initApiSecrets();
+    expect(outcome.status).toBe('migrated');
+    expect(legacyStore.settings.apiPool[0].apiKey).toBe('sk-only-copy');
+    expect(localStorage.getItem('fated-poem-settings')).not.toContain('sk-only-copy');
+    legacyStore.$dispose();
+  });
+
+  it('已销毁的 store 不得再把自己的快照写回 localStorage', async () => {
+    // 先把**其它**用例遗留的启动任务抽干 —— 它们经 beautifier-store 的
+    // `useSettingsStore()` 会写到「当时活跃」的那个 store 上，与本条要测的东西无关。
+    await drainMacrotasks(6);
+
+    setActivePinia(createPinia());
+    const ghost = useSettingsStore();
+    ghost.settings.apiPool = [
+      {
+        id: 'ghost-1',
+        name: 'ghost',
+        baseUrl: 'http://ghost',
+        apiKey: 'k',
+        maskedKey: '***',
+        model: 'm',
+        models: ['m'],
+        apiType: 'chat',
+      },
+    ] as never;
+
+    // 下一个用例的 afterEach/beforeEach 形状：销毁 → 清空 → 让出事件循环
+    ghost.$dispose();
+    store_.clear();
+    await drainMacrotasks(6);
+
+    // 🔴 幽灵 store 的启动任务此刻不得复活那份快照。
+    //    复活的后果不是「多一条脏数据」，而是下一个 store 会把它当成自己的 apiPool 读进来
+    //    —— 那条脱敏条目占住 index 0，新存的密钥被 push 到 index 1。
+    expect(localStorage.getItem('fated-poem-settings')).toBeNull();
+
+    setActivePinia(createPinia());
+    const fresh = useSettingsStore();
+    expect(fresh.settings.apiPool).toHaveLength(0);
+    fresh.$dispose();
   });
 });

@@ -19,7 +19,7 @@
  *    已迁出的历史键与迁移标志位刻意**不**在 `UiSettings` 上（见该文件头）。
  */
 import { defineStore } from 'pinia';
-import { ref, watch } from 'vue';
+import { ref, watch, onScopeDispose } from 'vue';
 import { deleteApiEndpoint, getApiEndpoints, saveApiEndpoint } from '@engine/database';
 import {
   DEFAULT_IMAGE_MAX_PER_HOUR,
@@ -372,19 +372,38 @@ export const useSettingsStore = defineStore('settings', () => {
   // Phase 0: 内置世界书合并已搬去 worldbook-store 的 init()（设计 D4 第 6 步）——
   // 必须在 localStorage→Dexie 迁移**之后**、针对 Dexie 执行，否则会把内置书写回
   // localStorage，源数组在迁移脚下漂移。
-  setTimeout(async () => {
+  /**
+   * 构造期那个 `setTimeout(0)` 启动任务的**归属标记**。
+   *
+   * 🔴 这个任务此前是**无主**的：既不随 store 销毁而取消，也不检查自己是否还是当前 store。
+   *    它于是能在自己那个 store 早已被替换之后，把那份陈旧快照写回 localStorage
+   *    —— 生产上只有一个 store 所以看不见，HMR 与测试里各建一个 store 的场景下就是
+   *    「刚清干净的 localStorage 又被上一个 store 写了回来」，下一个 store 读到幽灵快照。
+   *    settings-store.test.ts 那条 API Key 用例的负载敏感偶发失败正是这样来的：
+   *    幽灵快照里 `apiPool[0]` 是上一轮的**脱敏**条目（`apiKey: ''`），
+   *    于是 `saveApiEntry` 把新条目 push 到了 index 1。
+   */
+  let bootTaskCancelled = false;
+  const bootTimer = setTimeout(async () => {
+    if (bootTaskCancelled) return;
     // 🔴 内容-引擎分离波 1 / D22：一次性迁移 presets 镜像 → Dexie。
     //    必须在 loadAgentProjectDefaults 之前跑：seed 那步只在 Dexie 空时播种出厂预设，
     //    迁移先把用户的第三方预设从镜像搬进 Dexie，seed 就不会覆盖它们。
     //    迁移幂等：完成后从 settings 删除 presets 字段并 persist，下次启动不再触发。
     await migratePresetsMirrorToDexie(settings.value as Record<string, unknown>, () => {
-      try {
-        localStorage.setItem(STORAGE_KEY, serializeSettingsForLocalStorage(settings.value));
-        return true;
-      } catch {
-        return false;
-      }
+      if (bootTaskCancelled) return false;
+      // 🔴 **必须走 `saveNow()`，不能直接 `localStorage.setItem`。**
+      //    此前这里是裸 setItem，绕开了 `saveNow()` 的 `settingsPersistenceEnabled` 闸门
+      //    —— 而那道闸门的全部意义就是「迁移验证通过之前不许覆写 localStorage，
+      //    否则会毁掉密钥的唯一副本」（见 `saveNow` 的注释）。
+      //    老档案（密钥还只在 localStorage 里）+ 一个 `presets` 键，就足以让这个
+      //    启动任务在 `initApiSecrets()` 跑完之前把**脱敏后的** apiPool 写回去，
+      //    此后 Dexie 若写不进（无痕模式 / 配额 / IndexedDB 不可用），密钥就永久没了。
+      //    闸门关着时这里返回 false：presets 字段只在内存里删掉，
+      //    等 `doInitApiSecrets` 验证通过后那次 `persistRedactedSettings()` 会一并落盘。
+      return saveNow();
     });
+    if (bootTaskCancelled) return;
 
     // 加载项目默认 Agent 配置
     await loadAgentProjectDefaults();
@@ -394,6 +413,13 @@ export const useSettingsStore = defineStore('settings', () => {
     // 塞回 settings.beautifierPresetRules，源对象在迁移脚下漂移。
     // 现在它只进 beautifier-store 的纯内存 ref，不再持久化。
   }, 0);
+
+  // store 被销毁（`$dispose()` / HMR / 测试换 Pinia）时停掉启动任务 ——
+  // 让它不再往一个已经不属于自己的 localStorage 里写东西。
+  onScopeDispose(() => {
+    bootTaskCancelled = true;
+    clearTimeout(bootTimer);
+  });
 
   const settings = ref<UiSettings>(merged);
   const apiSecretsReady = ref(false);
