@@ -68,6 +68,17 @@ export interface GamePipelineDeps {
 /** 流式回调 — chunk 是累计的可见正文快照；isComplete=true 表示清理临时预览。 */
 export type StoryChunkCallback = (chunk: string, isComplete: boolean) => void;
 
+/**
+ * 这个错误是不是「用户主动取消」（离开游戏页 / 按了停止生成）。
+ *
+ * 侧链自 2026-08-10 起也吃 `run()` 的 abort 信号，于是取消会以 `AbortError` 的形状
+ * 冒到各条侧链的 catch 里。**取消不是失败** —— 按失败报会在 UI 上留一个红状态、
+ * 在控制台留一条 `console.error`，而那正是用户自己要的结果。
+ */
+function isAbortError(err: unknown): boolean {
+  return (err as { name?: string } | null | undefined)?.name === 'AbortError';
+}
+
 /** 兼容旧调用名；正文、控制区块与 `<option(s)>` 统一由 story-output 投影。 */
 export function extractStoryOptions(raw: string): { content: string; options: string[] } {
   return projectStoryOutput(raw);
@@ -149,6 +160,18 @@ export class GamePipeline {
   private saveId: string;
   private orch: AgentOrchestrator | null = null;
   private abortController: AbortController | null = null;
+  /**
+   * 本管线跑到第几轮（run() 每次进入自增）。
+   *
+   * 🔴 用来判「我的 finally 还是不是当前这一轮的 finally」（2026-08-10）。
+   * `abort()` 会**立刻**把 isGenerating 清成 false，输入框随之解锁，于是玩家可以在上一轮
+   * 收尾之前就发下一轮。此时旧 run 的 finally 会做两件破坏性的事：
+   *   ① `isGenerating = false` —— 在新一轮飞行途中解锁输入；
+   *   ② `abortController = null` —— 把**新一轮**的控制器抹掉，从此「停止生成」变成
+   *      一个静默的 no-op（`this.abortController?.abort()` 里的 `?.` 会吃掉它）。
+   * 两件都只在「我还是当前那一轮」时才做。
+   */
+  private runSeq = 0;
   /** 真机修(2026-07-17): run() 加载的配置/世界书/预设，供侧链 buildAgentMessages 使用（此前恒 undefined → systemPrompt 退化 stub + 世界书恒空） */
   private chainData: {
     agentConfigs: AgentConfig[];
@@ -271,6 +294,7 @@ export class GamePipeline {
       isUserMessage,
     );
     console.log('[GamePipeline] userInput preview:', userInput.slice(0, 300));
+    const mySeq = ++this.runSeq;
     this.abortController = new AbortController();
     this.game.isGenerating = true;
 
@@ -386,8 +410,12 @@ export class GamePipeline {
       // 再经这里的 refreshFromDb 才更新。而**转场恰恰是唯一真正该换歌的时刻**：
       // 在 Stage 1 播，正文已经进了熔火裂谷，BGM 还在放上一座城的曲子。
       this.flushPendingAudio();
-      this.game.isGenerating = false;
-      this.abortController = null;
+      // 🔴 只有「我还是当前那一轮」才收拾这两样 —— 否则会解锁新一轮的输入框，
+      // 并且把新一轮的控制器抹成 null（「停止生成」从此静默失效）。见 runSeq 的注释。
+      if (this.runSeq === mySeq) {
+        this.game.isGenerating = false;
+        this.abortController = null;
+      }
     }
   }
 
@@ -931,6 +959,19 @@ export class GamePipeline {
   private getClientFactory() {
     const saveId = this.saveId;
     const game = this.game;
+    // 🔴 侧链的取消信号（2026-08-10）。此前侧链**完全不响应 abort**：下面的包装层把
+    // `signal` 当入参转发，而 char_gen / item_gen / craft_gen / 战斗的调用方一个都没传，
+    // 于是 `abort()` 只掐得动 story（`callAgent` 显式传了 signal）。后果有两层：
+    //   ① 离开游戏页之后侧链照跑（item_gen 单次可达 300s），钱照花、结果照落库；
+    //   ② 「停止生成」把 isGenerating 清成 false → 输入框解锁 → 玩家可以开下一回合，
+    //      而上一回合的侧链仍在飞，两轮对**同一个存档**交错写入。
+    // ② 才是真正的理由：这不是偏好问题，是并发写入危害。
+    //
+    // 在**工厂创建时**取信号而不是每次调用时取：工厂是每次侧链调用现造的
+    // （5 个调用点，全在 run() 之内），所以这一份天然绑定「创建它的那一轮」。
+    // 每次调用现取的话，上一轮的侧链发起新请求时会读到**新一轮**的控制器，
+    // 于是老 abort 掐不动它 —— 正好丢掉这条修复想要的那个效果。
+    const turnSignal = this.abortController?.signal;
     return (agentId: string, endpoint: ApiEndpoint, _saveId: string) => {
       // 🔴 2026-08-02: item_gen 批量生成后单次调用耗时暴涨（9 个请求一次生成 ≈ 240s+），
       // API 池默认 timeout 60s 会掐断。item_gen 独立链（不走 orchestrator 的 config.timeout）
@@ -1005,7 +1046,8 @@ export class GamePipeline {
           const t0 = startTs();
           let result: any;
           try {
-            result = await real.chat(request, signal);
+            // 调用方给了就用它的，没给才回落本轮信号（见 turnSignal 那段注释）
+            result = await real.chat(request, signal ?? turnSignal);
           } catch (err: any) {
             record(
               extractMessages(request),
@@ -1021,7 +1063,10 @@ export class GamePipeline {
           const t0 = startTs();
           let result: any;
           try {
-            result = await real.chatWithTools(request, toolExecutor, options);
+            result = await real.chatWithTools(request, toolExecutor, {
+              ...options,
+              signal: options?.signal ?? turnSignal,
+            });
           } catch (err: any) {
             record(
               extractMessages(request),
@@ -1033,9 +1078,9 @@ export class GamePipeline {
           record(extractMessages(request), result, Date.now() - t0);
           return result;
         },
-        // chatStream 不常用（侧链不走流式），直接透传
+        // chatStream 不常用（侧链不走流式），直接透传（信号回落同上）
         chatStream: (request: any, callbacks: any, signal?: any) =>
-          real.chatStream(request, callbacks, signal),
+          real.chatStream(request, callbacks, signal ?? turnSignal),
       } as any;
     };
   }
@@ -1873,6 +1918,14 @@ export class GamePipeline {
       };
       return summary;
     } catch (err) {
+      if (isAbortError(err)) {
+        // 战斗被取消：照样 exitCombat（不能把玩家留在一个不再推进的战斗面板里），
+        // 但不报错状态。内核状态本来就只在终局才落库，中途取消零写入。
+        this.game.clearAgentStatus('combat_v3');
+        this.game.exitCombat();
+        console.log('[GamePipeline] combat_v3 已取消（离开游戏页 / 停止生成）');
+        return null;
+      }
       this.game.clearAgentStatus('combat_v3', String(err));
       this.game.exitCombat();
       console.error('[GamePipeline] combat_v3 失败:', err);
@@ -1915,6 +1968,11 @@ export class GamePipeline {
           this.emitMessage(result.narrative, 'assistant');
         }
       } catch (err) {
+        if (isAbortError(err)) {
+          this.game.clearAgentStatus('craft_gen');
+          console.log('[GamePipeline] craft_gen 链已取消（离开游戏页 / 停止生成）');
+          break;
+        }
         this.game.clearAgentStatus('craft_gen', String(err));
         console.error('[GamePipeline] craft_gen 链失败，继续处理剩余请求:', err);
       }
@@ -1976,6 +2034,13 @@ export class GamePipeline {
           });
         }
       } catch (err) {
+        if (isAbortError(err)) {
+          // 取消不是失败：清干净状态并**跳出整个循环** —— 剩下的标记只会各自再被
+          // 掐一次，徒增日志噪声（信号已经拉了，重试没有意义）
+          this.game.clearAgentStatus('char_gen');
+          console.log('[GamePipeline] char_gen 链已取消（离开游戏页 / 停止生成）');
+          break;
+        }
         this.game.clearAgentStatus('char_gen', String(err));
         console.error(
           `[GamePipeline] char_gen 链失败 (${marker.attributes?.characterName ?? '未知角色'})，继续处理剩余请求:`,
@@ -2042,6 +2107,11 @@ export class GamePipeline {
         // 物品数据已由 stateManager 落库；run() finally 的 refreshFromDb() 会把
         // 最新 characters（含新物品/装备）回读进 Pinia，前端面板随之刷新。
       } catch (err) {
+        if (isAbortError(err)) {
+          this.game.clearAgentStatus('item_gen');
+          console.log('[GamePipeline] item_gen 链已取消（离开游戏页 / 停止生成）');
+          break;
+        }
         this.game.clearAgentStatus('item_gen', String(err));
         console.error('[GamePipeline] item_gen 批量链失败（本批不落库，下回合重试）:', err);
       }
