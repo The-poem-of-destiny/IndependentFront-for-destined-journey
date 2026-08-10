@@ -47,6 +47,7 @@ import {
   getDatabase,
 } from './database';
 import { getVar, setVar, delVar, insertVar, applyPathOps } from './var-resolver';
+import { getTierConfig } from './tier-constants';
 import { getEngineSettings } from './engine-settings';
 // Q-19：这三个模块此前在 14 处 handler 里各 `await import` 一次。它们都不 import
 // 本模块（已核实无环），动态化没有换来任何解耦，只是让每个 handler 多一次 await
@@ -170,6 +171,9 @@ const UPDATE_CHAR_NUMERIC_FIELDS = new Set<string>([
   'money',
   'quantity',
 ]);
+
+/** 五维属性键（英文，对齐 CharacterState.attributes；升层自动加点逐键遍历用） */
+const ATTRIBUTE_KEYS = ['str', 'dex', 'con', 'int', 'spi'] as const;
 
 // ========== StateManager ==========
 
@@ -530,6 +534,11 @@ export class StateManager {
       const keys = Object.keys(value);
       const isDelta = patch.metadata?.delta === true;
 
+      // 升级/升层自动加点的取值基准 —— 必须在 value 落地**之前**抓，
+      // 否则 delta 与 set 两条路径都会把旧值就地改掉，差值恒为 0（ADR-11：数值规则归 Code）
+      const prevLevel = char.level;
+      const prevTier = char.tier;
+
       // ===== 白名单校验（先验证后赋值 — 原子拒绝，任一非法键则整个 value 不落地）=====
       for (const k of keys) {
         if (UPDATE_CHAR_FORBIDDEN_ARRAY_FIELDS.has(k)) {
@@ -605,6 +614,48 @@ export class StateManager {
           const max = char[maxField];
           if (typeof cur === 'number' && typeof max === 'number') {
             char[res] = Math.max(0, Math.min(cur, max));
+          }
+        }
+      }
+
+      // ===== 升级 / 升层自动加点（ADR-11：确定性数值规则归 Code，不交给 AI 算）=====
+      // 只认主角：NPC/怪物/召唤物的等级由生成器一次性给定，没有「攒点数分配」这回事。
+      if (char.type === 'player') {
+        // ① 升级：每升 1 级 +1 自由属性点
+        //    双重发放 guard —— patch 自己写了 freeAttrPoints 时不再叠加，
+        //    否则 AI 一边发点数一边升级，玩家会白拿一倍。
+        if (
+          typeof prevLevel === 'number' &&
+          typeof char.level === 'number' &&
+          !keys.includes('freeAttrPoints')
+        ) {
+          const levelGain = char.level - prevLevel;
+          // 降级不回收（剧情降级/数据修正不该没收玩家已到手的点数）
+          if (levelGain > 0) {
+            char.freeAttrPoints = (char.freeAttrPoints ?? 0) + levelGain;
+          }
+        }
+
+        // ② 升层：每升 1 层五维各 +1，钳到**新层级**上限
+        //    同样的双重发放 guard —— patch 自己写了 attributes 时不再叠加。
+        if (
+          typeof prevTier === 'number' &&
+          typeof char.tier === 'number' &&
+          !keys.includes('attributes')
+        ) {
+          const tierGain = char.tier - prevTier;
+          if (tierGain > 0) {
+            // 层级配置查不到（越界层级/脏数据）时只加不钳 —— 少给上限强于把属性削掉
+            const cap = getTierConfig(char.tier)?.attributeCap;
+            const base = (char.attributes ?? {}) as Record<string, number>;
+            const next: Record<string, number> = { ...base };
+            for (const attr of ATTRIBUTE_KEYS) {
+              const cur = typeof base[attr] === 'number' ? base[attr] : 0;
+              const raw = cur + tierGain;
+              // 钳制只封顶不回削 —— delta 五维加法不钳上限，已超上限的属性升层时不得被静默压低
+              next[attr] = typeof cap === 'number' ? Math.max(cur, Math.min(raw, cap)) : raw;
+            }
+            char.attributes = next as CharacterState['attributes'];
           }
         }
       }
