@@ -2,27 +2,28 @@
 target: the settings page
 total_score: 22
 max_score: 40
-na_heuristics: 
+na_heuristics:
 p0_count: 1
 p1_count: 3
 timestamp: 2026-08-08T04-01-26Z
 slug: src-ui-components-settings-settingspage-vue
 ---
+
 ## Design Health Score
 
-| #   | Heuristic                   | Score      | Key Issue                                                                                                     |
-| --- | --------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
-| 1   | Visibility of System Status | 2          | `agentDirty` is written in 4 places and read in **zero** — the unsaved-changes signal exists and is thrown away |
-| 2   | Match System / Real World   | 3          | Copy is unusually good, but `baseUrl` / `IndexedDB + localStorage` / `thinking:{type:'enabled'}` leak through   |
-| 3   | User Control and Freedom    | 2          | 「恢复成最新」wipes every override with no confirm; leaving the Agent panel silently discards drafts             |
-| 4   | Consistency and Standards   | 2          | 12 sections auto-save, 1 requires an explicit save; `window.confirm()` next to themed `AppModal`               |
-| 5   | Error Prevention            | 2          | Number inputs carry `min`/`max` that browsers don't enforce on typed input; values flow raw into engine config  |
-| 6   | Recognition Rather Than Recall | 2       | No search across 13 sections; cross-section dependencies must be held in working memory                        |
-| 7   | Flexibility and Efficiency  | 1          | No shortcuts, no search, no per-section URL, no keyboard path into any toggle                                  |
-| 8   | Aesthetic and Minimalist    | 3          | Disciplined shared chrome; undercut by three prose paragraphs before 存档数据's first control                   |
-| 9   | Error Recovery              | 2          | `ui.toast('ok')` / `ui.toast('fail: ' + msg)` are dev strings in the primary配置 flow                           |
-| 10  | Help and Documentation      | 3          | `form-hint` explains *why*, not just *what* — the best thing on this surface. No first-run path though          |
-| **Total** |                       | **22/40**  | **Acceptable — significant improvements needed**                                                              |
+| #         | Heuristic                      | Score     | Key Issue                                                                                                       |
+| --------- | ------------------------------ | --------- | --------------------------------------------------------------------------------------------------------------- |
+| 1         | Visibility of System Status    | 2         | `agentDirty` is written in 4 places and read in **zero** — the unsaved-changes signal exists and is thrown away |
+| 2         | Match System / Real World      | 3         | Copy is unusually good, but `baseUrl` / `IndexedDB + localStorage` / `thinking:{type:'enabled'}` leak through   |
+| 3         | User Control and Freedom       | 2         | 「恢复成最新」wipes every override with no confirm; leaving the Agent panel silently discards drafts            |
+| 4         | Consistency and Standards      | 2         | 12 sections auto-save, 1 requires an explicit save; `window.confirm()` next to themed `AppModal`                |
+| 5         | Error Prevention               | 2         | Number inputs carry `min`/`max` that browsers don't enforce on typed input; values flow raw into engine config  |
+| 6         | Recognition Rather Than Recall | 2         | No search across 13 sections; cross-section dependencies must be held in working memory                         |
+| 7         | Flexibility and Efficiency     | 1         | No shortcuts, no search, no per-section URL, no keyboard path into any toggle                                   |
+| 8         | Aesthetic and Minimalist       | 3         | Disciplined shared chrome; undercut by three prose paragraphs before 存档数据's first control                   |
+| 9         | Error Recovery                 | 2         | `ui.toast('ok')` / `ui.toast('fail: ' + msg)` are dev strings in the primary配置 flow                           |
+| 10        | Help and Documentation         | 3         | `form-hint` explains _why_, not just _what_ — the best thing on this surface. No first-run path though          |
+| **Total** |                                | **22/40** | **Acceptable — significant improvements needed**                                                                |
 
 ## Design Specificity Verdict
 
@@ -50,7 +51,7 @@ The single biggest opportunity: **surface the state you already track.** `agentD
 
 1. **`settings-chrome.css` as a real design system, with its reasoning attached.** One source for `.section > h3`, `.form-*`, `.toggle-*`, `.detail-card`, imported per-component via `<style scoped src>` so each keeps its own scope. The header documents the admission criterion (used by 2+ sections) and the specific bug that motivated it (45 inline margins, of which the first-card ones never applied because of margin collapsing). This is why the detector came back clean.
 
-2. **Hint copy that explains consequences, not fields.** 「标题字体」doesn't say "choose a title font" — it says 衬线体是古籍手稿观感的来源，改成无衬线会让全站失去这层对比. 「减少动态效果」tells you the OS preference already works and this switch is only an extra force-on. 存档数据 states up front that export excludes the audio and asset libraries, because 换设备时才发现"东西没跟过来"已经太晚了. Most settings pages label; this one *counsels*.
+2. **Hint copy that explains consequences, not fields.** 「标题字体」doesn't say "choose a title font" — it says 衬线体是古籍手稿观感的来源，改成无衬线会让全站失去这层对比. 「减少动态效果」tells you the OS preference already works and this switch is only an extra force-on. 存档数据 states up front that export excludes the audio and asset libraries, because 换设备时才发现"东西没跟过来"已经太晚了. Most settings pages label; this one _counsels_.
 
 3. **输出美化's three-stage structure.** 全局开关 → 已启用 (with per-rule toggles) → 可用规则库 (collapsed, count in the header) → 自定义规则. Progressive disclosure done right: the collapsed library shows `3 条未启用` so you know something is behind it. This is the shape the other complex sections should copy.
 
@@ -107,7 +108,7 @@ Above that, there's no search, no per-section URL (single-URL state app), no key
 
 **Why it matters**: The secondary persona in PRODUCT.md — the 世界书/预设管理员 — lives in this page. Making them re-derive the map on every visit is exactly the extraneous load the product's own principles reject.
 
-**Fix**: Add a filter input above the rail that matches section names *and* control labels. Add a fade/shadow at the rail's scroll edge. Turn the plain-text cross-references into buttons that call `selectSection()`. Give the rail arrow-key navigation with `aria-current="page"` on the active item (currently absent — active state is colour and weight only).
+**Fix**: Add a filter input above the rail that matches section names _and_ control labels. Add a fade/shadow at the rail's scroll edge. Turn the plain-text cross-references into buttons that call `selectSection()`. Give the rail arrow-key navigation with `aria-current="page"` on the active item (currently absent — active state is colour and weight only).
 
 **Suggested command**: `/impeccable layout`
 
@@ -115,7 +116,7 @@ Above that, there's no search, no per-section URL (single-URL state app), no key
 
 `ApiSection.vue:135` fires `ui.toast('ok', 'success')`. Line 146 fires `ui.toast('fail: ' + msg + hint, 'error')`. Line 247 dumps `API 密钥保存失败：${String(error)}` — a raw error object into a toast.
 
-This is genuinely strange, because the *hints* attached to those same messages are the best error copy in the codebase: the 401 branch says 「API Key 无效或与该服务不匹配，请按服务商文档核对 key 的来源与格式」, and the 404 branch distinguishes "this endpoint has no `/models`" from "your 主链接 is wrong." Someone thought hard about diagnosis and then prefixed it with `fail:`.
+This is genuinely strange, because the _hints_ attached to those same messages are the best error copy in the codebase: the 401 branch says 「API Key 无效或与该服务不匹配，请按服务商文档核对 key 的来源与格式」, and the 404 branch distinguishes "this endpoint has no `/models`" from "your 主链接 is wrong." Someone thought hard about diagnosis and then prefixed it with `fail:`.
 
 Compounding it: these are **toasts**, so a 100-character diagnostic auto-dismisses and can't be re-read, and it appears in a corner rather than beside the field that caused it. Adding an API endpoint is the first thing a new user must do, and it's the flow most likely to fail.
 
@@ -131,7 +132,7 @@ Compounding it: these are **toasts**, so a 100-character diagnostic auto-dismiss
 
 - No keyboard shortcut opens settings, and none jumps between sections. Every section change is a mouse trip to the rail.
 - No per-section URL. Alex cannot bookmark "the Agent tab," cannot share a link to it, and browser back doesn't move between sections.
-- Comparing two agents' prompts costs a full round trip *and* silently discards any unsaved edit on the way out.
+- Comparing two agents' prompts costs a full round trip _and_ silently discards any unsaved edit on the way out.
 - No bulk operations anywhere. Eleven agents share the same API pool selection, and it must be set eleven times.
 - No per-section reset — only a global 清除所有数据 and a per-agent 恢复成最新.
 
@@ -140,14 +141,14 @@ Compounding it: these are **toasts**, so a 100-character diagnostic auto-dismiss
 - **Blocking**: eight toggles in 消息显示, zero focusable elements. Measured, not inferred. The section is inoperable.
 - The nav rail's active state carries no `aria-current`. Sam hears fourteen identical buttons with no "you are here."
 - The Agent sub-nav badges are `!` / `✕` / `✓` glyphs with no accessible text. "Is this agent configured?" is conveyed by a character and a colour.
-- The theme grid's 10 swatches are buttons whose only content is `nameZh` plus a `✓` — the *state* they select is a background gradient with no non-visual description.
+- The theme grid's 10 swatches are buttons whose only content is `nameZh` plus a `✓` — the _state_ they select is a background gradient with no non-visual description.
 - Positives worth keeping: `AppModal` handles `Escape` at document level, `base.css:67` defines a real focus ring, and every nav item pairs its icon with a text label.
 
 **Jordan (Confused First-Timer)**:
 
-- Lands on API 配置 with an empty state whose entire instruction is 「点击右上角「＋ 添加 API」」— the empty state points at a button instead of *being* the button. The action is 500px away in the opposite corner.
+- Lands on API 配置 with an empty state whose entire instruction is 「点击右上角「＋ 添加 API」」— the empty state points at a button instead of _being_ the button. The action is 500px away in the opposite corner.
 - Clicking Agent 配置 next produces a wall of eleven red `!` badges and a 560px-wide void. Eleven alarms for one problem, and the fix is in a section Jordan just left.
-- 「恢复成最新」is unguessable. Restore *what* to *what*? Jordan will click it to find out, and lose their work.
+- 「恢复成最新」is unguessable. Restore _what_ to _what_? Jordan will click it to find out, and lose their work.
 - 存档数据 opens with three dense paragraphs about what backups exclude before showing a single control.
 
 ## Minor Observations
@@ -156,7 +157,7 @@ Compounding it: these are **toasts**, so a 100-character diagnostic auto-dismiss
 - **Hover and active read too similarly on the rail.** Hover is `rgba(230,200,150,0.06)`; active is `color-mix(primary 8%, card-bg)` plus a border and weight 600. They're distinguishable side by side and ambiguous in a screenshot.
 - **`min`/`max` on the 记忆 number inputs don't do what they look like they do.** HTML doesn't clamp typed values. `memorySnapshotLimit` flows through `main.ts:74` into `maxSnapshotsPerSave` unvalidated, and clearing the field yields an empty value on a `v-model.number`. No clamp exists anywhere in the chain.
 - **`ContentStatusBanner` is undismissable.** `role="status"`, no close control, ~40px above the settings header on every view. For someone who has decided not to install a content pack, it's permanent.
-- **输出美化's 导出规则/导入规则 float outside any card**, right-aligned below the last one — while 存档数据 puts the identical pair of actions *inside* a card. Same action, two containers.
+- **输出美化's 导出规则/导入规则 float outside any card**, right-aligned below the last one — while 存档数据 puts the identical pair of actions _inside_ a card. Same action, two containers.
 - **The Agent empty state is avoidable.** There's a persisted `s.activeAgent` and a resolver; on first run it's null and the user gets a void. Defaulting to the first agent costs one line and removes a screen that serves nobody.
 - **`AboutSection` reports 1978 tests, `AGENTS.md` reports 2787.** Hand-maintained constants with a build date of 2026-06-15 in a file the header admits was never wired to a real source.
 - **Nav buttons lack `type="button"`.** Harmless today (no enclosing form), but it's the kind of thing that breaks silently later.
