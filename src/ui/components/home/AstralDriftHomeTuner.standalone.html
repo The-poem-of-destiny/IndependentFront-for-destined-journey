@@ -4,10 +4,82 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
-    <title>Astral Drift — home backdrop</title>
+    <title>Astral Drift Home — tuner</title>
     <style>
       /*
-        ASTRAL DRIFT — third attempt at the home-page backdrop. Read this before changing it.
+        ASTRAL DRIFT — HOME LAYOUT STUDY. Prototype, not shipped chrome.
+
+        This is AstralDriftV2 with the composition moved so the real home screen can live on
+        top of it, and with the theme surface wired up. Four things changed and nothing else:
+
+          1. THE DISC IS OFF-CENTRE. buildGalaxy's group (and the core billboard, which is a
+             separate scene child and therefore does NOT follow the group) get a lateral
+             offset, so the left third of the frame is deep field and the UI column has
+             somewhere to be. The offset is in WORLD units derived from a SCREEN fraction —
+             see placeLayout() — because a fixed world offset drifts across the frame as the
+             aspect changes and stops clearing the column at all on narrow windows.
+
+          2. THE DISC HAS THREE ROTATION AXES ON DIALS, in degrees. v2 hard-coded
+             rotation.x = -1.0 rad in buildGalaxy and animated rotation.z; there was no way
+             to reach the other two from outside. A single roll dial only spins the ellipse
+             in the picture plane — it cannot change how edge-on the disc reads, which is
+             the axis that actually decides whether it looks observed or diagrammed. All
+             three are now layout state applied every frame, with the slow breathing left
+             on Z. Arrow keys step them a degree at a time.
+
+          3. THE TWO ARCS NOW FLANK THE UI COLUMN instead of lying across the bottom. They
+             are the same buildArc ribbons with the same wave, rotated to near-vertical and
+             placed either side of the column, so the copy sits inside a lane of light. Note
+             the specs were RE-AUTHORED rather than just rotated: sag/tilt/taper were tuned
+             for a wide shallow smile and read wrong stood on end.
+
+          4. THE GRADE PASS CARRIES THE THEME. All ten themes come out of one fragment
+             branch instead of ten palettes, because almost every material in this scene
+             clones its colour out of PALETTE at build time — retinting for real would mean
+             walking every material on every theme change. Two modes:
+               - astral (the 5 dark themes): a tritone ramp toward the theme accent, mixed
+                 over the original at `themeMix` so the galaxy keeps its own hue travel.
+               - chart (the 5 light themes): the frame is INVERTED into ink-on-paper. The
+                 scene is additive light on black, so its luminance is already a density
+                 map; paper - density * ink turns the same geometry into an engraved
+                 celestial chart with no change to a single mesh.
+
+                 !! THIS ONE IS NOT APPROVED (2026-08-09). It works and it is pretty, but
+                 it turns the galaxy into A PICTURE - the depth, drift and atmosphere are
+                 what additive light on black was buying, and paper takes that premise
+                 away wholesale. It is the leading candidate, not a settled decision.
+                 Alternatives and the reasoning are in
+                 docs/planning/2026-08-09-home-astral-drift-integration-design.md 5.5.
+                 Nothing else in this file depends on it: swapping it out is this one
+                 branch of the grade pass.
+
+        Known gaps, so nobody mistakes this for finished work: portrait stacks the column
+        over the disc and the flank arcs are hidden there rather than solved; the bloom is
+        still tuned for the dark palette and blooms too hot in chart mode at high `bloom`;
+        nothing here is wired to Vue, reduced-motion, or the lazy-load path yet.
+
+        ----------------------------------------------------------------------------------
+
+        Everything below this point is the v2 file and its notes still apply.
+
+        ASTRAL DRIFT v2 — the drift with runes. Read this before changing it.
+
+        v1 of this file (AstralDrift.standalone.html) is unchanged on disk. The only thing
+        added here is engraved work in the galaxy's own plane: two rune registers and a rail,
+        borrowed from ObsidianAstrolabeV2 and re-tuned for this camera. The point is the
+        marriage — the astrolabe's iconography around the drift's galaxy, so the disc reads
+        as something an instrument is built around rather than as an astronomical photograph.
+
+        Two numbers here are coupled and neither is free: a glyph cell is
+        circumference / (32 * repeat) wide and wants to be about as wide as its band is deep.
+        The first build ignored that and put runes the size of billboards round the disc.
+        The orbit arcs were also quietened (their travelling charge no longer flares to
+        white): with registers outside them there is more in the frame, so each element gets
+        less of it.
+
+        Everything below this point is the v1 file, and its notes still apply.
+
+        ----------------------------------------------------------------------------------
 
         The earlier study still on disk is MagicCircle.standalone.html (v1) — canvas-glyph
         decals, 34 blended layers over a full-screen procedural nebula. MagicCircleV2 (the
@@ -118,60 +190,276 @@
           );
       }
 
-      .title {
+      /*
+        The UI surface. Everything here is expressed in the app's own --theme-* tokens, fed
+        by the [data-theme] blocks further down, so what you see is what HomePage.vue would
+        get — not an approximation of it.
+      */
+      .ui {
         position: absolute;
         inset: 0;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: flex-start;
-        padding-top: 8.5vh;
+        padding: 0 0 0 clamp(28px, 7vw, 108px);
         pointer-events: none;
         user-select: none;
-        text-align: center;
       }
 
-      .title.hidden {
+      .ui.hidden {
         display: none;
       }
 
-      .title h1 {
-        margin: 0;
-        font-family: 'Songti SC', 'Noto Serif SC', 'Source Han Serif SC', serif;
-        font-size: clamp(34px, 6.2vw, 76px);
-        font-weight: 500;
-        letter-spacing: 0.34em;
-        text-indent: 0.34em;
-        color: #eef4ff;
-        text-shadow:
-          0 0 26px rgba(120, 180, 255, 0.34),
-          0 2px 40px rgba(0, 0, 0, 0.7);
+      .ui-column {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: clamp(272px, 25vw, 348px);
+        text-align: center;
       }
 
-      .title p {
-        margin: 14px 0 0;
-        font-size: clamp(10px, 1.15vw, 13px);
-        letter-spacing: 0.5em;
-        text-indent: 0.5em;
-        color: rgba(178, 202, 236, 0.66);
+      /* Corner frame, lifted from HomePage.vue's .title-frame. */
+      .brand-frame {
+        position: relative;
+        padding: 1.1rem 2.2rem;
+      }
+
+      .brand-corner {
+        position: absolute;
+        width: 22px;
+        height: 22px;
+        border-color: color-mix(in srgb, var(--theme-primary) 50%, transparent);
+        border-style: solid;
+      }
+
+      .brand-corner.tl {
+        top: 0;
+        left: 0;
+        border-width: 2px 0 0 2px;
+      }
+      .brand-corner.tr {
+        top: 0;
+        right: 0;
+        border-width: 2px 2px 0 0;
+      }
+      .brand-corner.bl {
+        bottom: 0;
+        left: 0;
+        border-width: 0 0 2px 2px;
+      }
+      .brand-corner.br {
+        bottom: 0;
+        right: 0;
+        border-width: 0 2px 2px 0;
+      }
+
+      .brand-title {
+        display: flex;
+        flex-direction: column;
+        margin: 0;
+        font-family: 'Cinzel', 'Noto Serif SC', 'Source Han Serif SC', serif;
+      }
+
+      .brand-title .line-main {
+        font-size: clamp(1.9rem, 3.1vw, 2.7rem);
+        font-weight: 700;
+        letter-spacing: 6px;
+        text-indent: 6px;
+        line-height: 1.3;
+        color: var(--theme-text-primary);
+        text-shadow:
+          0 0 40px color-mix(in srgb, var(--theme-primary) 35%, transparent),
+          0 2px 26px rgba(0, 0, 0, 0.55);
+      }
+
+      .brand-title .line-alt {
+        font-size: clamp(0.85rem, 1.2vw, 1.05rem);
+        font-weight: 400;
+        letter-spacing: 8px;
+        text-indent: 8px;
+        color: var(--theme-text-secondary);
+      }
+
+      .brand-divider {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 190px;
+        margin: 18px auto;
+      }
+
+      .brand-divider::before,
+      .brand-divider::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          color-mix(in srgb, var(--theme-primary) 42%, transparent)
+        );
+      }
+
+      .brand-divider::after {
+        background: linear-gradient(
+          90deg,
+          color-mix(in srgb, var(--theme-primary) 42%, transparent),
+          transparent
+        );
+      }
+
+      .brand-diamond {
+        width: 8px;
+        height: 8px;
+        margin: 0 14px;
+        background: var(--theme-primary);
+        transform: rotate(45deg);
+        opacity: 0.65;
+        flex-shrink: 0;
+      }
+
+      .brand-tagline {
+        margin: 0 0 6px;
+        font-family: 'Palatino Linotype', 'Book Antiqua', Palatino, serif;
+        font-size: 0.95rem;
+        letter-spacing: 4px;
+        text-indent: 4px;
+        color: var(--theme-text-muted);
+      }
+
+      .brand-quote {
+        margin: 0;
+        min-height: 1.6rem;
+        font-family: 'KaiTi', 'STKaiti', serif;
+        font-size: 0.92rem;
+        font-style: italic;
+        letter-spacing: 1px;
+        color: var(--theme-text-muted);
+      }
+
+      .actions {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+        width: 100%;
+        margin-top: 2.2rem;
+        pointer-events: auto;
+      }
+
+      .btn-row {
+        display: flex;
+        gap: 12px;
+      }
+
+      .btn-row .btn {
+        flex: 1;
+      }
+
+      /* Matches AppButton.vue: same radius token, same size-lg padding. */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 12px 24px;
+        border: 1px solid transparent;
+        /* Five of the ten themes inherit this from variables.css rather than declaring it,
+           so the fallback is load-bearing, not decoration. */
+        border-radius: var(--theme-radius-md, 3px);
+        font-family: inherit;
+        font-size: 1.05rem;
+        letter-spacing: 0.05em;
+        cursor: pointer;
+        transition:
+          background 0.2s ease,
+          border-color 0.2s ease,
+          transform 0.2s ease;
+      }
+
+      .btn:hover {
+        transform: translateY(-1px);
+      }
+
+      .btn-primary {
+        background: var(--theme-primary);
+        color: var(--theme-primary-text);
+      }
+
+      .btn-secondary {
+        background: color-mix(in srgb, var(--theme-card-bg) 82%, transparent);
+        border-color: var(--theme-card-border);
+        color: var(--theme-text-primary);
+        backdrop-filter: blur(6px);
+      }
+
+      /*
+        The ghost row lands on the rune ring in BOTH orientations — it is the one piece of
+        UI with no reliable backdrop. Two things were tried and rejected before this:
+        raising the text to --theme-text-primary alone (still lost on the light-theme
+        charts, where the ink density behind it sits at almost the same value as the text),
+        and a text-shadow (works on the dark themes, does nothing on paper, and reads as a
+        botched glow either way). What is actually needed is a surface, so it gets the
+        quietest one that still guarantees separation: a half-opacity card plate with the
+        same blur the secondary buttons use. It stays subordinate because it is smaller and
+        borderless until hover, not because it is transparent.
+      */
+      .btn-ghost {
+        padding: 8px 16px;
+        font-size: 0.95rem;
+        background: color-mix(in srgb, var(--theme-card-bg) 55%, transparent);
+        border-color: transparent;
+        color: var(--theme-text-primary);
+        backdrop-filter: blur(7px);
+      }
+
+      .btn-ghost:hover {
+        background: color-mix(in srgb, var(--theme-card-bg) 78%, transparent);
+        border-color: color-mix(in srgb, var(--theme-primary) 34%, transparent);
+      }
+
+      /*
+        Portrait: there is no left third to occupy, so the column goes to the top band and
+        the flank arcs are hidden (placeLayout does that half). This is the acknowledged
+        weak case, parked rather than solved.
+      */
+      .stage.is-portrait .ui {
+        align-items: flex-start;
+        justify-content: center;
+        padding: 6vh 24px 0;
+      }
+
+      .stage.is-portrait .ui-column {
+        width: min(88vw, 380px);
+      }
+
+      .stage.is-portrait .actions {
+        margin-top: 1.4rem;
       }
 
       .hud {
         position: absolute;
-        left: 18px;
+        right: 18px;
         bottom: 16px;
         display: flex;
         flex-direction: column;
         gap: 9px;
+        /* The tuning block roughly doubles the row count, and a panel anchored to the
+           bottom grows UPWARDS off the top of the frame — the sliders that vanish first
+           are the ones this file exists to drag. Cap it against the viewport and let it
+           scroll rather than reordering the panel. */
+        max-height: calc(100vh - 32px);
+        overflow-y: auto;
         padding: 12px 14px;
         border-radius: 10px;
         border: 1px solid rgba(120, 170, 235, 0.14);
-        background: rgba(4, 8, 18, 0.62);
+        background: rgba(4, 8, 18, 0.72);
         backdrop-filter: blur(8px);
         color: #9fb6d8;
         font-size: 11px;
         letter-spacing: 0.06em;
         user-select: none;
+        z-index: 3;
       }
 
       .hud.hidden {
@@ -197,7 +485,7 @@
         gap: 8px;
       }
 
-      .hud-row input {
+      .hud-row input[type='range'] {
         width: 116px;
         accent-color: #6fb6ff;
       }
@@ -208,10 +496,238 @@
         font-variant-numeric: tabular-nums;
       }
 
+      .hud-theme {
+        display: grid;
+        grid-template-columns: 62px 158px;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .hud-theme select {
+        width: 158px;
+        padding: 3px 4px;
+        border-radius: 4px;
+        border: 1px solid rgba(120, 170, 235, 0.2);
+        background: #0b1220;
+        color: #cfe2ff;
+        font-size: 11px;
+      }
+
+      .hud-sep {
+        height: 1px;
+        margin: 2px 0 1px;
+        background: rgba(120, 170, 235, 0.16);
+      }
+
+      .hud-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        color: #6f88ac;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      /* Same plate as .hud-theme select — the panel already has one control skin and a
+         second one would read as a stray browser default sitting in it. */
+      .hud-reset {
+        padding: 2px 9px;
+        border-radius: 4px;
+        border: 1px solid rgba(120, 170, 235, 0.2);
+        background: #0b1220;
+        color: #cfe2ff;
+        font-family: inherit;
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      .hud-reset:hover {
+        border-color: rgba(120, 170, 235, 0.42);
+        color: #ffd7a3;
+      }
+
+      .hud-head-tools {
+        display: flex;
+        gap: 6px;
+      }
+
+      /* Panel collapse. A DIRECT-child rule, so it hides the panel's own sections without
+         reaching inside them — which is what keeps it independent of `tune-collapsed`:
+         that class stays on the element while collapsed and comes back untouched. The head
+         row is excluded rather than moved outside the panel, so the chip keeps the same
+         plate, blur and corner the expanded panel has. */
+      .hud-panel-head {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      .hud.hud-collapsed > :not(.hud-panel-head) {
+        display: none;
+      }
+
+      /* Collapsed, the panel is just the chip: drop the row gap and the generous padding or
+         it sits in a box four times its own size. */
+      .hud.hud-collapsed {
+        gap: 0;
+        padding: 6px 7px;
+      }
+
+      /* Collapse is one class on the panel, not ten style writes from JS: the rows are
+         already addressable as a set, and a CSS rule cannot fall out of step with the
+         button the way a per-row loop can. Reset goes with them — it is an action on
+         values you can no longer see, and the head row is meant to stay quiet. */
+      .hud.tune-collapsed .hud-row.tune,
+      .hud.tune-collapsed #tune-reset {
+        display: none;
+      }
+
+      /* Wider label column than the layout dials: "circle tiltX" does not fit in 62px, and
+         a wrapped label pushes its own slider out of line with the rest of the block. */
+      .hud-row.tune {
+        grid-template-columns: 76px 116px 46px;
+      }
+
+      .hud-row.tune span:last-child {
+        color: #ffd7a3;
+      }
+
       .hud-hint {
         color: #55698a;
         font-size: 10px;
         letter-spacing: 0.04em;
+      }
+
+      /*
+        The app's own theme tokens, copied out of src/ui/themes/*.css by the generator so
+        this study cannot drift from the real values.
+      */
+      .stage[data-theme='parchment'] {
+        --theme-window-bg: #e5d8c2;
+        --theme-card-bg: rgba(250, 245, 234, 0.94);
+        --theme-card-border: #c5b18f;
+        --theme-surface-muted: #dfd0b7;
+        --theme-text-primary: #33281f;
+        --theme-text-secondary: #645342;
+        --theme-text-muted: #6f5a43;
+        --theme-primary: #8d642f;
+        --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
+        --theme-primary-text: #fffaf0;
+      }
+      .stage[data-theme='obsidian'] {
+        --theme-window-bg: #090b10;
+        --theme-card-bg: #11151b;
+        --theme-card-border: #4a402c;
+        --theme-surface-muted: #12161c;
+        --theme-text-primary: #e8deca;
+        --theme-text-secondary: #bdb3a1;
+        --theme-text-muted: #92897b;
+        --theme-primary: #c9a85f;
+        --theme-primary-bg: rgba(201, 168, 95, 0.13);
+        --theme-primary-text: #171208;
+        --theme-radius-md: 3px;
+      }
+      .stage[data-theme='crimson'] {
+        --theme-window-bg: #100e11;
+        --theme-card-bg: #21191e;
+        --theme-card-border: #584047;
+        --theme-surface-muted: #2a2025;
+        --theme-text-primary: #f0e2d8;
+        --theme-text-secondary: #ceb9ae;
+        --theme-text-muted: #a38d85;
+        --theme-primary: #b43b4d;
+        --theme-primary-bg: rgba(180, 59, 77, 0.14);
+        --theme-primary-text: #fff8f3;
+        --theme-radius-md: 6px;
+      }
+      .stage[data-theme='indigo'] {
+        --theme-window-bg: #f1efeb;
+        --theme-card-bg: #faf8f4;
+        --theme-card-border: #d8d4cd;
+        --theme-surface-muted: #eeece8;
+        --theme-text-primary: #2a3d5f;
+        --theme-text-secondary: #566279;
+        --theme-text-muted: #7b8190;
+        --theme-primary: #164c8a;
+        --theme-primary-bg: rgba(11, 64, 136, 0.075);
+        --theme-primary-text: #fbfaf7;
+      }
+      .stage[data-theme='bronze'] {
+        --theme-window-bg: #120e0b;
+        --theme-card-bg: #211810;
+        --theme-card-border: #72502d;
+        --theme-surface-muted: #1a130d;
+        --theme-text-primary: #eadcc5;
+        --theme-text-secondary: #c7a77e;
+        --theme-text-muted: #967756;
+        --theme-primary: #c48c4b;
+        --theme-primary-bg: rgba(196, 140, 75, 0.15);
+        --theme-primary-text: #160e08;
+        --theme-radius-md: 4px;
+      }
+      .stage[data-theme='sakura'] {
+        --theme-window-bg: #0a080d;
+        --theme-card-bg: #1b121a;
+        --theme-card-border: #533b4b;
+        --theme-surface-muted: #160f17;
+        --theme-text-primary: #eadde4;
+        --theme-text-secondary: #bea3b0;
+        --theme-text-muted: #917383;
+        --theme-primary: #c67998;
+        --theme-primary-bg: rgba(198, 121, 152, 0.14);
+        --theme-primary-text: #1a0f16;
+        --theme-radius-md: 3px;
+      }
+      .stage[data-theme='ivory'] {
+        --theme-window-bg: #e9e6df;
+        --theme-card-bg: rgba(253, 252, 248, 0.94);
+        --theme-card-border: #cec7ba;
+        --theme-surface-muted: #e2ded5;
+        --theme-text-primary: #302f2c;
+        --theme-text-secondary: #5f5b54;
+        --theme-text-muted: #858076;
+        --theme-primary: #887142;
+        --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
+        --theme-primary-text: #fffdf8;
+      }
+      .stage[data-theme='misty-lilac'] {
+        --theme-window-bg: #dce7f3;
+        --theme-card-bg: rgba(230, 239, 249, 0.7);
+        --theme-card-border: rgba(114, 135, 177, 0.36);
+        --theme-surface-muted: rgba(199, 216, 237, 0.42);
+        --theme-text-primary: #243551;
+        --theme-text-secondary: #435675;
+        --theme-text-muted: #52647e;
+        --theme-primary: #725b9b;
+        --theme-primary-bg: rgba(114, 91, 155, 0.12);
+        --theme-primary-text: #fdfbff;
+      }
+      .stage[data-theme='forest'] {
+        --theme-window-bg: #dce5d7;
+        --theme-card-bg: rgba(247, 246, 237, 0.94);
+        --theme-card-border: #aebdac;
+        --theme-surface-muted: #dde5d9;
+        --theme-text-primary: #26372c;
+        --theme-text-secondary: #455a4b;
+        --theme-text-muted: #5c7060;
+        --theme-primary: #4c755f;
+        --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 16%, transparent);
+        --theme-primary-text: #f8fcf8;
+      }
+      .stage[data-theme='ocean'] {
+        --theme-window-bg: #07131b;
+        --theme-card-bg: #0d202b;
+        --theme-card-border: #2b5060;
+        --theme-surface-muted: #091923;
+        --theme-text-primary: #deedf0;
+        --theme-text-secondary: #94b9c1;
+        --theme-text-muted: #617f87;
+        --theme-primary: #55a7b7;
+        --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
+        --theme-primary-text: #061319;
       }
     </style>
     <script type="importmap">
@@ -227,16 +743,78 @@
     <div class="stage">
       <canvas id="drift-canvas"></canvas>
       <div class="vignette"></div>
-      <div class="title" id="title">
-        <h1>命定之诗</h1>
-        <p>FATED POEM</p>
+      <div class="ui" id="ui">
+        <div class="ui-column">
+          <div class="brand-frame">
+            <span class="brand-corner tl"></span>
+            <span class="brand-corner tr"></span>
+            <span class="brand-corner bl"></span>
+            <span class="brand-corner br"></span>
+            <h1 class="brand-title">
+              <span class="line-main">命定之诗</span>
+              <span class="line-alt">FATED POEM</span>
+            </h1>
+          </div>
+          <div class="brand-divider"><span class="brand-diamond"></span></div>
+          <p class="brand-tagline">纺锤停转之处</p>
+          <p class="brand-quote" id="quote">「命运从不书写结局，只留下韵脚」</p>
+          <nav class="actions">
+            <button class="btn btn-primary" type="button">✦ 新 建 存 档</button>
+            <button class="btn btn-secondary" type="button">读 取 存 档</button>
+            <button class="btn btn-secondary" type="button">创 意 工 坊</button>
+            <div class="btn-row">
+              <button class="btn btn-ghost" type="button">设 置</button>
+              <button class="btn btn-ghost" type="button">制 作 人 员</button>
+            </div>
+          </nav>
+        </div>
       </div>
       <div class="hud" id="hud">
+        <div class="hud-panel-head">
+          <button id="hud-collapse" class="hud-reset" type="button">hide panel</button>
+        </div>
         <div class="hud-readout">
           <span><b id="stat-fps">--</b> fps</span>
           <span><b id="stat-ms">--</b> ms</span>
           <span><b id="stat-calls">--</b> calls</span>
           <span><b id="stat-scale">--</b> scale</span>
+        </div>
+        <div class="hud-theme">
+          <span>theme</span>
+          <select id="dial-theme"></select>
+        </div>
+        <div class="hud-row">
+          <span>pos x</span>
+          <input id="dial-offset" type="range" min="0" max="100" step="0.5" value="61" />
+          <span id="val-offset">61.0%</span>
+        </div>
+        <div class="hud-row">
+          <span>pos y</span>
+          <input id="dial-height" type="range" min="-50" max="50" step="0.5" value="-1" />
+          <span id="val-height">-1.0%</span>
+        </div>
+        <div class="hud-row">
+          <span>rot x</span>
+          <input id="dial-rotx" type="range" min="-180" max="180" step="0.5" value="-45.5" />
+          <span id="val-rotx">-45.5°</span>
+        </div>
+        <div class="hud-row">
+          <span>rot y</span>
+          <input id="dial-roty" type="range" min="-180" max="180" step="0.5" value="-37" />
+          <span id="val-roty">-37.0°</span>
+        </div>
+        <div class="hud-row">
+          <span>rot z</span>
+          <input id="dial-rotz" type="range" min="-180" max="180" step="0.5" value="6" />
+          <span id="val-rotz">6.0°</span>
+        </div>
+        <div class="hud-row">
+          <span>flank</span><input id="dial-flank" type="range" min="0" max="100" value="100" />
+          <span id="val-flank">1.00</span>
+        </div>
+        <div class="hud-row">
+          <span>tint</span><input id="dial-tint" type="range" min="0" max="100" value="45" />
+          <span id="val-tint">0.45</span>
         </div>
         <div class="hud-row">
           <span>bloom</span><input id="dial-bloom" type="range" min="0" max="200" value="100" />
@@ -254,7 +832,79 @@
           <span>veils</span><input id="dial-veils" type="range" min="0" max="200" value="100" />
           <span id="val-veils">1.00</span>
         </div>
-        <div class="hud-hint">move the pointer to parallax · T title · H panel</div>
+        <div class="hud-row">
+          <span>runes</span><input id="dial-runes" type="range" min="0" max="200" value="100" />
+          <span id="val-runes">1.00</span>
+        </div>
+        <div class="hud-row">
+          <span>circle</span><input id="dial-circle" type="range" min="0" max="200" value="100" />
+          <span id="val-circle">1.00</span>
+        </div>
+        <div class="hud-sep"></div>
+        <div class="hud-head">
+          <span>tuning</span>
+          <span class="hud-head-tools">
+            <button id="tune-reset" class="hud-reset" type="button">reset</button>
+            <button id="tune-collapse" class="hud-reset" type="button">hide</button>
+          </span>
+        </div>
+        <div class="hud-row tune">
+          <span>circle R</span
+          ><input id="tune-circleR" type="range" min="0.80" max="2.40" step="0.01" value="1.50" />
+          <span id="tval-circleR">1.500</span>
+        </div>
+        <div class="hud-row tune">
+          <span>circle z</span
+          ><input id="tune-circleZ" type="range" min="-6.00" max="6.00" step="0.05" value="2.70" />
+          <span id="tval-circleZ">2.70</span>
+        </div>
+        <!--
+          Tilts are in DEGREES, like this file's three rotation dials, not in the radians the
+          v2 tuner used: a panel that prints degrees for the disc and radians for the figure
+          drawn under it makes every comparison a conversion. +-51 deg is the same +-0.9 rad
+          travel, and step 0.5 keeps the arrow-key nudge at half a degree throughout.
+        -->
+        <div class="hud-row tune">
+          <span>circle tiltX</span
+          ><input id="tune-circleTiltX" type="range" min="-51" max="51" step="0.5" value="0" />
+          <span id="tval-circleTiltX">0.0°</span>
+        </div>
+        <div class="hud-row tune">
+          <span>circle tiltY</span
+          ><input id="tune-circleTiltY" type="range" min="-51" max="51" step="0.5" value="0" />
+          <span id="tval-circleTiltY">0.0°</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rune1 R</span
+          ><input id="tune-rune1R" type="range" min="1.00" max="2.40" step="0.005" value="1.50" />
+          <span id="tval-rune1R">1.500</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rune1 z</span
+          ><input id="tune-rune1Z" type="range" min="-6.00" max="6.00" step="0.05" value="6.00" />
+          <span id="tval-rune1Z">6.00</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rune2 R</span
+          ><input id="tune-rune2R" type="range" min="1.00" max="2.40" step="0.005" value="1.170" />
+          <span id="tval-rune2R">1.170</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rune2 z</span
+          ><input id="tune-rune2Z" type="range" min="-6.00" max="6.00" step="0.05" value="0.40" />
+          <span id="tval-rune2Z">0.40</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rail R</span
+          ><input id="tune-railR" type="range" min="1.00" max="2.40" step="0.005" value="1.890" />
+          <span id="tval-railR">1.890</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rail z</span
+          ><input id="tune-railZ" type="range" min="-6.00" max="6.00" step="0.05" value="1.95" />
+          <span id="tval-railZ">1.95</span>
+        </div>
+        <div class="hud-hint">pointer parallax · T ui · H panel</div>
       </div>
     </div>
 
@@ -272,7 +922,7 @@
       const stage = document.querySelector('.stage');
       const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-      const dials = { bloom: 1, galaxy: 1, arc: 1, veils: 1 };
+      const dials = { bloom: 1, galaxy: 1, arc: 1, veils: 1, runes: 1, circle: 1 };
 
       // ----------------------------------------------------------------------------------
       // Palette.
@@ -568,6 +1218,15 @@
           tDiffuse: { value: null },
           uTime: { value: 0 },
           uResolution: { value: new THREE.Vector2(1, 1) },
+          // Theme surface. See the header note: one branch here replaces ten palettes,
+          // because the meshes clone their colours out of PALETTE at build time.
+          uInk: { value: 0 }, // 0 = astral (dark themes), 1 = chart (light themes)
+          uThemeMix: { value: 0.45 },
+          uInkGain: { value: 2.6 },
+          uAccent: { value: new THREE.Color(0x7aa2d0) },
+          uField: { value: new THREE.Color(0x02030b) },
+          uPaper: { value: new THREE.Color(0xe5d8c2) },
+          uInkColor: { value: new THREE.Color(0x2b2418) },
         },
         vertexShader: /* glsl */ `
           varying vec2 vUv;
@@ -580,6 +1239,13 @@
           uniform sampler2D tDiffuse;
           uniform float uTime;
           uniform vec2 uResolution;
+          uniform float uInk;
+          uniform float uThemeMix;
+          uniform float uInkGain;
+          uniform vec3 uAccent;
+          uniform vec3 uField;
+          uniform vec3 uPaper;
+          uniform vec3 uInkColor;
           varying vec2 vUv;
 
           float hash21(vec2 point) {
@@ -609,11 +1275,49 @@
             float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
             color *= mix(vec3(0.975, 0.995, 1.03), vec3(1.02, 1.0, 0.985), smoothstep(0.15, 0.85, luma));
 
+            // ---- theme surface -------------------------------------------------------
+            // NO BACKTICKS IN THIS BLOCK. It is a JS template literal, so one backtick in
+            // a GLSL comment ends the string and the whole module fails to parse.
+            //
+            // Recomputed rather than reusing the luma above: the split tone has already
+            // moved the channels, and grading a ramp off a stale luminance puts the
+            // accent band in the wrong place by a visible amount at low uThemeMix.
+            float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+
+            // Astral: tritone field -> accent -> hot. Mixed OVER the original, never
+            // replacing it, so the galaxy's own violet/cyan travel survives the theme.
+            vec3 ramp = mix(uField, uAccent, smoothstep(0.0, 0.40, lum));
+            ramp = mix(ramp, vec3(1.0), smoothstep(0.58, 1.0, lum));
+            vec3 astral = mix(color, ramp, uThemeMix);
+
+            // Chart: the scene is additive light on black, so its luminance IS an ink
+            // density map already. Subtracting it from paper engraves the same geometry
+            // with no change to a single mesh.
+            //
+            // TONE MAP FIRST. The composer target is half-float and the galaxy core lands
+            // far above 1.0, where chroma is enormous; subtracting it there flipped the
+            // hottest pixel in the frame to its complement and the core came out as a
+            // saturated blue blob — a photo negative, which is the one thing this mode
+            // must not look like. Reinhard first, so density and chroma are both bounded.
+            vec3 sdr = color / (1.0 + color);
+            float density = dot(sdr, vec3(0.2126, 0.7152, 0.0722));
+            vec3 chroma = sdr - vec3(density);
+            float ink = pow(clamp(density * uInkGain, 0.0, 1.0), 0.55);
+            // Chroma also has to FADE OUT as ink approaches full, or the densest marks
+            // keep drifting toward a complementary colour instead of settling on ink.
+            // What survives is coloured washes in the mid densities, which reads as plate
+            // registration on a printed chart — that part was the point.
+            vec3 chart = uPaper - ink * (uPaper - uInkColor) - chroma * 0.35 * (1.0 - ink);
+
+            color = mix(astral, chart, uInk);
+
             float grain = hash21(vUv * uResolution + fract(uTime * 0.061) * 79.0) - 0.5;
             color += grain * 0.0055;
-            color *= 1.0 - smoothstep(0.12, 0.74, radial) * 0.3;
+            // Paper does not vignette like a lens; it darkens at the edge a little from
+            // age. Same term, a quarter of the strength.
+            color *= 1.0 - smoothstep(0.12, 0.74, radial) * mix(0.3, 0.08, uInk);
 
-            gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
+            gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
           }
         `,
       });
@@ -1261,10 +1965,21 @@
 
         const group = new THREE.Group();
         group.add(points);
-        // 1.0 rad, not the 0.62 of draft two: cos(0.62) squashes the disc by only 19%, which
-        // the eye reads as a flat circle seen head-on. At 1.0 it is 54% and the thing is
-        // unmistakably a disc lying in space.
-        group.rotation.x = 1.0;
+        // -1.0 rad. The magnitude is a framing choice: cos(0.62) squashes the disc by only
+        // 19%, which the eye reads as a flat circle seen head-on, where 1.0 gives 54% and the
+        // thing is unmistakably a disc lying in space.
+        //
+        // The SIGN is not a taste call, it is a bug fix. A disc built in the XY plane has its
+        // front-face normal at +Z; rotating it by +1.0 about X sends that normal to
+        // (0, -0.841, 0.540), which points DOWNWARD — so the camera, sitting on the positive
+        // side of it, was looking at the disc FROM BELOW. Nothing gave that away while the
+        // scene was only particles and rings, because those are symmetric front-to-back. Put
+        // lettering on it and it is immediately obvious: an annulus seen from behind shows
+        // its texture mirrored, so the runes read as engraved on the underside of a glass
+        // table while the galaxy still read as seen from above. Negating it puts the normal
+        // at (0, +0.841, 0.540) and the camera above the plane, which is one consistent
+        // reading for everything in the group.
+        group.rotation.x = -1.0;
         group.rotation.z = -0.24;
         scene.add(group);
         return {
@@ -1376,6 +2091,485 @@
         return { mesh, material };
       }
 
+      const RING_VERTEX = /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `;
+
+      const HASH_HEAD = /* glsl */ `
+        float hash11(float n) {
+          return fract(sin(n * 127.1) * 43758.5453123);
+        }
+      `;
+
+      // ==================================================================================
+      // Glyph atlas.
+      //
+      // Every rune in the piece lives in ONE 32x3 atlas baked at startup, and a whole
+      // register samples it by angle — 32 runes, one draw call, one texture unit. The
+      // alternative (the original magic-circle study's approach) is a textured plane per
+      // glyph, which is how that file ended up 34 alpha layers deep.
+      //
+      // The runes are generated from a stroke grammar rather than a font: a stem, one to
+      // three branches off it, sometimes a crossing diagonal or a lozenge. That is the
+      // Elder-Futhark silhouette without shipping a typeface or claiming to spell anything.
+      // The RNG is seeded, so the atlas is identical on every load — a piece that reshuffles
+      // its own iconography between visits reads as unstable, not as varied.
+      // ==================================================================================
+      function bakeGlyphAtlas({ cols = 32, rows = 3, cell = 64 } = {}) {
+        const atlas = document.createElement('canvas');
+        atlas.width = cols * cell;
+        atlas.height = rows * cell;
+        const ctx = atlas.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, atlas.width, atlas.height);
+        ctx.strokeStyle = '#fff';
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        let state = 0x9e3779b9;
+        const rnd = () => {
+          state ^= state << 13;
+          state ^= state >>> 17;
+          state ^= state << 5;
+          return ((state >>> 0) % 1000000) / 1000000;
+        };
+
+        const clamp01 = (value) => Math.min(0.98, Math.max(0.02, value));
+
+        for (let row = 0; row < rows; row += 1) {
+          // Later rows are lighter: they are the outer registers, and an outer register at
+          // the same stroke weight as an inner one flattens the whole figure.
+          ctx.lineWidth = Math.max(1.5, cell * (0.1 - row * 0.018));
+          for (let col = 0; col < cols; col += 1) {
+            // Glyphs occupy the middle 60% of the cell. The margin is what stops mipmap
+            // minification from bleeding a neighbouring rune into this one.
+            const pad = cell * 0.2;
+            const originX = col * cell + pad;
+            const originY = row * cell + pad;
+            const span = cell - pad * 2;
+            const at = (u, v) => [originX + clamp01(u) * span, originY + clamp01(v) * span];
+
+            ctx.beginPath();
+            const stems = rnd() < 0.24 ? 2 : 1;
+            const stemAt = [];
+            for (let index = 0; index < stems; index += 1) {
+              const u = stems === 1 ? 0.5 : index === 0 ? 0.3 : 0.7;
+              stemAt.push(u);
+              ctx.moveTo(...at(u, 0.04));
+              ctx.lineTo(...at(u, 0.96));
+            }
+
+            const branches = 1 + Math.floor(rnd() * 3);
+            for (let index = 0; index < branches; index += 1) {
+              const from = stemAt[Math.floor(rnd() * stemAt.length)];
+              const height = 0.1 + rnd() * 0.78;
+              const dirX = rnd() < 0.5 ? -1 : 1;
+              const dirY = rnd() < 0.5 ? 1 : -1;
+              const length = 0.2 + rnd() * 0.24;
+              ctx.moveTo(...at(from, height));
+              ctx.lineTo(...at(from + dirX * length, height + dirY * length * 0.95));
+            }
+
+            if (rnd() < 0.3) {
+              const flip = rnd() < 0.5;
+              ctx.moveTo(...at(flip ? 0.14 : 0.86, 0.12));
+              ctx.lineTo(...at(flip ? 0.86 : 0.14, 0.88));
+            }
+
+            if (rnd() < 0.24) {
+              const centre = 0.24 + rnd() * 0.52;
+              const r = 0.13;
+              ctx.moveTo(...at(0.5, centre - r));
+              ctx.lineTo(...at(0.5 + r, centre));
+              ctx.lineTo(...at(0.5, centre + r));
+              ctx.lineTo(...at(0.5 - r, centre));
+              ctx.closePath();
+            }
+
+            ctx.stroke();
+          }
+        }
+
+        const texture = new THREE.CanvasTexture(atlas);
+        // Repeat in u because a register wraps the full circle; clamp in v so a row can
+        // never sample into its neighbour.
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.generateMipmaps = true;
+        texture.colorSpace = THREE.NoColorSpace; // it is a mask, not a colour
+        texture.needsUpdate = true;
+        return { texture, cols, rows };
+      }
+
+      const glyphAtlas = bakeGlyphAtlas();
+
+      // ==================================================================================
+      // Annulus. uv.x is angle (0..1 round the circle), uv.y is radial (0 inner, 1 outer).
+      // Three's own RingGeometry maps uv over the bounding box instead, which is useless for
+      // anything that wants to be addressed in polar coordinates.
+      // ==================================================================================
+      function buildAnnulus(inner, outer, segments = 640) {
+        const vertexCount = (segments + 1) * 2;
+        const positions = new Float32Array(vertexCount * 3);
+        const uvs = new Float32Array(vertexCount * 2);
+        const indices = [];
+
+        for (let index = 0; index <= segments; index += 1) {
+          const t = index / segments;
+          const angle = t * TAU;
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+
+          const innerVertex = index * 2;
+          const outerVertex = innerVertex + 1;
+          positions[innerVertex * 3] = cos * inner;
+          positions[innerVertex * 3 + 1] = sin * inner;
+          positions[outerVertex * 3] = cos * outer;
+          positions[outerVertex * 3 + 1] = sin * outer;
+          uvs[innerVertex * 2] = t;
+          uvs[innerVertex * 2 + 1] = 0;
+          uvs[outerVertex * 2] = t;
+          uvs[outerVertex * 2 + 1] = 1;
+
+          if (index < segments) {
+            indices.push(innerVertex, outerVertex, innerVertex + 2);
+            indices.push(outerVertex, outerVertex + 2, innerVertex + 2);
+          }
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+        geometry.setIndex(indices);
+        return geometry;
+      }
+
+      // ==================================================================================
+      // Rune register.
+      //
+      // Each rune keeps its own brightness and its own breath rate, so the register never
+      // pulses as one object — a ring of identically-lit glyphs reads as printed type rather
+      // than as something charged. On top of that there is ONE charge running round the
+      // ring: the beat that says something is operating this.
+      //
+      // These live in the galaxy's own plane, so they tilt and drift with the disc and read
+      // as belonging to it. A ring pasted flat across the frame would read as UI.
+      // ==================================================================================
+      function buildRuneRegister(spec) {
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            tGlyphs: { value: glyphAtlas.texture },
+            uRow: { value: spec.row },
+            uRows: { value: glyphAtlas.rows },
+            uCols: { value: glyphAtlas.cols },
+            uSpin: { value: spec.spin },
+            uRepeat: { value: spec.repeat },
+            uRunRate: { value: spec.runRate },
+            uIntensity: { value: spec.intensity },
+            uShift: { value: spec.shift },
+            uChroma: { value: spec.chroma },
+            uTint: { value: spec.tint.clone() },
+            uHot: { value: spec.hot.clone() },
+          },
+          vertexShader: RING_VERTEX,
+          fragmentShader: /* glsl */ `
+            ${HASH_HEAD}
+            uniform sampler2D tGlyphs;
+            uniform float uTime;
+            uniform float uDial;
+            uniform float uRow;
+            uniform float uRows;
+            uniform float uCols;
+            uniform float uSpin;
+            uniform float uRepeat;
+            uniform float uRunRate;
+            uniform float uIntensity;
+            uniform float uShift;
+            uniform float uChroma;
+            uniform vec3 uTint;
+            uniform vec3 uHot;
+            varying vec2 vUv;
+
+            // Map a band coordinate into this register's row of the atlas. The clamp is what
+            // stops a chromatic offset near the band edge from sampling the NEXT row's runes.
+            float rowV(float t) {
+              return (uRow + clamp(t, 0.0, 1.0)) / uRows;
+            }
+
+            void main() {
+              // uRepeat lays the 32-glyph atlas round the ring more than once. Without it the
+              // cell width is circumference/32, which at this radius is nearly a world unit —
+              // the first build put runes the size of billboards round the disc. Keep it an
+              // integer or the seam at vUv.x = 1 tears a glyph in half.
+              float turn = vUv.x + uSpin * uTime;
+              float u = fract(turn * uRepeat);
+
+              // Authored chromatic aberration: the glyph mask is sampled three times, one per
+              // channel, offset ACROSS the band. This is what a lens does to a bright thin
+              // source, and doing it here rather than in the post chain means it can run at
+              // full strength on the runes without smearing the whole frame to match.
+              float mr = texture2D(tGlyphs, vec2(u, rowV(vUv.y + uShift))).r;
+              float mg = texture2D(tGlyphs, vec2(u, rowV(vUv.y))).r;
+              float mb = texture2D(tGlyphs, vec2(u, rowV(vUv.y - uShift))).r;
+              float mask = mg;
+              if (max(mr, max(mg, mb)) < 0.004) discard;
+
+              // Only where the channels DISAGREE — i.e. at a stroke edge. The interior, where
+              // all three sample the same solid stroke, stays exactly the register's own
+              // colour, so this reads as a fringe rather than as a rainbow rune.
+              vec3 fringe = max(vec3(mr, mg, mb) - mg, 0.0) * uChroma;
+
+              // Seed off the GLOBAL cell index, not the within-atlas one, so the repeats do
+              // not light identically and the repetition stops being legible.
+              float cell = floor(turn * uRepeat * uCols);
+              float seed = hash11(cell + uRow * 31.7);
+              float breath = 0.5 + 0.5 * sin(uTime * (0.28 + seed * 0.85) + seed * 24.0);
+              float bright = (0.3 + pow(seed, 1.7) * 1.5) * (0.45 + 0.55 * breath);
+
+              // One charge, running the ring ONCE per lap — driven by vUv.x, not by the
+              // repeated coordinate, or there would be one charge per repetition.
+              float head = fract(uTime * uRunRate);
+              float around = abs(fract(vUv.x - head + 0.5) - 0.5);
+              float travel = pow(max(0.0, 1.0 - around * 9.0), 3.0);
+
+              // Soft radial edges so the band resolves into the field rather than ending.
+              float edge = smoothstep(0.0, 0.12, vUv.y) * (1.0 - smoothstep(0.88, 1.0, vUv.y));
+
+              vec3 color = (uTint * mask + fringe) * bright + uHot * travel * 2.2 * mask;
+              gl_FragColor = vec4(color * edge * uIntensity * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+
+        const mesh = new THREE.Mesh(buildAnnulus(spec.inner, spec.outer), material);
+        mesh.frustumCulled = false;
+        return { mesh, material };
+      }
+
+      // ==================================================================================
+      // Rail — a thin bright ring with an authored chromatic fringe, same construction as
+      // the arcs: the cross-section profile is evaluated three times at three slightly
+      // different offsets, which is what a lens does to a bright thin source. It survives at
+      // full strength where a global RGB shift would have to smear the whole frame to get
+      // the same edge.
+      // ==================================================================================
+      function buildRail(spec) {
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            uTint: { value: spec.tint.clone() },
+            uIntensity: { value: spec.intensity },
+            uShift: { value: spec.shift },
+            uSoft: { value: spec.soft },
+            uRunRate: { value: spec.runRate || 0 },
+          },
+          vertexShader: RING_VERTEX,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            uniform float uDial;
+            uniform vec3 uTint;
+            uniform float uIntensity;
+            uniform float uShift;
+            uniform float uSoft;
+            uniform float uRunRate;
+            varying vec2 vUv;
+
+            float profile(float v, float k) {
+              return pow(max(0.0, 1.0 - abs(v)), k);
+            }
+
+            void main() {
+              float v = vUv.y * 2.0 - 1.0;
+              float r = profile(v + uShift, uSoft);
+              float g = profile(v, uSoft);
+              float b = profile(v - uShift, uSoft);
+              float core = profile(v, uSoft * 7.0);
+
+              float travel = 1.0;
+              if (uRunRate > 0.0) {
+                float head = fract(uTime * uRunRate);
+                float around = abs(fract(vUv.x - head + 0.5) - 0.5);
+                travel = 1.0 + pow(max(0.0, 1.0 - around * 6.0), 3.0) * 2.2;
+              }
+
+              vec3 color = vec3(r, g, b) * uTint + vec3(1.0) * core * 1.2;
+              gl_FragColor = vec4(color * uIntensity * travel * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+
+        const mesh = new THREE.Mesh(
+          buildAnnulus(spec.radius - spec.width, spec.radius + spec.width),
+          material,
+        );
+        mesh.frustumCulled = false;
+        return { mesh, material };
+      }
+
+      // ==================================================================================
+      // Magic circle — one circle with a pentagram inscribed in it, in the galaxy's plane.
+      //
+      // Deliberately ONE figure and nothing else. The registers and the rail already carry
+      // the ornament; what this layer has to supply is the single legible SHAPE that says
+      // the disc sits inside something drawn, and a shape only reads as drawn if the eye can
+      // take it in at once. Two circles and a second star would read as texture again.
+      //
+      // The whole figure is one quad and one distance field: circle at quad radius 0.9, star
+      // as the min() over five chords of that same circle (vertex k to k+2). fwidth resolves
+      // the stroke width in screen space, so it stays a hairline at any camera distance
+      // instead of aliasing into dashes the way authored geometry would.
+      //
+      // Circle and star breathe at different rates and only the circle carries the running
+      // charge. If they shared a beat the figure would read as one flat decal switching on
+      // and off; offset, it reads as a mechanism with a ring turning inside it.
+      // ==================================================================================
+      function buildMagicCircle(spec) {
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            uTint: { value: PALETTE.coreGold.clone() },
+            uHot: { value: PALETTE.coreHot.clone() },
+            uSpin: { value: spec.spin },
+            uIntensity: { value: spec.intensity },
+            uShift: { value: spec.shift },
+            uRunRate: { value: spec.runRate },
+          },
+          vertexShader: /* glsl */ `
+            varying vec2 vPos;
+            void main() {
+              vPos = uv * 2.0 - 1.0;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            uniform float uDial;
+            uniform vec3 uTint;
+            uniform vec3 uHot;
+            uniform float uSpin;
+            uniform float uIntensity;
+            uniform float uShift;
+            uniform float uRunRate;
+            varying vec2 vPos;
+
+            const float TAU_F = 6.28318530718;
+            const float RAD = 0.9;
+
+            float segDist(vec2 p, vec2 a, vec2 b) {
+              vec2 pa = p - a;
+              vec2 ba = b - a;
+              float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+              return length(pa - ba * h);
+            }
+
+            // One stroke profile, resolved in screen space. Everything in this shader —
+            // circle, star, and the three chromatic taps of each — goes through this, so the
+            // whole figure is guaranteed to be one weight of line.
+            float stroke(float d, float aa) {
+              return 1.0 - smoothstep(0.0, aa * 1.7, d);
+            }
+
+            void main() {
+              // The circle is rotation-invariant, so only the star is spun. Rotating both
+              // would cost the same and show nothing.
+              float a = uTime * uSpin;
+              float ca = cos(a);
+              float sa = sin(a);
+              vec2 ps = mat2(ca, sa, -sa, ca) * vPos;
+
+              // Five vertices, one point up (+PI/2). The chord from k to k+2 is the
+              // pentagram; k+2 is taken WITHOUT a modulo because cos/sin are periodic, which
+              // also keeps the loop free of array indexing.
+              float starDist = 1e9;
+              for (int k = 0; k < 5; k++) {
+                float a0 = float(k) * TAU_F / 5.0 + 1.57079632679;
+                float a1 = float(k + 2) * TAU_F / 5.0 + 1.57079632679;
+                vec2 v0 = vec2(cos(a0), sin(a0)) * RAD;
+                vec2 v1 = vec2(cos(a1), sin(a1)) * RAD;
+                starDist = min(starDist, segDist(ps, v0, v1));
+              }
+
+              float circleSd = length(vPos) - RAD;
+              float circleDist = abs(circleSd);
+
+              // Derivatives first, discard after: fwidth inside non-uniform control flow is
+              // undefined, and the far field of this quad is mostly empty.
+              float aaC = max(fwidth(circleSd), 1e-5);
+              float aaS = max(fwidth(starDist), 1e-5);
+              if (min(circleDist, starDist) > 0.4) discard;
+
+              // Authored chromatic fringe, same construction as the rail: the same profile
+              // evaluated three times, one per channel. uShift is in quad units and has to
+              // stay well under the stroke width — past that the channels stop overlapping
+              // and the figure reads as an anaglyph rather than as a lens fringe. Same
+              // lesson the rune registers' shift comment records.
+              float cr = stroke(abs(circleSd + uShift), aaC);
+              float cg = stroke(circleDist, aaC);
+              float cb = stroke(abs(circleSd - uShift), aaC);
+              vec3 cFringe = max(vec3(cr, cg, cb) - cg, 0.0);
+
+              float sr = stroke(max(starDist - uShift, 0.0), aaS);
+              float sg = stroke(starDist, aaS);
+              float sb = stroke(starDist + uShift, aaS);
+              vec3 sFringe = max(vec3(sr, sg, sb) - sg, 0.0);
+
+              // A soft skirt either side of each stroke. A pure fwidth hairline has nothing
+              // for the bloom chain to pick up, so the figure comes out as a wire drawing
+              // sitting on top of the frame rather than as light in it.
+              float cHalo = exp(-circleDist * 24.0) * 0.35;
+              float sHalo = exp(-starDist * 24.0) * 0.35;
+
+              // One charge running the circle. Angle-driven, so it is one head per lap.
+              float head = fract(uTime * uRunRate);
+              float angle01 = atan(vPos.y, vPos.x) / TAU_F;
+              float around = abs(fract(angle01 - head + 0.5) - 0.5);
+              float travel = pow(max(0.0, 1.0 - around * 8.0), 3.0);
+
+              // Two quiet breaths at unrelated rates. Shared, they would pulse as one object.
+              float breathC = 0.78 + 0.22 * sin(uTime * 0.21);
+              float breathS = 0.78 + 0.22 * sin(uTime * 0.34 + 1.7);
+
+              vec3 color = (uTint * (cg + cHalo) + cFringe) * breathC
+                         + (uTint * (sg + sHalo) + sFringe) * breathS
+                         + uHot * travel * (cg + cHalo * 0.6) * 1.6;
+              gl_FragColor = vec4(color * uIntensity * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+        // Quad space puts the figure at radius 0.9, so this is what lands it on
+        // spec.radius world units rather than on the quad's own edge.
+        mesh.scale.setScalar((spec.radius * 2.0) / 0.9);
+        mesh.frustumCulled = false;
+        return { mesh, material };
+      }
+
       // ==================================================================================
       // Layer 3c — the orbit rings.
       //
@@ -1462,8 +2656,12 @@
               float fade = smoothstep(uInner, uInner + 0.12, r) * (1.0 - smoothstep(0.72, 1.0, r));
 
               vec3 tint = mix(uCyan, uGold, step(0.5, hash11(id + 7.3)));
-              vec3 color = tint * bright + uHot * travel * 1.6;
-              gl_FragColor = vec4(color * line * gate * fade * (0.5 + travel * 2.0) * 0.5 * uDial, 1.0);
+              // The travelling charge is deliberately quieter here than in the un-runed
+              // build: with rune registers outside them, orbit arcs that flare to white read
+              // as hard CG ellipses laid over the disc rather than as light moving through a
+              // system. There is more in the frame now, so each element gets less of it.
+              vec3 color = tint * bright + uHot * travel * 0.85;
+              gl_FragColor = vec4(color * line * gate * fade * (0.5 + travel * 1.1) * 0.5 * uDial, 1.0);
             }
           `,
           transparent: true,
@@ -1573,8 +2771,14 @@
           const z = spec.z - spec.depth * norm * norm;
           // Taper the ends to nothing: a ribbon that runs off-frame at full width reads as
           // a mistake in a composition this empty.
-          const taper = Math.pow(Math.max(0, 1 - Math.abs(norm)), 0.55);
-          const width = spec.width * (0.25 + 0.75 * taper);
+          //
+          // taperFloor is why v2's ribbons end bluntly: at 0.25 the tip is still a quarter
+          // of full width when the geometry runs out. Off-frame that is invisible; for an
+          // arc that resolves inside the picture it has to reach 0 or it reads as a cut.
+          const taperFloor = spec.taperFloor === undefined ? 0.25 : spec.taperFloor;
+          const taperPow = spec.taperPow === undefined ? 0.55 : spec.taperPow;
+          const taper = Math.pow(Math.max(0, 1 - Math.abs(norm)), taperPow);
+          const width = spec.width * (taperFloor + (1 - taperFloor) * taper);
 
           for (let side = 0; side < 2; side += 1) {
             const v = side === 0 ? -1 : 1;
@@ -1607,6 +2811,7 @@
             uSoft: { value: spec.soft },
             uAmp: { value: spec.amp },
             uPhase: { value: spec.phase },
+            uFade: { value: spec.fade === undefined ? 0.16 : spec.fade },
           },
           vertexShader: /* glsl */ `
             attribute vec2 aParam;
@@ -1639,6 +2844,7 @@
             uniform float uSoft;
             uniform float uDial;
             uniform float uTime;
+            uniform float uFade;
             varying float vT;
             varying float vV;
 
@@ -1657,7 +2863,11 @@
               float core = profile(vV, uSoft * 7.0);
 
               // Fade the ends so the ribbon resolves into the field instead of stopping.
-              float ends = smoothstep(0.0, 0.16, vT) * (1.0 - smoothstep(0.84, 1.0, vT));
+              // Raised to a power as well as widened: a plain smoothstep still leaves a
+              // visible shoulder where the fade begins, which on a long thin ribbon looks
+              // like the line changing weight rather than dying away.
+              float ends = smoothstep(0.0, uFade, vT) * (1.0 - smoothstep(1.0 - uFade, 1.0, vT));
+              ends = pow(ends, 1.6);
 
               // One slow bright travelling along it, so the arc is alive without moving.
               float travel = pow(max(0.0, sin(vT * 3.14159 - uTime * 0.17)), 5.0);
@@ -1677,8 +2887,11 @@
 
         const mesh = new THREE.Mesh(geometry, material);
         mesh.frustumCulled = false;
+        // Stood up here rather than baked into the vertex loop so the wave, which runs
+        // along local X, still travels ALONG the ribbon after it is vertical.
+        mesh.rotation.z = spec.rot || 0;
         scene.add(mesh);
-        return { mesh, material };
+        return { mesh, material, spec };
       }
 
       // ==================================================================================
@@ -1913,46 +3126,240 @@
       galaxy.group.add(haze.mesh);
       // Rings live in the galaxy's own plane, so they tilt with it and read as orbits rather
       // than as a flat overlay pasted on the frame.
+      //
       const rings = buildRingField({ inner: 0.3, outer: galaxy.radius * 1.72, count: 24 });
       galaxy.group.add(rings.mesh);
+
+      // The figure the registers are engraved on. Everything here is additive, so draw
+      // order cannot put it "under" anything — the plane offset is what separates it from
+      // the disc, and the tilt plus parallax are what read that separation as depth. In v2
+      // the offset was NEGATIVE and the figure sat under the galaxy like a platform; the
+      // hand-tune (2026-08-09) brought it out in FRONT instead, so the disc is now seen
+      // through the drawing. Same mechanism, opposite sign — the sign is a composition
+      // choice, not a correctness one.
+      //
+      // spin is RADIANS PER SCENE SECOND (the shader does `uTime * uSpin` and rotates the
+      // pentagram by it). v2's -0.004 is a lap every ~26 minutes, i.e. static to anyone
+      // actually looking at the page; -0.084 is a lap every ~75 s, which reads as turning
+      // without becoming the fastest thing in the frame.
+      const magicCircle = buildMagicCircle({
+        radius: galaxy.radius * 1.5,
+        spin: -0.084,
+        runRate: 0.022,
+        intensity: 0.85,
+        shift: 0.006,
+      });
+      // Startup value only: setupTuning() sync()s every row before the first frame, so
+      // TUNING_DEFAULTS and the slider markup are what actually decide this. Kept in step
+      // with them so the build call is not a lie about where the figure sits.
+      magicCircle.mesh.position.z = 2.7;
+      galaxy.group.add(magicCircle.mesh);
+
+      // Runes, outward, interleaved with the orbit arcs the way registers and rails
+      // interleave on a real instrument. Gold inner turning one way, pale outer turning the
+      // other — two rings drifting the same way read as one ring.
+      //
+      // Band depth and `repeat` have to be chosen together: a glyph cell is
+      // circumference / (32 * repeat) wide, and it wants to be about as wide as the band is
+      // deep or the runes come out stretched.
+      const runeRegisters = [
+        buildRuneRegister({
+          inner: galaxy.radius * 1.455,
+          outer: galaxy.radius * 1.545,
+          row: 0,
+          repeat: 3, // 96 glyphs round a ~47-unit circumference -> ~0.49 per cell
+          spin: 0.0092,
+          runRate: 0.048,
+          intensity: 1.15,
+          // shift is in band-depth units, and it has to stay WELL under the stroke width or
+          // this stops being a lens fringe and becomes an anaglyph. A stroke is ~0.1 of a
+          // cell; at 0.055 the three channel samples barely overlapped, so outside the
+          // stroke there were pixels where only red or only blue was lit — saturated
+          // red/blue edges with no white anywhere, i.e. 3D-glasses. At 0.018 the images
+          // overlap almost everywhere and the disagreement is a ~1 px rim, which is what a
+          // real lens does.
+          shift: 0.018,
+          chroma: 0.9,
+          tint: PALETTE.coreGold,
+          hot: PALETTE.coreHot,
+        }),
+        buildRuneRegister({
+          // Pulled inside row 0 by the hand-tune (2026-08-09), so the two registers no
+          // longer read outward in atlas order. `repeat` is left at 4 because that is the
+          // ring the composition was approved with, but the cell is now narrower than the
+          // band is deep and the glyphs are correspondingly tall — re-pick `repeat` here if
+          // this radius is ever taken as final.
+          inner: galaxy.radius * 1.125,
+          outer: galaxy.radius * 1.215,
+          row: 1,
+          repeat: 4, // 128 glyphs round a ~37-unit circumference -> ~0.29 per cell
+          spin: -0.0058,
+          runRate: -0.031,
+          intensity: 0.6,
+          shift: 0.022,
+          chroma: 0.75,
+          tint: PALETTE.starCool,
+          hot: PALETTE.coreHot,
+        }),
+      ];
+      const runeRails = [
+        buildRail({
+          radius: galaxy.radius * 1.89,
+          width: 0.028,
+          tint: PALETTE.coreGold,
+          intensity: 0.62,
+          shift: 0.2,
+          soft: 2.2,
+          runRate: 0.026,
+        }),
+      ];
+      for (const register of runeRegisters) galaxy.group.add(register.mesh);
+      for (const rail of runeRails) galaxy.group.add(rail.mesh);
       const core = buildCore();
+      // The two arcs, re-authored as the UI column's flanks (see header note 3). They are
+      // built at the origin running along local X and then stood up by `rot`; placeLayout()
+      // owns where they end up, because that depends on the aspect.
+      //
+      // sag is what makes them BOW AROUND the column rather than run past it: positive sag
+      // on the left flank and negative on the right pushes each one's belly outward, so the
+      // gap between them is widest at the buttons. Setting both the same way was draft one
+      // and it looked like a slash through the frame.
       const arcs = [
         buildArc({
-          span: 17,
-          y: -5.4,
-          sag: 3.6,
-          tilt: 0.5,
-          z: -5.5,
-          depth: 2.4,
-          width: 0.5,
-          amp: 0.34,
+          // Span pulled in from 13. At 13 the ribbon ran the full height of the frame and
+          // its taper never resolved before the edge, so it read as a slash across the
+          // picture instead of as a bracket around the column.
+          span: 9.6,
+          y: 0,
+          sag: -1.15,
+          tilt: 0.25,
+          z: -4.0,
+          depth: 1.4,
+          width: 0.4,
+          amp: 0.26,
           phase: 0,
-          intensity: 1.25,
+          // Dimmed from 1.25. This one sits nearest the frame edge with nothing behind it,
+          // so at the old intensity it was the brightest object in the composition and
+          // pulled the eye off both the title and the disc.
+          intensity: 0.82,
           // shift is measured in half-widths. Draft one used 0.5 — half the ribbon — and the
           // arc came out a flat rainbow band instead of a white line with a lens's fringe on
           // it. The reference has the split confined to the outer rim; that is this number.
           shift: 0.2,
           soft: 2.6,
+          fade: 0.4,
+          taperFloor: 0,
+          taperPow: 1.25,
+          rot: Math.PI * 0.5 + 0.10,
           tint: PALETTE.arcTint.clone(),
         }),
         buildArc({
-          span: 15,
-          y: -6.6,
-          sag: 2.2,
-          tilt: -1.1,
-          z: -2.5,
-          depth: 1.2,
-          width: 0.34,
-          amp: 0.26,
+          // The inner flank is the one that was colliding with the disc: it has to die out
+          // before it reaches the rune registers, so it is both shorter and softer-tapered
+          // than its partner rather than a mirror of it.
+          span: 8.4,
+          y: 0,
+          sag: 1.15,
+          tilt: -0.35,
+          z: -2.2,
+          depth: 1.0,
+          width: 0.26,
+          amp: 0.2,
           phase: 2.4,
-          intensity: 0.26,
+          intensity: 0.3,
           shift: 0.26,
           soft: 3.6,
+          fade: 0.44,
+          taperFloor: 0,
+          taperPow: 1.35,
+          rot: Math.PI * 0.5 - 0.13,
           tint: PALETTE.armViolet.clone(),
         }),
       ];
       const meteors = buildMeteors();
       const dust = buildDust();
+
+      // ==================================================================================
+      // Home layout.
+      //
+      // The one rule: every placement here is authored as a SCREEN FRACTION and converted
+      // to world units at the depth the thing actually sits at. A world-space offset that
+      // clears the UI column at 16:10 slides straight back under it at 21:9, and on a
+      // narrow window the disc ends up centred again with the buttons on top of the core —
+      // which is exactly the failure this whole study exists to avoid.
+      // ==================================================================================
+      // Composition defaults, hand-tuned on the real thing (2026-08-09) rather than
+      // reasoned out. They are NOT v2's numbers: the disc is nearly level (rot z 6 instead
+      // of -24) and swung hard on Y instead, which is the change that stopped it reading as
+      // a diagram; the arcs are pushed to their widest so they clear the column entirely.
+      //
+      // These values must agree with the slider `value` attributes above. setupDials()
+      // calls sync() on every dial at startup, so the HTML is what actually wins after the
+      // first frame — this literal only covers the single placeLayout() that resize() runs
+      // before the dials exist. Change one, change both, or the frame moves on load.
+      const layout = {
+        offset: 0.61, // disc centre X, as a fraction of frame width
+        height: -0.01, // disc centre Y, as a fraction of frame height (+ is up)
+        rotX: THREE.MathUtils.degToRad(-45.5),
+        rotY: THREE.MathUtils.degToRad(-37),
+        rotZ: THREE.MathUtils.degToRad(6),
+        flank: 1, // 0 = arcs hug the column, 1 = arcs pushed wide
+        portrait: false,
+      };
+
+      // Visible extent in world units at a given depth, for this camera.
+      //
+      // CAMERA_BASE.z, NOT camera.position.z, and both reasons matter:
+      //
+      //   1. It is a bug otherwise. placeLayout() is called from resize(), which runs once
+      //      at startup BEFORE animate() has ever positioned the camera — so the live value
+      //      is still 0, every distance comes out about 5x too small, and the flank arcs
+      //      land across the middle of the frame instead of beside the column. It only
+      //      looked correct when something happened to fire a second resize later, which
+      //      is exactly the kind of order dependence that hides until it does not.
+      //   2. Even fixed, the live value is the wrong one to read: the camera dollies +-0.85
+      //      every frame, so placements derived from it would breathe against the DOM
+      //      column they are supposed to bracket.
+      function viewSize(z) {
+        const dist = Math.max(0.1, CAMERA_BASE.z - z);
+        const height = 2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+        return { height, width: height * camera.aspect };
+      }
+
+      function worldX(fraction, z) {
+        return (fraction - 0.5) * viewSize(z).width;
+      }
+
+      function placeLayout() {
+        const discZ = 0;
+        const offset = layout.portrait ? 0.5 : layout.offset;
+        const x = worldX(offset, discZ);
+        galaxy.group.position.x = x;
+        // The core billboard is a scene child, not a group child — it does not inherit the
+        // offset and will sit alone in the empty half if you forget it. It cannot simply be
+        // reparented: it copies the camera quaternion every frame, which a rotated parent
+        // would then compose with.
+        core.mesh.position.x = x;
+        // Portrait pushes the disc down instead of sideways, to clear the top band.
+        const y = viewSize(discZ).height * (layout.portrait ? -0.16 : layout.height);
+        galaxy.group.position.y = y;
+        core.mesh.position.y = y;
+
+        // Flanks bracket the UI column. Measured, not guessed: at 1440 wide the .ui
+        // padding resolves to 100.8px and .ui-column clamps to 348px, so the column spans
+        // 0.070..0.312 of the frame and is centred on 0.191. The old 0.21 centre with a
+        // 0.165 spread put the inner flank at 0.375 — past the column and into the disc's
+        // outer runes, which is what made that side read as clutter.
+        const spread = 0.075 + layout.flank * 0.09;
+        const centre = 0.191;
+        for (let i = 0; i < arcs.length; i += 1) {
+          const arc = arcs[i];
+          const side = i === 0 ? -1 : 1;
+          const z = arc.spec.z;
+          arc.mesh.position.x = worldX(centre + side * spread, z);
+          arc.mesh.visible = !layout.portrait;
+        }
+      }
 
       // ==================================================================================
       // Resolution governor.
@@ -2064,6 +3471,11 @@
         camera.aspect = viewportWidth / viewportHeight;
         camera.updateProjectionMatrix();
         applyScale();
+        // 1.15 rather than 1.0: at a hair over square there is no left third worth having,
+        // and the column would sit half on the disc.
+        layout.portrait = camera.aspect < 1.15;
+        stage.classList.toggle('is-portrait', layout.portrait);
+        placeLayout();
       }
 
       function considerScale(medianMs, now) {
@@ -2134,8 +3546,42 @@
         });
       }
 
+      // Copied out of src/ui/themes/*.css by the generator, so the accent the shader grades
+      // toward is the same hex the CSS uses. `kind` decides astral vs chart — it is the
+      // `type` field from THEME_LIST in theme-store.ts, not a guess from the background.
+      const THEMES = [
+        { id: 'parchment', label: '远行者舆图', kind: 'light', bg: '#e5d8c2', primary: '#8d642f' },
+        { id: 'obsidian', label: '玄金星盘', kind: 'dark', bg: '#090b10', primary: '#c9a85f' },
+        { id: 'crimson', label: '血色玫瑰窗', kind: 'dark', bg: '#100e11', primary: '#b43b4d' },
+        { id: 'indigo', label: '青花瓷', kind: 'light', bg: '#f1efeb', primary: '#164c8a' },
+        { id: 'bronze', label: '古铜机巧', kind: 'dark', bg: '#120e0b', primary: '#c48c4b' },
+        { id: 'sakura', label: '夜樱漆匣', kind: 'dark', bg: '#0a080d', primary: '#c67998' },
+        { id: 'ivory', label: '月白云锦', kind: 'light', bg: '#e9e6df', primary: '#887142' },
+        { id: 'misty-lilac', label: '极光霜晶', kind: 'light', bg: '#dce7f3', primary: '#725b9b' },
+        { id: 'forest', label: '翡翠温室', kind: 'light', bg: '#dce5d7', primary: '#4c755f' },
+        { id: 'ocean', label: '深海圣堂', kind: 'dark', bg: '#07131b', primary: '#55a7b7' },
+      ];
+
+      function applyTheme(themeId) {
+        const theme = THEMES.find((entry) => entry.id === themeId) || THEMES[1];
+        stage.setAttribute('data-theme', theme.id);
+        const light = theme.kind === 'light';
+        gradePass.uniforms.uInk.value = light ? 1 : 0;
+        gradePass.uniforms.uAccent.value.set(theme.primary);
+        if (light) {
+          // Paper is the theme's own window background; ink is its accent taken most of the
+          // way to black. Using the accent raw gives a washed-out chart with no contrast at
+          // the density end — the deepest part of the disc has to approach ink, not accent.
+          gradePass.uniforms.uPaper.value.set(theme.bg);
+          gradePass.uniforms.uInkColor.value.set(theme.primary).multiplyScalar(0.32);
+        } else {
+          gradePass.uniforms.uField.value.set(theme.bg).multiplyScalar(0.6);
+        }
+        document.body.style.background = theme.bg;
+      }
+
       function setupDials() {
-        for (const key of ['bloom', 'galaxy', 'arc', 'veils']) {
+        for (const key of ['bloom', 'galaxy', 'arc', 'veils', 'runes', 'circle']) {
           const input = document.querySelector('#dial-' + key);
           const label = document.querySelector('#val-' + key);
           const sync = () => {
@@ -2145,13 +3591,227 @@
           input.addEventListener('input', sync);
           sync();
         }
+
+        // Layout dials re-place rather than re-build: placeLayout() is pure placement and
+        // the rotations are read fresh every frame, so dragging these is free.
+        //
+        // Each entry reads its slider in the unit PRINTED NEXT TO IT — percent for the two
+        // placement axes, degrees for the three rotations. Sliders carry step=0.5 and
+        // min/max in those same units, so the arrow keys step half a unit and the readout
+        // never needs mental arithmetic. The earlier single dial normalised everything to
+        // 0..1, which is why nudging it was guesswork.
+        const layoutDials = [
+          ['offset', (v) => (layout.offset = v / 100), (v) => v.toFixed(1) + '%'],
+          ['height', (v) => (layout.height = v / 100), (v) => v.toFixed(1) + '%'],
+          ['rotx', (v) => (layout.rotX = THREE.MathUtils.degToRad(v)), (v) => v.toFixed(1) + '°'],
+          ['roty', (v) => (layout.rotY = THREE.MathUtils.degToRad(v)), (v) => v.toFixed(1) + '°'],
+          ['rotz', (v) => (layout.rotZ = THREE.MathUtils.degToRad(v)), (v) => v.toFixed(1) + '°'],
+          ['flank', (v) => (layout.flank = v / 100), (v) => (v / 100).toFixed(2)],
+        ];
+        for (const [key, apply, format] of layoutDials) {
+          const input = document.querySelector('#dial-' + key);
+          const label = document.querySelector('#val-' + key);
+          const sync = () => {
+            const value = Number(input.value);
+            apply(value);
+            label.textContent = format(value);
+            placeLayout();
+          };
+          input.addEventListener('input', sync);
+          sync();
+        }
+
+        const tintInput = document.querySelector('#dial-tint');
+        const tintLabel = document.querySelector('#val-tint');
+        const syncTint = () => {
+          const value = Number(tintInput.value) / 100;
+          // One dial, two modes: how far astral pulls toward the accent, and how hard
+          // chart bites into the paper. They are never both visible, so sharing the
+          // slider costs nothing and keeps the panel short.
+          gradePass.uniforms.uThemeMix.value = value;
+          gradePass.uniforms.uInkGain.value = 0.8 + value * 4.0;
+          tintLabel.textContent = value.toFixed(2);
+        };
+        tintInput.addEventListener('input', syncTint);
+        syncTint();
+
+        const themeSelect = document.querySelector('#dial-theme');
+        for (const theme of THEMES) {
+          const option = document.createElement('option');
+          option.value = theme.id;
+          option.textContent = theme.label + ' · ' + theme.kind;
+          themeSelect.appendChild(option);
+        }
+        themeSelect.value = 'obsidian';
+        themeSelect.addEventListener('change', () => applyTheme(themeSelect.value));
+        applyTheme(themeSelect.value);
+
+        // Whole-panel collapse. Separate class from `tune-collapsed` and never written
+        // together, so the tuning section's own state survives a collapse/expand round
+        // trip — the panel comes back exactly as it was left.
+        //
+        // Not the same control as the H key: that hides the panel outright (nothing left to
+        // click), which is for screenshots. This leaves the chip behind, which is for
+        // looking at the scene and then carrying on tuning.
+        const hudPanel = document.querySelector('#hud');
+        const panelButton = document.querySelector('#hud-collapse');
+        panelButton.addEventListener('click', () => {
+          const collapsed = hudPanel.classList.toggle('hud-collapsed');
+          panelButton.textContent = collapsed ? 'show panel' : 'hide panel';
+        });
+
         addEventListener('keydown', (event) => {
           if (event.key === 'h' || event.key === 'H') {
             document.querySelector('#hud').classList.toggle('hidden');
           }
           if (event.key === 't' || event.key === 'T') {
-            document.querySelector('#title').classList.toggle('hidden');
+            document.querySelector('#ui').classList.toggle('hidden');
           }
+        });
+      }
+
+      // ==================================================================================
+      // Tuning. Where the engraved work sits relative to the disc, dragged rather than
+      // guessed — this is the half of the composition placeLayout() does NOT own.
+      //
+      // Every radius here is in GALAXY RADII, so a number read off a slider can be pasted
+      // straight back into the build calls above as `galaxy.radius * n`. Band depth and the
+      // rail's half-width are held FIXED while a centre is dragged: they are coupled to
+      // `repeat` (a glyph cell is circumference / (32 * repeat) wide and wants to be about
+      // as wide as the band is deep), and `repeat` has to stay an integer or the seam at
+      // uv.x = 1 tears a glyph in half. Stretched glyphs at the extremes of the R sliders
+      // are therefore expected; when a radius is settled on, re-pick `repeat` by hand.
+      // ==================================================================================
+      const TUNE_BAND_DEPTH = 0.09; // register depth, in galaxy radii — held fixed
+      const TUNE_RAIL_HALF_WIDTH = 0.028; // world units, as the rail is built
+
+      // Tilts are stored in DEGREES to match this file's rotation dials; only the two
+      // apply() bodies convert, so nothing else has to know which unit the panel speaks.
+      //
+      // ONE literal, used both to seed `tuning` and to drive reset. Written twice it would
+      // eventually be edited once, and the failure is silent: reset would quietly restore a
+      // composition that never shipped. The slider `value` attributes still have to agree
+      // with this — bindTuner sync()s on startup, so the markup is what wins on load.
+      const TUNING_DEFAULTS = {
+        circleR: 1.5,
+        circleZ: 2.7,
+        circleTiltX: 0,
+        circleTiltY: 0,
+        rune1R: 1.5,
+        // Sits exactly on the slider's max. Deliberate — the hand-tune wanted the inner
+        // register right out at the front of the sweep, and widening the range to give it
+        // headroom would change what every other z slider's travel feels like.
+        rune1Z: 6.0,
+        rune2R: 1.17,
+        rune2Z: 0.4,
+        railR: 1.89,
+        railZ: 1.95,
+      };
+
+      const tuning = { ...TUNING_DEFAULTS };
+      const tuningSync = {};
+
+      // Dispose before replacing: the old attribute buffers live on the GPU and nothing else
+      // holds a reference, so skipping this leaks a set of VBOs per slider tick — and a
+      // slider tick is cheap to produce by the hundred.
+      function retuneAnnulus(mesh, inner, outer) {
+        mesh.geometry.dispose();
+        mesh.geometry = buildAnnulus(inner, outer);
+      }
+
+      function applyCircleRadius() {
+        // Radius is carried entirely by mesh scale — the circle sits at quad radius 0.9, so
+        // there is no geometry to rebuild here at all.
+        magicCircle.mesh.scale.setScalar((galaxy.radius * tuning.circleR * 2.0) / 0.9);
+      }
+
+      function applyRegisterRadius(index) {
+        const center = index === 0 ? tuning.rune1R : tuning.rune2R;
+        const half = TUNE_BAND_DEPTH * 0.5;
+        retuneAnnulus(
+          runeRegisters[index].mesh,
+          galaxy.radius * (center - half),
+          galaxy.radius * (center + half),
+        );
+      }
+
+      function applyRailRadius() {
+        const radius = galaxy.radius * tuning.railR;
+        retuneAnnulus(
+          runeRails[0].mesh,
+          radius - TUNE_RAIL_HALF_WIDTH,
+          radius + TUNE_RAIL_HALF_WIDTH,
+        );
+      }
+
+      // One binder for all ten rows. Range/step live in the input attributes, so the only
+      // things that vary per row are how the readout is printed and what to do with the
+      // value — same shape as the layout dials above.
+      function bindTuner(key, format, apply) {
+        const input = document.querySelector('#tune-' + key);
+        const label = document.querySelector('#tval-' + key);
+        const sync = () => {
+          tuning[key] = Number(input.value);
+          label.textContent = format(tuning[key]);
+          apply();
+        };
+        tuningSync[key] = sync;
+        input.addEventListener('input', sync);
+        sync();
+      }
+
+      const tuneRadius = (value) => value.toFixed(3);
+      const tuneDepth = (value) => value.toFixed(2);
+      const tuneAngle = (value) => value.toFixed(1) + '°';
+
+      // Programmatic entry point for the probe harness. It goes through the slider so the
+      // control, the readout and the scene can never disagree.
+      function setTuning(key, value) {
+        const input = document.querySelector('#tune-' + key);
+        if (!input || !tuningSync[key]) return false;
+        input.value = String(value);
+        tuningSync[key]();
+        return true;
+      }
+
+      function setupTuning() {
+        bindTuner('circleR', tuneRadius, applyCircleRadius);
+        bindTuner('circleZ', tuneDepth, () => {
+          magicCircle.mesh.position.z = tuning.circleZ;
+        });
+        bindTuner('circleTiltX', tuneAngle, () => {
+          magicCircle.mesh.rotation.x = THREE.MathUtils.degToRad(tuning.circleTiltX);
+        });
+        bindTuner('circleTiltY', tuneAngle, () => {
+          magicCircle.mesh.rotation.y = THREE.MathUtils.degToRad(tuning.circleTiltY);
+        });
+        bindTuner('rune1R', tuneRadius, () => applyRegisterRadius(0));
+        bindTuner('rune1Z', tuneDepth, () => {
+          runeRegisters[0].mesh.position.z = tuning.rune1Z;
+        });
+        bindTuner('rune2R', tuneRadius, () => applyRegisterRadius(1));
+        bindTuner('rune2Z', tuneDepth, () => {
+          runeRegisters[1].mesh.position.z = tuning.rune2Z;
+        });
+        bindTuner('railR', tuneRadius, applyRailRadius);
+        bindTuner('railZ', tuneDepth, () => {
+          runeRails[0].mesh.position.z = tuning.railZ;
+        });
+
+        // Reset goes through setTuning, not through `tuning`, for the same reason the probe
+        // harness does: writing the object moves the scene and leaves the slider and the
+        // readout showing the old value, which is worse than not resetting at all.
+        document.querySelector('#tune-reset').addEventListener('click', () => {
+          for (const [key, value] of Object.entries(TUNING_DEFAULTS)) setTuning(key, value);
+        });
+
+        // Collapse. Default expanded, and the head row never hides — a collapsed section
+        // with no visible handle is a section you cannot get back.
+        const hud = document.querySelector('#hud');
+        const collapseButton = document.querySelector('#tune-collapse');
+        collapseButton.addEventListener('click', () => {
+          const collapsed = hud.classList.toggle('tune-collapsed');
+          collapseButton.textContent = collapsed ? 'show' : 'hide';
         });
       }
 
@@ -2199,13 +3859,20 @@
         // Barely-there roll. At this amplitude it is not seen, it is only felt.
         camera.rotation.z += Math.sin(time * 0.029) * 0.012;
 
-        galaxy.group.rotation.z = -0.24 + Math.sin(time * 0.02) * 0.03;
+        galaxy.group.rotation.x = layout.rotX;
+        galaxy.group.rotation.y = layout.rotY;
+        // Breathing stays on Z only. On X it reads as the disc nodding, which is a
+        // different and much more noticeable motion than the roll v2 intended.
+        galaxy.group.rotation.z = layout.rotZ + Math.sin(time * 0.02) * 0.03;
         core.mesh.quaternion.copy(camera.quaternion);
         for (const child of veils.group.children) child.rotation.z += child.userData.spin * 0.016;
 
         galaxy.material.uniforms.uDial.value = dials.galaxy;
         haze.material.uniforms.uDial.value = dials.galaxy;
         rings.material.uniforms.uDial.value = dials.galaxy;
+        for (const register of runeRegisters) register.material.uniforms.uDial.value = dials.runes;
+        for (const rail of runeRails) rail.material.uniforms.uDial.value = dials.runes;
+        magicCircle.material.uniforms.uDial.value = dials.circle;
         core.material.uniforms.uDial.value = dials.galaxy;
         for (const arc of arcs) arc.material.uniforms.uDial.value = dials.arc;
         for (const material of veils.materials) material.uniforms.uDial.value = dials.veils;
@@ -2259,6 +3926,7 @@
       resize();
       setupPointer();
       setupDials();
+      setupTuning();
       // Warm the pipeline before the loop is allowed to measure anything.
       //
       // three compiles a shader program the first time a material is actually rendered, and
@@ -2297,8 +3965,29 @@
         resize,
         applyScale,
         dials,
-        layers: { storm, stars, veils, bokeh, galaxy, haze, rings, core, arcs, meteors, dust },
+        glyphAtlas,
+        layers: {
+          storm,
+          stars,
+          veils,
+          bokeh,
+          galaxy,
+          haze,
+          rings,
+          magicCircle,
+          runeRegisters,
+          runeRails,
+          core,
+          arcs,
+          meteors,
+          dust,
+        },
         uniforms: { uTime, uProjScale },
+        // Tuner only. `tuning` is the live values (read them off to copy back into the
+        // build calls); setTuning(key, value) is how the harness moves one, since writing
+        // the object directly would leave the slider and the readout behind.
+        tuning,
+        setTuning,
         clock,
         // Scrub scene time. Everything animated reads the clock, so this is the only way to
         // preview a composition minutes ahead without waiting minutes.

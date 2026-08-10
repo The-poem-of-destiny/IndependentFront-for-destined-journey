@@ -4,10 +4,46 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
-    <title>Astral Drift — home backdrop</title>
+    <title>Astral Drift v2 — tuner</title>
     <style>
       /*
-        ASTRAL DRIFT — third attempt at the home-page backdrop. Read this before changing it.
+        ASTRAL DRIFT v2 TUNER — the tuning playground for AstralDriftV2.standalone.html.
+
+        Identical to that file at load: every slider added here starts at the value v2 is
+        built with, so an untouched tuner IS v2. The extra HUD block drives the radius,
+        depth-plane offset and tilt of the magic circle and of each rune ring, because those
+        are the numbers that can only be found by eye. Nothing here writes anything back —
+        dial a figure in, read the numbers off the HUD, and copy them into AstralDriftV2 by
+        hand. This file is a bench, not a source of truth.
+
+        Everything below is the v2 header, and all of it still applies.
+
+        ----------------------------------------------------------------------------------
+
+        ASTRAL DRIFT v2 — the drift with runes. Read this before changing it.
+
+        v1 of this file (AstralDrift.standalone.html) is unchanged on disk. The only thing
+        added here is engraved work in the galaxy's own plane: two rune registers and a rail,
+        borrowed from ObsidianAstrolabeV2 and re-tuned for this camera. The point is the
+        marriage — the astrolabe's iconography around the drift's galaxy, so the disc reads
+        as something an instrument is built around rather than as an astronomical photograph.
+
+        Under the registers is the figure they are engraved on: one circle at 1.5R with a
+        pentagram inscribed in it, and nothing else. The registers were moved out to ride on
+        that circle and the rail moved out to the boundary, because ornament that floats free
+        of a figure reads as decoration while ornament laid ON one reads as an instrument —
+        and one legible shape does that work where a second circle would only add texture.
+
+        Two numbers here are coupled and neither is free: a glyph cell is
+        circumference / (32 * repeat) wide and wants to be about as wide as its band is deep.
+        The first build ignored that and put runes the size of billboards round the disc.
+        The orbit arcs were also quietened (their travelling charge no longer flares to
+        white): with registers outside them there is more in the frame, so each element gets
+        less of it.
+
+        Everything below this point is the v1 file, and its notes still apply.
+
+        ----------------------------------------------------------------------------------
 
         The earlier study still on disk is MagicCircle.standalone.html (v1) — canvas-glyph
         decals, 34 blended layers over a full-screen procedural nebula. MagicCircleV2 (the
@@ -213,6 +249,30 @@
         font-size: 10px;
         letter-spacing: 0.04em;
       }
+
+      /* Tuner only — the bench block below the shipped dials. */
+      .hud-sep {
+        height: 1px;
+        margin: 2px 0 1px;
+        background: rgba(120, 170, 235, 0.16);
+      }
+
+      .hud-head {
+        color: #6f88ac;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      /* Wider label column than the shipped dials: "circle tiltX" does not fit in 62px, and
+         a wrapped label pushes its own slider out of line with the rest of the block. */
+      .hud-row.tune {
+        grid-template-columns: 76px 116px 46px;
+      }
+
+      .hud-row.tune span:last-child {
+        color: #ffd7a3;
+      }
     </style>
     <script type="importmap">
       {
@@ -254,6 +314,80 @@
           <span>veils</span><input id="dial-veils" type="range" min="0" max="200" value="100" />
           <span id="val-veils">1.00</span>
         </div>
+        <div class="hud-row">
+          <span>runes</span><input id="dial-runes" type="range" min="0" max="200" value="100" />
+          <span id="val-runes">1.00</span>
+        </div>
+        <div class="hud-row">
+          <span>circle</span><input id="dial-circle" type="range" min="0" max="200" value="100" />
+          <span id="val-circle">1.00</span>
+        </div>
+        <div class="hud-sep"></div>
+        <div class="hud-head">tuning</div>
+        <div class="hud-row tune">
+          <span>circle R</span
+          ><input id="tune-circleR" type="range" min="0.80" max="2.40" step="0.01" value="1.50" />
+          <span id="tval-circleR">1.500</span>
+        </div>
+        <div class="hud-row tune">
+          <span>circle z</span
+          ><input id="tune-circleZ" type="range" min="-4.00" max="1.00" step="0.05" value="-1.00" />
+          <span id="tval-circleZ">-1.00</span>
+        </div>
+        <div class="hud-row tune">
+          <span>circle tiltX</span
+          ><input
+            id="tune-circleTiltX"
+            type="range"
+            min="-0.90"
+            max="0.90"
+            step="0.01"
+            value="0"
+          />
+          <span id="tval-circleTiltX">0.00</span>
+        </div>
+        <div class="hud-row tune">
+          <span>circle tiltY</span
+          ><input
+            id="tune-circleTiltY"
+            type="range"
+            min="-0.90"
+            max="0.90"
+            step="0.01"
+            value="0"
+          />
+          <span id="tval-circleTiltY">0.00</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rune1 R</span
+          ><input id="tune-rune1R" type="range" min="1.00" max="2.40" step="0.005" value="1.50" />
+          <span id="tval-rune1R">1.500</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rune1 z</span
+          ><input id="tune-rune1Z" type="range" min="-4.00" max="1.00" step="0.05" value="0" />
+          <span id="tval-rune1Z">0.00</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rune2 R</span
+          ><input id="tune-rune2R" type="range" min="1.00" max="2.40" step="0.005" value="1.665" />
+          <span id="tval-rune2R">1.665</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rune2 z</span
+          ><input id="tune-rune2Z" type="range" min="-4.00" max="1.00" step="0.05" value="0" />
+          <span id="tval-rune2Z">0.00</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rail R</span
+          ><input id="tune-railR" type="range" min="1.00" max="2.40" step="0.005" value="1.82" />
+          <span id="tval-railR">1.820</span>
+        </div>
+        <div class="hud-row tune">
+          <span>rail z</span
+          ><input id="tune-railZ" type="range" min="-4.00" max="1.00" step="0.05" value="0" />
+          <span id="tval-railZ">0.00</span>
+        </div>
         <div class="hud-hint">move the pointer to parallax · T title · H panel</div>
       </div>
     </div>
@@ -272,7 +406,7 @@
       const stage = document.querySelector('.stage');
       const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-      const dials = { bloom: 1, galaxy: 1, arc: 1, veils: 1 };
+      const dials = { bloom: 1, galaxy: 1, arc: 1, veils: 1, runes: 1, circle: 1 };
 
       // ----------------------------------------------------------------------------------
       // Palette.
@@ -1261,10 +1395,21 @@
 
         const group = new THREE.Group();
         group.add(points);
-        // 1.0 rad, not the 0.62 of draft two: cos(0.62) squashes the disc by only 19%, which
-        // the eye reads as a flat circle seen head-on. At 1.0 it is 54% and the thing is
-        // unmistakably a disc lying in space.
-        group.rotation.x = 1.0;
+        // -1.0 rad. The magnitude is a framing choice: cos(0.62) squashes the disc by only
+        // 19%, which the eye reads as a flat circle seen head-on, where 1.0 gives 54% and the
+        // thing is unmistakably a disc lying in space.
+        //
+        // The SIGN is not a taste call, it is a bug fix. A disc built in the XY plane has its
+        // front-face normal at +Z; rotating it by +1.0 about X sends that normal to
+        // (0, -0.841, 0.540), which points DOWNWARD — so the camera, sitting on the positive
+        // side of it, was looking at the disc FROM BELOW. Nothing gave that away while the
+        // scene was only particles and rings, because those are symmetric front-to-back. Put
+        // lettering on it and it is immediately obvious: an annulus seen from behind shows
+        // its texture mirrored, so the runes read as engraved on the underside of a glass
+        // table while the galaxy still read as seen from above. Negating it puts the normal
+        // at (0, +0.841, 0.540) and the camera above the plane, which is one consistent
+        // reading for everything in the group.
+        group.rotation.x = -1.0;
         group.rotation.z = -0.24;
         scene.add(group);
         return {
@@ -1376,6 +1521,485 @@
         return { mesh, material };
       }
 
+      const RING_VERTEX = /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `;
+
+      const HASH_HEAD = /* glsl */ `
+        float hash11(float n) {
+          return fract(sin(n * 127.1) * 43758.5453123);
+        }
+      `;
+
+      // ==================================================================================
+      // Glyph atlas.
+      //
+      // Every rune in the piece lives in ONE 32x3 atlas baked at startup, and a whole
+      // register samples it by angle — 32 runes, one draw call, one texture unit. The
+      // alternative (the original magic-circle study's approach) is a textured plane per
+      // glyph, which is how that file ended up 34 alpha layers deep.
+      //
+      // The runes are generated from a stroke grammar rather than a font: a stem, one to
+      // three branches off it, sometimes a crossing diagonal or a lozenge. That is the
+      // Elder-Futhark silhouette without shipping a typeface or claiming to spell anything.
+      // The RNG is seeded, so the atlas is identical on every load — a piece that reshuffles
+      // its own iconography between visits reads as unstable, not as varied.
+      // ==================================================================================
+      function bakeGlyphAtlas({ cols = 32, rows = 3, cell = 64 } = {}) {
+        const atlas = document.createElement('canvas');
+        atlas.width = cols * cell;
+        atlas.height = rows * cell;
+        const ctx = atlas.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, atlas.width, atlas.height);
+        ctx.strokeStyle = '#fff';
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        let state = 0x9e3779b9;
+        const rnd = () => {
+          state ^= state << 13;
+          state ^= state >>> 17;
+          state ^= state << 5;
+          return ((state >>> 0) % 1000000) / 1000000;
+        };
+
+        const clamp01 = (value) => Math.min(0.98, Math.max(0.02, value));
+
+        for (let row = 0; row < rows; row += 1) {
+          // Later rows are lighter: they are the outer registers, and an outer register at
+          // the same stroke weight as an inner one flattens the whole figure.
+          ctx.lineWidth = Math.max(1.5, cell * (0.1 - row * 0.018));
+          for (let col = 0; col < cols; col += 1) {
+            // Glyphs occupy the middle 60% of the cell. The margin is what stops mipmap
+            // minification from bleeding a neighbouring rune into this one.
+            const pad = cell * 0.2;
+            const originX = col * cell + pad;
+            const originY = row * cell + pad;
+            const span = cell - pad * 2;
+            const at = (u, v) => [originX + clamp01(u) * span, originY + clamp01(v) * span];
+
+            ctx.beginPath();
+            const stems = rnd() < 0.24 ? 2 : 1;
+            const stemAt = [];
+            for (let index = 0; index < stems; index += 1) {
+              const u = stems === 1 ? 0.5 : index === 0 ? 0.3 : 0.7;
+              stemAt.push(u);
+              ctx.moveTo(...at(u, 0.04));
+              ctx.lineTo(...at(u, 0.96));
+            }
+
+            const branches = 1 + Math.floor(rnd() * 3);
+            for (let index = 0; index < branches; index += 1) {
+              const from = stemAt[Math.floor(rnd() * stemAt.length)];
+              const height = 0.1 + rnd() * 0.78;
+              const dirX = rnd() < 0.5 ? -1 : 1;
+              const dirY = rnd() < 0.5 ? 1 : -1;
+              const length = 0.2 + rnd() * 0.24;
+              ctx.moveTo(...at(from, height));
+              ctx.lineTo(...at(from + dirX * length, height + dirY * length * 0.95));
+            }
+
+            if (rnd() < 0.3) {
+              const flip = rnd() < 0.5;
+              ctx.moveTo(...at(flip ? 0.14 : 0.86, 0.12));
+              ctx.lineTo(...at(flip ? 0.86 : 0.14, 0.88));
+            }
+
+            if (rnd() < 0.24) {
+              const centre = 0.24 + rnd() * 0.52;
+              const r = 0.13;
+              ctx.moveTo(...at(0.5, centre - r));
+              ctx.lineTo(...at(0.5 + r, centre));
+              ctx.lineTo(...at(0.5, centre + r));
+              ctx.lineTo(...at(0.5 - r, centre));
+              ctx.closePath();
+            }
+
+            ctx.stroke();
+          }
+        }
+
+        const texture = new THREE.CanvasTexture(atlas);
+        // Repeat in u because a register wraps the full circle; clamp in v so a row can
+        // never sample into its neighbour.
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.generateMipmaps = true;
+        texture.colorSpace = THREE.NoColorSpace; // it is a mask, not a colour
+        texture.needsUpdate = true;
+        return { texture, cols, rows };
+      }
+
+      const glyphAtlas = bakeGlyphAtlas();
+
+      // ==================================================================================
+      // Annulus. uv.x is angle (0..1 round the circle), uv.y is radial (0 inner, 1 outer).
+      // Three's own RingGeometry maps uv over the bounding box instead, which is useless for
+      // anything that wants to be addressed in polar coordinates.
+      // ==================================================================================
+      function buildAnnulus(inner, outer, segments = 640) {
+        const vertexCount = (segments + 1) * 2;
+        const positions = new Float32Array(vertexCount * 3);
+        const uvs = new Float32Array(vertexCount * 2);
+        const indices = [];
+
+        for (let index = 0; index <= segments; index += 1) {
+          const t = index / segments;
+          const angle = t * TAU;
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+
+          const innerVertex = index * 2;
+          const outerVertex = innerVertex + 1;
+          positions[innerVertex * 3] = cos * inner;
+          positions[innerVertex * 3 + 1] = sin * inner;
+          positions[outerVertex * 3] = cos * outer;
+          positions[outerVertex * 3 + 1] = sin * outer;
+          uvs[innerVertex * 2] = t;
+          uvs[innerVertex * 2 + 1] = 0;
+          uvs[outerVertex * 2] = t;
+          uvs[outerVertex * 2 + 1] = 1;
+
+          if (index < segments) {
+            indices.push(innerVertex, outerVertex, innerVertex + 2);
+            indices.push(outerVertex, outerVertex + 2, innerVertex + 2);
+          }
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+        geometry.setIndex(indices);
+        return geometry;
+      }
+
+      // ==================================================================================
+      // Rune register.
+      //
+      // Each rune keeps its own brightness and its own breath rate, so the register never
+      // pulses as one object — a ring of identically-lit glyphs reads as printed type rather
+      // than as something charged. On top of that there is ONE charge running round the
+      // ring: the beat that says something is operating this.
+      //
+      // These live in the galaxy's own plane, so they tilt and drift with the disc and read
+      // as belonging to it. A ring pasted flat across the frame would read as UI.
+      // ==================================================================================
+      function buildRuneRegister(spec) {
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            tGlyphs: { value: glyphAtlas.texture },
+            uRow: { value: spec.row },
+            uRows: { value: glyphAtlas.rows },
+            uCols: { value: glyphAtlas.cols },
+            uSpin: { value: spec.spin },
+            uRepeat: { value: spec.repeat },
+            uRunRate: { value: spec.runRate },
+            uIntensity: { value: spec.intensity },
+            uShift: { value: spec.shift },
+            uChroma: { value: spec.chroma },
+            uTint: { value: spec.tint.clone() },
+            uHot: { value: spec.hot.clone() },
+          },
+          vertexShader: RING_VERTEX,
+          fragmentShader: /* glsl */ `
+            ${HASH_HEAD}
+            uniform sampler2D tGlyphs;
+            uniform float uTime;
+            uniform float uDial;
+            uniform float uRow;
+            uniform float uRows;
+            uniform float uCols;
+            uniform float uSpin;
+            uniform float uRepeat;
+            uniform float uRunRate;
+            uniform float uIntensity;
+            uniform float uShift;
+            uniform float uChroma;
+            uniform vec3 uTint;
+            uniform vec3 uHot;
+            varying vec2 vUv;
+
+            // Map a band coordinate into this register's row of the atlas. The clamp is what
+            // stops a chromatic offset near the band edge from sampling the NEXT row's runes.
+            float rowV(float t) {
+              return (uRow + clamp(t, 0.0, 1.0)) / uRows;
+            }
+
+            void main() {
+              // uRepeat lays the 32-glyph atlas round the ring more than once. Without it the
+              // cell width is circumference/32, which at this radius is nearly a world unit —
+              // the first build put runes the size of billboards round the disc. Keep it an
+              // integer or the seam at vUv.x = 1 tears a glyph in half.
+              float turn = vUv.x + uSpin * uTime;
+              float u = fract(turn * uRepeat);
+
+              // Authored chromatic aberration: the glyph mask is sampled three times, one per
+              // channel, offset ACROSS the band. This is what a lens does to a bright thin
+              // source, and doing it here rather than in the post chain means it can run at
+              // full strength on the runes without smearing the whole frame to match.
+              float mr = texture2D(tGlyphs, vec2(u, rowV(vUv.y + uShift))).r;
+              float mg = texture2D(tGlyphs, vec2(u, rowV(vUv.y))).r;
+              float mb = texture2D(tGlyphs, vec2(u, rowV(vUv.y - uShift))).r;
+              float mask = mg;
+              if (max(mr, max(mg, mb)) < 0.004) discard;
+
+              // Only where the channels DISAGREE — i.e. at a stroke edge. The interior, where
+              // all three sample the same solid stroke, stays exactly the register's own
+              // colour, so this reads as a fringe rather than as a rainbow rune.
+              vec3 fringe = max(vec3(mr, mg, mb) - mg, 0.0) * uChroma;
+
+              // Seed off the GLOBAL cell index, not the within-atlas one, so the repeats do
+              // not light identically and the repetition stops being legible.
+              float cell = floor(turn * uRepeat * uCols);
+              float seed = hash11(cell + uRow * 31.7);
+              float breath = 0.5 + 0.5 * sin(uTime * (0.28 + seed * 0.85) + seed * 24.0);
+              float bright = (0.3 + pow(seed, 1.7) * 1.5) * (0.45 + 0.55 * breath);
+
+              // One charge, running the ring ONCE per lap — driven by vUv.x, not by the
+              // repeated coordinate, or there would be one charge per repetition.
+              float head = fract(uTime * uRunRate);
+              float around = abs(fract(vUv.x - head + 0.5) - 0.5);
+              float travel = pow(max(0.0, 1.0 - around * 9.0), 3.0);
+
+              // Soft radial edges so the band resolves into the field rather than ending.
+              float edge = smoothstep(0.0, 0.12, vUv.y) * (1.0 - smoothstep(0.88, 1.0, vUv.y));
+
+              vec3 color = (uTint * mask + fringe) * bright + uHot * travel * 2.2 * mask;
+              gl_FragColor = vec4(color * edge * uIntensity * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+
+        const mesh = new THREE.Mesh(buildAnnulus(spec.inner, spec.outer), material);
+        mesh.frustumCulled = false;
+        return { mesh, material };
+      }
+
+      // ==================================================================================
+      // Rail — a thin bright ring with an authored chromatic fringe, same construction as
+      // the arcs: the cross-section profile is evaluated three times at three slightly
+      // different offsets, which is what a lens does to a bright thin source. It survives at
+      // full strength where a global RGB shift would have to smear the whole frame to get
+      // the same edge.
+      // ==================================================================================
+      function buildRail(spec) {
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            uTint: { value: spec.tint.clone() },
+            uIntensity: { value: spec.intensity },
+            uShift: { value: spec.shift },
+            uSoft: { value: spec.soft },
+            uRunRate: { value: spec.runRate || 0 },
+          },
+          vertexShader: RING_VERTEX,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            uniform float uDial;
+            uniform vec3 uTint;
+            uniform float uIntensity;
+            uniform float uShift;
+            uniform float uSoft;
+            uniform float uRunRate;
+            varying vec2 vUv;
+
+            float profile(float v, float k) {
+              return pow(max(0.0, 1.0 - abs(v)), k);
+            }
+
+            void main() {
+              float v = vUv.y * 2.0 - 1.0;
+              float r = profile(v + uShift, uSoft);
+              float g = profile(v, uSoft);
+              float b = profile(v - uShift, uSoft);
+              float core = profile(v, uSoft * 7.0);
+
+              float travel = 1.0;
+              if (uRunRate > 0.0) {
+                float head = fract(uTime * uRunRate);
+                float around = abs(fract(vUv.x - head + 0.5) - 0.5);
+                travel = 1.0 + pow(max(0.0, 1.0 - around * 6.0), 3.0) * 2.2;
+              }
+
+              vec3 color = vec3(r, g, b) * uTint + vec3(1.0) * core * 1.2;
+              gl_FragColor = vec4(color * uIntensity * travel * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+
+        const mesh = new THREE.Mesh(
+          buildAnnulus(spec.radius - spec.width, spec.radius + spec.width),
+          material,
+        );
+        mesh.frustumCulled = false;
+        return { mesh, material };
+      }
+
+      // ==================================================================================
+      // Magic circle — one circle with a pentagram inscribed in it, in the galaxy's plane.
+      //
+      // Deliberately ONE figure and nothing else. The registers and the rail already carry
+      // the ornament; what this layer has to supply is the single legible SHAPE that says
+      // the disc sits inside something drawn, and a shape only reads as drawn if the eye can
+      // take it in at once. Two circles and a second star would read as texture again.
+      //
+      // The whole figure is one quad and one distance field: circle at quad radius 0.9, star
+      // as the min() over five chords of that same circle (vertex k to k+2). fwidth resolves
+      // the stroke width in screen space, so it stays a hairline at any camera distance
+      // instead of aliasing into dashes the way authored geometry would.
+      //
+      // Circle and star breathe at different rates and only the circle carries the running
+      // charge. If they shared a beat the figure would read as one flat decal switching on
+      // and off; offset, it reads as a mechanism with a ring turning inside it.
+      // ==================================================================================
+      function buildMagicCircle(spec) {
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            uTint: { value: PALETTE.coreGold.clone() },
+            uHot: { value: PALETTE.coreHot.clone() },
+            uSpin: { value: spec.spin },
+            uIntensity: { value: spec.intensity },
+            uShift: { value: spec.shift },
+            uRunRate: { value: spec.runRate },
+          },
+          vertexShader: /* glsl */ `
+            varying vec2 vPos;
+            void main() {
+              vPos = uv * 2.0 - 1.0;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            uniform float uDial;
+            uniform vec3 uTint;
+            uniform vec3 uHot;
+            uniform float uSpin;
+            uniform float uIntensity;
+            uniform float uShift;
+            uniform float uRunRate;
+            varying vec2 vPos;
+
+            const float TAU_F = 6.28318530718;
+            const float RAD = 0.9;
+
+            float segDist(vec2 p, vec2 a, vec2 b) {
+              vec2 pa = p - a;
+              vec2 ba = b - a;
+              float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+              return length(pa - ba * h);
+            }
+
+            // One stroke profile, resolved in screen space. Everything in this shader —
+            // circle, star, and the three chromatic taps of each — goes through this, so the
+            // whole figure is guaranteed to be one weight of line.
+            float stroke(float d, float aa) {
+              return 1.0 - smoothstep(0.0, aa * 1.7, d);
+            }
+
+            void main() {
+              // The circle is rotation-invariant, so only the star is spun. Rotating both
+              // would cost the same and show nothing.
+              float a = uTime * uSpin;
+              float ca = cos(a);
+              float sa = sin(a);
+              vec2 ps = mat2(ca, sa, -sa, ca) * vPos;
+
+              // Five vertices, one point up (+PI/2). The chord from k to k+2 is the
+              // pentagram; k+2 is taken WITHOUT a modulo because cos/sin are periodic, which
+              // also keeps the loop free of array indexing.
+              float starDist = 1e9;
+              for (int k = 0; k < 5; k++) {
+                float a0 = float(k) * TAU_F / 5.0 + 1.57079632679;
+                float a1 = float(k + 2) * TAU_F / 5.0 + 1.57079632679;
+                vec2 v0 = vec2(cos(a0), sin(a0)) * RAD;
+                vec2 v1 = vec2(cos(a1), sin(a1)) * RAD;
+                starDist = min(starDist, segDist(ps, v0, v1));
+              }
+
+              float circleSd = length(vPos) - RAD;
+              float circleDist = abs(circleSd);
+
+              // Derivatives first, discard after: fwidth inside non-uniform control flow is
+              // undefined, and the far field of this quad is mostly empty.
+              float aaC = max(fwidth(circleSd), 1e-5);
+              float aaS = max(fwidth(starDist), 1e-5);
+              if (min(circleDist, starDist) > 0.4) discard;
+
+              // Authored chromatic fringe, same construction as the rail: the same profile
+              // evaluated three times, one per channel. uShift is in quad units and has to
+              // stay well under the stroke width — past that the channels stop overlapping
+              // and the figure reads as an anaglyph rather than as a lens fringe. Same
+              // lesson the rune registers' shift comment records.
+              float cr = stroke(abs(circleSd + uShift), aaC);
+              float cg = stroke(circleDist, aaC);
+              float cb = stroke(abs(circleSd - uShift), aaC);
+              vec3 cFringe = max(vec3(cr, cg, cb) - cg, 0.0);
+
+              float sr = stroke(max(starDist - uShift, 0.0), aaS);
+              float sg = stroke(starDist, aaS);
+              float sb = stroke(starDist + uShift, aaS);
+              vec3 sFringe = max(vec3(sr, sg, sb) - sg, 0.0);
+
+              // A soft skirt either side of each stroke. A pure fwidth hairline has nothing
+              // for the bloom chain to pick up, so the figure comes out as a wire drawing
+              // sitting on top of the frame rather than as light in it.
+              float cHalo = exp(-circleDist * 24.0) * 0.35;
+              float sHalo = exp(-starDist * 24.0) * 0.35;
+
+              // One charge running the circle. Angle-driven, so it is one head per lap.
+              float head = fract(uTime * uRunRate);
+              float angle01 = atan(vPos.y, vPos.x) / TAU_F;
+              float around = abs(fract(angle01 - head + 0.5) - 0.5);
+              float travel = pow(max(0.0, 1.0 - around * 8.0), 3.0);
+
+              // Two quiet breaths at unrelated rates. Shared, they would pulse as one object.
+              float breathC = 0.78 + 0.22 * sin(uTime * 0.21);
+              float breathS = 0.78 + 0.22 * sin(uTime * 0.34 + 1.7);
+
+              vec3 color = (uTint * (cg + cHalo) + cFringe) * breathC
+                         + (uTint * (sg + sHalo) + sFringe) * breathS
+                         + uHot * travel * (cg + cHalo * 0.6) * 1.6;
+              gl_FragColor = vec4(color * uIntensity * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+        // Quad space puts the figure at radius 0.9, so this is what lands it on
+        // spec.radius world units rather than on the quad's own edge.
+        mesh.scale.setScalar((spec.radius * 2.0) / 0.9);
+        mesh.frustumCulled = false;
+        return { mesh, material };
+      }
+
       // ==================================================================================
       // Layer 3c — the orbit rings.
       //
@@ -1462,8 +2086,12 @@
               float fade = smoothstep(uInner, uInner + 0.12, r) * (1.0 - smoothstep(0.72, 1.0, r));
 
               vec3 tint = mix(uCyan, uGold, step(0.5, hash11(id + 7.3)));
-              vec3 color = tint * bright + uHot * travel * 1.6;
-              gl_FragColor = vec4(color * line * gate * fade * (0.5 + travel * 2.0) * 0.5 * uDial, 1.0);
+              // The travelling charge is deliberately quieter here than in the un-runed
+              // build: with rune registers outside them, orbit arcs that flare to white read
+              // as hard CG ellipses laid over the disc rather than as light moving through a
+              // system. There is more in the frame now, so each element gets less of it.
+              vec3 color = tint * bright + uHot * travel * 0.85;
+              gl_FragColor = vec4(color * line * gate * fade * (0.5 + travel * 1.1) * 0.5 * uDial, 1.0);
             }
           `,
           transparent: true,
@@ -1913,8 +2541,79 @@
       galaxy.group.add(haze.mesh);
       // Rings live in the galaxy's own plane, so they tilt with it and read as orbits rather
       // than as a flat overlay pasted on the frame.
+      //
       const rings = buildRingField({ inner: 0.3, outer: galaxy.radius * 1.72, count: 24 });
       galaxy.group.add(rings.mesh);
+
+      // The figure the registers are engraved on. Everything here is additive, so draw
+      // order cannot put it "under" anything — the offset below the disc plane is what
+      // does it: the galaxy and the runes sit above the figure in space, and the tilt
+      // plus parallax read it as a platform the whole instrument is mounted over.
+      const magicCircle = buildMagicCircle({
+        radius: galaxy.radius * 1.5,
+        spin: -0.004,
+        runRate: 0.022,
+        intensity: 0.85,
+        shift: 0.006,
+      });
+      magicCircle.mesh.position.z = -1.0;
+      galaxy.group.add(magicCircle.mesh);
+
+      // Runes, outward, interleaved with the orbit arcs the way registers and rails
+      // interleave on a real instrument. Gold inner turning one way, pale outer turning the
+      // other — two rings drifting the same way read as one ring.
+      //
+      // Band depth and `repeat` have to be chosen together: a glyph cell is
+      // circumference / (32 * repeat) wide, and it wants to be about as wide as the band is
+      // deep or the runes come out stretched.
+      const runeRegisters = [
+        buildRuneRegister({
+          inner: galaxy.radius * 1.455,
+          outer: galaxy.radius * 1.545,
+          row: 0,
+          repeat: 3, // 96 glyphs round a ~47-unit circumference -> ~0.49 per cell
+          spin: 0.0092,
+          runRate: 0.048,
+          intensity: 1.15,
+          // shift is in band-depth units, and it has to stay WELL under the stroke width or
+          // this stops being a lens fringe and becomes an anaglyph. A stroke is ~0.1 of a
+          // cell; at 0.055 the three channel samples barely overlapped, so outside the
+          // stroke there were pixels where only red or only blue was lit — saturated
+          // red/blue edges with no white anywhere, i.e. 3D-glasses. At 0.018 the images
+          // overlap almost everywhere and the disagreement is a ~1 px rim, which is what a
+          // real lens does.
+          shift: 0.018,
+          chroma: 0.9,
+          tint: PALETTE.coreGold,
+          hot: PALETTE.coreHot,
+        }),
+        buildRuneRegister({
+          inner: galaxy.radius * 1.62,
+          outer: galaxy.radius * 1.71,
+          row: 1,
+          repeat: 4, // 128 glyphs round a ~52-unit circumference -> ~0.41 per cell
+          spin: -0.0058,
+          runRate: -0.031,
+          intensity: 0.6,
+          shift: 0.022,
+          chroma: 0.75,
+          tint: PALETTE.starCool,
+          hot: PALETTE.coreHot,
+        }),
+      ];
+      const runeRails = [
+        buildRail({
+          radius: galaxy.radius * 1.82,
+          width: 0.028,
+          tint: PALETTE.coreGold,
+          intensity: 0.62,
+          shift: 0.2,
+          soft: 2.2,
+          runRate: 0.026,
+        }),
+      ];
+      for (const register of runeRegisters) galaxy.group.add(register.mesh);
+      for (const rail of runeRails) galaxy.group.add(rail.mesh);
       const core = buildCore();
       const arcs = [
         buildArc({
@@ -2135,7 +2834,7 @@
       }
 
       function setupDials() {
-        for (const key of ['bloom', 'galaxy', 'arc', 'veils']) {
+        for (const key of ['bloom', 'galaxy', 'arc', 'veils', 'runes', 'circle']) {
           const input = document.querySelector('#dial-' + key);
           const label = document.querySelector('#val-' + key);
           const sync = () => {
@@ -2152,6 +2851,125 @@
           if (event.key === 't' || event.key === 'T') {
             document.querySelector('#title').classList.toggle('hidden');
           }
+        });
+      }
+
+      // ==================================================================================
+      // Tuning bench — TUNER ONLY. None of this exists in AstralDriftV2.
+      //
+      // These are the numbers that cannot be reasoned to: how far out the figure wants to
+      // sit, how far below the disc plane it reads as a platform rather than as a second
+      // disc, and where each rune ring lands on it. Every slider starts at the value v2 is
+      // built with, so an untouched bench renders v2 exactly.
+      //
+      // Rebuilds run on 'input' and nowhere else. Doing the radius work per frame would be
+      // fewer lines and would throw away two annuli every frame for the 99.9% of frames in
+      // which nothing moved — and the cost would show up in the same HUD readout being used
+      // to judge the composition.
+      //
+      // One thing the bench cannot hold constant: a glyph cell is
+      // circumference / (32 * repeat) wide, so moving a register outward stretches its runes
+      // (`repeat` stays fixed here — it has to be an integer or the seam at uv.x = 1 tears a
+      // glyph in half). Stretched glyphs at the extremes are expected; when a radius is
+      // settled on, re-pick `repeat` back in the v2 file.
+      // ==================================================================================
+      const TUNE_BAND_DEPTH = 0.09; // register depth, in galaxy radii — held fixed
+      const TUNE_RAIL_HALF_WIDTH = 0.028; // world units, as the rail is built
+
+      const tuning = {
+        circleR: 1.5,
+        circleZ: -1.0,
+        circleTiltX: 0,
+        circleTiltY: 0,
+        rune1R: 1.5,
+        rune1Z: 0,
+        rune2R: 1.665,
+        rune2Z: 0,
+        railR: 1.82,
+        railZ: 0,
+      };
+      const tuningSync = {};
+
+      // Dispose before replacing: the old attribute buffers live on the GPU and nothing else
+      // holds a reference, so skipping this leaks a set of VBOs per slider tick — and a
+      // slider tick is cheap to produce by the hundred.
+      function retuneAnnulus(mesh, inner, outer) {
+        mesh.geometry.dispose();
+        mesh.geometry = buildAnnulus(inner, outer);
+      }
+
+      function applyCircleRadius() {
+        // Radius is carried entirely by mesh scale — the circle sits at quad radius 0.9, so
+        // there is no geometry to rebuild here at all.
+        magicCircle.mesh.scale.setScalar((galaxy.radius * tuning.circleR * 2.0) / 0.9);
+      }
+
+      function applyRegisterRadius(index) {
+        const center = index === 0 ? tuning.rune1R : tuning.rune2R;
+        const half = TUNE_BAND_DEPTH * 0.5;
+        retuneAnnulus(
+          runeRegisters[index].mesh,
+          galaxy.radius * (center - half),
+          galaxy.radius * (center + half),
+        );
+      }
+
+      function applyRailRadius() {
+        const radius = galaxy.radius * tuning.railR;
+        retuneAnnulus(
+          runeRails[0].mesh,
+          radius - TUNE_RAIL_HALF_WIDTH,
+          radius + TUNE_RAIL_HALF_WIDTH,
+        );
+      }
+
+      // One binder for all ten rows. Range/step live in the input attributes, so the only
+      // things that vary per row are the readout precision and what to do with the value.
+      function bindTuner(key, digits, apply) {
+        const input = document.querySelector('#tune-' + key);
+        const label = document.querySelector('#tval-' + key);
+        const sync = () => {
+          tuning[key] = Number(input.value);
+          label.textContent = tuning[key].toFixed(digits);
+          apply();
+        };
+        tuningSync[key] = sync;
+        input.addEventListener('input', sync);
+        sync();
+      }
+
+      // Programmatic entry point for the probe harness. It goes through the slider so the
+      // control, the readout and the scene can never disagree.
+      function setTuning(key, value) {
+        const input = document.querySelector('#tune-' + key);
+        if (!input || !tuningSync[key]) return false;
+        input.value = String(value);
+        tuningSync[key]();
+        return true;
+      }
+
+      function setupTuning() {
+        bindTuner('circleR', 3, applyCircleRadius);
+        bindTuner('circleZ', 2, () => {
+          magicCircle.mesh.position.z = tuning.circleZ;
+        });
+        bindTuner('circleTiltX', 2, () => {
+          magicCircle.mesh.rotation.x = tuning.circleTiltX;
+        });
+        bindTuner('circleTiltY', 2, () => {
+          magicCircle.mesh.rotation.y = tuning.circleTiltY;
+        });
+        bindTuner('rune1R', 3, () => applyRegisterRadius(0));
+        bindTuner('rune1Z', 2, () => {
+          runeRegisters[0].mesh.position.z = tuning.rune1Z;
+        });
+        bindTuner('rune2R', 3, () => applyRegisterRadius(1));
+        bindTuner('rune2Z', 2, () => {
+          runeRegisters[1].mesh.position.z = tuning.rune2Z;
+        });
+        bindTuner('railR', 3, applyRailRadius);
+        bindTuner('railZ', 2, () => {
+          runeRails[0].mesh.position.z = tuning.railZ;
         });
       }
 
@@ -2206,6 +3024,9 @@
         galaxy.material.uniforms.uDial.value = dials.galaxy;
         haze.material.uniforms.uDial.value = dials.galaxy;
         rings.material.uniforms.uDial.value = dials.galaxy;
+        for (const register of runeRegisters) register.material.uniforms.uDial.value = dials.runes;
+        for (const rail of runeRails) rail.material.uniforms.uDial.value = dials.runes;
+        magicCircle.material.uniforms.uDial.value = dials.circle;
         core.material.uniforms.uDial.value = dials.galaxy;
         for (const arc of arcs) arc.material.uniforms.uDial.value = dials.arc;
         for (const material of veils.materials) material.uniforms.uDial.value = dials.veils;
@@ -2259,6 +3080,8 @@
       resize();
       setupPointer();
       setupDials();
+      // Runs once at load, which also applies every default — an untouched bench is v2.
+      setupTuning();
       // Warm the pipeline before the loop is allowed to measure anything.
       //
       // three compiles a shader program the first time a material is actually rendered, and
@@ -2297,7 +3120,28 @@
         resize,
         applyScale,
         dials,
-        layers: { storm, stars, veils, bokeh, galaxy, haze, rings, core, arcs, meteors, dust },
+        // Tuner only. `tuning` is the live values (read them off to copy back into v2);
+        // setTuning(key, value) is how the harness moves one, since writing the object
+        // directly would leave the slider and the scene behind.
+        tuning,
+        setTuning,
+        glyphAtlas,
+        layers: {
+          storm,
+          stars,
+          veils,
+          bokeh,
+          galaxy,
+          haze,
+          rings,
+          magicCircle,
+          runeRegisters,
+          runeRails,
+          core,
+          arcs,
+          meteors,
+          dust,
+        },
         uniforms: { uTime, uProjScale },
         clock,
         // Scrub scene time. Everything animated reads the clock, so this is the only way to
