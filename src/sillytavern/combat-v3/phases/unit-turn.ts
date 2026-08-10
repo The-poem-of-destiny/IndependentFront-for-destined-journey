@@ -179,6 +179,20 @@ export function consumeSlot(
     return out;
   }
 
+  // EndTurn（结束回合）：放弃当前单位**全部**剩余槽位（攻击+动作），一次命令。
+  // 语义等价连续 PassAttack + PassAction；槽位清零后直接进 MoraleCheck，
+  // 相位流转与「两槽自然耗尽」完全一致（不变量①：Pass 也消费槽位）。
+  if (command.kind === 'EndTurn') {
+    if (u.attacksRemaining > 0) {
+      out.changes.slotConsumptions.push({ actorId: command.actorId, slot: 'attack' });
+    }
+    if (u.actionsRemaining > 0) {
+      out.changes.slotConsumptions.push({ actorId: command.actorId, slot: 'action' });
+    }
+    out.nextPhase = 'MoraleCheck';
+    return out;
+  }
+
   // 按 cost 消费槽（Pass 也消费，不变量①）
   const slot =
     command.cost === 'attack'

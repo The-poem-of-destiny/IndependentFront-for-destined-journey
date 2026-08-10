@@ -239,6 +239,26 @@ function executeAssembled() {
   selectedTargetId.value = '';
 }
 
+/**
+ * 结束回合：放弃当前单位**全部**剩余槽位（攻击+动作），一次 EndTurn 命令
+ * （内核 consumeSlot 全量消费 → MoraleCheck → 下一位），等价连续 PassAttack+PassAction。
+ * 与「跳过战斗」（放弃整场）刻意区分：这只是当前单位本轮结束。
+ */
+function handleEndTurn() {
+  const actorId = currentActorId();
+  if (!actorId || isLocked.value) return;
+  void game.submitCombatCommand({
+    kind: 'EndTurn',
+    actorId,
+    cost: 'none',
+    payload: {},
+  });
+  // 本单位轮次结束，清空拼装选择（下次轮到该单位时由 watch 重新锁定）
+  selectedAction.value = '';
+  selectedDetail.value = '';
+  selectedTargetId.value = '';
+}
+
 // ════════════════════════════════════════
 //  自由文本 → Command 解析（T14，设计 §3.2）
 // ════════════════════════════════════════
@@ -383,17 +403,25 @@ function handleKeydown(e: KeyboardEvent) {
       </button>
     </div>
 
-    <!-- ═══ 自由文本框 + 发送 ═══ -->
+    <!-- ═══ 自由文本框 + 发送 + 结束回合 ═══ -->
     <div class="input-section">
       <textarea
         v-model="inputText"
         class="combat-textarea"
         :class="{ 'is-locked': isLocked }"
         :disabled="isLocked"
-        placeholder="描述我方行动…（可点上方拼装直接执行，也可手打如“攻击骷髅兵”）"
+        placeholder="描述我方行动…（可点上方拼装直接执行，也可手打如“攻击骷髅兵”；“结束回合”放弃当前单位剩余行动）"
         rows="2"
         @keydown="handleKeydown"
       />
+      <button
+        class="end-turn-btn"
+        :class="{ 'is-disabled': isLocked }"
+        :disabled="isLocked"
+        @click="handleEndTurn"
+      >
+        结束回合
+      </button>
       <button
         class="send-btn"
         :class="{ 'is-disabled': !canSend }"
@@ -604,6 +632,35 @@ function handleKeydown(e: KeyboardEvent) {
   opacity: 0.7;
 }
 
+/* ── 结束回合按钮（secondary 变体：design §4.1）──
+   与「发送」（primary 实心）区分主次：结束回合是放弃语义，用描边次级样式 */
+.end-turn-btn {
+  flex-shrink: 0;
+  min-height: 36px;
+  min-width: 64px;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-lg);
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  color: var(--theme-primary);
+  font-size: 0.9rem;
+  font-family: var(--theme-font-body);
+  cursor: pointer;
+  transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
+}
+
+.end-turn-btn:hover:not(:disabled) {
+  background: var(--theme-surface-muted, var(--theme-card-bg));
+  border-color: var(--theme-primary);
+}
+
+.end-turn-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .send-btn {
   flex-shrink: 0;
   min-height: 36px;
@@ -636,6 +693,7 @@ function handleKeydown(e: KeyboardEvent) {
   .action-tab,
   .inject-btn,
   .combat-textarea,
+  .end-turn-btn,
   .send-btn {
     transition: none;
   }

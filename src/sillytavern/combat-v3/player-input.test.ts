@@ -65,6 +65,30 @@ describe('parsePlayerInput — 六类规则', () => {
     });
   });
 
+  it('结束回合 → EndTurn（cost none，放弃全部剩余槽位，优先于跳过/休息类规则）', () => {
+    const r = parsePlayerInput('结束回合', ctx());
+    expect(r).toEqual({
+      ok: true,
+      command: { actorId: '艾萨', cost: 'none', kind: 'EndTurn', payload: {} },
+    });
+  });
+
+  it('本回合结束 → EndTurn（同族关键词）', () => {
+    const r = parsePlayerInput('本回合结束，我不再行动', ctx());
+    expect(r).toEqual({
+      ok: true,
+      command: { actorId: '艾萨', cost: 'none', kind: 'EndTurn', payload: {} },
+    });
+  });
+
+  it('结束行动 → EndTurn 而非 PassAttack（END_TURN_RE 先于 PASS_RE 匹配）', () => {
+    const r = parsePlayerInput('结束行动', ctx());
+    expect(r).toEqual({
+      ok: true,
+      command: { actorId: '艾萨', cost: 'none', kind: 'EndTurn', payload: {} },
+    });
+  });
+
   it('道具名命中 → DeclareAction(item, description=道具名)', () => {
     const r = parsePlayerInput('使用治疗药水', ctx());
     expect(r).toEqual({
@@ -91,11 +115,10 @@ describe('parsePlayerInput — 六类规则', () => {
     expect(cmd.payload.skill).toBe('治愈术');
   });
 
-  it('技能名命中但没目标 → 明确拒绝（不静默 fallback）', () => {
-    const r = parsePlayerInput('施展火焰术', ctx());
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.reason).toContain('火焰术');
+  it('技能名命中但没目标 → 默认敌方存活首位（不拒绝，避免发不出）', () => {
+    const cmd = expectAttack(parsePlayerInput('施展火焰术', ctx()));
+    expect(cmd.payload.skill).toBe('火焰术');
+    expect(cmd.payload.targetId).toBe('骷髅兵');
   });
 
   it('敌方单位名命中（无技能）→ DeclareAttack 普攻', () => {
@@ -131,14 +154,68 @@ describe('parsePlayerInput — 匹配细节', () => {
     expect(cmd.payload.intentionLevel).toBe('非致死');
   });
 
-  it('目标只认存活单位：不在 units 里的名字不命中 → 攻击分支拒绝', () => {
-    const r = parsePlayerInput('攻击一个不存在的名字', ctx());
-    expect(r.ok).toBe(false);
+  it('目标只认存活单位：不在 units 里的名字不命中 → 攻击动词兜底默认敌方首位', () => {
+    // 「攻击一个不存在的名字」：名字不命中，但「攻击」是攻击意图 → 默认敌方存活首位
+    const cmd = expectAttack(parsePlayerInput('攻击一个不存在的名字', ctx()));
+    expect(cmd.payload.targetId).toBe('骷髅兵');
   });
 
-  it('普攻目标只限敌方：文本提到友方名字不会当攻击目标', () => {
-    // 「攻击艾达」→ 艾达是 player side，不在敌方过滤后的列表 → 拒绝而非打队友
-    const r = parsePlayerInput('攻击艾达', ctx());
+  it('普攻目标只限敌方：提到友方名字不会打队友，攻击意图兜底默认敌方首位', () => {
+    // 「攻击艾达」：艾达是 player side，不是合法攻击目标；
+    // 攻击意图存在 → 默认敌方存活首位，而不是打队友
+    const cmd = expectAttack(parsePlayerInput('攻击艾达', ctx()));
+    expect(cmd.payload.targetId).toBe('骷髅兵');
+  });
+});
+
+describe('parsePlayerInput — 默认目标（无点名时打敌方存活首位）', () => {
+  it('「攻击」→ DeclareAttack 目标=敌方首位', () => {
+    const cmd = expectAttack(parsePlayerInput('攻击', ctx()));
+    expect(cmd.payload.skill).toBeUndefined();
+    expect(cmd.payload.targetId).toBe('骷髅兵');
+  });
+
+  it('「挥剑砍它」→ DeclareAttack 目标=敌方首位（代词不点名也发得出）', () => {
+    const cmd = expectAttack(parsePlayerInput('挥剑砍它', ctx()));
+    expect(cmd.payload.skill).toBeUndefined();
+    expect(cmd.payload.targetId).toBe('骷髅兵');
+  });
+
+  it('「用火球术」→ skill=火球术 目标=敌方首位', () => {
+    const cmd = expectAttack(parsePlayerInput('用火球术', ctx({ skills: ['火球术'] })));
+    expect(cmd.payload.skill).toBe('火球术');
+    expect(cmd.payload.targetId).toBe('骷髅兵');
+  });
+
+  it('「对妲丽安施展治疗术」→ 有名字命中时不默认，目标=妲丽安（友方治疗）', () => {
+    const cmd = expectAttack(
+      parsePlayerInput('对妲丽安施展治疗术', ctx({
+        skills: ['治疗术'],
+        units: [
+          { id: '艾萨', name: '艾萨', side: 'player' },
+          { id: '妲丽安', name: '妲丽安', side: 'player' },
+          { id: '骷髅兵', name: '骷髅兵', side: 'enemy' },
+        ],
+      })),
+    );
+    expect(cmd.payload.skill).toBe('治疗术');
+    expect(cmd.payload.targetId).toBe('妲丽安');
+  });
+
+  it('攻击意图但场上没有敌方存活单位 → 拒绝（不产出指向自己的攻击）', () => {
+    const r = parsePlayerInput('攻击', ctx({ units: [
+      { id: '艾萨', name: '艾萨', side: 'player' },
+      { id: '艾达', name: '艾达', side: 'player' },
+    ] }));
     expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('没有可攻击的敌方单位');
+  });
+
+  it('完全无意义文本 → 仍拒绝「没看懂」（只有完全无法识别意图才拒绝）', () => {
+    const r = parsePlayerInput('今天天气真好啊', ctx());
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain('没看懂');
   });
 });

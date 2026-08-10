@@ -538,6 +538,21 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'end_turn',
+      description:
+        '（v3）当前行动单位结束本回合：放弃全部剩余行动槽（攻击+动作），立即推进到下一位。',
+      parameters: {
+        type: 'object',
+        properties: {
+          actorName: { type: 'string', description: '结束回合的角色名（当前行动单位）' },
+        },
+        required: ['actorName'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'submit_adjudication',
       description:
         '（v3）提出有界裁决：当标准动作无法表达一个创意效果时，用此工具申请法则级裁决。M2 先定义 schema，执行暂不支持。',
@@ -626,6 +641,7 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'declare_action',
     'pass_slot',
     'flee',
+    'end_turn',
     'submit_adjudication',
     'write_summary',
     // 只读查询（复用现有）

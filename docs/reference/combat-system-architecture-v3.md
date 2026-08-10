@@ -142,6 +142,7 @@ interface CombatCommand {
 | `DeclareBlock` | `action` | 响应式格挡/招架，只能在 `damage.preview` 的 EffectChoice 中提交 |
 | `Flee` | `both` | 逃跑检定 |
 | `PassAttack` / `PassAction` | 对应槽 | 显式放弃，**仍消费槽位**（不变量①） |
+| `EndTurn` | `none` | 结束回合：一次放弃当前单位**全部**剩余槽位（攻击+动作），语义等价连续 PassAttack + PassAction，直接进 MoraleCheck |
 | `Choose` | `none` | 回应 `RequiredInput.EffectChoice` 的选择 |
 | `Adjudicate` | `none` | 回应 `RequiredInput.BoundedAdjudication`，携带 `ProposedAdjudication` |
 | `SupplyDice` | `none` | 回应 `RequiredInput.BeginOutput`，注入新 60-d20 epoch |

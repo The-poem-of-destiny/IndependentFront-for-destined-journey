@@ -105,6 +105,22 @@ export function mkPass(
   } as CombatCommand;
 }
 
+/** 构造 EndTurn（结束回合：放弃当前单位全部剩余槽位，cost none） */
+export function mkEndTurn(
+  commandId: string,
+  expectedRevision: number,
+  actorId: string,
+): CombatCommand {
+  return {
+    commandId,
+    expectedRevision,
+    kind: 'EndTurn',
+    actorId,
+    cost: 'none',
+    payload: {},
+  } as CombatCommand;
+}
+
 /** 构造 RequestSettlement */
 export function mkSettle(
   commandId: string,

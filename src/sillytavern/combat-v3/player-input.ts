@@ -3,8 +3,9 @@
  *
  * 设计 §3.2「玩家输入（决策 B：统一 AI 解析意图）」：
  *   - 四步拼装能直接定 Command 时走结构化路径（前端 CombatActionBar 直接产 Command）；
- *   - 自由文本必须过解析器转 Command（DeclareAttack / DeclareAction / PassAttack / Flee），
- *     禁止把自由文本直接当 Command 喂内核（那是「查询工具被误当 Command」的同款坑）。
+ *   - 自由文本必须过解析器转 Command（DeclareAttack / DeclareAction / PassAttack /
+ *     EndTurn / Flee），禁止把自由文本直接当 Command 喂内核（那是「查询工具被误当
+ *     Command」的同款坑）。
  *
  * 本模块是自由文本那条路的**规则解析实现**（设计 §3.2「自由文本才过 AI/规则解析」）：
  * 确定性关键词 + 名字匹配，零 I/O、零随机、纯函数（照 combat-intention.ts 的先例）。
@@ -61,8 +62,21 @@ const FLEE_RE = /逃跑|撤退|逃离|开溜|脱离战斗|溜走/;
 /** 防御意图（整句关键词） */
 const DEFEND_RE = /防御|防守|格挡|举盾|坚守|戒备|守护/;
 
+/**
+ * 结束回合（整句关键词）：放弃当前单位**全部**剩余槽位（攻击+动作），
+ * 一次命令，等价连续 PassAttack + PassAction。刻意与 PASS_RE（跳过=只放弃攻击槽）
+ * 区分：放在 PASS_RE 之前匹配，避免「结束行动」类表述被 PASS_RE 吞成 PassAttack。
+ */
+const END_TURN_RE = /结束回合|结束行动|本回合结束|结束本回合/;
+
 /** 跳过本回合攻击（整句关键词；保守集合，避免误吞「等待时机」类描述） */
 const PASS_RE = /跳过|待机|按兵不动|休息|放弃攻击|放弃行动|放弃抵抗/;
+
+/**
+ * 攻击意图动词（整句关键词）：识别出「要打」但没点名谁时，默认打敌方存活首位。
+ * 排在 FLEE/DEFEND/PASS 之后匹配，不会误吞「防御」「待机」等（那些已提前 return）。
+ */
+const ATTACK_VERB_RE = /攻击|砍|劈|打|揍|挥|击|射|刺|斩|踢|扑|撞|轰|砸/;
 
 /** 道具使用的动词信号：光有道具名不够（「挥舞铁剑」是攻击不是用道具），必须带使用动词 */
 const USE_ITEM_RE = /使用|服用|喝下|喝掉|吃下|饮用|涂抹/;
@@ -107,12 +121,26 @@ function firstMentionUnit(
 }
 
 /**
+ * 敌方存活单位首位 —— 玩家没点名目标时的默认攻击目标。
+ * units 由调用方传入时已是存活过滤后的（CombatActionBar 传在场存活单位），
+ * 这里只按 side 过滤，取敌方第一个。
+ */
+function firstEnemyUnit(units: ReadonlyArray<PlayerParseUnit>): PlayerParseUnit | undefined {
+  return units.find((u) => u.side === 'enemy');
+}
+
+/**
  * 自由文本 → Command 的规则解析入口。
  *
  * 规则优先级（从上到下）：
- *   逃跑 → Flee；防御 → DeclareAction(defend)；跳过 → PassAttack；
- *   道具名命中 → DeclareAction(item)；技能名命中 → DeclareAttack(skill, 目标)；
- *   敌方单位名命中 → DeclareAttack(普攻)；都识别不出 → 明确拒绝。
+ *   逃跑 → Flee；防御 → DeclareAction(defend)；结束回合 → EndTurn；
+ *   跳过 → PassAttack；
+ *   道具名命中 → DeclareAction(item)；技能名命中 → DeclareAttack(skill, 点名目标或敌方首位)；
+ *   敌方单位名命中 → DeclareAttack(普攻)；攻击动词但无点名 → DeclareAttack(敌方首位)；
+ *   都识别不出 → 明确拒绝。
+ * 目标匹配默认值：技能/攻击意图没点名谁时**默认打敌方存活首位**（玩家常手打
+ * 「攻击」「挥剑砍它」「用火球术」这类不含单位名的指令；治疗/增益想指友方时
+ * 请点名，如「对XX施展Y」）。
  * 技能/普攻的意图层级取 parseIntentionFromInput（「打晕」「要害」「全力」等关键词提升）。
  */
 export function parsePlayerInput(text: string, ctx: PlayerParseCtx): PlayerCommandResult {
@@ -138,6 +166,10 @@ export function parsePlayerInput(text: string, ctx: PlayerParseCtx): PlayerComma
     };
   }
 
+  if (END_TURN_RE.test(t)) {
+    return { ok: true, command: { ...base, cost: 'none', kind: 'EndTurn', payload: {} } };
+  }
+
   if (PASS_RE.test(t)) {
     return { ok: true, command: { ...base, cost: 'attack', kind: 'PassAttack', payload: {} } };
   }
@@ -157,8 +189,10 @@ export function parsePlayerInput(text: string, ctx: PlayerParseCtx): PlayerComma
 
   const skill = ctx.skills?.length ? firstMention(t, ctx.skills) : undefined;
   if (skill) {
-    // 技能目标不限定阵营：治疗/增益可指向友方，攻击技能指向敌方
-    const target = firstMentionUnit(t, ctx.units);
+    // 技能目标不限定阵营：治疗/增益可指向友方，攻击技能指向敌方。
+    // 没点名目标 → 默认敌方存活首位（避免「施展火焰术」「用火球术」发不出）；
+    // 治疗/增益想指友方时请点名，如「对XX施展Y」。
+    const target = firstMentionUnit(t, ctx.units) ?? firstEnemyUnit(ctx.units);
     if (!target) {
       return {
         ok: false,
@@ -188,6 +222,24 @@ export function parsePlayerInput(text: string, ctx: PlayerParseCtx): PlayerComma
         cost: 'attack',
         kind: 'DeclareAttack',
         payload: { targetId: target.id, intentionLevel: parseIntentionFromInput(t) },
+      },
+    };
+  }
+
+  // 攻击意图但没点名目标（「攻击」「挥剑砍它」）→ 默认敌方存活首位，不报错。
+  // 「它/他/她」这类代词不特判 —— 名字没命中就落到这里，视为指代默认目标。
+  if (ATTACK_VERB_RE.test(t)) {
+    const fallback = firstEnemyUnit(ctx.units);
+    if (!fallback) {
+      return { ok: false, reason: '没有可攻击的敌方单位' };
+    }
+    return {
+      ok: true,
+      command: {
+        ...base,
+        cost: 'attack',
+        kind: 'DeclareAttack',
+        payload: { targetId: fallback.id, intentionLevel: parseIntentionFromInput(t) },
       },
     };
   }

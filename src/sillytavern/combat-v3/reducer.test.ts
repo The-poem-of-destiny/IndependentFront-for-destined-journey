@@ -14,7 +14,7 @@ import { reduce } from './reducer';
 import { createCombatState, applyOutcome } from './state';
 import { currentUnitId } from './phases/unit-turn';
 import type { CombatState, CombatDefinitionBundle } from './types';
-import { mkBundle, mkAttack, mkPass, mkAction, mkSettle } from './test-utils';
+import { mkBundle, mkAttack, mkPass, mkAction, mkSettle, mkEndTurn } from './test-utils';
 import { KernelStuckError } from './types';
 
 /** 跑一次 reduce 并返回 transition */
@@ -53,6 +53,62 @@ describe('phase 推进表（A1-1）', () => {
     expect(t.requiredInput?.kind).toBe('PlayerCommand');
     expect(t.snapshot.phase).toBe('SlotConsume');
     expect(t.snapshot.units['乙'].hp).toBeGreaterThan(0); // 未致死
+  });
+});
+
+describe('EndTurn（结束回合：放弃当前单位全部剩余槽位）', () => {
+  it('攻击后 EndTurn → 剩余动作槽清零 + 相位推进到下一位（乙开回合等输入）', () => {
+    const bundle = mkBundle({
+      participants: [mkBundle().participants[0], mkBundle().participants[1]],
+    });
+    const enemy = bundle.participants[1];
+    (enemy as any).hp = 50000;
+    (enemy as any).maxHp = 50000;
+    let s = createCombatState(bundle);
+    let t = once(bundle, s, mkAttack('a', 0, '甲', '乙')); // 消费攻击槽，剩动作槽
+    s = t.next!;
+    // 甲仍有动作槽 → EndTurn 放弃剩余 → 两槽清零 → MoraleCheck → 下一位
+    t = once(bundle, s, mkEndTurn('e', s.revision, '甲'));
+    expect(t.rejection).toBeUndefined();
+    expect(t.snapshot.units['甲'].attacksRemaining).toBe(0);
+    expect(t.snapshot.units['甲'].actionsRemaining).toBe(0);
+    expect(t.snapshot.currentTurnIndex).toBe(1);
+    expect(t.snapshot.phase).toBe('SlotConsume');
+    expect(t.requiredInput?.kind).toBe('PlayerCommand');
+  });
+
+  it('满槽直接 EndTurn → 攻击+动作双槽一次清零（等价连续 PassAttack + PassAction）', () => {
+    const bundle = mkBundle();
+    const s = createCombatState(bundle);
+    const t = once(bundle, s, mkEndTurn('e', 0, '甲'));
+    expect(t.rejection).toBeUndefined();
+    expect(t.snapshot.units['甲'].attacksRemaining).toBe(0);
+    expect(t.snapshot.units['甲'].actionsRemaining).toBe(0);
+    expect(t.snapshot.currentTurnIndex).toBe(1);
+    expect(t.requiredInput?.kind).toBe('PlayerCommand');
+  });
+
+  it('非当前单位 EndTurn → INVALID_PHASE（零事件）', () => {
+    const bundle = mkBundle({
+      participants: [mkBundle().participants[0], mkBundle().participants[1]],
+    });
+    const enemy = bundle.participants[1];
+    (enemy as any).hp = 50000;
+    (enemy as any).maxHp = 50000;
+    let s = createCombatState(bundle);
+    let t = once(bundle, s, mkAttack('a', 0, '甲', '乙')); // 轮到甲
+    s = t.next!;
+    t = once(bundle, s, mkEndTurn('e', s.revision, '乙')); // 乙不是当前单位
+    expect(t.rejection?.code).toBe('INVALID_PHASE');
+    expect(t.events).toHaveLength(0);
+  });
+
+  it('不在场单位 EndTurn → TARGET_NOT_PRESENT（零事件）', () => {
+    const bundle = mkBundle();
+    const s = createCombatState(bundle);
+    const t = once(bundle, s, mkEndTurn('e', 0, '不在场'));
+    expect(t.rejection?.code).toBe('TARGET_NOT_PRESENT');
+    expect(t.events).toHaveLength(0);
   });
 });
 

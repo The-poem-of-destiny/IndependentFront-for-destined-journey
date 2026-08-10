@@ -148,6 +148,7 @@ export type CombatCommandKind =
   | 'Flee'
   | 'PassAttack'
   | 'PassAction'
+  | 'EndTurn'
   | 'Choose'
   | 'Adjudicate'
   | 'SupplyDice'
@@ -957,6 +958,14 @@ export type CombatCommand =
       kind: 'PassAction';
       actorId: string;
       cost: 'action';
+      payload: Record<string, never>;
+    }
+  | {
+      commandId: string;
+      expectedRevision: number;
+      kind: 'EndTurn';
+      actorId: string;
+      cost: 'none';
       payload: Record<string, never>;
     }
   | {

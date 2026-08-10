@@ -173,6 +173,34 @@ describe('CombatActionBar — 四步拼装产出结构化 Command', () => {
   });
 });
 
+describe('CombatActionBar — 结束回合按钮', () => {
+  it('按钮存在：点击 → submitCombatCommand({kind:EndTurn, actorId:当前单位, cost:none})', async () => {
+    const w = await mountBar();
+    const btn = w.find('button.end-turn-btn');
+    expect(btn.exists()).toBe(true);
+    await btn.trigger('click');
+
+    expect(submitCombatCommand).toHaveBeenCalledTimes(1);
+    expect(submitCombatCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'EndTurn',
+        actorId: '艾萨',
+        cost: 'none',
+        payload: {},
+      }),
+    );
+  });
+
+  it('锁定态（敌方回合）→ 结束回合按钮禁用，不触发提交', async () => {
+    mockGame.combatAwaitingInput = null;
+    const w = await mountBar();
+    const btn = w.find('button.end-turn-btn');
+    expect((btn.element as HTMLButtonElement).disabled).toBe(true);
+    await btn.trigger('click');
+    expect(submitCombatCommand).not.toHaveBeenCalled();
+  });
+});
+
 describe('CombatActionBar — 自由文本走解析路径（不直接当 Command）', () => {
   it('攻击文本 → 解析成 DeclareAttack Command 提交（不是原始文本）', async () => {
     const w = await mountBar();

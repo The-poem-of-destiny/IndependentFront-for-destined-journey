@@ -780,6 +780,7 @@ function runBusiness(
       return handleFlee(bundle, working, command);
     case 'PassAttack':
     case 'PassAction':
+    case 'EndTurn':
       return {
         changes: emptyChanges(),
         events: [],
@@ -823,7 +824,8 @@ function validateEarly(state: CombatState, command: CombatCommand): CommandRejec
     case 'DeclareAction':
     case 'Flee':
     case 'PassAttack':
-    case 'PassAction': {
+    case 'PassAction':
+    case 'EndTurn': {
       if (!Object.prototype.hasOwnProperty.call(state.units, command.actorId)) {
         return { code: 'TARGET_NOT_PRESENT', message: `执行者「${command.actorId}」不在场` };
       }

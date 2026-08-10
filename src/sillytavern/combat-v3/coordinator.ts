@@ -226,6 +226,27 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
   const allEvents: DomainEvent[] = [];
   const loot: unknown[] = [];
 
+  // F5（2026-08-10）：开局先调一次 AI 构建战斗场景 —— 氛围描写（进 combatLog）+ 可调查询
+  // 工具获取信息（先攻由内核掷定，见 buildOpeningSceneMessage 的注入说明）。时序：F1 开局
+  // 事件 emit 之后、正式回合循环（SupplyDice → decideForUnit）之前。
+  // 触发条件：配置了 combat_v3 agent（configs 经 game-pipeline 恒透传）——无配置 = 无 agent
+  // 可用，静默跳过（不阻塞战斗）。失败同样在 openCombatScene 内部静默降级。
+  // 🔴 不产 Command、不改战斗状态：氛围描写阶段 AI 只输出叙事 + 查询，命令留到行动轮。
+  const combatCfgPresent = (opts.deps.configs ?? []).some((c) => c.agentId === 'combat_v3');
+  if (combatCfgPresent) {
+    await openCombatScene(
+      session,
+      { ...routingDeps, saveId: opts.saveId },
+      combatSession,
+      emitNarration,
+    );
+  }
+
+  // F4（2026-08-10）：待执行命令队列。敌方 Agent 一次 chatWithTools 可声明多个命令
+  // （attack+action），routeEnemyCommand 全部收集返回；主循环每次取一个 dispatch，
+  // dispatch 之间内核发 requiredInput（同单位继续）时**先消费队列**，不再重新调 AI。
+  const pendingCommands: CombatCommand[] = [];
+
   // 首次注骰
   let currentCommand: CombatCommand = supplyCommand(opts.saveId, session, getDice());
 
@@ -277,13 +298,20 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
         (currentCommand as { actorId?: string }).actorId,
       );
       if (steps > 3) break;
-      currentCommand = await decideForUnit(
+      // 队列优先：同一次 AI 声明的剩余命令仍有效（作废的只是当前这条）
+      if (pendingCommands.length > 0) {
+        currentCommand = nextPending(pendingCommands, session);
+        continue;
+      }
+      const cmds = await decideForUnit(
         firstInitiative(session),
         session,
         routingDeps,
         opts.saveId,
         combatSession,
       );
+      pendingCommands.push(...cmds);
+      currentCommand = nextPending(pendingCommands, session);
       continue;
     }
 
@@ -300,7 +328,13 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
     }
 
     if (trans.requiredInput) {
-      currentCommand = await routeRequiredInput(
+      // F4：两个命令的 dispatch 之间，内核会发 requiredInput（同单位继续）→ 先消费
+      // 队列里的下一个命令（同一次 AI 声明的剩余命令），而不是重新调 AI。
+      if (pendingCommands.length > 0) {
+        currentCommand = nextPending(pendingCommands, session);
+        continue;
+      }
+      const cmds = await routeRequiredInput(
         trans.requiredInput,
         session,
         {
@@ -315,20 +349,28 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
         },
         getDice,
       );
+      pendingCommands.push(...cmds);
+      currentCommand = nextPending(pendingCommands, session);
       continue;
     }
 
     // 无 requiredInput 且未终局 → 唯一真实场景就是 SupplyDice 刚喂完（phase 仍 CombatOpen，
     // kernel 未自动推进）。此时按当前先攻首位单位决定其第一个动作，dispatch 时 kernel 会
-    // auto 推进 CombatOpen→…→SlotConsume 并消费它。
+    // auto 推进 CombatOpen→…→SlotConsume 并消费它。队列优先（同 requiredInput 的兜底）。
     if (!trans.terminal) {
-      currentCommand = await decideForUnit(
+      if (pendingCommands.length > 0) {
+        currentCommand = nextPending(pendingCommands, session);
+        continue;
+      }
+      const cmds = await decideForUnit(
         firstInitiative(session),
         session,
         routingDeps,
         opts.saveId,
         combatSession,
       );
+      pendingCommands.push(...cmds);
+      currentCommand = nextPending(pendingCommands, session);
       continue;
     }
 
@@ -480,7 +522,9 @@ function firstInitiative(session: CombatSession): string {
 }
 
 /**
- * 决定某个单位的第一个/下一个动作 Command（按阵营分流：玩家 → store；敌方 → Agent）。
+ * 决定某个单位的第一个/下一个动作 Command 列表（按阵营分流：玩家 → store；敌方 → Agent）。
+ * 返回数组：敌方 Agent 一次声明可产多个命令（F4：attack+action 逐条 dispatch）；
+ * 玩家侧契约仍是单命令（submitCommand + waitForCommand 一次一个），包成单元素数组统一。
  * 与 routeRequiredInput 的 PlayerCommand 分支共用逻辑。
  * combatSession：持久会话句柄（决策 1A），透传给 routeEnemyCommand；可省略（一次性会话）。
  */
@@ -490,7 +534,7 @@ function decideForUnit(
   deps: RunCombatV3Opts['deps'],
   saveId: string,
   combatSession?: CombatSessionHandle,
-): Promise<CombatCommand> {
+): Promise<CombatCommand[]> {
   const snapshot = session.snapshot();
   const unit = snapshot.units[unitId];
   const rev = snapshot.revision;
@@ -509,16 +553,16 @@ function decideForUnit(
       });
       await deps.submitCommand(nearestCommand(rev, unitId, unitName));
       // UI 提交的 command 可能 revision 过期，统一修正为内核当前值（乐观并发契约）
-      return freshRevision(deps.waitForCommand(), session);
+      return [await freshRevision(deps.waitForCommand(), session)];
     });
   }
   // 敌方 → 战斗 Agent：声明演绎（narration）已由 routeEnemyCommand 经 ctx.onNarration
-  // 投进 combatLog，这里只取 command 进内核（§2.5）。
+  // 投进 combatLog，这里只取 commands 进内核（§2.5）。
   return routeEnemyCommand(
     { kind: 'PlayerCommand', unitId, unitName, round: snapshot.round },
     session,
     ctx,
-  ).then((res) => res.command);
+  ).then((res) => res.commands);
 }
 
 /** 把前端返回的 Command 的 expectedRevision 修正为内核当前 revision（防 stale） */
@@ -531,7 +575,20 @@ async function freshRevision(
 }
 
 /**
- * 把 RequiredInput 路由到对应去处，返回应 dispatch 的下一条 Command。
+ * 从待执行命令队列取下一个命令并修正 revision（F4 多命令队列）：
+ * 同一次 AI 声明的多个命令在 routeEnemyCommand 时共用当时的 revision，而前一个命令
+ * dispatch 后内核 revision 已 +1 → 后续命令若不修正会 STALE_REVISION rejection。
+ * 照 freshRevision（玩家命令）先例：dispatch 前统一修正为内核当前值（乐观并发契约）。
+ */
+function nextPending(pending: CombatCommand[], session: CombatSession): CombatCommand {
+  const cmd = pending.shift()!;
+  return { ...cmd, expectedRevision: session.snapshot().revision };
+}
+
+/**
+ * 把 RequiredInput 路由到对应去处，返回应 dispatch 的下一条 Command 列表。
+ * 返回数组：敌方 PlayerCommand 分支（routeEnemyCommand）一次声明可产多个命令
+ * （F4：attack+action 逐条 dispatch）；其余分支恒为单元素数组。
  * 穷尽 switch：新增 RequiredInput 变体未接路由则编译失败（A2-3）。
  * 导出供测试直捣（M3.5）。
  */
@@ -540,7 +597,7 @@ export async function routeRequiredInput(
   session: CombatSession,
   ctx: RouteCtx,
   getDice: DiceSupplier,
-): Promise<CombatCommand> {
+): Promise<CombatCommand[]> {
   switch (req.kind) {
     case 'PlayerCommand': {
       const unit = session.snapshot().units[req.unitId];
@@ -558,15 +615,15 @@ export async function routeRequiredInput(
         await ctx.submitCommand(
           nearestCommand(session.snapshot().revision, req.unitId, req.unitName),
         );
-        return freshRevision(ctx.waitForCommand(), session);
+        return [await freshRevision(ctx.waitForCommand(), session)];
       }
-      // 敌方 → 战斗 Agent（声明演绎经 ctx.onNarration 进 combatLog，这里只取 command）
-      return (await routeEnemyCommand(req, session, ctx)).command;
+      // 敌方 → 战斗 Agent（声明演绎经 ctx.onNarration 进 combatLog，这里只取 commands）
+      return (await routeEnemyCommand(req, session, ctx)).commands;
     }
     case 'BeginOutput': {
       // 注骰：调 getDice 取新 60 颗 → SupplyDice
       const d = getDice();
-      return supplyCommand(ctx.saveId, session, d);
+      return [supplyCommand(ctx.saveId, session, d)];
     }
     case 'EffectChoice':
       // M3.5 决定：EffectChoice 仍由 M4/后续实现（plan §6.7 只要求替换 CharGenRequest /
@@ -574,10 +631,10 @@ export async function routeRequiredInput(
       throw new UnsupportedInM2('EffectChoice');
     case 'BoundedAdjudication':
       // M3.5：去内核 evaluateAdjudication 验证 → Adjudicate Command（或 EffectRejected 流回）
-      return routeAdjudication(req, session);
+      return [await routeAdjudication(req, session)];
     case 'CharGenRequest':
       // M3.5：召唤出口（A35-1）——先查预生成池，未命中走实时 char_gen，再 SupplyUnit
-      return routeCharGenRequest(req, session, ctx);
+      return [await routeCharGenRequest(req, session, ctx)];
     default: {
       const _exhaustive: never = req;
       throw new Error(`未知 RequiredInput：${String(_exhaustive)}`);
@@ -754,6 +811,118 @@ function renderOpeningCombatMessage(ctx: RouteCtx, panel: string, unitName: stri
 }
 
 /**
+ * F5（2026-08-10）：开局氛围 user 消息 —— 明确指令 + 情境快照（模板渲染）+ 先攻说明。
+ *
+ * 指令在前（AI 先看到「描写氛围、禁止命令」再看快照）；情境快照复用
+ * renderOpeningCombatMessage 的三区渲染（有模板时）；无模板（无 configs / 无 registry
+ * 模板）→ 只有面板（projectToAgent 的 <action_info>）。
+ *
+ * 先攻说明：先攻由**内核**在首个真实 Command dispatch 时自动掷定（phases/initiative.ts），
+ * 开局调用发生在注骰之前，initiativeOrder 必然为空 → 注入「由内核掷定」说明，不空口
+ * 编序列；若快照已有（防御性，未来时序变化时生效）则注入真实序列。AI 想拿更多信息
+ * 可调 get_combat_state（返回与面板同源的战况总览）。
+ */
+function buildOpeningSceneMessage(ctx: RouteCtx, panel: string, session: CombatSession): string {
+  const cfg = ctx.configs?.find((c) => c.agentId === 'combat_v3');
+  const hasTemplate = !!(cfg?.template?.trim() || getDefaultTemplate('combat_v3'));
+  const snapshotText = hasTemplate ? renderOpeningCombatMessage(ctx, panel, '') : panel;
+  const view = session.snapshot();
+  const initiativeLine =
+    view.initiativeOrder.length > 0
+      ? `先攻序列: ${view.initiativeOrder.map((id) => view.units[id]?.name ?? id).join(' → ')}`
+      : '先攻序列: 由内核掷定（首个行动轮揭晓）';
+  return [
+    '【战斗开场】战斗即将开始。请描写战场氛围与双方对峙的场面（1-3 句），并可调用工具（get_combat_state / get_unit_detail 等）确认战况。',
+    '这是开场氛围描写：**禁止提交任何战斗命令**（declare_attack / declare_action 等），命令留到行动轮。',
+    '',
+    snapshotText,
+    initiativeLine,
+  ].join('\n');
+}
+
+/**
+ * F5（2026-08-10）：开局先调一次 AI 构建战斗场景 —— 氛围描写 + 信息获取。
+ *
+ * 时序：runCombatV3 在 F1 开局事件 emit 之后、正式回合循环（SupplyDice）之前调用。
+ * 复用持久会话（combatSession + clientFactory，与 routeEnemyCommand 同一句柄）：
+ * messages 为空时先 append system（combatSystemPrompt）+ 开局 user（buildOpeningSceneMessage），
+ * 再让 AI 输出氛围描写 —— 前缀稳定，开局内容保留进历史（后续决策可见情境快照）。
+ *
+ * 工具分流（氛围阶段不决策）：查询工具（get_*）经 executeCombatQuery 返回数据给模型；
+ * write_summary 回确认；命令类工具 → 返回错误 ToolResult 回喂模型（不产 Command）。
+ * AI 输出（assistant content）= 氛围描写 → 经 emitNarration（v3_narrative）进 combatLog。
+ *
+ * 失败静默降级（三档）：无 configs（调用方已判据跳过，这里不重复）→ 无 client /
+ * client 无 chatWithTools → 直接返回；chatWithTools 抛错 → 回滚本调用 push 的
+ * messages（length 截断，含 system——恢复为调用前原样，后续 routeEnemyCommand 首轮
+ * 正常初始化），不阻塞战斗。工具往返回流照 routeEnemyCommand 同款（查询结果保留进历史）。
+ */
+async function openCombatScene(
+  session: CombatSession,
+  ctx: RouteCtx,
+  handle: CombatSessionHandle,
+  emitNarration: (text: string) => void,
+): Promise<void> {
+  // client 惰性建（照 routeEnemyCommand）：整场战斗复用同一 combat_v3 client
+  if (!handle.client) {
+    handle.client = ctx.clientFactory('combat_v3', ctx.endpoint, ctx.saveId);
+  }
+  const client = handle.client;
+  if (!client || typeof client.chatWithTools !== 'function') return;
+
+  const panel = projectToAgent(session.snapshot());
+  if (ctx.onPanel) ctx.onPanel(panel);
+
+  const messages = handle.messages;
+  const beforeLen = messages.length;
+  // system 只 append 一次（整场战斗开头；messages 为空 = 首个敌方决策前从未注入）
+  if (beforeLen === 0) {
+    messages.push({ role: 'system', content: combatSystemPrompt(ctx) });
+  }
+  messages.push({ role: 'user', content: buildOpeningSceneMessage(ctx, panel, session) });
+
+  let sceneText = '';
+  try {
+    const result = await client.chatWithTools(
+      {
+        messages,
+        tools: getToolsForAgent('combat_v3'),
+      },
+      // 查询/命令分流（氛围阶段不决策）：查询类返回数据；write_summary 回确认；
+      // 命令类 → 错误 ToolResult 回喂模型（绝不产 Command，与 §2.2 决策 3C 同口径）。
+      (name, args) => {
+        if (isCombatQueryTool(name)) {
+          return executeCombatQuery(name, args, session, ctx);
+        }
+        if (name === 'write_summary') {
+          return Promise.resolve(collectCombatSummary(args));
+        }
+        return Promise.resolve({
+          error: `【开局氛围阶段】禁止提交战斗命令「${name}」——战斗尚未开始，请先描写战场氛围，命令留到行动轮。`,
+        } as ToolResult);
+      },
+      { maxRounds: MAX_TOOL_ROUNDS },
+    );
+    // 工具往返回流持久数组（查询结果保留进历史，与 routeEnemyCommand 同款）
+    appendToolRoundtrip(messages, result.toolCalls ?? []);
+    sceneText = (result.output ?? result.rawResponse ?? '').trim();
+    if (sceneText.length > 0) {
+      messages.push({ role: 'assistant', content: sceneText });
+    }
+  } catch {
+    // 失败静默降级：回滚本调用 push 的消息（含 system），恢复调用前原样
+    messages.length = beforeLen;
+    return;
+  }
+  // 氛围描写 → combatLog（叙事通道失败也不阻塞战斗）
+  try {
+    if (sceneText.length > 0) emitNarration(sceneText);
+  } catch {
+    // 叙事通道异常静默（与 narrateSettlement 的降级口径一致）
+  }
+}
+
+/**
  * 敌方 PlayerCommand → 战斗 Agent（chatWithTools）+ 工具调用 → Command
  *
  * 持久会话（设计 2026-08-09 §2.1 决策 1A）：整场战斗一个 client + 一条消息数组
@@ -764,8 +933,9 @@ function renderOpeningCombatMessage(ctx: RouteCtx, panel: string, unitName: stri
  * 省略 combatSession（直捣路由的测试）→ 调用内临时句柄，一次性会话行为。
  * 导出供测试直捣（先例：routeRequiredInput）。
  *
- * 返回值（设计 2026-08-09 §2.5）：{ command, narration }——
- *   - command：照旧进内核（lastCommandFromResult，只认命令类工具结果）
+ * 返回值（设计 2026-08-09 §2.5 / F4 2026-08-10）：{ commands, narration }——
+ *   - commands：照旧进内核（commandsFromResult，收集**全部**命令类工具调用，按调用序；
+ *     AI 一次声明 attack+action 两个命令 → [attackCmd, actionCmd]，主循环逐条 dispatch）
  *   - narration：声明演绎 = assistant content（1-3 句战斗演绎，随命令工具一并产出），
  *     同时经 ctx.onNarration 投进 combatLog（v3_narrative）；空正文时为空串。
  */
@@ -773,7 +943,7 @@ export async function routeEnemyCommand(
   req: Extract<RequiredInput, { kind: 'PlayerCommand' }>,
   session: CombatSession,
   ctx: RouteCtx,
-): Promise<{ command: CombatCommand; narration: string }> {
+): Promise<{ commands: CombatCommand[]; narration: string }> {
   const panel = projectToAgent(session.snapshot());
   if (ctx.onPanel) ctx.onPanel(panel);
 
@@ -785,7 +955,7 @@ export async function routeEnemyCommand(
   const client = handle.client;
   if (!client || !client.chatWithTools) {
     // 无 agent → 让敌方过（defensive：pass 攻击槽推进）
-    return { command: nextPass(session, 'attack'), narration: '' };
+    return { commands: [nextPass(session, 'attack')], narration: '' };
   }
 
   const messages = handle.messages;
@@ -859,7 +1029,7 @@ export async function routeEnemyCommand(
   }
 
   return {
-    command: lastCommandFromResult(result, session.snapshot().revision, req.unitId, session),
+    commands: commandsFromResult(result, session.snapshot().revision, req.unitId, session),
     narration,
   };
 }
@@ -1311,6 +1481,15 @@ function toolCallToCommandSync(
         cost: 'both',
         payload: {} as Record<string, never>,
       };
+    case 'end_turn':
+      return {
+        commandId: id,
+        expectedRevision: revision,
+        kind: 'EndTurn',
+        actorId: resolve(args.actorName) ?? actorId,
+        cost: 'none',
+        payload: {} as Record<string, never>,
+      };
     // submit_adjudication（设计 2026-08-09 §2.4 补执行端）：schema 有（agent-tools.ts:522）、
     // 原本无 case → 落 default 静默 pass。翻译成 Adjudicate Command，由 reducer 消费
     // Adjudicate 时走 evaluateAdjudication 内核实锤（六步边界验证，reducer.ts adjudicate()）。
@@ -1371,8 +1550,20 @@ function mapActionType(t: string): 'item' | 'move' | 'focus' | 'defend' {
   }
 }
 
-/** 从 chatWithTools 最终结果提取最后一条**命令类**工具调用 → Command */
-function lastCommandFromResult(
+/**
+ * F4（2026-08-10）：从 chatWithTools 最终结果收集**全部**命令类工具调用 → Command[]。
+ *
+ * 背景（真机复现）：敌方 Agent 一次 chatWithTools 声明 `declare_attack` + `declare_action`
+ * 两个命令，旧实现（lastCommandFromResult）只取最后一条命令类调用 → attack 被丢弃 → 内核
+ * 只消费动作槽 → 攻击槽永远 1/1 → 下一轮 AI 又声明 attack+action → 动作槽 SLOT_EXHAUSTED
+ * → 熔断 abandon → 玩家永远轮不到。修复：按调用顺序收集全部命令类调用（AI 声明 attack →
+ * action，就返回 [attackCmd, actionCmd]），由主循环逐条 dispatch。
+ *
+ * 仍跳过查询工具（get_*，返回数据不产 Command）与 write_summary（T11 收尾收集动作）；
+ * 一条命令都没有（纯查询/纯 summary 收尾 / 无工具调用）→ 防御性 [PassAttack] 推进
+ * （AI 未做决定，行为与修复前一致）。
+ */
+function commandsFromResult(
   result: {
     toolCalls?: Array<{ name: string; arguments: unknown }>;
     output?: string | null;
@@ -1380,33 +1571,27 @@ function lastCommandFromResult(
   revision: number,
   actorId: string,
   session: CombatSession,
-): CombatCommand {
+): CombatCommand[] {
   const calls = result.toolCalls ?? [];
-  // 只认命令类工具结果（设计 2026-08-09 §2.2 决策 3C）：查询工具（get_*）返回的是数据、
-  // 不产 Command；write_summary（T11）是收尾收集动作、同样不产 Command。从末尾跳过这两类
-  // 调用、取最后一条命令类调用（AI 可能先查后动）；一条命令都没有（纯查询/纯 summary
-  // 收尾 / 无工具调用）→ 防御性 pass 推进（AI 未做决定）。
-  const lastCommandCall = [...calls]
-    .reverse()
-    .find((c) => !isCombatQueryTool(c.name) && c.name !== 'write_summary');
-  if (!lastCommandCall) return nextPassCommand(revision, actorId, 'attack');
-  let args: Record<string, any> = {};
-  if (typeof lastCommandCall.arguments === 'string') {
-    try {
-      args = JSON.parse(lastCommandCall.arguments) as Record<string, any>;
-    } catch {
-      args = {};
+  const commands: CombatCommand[] = [];
+  for (const c of calls) {
+    if (isCombatQueryTool(c.name) || c.name === 'write_summary') continue;
+    let args: Record<string, any> = {};
+    if (typeof c.arguments === 'string') {
+      try {
+        args = JSON.parse(c.arguments) as Record<string, any>;
+      } catch {
+        args = {};
+      }
+    } else if (c.arguments && typeof c.arguments === 'object') {
+      args = c.arguments as Record<string, any>;
     }
-  } else if (lastCommandCall.arguments && typeof lastCommandCall.arguments === 'object') {
-    args = lastCommandCall.arguments as Record<string, any>;
+    commands.push(
+      toolCallToCommandSync(c.name, args, revision, actorId, makeUnitNameResolver(session)),
+    );
   }
-  return toolCallToCommandSync(
-    lastCommandCall.name,
-    args,
-    revision,
-    actorId,
-    makeUnitNameResolver(session),
-  );
+  if (commands.length === 0) return [nextPassCommand(revision, actorId, 'attack')];
+  return commands;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
