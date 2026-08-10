@@ -39,6 +39,8 @@ import { projectToUi } from './projection-ui';
 import { lookupSummon } from './summon-pool';
 import { runCharGenForCombat } from '../char-gen-agent';
 import { getToolsForAgent, executeToolCall } from '../agent-tools';
+import { resolveTemplateWithGlobals } from '../template-resolver';
+import { getDefaultTemplate } from '../placeholder-registry';
 import type {
   CombatCommand,
   CombatDefinitionBundle,
@@ -54,10 +56,12 @@ import type {
   ApiEndpoint,
   AgentContext,
   AgentConfig,
+  ChatMessage,
   CombatParticipant,
   IntentionLevel,
   StatePatch,
   ToolResult,
+  WorldBook,
 } from '../types';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -98,6 +102,15 @@ export interface RunCombatV3Opts {
     // combat_v3.systemPrompt（设计 2026-08-09 §2.7）；routeCharGenRequest 也用它喂
     // runCharGenForCombat 的 base.configs（M3.5 召唤链）。
     configs?: AgentConfig[];
+    // T2（2026-08-10）：Phase 10 模板系统上下文 —— 开局第一条 user 消息（情境快照）
+    // 的数据源，经 localParams 注入 combat_v3.template 的链占位符（COMBAT_BRIEF /
+    // USER_INPUT / AGENT.STORY / NARRATIVE / LORE_BOOK_STATIC）。全部可选：缺省时
+    // routeEnemyCommand 回退改造前的硬编码行为（「轮到敌方X行动+面板」，逐字不变）。
+    worldBooks?: WorldBook[]; // 已过滤：world_setting + race + system_core 分区
+    combatBrief?: string; // 从 <combat_trigger> marker 组装的战斗指令文本
+    userInput?: string; // 本轮玩家输入
+    storyOutput?: string; // 触发战斗的正文
+    history?: unknown[]; // 最近对话（ChatMessage[] 或等价形状）
     // 叙事通道（设计 2026-08-09 §2.5 声明/结算演绎）：runCombatV3 注入 emitNarration，
     // 经 RouteCtx.onNarration 转发声明演绎（assistant content）与结算结果句，以
     // v3_narrative 投进 combatLog（game-store 已消费该事件）。测试可注入捕获；
@@ -409,6 +422,11 @@ interface RouteCtx {
   configs?: import('../types').AgentConfig[];
   worldBooks?: import('../types').WorldBook[];
   presets?: import('../types').AgentPreset[];
+  /** T2（2026-08-10）：模板系统上下文（开局 user 情境快照的数据源，全部可选） */
+  combatBrief?: string;
+  userInput?: string;
+  storyOutput?: string;
+  history?: unknown[];
   /**
    * 持久会话句柄（设计 2026-08-09 §2.1 决策 1A）：整场战斗一个 client + 一条消息数组，
    * 由 runCombatV3 闭包持有并注入；routeEnemyCommand 读/写。省略时回退到调用内的
@@ -652,6 +670,64 @@ function combatSystemPrompt(ctx: RouteCtx): string {
 }
 
 /**
+ * T2（2026-08-10）：开局第一条 user 消息 = Phase 10 模板渲染结果（情境快照）。
+ *
+ * 模板来源（三级回退）：
+ *   1. ctx.configs 里 combat_v3 的 `template` 字段（agent-config.json 真源）
+ *   2. getDefaultTemplate('combat_v3')（registry 默认模板；当前未注册 → 空串）
+ *   3. 空 → 现状硬编码（「轮到敌方X行动 + 面板」，与改造前逐字一致）
+ *
+ * localParams 注入（优先级高于 registry，见 template-resolver）：
+ *   - COMBAT_BRIEF ← ctx.combatBrief（空给「（无战斗指令）」占位说明）
+ *   - USER_INPUT   ← ctx.userInput（回落 ctx.context.userInput）
+ *   - AGENT.STORY  ← ctx.storyOutput（仅显式非空时注入；否则回落 registry 的
+ *                     agentOutputs.story 路径）
+ *   - SYS_PROMPT   ← ''（system 消息已单独承载 systemPrompt，user 内不重复）
+ *   - COMBAT_PANEL ← 当前面板（agent-config 现存模板仍引用 {{COMBAT_PANEL}}；
+ *                     T3 替换模板后此键多余但无害）
+ *   NARRATIVE / LORE_BOOK_STATIC 走 registry：前者读 tplCtx.history；后者经
+ *   getEntriesForAgent（按 config.worldBookIds 过滤）→ filterActiveEntries →
+ *   renderWorldBookEntries。EJS 走 fail-closed 退化（生产 QuickJS 下不求值、
+ *   原文注入并记回退——与 buildAgentMessages 的同步兜底路同口径）。
+ *
+ * 严格一次：仅在持久会话 messages 为空（首轮决策）时调用；后续轮次 append 轮次消息。
+ */
+function renderOpeningCombatMessage(ctx: RouteCtx, panel: string, unitName: string): string {
+  const cfg = ctx.configs?.find((c) => c.agentId === 'combat_v3');
+  const template = cfg?.template?.trim() || getDefaultTemplate('combat_v3');
+  if (!template) {
+    return `轮到敌方「${unitName}」行动（我方单位由玩家控制）。\n\n${panel}`;
+  }
+  const tplCtx: AgentContext = {
+    ...(ctx.context ?? ({} as AgentContext)),
+    userInput: ctx.userInput ?? ctx.context?.userInput ?? '',
+    history: (ctx.history ?? ctx.context?.history ?? []) as ChatMessage[],
+  };
+  const localParams: Record<string, string> = {
+    SYS_PROMPT: '',
+    COMBAT_BRIEF: (ctx.combatBrief ?? '').trim() || '（无战斗指令）',
+    USER_INPUT: tplCtx.userInput,
+    COMBAT_PANEL: panel,
+  };
+  if (ctx.storyOutput) {
+    localParams['AGENT.STORY'] = ctx.storyOutput;
+  }
+  const resolved = resolveTemplateWithGlobals(
+    template,
+    'combat_v3',
+    tplCtx,
+    cfg ?? ({ agentId: 'combat_v3' } as AgentConfig),
+    ctx.worldBooks ?? [],
+    ctx.configs ?? [],
+    localParams,
+  );
+  // 渲染结果为空（极端路径）→ 兜底现状硬编码，绝不发空 user 消息
+  return resolved.trim().length > 0
+    ? resolved
+    : `轮到敌方「${unitName}」行动（我方单位由玩家控制）。\n\n${panel}`;
+}
+
+/**
  * 敌方 PlayerCommand → 战斗 Agent（chatWithTools）+ 工具调用 → Command
  *
  * 持久会话（设计 2026-08-09 §2.1 决策 1A）：整场战斗一个 client + 一条消息数组
@@ -687,15 +763,22 @@ export async function routeEnemyCommand(
   }
 
   const messages = handle.messages;
+  // 首轮判定：messages 为空 = 整场战斗的第一个敌方决策（client 刚建、system 未注入）。
   // system 只 append 一次（整场战斗开头的首个敌方决策时注入）
-  if (messages.length === 0) {
+  const firstDecision = messages.length === 0;
+  if (firstDecision) {
     messages.push({ role: 'system', content: combatSystemPrompt(ctx) });
   }
-  // 每回合 append user（轮到X + 面板）
-  messages.push({
-    role: 'user',
-    content: `轮到敌方「${req.unitName}」行动（我方单位由玩家控制）。\n\n${panel}`,
-  });
+  // T2（2026-08-10）：首轮 user = 模板渲染结果（情境快照，含战斗指令/世界设定/玩家输入/
+  // 触发正文/最近对话）；后续轮次只 append 面板增量（轮到X + 面板），不再渲染模板。
+  if (firstDecision) {
+    messages.push({ role: 'user', content: renderOpeningCombatMessage(ctx, panel, req.unitName) });
+  } else {
+    messages.push({
+      role: 'user',
+      content: `轮到敌方「${req.unitName}」行动（我方单位由玩家控制）。\n\n${panel}`,
+    });
+  }
 
   // 🔴 tools 必须显式注入（2026-08-08 真机 bug）：此前 `tools: undefined` 且
   //    agent-client 不自动注入 → 模型收不到 declare_attack 的 schema → 只能文本猜

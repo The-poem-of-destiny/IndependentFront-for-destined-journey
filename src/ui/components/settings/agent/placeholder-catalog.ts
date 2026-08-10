@@ -86,6 +86,12 @@ export const ALL_PLACEHOLDER_META: readonly PlaceholderBadge[] = [
   { key: 'ITEM_REQUEST', color: '#9e9e9e', desc: '<item_requests> 物品请求', category: '链调用' },
   { key: 'CHAR_GEN_RESULT', color: '#9e9e9e', desc: 'char_gen NPC生成结果', category: '链调用' },
   { key: 'CRAFT_RESULT', color: '#9e9e9e', desc: 'craft_gen 制作结果', category: '链调用' },
+  {
+    key: 'COMBAT_BRIEF',
+    color: '#9e9e9e',
+    desc: '战斗指令：战斗类型/环境/参战方与起因（来自 request_dispatcher 的 <combat_trigger>）',
+    category: '链调用',
+  },
 ];
 
 /** 每个 Agent 都能用的那一批（与它在 DAG 里的位置无关） */
@@ -109,6 +115,7 @@ const CHAIN_ONLY: Record<string, readonly string[]> = {
   craft_gen: ['CRAFT_REQUEST', 'ITEM_REQUEST', 'CRAFT_RESULT'],
   char_gen: ['CHAR_DETECT', 'CHAR_GEN_RESULT'],
   item_gen: ['ITEM_REQUEST', 'CHAR_GEN_RESULT', 'CRAFT_RESULT'],
+  combat_v3: ['COMBAT_BRIEF'],
 };
 
 /**

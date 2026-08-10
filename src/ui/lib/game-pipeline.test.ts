@@ -1387,3 +1387,157 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     expect(createSnapshotSpy).toHaveBeenCalledWith('pre-combat', 0);
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// T2（2026-08-10）：handleCombatTriggerV3 向 runCombatV3 传模板系统上下文 ——
+// combatBrief（marker 组装）/ 过滤后的世界书（world_setting + race + system_core）/
+// userInput / storyOutput / history。全部可选，缺省不崩。
+// ══════════════════════════════════════════════════════════════════════════════
+describe('T2 combat_v3 模板系统上下文传参', () => {
+  /** 最小 player 角色桩（characterToCombatParticipant 消费的字段） */
+  function playerCharStub() {
+    return {
+      id: 'hero',
+      name: '理查德',
+      type: 'player',
+      tier: 1,
+      level: 1,
+      attributes: { str: 5, dex: 5, con: 5, int: 5, spi: 5 },
+      hp: 100,
+      maxHp: 100,
+      mp: 50,
+      maxMp: 50,
+      sp: 50,
+      maxSp: 50,
+      inventory: [],
+      skills: [],
+      statusEffects: [],
+    };
+  }
+
+  function combatGameStore() {
+    return makeGameStore({
+      characters: [playerCharStub()],
+      enterCombat: vi.fn(),
+      exitCombat: vi.fn(),
+      applyCombatEvent: vi.fn(),
+      updateAgentStatus: vi.fn(),
+      clearAgentStatus: vi.fn(),
+      setCombatCoordinator: vi.fn(),
+      addMessage: vi.fn(),
+    });
+  }
+
+  beforeEach(() => {
+    runCombatV3Mock.mockReset();
+    createSnapshotSpy.mockClear();
+  });
+
+  it('组装 combatBrief + 过滤世界书（只留 world_setting/race/system_core）+ 透传 userInput/storyOutput/history', async () => {
+    const gameStore = combatGameStore();
+    const pipeline = makePipeline(gameStore, {
+      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
+    });
+    // chainData：pipeline 侧取世界书的来源（含一个工坊书、一个 extra_setting 书，应被过滤掉）
+    (pipeline as any).chainData = {
+      agentConfigs: [],
+      presets: [],
+      worldBooks: [
+        { id: 'wb_setting', name: '世界观', partition: 'world_setting', entries: [] },
+        { id: 'wb_race', name: '种族', partition: 'race', entries: [] },
+        { id: 'wb_core', name: '核心', partition: 'system_core', entries: [] },
+        { id: 'wb_extra', name: '额外设定', partition: 'extra_setting', entries: [] },
+        { id: 'wb_ws', name: '工坊', partition: 'creative_workshop', entries: [] },
+      ],
+    };
+    // currentContext：本轮玩家输入 + 最近对话（handleCombatTriggerV3 优先用它）
+    (pipeline as any).currentContext = {
+      userInput: '我走进竞技场，向冠军发起挑战',
+      history: [
+        { role: 'user', content: '我走进竞技场，向冠军发起挑战' },
+        { role: 'assistant', content: '大门缓缓打开' },
+      ],
+      worldBooks: [],
+      characters: [],
+      variables: {},
+      plotEvents: [],
+      memories: [],
+      agentOutputs: new Map(),
+    };
+
+    let captured: Record<string, any> | null = null;
+    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
+      captured = opts;
+      return {
+        narrativeSummary: 'ok',
+        patches: [],
+        totalExp: 0,
+        totalFp: 0,
+        loot: [],
+        rounds: 1,
+        outcome: 'ally_win',
+      };
+    });
+
+    const result = await (pipeline as any).handleCombatTrigger(
+      {
+        combatType: '死斗',
+        environment: '竞技场',
+        bodyText: '决一死战',
+        allies: '理查德',
+        enemies: '冠军',
+      } as never,
+      '理查德推开了竞技场的大门，冠军早已等候。',
+    );
+
+    expect(result?.outcome).toBe('ally_win');
+    expect(captured).not.toBeNull();
+    // combatBrief：从 marker 组装（战斗类型｜环境｜正文）
+    expect(captured!.deps.combatBrief).toBe('战斗类型: 死斗｜环境: 竞技场｜决一死战');
+    // worldBooks：只保留 world_setting / race / system_core 三区
+    expect(captured!.deps.worldBooks.map((b: { id: string }) => b.id)).toEqual([
+      'wb_setting',
+      'wb_race',
+      'wb_core',
+    ]);
+    // userInput / storyOutput / history 透传
+    expect(captured!.deps.userInput).toBe('我走进竞技场，向冠军发起挑战');
+    expect(captured!.deps.storyOutput).toBe('理查德推开了竞技场的大门，冠军早已等候。');
+    expect(captured!.deps.history).toHaveLength(2);
+  });
+
+  it('marker 缺 environment/bodyText → combatBrief 走缺省（战斗类型: 标准），chainData 缺省 → worldBooks 空数组不崩', async () => {
+    const gameStore = combatGameStore();
+    const pipeline = makePipeline(gameStore, {
+      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
+    });
+    // 不设 chainData / currentContext —— 缺省兜底路径
+
+    let captured: Record<string, any> | null = null;
+    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
+      captured = opts;
+      return {
+        narrativeSummary: 'ok',
+        patches: [],
+        totalExp: 0,
+        totalFp: 0,
+        loot: [],
+        rounds: 1,
+        outcome: 'ally_win',
+      };
+    });
+
+    const result = await (pipeline as any).handleCombatTrigger(
+      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
+      '',
+    );
+
+    expect(result?.outcome).toBe('ally_win');
+    expect(captured).not.toBeNull();
+    // 缺省字段照任务格式拼装（环境/正文为空段仍占位）
+    expect(captured!.deps.combatBrief).toBe('战斗类型: 标准｜环境: ｜');
+    // chainData 缺省 → 空数组（不 undefined、不崩）
+    expect(Array.isArray(captured!.deps.worldBooks)).toBe(true);
+    expect(captured!.deps.worldBooks).toHaveLength(0);
+  });
+});

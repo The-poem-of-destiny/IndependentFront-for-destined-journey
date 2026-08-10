@@ -12,7 +12,7 @@
  * 队列；乙若轮到自己则走 fake agent。
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildUnitPersistPatches,
   runCombatV3,
@@ -22,7 +22,8 @@ import {
 import { mkBundle, mkParticipant } from './test-utils';
 import type { CombatClient, CombatEvent } from '../combat-v2-types';
 import type { CombatCommand, CombatUnitView } from './types';
-import type { AgentConfig, StatePatch, StatusEffect } from '../types';
+import type { AgentConfig, StatePatch, StatusEffect, WorldBook } from '../types';
+import { resetPlaceholderGlobals } from '../placeholder-registry';
 
 /** 甲(player) + 乙(enemy, 脆皮 HP1)：甲一刀杀乙 → hp_zero 终局 */
 function attriteBundle() {
@@ -1548,6 +1549,269 @@ describe('T11：write_summary 终局摘要收集（2026-08-09 §2.2 改造：不
     expect(res.command.kind).toBe('PassAttack');
     // 收集点生效：text 进了 combatSession.summary（终局回注正文的数据源）
     expect(combatSession.summary ?? '').toContain('终局摘要文本');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// T2（2026-08-10）：战斗 Agent 持久会话接入 Phase 10 模板系统 ——
+// 开局第一次决策的 user 消息 = resolveTemplate 渲染 combat_v3.template（五区情境快照），
+// 之后每回合只 append 面板增量（轮到X + 面板），不再渲染模板。
+// ══════════════════════════════════════════════════════════════════════════════
+describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快照）', () => {
+  /** T3 的五区模板形状（战斗指令/世界设定/玩家输入/触发正文/最近对话）+ 现存 {{COMBAT_PANEL}} */
+  const FIVE_ZONE_TEMPLATE = [
+    '{{SYS_PROMPT}}',
+    '<战斗指令>',
+    '{{COMBAT_BRIEF}}',
+    '</战斗指令>',
+    '<世界设定>',
+    '{{LORE_BOOK_STATIC}}',
+    '</世界设定>',
+    '<玩家输入>',
+    '{{USER_INPUT}}',
+    '</玩家输入>',
+    '<触发正文>',
+    '{{AGENT.STORY}}',
+    '</触发正文>',
+    '<最近对话>',
+    '{{NARRATIVE:layers=1}}',
+    '</最近对话>',
+    '<战斗面板>',
+    '{{COMBAT_PANEL}}',
+    '</战斗面板>',
+  ].join('\n');
+
+  function makeCombatV3Config(over: Partial<AgentConfig> = {}): AgentConfig {
+    return {
+      agentId: 'combat_v3',
+      enabled: true,
+      apiEndpointId: 'ep',
+      model: 'm',
+      temperature: 0.7,
+      maxTokens: 2048,
+      topP: 1,
+      frequencyPenalty: 0,
+      presencePenalty: 0,
+      retryOnFail: true,
+      timeout: 60000,
+      userId: 'u',
+      promptTemplate: { fixedSystem: '', fixedExamples: '' },
+      worldBookIds: ['wb_core'],
+      systemPrompt: '战斗系统提示词',
+      template: FIVE_ZONE_TEMPLATE,
+      ...over,
+    };
+  }
+
+  function makeWorldBooks(): WorldBook[] {
+    return [
+      {
+        id: 'wb_core',
+        name: '核心设定',
+        partition: 'system_core',
+        entries: [
+          {
+            uid: 1,
+            name: '战意规则',
+            content: '战意规则：士气低于 0 溃逃。',
+            enabled: true,
+            key: [],
+            keysecondary: [],
+            selectiveLogic: 0,
+            order: 1,
+            position: 1,
+          },
+        ],
+      },
+    ];
+  }
+
+  /**
+   * 记录每次 chatWithTools 收到的 messages 的 fake client ctx。
+   * 返回宽松类型（routeEnemyCommand 是测试内动态 import，helper 拿不到
+   * Parameters<typeof routeEnemyCommand>），调用处 cast。
+   */
+  function capturingCtx(
+    combatSession: { messages: Array<{ role: string; content: string | null }>; client: unknown },
+    seen: Array<Array<{ role: string; content: string | null }>>,
+    over: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      clientFactory: () => {
+        return {
+          chatWithTools: async (req: {
+            messages: Array<{ role: string; content: string | null }>;
+          }) => {
+            seen.push(req.messages);
+            return { output: '战斗演绎', rawResponse: '战斗演绎', toolCalls: [] } as never;
+          },
+          chat: async () => ({ output: null, rawResponse: '' }) as never,
+        } as unknown as CombatClient;
+      },
+      endpoint: { id: 'ep' } as never,
+      saveId: 's1',
+      submitCommand: async () => undefined,
+      waitForCommand: async () => {
+        throw new Error('unused');
+      },
+      abandon: () => undefined,
+      combatSession: combatSession as never,
+      ...over,
+    };
+  }
+
+  afterEach(() => {
+    // resolveTemplateWithGlobals 会改写 placeholder-registry 的模块级 globals，
+    // 还原以免污染同文件其它用例
+    resetPlaceholderGlobals();
+  });
+
+  it('首轮 user 消息 = 模板渲染结果：含 COMBAT_BRIEF / 世界书 / userInput / storyOutput / NARRATIVE', async () => {
+    const { opts } = mkOpts();
+    const { routeEnemyCommand } = await import('./coordinator');
+    const { openCombat } = await import('./index');
+    const session = openCombat({ kind: 'new', bundle: opts.bundle } as never);
+
+    const messages: Array<{ role: string; content: string | null }> = [];
+    const seen: Array<Array<{ role: string; content: string | null }>> = [];
+    const ctx = capturingCtx({ messages, client: null } as never, seen, {
+      context: {} as never,
+      configs: [makeCombatV3Config()],
+      worldBooks: makeWorldBooks(),
+      combatBrief: '战斗类型: 死斗｜环境: 竞技场｜决一死战',
+      userInput: '我要挑战竞技场冠军',
+      storyOutput: '理查德推开了竞技场的大门，冠军早已等候。',
+      history: [
+        { role: 'user', content: '我要挑战竞技场冠军' },
+        { role: 'assistant', content: '守卫为你打开了竞技场大门。' },
+      ],
+    }) as unknown as Parameters<typeof routeEnemyCommand>[2];
+
+    await routeEnemyCommand(
+      { kind: 'PlayerCommand', unitId: '乙', unitName: '乙', round: 1 },
+      session,
+      ctx,
+    );
+
+    // system 一次 + 首轮 user = 模板渲染结果（情境快照）+ assistant 演绎
+    expect(messages.length).toBe(3);
+    expect(messages[0].role).toBe('system');
+    expect(messages[0].content).toBe('战斗系统提示词');
+    expect(messages[1].role).toBe('user');
+    expect(messages[2].role).toBe('assistant');
+    const firstUser = messages[1].content ?? '';
+    // COMBAT_BRIEF 注入
+    expect(firstUser).toContain('战斗类型: 死斗｜环境: 竞技场｜决一死战');
+    // LORE_BOOK_STATIC：按 config.worldBookIds 过滤后的世界书条目正文
+    expect(firstUser).toContain('战意规则：士气低于 0 溃逃。');
+    // USER_INPUT 注入
+    expect(firstUser).toContain('我要挑战竞技场冠军');
+    // AGENT.STORY 注入
+    expect(firstUser).toContain('理查德推开了竞技场的大门，冠军早已等候。');
+    // NARRATIVE：history 最近 1 轮（layers=1）逐条 [role]: content
+    expect(firstUser).toContain('[user]: 我要挑战竞技场冠军');
+    expect(firstUser).toContain('[assistant]: 守卫为你打开了竞技场大门。');
+    // SYS_PROMPT 置空（system 已单独承载，user 内不重复）
+    expect(firstUser).not.toContain('战斗系统提示词');
+    // 面板经 COMBAT_PANEL 注入（现存模板引用它）
+    expect(firstUser).toContain('<战斗面板>');
+    // 无字面占位符残留
+    expect(firstUser).not.toContain('{{');
+    // 渲染结果进了 chatWithTools 的请求
+    expect(seen[0][1].content).toBe(firstUser);
+  });
+
+  it('第二次调用（后续回合）不再渲染模板：user = 轮到X + 面板', async () => {
+    const { opts } = mkOpts();
+    const { routeEnemyCommand } = await import('./coordinator');
+    const { openCombat } = await import('./index');
+    const session = openCombat({ kind: 'new', bundle: opts.bundle } as never);
+
+    const messages: Array<{ role: string; content: string | null }> = [];
+    const seen: Array<Array<{ role: string; content: string | null }>> = [];
+    const ctx = capturingCtx({ messages, client: null } as never, seen, {
+      context: {} as never,
+      configs: [makeCombatV3Config()],
+      worldBooks: makeWorldBooks(),
+      combatBrief: '战斗类型: 死斗｜环境: 竞技场｜决一死战',
+      userInput: '我要挑战竞技场冠军',
+      storyOutput: '理查德推开了竞技场的大门，冠军早已等候。',
+      history: [{ role: 'user', content: '我要挑战竞技场冠军' }],
+    }) as unknown as Parameters<typeof routeEnemyCommand>[2];
+
+    await routeEnemyCommand(
+      { kind: 'PlayerCommand', unitId: '乙', unitName: '乙', round: 1 },
+      session,
+      ctx,
+    );
+    await routeEnemyCommand(
+      { kind: 'PlayerCommand', unitId: '丙', unitName: '丙', round: 2 },
+      session,
+      ctx,
+    );
+
+    // 第二次调用的最后一条 user = 轮次消息（轮到X + 面板），不再重复渲染模板
+    const userMsgs = messages.filter((m) => m.role === 'user' && m.content !== null);
+    expect(userMsgs.length).toBe(2);
+    expect(userMsgs[0].content ?? '').toContain('<战斗指令>');
+    expect(userMsgs[1].content ?? '').toContain('轮到敌方「丙」行动');
+    // 模板独有内容不再出现（情境快照只在首轮）
+    expect(userMsgs[1].content ?? '').not.toContain('<战斗指令>');
+    expect(userMsgs[1].content ?? '').not.toContain('竞技场冠军');
+    // system 仍只有一条
+    expect(messages.filter((m) => m.role === 'system').length).toBe(1);
+  });
+
+  it('无 configs / 无 template → 首轮回退现状硬编码（与改造前逐字一致，不崩）', async () => {
+    const { opts } = mkOpts();
+    const { routeEnemyCommand } = await import('./coordinator');
+    const { openCombat } = await import('./index');
+    const session = openCombat({ kind: 'new', bundle: opts.bundle } as never);
+
+    const messages: Array<{ role: string; content: string | null }> = [];
+    const seen: Array<Array<{ role: string; content: string | null }>> = [];
+    // 不传 configs / worldBooks / combatBrief —— 缺省兜底路径
+    const ctx = capturingCtx({ messages, client: null } as never, seen, {
+      context: {} as never,
+    }) as unknown as Parameters<typeof routeEnemyCommand>[2];
+
+    await routeEnemyCommand(
+      { kind: 'PlayerCommand', unitId: '乙', unitName: '乙', round: 1 },
+      session,
+      ctx,
+    );
+
+    expect(messages.length).toBe(3);
+    expect(messages[0].role).toBe('system');
+    expect(messages[1].role).toBe('user');
+    expect(messages[1].content ?? '').toContain('轮到敌方「乙」行动');
+    expect(messages[1].content ?? '').not.toContain('{{');
+  });
+
+  it('有 template 但缺 combatBrief/worldBooks → COMBAT_BRIEF 渲染「（无战斗指令）」占位、不崩', async () => {
+    const { opts } = mkOpts();
+    const { routeEnemyCommand } = await import('./coordinator');
+    const { openCombat } = await import('./index');
+    const session = openCombat({ kind: 'new', bundle: opts.bundle } as never);
+
+    const messages: Array<{ role: string; content: string | null }> = [];
+    const seen: Array<Array<{ role: string; content: string | null }>> = [];
+    const ctx = capturingCtx({ messages, client: null } as never, seen, {
+      context: {} as never,
+      // 有 config（带 template），但 combatBrief / worldBooks / userInput / storyOutput 全缺省
+      configs: [makeCombatV3Config()],
+    }) as unknown as Parameters<typeof routeEnemyCommand>[2];
+
+    await routeEnemyCommand(
+      { kind: 'PlayerCommand', unitId: '乙', unitName: '乙', round: 1 },
+      session,
+      ctx,
+    );
+
+    const firstUser = messages[1].content ?? '';
+    expect(firstUser).toContain('（无战斗指令）');
+    // 缺省段为空但不残留占位符
+    expect(firstUser).not.toContain('{{');
   });
 });
 

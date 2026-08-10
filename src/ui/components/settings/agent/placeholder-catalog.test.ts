@@ -124,6 +124,12 @@ describe('getPlaceholdersForAgent — 侧链专属', () => {
     expect(k).not.toContain('CRAFT_REQUEST');
   });
 
+  it('combat_v3 拿到战斗链的 COMBAT_BRIEF', () => {
+    const k = keysFor('combat_v3');
+    expect(k).toContain('COMBAT_BRIEF');
+    expect(k).not.toContain('CRAFT_REQUEST');
+  });
+
   it('🔴 story 拿不到任何侧链标记（那些是链内 Agent 才有的）', () => {
     const k = keysFor('story');
     for (const chain of [
@@ -132,6 +138,7 @@ describe('getPlaceholdersForAgent — 侧链专属', () => {
       'ITEM_REQUEST',
       'CHAR_GEN_RESULT',
       'CRAFT_RESULT',
+      'COMBAT_BRIEF',
     ]) {
       expect(k, `story 不该看见 ${chain}`).not.toContain(chain);
     }

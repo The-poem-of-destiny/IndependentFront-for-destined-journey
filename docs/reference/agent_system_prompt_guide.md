@@ -69,6 +69,7 @@
 | `{{ITEM_REQUEST}}` | craft-gen-chain / char-gen-agent | item_gen |
 | `{{CHAR_GEN_RESULT}}` | char-gen-agent | item_gen |
 | `{{CRAFT_RESULT}}` | craft-gen-chain | item_gen |
+| `{{COMBAT_BRIEF}}` | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 |
 
 ---
 
@@ -154,6 +155,7 @@ data/defaults/agent-config.json
 | **craft_gen** | `<世界设定>` `{{LORE_BOOK}}` → `<制作者状态>` `{{CHARACTER_STATE}}` → `<可用材料>` `{{INVENTORY}}` → `<本次制作需求>` `{{CRAFT_REQUEST}}` → `<当前剧情>` `{{NARRATIVE}}` ★ |
 | **char_gen** | `<世界设定>` `{{LORE_BOOK}}` → `<已有角色>` `{{CHARACTER_STATE}}` → `<当前剧情场景>` `{{NARRATIVE}}` → `<新角色描述>` `{{CHAR_DETECT}}` ★ |
 | **item_gen** | `<可用物品库>` `{{INVENTORY}}` → `<角色生成结果>` `{{CHAR_GEN_RESULT}}` → `<制作结果>` `{{CRAFT_RESULT}}` → `<物品需求>` `{{ITEM_REQUEST}}` ★ |
+| **combat_v3** | `<战斗指令>` `{{COMBAT_BRIEF}}` → `<世界设定>` `{{LORE_BOOK_STATIC}}` → `<玩家输入>` `{{USER_INPUT}}` → `<触发正文>` `{{AGENT.STORY}}` → `<最近对话>` `{{NARRATIVE}}` ★（真源为 `agent-config.json` 的 `combat_v3.template`，未注册 `getDefaultTemplate`；由 `renderOpeningCombatMessage` 三级回退取用） |
 
 > ★ 标记的为 Phase 10 模板系统已完成结构化的 Agent（含 XML 分区标签 + 注释）。占位符按缓存优化顺序排列：稳定在上、高频动态在下。
 

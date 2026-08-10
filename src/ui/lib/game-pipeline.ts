@@ -1527,10 +1527,21 @@ export class GamePipeline {
     };
   }
 
+  /**
+   * T2（2026-08-10）：战斗 Agent 模板系统上下文 —— 战斗 Agent 的模板只挂这三类分区书
+   * （世界观设定/种族特性/核心数值），与请求调度器的可见面同口径。过滤在 pipeline 侧
+   * 完成（coordinator 不碰原始列表，缺省时首轮模板的 {{LORE_BOOK_STATIC}} 渲染为空）。
+   */
+  private static readonly COMBAT_WORLD_BOOK_PARTITIONS: ReadonlySet<string> = new Set([
+    'world_setting',
+    'race',
+    'system_core',
+  ]);
+
   /** 🆕 M2 v3 分支：走 v3 Coordinator（openCombat + runCombatV3）。 */
   private async handleCombatTriggerV3(
     marker: CombatTriggerMarker,
-    _storyOutput: string,
+    storyOutput: string,
   ): Promise<CombatSummaryResult | null> {
     const endpoint = this.getEndpointForAgent('combat_v3');
     if (!endpoint) {
@@ -1591,6 +1602,19 @@ export class GamePipeline {
 
       // T16 §3.5：存档本次 combat marker，供「重开战斗」restart 回调重新走本函数。
       this._lastCombatMarker = marker;
+
+      // T2（2026-08-10）：模板系统上下文 —— 从 marker 组装战斗指令（战斗类型｜环境｜
+      // 正文），过滤出战斗 Agent 可见的世界书（world_setting + race + system_core）。
+      // 全部只进 coordinator 的 deps（可选字段），缺省时首轮模板渲染退化为空占位/现状。
+      const combatBrief =
+        [
+          `战斗类型: ${marker.combatType ?? '标准'}`,
+          `环境: ${marker.environment ?? ''}`,
+          marker.bodyText ?? '',
+        ].join('｜') || '（无战斗指令）';
+      const combatWorldBooks = (this.chainData?.worldBooks ?? []).filter((book) =>
+        GamePipeline.COMBAT_WORLD_BOOK_PARTITIONS.has(book.partition),
+      );
 
       // 前端 Command 桥：pending resolver，store.submitCombatCommand → coordinator.submit → resolve
       let pendingResolve: ((c: CombatCommand) => void) | null = null;
@@ -1666,6 +1690,14 @@ export class GamePipeline {
           // 2026-08-09 §2.7: 战斗 Agent 的 systemPrompt 从 agent-config 读（此前恒 undefined，
           // routeEnemyCommand 回退硬编码 125 字）。照 char_gen/craft_gen 从 chainData 取 configs 的先例。
           configs: this.chainData?.agentConfigs,
+          // T2（2026-08-10）：Phase 10 模板系统上下文（全部可选，coordinator 缺省兜底）——
+          // combatBrief（marker 组装）/ 过滤后的世界书 / 本轮玩家输入 / 触发战斗的正文 /
+          // 最近对话历史。首轮 user 消息（情境快照）的数据源。
+          worldBooks: combatWorldBooks,
+          combatBrief,
+          userInput: context.userInput,
+          storyOutput,
+          history: context.history,
           submitCommand: async () => {}, // 等待态由 v3_awaiting_player_input 事件驱动 store
           waitForCommand,
           abandon: () => {},
