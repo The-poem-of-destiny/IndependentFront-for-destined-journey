@@ -5,6 +5,7 @@ import { useThemeStore } from './stores/theme-store';
 import { useUIStore } from './stores/ui-store';
 import { installUnlockListener } from './lib/audio-singleton';
 import { installProductionEjsBackend } from '@engine/ejs-backend';
+import { installProductionScriptBackend } from '@engine/script-backend';
 import { setEngineSettingsProvider } from '@engine/engine-settings';
 import { useSettingsStore } from './stores/settings-store';
 // 字体与图标 —— **自托管**，零外部请求（2026-08-05，替掉 index.html 里的两个 CDN）。
@@ -101,6 +102,24 @@ void installProductionEjsBackend().then((isolated) => {
   if (isolated) return;
   useUIStore().toast(
     'EJS 隔离环境未能装载，世界书动态内容已停用（条目按原文注入）。请刷新或更新浏览器。',
+    'error',
+    // 安全相关，不自动消失
+    0,
+  );
+});
+
+// 词条脚本隔离后端（SEC-02 收口）。与上面 EJS 那条是**两个独立后端**：
+// 同一个 QuickJS 依赖，但契约不同（脚本一次一 context、同步、副作用走宿主闭包）。
+//
+// **不 await**：wasm 装载有开销，挡在挂载前会白白拖慢启动；脚本执行最早发生在
+// 读档时（`wireEffectSystem`），那时早已装完。装载期间 fail-closed。
+//
+// 🔴 返回值同样必须接住。装不上时**带脚本的物品/状态会静默失去效果** ——
+// 玩家看到的是「这把剑的灼烧没触发」，不会联想到隔离没装上。
+void installProductionScriptBackend().then((isolated) => {
+  if (isolated) return;
+  useUIStore().toast(
+    '脚本隔离环境未能装载，物品与状态的效果脚本已停用。请刷新或更新浏览器。',
     'error',
     // 安全相关，不自动消失
     0,

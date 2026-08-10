@@ -1,11 +1,22 @@
 /**
  * subscription-manager 测试 (Phase 7e+8)
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import { SubscriptionManager } from './subscription-manager';
 import { EventBus } from './game-event';
+import { installProductionScriptBackend, resetScriptBackend } from './script-backend';
 import type { CodeResolver } from './subscription-manager';
 import type { ScriptContext } from './script-executor';
+
+// 订阅触发时真的会跑脚本 —— 没有隔离就全是 no-op，断言会静默变成空转（见
+// script-executor.test.ts 顶部那段反假绿说明）
+beforeAll(async () => {
+  expect(await installProductionScriptBackend()).toBe(true);
+});
+
+afterAll(() => {
+  resetScriptBackend();
+});
 
 function makeBaseCtx(
   overrides: Partial<Pick<ScriptContext, 'owner' | 'parentScripts'>> = {},

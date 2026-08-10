@@ -4,17 +4,27 @@
  * 提供沙盒环境执行 AI 编写的效果脚本。
  * 脚本通过 $ API 与引擎交互，可以套娃创建新状态效果。
  *
- * 安全模型:
- * - new Function() 沙盒隔离，无 DOM/文件/网络访问
- * - 仅暴露白名单内的 $ API
+ * 安全模型（2026-08-10 起 —— SEC-02 收口）:
+ * - **QuickJS(wasm) realm 隔离**（`script-backend.ts` → `script-quickjs-backend.ts`）。
+ *   guest 里不存在 `globalThis`(宿主) / `indexedDB` / `fetch`，够不到 Dexie 与 API Key。
+ * - 墙钟预算 50ms —— `init` 里一句 `for(;;);` 不再冻死标签页
+ * - 未装隔离时 **fail-closed**：脚本一行都不跑，绝不回落 `new Function`
+ * - 仅暴露白名单内的 $ API（`buildSandbox()` 是这份名单的唯一真源）
  * - 🆕 支持跨对象脚本引用: @parent.xxx / @type.id.xxx
  * - 🆕 支持 $event.on/off 持久事件订阅
  * - 🆕 支持 init/cleanup 生命周期钩子
+ *
+ * 🪦 **旧实现是 `new Function` + 13 个同名形参遮蔽**。那不是安全边界：文件里当年就写着
+ *    `({}).constructor.constructor("return globalThis")()` 能拿回真全局，并注明「生产链路
+ *    尚未接通脚本执行，正式接通前必须替换」。Q-07 早已接通（读档 / 装卸物品 / 状态到期
+ *    三条路都会执行 AI 产出的脚本），那句注释却留到了 2026-08-09 的审查 —— 它是全仓
+ *    **唯一一条活着的同源代码执行路径**，也因此是唯一一条活着的 API Key 外泄路径。
  *
  * 📖 脚本编写规范详见: docs/reference/effect_script_system.md
  */
 
 import type { StatusEffect, ReadonlyHookSet, AttributeName } from './types';
+import { getScriptBackend } from './script-backend';
 
 // ═══════════════════════════════════════════════════════════
 // 类型
@@ -166,47 +176,43 @@ export function executeScript(script: string, context: ScriptContext): ScriptEff
 
   if (!script || script.trim().length === 0) return effects;
 
+  // $call 递归深度护栏。旧实现靠爆栈兜底（`$call` 可以自己调自己），
+  // 隔离后每层都要建一个 runtime —— 无界递归会变成内存与时间的双重放大器。
+  if (callDepth >= MAX_CALL_DEPTH) {
+    console.warn(`[ScriptExecutor] $call 递归超限 (${MAX_CALL_DEPTH})，本层脚本跳过`);
+    return effects;
+  }
+
+  const sandbox = buildSandbox(effects, context);
+
+  callDepth++;
+  let outcome: { ok: boolean; error?: string };
   try {
-    const sandbox = buildSandbox(effects, context);
-    // 🔒 P1-02 沙箱加固：把危险全局显式遮蔽为 undefined（同名参数遮蔽，使脚本内直接引用拿到 undefined）。
-    // ⚠️ 这不是真正的安全沙箱 —— new Function 无法堵住所有逃逸路径（经典绕过：
-    //    `({}).constructor.constructor("return globalThis")()` 仍能拿回 Function 构造器）。
-    //    当前生产链路尚未接通脚本执行（见 P1-11 / ARCHITECTURE 声明与实际不符），此为纵深防御；
-    //    正式接通前必须替换为白名单 AST 解释器或 SES/QuickJS 等真正隔离的求值器。
-    // 注意：浏览器全局 `self` 已被 sandbox 的上下文变量占用（脚本内 self === ctx.self），
-    // 不能再列入此处 —— 重复参数名在 "use strict" 下是 SyntaxError，会让整个脚本静默编译失败。
-    // 同理 `eval` / `arguments` 是 strict 模式保留字，不能作参数名；strict 模式下 eval 已受限，
-    // 主要逃逸路径是 Function 构造器，此处已遮蔽。
-    const SANDBOX_SHADOW_GLOBALS = [
-      'globalThis',
-      'window',
-      'document',
-      'fetch',
-      'navigator',
-      'localStorage',
-      'sessionStorage',
-      'indexedDB',
-      'Function',
-      'setTimeout',
-      'setInterval',
-      'XMLHttpRequest',
-      'WebSocket',
-    ];
-    const fn = new Function(
-      ...Object.keys(sandbox),
-      ...SANDBOX_SHADOW_GLOBALS,
-      `"use strict";\n${script}`,
-    );
-    fn(...Object.values(sandbox), ...SANDBOX_SHADOW_GLOBALS.map(() => undefined));
+    // 🔴 后端契约是**永不抛**，但这圈 try 仍然保留：`buildSandbox` 之后、后端之内
+    //    任何意外都不该让状态提交链断掉。失败时返回**已收集到的部分效果**，
+    //    与旧实现一致（脚本抛错时前半段的 $ 调用照样算数）。
+    outcome = getScriptBackend().run(script, sandbox);
   } catch (err) {
-    console.error(
-      '[ScriptExecutor] 脚本执行失败:',
-      err instanceof Error ? err.message : String(err),
-    );
+    outcome = { ok: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    callDepth--;
+  }
+
+  if (!outcome.ok && outcome.error) {
+    console.error('[ScriptExecutor] 脚本执行失败:', outcome.error);
   }
 
   return effects;
 }
+
+/**
+ * `$call` 嵌套深度上限。
+ *
+ * 5 是 `resolveScriptRef` 的 @ 引用解析上限；调用深度给到 8，留一点余量给
+ * 「A 调 B 调 C」这类合法的浅层组合，同时把「自己调自己」挡在可控范围内。
+ */
+const MAX_CALL_DEPTH = 8;
+let callDepth = 0;
 
 /**
  * 在效果列表中按钩子名执行脚本

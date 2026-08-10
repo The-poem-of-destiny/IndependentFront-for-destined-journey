@@ -5,7 +5,8 @@
  *       快照打/恢复 (M5 §11.2), 事件管理, 批量提交, 部分成功
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
+import { installProductionScriptBackend, resetScriptBackend } from './script-backend';
 import type {
   CharacterState,
   SaveSlot,
@@ -16,6 +17,17 @@ import type {
 } from './types';
 import { createDefaultCharacterState } from './types';
 import { createDefaultTime } from './time-system';
+
+// 本文件有两组用例真的会执行效果脚本（`onRemove` 到期链、Q-07 效果反应轮）。
+// 脚本自 SEC-02 收口起跑在 QuickJS 隔离里，没装隔离就是 fail-closed（一行不跑）——
+// 那两条断言会从「补丁落地了」退化成「什么都没发生」。装不上就当场炸，别静默变绿。
+beforeAll(async () => {
+  expect(await installProductionScriptBackend()).toBe(true);
+});
+
+afterAll(() => {
+  resetScriptBackend();
+});
 
 // Hoisted mock — replaces ./database for all consumers
 vi.mock('./database', () => ({

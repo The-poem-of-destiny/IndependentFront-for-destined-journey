@@ -167,6 +167,28 @@ src/sillytavern/                    ← 核心引擎
   ├── craft-gen-chain.ts            ← [Phase 9b] 制作生成编排（M3 零id/type归一化/单patch）
   │
   ├── script-executor.ts            ← [Phase 7e+8] 脚本沙盒（$event.on/off / $call / @parent / init·cleanup）
+  │      🔴 **求值跑在 QuickJS 隔离里，不再是 `new Function`**（2026-08-10 / SEC-02 收口）。
+  │         `buildSandbox()` 仍是 $ API 名单的**唯一真源** —— guest 面由后端从它推导，
+  │         加 `$foo` 不必动后端；宿主闭包一行没改，所以 `_parentScripts` 盖章 /
+  │         `$call` 合并 / handle 编号全在宿主侧原样发生（这是兼容性的来源）
+  │      🔴 **测试必须 `await installProductionScriptBackend()`**（`beforeAll`）。默认后端是
+  │         fail-closed：不装就是**脚本一行不跑**，而「断言收集到 0 条效果」那类用例会照常变绿。
+  │         已装的四个文件：script-executor / script-quickjs-backend / subscription-manager /
+  │         effect-wiring / state-manager（后者有两组用例真的会执行 onRemove 与反应轮脚本）
+  ├── script-backend.ts             ← [SEC-02] 脚本后端接缝：ScriptBackend 接口 + FailClosed + 单例 +
+  │                                    installProductionScriptBackend()（预热真 wasm 才算成功）
+  │      🔴 与 `ejs-backend.ts` **刻意不同：没有 Legacy**。脚本执行面就是 SEC-02 本身，
+  │         留一个可安装的 `new Function` 实现等于把刚拆掉的枪放回抽屉。`setScriptBackend`
+  │         同理不导出 —— 公开的「换掉当前后端」入口会把 fail-closed 默认值变成建议
+  ├── script-quickjs-backend.ts     ← [SEC-02] ★脚本的 QuickJS(wasm) 隔离后端。**一次脚本一个
+  │                                    runtime+context**（脚本之间零泄漏 + `$call` 重入无干扰），
+  │                                    墙钟 50ms、内存 32MB
+  │      实测：构造器逃逸只拿到 guest 全局（宿主哨兵不可见）/ fetch·indexedDB·process 全不可达 /
+  │      `while(true)` 53ms 被中断且不毒化后端 / 每次执行约 0.47ms
+  │      🔴 宿主全局仍**显式遮蔽成 `undefined`**（不是让它 ReferenceError）—— 保真旧实现的
+  │         形参遮蔽，`if (window)` 这种防御性写法（AI 爱写）不能因此整个脚本中断。
+  │         但 `Function` / `globalThis` / `eval` **刻意不遮蔽**：在 realm 里它们够不到宿主，
+  │         留着反而更兼容
   ├── subscription-manager.ts       ← [Phase 7e+8] 持久订阅管理器（递归保护≤10 + 僵尸兜底）
   ├── effect-wiring.ts              ← [Q-07] 战斗外效果接线（存档加载 wireEffectSystem / 装备卸下 wire-unwireObject）
   │                                    EventBus 按存档实例化 + ScriptRegistry/SubscriptionManager 双 facade

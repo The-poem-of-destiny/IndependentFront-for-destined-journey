@@ -1,7 +1,12 @@
 /**
  * script-executor 测试 (Phase 7e+8)
+ *
+ * 🔴 **本文件跑在真 QuickJS 隔离上**（SEC-02 收口后的生产后端），不是替身。
+ *    理由：这次改动的全部风险都在「兼容性」三个字上 —— 用假后端跑，
+ *    证明的是「宿主闭包还在」，证明不了「AI 写的那些脚本在 realm 里还跑得动」。
+ *    代价是本文件要背一次 wasm 启动（约 100ms），只此一次，值。
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   executeScript,
   executeHook,
@@ -9,8 +14,32 @@ import {
   executeInit,
   executeCleanup,
 } from './script-executor';
+import {
+  installProductionScriptBackend,
+  getScriptBackend,
+  resetScriptBackend,
+} from './script-backend';
 import type { StatusEffect, ReadonlyHookSet } from './types';
 import type { ScriptContext } from './script-executor';
+
+beforeAll(async () => {
+  const isolated = await installProductionScriptBackend();
+  // 🔴 反假绿哨兵：装不上时后端是 fail-closed，**所有脚本静默不跑**。
+  //    那种情况下「断言收集到 0 条效果」的用例会照常通过，整个文件变成一场空转。
+  //    这里当场炸掉，别让它伪装成绿。
+  expect(isolated, 'QuickJS 隔离未装载 —— 本文件的断言将全部失去意义').toBe(true);
+});
+
+afterAll(() => {
+  resetScriptBackend();
+});
+
+describe('隔离后端就位（反假绿哨兵）', () => {
+  it('生产后端是 QuickJS 而不是 fail-closed', () => {
+    expect(getScriptBackend().name).toBe('quickjs(wasm)');
+    expect(getScriptBackend().interruptible).toBe(true);
+  });
+});
 
 function makeStatus(overrides: Partial<StatusEffect> = {}): StatusEffect {
   return {
