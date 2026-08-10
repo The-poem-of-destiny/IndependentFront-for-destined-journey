@@ -145,6 +145,8 @@
 | `npm audit`                      | ✅ 0 漏洞                               |
 | CI（`.github/workflows/ci.yml`） | 三个并行 job、八道闸门，**不含 build**  |
 
+> 📌 **GitHub 安全页那 6 条 Dependabot 告警是过期的，别去追。** push 时 GitHub 会提示「6 vulnerabilities (2 high, 4 moderate)」，与上表的 `npm audit: 0` 直接矛盾。逐条核过：5 条 undici 的受影响范围是 `>= 7.0.0, < 7.29.0`、首个修复版 `7.29.0`，而锁定安装的正是 **7.29.0**；1 条 postcss 受影响 `<= 8.5.17`、首个修复版 `8.5.18`，实装 **8.5.25**。六条全部已在修复版之上，告警建于 2026-08-02 / 08-04 且未被自动关闭。`npm audit` 的 0 是对的。
+
 补充观测：`build.sourcemap: true`，产物里带 59 份 sourcemap 共约 9.7 MB。对本地优先的应用不算缺陷，但等于把可读源码一起发出去，值得有意识地确认一次。依赖零漏洞，但 pinia 2→4、vite 6→8、typescript 5→7 有大版本落差。
 
 ---
