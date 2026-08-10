@@ -151,6 +151,80 @@
 
 ---
 
+## 修复状态（2026-08-10 更新）
+
+> 本节只记「本报告登记的条目现在是什么状态」，各条的分析原文一字未改。
+
+**已收口**
+
+| ID      | 收口方式                                                                                                                   |
+| ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| SEC-02  | `executeScript` 迁进 QuickJS realm，`new Function` 那条路径已删、fail-closed（见该条正文的 ✅ 块）                         |
+| BLK-01  | `setCombatCoordinator` 已移到 `await runCombatV3(...)` **之前**（`game-pipeline.ts`），死锁解除                            |
+| SEC-09  | `forward()` 先 `new URL` 规范化掉 base 的 query/fragment 再拼 suffix；解析不了的 base 400。5 条回归在 `server-app.test.ts` |
+| SEC-03  | `/data` 读路径套上写路径那道 `relative()` 包含校验，删掉已成死代码的 `'..'` 判断                                           |
+| COR-02  | `GamePage.onUnmounted` 先 `pipeline?.abort()`；管线内新增存档归属闸（`emitMessage` / `refreshFromDb`）                     |
+| COR-07  | `installPack` 的互斥改为第一个 await 之前**同步**置位 + 外层 finally 放锁；`uninstallPack` 补读锁（新增 `busy` 状态）      |
+| COR-08  | `stats` 改为**每条目**从宿主 JSON 重建；`ejs-backend-parity.test.ts` 补两条跨条目用例                                      |
+| COR-12  | 续骰 / rejection 恢复改用内核当前行动单位（`currentInitiative`），不再是 `initiativeOrder[0]`                              |
+| COR-13  | `applyBuffTick` 跳过「召唤时限」，到期所有权独占归 `expireSummonedUnits`                                                   |
+| TEST-01 | CI 的 types job 末尾补 `npm run build`（八道闸门 → 九道）                                                                  |
+
+每条都配了**先证伪再修**的回归测试：临时撤掉修复后逐条确认变红。
+
+> 🔴 **修复本身又过了一轮对抗审查（2026-08-10），逮到 5 处并已一并收口** —— 记在这里是因为
+> 其中两条正是「修一半比不修更糟」的形状：
+>
+> 1. **COR-12 的初版在最常发生的那条续骰路径上是净退步。** `initiative` 通道只有 10 颗骰，
+>    4 个单位打到第 3 轮必然耗尽；而 `initiative.ts` 骰子耗尽时 `return out` **早于**
+>    `currentTurnIndex = 0`，`unit-turn` 收尾最后一位时又不写该字段，`reduceSupplyDice` 零推进
+>    —— 于是那条路上拿到的是**上一轮先攻末位**，比旧代码的「上一轮首位」更不可能对。
+>    现在按 phase 分流：只有回合中（`UnitTurnOpen`/`SlotConsume`/`MoraleCheck`/`UnitTurnClose`）
+>    才信 `currentTurnIndex`，其余一律退回 `initiativeOrder[0]`。初版注释里那句「Initiative
+>    阶段恢复不受影响」是**假的**（归零发生在下一次 dispatch 里面，而取值在那之前）。
+> 2. **COR-02 的闸门漏了 `addSystemMessage`。** 它与 `addMessage` 落到同一个 `persistMessage`
+>    （`saveId: activeSaveId.value`），所以 char_gen 的 NPC 卡片照样能写进后来打开的存档；
+>    同一段的 `characters.push` 也一样。已补 `emitSystemMessage` 同闸 + 整块守卫。
+> 3. **`sendOpeningPrompt` 收尾会写到别的存档上** —— 它读 `this.game.messages`、经
+>    `releaseOpeningPromptClaim` → `patchSaveMetadata` 写 `activeSave`。两个都刚开场的存档交错时，
+>    A 会把 **B 的** `openingPromptConsumed` 归还成 false，B 下次挂载把开场叙事写两遍。
+> 4. **`setPendingOptions` 写在闸门之前** —— 孤儿回合的行动选项照样铺进新存档的输入区。
+> 5. **COR-08 的初版实现选了最贵的那种**：每条目求值一遍 `stats` 的**源码字面量**（词法+语法+
+>    字节码），实测 109 条目 / 57KB stats 是 626ms，而 `JSON.parse` 同语义只要 191ms —— pass
+>    天花板是 5000ms，撞上去的后果是剩余条目**静默回退原文**。且那句 `evalVoid` 的返回值**没查**，
+>    重建失败会让本条目读到上一条的残留。现在从 guest 侧一个不可写不可配置的母本 `JSON.parse`，
+>    并用 `defineProperty` 让失败变响（顺带堵掉「条目把 `stats` 钉成不可配置」那条复活路径）。
+>
+> **侧链取消（初次登记为「需裁定」，2026-08-10 已做）**：侧链（char_gen / item_gen /
+> craft_gen / combat_v3）此前**完全不响应 abort** —— `getClientFactory` 包出来的客户端把
+> `signal` 当入参转发，而这四条链的调用方一个都没传，于是 `run()` 的 `abortController`
+> 只到得了 story。
+>
+> 初稿把它记成「产品决定」（接上会改变「停止生成」的语义：当前是让侧链跑完再落库）。
+> **重看之后判定它是缺陷不是偏好**，理由是第二层后果：`abort()` 会**立刻**把 `isGenerating`
+> 清成 false → 输入框解锁 → 玩家可以开下一回合，而上一回合的侧链仍在飞，两轮对**同一个存档**
+> 交错写入。让侧链跑完不是一个可选的产品口味，它是并发写入危害。
+>
+> 顺带治好同一族的一条：旧 run 的 `finally` 会无条件 `isGenerating = false` +
+> `abortController = null` —— 落在新一轮飞行途中时，前者解锁输入框，后者把**新一轮**的控制器
+> 抹掉，「停止生成」从此变成静默 no-op（`this.abortController?.abort()` 的 `?.` 会吃掉它）。
+> 现在 `run()` 带 `runSeq` 令牌，只有「我还是当前那一轮」才收拾这两样。
+>
+> 代价（已知并接受）：取消一个已产出正文的回合，正文里提到的 NPC 可能来不及进角色表。
+> 这与 API 中途失败的表现一致，且取消是玩家自己按的。取消现在**不按失败报**
+> （`isAbortError` → 清状态不带 error + 跳出循环，不再逐个标记重试一遍）。
+
+**仍未处理**（各自的理由见正文）
+
+- **SEC-04** —— 需要先裁定发行形态（带不带本地 BFF），不是代码问题。
+- **SEC-05** —— 写入口的来源校验会改变 dev 工具的可达性，留给维护者决定口径。
+- **COR-01 / COR-03 / COR-04 / COR-05 / COR-06** —— 都要改数据模型或补新的写入路径（字段级补丁 / 分钟制记账 / `status-api` 接线 / `detachItemWiring` / 标记落库），不属于「照着结论改一处」那一类。
+- **PERF-02** —— 要动 BeautifierFrame 的 postMessage 桥，回归面比看上去大。
+- **SEC-06 / PERF-01 / SEC-07 / SEC-08** —— 维护者已裁定**无限期搁置**，不修。
+- 文末「登记但未展开」那 24 条 —— 报告本身建议先各自复核再动手。
+
+---
+
 ## 优先级总表
 
 「置信度」列：**已确认** = 对抗复核后原样成立；**已修正** = 成立但机理/严重度经复核修正；**未复核** = 仅单 Agent 提出。

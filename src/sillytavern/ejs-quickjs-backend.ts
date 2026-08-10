@@ -364,6 +364,15 @@ export class QuickJsBackend implements EjsBackend {
     };
 
     try {
+      // 🔴 COR-08（2026-08-09 审查）：只读轴 `stats` 必须**每条目重建**。
+      // installCapabilities 每趟只编组一次，而 runEntry 的 restore() 只回滚 vars 与 _local
+      // —— 于是条目 A 的 `stats.主角.背包.push('污染')` 会漏给同一趟里后面每一条，
+      // 连 A 自己抛错被回滚、原文注入的情况都不例外（对只读轴的写活了下来，进了提示词）。
+      // Legacy 后端相反（`deepClone(ctx.stats)` 每条目一份），两个后端因此给出不同答案
+      // 且**双方都报 ok:true**。后果不是被攻击，是 AI 收到一份伪造的上下文且无从复现
+      // —— 换个后端就好了、改一下条目顺序也可能就好了。
+      // 母本 `__ejsStatsJson` 在 installCapabilities 里种下并钉成不可写不可配置，
+      // 重建动作在 runEntry（不变式 5）。
       this.installCapabilities(context, ctx, rngRef, capsRef);
 
       for (const entry of entries) {
@@ -446,7 +455,13 @@ export class QuickJsBackend implements EjsBackend {
     this.evalSetup(
       context,
       `globalThis.__ejsData = ${json};
-globalThis.stats = __ejsData.stats;
+// COR-08：只读轴的**不可变**母本。每条目从它 JSON.parse 出一份新的 stats（见 runEntry）。
+// 钉成 writable:false + configurable:false —— 否则条目改掉这个串就能把 COR-08 换个地方复活。
+Object.defineProperty(globalThis, '__ejsStatsJson', {
+  value: JSON.stringify(__ejsData.stats),
+  writable: false, configurable: false, enumerable: false,
+});
+globalThis.stats = JSON.parse(globalThis.__ejsStatsJson);
 globalThis.vars = __ejsData.vars;
 globalThis.world = __ejsData.world;
 globalThis.world.isDaytime = function () { return ${isDaytime ? 'true' : 'false'}; };
@@ -585,6 +600,9 @@ globalThis.engine = __ejsData.engine;`,
    * 3. **异步条目照跑**。body 统一包进 async IIFE 并 pump 微任务队列；
    *    曾经直接塞进同步 IIFE，`await` 一律 `SyntaxError`（真机语料 3 条）。
    * 4. **interrupt 全程装着**（含快照与回滚）。见下方 deadline 那段的说明。
+   * 5. **`stats` 逐条目重建**（COR-08）。只读轴是活的客体对象，没 freeze 也没 proxy；
+   *    整趟只编组一次时，一条目的手滑赋值会静默污染其后所有条目 —— 而 Legacy 每条目
+   *    深拷贝一份。两个后端因此对同一份语料给出不同答案且都报 `ok: true`。
    */
   private runEntry(
     runtime: QuickJsRuntimeLike,
@@ -626,6 +644,32 @@ globalThis.engine = __ejsData.engine;`,
     };
 
     try {
+      // 不变式 5（COR-08）：只读轴 `stats` 每条目重建，条目之间零泄漏。
+      //
+      // 从 guest 侧那个不可变母本 `JSON.parse` 一份，**不是**每条目求值一遍 stats 的
+      // 源码字面量 —— 后者每次要走词法+语法+字节码生成，实测慢约一个量级
+      // （109 条目 / 57KB stats：626ms vs 191ms），而 pass 天花板只有 5000ms，
+      // 撞上去的后果是剩余条目**静默回退原文**。
+      //
+      // 用 defineProperty 而不是直接赋值，是为了让失败**响**：条目若把 `stats` 设成
+      // 不可配置，赋值会静默失败（非严格模式）而 defineProperty 会抛 —— 于是下面这个
+      // 返回值检查能把它变成一条诚实的失败，而不是让本条目读到上一条那份被污染的 stats。
+      // 放在 try 内：早退也要走 finally 摘 interrupt。
+      const statsOk = this.evalVoid(
+        context,
+        `Object.defineProperty(globalThis, 'stats', {
+  value: JSON.parse(globalThis.__ejsStatsJson),
+  writable: true, configurable: true, enumerable: true,
+});`,
+      );
+      if (!statsOk) {
+        return {
+          uid: entry.uid,
+          text: entry.content,
+          ok: false,
+          error: 'stats 只读轴重建失败（本条目不执行，避免读到上一条目的残留）',
+        };
+      }
       snapOk = this.evalVoid(context, `globalThis.__ejsSnap = JSON.stringify(globalThis.vars);`);
       // 不变式 3：async IIFE + 微任务泵。**无条件**走异步壳（不去嗅探 `await`）——
       // 嗅探要么误判（正文里的 "await" 字样），要么就得再写一个 token 扫描器；

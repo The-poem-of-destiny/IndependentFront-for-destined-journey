@@ -105,6 +105,9 @@ import { preCheckPlot, postCheckPlot } from '@engine/plot-engine';
 
 function makeGameStore(overrides: Record<string, any> = {}) {
   return {
+    // 🔴 必须与 makePipeline 的 saveId 一致：COR-02 之后管线拿它判「本轮结果还属不属于
+    // 当前打开的存档」，对不上就丢弃正文 —— 桩里漏了这一格，7 条既有用例会一起变红。
+    activeSaveId: 'save-test',
     messages: [],
     characters: [],
     saveProfile: null,
@@ -617,6 +620,112 @@ describe('handleAgentResult — story 正文投影', () => {
       ),
     ).rejects.toThrow('no player-visible narrative');
     expect(addMessage).not.toHaveBeenCalled();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// COR-02（2026-08-09 审查）：孤儿回合不许写进后来打开的那个存档
+// ══════════════════════════════════════════════════════════════════════════
+describe('COR-02：存档归属闸', () => {
+  // 失败场景：存档 A 生成中（story 在飞，约 20 秒）→ 玩家点「← 首页」→ 打开存档 B。
+  // GamePage 无 KeepAlive，卸载即销毁；但在飞的 run() 仍会走到 handleAgentResult →
+  // game.addMessage(...)，而 game-store 是从 **store** 取存档号的
+  // （`saveId: activeSaveId.value`）—— 为 A 生成的正文于是落进 B 并永久留在 B 的历史里。
+
+  it('🔴 store 已切到别的存档 → 本轮正文被丢弃，不写进那个存档', async () => {
+    const addMessage = vi.fn((content: string) => ({ id: 'm1', turn: 1, content }));
+    const pipeline = makePipeline({ addMessage, activeSaveId: 'another-save' });
+
+    await (pipeline as any).handleAgentResult(
+      makeResult('story', '<maintext>为存档 A 生成的正文</maintext>'),
+    );
+
+    expect(addMessage).not.toHaveBeenCalled();
+  });
+
+  it('🔴 被丢弃时不留下 lastStoryMessage —— 插画锚点不能指向一条不存在的消息', async () => {
+    const pipeline = makePipeline({
+      addMessage: vi.fn((content: string) => ({ id: 'm1', turn: 1, content })),
+      activeSaveId: 'another-save',
+    });
+
+    await (pipeline as any).handleAgentResult(makeResult('story', '<maintext>正文</maintext>'));
+
+    expect((pipeline as any).lastStoryMessage).toBeNull();
+  });
+
+  it('存档没变时照常写入（闸门不误伤正常回合）', async () => {
+    const addMessage = vi.fn((content: string) => ({ id: 'm1', turn: 1, content }));
+    const pipeline = makePipeline({ addMessage }); // activeSaveId 默认 = 'save-test'
+
+    await (pipeline as any).handleAgentResult(makeResult('story', '<maintext>正文</maintext>'));
+
+    expect(addMessage).toHaveBeenCalledWith('正文', 'assistant');
+    expect((pipeline as any).lastStoryMessage).toMatchObject({ id: 'm1' });
+  });
+
+  it('存档已切走时不替新存档跑 refreshFromDb', async () => {
+    const refreshFromDb = vi.fn(async () => {});
+    const pipeline = makePipeline({ refreshFromDb, activeSaveId: 'another-save' });
+
+    // run() 的 finally 一定会执行；这里让管线在早期就失败，只验回读没被触发
+    await pipeline.run('输入');
+
+    expect(refreshFromDb).not.toHaveBeenCalled();
+  });
+
+  // 🔴 以下四条是 2026-08-10 审查轮补的 —— 初版闸门只收编了 `addMessage`，
+  // 而「本轮结果的投影」不止正文一条。
+
+  it('🔴 系统消息（char_gen 卡片）同样过闸 —— 它与正文落到同一个 persistMessage', () => {
+    const addSystemMessage = vi.fn();
+    const pipeline = makePipeline({ addSystemMessage, activeSaveId: 'another-save' });
+
+    (pipeline as any).emitSystemMessage({
+      type: 'char_gen',
+      characterName: '琴师',
+      narrative: '一位琴师加入了队伍',
+    });
+
+    expect(addSystemMessage).not.toHaveBeenCalled();
+  });
+
+  it('存档没变时系统消息照常写入', () => {
+    const addSystemMessage = vi.fn();
+    const pipeline = makePipeline({ addSystemMessage });
+
+    (pipeline as any).emitSystemMessage({
+      type: 'char_gen',
+      characterName: '琴师',
+      narrative: '一位琴师加入了队伍',
+    });
+
+    expect(addSystemMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 正文被丢弃时行动选项也不铺进新存档的输入区', async () => {
+    const setPendingOptions = vi.fn();
+    const pipeline = makePipeline({ setPendingOptions, activeSaveId: 'another-save' });
+
+    await (pipeline as any).handleAgentResult(
+      makeResult('story', '<maintext>正文</maintext><options>1. 前进</options>'),
+    );
+
+    expect(setPendingOptions).not.toHaveBeenCalled();
+  });
+
+  it('🔴 存档已切走时不归还开场认领 —— 那会把别的存档的开场重放一遍', async () => {
+    const releaseOpeningPromptClaim = vi.fn(async () => true);
+    const pipeline = makePipeline({
+      openingPrompt: 'OPENING',
+      markOpeningPromptConsumed: vi.fn(async () => true),
+      releaseOpeningPromptClaim,
+      activeSaveId: 'another-save',
+    });
+
+    await pipeline.sendOpeningPrompt();
+
+    expect(releaseOpeningPromptClaim).not.toHaveBeenCalled();
   });
 });
 
@@ -1189,6 +1298,33 @@ describe('runImagePromptAgent — activity ledger', () => {
       undefined,
       'activity-test',
     );
+  });
+
+  it("keeps an older turn's callbacks bound to their original activity run", () => {
+    const gameStore = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    const events = (pipeline as any).buildEventHandlers('activity-old');
+
+    // abort() unlocks input immediately, so a newer turn can own the instance before
+    // the older callbacks finish. Those late callbacks must not land in the new ledger.
+    (pipeline as any).activeRunId = 'activity-new';
+    events.onAgentStart('story', { apiEndpointId: 'ep-story', model: 'story-model' });
+    events.onToolCall('story', 'lookup_lore', { name: '旧城' }, { found: true });
+    events.onAgentError('story', '已取消');
+
+    expect(gameStore.updateAgentStatus).toHaveBeenCalledWith('story', 'activity-old');
+    expect(gameStore.recordAgentToolActivity).toHaveBeenCalledWith(
+      'story',
+      'lookup_lore',
+      { name: '旧城' },
+      { found: true },
+      'activity-old',
+    );
+    expect(gameStore.clearAgentStatus).toHaveBeenCalledWith('story', '已取消', 'activity-old');
   });
 });
 

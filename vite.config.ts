@@ -78,11 +78,15 @@ export default defineConfig({
             // resolve(dataDir, '/worldbooks/x') 因绝对路径直接丢掉 dataDir。
             const relPath = url.pathname.replace(/^\//, '');
             const filePath = resolve(dataDir, relPath);
-            if (
-              fs.existsSync(filePath) &&
-              fs.statSync(filePath).isFile() &&
-              !relPath.includes('..')
-            ) {
+            // 🔒 SEC-03：canonical containment —— 与 20 行之下的写路径同一道守卫。
+            // 此前这里只判 `!relPath.includes('..')`，两处都不够：
+            //   ① WHATWG URL 解析器早把点段规范化掉了，那个 '..' 判断是死代码；
+            //   ② Windows 绝对路径（/C:/Windows/win.ini）不含 '..'，经 resolve 会**吞掉**
+            //      dataDir 逃到任意位置，existsSync 为真 → dev server 200 回任意本地文件。
+            // dataDir 指向的正是私有内容仓，所以这条在开发机上不是「一般文件读取」。
+            const rel = relative(dataDir, filePath);
+            if (rel.startsWith('..') || isAbsolute(rel)) return next();
+            if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
               res.statusCode = 200;
               res.setHeader('Content-Type', 'application/json');
               res.setHeader('Cache-Control', 'no-cache');

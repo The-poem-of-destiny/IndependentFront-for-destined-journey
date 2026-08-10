@@ -250,8 +250,16 @@ watch(
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown);
-  pipeline?.abort?.();
+  // 🔴 COR-02（2026-08-09 审查）：**先 abort 再清 isGenerating**。
+  // 应用没有 KeepAlive（App.vue 用 `:key="ui.currentView"`），而「← 首页」是一个
+  // 始终可点的按钮 —— 生成中途导航就会在这里卸载 GamePage。此前不调 abort，仍在飞的
+  // run() 之后会走到 handleAgentResult → game.addMessage(...)，而 game-store 是从
+  // **store** 而不是从 pipeline 取存档号的。于是「存档 A 生成中 → 回首页 → 打开存档 B」
+  // 会把为 A 生成的正文追加进 B 并以 saveId:B 落库，永久留在 B 的历史里。
+  // （漏网写入还有第二道闸：GamePipeline 内的 emitMessage 存档归属检查。）
+  pipeline?.abort();
   cancelStreamingPreview();
+  game.isGenerating = false;
   // 🖼 离开游戏页：中止在飞的出图、清掉排队的（§8.2）。排队中的一个字节都没花，
   //    删掉即可；在飞的那条会落 failed/aborted，因为上游照样计费。
   sceneImages.abortAll();

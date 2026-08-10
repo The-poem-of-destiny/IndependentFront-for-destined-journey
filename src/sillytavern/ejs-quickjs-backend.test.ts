@@ -451,3 +451,48 @@ describe('QuickJS 后端 · 能力面', () => {
     SLOW,
   );
 });
+
+// ═══════════════════════════════════════════════════════════
+// COR-08 的加固面（2026-08-10 审查轮）—— 只读轴重建**失败要响，不要静默用上一条的残留**
+// ═══════════════════════════════════════════════════════════
+
+describe('QuickJS 后端 · stats 逐条目重建的加固', () => {
+  it(
+    '🔴 母本 __ejsStatsJson 不可写不可配置 —— 条目改不掉它，COR-08 换不了地方复活',
+    async () => {
+      const ctx = makeCtx({ stats: { 主角: { 等级: 7 } } });
+      const out = await backend.runPass(
+        [
+          // 非严格模式下赋值静默失败；defineProperty 会抛，两种写法都不该改成功
+          { uid: 1, content: '<% globalThis.__ejsStatsJson = \'{"主角":{"等级":999}}\' %>改过了' },
+          { uid: 2, content: '<%= stats.主角.等级 %>' },
+        ],
+        ctx,
+      );
+      expect(out[1].text).toBe('7');
+    },
+    SLOW,
+  );
+
+  it(
+    '🔴 条目把 stats 钉成不可配置 → 后续条目**判失败原文注入**，而不是静默读到残留',
+    async () => {
+      const ctx = makeCtx({ stats: { 主角: { 等级: 7 } } });
+      const out = await backend.runPass(
+        [
+          {
+            uid: 1,
+            content:
+              '<% Object.defineProperty(globalThis, "stats", { value: { 主角: { 等级: 999 } }, writable: false, configurable: false }) %>钉死',
+          },
+          { uid: 2, content: '<%= stats.主角.等级 %>' },
+        ],
+        ctx,
+      );
+      // 重建抛错 → 本条目不执行、原文注入。绝不能渲染成 999（那就是 COR-08 复活）
+      expect(out[1].ok).toBe(false);
+      expect(out[1].text).toBe('<%= stats.主角.等级 %>');
+    },
+    SLOW,
+  );
+});

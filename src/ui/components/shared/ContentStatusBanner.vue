@@ -147,6 +147,7 @@ async function uninstallPack() {
       return;
     }
     if (outcome.ok) ui.toast('内容包已卸载', 'success');
+    else if (outcome.status === 'busy') ui.toast('另一次内容包操作正在进行，请稍后再试', 'error');
     else ui.toast('卸载失败', 'error');
   } catch {
     ui.toast('卸载失败', 'error');

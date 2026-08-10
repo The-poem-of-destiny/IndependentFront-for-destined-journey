@@ -133,6 +133,12 @@ function tickFrozenSlots(state: CombatState): readonly FrozenSlot[] | undefined 
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
+ * 召唤时限的保留 buff 名。产出方在 `reducer.ts` 的 Spawn 分支
+ * （category `增益` / timeUnit `回合`），到期所有权**独占**归 `expireSummonedUnits`。
+ */
+const SUMMON_DURATION_STATUS = '召唤时限';
+
+/**
  * 在 round.close 扫描「召唤时限」buff 的召唤物，剩余回合减一；归 0 则：
  *   - 从 units / initiativeOrder 移除（applyOutcome removeUnitIds）
  *   - 从其 automaton 从 ActiveEffectIndex 摘除（updateIndex removeIds，按 byOwner[unitId]）
@@ -150,15 +156,15 @@ function expireSummonedUnits(
   const affected: StatusPatch[] = [];
 
   for (const [id, unit] of Object.entries(state.units)) {
-    const summonBuff = unit.statusEffects.find((s) => s.name === '召唤时限');
+    const summonBuff = unit.statusEffects.find((s) => s.name === SUMMON_DURATION_STATUS);
     if (!summonBuff || summonBuff.remainingTime === null) continue;
 
     const newTime = summonBuff.remainingTime - 1;
     if (newTime <= 0) {
       // 到期：移除单位 + 摘 automaton
       removeUnitIds.push(id);
-      affected.push({ op: 'remove', unitId: id, statusId: '召唤时限' });
-      events.push({ kind: 'StatusExpired', unitId: id, statusId: '召唤时限' });
+      affected.push({ op: 'remove', unitId: id, statusId: SUMMON_DURATION_STATUS });
+      events.push({ kind: 'StatusExpired', unitId: id, statusId: SUMMON_DURATION_STATUS });
       events.push({ kind: 'UnitDespawned', unitId: id, reason: 'expired' });
     } else {
       // 剩余递减写回
@@ -211,6 +217,14 @@ function applyBuffTick(
     for (const buff of unit.statusEffects) {
       // 只处理有生命周期（remainingTime !== null，timeUnit === '回合'）的战斗型 buff
       if (buff.remainingTime === null || buff.timeUnit !== '回合') continue;
+
+      // 🔴 COR-13：召唤时限**独占**归 expireSummonedUnits（round.close）。
+      // 它的 category 是「增益」、timeUnit 是「回合」，此前会被 round.open 这条通用
+      // tick 一并减掉 —— 于是每轮减两次，而**只有 round.close 那条会真的发
+      // UnitDespawned / removeUnitIds**，round.open 只是把状态删掉。结果：偶数时长的
+      // 召唤在 round.open 归零 → 计时器被静默删除、单位永远留在战斗里。
+      // （现有 spawn.test.ts 连调两次 handleRoundClose、从不跑 handleRoundOpen，看不见这条。）
+      if (buff.name === SUMMON_DURATION_STATUS) continue;
 
       const isPositive = buff.category === '增益';
       const matches = direction === 'positive' ? isPositive : !isPositive;

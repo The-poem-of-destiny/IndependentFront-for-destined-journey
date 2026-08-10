@@ -304,7 +304,7 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
         continue;
       }
       const cmds = await decideForUnit(
-        firstInitiative(session),
+        currentInitiative(session),
         session,
         routingDeps,
         opts.saveId,
@@ -355,15 +355,17 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
     }
 
     // 无 requiredInput 且未终局 → 唯一真实场景就是 SupplyDice 刚喂完（phase 仍 CombatOpen，
-    // kernel 未自动推进）。此时按当前先攻首位单位决定其第一个动作，dispatch 时 kernel 会
+    // kernel 未自动推进）。此时按**内核当前行动单位**决定其下一个动作，dispatch 时 kernel 会
     // auto 推进 CombatOpen→…→SlotConsume 并消费它。队列优先（同 requiredInput 的兜底）。
+    // 🔴 COR-12：这里曾写「先攻首位」，续骰由回合中的非首位单位触发时会带着错误行动者
+    // 往下走 → INVALID_PHASE → 整场战斗以空补丁放弃。见 currentInitiative 的注释。
     if (!trans.terminal) {
       if (pendingCommands.length > 0) {
         currentCommand = nextPending(pendingCommands, session);
         continue;
       }
       const cmds = await decideForUnit(
-        firstInitiative(session),
+        currentInitiative(session),
         session,
         routingDeps,
         opts.saveId,
@@ -516,9 +518,48 @@ interface RouteCtx {
 /** 骰子供应回调类型（闭包传入） */
 type DiceSupplier = () => { outputId: string; dice: number[] };
 
-/** 先攻首位单位 id（供初值 / rejection 兜底用） */
-function firstInitiative(session: CombatSession): string {
-  return session.snapshot().initiativeOrder[0] ?? '';
+/**
+ * 内核处在**某个单位的回合之中**的 phase —— 只有这几个 phase 下 `currentTurnIndex`
+ * 才真的指向「该被问下一条命令的那个单位」。
+ */
+const UNIT_TURN_PHASES: ReadonlySet<string> = new Set([
+  'UnitTurnOpen',
+  'SlotConsume',
+  'MoraleCheck',
+  'UnitTurnClose',
+]);
+
+/**
+ * 续骰 / rejection 恢复时该问哪个单位（COR-12）。
+ *
+ * **回合中**（`UNIT_TURN_PHASES`）用 `initiativeOrder[currentTurnIndex]`：
+ * SupplyDice 续骰由谁触发就该恢复给谁（attackHit / intentCheck / statusContest /
+ * procCheck 任一通道耗尽都会续骰），而回合中触发它的多半不是先攻首位。此前一律返回
+ * `initiativeOrder[0]`，于是下一条命令带着错误行动者 → `consumeSlot` 以 `INVALID_PHASE`
+ * 拒绝 → coordinator 跳出并以空补丁**放弃整场战斗**。
+ *
+ * 🔴 **其余 phase 一律退回 `initiativeOrder[0]`，因为那时 `currentTurnIndex` 是陈旧的**
+ * （2026-08-10 审查逮到 —— 初版这里没有分流，在最常见的那条续骰路径上反而更差）：
+ *
+ *   - `unit-turn.ts` 收尾最后一个单位时 `nextIndex >= order.length` → **不写**
+ *     `currentTurnIndex`，它停在 `len-1`；`round.ts` 的 open/close 都不碰它。
+ *   - `initiative.ts` 骰子耗尽时 `return out` **早于** `out.currentTurnIndex = 0`。
+ *   - `reduceSupplyDice` 原样保留 phase、零推进。
+ *
+ * 于是 initiative 通道耗尽（它只有 10 颗，4 个单位打到第 3 轮必然发生）走到这里时，
+ * phase 仍是 `Initiative` 而索引是**上一轮先攻末位**。两个值其实都只是猜——正确行动者要等
+ * 内核用新骰子重掷先攻才知道——但上一轮首位（先攻修正不变）比上一轮末位更可能仍是首位。
+ * 这条路上不做「改进」，保持既有行为。
+ *
+ * 索引钳制与 `phases/unit-turn.ts` 的 `currentUnitId` 一致（那边吃 CombatState，
+ * 这边只拿得到 CombatView，故不能直接复用）。
+ */
+export function currentInitiative(session: CombatSession): string {
+  const view = session.snapshot();
+  const order = view.initiativeOrder;
+  if (order.length === 0) return '';
+  if (!UNIT_TURN_PHASES.has(view.phase)) return order[0] ?? '';
+  return order[Math.min(view.currentTurnIndex, order.length - 1)] ?? '';
 }
 
 /**

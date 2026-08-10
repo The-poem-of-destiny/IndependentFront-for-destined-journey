@@ -1,6 +1,7 @@
 name: CI
 
 # 八道闸门拆成三个并行 job（2026-08-08）。
+# 2026-08-10 起是**九道** —— types job 末尾补了 `npm run build`（TEST-01，理由写在那一行旁）。
 #
 # ## 为什么拆
 # 拆之前是单 job 串行，实测 ~178s：环境准备 14s + typecheck 11s + typecheck:vue 18s
@@ -44,6 +45,11 @@ jobs:
       - run: npm run typecheck:vue
       # server/ tests/ *.config.ts —— 主 tsconfig 只 include src/**，这一步是它们唯一的类型网
       - run: npm run typecheck:tools
+      # 🔴 TEST-01（2026-08-09 审查）：tsc / vue-tsc **不解析**资源导入与 CSS url()，
+      # 所以「删掉的主题文件仍被 import」「new URL('./x.wasm', import.meta.url) 指向不存在的
+      # 文件」「vite 插件在构建期抛错」这类破坏能全绿合入。build 约 48s，而墙钟关键路径是
+      # test 的约 82s —— 挂在最短的 types job 上不改变总时长。
+      - run: npm run build
 
   quality:
     name: quality
