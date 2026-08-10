@@ -62,6 +62,13 @@ const characterNames = computed(() => {
   return map;
 });
 
+/** 空态两种情形：筛出来是空 vs 本来就没有记忆 */
+const emptyText = computed(() =>
+  filtered.value.length === 0 && (searchQuery.value || importanceFilter.value !== 'all')
+    ? '无匹配记忆'
+    : '书页尚空 —— 冒险几轮后记忆会在这里沉淀',
+);
+
 function characterNameOf(id: string): string {
   return characterNames.value.get(id) ?? id;
 }
@@ -74,14 +81,11 @@ function timeText(ts: number): string {
   }
 }
 
-function starClass(importance: number): string {
-  if (importance >= 8) return 'star-high';
-  if (importance >= 5) return 'star-mid';
-  return 'star-low';
-}
-
-function starText(importance: number): string {
-  return '★'.repeat(importance) + '☆'.repeat(Math.max(0, 10 - importance));
+/** 重要度三档（阈值与原 starClass 一致）：≥8 高 / ≥5 中 / 其余 低 */
+function importanceClass(importance: number): string {
+  if (importance >= 8) return 'imp-high';
+  if (importance >= 5) return 'imp-mid';
+  return 'imp-low';
 }
 
 function onFilterChange() {
@@ -130,8 +134,11 @@ async function removeSelected() {
       <div class="detail-toolbar">
         <button class="back-btn" aria-label="返回列表" @click="backToList">← 返回</button>
         <span class="detail-title">记忆详情</span>
-        <span class="detail-star" :class="starClass(selected.importance)">
-          {{ starText(selected.importance) }}
+        <span class="detail-importance">
+          <span class="imp-chip" :class="importanceClass(selected.importance)">
+            <span class="imp-star" aria-hidden="true">★</span>{{ selected.importance }}
+          </span>
+          <span class="imp-text">重要度 {{ selected.importance }}/10</span>
         </span>
       </div>
       <div class="detail-meta">
@@ -142,10 +149,14 @@ async function removeSelected() {
           {{ selected.relatedCharacterIds.map(characterNameOf).join(' · ') }}
         </span>
       </div>
+      <span class="section-label">内容</span>
       <div class="detail-content">{{ selected.content }}</div>
-      <div v-if="selected.keywords?.length" class="detail-keywords">
-        <span v-for="kw in selected.keywords" :key="kw" class="keyword">{{ kw }}</span>
-      </div>
+      <template v-if="selected.keywords?.length">
+        <span class="section-label">关键词</span>
+        <div class="detail-keywords">
+          <span v-for="kw in selected.keywords" :key="kw" class="keyword">{{ kw }}</span>
+        </div>
+      </template>
       <div class="detail-foot">
         <span class="detail-id">ID: {{ selected.id }}</span>
         <span class="detail-real">存档于 {{ timeText(selected.realTimestamp) }}</span>
@@ -188,27 +199,23 @@ async function removeSelected() {
           @click="openDetail(mem.id)"
         >
           <span class="card-topline">
-            <span class="card-star" :class="starClass(mem.importance)">{{
-              '★'.repeat(mem.importance)
-            }}</span>
+            <span class="imp-chip" :class="importanceClass(mem.importance)">
+              <span class="imp-star" aria-hidden="true">★</span>{{ mem.importance }}
+            </span>
             <span class="card-id">{{ mem.id }}</span>
           </span>
           <span class="card-content">{{ mem.content }}</span>
           <span class="card-meta">
             <span v-if="mem.keywords?.length" class="card-keywords">
-              {{ mem.keywords.slice(0, 3).join(' · ') }}
+              <span v-for="kw in mem.keywords.slice(0, 3)" :key="kw" class="card-keyword">{{
+                kw
+              }}</span>
             </span>
             <span v-if="mem.timeRange?.start" class="card-time">{{ mem.timeRange.start }}</span>
           </span>
         </button>
       </div>
-      <div v-else class="empty">
-        {{
-          filtered.length === 0 && (searchQuery || importanceFilter !== 'all')
-            ? '无匹配记忆'
-            : '暂无记忆'
-        }}
-      </div>
+      <div v-else class="empty">{{ emptyText }}</div>
 
       <div v-if="totalPages > 1" class="pagination">
         <button
@@ -241,67 +248,100 @@ async function removeSelected() {
   flex-direction: column;
   height: 100%;
   min-height: 37.5rem;
-  padding: 8px;
-  gap: 8px;
+  padding: var(--theme-spacing-sm);
+  gap: var(--theme-spacing-sm);
+}
+.memory-wall {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: var(--theme-spacing-sm);
 }
 /* ===== 卡片墙 ===== */
 .wall-toolbar {
   display: flex;
-  gap: 8px;
+  gap: var(--theme-spacing-sm);
   align-items: center;
   flex-shrink: 0;
-  margin-bottom: 4px;
 }
 .search-input {
   flex: 1;
   min-width: 0;
-  padding: 6px 10px;
+  height: 2rem;
+  padding: 0 var(--theme-spacing-sm);
   font-size: 0.8125rem;
   font-family: inherit;
   color: var(--theme-text-primary);
   background: var(--theme-surface-muted);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-sm, 4px);
+  border-radius: var(--theme-radius-sm);
+  transition:
+    border-color var(--theme-transition-fast),
+    background-color var(--theme-transition-fast);
+}
+.search-input:hover {
+  border-color: color-mix(in srgb, var(--theme-primary) 40%, var(--theme-card-border));
 }
 .search-input:focus {
   outline: none;
   border-color: var(--theme-primary);
 }
+.search-input:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 1px;
+}
 .sort-select {
-  padding: 6px 8px;
+  height: 2rem;
+  padding: 0 var(--theme-spacing-xs);
   font-size: 0.75rem;
   font-family: inherit;
   color: var(--theme-text-secondary);
   background: var(--theme-surface-muted);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-sm, 4px);
+  border-radius: var(--theme-radius-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--theme-transition-fast),
+    color var(--theme-transition-fast);
+}
+.sort-select:hover {
+  color: var(--theme-text-primary);
+  border-color: color-mix(in srgb, var(--theme-primary) 40%, var(--theme-card-border));
+}
+.sort-select:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 1px;
 }
 .card-grid {
   flex: 1;
   overflow-y: auto;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 10px;
+  gap: var(--theme-spacing-md);
   align-content: start;
   padding-top: 2px;
 }
 .memory-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px;
+  gap: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-md);
   text-align: left;
   background: var(--theme-card-bg);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-sm, 4px);
+  border-radius: var(--theme-radius-md);
+  box-shadow: var(--paper-stack);
   cursor: pointer;
   font-family: inherit;
   transition:
     border-color var(--theme-transition-fast),
+    background-color var(--theme-transition-fast),
     transform var(--theme-transition-fast);
 }
 .memory-card:hover {
-  border-color: var(--theme-primary);
+  border-color: color-mix(in srgb, var(--theme-primary) 45%, var(--theme-card-border));
+  background: color-mix(in srgb, var(--theme-primary) 6%, var(--theme-card-bg));
   transform: translateY(-1px);
 }
 .memory-card:focus-visible {
@@ -311,31 +351,53 @@ async function removeSelected() {
 .card-topline {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
-  gap: 6px;
-}
-.card-star {
-  font-size: 0.6875rem;
+  align-items: center;
+  gap: var(--theme-spacing-xs);
 }
 .card-id {
   font-size: 0.625rem;
   color: var(--theme-text-muted);
   font-family: monospace;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
-.star-high {
-  color: #f59e0b;
+/* 重要度徽章（★ + 数值，三档全部走 token 着色） */
+.imp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 1px var(--theme-spacing-xs);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  border-radius: var(--theme-radius-sm);
 }
-.star-mid {
-  color: #94a3b8;
+.imp-star {
+  font-size: 0.625rem;
 }
-.star-low {
-  color: #64748b;
+.imp-high {
+  color: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, transparent);
+}
+.imp-mid {
+  color: var(--theme-text-secondary);
+  background: color-mix(in srgb, var(--theme-text-secondary) 8%, transparent);
+  border: 1px solid var(--theme-card-border);
+}
+.imp-low {
+  color: var(--theme-text-muted);
+  background: transparent;
+  border: 1px solid var(--theme-card-border);
 }
 .card-content {
-  font-size: 0.75rem;
-  color: var(--theme-text-secondary);
-  line-height: 1.5;
+  font-family: var(--theme-font-title);
+  font-size: 0.8125rem;
+  color: var(--theme-text-primary);
+  line-height: 1.55;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
@@ -344,15 +406,14 @@ async function removeSelected() {
 .card-meta {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--theme-spacing-xs);
   margin-top: auto;
 }
 .card-keywords {
-  font-size: 0.625rem;
-  color: var(--theme-text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--theme-spacing-xs);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .card-time {
   font-size: 0.625rem;
@@ -364,19 +425,33 @@ async function removeSelected() {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 6px 0 2px;
+  gap: var(--theme-spacing-md);
+  padding-top: var(--theme-spacing-xs);
   flex-shrink: 0;
 }
 .page-btn {
-  padding: 4px 10px;
+  min-height: 2rem;
+  padding: 0 var(--theme-spacing-md);
   font-size: 0.75rem;
   font-family: inherit;
   color: var(--theme-text-secondary);
   background: var(--theme-surface-muted);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-sm, 4px);
+  border-radius: var(--theme-radius-sm);
   cursor: pointer;
+  transition:
+    color var(--theme-transition-fast),
+    border-color var(--theme-transition-fast),
+    background-color var(--theme-transition-fast);
+}
+.page-btn:hover:not(:disabled) {
+  color: var(--theme-text-primary);
+  border-color: color-mix(in srgb, var(--theme-primary) 45%, var(--theme-card-border));
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-surface-muted));
+}
+.page-btn:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 1px;
 }
 .page-btn:disabled {
   opacity: 0.5;
@@ -390,85 +465,140 @@ async function removeSelected() {
 .memory-detail {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--theme-spacing-sm);
   height: 100%;
-  padding: 4px;
+  padding: var(--theme-spacing-xs);
 }
 .detail-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--theme-spacing-md);
   flex-shrink: 0;
 }
 .back-btn {
-  padding: 4px 10px;
+  min-height: 2rem;
+  padding: 0 var(--theme-spacing-md);
   font-size: 0.75rem;
   font-family: inherit;
   color: var(--theme-text-secondary);
   background: var(--theme-surface-muted);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-sm, 4px);
+  border-radius: var(--theme-radius-sm);
   cursor: pointer;
+  transition:
+    color var(--theme-transition-fast),
+    border-color var(--theme-transition-fast),
+    background-color var(--theme-transition-fast);
+}
+.back-btn:hover {
+  color: var(--theme-text-primary);
+  border-color: color-mix(in srgb, var(--theme-primary) 45%, var(--theme-card-border));
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-surface-muted));
+}
+.back-btn:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 1px;
 }
 .detail-title {
-  font-size: 0.8125rem;
+  font-family: var(--theme-font-title);
+  font-size: 0.875rem;
   font-weight: 600;
+  letter-spacing: 0.03em;
   color: var(--theme-text-primary);
 }
-.detail-star {
-  font-size: 0.75rem;
+.detail-importance {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
   margin-left: auto;
+}
+.imp-text {
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
 }
 .detail-meta {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--theme-spacing-xs);
   font-size: 0.6875rem;
   color: var(--theme-text-muted);
+}
+/* Section 标题装饰线（design.md §5.1） */
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-family: var(--theme-font-title);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--theme-text-secondary);
+}
+.section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, var(--theme-card-border), transparent);
 }
 .detail-content {
   flex: 1;
   overflow-y: auto;
+  font-family: var(--theme-font-title);
   font-size: 0.8125rem;
   color: var(--theme-text-primary);
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
-  padding: 10px;
-  background: var(--theme-surface-muted);
-  border-radius: var(--theme-radius-sm, 4px);
+  padding: var(--theme-spacing-md);
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  box-shadow: var(--paper-stack);
 }
 .detail-keywords {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--theme-spacing-xs);
   flex-shrink: 0;
 }
-.keyword {
+.keyword,
+.card-keyword {
   font-size: 0.625rem;
-  padding: 1px 6px;
+  line-height: 1.5;
+  padding: 1px var(--theme-spacing-xs);
   background: var(--theme-surface-muted);
   color: var(--theme-text-muted);
-  border-radius: 3px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  white-space: nowrap;
 }
 .detail-foot {
   display: flex;
   justify-content: space-between;
+  gap: var(--theme-spacing-sm);
   font-size: 0.625rem;
   color: var(--theme-text-muted);
   font-family: monospace;
 }
 .detail-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--theme-spacing-sm);
   flex-shrink: 0;
 }
 .empty {
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  padding: var(--theme-spacing-2xl) 0;
+  text-align: center;
   color: var(--theme-text-muted);
   font-size: 0.8125rem;
+  font-style: italic;
+}
+.empty::before {
+  content: '—';
+  display: block;
+  margin-bottom: var(--theme-spacing-sm);
+  font-size: 1.25rem;
+  opacity: 0.3;
 }
 </style>
