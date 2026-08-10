@@ -117,9 +117,7 @@ describe('ChatFlow 右键菜单 — user 消息', () => {
 
     const rows = wrapper.findAll('.bubble-row-player');
     await rows[1].trigger('contextmenu');
-    const copyBtn = wrapper
-      .findAll('.ctx-menu .ctx-item')
-      .find((b) => b.text().includes('复制'));
+    const copyBtn = wrapper.findAll('.ctx-menu .ctx-item').find((b) => b.text().includes('复制'));
     expect(copyBtn).toBeTruthy();
 
     await copyBtn!.trigger('click');

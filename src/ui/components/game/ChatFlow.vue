@@ -463,9 +463,8 @@ onUnmounted(() => {
           :disabled="game.isInCombat"
           @click.stop="ctxRollback"
         >
-          <i class="fa-solid fa-rotate-left" /> {{
-            ctxMenu.role === 'user' ? '回退到这条输入' : '回退本轮'
-          }}
+          <i class="fa-solid fa-rotate-left" />
+          {{ ctxMenu.role === 'user' ? '回退到这条输入' : '回退本轮' }}
         </button>
         <button v-if="ctxMenu.canImage" class="ctx-item" @click.stop="ctxSceneImage">
           <i class="fa-solid fa-image" /> 为这一段配图
