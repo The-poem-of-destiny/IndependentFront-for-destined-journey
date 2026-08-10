@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useGameStore } from '../../stores/game-store';
+import { useUIStore } from '../../stores/ui-store';
 import { useHoverPopup } from '../../composables/useHoverPopup';
 import { usePlayerPortrait } from '../../composables/usePlayerPortrait';
 import { normalizeItemType } from '@engine/field-enums';
+import { getTierConfig } from '@engine/tier-constants';
+import type { AllocatableAttr } from '@engine/attribute-allocation';
 import ResourceBar from '../shared/ResourceBar.vue';
 import AvatarPanel from '../shared/AvatarPanel.vue';
 import CharacterPortrait from '../shared/CharacterPortrait.vue';
@@ -17,6 +20,7 @@ import BuffChip from '../shared/BuffChip.vue';
 import AssetCropEditor from '../shared/AssetCropEditor.vue';
 
 const game = useGameStore();
+const ui = useUIStore();
 
 const player = computed(() => game.player);
 
@@ -87,13 +91,46 @@ const ATTR_LABELS: Record<string, string> = {
   int: '智力',
   spi: '精神',
 };
+
+// ═══ 自由属性点：剩余点数 + 每维一个「+」 ═══
+//
+// 🔴 **上限判据只查一处**（ADR-11 数值规则归 Code）：`getTierConfig(tier).attributeCap`，
+//    与引擎 `allocateAttributePoint` 用的是同一张表 —— 前端自己算一份，迟早会出现
+//    「按钮亮着、点下去被引擎拒」或反过来「明明还能加却按不动」。
+// 🔴 查不到层级配置（越界层级 / 脏数据）时**不禁用**：上限未知就拦死，等于把玩家
+//    已经到手的点数扣在手里，且引擎那侧对同一情况也是放行的。
+const freeAttrPoints = computed(() => player.value?.freeAttrPoints ?? 0);
+const attributeCap = computed(() => getTierConfig(player.value?.tier ?? 0)?.attributeCap);
+
+/** 一次只放一个请求过去 —— 最后 1 点被连点两下会拿到一次「没有可用的自由属性点」 */
+const allocating = ref(false);
+
 const attrEntries = computed(() =>
-  Object.entries(player.value?.attributes ?? {}).map(([key, value]) => ({
-    key,
-    label: ATTR_LABELS[key] || key,
-    value,
-  })),
+  Object.entries(player.value?.attributes ?? {}).map(([key, value]) => {
+    const cap = attributeCap.value;
+    const atCap = typeof cap === 'number' && typeof value === 'number' && value >= cap;
+    return {
+      key,
+      label: ATTR_LABELS[key] || key,
+      value,
+      atCap,
+      /** 禁用时说清为什么；能点时说清点了会发生什么 */
+      plusTitle: atCap ? `已达当前层级上限（${cap}）` : `分配 1 点到${ATTR_LABELS[key] || key}`,
+    };
+  }),
 );
+
+/** 点「+」→ 花 1 点。失败原因由引擎给（点数不足 / 到顶 / 落库失败），本层只负责播报 */
+async function addAttrPoint(attr: string) {
+  if (allocating.value) return;
+  allocating.value = true;
+  try {
+    const result = await game.allocateAttrPoint(attr as AllocatableAttr);
+    if (!result.ok) ui.toast(result.error ?? '属性点分配失败', 'error');
+  } finally {
+    allocating.value = false;
+  }
+}
 
 // ═══ 装备列表 ═══
 // M6 完整重构: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3），槽位为中文枚举
@@ -320,6 +357,10 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
           @keydown.space.prevent="daoOpen = !daoOpen"
         >
           <span class="section-title">属性</span>
+          <!-- 剩余自由点 —— 在 Transition 之外，属性区折叠时依然看得见（有点没花是要
+               玩家去花的，藏在折叠里等于没通知）。它是**内容不是控件**：真正的分配
+               入口是下面每一维的「+」。 -->
+          <span v-if="freeAttrPoints > 0" class="attr-free">自由点 {{ freeAttrPoints }}</span>
           <span class="attr-level">Lv.{{ player.level }}</span>
           <i class="fa-solid" :class="daoOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
         </div>
@@ -363,10 +404,30 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
             />
 
             <!-- 五维属性保持单行 -->
+            <!-- 有自由点时每格底下长出一个通栏的「+」: 加的是**高度**不是宽度，
+                 五列仍旧一行放得下（横向再挤会把「力量」这样的两字标签逼到换行）。
+                 到顶那一维的 title 挂在格子上 —— disabled 的按钮不派发鼠标事件，
+                 tooltip 挂在它自己身上在部分浏览器里根本不出现。 -->
             <div class="attr-grid">
-              <div v-for="attr in attrEntries" :key="attr.key" class="kv-item">
+              <div
+                v-for="attr in attrEntries"
+                :key="attr.key"
+                class="kv-item"
+                :title="freeAttrPoints > 0 && attr.atCap ? attr.plusTitle : undefined"
+              >
                 <span class="kv-label">{{ attr.label }}</span>
                 <span class="kv-value">{{ attr.value }}</span>
+                <button
+                  v-if="freeAttrPoints > 0"
+                  class="attr-plus"
+                  type="button"
+                  :disabled="attr.atCap || allocating"
+                  :title="attr.plusTitle"
+                  :aria-label="attr.plusTitle"
+                  @click="addAttrPoint(attr.key)"
+                >
+                  +
+                </button>
               </div>
             </div>
           </div>
@@ -792,6 +853,64 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   font-size: 0.75rem;
   line-height: 1.25;
   font-variant-numeric: tabular-nums;
+}
+
+/* ═══ 自由属性点 ═══ */
+/* 剩余点数徽章 —— design.md §1「激活态/强调徽章通用配方」的染底 + 混合边框 */
+.attr-free {
+  margin-left: var(--theme-spacing-sm);
+  padding: 1px 6px;
+  border-radius: var(--theme-radius-sm, 4px);
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+  color: var(--theme-primary);
+  font-size: 0.625rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* 通栏的「+」: 宽度吃满格子换取指点面积。
+   🔴 高度刻意低于 design.md §4.1 那条 36px 触摸目标: 这是侧栏里 5 列的紧凑网格，
+   36px 会把这一格撑成整块面板最高的东西，而「五维保持单行」是这块布局的硬约束。
+   补偿在宽度上 —— 整格可点，比一个 36px 见方的圆钮还好按。 */
+.attr-plus {
+  margin-top: 3px;
+  width: 100%;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm, 4px);
+  background: var(--theme-card-bg);
+  color: var(--theme-primary);
+  font-family: inherit;
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background var(--theme-transition-fast, 0.15s ease),
+    border-color var(--theme-transition-fast, 0.15s ease);
+}
+.attr-plus:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+}
+.attr-plus:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 1px;
+}
+/* 🔴 只写 `:disabled`，不挂裸 `.disabled` 类 —— utilities.css 里那条全局
+   `.disabled { pointer-events: none }` 会连带把 title 提示一起吞掉 */
+.attr-plus:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  color: var(--theme-text-muted);
+}
+@media (prefers-reduced-motion: reduce) {
+  .attr-plus {
+    transition: none;
+  }
 }
 
 /* ═══ 状态效果 ═══ */
