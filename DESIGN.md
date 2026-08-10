@@ -89,16 +89,18 @@ Flexibility: selected references are visual truth; responsive frame ownership re
 
 #### Locked implementation directions
 
-| Theme                         | Decision                                 | Reference                                            |
-| ----------------------------- | ---------------------------------------- | ---------------------------------------------------- |
-| Wayfarer's Atlas / 远行者舆图 | Full theme: brass navigator's instrument | `artifacts/theme-looks/wayfarers-atlas/look-4.png`   |
-| Moonwhite Brocade / 月白云锦  | Minimal moonwhite brocade relief         | `artifacts/theme-looks/moonwhite-brocade/look-4.png` |
-| Jade Conservatory / 翡翠温室  | Full theme: carved jade lattice          | `artifacts/theme-looks/jade-conservatory/look-4.png` |
-| Aurora Frostglass / 极光霜晶  | Full theme: boreal aurora wash           | `artifacts/theme-looks/aurora-frostglass/look-2.png` |
-| Gilded Orrery / 玄金星盘      | Full theme: armillary brass mechanism    | `artifacts/theme-looks/gilded-orrery/look-2.png`     |
-| Bronze Mechanism / 古铜机巧   | Full theme: precision guild instrument   | `artifacts/theme-looks/bronze-mechanism/look-3.png`  |
-| Nocturne Sakura / 夜樱漆匣    | Full theme: moonlit falling petals       | `artifacts/theme-looks/nocturne-sakura/look-5.png`   |
-| Abyssal Cathedral / 深海圣堂  | Full theme: submerged Gothic nave        | `artifacts/theme-looks/abyssal-cathedral/look-2.png` |
+| Theme                         | Decision                                  | Reference                                                                   |
+| ----------------------------- | ----------------------------------------- | --------------------------------------------------------------------------- |
+| Wayfarer's Atlas / 远行者舆图 | Full theme: brass navigator's instrument  | `artifacts/theme-looks/wayfarers-atlas/look-4.png`                          |
+| Moonwhite Brocade / 月白云锦  | Minimal moonwhite brocade relief          | `artifacts/theme-looks/moonwhite-brocade/look-4.png`                        |
+| Jade Conservatory / 翡翠温室  | Full theme: jade-framed herbarium cabinet | `artifacts/theme-looks/jade-conservatory/prototype-4-herbarium-archive.png` |
+| Aurora Frostglass / 极光霜晶  | Full theme: boreal aurora wash            | `artifacts/theme-looks/aurora-frostglass/look-2.png`                        |
+| Gilded Orrery / 玄金星盘      | Full theme: armillary brass mechanism     | `artifacts/theme-looks/gilded-orrery/look-2.png`                            |
+| Bronze Mechanism / 古铜机巧   | Full theme: precision guild instrument    | `artifacts/theme-looks/bronze-mechanism/look-3.png`                         |
+| Nocturne Sakura / 夜樱漆匣    | Full theme: moonlit falling petals        | `artifacts/theme-looks/nocturne-sakura/look-5.png`                          |
+| Abyssal Cathedral / 深海圣堂  | Full theme: submerged Gothic nave         | `artifacts/theme-looks/abyssal-cathedral/look-2.png`                        |
 
 The detailed visual contracts and rejection criteria are recorded in
 `docs/planning/2026-08-08-selected-theme-directions.md`.
+
+For Jade Conservatory, the center narrative surface is a bound parchment folio with jade edge rails and four antique-brass barrel hinges, one near each corner. Tabs and primary controls are polished-jade plaques with stable geometry across inactive, hover, focus, and active states. The composer retains its outer notebook border and parchment field without stretching decorative artwork behind the input. A flat paper-only treatment, open jewelry-like binding rings, repeated hinges down the full rails, and stretched panel rasters are explicitly rejected.

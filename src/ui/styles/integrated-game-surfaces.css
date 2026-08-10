@@ -451,7 +451,7 @@
 }
 
 /* --------------------------------------------------------------------- */
-/* Jade Conservatory: intact relief, quiet paper, raised carved controls. */
+/* Jade Conservatory interaction baseline; the final herbarium surfaces are defined below. */
 /* --------------------------------------------------------------------- */
 
 :root[data-theme='forest'] {
@@ -551,37 +551,122 @@
 }
 
 :root[data-theme='forest'] body .game-page-layout .tab-bar {
-  border-top: 1px solid rgba(95, 124, 99, 0.3);
-  border-bottom: 1px solid rgba(84, 111, 90, 0.5);
+  padding: 6px 8px 7px;
+  border-top: 1px solid rgba(150, 120, 65, 0.34);
+  border-bottom: 1px solid rgba(96, 118, 94, 0.46);
+  background-color: rgba(244, 240, 226, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 253, 245, 0.86),
+    inset 0 -1px 0 rgba(137, 113, 71, 0.12);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-list {
+  gap: 4px;
+  padding: 2px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 :root[data-theme='forest'] body .game-page-layout .tab-item {
-  color: #506957;
-  background:
-    linear-gradient(180deg, rgba(253, 253, 248, 0.36), rgba(167, 190, 167, 0.13)),
-    rgba(218, 229, 214, 0.13);
-  border-color: rgba(95, 122, 99, 0.38);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 250, 0.68);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 9px 8px;
+  color: #4b6252;
+  background-color: rgba(211, 223, 207, 0.72);
+  background-image: linear-gradient(180deg, rgba(255, 254, 247, 0.5), rgba(172, 193, 173, 0.14));
+  border: 1px solid rgba(91, 116, 94, 0.48);
+  border-radius: 3px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 254, 248, 0.84),
+    inset 0 -1px 0 rgba(67, 94, 72, 0.12),
+    0 1px 2px rgba(55, 78, 59, 0.1);
+  transition:
+    color 150ms ease-out,
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out;
 }
 
-:root[data-theme='forest'] body .game-page-layout .tab-item:hover {
+:root[data-theme='forest'] body .game-page-layout .tab-item:last-child {
+  border-right: 1px solid rgba(91, 116, 94, 0.48);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item::before {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: -5px;
+  width: 5px;
+  height: 12px;
+  border: 1px solid rgba(129, 99, 49, 0.5);
+  border-radius: 1px;
+  background-color: #b29459;
+  background-image: linear-gradient(90deg, #8b6c38, #c4aa70 48%, #8b6c38);
+  box-shadow: 0 0 0 1px rgba(255, 250, 230, 0.28);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item:first-child::before {
+  display: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item::after {
+  display: block;
+  left: 50%;
+  right: auto;
+  bottom: 1px;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background-color: rgba(143, 112, 57, 0.46);
+  box-shadow: none;
+  opacity: 0.58;
+  transform: translateX(-50%);
+  transition:
+    width 150ms ease-out,
+    background-color 150ms ease-out,
+    opacity 150ms ease-out;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item:hover,
+:root[data-theme='forest'] body .game-page-layout .tab-item:focus-visible {
   color: #294735;
-  background: rgba(188, 210, 190, 0.28);
+  background-color: rgba(224, 232, 216, 0.9);
+  border-color: rgba(66, 101, 76, 0.64);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 254, 248, 0.92),
+    inset 0 -1px 0 rgba(67, 94, 72, 0.15),
+    0 2px 4px rgba(55, 78, 59, 0.14);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item:focus-visible {
+  outline: 2px solid #315f46;
+  outline-offset: -2px;
 }
 
 :root[data-theme='forest'] body .game-page-layout .tab-active {
   color: #21422f;
-  background:
-    linear-gradient(180deg, rgba(246, 250, 242, 0.54), rgba(143, 177, 150, 0.24)),
-    rgba(202, 219, 200, 0.3);
+  font-weight: 600;
+  background-color: rgba(247, 242, 226, 0.96);
+  background-image: linear-gradient(180deg, rgba(255, 254, 248, 0.88), rgba(225, 228, 207, 0.26));
+  border-color: rgba(53, 91, 67, 0.7);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 252, 0.9),
-    inset 0 0 0 1px rgba(126, 156, 129, 0.24);
+    inset 0 1px 0 rgba(255, 255, 251, 0.96),
+    inset 0 -2px 0 rgba(152, 119, 62, 0.5),
+    0 2px 4px rgba(48, 72, 54, 0.15);
 }
 
 :root[data-theme='forest'] body .game-page-layout .tab-active::after {
-  background: #44735a;
-  box-shadow: 0 -1px 0 rgba(245, 252, 244, 0.86);
+  width: 32px;
+  background-color: #8f6f3c;
+  box-shadow: 0 -1px 0 rgba(255, 251, 234, 0.72);
+  opacity: 0.92;
 }
 
 :root[data-theme='forest']
@@ -1840,49 +1925,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  :root:is(
-      [data-theme='parchment'],
-      [data-theme='forest'],
-      [data-theme='ivory'],
-      [data-theme='misty-lilac'],
-      [data-theme='obsidian'],
-      [data-theme='bronze'],
-      [data-theme='ocean']
-    )
-    body
-    .game-page-layout
-    *,
-  :root:is(
-      [data-theme='parchment'],
-      [data-theme='forest'],
-      [data-theme='ivory'],
-      [data-theme='misty-lilac'],
-      [data-theme='obsidian'],
-      [data-theme='bronze'],
-      [data-theme='ocean']
-    )
-    body
-    .game-page-layout
-    *::before,
-  :root:is(
-      [data-theme='parchment'],
-      [data-theme='forest'],
-      [data-theme='ivory'],
-      [data-theme='misty-lilac'],
-      [data-theme='obsidian'],
-      [data-theme='bronze'],
-      [data-theme='ocean']
-    )
-    body
-    .game-page-layout
-    *::after {
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-  }
-}
-
 /* --------------------------------------------------------------------- */
 /* Live-region ownership correction.                                     */
 /*                                                                        */
@@ -2035,12 +2077,16 @@
     0 -2px 5px rgba(66, 40, 14, 0.24);
 }
 
-/* Jade Conservatory: the botanical relief is cropped per live ledger. */
+/* Jade Conservatory: a quiet herbarium cabinet of paper, jade rails, and brass clips. */
 :root[data-theme='forest'] body .game-page-layout {
-  background:
-    radial-gradient(circle at 14% 12%, rgba(255, 255, 248, 0.64), transparent 36%),
-    linear-gradient(135deg, #eaf0e5, #dce7d8 54%, #edf1e8);
-  box-shadow: inset 0 0 0 2px rgba(89, 119, 94, 0.44);
+  background-color: #e7e6dc;
+  background-image:
+    radial-gradient(circle at 14% 10%, rgba(255, 253, 245, 0.7), transparent 34%),
+    repeating-linear-gradient(96deg, rgba(79, 94, 75, 0.02) 0 1px, transparent 1px 14px),
+    linear-gradient(135deg, #ebe9df, #dde3d8 58%, #eeebe1);
+  box-shadow:
+    inset 0 0 0 1px rgba(77, 103, 82, 0.48),
+    inset 0 0 0 2px rgba(151, 119, 65, 0.24);
 }
 
 :root[data-theme='forest'] body .game-page-layout .game-body {
@@ -2057,45 +2103,83 @@
 :root[data-theme='forest'] body .game-page-layout .input-bar {
   margin: 0;
   border-radius: 0;
-  background:
-    linear-gradient(115deg, rgba(255, 255, 249, 0.62), rgba(217, 229, 214, 0.54)), #e4eadf;
+  background-color: #f2eee3;
+  background-image:
+    repeating-linear-gradient(93deg, rgba(89, 95, 75, 0.018) 0 1px, transparent 1px 15px),
+    repeating-linear-gradient(2deg, rgba(150, 132, 91, 0.014) 0 1px, transparent 1px 19px),
+    linear-gradient(115deg, rgba(255, 253, 246, 0.72), rgba(235, 232, 219, 0.52));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 250, 0.92),
-    inset 0 0 0 2px rgba(103, 132, 107, 0.28),
-    inset 0 0 14px rgba(49, 79, 57, 0.1);
+    inset 0 1px 0 rgba(255, 253, 247, 0.9),
+    inset 0 0 12px rgba(65, 78, 64, 0.06);
 }
 
 :root[data-theme='forest'] body .game-page-layout .top-bar {
   border: 0;
-  border-bottom: 3px double rgba(83, 112, 90, 0.72);
+  border-bottom: 1px solid var(--forest-gold-line);
+  background-color: #dde3d8;
+  background-image:
+    linear-gradient(180deg, rgba(255, 254, 248, 0.64), rgba(185, 203, 186, 0.2)),
+    repeating-linear-gradient(90deg, rgba(75, 98, 78, 0.025) 0 1px, transparent 1px 18px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 254, 249, 0.94),
+    inset 0 -2px 0 rgba(91, 116, 94, 0.18),
+    0 2px 4px rgba(56, 70, 57, 0.08);
 }
 
-:root[data-theme='forest'] body .game-page-layout .side-toolbar,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar {
+  padding-top: 6px;
+  gap: 2px;
+  border: 0;
+  border-right: 1px solid rgba(76, 103, 82, 0.56);
+  background-color: #d5ded2;
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 254, 248, 0.7),
+    rgba(192, 207, 191, 0.38) 55%,
+    rgba(93, 121, 98, 0.15)
+  );
+  box-shadow:
+    inset -2px 0 0 rgba(151, 119, 65, 0.18),
+    inset 1px 0 0 rgba(255, 254, 248, 0.76);
+}
+
 :root[data-theme='forest'] body .game-page-layout .scene-panel {
   border: 0;
-  border-right: 3px double rgba(83, 112, 90, 0.7);
+  border-right: 1px solid rgba(76, 103, 82, 0.56);
+  box-shadow:
+    inset -2px 0 0 rgba(151, 119, 65, 0.16),
+    inset 0 1px 0 rgba(255, 253, 247, 0.84);
 }
 
 :root[data-theme='forest'] body .game-page-layout .status-hud {
   border: 0;
-  border-left: 3px double rgba(83, 112, 90, 0.7);
+  border-left: 1px solid rgba(76, 103, 82, 0.56);
+  box-shadow:
+    inset 2px 0 0 rgba(151, 119, 65, 0.16),
+    inset 0 1px 0 rgba(255, 253, 247, 0.84);
 }
 
 :root[data-theme='forest'] body .game-page-layout .chat-flow {
   overflow: hidden;
-  border: 0;
-  background-color: #f0f1e8;
+  border-top: 0;
+  border-right: 1px solid rgba(82, 106, 86, 0.5);
+  border-bottom: 0;
+  border-left: 1px solid rgba(82, 106, 86, 0.5);
+  background-color: #f4f0e5;
   background-image:
-    linear-gradient(rgba(250, 249, 241, 0.36), rgba(238, 241, 232, 0.28)), var(--forest-chassis);
-  background-repeat: no-repeat;
-  background-position: center, center;
+    repeating-linear-gradient(94deg, rgba(92, 91, 70, 0.016) 0 1px, transparent 1px 17px),
+    repeating-linear-gradient(3deg, rgba(139, 120, 78, 0.014) 0 1px, transparent 1px 21px),
+    linear-gradient(135deg, rgba(250, 247, 238, 0.98), rgba(239, 235, 223, 0.96));
+  background-repeat: repeat, repeat, no-repeat;
+  background-position: center;
   background-size:
-    100% 100%,
-    200% auto;
+    auto,
+    auto,
+    100% 100%;
   box-shadow:
-    inset 3px 0 0 rgba(82, 111, 88, 0.72),
-    inset -3px 0 0 rgba(82, 111, 88, 0.72),
-    inset 0 0 30px rgba(59, 88, 66, 0.1);
+    inset 2px 0 0 rgba(151, 119, 65, 0.12),
+    inset -2px 0 0 rgba(151, 119, 65, 0.12),
+    inset 0 0 24px rgba(62, 74, 61, 0.05);
 }
 
 :root[data-theme='forest'] body .game-page-layout .chat-messages {
@@ -2105,9 +2189,13 @@
 :root[data-theme='forest'] body .game-page-layout .input-bar {
   margin: 0 8px 7px;
   padding: 7px;
-  border: 2px solid rgba(76, 117, 95, 0.64);
-  border-radius: 3px;
-  background: rgba(239, 244, 235, 0.72);
+  border: 1px solid rgba(78, 105, 84, 0.58);
+  border-radius: 2px;
+  background-color: rgba(246, 242, 231, 0.94);
+  background-image: linear-gradient(180deg, rgba(255, 253, 246, 0.62), rgba(210, 220, 207, 0.16));
+  box-shadow:
+    inset 0 1px 3px rgba(62, 77, 64, 0.08),
+    0 -1px 0 rgba(151, 119, 65, 0.26);
 }
 
 :root[data-theme='forest'] body .game-page-layout .scene-panel::after,
@@ -2116,14 +2204,237 @@
   content: '';
   display: block;
   position: absolute;
-  z-index: 5;
-  inset: 0;
-  border: 10px solid transparent;
-  border-image-source: var(--forest-avatar-medallion);
-  border-image-slice: 92;
-  border-image-width: 10px;
-  border-image-repeat: round;
+  z-index: 0;
+  border: 0;
+  background-image: var(--forest-herbarium-sprig);
+  background-repeat: no-repeat;
+  background-position: bottom left;
+  background-size: contain;
   pointer-events: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-panel .tab-item::after {
+  top: -4px;
+  bottom: auto;
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-panel::after {
+  bottom: -18px;
+  left: -18px;
+  width: 168px;
+  height: 290px;
+  opacity: 0.16;
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-flow::after {
+  top: 14px;
+  right: -28px;
+  width: 144px;
+  height: 238px;
+  opacity: 0.08;
+  transform: rotate(180deg);
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-hud::after {
+  right: -24px;
+  bottom: -42px;
+  width: 142px;
+  height: 250px;
+  opacity: 0.1;
+}
+
+:root[data-theme='forest'] body .game-page-layout :is(.scene-panel, .chat-flow, .status-hud) > * {
+  position: relative;
+  z-index: 1;
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-title {
+  border: 1px solid rgba(101, 124, 103, 0.34);
+  border-radius: 2px;
+  background-color: rgba(248, 244, 233, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 254, 248, 0.9),
+    0 1px 2px rgba(58, 72, 59, 0.08);
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-top {
+  margin: 8px 9px 0;
+  padding: 11px 12px 10px;
+  border: 1px solid rgba(89, 113, 92, 0.36);
+  border-bottom-color: var(--forest-gold-line);
+  border-radius: 2px 2px 0 0;
+  background-color: rgba(247, 243, 232, 0.88);
+  background-image: linear-gradient(120deg, rgba(255, 254, 248, 0.52), rgba(212, 222, 209, 0.16));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 254, 248, 0.86),
+    0 2px 4px rgba(58, 73, 59, 0.07);
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-tab-body {
+  margin: 0 9px 9px;
+  padding: 10px;
+  border: 1px solid rgba(89, 113, 92, 0.3);
+  border-top: 0;
+  border-radius: 0 0 2px 2px;
+  background-color: rgba(246, 242, 231, 0.62);
+  box-shadow: inset 0 -1px 0 rgba(255, 253, 246, 0.62);
+}
+
+:root[data-theme='forest'] body .game-page-layout .section-header {
+  border-bottom: 1px solid rgba(151, 119, 65, 0.22);
+  background-color: rgba(218, 226, 214, 0.46);
+  box-shadow: inset 0 1px 0 rgba(255, 254, 248, 0.58);
+}
+
+:root[data-theme='forest'] body .game-page-layout .section-header.clickable:hover,
+:root[data-theme='forest'] body .game-page-layout .section-header.clickable:focus-visible {
+  background-color: rgba(226, 232, 220, 0.72);
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-overview {
+  padding: 0;
+  background: transparent;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-overview > .section,
+:root[data-theme='forest'] body .game-page-layout .status-glass,
+:root[data-theme='forest'] body .game-page-layout .status-glass > .section {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-glass > .section + .section {
+  border-top: 1px solid rgba(91, 113, 93, 0.24);
+}
+
+:root[data-theme='forest'] body .game-page-layout .player-summary {
+  padding: 8px 12px 12px;
+  background-color: rgba(247, 243, 232, 0.32);
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot:not(.large) {
+  box-sizing: border-box;
+  aspect-ratio: 1;
+  max-width: 10.25rem;
+  padding: 10px;
+  border: 1px solid rgba(74, 100, 80, 0.62);
+  border-radius: 50%;
+  background-color: rgba(220, 229, 216, 0.82);
+  background-image: radial-gradient(circle, rgba(255, 254, 247, 0.64), rgba(183, 201, 184, 0.2));
+  box-shadow:
+    0 0 0 3px rgba(246, 242, 231, 0.9),
+    0 0 0 4px rgba(151, 119, 65, 0.46),
+    inset 0 1px 0 rgba(255, 254, 249, 0.9),
+    0 4px 8px rgba(55, 72, 58, 0.13);
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot:not(.large)::after {
+  display: block;
+  inset: 5px;
+  border: 1px solid rgba(151, 119, 65, 0.48);
+  border-radius: 50%;
+  background: transparent;
+  filter: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot:not(.large) .avatar-shape-square {
+  border: 1px solid rgba(79, 104, 84, 0.34);
+  border-radius: 50%;
+  background-color: rgba(226, 233, 221, 0.9);
+  background-image: radial-gradient(circle, rgba(255, 254, 247, 0.54), rgba(192, 208, 193, 0.18));
+  box-shadow: inset 0 2px 5px rgba(56, 77, 61, 0.09);
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot.large {
+  border: 1px solid rgba(76, 103, 82, 0.58);
+  border-radius: 2px;
+  box-shadow:
+    0 0 0 2px rgba(246, 242, 231, 0.86),
+    0 0 0 3px rgba(151, 119, 65, 0.36),
+    0 4px 8px rgba(55, 72, 58, 0.12);
+}
+
+:root[data-theme='forest'] body .game-page-layout .summary-name {
+  min-width: 8.5rem;
+  padding: 5px 14px;
+  border: 1px solid rgba(77, 103, 82, 0.5);
+  border-radius: 2px;
+  background-color: rgba(211, 223, 207, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 254, 248, 0.78),
+    0 1px 2px rgba(55, 72, 58, 0.09);
+  text-align: center;
+}
+
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .collapse-toggle,
+:root[data-theme='forest']
+  body
+  .game-page-layout
+  :is(.top-btn, .input-btn, .send-btn, .scene-title-action) {
+  border: 1px solid rgba(83, 108, 88, 0.46);
+  border-radius: 2px;
+  background-color: rgba(239, 240, 228, 0.86);
+  background-image: linear-gradient(180deg, rgba(255, 254, 248, 0.66), rgba(176, 195, 177, 0.14));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 254, 249, 0.84),
+    inset 0 -1px 0 rgba(65, 91, 70, 0.1),
+    0 1px 2px rgba(56, 73, 59, 0.1);
+}
+
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn:hover,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn:focus-visible,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .collapse-toggle:hover,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .collapse-toggle:focus-visible,
+:root[data-theme='forest'] body .game-page-layout .top-btn:hover,
+:root[data-theme='forest'] body .game-page-layout .top-btn:focus-visible,
+:root[data-theme='forest'] body .game-page-layout .input-btn:hover,
+:root[data-theme='forest'] body .game-page-layout .input-btn:focus-visible,
+:root[data-theme='forest'] body .game-page-layout .send-btn:hover,
+:root[data-theme='forest'] body .game-page-layout .send-btn:focus-visible,
+:root[data-theme='forest'] body .game-page-layout .scene-title-action:hover,
+:root[data-theme='forest'] body .game-page-layout .scene-title-action:focus-visible {
+  color: #294735;
+  background-color: rgba(249, 245, 234, 0.96);
+  border-color: rgba(64, 98, 74, 0.64);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 254, 249, 0.94),
+    0 2px 4px rgba(55, 72, 58, 0.13);
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-field {
+  color: var(--theme-text-primary);
+  border: 1px solid rgba(79, 104, 84, 0.44);
+  border-radius: 2px;
+  background-color: rgba(249, 246, 237, 0.94);
+  box-shadow:
+    inset 0 1px 4px rgba(57, 75, 61, 0.08),
+    0 1px 0 rgba(255, 254, 248, 0.72);
+}
+
+:root[data-theme='forest'] body .game-page-layout .bubble-narrative-full {
+  border: 0;
+  background-color: rgba(249, 246, 237, 0.56);
+  box-shadow: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .bubble-player,
+:root[data-theme='forest'] body .game-page-layout .dialogue-card {
+  border: 1px solid rgba(151, 119, 65, 0.18);
+  border-radius: 2px;
+  background-color: rgba(248, 244, 234, 0.52);
+  box-shadow: inset 0 1px 0 rgba(255, 254, 248, 0.64);
+}
+
+:root[data-theme='forest'] body .game-page-layout .kv-item {
+  border: 1px solid rgba(89, 112, 92, 0.24);
+  border-radius: 2px;
+  background-color: rgba(219, 227, 215, 0.48);
+  background-image: none;
+  box-shadow: inset 0 1px 0 rgba(255, 254, 248, 0.56);
 }
 
 /* Moonwhite Brocade: woven light, restrained seams, no framed bitmap. */
@@ -2536,7 +2847,6 @@
 }
 
 @media (max-width: 1100px) {
-  :root[data-theme='forest'] body .game-page-layout .chat-flow,
   :root[data-theme='obsidian'] body .game-page-layout .chat-flow,
   :root[data-theme='ocean'] body .game-page-layout .chat-flow {
     background-size:
@@ -2553,5 +2863,840 @@
     background: rgba(221, 234, 248, 0.72);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+}
+
+/* Jade Conservatory reference-fidelity pass: bound herbarium folio. */
+:root[data-theme='forest'] body .game-page-layout {
+  background-color: #dbe3d7;
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 540px 540px;
+  box-shadow:
+    inset 0 0 0 1px rgba(55, 82, 63, 0.5),
+    inset 0 0 0 3px rgba(171, 142, 84, 0.28);
+}
+
+:root[data-theme='forest'] body .game-page-layout .game-body {
+  gap: 0;
+  padding: 0;
+  background-color: #d8e1d5;
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 520px 520px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-bar {
+  background-color: #f1ecdf;
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 460px 460px;
+  border: 0;
+  border-bottom: 2px solid rgba(77, 103, 82, 0.62);
+  box-shadow:
+    inset 0 -1px 0 rgba(171, 142, 84, 0.52),
+    0 2px 5px rgba(47, 66, 52, 0.16);
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-title {
+  padding: 4px 20px;
+  border: 4px solid transparent;
+  border-image: var(--forest-jade-frame) 28 / 4px stretch;
+  border-radius: 0;
+  background-color: rgba(248, 243, 230, 0.92);
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 360px 360px;
+  box-shadow: 0 2px 5px rgba(48, 68, 53, 0.12);
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-title-rule {
+  background: var(--forest-gold-line);
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-btn,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .collapse-toggle {
+  color: #294735;
+  border: 5px solid transparent;
+  border-image: var(--forest-jade-frame) 28 / 5px stretch;
+  border-radius: 0;
+  background-color: #f4efe2;
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 260px 260px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 248, 0.86),
+    0 2px 4px rgba(49, 69, 54, 0.15);
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-btn:hover,
+:root[data-theme='forest'] body .game-page-layout .top-btn:focus-visible,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn:hover,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn:focus-visible,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .collapse-toggle:hover,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .collapse-toggle:focus-visible {
+  color: #173625;
+  background-color: #fbf7eb;
+  border-color: transparent;
+  filter: brightness(1.035) saturate(1.04);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 250, 0.94),
+    0 3px 6px rgba(43, 64, 49, 0.2);
+}
+
+:root[data-theme='forest'] body .game-page-layout .side-toolbar {
+  padding-top: 6px;
+  gap: 2px;
+  border: 0;
+  border-right: 2px solid rgba(76, 103, 82, 0.62);
+  border-radius: 0;
+  background-color: #d6e0d3;
+  background-image: var(--forest-jade-tab);
+  background-repeat: repeat-y;
+  background-position: center;
+  background-size: 100% 88px;
+  box-shadow:
+    inset -1px 0 0 rgba(171, 142, 84, 0.48),
+    inset 1px 0 0 rgba(255, 255, 248, 0.76);
+}
+
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .collapse-toggle {
+  min-height: 49px;
+  margin-inline: 3px;
+  padding: 6px 2px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-panel,
+:root[data-theme='forest'] body .game-page-layout .status-hud {
+  box-sizing: border-box;
+  border: 8px solid transparent;
+  border-image: var(--forest-jade-frame) 28 / 8px stretch;
+  border-radius: 0;
+  background-color: #f4eee1;
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-position: center;
+  background-size: 480px 480px;
+  background-clip: padding-box;
+  box-shadow:
+    inset 0 0 22px rgba(115, 93, 57, 0.07),
+    0 2px 6px rgba(46, 64, 51, 0.18);
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-panel::after,
+:root[data-theme='forest'] body .game-page-layout .status-hud::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  display: block;
+  width: 132px;
+  height: 390px;
+  border: 0;
+  background-image: var(--forest-herbarium-sprig);
+  background-repeat: no-repeat;
+  background-position: center bottom;
+  background-size: contain;
+  opacity: 0.14;
+  pointer-events: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-panel::after {
+  right: auto;
+  bottom: 4px;
+  left: 4px;
+  transform: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-hud::after {
+  right: 4px;
+  bottom: -32px;
+  left: auto;
+  transform: scaleX(-1);
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-panel > *,
+:root[data-theme='forest'] body .game-page-layout .status-hud > * {
+  position: relative;
+  z-index: 1;
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-top {
+  box-sizing: border-box;
+  min-height: 145px;
+  margin: 4px 4px 0;
+  padding: 13px 14px;
+  border: 5px solid transparent;
+  border-image: var(--forest-jade-frame) 28 / 5px stretch;
+  border-radius: 0;
+  background-color: rgba(247, 241, 227, 0.93);
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 360px 360px;
+  box-shadow: 0 2px 5px rgba(57, 72, 59, 0.1);
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-tab-body {
+  margin: 0 4px 4px;
+  padding: 12px;
+  border: 1px solid rgba(83, 108, 88, 0.28);
+  border-top: 0;
+  border-radius: 0;
+  background-color: rgba(247, 241, 227, 0.46);
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 420px 420px;
+  box-shadow: inset 0 0 18px rgba(107, 86, 54, 0.05);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-bar {
+  padding: 5px 6px 8px;
+  border: 0;
+  background-color: rgba(239, 233, 216, 0.88);
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 320px 320px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 253, 245, 0.82),
+    inset 0 -1px 0 rgba(151, 119, 66, 0.32);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-list {
+  gap: 3px;
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 46px;
+  padding: 9px 8px 11px;
+  color: #385442;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: var(--forest-jade-tab);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  box-shadow: none;
+  filter: brightness(0.96) saturate(0.9);
+  transition:
+    color 150ms ease-out,
+    filter 150ms ease-out;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item:last-child {
+  border-right: 0;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item::before {
+  content: '';
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: -7px;
+  display: block;
+  width: 11px;
+  height: 4px;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: var(--forest-tab-connector);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  box-shadow: none;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item:first-child::before {
+  display: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item::after {
+  content: '';
+  position: absolute;
+  z-index: 3;
+  bottom: -4px;
+  left: 50%;
+  display: block;
+  width: 30px;
+  height: 6px;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: var(--forest-tab-connector);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  box-shadow: none;
+  opacity: 0.82;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item:hover {
+  color: #213f2d;
+  background-color: transparent;
+  filter: brightness(1.035) saturate(1.02);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item:focus-visible {
+  color: #173925;
+  background-color: transparent;
+  filter: brightness(1.045) saturate(1.05);
+  outline: 2px solid #315f46;
+  outline-offset: -4px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-active {
+  color: #173b27;
+  font-weight: 650;
+  background-color: transparent;
+  background-image: var(--forest-jade-tab);
+  border: 0;
+  box-shadow: none;
+  filter: brightness(1.085) saturate(1.08) contrast(1.02);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-active::after {
+  width: 34px;
+  background-color: transparent;
+  background-image: var(--forest-tab-connector);
+  opacity: 1;
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-flow {
+  box-sizing: border-box;
+  position: relative;
+  isolation: isolate;
+  margin: 7px 10px 6px;
+  overflow: visible;
+  border: 10px solid transparent;
+  border-image: var(--forest-jade-frame) 28 / 10px stretch;
+  border-radius: 0;
+  background-color: #f5efe2;
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-position: center;
+  background-size: 560px 560px;
+  background-clip: padding-box;
+  box-shadow:
+    inset 12px 0 18px -18px rgba(46, 71, 52, 0.44),
+    inset -12px 0 18px -18px rgba(46, 71, 52, 0.44),
+    inset 0 0 24px rgba(114, 88, 50, 0.06),
+    0 4px 10px rgba(43, 63, 49, 0.2);
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-flow::before,
+:root[data-theme='forest'] body .game-page-layout .chat-flow::after {
+  content: '';
+  position: absolute;
+  z-index: 4;
+  top: 3px;
+  bottom: 58px;
+  display: block;
+  width: 26px;
+  height: auto;
+  border: 0;
+  background-color: transparent;
+  background-image: var(--forest-binding-clasp), var(--forest-binding-clasp);
+  background-repeat: no-repeat;
+  background-position:
+    center 7%,
+    center 93%;
+  background-size: 26px 70px;
+  opacity: 0.96;
+  pointer-events: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-flow::before {
+  left: -22px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-flow::after {
+  right: -22px;
+  left: auto;
+  transform: scaleX(-1);
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-messages {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-messages::before,
+:root[data-theme='forest'] body .game-page-layout .chat-messages::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  display: block;
+  width: 126px;
+  height: 430px;
+  background-image: var(--forest-herbarium-sprig);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  opacity: 0.1;
+  pointer-events: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-messages::before {
+  top: -68px;
+  right: 4px;
+  transform: rotate(180deg);
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-messages::after {
+  right: 12px;
+  bottom: -104px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-messages > * {
+  position: relative;
+  z-index: 1;
+}
+
+:root[data-theme='forest'] body .game-page-layout .bubble-narrative-full,
+:root[data-theme='forest'] body .game-page-layout .bubble-player,
+:root[data-theme='forest'] body .game-page-layout .dialogue-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-bar {
+  box-sizing: border-box;
+  margin: 0 2px 2px;
+  padding: 7px;
+  border: 6px solid transparent;
+  border-image: var(--forest-jade-frame) 28 / 6px stretch;
+  border-radius: 0;
+  background-color: #dce4d7;
+  background-image: none;
+  box-shadow: 0 -2px 5px rgba(49, 70, 54, 0.14);
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-field {
+  color: var(--theme-text-primary);
+  border: 1px solid rgba(78, 103, 83, 0.5);
+  border-radius: 2px;
+  background-color: #f8f2e5;
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 360px 360px;
+  box-shadow:
+    inset 0 2px 5px rgba(67, 79, 64, 0.14),
+    0 1px 0 rgba(255, 255, 248, 0.72);
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-btn,
+:root[data-theme='forest'] body .game-page-layout .send-btn {
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: var(--forest-jade-tab);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  box-shadow: none;
+  filter: brightness(0.98) saturate(0.96);
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-btn:hover,
+:root[data-theme='forest'] body .game-page-layout .input-btn:focus-visible,
+:root[data-theme='forest'] body .game-page-layout .send-btn:hover,
+:root[data-theme='forest'] body .game-page-layout .send-btn:focus-visible {
+  color: #173b27;
+  background-color: transparent;
+  border-color: transparent;
+  filter: brightness(1.08) saturate(1.06);
+  box-shadow: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-overview {
+  padding: 0;
+  background: transparent;
+}
+
+:root[data-theme='forest'] body .game-page-layout .player-summary {
+  padding: 10px 12px 13px;
+  background-color: rgba(247, 241, 227, 0.62);
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 420px 420px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot:not(.large) {
+  box-sizing: border-box;
+  width: 12rem;
+  max-width: 12rem;
+  aspect-ratio: 523 / 640;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot:not(.large)::after {
+  content: '';
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  display: block;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: var(--forest-avatar-medallion);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  filter: drop-shadow(0 4px 6px rgba(45, 66, 50, 0.22));
+  pointer-events: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot:not(.large) .avatar-xl {
+  opacity: 0;
+}
+
+:root[data-theme='forest'] body .game-page-layout .summary-name {
+  min-width: 14rem;
+  padding: 9px 22px 11px;
+  color: #264532;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: var(--forest-jade-tab);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  box-shadow: none;
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 0 rgba(255, 255, 248, 0.72);
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-overview > .section,
+:root[data-theme='forest'] body .game-page-layout .status-glass,
+:root[data-theme='forest'] body .game-page-layout .status-glass > .section {
+  border-radius: 0;
+  background-color: rgba(247, 241, 227, 0.72);
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 440px 440px;
+  box-shadow: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-glass {
+  margin-top: 0;
+  overflow: hidden;
+  border: 6px solid transparent;
+  border-image: var(--forest-jade-frame) 28 / 6px stretch;
+  box-shadow: 0 2px 5px rgba(48, 68, 53, 0.12);
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-glass > .section {
+  border: 0;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-glass > .section + .section {
+  border-top: 1px solid rgba(91, 113, 93, 0.32);
+}
+
+:root[data-theme='forest'] body .game-page-layout .section-header {
+  border-bottom: 1px solid rgba(151, 119, 65, 0.36);
+  background-color: rgba(216, 226, 212, 0.7);
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 340px 340px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 248, 0.7),
+    inset 0 -1px 0 rgba(76, 103, 82, 0.12);
+}
+
+:root[data-theme='forest'] body .game-page-layout .kv-item {
+  border: 4px solid transparent;
+  border-image: var(--forest-jade-frame) 28 / 4px stretch;
+  border-radius: 0;
+  background-color: #f1ecdf;
+  background-image: var(--forest-parchment-texture);
+  background-repeat: repeat;
+  background-size: 260px 260px;
+  box-shadow: 0 1px 3px rgba(50, 68, 54, 0.1);
+}
+
+@media (max-width: 1100px) {
+  :root[data-theme='forest'] body .game-page-layout .scene-top {
+    min-height: 126px;
+  }
+
+  :root[data-theme='forest'] body .game-page-layout .chat-flow {
+    margin-inline: 7px;
+    border-width: 8px;
+    border-image-width: 8px;
+  }
+
+  :root[data-theme='forest'] body .game-page-layout .chat-flow::before {
+    left: -19px;
+  }
+
+  :root[data-theme='forest'] body .game-page-layout .chat-flow::after {
+    right: -19px;
+  }
+
+  :root[data-theme='forest'] body .game-page-layout .portrait-slot:not(.large) {
+    width: 9.5rem;
+    max-width: 9.5rem;
+  }
+
+  :root[data-theme='forest'] body .game-page-layout .summary-name {
+    min-width: 10.5rem;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme='forest'] body .game-page-layout .scene-panel,
+  :root[data-theme='forest'] body .game-page-layout .status-hud,
+  :root[data-theme='forest'] body .game-page-layout .chat-flow,
+  :root[data-theme='forest'] body .game-page-layout .scene-top,
+  :root[data-theme='forest'] body .game-page-layout .scene-tab-body,
+  :root[data-theme='forest'] body .game-page-layout .status-glass {
+    background-color: #f4eee1;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:is(
+      [data-theme='parchment'],
+      [data-theme='forest'],
+      [data-theme='ivory'],
+      [data-theme='misty-lilac'],
+      [data-theme='obsidian'],
+      [data-theme='bronze'],
+      [data-theme='ocean']
+    )
+    body
+    .game-page-layout
+    *,
+  :root:is(
+      [data-theme='parchment'],
+      [data-theme='forest'],
+      [data-theme='ivory'],
+      [data-theme='misty-lilac'],
+      [data-theme='obsidian'],
+      [data-theme='bronze'],
+      [data-theme='ocean']
+    )
+    body
+    .game-page-layout
+    *::before,
+  :root:is(
+      [data-theme='parchment'],
+      [data-theme='forest'],
+      [data-theme='ivory'],
+      [data-theme='misty-lilac'],
+      [data-theme='obsidian'],
+      [data-theme='bronze'],
+      [data-theme='ocean']
+    )
+    body
+    .game-page-layout
+    *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+/* Jade reference scale calibration at the selected desktop viewport. */
+:root[data-theme='forest'] body .game-page-layout .top-bar {
+  height: 3.5rem;
+  min-height: 3.5rem;
+  font-size: 1rem;
+}
+
+:root[data-theme='forest'] body .game-page-layout .bubble-text {
+  font-size: 1.0625rem;
+  line-height: 1.72;
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-top {
+  font-size: 0.9375rem;
+  line-height: 1.65;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item {
+  font-size: 1rem;
+}
+
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .collapse-toggle {
+  font-size: 0.96875rem;
+}
+
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn i {
+  font-size: 1rem;
+}
+
+:root[data-theme='forest'] body .game-page-layout .identity-line {
+  font-size: 0.8125rem;
+}
+
+:root[data-theme='forest'] body .game-page-layout .section-header {
+  font-size: 1rem;
+}
+
+:root[data-theme='forest'] body .game-page-layout .res-label,
+:root[data-theme='forest'] body .game-page-layout .res-values,
+:root[data-theme='forest'] body .game-page-layout .kv-label,
+:root[data-theme='forest'] body .game-page-layout .kv-value {
+  font-size: 0.8125rem;
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-field {
+  font-size: 1rem;
+}
+
+@media (min-width: 1200px) {
+  :root[data-theme='forest'] body .game-page-layout,
+  :root[data-theme='forest'] body .game-page-layout .game-body {
+    --rail-w: 5.4rem;
+  }
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-glass .section-header {
+  min-height: 44px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .attribute-section .section-body {
+  gap: 10px;
+  padding: 8px 12px 12px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .attribute-section .resource-bar {
+  min-height: 26px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .attribute-section .res-track {
+  min-height: 25px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .attribute-section .attr-grid .kv-item {
+  min-height: 58px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-glass .empty-tab {
+  padding-block: 14px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-messages::after {
+  right: 12px;
+  bottom: 0;
+  height: 360px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-top {
+  min-height: 155px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .summary-name {
+  box-sizing: border-box;
+  min-height: 3.6rem;
+  margin-top: -1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* StatusHUD's component-level zoom makes its visual and scroll geometry diverge
+   in Chromium. Preserve the reference scale with explicit dimensions so every
+   measured ledger landmark shares the same coordinate system. */
+:root[data-theme='forest'] body .game-page-layout .status-hud {
+  zoom: 1;
+}
+
+:root[data-theme='forest'] body .game-page-layout .player-summary {
+  padding: 3px 13px 20px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot:not(.large) {
+  width: 13.2rem;
+  max-width: 13.2rem;
+}
+
+:root[data-theme='forest'] body .game-page-layout .summary-name {
+  min-width: 15.4rem;
+  min-height: 3.75rem;
+  margin-top: -0.7rem;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-overview > .section > .section-header {
+  box-sizing: border-box;
+  min-height: 52px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-hud .identity-line,
+:root[data-theme='forest'] body .game-page-layout .status-hud .res-label,
+:root[data-theme='forest'] body .game-page-layout .status-hud .res-values,
+:root[data-theme='forest'] body .game-page-layout .status-hud .kv-label,
+:root[data-theme='forest'] body .game-page-layout .status-hud .kv-value {
+  font-size: 0.875rem;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-hud .section-header,
+:root[data-theme='forest'] body .game-page-layout .status-hud .tab-item {
+  font-size: 1.0625rem;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-glass .section-header {
+  min-height: 48px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .attribute-section > .section-header {
+  min-height: 57px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .attribute-section .section-body {
+  gap: 11px;
+  padding: 9px 13px 13px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .attribute-section .resource-bar {
+  min-height: 29px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .attribute-section .res-track {
+  min-height: 28px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .attribute-section .attr-grid .kv-item {
+  min-height: 64px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-glass .empty-tab {
+  padding-block: 15px;
+}
+
+@media (max-width: 1100px) {
+  :root[data-theme='forest'] body .game-page-layout .portrait-slot:not(.large) {
+    width: 10.45rem;
+    max-width: 10.45rem;
+  }
+
+  :root[data-theme='forest'] body .game-page-layout .summary-name {
+    min-width: 11.55rem;
   }
 }
