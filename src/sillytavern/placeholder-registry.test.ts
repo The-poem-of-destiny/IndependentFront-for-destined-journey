@@ -1335,6 +1335,20 @@ describe('Chain communication placeholders', () => {
     expect(result).toBe('');
   });
 
+  it('COMBAT_ROSTER returns empty (injected via resolveTemplate localParams)', () => {
+    const result = PLACEHOLDER_REGISTRY['COMBAT_ROSTER'](mockCtx(), mockConfig());
+    expect(result).toBe('');
+  });
+
+  it('COMBAT_ROSTER always returns empty from registry', () => {
+    // Even with _localParams set on ctx, the registry resolver ignores it.
+    // localParams are injected by resolveTemplate(), not the registry.
+    const ctx = mockCtx();
+    (ctx as any)._localParams = { COMBAT_ROSTER: '我方: 理查德；敌方: 冠军' };
+    const result = PLACEHOLDER_REGISTRY['COMBAT_ROSTER'](ctx, mockConfig());
+    expect(result).toBe('');
+  });
+
   it('CHAR_GEN_RESULT reads from agentOutputs', () => {
     const ctx = mockCtx();
     ctx.agentOutputs.set('char_gen', '<char_result><name>NPC</name></char_result>');

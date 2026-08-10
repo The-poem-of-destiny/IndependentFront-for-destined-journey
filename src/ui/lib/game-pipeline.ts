@@ -1538,7 +1538,11 @@ export class GamePipeline {
     'system_core',
   ]);
 
-  /** 🆕 M2 v3 分支：走 v3 Coordinator（openCombat + runCombatV3）。 */
+  /** 🆕 M2 v3 分支：combat_trigger 检出 → **只弹就绪面板**（F2，2026-08-10）。
+   *  就绪内容 = marker 快照（参战方/战斗类型/环境/起因），由 v3_combat_ready 事件
+   *  投进 store（combatReady 置位 → isInCombat=true → CombatPanel 显示就绪分支）。
+   *  玩家点「开始战斗」→ store.startCombat → 占位句柄的 start → startCombatV3 真开打。
+   *  返回 null（orchestrator 不消费返回值；就绪期不 enterCombat / 不 runCombatV3）。 */
   private async handleCombatTriggerV3(
     marker: CombatTriggerMarker,
     storyOutput: string,
@@ -1546,6 +1550,56 @@ export class GamePipeline {
     const endpoint = this.getEndpointForAgent('combat_v3');
     if (!endpoint) {
       console.warn('[GamePipeline] combat_v3 跳过: 未配置 API endpoint');
+      return null;
+    }
+    // 存档 marker（startCombatV3 / 重开战斗 restart 回调复用）
+    this._lastCombatMarker = marker;
+
+    // marker 快照 → v3_combat_ready（名字名单拆成数组；空名单字段缺席）
+    const splitNames = (s: string | undefined): string[] | undefined => {
+      if (!s) return undefined;
+      const names = s
+        .split(/[,，]/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      return names.length > 0 ? names : undefined;
+    };
+    this.game.applyCombatEvent({
+      type: 'v3_combat_ready',
+      combatType: marker.combatType,
+      environment: marker.environment,
+      allies: splitNames(marker.allies),
+      enemies: splitNames(marker.enemies),
+      bodyText: marker.bodyText,
+      brief:
+        [marker.combatType ?? '', marker.environment ?? '', marker.bodyText ?? '']
+          .filter(Boolean)
+          .join('｜') || undefined,
+    });
+    // 就绪期占位句柄：只有 start（store.startCombat 点「开始」才触发真开打）。
+    // startCombatV3 里会 setCombatCoordinator 替换成完整句柄（submit/abandon/restart）。
+    this.game.setCombatCoordinator({
+      start: async () => {
+        await this.startCombatV3(storyOutput);
+      },
+    });
+    return null;
+  }
+
+  /** 🆕 M2 v3 分支（F2）：就绪面板点「开始」后的真开打 —— 原 handleCombatTriggerV3
+   *  主体（enterCombat → participants → pre-combat 快照 → setCombatCoordinator →
+   *  runCombatV3 → 摘要回注）。marker 取自已存档的 _lastCombatMarker。 */
+  private async startCombatV3(storyOutput: string): Promise<CombatSummaryResult | null> {
+    const marker = this._lastCombatMarker;
+    if (!marker) {
+      console.warn('[GamePipeline] startCombatV3 跳过: 无已存档 combat marker');
+      this.game.exitCombat();
+      return null;
+    }
+    const endpoint = this.getEndpointForAgent('combat_v3');
+    if (!endpoint) {
+      console.warn('[GamePipeline] combat_v3 跳过: 未配置 API endpoint');
+      this.game.exitCombat();
       return null;
     }
     try {
@@ -1556,10 +1610,15 @@ export class GamePipeline {
       const { runCombatV3 } = await import('@engine/combat-v3');
       const { characterToCombatParticipant } = await import('@engine/combat-v2-types');
 
-      // 组装 bundle：全部人物 → CombatParticipant。
+      // 组装 bundle：参战角色 → CombatParticipant。
       // 🔴 2026-08-08 阵营修复：调度器在 combat_trigger 上声明 allies/enemies 名单，
       //    按名分阵营——否则所有非 player 角色都被当 enemy（契约的妲丽安会被敌方
       //    Agent 控制）。名单缺省时回退到旧行为（player=ally，其余=enemy）。
+      // 🔴 2026-08-10 名单收敛（真机 debug）：声明了名单时，**只把名单内的角色拉进
+      //    战斗**（外加 player 本体）。此前所有 hp>0 角色全拉 + sideOf 把名单外非
+      //    player 一律判 enemy——我方旁观 NPC（客栈掌柜奥斯瓦尔德，不在
+      //    allies/enemies 名单）会被当敌方拉进 participants，战斗面板出现多余单位
+      //    并让敌方 Agent 替它决策。名单缺省（无名单声明）时保持旧行为全拉。
       const playerC = this.game.characters.find((c) => c.type === 'player');
       const allyNames = new Set(
         (marker.allies ?? '')
@@ -1576,6 +1635,7 @@ export class GamePipeline {
       const sideOf = (c: CharacterState): 'ally' | 'enemy' => {
         if (allyNames.size > 0 || enemyNames.size > 0) {
           // 调度器给了名单 → 名单内命中按阵营，未命中的：玩家归 ally，其余归 enemy
+          // （未命中的非玩家已被下方 filter 排除，此分支实际只兜 player）
           if (allyNames.has(c.name)) return 'ally';
           if (enemyNames.has(c.name)) return 'enemy';
           return c.type === 'player' ? 'ally' : 'enemy';
@@ -1583,8 +1643,17 @@ export class GamePipeline {
         // 无名单 → 旧行为
         return c.type === 'player' ? 'ally' : 'enemy';
       };
+      const hasListedSides = allyNames.size > 0 || enemyNames.size > 0;
+      // F3：名单声明时只拉名单内角色 + player 本体；名单外的旁观者（无论 npc 还是
+      // monster）不进战斗、不占行动序列。名单缺省 → 旧行为：所有存活角色全拉。
+      const inRoster = (c: CharacterState): boolean =>
+        c.type === 'player' || allyNames.has(c.name) || enemyNames.has(c.name);
       const participants = this.game.characters
-        .filter((c) => c.hp > 0)
+        .filter((c) => {
+          if (c.hp <= 0) return false;
+          if (!hasListedSides) return true;
+          return inRoster(c);
+        })
         .map((c) => characterToCombatParticipant(c, sideOf(c)));
       const fpSnapshot = this.game.fp ?? 0;
       const bundle = {
@@ -1600,8 +1669,8 @@ export class GamePipeline {
         return null;
       }
 
-      // T16 §3.5：存档本次 combat marker，供「重开战斗」restart 回调重新走本函数。
-      this._lastCombatMarker = marker;
+      // T16 §3.5：_lastCombatMarker 已由就绪版 handleCombatTriggerV3 存档
+      //（重开战斗 restart 回调与二次开始都复用它），这里不再重复赋值。
 
       // T2（2026-08-10）：模板系统上下文 —— 从 marker 组装战斗指令（战斗类型｜环境｜
       // 正文），过滤出战斗 Agent 可见的世界书（world_setting + race + system_core）。
@@ -1612,6 +1681,12 @@ export class GamePipeline {
           `环境: ${marker.environment ?? ''}`,
           marker.bodyText ?? '',
         ].join('｜') || '（无战斗指令）';
+      // T4（2026-08-10）：参战方名单 —— 从 marker 的 allies/enemies 组装，注入模板 <参战方> 区。
+      // 只有声明了名单才给（调度器明确说了谁在场上，AI 才能确认敌我）；未声明时留空，
+      // coordinator 给「（无参战方名单）」占位说明（与 combatBrief 同口径）。
+      const combatRoster = hasListedSides
+        ? `我方: ${marker.allies ?? ''}；敌方: ${marker.enemies ?? ''}`
+        : '';
       const combatWorldBooks = (this.chainData?.worldBooks ?? []).filter((book) =>
         GamePipeline.COMBAT_WORLD_BOOK_PARTITIONS.has(book.partition),
       );
@@ -1628,6 +1703,8 @@ export class GamePipeline {
       // 自己的回合（pendingResolve 有值但没人能 resolve）。必须把句柄挂到 store 的
       // **开战之前**：战斗进行中 submit/abandon 才可用。clearAgentStatus/exitCombat/
       // 摘要回注仍保留在 runCombatV3 完成之后（闭包引用关系不变）。
+      // F2：就绪期占位句柄（只有 start）在这里被替换成完整句柄 —— submit/abandon/
+      // waitForCommand/restart 从此刻起可用；start 不再需要（就绪面板已关）。
       // ────────────────────────────────────────────────────────────────────────────
 
       // ② pre-combat 快照（设计 §3.5）：openCombat 之前留档开战前状态（角色/对话/变量），
@@ -1668,7 +1745,7 @@ export class GamePipeline {
         },
         waitForCommand,
         // §3.5 重开战斗：store.restartCombat 恢复 pre-combat 快照后调它重新走本函数。
-        //    拿本场 marker 重触发 combat（角色/对话/状态已随快照回滚，这里重建战斗）。
+        //    F2：重开走**就绪流程**（先弹就绪面板，玩家点「开始」才再开打），不再直接开打。
         preSnapshotId,
         restart: async () => {
           if (this._lastCombatMarker) {
@@ -1691,10 +1768,11 @@ export class GamePipeline {
           // routeEnemyCommand 回退硬编码 125 字）。照 char_gen/craft_gen 从 chainData 取 configs 的先例。
           configs: this.chainData?.agentConfigs,
           // T2（2026-08-10）：Phase 10 模板系统上下文（全部可选，coordinator 缺省兜底）——
-          // combatBrief（marker 组装）/ 过滤后的世界书 / 本轮玩家输入 / 触发战斗的正文 /
-          // 最近对话历史。首轮 user 消息（情境快照）的数据源。
+          // combatBrief（marker 组装）/ combatRoster（marker 名单组装）/ 过滤后的世界书 /
+          // 本轮玩家输入 / 触发战斗的正文 / 最近对话历史。首轮 user 消息（情境快照）的数据源。
           worldBooks: combatWorldBooks,
           combatBrief,
+          combatRoster,
           userInput: context.userInput,
           storyOutput,
           history: context.history,

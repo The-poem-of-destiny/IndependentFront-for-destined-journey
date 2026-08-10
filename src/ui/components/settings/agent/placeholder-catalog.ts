@@ -1,7 +1,7 @@
 /**
  * 上下文模板占位符目录（Phase 10e，Q-25 第 9 步搬出）。
  *
- * 一张 23 项的数据表 + 一条「哪些 Agent 看得见哪些占位符」的纯筛选。此前它俩住在
+ * 一张 24 项的数据表 + 一条「哪些 Agent 看得见哪些占位符」的纯筛选。此前它俩住在
  * `SettingsPage.vue` 的 script 里，于是想验「vars_update 到底该看见几个占位符」
  * 得先挂起整个设置页。搬成纯模块之后是一行 import 一行断言。
  *
@@ -92,6 +92,12 @@ export const ALL_PLACEHOLDER_META: readonly PlaceholderBadge[] = [
     desc: '战斗指令：战斗类型/环境/参战方与起因（来自 request_dispatcher 的 <combat_trigger>）',
     category: '链调用',
   },
+  {
+    key: 'COMBAT_ROSTER',
+    color: '#9e9e9e',
+    desc: '参战单位清单：我方/敌方名单（编排层从 <combat_trigger> 的 allies/enemies 组装注入）',
+    category: '链调用',
+  },
 ];
 
 /** 每个 Agent 都能用的那一批（与它在 DAG 里的位置无关） */
@@ -115,7 +121,7 @@ const CHAIN_ONLY: Record<string, readonly string[]> = {
   craft_gen: ['CRAFT_REQUEST', 'ITEM_REQUEST', 'CRAFT_RESULT'],
   char_gen: ['CHAR_DETECT', 'CHAR_GEN_RESULT'],
   item_gen: ['ITEM_REQUEST', 'CHAR_GEN_RESULT', 'CRAFT_RESULT'],
-  combat_v3: ['COMBAT_BRIEF'],
+  combat_v3: ['COMBAT_BRIEF', 'COMBAT_ROSTER'],
 };
 
 /**

@@ -484,6 +484,9 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
   /** {{COMBAT_BRIEF}} — 战斗指令：战斗类型/环境/参战方与起因（来自 request_dispatcher 的 <combat_trigger>） */
   COMBAT_BRIEF: (_ctx, _config, _params) => '',
 
+  /** {{COMBAT_ROSTER}} — 参战单位清单（我方/敌方名单，由 game-pipeline 从 <combat_trigger> 的 allies/enemies 组装） */
+  COMBAT_ROSTER: (_ctx, _config, _params) => '',
+
   /** {{CHAR_GEN_RESULT}} — char_gen 输出 (从 agentOutputs 读取) */
   CHAR_GEN_RESULT: (ctx, _config, _params) => {
     const v = ctx.agentOutputs?.get('char_gen');

@@ -90,8 +90,22 @@ export const useGameStore = defineStore('game', () => {
   // 🆕 v3：独立 v3ActiveCombat ref（CombatView 形状，与 v2 activeCombat 并存）。
   //   v2 事件写 activeCombat，v3 事件写 v3ActiveCombat；isInCombat 同时看两者。
   const v3ActiveCombat = ref<CombatView | null>(null);
+
+  // 🆕 F2（2026-08-10）：就绪态 —— combat_trigger 检出后、玩家点「开始战斗」前的
+  //   面板数据（marker 快照）。非 null = 就绪面板显示中（覆盖层锁 UI，战斗还没开）。
+  //   isInCombat 认它；startCombat() 清它并调 coordinator.start() 真开打。
+  const combatReady = ref<{
+    combatType?: string;
+    environment?: string;
+    allies?: string[];
+    enemies?: string[];
+    bodyText?: string;
+    brief?: string;
+  } | null>(null);
+
   const isInCombat = computed(
     () =>
+      combatReady.value !== null ||
       (activeCombat.value !== null && activeCombat.value.status !== 'ended') ||
       (v3ActiveCombat.value !== null && v3ActiveCombat.value.phase !== 'SettlementCommitted'),
   );
@@ -110,21 +124,24 @@ export const useGameStore = defineStore('game', () => {
   const combatCurrentUnitId = ref<string | null>(null);
   /** 🆕 v3：Coordinator 句柄（submitCommand / abandon / 重开），供前端 Command 路由与放弃（C4）
    *  T16 §3.5：+preSnapshotId（pre-combat 快照，重开战斗 restoreSnapshot 用）与
-   *  +restart（重开战斗回调 —— pipeline 持有 combat marker，重触发归它）。 */
+   *  +restart（重开战斗回调 —— pipeline 持有 combat marker，重触发归它）。
+   *  F2：+start（就绪期占位句柄只带它 —— 玩家点「开始战斗」→ store.startCombat 调它）。 */
   const combatCoordinator = ref<{
     submit?: (cmd: CombatCommand) => Promise<void>;
     abandon?: () => void;
     waitForCommand?: () => Promise<CombatCommand>;
     preSnapshotId?: string | null;
     restart?: () => Promise<void>;
+    start?: () => Promise<void>;
   } | null>(null);
 
-  /** 战斗开始：清空面板状态（activeCombat 由 combat_started 事件填；v3 清 v3 ref） */
+  /** 战斗开始：清空面板状态（activeCombat 由 combat_started 事件填；v3 清 v3 ref；F2 清就绪态） */
   function enterCombat() {
     combatLog.value = [];
     combatAwaitingInput.value = null;
     combatCurrentUnitId.value = null;
     v3ActiveCombat.value = null;
+    combatReady.value = null;
   }
 
   /** 应用 runner 事件流 → 更新面板状态（combat_started / action_resolved / 回合事件 / awaiting） */
@@ -151,6 +168,19 @@ export const useGameStore = defineStore('game', () => {
         combatCurrentUnitId.value = evt.unitId;
         break;
       // ── v3 扩展变体（投影 A 输出，M2）──
+      // 🆕 F2：就绪面板事件（combat_trigger 检出后 pipeline 直接构造，先于
+      //   v3_combat_started 到达）——置 combatReady（isInCombat 据此弹就绪面板）。
+      //   战斗还没开，不动 v3ActiveCombat / combatLog。
+      case 'v3_combat_ready':
+        combatReady.value = {
+          combatType: evt.combatType,
+          environment: evt.environment,
+          allies: evt.allies ? [...evt.allies] : undefined,
+          enemies: evt.enemies ? [...evt.enemies] : undefined,
+          bodyText: evt.bodyText,
+          brief: evt.brief,
+        };
+        break;
       case 'v3_combat_started':
         v3ActiveCombat.value = {
           revision: 0,
@@ -243,6 +273,7 @@ export const useGameStore = defineStore('game', () => {
     combatLog.value = [];
     combatAwaitingInput.value = null;
     combatCurrentUnitId.value = null;
+    combatReady.value = null;
     const c = combatCoordinator.value;
     if (c?.abandon) c.abandon();
   }
@@ -252,6 +283,18 @@ export const useGameStore = defineStore('game', () => {
    *  （v3ActiveCombat=null → isInCombat=false）。确认弹窗文案由组件负责。 */
   function skipCombat() {
     abandonCombat();
+  }
+
+  /** 🆕 F2：玩家点「开始战斗」——立即清就绪态（面板从「就绪」切到「开打中」），
+   *  再调 coordinator.start()（pipeline 的 startCombatV3 真开打：enterCombat →
+   *  participants → pre-combat 快照 → runCombatV3，会重新 setCombatCoordinator
+   *  成完整句柄）。start 抛错也不回填就绪态（开打失败走 exitCombat 收面板）。 */
+  async function startCombat(): Promise<void> {
+    const c = combatCoordinator.value;
+    combatReady.value = null;
+    if (c?.start) {
+      await c.start();
+    }
   }
 
   /** v3：重开战斗（设计 2026-08-09 §3.5）——abandonCombat() → restoreSnapshot(pre-combat
@@ -298,6 +341,7 @@ export const useGameStore = defineStore('game', () => {
     combatCurrentUnitId.value = null;
     combatCoordinator.value = null;
     v3ActiveCombat.value = null;
+    combatReady.value = null;
   }
 
   // === 元数据 ===
@@ -805,6 +849,7 @@ export const useGameStore = defineStore('game', () => {
     plotOutline.value = null;
     activeCombat.value = null;
     saveProfile.value = null;
+    combatReady.value = null;
   }
 
   /**
@@ -969,6 +1014,7 @@ export const useGameStore = defineStore('game', () => {
     combatAwaitingInput,
     combatCurrentUnitId,
     v3ActiveCombat,
+    combatReady,
     combatCoordinator,
     enterCombat,
     applyCombatEvent,
@@ -976,6 +1022,7 @@ export const useGameStore = defineStore('game', () => {
     submitCombatCommand,
     abandonCombat,
     skipCombat,
+    startCombat,
     restartCombat,
     exitCombat,
     saveProfile,

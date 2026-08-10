@@ -1284,8 +1284,8 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     createSnapshotSpy.mockClear();
   });
 
-  it('setCombatCoordinator 在 runCombatV3 之前挂好；战斗中句柄可完成 submit→waitForCommand 往返；pre-combat 快照已打', async () => {
-    // 句柄形状照 game-store 的 combatCoordinator（submit/abandon/waitForCommand/preSnapshotId/restart）
+  it('F2：检出 → 只弹就绪面板（不 runCombatV3）→ 点开始 → startCombatV3 真开打（句柄先挂、pre-combat 快照已打）', async () => {
+    // 句柄形状照 game-store 的 combatCoordinator（submit/abandon/waitForCommand/preSnapshotId/restart/start）
     // 🔴 用 holder 对象而不是裸 let：直接 `coordinatorHandle = h` 会让 TS 的 CFA 把变量收窄
     //    成回调参数的类型（甚至 never），属性访问跟着报错。
     const holder: {
@@ -1293,6 +1293,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
         submit?: (c: never) => Promise<void>;
         waitForCommand?: () => Promise<never>;
         preSnapshotId?: string | null;
+        start?: () => Promise<void>;
       } | null;
     } = { handle: null };
 
@@ -1338,14 +1339,30 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       };
     });
 
-    const result = await (pipeline as any).handleCombatTrigger(
+    // ① combat_trigger 检出 → 只弹就绪面板：v3_combat_ready 投进 store、**不 runCombatV3**
+    const readyResult = await (pipeline as any).handleCombatTrigger(
       { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
       '',
     );
+    expect(readyResult).toBeNull();
+    expect(runCombatV3Mock).not.toHaveBeenCalled();
+    expect(gameStore.applyCombatEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'v3_combat_ready',
+        combatType: '标准',
+        allies: ['理查德'],
+        enemies: ['骷髅'],
+      }),
+    );
+    // 就绪期占位句柄：只有 start（store.startCombat 调它），submit/waitForCommand 还没挂
+    expect(typeof holder.handle?.start).toBe('function');
+    expect(holder.handle?.submit).toBeUndefined();
 
-    expect(result?.outcome).toBe('ally_win');
-    // 时序修复：句柄在 runCombatV3 之前已挂（fake 内部断言成立）
-    expect(gameStore.setCombatCoordinator).toHaveBeenCalled();
+    // ② 玩家点「开始战斗」→ store.startCombat → 占位句柄 start → startCombatV3 真开打
+    await holder.handle!.start!();
+
+    // 时序修复：完整句柄（submit/waitForCommand/...）在 runCombatV3 之前已挂（fake 内部断言成立）
+    expect(gameStore.setCombatCoordinator).toHaveBeenCalledTimes(2); // 占位 + 完整
     // pre-combat 快照：createSnapshot('pre-combat', 当前回合数)
     expect(createSnapshotSpy).toHaveBeenCalledWith('pre-combat', 3);
     expect(holder.handle?.preSnapshotId).toBe('snap-pre-combat');
@@ -1354,6 +1371,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
   });
 
   it('无活跃存档回合数时 pre-combat 快照 turn 兜底 0（不阻塞开战）', async () => {
+    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
     const gameStore = makeGameStore({
       characters: [playerCharStub()],
       enterCombat: vi.fn(),
@@ -1361,7 +1379,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       applyCombatEvent: vi.fn(),
       updateAgentStatus: vi.fn(),
       clearAgentStatus: vi.fn(),
-      setCombatCoordinator: vi.fn(),
+      setCombatCoordinator: vi.fn((h: unknown) => (holder.handle = h as never)),
       addMessage: vi.fn(),
       activeSave: null, // activeSave 缺省 → 回合数兜底 0
     });
@@ -1378,12 +1396,12 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       outcome: 'ally_win',
     });
 
-    const result = await (pipeline as any).handleCombatTrigger(
+    await (pipeline as any).handleCombatTrigger(
       { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
       '',
     );
+    await holder.handle!.start!();
 
-    expect(result?.outcome).toBe('ally_win');
     expect(createSnapshotSpy).toHaveBeenCalledWith('pre-combat', 0);
   });
 });
@@ -1415,7 +1433,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     };
   }
 
-  function combatGameStore() {
+  function combatGameStore(holder?: { handle: { start?: () => Promise<void> } | null }) {
     return makeGameStore({
       characters: [playerCharStub()],
       enterCombat: vi.fn(),
@@ -1423,7 +1441,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
       applyCombatEvent: vi.fn(),
       updateAgentStatus: vi.fn(),
       clearAgentStatus: vi.fn(),
-      setCombatCoordinator: vi.fn(),
+      setCombatCoordinator: holder ? vi.fn((h: unknown) => (holder.handle = h as never)) : vi.fn(),
       addMessage: vi.fn(),
     });
   }
@@ -1434,7 +1452,8 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
   });
 
   it('组装 combatBrief + 过滤世界书（只留 world_setting/race/system_core）+ 透传 userInput/storyOutput/history', async () => {
-    const gameStore = combatGameStore();
+    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
+    const gameStore = combatGameStore(holder);
     const pipeline = makePipeline(gameStore, {
       apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
     });
@@ -1450,7 +1469,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
         { id: 'wb_ws', name: '工坊', partition: 'creative_workshop', entries: [] },
       ],
     };
-    // currentContext：本轮玩家输入 + 最近对话（handleCombatTriggerV3 优先用它）
+    // currentContext：本轮玩家输入 + 最近对话（startCombatV3 优先用它）
     (pipeline as any).currentContext = {
       userInput: '我走进竞技场，向冠军发起挑战',
       history: [
@@ -1479,7 +1498,8 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
       };
     });
 
-    const result = await (pipeline as any).handleCombatTrigger(
+    // F2：检出只弹就绪 → 点开始（holder.handle.start）才真开打（storyOutput 经就绪闭包传入）
+    await (pipeline as any).handleCombatTrigger(
       {
         combatType: '死斗',
         environment: '竞技场',
@@ -1489,11 +1509,14 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
       } as never,
       '理查德推开了竞技场的大门，冠军早已等候。',
     );
+    expect(runCombatV3Mock).not.toHaveBeenCalled();
+    await holder.handle!.start!();
 
-    expect(result?.outcome).toBe('ally_win');
     expect(captured).not.toBeNull();
     // combatBrief：从 marker 组装（战斗类型｜环境｜正文）
     expect(captured!.deps.combatBrief).toBe('战斗类型: 死斗｜环境: 竞技场｜决一死战');
+    // combatRoster：从 marker 的 allies/enemies 组装（我方｜敌方）
+    expect(captured!.deps.combatRoster).toBe('我方: 理查德；敌方: 冠军');
     // worldBooks：只保留 world_setting / race / system_core 三区
     expect(captured!.deps.worldBooks.map((b: { id: string }) => b.id)).toEqual([
       'wb_setting',
@@ -1507,7 +1530,8 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
   });
 
   it('marker 缺 environment/bodyText → combatBrief 走缺省（战斗类型: 标准），chainData 缺省 → worldBooks 空数组不崩', async () => {
-    const gameStore = combatGameStore();
+    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
+    const gameStore = combatGameStore(holder);
     const pipeline = makePipeline(gameStore, {
       apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
     });
@@ -1527,17 +1551,157 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
       };
     });
 
-    const result = await (pipeline as any).handleCombatTrigger(
+    await (pipeline as any).handleCombatTrigger(
       { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
       '',
     );
+    await holder.handle!.start!();
 
-    expect(result?.outcome).toBe('ally_win');
     expect(captured).not.toBeNull();
     // 缺省字段照任务格式拼装（环境/正文为空段仍占位）
     expect(captured!.deps.combatBrief).toBe('战斗类型: 标准｜环境: ｜');
+    // 有名单声明 → combatRoster 照拼
+    expect(captured!.deps.combatRoster).toBe('我方: 理查德；敌方: 骷髅');
     // chainData 缺省 → 空数组（不 undefined、不崩）
     expect(Array.isArray(captured!.deps.worldBooks)).toBe(true);
     expect(captured!.deps.worldBooks).toHaveLength(0);
+  });
+
+  it('无 allies/enemies 名单声明 → combatRoster 空串（coordinator 落「（无参战方名单）」占位，不臆造名单）', async () => {
+    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
+    const gameStore = combatGameStore(holder);
+    const pipeline = makePipeline(gameStore, {
+      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
+    });
+
+    let captured: Record<string, any> | null = null;
+    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
+      captured = opts;
+      return {
+        narrativeSummary: 'ok',
+        patches: [],
+        totalExp: 0,
+        totalFp: 0,
+        loot: [],
+        rounds: 1,
+        outcome: 'ally_win',
+      };
+    });
+
+    await (pipeline as any).handleCombatTrigger({ combatType: '标准' } as never, '');
+    await holder.handle!.start!();
+
+    expect(captured).not.toBeNull();
+    expect(captured!.deps.combatRoster).toBe('');
+  });
+
+  // 🔴 2026-08-10 真机 debug：combat_trigger 声明 allies/enemies 名单后，
+  // 名单外的角色（我方旁观 NPC 客栈掌柜奥斯瓦尔德·狼牙）曾被当敌方拉进战斗面板。
+  it('F3：名单声明时只拉名单内角色 + player 本体：名单外旁观 NPC 不进 participants', async () => {
+    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
+    const gameStore = combatGameStore(holder);
+    gameStore.characters = [
+      playerCharStub(), // 玩家 理查德
+      {
+        ...playerCharStub(),
+        id: 'npc_dalian',
+        name: '妲丽安',
+        type: 'npc',
+        hp: 30,
+        maxHp: 30,
+      },
+      {
+        ...playerCharStub(),
+        id: 'monster_sludge',
+        name: '沼泥潜兽',
+        type: 'monster',
+        hp: 20,
+        maxHp: 20,
+      },
+      {
+        ...playerCharStub(),
+        id: 'npc_oswald',
+        name: '奥斯瓦尔德·狼牙',
+        type: 'npc',
+        hp: 5,
+        maxHp: 5,
+      },
+    ];
+    const pipeline = makePipeline(gameStore, {
+      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
+    });
+
+    let captured: Record<string, any> | null = null;
+    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
+      captured = opts;
+      return {
+        narrativeSummary: 'ok',
+        patches: [],
+        totalExp: 0,
+        totalFp: 0,
+        loot: [],
+        rounds: 1,
+        outcome: 'ally_win',
+      };
+    });
+
+    // F2：检出 → 就绪面板（v3_combat_ready 带名单数组）→ 点开始 → 真开打
+    await (pipeline as any).handleCombatTrigger(
+      { combatType: '标准', allies: '妲丽安', enemies: '沼泥潜兽' } as never,
+      '',
+    );
+    expect(gameStore.applyCombatEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'v3_combat_ready',
+        allies: ['妲丽安'],
+        enemies: ['沼泥潜兽'],
+      }),
+    );
+    await holder.handle!.start!();
+
+    const names = captured!.bundle.participants.map((p: { name: string }) => p.name).sort();
+    // 只有名单内双方 + player；奥斯瓦尔德（名单外旁观者）绝不参战
+    expect(names).toEqual(['妲丽安', '沼泥潜兽', '理查德']);
+    expect(names).toHaveLength(3);
+  });
+
+  it('F3：名单缺省时保持旧行为：所有存活角色全拉（player=ally，其余=enemy）', async () => {
+    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
+    const gameStore = combatGameStore(holder);
+    gameStore.characters = [
+      playerCharStub(),
+      { ...playerCharStub(), id: 'npc_a', name: '路人甲', type: 'npc', hp: 10, maxHp: 10 },
+      { ...playerCharStub(), id: 'npc_b', name: '路人乙', type: 'npc', hp: 10, maxHp: 10 },
+      { ...playerCharStub(), id: 'npc_dead', name: '已倒下者', type: 'npc', hp: 0, maxHp: 10 },
+    ];
+    const pipeline = makePipeline(gameStore, {
+      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
+    });
+
+    let captured: Record<string, any> | null = null;
+    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
+      captured = opts;
+      return {
+        narrativeSummary: 'ok',
+        patches: [],
+        totalExp: 0,
+        totalFp: 0,
+        loot: [],
+        rounds: 1,
+        outcome: 'ally_win',
+      };
+    });
+
+    await (pipeline as any).handleCombatTrigger({ combatType: '标准' } as never, '');
+    // 无名单 → v3_combat_ready 不带 allies/enemies（缺省缺席）
+    expect(gameStore.applyCombatEvent).toHaveBeenCalledWith(
+      expect.not.objectContaining({ allies: expect.anything() }) as never,
+    );
+    await holder.handle!.start!();
+
+    // 无名单 → 旧行为全拉（hp>0 的角色都在），倒下者（hp=0）仍不拉
+    const names = captured!.bundle.participants.map((p: { name: string }) => p.name).sort();
+    // 期望数组按 .sort() 的 UTF-16 码点序（乙 U+4E59 在 甲 U+7532 前），与 received 同口径
+    expect(names).toEqual(['理查德', '路人乙', '路人甲']);
   });
 });
