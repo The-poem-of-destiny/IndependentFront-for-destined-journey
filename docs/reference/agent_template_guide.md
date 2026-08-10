@@ -74,7 +74,7 @@
 | `{{AGENT.MEMORY_SUMMARY}}` | memory_summary | Stage 5+ |
 | `{{AGENT.CHAR_UPDATE}}` | char_update | Stage 4+ |
 
-### 链占位符（6 个，由编排层 `localParams` 注入）
+### 链占位符（7 个，由编排层 `localParams` 注入）
 
 | 占位符 | 谁注入 | 消费者 | 注入方式 |
 |--------|--------|--------|----------|
@@ -84,6 +84,7 @@
 | `{{CHAR_GEN_RESULT}}` | char-gen-agent | item_gen | `ctx.agentOutputs` |
 | `{{CRAFT_RESULT}}` | craft-gen-chain | item_gen | `ctx.agentOutputs` |
 | `{{COMBAT_BRIEF}}` | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 | 开局消息渲染的 `localParams`（`renderOpeningCombatMessage`） |
+| `{{COMBAT_ROSTER}}` | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 | 同上（从 `<combat_trigger>` 的 allies/enemies 组装「我方/敌方」名单） |
 
 **重要**: 链占位符不出现在 `PLACEHOLDER_REGISTRY` 的正常解析路径中——registry 只返回空串 fallback。实际值由 `resolveTemplate()` 的 `localParams` 参数接管（优先级高于 registry）。
 

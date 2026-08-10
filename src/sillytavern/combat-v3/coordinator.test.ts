@@ -140,6 +140,56 @@ describe('A2-1：终局一次 commitChatState', () => {
   });
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// F1（2026-08-10）：v3_combat_started 立即 emit（「面板不弹」死锁回归）
+// 背景：首个 dispatch 是 SupplyDice（reduceSupplyDice 保持 phase 不变、不产
+// CombatOpened），CombatOpened 要等下一个 Command 才发。玩家单位先动 →
+// decideForUnit 走 waitForCommand() 永久 pending → v3_combat_started 永不落地 →
+// 面板不弹 → 玩家无法输入 → 死锁。修复：openCombat 之后、首个 dispatch 之前，
+// 直接用 onCombatEvent 发 v3_combat_started + v3_units_snapshot（不依赖事件流）。
+// ══════════════════════════════════════════════════════════════════════════
+describe('F1：开局事件立即 emit（真实 runCombatV3 全链路）', () => {
+  it('玩家先动：开局同步收到 v3_combat_started + v3_units_snapshot（不等 CombatOpened）', async () => {
+    const { opts, setQueue } = mkOpts();
+    const seen: CombatEvent[] = [];
+    opts.onCombatEvent = (evt) => seen.push(evt);
+    // 玩家（甲）先动：修复前 coordinator 在首个 dispatch 后就挂起等玩家输入，
+    // CombatOpened（在下一条命令进 runDispatch 才发）永远等不到 → 面板不弹。
+    setQueue(atkTurn());
+
+    const runPromise = runCombatV3(opts);
+
+    // 开局事件同步落地（emit 在 openCombat 之后、首个 dispatch 之前的同步代码里）——
+    // 面板在玩家回合挂起前就已弹出，死锁由此解开
+    const started = seen.filter((e) => e.type === 'v3_combat_started');
+    expect(started.length).toBeGreaterThanOrEqual(1);
+    expect(started[0]).toMatchObject({
+      combatId: 'coord-test',
+      round: 1,
+      unitNames: ['甲', '乙'],
+    });
+    const snap = seen.find((e) => e.type === 'v3_units_snapshot');
+    expect(snap && 'units' in snap ? Object.keys(snap.units).sort() : []).toEqual(['乙', '甲']);
+
+    // 收尾：玩家命令队列能喂入并推进（面板先弹后输入，命令照常消费）
+    await runPromise;
+  });
+
+  it('敌方先动：同样立即 emit（不依赖玩家输入回合）', async () => {
+    const { opts, setQueue } = mkOpts({
+      enemyScript: [{ name: 'declare_attack', args: { actorName: '乙', targetName: '甲' } }],
+    });
+    // 敌方（乙）先动后轮到玩家（甲）：喂它的回合命令（atkTurn 先例），
+    // 否则玩家回合 waitForCommand 队列耗尽熔断——遗留缺陷（本测试此前从未提交过 git）
+    setQueue(atkTurn());
+    const seen: CombatEvent[] = [];
+    opts.onCombatEvent = (evt) => seen.push(evt);
+    const result = await runCombatV3(opts);
+    expect(seen.filter((e) => e.type === 'v3_combat_started').length).toBeGreaterThanOrEqual(1);
+    expect(result.outcome).toBe('ally_win');
+  });
+});
+
 describe('Q-01：生产骰源接线（消灭恒定 10）', () => {
   it('coordinator 使用注入的 drawDice 而非 sysDrawSixty（旧代码从不调用它）', async () => {
     const { opts, setQueue } = mkOpts();
@@ -1558,12 +1608,16 @@ describe('T11：write_summary 终局摘要收集（2026-08-09 §2.2 改造：不
 // 之后每回合只 append 面板增量（轮到X + 面板），不再渲染模板。
 // ══════════════════════════════════════════════════════════════════════════════
 describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快照）', () => {
-  /** T3 的五区模板形状（战斗指令/世界设定/玩家输入/触发正文/最近对话）+ 现存 {{COMBAT_PANEL}} */
+  /** 模板形状（战斗指令/参战方/世界设定/玩家输入/触发正文/最近对话）+ 现存 {{COMBAT_PANEL}}；
+   *  玩家视角区保留在测试模板里，只为验证注入键仍在工作——真源 agent-config.json 已删它们（见下方两区/三区测试） */
   const FIVE_ZONE_TEMPLATE = [
     '{{SYS_PROMPT}}',
     '<战斗指令>',
     '{{COMBAT_BRIEF}}',
     '</战斗指令>',
+    '<参战方>',
+    '{{COMBAT_ROSTER}}',
+    '</参战方>',
     '<世界设定>',
     '{{LORE_BOOK_STATIC}}',
     '</世界设定>',
@@ -1679,6 +1733,7 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
       configs: [makeCombatV3Config()],
       worldBooks: makeWorldBooks(),
       combatBrief: '战斗类型: 死斗｜环境: 竞技场｜决一死战',
+      combatRoster: '我方: 理查德；敌方: 冠军',
       userInput: '我要挑战竞技场冠军',
       storyOutput: '理查德推开了竞技场的大门，冠军早已等候。',
       history: [
@@ -1702,6 +1757,8 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
     const firstUser = messages[1].content ?? '';
     // COMBAT_BRIEF 注入
     expect(firstUser).toContain('战斗类型: 死斗｜环境: 竞技场｜决一死战');
+    // COMBAT_ROSTER 注入（参战方名单）
+    expect(firstUser).toContain('我方: 理查德；敌方: 冠军');
     // LORE_BOOK_STATIC：按 config.worldBookIds 过滤后的世界书条目正文
     expect(firstUser).toContain('战意规则：士气低于 0 溃逃。');
     // USER_INPUT 注入
@@ -1810,7 +1867,75 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
 
     const firstUser = messages[1].content ?? '';
     expect(firstUser).toContain('（无战斗指令）');
+    // combatRoster 缺省 → 「（无参战方名单）」占位，不臆造名单
+    expect(firstUser).toContain('（无参战方名单）');
     // 缺省段为空但不残留占位符
+    expect(firstUser).not.toContain('{{');
+  });
+
+  // 🔴 2026-08-10 真机 debug（fated-poem-debug-7c342726）：敌方 Agent 开局被注入
+  // 玩家视角内容（story 第一人称正文 + <options> 玩家选项 + 最近对话），导致它
+  // reasoning 写成「My character is 奥利雅思」并 DeclareAttack 我方单位（替玩家决策）。
+  // 修复后 agent-config.json 真源 template 只保留 <战斗指令> + <参战方> + <世界设定>。
+  it('开局模板不含玩家视角区（<玩家输入>/<触发正文>/<最近对话>），只留 <战斗指令>/<参战方>/<世界设定>', async () => {
+    const { opts } = mkOpts();
+    const { routeEnemyCommand } = await import('./coordinator');
+    const { openCombat } = await import('./index');
+    const session = openCombat({ kind: 'new', bundle: opts.bundle } as never);
+
+    // 三区模板：与 agent-config.json 真源（2026-08-10 修复后）同形状
+    const THREE_ZONE_TEMPLATE = [
+      '{{SYS_PROMPT}}',
+      '<战斗指令>',
+      '{{COMBAT_BRIEF}}',
+      '</战斗指令>',
+      '<参战方>',
+      '{{COMBAT_ROSTER}}',
+      '</参战方>',
+      '<世界设定>',
+      '{{LORE_BOOK_STATIC}}',
+      '</世界设定>',
+    ].join('\n');
+
+    const messages: Array<{ role: string; content: string | null }> = [];
+    const seen: Array<Array<{ role: string; content: string | null }>> = [];
+    const ctx = capturingCtx({ messages, client: null } as never, seen, {
+      context: {} as never,
+      configs: [makeCombatV3Config({ template: THREE_ZONE_TEMPLATE })],
+      worldBooks: makeWorldBooks(),
+      combatBrief: '战斗类型: 死斗｜环境: 竞技场｜决一死战',
+      combatRoster: '我方: 理查德；敌方: 冠军',
+      userInput: '我要挑战竞技场冠军',
+      storyOutput: '理查德推开了竞技场的大门，冠军早已等候。',
+      history: [
+        { role: 'user', content: '我要挑战竞技场冠军' },
+        { role: 'assistant', content: '守卫为你打开了竞技场大门。' },
+      ],
+    }) as unknown as Parameters<typeof routeEnemyCommand>[2];
+
+    await routeEnemyCommand(
+      { kind: 'PlayerCommand', unitId: '乙', unitName: '乙', round: 1 },
+      session,
+      ctx,
+    );
+
+    const firstUser = messages[1].content ?? '';
+    // 敌方决策所需的三区在
+    expect(firstUser).toContain('<战斗指令>');
+    expect(firstUser).toContain('战斗类型: 死斗｜环境: 竞技场｜决一死战');
+    expect(firstUser).toContain('<参战方>');
+    expect(firstUser).toContain('我方: 理查德；敌方: 冠军');
+    expect(firstUser).toContain('<世界设定>');
+    expect(firstUser).toContain('战意规则：士气低于 0 溃逃。');
+    // 玩家视角区缺席
+    expect(firstUser).not.toContain('<玩家输入>');
+    expect(firstUser).not.toContain('<触发正文>');
+    expect(firstUser).not.toContain('<最近对话>');
+    // 玩家输入 / 触发正文 / 最近对话的内容一个字都不许漏给敌方 Agent
+    expect(firstUser).not.toContain('我要挑战竞技场冠军');
+    expect(firstUser).not.toContain('理查德推开了竞技场的大门');
+    expect(firstUser).not.toContain('[user]');
+    expect(firstUser).not.toContain('[assistant]');
     expect(firstUser).not.toContain('{{');
   });
 });

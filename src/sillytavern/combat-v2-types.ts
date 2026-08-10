@@ -118,7 +118,21 @@ export type CombatEvent =
   | { type: 'v3_settlement'; fpDelta: number; reason: string; winner?: string }
   | { type: 'v3_narrative'; text: string; round: number }
   | { type: 'v3_awaiting_player_input'; unit: string; unitId: string; round: number }
-  | { type: 'v3_combat_ended'; reason: string; winner?: string };
+  | { type: 'v3_combat_ended'; reason: string; winner?: string }
+  /**
+   * 🆕 F2（2026-08-10）：就绪面板事件 —— combat_trigger 检出后由 game-pipeline 直接
+   * 构造（不经过 projection-ui，无对应 DomainEvent）。载荷 = marker 快照，就绪面板
+   * 据此展示参战方/类型/环境/起因；玩家点「开始战斗」才 openCombat + runCombatV3。
+   */
+  | {
+      type: 'v3_combat_ready';
+      combatType?: string;
+      environment?: string;
+      allies?: string[];
+      enemies?: string[];
+      bodyText?: string;
+      brief?: string;
+    };
 
 // ========== PipelineContext + COMBAT_EVENTS（原出自 combat-pipeline.ts） ==========
 // Q-04: combat-morale-pipeline.ts 已删，此段供 v2 遗留类型/前端复用。保留类型形状，

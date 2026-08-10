@@ -108,6 +108,7 @@ export interface RunCombatV3Opts {
     // routeEnemyCommand 回退改造前的硬编码行为（「轮到敌方X行动+面板」，逐字不变）。
     worldBooks?: WorldBook[]; // 已过滤：world_setting + race + system_core 分区
     combatBrief?: string; // 从 <combat_trigger> marker 组装的战斗指令文本
+    combatRoster?: string; // 参战单位清单（我方/敌方名单，由 game-pipeline 从 marker 的 allies/enemies 组装）
     userInput?: string; // 本轮玩家输入
     storyOutput?: string; // 触发战斗的正文
     history?: unknown[]; // 最近对话（ChatMessage[] 或等价形状）
@@ -172,6 +173,28 @@ function nextCmdId(prefix: string): string {
 export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result> {
   const { deps } = opts;
   const session = openCombat({ kind: 'new', bundle: opts.bundle });
+
+  // ── F1（2026-08-10 面板不弹死锁根治）────────────────────────────────────────
+  // 开局事件**抢在首个 dispatch 之前**立即 emit。背景：首个 dispatch 是 SupplyDice，
+  // reduceSupplyDice 保持 phase 不变、不产 CombatOpened —— CombatOpened 要等下一个
+  // Command 进 runDispatch 才发。玩家单位先动 → decideForUnit 走 waitForCommand()
+  // 永久 pending（等玩家输入）→ v3_combat_started 永不落地 → 面板不弹 → 玩家看不到
+  // 面板无法输入 → 死锁。这里直接发两条（形状照 projection-ui.ts mapEvent 的
+  // CombatOpened 分支与 v3_units_snapshot），面板先弹、玩家能输入。
+  // 幂等说明：后续 dispatch 流若再遇 CombatOpened，emitEvents 会重复发
+  // v3_combat_started + v3_units_snapshot —— game-store 的 v3ActiveCombat 整份覆盖
+  // 与 units 覆盖均无害（可接受重复，不额外去重）。
+  // ──────────────────────────────────────────────────────────────────────────────
+  if (opts.onCombatEvent) {
+    const openView = session.snapshot();
+    opts.onCombatEvent({
+      type: 'v3_combat_started',
+      combatId: openView.combatId,
+      round: 1,
+      unitNames: Object.keys(openView.units),
+    });
+    opts.onCombatEvent({ type: 'v3_units_snapshot', units: { ...openView.units } });
+  }
 
   // 骰子供应（必填依赖 drawDice；BeginOutput 走 getDice 续杯）
   const getDice = (): { outputId: string; dice: number[] } => deps.drawDice();
@@ -424,6 +447,7 @@ interface RouteCtx {
   presets?: import('../types').AgentPreset[];
   /** T2（2026-08-10）：模板系统上下文（开局 user 情境快照的数据源，全部可选） */
   combatBrief?: string;
+  combatRoster?: string;
   userInput?: string;
   storyOutput?: string;
   history?: unknown[];
@@ -678,7 +702,8 @@ function combatSystemPrompt(ctx: RouteCtx): string {
  *   3. 空 → 现状硬编码（「轮到敌方X行动 + 面板」，与改造前逐字一致）
  *
  * localParams 注入（优先级高于 registry，见 template-resolver）：
- *   - COMBAT_BRIEF ← ctx.combatBrief（空给「（无战斗指令）」占位说明）
+ *   - COMBAT_BRIEF  ← ctx.combatBrief（空给「（无战斗指令）」占位说明）
+ *   - COMBAT_ROSTER ← ctx.combatRoster（我方/敌方名单；空给「（无参战方名单）」占位说明）
  *   - USER_INPUT   ← ctx.userInput（回落 ctx.context.userInput）
  *   - AGENT.STORY  ← ctx.storyOutput（仅显式非空时注入；否则回落 registry 的
  *                     agentOutputs.story 路径）
@@ -706,6 +731,7 @@ function renderOpeningCombatMessage(ctx: RouteCtx, panel: string, unitName: stri
   const localParams: Record<string, string> = {
     SYS_PROMPT: '',
     COMBAT_BRIEF: (ctx.combatBrief ?? '').trim() || '（无战斗指令）',
+    COMBAT_ROSTER: (ctx.combatRoster ?? '').trim() || '（无参战方名单）',
     USER_INPUT: tplCtx.userInput,
     COMBAT_PANEL: panel,
   };

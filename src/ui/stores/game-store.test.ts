@@ -604,6 +604,72 @@ describe('M2 v3 战斗接线', () => {
     expect(Object.keys(store.v3ActiveCombat?.units ?? {})).toHaveLength(1);
   });
 
+  // ════════════════════════════════════════════════════════════════════════
+  // F2（2026-08-10）：就绪态 —— combat_trigger 检出 → combatReady 置位
+  // （isInCombat 认它，面板先弹）→ 玩家点「开始战斗」（startCombat →
+  // coordinator.start）→ 才 openCombat + runCombatV3 真开打。
+  // ════════════════════════════════════════════════════════════════════════
+  describe('F2：就绪态（就绪面板 → 点开始 → 才开打）', () => {
+    it('v3_combat_ready 到达：combatReady 置位（含名单数组）+ isInCombat=true + 战斗视图未开', () => {
+      const store = useGameStore();
+      expect(store.isInCombat).toBe(false);
+      store.applyCombatEvent({
+        type: 'v3_combat_ready',
+        combatType: '死斗',
+        environment: '竞技场',
+        allies: ['理查德', '妲丽安'],
+        enemies: ['冠军'],
+        bodyText: '决一死战',
+      });
+      expect(store.combatReady).toMatchObject({
+        combatType: '死斗',
+        environment: '竞技场',
+        allies: ['理查德', '妲丽安'],
+        enemies: ['冠军'],
+        bodyText: '决一死战',
+      });
+      // 就绪态 = 战斗中（覆盖层锁 UI），但战斗视图（v3ActiveCombat）还没开
+      expect(store.isInCombat).toBe(true);
+      expect(store.v3ActiveCombat).toBeNull();
+      // 就绪事件不污染消息流
+      expect(store.combatLog).toHaveLength(0);
+    });
+
+    it('startCombat：清就绪态并调 coordinator.start（真开打回调）', async () => {
+      const store = useGameStore();
+      let started = 0;
+      store.setCombatCoordinator({ start: async () => (started += 1) });
+      store.applyCombatEvent({ type: 'v3_combat_ready', combatType: '标准' });
+      await store.startCombat();
+      expect(started).toBe(1);
+      expect(store.combatReady).toBeNull();
+    });
+
+    it('startCombat：句柄无 start（战斗已开/占位缺失）时不崩', async () => {
+      const store = useGameStore();
+      store.setCombatCoordinator({ abandon: () => {} });
+      store.applyCombatEvent({ type: 'v3_combat_ready', combatType: '标准' });
+      await store.startCombat();
+      expect(store.combatReady).toBeNull();
+    });
+
+    it('skipCombat / enterCombat / exitCombat 都清就绪态', () => {
+      const store = useGameStore();
+      store.applyCombatEvent({ type: 'v3_combat_ready', combatType: '标准' });
+      store.skipCombat();
+      expect(store.combatReady).toBeNull();
+      expect(store.isInCombat).toBe(false);
+
+      store.applyCombatEvent({ type: 'v3_combat_ready', combatType: '标准' });
+      store.enterCombat();
+      expect(store.combatReady).toBeNull();
+
+      store.applyCombatEvent({ type: 'v3_combat_ready', combatType: '标准' });
+      store.exitCombat();
+      expect(store.combatReady).toBeNull();
+    });
+  });
+
   it('skipCombat：abandonCombat 包装（战斗放弃 → 面板关闭、不落库）', () => {
     const store = useGameStore();
     let abandoned = false;
