@@ -1,28 +1,28 @@
-/* ===== Ivory (象牙白) — 明亮象牙风格 ===== */
+/* ===== Moonwhite Brocade (月白云锦) — 月白丝缎与珠母 ===== */
 [data-theme='ivory'] {
-  --theme-window-bg: #faf8f5;
-  --theme-window-border: #d8d0c5;
-  --theme-content-bg: #ffffff;
-  --theme-card-bg: rgba(255, 255, 255, 0.9);
-  --theme-card-border: #d8d0c5;
-  --theme-surface-muted: #f0ece5;
-  --theme-overlay-bg: rgba(0, 0, 0, 0.3);
+  --theme-window-bg: #e9e6df;
+  --theme-window-border: #c4beb2;
+  --theme-content-bg: #f5f3ed;
+  --theme-card-bg: rgba(253, 252, 248, 0.94);
+  --theme-card-border: #cec7ba;
+  --theme-surface-muted: #e2ded5;
+  --theme-overlay-bg: rgba(31, 33, 35, 0.34);
 
-  --theme-title-bar-bg: #f5f0e8;
-  --theme-title-bar-text: #4a3b31;
-  --theme-title-bar-icon: #8c7b6b;
-  --theme-title-bar-btn-hover: rgba(0, 0, 0, 0.05);
-  --theme-tab-bar-bg: #f0ebe0;
-  --theme-tab-text: #8c7b6b;
-  --theme-tab-active-text: #4a3b31;
-  --theme-tab-indicator: #c0a060;
-  --theme-tab-hover-bg: rgba(0, 0, 0, 0.04);
+  --theme-title-bar-bg: #dfdcd4;
+  --theme-title-bar-text: #373532;
+  --theme-title-bar-icon: #77736c;
+  --theme-title-bar-btn-hover: rgba(54, 51, 46, 0.06);
+  --theme-tab-bar-bg: #e5e1d8;
+  --theme-tab-text: #777168;
+  --theme-tab-active-text: #302f2c;
+  --theme-tab-indicator: #887142;
+  --theme-tab-hover-bg: rgba(72, 67, 58, 0.05);
 
-  --theme-text-primary: #3a3028;
-  --theme-text-secondary: #6b5d50;
-  --theme-text-muted: #9d9080;
+  --theme-text-primary: #302f2c;
+  --theme-text-secondary: #5f5b54;
+  --theme-text-muted: #858076;
 
-  --theme-primary: #a8863e;
+  --theme-primary: #887142;
   --theme-primary-text: #fffdf8;
 
   --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
@@ -57,7 +57,7 @@
 
   /* 🔴 字体**不在主题里定义** —— 理由同 parchment.css，见那里的注释与 design.md §7.4 */
 
-  --theme-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
-  --theme-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
-  --theme-shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.12);
+  --theme-shadow-sm: 0 1px 3px rgba(48, 45, 39, 0.07);
+  --theme-shadow-md: 0 2px 8px rgba(48, 45, 39, 0.1);
+  --theme-shadow-lg: 0 4px 16px rgba(48, 45, 39, 0.15);
 }

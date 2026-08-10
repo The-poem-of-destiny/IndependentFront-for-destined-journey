@@ -45,6 +45,7 @@ import './themes/ivory.css';
 import './themes/misty-lilac.css';
 import './themes/forest.css';
 import './themes/ocean.css';
+import './styles/integrated-game-surfaces.css';
 
 const app = createApp(App);
 const pinia = createPinia();

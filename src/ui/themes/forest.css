@@ -1,51 +1,789 @@
-/* ===== Forest (森林) — 墨绿自然风格 ===== */
+/* ===== Jade Conservatory (翡翠温室) — jade-framed herbarium cabinet ===== */
 [data-theme='forest'] {
-  --theme-window-bg: #0d1a12;
-  --theme-window-border: #1a3a25;
-  --theme-content-bg: #0a150e;
-  --theme-card-bg: #152218;
-  --theme-card-border: #1a3a25;
-  --theme-surface-muted: color-mix(in srgb, #0d1a12 72%, #152218 28%);
-  --theme-overlay-bg: color-mix(in srgb, #0d1a12 58%, transparent);
+  --theme-window-bg: #e5e6dc;
+  --theme-window-border: #91a293;
+  --theme-content-bg: #f2eee3;
+  --theme-card-bg: rgba(247, 243, 232, 0.96);
+  --theme-card-border: #abb6a8;
+  --theme-surface-muted: #dfe5da;
+  --theme-overlay-bg: rgba(31, 50, 39, 0.38);
 
-  --theme-title-bar-bg: #111f16;
-  --theme-title-bar-text: #d8f0e0;
-  --theme-title-bar-icon: #80b898;
-  --theme-title-bar-btn-hover: rgba(255, 255, 255, 0.06);
-  --theme-tab-bar-bg: #0f1c14;
-  --theme-tab-text: #689878;
-  --theme-tab-active-text: #c8f0d8;
-  --theme-tab-indicator: #4ade80;
-  --theme-tab-hover-bg: rgba(255, 255, 255, 0.04);
+  --theme-title-bar-bg: #e0e5da;
+  --theme-title-bar-text: #27382d;
+  --theme-title-bar-icon: #526b59;
+  --theme-title-bar-btn-hover: rgba(60, 104, 78, 0.09);
+  --theme-tab-bar-bg: #e2e4d8;
+  --theme-tab-text: #526b59;
+  --theme-tab-active-text: #233c2e;
+  --theme-tab-indicator: #4c755f;
+  --theme-tab-hover-bg: rgba(76, 117, 95, 0.09);
 
-  --theme-text-primary: #d8f0e0;
-  --theme-text-secondary: #80b898;
-  --theme-text-muted: #587860;
+  --theme-text-primary: #2d3d32;
+  --theme-text-secondary: #4a5d50;
+  --theme-text-muted: #627165;
 
-  --theme-primary: #4ade80;
+  --theme-primary: #4f705a;
+  --theme-primary-text: #f8fcf8;
+  --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 16%, transparent);
+  --theme-success: #3f7554;
+  --theme-warning: #956c28;
+  --theme-error: #a94747;
 
-  --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
-  --theme-success: #4ade80;
-  --theme-warning: #d4a834;
-  --theme-error: #e85555;
+  --theme-hp: #b95b5f;
+  --theme-mp: #4d75ac;
+  --theme-sp: #438d5b;
+  --theme-exp: #a47b28;
+  --theme-affection: #b75b7b;
+  --theme-affection-bg: rgba(183, 91, 123, 0.12);
+  --theme-affection-text: #8d3d5a;
 
-  --theme-hp: #e85555;
-  --theme-mp: #6088d8;
-  --theme-sp: #4ade80;
-  --theme-exp: #d4a834;
-  --theme-affection: #e87898;
-  --theme-affection-bg: rgba(232, 120, 152, 0.18);
-  --theme-affection-text: #f8b0c0;
+  --theme-quality-common: #718176;
+  --theme-quality-uncommon: #3f8157;
+  --theme-quality-rare: #4b72a8;
+  --theme-quality-epic: #7b5fa1;
+  --theme-quality-legendary: #a47b28;
+  --theme-quality-mythic: #a75273;
+  --theme-quality-unique: #a96334;
 
-  --theme-quality-common: #b0c0b0;
-  --theme-quality-uncommon: #4ade80;
-  --theme-quality-rare: #6088d8;
-  --theme-quality-epic: #a070e0;
-  --theme-quality-legendary: #d4a834;
-  --theme-quality-mythic: #e87898;
-  --theme-quality-unique: #e89848;
+  --theme-currency-gold: #957027;
+  --theme-currency-silver: #6f7d76;
+  --theme-currency-copper: #9b6548;
 
-  --theme-currency-gold: #d4a834;
-  --theme-currency-silver: #b0c0b0;
-  --theme-currency-copper: #c08050;
+  --theme-shadow-sm: 0 2px 4px rgba(50, 66, 53, 0.1);
+  --theme-shadow-md: 0 3px 8px rgba(50, 66, 53, 0.13);
+  --theme-shadow-lg: 0 6px 16px rgba(50, 66, 53, 0.18);
+  --paper-stack: 0 1px 0 rgba(255, 253, 245, 0.76), 0 3px 7px rgba(61, 72, 59, 0.1);
+
+  --forest-paper: rgba(244, 240, 228, 0.94);
+  --forest-paper-dense: rgba(248, 244, 234, 0.98);
+  --forest-jade: #cbd6c8;
+  --forest-jade-deep: #849888;
+  --forest-ridge: rgba(255, 253, 246, 0.82);
+  --forest-recess: rgba(58, 78, 63, 0.22);
+  --forest-verdigris: #4f705a;
+  --forest-gold: #987742;
+  --forest-gold-line: rgba(152, 119, 66, 0.48);
+  --forest-chassis: url('../assets/themes/forest/jade-conservatory-chassis.webp');
+  --forest-chassis-overlay: url('../assets/themes/forest/jade-conservatory-chassis-overlay.webp');
+  --forest-parchment-texture: url('../assets/themes/forest/herbarium-parchment.webp');
+  --forest-jade-frame: url('../assets/themes/forest/jade-panel-frame.png');
+  --forest-jade-tab: url('../assets/themes/forest/jade-tab-polished.png');
+  --forest-binding-clasp: url('../assets/themes/forest/jade-binding-clasp.png');
+  --forest-tab-connector: url('../assets/themes/forest/jade-tab-connector.png');
+  --forest-avatar-medallion: url('../assets/themes/forest/herbarium-leaf-medallion.png');
+  --forest-herbarium-sprig: url('../assets/themes/forest/herbarium-sprig.png');
+}
+
+/* One authored relief plane carries the conservatory. It keeps its aspect
+   ratio, crops at narrow desktop widths, and never tiles or stretches. */
+:root[data-theme='forest'] body .game-page-layout {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--theme-window-bg);
+  background-image: var(--forest-chassis);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+}
+
+/* The populated interface previously buried the authored relief below opaque
+   component backgrounds. This extracted plane now sits above the structural
+   surfaces but below every real control and piece of content. */
+:root[data-theme='forest'] body .game-page-layout::after {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  background-image: var(--forest-chassis-overlay);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  filter: contrast(1.04) saturate(0.92) drop-shadow(0 2px 3px rgba(43, 64, 49, 0.2));
+  pointer-events: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout > *,
+:root[data-theme='forest'] body .game-page-layout .game-body > *,
+:root[data-theme='forest'] body .game-page-layout .chat-flow > * {
+  position: relative;
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-bar > *,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar > *,
+:root[data-theme='forest'] body .game-page-layout .scene-panel > *,
+:root[data-theme='forest'] body .game-page-layout .status-hud > *,
+:root[data-theme='forest'] body .game-page-layout .chat-messages > *,
+:root[data-theme='forest'] body .game-page-layout .input-bar > * {
+  position: relative;
+  z-index: 3;
+}
+
+:root[data-theme='forest'] body .game-page-layout .game-body {
+  background-color: rgba(228, 235, 224, 0.12);
+}
+
+/* The outer frame is satin celadon: one cool ridge, one mineral recess, and
+   sparse aged-gold joins rather than luminous borders. */
+:root[data-theme='forest'] body .game-page-layout .top-bar,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar,
+:root[data-theme='forest'] body .game-page-layout .scene-panel,
+:root[data-theme='forest'] body .game-page-layout .status-hud,
+:root[data-theme='forest'] body .game-page-layout .input-bar {
+  border-color: var(--forest-recess);
+  box-shadow:
+    inset 0 1px 0 var(--forest-ridge),
+    inset 0 -1px 0 rgba(67, 96, 74, 0.12),
+    0 2px 5px rgba(43, 64, 49, 0.1);
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-bar {
+  background-color: rgba(207, 221, 204, 0.54);
+  background-image: linear-gradient(
+    to bottom,
+    rgba(255, 255, 247, 0.34),
+    rgba(202, 218, 199, 0.28) 48%,
+    rgba(128, 153, 131, 0.16)
+  );
+  border-bottom: 1px solid var(--forest-gold-line);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 249, 0.84),
+    inset 0 -2px 0 rgba(76, 117, 95, 0.16),
+    0 2px 5px rgba(43, 64, 49, 0.12);
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-title {
+  min-width: 15rem;
+  justify-content: center;
+  padding: 4px 18px;
+  border: 1px solid rgba(76, 117, 95, 0.32);
+  border-radius: 8px;
+  background-color: rgba(244, 243, 234, 0.54);
+  box-shadow:
+    inset 0 1px 2px rgba(55, 82, 63, 0.13),
+    0 1px 0 rgba(255, 255, 248, 0.74);
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-title-rule {
+  background: linear-gradient(to right, transparent, var(--forest-gold-line), transparent);
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-divider {
+  background: var(--forest-gold-line);
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-btn,
+:root[data-theme='forest'] body .game-page-layout .agent-indicator {
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-btn:hover,
+:root[data-theme='forest'] body .game-page-layout .top-btn:focus-visible {
+  background-color: rgba(246, 245, 236, 0.58);
+  border-color: rgba(76, 117, 95, 0.3);
+  box-shadow: inset 0 1px 0 var(--forest-ridge);
+}
+
+/* The two ledgers are botanical-paper inserts. Their transparency reveals the
+   authored corner relief without turning the whole theme into green glass. */
+:root[data-theme='forest'] body .game-page-layout .scene-panel,
+:root[data-theme='forest'] body .game-page-layout .status-hud {
+  background-color: rgba(246, 244, 234, 0.54);
+  background-image: linear-gradient(
+    100deg,
+    rgba(255, 255, 249, 0.2),
+    rgba(239, 241, 231, 0.04) 48%,
+    rgba(205, 219, 201, 0.12)
+  );
+  backdrop-filter: blur(0.6px) saturate(96%);
+  -webkit-backdrop-filter: blur(0.6px) saturate(96%);
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-panel {
+  border-right: 1px solid var(--forest-gold-line);
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-hud {
+  border-left: 1px solid var(--forest-gold-line);
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-flow,
+:root[data-theme='forest'] body .game-page-layout .chat-messages {
+  background-color: transparent;
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-messages {
+  box-shadow:
+    inset 9px 0 14px -15px rgba(46, 75, 55, 0.42),
+    inset -9px 0 14px -15px rgba(46, 75, 55, 0.42);
+}
+
+:root[data-theme='forest'] body .game-page-layout .chat-empty-glyph {
+  color: var(--forest-verdigris);
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 247, 0.9));
+}
+
+/* Carved rail plaques: the surrounding screen stays still while only the inset
+   plate lifts on hover. */
+:root[data-theme='forest'] body .game-page-layout .side-toolbar {
+  padding-top: 8px;
+  gap: 2px;
+  background-color: rgba(204, 220, 201, 0.52);
+  background-image: linear-gradient(
+    to right,
+    rgba(255, 255, 248, 0.36),
+    rgba(190, 210, 190, 0.16) 48%,
+    rgba(78, 112, 87, 0.12)
+  );
+  border-right: 1px solid var(--forest-gold-line);
+}
+
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .collapse-toggle {
+  min-height: 42px;
+  margin-inline: 4px;
+  border: 1px solid rgba(60, 102, 76, 0.58);
+  border-radius: 5px;
+  background-color: rgba(244, 244, 234, 0.82);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 248, 0.88),
+    inset 0 -2px 2px rgba(57, 88, 66, 0.22),
+    0 2px 4px rgba(43, 64, 49, 0.18);
+  transition:
+    background-color 160ms ease-out,
+    border-color 160ms ease-out,
+    box-shadow 160ms ease-out,
+    color 160ms ease-out;
+}
+
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn:hover,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn:focus-visible,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .collapse-toggle:hover,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .collapse-toggle:focus-visible {
+  background-color: rgba(253, 250, 239, 0.94);
+  border-color: rgba(55, 101, 73, 0.78);
+  color: var(--theme-tab-active-text);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 249, 0.96),
+    inset 0 -2px 2px rgba(57, 88, 66, 0.22),
+    0 3px 6px rgba(43, 64, 49, 0.21);
+}
+
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .tool-btn:active,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar .collapse-toggle:active {
+  background-color: rgba(217, 228, 211, 0.7);
+  box-shadow:
+    inset 0 2px 3px rgba(50, 78, 58, 0.2),
+    0 1px 0 rgba(255, 255, 248, 0.66);
+}
+
+/* Scene plaque and section seams join the ledger instead of floating as cards. */
+:root[data-theme='forest'] body .game-page-layout .scene-top {
+  margin: 8px 9px 0;
+  padding: 11px 12px 10px;
+  border: 1px solid rgba(76, 117, 95, 0.28);
+  border-radius: 7px 7px 3px 3px;
+  background-color: rgba(248, 246, 237, 0.78);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 249, 0.78),
+    inset 0 0 0 3px rgba(207, 221, 204, 0.22),
+    0 2px 4px rgba(43, 64, 49, 0.11);
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-tab-body {
+  margin: 0 9px 9px;
+  padding: 10px;
+  border: 1px solid rgba(76, 117, 95, 0.25);
+  border-top: 0;
+  border-radius: 0 0 9px 9px;
+  background-color: rgba(246, 244, 234, 0.66);
+  box-shadow:
+    inset 0 -1px 0 rgba(255, 255, 249, 0.66),
+    0 2px 4px rgba(43, 64, 49, 0.09);
+}
+
+/* Connected framed cells preserve their footprint across every selection state. */
+:root[data-theme='forest'] body .game-page-layout .tab-bar {
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(76, 117, 95, 0.2);
+  background-color: rgba(207, 221, 204, 0.52);
+  box-shadow: inset 0 1px 0 var(--forest-ridge);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-list {
+  gap: 0;
+  padding: 2px;
+  border: 1px solid rgba(76, 117, 95, 0.4);
+  border-radius: 6px;
+  background-color: rgba(197, 214, 194, 0.58);
+  box-shadow:
+    inset 0 1px 2px rgba(52, 81, 60, 0.16),
+    0 1px 0 rgba(255, 255, 248, 0.72);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item {
+  min-width: 0;
+  border: 1px solid transparent;
+  border-right-color: rgba(76, 117, 95, 0.2);
+  border-radius: 3px;
+  background-color: rgba(238, 241, 230, 0.36);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 247, 0.28);
+  transition:
+    background-color 160ms ease-out,
+    border-color 160ms ease-out,
+    box-shadow 160ms ease-out,
+    color 160ms ease-out;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item:last-child {
+  border-right-color: transparent;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item::after {
+  display: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-item:hover,
+:root[data-theme='forest'] body .game-page-layout .tab-item:focus-visible {
+  background-color: rgba(249, 247, 238, 0.64);
+  border-color: rgba(76, 117, 95, 0.38);
+  color: var(--theme-tab-active-text);
+}
+
+:root[data-theme='forest'] body .game-page-layout .tab-active {
+  background-color: rgba(248, 244, 229, 0.92);
+  border-color: rgba(59, 104, 78, 0.62);
+  color: var(--theme-tab-active-text);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 248, 0.9),
+    inset 0 -2px 0 var(--forest-gold-line),
+    0 1px 3px rgba(43, 64, 49, 0.14);
+}
+
+/* Rows and expanded ledgers use paper inserts held by shallow jade frames. */
+:root[data-theme='forest']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry) {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(76, 117, 95, 0.28);
+  border-radius: 6px;
+  background-color: rgba(246, 244, 234, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 248, 0.6),
+    0 2px 4px rgba(43, 64, 49, 0.08);
+  transition:
+    background-color 160ms ease-out,
+    border-color 160ms ease-out,
+    box-shadow 160ms ease-out;
+}
+
+:root[data-theme='forest']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry):hover,
+:root[data-theme='forest']
+  body
+  .game-page-layout
+  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry):focus-visible {
+  background-color: rgba(249, 247, 238, 0.76);
+  border-color: rgba(76, 117, 95, 0.48);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 248, 0.82),
+    0 3px 6px rgba(43, 64, 49, 0.12);
+}
+
+:root[data-theme='forest'] body .game-page-layout :is(.quest-item, .item-entry).open {
+  background-color: rgba(247, 245, 235, 0.9);
+  border-color: rgba(76, 117, 95, 0.52);
+  box-shadow:
+    inset 0 2px 3px rgba(50, 78, 58, 0.13),
+    0 2px 5px rgba(43, 64, 49, 0.12);
+}
+
+:root[data-theme='forest'] body .game-page-layout .item-entry.open .item-row {
+  border: 0;
+  border-bottom: 1px solid rgba(76, 117, 95, 0.2);
+  border-radius: 0;
+  background-color: transparent;
+}
+
+:root[data-theme='forest'] body .game-page-layout .item-entry.open .item-detail {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background-color: rgba(239, 243, 232, 0.52);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 248, 0.5);
+}
+
+:root[data-theme='forest'] body .game-page-layout .item-row,
+:root[data-theme='forest'] body .game-page-layout .quest-item,
+:root[data-theme='forest'] body .game-page-layout .scene-npc-item {
+  color: var(--theme-text-secondary);
+}
+
+:root[data-theme='forest'] body .game-page-layout .item-row:hover {
+  background-color: rgba(76, 117, 95, 0.07);
+}
+
+:root[data-theme='forest'] body .game-page-layout .npc-portrait,
+:root[data-theme='forest'] body .game-page-layout .avatar-shape-square {
+  border: 1px solid rgba(76, 117, 95, 0.5);
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 3px rgba(204, 219, 201, 0.68),
+    0 0 0 4px rgba(155, 124, 72, 0.34),
+    inset 0 1px 0 rgba(255, 255, 248, 0.56),
+    0 4px 8px rgba(43, 64, 49, 0.15);
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot {
+  border: 0;
+  border-radius: 5px;
+  box-shadow: none;
+}
+
+/* The default square portrait receives its own fitted raster medallion. The
+   1:1 asset is never stretched onto imported 4:5 large portraits. */
+:root[data-theme='forest'] body .game-page-layout .portrait-slot:not(.large) {
+  box-sizing: border-box;
+  aspect-ratio: 1;
+  padding: 15px;
+  background-color: rgba(242, 243, 233, 0.58);
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot:not(.large)::after {
+  content: '';
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  background-image: var(--forest-avatar-medallion);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  filter: contrast(1.05) saturate(0.92) drop-shadow(0 4px 5px rgba(43, 64, 49, 0.2));
+  pointer-events: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot:not(.large) .avatar-xl {
+  max-width: none;
+  border: 1px solid rgba(76, 117, 95, 0.26);
+  border-radius: 3px;
+  background-color: rgba(214, 226, 210, 0.82);
+  box-shadow: inset 0 2px 4px rgba(47, 75, 55, 0.14);
+}
+
+:root[data-theme='forest'] body .game-page-layout .portrait-slot.large {
+  border: 1px solid rgba(76, 117, 95, 0.5);
+  box-shadow:
+    0 0 0 3px rgba(204, 219, 201, 0.68),
+    0 0 0 4px rgba(155, 124, 72, 0.34),
+    0 4px 8px rgba(43, 64, 49, 0.15);
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-panel .npc-portrait {
+  background-color: color-mix(in srgb, var(--npc-avatar-color, var(--theme-primary)) 78%, #d6e2d2);
+}
+
+:root[data-theme='forest'] body .game-page-layout .summary-name {
+  color: #31503d;
+  letter-spacing: 0.06em;
+  text-shadow: 0 1px 0 rgba(255, 255, 248, 0.74);
+}
+
+/* The status ledger is one connected carved cabinet, not a stack of cards. */
+:root[data-theme='forest'] body .game-page-layout .status-overview {
+  padding: 8px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-overview > .section,
+:root[data-theme='forest'] body .game-page-layout .status-glass {
+  border: 1px solid rgba(76, 117, 95, 0.3);
+  background-color: rgba(246, 244, 234, 0.66);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 248, 0.66),
+    0 2px 4px rgba(43, 64, 49, 0.09);
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-overview > .section:first-child {
+  border-radius: 9px 9px 3px 3px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-glass {
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-glass > .section {
+  border: 0;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .status-glass > .section + .section {
+  border-top: 1px solid rgba(76, 117, 95, 0.24);
+}
+
+:root[data-theme='forest'] body .game-page-layout .section-header {
+  border-bottom: 1px solid rgba(76, 117, 95, 0.15);
+  background-color: rgba(207, 221, 204, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 248, 0.5);
+}
+
+:root[data-theme='forest'] body .game-page-layout .section-header.clickable:hover,
+:root[data-theme='forest'] body .game-page-layout .section-header.clickable:focus-visible {
+  background-color: rgba(219, 229, 214, 0.58);
+}
+
+:root[data-theme='forest'] body .game-page-layout .kv-item {
+  border: 1px solid rgba(76, 117, 95, 0.24);
+  border-radius: 4px;
+  background-color: rgba(220, 230, 216, 0.62);
+  box-shadow:
+    inset 0 1px 2px rgba(54, 82, 62, 0.12),
+    0 1px 0 rgba(255, 255, 247, 0.68);
+}
+
+/* Semantic fills stay recognisable; only their channels become carved gauges. */
+:root[data-theme='forest'] body .game-page-layout .res-track {
+  border: 1px solid rgba(76, 117, 95, 0.28);
+  border-radius: 5px;
+  background-color: rgba(80, 105, 86, 0.14);
+  box-shadow:
+    inset 0 2px 3px rgba(40, 62, 47, 0.18),
+    0 1px 0 rgba(255, 255, 248, 0.68);
+}
+
+:root[data-theme='forest'] body .game-page-layout .res-fill {
+  border-radius: 4px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -1px 0 rgba(28, 47, 34, 0.16);
+}
+
+:root[data-theme='forest'] body .game-page-layout .res-values {
+  text-shadow: 0 1px 1px rgba(22, 35, 26, 0.58);
+}
+
+/* The command tray is a recessed paper insert seated in the jade chassis. */
+:root[data-theme='forest'] body .game-page-layout .input-bar {
+  padding: 7px 10px;
+  background-color: rgba(207, 221, 204, 0.48);
+  background-image: linear-gradient(to bottom, rgba(255, 255, 248, 0.28), rgba(195, 213, 192, 0.2));
+  border-top: 1px solid var(--forest-gold-line);
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-field {
+  border: 1px solid rgba(76, 117, 95, 0.42);
+  border-radius: 5px;
+  background-color: rgba(249, 247, 238, 0.9);
+  box-shadow:
+    inset 0 2px 4px rgba(47, 75, 55, 0.13),
+    0 1px 0 rgba(255, 255, 248, 0.74);
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-field:focus {
+  border-color: var(--forest-verdigris);
+  box-shadow:
+    0 0 0 2px rgba(76, 117, 95, 0.18),
+    inset 0 2px 4px rgba(47, 75, 55, 0.13);
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-btn,
+:root[data-theme='forest'] body .game-page-layout .send-btn {
+  border: 1px solid rgba(76, 117, 95, 0.4);
+  border-radius: 5px;
+  background-color: rgba(235, 240, 228, 0.72);
+  box-shadow:
+    inset 0 1px 0 var(--forest-ridge),
+    inset 0 -1px 1px rgba(57, 88, 66, 0.13),
+    0 2px 4px rgba(43, 64, 49, 0.11);
+}
+
+:root[data-theme='forest'] body .game-page-layout .send-btn {
+  color: #315f46;
+  border-color: rgba(155, 124, 72, 0.52);
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-btn:hover,
+:root[data-theme='forest'] body .game-page-layout .input-btn:focus-visible,
+:root[data-theme='forest'] body .game-page-layout .send-btn:hover,
+:root[data-theme='forest'] body .game-page-layout .send-btn:focus-visible {
+  background-color: rgba(249, 247, 238, 0.84);
+  border-color: rgba(76, 117, 95, 0.58);
+  color: #294d3a;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 248, 0.88),
+    0 3px 6px rgba(43, 64, 49, 0.14);
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-btn:active,
+:root[data-theme='forest'] body .game-page-layout .send-btn:active {
+  background-color: rgba(210, 224, 207, 0.82);
+  box-shadow:
+    inset 0 2px 3px rgba(47, 75, 55, 0.2),
+    0 1px 0 rgba(255, 255, 248, 0.62);
+}
+
+/* Every keyboard path gets a dark verdigris ring plus a pale offset edge. */
+:root[data-theme='forest']
+  body
+  .game-page-layout
+  :is(button, [role='button'], input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid #315f46;
+  outline-offset: 2px;
+}
+
+:root[data-theme='forest']
+  body
+  :is(.options-popup, .cascader-dropdown, .modal-content, .thought-bubble, .buff-pop, .ctx-menu) {
+  border: 1px solid rgba(76, 117, 95, 0.44);
+  border-radius: 7px;
+  background-color: rgba(247, 246, 238, 0.97);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 248, 0.76),
+    0 6px 14px rgba(43, 64, 49, 0.2);
+}
+
+:root[data-theme='forest'] body select option {
+  color: var(--theme-text-primary);
+  background: #f2f3e9;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme='forest'] body .game-page-layout .scene-panel,
+  :root[data-theme='forest'] body .game-page-layout .status-hud,
+  :root[data-theme='forest'] body .game-page-layout .chat-flow,
+  :root[data-theme='forest'] body .game-page-layout .chat-messages,
+  :root[data-theme='forest'] body .game-page-layout .scene-top,
+  :root[data-theme='forest'] body .game-page-layout .scene-tab-body,
+  :root[data-theme='forest'] body .game-page-layout .status-overview > .section,
+  :root[data-theme='forest'] body .game-page-layout .status-glass,
+  :root[data-theme='forest']
+    body
+    .game-page-layout
+    :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry) {
+    background-color: #f2f3e9;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme='forest']
+    body
+    .game-page-layout
+    :is(
+      .top-btn,
+      .tool-btn,
+      .collapse-toggle,
+      .tab-item,
+      .quest-item,
+      .scene-npc-item,
+      .news-item,
+      .system-notif,
+      .item-entry,
+      .input-btn,
+      .send-btn
+    ) {
+    transition: none;
+  }
+}
+
+/* At narrow desktop widths the authored composition crops at the sides while
+   the fixed 25/50/25 topology remains untouched. Reduce inner decoration only. */
+@media (max-width: 1100px) {
+  :root[data-theme='forest'] body .game-page-layout {
+    background-size: auto 100%;
+  }
+
+  :root[data-theme='forest'] body .game-page-layout .top-title {
+    min-width: 10rem;
+    padding-inline: 10px;
+  }
+
+  :root[data-theme='forest'] body .game-page-layout .status-overview {
+    padding: 6px;
+  }
+
+  :root[data-theme='forest'] body .game-page-layout .scene-top,
+  :root[data-theme='forest'] body .game-page-layout .scene-tab-body {
+    margin-inline: 6px;
+  }
+}
+
+/* Owner fidelity rework: the authored conservatory chassis is now the load-bearing
+   surface. Component fills are reading veils only; they no longer bury the relief. */
+[data-theme='forest'] {
+  --forest-chassis: url('../assets/themes/forest/jade-conservatory-chassis-v4.webp');
+  --forest-paper: rgba(249, 247, 237, 0.46);
+  --forest-paper-dense: rgba(249, 247, 237, 0.68);
+}
+
+:root[data-theme='forest'] body .game-page-layout {
+  background-color: #e9eee3;
+  background-image: var(--forest-chassis);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+:root[data-theme='forest'] body .game-page-layout::after {
+  display: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .game-body,
+:root[data-theme='forest'] body .game-page-layout .chat-flow,
+:root[data-theme='forest'] body .game-page-layout .chat-messages {
+  background: transparent;
+}
+
+:root[data-theme='forest'] body .game-page-layout .top-bar,
+:root[data-theme='forest'] body .game-page-layout .side-toolbar,
+:root[data-theme='forest'] body .game-page-layout .scene-panel,
+:root[data-theme='forest'] body .game-page-layout .status-hud,
+:root[data-theme='forest'] body .game-page-layout .input-bar {
+  background-color: transparent;
+  background-image: none;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-top,
+:root[data-theme='forest'] body .game-page-layout .scene-tab-body,
+:root[data-theme='forest'] body .game-page-layout .status-overview,
+:root[data-theme='forest'] body .game-page-layout .status-glass,
+:root[data-theme='forest'] body .game-page-layout .section,
+:root[data-theme='forest'] body .game-page-layout .bubble-narrative-full {
+  background-color: var(--forest-paper);
+  border-color: rgba(78, 105, 82, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 248, 0.72),
+    0 3px 10px rgba(46, 68, 52, 0.08);
+}
+
+:root[data-theme='forest'] body .game-page-layout .scene-top,
+:root[data-theme='forest'] body .game-page-layout .player-summary,
+:root[data-theme='forest'] body .game-page-layout .section-header,
+:root[data-theme='forest'] body .game-page-layout .tab-bar {
+  background-color: rgba(231, 237, 224, 0.54);
+  background-image: none;
+}
+
+:root[data-theme='forest'] body .game-page-layout .input-field {
+  background-color: rgba(250, 248, 240, 0.72);
+  border-color: rgba(92, 116, 92, 0.3);
+  box-shadow:
+    inset 0 1px 4px rgba(52, 76, 57, 0.1),
+    0 1px 0 rgba(255, 255, 250, 0.74);
+}
+
+@media (max-width: 1100px) {
+  :root[data-theme='forest'] body .game-page-layout {
+    background-size: auto 100%;
+  }
 }
