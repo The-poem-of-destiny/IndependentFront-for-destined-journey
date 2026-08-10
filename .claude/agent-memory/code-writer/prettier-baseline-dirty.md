@@ -34,4 +34,10 @@ format:check 的 glob 是 `{src,server,tests,scripts}/**/*.{ts,vue,css,mjs,cjs}`
 prettier 风格，**别去格式化它**。
 lint 是 0 errors / 165 warnings 的基线，别为清 warning 顺手改无关文件。
 
+🔴 **`.html` 不在 glob 里**（2026-08-10 实测）：`src/ui/components/home/*.standalone.html` 那批研究页
+`npx prettier --check` **全部报红**（含已提交的 AstralDrift / AstralDriftV2），但 CI 根本不看它们
+——glob 没有 `html` 后缀，`.prettierignore` 也没列。所以给 standalone html 跑 `--write` 是**纯添乱**
+（prettier 会把 veil SPECS 那种一行一条的数组表拆成几百行，破坏作者刻意的可读排版）。
+新增 standalone html 只需保持 LF 行尾即可，格式不用管。
+
 相关：[[known-flaky-tests]]（测试侧的同类基线）
