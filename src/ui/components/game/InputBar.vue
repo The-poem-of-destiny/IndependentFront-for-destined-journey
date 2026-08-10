@@ -7,7 +7,7 @@ const emit = defineEmits<{
   stop: [];
 }>();
 
-const props = defineProps<{ disabled?: boolean }>();
+const props = defineProps<{ disabled?: boolean; stopping?: boolean }>();
 
 const game = useGameStore();
 const input = ref('');
@@ -111,8 +111,15 @@ function handleStop() {
     </button>
 
     <!-- 生成态：停止按钮 -->
-    <button v-if="props.disabled" class="input-btn stop-btn" title="停止生成" @click="handleStop">
-      <i class="fa-solid fa-stop" />
+    <button
+      v-if="props.disabled"
+      class="input-btn stop-btn"
+      :title="props.stopping ? '正在停止' : '停止生成'"
+      :aria-label="props.stopping ? '正在停止' : '停止生成'"
+      :disabled="props.stopping"
+      @click="handleStop"
+    >
+      <i :class="props.stopping ? 'fa-solid fa-hourglass-half' : 'fa-solid fa-stop'" />
     </button>
   </div>
 </template>
@@ -158,6 +165,10 @@ function handleStop() {
 .stop-btn:hover {
   background: color-mix(in srgb, var(--theme-error) 20%, transparent);
   color: var(--theme-error);
+}
+.stop-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 .input-field {
   flex: 1;

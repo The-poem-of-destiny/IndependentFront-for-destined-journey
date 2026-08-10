@@ -1565,6 +1565,38 @@ export interface AgentResult {
   requestMessages?: Array<{ role: string; content: string | null }>;
 }
 
+/** 玩家可见的单次 Agent 工具活动；只保留语义化文案，不携带原始参数或响应。 */
+export interface AgentToolActivity {
+  id: string;
+  label: string;
+  detail?: string;
+  status: 'completed' | 'failed';
+  completedAt: number;
+}
+
+/** 玩家可见的单个 Agent 步骤；同一回合允许并行与同名多次执行。 */
+export interface AgentActivityStep {
+  id: string;
+  agentId: string;
+  label: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  startedAt: number;
+  completedAt?: number;
+  tools: AgentToolActivity[];
+}
+
+/** 与一条玩家消息绑定的回合活动记录。原始调用细节只进入 DebugAgentEntry。 */
+export interface AgentActivityRun {
+  id: string;
+  sourceMessageId: string | null;
+  status: 'running' | 'stopping' | 'completed' | 'failed' | 'cancelled';
+  startedAt: number;
+  completedAt?: number;
+  message?: string;
+  standalone: boolean;
+  steps: AgentActivityStep[];
+}
+
 /** 编排器运行记录 */
 export interface OrchestratorRun {
   id: string;

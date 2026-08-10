@@ -629,11 +629,16 @@ export class AgentOrchestrator {
     const result = await client.chatWithTools(
       request,
       async (name, args) => {
-        const toolResult = await executeToolCall(name, args, toolContext);
-        if (this.events.onToolCall) {
-          this.events.onToolCall(config.agentId, name, args, toolResult);
+        try {
+          const toolResult = await executeToolCall(name, args, toolContext);
+          this.events.onToolCall?.(config.agentId, name, args, toolResult);
+          return toolResult;
+        } catch (error) {
+          this.events.onToolCall?.(config.agentId, name, args, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
         }
-        return toolResult;
       },
       { maxRounds: config.maxToolCallRounds ?? 5, signal: config.abortSignal },
     );

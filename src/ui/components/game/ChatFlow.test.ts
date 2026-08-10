@@ -13,7 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import type { ChatMessage } from '@engine/types';
+import type { AgentActivityRun, ChatMessage } from '@engine/types';
 import ChatFlow from './ChatFlow.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 
@@ -23,6 +23,8 @@ const game = vi.hoisted(() => ({
   isInCombat: false,
   pendingOptions: [] as string[],
   pendingInput: null as string | null,
+  agentActivityRuns: [] as AgentActivityRun[],
+  currentAgentActivityRun: null as AgentActivityRun | null,
   clearPendingInput: vi.fn(),
   rollbackOneTurn: vi.fn(async () => ({ ok: true })),
 }));
@@ -47,6 +49,7 @@ describe('ChatFlow 右键菜单 — user 消息', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    game.agentActivityRuns = [];
     // 配图档关掉 → user 消息菜单只剩回退/复制两项（配图是给正文的）
     useSettingsStore().settings.imageGenMode = 'off';
     Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => {}) } });
@@ -123,5 +126,46 @@ describe('ChatFlow 右键菜单 — user 消息', () => {
     await copyBtn!.trigger('click');
     await flushPromises();
     expect(writeText).toHaveBeenCalledWith('我要复制的内容');
+  });
+});
+
+describe('ChatFlow 回合活动重试', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    game.agentActivityRuns = [];
+  });
+
+  it('同一输入多次失败时只允许重试最后一次运行', async () => {
+    game.agentActivityRuns = ['attempt-1', 'attempt-2'].map((id, index) => ({
+      id,
+      sourceMessageId: 'u1',
+      status: 'failed' as const,
+      startedAt: index,
+      completedAt: index + 1,
+      message: '世界的回应在此中断，可以再次尝试。',
+      standalone: false,
+      steps: [],
+    }));
+
+    const wrapper = mount(ChatFlow, {
+      global: {
+        stubs: {
+          teleport: true,
+          TurnActivityLedger: {
+            props: ['run', 'canRetry'],
+            emits: ['retry'],
+            template:
+              '<button v-if="canRetry" class="retry-probe" @click="$emit(\'retry\')">{{ run.id }}</button>',
+          },
+        },
+      },
+      props: { messages: [userMsg('u1', '再试一次')], isGenerating: false },
+    });
+
+    const retry = wrapper.findAll('.retry-probe');
+    expect(retry).toHaveLength(1);
+    expect(retry[0].text()).toBe('attempt-2');
+    await retry[0].trigger('click');
+    expect(wrapper.emitted('retry-turn')).toEqual([['u1']]);
   });
 });

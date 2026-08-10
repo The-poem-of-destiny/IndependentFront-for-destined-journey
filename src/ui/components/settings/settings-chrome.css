@@ -137,7 +137,11 @@
   cursor: pointer;
 }
 .toggle-input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 .toggle-slider {
   width: 40px;
@@ -163,6 +167,10 @@
 }
 .toggle-input:checked + .toggle-slider::after {
   transform: translateX(18px);
+}
+.toggle-input:focus-visible + .toggle-slider {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 3px;
 }
 .toggle-row {
   display: flex;

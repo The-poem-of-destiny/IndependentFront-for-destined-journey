@@ -2,7 +2,7 @@
 /**
  * 设置页壳层 —— 导航 + Agent 分区（Q-25）
  *
- * 12 个分区里 11 个已经是一行子组件；只剩 **Agent 配置**还内联在这里，因为它
+ * 14 个分区里 13 个已经是一行子组件；只剩 **Agent 配置**还内联在这里，因为它
  * 要读写 13 张 per-Agent 并行 map（`agentModels` / `agentPrompts` / …），
  * 而那些 map 的形状正是 Q-18 要改的东西 —— 先拆再改等于拆两遍。
  * Q-18 落地后照 `settings/audio/` 的样子拆成 `settings/agent/` 目录。
@@ -32,6 +32,7 @@ import AudioSection from './AudioSection.vue';
 import AssetSection from './AssetSection.vue';
 import ImageSection from './image/ImageSection.vue';
 import DataSection from './DataSection.vue';
+import DeveloperSection from './DeveloperSection.vue';
 import AboutSection from './AboutSection.vue';
 
 const ui = useUIStore();
@@ -63,6 +64,7 @@ type Section =
   | 'asset'
   | 'image'
   | 'data'
+  | 'developer'
   | 'about';
 const activeSection = ref<Section>('api');
 
@@ -80,6 +82,7 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'asset', label: '素材', icon: 'fa-solid fa-image' },
   { key: 'image', label: '图像生成', icon: 'fa-solid fa-wand-sparkles' },
   { key: 'data', label: '存档数据', icon: 'fa-solid fa-database' },
+  { key: 'developer', label: '开发者模式', icon: 'fa-solid fa-code' },
   { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
 ];
 
@@ -254,6 +257,9 @@ onMounted(() => {
 
             <!-- ========== 存档数据 ========== -->
             <DataSection v-if="activeSection === 'data'" />
+
+            <!-- ========== 开发者模式 ========== -->
+            <DeveloperSection v-if="activeSection === 'developer'" />
 
             <!-- ========== 关于 ========== -->
             <AboutSection v-if="activeSection === 'about'" />

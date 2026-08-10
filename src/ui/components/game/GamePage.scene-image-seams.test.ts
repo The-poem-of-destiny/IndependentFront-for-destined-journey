@@ -153,7 +153,6 @@ const STUBS = {
   ChatFlow: true,
   StatusHUD: true,
   InputBar: true,
-  AgentStatusPanel: true,
   MiniPlayer: true,
   CombatPanel: true,
   ItemsPanel: true,

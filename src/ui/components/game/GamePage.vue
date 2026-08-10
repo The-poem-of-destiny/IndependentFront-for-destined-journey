@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
@@ -30,7 +30,6 @@ import SnapshotPanel from './SnapshotPanel.vue';
 import CgGalleryPanel from './CgGalleryPanel.vue';
 import WorkshopEnablePanel from './WorkshopEnablePanel.vue';
 import MapPanel from './MapPanel.vue';
-import AgentStatusPanel from './AgentStatusPanel.vue';
 import DebugPanel from './DebugPanel.vue';
 import MiniPlayer from './MiniPlayer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
@@ -47,6 +46,29 @@ const s = settings.settings;
 
 let pipeline: GamePipeline | null = null;
 const streamingText = ref('');
+let streamingFrame: number | null = null;
+let pendingStreamingText = '';
+
+function cancelStreamingPreview() {
+  if (streamingFrame !== null) cancelAnimationFrame(streamingFrame);
+  streamingFrame = null;
+  pendingStreamingText = '';
+  streamingText.value = '';
+}
+
+/** 网络 delta 可能远快于绘制；每帧只提交最新可见快照，避免整段正文重复重排。 */
+function handleStoryChunk(chunk: string, isComplete: boolean) {
+  if (isComplete) {
+    cancelStreamingPreview();
+    return;
+  }
+  pendingStreamingText = chunk;
+  if (streamingFrame !== null) return;
+  streamingFrame = requestAnimationFrame(() => {
+    streamingFrame = null;
+    streamingText.value = pendingStreamingText;
+  });
+}
 
 onMounted(async () => {
   window.addEventListener('keydown', onKeyDown);
@@ -151,13 +173,7 @@ onMounted(async () => {
     // 首次加载 → 自动发送开场 Prompt
     if (!game.hasOpeningPromptConsumed && game.openingPrompt) {
       console.log('[GamePage] sending opening prompt...');
-      await pipeline.sendOpeningPrompt((chunk: string, isComplete: boolean) => {
-        if (isComplete) {
-          streamingText.value = '';
-        } else {
-          streamingText.value = chunk;
-        }
-      });
+      await pipeline.sendOpeningPrompt(handleStoryChunk);
     } else {
       console.log(
         '[GamePage] NOT sending opening prompt. consumed:',
@@ -171,8 +187,9 @@ onMounted(async () => {
   }
 });
 
-/** 🧪 开发用测试注入 — 仅 DEV 构建注册到 window / 快捷键（P1-14: 生产构建不暴露） */
+/** 🧪 开发用测试注入 — 仍限定 DEV 构建，且要求用户已开启开发者模式。 */
 async function injectChatFlowTest() {
+  if (!s.developerMode) return;
   // 确保所有系统事件类型都可见
   s.systemEventsVisible = true;
   s.systemEventFilters = {
@@ -203,10 +220,10 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
   (window as any).__injectChatFlowTest__ = injectChatFlowTest;
 }
 
-// Ctrl+Shift+T 快捷键注入 / Alt+Shift+D 调试面板 — 仅 DEV 构建响应（P1-14）
+// Alt+Shift+D 属于用户可控的开发者模式；Ctrl+Shift+T 测试注入仍只在 DEV 构建响应。
 function onKeyDown(e: KeyboardEvent) {
-  if (!import.meta.env.DEV) return;
-  if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+  if (!s.developerMode) return;
+  if (import.meta.env.DEV && e.ctrlKey && e.shiftKey && e.key === 'T') {
     e.preventDefault();
     void injectChatFlowTest();
   }
@@ -220,9 +237,21 @@ function onKeyDown(e: KeyboardEvent) {
 // ===== 调试面板 =====
 const showDebug = ref(false);
 
+// 关闭开关必须立刻收起所有原始诊断面，不能只把下次入口藏起来。
+watch(
+  () => s.developerMode,
+  (enabled) => {
+    if (enabled) return;
+    showDebug.value = false;
+    if (game.activeModal === 'debug') game.closeModal();
+  },
+  { immediate: true },
+);
+
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown);
-  game.isGenerating = false;
+  pipeline?.abort?.();
+  cancelStreamingPreview();
   // 🖼 离开游戏页：中止在飞的出图、清掉排队的（§8.2）。排队中的一个字节都没花，
   //    删掉即可；在飞的那条会落 failed/aborted，因为上游照样计费。
   sceneImages.abortAll();
@@ -230,19 +259,21 @@ onUnmounted(() => {
 
 async function handleSend(content: string) {
   if (game.isGenerating || !pipeline) return;
-  streamingText.value = '';
-  await pipeline.run(content, (chunk: string, isComplete: boolean) => {
-    if (isComplete) {
-      streamingText.value = '';
-    } else {
-      streamingText.value = chunk;
-    }
-  });
+  cancelStreamingPreview();
+  await pipeline.run(content, handleStoryChunk);
+}
+
+async function handleRetry(messageId: string) {
+  if (game.isGenerating || !pipeline) return;
+  const message = game.messages.find((entry) => entry.id === messageId && entry.role === 'user');
+  if (!message) return;
+  cancelStreamingPreview();
+  await pipeline.run(message.content, handleStoryChunk, false, message.id);
 }
 
 function handleStop() {
   pipeline?.abort();
-  streamingText.value = '';
+  cancelStreamingPreview();
 }
 
 function handleToolClick(id: string) {
@@ -255,6 +286,7 @@ function handleToolClick(id: string) {
     showMiniPlayer.value = !showMiniPlayer.value;
     return;
   }
+  if (id === 'debug' && !s.developerMode) return;
   game.showModal(id);
 }
 
@@ -285,9 +317,9 @@ function onModalOpenChange(v: boolean) {
         @send="handleSend"
         @select-option="handleSelectOption"
         @stop="handleStop"
+        @retry-turn="handleRetry"
       />
       <StatusHUD />
-      <AgentStatusPanel />
     </div>
 
     <MiniPlayer :open="showMiniPlayer" @close="showMiniPlayer = false" />
@@ -387,7 +419,7 @@ function onModalOpenChange(v: boolean) {
     </AppModal>
     <AppModal
       title="调试 & 导出"
-      :open="game.activeModal === 'debug'"
+      :open="s.developerMode && game.activeModal === 'debug'"
       size="xxl"
       closable
       @close="game.closeModal()"
@@ -398,7 +430,7 @@ function onModalOpenChange(v: boolean) {
 
     <!-- 调试面板 (Alt+Shift+D) -->
     <Teleport to="body">
-      <div v-if="showDebug" class="debug-drawer">
+      <div v-if="s.developerMode && showDebug" class="debug-drawer">
         <div class="debug-header">
           <span>Debug Panel</span>
           <button @click="showDebug = false">✕</button>

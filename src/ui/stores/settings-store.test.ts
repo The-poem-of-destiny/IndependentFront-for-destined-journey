@@ -64,6 +64,20 @@ describe('settings-store', () => {
     expect(Array.isArray(store.settings.apiPool)).toBe(true);
     expect(store.settings.plotMode).toBe('off');
     expect(store.settings.memoryRecallCount).toBe(20);
+    expect(store.settings.developerMode).toBe(false);
+  });
+
+  it('开发者模式默认关闭，并随设置袋持久化', async () => {
+    expect(store.settings.developerMode).toBe(false);
+
+    store.settings.developerMode = true;
+    await nextTick();
+
+    const saved = JSON.parse(localStorage.getItem('fated-poem-settings')!);
+    expect(saved.developerMode).toBe(true);
+
+    store.resetAll();
+    expect(store.settings.developerMode).toBe(false);
   });
 
   it('修改 settings 应自动写 localStorage', async () => {
@@ -193,6 +207,7 @@ describe('settings-store', () => {
     expect(keys).toContain('plotEventsPerChapter');
     expect(keys).toContain('memoryRecallCount');
     expect(keys).toContain('memoryCacheStrategy');
+    expect(keys).toContain('developerMode');
   });
 
   // ═══ 图像设置：构造完成的那一拍就必须是合法袋子 ═══

@@ -81,6 +81,7 @@ async function buildExportData() {
       error: e.error,
       rawResponse: e.rawResponse,
       reasoning: e.reasoning,
+      toolCalls: e.toolCalls,
       messages: e.messages,
     })),
     apiPool: (sysSettings.apiPool as any[]).map((ep: any) => ({
@@ -155,6 +156,14 @@ async function copyJson() {
 function truncate(str: string, max: number): string {
   if (!str) return '';
   return str.length > max ? str.slice(0, max) + '…' : str;
+}
+
+function formatJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 </script>
 
@@ -264,6 +273,18 @@ function truncate(str: string, max: number): string {
               <template v-if="entry.reasoning">
                 <h6 class="debug-reasoning-h">思维链</h6>
                 <pre class="debug-reasoning-pre">{{ truncate(entry.reasoning, 2000) }}</pre>
+              </template>
+              <template v-if="entry.toolCalls?.length">
+                <h6 class="debug-reasoning-h">工具调用 ({{ entry.toolCalls.length }})</h6>
+                <details
+                  v-for="(tool, index) in entry.toolCalls"
+                  :key="`${tool.name}-${index}`"
+                  class="debug-tool-call"
+                >
+                  <summary>{{ tool.name }}</summary>
+                  <pre>参数: {{ truncate(formatJson(tool.arguments), 1200) }}</pre>
+                  <pre>结果: {{ truncate(formatJson(tool.result), 1200) }}</pre>
+                </details>
               </template>
             </div>
           </div>
@@ -442,5 +463,22 @@ function truncate(str: string, max: number): string {
   border-radius: 3px;
   white-space: pre-wrap;
   color: var(--theme-text-muted);
+}
+.debug-tool-call {
+  margin-top: 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: 3px;
+  background: var(--theme-card-bg);
+}
+.debug-tool-call summary {
+  cursor: pointer;
+  color: var(--theme-text-secondary);
+  font-size: 0.625rem;
+}
+.debug-tool-call pre {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 </style>

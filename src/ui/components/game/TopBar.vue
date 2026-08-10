@@ -32,14 +32,8 @@ const turnCount = computed(() => {
       <span class="top-title-rule" aria-hidden="true" />
     </span>
 
-    <!-- 右: Agent 状态 + 设置 + 全屏 -->
+    <!-- 右: 设置 + 全屏；Agent 活动在对话流中按回合展示 -->
     <div class="top-right">
-      <Transition name="agent-fade">
-        <span v-if="game.agentStatus" class="agent-indicator">
-          <i class="fa-solid fa-circle-notch agent-spin" aria-hidden="true" />
-          {{ game.agentStatus.label }}…
-        </span>
-      </Transition>
       <button class="top-btn icon-btn" title="设置" @click="ui.navigate('settings')">
         <i class="fa-solid fa-gear" />
       </button>
@@ -127,48 +121,6 @@ const turnCount = computed(() => {
     color-mix(in srgb, var(--theme-primary) 45%, transparent),
     transparent
   );
-}
-
-/* Agent 状态指示 */
-.agent-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.75rem;
-  color: var(--theme-text-secondary);
-  padding: 3px 10px;
-  border-radius: var(--theme-radius-sm, 4px);
-  background: color-mix(in srgb, var(--theme-primary) 8%, transparent);
-  white-space: nowrap;
-}
-.agent-spin {
-  animation: agent-rotate 1s linear infinite;
-  color: var(--theme-primary);
-  font-size: 0.6875rem;
-}
-@keyframes agent-rotate {
-  to {
-    transform: rotate(360deg);
-  }
-}
-.agent-fade-enter-active {
-  transition: opacity 0.2s ease-out;
-}
-.agent-fade-leave-active {
-  transition: opacity 0.15s ease-in;
-}
-.agent-fade-enter-from,
-.agent-fade-leave-to {
-  opacity: 0;
-}
-@media (prefers-reduced-motion: reduce) {
-  .agent-spin {
-    animation: none;
-  }
-  .agent-fade-enter-active,
-  .agent-fade-leave-active {
-    transition: none;
-  }
 }
 
 @media (max-width: 720px) {

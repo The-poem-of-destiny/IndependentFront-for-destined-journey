@@ -2,9 +2,11 @@
 import { computed } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useAudioStore } from '../../stores/audio-store';
+import { useSettingsStore } from '../../stores/settings-store';
 
 const game = useGameStore();
 const audio = useAudioStore();
+const settings = useSettingsStore().settings;
 
 /** 播放中给音乐图标一点低幅呼吸（仅 opacity，不碰布局属性） */
 const musicPlaying = computed(() => audio.state.music.status === 'playing');
@@ -27,9 +29,9 @@ const allTools = [
   { id: 'debug', label: '调试', icon: 'fa-solid fa-bug' },
   { id: 'settings', label: '设置', icon: 'fa-solid fa-gear' },
 ];
-// 🔒 P1-14: 调试按钮仅 DEV 构建显示 —— 生产构建不暴露调试面板入口
+// 原始请求、响应、思维链与工具参数只在用户明确开启开发者模式后出现。
 const tools = computed(() =>
-  import.meta.env.DEV ? allTools : allTools.filter((t) => t.id !== 'debug'),
+  settings.developerMode ? allTools : allTools.filter((tool) => tool.id !== 'debug'),
 );
 
 function handleClick(id: string) {

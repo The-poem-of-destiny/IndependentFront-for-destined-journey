@@ -116,6 +116,10 @@ function makeGameStore(overrides: Record<string, any> = {}) {
     setPendingOptions: vi.fn(),
     clearAgentLog: vi.fn(),
     clearAllAgentStatus: vi.fn(),
+    startAgentActivityRun: vi.fn(() => 'activity-test'),
+    finishAgentActivityRun: vi.fn(),
+    markAgentActivityStopping: vi.fn(),
+    recordAgentToolActivity: vi.fn(),
     updateAgentStatus: vi.fn(),
     clearAgentStatus: vi.fn(),
     addAgentLogEntry: vi.fn(),
@@ -483,6 +487,24 @@ describe('buildContext — plotSettings (步5)', () => {
       '上一轮输入',
       '上一轮正文',
     ]);
+  });
+
+  it('重试时从历史排除触发消息，只通过 userInput 注入一次', () => {
+    const pipeline = makePipeline({
+      messages: [
+        { id: 'u1', role: 'user', content: '上一轮输入', timestamp: 1 },
+        { id: 'a1', role: 'assistant', content: '上一轮正文', timestamp: 2 },
+        { id: 'u2', role: 'user', content: '需要重试的输入', timestamp: 3 },
+      ],
+    });
+
+    const ctx = (pipeline as any).buildContext('需要重试的输入', 'u2');
+
+    expect(ctx.userInput).toBe('需要重试的输入');
+    expect(ctx.history.map((message: { id: string }) => message.id)).toEqual(['u1', 'a1']);
+    expect(
+      ctx.history.filter((message: { content: string }) => message.content === '需要重试的输入'),
+    ).toHaveLength(0);
   });
 
   it('读取 activeSave.metadata.plotSettings', () => {

@@ -74,6 +74,46 @@ Flexibility: materials and ornament may vary by theme; the feature and interacti
 - Reflow the command dock and keep the battlefield scrollable on narrow
   viewports; do not remove or merge existing actions to make them fit.
 
+### Inline turn activity ledger
+
+Status: owner-approved interaction contract
+Scope: every play-area theme
+Flexibility: materials follow the active theme; placement and information boundaries do not
+
+- Show each Agent run inline after its player message rather than in a floating
+  viewport overlay or the top bar.
+- Keep the surface visible to every player and use game-language labels only.
+  Agent ids, tool names, payloads, prompts, and provider reasoning remain in
+  Developer Mode.
+- Represent concurrent agents as independent sibling steps and tool calls as
+  nested semantic actions. The narrative may stream below while later steps
+  continue.
+- Keep the active ledger height bounded, preserve manual expansion, and condense
+  an untouched ledger when the run completes. Failed and player-cancelled runs
+  remain open with an inline recovery message; only the latest attempt for the
+  newest player message offers retry.
+- Inherit each theme's live card material and type system. Do not introduce a
+  monospace console treatment, decorative blur, or a new runtime asset.
+
+### Developer mode
+
+Status: owner-approved interaction contract
+Scope: Settings and play-area diagnostics
+Flexibility: diagnostic layout may be technical; access rules do not vary by theme
+
+- Developer Mode (`developerMode`) is a persistent toggle in its own Settings section and is off by default.
+- Enabling it reveals the game toolbar debug entry, raw Agent request/response
+  diagnostics, provider reasoning, tool payloads, exports, and the `Alt + Shift + D`
+  diagnostic drawer. Disabling it immediately hides the entry and closes any open
+  diagnostic surface.
+- The inline turn activity ledger remains visible and game-language-first in both
+  modes; Developer Mode adds separate inspection surfaces rather than replacing it.
+- `Ctrl + Shift + T` test-fixture injection remains restricted to development builds
+  and additionally requires Developer Mode. A production user cannot enable fake-data
+  injection by changing this setting.
+- Diagnostic exports can contain conversation text, prompts, and raw model output;
+  the Settings surface must warn players to inspect an export before sharing it.
+
 ## Theme-specific decisions
 
 ### Qinghua porcelain
