@@ -254,6 +254,67 @@ describe('useAssetImage · 名字匹配', () => {
     expect(h.released).toEqual(['av']);
   });
 
+  // ── 变体（D11）──
+  // 相册那类「一格一行」的使用面靠它；此前 `resolveAsset` 早就收第四个参数，
+  // 只是这一层没有入口，于是 UI 侧永远只取得到每个类型的主图。
+
+  it('指定变体 → 命中该变体那一行', async () => {
+    const h = makeHarness([
+      row({ id: 'base', name: '苏婉', type: '立绘' }),
+      row({ id: 'smile', name: '苏婉', type: '立绘', variant: '微笑' }),
+    ]);
+    const { api } = run(() => useAssetImage('苏婉', '立绘', { source: h.source, variant: '微笑' }));
+    await flush();
+    expect(api.url.value).toBe('blob:smile');
+    expect(api.row.value?.id).toBe('smile');
+  });
+
+  it('不指定变体 → 主图（变体存在也不会被抓来顶替）', async () => {
+    const h = makeHarness([
+      row({ id: 'base', name: '苏婉', type: '立绘' }),
+      row({ id: 'smile', name: '苏婉', type: '立绘', variant: '微笑' }),
+    ]);
+    const { api } = run(() => useAssetImage('苏婉', '立绘', { source: h.source }));
+    await flush();
+    expect(api.url.value).toBe('blob:base');
+  });
+
+  /**
+   * ⚠️ 变体寻址**不是精确寻址**（`pickFromSlot` 的既有行为，本层只是把参数接上）：
+   * 该类型没有这个变体时退回主图。要「必须正是那一行」的调用方得自己核对 `row`。
+   */
+  it('变体缺席 → 退回该类型主图，不空手', async () => {
+    const h = makeHarness([row({ id: 'base', name: '苏婉', type: '立绘' })]);
+    const { api } = run(() =>
+      useAssetImage('苏婉', '立绘', { source: h.source, variant: '没有这个表情' }),
+    );
+    await flush();
+    expect(api.url.value).toBe('blob:base');
+  });
+
+  it('空串变体等同未指定（与 asset-index 的归一口径一致）', async () => {
+    const h = makeHarness([row({ id: 'base', name: '苏婉', type: '立绘' })]);
+    const { api } = run(() => useAssetImage('苏婉', '立绘', { source: h.source, variant: '' }));
+    await flush();
+    expect(api.url.value).toBe('blob:base');
+  });
+
+  it('变体是响应式的: 换变体就换图，且恰好撤旧的一次', async () => {
+    const h = makeHarness([
+      row({ id: 'smile', name: '苏婉', type: '立绘', variant: '微笑' }),
+      row({ id: 'cry', name: '苏婉', type: '立绘', variant: '哭' }),
+    ]);
+    const variant = ref('微笑');
+    const { api } = run(() => useAssetImage('苏婉', '立绘', { source: h.source, variant }));
+    await flush();
+    expect(api.url.value).toBe('blob:smile');
+
+    variant.value = '哭';
+    await flush();
+    expect(api.url.value).toBe('blob:cry');
+    expect(h.released).toEqual(['smile']);
+  });
+
   it('字节缺失（assetUrl 给 null）→ url 为 null，且不欠任何 release', async () => {
     const h = makeHarness([row({ id: 'a1', name: '苏婉' })], false);
     const { scope, api } = run(() => useAssetImage('苏婉', undefined, { source: h.source }));

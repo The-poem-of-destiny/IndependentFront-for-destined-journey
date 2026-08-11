@@ -10,6 +10,7 @@ import { getAffectionLabel } from '@engine/affection-system';
 import { MONTH_NAMES, WEEKDAY_NAMES, getTimeOfDay } from '@engine/time-system';
 import { nameColorVar, initialsOf } from '../../utils/name-color';
 import AppTabs from '../shared/AppTabs.vue';
+import CharacterViewerModal from './CharacterViewerModal.vue';
 
 const game = useGameStore();
 
@@ -180,6 +181,19 @@ async function toggleNews(id: string) {
 function openCharList() {
   game.showModal('characters');
 }
+
+/**
+ * ═══ 角色查看器 ═══
+ *
+ * 在场那一行本来就是 `<button>`（此前只挂着悬停心声），点开一份完整档案是它缺的那半。
+ *
+ * 存的是**名字**而不是整个角色对象: 弹窗每次都按名字回查 `game.characters`
+ * （M4 起名字唯一），于是战斗/提交换掉整份数组时它跟着更新。攥着对象的话，
+ * 打完架再看这个人，血量还是打之前的 —— 而那种缺陷没人会怀疑到弹窗上。
+ * **不走 `game.showModal`**: 那是页面级弹窗的单选位（一次只能开一个），本弹窗是
+ * 场景栏自己的一层，与「角色列表」那个页面级弹窗互不相干。
+ */
+const viewingName = ref<string | null>(null);
 </script>
 
 <template>
@@ -298,12 +312,16 @@ function openCharList() {
         </div>
 
         <div v-if="presentChars.length" class="scene-npc-list">
+          <!-- 点开角色查看器。⚠️ **这一行不加 `title`**: 它已经挂着心声悬停气泡，
+               再给一个原生 tooltip 会在同一次悬停里冒出两层浮层（本文件里其它
+               带 `title` 的都是没有气泡的控件）。可点性靠 hover 态与 `<button>` 本身表达。 -->
           <button
             v-for="char in presentChars"
             :key="char.id"
             class="scene-npc-item"
             :class="{ hovered: thoughtPop.key.value === char.id }"
             :aria-describedby="thoughtPop.key.value === char.id ? 'npc-thought-pop' : undefined"
+            @click="viewingName = char.name"
             @mouseenter="thoughtPop.onEnter($event, char.id)"
             @mouseleave="thoughtPop.hide"
             @focus="thoughtPop.onFocus($event, char.id)"
@@ -408,6 +426,9 @@ function openCharList() {
   <div v-else class="scene-panel scene-panel-empty">
     <div class="scene-empty-msg">未选择存档</div>
   </div>
+
+  <!-- ═══ 角色查看器 —— 点在场角色开（自己 Teleport 到 body，见 AppModal） ═══ -->
+  <CharacterViewerModal :name="viewingName" @close="viewingName = null" />
 
   <!-- ═══ 心声气泡（Teleport 出滚动容器，否则会被 overflow 裁掉） ═══ -->
   <Teleport to="body">
