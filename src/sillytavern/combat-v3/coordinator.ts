@@ -63,6 +63,7 @@ import type {
   ToolResult,
   WorldBook,
 } from '../types';
+import { getCombatCoefficient } from '../tier-constants';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 类型定义
@@ -474,12 +475,21 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
   const initialFp = opts.bundle.resourceSnapshots.FP;
   const finalFp = finalSnapshot.resourceSnapshots.FP;
   const fpDelta = finalFp - initialFp;
+  const combatOutcome = outcomeOf(session);
+  // §12.4 EXP 结算：ally_win 时按「被杀敌方 level × 战斗系数」求和平分给存活队友。
+  const expReward = buildExpRewardPatches(
+    finalSnapshot.units,
+    opts.bundle.participants,
+    deps.characters,
+    combatOutcome,
+  );
   // T10（设计 2026-08-09 §2.6 方案 1）：终局 Code 覆写回写 —— 把战斗结束时的单位
   // 资源（hp/mp/sp）与状态效果按 characterId 匹配存档角色，生成 StatePatch 与 FP
   // patch **合并进同一次 commitChatState**（A2-1：整场只 commit 一次，不开第二次）。
   // 召唤物（characterId 匹配不到存档角色）跳过，不硬造角色。
   const patches = [
     ...toPatches(allEvents, opts.bundle, fpDelta),
+    ...expReward.patches,
     ...buildUnitPersistPatches(finalSnapshot.units, deps.characters, opts.bundle.participants),
   ];
   if (deps.stateManager) {
@@ -505,11 +515,11 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
       collectedSummary ||
       `战斗结束（${session.snapshot().terminal?.reason ?? 'terminal'}）`,
     patches,
-    totalExp: 0,
+    totalExp: expReward.totalExp,
     totalFp: finalFp,
     loot,
     rounds,
-    outcome: outcomeOf(session),
+    outcome: combatOutcome,
   };
 }
 
@@ -2046,20 +2056,92 @@ function outcomeOf(session: CombatSession): CombatV3Result['outcome'] {
  * M1 内核 settle 不产 SettlementCommitted 事件（只产 CombatEnded + FP NarrativeCue），
  * 故这里直接按 fpDelta 生成 FP 结算 patch，保证终局一次 commitChatState（A2-1）。
  * 遵循数据字典五铁律 ④（FP 走 SaveProfile 唯一真源）。
+ *
+ * 🔴 2026-08-12（真机 bug：Patch set on users.fp: 未知操作: set）：
+ *   旧实现用 `op:'set'` + `target:'users.fp'`——set 不在 StatePatchOp 联合里
+ *   （state-manager 只认 replace/delta/add/remove 及各 set_hp/set_mp 等具名 op），
+ *   target 也错了（FP 真源是 profile.fp，见 craft-gen-chain 的先例）。
+ *   更糟的是语义：op:'set' value:N 会把 FP **覆盖**成 N 而不是加减——
+ *   fpDelta=0 时会把玩家 FP 清零。幸好 state-manager 因不认识 op 而拒收，
+ *   玩家的 FP 被「未知操作」这条错误救下来了。现在改为 delta_variable（与
+ *   craft-gen-chain FP 奖励同 op/target），amount=0 时整条不发。
  */
 function toPatches(
   _events: readonly DomainEvent[],
   _bundle: CombatDefinitionBundle,
   fpDelta: number,
 ): StatePatch[] {
+  if (fpDelta === 0) return []; // 无变动不发 patch（delta_variable amount:0 是无意义噪声）
   return [
     {
-      op: 'set',
-      target: 'users.fp',
-      path: '',
-      value: Math.round(fpDelta),
-    } as unknown as StatePatch,
+      op: 'delta_variable',
+      target: 'profile.fp',
+      amount: Math.round(fpDelta),
+    },
   ];
+}
+
+/**
+ * 战斗胜利经验值结算（架构 §12.4 EXP）。
+ *
+ * v3 内核 M1 只结算 FP 净变动，EXP/战利品留给 coordinator 补（terminal.ts 注释明说）。
+ * 本函数补上 EXP：仅 ally_win 结算；fled / enemy_win / draw 不给经验。
+ *
+ * 公式（世界书 #417617 战斗系数表 + ADR-11 确定性归 Code）：
+ *   每个被击杀的敌方单位贡献 EXP = level × getCombatCoefficient(tier)
+ *   求和后平分给玩家方存活（hp > 0）且有存档角色对应的单位。
+ *
+ * 被击杀敌方的 level/tier 取自 CombatParticipant（CombatUnitView 不带 level），
+ * 按 characterId（= unit.id）匹配。匹配不到 participant 时 tier 兜底取 unit.tier，
+ * level 兜底取 1。EXP 整除向下取整（Math.floor），余数丢弃。
+ *
+ * 纯函数，导出供测试直捣。铁律：不产 id（铁律 1）。
+ */
+export function buildExpRewardPatches(
+  units: Readonly<Record<string, CombatUnitView>>,
+  participants: readonly CombatParticipant[],
+  characters: ReadonlyArray<Record<string, unknown>>,
+  outcome: CombatV3Result['outcome'],
+): { patches: StatePatch[]; totalExp: number } {
+  if (outcome !== 'ally_win') return { patches: [], totalExp: 0 };
+
+  const defeatedEnemies = Object.values(units).filter(
+    (u) => u.side === 'enemy' && u.hp <= 0,
+  );
+  if (defeatedEnemies.length === 0) return { patches: [], totalExp: 0 };
+
+  let rawExp = 0;
+  for (const enemy of defeatedEnemies) {
+    const p = participants.find((pp) => pp.characterId === enemy.id);
+    const tier = p?.tier ?? enemy.tier ?? 1;
+    const level = p?.level ?? 1;
+    rawExp += level * getCombatCoefficient(tier);
+  }
+  const totalExp = Math.round(rawExp);
+  if (totalExp <= 0) return { patches: [], totalExp: 0 };
+
+  // 玩家方存活单位 → 匹配存档角色（召唤物/无对应角色跳过，不硬造）
+  const survivorChars: string[] = [];
+  for (const unit of Object.values(units)) {
+    if (unit.side !== 'player' || unit.hp <= 0) continue;
+    const saved = findSavedCharacter(characters, unit);
+    const name = saved?.name;
+    if (typeof name === 'string' && name.length > 0) {
+      survivorChars.push(name);
+    }
+  }
+  if (survivorChars.length === 0) return { patches: [], totalExp: 0 }; // 无人存活 → EXP 浪费
+
+  const expPerSurvivor = Math.floor(totalExp / survivorChars.length);
+  if (expPerSurvivor <= 0) return { patches: [], totalExp: 0 }; // 整除为 0 → 不发
+
+  const patches: StatePatch[] = survivorChars.map((name) => ({
+    op: 'update_character',
+    target: `characters.${name}`,
+    value: { totalExp: expPerSurvivor },
+    metadata: { source: 'combat_v3', delta: true },
+  }));
+  return { patches, totalExp };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
