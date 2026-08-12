@@ -1671,7 +1671,12 @@ describe('§12.4 EXP 结算 + FP patch 修复（2026-08-12 真机 bug）', () =>
   it('ally_win：被杀敌方 level×战斗系数 求和后平分给存活玩家方角色', () => {
     // 丙 T1 Lv.5 → 5×2.0=10；甲乙均分 → 各 5
     const { units, participants, characters } = mkExpScene(1, 5);
-    const { patches, totalExp } = buildExpRewardPatches(units, participants, characters, 'ally_win');
+    const { patches, totalExp } = buildExpRewardPatches(
+      units,
+      participants,
+      characters,
+      'ally_win',
+    );
     expect(totalExp).toBe(10);
     expect(patches).toContainEqual({
       op: 'update_character',
@@ -1689,7 +1694,12 @@ describe('§12.4 EXP 结算 + FP patch 修复（2026-08-12 真机 bug）', () =>
 
   it('ally_win：高 tier 敌方给的 EXP 按 combatCoefficient 放大（T3 Lv.10 → 10×4.0=40）', () => {
     const { units, participants, characters } = mkExpScene(3, 10);
-    const { totalExp, patches } = buildExpRewardPatches(units, participants, characters, 'ally_win');
+    const { totalExp, patches } = buildExpRewardPatches(
+      units,
+      participants,
+      characters,
+      'ally_win',
+    );
     expect(totalExp).toBe(40);
     expect(patches).toHaveLength(2);
     expect(patches.every((p) => (p.value as { totalExp?: number }).totalExp === 20)).toBe(true);
@@ -1711,7 +1721,12 @@ describe('§12.4 EXP 结算 + FP patch 修复（2026-08-12 真机 bug）', () =>
       丙: { ...unitView('丙', 400, 400, 0, 0, 0, 0), side: 'enemy' as const },
     };
     expect(
-      buildExpRewardPatches(units, [mkParticipant('丙', { side: 'enemy' })], [{ id: '甲', name: '甲' }], 'ally_win'),
+      buildExpRewardPatches(
+        units,
+        [mkParticipant('丙', { side: 'enemy' })],
+        [{ id: '甲', name: '甲' }],
+        'ally_win',
+      ),
     ).toEqual({ patches: [], totalExp: 0 });
   });
 
@@ -1740,7 +1755,12 @@ describe('§12.4 EXP 结算 + FP patch 修复（2026-08-12 真机 bug）', () =>
       { id: '乙', name: '乙' },
       { id: '丁', name: '丁' },
     ] as Array<Record<string, unknown>>;
-    const { patches, totalExp } = buildExpRewardPatches(units, participants, characters, 'ally_win');
+    const { patches, totalExp } = buildExpRewardPatches(
+      units,
+      participants,
+      characters,
+      'ally_win',
+    );
     expect(totalExp).toBe(0); // floor(2/3)=0 → 无人拿到 → 实际授予 0
     expect(patches).toEqual([]);
   });
