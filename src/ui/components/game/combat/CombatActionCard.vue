@@ -237,6 +237,18 @@ const v3Hit = computed((): boolean | null => {
   return typeof v === 'boolean' ? v : null;
 });
 
+/** v3：骰值数组（1~2 颗 d20，AttackResolved.dice） */
+const v3Dice = computed<number[] | null>(() => {
+  const v = (props.result as Record<string, unknown>)?.dice;
+  return Array.isArray(v) ? (v.filter((d) => typeof d === 'number') as number[]) : null;
+});
+
+/** v3：意图层级（AttackDeclared.intentionLevel） */
+const v3Intention = computed((): string | null => {
+  const v = (props.result as Record<string, unknown>)?.intentionLevel;
+  return typeof v === 'string' && v.length > 0 ? v : null;
+});
+
 /** v3：最终伤害 / 伤害类型 / 目标 HP 前后 */
 const v3Final = computed((): number | null => {
   const v = (props.result as Record<string, unknown>)?.final;
@@ -245,6 +257,16 @@ const v3Final = computed((): number | null => {
 const v3DamageType = computed((): string | null => {
   const v = (props.result as Record<string, unknown>)?.damageType;
   return typeof v === 'string' && v.length > 0 ? v : null;
+});
+/** v3：减免前伤害（= 初始伤害 = 属性×10×系数 + 技能威力 + 武器攻击力） */
+const v3PreReduction = computed((): number | null => {
+  const v = (props.result as Record<string, unknown>)?.preReduction;
+  return typeof v === 'number' ? v : null;
+});
+/** v3：评级/意图系数修正后、DR 减免前的中间伤害值 */
+const v3PostStep6 = computed((): number | null => {
+  const v = (props.result as Record<string, unknown>)?.postStep6;
+  return typeof v === 'number' ? v : null;
 });
 const v3TargetHpBefore = computed((): number | null => {
   const v = (props.result as Record<string, unknown>)?.targetHpBefore;
@@ -300,18 +322,39 @@ function v3Summary(): {
   return { attacker: atk, target: tgt, skill, check, rating, damage: dmg, hp };
 }
 
-/** v3：展开详情行（供模板渲染完整信息） */
+/** v3：展开详情行（供模板渲染完整信息：骰值/检定/伤害分解/HP） */
 const v3DetailRows = computed(() => {
-  const rows: Array<{ label: string; value: string }> = [];
+  const rows: Array<{ label: string; value: string; note?: string; highlight?: boolean }> = [];
   if (v3Skill.value) rows.push({ label: '技能', value: v3Skill.value });
+  if (v3Intention.value) rows.push({ label: '意图', value: v3Intention.value });
+  // 骰值：1~2 颗 d20 原始骰面 → checkValue（检定值）→ rating（评级）
+  const diceStr =
+    v3Dice.value && v3Dice.value.length > 0 ? v3Dice.value.join(' + ') : null;
   if (v3CheckValue.value !== null) {
     rows.push({
       label: '检定',
       value: `${v3CheckValue.value}${v3Rating.value ? `（${v3Rating.value}）` : ''}`,
+      note: diceStr ? `骰 ${diceStr}` : undefined,
     });
+  } else if (diceStr) {
+    rows.push({ label: '骰值', value: diceStr });
   }
-  if (v3Final.value !== null && !v3IsMiss.value) {
-    rows.push({ label: '伤害', value: `${v3Final.value} 点${v3DamageType.value ?? ''}` });
+  // 伤害分解：preReduction（初始）→ postStep6（评级修正后）→ final（DR 减免后）
+  if (!v3IsMiss.value && v3Final.value !== null) {
+    const parts: string[] = [];
+    if (v3PreReduction.value !== null) parts.push(`初始 ${v3PreReduction.value}`);
+    if (v3PostStep6.value !== null && v3PostStep6.value !== v3PreReduction.value) {
+      parts.push(`修正 ${v3PostStep6.value}`);
+    }
+    if (v3PostStep6.value !== null && v3Final.value !== v3PostStep6.value) {
+      parts.push(`减免 −${v3PostStep6.value - v3Final.value}`);
+    }
+    rows.push({
+      label: '伤害',
+      value: `${v3Final.value} 点${v3DamageType.value ?? ''}`,
+      note: parts.length > 1 ? parts.join(' → ') : undefined,
+      highlight: true,
+    });
   }
   if (v3TargetHpBefore.value !== null && v3TargetHpAfter.value !== null) {
     rows.push({
@@ -396,12 +439,22 @@ const v3DetailRows = computed(() => {
 
     <!-- ════════ 展开态：v3 扁平详情 / 8 步伤害管线 ════════ -->
     <Transition name="cac-expand">
-      <!-- 🆕 v3 攻击卡片展开：技能/检定/伤害/HP 详情行（2026-08-12） -->
+      <!-- 🆕 v3 攻击卡片展开：骰值/检定/伤害分解/HP 详情行（2026-08-12） -->
       <div v-if="expanded && isV3Attack" class="cac-body">
         <div class="cac-detail-list">
-          <div v-for="row in v3DetailRows" :key="row.label" class="cac-step">
-            <span class="cac-step-label">{{ row.label }}</span>
-            <span class="cac-step-value">{{ row.value }}</span>
+          <div
+            v-for="row in v3DetailRows"
+            :key="row.label"
+            class="cac-step"
+            :class="{ 'cac-step--final': row.highlight }"
+          >
+            <span class="cac-step-label" :class="{ 'cac-step-label--final': row.highlight }">
+              {{ row.label }}
+            </span>
+            <span class="cac-step-value" :class="{ 'cac-step-value--final': row.highlight }">
+              {{ row.value }}
+            </span>
+            <span v-if="row.note" class="cac-step-note">{{ row.note }}</span>
           </div>
           <div v-if="v3DetailRows.length === 0" class="cac-desc">本次行动无详细结算数据</div>
         </div>

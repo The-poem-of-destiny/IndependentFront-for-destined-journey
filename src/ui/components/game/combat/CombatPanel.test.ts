@@ -245,4 +245,80 @@ describe('CombatPanel F2 就绪态', () => {
     expect(text).not.toContain(A);
     expect(text).not.toContain(B);
   });
+
+  it('开打态 AI 思考中（非等玩家输入）→ 消息流末尾显示「思考中…」转圈；等玩家输入时不显示', async () => {
+    mockGame.combatReady = null;
+    mockGame.v3ActiveCombat = {
+      combatId: 'c1',
+      revision: 0,
+      phase: 'SlotConsume',
+      round: 1,
+      initiativeOrder: ['理查德', '冠军'],
+      currentTurnIndex: 1,
+      units: {
+        理查德: {
+          id: '理查德',
+          name: '理查德',
+          side: 'player',
+          tier: 1,
+          hp: 100,
+          maxHp: 100,
+          mp: 50,
+          maxMp: 50,
+          sp: 50,
+          maxSp: 50,
+          attacksRemaining: 1,
+          actionsRemaining: 1,
+          canAct: true,
+          morale: 'steady',
+          statusEffects: [],
+        },
+        冠军: {
+          id: '冠军',
+          name: '冠军',
+          side: 'enemy',
+          tier: 1,
+          hp: 80,
+          maxHp: 80,
+          mp: 0,
+          maxMp: 0,
+          sp: 0,
+          maxSp: 0,
+          attacksRemaining: 1,
+          actionsRemaining: 1,
+          canAct: true,
+          morale: 'steady',
+          statusEffects: [],
+        },
+      },
+      resourceSnapshots: { FP: 0 },
+    };
+    // 不等玩家输入 → AI 思考中
+    mockGame.combatAwaitingInput = null;
+    const wrapper = await mountPanel();
+    expect(wrapper.find('.thinking-indicator').exists()).toBe(true);
+    expect(wrapper.find('.thinking-text').text()).toContain('思考中');
+
+    // 等玩家输入 → 不显示思考中
+    mockGame.combatAwaitingInput = { unit: '理查德', unitId: '理查德', round: 1 };
+    await nextTick();
+    expect(wrapper.find('.thinking-indicator').exists()).toBe(false);
+  });
+
+  it('终局 phase（Terminal / SettlementCommitted）→ 不显示思考中（战斗已结束）', async () => {
+    mockGame.combatReady = null;
+    mockGame.v3ActiveCombat = {
+      combatId: 'c1',
+      revision: 0,
+      phase: 'SettlementCommitted',
+      round: 3,
+      initiativeOrder: ['理查德', '冠军'],
+      currentTurnIndex: 0,
+      units: {},
+      resourceSnapshots: { FP: 0 },
+    };
+    mockGame.combatAwaitingInput = null;
+    const wrapper = await mountPanel();
+    expect(wrapper.find('.thinking-indicator').exists()).toBe(false);
+  });
 });

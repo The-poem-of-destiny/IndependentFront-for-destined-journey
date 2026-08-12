@@ -15,6 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildCombatEndFactText,
+  buildExpRewardPatches,
   buildUnitPersistPatches,
   collectCombatEndFacts,
   currentInitiative,
@@ -1582,11 +1583,19 @@ describe('T10：终局落库回写（2026-08-09 §2.6 方案 1：战斗后角色
     expect(commit).toHaveBeenCalledTimes(1);
     const patches = commit.mock.calls[0][0] as StatePatch[];
 
-    // FP patch 与单位回写 patch 在**同一次** commit 的同一数组里
-    // （op:'set' 是 toPatches 既有形态，不在 StatePatchOp 联合，断言时绕过类型）
+    // FP delta=0（本场景无人花 FP）→ 不发 FP patch；EXP 结算走 update_character delta
+    // （乙 tier3/Lv10 → 10×4.0=40 EXP，甲独享）
+    expect(patches.some((p) => p.target === 'users.fp' || p.target === 'profile.fp')).toBe(false);
     expect(
-      patches.some((p) => (p as { op?: string }).op === 'set' && p.target === 'users.fp'),
+      patches.some(
+        (p) =>
+          p.op === 'update_character' &&
+          p.target === 'characters.甲' &&
+          (p.value as { totalExp?: number })?.totalExp === 40 &&
+          (p.metadata as { delta?: boolean })?.delta === true,
+      ),
     ).toBe(true);
+    expect(result.totalExp).toBe(40);
 
     // 甲：满血 500 / mp 100 / sp 50 覆写（战斗无消耗，原样回写）
     expect(patches).toContainEqual({ op: 'set_hp', target: 'characters.甲', value: 500 });
@@ -1636,6 +1645,104 @@ describe('T10：终局落库回写（2026-08-09 §2.6 方案 1：战斗后角色
       target: 'characters.甲',
       value: { name: '专注' },
     });
+  });
+});
+
+describe('§12.4 EXP 结算 + FP patch 修复（2026-08-12 真机 bug）', () => {
+  /** 两个玩家方存活角色 + 一个被杀敌方（tier/level 可控） */
+  const mkExpScene = (enemyTier: number, enemyLevel: number) => ({
+    units: {
+      甲: unitView('甲', 500, 500, 100, 100, 50, 50) as CombatUnitView & { side: 'player' },
+      乙: unitView('乙', 300, 300, 50, 50, 30, 30) as CombatUnitView & { side: 'player' },
+      // 敌方丙：被击杀（hp 0）
+      丙: { ...unitView('丙', 0, 400, 0, 0, 0, 0), side: 'enemy' as const },
+    },
+    participants: [
+      mkParticipant('甲', { side: 'ally', characterId: '甲' }),
+      mkParticipant('乙', { side: 'ally', characterId: '乙' }),
+      mkParticipant('丙', { side: 'enemy', characterId: '丙', tier: enemyTier, level: enemyLevel }),
+    ],
+    characters: [
+      { id: '甲', name: '甲', type: 'player' },
+      { id: '乙', name: '乙', type: 'npc' },
+    ] as Array<Record<string, unknown>>,
+  });
+
+  it('ally_win：被杀敌方 level×战斗系数 求和后平分给存活玩家方角色', () => {
+    // 丙 T1 Lv.5 → 5×2.0=10；甲乙均分 → 各 5
+    const { units, participants, characters } = mkExpScene(1, 5);
+    const { patches, totalExp } = buildExpRewardPatches(units, participants, characters, 'ally_win');
+    expect(totalExp).toBe(10);
+    expect(patches).toContainEqual({
+      op: 'update_character',
+      target: 'characters.甲',
+      value: { totalExp: 5 },
+      metadata: { source: 'combat_v3', delta: true },
+    });
+    expect(patches).toContainEqual({
+      op: 'update_character',
+      target: 'characters.乙',
+      value: { totalExp: 5 },
+      metadata: { source: 'combat_v3', delta: true },
+    });
+  });
+
+  it('ally_win：高 tier 敌方给的 EXP 按 combatCoefficient 放大（T3 Lv.10 → 10×4.0=40）', () => {
+    const { units, participants, characters } = mkExpScene(3, 10);
+    const { totalExp, patches } = buildExpRewardPatches(units, participants, characters, 'ally_win');
+    expect(totalExp).toBe(40);
+    expect(patches).toHaveLength(2);
+    expect(patches.every((p) => (p.value as { totalExp?: number }).totalExp === 20)).toBe(true);
+  });
+
+  it('非 ally_win（fled / enemy_win / draw）→ 不给 EXP', () => {
+    const { units, participants, characters } = mkExpScene(1, 5);
+    for (const outcome of ['fled', 'enemy_win', 'draw'] as const) {
+      expect(buildExpRewardPatches(units, participants, characters, outcome)).toEqual({
+        patches: [],
+        totalExp: 0,
+      });
+    }
+  });
+
+  it('ally_win 但敌方全存活（无被击杀单位）→ 不给 EXP', () => {
+    const units = {
+      甲: { ...unitView('甲', 500, 500, 100, 100, 50, 50), side: 'player' as const },
+      丙: { ...unitView('丙', 400, 400, 0, 0, 0, 0), side: 'enemy' as const },
+    };
+    expect(
+      buildExpRewardPatches(units, [mkParticipant('丙', { side: 'enemy' })], [{ id: '甲', name: '甲' }], 'ally_win'),
+    ).toEqual({ patches: [], totalExp: 0 });
+  });
+
+  it('ally_win 但玩家方全灭（无存活匹配角色）→ 不给 EXP（极端场景）', () => {
+    const { participants, characters } = mkExpScene(1, 5);
+    const units = {
+      甲: { ...unitView('甲', 0, 500, 100, 100, 50, 50), side: 'player' as const },
+      丙: { ...unitView('丙', 0, 400, 0, 0, 0, 0), side: 'enemy' as const },
+    };
+    expect(buildExpRewardPatches(units, participants, characters, 'ally_win')).toEqual({
+      patches: [],
+      totalExp: 0,
+    });
+  });
+
+  it('EXP 整除向下取整：T1 Lv.1 → 1×2.0=2 / 3 存活 → 各 0 → 不发 patch（余数丢弃且 0 无意义）', () => {
+    const { participants } = mkExpScene(1, 1);
+    const units = {
+      甲: { ...unitView('甲', 500, 500, 100, 100, 50, 50), side: 'player' as const },
+      乙: { ...unitView('乙', 300, 300, 50, 50, 30, 30), side: 'player' as const },
+      丁: { ...unitView('丁', 200, 200, 50, 50, 30, 30), side: 'player' as const },
+      丙: { ...unitView('丙', 0, 400, 0, 0, 0, 0), side: 'enemy' as const },
+    };
+    const characters = [
+      { id: '甲', name: '甲' },
+      { id: '乙', name: '乙' },
+      { id: '丁', name: '丁' },
+    ] as Array<Record<string, unknown>>;
+    const { patches, totalExp } = buildExpRewardPatches(units, participants, characters, 'ally_win');
+    expect(totalExp).toBe(0); // floor(2/3)=0 → 无人拿到 → 实际授予 0
+    expect(patches).toEqual([]);
   });
 });
 

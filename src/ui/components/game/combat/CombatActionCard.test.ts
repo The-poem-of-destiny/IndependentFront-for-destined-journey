@@ -80,6 +80,64 @@ describe('CombatActionCard — v3 攻击卡片', () => {
     expect(text).toContain('625 → 464');
   });
 
+  it('v3 展开含骰值/意图/伤害分解（dice + preReduction→postStep6→final）', async () => {
+    const w = mount(CombatActionCard, {
+      props: {
+        toolName: 'attack',
+        result: {
+          attackerId: '奥利雅思',
+          targetId: '魔物',
+          skill: '火球术',
+          intentionLevel: '战术',
+          checkValue: 22,
+          rating: '暴击',
+          hit: true,
+          dice: [18, 4],
+          preReduction: 500,
+          postStep6: 850,
+          final: 680,
+          damageType: '能量',
+          targetHpBefore: 1000,
+          targetHpAfter: 320,
+        },
+      },
+    });
+    await w.find('.cac-header').trigger('click');
+    const text = w.text();
+    // 意图
+    expect(text).toContain('意图');
+    expect(text).toContain('战术');
+    // 骰值（检定行 note 里显示原始骰面）
+    expect(text).toContain('骰 18 + 4');
+    // 伤害分解链：初始 → 修正 → 减免
+    expect(text).toContain('初始 500');
+    expect(text).toContain('修正 850');
+    expect(text).toContain('减免');
+  });
+
+  it('v3 单骰只显示一个骰值（无 + 号）', async () => {
+    const w = mount(CombatActionCard, {
+      props: {
+        toolName: 'attack',
+        result: {
+          attackerId: '甲',
+          targetId: '乙',
+          checkValue: 12,
+          rating: '有效',
+          hit: true,
+          dice: [12],
+          final: 100,
+          damageType: '物理',
+          targetHpBefore: 200,
+          targetHpAfter: 100,
+        },
+      },
+    });
+    await w.find('.cac-header').trigger('click');
+    expect(w.text()).toContain('骰 12');
+    expect(w.text()).not.toContain('骰 12 +');
+  });
+
   it('非攻击 tool（如 cost）→ 不落入 v3 攻击分支，正常渲染', () => {
     const w = mount(CombatActionCard, {
       props: { toolName: 'cost', result: { unitId: '甲', resource: 'mp', amount: 100 } },

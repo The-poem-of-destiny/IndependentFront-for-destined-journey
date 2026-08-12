@@ -9,6 +9,22 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 战斗结算修复 + 攻击卡片详情扩充 ｜ ✅ 已修（2026-08-12）
+
+来自 `fated-poem-debug-7c342726-1786542815092.json` 主人实战复现的三项战斗问题：
+
+1. **打完架没经验值** — v3 内核 `settle()` 只算 FP 净变动，EXP/战利品留给 coordinator 补（terminal.ts 注释明说的 TODO），但 coordinator 的 `toPatches` 只产 FP patch、且 EXP 从未实现。新增 `buildExpRewardPatches()`：`ally_win` 时按「被杀敌方 level × getCombatCoefficient(tier)」求和平分给存活玩家方角色，走 `update_character` + `metadata:{delta:true}`（与 craft_gen 同路径）。`fled`/`enemy_win`/`draw` 不给。
+2. **`[系统] 部分状态未能写入: Patch set on users.fp: 未知操作: set`** — `toPatches` 用 `op:'set'`（不在 StatePatchOp 联合）+ `target:'users.fp'`（错误路径），被 state-manager 完全拒收 → FP delta 彻底丢失。更糟的是 `set` 是覆盖语义，fpDelta=0 时会把玩家 FP **清零**（幸好被拒收了）。改为 `op:'delta_variable', target:'profile.fp'`（与 craft_gen FP 奖励同 op/target），delta=0 时不发。
+3. **战斗消息流缺「思考中」指示** — `CombatMessageFlow` 末尾新增低调转圈「思考中…」提示（照 ChatFlow 先例），条件 = 在战斗 + 非等玩家输入 + 非终局。`CombatPanel` 计算 `isCombatThinking` 传入。
+
+**攻击检定卡片扩充**（主人反馈"信息不够"）：
+
+- 投影层（`projection-ui.ts:aggregateAttackCard`）补投三个此前丢弃的字段：`dice`（原始 d20 骰面）、`postStep6`（评级修正后/DR 减免前中间值）、`intentionLevel`（意图层级）。
+- `CombatActionCard` v3 详情区从 4 行（技能/检定/伤害/HP）扩充为：意图 / 检定（+骰值 note）/ 伤害（+`初始→修正→减免`分解 note）/ HP。骰值能让玩家看到"骰出来多少"，伤害分解能看懂"怎么算的"。
+- 伤害分解 note 只在有中间数据且值不同时出现，不对简单攻击刷屏。
+
+**宽度对齐**：`CombatMessageFlow` 的 `.narrative-body` 此前有 `max-width:90ch` 收窄居中，叙事文字比攻击卡片窄一截——去掉后两者同宽（战斗记录框本身已约束宽度）。
+
 ### 地图系统 v1（ADR-31）｜ ✅ 已实施 + UI 真机走查（2026-08-12）
 
 设计与 14 条裁定：`docs/planning/2026-08-11-map-system-v1-integration.md`；

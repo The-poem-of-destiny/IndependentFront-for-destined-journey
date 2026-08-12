@@ -62,6 +62,18 @@ function confirmRestart() {
 
 // ── 面板折叠（收起时游戏仍锁定，留小条重新展开；主链路「就绪→开始」不依赖它）──
 const collapsed = ref(false);
+
+/**
+ * 🆕 战斗「思考中」判定：combat_v3 Agent 正在跑（非等玩家输入、非终局）。
+ * 条件：v3 战斗进行中 + 不在等玩家输入 + phase 还没进 Terminal/SettlementCommitted。
+ * 传给 CombatMessageFlow 在消息流末尾显示「思考中…」转圈，让玩家知道引擎没卡死。
+ */
+const isCombatThinking = computed(() => {
+  const combat = game.v3ActiveCombat;
+  if (!combat) return false;
+  if (game.combatAwaitingInput) return false;
+  return combat.phase !== 'Terminal' && combat.phase !== 'SettlementCommitted';
+});
 </script>
 
 <template>
@@ -152,6 +164,7 @@ const collapsed = ref(false);
                 <CombatMessageFlow
                   :entries="game.combatLog"
                   :units="unitNames"
+                  :is-thinking="isCombatThinking"
                   class="combat-flow"
                 />
               </section>

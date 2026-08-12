@@ -21,6 +21,9 @@ const props = defineProps<{
   entries: CombatLogEntry[];
   /** 单位 id → 名字字典（透传给动作卡片：v3 攻击卡反查 UUID → 中文名） */
   units?: Record<string, string>;
+  /** 🆕 AI 思考中：战斗面板收到 combat_v3 Agent 在跑（非等玩家输入、非终局）时为 true，
+   *  在消息流底部渲染低调的「思考中…」转圈提示，让玩家知道引擎没卡死 */
+  isThinking?: boolean;
 }>();
 
 /* ── 自动滚到底（参考 ChatFlow.vue watch 写法） ── */
@@ -71,6 +74,19 @@ watch(
           <CombatActionCard :result="entry.result" :tool-name="entry.toolName" :units="units" />
         </div>
       </template>
+
+      <!-- 🆕 思考中指示：AI 正在决策（非等玩家输入），在消息流末尾显示低调转圈 -->
+      <div
+        v-if="isThinking"
+        class="bubble-row bubble-row-thinking"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="thinking-indicator">
+          <span class="thinking-spinner" aria-hidden="true" />
+          <span class="thinking-text">思考中…</span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -199,10 +215,10 @@ watch(
   color: var(--theme-text-primary);
 }
 
-/* 叙事正文段落（design.md §2.5 首行缩进） */
+/* 叙事正文段落（design.md §2.5 首行缩进）。
+   🔴 不加 max-width:90ch —— 战斗面板的 ledger 容器本身已约束宽度，
+   再套 90ch 会让叙事比攻击卡片窄一截（真机视觉不齐），二者必须同宽。 */
 .narrative-body {
-  max-width: 90ch;
-  margin-inline: auto;
   font-family: var(--theme-font-title);
   color: var(--theme-text-primary);
   line-height: 1.8;
@@ -239,5 +255,46 @@ watch(
 
 .bubble-row-action :deep(.combat-action-card) {
   width: 100%;
+}
+
+/* ===== 思考中指示（照 ChatFlow.vue 先例：低调转圈 + 文案）===== */
+.bubble-row-thinking {
+  justify-content: center;
+  padding: var(--theme-spacing-xs) var(--theme-spacing-md);
+}
+
+.thinking-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-xs) var(--theme-spacing-md);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 22%, var(--theme-card-border));
+  border-radius: var(--theme-radius-sm);
+  background: color-mix(in srgb, var(--theme-card-bg) 88%, var(--theme-content-bg));
+  color: var(--theme-text-secondary);
+  font-size: 0.8125rem;
+  font-family: var(--theme-font-body);
+}
+
+.thinking-spinner {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--theme-primary) 25%, transparent);
+  border-top-color: var(--theme-primary);
+  border-radius: 50%;
+  animation: combat-thinking-spin 0.8s linear infinite;
+}
+
+@keyframes combat-thinking-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-spinner {
+    animation: none;
+  }
 }
 </style>
