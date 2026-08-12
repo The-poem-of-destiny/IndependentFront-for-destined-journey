@@ -328,8 +328,7 @@ const v3DetailRows = computed(() => {
   if (v3Skill.value) rows.push({ label: '技能', value: v3Skill.value });
   if (v3Intention.value) rows.push({ label: '意图', value: v3Intention.value });
   // 骰值：1~2 颗 d20 原始骰面 → checkValue（检定值）→ rating（评级）
-  const diceStr =
-    v3Dice.value && v3Dice.value.length > 0 ? v3Dice.value.join(' + ') : null;
+  const diceStr = v3Dice.value && v3Dice.value.length > 0 ? v3Dice.value.join(' + ') : null;
   if (v3CheckValue.value !== null) {
     rows.push({
       label: '检定',

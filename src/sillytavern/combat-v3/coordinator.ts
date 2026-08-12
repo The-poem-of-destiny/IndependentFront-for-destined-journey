@@ -2105,9 +2105,7 @@ export function buildExpRewardPatches(
 ): { patches: StatePatch[]; totalExp: number } {
   if (outcome !== 'ally_win') return { patches: [], totalExp: 0 };
 
-  const defeatedEnemies = Object.values(units).filter(
-    (u) => u.side === 'enemy' && u.hp <= 0,
-  );
+  const defeatedEnemies = Object.values(units).filter((u) => u.side === 'enemy' && u.hp <= 0);
   if (defeatedEnemies.length === 0) return { patches: [], totalExp: 0 };
 
   let rawExp = 0;
