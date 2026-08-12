@@ -3635,12 +3635,11 @@ export type TerrainType =
   | '城市'
   | '飞艇';
 
-export interface TravelResult {
-  path: LocationEdge[];
-  totalDistanceKm: number;
-  travelTime: { walk: number; ride: number; carriage: number; teleport: number };
-  dangerLevel: number;
-}
+// 🪦 `TravelResult`（旧语义图的旅行产物，声明至今零使用）已随地图系统 v1 退役（设计 §6.2）：
+//    寻路的唯一产物形状是 `types-map.ts` 的 `MapRoute`（tilePath / days / crossings），
+//    **不双轨** —— 两个都在的话，下一个人会照着没人调用的那个写实现。
+//    旧字段里的 `travelTime` 四档（步行/骑乘/马车/传送）与 `dangerLevel` 刻意没有搬过去：
+//    v1 的代价模型只有一个标量（§1 非目标），危险度是内容侧的事（`impassable` 标在包数据里）。
 
 // ═══════════════════════════════════════════════════════════
 // Phase 7e — Map System Types
