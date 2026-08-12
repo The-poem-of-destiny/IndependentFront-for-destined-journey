@@ -88,9 +88,22 @@ export default defineConfig({
             if (rel.startsWith('..') || isAbsolute(rel)) return next();
             if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
               res.statusCode = 200;
-              res.setHeader('Content-Type', 'application/json');
+              // 🔴 二进制必须按 Buffer 原样回（地图 v1 真机走查逮到：provinces.png 经
+              // utf-8 往返后首字节 0x89 变成 U+FFFD 三字节，图不可解码且体积膨胀）。
+              // 文本按 Buffer 回同样无损，所以统一走字节，不再假设「/data 全是 JSON」。
+              const ext = filePath.slice(filePath.lastIndexOf('.') + 1).toLowerCase();
+              const mime: Record<string, string> = {
+                json: 'application/json',
+                png: 'image/png',
+                jpg: 'image/jpeg',
+                jpeg: 'image/jpeg',
+                webp: 'image/webp',
+                txt: 'text/plain; charset=utf-8',
+                md: 'text/markdown; charset=utf-8',
+              };
+              res.setHeader('Content-Type', mime[ext] ?? 'application/octet-stream');
               res.setHeader('Cache-Control', 'no-cache');
-              res.end(fs.readFileSync(filePath, 'utf-8'));
+              res.end(fs.readFileSync(filePath));
               return;
             }
             next();

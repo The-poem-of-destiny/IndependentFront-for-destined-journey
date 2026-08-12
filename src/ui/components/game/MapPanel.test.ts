@@ -40,7 +40,7 @@ import {
 } from '../../lib/map-political';
 import type { ProvinceRasterResult } from '../../lib/map-provinces-raster';
 import { loadProvinceRaster } from '../../lib/map-provinces-raster';
-import { removeMapMarker, setMapMarker } from '@engine/save-profile';
+import { removeMapMarker, setMapMarker, updateMapFlags } from '@engine/save-profile';
 import { findPath } from '@engine/map-path';
 
 enableAutoUnmount(afterEach);
@@ -91,6 +91,8 @@ vi.mock('@engine/save-profile', async (importOriginal) => {
     ...actual,
     setMapMarker: vi.fn(async (profile: unknown) => profile),
     removeMapMarker: vi.fn(async (profile: unknown) => profile),
+    // 显示用落位**绝不落库**，所以这一个也得是 spy（断言它一次都没被叫过）
+    updateMapFlags: vi.fn(async (profile: unknown) => profile),
   };
 });
 
@@ -392,6 +394,7 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
     vi.mocked(findPath).mockClear();
     vi.mocked(setMapMarker).mockClear();
     vi.mocked(removeMapMarker).mockClear();
+    vi.mocked(updateMapFlags).mockClear();
   });
 
   afterEach(() => {
@@ -555,14 +558,64 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
     expect(header.text()).toContain('约还需 5 天');
   });
 
-  it('玩家未落位 → 「位置未定位」，且路线区如实说不能规划（不瞎指）', async () => {
-    await useGameStub({ saveProfile: makeProfile({}) });
+  it('位置路径也解不开时 → 「位置未定位」，且路线区如实说不能规划（不瞎指）', async () => {
+    // 没有 lastTileId、也没有任何位置路径 —— 这才是真正的「未定位」
+    await useGameStub({ saveProfile: makeProfile({}), player: null });
     setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
     const wrapper = await mountPanel();
     await openPoliticalTab(wrapper);
     expect(wrapper.find('.pol-chip-muted').text()).toContain('位置未定位');
     await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
     expect(wrapper.find('.pol-card').text()).toContain('玩家位置未在地图上定位');
+  });
+
+  it('新档（lastTileId 还没写过）用位置路径做只读落位 → 照样高亮、照样能预览路线', async () => {
+    // 🔴 2026-08-12 真机走查：建档直接写 CharacterState.location，落位钩子挂在
+    //    set_location op 上，所以新档的 lastTileId 是空的 —— 而位置路径完全解得开。
+    //    此前这里显示「位置未定位」且路线规划整个锁死。
+    await useGameStub({
+      saveProfile: makeProfile({}),
+      player: { location: '大陆某区域-甲国-甲州-甲一' },
+    });
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    expect(wrapper.find('.pol-chip-muted').exists()).toBe(false);
+    expect(wrapper.find('.pol-chip').text()).toContain('甲一');
+
+    await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
+    await clickButton(wrapper, '.pol-card', '查看路线');
+    expect(lastFindPathCall()?.[1]).toBe(1); // 起点 = 解析出来的那一块
+    expect(wrapper.find('.pol-route-days').exists()).toBe(true);
+  });
+
+  it('显示用落位**一个字节都不写**（权威落位仍归 state-manager）', async () => {
+    await useGameStub({
+      saveProfile: makeProfile({}),
+      player: { location: '大陆某区域-甲国-甲州-甲一' },
+    });
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+    await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
+    await clickButton(wrapper, '.pol-card', '查看路线');
+    await flushPromises();
+
+    expect(updateMapFlags).not.toHaveBeenCalled();
+    expect(setMapMarker).not.toHaveBeenCalled();
+    expect(removeMapMarker).not.toHaveBeenCalled();
+  });
+
+  it('已落位的 lastTileId 压过位置路径（权威值永远优先）', async () => {
+    await useGameStub({
+      saveProfile: makeProfile({ lastTileId: 2 }),
+      player: { location: '甲一' },
+    });
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+    expect(wrapper.find('.pol-chip').text()).toContain('甲二');
   });
 
   it('页签来回切不重建（缓存按 contentHash 命中；8.7M 像素解码不该每切一次重来）', async () => {

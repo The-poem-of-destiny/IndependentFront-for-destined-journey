@@ -17,7 +17,8 @@ src/sillytavern/                    ← 核心引擎
   │   ├── v3 兼容: Lorebook / ChatPreset / AppSettings / ChatSession / ChatMessage
   │   ├── v4+: CharacterState / MemoryRecord / PlotEvent / Snapshot / SaveSlot
   │   │         ApiEndpoint / AgentConfig / AgentDefinition / Pipeline / AgentContext
-  │   │         AgentResult / OrchestratorRun / MapTopology / VarsPatch
+  │   │         AgentResult / OrchestratorRun / MapMarker / VarsPatch（🪦 MapTopology 从未存在过，
+  │   │         地图类型在 types-map.ts 分册）
   │   ├── Audio: AudioSourceKind ('blob'|'builtin'|'file') / AudioTrack / AudioBlobRecord 等
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
@@ -116,6 +117,19 @@ src/sillytavern/                    ← 核心引擎
   ├── game-event.ts                 ← [Phase 4.5] EventBus 按存档隔离（+ emitChain 链式管道 ADR-29）
   ├── state-manager.ts              ← 唯一状态写入入口（M2按名寻址 M4名字唯一化 M5变量迁profile+快照重建）
   ├── dice.ts / memory-store.ts / memory-summarizer.ts / plot-outline.ts / plot-engine.ts / location-db.ts
+  │
+  ├── types-map.ts                  ← [地图 v1 / ADR-31] 地图类型分册（MapPack/MapTile/MapSaveFlags/MapRoute）
+  ├── map-pack.ts                   ← [地图 v1] coerceMapPack 容错解析（永不抛，坏包回退 EMPTY_MAP_PACK）
+  ├── map-index.ts                  ← [地图 v1] 索引 + resolveTileByLocation（落位契约五条 + 锚地块 + 8 向罗盘）
+  ├── map-path.ts                   ← [地图 v1] 混合通行图 Dijkstra（陆海同图按边计价 + via/avoid，逐边时间累积）
+  ├── map-weather.ts                ← [地图 v1] 确定性天气采样（种子随机，词汇随包，零存储）
+  ├── map-context.ts                ← [地图 v1] $map 结构快照 + uid 446 runtime_geo 投影（只产数据不产中文 prose）
+  ├── map-runtime.ts                ← [地图 v1] 注入缝（installMapPack/getMapIndex；content-store 第 8 面点火）
+  │      🔴 **map-*.ts 禁任何中文字面量**（map-literals-gate.test.ts 结构闸门）——随图数据全在
+  │         pack 里、中文渲染在 placeholder-registry（dispatcher）与内容仓世界书条目（story），
+  │         这是 ADR-31「换图零改码」的机器保证。落位/天气/旅程接线在 state-manager
+  │         （applySetLocation 仅玩家 / applyTimeAdvance 跨天重断言 / packStamp=contentHash 自愈），
+  │         设计与 14 条裁定见 docs/planning/2026-08-11-map-system-v1-integration.md
   │
   ├── combat-intention.ts / combat-damage.ts / combat-turn.ts / combat-resolver.ts
   │   └── (以上为 v2 战斗纯计算函数，v3 内核仍调用；v2 编排层 combat-runner/combat-pipeline 由 M5 删除)

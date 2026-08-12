@@ -43,6 +43,8 @@ import {
   type StageView,
 } from '../../lib/map-political';
 import { getMapIndex, getMapPack } from '@engine/map-runtime';
+// 落位解析（引擎的落位契约本体）—— 这里**只读**，不写任何派生态，理由见 `playerTileId`
+import { resolveTileByLocation } from '@engine/map-index';
 import { findPath } from '@engine/map-path';
 import { getMapFlags } from '@engine/save-profile';
 import type { MapRoute } from '@engine/types-map';
@@ -125,11 +127,32 @@ const worldStyle = computed(() => ({
   transform: `translate(${view.value.x}px, ${view.value.y}px) scale(${view.value.s})`,
 }));
 
+/**
+ * 玩家所在地块。**已落位的 `lastTileId` 永远优先**，拿不到时退到一次**只读的显示用落位**。
+ *
+ * 🔴 为什么需要退路（2026-08-12 真机走查）：新档的 `worldFlags.map.lastTileId` 是**空的** ——
+ *    建档直接写 `CharacterState.location`，一个 `set_location` patch 都还没跑过，而落位钩子
+ *    挂在那条 op 上。于是玩家在一张画得好好的图上看到「位置未定位」，路线规划整个锁死，
+ *    而他的位置路径（形如 `大陆某区域-某国-某城`）本来完全解得开。
+ *
+ * 🔴 **只读投影，一个字节都不写**：这里**不碰** `updateMapFlags`、不碰任何 store。
+ *    权威落位仍然只发生在 `state-manager.applySetLocation`（第一次真移动时），
+ *    这一层只是把「按现在的位置路径看，棋子该在哪」画出来。
+ *    在 UI 里顺手把它落库很诱人 —— 那等于开了第二条写路径，而它写的是一个**没有 patch
+ *    背书**的派生态：换包自愈、快照回退、乃至「AI 其实把人挪到别处了」都会与它打架，
+ *    且不报错。
+ * 🔴 `resolveTileByLocation(..., null)` 的第三参传 `null`（不传当前块）：没有「当前块」这个
+ *    事实可用（正是它缺席才走到这里），传别的值会让「路径只写到国家粗度」那一档
+ *    （§8.2-3 原地不动）拿一个猜来的块当锚。
+ */
 const playerTileId = computed<number | null>(() => {
   const profile = game.saveProfile;
-  if (!profile) return null;
-  const id = getMapFlags(profile).lastTileId;
-  return typeof id === 'number' ? id : null;
+  const persisted = profile ? getMapFlags(profile).lastTileId : undefined;
+  if (typeof persisted === 'number') return persisted;
+
+  const location = game.player?.location;
+  if (typeof location !== 'string' || location.trim().length === 0) return null;
+  return resolveTileByLocation(mapIndex.value, location, null);
 });
 const playerTileView = computed(() =>
   playerTileId.value === null ? null : describeTile(mapIndex.value, playerTileId.value),
