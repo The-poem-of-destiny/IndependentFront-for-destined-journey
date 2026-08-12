@@ -155,7 +155,7 @@ export function buildEjsHistoryText(
  * 于是它一直在空转，而空转不报错、只是 Mermaid 图里没有玩家周边。
  * 键名是**消费侧定的**，改这里等于把那条目重新打回空转，所以它单列成常量（测试钉住）。
  */
-export const RUNTIME_GEO_LOCAL_VAR = 'runtime_geo_compact_data';
+const RUNTIME_GEO_LOCAL_VAR = 'runtime_geo_compact_data';
 
 /**
  * 当前天气标签（地图 v1 §7 / §5 接线表的两处「天气供值漂移」之一）。

@@ -352,7 +352,7 @@ function buildWorld(input: EjsCapabilityInput): EjsWorld {
  * 🔴 AI 永远看不到 tileId 与像素坐标（§8.3）—— `MapSnapshot` 本身就不带这两样，
  *    本层原样转发，不做「顺手补一个 id 方便调试」那种事。
  */
-export interface EjsMap {
+interface EjsMap {
   /** 当前地块；`null` = 空包 / 从未成功落位（渲染层写「未定位」，不是错误） */
   currentTile: MapSnapshotPlace | null;
   /** 严格一跳邻接，顺序稳定（权威在 `map-index.buildNeighbors`）；未落位时空数组 */

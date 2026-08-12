@@ -235,7 +235,7 @@ export interface PackImageDialectsSection {
  * `PackImageDialectsSection`）。声明成 `MapPack` 会让读代码的人以为 pack 里的东西
  * 已经被谁校验过了，而事实是**没有**。
  */
-export type PackMapPackSection = Readonly<Record<string, unknown>>;
+type PackMapPackSection = Readonly<Record<string, unknown>>;
 
 /**
  * 内容包顶层结构（§4）。
