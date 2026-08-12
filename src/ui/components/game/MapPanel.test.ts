@@ -662,6 +662,119 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
     const imports = src.match(/^\s*import\s[^;]*;/gm) ?? [];
     expect(imports.filter((line) => /['"][^'"]*\/data\//.test(line))).toEqual([]);
   });
+
+  it('中层/地块档标出地块名，势力档不标；缩得太小时一个也不标', async () => {
+    await useGameStub({});
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    // 🔴 jsdom 里 rect 恒为 0 → 视图退化成 s=min=1，`zoomStageView` 夹不动，
+    //    「放大到阈值以上」这件事根本发生不了。给舞台一个真实尺寸才测得了阈值那一档。
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 600,
+      bottom: 400,
+      width: 600,
+      height: 400,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    const labelTexts = () => wrapper.findAll('.pol-label').map((n) => n.text());
+    const NAMES = ['甲一', '甲二', '雪脊', '乙一', '内海', '荒地'];
+
+    // 默认停在势力档 —— 那一档要看疆域连片，几百个地名只会盖住它
+    expect(wrapper.find('.pol-mode-active').text()).toBe('势力');
+    expect(labelTexts()).toEqual([]);
+
+    // 换到地块档但还停在适应视图：低于阈值仍然一个都不画
+    await clickButton(wrapper, '.pol-actions', '地块');
+    expect(wrapper.find('.pol-mode-active').text()).toBe('地块');
+    expect(labelTexts()).toEqual([]);
+
+    await clickButton(wrapper, '.pol-actions', '放大');
+    await clickButton(wrapper, '.pol-actions', '放大');
+    expect(labelTexts()).toEqual(NAMES);
+
+    // 🔴 中层档标的是**中层名**，一个域一个 —— 不是它辖下每块地一个。
+    //    夹具里只有 m-1「甲州」，且只有 1 号地块属于它。
+    await clickButton(wrapper, '.pol-actions', '中层');
+    expect(labelTexts()).toEqual(['甲州']);
+
+    // 切回势力档 → 标签整组撤掉
+    await clickButton(wrapper, '.pol-actions', '势力');
+    expect(labelTexts()).toEqual([]);
+  });
+
+  it('换档不影响命中检测与信息卡（标签不吃指针事件）', async () => {
+    await useGameStub({ saveProfile: makeProfile({ lastTileId: 1 }) });
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    await clickButton(wrapper, '.pol-actions', '地块');
+    await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
+    expect(wrapper.find('.pol-card-title').text()).toBe('乙一');
+    await clickButton(wrapper, '.pol-actions', '中层');
+    expect(wrapper.find('.pol-card-title').text()).toBe('乙一');
+  });
+
+  it('底图不许再是独立的 <img> 层（浏览器会丢掉被拉伸图片层的光栅块）', async () => {
+    // 🔴 源码断言：`.pol-world` 被 scale 放大到约 24 倍，深缩放时那张被拉伸的 <img>
+    //    超出图块/纹理预算，部分区域**永远排不上光栅** —— 真机上看到的是阶梯状空白。
+    //    行为测试守不住它（jsdom 里没有光栅化这回事），所以钉在源码上。
+    const src = (await import('./MapPoliticalTab.vue?raw')).default;
+    expect(src).not.toContain('pol-base');
+    // 模板段里一个 <img 都不该剩（注释里写 `<img>` 会被这条绊倒，所以只扫模板）
+    const template = src.slice(src.indexOf('<template>'), src.indexOf('</template>'));
+    expect(template).not.toContain('<img');
+  });
+
+  it('底图解码落地后合成进着色画布：先底图后着色，同一张纹理', async () => {
+    const draws: string[] = [];
+    const bitmap = { close: vi.fn() } as unknown as ImageBitmap;
+    // 一份共用的假 2D 上下文：离屏底片与两张可见画布都从它拿
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+      putImageData: () => {},
+      clearRect: () => {},
+      drawImage: (source: unknown) => draws.push(source === bitmap ? 'base' : 'tint'),
+    } as unknown as CanvasRenderingContext2D);
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn(async () => bitmap),
+    );
+    // 只对底图地址应答 —— 其余照 beforeEach 的口径失败（放行全部会把注册表 hydrate
+    // 也带进来，那条链会拿这个假响应去 .json()，喷一屏与本用例无关的告警）
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url !== '/map-small.webp') throw new Error('offline in tests');
+        return { ok: true, blob: async () => new Blob(['x']) };
+      }),
+    );
+
+    await useGameStub({});
+    setContentRegistry({
+      ...emptyRegistry(),
+      mapPack: MAP_PACK,
+      branding: { mapSources: [{ key: 'small', name: '高清地图', url: '/map-small.webp' }] },
+    });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+    await flushPromises();
+    await wrapper.vm.$nextTick();
+
+    // 最后一次重画的顺序：底图垫底、政治色盖上去（反了就把底图整片盖掉）
+    expect(draws.slice(-2)).toEqual(['base', 'tint']);
+    // 底图缺席时那一趟只画着色 —— 也就是内容包没带底图时的既有表现
+    expect(draws.filter((d) => d === 'tint').length).toBeGreaterThan(1);
+
+    wrapper.unmount();
+    expect(bitmap.close).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════

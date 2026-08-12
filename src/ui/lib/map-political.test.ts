@@ -17,9 +17,13 @@ import type { MapPack, MapTile } from '@engine/types-map';
 import {
   buildBorderPaths,
   buildHighlightPatch,
+  buildLabelsForMode,
+  buildMidTierLabels,
+  buildModePaint,
   buildPoliticalPaint,
   buildPoliticalTint,
   buildTileColorLookup,
+  buildTileLabels,
   buildTraceKeys,
   centerStageView,
   clampStageView,
@@ -31,6 +35,8 @@ import {
   IMPASSABLE_ALPHA,
   IMPASSABLE_HATCH_RGB,
   IMPASSABLE_RGB,
+  LABEL_MIN_ZOOM_OVER_MIN,
+  labelsVisibleAtZoom,
   provinceColorForTileId,
   rgbKey,
   stagePointToWorld,
@@ -298,6 +304,170 @@ describe('政治着色', () => {
     expect(alphaAt(tint, 6, 2, 0)).toBe(IMPASSABLE_ALPHA);
     // 影线：(x - y) % 6 < 2 那两条与其余不同色
     expect(rgbAt(tint, 6, 2, 0)).not.toEqual(rgbAt(tint, 6, 2, 1));
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 着色方式（势力 / 中层 / 地块）与地块名标签
+// ═══════════════════════════════════════════════════════════
+
+describe('着色方式', () => {
+  it('势力档与 buildPoliticalPaint **逐项相同** —— 组件据此复用舞台烘好的缓冲', () => {
+    // 🔴 这条守的是「加了开关之后势力档逐像素不变」：组件在 country 档直接用
+    //    `stage.tint`（composable 用 buildPoliticalPaint 烘的），只有这条等价成立才合法。
+    const pack = makePack();
+    const viaMode = buildModePaint(pack, 'country');
+    const direct = buildPoliticalPaint(pack);
+    expect([...viaMode.fillByTile.entries()]).toEqual([...direct.fillByTile.entries()]);
+    expect([...viaMode.hatchByTile.entries()]).toEqual([...direct.hatchByTile.entries()]);
+  });
+
+  it('地块档：pack 的权威块色优先，缺席才回落哈希', () => {
+    const pack = makePack({
+      tiles: [
+        tile({ id: 1, name: '甲一', color: [9, 8, 7] }),
+        tile({ id: 2, name: '甲二' }), // 没有 color → 回落
+      ],
+    });
+    const paint = buildModePaint(pack, 'tile');
+    expect(paint.fillByTile.get(1)).toEqual([9, 8, 7]);
+    expect(paint.fillByTile.get(2)).toEqual(provinceColorForTileId(2));
+  });
+
+  it('中层档：同中层同色、不同中层不同色，没有中层的陆块走中性色', () => {
+    const pack = makePack({
+      midTiers: [
+        { id: 'm-1', name: '甲州', countryId: 'c-a', climateId: '', anchorTileId: 1 },
+        { id: 'm-2', name: '乙州', countryId: 'c-b', climateId: '', anchorTileId: 3 },
+      ],
+      tiles: [
+        tile({ id: 1, midTierId: 'm-1' }),
+        tile({ id: 2, midTierId: 'm-1' }),
+        tile({ id: 3, midTierId: 'm-2' }),
+        tile({ id: 4 }), // 没有中层
+      ],
+    });
+    const paint = buildModePaint(pack, 'midTier');
+    expect(paint.fillByTile.get(1)).toEqual(paint.fillByTile.get(2));
+    expect(paint.fillByTile.get(3)).not.toEqual(paint.fillByTile.get(1));
+    expect(paint.fillByTile.get(4)).toEqual([...UNCLAIMED_RGB]);
+    // 颜色出自既有的那个哈希，**没有第二个颜色算法**（序号 +1，见被测文件那条注释）
+    expect(paint.fillByTile.get(1)).toEqual(provinceColorForTileId(1));
+    expect(paint.fillByTile.get(3)).toEqual(provinceColorForTileId(2));
+  });
+
+  it('两个新档都不画水域与天堑（势力档的影线是势力档的问题）', () => {
+    const pack = makePack();
+    for (const mode of ['midTier', 'tile'] as const) {
+      const paint = buildModePaint(pack, mode);
+      expect(paint.fillByTile.has(5), `${mode} 不该画内海`).toBe(false);
+      expect(paint.fillByTile.has(6), `${mode} 不该画雪脊`).toBe(false);
+      expect(paint.hatchByTile.size, `${mode} 不该有影线`).toBe(0);
+    }
+  });
+
+  it('换档只是换一张颜色表：同一份 idBuf 直接喂 buildPoliticalTint 就能出新缓冲', () => {
+    const pack = makePack();
+    const raster = decode(STRIPES, pack);
+    const tint = buildPoliticalTint(raster, buildModePaint(pack, 'tile'));
+    expect(rgbAt(tint, 6, 0, 0)).toEqual([...provinceColorForTileId(1)]);
+    expect(alphaAt(tint, 6, 0, 0)).toBe(TERRITORY_ALPHA);
+    expect(alphaAt(tint, 6, 5, 0)).toBe(0); // 内海仍然留空
+    expect(alphaAt(tint, 6, 2, 0)).toBe(0); // 天堑在这一档也留空
+  });
+});
+
+describe('地图标签', () => {
+  it('地块档：每块地一个标签，落在形心；没名字的跳过', () => {
+    const pack = makePack({
+      tiles: [
+        tile({ id: 1, name: '甲一', centroid: [2, 1] }),
+        tile({ id: 2, name: '   ' }), // 空白名 = 没名字
+        tile({ id: 3, name: '' }),
+      ],
+    });
+    expect(buildTileLabels(pack, 6, 3)).toEqual([{ key: 't1', name: '甲一', x: 2, y: 1 }]);
+  });
+
+  it('形心按 resolution → 实际栅格的比例折算（两者理论相等但不假设）', () => {
+    const pack = makePack({
+      resolution: { w: 6, h: 3 },
+      tiles: [tile({ id: 1, name: '甲一', centroid: [3, 1] })],
+    });
+    // 栅格是 resolution 的两倍宽高
+    expect(buildTileLabels(pack, 12, 6)[0]).toEqual({ key: 't1', name: '甲一', x: 6, y: 2 });
+  });
+
+  it('中层档：一个中层**一个**标签（不是它辖下每块地一个），落在锚地块形心', () => {
+    const pack = makePack({
+      midTiers: [{ id: 'm-1', name: '甲州', countryId: 'c-a', climateId: '', anchorTileId: 2 }],
+      tiles: [
+        tile({ id: 1, name: '甲一', midTierId: 'm-1', centroid: [0, 0], areaPx: 1 }),
+        tile({ id: 2, name: '甲二', midTierId: 'm-1', centroid: [4, 2], areaPx: 1 }),
+        tile({ id: 3, name: '甲三', midTierId: 'm-1', centroid: [0, 0], areaPx: 1 }),
+      ],
+    });
+    // 三块地只出一个标签，且用的是锚地块（2 号）的形心而不是三者平均
+    expect(buildMidTierLabels(pack, 6, 3)).toEqual([{ key: 'mm-1', name: '甲州', x: 4, y: 2 }]);
+  });
+
+  it('中层档：没有锚地块时用**按面积加权**的形心（碎块拽不走标签）', () => {
+    const pack = makePack({
+      midTiers: [{ id: 'm-1', name: '甲州', countryId: 'c-a', climateId: '', anchorTileId: null }],
+      tiles: [
+        // 主体块占 99 像素在 x=0，一个碎块占 1 像素在 x=100
+        tile({ id: 1, midTierId: 'm-1', centroid: [0, 0], areaPx: 99 }),
+        tile({ id: 2, midTierId: 'm-1', centroid: [100, 0], areaPx: 1 }),
+      ],
+    });
+    // 等权平均会落在 x=50（主体外面）；加权后落在 x=1 附近
+    expect(buildMidTierLabels(pack, 6, 3)[0].x).toBeCloseTo(1, 6);
+  });
+
+  it('中层档：面积全为 0 时退回等权平均，绝不产出 NaN', () => {
+    const pack = makePack({
+      midTiers: [{ id: 'm-1', name: '甲州', countryId: 'c-a', climateId: '', anchorTileId: null }],
+      tiles: [
+        tile({ id: 1, midTierId: 'm-1', centroid: [0, 0], areaPx: 0 }),
+        tile({ id: 2, midTierId: 'm-1', centroid: [4, 2], areaPx: 0 }),
+      ],
+    });
+    expect(buildMidTierLabels(pack, 6, 3)[0]).toEqual({ key: 'mm-1', name: '甲州', x: 2, y: 1 });
+  });
+
+  it('中层档：没有成员地块的空壳中层不出标签（真包里就有几个）', () => {
+    const pack = makePack({
+      midTiers: [
+        { id: 'm-1', name: '甲州', countryId: 'c-a', climateId: '', anchorTileId: 1 },
+        // 空壳：没有任何地块的 midTierId 指向它 —— 哪怕锚地块指得到一块地
+        { id: 'm-空', name: '幽州', countryId: 'c-a', climateId: '', anchorTileId: 1 },
+        { id: 'm-2', name: '   ', countryId: 'c-a', climateId: '', anchorTileId: 1 },
+      ],
+      tiles: [tile({ id: 1, midTierId: 'm-1', centroid: [1, 1] })],
+    });
+    expect(buildMidTierLabels(pack, 6, 3).map((l) => l.name)).toEqual(['甲州']);
+  });
+
+  it('按档分派：势力不画、中层出中层名、地块出地块名', () => {
+    const pack = makePack({
+      midTiers: [{ id: 'm-1', name: '甲州', countryId: 'c-a', climateId: '', anchorTileId: 1 }],
+      tiles: [
+        tile({ id: 1, name: '甲一', midTierId: 'm-1' }),
+        tile({ id: 2, name: '甲二', midTierId: 'm-1' }),
+      ],
+    });
+    expect(buildLabelsForMode(pack, 'country', 6, 3)).toEqual([]);
+    expect(buildLabelsForMode(pack, 'midTier', 6, 3).map((l) => l.name)).toEqual(['甲州']);
+    expect(buildLabelsForMode(pack, 'tile', 6, 3).map((l) => l.name)).toEqual(['甲一', '甲二']);
+  });
+
+  it('缩放阈值：低于 min 的 1.5 倍不画（单一阈值，不做逐标签避让）', () => {
+    const view = (s: number): StageView => ({ s, x: 0, y: 0, min: 2, max: 50 });
+    expect(labelsVisibleAtZoom(view(2))).toBe(false);
+    expect(labelsVisibleAtZoom(view(2 * LABEL_MIN_ZOOM_OVER_MIN))).toBe(true);
+    expect(labelsVisibleAtZoom(view(40))).toBe(true);
+    // 退化视图（未布局）不该把标签画到一个还没有尺寸的舞台上
+    expect(labelsVisibleAtZoom({ s: 1, x: 0, y: 0, min: 0, max: 1 })).toBe(false);
   });
 });
 
