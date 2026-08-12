@@ -315,6 +315,9 @@ export function validatePackOrThrow(pack: unknown): PackValidationNote[] {
     'namePools',
     'branding',
     'imageDialects',
+    // 地图包（第 8 面）：裸数组/裸串在这里就被拒，`coerceMapPack` 那条「整份认不出 → 空包」
+    // 的兜底因此只服务运行时，不给装包路径当遮羞布（口径同 imageDialects）
+    'mapPack',
   ] as const;
   for (const name of objectSectionNames) {
     const v = pack[name];

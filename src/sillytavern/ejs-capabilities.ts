@@ -17,6 +17,14 @@ import type { CharacterState, Quest } from './types';
 import { formatGameTime, getTimeOfDay, type GameTime } from './time-system';
 import { getAffectionLabel } from './affection-system';
 import { DANGEROUS_PATH_SEGMENTS } from './var-resolver';
+// 地图 v1 §5：`$map` 的数据形状。**type-only** —— 快照由调用方算好交进来，
+// 本模块不 import `map-runtime` / `map-index`（能力面是纯投影，不碰注入缝也不建索引）。
+import type {
+  MapSnapshot,
+  MapSnapshotJourney,
+  MapSnapshotNeighbor,
+  MapSnapshotPlace,
+} from './map-context';
 
 // ═══════════════════════════════════════════════════════════
 // 注入面
@@ -50,6 +58,25 @@ export interface EjsCapabilityInput {
   focusQuest?: string;
   turn?: number;
   weather?: string;
+  /**
+   * 地图只读快照（`map-context.buildMapSnapshot()` 的产出）——`$map` 的全部数据（地图 v1 §5）。
+   *
+   * 不给（空包 / 从未落位 / 老调用方）→ `$map` 各格为空值而**不是** `undefined`：
+   * 世界书 EJS 照常能写 `if ($map.currentTile)`，不必先判 `typeof $map`。
+   */
+  mapSnapshot?: MapSnapshot;
+  /**
+   * 引擎供给的**只读**局部变量种子：`local.get` / `getLocalVar` 查不到自己写的那份时回落到这里。
+   *
+   * 为什么不直接 `local.set` 一份：`local` 的桶落在 `vars._local.<projectId>` 里，
+   * 而 `vars` 是**共写草稿**——写进去会经 `ejs-vars-diff` 落进存档变量，等于每回合把一份
+   * 引擎随时能重算的派生数据持久化一遍（地图投影动辄几 KB，还会顶到 `LOCAL_PROJECT_MAX_BYTES`）。
+   * 种子是**读侧回落层**：不落库、不进 diff，条目照旧可以用同名 `local.set` 就地遮蔽它。
+   *
+   * 🔴 **不按项目隔离**（与桶相反）：种子是引擎供的事实（如 `runtime_geo_compact_data`），
+   *    不是某个项目的私有状态；写仍然各归各的项目。
+   */
+  localSeed?: Record<string, unknown>;
   /** 当前角色绑定的世界书名（上游 `charLoreBook` 别名的来源） */
   charLoreBook?: string;
   /** 世界书查询（不给 = `lore.*` 全部返回空） */
@@ -309,6 +336,59 @@ function buildWorld(input: EjsCapabilityInput): EjsWorld {
 }
 
 // ═══════════════════════════════════════════════════════════
+// $map（地图 v1 §5 / §8.1）—— 只读地块事实
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * `$map` namespace（地图 v1 §5）。story 的 `MAP_CONTEXT` 世界书条目就从这里渲染。
+ *
+ * 🔴 **刻意全是数据、一个函数都没有**（所以设计里那个 `ownerOf()` 不在这里）：
+ *    函数过不了 JSON 编组 —— `world.isDaytime` 就是这么在 QuickJS 下抛 `not a function`
+ *    而在 Legacy 下工作正常的（Q-09）。所有者信息已经在 `currentTile.countryName` 与
+ *    `neighbors[].ownerName` 里，给一个查询函数只会换来一条两后端不一致的路。
+ * 🔴 名字全是 ASCII（`world` 那边是中文键）：这一面的**数据**来自 pack（换图即换词汇），
+ *    只有键名是引擎契约；`map-*.ts` 的结构闸门禁 CJK 字面量，键名跟着一起保持 ASCII，
+ *    渲染层（占位符 / 世界书条目）自己查中文表。
+ * 🔴 AI 永远看不到 tileId 与像素坐标（§8.3）—— `MapSnapshot` 本身就不带这两样，
+ *    本层原样转发，不做「顺手补一个 id 方便调试」那种事。
+ */
+export interface EjsMap {
+  /** 当前地块；`null` = 空包 / 从未成功落位（渲染层写「未定位」，不是错误） */
+  currentTile: MapSnapshotPlace | null;
+  /** 严格一跳邻接，顺序稳定（权威在 `map-index.buildNeighbors`）；未落位时空数组 */
+  neighbors: MapSnapshotNeighbor[];
+  /** 天气标签串（包词汇原文）；`null` = 这一格不写 */
+  weatherNow: string | null;
+  /** 在途摘要；`null` = 不在途 */
+  journey: MapSnapshotJourney | null;
+  /**
+   * 上一次移动跨越的跳数（`1` = 相邻的正常移动）；`null` = 没有这条事实。
+   *
+   * 在表里是因为 `MAP_CONTEXT` 的**提示行**（§8.1 四类行的第四类）只有它能渲染 ——
+   * 少了这一格，渲染层要么印不出那行，要么去别处再找一遍同一个事实。
+   */
+  discontinuity: number | null;
+}
+
+/**
+ * 快照 → `$map`。
+ *
+ * 空快照与「有快照但没落位」走同一条出口（合同不是异常，见 `MapSnapshot` 的说明）。
+ * 深拷贝是只读孤儿契约（P4）：条目改了返回值不会漏进下一个条目，也漏不回宿主那份输入。
+ */
+function buildMap(input: EjsCapabilityInput): EjsMap {
+  const snap = input.mapSnapshot;
+  const neighbors = snap?.neighbors;
+  return {
+    currentTile: snap?.current ? clone(snap.current) : null,
+    neighbors: Array.isArray(neighbors) ? clone(neighbors) : [],
+    weatherNow: snap?.weatherLabel ?? null,
+    journey: snap?.journey ? clone(snap.journey) : null,
+    discontinuity: snap?.discontinuity ?? null,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
 // quest（§3.6）
 // ═══════════════════════════════════════════════════════════
 
@@ -446,6 +526,20 @@ export interface EjsLocal {
 function buildLocal(vars: Record<string, any>, input: EjsCapabilityInput, ui: EjsUi): EjsLocal {
   const projectId = String(input.projectId ?? 'builtin');
 
+  /**
+   * 引擎供的只读种子（`EjsCapabilityInput.localSeed`）。
+   *
+   * 读优先级：**本项目自己写过的桶 > 种子 > 调用方的 fallback**。桶在前是关键 ——
+   * 条目用同名 `local.set` 就地遮蔽引擎值这条路必须留着（种子是缺省，不是强制）。
+   * `remove` 只删桶里那份，删完又读回种子：种子每回合由引擎重新供给，
+   * 「删得掉」是一句守不住的承诺。
+   */
+  const seedOf = (key: string): unknown => {
+    const seed = input.localSeed;
+    if (seed === null || typeof seed !== 'object') return undefined;
+    return Object.prototype.hasOwnProperty.call(seed, key) ? seed[key] : undefined;
+  };
+
   /** 取（或建）本项目的 KV 子树。落在 `vars` 下 → 随快照回退天然覆盖 */
   const bucket = (create: boolean): Record<string, unknown> | undefined => {
     if (DANGEROUS_PATH_SEGMENTS.has(projectId)) return undefined;
@@ -476,7 +570,9 @@ function buildLocal(vars: Record<string, any>, input: EjsCapabilityInput, ui: Ej
       if (!k) return fallback ?? null;
       const own = bucket(false);
       const v = own?.[k];
-      return v === undefined ? (fallback ?? null) : clone(v);
+      if (v !== undefined) return clone(v);
+      const seeded = seedOf(k);
+      return seeded === undefined ? (fallback ?? null) : clone(seeded);
     },
     set: (key, value) => {
       const k = safeKey(key);
@@ -511,7 +607,10 @@ function buildLocal(vars: Record<string, any>, input: EjsCapabilityInput, ui: Ej
       const k = safeKey(key);
       if (!k) return false;
       const own = bucket(false);
-      return own !== undefined && own[k] !== undefined;
+      if (own !== undefined && own[k] !== undefined) return true;
+      // 种子也算「有」—— 否则 `if (local.has(k)) local.get(k)` 这种守卫写法
+      // 会把引擎供的值挡在门外，而 `get` 明明取得到（两个答案不一致，且无声）
+      return seedOf(k) !== undefined;
     },
     remove: (key) => {
       const k = safeKey(key);
@@ -519,7 +618,13 @@ function buildLocal(vars: Record<string, any>, input: EjsCapabilityInput, ui: Ej
       const own = bucket(false);
       if (own) delete own[k];
     },
-    keys: () => Object.keys(bucket(false) ?? {}),
+    keys: () => {
+      const own = Object.keys(bucket(false) ?? {});
+      const seed = input.localSeed;
+      if (seed === null || typeof seed !== 'object') return own;
+      // 桶在前、种子补后：与 `get` 的优先级同序，且已被遮蔽的种子键不重复出现
+      return [...own, ...Object.keys(seed).filter((k) => !own.includes(k))];
+    },
   };
 }
 
@@ -567,8 +672,12 @@ function buildUi(input: EjsCapabilityInput): EjsUi {
 // engine（§3.12）—— 版本与能力探测
 // ═══════════════════════════════════════════════════════════
 
-/** 能力面契约版本。**新增能力时升 minor，移除/改语义升 major** */
-export const EJS_SURFACE_VERSION = '1.0.0';
+/**
+ * 能力面契约版本。**新增能力时升 minor，移除/改语义升 major**
+ *
+ * 1.1.0：`$map` 只读面（地图 v1 §5）。纯新增，旧条目一字不受影响。
+ */
+export const EJS_SURFACE_VERSION = '1.1.0';
 
 /**
  * 🔴 **能力面唯一真源（Q-09）**。
@@ -592,6 +701,8 @@ export const EJS_SURFACE = {
     char: ['player', 'get', 'present', 'all', 'has', 'affection', 'affectionLabel'],
     // isDaytime 是函数，过 JSON 编组会丢；QuickJS 侧另有常量 shim 顶上
     world: ['时间', '时间详情', '地点', '天气', '回合', 'isDaytime'],
+    // 地图 v1 §5：**全是数据**（见 EjsMap 的说明——函数在这一面是禁忌）
+    $map: ['currentTile', 'neighbors', 'weatherNow', 'journey', 'discontinuity'],
     quest: ['all', 'active', 'get', 'has', 'focus'],
     lore: ['get', 'has', 'list'],
     chat: ['last', 'at', 'slice', 'match', 'text'],
@@ -717,6 +828,8 @@ export interface EjsCapabilities {
   chat: EjsChat;
   char: EjsChar;
   world: EjsWorld;
+  /** 地图 v1 §5。名字带 `$` 是刻意的：`map` 是语料里极常见的局部变量名，撞名就被遮蔽 */
+  $map: EjsMap;
   quest: EjsQuest;
   lore: EjsLore;
   local: EjsLocal;
@@ -743,6 +856,7 @@ export function buildEjsCapabilities(
     chat: buildChat(inp, historyText),
     char: buildChar(inp),
     world: buildWorld(inp),
+    $map: buildMap(inp),
     quest: buildQuest(inp),
     lore: buildLore(inp),
     local: buildLocal(vars, inp, ui),

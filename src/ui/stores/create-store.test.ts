@@ -124,6 +124,7 @@ function seedFixtureRegistry() {
     markers: undefined,
     branding: { era: FIXTURE_ERA },
     imageDialects: undefined,
+    mapPack: undefined,
   });
 }
 
@@ -245,6 +246,7 @@ describe('内容加载门 —— 目录来自注册表而不是编译期常量',
       markers: undefined,
       branding,
       imageDialects: undefined,
+      mapPack: undefined,
     });
     return useCreateStore();
   }
@@ -980,6 +982,7 @@ describe('buildOpeningPrompt', () => {
       markers: undefined,
       branding: undefined,
       imageDialects: undefined,
+      mapPack: undefined,
     });
     setActivePinia(createPinia());
     const bare = useCreateStore();

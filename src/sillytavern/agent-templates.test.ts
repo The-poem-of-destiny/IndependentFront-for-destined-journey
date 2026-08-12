@@ -909,6 +909,91 @@ describe('buildAgentMessages × 能力面接线', () => {
     expect(render('Lv<%= getMessageVar("stat_data.主角.等级") %>', ctx)).toContain('Lv7');
     expect(render('说=<%= getChatMessage(-1, "user") %>', ctx)).toContain('说=第一句');
   });
+
+  // ── 天气供值漂移（地图 v1 §5 接线表第二处）────────────────────────────
+  //
+  // `buildWorld` 一直读 `EjsCapabilityInput.weather` 写进 `world.天气`，而
+  // `buildCapabilityInput` 从来没传过它 —— 于是每一条读天气的条目都读空串，且**不报错**
+  // （条目自己的 `|| '未知'` 兜底把它掩盖得很干净）。这两条穿过真装配链盯住供值。
+
+  it('🔴 world.天气：拿得到 ctx.weather（此前恒空串）', () => {
+    const ctx = makeContext({ weather: '小雪' });
+    expect(render('天气=<%= world.天气 %>', ctx)).toContain('天气=小雪');
+  });
+
+  it('ctx.weather 缺席时回落变量真源 variables.sys.天气（不经 game-pipeline 的调用方）', () => {
+    const ctx = makeContext({ variables: { sys: { 天气: '雷暴' } } });
+    expect(render('天气=<%= world.天气 %>', ctx)).toContain('天气=雷暴');
+  });
+
+  it('ctx.weather 赢过变量（game-pipeline 已解析完整链：sys → worldFlags 两格）', () => {
+    const ctx = makeContext({ weather: '血月', variables: { sys: { 天气: '晴' } } });
+    expect(render('天气=<%= world.天气 %>', ctx)).toContain('天气=血月');
+  });
+
+  it('都没有 → 空串（不猜、不报错）', () => {
+    expect(render('天气=[<%= world.天气 %>]', makeContext())).toContain('天气=[]');
+  });
+
+  // ── $map（地图 v1 §5）────────────────────────────────────────────────
+
+  it('$map：没装地图包时 currentTile 为 null，`if ($map.currentTile)` 直接可写', () => {
+    // 🔴 这条钉的是「空包是合同不是异常」：整段守卫分支照常渲染，条目不回退
+    const out = render(
+      '<% if ($map.currentTile) { %>有地块<% } else { %>未定位<% } %>|邻接<%= $map.neighbors.length %>',
+      makeContext(),
+    );
+    expect(out).toContain('未定位|邻接0');
+    expect(out).not.toContain('$map');
+  });
+
+  it('$map.weatherNow 与 world.天气 同源（两处不一致就是面板与提示词漂了）', () => {
+    const ctx = makeContext({ weather: '小雪' });
+    expect(render('<%= $map.weatherNow %>/<%= world.天气 %>', ctx)).toContain('小雪/小雪');
+  });
+
+  it('engine.has 认得 $map 的成员（守卫分支不该反过来禁用一个可用能力）', () => {
+    const out = render(
+      '<%= engine.has("$map") %>|<%= engine.has("$map.currentTile") %>|<%= engine.has("$map.没有这个") %>',
+      makeContext(),
+    );
+    expect(out).toContain('true|true|false');
+  });
+
+  // ── uid 446 的 runtime_geo_compact_data（地图 v1 §8.1-2）─────────────
+
+  it('🔴 getLocalVar("runtime_geo_compact_data") 拿到引擎供的投影（此前全仓零供值）', () => {
+    const player = createDefaultCharacterState({ name: '主角', type: 'player' });
+    player.location = '艾瑟嘉德-王城区';
+    const ctx = makeContext({ characters: [player] });
+
+    // uid 446 的真实读法就是这一句（带 defaults 的别名形态）
+    const out = render(
+      '<% const g = getLocalVar("runtime_geo_compact_data", { defaults: null }) %>' +
+        '有数据=<%= g !== null %>|当前=<%= g && g.current %>|地点数=<%= g && g.places.length %>',
+      ctx,
+    );
+    expect(out).toContain('有数据=true');
+    // 当前地点名取自玩家的位置路径（真源），不是地图包
+    expect(out).toContain('当前=艾瑟嘉德-王城区');
+    // 注册表在测试里是空的 → places 空表；契约要的是**这个键存在且形状对**
+    expect(out).toContain('地点数=0');
+  });
+
+  it('种子读得到但**不进 vars 提交草稿**（否则每回合把可重算的派生数据写进存档变量）', () => {
+    const drafts = new Map<string, { base: Record<string, any>; draft: Record<string, any> }>();
+    const ctx = makeContext({ variables: { sys: {} }, ejsVarsDrafts: drafts });
+    // 持权 Agent：这份 draft 就是回合结算真的要 diff 落库的那一份
+    const cfg = makeCfg('story', { worldBookIds: ['wb_cap'], ejsVarsCommit: true });
+    const msgs = buildAgentMessages(
+      'story',
+      ctx,
+      [cfg],
+      [bookWith('<%= local.has("runtime_geo_compact_data") %>')],
+    );
+    expect(msgs![0].content).toContain('true');
+    expect(drafts.get('story')!.draft['_local']).toBeUndefined();
+  });
 });
 
 // ========== EJS 回退诊断出口（D8）==========

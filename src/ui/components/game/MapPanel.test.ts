@@ -75,6 +75,7 @@ function emptyRegistry() {
     markers: undefined,
     branding: undefined,
     imageDialects: undefined,
+    mapPack: undefined,
   };
 }
 

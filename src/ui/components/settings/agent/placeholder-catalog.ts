@@ -1,7 +1,7 @@
 /**
  * 上下文模板占位符目录（Phase 10e，Q-25 第 9 步搬出）。
  *
- * 一张 24 项的数据表 + 一条「哪些 Agent 看得见哪些占位符」的纯筛选。此前它俩住在
+ * 一张 26 项的数据表 + 一条「哪些 Agent 看得见哪些占位符」的纯筛选。此前它俩住在
  * `SettingsPage.vue` 的 script 里，于是想验「vars_update 到底该看见几个占位符」
  * 得先挂起整个设置页。搬成纯模块之后是一行 import 一行断言。
  *
@@ -47,6 +47,12 @@ export const ALL_PLACEHOLDER_META: readonly PlaceholderBadge[] = [
   { key: 'CHARACTER_STATE', color: '#ff9800', desc: '角色状态 — 属性/装备/技能', category: '角色' },
   { key: 'INVENTORY', color: '#ff9800', desc: '背包 — 角色物品列表', category: '角色' },
   { key: 'GAME_TIME', color: '#4caf50', desc: '世界状态 — 时间/位置/天气', category: '世界' },
+  {
+    key: 'MAP_CONTEXT',
+    color: '#4caf50',
+    desc: '地图上下文 — 当前地块/一跳邻接/天气/在途（未装地图包时为空）',
+    category: '世界',
+  },
   { key: 'ACTIVE_EFFECTS', color: '#ff9800', desc: '活跃效果 — Buff/Debuff', category: '角色' },
   { key: 'MEMORY_ENTRIES', color: '#ff7043', desc: '记忆条目 — embedding 召回', category: '记忆' },
   { key: 'PLOT_EVENTS', color: '#ff7043', desc: '剧情事件 — 活跃+待处理', category: '剧情' },
@@ -125,6 +131,21 @@ const CHAIN_ONLY: Record<string, readonly string[]> = {
 };
 
 /**
+ * 主 DAG 内**按 Agent 定向**的引擎注入块。
+ *
+ * 与 `CHAIN_ONLY` 形状相同、语义不同：那些是侧链标记（只有被链唤起的 Agent 才拿得到），
+ * 这些是**引擎每回合都能算出来、但只送给某一个 Agent** 的块。
+ *
+ * 🔴 `MAP_CONTEXT` 只给 request_dispatcher（地图 v1 裁定 §12-9）：story 拿不到是因为它有
+ *    预设短路（占位符到不了它，story 侧走世界书 constant 条目）；vars_update 拿不到是因为
+ *    它只执行调度器的清单、不发起空间决策，喂它是纯 token 浪费。徽章不出现≠手打无效 ——
+ *    引擎注册表对每个 Agent 都认这个键，这张表只决定**面板上画不画那个按钮**。
+ */
+const AGENT_SCOPED: Record<string, readonly string[]> = {
+  request_dispatcher: ['MAP_CONTEXT'],
+};
+
+/**
  * Agent 间通信：某个 Agent 能读到**哪些上游 Agent** 的输出。
  *
  * 🔴 这张表编码的是 DAG 的**偏序**：只列在它之前跑完的那些。写错方向不会报错，
@@ -143,6 +164,7 @@ const AGENT_OUTPUTS: Record<string, readonly string[]> = {
 export function getPlaceholdersForAgent(agentId: string): PlaceholderBadge[] {
   const allowed = new Set<string>([
     ...(CHAIN_ONLY[agentId] ?? []),
+    ...(AGENT_SCOPED[agentId] ?? []),
     ...(AGENT_OUTPUTS[agentId] ?? []),
   ]);
   return ALL_PLACEHOLDER_META.filter((p) => COMMON_KEYS.includes(p.key) || allowed.has(p.key));

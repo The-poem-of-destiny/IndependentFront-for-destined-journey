@@ -777,6 +777,44 @@ describe('buildContext — EJS 两轴注入 (工坊 P2 / ADR-30)', () => {
     expect(ctx.ejsVarsDrafts).toBeInstanceOf(Map);
     expect(ctx.ejsVarsDrafts.size).toBe(0);
   });
+
+  // ── 天气供值漂移（地图 v1 §5 接线表第一处）──────────────────────────
+  //
+  // `stat-projection` 从 T3 起就会写 `stats.世界.天气`，但**这个调用点从来没传过 weather**
+  // —— 世界书里每一处 `stats.世界.天气` 都读不到那个键，而条目自己的 `|| '未知'`
+  // 把它掩盖得干干净净（与 `blurByDefault` 同形状：逻辑对、没人供值）。
+  // 这三条钉的是「有人供值」+「与 ctx.weather 同一条链」。
+
+  it('🔴 statData.世界.天气 ← variables.sys.天气（此前这个键根本不存在）', () => {
+    const pipeline = makePipeline({
+      characters: [player],
+      saveProfile: { variables: { sys: { 天气: '小雪' } } },
+    });
+    const ctx = (pipeline as any).buildContext('输入');
+    expect(ctx.statData.世界.天气).toBe('小雪');
+    // 同一条链的两个消费方不许漂：面板上写着「小雪」、提示词里却是别的天气
+    expect(ctx.weather).toBe('小雪');
+  });
+
+  it('旧存档兜底：worldFlags.天气 / worldFlags.weather 也认（读法与出图同口径）', () => {
+    const zh = (pipeline: any) => pipeline.buildContext('输入').statData.世界.天气;
+    expect(
+      zh(makePipeline({ characters: [player], saveProfile: { worldFlags: { 天气: '大雨' } } })),
+    ).toBe('大雨');
+    expect(
+      zh(makePipeline({ characters: [player], saveProfile: { worldFlags: { weather: '沙暴' } } })),
+    ).toBe('沙暴');
+  });
+
+  it('没有天气 → 整个键不出现（缺席不是空串，条目的守卫分支据此降级）', () => {
+    const pipeline = makePipeline({
+      characters: [player],
+      saveProfile: { variables: { sys: {} } },
+    });
+    const ctx = (pipeline as any).buildContext('输入');
+    expect(ctx.statData.世界?.天气).toBeUndefined();
+    expect(ctx.weather).toBeUndefined();
+  });
 });
 
 describe('handleAgentResult — plot_pre_check (步5)', () => {

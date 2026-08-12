@@ -294,12 +294,14 @@ const SANDBOX_PARAM_NAMES = [
   // ST 值宏的降级落点（由 rewriteCodeMacros 生成调用，模板作者不直接写）
   '__roll',
   '__random',
-  // —— 能力面 §3（T2/T4/T5）：创作者直接写的 12 个顶层符号 ——
+  // —— 能力面 §3（T2/T4/T5）：创作者直接写的 13 个顶层符号 ——
   'rng',
   'fmt',
   'chat',
   'char',
   'world',
+  // 地图 v1 §5：`$map` 只读面。带 `$` 是为了不撞语料里常见的局部变量名 `map`
+  '$map',
   'quest',
   'lore',
   'local',
@@ -683,6 +685,7 @@ function buildSandboxArgs(ctx: EjsEvalContext, sourceKey: string): any[] {
     caps.chat,
     caps.char,
     caps.world,
+    caps.$map,
     caps.quest,
     caps.lore,
     caps.local,

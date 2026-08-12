@@ -34,6 +34,11 @@ import { resolveTemplateWithGlobals } from './template-resolver';
 import type { EjsCapabilityInput } from './ejs-capabilities';
 import { DANGEROUS_PATH_SEGMENTS } from './var-resolver';
 import { getDefaultTemplate } from './placeholder-registry';
+// 地图 v1（§5 接线表）：`$map` 与 uid 446 的 `runtime_geo_compact_data` 都在装配期算。
+// 三个模块全是纯函数叶 / 无 I/O 注入缝 —— 本文件仍然不碰 Dexie。
+import { getMapPack } from './map-runtime';
+import { buildMapSnapshot, buildRuntimeGeoData } from './map-context';
+import { getLocationNodes } from './location-db';
 
 // ========== 通用工具 ==========
 
@@ -143,7 +148,35 @@ export function buildEjsHistoryText(
  *   往 Map 里 set **不算 mutate 原 ctx 的既有字段**（容器由上游创建并共享）。
  */
 /**
- * 组装能力面输入（能力面 §3.3-§3.12）。
+ * 世界书 `extra_setting` uid 446「长途移动与地理参考」读的那个局部变量名（地图 v1 §8.1-2）。
+ *
+ * 那条目是一段 `constant: true` 的 EJS 程序，`getLocalVar('runtime_geo_compact_data', …)`
+ * 拿不到数据时走自己的区域级空回退 —— **引擎此前从未供过这个变量**（全仓 grep 零命中），
+ * 于是它一直在空转，而空转不报错、只是 Mermaid 图里没有玩家周边。
+ * 键名是**消费侧定的**，改这里等于把那条目重新打回空转，所以它单列成常量（测试钉住）。
+ */
+export const RUNTIME_GEO_LOCAL_VAR = 'runtime_geo_compact_data';
+
+/**
+ * 当前天气标签（地图 v1 §7 / §5 接线表的两处「天气供值漂移」之一）。
+ *
+ * 真源是 `AgentContext.weather` —— 由 game-pipeline 按 `resolveSceneWeather` 的那条链
+ * （`variables.sys.天气` → `worldFlags.天气` → `worldFlags.weather`）解析一次，
+ * 状态面板 / `stats.世界.天气` / `world.天气` / `$map.weatherNow` 因此**同出一源**。
+ * 这里只补一层「引擎自持」的兜底：`weather` 缺席时读 `variables.sys.天气`（真源那一格），
+ * 让不经 game-pipeline 的调用方（测试 / 将来的第二个装配入口）也不至于永远拿空串。
+ * 兜底刻意**不含** `worldFlags` 两格 —— 那是旧存档兼容，引擎侧上下文里根本没有那袋。
+ */
+function resolveContextWeather(ctx: AgentContext): string {
+  const supplied = ctx.weather;
+  if (typeof supplied === 'string' && supplied.trim() !== '') return supplied;
+  const sys = ctx.variables?.['sys'] as Record<string, unknown> | undefined;
+  const raw = sys?.['天气'];
+  return typeof raw === 'string' && raw.trim() !== '' ? raw : '';
+}
+
+/**
+ * 组装能力面输入（能力面 §3.3-§3.12 + 地图 v1 §5 的 `$map`）。
  *
  * 🔴 `lore` 的可见性是**安全相关**的：`getEntriesForAgent` 已经按 Phase 8 分区过滤，
  * 这里只在它的产出里查 —— EJS 绝不能成为绕过可见性模型的旁路。
@@ -177,6 +210,10 @@ function buildCapabilityInput(
     return loreIndex;
   };
 
+  const weather = resolveContextWeather(ctx);
+  const playerLocation =
+    (ctx.characters ?? []).find((c) => c.type === 'player')?.location?.trim() || null;
+
   return {
     history: (ctx.history ?? []).map((m) => ({ role: m.role, content: m.content ?? '' })),
     characters: ctx.characters,
@@ -185,6 +222,32 @@ function buildCapabilityInput(
     quests: ctx.quests,
     focusQuest: ctx.focusQuest,
     turn: ctx.history?.length ?? 0,
+    // 🔴 漂移修复（地图 v1 §5）：`ejs-capabilities.buildWorld` 一直读这一格写进 `world.天气`，
+    //    而生产从来没人供值 —— 于是每一条读天气的世界书条目都在读空串，且不报错
+    weather,
+    /**
+     * `$map` 的数据面（地图 v1 §5）。
+     *
+     * 不可变半边（地块 / 邻接 / 所有者）来自 `getMapPack()` 那条注入缝，可变半边来自
+     * `ctx.mapFlags`（game-pipeline 经 `getMapFlags(profile)` 读出）。**空包 / 未落位时
+     * 快照各格为空**，不抛不缺字段 —— 世界书 EJS 照常 `if ($map.currentTile)`。
+     * 索引每次现建（`buildMapSnapshot` 的说明）：热换内容包后本回合就是新地图。
+     */
+    mapSnapshot: buildMapSnapshot(getMapPack(), {
+      currentTileId: ctx.mapFlags?.lastTileId ?? null,
+      weatherLabel: weather.length > 0 ? weather : null,
+      journey: ctx.mapFlags?.journey ?? null,
+      discontinuity: ctx.mapFlags?.lastMoveDiscontinuity ?? null,
+    }),
+    /**
+     * uid 446 的 `runtime_geo_compact_data`（地图 v1 §8.1-2）。
+     *
+     * 走 `localSeed`（只读回落层）而不是往草稿里 `local.set`：这份投影每回合可重算，
+     * 落进 `vars` 只会把几 KB 派生数据反复写进存档变量（并顶到 `local` 的项目配额）。
+     * 尺度上与 `$map` **刻意并存**：这一份是城际/区域级（旧语义图 34 节点），
+     * `$map` 是本地一跳的地块级 —— 316 块地全塞进 Mermaid 会撑爆它自带的 ≤30 边限流。
+     */
+    localSeed: { [RUNTIME_GEO_LOCAL_VAR]: buildRuntimeGeoData(getLocationNodes(), playerLocation) },
     charLoreBook: config?.worldBookIds?.[0] ?? '',
     projectId: 'builtin',
     engineVersion: undefined,

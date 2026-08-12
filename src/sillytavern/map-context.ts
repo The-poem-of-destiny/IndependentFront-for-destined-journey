@@ -117,7 +117,8 @@ export interface MapSnapshot {
   /** 天气标签（包词汇原文，来自 `map-weather.weatherAt`）；`null` = 这一格不写 */
   weatherLabel: string | null;
   /**
-   * 提示行的判据：上一次移动跨越了几跳（`1` = 相邻，正常移动）。
+   * 提示行的判据：非空 = 上一次移动落在了**不相邻**的地块（接线层在跨越发生时置 `1`，
+   * 相邻的正常移动为 `null`）——与 `types-map.ts` / `state-manager` 的语义一致。
    *
    * 🔴 **只校验不否决**（裁定 §12-4）：目的地与出发地不连通时照常落位（AI 赢 —— 传送 /
    *    剧情跳转是合法叙事），只在下一回合的上下文里附一条提示。数字由接线层（W2）算好传进来，
@@ -214,7 +215,7 @@ function describeNeighbors(index: MapIndex, tile: MapTile): MapSnapshotNeighbor[
  * 在途摘要。
  *
  * 目的地地块查不到（包换版了 / 旗是别的包留下的）→ 整段 `null`：那时连目的地叫什么都说不出，
- * 硬造一行「前往（未知）」是把 packVersion 自愈（§3.4-2）该清掉的旧派生态讲成了当前事实。
+ * 硬造一行「前往（未知）」是把 packStamp 自愈（§3.4-2）该清掉的旧派生态讲成了当前事实。
  */
 function describeJourney(
   index: MapIndex,

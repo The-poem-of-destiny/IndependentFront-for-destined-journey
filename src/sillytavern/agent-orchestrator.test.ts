@@ -6,21 +6,34 @@ import { AgentOrchestrator } from './agent-orchestrator';
 import type { AgentContext, AgentConfig, ApiEndpoint, Pipeline } from './types';
 
 // state-manager mock: 捕获 commitChatState 收到的 patches（Stage3 <json> 解析测试用）
-const { commitChatStateMock } = vi.hoisted(() => ({
-  commitChatStateMock: vi.fn(async (patches: any[]) => ({
-    success: true,
-    patchesApplied: patches.length,
-    eventsGenerated: [],
-    errors: [] as string[],
-  })),
-}));
+const { commitChatStateMock, applyTimeAdvanceMock, syncMapJourneyMock, journeySnapshot } =
+  vi.hoisted(() => {
+    const commitChatStateMock = vi.fn(async (patches: any[]) => ({
+      success: true,
+      patchesApplied: patches.length,
+      eventsGenerated: [],
+      errors: [] as string[],
+    }));
+    const applyTimeAdvanceMock = vi.fn(async () => [] as any[]);
+    // 🗺 地图 v1：在途旗同步**被调用那一刻**的先后关系。用「调用时读计数」而不是
+    // mock.invocationCallOrder，是因为各 describe 的 beforeEach 会重置实现，
+    // 而这份快照读的是调用发生时的事实，重置不影响它。
+    const journeySnapshot = { calls: 0, commitsBefore: -1, advancesBefore: -1 };
+    const syncMapJourneyMock = vi.fn(async () => {
+      journeySnapshot.calls += 1;
+      journeySnapshot.commitsBefore = commitChatStateMock.mock.calls.length;
+      journeySnapshot.advancesBefore = applyTimeAdvanceMock.mock.calls.length;
+    });
+    return { commitChatStateMock, applyTimeAdvanceMock, syncMapJourneyMock, journeySnapshot };
+  });
 vi.mock('./state-manager', async (importOriginal) => {
   const orig = await importOriginal<typeof import('./state-manager')>();
   return {
     ...orig,
     createStateManager: vi.fn(() => ({
       commitChatState: commitChatStateMock,
-      applyTimeAdvance: vi.fn(),
+      applyTimeAdvance: applyTimeAdvanceMock,
+      syncMapJourney: syncMapJourneyMock,
     })),
   };
 });
@@ -1520,6 +1533,43 @@ async function runDispatcherWithJson(
   await orch.run();
   return commitChatStateMock.mock.calls.flatMap((c) => c[0]);
 }
+
+// ========== Stage 2 提交后胶水 → 在途旗（地图 v1 §5 接线表 / 裁定 §12-8）==========
+
+describe('AgentOrchestrator — Stage2 在途旗同步（地图接线）', () => {
+  beforeEach(() => {
+    commitChatStateMock.mockClear();
+    applyTimeAdvanceMock.mockClear();
+    syncMapJourneyMock.mockClear();
+    journeySnapshot.calls = 0;
+    journeySnapshot.commitsBefore = -1;
+    journeySnapshot.advancesBefore = -1;
+  });
+
+  it('🔴 dispatcher <json> 处理完就调用 syncMapJourney —— 有人供值，不只是逻辑对', async () => {
+    await runDispatcherWithJson({
+      delta_time: 30,
+      replace: [{ path: 'sys.旅行目的地', value: '未知目的地' }],
+    });
+    expect(syncMapJourneyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 顺序是契约：目的地变量落库、时间推进**之后**才算旗', async () => {
+    await runDispatcherWithJson({
+      delta_time: 30,
+      replace: [{ path: 'sys.旅行目的地', value: '未知目的地' }],
+    });
+    // 旗要基于「这一回合的目的地 + 这一回合的时刻」算：提前一步就是拿旧状态定到达时刻
+    expect(journeySnapshot.commitsBefore).toBeGreaterThanOrEqual(1);
+    expect(journeySnapshot.advancesBefore).toBe(1);
+  });
+
+  it('没有 delta_time 也照样同步（清旗/到达这类变化与时间推进无关）', async () => {
+    await runDispatcherWithJson({ replace: [{ path: 'sys.旅行目的地', value: '' }] });
+    expect(syncMapJourneyMock).toHaveBeenCalledTimes(1);
+    expect(journeySnapshot.advancesBefore).toBe(0);
+  });
+});
 
 describe('AgentOrchestrator — Stage2 世界新闻 → add_news', () => {
   beforeEach(() => {

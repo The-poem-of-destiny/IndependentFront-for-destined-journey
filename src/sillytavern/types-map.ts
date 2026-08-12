@@ -166,8 +166,9 @@ export type MapStrait = [tileA: number, tileB: number];
 /**
  * 编译期烘好的**不可变**地图内容包（内容注册表第 8 面 `mapPack`）。
  *
- * 🔴 全装置只有**一个现行包**，存档**不钉包版本**（§3.4-2）：`worldFlags.map.packVersion`
- *    只是个戳，不符就清掉全部派生态按位置路径重落位。这是「位置路径为真源」（裁定 §12-1）
+ * 🔴 全装置只有**一个现行包**，存档**不钉包版本**（§3.4-2）：`worldFlags.map.packStamp`
+ *    只是个戳（= 本包的 `contentHash`），不符就清掉全部派生态按位置路径重落位。
+ *    这是「位置路径为真源」（裁定 §12-1）
  *    的直接红利 —— 一切地图派生态都可重建，所以旧存档永不崩，最坏是棋子短暂未定位。
  */
 export interface MapPack {
@@ -243,17 +244,35 @@ export interface MapWeatherStamp {
 /**
  * `worldFlags.map` 的形状（**不新增 Dexie 表**，worldFlags 已在 FullBackup 内）。
  *
- * 🔴 全字段可选、且**全部是派生态**：`packVersion` 与现行包不符时，下面三格一律清掉
+ * 🔴 全字段可选、且**全部是派生态**：`packStamp` 与现行包不符时，下面各格一律清掉
  *    并按位置路径立即重落位（§3.4-2 自愈）。所以这里永远不该出现「只有这里才有的事实」——
  *    真源是 `CharacterState.location` 那条自由文本路径。
  * 🔴 **只跟踪玩家**（裁定 §12-3，player only throughout）：NPC 的 `set_location` 不写这里，
  *    NPC 地块查询留作按需纯函数调用，不留历史。
  */
 export interface MapSaveFlags {
-  /** 现行包戳；不符 → 清下面全部派生态并重落位 */
-  packVersion?: string;
+  /**
+   * 现行包戳；不符 → 清下面全部派生态并重落位（§3.4-2 自愈）。
+   *
+   * 🔴 存的是 **`MapPack.contentHash`**，不是 `version`。语义版本是**手写字段**：作者改完地图
+   *    重编译时它常常一个字节都不变（正是「随手更新」这条需求的常态），于是自愈判据永远相等、
+   *    整条自愈静默失效 —— 而症状是棋子沿着**旧地图**落位，不报错。`contentHash` 是编译期从
+   *    内容算出来的，改了地图它必变；UI 的渲染缓存（idBuf / 边界线 / 底图）用的也是它（§3.4-3），
+   *    两侧同一个失效键。
+   */
+  packStamp?: string;
   /** 最近一次成功落位的地块（仅玩家）；落位失败时**保持原值不动** */
   lastTileId?: number;
   journey?: MapJourneyFlag;
   weatherStamp?: MapWeatherStamp;
+  /**
+   * 上一次落位跨越了几跳（`1` = 不相邻，v1 只区分「相邻」与「不相邻」两态）；
+   * 缺席 = 上一次移动是正常的相邻移动（或还没移动过）。
+   *
+   * 🔴 **只校验不否决**（裁定 §12-4）：不连通照常落位（传送 / 剧情跳转是合法叙事），
+   *    这一格只是让下一回合的 `MAP_CONTEXT` 附一条提示行（`MapSnapshot.discontinuity`）。
+   *    把它升级成拒绝落位就是让代码否决叙事。
+   * 🔴 派生态，随 `packStamp` 不符一起清 —— 换图后「上一跳」这个说法本身就不成立了。
+   */
+  lastMoveDiscontinuity?: number;
 }

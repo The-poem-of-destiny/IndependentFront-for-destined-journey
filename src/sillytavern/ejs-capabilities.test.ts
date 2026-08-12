@@ -334,6 +334,124 @@ describe('local（§3.3）', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// localSeed —— 引擎供的只读回落层（地图 v1 §8.1-2 的 runtime_geo_compact_data）
+// ═══════════════════════════════════════════════════════════
+
+describe('local 的只读种子（localSeed）', () => {
+  const seed = { runtime_geo_compact_data: { places: [{ id: 'p1' }], edges: [] } };
+
+  it('读得到、has 为真、进 keys —— 但**一个字节都不落 vars 草稿**', () => {
+    const { caps, vars } = build({ localSeed: seed });
+    expect(caps.local.get('runtime_geo_compact_data')).toEqual(seed.runtime_geo_compact_data);
+    expect(caps.local.has('runtime_geo_compact_data')).toBe(true);
+    expect(caps.local.keys()).toEqual(['runtime_geo_compact_data']);
+    // 🔴 这一条是这个特性存在的**理由**：种子若落进 vars，就会经 ejs-vars-diff
+    // 每回合把一份可重算的派生数据写进存档变量（还会顶到 local 的项目配额）
+    expect(vars[LOCAL_ROOT]).toBeUndefined();
+  });
+
+  it('是只读孤儿：改返回值不影响下一次读，也改不到宿主那份输入', () => {
+    const { caps } = build({ localSeed: seed });
+    const got = caps.local.get('runtime_geo_compact_data') as { places: unknown[] };
+    got.places.push({ id: '偷偷加的' });
+    expect(
+      (caps.local.get('runtime_geo_compact_data') as { places: unknown[] }).places,
+    ).toHaveLength(1);
+    expect(seed.runtime_geo_compact_data.places).toHaveLength(1);
+  });
+
+  it('同名 set 就地遮蔽（桶 > 种子）；remove 只删自己写的那份，种子照旧读得到', () => {
+    const { caps } = build({ localSeed: seed });
+    caps.local.set('runtime_geo_compact_data', '我自己的值');
+    expect(caps.local.get('runtime_geo_compact_data')).toBe('我自己的值');
+    // 遮蔽后不该在 keys 里出现两次
+    expect(caps.local.keys()).toEqual(['runtime_geo_compact_data']);
+    caps.local.remove('runtime_geo_compact_data');
+    expect(caps.local.get('runtime_geo_compact_data')).toEqual(seed.runtime_geo_compact_data);
+  });
+
+  it('种子里没有的键仍走 fallback ?? null（种子不是「什么都有」）', () => {
+    const { caps } = build({ localSeed: seed });
+    expect(caps.local.get('别的键')).toBeNull();
+    expect(caps.local.get('别的键', 7)).toBe(7);
+  });
+
+  it('危险键即使出现在种子里也读不到（护栏在 safeKey，不在种子）', () => {
+    const { caps } = build({ localSeed: { __proto__: { polluted: true } } as never });
+    expect(caps.local.get('__proto__')).toBeNull();
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// $map（地图 v1 §5）
+// ═══════════════════════════════════════════════════════════
+
+describe('$map（地图 v1 §5）', () => {
+  const snapshot = {
+    current: {
+      name: '白曜城',
+      terrain: '平原',
+      water: null,
+      impassable: false,
+      midTierName: '云息盆地',
+      countryName: '诺斯加德联盟',
+    },
+    neighbors: [
+      {
+        name: '雾凇海岸',
+        terrain: '苔原',
+        dir: 'N' as const,
+        water: null,
+        impassable: false,
+        ownerName: null,
+      },
+    ],
+    journey: { toName: '铁炉堡', nextName: '驰原省边墙', remainingDays: 3 },
+    weatherLabel: '小雪',
+    discontinuity: null,
+  };
+
+  it('没有快照（空包 / 未落位 / 老调用方）→ 空值而不是 undefined', () => {
+    // 🔴 这条钉的是世界书 EJS 的写法：`if ($map.currentTile)` 必须能直接写，
+    //    不必先判 `typeof $map`（各格 undefined 会让作者去写防御性 try/catch）
+    const { caps } = build({});
+    expect(caps.$map.currentTile).toBeNull();
+    expect(caps.$map.neighbors).toEqual([]);
+    expect(caps.$map.weatherNow).toBeNull();
+    expect(caps.$map.journey).toBeNull();
+    expect(caps.$map.discontinuity).toBeNull();
+  });
+
+  it('有快照 → 逐格转发（weatherLabel → weatherNow，current → currentTile）', () => {
+    const { caps } = build({ mapSnapshot: snapshot });
+    expect(caps.$map.currentTile?.name).toBe('白曜城');
+    expect(caps.$map.currentTile?.countryName).toBe('诺斯加德联盟');
+    expect(caps.$map.neighbors).toHaveLength(1);
+    expect(caps.$map.neighbors[0].dir).toBe('N');
+    expect(caps.$map.weatherNow).toBe('小雪');
+    expect(caps.$map.journey?.remainingDays).toBe(3);
+  });
+
+  it('只读孤儿：改返回值不回流宿主那份快照', () => {
+    const { caps } = build({ mapSnapshot: snapshot });
+    caps.$map.neighbors.push({ ...snapshot.neighbors[0], name: '凭空多出来的' });
+    caps.$map.currentTile!.name = '改过的名字';
+    expect(snapshot.neighbors).toHaveLength(1);
+    expect(snapshot.current.name).toBe('白曜城');
+  });
+
+  it('🔴 整面没有函数 —— 函数过不了 JSON 编组，会让两个后端分叉（world.isDaytime 的教训）', () => {
+    const { caps } = build({ mapSnapshot: snapshot });
+    for (const [k, v] of Object.entries(caps.$map)) {
+      expect(typeof v, `$map.${k} 是函数`).not.toBe('function');
+    }
+    // 且整面能原样过 JSON（QuickJS 后端就是这么送过去的）
+    expect(JSON.parse(JSON.stringify(caps.$map)).currentTile.name).toBe('白曜城');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
 // ui
 // ═══════════════════════════════════════════════════════════
 
@@ -419,7 +537,17 @@ describe('EJS_SURFACE —— engine.has 不许再说谎', () => {
 
   // `fmt` / `rng` 是纯函数库（ejs-fmt / ejs-rng），由 runtime 直接注入沙盒，
   // 不经 buildEjsCapabilities —— 它们的同源性由下面那条「与 EJS_SURFACE 同源」覆盖。
-  const ON_CAPS = ['chat', 'char', 'world', 'quest', 'lore', 'local', 'ui', 'engine'] as const;
+  const ON_CAPS = [
+    'chat',
+    'char',
+    'world',
+    '$map',
+    'quest',
+    'lore',
+    'local',
+    'ui',
+    'engine',
+  ] as const;
 
   it('namespace 里声明的成员，实际对象上必须真的有', () => {
     const c = caps() as unknown as Record<string, Record<string, unknown>>;

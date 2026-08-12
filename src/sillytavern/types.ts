@@ -18,6 +18,8 @@ import type { EffectAutomaton } from './combat-v3/types';
 // type-only 单向边：types-image.ts **不 import 本文件**（图像子系统的类型全部自持），
 // 所以这条边不成环。只为把 SceneImageMarker 接进 DetectedMarker 联合。
 import type { SceneImageMarker } from './types-image';
+// 地图 v1: `AgentContext.mapFlags` 的形状（分册 types-map.ts，口径同上 —— 只 type-only 反向引用）
+import type { MapSaveFlags } from './types-map';
 
 // 音频子系统的接口/seam 类型拆分在 types-audio.ts（本文件已逾 800 行）。
 // 从这里统一再导出，「types.ts 是唯一类型来源」这条 import 路径依然成立。
@@ -1450,6 +1452,25 @@ export interface AgentContext {
 
   /** 存档级游戏时间（供 memory_summary 等 Agent 注入时间上下文） */
   gameTime?: GameTime;
+
+  // --- 地图 v1（§8.1 读侧）: `{{MAP_CONTEXT}}` 的两格可变输入 ---
+  /**
+   * 地图派生态（`SaveProfile.worldFlags.map`，由 game-pipeline 经 `getMapFlags()` 取出）。
+   *
+   * 🔴 这里**只放可变半边**（落位 / 在途 / 不连通）。不可变半边（地块 / 邻接 / 所有者 / 天气表）
+   *    由 `map-runtime.getMapPack()` 那条注入缝给 —— 把整份包塞进每个 Agent 的上下文，
+   *    等于让 316 块地随每次装配复制一遍。
+   * 🔴 缺席 = 从未落位 / 没装地图包：`{{MAP_CONTEXT}}` 整段不出（零 token，§8.1）。
+   */
+  mapFlags?: MapSaveFlags;
+  /**
+   * 当前天气标签串（自由文本，如「小雪」）。
+   *
+   * 读法与 `resolveSceneWeather` **同口径**：`variables.sys.天气` → `worldFlags.天气` →
+   * `worldFlags.weather`（后两格兜旧存档）。供值在 game-pipeline —— 面板上写着「小雨」、
+   * 提示词里却是晴天，是这条链最容易漂出来的样子。
+   */
+  weather?: string;
 
   /**
    * 存档开局提示词原文（save.metadata.openingPrompt）——含捏人页选的初始技能/装备
