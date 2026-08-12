@@ -9,6 +9,30 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 地图系统 v1（ADR-31）｜ ✅ 已实施 + UI 真机走查（2026-08-12）
+
+设计与 14 条裁定：`docs/planning/2026-08-11-map-system-v1-integration.md`；
+编排与偏差记录：同目录 `-implementation-plan.md`。一天内 W0-W4 五波全部落地：
+
+- **引擎六模块**（map-pack/index/path/weather/context/runtime，全纯函数叶）+ 结构闸门
+  （`map-*.ts` 禁中文字面量 = 换图零改码的机器保证）。玩家位置真源仍是位置路径，
+  地块只是**落位**投影；混合通行图寻路（陆海同图 + via/avoid）；确定性天气（词汇随包）。
+- **接线**：applySetLocation 仅玩家落位 + packStamp(contentHash) 自愈；跨天天气重断言
+  （Code 兜底 AI 覆盖）；`sys.旅行目的地` → journey 旗；`$map` 双 EJS 后端；
+  `runtime_geo_compact_data` 只读种子（uid 446 十五个月来首次真的有数据，顺手点亮了它）；
+  `{{MAP_CONTEXT}}`（dispatcher 模板）+ 内容仓 uid 510（story，免疫预设短路）双渲染器；
+  两处天气供值漂移（buildStatData / buildCapabilityInput）一并修复。
+- **UI**：MapPanel 新「势力地图」页签（sample 渲染栈自包含移植：着色/RDP 边界/命中/
+  路线预览/出发指令进输入框不自动发送）；顺手修了 schedulePersist 空壳（标记编辑此前从不落库）。
+- **数据**：编译管线 CK3 mapdata → map-pack.json（310 块 / 12 气候档全 57 中层 /
+  kmPerPx=0.42 最小二乘标定，12 组城际 5 组 ±30%、诚实的粗）；真实包落内容仓，公开仓中立占位。
+- **真机走查逮到并修掉**：dev overlay 中间件把二进制当 UTF-8 读（provinces.png 首字节
+  0x89 → U+FFFD 三字节，图不可解码）——「/data 全是 JSON」的假设第一次遇到 PNG 就碎了；
+  新档 lastTileId 未设时地图整体锁死 → 补只读显示落位。
+  实测：艾瑟嘉德 → 铁炉堡路线预览「约 6 天」vs 世界书 7 天（−14%，与标定报告一致）。
+- **未走查**（无 API key / 面板 wasm 限制）：真实 AI 轮次（MAP_CONTEXT 进提示词、叙事落位、
+  delta_time 锚定）与 EJS 条目浏览器内渲染 —— 链路测试与双后端语料测试背书，待日常游玩验证。
+
 ### 设置 store 启动任务绕开密钥保护闸门 ｜ ✅ 已修（2026-08-10）
 
 追 `settings-store.test.ts` 那条负载敏感偶发失败时挖出来的**真实数据丢失缺陷**。

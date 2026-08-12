@@ -26,3 +26,7 @@
 - [清 body 会炸掉遗留 wrapper](vtu-body-clear-kills-stale-wrappers.md) — 没开 enableAutoUnmount 的组件测试里别写 document.body.innerHTML=''；测试全绿但结尾多出 Unhandled Rejection，且指错用例名
 - [内容注册表不是响应式的](content-registry-not-reactive.md) — computed 里直接读 getContentRegistry() 会永久缓存空目录；必须落 ref + 四态加载门，测试先 setContentRegistry 再建 store
 - [vite define 两个静默陷阱](vite-define-two-traps.md) — vitest 不共用 vite.config.ts；define 只替换裸标识符，成员访问读不到注入值
+- [worktree 里 knip 报假死代码](knip-ratchet-worktree-phantoms.md) — worktree 的 node_modules 是空目录，knip:ratchet 会多报 11 条工具链条目；别据此跑 knip:update
+- [uid 446 runtime_geo 契约](uid446-runtime-geo-contract.md) — importance 越大越显著（tier 要反着映）、大陆 id 必须是字面 'continent'；直译字段名会让区域层静默空转
+- [冗余保险会互相掩护](redundant-guards-mask-mutations.md) — 决定性算法要逐条变异测试：两处重叠的保险单删都是绿的，钉不住的那处要么补用例要么降级成「保险」
+- [CRLF 会毁掉变异脚本](crlf-breaks-mutation-scripts.md) — src/** 全是 CRLF；replace(行+"\n") 静默失败留下两份代码，变异「没咬住」的结论多半是脚本没生效

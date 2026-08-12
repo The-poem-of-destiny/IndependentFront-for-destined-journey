@@ -224,6 +224,20 @@ export interface PackImageDialectsSection {
 }
 
 /**
+ * 地图内容包分节（地图系统 v1 / 设计 §3.3）—— 内容注册表**第 8 面**。
+ *
+ * 🔴 **整节替换，走 `branding`/`imageDialects` 那一档而不是 `catalog` 的 `.data` 档**：
+ * 落盘形状（`data/content/map-pack.json`）就是 `MapPack` 本身，再包一层 `data` 只是多一层壳。
+ *
+ * 🔴 **刻意不写成 `MapPack`**（尽管那才是它的真实形状）：这一节来自第三方内容包，
+ * 校验器只判「是不是 JSON 对象」，收窄留给引擎侧的容错解析器 `coerceMapPack`
+ * —— 那里认不出的条目跳过、认不出的旋钮回落，**planner 不解释结构**（口径同
+ * `PackImageDialectsSection`）。声明成 `MapPack` 会让读代码的人以为 pack 里的东西
+ * 已经被谁校验过了，而事实是**没有**。
+ */
+type PackMapPackSection = Readonly<Record<string, unknown>>;
+
+/**
  * 内容包顶层结构（§4）。
  *
  * 分节**全部可选**，三态语义：
@@ -262,6 +276,8 @@ export interface ContentPack {
   namePools?: PackNamePoolsSection;
   branding?: PackBrandingSection;
   imageDialects?: PackImageDialectsSection;
+  /** 地图内容包（地图系统 v1 / §3.3）—— 注册表第 8 面，整节替换 */
+  mapPack?: PackMapPackSection;
 
   /**
    * 构建器逐节盖章的 hash 清单。

@@ -446,6 +446,10 @@ export class QuickJsBackend implements EjsBackend {
       stats: ctx.stats ?? {},
       vars: ctx.vars ?? {},
       world: worldMarshalled.data,
+      // 地图 v1 §5：`$map` 走**数据轴**而不是桥接函数 —— 它整面只有数据、没有一个函数
+      // （`EjsMap` 的文件头说明了为什么），所以 JSON 一次过境就够，且不会出现
+      // `world.isDaytime` 那种「Legacy 有、guest 没有」的分叉
+      $map: caps.$map,
       charLoreBook: caps.charLoreBook,
       engine: { name: caps.engine.name, version: caps.engine.version },
     };
@@ -465,6 +469,7 @@ globalThis.stats = JSON.parse(globalThis.__ejsStatsJson);
 globalThis.vars = __ejsData.vars;
 globalThis.world = __ejsData.world;
 globalThis.world.isDaytime = function () { return ${isDaytime ? 'true' : 'false'}; };
+globalThis.$map = __ejsData.$map;
 globalThis.charLoreBook = __ejsData.charLoreBook;
 globalThis.engine = __ejsData.engine;`,
       '数据轴',

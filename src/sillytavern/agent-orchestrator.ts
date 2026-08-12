@@ -887,6 +887,11 @@ export class AgentOrchestrator {
         if (deltaTime !== undefined) {
           await this.advanceTime(deltaTime, 'request_dispatcher');
         }
+
+        // 🗺 提交后胶水（地图 v1 §8.2 / 裁定 §12-8）：dispatcher 刚把 `sys.旅行目的地` 落库、
+        // 时间也刚推进过，在途旗要基于**这两者之后**的状态算 —— 顺序不能提前。
+        // 它自己就是 no-op 安全的（没装地图包 / 目的地为空 / 落位失败一律不写），所以不加条件。
+        await this.syncMapJourney('request_dispatcher');
       }
 
       // Step C: 新格式 request 标签 → 并行回调
@@ -1058,6 +1063,26 @@ export class AgentOrchestrator {
     } catch (err) {
       console.error(`[Orchestrator] ${source} 状态提交抛异常:`, err);
       this.events.onStateCommitError?.(source, [String(err)]);
+    }
+  }
+
+  /**
+   * 🗺 在途旗同步（地图 v1 §5 接线表的「提交后胶水」）。
+   *
+   * 判定与写入全在 `StateManager.syncMapJourney` 里（ADR-21：状态变更只从那里出去）；
+   * 本方法只是**触发点** —— 这一条缝之所以在 dispatcher 分支而不在 vars_update 分支，
+   * 是因为 `sys.旅行目的地` 是 dispatcher 写的。代价（已知、可接受）：同一回合里玩家的
+   * `set_location` 由**后一个** stage（vars_update）落库，所以本次计划路线的起点是
+   * 移动**前**的地块。这不影响正确性 —— 在途旗每回合重算，`plannedPath` 本就是 advisory，
+   * 下一回合起点自然对上（裁定 §12-7 附加：叙事偏离时按新位置重估）。
+   */
+  private async syncMapJourney(source: string): Promise<void> {
+    try {
+      const { createStateManager } = await import('./state-manager');
+      await createStateManager(this.saveId).syncMapJourney();
+    } catch (err) {
+      // 地图是派生投影：旗没设上不影响任何已落库的状态，也不该污染 onStateCommitError
+      console.warn(`[Orchestrator] ${source} 在途旗同步失败:`, err);
     }
   }
 

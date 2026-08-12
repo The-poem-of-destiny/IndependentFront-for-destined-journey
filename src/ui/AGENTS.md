@@ -21,6 +21,14 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 ├── composables/
 │   ├── useMapViewer.ts              ← OpenSeadragon 生命周期
 │   ├── useMapMarkers.ts             ← 地图标记 CRUD + Overlay 同步
+│   ├── useMapPolitical.ts           ← [地图 v1] 势力地图舞台的状态与生命周期（懒建 / 按
+│   │                                   `contentHash` 失效 / 卸载释放 / 失败分档）
+│   │                                   🔴 懒 + 释放两头都要（设计 §9 预算：一次构建约 280ms、
+│   │                                      常驻 idBuf 约 35MB）。提到模块级「反正只建一次」
+│   │                                      = 手滑点开一次就常驻 35MB 到本局结束
+│   │                                   🔴 失效键是 `contentHash` 不是 URL —— `provinces.png`
+│   │                                      的地址是常量，换图时内容变地址不变；拿地址当键
+│   │                                      会让新图配着旧像素画，而那不报错
 │   ├── useHoverPopup.ts             ← 悬停浮层唯一实现（读 settings.hoverDelayMs）
 │   ├── useAssetImage.ts             ← [素材] 渲染缝：(name,type?) → {url,isVideo,row}，世代号守卫 + 引用计数索引
 │   │                                   `options.variant` 指定表情/差分（与 name/type 同属"要解析什么"，
@@ -120,6 +128,21 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      不从设置里再算一遍。seed 在这一层定死（客户端那个时钟兜底
 │   │                                      只是保险）
 │   │                                   `runtimeInfo()` 是记录戳（provider + dialectId）的唯一供给方
+│   ├── map-political.ts             ← [地图 v1 / §9] 势力地图的**全部纯逻辑**：provinces.png
+│   │                                   像素→tileId 解码 / 政治着色缓冲 / 边界折线（栅格→单位段
+│   │                                   →链化→RDP→SVG path）/ 命中 / 高亮补丁 / 平移缩放数学 /
+│   │                                   信息卡投影 / 「出发」指令措辞
+│   │                                   🔴 **颜色↔tileId 是承重假设**：pack 里**没有**这张表
+│   │                                      （`MapTile` 不带颜色），块色由工具链的
+│   │                                      `colorForId(id)` 确定性哈希产出，本层重算同一个哈希
+│   │                                      （实测与首发 definition.csv 316/316 全等）。撞色时
+│   │                                      两块地**一起丢** —— 顶替的后果是「整块地画错/点错」
+│   │                                      且完全无声
+│   │                                   🔴 高亮必须是**一份**补丁：`putImageData` 是覆盖不是混合，
+│   │                                      逐块 put 会把邻块已画的像素清成透明
+│   ├── map-provinces-raster.ts      ← [地图 v1] 取图 + 解码那一步，**唯一**碰 canvas 的地方
+│   │                                   （组件测试 mock 它；jsdom 没有 2D 上下文）。永不抛：
+│   │                                   公开仓占位包**没有** provinces.png，404 是常态
 │   ├── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
 │   └── variables.css + 10 主题 CSS（parchment/obsidian/crimson/indigo/bronze/sakura/ivory/misty-lilac/forest/ocean）
 │
@@ -382,6 +405,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── game/
 │   │   ├── GamePage.vue             ← 游戏页主布局（三栏 + 6 弹窗；持有 --rail-w）
 │   │   ├── MapPanel.vue / TopBar.vue / SideToolbar.vue / ScenePanel.vue / ChatFlow.vue / InputBar.vue
+│   │   │                               [地图 v1] MapPanel 加页签「标记地图 / 势力地图」：两个都靠
+│   │   │                               `v-show` 切（标记页签用 v-if 会拆掉 OSD 的挂载容器 ——
+│   │   │                               切一次地图就白），势力页签额外一次性 `v-if` 懒挂载
+│   │   │                               🔴 顺手修了 `schedulePersist` —— 它此前是**空壳**（定时器
+│   │   │                                  回调里什么都不做），标记工作台改的名字/颜色关掉就没了。
+│   │   │                                  现在按基线 diff 走 `setMapMarker`/`removeMapMarker`
+│   │   │                                  （P1-09 命名写入口 + try/catch），挂载灌入预设**不算改动**
+│   │   │                                  （否则预设被复制进存档，此后内容包更新永远不生效）
+│   │   ├── MapPoliticalTab.vue      ← [地图 v1 / §9] 势力地图页签（自包含渲染栈，裁定 §12-12：
+│   │   │                               **不做 OSD 叠加集成**）。着色 canvas + 高亮 canvas +
+│   │   │                               SVG 边界 + 指针交互 + 信息卡 + 路线预览（via/avoid 实时重算）
+│   │   │                               🔴 「出发」只 `game.fillInput(...)` **不自动发送**（§8.2）：
+│   │   │                                  与 ChatFlow 点行动选项同一条缝，**不开第二条写路径**；
+│   │   │                                  地图一个字节的状态都不写
 │   │   │                               [图像 v1] ChatFlow 右键菜单加「为这一段配图」：回退只在**最新一条**
 │   │   │                               消息上 —— assistant「回退本轮」/ user「回退到这条输入」（正文没
 │   │   │                               生成时右键自己的输入撤回重发），配图**哪条都行**（story 被教了克制使用）

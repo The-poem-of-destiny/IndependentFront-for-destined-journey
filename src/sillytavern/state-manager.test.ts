@@ -67,6 +67,15 @@ vi.mock('./save-profile', () => ({
   updateProfile: vi.fn(),
   setQuest: vi.fn(),
   removeQuest: vi.fn(),
+  // 🗺 地图 v1：本文件的用例全跑在**空包**上（三条地图钩子整段 no-op），这两个只为让 mock 的
+  // 导出面与真模块一致 —— 缺了它们，将来某个装了包的用例拿到的是 undefined，而钩子的 catch
+  // 会把它降级成一条 console.warn（静默变绿）。真链路测试在 state-manager.map-wiring.test.ts。
+  getMapFlags: vi.fn((profile: any) => profile?.worldFlags?.map ?? {}),
+  updateMapFlags: vi.fn(async (profile: any, flags: any) => {
+    profile.worldFlags = profile.worldFlags ?? {};
+    profile.worldFlags.map = flags;
+    return profile;
+  }),
 }));
 
 import { StateManager, createStateManager } from './state-manager';

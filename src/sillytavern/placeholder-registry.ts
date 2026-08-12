@@ -30,7 +30,17 @@ import {
 import { parseSetvars, resolveGetvars, resolveRandoms } from './preset-loader';
 import { buildZoneContext, filterZoneContent, getAgentZoneVisibility } from './context-visibility';
 import { defaultHistoryLayers } from './agent-templates';
-import { formatGameTime } from './time-system';
+import { formatGameTime, getSeason, type GameTime } from './time-system';
+import { buildMapSnapshot } from './map-context';
+import type {
+  MapSnapshot,
+  MapSnapshotJourney,
+  MapSnapshotNeighbor,
+  MapSnapshotPlace,
+} from './map-context';
+import type { MapCompass } from './map-index';
+import { isEmptyMapPack } from './map-pack';
+import { getMapPack } from './map-runtime';
 
 // ═══════════════════════════════════════════════════════════
 // Module-Level Globals
@@ -200,6 +210,159 @@ function resolveLoreBookSection(
     }
   }
   return formatted;
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAP_CONTEXT 渲染（地图 v1 §8.1 载荷契约 —— 两个渲染器之一）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 罗盘令牌 → 中文方位。
+ *
+ * 🔴 这张表**属于本文件**，不属于 `map-*.ts`：那些模块被结构闸门（`map-literals-gate.test.ts`，
+ *    §3.4-1「换图零改码」）禁掉了中文字面量，所以 `MapSnapshot` 给的是 ASCII 令牌，
+ *    中文在渲染层查表。同一份 `$map` 数据有**两个渲染器**（裁定 §12-9）：本文件喂
+ *    request_dispatcher（模板占位符），内容仓一条 constant EJS 世界书条目喂 story
+ *    （story 有预设短路，占位符到不了它）。**数据不会漂，措辞可以漂** —— 措辞属创作层。
+ */
+const MAP_COMPASS_LABELS: Record<MapCompass, string> = {
+  N: '北',
+  NE: '东北',
+  E: '东',
+  SE: '东南',
+  S: '南',
+  SW: '西南',
+  W: '西',
+  NW: '西北',
+};
+
+/** 当前行的格分隔（照 §8.1 样例：全角竖线，无空格） */
+const MAP_CELL_SEP = '｜';
+/** 邻接项之间 */
+const MAP_NEIGHBOR_SEP = ' · ';
+/** 单个邻接项括注内部 */
+const MAP_NOTE_SEP = '·';
+
+/**
+ * 中层 / 国家括注。
+ *
+ * 三种「查不到」的成因（不属于任何中层 / 无主之地 / 包里悬空 id）**刻意同一个处置** ——
+ * 那一格不写（`MapSnapshotPlace` 那条注释：区分开就得让渲染层也分三支）。
+ */
+function renderMapDomain(place: MapSnapshotPlace): string {
+  const parts: string[] = [];
+  if (place.midTierName !== null && place.midTierName.trim() !== '') parts.push(place.midTierName);
+  if (place.countryName !== null && place.countryName.trim() !== '') {
+    parts.push(`${place.countryName}领`);
+  }
+  return parts.length === 0 ? '' : `（${parts.join(' · ')}）`;
+}
+
+/**
+ * 天气格。**只到季节**。
+ *
+ * 🔴 §8.1 样例写的是「小雪（寒冬 · 长夜月）」，而那 12 个具名月是**世界书历法**里的内容，
+ *    引擎的 `time-system.MONTH_NAMES` 只有「一月…十二月」这种数词表 —— 拿它顶替具名月
+ *    等于在提示词里写一句世界观不认的话。具名月留给内容仓那个渲染器（它读得到历法条目），
+ *    这里只出 `getSeason()`。少一格标签好过一句错话（口径同 `map-context` 那些「不产」的字段）。
+ */
+function renderMapWeatherCell(label: string, gameTime: GameTime | undefined): string {
+  const season = gameTime === undefined ? '' : getSeason(gameTime.month);
+  return season === '' ? `天气: ${label}` : `天气: ${label}（${season}）`;
+}
+
+/**
+ * 邻接行（严格一跳）。
+ *
+ * 括注顺序照 §8.1 原文：**地形 → 仅异主时的所有者 → 通行性**。`ownerName` 是否为 null
+ * 本身就是「该不该标所有者」的答案（`map-context` 已经比过了），这里不再比一遍。
+ */
+function renderMapNeighborLine(neighbors: readonly MapSnapshotNeighbor[]): string {
+  if (neighbors.length === 0) return '';
+  const items = neighbors.map((n) => {
+    const notes: string[] = [];
+    if (n.terrain.trim() !== '') notes.push(n.terrain);
+    if (n.ownerName !== null && n.ownerName.trim() !== '') notes.push(`${n.ownerName}领`);
+    // 水域与不可通行是**通行性事实**，AI 必须看见：挡在西边的冰脊、东边那片要船才过得去的海。
+    // 湖块 v1 一律不可入（§6.1），海块要船 —— 两者措辞刻意不同，因为处置不同。
+    if (n.water === 'sea') notes.push('需船');
+    else if (n.water === 'lake') notes.push('不可入');
+    if (n.impassable) notes.push('不可通行');
+    const suffix = notes.length === 0 ? '' : `(${notes.join(MAP_NOTE_SEP)})`;
+    return `${MAP_COMPASS_LABELS[n.dir]}→${n.name}${suffix}`;
+  });
+  return `邻接: ${items.join(MAP_NEIGHBOR_SEP)}`;
+}
+
+/**
+ * 在途行。
+ *
+ * 两格可以缺而**都不是异常**（`MapSnapshotJourney` 那条注释）：没有「下一站」= 玩家不在计划
+ * 路线上（或压根没计划路线），没有「还需 N 天」= 当前位置到目的地无路可走。缺了就少一格，
+ * 「在途，目的地 X」本身仍是真事实。
+ *
+ * 🔴 天数是**锚不是判决**（裁定 §12-5）：`delta_time` 仍由 dispatcher 写，Code 只把路线估算
+ *    摆在它眼前。所以措辞是「约还需」而不是「需要」。
+ */
+function renderMapJourneyLine(journey: MapSnapshotJourney): string {
+  let line = `旅行中: 前往${journey.toName}`;
+  if (journey.nextName !== null && journey.nextName.trim() !== '') {
+    line += `，沿计划路线，下一站 ${journey.nextName}`;
+  }
+  if (journey.remainingDays !== null) line += `，约还需 ${journey.remainingDays} 天`;
+  return line;
+}
+
+/**
+ * 天气标签的读法 —— 与 `resolveSceneWeather`（前端）**同口径**的两级：
+ * `ctx.weather`（供值侧已经走完 `sys.天气` → `worldFlags.天气` → `worldFlags.weather` 三格）
+ * → `ctx.variables.sys.天气`（变量真源，任何造得出 AgentContext 的调用方都有它）。
+ *
+ * 为什么留第二级：`weather` 是新字段，而 `AgentContext` 有好几个构造点。漏供的症状不是报错，
+ * 是天气格**静默消失** —— 而消失与「今天没有天气」长得一模一样（blurByDefault 那类缺陷）。
+ */
+function readWeatherLabel(ctx: AgentContext): string | null {
+  const supplied = typeof ctx.weather === 'string' ? ctx.weather.trim() : '';
+  if (supplied !== '') return supplied;
+  const sys = (ctx.variables ?? {})['sys'] as Record<string, unknown> | undefined;
+  const raw = sys?.['天气'];
+  const fromVars = typeof raw === 'string' ? raw.trim() : '';
+  return fromVars === '' ? null : fromVars;
+}
+
+/**
+ * 四类行 → `<map_context>` 块（§8.1）。
+ *
+ * 🔴 **未定位时只出一行**：`位置: 未定位（按叙事继续）`。位置路径才是真源，地块只是投影
+ *    （裁定 §12-1），投影为空时游戏照常进行 —— 这一行是在告诉 AI「别等地图，照叙事写」。
+ *    此时在途摘要只剩一个目的地名字（`remainingDays` / `nextName` 都算不出来），
+ *    而那个名字叙事里刚写过；不连通提示更是无从谈起，所以两条都不出。
+ */
+function renderMapContextBlock(snapshot: MapSnapshot, gameTime: GameTime | undefined): string {
+  const lines: string[] = [];
+  const place = snapshot.current;
+
+  if (place === null) {
+    lines.push('位置: 未定位（按叙事继续）');
+  } else {
+    const cells = [`位置: ${place.name}${renderMapDomain(place)}`];
+    if (place.terrain.trim() !== '') cells.push(`地形: ${place.terrain}`);
+    if (snapshot.weatherLabel !== null && snapshot.weatherLabel.trim() !== '') {
+      cells.push(renderMapWeatherCell(snapshot.weatherLabel.trim(), gameTime));
+    }
+    lines.push(cells.join(MAP_CELL_SEP));
+
+    const neighborLine = renderMapNeighborLine(snapshot.neighbors);
+    if (neighborLine !== '') lines.push(neighborLine);
+    if (snapshot.journey !== null) lines.push(renderMapJourneyLine(snapshot.journey));
+    // 提示行的判据是**这一格在不在**（`projectLocationFlags` 只在两块不相邻时写 1，
+    // 相邻时显式删掉）—— 拿数值比大小会把「相邻」也讲成越野。至多一条（§8.1）。
+    if (snapshot.discontinuity !== null) {
+      lines.push('提示: 上回合移动跨越了不相邻地块（如为传送/剧情跳转可忽略）');
+    }
+  }
+
+  return `<map_context>\n${lines.join('\n')}\n</map_context>`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -389,6 +552,30 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
       }
     }
     return parts.join('\n');
+  },
+
+  /**
+   * {{MAP_CONTEXT}} — 地块地图的本地事实块（地图 v1 §8.1）：当前地块 + 严格一跳邻接 +
+   * 天气（含季节）+ 在途摘要 + 至多一条不连通提示，包在 `<map_context>` 里。
+   *
+   * 🔴 **没装地图包时是空串**（`isEmptyMapPack`）：地图是**可选**子系统，不用它的存档
+   *    一个 token 都不该付。所以这个块自带 XML 外壳、模板里**不要**再包一层中文标签 ——
+   *    包了就会在没地图时留下一对空标签，把「零成本」这条设计意图静默作废。
+   * 🔴 数据面全部来自 `map-context.buildMapSnapshot`（纯函数），可变半边来自 `ctx.mapFlags`，
+   *    不可变半边来自 `map-runtime.getMapPack()` 那条注入缝。本 resolver 只负责**措辞**。
+   * 🔴 只给名字：没有 tileId、没有像素坐标、没有两跳（§8.3 保护面）。
+   */
+  MAP_CONTEXT: (ctx, _config, _params) => {
+    const pack = getMapPack();
+    if (isEmptyMapPack(pack)) return '';
+    const flags = ctx.mapFlags ?? {};
+    const snapshot = buildMapSnapshot(pack, {
+      currentTileId: flags.lastTileId ?? null,
+      weatherLabel: readWeatherLabel(ctx),
+      journey: flags.journey ?? null,
+      discontinuity: flags.lastMoveDiscontinuity ?? null,
+    });
+    return renderMapContextBlock(snapshot, ctx.gameTime);
   },
 
   /** {{ACTIVE_EFFECTS}} — 提取所有角色的状态效果 */

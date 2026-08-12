@@ -14,6 +14,7 @@ import {
   DEFAULT_IMAGE_QUALITY_SUFFIX,
 } from '../src/sillytavern/image-defaults';
 import { setContentRegistry, getContentRegistry } from '../src/ui/stores/content-store';
+import { coerceMapPack, isEmptyMapPack } from '../src/sillytavern/map-pack';
 
 /**
  * 占位内容集能不能被现有解析器吃下（内容-引擎分离 §6 / T16）。
@@ -44,6 +45,7 @@ const bloodlinesRaw = readJson(join(PLACEHOLDER_CONTENT, 'bloodlines.json'));
 const namePoolsRaw = readJson(join(PLACEHOLDER_CONTENT, 'name-pools.json'));
 const brandingRaw = readJson(join(PLACEHOLDER_CONTENT, 'branding.json'));
 const imageDialectsRaw = readJson(join(PLACEHOLDER_CONTENT, 'image-dialects.json'));
+const mapPackRaw = readJson(join(PLACEHOLDER_CONTENT, 'map-pack.json'));
 const markersRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'map-marker-presets.json'));
 const audioManifestRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'audio-manifest.json'));
 const beautifierRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'beautifier-rules.json')) as {
@@ -55,7 +57,7 @@ const agentConfigRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'agent-config.json'))
   agents: Record<string, Record<string, unknown>>;
 };
 
-describe('占位内容 · 注册表七面能被生产解析器吃下', () => {
+describe('占位内容 · 注册表八面能被生产解析器吃下', () => {
   beforeEach(() => {
     setContentRegistry({
       catalog: catalogRaw,
@@ -65,7 +67,15 @@ describe('占位内容 · 注册表七面能被生产解析器吃下', () => {
       markers: markersRaw,
       branding: brandingRaw,
       imageDialects: imageDialectsRaw,
+      mapPack: mapPackRaw,
     });
+  });
+
+  it('mapPack 占位包过生产 coerce 且非空', () => {
+    const pack = coerceMapPack(mapPackRaw);
+    expect(isEmptyMapPack(pack)).toBe(false);
+    expect(pack.tiles.length).toBeGreaterThan(0);
+    expect(pack.countries.length).toBeGreaterThan(0);
   });
 
   it('catalog：七池解析出来非空，三类装备各 ≥3 件', () => {

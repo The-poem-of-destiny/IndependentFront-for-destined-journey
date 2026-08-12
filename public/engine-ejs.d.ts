@@ -4,7 +4,7 @@
  * 把本文件放进你写世界书的项目里（或在 VSCode 里 `/// <reference path="engine-ejs.d.ts" />`），
  * 写 `<% %>` 里的代码时就有补全与类型检查了。
  *
- * 契约版本：1.0.0 —— 与 `engine.version` 对应。
+ * 契约版本：1.1.0 —— 与 `engine.version` 对应。（1.1.0 新增 `$map` 只读地块面）
  * 创作者规范：`docs/reference/worldbook-ejs-regex-authoring-guide.md`
  * 设计记录：`docs/planning/2026-08-01-ejs-capability-surface-design.md`
  *
@@ -134,6 +134,12 @@ declare const vars: Record<string, any>;
  * 只有带 `ejsVarsCommit` 的 Agent 才会把改动持久化（默认仅 story）。
  *
  * 上限：单值 16 KiB，整个共享桶 64 KiB（UTF-8 JSON）。超了静默忽略并记诊断。
+ *
+ * ## 引擎会预置几个只读键（不占桶配额）
+ * `local.get` / `getLocalVar` 查不到你自己写过的值时，会回落到引擎每回合供给的种子。
+ * 目前只有一个：**`runtime_geo_compact_data`**（地理投影，给 `<runtime_geo>` 那类条目用）。
+ * 它们出现在 `keys()` 里、`has()` 为真，但 `remove()` 删不掉（下一回合又会供上来）；
+ * 用同名 `set()` 可以就地遮蔽成你自己的值。
  */
 declare const local: {
   get(key: string, fallback?: any): any;
@@ -200,6 +206,64 @@ declare const world: {
   isDaytime(): boolean;
 };
 
+// ═══════════════════════════════════════════════════════════
+// $map —— 只读地块事实（地图系统 v1）
+// ═══════════════════════════════════════════════════════════
+
+interface PoemMapPlace {
+  /** 地块名。🔴 这一面的键名是 ASCII（不像 `world` 那边用中文键） */
+  name: string;
+  /** 地形词 —— 词汇由地图包定义，引擎不认识也不翻译 */
+  terrain: string;
+  /** `'sea'` / `'lake'` / `null`（陆块） */
+  water: 'sea' | 'lake' | null;
+  impassable: boolean;
+  /** 所属中层（省 / 领）；`null` = 不属于任何中层，或包里查不到 */
+  midTierName: string | null;
+  /** 所属国家；`null` = 无主之地，或包里查不到 */
+  countryName: string | null;
+}
+
+interface PoemMapNeighbor {
+  name: string;
+  terrain: string;
+  /** 8 方罗盘令牌（ASCII）。中文说法自己查表：`{ N: '北', NE: '东北', … }` */
+  dir: 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
+  water: 'sea' | 'lake' | null;
+  impassable: boolean;
+  /** **只在与当前地块异主时**才有值 —— 同主 / 无主一律 `null`（不必自己比对） */
+  ownerName: string | null;
+}
+
+interface PoemMapJourney {
+  /** 目的地地块名 */
+  toName: string;
+  /** 计划路线上的下一站；`null` = 队伍已偏离计划路线（计划只是建议，不是约束） */
+  nextName: string | null;
+  /** 按**当前位置**重估的剩余天数；`null` = 无路可走或还没落位 */
+  remainingDays: number | null;
+}
+
+/**
+ * 当前位置的地块事实：当前块 + 严格一跳邻接 + 天气 + 在途。
+ *
+ * ⚠️ 没装地图包、或玩家位置还没落到某个地块上时，`currentTile` 是 `null`、
+ * `neighbors` 是空数组 —— 请写 `<% if ($map.currentTile) { %>…<% } %>`，不要假设它一定有值。
+ *
+ * 这一面**没有函数**（所以没有 `ownerOf()`）：所有者已经在 `countryName` / `ownerName` 里。
+ * 也**永远不会**给你地块 id 或像素坐标 —— 只有名字与关系。
+ */
+declare const $map: {
+  currentTile: PoemMapPlace | null;
+  /** 顺序稳定（同一份包同一个位置每回合同序）—— 别自己重排，那会让提示词前缀抖动 */
+  neighbors: PoemMapNeighbor[];
+  /** 天气标签（与 `world.天气` 同一个值）；`null` = 没有 */
+  weatherNow: string | null;
+  journey: PoemMapJourney | null;
+  /** 上一次移动跨越的跳数（`1` = 相邻的正常移动）；`null` = 没有这条事实 */
+  discontinuity: number | null;
+};
+
 interface PoemQuest {
   名字: string;
   状态: string;
@@ -264,7 +328,10 @@ declare const chat: {
  */
 declare const fmt: {
   /** YAML 序列化。喂 AI 的结构化数据推荐用它（比 JSON 省 token） */
-  yaml(value: unknown, opts?: { blockQuote?: 'literal' | 'folded' | boolean; indent?: number }): string;
+  yaml(
+    value: unknown,
+    opts?: { blockQuote?: 'literal' | 'folded' | boolean; indent?: number },
+  ): string;
   json(value: unknown, indent?: number): string;
   /** Markdown 表格 */
   table(rows: unknown[], columns?: string[]): string;

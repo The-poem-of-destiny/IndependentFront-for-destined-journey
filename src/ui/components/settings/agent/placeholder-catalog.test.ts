@@ -11,6 +11,7 @@ import {
   getPlaceholdersForAgent,
   type PlaceholderBadge,
 } from './placeholder-catalog';
+import { PLACEHOLDER_REGISTRY } from '@engine/placeholder-registry';
 
 const keysFor = (agentId: string): string[] => getPlaceholdersForAgent(agentId).map((p) => p.key);
 
@@ -26,6 +27,15 @@ describe('ALL_PLACEHOLDER_META', () => {
       expect(p.desc, p.key).toBeTruthy();
       expect(p.category, p.key).toBeTruthy();
       expect(p.color, p.key).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+  });
+
+  it('🔴 每一项在引擎注册表里都真的有 resolver（「加占位符两处都要动」的那条闸门）', () => {
+    // 反方向刻意不测：引擎有、目录没有是**可接受**的状态（SKILL_STATE / QUEST_STATE 就是——
+    // 手打进模板仍然有效，只是面板上点不出来）。反过来才是缺陷：目录多写一个键，
+    // UI 会给出一个装配期不认的占位符，而它渲染出来永远是空串。
+    for (const p of ALL_PLACEHOLDER_META) {
+      expect(typeof PLACEHOLDER_REGISTRY[p.key], `引擎注册表缺 ${p.key}`).toBe('function');
     }
   });
 
@@ -64,6 +74,29 @@ describe('getPlaceholdersForAgent — 公共批', () => {
 
   it('没登记过的 Agent 只拿到公共批，不报错', () => {
     expect(keysFor('未来的新_agent')).toHaveLength(12);
+  });
+});
+
+describe('getPlaceholdersForAgent — 按 Agent 定向的引擎块', () => {
+  it('🔴 MAP_CONTEXT 只给 request_dispatcher（地图 v1 裁定 §12-9）', () => {
+    expect(keysFor('request_dispatcher')).toContain('MAP_CONTEXT');
+    // story 走世界书 constant 条目（它有预设短路，占位符到不了）；
+    // vars_update 只执行调度器的清单、不发起空间决策，喂它是纯 token 浪费
+    for (const agentId of [
+      'story',
+      'vars_update',
+      'char_gen',
+      'memory_summary',
+      '未来的新_agent',
+    ]) {
+      expect(keysFor(agentId), `${agentId} 不该看见 MAP_CONTEXT`).not.toContain('MAP_CONTEXT');
+    }
+  });
+
+  it('它不是侧链标记：dispatcher 照样拿不到侧链那些键', () => {
+    const k = keysFor('request_dispatcher');
+    expect(k).not.toContain('CRAFT_REQUEST');
+    expect(k).not.toContain('COMBAT_BRIEF');
   });
 });
 

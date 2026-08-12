@@ -438,6 +438,73 @@ describe('回归：编组层丢语义导致的后端分叉', () => {
     },
     SLOW,
   );
+
+  it(
+    '$map 两后端同解（QuickJS 侧要过 JSON 编组，所以这一面刻意没有函数）',
+    async () => {
+      const capabilities = {
+        weather: '小雪',
+        mapSnapshot: {
+          current: {
+            name: '白曜城',
+            terrain: '平原',
+            water: null,
+            impassable: false,
+            midTierName: '云息盆地',
+            countryName: '诺斯加德联盟',
+          },
+          neighbors: [
+            {
+              name: '内苍白海',
+              terrain: '近海',
+              dir: 'E',
+              water: 'sea',
+              impassable: false,
+              ownerName: null,
+            },
+          ],
+          journey: { toName: '铁炉堡', nextName: null, remainingDays: 7 },
+          weatherLabel: '小雪',
+          discontinuity: null,
+        },
+      } as never;
+      const r = await expectSame(
+        '<% if ($map.currentTile) { %><%= $map.currentTile.name %>/<%= $map.currentTile.countryName %>' +
+          '/<%= $map.neighbors[0].dir %><%= $map.neighbors[0].water %>/<%= $map.weatherNow %>' +
+          '/<%= $map.journey.remainingDays %><% } %>',
+        { capabilities },
+      );
+      expect(r.quickjsOk).toEqual([true]);
+      expect(r.quickjsText).toEqual(['白曜城/诺斯加德联盟/Esea/小雪/7']);
+
+      // 空快照（没装地图包）：守卫分支两边同解，且都不回退
+      const empty = await expectSame(
+        '<% if ($map.currentTile) { %>有<% } else { %>未定位<% } %><%= $map.neighbors.length %>',
+      );
+      expect(empty.quickjsOk).toEqual([true]);
+      expect(empty.quickjsText).toEqual(['未定位0']);
+    },
+    SLOW,
+  );
+
+  it(
+    'localSeed 两后端同解，且都不把种子写进草稿（guest 的 local.* 走桥接直达宿主）',
+    async () => {
+      const capabilities = {
+        localSeed: { runtime_geo_compact_data: { places: [{ id: 'p1' }], current: '白曜城' } },
+      } as never;
+      const r = await expectSame(
+        '<% const g = getLocalVar("runtime_geo_compact_data", { defaults: null }) %>' +
+          '<%= g && g.current %>/<%= g && g.places.length %>/<%= local.has("runtime_geo_compact_data") %>',
+        { capabilities },
+      );
+      expect(r.quickjsText).toEqual(['白曜城/1/true']);
+      // `expectSame` 已比过草稿末态；这里再点名 `_local` —— 种子不该建出那个桶
+      expect(r.quickjsVars['_local']).toBeUndefined();
+      expect(r.legacyVars['_local']).toBeUndefined();
+    },
+    SLOW,
+  );
 });
 
 // ═══════════════════════════════════════════════════════════

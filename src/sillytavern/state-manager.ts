@@ -19,6 +19,7 @@ import type {
   CharacterState,
   MemoryRecord,
   PlotEvent,
+  SaveProfile,
   StatusEffect,
   Skill,
   InventoryItem,
@@ -53,9 +54,25 @@ import { getEngineSettings } from './engine-settings';
 // 本模块（已核实无环），动态化没有换来任何解耦，只是让每个 handler 多一次 await
 // 和一行噪音，还遮蔽了 1471 行那处同名解构。script-executor 仍留动态 —— 它是
 // 唯一可能成环的那个（沙盒会回调状态层），单独验证后再说。
-import { getProfile, updateProfile, setQuest, removeQuest } from './save-profile';
+import {
+  getProfile,
+  updateProfile,
+  setQuest,
+  removeQuest,
+  getMapFlags,
+  updateMapFlags,
+} from './save-profile';
 import { clampAffection } from './affection-system';
-import { advanceTime } from './time-system';
+import { advanceTime, getSeason, toEpochMinutes } from './time-system';
+// 地图 v1 接线（设计 §5 接线表）：落位 / 天气断言 / 在途旗三条钩子的依赖。
+// 全是纯函数叶 + 一条注入缝（`map-runtime`），没有一个会读注册表或碰 Dexie ——
+// 静态 import 因此不成环（map-* 一律不 import 本模块）。
+import { getMapIndex, getMapPack } from './map-runtime';
+import { isEmptyMapPack } from './map-pack';
+import { resolveTileByLocation, type MapIndex } from './map-index';
+import { findPath } from './map-path';
+import { weatherAt, weatherZoneOfTile } from './map-weather';
+import type { MapJourneyFlag, MapPack, MapSaveFlags } from './types-map';
 import type { EjsVarsDiff } from './ejs-vars-diff';
 import {
   normalizeQuestStatus,
@@ -1145,6 +1162,10 @@ export class StateManager {
     char.location = String(patch.value);
     await saveCharacter(char);
 
+    // 地图 v1（§8.2）：位置路径先落库，**然后**才投影成地块 —— 顺序是契约的一部分，
+    // 位置路径是真源、地块只是投影（裁定 §12-1）。投影失败/抛错一律不影响上面这一步。
+    await this.syncMapLocation(char);
+
     return this.createEvent('location_change', patch);
   }
 
@@ -1527,6 +1548,155 @@ export class StateManager {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // 🗺 地图接线（地图系统 v1 / 设计 §5 接线表）
+  // ═══════════════════════════════════════════════════════════
+  //
+  // 三条钩子（落位 / 天气断言 / 在途旗）都长同一个样子:
+  //   ① 空包 → 整段 no-op（地图是**可选**子系统，没装包时游戏一个字节都不受影响）
+  //   ② 读 profile → `ensureMapFlags` 自愈 → 纯函数算出下一份 flags
+  //   ③ 有变化才经命名写入口 `updateMapFlags` 落库
+  //   ④ 整段包在 try/catch 里：地图是**派生**投影，投影失败绝不能让正文状态提交失败
+  //      （§8.2-5「解析失败 → 保持原值，位置路径原文保留」的同一个精神）
+  //
+  // 🔴 为什么策略（自愈/落位/天气/在途）写在这里而不在 `map-*.ts`:
+  //    那五个模块是**纯函数叶**且受结构闸门约束（零中文字面量）；而这三条策略要碰
+  //    `variables.sys.天气` / `variables.sys.旅行目的地` 这两个中文变量路径，还要碰 profile 与
+  //    Dexie。它们属于**接线层**，接线层就是这里（ADR-21：状态变更只从 StateManager 出去）。
+
+  /**
+   * 取本存档的地图派生态，顺手做**换包自愈**（§3.4-2）。
+   *
+   * 判据是 `packStamp !== pack.contentHash`（**内容哈希，不是语义版本** —— 理由写在
+   * `MapSaveFlags.packStamp` 上）。不符时:
+   *   · 派生态整份清掉（`lastTileId` / `journey` / `weatherStamp` / 不连通标记全是旧地图的说法）
+   *   · **立刻**按玩家当前位置路径重落位一次，不等下一次移动 —— 否则棋子会在地图上消失
+   *     整整一段游玩（那正是「投影可自愈」这条红利要兑现的地方）
+   *
+   * `healed` 供调用方判断「即便这一次没有别的变化，也得落一次库」。
+   */
+  private async ensureMapFlags(
+    profile: SaveProfile,
+    pack: MapPack,
+  ): Promise<{ flags: MapSaveFlags; healed: boolean }> {
+    const current = getMapFlags(profile);
+    if (current.packStamp === pack.contentHash) return { flags: current, healed: false };
+
+    const healed: MapSaveFlags = { packStamp: pack.contentHash };
+    const player = (await getCharacters(this.saveId)).find((c) => c.type === 'player');
+    if (!player) return { flags: healed, healed: true };
+
+    // currentTileId 传 null：旧包的块号在新包里没有意义（`resolveTileByLocation` 会把
+    // 「当前块不明」当作域外，于是路径只写到国家粗度时落锚地块 —— 正是自愈想要的）
+    const tileId = resolveTileByLocation(getMapIndex(), player.location, null);
+    return { flags: tileId === null ? healed : { ...healed, lastTileId: tileId }, healed: true };
+  }
+
+  /**
+   * 落位钩子（§8.2）—— `applySetLocation` 写完 `location` 之后调用。
+   *
+   * 🔴 **只跟踪玩家**（裁定 §12-3 "player only throughout"）：NPC 的 `set_location` 在这里
+   *    一个字节都不写。NPC 的地块是按需纯函数查询，不留历史 —— 留了就要维护它的自愈、
+   *    它的快照回滚、它的换包清理，而没有任何消费方要它。
+   */
+  private async syncMapLocation(char: CharacterState): Promise<void> {
+    if (char.type !== 'player') return;
+
+    const pack = getMapPack();
+    if (isEmptyMapPack(pack)) return;
+
+    try {
+      const profile = await getProfile(this.saveId);
+      const { flags, healed } = await this.ensureMapFlags(profile, pack);
+      const projected = projectLocationFlags(getMapIndex(), flags, char.location);
+      if (projected === null && !healed) return; // 落位失败且无需自愈 → 一个字节都不动
+      await updateMapFlags(profile, projected ?? flags);
+    } catch (err) {
+      // 位置路径已经落库了（真源没丢），投影失败只让棋子暂时不动
+      console.warn('[StateManager] 地图落位失败（位置路径已落库，不影响正文）:', err);
+    }
+  }
+
+  /**
+   * 天气断言钩子（§7 / 裁定 §12-6）—— `applyTimeAdvance` 推进完时间后调用。
+   *
+   * **Code 兜底 + AI 覆盖**：跨天或换气候区时引擎往 `variables.sys.天气` 写一个**标签串**
+   * （不是结构体），AI 仍可经既有写路径覆盖它（叙事性天气：血月、法术风暴），下一次跨天
+   * 引擎重断言、覆盖自然过期。
+   *
+   * 🔴 同日同区**绝不重写**：那正是 AI 覆盖能在一天之内活下来的原因。判据是
+   *    `weatherStamp`，比的是 `{day, zoneId}` 两格 —— 少比一格（比如只看 day）的症状是
+   *    跨区移动不换天气，或者同一天里 AI 的血月被引擎抹掉。
+   * 🔴 `weatherAt` 返回 `null`（包里没有一张可用天气表）时**只更新戳、不动 `sys.天气`**：
+   *    保持原值与落位失败保 `lastTileId` 同款处置（`map-weather.ts` 文件头），
+   *    绝不凭空造一个不在包词汇里的标签串。
+   */
+  private async syncMapWeather(profile: SaveProfile): Promise<void> {
+    const pack = getMapPack();
+    if (isEmptyMapPack(pack)) return;
+
+    try {
+      const { flags, healed } = await this.ensureMapFlags(profile, pack);
+      const gameDay = Math.floor(toEpochMinutes(profile.gameTime) / MINUTES_PER_GAME_DAY);
+      const asserted = assertWeatherFlags(
+        pack,
+        flags,
+        // 季节键由调用方从 `getSeason()` 取来原样传进去：历法是内容，`map-weather` 不认识季节
+        getSeason(profile.gameTime.month),
+        gameDay,
+        this.saveId,
+      );
+
+      if (asserted === null) {
+        if (healed) await updateMapFlags(profile, flags);
+        return;
+      }
+
+      // 先就地改 variables，再经命名写入口落库 —— `updateMapFlags` 落的是整份 profile，
+      // 所以天气标签与它的戳**不可能只落一半**（半落的表现是下一次跨天不再断言）
+      if (asserted.label !== null) {
+        profile.variables = setVar(profile.variables ?? {}, WEATHER_VAR_PATH, asserted.label);
+      }
+      await updateMapFlags(profile, asserted.flags);
+    } catch (err) {
+      console.warn('[StateManager] 天气断言失败（时间已推进，不影响正文）:', err);
+    }
+  }
+
+  /**
+   * 在途旗胶水（§8.2 / 裁定 §12-8）—— 由 orchestrator 的 dispatcher 分支在
+   * `commitPatches` + `advanceTime` 之后调用。
+   *
+   * 读 `variables.sys.旅行目的地`（dispatcher 写的**普通变量**，v1 不加新标记不加新 op）:
+   *   · 有值且落位成功、且不是当前块 → 设/更新 `journey`（含 `findPath` 计划路线与到达估算）
+   *   · 空值 / 已在目的地 → 清旗
+   *   · 落位失败 → **什么都不做**（不设旗、不报错）—— 无害，下一回合 AI 可能写个认得出的名字
+   *
+   * 🔴 是**数据不是状态机**（§1 非目标）：新计划整份覆盖、到达即清，没有 leg / checkpoint /
+   *    事件调度。每回合重算一次 `arriveAtMinute` 是特性 —— 叙事偏离计划路线时按新位置重估
+   *    剩余天数（`plannedPath` 是 advisory，绝不 enforcement）。
+   */
+  async syncMapJourney(): Promise<void> {
+    const pack = getMapPack();
+    if (isEmptyMapPack(pack)) return;
+
+    try {
+      const profile = await getProfile(this.saveId);
+      const { flags, healed } = await this.ensureMapFlags(profile, pack);
+      const planned = planJourneyFlags(
+        pack,
+        getMapIndex(),
+        flags,
+        readTravelDestination(profile.variables),
+        toEpochMinutes(profile.gameTime),
+      );
+      if (planned === null && !healed) return;
+      await updateMapFlags(profile, planned ?? flags);
+    } catch (err) {
+      console.warn('[StateManager] 在途旗同步失败（不影响正文与已落库状态）:', err);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // 🆕 时间推进 & 状态效果结算 (Phase 7e+8)
   // ═══════════════════════════════════════════════════════════
 
@@ -1546,6 +1716,10 @@ export class StateManager {
     const profile = await getProfile(this.saveId);
     profile.gameTime = advanceTime(profile.gameTime, minutes);
     await updateProfile(profile);
+
+    // 1.5 🗺 天气重断言（地图 v1 §7）——**必须在时间推进之后**：判据是「新时间落在哪一天」，
+    //     拿旧时间去比就等于永远差一天（跨天那一次不断言、下一次同日的又不断言）
+    await this.syncMapWeather(profile);
 
     // 2. 遍历所有角色, 扣减 StatusEffect.remainingTime
     const characters = await getCharacters(this.saveId);
@@ -1652,6 +1826,138 @@ export function createStateManager(
  */
 export function findByName<T extends { name: string }>(list: T[], name: string): T | undefined {
   return list.find((item) => item.name === name);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 🗺 地图策略（纯函数；上面三条钩子的全部判定都在这里）
+// ═══════════════════════════════════════════════════════════
+
+/** 一游戏日 = 1440 分钟（`time-system` 的同一个常量，那边没导出） */
+const MINUTES_PER_GAME_DAY = 1440;
+
+/** 引擎断言的天气标签落在这条变量路径（§7：**只写标签串**，不写结构体） */
+const WEATHER_VAR_PATH = 'sys.天气';
+
+/**
+ * 在途旗的发起面 —— dispatcher 写的**普通变量**（裁定 §12-8：v1 无新标记无新 op）。
+ * 值是一个**名字**（地块 / 聚落 / 中层 / 国家），不是路径也不是 id。
+ */
+const TRAVEL_DESTINATION_VAR_PATH = 'sys.旅行目的地';
+
+/** 两块地在**合并后的**邻接图（邻接 ∪ 海峡）上相不相邻 */
+function areTilesAdjacent(index: MapIndex, a: number, b: number): boolean {
+  const links = index.neighbors.get(a);
+  return links !== undefined && links.some((link) => link.tileId === b);
+}
+
+/** `sys.旅行目的地` → 修过边的名字；不是非空串一律读作「没有目的地」 */
+function readTravelDestination(variables: Record<string, any> | undefined): string {
+  const raw = getVar(variables ?? {}, TRAVEL_DESTINATION_VAR_PATH);
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+/**
+ * 位置路径 → 下一份 flags（**落位**，§8.2）。`null` = 这一次不该写任何东西。
+ *
+ * 三件事一次算完（它们共用「这次落到哪个块」这一个结论，拆开就要各查一遍表）:
+ *   ① `lastTileId` —— 落位失败（`resolveTileByLocation` 返回 `null`）时**保持原值**（§8.2-5）
+ *   ② `lastMoveDiscontinuity` —— 上一块存在、这次换了块、且两块**不相邻**（裁定 §12-4
+ *      只校验不否决：照常落位，只在下一回合的 `MAP_CONTEXT` 附一条提示行）。
+ *      不满足时**显式删掉**这一格 —— 留着就是拿上上次的越野说这一次的事，而提示行会一直挂着
+ *   ③ 到达即清旗 —— 落到 `journey.toTileId` 就把在途旗删掉（在途旗是数据不是状态机）
+ */
+function projectLocationFlags(
+  index: MapIndex,
+  flags: MapSaveFlags,
+  locationPath: string,
+): MapSaveFlags | null {
+  const previous = flags.lastTileId ?? null;
+  const resolved = resolveTileByLocation(index, locationPath, previous);
+  if (resolved === null) return null;
+
+  const next: MapSaveFlags = { ...flags, lastTileId: resolved };
+
+  if (previous !== null && previous !== resolved && !areTilesAdjacent(index, previous, resolved)) {
+    next.lastMoveDiscontinuity = 1;
+  } else {
+    delete next.lastMoveDiscontinuity;
+  }
+
+  if (next.journey !== undefined && next.journey.toTileId === resolved) delete next.journey;
+
+  return next;
+}
+
+/**
+ * 天气重断言（§7）。`null` = 不必重断言（**同日同区**，或压根没落位 / 没气候区）。
+ *
+ * 返回的 `label` 为 `null` 时调用方**只更新戳**：包里一张可用天气表都没有，
+ * 而凭空造一个不在包词汇里的标签串会被 `image-world-tags` 漏掉、又会被 `<tp>` 栏当真话讲。
+ */
+function assertWeatherFlags(
+  pack: MapPack,
+  flags: MapSaveFlags,
+  seasonKey: string,
+  gameDay: number,
+  saveSeed: string,
+): { flags: MapSaveFlags; label: string | null } | null {
+  const tileId = flags.lastTileId;
+  if (tileId === undefined) return null; // 没落位 → 不知道在哪个气候区，什么都不断言
+
+  const zoneId = weatherZoneOfTile(pack, tileId);
+  if (zoneId === null) return null;
+
+  const stamp = flags.weatherStamp;
+  if (stamp !== undefined && stamp.day === gameDay && stamp.zoneId === zoneId) return null;
+
+  const result = weatherAt(pack, zoneId, seasonKey, gameDay, saveSeed);
+  return {
+    flags: { ...flags, weatherStamp: { day: gameDay, zoneId } },
+    label: result?.label ?? null,
+  };
+}
+
+/**
+ * `sys.旅行目的地` → 下一份 flags（在途旗，§8.2 / 裁定 §12-8）。`null` = 这一次不写。
+ *
+ * 🔴 `findPath` 无路时**照样设旗**，只是没有 `plannedPath`、`arriveAtMinute` 取**当前时刻**
+ *    （= 到达时刻未知 ≈ 现在）。理由：目的地是叙事事实（队伍立志要去某处），而「地图上走不通」
+ *    是地图的事实 —— 传送 / 剧情跳转 / 尚未建模的航线都会让一条合法的旅程无路可走。
+ *    因此不设旗会把「AI 说了要去」整条丢掉；而胡编一个天数会被 dispatcher 当成锚（§12-5）。
+ *    「未知 ≈ 现在」是最诚实的可选项：`MAP_CONTEXT` 的在途行照 `remainingDays: null` 渲染。
+ */
+function planJourneyFlags(
+  pack: MapPack,
+  index: MapIndex,
+  flags: MapSaveFlags,
+  destination: string,
+  nowMinute: number,
+): MapSaveFlags | null {
+  // 清旗：没有旗时返回 `null`（别为了「清一个本来就不存在的旗」白写一次库）
+  const cleared = (): MapSaveFlags | null => {
+    if (flags.journey === undefined) return null;
+    const next = { ...flags };
+    delete next.journey;
+    return next;
+  };
+
+  if (destination.length === 0) return cleared();
+
+  const from = flags.lastTileId ?? null;
+  // 目的地是**名字**，按单段路径解析；`from` 当 currentTileId 传进去 —— 目的地只写到
+  // 国家粗度且队伍已在域内时，落位契约 3 会给回原地，于是下面判成「已在目的地」清旗
+  const toTileId = resolveTileByLocation(index, destination, from);
+  if (toTileId === null) return null; // 落位失败 = 不设旗，无害（§8.2）
+  if (toTileId === from) return cleared();
+
+  const route = from === null ? null : findPath(pack, from, toTileId);
+  const journey: MapJourneyFlag = {
+    toTileId,
+    arriveAtMinute: nowMinute + (route?.days ?? 0) * MINUTES_PER_GAME_DAY,
+  };
+  if (route !== null) journey.plannedPath = route.tilePath;
+
+  return { ...flags, journey };
 }
 
 import type { ScriptEffects } from './script-executor';

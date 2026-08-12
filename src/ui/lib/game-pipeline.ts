@@ -46,6 +46,9 @@ import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import { buildStatData } from '@engine/stat-projection';
 import { buildPassSeed } from '@engine/ejs-rng';
+// 🗺 地图 v1: `{{MAP_CONTEXT}}` 的可变半边（`worldFlags.map`）+ 天气标签（与出图同口径）
+import { getMapFlags } from '@engine/save-profile';
+import { resolveSceneWeather } from './scene-image-seams';
 
 /** EJS `ui.log` 环形缓冲上限（能力面 §6.2） */
 import { diffVars, measureDiffSize, EJS_DIFF_SIZE_LIMIT } from '@engine/ejs-vars-diff';
@@ -792,6 +795,12 @@ export class GamePipeline {
       agentOutputs: new Map(),
       plotSettings,
       gameTime: this.game.gameTime ?? undefined,
+      // 🗺 地图 v1 §8.1: `{{MAP_CONTEXT}}` 的两格可变输入。**必须在这里供值** ——
+      //    占位符自己去读 Pinia 就把引擎的依赖方向反过来了（map-runtime 那条缝同理）。
+      //    漏供的症状不是报错，是那个块静默消失（blurByDefault 的教训），
+      //    故 placeholder-registry.map-context.test.ts 有一条源码断言盯着这两行。
+      mapFlags: this.game.saveProfile ? getMapFlags(this.game.saveProfile) : undefined,
+      weather: resolveSceneWeather(this.game.saveProfile),
       // 🔴 2026-08-02 修: 初始技能走 item_gen 链路 —— request_dispatcher 的 {{SKILL_STATE}}
       //    需要读到捏人页选的初始技能声明（存在 openingPrompt 里），否则主角 skills 落库为空的
       //    开局永远发不出 `<item_gen_request itemType="skill">`，技能没有 modifiers/automata。
@@ -803,6 +812,11 @@ export class GamePipeline {
         gameTime: this.game.saveProfile?.gameTime,
         fp: this.game.saveProfile?.fp,
         turn: history.length,
+        // 🔴 漂移修复（地图 v1 §5 接线表）：`stat-projection` 一直会写 `stats.世界.天气`，
+        //    只是**从来没人供值** —— 于是世界书里每一处 `stats.世界.天气` 都读不到那个键，
+        //    而条目自己的 `|| '未知'` 兜底把这件事掩盖得干干净净。与上面 `weather:` 同一次读法
+        //    （同一条链、同一个函数），状态面板 / stats / world.天气 / $map.weatherNow 因此不会互相漂
+        weather: resolveSceneWeather(this.game.saveProfile),
       }),
       // 能力面 T2 (§7): EJS 随机种子 = (存档, 回合号)。快照回退重放同一回合 → 同一份世界书正文。
       // 回合号取历史长度：它随回合单调增长，且快照回退时会连同历史一起回到旧值 —— 正是我们要的。

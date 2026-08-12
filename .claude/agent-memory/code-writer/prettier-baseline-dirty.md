@@ -40,4 +40,10 @@ lint 是 0 errors / 165 warnings 的基线，别为清 warning 顺手改无关�
 （prettier 会把 veil SPECS 那种一行一条的数组表拆成几百行，破坏作者刻意的可读排版）。
 新增 standalone html 只需保持 LF 行尾即可，格式不用管。
 
-相关：[[known-flaky-tests]]（测试侧的同类基线）
+🔴 **`--check` 的红/绿在 CRLF 文件之间并不一致**（2026-08-12 实测）：同一批全 CRLF 的文件里
+`types-map.ts` 报 clean、`state-manager.ts` 报 DIRTY，而两者 CR-剥离后与 prettier 输出**逐字节相同**。
+所以「本地全红 = CRLF 假象」这个概括不完全 —— 有些 CRLF 文件蒙对了，于是「只有我改过的那几个红」
+看起来特别像真问题。**唯一可信的判据只有上面那条 CR-剥离 diff**（`diff <(tr -d '\r' < f) <(tr -d '\r' < <(npx prettier f))`
+→ 0 行即合格）。别拿 `--check` 的逐文件结果推断自己写坏了格式。
+
+相关：[[known-flaky-tests]]（测试侧的同类基线）、[[crlf-breaks-mutation-scripts]]（同一个 CRLF 事实的另一处咬人）

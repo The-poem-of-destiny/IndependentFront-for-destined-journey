@@ -1,16 +1,30 @@
 <script setup lang="ts">
 /**
- * MapPanel — 地图查看器面板
+ * MapPanel — 地图查看器面板（两个页签）
  *
  * 对标原版 MapTab，用 Vue 3 + OpenSeadragon 重新实现。
  * 功能：地图缩放/平移、预设+手动标记、角色位置高亮、标记编辑工作台。
  * 砍掉：DrawCanvas 自由绘制、SW Cache、图片轮播 UI。
+ *
+ * 「势力地图」页签（地图系统 v1 / 设计 §9，裁定 §12-12）在 `MapPoliticalTab.vue`：
+ * **自成一套渲染栈**（自己的 canvas + 自己的平移缩放），与本页签的 OSD 各不相干。
+ * 一个 Modal 里两套平移缩放是设计明确接受的代价 —— 把政治层改写成 OSD overlay 等于把
+ * 坐标映射、重绘时机、命中检测对着 OSD 的缩放模型重推一遍（纯集成风险、v1 零收益）。
+ *
+ * 🔴 **两个页签都靠 v-show 切换，势力页签额外用一次性的 v-if 做懒挂载**：
+ *    · 标记页签用 `v-if` 会在切回来时把 OSD 的挂载容器整个换掉 —— viewer 还活着但它的
+ *      DOM 没了，表现是「切一次页签地图就白了」；
+ *    · 势力页签**进过一次才挂载**（`politicalMounted`）：它一建就解码 8.7M 像素
+ *      （约 280ms / 常驻 35MB，设计 §9 预算），没进过不该分配一个字节。挂上之后不再拆 ——
+ *      否则来回切页签就是来回重建那 280ms。释放发生在 Modal 关闭（本组件卸载）。
  */
 
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import OpenSeadragon from 'openseadragon';
 import { useGameStore } from '../../stores/game-store';
 import { useMapViewer, resolveMapSources } from '../../composables/useMapViewer';
+import AppTabs from '../shared/AppTabs.vue';
+import MapPoliticalTab from './MapPoliticalTab.vue';
 import {
   useMapMarkers,
   DEFAULT_MARKER_COLOR,
@@ -20,7 +34,7 @@ import {
   MARKER_COLOR_OPTIONS,
 } from '../../composables/useMapMarkers';
 import { getLocationNode, getLocationNodes } from '@engine/location-db';
-import { getMapMarkers } from '@engine/save-profile';
+import { getMapMarkers, removeMapMarker, setMapMarker } from '@engine/save-profile';
 import type { LocationNode, MapMarker } from '@engine/types';
 import { getContentRegistry, ensureContentRegistryLoaded } from '../../stores/content-store';
 
@@ -129,6 +143,26 @@ const npcLocationMarkers = computed(() => {
   return result;
 });
 
+// ═══ 页签 ═══
+type MapTabKey = 'markers' | 'political';
+const MAP_TABS: { key: MapTabKey; label: string }[] = [
+  { key: 'markers', label: '标记地图' },
+  { key: 'political', label: '势力地图' },
+];
+const activeMapTab = ref<MapTabKey>('markers');
+/**
+ * 势力页签**进过一次就一直挂着**（此后靠 v-show 切换），直到 Modal 关闭。
+ *
+ * 🔴 三档缺一不可：没进过 → 一个字节都不分配；进过 → 来回切页签**不重建**
+ *    （8.7M 像素解码约 280ms，每次切都重来是明显卡顿）；Modal 关 → 随本组件一起卸载释放。
+ *    单纯 `v-if="activeMapTab === 'political'"` 满足第一和第三档，但第二档会退化成
+ *    「每切一次重建一次」。
+ */
+const politicalMounted = ref(false);
+watch(activeMapTab, (tab) => {
+  if (tab === 'political') politicalMounted.value = true;
+});
+
 // ═══ Refs ═══
 const containerRef = ref<HTMLDivElement | null>(null);
 const workbenchOpen = ref(false);
@@ -206,15 +240,68 @@ const playerLocationNode = computed(() => {
 });
 
 // ═══ 持久化 ═══
+/**
+ * 标记落库（P1-09 受控例外：`worldFlags.mapMarkers` 是纯 UI 辅助数据，允许 UI 层直写，
+ * 但必须走**命名写入口** `setMapMarker` / `removeMapMarker` 且带 try/catch —— 不裸 `db.put`）。
+ *
+ * 🔴 这里以前是**一个空壳**：`schedulePersist` 起了个定时器、回调里什么都不做，
+ *    于是「标记工作台」改的名字、颜色、位置，关掉 Modal 就全没了（`setMapMarker` /
+ *    `removeMapMarker` 在全仓只有测试调用方）。注释里还写着「当前由 useMapMarkers 内部处理」
+ *    —— 那个 composable 里一行落库代码都没有。
+ *
+ * 🔴 **按基线做 diff，而不是每次整份写**：`watch(markers, deep)` 在挂载灌入预设时也会响，
+ *    整份写就等于玩家一次都没编辑、内容包的预设已经被复制进这份存档 —— 此后内容包更新
+ *    地图标记，这个存档永远看不到（onMounted 的取值口径是「存档里有就用存档的」）。
+ *    基线在挂载时建立，因此那一次 tick 的 diff 是空的，什么都不落。
+ *
+ * 🔴 **但第一次真编辑要落整份**：存档里一条都没有时只落被改的那一条，会让下次打开
+ *    只剩那一条（同样是上面那条取值口径）。所以「存档为空 + 有改动」= 把当前整份种进去。
+ */
+const PERSIST_DEBOUNCE_MS = 1000;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
+/** 上一次落库的样子（id → JSON）。`null` = 基线还没建立（挂载途中），此时不落任何东西 */
+let persistedSnapshot: Map<string, string> | null = null;
+
+/** 深拷贝成纯对象：Vue 的响应式代理进不了 IndexedDB 的结构化克隆，且这份 JSON 正好当 diff 键 */
+function plainMarkers(): MapMarker[] {
+  return markers.value.map((m) => JSON.parse(JSON.stringify(m)) as MapMarker);
+}
+
+function snapshotOf(list: MapMarker[]): Map<string, string> {
+  return new Map(list.map((m) => [m.id, JSON.stringify(m)]));
+}
+
+async function flushPersist(): Promise<void> {
+  const profile = game.saveProfile;
+  const baseline = persistedSnapshot;
+  if (!profile || baseline === null) return;
+
+  const current = plainMarkers();
+  const next = snapshotOf(current);
+  const changed = current.filter((m) => baseline.get(m.id) !== next.get(m.id));
+  const removed = [...baseline.keys()].filter((id) => !next.has(id));
+  if (changed.length === 0 && removed.length === 0) return;
+
+  try {
+    if (getMapMarkers(profile).length === 0) {
+      for (const marker of current) await setMapMarker(profile, marker);
+    } else {
+      for (const marker of changed) await setMapMarker(profile, marker);
+      for (const id of removed) await removeMapMarker(profile, id);
+    }
+    persistedSnapshot = next;
+  } catch (err) {
+    // 落库失败不打断编辑：基线不动，下一次改动会把这次的一起重试
+    console.error('[MapPanel] 地图标记落库失败', err);
+  }
+}
+
 function schedulePersist() {
   if (persistTimer) clearTimeout(persistTimer);
-  // 🔴 原 setTimeout(persistTimer, ...) 把 timer id 当回调传（TS 报 TimerHandler 错），是类型+运行时双 bug
-  //    （1 秒后引擎试图把 number 当函数调用必然抛错）。回调合法化为 no-op 以过 vue-tsc；
-  //    markers 持久化若需要应在此接入真正的写入函数（当前由 useMapMarkers 内部处理）。
   persistTimer = setTimeout(() => {
     persistTimer = null;
-  }, 1000);
+    void flushPersist();
+  }, PERSIST_DEBOUNCE_MS);
 }
 
 watch(markers, () => schedulePersist(), { deep: true });
@@ -387,6 +474,9 @@ onMounted(async () => {
   } else {
     setMarkers(raw);
   }
+  // 落库基线 = 刚灌进去的这一份（见 flushPersist 那条注释：少了它，挂载本身就会把
+  // 内容包的预设复制进存档，此后预设更新对这个存档永远不生效）
+  persistedSnapshot = snapshotOf(plainMarkers());
 
   await nextTick();
   createViewer();
@@ -395,7 +485,13 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  if (persistTimer) clearTimeout(persistTimer);
+  // 🔴 待落的改动要**补落**，不是丢掉：改完名字一秒内关掉 Modal 是常态操作，
+  //    而防抖的那一秒本来是为了少写几次库，不是为了给「关得快」开一个丢数据的口子
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+    void flushPersist();
+  }
   clearOverlays();
   destroy();
 });
@@ -403,305 +499,323 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="map-panel">
-    <!-- ═══ 工具栏 ═══ -->
-    <div class="map-toolbar">
-      <div class="toolbar-left">
-        <span class="toolbar-title">地图</span>
-        <span class="toolbar-badge">{{ markers.length }} 标记</span>
-      </div>
-      <div class="toolbar-actions">
-        <!-- 地图源切换（图源由内容供给；一个都没有时整组不出现） -->
-        <div v-if="mapSources.length > 0" class="source-group">
+    <!-- ═══ 页签（标记地图 / 势力地图） ═══ -->
+    <AppTabs :tabs="MAP_TABS" :active="activeMapTab" @select="activeMapTab = $event" />
+
+    <!-- ═══ 标记地图（v-show：OSD 的挂载容器不能被拆掉，见文件头） ═══ -->
+    <div v-show="activeMapTab === 'markers'" class="map-tab-body">
+      <!-- ═══ 工具栏 ═══ -->
+      <div class="map-toolbar">
+        <div class="toolbar-left">
+          <span class="toolbar-title">地图</span>
+          <span class="toolbar-badge">{{ markers.length }} 标记</span>
+        </div>
+        <div class="toolbar-actions">
+          <!-- 地图源切换（图源由内容供给；一个都没有时整组不出现） -->
+          <div v-if="mapSources.length > 0" class="source-group">
+            <button
+              v-for="src in mapSources"
+              :key="src.key"
+              class="btn btn-sm"
+              :class="{ 'btn-active': currentSourceKey === src.key }"
+              @click="switchSource(src.key)"
+            >
+              {{ src.name }}
+            </button>
+          </div>
+          <!-- 新增标记模式 -->
           <button
-            v-for="src in mapSources"
-            :key="src.key"
             class="btn btn-sm"
-            :class="{ 'btn-active': currentSourceKey === src.key }"
-            @click="switchSource(src.key)"
+            :class="{ 'btn-active': markerAddMode }"
+            @click="markerAddMode = !markerAddMode"
           >
-            {{ src.name }}
+            {{ markerAddMode ? '取消新增' : '新增标记' }}
+          </button>
+          <!-- 工作台开关 -->
+          <button
+            class="btn btn-sm"
+            :class="{ 'btn-active': workbenchOpen }"
+            @click="workbenchOpen = !workbenchOpen"
+          >
+            {{ workbenchOpen ? '收起工作台' : '标记工作台' }}
           </button>
         </div>
-        <!-- 新增标记模式 -->
-        <button
-          class="btn btn-sm"
-          :class="{ 'btn-active': markerAddMode }"
-          @click="markerAddMode = !markerAddMode"
-        >
-          {{ markerAddMode ? '取消新增' : '新增标记' }}
-        </button>
-        <!-- 工作台开关 -->
-        <button
-          class="btn btn-sm"
-          :class="{ 'btn-active': workbenchOpen }"
-          @click="workbenchOpen = !workbenchOpen"
-        >
-          {{ workbenchOpen ? '收起工作台' : '标记工作台' }}
-        </button>
+      </div>
+
+      <div class="map-body" :class="{ 'has-workbench': workbenchOpen }">
+        <!-- ═══ 地图舞台 ═══ -->
+        <div class="map-stage">
+          <!-- 状态提示 -->
+          <div v-if="status === 'loading'" class="map-overlay">
+            <span>{{
+              contentReady
+                ? mapDownloadProgress > 0
+                  ? `地图下载中 ${mapDownloadProgress}%…`
+                  : '地图加载中…'
+                : '内容加载中…'
+            }}</span>
+          </div>
+          <div v-else-if="status === 'error'" class="map-overlay map-overlay-error">
+            <span>{{ errorMessage || '地图加载失败' }}</span>
+            <button
+              v-if="mapSources.length > 0"
+              class="btn btn-sm"
+              @click="requestLoadSource(currentSourceKey || mapSources[0].key)"
+            >
+              重试
+            </button>
+          </div>
+
+          <!-- 模式提示 -->
+          <div v-if="markerAddMode" class="map-mode-hint">点击地图任意位置放置标记</div>
+
+          <!-- OSD Viewer 容器 -->
+          <div
+            ref="containerRef"
+            class="map-viewer"
+            :style="{ cursor: markerAddMode ? 'crosshair' : '' }"
+            @click="onMapClick"
+          />
+
+          <!-- ═══ 浮动信息卡片 ═══ -->
+          <Teleport :to="containerRef" :disabled="!containerRef">
+            <article
+              v-if="activeMarker && activeMarkerCardPosition.visible"
+              class="map-marker-card"
+              :style="{
+                left: activeMarkerCardPosition.left + 'px',
+                top: activeMarkerCardPosition.top + 'px',
+              }"
+            >
+              <!-- 图片区域 -->
+              <div v-if="activeMarkerImage" class="card-media">
+                <button
+                  v-if="hasMultipleImages"
+                  class="card-carousel-btn card-carousel-prev"
+                  aria-label="上一张"
+                  @click.stop="handlePrevImage"
+                >
+                  <i class="fa-solid fa-chevron-left" />
+                </button>
+                <img
+                  :src="activeMarkerImage"
+                  :alt="activeMarker.name + ' 主视觉'"
+                  class="card-hero-image"
+                  @error="
+                    (e: Event) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }
+                  "
+                />
+                <button
+                  v-if="hasMultipleImages"
+                  class="card-carousel-btn card-carousel-next"
+                  aria-label="下一张"
+                  @click.stop="handleNextImage"
+                >
+                  <i class="fa-solid fa-chevron-right" />
+                </button>
+                <!-- 轮播点 -->
+                <div v-if="hasMultipleImages" class="card-carousel-dots">
+                  <button
+                    v-for="(_, idx) in activeMarkerImages"
+                    :key="idx"
+                    class="card-dot"
+                    :class="{ 'card-dot-active': idx === activeImageIndex }"
+                    :aria-label="'第 ' + (idx + 1) + ' 张图片'"
+                    @click.stop="activeImageIndex = idx"
+                  />
+                </div>
+              </div>
+
+              <!-- Header -->
+              <div class="card-header">
+                <div class="card-title-block">
+                  <span
+                    class="card-dot"
+                    :style="{ backgroundColor: activeMarker.color ?? DEFAULT_MARKER_COLOR }"
+                  />
+                  <div class="card-heading">
+                    <div class="card-title">{{ activeMarker.name || '未命名标记' }}</div>
+                    <div class="card-meta">{{ activeMarker.group || '未分组' }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Body -->
+              <div class="card-body">
+                <p class="card-description">{{ activeMarker.description || '暂无说明' }}</p>
+              </div>
+            </article>
+          </Teleport>
+
+          <!-- 角色位置指示 -->
+          <div v-if="playerLocationNode" class="player-location-bar">
+            <i class="fa-solid fa-location-dot" />
+            <span>当前：{{ playerLocationNode.name }}</span>
+            <span v-if="playerMarker" class="loc-matched">✓ 已定位</span>
+            <span v-else class="loc-unmatched">（无地图标记）</span>
+          </div>
+
+          <!-- NPC 位置汇总 -->
+          <div v-if="npcLocationMarkers.length > 0" class="npc-location-bar">
+            <i class="fa-solid fa-users" />
+            <span>NPC：</span>
+            <span
+              v-for="loc in npcLocationMarkers"
+              :key="loc.marker.id"
+              class="npc-loc-tag"
+              @click="focusMarker(loc.marker)"
+            >
+              {{ loc.name }}（{{ loc.npcNames[0]
+              }}{{ loc.npcNames.length > 1 ? ' +' + (loc.npcNames.length - 1) : '' }}）
+            </span>
+          </div>
+        </div>
+
+        <!-- ═══ 标记工作台 ═══ -->
+        <aside v-if="workbenchOpen" class="marker-workbench">
+          <!-- Tab 切换 -->
+          <div class="workbench-tabs">
+            <button
+              class="wb-tab"
+              :class="{ active: activeTab === 'list' }"
+              @click="activeTab = 'list'"
+            >
+              标记列表 ({{ filteredMarkers.length }})
+            </button>
+            <button
+              v-if="activeMarker"
+              class="wb-tab"
+              :class="{ active: activeTab === 'editor' }"
+              @click="activeTab = 'editor'"
+            >
+              编辑
+            </button>
+          </div>
+
+          <!-- 列表视图 -->
+          <div v-if="activeTab === 'list'" class="workbench-list">
+            <input v-model="searchQuery" class="wb-search" type="text" placeholder="搜索标记…" />
+            <div class="marker-items">
+              <button
+                v-for="m in filteredMarkers"
+                :key="m.id"
+                class="marker-item"
+                :class="{ 'marker-item-active': m.id === activeMarkerId }"
+                @click="handleWorkbenchSelect(m.id)"
+              >
+                <span
+                  class="mi-dot"
+                  :style="{ backgroundColor: m.color ?? DEFAULT_MARKER_COLOR }"
+                />
+                <span class="mi-name">{{ m.name }}</span>
+                <span v-if="m.group" class="mi-group">{{ m.group }}</span>
+                <span class="mi-locate" title="定位" @click.stop="focusMarker(m)">
+                  <i class="fa-solid fa-magnifying-glass-location" />
+                </span>
+              </button>
+              <div v-if="filteredMarkers.length === 0" class="marker-empty">
+                {{ searchQuery ? '无匹配标记' : '暂无标记' }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 编辑视图 -->
+          <div v-if="activeTab === 'editor' && activeMarker" class="workbench-editor">
+            <button class="wb-back" @click="activeTab = 'list'">← 返回列表</button>
+
+            <div class="form-group">
+              <label class="form-label">名称</label>
+              <input
+                v-model="editingName"
+                class="form-input"
+                type="text"
+                @change="handleSaveEditor"
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">分组</label>
+              <input
+                v-model="editingGroup"
+                class="form-input"
+                type="text"
+                placeholder="如：城邦 / 遗迹"
+                @change="handleSaveEditor"
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">描述</label>
+              <textarea
+                v-model="editingDescription"
+                class="form-textarea"
+                rows="3"
+                placeholder="标记说明"
+                @change="handleSaveEditor"
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">图标</label>
+              <div class="icon-grid">
+                <button
+                  v-for="icon in MARKER_ICON_OPTIONS"
+                  :key="icon"
+                  class="icon-btn"
+                  :class="{ 'icon-btn-active': editingIcon === icon }"
+                  :title="MARKER_ICON_LABELS[icon]"
+                  @click="
+                    editingIcon = icon;
+                    handleSaveEditor();
+                  "
+                >
+                  <i :class="icon" />
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">颜色</label>
+              <div class="color-row">
+                <button
+                  v-for="color in MARKER_COLOR_OPTIONS"
+                  :key="color"
+                  class="color-btn"
+                  :class="{ 'color-btn-active': editingColor === color }"
+                  :style="{ backgroundColor: color }"
+                  @click="
+                    editingColor = color;
+                    handleSaveEditor();
+                  "
+                />
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button
+                class="btn btn-danger btn-sm"
+                @click="
+                  handleDeleteMarker(activeMarker!.id);
+                  activeTab = 'list';
+                "
+              >
+                删除标记
+              </button>
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
 
-    <div class="map-body" :class="{ 'has-workbench': workbenchOpen }">
-      <!-- ═══ 地图舞台 ═══ -->
-      <div class="map-stage">
-        <!-- 状态提示 -->
-        <div v-if="status === 'loading'" class="map-overlay">
-          <span>{{
-            contentReady
-              ? mapDownloadProgress > 0
-                ? `地图下载中 ${mapDownloadProgress}%…`
-                : '地图加载中…'
-              : '内容加载中…'
-          }}</span>
-        </div>
-        <div v-else-if="status === 'error'" class="map-overlay map-overlay-error">
-          <span>{{ errorMessage || '地图加载失败' }}</span>
-          <button
-            v-if="mapSources.length > 0"
-            class="btn btn-sm"
-            @click="requestLoadSource(currentSourceKey || mapSources[0].key)"
-          >
-            重试
-          </button>
-        </div>
-
-        <!-- 模式提示 -->
-        <div v-if="markerAddMode" class="map-mode-hint">点击地图任意位置放置标记</div>
-
-        <!-- OSD Viewer 容器 -->
-        <div
-          ref="containerRef"
-          class="map-viewer"
-          :style="{ cursor: markerAddMode ? 'crosshair' : '' }"
-          @click="onMapClick"
-        />
-
-        <!-- ═══ 浮动信息卡片 ═══ -->
-        <Teleport :to="containerRef" :disabled="!containerRef">
-          <article
-            v-if="activeMarker && activeMarkerCardPosition.visible"
-            class="map-marker-card"
-            :style="{
-              left: activeMarkerCardPosition.left + 'px',
-              top: activeMarkerCardPosition.top + 'px',
-            }"
-          >
-            <!-- 图片区域 -->
-            <div v-if="activeMarkerImage" class="card-media">
-              <button
-                v-if="hasMultipleImages"
-                class="card-carousel-btn card-carousel-prev"
-                aria-label="上一张"
-                @click.stop="handlePrevImage"
-              >
-                <i class="fa-solid fa-chevron-left" />
-              </button>
-              <img
-                :src="activeMarkerImage"
-                :alt="activeMarker.name + ' 主视觉'"
-                class="card-hero-image"
-                @error="
-                  (e: Event) => {
-                    (e.target as HTMLImageElement).style.display = 'none';
-                  }
-                "
-              />
-              <button
-                v-if="hasMultipleImages"
-                class="card-carousel-btn card-carousel-next"
-                aria-label="下一张"
-                @click.stop="handleNextImage"
-              >
-                <i class="fa-solid fa-chevron-right" />
-              </button>
-              <!-- 轮播点 -->
-              <div v-if="hasMultipleImages" class="card-carousel-dots">
-                <button
-                  v-for="(_, idx) in activeMarkerImages"
-                  :key="idx"
-                  class="card-dot"
-                  :class="{ 'card-dot-active': idx === activeImageIndex }"
-                  :aria-label="'第 ' + (idx + 1) + ' 张图片'"
-                  @click.stop="activeImageIndex = idx"
-                />
-              </div>
-            </div>
-
-            <!-- Header -->
-            <div class="card-header">
-              <div class="card-title-block">
-                <span
-                  class="card-dot"
-                  :style="{ backgroundColor: activeMarker.color ?? DEFAULT_MARKER_COLOR }"
-                />
-                <div class="card-heading">
-                  <div class="card-title">{{ activeMarker.name || '未命名标记' }}</div>
-                  <div class="card-meta">{{ activeMarker.group || '未分组' }}</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Body -->
-            <div class="card-body">
-              <p class="card-description">{{ activeMarker.description || '暂无说明' }}</p>
-            </div>
-          </article>
-        </Teleport>
-
-        <!-- 角色位置指示 -->
-        <div v-if="playerLocationNode" class="player-location-bar">
-          <i class="fa-solid fa-location-dot" />
-          <span>当前：{{ playerLocationNode.name }}</span>
-          <span v-if="playerMarker" class="loc-matched">✓ 已定位</span>
-          <span v-else class="loc-unmatched">（无地图标记）</span>
-        </div>
-
-        <!-- NPC 位置汇总 -->
-        <div v-if="npcLocationMarkers.length > 0" class="npc-location-bar">
-          <i class="fa-solid fa-users" />
-          <span>NPC：</span>
-          <span
-            v-for="loc in npcLocationMarkers"
-            :key="loc.marker.id"
-            class="npc-loc-tag"
-            @click="focusMarker(loc.marker)"
-          >
-            {{ loc.name }}（{{ loc.npcNames[0]
-            }}{{ loc.npcNames.length > 1 ? ' +' + (loc.npcNames.length - 1) : '' }}）
-          </span>
-        </div>
-      </div>
-
-      <!-- ═══ 标记工作台 ═══ -->
-      <aside v-if="workbenchOpen" class="marker-workbench">
-        <!-- Tab 切换 -->
-        <div class="workbench-tabs">
-          <button
-            class="wb-tab"
-            :class="{ active: activeTab === 'list' }"
-            @click="activeTab = 'list'"
-          >
-            标记列表 ({{ filteredMarkers.length }})
-          </button>
-          <button
-            v-if="activeMarker"
-            class="wb-tab"
-            :class="{ active: activeTab === 'editor' }"
-            @click="activeTab = 'editor'"
-          >
-            编辑
-          </button>
-        </div>
-
-        <!-- 列表视图 -->
-        <div v-if="activeTab === 'list'" class="workbench-list">
-          <input v-model="searchQuery" class="wb-search" type="text" placeholder="搜索标记…" />
-          <div class="marker-items">
-            <button
-              v-for="m in filteredMarkers"
-              :key="m.id"
-              class="marker-item"
-              :class="{ 'marker-item-active': m.id === activeMarkerId }"
-              @click="handleWorkbenchSelect(m.id)"
-            >
-              <span class="mi-dot" :style="{ backgroundColor: m.color ?? DEFAULT_MARKER_COLOR }" />
-              <span class="mi-name">{{ m.name }}</span>
-              <span v-if="m.group" class="mi-group">{{ m.group }}</span>
-              <span class="mi-locate" title="定位" @click.stop="focusMarker(m)">
-                <i class="fa-solid fa-magnifying-glass-location" />
-              </span>
-            </button>
-            <div v-if="filteredMarkers.length === 0" class="marker-empty">
-              {{ searchQuery ? '无匹配标记' : '暂无标记' }}
-            </div>
-          </div>
-        </div>
-
-        <!-- 编辑视图 -->
-        <div v-if="activeTab === 'editor' && activeMarker" class="workbench-editor">
-          <button class="wb-back" @click="activeTab = 'list'">← 返回列表</button>
-
-          <div class="form-group">
-            <label class="form-label">名称</label>
-            <input
-              v-model="editingName"
-              class="form-input"
-              type="text"
-              @change="handleSaveEditor"
-            />
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">分组</label>
-            <input
-              v-model="editingGroup"
-              class="form-input"
-              type="text"
-              placeholder="如：城邦 / 遗迹"
-              @change="handleSaveEditor"
-            />
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">描述</label>
-            <textarea
-              v-model="editingDescription"
-              class="form-textarea"
-              rows="3"
-              placeholder="标记说明"
-              @change="handleSaveEditor"
-            />
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">图标</label>
-            <div class="icon-grid">
-              <button
-                v-for="icon in MARKER_ICON_OPTIONS"
-                :key="icon"
-                class="icon-btn"
-                :class="{ 'icon-btn-active': editingIcon === icon }"
-                :title="MARKER_ICON_LABELS[icon]"
-                @click="
-                  editingIcon = icon;
-                  handleSaveEditor();
-                "
-              >
-                <i :class="icon" />
-              </button>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">颜色</label>
-            <div class="color-row">
-              <button
-                v-for="color in MARKER_COLOR_OPTIONS"
-                :key="color"
-                class="color-btn"
-                :class="{ 'color-btn-active': editingColor === color }"
-                :style="{ backgroundColor: color }"
-                @click="
-                  editingColor = color;
-                  handleSaveEditor();
-                "
-              />
-            </div>
-          </div>
-
-          <div class="form-actions">
-            <button
-              class="btn btn-danger btn-sm"
-              @click="
-                handleDeleteMarker(activeMarker!.id);
-                activeTab = 'list';
-              "
-            >
-              删除标记
-            </button>
-          </div>
-        </div>
-      </aside>
+    <!-- ═══ 势力地图（首次进入才挂载，之后靠 v-show 留住，见文件头预算） ═══ -->
+    <div v-show="activeMapTab === 'political'" class="map-tab-body">
+      <MapPoliticalTab
+        v-if="politicalMounted && contentReady"
+        :active="activeMapTab === 'political'"
+      />
+      <div v-else-if="activeMapTab === 'political'" class="map-tab-loading">内容加载中…</div>
     </div>
   </div>
 </template>
@@ -714,6 +828,23 @@ onBeforeUnmount(() => {
   height: 72vh;
   min-height: 480px;
   gap: 0;
+}
+
+/* 页签体：撑满页签栏以下的空间（两个页签各一层） */
+.map-tab-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: var(--theme-spacing-sm);
+}
+.map-tab-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--theme-text-muted);
+  font-size: 0.8125rem;
 }
 
 /* ═══ 工具栏 ═══ */

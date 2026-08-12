@@ -241,3 +241,44 @@ export async function removeMapMarker(profile: SaveProfile, id: string): Promise
   await updateProfile(profile);
   return profile;
 }
+
+// ═══════════════════════════════════════════════════════════
+// 地图派生态（地图系统 v1 / 设计 §4 · §3.4-2）
+// ═══════════════════════════════════════════════════════════
+
+import type { MapSaveFlags } from './types-map';
+
+/** `worldFlags.map` 在 profile 里的键 —— 只在本节出现，读写两侧共用一处 */
+const MAP_FLAGS_KEY = 'map';
+
+/**
+ * 读地图派生态（`worldFlags.map`）。
+ *
+ * 缺席（新档 / 换包自愈前）返回**空袋子**而不是 `undefined`：全字段可选，
+ * 「一格都没有」与「还没有这个袋子」对每个消费方都是同一件事（`MapSaveFlags` 文件头）。
+ * 🔴 返回的空袋子是**新对象**，往里写不会落库 —— 落库只有 `updateMapFlags` 这一条路。
+ */
+export function getMapFlags(profile: SaveProfile): MapSaveFlags {
+  const raw = profile.worldFlags?.[MAP_FLAGS_KEY];
+  return raw !== null && typeof raw === 'object' ? (raw as MapSaveFlags) : {};
+}
+
+/**
+ * 整份覆盖地图派生态（**命名写入口**，P1-09 口径，先例 `setMapMarker`）。
+ *
+ * 🔴 **整份覆盖而不是逐字段合并**：这一袋全是派生态，换包自愈要能把它清空（§3.4-2），
+ *    而「合并」这个语义下清空是做不到的 —— 传一个只有新戳的袋子会被旧 `lastTileId` 补回来，
+ *    于是自愈之后棋子仍然指着旧地图上的块。调用方负责算出**完整**的下一份。
+ * 🔴 `saveSaveProfile` 落的是整份 profile，所以同一次调用前就地改过的 `variables`
+ *    （天气断言那条）会随本次写一起落库 —— 天气与它的戳因此**不可能只落一半**。
+ */
+export async function updateMapFlags(
+  profile: SaveProfile,
+  flags: MapSaveFlags,
+): Promise<SaveProfile> {
+  // 存量记录（与手搓的测试 profile）可能整个缺 worldFlags；缺了就补一个空袋子
+  if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
+  profile.worldFlags[MAP_FLAGS_KEY] = flags;
+  await updateProfile(profile);
+  return profile;
+}

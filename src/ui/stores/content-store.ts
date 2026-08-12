@@ -18,10 +18,10 @@
  *    audio manifest + beautifier + builtin-worldbooks 全部经 provider 上报内容态。
  *    行为兜底不变（失败不阻塞启动）；现在失败进 `contentStatus='error'` 而不是静默。
  *
- * 3. **内容注册表**（D16）。七面（catalog/locations/bloodlines/namePools/markers/branding/imageDialects）
- *    的同步读取入口，约定 URL `/data/content/<name>.json`（markers 例外，见
- *    `CONTENT_REGISTRY_SOURCES`）。消费方（agent-tools 同步路径 / random-tables /
- *    bloodlines / $location）**同步**读它，所以注册表必须在任何 agent 执行前灌注完成——
+ * 3. **内容注册表**（D16）。八面（catalog/locations/bloodlines/namePools/markers/branding/
+ *    imageDialects/mapPack）的同步读取入口，约定 URL `/data/content/<name>.json`
+ *    （markers 例外，见 `CONTENT_REGISTRY_SOURCES`）。消费方（agent-tools 同步路径 /
+ *    random-tables / bloodlines / $location）**同步**读它，所以注册表必须在任何 agent 执行前灌注完成——
  *    两段保证：模块顶层同步 `seedPlaceholderRegistry()`（保证非 null 骨架），
  *    boot 链上 `loadProjectDefaults()` 里的 `ensureContentRegistryLoaded()`（灌真值，
  *    波 2 逐面接管的落点；pack 安装（T7）重灌走 `setContentRegistry`）。
@@ -64,6 +64,9 @@ import {
   //    读代码时一眼能分清「引擎注入缝」与「store action」。
   reportContentFetch as reportEngineContentFetch,
 } from '@engine/content-source';
+// 第 8 面 mapPack 的收窄口（永不抛）+ 引擎侧地图缝（见 `setContentRegistry`）
+import { coerceMapPack } from '@engine/map-pack';
+import { installMapPack } from '@engine/map-runtime';
 import {
   planPackUninstall,
   diffPackUpgrade,
@@ -289,11 +292,12 @@ export async function loadAllDefaultBooks(): Promise<WorldBook[]> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 2. 内容注册表（D16，七面同步读取）
+// 2. 内容注册表（D16，八面同步读取）
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 内容注册表的七面（D16 / §5.1；第 7 面 imageDialects 由图像 v2 追加）。
+ * 内容注册表的八面（D16 / §5.1；第 7 面 imageDialects 由图像 v2 追加，
+ * 第 8 面 mapPack 由地图系统 v1 追加）。
  *
  * 约定 URL: `/data/content/<name>.json`。本波（T2）先灌占位 = 现有代码常量；波 2 逐面接管，
  * pack 安装（T7）重灌。消费方同步读，所以灌注必须在任何 agent 执行前完成。
@@ -323,6 +327,19 @@ export interface ContentRegistry {
    * 与图像 v1 逐字节相同。第 7 面是「能被内容包替换」的能力，不是运行前提。
    */
   imageDialects: unknown;
+  /**
+   * 地图内容包（地图系统 v1 / §3.3）：`map-pack.json` 的原始 JSON。
+   *
+   * 🔴 **本面的消费方一个都不在这里读它** —— 落位（`state-manager`）、寻路、天气、
+   * `$map` 能力面全在引擎侧，读的是 `map-runtime.getMapPack()`。本面只是那个模块级事实的
+   * **来源**：`setContentRegistry` 每次替换注册表时把这一面经 `coerceMapPack` 收窄后装进去
+   * （见那个函数）。所以 UI/引擎要地图**不要读这一面**，读 `getMapPack()`；要那张
+   * `provinces.png` 用 `MAP_PROVINCES_URL`。
+   *
+   * 🔴 与其余七面同一条纪律 —— 缺席不是错误：整份认不出 → 空包 → 落位永远 null、
+   * 天气不断言、`MAP_CONTEXT` 整段不出，游戏照常进行（`map-pack.ts` 文件头的兜底合同）。
+   */
+  mapPack: unknown;
 }
 
 /**
@@ -347,9 +364,24 @@ export function getContentRegistry(): ContentRegistry {
  *
  * 🔴 **整份替换**：不做深合并（避免占位常量与 pack payload 半混的半状态）。
  * 调用方应先用 `resolveSection`（content-source.ts，D20 三态）算出最终值再传进来。
+ *
+ * 🔴 **顺带把第 8 面装进引擎的地图缝**（地图系统 v1 / §3.3）。这个副作用是刻意的：
+ * `mapPack` 与其余七面不同 —— 它的消费方全在引擎侧（`state-manager` 的落位与天气钩子、
+ * `$map` 能力面），读的是 `map-runtime` 里「当前装着哪一份包」那**一个**模块级事实，
+ * 不是本注册表。两者一旦能各说各话，症状是**沿着上一份地图落位**，而它不报错。
+ * 所以「换地图」只有一个失效点，就是这一行：注册表被整份替换 = 地图被替换。四条重灌路径
+ * （首轮占位加载 / 装包 `applyInstall` / 卸载重灌 / `POEM_CONTENT_DIR` 覆盖后重解析）
+ * 全都经过本函数，因此没有一条需要谁记得另外去调 `installMapPack`。
+ *
+ * 反过来说：先 `installMapPack(fixture)` 再调本函数，包会被换成注册表那一面的值 ——
+ * 那正是生产要的不变式，不是意外。单测引擎侧别经过本函数（照 `map-runtime.test.ts` 的样子）。
+ *
+ * 🔴 **仍然永不抛**：`coerceMapPack` 对任意坏输入都返回合法包（整份认不出 → 空包），
+ * `installMapPack` 自己也不校验。坏地图包的代价是「棋子没在图上」，不是启动失败。
  */
 export function setContentRegistry(next: ContentRegistry): void {
   registry = next;
+  installMapPack(coerceMapPack(next.mapPack));
 }
 
 /** 造一份空注册表骨架 */
@@ -362,6 +394,7 @@ function createEmptyRegistry(): ContentRegistry {
     markers: undefined,
     branding: undefined,
     imageDialects: undefined,
+    mapPack: undefined,
   };
 }
 
@@ -374,19 +407,23 @@ function createEmptyRegistry(): ContentRegistry {
  *
  * 🔴 这里**不**同步 `import` random-tables / bloodlines / location-db 的真实常量——
  * 那会把 334 KB 的 start-catalog-data 等内容编译进 bundle（§1.2 硬耦合 #2/#3）。
- * **异步占位加载见 `ensureContentRegistryLoaded()`**（七面各自 fetch
+ * **异步占位加载见 `ensureContentRegistryLoaded()`**（八面各自 fetch
  * `/data/content/<name>.json`）；pack 分节由装包执行器经 `setContentRegistry` 重灌。
+ *
+ * 🔴 **经 `setContentRegistry` 走，不直接赋值 `registry`**：清空注册表必须连带把引擎侧的
+ * 地图缝也清回空包（地图系统 v1 / §3.3）。卸载流先 seed 再重拉占位，中间那一段若还装着
+ * 刚卸掉的地图包，落位就仍沿着它走 —— 而那既不报错也没人会去看。
  */
 export function seedPlaceholderRegistry(): void {
-  registry = createEmptyRegistry();
+  setContentRegistry(createEmptyRegistry());
 }
 
 // ═══════════════════════════════════════════════════════════
-// 2b. 七面占位内容的异步加载（D16 / §5.1，波 2 七个抽取任务的共同落点）
+// 2b. 八面占位内容的异步加载（D16 / §5.1，波 2 七个抽取任务的共同落点）
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 七面占位内容的来源 URL（与私有内容仓 `data/` 树同形——设计 §3.1）。
+ * 八面占位内容的来源 URL（与私有内容仓 `data/` 树同形——设计 §3.1）。
  *
  * 🔴 `markers` 不在 `content/` 下：地图标记预设今天就住在 `data/defaults/`
  * （`map-marker-presets.json`，MapPanel 的既有文件），抽取时不搬家。
@@ -401,8 +438,27 @@ export const CONTENT_REGISTRY_SOURCES: ReadonlyArray<{
   { face: 'namePools', url: '/data/content/name-pools.json' },
   { face: 'branding', url: '/data/content/branding.json' },
   { face: 'imageDialects', url: '/data/content/image-dialects.json' },
+  { face: 'mapPack', url: '/data/content/map-pack.json' },
   { face: 'markers', url: '/data/defaults/map-marker-presets.json' },
 ];
+
+/**
+ * `provinces.png` 的约定 URL（地图系统 v1 / §3.3·§9）—— 政治层渲染与命中检测的像素源。
+ *
+ * 🔴 **它不是注册表的一面**，所以不在 `CONTENT_REGISTRY_SOURCES` 里：注册表灌的是同步可读的
+ * JSON 值，而这里是几 MB 字节，只有 UI 打开「势力地图」页签时才解码成 `idBuf`；
+ * 引擎一个像素都不碰（邻接关系早在 `map-pack.json` 的 `adjacency` 里）。
+ *
+ * 🔴 **content pack 替换不了它**：pack 是一份 JSON，装不下 PNG 字节。真实地图的
+ * `provinces.png` 与 `map-pack.json` 同住内容树 `data/content/`（私有内容仓，经
+ * `POEM_CONTENT_DIR` 开发覆盖 / 部署时铺进 `public/`），所以这里是**常量**而不是从包里读出的
+ * 路径 —— 换图时它的内容变、URL 不变。渲染缓存的失效键因此必须取包的 `contentHash`
+ * （§3.4-3），拿这个 URL 当键会让新图配着旧像素画。
+ *
+ * 🔴 公开仓的占位包**没有**这张图（占位是十几块合成地块，没有像素面）：取它会 404。
+ * 调用方按「取不到 → 不画政治层」处置，与 `resolveMapSources` 没图源时返回空数组同一口径。
+ */
+export const MAP_PROVINCES_URL = '/data/content/provinces.png';
 
 /** 首轮占位加载的 memo（幂等闸；`ensureContentRegistryLoaded` 的全部状态） */
 let registryLoadPromise: Promise<void> | null = null;
@@ -454,8 +510,9 @@ async function fetchRegistryFace(
  * 已装 pack 各面的取值（D20 三态的 pack 半边）。
  *
  * 取法与装包执行器一致：`catalog` / `namePools` 取 `.data` 子字段，
- * `locations` / `mapMarkers` / `branding` / `bloodlines` / `imageDialects` 是整节
- * （方言分节按整节走，因为它落盘就是 `{ dialects: [...] }` —— 与 `bloodlines` 同形）。
+ * `locations` / `mapMarkers` / `branding` / `bloodlines` / `imageDialects` / `mapPack` 是整节
+ * （方言分节按整节走，因为它落盘就是 `{ dialects: [...] }` —— 与 `bloodlines` 同形；
+ * 地图包同理，它落盘就是 `MapPack` 本身，再包一层 `data` 只是多一层壳）。
  * 键**只在该面有值时才出现**——于是下游一律 `resolveSection(packFace, placeholder)`，
  * 不必在两处各写一遍三元。
  *
@@ -474,6 +531,7 @@ function packRegistryFaces(
   if (pack.mapMarkers !== undefined) out.markers = pack.mapMarkers;
   if (pack.branding !== undefined) out.branding = pack.branding;
   if (pack.imageDialects !== undefined) out.imageDialects = pack.imageDialects;
+  if (pack.mapPack !== undefined) out.mapPack = pack.mapPack;
   return out;
 }
 
@@ -521,9 +579,9 @@ async function loadContentRegistryOnce(): Promise<void> {
 }
 
 /**
- * 确保注册表七面已完成首轮占位加载（D16）。
+ * 确保注册表八面已完成首轮占位加载（D16）。
  *
- * - **幂等**：memoize 同一个 promise，七面只 fetch 一轮；重复 await 零 I/O。
+ * - **幂等**：memoize 同一个 promise，八面只 fetch 一轮；重复 await 零 I/O。
  * - **永不抛、永不阻塞启动**：逐面独立，一面失败不影响其余五面；失败面保持原值。
  * - **pack 优先**（D20 三态）：已装 pack 提供的分节赢过占位 fetch 结果。
  *
@@ -546,7 +604,7 @@ export function resetContentRegistryLoadedForTests(): void {
  * 卸载 pack 后重新拉一轮占位内容（§5.2 卸载流的注册表重灌）。
  *
  * 🔴 光调 `seedPlaceholderRegistry()` 只把注册表清成空骨架——那会让卸载后的捏人页/地图页
- * 拿到七个 `undefined`。这里重置 memo 再跑一轮，把占位 JSON 灌回去。
+ * 拿到八个 `undefined`（连地图也退成空包）。这里重置 memo 再跑一轮，把占位 JSON 灌回去。
  */
 async function reloadContentRegistryPlaceholders(): Promise<void> {
   resetContentRegistryLoadedForTests();
@@ -651,13 +709,13 @@ export const useContentStore = defineStore('content', () => {
     // 先确保已装 pack 从 Dexie 载入模块缓存（boot 时序；idempotent）
     await hydratePackState();
     const defaults = await resolveProjectDefaults();
-    // 🔴 七面注册表接进 boot 链（D16 时序契约）：本函数是三处装载面的收口入口，
+    // 🔴 八面注册表接进 boot 链（D16 时序契约）：本函数是三处装载面的收口入口，
     //    boot 必经，所以注册表的首轮占位加载挂在这里（幂等，只跑一轮）。
     //    **放在默认层解析之后**且**不影响返回值**——它永不抛，失败只进 contentStatus。
     //    UI 页面（捏人页/地图页的加载门）可以单独 `await ensureContentRegistryLoaded()`。
     //
     // 🔴 先记下「默认层这一趟失败了吗」：reportContentFetch 的既有语义是**后一次成功清 error**
-    //    （见上面那个函数），于是七面占位加载成功会把 agent-config 的失败悄悄擦掉——
+    //    （见上面那个函数），于是八面占位加载成功会把 agent-config 的失败悄悄擦掉——
     //    本函数「失败 → contentStatus=error」的既有行为不许因为多挂了一条加载链而变。
     const defaultsError = contentStatus.value === 'error' ? lastFetchError.value : null;
     await ensureContentRegistryLoaded();
@@ -895,9 +953,11 @@ export const useContentStore = defineStore('content', () => {
     //    （D44）。同步注册表在装包成功后由 setActivePackRecord 重灌（各面交给后续波次
     //    逐面接管，本波至少把各面标记成 pack payload 的 resolveSection）。
 
-    // 注册表重灌：七面 = pack payload > 当前值（占位 fetch 的结果，或未加载时的 undefined）。
+    // 注册表重灌：八面 = pack payload > 当前值（占位 fetch 的结果，或未加载时的 undefined）。
     // 🔴 pack 取值与 `packRegistryFaces` 同一处定义（catalog/namePools 取 .data，其余整节），
     //    三态判定统一走 `resolveSection` —— 装包路径与占位加载路径不许各写一套。
+    // 🔴 `mapPack` 这一面漏了不会报错，只会让装了地图的包**沿旧地图落位**：引擎侧的地图缝
+    //    由 `setContentRegistry` 供值，供不到就还是上一份（多半是占位包）。
     const reg = getContentRegistry();
     const packFaces = packRegistryFaces(pack);
     setContentRegistry({
@@ -908,6 +968,7 @@ export const useContentStore = defineStore('content', () => {
       markers: resolveSection(packFaces.markers, reg.markers),
       branding: resolveSection(packFaces.branding, reg.branding),
       imageDialects: resolveSection(packFaces.imageDialects, reg.imageDialects),
+      mapPack: resolveSection(packFaces.mapPack, reg.mapPack),
     });
 
     // e. 存档 uid 迁移（D43）：rewrite 应用 + needsSelectionPartitions 标记
@@ -1316,7 +1377,7 @@ export const useContentStore = defineStore('content', () => {
           /* 同上：静默兜底 */
         }
 
-        // 🔴 pack 缓存清掉**之后**再重拉占位七面（否则 pack 优先级会把刚卸的包灌回来）；
+        // 🔴 pack 缓存清掉**之后**再重拉占位八面（否则 pack 优先级会把刚卸的包灌回来）；
         //    又必须在下面那句 `contentStatus = 'placeholder'` **之前** —— 卸载的终态是确定的
         //    （包没了 = 占位态），不该被这一轮占位 fetch 的成败改写。失败仍进 fetchReports。
         await reloadContentRegistryPlaceholders();
