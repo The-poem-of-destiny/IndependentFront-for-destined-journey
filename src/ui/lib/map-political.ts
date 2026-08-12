@@ -389,6 +389,243 @@ export function buildPoliticalTint(
 }
 
 // ═══════════════════════════════════════════════════════════
+// 2b. 着色方式（势力 / 中层 / 地块）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 着色方式。`country` 就是本文件第 2 节那套原样（政治层），另两档是「同一份 idBuf 换一张
+ * 颜色表」—— 数据一个字节都没多，只是把哪块地画成什么色重算一遍。
+ */
+export type MapTintMode = 'country' | 'midTier' | 'tile';
+
+/**
+ * 中层 id → 显示色，取**它在 `pack.midTiers` 里的序号**喂给 `provinceColorForTileId`。
+ *
+ * 🔴 **不新写一个哈希**：中层 id 是字符串而那个哈希吃数字，所以要有一步「字符串 → 数字」。
+ *    这里用序号而不是自己折一个字符串哈希 —— 后者等于往仓库里加第二个颜色算法，
+ *    而这一层要的只是「相邻的中层别撞成一个色」，那个哈希的雪崩已经够了。
+ *    代价说清楚：**重编包时在中层列表中间插一个，它后面所有中层会换色**。纯观感，
+ *    不影响命中/路线/落位（那些一律走 id），故接受。
+ * 序号 +1 是为了避开 0 —— 那个哈希对 0 落在保留色兜底那一支上。
+ */
+function midTierFillMap(pack: MapPack): Map<string, [number, number, number]> {
+  const out = new Map<string, [number, number, number]>();
+  pack.midTiers.forEach((midTier, index) => {
+    if (out.has(midTier.id)) return;
+    out.set(midTier.id, provinceColorForTileId(index + 1));
+  });
+  return out;
+}
+
+/**
+ * 包 + 着色方式 → 着色判定（喂给 `buildPoliticalTint`，与政治层同一条管道）。
+ *
+ * 🔴 `country` **原样委托** `buildPoliticalPaint`：势力档必须与加这个开关之前逐像素相同，
+ *    而做到这一点的唯一可靠办法是**根本不写第二份实现**（有回归测试钉住这条等价）。
+ *
+ * 另两档共同的处置（**与势力档刻意不同**，不是漏写）：
+ *   · 水域 —— 不着色，同势力档（底图的海本来就好看）。
+ *   · 天堑 —— **也不着色**，而势力档给它影线。影线回答的是「这道屏障在谁的势力范围内」，
+ *     那是势力档的问题；在「中层 / 地块」两档里它只会盖掉那块地自己的颜色和名字标签。
+ *   · 没有中层的陆块 —— 走无主之地那个中性色（同势力档对无主的处置），**不是留空**：
+ *     留空会让一整片陆地看起来和没画的空白/海面一样。
+ */
+export function buildModePaint(pack: MapPack, mode: MapTintMode): PoliticalPaint {
+  if (mode === 'country') return buildPoliticalPaint(pack);
+
+  const midTierFill = mode === 'midTier' ? midTierFillMap(pack) : null;
+  const neutral: [number, number, number] = [...UNCLAIMED_RGB];
+  const fillByTile = new Map<number, [number, number, number]>();
+  const seen = new Set<number>();
+
+  for (const tile of pack.tiles) {
+    if (seen.has(tile.id)) continue;
+    seen.add(tile.id);
+    if (tile.water !== null || tile.impassable) continue;
+
+    if (midTierFill === null) {
+      // 地块档：pack 带的**权威**块色优先，缺席才回落哈希（同文件头那条红线）
+      fillByTile.set(tile.id, tile.color ?? provinceColorForTileId(tile.id));
+      continue;
+    }
+    const rgb = tile.midTierId === null ? undefined : midTierFill.get(tile.midTierId);
+    fillByTile.set(tile.id, rgb ?? neutral);
+  }
+
+  // 两档都没有天堑影线（理由见上）—— 空表即「一块也不画影线」
+  return { fillByTile, hatchByTile: new Map() };
+}
+
+// ═══════════════════════════════════════════════════════════
+// 2c. 地块名标签
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 一个地图标签的落点（世界坐标 = 栅格坐标，见 `tileAtRasterPoint`）。
+ *
+ * `key` 是**渲染用的稳定键**，不是业务 id：两档标签的粒度不同（地块 / 中层），
+ * 各自的 id 空间会撞号（地块 id 是数字、中层 id 是字符串），所以在这里就带上前缀分家。
+ */
+export interface MapLabel {
+  key: string;
+  name: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * 标签起显阈值，按 `view.min` 的倍数（不是绝对缩放）。
+ *
+ * 🔴 **单一阈值，刻意不做逐标签避让**：几百个标签两两测碰撞是每帧一次的活，而它换来的
+ *    只是「缩小时也能看见几个名字」—— 那时候真正有用的信息是疆域形状，不是地名。
+ *    低于阈值一律不画，高于阈值全画（重叠由玩家自己放大解决）。
+ */
+export const LABEL_MIN_ZOOM_OVER_MIN = 1.5;
+
+/** 当前缩放该不该画标签（阈值口径唯一一处，组件不自己写这个不等式） */
+export function labelsVisibleAtZoom(view: StageView): boolean {
+  if (!Number.isFinite(view.s) || !Number.isFinite(view.min) || view.min <= 0) return false;
+  return view.s >= view.min * LABEL_MIN_ZOOM_OVER_MIN;
+}
+
+/**
+ * 形心坐标系 → 世界（栅格）坐标系的比例。
+ *
+ * 形心存在 `pack.resolution` 那个坐标系里，而实际栅格未必同尺寸（理论相等但不假设），
+ * 所以照 `MapPoliticalTab.tileWorldPoint` 的同一个比例折算。
+ */
+function rasterScale(pack: MapPack, rasterW: number, rasterH: number): { sx: number; sy: number } {
+  const res = pack.resolution;
+  return {
+    sx: res.w > 0 && rasterW > 0 ? rasterW / res.w : 1,
+    sy: res.h > 0 && rasterH > 0 ? rasterH / res.h : 1,
+  };
+}
+
+/**
+ * 包 → 地块名标签表（形心落点）。
+ * 没名字的地块跳过 —— 画一个空标签只会占住位置。
+ */
+export function buildTileLabels(pack: MapPack, rasterW: number, rasterH: number): MapLabel[] {
+  const { sx, sy } = rasterScale(pack, rasterW, rasterH);
+
+  const out: MapLabel[] = [];
+  const seen = new Set<number>();
+  for (const tile of pack.tiles) {
+    if (seen.has(tile.id)) continue;
+    seen.add(tile.id);
+    const name = typeof tile.name === 'string' ? tile.name.trim() : '';
+    if (name.length === 0) continue;
+    const [cx, cy] = tile.centroid;
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+    out.push({ key: `t${tile.id}`, name, x: cx * sx, y: cy * sy });
+  }
+  return out;
+}
+
+/**
+ * 包 → **中层名**标签表：一个中层**一个**标签（不是它辖下每块地一个）。
+ *
+ * 🔴 中层档标中层名、地块档标地块名 —— 两档标签的**粒度跟着着色粒度走**。
+ *    中层档把 45 个域各染一色，再往上撒 310 个地块名，读者要从颜色数名字、
+ *    从名字数颜色，两边都对不上。
+ *
+ * 落点两条路（**锚地块优先**）：
+ *   · `anchorTileId` 指得到一块地 → 用那块地的形心。它是编译期选出来的首府/代表块，
+ *     比几何平均更像「这个域在人们心里的位置」。
+ *   · 否则 → 成员地块形心的**按面积加权**平均。不加权的话，一个域里若有一堆小碎块和
+ *     一块巨大的主体，标签会被碎块拽到主体外面去（甚至落进邻国）。
+ *     面积全是 0 / 非法时退回等权平均，而不是产出 NaN。
+ * **没有成员地块的中层不出标签**（真包里就有几个这样的空壳）：它在图上没有任何疆域，
+ * 给它找个位置画上去等于凭空指认一块别人的地。名字为空同理。
+ */
+export function buildMidTierLabels(pack: MapPack, rasterW: number, rasterH: number): MapLabel[] {
+  const { sx, sy } = rasterScale(pack, rasterW, rasterH);
+
+  const tileById = new Map<number, MapTile>();
+  for (const tile of pack.tiles) if (!tileById.has(tile.id)) tileById.set(tile.id, tile);
+
+  /**
+   * 中层 id → 成员地块累计（一趟扫完，不给每个中层各扫一遍地块表）。
+   * 加权和与朴素和**同时**累计：面积全为 0 时才用后者，判断在扫完之后。
+   */
+  interface MemberSum {
+    /** 面积加权的形心和 */
+    wx: number;
+    wy: number;
+    /** 面积和（= 加权分母） */
+    w: number;
+    /** 等权兜底用的朴素形心和 */
+    px: number;
+    py: number;
+    /** 成员块数（= 等权分母） */
+    n: number;
+  }
+  const members = new Map<string, MemberSum>();
+  for (const tile of tileById.values()) {
+    if (tile.midTierId === null) continue;
+    const [cx, cy] = tile.centroid;
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+    const area = Number.isFinite(tile.areaPx) && tile.areaPx > 0 ? tile.areaPx : 0;
+    let bag = members.get(tile.midTierId);
+    if (bag === undefined) {
+      bag = { wx: 0, wy: 0, w: 0, px: 0, py: 0, n: 0 };
+      members.set(tile.midTierId, bag);
+    }
+    bag.wx += cx * area;
+    bag.wy += cy * area;
+    bag.w += area;
+    bag.px += cx;
+    bag.py += cy;
+    bag.n += 1;
+  }
+
+  const out: MapLabel[] = [];
+  const seen = new Set<string>();
+  for (const midTier of pack.midTiers) {
+    if (seen.has(midTier.id)) continue;
+    seen.add(midTier.id);
+    const name = typeof midTier.name === 'string' ? midTier.name.trim() : '';
+    if (name.length === 0) continue;
+
+    const bag = members.get(midTier.id);
+    if (bag === undefined || bag.n === 0) continue; // 空壳中层：图上没有它的地
+
+    const anchor = midTier.anchorTileId === null ? undefined : tileById.get(midTier.anchorTileId);
+    let cx: number;
+    let cy: number;
+    if (anchor !== undefined && Number.isFinite(anchor.centroid[0])) {
+      cx = anchor.centroid[0];
+      cy = anchor.centroid[1];
+    } else if (bag.w > 0) {
+      cx = bag.wx / bag.w;
+      cy = bag.wy / bag.w;
+    } else {
+      cx = bag.px / bag.n;
+      cy = bag.py / bag.n;
+    }
+    out.push({ key: `m${midTier.id}`, name, x: cx * sx, y: cy * sy });
+  }
+  return out;
+}
+
+/**
+ * 当前着色档该画哪一批标签（**唯一**入口，组件不自己挑）。
+ *
+ * 势力档不画：那一档要看的是疆域连片，撒上名字只会盖住它。
+ */
+export function buildLabelsForMode(
+  pack: MapPack,
+  mode: MapTintMode,
+  rasterW: number,
+  rasterH: number,
+): MapLabel[] {
+  if (mode === 'country') return [];
+  if (mode === 'midTier') return buildMidTierLabels(pack, rasterW, rasterH);
+  return buildTileLabels(pack, rasterW, rasterH);
+}
+
+// ═══════════════════════════════════════════════════════════
 // 3. 边界折线（栅格 → 单位段 → 链化 → RDP → SVG path）
 // ═══════════════════════════════════════════════════════════
 
