@@ -6,8 +6,9 @@
  *
  * M1 最小实现：
  *   - DeclareAction：战术动作（道具/移动/专注/防御），消费动作槽（consumeSlot 管）+ 产 NarrativeCue 事件
- *   - Flee：逃跑检定（从 statusContest 取骰，d20 + 敏捷 vs DC 12），成功 → Terminal(flee_success)，
- *     失败 → 消费攻击+动作槽，产 FleeAttempt
+ *   - Flee：逃跑检定（从 statusContest 取骰，d20 + 敏捷 vs DC 12），成功 → 移除单位离场
+ *     （Bug C：不再整场 Terminal，终局交 checkTerminal；单敌人逃光 = 玩家获胜），
+ *     失败 → 结束本回合进 MoraleCheck（Bug A：不占槽，不再 SLOT_EXHAUSTED），产 FleeAttempt
  *
  * M3.5 扩展（开放召唤出口，A35-1）：
  *   - DeclareAction 结算时求值 action.declared 窗口，若 automaton 返回 SpawnOrDespawnIntent(op:'spawn'):
@@ -182,10 +183,15 @@ function collectSpawnAndFees(
 }
 
 /**
- * 结算一次逃跑（Flee，cost 'both'）。
+ * 结算一次逃跑（Flee，cost 'none'，Bug A 2026-08-12）。
  *
  * 检定：从 statusContest 取骰 → `d20 + 敏捷` ≥ DC 12 成功。
- * 成功 → Terminal(flee_success)；失败 → 两槽照常消费（consumeSlot 已扣），产 FleeAttempt(false)。
+ * 成功（Bug C 修复）→ **不再结束整场战斗**：只把逃跑者移出战场
+ *   （removeUnitIds + UnitDespawned('fled')，applyOutcome 同步摘 initiativeOrder），
+ *   终局交给 checkTerminal 兜底——单敌人逃光 → hp_zero/player（玩家获胜）；
+ *   多敌人逃一个 → 战斗继续。nextPhase 'UnitTurnClose'：逃跑者回合就此结束。
+ * 失败 → 直接进 MoraleCheck（结束本回合、推进下一位）。Flee 不消费槽位，
+ *   留在 SlotConsume 会无限等同一单位的命令（卡死），故不再「两槽自然归零」。
  */
 export function handleFlee(
   bundle: CombatDefinitionBundle,
@@ -195,7 +201,7 @@ export function handleFlee(
   const out: PhaseOutcome = {
     changes: emptyChanges(),
     events: [],
-    nextPhase: 'SlotConsume',
+    nextPhase: 'MoraleCheck',
   };
   const actor = state.units[command.actorId];
   if (!actor) {
@@ -217,10 +223,15 @@ export function handleFlee(
   out.events.push({ kind: 'FleeAttempt', unitId: actor.id, success, roll });
 
   if (success) {
-    out.nextPhase = 'Terminal';
-    out.terminal = { reason: 'flee_success', winner: undefined };
+    // Bug C（2026-08-12）：逃跑成功只移除该单位，不设 Terminal / 不进 Terminal 相位。
+    // 终局判定交给 checkTerminal（reducer 每步后调用）：单敌人逃光 → hp_zero/player。
+    out.removeUnitIds = [actor.id];
+    out.events.push({ kind: 'UnitDespawned', unitId: actor.id, reason: 'fled' });
+    out.nextPhase = 'UnitTurnClose';
   } else {
-    out.nextPhase = 'SlotConsume';
+    // Bug A（2026-08-12）：逃跑失败也结束本回合（直接 MoraleCheck → 下一位），
+    // 不留在 SlotConsume 无限等命令。
+    out.nextPhase = 'MoraleCheck';
   }
   return out;
 }

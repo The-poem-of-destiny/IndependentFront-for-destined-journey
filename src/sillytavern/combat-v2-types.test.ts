@@ -180,4 +180,68 @@ describe('characterToCombatParticipant', () => {
     expect(p.activeSkills).toHaveLength(1);
     expect(p.activeSkills![0].name).toBe('火球术');
   });
+
+  it('🆕 装备 stats 中文键（攻击力/防御力/命中/闪避/穿透/减伤）→ 战斗字段正确读出（2026-08-12）', () => {
+    const char = makeChar({
+      inventory: [
+        {
+          name: '精铁长剑',
+          quantity: 1,
+          equippedSlot: '武器',
+          stats: { 攻击力: 130, 命中: 5, 穿透: 10 },
+        },
+        {
+          name: '精铁板甲',
+          quantity: 1,
+          equippedSlot: '身体',
+          stats: { 防御力: 130, 闪避: 3, 减伤: 2 },
+        },
+      ],
+    });
+    const p = characterToCombatParticipant(char, 'ally');
+    expect(p.weaponAtk).toBe(130);
+    expect(p.defense).toBe(130);
+    expect(p.hitBonus).toBe(5);
+    expect(p.penetration).toBe(10);
+    expect(p.dodgeBonus).toBe(3);
+    expect(p.dr).toBe(2);
+  });
+
+  it('🆕 装备 stats 中文键变体（攻击/防御）→ weaponAtk/defense 正确读出（2026-08-12）', () => {
+    const char = makeChar({
+      inventory: [
+        { name: '幽怨之剑', quantity: 1, equippedSlot: '武器', stats: { 攻击: 75 } },
+        { name: '旧护甲', quantity: 1, equippedSlot: '身体', stats: { 防御: 75 } },
+      ],
+    });
+    const p = characterToCombatParticipant(char, 'ally');
+    expect(p.weaponAtk).toBe(75);
+    expect(p.defense).toBe(75);
+  });
+
+  it('🆕 装备 stats 英文键保持可读（回归，2026-08-12）', () => {
+    const char = makeChar({
+      inventory: [
+        {
+          name: '精钢长剑',
+          quantity: 1,
+          equippedSlot: '武器',
+          stats: { atk: 130, hit: 5, penetration: 0.15 },
+        },
+        {
+          name: '精钢板甲',
+          quantity: 1,
+          equippedSlot: '身体',
+          stats: { defense: 130, dodge: 3, dr: 2 },
+        },
+      ],
+    });
+    const p = characterToCombatParticipant(char, 'ally');
+    expect(p.weaponAtk).toBe(130);
+    expect(p.defense).toBe(130);
+    expect(p.hitBonus).toBe(5);
+    expect(p.penetration).toBe(0.15);
+    expect(p.dodgeBonus).toBe(3);
+    expect(p.dr).toBe(2);
+  });
 });

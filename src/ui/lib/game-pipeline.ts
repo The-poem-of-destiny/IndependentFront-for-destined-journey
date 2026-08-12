@@ -1897,6 +1897,14 @@ export class GamePipeline {
       const waitForCommand = () =>
         new Promise<CombatCommand>((resolve) => (pendingResolve = resolve));
 
+      // 🎭 主持人/DM 模式（2026-08-12）：玩家**意图文本**桥。与 Command 桥并存——
+      //   coordinator 玩家分支优先走意图（waitForPlayerIntent → routePlayerIntent →
+      //   主持人会话解析），Command 桥留给测试/直捣兜底。两个 pending resolver
+      //   互斥使用：某轮要么等意图、要么等 Command，不会同时挂起。
+      let pendingIntentResolve: ((text: string) => void) | null = null;
+      const waitForPlayerIntent = () =>
+        new Promise<string>((resolve) => (pendingIntentResolve = resolve));
+
       // ── 🔴 T16 时序修复（玩家首决策永久挂起的根因）────────────────────────────
       // 此前 setCombatCoordinator 在 `await runCombatV3(...)` **之后**才执行，而
       // coordinator 的 waitForCommand（玩家单位轮次）依赖 store 经
@@ -1928,6 +1936,15 @@ export class GamePipeline {
             const r = pendingResolve;
             pendingResolve = null;
             r(cmd);
+          }
+        },
+        // 🎭 主持人/DM 模式（2026-08-12）：玩家提交**意图文本** → resolve 意图等待。
+        //   coordinator 收到后走 routePlayerIntent（主持人会话解析玩家意图 → Command）。
+        submitPlayerIntent: async (text: string) => {
+          if (pendingIntentResolve) {
+            const r = pendingIntentResolve;
+            pendingIntentResolve = null;
+            r(text);
           }
         },
         abandon: () => {
@@ -1979,6 +1996,10 @@ export class GamePipeline {
           history: context.history,
           submitCommand: async () => {}, // 等待态由 v3_awaiting_player_input 事件驱动 store
           waitForCommand,
+          // 🎭 主持人/DM 模式（2026-08-12）：玩家意图文本桥（生产主路径）。
+          //   coordinator 玩家分支据此走 routePlayerIntent（主持人解析玩家意图）。
+          submitPlayerIntent: async () => {},
+          waitForPlayerIntent,
           abandon: () => {},
           // 真实随机源（Q-01）：唯一注入点，委托 dice.ts 的 rollDice（内核禁 Math.random）。
           // 每次续杯调用会换一批新骰（BeginOutput 后再取，outputId 用计数器区分）。

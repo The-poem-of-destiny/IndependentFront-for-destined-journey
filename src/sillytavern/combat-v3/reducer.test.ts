@@ -14,7 +14,7 @@ import { reduce } from './reducer';
 import { createCombatState, applyOutcome } from './state';
 import { currentUnitId } from './phases/unit-turn';
 import type { CombatState, CombatDefinitionBundle } from './types';
-import { mkBundle, mkAttack, mkPass, mkAction, mkSettle, mkEndTurn } from './test-utils';
+import { mkBundle, mkAttack, mkPass, mkAction, mkSettle, mkEndTurn, mkFlee } from './test-utils';
 import { KernelStuckError } from './types';
 
 /** 跑一次 reduce 并返回 transition */
@@ -184,6 +184,68 @@ describe('熔断（§3.9）', () => {
     const t = once(oneSide, s, mkAttack('c1', 0, '甲', '甲'));
     // 若 reducer 侥幸在熔断前返回则通过（正常路径不该熔断）
     expect(t.rejection).toBeUndefined();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Bug A / Bug C（2026-08-12）：逃跑语义修正
+//   Bug A：Flee 不再 cost 'both' —— 攻击槽耗尽后点逃跑不再 SLOT_EXHAUSTED
+//   Bug C：逃跑成功不再整场 Terminal(flee_success)，只移除逃跑单位；终局归 checkTerminal
+// ══════════════════════════════════════════════════════════════════════════
+describe('Bug A/C：逃跑语义（不占槽 + 成功移除单位）', () => {
+  it('Bug A：攻击槽耗尽后 Flee 不再 SLOT_EXHAUSTED，正常检定（成功 → 移除单位 + 终局）', () => {
+    const bundle = mkBundle();
+    // 乙血厚（甲一刀 639 会打死 500hp 的乙 → 下一次 dispatch 一进 checkTerminal
+    // 就终局，Flee 根本轮不到执行）——保住乙，让逃跑检定真正跑起来
+    const enemy = bundle.participants[1];
+    (enemy as any).hp = 50000;
+    (enemy as any).maxHp = 50000;
+    let s = createCombatState(bundle);
+    // 甲先攻击（消费攻击槽，剩动作槽）→ 攻击槽已空
+    let t = once(bundle, s, mkAttack('a', 0, '甲', '乙'));
+    s = t.next!;
+    expect(s.units['甲'].attacksRemaining).toBe(0);
+    expect(s.units['乙'].hp).toBeGreaterThan(0); // 乙未死
+    // 攻击槽已空的情况下点逃跑 → 修复前 cost 'both' 要求攻击槽 ≥1 → SLOT_EXHAUSTED；
+    // 修复后不再被拒，能正常检定
+    t = once(bundle, s, mkFlee('f', s.revision, '甲'));
+    expect(t.rejection).toBeUndefined();
+    const flee = t.events.find((e: any) => e.kind === 'FleeAttempt') as
+      { success: boolean } | undefined;
+    expect(flee?.success).toBe(true); // 全 10 骰 + dex 15 → 25 ≥ DC 12
+    // 逃跑成功 → 甲被移除 → 只剩乙（enemy）→ 玩家全灭 → 终局敌方获胜
+    expect(t.events.map((e: any) => e.kind)).toContain('UnitDespawned');
+    expect(t.snapshot.units['甲']).toBeUndefined();
+    expect(t.snapshot.phase).toBe('Terminal');
+    expect(t.terminal?.reason).toBe('hp_zero');
+    expect(t.terminal?.winner).toBe('enemy');
+  });
+
+  it('Bug C：单敌人逃跑成功 → 敌方被移除 + 战斗结束玩家获胜（不再是 flee_success 整场终局）', () => {
+    const bundle = mkBundle();
+    const enemy = bundle.participants[1];
+    (enemy as any).hp = 50000;
+    (enemy as any).maxHp = 50000;
+    let s = createCombatState(bundle);
+    // 甲攻击（消费攻击槽）→ pass 动作槽 → 轮到乙（SlotConsume）
+    let t = once(bundle, s, mkAttack('a', 0, '甲', '乙'));
+    s = t.next!;
+    t = once(bundle, s, mkPass('p', s.revision, '甲', 'action'));
+    s = t.next!;
+    expect(s.phase).toBe('SlotConsume');
+    expect(s.units['乙'].hp).toBeGreaterThan(0); // 未致死，乙存活
+    // 乙逃跑成功 → 单位移除 + 终局玩家获胜（敌人逃光 = 我方获胜）
+    t = once(bundle, s, mkFlee('f', s.revision, '乙'));
+    expect(t.rejection).toBeUndefined();
+    const flee = t.events.find((e: any) => e.kind === 'FleeAttempt') as
+      { success: boolean } | undefined;
+    expect(flee?.success).toBe(true);
+    expect(t.events.map((e: any) => e.kind)).toContain('UnitDespawned');
+    expect(t.snapshot.units['乙']).toBeUndefined(); // 已离场
+    expect(t.snapshot.initiativeOrder).not.toContain('乙');
+    expect(t.snapshot.phase).toBe('Terminal');
+    expect(t.terminal?.reason).toBe('hp_zero');
+    expect(t.terminal?.winner).toBe('player');
   });
 });
 

@@ -1,20 +1,15 @@
 <script setup lang="ts">
 /**
- * CombatActionBar.vue — 战斗操作栏（M5 前端战斗面板 P4 子组件，B+C 混合操作）
+ * CombatActionBar.vue — 战斗操作栏（M5 前端战斗面板 P4 子组件）
  *
- * 快捷拼装助手 + 自由文本框。玩家通过四步选择（单位→行动类型→技能/道具→目标）
- * 拼装出结构化 v3 Command 直接提交（T14）；自由文本框可手打描述，经引擎的
- * 文本→Command 解析器转 Command 后提交 —— 禁止把自由文本直接当 Command 喂内核。
+ * 🎭 主持人/DM 模式（2026-08-12）：玩家输入**一律走意图文本 → 战斗主持人解析**。
+ * 四步拼装（单位→行动类型→技能/道具→目标）把玩家的选择**格式化成一句自然语言**
+ * 经 `submitCombatIntent` 交给 combat_v3 主持人会话；自由文本框原样提交。AI 理解
+ * 玩家想做什么 → 调 declare_* 工具声明动作 → 内核校验执行。拼装与对话同一条链路。
  *
  * 数据来源：useGameStore（v3ActiveCombat / combatAwaitingInput / characters /
- * submitCombatCommand）。敌我单位从 v3ActiveCombat.units 字典按 initiativeOrder
+ * submitCombatIntent）。敌我单位从 v3ActiveCombat.units 字典按 initiativeOrder
  * + side 投影（决策 A2，见 combat-v3-projection.ts）。
- *
- * T14（设计 2026-08-09 §3.2「玩家输入：统一 AI 解析意图」）：
- * - 拼装 UI 能确定意图/目标/技能时 → 直接产结构化 Command（不经过文本解析）
- * - 自由文本 → parsePlayerInput（@engine/combat-v3 的规则解析器，意图复用
- *   v2 的 parseIntentionFromInput；解析失败明确拒绝并 toast，不清空输入）
- * - v2 的 submitCombatInput（文本）已移除，store 侧 v2 提交链路一并删除
  *
  * 设计规范遵循 docs/design.md：
  * - 间距用 --theme-spacing-* 变量（§3）
@@ -30,7 +25,6 @@
 import { ref, computed, watch } from 'vue';
 import { useGameStore } from '../../../stores/game-store';
 import { useUIStore } from '../../../stores/ui-store';
-import { parsePlayerInput, type PlayerCommand, type PlayerParseCtx } from '@engine/combat-v3';
 import type { CharacterState, Skill, InventoryItem } from '@engine/types';
 import { projectUnitsBySide, type V3Unit } from './combat-v3-projection';
 
@@ -46,6 +40,35 @@ const awaiting = computed(() => game.combatAwaitingInput);
 
 /** 整个操作栏是否禁用（敌方回合或非战斗态） */
 const isLocked = computed(() => !awaiting.value);
+
+/**
+ * 当前行动单位（awaiting.unitId 对应的在场单位）——读攻击/动作槽剩余量，
+ * 决定哪些行动按钮可用。v3 单位卡片数据源：v3ActiveCombat.units 字典。
+ */
+const currentUnit = computed<V3Unit | undefined>(() => {
+  const id = awaiting.value?.unitId;
+  if (!id || !game.v3ActiveCombat) return undefined;
+  return game.v3ActiveCombat.units[id];
+});
+
+/**
+ * 🆕 2026-08-12（Bug 2 UI 侧）：攻击槽是否已耗尽。
+ * 原版规则每单位每回合 1[攻击]+1[动作]（世界书 uid 435）：攻击槽用完后**再点攻击**
+ * 会被内核 SLOT_EXHAUSTED 拒绝（此前还因 coordinator 熔断 abandon 整场 → 页面闪退）。
+ * 现在按钮层直接禁用「普攻 / 技能」（都是占攻击槽的行动），并给玩家文案提示。
+ */
+const attackSlotExhausted = computed(() => {
+  const u = currentUnit.value;
+  if (!u) return false;
+  return u.attacksRemaining <= 0;
+});
+
+/** 动作槽是否已耗尽（防御/道具/移动/专注等占动作槽；耗尽时只留「结束回合」） */
+const actionSlotExhausted = computed(() => {
+  const u = currentUnit.value;
+  if (!u) return false;
+  return u.actionsRemaining <= 0;
+});
 
 /** 我方参战单位列表（v3：player 阵营 + 存活） */
 const allyUnits = computed<V3Unit[]>(() =>
@@ -153,8 +176,16 @@ watch(
   { immediate: true },
 );
 
-/** 切换行动类型时清空子选择 */
+/** 切换行动类型时清空子选择；攻击/技能（占攻击槽）在攻击槽耗尽时禁用 */
 function selectAction(type: ActionType) {
+  if (attackSlotExhausted.value && (type === 'attack' || type === 'skill')) {
+    ui.toast('攻击槽已用完，请执行其他行动或点「结束回合」', 'warning');
+    return;
+  }
+  if (actionSlotExhausted.value && type === 'item') {
+    ui.toast('动作槽已用完，请点「结束回合」推进到下一位', 'warning');
+    return;
+  }
   if (selectedAction.value === type) return;
   selectedAction.value = type;
   selectedDetail.value = '';
@@ -175,50 +206,56 @@ function currentActorId(): string {
 }
 
 /**
- * 四步拼装 → v3 Command（不经过文本解析；store 的 submitCombatCommand 会补
- * commandId + expectedRevision）。字段不全（缺目标/缺技能）→ null，由 canAssemble
- * 在按钮层拦掉，这里只做防御性返回。
+ * 四步拼装 → **自然语言意图文本**（主持人/DM 模式，2026-08-12）。
+ *
+ * 🎭 重大改造：拼装不再直接产结构化 Command 喂内核，而是把玩家的选择格式化成
+ * 一句意图文本，经 `submitCombatIntent` 交给战斗主持人（combat_v3 会话）解析——
+ * AI 理解玩家想做什么 → 调 declare_* 工具声明动作 → 内核校验执行。这样拼装和
+ * 自由对话走同一条「玩家跟 AI 对话」链路，AI 统一理解意图。
+ *
+ * 字段不全（缺目标/缺技能）→ null，由 canAssemble 在按钮层拦掉，这里只做防御性返回。
  */
-function assembleCommand(): PlayerCommand | null {
+function assembleIntentText(): string | null {
   if (!selectedUnitId.value || !selectedAction.value) return null;
-  const actorId = currentActorId();
-  if (!actorId) return null;
+  const actorName =
+    findCharacter(selectedUnitId.value)?.name ?? currentUnit.value?.name ?? selectedUnitId.value;
+  if (!actorName) return null;
 
   switch (selectedAction.value) {
-    case 'attack':
+    case 'attack': {
       if (!selectedTargetId.value) return null;
-      return {
-        kind: 'DeclareAttack',
-        actorId,
-        cost: 'attack',
-        payload: { targetId: selectedTargetId.value, intentionLevel: '常规' },
-      };
+      const targetName = currentUnitNameOf(selectedTargetId.value);
+      return `我方「${actorName}」对「${targetName}」发动普通攻击`;
+    }
     case 'skill': {
       if (!selectedDetail.value || !selectedTargetId.value) return null;
-      return {
-        kind: 'DeclareAttack',
-        actorId,
-        cost: 'attack',
-        payload: {
-          targetId: selectedTargetId.value,
-          skill: selectedDetail.value,
-          intentionLevel: '常规',
-        },
-      };
+      const targetName = currentUnitNameOf(selectedTargetId.value);
+      return `我方「${actorName}」使用技能「${selectedDetail.value}」攻击「${targetName}」`;
     }
     case 'item':
       if (!selectedDetail.value) return null;
-      return {
-        kind: 'DeclareAction',
-        actorId,
-        cost: 'action',
-        payload: { actionType: 'item', description: selectedDetail.value },
-      };
+      return `我方「${actorName}」使用道具「${selectedDetail.value}」`;
     case 'defend':
-      return { kind: 'DeclareAction', actorId, cost: 'action', payload: { actionType: 'defend' } };
+      return `我方「${actorName}」采取防御姿态`;
     case 'flee':
-      return { kind: 'Flee', actorId, cost: 'both', payload: {} };
+      return `我方「${actorName}」尝试逃跑`;
   }
+}
+
+/** 从 v3ActiveCombat.units 按 id 查展示名（拼装意图文本用） */
+function currentUnitNameOf(unitId: string): string {
+  const u = game.v3ActiveCombat?.units?.[unitId];
+  return u?.name ?? unitId;
+}
+
+/** 执行拼装：产意图文本 → submitCombatIntent → 清空子选择（保留单位，可连续行动） */
+function executeAssembled() {
+  const text = assembleIntentText();
+  if (!text) return;
+  void game.submitCombatIntent(text);
+  selectedAction.value = '';
+  selectedDetail.value = '';
+  selectedTargetId.value = '';
 }
 
 /** 拼装四步是否已完整（按钮可用性） */
@@ -229,30 +266,15 @@ const canAssemble = computed(() => {
   return true;
 });
 
-/** 执行拼装：产 Command → submitCombatCommand → 清空子选择（保留单位，可连续行动） */
-function executeAssembled() {
-  const cmd = assembleCommand();
-  if (!cmd) return;
-  void game.submitCombatCommand(cmd);
-  selectedAction.value = '';
-  selectedDetail.value = '';
-  selectedTargetId.value = '';
-}
-
 /**
- * 结束回合：放弃当前单位**全部**剩余槽位（攻击+动作），一次 EndTurn 命令
- * （内核 consumeSlot 全量消费 → MoraleCheck → 下一位），等价连续 PassAttack+PassAction。
- * 与「跳过战斗」（放弃整场）刻意区分：这只是当前单位本轮结束。
+ * 结束回合：放弃当前单位**全部**剩余槽位（攻击+动作）。
+ * 🎭 主持人/DM 模式（2026-08-12）：走意图文本 → 主持人理解「结束回合」→ 调 end_turn
+ * （内核 consumeSlot 全量消费 → MoraleCheck → 下一位），与「跳过战斗」刻意区分。
  */
 function handleEndTurn() {
   const actorId = currentActorId();
   if (!actorId || isLocked.value) return;
-  void game.submitCombatCommand({
-    kind: 'EndTurn',
-    actorId,
-    cost: 'none',
-    payload: {},
-  });
+  void game.submitCombatIntent(`我方「${currentUnit.value?.name ?? actorId}」结束本回合`);
   // 本单位轮次结束，清空拼装选择（下次轮到该单位时由 watch 重新锁定）
   selectedAction.value = '';
   selectedDetail.value = '';
@@ -260,46 +282,20 @@ function handleEndTurn() {
 }
 
 // ════════════════════════════════════════
-//  自由文本 → Command 解析（T14，设计 §3.2）
-// ════════════════════════════════════════
-
-/** 构造解析上下文：当前行动者 + 在场存活单位 + 当前选中角色的技能/道具名单 */
-function parseCtx(): PlayerParseCtx {
-  return {
-    actorId: currentActorId(),
-    units: [...allyUnits.value, ...enemyUnits.value].map((u) => ({
-      id: u.id,
-      name: u.name,
-      side: u.side,
-    })),
-    skills: selectedCharacter.value
-      ? (selectedCharacter.value.skills ?? []).filter((s) => s.type === 'active').map((s) => s.name)
-      : [],
-    items: selectedCharacter.value
-      ? (selectedCharacter.value.inventory ?? [])
-          .filter((i) => (i.type === 'consumable' || i.type === 'material') && i.quantity > 0)
-          .map((i) => i.name)
-      : [],
-  };
-}
-
-// ════════════════════════════════════════
-//  发送
+//  发送（主持人/DM 模式，2026-08-12）
 // ════════════════════════════════════════
 
 const canSend = computed(() => inputText.value.trim().length > 0 && !isLocked.value);
 
+/**
+ * 🎭 主持人/DM 模式：自由文本直接提交给主持人（submitCombatIntent），由 AI 理解玩家
+ * 意图 → 调 declare_* 工具声明动作 → 内核执行。不再做本地正则解析（parsePlayerInput
+ * 曾把自由文本转 Command —— 那些规则让位于主持人理解，表达力更自然）。
+ */
 function handleSend() {
   const text = inputText.value.trim();
   if (!text || isLocked.value) return;
-  const result = parsePlayerInput(text, parseCtx());
-  if (!result.ok) {
-    // 解析失败：明确拒绝并 toast，不清空输入（玩家可修改重发）。
-    // 🔴 绝不把自由文本直接当 Command 喂内核（设计 §3.2）。
-    ui.toast(result.reason, 'warning');
-    return;
-  }
-  void game.submitCombatCommand(result.command);
+  void game.submitCombatIntent(text);
   inputText.value = '';
   // 拼装状态保留（同单位可能多次行动），文本框清空
 }
@@ -348,12 +344,28 @@ function handleKeydown(e: KeyboardEvent) {
             v-for="tab in ACTION_TABS"
             :key="tab.type"
             class="action-tab"
-            :class="{ selected: selectedAction === tab.type }"
-            :disabled="isLocked || !selectedUnitId"
+            :class="{
+              selected: selectedAction === tab.type,
+              'is-slot-exhausted':
+                (tab.type === 'attack' || tab.type === 'skill') && attackSlotExhausted,
+            }"
+            :disabled="
+              isLocked ||
+              !selectedUnitId ||
+              ((tab.type === 'attack' || tab.type === 'skill') && attackSlotExhausted)
+            "
+            :title="
+              (tab.type === 'attack' || tab.type === 'skill') && attackSlotExhausted
+                ? '攻击槽已用完，请执行其他行动或点「结束回合」'
+                : tab.label
+            "
             @click="selectAction(tab.type)"
           >
             {{ tab.label }}
           </button>
+        </div>
+        <div v-if="attackSlotExhausted" class="slot-hint attack-slot-hint">
+          攻击槽已用完 · 可点「结束回合」
         </div>
       </div>
 
@@ -643,6 +655,23 @@ function handleKeydown(e: KeyboardEvent) {
 .action-tab:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ── 攻击槽耗尽（Bug 2 UI 侧，2026-08-12）── */
+.action-tab.is-slot-exhausted:not(.selected) {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.slot-hint {
+  grid-column: 1 / -1;
+  font-size: 0.6875rem;
+  color: var(--theme-warning, var(--theme-text-muted));
+  letter-spacing: 0.03em;
+}
+
+.attack-slot-hint {
+  color: color-mix(in srgb, var(--theme-primary) 78%, var(--theme-text-muted));
 }
 
 /* ── 注入按钮 ── */

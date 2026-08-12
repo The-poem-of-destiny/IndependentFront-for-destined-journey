@@ -562,6 +562,23 @@ describe('M2 v3 战斗接线', () => {
     expect(store.combatAwaitingInput).toBeNull();
   });
 
+  it('submitCombatIntent（主持人模式）：意图文本原样转 Coordinator.submitPlayerIntent', async () => {
+    const store = useGameStore();
+    let received: string | null = null;
+    store.setCombatCoordinator({
+      submitPlayerIntent: async (text: string) => {
+        received = text;
+      },
+    });
+    await store.submitCombatIntent('我方「甲」使用火焰术攻击「骷髅兵」');
+    expect(received).toBe('我方「甲」使用火焰术攻击「骷髅兵」');
+  });
+
+  it('submitCombatIntent：无意图桥（旧 coordinator / 测试）→ 静默忽略（不抛）', async () => {
+    const store = useGameStore();
+    await expect(store.submitCombatIntent('随便说点什么')).resolves.not.toThrow();
+  });
+
   it('应用 v3 战斗事件驱动面板状态', () => {
     const store = useGameStore();
     store.applyCombatEvent({
@@ -868,6 +885,134 @@ describe('M2 v3 战斗接线', () => {
     const result = await runPromise;
     expect(result.outcome).toBe('ally_win');
     expect(seen.some((e) => e.type === 'v3_awaiting_player_input')).toBe(true);
+  });
+
+  it('🎭 主持人/DM 模式：玩家意图文本 → 主持人解析 → Command → 内核推进（submitCombatIntent 链路）', async () => {
+    const store = useGameStore();
+    const seen: CombatEvent[] = [];
+    // game-pipeline 意图文本桥（主持人模式）：waitForPlayerIntent 暴露 pending resolve，
+    // coordinator 句柄在 runCombatV3 之前挂到 store。
+    let pendingIntentResolve: ((text: string) => void) | null = null;
+    const waitForPlayerIntent = () => new Promise<string>((r) => (pendingIntentResolve = r));
+
+    // fake 主持人：玩家意图文本「攻击乙」→ 声明攻击；敌方轮次 → 扮演乙 pass 双槽。
+    // 首个 chatWithTools 调用是开局氛围（F5：openCombatScene，含「战斗开场」user）
+    // ——返回氛围描写、不产命令；此后进入正式决策（【玩家意图】/轮到敌方）。
+    let hostCallIdx = 0;
+    const opts: RunCombatV3Opts = {
+      saveId: SAVE_ID,
+      bundle: mkBundle({
+        combatId: 't16-host-bridge',
+        participants: [
+          mkParticipant('甲'),
+          mkParticipant('乙', {
+            side: 'enemy',
+            characterId: '乙',
+            name: '乙',
+            hp: 1,
+            maxHp: 1,
+            defense: 0,
+            dr: 0,
+          }),
+        ],
+      }),
+      deps: {
+        configs: [
+          {
+            agentId: 'combat_v3',
+            systemPrompt: 'TEST_HOST_SYSTEM_PROMPT',
+          } as never,
+        ],
+        clientFactory: () =>
+          ({
+            chatWithTools: async (
+              req: { messages: Array<{ role: string; content: string | null }> },
+              toolExecutor: (n: string, a: Record<string, any>) => Promise<unknown>,
+            ) => {
+              hostCallIdx++;
+              // ① 开局氛围调用：只输出氛围，不产命令
+              if (hostCallIdx === 1) {
+                return { output: '战场杀意弥漫', rawResponse: '', toolCalls: [] } as never;
+              }
+              // ② 正式决策：主持人读到【玩家意图】→ 按意图声明玩家动作；否则视为敌方轮次
+              const lastUser =
+                req.messages
+                  .filter((m) => m.role === 'user' && m.content !== null)
+                  .map((m) => m.content as string)
+                  .pop() ?? '';
+              const history: Array<{ name: string; arguments: unknown; result: unknown }> = [];
+              if (lastUser.includes('【玩家意图】') && lastUser.includes('结束本回合')) {
+                const args = { actorName: '甲' };
+                const result = await toolExecutor('end_turn', args);
+                history.push({ name: 'end_turn', arguments: args, result });
+              } else if (lastUser.includes('【玩家意图】')) {
+                const args = { actorName: '甲', targetName: '乙', intentionLevel: '常规' };
+                const result = await toolExecutor('declare_attack', args);
+                history.push({ name: 'declare_attack', arguments: args, result });
+              } else {
+                // 敌方轮次：扮演乙 pass 双槽（不撞 SLOT_EXHAUSTED）
+                const script = [
+                  { name: 'pass_slot', args: { actorName: '乙', slot: 'attack' } },
+                  { name: 'pass_slot', args: { actorName: '乙', slot: 'action' } },
+                ];
+                for (const step of script) {
+                  const result = await toolExecutor(step.name, step.args);
+                  history.push({ name: step.name, arguments: step.args, result });
+                }
+              }
+              return { output: '主持人演绎', rawResponse: '', toolCalls: history } as never;
+            },
+            chat: async () => ({ output: null, rawResponse: '' }),
+          }) as never,
+        endpoint: { id: 'ep' } as never,
+        stateManager: { commitChatState: async () => {} },
+        characters: [],
+        context: {} as never,
+        submitCommand: async () => {},
+        waitForCommand: async () => {
+          throw new Error('主持人模式不应走 Command 桥');
+        },
+        submitPlayerIntent: async () => {},
+        waitForPlayerIntent,
+        abandon: () => {},
+        drawDice: () => ({ outputId: 'host-dice', dice: Array.from({ length: 60 }, () => 10) }),
+      },
+      onCombatEvent: (evt) => {
+        seen.push(evt);
+        store.applyCombatEvent(evt);
+      },
+    };
+
+    // 🔴 句柄先挂（runCombatV3 之前），战斗进行中玩家意图才能喂入
+    store.setCombatCoordinator({
+      submitPlayerIntent: async (text: string) => {
+        if (pendingIntentResolve) {
+          const r = pendingIntentResolve;
+          pendingIntentResolve = null;
+          r(text);
+        }
+      },
+      abandon: () => {},
+    });
+
+    const runPromise = runCombatV3(opts); // 不 await：让战斗在玩家回合挂起
+
+    // 等轮到玩家 → 喂意图「攻击乙」→ 主持人解析成 DeclareAttack → 内核结算
+    await vi.waitFor(() => {
+      expect(store.combatAwaitingInput?.unitId).toBe('甲');
+    });
+    await store.submitCombatIntent('攻击乙');
+    // 等第二枚等待事件（攻击后内核要求消费 action 槽）→ 喂「结束本回合」
+    await vi.waitFor(() => {
+      expect(seen.filter((e) => e.type === 'v3_awaiting_player_input').length).toBe(2);
+    });
+    await store.submitCombatIntent('我方「甲」结束本回合');
+
+    const result = await runPromise;
+    // 主持人链路推进战斗并正常结算（意图文本 → 主持人 → Command → 内核）
+    expect(result.outcome).toBe('ally_win');
+    // 敌人真的被攻击（v3_action 攻击卡片来自内核真实结算）
+    expect(seen.some((e) => e.type === 'v3_action' && e.toolName === 'attack')).toBe(true);
   });
 });
 

@@ -49,7 +49,16 @@ export interface CombatClient {
     toolExecutor: (name: string, args: Record<string, any>) => Promise<unknown>,
     options?: { maxRounds?: number; signal?: AbortSignal },
   ) => Promise<CombatClientResult>;
-  chat: (messages: Array<{ role: string; content: string }>) => Promise<CombatClientResult>;
+  /**
+   * 结算叙事短调用（narrateSettlement）——纯文本，不走工具。
+   * 🔴 契约与 AgentClient.chat 对齐：**对象形状** `{ messages }`，不是裸数组。
+   *    2026-08-12 真机 debug：此前接口声明数组、AgentClient.chat 收对象，
+   *    于是 `request.messages` 是 undefined → ensureUserMessage 里 `messages.length`
+   *    抛「Cannot read properties of undefined (reading 'length')」，结算叙事每次必败。
+   */
+  chat: (request: {
+    messages: Array<{ role: string; content: string }>;
+  }) => Promise<CombatClientResult>;
 }
 
 export interface CombatClientResult {
@@ -118,6 +127,20 @@ export type CombatEvent =
   | { type: 'v3_settlement'; fpDelta: number; reason: string; winner?: string }
   | { type: 'v3_narrative'; text: string; round: number }
   | { type: 'v3_awaiting_player_input'; unit: string; unitId: string; round: number }
+  | {
+      /**
+       * 🆕 2026-08-12（Bug 2 修复）：玩家侧命令被内核 rejection 的友好提示。
+       * 典型场景：玩家攻击槽已耗尽仍再点攻击 → SLOT_EXHAUSTED。这是**玩家误操作**，
+       * 不是系统故障 —— 此前 coordinator 走熔断（steps>3 → break → abandon）会毁掉
+       * 整场战斗。现在 emit 本事件：store 在 combatLog 推一条提示行 + 重新亮
+       * v3_awaiting_player_input，玩家可换动作或点「结束回合」。
+       */
+      type: 'v3_rejection_notice';
+      code: string;
+      message: string;
+      unit: string;
+      unitId: string;
+    }
   | { type: 'v3_combat_ended'; reason: string; winner?: string }
   /**
    * 🆕 F2（2026-08-10）：就绪面板事件 —— combat_trigger 检出后由 game-pipeline 直接
@@ -178,6 +201,27 @@ export const COMBAT_EVENTS = {
 // game-pipeline v3 分支组装 bundle participants 时仍引（把 CharacterState → CombatParticipant）。
 
 /**
+ * 从装备 stats 对象里按「英文键优先、中文键兜底」的顺序取数值。
+ * 背景（2026-08-12）：item_gen 链路（char-gen-agent parseEquipmentXML）把 XML
+ * `stats="攻击力:130"` 原样解析成中文键对象（{ 攻击力: 130 }）经 add_item patch 落库，
+ * 真机数据里 `攻击`/`攻击力`/`防御`/`防御力` 并存；而本模块读取处此前只认英文键
+ * （atk/defense/dr/...），导致 weaponAtk 恒 0、defense 恒 10。中文候选词与
+ * effect-parser CHINESE_TO_KEY / describe-automaton SLOT_CN 的口径对齐
+ * （攻击力/防御力/命中/闪避/穿透/减伤）。存量存档不动，只在读取处做多键兼容。
+ */
+function statNum(
+  stats: Record<string, unknown> | undefined,
+  ...keys: string[]
+): number | undefined {
+  if (!stats) return undefined;
+  for (const k of keys) {
+    const v = stats[k];
+    if (typeof v === 'number') return v;
+  }
+  return undefined;
+}
+
+/**
  * 从 CharacterState 创建 CombatParticipant。
  * 填充战斗所需的衍生字段（M2：装备 = inventory 中 equippedSlot 非空的物品，规范 §3）。
  * 纯类型转换；不依赖任何 v2 战斗运行时。
@@ -231,17 +275,17 @@ export function characterToCombatParticipant(
     maxMp: char.maxMp,
     sp: char.sp,
     maxSp: char.maxSp,
-    defense: armor?.stats?.defense ?? 10,
-    dr: armor?.stats?.dr ?? 0,
-    penetration: weapon?.stats?.penetration ?? 0,
-    hitBonus: weapon?.stats?.hit ?? 0,
-    dodgeBonus: armor?.stats?.dodge ?? 0,
+    defense: statNum(armor?.stats, 'defense', '防御', '防御力') ?? 10,
+    dr: statNum(armor?.stats, 'dr', '减伤') ?? 0,
+    penetration: statNum(weapon?.stats, 'penetration', '穿透') ?? 0,
+    hitBonus: statNum(weapon?.stats, 'hit', '命中') ?? 0,
+    dodgeBonus: statNum(armor?.stats, 'dodge', '闪避') ?? 0,
     speedModifiers: [],
     fixedInitiativeBonus: 0,
     attacksRemaining: 1,
     actionsRemaining: 1,
     statusEffects: char.statusEffects,
-    weaponAtk: weapon?.stats?.atk ?? 0,
+    weaponAtk: statNum(weapon?.stats, 'atk', '攻击', '攻击力') ?? 0,
     modifiers: equippedModifiers.length > 0 ? equippedModifiers : undefined,
     automata: equippedAutomata.length > 0 ? equippedAutomata : undefined,
     activeSkills: activeSkills.length > 0 ? activeSkills : undefined,

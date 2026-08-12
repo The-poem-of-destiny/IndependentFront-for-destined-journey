@@ -82,8 +82,61 @@ const ALL_EVENTS: DomainEvent[] = [
 describe('A2-6：29 个 DomainEvent 全部有映射（穷尽）', () => {
   it('projectToUi 不抛错且每个事件产出至少一个 CombatEvent（无静默丢弃）', () => {
     const out = projectToUi(ALL_EVENTS);
-    expect(out.length).toBe(ALL_EVENTS.length); // 一一对应，无丢弃
+    // 🔴 2026-08-12：攻击三阶段（AttackDeclared/AttackResolved/DamageApplied）**聚合**
+    //   为一张完整 v3_action 卡片（否则 UI 一次攻击冒三张空卡）→ 产出数 = 事件数 - 2
+    const attackKinds = ALL_EVENTS.filter(
+      (e) =>
+        e.kind === 'AttackDeclared' || e.kind === 'AttackResolved' || e.kind === 'DamageApplied',
+    ).length;
+    expect(out.length).toBe(ALL_EVENTS.length - attackKinds + 1); // N 攻击事件 → 1 张卡
     expect(out.every((e) => e && e.type)).toBe(true);
+  });
+
+  // 🔴 2026-08-12（真机 bug：一次攻击显示三张空卡）回归：攻击三阶段合成一张完整卡片
+  it('攻击三阶段事件聚合为一张完整 v3_action（字段齐全：检定/评级/伤害/HP）', () => {
+    const out = projectToUi([
+      {
+        kind: 'AttackDeclared',
+        attackerId: '甲',
+        targetId: '乙',
+        skill: '灼热射线',
+        intentionLevel: '常规',
+      },
+      {
+        kind: 'AttackResolved',
+        attackerId: '甲',
+        targetId: '乙',
+        checkValue: 15,
+        rating: '有效',
+        hit: true,
+        dice: [10],
+      },
+      {
+        kind: 'DamageApplied',
+        attackerId: '甲',
+        targetId: '乙',
+        preReduction: 200,
+        postStep6: 180,
+        final: 161,
+        damageType: '能量',
+        targetHpBefore: 625,
+        targetHpAfter: 464,
+      },
+    ]);
+    // 只产出 1 张卡（不再是 3 张）
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe('v3_action');
+    const r = (out[0] as { result: Record<string, unknown> }).result;
+    expect(r.attackerId).toBe('甲');
+    expect(r.targetId).toBe('乙');
+    expect(r.skill).toBe('灼热射线');
+    expect(r.checkValue).toBe(15);
+    expect(r.rating).toBe('有效');
+    expect(r.hit).toBe(true);
+    expect(r.final).toBe(161);
+    expect(r.damageType).toBe('能量');
+    expect(r.targetHpBefore).toBe(625);
+    expect(r.targetHpAfter).toBe(464);
   });
 });
 

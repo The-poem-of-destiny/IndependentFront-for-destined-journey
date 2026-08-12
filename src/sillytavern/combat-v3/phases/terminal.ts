@@ -5,9 +5,11 @@
  * 实施计划：docs/planning/2026-07-31-combat-v3-implementation-plan.md §3.2 / §3.5（C3 / M-A1-6 / A1-7）
  *
  * 终局四出口（验收 A1-6）：
- *   1. hp_zero        —— 一方（玩家或敌方）全灭
+ *   1. hp_zero        —— 一方（玩家或敌方）全灭（含逃跑致空战场：敌人逃光 = 玩家获胜）
  *   2. morale_routed  —— 士气溃逃（unit-turn.runMoraleCheck 触发）
- *   3. flee_success   —— 逃跑成功（action.handleFlee 触发）
+ *   3. flee_success   —— 逃跑成功（🔴 2026-08-12 Bug C 后不再由 handleFlee 直接触发：
+ *                        逃跑改为移除单位，终局归 checkTerminal 判定；此 reason 保留给
+ *                        历史 fixture / 显式 forceTerminal 兼容）
  *   4. force_terminal —— 强制终局（概念级，第 09 场，rule-keys 注册）
  *
  * checkTerminal(state)：返回 TerminalReason | null。dispatch 进入 Terminal 相位后
@@ -40,10 +42,13 @@ export function checkTerminal(
   }
 
   const units = Object.values(state.units);
-  if (units.length === 0) return null;
-
+  // 🔴 2026-08-12（Bug C 修复）：空战场**必须终局**，不得返回 null。
+  // 原实现两处 return null（units 空 / 全部 hp≤0）会让「双方同时跑光/死光」无人
+  // 判终 → dispatch 循环空转直至 KernelStuckError（真机卡死隐患）。全灭/全跑光
+  // 没有赢家 → winner undefined（平局语义），但 reason 必须给出才能进 Terminal
+  // 相位 → RequestSettlement 收尾。
   const alive = units.filter((u) => u.hp > 0);
-  if (alive.length === 0) return null;
+  if (alive.length === 0) return { reason: 'hp_zero', winner: undefined };
 
   const playerAlive = alive.some((u) => u.side === 'player');
   const enemyAlive = alive.some((u) => u.side === 'enemy');

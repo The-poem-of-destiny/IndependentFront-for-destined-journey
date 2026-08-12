@@ -14,7 +14,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildCombatEndFactText,
   buildUnitPersistPatches,
+  collectCombatEndFacts,
   currentInitiative,
   resolveUnitIdByName,
   runCombatV3,
@@ -1292,6 +1294,122 @@ describe('结算演绎（2026-08-09 §2.5：数字即时 + AI 叙事补上）', 
     expect(narrationSeen).toEqual(['乙压低身形，利刃带风直取甲！']);
   });
 
+  // 🎭 主持人/DM 模式（2026-08-12）：玩家意图 → 主持人解析 → Command
+  it('routePlayerIntent：玩家意图文本 → 主持人会话解析 → 替玩家声明动作（主持人模式）', async () => {
+    const { opts } = mkOpts();
+    const { routePlayerIntent } = await import('./coordinator');
+    const { openCombat } = await import('./index');
+    const session = openCombat({ kind: 'new', bundle: opts.bundle } as never);
+    const narrationSeen: string[] = [];
+    // 捕获主持人会话收到的 user 消息（验证【玩家意图】真的喂进去了）
+    let seenUser: string | null = null;
+    // 预置一条已发消息（模拟战斗进行中、非首轮决策）→ 玩家意图走增量 user 分支
+    const combatSession = {
+      messages: [{ role: 'system' as const, content: 'pre-seeded' }],
+      client: null,
+    };
+    const ctx: Parameters<typeof routePlayerIntent>[3] = {
+      clientFactory: () =>
+        ({
+          chatWithTools: async (req: {
+            messages: Array<{ role: string; content: string | null }>;
+          }) => {
+            seenUser =
+              req.messages
+                .filter((m) => m.role === 'user' && m.content !== null)
+                .map((m) => m.content as string)
+                .pop() ?? null;
+            return {
+              output: '明白了，我替你执行。',
+              rawResponse: '明白了，我替你执行。',
+              toolCalls: [
+                {
+                  name: 'declare_attack',
+                  arguments: { actorName: '甲', targetName: '乙', intentionLevel: '常规' },
+                },
+              ],
+            };
+          },
+          chat: async () => ({ output: null, rawResponse: '' }),
+        }) as never,
+      endpoint: opts.deps.endpoint,
+      saveId: 's1',
+      submitCommand: async () => undefined,
+      waitForCommand: async () => {
+        throw new Error('unused');
+      },
+      abandon: () => undefined,
+      context: {} as never,
+      onNarration: (text) => narrationSeen.push(text),
+      combatSession,
+    };
+    const res = await routePlayerIntent(
+      '我用灼热射线打那个怪物',
+      { kind: 'PlayerCommand', unitId: '甲', unitName: '甲', round: 1 },
+      session,
+      ctx,
+    );
+    // ① 【玩家意图】文本真的进了主持人会话的 user 消息
+    expect(seenUser).toContain('【玩家意图】');
+    expect(seenUser).toContain('我用灼热射线打那个怪物');
+    // ② 主持人产出命令（替玩家声明攻击）
+    expect(res.commands[0].kind).toBe('DeclareAttack');
+    expect((res.commands[0] as { actorId?: string }).actorId).toBe('甲');
+    // ③ 演绎进 combatLog
+    expect(narrationSeen).toEqual(['明白了，我替你执行。']);
+  });
+
+  it('routePlayerIntent 空意图文本 → 兜底文案喂主持人，不抛错', async () => {
+    const { opts } = mkOpts();
+    const { routePlayerIntent } = await import('./coordinator');
+    const { openCombat } = await import('./index');
+    const session = openCombat({ kind: 'new', bundle: opts.bundle } as never);
+    let seenUser: string | null = null;
+    // 预置一条已发消息（模拟整场战斗进行中、非首轮决策）→ 空意图兜底文案才会被 append
+    const combatSession = {
+      messages: [{ role: 'system' as const, content: 'pre-seeded' }],
+      client: null,
+    };
+    const ctx: Parameters<typeof routePlayerIntent>[3] = {
+      clientFactory: () =>
+        ({
+          chatWithTools: async (req: {
+            messages: Array<{ role: string; content: string | null }>;
+          }) => {
+            seenUser =
+              req.messages
+                .filter((m) => m.role === 'user' && m.content !== null)
+                .map((m) => m.content as string)
+                .pop() ?? null;
+            return {
+              output: '',
+              rawResponse: '',
+              toolCalls: [],
+            };
+          },
+          chat: async () => ({ output: null, rawResponse: '' }),
+        }) as never,
+      endpoint: opts.deps.endpoint,
+      saveId: 's1',
+      submitCommand: async () => undefined,
+      waitForCommand: async () => {
+        throw new Error('unused');
+      },
+      abandon: () => undefined,
+      context: {} as never,
+      combatSession,
+    };
+    const res = await routePlayerIntent(
+      '   ',
+      { kind: 'PlayerCommand', unitId: '甲', unitName: '甲', round: 1 },
+      session,
+      ctx,
+    );
+    expect(seenUser).toContain('玩家未给出具体指令');
+    // 空输出 + 无工具调用 → 防御性 PassAttack（commandsFromResult 兜底）
+    expect(res.commands[0].kind).toBe('PassAttack');
+  });
+
   /**
    * 端到端场景：乙高血量（1500）→ 乙每回合 pass 双槽（仍会建持久会话 client）→
    * 甲每回合攻击 → 每次攻击 dispatch 触发一次结算短调用（client.chat 非工具路径）。
@@ -1343,7 +1461,10 @@ describe('结算演绎（2026-08-09 §2.5：数字即时 + AI 叙事补上）', 
           }
           return { output: 'ok', rawResponse: 'ok', toolCalls: history } as never;
         },
-        chat: async (messages: unknown) => chatImpl(messages),
+        chat: async (request: unknown) => {
+          const req = request as { messages?: unknown };
+          return chatImpl((req?.messages ?? []) as unknown);
+        },
       }) as never;
     return opts;
   }
@@ -1643,6 +1764,173 @@ describe('T11：write_summary 终局摘要收集（2026-08-09 §2.2 改造：不
     expect(res.commands[0].kind).toBe('PassAttack');
     // 收集点生效：text 进了 combatSession.summary（终局回注正文的数据源）
     expect(combatSession.summary ?? '').toContain('终局摘要文本');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 战斗终局 AI 总结（2026-08-12 新增）：终局结算完成后，专门调一次 AI 写总结叙事，
+// 不再只靠战斗中 write_summary 顺手收集。优先级：总结 || collectedSummary || 兜底。
+// ══════════════════════════════════════════════════════════════════════════════
+describe('战斗终局 AI 总结（终局后专门调 AI 写总结叙事）', () => {
+  const combatConfig = (systemPrompt: string): AgentConfig =>
+    ({
+      agentId: 'combat_v3',
+      enabled: true,
+      apiEndpointId: 'ep',
+      model: '',
+      temperature: 0.7,
+      maxTokens: 4096,
+      topP: 1,
+      frequencyPenalty: 0,
+      presencePenalty: 0,
+      retryOnFail: false,
+      timeout: 0,
+      userId: '',
+      promptTemplate: { fixedSystem: '', fixedExamples: '' },
+      worldBookIds: [],
+      systemPrompt,
+    }) as AgentConfig;
+
+  /** 构造「甲一刀秒杀脆皮乙」的战斗（乙 1hp：甲首轮带走 → 战斗短、乙从未行动） */
+  function quickKillBundle() {
+    return mkBundle({
+      combatId: 'coord-end-summary',
+      participants: [
+        mkParticipant('甲'),
+        mkParticipant('乙', {
+          side: 'enemy',
+          characterId: '乙',
+          name: '乙',
+          hp: 1,
+          maxHp: 1,
+          defense: 0,
+          dr: 0,
+        }),
+      ],
+    });
+  }
+
+  it('端到端：终局结算后 narrateCombatEnd 被调用 → narrativeSummary 用总结文本（chat 收到终局事实）', async () => {
+    const { opts, setQueue } = mkOpts();
+    opts.bundle = quickKillBundle();
+    // F5 开局氛围：configs 经 game-pipeline 恒透传 → openCombatScene 惰性建 client
+    opts.deps.configs = [combatConfig('TEST_COMBAT_END_SUMMARY_PROMPT')];
+    setQueue(atkTurn());
+
+    // chat 分流：user 消息含「【战斗终局】」→ 终局总结调用（返回总结文本）；否则是
+    // 战斗中 settlement 演绎（返回空输出跳过，不干扰终局总结断言）
+    let endSummaryMessages: Array<{ role: string; content: string | null }> | undefined;
+    opts.deps.clientFactory = () =>
+      ({
+        chatWithTools: async () =>
+          ({ output: '战场开场。', rawResponse: '战场开场。', toolCalls: [] }) as never,
+        chat: async (req: { messages: Array<{ role: string; content: string }> }) => {
+          const last = req.messages[req.messages.length - 1];
+          if (last?.role === 'user' && last.content.includes('【战斗终局】')) {
+            endSummaryMessages = req.messages;
+            return {
+              output: '甲在电光石火间了结乙，战场归于沉寂。',
+              rawResponse: '',
+            } as never;
+          }
+          return { output: null, rawResponse: '' } as never;
+        },
+      }) as never;
+
+    const result = await runCombatV3(opts);
+    expect(result.outcome).toBe('ally_win');
+    // narrativeSummary 用的是终局总结文本（优先级：总结 || collectedSummary || 兜底）
+    expect(result.narrativeSummary).toBe('甲在电光石火间了结乙，战场归于沉寂。');
+    // 终局总结调用确实发生：chat 收到带整场战斗事实的 user 消息
+    expect(endSummaryMessages).toBeDefined();
+    const endUser = endSummaryMessages!.find(
+      (m) => m.role === 'user' && m.content?.includes('【战斗终局】'),
+    );
+    expect(endUser?.content).toContain('战斗结果：我方获胜');
+    expect(endUser?.content).toContain('进行回合数');
+    expect(endUser?.content).toContain('仍屹立于战场：甲');
+    expect(endUser?.content).toContain('倒下或已离场：乙');
+  });
+
+  it('端到端：终局总结 chat 抛错 → 回落兜底不崩（战斗结果照常返回）', async () => {
+    const { opts, setQueue } = mkOpts();
+    opts.bundle = quickKillBundle();
+    opts.deps.configs = [combatConfig('TEST_COMBAT_END_SUMMARY_PROMPT')];
+    setQueue(atkTurn());
+    opts.deps.clientFactory = () =>
+      ({
+        chatWithTools: async () =>
+          ({ output: '战场开场。', rawResponse: '战场开场。', toolCalls: [] }) as never,
+        chat: async () => {
+          throw new Error('mock chat 失败');
+        },
+      }) as never;
+
+    const result = await runCombatV3(opts);
+    expect(result.outcome).toBe('ally_win');
+    // 总结失败（narrateCombatEnd 静默吞掉）→ 回落 collectedSummary || 兜底
+    // （本用例无 write_summary → 兜底文本，终局流程不崩）
+    expect(result.narrativeSummary).toContain('战斗结束');
+  });
+
+  it('端到端：终局总结 chat 返回空输出 → 回落兜底不崩', async () => {
+    const { opts, setQueue } = mkOpts();
+    opts.bundle = quickKillBundle();
+    opts.deps.configs = [combatConfig('TEST_COMBAT_END_SUMMARY_PROMPT')];
+    setQueue(atkTurn());
+    opts.deps.clientFactory = () =>
+      ({
+        chatWithTools: async () =>
+          ({ output: '战场开场。', rawResponse: '战场开场。', toolCalls: [] }) as never,
+        chat: async () => ({ output: null, rawResponse: '' }) as never,
+      }) as never;
+
+    const result = await runCombatV3(opts);
+    expect(result.outcome).toBe('ally_win');
+    expect(result.narrativeSummary).toContain('战斗结束');
+  });
+
+  it('直捣：collectCombatEndFacts 存活/倒下分类（逃跑移除的单位归入离场名单）', () => {
+    const session = {
+      snapshot: () => ({
+        round: 3,
+        resourceSnapshots: { FP: 1250 },
+        terminal: { reason: 'hp_zero' as const, winner: 'player' },
+        units: {
+          甲: { id: '甲', name: '甲', side: 'player' as const, hp: 3200, maxHp: 5000 },
+          丙: { id: '丙', name: '丙', side: 'enemy' as const, hp: 0, maxHp: 500 },
+        },
+      }),
+    } as never;
+    const facts = collectCombatEndFacts(session, 1000, [
+      mkParticipant('甲'),
+      mkParticipant('乙', { side: 'enemy', characterId: '乙', name: '乙' }),
+      mkParticipant('丙', { side: 'enemy', characterId: '丙', name: '丙', hp: 0, maxHp: 500 }),
+    ]);
+    expect(facts.outcome).toBe('ally_win');
+    expect(facts.rounds).toBe(3);
+    expect(facts.fpDelta).toBe(250);
+    // 甲 hp>0 → 存活；丙 hp≤0 → 倒下；乙开战在场而终局快照已移除（逃跑成功）→ 离场
+    expect(facts.aliveUnits).toEqual([{ name: '甲', side: 'player' }]);
+    expect(facts.fallenUnits.map((u) => u.name).sort()).toEqual(['丙', '乙']);
+  });
+
+  it('直捣：buildCombatEndFactText 形状（结果/回合/FP/名单进事实串，供 AI 当依据）', () => {
+    const text = buildCombatEndFactText({
+      reason: 'flee_success',
+      winner: undefined,
+      outcome: 'fled',
+      rounds: 2,
+      fpDelta: -100,
+      aliveUnits: [{ name: '甲', side: 'player' }],
+      fallenUnits: [{ name: '乙', side: 'enemy' }],
+    });
+    expect(text).toContain('战斗结果：战斗以逃遁告终');
+    expect(text).toContain('终局原因：逃跑成功');
+    expect(text).toContain('进行回合数：2');
+    expect(text).toContain('命运点数净变动：-100');
+    expect(text).toContain('仍屹立于战场：甲');
+    expect(text).toContain('倒下或已离场：乙');
   });
 });
 
@@ -2406,7 +2694,317 @@ describe('F4：敌方多命令按序全部 dispatch（SLOT_EXHAUSTED 卡死根�
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// F5（2026-08-10）：开局先调 AI 构建战斗场景 —— 氛围描写（进 combatLog）+ 信息获取
+// Bug 2（2026-08-12）：玩家攻击槽耗尽后再次点攻击 → SLOT_EXHAUSTED。
+// 根因：coordinator 的 rejection 熔断（steps>3 → break → abandon）把玩家的
+// **误操作**当成系统故障处理，整场战斗被放弃（用户看到「页面闪退」）。
+// 修复：玩家侧 SLOT_EXHAUSTED 不熔断 → emit v3_rejection_notice + 重新等待输入。
+// ══════════════════════════════════════════════════════════════════════════
+describe('Bug 2：玩家攻击槽耗尽后再次点攻击 → 提示 + 继续等输入，不 abandon', () => {
+  it('连续两次 DeclareAttack（第二次攻击槽已空）→ emit v3_rejection_notice、不 abandon、战斗继续推进', async () => {
+    const { opts, commit } = mkOpts({
+      // 乙方（敌方）配 pass 双槽脚本：回合完整推进，不产生自己的 SLOT_EXHAUSTED，
+      // 让测试只验证「玩家侧」攻击槽耗尽的处理路径。
+      enemyScript: [
+        { name: 'pass_slot', args: { actorName: '乙', slot: 'attack' } },
+        { name: 'pass_slot', args: { actorName: '乙', slot: 'action' } },
+      ],
+    });
+    opts.bundle = mkBundle({
+      combatId: 'coord-bug2-slot',
+      participants: [
+        mkParticipant('甲', { hp: 999999, maxHp: 999999 }), // 扛住敌方攻击，让战斗推进
+        mkParticipant('乙', {
+          side: 'enemy',
+          characterId: '乙',
+          name: '乙',
+          hp: 1000,
+          maxHp: 1000,
+          defense: 300,
+        }),
+      ],
+    });
+    // 玩家队列：攻击（占攻击槽）→ 再攻击（攻击槽已空，应 SLOT_EXHAUSTED）→ pass 动作槽推进
+    // 后续轮次循环供给（commandId 每轮唯一防内核幂等缓存重放）。
+    opts.deps.waitForCommand = (() => {
+      let q: CombatCommand[] = [];
+      let n = 0;
+      const nextAttack = (): CombatCommand => ({
+        commandId: `u-atk-${++n}`,
+        expectedRevision: -1,
+        kind: 'DeclareAttack',
+        actorId: '甲',
+        cost: 'attack',
+        payload: { targetId: '乙', intentionLevel: '常规' },
+      });
+      const nextPassAction = (): CombatCommand => ({
+        commandId: `u-pass-${++n}`,
+        expectedRevision: -1,
+        kind: 'PassAction',
+        actorId: '甲',
+        cost: 'action',
+        payload: {} as Record<string, never>,
+      });
+      return async () => {
+        if (q.length === 0) q = [nextAttack(), nextAttack(), nextPassAction()];
+        return q.shift()!;
+      };
+    })();
+    const events: CombatEvent[] = [];
+    opts.onCombatEvent = (evt) => events.push(evt);
+
+    const result = await runCombatV3(opts);
+
+    // ① 玩家第二次攻击被拒（SLOT_EXHAUSTED）→ 提示事件被 emit
+    const notices = events.filter((e) => e.type === 'v3_rejection_notice');
+    expect(notices.length).toBeGreaterThan(0);
+    expect((notices[0] as { code?: string }).code).toBe('SLOT_EXHAUSTED');
+    // ② 不 abandon（修复前的根因：熔断 → 整场被放弃 → 页面闪退）
+    expect(opts.deps.abandon).not.toHaveBeenCalled();
+    // ③ 战斗照常推进到终局落库（提示只是重等待，玩家后续命令正常消费）
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(result.narrativeSummary).not.toContain('战斗被放弃');
+  });
+
+  it('敌方侧 rejection（SLOT_EXHAUSTED）→ 降级 PassAttack 推进，不再熔断 abandon（Bug B 修复）', async () => {
+    // 🔴 Bug B（2026-08-12）：敌方 SLOT_EXHAUSTED 此前走 `steps > 3 break` 熔断 →
+    //   aborted=true → deps.abandon() → 整场战斗被放弃（真机「页面闪退」）。
+    //   现在任何 rejection 都不再熔断：emit v3_rejection_notice + 降级 PassAttack
+    //   推进当前单位 —— 战斗继续，最坏情况是乙白费一次行动。
+    // 用 enemyScript 让乙重复发 pass_slot(action)（动作槽只 1 个，第二次必 SLOT_EXHAUSTED）
+    const { opts, abandon } = mkOpts({
+      enemyScript: [
+        { name: 'pass_slot', args: { actorName: '乙', slot: 'action' } },
+        { name: 'pass_slot', args: { actorName: '乙', slot: 'action' } },
+        { name: 'pass_slot', args: { actorName: '乙', slot: 'action' } },
+        { name: 'pass_slot', args: { actorName: '乙', slot: 'action' } },
+      ],
+    });
+    opts.bundle = mkBundle({
+      combatId: 'coord-bug2-enemy',
+      participants: [
+        mkParticipant('甲', { hp: 999999, maxHp: 999999 }),
+        mkParticipant('乙', {
+          side: 'enemy',
+          characterId: '乙',
+          name: '乙',
+          hp: 1000,
+          maxHp: 1000,
+          defense: 300,
+        }),
+      ],
+    });
+    // 玩家循环供给：甲每回合攻击乙 + 放弃动作槽（乙白费槽位的轮数不定，循环供到乙死为止）
+    opts.deps.waitForCommand = (() => {
+      let q: CombatCommand[] = [];
+      let n = 0;
+      const nextAttack = (): CombatCommand => ({
+        commandId: `u-atk-${++n}`,
+        expectedRevision: -1,
+        kind: 'DeclareAttack',
+        actorId: '甲',
+        cost: 'attack',
+        payload: { targetId: '乙', intentionLevel: '常规' },
+      });
+      const nextPassAction = (): CombatCommand => ({
+        commandId: `u-pass-${++n}`,
+        expectedRevision: -1,
+        kind: 'PassAction',
+        actorId: '甲',
+        cost: 'action',
+        payload: {} as Record<string, never>,
+      });
+      return async () => {
+        if (q.length === 0) q = [nextAttack(), nextPassAction()];
+        return q.shift()!;
+      };
+    })();
+    const events: CombatEvent[] = [];
+    opts.onCombatEvent = (evt) => events.push(evt);
+
+    const result = await runCombatV3(opts);
+
+    // ① 不再 abandon（修复前的根因：熔断 → 整场被放弃）
+    expect(abandon).not.toHaveBeenCalled();
+    // ② 敌方的 rejection 有通知事件（v3_rejection_notice）
+    const notices = events.filter((e) => e.type === 'v3_rejection_notice');
+    expect(notices.length).toBeGreaterThan(0);
+    expect((notices[0] as { code?: string }).code).toBe('SLOT_EXHAUSTED');
+    // ③ 战斗照常推进到终局落库（甲每轮攻击，乙每轮白费槽位后回合结束）
+    expect(result.narrativeSummary).not.toContain('战斗被放弃');
+    expect(result.outcome).toBe('ally_win');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Bug C（2026-08-12）：逃跑成功不再整场 Terminal(flee_success)。
+// 逃跑改为移除单位：单敌人逃光 = 玩家获胜（战斗正常结算落库）；多敌人逃一个 = 战斗继续。
+// ══════════════════════════════════════════════════════════════════════════
+describe('Bug C：敌方逃跑成功 → 移除单位 + 单敌人战斗结束玩家获胜', () => {
+  it('真实 runCombatV3：乙逃跑成功 → 乙被移除（v3_roster_changed despawned）、outcome ally_win、不 abandon', async () => {
+    const { opts, commit, setQueue } = mkOpts({
+      enemyScript: [{ name: 'flee', args: { actorName: '乙' } }],
+    });
+    opts.bundle = mkBundle({
+      combatId: 'coord-bugc-flee',
+      participants: [
+        mkParticipant('甲', { hp: 999999, maxHp: 999999 }),
+        mkParticipant('乙', {
+          side: 'enemy',
+          characterId: '乙',
+          name: '乙',
+          hp: 1000,
+          maxHp: 1000,
+          defense: 300,
+        }),
+      ],
+    });
+    setQueue([...atkTurn(), ...atkTurn()]);
+    const events: CombatEvent[] = [];
+    opts.onCombatEvent = (evt) => events.push(evt);
+
+    const result = await runCombatV3(opts);
+
+    // ① 逃跑检定事件（FleeAttempt → v3_action toolName 'flee'，默认骰全 10 + dex 15 → 成功）
+    const fleeActions = events.filter(
+      (e) => e.type === 'v3_action' && (e as { toolName?: string }).toolName === 'flee',
+    );
+    expect(fleeActions.length).toBeGreaterThan(0);
+    expect((fleeActions[0] as { result?: { success?: boolean } }).result?.success).toBe(true);
+    // ② 单位被移除（UnitDespawned → v3_roster_changed op 'despawned'）
+    const despawns = events.filter(
+      (e) => e.type === 'v3_roster_changed' && (e as { op?: string }).op === 'despawned',
+    );
+    expect(despawns.length).toBeGreaterThan(0);
+    // ③ 战斗结束玩家获胜（敌人逃光 = 我方获胜），整场只落库一次、不 abandon
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(opts.deps.abandon).not.toHaveBeenCalled();
+    expect(result.outcome).toBe('ally_win');
+    expect(result.narrativeSummary).not.toContain('战斗被放弃');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// BeginOutput 重放（2026-08-12）：攻击撞骰池耗尽（骰尽续杯）→ 续骰后**自动重放**被中断
+// 的攻击，玩家不用重新输入一次。
+// 背景：玩家提交 DeclareAttack，内核结算中途 intentCheck 通道骰子耗尽 → reducer 返回
+//   requiredInput: BeginOutput，攻击**零微步骤已提交**（不伤血、不耗槽）。此前 coordinator
+//   续骰（SupplyDice）后被中断的攻击命令被丢掉，循环重新走 decideForUnit → 又 emit
+//   v3_awaiting_player_input 等玩家输入 → 玩家要重新输入一次攻击。
+// 修复：BeginOutput 分支把被中断的 currentCommand 排在 SupplyDice 之后一起进队列
+//   （新 commandId 避开 kernel 幂等缓存；expectedRevision 由 nextPending 修正）。
+// 骰带设计：intentCheck 预算 7 颗、每次攻击掷 2 颗 → 第 1~3 击各耗 2 颗（剩 1），
+//   第 4 击 draw(2) 越界 → BeginOutput。甲每击 639（骰全 10 + tier 3 同层检定 15 有效
+//   + 乙 defense 100 / dr 0.1），乙 hp 2555 → 3 击后剩 638，第 4 击（重放）639 杀死乙
+//   → hp_zero 终局。乙 player 侧（默认 ally → player）→ 战意检定跳过、不溃逃，血线可控。
+// ══════════════════════════════════════════════════════════════════════════
+describe('BeginOutput：攻击撞骰池耗尽 → 续骰后自动重放，玩家不用重新输入', () => {
+  it('甲第 4 次攻击触发 BeginOutput → 续骰重放 → 第 4 击杀死乙，不再 emit v3_awaiting_player_input 等玩家重输', async () => {
+    const bundle = mkBundle({
+      combatId: 'coord-begin-output-replay',
+      // 死斗：战意阈值 10%（标准是 30%）——乙 3 击后剩 25% 不溃逃，撑到第 4 击
+      combatType: '死斗',
+      participants: [
+        // 甲先攻稳第一（fixedInitiativeBonus 100 vs 0），每轮 attack + pass action
+        mkParticipant('甲', { fixedInitiativeBonus: 100 }),
+        // 乙 enemy 侧（走 fake agent pass）：血线 = 3 击 1917 后剩 638（25%），第 4 击 639 死
+        mkParticipant('乙', {
+          side: 'enemy',
+          characterId: '乙',
+          name: '乙',
+          hp: 2555,
+          maxHp: 2555,
+        }),
+      ],
+    });
+
+    // 甲 player 侧命令全走 submitCommand + waitForCommand；调用序固定（每轮 2 个）：
+    // attack → pass action（乙 enemy 侧走 fake agent，不进此队列）
+    const submitCommand = vi.fn(async () => {});
+    let n = 0;
+    const waitForCommand = (async () => {
+      const i = n % 2;
+      const commandId = `u-cmd-${++n}`;
+      return {
+        commandId,
+        expectedRevision: -1,
+        kind: i === 0 ? 'DeclareAttack' : 'PassAction',
+        actorId: '甲',
+        cost: i === 0 ? 'attack' : 'action',
+        payload: (i === 0 ? { targetId: '乙', intentionLevel: '常规' } : {}) as Record<
+          string,
+          never
+        >,
+      } as CombatCommand;
+    }) as unknown as () => Promise<CombatCommand>;
+
+    const commit = vi.fn(async () => {});
+    const abandon = vi.fn(() => {});
+    let diceBatch = 0;
+    const events: CombatEvent[] = [];
+    const opts: RunCombatV3Opts = {
+      saveId: 's1',
+      bundle,
+      deps: {
+        // 乙 enemy 侧：attack 槽 / action 槽交替 pass_slot（照 F5 ENEMY_SCRIPTS 交替先例）
+        clientFactory: () => {
+          let idx = 0;
+          return {
+            chatWithTools: async () => ({
+              output: 'ok',
+              rawResponse: '',
+              toolCalls: [
+                {
+                  name: 'pass_slot',
+                  arguments: { actorName: '乙', slot: idx++ % 2 === 0 ? 'attack' : 'action' },
+                },
+              ],
+            }),
+            chat: async () => ({ output: null, rawResponse: '' }),
+          } as unknown as CombatClient;
+        },
+        endpoint: { id: 'ep' } as never,
+        stateManager: { commitChatState: commit },
+        characters: [],
+        context: {} as never,
+        submitCommand,
+        waitForCommand,
+        abandon,
+        // 确定性骰源（60 颗 10）；diceBatch：第 1 次 = 开局注骰，第 2 次 = BeginOutput 续杯
+        drawDice: () => ({
+          outputId: `epoch-${++diceBatch}`,
+          dice: Array.from({ length: 60 }, () => 10),
+        }),
+      },
+      onCombatEvent: (evt) => events.push(evt),
+    };
+
+    const result = await runCombatV3(opts);
+
+    const awaiting = events.filter((e) => e.type === 'v3_awaiting_player_input');
+    const attackCards = events.filter(
+      (e) => e.type === 'v3_action' && (e as { toolName?: string }).toolName === 'attack',
+    );
+    const diceEpochs = events.filter((e) => e.type === 'v3_dice_epoch');
+
+    // ① BeginOutput 路径真的走过：第 2 次注骰（续杯）发生了
+    expect(diceBatch).toBeGreaterThanOrEqual(2);
+    expect(diceEpochs.length).toBeGreaterThanOrEqual(1);
+    // ② 第 4 击（重放）正常结算：4 张攻击卡片
+    //   （修复前：第 4 击被丢弃 → 重问玩家后补打，玩家多输入一次）
+    expect(attackCards.length).toBe(4);
+    // ③ 玩家没有被再次询问：8 次 = R1-4 每轮 2 次（甲 attack 首问 + pass action 继续）
+    //   （修复前：R4 攻击被丢 → decideForUnit 重问甲 → 9 次）
+    expect(awaiting.length).toBe(8);
+    expect(submitCommand).toHaveBeenCalledTimes(8);
+    expect(n).toBe(8);
+    // ④ 战斗正常终局：第 4 击重放杀死乙 → hp_zero → ally_win；不 abandon、整场只落库一次
+    expect(abandon).not.toHaveBeenCalled();
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(result.outcome).toBe('ally_win');
+    expect(result.rounds).toBe(4);
+  });
+});
+
 // 时序：F1 开局事件 emit 之后、正式回合循环（SupplyDice → decideForUnit）之前，
 // 走持久会话（system 首轮注入 + 模板情境快照），AI 输出氛围描写经 v3_narrative 进
 // combatLog；可调查询工具但**不产 Command**（氛围阶段不决策）。

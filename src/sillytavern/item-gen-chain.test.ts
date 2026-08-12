@@ -10,7 +10,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { runItemGenChain, buildItemGenPatches, buildItemRequestsXML } from './item-gen-chain';
 import type { ItemGenChainClient, ItemGenChainDeps } from './item-gen-chain';
 import type { ItemGenRequestMarker, ItemGenOutput, ApiEndpoint, AgentContext } from './types';
-
+import { parseItemGenOutput } from './char-gen-agent';
 // ========== Factory Helpers ==========
 
 function makeEndpoint(overrides: Partial<ApiEndpoint> = {}): ApiEndpoint {
@@ -249,6 +249,74 @@ describe('buildItemGenPatches', () => {
     expect(skill.modifiers).toHaveLength(1);
     expect(skill.modifiers[0].checkType).toBe('生产制作');
     expect(skill.modifiers[0].bonus).toBe(-4);
+  });
+
+  it('🔴 回归 (2026-08-12): add_skill patch 透传 skillPower/relevantAttribute/damageType（0694453 只修了 char_gen 链，本链漏接 → 开局初始技能战斗兜底 0）', () => {
+    const itemOutput: ItemGenOutput = {
+      skills: [
+        {
+          name: '火球术',
+          description: '凝练的火焰弹',
+          type: 'active',
+          cost: { type: 'MP', amount: 50 },
+          // parseSkillsXML 对 <skill power/attr/dtype> 的解析产物（char-gen-agent.test.ts 1530 段已测）
+          skillPower: 400,
+          relevantAttribute: 'int',
+          damageType: '能量',
+        },
+      ],
+      equipment: [],
+      inventory: [],
+    };
+    const patches = buildItemGenPatches(itemOutput, 'char-001');
+    const skill = patches[0].value as any;
+    expect(skill.name).toBe('火球术');
+    // 断点: 此前只透传 modifiers/buffs/divinity/automata，三字段落库即丢 →
+    //   characterToCombatParticipant 按 typeof skillPower 过滤踢出 activeSkills
+    expect(skill.skillPower).toBe(400);
+    expect(skill.relevantAttribute).toBe('int');
+    expect(skill.damageType).toBe('能量');
+  });
+
+  it('🔴 全链路 (2026-08-12): 开局技能声明 → buildItemRequestsXML → parseItemGenOutput → patch 含主体威力三字段', async () => {
+    // ① request_dispatcher 从 {{SKILL_STATE}} 的开局声明发 marker（bodyText 含「威力:400」原文）
+    const marker: ItemGenRequestMarker = {
+      type: 'item_gen_request',
+      attributes: { itemType: 'skill', source: 'story', owner: 'char-001' },
+      bodyText:
+        '火球术（主动·rare (智力, 范围:5, 伤害, 威力: 400, 塑能)）：凝练的火焰弹[范围伤害:造成100%能量伤害, 法力燃烧:消耗倍增]',
+      position: 0,
+      rawContent: '',
+    };
+    // ② item_gen 收到的输入形状（<request type="skill"> 打包，威力信息保留在正文）
+    const itemRequestsXML = buildItemRequestsXML([marker]);
+    expect(itemRequestsXML).toContain('<request type="skill">');
+    expect(itemRequestsXML).toContain('威力: 400');
+    // ③ 模拟 item_gen 响应（systemPrompt 教过 <skill power/attr/dtype> 属性）
+    const itemGenRaw = `<item_result>
+<skills>
+<skill name="火球术" type="active" cost_type="MP" cost_amount="50" cooldown="0" power="400" attr="int" dtype="能量">
+  凝练的火焰弹。
+  <effect name="范围伤害">造成100%能量伤害</effect>
+</skill>
+</skills>
+<equipment></equipment>
+<inventory></inventory>
+</item_result>`;
+    // ④ parseItemGenOutput 解析出三字段（char-gen-agent.test.ts 1530 段已测，这里走真函数）
+    const output = parseItemGenOutput(itemGenRaw);
+    expect(output.skills).toHaveLength(1);
+    expect(output.skills[0].skillPower).toBe(400);
+    expect(output.skills[0].relevantAttribute).toBe('int');
+    expect(output.skills[0].damageType).toBe('能量');
+    // ⑤ buildItemGenPatches 落库 patch 不丢三字段（断点 A 回归）
+    const patches = buildItemGenPatches(output, 'char-001');
+    const skillPatch = patches.find((p) => p.op === 'add_skill');
+    expect(skillPatch).toBeDefined();
+    const value = skillPatch!.value as any;
+    expect(value.skillPower).toBe(400);
+    expect(value.relevantAttribute).toBe('int');
+    expect(value.damageType).toBe('能量');
   });
 
   it('target 指向 owner 角色字符路径', () => {

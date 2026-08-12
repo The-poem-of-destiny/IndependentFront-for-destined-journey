@@ -36,11 +36,11 @@ function expectAttack(r: PlayerCommandResult): Extract<PlayerCommand, { kind: 'D
 }
 
 describe('parsePlayerInput — 六类规则', () => {
-  it('逃跑 → Flee（cost both）', () => {
+  it('逃跑 → Flee（cost none，不占攻击/动作槽，Bug A 2026-08-12）', () => {
     const r = parsePlayerInput('我们赶紧逃跑！', ctx());
     expect(r).toEqual({
       ok: true,
-      command: { actorId: '艾萨', cost: 'both', kind: 'Flee', payload: {} },
+      command: { actorId: '艾萨', cost: 'none', kind: 'Flee', payload: {} },
     });
   });
 

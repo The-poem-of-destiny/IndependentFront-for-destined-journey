@@ -941,7 +941,9 @@ export type CombatCommand =
       expectedRevision: number;
       kind: 'Flee';
       actorId: string;
-      cost: 'both';
+      // Bug A（2026-08-12）：逃跑是「想跑就能跑」的自由动作，不占攻击/动作槽。
+      // 此前 'both' 让攻击槽耗尽后的逃跑撞 SLOT_EXHAUSTED 被拒（真机 bug）。
+      cost: 'none';
       payload: Record<string, never>;
     }
   | {
@@ -1251,7 +1253,12 @@ export type DomainEvent =
       duration?: number | null;
       sourceItem?: string;
     }
-  | { kind: 'UnitDespawned'; unitId: string; reason?: 'expired' | 'active' | 'summoner_down' }
+  | {
+      kind: 'UnitDespawned';
+      unitId: string;
+      /** 'fled'（Bug C 修复，2026-08-12）：逃跑成功离场，与召唤物到期同走移除语义 */
+      reason?: 'expired' | 'active' | 'summoner_down' | 'fled';
+    }
   | { kind: 'DamagePrevented'; unitId: string; amount: number; keptHp: number }
   | {
       kind: 'DamageReflected';

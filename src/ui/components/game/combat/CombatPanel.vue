@@ -16,6 +16,19 @@ const game = useGameStore();
 const enemies = computed<V3Unit[]>(() => projectUnitsBySide(game.v3ActiveCombat, 'enemy'));
 const allies = computed<V3Unit[]>(() => projectUnitsBySide(game.v3ActiveCombat, 'player'));
 
+/** 🆕 v3 单位 id → 名字字典：CombatActionCard 反查攻击卡片里的 UUID → 中文名。
+ *  （生产路径 v3_action 的 attackerId/targetId 是角色 UUID，units 字典里有 name） */
+const unitNames = computed<Record<string, string>>(() => {
+  const units = game.v3ActiveCombat?.units;
+  if (!units) return {};
+  const out: Record<string, string> = {};
+  for (const id of Object.keys(units)) {
+    const name = units[id]?.name;
+    if (name) out[id] = name;
+  }
+  return out;
+});
+
 // ── T16 §3.5 跳过/重开战斗：确认弹窗（文案照设计 §3.5 原文）──
 const skipOpen = ref(false);
 const restartOpen = ref(false);
@@ -136,7 +149,11 @@ const collapsed = ref(false);
                 <div class="combat-ledger-heading">
                   <span id="combat-ledger-label">战斗记录</span>
                 </div>
-                <CombatMessageFlow :entries="game.combatLog" class="combat-flow" />
+                <CombatMessageFlow
+                  :entries="game.combatLog"
+                  :units="unitNames"
+                  class="combat-flow"
+                />
               </section>
 
               <section

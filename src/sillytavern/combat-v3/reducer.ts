@@ -110,7 +110,17 @@ export function reduce(
 
   // 3. SupplyDice 续杯（BeginOutput 应答）
   if (command.kind === 'SupplyDice') {
-    return reduceSupplyDice(bundle, state, command);
+    const supplied = reduceSupplyDice(bundle, state, command);
+    // 🔴 2026-08-12（真机 bug：首回合面板「攻0动0」）：
+    //   `reduceSupplyDice` 保持 phase 不变（CombatOpen）零推进。开局首次注骰后，
+    //   coordinator 在槽位发放前就问玩家 → 面板显示攻0动0、AI 误判「没槽可动」。
+    //   修复：开局（phase 仍 CombatOpen）时继续 auto 推进到 SlotConsume——
+    //   掷先攻 + 开回合发槽（openUnitTurn）→ 返回 PlayerCommand（此时面板攻1动1）。
+    //   续杯（其他 phase）保持既有语义（只注骰，不推进）。
+    if (supplied.snapshot.phase === 'CombatOpen') {
+      return advanceAfterOpeningSupply(bundle, state, supplied);
+    }
+    return supplied;
   }
 
   // 4. RequestSettlement（C3）
@@ -745,8 +755,16 @@ function consumePlayerCommand(
   // ③ 合并 slot + business 一次 apply（不变量④ / M-9 攻守资源同批）
   const combined = mergeChanges(slotOut.changes, biz.changes);
   // nextPhase：槽位消费结果权威（SlotConsume 同 unit 继续 / MoraleCheck 推进）；
-  // 终局由 biz.terminal 覆盖为 Terminal
-  const nextPhase: CombatPhase = biz.terminal ? 'Terminal' : slotOut.nextPhase;
+  // 终局由 biz.terminal 覆盖为 Terminal。
+  // 🔴 2026-08-12（Bug A/C）：Flee 是唯一例外 —— 它不消费槽位（slotOut 恒
+  //   SlotConsume），相位流转由 handleFlee 自己决定：成功 → UnitTurnClose
+  //   （单位已移除，applyOutcome 摘 initiativeOrder）；失败 → MoraleCheck
+  //   （结束本回合，不留在 SlotConsume 无限等同一单位命令）。
+  const nextPhase: CombatPhase = biz.terminal
+    ? 'Terminal'
+    : command.kind === 'Flee'
+      ? biz.nextPhase
+      : slotOut.nextPhase;
   const out: PhaseOutcome = {
     changes: combined,
     events: [...slotOut.events, ...biz.events],
@@ -754,6 +772,11 @@ function consumePlayerCommand(
     dice: biz.dice ?? slotOut.dice,
     terminal: biz.terminal,
     round: biz.round,
+    // 🔴 2026-08-12（Bug C 修复）：业务结算产出的 removeUnitIds / activeEffects
+    //   必须透传给 applyOutcome —— 此前漏透传，UnitDespawned 事件发了但单位
+    //   没有被从 units / initiativeOrder 摘除（逃跑成功 = 白跑）。
+    removeUnitIds: biz.removeUnitIds,
+    activeEffects: biz.activeEffects,
   };
   const next = applyOutcome(working, out);
 
@@ -862,6 +885,96 @@ function reduceSupplyDice(
     events: [{ kind: 'NarrativeCue', text: `骰池续杯：${command.payload.outputId}` }],
     next,
   };
+}
+
+/**
+ * 🔴 2026-08-12（真机 bug：首回合面板「攻0动0」修复）：
+ * 开局首次 SupplyDice 注骰后，kernel 从 CombatOpen 继续 auto 推进到 SlotConsume：
+ *   CombatOpen → RoundOpen（handleRoundOpen）→ Initiative（handleInitiative 掷先攻）
+ *   → UnitTurnOpen（openUnitTurn 发槽）→ SlotConsume（返回 PlayerCommand 等玩家命令）。
+ *
+ * 背景：`reduceSupplyDice` 只注骰、phase 保持 CombatOpen 零推进。此前 coordinator 在
+ * 注骰后、发槽前就问玩家 → 面板 `攻0动0`，AI 误判「没槽可动」。让开局首骰继续推进，
+ * 玩家第一次被问时槽位已发放（面板攻1动1）。
+ *
+ * 幂等/续杯安全：仅在 phase === 'CombatOpen'（开局首次）调用；续杯（Initiative 等）
+ * 走 reduceSupplyDice 原路径（注骰即回，由协调器 BeginOutput 路由决定下一个动作单位）。
+ */
+function advanceAfterOpeningSupply(
+  bundle: CombatDefinitionBundle,
+  original: CombatState,
+  supplied: CombatTransition,
+): CombatTransition {
+  const next0 = supplied.next;
+  if (!next0) {
+    throw new KernelStuckError('开局 SupplyDice 注骰返回空 next');
+  }
+  let working: CombatState = next0;
+  const events: PhaseOutcome['events'][] = [supplied.events] as unknown as PhaseOutcome['events'][];
+
+  // 从 CombatOpen 起循环 auto 推进（与 runDispatch 同款：rejection / 骰尽 / Terminal 兜底）
+  let guard = 0;
+  while (true) {
+    if (++guard > MAX_STEPS_PER_DISPATCH) {
+      throw new KernelStuckError(
+        `Kernel 熔断：开局 SupplyDice 推进超过 ${MAX_STEPS_PER_DISPATCH} 个微步骤（phase: ${working.phase}）`,
+      );
+    }
+    const phase = working.phase;
+    if (phase === 'SlotConsume' || phase === 'Terminal' || phase === 'SettlementCommitted') {
+      break;
+    }
+    const autoFn = AUTO_PHASES[phase as CombatPhase];
+    if (!autoFn) {
+      throw new KernelStuckError(`开局推进遇到未知 phase「${phase}」`);
+    }
+    // CombatOpen 首步发 CombatOpened（与 runDispatch 552 行同款）
+    if (phase === 'CombatOpen') {
+      events.push([
+        {
+          kind: 'CombatOpened',
+          combatId: working.combatId,
+          combatType: bundle.combatType,
+          unitIds: Object.keys(working.units),
+          bundleHash: working.provenance.bundleHash,
+        },
+      ] as PhaseOutcome['events']);
+    }
+    const out = autoFn(bundle, working);
+    if (out.requiredInput) {
+      // 骰尽 → 返回 BeginOutput（coordinator 续杯；此时不在玩家轮，不产生面板误导）
+      return buildTransition(original, events, {
+        requiredInput: out.requiredInput,
+        snapshotState: working,
+      });
+    }
+    if (out.rejection) {
+      return buildTransition(original, events, { snapshotState: working });
+    }
+    if (out.events.length > 0) events.push(out.events);
+    const next = applyOutcome(working, out);
+    if (!next) {
+      throw new KernelStuckError(`开局推进 applyOutcome 返回空（phase: ${working.phase}）`);
+    }
+    working = next;
+  }
+
+  // 到 SlotConsume → 返回 PlayerCommand（当前单位等命令；槽位已发，面板正确）
+  if (working.phase === 'SlotConsume') {
+    const id = currentUnitId(working);
+    const u = id ? working.units[id] : undefined;
+    return buildTransition(original, events, {
+      snapshotState: working,
+      requiredInput: {
+        kind: 'PlayerCommand',
+        unitId: id ?? '',
+        unitName: u?.name ?? '',
+        round: working.round,
+      },
+    });
+  }
+  // Terminal（极小概率：开战即终局）→ 照常返回
+  return buildTransition(original, events, { snapshotState: working });
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

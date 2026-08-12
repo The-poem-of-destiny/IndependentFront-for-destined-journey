@@ -2595,6 +2595,45 @@ describe('StateManager', () => {
       expect(skill.automata).toHaveLength(1);
     });
 
+    it('🔴 回归 (2026-08-12): add_skill 透传 skillPower/relevantAttribute/damageType（0694453 漏收 → 开局技能战斗兜底 0）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1',
+        name: '理德',
+        type: 'player',
+        saveId: 's1',
+        skills: [],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        {
+          op: 'add_skill',
+          target: 'characters.理德',
+          value: {
+            name: '火球术',
+            description: '凝练的火焰弹',
+            type: 'active',
+            cost: { type: 'MP', amount: 50 },
+            // item_gen 合法产出（item-gen-chain buildItemGenPatches 透传后的 patch 形状）
+            skillPower: 400,
+            relevantAttribute: 'int',
+            damageType: '能量',
+          },
+        },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(char.skills).toHaveLength(1);
+      const skill = char.skills[0] as any;
+      // 断点: 新技能白名单只收 8+4 字段，三字段落库即丢 → 主动技能进不了
+      //   characterToCombatParticipant.activeSkills → 战斗 handleAttack 兜底 0 伤害
+      expect(skill.skillPower).toBe(400);
+      expect(skill.relevantAttribute).toBe('int');
+      expect(skill.damageType).toBe('能量');
+    });
+
     it('同名 add_skill = 覆盖升级：提供的字段覆盖，未提供的保留，不重复插入（规范 §4）', async () => {
       const existing: Skill = {
         name: '斩击',

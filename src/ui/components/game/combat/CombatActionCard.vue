@@ -20,6 +20,9 @@ const props = defineProps<{
   result?: Record<string, unknown>;
   /** 工具名称，如 'combat_attack' / 'combat_use_skill' / 'status_apply' */
   toolName?: string;
+  /** 单位 id → 名字字典（v3 攻击卡片用：生产路径 attackerId/targetId 是角色 UUID，
+   *  显示标题前反查中文名；缺失时回退显示原 id） */
+  units?: Record<string, string>;
 }>();
 
 // ── 折叠/展开状态 ──
@@ -183,6 +186,140 @@ const fullResult = computed((): CombatActionResult | null => {
   if (!hasDamageBreakdown.value) return null;
   return props.result as unknown as CombatActionResult;
 });
+
+// ════════════════════════════════════════════════════════════════
+// 🆕 v3 形状识别（2026-08-12）：v3 的 v3_action(attack) 卡片是**扁平字段**
+//   （{ attackerId, targetId, skill?, checkValue?, rating?, hit?, final?, ... }），
+//   不是 v2 的 CombatActionResult（request/attackRoll/damage 嵌套）。
+//   hasDamageBreakdown=false 时会落兜底「attack」空卡 —— 那就是「显示三个 attack、
+//   点开没内容」的根源。这里识别 v3 形状并渲染完整摘要 + 展开详情。
+// ════════════════════════════════════════════════════════════════
+
+/** 是否为 v3 攻击卡片（扁平字段，顶层有 attackerId + targetId） */
+const isV3Attack = computed((): boolean => {
+  const r = props.result;
+  return (
+    r != null &&
+    typeof r === 'object' &&
+    typeof (r as Record<string, unknown>).attackerId === 'string' &&
+    typeof (r as Record<string, unknown>).targetId === 'string' &&
+    props.toolName === 'attack'
+  );
+});
+
+/** v3：攻方 / 守方 id（用于反查名字，缺失回退 id） */
+const v3AttackerId = computed((): string | null => {
+  const v = (props.result as Record<string, unknown>)?.attackerId;
+  return typeof v === 'string' ? v : null;
+});
+const v3TargetId = computed((): string | null => {
+  const v = (props.result as Record<string, unknown>)?.targetId;
+  return typeof v === 'string' ? v : null;
+});
+
+/** v3：技能名（可选） */
+const v3Skill = computed((): string | null => {
+  const v = (props.result as Record<string, unknown>)?.skill;
+  return typeof v === 'string' && v.length > 0 ? v : null;
+});
+
+/** v3：检定值 / 评级 / 是否命中 */
+const v3CheckValue = computed((): number | null => {
+  const v = (props.result as Record<string, unknown>)?.checkValue;
+  return typeof v === 'number' ? v : null;
+});
+const v3Rating = computed((): string | null => {
+  const v = (props.result as Record<string, unknown>)?.rating;
+  return typeof v === 'string' && v.length > 0 ? v : null;
+});
+const v3Hit = computed((): boolean | null => {
+  const v = (props.result as Record<string, unknown>)?.hit;
+  return typeof v === 'boolean' ? v : null;
+});
+
+/** v3：最终伤害 / 伤害类型 / 目标 HP 前后 */
+const v3Final = computed((): number | null => {
+  const v = (props.result as Record<string, unknown>)?.final;
+  return typeof v === 'number' ? v : null;
+});
+const v3DamageType = computed((): string | null => {
+  const v = (props.result as Record<string, unknown>)?.damageType;
+  return typeof v === 'string' && v.length > 0 ? v : null;
+});
+const v3TargetHpBefore = computed((): number | null => {
+  const v = (props.result as Record<string, unknown>)?.targetHpBefore;
+  return typeof v === 'number' ? v : null;
+});
+const v3TargetHpAfter = computed((): number | null => {
+  const v = (props.result as Record<string, unknown>)?.targetHpAfter;
+  return typeof v === 'number' ? v : null;
+});
+
+/** v3：是否命中（hit !== false 且伤害 > 0；未命中 = hit false 或伤害 0） */
+const v3IsMiss = computed((): boolean => {
+  if (v3Hit.value === false) return true;
+  if (v3Hit.value === null) return (v3Final.value ?? 0) <= 0;
+  return (v3Final.value ?? 0) <= 0;
+});
+
+/** v3：按评级/命中映射语义色 */
+const v3Color = computed((): string => {
+  if (v3IsMiss.value) return 'var(--theme-text-muted)';
+  if (v3Final.value === null) return 'var(--theme-text-primary)';
+  return 'var(--theme-primary)';
+});
+
+/** 从 v3 扁平字段渲染的摘要行：攻方 → 守方（技能）| 检定 N（评级）| 伤害 |
+ *  HP 前后。攻守 id 先经 units 字典反查名字（生产是 UUID），查不到回退 id */
+function v3Summary(): {
+  attacker: string;
+  target: string;
+  skill: string;
+  check: string;
+  damage: string;
+  hp: string;
+} {
+  const atk = v3AttackerId.value
+    ? (props.units?.[v3AttackerId.value] ?? v3AttackerId.value)
+    : '未知';
+  const tgt = v3TargetId.value ? (props.units?.[v3TargetId.value] ?? v3TargetId.value) : '未知';
+  const skill = v3Skill.value ? ` · ${v3Skill.value}` : '';
+  const check = v3CheckValue.value !== null ? `检定 ${v3CheckValue.value}` : '';
+  const rating = v3Rating.value ? `（${v3Rating.value}）` : '';
+  const dmg =
+    v3Final.value !== null && !v3IsMiss.value
+      ? `${v3Final.value} 点${v3DamageType.value ?? ''}伤害`
+      : v3IsMiss.value
+        ? '未命中'
+        : '';
+  const hp =
+    v3TargetHpBefore.value !== null && v3TargetHpAfter.value !== null
+      ? `HP ${v3TargetHpBefore.value} → ${v3TargetHpAfter.value}`
+      : '';
+  return { attacker: atk, target: tgt, skill, check, rating, damage: dmg, hp };
+}
+
+/** v3：展开详情行（供模板渲染完整信息） */
+const v3DetailRows = computed(() => {
+  const rows: Array<{ label: string; value: string }> = [];
+  if (v3Skill.value) rows.push({ label: '技能', value: v3Skill.value });
+  if (v3CheckValue.value !== null) {
+    rows.push({
+      label: '检定',
+      value: `${v3CheckValue.value}${v3Rating.value ? `（${v3Rating.value}）` : ''}`,
+    });
+  }
+  if (v3Final.value !== null && !v3IsMiss.value) {
+    rows.push({ label: '伤害', value: `${v3Final.value} 点${v3DamageType.value ?? ''}` });
+  }
+  if (v3TargetHpBefore.value !== null && v3TargetHpAfter.value !== null) {
+    rows.push({
+      label: '目标 HP',
+      value: `${v3TargetHpBefore.value} → ${v3TargetHpAfter.value}`,
+    });
+  }
+  return rows;
+});
 </script>
 
 <template>
@@ -201,8 +338,31 @@ const fullResult = computed((): CombatActionResult | null => {
     >
       <span class="cac-tag">{{ toolLabel }}</span>
 
+      <!-- 🆕 v3 攻击卡片：扁平字段摘要（2026-08-12） -->
+      <template v-if="isV3Attack">
+        <span class="cac-summary">
+          <span class="cac-name">{{ v3Summary().attacker }}</span>
+          <i class="fa-solid fa-arrow-right cac-arrow" />
+          <span class="cac-name">{{ v3Summary().target }}</span>
+          <span v-if="v3Summary().skill" class="cac-skill">{{ v3Summary().skill }}</span>
+        </span>
+
+        <span v-if="v3Summary().check" class="cac-divider" />
+        <span v-if="v3Summary().check" class="cac-check">{{ v3Summary().check }}</span>
+        <span v-if="v3Summary().rating" class="cac-rating" :style="{ color: v3Color }">
+          {{ v3Summary().rating }}
+        </span>
+
+        <span v-if="v3Summary().damage" class="cac-damage" :style="{ color: v3Color }">
+          {{ v3Summary().damage }}
+        </span>
+        <span v-else-if="v3IsMiss" class="cac-miss">未命中</span>
+
+        <span v-if="v3Summary().hp" class="cac-hp">{{ v3Summary().hp }}</span>
+      </template>
+
       <!-- 有完整伤害分解：标准摘要行 -->
-      <template v-if="hasDamageBreakdown">
+      <template v-else-if="hasDamageBreakdown">
         <span class="cac-summary">
           <span class="cac-name">{{ attackerId ?? '未知' }}</span>
           <i class="fa-solid fa-arrow-right cac-arrow" />
@@ -233,9 +393,20 @@ const fullResult = computed((): CombatActionResult | null => {
       <i class="fa-solid cac-chevron" :class="expanded ? 'fa-chevron-up' : 'fa-chevron-down'" />
     </div>
 
-    <!-- ════════ 展开态：8 步伤害管线 ════════ -->
+    <!-- ════════ 展开态：v3 扁平详情 / 8 步伤害管线 ════════ -->
     <Transition name="cac-expand">
-      <div v-if="expanded && hasDamageBreakdown && fullResult" class="cac-body">
+      <!-- 🆕 v3 攻击卡片展开：技能/检定/伤害/HP 详情行（2026-08-12） -->
+      <div v-if="expanded && isV3Attack" class="cac-body">
+        <div class="cac-detail-list">
+          <div v-for="row in v3DetailRows" :key="row.label" class="cac-step">
+            <span class="cac-step-label">{{ row.label }}</span>
+            <span class="cac-step-value">{{ row.value }}</span>
+          </div>
+          <div v-if="v3DetailRows.length === 0" class="cac-desc">本次行动无详细结算数据</div>
+        </div>
+      </div>
+
+      <div v-else-if="expanded && hasDamageBreakdown && fullResult" class="cac-body">
         <div class="cac-pipeline">
           <!-- Step 1: 初始伤害 -->
           <div class="cac-step">
@@ -427,6 +598,21 @@ const fullResult = computed((): CombatActionResult | null => {
 .cac-arrow {
   font-size: 0.625rem; /* 10px */
   opacity: 0.4;
+}
+
+/* v3 攻击卡片：技能名小字（2026-08-12） */
+.cac-skill {
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+  font-weight: 500;
+  margin-inline-start: var(--theme-spacing-xs, 4px);
+}
+
+/* v3 攻击卡片：展开态详情行（复用管线步视觉） */
+.cac-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-xs, 4px);
 }
 
 .cac-divider {

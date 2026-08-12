@@ -1,12 +1,14 @@
 /**
- * CombatActionBar.test.ts — T14 玩家输入改造（设计 2026-08-09 §3.2「统一 AI 解析意图」）
+ * CombatActionBar.test.ts — 玩家输入链路（主持人/DM 模式，2026-08-12）
  *
- * 三条核心断言：
- * 1. 四步拼装产出**结构化 Command**（DeclareAttack / DeclareAction / Flee）并调
- *    submitCombatCommand —— 不经过文本解析，不把拼装结果当文本发。
- * 2. 自由文本走引擎解析路径转 Command —— 提交的是 Command 对象，**不是原始文本**。
- * 3. 自由文本解析失败 → 明确拒绝（submitCombatCommand 不被调用）+ toast 提示 + 输入保留。
- * 4. 拼装四步不完整 → 「执行行动」按钮禁用。
+ * 🎭 核心改造：玩家输入**一律走意图文本 → 战斗主持人解析**（不再本地产 Command）。
+ * 核心断言：
+ * 1. 四步拼装产出**自然语言意图文本**（如「我方艾萨使用技能火焰术攻击骷髅兵」）
+ *    → 调 submitCombatIntent —— 提交的是**文本**，不是 Command 对象。
+ * 2. 自由文本原样 → submitCombatIntent —— 不做本地正则解析。
+ * 3. 拼装四步不完整 → 「执行行动」按钮禁用。
+ * 4. 结束回合 / 逃跑 / 防御 → 也是意图文本（交给主持人理解）。
+ * 5. 攻击槽耗尽（Bug 2 UI 侧）→ 普攻/技能 Tab 禁用 + 行内提示。
  *
  * @vitest-environment jsdom
  */
@@ -20,7 +22,7 @@ import type { CharacterState } from '@engine/types';
  *  combat-v3-projection.ts 的方式从 CombatView.units 索引推导 */
 type CombatUnitView = CombatView['units'][string];
 
-const submitCombatCommand = vi.fn(async (_cmd: unknown) => {});
+const submitCombatIntent = vi.fn(async (_text: unknown) => {});
 const toast = vi.fn();
 let mockGame: Record<string, unknown>;
 const mockUi = { toast };
@@ -79,7 +81,7 @@ beforeEach(() => {
     v3ActiveCombat: combatView(),
     combatAwaitingInput: { unit: '艾萨', unitId: '艾萨', round: 1 },
     characters: [hero],
-    submitCombatCommand,
+    submitCombatIntent,
   });
 });
 
@@ -96,66 +98,54 @@ async function clickTab(wrapper: ReturnType<typeof mount>, label: string) {
   await tab!.trigger('click');
 }
 
-describe('CombatActionBar — 四步拼装产出结构化 Command', () => {
-  it('普攻：单位+行动+目标 → DeclareAttack（payload 带 targetId + 意图常规）', async () => {
+describe('CombatActionBar — 四步拼装产出意图文本（主持人模式）', () => {
+  it('普攻：单位+行动+目标 → submitCombatIntent 收到「对XX发动普通攻击」文本', async () => {
     const w = await mountBar();
     await clickTab(w, '普攻');
     await w.find('select[aria-label="选择目标"]').setValue('骷髅兵');
     await w.find('button.inject-btn').trigger('click');
 
-    expect(submitCombatCommand).toHaveBeenCalledTimes(1);
-    expect(submitCombatCommand).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: 'DeclareAttack',
-        actorId: '艾萨',
-        cost: 'attack',
-        payload: expect.objectContaining({ targetId: '骷髅兵', intentionLevel: '常规' }),
-      }),
-    );
+    expect(submitCombatIntent).toHaveBeenCalledTimes(1);
+    const arg = submitCombatIntent.mock.calls[0][0] as string;
+    // 🔴 核心断言：提交的是**意图文本**，绝不是 Command 对象
+    expect(typeof arg).toBe('string');
+    expect(arg).toContain('艾萨');
+    expect(arg).toContain('骷髅兵');
+    expect(arg).toContain('普通攻击');
   });
 
-  it('技能：单位+技能+目标 → DeclareAttack（payload 带 skill）', async () => {
+  it('技能：单位+技能+目标 → 意图文本含技能名与目标', async () => {
     const w = await mountBar();
     await clickTab(w, '技能');
     await w.find('select[aria-label="选择技能"]').setValue('火焰术');
     await w.find('select[aria-label="选择目标"]').setValue('骷髅兵');
     await w.find('button.inject-btn').trigger('click');
 
-    expect(submitCombatCommand).toHaveBeenCalledTimes(1);
-    expect(submitCombatCommand).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: 'DeclareAttack',
-        cost: 'attack',
-        payload: expect.objectContaining({ targetId: '骷髅兵', skill: '火焰术' }),
-      }),
-    );
+    expect(submitCombatIntent).toHaveBeenCalledTimes(1);
+    const arg = submitCombatIntent.mock.calls[0][0] as string;
+    expect(arg).toContain('火焰术');
+    expect(arg).toContain('骷髅兵');
+    expect(arg).toContain('使用技能');
   });
 
-  it('防御：→ DeclareAction(actionType: defend)', async () => {
+  it('防御：→ 意图文本含「防御姿态」', async () => {
     const w = await mountBar();
     await clickTab(w, '防御');
     await w.find('button.inject-btn').trigger('click');
 
-    expect(submitCombatCommand).toHaveBeenCalledTimes(1);
-    expect(submitCombatCommand).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: 'DeclareAction',
-        actorId: '艾萨',
-        cost: 'action',
-        payload: { actionType: 'defend' },
-      }),
-    );
+    expect(submitCombatIntent).toHaveBeenCalledTimes(1);
+    const arg = submitCombatIntent.mock.calls[0][0] as string;
+    expect(arg).toContain('防御');
   });
 
-  it('逃跑：→ Flee', async () => {
+  it('逃跑：→ 意图文本含「逃跑」', async () => {
     const w = await mountBar();
     await clickTab(w, '逃跑');
     await w.find('button.inject-btn').trigger('click');
 
-    expect(submitCombatCommand).toHaveBeenCalledTimes(1);
-    expect(submitCombatCommand).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'Flee', actorId: '艾萨', cost: 'both', payload: {} }),
-    );
+    expect(submitCombatIntent).toHaveBeenCalledTimes(1);
+    const arg = submitCombatIntent.mock.calls[0][0] as string;
+    expect(arg).toContain('逃跑');
   });
 
   it('拼装四步不完整 → 「执行行动」禁用', async () => {
@@ -174,21 +164,15 @@ describe('CombatActionBar — 四步拼装产出结构化 Command', () => {
 });
 
 describe('CombatActionBar — 结束回合按钮', () => {
-  it('按钮存在：点击 → submitCombatCommand({kind:EndTurn, actorId:当前单位, cost:none})', async () => {
+  it('按钮存在：点击 → submitCombatIntent 收到「结束本回合」意图文本', async () => {
     const w = await mountBar();
     const btn = w.find('button.end-turn-btn');
     expect(btn.exists()).toBe(true);
     await btn.trigger('click');
 
-    expect(submitCombatCommand).toHaveBeenCalledTimes(1);
-    expect(submitCombatCommand).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: 'EndTurn',
-        actorId: '艾萨',
-        cost: 'none',
-        payload: {},
-      }),
-    );
+    expect(submitCombatIntent).toHaveBeenCalledTimes(1);
+    const arg = submitCombatIntent.mock.calls[0][0] as string;
+    expect(arg).toContain('结束本回合');
   });
 
   it('锁定态（敌方回合）→ 结束回合按钮禁用，不触发提交', async () => {
@@ -197,48 +181,28 @@ describe('CombatActionBar — 结束回合按钮', () => {
     const btn = w.find('button.end-turn-btn');
     expect((btn.element as HTMLButtonElement).disabled).toBe(true);
     await btn.trigger('click');
-    expect(submitCombatCommand).not.toHaveBeenCalled();
+    expect(submitCombatIntent).not.toHaveBeenCalled();
   });
 });
 
-describe('CombatActionBar — 自由文本走解析路径（不直接当 Command）', () => {
-  it('攻击文本 → 解析成 DeclareAttack Command 提交（不是原始文本）', async () => {
+describe('CombatActionBar — 自由文本原样交主持人（不本地解析）', () => {
+  it('攻击文本 → submitCombatIntent 收到原文本（不做正则解析）', async () => {
     const w = await mountBar();
-    await w.find('textarea.combat-textarea').setValue('攻击骷髅兵');
+    await w.find('textarea.combat-textarea').setValue('用灼热射线打它，瞄准眼睛！');
     await w.find('button.send-btn').trigger('click');
 
-    expect(submitCombatCommand).toHaveBeenCalledTimes(1);
-    const arg = submitCombatCommand.mock.calls[0][0] as {
-      kind: string;
-      payload: { targetId: string };
-    };
-    // 🔴 核心断言：提交的是 Command 对象，绝不是玩家输入的原字符串
-    expect(typeof arg).toBe('object');
-    expect(arg).not.toBe('攻击骷髅兵');
-    expect(arg.kind).toBe('DeclareAttack');
-    expect(arg.payload.targetId).toBe('骷髅兵');
+    expect(submitCombatIntent).toHaveBeenCalledTimes(1);
+    // 🔴 核心断言：原文直接交给主持人，不是本地转 Command
+    expect(submitCombatIntent).toHaveBeenCalledWith('用灼热射线打它，瞄准眼睛！');
   });
 
-  it('逃跑文本 → 解析成 Flee Command', async () => {
+  it('任意文本都原样提交（主持人理解意图，本地不再拒绝）', async () => {
     const w = await mountBar();
-    await w.find('textarea.combat-textarea').setValue('我们赶紧逃跑！');
+    await w.find('textarea.combat-textarea').setValue('随便瞎写点什么自由发挥');
     await w.find('button.send-btn').trigger('click');
 
-    expect(submitCombatCommand).toHaveBeenCalledTimes(1);
-    const arg = submitCombatCommand.mock.calls[0][0] as { kind: string };
-    expect(arg.kind).toBe('Flee');
-  });
-
-  it('解析失败 → 拒绝提交 + toast 提示 + 输入保留（可修改重发）', async () => {
-    const w = await mountBar();
-    await w.find('textarea.combat-textarea').setValue('随便瞎写点什么');
-    await w.find('button.send-btn').trigger('click');
-
-    expect(submitCombatCommand).not.toHaveBeenCalled();
-    expect(toast).toHaveBeenCalledWith(expect.stringContaining('没看懂'), 'warning');
-    expect((w.find('textarea.combat-textarea').element as HTMLTextAreaElement).value).toContain(
-      '随便瞎写',
-    );
+    expect(submitCombatIntent).toHaveBeenCalledTimes(1);
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it('空文本 → 发送按钮禁用，不触发任何提交', async () => {
@@ -246,5 +210,46 @@ describe('CombatActionBar — 自由文本走解析路径（不直接当 Command
     expect((w.find('button.send-btn').element as HTMLButtonElement).disabled).toBe(true);
     await w.find('textarea.combat-textarea').setValue('  ');
     expect((w.find('button.send-btn').element as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Bug 2（2026-08-12）UI 侧：攻击槽耗尽后攻击/技能按钮禁用 + 提示。
+// 根因：每单位每回合 1[攻击]+1[动作]（世界书 uid 435），攻击槽用完后 UI 仍允许
+// 再点攻击 → 内核 SLOT_EXHAUSTED → coordinator 熔断 abandon 整场（页面闪退）。
+// 修复：按钮层直接禁用占攻击槽的行动（普攻/技能），并 toast + 行内文案提示。
+// ══════════════════════════════════════════════════════════════════════════
+describe('CombatActionBar — 攻击槽耗尽时禁用攻击/技能（Bug 2 UI 侧）', () => {
+  it('attacksRemaining=0 → 普攻/技能 Tab 禁用 + 行内提示可见', async () => {
+    const view = combatView();
+    const exhaustedUnit = { ...view.units['艾萨'], attacksRemaining: 0 };
+    mockGame.v3ActiveCombat = reactive({
+      ...view,
+      units: { ...view.units, 艾萨: exhaustedUnit },
+    });
+
+    const w = await mountBar();
+    const atkTab = w.findAll('.action-tab').find((b) => b.text() === '普攻');
+    const skillTab = w.findAll('.action-tab').find((b) => b.text() === '技能');
+    expect((atkTab!.element as HTMLButtonElement).disabled).toBe(true);
+    expect((skillTab!.element as HTMLButtonElement).disabled).toBe(true);
+
+    // 被禁用按钮不触发点击 handler（浏览器原生行为）→ 不提交意图
+    await atkTab!.trigger('click');
+    expect(submitCombatIntent).not.toHaveBeenCalled();
+
+    // 行内提示可见（「攻击槽已用完 · 可点结束回合」）
+    const hint = w.find('.attack-slot-hint');
+    expect(hint.exists()).toBe(true);
+    expect(hint.text()).toContain('攻击槽已用完');
+  });
+
+  it('attacksRemaining=1 → 普攻/技能可点，无行内提示', async () => {
+    const w = await mountBar();
+    const atkTab = w.findAll('.action-tab').find((b) => b.text() === '普攻');
+    const skillTab = w.findAll('.action-tab').find((b) => b.text() === '技能');
+    expect((atkTab!.element as HTMLButtonElement).disabled).toBe(false);
+    expect((skillTab!.element as HTMLButtonElement).disabled).toBe(false);
+    expect(w.find('.attack-slot-hint').exists()).toBe(false);
   });
 });

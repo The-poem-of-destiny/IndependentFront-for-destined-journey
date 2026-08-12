@@ -1106,6 +1106,14 @@ export class StateManager {
         buffs: value.buffs,
         divinity: value.divinity,
         automata: value.automata,
+        // 🆕 skillPower 链路修复 (2026-08-04 漏网 2026-08-12): 主体威力三字段透传。
+        //   0694453 只补了 char_gen 链路的 assembleCharacterState，本入口（request_dispatcher →
+        //   item_gen 独立链的 add_skill patch 同样带这三字段）的新技能白名单漏收 →
+        //   开局初始技能（火球术等）落库后 skillPower/relevantAttribute/damageType 全丢，
+        //   characterToCombatParticipant 按 typeof 过滤踢出 activeSkills，战斗兜底 0 伤害。
+        skillPower: value.skillPower,
+        relevantAttribute: value.relevantAttribute,
+        damageType: value.damageType,
       });
     }
     await saveCharacter(char);

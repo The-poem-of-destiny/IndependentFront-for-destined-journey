@@ -12,11 +12,13 @@
 
 import { describe, expect, it } from 'vitest';
 import { reduce } from '../reducer';
-import { createCombatState } from '../state';
+import { createCombatState, applyOutcome } from '../state';
 import { handleRoundOpen, handleRoundClose } from './round';
 import { runMoraleCheck, openUnitTurn } from './unit-turn';
-import type { CombatState } from '../types';
-import { mkBundle, mkAttack, mkPass } from '../test-utils';
+import { handleFlee } from './action';
+import { checkTerminal } from './terminal';
+import type { CombatState, CombatCommand } from '../types';
+import { mkBundle, mkAttack, mkPass, mkFlee, mkParticipant } from '../test-utils';
 
 /** 便捷 helper：从 bundle 建初始 state */
 
@@ -190,5 +192,59 @@ describe('A1-9 / A1-10：非致死 + 负 modifier', () => {
     if (damageEvt) {
       expect(damageEvt.final).toBe(0);
     }
+  });
+});
+
+// ── 辅助 ──
+function emptyChg(): any {
+  return {
+    hpChanges: {},
+    mpChanges: {},
+    spChanges: {},
+    fpDelta: 0,
+    statusPatches: [],
+    slotConsumptions: [],
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Bug C（2026-08-12）：逃跑成功不再整场 Terminal —— 只移除逃跑单位，
+// 终局归 checkTerminal（单敌人逃光 = 玩家获胜；多敌人逃一个 = 战斗继续）
+// ══════════════════════════════════════════════════════════════════════════
+describe('Bug C：逃跑成功移除单位（多敌人场景）', () => {
+  it('多敌人逃一个 → 该单位从 units/initiativeOrder 摘除，战斗继续（checkTerminal 不终局）', () => {
+    const bundle = mkBundle({
+      participants: [
+        mkParticipant('甲'),
+        mkParticipant('乙', { side: 'enemy' }),
+        mkParticipant('丙', { side: 'enemy' }),
+      ],
+    });
+    let s = createCombatState(bundle);
+    // 手工推进到乙的 SlotConsume（乙当前，槽已发好）
+    s = applyOutcome(s, {
+      changes: { ...emptyChg(), turnOpenSlots: [{ actorId: '乙', attacks: 1, actions: 1 }] },
+      events: [],
+      nextPhase: 'SlotConsume',
+      currentTurnIndex: 1,
+    });
+    const out = handleFlee(
+      bundle,
+      s,
+      mkFlee('f', s.revision, '乙') as Extract<CombatCommand, { kind: 'Flee' }>,
+    );
+    expect(out.rejection).toBeUndefined();
+    // 成功 → removeUnitIds + UnitDespawned('fled') + 走 UnitTurnClose（不 Terminal）
+    expect(out.removeUnitIds).toEqual(['乙']);
+    const despawn = out.events.find((e) => e.kind === 'UnitDespawned') as any;
+    expect(despawn?.unitId).toBe('乙');
+    expect(despawn?.reason).toBe('fled');
+    expect(out.nextPhase).toBe('UnitTurnClose');
+    // 应用产出：乙从 units 与 initiativeOrder 摘除（index 不越界不归零），战斗继续
+    const next = applyOutcome(s, out);
+    expect(next.units['乙']).toBeUndefined();
+    expect(next.initiativeOrder).toEqual(['甲', '丙']);
+    expect(next.currentTurnIndex).toBe(1); // 指向丙
+    expect(checkTerminal(next)).toBeNull(); // 甲、丙都存活 → 不终局
   });
 });

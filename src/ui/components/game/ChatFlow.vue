@@ -206,6 +206,23 @@ function activityRunsForMessage(messageId: string) {
   return activityRunsByMessage.value.get(messageId) ?? [];
 }
 
+/**
+ * 🆕 「思考中」指示（2026-08-12）：生成期间显示当前 Agent 正在做什么。
+ * 数据源：game.currentAgentActivityRun（running/stopping 的最新活动 run），
+ * 取最新 running step 的 label（如「书写此刻」「推演战局」）+ 最新 tool 的
+ * 友好文案（presentToolActivity 的 label）。无活动时兜底「正在构思…」。
+ */
+const thinkingText = computed(() => {
+  const run = game.currentAgentActivityRun;
+  if (!run) return '正在构思…';
+  // 最新 running step（没有则取整个 run 的最后一个 step）
+  const step = [...run.steps].reverse().find((s) => s.status === 'running') ?? run.steps.at(-1);
+  if (!step) return '正在构思…';
+  const tool = step.tools.at(-1);
+  if (tool) return `${step.label} · ${tool.label}`;
+  return step.label;
+});
+
 function canRetryRun(run: AgentActivityRun): boolean {
   const messageId = run.sourceMessageId;
   if (!messageId || props.isGenerating || (run.status !== 'failed' && run.status !== 'cancelled')) {
@@ -475,6 +492,19 @@ onUnmounted(() => {
         </div>
       </template>
 
+      <!-- 🆕 思考中指示（2026-08-12）：生成态、正文未出时显示当前 Agent 活动 -->
+      <div
+        v-if="isGenerating && !streamingText"
+        class="bubble-row bubble-row-thinking"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="thinking-indicator">
+          <span class="thinking-spinner" aria-hidden="true" />
+          <span class="thinking-text">{{ thinkingText }}</span>
+        </div>
+      </div>
+
       <!-- 🆕 流式正文实时渲染 -->
       <div v-if="isGenerating && streamingText" class="bubble-row bubble-row-narrative">
         <div class="bubble bubble-narrative-full">
@@ -596,6 +626,47 @@ onUnmounted(() => {
 .bubble-row-player,
 .bubble-row-narrative {
   justify-content: center;
+}
+
+/* 🆕 思考中指示（2026-08-12）：生成态占位 —— 中央居中的低调「正在…」提示 */
+.bubble-row-thinking {
+  justify-content: center;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+}
+
+.thinking-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-xs) var(--theme-spacing-md);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 22%, var(--theme-card-border));
+  border-radius: var(--theme-radius-sm);
+  background: color-mix(in srgb, var(--theme-card-bg) 88%, var(--theme-content-bg));
+  color: var(--theme-text-secondary);
+  font-size: 0.8125rem;
+  font-family: var(--theme-font-body);
+}
+
+.thinking-spinner {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--theme-primary) 25%, transparent);
+  border-top-color: var(--theme-primary);
+  border-radius: 50%;
+  animation: thinking-spin 0.8s linear infinite;
+}
+
+@keyframes thinking-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-spinner {
+    animation: none;
+  }
 }
 /* 正文列已经是屏宽 50%，宽度由布局决定而非 ch 上限 ——
    原先 72ch 会在宽屏上把正文钉在中间、两侧留出大片空白。 */

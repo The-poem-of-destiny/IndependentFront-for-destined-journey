@@ -33,6 +33,38 @@
 - **未走查**（无 API key / 面板 wasm 限制）：真实 AI 轮次（MAP_CONTEXT 进提示词、叙事落位、
   delta_time 锚定）与 EJS 条目浏览器内渲染 —— 链路测试与双后端语料测试背书，待日常游玩验证。
 
+### 战斗主持人/DM 模式改造 + 战斗双 bug 修复 ｜ ✅ 已修（2026-08-12）
+
+**两个真机 bug 修复**（来自 `fated-poem-debug-7c342726-1786503133122.json`，主人实战复现）：
+
+1. **Bug 1 — 结算叙事必崩**：`CombatClient.chat` 接口契约（裸数组）与生产实现 `AgentClient.chat`（`{messages}` 对象）脱节，`narrateSettlement` 每次玩家攻击结算后调用必抛 `Cannot read properties of undefined (reading 'length')`（agentLog 实证，duration 1002ms 吻合 maxRetries 重试）。修：接口与调用点统一为对象形状（`combat-v2-types.ts` + `coordinator.ts`）。**结算结果句此前从没成功生成过。**
+2. **Bug 2 — 第二次攻击闪退**：玩家攻击槽耗尽后再点攻击 → 内核 `SLOT_EXHAUSTED` → coordinator 熔断（`steps>3`）→ abandon 整场（debug 的「战斗被放弃」= 页面闪退）。根因是**把玩家的误操作当系统故障熔断**。修：玩家侧 `SLOT_EXHAUSTED` 不熔断 → emit `v3_rejection_notice`（store 推提示行）+ 重新等待玩家输入；敌方 AI 侧熔断保护保留。UI 侧攻击槽耗尽时禁用普攻/技能 Tab + 行内提示。
+
+**主持人/DM 模式改造**（设计纠偏）：
+
+- 原设计把 `combat_v3` 定位为「敌方专属决策器」（systemPrompt 明文「只控制敌方、绝不替玩家做决定」），玩家侧走 UI 直连 Command / 正则解析，完全不经 AI。主人确认这偏离了 DM 的本来定位——`combat_v3` 应是**战斗主持人**：一个持久会话贯穿全场，既解析玩家意图、又扮演敌方。
+- **engine**：`routeEnemyCommand` 泛化为 `routeHostCommand`（同一持久会话，buildUserContent 按敌我构造消息）；新增 `routePlayerIntent`（【玩家意图】文本 → 主持人理解 → `declare_*` 工具 → Command）。`decideForUnit` / `routeRequiredInput` 玩家分支优先走 `waitForPlayerIntent` 意图文本桥，测试未注入时回退旧 Command 路径。
+- **桥接**：`RunCombatV3Opts.deps` 新增 `submitPlayerIntent` / `waitForPlayerIntent`；game-pipeline 接两路 pending resolve（意图 / Command 互斥）。
+- **前端**：`store.submitCombatIntent(text)`；`CombatActionBar` 拼装不再产 Command，而是格式化自然语言（「我方艾萨使用技能火焰术攻击骷髅兵」）→ `submitCombatIntent`；自由文本原样交主持人；结束回合也走意图文本。
+- **systemPrompt**（两仓 agent-config.json 同步改写）：敌方专属 → 战斗主持人（玩家轮次忠实解析玩家意图、敌方轮次扮演敌方、结算演绎、终局摘要；禁止替玩家发明行动 / 篡改意图）。
+- **测试**：coordinator 新增 `routePlayerIntent` 直捣 ×2 + store 端到端「意图文本 → 主持人 → Command → 内核」链路 + `submitCombatIntent` 桥 ×2 + CombatActionBar 意图文本化重写。全仓 7675 tests 全绿。
+
+### 战斗真机 debug 8 项修复 ｜ ✅ 已修（2026-08-12）
+
+来自 `fated-poem-debug-7c342726-1786525609627.json` 主人实战复现的战斗问题，全部定位并修复：
+
+1. **攻击卡片标题显示 UUID** —— `CombatActionCard` v3 分支直渲 `attackerId/targetId`（生产路径是角色 UUID）。修：`units`（id→name 名字字典）三级透传（CombatPanel → CombatMessageFlow → CombatActionCard），`v3Summary()` 反查名字、查不到回退 id；测试 fixture 补真实 UUID 形状钉住。
+2. **火球术伤害偏低（~300 应 ~670）** —— 两层根因：
+   - ① 主角初始技能缺 `skillPower/relevantAttribute/damageType`：断点不在 item_gen 生成，而在**落库两处透传遗漏**（`item-gen-chain.ts` 的 add_skill patch、`state-manager.ts` 的 applyAddSkill 白名单都没带三字段；2026-08-04 skillPower 修复漏了这两处）。已补透传 + 全链路测试。
+   - ② 装备 stats 键中英不匹配：item_gen 产中文键（`攻击`/`防御力`），战斗读英文键（`atk`/`defense`）→ weaponAtk 恒 0、defense 恒 10。修：`characterToCombatParticipant` 加 `statNum` 多键兼容（英文优先、中文兜底），存量存档零迁移。
+3. **骰池刷新中断玩家动作** —— 玩家攻击撞骰池耗尽（BeginOutput）时被中断命令被丢弃，续骰后重问玩家需重新输入。修：coordinator BeginOutput 分支把被中断命令以新 commandId（防幂等缓存死循环）排在 SupplyDice 之后重放，SlotConsume 相位守卫精确覆盖「玩家攻击被中断」；auto 相位骰尽保持既有行为。
+4. **敌人逃跑闪退** —— 三处耦合根因一并修：
+   - ① Flee `cost:'both'` 被攻击槽卡死：Flee 解耦为 `cost:'none'` 不占槽。
+   - ② 敌方侧 rejection（SLOT_EXHAUSTED 等）落 `steps>3` 熔断 abandon（Bug 2 只修玩家侧）：删除熔断出口，统一降级 PassAttack 推进 + emit `v3_rejection_notice`。
+   - ③ 逃跑成功语义错误（一个敌人逃跑=整场结束）：改为 `removeUnitIds` 移出战斗列表（`UnitDespawned('fled')`），终局交给 `checkTerminal`（单敌人→玩家获胜、多敌人→继续）；顺带修 `consumePlayerCommand` 漏透传 `biz.removeUnitIds` 的隐藏 bug（逃跑成功=白跑）与 `checkTerminal` 空战场返回 null 的卡死分支。
+
+**验证**：全量 7704 tests 通过（+8 回归用例）、typecheck / lint 全绿、编码闸门 U+FFFD 0。
+
 ### 设置 store 启动任务绕开密钥保护闸门 ｜ ✅ 已修（2026-08-10）
 
 追 `settings-store.test.ts` 那条负载敏感偶发失败时挖出来的**真实数据丢失缺陷**。

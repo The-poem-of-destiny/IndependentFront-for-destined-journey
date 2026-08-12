@@ -126,6 +126,11 @@ export interface RunCombatV3Opts {
     // 玩家 Command 路由 → game-store
     submitCommand: (cmd: CombatCommand) => Promise<void>;
     waitForCommand: () => Promise<CombatCommand>;
+    // 🆕 2026-08-12（主持人/DM 模式）：玩家意图文本桥。生产由 game-pipeline 提供
+    // （前端提交文本 → coordinator 收到 → 主持人会话解析 → Command）；测试缺省时
+    // coordinator 回退 submitCommand/waitForCommand（直捣路由测试不改动）。
+    submitPlayerIntent?: (text: string) => Promise<void>;
+    waitForPlayerIntent?: () => Promise<string>;
     // 放弃战斗（C4）
     abandon: () => void;
     // BeginOutput 注骰（必填依赖）：coordinator 每次续杯会调它取 60 颗 d20。
@@ -282,36 +287,63 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
     emitEvents(opts, trans.events, session);
 
     if (trans.rejection) {
-      // stale / 非法：本命令作废，重新按当前单位决定（不该发生，熔断保护）
-      console.log(
-        'DEBUG rej steps=',
-        steps,
-        'code=',
-        trans.rejection.code,
-        'msg=',
-        String(trans.rejection.message),
-        'phase=',
-        session.snapshot().phase,
-        'kind=',
-        (currentCommand as { kind?: string }).kind,
-        'actor=',
-        (currentCommand as { actorId?: string }).actorId,
-      );
-      if (steps > 3) break;
-      // 队列优先：同一次 AI 声明的剩余命令仍有效（作废的只是当前这条）
-      if (pendingCommands.length > 0) {
+      // 🔴 2026-08-12（Bug 2 修复）：玩家侧 SLOT_EXHAUSTED（攻击槽/动作槽已耗尽仍再点）
+      //   **不是系统故障，是玩家误操作** —— 绝不能走熔断 abandon 毁掉整场战斗。
+      //   此前这里一律 `if (steps > 3) break`：开局 dispatch 几次后 steps 早超 3，
+      //   玩家攻击槽耗尽后再点一次攻击 → SLOT_EXHAUSTED → 直接熔断 → 整场被放弃
+      //   （debug 的「战斗被放弃（M2 coordinator abandon）」= 主人看到的页面闪退）。
+      //   现在：emit v3_rejection_notice（store 推提示行 + 重新亮等待输入）→ 回到
+      //   等待玩家输入，玩家可换动作或点「结束回合」正常推进。
+      const rejectedUnit = session.snapshot().units[currentCommand.actorId];
+      const isPlayerSide = rejectedUnit?.side === 'player';
+      if (isPlayerSide && trans.rejection.code === 'SLOT_EXHAUSTED') {
+        if (opts.onCombatEvent) {
+          opts.onCombatEvent({
+            type: 'v3_rejection_notice',
+            code: 'SLOT_EXHAUSTED',
+            message: `「${rejectedUnit.name}」${trans.rejection.message}，请换其他行动或点「结束回合」`,
+            unit: rejectedUnit.name,
+            unitId: rejectedUnit.id,
+          });
+        }
+        // 回到等待玩家输入（decideForUnit 玩家分支会 emit v3_awaiting_player_input
+        // 并 submitCommand + waitForCommand；这里照 rejection 恢复路径的重决定写法）。
+        const cmds = await decideForUnit(
+          currentInitiative(session),
+          session,
+          routingDeps,
+          opts.saveId,
+          combatSession,
+        );
+        pendingCommands.push(...cmds);
         currentCommand = nextPending(pendingCommands, session);
         continue;
       }
-      const cmds = await decideForUnit(
-        currentInitiative(session),
-        session,
-        routingDeps,
-        opts.saveId,
-        combatSession,
-      );
-      pendingCommands.push(...cmds);
-      currentCommand = nextPending(pendingCommands, session);
+      // 🔴 2026-08-12（Bug B 修复）：其余 rejection（含敌方 SLOT_EXHAUSTED /
+      //   INVALID_PHASE / stale 等）**一律不再熔断 abandon**。此前 `steps > 3 break`
+      //   的熔断出口让敌方一次 SLOT_EXHAUSTED 就整场被放弃（页面闪退真凶）。
+      //   现在统一降级：emit v3_rejection_notice（message 用 rejection 原文）+
+      //   构造 PassAttack 推进当前单位 —— 战斗继续，最坏情况是单位白费一次行动。
+      //   MAX_DISPATCH_STEPS（500）仍是死循环兜底，熔断保护没有整个拆掉。
+      if (opts.onCombatEvent) {
+        opts.onCombatEvent({
+          type: 'v3_rejection_notice',
+          code: trans.rejection.code,
+          message: trans.rejection.message,
+          unit: rejectedUnit?.name,
+          unitId: rejectedUnit?.id,
+        });
+      }
+      // 降级推进的单位：命令 actor 仍在场且就是内核当前行动单位 → 用它；
+      // 已不在场（TARGET_NOT_PRESENT）/ 张冠李戴 → 用 currentInitiative
+      // （否则 PassAttack 会再次被拒，构成 rejection → 降级 → rejection 死循环）。
+      const current = currentInitiative(session);
+      const passActorId = rejectedUnit && rejectedUnit.id === current ? rejectedUnit.id : current;
+      if (!passActorId) {
+        // 无当前行动单位（极端空战场）→ 交给主循环（checkTerminal 已保证空战场必终局）
+        continue;
+      }
+      currentCommand = nextPassCommand(session.snapshot().revision, passActorId, 'attack');
       continue;
     }
 
@@ -330,7 +362,13 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
     if (trans.requiredInput) {
       // F4：两个命令的 dispatch 之间，内核会发 requiredInput（同单位继续）→ 先消费
       // 队列里的下一个命令（同一次 AI 声明的剩余命令），而不是重新调 AI。
-      if (pendingCommands.length > 0) {
+      // 🔴 2026-08-12（真机 bug：莫名的槽位耗尽）：**BeginOutput（骰尽续杯）必须优先
+      //   注骰，不能先消费队列**。attack 触发 BeginOutput 时，当前 dispatch 被骰尽
+      //   中断（ResolutionFrame 挂着、攻击槽消费未提交），必须先 SupplyDice 恢复 frame
+      //   才能继续。此前队列优先跳过注骰 → 先 dispatch 队列里的 action（动作槽被消费、
+      //   攻击槽因 frame 未恢复仍在）→ 协调器以为乙还有攻击槽 → 又问敌方（浪费一次
+      //   AI 调用）→ 第二次 action 撞 SLOT_EXHAUSTED。这就是「莫名的槽位耗尽」的根源。
+      if (trans.requiredInput.kind !== 'BeginOutput' && pendingCommands.length > 0) {
         currentCommand = nextPending(pendingCommands, session);
         continue;
       }
@@ -349,7 +387,33 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
         },
         getDice,
       );
-      pendingCommands.push(...cmds);
+      // 🆕 2026-08-12（Bug 修复：攻击撞骰池耗尽被丢 → 玩家必须重输一次）：
+      // BeginOutput（骰尽续骰）后**重放被中断的命令**。玩家提交的攻击在内核结算中途
+      // （intentCheck / attackHit 通道）骰子耗尽 → reducer 返回 BeginOutput，此时命令
+      // **零微步骤已提交**（不伤血、不耗槽）。续骰后把被中断的 currentCommand 排在
+      // SupplyDice 之后一起进队列，nextPending 取出时把 expectedRevision 修正为
+      // SupplyDice 之后的当前内核 revision（不撞 STALE_REVISION）→ 原样重放，玩家
+      // 不用重新输入一次攻击。
+      //
+      // 🔴 必须造新 commandId：kernel 幂等缓存（AA1-3，kernel.ts dispatch）会缓存
+      //   **首次** BeginOutput transition（非 rejection 也缓存），复用原 commandId
+      //   → 重放命中缓存直接返回首次 BeginOutput → 死循环注骰直至 MAX_DISPATCH_STEPS
+      //   熔断。新 id 保持 kind/payload/actorId/cost 与当前命令逐字节一致（重放语义
+      //   不变）；expectedRevision 由 nextPending 修正。
+      // 🔴 只重放「命令未消费」的 BeginOutput（snapshot.phase === 'SlotConsume'：
+      //   consumePlayerCommand 结算中途骰尽）。其余 BeginOutput（auto 相位骰尽：
+      //   Initiative / MoraleCheck / UnitTurnClose 等）时命令可能已提交（伤害已结算、
+      //   槽位已消费），重放会 SLOT_EXHAUSTED / 重复结算 → 保持既有行为（丢命令后
+      //   decideForUnit 重问）。防死循环：重放后再遇 BeginOutput（续 60 颗新骰后
+      //   理论几乎不可能）由 MAX_DISPATCH_STEPS 兜底熔断，无需额外计数器。
+      if (trans.requiredInput.kind === 'BeginOutput' && trans.snapshot.phase === 'SlotConsume') {
+        pendingCommands.push(...cmds, {
+          ...currentCommand,
+          commandId: nextCmdId(`retry-${currentCommand.kind}`),
+        });
+      } else {
+        pendingCommands.push(...cmds);
+      }
       currentCommand = nextPending(pendingCommands, session);
       continue;
     }
@@ -422,6 +486,14 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
     await deps.stateManager.commitChatState(patches);
   }
 
+  // 🆕 战斗终局 AI 总结（2026-08-12）：终局结算完成后，把整场战斗事实喂持久会话，
+  // AI 写一段面向玩家的战斗总结叙事（替代「战斗直接中断、只靠战斗中 write_summary
+  // 收集」）。顺序刻意如此：commitChatState 先落库（战斗结果铁定保存）→ 总结（失败
+  // 只损失叙事，不阻塞主流程）→ 优先级 endSummary || collectedSummary || 兜底
+  // （总结失败回落既有兜底语义，game-pipeline 照常注入【战斗摘要】，不崩）。
+  const endFacts = collectCombatEndFacts(session, initialFp, opts.bundle.participants);
+  const endSummary = await narrateCombatEnd(endFacts, combatSession);
+
   // T11（设计 2026-08-09 §2.2 write_summary 改造）：终局摘要回注正文 —— 用 AI 经
   // write_summary(text) 收集进 combatSession.summary 的文本；没有摘要（AI 从未调 /
   // 全部空文本）→ 兜底「战斗结束（reason）」非空文本，game-pipeline 照常注入，不崩。
@@ -429,7 +501,9 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
 
   return {
     narrativeSummary:
-      collectedSummary || `战斗结束（${session.snapshot().terminal?.reason ?? 'terminal'}）`,
+      endSummary ||
+      collectedSummary ||
+      `战斗结束（${session.snapshot().terminal?.reason ?? 'terminal'}）`,
     patches,
     totalExp: 0,
     totalFp: finalFp,
@@ -478,6 +552,8 @@ interface CombatSessionHandle {
 interface RouteCtx {
   submitCommand: (cmd: CombatCommand) => Promise<void>;
   waitForCommand: () => Promise<CombatCommand>;
+  /** 🎭 主持人/DM 模式（2026-08-12）：等玩家**意图文本** → 主持人解析 → Command */
+  waitForPlayerIntent?: () => Promise<string>;
   abandon: () => void;
   clientFactory: (agentId: string, endpoint: ApiEndpoint, saveId: string) => CombatClient;
   endpoint: ApiEndpoint;
@@ -592,6 +668,19 @@ function decideForUnit(
         unitId,
         round: snapshot.round,
       });
+      // 🎭 主持人/DM 模式（2026-08-12）：玩家输入走意图文本 → 主持人解析 → Command。
+      // 生产（game-pipeline）注入 submitPlayerIntent/waitForPlayerIntent；直捣路由的
+      // 测试没注入时回退旧路径（submitCommand/waitForCommand 拿 Command）。
+      if (ctx.waitForPlayerIntent) {
+        const intent = await ctx.waitForPlayerIntent();
+        const res = await routePlayerIntent(
+          intent,
+          { kind: 'PlayerCommand', unitId, unitName, round: snapshot.round },
+          session,
+          ctx,
+        );
+        return res.commands;
+      }
       await deps.submitCommand(nearestCommand(rev, unitId, unitName));
       // UI 提交的 command 可能 revision 过期，统一修正为内核当前值（乐观并发契约）
       return [await freshRevision(deps.waitForCommand(), session)];
@@ -652,6 +741,12 @@ export async function routeRequiredInput(
           unitId: req.unitId,
           round: session.snapshot().round,
         });
+        // 🎭 主持人/DM 模式（2026-08-12）：玩家意图文本 → 主持人解析 → Command。
+        // 生产注入 waitForPlayerIntent；直捣路由测试没注入时回退旧 Command 路径。
+        if (ctx.waitForPlayerIntent) {
+          const intent = await ctx.waitForPlayerIntent();
+          return (await routePlayerIntent(intent, req, session, ctx)).commands;
+        }
         // → game-store，等前端（Promise 在 coordinator 侧）；修正 revision
         await ctx.submitCommand(
           nearestCommand(session.snapshot().revision, req.unitId, req.unitName),
@@ -964,26 +1059,35 @@ async function openCombatScene(
 }
 
 /**
- * 敌方 PlayerCommand → 战斗 Agent（chatWithTools）+ 工具调用 → Command
+ * 通用「主持人路由」：把一次决策请求交给战斗主持人会话（chatWithTools）+ 工具 → Command。
+ *
+ * 🎭 2026-08-12（主持人/DM 模式改造）：combat_v3 的定位从「敌方专属决策器」改为
+ * **战斗主持人** —— 同一个持久会话贯穿整场，同时服务两侧：
+ *   - 玩家轮次（routePlayerIntent）：user 消息 = 【玩家意图】文本 → 主持人分析玩家
+ *     想做什么 → 调 declare_* 工具替玩家声明动作（玩家说攻击就攻击、说防御就防御）
+ *   - 敌方轮次（routeEnemyCommand）：user 消息 = 轮到敌方X → 主持人扮演敌方决策
+ *   - 结算演绎（narrateSettlement）：走同一会话写结果句
+ * 两条路共用 handle.messages + handle.client（决策 1A），system 只 append 一次；
+ * 前缀稳定 → LLM 前缀缓存命中。buildUserContent 由调用方按「玩家/敌方」构造首轮与
+ * 后续轮次的 user 消息；缺省行为由 routeEnemyCommand / routePlayerIntent 各自封装。
  *
  * 持久会话（设计 2026-08-09 §2.1 决策 1A）：整场战斗一个 client + 一条消息数组
  * （ctx.combatSession，由 runCombatV3 闭包持有）。system 只 append 一次；每回合
- * append user(轮到X+面板) → chatWithTools（回合内工具往返在 agent-client 内部循环）
- * → 按 result.toolCalls 把工具往返回流进持久数组 → append 最终 assistant 正文。
- * 前缀稳定 → LLM 前缀缓存命中；查询结果保留进历史（决策 3）。
+ * append user → chatWithTools（回合内工具往返在 agent-client 内部循环）→ 按
+ * result.toolCalls 把工具往返回流进持久数组 → append 最终 assistant 正文。
  * 省略 combatSession（直捣路由的测试）→ 调用内临时句柄，一次性会话行为。
- * 导出供测试直捣（先例：routeRequiredInput）。
  *
- * 返回值（设计 2026-08-09 §2.5 / F4 2026-08-10）：{ commands, narration }——
+ * 返回值：{ commands, narration }——
  *   - commands：照旧进内核（commandsFromResult，收集**全部**命令类工具调用，按调用序；
  *     AI 一次声明 attack+action 两个命令 → [attackCmd, actionCmd]，主循环逐条 dispatch）
  *   - narration：声明演绎 = assistant content（1-3 句战斗演绎，随命令工具一并产出），
  *     同时经 ctx.onNarration 投进 combatLog（v3_narrative）；空正文时为空串。
  */
-export async function routeEnemyCommand(
-  req: Extract<RequiredInput, { kind: 'PlayerCommand' }>,
+export async function routeHostCommand(
+  req: { unitId: string; unitName: string; round: number },
   session: CombatSession,
   ctx: RouteCtx,
+  buildUserContent: (panel: string, firstDecision: boolean) => string,
 ): Promise<{ commands: CombatCommand[]; narration: string }> {
   const panel = projectToAgent(session.snapshot());
   if (ctx.onPanel) ctx.onPanel(panel);
@@ -995,26 +1099,23 @@ export async function routeEnemyCommand(
   }
   const client = handle.client;
   if (!client || !client.chatWithTools) {
-    // 无 agent → 让敌方过（defensive：pass 攻击槽推进）
+    // 无 agent → 让当前单位过（defensive：pass 攻击槽推进）
     return { commands: [nextPass(session, 'attack')], narration: '' };
   }
 
   const messages = handle.messages;
-  // 首轮判定：messages 为空 = 整场战斗的第一个敌方决策（client 刚建、system 未注入）。
-  // system 只 append 一次（整场战斗开头的首个敌方决策时注入）
+  // 首轮判定：messages 为空 = 整场战斗的第一个决策（client 刚建、system 未注入）。
+  // system 只 append 一次（整场战斗开头的首个决策时注入）
   const firstDecision = messages.length === 0;
   if (firstDecision) {
     messages.push({ role: 'system', content: combatSystemPrompt(ctx) });
   }
   // T2（2026-08-10）：首轮 user = 模板渲染结果（情境快照，含战斗指令/世界设定/玩家输入/
-  // 触发正文/最近对话）；后续轮次只 append 面板增量（轮到X + 面板），不再渲染模板。
+  // 触发正文/最近对话）；后续轮次只 append 面板增量（buildUserContent 构造），不再渲染模板。
   if (firstDecision) {
     messages.push({ role: 'user', content: renderOpeningCombatMessage(ctx, panel, req.unitName) });
   } else {
-    messages.push({
-      role: 'user',
-      content: `轮到敌方「${req.unitName}」行动（我方单位由玩家控制）。\n\n${panel}`,
-    });
+    messages.push({ role: 'user', content: buildUserContent(panel, false) });
   }
 
   // 🔴 tools 必须显式注入（2026-08-08 真机 bug）：此前 `tools: undefined` 且
@@ -1073,6 +1174,54 @@ export async function routeEnemyCommand(
     commands: commandsFromResult(result, session.snapshot().revision, req.unitId, session),
     narration,
   };
+}
+
+/**
+ * 敌方 PlayerCommand → 战斗主持人扮演敌方决策。
+ * （主持人/DM 模式，2026-08-12：routeEnemyCommand 变成 routeHostCommand 的敌方封装。）
+ * user 消息：轮到敌方「X」行动（我方单位由玩家控制）+ 面板。
+ */
+export async function routeEnemyCommand(
+  req: Extract<RequiredInput, { kind: 'PlayerCommand' }>,
+  session: CombatSession,
+  ctx: RouteCtx,
+): Promise<{ commands: CombatCommand[]; narration: string }> {
+  return routeHostCommand(
+    req,
+    session,
+    ctx,
+    (panel) => `轮到敌方「${req.unitName}」行动（我方单位由玩家控制）。\n\n${panel}`,
+  );
+}
+
+/**
+ * 🆕 玩家意图 → 战斗主持人解析 → Command（主持人/DM 模式，2026-08-12）。
+ *
+ * 玩家轮次：前端把玩家输入（拼装格式化文本 / 自由对话）经 submitPlayerIntent 提交，
+ * coordinator 等意图文本 → 本函数把【玩家意图】文本 append 进同一主持人持久会话 →
+ * 主持人分析玩家想做什么 → 调 declare_* 工具替玩家声明动作（Command 仍由内核校验消费）。
+ *
+ * 与敌方分支（routeEnemyCommand）共用 handle.messages + handle.client（决策 1A）：
+ * 主持人有全程记忆，既记得玩家说过什么、也记得敌方做过什么。
+ *
+ * 导出供测试直捣。
+ */
+export async function routePlayerIntent(
+  intentText: string,
+  req: Extract<RequiredInput, { kind: 'PlayerCommand' }>,
+  session: CombatSession,
+  ctx: RouteCtx,
+): Promise<{ commands: CombatCommand[]; narration: string }> {
+  const trimmed = (intentText ?? '').trim();
+  return routeHostCommand(
+    req,
+    session,
+    ctx,
+    (panel) =>
+      `【玩家意图】${trimmed || '（玩家未给出具体指令，请按当前战况合理推进）'}\n\n` +
+      `你是战斗主持人：理解玩家想做什么，调工具替他声明动作（玩家说攻击就攻击、说防御就防御、` +
+      `说逃跑就逃跑——意图以玩家输入为准，不要替他发明他没说的行动）。\n\n${panel}`,
+  );
 }
 
 /**
@@ -1254,9 +1403,12 @@ async function narrateSettlement(
     `${factText}\n\n按演绎契约写一句结果句（命中/伤害/受击反应）。`;
   messages.push({ role: 'user', content: userContent });
   try {
-    const result = await client.chat(
-      messages as unknown as Array<{ role: string; content: string }>,
-    );
+    // 🔴 2026-08-12 真机 debug 修复：CombatClient.chat 契约是**对象形状** `{ messages }`
+    //   （对齐 AgentClient.chat），此前误传裸数组 → request.messages 为 undefined →
+    //   ensureUserMessage 里 undefined.length 崩 → 每次结算叙事必失败（agentLog 记
+    //   「Cannot read properties of undefined (reading 'length')」）。已把接口与
+    //   调用点一并改为对象形状（combat-v2-types.ts 的 CombatClient.chat 签名同步改）。
+    const result = await client.chat({ messages } as never);
     const sentence = (result.output ?? result.rawResponse ?? '').trim();
     if (sentence.length > 0) {
       messages.push({ role: 'assistant', content: sentence });
@@ -1266,6 +1418,173 @@ async function narrateSettlement(
     return '';
   } catch {
     messages.pop(); // 调用抛错 → 回滚 user 消息，战斗主流程不受影响
+    return '';
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 战斗终局 AI 总结（2026-08-12 新增）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** 终局原因（TerminalReason）的中文描述（喂 AI 的事实文本用） */
+const TERMINAL_REASON_TEXT: Readonly<Record<string, string>> = {
+  hp_zero: '一方全灭',
+  morale_routed: '士气溃逃',
+  flee_success: '逃跑成功',
+  force_terminal: '强制终局',
+};
+
+/** 归一 outcome 的中文描述（与 CombatV3Result.outcome 同源，feed AI 的事实文本用） */
+const COMBAT_OUTCOME_TEXT: Readonly<Record<CombatV3Result['outcome'], string>> = {
+  ally_win: '我方获胜',
+  enemy_win: '敌方获胜',
+  fled: '战斗以逃遁告终',
+  draw: '战斗以平局告终',
+};
+
+/**
+ * 战斗终局事实（喂 AI 的整场战斗总结依据）。
+ *
+ * 纯数据：reason / winner / outcome / rounds / fpDelta + 存活与倒下（离场）单位名。
+ * 数字只给 AI 当事实依据——叙事契约要求结果文本**不重复**数字卡片（战斗面板已展示，
+ * 照叙事规范：结果句不出现 HP / FP / 检定等机制术语）。
+ */
+export interface CombatEndFacts {
+  /** 终局原因（TerminalReason：hp_zero / morale_routed / flee_success / force_terminal） */
+  reason: string;
+  /** 胜方（'player' | 'enemy'；平局 / 逃跑成功时缺省） */
+  winner?: string;
+  /** 归一 outcome（ally_win / enemy_win / fled / draw，与 CombatV3Result.outcome 同源） */
+  outcome: CombatV3Result['outcome'];
+  /** 进行回合数 */
+  rounds: number;
+  /** 命运点数净变动（终局快照 − 开战快照，架构 §十二 12.2 Δ 口径） */
+  fpDelta: number;
+  /** 终局仍存活（终局快照在场且 hp > 0）的单位（展示名，铁律 ① 名字是逻辑键） */
+  aliveUnits: Array<{ name: string; side: 'player' | 'enemy' }>;
+  /** 倒下或已离场（终局快照 hp ≤ 0，或开战在场而终局快照已移除——逃跑成功 / 召唤到期）的单位 */
+  fallenUnits: Array<{ name: string; side: 'player' | 'enemy' }>;
+}
+
+/**
+ * 从终局快照组装终局事实。
+ *
+ * - 存活：终局快照 units 中 hp > 0 的单位（拿展示名）
+ * - 倒下 / 离场：终局 units 中 hp ≤ 0 的单位 + 开战参与者（bundle.participants）里
+ *   终局快照已找不到的（逃跑成功移除 / 召唤物到期——战斗结束时它们不在场）
+ * - outcome 复用 outcomeOf 归一（与 CombatV3Result.outcome 同一函数，不重复推导）
+ *
+ * 纯函数（只读快照 + 初始名单，无 I/O），导出供测试直捣（先例 collectSettlementFacts）。
+ */
+export function collectCombatEndFacts(
+  session: CombatSession,
+  initialFp: number,
+  participants: readonly CombatParticipant[],
+): CombatEndFacts {
+  const view = session.snapshot();
+  const terminal = view.terminal;
+
+  const aliveUnits: CombatEndFacts['aliveUnits'] = [];
+  const fallenUnits: CombatEndFacts['fallenUnits'] = [];
+
+  // 终局在场单位：hp > 0 → 存活；hp ≤ 0 → 倒下
+  for (const u of Object.values(view.units)) {
+    const entry = { name: u.name, side: u.side };
+    if (u.hp > 0) aliveUnits.push(entry);
+    else fallenUnits.push(entry);
+  }
+
+  // 开战在场而终局已移除（逃跑成功 / 召唤到期）→ 离场归入倒下名单。
+  // 防御性去重：正常情况下 participants 与终局 units 一一对应，但召唤物/回放数据
+  // 可能重叠，避免同一名字进两遍（名单只当事实依据，重复会误导 AI 人数）。
+  const presentIds = new Set(Object.keys(view.units));
+  const alreadyListed = new Set([...aliveUnits, ...fallenUnits].map((u) => u.name));
+  for (const p of participants) {
+    if (presentIds.has(p.characterId)) continue;
+    if (alreadyListed.has(p.name)) continue;
+    fallenUnits.push({ name: p.name, side: p.side === 'enemy' ? 'enemy' : 'player' });
+  }
+
+  return {
+    reason: terminal?.reason ?? 'terminal',
+    winner: terminal?.winner,
+    outcome: outcomeOf(session),
+    rounds: view.round,
+    fpDelta: view.resourceSnapshots.FP - initialFp,
+    aliveUnits,
+    fallenUnits,
+  };
+}
+
+/**
+ * 终局事实 → 喂 AI 的文本（整场战斗总结的依据串）。
+ *
+ * 确定性数字（回合数 / FP 净变动 / 单位名单）只给 AI 当事实依据——契约要求结果
+ * 文本不重复数字卡片、不出现机制术语（照叙事规范）。纯函数，导出供测试直捣
+ * （先例 buildSettlementFactText）。
+ */
+export function buildCombatEndFactText(facts: CombatEndFacts): string {
+  const lines: string[] = [];
+  lines.push(`战斗结果：${COMBAT_OUTCOME_TEXT[facts.outcome] ?? '平局'}`);
+  const reasonText = TERMINAL_REASON_TEXT[facts.reason] ?? facts.reason;
+  if (reasonText) lines.push(`终局原因：${reasonText}`);
+  lines.push(`进行回合数：${facts.rounds}`);
+  const fpSign = facts.fpDelta >= 0 ? '+' : '';
+  lines.push(`命运点数净变动：${fpSign}${facts.fpDelta}`);
+  if (facts.aliveUnits.length > 0) {
+    lines.push(`仍屹立于战场：${facts.aliveUnits.map((u) => u.name).join('、')}`);
+  }
+  if (facts.fallenUnits.length > 0) {
+    lines.push(`倒下或已离场：${facts.fallenUnits.map((u) => u.name).join('、')}`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * 战斗终局 AI 总结：终局结算完成后，把整场战斗事实喂同一持久会话，
+ * AI 写一段面向玩家的战斗总结叙事（2-4 句，收束胜负 / 关键转折 / 幸存者命运）。
+ *
+ * 与 narrateSettlement 同形（三条铁则照抄）：
+ *  - **不产 Command、不改战斗状态**：总结只读，战斗结果已由 commitChatState 落库。
+ *  - **走 client.chat（非工具路径）**：总结是纯文本一段，无需工具；也不消费主决策
+ *    的 chatWithTools 工具轮预算。
+ *  - **失败优雅降级**：无 client / 调用抛错 / 空输出 → 返回 ''，调用方回落
+ *    collectedSummary / 兜底（T11 语义不变，战斗结果不受影响）。
+ *
+ * 持久会话契约（决策 1A）：总结 user(终局事实) 与 assistant(总结文本) 都 append 进
+ * handle.messages——与主决策消息同一数组、串行追加 → 前缀稳定、不错位。失败时回滚
+ * user 消息（pop），数组保持失败前原样，不污染后续（战斗已结束，主要是保持可回放）。
+ * client 由主决策（F5 openCombatScene / routeEnemyCommand）惰性建；整场从未调 AI 时
+ * client 为 null → 总结静默跳过（无 agent 会话的降级形态，兜底摘要照常回注）。
+ */
+async function narrateCombatEnd(
+  facts: CombatEndFacts,
+  handle: CombatSessionHandle,
+): Promise<string> {
+  const client = handle.client;
+  if (!client || typeof client.chat !== 'function') return '';
+  const factText = buildCombatEndFactText(facts);
+  if (!factText) return '';
+  const messages = handle.messages;
+  const userContent =
+    `【战斗终局】战斗已结束，结算已落库。以下为整场战斗的终局事实` +
+    `（数字由战斗面板展示，叙事勿重复数值）：\n${factText}\n\n` +
+    `请以旁白口吻写一段面向玩家的战斗总结叙事（2-4 句）：交代胜负、关键转折与幸存者/` +
+    `倒下者的命运，收束这场战斗。不要复述数字卡片，不要出现「HP」「FP」「检定」等机制术语。`;
+  messages.push({ role: 'user', content: userContent });
+  try {
+    // 🔴 照 narrateSettlement 的 2026-08-12 修复：CombatClient.chat 契约是对象形状
+    // `{ messages }`（对齐 AgentClient.chat），传裸数组会让 request.messages 为 undefined。
+    const result = await client.chat({ messages } as never);
+    const text = (result.output ?? result.rawResponse ?? '').trim();
+    if (text.length > 0) {
+      messages.push({ role: 'assistant', content: text });
+      return text;
+    }
+    messages.pop(); // 空输出（含 result.error 的失败形态）→ 回滚 user 消息
+    return '';
+  } catch {
+    messages.pop(); // 调用抛错 → 回滚 user 消息，战斗结果不受影响
     return '';
   }
 }
@@ -1514,12 +1833,13 @@ function toolCallToCommandSync(
         payload: {} as Record<string, never>,
       };
     case 'flee':
+      // Bug A（2026-08-12）：逃跑不占攻击/动作槽（cost 'none'）——「想跑就能跑」。
       return {
         commandId: id,
         expectedRevision: revision,
         kind: 'Flee',
         actorId: resolve(args.actorName) ?? actorId,
-        cost: 'both',
+        cost: 'none',
         payload: {} as Record<string, never>,
       };
     case 'end_turn':
@@ -1696,6 +2016,13 @@ function emitEvents(
     for (const evt of projectToUi(events, { units: session.snapshot().units })) {
       opts.onCombatEvent(evt);
     }
+    // 🔴 2026-08-12（真机 bug：打半天血量不掉）：普通伤害（DamageApplied→v3_action）
+    //   **不触发 v3_unit_state_changed**（那只在 HpFloored/UnitDowned/UnitDefeated 发），
+    //   前端 v3ActiveCombat.units 只在开战快照更新一次 → UI 面板 HP 永远停在开战值。
+    //   修复：**每次 dispatch 后补发 v3_units_snapshot**（整个 units 字典），前端覆盖
+    //   units —— HP/槽位/状态实时同步（伤害、血量变化、槽位消费都能看到）。
+    //   幂等：store 的 v3_units_snapshot 分支是整份覆盖，重复发无害。
+    opts.onCombatEvent({ type: 'v3_units_snapshot', units: { ...session.snapshot().units } });
   }
 }
 

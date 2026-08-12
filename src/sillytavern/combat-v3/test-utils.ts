@@ -121,6 +121,22 @@ export function mkEndTurn(
   } as CombatCommand;
 }
 
+/** 构造 Flee（逃跑，cost 'none'——Bug A 2026-08-12：不占攻击/动作槽，「想跑就能跑」） */
+export function mkFlee(
+  commandId: string,
+  expectedRevision: number,
+  actorId: string,
+): CombatCommand {
+  return {
+    commandId,
+    expectedRevision,
+    kind: 'Flee',
+    actorId,
+    cost: 'none',
+    payload: {},
+  } as CombatCommand;
+}
+
 /** 构造 RequestSettlement */
 export function mkSettle(
   commandId: string,

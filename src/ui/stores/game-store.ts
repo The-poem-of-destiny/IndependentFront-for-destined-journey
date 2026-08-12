@@ -134,6 +134,8 @@ export const useGameStore = defineStore('game', () => {
    *  F2：+start（就绪期占位句柄只带它 —— 玩家点「开始战斗」→ store.startCombat 调它）。 */
   const combatCoordinator = ref<{
     submit?: (cmd: CombatCommand) => Promise<void>;
+    /** 🎭 主持人/DM 模式（2026-08-12）：提交玩家意图文本 → 主持人解析 → Command */
+    submitPlayerIntent?: (text: string) => Promise<void>;
     abandon?: () => void;
     waitForCommand?: () => Promise<CombatCommand>;
     preSnapshotId?: string | null;
@@ -231,6 +233,18 @@ export const useGameStore = defineStore('game', () => {
         if (evt.text)
           combatLog.value.push({ id, kind: 'narrative', text: evt.text, round: evt.round });
         break;
+      // 🆕 2026-08-12（Bug 2 修复）：玩家侧命令被内核 rejection 的友好提示。
+      // 典型：攻击槽/动作槽已耗尽仍再点 → SLOT_EXHAUSTED。此前 coordinator 熔断
+      // abandon 整场（页面闪退根因）；现在只推一条提示行，随后 coordinator 重新 emit
+      // v3_awaiting_player_input 亮「等待输入」，玩家可换动作或点「结束回合」。
+      case 'v3_rejection_notice':
+        combatLog.value.push({
+          id,
+          kind: 'narrative',
+          text: `⚠️ ${evt.message}`,
+          round: undefined,
+        });
+        break;
       case 'v3_awaiting_player_input':
         combatAwaitingInput.value = {
           unit: evt.unit,
@@ -271,6 +285,20 @@ export const useGameStore = defineStore('game', () => {
       payload: partial.payload ?? ({} as Record<string, unknown>),
     } as CombatCommand;
     await coordinator.submit(cmd);
+  }
+
+  /** 🎭 主持人/DM 模式（2026-08-12）：玩家提交**意图文本**（拼装格式化文本 / 自由对话）
+   *  → 转 Coordinator → 主持人会话解析 → Command。生产路径替代 submitCombatCommand：
+   *  UI 不再直接产 Command 喂内核，玩家输入一律过主持人理解意图（ADM 模式）。
+   *  老 Command 直连路径保留（submitCombatCommand），供测试/快速直捣兜底。
+   */
+  async function submitCombatIntent(text: string): Promise<void> {
+    const coordinator = combatCoordinator.value;
+    if (!coordinator?.submitPlayerIntent) {
+      // 无意图桥（旧 coordinator / 测试）→ 静默忽略（与 submitCombatCommand 无 Coordinator 同口径）
+      return;
+    }
+    await coordinator.submitPlayerIntent(text);
   }
 
   /** v3：放弃战斗（C4）——句柄 abandon → 丢弃 session → exitCombat */
@@ -1112,6 +1140,7 @@ export const useGameStore = defineStore('game', () => {
     applyCombatEvent,
     setCombatCoordinator,
     submitCombatCommand,
+    submitCombatIntent,
     abandonCombat,
     skipCombat,
     startCombat,

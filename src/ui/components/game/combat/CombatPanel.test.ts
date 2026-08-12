@@ -165,4 +165,84 @@ describe('CombatPanel F2 就绪态', () => {
     expect(wrapper.find('.combat-action-bar').exists()).toBe(true);
     expect(wrapper.text()).toContain('100 / 100');
   });
+
+  it('开打态 v3_action 日志（attackerId/targetId 是 UUID）：units 字典经 CombatMessageFlow 透传，卡片标题渲染中文名', async () => {
+    mockGame.combatReady = null;
+    // 生产形状：单位 id 是 UUID、name 是中文名；v3_action 里塞的是 UUID
+    const A = '2011502d-0fb3-4d0e-97d9-cd1e300edd86';
+    const B = '7f3c9b21-5a4e-4d8f-9b1a-2c6d8e0f4a53';
+    mockGame.v3ActiveCombat = {
+      combatId: 'c1',
+      revision: 0,
+      phase: 'CombatOpen',
+      round: 1,
+      initiativeOrder: [A, B],
+      currentTurnIndex: 0,
+      units: {
+        [A]: {
+          id: A,
+          name: '奥利雅思',
+          side: 'player',
+          tier: 1,
+          hp: 100,
+          maxHp: 100,
+          mp: 50,
+          maxMp: 50,
+          sp: 50,
+          maxSp: 50,
+          attacksRemaining: 1,
+          actionsRemaining: 1,
+          canAct: true,
+          morale: 'steady',
+          statusEffects: [],
+        },
+        [B]: {
+          id: B,
+          name: '灰皮巨鼠',
+          side: 'enemy',
+          tier: 1,
+          hp: 80,
+          maxHp: 80,
+          mp: 0,
+          maxMp: 0,
+          sp: 0,
+          maxSp: 0,
+          attacksRemaining: 1,
+          actionsRemaining: 1,
+          canAct: true,
+          morale: 'steady',
+          statusEffects: [],
+        },
+      },
+      resourceSnapshots: { FP: 0 },
+    };
+    mockGame.combatLog = [
+      {
+        id: 'log-1',
+        kind: 'action',
+        toolName: 'attack',
+        result: {
+          attackerId: A,
+          targetId: B,
+          skill: '灼热射线',
+          checkValue: 15,
+          rating: '有效',
+          hit: true,
+          final: 161,
+          damageType: '能量',
+          targetHpBefore: 625,
+          targetHpAfter: 464,
+        },
+      },
+    ];
+    const wrapper = await mountPanel();
+
+    expect(wrapper.find('.combat-action-card').exists()).toBe(true);
+    // 标题的攻方/守方两个 .cac-name（中间是 CSS 伪元素箭头，text() 不含 →）
+    const names = wrapper.findAll('.combat-action-card .cac-name').map((n) => n.text());
+    expect(names).toEqual(['奥利雅思', '灰皮巨鼠']);
+    const text = wrapper.find('.combat-action-card').text();
+    expect(text).not.toContain(A);
+    expect(text).not.toContain(B);
+  });
 });

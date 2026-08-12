@@ -19,6 +19,8 @@ import CombatActionCard from './CombatActionCard.vue';
 
 const props = defineProps<{
   entries: CombatLogEntry[];
+  /** 单位 id → 名字字典（透传给动作卡片：v3 攻击卡反查 UUID → 中文名） */
+  units?: Record<string, string>;
 }>();
 
 /* ── 自动滚到底（参考 ChatFlow.vue watch 写法） ── */
@@ -66,7 +68,7 @@ watch(
 
         <!-- 动作结果卡片 -->
         <div v-else-if="entry.kind === 'action'" class="bubble-row bubble-row-action">
-          <CombatActionCard :result="entry.result" :tool-name="entry.toolName" />
+          <CombatActionCard :result="entry.result" :tool-name="entry.toolName" :units="units" />
         </div>
       </template>
     </div>

@@ -169,3 +169,61 @@ describe('ChatFlow 回合活动重试', () => {
     expect(wrapper.emitted('retry-turn')).toEqual([['u1']]);
   });
 });
+
+// 🆕 思考中指示（2026-08-12）：生成态、正文未出时显示当前 Agent 活动
+describe('ChatFlow 思考中指示', () => {
+  it('isGenerating 且无 streamingText → 显示思考中（含当前 Agent 活动文案）', async () => {
+    game.currentAgentActivityRun = {
+      id: 'activity-1',
+      sourceMessageId: 'u1',
+      status: 'running' as const,
+      startedAt: 0,
+      standalone: false,
+      steps: [
+        {
+          id: 's1',
+          agentId: 'story',
+          label: '书写此刻',
+          status: 'running' as const,
+          startedAt: 0,
+          tools: [
+            { id: 't1', label: '掷出命运之骰', status: 'completed' as const, completedAt: 0 },
+          ],
+        },
+      ],
+    };
+    const wrapper = mount(ChatFlow, {
+      global: {
+        stubs: { teleport: true, TurnActivityLedger: true },
+      },
+      props: { messages: [userMsg('u1', '继续')], isGenerating: true, streamingText: '' },
+    });
+
+    const indicator = wrapper.find('.thinking-indicator');
+    expect(indicator.exists()).toBe(true);
+    expect(indicator.text()).toContain('书写此刻');
+    expect(indicator.text()).toContain('掷出命运之骰');
+  });
+
+  it('生成中但已有流式正文 → 不显示思考中（正文已在输出）', async () => {
+    game.currentAgentActivityRun = null;
+    const wrapper = mount(ChatFlow, {
+      global: { stubs: { teleport: true, TurnActivityLedger: true } },
+      props: {
+        messages: [userMsg('u1', '继续')],
+        isGenerating: true,
+        streamingText: '风从旷野那头灌过来…',
+      },
+    });
+    expect(wrapper.find('.thinking-indicator').exists()).toBe(false);
+  });
+
+  it('非生成态 → 不显示思考中', async () => {
+    game.currentAgentActivityRun = null;
+    const wrapper = mount(ChatFlow, {
+      global: { stubs: { teleport: true, TurnActivityLedger: true } },
+      props: { messages: [userMsg('u1', '继续')], isGenerating: false },
+    });
+    expect(wrapper.find('.thinking-indicator').exists()).toBe(false);
+  });
+});

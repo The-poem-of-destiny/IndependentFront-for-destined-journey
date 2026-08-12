@@ -213,16 +213,17 @@
 - 新增 `v3_units_snapshot` 事件：把单位字典整体填进 store（当前 `v3_combat_started` 的 `units:{}` 是空的，后续事件也不填——面板弹出来也是空的，必须补）。
 - `game-store.ts` 的 `v3_combat_started` 分支填充 `units` 字典（从事件载荷或开战 bundle）。
 
-### 3.2 玩家输入（决策 B：统一 AI 解析意图）
+### 3.2 玩家输入（🎭 2026-08-12 主持人/DM 模式改造：统一 AI 解析意图）
 
-**现状**：`CombatActionBar.vue:238` 走 v2 `submitCombatInput(文本)` → runner 解析自然语言。v3 是 `submitCombatCommand(Command)` → `coordinator.submit`（game-pipeline.ts:1580 的桥已通）。
+**现状（T14 已实施）**：`CombatActionBar.vue` 四步拼装直接产结构化 Command → `submitCombatCommand` → 内核；自由文本走 `parsePlayerInput` 规则解析。**两条路都不经过 AI**。
 
-**改造**：玩家输入统一走**文本 → AI 解析意图**：
+**🎭 主持人模式改造（2026-08-12，设计纠偏）**：`combat_v3` 的定位从「敌方专属决策器」改为**战斗主持人（DM）**——同一持久会话贯穿全场，玩家轮次收到【玩家意图】文本后分析理解并调 `declare_*` 工具替玩家声明动作，敌方轮次扮演敌方决策。
 
-- 四步拼装产出自然语言指令（保留现有拼装 UI，产出仍是文本），自由文本同样。
-- 文本经 coordinator 的解析器转 Command（`DeclareAttack` / `DeclareAction` / `PassSlot` / `Flee`）。
-- 解析器可选：优先结构化（拼装能直接定 Command），自由文本才过 AI/规则解析。
-- 禁止把自由文本直接当 Command 喂内核（那是"查询工具被误当 Command"的同款坑）。
+- 拼装产出**自然语言意图文本**（如「我方艾萨使用技能火焰术攻击骷髅兵」）→ `submitCombatIntent`；自由文本原样提交。
+- `routePlayerIntent`：把【玩家意图】文本 append 进主持人会话 → `chatWithTools` → 主持人调工具 → Command（内核校验执行）。
+- 与敌方分支共用 `handle.messages` + `handle.client`（决策 1A）：主持人有全程记忆，记得玩家说过什么、敌方做过什么。
+- 禁止把自由文本直接当 Command 喂内核（那是"查询工具被误当 Command"的同款坑）——现在由主持人理解意图，不再本地正则解析。
+- 旧 Command 直连路径保留为测试/直捣兜底（`waitForCommand`），生产恒走意图桥（`waitForPlayerIntent`）。
 
 ### 3.3 单位卡片展示层级
 

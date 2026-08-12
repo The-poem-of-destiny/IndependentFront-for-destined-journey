@@ -363,6 +363,15 @@ export function buildItemGenPatches(itemOutput: ItemGenOutput, characterId: stri
         ...(skill.buffs?.length ? { buffs: skill.buffs } : {}),
         ...(skill.divinity !== undefined ? { divinity: skill.divinity } : {}),
         ...(skill.automata?.length ? { automata: skill.automata } : {}),
+        // 🆕 skillPower 链路修复 (2026-08-04 漏网 2026-08-12): 主体威力三字段透传。
+        //    0694453 只修了 char_gen 链路的 assembleCharacterState，本链（request_dispatcher →
+        //    item_gen → add_skill）的 patch 漏了这三字段 → 开局初始技能（火球术等）落库后
+        //    skillPower/relevantAttribute/damageType 全丢 → characterToCombatParticipant 按
+        //    typeof skillPower === 'number' 过滤踢出 activeSkills → 战斗兜底 0 伤害。
+        //    与 assembleCharacterState（char-gen-agent.ts）的透传口径逐字段一致。
+        ...(skill.skillPower !== undefined ? { skillPower: skill.skillPower } : {}),
+        ...(skill.relevantAttribute ? { relevantAttribute: skill.relevantAttribute } : {}),
+        ...(skill.damageType ? { damageType: skill.damageType } : {}),
       },
       metadata: { source: 'item_gen', kind: 'skill' },
     });

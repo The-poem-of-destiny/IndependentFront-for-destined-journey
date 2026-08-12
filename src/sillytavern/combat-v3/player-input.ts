@@ -151,7 +151,8 @@ export function parsePlayerInput(text: string, ctx: PlayerParseCtx): PlayerComma
   const base = { actorId: ctx.actorId } as const;
 
   if (FLEE_RE.test(t)) {
-    return { ok: true, command: { ...base, cost: 'both', kind: 'Flee', payload: {} } };
+    // Bug A（2026-08-12）：逃跑不占攻击/动作槽（cost 'none'）——「想跑就能跑」。
+    return { ok: true, command: { ...base, cost: 'none', kind: 'Flee', payload: {} } };
   }
 
   if (DEFEND_RE.test(t)) {

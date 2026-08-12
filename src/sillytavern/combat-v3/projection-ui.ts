@@ -28,6 +28,13 @@ import type { CombatUnitView, DomainEvent, MoraleState } from './types';
  * v3_units_snapshot（开局单位字典整体快照，让面板有数据）。缺省不传则行为与 T13 前
  * 逐字节一致（一一对应、无多产事件），coordinator 在首次 dispatch 时传
  * session.snapshot().units。
+ *
+ * 🔴 2026-08-12（真机 bug：一次攻击显示三张空卡片）：攻击三阶段事件
+ * （AttackDeclared / AttackResolved / DamageApplied）**各自** mapEvent 成一张 v3_action，
+ * 而每张只带各自阶段的零散字段（形状又不是 CombatActionCard 期望的 v2 CombatActionResult）
+ * → UI 一次攻击冒出三张「attack」空卡。修复：**按攻击对 (attackerId, targetId) 聚合**成
+ * 一张完整 v3_action 卡片（含命中/评级/伤害/HP 变化全字段），顺序放在首事件位置。
+ * 聚合后字段形状见 v3 卡片契约（CombatActionCard 的 v3 分支）。
  */
 export function projectToUi(
   events: readonly DomainEvent[],
@@ -35,6 +42,18 @@ export function projectToUi(
 ): CombatEvent[] {
   const out: CombatEvent[] = [];
   for (const evt of events) {
+    // 🔴 攻击三阶段聚合：AttackDeclared/AttackResolved/DamageApplied 合并成一张卡片
+    if (
+      evt.kind === 'AttackDeclared' ||
+      evt.kind === 'AttackResolved' ||
+      evt.kind === 'DamageApplied'
+    ) {
+      // 只在「首事件」时落一张聚合卡，后续同攻击对事件跳过（避免重复卡片）
+      if (isFirstOfAttackPair(out, evt)) {
+        out.push(aggregateAttackCard(events, evt));
+      }
+      continue;
+    }
     out.push(mapEvent(evt));
     // v3_combat_started 先落 store（创建 v3ActiveCombat），快照随后填充 units —— 顺序不可换
     if (evt.kind === 'CombatOpened' && opts?.units) {
@@ -42,6 +61,66 @@ export function projectToUi(
     }
   }
   return out;
+}
+
+/** 判定 evt 是否是某攻击对的**第一个**阶段事件（后续同对事件已聚合进卡片，不再重复发） */
+function isFirstOfAttackPair(
+  already: CombatEvent[],
+  evt: Extract<DomainEvent, { kind: 'AttackDeclared' | 'AttackResolved' | 'DamageApplied' }>,
+): boolean {
+  // 在已产出的事件里找同攻击对的 v3_action(attack) 卡片
+  const key = `${evt.attackerId}->${evt.targetId}`;
+  return !already.some(
+    (e) =>
+      e.type === 'v3_action' &&
+      e.toolName === 'attack' &&
+      `${(e.result as Record<string, unknown>)?.attackerId}->${
+        (e.result as Record<string, unknown>)?.targetId
+      }` === key,
+  );
+}
+
+/**
+ * 把一段 events 里同攻击对的 AttackDeclared/AttackResolved/DamageApplied 聚合
+ * 成一张完整 v3_action 卡片（v3 扁平字段，供 CombatActionCard 渲染）。
+ * 顺序：AttackDeclared（声明）→ AttackResolved（检定/评级/命中）→ DamageApplied（伤害/HP）。
+ */
+function aggregateAttackCard(
+  all: readonly DomainEvent[],
+  first: Extract<DomainEvent, { kind: 'AttackDeclared' | 'AttackResolved' | 'DamageApplied' }>,
+): CombatEvent {
+  const attackerId = first.attackerId;
+  const targetId = first.targetId;
+  const siblings = all.filter(
+    (e) =>
+      (e.kind === 'AttackDeclared' || e.kind === 'AttackResolved' || e.kind === 'DamageApplied') &&
+      e.attackerId === attackerId &&
+      e.targetId === targetId,
+  );
+  const declared = siblings.find((e) => e.kind === 'AttackDeclared') as
+    Extract<DomainEvent, { kind: 'AttackDeclared' }> | undefined;
+  const resolved = siblings.find((e) => e.kind === 'AttackResolved') as
+    Extract<DomainEvent, { kind: 'AttackResolved' }> | undefined;
+  const damaged = siblings.find((e) => e.kind === 'DamageApplied') as
+    Extract<DomainEvent, { kind: 'DamageApplied' }> | undefined;
+
+  return {
+    type: 'v3_action',
+    toolName: 'attack',
+    result: {
+      attackerId,
+      targetId,
+      skill: declared?.skill,
+      checkValue: resolved?.checkValue,
+      rating: resolved?.rating,
+      hit: resolved?.hit,
+      final: damaged?.final ?? damaged?.preReduction,
+      preReduction: damaged?.preReduction,
+      damageType: damaged?.damageType,
+      targetHpBefore: damaged?.targetHpBefore,
+      targetHpAfter: damaged?.targetHpAfter,
+    },
+  };
 }
 
 /** 单个 DomainEvent → CombatEvent 的穷尽映射 */

@@ -48,6 +48,30 @@ describe('A1-6：终局四出口', () => {
     expect(checkTerminal(s)?.reason).toBe('flee_success');
   });
 
+  it('🔴 Bug C 修复：空战场（双方跑光/死光）必须终局，不得返回 null', () => {
+    // 原实现 `units.length === 0 → null` 与 `全部 hp≤0 → null` 会让「双方同时
+    // 跑光/死光」无人判终 → dispatch 循环空转直至 KernelStuckError（真机卡死）。
+    // 修复后：空战场判平局（winner undefined），但 reason 必须给出才能进
+    // Terminal 相位 → RequestSettlement 收尾。
+    const bundle = mkBundle();
+    // ① units 为空（全部离场）
+    const emptyUnits: CombatState = {
+      ...createCombatState(bundle),
+      units: {},
+      initiativeOrder: [],
+    };
+    expect(checkTerminal(emptyUnits)).toEqual({ reason: 'hp_zero', winner: undefined });
+    // ② units 非空但全部 hp ≤ 0（同归于尽）
+    const allDead: CombatState = {
+      ...createCombatState(bundle),
+      units: {
+        甲: { ...createCombatState(bundle).units['甲'], hp: 0 },
+        乙: { ...createCombatState(bundle).units['乙'], hp: 0 },
+      },
+    };
+    expect(checkTerminal(allDead)).toEqual({ reason: 'hp_zero', winner: undefined });
+  });
+
   it('forceTerminal → 进 Terminal', () => {
     const bundle = mkBundle();
     const s: CombatState = {

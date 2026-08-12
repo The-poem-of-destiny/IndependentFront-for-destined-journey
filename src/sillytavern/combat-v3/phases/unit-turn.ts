@@ -159,7 +159,8 @@ function activeFrozenFor(state: CombatState, unitId: string): { attack: boolean;
  * 消费后：
  *   - DeclareAttack / PassAttack / DeclareAction / PassAction 消费对应槽
  *   - 两槽都归 0 → nextPhase 'MoraleCheck'；否则留在 'SlotConsume'（同单位等待）
- *   - Flee（cost 'both'）→ 消费攻击+动作，进 Flee 检定（action.ts/flee）
+ *   - Flee（cost 'none'，Bug A）→ 跳过槽位消费，进 Flee 检定（action.ts/flee）；
+ *     相位流转由 handleFlee 决定（成功 UnitTurnClose / 失败 MoraleCheck）
  */
 export function consumeSlot(
   bundle: CombatDefinitionBundle,
@@ -193,19 +194,26 @@ export function consumeSlot(
     return out;
   }
 
-  // 按 cost 消费槽（Pass 也消费，不变量①）
-  const slot =
-    command.cost === 'attack'
-      ? 'attack'
-      : command.cost === 'action'
-        ? 'action'
-        : command.cost === 'both'
-          ? 'both'
-          : null;
+  // Bug A（2026-08-12）：逃跑是「想跑就能跑」的自由动作 —— 不占攻击/动作槽。
+  // 此前 Flee cost 'both' 要求两槽各剩 ≥1：玩家用过攻击槽后再点逃跑 →
+  // SLOT_EXHAUSTED → 逃跑被卡死（真机 bug）。现在 Flee 跳过槽位消费
+  // （cost 已改 'none'），本函数只校验在场/当前单位，相位流转交给 handleFlee
+  // （成功 → UnitTurnClose 移除单位；失败 → MoraleCheck 结束本回合，
+  // 见 reducer.consumePlayerCommand 的 Flee 特判）。
+  if (command.kind === 'Flee') {
+    out.nextPhase = 'SlotConsume';
+    return out;
+  }
+
+  // 按 cost 消费槽（Pass 也消费，不变量①）。
+  // 🔴 2026-08-12（Bug A）：'both' 分支已删除 —— 它是 Flee 专用（攻击+动作各扣一），
+  // 而 Flee 已改 cost 'none' + 上方专用分支跳过槽位消费；CommandCost 联合里保留
+  // 'both' 字面量（防御未来新命令），但 consumeSlot 不再消费它。
+  const slot = command.cost === 'attack' ? 'attack' : command.cost === 'action' ? 'action' : null;
 
   if (slot === null) {
-    // cost 'none'（Choose / Adjudicate / SupplyDice / RequestSettlement）不走槽位消耗，
-    // 由 reducer 单独路由，不应进到这里。
+    // cost 'none'（Choose / Adjudicate / SupplyDice / RequestSettlement / Flee）不走
+    // 槽位消耗，由 reducer 单独路由 / phase handler 决定流转，不应进到这里。
     out.nextPhase = 'SlotConsume';
     return out;
   }
@@ -216,28 +224,18 @@ export function consumeSlot(
       return out;
     }
     out.changes.slotConsumptions.push({ actorId: command.actorId, slot: 'attack' });
-  } else if (slot === 'action') {
+  } else {
     if (u.actionsRemaining <= 0) {
       out.rejection = { code: 'SLOT_EXHAUSTED', message: '动作槽已耗尽' };
       return out;
     }
     out.changes.slotConsumptions.push({ actorId: command.actorId, slot: 'action' });
-  } else {
-    // both（Flee）：攻击 + 动作 各消费一个
-    if (u.attacksRemaining <= 0 || u.actionsRemaining <= 0) {
-      out.rejection = { code: 'SLOT_EXHAUSTED', message: '需要攻击+动作槽（逃跑）' };
-      return out;
-    }
-    out.changes.slotConsumptions.push(
-      { actorId: command.actorId, slot: 'attack' },
-      { actorId: command.actorId, slot: 'action' },
-    );
   }
 
   // 判断是否两槽都归零 → MoraleCheck；否则同单位继续等 PlayerCommand
   const after = {
-    attacks: u.attacksRemaining - (slot === 'attack' || slot === 'both' ? 1 : 0),
-    actions: u.actionsRemaining - (slot === 'action' || slot === 'both' ? 1 : 0),
+    attacks: u.attacksRemaining - (slot === 'attack' ? 1 : 0),
+    actions: u.actionsRemaining - (slot === 'action' ? 1 : 0),
   };
   if (after.attacks <= 0 && after.actions <= 0) {
     out.nextPhase = 'MoraleCheck';
