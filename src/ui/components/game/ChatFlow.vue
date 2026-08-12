@@ -216,9 +216,9 @@ const thinkingText = computed(() => {
   const run = game.currentAgentActivityRun;
   if (!run) return '正在构思…';
   // 最新 running step（没有则取整个 run 的最后一个 step）
-  const step = [...run.steps].reverse().find((s) => s.status === 'running') ?? run.steps.at(-1);
+  const step = [...run.steps].reverse().find((s) => s.status === 'running') ?? run.steps[run.steps.length - 1];
   if (!step) return '正在构思…';
-  const tool = step.tools.at(-1);
+  const tool = step.tools[step.tools.length - 1];
   if (tool) return `${step.label} · ${tool.label}`;
   return step.label;
 });

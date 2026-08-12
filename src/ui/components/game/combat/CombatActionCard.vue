@@ -276,6 +276,7 @@ function v3Summary(): {
   target: string;
   skill: string;
   check: string;
+  rating: string;
   damage: string;
   hp: string;
 } {
