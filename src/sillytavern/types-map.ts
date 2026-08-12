@@ -122,6 +122,17 @@ export interface MapTile {
   countryId: string | null;
   /** 所属中层；`null` = 不属于任何中层 */
   midTierId: string | null;
+  /**
+   * `provinces.png` 里这块地的**权威**块色（RGB 0-255）—— 编译期直接取自 `definition.csv`
+   * 那一行，与栅格像素同源。UI 的政治层拿它把像素反查成地块（`buildTileColorLookup`）。
+   *
+   * 🔴 **可选，缺席合法**：这一格是后加的，早期包与手写占位包没有它。缺席时 UI 回落到
+   *    「重算工具链 `colorForId(id)` 哈希」那条旧路，而那条路只在工具链的 `allocColor`
+   *    从没为撞色加过盐时才等于真实颜色 —— 加过盐的那一块会被算到**另一块地**的颜色上，
+   *    表现是「画错、点错一整块地」且完全无声。所以**有这一格时永远优先用它**。
+   * 🔴 引擎不读颜色（同 `MapCountry.color`）：它只服务 UI 的命中检测与着色。
+   */
+  color?: [r: number, g: number, b: number];
   /** 形心像素坐标（× `kmPerPx` 得距离，§6.2） */
   centroid: [x: number, y: number];
   /** 像素面积 —— 只用于「无首府的中层取最大块」那条锚地块兜底（§8.2-3） */

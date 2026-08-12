@@ -94,6 +94,9 @@ const FIXTURE: MapPack = {
       impassable: false,
       countryId: 'north',
       midTierId: 'north-a',
+      // 夹具刻意**只给两块地**上色（另一块是 Echo）：`color` 是可选格，混合包是合法输入，
+      // 而「有色的用色、没色的回落哈希」正是 UI 那边逐块判断的理由。
+      color: [12, 34, 56],
       centroid: [10, 10],
       areaPx: 900,
     },
@@ -138,6 +141,7 @@ const FIXTURE: MapPack = {
       impassable: false,
       countryId: null,
       midTierId: null,
+      color: [200, 201, 202],
       centroid: [45, 15],
       areaPx: 1200,
     },
@@ -473,6 +477,79 @@ describe('coerceTiles —— 坏地块整条跳过，好地块一格不动', () 
       { id: 21, name: 'Kilo', terrain: 'never-seen-terrain', centroid: [1, 2] },
     ]);
     expect(tiles.find((t) => t.name === 'Kilo')!.terrain).toBe('never-seen-terrain');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 块色（`color`）—— UI 把像素反查成地块的钥匙
+// ═══════════════════════════════════════════════════════════
+
+describe('地块块色 —— 权威色收下，坏色只丢这一格', () => {
+  function tileOf(patch: Record<string, unknown>): MapPack['tiles'][number] | undefined {
+    const item = { id: 40, name: 'Painted', terrain: 'plains', centroid: [1, 2], ...patch };
+    return coerceMapPack(raw({ tiles: [item] })).tiles[0];
+  }
+
+  it('权威色原样收下（数字串通道也收 —— pack 由 CSV 编译而来）', () => {
+    expect(tileOf({ color: [12, 34, 56] })!.color).toEqual([12, 34, 56]);
+    expect(tileOf({ color: ['0', '128', '255'] })!.color).toEqual([0, 128, 255]);
+    // 第四格（有些工具会补 alpha）不妨碍前三格
+    expect(tileOf({ color: [1, 2, 3, 255] })!.color).toEqual([1, 2, 3]);
+  });
+
+  it('没写这一格的地块**不长出**它（缺席是合法的，UI 据此回落哈希重算）', () => {
+    const tile = tileOf({})!;
+    expect(tile.color).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(tile, 'color')).toBe(false);
+  });
+
+  it('混合包：写了的留着、没写的仍然缺席（可选格不是全有或全无）', () => {
+    const pack = coerceMapPack(fixture());
+    expect(pack.tiles.find((t) => t.id === 1)!.color).toEqual([12, 34, 56]);
+    expect(pack.tiles.find((t) => t.id === 5)!.color).toEqual([200, 201, 202]);
+    expect(pack.tiles.find((t) => t.id === 2)!.color).toBeUndefined();
+  });
+
+  it('🔴 坏色 → 缺席（**不是** [0,0,0]）：地块色是反查像素的钥匙，凭空的纯黑会认成「未绘制」', () => {
+    for (const bad of [
+      'red',
+      42,
+      null,
+      {},
+      [1, 2], // 长度不足
+      [1, 2, 'x'], // 通道认不出
+      [1, 2, Number.NaN],
+      [1, 2, null],
+      [-1, 2, 3], // 越界：`& 255` 会把它换成另一个颜色，那是替包发明数据
+      [1, 2, 256],
+      [1, 2, 3.5], // 通道不可能有小数，圆整它等于猜
+    ]) {
+      expect(tileOf({ color: bad })!.color).toBeUndefined();
+    }
+  });
+
+  it('坏色**不丢地块**（它仍要在图上占位、仍要有名字与形心）', () => {
+    const tile = tileOf({ color: 'red' })!;
+    expect(tile.id).toBe(40);
+    expect(tile.name).toBe('Painted');
+    expect(tile.centroid).toEqual([1, 2]);
+  });
+
+  it('🔴 与国家色刻意不同口径：国家坏色回落 [0,0,0]，地块坏色是缺席', () => {
+    const pack = coerceMapPack(
+      raw({
+        countries: [{ id: 'x', name: 'X', color: 'not-a-color', anchorTileId: null }],
+        tiles: [{ id: 41, name: 'Quebec', terrain: 'plains', centroid: [1, 1], color: 'nope' }],
+      }),
+    );
+    // 国家色画成黑就行（看得见、引擎不读）；地块色不能猜（猜错 = 整块地画错/点错）
+    expect(pack.countries[0]!.color).toEqual([0, 0, 0]);
+    expect(pack.tiles[0]!.color).toBeUndefined();
+  });
+
+  it('边界值 0 / 255 照收 —— 纯黑该不该用是 UI 那一层的判断，不在这里改数据', () => {
+    expect(tileOf({ color: [0, 0, 0] })!.color).toEqual([0, 0, 0]);
+    expect(tileOf({ color: [255, 255, 255] })!.color).toEqual([255, 255, 255]);
   });
 });
 

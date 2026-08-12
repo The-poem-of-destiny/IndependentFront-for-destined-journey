@@ -179,6 +179,50 @@ describe('像素 → 地块 id', () => {
     }
   });
 
+  it('🔴 pack 带的权威色优先，哈希只是回落 —— 有色的地块用哈希查不到', () => {
+    // 权威色刻意与哈希色不同：工具链 `allocColor` 为撞色加过盐时，真实颜色正是这样偏离哈希的
+    const explicit: [number, number, number] = [3, 5, 7];
+    const lookup = buildTileColorLookup([{ id: 1, color: explicit }]);
+    expect(lookup.byColor.get(rgbKey(3, 5, 7))).toBe(1);
+    const hashed = provinceColorForTileId(1);
+    expect(hashed).not.toEqual(explicit);
+    expect(lookup.byColor.has(rgbKey(hashed[0], hashed[1], hashed[2]))).toBe(false);
+    expect(lookup.ambiguous).toBe(0);
+  });
+
+  it('🔴 逐块判断，不是整包二选一：混合包里有色的用色、无色的回落哈希', () => {
+    const lookup = buildTileColorLookup([{ id: 1, color: [3, 5, 7] }, { id: 2 }]);
+    expect(lookup.byColor.get(rgbKey(3, 5, 7))).toBe(1);
+    const two = provinceColorForTileId(2);
+    expect(lookup.byColor.get(rgbKey(two[0], two[1], two[2]))).toBe(2);
+    expect(lookup.byColor.size).toBe(2);
+  });
+
+  it('权威色也走同一条撞色防线（两边一起丢），纯黑同样不入表', () => {
+    const collide = buildTileColorLookup([
+      { id: 1, color: [9, 9, 9] },
+      { id: 2, color: [9, 9, 9] },
+      { id: 3, color: [4, 4, 4] },
+    ]);
+    expect(collide.byColor.has(rgbKey(9, 9, 9))).toBe(false);
+    expect(collide.ambiguous).toBe(2);
+    expect(collide.byColor.get(rgbKey(4, 4, 4))).toBe(3);
+    // 纯黑是「未绘制」的保留色：映射到它的地块会把整片没画的区域认成自己的领土
+    const black = buildTileColorLookup([{ id: 1, color: [0, 0, 0] }]);
+    expect(black.byColor.size).toBe(0);
+  });
+
+  it('权威色画出来的栅格能反查到地块（解码端与查表端同一口径）', () => {
+    const tiles = [
+      { id: 1, color: [3, 5, 7] as [number, number, number] },
+      { id: 2, color: [200, 100, 50] as [number, number, number] },
+    ];
+    const data = new Uint8ClampedArray([3, 5, 7, 255, 200, 100, 50, 255]);
+    const raster = decodeProvinceIds({ width: 2, height: 1, data }, buildTileColorLookup(tiles));
+    expect([raster.idBuf[0], raster.idBuf[1]]).toEqual([1, 2]);
+    expect(raster.unknownPixels).toBe(0);
+  });
+
   it('撞色的两块地一起丢 —— 绝不让其中一块顶替另一块（文件头红线）', () => {
     // 5948 与 8811 的哈希色相同（[200,241,78]），暴力扫出来的定值：哈希确定，永远成立
     const lookup = buildTileColorLookup([{ id: 5948 }, { id: 8811 }, { id: 1 }]);

@@ -168,6 +168,7 @@
       "impassable": false,
       "countryId": "country_northridge",
       "midTierId": "mid_northplain",
+      "color": [124, 176, 96],
       "centroid": [75, 82],
       "areaPx": 5400
     },
@@ -179,6 +180,7 @@
       "impassable": false,
       "countryId": "country_northridge",
       "midTierId": "mid_northplain",
+      "color": [58, 112, 84],
       "centroid": [168, 74],
       "areaPx": 4600
     },
@@ -190,6 +192,7 @@
       "impassable": true,
       "countryId": "country_northridge",
       "midTierId": "mid_frostridge",
+      "color": [176, 182, 196],
       "centroid": [82, 26],
       "areaPx": 3100
     },
@@ -201,6 +204,7 @@
       "impassable": false,
       "countryId": "country_northridge",
       "midTierId": "mid_frostridge",
+      "color": [146, 138, 92],
       "centroid": [170, 24],
       "areaPx": 3600
     },
@@ -212,6 +216,7 @@
       "impassable": false,
       "countryId": "country_wilderness",
       "midTierId": null,
+      "color": [190, 196, 108],
       "centroid": [78, 148],
       "areaPx": 6200
     },
@@ -223,6 +228,7 @@
       "impassable": false,
       "countryId": "country_wilderness",
       "midTierId": null,
+      "color": [152, 130, 116],
       "centroid": [176, 142],
       "areaPx": 4100
     },
@@ -234,6 +240,7 @@
       "impassable": false,
       "countryId": null,
       "midTierId": null,
+      "color": [96, 148, 200],
       "centroid": [124, 115],
       "areaPx": 1400
     },
@@ -245,6 +252,7 @@
       "impassable": false,
       "countryId": "country_southcoast",
       "midTierId": "mid_harbor",
+      "color": [214, 186, 104],
       "centroid": [88, 220],
       "areaPx": 4800
     },
@@ -256,6 +264,7 @@
       "impassable": false,
       "countryId": "country_southcoast",
       "midTierId": "mid_harbor",
+      "color": [206, 158, 118],
       "centroid": [182, 222],
       "areaPx": 3900
     },
@@ -267,6 +276,7 @@
       "impassable": false,
       "countryId": null,
       "midTierId": null,
+      "color": [72, 132, 190],
       "centroid": [285, 110],
       "areaPx": 21000
     },
@@ -278,6 +288,7 @@
       "impassable": false,
       "countryId": null,
       "midTierId": null,
+      "color": [40, 92, 154],
       "centroid": [362, 150],
       "areaPx": 26000
     },
@@ -289,6 +300,7 @@
       "impassable": false,
       "countryId": null,
       "midTierId": null,
+      "color": [104, 168, 208],
       "centroid": [278, 245],
       "areaPx": 14000
     },
@@ -300,6 +312,7 @@
       "impassable": false,
       "countryId": "country_wilderness",
       "midTierId": null,
+      "color": [188, 142, 96],
       "centroid": [330, 258],
       "areaPx": 900
     }

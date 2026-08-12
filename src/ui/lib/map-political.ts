@@ -14,13 +14,16 @@
  * overlay 等于把坐标映射、重绘时机、命中检测对着 OSD 的缩放模型重推一遍 —— 纯集成风险、
  * v1 零收益。代价是一个 Modal 里两套平移缩放实现，已接受。
  *
- * 🔴 **像素颜色与 tileId 的对应关系是这一层的承重假设**，而 pack 里**没有**这张表：
- *    `MapTile` 不带颜色（见 `types-map.ts`）。provinces.png 的块色由工具链的
- *    `colorForId(id)` 确定性哈希产出（`sample-map/mapdata.js`），编译脚本原样拷图、不导出颜色。
- *    所以这里必须重算同一个哈希 —— 实测与首发 mapdata 的 definition.csv **316/316 全等**。
- *    工具链的 `allocColor` 在**撞色**时会加盐（`colorForId(id + salt * 7919)`），那时某个块的
- *    真实颜色就不再是 `colorForId(id)`，而哈希重算会把它算到**另一个块**的颜色上 ——
- *    「画错一整块地」且完全无声。故 `buildTileColorLookup` 一旦发现两个 id 撞到同一个颜色
+ * 🔴 **像素颜色与 tileId 的对应关系是这一层的承重假设**，而 pack 现在**自己带着这张表**：
+ *    每块地有 `MapTile.color`（编译期取自 `definition.csv`，与 provinces.png 的像素同源）。
+ *    有这一格就**照抄，绝不再猜**。
+ *    只有**没有**颜色的地块（早期包 / 手写占位包）才回落旧路：重算工具链的
+ *    `colorForId(id)` 确定性哈希（`sample-map/mapdata.js`）。那条路实测与首发 mapdata 的
+ *    definition.csv **316/316 全等**，但那只是**当下**碰巧全等 —— 工具链的 `allocColor`
+ *    在**撞色**时会加盐（`colorForId(id + salt * 7919)`），那时某个块的真实颜色就不再是
+ *    `colorForId(id)`，而哈希重算会把它算到**另一个块**的颜色上 —— 「画错一整块地」且
+ *    完全无声。这正是 pack 要出这一格的理由；回落只为让老包仍然画得出来，不是等价方案。
+ *    两条路径共用同一条防线：`buildTileColorLookup` 一旦发现两个 id 撞到同一个颜色
  *    键，**两边一起丢**（那两块地不着色、点不中，看得见），并把撞色数报出来。
  *    宁可漏不可猜 —— 先例 `image-world-tags`。
  *
@@ -59,6 +62,7 @@ export function rgbKey(r: number, g: number, b: number): number {
 /**
  * tileId → provinces.png 里那块地的颜色（工具链 `colorForId` 的逐位移植）。
  *
+ * 🔴 **这是回落路径**（`MapTile.color` 缺席时才用它，见文件头）：pack 带了权威色就照抄。
  * 🔴 **一个数都不许改**（含那三个魔数与 `Math.imul`）：它与画图那一侧必须逐位相同，
  *    改一位的表现不是报错，是整张图查不到任何一块地（或者更坏 —— 查到别的块）。
  * 纯黑保留给「未绘制」，所以哈希落到全 0 时上游用 `[17, 17, 17]` 顶掉。
@@ -81,19 +85,32 @@ export interface TileColorLookup {
   ambiguous: number;
 }
 
+/** 建查表要的最小地块形状 —— `MapTile` 的子集（这一层不需要地形/归属/形心） */
+export interface TileColorSource {
+  id: number;
+  /** pack 带的**权威**块色；缺席 → 回落 `provinceColorForTileId` 哈希重算 */
+  color?: readonly [number, number, number];
+}
+
 /**
  * 建颜色查表。撞色的**两边一起丢**（理由见文件头那条红线）。
  *
+ * 🔴 **逐块判断用哪条路**，不是整包二选一：pack 允许「一部分地块有色、另一部分没有」
+ *    （`color` 是可选格），而按整包挑一条路会让混合包里有色的那些也去走哈希 —— 恰好
+ *    丢掉这一格带来的全部好处，且看不出来。
+ *
  * 顺带丢掉纯黑：它是「未绘制」的保留色，一个映射到它的地块会让整片没画的区域
- * 变成那一块地的领土。
+ * 变成那一块地的领土。（引擎侧 `coerceMapPack` 已经把坏色打回缺席，所以这里读到的
+ * `color` 要么是三个 0-255 的整数、要么没有；万一仍有坏值，`rgbKey` 会把它算成 0，
+ * 与纯黑同处置 —— 那也是「丢掉」这一侧。）
  */
-export function buildTileColorLookup(tiles: readonly { id: number }[]): TileColorLookup {
+export function buildTileColorLookup(tiles: readonly TileColorSource[]): TileColorLookup {
   const byColor = new Map<number, number>();
   const collided = new Set<number>();
 
   for (const tile of tiles) {
     if (!Number.isFinite(tile.id)) continue;
-    const [r, g, b] = provinceColorForTileId(tile.id);
+    const [r, g, b] = tile.color ?? provinceColorForTileId(tile.id);
     const key = rgbKey(r, g, b);
     if (key === 0) continue;
     if (byColor.has(key)) {

@@ -165,6 +165,30 @@ function readColor(value: unknown): [number, number, number] {
   return [r, g, b];
 }
 
+/**
+ * 地块块色 —— 认不出返回 `undefined`（**不是** `readColor` 的全 0 回落）。
+ *
+ * 🔴 与国家色刻意不同处：国家色坏了画成黑就行（看得见、且引擎不读）；地块色是 UI 把**像素
+ *    反查成地块**的钥匙，一个凭空的 `[0, 0, 0]` 会声称自己是栅格里的「未绘制」保留色 ——
+ *    要么整块地被查表丢掉，要么把整片没画的区域认成这块地。缺席才是诚实的答案：UI 据此
+ *    回落「重算工具链哈希」那条旧路，那条路对不上时表现为「认不出颜色的像素数 > 0」，
+ *    是看得见的（先例 `image-world-tags` 的「宁可漏不可猜」）。
+ * 🔴 只收 0-255 的整数，**不做取模**：栅格反查用的键是 `(r << 16) | (g << 8) | b` 配 `& 255`，
+ *    把 300 收成 44 就是**替包发明一个别的颜色**，而它会安静地命中另一块地。
+ *    小数同理不收 —— 通道值不可能有小数，圆整它等于猜。
+ */
+function readTileColor(value: unknown): [number, number, number] | undefined {
+  if (!Array.isArray(value) || value.length < 3) return undefined;
+  const channels: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    const channel = readNumber(value[i]);
+    if (channel === null || !Number.isInteger(channel) || channel < 0 || channel > 255)
+      return undefined;
+    channels.push(channel);
+  }
+  return [channels[0]!, channels[1]!, channels[2]!];
+}
+
 /** 正数费率：0 与负数一律回落（见 `IDENTITY_RATE` 那条注释） */
 function readPositiveRate(value: unknown, fallback: number): number {
   const parsed = readNumber(value);
@@ -228,6 +252,9 @@ function coerceTravelRules(raw: unknown): TravelRules {
  *      对靠近原点的一切都显得又近又便宜。宁可整块不在图上（它的邻接边随后会被清掉）
  *
  * id 重复只留**第一条**（先到先得是稳定的；数组里的「后者赢」依赖遍历顺序）。
+ *
+ * 可选的 `color` 是**逐格宽容**的：坏值只丢那一格（见 `readTileColor`），地块照留 ——
+ * 它是 UI 的着色/命中钥匙，不是地块存在与否的判据。
  */
 function coerceTiles(raw: unknown): MapTile[] {
   if (!Array.isArray(raw)) return [];
@@ -253,7 +280,7 @@ function coerceTiles(raw: unknown): MapTile[] {
     const areaPx = readNumberOr(item.areaPx, 0);
 
     seen.add(id);
-    out.push({
+    const tile: MapTile = {
       id,
       name,
       terrain: readText(item.terrain),
@@ -263,7 +290,11 @@ function coerceTiles(raw: unknown): MapTile[] {
       midTierId: readIdOrNull(item.midTierId),
       centroid: [x, y],
       areaPx: areaPx >= 0 ? areaPx : 0,
-    });
+    };
+    // 坏色**只丢这一格**（照 `unclaimed` 的写法只在有值时挂上，不写 `color: undefined`）
+    const color = readTileColor(item.color);
+    if (color !== undefined) tile.color = color;
+    out.push(tile);
   }
   return out;
 }
