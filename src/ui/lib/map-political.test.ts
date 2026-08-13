@@ -38,7 +38,6 @@ import {
   frameStageOnPoints,
   IMPASSABLE_ALPHA,
   IMPASSABLE_HATCH_RGB,
-  AUTO_MIDTIER_ZOOM_OVER_MIN,
   AUTO_TILE_ZOOM_OVER_MIN,
   IMPASSABLE_RGB,
   LABEL_MIN_ZOOM_OVER_MIN,
@@ -563,20 +562,19 @@ describe('地图标签', () => {
   it('自动档：粒度跟着缩放走，两个阈值都按**取等号即进位**', () => {
     const at = (ratio: number): StageView => ({ s: 2 * ratio, x: 0, y: 0, min: 2, max: 500 });
     expect(resolveEffectiveTintMode('auto', at(1))).toBe('country');
-    // 恰好 T_MID：进中层（>= 不是 >）
-    expect(resolveEffectiveTintMode('auto', at(AUTO_MIDTIER_ZOOM_OVER_MIN - 0.0001))).toBe(
-      'country',
-    );
-    expect(resolveEffectiveTintMode('auto', at(AUTO_MIDTIER_ZOOM_OVER_MIN))).toBe('midTier');
+    // 恰好 T_MID：进中层（>= 不是 >）。中层阈值就是标签起显阈值本身（见下一条用例）
+    expect(resolveEffectiveTintMode('auto', at(LABEL_MIN_ZOOM_OVER_MIN - 0.0001))).toBe('country');
+    expect(resolveEffectiveTintMode('auto', at(LABEL_MIN_ZOOM_OVER_MIN))).toBe('midTier');
     // 恰好 T_TILE：进地块
     expect(resolveEffectiveTintMode('auto', at(AUTO_TILE_ZOOM_OVER_MIN - 0.0001))).toBe('midTier');
     expect(resolveEffectiveTintMode('auto', at(AUTO_TILE_ZOOM_OVER_MIN))).toBe('tile');
     expect(resolveEffectiveTintMode('auto', at(50))).toBe('tile');
   });
 
-  it('自动档进中层的那一刻**正是**标签起显的那一刻（两个阈值刻意是同一个数）', () => {
-    // 🔴 差一点点就会出现「变了色却没有名字」的一小段缩放区间，看起来像掉了东西
-    expect(AUTO_MIDTIER_ZOOM_OVER_MIN).toBe(LABEL_MIN_ZOOM_OVER_MIN);
+  it('自动档进中层的那一刻**正是**标签起显的那一刻（同一个常量，构造上不可能分叉）', () => {
+    // 🔴 差一点点就会出现「变了色却没有名字」的一小段缩放区间，看起来像掉了东西。
+    //    resolveEffectiveTintMode 直接引用 LABEL_MIN_ZOOM_OVER_MIN（不设别名常量），
+    //    这里从两个入口各问一次，钉住它们在同一缩放下同时翻转。
     const view: StageView = { s: 2 * LABEL_MIN_ZOOM_OVER_MIN, x: 0, y: 0, min: 2, max: 500 };
     expect(resolveEffectiveTintMode('auto', view)).toBe('midTier');
     expect(labelsVisibleAtZoom(view)).toBe(true);
