@@ -146,7 +146,12 @@ const MAP_PACK: MapPack = {
   resolution: { w: 6, h: 1 },
   kmPerPx: 1,
   terrains: ['平地', '山地', '水面'],
-  travelRules: { rates: { land: 10, nearSea: 20, farSea: 30 }, embarkCost: 1, terrainFactor: {} },
+  travelRules: {
+    rates: { land: 10, nearSea: 20, farSea: 30 },
+    embarkCost: 1,
+    terrainFactor: {},
+    modes: [],
+  },
   countries: [
     { id: 'c-a', name: '甲国', color: [10, 20, 30], anchorTileId: 1 },
     { id: 'c-b', name: '乙国', color: [200, 100, 50], anchorTileId: 4 },
@@ -555,7 +560,12 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
   it('「出发」把指令填进输入框、关掉 Modal —— 不自动发送（§8.2）', async () => {
     const game = await useGameStub({ saveProfile: makeProfile({ lastTileId: 1 }) });
     // 天数固定，断言才能钉逐字的措辞
-    vi.mocked(findPath).mockReturnValue({ tilePath: [1, 2, 3, 4], days: 7, crossings: ['甲州'] });
+    vi.mocked(findPath).mockReturnValue({
+      tilePath: [1, 2, 3, 4],
+      days: 7,
+      timeDays: 6.4,
+      crossings: ['甲州'],
+    });
     setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
     const wrapper = await mountPanel();
     await openPoliticalTab(wrapper);
@@ -571,6 +581,66 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
     expect(game.closeModal).toHaveBeenCalledTimes(1);
   });
 
+  it('出行方式 chips：按方式在取整前估天数，选中方式写进出发指令', async () => {
+    const game = await useGameStub({ saveProfile: makeProfile({ lastTileId: 1 }) });
+    vi.mocked(findPath).mockReturnValue({
+      tilePath: [1, 2, 3, 4],
+      days: 7,
+      timeDays: 6.4,
+      crossings: [],
+    });
+    setContentRegistry({
+      ...emptyRegistry(),
+      mapPack: {
+        ...MAP_PACK,
+        travelRules: {
+          ...MAP_PACK.travelRules,
+          modes: [
+            { id: 'carriage', label: '马车', factor: 1 },
+            { id: 'airship', label: '空艇', factor: 0.25 },
+          ],
+        },
+      },
+    });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
+    await clickButton(wrapper, '.pol-card', '查看路线');
+
+    const chips = wrapper.findAll('.pol-mode-chip');
+    // ceil(6.4×1) = 7 / ceil(6.4×0.25) = 2 —— 倍率乘在取整前的 timeDays 上
+    expect(chips.map((c) => c.text().replace(/\s+/g, ' '))).toEqual(['马车 · 7 天', '空艇 · 2 天']);
+    expect(wrapper.find('.pol-route-days').text()).toBe('约 7 天');
+
+    await chips[1]!.trigger('click');
+    expect(wrapper.find('.pol-route-days').text()).toBe('约 2 天');
+
+    await clickButton(wrapper, '.pol-card', '出发');
+    expect(game.fillInput).toHaveBeenCalledWith(
+      '【地图】玩家决定启程前往乙一，出行方式：空艇，约 2 天',
+    );
+  });
+
+  it('旧包（零方式）不渲染方式行 —— 措辞与天数与从前逐字一致', async () => {
+    await useGameStub({ saveProfile: makeProfile({ lastTileId: 1 }) });
+    vi.mocked(findPath).mockReturnValue({
+      tilePath: [1, 2, 3, 4],
+      days: 7,
+      timeDays: 6.4,
+      crossings: [],
+    });
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
+    await clickButton(wrapper, '.pol-card', '查看路线');
+
+    expect(wrapper.find('.pol-route-modes').exists()).toBe(false);
+    expect(wrapper.find('.pol-route-days').text()).toBe('约 7 天');
+  });
+
   it('在途旗 → 页签头显示目的地与按当前位置重估的剩余天数', async () => {
     await useGameStub({
       saveProfile: makeProfile({
@@ -578,7 +648,12 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
         journey: { toTileId: 4, arriveAtMinute: 999 },
       }),
     });
-    vi.mocked(findPath).mockReturnValue({ tilePath: [1, 2, 3, 4], days: 5, crossings: [] });
+    vi.mocked(findPath).mockReturnValue({
+      tilePath: [1, 2, 3, 4],
+      days: 5,
+      timeDays: 4.2,
+      crossings: [],
+    });
     setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
     const wrapper = await mountPanel();
     await openPoliticalTab(wrapper);
@@ -929,7 +1004,12 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
 
   it('路线折线按顺序连点，途经点画在线上（只标真的经过的）', async () => {
     await useGameStub({ saveProfile: makeProfile({ lastTileId: 1 }) });
-    vi.mocked(findPath).mockReturnValue({ tilePath: [1, 2, 4], days: 3, crossings: [] });
+    vi.mocked(findPath).mockReturnValue({
+      tilePath: [1, 2, 4],
+      days: 3,
+      timeDays: 2.6,
+      crossings: [],
+    });
     setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
     const wrapper = await mountPanel();
     await openPoliticalTab(wrapper);

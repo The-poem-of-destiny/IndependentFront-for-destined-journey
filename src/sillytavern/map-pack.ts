@@ -68,6 +68,7 @@ function createIdentityTravelRules(): TravelRules {
     rates: { land: IDENTITY_RATE, nearSea: IDENTITY_RATE, farSea: IDENTITY_RATE },
     embarkCost: 0,
     terrainFactor: {},
+    modes: [],
   };
 }
 
@@ -237,6 +238,22 @@ function coerceTravelRules(raw: unknown): TravelRules {
       const factor = readNumber(value);
       if (factor === null || factor < 0) continue;
       out.terrainFactor[key] = factor;
+    }
+  }
+
+  // 出行方式：坏条目整条跳过（半条方式没有意义），id 重复首见胜；缺席/全坏 → 空数组
+  if (Array.isArray(raw.modes)) {
+    const seen = new Set<string>();
+    for (const item of raw.modes) {
+      if (!isRecord(item)) continue;
+      const id = typeof item.id === 'string' ? item.id.trim() : '';
+      const label = typeof item.label === 'string' ? item.label.trim() : '';
+      const factor = readNumber(item.factor);
+      if (id.length === 0 || label.length === 0) continue;
+      if (factor === null || factor <= 0) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.modes.push({ id, label, factor });
     }
   }
   return out;

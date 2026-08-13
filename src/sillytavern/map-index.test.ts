@@ -80,6 +80,7 @@ const FIXTURE: MapPack = {
     rates: { land: 30, nearSea: 60, farSea: 120 },
     embarkCost: 12,
     terrainFactor: { plains: 1, forest: 1.4 },
+    modes: [],
   },
   countries: [
     { id: 'north', name: 'Northland', color: [10, 20, 30], anchorTileId: 1 },

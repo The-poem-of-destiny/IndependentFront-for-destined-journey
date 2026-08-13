@@ -38,6 +38,7 @@ const FIXTURE: MapPack = {
     rates: { land: 30, nearSea: 60, farSea: 120 },
     embarkCost: 12,
     terrainFactor: { plains: 1, forest: 1.4, hills: 1.8, ridge: 3 },
+    modes: [],
   },
   countries: [
     { id: 'north', name: 'Northland', color: [10, 20, 30], anchorTileId: 1 },
@@ -326,6 +327,36 @@ describe('coerceMapPack —— 缺节的包（每节各自回落，不连坐）'
     expect(pack.travelRules.rates).toEqual({ land: 1, nearSea: 1, farSea: 1 });
     expect(pack.travelRules.embarkCost).toBe(0);
     expect(pack.travelRules.terrainFactor).toEqual({});
+    expect(pack.travelRules.modes).toEqual([]);
+  });
+
+  it('modes：坏条目整条跳过、id 重复首见胜、缺席是空数组（v1.0.0 旧包照常吃）', () => {
+    const pack = coerceMapPack(
+      raw({
+        travelRules: {
+          rates: { land: 30, nearSea: 60, farSea: 120 },
+          embarkCost: 1,
+          terrainFactor: {},
+          modes: [
+            { id: 'carriage', label: '马车', factor: 1 },
+            { id: 'walk', label: '步行', factor: 2 },
+            { id: 'walk', label: '重复的步行', factor: 3 }, // 重复 id：首见胜
+            { id: '', label: '无名', factor: 1 }, // 空 id
+            { id: 'ghost', label: '', factor: 1 }, // 空 label
+            { id: 'free', label: '免费', factor: 0 }, // 0 倍率 = 瞬移，拒收
+            { id: 'slow', label: '龟速', factor: -2 }, // 负倍率
+            { id: 'nan', label: '坏数', factor: 'fast' }, // 认不出
+            'not-an-object',
+          ],
+        },
+      }),
+    );
+    expect(pack.travelRules.modes).toEqual([
+      { id: 'carriage', label: '马车', factor: 1 },
+      { id: 'walk', label: '步行', factor: 2 },
+    ]);
+    // 旧包（没有 modes 字段）不受影响
+    expect(coerceMapPack(raw({})).travelRules.modes).toEqual([]);
   });
 
   it('travelRules 单格坏只回落那一格', () => {

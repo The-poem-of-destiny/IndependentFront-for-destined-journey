@@ -57,6 +57,7 @@ function makePack(parts: {
       rates: { land: 30, nearSea: 60, farSea: 120 },
       embarkCost: 10,
       terrainFactor: { plains: 1 },
+      modes: [],
     },
     countries: [{ id: 'north', name: 'Northland', color: [10, 20, 30], anchorTileId: 1 }],
     midTiers: parts.midTiers,

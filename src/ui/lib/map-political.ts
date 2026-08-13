@@ -36,7 +36,7 @@
  */
 
 import { countryOfTile, midTierOfTile, type MapIndex } from '@engine/map-index';
-import type { MapPack, MapTile } from '@engine/types-map';
+import type { MapPack, MapRoute, MapTile } from '@engine/types-map';
 
 // ═══════════════════════════════════════════════════════════
 // 1. 像素 → 地块 id
@@ -1345,6 +1345,25 @@ export interface DepartureDirectiveInput {
   avoid?: readonly string[];
   /** 天数估算；`null` / 0 → 不写这一句（宁可不说，也别说「约 0 天」） */
   days?: number | null;
+  /**
+   * 出行方式显示名（pack `travelRules.modes[].label`）；空/缺席 → 不写方式子句。
+   * 🔴 传的是 label 不是 id —— 这句话给 AI 与玩家看，id 是包内键不该露面。
+   */
+  mode?: string | null;
+}
+
+/**
+ * 一种出行方式下的天数估算：在**取整前**的路线时间上乘倍率，再走与 `findPath` 相同的
+ * 「含边至少 1 天、原地 0 天」口径。对取整后的 `days` 乘倍率会放大取整误差
+ * （1.3 天的路 ceil 成 2 再 ×2 = 4 天，而真值是 ceil(2.6) = 3 天）。
+ */
+export function estimateModeDays(
+  route: Pick<MapRoute, 'timeDays' | 'tilePath'>,
+  factor: number,
+): number {
+  if (!Number.isFinite(factor) || factor <= 0) return 0;
+  if (route.tilePath.length <= 1) return 0;
+  return Math.max(1, Math.ceil(route.timeDays * factor));
 }
 
 function cleanNames(list: readonly string[] | undefined): string[] {
@@ -1380,8 +1399,12 @@ export function composeDepartureDirective(input: DepartureDirectiveInput): strin
     typeof input.days === 'number' && Number.isFinite(input.days)
       ? Math.max(0, Math.round(input.days))
       : 0;
+  // 措辞刻意方式中立（「出行方式：X」）：label 是包词汇，任何动词搭配（乘/骑/步行）都会
+  // 对某些方式念不通
+  const mode = typeof input.mode === 'string' ? input.mode.trim() : '';
 
   let text = `【地图】玩家决定启程前往${destination}`;
+  if (mode.length > 0) text += `，出行方式：${mode}`;
   if (via.length > 0) text += `，取道${via.join('、')}`;
   if (avoid.length > 0) text += `，避开${avoid.join('、')}`;
   if (days > 0) text += `，约 ${days} 天`;

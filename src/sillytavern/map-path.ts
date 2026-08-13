@@ -415,5 +415,11 @@ export function findPath(
   // 含边的路径至少 1 天（形心极近的两块地不该显示成「0 天到」）；原地不动是 0 天
   const days = tilePath.length <= 1 ? 0 : Math.max(1, Math.ceil(totalTimeDays));
 
-  return { tilePath, days, crossings: buildCrossings(pack, tilePath, graph.nodes) };
+  // timeDays 原样带出（原地不动归零，别把浮点噪声当时间）——出行方式预览在它上面乘倍率再取整
+  return {
+    tilePath,
+    days,
+    timeDays: tilePath.length <= 1 ? 0 : totalTimeDays,
+    crossings: buildCrossings(pack, tilePath, graph.nodes),
+  };
 }

@@ -32,6 +32,7 @@ import {
   centerStageView,
   clampStageView,
   composeDepartureDirective,
+  estimateModeDays,
   decodeProvinceIds,
   describeTile,
   fitStageView,
@@ -96,6 +97,7 @@ function makePack(overrides: Partial<MapPack> = {}): MapPack {
       rates: { land: 10, nearSea: 20, farSea: 30 },
       embarkCost: 1,
       terrainFactor: { 平地: 1, 山地: 2 },
+      modes: [],
     },
     countries: [
       { id: 'c-a', name: '甲国', color: [10, 20, 30], anchorTileId: 1 },
@@ -839,5 +841,33 @@ describe('出发指令（§8.2）', () => {
     expect(composeDepartureDirective({ destination: '乙一', days: -5 })).toBe(
       '【地图】玩家决定启程前往乙一',
     );
+  });
+
+  it('出行方式子句：有 label 才写，空串/缺席整段省略（旧包零方式时措辞与从前逐字一致）', () => {
+    expect(
+      composeDepartureDirective({ destination: '乙一', via: ['甲二'], days: 7, mode: '空艇' }),
+    ).toBe('【地图】玩家决定启程前往乙一，出行方式：空艇，取道甲二，约 7 天');
+    expect(composeDepartureDirective({ destination: '乙一', mode: '  ' })).toBe(
+      '【地图】玩家决定启程前往乙一',
+    );
+    expect(composeDepartureDirective({ destination: '乙一', mode: null, days: 3 })).toBe(
+      '【地图】玩家决定启程前往乙一，约 3 天',
+    );
+  });
+});
+
+describe('estimateModeDays（出行方式预览）', () => {
+  it('在取整前的 timeDays 上乘倍率再 ceil —— 不是对 days 乘（那会放大取整误差）', () => {
+    const route = { tilePath: [1, 2, 3], timeDays: 1.3 };
+    expect(estimateModeDays(route, 1)).toBe(2);
+    expect(estimateModeDays(route, 2)).toBe(3); // ceil(2.6)，而不是 ceil(1.3)*2 = 4
+    expect(estimateModeDays(route, 0.25)).toBe(1); // 含边至少 1 天（口径同 findPath）
+  });
+
+  it('原地不动 0 天；倍率非正/认不出 → 0（调用方据此不显示）', () => {
+    expect(estimateModeDays({ tilePath: [1], timeDays: 0 }, 2)).toBe(0);
+    expect(estimateModeDays({ tilePath: [1, 2], timeDays: 1.5 }, 0)).toBe(0);
+    expect(estimateModeDays({ tilePath: [1, 2], timeDays: 1.5 }, -1)).toBe(0);
+    expect(estimateModeDays({ tilePath: [1, 2], timeDays: 1.5 }, Number.NaN)).toBe(0);
   });
 });

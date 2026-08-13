@@ -234,6 +234,15 @@ days      = ceil(Σcost / rate)
   新类型 `MapRoute = { tilePath: number[]; days: number; crossings: string[] }`
   （crossings = 途经的中层/国家名与水段，给回执与 UI 用），不再双轨。
 
+> **2026-08-13 修订（出行方式预览 / pack v1.1.0）**：`travelRules` 增加 `modes[]`
+> （`{id, label, factor}`，编译脚本持有默认表：马车 1.0 基线 / 步行 2.0（faction uid 141
+> 「十至十四日徒步或五至七日麋鹿骑行」）/ 骑乘 0.8 / 空艇 0.25（无天数真值，设计值））。
+> `factor` 乘在 `MapRoute.timeDays`（新增：取整前总时间）上再 ceil，**只是 UI 预览层的
+> 倍率**——不进寻路状态、不进存档、不进 MAP_CONTEXT；选中方式经出发指令
+> （`出行方式：<label>`）给 AI 当锚。旧包（v1.0.0，无 modes）coerce 成空数组，
+> UI 不显示方式行，行为与从前逐字一致。engine 侧 `embarkCost` 单位澄清为 **km 等效**
+> （引擎除以陆行费率；编译脚本旧注「天」是错的，常量已改名 EMBARK_COST_KM，值不变）。
+
 ### 6.3 标定
 
 世界书 `locations.json` 有 8+ 组城际天数（艾瑟嘉德→金谷城 3 天 / →铁炉堡 7 天 / 白曜城→琥珀加德 2 天…）。
