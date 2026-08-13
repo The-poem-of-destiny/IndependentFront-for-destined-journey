@@ -759,6 +759,26 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
     expect(wrapper.find('.pol-card-title').text()).toBe('乙一·新');
   });
 
+  it('取图 URL 挂着 contentHash —— 换包后重建必然绕开 HTTP 缓存（2026-08-13）', async () => {
+    // 「失效键是 contentHash」那条红线堵的是内存层；地址恒定时浏览器缓存可以在换包后
+    // 把旧像素回给新一轮重建 —— 新 pack 的标签配旧图画，偶发一次且硬刷新自愈。
+    // hash 进查询串让「包变 → 地址变 → 必然回源」，包没变时照旧命中缓存。
+    await useGameStub({});
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+    expect(vi.mocked(loadProvinceRaster).mock.calls[0]?.[0]).toContain('?v=test-hash');
+
+    await wrapper.findAll('.tab-item')[0].trigger('click');
+    await flushPromises();
+    setContentRegistry({
+      ...emptyRegistry(),
+      mapPack: { ...MAP_PACK, contentHash: 'test-hash-2' },
+    });
+    await openPoliticalTab(wrapper);
+    expect(vi.mocked(loadProvinceRaster).mock.calls[1]?.[0]).toContain('?v=test-hash-2');
+  });
+
   it('势力页签的源码里也不许出现指向 data/ 的 import', async () => {
     const src = (await import('./MapPoliticalTab.vue?raw')).default;
     const imports = src.match(/^\s*import\s[^;]*;/gm) ?? [];

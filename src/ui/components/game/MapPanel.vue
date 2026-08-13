@@ -1485,14 +1485,18 @@ onBeforeUnmount(() => {
 /* OSD marker overlay 样式 */
 .osd-marker {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  width: 18px;
+  height: 18px;
   cursor: pointer;
   pointer-events: auto;
   z-index: 3;
-  transform: translate(-50%, -100%);
-  /* 图标锚点对准地图坐标，文字在图标下方 */
+  /* 🔴 根元素上不准有任何位移 transform，尺寸必须恒等于图标（2026-08-13）：
+     OSD 的 Placement.CENTER 已把 overlay 中心对准锚点，这里再叠 translate
+     等于把标记挪出一个**恒定屏幕像素**的偏移 —— 地图点随缩放动、偏移不动，
+     标记看起来就在地图上滑走，且偏移量跟着标签文字长短各不相同
+     （真机定量：图标中心偏离锚点约 (−标签宽/2, −50)px）。
+     名字标签绝对定位挂在图标下方、不进布局流，这样「图标中心 = 锚点」
+     是结构保证，任何缩放下零偏移。 */
 }
 .osd-marker-active {
   z-index: 5;
@@ -1514,6 +1518,10 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 .osd-marker-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
   margin-top: 2px;
   background: var(--theme-card-bg, #1a1a2e);
   border: 1px solid var(--theme-card-border, #333);

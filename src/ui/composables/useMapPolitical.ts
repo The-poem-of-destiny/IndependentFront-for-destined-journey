@@ -102,7 +102,18 @@ export function useMapPolitical() {
     building = (async () => {
       const startedAt = Date.now();
       const lookup = buildTileColorLookup(pack.tiles);
-      const result = await loadProvinceRaster(MAP_PROVINCES_URL, lookup, signal);
+      // 🔴 取图 URL 必须挂上 contentHash（2026-08-13）：文件头那条「失效键是 contentHash」
+      //    红线堵的是内存这一层；HTTP 缓存是**同一个坑的第二处** —— 地址恒定时，换包后的
+      //    重建会拿浏览器（启发式）缓存里的**旧像素**配新 pack 画，标签/命中/边界整层错位，
+      //    不报错、硬刷新后自愈，表现为「偶发一次、无法复现」。hash 进查询串让
+      //    「包变 → 地址变 → 必然回源」，包没变时照旧命中缓存。
+      //    空串 / 'placeholder' 不挂参：占位包根本没有这张图（404 是常态），两份坏包
+      //    共用一个键在这里无害。
+      const rasterUrl =
+        pack.contentHash !== '' && pack.contentHash !== 'placeholder'
+          ? `${MAP_PROVINCES_URL}?v=${encodeURIComponent(pack.contentHash)}`
+          : MAP_PROVINCES_URL;
+      const result = await loadProvinceRaster(rasterUrl, lookup, signal);
 
       if (signal.aborted) return;
 
