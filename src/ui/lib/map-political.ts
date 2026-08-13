@@ -1345,11 +1345,6 @@ export interface DepartureDirectiveInput {
   avoid?: readonly string[];
   /** 天数估算；`null` / 0 → 不写这一句（宁可不说，也别说「约 0 天」） */
   days?: number | null;
-  /**
-   * 出行方式显示名（pack `travelRules.modes[].label`）；空/缺席 → 不写方式子句。
-   * 🔴 传的是 label 不是 id —— 这句话给 AI 与玩家看，id 是包内键不该露面。
-   */
-  mode?: string | null;
 }
 
 /**
@@ -1399,12 +1394,10 @@ export function composeDepartureDirective(input: DepartureDirectiveInput): strin
     typeof input.days === 'number' && Number.isFinite(input.days)
       ? Math.max(0, Math.round(input.days))
       : 0;
-  // 措辞刻意方式中立（「出行方式：X」）：label 是包词汇，任何动词搭配（乘/骑/步行）都会
-  // 对某些方式念不通
-  const mode = typeof input.mode === 'string' ? input.mode.trim() : '';
 
+  // 出行方式刻意不进指令（2026-08-13 主人裁定）：方式行是给玩家的纯参考，
+  // 要坐什么由玩家在输入框自己写 —— 指令是可编辑文本，不替玩家做这个决定。
   let text = `【地图】玩家决定启程前往${destination}`;
-  if (mode.length > 0) text += `，出行方式：${mode}`;
   if (via.length > 0) text += `，取道${via.join('、')}`;
   if (avoid.length > 0) text += `，避开${avoid.join('、')}`;
   if (days > 0) text += `，约 ${days} 天`;

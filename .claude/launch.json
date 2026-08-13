@@ -9,10 +9,14 @@
     },
     {
       "name": "dev-content",
-      "runtimeExecutable": "cmd",
+      "runtimeExecutable": "env",
       "runtimeArgs": [
-        "/c",
-        "set POEM_CONTENT_DIR=E:\\Projects\\fated_poem_independent_assets\\data&& npx vite --port 5173 --strictPort"
+        "POEM_CONTENT_DIR=../Independend-Frontend-Assets/data",
+        "npx",
+        "vite",
+        "--port",
+        "5173",
+        "--strictPort"
       ],
       "port": 5173
     }

@@ -455,26 +455,15 @@ const routeUnreachable = computed(
 );
 
 /**
- * 出行方式表（pack v1.1.0 的 `travelRules.modes`）。旧包是空数组 → 方式行整个不渲染、
- * 天数走基线口径 —— 与没有这个特性时逐字节一致。失效键与 `mapIndex` 同款（换包重建舞台）。
+ * 出行方式表（pack v1.1.0 的 `travelRules.modes`）。**纯参考展示**，不可选：大字天数与
+ * 出发指令都走基线口径（factor = 1 的方式 = 校准所依据的城际天数），方式行只是把
+ * 各种方式的估算并排给玩家看 —— 要坐什么由玩家在输入框自己说，AI 自然看得见。
+ * 旧包是空数组 → 方式行整个不渲染，与没有这个特性时逐字节一致。
+ * 失效键与 `mapIndex` 同款（换包重建舞台）。
  */
 const travelModes = computed(() => {
   void polStage.value;
   return getMapPack().travelRules.modes;
-});
-const selectedModeId = ref('');
-/** 没点过 / 选中的方式随换包消失 → 回落第一项（编译脚本约定：第一项是默认方式） */
-const selectedMode = computed(() => {
-  const modes = travelModes.value;
-  if (modes.length === 0) return null;
-  return modes.find((m) => m.id === selectedModeId.value) ?? modes[0]!;
-});
-/** 展示与出发指令共用的天数：有方式表按选中方式估，没有就是基线 `days` */
-const routeDays = computed(() => {
-  const r = route.value;
-  if (r === null) return 0;
-  const mode = selectedMode.value;
-  return mode === null ? r.days : estimateModeDays(r, mode.factor);
 });
 function modeDaysOf(factor: number): number {
   const r = route.value;
@@ -486,8 +475,7 @@ const departureDirective = computed(() =>
     destination: selectedView.value?.name ?? '',
     via: viaNames.value,
     avoid: avoidNames.value,
-    days: route.value === null ? null : routeDays.value,
-    mode: selectedMode.value?.label ?? null,
+    days: route.value?.days ?? null,
   }),
 );
 
@@ -1219,19 +1207,16 @@ onBeforeUnmount(() => {
           <p v-else-if="selectedTileId === playerTileId" class="pol-note">玩家当前就在此地</p>
           <template v-else>
             <div v-if="route" class="pol-route">
-              <div class="pol-route-days">约 {{ routeDays }} 天</div>
+              <div class="pol-route-days">约 {{ route.days }} 天</div>
               <div v-if="travelModes.length > 0" class="pol-route-modes">
-                <button
+                <span
                   v-for="m in travelModes"
                   :key="m.id"
-                  type="button"
-                  class="pol-mode-chip"
-                  :class="{ active: selectedMode?.id === m.id }"
+                  class="pol-mode-item"
                   :data-mode-id="m.id"
-                  @click="selectedModeId = m.id"
                 >
-                  {{ m.label }} · {{ modeDaysOf(m.factor) }} 天
-                </button>
+                  {{ m.label }} {{ modeDaysOf(m.factor) }} 天
+                </span>
               </div>
               <div v-if="route.crossings.length > 0" class="pol-route-cross">
                 途经：{{ route.crossings.join(' · ') }}
@@ -1831,34 +1816,14 @@ onBeforeUnmount(() => {
   color: var(--theme-text-secondary);
 }
 
+/* 出行方式参考行：纯展示不可点（要坐什么玩家在输入框自己说） */
 .pol-route-modes {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--theme-spacing-xs);
-}
-.pol-mode-chip {
-  padding: 3px 10px;
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-sm);
-  background: var(--theme-card-bg);
+  gap: 2px var(--theme-spacing-sm);
+  font-size: 0.75rem;
+  line-height: 1.55;
   color: var(--theme-text-secondary);
-  font-family: inherit;
-  font-size: 0.7rem;
-  line-height: 1.5;
-  cursor: pointer;
-  transition:
-    background var(--theme-transition-fast),
-    color var(--theme-transition-fast),
-    border-color var(--theme-transition-fast);
-}
-.pol-mode-chip:hover {
-  background: var(--theme-tab-hover-bg);
-  color: var(--theme-text-primary);
-}
-.pol-mode-chip.active {
-  background: var(--theme-primary);
-  border-color: var(--theme-primary);
-  color: var(--theme-primary-text);
 }
 
 .pol-note {

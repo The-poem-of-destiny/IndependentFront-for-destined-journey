@@ -842,18 +842,6 @@ describe('出发指令（§8.2）', () => {
       '【地图】玩家决定启程前往乙一',
     );
   });
-
-  it('出行方式子句：有 label 才写，空串/缺席整段省略（旧包零方式时措辞与从前逐字一致）', () => {
-    expect(
-      composeDepartureDirective({ destination: '乙一', via: ['甲二'], days: 7, mode: '空艇' }),
-    ).toBe('【地图】玩家决定启程前往乙一，出行方式：空艇，取道甲二，约 7 天');
-    expect(composeDepartureDirective({ destination: '乙一', mode: '  ' })).toBe(
-      '【地图】玩家决定启程前往乙一',
-    );
-    expect(composeDepartureDirective({ destination: '乙一', mode: null, days: 3 })).toBe(
-      '【地图】玩家决定启程前往乙一，约 3 天',
-    );
-  });
 });
 
 describe('estimateModeDays（出行方式预览）', () => {
