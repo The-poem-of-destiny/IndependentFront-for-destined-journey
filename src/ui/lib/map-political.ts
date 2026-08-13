@@ -499,15 +499,6 @@ export function labelsVisibleAtZoom(view: StageView): boolean {
 }
 
 /**
- * 自动档升到「中层」的阈值。
- *
- * 🔴 **就是标签起显阈值本身**，不是一个碰巧相等的数：自动档在这一档同时开始画中层色
- *    与中层名，两者必须同时发生 —— 差一点点就会出现「变了色却没有名字」或者反过来的
- *    一小段缩放区间，看起来像掉了东西。所以这里引用它，而不是再写一个 1.5。
- */
-export const AUTO_MIDTIER_ZOOM_OVER_MIN = LABEL_MIN_ZOOM_OVER_MIN;
-
-/**
  * 自动档升到「地块」的阈值（= fit 下限的 4.5 倍）。
  *
  * 取值依据是**真包实测**而不是手感：310 块地的名字在这个缩放下视口里约剩四十来个，
@@ -530,7 +521,10 @@ export function resolveEffectiveTintMode(mode: MapTintModeChoice, view: StageVie
   if (!Number.isFinite(view.s) || !Number.isFinite(view.min) || view.min <= 0) return 'country';
   const ratio = view.s / view.min;
   if (ratio >= AUTO_TILE_ZOOM_OVER_MIN) return 'tile';
-  if (ratio >= AUTO_MIDTIER_ZOOM_OVER_MIN) return 'midTier';
+  // 🔴 中层档阈值**就是标签起显阈值本身**，不是一个碰巧相等的数：自动档在这一档同时
+  //    开始画中层色与中层名，两者必须同时发生 —— 差一点点就会出现「变了色却没有名字」
+  //    （或反过来）的一小段缩放区间。所以直接引用它，而不是再写一个 1.5。
+  if (ratio >= LABEL_MIN_ZOOM_OVER_MIN) return 'midTier';
   return 'country';
 }
 
@@ -716,7 +710,7 @@ export function projectToScreen(point: MapPoint, view: StageView): MapPoint {
  * 视口外多留这么多像素才裁掉 —— 标签是**按中心点**裁的，而它本身有宽度，
  * 贴边那些的中心点已经出界、字却还该露半个。
  */
-export const LABEL_CULL_MARGIN_PX = 96;
+const LABEL_CULL_MARGIN_PX = 96;
 
 /**
  * 标签（世界坐标）→ **屏幕坐标**，并裁掉视口外的。
