@@ -28,23 +28,32 @@ import { useGameStore } from '../../stores/game-store';
 import { getContentRegistry } from '../../stores/content-store';
 import { resolveMapSources } from '../../composables/useMapViewer';
 import { useMapPolitical } from '../../composables/useMapPolitical';
+import { useAssetImage } from '../../composables/useAssetImage';
 import { isReducedMotion } from '../../lib/reduced-motion';
 import {
   buildHighlightPatch,
   buildLabelsForMode,
   buildModePaint,
   buildPoliticalTint,
+  buildRoutePolyline,
+  buildRouteWaypoints,
   clampStageView,
   composeDepartureDirective,
   describeTile,
   fitStageView,
+  formatPolylinePoints,
   frameStageOnPoints,
   labelsVisibleAtZoom,
+  projectLabelsToScreen,
+  projectToScreen,
+  resolveEffectiveTintMode,
   stagePointToWorld,
+  tileCentroidWorld,
   tileAtRasterPoint,
   tileNameOf,
   zoomStageView,
   type MapTintMode,
+  type MapTintModeChoice,
   type StageView,
 } from '../../lib/map-political';
 import { getMapIndex, getMapPack } from '@engine/map-runtime';
@@ -58,19 +67,37 @@ import type { MapRoute } from '@engine/types-map';
 const ROUTE_RGBA = [255, 236, 178, 92] as const;
 const VIA_RGBA = [173, 226, 255, 120] as const;
 const AVOID_RGBA = [255, 138, 128, 110] as const;
-const PLAYER_RGBA = [255, 250, 232, 130] as const;
 const SELECT_RGBA = [255, 246, 214, 104] as const;
 const HOVER_RGBA = [255, 250, 232, 54] as const;
+// 🔴 玩家**没有**像素高亮色：他所在的那一块曾经也涂一层，但那既指不准（整块地一起亮，
+//    读不出「人在哪」）又与选中/路线的涂色抢同一个平面。现在改画一枚棋子（`.pol-pin`）。
 
 /**
  * 三档着色方式。**会话内的纯界面状态**（一个 ref，不落任何存储）——
  * 地图一个字节的持久状态都不写（ADR-31 / 文件头那条），一个显示开关更不该开这个先例。
  */
-const MODE_OPTIONS: readonly { id: MapTintMode; label: string }[] = [
-  { id: 'country', label: '势力' },
-  { id: 'midTier', label: '中层' },
-  { id: 'tile', label: '地块' },
+/** 三个实档的名字（**唯一**一处，按钮组与自动档的后缀都从这里取，免得两处飘开） */
+const EFFECTIVE_LABEL: Record<MapTintMode, string> = {
+  country: '势力',
+  midTier: '中层',
+  tile: '地块',
+};
+
+const MODE_OPTIONS: readonly { id: MapTintModeChoice; label: string }[] = [
+  { id: 'auto', label: '自动' },
+  { id: 'country', label: EFFECTIVE_LABEL.country },
+  { id: 'midTier', label: EFFECTIVE_LABEL.midTier },
+  { id: 'tile', label: EFFECTIVE_LABEL.tile },
 ];
+
+/**
+ * 缩放停下多久算「停稳了」（freeze-and-settle 的那个 settle）。
+ *
+ * 🔴 这个常量是**性能契约**，不是手感参数：所有「按分辨率算」的东西（标签字号与可见性、
+ *    棋子大小、边界线宽、自动档分档）一律读停稳后的视图，缩放过程中一个都不动。
+ *    详见 `settledView`。
+ */
+const SETTLE_MS = 150;
 
 /** 拖拽判据：位移小于这个数才算「点击」而不是「拖完地图松手」 */
 const CLICK_SLOP_PX = 3;
@@ -106,12 +133,39 @@ const tintRef = ref<HTMLCanvasElement | null>(null);
 const fxRef = ref<HTMLCanvasElement | null>(null);
 
 const view = ref<StageView>({ s: 1, x: 0, y: 0, min: 1, max: 1 });
-const tintMode = ref<MapTintMode>('country');
+
+/**
+ * **停稳后**的视图（freeze-and-settle）—— 缩放手势期间它不动，最后一次缩放的
+ * `SETTLE_MS` 毫秒后才追上 `view`。
+ *
+ * 🔴 为什么必须有这一层（2026-08-12 真机剖析，最坏帧 ~250ms）：手势期间只要有**任何**
+ *    按分辨率算的东西跟着 `view.s` 变，浏览器就没法复用已经栅格化好的那张图 ——
+ *    两条实测出来的罪证各自都能把帧拖到 200ms 以上：
+ *      ① 边界线的 `vector-effect: non-scaling-stroke`：线宽要按屏幕算，
+ *         那么「把旧栅格拉大」就是错的，于是**每一格滚轮**整张 SVG 重新栅格化。
+ *      ② `--pol-label-k` 每格变一次：310 个带描边的中文标签逐帧重排 + 重刻字形。
+ *    所以规矩是：**`view` 只准喂 `.pol-world` 的 transform**（那是纯 GPU 变换，
+ *    合成器直接缩放现成的栅格）；一切按分辨率算的量一律读 `settledView`。
+ *    代价是手势中标签/棋子跟着地图一起缩放（大小暂时不对），停手 150ms 内自己纠正 ——
+ *    这个取舍是刻意的：动的时候没人在读地名，卡顿却人人都感觉得到。
+ * 🔴 平移**不需要**进这一层：`x`/`y` 不改变任何分辨率相关的量，只挪 transform。
+ */
+const settledView = ref<StageView>({ s: 1, x: 0, y: 0, min: 1, max: 1 });
+
+/**
+ * 舞台尺寸的**响应式**副本（`viewportSize()` 是命令式的，computed 里读不到变化）。
+ * 只在 settle / 挂载 / 容器尺寸变化时同步 —— 手势期间它不变，所以不参与逐帧开销。
+ */
+const viewport = ref({ vw: 0, vh: 0 });
+
+const tintMode = ref<MapTintModeChoice>('auto');
 const hoverTileId = ref(0);
 const selectedTileId = ref(0);
 const viaTileIds = ref<number[]>([]);
 const avoidTileIds = ref<number[]>([]);
 const routeVisible = ref(false);
+const settingLocation = ref(false);
+const setLocationError = ref('');
 const tipLeft = ref(0);
 const tipTop = ref(0);
 
@@ -128,6 +182,8 @@ let tintSourceMode: MapTintMode | null = null;
 let disposed = false;
 let resizeObserver: ResizeObserver | null = null;
 let frameRaf = 0;
+/** settle 防抖句柄（0 = 没有在等） */
+let settleTimer = 0;
 
 // ═══ 派生 ═══
 
@@ -148,15 +204,49 @@ const mapIndex = computed(() => {
   return getMapIndex();
 });
 
+/**
+ * **实际用来画的那一档**。自动档由缩放决定粒度（口径在 `map-political.ts`）；
+ * 手动三档原样透传。整个渲染面 —— 着色缓冲、标签、按钮态 —— 一律读这一个，
+ * 绝不再各自去看 `tintMode`：那样自动档就会在某些面生效、某些面不生效。
+ */
+const effectiveMode = computed(() => resolveEffectiveTintMode(tintMode.value, settledView.value));
+
+/** 自动档按钮上带出当前实档，否则玩家会不明白「我什么都没点，颜色怎么变了」 */
+function modeLabel(option: { id: MapTintModeChoice; label: string }): string {
+  if (option.id !== 'auto' || tintMode.value !== 'auto') return option.label;
+  return `自动·${EFFECTIVE_LABEL[effectiveMode.value]}`;
+}
+
 const worldViewBox = computed(() => `0 0 ${worldW.value} ${worldH.value}`);
 const worldStyle = computed(() => ({
   width: `${worldW.value}px`,
   height: `${worldH.value}px`,
   transform: `translate(${view.value.x}px, ${view.value.y}px) scale(${view.value.s})`,
-  // 标签的反缩放系数：世界层整个被 scale() 放大，字号乘上 1/s 才能在屏幕上恒定
-  // （见 `.pol-label` 那条注释 —— 这是**一次**样式写入，不是几百个节点各写一次属性）
-  '--pol-label-k': String(1 / (view.value.s || 1)),
+  /*
+   * 世界层里**线宽**的反缩放系数（标签与棋子已经搬去屏幕层，不再用它）。
+   *
+   * 🔴 取 `settledView` 不是 `view`，且 `.pv-*` 上**禁用** `vector-effect:
+   *    non-scaling-stroke`：那个属性等于告诉浏览器「线宽按屏幕算」，于是把旧栅格
+   *    拉大就是错的 —— 每一格滚轮整张 SVG 重新栅格化（真机实测最坏帧 204ms）。
+   *    改成世界单位 × 一个停稳后才变的系数：手势中 SVG 内容一个字节没变，
+   *    合成器可以合法地复用那张栅格；停稳后写一次变量，重新栅格化一次。
+   *    静止时的观感与之前逐字节相同（仍是 1.4/1.9/2.4/3.4 屏幕像素）。
+   */
+  '--pol-stroke-k': String(1 / (settledView.value.s || 1)),
 }));
+
+/*
+ * 🔴 **屏幕层没有补偿变换，一个 scale() 都不许有**（2026-08-12 用户反馈）。
+ *    上一版给这个容器套了个 `scale(f)` 把停稳时算好的坐标映射到实时视图 —— 结果是
+ *    缩放过程中**字明显跟着变大变小、停手 150ms 后再"啪"地跳回去**。
+ *    容器缩放这条路对文字天生就是错的：字号只要经过任何 scale，视觉大小就必然变。
+ *    现在改成**每一帧按实时视图重新投影每个标签的位置**，只写 `transform: translate()`：
+ *      · 字号是常量 12px/15px，**结构上不可能变**（没有任何东西缩放它）；
+ *      · 位置逐帧精确跟着地图走，没有 150ms 的错位窗口；
+ *      · 代价是每帧 ~35 次纯 transform 样式写入（裁剪后可见标签就这么多）+ 一趟纯数学，
+ *        既不触发布局（绝对定位 + 固定尺寸）也不触发字形重刻。
+ *    **别再把 scale 加回容器上**：那不报错，只是用户又会看见字在跳。
+ */
 
 /**
  * 标签。**粒度跟着着色粒度走**：地块档标地块名（310 个），中层档标中层名（一个域一个，
@@ -165,11 +255,95 @@ const worldStyle = computed(() => ({
 const mapLabels = computed(() => {
   const stage = polStage.value;
   if (stage === null) return [];
-  return buildLabelsForMode(stage.pack, tintMode.value, stage.raster.w, stage.raster.h);
+  return buildLabelsForMode(stage.pack, effectiveMode.value, stage.raster.w, stage.raster.h);
 });
 
 /** 缩得太小时标签会糊成一团 —— 阈值口径在 `map-political.ts`，这里只问答案 */
-const labelsVisible = computed(() => mapLabels.value.length > 0 && labelsVisibleAtZoom(view.value));
+const labelsVisible = computed(
+  () => mapLabels.value.length > 0 && labelsVisibleAtZoom(settledView.value),
+);
+
+/**
+ * 真正渲染的那批标签：**屏幕坐标 + 视口裁剪**，跟着**实时视图**逐帧重算。
+ *
+ * 🔴 这里用 `view` 而不是 `settledView`（与「哪一批标签」相反，见 `mapLabels`）：
+ *    位置必须逐帧跟着地图走，否则要么错位、要么得靠容器 scale 补偿 —— 而那正是
+ *    用户看见「字在变大变小然后跳一下」的原因。
+ *    成本是一趟纯数学（≤310 项）+ 每个可见标签一次 transform 写入（裁剪后 ~35 个），
+ *    不含布局、不含字形重刻。
+ * 🔴 **哪一批**（地块名 310 / 中层名 49）仍由停稳后的档决定：换档要整组换 DOM，
+ *    那件事绝不能发生在手势中间。
+ */
+const screenLabels = computed(() => {
+  if (!labelsVisible.value) return [];
+  return projectLabelsToScreen(mapLabels.value, view.value, viewport.value.vw, viewport.value.vh);
+});
+
+// ═══ 玩家棋子 ═══
+
+/**
+ * 棋子落点（玩家地块的形心）。地块整块涂色读不出「人在哪」，所以改画一枚立在形心上的棋子。
+ */
+const playerPinPoint = computed(() => {
+  const stage = polStage.value;
+  const tileId = playerTileId.value;
+  if (stage === null || tileId === null) return null;
+  return tileCentroidWorld(stage.pack, tileId, stage.raster.w, stage.raster.h);
+});
+
+/**
+ * 棋子的定位样式。棋子与标签一样住在**不缩放的屏幕层**里，所以这里给的是屏幕坐标、
+ * 尺寸是固定的 CSS 像素 —— 不再需要任何反缩放，头像也就不会在深缩放下糊掉。
+ */
+const playerPinStyle = computed(() => {
+  const point = playerPinPoint.value;
+  if (point === null) return undefined;
+  // 与标签同一套：实时投影 + **只写 transform**。`translate(-50%, -100%)` 那一段把针尖
+  // 挪到落点（百分比按元素自身尺寸算），放在后面 = 先作用于元素本身，再整体平移到位。
+  const screen = projectToScreen(point, view.value);
+  return { transform: `translate(${screen.x}px, ${screen.y}px) translate(-50%, -100%)` };
+});
+
+const playerName = computed(() => game.player?.name ?? '');
+/**
+ * 棋子上的脸。**刻意不传 `'头像'` 这一个类型**，走 composable 默认的脸位链
+ * （头像 → 立绘 → 立绘bg）：传裸类型会让回退链失效，只有立绘的角色在头像位显示首字母 ——
+ * 那正是 `useAssetImage` 文件头点名的那个洞。
+ */
+const { url: playerAvatarUrl, isVideo: playerAvatarIsVideo } = useAssetImage(playerName);
+/** 没有素材时的兜底：名字首字（AvatarPanel 的口径）。视频素材也走这条 —— 一枚针不放视频 */
+const playerInitial = computed(() => playerName.value.slice(0, 1));
+const playerPinImage = computed(() =>
+  playerAvatarUrl.value !== null && !playerAvatarIsVideo.value ? playerAvatarUrl.value : null,
+);
+
+// ═══ 路线折线 ═══
+
+/**
+ * 路线折线的顶点 / `points` 串 / 途经点标记。
+ *
+ * 这一层是**加在**既有的路线涂色之上的：涂色告诉你「经过哪些地」，线告诉你「按什么顺序」。
+ * 只有涂色时，一条来回绕的路线看起来就是一片散开的色块。
+ */
+const routePoints = computed(() => {
+  const stage = polStage.value;
+  const path = route.value?.tilePath;
+  if (stage === null || path === undefined) return [];
+  return buildRoutePolyline(stage.pack, path, stage.raster.w, stage.raster.h);
+});
+const routePointsAttr = computed(() => formatPolylinePoints(routePoints.value));
+const routeWaypoints = computed(() => {
+  const stage = polStage.value;
+  const path = route.value?.tilePath;
+  if (stage === null || path === undefined) return [];
+  return buildRouteWaypoints(stage.pack, path, viaTileIds.value, stage.raster.w, stage.raster.h);
+});
+/**
+ * 途经点圆点的半径（世界单位）。线宽走 `non-scaling-stroke`（与边界同一口径），
+ * 但 `r` 没有那个开关，所以在这里反缩放。途经点至多几个，逐节点改属性可以忽略不计
+ * ——「几百个节点别逐个改属性」那条说的是名字标签。
+ */
+const routeDotRadius = computed(() => 5 / (settledView.value.s || 1));
 
 /**
  * 玩家所在地块。**已落位的 `lastTileId` 永远优先**，拿不到时退到一次**只读的显示用落位**。
@@ -244,6 +418,15 @@ const avoidNames = computed(() =>
   avoidTileIds.value
     .map((id) => tileNameOf(mapIndex.value, id))
     .filter((name): name is string => name !== null),
+);
+
+/** 「设为当前位置」的可用性（天堑不可选，理由见 `setHere`；已经站在那儿也没必要） */
+const canSetLocation = computed(
+  () =>
+    selectedTileId.value > 0 &&
+    selectedTileId.value !== playerTileId.value &&
+    selectedView.value?.impassable !== true &&
+    !settingLocation.value,
 );
 
 const canRoute = computed(
@@ -398,7 +581,7 @@ function paintTint(): void {
   // jsdom 没有 2D 上下文 —— 拿不到就不画（组件测试只验数据与结构，不验像素）
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
-  const tint = ensureTintSource(stage, tintMode.value);
+  const tint = ensureTintSource(stage, effectiveMode.value);
   if (tint === null) return;
   ctx.clearRect(0, 0, stage.raster.w, stage.raster.h);
   if (baseBitmap !== null) ctx.drawImage(baseBitmap, 0, 0, stage.raster.w, stage.raster.h);
@@ -413,12 +596,11 @@ function paintFx(): void {
   if (!ctx) return;
   ctx.clearRect(0, 0, stage.raster.w, stage.raster.h);
 
-  // 后写的赢：路线 → 回避 → 途经 → 玩家 → 选中 → 悬停
+  // 后写的赢：路线 → 回避 → 途经 → 选中 → 悬停（玩家不在此列，他是一枚棋子）
   const colors = new Map<number, readonly [number, number, number, number]>();
   for (const id of route.value?.tilePath ?? []) colors.set(id, ROUTE_RGBA);
   for (const id of avoidTileIds.value) colors.set(id, AVOID_RGBA);
   for (const id of viaTileIds.value) colors.set(id, VIA_RGBA);
-  if (playerTileId.value !== null) colors.set(playerTileId.value, PLAYER_RGBA);
   if (selectedTileId.value > 0) colors.set(selectedTileId.value, SELECT_RGBA);
   if (hoverTileId.value > 0 && hoverTileId.value !== selectedTileId.value) {
     colors.set(hoverTileId.value, HOVER_RGBA);
@@ -636,6 +818,30 @@ function depart(): void {
   game.closeModal();
 }
 
+/**
+ * 「设为当前位置」—— 手动落位。
+ *
+ * 🔴 **本组件仍然零写入**：它只调 `game.setPlayerLocation(地块名)`，那条 action 提交
+ *    一条 `set_location`，地块投影由引擎钩子在位置路径落库之后自己做（见那条 action）。
+ *    这里不碰 `worldFlags.map`、不碰 `lastTileId` —— 文件头「地图不写任何状态」那条讲的是
+ *    「不开第二条写路径」，走引擎唯一写入口的这条不是第二条。
+ * 🔴 天堑不可选：`findPath` 把不可通行块整个剔出邻接图，落位到那里之后从它出发的
+ *    任何路线规划都恒为无解 —— 玩家会得到一张「哪都去不了」的地图，且看不出原因。
+ */
+async function setHere(): Promise<void> {
+  // 变量名刻意不叫 `view` —— 那是舞台视图的 ref，遮蔽它会让后面读代码的人看错一层
+  const target = selectedView.value;
+  if (target === null || !canSetLocation.value) return;
+  settingLocation.value = true;
+  try {
+    const result = await game.setPlayerLocation(target.name);
+    // 失败只说一句，不改任何界面状态（位置真源在存档里，这里没有本地副本要回滚）
+    setLocationError.value = result.ok ? '' : (result.error ?? '落位失败');
+  } finally {
+    settingLocation.value = false;
+  }
+}
+
 function focusPlayer(): void {
   if (playerTileId.value === null) return;
   frameTiles([playerTileId.value]);
@@ -692,6 +898,39 @@ async function loadBaseArt(): Promise<void> {
   if (polStage.value !== null) paintTint();
 }
 
+/** 舞台尺寸 → 响应式副本（屏幕层投影要用；只在停稳/挂载/容器变化时调） */
+function syncViewport(): void {
+  const { vw, vh } = viewportSize();
+  if (viewport.value.vw !== vw || viewport.value.vh !== vh) viewport.value = { vw, vh };
+}
+
+/** 立刻把 `settledView` 对齐到当前视图（取景/首次就绪这类「不是手势」的跳变用它） */
+function settleNow(): void {
+  if (settleTimer !== 0) {
+    clearTimeout(settleTimer);
+    settleTimer = 0;
+  }
+  syncViewport();
+  settledView.value = { ...view.value };
+}
+
+/**
+ * 缩放防抖 → `settledView`。
+ *
+ * 只盯 `s` 与 `min`（`min` 会在容器尺寸变化时变）—— 平移不进这一层，理由见 `settledView`。
+ */
+watch(
+  () => [view.value.s, view.value.min] as const,
+  () => {
+    if (settleTimer !== 0) clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+      settleTimer = 0;
+      syncViewport();
+      settledView.value = { ...view.value };
+    }, SETTLE_MS) as unknown as number;
+  },
+);
+
 watch(
   () => props.active === true,
   (active) => {
@@ -705,6 +944,7 @@ onMounted(() => {
   if (typeof ResizeObserver === 'function' && stageRef.value !== null) {
     resizeObserver = new ResizeObserver(() => {
       const { vw, vh } = viewportSize();
+      syncViewport();
       if (vw <= 0 || vh <= 0 || worldW.value <= 0) return;
       const fitted = fitStageView(vw, vh, worldW.value, worldH.value);
       view.value = clampStageView(
@@ -725,6 +965,8 @@ watch(
     if (stage === null) return;
     await nextTick();
     fitView();
+    // 首次就绪不是手势 —— 立刻对齐，否则头 150ms 会拿退化视图（s=1）的档去画第一帧
+    settleNow();
     paintTint();
     paintFx();
     if (playerTileId.value !== null) frameTiles([playerTileId.value]);
@@ -735,8 +977,14 @@ watch([route, hoverTileId, selectedTileId, viaTileIds, avoidTileIds, playerTileI
   paintFx();
 });
 
-// 换档 → 重烘那张离屏底片再合成一遍（同步；整幅约 100ms，只在玩家按下时发生）
-watch(tintMode, () => {
+/**
+ * 换档 → 重烘那张离屏底片再合成一遍（同步，整幅约 100ms）。
+ *
+ * 🔴 watch 的是**实档**不是玩家选的那一档：自动档下跨过一个缩放阈值时没有任何点击发生，
+ *    盯着 `tintMode` 的话颜色就永远停在进入自动档那一刻的粒度。
+ *    实档一轮缩放里至多变两次，所以这不是「每帧重烘」。
+ */
+watch(effectiveMode, () => {
   paintTint();
 });
 
@@ -784,10 +1032,11 @@ onBeforeUnmount(() => {
             :key="option.id"
             class="pol-btn pol-mode"
             :class="{ 'pol-mode-active': tintMode === option.id }"
+            :data-mode="option.id"
             :aria-pressed="tintMode === option.id"
             @click="tintMode = option.id"
           >
-            {{ option.label }}
+            {{ modeLabel(option) }}
           </button>
         </div>
         <button class="pol-btn" :disabled="playerTileId === null" @click="focusPlayer">
@@ -832,26 +1081,63 @@ onBeforeUnmount(() => {
             <path class="pv-impass" :d="borders?.impassable || ''" />
             <path class="pv-nat" :d="borders?.national || ''" />
             <!--
-              地块名标签。字号/描边宽度都乘 `--pol-label-k`（= 1/缩放，由 `.pol-world` 的
-              内联样式给），所以缩放时**这几百个节点一个属性都不用改** —— 改属性那条路
-              每滚一格轮子就是几百次 DOM 写入，会明显掉帧。
+              路线折线（**加在**既有路线涂色之上）：涂色说「经过哪些地」，线说「按什么顺序」。
+              画两条同样的线 = 浅色光晕在下、虚线在上，这样它在羊皮纸与色块上都读得出来。
             -->
-            <g
-              v-if="labelsVisible"
-              class="pol-labels"
-              :class="{ 'pol-labels-mid': tintMode === 'midTier' }"
-            >
-              <text
-                v-for="label in mapLabels"
-                :key="label.key"
-                class="pol-label"
-                :x="label.x"
-                :y="label.y"
-              >
-                {{ label.name }}
-              </text>
-            </g>
+            <template v-if="routePointsAttr">
+              <polyline class="pol-route-halo" :points="routePointsAttr" />
+              <polyline class="pol-route-line" :points="routePointsAttr" />
+            </template>
+            <circle
+              v-for="waypoint in routeWaypoints"
+              :key="waypoint.tileId"
+              class="pol-route-dot"
+              :cx="waypoint.x"
+              :cy="waypoint.y"
+              :r="routeDotRadius"
+            />
           </svg>
+        </div>
+
+        <!--
+          ═══ 屏幕层：名字标签 + 玩家棋子 ═══
+
+          🔴 它们**必须住在 `.pol-world` 外面**（2026-08-12）：那一层被 scale() 放大，
+             而 Chromium 对巨大合成层的栅格化倍率有上限 —— 超过之后是把已有栅格拉大，
+             住在里面的文字与头像**必糊**，且字号怎么调都救不回来（问题在层的栅格，不在字号）。
+             搬到不缩放的这一层之后，12px 就是真的 12px，任何缩放下都锐利。
+          🔴 每个标签/棋子**逐帧按实时视图重新投影**，且只写 `transform: translate()`
+             （容器上**没有** scale —— 那条路会让用户看见字变大变小再跳回去，见脚本里那段）。
+             字号是常量，所以「大小不变」是结构保证而不是补偿出来的。
+        -->
+        <div v-if="polStatus === 'ready' && raster" class="pol-screen" aria-hidden="true">
+          <svg
+            v-if="screenLabels.length > 0"
+            class="pol-screen-vec"
+            :class="{ 'pol-labels-mid': effectiveMode === 'midTier' }"
+          >
+            <text
+              v-for="label in screenLabels"
+              :key="label.key"
+              class="pol-label"
+              :style="{ transform: `translate(${label.x}px, ${label.y}px)` }"
+            >
+              {{ label.name }}
+            </text>
+          </svg>
+
+          <div
+            v-if="playerPinStyle"
+            class="pol-pin"
+            :style="playerPinStyle"
+            :title="`当前位置：${playerTileView?.name ?? ''}`"
+          >
+            <div class="pol-pin-disc">
+              <img v-if="playerPinImage" class="pol-pin-face" :src="playerPinImage" alt="" />
+              <span v-else class="pol-pin-initial">{{ playerInitial }}</span>
+            </div>
+            <span class="pol-pin-tail" />
+          </div>
         </div>
 
         <!-- 悬停气泡：地块名 / 所有者 / 地形（+ 不可通行、水域） -->
@@ -922,6 +1208,7 @@ onBeforeUnmount(() => {
         </section>
 
         <div class="pol-card-actions">
+          <button class="pol-btn" :disabled="!canSetLocation" @click="setHere">设为当前位置</button>
           <button class="pol-btn" :disabled="!canRoute" @click="showRoute">查看路线</button>
           <button class="pol-btn" @click="toggleVia">
             {{ viaTileIds.includes(selectedTileId) ? '取消途经点' : '设为途经点' }}
@@ -944,6 +1231,11 @@ onBeforeUnmount(() => {
             清空规划
           </button>
         </div>
+
+        <p v-if="selectedView.impassable" class="pol-note">
+          此地不可通行，无法落位（从这里出发的任何路线都无解）
+        </p>
+        <p v-if="setLocationError" class="pol-note pol-note-warn">{{ setLocationError }}</p>
 
         <p class="pol-hint">「出发」只把一句行动写进输入框，由你自己发送 —— 地图不会替你行动</p>
       </aside>
@@ -1122,55 +1414,123 @@ onBeforeUnmount(() => {
   pointer-events: none;
   user-select: none;
 }
-.pol-vec path {
+/*
+ * 🔴 **`.pol-vec` 里禁用 `vector-effect: non-scaling-stroke`**（2026-08-12 真机实测：
+ *    单独开着它，缩放最坏帧 204ms）。它的语义是「线宽按屏幕算」，于是「把旧栅格拉大」
+ *    对浏览器来说就是错的 —— 每一格滚轮整张 SVG 必须重新栅格化。
+ *    改法：线宽写成世界单位 × `--pol-stroke-k`（停稳后才变，见 `worldStyle`）。
+ *    手势中 SVG 内容一个字节没变 → 合成器合法复用栅格；停稳后重算一次。
+ *    静止时的观感与之前逐字节相同。**别把它加回来**，加回来不报错，只是又开始卡。
+ */
+.pol-vec path,
+.pol-vec polyline,
+.pol-vec circle {
   fill: none;
   stroke-linejoin: round;
   stroke-linecap: round;
-  vector-effect: non-scaling-stroke;
 }
-/* 四类线型：块界最轻、海岸次之、天堑虚线（= 不可通行）、国界最重 */
+/* 屏幕层容器：**不缩放、不变换**，只是一块盖在舞台上的定位画布（理由见脚本里那段红字） */
+.pol-screen {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+  z-index: 3;
+}
+.pol-screen-vec {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+/*
+ * 四类线型：块界最轻、海岸次之、天堑虚线（= 不可通行）、国界最重。
+ *
+ * 宽度整体加粗约 1.7 倍（2026-08-12）：适应视图下原先那 0.8 的块界几乎看不见，
+ * 而「哪里是一块地」正是这个页签最基本的信息。**层级必须保持**（国界恒最重），
+ * 不然加粗只是把四种线糊成一种。
+ * 🔴 这些数字仍是**屏幕像素的观感**，但写法是「世界单位 × `--pol-stroke-k`」——
+ *    那个变量只在停稳后写一次（= 1/缩放）。静止时与从前逐字节相同，手势中
+ *    整张 SVG 不变、栅格可复用。禁用 non-scaling-stroke 的理由见上面那条。
+ */
 .pv-prov {
   stroke: var(--theme-card-border);
-  stroke-opacity: 0.55;
-  stroke-width: 0.8;
+  stroke-opacity: 0.7;
+  stroke-width: calc(1.4px * var(--pol-stroke-k, 1));
 }
 .pv-coast {
   stroke: var(--theme-text-secondary);
-  stroke-opacity: 0.4;
-  stroke-width: 1.1;
+  stroke-opacity: 0.5;
+  stroke-width: calc(1.9px * var(--pol-stroke-k, 1));
 }
 .pv-impass {
   stroke: var(--theme-text-muted);
-  stroke-opacity: 0.7;
-  stroke-width: 1.4;
-  stroke-dasharray: 5 3;
+  stroke-opacity: 0.75;
+  stroke-width: calc(2.4px * var(--pol-stroke-k, 1));
+  stroke-dasharray: calc(6px * var(--pol-stroke-k, 1)) calc(4px * var(--pol-stroke-k, 1));
 }
 .pv-nat {
   stroke: var(--theme-text-primary);
-  stroke-opacity: 0.7;
-  stroke-width: 2;
+  stroke-opacity: 0.75;
+  stroke-width: calc(3.4px * var(--pol-stroke-k, 1));
+}
+
+/*
+ * 路线折线。线宽同样走 `--pol-stroke-k`（**不用** non-scaling-stroke —— 那一层里
+ * 只要有一个元素带它，整张 SVG 就又变成每帧重栅格化，前功尽弃）。
+ * 光晕是**同一条线画两遍**（浅色粗的在下、深色虚线在上）—— 羊皮纸底与半透明色块
+ * 两种背景的明度都不可控，只给一种颜色必然在某一类地块上消失。
+ */
+.pol-route-halo,
+.pol-route-line,
+.pol-route-dot {
+  pointer-events: none;
+}
+.pol-route-halo {
+  stroke: var(--theme-card-bg);
+  stroke-opacity: 0.85;
+  stroke-width: calc(6px * var(--pol-stroke-k, 1));
+}
+.pol-route-line {
+  stroke: var(--theme-primary);
+  stroke-width: calc(2.6px * var(--pol-stroke-k, 1));
+  stroke-dasharray: calc(9px * var(--pol-stroke-k, 1)) calc(6px * var(--pol-stroke-k, 1));
+}
+/* 途经点：线上的实心点（半径在脚本里按停稳视图反缩放 —— `r` 不是能 calc 的那类属性） */
+.pol-route-dot {
+  fill: var(--theme-primary);
+  stroke: var(--theme-card-bg);
+  stroke-width: calc(2.5px * var(--pol-stroke-k, 1));
 }
 
 /*
  * 地块名标签。
  *
- * 🔴 尺寸一律 `calc(... * var(--pol-label-k))`（k = 1/缩放，见 `worldStyle`）：
- *    SVG 带 viewBox，里面的 px 就是世界单位，会跟着 `.pol-world` 的 scale() 一起被放大。
- *    不反缩放的话，适应视图时字大得能盖住半张图、放到最大时又只剩一根线。
+ * 🔴 尺寸是**朴素的 CSS 像素**，一个反缩放变量都没有：标签住在不缩放的 `.pol-screen`
+ *    里，12px 就是屏幕上的 12px。此前它们住在被 scale() 的世界层里、靠
+ *    `--pol-label-k` 反缩放，结果是深缩放下必糊 —— Chromium 对巨大合成层的栅格化
+ *    倍率有上限，超过之后是把已有栅格拉大，字号技巧一个都救不了。
+ *    **别再往这里加 `var(--pol-*-k)`**：那等于把标签搬回会糊的那条路。
  * 🔴 **深色字 + 浅色描边光晕**（`paint-order: stroke` 让描边画在字底下）：这一层压在
  *    手绘底图和半透明色块上，两种背景的明度都不可控 —— 只给颜色不给光晕，标签会在
- *    某些地块上彻底读不出来。描边宽度同样要反缩放，否则放大后光晕会把字吃掉。
- * 指针事件由 `.pol-vec` 那条统一关掉，命中检测走 idBuf，不受这一层影响。
+ *    某些地块上彻底读不出来。
+ * 指针事件由 `.pol-screen` 统一关掉，命中检测走 idBuf，不受这一层影响。
  */
 .pol-label {
   font-family: var(--theme-font-title);
-  font-size: calc(12px * var(--pol-label-k, 1));
+  font-size: 12px;
   font-weight: 600;
   text-anchor: middle;
   dominant-baseline: central;
   fill: var(--theme-text-primary);
   stroke: var(--theme-card-bg);
-  stroke-width: calc(3px * var(--pol-label-k, 1));
+  stroke-width: 3px;
   stroke-linejoin: round;
   paint-order: stroke;
 }
@@ -1178,13 +1538,69 @@ onBeforeUnmount(() => {
 /*
  * 中层名比地块名重一档：那一档只有约 45 个标签（不是 310），每个覆盖一整片域，
  * 所以给得起字重与字号 —— 层级读得出来，也不至于把域内细节盖住。
- * 光晕/反缩放/不吃指针事件的机制一模一样，只是尺寸常量不同。
  */
 .pol-labels-mid .pol-label {
-  font-size: calc(15px * var(--pol-label-k, 1));
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: calc(0.5px * var(--pol-label-k, 1));
-  stroke-width: calc(3.5px * var(--pol-label-k, 1));
+  letter-spacing: 0.5px;
+  stroke-width: 3.5px;
+}
+
+/*
+ * 玩家棋子 —— 一枚立在形心上的针。
+ *
+ * 🔴 定位整个走**内联 transform**（`playerPinStyle`）：`translate(落点) translate(-50%,-100%)`
+ *    —— 后半段把针尖挪到落点（百分比按元素自身尺寸算）。用 transform 而不是 left/top，
+ *    是为了逐帧改位置时不触发布局。
+ *    这里**不再有 scale()**：棋子与标签一样住在不缩放的屏幕层，尺寸本来就恒定，
+ *    头像也就不会在深缩放下糊掉。
+ * 🔴 `pointer-events: none`：命中检测读的是 idBuf，棋子挡在上面会让它下面那块地点不中。
+ */
+.pol-pin {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  user-select: none;
+}
+.pol-pin-disc {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  overflow: hidden;
+  border-radius: 50%;
+  border: 2px solid var(--theme-primary);
+  background: var(--theme-card-bg);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--theme-card-bg) 80%, transparent),
+    var(--theme-shadow-sm);
+}
+.pol-pin-face {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pol-pin-initial {
+  font-family: var(--theme-font-title);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--theme-primary);
+}
+/* 针尖：朝下的小三角，让圆盘读成「指着这一点」而不是「浮在这一带」 */
+.pol-pin-tail {
+  width: 0;
+  height: 0;
+  margin-top: -2px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 8px solid var(--theme-primary);
+  filter: drop-shadow(0 1px 0 color-mix(in srgb, var(--theme-card-bg) 80%, transparent));
 }
 
 .pol-overlay {

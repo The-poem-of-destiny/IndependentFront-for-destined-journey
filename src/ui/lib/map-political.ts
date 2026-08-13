@@ -399,6 +399,16 @@ export function buildPoliticalTint(
 export type MapTintMode = 'country' | 'midTier' | 'tile';
 
 /**
+ * 玩家**选的**那一档 —— 比 `MapTintMode` 多一个 `auto`。
+ *
+ * 🔴 两个类型刻意分开：`auto` 只是「跟着缩放走」这条**策略**，它永远不会被拿去画像素。
+ *    合并成一个类型的代价是 `buildModePaint` / `buildLabelsForMode` 都要多一个
+ *    「auto 该画什么」的分支，而那个问题在那一层根本没有答案（它们看不见缩放）。
+ *    所有渲染路径一律先过 `resolveEffectiveTintMode` 拿到实档。
+ */
+export type MapTintModeChoice = MapTintMode | 'auto';
+
+/**
  * 中层 id → 显示色，取**它在 `pack.midTiers` 里的序号**喂给 `provinceColorForTileId`。
  *
  * 🔴 **不新写一个哈希**：中层 id 是字符串而那个哈希吃数字，所以要有一步「字符串 → 数字」。
@@ -486,6 +496,42 @@ export const LABEL_MIN_ZOOM_OVER_MIN = 1.5;
 export function labelsVisibleAtZoom(view: StageView): boolean {
   if (!Number.isFinite(view.s) || !Number.isFinite(view.min) || view.min <= 0) return false;
   return view.s >= view.min * LABEL_MIN_ZOOM_OVER_MIN;
+}
+
+/**
+ * 自动档升到「中层」的阈值。
+ *
+ * 🔴 **就是标签起显阈值本身**，不是一个碰巧相等的数：自动档在这一档同时开始画中层色
+ *    与中层名，两者必须同时发生 —— 差一点点就会出现「变了色却没有名字」或者反过来的
+ *    一小段缩放区间，看起来像掉了东西。所以这里引用它，而不是再写一个 1.5。
+ */
+export const AUTO_MIDTIER_ZOOM_OVER_MIN = LABEL_MIN_ZOOM_OVER_MIN;
+
+/**
+ * 自动档升到「地块」的阈值（= fit 下限的 4.5 倍）。
+ *
+ * 取值依据是**真包实测**而不是手感：310 块地的名字在这个缩放下视口里约剩四十来个，
+ * 再往下缩就开始糊成一团（ratio≈2 时实测视口内有 265 个）。**刻意不做迟滞**：
+ * 来回跨阈值会重烘一次着色（约 100ms），而加一段迟滞带换来的是「同一个缩放下
+ * 显示的东西取决于你是放大还是缩小过来的」—— 那个不一致比偶尔多烘一次更难解释。
+ */
+export const AUTO_TILE_ZOOM_OVER_MIN = 4.5;
+
+/**
+ * 玩家选的档 → **实际用来画的档**。
+ *
+ * 手动三档原样返回（`auto` 之外的一切都是显式覆盖，不受缩放影响）。
+ * `auto` 按 `view.s / view.min` 分三段，粒度跟着缩放走（CK3 的口径）：
+ * 缩得很小时看势力连片，放大到能读名字了给中层，再放大给地块。
+ * 视图退化（未布局，`min <= 0`）时给 `country` —— 那是最粗的一档，也是原先的默认。
+ */
+export function resolveEffectiveTintMode(mode: MapTintModeChoice, view: StageView): MapTintMode {
+  if (mode !== 'auto') return mode;
+  if (!Number.isFinite(view.s) || !Number.isFinite(view.min) || view.min <= 0) return 'country';
+  const ratio = view.s / view.min;
+  if (ratio >= AUTO_TILE_ZOOM_OVER_MIN) return 'tile';
+  if (ratio >= AUTO_MIDTIER_ZOOM_OVER_MIN) return 'midTier';
+  return 'country';
 }
 
 /**
@@ -605,6 +651,139 @@ export function buildMidTierLabels(pack: MapPack, rasterW: number, rasterH: numb
       cy = bag.py / bag.n;
     }
     out.push({ key: `m${midTier.id}`, name, x: cx * sx, y: cy * sy });
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 2d. 世界坐标落点（棋子 / 路线折线 / 途经点）
+// ═══════════════════════════════════════════════════════════
+
+/** 世界（栅格）坐标系上的一个点 */
+export interface MapPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * 地块 → 形心的世界坐标（查不到 / 形心非法 → null）。
+ *
+ * 🔴 **必须过 `rasterScale`**：形心存在 `pack.resolution` 坐标系里，而世界盒是实际栅格。
+ *    两者理论相等，但直接拿形心当世界坐标的代价是「棋子和路线整体偏移」——
+ *    偏得不多的时候看着只是「画得不太准」，没人会怀疑是坐标系错了。
+ */
+export function tileCentroidWorld(
+  pack: MapPack,
+  tileId: number,
+  rasterW: number,
+  rasterH: number,
+): MapPoint | null {
+  const tile = pack.tiles.find((t) => t.id === tileId);
+  if (tile === undefined) return null;
+  const [cx, cy] = tile.centroid;
+  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+  const { sx, sy } = rasterScale(pack, rasterW, rasterH);
+  return { x: cx * sx, y: cy * sy };
+}
+
+/**
+ * 路线地块序列 → 折线顶点（按 `tilePath` 的**顺序**，这是一条路不是一堆点）。
+ *
+ * 查不到的地块**跳过而不是中断**：路线本身由 `findPath` 在引擎侧算出，能出现在
+ * `tilePath` 里就说明它在图里；真出现查不到的（包与图不同版）时，画一条略抄近路的线
+ * 也远好过整条路线消失 —— 后者会让玩家以为「没有路」。
+ */
+export function buildRoutePolyline(
+  pack: MapPack,
+  tilePath: readonly number[],
+  rasterW: number,
+  rasterH: number,
+): MapPoint[] {
+  const out: MapPoint[] = [];
+  for (const tileId of tilePath) {
+    const point = tileCentroidWorld(pack, tileId, rasterW, rasterH);
+    if (point !== null) out.push(point);
+  }
+  return out;
+}
+
+/** 世界坐标 → 屏幕（视口）坐标：先按缩放放大，再加上世界层的位移 */
+export function projectToScreen(point: MapPoint, view: StageView): MapPoint {
+  return { x: point.x * view.s + view.x, y: point.y * view.s + view.y };
+}
+
+/**
+ * 视口外多留这么多像素才裁掉 —— 标签是**按中心点**裁的，而它本身有宽度，
+ * 贴边那些的中心点已经出界、字却还该露半个。
+ */
+export const LABEL_CULL_MARGIN_PX = 96;
+
+/**
+ * 标签（世界坐标）→ **屏幕坐标**，并裁掉视口外的。
+ *
+ * 🔴 标签之所以要投影到屏幕空间而不是跟着世界层缩放（2026-08-12 真机）：
+ *    Chromium 对**巨大合成层**的栅格化倍率有上限，超过之后它是把已有栅格**拉大**的。
+ *    于是住在那一层里的文字，无论字号怎么反缩放，都会以偏小的分辨率栅格化再被放大 ——
+ *    深缩放下字必糊，而且**字号技巧一个都救不了**（问题出在层的栅格，不在字号）。
+ *    搬进不缩放的屏幕层之后，12px 就是真的 12px，任何缩放下都锐利，这是构造保证的。
+ * 🔴 顺带解决 DOM 规模：深缩放时 310 个标签里绝大多数在视口外，裁掉之后
+ *    DOM 里只留看得见的那些（真包实测约 100 个以内）。
+ *
+ * 视口尺寸**显式传入**而不是在这里读 DOM：这一层不碰 DOM（jsdom 里视口恒为 0×0，
+ * 测试得能自己给真实数字）。
+ */
+export function projectLabelsToScreen(
+  labels: readonly MapLabel[],
+  view: StageView,
+  viewportW: number,
+  viewportH: number,
+  margin: number = LABEL_CULL_MARGIN_PX,
+): MapLabel[] {
+  const out: MapLabel[] = [];
+  for (const label of labels) {
+    const p = projectToScreen(label, view);
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+    if (p.x < -margin || p.x > viewportW + margin) continue;
+    if (p.y < -margin || p.y > viewportH + margin) continue;
+    out.push({ key: label.key, name: label.name, x: p.x, y: p.y });
+  }
+  return out;
+}
+
+/** 折线顶点 → SVG `points` 属性串（空/单点 → 空串，调用方据此不渲染） */
+export function formatPolylinePoints(points: readonly MapPoint[]): string {
+  if (points.length < 2) return '';
+  return points.map((p) => `${p.x},${p.y}`).join(' ');
+}
+
+/** 落在路线上的一个途经点 */
+export interface RouteWaypoint extends MapPoint {
+  tileId: number;
+}
+
+/**
+ * 途经点标记：`via` 里**真的落在这条路线上**的那些。
+ *
+ * 🔴 判据是「在 `tilePath` 里」而不是「玩家点过它」：`findPath` 的 via 是**软约束**
+ *    （绕不过去时它会给一条不经过的路），照 `viaTileIds` 原样画会在一条根本没经过的
+ *    地块上点一个「途经」标记 —— 地图在这里会撒一个看不出来的谎。
+ * 顺序跟着路线走（不是玩家的点选顺序），这样标记读起来就是「先经过谁、后经过谁」。
+ */
+export function buildRouteWaypoints(
+  pack: MapPack,
+  tilePath: readonly number[],
+  viaTileIds: readonly number[],
+  rasterW: number,
+  rasterH: number,
+): RouteWaypoint[] {
+  const via = new Set(viaTileIds);
+  const out: RouteWaypoint[] = [];
+  const seen = new Set<number>();
+  for (const tileId of tilePath) {
+    if (!via.has(tileId) || seen.has(tileId)) continue;
+    seen.add(tileId);
+    const point = tileCentroidWorld(pack, tileId, rasterW, rasterH);
+    if (point !== null) out.push({ tileId, x: point.x, y: point.y });
   }
   return out;
 }

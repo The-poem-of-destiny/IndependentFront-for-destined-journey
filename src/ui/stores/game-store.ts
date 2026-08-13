@@ -1099,6 +1099,33 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
+   * 手动落位：把玩家的位置路径改成某个地块名（势力地图「设为当前位置」唯一写入口）。
+   *
+   * 🔴 **只提交一条 `set_location`，绝不自己写 `worldFlags.map`**：地块是位置路径的
+   *    **投影**（ADR-31 / 裁定 §12-1），而那次投影由 `applySetLocation` 里的
+   *    `syncMapLocation` 钩子在**位置路径落库之后**做（含 packStamp 自愈与「只跟玩家」
+   *    那两条）。在这里顺手补一份 `lastTileId` 是很诱人的 —— 那等于开第二条写路径，
+   *    写的还是一个没有 patch 背书的派生态：换包自愈、快照回退都会与它打架，且不报错。
+   * 🔴 值是**地块名**不是 id：AI 与存档里的位置一律按名字说话（§8.3），
+   *    落位再经 `placeBindings` 解回地块 —— 这也是一次地图点击**诚实的粒度**。
+   */
+  async function setPlayerLocation(tileName: string): Promise<{ ok: boolean; error?: string }> {
+    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' };
+    const name = typeof tileName === 'string' ? tileName.trim() : '';
+    if (name.length === 0) return { ok: false, error: '地块名为空' };
+    const playerName = player.value?.name ?? '';
+    if (playerName.length === 0) return { ok: false, error: '没有玩家角色' };
+
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      { op: 'set_location', target: `characters.${playerName}`, value: name },
+    ]);
+    // 回读是必须的：`saveProfile` 里的落位投影由引擎钩子写，不刷新则地图上的棋子不动
+    if (result.success) await refreshFromDb();
+    return result.success ? { ok: true } : { ok: false, error: result.errors.join('; ') };
+  }
+
+  /**
    * 删除一个角色（按名）。用于清理龙套/NPC。
    * 🔴 只删角色行本身，不清理记忆/剧情关联（用户意图是删龙套，非清除叙事痕迹）。
    * 🔴 成功后**整表替换**内存角色：refreshFromDb 是合并语义，删掉的角色不会从内存消失。
@@ -1204,5 +1231,6 @@ export const useGameStore = defineStore('game', () => {
     removeItem,
     removeSkill,
     removeCharacter,
+    setPlayerLocation,
   };
 });

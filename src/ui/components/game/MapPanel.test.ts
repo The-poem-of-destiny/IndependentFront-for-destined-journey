@@ -75,6 +75,7 @@ vi.mock('../../stores/game-store', () => ({
     saveProfile: null,
     fillInput: vi.fn(),
     closeModal: vi.fn(),
+    setPlayerLocation: vi.fn(async () => ({ ok: true })),
   })),
 }));
 
@@ -333,6 +334,8 @@ interface GameStub {
   saveProfile: unknown;
   fillInput: ReturnType<typeof vi.fn>;
   closeModal: ReturnType<typeof vi.fn>;
+  /** 手动落位的唯一写入口（地图组件只调它，不自己写任何状态） */
+  setPlayerLocation: ReturnType<typeof vi.fn>;
 }
 
 function makeProfile(map: Record<string, unknown>, markers: MapMarker[] = []) {
@@ -347,6 +350,7 @@ async function useGameStub(stub: Partial<GameStub>): Promise<GameStub> {
     saveProfile: null,
     fillInput: vi.fn(),
     closeModal: vi.fn(),
+    setPlayerLocation: vi.fn(async () => ({ ok: true })),
     ...stub,
   };
   (useGameStore as unknown as { mockReturnValue: (v: GameStub) => void }).mockReturnValue(full);
@@ -358,6 +362,32 @@ async function clickButton(wrapper: VueWrapper, scope: string, label: string): P
   const button = wrapper.findAll(`${scope} button`).find((b) => b.text().includes(label));
   expect(button, `按钮「${label}」不存在`).toBeDefined();
   await button!.trigger('click');
+  await wrapper.vm.$nextTick();
+}
+
+/**
+ * 等 freeze-and-settle 的防抖过去。
+ *
+ * 🔴 缩放**不再立刻**改标签/棋子/自动档分档 —— 那些「按分辨率算」的东西一律等停稳
+ *    （组件里 `SETTLE_MS = 150`）才更新，这是为了让手势期间只剩一个纯 GPU 变换。
+ *    这是**刻意的行为变更**：不等它就断言，测到的是手势中间态。
+ */
+async function settle(wrapper: VueWrapper): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 220));
+  await wrapper.vm.$nextTick();
+}
+
+/**
+ * 按**档位 id** 点着色档按钮。
+ *
+ * 🔴 刻意不按文字找：自动档激活时它的文字是「自动·势力」，而 `clickButton` 是包含匹配 ——
+ *    找「势力」会先命中自动档那一个（它在 DOM 里更靠前），于是测试点了个完全不同的按钮
+ *    却照样绿。`data-mode` 是组件为此专门带的。
+ */
+async function clickMode(wrapper: VueWrapper, mode: string): Promise<void> {
+  const button = wrapper.find(`.pol-actions button[data-mode="${mode}"]`);
+  expect(button.exists(), `着色档「${mode}」不存在`).toBe(true);
+  await button.trigger('click');
   await wrapper.vm.$nextTick();
 }
 
@@ -685,27 +715,236 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
     const labelTexts = () => wrapper.findAll('.pol-label').map((n) => n.text());
     const NAMES = ['甲一', '甲二', '雪脊', '乙一', '内海', '荒地'];
 
-    // 默认停在势力档 —— 那一档要看疆域连片，几百个地名只会盖住它
-    expect(wrapper.find('.pol-mode-active').text()).toBe('势力');
+    // 默认停在自动档，适应视图下它的实档是势力 —— 按钮把实档带出来
+    expect(wrapper.find('.pol-mode-active').text()).toBe('自动·势力');
     expect(labelTexts()).toEqual([]);
 
     // 换到地块档但还停在适应视图：低于阈值仍然一个都不画
-    await clickButton(wrapper, '.pol-actions', '地块');
+    await clickMode(wrapper, 'tile');
     expect(wrapper.find('.pol-mode-active').text()).toBe('地块');
     expect(labelTexts()).toEqual([]);
 
     await clickButton(wrapper, '.pol-actions', '放大');
     await clickButton(wrapper, '.pol-actions', '放大');
-    expect(labelTexts()).toEqual(NAMES);
+    await settle(wrapper);
+    // 🔴 标签现在投影到**屏幕空间**并按视口裁剪 —— 深缩放下视口外的不进 DOM，
+    //    所以这里断言的是「看得见的都是地块名、且确实有」，不是固定的六个
+    expect(labelTexts().length).toBeGreaterThan(0);
+    expect(labelTexts().every((n) => NAMES.includes(n))).toBe(true);
 
     // 🔴 中层档标的是**中层名**，一个域一个 —— 不是它辖下每块地一个。
     //    夹具里只有 m-1「甲州」，且只有 1 号地块属于它。
-    await clickButton(wrapper, '.pol-actions', '中层');
-    expect(labelTexts()).toEqual(['甲州']);
+    await clickMode(wrapper, 'midTier');
+    expect(labelTexts().every((n) => n === '甲州')).toBe(true);
 
     // 切回势力档 → 标签整组撤掉
-    await clickButton(wrapper, '.pol-actions', '势力');
+    await clickMode(wrapper, 'country');
     expect(labelTexts()).toEqual([]);
+  });
+
+  it('自动档：粒度跟着缩放走（势力 → 中层 → 地块），按钮实时显示实档', async () => {
+    await useGameStub({});
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 600,
+      bottom: 400,
+      width: 600,
+      height: 400,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    const active = () => wrapper.find('.pol-mode-active').text();
+    const labelTexts = () => wrapper.findAll('.pol-label').map((n) => n.text());
+    const zoom = async (times: number) => {
+      for (let i = 0; i < times; i++) await clickButton(wrapper, '.pol-actions', '放大');
+    };
+
+    const TILE_NAMES = ['甲一', '甲二', '雪脊', '乙一', '内海', '荒地'];
+
+    // 适应视图（ratio ≈ 1.11）→ 势力，一个标签都没有
+    expect(active()).toBe('自动·势力');
+    expect(labelTexts()).toEqual([]);
+
+    // 两格放大（ratio ≈ 2.03）→ 越过 T_MID：中层色 + 中层名
+    // 🔴 必须等停稳：分档现在读 `settledView`，手势中刻意不跟着变
+    await zoom(2);
+    await settle(wrapper);
+    expect(active()).toBe('自动·中层');
+    expect(labelTexts().every((n) => n === '甲州')).toBe(true);
+
+    // 再三格（ratio ≈ 4.98）→ 越过 T_TILE：地块色 + 地块名
+    await zoom(3);
+    await settle(wrapper);
+    expect(active()).toBe('自动·地块');
+    expect(labelTexts().length).toBeGreaterThan(0);
+    expect(labelTexts().every((n) => TILE_NAMES.includes(n))).toBe(true);
+
+    // 缩回去 —— 没有迟滞，原路退回（同一个缩放显示同样的东西）
+    await clickButton(wrapper, '.pol-actions', '适应');
+    await settle(wrapper);
+    expect(active()).toBe('自动·势力');
+    expect(labelTexts()).toEqual([]);
+  });
+
+  it('缩放中标签**逐帧**重定位、且只写 transform —— 字号不参与，所以大小不会跳', async () => {
+    await useGameStub({});
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 600,
+      bottom: 400,
+      width: 600,
+      height: 400,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    await clickMode(wrapper, 'tile');
+    await clickButton(wrapper, '.pol-actions', '放大');
+    await clickButton(wrapper, '.pol-actions', '放大');
+    await settle(wrapper);
+
+    const styles = () => wrapper.findAll('.pol-label').map((n) => n.attributes('style') ?? '');
+    const before = styles();
+    expect(before.length).toBeGreaterThan(0);
+    // 🔴 每个标签的内联样式**只有** transform：写宽高/字号会触发布局与字形重刻，
+    //    而那正是上一版每帧掉几十毫秒的来源
+    expect(before.every((s) => /^transform:\s*translate\(/.test(s.trim()))).toBe(true);
+    expect(before.some((s) => /font-size|width|height|left|top/.test(s))).toBe(false);
+
+    // 🔴 容器上**不许**有补偿 scale —— 那条路会让用户看见字变大变小再跳回去
+    const screen = wrapper.find('.pol-screen');
+    expect(screen.attributes('style') ?? '').not.toContain('scale');
+
+    // 不给 settle 机会：位置必须**立刻**跟着实时视图变（不是等 150ms）
+    await clickButton(wrapper, '.pol-actions', '放大');
+    expect(styles()).not.toEqual(before);
+    // 而「哪一批标签」仍归停稳后的档管：手势中不会把 310 换成 49
+    expect(wrapper.findAll('.pol-label').every((n) => n.text() !== '甲州')).toBe(true);
+  });
+
+  it('标签与棋子住在**不缩放的屏幕层**里，字号是朴素 px（深缩放不糊的构造保证）', async () => {
+    // 🔴 源码断言：Chromium 对巨大合成层的栅格化倍率有上限，住在被 scale() 的世界层里
+    //    的文字必然在深缩放下变糊，而这**不是字号能修的**。所以钉两件事：
+    //    ① 标签/棋子不在 `.pol-world` 里；② 它们的尺寸里没有任何反缩放变量。
+    const src = (await import('./MapPoliticalTab.vue?raw')).default;
+    const style = src.slice(src.indexOf('<style'));
+    const labelRule = style.slice(style.indexOf('.pol-label {'), style.indexOf('.pol-labels-mid'));
+    expect(labelRule).toContain('font-size: 12px');
+    expect(labelRule).not.toContain('--pol-label-k');
+    // 边界线也不许再用 non-scaling-stroke（每格滚轮整张 SVG 重栅格化，实测最坏帧 204ms）
+    const vecRules = style.slice(style.indexOf('.pol-vec path'), style.indexOf('.pol-label {'));
+    expect(vecRules).not.toContain('vector-effect: non-scaling-stroke');
+  });
+
+  it('手动档是显式覆盖：选定后缩放再怎么变都不跟着改', async () => {
+    await useGameStub({});
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 600,
+      bottom: 400,
+      width: 600,
+      height: 400,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    await clickMode(wrapper, 'country');
+    for (let i = 0; i < 5; i++) await clickButton(wrapper, '.pol-actions', '放大');
+    // 深缩放下自动档早该进地块了，但显式选了势力就不许动
+    expect(wrapper.find('.pol-mode-active').text()).toBe('势力');
+    expect(wrapper.findAll('.pol-label')).toHaveLength(0);
+  });
+
+  it('玩家棋子画在所在地块的形心；未定位时根本不画', async () => {
+    await useGameStub({ saveProfile: makeProfile({ lastTileId: 4 }) });
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    const pin = wrapper.find('.pol-pin');
+    expect(pin.exists()).toBe(true);
+    // 4 号地块（乙一）形心 [3,0]，resolution 与栅格同为 6×1 → 世界坐标就是 3,0；
+    // 定位只走 transform（逐帧改位置不该触发布局），后半段把针尖挪到落点
+    expect(pin.attributes('style')).toContain('translate(3px, 0px)');
+    expect(pin.attributes('style')).toContain('translate(-50%, -100%)');
+    // 没有素材 → 名字首字兜底
+    expect(wrapper.find('.pol-pin-face').exists()).toBe(false);
+
+    // 🔴 玩家那一块**不再**参与像素高亮（棋子取代了它）—— 源码里不该再有玩家色
+    const src = (await import('./MapPoliticalTab.vue?raw')).default;
+    expect(src).not.toContain('PLAYER_RGBA');
+  });
+
+  it('位置解不开时不画棋子（宁可不画，也别把它戳在 0,0）', async () => {
+    await useGameStub({ saveProfile: makeProfile({}), player: null });
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+    expect(wrapper.find('.pol-pin').exists()).toBe(false);
+  });
+
+  it('「设为当前位置」：提交一次 setPlayerLocation；站在原地/天堑时禁用', async () => {
+    const setPlayerLocation = vi.fn(async () => ({ ok: true }));
+    await useGameStub({ saveProfile: makeProfile({ lastTileId: 1 }), setPlayerLocation });
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    const button = () =>
+      wrapper.findAll('.pol-card button').find((b) => b.text().includes('设为当前位置'));
+
+    // 选中玩家脚下那一块（1 号）→ 禁用（已经在那儿了）
+    await wrapper.find('.pol-stage').trigger('click', { clientX: 0, clientY: 0 });
+    expect(button()?.attributes('disabled')).toBeDefined();
+
+    // 天堑（3 号，雪脊）→ 禁用 + 说明为什么（findPath 把它剔出邻接图）
+    await wrapper.find('.pol-stage').trigger('click', { clientX: 2, clientY: 0 });
+    expect(button()?.attributes('disabled')).toBeDefined();
+    expect(wrapper.find('.pol-card').text()).toContain('不可通行');
+
+    // 普通地块（4 号，乙一）→ 可用，点一次走 store 的唯一写入口，传的是**地块名**
+    await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
+    expect(button()?.attributes('disabled')).toBeUndefined();
+    await clickButton(wrapper, '.pol-card', '设为当前位置');
+    await flushPromises();
+    expect(setPlayerLocation).toHaveBeenCalledTimes(1);
+    expect(setPlayerLocation).toHaveBeenCalledWith('乙一');
+  });
+
+  it('路线折线按顺序连点，途经点画在线上（只标真的经过的）', async () => {
+    await useGameStub({ saveProfile: makeProfile({ lastTileId: 1 }) });
+    vi.mocked(findPath).mockReturnValue({ tilePath: [1, 2, 4], days: 3, crossings: [] });
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    // 把甲二（2 号）设为途经点，再选乙一（4 号）看路线
+    await wrapper.find('.pol-stage').trigger('click', { clientX: 1, clientY: 0 });
+    await clickButton(wrapper, '.pol-card', '设为途经点');
+    await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
+    await clickButton(wrapper, '.pol-card', '查看路线');
+
+    // 形心 [0,0] → [1,0] → [3,0]，顺序就是 tilePath 的顺序
+    expect(wrapper.find('.pol-route-line').attributes('points')).toBe('0,0 1,0 3,0');
+    const dots = wrapper.findAll('.pol-route-dot');
+    expect(dots).toHaveLength(1);
+    expect(dots[0].attributes('cx')).toBe('1');
   });
 
   it('换档不影响命中检测与信息卡（标签不吃指针事件）', async () => {
@@ -714,10 +953,10 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
     const wrapper = await mountPanel();
     await openPoliticalTab(wrapper);
 
-    await clickButton(wrapper, '.pol-actions', '地块');
+    await clickMode(wrapper, 'tile');
     await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
     expect(wrapper.find('.pol-card-title').text()).toBe('乙一');
-    await clickButton(wrapper, '.pol-actions', '中层');
+    await clickMode(wrapper, 'midTier');
     expect(wrapper.find('.pol-card-title').text()).toBe('乙一');
   });
 

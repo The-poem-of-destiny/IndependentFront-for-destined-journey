@@ -22,9 +22,13 @@ import {
   buildModePaint,
   buildPoliticalPaint,
   buildPoliticalTint,
+  buildRoutePolyline,
+  buildRouteWaypoints,
   buildTileColorLookup,
   buildTileLabels,
   buildTraceKeys,
+  formatPolylinePoints,
+  tileCentroidWorld,
   centerStageView,
   clampStageView,
   composeDepartureDirective,
@@ -34,10 +38,15 @@ import {
   frameStageOnPoints,
   IMPASSABLE_ALPHA,
   IMPASSABLE_HATCH_RGB,
+  AUTO_MIDTIER_ZOOM_OVER_MIN,
+  AUTO_TILE_ZOOM_OVER_MIN,
   IMPASSABLE_RGB,
   LABEL_MIN_ZOOM_OVER_MIN,
   labelsVisibleAtZoom,
+  projectLabelsToScreen,
+  projectToScreen,
   provinceColorForTileId,
+  resolveEffectiveTintMode,
   rgbKey,
   stagePointToWorld,
   TERRITORY_ALPHA,
@@ -448,6 +457,96 @@ describe('地图标签', () => {
     expect(buildMidTierLabels(pack, 6, 3).map((l) => l.name)).toEqual(['甲州']);
   });
 
+  it('棋子落点 = 地块形心，且照 resolution → 栅格比例折算', () => {
+    const pack = makePack({
+      resolution: { w: 6, h: 3 },
+      tiles: [tile({ id: 1, centroid: [3, 1] })],
+    });
+    expect(tileCentroidWorld(pack, 1, 6, 3)).toEqual({ x: 3, y: 1 });
+    expect(tileCentroidWorld(pack, 1, 12, 6)).toEqual({ x: 6, y: 2 });
+    // 查不到的地块 → null（调用方据此不画棋子，而不是画到 (0,0)）
+    expect(tileCentroidWorld(pack, 99, 6, 3)).toBeNull();
+  });
+
+  it('路线折线按 tilePath 的**顺序**连点；查不到的地块跳过而不是中断', () => {
+    const pack = makePack({
+      tiles: [
+        tile({ id: 1, centroid: [0, 0] }),
+        tile({ id: 2, centroid: [1, 1] }),
+        tile({ id: 3, centroid: [2, 2] }),
+      ],
+    });
+    expect(buildRoutePolyline(pack, [3, 1, 2], 6, 3)).toEqual([
+      { x: 2, y: 2 },
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+    ]);
+    // 中间夹一个不存在的地块：整条线仍在，只是少一个顶点
+    expect(buildRoutePolyline(pack, [1, 99, 3], 6, 3)).toEqual([
+      { x: 0, y: 0 },
+      { x: 2, y: 2 },
+    ]);
+  });
+
+  it('points 串：不足两点给空串（调用方据此整条不渲染）', () => {
+    expect(formatPolylinePoints([])).toBe('');
+    expect(formatPolylinePoints([{ x: 1, y: 2 }])).toBe('');
+    expect(
+      formatPolylinePoints([
+        { x: 1, y: 2 },
+        { x: 3, y: 4 },
+      ]),
+    ).toBe('1,2 3,4');
+  });
+
+  it('途经点只标**真的落在路线上**的那些，且按路线顺序（不是点选顺序）', () => {
+    const pack = makePack({
+      tiles: [
+        tile({ id: 1, centroid: [0, 0] }),
+        tile({ id: 2, centroid: [1, 0] }),
+        tile({ id: 3, centroid: [2, 0] }),
+        tile({ id: 4, centroid: [3, 0] }),
+      ],
+    });
+    // 🔴 via 是软约束：findPath 绕不过去时会给一条不经过它的路。4 号没在路线上 →
+    //    不该标，否则地图会在一块根本没经过的地上点一个「途经」。
+    const marks = buildRouteWaypoints(pack, [1, 2, 3], [3, 2, 4], 6, 3);
+    expect(marks).toEqual([
+      { tileId: 2, x: 1, y: 0 },
+      { tileId: 3, x: 2, y: 0 },
+    ]);
+  });
+
+  it('世界坐标 → 屏幕坐标：先缩放再加位移', () => {
+    const view: StageView = { s: 2, x: 10, y: -5, min: 1, max: 50 };
+    expect(projectToScreen({ x: 3, y: 4 }, view)).toEqual({ x: 16, y: 3 });
+  });
+
+  it('投影后按视口裁剪：视口外（超过留白）的标签不进 DOM', () => {
+    // 🔴 深缩放时 310 个标签里绝大多数在视口外；不裁的话 DOM 里挂着几百个看不见的节点
+    const view: StageView = { s: 1, x: 0, y: 0, min: 1, max: 50 };
+    const labels = [
+      { key: 'a', name: '中间', x: 50, y: 50 },
+      { key: 'b', name: '左外', x: -500, y: 50 },
+      { key: 'c', name: '右外', x: 5000, y: 50 },
+      { key: 'd', name: '下外', x: 50, y: 5000 },
+      { key: 'e', name: '贴边', x: -10, y: 50 }, // 中心点出界但字还该露出来 → 留白内，保留
+    ];
+    const kept = projectLabelsToScreen(labels, view, 200, 200).map((l) => l.name);
+    expect(kept).toEqual(['中间', '贴边']);
+  });
+
+  it('裁剪留白可调，且投影出来的是**屏幕**坐标（不是原样透传世界坐标）', () => {
+    const view: StageView = { s: 2, x: 100, y: 0, min: 1, max: 50 };
+    const labels = [{ key: 'a', name: '甲', x: 10, y: 10 }];
+    expect(projectLabelsToScreen(labels, view, 400, 400)).toEqual([
+      { key: 'a', name: '甲', x: 120, y: 20 },
+    ]);
+    // 留白收到 0 时，正好落在边界上仍算在内
+    expect(projectLabelsToScreen(labels, view, 120, 20, 0)).toHaveLength(1);
+    expect(projectLabelsToScreen(labels, view, 119, 20, 0)).toHaveLength(0);
+  });
+
   it('按档分派：势力不画、中层出中层名、地块出地块名', () => {
     const pack = makePack({
       midTiers: [{ id: 'm-1', name: '甲州', countryId: 'c-a', climateId: '', anchorTileId: 1 }],
@@ -459,6 +558,44 @@ describe('地图标签', () => {
     expect(buildLabelsForMode(pack, 'country', 6, 3)).toEqual([]);
     expect(buildLabelsForMode(pack, 'midTier', 6, 3).map((l) => l.name)).toEqual(['甲州']);
     expect(buildLabelsForMode(pack, 'tile', 6, 3).map((l) => l.name)).toEqual(['甲一', '甲二']);
+  });
+
+  it('自动档：粒度跟着缩放走，两个阈值都按**取等号即进位**', () => {
+    const at = (ratio: number): StageView => ({ s: 2 * ratio, x: 0, y: 0, min: 2, max: 500 });
+    expect(resolveEffectiveTintMode('auto', at(1))).toBe('country');
+    // 恰好 T_MID：进中层（>= 不是 >）
+    expect(resolveEffectiveTintMode('auto', at(AUTO_MIDTIER_ZOOM_OVER_MIN - 0.0001))).toBe(
+      'country',
+    );
+    expect(resolveEffectiveTintMode('auto', at(AUTO_MIDTIER_ZOOM_OVER_MIN))).toBe('midTier');
+    // 恰好 T_TILE：进地块
+    expect(resolveEffectiveTintMode('auto', at(AUTO_TILE_ZOOM_OVER_MIN - 0.0001))).toBe('midTier');
+    expect(resolveEffectiveTintMode('auto', at(AUTO_TILE_ZOOM_OVER_MIN))).toBe('tile');
+    expect(resolveEffectiveTintMode('auto', at(50))).toBe('tile');
+  });
+
+  it('自动档进中层的那一刻**正是**标签起显的那一刻（两个阈值刻意是同一个数）', () => {
+    // 🔴 差一点点就会出现「变了色却没有名字」的一小段缩放区间，看起来像掉了东西
+    expect(AUTO_MIDTIER_ZOOM_OVER_MIN).toBe(LABEL_MIN_ZOOM_OVER_MIN);
+    const view: StageView = { s: 2 * LABEL_MIN_ZOOM_OVER_MIN, x: 0, y: 0, min: 2, max: 500 };
+    expect(resolveEffectiveTintMode('auto', view)).toBe('midTier');
+    expect(labelsVisibleAtZoom(view)).toBe(true);
+  });
+
+  it('手动三档原样透传（显式覆盖不受缩放影响）', () => {
+    const deep: StageView = { s: 100, x: 0, y: 0, min: 2, max: 500 };
+    const shallow: StageView = { s: 2, x: 0, y: 0, min: 2, max: 500 };
+    for (const mode of ['country', 'midTier', 'tile'] as const) {
+      expect(resolveEffectiveTintMode(mode, deep)).toBe(mode);
+      expect(resolveEffectiveTintMode(mode, shallow)).toBe(mode);
+    }
+  });
+
+  it('自动档遇退化视图（未布局）退到最粗的势力档，不产出 NaN 分档', () => {
+    expect(resolveEffectiveTintMode('auto', { s: 1, x: 0, y: 0, min: 0, max: 1 })).toBe('country');
+    expect(resolveEffectiveTintMode('auto', { s: Number.NaN, x: 0, y: 0, min: 2, max: 5 })).toBe(
+      'country',
+    );
   });
 
   it('缩放阈值：低于 min 的 1.5 倍不画（单一阈值，不做逐标签避让）', () => {
