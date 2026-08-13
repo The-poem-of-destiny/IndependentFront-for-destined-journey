@@ -83,6 +83,7 @@ function buildPack(contentHash: string): MapPack {
       rates: { land: 30, nearSea: 60, farSea: 120 },
       embarkCost: 5,
       terrainFactor: { plains: 1 },
+      modes: [],
     },
     countries: [{ id: 'north', name: 'Northland', color: [1, 2, 3], anchorTileId: 1 }],
     midTiers: [

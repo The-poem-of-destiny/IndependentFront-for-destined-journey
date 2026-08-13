@@ -48,6 +48,7 @@ function pack(contentHash: string, tiles: MapTile[]): MapPack {
       rates: { land: 30, nearSea: 60, farSea: 120 },
       embarkCost: 5,
       terrainFactor: {},
+      modes: [],
     },
     countries: [],
     midTiers: [],

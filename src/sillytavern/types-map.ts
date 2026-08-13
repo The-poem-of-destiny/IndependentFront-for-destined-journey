@@ -85,6 +85,23 @@ export interface TravelRules {
   embarkCost: number;
   /** 键 = pack `terrains` 词汇；缺键引擎回退 1.0 */
   terrainFactor: Record<string, number>;
+  /**
+   * 出行方式预览表（pack v1.1.0 起；旧包缺席 → 空数组，UI 不显示方式选择）。
+   * `factor` 乘在整段路线的估算时间上 —— 粗但诚实：天数是给 AI 的锚不是判决，
+   * 分段计价留给 v2。数组顺序 = UI 显示顺序，第一项为默认。
+   */
+  modes: TravelMode[];
+}
+
+/**
+ * 一种出行方式。`id` 是包内稳定键（ASCII），`label` 是显示文本 —— 引擎把两者都当
+ * 不透明数据（结构闸门禁止引擎持有中文词汇，方式词汇随包走，§3.4）。
+ */
+export interface TravelMode {
+  id: string;
+  label: string;
+  /** 相对基线（factor = 1 的方式，即校准所依据的城际天数速率）的时间倍率，正数 */
+  factor: number;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -214,7 +231,9 @@ export interface MapPack {
  * 一条路线 —— `findPath()` 的唯一产物形状。
  *
  * 🔴 **只有一个标量代价、一条结果**（§1 非目标）：没有成本向量、没有路线偏好、
- *    没有 k 条备选 —— 那是前代设计砍掉的东西。
+ *    没有 k 条备选 —— 那是前代设计砍掉的东西。`timeDays` 不是第二个代价维度，
+ *    它就是 `days` 取整前的那个数 —— 露出来只为出行方式预览能在乘倍率**之后**再取整
+ *    （对取整后的 `days` 乘倍率会放大取整误差）。
  * 🔴 既有 `TravelResult`（types.ts，声明至今零使用）由后续任务退役，**不双轨**。
  */
 export interface MapRoute {
@@ -222,6 +241,8 @@ export interface MapRoute {
   tilePath: number[];
   /** 天数估算 = `ceil(Σcost / rate)` */
   days: number;
+  /** 取整前的总时间（天，基线方式）；`days = tilePath 含边 ? max(1, ceil(timeDays)) : 0` */
+  timeDays: number;
   /** 途经的中层/国家名与水段 —— 给回执与 UI 用（名字，不是 id） */
   crossings: string[];
 }

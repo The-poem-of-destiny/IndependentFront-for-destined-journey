@@ -57,6 +57,7 @@ const FIXTURE: MapPack = {
     embarkCost: 4,
     // 🔴 `ridge` 刻意比平原便宜、`tundra` 刻意缺席（缺键必须回退 1.0）
     terrainFactor: { plains: 1, forest: 2, ridge: 0.1, 'still-water': 0.1 },
+    modes: [],
   },
   countries: [
     { id: 'north', name: 'Northland', color: [10, 20, 30], anchorTileId: 1 },
@@ -268,6 +269,7 @@ describe('findPath —— 已知小图上的最短路', () => {
     expect(findPath(fixture(), 1, 1)).toEqual({
       tilePath: [1],
       days: 0,
+      timeDays: 0,
       crossings: ['North Vale'],
     });
   });
@@ -278,6 +280,20 @@ describe('findPath —— 已知小图上的最短路', () => {
     const route = findPath(pack, 1, 2);
     expect(route?.tilePath).toEqual([1, 2]);
     expect(route?.days).toBe(1);
+  });
+
+  it('timeDays 是取整前的总时间：days = max(1, ceil(timeDays))，与逐边口径一致', () => {
+    const pack = fixture();
+    const route = findPath(pack, 1, 3);
+    expect(route).not.toBeNull();
+    expect(route!.timeDays).toBeGreaterThan(0);
+    expect(route!.days).toBe(Math.max(1, Math.ceil(route!.timeDays)));
+    const graph = expectedGraph(pack);
+    let total = 0;
+    for (let i = 0; i + 1 < route!.tilePath.length; i++) {
+      total += expectedEdgeTime(pack, graph, route!.tilePath[i], route!.tilePath[i + 1]);
+    }
+    expect(route!.timeDays).toBeCloseTo(total, 10);
   });
 });
 
@@ -386,6 +402,7 @@ function waterwayPack(options: { blockSpur: boolean; spurViaStrait?: boolean }):
       rates: { land: 10, nearSea: 20, farSea: 40 },
       embarkCost: 0,
       terrainFactor: { plains: 1 },
+      modes: [],
     },
     countries: [],
     midTiers: [],
@@ -580,6 +597,7 @@ function tiePack(reverseEdgeOrder: boolean): MapPack {
       rates: { land: 10, nearSea: 20, farSea: 40 },
       embarkCost: 0,
       terrainFactor: { plains: 1 },
+      modes: [],
     },
     countries: [],
     midTiers: [],
@@ -628,6 +646,7 @@ function tieBreakPack(reverseEdgeOrder: boolean): MapPack {
       rates: { land: 10, nearSea: 20, farSea: 40 },
       embarkCost: 0,
       terrainFactor: { plains: 1 },
+      modes: [],
     },
     countries: [],
     midTiers: [],
@@ -724,6 +743,7 @@ function gridPack(kinds: GridKind[]): MapPack {
       rates: { land: 30, nearSea: 60, farSea: 120 },
       embarkCost: 12,
       terrainFactor: { plains: 1, forest: 2.5, 'still-water': 0.05, ridge: 0.05 },
+      modes: [],
     },
     countries: [],
     midTiers: [],

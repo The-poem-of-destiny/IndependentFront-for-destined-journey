@@ -43,6 +43,7 @@ function makePack(): MapPack {
       rates: { land: 40, nearSea: 60, farSea: 100 },
       embarkCost: 20,
       terrainFactor: { flatland: 1, grassland: 1.2 },
+      modes: [],
     },
     countries: [
       { id: 'c-alpha', name: 'Alpha Realm', color: [10, 20, 30], anchorTileId: TILE_HEARTH },
