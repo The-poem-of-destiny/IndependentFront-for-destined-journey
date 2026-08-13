@@ -2,7 +2,7 @@
  * agent-client.ts — API 客户端测试
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { AgentClient, buildUserId, parseUserId } from './agent-client';
+import { AgentClient, buildUserId, parseUserId, USER_PLACEHOLDER_CONTENT } from './agent-client';
 import type { ApiEndpoint } from './types';
 
 function makeEndpoint(overrides: Partial<ApiEndpoint> = {}): ApiEndpoint {
@@ -196,6 +196,56 @@ describe('AgentClient', () => {
       const result = await client.chat({ messages: [{ role: 'user', content: 'test' }] });
       expect(result.rawResponse).toBe('from cline');
       expect(result.tokensUsed).toBe(42);
+    });
+  });
+
+  describe('ensureUserMessage — 全 system 消息补位', () => {
+    // `buildAgentMessages` 对每个 Agent 都只产出一条 system 消息，所以这条补位路径
+    // 落在**每一次**生产请求上（不是边缘分支），此前零覆盖。
+    const okRes = { choices: [{ message: { content: 'ok' } }], usage: { total_tokens: 1 } };
+
+    it('🔴 回归(2026-08-13): 补的 user 消息必须非空 —— 空串会让 Gemini 系网关 400 contents field is required', async () => {
+      const mockFn = mockFetch(okRes);
+      globalThis.fetch = mockFn;
+
+      await client.chat({ messages: [{ role: 'system', content: '你是叙事引擎' }] });
+
+      const body = JSON.parse(mockFn.mock.calls[0][1].body);
+      expect(body.messages).toHaveLength(2);
+      expect(body.messages[1].role).toBe('user');
+      // 判据是「非空」而不是「等于某个字」—— 占位词可以换，空串不行
+      expect(body.messages[1].content.length).toBeGreaterThan(0);
+      expect(body.messages[1].content).toBe(USER_PLACEHOLDER_CONTENT);
+    });
+
+    it('常量自身非空（换占位词时的护栏）', () => {
+      expect(USER_PLACEHOLDER_CONTENT.trim()).not.toBe('');
+    });
+
+    it('已有 user 消息时不追加、不改写', async () => {
+      const mockFn = mockFetch(okRes);
+      globalThis.fetch = mockFn;
+
+      await client.chat({
+        messages: [
+          { role: 'system', content: 'sys' },
+          { role: 'user', content: '玩家输入' },
+        ],
+      });
+
+      const body = JSON.parse(mockFn.mock.calls[0][1].body);
+      expect(body.messages).toHaveLength(2);
+      expect(body.messages[1].content).toBe('玩家输入');
+    });
+
+    it('空 messages 数组保持原样（不无中生有）', async () => {
+      const mockFn = mockFetch(okRes);
+      globalThis.fetch = mockFn;
+
+      await client.chat({ messages: [] });
+
+      const body = JSON.parse(mockFn.mock.calls[0][1].body);
+      expect(body.messages).toEqual([]);
     });
   });
 

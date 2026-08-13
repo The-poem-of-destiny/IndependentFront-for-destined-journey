@@ -15,6 +15,12 @@ import type { ApiEndpoint, AgentResult, ToolDefinition } from './types';
 /** 内部扩展 — 包含原始 tool_calls 数据 */
 type InternalAgentResult = AgentResult & { _toolCalls?: any[] };
 
+/**
+ * 全 system 消息时补的那条 user 消息的内容 —— **不许改成空串**，理由见 `ensureUserMessage`。
+ * 导出仅供单测断言「它非空」，生产代码只有 `ensureUserMessage` 一个消费者。
+ */
+export const USER_PLACEHOLDER_CONTENT = '继续';
+
 // ========== Types ==========
 
 export interface ChatRequest {
@@ -123,17 +129,30 @@ export class AgentClient {
   }
 
   /**
-   * 确保 messages 至少包含一条 user 消息。
+   * 确保 messages 至少包含一条**非空** user 消息。
+   *
+   * `buildAgentMessages` 对**每一个** Agent 都只产出一条 system 消息
+   * （agent-templates.ts 末尾 `return [{ role: 'system', content: resolved }]`，
+   * 玩家输入与历史全拼进那一条里），所以这个补丁不是边缘路径 —— 它落在每一次请求上。
    *
    * 修复(2026-07-30): 部分 API（如 ollama.com）当 messages 只有 system 消息时
    * 返回 finish_reason="load" 和空内容（模型不加载），导致所有 agent 空回。
-   * 当 messages 全是 system 时追加一条空 user 消息以触发正常生成。
+   * 当 messages 全是 system 时追加一条 user 消息以触发正常生成。
+   *
+   * 🔴 修复(2026-08-13): 追加的这条**必须有内容**，`content: ''` 会打死 Gemini 系网关。
+   * OpenAI→Gemini 的转换层把 system 收进 `system_instruction`、其余收进 `contents`，
+   * 空文本那条在转换中被丢掉 → `contents` 空 → `HTTP 400: contents field is required`。
+   * 真机症状（gcli.ggchan.dev + gemini-3-flash-preview）：第 0 轮 memory_recall 400，
+   * 而 story stage 的 `waitFor` 含 memory_recall、`stageDependenciesMet` 要求依赖全部无
+   * error，于是**整轮正文被跳过、界面一片空白**。
+   * 占位内容取「继续」而非标点：中文语料下最中性、且是常量（不随轮次变化），
+   * 不破坏 DeepSeek KVCache 的静态前缀命中。
    */
   private ensureUserMessage(messages: ChatRequest['messages']): ChatRequest['messages'] {
     if (messages.length === 0) return messages;
     const hasUser = messages.some((m) => m.role === 'user');
     if (hasUser) return messages;
-    return [...messages, { role: 'user', content: '' }];
+    return [...messages, { role: 'user', content: USER_PLACEHOLDER_CONTENT }];
   }
 
   /**
