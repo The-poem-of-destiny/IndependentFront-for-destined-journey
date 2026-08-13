@@ -146,7 +146,12 @@ const MAP_PACK: MapPack = {
   resolution: { w: 6, h: 1 },
   kmPerPx: 1,
   terrains: ['平地', '山地', '水面'],
-  travelRules: { rates: { land: 10, nearSea: 20, farSea: 30 }, embarkCost: 1, terrainFactor: {}, modes: [] },
+  travelRules: {
+    rates: { land: 10, nearSea: 20, farSea: 30 },
+    embarkCost: 1,
+    terrainFactor: {},
+    modes: [],
+  },
   countries: [
     { id: 'c-a', name: '甲国', color: [10, 20, 30], anchorTileId: 1 },
     { id: 'c-b', name: '乙国', color: [200, 100, 50], anchorTileId: 4 },
@@ -643,7 +648,12 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
         journey: { toTileId: 4, arriveAtMinute: 999 },
       }),
     });
-    vi.mocked(findPath).mockReturnValue({ tilePath: [1, 2, 3, 4], days: 5, timeDays: 4.2, crossings: [] });
+    vi.mocked(findPath).mockReturnValue({
+      tilePath: [1, 2, 3, 4],
+      days: 5,
+      timeDays: 4.2,
+      crossings: [],
+    });
     setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
     const wrapper = await mountPanel();
     await openPoliticalTab(wrapper);
@@ -994,7 +1004,12 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
 
   it('路线折线按顺序连点，途经点画在线上（只标真的经过的）', async () => {
     await useGameStub({ saveProfile: makeProfile({ lastTileId: 1 }) });
-    vi.mocked(findPath).mockReturnValue({ tilePath: [1, 2, 4], days: 3, timeDays: 2.6, crossings: [] });
+    vi.mocked(findPath).mockReturnValue({
+      tilePath: [1, 2, 4],
+      days: 3,
+      timeDays: 2.6,
+      crossings: [],
+    });
     setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
     const wrapper = await mountPanel();
     await openPoliticalTab(wrapper);
