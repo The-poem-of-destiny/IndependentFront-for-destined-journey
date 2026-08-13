@@ -581,7 +581,7 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
     expect(game.closeModal).toHaveBeenCalledTimes(1);
   });
 
-  it('出行方式 chips：按方式在取整前估天数，选中方式写进出发指令', async () => {
+  it('出行方式参考行：全部方式并排展示、不可点选，出发指令不带方式（基线天数）', async () => {
     const game = await useGameStub({ saveProfile: makeProfile({ lastTileId: 1 }) });
     vi.mocked(findPath).mockReturnValue({
       tilePath: [1, 2, 3, 4],
@@ -608,18 +608,15 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
     await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
     await clickButton(wrapper, '.pol-card', '查看路线');
 
-    const chips = wrapper.findAll('.pol-mode-chip');
+    const items = wrapper.findAll('.pol-mode-item');
     // ceil(6.4×1) = 7 / ceil(6.4×0.25) = 2 —— 倍率乘在取整前的 timeDays 上
-    expect(chips.map((c) => c.text().replace(/\s+/g, ' '))).toEqual(['马车 · 7 天', '空艇 · 2 天']);
+    expect(items.map((c) => c.text().replace(/\s+/g, ' '))).toEqual(['马车 7 天', '空艇 2 天']);
+    // 纯参考：不是按钮（点了也不该改变任何东西），大字与指令都走基线
+    expect(wrapper.find('button.pol-mode-item').exists()).toBe(false);
     expect(wrapper.find('.pol-route-days').text()).toBe('约 7 天');
 
-    await chips[1]!.trigger('click');
-    expect(wrapper.find('.pol-route-days').text()).toBe('约 2 天');
-
     await clickButton(wrapper, '.pol-card', '出发');
-    expect(game.fillInput).toHaveBeenCalledWith(
-      '【地图】玩家决定启程前往乙一，出行方式：空艇，约 2 天',
-    );
+    expect(game.fillInput).toHaveBeenCalledWith('【地图】玩家决定启程前往乙一，约 7 天');
   });
 
   it('旧包（零方式）不渲染方式行 —— 措辞与天数与从前逐字一致', async () => {
