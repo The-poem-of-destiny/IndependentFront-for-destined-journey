@@ -9,6 +9,32 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 进度表长注归档（2026-08-13 迁自 `AGENTS.md`）
+
+以下六条长注原挂在 `AGENTS.md` 进度表下方，按「指令文件只留速览，历史在这里」的规则**原文**迁入。🔴 其中〔工坊入口已开放〕一条是工坊/正则代码的**安全执行边界**，仍具现行效力，读工坊/正则代码前必读。
+
+> 🔓 **工坊入口已开放（2026-08-04）**：首页「创意工坊」按钮的 `HomePage.vue` `WORKSHOP_ENTRY_ENABLED` 已置 `true`。以下执行边界（2026-08-01 安全审计，2026-08-03 视觉边界修订）**一条没变**，仍是读工坊/正则代码时的必读；唯一遗留缺口是**脚本没有 CPU 预算**（恶意规则可让那一个 iframe 空转，宿主页面不受影响）。SEC-02 已由 QuickJS 隔离后端收口；SEC-01 不再用 DOM 白名单牺牲 replacement 兼容，而是把每次富正则命中放进各自无 same-origin 的 `sandbox="allow-scripts"` iframe，并使用 `credentialless` + `no-referrer`；未命中正文始终由宿主原生文本面渲染，正则 CSS/布局无法触及普通正文或其它命中。代价是跨命中 DOM 查询不再兼容。外部 HTTP(S) 资源与原生网络 API 为兼容性刻意放行；form、popup、download、top navigation、嵌套 frame、parent DOM、应用 Dexie/storage 与 API Key 仍不可达，应用自有 `/api` 也拒绝 `Origin: null`。正则唯一持久权限是 Dexie v16 `regexStorage`：所有正则、信任级别与预览共享同一个不可信命名空间，iframe 内以同步 `localStorage` 镜像和 `window.regexStorage` 别名使用，跨 frame 持久化/广播；`sessionStorage` 仍只活在当前 frame，IndexedDB 不开放。规则可向远程或本地网络发请求，也可外传该命中的 replacement/capture 与 regex-namespace 数据，这是当前威胁模型明确接受的暴露。**但这套全开契约只给「用户自己装过的规则」**：模型输出里合成的 `<item_info>` / `<task_info>` 卡片是另一档（`BeautifierMatchSegment.origin === 'model'`）—— CSP 只放行带 nonce 的宿主引导脚本，卡片自带 `<script>` / inline handler 由浏览器拦掉，`connect-src 'none'`，也不注入 `regexStorage` 快照；样式/图片照旧，视觉不降级。理由是模型正文会被世界书/角色卡/工坊文案里的注入牵着走，不该顺带拿到脚本面与网络出口。2026-08-02 公共工坊快照为 303 项目 / 99 条正则（0 编译失败）：60 条外部资源规则不再降级，16 条 parent 耦合与 14 条宿主 API 耦合仍受限；storage 词法命中 8 条，精查为 5 项目 6 条 active + 2 条仅注释，active 均只用 `getItem`/`setItem`/`removeItem` 且现已兼容。脚本仍无 CPU 预算（入口开放后这条仍未补）；已装规则按存档启用状态运行。详见 `docs/reviews/2026-08-01-repository-review.md` 与 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
+
+> 🟡 **工坊 P4 已实施（B1-B5），真机走查未做**：以上游工坊页（`github.com/AkabaneSaki/myrepo`，本地克隆 `E:\Projects\myrepo`）为参照做的功能对齐。B1 封面代理链 + 类型徽章 + Cloudflare 错误码 + 加载更多；B2 我的项目 / 订阅与已装 / 审核徽章；B3 更新前改动预告；B4 投稿·编辑·上传·可见性·删除；B5 审核队列 + 管理员 + 日志。**三条与上游刻意不同**已写进各自文件头注释：不给没有基础标签的项目盖章成「系统」、diff 由已算好的安装计划派生（不重新归一化一遍）、权限判定只用于画不画入口（门禁在上游 403）。**真机走查（2026-08-02）**：B4 写侧（投稿上传 / 编辑 / 删除）与 P3 社交（点赞 / 订阅）已人工走过。B1-B3（封面链 / 我的项目 / 更新 diff）尚未专门走查。🔴 **B5 审核面无法自测（已搁置）** —— 当前账号 `isAdmin: false`，延后到拿到管理员账号再做。
+
+> 🩹 **走查后修的三处**（fable 审查发现，均已补回归测试）：
+>
+> 1. **并发 toggle 互相抹掉** —— 节流键按（项目 × 动作）分开，点赞与订阅可同时在飞；而校正/回滚都拿**起飞时**抓的快照整份盖回去，后落地的会把先落地的成果重置回起飞前，失败回滚还会连累并发动作、并留下一个服务端从没记过的「幻影赞」。现在校正基线取**落地那一刻**的覆盖层，回滚只放回自己那一对字段（`workshop-social-store.ts` 的 `rollback`）。
+> 2. **编辑表单从本地已装库取初值** —— 「我的项目」列的是作者名下全部项目、未必装过，查空就开出空表单，而「提交修改」是整份 PUT，一次没留神就把上游的简介清成空串、标签清光。现在 `WorkshopBrowseModal` 的 `edit` 事件转达**上游整行**，本地那份只做兜底。
+> 3. **登录弹窗不验地址** —— `window.open` 吃的是上游响应里的一个字段：`javascript:` 会在与本源关联的上下文里执行（当时 API Key 仍在 localStorage），而弹窗刻意保留 opener（登录靠 postMessage），放行陌生域等于把 `opener.location` 交出去。现在开窗前过 `isAllowedLoginUrl()`：只放 https + 主机钉死 `discord.com` 与工坊 worker（含子域）。
+>
+> 🟡 **图像生成 v1 已实施（7 波 22 任务），真机走查未做**：`<scene_image>` 成为引擎认识的标记，story 在正文里就地插标记当锚点，Code 走「限额 → `image_prompt` 侧链把中文转 danbooru → NovelAI V4.5 出图 → 落库 → 就地渲染」。三档开关（off / manual / auto）默认 **manual**。设计 D1–D55 全文在 `docs/planning/2026-08-04-image-generation-design.md`，实施编排与实际偏差在同目录的 `-implementation-plan.md`。**上游链路已真机跑通（2026-08-04）**：合成冒烟（不走真实游玩，手工造 danbooru 场景串）打通「装配 → 三重冗余 → 同源 BFF `forward()` → NAI → 真实 zip → PNG」，1 角色与 0 角色各出图一张，1216×832，约 1.8 秒。三条此前只有自压 fixture 的假设现已实测：真实响应 zip（魔数 `50 4b 03 04`，单条目 `image_0.png`）、0 角色空数组上游接受、`ucPreset: 0` 出图正常。**仍未真机的是游玩链路**：story 产标记 → `image_prompt` 侧链 → 限额 → 落库 → 正文渲染 / CG 图鉴，全部只有单测。四条钱相关的铁则分别钉在四个文件里：自动档不追溯开火（`lib/game-pipeline.ts`）、限额在侧链之前（`image-quota.ts`）、「无记录 + auto」出按钮而不是去生成（`scene-image-view.ts`）、手动永不被判成不可用（`useManualSceneImage.ts`）。
+>
+> 🩹 **真机第一次成功出图时逮到的（2026-08-04）**：`parseNaiZip` 先判 `content-type` 含不含 `zip`，不含就 `bad-response`。NAI 实际报的是 **`binary/octet-stream`** —— 于是第一张**已生成、已扣 Anlas** 的图被我们自己扔掉，还报成「NovelAI 返回了看不懂的内容」。根因是**拿可变的 header 去否决不可变的字节**：现在一律先试解包，content-type 只进失败 detail。同一轮还发现 `NAI_ANLAS_RULES` 的免费额度是 **Opus 专属**却对所有账户生效（见上一条 commit）。
+>
+> 🩹 **游玩链路真机第一轮逮到的（2026-08-05）**：出图端点那格 Base URL 是**自由文本**，一格连坑两轮，而**两次报错都指着无辜的地方** —— 填成 `https://api.novelai.net`（NAI 的**文本/账户**域）时，那台机器上 `/ai/generate-image` 还活着（所以是 400 不是 404）但模型枚举停在 V3，于是它对一个完全合法的 `nai-diffusion-4-5-full` 回 **「model must be a valid enum value」**，看起来像模型名写错；改对域名却漏掉 `https://` 时，BFF 的 `forward()` 回 **「invalid X-Target-Base-URL」**，看起来像 header 坏了。裁定：**出图地址由代码持有，用户只填令牌** —— `scene-image-seams` 不再读 `endpoint.baseUrl`，API 配置里出图端点的「主链接」与「模型」两格直接隐藏（`isImageEntry`）。`image-client` 仍收 `baseUrl`（自建镜像/测试替身）并新增 `resolveImageBaseUrl`：补协议、剃掉 BFF 自己会拼的 `/ai/generate-image`、文本域**只报错不改写**。同一轮还确认「弹回首页」不可能是组件异常 —— 全仓没有任何程序化跳首页的路径，`currentView` 初值就是 `home` 且只活在内存里，所以那是**整页重载**（待再现时取证）。
+>
+> 🩹 **实施中逮到的两处**：① `blurByDefault`（D46 打码）**声明了但没人传**，整条功能是死的 —— 根因是只有单组件测试，那种测试能证明逻辑对、**证明不了有人供值**，现已补从 ChatFlow 真渲染到底的链路测试。② `data/defaults/agent-config.json` 里曾有 **47 个 U+FFFD 坏字符**（16 段 / 6 个 agent，其中一处落在闭合 XML 标签的标签名里）—— **已于 2026-08-05 修复**（实测 U+FFFD:0 / ctrl:0 / JSON 可解析），`tests/encoding-invariants.test.ts` 把三条判据变成了常驻 CI 断言。
+>
+> 🟡 **工坊 P2 已实施（T1-T6），真机走查未做**：世界书条目正文的 EJS 现在**会在提示装配期求值**（ADR-30 两轴契约：只读 `stats` + 共写 `vars`，冲突 AI 赢；动态条目沉底、静态前缀字节稳定）。全语料冒烟 509 条目 / 61 动态 / **0 回退**（能力面别名层落地后 7 → 0，白名单已清空；语料门现按 **Legacy 与 QuickJS 双后端**各自跑双向白名单，基线一致），回退条目原文注入不阻断。代码位内嵌的 ST 值宏（`{{roll}}`/`{{random::}}`）已在编译期降成沙盒调用（`rewriteCodeMacros`），uid 358 出列。回退率 / 缓存命中字节 / 跨回合链尚未真机验证，设计全文见 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`。
+
+---
+
 ### 战斗结算修复 + 攻击卡片详情扩充 ｜ ✅ 已修（2026-08-12）
 
 来自 `fated-poem-debug-7c342726-1786542815092.json` 主人实战复现的三项战斗问题：

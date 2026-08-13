@@ -6,7 +6,7 @@
 > **定位**：本文件是 EJS 能力面的设计与实施记录。上游（SillyTavern + 酒馆助手 + MVU）的 API 只以**兼容别名层**形式承接存量内容，不是设计约束。
 >
 > **前置阅读**：`docs/planning/2026-07-31-workshop-phase2-ejs-design.md`（D1-D10 契约）、
-> `docs/reviews/2026-08-01-repository-review.md`（SEC-02）、`AGENTS.md`「事件驱动架构」。
+> `docs/reviews/2026-08-01-repository-review.md`（SEC-02）、`src/sillytavern/AGENTS.md`「事件驱动架构」（2026-08-13 自根 `AGENTS.md` 迁入）。
 
 ---
 

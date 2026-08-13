@@ -286,73 +286,9 @@ npm run dev            # 开发服务器（dev.bat：自动杀残留进程 + 固
 - **EJS 世界书求值契约 (ADR-30)**：世界书条目正文 EJS 由 Code 在提示装配期求值（承 ADR-04），契约自主设计、不承诺 MVU/酒馆助手兼容（上游函数名仅作别名层）。**两轴**：`stats` 只读面（纯代码推导数值：资源/等级/五维/命运点数/时间）+ `vars` 共写叙事变量空间（= `variables.sys` 草稿，AI 与 EJS 双写同一棵树，**冲突 AI 赢**——EJS 差量先落、vars_update 补丁后落）。提交权按 Agent 声明（`ejsVarsCommit`，默认仅 story——前瞻扩展设计）。缓存分层：含 `<%`/`{{random`/`{{getvar` 的条目沉到 LORE_BOOK 展开尾部，静态前缀保字节稳定；EJS 失败条目原文注入（零回归兜底）。创作者规范：`docs/reference/worldbook-ejs-regex-authoring-guide.md`；设计全文：`docs/planning/2026-07-31-workshop-phase2-ejs-design.md`；词汇：根目录 `CONTEXT.md`。
 - **地图 v1 契约 (ADR-31)**：位置路径（`CharacterState.location` 自由文本）为唯一位置真源，地块是**落位**投影（绝不模糊匹配、失败不动）；地图对 AI **只教不管**——读侧持续展示真实地块名 + 路线/天数锚定（story 走世界书 EJS 条目、dispatcher 走 `{{MAP_CONTEXT}}`），写侧被动解析不否决、`delta_time` 不 clamp、天气 Code 兜底 AI 覆盖（跨天重断言）。寻路是一张**混合通行图**（陆海同图按边类型计价 + via/avoid 途经点，不做交通方式状态展开）。所有者静态不可易手（`history.txt` 不读）。地图状态只跟踪玩家、不新增 Dexie 表（可变状态全在 `worldFlags.map`）。**换图零改码**：随图数据（地形系数/费率/气候与天气词汇/绑定表/比例尺）全在 pack、默认规则表归编译脚本，引擎地图模块零中文字面量（结构闸门钉死）；**存档不钉包版本**——位置路径为真源使投影可自愈，包版本戳不符就清派生态重落位，旧存档永不崩。裁定记录与设计全文：`docs/planning/2026-08-11-map-system-v1-integration.md`；词汇：根目录 `CONTEXT.md`「地图系统」节。
 
-## 事件驱动架构（Phase 4.5-8 实现）
+## 事件驱动架构 / v4 子系统分流 / $ API（已迁入引擎分册）
 
-```
-Layer 5  脚本级 Script Sandbox  AI 调用: $event.on/off(持久订阅) / $call(跨对象引用)
-  ↑       (AI 可编程)            init/cleanup 生命周期 + @parent 继承链
-Layer 4  语义级 $ API           AI 调用: $combat.attack() / $craft.startProject()
-  ↑       (AI 可见)
-Layer 3  流程级 Resolver        引擎内部: CombatResolver / CraftResolver
-  ↑       (AI 不可见)
-Layer 2  计算级 纯函数          $dice.d20() / $resource.getHpPercent() / $char.getTier()
-  ↑       (AI 可读，不可写)
-Layer 1  原语级 状态读写        StateManager.commitChatState() / $validate.effectValue()
-          (仅引擎内部)
-```
-
-### 关键架构决策
-
-| 决策                         | 选择                                | 理由                                                                                                                                                                                                                                                                                          |
-| ---------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| EventBus 实例化              | 按 SaveSlot                         | 效果实例随存档隔离                                                                                                                                                                                                                                                                            |
-| Script 执行                  | **QuickJS(wasm) realm 隔离**        | $event.on/off 持久订阅 + $call 跨对象调用 + init/cleanup 生命周期。2026-08-10 起求值从 `new Function` 迁到隔离后端（SEC-02）：guest 里没有宿主 `globalThis`/`indexedDB`/`fetch`，够不到 Dexie 与 API Key；墙钟 50ms 预算。装不上 **fail-closed**（脚本一行不跑），**绝不回落 `new Function`** |
-| 持久订阅管理                 | subscription-manager.ts             | 递归保护(≤10) + 僵尸兜底(unregisterAll)                                                                                                                                                                                                                                                       |
-| EffectRuntime 时序           | 管线完成后批量执行                  | 保持 DAG 原子性                                                                                                                                                                                                                                                                               |
-| EventBus 引入时机            | Phase 7e+8（已完成）                | 与 Script 系统同步上线                                                                                                                                                                                                                                                                        |
-| Agentic 模式                 | OpenAI function calling (Phase 8.5) | craft_gen/char_gen/item_gen 通过 tools 调用真实 Code 函数，禁止 AI 编造数值                                                                                                                                                                                                                   |
-| craft_request 时序           | 延迟型 (对齐 combat_trigger)        | Stage 1 暂存 → Stage 2 统一执行，避免阻塞叙事                                                                                                                                                                                                                                                 |
-| System Prompt 管理 (Phase 9) | agent-config.json 唯一来源          | 所有 Agent 的完整 systemPrompt 存在 agent-config.json；agent-templates.ts 只留 stub + 动态上下文函数。🔴 **story 例外**：预设短路，行为真源是预设条目——细节见架构图里 agent-config.json 那条                                                                                                  |
-
-### 效果系统统一框架（战斗+制作共用，ADR-29）
-
-战斗 v2 (M1-M5) 已验证一套**统一 subscribeChain 链式管道**机制，制作系统直接复用，不发明第二套。完整设计见 `docs/planning/unified-effect-system-framework.md`。
-
-> 📌 **v3 演进**：战斗内已由 v3 内核接管（`combat-v3/`），效果走 **EffectAutomaton DSL**（18 窗口声明 / **12 个已接求值器** + 8 大类 intent + 封闭表达式文法），不再走 emitChain/script-executor。**本框架仍是制作系统与战斗外的效果基座**（ADR-29 继续适用）。
-
-- **统一机制**：`EventBus.emitChain(type, params, ctx)` 链式参数管道——`(priority, order, 注册序)` 稳定排序、`ctx.combatants`+`subscription.owner` 在场过滤、错误隔离、递归保护
-- **两个注册 facade**（互不干扰）：`ScriptRegistry`（声明式，物品装备/卸下）+ `SubscriptionManager`（动态，AI script 运行时 `$event.on`）
-- **modifier 不是第二套系统**：物品 `modifiers[]` 在装备时由 ScriptRegistry 注册成"push handler"，走同一条 emitChain
-- **核心模式：纯函数兜底 + AI subscribeChain 覆盖**：Code 算基础 → emitChain 传 AI → AI handler 改 outcome → AI 不响应走兜底
-- **✅ P1-11 已接线（Q-07, 2026-08-03）**：战斗外效果系统已由 `effect-wiring.ts` 接进生产——`wireEffectSystem(saveId, characters)` 在存档加载时对已装备物品/技能执行 `executeInit` + `$event.on` 订阅注册，装备/卸下经 `state-manager` 的 equip/unequip handler 调 `wireObject`/`unwireObject`。`getEventBus(saveId)` 按存档实例化，`ScriptRegistry` + `SubscriptionManager` 双 facade 随存档生命周期。
-- **✅ emit 源与效果回收也已接线（Q-07 第二半, 2026-08-03）**：`commitChatState` 每次提交后，把本次 patch 产生的 `GameEvent` 经 `publishToEffectSystem(saveId, events)` 发到存档 EventBus；`SubscriptionManager` 新增 `setEffectSink`，触发脚本产出的 `hpChanges`/`statChanges`/status 意图不再被丢弃（此前 `handleEvent` 执行完脚本直接扔掉，注释写着「由 state-manager 统一 apply」却没有那个调用方——与 Q-02 同形状的缺陷）。收上来的效果经 `convertScriptEffects` 转成 StatePatch，再走一轮 `commitChatState`（ADR-21 唯一写入口，**没有开第二条写路径**）。反应轮有深度上限 `MAX_EVENT_REACTION_DEPTH = 3`，防止「A 触发 B、B 触发 A」打成事件风暴。没接过线的存档零开销（`peekEffectWiring` 不凭空建 EventBus）。
-- **⚠️ 战斗内 18 窗口里只有 12 个真的接了求值器**：`initiative.before` / `initiative.after` / `turn.close` / `morale.before` / `morale.after` / `settlement.before` 在 `combat-v3/phases/` 里没有任何求值器。它们现在编译期就以 `WINDOW_NOT_WIRED` 掉落（`V3_WINDOW_KEYS_RESERVED`），不再静默入索引；接上求值器时把 key 挪进 `V3_WINDOW_KEYS_LIVE` 即可。窗口求值统一走 `runWindow(out.events, ...)`——它保证 `EffectRejected` 诊断必进事件流，忽略返回值是可见的 TODO 而非隐藏的丢弃。
-
-## v4 三层子系统分流 (ADR-24/25/26)
-
-```
-SubSystem-Craft  制作  → 🚩 延迟型: Story 输出 <craft_request>，Stage1 暂存 → Stage2 执行 craft_gen Agent
-                          → AI 调 tools (get_inventory→craft_check→craft_settle) → 真实 DC+骰值+评级+结算 (Code)
-                          → 创意效果 (AI) → 结果注入正文 + StatePatch 提交
-SubSystem-Combat 战斗  → Stage1后检测 <combat_trigger> → 暂存 → Stage2 request_dispatcher 完成 char_gen 后唤起
-                          → 独立战斗窗口 (Code循环 + AI摘要) → 摘要回注正文 + 批量StatePatch
-SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC → char_gen Agent 调 tools → 输出 <char_result> XML
-                          → 调 item_gen Agent (仅1次, ADR-26) → 下回合可用
-```
-
-### 9 个 $ API Namespace
-
-| Namespace   | AI可见     | 用途     |
-| ----------- | ---------- | -------- |
-| `$combat`   | ✅         | 战斗流程 |
-| `$craft`    | ✅         | 制作流程 |
-| `$status`   | ✅         | 状态效果 |
-| `$dice`     | ✅         | 骰池系统 |
-| `$char`     | ✅(只读)   | 角色查询 |
-| `$var`      | ✅         | 变量读写 |
-| `$time`     | ✅         | 时间查询 |
-| `$resource` | ✅(只读)   | 资源查询 |
-| `$validate` | ❌(引擎内) | 数值约束 |
+「事件驱动架构（Phase 4.5-8 实现）」「v4 三层子系统分流 (ADR-24/25/26)」「9 个 $ API Namespace」三节为引擎层内容，2026-08-13 原文迁入 [`src/sillytavern/AGENTS.md`](src/sillytavern/AGENTS.md)。改引擎代码前按下方「架构地图」一节的规则读分册。
 
 ## Phase 完成通知
 
@@ -409,25 +345,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 地图 v1        | 地块/静态所有者/混合图寻路/天气/AI 集成（ADR-31）                                                                                      | ✅ 已实施，UI 真机走查过；AI 轮次待日常游玩验证                                                       |
 | 真机迭代       | debug loop 持续修复                                                                                                                    | 🔄                                                                                                    |
 
-> 🔓 **工坊入口已开放（2026-08-04）**：首页「创意工坊」按钮的 `HomePage.vue` `WORKSHOP_ENTRY_ENABLED` 已置 `true`。以下执行边界（2026-08-01 安全审计，2026-08-03 视觉边界修订）**一条没变**，仍是读工坊/正则代码时的必读；唯一遗留缺口是**脚本没有 CPU 预算**（恶意规则可让那一个 iframe 空转，宿主页面不受影响）。SEC-02 已由 QuickJS 隔离后端收口；SEC-01 不再用 DOM 白名单牺牲 replacement 兼容，而是把每次富正则命中放进各自无 same-origin 的 `sandbox="allow-scripts"` iframe，并使用 `credentialless` + `no-referrer`；未命中正文始终由宿主原生文本面渲染，正则 CSS/布局无法触及普通正文或其它命中。代价是跨命中 DOM 查询不再兼容。外部 HTTP(S) 资源与原生网络 API 为兼容性刻意放行；form、popup、download、top navigation、嵌套 frame、parent DOM、应用 Dexie/storage 与 API Key 仍不可达，应用自有 `/api` 也拒绝 `Origin: null`。正则唯一持久权限是 Dexie v16 `regexStorage`：所有正则、信任级别与预览共享同一个不可信命名空间，iframe 内以同步 `localStorage` 镜像和 `window.regexStorage` 别名使用，跨 frame 持久化/广播；`sessionStorage` 仍只活在当前 frame，IndexedDB 不开放。规则可向远程或本地网络发请求，也可外传该命中的 replacement/capture 与 regex-namespace 数据，这是当前威胁模型明确接受的暴露。**但这套全开契约只给「用户自己装过的规则」**：模型输出里合成的 `<item_info>` / `<task_info>` 卡片是另一档（`BeautifierMatchSegment.origin === 'model'`）—— CSP 只放行带 nonce 的宿主引导脚本，卡片自带 `<script>` / inline handler 由浏览器拦掉，`connect-src 'none'`，也不注入 `regexStorage` 快照；样式/图片照旧，视觉不降级。理由是模型正文会被世界书/角色卡/工坊文案里的注入牵着走，不该顺带拿到脚本面与网络出口。2026-08-02 公共工坊快照为 303 项目 / 99 条正则（0 编译失败）：60 条外部资源规则不再降级，16 条 parent 耦合与 14 条宿主 API 耦合仍受限；storage 词法命中 8 条，精查为 5 项目 6 条 active + 2 条仅注释，active 均只用 `getItem`/`setItem`/`removeItem` 且现已兼容。脚本仍无 CPU 预算（入口开放后这条仍未补）；已装规则按存档启用状态运行。详见 `docs/reviews/2026-08-01-repository-review.md` 与 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
-
-> 🟡 **工坊 P4 已实施（B1-B5），真机走查未做**：以上游工坊页（`github.com/AkabaneSaki/myrepo`，本地克隆 `E:\Projects\myrepo`）为参照做的功能对齐。B1 封面代理链 + 类型徽章 + Cloudflare 错误码 + 加载更多；B2 我的项目 / 订阅与已装 / 审核徽章；B3 更新前改动预告；B4 投稿·编辑·上传·可见性·删除；B5 审核队列 + 管理员 + 日志。**三条与上游刻意不同**已写进各自文件头注释：不给没有基础标签的项目盖章成「系统」、diff 由已算好的安装计划派生（不重新归一化一遍）、权限判定只用于画不画入口（门禁在上游 403）。**真机走查（2026-08-02）**：B4 写侧（投稿上传 / 编辑 / 删除）与 P3 社交（点赞 / 订阅）已人工走过。B1-B3（封面链 / 我的项目 / 更新 diff）尚未专门走查。🔴 **B5 审核面无法自测（已搁置）** —— 当前账号 `isAdmin: false`，延后到拿到管理员账号再做。
-
-> 🩹 **走查后修的三处**（fable 审查发现，均已补回归测试）：
->
-> 1. **并发 toggle 互相抹掉** —— 节流键按（项目 × 动作）分开，点赞与订阅可同时在飞；而校正/回滚都拿**起飞时**抓的快照整份盖回去，后落地的会把先落地的成果重置回起飞前，失败回滚还会连累并发动作、并留下一个服务端从没记过的「幻影赞」。现在校正基线取**落地那一刻**的覆盖层，回滚只放回自己那一对字段（`workshop-social-store.ts` 的 `rollback`）。
-> 2. **编辑表单从本地已装库取初值** —— 「我的项目」列的是作者名下全部项目、未必装过，查空就开出空表单，而「提交修改」是整份 PUT，一次没留神就把上游的简介清成空串、标签清光。现在 `WorkshopBrowseModal` 的 `edit` 事件转达**上游整行**，本地那份只做兜底。
-> 3. **登录弹窗不验地址** —— `window.open` 吃的是上游响应里的一个字段：`javascript:` 会在与本源关联的上下文里执行（当时 API Key 仍在 localStorage），而弹窗刻意保留 opener（登录靠 postMessage），放行陌生域等于把 `opener.location` 交出去。现在开窗前过 `isAllowedLoginUrl()`：只放 https + 主机钉死 `discord.com` 与工坊 worker（含子域）。
->
-> 🟡 **图像生成 v1 已实施（7 波 22 任务），真机走查未做**：`<scene_image>` 成为引擎认识的标记，story 在正文里就地插标记当锚点，Code 走「限额 → `image_prompt` 侧链把中文转 danbooru → NovelAI V4.5 出图 → 落库 → 就地渲染」。三档开关（off / manual / auto）默认 **manual**。设计 D1–D55 全文在 `docs/planning/2026-08-04-image-generation-design.md`，实施编排与实际偏差在同目录的 `-implementation-plan.md`。**上游链路已真机跑通（2026-08-04）**：合成冒烟（不走真实游玩，手工造 danbooru 场景串）打通「装配 → 三重冗余 → 同源 BFF `forward()` → NAI → 真实 zip → PNG」，1 角色与 0 角色各出图一张，1216×832，约 1.8 秒。三条此前只有自压 fixture 的假设现已实测：真实响应 zip（魔数 `50 4b 03 04`，单条目 `image_0.png`）、0 角色空数组上游接受、`ucPreset: 0` 出图正常。**仍未真机的是游玩链路**：story 产标记 → `image_prompt` 侧链 → 限额 → 落库 → 正文渲染 / CG 图鉴，全部只有单测。四条钱相关的铁则分别钉在四个文件里：自动档不追溯开火（`lib/game-pipeline.ts`）、限额在侧链之前（`image-quota.ts`）、「无记录 + auto」出按钮而不是去生成（`scene-image-view.ts`）、手动永不被判成不可用（`useManualSceneImage.ts`）。
->
-> 🩹 **真机第一次成功出图时逮到的（2026-08-04）**：`parseNaiZip` 先判 `content-type` 含不含 `zip`，不含就 `bad-response`。NAI 实际报的是 **`binary/octet-stream`** —— 于是第一张**已生成、已扣 Anlas** 的图被我们自己扔掉，还报成「NovelAI 返回了看不懂的内容」。根因是**拿可变的 header 去否决不可变的字节**：现在一律先试解包，content-type 只进失败 detail。同一轮还发现 `NAI_ANLAS_RULES` 的免费额度是 **Opus 专属**却对所有账户生效（见上一条 commit）。
->
-> 🩹 **游玩链路真机第一轮逮到的（2026-08-05）**：出图端点那格 Base URL 是**自由文本**，一格连坑两轮，而**两次报错都指着无辜的地方** —— 填成 `https://api.novelai.net`（NAI 的**文本/账户**域）时，那台机器上 `/ai/generate-image` 还活着（所以是 400 不是 404）但模型枚举停在 V3，于是它对一个完全合法的 `nai-diffusion-4-5-full` 回 **「model must be a valid enum value」**，看起来像模型名写错；改对域名却漏掉 `https://` 时，BFF 的 `forward()` 回 **「invalid X-Target-Base-URL」**，看起来像 header 坏了。裁定：**出图地址由代码持有，用户只填令牌** —— `scene-image-seams` 不再读 `endpoint.baseUrl`，API 配置里出图端点的「主链接」与「模型」两格直接隐藏（`isImageEntry`）。`image-client` 仍收 `baseUrl`（自建镜像/测试替身）并新增 `resolveImageBaseUrl`：补协议、剃掉 BFF 自己会拼的 `/ai/generate-image`、文本域**只报错不改写**。同一轮还确认「弹回首页」不可能是组件异常 —— 全仓没有任何程序化跳首页的路径，`currentView` 初值就是 `home` 且只活在内存里，所以那是**整页重载**（待再现时取证）。
->
-> 🩹 **实施中逮到的两处**：① `blurByDefault`（D46 打码）**声明了但没人传**，整条功能是死的 —— 根因是只有单组件测试，那种测试能证明逻辑对、**证明不了有人供值**，现已补从 ChatFlow 真渲染到底的链路测试。② `data/defaults/agent-config.json` 里曾有 **47 个 U+FFFD 坏字符**（16 段 / 6 个 agent，其中一处落在闭合 XML 标签的标签名里）—— **已于 2026-08-05 修复**（实测 U+FFFD:0 / ctrl:0 / JSON 可解析），`tests/encoding-invariants.test.ts` 把三条判据变成了常驻 CI 断言。
->
-> 🟡 **工坊 P2 已实施（T1-T6），真机走查未做**：世界书条目正文的 EJS 现在**会在提示装配期求值**（ADR-30 两轴契约：只读 `stats` + 共写 `vars`，冲突 AI 赢；动态条目沉底、静态前缀字节稳定）。全语料冒烟 509 条目 / 61 动态 / **0 回退**（能力面别名层落地后 7 → 0，白名单已清空；语料门现按 **Legacy 与 QuickJS 双后端**各自跑双向白名单，基线一致），回退条目原文注入不阻断。代码位内嵌的 ST 值宏（`{{roll}}`/`{{random::}}`）已在编译期降成沙盒调用（`rewriteCodeMacros`），uid 358 出列。回退率 / 缓存命中字节 / 跨回合链尚未真机验证，设计全文见 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`。
+> 📦 **进度表长注已迁出（2026-08-13）**：原挂在此处的六条长注（🔓 工坊入口执行边界 / 🟡 工坊 P4 / 🩹 走查后修的三处 / 🟡 图像生成 v1 + 两条真机踩坑 / 🩹 实施中两处 / 🟡 工坊 P2 EJS）已按本文件「详细记录进 CHANGELOG」的规则**原文**迁入 `docs/CHANGELOG.md`「进度表长注归档」节。🔴 其中〔工坊入口已开放〕一条是工坊/正则的**安全执行边界**，读工坊/正则代码前仍必读。
 
 ## 架构地图（已拆分为分册 —— 必读指引）
 
@@ -449,7 +367,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 - **Claude Code**：分册同目录各有一个 `CLAUDE.md` 薄壳（`@AGENTS.md` 导入），
   会在读写该目录下的文件时自动加载，无需手动读取。
 
-其余约定（设计约定 / ADR / 事件驱动架构 / 数据字段规范 / 提交前检查 / 进度）仍全部留在本文件。
+其余约定（设计约定 / ADR / 数据字段规范 / 提交前检查 / 进度）仍全部留在本文件；事件驱动架构 / v4 子系统分流 / $ API 三节已随分册迁入引擎层（见上文指引）。
 
 ## 内容许可
 

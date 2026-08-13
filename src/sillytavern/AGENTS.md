@@ -380,3 +380,75 @@ src/sillytavern/                    ← 核心引擎
 ```
 
 > 🪦 这里曾指着一行 `src/vanilla/sillytavern-store.ts`（"框架无关响应式 Store"）——该目录早已不存在，Store 由 Pinia 接管。Q-15 清仓时删掉，别按图找那个文件。
+
+---
+
+> 以下三节 2026-08-13 自根 `AGENTS.md` **原文**迁入（引擎层内容归引擎分册）。
+
+## 事件驱动架构（Phase 4.5-8 实现）
+
+```
+Layer 5  脚本级 Script Sandbox  AI 调用: $event.on/off(持久订阅) / $call(跨对象引用)
+  ↑       (AI 可编程)            init/cleanup 生命周期 + @parent 继承链
+Layer 4  语义级 $ API           AI 调用: $combat.attack() / $craft.startProject()
+  ↑       (AI 可见)
+Layer 3  流程级 Resolver        引擎内部: CombatResolver / CraftResolver
+  ↑       (AI 不可见)
+Layer 2  计算级 纯函数          $dice.d20() / $resource.getHpPercent() / $char.getTier()
+  ↑       (AI 可读，不可写)
+Layer 1  原语级 状态读写        StateManager.commitChatState() / $validate.effectValue()
+          (仅引擎内部)
+```
+
+### 关键架构决策
+
+| 决策                         | 选择                                | 理由                                                                                                                                                                                                                                                                                          |
+| ---------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| EventBus 实例化              | 按 SaveSlot                         | 效果实例随存档隔离                                                                                                                                                                                                                                                                            |
+| Script 执行                  | **QuickJS(wasm) realm 隔离**        | $event.on/off 持久订阅 + $call 跨对象调用 + init/cleanup 生命周期。2026-08-10 起求值从 `new Function` 迁到隔离后端（SEC-02）：guest 里没有宿主 `globalThis`/`indexedDB`/`fetch`，够不到 Dexie 与 API Key；墙钟 50ms 预算。装不上 **fail-closed**（脚本一行不跑），**绝不回落 `new Function`** |
+| 持久订阅管理                 | subscription-manager.ts             | 递归保护(≤10) + 僵尸兜底(unregisterAll)                                                                                                                                                                                                                                                       |
+| EffectRuntime 时序           | 管线完成后批量执行                  | 保持 DAG 原子性                                                                                                                                                                                                                                                                               |
+| EventBus 引入时机            | Phase 7e+8（已完成）                | 与 Script 系统同步上线                                                                                                                                                                                                                                                                        |
+| Agentic 模式                 | OpenAI function calling (Phase 8.5) | craft_gen/char_gen/item_gen 通过 tools 调用真实 Code 函数，禁止 AI 编造数值                                                                                                                                                                                                                   |
+| craft_request 时序           | 延迟型 (对齐 combat_trigger)        | Stage 1 暂存 → Stage 2 统一执行，避免阻塞叙事                                                                                                                                                                                                                                                 |
+| System Prompt 管理 (Phase 9) | agent-config.json 唯一来源          | 所有 Agent 的完整 systemPrompt 存在 agent-config.json；agent-templates.ts 只留 stub + 动态上下文函数。🔴 **story 例外**：预设短路，行为真源是预设条目——细节见架构图里 agent-config.json 那条                                                                                                  |
+
+### 效果系统统一框架（战斗+制作共用，ADR-29）
+
+战斗 v2 (M1-M5) 已验证一套**统一 subscribeChain 链式管道**机制，制作系统直接复用，不发明第二套。完整设计见 `docs/planning/unified-effect-system-framework.md`。
+
+> 📌 **v3 演进**：战斗内已由 v3 内核接管（`combat-v3/`），效果走 **EffectAutomaton DSL**（18 窗口声明 / **12 个已接求值器** + 8 大类 intent + 封闭表达式文法），不再走 emitChain/script-executor。**本框架仍是制作系统与战斗外的效果基座**（ADR-29 继续适用）。
+
+- **统一机制**：`EventBus.emitChain(type, params, ctx)` 链式参数管道——`(priority, order, 注册序)` 稳定排序、`ctx.combatants`+`subscription.owner` 在场过滤、错误隔离、递归保护
+- **两个注册 facade**（互不干扰）：`ScriptRegistry`（声明式，物品装备/卸下）+ `SubscriptionManager`（动态，AI script 运行时 `$event.on`）
+- **modifier 不是第二套系统**：物品 `modifiers[]` 在装备时由 ScriptRegistry 注册成"push handler"，走同一条 emitChain
+- **核心模式：纯函数兜底 + AI subscribeChain 覆盖**：Code 算基础 → emitChain 传 AI → AI handler 改 outcome → AI 不响应走兜底
+- **✅ P1-11 已接线（Q-07, 2026-08-03）**：战斗外效果系统已由 `effect-wiring.ts` 接进生产——`wireEffectSystem(saveId, characters)` 在存档加载时对已装备物品/技能执行 `executeInit` + `$event.on` 订阅注册，装备/卸下经 `state-manager` 的 equip/unequip handler 调 `wireObject`/`unwireObject`。`getEventBus(saveId)` 按存档实例化，`ScriptRegistry` + `SubscriptionManager` 双 facade 随存档生命周期。
+- **✅ emit 源与效果回收也已接线（Q-07 第二半, 2026-08-03）**：`commitChatState` 每次提交后，把本次 patch 产生的 `GameEvent` 经 `publishToEffectSystem(saveId, events)` 发到存档 EventBus；`SubscriptionManager` 新增 `setEffectSink`，触发脚本产出的 `hpChanges`/`statChanges`/status 意图不再被丢弃（此前 `handleEvent` 执行完脚本直接扔掉，注释写着「由 state-manager 统一 apply」却没有那个调用方——与 Q-02 同形状的缺陷）。收上来的效果经 `convertScriptEffects` 转成 StatePatch，再走一轮 `commitChatState`（ADR-21 唯一写入口，**没有开第二条写路径**）。反应轮有深度上限 `MAX_EVENT_REACTION_DEPTH = 3`，防止「A 触发 B、B 触发 A」打成事件风暴。没接过线的存档零开销（`peekEffectWiring` 不凭空建 EventBus）。
+- **⚠️ 战斗内 18 窗口里只有 12 个真的接了求值器**：`initiative.before` / `initiative.after` / `turn.close` / `morale.before` / `morale.after` / `settlement.before` 在 `combat-v3/phases/` 里没有任何求值器。它们现在编译期就以 `WINDOW_NOT_WIRED` 掉落（`V3_WINDOW_KEYS_RESERVED`），不再静默入索引；接上求值器时把 key 挪进 `V3_WINDOW_KEYS_LIVE` 即可。窗口求值统一走 `runWindow(out.events, ...)`——它保证 `EffectRejected` 诊断必进事件流，忽略返回值是可见的 TODO 而非隐藏的丢弃。
+
+## v4 三层子系统分流 (ADR-24/25/26)
+
+```
+SubSystem-Craft  制作  → 🚩 延迟型: Story 输出 <craft_request>，Stage1 暂存 → Stage2 执行 craft_gen Agent
+                          → AI 调 tools (get_inventory→craft_check→craft_settle) → 真实 DC+骰值+评级+结算 (Code)
+                          → 创意效果 (AI) → 结果注入正文 + StatePatch 提交
+SubSystem-Combat 战斗  → Stage1后检测 <combat_trigger> → 暂存 → Stage2 request_dispatcher 完成 char_gen 后唤起
+                          → 独立战斗窗口 (Code循环 + AI摘要) → 摘要回注正文 + 批量StatePatch
+SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC → char_gen Agent 调 tools → 输出 <char_result> XML
+                          → 调 item_gen Agent (仅1次, ADR-26) → 下回合可用
+```
+
+### 9 个 $ API Namespace
+
+| Namespace   | AI可见     | 用途     |
+| ----------- | ---------- | -------- |
+| `$combat`   | ✅         | 战斗流程 |
+| `$craft`    | ✅         | 制作流程 |
+| `$status`   | ✅         | 状态效果 |
+| `$dice`     | ✅         | 骰池系统 |
+| `$char`     | ✅(只读)   | 角色查询 |
+| `$var`      | ✅         | 变量读写 |
+| `$time`     | ✅         | 时间查询 |
+| `$resource` | ✅(只读)   | 资源查询 |
+| `$validate` | ❌(引擎内) | 数值约束 |
