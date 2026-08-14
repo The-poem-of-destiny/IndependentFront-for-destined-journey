@@ -260,10 +260,13 @@ npm run lint:fix       # 同上 + 自动修（会自动删未引用导入）
 npm run knip           # 死代码原始报告（人看的）
 npm run knip:ratchet   # 死代码棘轮闸门（CI 跑这个：只许变少不许变多）
 npm run knip:update    # 清理完死代码后收紧 knip-baseline.json
-npm run dev            # 开发服务器（dev.bat：自动杀残留进程 + 固定 5173 端口）
-                       # 🔴 改 dev.bat 前必读 docs/reference/dev-bat-notes.md ——
-                       #    注释一律纯 ASCII（中文注释会让 cmd 把注释片段当命令执行），
-                       #    行尾必须 CRLF（根目录 .gitattributes 已把 *.bat 钉死）
+npm run dev            # 开发服务器（自动杀残留进程 + 固定 5173 端口）
+                       # 入口是 scripts/dev.mjs，按平台分发：Windows → dev.bat，
+                       # macOS/Linux → dev.sh（行为一致，端口清理用 lsof）
+                       # 🔴 改任一启动器前必读 docs/reference/dev-bat-notes.md ——
+                       #    dev.bat 注释一律纯 ASCII（中文注释会让 cmd 把注释片段当命令执行）
+                       #    且行尾必须 CRLF；dev.sh 反过来必须 LF（shebang 带 CR 会
+                       #    报 bad interpreter）。两条都由根目录 .gitattributes 钉死
 ```
 
 ## Bug 反馈处理规范

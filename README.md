@@ -46,7 +46,9 @@ npm run dev
 
 启动后浏览器自动打开 `http://localhost:5173`。
 
-> Windows 用户也可直接双击 `dev.bat`（自动清理旧进程 + 固定端口启动）。
+`npm run dev` 在 Windows / macOS / Linux 上通用（按平台自动转发到 `dev.bat` 或 `dev.sh`，
+两者都会自动清理旧进程并固定端口启动）。也可以直接运行对应平台的启动器：Windows 双击
+`dev.bat`，macOS / Linux 执行 `bash dev.sh`。
 
 ---
 

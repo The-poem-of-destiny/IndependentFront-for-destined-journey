@@ -1,8 +1,16 @@
 # dev.bat 说明书（改启动器前必读）
 
-`dev.bat` 是开发启动器（`npm run dev` / 双击都走它）。它做两件事：清掉 5173-5179 上的残留 Vite 监听，然后固定端口 5173 启动 Vite。
+开发启动器做两件事：清掉 5173-5179 上的残留 Vite 监听，然后固定端口 5173 启动 Vite。
 
-这份文档存在的唯一理由：**`dev.bat` 里的注释必须是纯 ASCII**，所以那些用中文写的踩坑记录没地方放，只能搬到这里。
+**它现在有三个文件**（2026-08-14 起，见第六节）：
+
+| 文件              | 角色                                                              |
+| ----------------- | ----------------------------------------------------------------- |
+| `scripts/dev.mjs` | `npm run dev` 的入口，按 `process.platform` 分发，本身不做任何事   |
+| `dev.bat`         | Windows 启动器（本文一到五节全部只讲它）                          |
+| `dev.sh`          | macOS / Linux 启动器，行为与 `dev.bat` 一致                       |
+
+这份文档存在的唯一理由：**`dev.bat` 里的注释必须是纯 ASCII**，所以那些用中文写的踩坑记录没地方放，只能搬到这里。（`dev.sh` 没有这个限制，它的注释就写在文件里。）
 
 ---
 
@@ -139,3 +147,48 @@ ERROR: Input redirection is not supported, exiting the process immediately.
 ### 坑：本段改动遵守第一节铁律
 
 内容仓分支的注释全部纯 ASCII，`echo` 行保留中文（实测安全）。参数解析用 `%~1`/`%~2` 判 `--no-content`、`if exist` 独立成块——避开 cmd 括号块内 `set` + `if defined` 的延迟展开陷阱（实测：同一块内 `set "NO_CONTENT="` 后 `if not defined NO_CONTENT` 恒真，会让 `--no-content` 失效）。
+
+---
+
+## 六、Mac / Linux 启动器（`dev.sh` + `scripts/dev.mjs`）
+
+2026-08-14 加入，起因是 `"dev": "dev.bat"` 在 macOS 上根本不是一个命令。
+
+### 分发层为什么在 node 里
+
+npm 没有「按平台选 script」的机制，而我们不想为这件事引一个依赖（`cross-env` 之类解决的也不是这个问题）。所以 `package.json` 的 `dev` 指向 `node scripts/dev.mjs`，由它按 `process.platform` 转发，参数原样透传（`npm run dev -- --no-content` 照旧生效）。
+
+两个调用姿势都是刻意的：
+
+- **Windows 走 `cmd.exe /c dev.bat`**，不是直接 spawn。Node 18 起 `spawn` 不再直接执行 `.bat`/`.cmd`（CVE-2024-27980），而 `shell: true` 会多套一层引号解析；显式 `cmd /c` 两头都避开。
+- **POSIX 走 `bash dev.sh`**，不是 `./dev.sh`。可执行位在 Windows 检出里经常丢（`core.filemode=false` 是常态），显式用解释器调用就跟文件模式无关了。
+
+父进程把 `SIGINT` 换成空处理：Ctrl+C 在终端里本来就投递给整个进程组，子进程自己收得到；父进程不抢着退，免得把还在收尾的 Vite 变成孤儿。
+
+### `dev.sh` 与 `dev.bat` 的差异（只有一处是实质的）
+
+端口清理换成了 `lsof -ti tcp:<port> -sTCP:LISTEN`。第二节那三个 netstat/findstr 细节**在这里全部不存在**：`-sTCP:LISTEN` 已经把 ESTABLISHED / TIME_WAIT 排除在外（对应细节 2），`lsof` 不区分 IPv4/IPv6（对应细节 1），按端口精确匹配也不会误伤 `:51730`（对应细节 3）。
+
+其余一一对应：内容仓自动检测同样是兄弟目录 `../fated_poem_independent_assets/data`、同样尊重已设的 `POEM_CONTENT_DIR`、同样认 `--no-content`；`ping -n 2` 对应 `sleep 1`。
+
+两个 `dev.sh` 独有的注意点：
+
+1. **`set -euo pipefail` 下 `lsof` 无匹配会当场终止脚本** —— `lsof` 找不到监听时退出码是 1，所以那行必须 `|| true`。同理，收尾那句 `[ -n "$X" ] && echo …` 也不能用短路写法（条件为假时整条语句退出码为 1），已改成 `if` 块。
+2. **`lsof` 缺失时不静默失败** —— 走 `command -v lsof` 判断，缺了就打印一行说明并跳过清理；接着 `--strictPort` 会在端口被占时明确报错，而不是让人对着「一闪就崩」猜原因。
+
+### 行尾：`dev.sh` 必须 LF（和 `dev.bat` 正好相反）
+
+根目录 `.gitattributes` 已钉 `dev.sh text eol=lf`。理由与 `scripts/notify.sh` 那条完全相同：shebang 行尾多一个 CR，解释器读到的就是 `/usr/bin/env bash\r` 这个不存在的路径，报 `bad interpreter: ...^M`。**新增任何带 shebang 的脚本都记得往 `.gitattributes` 补一行。**
+
+### 已验证 / 尚未验证
+
+已验证（2026-08-14，Windows 11）：
+
+- `npm run dev` 经分发器走 `dev.bat` 全链路正常：横幅、内容仓自动检测、Vite `HTTP 200`；连开两次实例时第二次打出 `[clean] 杀掉端口 5173 上的进程 PID=…` 并正常接管端口（即分发层没有破坏 `dev.bat` 原有行为）。
+- `dev.sh` 在 Git Bash 里真跑通到 Vite ready：横幅、内容仓自动检测、`lsof` 缺失分支的提示、`npx vite` 启动。
+
+**尚未在真机 macOS 上跑过** —— 具体缺的是 `lsof` 那条端口清理分支（Git Bash 没有 `lsof`，走的是跳过分支）与 macOS 本身的表现。见根目录 `TODO.md` 的 Mac 兼容条目。
+
+### 顺带：别在 Git Bash 里用 `dev.sh` 当日常启动器
+
+上面那次 Git Bash 实跑暴露了一个只在 Windows 上成立的问题：MSYS 把自动检测出的内容仓路径给成了 `/e/Projects/...`，而 `vite.config.ts` 里的 `resolve()` 按 Windows 语义会把它解成 `E:\e\Projects\...`（不存在），于是 `/data` overlay 静默指向空目录。**Windows 上请始终走 `npm run dev`（分发到 `dev.bat`）**；`dev.sh` 只为 macOS / Linux 存在。
