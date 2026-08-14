@@ -21,14 +21,24 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 ├── composables/
 │   ├── useMapViewer.ts              ← OpenSeadragon 生命周期
 │   ├── useMapMarkers.ts             ← 地图标记 CRUD + Overlay 同步
+│   │                                   🔴 overlay 居中**只做一次，归 OSD 的 `Placement.CENTER`**
+│   │                                      （2026-08-13）：`.osd-marker` 根元素（MapPanel.vue 非
+│   │                                      scoped 样式）尺寸恒等于图标、零位移样式 —— 在根元素上
+│   │                                      叠 translate/margin 等于恒定屏幕偏移，缩放时标记就在
+│   │                                      地图上滑走。名字标签绝对定位在根盒子外，**必须
+│   │                                      pointer-events: auto**（none 会让点名牌穿透到画布）。
+│   │                                      钉在 MapPanel.marker-anchor.test.ts（?raw 源码断言）
 │   ├── useMapPolitical.ts           ← [地图 v1] 势力地图舞台的状态与生命周期（懒建 / 按
 │   │                                   `contentHash` 失效 / 卸载释放 / 失败分档）
 │   │                                   🔴 懒 + 释放两头都要（设计 §9 预算：一次构建约 280ms、
 │   │                                      常驻 idBuf 约 35MB）。提到模块级「反正只建一次」
 │   │                                      = 手滑点开一次就常驻 35MB 到本局结束
-│   │                                   🔴 失效键是 `contentHash` 不是 URL —— `provinces.png`
-│   │                                      的地址是常量，换图时内容变地址不变；拿地址当键
-│   │                                      会让新图配着旧像素画，而那不报错
+│   │                                   🔴 失效纪律分两层（2026-08-13 补第二层）：内存缓存按
+│   │                                      `contentHash` 失效（不拿路径当键 —— 换图时内容变
+│   │                                      路径不变，旧像素配新图不报错）；HTTP 请求经
+│   │                                      content-store 的 `provincesRasterUrl(hash)` 挂
+│   │                                      `?v=` 回源 + 取图 fetch `no-cache` 验新兜底 ——
+│   │                                      只堵内存层时，换包重建仍会拿浏览器缓存的旧像素
 │   ├── useHoverPopup.ts             ← 悬停浮层唯一实现（读 settings.hoverDelayMs）
 │   ├── useAssetImage.ts             ← [素材] 渲染缝：(name,type?) → {url,isVideo,row}，世代号守卫 + 引用计数索引
 │   │                                   `options.variant` 指定表情/差分（与 name/type 同属"要解析什么"，

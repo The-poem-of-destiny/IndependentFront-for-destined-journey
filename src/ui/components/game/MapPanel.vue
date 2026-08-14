@@ -1506,8 +1506,10 @@ onBeforeUnmount(() => {
   transform: scale(1.2);
 }
 .osd-marker-icon {
-  width: 18px;
-  height: 18px;
+  /* 尺寸跟根元素走（单一来源在 .osd-marker 上）—— 图标与根不同尺寸时
+     OSD 居中的是根盒子而不是图标，每个标记都会差出半个差值 */
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1515,7 +1517,6 @@ onBeforeUnmount(() => {
   color: #ffcc66;
   text-shadow: 0 0 6px rgba(0, 0, 0, 0.35);
   transition: transform 100ms;
-  flex-shrink: 0;
 }
 .osd-marker-label {
   position: absolute;
@@ -1530,7 +1531,12 @@ onBeforeUnmount(() => {
   font-size: 10px;
   white-space: nowrap;
   color: var(--theme-text-primary, #eee);
-  pointer-events: none;
+  /* 🔴 必须可命中（auto）：名牌已脱离布局流、在 18×18 根盒子**外面**，
+     pointer-events: none 会让点名牌的点击穿透到 OSD 画布 —— 浏览模式点名牌
+     变成取消选中，加标记模式点名牌会在原标记上再落一个新标记。
+     设成 auto 后点击落在名牌上、冒泡回根元素，MouseTracker 与
+     `closest('.osd-marker')` 两条路都照常命中（= 名牌还在盒子里时的旧行为）。 */
+  pointer-events: auto;
   user-select: none;
   max-width: 120px;
   overflow: hidden;
