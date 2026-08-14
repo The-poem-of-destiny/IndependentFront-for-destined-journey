@@ -76,6 +76,9 @@ node -e "const fs=require('fs');const f=process.argv[1];const s=fs.readFileSync(
 
 ## 文档导航
 
+**发布前待办清单在根目录 [`TODO.md`](TODO.md)**（Mac 兼容 / 正式打包 / 配乐 / 远程素材 /
+主题打磨 / 多分辨率 / 移动端）。做完一条就把它搬进 `docs/CHANGELOG.md`，别在两处并存。
+
 详细设计文档统一在 `docs/` 目录下：
 
 ```bash
