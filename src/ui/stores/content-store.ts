@@ -451,14 +451,30 @@ export const CONTENT_REGISTRY_SOURCES: ReadonlyArray<{
  *
  * 🔴 **content pack 替换不了它**：pack 是一份 JSON，装不下 PNG 字节。真实地图的
  * `provinces.png` 与 `map-pack.json` 同住内容树 `data/content/`（私有内容仓，经
- * `POEM_CONTENT_DIR` 开发覆盖 / 部署时铺进 `public/`），所以这里是**常量**而不是从包里读出的
- * 路径 —— 换图时它的内容变、URL 不变。渲染缓存的失效键因此必须取包的 `contentHash`
- * （§3.4-3），拿这个 URL 当键会让新图配着旧像素画。
+ * `POEM_CONTENT_DIR` 开发覆盖 / 部署时铺进 `public/`），所以路径是**常量**而不是从包里
+ * 读出的 —— 换图时它的内容变、路径不变。由此有两层失效纪律（2026-08-13 补第二层）：
+ * ① 渲染缓存（内存）的失效键必须取包的 `contentHash`（§3.4-3），拿路径当键会让新图配着
+ *   旧像素画；② **请求 URL 必须经 `provincesRasterUrl(pack.contentHash)` 挂上 `?v=` 参数**，
+ *   否则换包后的重建可能拿浏览器 HTTP 缓存里的旧像素配新 pack —— 同一个坑在 HTTP 层的分身
+ *   （dev 中间件发 no-cache 不受影响，生产/静态托管会中）。
  *
  * 🔴 公开仓的占位包**没有**这张图（占位是十几块合成地块，没有像素面）：取它会 404。
  * 调用方按「取不到 → 不画政治层」处置，与 `resolveMapSources` 没图源时返回空数组同一口径。
  */
 export const MAP_PROVINCES_URL = '/data/content/provinces.png';
+
+/**
+ * `provinces.png` 的**唯一**取图 URL 出口：包变 → 地址变 → 必然回源；包没变照旧命中缓存。
+ *
+ * 空串 / `'placeholder'`（占位包 `map-pack.json` 里的字面哨兵）不挂参：占位包根本没有
+ * 这张图（404 是常态），两份坏包共用一个键在这里无害。裸常量 `MAP_PROVINCES_URL` 只用于
+ * 文档与测试 —— 生产取图一律走本函数，绕开它就等于把 HTTP 缓存那半个坑挖回来。
+ */
+export function provincesRasterUrl(contentHash: string): string {
+  return contentHash !== '' && contentHash !== 'placeholder'
+    ? `${MAP_PROVINCES_URL}?v=${encodeURIComponent(contentHash)}`
+    : MAP_PROVINCES_URL;
+}
 
 /** 首轮占位加载的 memo（幂等闸；`ensureContentRegistryLoaded` 的全部状态） */
 let registryLoadPromise: Promise<void> | null = null;
@@ -482,7 +498,10 @@ async function fetchRegistryFace(
 ): Promise<RegistryFaceFetch> {
   const source = `content-registry:${face}`;
   try {
-    const res = await fetch(url);
+    // 🔴 no-cache（= 必回源验新，命中 304 时零流量）：这些面全是「常量 URL、内容随包换」，
+    //    其中 map-pack.json 还供给 provinces.png 取图的 `?v=` —— 这一面被缓存住，挂出去的
+    //    就是**旧** hash，下游的防缓存等于没做。八面 JSON 都很小，验新成本可忽略。
+    const res = await fetch(url, { cache: 'no-cache' });
     if (!res.ok) {
       reportEngineContentFetch({
         source,

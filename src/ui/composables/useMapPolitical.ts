@@ -11,9 +11,11 @@
  *    整份丢掉。把它提到模块级「反正只建一次」是很诱人的，但那意味着玩家哪怕只手滑点开一次
  *    势力地图，之后整局游戏都常驻 35MB —— 而这一层的数据在关掉之后毫无用处。
  *
- * 🔴 **失效键是 `contentHash`**（设计 §3.4-3），不是 URL：`provinces.png` 的地址是常量
- *    （`MAP_PROVINCES_URL`），换图时它的**内容**变、地址不变。拿地址当键会让新图配着旧像素画，
- *    而那不报错 —— 只是每一块地都指着隔壁那一块。附带按包对象同一性也比一次
+ * 🔴 **失效键是 `contentHash`**（设计 §3.4-3），不是 URL：`provinces.png` 的**路径**是常量，
+ *    换图时它的**内容**变、路径不变。拿路径当键会让新图配着旧像素画，而那不报错 ——
+ *    只是每一块地都指着隔壁那一块。这条纪律有两层：内存缓存按 `contentHash` 失效（本文件），
+ *    HTTP 请求经 `provincesRasterUrl(hash)` 挂 `?v=` 参数回源（content-store，2026-08-13）——
+ *    只堵内存那层时，换包重建仍可能拿浏览器缓存的旧像素配新 pack。附带按包对象同一性也比一次
  *    （`contentHash` 允许是空串 / `'placeholder'`，两份不同的坏包会撞成同一个键）。
  *
  * 🔴 **失败一律不抛**：这张图在公开仓根本不存在（占位包无像素面）。势力地图退化成友好空态，
@@ -34,7 +36,7 @@ import {
   type ProvinceRaster,
 } from '../lib/map-political';
 import { loadProvinceRaster } from '../lib/map-provinces-raster';
-import { MAP_PROVINCES_URL } from '../stores/content-store';
+import { provincesRasterUrl } from '../stores/content-store';
 
 /** `empty` 与 `error` 都是「画不出来」，但措辞与可操作性不同（缺内容 vs 环境/数据坏了） */
 export type MapPoliticalStatus = 'idle' | 'building' | 'ready' | 'empty' | 'error';
@@ -68,6 +70,8 @@ export function useMapPolitical() {
 
   let controller: AbortController | null = null;
   let building: Promise<void> | null = null;
+  /** 在建的是**哪一份包**（构建复用只对同一份包成立；换包中途要弃旧起新） */
+  let buildingPack: MapPack | null = null;
 
   /**
    * 建（或复用）政治层。**幂等**：并发调用共享同一个 promise，已建好且包没变时立刻返回。
@@ -91,7 +95,9 @@ export function useMapPolitical() {
       return;
     }
 
-    if (building !== null) return building;
+    // 🔴 在建复用只对**同一份包**成立：换包中途返回旧包的构建，等到的是一版马上要作废的
+    //    舞台（280ms + 35MB 白干一轮），随后还得再建一次。包变了就弃旧起新。
+    if (building !== null && buildingPack === pack) return building;
 
     controller?.abort();
     controller = new AbortController();
@@ -99,10 +105,14 @@ export function useMapPolitical() {
     status.value = 'building';
     message.value = '';
 
-    building = (async () => {
+    buildingPack = pack;
+    const run = (async () => {
       const startedAt = Date.now();
       const lookup = buildTileColorLookup(pack.tiles);
-      const result = await loadProvinceRaster(MAP_PROVINCES_URL, lookup, signal);
+      // 🔴 取图必须走 `provincesRasterUrl`（content-store）：内存缓存按 contentHash 失效
+      //    只堵了一半，HTTP 缓存是同一个坑的第二处 —— 换包后的重建会拿浏览器缓存里的
+      //    **旧像素**配新 pack 画，整层错位且不报错。`?v=<hash>` 让「包变 → 地址变 → 必然回源」。
+      const result = await loadProvinceRaster(provincesRasterUrl(pack.contentHash), lookup, signal);
 
       if (signal.aborted) return;
 
@@ -137,18 +147,27 @@ export function useMapPolitical() {
         buildMs: Date.now() - startedAt,
       };
       status.value = 'ready';
-    })()
+    })();
+
+    const tracked: Promise<void> = run
       .catch((err: unknown) => {
         // 到这里只可能是意料之外的（loadProvinceRaster 自己永不抛）——照样不许穿出去
+        if (signal.aborted) return;
         stage.value = null;
         status.value = 'error';
         message.value = `势力地图构建失败：${err instanceof Error ? err.message : String(err)}`;
       })
       .finally(() => {
-        building = null;
+        // 🔴 只清**自己**：换包弃旧起新后，旧构建的 finally 晚于新构建的登记到来，
+        //    无条件置 null 会把新构建的在建标记抹掉，下一次调用就会再起第三份
+        if (building === tracked) {
+          building = null;
+          buildingPack = null;
+        }
       });
+    building = tracked;
 
-    return building;
+    return tracked;
   }
 
   /** 丢掉全部大缓冲（Modal 关闭 = 本组件卸载）。可重入。 */

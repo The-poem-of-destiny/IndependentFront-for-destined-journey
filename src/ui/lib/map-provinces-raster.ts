@@ -111,7 +111,10 @@ export async function loadProvinceRaster(
 
   let blob: Blob;
   try {
-    const response = await fetch(url, { signal });
+    // 🔴 no-cache（必回源验新，304 时零字节）是 `?v=<contentHash>` 之外的第二道闸：
+    //    hash 只盖 pack JSON（编译器对规范形 JSON 求哈希），一次只动像素不动数据的重涂、
+    //    或者一份漏了 contentHash 的手工包，URL 都不会变 —— 那时全靠这里的条件请求兜底。
+    const response = await fetch(url, { signal, cache: 'no-cache' });
     if (!response.ok) {
       return { ok: false, reason: 'missing', detail: `HTTP ${response.status}` };
     }
