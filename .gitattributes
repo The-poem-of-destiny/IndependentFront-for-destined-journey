@@ -25,3 +25,4 @@
 scripts/knip-ratchet.mjs text eol=lf
 scripts/build-placeholder-hashes.mjs text eol=lf
 scripts/notify.sh text eol=lf
+dev.sh text eol=lf

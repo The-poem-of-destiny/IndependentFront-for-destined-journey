@@ -15,7 +15,7 @@
     "docs"
   ],
   "scripts": {
-    "dev": "dev.bat",
+    "dev": "node scripts/dev.mjs",
     "build": "vite build",
     "build:engine": "tsc",
     "typecheck": "tsc --noEmit",
