@@ -170,13 +170,6 @@
   --lift:
     -4px -4px 10px rgba(var(--thread-light), 0.7), 6px 10px 26px rgba(var(--thread-shade), 0.2);
 
-  /* The weave itself: two thread directions at 45°, one catching light and one
-     in shadow. Alpha is deliberately near the visibility floor — at 1440px this
-     should read as "the surface has a grain", never as a visible pattern. */
-  --brocade:
-    repeating-linear-gradient(45deg, rgba(var(--thread-light), 0.5) 0 1px, transparent 1px 4px),
-    repeating-linear-gradient(-45deg, rgba(var(--thread-shade), 0.022) 0 1px, transparent 1px 4px);
-
   --theme-shadow-sm: 0 1px 3px rgba(48, 45, 39, 0.07);
   --theme-shadow-md: 0 2px 8px rgba(48, 45, 39, 0.1);
   --theme-shadow-lg: 0 4px 16px rgba(48, 45, 39, 0.15);
@@ -187,59 +180,44 @@
    CLOTH — the ground everything is pressed into
    =========================================================================== */
 
-/* The shipped ivory material lives in `styles/integrated-game-surfaces.css`: a
-   full-viewport silk chassis raster with panels at 5.5% opacity floating over
-   it — look-4's mist-silk thesis, built. It has to come off here, and not
-   because it is bad. Translucent panels over a photographic plate mean the
-   "cloth" is a window, and a window cannot be the sheet a relief is pressed
-   into. Same incompatibility as the porcelain variant, cheaper to pay: the
-   plate is a generated raster rather than authored artwork, and the CSS weave
-   below does its job. `main.ts` imports this file after that sheet so these
-   resets land; see the note there. */
+/* PURE. There is no pattern in this theme — no weave texture, no moonlight
+   window, no raster. Every surface is a flat field of colour, and the only
+   thing that produces form anywhere in the interface is light.
+
+   That is the whole point of the exercise, and it is also the hardest version
+   to make work: a pattern will hide a shadow that is too weak, and with the
+   pattern gone there is nothing left to hide behind. Anything that reads at all
+   reads because the relief is doing real work.
+
+   Two things had to come off to get here:
+
+   1. The shipped ivory material in `styles/integrated-game-surfaces.css` — a
+      full-viewport silk chassis raster with panels at 5.5% opacity over it,
+      look-4's mist-silk thesis, built. Translucent panels over a photographic
+      plate mean the "cloth" is a window, and a window cannot be the sheet a
+      relief is pressed into. `main.ts` imports this file after that sheet so
+      these resets land; see the note there.
+   2. This file's own first draft, which had a 45° jacquard weave on the cloth
+      and a soft moon behind the empty state. Both were defensible as 云锦, and
+      neither is neumorphism. */
 :root[data-theme='ivory'] body .game-page-layout {
   position: relative;
   isolation: isolate;
   color: var(--theme-text-primary);
   background-color: var(--theme-window-bg);
-  background-image: var(--brocade);
+  background-image: none;
   box-shadow: none;
 }
 
-/* The moonlight window behind the narrative field. The reference asks for
-   "a quiet circular mist window ... without an illustration", so it is one
-   soft ring and one broad glow — decoration behind content, pointer-inert. */
+/* The reading field keeps a slightly lighter fill than the frame around it.
+   This is the one tonal step in the theme that is not made of light, and it is
+   deliberate: the narrative is the protagonist and needs to be findable before
+   any relief is read. Whether it should instead be a shallow recess is the open
+   question in the panel discussion. */
 :root[data-theme='ivory'] body .game-page-layout .chat-flow {
-  position: relative;
-  isolation: isolate;
   background-color: var(--theme-content-bg);
-  background-image: var(--brocade);
-}
-
-:root[data-theme='ivory'] body .game-page-layout .chat-flow::before {
-  content: '';
-  position: absolute;
-  z-index: 0;
-  top: 50%;
-  left: 50%;
-  width: min(46vh, 34vw);
-  aspect-ratio: 1;
-  transform: translate(-50%, -58%);
-  border-radius: 50%;
-  pointer-events: none;
-  background:
-    radial-gradient(
-      circle,
-      transparent 0 61%,
-      rgba(var(--thread-light), 0.85) 62% 63.4%,
-      transparent 64%
-    ),
-    radial-gradient(circle, rgba(var(--thread-light), 0.5) 0 44%, transparent 68%);
-  box-shadow: inset 0 0 60px rgba(var(--thread-shade), 0.035);
-}
-
-:root[data-theme='ivory'] body .game-page-layout .chat-flow > * {
-  position: relative;
-  z-index: 1;
+  background-image: none;
+  box-shadow: none;
 }
 
 /* The narrative field is the protagonist, so it is the one region with no
@@ -258,14 +236,21 @@
 
 /* Structural panels are the same bolt, seamed with one thread. They are flat:
    if the panels themselves had relief there would be nothing left for the
-   controls to be raised *from*. */
+   controls to be raised *from*.
+
+   `background-image: none` is load-bearing, not tidiness. The integrated sheet
+   washes four of these five panels with a 105° silk sheen gradient; setting
+   only background-color leaves that sheen on top, and a directional gradient
+   across a panel competes with the one light source the whole theme is built
+   on. It survived the first purity audit because that audit sampled the rail
+   alone. */
 :root[data-theme='ivory'] body .game-page-layout .top-bar,
 :root[data-theme='ivory'] body .game-page-layout .side-toolbar,
 :root[data-theme='ivory'] body .game-page-layout .scene-panel,
 :root[data-theme='ivory'] body .game-page-layout .status-hud,
 :root[data-theme='ivory'] body .game-page-layout .input-bar {
   background-color: var(--silk);
-  background-image: var(--brocade);
+  background-image: none;
   border-color: var(--seam);
   box-shadow: none;
   backdrop-filter: none;
@@ -680,7 +665,6 @@
 :root[data-theme='ivory'] body .buff-pop,
 :root[data-theme='ivory'] body .system-notif {
   background-color: var(--silk-raised);
-  background-image: var(--brocade);
   border: 1px solid var(--rim);
   border-radius: var(--theme-radius-lg);
   box-shadow: var(--lift);
@@ -736,23 +720,12 @@
 
 /* The weave and the moon are the only translucency in the theme; relief is
    opaque by construction, so this mode costs almost nothing here. */
-@media (prefers-reduced-transparency: reduce) {
-  :root[data-theme='ivory'] body .game-page-layout,
-  :root[data-theme='ivory'] body .game-page-layout .top-bar,
-  :root[data-theme='ivory'] body .game-page-layout .side-toolbar,
-  :root[data-theme='ivory'] body .game-page-layout .scene-panel,
-  :root[data-theme='ivory'] body .game-page-layout .status-hud,
-  :root[data-theme='ivory'] body .game-page-layout .input-bar,
-  :root[data-theme='ivory'] body .modal-content,
-  :root[data-theme='ivory'] body .options-popup,
-  :root[data-theme='ivory'] body .ctx-menu {
-    background-image: none;
-  }
-
-  :root[data-theme='ivory'] body .game-page-layout .chat-flow::before {
-    display: none;
-  }
-}
+/* No `prefers-reduced-transparency` block, and that is a result rather than an
+   omission: with the weave and the moon gone there is no see-through surface
+   left anywhere in the theme. Every panel, control and floating layer is a
+   solid fill, so the reduced-transparency rendering and the default rendering
+   are already the same pixels. The block this replaces existed only to strip
+   the two patterns. */
 
 @media (prefers-reduced-motion: reduce) {
   :root[data-theme='ivory'] body .game-page-layout .tool-btn,
