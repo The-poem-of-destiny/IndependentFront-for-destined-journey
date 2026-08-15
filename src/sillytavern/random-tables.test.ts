@@ -178,6 +178,55 @@ describe('randomName', () => {
   });
 });
 
+// ========== randomName 防重名（avoid，2026-08-15） ==========
+// 真机教训：同一存档两个无名男性人类 NPC 先后经 random_name 抽中同一个
+// 「奥斯瓦尔德」——池是均匀随机的，但引擎没有任何防撞护栏，AI 也照单全收。
+
+describe('randomName avoid（防重名）', () => {
+  it('avoid 含给定名 → 绝不再抽出该名（含带姓变体）', () => {
+    // 已有角色「A1·S1」——给定名 A1 被封；A1 与 A1·S2 都是撞车形态
+    for (let i = 0; i < 60; i++) {
+      const given = randomName('alpha', '男', FIXTURE, ['A1·S1']).split('·')[0];
+      expect(given).not.toBe('A1');
+    }
+  });
+
+  it('avoid 的比较粒度是给定名：已有「A2·S1」封 A2，不封姓 S1', () => {
+    for (let i = 0; i < 60; i++) {
+      const [given, surname] = randomName('alpha', '男', FIXTURE, ['A2·S1']).split('·');
+      expect(given).not.toBe('A2');
+      // 姓氏不参与比较：A1·S1（与已有角色同姓）是合法结果
+      if (surname !== undefined) expect(surname === 'S1' || surname === 'S2').toBe(true);
+    }
+  });
+
+  it('avoid 封掉多个名 → 只从剩余名里抽', () => {
+    for (let i = 0; i < 60; i++) {
+      const given = randomName('alpha', '男', FIXTURE, ['A1', 'A2']).split('·')[0];
+      expect(given).toBe('A3');
+    }
+  });
+
+  it('avoid 全覆盖名池 → 仍返回池内名（空串会打断生成链）', () => {
+    for (let i = 0; i < 30; i++) {
+      const name = randomName('alpha', '男', FIXTURE, ['A1', 'A2', 'A3']);
+      expect(FIXTURE.namePools.alpha.male).toContain(name.split('·')[0]);
+    }
+  });
+
+  it('avoid 含空串/空白 → 被忽略，不影响抽样', () => {
+    const given = randomName('alpha', '男', FIXTURE, ['', '  ']).split('·')[0];
+    expect(FIXTURE.namePools.alpha.male).toContain(given);
+  });
+
+  it('avoid 与池无交集 → 行为与不传时一致（池内取值）', () => {
+    for (let i = 0; i < 40; i++) {
+      const given = randomName('alpha', '男', FIXTURE, ['完全无关的名字']).split('·')[0];
+      expect(FIXTURE.namePools.alpha.male).toContain(given);
+    }
+  });
+});
+
 // ========== randomHairColor / randomEyeColor ==========
 
 describe('randomHairColor', () => {

@@ -64,7 +64,7 @@ function brandingWorldLabel(): string {
  * `random_name` 的工具描述（**唯一**一处作者面文案；中性基线与品牌版共用它）。
  */
 function randomNameToolDescription(worldLabel: string): string {
-  return `随机生成一个符合${worldLabel}世界观的角色名称。根据种族和性别从名称池中随机选取。`;
+  return `随机生成一个符合${worldLabel}世界观的角色名称。根据种族和性别从名称池中随机选取，自动避开与已有角色重名。`;
 }
 
 /**
@@ -809,7 +809,10 @@ export async function executeToolCall(
     case 'random_name': {
       const race = args.race ?? '人类';
       const gender = args.gender ?? '男';
-      const name = randomName(race, gender);
+      // 防重名（2026-08-15）：把存档已有角色名喂给抽样器。比较「·」前的给定名——
+      // 已有「奥斯瓦尔德·狼牙」时不再抽出第二个「奥斯瓦尔德」（真机撞名教训）。
+      const avoid = context.characters.map((c) => c.name).filter(Boolean);
+      const name = randomName(race, gender, undefined, avoid);
       return { name, race, gender };
     }
     case 'random_hair_color': {

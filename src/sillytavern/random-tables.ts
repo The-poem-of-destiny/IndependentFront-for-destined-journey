@@ -194,16 +194,32 @@ function resolveColorPool(
  * 50% 概率带姓氏；🔴 该种族**没有姓氏池**（如世界书里明确「无姓氏」的种族）时
  * 只返回名，不再拼一个空姓——原实现在这里会产出 `名·undefined`。
  * 名字池为空 → 返回空串（确定性兜底）。
+ *
+ * @param avoid 已有角色名单（防重名，2026-08-15）。比较粒度是「·」前的**给定名**——
+ *   已有 `奥斯瓦尔德·狼牙` 时，`奥斯瓦尔德` 与 `奥斯瓦尔德·X` 都算撞车，直接从
+ *   候选池里剔除后再抽（真机教训：同一存档抽中两个「奥斯瓦尔德」）。候选池被
+ *   avoid 全覆盖（池小或同名 NPC 成批）时退回原名池——空名比重名更坏
+ *   （`<char_result><name>` 为空会打断整条生成链）。avoid 为空时行为与旧版逐字节一致。
  */
 export function randomName(
   race: string,
   gender: '男' | '女' = '男',
   content: NamePoolsContent = getNamePoolsContent(),
+  avoid: readonly string[] = [],
 ): string {
   const pool = resolveNamePool(race, content);
   const givenNames = gender === '男' ? pool?.male : pool?.female;
-  const given = pick(givenNames);
-  if (given === undefined) return '';
+  if (!givenNames || givenNames.length === 0) return '';
+
+  const avoidGiven = new Set(
+    avoid.filter(Boolean).map((n) => n.split('·')[0].trim().toLowerCase()),
+  );
+  const candidates = avoidGiven.size
+    ? givenNames.filter((g) => !avoidGiven.has(g.toLowerCase()))
+    : givenNames;
+  // 候选池被 avoid 全覆盖 → 退回原名池（好过空串打断生成链）
+  const source = candidates.length > 0 ? candidates : givenNames;
+  const given = source[Math.floor(Math.random() * source.length)];
 
   // 50% 概率有姓氏（中层阶级）
   if (Math.random() < 0.5) {
