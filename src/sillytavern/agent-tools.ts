@@ -26,6 +26,7 @@ import { normalizeItemType } from './field-enums';
 import { buildCraftRequest, craftCheckDiceCount, craftRequestFingerprint } from './craft-request';
 import {
   randomName,
+  randomNameSeed,
   randomHairColor,
   randomEyeColor,
   randomPersonality,
@@ -273,6 +274,21 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
         properties: {
           race: { type: 'string', description: '种族，如 人类/精灵/矮人/翼民/兽族/血族/巨龙' },
           gender: { type: 'string', enum: ['男', '女'], description: '性别' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'random_name_seed',
+      description:
+        '生成 IPA 音素种子（按种族的发音风格加权抽样，如 "t/a/ʃ/i/n/ɑ"）。种子是取名灵感，不是成品名——按命名规则把音素组合想象成发音，再转写成独特的中文名。适合为新 NPC 起多样、不重复的名字；快速取名可直接用 random_name。',
+      parameters: {
+        type: 'object',
+        properties: {
+          race: { type: 'string', description: '种族，如 人类/精灵/矮人/翼民/兽族/血族/巨龙' },
+          count: { type: 'integer', description: '生成几组候选种子（1-3，缺省 1）' },
         },
       },
     },
@@ -621,6 +637,7 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'roll_d100',
     'roll_dice',
     'random_name',
+    'random_name_seed',
     'random_hair_color',
     'random_eye_color',
     'random_personality',
@@ -814,6 +831,21 @@ export async function executeToolCall(
       const avoid = context.characters.map((c) => c.name).filter(Boolean);
       const name = randomName(race, gender, undefined, avoid);
       return { name, race, gender };
+    }
+    case 'random_name_seed': {
+      const race = args.race ?? '人类';
+      const count = Math.min(Math.max(Math.floor(Number(args.count) || 1), 1), 3);
+      const seeds = randomNameSeed(race, count);
+      // 空数组 = 该种族没有种子配置（内容面缺席）——提示 AI 走 random_name，别让
+      // 它对着空结果自行编音素（那是绕过 Code 随机，又回到模式坍缩）
+      if (seeds.length === 0) {
+        return {
+          race,
+          seeds: [],
+          hint: '该种族暂无音素种子配置，请改用 random_name 取名',
+        };
+      }
+      return { race, seeds };
     }
     case 'random_hair_color': {
       const race = args.race ?? '人类';

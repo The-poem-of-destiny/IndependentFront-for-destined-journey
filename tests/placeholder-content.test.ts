@@ -5,7 +5,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { parseCatalogData, isCatalogPopulated } from '../src/sillytavern/start-catalog-mechanics';
 import { coerceLocationNodes, getChildren, getNeighbors } from '../src/sillytavern/location-db';
 import { getBloodlineSet, calcBloodlineModifiers } from '../src/sillytavern/bloodlines';
-import { getNamePoolsContent, randomName, randomHairColor } from '../src/sillytavern/random-tables';
+import {
+  getNamePoolsContent,
+  randomName,
+  randomNameSeed,
+  randomHairColor,
+} from '../src/sillytavern/random-tables';
 import { resolveBranding, NEUTRAL_BRANDING } from '../src/ui/branding-defaults';
 import { parseImageDialects, FALLBACK_IMAGE_DIALECT } from '../src/sillytavern/image-dialect';
 import {
@@ -156,6 +161,18 @@ describe('占位内容 · 注册表八面能被生产解析器吃下', () => {
     expect(randomName('人类', '男').length).toBeGreaterThan(0);
     expect(randomName('古龙', '女').length).toBeGreaterThan(0);
     expect(randomHairColor('古龙').length).toBeGreaterThan(0);
+  });
+
+  it('seedProfiles：占位 6 种族都能产音素种子（random_name_seed 不空转）', () => {
+    const content = getNamePoolsContent();
+    expect(Object.keys(content.seedProfiles).length).toBeGreaterThanOrEqual(6);
+    for (const race of Object.keys(content.namePools)) {
+      const seeds = randomNameSeed(race, 1, content);
+      expect(seeds, `种族「${race}」应能产种子`).toHaveLength(1);
+      expect(seeds[0].split('/').length).toBeGreaterThanOrEqual(2);
+    }
+    // 没有专属 profile 的种族靠 defaultRace 回落，同样出得了种子
+    expect(randomNameSeed('古龙', 1, content)).toHaveLength(1);
   });
 
   it('branding：解析后不回落中性默认值，且 mapSources 为空（D23 空态）', () => {

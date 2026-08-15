@@ -796,3 +796,70 @@ describe('random_name 工具防重名', () => {
     expect(r.name).toBe('丙一'); // 抽尽保底：撞名好过空名
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// random_name_seed 工具（IPA 音素种子，2026-08-15）
+// ═══════════════════════════════════════════════════════════
+
+describe('random_name_seed 工具', () => {
+  afterEach(() => {
+    setContentRegistry({ ...getContentRegistry(), namePools: undefined });
+  });
+
+  it('有 profile 的种族 → 返回 count 组种子（工具层钳到 1-3）', async () => {
+    setContentRegistry({
+      ...getContentRegistry(),
+      namePools: {
+        namePools: { 人类: { male: ['甲'], female: [], surnames: [] } },
+        seedProfiles: {
+          人类: {
+            weights: { P: 45, S: 20, D: 25, X: 2, V: 18 },
+            force: ['V'],
+            count: [3, 4],
+            mods: {
+              startPrefer: ['P', 'S'],
+              endPrefer: ['V', 'D'],
+              maxConsecutiveConsonants: 2,
+              vowelTone: 'neutral',
+              mutationChance: 0.12,
+            },
+          },
+        },
+        hairColors: {},
+        eyeColors: {},
+        personality: {},
+      },
+    });
+    const r = (await executeToolCall(
+      'random_name_seed',
+      { race: '人类', count: 99 },
+      makeCtx(),
+    )) as Record<string, unknown>;
+    expect(r.seeds).toHaveLength(3); // 99 钳到 3
+    for (const seed of r.seeds as string[]) {
+      expect(seed.split('/').length).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('无 profile → 空数组 + 提示改用 random_name（别让 AI 对着空结果自编音素）', async () => {
+    setContentRegistry({
+      ...getContentRegistry(),
+      namePools: {
+        namePools: {},
+        hairColors: {},
+        eyeColors: {},
+        personality: {},
+      },
+    });
+    const r = (await executeToolCall('random_name_seed', { race: '巨龙' }, makeCtx())) as Record<
+      string,
+      unknown
+    >;
+    expect(r.seeds).toEqual([]);
+    expect(String(r.hint)).toContain('random_name');
+  });
+
+  it('random_name_seed 在 char_gen 工具白名单里', () => {
+    expect(getToolsForAgent('char_gen').map((t) => t.function.name)).toContain('random_name_seed');
+  });
+});
