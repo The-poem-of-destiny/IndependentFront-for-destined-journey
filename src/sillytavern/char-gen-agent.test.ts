@@ -807,7 +807,9 @@ async function executeToolCallForTest(
   }
 
   // get_character 不传 characterId → 返回空字符列表（天然降级语义）
-  // 其余所有工具（roll_d20, random_name, roll_attributes, etc.）→ 纯函数，context 不读取
+  // 其余所有工具（roll_d20, random_name, roll_attributes, etc.）→ 纯函数调用。
+  // random_name 自 2026-08-15 起读 context.characters 做防重名，但此处 characters
+  // 为空数组 → avoid 为空 → 行为与纯函数一致
   return executeToolCall(functionName, args, {
     characters: [],
     variables: {},

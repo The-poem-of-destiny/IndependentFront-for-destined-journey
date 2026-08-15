@@ -704,7 +704,7 @@ describe('random_name 工具描述的品牌面（D26）', () => {
     const def = getToolDefinition('random_name');
     expect(def).toBeDefined();
     expect(def!.function.description).toBe(
-      '随机生成一个符合当前世界观的角色名称。根据种族和性别从名称池中随机选取。',
+      '随机生成一个符合当前世界观的角色名称。根据种族和性别从名称池中随机选取，自动避开与已有角色重名。',
     );
     expect(def!.function.description).not.toContain('《');
   });
@@ -712,7 +712,7 @@ describe('random_name 工具描述的品牌面（D26）', () => {
   it('注册表有 branding.appTitle → 描述换成带作品名的版本', () => {
     setContentRegistry({ ...getContentRegistry(), branding: { appTitle: '某某作品' } });
     expect(getToolDefinition('random_name')!.function.description).toBe(
-      '随机生成一个符合《某某作品》世界观的角色名称。根据种族和性别从名称池中随机选取。',
+      '随机生成一个符合《某某作品》世界观的角色名称。根据种族和性别从名称池中随机选取，自动避开与已有角色重名。',
     );
   });
 
@@ -736,5 +736,63 @@ describe('random_name 工具描述的品牌面（D26）', () => {
     const before = getToolDefinition('roll_d20')!.function.description;
     setContentRegistry({ ...getContentRegistry(), branding: undefined });
     expect(getToolDefinition('roll_d20')!.function.description).toBe(before);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// random_name 防重名（2026-08-15）
+// 真机教训（debug-7c342726）：同一存档先后两个无名男性人类 NPC 都抽中
+// 「奥斯瓦尔德」——工具层从此把 context.characters 的名字喂给抽样器。
+// ═══════════════════════════════════════════════════════════
+
+describe('random_name 工具防重名', () => {
+  afterEach(() => {
+    setContentRegistry({ ...getContentRegistry(), namePools: undefined });
+  });
+
+  it('已有角色封掉池中其余名 → 必然抽出仅剩的那个名', async () => {
+    setContentRegistry({
+      ...getContentRegistry(),
+      namePools: {
+        namePools: {
+          人类: {
+            male: ['甲一', '甲二', '甲三'],
+            female: ['乙一'],
+            surnames: [],
+          },
+        },
+        hairColors: {},
+        eyeColors: {},
+        personality: {},
+      },
+    });
+    // 已有角色封掉 甲一 / 甲二（其中一个是 名·姓 形态，验证给定名粒度比较）
+    const ctx = makeCtx([
+      makeCharacter({ name: '甲一' }),
+      makeCharacter({ name: '甲二·铁锤', type: 'npc' }),
+    ]);
+    const r = (await executeToolCall('random_name', { race: '人类', gender: '男' }, ctx)) as Record<
+      string,
+      unknown
+    >;
+    expect(r.name).toBe('甲三');
+  });
+
+  it('avoid 全覆盖名池 → 仍返回池内名而非空串', async () => {
+    setContentRegistry({
+      ...getContentRegistry(),
+      namePools: {
+        namePools: { 人类: { male: ['丙一'], female: [], surnames: [] } },
+        hairColors: {},
+        eyeColors: {},
+        personality: {},
+      },
+    });
+    const ctx = makeCtx([makeCharacter({ name: '丙一' })]);
+    const r = (await executeToolCall('random_name', { race: '人类', gender: '男' }, ctx)) as Record<
+      string,
+      unknown
+    >;
+    expect(r.name).toBe('丙一'); // 抽尽保底：撞名好过空名
   });
 });
