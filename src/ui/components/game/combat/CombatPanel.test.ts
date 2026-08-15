@@ -335,9 +335,7 @@ describe('CombatPanel 结算确认态（2026-08-13 需求 D）', () => {
       outcome: 'ally_win',
       totalExp: 2,
       totalFp: 5,
-      loot: [
-        { name: '断爪', description: '魔物爪甲', quantity: 2, quality: '普通' },
-      ],
+      loot: [{ name: '断爪', description: '魔物爪甲', quantity: 2, quality: '普通' }],
       rounds: 2,
       summaryText: '奥利雅思以灼热射线贯穿魔物咽喉，获胜。',
     };
