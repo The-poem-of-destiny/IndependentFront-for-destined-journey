@@ -9,6 +9,21 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 战斗结算可见化 + dispatcher 战后重触发修复 ｜ ✅ 已修（2026-08-13）
+
+来自 `fated-poem-debug-7c342726-1786779529164.json` 主人实战复现的三项问题（前两项为同一轮 debug 链的连环发现）：
+
+1. **战斗打完 HUD 血量/经验不动（满血假象）** — 战斗终局的 `commitChatState` 只写 Dexie，而战斗链路（`store.startCombat → coordinator.start → startCombatV3`）不经过 `run()` 的 finally —— store 从不回读。导出快照（`refreshFromDb` 后）里 HP 1634→1329、EXP +2 其实都落库了，只是 UI 一直显示开战前的旧值。修复：`startCombatV3` 终局后回读一次（含 COR-02 存档切走守卫）。
+2. **战后收尾轮又触发一场一模一样的战斗** — dispatcher 的 reasoning 白纸黑字：它看到任务详情残留的「对峙、一触即发」（战斗前写的过时文本）+ 正文里的战斗痕迹（尸体/焦痕/伤口），按「战斗已发生必须发 combat_trigger」规则判定要重演。三层修复：
+   - 引擎：`AgentContext.recentCombat`（pipeline 终局记录，内存级；aborted 不记）+ `{{RECENT_COMBAT}}` 占位符渲染 `<recent_combat>` 事实块（名单/结果/回合数，缺席零 token，照 MAP_CONTEXT 口径），dispatcher 模板注入；
+   - 内容仓 `request_dispatcher`：战斗判断节新增「已结算战斗的战后延续 → 不发 combat_trigger」规则（点名尸体/焦痕/搜刮/过时任务详情四种误判源）+ 自检第 11 条；
+   - `CombatV3Result.aborted` 标志：放弃的战斗不算已结算，不拦下一轮正常触发。
+3. **战斗结算数值不可见 + 摘要不可改（主人需求 D）** — 战斗终局先弹**结算确认面板**（CombatPanel 第三态）：上半数值卡（胜负/回合/经验/FP/战利品——解决"结算看不见"），下半可编辑摘要 textarea（预填 AI 摘要防乱写）。「注入正文」用编辑后文本；「放弃注入」只收面板（数值不回滚，落库不可逆）；aborted 不弹不注入。挂起兜底三层：`exitCombat` resolve(null) + GamePage 卸载定向清理（只清确认态，进行中战斗保持）+ confirm/discard 消费 resolver。
+
+顺手修：`combat_v3.systemPrompt` 两仓漂移（2026-08-12 DM 定位改造只改了内容仓，公开仓 `public/data/defaults/agent-config.json` 未同步 → F5 联动测试挂红），外科手术式同步（1 行 diff）。
+
+测试：新增 14 用例（pipeline 终局流程/store 确认态/panel 结算分支/registry 占位符）；8222 tests 全绿 · lint 0 warning · typecheck 0 错误 · knip 棘轮无新增。内容仓编码三判据过（U+FFFD:0 / ctrl:0 / JSON 可解析），pack 2.2.1 构建过契约测试 6/6。
+
 ### 地图 v1.1：旅程天数校准二轮 + 出行方式预览（2026-08-13）
 
 **pack v1.1.0**（schema 变更：`travelRules.modes[]`）。跨三仓交付，设计修订注记见 `docs/planning/2026-08-11-map-system-v1-integration.md` §6.2 顶部。

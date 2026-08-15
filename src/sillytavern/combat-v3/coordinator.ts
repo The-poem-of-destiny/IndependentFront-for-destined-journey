@@ -86,6 +86,12 @@ export interface CombatV3Result {
   loot: unknown[];
   rounds: number;
   outcome: 'ally_win' | 'enemy_win' | 'fled' | 'draw';
+  /**
+   * 战斗被放弃（C4 abandon / 中途取消）：patches 为空、终局未落库。
+   * 消费方（game-pipeline）据此不把放弃的战斗记入「最近已结算战斗」——
+   * 放弃的战斗没有发生过，下一轮 dispatcher 仍可对正文战况正常触发。
+   */
+  aborted?: boolean;
 }
 
 /** runCombatV3 的依赖注入（全部可 mock，测试友好） */
@@ -466,6 +472,7 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
       loot: [],
       rounds,
       outcome: 'draw',
+      aborted: true,
     };
   }
 

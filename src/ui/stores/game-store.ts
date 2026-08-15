@@ -8,6 +8,7 @@ import type {
   PlotEvent,
   PlotOutline,
   CombatState,
+  CombatSummaryResult,
   SaveProfile,
   AgentResult,
   AgentActivityRun,
@@ -109,9 +110,25 @@ export const useGameStore = defineStore('game', () => {
     brief?: string;
   } | null>(null);
 
+  // 🆕 结算确认态（2026-08-13 需求 D）：战斗终局落库后、摘要注入正文前的确认面板。
+  //   非 null = 结算确认面板显示中（数值卡 + 可编辑摘要 textarea）。isInCombat 认它
+  //   —— v3_settlement 已把 phase 置 SettlementCommitted（isInCombat 第三判据本会翻
+  //   false 关面板），确认面板需要面板继续开着，所以它必须进 isInCombat。
+  const combatSummaryReview = ref<{
+    outcome: 'ally_win' | 'enemy_win' | 'draw' | 'fled';
+    totalExp: number;
+    totalFp: number;
+    loot: CombatSummaryResult['loot'];
+    rounds: number;
+    summaryText: string;
+  } | null>(null);
+  /** awaitCombatSummaryReview 挂起的 resolver（confirm/discard/exitCombat 消费） */
+  let summaryReviewResolve: ((text: string | null) => void) | null = null;
+
   const isInCombat = computed(
     () =>
       combatReady.value !== null ||
+      combatSummaryReview.value !== null ||
       (activeCombat.value !== null && activeCombat.value.status !== 'ended') ||
       (v3ActiveCombat.value !== null && v3ActiveCombat.value.phase !== 'SettlementCommitted'),
   );
@@ -367,6 +384,40 @@ export const useGameStore = defineStore('game', () => {
     return { ok: true };
   }
 
+  /** 🆕 结算确认（2026-08-13 需求 D）：pipeline 战斗终局调用 —— 投结算确认面板并
+   *  挂起等玩家裁决。返回 Promise：resolve(编辑后的摘要文本) = 注入正文；
+   *  resolve(null) = 放弃注入（结算数值已落库不可逆，只是叙事不进正文）。
+   *  面板期间 isInCombat 保持 true（combatSummaryReview 进了 isInCombat 判据）。 */
+  function awaitCombatSummaryReview(payload: {
+    outcome: CombatSummaryResult['outcome'];
+    totalExp: number;
+    totalFp: number;
+    loot: CombatSummaryResult['loot'];
+    rounds: number;
+    summaryText: string;
+  }): Promise<string | null> {
+    combatSummaryReview.value = { ...payload, loot: [...payload.loot] };
+    return new Promise((resolve) => {
+      summaryReviewResolve = resolve;
+    });
+  }
+
+  /** 玩家点「注入正文」—— text 为（可能编辑过的）摘要文本 */
+  function confirmCombatSummary(text: string) {
+    combatSummaryReview.value = null;
+    const r = summaryReviewResolve;
+    summaryReviewResolve = null;
+    r?.(text);
+  }
+
+  /** 玩家点「放弃注入」—— resolve(null)，pipeline 只收面板不写正文 */
+  function discardCombatSummary() {
+    combatSummaryReview.value = null;
+    const r = summaryReviewResolve;
+    summaryReviewResolve = null;
+    r?.(null);
+  }
+
   /** 战斗结束：清空面板（activeCombat=null → isInCombat=false） */
   function exitCombat() {
     activeCombat.value = null;
@@ -376,6 +427,14 @@ export const useGameStore = defineStore('game', () => {
     combatCoordinator.value = null;
     v3ActiveCombat.value = null;
     combatReady.value = null;
+    // 结算确认挂起时被 exitCombat（离开页面 / 停止生成 / 战斗失败路径）——
+    // 必须 resolve(null)，否则 pipeline 的 await 永久悬挂。
+    if (summaryReviewResolve) {
+      const r = summaryReviewResolve;
+      summaryReviewResolve = null;
+      combatSummaryReview.value = null;
+      r(null);
+    }
   }
 
   // === 元数据 ===
@@ -1162,6 +1221,7 @@ export const useGameStore = defineStore('game', () => {
     combatCurrentUnitId,
     v3ActiveCombat,
     combatReady,
+    combatSummaryReview,
     combatCoordinator,
     enterCombat,
     applyCombatEvent,
@@ -1172,6 +1232,9 @@ export const useGameStore = defineStore('game', () => {
     skipCombat,
     startCombat,
     restartCombat,
+    awaitCombatSummaryReview,
+    confirmCombatSummary,
+    discardCombatSummary,
     exitCombat,
     saveProfile,
     fp,

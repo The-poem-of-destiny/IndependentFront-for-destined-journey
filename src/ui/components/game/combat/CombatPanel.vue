@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useGameStore } from '../../../stores/game-store';
 import { projectUnitsBySide, type V3Unit } from './combat-v3-projection';
 import CombatHeader from './CombatHeader.vue';
@@ -45,6 +45,30 @@ const readyAllies = computed<string[]>(() => {
   return names;
 });
 const readyEnemies = computed<string[]>(() => game.combatReady?.enemies ?? []);
+
+// ── 结算确认态（2026-08-13 需求 D）：终局数值卡 + 可编辑摘要 → 注入正文 / 放弃 ──
+const settlement = computed(() => game.combatSummaryReview);
+/** 摘要编辑草稿 —— 确认面板出现时预填 AI 摘要，玩家可自由修改 */
+const summaryDraft = ref('');
+watch(
+  () => game.combatSummaryReview,
+  (r) => {
+    if (r) summaryDraft.value = r.summaryText;
+  },
+  { immediate: true },
+);
+const OUTCOME_LABELS: Record<string, string> = {
+  ally_win: '胜利',
+  enemy_win: '战败',
+  draw: '平局',
+  fled: '撤退',
+};
+function confirmSettlement() {
+  game.confirmCombatSummary(summaryDraft.value);
+}
+function discardSettlement() {
+  game.discardCombatSummary();
+}
 
 function confirmStart() {
   void game.startCombat();
@@ -130,6 +154,53 @@ const isCombatThinking = computed(() => {
             <div class="combat-panel-actions">
               <AppButton variant="primary" size="sm" @click="confirmStart">开始战斗</AppButton>
               <AppButton variant="ghost" size="sm" @click="skipOpen = true">跳过战斗</AppButton>
+            </div>
+          </div>
+
+          <!-- ═══ 结算确认态（2026-08-13 需求 D）：终局数值卡 + 可编辑摘要 ═══ -->
+          <div v-else-if="settlement" class="combat-settlement">
+            <div class="combat-ready-title">
+              <i class="fa-solid fa-flag-checkered combat-title-icon" />
+              <span>战斗结算 — {{ OUTCOME_LABELS[settlement.outcome] ?? settlement.outcome }}</span>
+            </div>
+
+            <div class="css-stats">
+              <div class="css-stat-row">
+                <span class="css-stat-label">战斗回合</span>
+                <span class="css-stat-value">{{ settlement.rounds }}</span>
+              </div>
+              <div class="css-stat-row">
+                <span class="css-stat-label">获得经验</span>
+                <span class="css-stat-value css-stat-exp">+{{ settlement.totalExp }}</span>
+              </div>
+              <div class="css-stat-row">
+                <span class="css-stat-label">命运点数（当前）</span>
+                <span class="css-stat-value">{{ settlement.totalFp }}</span>
+              </div>
+              <div class="css-stat-row css-stat-row-loot">
+                <span class="css-stat-label">战利品</span>
+                <span class="css-stat-value">
+                  <template v-if="settlement.loot.length > 0">
+                    {{ settlement.loot.map((l) => `${l.name}×${l.quantity}`).join('、') }}
+                  </template>
+                  <template v-else>（无记录）</template>
+                </span>
+              </div>
+            </div>
+            <p class="css-hint">数值结算已保存。下方摘要将注入正文，可自由修改后再确认。</p>
+
+            <textarea
+              v-model="summaryDraft"
+              class="css-editor"
+              rows="8"
+              aria-label="战斗摘要（可编辑）"
+            />
+
+            <div class="combat-panel-actions">
+              <AppButton variant="primary" size="sm" @click="confirmSettlement"
+                >注入正文</AppButton
+              >
+              <AppButton variant="ghost" size="sm" @click="discardSettlement">放弃注入</AppButton>
             </div>
           </div>
 
@@ -402,6 +473,75 @@ const isCombatThinking = computed(() => {
 }
 .combat-ready .combat-panel-actions {
   grid-column: 1 / -1;
+}
+
+/* ── 结算确认态面板（2026-08-13 需求 D）── */
+.combat-settlement {
+  width: min(46rem, 100%);
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-md);
+  padding: var(--theme-spacing-2xl);
+}
+.css-stats {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: var(--theme-card-bg);
+  box-shadow: var(--paper-stack);
+  overflow: hidden;
+}
+.css-stat-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--theme-spacing-md);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+}
+.css-stat-row + .css-stat-row {
+  border-top: 1px solid var(--theme-card-border);
+}
+.css-stat-label {
+  font-size: 0.8125rem;
+  color: var(--theme-text-secondary);
+}
+.css-stat-value {
+  font-family: var(--theme-font-title);
+  font-size: 0.9375rem;
+  color: var(--theme-text-primary);
+}
+.css-stat-exp {
+  color: var(--theme-primary);
+  font-weight: 700;
+}
+.css-stat-row-loot .css-stat-value {
+  text-align: right;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.css-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+}
+.css-editor {
+  width: 100%;
+  resize: vertical;
+  min-height: 8rem;
+  font-family: var(--theme-font-body);
+  font-size: 0.875rem;
+  line-height: 1.7;
+  color: var(--theme-text-primary);
+  background: var(--theme-surface-muted);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  padding: var(--theme-spacing-md);
+}
+.css-editor:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 1px;
 }
 .combat-side-label {
   font-size: 0.75rem;

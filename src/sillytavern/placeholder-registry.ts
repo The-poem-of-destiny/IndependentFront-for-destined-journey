@@ -21,7 +21,13 @@
  *   角色状态实际由 CHARACTER_STATE / INVENTORY / SKILL_STATE 各自的内联实现产出）
  */
 
-import type { AgentContext, AgentConfig, WorldBook, PlaceholderResolver } from './types';
+import type {
+  AgentContext,
+  AgentConfig,
+  WorldBook,
+  PlaceholderResolver,
+  RecentCombatInfo,
+} from './types';
 import {
   getEntriesForAgent,
   filterActiveEntries,
@@ -578,6 +584,36 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     return renderMapContextBlock(snapshot, ctx.gameTime);
   },
 
+  /**
+   * {{RECENT_COMBAT}} — 最近一场**已结算**战斗的事实块（2026-08-13 真机 debug）。
+   *
+   * 数据来自 `ctx.recentCombat`（game-pipeline 战斗终局时记录，内存级）。request_dispatcher
+   * 据此分辨「正文在写已结算战斗的战后延续」vs「正文新开了一场战斗」——没有它，dispatcher
+   * 看到正文里的战斗痕迹（尸体/焦痕/伤口）会按「战斗已发生必须重演」再发一次
+   * `<combat_trigger>`，把打完的战斗原样重打一遍。
+   *
+   * 🔴 **本 resolver 只产事实**（名单/结果/结算回合），规则（何时不再发 combat_trigger）
+   *    在 request_dispatcher 的 systemPrompt 里 —— 事实与指令分家，改措辞不用动引擎。
+   * 🔴 缺席（没打过 / 放弃的战斗 / 跨会话丢内存）= 空串（零 token，照 MAP_CONTEXT 口径）。
+   *    块自带 XML 外壳，模板里不要再包一层中文标签。
+   */
+  RECENT_COMBAT: (ctx, _config, _params) => {
+    const rc = ctx.recentCombat;
+    if (!rc) return '';
+    const outcomeText: Record<RecentCombatInfo['outcome'], string> = {
+      ally_win: '我方胜利',
+      enemy_win: '敌方胜利',
+      draw: '平局',
+      fled: '我方撤退',
+    };
+    const lines = [
+      '最近一场战斗已经通过战斗面板结算完成（数值已落库，无需重演）：',
+      `我方: ${rc.allies.length > 0 ? rc.allies.join('、') : '（玩家）'} | 敌方: ${rc.enemies.join('、')}`,
+      `结果: ${outcomeText[rc.outcome] ?? rc.outcome} | 结算时回合数: ${rc.endedAtTurn}`,
+    ];
+    return `<recent_combat>\n${lines.join('\n')}\n</recent_combat>`;
+  },
+
   /** {{ACTIVE_EFFECTS}} — 提取所有角色的状态效果 */
   ACTIVE_EFFECTS: (ctx, _config, _params) => {
     const characters = ctx.characters ?? [];
@@ -703,7 +739,7 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   plot_pre_check:
     '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你判断剧情触发所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<剧情事件库>\n{{PLOT_EVENTS}}\n</剧情事件库>\n<!-- 引擎注入的剧情全景数据，内含三个子区块：<剧情大纲>(标题/版本/当前章节/章节进度/正文节选)、\n     <剧情事件列表>(全部活跃与待触发事件的标题+描述+状态+触发条件——含尚未向玩家揭示的 hidden 事件，\n     防剧透只在 UI 层，你必须全量审视)、<当前状态>(时间/位置/主角层级一行摘要)。\n     这是你触发判断的唯一事件来源——triggeredEvents 的 title 必须与 <剧情事件列表> 逐字一致。\n     区块为空或缺大纲时（如支线模式初期）以现有内容为准，保守判断，不编造事件。-->\n\n<记忆召回>\n{{AGENT.MEMORY_RECALL}}\n</记忆召回>\n<!-- 上游记忆召回 Agent 给出的相关历史记忆。用于核对触发条件中的历史前提\n     （如「与铁匠建立信任之后」）。为空表示本轮无相关记忆——缺证据时按条件未满足处理。-->\n\n<最近对话>\n{{NARRATIVE:layers=3}}\n</最近对话>\n<!-- 🔴 每轮变化。最近 3 轮正文与玩家输入。评估证据强度时它是第二优先级——\n     低于本轮 <用户输入> 的明确行动，高于 <记忆召回> 中的旧线索。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 🔴 每轮变化。本轮玩家的行动宣言——触发判断的首要证据来源。-->',
   request_dispatcher:
-    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你完成变量调度所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力文化、地理信息等。\n     判断角色种族和势力归属时参考此处。——稳定数据，优先查阅。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 当前存档中所有已有角色的列表（ID/Name/Race/Type/Tier/Location）。\n     这是你判断\"新角色 vs 已有角色\"的唯一依据——\n     角色名不在此表中 → 新角色 → <char_gen_request>；\n     角色名在此表中 → 已有角色 → <char_update_request>。-->\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n<!-- 所有角色背包中的物品、装备、材料清单。\n     这是你判断\"新物品 vs 已有物品\"的唯一依据——\n     物品名不在背包中 → 新物品 → <item_gen_request>；\n     物品名在背包中 → 已有物品 → <item_update_request>。-->\n\n<已有技能>\n{{SKILL_STATE}}\n</已有技能>\n<!-- 🔴 2026-08-02 新增: 所有角色的技能清单（含开局初始技能声明）。\n     这是你判断\"新技能 vs 已有技能\"的唯一依据——\n     技能名不在下表中 → 新技能 → <item_gen_request itemType="skill">（逐条单独发）；\n     技能名已在表中 → 已有技能，不重复生成。\n     开局初始技能声明标了「尚未落库，需生成」→ 逐条发 <item_gen_request itemType="skill">\n     让 item_gen 生成 stats/modifiers/automata。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n<!-- 🔴 高频变化：本回合 Story Agent 生成的叙事正文。\n     仔细阅读全文，从中提取所有变量变化、新角色/物品出现、制作场景。——这是你的核心输入。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 本轮用户的原始输入。开局轮此处是开场提示词，含「--- 初始装备 ---」「--- 初始技能 ---」\n     原始清单。正文里改写过的装备/技能若与此处声明对应，按此处的原名与原描述发 request，\n     不要用正文改写名——否则 item_gen 会丢数值重掷。-->',
+    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你完成变量调度所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力文化、地理信息等。\n     判断角色种族和势力归属时参考此处。——稳定数据，优先查阅。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 当前存档中所有已有角色的列表（ID/Name/Race/Type/Tier/Location）。\n     这是你判断\"新角色 vs 已有角色\"的唯一依据——\n     角色名不在此表中 → 新角色 → <char_gen_request>；\n     角色名在此表中 → 已有角色 → <char_update_request>。-->\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n<!-- 所有角色背包中的物品、装备、材料清单。\n     这是你判断\"新物品 vs 已有物品\"的唯一依据——\n     物品名不在背包中 → 新物品 → <item_gen_request>；\n     物品名在背包中 → 已有物品 → <item_update_request>。-->\n\n<已有技能>\n{{SKILL_STATE}}\n</已有技能>\n<!-- 🔴 2026-08-02 新增: 所有角色的技能清单（含开局初始技能声明）。\n     这是你判断\"新技能 vs 已有技能\"的唯一依据——\n     技能名不在下表中 → 新技能 → <item_gen_request itemType="skill">（逐条单独发）；\n     技能名已在表中 → 已有技能，不重复生成。\n     开局初始技能声明标了「尚未落库，需生成」→ 逐条发 <item_gen_request itemType="skill">\n     让 item_gen 生成 stats/modifiers/automata。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n{{RECENT_COMBAT}}\n<!-- 最近一场已结算战斗的事实块（<recent_combat>，自带外壳）。战斗刚打完的那几轮它\n     会出现——正文里的战斗痕迹（尸体/焦痕/伤口）属于已结算战斗的战后延续，不要重发\n     <combat_trigger> 重演。缺席 = 没有已结算战斗记录，此区块零 token。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n<!-- 🔴 高频变化：本回合 Story Agent 生成的叙事正文。\n     仔细阅读全文，从中提取所有变量变化、新角色/物品出现、制作场景。——这是你的核心输入。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 本轮用户的原始输入。开局轮此处是开场提示词，含「--- 初始装备 ---」「--- 初始技能 ---」\n     原始清单。正文里改写过的装备/技能若与此处声明对应，按此处的原名与原描述发 request，\n     不要用正文改写名——否则 item_gen 会丢数值重掷。-->',
   vars_update:
     '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你更新角色/物品状态的完整上下文数据。       -->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。         -->\n<!-- ⚠️ 需要写脚本时调用 get_script_reference 工具。     -->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n\n<调度器输出>\n{{AGENT.REQUEST_DISPATCHER}}\n</调度器输出>\n<!-- request_dispatcher 的完整输出，包含 <char_update_request> 和 <item_update_request> 标签。\n     逐条读取每个标签，这是你需要处理的变更清单。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n\n<最近对话>\n{{NARRATIVE:layers=1}}\n</最近对话>',
   memory_summary: '{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{NARRATIVE:layers=4}}',

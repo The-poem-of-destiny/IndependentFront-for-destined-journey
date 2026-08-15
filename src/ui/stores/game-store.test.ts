@@ -697,6 +697,58 @@ describe('M2 v3 战斗接线', () => {
     });
   });
 
+  // ===== 结算确认态（2026-08-13 需求 D）：终局数值卡 + 可编辑摘要 =====
+  describe('combatSummaryReview 结算确认', () => {
+    const payload = {
+      outcome: 'ally_win' as const,
+      totalExp: 2,
+      totalFp: 5,
+      loot: [{ name: '断爪', description: '', quantity: 1 }],
+      rounds: 2,
+      summaryText: '摘要文本',
+    };
+
+    it('awaitCombatSummaryReview：面板置位（isInCombat 保持 true）+ 挂起 Promise；confirm 收编辑文本并清态', async () => {
+      const store = useGameStore();
+      const p = store.awaitCombatSummaryReview(payload);
+      expect(store.combatSummaryReview).not.toBeNull();
+      // v3_settlement 已把 phase 置 SettlementCommitted（isInCombat 其它判据都 false），
+      // 确认面板期间 isInCombat 必须仍为 true（否则面板自己关掉）
+      store.v3ActiveCombat = {
+        combatId: 'c1',
+        revision: 0,
+        phase: 'SettlementCommitted',
+        round: 2,
+        initiativeOrder: [],
+        currentTurnIndex: 0,
+        units: {},
+        resourceSnapshots: { FP: 0 },
+      } as never;
+      expect(store.isInCombat).toBe(true);
+
+      store.confirmCombatSummary('我改过的摘要');
+      await expect(p).resolves.toBe('我改过的摘要');
+      expect(store.combatSummaryReview).toBeNull();
+    });
+
+    it('discardCombatSummary：resolve(null)（放弃注入，数值不回滚）', async () => {
+      const store = useGameStore();
+      const p = store.awaitCombatSummaryReview(payload);
+      store.discardCombatSummary();
+      await expect(p).resolves.toBeNull();
+      expect(store.combatSummaryReview).toBeNull();
+    });
+
+    it('exitCombat 兜底：确认挂起时被 exitCombat（离开页面/停止生成）→ resolve(null)，promise 不悬挂', async () => {
+      const store = useGameStore();
+      const p = store.awaitCombatSummaryReview(payload);
+      store.exitCombat();
+      await expect(p).resolves.toBeNull();
+      expect(store.combatSummaryReview).toBeNull();
+      expect(store.isInCombat).toBe(false);
+    });
+  });
+
   it('skipCombat：abandonCombat 包装（战斗放弃 → 面板关闭、不落库）', () => {
     const store = useGameStore();
     let abandoned = false;

@@ -18,6 +18,8 @@ import { mount } from '@vue/test-utils';
 const startCombat = vi.fn(async () => {});
 const skipCombat = vi.fn();
 const restartCombat = vi.fn(async () => ({ ok: true }));
+const confirmCombatSummary = vi.fn();
+const discardCombatSummary = vi.fn();
 const toast = vi.fn();
 let mockGame: Record<string, unknown>;
 
@@ -38,6 +40,7 @@ beforeEach(() => {
       enemies: ['冠军'],
       bodyText: '决一死战',
     },
+    combatSummaryReview: null,
     v3ActiveCombat: null,
     combatLog: [],
     combatAwaitingInput: null,
@@ -47,6 +50,8 @@ beforeEach(() => {
     startCombat,
     skipCombat,
     restartCombat,
+    confirmCombatSummary,
+    discardCombatSummary,
   });
 });
 
@@ -320,5 +325,63 @@ describe('CombatPanel F2 就绪态', () => {
     mockGame.combatAwaitingInput = null;
     const wrapper = await mountPanel();
     expect(wrapper.find('.thinking-indicator').exists()).toBe(false);
+  });
+});
+
+describe('CombatPanel 结算确认态（2026-08-13 需求 D）', () => {
+  function setSettlement() {
+    mockGame.combatReady = null;
+    mockGame.combatSummaryReview = {
+      outcome: 'ally_win',
+      totalExp: 2,
+      totalFp: 5,
+      loot: [
+        { name: '断爪', description: '魔物爪甲', quantity: 2, quality: '普通' },
+      ],
+      rounds: 2,
+      summaryText: '奥利雅思以灼热射线贯穿魔物咽喉，获胜。',
+    };
+  }
+
+  it('combatSummaryReview 置位：渲染结算分支（结果/回合/经验/战利品 + 预填摘要），不渲染就绪/开打态', async () => {
+    setSettlement();
+    const wrapper = await mountPanel();
+
+    expect(wrapper.find('.combat-settlement').exists()).toBe(true);
+    expect(wrapper.find('.combat-ready-title').text()).toContain('战斗结算');
+    expect(wrapper.find('.combat-ready-title').text()).toContain('胜利');
+    const stats = wrapper.find('.css-stats').text();
+    expect(stats).toContain('2'); // rounds
+    expect(stats).toContain('+2'); // exp
+    expect(stats).toContain('断爪×2'); // loot
+    // 摘要 textarea 预填 AI 文本
+    const editor = wrapper.find('.css-editor');
+    expect((editor.element as HTMLTextAreaElement).value).toContain('灼热射线');
+    // 其它两态不出现
+    expect(wrapper.find('.combat-ready').exists()).toBe(false);
+    expect(wrapper.find('.combat-header').exists()).toBe(false);
+  });
+
+  it('玩家编辑摘要后点「注入正文」→ confirmCombatSummary 收到编辑后的文本', async () => {
+    setSettlement();
+    const wrapper = await mountPanel();
+    const editor = wrapper.find('.css-editor');
+    await editor.setValue('我改过的战斗总结。');
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('注入正文'));
+    expect(btn).toBeTruthy();
+    await btn!.trigger('click');
+    await nextTick();
+    expect(confirmCombatSummary).toHaveBeenCalledTimes(1);
+    expect(confirmCombatSummary).toHaveBeenCalledWith('我改过的战斗总结。');
+  });
+
+  it('点「放弃注入」→ discardCombatSummary（数值不回滚，叙事不进正文）', async () => {
+    setSettlement();
+    const wrapper = await mountPanel();
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('放弃注入'));
+    expect(btn).toBeTruthy();
+    await btn!.trigger('click');
+    await nextTick();
+    expect(discardCombatSummary).toHaveBeenCalledTimes(1);
   });
 });
