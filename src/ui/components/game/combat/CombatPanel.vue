@@ -197,9 +197,7 @@ const isCombatThinking = computed(() => {
             />
 
             <div class="combat-panel-actions">
-              <AppButton variant="primary" size="sm" @click="confirmSettlement"
-                >注入正文</AppButton
-              >
+              <AppButton variant="primary" size="sm" @click="confirmSettlement">注入正文</AppButton>
               <AppButton variant="ghost" size="sm" @click="discardSettlement">放弃注入</AppButton>
             </div>
           </div>
