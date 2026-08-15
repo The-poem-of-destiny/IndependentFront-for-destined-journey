@@ -1,4 +1,63 @@
-/* ===== Moonwhite Brocade (月白云锦) — 月白丝缎与珠母 ===== */
+/* ===== Moonwhite Brocade (月白云锦) — 织锦浮雕 / Woven Relief =====
+ *
+ * PROTOTYPE. This file replaces the former token-only fallback with a full
+ * neumorphic conversion. `docs/planning/2026-08-08-selected-theme-directions.md`
+ * §2 froze this theme at tokens-only; that decision is knowingly superseded
+ * here at the owner's direction.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY NEUMORPHISM WORKS ON THIS THEME AND NOT ON PORCELAIN
+ * ---------------------------------------------------------------------------
+ * Neumorphism makes one physical claim: everything is a single continuous
+ * sheet, and form is made only of light. On porcelain that claim is false —
+ * porcelain is fired objects with edges, and its glaze pools at the rim.
+ *
+ * On brocade the claim is literally true. 云锦 is jacquard silk: one bolt of
+ * cloth, in which the pattern exists *because* warp and weft run in different
+ * directions and catch light differently. Same colour, different light. That is
+ * the definition of neumorphism, arrived at by a loom rather than a design
+ * trend. So this theme is not "neumorphism applied to a fabric palette" — it is
+ * a woven surface rendered the way a woven surface actually behaves.
+ *
+ * The locked reference (`artifacts/theme-looks/moonwhite-brocade/look-4.png`,
+ * "烟罗叠雾 / Mist-Silk Translucency") already asks for "one soft offset shadow
+ * and one restrained specular thread edge, never glossy glass" — that pair *is*
+ * the neumorphic pair. This prototype departs from the reference on exactly one
+ * point: the reference's thesis is translucent gauze, and translucency and
+ * neumorphism are mutually exclusive (a sheet you can see through cannot be the
+ * sheet the form is pressed into). So the cloth here is opaque heavy jacquard
+ * rather than mist-silk — arguably closer to what 云锦 actually is.
+ *
+ * ---------------------------------------------------------------------------
+ * THE FOUR RULES
+ * ---------------------------------------------------------------------------
+ * 1. ONE BOLT OF CLOTH. Every control is `--silk`, the same colour as the
+ *    surface behind it. A control that needs its own fill to be seen has failed
+ *    and must be fixed with light or thread, not with paint.
+ *
+ * 2. THREE DEPTHS, AND NOTHING EVER LEAVES THE CLOTH. cloth (flat) → deboss
+ *    (pressed in) → emboss (raised). There is no elevation tier: emboss and
+ *    deboss are both operations on a surface you cannot leave, so "floating"
+ *    has no representation here and is not faked with a drop shadow. Overlays
+ *    are handled by --fold and --recede instead; see their note below.
+ *    **Containers deboss, contents emboss. Never emboss inside an emboss** —
+ *    that is how neumorphic UIs turn into a field of marshmallows.
+ *
+ * 3. GOLD IS THREAD, NOT LIGHT. `#887142` is the metallic weft. It draws seams,
+ *    underlines the selected tab, and rings focus. It never glows, never fills a
+ *    button, and never appears on more than one element in a region.
+ *
+ * 4. NO FRAMES; STATE MOVES MORE THAN THE SHADOW. Nothing is ringed in a line —
+ *    elements are shown by relief, which is the claim neumorphism actually
+ *    makes. Because that removes the boundary a line used to provide, every
+ *    interactive state has to move something a blur cannot hide: the fill tone,
+ *    the type colour, or the gold. Shadow-only state is invisible to anyone who
+ *    cannot resolve a 9px warm blur, and it is the single most common way
+ *    neumorphism fails an accessibility review. See the frame note below for
+ *    what this costs and what pays for it.
+ * ---------------------------------------------------------------------------
+ */
+
 [data-theme='ivory'] {
   --theme-window-bg: #e9e6df;
   --theme-window-border: #c4beb2;
@@ -6,58 +65,839 @@
   --theme-card-bg: rgba(253, 252, 248, 0.94);
   --theme-card-border: #cec7ba;
   --theme-surface-muted: #e2ded5;
-  --theme-overlay-bg: rgba(31, 33, 35, 0.34);
+  /* A warm dim, not a neutral one. Neutral grey over moonwhite reads as dirt on
+     the cloth; this is the same --thread-shade every shadow in the theme uses,
+     so the world receding is the same light getting darker rather than a sheet
+     of grey being laid over it. */
+  --theme-overlay-bg: rgba(64, 57, 45, 0.4);
 
   --theme-title-bar-bg: #dfdcd4;
   --theme-title-bar-text: #373532;
   --theme-title-bar-icon: #77736c;
   --theme-title-bar-btn-hover: rgba(54, 51, 46, 0.06);
   --theme-tab-bar-bg: #e5e1d8;
-  --theme-tab-text: #777168;
+  /* Solved against --silk-pressed, the darkest cloth any label ever sits on
+     (the debossed tab tray). Picking these against the *lightest* ground is the
+     trap: an inactive tab label passes on the panel and fails in the trough. */
+  --theme-tab-text: #6a645c;
   --theme-tab-active-text: #302f2c;
   --theme-tab-indicator: #887142;
   --theme-tab-hover-bg: rgba(72, 67, 58, 0.05);
 
   --theme-text-primary: #302f2c;
   --theme-text-secondary: #5f5b54;
-  --theme-text-muted: #858076;
+  --theme-text-muted: #676259;
 
   --theme-primary: #887142;
   --theme-primary-text: #fffdf8;
 
   --theme-primary-bg: color-mix(in srgb, var(--theme-primary) 20%, transparent);
-  --theme-success: #4a9e5c;
-  --theme-warning: #d4883c;
-  --theme-error: #d4343c;
+  --theme-success: #3f8a4f;
+  --theme-warning: #b06a22;
+  --theme-error: #bc2b33;
 
-  --theme-hp: #d4343c;
-  --theme-mp: #4868c0;
-  --theme-sp: #4a9e5c;
-  --theme-exp: #d4883c;
-  --theme-affection: #d04868;
-  --theme-affection-bg: rgba(208, 72, 104, 0.1);
-  --theme-affection-text: #a03050;
+  /* Resource hues are dyed cord, and the value sits on top of them in white —
+     so these are solved for 4.5:1 against #fffdf8, not against the cloth. SP
+     and EXP were the two that failed; green and ochre are the hues where a
+     "readable on light" pick and a "readable under white" pick diverge most. */
+  --theme-hp: #b3272f;
+  --theme-mp: #3a56a8;
+  --theme-sp: #3a8149;
+  --theme-exp: #9f6a24;
+  --theme-affection: #b83a5a;
+  --theme-affection-bg: rgba(184, 58, 90, 0.1);
+  --theme-affection-text: #942c48;
 
-  --theme-quality-common: #a0a0a0;
-  --theme-quality-uncommon: #4a9e5c;
-  --theme-quality-rare: #4868c0;
-  --theme-quality-epic: #8850c0;
-  --theme-quality-legendary: #d4883c;
-  --theme-quality-mythic: #d04868;
-  --theme-quality-unique: #e0883c;
+  --theme-quality-common: #7d7970;
+  --theme-quality-uncommon: #3f8a4f;
+  --theme-quality-rare: #3a56a8;
+  --theme-quality-epic: #6f3fa8;
+  --theme-quality-legendary: #a26c25;
+  --theme-quality-mythic: #b83a5a;
+  --theme-quality-unique: #b4661f;
 
-  --theme-currency-gold: #c0a060;
-  --theme-currency-silver: #b0a898;
-  --theme-currency-copper: #c87848;
+  --theme-currency-gold: #94762c;
+  --theme-currency-silver: #7e786c;
+  --theme-currency-copper: #a75c30;
 
-  --theme-tag-present-bg: rgba(74, 158, 92, 0.1);
-  --theme-tag-present-text: #3a8050;
-  --theme-tag-contract-bg: rgba(208, 72, 104, 0.1);
-  --theme-tag-contract-text: #a03050;
+  --theme-tag-present-bg: rgba(63, 138, 79, 0.12);
+  --theme-tag-present-text: #2f6b3c;
+  --theme-tag-contract-bg: rgba(184, 58, 90, 0.12);
+  --theme-tag-contract-text: #942c48;
+
+  --theme-ascension-element: rgba(58, 86, 168, 0.1);
+  --theme-ascension-power: rgba(162, 108, 37, 0.1);
+  --theme-ascension-law: rgba(111, 63, 168, 0.1);
 
   /* 🔴 字体**不在主题里定义** —— 理由同 parchment.css，见那里的注释与 design.md §7.4 */
+
+  /* ===== The bolt of cloth =====
+     Every control shares --silk. The two neighbours are not "lighter and darker
+     buttons" — they are the same cloth caught at a different angle, which is
+     why they sit only ~4% apart. Widen that gap and the weave becomes paint. */
+  --silk: #eeebe4;
+  --silk-raised: #f5f2ec;
+  --silk-pressed: #e6e2da;
+
+  /* Warm shadows, never neutral gray. Gray is what makes neumorphism read as
+     moulded plastic; the whole difference between silk and ABS is 8° of hue. */
+  --thread-shade: 96, 88, 74;
+  --thread-light: 255, 254, 251;
+
+  /* ===== No frames. Read this before putting one back. =====
+     Every enclosing border in this theme is `1px solid transparent`: the box is
+     still there, it is simply not drawn. Elements are shown by relief alone,
+     which is what neumorphism actually claims to do — a control ringed in a
+     line is a bordered control that happens to have a shadow.
+
+     Keeping the 1px is not laziness. It holds geometry stable (a border that
+     appears on hover or in high contrast must not resize anything), and it
+     means the frame can be restored by colouring one property.
+
+     🔴 THE COST, STATED PLAINLY. SC 1.4.11 wants 3:1 for a UI component
+     boundary. A solid line reaches that; a blurred shadow does not — its peak
+     opacity sits well under its declared alpha, and on a cloth this light the
+     honest ceiling is roughly 1.4:1. So in the default rendering, idle controls
+     are NOT provably conformant. Three things carry the load instead:
+
+       1. relief deepened below until it does real work rather than decorating
+       2. the focus ring untouched — gold at 3.93:1, and focus is where the
+          requirement bites hardest
+       3. `prefers-contrast: more` colours --rim back in on every component, so
+          anyone who has asked their OS for stronger boundaries gets them
+
+     --rim therefore still exists, but only as the high-contrast affordance and
+     the state colour. --seam stays for dividers between regions: a rule between
+     two list rows is not a frame around a thing. */
+  --seam: rgba(96, 88, 74, 0.4);
+  --rim: rgba(96, 88, 74, 0.72);
+  --rim-strong: rgba(96, 88, 74, 0.86);
+  --weft-gold: #887142;
+  --weft-gold-soft: rgba(136, 113, 66, 0.34);
+
+  /* Depth 2 — embossed out of the cloth. One specular edge, one soft offset. */
+  --emboss: -4px -4px 9px rgba(var(--thread-light), 1), 4px 4px 9px rgba(var(--thread-shade), 0.26);
+  --emboss-hover:
+    -5px -5px 11px rgba(var(--thread-light), 1), 5px 5px 11px rgba(var(--thread-shade), 0.31);
+  /* Depth 1 — pressed into the cloth. Light source inverts; nothing moves. */
+  --deboss:
+    inset -3px -3px 7px rgba(var(--thread-light), 0.95),
+    inset 3px 3px 7px rgba(var(--thread-shade), 0.28);
+  --deboss-deep:
+    inset -4px -4px 9px rgba(var(--thread-light), 1),
+    inset 4px 4px 9px rgba(var(--thread-shade), 0.34);
+  /* A large recess casts a proportionally larger edge shadow — same depth, not
+     a fifth one. The reading well is ~700px wide; --deboss at 2px would read as
+     a hairline on something that size and the well would vanish. */
+  --deboss-well:
+    inset -6px -6px 15px rgba(var(--thread-light), 0.92),
+    inset 6px 6px 17px rgba(var(--thread-shade), 0.25);
+
+  /* ===== Overlays: two tiers, because neumorphism has no word for "above" =====
+     Emboss and deboss are both operations on a surface you cannot leave, so a
+     floating layer has no representation in this vocabulary at all. Rather than
+     invent an elevation shadow (the usual cheat), overlays are split by what
+     they actually are:
+
+     --fold    An attached menu is a flap of the same cloth turned out from its
+               trigger. It is FLAT — a fold has an edge, not a relief — and it
+               casts a short contact shadow where it meets the surface. This is
+               not an elevation shadow; it does not grow with importance.
+     --recede  A dialog changes context, so the CONTEXT moves. The world is
+               pressed down and dimmed at the viewport edge and the dialog sits
+               flat at the original surface level. Nothing ever rises.
+
+     Both are only viable because --rim guarantees every component boundary
+     ≥3:1: a completely flat overlay still reads as a distinct object without
+     borrowing a drop shadow to say so. */
+  --fold: 0 3px 9px rgba(var(--thread-shade), 0.22);
+  --recede: inset 0 0 90px rgba(var(--thread-shade), 0.26);
 
   --theme-shadow-sm: 0 1px 3px rgba(48, 45, 39, 0.07);
   --theme-shadow-md: 0 2px 8px rgba(48, 45, 39, 0.1);
   --theme-shadow-lg: 0 4px 16px rgba(48, 45, 39, 0.15);
+  --paper-stack: none;
+}
+
+/* ===========================================================================
+   CLOTH — the ground everything is pressed into
+   =========================================================================== */
+
+/* PURE. There is no pattern in this theme — no weave texture, no moonlight
+   window, no raster. Every surface is a flat field of colour, and the only
+   thing that produces form anywhere in the interface is light.
+
+   That is the whole point of the exercise, and it is also the hardest version
+   to make work: a pattern will hide a shadow that is too weak, and with the
+   pattern gone there is nothing left to hide behind. Anything that reads at all
+   reads because the relief is doing real work.
+
+   Two things had to come off to get here:
+
+   1. The shipped ivory material in `styles/integrated-game-surfaces.css` — a
+      full-viewport silk chassis raster with panels at 5.5% opacity over it,
+      look-4's mist-silk thesis, built. Translucent panels over a photographic
+      plate mean the "cloth" is a window, and a window cannot be the sheet a
+      relief is pressed into. `main.ts` imports this file after that sheet so
+      these resets land; see the note there.
+   2. This file's own first draft, which had a 45° jacquard weave on the cloth
+      and a soft moon behind the empty state. Both were defensible as 云锦, and
+      neither is neumorphism. */
+:root[data-theme='ivory'] body .game-page-layout {
+  position: relative;
+  isolation: isolate;
+  color: var(--theme-text-primary);
+  background-color: var(--theme-window-bg);
+  background-image: none;
+  box-shadow: none;
+}
+
+/* THE READING WELL. Removing the pattern took the structure with it: five flat
+   panels separated by 1px seams is one undifferentiated warm field, and the
+   25/50/25 topology stops existing visually. Depth has to carry what the
+   texture used to.
+
+   So the chrome stays flat and the narrative is cut INTO it. That gives the
+   centre column a real boundary, and it costs nothing in quietness — a recess
+   is the calmest thing a surface can do, which is exactly what a field the
+   player reads for hours should be. It also keeps the nesting clean: controls
+   emboss from flat chrome, so no relief is ever stacked on another.
+
+   The fill is --silk-pressed, the same tone every other recess in the theme
+   uses (input field, tab tray, resource channel). Debossed things are that
+   colour here; that consistency is what makes the depth legible as a language
+   rather than as a set of one-off effects. */
+:root[data-theme='ivory'] body .game-page-layout .chat-flow {
+  background-color: var(--silk-pressed);
+  background-image: none;
+  /* The well is cut, not framed — it inherited a drawn edge from the sheet it
+     overrides, which is the largest frame in the layout. */
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-lg);
+  box-shadow: var(--deboss-well);
+}
+
+/* The narrative field is the protagonist, so it is the one region with no
+   relief at all. Message surfaces stay flat cloth. */
+:root[data-theme='ivory'] body .game-page-layout .chat-messages,
+:root[data-theme='ivory'] body .game-page-layout .bubble-narrative-full {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .chat-empty-glyph {
+  color: var(--weft-gold-soft);
+  filter: none;
+}
+
+/* Structural panels are the same bolt, seamed with one thread. They are flat:
+   if the panels themselves had relief there would be nothing left for the
+   controls to be raised *from*.
+
+   `background-image: none` is load-bearing, not tidiness. The integrated sheet
+   washes four of these five panels with a 105° silk sheen gradient; setting
+   only background-color leaves that sheen on top, and a directional gradient
+   across a panel competes with the one light source the whole theme is built
+   on. It survived the first purity audit because that audit sampled the rail
+   alone. */
+:root[data-theme='ivory'] body .game-page-layout .top-bar,
+:root[data-theme='ivory'] body .game-page-layout .side-toolbar,
+:root[data-theme='ivory'] body .game-page-layout .scene-panel,
+:root[data-theme='ivory'] body .game-page-layout .status-hud,
+:root[data-theme='ivory'] body .game-page-layout .input-bar {
+  background-color: var(--silk);
+  background-image: none;
+  border-color: var(--seam);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .game-body {
+  background-color: var(--theme-window-bg);
+  background-image: none;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .top-divider,
+:root[data-theme='ivory'] body .game-page-layout .scene-panel {
+  border-right-color: var(--seam);
+}
+
+/* Rule 3 — the single fate seam. This is the only place gold is drawn as a
+   line across the interface, and it appears exactly once. */
+:root[data-theme='ivory'] body .game-page-layout .top-title-rule {
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--weft-gold-soft) 22%,
+    var(--weft-gold-soft) 78%,
+    transparent
+  );
+}
+
+:root[data-theme='ivory'] body .game-page-layout .top-title {
+  color: var(--theme-text-primary);
+  letter-spacing: 0.08em;
+}
+
+/* ===========================================================================
+   EMBOSS — controls raised out of the cloth
+   =========================================================================== */
+
+:root[data-theme='ivory'] body .game-page-layout .tool-btn,
+:root[data-theme='ivory'] body .game-page-layout .collapse-toggle,
+:root[data-theme='ivory'] body .game-page-layout .scene-title-action,
+:root[data-theme='ivory'] body .game-page-layout .top-btn,
+:root[data-theme='ivory'] body .game-page-layout .input-btn:not(.stop-btn),
+:root[data-theme='ivory'] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger) {
+  background: var(--silk-raised);
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-md);
+  box-shadow: var(--emboss);
+  transition:
+    box-shadow 200ms ease-out,
+    background-color 200ms ease-out,
+    border-color 200ms ease-out,
+    color 200ms ease-out;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .tool-btn:hover,
+:root[data-theme='ivory'] body .game-page-layout .collapse-toggle:hover,
+:root[data-theme='ivory'] body .game-page-layout .scene-title-action:hover,
+:root[data-theme='ivory'] body .game-page-layout .top-btn:hover,
+:root[data-theme='ivory'] body .game-page-layout .input-btn:not(.stop-btn):hover,
+:root[data-theme='ivory'] body .game-page-layout .app-btn:not(.btn-primary):not(.btn-danger):hover {
+  background: #f6f4ef;
+  border-color: transparent;
+  box-shadow: var(--emboss-hover);
+  color: var(--theme-text-primary);
+}
+
+/* Rule 4 — pressing inverts the light AND darkens the type. Two signals. */
+:root[data-theme='ivory'] body .game-page-layout .tool-btn:active,
+:root[data-theme='ivory'] body .game-page-layout .collapse-toggle:active,
+:root[data-theme='ivory'] body .game-page-layout .scene-title-action:active,
+:root[data-theme='ivory'] body .game-page-layout .top-btn:active,
+:root[data-theme='ivory'] body .game-page-layout .input-btn:not(.stop-btn):active,
+:root[data-theme='ivory']
+  body
+  .game-page-layout
+  .app-btn:not(.btn-primary):not(.btn-danger):active {
+  background: var(--silk-pressed);
+  border-color: transparent;
+  box-shadow: var(--deboss);
+  color: var(--theme-text-primary);
+}
+
+/* The send control is the composer's endpoint and the most-pressed control in
+   the app, so it is the one button allowed a thread of gold. */
+:root[data-theme='ivory'] body .game-page-layout .send-btn {
+  background: var(--silk-raised);
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-md);
+  box-shadow: var(--emboss);
+  color: var(--weft-gold);
+  transition:
+    box-shadow 200ms ease-out,
+    background-color 200ms ease-out,
+    border-color 200ms ease-out;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .send-btn:hover {
+  background: #f6f4ef;
+  border-color: var(--weft-gold);
+  box-shadow: var(--emboss-hover);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .send-btn:active {
+  background: var(--silk-pressed);
+  border-color: var(--weft-gold);
+  box-shadow: var(--deboss);
+}
+
+/* Semantic surfaces keep their own colour hierarchy — Rule 2 does not get to
+   outrank "this button stops the model". */
+:root[data-theme='ivory'] body .game-page-layout .input-btn.stop-btn {
+  box-shadow: none;
+}
+
+/* ===========================================================================
+   DEBOSS — troughs, channels and trays pressed into the cloth
+   =========================================================================== */
+
+:root[data-theme='ivory'] body .game-page-layout .input-field,
+:root[data-theme='ivory'] body .game-page-layout .form-input,
+:root[data-theme='ivory'] body .game-page-layout .form-select,
+:root[data-theme='ivory'] body .game-page-layout .mini-select,
+:root[data-theme='ivory'] body .game-page-layout .focus-select,
+:root[data-theme='ivory'] body .game-page-layout .cascader-trigger,
+:root[data-theme='ivory'] body .game-page-layout select {
+  background: var(--silk-pressed);
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-md);
+  box-shadow: var(--deboss);
+  color: var(--theme-text-primary);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .input-field:focus,
+:root[data-theme='ivory'] body .game-page-layout .form-input:focus,
+:root[data-theme='ivory'] body .game-page-layout select:focus {
+  border-color: var(--weft-gold);
+  box-shadow: var(--deboss-deep);
+  outline: none;
+}
+
+/* Tabs: the tray is a channel woven into the panel; the selected label is the
+   one layer lifted out of it, with the gold weft running underneath. */
+:root[data-theme='ivory'] body .game-page-layout .tab-bar {
+  background: transparent;
+  border-bottom: 0;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .tab-list {
+  gap: 4px;
+  padding: 4px;
+  background: var(--silk-pressed);
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-lg);
+  box-shadow: var(--deboss);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .tab-item {
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-sm);
+  color: var(--theme-tab-text);
+  background: transparent;
+  box-shadow: none;
+  transition:
+    box-shadow 200ms ease-out,
+    background-color 200ms ease-out,
+    color 200ms ease-out;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .tab-item::after {
+  display: none;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .tab-item:hover {
+  background: rgba(var(--thread-light), 0.55);
+  color: var(--theme-text-primary);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .tab-active {
+  background: var(--silk-raised);
+  /* Three declarations for one border, and all three are load-bearing, because
+     `integrated-game-surfaces.css` treats .tab-item borders as SEPARATORS while
+     this theme treats them as a component RIM:
+
+       border-width  — its shared block sets `0 1px 0 0` (a right-hand divider)
+       border-style  — its `.tab-item:last-child { border-right: 0 }` resets the
+                       right side to style:none, which zeroes the computed width
+                       whatever this rule asks for; that pseudo-class also
+                       outranks this selector, so the reset has to be explicit
+       border-color  — the rim colour itself
+
+     Setting only the colour scores a clean pass in a contrast audit that samples
+     borderTopColor: the colour is right, there is simply no border under it, and
+     the selected tab in the last position had no right edge at all. */
+  border-color: transparent;
+  border-style: solid;
+  border-width: 1px;
+  border-radius: var(--theme-radius-sm);
+  /* The gold weft is a STATE INDICATOR, so it is held to 3:1 like any other —
+     at 0.34 alpha it measured 1.5:1 and was decoration pretending to be state.
+     Solid gold on raised silk is 4.08:1. */
+  box-shadow:
+    var(--emboss),
+    inset 0 -2px 0 var(--weft-gold);
+  color: var(--theme-tab-active-text);
+  font-weight: 600;
+}
+
+/* `.tab-item:last-child { border-right: 0 }` in the integrated sheet carries one
+   more pseudo-class than the rule above, so it wins on specificity no matter how
+   late this file loads — a selected tab sitting last in its strip lost its right
+   edge. Matching on both classes the element actually carries is enough to take
+   it back without an !important and without narrowing the rule above. */
+:root[data-theme='ivory'] body .game-page-layout .tab-item.tab-active {
+  border-right: 1px solid transparent;
+}
+
+/* The player's own turn, and dialogue, are woven INTO the reading field rather
+   than laid on top of it: a different weave of the same cloth, one seam, and no
+   relief at all. The narrative region is the protagonist and stays the quietest
+   surface in the theme — a raised card here would outrank the story it holds.
+   (The material this replaces was look-4's translucent card, which cannot
+   survive on an opaque bolt: 54% of nothing is nothing.) */
+:root[data-theme='ivory'] body .game-page-layout .bubble-player,
+:root[data-theme='ivory'] body .game-page-layout .dialogue-card {
+  background: var(--silk);
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-md);
+  box-shadow: none;
+}
+
+/* Action options are how the player actually plays, so they carry real relief.
+   Their container is a flap (flat, Tier 1), which is precisely why they are
+   allowed to: the only relief in that region is theirs, so Rule 2 holds. An
+   earlier draft made the popup raised and justified the options on top of it as
+   "a different axis" — that was a relief inside a relief with a nicer name.
+   Before either draft they had no border, no fill and no shadow at all: a
+   primary control with no boundary. */
+:root[data-theme='ivory'] body .game-page-layout .option-item,
+:root[data-theme='ivory'] body .game-page-layout .option-custom {
+  background: var(--silk-raised);
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-sm);
+  box-shadow: var(--emboss);
+  color: var(--theme-text-primary);
+  transition:
+    box-shadow 200ms ease-out,
+    background-color 200ms ease-out,
+    border-color 200ms ease-out;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .option-item:hover,
+:root[data-theme='ivory'] body .game-page-layout .option-custom:hover {
+  background: #f6f4ef;
+  border-color: transparent;
+  box-shadow: var(--emboss-hover);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .option-item:active,
+:root[data-theme='ivory'] body .game-page-layout .option-custom:active {
+  background: var(--silk-pressed);
+  border-color: transparent;
+  box-shadow: var(--deboss);
+}
+
+/* ===========================================================================
+   STATUS LEDGER
+   =========================================================================== */
+
+:root[data-theme='ivory'] body .game-page-layout .status-overview,
+:root[data-theme='ivory'] body .game-page-layout .status-glass,
+:root[data-theme='ivory'] body .game-page-layout .scene-tab-body,
+:root[data-theme='ivory'] body .game-page-layout .scene-top {
+  background: transparent;
+  border-color: var(--seam);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .section,
+:root[data-theme='ivory'] body .game-page-layout .player-summary {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--seam);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .section-header {
+  color: var(--theme-text-secondary);
+  letter-spacing: 0.06em;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .summary-name {
+  color: var(--theme-text-primary);
+  letter-spacing: 0.05em;
+}
+
+/* Resource bars are the one place saturated colour is allowed, so the relief
+   has to stay out of its way: a channel pressed into the cloth, and a raised
+   dyed cord lying in it. The cord keeps its semantic hue at full strength. */
+:root[data-theme='ivory'] body .game-page-layout .res-track {
+  background: var(--silk-pressed);
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-full);
+  box-shadow: var(--deboss);
+  overflow: hidden;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .res-fill {
+  border-radius: var(--theme-radius-full);
+  opacity: 1;
+  box-shadow:
+    inset 0 1px 0 rgba(var(--thread-light), 0.42),
+    inset 0 -1px 2px rgba(var(--thread-shade), 0.22);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .res-values {
+  color: #fffdf8;
+  text-shadow: 0 1px 2px rgba(28, 24, 18, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Attribute lenses: small embossed tiles seated on the flat ledger. */
+:root[data-theme='ivory'] body .game-page-layout .kv-item {
+  background: var(--silk-raised);
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-sm);
+  box-shadow: var(--emboss);
+}
+
+/* ===========================================================================
+   LIST ROWS — Rule 2 in practice
+   A ledger of embossed cards is how neumorphism becomes a bag of marshmallows.
+   Rows are flat and thread-separated; opening one presses it INTO the cloth,
+   so the expanded row is a compartment rather than another raised card.
+   =========================================================================== */
+
+:root[data-theme='ivory'] body .game-page-layout .item-entry,
+:root[data-theme='ivory'] body .game-page-layout .quest-item,
+:root[data-theme='ivory'] body .game-page-layout .news-item,
+:root[data-theme='ivory'] body .game-page-layout .scene-npc-item {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--seam);
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transition:
+    box-shadow 200ms ease-out,
+    background-color 200ms ease-out;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .item-entry:hover,
+:root[data-theme='ivory'] body .game-page-layout .quest-item:hover,
+:root[data-theme='ivory'] body .game-page-layout .news-item:hover,
+:root[data-theme='ivory'] body .game-page-layout .scene-npc-item:hover,
+:root[data-theme='ivory'] body .game-page-layout .scene-npc-item.hovered {
+  background: rgba(var(--thread-light), 0.6);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .item-entry.open,
+:root[data-theme='ivory'] body .game-page-layout .quest-item.open {
+  background: var(--silk-pressed);
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-md);
+  box-shadow: var(--deboss);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .item-entry.open .item-row,
+:root[data-theme='ivory'] body .game-page-layout .item-entry.open .item-detail {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .item-entry.open .item-detail {
+  border-top: 1px solid var(--seam);
+}
+
+:root[data-theme='ivory'] body .game-page-layout .item-row {
+  background: transparent;
+  border-radius: 0;
+}
+
+:root[data-theme='ivory'] body .game-page-layout .det-chip {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-sm);
+}
+
+/* Portraits are mounted in the cloth, not floating on it: a shallow frame
+   pressed around the image so it reads as inset into the panel. */
+:root[data-theme='ivory'] body .game-page-layout .avatar-shape-square,
+:root[data-theme='ivory'] body .game-page-layout .npc-portrait,
+:root[data-theme='ivory'] body .game-page-layout .portrait-slot,
+:root[data-theme='ivory'] body .game-page-layout .avatar-xl {
+  background: var(--silk-pressed);
+  border: 1px solid transparent;
+  box-shadow: var(--deboss);
+}
+
+/* ===========================================================================
+   OVERLAYS — two tiers, because nothing may leave the cloth
+   =========================================================================== */
+
+/* TIER 1 — attached layers: a flap of the same cloth, turned out.
+   Flat, because a fold has an edge rather than a relief. That is also what
+   keeps Rule 2: the options inside these are embossed, and an embossed flap
+   would put a relief inside a relief. The rim is the cut edge; --fold is the
+   short contact shadow where the flap meets the surface it came from. */
+/* Both scopings on purpose. The integrated sheet styles these popups through
+   `… body .game-page-layout :is(.options-popup, …)`, which outranks a plain
+   `… body .options-popup` — so the play-area copies kept the old translucent
+   fill while the settings-page copies took the new one. Popups render both
+   inside and outside `.game-page-layout`, so both selectors have to exist or
+   the same menu looks like two different materials depending on which page
+   opened it. */
+:root[data-theme='ivory'] body .options-popup,
+:root[data-theme='ivory'] body .cascader-dropdown,
+:root[data-theme='ivory'] body .ctx-menu,
+:root[data-theme='ivory'] body .thought-bubble,
+:root[data-theme='ivory'] body .buff-pop,
+:root[data-theme='ivory'] body .system-notif,
+:root[data-theme='ivory'] body .game-page-layout .options-popup,
+:root[data-theme='ivory'] body .game-page-layout .cascader-dropdown,
+:root[data-theme='ivory'] body .game-page-layout .ctx-menu,
+:root[data-theme='ivory'] body .game-page-layout .thought-bubble,
+:root[data-theme='ivory'] body .game-page-layout .buff-pop,
+:root[data-theme='ivory'] body .game-page-layout .system-notif {
+  background-color: var(--silk);
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-md);
+  box-shadow: var(--fold);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* TIER 2 — dialogs: the world moves instead.
+   The dialog is flat cloth at the original surface level with no shadow of its
+   own; what changes is everything behind it. A dialog is a change of context,
+   so the context is what recedes. */
+:root[data-theme='ivory'] body .modal-content {
+  background-color: var(--silk);
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-lg);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* The recede itself. `backdrop-filter: blur()` is removed on purpose and it is
+   not an oversight: a blur says "frosted glass in front of the world", which is
+   the glassmorphism vocabulary and the one thing this theme spent two passes
+   getting rid of. The world here is not behind glass — it is further away. */
+:root[data-theme='ivory'] body .modal-overlay,
+:root[data-theme='ivory'] body .combat-overlay {
+  background: var(--theme-overlay-bg);
+  box-shadow: var(--recede);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+:root[data-theme='ivory'] body select option {
+  color: var(--theme-text-primary);
+  background: #f2efe9;
+}
+
+/* ===========================================================================
+   FOCUS
+   Rule 4's hardest case. base.css already rings focus in --theme-primary, which
+   is the gold; on this cloth that alone is thin, so the ring is paired with the
+   deepest deboss the theme owns. Focus must never be shadow-only.
+   =========================================================================== */
+
+:root[data-theme='ivory'] body .game-page-layout :focus-visible {
+  outline: 2px solid var(--weft-gold);
+  outline-offset: 2px;
+}
+
+/* ===========================================================================
+   ACCESSIBILITY
+   Neumorphism is form made of light, so every mode that takes the light away
+   has to hand the form back as thread. These blocks are not polish.
+   =========================================================================== */
+
+/* ===========================================================================
+   THE FRAMES, RETURNED
+   This block is no longer a polish pass — since the default rendering shows
+   every element by relief alone, this is the ONLY place a component boundary
+   reaches 3:1. It has to cover every component, not a representative sample:
+   anything missing here is a control that has no boundary for a viewer who has
+   explicitly asked their system for stronger ones. The transparent 1px each
+   element already carries means colouring it in moves nothing.
+   =========================================================================== */
+@media (prefers-contrast: more) {
+  :root[data-theme='ivory'] body .game-page-layout .tool-btn,
+  :root[data-theme='ivory'] body .game-page-layout .collapse-toggle,
+  :root[data-theme='ivory'] body .game-page-layout .scene-title-action,
+  :root[data-theme='ivory'] body .game-page-layout .top-btn,
+  :root[data-theme='ivory'] body .game-page-layout .input-btn,
+  :root[data-theme='ivory'] body .game-page-layout .send-btn,
+  :root[data-theme='ivory'] body .game-page-layout .input-field,
+  :root[data-theme='ivory'] body .game-page-layout .form-input,
+  :root[data-theme='ivory'] body .game-page-layout .form-select,
+  :root[data-theme='ivory'] body .game-page-layout .mini-select,
+  :root[data-theme='ivory'] body .game-page-layout .focus-select,
+  :root[data-theme='ivory'] body .game-page-layout .cascader-trigger,
+  :root[data-theme='ivory'] body .game-page-layout select,
+  :root[data-theme='ivory'] body .game-page-layout .tab-list,
+  :root[data-theme='ivory'] body .game-page-layout .tab-item.tab-active,
+  :root[data-theme='ivory'] body .game-page-layout .res-track,
+  :root[data-theme='ivory'] body .game-page-layout .kv-item,
+  :root[data-theme='ivory'] body .game-page-layout .item-entry.open,
+  :root[data-theme='ivory'] body .game-page-layout .quest-item.open,
+  :root[data-theme='ivory'] body .game-page-layout .option-item,
+  :root[data-theme='ivory'] body .game-page-layout .option-custom,
+  :root[data-theme='ivory'] body .game-page-layout .bubble-player,
+  :root[data-theme='ivory'] body .game-page-layout .dialogue-card,
+  :root[data-theme='ivory'] body .options-popup,
+  :root[data-theme='ivory'] body .cascader-dropdown,
+  :root[data-theme='ivory'] body .ctx-menu,
+  :root[data-theme='ivory'] body .thought-bubble,
+  :root[data-theme='ivory'] body .buff-pop,
+  :root[data-theme='ivory'] body .system-notif,
+  :root[data-theme='ivory'] body .modal-content,
+  :root[data-theme='ivory'] body .game-page-layout .options-popup,
+  :root[data-theme='ivory'] body .game-page-layout .cascader-dropdown,
+  :root[data-theme='ivory'] body .game-page-layout .ctx-menu,
+  :root[data-theme='ivory'] body .game-page-layout .thought-bubble,
+  :root[data-theme='ivory'] body .game-page-layout .buff-pop,
+  :root[data-theme='ivory'] body .game-page-layout .system-notif {
+    border-color: var(--rim-strong);
+  }
+
+  /* The gold weft is the selected-tab state indicator; at higher contrast it
+     goes solid rather than relying on the relief that surrounds it. */
+  :root[data-theme='ivory'] body .game-page-layout .tab-active {
+    box-shadow:
+      var(--emboss),
+      inset 0 -2px 0 var(--weft-gold);
+  }
+}
+
+/* The weave and the moon are the only translucency in the theme; relief is
+   opaque by construction, so this mode costs almost nothing here. */
+/* No `prefers-reduced-transparency` block, and that is a result rather than an
+   omission: with the weave and the moon gone there is no see-through surface
+   left anywhere in the theme. Every panel, control and floating layer is a
+   solid fill, so the reduced-transparency rendering and the default rendering
+   are already the same pixels. The block this replaces existed only to strip
+   the two patterns. */
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme='ivory'] body .game-page-layout .tool-btn,
+  :root[data-theme='ivory'] body .game-page-layout .collapse-toggle,
+  :root[data-theme='ivory'] body .game-page-layout .scene-title-action,
+  :root[data-theme='ivory'] body .game-page-layout .top-btn,
+  :root[data-theme='ivory'] body .game-page-layout .input-btn,
+  :root[data-theme='ivory'] body .game-page-layout .send-btn,
+  :root[data-theme='ivory'] body .game-page-layout .tab-item,
+  :root[data-theme='ivory'] body .game-page-layout .item-entry,
+  :root[data-theme='ivory'] body .game-page-layout .quest-item,
+  :root[data-theme='ivory'] body .game-page-layout .news-item,
+  :root[data-theme='ivory'] body .game-page-layout .scene-npc-item {
+    transition: none;
+  }
+}
+
+/* Forced colours discards every shadow in this file at once — i.e. the entire
+   theme. What is left has to be the thread, so borders become system colours
+   rather than disappearing along with the light. */
+@media (forced-colors: active) {
+  :root[data-theme='ivory'] body .game-page-layout .tool-btn,
+  :root[data-theme='ivory'] body .game-page-layout .collapse-toggle,
+  :root[data-theme='ivory'] body .game-page-layout .scene-title-action,
+  :root[data-theme='ivory'] body .game-page-layout .top-btn,
+  :root[data-theme='ivory'] body .game-page-layout .input-btn,
+  :root[data-theme='ivory'] body .game-page-layout .send-btn,
+  :root[data-theme='ivory'] body .game-page-layout .input-field,
+  :root[data-theme='ivory'] body .game-page-layout .tab-list,
+  :root[data-theme='ivory'] body .game-page-layout .tab-active,
+  :root[data-theme='ivory'] body .game-page-layout .res-track,
+  :root[data-theme='ivory'] body .game-page-layout .kv-item {
+    border: 1px solid CanvasText;
+  }
+
+  :root[data-theme='ivory'] body .game-page-layout .tab-active {
+    border-bottom: 2px solid Highlight;
+  }
 }

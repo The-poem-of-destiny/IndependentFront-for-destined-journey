@@ -42,11 +42,18 @@ import './themes/crimson.css';
 import './themes/indigo.css';
 import './themes/bronze.css';
 import './themes/sakura.css';
-import './themes/ivory.css';
 import './themes/misty-lilac.css';
 import './themes/forest.css';
 import './themes/ocean.css';
 import './styles/integrated-game-surfaces.css';
+// 🔴 ivory 刻意排在 integrated-game-surfaces.css **之后**（其余九个主题仍在它之前）。
+//    那份表的文件头写明「deliberately load after the individual theme sheets」，
+//    它给 ivory 的是一整套材质：全屏丝绸底盘贴图 + 近乎透明的面板（烟罗叠雾）。
+//    ivory 的织锦浮雕原型要求一块**不透明连续布面**，两者互斥且特异度相同 ——
+//    只靠特异度赢要给每条规则加冗余选择器，所以改用顺序，与本仓既有约定一致。
+//    本文件只含 `[data-theme='ivory']` 选择器、且 integrated 不重定义任何
+//    `--theme-*`，因此这一行的位置对另外九个主题零影响。
+import './themes/ivory.css';
 
 const app = createApp(App);
 const pinia = createPinia();
