@@ -137,6 +137,10 @@ function makeGameStore(overrides: Record<string, any> = {}) {
     clearAgentStatus: vi.fn(),
     addAgentLogEntry: vi.fn(),
     refreshFromDb: vi.fn(async () => {}),
+    // 🆕 结算确认（2026-08-13 需求 D）：默认立即以原文确认（模拟玩家直接点「注入正文」）
+    awaitCombatSummaryReview: vi.fn(async (p: { summaryText: string }) => p.summaryText),
+    confirmCombatSummary: vi.fn(),
+    discardCombatSummary: vi.fn(),
     markOpeningPromptConsumed: vi.fn(async () => true),
     releaseOpeningPromptClaim: vi.fn(async () => true),
     recordEjsVarsRejection: vi.fn(),
@@ -1620,6 +1624,140 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     expect(holder.handle?.preSnapshotId).toBe('snap-pre-combat');
     // 终局后的清理仍在 runCombatV3 完成之后执行（顺序未被提前破坏）
     expect(gameStore.exitCombat).toHaveBeenCalled();
+  });
+
+  it('🔴 2026-08-13 真机 debug：战斗终局落库后回读 store（refreshFromDb）—— 满血假象修复', async () => {
+    // 战斗链路（store.startCombat → startCombatV3）不经过 run() 的 finally，
+    // 终局 commitChatState 只写 Dexie；不回读的话 HUD 一直显示开战前的血量/经验。
+    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
+    const gameStore = makeGameStore({
+      characters: [playerCharStub()],
+      enterCombat: vi.fn(),
+      exitCombat: vi.fn(),
+      applyCombatEvent: vi.fn(),
+      updateAgentStatus: vi.fn(),
+      clearAgentStatus: vi.fn(),
+      setCombatCoordinator: vi.fn((h: unknown) => (holder.handle = h as never)),
+      awaitCombatSummaryReview: vi.fn(async (p: { summaryText: string }) => p.summaryText),
+      activeSave: { id: 's', metadata: { totalTurns: 1 } },
+    });
+    runCombatV3Mock.mockResolvedValue({
+      narrativeSummary: 'ok',
+      patches: [],
+      totalExp: 2,
+      totalFp: 0,
+      loot: [],
+      rounds: 1,
+      outcome: 'ally_win',
+    });
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore({ apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }] }),
+      saveId: 'save-test',
+    });
+
+    await (pipeline as any).handleCombatTrigger(
+      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
+      '',
+    );
+    (gameStore.refreshFromDb as ReturnType<typeof vi.fn>).mockClear();
+    await holder.handle!.start!();
+
+    // 终局落库后回读了 store（HUD 血量/经验可见）
+    expect(gameStore.refreshFromDb).toHaveBeenCalledTimes(1);
+
+    // COR-02：存档已切走时不回读（给别人的存档跑刷新没有意义）
+    (gameStore.refreshFromDb as ReturnType<typeof vi.fn>).mockClear();
+    await (pipeline as any).handleCombatTrigger(
+      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
+      '',
+    );
+    gameStore.activeSaveId = 'another-save';
+    await holder.handle!.start!();
+    expect(gameStore.refreshFromDb).not.toHaveBeenCalled();
+  });
+
+  it('🔴 需求 D（2026-08-13）：终局先弹结算确认 → 玩家编辑后的文本注入正文；aborted 不弹确认', async () => {
+    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
+    const gameStore = makeGameStore({
+      characters: [playerCharStub()],
+      enterCombat: vi.fn(),
+      exitCombat: vi.fn(),
+      applyCombatEvent: vi.fn(),
+      updateAgentStatus: vi.fn(),
+      clearAgentStatus: vi.fn(),
+      setCombatCoordinator: vi.fn((h: unknown) => (holder.handle = h as never)),
+      addMessage: vi.fn((content: string, role: string) => ({
+        id: 'msg_stub',
+        role,
+        content,
+        timestamp: 0,
+        turn: 1,
+      })),
+      awaitCombatSummaryReview: vi.fn(async () => '玩家改过的战斗总结'),
+      activeSave: { id: 's', metadata: { totalTurns: 7 } },
+    });
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore({ apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }] }),
+      saveId: 'save-test',
+    });
+
+    // ① 正常终局：确认框收到结算数据，注入的是**编辑后**的文本
+    runCombatV3Mock.mockResolvedValue({
+      narrativeSummary: 'AI 原始摘要',
+      patches: [],
+      totalExp: 2,
+      totalFp: 5,
+      loot: [],
+      rounds: 2,
+      outcome: 'ally_win',
+    });
+    await (pipeline as any).handleCombatTrigger(
+      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
+      '',
+    );
+    await holder.handle!.start!();
+    expect(gameStore.awaitCombatSummaryReview).toHaveBeenCalledWith(
+      expect.objectContaining({ totalExp: 2, outcome: 'ally_win', summaryText: 'AI 原始摘要' }),
+    );
+    expect(gameStore.addMessage).toHaveBeenCalledWith(
+      '【战斗摘要】玩家改过的战斗总结',
+      'assistant',
+    );
+    // B：最近已结算战斗被记录（{{RECENT_COMBAT}} 数据源），含名单与回合数
+    expect((pipeline as any).buildContext('输入').recentCombat).toEqual({
+      allies: ['理查德'],
+      enemies: ['骷髅'],
+      outcome: 'ally_win',
+      endedAtTurn: 7,
+    });
+    // 确认之后才收面板
+    expect(gameStore.exitCombat).toHaveBeenCalled();
+
+    // ② 放弃的战斗（aborted）：不弹确认、不注入、不记录已结算
+    (gameStore.awaitCombatSummaryReview as ReturnType<typeof vi.fn>).mockClear();
+    (gameStore.addMessage as ReturnType<typeof vi.fn>).mockClear();
+    (gameStore.exitCombat as ReturnType<typeof vi.fn>).mockClear();
+    runCombatV3Mock.mockResolvedValue({
+      narrativeSummary: '战斗被放弃（M2 coordinator abandon）',
+      patches: [],
+      totalExp: 0,
+      totalFp: 0,
+      loot: [],
+      rounds: 1,
+      outcome: 'draw',
+      aborted: true,
+    });
+    await (pipeline as any).handleCombatTrigger(
+      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
+      '',
+    );
+    await holder.handle!.start!();
+    expect(gameStore.awaitCombatSummaryReview).not.toHaveBeenCalled();
+    expect(gameStore.addMessage).not.toHaveBeenCalled();
+    // aborted 未覆盖上一次的记录（仍然只有第一场的记录）
+    expect((pipeline as any)._recentCombat.outcome).toBe('ally_win');
   });
 
   it('无活跃存档回合数时 pre-combat 快照 turn 兜底 0（不阻塞开战）', async () => {

@@ -1349,6 +1349,37 @@ describe('Chain communication placeholders', () => {
     expect(result).toBe('');
   });
 
+  it('RECENT_COMBAT：缺席（没打过 / 跨会话丢内存）→ 空串（零 token，照 MAP_CONTEXT 口径）', () => {
+    const result = PLACEHOLDER_REGISTRY['RECENT_COMBAT'](mockCtx(), mockConfig());
+    expect(result).toBe('');
+  });
+
+  it('RECENT_COMBAT：已结算战斗 → <recent_combat> 事实块（名单/结果/回合数，只产事实不产指令）', () => {
+    const ctx = mockCtx({
+      recentCombat: {
+        allies: ['奥利雅思'],
+        enemies: ['洞中黏液魔物'],
+        outcome: 'ally_win',
+        endedAtTurn: 16,
+      },
+    });
+    const result = PLACEHOLDER_REGISTRY['RECENT_COMBAT'](ctx, mockConfig());
+    expect(result).toContain('<recent_combat>');
+    expect(result).toContain('我方: 奥利雅思 | 敌方: 洞中黏液魔物');
+    expect(result).toContain('结果: 我方胜利');
+    expect(result).toContain('结算时回合数: 16');
+    expect(result).toContain('已经通过战斗面板结算完成');
+  });
+
+  it('RECENT_COMBAT：allies 空名单（缺省名单的战斗）→ 渲染（玩家）占位', () => {
+    const ctx = mockCtx({
+      recentCombat: { allies: [], enemies: ['哥布林'], outcome: 'fled', endedAtTurn: 3 },
+    });
+    const result = PLACEHOLDER_REGISTRY['RECENT_COMBAT'](ctx, mockConfig());
+    expect(result).toContain('我方: （玩家）');
+    expect(result).toContain('结果: 我方撤退');
+  });
+
   it('CHAR_GEN_RESULT reads from agentOutputs', () => {
     const ctx = mockCtx();
     ctx.agentOutputs.set('char_gen', '<char_result><name>NPC</name></char_result>');

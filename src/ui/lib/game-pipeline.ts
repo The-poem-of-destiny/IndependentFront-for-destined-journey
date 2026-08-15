@@ -20,6 +20,7 @@ import type {
   AgentPreset,
   CombatTriggerMarker,
   CombatSummaryResult,
+  RecentCombatInfo,
   WorldBook,
   CraftGenRequestMarker,
   CharGenRequestMarker,
@@ -223,6 +224,15 @@ export class GamePipeline {
    * 引擎依赖）。整场战斗生命周期内有效；下次 combat_trigger 覆盖。
    */
   private _lastCombatMarker: CombatTriggerMarker | null = null;
+  /**
+   * 最近一场**已结算**战斗（2026-08-13 真机 debug：dispatcher 战后轮重触发战斗）。
+   *
+   * 战斗终局落库时记录（startCombatV3），`buildContext` 供给 `ctx.recentCombat` →
+   * `{{RECENT_COMBAT}}` 渲染。内存级（与 `_lastCombatMarker` 同口径，不持久化）：
+   * 战斗后的紧接着的下一轮是误触发高发窗口，覆盖它就够；跨会话场景里已有角色表
+   * 自带 hp=0/死亡状态可判。放弃的战斗不记录（没发生过）。
+   */
+  private _recentCombat: RecentCombatInfo | null = null;
 
   /**
    * 取 EJS `ui.log` 调试日志快照（能力面 §3.11）。
@@ -801,6 +811,10 @@ export class GamePipeline {
       //    故 placeholder-registry.map-context.test.ts 有一条源码断言盯着这两行。
       mapFlags: this.game.saveProfile ? getMapFlags(this.game.saveProfile) : undefined,
       weather: resolveSceneWeather(this.game.saveProfile),
+      // 🔴 2026-08-13 真机 debug：最近已结算战斗（{{RECENT_COMBAT}} 的数据源）。
+      //    与上面两行同一条铁律：供值必须在 buildContext —— 漏供的症状同样是
+      //    区块静默消失（dispatcher 又开始战后重触发，谁也看不见为什么）。
+      recentCombat: this._recentCombat ?? undefined,
       // 🔴 2026-08-02 修: 初始技能走 item_gen 链路 —— request_dispatcher 的 {{SKILL_STATE}}
       //    需要读到捏人页选的初始技能声明（存在 openingPrompt 里），否则主角 skills 落库为空的
       //    开局永远发不出 `<item_gen_request itemType="skill">`，技能没有 modifiers/automata。
@@ -2012,10 +2026,43 @@ export class GamePipeline {
       });
 
       this.game.clearAgentStatus('combat_v3');
-      this.game.exitCombat(); // 战斗结束关面板（终局已由 onCombatEvent 置 v3ActiveCombat）
-      if (result.narrativeSummary) {
-        this.emitMessage(`【战斗摘要】${result.narrativeSummary}`, 'assistant');
+      // 🔴 2026-08-13 真机 debug：战斗终局的 commitChatState 只写 Dexie，而本条链路
+      //（store.startCombat → coordinator.start → startCombatV3）不经过 run() 的
+      // finally —— store 从不回读，HUD 一直是开战前的血量/经验（满血假象）。
+      // 终局落库后回读一次（含 COR-02 存档切走守卫）。
+      if (this.ownsActiveSave) await this.game.refreshFromDb();
+      // 同一真机 debug：记录「最近已结算战斗」供下一轮 dispatcher 上下文（{{RECENT_COMBAT}}）
+      // —— 没有它 dispatcher 不知道正文里的战斗描写是已结算战斗的战后延续，会再发
+      // combat_trigger 把打完的战斗重演一遍。内存级（与 _lastCombatMarker 同口径）；
+      // 放弃的战斗（aborted，未落库）不算已结算，不记录。
+      if (!result.aborted) {
+        this._recentCombat = {
+          allies: [...allyNames],
+          enemies: [...enemyNames],
+          outcome: result.outcome,
+          endedAtTurn: this.game.activeSave?.metadata?.totalTurns ?? 0,
+        };
       }
+      // 🆕 结算确认框（2026-08-13 需求 D）：终局数值已落库，摘要注入前弹确认面板——
+      // 上半数值卡（经验/FP/掉落/回合/胜负，顺带解决"结算不可见"），下半可编辑摘要
+      // textarea（防 AI 乱写，玩家可改）。玩家「注入正文」→ emitMessage(编辑后文本)；
+      // 「放弃注入」→ 只收面板（数值不回滚，落库不可逆）。exitCombat 移到确认之后——
+      // 确认期间 isInCombat 靠 store 的 combatSummaryReview 维持。
+      // 放弃的战斗（aborted）不弹确认也不注入（"战斗被放弃"是内部文本，进正文是噪音）。
+      if (!result.aborted && result.narrativeSummary && this.ownsActiveSave) {
+        const finalText = await this.game.awaitCombatSummaryReview({
+          outcome: result.outcome,
+          totalExp: result.totalExp,
+          totalFp: result.totalFp,
+          loot: (result.loot as CombatSummaryResult['loot']) ?? [],
+          rounds: result.rounds,
+          summaryText: result.narrativeSummary,
+        });
+        if (finalText && finalText.trim()) {
+          this.emitMessage(`【战斗摘要】${finalText}`, 'assistant');
+        }
+      }
+      this.game.exitCombat(); // 确认收尾后关面板（终局已由 onCombatEvent 置 v3ActiveCombat）
       const summary: CombatSummaryResult = {
         narrativeSummary: result.narrativeSummary,
         patches: result.patches,

@@ -1420,6 +1420,22 @@ export interface ZoneVisibilityMatrix {
   variable: VisibilityLevel;
 }
 
+/**
+ * 最近一场已结算战斗的摘要（`AgentContext.recentCombat` 的载荷，2026-08-13）。
+ * 由 game-pipeline 在战斗终局落库时记录，`{{RECENT_COMBAT}}` 渲染成事实区块，
+ * 供 request_dispatcher 分辨「战后延续」vs「新开战斗」。
+ */
+export interface RecentCombatInfo {
+  /** 我方参战名单（marker.allies 拆分；缺省名单时 = 玩家） */
+  allies: string[];
+  /** 敌方参战名单（marker.enemies 拆分） */
+  enemies: string[];
+  /** 结算结果（与 CombatSummaryResult.outcome 同口径） */
+  outcome: 'ally_win' | 'enemy_win' | 'draw' | 'fled';
+  /** 结算发生时的回合数（save.metadata.totalTurns 口径） */
+  endedAtTurn: number;
+}
+
 /** Agent 运行上下文 */
 export interface AgentContext {
   userInput: string;
@@ -1471,6 +1487,20 @@ export interface AgentContext {
    * 提示词里却是晴天，是这条链最容易漂出来的样子。
    */
   weather?: string;
+
+  /**
+   * 最近一场**已结算**战斗的摘要（2026-08-13 真机 debug：dispatcher 战后轮重触发战斗）。
+   *
+   * 供值在 game-pipeline —— 战斗终局落库时记录（marker 名单 + outcome + 结算回合数），
+   * `buildContext` 带进 ctx，`{{RECENT_COMBAT}}` 渲染成事实区块。request_dispatcher 据此
+   * 分辨「正文在写已结算战斗的战后延续」vs「正文新开了一场战斗」—— 前者不再发
+   * `<combat_trigger>`。
+   *
+   * 🔴 **内存级**（pipeline 实例生命周期，与 `_lastCombatMarker` 同口径，不持久化）：
+   * 战斗后的**紧接着的下一轮**是误触发高发窗口，覆盖它就够；跨会话场景里已有角色表
+   * 自带 hp=0/死亡状态可判。🔴 缺席 = 没有已结算战斗记录（零 token，区块整段不出）。
+   */
+  recentCombat?: RecentCombatInfo;
 
   /**
    * 存档开局提示词原文（save.metadata.openingPrompt）——含捏人页选的初始技能/装备
