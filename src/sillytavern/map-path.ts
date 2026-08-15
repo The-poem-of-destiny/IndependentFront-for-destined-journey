@@ -403,13 +403,26 @@ export function findPath(
   }
 
   const tilePath: number[] = [];
-  let totalTimeDays = 0;
   for (let i = 0; i + 1 < waypoints.length; i++) {
     const segment = shortestSegment(pack, graph, waypoints[i], waypoints[i + 1], avoid);
     if (segment === null) return null;
-    totalTimeDays += segment.timeDays;
     // 接点去重：上一段的终点就是这一段的起点
     tilePath.push(...(tilePath.length === 0 ? segment.path : segment.path.slice(1)));
+  }
+
+  // 🔴 timeDays 沿**最终路径逐边重算**，不把各段 Dijkstra 总时按段相加：浮点加法
+  //   不结合，(e1+e2)+(e3+e4) 与 ((e1+e2)+e3)+e4 会差出一个 ε，恰跨整数边界时
+  //   ceil 会差 1 天（2026-08-15 CI 属性测试真机撞上：expected 115 / received 114）。
+  //   逐边重算让 timeDays 与「沿 tilePath 顺序把每条边加一遍」逐字节同源——段内
+  //   Dijkstra 的累积序本就是路径序，无 via 时两种算法本来就相同，有 via 时分组
+  //   差异被这次重算抹掉。
+  let totalTimeDays = 0;
+  for (let i = 0; i + 1 < tilePath.length; i++) {
+    const from = graph.nodes.get(tilePath[i]);
+    const to = graph.nodes.get(tilePath[i + 1]);
+    if (from !== undefined && to !== undefined) {
+      totalTimeDays += edgeTimeDays(pack, graph, from, to);
+    }
   }
 
   // 含边的路径至少 1 天（形心极近的两块地不该显示成「0 天到」）；原地不动是 0 天
