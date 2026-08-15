@@ -76,6 +76,8 @@ export interface NamePoolsContent {
   /** 发色/瞳色池查不到该种族时回退到的键；缺省 = 不回退 */
   defaultColorKey?: string;
   namePools: Record<string, NamePool>;
+  /** 音素种子 profile（世界书 uid 480748 移植，2026-08-15）；缺面 = 空对象（种子工具返回空） */
+  seedProfiles: Record<string, SeedProfile>;
   hairColors: Record<string, string[]>;
   eyeColors: Record<string, string[]>;
   personality: Partial<PersonalityPool>;
@@ -84,6 +86,7 @@ export interface NamePoolsContent {
 /** 空内容（注册表未就绪 / 形状不对时的确定性兜底） */
 const EMPTY_NAME_POOLS_CONTENT: NamePoolsContent = {
   namePools: {},
+  seedProfiles: {},
   hairColors: {},
   eyeColors: {},
   personality: {},
@@ -106,6 +109,7 @@ export function getNamePoolsContent(): NamePoolsContent {
     defaultRace: typeof raw.defaultRace === 'string' ? raw.defaultRace : undefined,
     defaultColorKey: typeof raw.defaultColorKey === 'string' ? raw.defaultColorKey : undefined,
     namePools: parseNamePools(raw.namePools),
+    seedProfiles: parseSeedProfiles(raw.seedProfiles),
     hairColors: parseStringListMap(raw.hairColors),
     eyeColors: parseStringListMap(raw.eyeColors),
     personality: parsePersonality(raw.personality),
@@ -182,6 +186,354 @@ function resolveColorPool(
   if (direct) return direct;
   const fallbackKey = content.defaultColorKey;
   return (fallbackKey === undefined ? undefined : map[fallbackKey]) ?? [];
+}
+
+// ═══════════════════════════════════════════════════════════
+// IPA 音素种子（世界书 uid 480748 [角色命名指导] 的 IPA-Seed 机制移植，2026-08-15）
+// ═══════════════════════════════════════════════════════════
+//
+// 世界书的原设计：不直接随机「整名」，而是先生成**音素种子**，再交给命名规则拼装，
+// 降低同质化（固定名字池抽来抽去总是那几十个名，真机已撞过「奥斯瓦尔德」）。
+// 按 ADR-28 移植口径：结果（AI 拿到多样化取名灵感）照搬，手段工程化——
+// 种子生成（随机）归 Code，创名（创意：文化风格分析→发音转写中文）归 AI（ADR-11）。
+//
+// 分工与 D25③ 同口径：**音素池/修饰符算法是机制，留在引擎；种族 profile 是世界数据，
+// 住内容仓 `name-pools.json` 的 `seedProfiles` 面**（pack 搭 namePools 分节整体替换）。
+
+/** 音素池键：P 强力（爆破/塞擦）/ S 丝滑（擦音/流音/滑音）/ D 深沉（鼻音/喉化）/ X 异质（点击/内爆/喷音/喉塞）/ V 元音 */
+export type PhonemePoolKey = 'P' | 'S' | 'D' | 'X' | 'V';
+
+/** 五组 IPA 音素池（语言通用的音系分类，不是世界数据） */
+const IPA_POOLS: Record<PhonemePoolKey, readonly string[]> = {
+  P: [
+    'p',
+    'b',
+    't',
+    'd',
+    'k',
+    'ɡ',
+    'q',
+    'ʈ',
+    'ɖ',
+    'c',
+    'ɟ',
+    'ts',
+    'dz',
+    'tʃ',
+    'dʒ',
+    'tɕ',
+    'dʑ',
+    'ʈʂ',
+    'ɖʐ',
+  ],
+  S: [
+    'f',
+    's',
+    'v',
+    'z',
+    'ʃ',
+    'ʒ',
+    'ɕ',
+    'ʑ',
+    'ʂ',
+    'ʐ',
+    'ɸ',
+    'β',
+    'θ',
+    'ð',
+    'ç',
+    'x',
+    'h',
+    'ɬ',
+    'ɮ',
+    'l',
+    'r',
+    'ɹ',
+    'ɾ',
+    'ɽ',
+    'ʎ',
+    'j',
+    'w',
+  ],
+  D: ['m', 'ɱ', 'n', 'ɳ', 'ɲ', 'ŋ', 'ɴ', 'ʁ', 'ʀ', 'ɣ', 'χ', 'ʕ', 'ɫ', 'ɢ'],
+  X: ['ǃ', 'ʘ', 'ǀ', 'ǁ', 'ǂ', 'ɓ', 'ɗ', 'ʄ', 'ɠ', 'ʛ', "p'", "t'", "k'", "q'", "ts'", "tʃ'", 'ʔ'],
+  V: [
+    'i',
+    'y',
+    'ɨ',
+    'ʉ',
+    'ɯ',
+    'u',
+    'ɪ',
+    'ʏ',
+    'ʊ',
+    'e',
+    'ø',
+    'ɘ',
+    'ɵ',
+    'ɤ',
+    'o',
+    'ə',
+    'ɛ',
+    'œ',
+    'ɜ',
+    'ɞ',
+    'ʌ',
+    'ɔ',
+    'æ',
+    'ɐ',
+    'a',
+    'ɶ',
+    'ɑ',
+    'ɒ',
+  ],
+};
+
+/** 音素 → 所属池（O(1) 反查表） */
+const PHONEME_POOL_OF: ReadonlyMap<string, PhonemePoolKey> = new Map(
+  (Object.keys(IPA_POOLS) as PhonemePoolKey[]).flatMap((key) =>
+    IPA_POOLS[key].map((ph) => [ph, key] as const),
+  ),
+);
+
+/** 元音亮/暗两组（vowelTone 修饰符的换字来源） */
+const BRIGHT_VOWELS = ['i', 'y', 'e', 'ø', 'ɪ', 'ʏ', 'ɛ', 'œ', 'æ'];
+const DARK_VOWELS = ['u', 'ɯ', 'o', 'ɤ', 'ʊ', 'ɔ', 'ɑ', 'ɒ', 'ʌ', 'ɞ'];
+
+/** 连读音变规则（音系通用的同化现象，不是世界数据） */
+const MUTATION_RULES: ReadonlyArray<{
+  prev: readonly string[];
+  curr: readonly string[];
+  to: string;
+}> = [
+  { prev: ['s', 'z'], curr: ['j', 'i', 'ɪ'], to: 'ʃ' },
+  { prev: ['t'], curr: ['s'], to: 'ts' },
+  { prev: ['d'], curr: ['z'], to: 'dz' },
+  { prev: ['t'], curr: ['ʃ'], to: 'tʃ' },
+  { prev: ['d'], curr: ['ʒ'], to: 'dʒ' },
+  { prev: ['n'], curr: ['k', 'ɡ', 'q', 'ɢ'], to: 'ŋ' },
+];
+
+/** 种族种子 profile 的修饰符层 */
+export interface SeedProfileMods {
+  startPrefer: PhonemePoolKey[];
+  endPrefer: PhonemePoolKey[];
+  maxConsecutiveConsonants: number;
+  vowelTone: 'neutral' | 'bright' | 'dark';
+  mutationChance: number;
+}
+
+/** 一个种族的音素种子 profile（世界书 raceProfiles 的形状） */
+export interface SeedProfile {
+  /** 各池抽样权重（值越大越容易抽到；缺省池 = 权重 0） */
+  weights: Partial<Record<PhonemePoolKey, number>>;
+  /** 强制池（按顺序至少抽到这些池各 1 个） */
+  force: PhonemePoolKey[];
+  /** 本轮总音素数量区间 [min, max] */
+  count: [number, number];
+  mods: SeedProfileMods;
+}
+
+const SEED_POOL_KEYS: readonly PhonemePoolKey[] = ['P', 'S', 'D', 'X', 'V'];
+
+/** `Record<string, SeedProfile>` 的容错解析：坏 profile 整条丢弃，不牵连其余 */
+function parseSeedProfiles(v: unknown): Record<string, SeedProfile> {
+  if (!isPlainObject(v)) return {};
+  const out: Record<string, SeedProfile> = {};
+  for (const [race, value] of Object.entries(v)) {
+    if (!isPlainObject(value)) continue;
+    const weights: Partial<Record<PhonemePoolKey, number>> = {};
+    if (isPlainObject(value.weights)) {
+      for (const key of SEED_POOL_KEYS) {
+        const w = Number(value.weights[key]);
+        if (Number.isFinite(w) && w >= 0) weights[key] = w;
+      }
+    }
+    const force = Array.isArray(value.force)
+      ? value.force.filter((k): k is PhonemePoolKey => SEED_POOL_KEYS.includes(k as PhonemePoolKey))
+      : [];
+    const rawCount = Array.isArray(value.count) ? value.count.map(Number) : [];
+    let lo = Number.isFinite(rawCount[0]) ? Math.floor(rawCount[0]) : 3;
+    let hi = Number.isFinite(rawCount[1]) ? Math.floor(rawCount[1]) : 4;
+    if (lo > hi) [lo, hi] = [hi, lo];
+    lo = Math.min(Math.max(lo, 1), 12);
+    hi = Math.min(Math.max(hi, lo), 12);
+
+    const mods = isPlainObject(value.mods) ? value.mods : {};
+    const parseKeyList = (x: unknown): PhonemePoolKey[] =>
+      Array.isArray(x)
+        ? x.filter((k): k is PhonemePoolKey => SEED_POOL_KEYS.includes(k as PhonemePoolKey))
+        : [];
+    const tone =
+      mods.vowelTone === 'bright' || mods.vowelTone === 'dark' ? mods.vowelTone : 'neutral';
+    const chance = Number(mods.mutationChance);
+    out[race] = {
+      weights,
+      force,
+      count: [lo, hi],
+      mods: {
+        startPrefer: parseKeyList(mods.startPrefer),
+        endPrefer: parseKeyList(mods.endPrefer),
+        maxConsecutiveConsonants: Math.min(
+          Math.max(Math.floor(Number(mods.maxConsecutiveConsonants) || 2), 1),
+          6,
+        ),
+        vowelTone: tone,
+        mutationChance: Number.isFinite(chance) ? Math.min(Math.max(chance, 0), 1) : 0,
+      },
+    };
+  }
+  return out;
+}
+
+/** 按种族取种子 profile；查不到回退 `defaultRace`（与 resolveNamePool 同链），仍查不到返回 undefined */
+function resolveSeedProfile(race: string, content: NamePoolsContent): SeedProfile | undefined {
+  const direct = content.seedProfiles[race];
+  if (direct) return direct;
+  const fallbackKey = content.defaultRace;
+  return fallbackKey === undefined ? undefined : content.seedProfiles[fallbackKey];
+}
+
+// ── 修饰符管线（世界书原文的忠实移植；每步都保持纯函数式：改副本不动入参） ──
+
+function pickWeightedPool(weights: Partial<Record<PhonemePoolKey, number>>): PhonemePoolKey {
+  let total = 0;
+  for (const key of SEED_POOL_KEYS) total += Math.max(0, weights[key] ?? 0);
+  if (total <= 0) return 'V';
+  let roll = Math.random() * total;
+  for (const key of SEED_POOL_KEYS) {
+    roll -= Math.max(0, weights[key] ?? 0);
+    if (roll <= 0) return key;
+  }
+  return 'V';
+}
+
+function shuffleInPlace<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function poolKeyOf(phoneme: string): PhonemePoolKey {
+  return PHONEME_POOL_OF.get(phoneme) ?? 'S';
+}
+
+function isVowelPhoneme(phoneme: string): boolean {
+  return poolKeyOf(phoneme) === 'V';
+}
+
+function movePreferredToEdge(
+  seed: string[],
+  preferredPools: readonly PhonemePoolKey[],
+  edge: 'start' | 'end',
+): void {
+  if (preferredPools.length === 0 || seed.length === 0) return;
+  const target = edge === 'end' ? seed.length - 1 : 0;
+  const idx = seed.findIndex((p) => preferredPools.includes(poolKeyOf(p)));
+  if (idx > -1 && idx !== target) [seed[target], seed[idx]] = [seed[idx], seed[target]];
+}
+
+function smoothConsonantClusters(seed: string[], maxConsecutiveConsonants: number): void {
+  let run = 0;
+  for (let i = 0; i < seed.length; i++) {
+    if (isVowelPhoneme(seed[i])) {
+      run = 0;
+      continue;
+    }
+    run += 1;
+    if (run <= maxConsecutiveConsonants) continue;
+    const vowelIndex = seed.findIndex((p, j) => j > i && isVowelPhoneme(p));
+    if (vowelIndex > -1) {
+      [seed[i], seed[vowelIndex]] = [seed[vowelIndex], seed[i]];
+      run = 0;
+      continue;
+    }
+    seed[i] = pick(IPA_POOLS.V)!; // 找不到后置元音就地把超额辅音换成元音
+    run = 0;
+  }
+}
+
+function shiftVowelTone(seed: string[], tone: 'neutral' | 'bright' | 'dark'): void {
+  if (tone !== 'bright' && tone !== 'dark') return;
+  for (let i = 0; i < seed.length; i++) {
+    if (!isVowelPhoneme(seed[i]) || Math.random() >= 0.45) continue;
+    if (tone === 'bright' && DARK_VOWELS.includes(seed[i])) seed[i] = pick(BRIGHT_VOWELS)!;
+    else if (tone === 'dark' && BRIGHT_VOWELS.includes(seed[i])) seed[i] = pick(DARK_VOWELS)!;
+  }
+}
+
+function applyMutations(seed: string[], chance: number): void {
+  if (chance <= 0) return;
+  for (let i = 1; i < seed.length; i++) {
+    if (Math.random() >= chance) continue;
+    for (const rule of MUTATION_RULES) {
+      if (rule.prev.includes(seed[i - 1]) && rule.curr.includes(seed[i])) {
+        seed[i] = rule.to;
+        break;
+      }
+    }
+  }
+}
+
+function dedupeAdjacent(seed: string[]): void {
+  for (let i = 1; i < seed.length; i++) {
+    if (seed[i] !== seed[i - 1]) continue;
+    const pool = IPA_POOLS[poolKeyOf(seed[i])];
+    if (pool.length < 2) continue;
+    let replaced = seed[i];
+    let guard = 0;
+    while (replaced === seed[i] && guard < 8) {
+      replaced = pick(pool)!;
+      guard += 1;
+    }
+    seed[i] = replaced;
+  }
+}
+
+function buildSeedOnce(profile: SeedProfile): string[] {
+  const [lo, hi] = profile.count;
+  const targetCount = randInt(lo, hi);
+  const seed: string[] = [];
+  for (const forcedPool of profile.force) {
+    if (seed.length >= targetCount) break;
+    seed.push(pick(IPA_POOLS[forcedPool]) ?? pick(IPA_POOLS.V)!);
+  }
+  while (seed.length < targetCount) {
+    const poolKey = pickWeightedPool(profile.weights);
+    seed.push(pick(IPA_POOLS[poolKey]) ?? pick(IPA_POOLS.V)!);
+  }
+  const next = shuffleInPlace(seed.slice());
+  const mods = profile.mods;
+  movePreferredToEdge(next, mods.startPrefer, 'start');
+  movePreferredToEdge(next, mods.endPrefer, 'end');
+  smoothConsonantClusters(next, mods.maxConsecutiveConsonants);
+  shiftVowelTone(next, mods.vowelTone);
+  applyMutations(next, mods.mutationChance);
+  dedupeAdjacent(next);
+  return next;
+}
+
+/**
+ * 生成 IPA 音素种子（世界书 uid 480748 机制）。
+ *
+ * 返回 `['t/a/ʃ/i/n/ɑ', ...]` 形式的种子串——**不是成品名**，是取名灵感；
+ * 创名（文化风格分析→按发音转写中文）是 AI 的活，规则在 char_gen 提示词。
+ * 该种族没有 profile（且回退不到 defaultRace）→ 空数组（确定性兜底，工具层
+ * 会提示 AI 改用 random_name）。
+ *
+ * @param count 生成几组（钳到 1-8；世界书口径人类 3 组、其余 1 组）
+ */
+export function randomNameSeed(
+  race: string,
+  count = 1,
+  content: NamePoolsContent = getNamePoolsContent(),
+): string[] {
+  const profile = resolveSeedProfile(race, content);
+  if (!profile) return [];
+  const total = Math.min(Math.max(Math.floor(Number(count) || 1), 1), 8);
+  return Array.from({ length: total }, () => buildSeedOnce(profile).join('/'));
 }
 
 // ═══════════════════════════════════════════════════════════

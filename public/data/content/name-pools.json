@@ -1,7 +1,81 @@
 {
-  "$comment": "占位内容（内容-引擎分离 §6 / D25③）。名字池按**血脉 name** 建键（char_gen 的 random_name 工具就是拿种族名来查的），查不到时回落 defaultRace；发色/瞳色查不到回落 defaultColorKey。占位只铺 6 个常见种族，其余种族靠回落照常出名字。personality 六维的 code 字母与真实内容一致——code 会被写进角色的 personality 属性并被提示词消费，换字母等于换语义。",
+  "$comment": "占位内容（内容-引擎分离 §6 / D25③）。名字池按**血脉 name** 建键（char_gen 的 random_name 工具就是拿种族名来查的），查不到时回落 defaultRace；发色/瞳色查不到回落 defaultColorKey。占位只铺 6 个常见种族，其余种族靠回落照常出名字。personality 六维的 code 字母与真实内容一致——code 会被写进角色的 personality 属性并被提示词消费，换字母等于换语义。seedProfiles 是 IPA 音素种子 profile（世界书 uid 480748 机制移植，2026-08-15）：五池权重（P 爆破/S 擦流/D 鼻喉/X 异质/V 元音）+ 强制池 + 音素数区间 + 修饰符，random_name_seed 工具按它产种子供 AI 创名。",
   "defaultRace": "人类",
   "defaultColorKey": "默认",
+  "seedProfiles": {
+    "人类": {
+      "weights": { "P": 45, "S": 20, "D": 25, "X": 2, "V": 18 },
+      "force": ["V"],
+      "count": [3, 4],
+      "mods": {
+        "startPrefer": ["P", "S"],
+        "endPrefer": ["V", "D"],
+        "maxConsecutiveConsonants": 2,
+        "vowelTone": "neutral",
+        "mutationChance": 0.12
+      }
+    },
+    "精灵": {
+      "weights": { "P": 5, "S": 80, "D": 5, "X": 1, "V": 28 },
+      "force": ["S", "V"],
+      "count": [4, 6],
+      "mods": {
+        "startPrefer": ["S", "V"],
+        "endPrefer": ["V", "S"],
+        "maxConsecutiveConsonants": 1,
+        "vowelTone": "bright",
+        "mutationChance": 0.22
+      }
+    },
+    "矮人": {
+      "weights": { "P": 38, "S": 8, "D": 52, "X": 3, "V": 16 },
+      "force": ["D", "P"],
+      "count": [4, 6],
+      "mods": {
+        "startPrefer": ["D", "P"],
+        "endPrefer": ["D", "V"],
+        "maxConsecutiveConsonants": 2,
+        "vowelTone": "dark",
+        "mutationChance": 0.16
+      }
+    },
+    "兽族": {
+      "weights": { "P": 62, "S": 10, "D": 26, "X": 3, "V": 14 },
+      "force": ["P"],
+      "count": [3, 5],
+      "mods": {
+        "startPrefer": ["P", "D"],
+        "endPrefer": ["D", "V"],
+        "maxConsecutiveConsonants": 2,
+        "vowelTone": "dark",
+        "mutationChance": 0.18
+      }
+    },
+    "血族": {
+      "weights": { "P": 16, "S": 44, "D": 36, "X": 5, "V": 20 },
+      "force": ["S", "D"],
+      "count": [5, 7],
+      "mods": {
+        "startPrefer": ["S", "D"],
+        "endPrefer": ["S", "V"],
+        "maxConsecutiveConsonants": 2,
+        "vowelTone": "dark",
+        "mutationChance": 0.28
+      }
+    },
+    "不死生物": {
+      "weights": { "P": 18, "S": 14, "D": 56, "X": 18, "V": 16 },
+      "force": ["D", "X"],
+      "count": [4, 7],
+      "mods": {
+        "startPrefer": ["D", "X"],
+        "endPrefer": ["D", "S"],
+        "maxConsecutiveConsonants": 3,
+        "vowelTone": "dark",
+        "mutationChance": 0.24
+      }
+    }
+  },
   "namePools": {
     "人类": {
       "male": [

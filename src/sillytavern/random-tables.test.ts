@@ -17,6 +17,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   randomName,
+  randomNameSeed,
   randomHairColor,
   randomEyeColor,
   randomPersonality,
@@ -25,6 +26,7 @@ import {
   getTierAttributeCap,
   getNamePoolsContent,
   type NamePoolsContent,
+  type SeedProfile,
 } from './random-tables';
 import { getContentRegistry, setContentRegistry } from '@ui/stores/content-store';
 
@@ -35,6 +37,20 @@ const FIXTURE: NamePoolsContent = {
   namePools: {
     alpha: { male: ['A1', 'A2', 'A3'], female: ['A4', 'A5'], surnames: ['S1', 'S2'] },
     nosurname: { male: ['N1', 'N2'], female: ['N3'], surnames: [] },
+  },
+  seedProfiles: {
+    alpha: {
+      weights: { P: 40, S: 20, D: 20, X: 0, V: 20 },
+      force: ['V'],
+      count: [3, 4],
+      mods: {
+        startPrefer: ['P', 'S'],
+        endPrefer: ['V', 'D'],
+        maxConsecutiveConsonants: 2,
+        vowelTone: 'neutral',
+        mutationChance: 0,
+      },
+    },
   },
   hairColors: { alpha: ['h1', 'h2'], fallback: ['hf'] },
   eyeColors: { alpha: ['e1', 'e2'], fallback: ['ef'] },
@@ -51,6 +67,7 @@ const FIXTURE: NamePoolsContent = {
 /** 空内容（各池皆空）——注册表未就绪时的等价物 */
 const EMPTY: NamePoolsContent = {
   namePools: {},
+  seedProfiles: {},
   hairColors: {},
   eyeColors: {},
   personality: {},
@@ -224,6 +241,244 @@ describe('randomName avoid（防重名）', () => {
       const given = randomName('alpha', '男', FIXTURE, ['完全无关的名字']).split('·')[0];
       expect(FIXTURE.namePools.alpha.male).toContain(given);
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// randomNameSeed（IPA 音素种子，世界书 uid 480748 机制移植）
+// ═══════════════════════════════════════════════════════════
+
+/** fixture 的 alpha profile：X 权重 0、mutationChance 0 —— 不变量可精确断言 */
+const SEED_PROFILE = FIXTURE.seedProfiles.alpha;
+
+/** 全部合法音素（用于「音素都来自已知池」断言） */
+const ALL_PHONEMES = new Set(
+  ([] as string[]).concat(
+    phonemePoolForTest('P'),
+    phonemePoolForTest('S'),
+    phonemePoolForTest('D'),
+    phonemePoolForTest('X'),
+    phonemePoolForTest('V'),
+  ),
+);
+
+/** 测试侧音素池镜像（引擎不导出 IPA_POOLS，这里按公开类型重述一份做断言依据） */
+function phonemePoolForTest(key: 'P' | 'S' | 'D' | 'X' | 'V'): string[] {
+  const pools: Record<'P' | 'S' | 'D' | 'X' | 'V', string[]> = {
+    P: [
+      'p',
+      'b',
+      't',
+      'd',
+      'k',
+      'ɡ',
+      'q',
+      'ʈ',
+      'ɖ',
+      'c',
+      'ɟ',
+      'ts',
+      'dz',
+      'tʃ',
+      'dʒ',
+      'tɕ',
+      'dʑ',
+      'ʈʂ',
+      'ɖʐ',
+    ],
+    S: [
+      'f',
+      's',
+      'v',
+      'z',
+      'ʃ',
+      'ʒ',
+      'ɕ',
+      'ʑ',
+      'ʂ',
+      'ʐ',
+      'ɸ',
+      'β',
+      'θ',
+      'ð',
+      'ç',
+      'x',
+      'h',
+      'ɬ',
+      'ɮ',
+      'l',
+      'r',
+      'ɹ',
+      'ɾ',
+      'ɽ',
+      'ʎ',
+      'j',
+      'w',
+    ],
+    D: ['m', 'ɱ', 'n', 'ɳ', 'ɲ', 'ŋ', 'ɴ', 'ʁ', 'ʀ', 'ɣ', 'χ', 'ʕ', 'ɫ', 'ɢ'],
+    X: [
+      'ǃ',
+      'ʘ',
+      'ǀ',
+      'ǁ',
+      'ǂ',
+      'ɓ',
+      'ɗ',
+      'ʄ',
+      'ɠ',
+      'ʛ',
+      "p'",
+      "t'",
+      "k'",
+      "q'",
+      "ts'",
+      "tʃ'",
+      'ʔ',
+    ],
+    V: [
+      'i',
+      'y',
+      'ɨ',
+      'ʉ',
+      'ɯ',
+      'u',
+      'ɪ',
+      'ʏ',
+      'ʊ',
+      'e',
+      'ø',
+      'ɘ',
+      'ɵ',
+      'ɤ',
+      'o',
+      'ə',
+      'ɛ',
+      'œ',
+      'ɜ',
+      'ɞ',
+      'ʌ',
+      'ɔ',
+      'æ',
+      'ɐ',
+      'a',
+      'ɶ',
+      'ɑ',
+      'ɒ',
+    ],
+  };
+  return pools[key];
+}
+
+/** 音素 → 池键（测试侧镜像） */
+function poolOfPhoneme(ph: string): 'P' | 'S' | 'D' | 'X' | 'V' {
+  for (const key of ['P', 'S', 'D', 'X', 'V'] as const) {
+    if (phonemePoolForTest(key).includes(ph)) return key;
+  }
+  throw new Error(`未知音素: ${ph}`);
+}
+
+describe('randomNameSeed（IPA 音素种子）', () => {
+  it('形状："/" 分隔的音素串，音素全部来自五池之一', () => {
+    for (let i = 0; i < 60; i++) {
+      const [seed] = randomNameSeed('alpha', 1, FIXTURE);
+      expect(seed).toBeTruthy();
+      for (const ph of seed.split('/')) expect(ALL_PHONEMES.has(ph), `未知音素 ${ph}`).toBe(true);
+    }
+  });
+
+  it('音素数量落在 profile 的 count 区间内', () => {
+    for (let i = 0; i < 60; i++) {
+      const [seed] = randomNameSeed('alpha', 1, FIXTURE);
+      const n = seed.split('/').length;
+      expect(n).toBeGreaterThanOrEqual(SEED_PROFILE.count[0]);
+      expect(n).toBeLessThanOrEqual(SEED_PROFILE.count[1]);
+    }
+  });
+
+  it('强制池（force: V）在种子里至少出现一次', () => {
+    for (let i = 0; i < 40; i++) {
+      const [seed] = randomNameSeed('alpha', 1, FIXTURE);
+      const keys = seed.split('/').map(poolOfPhoneme);
+      expect(keys).toContain('V');
+    }
+  });
+
+  it('权重为 0 的池（X: 0）永不出现', () => {
+    for (let i = 0; i < 60; i++) {
+      const [seed] = randomNameSeed('alpha', 1, FIXTURE);
+      for (const ph of seed.split('/')) expect(poolOfPhoneme(ph)).not.toBe('X');
+    }
+  });
+
+  it('相邻音素不重复（dedupeAdjacent 不变量）', () => {
+    for (let i = 0; i < 60; i++) {
+      const [seed] = randomNameSeed('alpha', 1, FIXTURE);
+      const parts = seed.split('/');
+      for (let j = 1; j < parts.length; j++) expect(parts[j]).not.toBe(parts[j - 1]);
+    }
+  });
+
+  it('连续辅音不超过 maxConsecutiveConsonants（平滑不变量）', () => {
+    for (let i = 0; i < 60; i++) {
+      const [seed] = randomNameSeed('alpha', 1, FIXTURE);
+      let run = 0;
+      for (const ph of seed.split('/')) {
+        if (poolOfPhoneme(ph) === 'V') {
+          run = 0;
+          continue;
+        }
+        run += 1;
+        expect(run).toBeLessThanOrEqual(SEED_PROFILE.mods.maxConsecutiveConsonants);
+      }
+    }
+  });
+
+  it('多次调用产生不同种子（组合空间远大于固定池）', () => {
+    const seeds = new Set<string>();
+    for (let i = 0; i < 80; i++) seeds.add(randomNameSeed('alpha', 1, FIXTURE)[0]);
+    expect(seeds.size).toBeGreaterThan(40);
+  });
+
+  it('count 参数钳制：0/负数 → 1，超大 → 8', () => {
+    expect(randomNameSeed('alpha', 0, FIXTURE)).toHaveLength(1);
+    expect(randomNameSeed('alpha', -5, FIXTURE)).toHaveLength(1);
+    expect(randomNameSeed('alpha', 100, FIXTURE)).toHaveLength(8);
+  });
+
+  it('未知种族回退 defaultRace 的 profile（与名字池同链）', () => {
+    const seeds = randomNameSeed('不存在的种族', 2, FIXTURE);
+    expect(seeds).toHaveLength(2);
+    for (const ph of seeds[0].split('/')) expect(ALL_PHONEMES.has(ph)).toBe(true);
+  });
+
+  it('种族无 profile 且回退不到 defaultRace → 空数组（确定性兜底，不抛）', () => {
+    const noSeed: NamePoolsContent = { ...FIXTURE, seedProfiles: {}, defaultRace: undefined };
+    expect(randomNameSeed('alpha', 3, noSeed)).toEqual([]);
+  });
+
+  it('空内容（注册表未就绪）→ 空数组', () => {
+    expect(randomNameSeed('alpha', 1, EMPTY)).toEqual([]);
+  });
+
+  it('parseSeedProfiles 容错：坏形状的 profile 整条丢弃，其余照常', () => {
+    seedRegistry({
+      ...FIXTURE,
+      seedProfiles: {
+        good: SEED_PROFILE as unknown as Record<string, unknown>,
+        bad: 'not-an-object',
+        alsoBad: { weights: 'x', force: 42, count: 'nope', mods: null },
+      },
+    });
+    const content = getNamePoolsContent();
+    expect(Object.keys(content.seedProfiles).sort()).toEqual(['alsoBad', 'good']);
+    // 坏 profile 解析成默认形状而非消失（count 缺省 3-4、mods 全默认）
+    const bad = content.seedProfiles.alsoBad as SeedProfile;
+    expect(bad.count).toEqual([3, 4]);
+    expect(bad.force).toEqual([]);
+    expect(bad.mods.vowelTone).toBe('neutral');
+    expect(bad.mods.mutationChance).toBe(0);
+    // good 原样可产种子
+    expect(randomNameSeed('good', 1, content)).toHaveLength(1);
   });
 });
 
