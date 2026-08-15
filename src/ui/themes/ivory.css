@@ -35,8 +35,11 @@
  *    surface behind it. A control that needs its own fill to be seen has failed
  *    and must be fixed with light or thread, not with paint.
  *
- * 2. FOUR DEPTHS, NEVER FIVE. cloth (flat) → deboss (pressed in) → emboss
- *    (raised) → lift (left the cloth entirely, floating layers only).
+ * 2. THREE DEPTHS, AND NOTHING EVER LEAVES THE CLOTH. cloth (flat) → deboss
+ *    (pressed in) → emboss (raised). There is no elevation tier: emboss and
+ *    deboss are both operations on a surface you cannot leave, so "floating"
+ *    has no representation here and is not faked with a drop shadow. Overlays
+ *    are handled by --fold and --recede instead; see their note below.
  *    **Containers deboss, contents emboss. Never emboss inside an emboss** —
  *    that is how neumorphic UIs turn into a field of marshmallows.
  *
@@ -58,7 +61,11 @@
   --theme-card-bg: rgba(253, 252, 248, 0.94);
   --theme-card-border: #cec7ba;
   --theme-surface-muted: #e2ded5;
-  --theme-overlay-bg: rgba(31, 33, 35, 0.34);
+  /* A warm dim, not a neutral one. Neutral grey over moonwhite reads as dirt on
+     the cloth; this is the same --thread-shade every shadow in the theme uses,
+     so the world receding is the same light getting darker rather than a sheet
+     of grey being laid over it. */
+  --theme-overlay-bg: rgba(64, 57, 45, 0.4);
 
   --theme-title-bar-bg: #dfdcd4;
   --theme-title-bar-text: #373532;
@@ -165,10 +172,32 @@
   --deboss-deep:
     inset -3px -3px 7px rgba(var(--thread-light), 0.9),
     inset 3px 3px 7px rgba(var(--thread-shade), 0.18);
-  /* Depth 3 — off the cloth. Floating layers only; this is the one place a
-     genuine drop shadow is allowed, because the layer really is above. */
-  --lift:
-    -4px -4px 10px rgba(var(--thread-light), 0.7), 6px 10px 26px rgba(var(--thread-shade), 0.2);
+  /* A large recess casts a proportionally larger edge shadow — same depth, not
+     a fifth one. The reading well is ~700px wide; --deboss at 2px would read as
+     a hairline on something that size and the well would vanish. */
+  --deboss-well:
+    inset -5px -5px 12px rgba(var(--thread-light), 0.85),
+    inset 5px 5px 14px rgba(var(--thread-shade), 0.16);
+
+  /* ===== Overlays: two tiers, because neumorphism has no word for "above" =====
+     Emboss and deboss are both operations on a surface you cannot leave, so a
+     floating layer has no representation in this vocabulary at all. Rather than
+     invent an elevation shadow (the usual cheat), overlays are split by what
+     they actually are:
+
+     --fold    An attached menu is a flap of the same cloth turned out from its
+               trigger. It is FLAT — a fold has an edge, not a relief — and it
+               casts a short contact shadow where it meets the surface. This is
+               not an elevation shadow; it does not grow with importance.
+     --recede  A dialog changes context, so the CONTEXT moves. The world is
+               pressed down and dimmed at the viewport edge and the dialog sits
+               flat at the original surface level. Nothing ever rises.
+
+     Both are only viable because --rim guarantees every component boundary
+     ≥3:1: a completely flat overlay still reads as a distinct object without
+     borrowing a drop shadow to say so. */
+  --fold: 0 2px 5px rgba(var(--thread-shade), 0.11);
+  --recede: inset 0 0 90px rgba(var(--thread-shade), 0.26);
 
   --theme-shadow-sm: 0 1px 3px rgba(48, 45, 39, 0.07);
   --theme-shadow-md: 0 2px 8px rgba(48, 45, 39, 0.1);
@@ -209,15 +238,26 @@
   box-shadow: none;
 }
 
-/* The reading field keeps a slightly lighter fill than the frame around it.
-   This is the one tonal step in the theme that is not made of light, and it is
-   deliberate: the narrative is the protagonist and needs to be findable before
-   any relief is read. Whether it should instead be a shallow recess is the open
-   question in the panel discussion. */
+/* THE READING WELL. Removing the pattern took the structure with it: five flat
+   panels separated by 1px seams is one undifferentiated warm field, and the
+   25/50/25 topology stops existing visually. Depth has to carry what the
+   texture used to.
+
+   So the chrome stays flat and the narrative is cut INTO it. That gives the
+   centre column a real boundary, and it costs nothing in quietness — a recess
+   is the calmest thing a surface can do, which is exactly what a field the
+   player reads for hours should be. It also keeps the nesting clean: controls
+   emboss from flat chrome, so no relief is ever stacked on another.
+
+   The fill is --silk-pressed, the same tone every other recess in the theme
+   uses (input field, tab tray, resource channel). Debossed things are that
+   colour here; that consistency is what makes the depth legible as a language
+   rather than as a set of one-off effects. */
 :root[data-theme='ivory'] body .game-page-layout .chat-flow {
-  background-color: var(--theme-content-bg);
+  background-color: var(--silk-pressed);
   background-image: none;
-  box-shadow: none;
+  border-radius: var(--theme-radius-lg);
+  box-shadow: var(--deboss-well);
 }
 
 /* The narrative field is the protagonist, so it is the one region with no
@@ -481,11 +521,13 @@
   box-shadow: none;
 }
 
-/* Action options are how the player actually plays, so they are the one control
-   in the narrative column allowed to leave the cloth. They live inside a lifted
-   popup, which is a different axis from the cloth — emboss inside lift is not
-   the emboss-inside-emboss Rule 2 forbids. Before this they had no border, no
-   fill and no shadow: a primary control with no boundary at all. */
+/* Action options are how the player actually plays, so they carry real relief.
+   Their container is a flap (flat, Tier 1), which is precisely why they are
+   allowed to: the only relief in that region is theirs, so Rule 2 holds. An
+   earlier draft made the popup raised and justified the options on top of it as
+   "a different axis" — that was a relief inside a relief with a nicer name.
+   Before either draft they had no border, no fill and no shadow at all: a
+   primary control with no boundary. */
 :root[data-theme='ivory'] body .game-page-layout .option-item,
 :root[data-theme='ivory'] body .game-page-layout .option-custom {
   background: var(--silk-raised);
@@ -654,20 +696,62 @@
 }
 
 /* ===========================================================================
-   LIFT — layers that have left the cloth
+   OVERLAYS — two tiers, because nothing may leave the cloth
    =========================================================================== */
 
-:root[data-theme='ivory'] body .modal-content,
+/* TIER 1 — attached layers: a flap of the same cloth, turned out.
+   Flat, because a fold has an edge rather than a relief. That is also what
+   keeps Rule 2: the options inside these are embossed, and an embossed flap
+   would put a relief inside a relief. The rim is the cut edge; --fold is the
+   short contact shadow where the flap meets the surface it came from. */
+/* Both scopings on purpose. The integrated sheet styles these popups through
+   `… body .game-page-layout :is(.options-popup, …)`, which outranks a plain
+   `… body .options-popup` — so the play-area copies kept the old translucent
+   fill while the settings-page copies took the new one. Popups render both
+   inside and outside `.game-page-layout`, so both selectors have to exist or
+   the same menu looks like two different materials depending on which page
+   opened it. */
 :root[data-theme='ivory'] body .options-popup,
 :root[data-theme='ivory'] body .cascader-dropdown,
 :root[data-theme='ivory'] body .ctx-menu,
 :root[data-theme='ivory'] body .thought-bubble,
 :root[data-theme='ivory'] body .buff-pop,
-:root[data-theme='ivory'] body .system-notif {
-  background-color: var(--silk-raised);
+:root[data-theme='ivory'] body .system-notif,
+:root[data-theme='ivory'] body .game-page-layout .options-popup,
+:root[data-theme='ivory'] body .game-page-layout .cascader-dropdown,
+:root[data-theme='ivory'] body .game-page-layout .ctx-menu,
+:root[data-theme='ivory'] body .game-page-layout .thought-bubble,
+:root[data-theme='ivory'] body .game-page-layout .buff-pop,
+:root[data-theme='ivory'] body .game-page-layout .system-notif {
+  background-color: var(--silk);
+  border: 1px solid var(--rim);
+  border-radius: var(--theme-radius-md);
+  box-shadow: var(--fold);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* TIER 2 — dialogs: the world moves instead.
+   The dialog is flat cloth at the original surface level with no shadow of its
+   own; what changes is everything behind it. A dialog is a change of context,
+   so the context is what recedes. */
+:root[data-theme='ivory'] body .modal-content {
+  background-color: var(--silk);
   border: 1px solid var(--rim);
   border-radius: var(--theme-radius-lg);
-  box-shadow: var(--lift);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* The recede itself. `backdrop-filter: blur()` is removed on purpose and it is
+   not an oversight: a blur says "frosted glass in front of the world", which is
+   the glassmorphism vocabulary and the one thing this theme spent two passes
+   getting rid of. The world here is not behind glass — it is further away. */
+:root[data-theme='ivory'] body .modal-overlay,
+:root[data-theme='ivory'] body .combat-overlay {
+  background: var(--theme-overlay-bg);
+  box-shadow: var(--recede);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
