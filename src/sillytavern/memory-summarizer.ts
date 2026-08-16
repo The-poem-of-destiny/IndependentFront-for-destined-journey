@@ -10,7 +10,7 @@
  */
 
 import type { MemoryRecord } from './types';
-import { getMemories, saveMemory } from './database';
+import { getAllMemoryIds, saveMemory } from './database';
 import { computeEmbedding } from './memory-store';
 // Q-05：从模型输出抢救 JSON 的唯一入口
 import { parseModelJson } from './model-json';
@@ -25,21 +25,41 @@ export const MEMORY_MIN_CHARS = 100;
 
 // ========== MEM 编号 ==========
 
-/** 生成下一条记忆的 ID（格式: MEM + 6 位编号） */
-export async function generateMemoryId(saveId: string): Promise<string> {
-  const memories = await getMemories(saveId);
-
+/**
+ * MEM 编号分配器（纯函数）—— **全仓唯一一份**，`session-backup.ts` 导入同一个实现。
+ *
+ * 🔴 **编号必须按全库分配，不能按存档分配**：`memories` 表的主键 `id` 是**全局主键**
+ * （`saveId` 只是索引），所以两个存档各自从 MEM000001 数下去时，第二个存档的
+ * `saveMemory()` 是 Dexie `put` —— 它会**静默覆盖**第一个存档的那一行。表现是
+ * 「另一个周目的记忆莫名其妙变成了这个周目的内容」，不报错、不掉行数。
+ *
+ * 位数规则是**补齐到至少 6 位**而不是截断到 6 位：超过 999999 条时编号自然变长，
+ * 正则 `/^MEM(\d{6,})$/` 照样认得，截断则会重新撞号。
+ */
+export function allocateMemoryIds(existingIds: string[], count: number): string[] {
   let maxNum = 0;
-  for (const m of memories) {
-    const match = m.id.match(/^MEM(\d{6})$/);
-    if (match) {
-      const num = parseInt(match[1], 10);
-      if (num > maxNum) maxNum = num;
-    }
+  for (const id of existingIds) {
+    const m = /^MEM(\d{6,})$/.exec(id);
+    if (!m) continue;
+    const n = parseInt(m[1], 10);
+    if (n > maxNum) maxNum = n;
   }
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    out.push(`MEM${String(maxNum + 1 + i).padStart(6, '0')}`);
+  }
+  return out;
+}
 
-  const nextNum = maxNum + 1;
-  return `MEM${String(nextNum).padStart(6, '0')}`;
+/**
+ * 生成下一条记忆的 ID（格式: MEM + 至少 6 位编号）。
+ *
+ * 扫的是**全库**（所有存档）的最大号 +1 —— 理由见 {@link allocateMemoryIds}。
+ * 故本函数**不收 saveId**：收了会让调用方以为编号是按存档分配的，而那正是被修掉的 bug。
+ */
+export async function generateMemoryId(): Promise<string> {
+  const existingIds = await getAllMemoryIds();
+  return allocateMemoryIds(existingIds, 1)[0];
 }
 
 // ========== 校验 ==========
@@ -153,8 +173,8 @@ export async function summarizeAndSave(
     throw new Error(`记忆校验失败: ${validation.reason}`);
   }
 
-  // 3. 生成 ID
-  const id = await generateMemoryId(saveId);
+  // 3. 生成 ID（全库唯一，不按存档编号）
+  const id = await generateMemoryId();
 
   const now = Date.now();
   const memory: MemoryRecord = {
@@ -205,7 +225,7 @@ export async function createCompressionSummaryMemory(
   keywords: string[],
   importance: number,
 ): Promise<MemoryRecord> {
-  const id = await generateMemoryId(saveId);
+  const id = await generateMemoryId();
   const now = Date.now();
   const earliestTime = oldMemories.reduce(
     (min, m) => (m.createdAt < min ? m.createdAt : min),

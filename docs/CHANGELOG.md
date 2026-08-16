@@ -9,6 +9,16 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 单存档导出/导入（跨客户端存档互传 + 依赖体检）｜ ✅ 已实施，真机走查过（2026-08-15）
+
+此前「导入存档」按钮实际是**整库恢复**（`importAllData` 替换全部数据），且所有导入失败都吞成一句「文件格式不正确」。本次交付三件事：
+
+- **引擎 `session-backup.ts`（新）**：单存档导出/导入。导出整取每存档 10 张表（清单同 `deleteSaveSlot`，插画字节不随行、拷贝盖 `blobDropped`）+ **内容依赖清单**（enabledWorldBookEntries 的 `partition:uid` token 逐条带书名/条目标题注记、工坊项目、已装内容包 id+版本、导出端 story 预设）；`checkSessionSaveDependencies` 导入前只读体检；导入**一律重发全部 id**（saveId + 每行 id + 内部引用：activeSnapshotId / sceneImages.messageId / plot 父子链 / 快照内嵌拷贝），同文件导两次得两个独立存档，全局表一行不改。依赖齐 → 存档零配置即玩（token 直接命中本机内容，地图凭 packStamp 自愈）；缺内容 → 警告弹窗逐条列出（分组文案在 `session-import-messages.ts`），可取消可强导。
+- **两处毛边修复**：首页导入现在按 `isSessionBackup` 分流——单存档文件走体检导入，整库备份文件先弹「替换全部数据」危险确认（设置页数据分区同样加了确认弹窗）；所有导入 catch 如实显示真实错误信息 + console.error。
+- **memory id 跨档撞车修复**（session-backup 实施中发现的既有 bug）：`memories` 表主键全局唯一，但 `generateMemoryId` 只扫单个存档——两个存档都会铸出 `MEM000001`，后写静默覆盖前写。改为全表扫 max（`allocateMemoryIds` 纯函数唯一实现，session-backup 与生成器共用），`test-save.ts` 的硬编码 id 同步改掉（`createTestSavePreservingData` 不清库，硬编码会覆盖真实存档的记忆行）。
+
+测试：session-backup 33 用例（往返/双导入隔离/依赖体检四态/校验/全局表不动/blobDropped）+ 警告文案 9 用例 + 跨档撞车回归（真 fake-indexeddb 双存档共存断言）；全量 8296 tests 全绿 · typecheck/lint 0。真机走查（Vite dev + 真 IndexedDB）：导出按钮/toast、往返重键（slot 0→1、MEM000002 续号）、依赖体检三轴命中与警告文案逐条核对，控制台零错误。文件选择器后面的两个确认弹窗自动化够不到，触发逻辑经代码审查确认无绕过路径。
+
 ### IPA 音素种子起名（世界书 #480748 机制移植）｜ ✅ 已实施（2026-08-15）
 
 主人复查「名字太少」时发现：世界书原版起名根本不是固定名字池，是 uid 480748「角色命名指导」（10184 字）的 **IPA-Seed 生成器**——五组音素池（P 爆破/S 擦流/D 鼻喉/X 异质/V 元音）× 11 种族 profile（权重/强制池/音素数/修饰符），每轮产音素种子交给 AI 按命名规则（文化风格→发音转写中文 + 阶级三段格式 + 种族特化）创名。这条条目**从未迁进 pack**（510 条里零命名相关），char_gen 只剩固定池（人类男名 32 个）——多样性天花板就是这么来的。按 ADR-28 移植：结果照搬、手段工程化。

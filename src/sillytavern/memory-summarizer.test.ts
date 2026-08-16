@@ -16,12 +16,12 @@ import type { MemoryRecord } from './types';
 // Mock 数据库 & memory-store — 必须在 import 被测模块之前
 // ═══════════════════════════════════════════════════════════
 
-const mockGetMemories = vi.fn();
+const mockGetAllMemoryIds = vi.fn();
 const mockSaveMemory = vi.fn();
 const mockComputeEmbedding = vi.fn();
 
 vi.mock('./database', () => ({
-  getMemories: (...args: any[]) => mockGetMemories(...args),
+  getAllMemoryIds: (...args: any[]) => mockGetAllMemoryIds(...args),
   saveMemory: (...args: any[]) => mockSaveMemory(...args),
 }));
 
@@ -30,6 +30,7 @@ vi.mock('./memory-store', () => ({
 }));
 
 import {
+  allocateMemoryIds,
   generateMemoryId,
   validateMemoryContent,
   parseMemorySummaryOutput,
@@ -265,52 +266,70 @@ describe('parseMemorySummaryOutput', () => {
 
 describe('generateMemoryId', () => {
   it('无已有记忆时应返回 MEM000001', async () => {
-    mockGetMemories.mockResolvedValue([]);
-    const id = await generateMemoryId('save_1');
+    mockGetAllMemoryIds.mockResolvedValue([]);
+    const id = await generateMemoryId();
     expect(id).toBe('MEM000001');
-    expect(mockGetMemories).toHaveBeenCalledWith('save_1');
+  });
+
+  it('应扫全库（跨存档）而不是只扫某个存档', async () => {
+    // 这条钉死本次修复：编号来源是全库主键表，取不到 saveId 也不需要 saveId。
+    mockGetAllMemoryIds.mockResolvedValue(['MEM000009']);
+    const id = await generateMemoryId();
+    expect(id).toBe('MEM000010');
+    expect(mockGetAllMemoryIds).toHaveBeenCalledWith();
   });
 
   it('已有 MEM000001-MEM000005 时应返回 MEM000006', async () => {
-    mockGetMemories.mockResolvedValue([
-      makeMemory({ id: 'MEM000001' }),
-      makeMemory({ id: 'MEM000003' }),
-      makeMemory({ id: 'MEM000005' }),
-    ]);
-    const id = await generateMemoryId('save_1');
+    mockGetAllMemoryIds.mockResolvedValue(['MEM000001', 'MEM000003', 'MEM000005']);
+    const id = await generateMemoryId();
     expect(id).toBe('MEM000006');
   });
 
   it('记忆 ID 有间隔时应找到最大编号并 +1', async () => {
-    mockGetMemories.mockResolvedValue([
-      makeMemory({ id: 'MEM000001' }),
-      makeMemory({ id: 'MEM000042' }),
-      makeMemory({ id: 'MEM000007' }),
-    ]);
-    const id = await generateMemoryId('save_1');
+    mockGetAllMemoryIds.mockResolvedValue(['MEM000001', 'MEM000042', 'MEM000007']);
+    const id = await generateMemoryId();
     expect(id).toBe('MEM000043');
   });
 
   it('混入非 MEM 格式的 ID 时应忽略它们', async () => {
-    mockGetMemories.mockResolvedValue([
-      makeMemory({ id: 'MEM000003' }),
-      makeMemory({ id: 'old_format_999' }),
-      makeMemory({ id: 'custom-id' }),
-      makeMemory({ id: 'MEM000001' }),
-      makeMemory({ id: '' }),
+    mockGetAllMemoryIds.mockResolvedValue([
+      'MEM000003',
+      'old_format_999',
+      'custom-id',
+      'MEM000001',
+      '',
     ]);
-    const id = await generateMemoryId('save_1');
+    const id = await generateMemoryId();
     // 只有 MEM000003 和 MEM000001 是合法格式，最大 = 3，所以下一个是 4
     expect(id).toBe('MEM000004');
   });
 
   it('所有 ID 都非 MEM 格式时应返回 MEM000001', async () => {
-    mockGetMemories.mockResolvedValue([
-      makeMemory({ id: 'random-uuid' }),
-      makeMemory({ id: 'legacy-001' }),
-    ]);
-    const id = await generateMemoryId('save_1');
+    mockGetAllMemoryIds.mockResolvedValue(['random-uuid', 'legacy-001']);
+    const id = await generateMemoryId();
     expect(id).toBe('MEM000001');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// allocateMemoryIds（纯函数；session-backup 导入的就是这一份）
+// ═══════════════════════════════════════════════════════════
+
+describe('allocateMemoryIds', () => {
+  it('连号分配 count 个，从全库最大号往后续', () => {
+    expect(allocateMemoryIds(['MEM000007', 'x'], 3)).toEqual([
+      'MEM000008',
+      'MEM000009',
+      'MEM000010',
+    ]);
+  });
+
+  it('超过 6 位时补齐而不截断（否则会重新撞号）', () => {
+    expect(allocateMemoryIds(['MEM1234567'], 1)).toEqual(['MEM1234568']);
+  });
+
+  it('count 为 0 时返回空数组', () => {
+    expect(allocateMemoryIds(['MEM000001'], 0)).toEqual([]);
   });
 });
 
@@ -338,8 +357,8 @@ describe('createCompressionSummaryMemory', () => {
   ];
 
   beforeEach(() => {
-    // M6 #50: createCompressionSummaryMemory 内部经 generateMemoryId 查询已有记忆
-    mockGetMemories.mockResolvedValue(oldMemories);
+    // M6 #50: createCompressionSummaryMemory 内部经 generateMemoryId 查询已有编号（全库）
+    mockGetAllMemoryIds.mockResolvedValue(oldMemories.map((m) => m.id));
   });
 
   it('应正确设置 saveId、content、hiddenLine、keywords、importance', async () => {
@@ -397,7 +416,7 @@ describe('createCompressionSummaryMemory', () => {
   });
 
   it('空记忆列表时应使用默认值', async () => {
-    mockGetMemories.mockResolvedValue([]);
+    mockGetAllMemoryIds.mockResolvedValue([]);
     const result = await createCompressionSummaryMemory(
       'save_empty',
       [],
@@ -448,7 +467,7 @@ describe('summarizeAndSave', () => {
   };
 
   beforeEach(() => {
-    mockGetMemories.mockResolvedValue([]); // 默认无已有记忆 → MEM000001
+    mockGetAllMemoryIds.mockResolvedValue([]); // 默认全库无记忆 → MEM000001
     mockSaveMemory.mockResolvedValue('MEM000001');
     mockComputeEmbedding.mockResolvedValue(new Array(128).fill(0.1));
   });
@@ -531,12 +550,12 @@ describe('summarizeAndSave', () => {
   });
 
   it('已有 5 条记忆时应生成 MEM000006', async () => {
-    mockGetMemories.mockResolvedValue([
-      makeMemory({ id: 'MEM000001' }),
-      makeMemory({ id: 'MEM000002' }),
-      makeMemory({ id: 'MEM000003' }),
-      makeMemory({ id: 'MEM000004' }),
-      makeMemory({ id: 'MEM000005' }),
+    mockGetAllMemoryIds.mockResolvedValue([
+      'MEM000001',
+      'MEM000002',
+      'MEM000003',
+      'MEM000004',
+      'MEM000005',
     ]);
 
     const result = await summarizeAndSave({

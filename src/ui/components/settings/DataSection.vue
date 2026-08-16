@@ -14,6 +14,7 @@ import AppModal from '../shared/AppModal.vue';
 import PackInstallConfirmModal from './PackInstallConfirmModal.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
+import type { FullBackup } from '@engine/database';
 import type { PackInstallPlan } from '@engine/types-content';
 import type { PackUpgradeDiff } from '@engine/content-pack-plan';
 
@@ -313,24 +314,56 @@ async function exportAll() {
   URL.revokeObjectURL(u);
   ui.toast('导出成功', 'success');
 }
-async function importAll() {
+/**
+ * 整库导入 —— 选好文件**先确认再执行**。
+ *
+ * 🔴 这一步不是仪式感：这个按钮做的是**替换**而不是追加，点下去之前用户看到的
+ *    只有「导入数据」四个字。确认弹窗是唯一说清后果的地方。
+ * 🔴 待确认的文件放 shallowRef：内容包那条路踩过 Proxy 进 IndexedDB 的雷（见上方注释）。
+ */
+const showImportConfirm = ref(false);
+const pendingImportFile = shallowRef<File | null>(null);
+
+function importAll() {
   const i = document.createElement('input');
   i.type = 'file';
   i.accept = '.json';
-  i.onchange = async (e) => {
+  i.onchange = (e) => {
     const f = (e.target as HTMLInputElement).files?.[0];
     if (!f) return;
-    try {
-      const { importAllData } = await import('@engine/database');
-      await importAllData(JSON.parse(await f.text()));
-      await cfg.reloadApiEntries();
-      ui.toast('导入成功', 'success');
-      await loadStorageUsage();
-    } catch {
-      ui.toast('导入失败', 'error');
-    }
+    pendingImportFile.value = f;
+    showImportConfirm.value = true;
   };
   i.click();
+}
+
+async function confirmImportAll() {
+  const f = pendingImportFile.value;
+  showImportConfirm.value = false;
+  pendingImportFile.value = null;
+  if (!f) return;
+  try {
+    const raw: unknown = JSON.parse(await f.text());
+    // 🔴 进 importAllData 之前必须先认形状：validateBackupOrThrow 对「实体数组全缺席」
+    //    是容忍的（三态语义，为老备份留的），于是一份只带 `version` 的角色卡 / 预设 JSON
+    //    能一路走到 doImportAllData 把整个库清空。判据用引擎那份严格的，不在这里另写一个。
+    const { isFullBackupFile } = await import('@engine/session-backup');
+    if (!isFullBackupFile(raw)) {
+      ui.toast('导入失败：这个文件看起来不是整库备份', 'error');
+      return;
+    }
+    const { importAllData } = await import('@engine/database');
+    await importAllData(raw as FullBackup);
+    await cfg.reloadApiEntries();
+    ui.toast('导入成功', 'success');
+    await loadStorageUsage();
+  } catch (err) {
+    // 真实错误必须说出来：此前空 catch 只弹一句「导入失败」，
+    // 校验拒绝 / JSON 坏了 / 事务回滚三种情况长得一模一样，无从排查。
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[data] 整库导入失败:', err);
+    ui.toast(`导入失败：${msg}`, 'error');
+  }
 }
 /**
  * 清除全部数据。
@@ -489,6 +522,42 @@ async function clearAll() {
       <template #footer
         ><AppButton variant="ghost" size="sm" @click="showClearConfirm = false">取消</AppButton
         ><AppButton variant="danger" size="sm" @click="clearAll">确认清除</AppButton></template
+      ></AppModal
+    >
+    <!--
+      整库导入确认：这个动作是**替换**不是合并，点之前必须先说清楚。
+    -->
+    <AppModal
+      :open="showImportConfirm"
+      title="确认导入"
+      size="sm"
+      @update:open="
+        (v: boolean) => {
+          if (!v) {
+            showImportConfirm = false;
+            pendingImportFile = null;
+          }
+        }
+      "
+      ><p>
+        整库导入会用备份文件<strong style="color: var(--theme-error)">替换全部现有数据</strong
+        >，包括所有存档、角色、记忆、剧情与世界书。
+      </p>
+      <p class="text-muted text-sm">
+        当前数据将被覆盖且不可撤销（音频库与素材库不在备份范围内，不受影响）。建议先「导出全部数据」留一份备份。
+      </p>
+      <template #footer
+        ><AppButton
+          variant="ghost"
+          size="sm"
+          @click="
+            showImportConfirm = false;
+            pendingImportFile = null;
+          "
+          >取消</AppButton
+        ><AppButton variant="danger" size="sm" @click="confirmImportAll"
+          >替换全部数据并导入</AppButton
+        ></template
       ></AppModal
     >
     <!--
