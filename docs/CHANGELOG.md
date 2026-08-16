@@ -9,6 +9,10 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 随机事件调试分区（DebugPanel）｜ ✅ 已实施，真机走查过（2026-08-16）
+
+游戏页调试面板（开发者模式 + Alt+Shift+D）新增「随机事件」分区，按主人裁定**只做三样**：①当前 `available` 门槛通过的事件表（名字/触发/权重连乘/日概率，含「在池」标）；②MTTH 因子活体求值（读侧全部复用生产 `evaluateEventCondition` / `computeEventWeight`，零第二实现）；③每行「下回合触发」按钮 → `game-store.devArmRandomEvent` → StateManager 具名 dev 方法 `devForceArmRandomEvent`（ADR-21，不进工具表 AI 不可见），真实槽位采样固化 brief、`forced: true` 免疫淘汰与 TTL，渲染层复用既有 forced 必演指令行（零改动）。调度器新增纯函数 `armRandomEventForced`（同名先撤再入池）。新增 39 测试。真机走查：分区渲染 / available 过滤（夜半叩门被门槛拦下）/ 按钮入池 + 落库 + 在池标全过。已知行为：dev 入池条目带当前地点键，触发前离开该地点会被「离开即撤」规则撤下（与首访 forced 同规则，调试旅途回合先按按钮再动身）。
+
 ### 随机事件系统 v1 ｜ ✅ 已实施（待真机）（2026-08-15）
 
 剧情系统旗下的支线/遭遇子系统，**可独立于剧情系统本体开关**。一句话机制：Code 端种子化确定性调度（每条事件独立 MTTH × 声明式权重链、`available` 硬门槛、共享全局冷却、点名地点首访强制）逐天掷骰产出跨回合驻留的**候选池** → `{{RANDOM_EVENTS}}` 注入 story（不新开 Agent、战斗会话活跃时静默零 token）→ AI 有空时演绎一条并以 `<event_trigger name>` 回执 → Code 按名字结算（清非强制池 / 起冷却 / 记足迹）。触发**纯叙事零副作用**，状态变化仍由既有 dispatcher/vars_update 管线捕获（ADR-32，见 `AGENTS.md` 设计约定）。

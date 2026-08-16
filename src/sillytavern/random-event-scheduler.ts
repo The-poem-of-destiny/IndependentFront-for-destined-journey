@@ -543,6 +543,50 @@ function selectFirstVisitDef(
 }
 
 // ═══════════════════════════════════════════════════════════
+// 调试强制入池（开发者面板专用）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 把**任意一条**定义按 forced 入池。无变化返回 `null`。
+ *
+ * 唯一的调用方是 StateManager 的 `devForceArmRandomEvent`（开发者调试面板的「下回合触发」）。
+ * 它**刻意绕过** MTTH 掷骰 / `available` / 权重链 / 冷却与 `once` —— 那是一个开发者按钮的
+ * 全部意义：我现在就要看这条事件被演绎出来。
+ *
+ * 🔴 为什么是这里而不是在接线层现拼一个条目：槽位采样与简报固化（`armEntry` → `sampleSlots`
+ *    → `renderBrief`）是**入池语义的一部分**。在别处手搓一个 `{ name, brief: def.brief }`
+ *    会把 `{{槽名}}` / `{{place}}` 原样喂给 AI —— 看着像功能正常，只是调试出来的那一次
+ *    与真实入池长得不一样，于是调试本身失去意义。
+ *
+ * 🔴 **不调 `enforcePoolCap`**（同 `armFirstVisitEvent`）：forced 条目本来就免疫淘汰，
+ *    在这里挨个撤别人只会把玩家正在等的候选挤掉。宁可短暂超上限。
+ *
+ * 🔴 同名旧条目**先撤再入**：池里可能已经有一条非 forced 的它。留着就是两行同名候选 ——
+ *    注入块里出现两次，而 `settleRandomEventTrigger` 只认第一条。
+ */
+export function armRandomEventForced(
+  def: RandomEventDef,
+  flags: RandomEventSaveFlags,
+  ctx: RandomEventRollContext,
+  args: { currentDay: number; saveSeed: string },
+): RandomEventSaveFlags | null {
+  const currentDay = toDay(args.currentDay);
+  const name = typeof def?.name === 'string' ? def.name : '';
+  if (currentDay === null || name.length === 0) return null;
+
+  const before = normalizeFlags(flags);
+  const next = normalizeFlags(flags);
+  next.pending = next.pending.filter((entry) => entry.name !== name);
+
+  const rng = createEjsRng(buildRandomEventSeed(args.saveSeed, name, currentDay));
+  next.pending.push(
+    armEntry(def, ctx, rng, { armedDay: currentDay, forced: true, placeKey: ctx.placeKey }),
+  );
+
+  return finalize(next, before);
+}
+
+// ═══════════════════════════════════════════════════════════
 // 池子保洁（§4.3）
 // ═══════════════════════════════════════════════════════════
 

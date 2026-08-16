@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest';
 import { splitLocationSegments } from './map-index';
 import {
   armFirstVisitEvent,
+  armRandomEventForced,
   buildRandomEventSeed,
   computeEventWeight,
   evaluateEventCondition,
@@ -760,6 +761,101 @@ describe('armFirstVisitEvent —— 点名地点首访必入池（§4.2）', () 
     });
     const first = arm([def], {}, 'Harbor');
     expect(arm([def], {}, 'Harbor')).toEqual(first);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 调试强制入池
+// ═══════════════════════════════════════════════════════════
+
+describe('armRandomEventForced —— 开发者面板的「下回合触发」', () => {
+  const devArm = (
+    def: RandomEventDef,
+    flags: RandomEventSaveFlags = {},
+    ctx: RandomEventRollContext = CTX,
+    currentDay = 10,
+  ) => armRandomEventForced(def, flags, ctx, { currentDay, saveSeed: SEED });
+
+  it('按 forced 入池 —— 池满淘汰与过期都动不了它', () => {
+    const entry = devArm(mtth('Dev', NEVER))?.pending?.[0];
+    expect(entry?.name).toBe('Dev');
+    expect(entry?.forced).toBe(true);
+    expect(entry?.armedDay).toBe(10);
+    // forced 条目不设过期（`expiresDay` 缺席 = 永不过期，见类型分册那条注释）
+    expect(entry?.expiresDay).toBeUndefined();
+  });
+
+  it('🔴 绕过 available / 权重 ×0 / 冷却 / once —— 这就是这个按钮的全部意义', () => {
+    const blocked = mtth('Dev', NEVER, {
+      available: { journey: true }, // ctx.journeyActive 缺席 → 硬门槛不满足
+      weights: [{ when: {}, multiply: 0 }],
+      once: true,
+      cooldownDays: 999,
+    });
+    const flags: RandomEventSaveFlags = {
+      fired: { Dev: { count: 1, lastDay: 9 } },
+      lastTriggerDay: 10,
+    };
+    expect(names(devArm(blocked, flags))).toEqual(['Dev']);
+  });
+
+  it('简报走真实入池那条路（槽位采样 + {{place}} 固化），不是把模板原样搬过去', () => {
+    const def = mtth('Dev', NEVER, {
+      brief: 'a {{goods}} at {{place}}',
+      slots: { goods: { pick: ['relic'] } },
+    });
+    expect(devArm(def)?.pending?.[0].brief).toBe('a relic at Harbor');
+  });
+
+  it('确定性：同 (saveSeed, name, day) 同结果；换日换结果（多行槽位）', () => {
+    const def = mtth('Dev', NEVER, {
+      brief: '{{mood}}',
+      slots: { mood: { pick: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] } },
+    });
+    expect(devArm(def)?.pending?.[0].brief).toBe(devArm(def)?.pending?.[0].brief);
+    const briefs = new Set<string>();
+    for (let day = 1; day <= 40; day++) {
+      briefs.add(devArm(def, {}, CTX, day)?.pending?.[0].brief ?? '-');
+    }
+    expect(briefs.size).toBeGreaterThan(1);
+  });
+
+  it('同名旧条目先撤再入 —— 池里绝不出现两行同名候选', () => {
+    const flags: RandomEventSaveFlags = {
+      pending: [{ name: 'Dev', armedDay: 1, expiresDay: 6, priority: 0, brief: 'stale' }],
+    };
+    const next = devArm(mtth('Dev', NEVER), flags);
+    expect(names(next)).toEqual(['Dev']);
+    expect(next?.pending?.[0].forced).toBe(true);
+  });
+
+  it('不做池满淘汰 —— 别人正在等的候选不该被一次调试挤掉（同 armFirstVisitEvent）', () => {
+    const flags: RandomEventSaveFlags = {
+      pending: [
+        { name: 'A', armedDay: 1, expiresDay: 6, priority: 5, brief: 'a' },
+        { name: 'B', armedDay: 1, expiresDay: 6, priority: 4, brief: 'b' },
+        { name: 'C', armedDay: 1, expiresDay: 6, priority: 3, brief: 'c' },
+      ],
+    };
+    expect(names(devArm(mtth('Dev', NEVER), flags))).toEqual(['A', 'B', 'C', 'Dev']);
+  });
+
+  it('地点键写进条目（离开即撤那条过滤按它比对）', () => {
+    expect(devArm(mtth('Dev', NEVER))?.pending?.[0].placeKey).toBe('Harbor');
+  });
+
+  it('日子非有穷 / 名字为空 → null（不拿假日子往下算）', () => {
+    expect(devArm(mtth('Dev', NEVER), {}, CTX, Number.NaN)).toBeNull();
+    expect(devArm({ ...mtth('X', NEVER), name: '' })).toBeNull();
+  });
+
+  it('不改入参', () => {
+    const flags: RandomEventSaveFlags = {
+      pending: [{ name: 'A', armedDay: 1, expiresDay: 6, priority: 5, brief: 'a' }],
+    };
+    const snapshot = JSON.stringify(flags);
+    devArm(mtth('Dev', NEVER), flags);
+    expect(JSON.stringify(flags)).toBe(snapshot);
   });
 });
 

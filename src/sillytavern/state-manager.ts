@@ -82,6 +82,7 @@ import { getRandomEventPack } from './random-event-runtime';
 import { isEmptyRandomEventPack } from './random-event-pack';
 import {
   armFirstVisitEvent,
+  armRandomEventForced,
   pruneRandomEvents,
   rollRandomEvents,
   settleRandomEventTrigger,
@@ -1944,6 +1945,48 @@ export class StateManager {
     } catch (err) {
       // 事件系统只记「触发过」这一事实（铁则 5）；记不上不该让这一回合的正文崩掉
       console.warn('[StateManager] 随机事件触发结算失败（不影响正文）:', err);
+    }
+  }
+
+  /**
+   * 调试入池：把一条事件按 forced 塞进候选池，让它在**下一回合**的 `{{RANDOM_EVENTS}}` 里
+   * 带 `[!]`（= 必须尽快触发）出现。开发者调试面板专用。
+   *
+   * 🔴 **命名方法，不是 `StatePatchOp`**（同 `confirmRandomEventTrigger` 那条理由）：
+   *    做成 op 就等于把「凭空点燃一个事件」这个能力交给了 AI。它也**不进任何 Agent 工具表**。
+   * 🔴 **刻意绕过 `available` / 权重 / 冷却 / `once`**：这就是一个开发者按钮的意义。
+   *    调用方（调试面板）只列 `available` 通过的事件，但这一层不替它把关 ——
+   *    在这里加闸门会让「为什么按了没反应」变成一道要读三个纯函数才答得上的谜题。
+   * 🔴 槽位采样与简报固化整份走 `armRandomEventForced`（= 真实入池那条路），
+   *    不在这里手搓条目：手搓出来的候选带着未替换的 `{{槽名}}`，调试的就不是真实形态了。
+   *
+   * 结果交回调用方转 toast（本层不弹提示，同 `allocateAttributePoint` 的口径）。
+   */
+  async devForceArmRandomEvent(name: string): Promise<{ ok: boolean; error?: string }> {
+    const wanted = typeof name === 'string' ? name.trim() : '';
+    if (wanted.length === 0) return { ok: false, error: '事件名为空' };
+
+    const pack = getRandomEventPack();
+    const def = pack.defs.find((d) => d?.name === wanted);
+    if (def === undefined) {
+      // 幻觉名字与「换包后名字对不上」共用这一条 warn（铁则 4：认不出就静默跳过，不抛）
+      console.warn(`[StateManager] 随机事件定义不存在，忽略调试入池: ${wanted}`);
+      return { ok: false, error: '事件定义不存在（可能换过内容包）' };
+    }
+
+    try {
+      const profile = await getProfile(this.saveId);
+      const ctx = await this.buildRandomEventContext(profile);
+      const armed = armRandomEventForced(def, getRandomEventFlags(profile), ctx, {
+        currentDay: this.gameDayOf(profile),
+        saveSeed: this.saveId,
+      });
+      // `null` = 池里已经有一条一模一样的（同日同名同简报）→ 已经armed，无需再写库
+      if (armed !== null) await updateRandomEventFlags(profile, armed);
+      return { ok: true };
+    } catch (err) {
+      console.warn('[StateManager] 随机事件调试入池失败（不影响正文与已落库状态）:', err);
+      return { ok: false, error: '调试入池失败（详见控制台）' };
     }
   }
 

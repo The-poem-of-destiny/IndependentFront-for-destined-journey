@@ -28,6 +28,12 @@ computed 里都不许直接 `getContentRegistry().<face>`** —— 必须先落�
   一个字都没说。`await contentReadyPromise` 之后重取注册表 = 又读到一次空目录，
   和不写这段代码等价。2026-08-08 在 `ImagePresetList.vue` 上逮到一次（C15 那句
   「缺少形态提示」因此在组件整个生命周期里是死的）。
+- **同族的模块级非响应式缝还有两条**：`random-event-runtime.getRandomEventPack()` 与
+  `engine-settings.getEngineSettings()`。2026-08-16 给 DebugPanel 加随机事件区块时踩到：
+  它们同样要落 `ref`。**取快照写在 `<script setup>` 顶层同步调，别放 `onMounted`** ——
+  onMounted 里改 ref 是下一拍才渲染，真机上首帧闪一下「未装载事件包」，而组件测试里
+  `mount(...).text()` 是同步读的，读到的全是 ref 初值（症状：断言全红，但功能其实是对的，
+  很容易误判成模块被加载了两份）。
 - 测试里给 store 喂内容：先 `setContentRegistry({...})` **再** `useCreateStore()`。
   组件测试里 mock content-store 时**别把注册表 mock 成一开始就满的** —— 那样「组件等的
   是哪个 promise」这个问题根本没被问到，接错 promise 照样全绿。要留一个「加载门兑现后

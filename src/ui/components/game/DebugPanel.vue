@@ -1,11 +1,103 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useGameStore, type DebugAgentEntry } from '../../stores/game-store';
 import { useSettingsStore } from '../../stores/settings-store';
+import { useUIStore } from '../../stores/ui-store';
 import { getEjsBackend } from '@engine/ejs-backend';
+import { getEngineSettings } from '@engine/engine-settings';
+import { getRandomEventPack } from '@engine/random-event-runtime';
+import { buildRandomEventRollContext } from '@engine/random-event-snapshot';
+import { getRandomEventFlags } from '@engine/save-profile';
+import { toEpochMinutes } from '@engine/time-system';
+import {
+  buildRandomEventDebugRows,
+  formatDailyProbability,
+  formatEventWeight,
+  type RandomEventDebugRow,
+} from './random-event-debug';
 
 const game = useGameStore();
 const settings = useSettingsStore();
+const ui = useUIStore();
+
+// ═══════════════════════════════════════════════════════════
+// 随机事件（随机事件 v1 §4）
+// ═══════════════════════════════════════════════════════════
+
+/** 一个游戏日的分钟数（口径同 `state-manager` / `game-pipeline`，那份常量未导出） */
+const MINUTES_PER_GAME_DAY = 1440;
+
+/**
+ * 候选表**用 `ref` 不用 `computed`**。
+ *
+ * 事件包（`getRandomEventPack()`）与引擎设置（`getEngineSettings()`）都是**模块级非响应式
+ * 状态**：computed 会在第一次求值后把结果连同「当时装的是空包」一起缓存住，此后换存档、
+ * 装内容包都不会让它重算 —— 症状是面板永远显示「没装事件包」。所以显式取快照：
+ * setup 里同步取一次（面板整块由 AppModal 的 `v-if` 托管，每次打开都是新挂载 = 一次刷新），
+ * 入池按钮按完再取一次。
+ */
+const eventRows = ref<RandomEventDebugRow[]>([]);
+const eventPackEmpty = ref(true);
+const eventFrequency = ref(1);
+const eventsEnabled = ref(true);
+const arming = ref('');
+
+function refreshRandomEvents(): void {
+  const engine = getEngineSettings();
+  eventsEnabled.value = engine.randomEventsEnabled;
+  eventFrequency.value = engine.randomEventsFrequency;
+
+  const pack = getRandomEventPack();
+  eventPackEmpty.value = pack.defs.length === 0;
+
+  const profile = game.saveProfile;
+  if (!profile) {
+    eventRows.value = [];
+    return;
+  }
+  try {
+    const player = game.characters.find((c) => c.type === 'player');
+    eventRows.value = buildRandomEventDebugRows(
+      pack.defs,
+      getRandomEventFlags(profile),
+      // 上下文快照与入池侧、注入侧**共用同一份实现**（`random-event-snapshot`）——
+      // 调试面板照抄一份判据的下场是：它会在真机上说谎，而说谎的正是用来查真相的那块面板
+      buildRandomEventRollContext(profile, player),
+      engine.randomEventsFrequency,
+    );
+  } catch (err) {
+    console.warn('[DebugPanel] 随机事件候选表构建失败:', err);
+    eventRows.value = [];
+  }
+}
+
+// 挂载即取一次（**setup 里同步调，不用 onMounted**：refs 在 onMounted 里改是下一拍才渲染，
+// 首帧会闪一下「未装载事件包」；这一层没有任何异步，没理由让用户先看见一个假答案）
+refreshRandomEvents();
+
+/** 当前游戏日（表头显示；与调度器的 gameDay 同口径） */
+const currentGameDay = computed(() => {
+  const profile = game.saveProfile;
+  if (!profile) return null;
+  return Math.floor(toEpochMinutes(profile.gameTime) / MINUTES_PER_GAME_DAY);
+});
+
+/** 「下回合触发」：按 forced 入池 → 下一轮 `{{RANDOM_EVENTS}}` 里带 `[!]` 出现 */
+async function armEvent(name: string): Promise<void> {
+  if (arming.value.length > 0) return;
+  arming.value = name;
+  try {
+    const result = await game.devArmRandomEvent(name);
+    if (result.ok) {
+      ui.toast(`已强制入池：${name}（下回合注入给正文）`, 'success');
+    } else {
+      ui.toast(result.error ?? '入池失败', 'error');
+    }
+  } finally {
+    arming.value = '';
+    refreshRandomEvents();
+  }
+}
 
 /** 本轮 token 汇总（排除 memory_recall 记忆召回，只看正文链路的缓存效率） */
 const tokenSummary = computed(() => {
@@ -228,6 +320,65 @@ function formatJson(value: unknown): string {
       </div>
     </div>
 
+    <!-- 随机事件：当前「调度器会考虑」的定义 + 各自的 MTTH 因子 -->
+    <div class="debug-section">
+      <h4>
+        随机事件 ({{ eventRows.length }})
+        <span class="debug-re-meta">
+          第 {{ currentGameDay ?? '—' }} 日 · 频率 ×{{ eventFrequency }}
+          <template v-if="!eventsEnabled"> · <span class="debug-warn">系统已关闭</span></template>
+        </span>
+      </h4>
+      <div v-if="eventPackEmpty" class="debug-empty">未装载事件包（本子系统整段 no-op）</div>
+      <div v-else-if="!game.saveProfile" class="debug-empty">无活跃存档</div>
+      <div v-else-if="eventRows.length === 0" class="debug-empty">
+        当前上下文下没有事件通过 available 硬门槛（或已被 once 消耗）
+      </div>
+      <table v-else class="debug-re-table">
+        <thead>
+          <tr>
+            <th>名字</th>
+            <th>触发</th>
+            <th>权重</th>
+            <th>日概率</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in eventRows" :key="row.name">
+            <td>
+              {{ row.name }}
+              <span v-if="row.inPool" class="debug-re-pill">在池</span>
+              <span v-if="row.priority !== 0" class="debug-re-dim">P{{ row.priority }}</span>
+            </td>
+            <td>
+              <template v-if="row.kind === 'mtth'">{{ row.mtthDays }} 天</template>
+              <template v-else>
+                首访
+                <span class="debug-re-dim">{{
+                  (row.places ?? []).join(' / ') || '（无地点）'
+                }}</span>
+              </template>
+            </td>
+            <td :class="{ 'debug-warn': row.weight === 0 }">
+              ×{{ formatEventWeight(row.weight) }}
+            </td>
+            <td>{{ formatDailyProbability(row.dailyProbability) }}</td>
+            <td>
+              <button
+                class="debug-btn debug-btn-sm"
+                :disabled="arming.length > 0"
+                title="按 forced 塞进候选池，下回合注入给正文（绕过掷骰/冷却/权重）"
+                @click="armEvent(row.name)"
+              >
+                下回合触发
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <!-- Agent 调用日志 -->
     <div class="debug-section">
       <h4>本轮 Agent 调用 ({{ game.agentLog.length }})</h4>
@@ -320,9 +471,54 @@ function formatJson(value: unknown): string {
 .debug-btn:hover {
   background: var(--theme-card-bg);
 }
+.debug-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.debug-btn-sm {
+  padding: 2px 8px;
+  font-size: 0.6875rem;
+}
 .debug-section {
   border-bottom: 1px solid var(--theme-card-border);
   padding-bottom: 12px;
+}
+/* 随机事件表：一屏能扫完的密度，宽了就自己横滚（不许把面板撑破） */
+.debug-re-meta {
+  font-weight: 400;
+  color: var(--theme-text-muted);
+  font-size: 0.6875rem;
+  margin-left: 6px;
+}
+.debug-re-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.6875rem;
+  color: var(--theme-text-secondary);
+}
+.debug-re-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--theme-text-muted);
+  padding: 2px 6px 4px 0;
+  border-bottom: 1px solid var(--theme-card-border);
+}
+.debug-re-table td {
+  padding: 3px 6px 3px 0;
+  vertical-align: middle;
+}
+.debug-re-pill {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 0.5625rem;
+  background: color-mix(in srgb, var(--theme-primary) 18%, transparent);
+  color: var(--theme-primary);
+}
+.debug-re-dim {
+  margin-left: 4px;
+  color: var(--theme-text-muted);
 }
 .debug-section h4 {
   font-size: 0.8125rem;
