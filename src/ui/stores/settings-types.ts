@@ -170,6 +170,25 @@ export type UiSettings = {
   /** 0 = 让 AI 自己判断 */
   plotEventsPerChapter: number;
 
+  // ═══ 随机事件（随机事件系统 v1 / 裁定 §13-4）═══
+  //
+  // 🔴 这两项是**全局设置**，不是「新档默认值」——与上面那批 plot* 刚好相反。
+  //    随机事件是口味开关（比照 beautifierEnabled / imageGenMode），玩家中途想关就关；
+  //    不进 PlotSettings、不进存档、零迁移。引擎侧经 `engine-settings.ts` 的注入缝读
+  //    （main.ts 的 provider 转发这两格），**不进 AppSettings** —— 那会让设置重新有两个真源。
+  // 🔴 与剧情系统三个 Agent 的开关**彼此独立**：`plotMode === 'off'` 时随机事件照跑
+  //    （调度挂在 StateManager、注入挂在 story、marker 收在 orchestrator Stage 1，
+  //    三面都不在 plot agent 链上）。
+
+  /** 随机事件总开关。关 = 调度 no-op（**保留候选池不清**）+ 注入空串 + marker 忽略 */
+  randomEventsEnabled: boolean;
+  /**
+   * 频率系数，乘进每次 MTTH 掷骰的权重（0.5 / 1 / 2 三档，裁定 §13-6）。
+   * 🔴 类型是 `number` 而不是收窄联合：它只被乘进一个概率，越界的历史值不会让引擎崩，
+   *    收窄反而会让「以后想加一档」变成一次跨引擎改动。
+   */
+  randomEventsFrequency: number;
+
   // ═══ 记忆 & 缓存 ═══
   memoryRecallCount: number;
   memoryCompressionThreshold: number;

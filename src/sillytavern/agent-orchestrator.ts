@@ -25,6 +25,7 @@ import type {
   ItemGenRequestMarker,
   ItemUpdateRequestMarker,
   CraftGenRequestMarker,
+  EventTriggerMarker,
   ToolExecutionContext,
 } from './types';
 import type { SceneImageMarker } from './types-image';
@@ -132,6 +133,20 @@ export interface OrchestratorEvents {
    * **不 await、不阻塞管线**，抛错也吞掉 —— 出图是旁路，画不出来不该影响这一轮叙事。
    */
   onSceneImage?: (markers: SceneImageMarker[], storyOutput: string) => void | Promise<void>;
+
+  /**
+   * 🎲 Event Trigger: Stage 1 正文中检测到 `<event_trigger name>` 后触发（随机事件 v1 §5.2）。
+   *
+   * 结算（清池 / 起冷却 / 记档案 / 记足迹 / emit）全在
+   * `StateManager.confirmRandomEventTrigger`；本回调只是把名字送过去。
+   *
+   * 🔴 **不 await、不阻塞管线**，抛错也吞掉 —— 事件系统只记「触发过」这一事实（铁则 5），
+   *    记不上不该让这一回合的正文失败。
+   * 🔴 **一回合至多一条**：AI 写了多个标记时只取**第一个**（提示词教的是「至多触发一个」，
+   *    多写就是它没守住；取第一个而不是最后一个 —— 正文里先写的那条才是它真正演绎的那条）。
+   * 🔴 名字在不在池里、系统关没关，都由结算侧判（warn-noop）。这里判一遍就是第二处口径。
+   */
+  onEventTrigger?: (name: string) => void | Promise<void>;
 
   // ===== Phase 10: request_dispatcher 调度器回调 =====
 
@@ -289,6 +304,10 @@ export class AgentOrchestrator {
         // With retry on, continue to next stage (failed agents already recorded)
       }
     }
+
+    // 🎲 每回合胶水（随机事件 v1 §4.3）：本轮全部落库动作已经跑完，这时候的上下文
+    // 才是下一回合注入块要依据的那份。自带 try/catch，永远不影响 run 的状态判定。
+    await this.syncRandomEventsForTurn();
 
     this.status =
       this.completedStages.length > 0 && this.requiredAgentsSucceeded() ? 'completed' : 'failed';
@@ -854,6 +873,23 @@ export class AgentOrchestrator {
           // 画不出插画不该让这一轮叙事失败
         }
       }
+
+      // 🎲 event_trigger: 就地触发，不 await —— 随机事件结算是旁路簿记（铁则 5），
+      // 不进管线时序。**只取第一条**（提示词教的是「至多触发一个」），且名字为空的不算数
+      // —— 拿空串去结算只会在日志里留一条「不在候选池」的假警报。
+      const eventMarkers = scanResult.markers.filter(
+        (m): m is EventTriggerMarker => m.type === 'event_trigger',
+      );
+      const firstEvent = eventMarkers.find((m) => (m.name ?? '').length > 0);
+      if (firstEvent && this.events.onEventTrigger) {
+        try {
+          void Promise.resolve(this.events.onEventTrigger(firstEvent.name as string)).catch(
+            () => {},
+          );
+        } catch {
+          // 事件记不上账不该让这一轮叙事失败
+        }
+      }
     }
 
     // Stage 2 (request_dispatcher): 扫描调度器输出 + 处理所有 request
@@ -1083,6 +1119,29 @@ export class AgentOrchestrator {
     } catch (err) {
       // 地图是派生投影：旗没设上不影响任何已落库的状态，也不该污染 onStateCommitError
       console.warn(`[Orchestrator] ${source} 在途旗同步失败:`, err);
+    }
+  }
+
+  /**
+   * 🎲 随机事件候选池的每回合保洁（随机事件 v1 §4.3）。
+   *
+   * 形状逐字照 `syncMapJourney`：判定与写入全在 `StateManager.syncRandomEventsForTurn` 里
+   * （ADR-21），本方法只是**触发点**；自带 try/catch + warn，**绝不碰 `onStateCommitError`**
+   * —— 池子是旁路簿记，保洁失败不影响任何已落库的状态，报成「状态未能写入」只会让玩家
+   * 去查一件没发生的事。
+   *
+   * 为什么挂在整轮末尾而不是某个 stage 之后：要保洁的是**上下文变了**导致的失效
+   * （AI 在本轮改了变量 / 任务状态 / 好感度，于是某条候选的 `available` 不再满足），
+   * 而那些改动散在 dispatcher 与 vars_update 两个 stage 里。跑在最后一次落库之后，
+   * 下一回合的注入块才不会展示一条已经失效的候选。它是幂等的（同一轮跑两次无副作用），
+   * 系统关闭 / 没装事件包时整段 no-op。
+   */
+  private async syncRandomEventsForTurn(): Promise<void> {
+    try {
+      const { createStateManager } = await import('./state-manager');
+      await createStateManager(this.saveId).syncRandomEventsForTurn();
+    } catch (err) {
+      console.warn('[Orchestrator] 随机事件候选池保洁失败（不影响本轮任何已落库状态）:', err);
     }
   }
 

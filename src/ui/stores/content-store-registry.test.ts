@@ -41,6 +41,17 @@ const PLACEHOLDER_BODIES: Record<string, unknown> = {
     contentHash: 'map-placeholder-hash',
     tiles: [{ id: 1, name: 'Alpha', centroid: [10, 10] }],
   },
+  // 🔴 randomEvents（随机事件 v1 / §3.3）：形状只要够 `coerceRandomEventPack` 认出「有定义」——
+  //    这一组测的是**加载路径**，装出来的包是否非空在 content-store-random-events.test.ts 里守
+  '/data/content/random-events.json': {
+    defs: [
+      {
+        name: 'event-placeholder',
+        brief: 'brief-placeholder',
+        trigger: { type: 'mtth', mtthDays: 20 },
+      },
+    ],
+  },
   '/data/defaults/map-marker-presets.json': [{ id: 'marker-placeholder' }],
 };
 
@@ -104,7 +115,7 @@ afterEach(async () => {
 });
 
 describe('ensureContentRegistryLoaded —— URL 约定', () => {
-  it('八面齐全，且 markers 走 /data/defaults/（不在 content/ 下）', () => {
+  it('各面齐全，且 markers 走 /data/defaults/（不在 content/ 下）', () => {
     expect(CONTENT_REGISTRY_SOURCES.map((s) => s.face).sort()).toEqual([
       'bloodlines',
       'branding',
@@ -114,6 +125,7 @@ describe('ensureContentRegistryLoaded —— URL 约定', () => {
       'mapPack',
       'markers',
       'namePools',
+      'randomEvents',
     ]);
     const byFace = Object.fromEntries(CONTENT_REGISTRY_SOURCES.map((s) => [s.face, s.url]));
     expect(byFace.catalog).toBe('/data/content/catalog.json');
@@ -125,6 +137,9 @@ describe('ensureContentRegistryLoaded —— URL 约定', () => {
     expect(byFace.imageDialects).toBe('/data/content/image-dialects.json');
     // 🔴 第 8 面（地图 v1 / §3.3）：同样缺席不是错误，落位/天气/MAP_CONTEXT 整套静默不出
     expect(byFace.mapPack).toBe('/data/content/map-pack.json');
+    // 🔴 randomEvents（随机事件 v1 / §3.3，在 ContentPack 里是第 13 分节）：缺席同样不是
+    //    错误 —— 空包 → 掷骰/首访/保洁/注入四条钩子整段 no-op
+    expect(byFace.randomEvents).toBe('/data/content/random-events.json');
     // 🔴 地图标记预设今天就住在 data/defaults/，抽取时不搬家
     expect(byFace.markers).toBe('/data/defaults/map-marker-presets.json');
   });
@@ -186,7 +201,7 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
     expect(rep?.error).toContain('network down');
   });
 
-  it('八面全 404 → 不抛、骨架仍非 null 且八键齐（应用不崩）', async () => {
+  it('各面全 404 → 不抛、骨架仍非 null 且各键齐（应用不崩）', async () => {
     installFetchMock(
       Object.fromEntries(CONTENT_REGISTRY_SOURCES.map((s) => [s.url, '404'])) as Record<
         string,
@@ -205,6 +220,7 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
       'mapPack',
       'markers',
       'namePools',
+      'randomEvents',
     ]);
     expect(Object.values(r).every((v) => v === undefined)).toBe(true);
   });

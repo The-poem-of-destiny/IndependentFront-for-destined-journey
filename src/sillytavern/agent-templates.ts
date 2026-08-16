@@ -598,7 +598,7 @@ const PLOT_AGENT_IDS = new Set(['plot_pre_check', 'plot_post_check', 'plot_outli
  * 未命中（纯 ST 预设 / 测试桩）→ 走默认 template 追加兜底。
  */
 const STORY_PRESET_PLACEHOLDER_RE =
-  /\{\{(?:LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|USER_INPUT|CHARACTER_STATE|GAME_TIME|NARRATIVE|AGENT\.MEMORY_RECALL|AGENT\.PLOT_PRE_CHECK)\}\}/;
+  /\{\{(?:LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|USER_INPUT|CHARACTER_STATE|GAME_TIME|NARRATIVE|RANDOM_EVENTS|AGENT\.MEMORY_RECALL|AGENT\.PLOT_PRE_CHECK)\}\}/;
 
 /**
  * Phase 10: Build agent messages using the placeholder template system.

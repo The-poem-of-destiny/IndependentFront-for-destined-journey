@@ -67,6 +67,9 @@ import {
 // 第 8 面 mapPack 的收窄口（永不抛）+ 引擎侧地图缝（见 `setContentRegistry`）
 import { coerceMapPack } from '@engine/map-pack';
 import { installMapPack } from '@engine/map-runtime';
+// 第 13 面 randomEvents 的收窄口（永不抛）+ 引擎侧随机事件缝（见 `setContentRegistry`）
+import { coerceRandomEventPack } from '@engine/random-event-pack';
+import { installRandomEventPack } from '@engine/random-event-runtime';
 import {
   planPackUninstall,
   diffPackUpgrade,
@@ -296,8 +299,9 @@ export async function loadAllDefaultBooks(): Promise<WorldBook[]> {
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 内容注册表的八面（D16 / §5.1；第 7 面 imageDialects 由图像 v2 追加，
- * 第 8 面 mapPack 由地图系统 v1 追加）。
+ * 内容注册表的各面（D16 / §5.1；第 7 面 imageDialects 由图像 v2 追加，
+ * 第 8 面 mapPack 由地图系统 v1 追加，`randomEvents` 由随机事件系统 v1 追加 ——
+ * 后者在 `ContentPack` 里是**第 13 分节**，两套编号各数各的，别混着读）。
  *
  * 约定 URL: `/data/content/<name>.json`。本波（T2）先灌占位 = 现有代码常量；波 2 逐面接管，
  * pack 安装（T7）重灌。消费方同步读，所以灌注必须在任何 agent 执行前完成。
@@ -340,6 +344,18 @@ export interface ContentRegistry {
    * 天气不断言、`MAP_CONTEXT` 整段不出，游戏照常进行（`map-pack.ts` 文件头的兜底合同）。
    */
   mapPack: unknown;
+  /**
+   * 随机事件包（随机事件系统 v1 / §3.3）：`random-events.json` 的原始 JSON。
+   *
+   * 🔴 **消费方一个都不在这里读它**（与 `mapPack` 逐字同款）—— 掷骰与首访钩子
+   * （`state-manager`）、池子保洁、`{{RANDOM_EVENTS}}` 的 resolver 读的都是
+   * `random-event-runtime.getRandomEventPack()`。本面只是那个模块级事实的**来源**：
+   * `setContentRegistry` 每次替换注册表时把这一面经 `coerceRandomEventPack` 收窄后装进去。
+   *
+   * 🔴 缺席不是错误：整份认不出 → 空包 → 掷骰/首访/保洁/注入四条钩子整段 no-op，
+   * 游戏一个字节都不受影响（引擎仓零内置事件）。
+   */
+  randomEvents: unknown;
 }
 
 /**
@@ -382,6 +398,10 @@ export function getContentRegistry(): ContentRegistry {
 export function setContentRegistry(next: ContentRegistry): void {
   registry = next;
   installMapPack(coerceMapPack(next.mapPack));
+  // 🔴 第 13 面同理（随机事件系统 v1 / §3.3）：引擎侧读的是 `random-event-runtime` 里
+  //    「当前装着哪一份事件包」那一个模块级事实，不是本注册表。漏掉这一行的症状同样不是
+  //    报错，而是**沿着上一份事件包掷骰**（换包后旧事件继续入池、新事件永不出现）。
+  installRandomEventPack(coerceRandomEventPack(next.randomEvents));
 }
 
 /** 造一份空注册表骨架 */
@@ -395,6 +415,7 @@ function createEmptyRegistry(): ContentRegistry {
     branding: undefined,
     imageDialects: undefined,
     mapPack: undefined,
+    randomEvents: undefined,
   };
 }
 
@@ -439,6 +460,7 @@ export const CONTENT_REGISTRY_SOURCES: ReadonlyArray<{
   { face: 'branding', url: '/data/content/branding.json' },
   { face: 'imageDialects', url: '/data/content/image-dialects.json' },
   { face: 'mapPack', url: '/data/content/map-pack.json' },
+  { face: 'randomEvents', url: '/data/content/random-events.json' },
   { face: 'markers', url: '/data/defaults/map-marker-presets.json' },
 ];
 
@@ -551,6 +573,7 @@ function packRegistryFaces(
   if (pack.branding !== undefined) out.branding = pack.branding;
   if (pack.imageDialects !== undefined) out.imageDialects = pack.imageDialects;
   if (pack.mapPack !== undefined) out.mapPack = pack.mapPack;
+  if (pack.randomEvents !== undefined) out.randomEvents = pack.randomEvents;
   return out;
 }
 
@@ -988,6 +1011,7 @@ export const useContentStore = defineStore('content', () => {
       branding: resolveSection(packFaces.branding, reg.branding),
       imageDialects: resolveSection(packFaces.imageDialects, reg.imageDialects),
       mapPack: resolveSection(packFaces.mapPack, reg.mapPack),
+      randomEvents: resolveSection(packFaces.randomEvents, reg.randomEvents),
     });
 
     // e. 存档 uid 迁移（D43）：rewrite 应用 + needsSelectionPartitions 标记

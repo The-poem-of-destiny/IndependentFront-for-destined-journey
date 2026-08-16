@@ -21,6 +21,8 @@ describe('getEngineSettings', () => {
     expect(getEngineSettings()).toEqual({
       maxSnapshotsPerSave: DEFAULT_SETTINGS.maxSnapshotsPerSave,
       snapshotRetentionMode: DEFAULT_SETTINGS.snapshotRetentionMode,
+      randomEventsEnabled: true,
+      randomEventsFrequency: 1,
     });
   });
 
@@ -28,11 +30,29 @@ describe('getEngineSettings', () => {
     setEngineSettingsProvider(() => ({
       maxSnapshotsPerSave: 7,
       snapshotRetentionMode: 'dense',
+      randomEventsEnabled: false,
+      randomEventsFrequency: 2,
     }));
     expect(getEngineSettings()).toEqual({
       maxSnapshotsPerSave: 7,
       snapshotRetentionMode: 'dense',
+      randomEventsEnabled: false,
+      randomEventsFrequency: 2,
     });
+  });
+
+  /**
+   * 🔴 随机事件两项**默认必须是「开」**（设计 §6）。provider 要到 W3 才由 `main.ts` 接上，
+   *    在那之前这两个缺省值就是系统的真实行为 —— 默认关掉的症状是整个子系统装好了、
+   *    测试全绿、真机一个事件都不起，而没有任何一处会报错。
+   */
+  it('随机事件两项：没注册 / 只给一半时都默认 live（开 + 1 倍频率）', () => {
+    expect(getEngineSettings().randomEventsEnabled).toBe(true);
+    expect(getEngineSettings().randomEventsFrequency).toBe(1);
+
+    setEngineSettingsProvider(() => ({ randomEventsFrequency: 0.5 }));
+    expect(getEngineSettings().randomEventsEnabled).toBe(true);
+    expect(getEngineSettings().randomEventsFrequency).toBe(0.5);
   });
 
   it('每次调用都重新问 provider —— 设置页改完不必重启', () => {
@@ -48,6 +68,8 @@ describe('getEngineSettings', () => {
     expect(getEngineSettings()).toEqual({
       maxSnapshotsPerSave: DEFAULT_SETTINGS.maxSnapshotsPerSave,
       snapshotRetentionMode: 'dense',
+      randomEventsEnabled: true,
+      randomEventsFrequency: 1,
     });
   });
 

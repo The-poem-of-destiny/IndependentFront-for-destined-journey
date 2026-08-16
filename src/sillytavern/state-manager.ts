@@ -61,18 +61,32 @@ import {
   removeQuest,
   getMapFlags,
   updateMapFlags,
+  getRandomEventFlags,
+  updateRandomEventFlags,
 } from './save-profile';
 import { clampAffection } from './affection-system';
-import { advanceTime, getSeason, toEpochMinutes } from './time-system';
+import { advanceTime, getSeason, getTimeOfDay, toEpochMinutes } from './time-system';
 // 地图 v1 接线（设计 §5 接线表）：落位 / 天气断言 / 在途旗三条钩子的依赖。
 // 全是纯函数叶 + 一条注入缝（`map-runtime`），没有一个会读注册表或碰 Dexie ——
 // 静态 import 因此不成环（map-* 一律不 import 本模块）。
 import { getMapIndex, getMapPack } from './map-runtime';
 import { isEmptyMapPack } from './map-pack';
-import { resolveTileByLocation, type MapIndex } from './map-index';
+import { resolveTileByLocation, splitLocationSegments, type MapIndex } from './map-index';
 import { findPath } from './map-path';
 import { weatherAt, weatherZoneOfTile } from './map-weather';
 import type { MapJourneyFlag, MapPack, MapSaveFlags } from './types-map';
+// 随机事件 v1 接线（设计 §4.1 掷骰 / §4.2 首访 / §4.3 保洁 / §5.2 结算）。
+// 与地图那一组同款依赖形状：全是纯函数叶 + 一条注入缝（`random-event-runtime`），
+// 没有一个会读注册表或碰 Dexie，静态 import 不成环。
+import { getRandomEventPack } from './random-event-runtime';
+import { isEmptyRandomEventPack } from './random-event-pack';
+import {
+  armFirstVisitEvent,
+  pruneRandomEvents,
+  rollRandomEvents,
+  settleRandomEventTrigger,
+} from './random-event-scheduler';
+import type { RandomEventRollContext } from './types-random-events';
 import type { EjsVarsDiff } from './ejs-vars-diff';
 import {
   normalizeQuestStatus,
@@ -1174,6 +1188,11 @@ export class StateManager {
     // 位置路径是真源、地块只是投影（裁定 §12-1）。投影失败/抛错一律不影响上面这一步。
     await this.syncMapLocation(char);
 
+    // 随机事件 v1（§4.2）：**必须在落位之后** —— 地点键优先取地块名，而地块名要等
+    // `syncMapLocation` 把 `lastTileId` 写进 flags 才拿得到（否则每次都降级成位置路径最深段，
+    // 症状是首访事件在「地块名 ≠ 路径末段」的地方永远不触发，而没有任何一处会报错）
+    await this.syncRandomEventFirstVisit(char);
+
     return this.createEvent('location_change', patch);
   }
 
@@ -1705,6 +1724,241 @@ export class StateManager {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // 🎲 随机事件接线（随机事件系统 v1 / 设计 §4·§5.2）
+  // ═══════════════════════════════════════════════════════════
+  //
+  // 三条钩子（MTTH 掷骰 / 首访强制 / 每回合保洁）长的是与地图那三条**同一个样子**:
+  //   ① 关闭 or 空包 → 整段 no-op（随机事件是**可选**子系统；关掉时 flags 保留不清，§6）
+  //   ② 读 profile → 组装只读上下文快照 → 纯函数算出下一份 flags
+  //   ③ 有变化才经命名写入口 `updateRandomEventFlags` 落库（纯函数「无变化返回 null」的用途）
+  //   ④ 整段包在 try/catch 里：候选池是**旁路**账本，它失败绝不能让正文状态提交失败
+  //
+  // 🔴 为什么上下文组装在这里而不在 `random-event-scheduler.ts`:
+  //    那个模块是**纯函数叶**且受结构闸门约束（零中文字面量 / 零随机 / 零时钟）；而组装要碰
+  //    profile、Dexie 里的角色行、地图落位结果与中文任务状态串。它属于**接线层**，
+  //    接线层就是这里（理由同 `projectLocationFlags`，ADR-21）。
+
+  /** 本存档当前是第几个游戏日（`applyTimeAdvance` 与三条钩子共用同一个口径） */
+  private gameDayOf(profile: SaveProfile): number {
+    return Math.floor(toEpochMinutes(profile.gameTime) / MINUTES_PER_GAME_DAY);
+  }
+
+  /**
+   * 地点键（§2 词汇表）：**落位成功 = 地块名，失败 = 位置路径最深段**。
+   *
+   * 🔴 取地块**名**而不是 `lastTileId`：足迹（`visited`）要在换图后存活，名字比编号稳定
+   *    （§4.2）。也正因如此，没装地图包 / 落位失败时降级到位置路径最深段 ——
+   *    首访语义降级但不失效，且**永不模糊匹配**（承 ADR-31）。
+   */
+  private resolvePlaceKey(mapFlags: MapSaveFlags, locationPath: string): string | undefined {
+    const tileId = mapFlags.lastTileId;
+    if (tileId !== undefined && !isEmptyMapPack(getMapPack())) {
+      const name = getMapIndex().tileById.get(tileId)?.name;
+      if (typeof name === 'string' && name.length > 0) return name;
+    }
+    const segments = splitLocationSegments(locationPath ?? '');
+    return segments.length > 0 ? segments[0] : undefined;
+  }
+
+  /**
+   * 条件求值的只读快照（`RandomEventRollContext`）。
+   *
+   * 🔴 **每一格缺席时相关条件求值为假**（不是「通过」）—— 所以这里宁可少供一格，
+   *    也绝不为了让条件好过而编一个值。玩家角色不在（新档 / 已删）时 `playerLevel`
+   *    与 `placeKey` 双双缺席，于是带地点或等级门槛的事件都不会触发，这是对的。
+   */
+  private async buildRandomEventContext(profile: SaveProfile): Promise<RandomEventRollContext> {
+    const player = (await getCharacters(this.saveId)).find((c) => c.type === 'player');
+    const mapFlags = getMapFlags(profile);
+
+    const quests: Record<string, string> = {};
+    for (const [name, quest] of Object.entries(profile.quests ?? {})) {
+      if (typeof quest?.status === 'string') quests[name] = quest.status;
+    }
+
+    const ctx: RandomEventRollContext = {
+      journeyActive: mapFlags.journey !== undefined,
+      season: getSeason(profile.gameTime.month),
+      timeOfDay: getTimeOfDay(profile.gameTime),
+      variables: profile.variables ?? {},
+      quests,
+      affections: profile.affections ?? {},
+    };
+
+    if (player !== undefined) {
+      ctx.locationPath = player.location;
+      const placeKey = this.resolvePlaceKey(mapFlags, player.location);
+      if (placeKey !== undefined) ctx.placeKey = placeKey;
+      if (typeof player.level === 'number' && Number.isFinite(player.level)) {
+        ctx.playerLevel = player.level;
+      }
+    }
+    return ctx;
+  }
+
+  /**
+   * MTTH 掷骰钩子（§4.1）—— `applyTimeAdvance` 推进完时间、天气重断言之后调用。
+   *
+   * **必须在时间推进之后**（同天气那条理由）：逐天走的区间是 `(lastRollDay, 当前日]`，
+   * 拿旧时间去走就等于永远差一天。
+   *
+   * 掷骰之后**顺手保洁一次**：这一次时间推进本身就可能让池里的条目过期（TTL 是按天算的），
+   * 而保洁与掷骰共用同一份上下文 —— 分成两次调用要各组装一遍快照，还会多一次落库。
+   */
+  private async syncRandomEvents(profile: SaveProfile): Promise<void> {
+    const settings = getEngineSettings();
+    if (!settings.randomEventsEnabled) return;
+    const pack = getRandomEventPack();
+    if (isEmptyRandomEventPack(pack)) return;
+
+    try {
+      const ctx = await this.buildRandomEventContext(profile);
+      const currentDay = this.gameDayOf(profile);
+      const current = getRandomEventFlags(profile);
+
+      const rolled = rollRandomEvents(pack.defs, pack.config, current, ctx, {
+        saveSeed: this.saveId,
+        currentDay,
+        frequency: settings.randomEventsFrequency,
+      });
+      const pruned = pruneRandomEvents(pack.defs, pack.config, rolled ?? current, ctx, currentDay);
+
+      // 两个纯函数都可能说「无变化」；只要有一个说了变化就落一次库（`pruned` 更新，优先它）
+      const next = pruned ?? rolled;
+      if (next === null) return;
+      await updateRandomEventFlags(profile, next);
+    } catch (err) {
+      // 时间已经推进、正文状态已经落库；候选池算不出来只是这一回合没有新事件
+      console.warn('[StateManager] 随机事件调度失败（时间已推进，不影响正文）:', err);
+    }
+  }
+
+  /**
+   * 首访强制钩子（§4.2）—— `applySetLocation` 落位之后调用。
+   *
+   * 🔴 **只跟踪玩家**（同 `syncMapLocation` 的 player only）：NPC 换位置不该起玩家的首访事件。
+   * 🔴 **足迹在触发时记账、不在入池时**（纯函数那边的契约）：AI 一直没触发、玩家离开又回来，
+   *    会再次强制入池 —— 这才守得住「点名地点第一次到必定触发」。
+   *
+   * 入池后同样顺手保洁：换了地点就意味着 `location` 类条件的答案变了，池里可能有条目当场失效
+   * （`available` 不再满足 / 权重归零），留到下一回合再撤等于把它注给 AI 看一次。
+   */
+  private async syncRandomEventFirstVisit(char: CharacterState): Promise<void> {
+    if (char.type !== 'player') return;
+    if (!getEngineSettings().randomEventsEnabled) return;
+    const pack = getRandomEventPack();
+    if (isEmptyRandomEventPack(pack)) return;
+
+    try {
+      const profile = await getProfile(this.saveId);
+      const ctx = await this.buildRandomEventContext(profile);
+      const placeKey = ctx.placeKey;
+      // 地点键都算不出来（没落位且位置路径为空）→ 什么也不做，不拿空键去比足迹
+      if (placeKey === undefined || placeKey.length === 0) return;
+
+      const currentDay = this.gameDayOf(profile);
+      const current = getRandomEventFlags(profile);
+
+      const armed = armFirstVisitEvent(pack.defs, current, ctx, {
+        placeKey,
+        currentDay,
+        saveSeed: this.saveId,
+      });
+      const pruned = pruneRandomEvents(pack.defs, pack.config, armed ?? current, ctx, currentDay);
+
+      const next = pruned ?? armed;
+      if (next === null) return;
+      await updateRandomEventFlags(profile, next);
+    } catch (err) {
+      // 位置路径与地块投影都已落库；首访没入池只是少一次遭遇
+      console.warn('[StateManager] 随机事件首访入池失败（位置已落库，不影响正文）:', err);
+    }
+  }
+
+  /**
+   * 每回合一次的轻量保洁（§4.3）—— 由 orchestrator 的每回合胶水层调用（形状照
+   * `syncMapJourney`：公开、自带 try/catch、不污染 `onStateCommitError`）。
+   *
+   * **只保洁不掷骰**：掷骰的判据是「日子过了几天」，而回合与天数无关（一整天可以是十个回合，
+   * 也可以是零个）。这里要处理的是**上下文变了**导致的失效（AI 在正文里改了变量 / 任务状态 /
+   * 好感度，于是某条候选的 `available` 不再满足）—— 便宜且幂等，同一回合调两次不会有副作用。
+   */
+  async syncRandomEventsForTurn(): Promise<void> {
+    if (!getEngineSettings().randomEventsEnabled) return;
+    const pack = getRandomEventPack();
+    if (isEmptyRandomEventPack(pack)) return;
+
+    try {
+      const profile = await getProfile(this.saveId);
+      const ctx = await this.buildRandomEventContext(profile);
+      const pruned = pruneRandomEvents(
+        pack.defs,
+        pack.config,
+        getRandomEventFlags(profile),
+        ctx,
+        this.gameDayOf(profile),
+      );
+      if (pruned === null) return;
+      await updateRandomEventFlags(profile, pruned);
+    } catch (err) {
+      console.warn('[StateManager] 随机事件保洁失败（不影响正文与已落库状态）:', err);
+    }
+  }
+
+  /**
+   * AI 回执 `<event_trigger name>` 后的结算入口（§5.2）。
+   *
+   * 🔴 **命名方法，不是 `StatePatchOp`**（设计 §5.2 明写）：它不是 AI 面向的通用状态原语，
+   *    做成 op 就等于让 `vars_update` 也能伪造一次触发。ADR-21 的「唯一写入口」语义由
+   *    StateManager 方法本身承接，与 `applyTimeAdvance` 同档。
+   *
+   * 两条 warn-noop（都不是错误，是设计内行为）:
+   *   · 系统关闭时收到 marker —— 关掉之后 story 预设里可能还留着上一轮的注入块
+   *   · 名字不在候选池 —— **AI 幻觉触发不奖励**（§5.2 步 1）。逐字匹配，不做模糊解析：
+   *     模糊匹配会让「AI 编了一个相近的名字」静默变成「触发了另一个真事件」
+   *
+   * 结算五步里的前四步在纯函数 `settleRandomEventTrigger`（清池 / 起冷却 / 记档案 / 记足迹），
+   * 这里只做第五步：落库 + emit。
+   */
+  async confirmRandomEventTrigger(name: string): Promise<void> {
+    if (!getEngineSettings().randomEventsEnabled) {
+      console.warn(`[StateManager] 随机事件已关闭，忽略触发回执: ${name}`);
+      return;
+    }
+
+    try {
+      const profile = await getProfile(this.saveId);
+      const currentDay = this.gameDayOf(profile);
+      const settled = settleRandomEventTrigger(getRandomEventFlags(profile), name, currentDay);
+      if (settled === null) {
+        console.warn(`[StateManager] 随机事件不在候选池中，忽略触发回执: ${name}`);
+        return;
+      }
+
+      await updateRandomEventFlags(profile, settled.flags);
+
+      // emit 形状照 `applyTimeAdvance` 末尾那条（真 push 进 this.events，不是只构造），
+      // 再走一次 `reactToEvents` —— 效果系统的 `$event.on('random_event')` 订阅者要吃得到
+      // （§5.2 步 5）。没接过线的存档在 `reactToEvents` 里零开销返回。
+      const event = this.createEvent('random_event', {
+        op: 'set_variable',
+        target: `worldFlags.randomEvents.fired.${settled.triggered.name}`,
+        value: {
+          name: settled.triggered.name,
+          day: currentDay,
+          forced: settled.triggered.forced === true,
+          brief: settled.triggered.brief,
+        },
+      });
+      this.events.push(event);
+      await this.reactToEvents([event]);
+    } catch (err) {
+      // 事件系统只记「触发过」这一事实（铁则 5）；记不上不该让这一回合的正文崩掉
+      console.warn('[StateManager] 随机事件触发结算失败（不影响正文）:', err);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // 🆕 时间推进 & 状态效果结算 (Phase 7e+8)
   // ═══════════════════════════════════════════════════════════
 
@@ -1728,6 +1982,11 @@ export class StateManager {
     // 1.5 🗺 天气重断言（地图 v1 §7）——**必须在时间推进之后**：判据是「新时间落在哪一天」，
     //     拿旧时间去比就等于永远差一天（跨天那一次不断言、下一次同日的又不断言）
     await this.syncMapWeather(profile);
+
+    // 1.6 🎲 随机事件逐天掷骰（随机事件 v1 §4.1）——**必须在时间推进之后**，且排在天气之后：
+    //     权重条件里有 `time.seasonAnyOf` / `timeOfDayAnyOf`，用的是推进后的新时间；
+    //     天气在前是因为它会写 `variables.sys.天气`，而条件 DSL 的 `var` 读的正是这棵树
+    await this.syncRandomEvents(profile);
 
     // 2. 遍历所有角色, 扣减 StatusEffect.remainingTime
     const characters = await getCharacters(this.saveId);

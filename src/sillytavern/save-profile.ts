@@ -282,3 +282,45 @@ export async function updateMapFlags(
   await updateProfile(profile);
   return profile;
 }
+
+// ═══════════════════════════════════════════════════════════
+// 随机事件每存档状态（随机事件系统 v1 / 设计 §3.2）
+// ═══════════════════════════════════════════════════════════
+
+import type { RandomEventSaveFlags } from './types-random-events';
+
+/** `worldFlags.randomEvents` 在 profile 里的键 —— 只在本节出现，读写两侧共用一处 */
+const RANDOM_EVENT_FLAGS_KEY = 'randomEvents';
+
+/**
+ * 读随机事件状态（`worldFlags.randomEvents`）。
+ *
+ * 缺席（新档 / 还没掷过第一次骰）返回**空袋子**而不是 `undefined`：全字段可选，
+ * 「一格都没有」与「还没有这个袋子」对每个消费方都是同一件事（`RandomEventSaveFlags` 注释）。
+ * 🔴 返回的空袋子是**新对象**，往里写不会落库 —— 落库只有 `updateRandomEventFlags` 这一条路。
+ */
+export function getRandomEventFlags(profile: SaveProfile): RandomEventSaveFlags {
+  const raw = profile.worldFlags?.[RANDOM_EVENT_FLAGS_KEY];
+  return raw !== null && typeof raw === 'object' ? (raw as RandomEventSaveFlags) : {};
+}
+
+/**
+ * 整份覆盖随机事件状态（**命名写入口**，P1-09 口径，形状照 `updateMapFlags`）。
+ *
+ * 🔴 **整份覆盖而不是逐字段合并**：四个调度纯函数（掷骰 / 首访 / 保洁 / 结算）返回的都是
+ *    **完整的下一份** flags，且它们的产物里「某个数组变短了」「某个字段被删了」是主要的变化
+ *    形态 —— 而「合并」这个语义下删除是做不到的。合并的症状是候选池只增不减：过期条目撤不掉、
+ *    触发后清不了池。调用方负责算出完整的下一份。
+ * 🔴 **与 `worldFlags.map` 的契约刚好相反**：这一袋存的是**事实不是派生态**（足迹与触发档案
+ *    不可重算），所以没有换包自愈那条清空路径（设计 §3.2）。
+ */
+export async function updateRandomEventFlags(
+  profile: SaveProfile,
+  flags: RandomEventSaveFlags,
+): Promise<SaveProfile> {
+  // 存量记录（与手搓的测试 profile）可能整个缺 worldFlags；缺了就补一个空袋子
+  if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
+  profile.worldFlags[RANDOM_EVENT_FLAGS_KEY] = flags;
+  await updateProfile(profile);
+  return profile;
+}

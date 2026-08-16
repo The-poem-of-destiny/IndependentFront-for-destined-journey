@@ -18,7 +18,7 @@
     "world_setting": "af78d2c6bb272d5d"
   },
   "byPreset": {
-    "placeholder-story-v1": "0bbc89e4c15bcb6d"
+    "placeholder-story-v1": "1f3a6d80d45839df"
   },
   "byBeautifierRule": {
     "placeholder-aside": "ff03fa46267cb2b3",
@@ -33,12 +33,13 @@
     "content/catalog": "4446cad8324e9b60",
     "content/image-dialects": "5507786297ecde48",
     "content/locations": "319a3dc5cef8e61f",
-    "content/map-pack": "065d98d65b15508e",
-    "content/name-pools": "45977085fb1d52eb",
-    "defaults/agent-config": "d1d7725cc6b40912",
+    "content/map-pack": "ab70d9905886458b",
+    "content/name-pools": "3e3e93642df2e4ef",
+    "content/random-events": "bb263e1d9f733963",
+    "defaults/agent-config": "e52adc8b488e6a48",
     "defaults/audio-manifest": "741638a580c5630d",
     "defaults/beautifier-rules": "109fb75675ff60ed",
     "defaults/map-marker-presets": "741638a580c5630d",
-    "defaults/story-preset": "31f451a862e5ef30"
+    "defaults/story-preset": "6bf1e6a4c0ac488c"
   }
 }

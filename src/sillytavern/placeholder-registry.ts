@@ -47,6 +47,8 @@ import type {
 import type { MapCompass } from './map-index';
 import { isEmptyMapPack } from './map-pack';
 import { getMapPack } from './map-runtime';
+// 随机事件 v1 (§5.1 渲染)：只要形状，不要数据 —— 候选快照由 game-pipeline 供进 ctx
+import type { RandomEventOfferEntry } from './random-event-context';
 
 // ═══════════════════════════════════════════════════════════
 // Module-Level Globals
@@ -372,6 +374,53 @@ function renderMapContextBlock(snapshot: MapSnapshot, gameTime: GameTime | undef
 }
 
 // ═══════════════════════════════════════════════════════════
+// RANDOM_EVENTS 渲染（随机事件 v1 §5.1 —— 与 MAP_CONTEXT 同款分工）
+// ═══════════════════════════════════════════════════════════
+
+/** 候选行里的换行/连续空白折叠成单空格 —— 一条候选恒占一行（多行简报会把列表读乱） */
+function flattenOfferText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 候选快照 → `<random_events>` 块（§5.1 的块形状）。
+ *
+ * 🔴 **措辞全在这里**，数据面（过滤 + 排序）在 `random-event-context.buildRandomEventOffer`。
+ *    这是 `{{MAP_CONTEXT}}` 那三条纪律里的第二条，也是随机事件那几个纯函数叶被结构闸门
+ *    禁掉中文字面量的原因。
+ * 🔴 `[!]` 那行说明**只在真有 forced 条目时出现**：讲解一个列表里根本不存在的记号，
+ *    是在教模型认一个它看不到的东西。
+ * 🔴 `plotCompatible` 那一句由调用方按 `plotSettings.mode` 决定（§5.1 末段）：剧情系统
+ *    关掉时它就是一句无意义的约束，而随机事件**可独立于剧情系统工作**是本设计第一需求。
+ */
+function renderRandomEventsBlock(
+  offer: readonly RandomEventOfferEntry[],
+  plotCompatible: boolean,
+): string {
+  const lines: string[] = [
+    '以下事件当前可以触发。请在叙事自然、不打断当前剧情节奏的时机，选择其中至多一个',
+    '编织进正文（按优先级与当前剧情契合度自行判断；本回合不方便可以不触发，列表会保留）。',
+    '触发时：把事件内容自然写进正文，并在回复末尾输出 <event_trigger name="事件名"/>（名字逐字一致）。',
+  ];
+  if (offer.some((e) => e.forced)) {
+    lines.push('[!] 标记的是首次到访事件，必须尽快触发（本回合优先）。');
+  }
+  if (plotCompatible) {
+    lines.push('触发时机须与当前剧情推进兼容。');
+  }
+
+  for (const entry of offer) {
+    const mark = entry.forced ? '[!]' : '';
+    const detail = entry.detail ? `（演绎指引：${flattenOfferText(entry.detail)}）` : '';
+    lines.push(
+      `- ${mark}〔优先级 ${entry.priority}〕${entry.name}：${flattenOfferText(entry.brief)}${detail}`,
+    );
+  }
+
+  return `<random_events>\n${lines.join('\n')}\n</random_events>`;
+}
+
+// ═══════════════════════════════════════════════════════════
 // Placeholder Registry
 // ═══════════════════════════════════════════════════════════
 
@@ -585,6 +634,30 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
   },
 
   /**
+   * {{RANDOM_EVENTS}} — 当前可触发的随机事件候选块（随机事件 v1 §5.1）：指令段 +
+   * 一条候选一行（`[!]` 首访 / 优先级 / 名字 / 简报 / 可选演绎指引），包在 `<random_events>` 里。
+   *
+   * 🔴 **三条空串出口**（缺一条都是在花冤枉 token 或在错误的时机说话）:
+   *    ① 池空（`randomEventOffer` 缺席或为空）—— 常态，绝大多数回合都走这条；
+   *    ② 系统关闭（`randomEventsEnabled === false`，裁定 §13-4）；
+   *    ③ **战斗会话活跃**（`combatActive`，裁定 §13-2）—— 掷骰照常、候选静默驻池，
+   *      战斗结束后下一回合自然恢复注入。判据是**活跃位**不是 `recentCombat`（战后回执）。
+   *    照 MAP_CONTEXT 的口径：块自带 XML 外壳，模板里**不要**再包一层中文标签 ——
+   *    包了就会在空池时留下一对空标签，把「零成本」这条设计意图静默作废。
+   * 🔴 数据面（过滤/排序）在 `random-event-context.buildRandomEventOffer`（纯函数），
+   *    供值在 game-pipeline 的 `buildContext`。本 resolver 只负责**措辞**。
+   * 🔴 只给名字与简报：没有 id、没有 MTTH、没有权重、没有过期日（AI 认领靠名字逐字一致，
+   *    其余是引擎的记账，讲给它只会诱导它去推理概率）。
+   */
+  RANDOM_EVENTS: (ctx, _config, _params) => {
+    if (ctx.randomEventsEnabled === false) return '';
+    if (ctx.combatActive === true) return '';
+    const offer = ctx.randomEventOffer ?? [];
+    if (offer.length === 0) return '';
+    return renderRandomEventsBlock(offer, (ctx.plotSettings?.mode ?? 'off') !== 'off');
+  },
+
+  /**
    * {{RECENT_COMBAT}} — 最近一场**已结算**战斗的事实块（2026-08-13 真机 debug）。
    *
    * 数据来自 `ctx.recentCombat`（game-pipeline 战斗终局时记录，内存级）。request_dispatcher
@@ -730,8 +803,10 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
 // ═══════════════════════════════════════════════════════════
 
 const DEFAULT_TEMPLATES: Record<string, string> = {
+  // 随机事件 v1 (§5.1)：`{{RANDOM_EVENTS}}` 排在动态区之后、对话历史之前 —— 它每回合都可能
+  // 变（池子会增删），放前面会把前缀缓存打碎；块自带 `<random_events>` 外壳，别再包中文标签。
   story:
-    '{{SYS_PROMPT}}\n{{AGENT.MEMORY_RECALL}}\n{{AGENT.PLOT_PRE_CHECK}}\n{{LORE_BOOK_STATIC}}\n{{CHARACTER_STATE}}\n{{LORE_BOOK_DYNAMIC}}\n{{GAME_TIME}}\n{{NARRATIVE}}\n{{USER_INPUT}}',
+    '{{SYS_PROMPT}}\n{{AGENT.MEMORY_RECALL}}\n{{AGENT.PLOT_PRE_CHECK}}\n{{LORE_BOOK_STATIC}}\n{{CHARACTER_STATE}}\n{{LORE_BOOK_DYNAMIC}}\n{{GAME_TIME}}\n{{RANDOM_EVENTS}}\n{{NARRATIVE}}\n{{USER_INPUT}}',
   memory_recall: '{{SYS_PROMPT}}\n{{MEMORY_ENTRIES}}\n{{NARRATIVE:layers=3}}\n{{USER_INPUT}}',
   // Phase 10 结构化（2026-07-20）: XML 分区 + 注释三要素 + 缓存排序。
   // {{PLOT_EVENTS}} 在管线中被 buildAgentMessages 的 localParams 覆盖为富上下文块

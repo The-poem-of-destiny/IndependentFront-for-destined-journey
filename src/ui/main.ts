@@ -82,6 +82,12 @@ setEngineSettingsProvider(() => {
     // 设置页上叫「快照上限」，字段名是历史遗留的 memorySnapshotLimit
     maxSnapshotsPerSave: s.memorySnapshotLimit,
     snapshotRetentionMode: s.snapshotRetentionMode,
+    // 随机事件两项（随机事件系统 v1 / 裁定 §13-4）。
+    // 🔴 必须**每次调用现读**（provider 是个函数，`s` 是 store 的响应式对象）——
+    //    引擎在写库路径上同步调 getEngineSettings()，所以设置页拨一下开关下一回合即生效。
+    //    把值提到 provider 外面存一份快照，等于把开关永久钉在启动那一刻。
+    randomEventsEnabled: s.randomEventsEnabled,
+    randomEventsFrequency: s.randomEventsFrequency,
   };
 });
 

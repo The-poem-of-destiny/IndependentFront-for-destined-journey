@@ -1,7 +1,7 @@
 /**
  * 上下文模板占位符目录（Phase 10e，Q-25 第 9 步搬出）。
  *
- * 一张 26 项的数据表 + 一条「哪些 Agent 看得见哪些占位符」的纯筛选。此前它俩住在
+ * 一张 27 项的数据表 + 一条「哪些 Agent 看得见哪些占位符」的纯筛选。此前它俩住在
  * `SettingsPage.vue` 的 script 里，于是想验「vars_update 到底该看见几个占位符」
  * 得先挂起整个设置页。搬成纯模块之后是一行 import 一行断言。
  *
@@ -52,6 +52,12 @@ export const ALL_PLACEHOLDER_META: readonly PlaceholderBadge[] = [
     color: '#4caf50',
     desc: '地图上下文 — 当前地块/一跳邻接/天气/在途（未装地图包时为空）',
     category: '世界',
+  },
+  {
+    key: 'RANDOM_EVENTS',
+    color: '#ff7043',
+    desc: '随机事件候选 — 当前可触发的事件列表（池空/关闭/战斗中为空）',
+    category: '剧情',
   },
   { key: 'ACTIVE_EFFECTS', color: '#ff9800', desc: '活跃效果 — Buff/Debuff', category: '角色' },
   { key: 'MEMORY_ENTRIES', color: '#ff7043', desc: '记忆条目 — embedding 召回', category: '记忆' },
@@ -140,9 +146,13 @@ const CHAIN_ONLY: Record<string, readonly string[]> = {
  *    预设短路（占位符到不了它，story 侧走世界书 constant 条目）；vars_update 拿不到是因为
  *    它只执行调度器的清单、不发起空间决策，喂它是纯 token 浪费。徽章不出现≠手打无效 ——
  *    引擎注册表对每个 Agent 都认这个键，这张表只决定**面板上画不画那个按钮**。
+ * 🔴 `RANDOM_EVENTS` 反过来**只给 story**（随机事件 v1 §5.1 末段）：事件的消费者只有它一个，
+ *    单通道免双写。story 有预设短路不假，但占位符**能穿透预设**（`STORY_PRESET_PLACEHOLDER_RE`
+ *    命中后会就地预解析）—— 所以这个按钮对 story 是真的有用，与 MAP_CONTEXT 的情况不同。
  */
 const AGENT_SCOPED: Record<string, readonly string[]> = {
   request_dispatcher: ['MAP_CONTEXT'],
+  story: ['RANDOM_EVENTS'],
 };
 
 /**

@@ -13,6 +13,7 @@ import {
   scanCharDetects,
   scanPlayAudioMarkers,
   scanSceneImages,
+  scanEventTriggers,
   sanitizeCaption,
   CAPTION_TITLE_MAX,
   CAPTION_DESC_MAX,
@@ -370,10 +371,11 @@ describe('MARKER_TAGS', () => {
     expect(MARKER_TAGS).toContain('char_detect');
   });
 
-  it('长度应为 10 (Phase 10 的 5 种 request + play_audio + scene_image)', () => {
-    expect(MARKER_TAGS).toHaveLength(10);
+  it('长度应为 11 (Phase 10 的 5 种 request + play_audio + scene_image + event_trigger)', () => {
+    expect(MARKER_TAGS).toHaveLength(11);
     expect(MARKER_TAGS).toContain('play_audio');
     expect(MARKER_TAGS).toContain('scene_image');
+    expect(MARKER_TAGS).toContain('event_trigger');
   });
 });
 
@@ -392,10 +394,11 @@ describe('MARKER_TAG_SET', () => {
     expect(MARKER_TAG_SET.has('craft_gen_request')).toBe(true);
   });
 
-  it('大小应为 10 (Phase 10 的 5 种 request + play_audio + scene_image)', () => {
-    expect(MARKER_TAG_SET.size).toBe(10);
+  it('大小应为 11 (Phase 10 的 5 种 request + play_audio + scene_image + event_trigger)', () => {
+    expect(MARKER_TAG_SET.size).toBe(11);
     expect(MARKER_TAG_SET.has('play_audio')).toBe(true);
     expect(MARKER_TAG_SET.has('scene_image')).toBe(true);
+    expect(MARKER_TAG_SET.has('event_trigger')).toBe(true);
   });
 
   it('不应包含非标记标签', () => {
@@ -614,6 +617,53 @@ describe('scanSceneImages', () => {
     const [m] = scanSceneImages('<Scene_Image title="低语">画面</Scene_Image>');
     expect(m.type).toBe('scene_image');
     expect(m.bodyText).toBe('画面');
+  });
+});
+
+// ========== 随机事件 v1: <event_trigger>（设计 §5.2） ==========
+
+describe('scanEventTriggers', () => {
+  it('🔴 自闭合是提示词教的写法：认得出、name 取到、bodyText 空串、且被剥掉', () => {
+    // 不认自闭合的话这个标记既不会被结算、也不会被剥掉 —— 那行尖括号直接漏给玩家
+    const text = '正文……<event_trigger name="神秘商人"/>';
+    const [m] = scanEventTriggers(text);
+    expect(m.type).toBe('event_trigger');
+    expect(m.name).toBe('神秘商人');
+    expect(m.bodyText).toBe('');
+    expect(scanMarkers(text).cleanText).toBe('正文……');
+  });
+
+  it('成对与漏写闭合两种写法也认（AI 记不记得写闭合标签不该改变结算与去留）', () => {
+    expect(scanEventTriggers('<event_trigger name="初临此地"></event_trigger>')[0].name).toBe(
+      '初临此地',
+    );
+    const [open] = scanEventTriggers('尾声。<event_trigger name="初临此地">');
+    expect(open.name).toBe('初临此地');
+  });
+
+  it('🔴 name 原样取，不 trim 内容 / 不折大小写 / 不去中文标点（逻辑键靠 === 比候选池）', () => {
+    const [m] = scanEventTriggers('<event_trigger name="「加冕日」人潮 A"/>');
+    expect(m.name).toBe('「加冕日」人潮 A');
+  });
+
+  it('缺 name / 空 name 都产出标记（仍要被剥掉），name 留给结算侧 warn-noop', () => {
+    expect(scanEventTriggers('<event_trigger/>')[0].name).toBeUndefined();
+    expect(scanEventTriggers('<event_trigger name=""/>')[0].name).toBe('');
+    expect(scanMarkers('A<event_trigger/>B').cleanText).toBe('AB');
+  });
+
+  it('scanMarkers 主入口收得到它，且与其它标记按 position 排在一起', () => {
+    const text = '<scene_image>画面</scene_image>尾声<event_trigger name="神秘商人"/>';
+    const markers = scanMarkers(text).markers;
+    expect(markers.map((m) => m.type)).toEqual(['scene_image', 'event_trigger']);
+    expect(isMarkerTag('event_trigger')).toBe(true);
+    expect(classifyMarker('event_trigger')).toBe('event_trigger');
+  });
+
+  it('一轮写了多个：全部扫出来（取哪一条是编排层的策略，不在扫描器里判）', () => {
+    const list = scanEventTriggers('<event_trigger name="甲"/>中间<event_trigger name="乙"/>');
+    expect(list.map((m) => m.name)).toEqual(['甲', '乙']);
+    expect(list[0].position).toBeLessThan(list[1].position);
   });
 });
 

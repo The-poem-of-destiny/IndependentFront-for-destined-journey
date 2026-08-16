@@ -481,6 +481,27 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
     expect(content).not.toContain('{{LORE_BOOK_DYNAMIC}}');
     expect(content).toContain('核心提示词。');
   });
+
+  // 随机事件 v1 §5.1 步 4：三处同步改漏一处的症状是**静默消失**。这一处漏了的表现是
+  // 「只靠 {{RANDOM_EVENTS}} 的预设不走预解析」—— 那个占位符会原样裸奔到模型眼前。
+  it('story + 预设只含 {{RANDOM_EVENTS}} → 仍判定为规范预设并预解析', () => {
+    const ctx = makeContext({ userInput: '继续赶路' });
+    const cfg = makeCfg('story', { presetId: 'random-events-preset' });
+    const presets: AgentPreset[] = [
+      {
+        id: 'random-events-preset',
+        name: 'Random Events Preset',
+        fixedSystem: '核心提示词。\n{{RANDOM_EVENTS}}',
+        fixedExamples: '',
+      } as AgentPreset,
+    ];
+
+    const content = buildAgentMessages('story', ctx, [cfg], [], presets)![0].content;
+
+    // 池空 → 渲染成空串（零 token），但**必须已经被渲染过**，不能留着裸占位符
+    expect(content).not.toContain('{{RANDOM_EVENTS}}');
+    expect(content).toContain('核心提示词。');
+  });
 });
 
 // ========== Phase 10: 单消息返回格式 ==========

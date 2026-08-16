@@ -20,6 +20,10 @@ import type { EffectAutomaton } from './combat-v3/types';
 import type { SceneImageMarker } from './types-image';
 // 地图 v1: `AgentContext.mapFlags` 的形状（分册 types-map.ts，口径同上 —— 只 type-only 反向引用）
 import type { MapSaveFlags } from './types-map';
+// 随机事件 v1: `AgentContext.randomEventOffer` 的形状。**type-only，不成环** ——
+// `random-event-context.ts` 自己只 import `random-event-scheduler` 与 `types-random-events`，
+// 两者都不 import 本文件。这里刻意不复述那个形状（复述一份就是第二个真源）。
+import type { RandomEventOfferEntry } from './random-event-context';
 
 // 音频子系统的接口/seam 类型拆分在 types-audio.ts（本文件已逾 800 行）。
 // 从这里统一再导出，「types.ts 是唯一类型来源」这条 import 路径依然成立。
@@ -1502,6 +1506,35 @@ export interface AgentContext {
    */
   recentCombat?: RecentCombatInfo;
 
+  // --- 随机事件 v1（§5.1 读侧）: `{{RANDOM_EVENTS}}` 的三格输入 ---
+  /**
+   * 当前该展示给 AI 的候选事件列表（`buildRandomEventOffer` 的产出，已过滤 + 已排序）。
+   *
+   * 🔴 供值在 game-pipeline 的 `buildContext` —— 与 `mapFlags` / `recentCombat` 同一条铁律：
+   *    resolver 自己去读 Pinia 或 Dexie 就把引擎的依赖方向反过来了。漏供的症状不是报错，
+   *    是那个块**静默消失**（blurByDefault 的教训），故有一条源码断言盯着那几行。
+   * 🔴 这里放的是**数据快照不是措辞**：`<random_events>` 外壳、指令段、`[!]` 标记全在
+   *    `PLACEHOLDER_REGISTRY.RANDOM_EVENTS` 的 resolver 里。
+   * 🔴 缺席 / 空数组 = 池空 → 整段不出（零 token）。
+   */
+  randomEventOffer?: RandomEventOfferEntry[];
+  /**
+   * 随机事件总开关的当前值（`engine-settings.randomEventsEnabled`）。
+   *
+   * 关掉时注入空串（裁定 §13-4）。**判据必须随上下文走**：resolver 自己去调
+   * `getEngineSettings()` 就等于在装配层新开一条读设置的路，而 `buildContext` 已经在读了。
+   * 缺席读作「没人告诉我」→ 不当作关（真正的空池由 `randomEventOffer` 判）。
+   */
+  randomEventsEnabled?: boolean;
+  /**
+   * 战斗会话是否活跃（`game-store.isInCombat`：就绪面板 / 结算确认 / v2 / v3 四判据同源）。
+   *
+   * 裁定 §13-2：战斗期间注入**全面静默**（零 token）—— MTTH 掷骰照常、候选静默驻池，
+   * 战斗结束后下一回合恢复。🔴 **不是** `recentCombat`：那一格是**战后回执**（已结算），
+   * 拿它当活跃位会让静默恰好发生在该恢复注入的那几轮。
+   */
+  combatActive?: boolean;
+
   /**
    * 存档开局提示词原文（save.metadata.openingPrompt）——含捏人页选的初始技能/装备
    * 声明（`--- 初始技能 ---` 自然语言段）。request_dispatcher 的 {{SKILL_STATE}} 用它
@@ -1678,6 +1711,12 @@ export type GameEventType =
   | 'skill_use'
   | 'location_change'
   | 'quest_update'
+  /**
+   * 随机事件被 AI 认领并由 Code 结算（随机事件系统 v1 / 设计 §5.2 步 5）。
+   * 只记「触发过」这一事实 —— v1 事件零数值副作用（铁则 5），状态变化由既有的
+   * dispatcher / vars_update 管线从正文里自然捕获。
+   */
+  | 'random_event'
   | 'system';
 
 /** 游戏事件 — 结构化的事件记录 */
@@ -3050,7 +3089,8 @@ export type MarkerType =
   | 'item_update_request' // 物品调度
   | 'craft_gen_request' // 制作调度（统一 _request 后缀）
   | 'play_audio' // 场景配乐（Story 直接输出，非阻塞）
-  | 'scene_image'; // 情景插画（图像生成 v1；标记即锚点，图就地插进正文）
+  | 'scene_image' // 情景插画（图像生成 v1；标记即锚点，图就地插进正文）
+  | 'event_trigger'; // 随机事件触发回执（随机事件 v1 §5.2；Story 认领候选池里的一条）
 
 /** 所有标记的公共字段 */
 export interface DetectedMarkerBase {
@@ -3149,6 +3189,26 @@ export interface PlayAudioMarker extends DetectedMarkerBase {
   bodyText?: string;
 }
 
+/**
+ * `<event_trigger>` 标记 — Story 认领候选池里的一条随机事件（随机事件 v1 §5.2）。
+ *
+ * 写法是自闭合、写在回复末尾：`<event_trigger name="神秘商人"/>`。成对与漏写闭合两种
+ * 写法也认（`lenientClosing`，同 `scene_image` / `play_audio` 的理由：不认就等于
+ * 「既不生效、也剥不掉」，那行尖括号会漏到玩家眼前）。
+ *
+ * 🔴 **`name` 是逻辑键，逐字匹配候选池**（铁则 1：AI 永不见 id）。结算侧
+ * `StateManager.confirmRandomEventTrigger` **不做模糊解析** —— 模糊匹配会让
+ * 「AI 编了一个相近的名字」静默变成「触发了另一个真事件」。
+ * 🔴 没有正文：事件内容由 AI 写进 `<maintext>`，这个标记只是**回执**。
+ */
+export interface EventTriggerMarker extends DetectedMarkerBase {
+  type: 'event_trigger';
+  /** 事件名（候选池里的逻辑键）。缺省/空串 = AI 没写名字 → 结算侧 warn 忽略 */
+  name?: string;
+  /** 恒为空串（自闭合无正文）；成对写法下的正文一律无意义，不进结算 */
+  bodyText?: string;
+}
+
 /** 三种标记的联合类型 */
 export type DetectedMarker =
   | CraftRequestMarker
@@ -3166,7 +3226,10 @@ export type DetectedMarker =
   // 🔴 加/删 `MarkerType` 成员与改 `MARKER_SPECS` **必须同一次改动**：那张表是
   //    `{ [K in Exclude<MarkerType,'play_audio'>]: … }` 的映射类型，只改一边当场缺键、
   //    编译不过（设计 §3.1）。
-  | SceneImageMarker;
+  | SceneImageMarker
+  // 随机事件 v1：`<event_trigger>`（§5.2 写侧）。同上一条 —— 它与 `MARKER_SPECS` 里的
+  // `event_trigger` 一行是同一次改动的两半。
+  | EventTriggerMarker;
 
 /**
  * <char_gen_request> 标记 — request_dispatcher 检测到新角色时输出。

@@ -9,6 +9,27 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 随机事件系统 v1 ｜ ✅ 已实施（待真机）（2026-08-15）
+
+剧情系统旗下的支线/遭遇子系统，**可独立于剧情系统本体开关**。一句话机制：Code 端种子化确定性调度（每条事件独立 MTTH × 声明式权重链、`available` 硬门槛、共享全局冷却、点名地点首访强制）逐天掷骰产出跨回合驻留的**候选池** → `{{RANDOM_EVENTS}}` 注入 story（不新开 Agent、战斗会话活跃时静默零 token）→ AI 有空时演绎一条并以 `<event_trigger name>` 回执 → Code 按名字结算（清非强制池 / 起冷却 / 记足迹）。触发**纯叙事零副作用**，状态变化仍由既有 dispatcher/vars_update 管线捕获（ADR-32，见 `AGENTS.md` 设计约定）。
+
+四波交付：
+
+- **W1（纯函数层）**：`types-random-events.ts` / `random-event-pack.ts`（`coerceRandomEventPack` 永不抛）/ `random-event-scheduler.ts`（逐天 MTTH + 权重 + 冷却 + 池保洁，零 `Math.random`、零时钟）/ `random-event-context.ts`（条件 DSL 求值）/ `random-event-runtime.ts`（注入缝单例），**128 测试**。
+- **W2a（状态层）**：`SaveProfile.worldFlags.randomEvents` 四件套 + StateManager 两钩子（`applyTimeAdvance` 掷骰 / `applySetLocation` 首访）+ 命名写入口 `confirmRandomEventTrigger`（**不做成 StatePatchOp** —— 它不是 AI 面向的通用状态原语）+ 每回合 `syncRandomEventsForTurn` 保洁；`engine-settings.ts` 加 `randomEventsEnabled(true)` / `randomEventsFrequency(1)`。
+- **W2b（内容层）**：`ContentPack` 第 13 分节 `randomEvents`（types-content / content-pack-plan / content-source / content-store 四处接线，三态语义照旧）+ `public/data/content/random-events.json` 零 IP 占位集（两条通用事件）。
+- **W2c（AI 集成）**：`{{RANDOM_EVENTS}}` resolver（块自带 XML 外壳、数据面纯函数）+ `AgentContext.randomEventOffer/randomEventsEnabled/combatActive` 供值 + `MARKER_SPECS` 加 `event_trigger`（`lenientClosing`，AI 写的是自闭合形态）+ orchestrator `onEventTrigger` → game-pipeline handler + story 预设教学文案 + `placeholder-catalog` 条目。
+- **W3（外围，本条）**：设置两字段（`settings-types` 声明 + `getDefaults()` 默认值 + `main.ts` provider 转发，三处缺一即静默失效）+ PlotSection「随机事件」子块（总开关 + 三档频率）+ `story-output.ts` 剥 `event_trigger`（与 `play_audio` 同类：零渲染意义的回执，漏出去就是玩家眼前一行尖括号；结算侧读的是未投影的原始输出，不受影响）+ 文档同步 + `placeholder-hashes.json` 重生成。
+
+**8 条 grilling 裁定**（副作用面 / 战斗互斥 / 首访语义收窄 / 开关层级 / 清池策略 / 默认参数 / 首访粒度 / P2 排序）逐条记录在设计文档 §13，改这套东西之前先读那一节 —— 其中「`first_visit` 的 `scope` 必填、普通新地点不起事件」与「触发即清全部非 forced 候选」两条最容易被当成缺陷顺手"修好"。
+
+留验事项：
+
+- **AI 认领率待真机** —— 候选池驻留 + TTL 过期是设计内行为；若长期无视，调 story 预设话术（内容侧），**不加 Code 强制**。
+- **正式事件包待内容仓侧创作**（含 `first_visit` 样例，需真实地块名）—— 公开仓只有零 IP 占位集的两条通用事件。
+- `placeholder-hashes.json` 已重生成；本次顺带刷新了三条**本特性之前就已过期**的条目（`content/map-pack` / `content/name-pools` / `defaults/agent-config`）。
+- `src/ui/stores/content-store-registry.test.ts` 的既有 flaky 与本波无关。
+
 ### IPA 音素种子起名（世界书 #480748 机制移植）｜ ✅ 已实施（2026-08-15）
 
 主人复查「名字太少」时发现：世界书原版起名根本不是固定名字池，是 uid 480748「角色命名指导」（10184 字）的 **IPA-Seed 生成器**——五组音素池（P 爆破/S 擦流/D 鼻喉/X 异质/V 元音）× 11 种族 profile（权重/强制池/音素数/修饰符），每轮产音素种子交给 AI 按命名规则（文化风格→发音转写中文 + 阶级三段格式 + 种族特化）创名。这条条目**从未迁进 pack**（510 条里零命名相关），char_gen 只剩固定池（人类男名 32 个）——多样性天花板就是这么来的。按 ADR-28 移植：结果照搬、手段工程化。

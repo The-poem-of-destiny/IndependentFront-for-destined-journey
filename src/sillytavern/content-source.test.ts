@@ -216,6 +216,24 @@ describe('validatePackOrThrow', () => {
     expect(hasCode(errorNotes(notes), 'bad-catalog-section')).toBe(true);
   });
 
+  it('randomEvents 是裸数组 → bad-randomEvents-section（第 13 面走对象型闸）', () => {
+    // 🔴 `coerceRandomEventPack` 对裸数组也返回空包（永不抛），但那条兜底是**运行时**的。
+    //    装包路径不该借它当遮羞布：装了一个形状就不对的包，用户该在装的时候知道，
+    //    而不是等到「事件系统怎么一条都不触发」。口径同 mapPack / imageDialects。
+    const notes = validatePackOrThrow({ ...minimalPack(), randomEvents: [] });
+    expect(hasCode(errorNotes(notes), 'bad-randomEvents-section')).toBe(true);
+  });
+
+  it('randomEvents 是合法对象 → 无该 error（含只写 defs、config 缺席）', () => {
+    const notes = validatePackOrThrow({ ...minimalPack(), randomEvents: { defs: [] } });
+    expect(hasCode(errorNotes(notes), 'bad-randomEvents-section')).toBe(false);
+  });
+
+  it('randomEvents 缺席 → 无该 error（absent = 本包对随机事件无话可说）', () => {
+    const notes = validatePackOrThrow(minimalPack());
+    expect(hasCode(errorNotes(notes), 'bad-randomEvents-section')).toBe(false);
+  });
+
   // ── creative_workshop 分区拒绝（D8）──
 
   it('worldBooks 含 creative_workshop 分区书 → workshop-partition-rejected (error)', () => {
