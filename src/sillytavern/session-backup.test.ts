@@ -11,6 +11,7 @@ import {
   createDefaultSaveProfile,
   deleteSaveSlot,
   characterAppearanceKey,
+  exportAllData,
 } from './database';
 import type { ContentPackRecord } from './database';
 import { createDefaultCharacterState } from './types';
@@ -30,6 +31,7 @@ import type {
 import type { SceneImageRecord, CharacterSessionAppearance, ImagePreset } from './types-image';
 import {
   isSessionBackup,
+  isFullBackupFile,
   exportSessionSave,
   checkSessionSaveDependencies,
   importSessionSave,
@@ -58,6 +60,32 @@ function makeWorldBook(overrides: Partial<WorldBook> = {}): WorldBook {
   };
 }
 
+/** 世界书条目夹具；`workshop` 传了就写进 `extra.workshop`（跨机身份的来源） */
+function makeEntry(
+  uid: number,
+  name: string,
+  workshop?: { projectId: string; projectName: string; sourceUid: string | number },
+): WorldBook['entries'][number] {
+  return {
+    uid,
+    name,
+    content: '正文',
+    enabled: true,
+    key: [],
+    keysecondary: [],
+    selectiveLogic: 0,
+    order: 0,
+    position: 0,
+    ...(workshop
+      ? {
+          extra: {
+            workshop: { ...workshop, sourceComment: name, sourceHash: 'hash' },
+          },
+        }
+      : {}),
+  };
+}
+
 function makeWorkshopProject(overrides: Partial<WorkshopProject> = {}): WorkshopProject {
   return {
     id: 'proj_uuid_1',
@@ -79,6 +107,10 @@ function makeWorkshopProject(overrides: Partial<WorkshopProject> = {}): Workshop
   };
 }
 
+/**
+ * 内容包夹具 —— 默认**拥有 `book_core`**，而存档启用了 `system_core:100`，
+ * 于是它是「这份存档真的用到的包」（Finding 4 的判据①）。
+ */
 function makePackRecord(overrides: Partial<ContentPackRecord> = {}): ContentPackRecord {
   return {
     packId: 'test-pack',
@@ -89,6 +121,14 @@ function makePackRecord(overrides: Partial<ContentPackRecord> = {}): ContentPack
       packId: 'test-pack',
       packVersion: '1.0.0',
       name: '测试内容包',
+      worldBooks: [
+        makeWorldBook({
+          id: 'book_core',
+          name: '核心设定',
+          partition: 'system_core',
+          entries: [makeEntry(100, '命定核心')],
+        }),
+      ],
     } as ContentPackRecord['payload'],
     ...overrides,
   };
@@ -293,64 +333,25 @@ async function seedContent(): Promise<void> {
       id: 'book_core',
       name: '核心设定',
       partition: 'system_core',
-      entries: [
-        {
-          uid: 100,
-          name: '命定核心',
-          content: '正文',
-          enabled: true,
-          key: [],
-          keysecondary: [],
-          selectiveLogic: 0,
-          order: 0,
-          position: 0,
-        },
-      ],
+      entries: [makeEntry(100, '命定核心')],
     }),
     makeWorldBook({
       id: 'book_workshop',
       name: '测试工坊项目',
       partition: 'creative_workshop',
       entries: [
-        {
-          uid: 900001,
-          name: '二创条目',
-          content: '正文',
-          enabled: true,
-          key: [],
-          keysecondary: [],
-          selectiveLogic: 0,
-          order: 0,
-          position: 0,
-          extra: {
-            workshop: {
-              projectId: 'proj_uuid_1',
-              projectName: '测试工坊项目',
-              sourceUid: 1,
-              sourceComment: '二创条目',
-              sourceHash: 'hash',
-            },
-          },
-        },
+        makeEntry(900001, '二创条目', {
+          projectId: 'proj_uuid_1',
+          projectName: '测试工坊项目',
+          sourceUid: 1,
+        }),
       ],
     }),
     makeWorldBook({
       id: 'book_dlc',
       name: '扩展内容',
       partition: 'dlc',
-      entries: [
-        {
-          uid: 777,
-          name: '隐藏副本',
-          content: '正文',
-          enabled: true,
-          key: [],
-          keysecondary: [],
-          selectiveLogic: 0,
-          order: 0,
-          position: 0,
-        },
-      ],
+      entries: [makeEntry(777, '隐藏副本')],
     }),
   ]);
   await db.workshopProjects.put(makeWorkshopProject());
@@ -478,6 +479,63 @@ describe('exportSessionSave', () => {
       { packId: 'test-pack', packVersion: '1.0.0', name: '测试内容包' },
     ]);
     expect(backup.dependencies.storyPreset).toEqual(STORY_PRESET);
+  });
+
+  it('依赖清单：这份存档没用到的包不进清单（否则收件人被无关告警淹掉）', async () => {
+    await seedSave();
+    await seedContent();
+    // 装着、但它的书一条都没被本存档启用，也没带地图
+    await getDatabase().contentPacks.put(
+      makePackRecord({
+        packId: 'other-pack',
+        payload: {
+          formatVersion: 1,
+          packId: 'other-pack',
+          packVersion: '1.0.0',
+          name: '无关内容包',
+          worldBooks: [
+            makeWorldBook({
+              id: 'book_other',
+              partition: 'dlc',
+              entries: [makeEntry(555, '没启用的条目')],
+            }),
+          ],
+        } as ContentPackRecord['payload'],
+      }),
+    );
+
+    const backup = await exportSessionSave(SAVE_ID);
+    expect(backup.dependencies.packs.map((p) => p.packId)).toEqual(['test-pack']);
+  });
+
+  it('依赖清单：地图包按 packStamp 认（存档确实在这张地图上落过位）', async () => {
+    await seedSave();
+    const db = getDatabase();
+    // 只装一个「没有任何启用条目」的地图包 —— 唯一的联系是存档档案里的戳
+    await db.contentPacks.put(
+      makePackRecord({
+        packId: 'map-pack',
+        payload: {
+          formatVersion: 1,
+          packId: 'map-pack',
+          packVersion: '1.0.0',
+          name: '地图包',
+          mapPack: { contentHash: 'hash-map-v1' },
+        } as ContentPackRecord['payload'],
+      }),
+    );
+
+    const profile = (await db.saveProfiles.get(SAVE_ID))!;
+    profile.worldFlags = { map: { packStamp: 'hash-map-v1' } };
+    await db.saveProfiles.put(profile);
+
+    const backup = await exportSessionSave(SAVE_ID);
+    expect(backup.dependencies.packs.map((p) => p.packId)).toEqual(['map-pack']);
+
+    // 戳对不上就不算用到
+    profile.worldFlags = { map: { packStamp: 'hash-map-v2' } };
+    await db.saveProfiles.put(profile);
+    expect((await exportSessionSave(SAVE_ID)).dependencies.packs).toEqual([]);
   });
 
   it('不传 storyPreset 时清单里就没有这一项（引擎不去猜全局 UI 状态）', async () => {
@@ -773,6 +831,133 @@ describe('checkSessionSaveDependencies', () => {
     const check = await checkSessionSaveDependencies(bare);
     expect(check.ok).toBe(true);
     expect(check.missingEntries).toEqual([]);
+  });
+});
+
+// ========== 工坊条目跨机身份（Finding 1/2）==========
+//
+// 工坊 uid 由**本机分区级单调游标**发号，同一个项目在另一台机器上按不同安装顺序
+// 拿到的 uid 完全不同。裸 token 比对的两种败法都不报错：假通过（uid 撞上别的项目）
+// 与假缺失（同项目不同号）。这一组把两种都钉住。
+
+describe('工坊条目按身份而非 uid 比对', () => {
+  /** 把收件人库里的工坊书换成「同一项目、不同本机 uid」 */
+  async function reinstallWorkshopAt(uid: number, projectId = 'proj_uuid_1'): Promise<void> {
+    await getDatabase().worldBooks.put(
+      makeWorldBook({
+        id: 'book_workshop',
+        name: '测试工坊项目',
+        partition: 'creative_workshop',
+        entries: [
+          makeEntry(uid, '二创条目', { projectId, projectName: '测试工坊项目', sourceUid: 1 }),
+        ],
+      }),
+    );
+  }
+
+  it('导出清单给工坊条目带上跨机身份（项目 id + 上游 uid）', async () => {
+    await seedSave();
+    await seedContent();
+
+    const backup = await exportSessionSave(SAVE_ID);
+    const workshopRef = backup.dependencies.worldBookEntries.find((e) =>
+      e.token.startsWith('creative_workshop:'),
+    )!;
+    expect(workshopRef.workshopProjectId).toBe('proj_uuid_1');
+    expect(workshopRef.workshopSourceUid).toBe(1);
+    // 非工坊条目不带身份（那些 uid 是内容仓固定编号，本来就跨机稳定）
+    const coreRef = backup.dependencies.worldBookEntries.find(
+      (e) => e.token === 'system_core:100',
+    )!;
+    expect(coreRef.workshopProjectId).toBeUndefined();
+  });
+
+  it('(a) 同项目、收件人本机 uid 不同 → 不报缺失，且导入时 token 被改写成本机 uid', async () => {
+    await seedSave();
+    await seedContent();
+    const backup = await exportSessionSave(SAVE_ID);
+
+    // 收件人那边这个项目装在 900500（安装顺序不同），而备份里写的是 900001
+    await reinstallWorkshopAt(900500);
+
+    const check = await checkSessionSaveDependencies(backup);
+    expect(check.missingEntries).toEqual([]);
+    expect(check.ok).toBe(true);
+
+    const { saveId } = await importSessionSave(backup);
+    const tokens = (await getDatabase().saves.get(saveId))!.metadata.enabledWorldBookEntries!;
+    expect(tokens).toContain('creative_workshop:900500');
+    expect(tokens).not.toContain('creative_workshop:900001');
+    // 非工坊 token 一个字节不动
+    expect(tokens).toContain('system_core:100');
+    expect(tokens).toContain('dlc:777');
+  });
+
+  it('(b) 同一个 uid 被**另一个项目**占着 → 照报缺失（裸 token 比对会在这里假通过）', async () => {
+    await seedSave();
+    await seedContent();
+    const backup = await exportSessionSave(SAVE_ID);
+
+    await reinstallWorkshopAt(900001, 'proj_uuid_OTHER');
+
+    const check = await checkSessionSaveDependencies(backup);
+    expect(check.ok).toBe(false);
+    expect(check.missingEntries.map((e) => e.token)).toEqual(['creative_workshop:900001']);
+
+    // 导入不去硬凑：认不出身份就原样留着，绝不指向别的项目的条目
+    const { saveId } = await importSessionSave(backup);
+    const tokens = (await getDatabase().saves.get(saveId))!.metadata.enabledWorldBookEntries!;
+    expect(tokens).toContain('creative_workshop:900001');
+  });
+
+  it('(c) 清单项没有身份（老备份 / 手工条目）→ 退回裸 token 比对', async () => {
+    await seedSave();
+    await seedContent();
+    // 导出**之前**抹掉溯源 → 清单里这一条不带身份
+    const db = getDatabase();
+    const book = (await db.worldBooks.get('book_workshop'))!;
+    book.entries[0].extra = undefined;
+    await db.worldBooks.put(book);
+
+    const backup = await exportSessionSave(SAVE_ID);
+    expect(backup.dependencies.worldBookEntries.every((e) => !e.workshopProjectId)).toBe(true);
+
+    // token 还在 → 齐全
+    expect((await checkSessionSaveDependencies(backup)).ok).toBe(true);
+
+    // token 换个号 → 报缺失（没有身份可依，只能按号比）
+    await reinstallWorkshopAt(900500);
+    const book2 = (await db.worldBooks.get('book_workshop'))!;
+    book2.entries[0].extra = undefined;
+    await db.worldBooks.put(book2);
+    const check = await checkSessionSaveDependencies(backup);
+    expect(check.missingEntries.map((e) => e.token)).toEqual(['creative_workshop:900001']);
+  });
+});
+
+// ========== 整库备份文件识别（Finding 3）==========
+
+describe('isFullBackupFile', () => {
+  it('只有一个数字 version 的 JSON 不算整库备份（角色卡/预设全长这样）', () => {
+    expect(isFullBackupFile({ version: 2, name: '某角色', description: 'x' })).toBe(false);
+    expect(isFullBackupFile({ spec: 'chara_card_v2', spec_version: '2.0', data: {} })).toBe(false);
+    expect(isFullBackupFile(null)).toBe(false);
+    expect(isFullBackupFile([])).toBe(false);
+    expect(isFullBackupFile({ version: 'v21', saves: [] })).toBe(false);
+  });
+
+  it('真的整库备份 → true', async () => {
+    const backup = await exportAllData();
+    expect(isFullBackupFile(backup)).toBe(true);
+    // 只要有一条签名数组在场就认（老备份缺后加的表是正常的）
+    expect(isFullBackupFile({ version: 21, saves: [] })).toBe(true);
+  });
+
+  it('单存档备份不算整库备份（两条导入路径必须分得开）', async () => {
+    await seedSave();
+    const session = await exportSessionSave(SAVE_ID);
+    expect(isFullBackupFile(session)).toBe(false);
+    expect(isSessionBackup(session)).toBe(true);
   });
 });
 

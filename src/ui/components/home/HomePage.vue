@@ -225,13 +225,6 @@ const sessionWarnings = ref<string[]>([]);
 const showSessionWarnModal = ref(false);
 const showFullBackupModal = ref(false);
 
-/** 整库备份的识别判据（`isSessionBackup` 之后才问，两者不会互相误判） */
-function looksLikeFullBackup(data: unknown): data is FullBackup {
-  if (data === null || typeof data !== 'object' || Array.isArray(data)) return false;
-  const v = (data as Record<string, unknown>).version;
-  return typeof v === 'number' && Number.isFinite(v);
-}
-
 /**
  * 导入入口 —— **先分流再动手**。
  *
@@ -255,13 +248,16 @@ async function importSave() {
       return;
     }
     try {
-      const { isSessionBackup } = await import('@engine/session-backup');
+      const { isSessionBackup, isFullBackupFile } = await import('@engine/session-backup');
       if (isSessionBackup(data)) {
         await beginSessionImport(data);
         return;
       }
-      if (looksLikeFullBackup(data)) {
-        pendingFullBackup.value = data;
+      // 🔴 整库判据必须是引擎那份严格的 isFullBackupFile：只看 `version` 是数字的话，
+      //    角色卡 / 预设这类随处可见的 JSON 都能冒充整库备份，而确认之后
+      //    validateBackupOrThrow 对「实体数组全缺席」是容忍的 —— 用户点一下就清库了。
+      if (isFullBackupFile(data)) {
+        pendingFullBackup.value = data as FullBackup;
         showFullBackupModal.value = true;
         return;
       }

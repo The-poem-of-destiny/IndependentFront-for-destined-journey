@@ -23,6 +23,7 @@
  */
 
 import { getDatabase, characterAppearanceKey, DB_VERSION } from './database';
+import type { ContentPackRecord } from './database';
 // 记忆编号分配器与 generateMemoryId() **共用同一个实现**（两处各写一份就是漂移的来路：
 // 一边补齐到 6 位、另一边截断到 6 位，撞号了也不会有任何报错）。
 import { allocateMemoryIds } from './memory-summarizer';
@@ -46,13 +47,45 @@ import type { SceneImageRecord, CharacterSessionAppearance } from './types-image
 // ═══════════════════════════════════════════════════════════
 
 /**
+ * 一条「本存档启用了这个世界书条目」的引用。
+ *
+ * 🔴 **`token` 只在同一台机器上是稳定标识**。工坊条目的 uid 由**本机分区级单调游标**
+ *    发号（`workshop-install-plan.planInstall` / `InstallRegistry.nextUid`），同一个项目
+ *    在另一台机器上按不同的安装顺序会拿到完全不同的 uid。于是拿裸 token 跨机比对有两种
+ *    败法，且**两种都不报错**：
+ *    - **假通过**：收件人那边 `creative_workshop:5` 确实存在，但它属于**另一个项目** ——
+ *      体检说「内容齐全」，存档实际启用了一批风马牛不相及的条目。
+ *    - **假缺失**：同一个项目装着，只是本机 uid 不同 —— 体检报「缺 N 条」，用户被吓退。
+ *
+ *    所以工坊条目额外带上**跨机稳定的身份**（项目 id + 上游原始 uid，来自条目的
+ *    `extra.workshop`，D14），体检与导入都按身份比对、按身份重定向。
+ *    非工坊分区的 uid 是内容仓/内置书自带的固定编号，仍按 token 比对。
+ */
+interface SessionEntryRef {
+  /** `${partition}:${uid}` —— 导出机本地的串；工坊条目跨机不可移植，见上 */
+  token: string;
+  bookName?: string;
+  entryTitle?: string;
+  /** 工坊条目才有：跨机稳定的项目身份（`WorldBookEntry.extra.workshop.projectId`） */
+  workshopProjectId?: string;
+  /** 工坊条目才有：上游原始 uid（同上 `.sourceUid`），项目内稳定 */
+  workshopSourceUid?: string | number;
+}
+
+/**
  * 内容依赖清单 —— 「这份存档要跑起来，收件人库里得有什么」。
  *
  * 清单是**导出时点的观察**，不是承诺：每一项都可能在收件人那边缺席或版本不同，
  * 这正是 `checkSessionSaveDependencies` 要回答的问题。
  */
 interface SessionDependencies {
-  /** 装着的内容包（通常 0–1 个）。版本不同不等于不能玩，但值得在导入前说一声 */
+  /**
+   * 这份存档**真的用到**的内容包。
+   *
+   * 🔴 刻意**不是**「本机装着的全部包」：那样收件人会为一堆这个存档从没碰过的包收到
+   *    「未安装内容包」告警，而告警多到一定程度就等于没有告警 —— 真正缺的那一条被淹掉。
+   *    判据见 `selectReferencedPacks`（拥有启用条目的书 / 地图包戳对得上）。
+   */
   packs: Array<{ packId: string; packVersion: string; name?: string }>;
   /**
    * 本存档启用的世界书条目 token（`${partition}:${uid}`），带导出侧解析出的书名/条目名。
@@ -60,7 +93,7 @@ interface SessionDependencies {
    * 🔴 解析不出来的 token **照样进清单**（只是没有注释）—— 导出方自己都缺的条目，
    *    收件人更可能缺，把它藏起来只会让体检结果偏乐观。
    */
-  worldBookEntries: Array<{ token: string; bookName?: string; entryTitle?: string }>;
+  worldBookEntries: SessionEntryRef[];
   /** 上面那些 token 里属于创意工坊的，归拢成项目粒度（UI 粒度是项目，存储粒度是条目） */
   workshopProjects: Array<{ id: string; name: string; version?: string }>;
   /**
@@ -93,7 +126,8 @@ export interface SessionBackup {
 /** 导入前体检结果 —— 只读，永不因内容缺失而抛错 */
 export interface SessionImportCheck {
   ok: boolean;
-  missingEntries: Array<{ token: string; bookName?: string; entryTitle?: string }>;
+  /** 原样透传清单项（含工坊身份字段），措辞层只用得到 token / bookName / entryTitle */
+  missingEntries: SessionEntryRef[];
   packMismatches: Array<{
     packId: string;
     name?: string;
@@ -124,6 +158,42 @@ export function isSessionBackup(data: unknown): data is SessionBackup {
   return rec !== null && rec.kind === SESSION_BACKUP_KIND;
 }
 
+/**
+ * 整库备份（`FullBackup`）的**签名数组** —— 认出「这是不是一份整库备份」用的。
+ *
+ * 挑的都是 `exportAllData()` 必产出的顶层实体表；任何一条在，就说明这份 JSON 至少
+ * 长着整库备份的形状。刻意不要求**全部**在场：老版本备份缺后加的那几张表是正常的。
+ */
+const FULL_BACKUP_SIGNATURE_FIELDS = [
+  'saves',
+  'characters',
+  'lorebooks',
+  'presets',
+  'memories',
+  'messages',
+  'worldBooks',
+] as const;
+
+/**
+ * 「这份 JSON 是整库备份吗」—— 整库导入前的**唯一**结构判据。
+ *
+ * 🔴 光看 `version` 是数字**远远不够**：角色卡 / 预设 / 各种社区 JSON 里 `version` 是
+ *    极常见的字段，全都能通过。而整库导入的下一步是 `validateBackupOrThrow` ——
+ *    它对**全部实体字段缺席**是容忍的（三态语义，为老备份留的），于是
+ *    `doImportAllData` 会拿着一份空备份把用户整个库清空。判据松一格，代价是整库数据。
+ *
+ * 三条同时满足才算：普通对象 + `version` 是有限数 + **不是**单存档备份（`kind` 缺席）
+ * + 至少有一条整库备份签名数组**真的在场**（`Array.isArray`，不是「字段存在」）。
+ */
+export function isFullBackupFile(data: unknown): boolean {
+  const rec = asRecord(data);
+  if (!rec) return false;
+  if (typeof rec.version !== 'number' || !Number.isFinite(rec.version)) return false;
+  // 单存档备份走另一条路（`importSessionSave`）；`kind` 在场就一定不是整库备份
+  if (rec.kind !== undefined) return false;
+  return FULL_BACKUP_SIGNATURE_FIELDS.some((f) => Array.isArray(rec[f]));
+}
+
 // ═══════════════════════════════════════════════════════════
 // 导出
 // ═══════════════════════════════════════════════════════════
@@ -144,6 +214,99 @@ function buildEntryAnnotations(
     }
   }
   return index;
+}
+
+/**
+ * 工坊身份键 —— JSON.stringify([projectId, sourceUid])。
+ *
+ * `sourceUid` 在类型上是 `string | number`（上游自由填），统一 `String()` 后入键。
+ *
+ * 🔴 **不用分隔符拼串**：projectId 是 uuid、sourceUid 是自由串，随便挑一个可见字符
+ *    当分隔符，迟早会有两对不同的 (项目, uid) 拼出同一个键 —— 而症状是体检假通过。
+ *    `JSON.stringify` 会把值里的引号自己转义掉，天然没有这个歧义。
+ */
+function workshopIdentityKey(projectId: string, sourceUid: string | number): string {
+  return JSON.stringify([projectId, String(sourceUid)]);
+}
+
+/**
+ * 收件人库里的「工坊身份 → 本机 uid」索引。
+ *
+ * 只扫 `creative_workshop` 分区：别的分区没有 `extra.workshop`，扫了也只是空转。
+ * 同一身份重复出现（理论上不该有）取先到的那条 —— 与 `buildEntryAnnotations` 同口径。
+ */
+function buildWorkshopProvenanceIndex(books: WorldBook[]): Map<string, number> {
+  const index = new Map<string, number>();
+  for (const book of books) {
+    if (book.partition !== WORKSHOP_PARTITION) continue;
+    for (const entry of book.entries ?? []) {
+      const w = entry.extra?.workshop;
+      if (!w?.projectId || w.sourceUid === undefined || w.sourceUid === null) continue;
+      const key = workshopIdentityKey(w.projectId, w.sourceUid);
+      if (!index.has(key)) index.set(key, entry.uid);
+    }
+  }
+  return index;
+}
+
+/** 清单项带没带跨机身份 —— 带了就按身份比对，没带（非工坊 / 老备份）退回裸 token */
+function entryIdentityKey(ref: SessionEntryRef): string | null {
+  if (
+    !ref.workshopProjectId ||
+    ref.workshopSourceUid === undefined ||
+    ref.workshopSourceUid === null
+  ) {
+    return null;
+  }
+  return workshopIdentityKey(ref.workshopProjectId, ref.workshopSourceUid);
+}
+
+/**
+ * 这份存档**真的用到**的内容包（Finding 4）。
+ *
+ * 两条判据，命中任一即算用到：
+ * ① 包里某本世界书的条目，被本存档启用了至少一条（`enabledTokens` 命中）
+ * ② 包带地图，且它的 `contentHash` 正是本存档档案里记着的 `worldFlags.map.packStamp`
+ *    —— 存档确实是在这张地图上落过位的（自愈戳的语义见 types-map.ts）
+ *
+ * 判不出关系就**不进清单**：宁可少报一条「未安装内容包」，也不要让收件人对着一串
+ * 与这份存档毫无关系的包名发愁。真缺内容时世界书条目那一段照样会报。
+ */
+function selectReferencedPacks(
+  packs: ContentPackRecord[],
+  books: WorldBook[],
+  enabledTokens: Set<string>,
+  mapPackStamp: string | undefined,
+): SessionDependencies['packs'] {
+  const booksById = new Map<string, WorldBook>();
+  for (const b of books) booksById.set(b.id, b);
+
+  const out: SessionDependencies['packs'] = [];
+  for (const pack of packs) {
+    let referenced = false;
+
+    for (const packBook of pack.payload?.worldBooks ?? []) {
+      // 本机安装的那本优先（用户可能改过条目）；没装则退回 payload 里的定义
+      const book = booksById.get(packBook.id) ?? packBook;
+      if ((book.entries ?? []).some((e) => enabledTokens.has(`${book.partition}:${e.uid}`))) {
+        referenced = true;
+        break;
+      }
+    }
+
+    if (!referenced && mapPackStamp) {
+      const hash = (pack.payload?.mapPack as { contentHash?: unknown } | undefined)?.contentHash;
+      if (typeof hash === 'string' && hash !== '' && hash === mapPackStamp) referenced = true;
+    }
+
+    if (!referenced) continue;
+    out.push({
+      packId: pack.packId,
+      packVersion: pack.packVersion,
+      ...(pack.payload?.name ? { name: pack.payload.name } : {}),
+    });
+  }
+  return out;
 }
 
 /**
@@ -256,15 +419,30 @@ export async function exportSessionSave(
   }
 
   const entryIndex = buildEntryAnnotations(books);
+  const mapPackStamp =
+    (profile?.worldFlags?.map as { packStamp?: unknown } | undefined)?.packStamp ?? undefined;
   const dependencies: SessionDependencies = {
-    packs: packs.map((p) => ({
-      packId: p.packId,
-      packVersion: p.packVersion,
-      ...(p.payload?.name ? { name: p.payload.name } : {}),
-    })),
+    packs: selectReferencedPacks(
+      packs,
+      books,
+      tokenSeen,
+      typeof mapPackStamp === 'string' ? mapPackStamp : undefined,
+    ),
     worldBookEntries: tokens.map((token) => {
       const hit = entryIndex.get(token);
-      return hit ? { token, bookName: hit.bookName, entryTitle: hit.entryTitle } : { token };
+      if (!hit) return { token };
+      const ref: SessionEntryRef = {
+        token,
+        bookName: hit.bookName,
+        entryTitle: hit.entryTitle,
+      };
+      // 工坊条目额外带上跨机稳定身份 —— 收件人那边 uid 几乎必然不同（见 SessionEntryRef）
+      const w = hit.entry.extra?.workshop;
+      if (w?.projectId && w.sourceUid !== undefined && w.sourceUid !== null) {
+        ref.workshopProjectId = w.projectId;
+        ref.workshopSourceUid = w.sourceUid;
+      }
+      return ref;
     }),
     workshopProjects: resolveWorkshopProjects(tokens, entryIndex, projects),
     ...(opts?.storyPreset ? { storyPreset: { ...opts.storyPreset } } : {}),
@@ -316,13 +494,20 @@ export async function checkSessionSaveDependencies(
 
   const [books, packs] = await Promise.all([db.worldBooks.toArray(), db.contentPacks.toArray()]);
 
-  // 收件人库里现有的 token 全集
+  // 收件人库里现有的 token 全集（非工坊条目按它比对）
   const available = new Set<string>();
   for (const book of books) {
     for (const entry of book.entries ?? []) available.add(`${book.partition}:${entry.uid}`);
   }
+  // 工坊条目按**身份**比对：本机 uid 与导出机几乎必然不同（见 SessionEntryRef）
+  const provenance = buildWorkshopProvenanceIndex(books);
 
-  const missingEntries = (deps.worldBookEntries ?? []).filter((e) => !available.has(e.token));
+  const missingEntries = (deps.worldBookEntries ?? []).filter((e) => {
+    const identity = entryIdentityKey(e);
+    // 带身份 → 裸 token 相等**既不充分也不必要**，只认身份
+    if (identity !== null) return !provenance.has(identity);
+    return !available.has(e.token);
+  });
 
   const installedPacks = new Map(packs.map((p) => [p.packId, p]));
   const packMismatches: SessionImportCheck['packMismatches'] = [];
@@ -398,6 +583,34 @@ class IdMap {
 function remapSoftRefs(ids: string[] | undefined, map: IdMap): string[] | undefined {
   if (!Array.isArray(ids)) return ids;
   return ids.map((id) => map.peek(id) ?? id);
+}
+
+/**
+ * 存档启用的工坊 token → **收件人本机的** uid（Finding 1/2）。
+ *
+ * 不重定向的话，导进来的存档指着导出机的 uid：那些 uid 在本机要么不存在（内容静默少一半），
+ * 要么属于**另一个项目**（静默启用一批风马牛不相及的条目）。两种都不会报错。
+ *
+ * 认不出身份、或本机确实没装这个项目 → **原样留着**：无害（匹配不到任何条目），
+ * 且与「告警之后仍允许强行导入」那条路径一致 —— 用户装上项目之后重新启用即可。
+ */
+function remapWorkshopTokens(
+  tokens: string[],
+  refs: SessionEntryRef[],
+  provenance: Map<string, number>,
+): string[] {
+  const byToken = new Map<string, SessionEntryRef>();
+  for (const ref of refs) {
+    if (ref && typeof ref.token === 'string' && !byToken.has(ref.token))
+      byToken.set(ref.token, ref);
+  }
+  return tokens.map((token) => {
+    const ref = byToken.get(token);
+    const identity = ref ? entryIdentityKey(ref) : null;
+    if (identity === null) return token;
+    const localUid = provenance.get(identity);
+    return localUid === undefined ? token : `${WORKSHOP_PARTITION}:${localUid}`;
+  });
 }
 
 function readArray<T>(source: Record<string, unknown>, field: string): T[] {
@@ -516,6 +729,25 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       : p.contracts,
   });
 
+  // 工坊 token 跨机重定向要读全局 worldBooks —— 只读，且刻意放在写事务**之外**
+  // （下面那个 'rw' 事务的表清单里没有 worldBooks，进去读会直接抛）。
+  const localBooks = await db.worldBooks.toArray();
+  const provenance = buildWorkshopProvenanceIndex(localBooks);
+  const manifestRefs = Array.isArray(backup?.dependencies?.worldBookEntries)
+    ? backup.dependencies.worldBookEntries
+    : [];
+
+  const nextMetadata: SaveSlot['metadata'] = asRecord(rawSave.metadata)
+    ? { ...rawSave.metadata }
+    : { characterName: '', userName: '', gameStartTime: '', totalTurns: 0 };
+  if (Array.isArray(nextMetadata.enabledWorldBookEntries)) {
+    nextMetadata.enabledWorldBookEntries = remapWorkshopTokens(
+      nextMetadata.enabledWorldBookEntries,
+      manifestRefs,
+      provenance,
+    );
+  }
+
   const nextSave: SaveSlot = {
     ...rawSave,
     id: newSaveId,
@@ -524,9 +756,7 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
     activeSnapshotId: rawSave.activeSnapshotId
       ? (snapIds.peek(rawSave.activeSnapshotId) ?? null)
       : null,
-    metadata: asRecord(rawSave.metadata)
-      ? { ...rawSave.metadata }
-      : { characterName: '', userName: '', gameStartTime: '', totalTurns: 0 },
+    metadata: nextMetadata,
   };
 
   const nextCharacters = characters.map(remapCharacter);
@@ -596,10 +826,10 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
 
       // 记忆编号从全库最大号往后续（格式必须留住 —— 换成 UUID 的话新记忆会从
       // MEM000001 重新编号；见 memory-summarizer.allocateMemoryIds）
-      const memoryIds = allocateMemoryIds(
-        (await db.memories.toArray()).map((m) => m.id),
-        memories.length,
-      );
+      // 🔴 只要 id 就别 `toArray()` —— 那会把每条记忆的正文和 embedding 向量
+      //    （4096 维浮点）整份读进内存，纯粹为了算一个最大编号。
+      const existingMemoryIds = (await db.memories.toCollection().primaryKeys()) as string[];
+      const memoryIds = allocateMemoryIds(existingMemoryIds, memories.length);
       const nextMemories: MemoryRecord[] = memories.map((m, i) => {
         const next: MemoryRecord = { ...m, id: memoryIds[i], saveId: newSaveId };
         const related = remapSoftRefs(m.relatedCharacterIds, charIds);

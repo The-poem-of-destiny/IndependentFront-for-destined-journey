@@ -14,6 +14,7 @@ import AppModal from '../shared/AppModal.vue';
 import PackInstallConfirmModal from './PackInstallConfirmModal.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
+import type { FullBackup } from '@engine/database';
 import type { PackInstallPlan } from '@engine/types-content';
 import type { PackUpgradeDiff } from '@engine/content-pack-plan';
 
@@ -342,8 +343,17 @@ async function confirmImportAll() {
   pendingImportFile.value = null;
   if (!f) return;
   try {
+    const raw: unknown = JSON.parse(await f.text());
+    // 🔴 进 importAllData 之前必须先认形状：validateBackupOrThrow 对「实体数组全缺席」
+    //    是容忍的（三态语义，为老备份留的），于是一份只带 `version` 的角色卡 / 预设 JSON
+    //    能一路走到 doImportAllData 把整个库清空。判据用引擎那份严格的，不在这里另写一个。
+    const { isFullBackupFile } = await import('@engine/session-backup');
+    if (!isFullBackupFile(raw)) {
+      ui.toast('导入失败：这个文件看起来不是整库备份', 'error');
+      return;
+    }
     const { importAllData } = await import('@engine/database');
-    await importAllData(JSON.parse(await f.text()));
+    await importAllData(raw as FullBackup);
     await cfg.reloadApiEntries();
     ui.toast('导入成功', 'success');
     await loadStorageUsage();
