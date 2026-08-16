@@ -51,6 +51,7 @@ const namePoolsRaw = readJson(join(PLACEHOLDER_CONTENT, 'name-pools.json'));
 const brandingRaw = readJson(join(PLACEHOLDER_CONTENT, 'branding.json'));
 const imageDialectsRaw = readJson(join(PLACEHOLDER_CONTENT, 'image-dialects.json'));
 const mapPackRaw = readJson(join(PLACEHOLDER_CONTENT, 'map-pack.json'));
+const randomEventsRaw = readJson(join(PLACEHOLDER_CONTENT, 'random-events.json'));
 const markersRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'map-marker-presets.json'));
 const audioManifestRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'audio-manifest.json'));
 const beautifierRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'beautifier-rules.json')) as {
@@ -73,6 +74,7 @@ describe('占位内容 · 注册表八面能被生产解析器吃下', () => {
       branding: brandingRaw,
       imageDialects: imageDialectsRaw,
       mapPack: mapPackRaw,
+      randomEvents: randomEventsRaw,
     });
   });
 
