@@ -465,6 +465,200 @@ describe('AgentOrchestrator — 基本执行', () => {
   });
 });
 
+// ========== Per-Agent 依赖判定（并行化改造 2026-08-16） ==========
+
+describe('AgentOrchestrator — per-agent 依赖（agentWaitFor）', () => {
+  // mock fetch：按 agent 返回不同内容，便于断言哪个 agent 跑了
+  function mockFetchByAgent() {
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: any) => {
+      const body = JSON.parse(init?.body ?? '{}');
+      const msgs = body.messages ?? [];
+      const last = msgs[msgs.length - 1];
+      const content = String(last?.content ?? '');
+      let out = 'generic';
+      if (content.includes('vars_update')) out = 'vars_output';
+      if (content.includes('plot_post_check')) out = 'post_check_output';
+      if (content.includes('memory_summary')) out = 'memory_summary_output';
+      if (content.includes('request_dispatcher')) out = 'dispatcher_output';
+      if (content.includes('story')) out = 'story_output';
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: out } }],
+          usage: { total_tokens: 10 },
+        }),
+        text: async () => '',
+      });
+    });
+  }
+
+  it('依赖失败的 agent 被跳过，但不连坐同 stage 其他 agent', async () => {
+    // 用 onAgentComplete 注入 memory_recall 失败（publishAgentCompletion 抛错 →
+    // result.error 被设置）—— 比 fetch 按调用次数区分更稳（并行无竞态）。
+    // 于是：Stage 1 的 story（依赖 memory_recall + plot_pre_check）被跳过；
+    // Stage 2 里 request_dispatcher（agentWaitFor 声明空依赖）照常执行，
+    // memory_summary（依赖 story，从未产出）被跳过 —— 不连坐 dispatcher。
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: 'ok' } }],
+          usage: { total_tokens: 10 },
+        }),
+        text: async () => '',
+      });
+    });
+
+    const pipeline: Pipeline = {
+      timeout: 30000,
+      retryOnFail: false,
+      stages: [
+        { agents: ['memory_recall', 'plot_pre_check'], waitFor: [] },
+        { agents: ['story'], waitFor: ['memory_recall', 'plot_pre_check'] },
+        {
+          agents: ['request_dispatcher', 'memory_summary'],
+          waitFor: ['story'],
+          agentWaitFor: {
+            request_dispatcher: [],
+            memory_summary: ['story'],
+          },
+        },
+      ],
+    };
+
+    const context = makeContext();
+    const orch = new AgentOrchestrator(
+      {
+        pipeline,
+        context,
+        agentConfigs: [
+          makeAgentConfig({ agentId: 'memory_recall' }),
+          makeAgentConfig({ agentId: 'plot_pre_check' }),
+          makeAgentConfig({ agentId: 'story' }),
+          makeAgentConfig({ agentId: 'request_dispatcher' }),
+          makeAgentConfig({ agentId: 'memory_summary' }),
+        ],
+        endpoints: [makeEndpoint()],
+        saveId: 'test',
+      },
+      {
+        onAgentComplete: async (result) => {
+          if (result.agentId === 'memory_recall') {
+            throw new Error('simulated memory_recall failure');
+          }
+        },
+      },
+    );
+
+    await orch.run();
+
+    // request_dispatcher 跑了（无依赖），story 与 memory_summary 被跳过（依赖失败/未产出）
+    expect(context.agentOutputs!.has('request_dispatcher')).toBe(true);
+    expect(context.agentOutputs!.has('story')).toBe(false);
+    expect(context.agentOutputs!.has('memory_summary')).toBe(false);
+  });
+
+  it('agentWaitFor 缺省回退 stage.waitFor（与原整 stage 语义一致）', async () => {
+    mockFetchByAgent();
+    const pipeline: Pipeline = {
+      timeout: 30000,
+      retryOnFail: false,
+      stages: [
+        { agents: ['story'], waitFor: [] },
+        { agents: ['vars_update'], waitFor: ['story'] },
+      ],
+    };
+    const context = makeContext();
+    const orch = new AgentOrchestrator({
+      pipeline,
+      context,
+      agentConfigs: [
+        makeAgentConfig({ agentId: 'story' }),
+        makeAgentConfig({ agentId: 'vars_update' }),
+      ],
+      endpoints: [makeEndpoint()],
+      saveId: 'test',
+    });
+    await orch.run();
+    expect(context.agentOutputs!.has('vars_update')).toBe(true);
+  });
+
+  it('agentWaitFor 声明非本 stage agent 应校验失败', async () => {
+    globalThis.fetch = mockFetch('ok');
+    const pipeline: Pipeline = {
+      timeout: 30000,
+      retryOnFail: false,
+      stages: [
+        {
+          agents: ['story'],
+          waitFor: [],
+          agentWaitFor: { not_here: ['story'] },
+        },
+      ],
+    };
+    const orch = new AgentOrchestrator({
+      pipeline,
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+      endpoints: [makeEndpoint()],
+      saveId: 'test',
+    });
+    const run = await orch.run();
+    expect(run.status).toBe('failed');
+  });
+});
+
+// ========== DEFAULT_AGENT_PIPELINE 完整运行（并行化重排后） ==========
+
+describe('AgentOrchestrator — DEFAULT_AGENT_PIPELINE（4 层并行管线）', () => {
+  it('6 个 Agent 全部成功产出（memory_summary 与 dispatcher 同 Stage、post_check 与 vars_update 同 Stage）', async () => {
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: 'ok' } }],
+          usage: { total_tokens: 10 },
+        }),
+        text: async () => '',
+      });
+    });
+
+    const { DEFAULT_AGENT_PIPELINE } = await import('./types');
+    const agentIds = [
+      'memory_recall',
+      'plot_pre_check',
+      'story',
+      'request_dispatcher',
+      'vars_update',
+      'memory_summary',
+      'plot_post_check',
+    ];
+    const context = makeContext();
+    const orch = new AgentOrchestrator({
+      pipeline: DEFAULT_AGENT_PIPELINE,
+      context,
+      agentConfigs: agentIds.map((id) => makeAgentConfig({ agentId: id })),
+      endpoints: [makeEndpoint()],
+      saveId: 'test',
+    });
+
+    const run = await orch.run();
+    expect(run.status).toBe('completed');
+    // 关键：所有依赖按 agentWaitFor 独立满足，无连坐
+    for (const id of agentIds) {
+      expect(context.agentOutputs!.has(id)).toBe(true);
+    }
+    // 新 Stage 3 的 vars_update 不应被 memory_summary 缺席拖累（此处两者都成功，验证结构不炸）
+    expect(run.completedStages).toHaveLength(4);
+  });
+});
+
 // ========== Error Handling ==========
 
 describe('AgentOrchestrator — 错误处理', () => {
@@ -1204,6 +1398,247 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
     // Both markers should be replaced
     const modifiedOutput = context.agentOutputs!.get('story');
     expect(modifiedOutput).toBe('【结果1】和【结果2】');
+  });
+});
+
+// ========== 侧链旁路化（并行化改造 2026-08-16：方案①） ==========
+
+describe('AgentOrchestrator — 侧链旁路化（barrier / combat 等待 / 末尾收尾）', () => {
+  // dispatcher 与 vars_update 同 stage 并行，装配完成先后不定 → fetch 顺序不可依赖。
+  // 统一响应：同一段内容两个 agent 都能消费（dispatcher 解析 delta_time/replace +
+  // 扫描 char_gen_request；vars_update 解析 characters）。
+  const UNIFIED_JSON = JSON.stringify({
+    delta_time: 10,
+    replace: [{ path: 'sys.测试', value: 'x' }],
+    characters: {
+      replace: [{ name: '主角', path: 'hp', value: 50 }],
+      delta: [],
+      add: [],
+      remove: [],
+    },
+  });
+
+  function makePipeline(): Pipeline {
+    return {
+      timeout: 30000,
+      retryOnFail: false,
+      stages: [
+        { agents: ['story'], waitFor: [] },
+        { agents: ['request_dispatcher', 'vars_update'], waitFor: ['story'] },
+      ],
+    };
+  }
+
+  it('🔴 回合级 barrier：vars_update 的提交发生在侧链完整完成之后', async () => {
+    // story 单独响应（第 1 次调用必然属于它）；dispatcher/vars_update 用统一响应，
+    // 与调用顺序无关。
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: '正文' } }],
+          usage: { total_tokens: 10 },
+        }),
+        text: async () => '',
+      })
+      .mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: `<json>${UNIFIED_JSON}</json><char_gen_request characterName="新角色">铁匠</char_gen_request>`,
+                },
+              },
+            ],
+            usage: { total_tokens: 10 },
+          }),
+          text: async () => '',
+        }),
+      );
+
+    let resolveSideChain!: () => void;
+    const onCharGenRequest = vi.fn(() => {
+      return new Promise<void>((resolve) => (resolveSideChain = resolve));
+    });
+
+    const orch = new AgentOrchestrator(
+      {
+        pipeline: makePipeline(),
+        context: makeContext(),
+        agentConfigs: [
+          makeAgentConfig({ agentId: 'story' }),
+          makeAgentConfig({ agentId: 'request_dispatcher' }),
+          makeAgentConfig({ agentId: 'vars_update' }),
+        ],
+        endpoints: [makeEndpoint()],
+        saveId: 'test',
+      },
+      { onCharGenRequest },
+    );
+
+    commitChatStateMock.mockClear();
+    const runPromise = orch.run();
+    // 让微任务跑几拍：dispatcher 的 <json> 提交（第 1 次 commit）应已发生，
+    // vars_update 的提交必须被 barrier 挡住（侧链未完成）
+    await new Promise((r) => setTimeout(r, 20));
+    expect(onCharGenRequest).toHaveBeenCalledTimes(1);
+    expect(commitChatStateMock.mock.calls.length).toBe(1);
+
+    // 侧链完成 → barrier 放行 → vars_update 提交（第 2 次 commit）
+    resolveSideChain();
+    await runPromise;
+
+    expect(commitChatStateMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('🔴 combat 分支显式等 char_gen：onCombatTrigger 调用时新角色已生成', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: '正文' } }],
+          usage: { total_tokens: 10 },
+        }),
+        text: async () => '',
+      })
+      .mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: `<json>${UNIFIED_JSON}</json><char_gen_request characterName="新角色">铁匠</char_gen_request><combat_trigger combatType="死斗">Boss 战</combat_trigger>`,
+                },
+              },
+            ],
+            usage: { total_tokens: 10 },
+          }),
+          text: async () => '',
+        }),
+      );
+
+    let combatSawSideChainDone = false;
+    let sideChainDone = false;
+    let resolveSideChain!: () => void;
+    const onCharGenRequest = vi.fn(() => {
+      return new Promise<void>((resolve) => (resolveSideChain = resolve));
+    });
+    const onCombatTrigger = vi.fn(async () => {
+      // combat 分支必须先等 char_gen（参战方新角色先生成）
+      combatSawSideChainDone = sideChainDone;
+      return null;
+    });
+
+    const orch = new AgentOrchestrator(
+      {
+        pipeline: makePipeline(),
+        context: makeContext(),
+        agentConfigs: [
+          makeAgentConfig({ agentId: 'story' }),
+          makeAgentConfig({ agentId: 'request_dispatcher' }),
+          makeAgentConfig({ agentId: 'vars_update' }),
+        ],
+        endpoints: [makeEndpoint()],
+        saveId: 'test',
+      },
+      { onCharGenRequest, onCombatTrigger },
+    );
+
+    const runPromise = orch.run();
+    await new Promise((r) => setTimeout(r, 10));
+    sideChainDone = true;
+    resolveSideChain();
+    await runPromise;
+
+    expect(onCombatTrigger).toHaveBeenCalledTimes(1);
+    expect(combatSawSideChainDone).toBe(true);
+  });
+
+  it('🔴 run() 末尾兜底：管线无 vars_update（不进 barrier）时侧链仍被 await', async () => {
+    // 只有 story + dispatcher 两个 stage：dispatcher 侧链启动后没有 vars_update
+    // barrier，收尾必须由 run() 末尾的 await 完成。
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: '正文' } }],
+          usage: { total_tokens: 10 },
+        }),
+        text: async () => '',
+      })
+      .mockImplementation(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => ({
+            choices: [
+              {
+                message: {
+                  content: `<json>${UNIFIED_JSON}</json><char_gen_request characterName="新角色">铁匠</char_gen_request>`,
+                },
+              },
+            ],
+            usage: { total_tokens: 10 },
+          }),
+          text: async () => '',
+        }),
+      );
+
+    let resolveSideChain!: () => void;
+    const onCharGenRequest = vi.fn(() => {
+      return new Promise<void>((resolve) => (resolveSideChain = resolve));
+    });
+
+    const orch = new AgentOrchestrator(
+      {
+        pipeline: {
+          timeout: 30000,
+          retryOnFail: false,
+          stages: [
+            { agents: ['story'], waitFor: [] },
+            { agents: ['request_dispatcher'], waitFor: ['story'] },
+          ],
+        },
+        context: makeContext(),
+        agentConfigs: [
+          makeAgentConfig({ agentId: 'story' }),
+          makeAgentConfig({ agentId: 'request_dispatcher' }),
+        ],
+        endpoints: [makeEndpoint()],
+        saveId: 'test',
+      },
+      { onCharGenRequest },
+    );
+
+    const runPromise = orch.run();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(onCharGenRequest).toHaveBeenCalledTimes(1);
+    // 侧链未完成 → run() 必须挂起（末尾 await）
+    let runSettled = false;
+    void runPromise.then(() => (runSettled = true));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(runSettled).toBe(false);
+
+    resolveSideChain();
+    await runPromise;
+    expect(runSettled).toBe(true);
   });
 });
 

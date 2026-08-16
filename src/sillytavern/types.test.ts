@@ -230,8 +230,8 @@ describe('resolvePlotTree', () => {
 // ========== DEFAULT_AGENT_PIPELINE ==========
 
 describe('DEFAULT_AGENT_PIPELINE', () => {
-  it('应有 6 个阶段', () => {
-    expect(DEFAULT_AGENT_PIPELINE.stages).toHaveLength(6);
+  it('应有 4 个阶段（2026-08-16 并行化重排：6 层 → 4 层）', () => {
+    expect(DEFAULT_AGENT_PIPELINE.stages).toHaveLength(4);
   });
 
   it('第一阶段 (memory_recall + plot_pre_check) 并行，无依赖', () => {
@@ -248,29 +248,24 @@ describe('DEFAULT_AGENT_PIPELINE', () => {
     expect(s.waitFor).toContain('plot_pre_check');
   });
 
-  it('第三阶段 (request_dispatcher) 依赖 story', () => {
+  it('第三阶段 (request_dispatcher + memory_summary) 并行，都只依赖 story', () => {
     const s = DEFAULT_AGENT_PIPELINE.stages[2];
-    expect(s.agents).toEqual(['request_dispatcher']);
+    expect(s.agents).toContain('request_dispatcher');
+    expect(s.agents).toContain('memory_summary');
     expect(s.waitFor).toEqual(['story']);
   });
 
-  it('第四阶段 (vars_update) 依赖 story + request_dispatcher', () => {
+  it('第四阶段 (vars_update + plot_post_check) 并行，per-agent 独立依赖互不连坐', () => {
     const s = DEFAULT_AGENT_PIPELINE.stages[3];
-    expect(s.agents).toEqual(['vars_update']);
+    expect(s.agents).toContain('vars_update');
+    expect(s.agents).toContain('plot_post_check');
+    // 并集 waitFor 覆盖两边的依赖（validatePipeline 的「已产出」检查按它走）
     expect(s.waitFor).toContain('story');
     expect(s.waitFor).toContain('request_dispatcher');
-  });
-
-  it('第五阶段 (memory_summary) 依赖 story', () => {
-    const s = DEFAULT_AGENT_PIPELINE.stages[4];
-    expect(s.agents).toEqual(['memory_summary']);
-  });
-
-  it('第六阶段 (plot_post_check) 依赖 story + memory_summary', () => {
-    const s = DEFAULT_AGENT_PIPELINE.stages[5];
-    expect(s.agents).toEqual(['plot_post_check']);
-    expect(s.waitFor).toContain('story');
     expect(s.waitFor).toContain('memory_summary');
+    // per-agent 覆盖：vars_update 不依赖 memory_summary，post_check 不依赖 dispatcher
+    expect(s.agentWaitFor?.vars_update).toEqual(['story', 'request_dispatcher']);
+    expect(s.agentWaitFor?.plot_post_check).toEqual(['story', 'memory_summary']);
   });
 
   it('总超时应为 120s', () => {

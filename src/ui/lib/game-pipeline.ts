@@ -445,6 +445,15 @@ export class GamePipeline {
       activityMessage = '世界的回应在此中断，可以检查设置后再次尝试。';
       return false;
     } finally {
+      // 🔴 并行化改造（2026-08-16）：后台任务（memory_summary embedding 落库 /
+      // 剧情落库）不响应 abort，会在管线早退后悬空继续跑。回读之前统一收尾
+      // （allSettled：postCheckPlot 等任务自带 try/catch，不拒绝也要兜底），
+      // 否则 refreshFromDb 会读到任务写到一半的中间态。
+      // completed 路径的 await 在 4.5 处已跑过（advanceTurn 之前），这里幂等。
+      if (this.pendingPlotTasks.length > 0) {
+        await Promise.allSettled(this.pendingPlotTasks);
+        this.pendingPlotTasks = [];
+      }
       // 🆕 管线中 StateManager / 侧链 (char_gen/item_gen/craft_gen) 直接写 Dexie，
       // 这里统一回读，让 Pinia 内存态（characters/metadata/saveProfile）与 DB 对齐，
       // DebugPanel 导出和右侧状态栏才能拿到最新数据。abort/报错时部分 patch 可能已提交，同样需要回读。
@@ -684,6 +693,10 @@ export class GamePipeline {
         streamCallbacks = {
           onChunk: (text: string, isComplete: boolean) => {
             if (isComplete) {
+              // 🔴 2026-08-16（Agent 重试）：`text === ''` 是 AgentClient 重试循环
+              // 的清预览信号 —— 失败重试前会调 onChunk('', true)。必须重置
+              // streamedRaw，否则重试生成的新正文与第一段失败前的半截拼接显示。
+              if (text === '') streamedRaw = '';
               onStoryChunk('', true);
               return;
             }
@@ -748,6 +761,9 @@ export class GamePipeline {
         frequencyPenalty: agentCfg.freqPen,
         presencePenalty: agentCfg.presPen,
         retryOnFail: true,
+        // 🆕 2026-08-16: 失败自动重试次数（AgentClient 循环上限；外部取消永不重试）。
+        // 解析值经 覆写 ?? 默认层 ?? AGENT_SETTINGS_DEFAULTS(3)。
+        maxRetries: agentCfg.maxRetries,
         timeout: 120000,
         userId: `fp|${this.saveId}|${agentId}`,
         promptTemplate: {
@@ -1015,6 +1031,7 @@ export class GamePipeline {
           freqPen: typeof e.freqPen === 'number' ? e.freqPen : undefined,
           presPen: typeof e.presPen === 'number' ? e.presPen : undefined,
           maxTokens: typeof e.maxTokens === 'number' ? e.maxTokens : undefined,
+          maxRetries: typeof e.maxRetries === 'number' ? e.maxRetries : undefined,
           historyLayers: typeof e.historyLayers === 'number' ? e.historyLayers : undefined,
           historySlice: typeof e.historySlice === 'number' ? e.historySlice : undefined,
           presetId: e.presetId || undefined,
@@ -1107,11 +1124,16 @@ export class GamePipeline {
       // 🔴 2026-08-02: item_gen 批量生成后单次调用耗时暴涨（9 个请求一次生成 ≈ 240s+），
       // API 池默认 timeout 60s 会掐断。item_gen 独立链（不走 orchestrator 的 config.timeout）
       // 在 client 构造时单独放大超时，避免"思考完没来得及输出"就超时。
+      // 🆕 2026-08-16: 重试次数从 chainData 的 AgentConfig 解析（设置页旋钮），
+      // 缺省 1 次。⚠️ item_gen 超时 300s × 3 次重试最坏约 15 分钟 —— 超时罕见，
+      // 且 per-agent 旋钮可调（侧链默认随 agent-config 的 3）。
+      const chainCfg = this.chainData?.agentConfigs.find((c) => c.agentId === agentId);
       const real = new AgentClient({
         endpoint,
         agentId,
         saveId,
         timeout: agentId === 'item_gen' ? 300000 : undefined, // 300s；其余 agent 沿用 endpoint.timeout
+        maxRetries: chainCfg?.maxRetries ?? 1,
       });
       const label = AGENT_LABELS[agentId] ?? agentId;
       let callSeq = 0;
@@ -1623,7 +1645,21 @@ export class GamePipeline {
         break;
       }
       case 'memory_summary': {
-        await this.persistMemorySummary(result);
+        // 🔴 并行化改造（方案③，2026-08-16）：embedding 落库挪进 pendingPlotTasks
+        // 后台队列（run() 末尾统一 await）—— plot_post_check 消费的是
+        // `context.agentOutputs` 里的**文本输出**，不依赖 embedding 结果；
+        // `recentMemories` 更新延迟到 run() 末尾，下一轮 buildContext 在 run()
+        // 之后执行，读得到。onAgentComplete 因此不再被一次慢 embedding 调用阻塞
+        // stage 完成 —— 新 Stage 2 里与 request_dispatcher 同组，不让它拖累调度。
+        // persistMemorySummary 内部自带 try/catch 不会拒绝，这里再包一层防悬空。
+        const task = (async () => {
+          try {
+            await this.persistMemorySummary(result);
+          } catch (err) {
+            console.error('[GamePipeline] memory_summary 后台落库失败:', err);
+          }
+        })();
+        this.pendingPlotTasks.push(task);
         break;
       }
       case 'plot_pre_check': {
@@ -1713,15 +1749,21 @@ export class GamePipeline {
       if (terminal.length > 0) {
         const { saveMemory } = await import('@engine/database');
         const { generateMemoryId } = await import('@engine/memory-summarizer');
+        // 🔴 并行化改造：「分配 id + 落库」必须与 memory_summary 的落库互斥（同全局
+        // 锁段）—— 两条链现在可能并行（方案③把 memory_summary 旁路成后台），
+        // 各自扫全库分配会撞号，后写覆盖先写（state-write-queue 全局锁）。
+        const { withGlobalWriteLock } = await import('@engine/state-write-queue');
         const gt = this.currentContext?.gameTime;
         const timeStr = gt ? `${gt.era}${gt.year}年${gt.month}月${gt.day}日` : '未知';
         for (const event of terminal) {
-          const mem = eventToMemory(event, this.saveId, { start: timeStr, end: timeStr });
-          // Q-03：与 memory_summary 共用同一 id 发号器（MEM6位流水号），不再用 base36 时间戳
-          await saveMemory({
-            ...mem,
-            id: await generateMemoryId(),
-          } as MemoryRecord);
+          await withGlobalWriteLock(async () => {
+            const mem = eventToMemory(event, this.saveId, { start: timeStr, end: timeStr });
+            // Q-03：与 memory_summary 共用同一 id 发号器（MEM6位流水号），不再用 base36 时间戳
+            await saveMemory({
+              ...mem,
+              id: await generateMemoryId(),
+            } as MemoryRecord);
+          });
         }
         console.log(
           `[GamePipeline] plot_post_check 事件转记忆: ${terminal.map((e) => e.title).join('、')}`,

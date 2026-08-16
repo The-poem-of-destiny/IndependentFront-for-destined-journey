@@ -230,6 +230,26 @@ void ref;
         />
       </label>
       <label class="form-label"
+        >失败重试次数
+        <span class="source-badge" :class="{ overridden: isOverridden('maxRetries') }">{{
+          isOverridden('maxRetries') ? '已覆写' : '默认'
+        }}</span>
+        <p class="form-hint">请求失败后自动重试几遍（0=不重试；指数退避）。手动停止永不重试。</p>
+        <input
+          type="number"
+          min="0"
+          max="5"
+          step="1"
+          :value="agentCfg.maxRetries"
+          class="form-input"
+          @input="
+            setAgentField({
+              maxRetries: Number(($event.target as HTMLInputElement).value),
+            })
+          "
+        />
+      </label>
+      <label class="form-label"
         >历史注入层数
         <span class="source-badge" :class="{ overridden: isOverridden('historyLayers') }">{{
           isOverridden('historyLayers') ? '已覆写' : '默认'

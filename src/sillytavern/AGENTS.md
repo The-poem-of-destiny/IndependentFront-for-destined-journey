@@ -95,6 +95,11 @@ src/sillytavern/                    ← 核心引擎
   ├── agent-orchestrator.ts         ← [Phase 3+8.5] DAG 编排引擎（阶段串行+同阶段并行/M3 翻译层按名寻址零id单patch）
   │   ├── callAgenticAgent(): toolsEnabled=true → chatWithTools() 多轮循环
   │   └── Marker 回调: onCraftRequest/onCombatTrigger/onCharGenRequest/onPlayAudio
+  │       🔴 [并行化 2026-08-16] 侧链（char_gen/item_gen/craft_gen）启动**不 await**，
+  │          与 vars_update LLM 并行；收尾三点：vars_update 提交前的回合级 barrier /
+  │          combat 分支显式等 charGenPromise / run() 末尾与失败路径统一 await。
+  │          per-agent 依赖：`PipelineStage.agentWaitFor[agentId]`（缺省回退 stage.waitFor），
+  │          依赖失败的 agent 只跳过自己、不连坐同 stage 其他 agent
   ├── story-rescue.ts               ← Story 正文救援（正文吞思维链 / 思维链泄漏正文 AI 缺陷兜底）
   ├── random-tables.ts              ← [Phase 8.5] NPC 生成随机表
   │
@@ -117,6 +122,14 @@ src/sillytavern/                    ← 核心引擎
   ├── stat-projection.ts            ← [工坊 P2] buildStatData：主角资源/等级/五维/命运点数/世界.时间（只读快照）
   ├── ejs-vars-diff.ts              ← [工坊 P2] 草稿深 diff → {replace,remove} 喂 applyVarsPatch；256KB 护栏
   ├── game-event.ts                 ← [Phase 4.5] EventBus 按存档隔离（+ emitChain 链式管道 ADR-29）
+  ├── state-write-queue.ts          ← 🆕 [并行化 2026-08-16] 写入串行队列地基：withSaveWriteLock
+  │                                    （per-saveId FIFO）+ withGlobalWriteLock（记忆 id 分配+落库）。
+  │                                    🔴 锁粒度 = RMW 区段，锁内**禁止**调用任何会再入队列的函数
+  │                                    （reactToEvents / applyTimeAdvance 尾部自提交一律移锁外，
+  │                                    否则同 saveId 自等死锁）。LLM 调用无副作用可并行；
+  │                                    一切 Dexie 写入必须经此串行。收编点：commitChatState /
+  │                                    applyTimeAdvance / confirmRandomEventTrigger / sync* /
+  │                                    advanceTurn / createSnapshot / restoreSnapshot
   ├── state-manager.ts              ← 唯一状态写入入口（M2按名寻址 M4名字唯一化 M5变量迁profile+快照重建）
   ├── dice.ts / memory-store.ts / memory-summarizer.ts / plot-outline.ts / plot-engine.ts / location-db.ts
   │

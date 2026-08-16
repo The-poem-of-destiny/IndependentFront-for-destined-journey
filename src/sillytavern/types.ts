@@ -354,6 +354,11 @@ export interface AgentConfig {
   frequencyPenalty: number;
   presencePenalty: number;
   retryOnFail: boolean;
+  /**
+   * 🆕 2026-08-16: 失败自动重试次数（AgentClient.chat / chatStream 的循环上限）。
+   * 缺省 = 1（兼容 retryOnFail 旧语义：true=1 次）。外部取消（abort）永不重试。
+   */
+  maxRetries?: number;
   timeout: number;
   userId: string; // DeepSeek 缓存隔离（自动生成）
   promptTemplate: {
@@ -432,6 +437,13 @@ export type LocalParams = Record<string, string>;
 export interface PipelineStage {
   agents: string[]; // 本阶段运行的 Agent ID（同阶段可并行）
   waitFor: string[]; // 等待哪些 Agent 完成
+  /**
+   * 🆕 并行化改造（2026-08-16）：per-agent 依赖覆盖。
+   * 同一 stage 内不同 Agent 的上游依赖可以不同 —— 某个 Agent 的依赖失败只跳过
+   * 它自己，不连坐同 stage 的其他 Agent。缺省（或该 agent 未声明）时回退
+   * `waitFor`（= 该 stage 所有 agent 共用同一组依赖，与原语义一致）。
+   */
+  agentWaitFor?: Record<string, string[]>;
 }
 
 export interface Pipeline {
@@ -442,7 +454,7 @@ export interface Pipeline {
   retryOnFail: boolean; // 失败重试策略
 }
 
-/** 默认 Agent 管线 (Phase 10 更新) */
+/** 默认 Agent 管线 (Phase 10 更新; 2026-08-16 并行化重排: 6 层 → 4 层) */
 export const DEFAULT_AGENT_PIPELINE: Pipeline = {
   timeout: 120000,
   retryOnFail: true,
@@ -452,14 +464,18 @@ export const DEFAULT_AGENT_PIPELINE: Pipeline = {
     { agents: ['memory_recall', 'plot_pre_check'], waitFor: [] },
     // Stage 1: 正文 AI
     { agents: ['story'], waitFor: ['memory_recall', 'plot_pre_check'] },
-    // Stage 2: 请求调度（原 vars_update，判断新-vs-已有，分派 request 标签）
-    { agents: ['request_dispatcher'], waitFor: ['story'] },
-    // Stage 3: 变量更新（合并原 char_update + item_update，执行状态写入 + 可选环境效果 script）
-    { agents: ['vars_update'], waitFor: ['story', 'request_dispatcher'] },
-    // Stage 4: 记忆总结
-    { agents: ['memory_summary'], waitFor: ['story'] },
-    // Stage 5: 剧情修正 + 大纲更新 + 世界线变动
-    { agents: ['plot_post_check'], waitFor: ['story', 'memory_summary'] },
+    // Stage 2: 请求调度 + 记忆摘要（并行 —— 两者都只依赖 story，互不依赖）
+    { agents: ['request_dispatcher', 'memory_summary'], waitFor: ['story'] },
+    // Stage 3: 变量更新 + 剧情复检（并行 —— 各自独立依赖，互不连坐：
+    //          vars_update 不需要 memory_summary，plot_post_check 不需要 dispatcher）
+    {
+      agents: ['vars_update', 'plot_post_check'],
+      waitFor: ['story', 'request_dispatcher', 'memory_summary'],
+      agentWaitFor: {
+        vars_update: ['story', 'request_dispatcher'],
+        plot_post_check: ['story', 'memory_summary'],
+      },
+    },
   ],
 };
 

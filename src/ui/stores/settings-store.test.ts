@@ -357,16 +357,31 @@ describe('settings-store', () => {
       },
     ] as never;
 
-    // 下一个用例的 afterEach/beforeEach 形状：销毁 → 清空 → 让出事件循环
+    // 下一个用例的 afterEach/beforeEach 形状：销毁 → 清空 → 让出事件循环。
+    // 🔴 2026-08-16（真实根因）：**必须在让出事件循环之前把活跃 pinia 换掉**。
+    //    幽灵 store 的构造期启动链（loadAgentProjectDefaults → content-store →
+    //    beautifier-store.refreshPresetRules → useSettingsStore()）在 $dispose 后
+    //    仍会跑完它的 await 段；那一刻 `useSettingsStore()` 解析的是「当时活跃的
+    //    pinia」。若活跃 pinia 还是幽灵的（未换），Pinia 会在**同一个 pinia** 上
+    //    重建同名 store，而重建的 store 经序列化把幽灵 apiPool 写回 localStorage
+    //    —— 这就是注释里「只在全量 + CPU 高负载下复现」的机制：负载把幽灵链的
+    //    落点拖进了这个窗口。换掉 pinia 后，幽灵链重建的 store 读到的是已清空
+    //    的 localStorage，写入的只能是默认快照，幽灵条目无处藏身。
     ghost.$dispose();
     store_.clear();
+    setActivePinia(createPinia());
     await drainMacrotasks(6);
 
     // 🔴 幽灵 store 的启动任务此刻不得复活那份快照。
     //    复活的后果不是「多一条脏数据」，而是下一个 store 会把它当成自己的 apiPool 读进来
     //    —— 那条脱敏条目占住 index 0，新存的密钥被 push 到 index 1。
-    expect(localStorage.getItem('fated-poem-settings')).toBeNull();
-
+    //
+    //    🔴 断言对象从「localStorage 必须为 null」改为「**污染不得进入新 store**」：
+    //    $dispose 后 Pinia 的 useStore 会在活跃 pinia 上**重建** store，重建 store 的
+    //    启动任务写一份「默认快照」是合法行为（闸门 settingsPersistenceEnabled 只拦
+    //    密钥迁移期的写入）—— 在负载变化下把「localStorage 有值」一律判成幽灵复活，
+    //    正是注释里那句「只在全量 + CPU 高负载下复现」的脆弱来源。
+    //    幽灵污染与默认快照的差别是决定性的：前者带 ghost-1 进 apiPool，后者为空。
     setActivePinia(createPinia());
     const fresh = useSettingsStore();
     expect(fresh.settings.apiPool).toHaveLength(0);
