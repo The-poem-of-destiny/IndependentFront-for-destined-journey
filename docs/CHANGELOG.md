@@ -9,6 +9,47 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### Agent 失败自动重试可配置化 + 幽灵快照根因修复 ｜ ✅ 已实施（2026-08-16）
+
+**需求**：Agent 流报错默认自动重试 3 遍，仍失败再报错；重试次数可在设置页配置。
+**现状**：`AgentClient.chat()` 循环重试 1 次（`config.retryOnFail ? 1 : 0`）；**`chatStream()`（story 走这条）零重试**——一次 500 或首字节超时直接整轮失败；次数不可配置。
+
+**改动清单**：
+
+- **`agent-client.ts`**：`chat()` 循环加 **AbortError 短路**（外部取消立即停，不白等退避——修现存「取消后仍重试 N 次」bug）；`chatStream()` 重构为 `streamOnce()` + 重试循环（成功 onComplete 一次；abort 立即停不重试；可重试错误且未超限 → **先 `onChunk('', true)` 清玩家可见预览**（防两段正文拼接显示），指数退避后重试；超限 onError）。
+- **`types.ts`**：`AgentConfig.maxRetries?: number`（缺省回退 `retryOnFail` 旧布尔语义）。
+- **设置接线五处**（Q-18 纪律，缺一处即静默失效）：`agent-config.json` 13 agent 全加 `maxRetries: 3`（纯插入 13 行，CRLF 逐行脚本保编码）；`agent-settings.ts` 的 `AgentSettingsEntry` + `AGENT_SETTINGS_DEFAULTS.maxRetries: 3` + `getAgentSettings` 解析；`game-pipeline.ts` 的 `buildAgentConfigs` 映射 + `loadPresets` 透传 + **streamCallbacks 的 `onChunk('', true)` 重置 `streamedRaw`**（重试清预览的 UI 半边）+ `getClientFactory` 侧链从 chainData 解析 maxRetries；`AgentParamsCard.vue` 加「失败重试次数」旋钮（0-5，带默认/已覆写徽标）。
+- **orchestrator**：`callAgent`/`callAgenticAgent` 的 `maxRetries: config.maxRetries ?? (retryOnFail ? 1 : 0)`。
+
+**顺带修掉一个真实产品 bug（settings-store 幽灵快照复活，测试驱动定位）**：
+`settings-store` 的 `saveNow()` 此前不检查 store 生命周期——`$dispose` 后构造期启动链（`loadAgentProjectDefaults → content-store → beautifier-store.refreshPresetRules`）经实例绑定的 `saveNow` 仍能把陈旧快照写回 localStorage。`saveNow` 加 `bootTaskCancelled` 检查（与 bootTimer 同一条防线，覆盖所有经实例的出写路径）。settings-store.test.ts 那条「已销毁的 store」用例的负载敏感失败（注释自证的「只在全量 + CPU 高负载下复现」）随之定位：**测试缺了「$dispose 后换活跃 pinia」这一步**（下一条用例 beforeEach 的形状），幽灵链在旧 pinia 上重建 store 并写入——测试补上 `setActivePinia(createPinia())`，断言从「localStorage 必须为 null」改为「污染不得进入新 store」（重建 store 写默认快照是合法行为，带幽灵条目才是缺陷）。
+
+**验证**：8556 tests 全绿（settings-store 单文件 5 连跑稳定）· typecheck 0 错误 · lint 0 error · 编码闸门干净。
+
+**留验事项**：真机断网/错端点观察重试日志与次数；`item_gen` 超时 300s × 3 次重试最坏约 15 分钟（超时罕见，per-agent 旋钮可调）；重试请求相同 → DeepSeek KVCache 命中，成本主要是时间。
+
+### Agent 管线并行化（写队列地基 + 4 层管线 + 侧链旁路）｜ ✅ 已实施（待真机）（2026-08-16）
+
+**背景**：管线 6 阶段几乎全串行，一轮完整跑完最长 6 分钟（story → dispatcher → vars_update → memory_summary → post_check 逐次排队 + dispatcher 侧链的 N 次 LLM 调用）。目标：LLM 调用并行、落库串行，预估 6 分钟 → 3 分钟内。
+
+**三条铁律**（GLM 5.3 审查子代理修正，审查 17 问题点）：
+
+1. LLM 调用无副作用可并行；一切 Dexie 写入必须串行（per-saveId FIFO 写队列）。
+2. 锁粒度 = RMW 区段，锁内禁止调用任何会再入队列的函数（防自死锁——`commitChatState` 内部的 `reactToEvents` 嵌套提交、`applyTimeAdvance` 尾部自提交全部移锁外）。
+3. 写队列顺带修复三个现状竞态：侧链并发 commitChatState 的 FP lost-update、commitChatState 尾部 saveSaveSlot 与 advanceTurn 的 totalTurns lost-update、随机事件结算/保洁的整条 SaveProfile 竞写（此前靠 2026-08-16 的 await 时序脆弱兜底）。
+
+**三批交付**：
+
+- **第一批（队列地基）**：新模块 `state-write-queue.ts`（`withSaveWriteLock` per-saveId FIFO + `withGlobalWriteLock` 全局 FIFO，错误传播、队尾吞错、完成即清理）；state-manager 八处写入收编（`commitChatState` / `applyTimeAdvance` / `confirmRandomEventTrigger` / `syncRandomEventsForTurn` / `syncMapJourney` / `advanceTurn` 拆两段 / `createSnapshot` / `restoreSnapshot` 7 表事务）；记忆 id 全局锁（`generateMemoryId + saveMemory` 序列，3 调用点：`summarizeAndSave` / `createCompressionSummaryMemory` / game-pipeline `persistPlotPostCheck`）；`PipelineStage.agentWaitFor` per-agent 依赖判定（某 agent 依赖失败只跳过它自己，不连坐同 stage 其他 agent——`types.ts` / `agent-orchestrator.ts` 三处 + 校验）。
+- **第二批（③+② 强耦合同批）**：`persistMemorySummary` 的 embedding 落库挪进 `pendingPlotTasks` 后台队列（run() 末尾统一 await，finally 兜底 abort/失败路径）；`DEFAULT_AGENT_PIPELINE` 6 层 → 4 层（Stage 2 = request_dispatcher ‖ memory_summary，Stage 3 = vars_update ‖ plot_post_check，配 `agentWaitFor` 互不连坐）。
+- **第三批（方案①）**：dispatcher 侧链（char_gen/item_gen/craft_gen）**启动不 await**，LLM 调用与 vars_update 并行；回合级 barrier（vars_update 提交前 await 侧链完整完成——防按名引用新 NPC 抛「角色不存在」）；combat 分支显式等 char_gen 链；run() 末尾 + 失败/abort 路径统一收尾侧链。
+
+**涉及文件**：`state-write-queue.ts`(+`.test.ts`, 新) · `state-manager.ts` · `agent-orchestrator.ts` · `types.ts` · `memory-summarizer.ts` · `memory-store.ts` · `game-pipeline.ts` · `types.test.ts` · `agent-orchestrator.test.ts`（+75 测试，其中侧链旁路化专项 3 条：barrier 顺序 / combat 等待 / 末尾兜底）
+
+**验证**：8548 tests 全绿 · typecheck 0 错误 · lint 0 error · 编码闸门干净。
+
+**留验事项**：真机一轮游玩计时对比（预估关键路径 = story + max(dispatcher‖memory_summary) + max(vars_update‖post_check‖侧链)）；侧链并发后最多 4-5 路 LLM 并发，若遇 API 429 给侧链加信号量（≤2 条，本次未做）；`restoreSnapshot` 已入队（UI 另有 isGenerating 挡住管线中恢复）。
+
 ### 随机事件调试分区（DebugPanel）｜ ✅ 已实施，真机走查过（2026-08-16）
 
 游戏页调试面板（开发者模式 + Alt+Shift+D）新增「随机事件」分区，按主人裁定**只做三样**：①当前 `available` 门槛通过的事件表（名字/触发/权重连乘/日概率，含「在池」标）；②MTTH 因子活体求值（读侧全部复用生产 `evaluateEventCondition` / `computeEventWeight`，零第二实现）；③每行「下回合触发」按钮 → `game-store.devArmRandomEvent` → StateManager 具名 dev 方法 `devForceArmRandomEvent`（ADR-21，不进工具表 AI 不可见），真实槽位采样固化 brief、`forced: true` 免疫淘汰与 TTL，渲染层复用既有 forced 必演指令行（零改动）。调度器新增纯函数 `armRandomEventForced`（同名先撤再入池）。新增 39 测试。真机走查：分区渲染 / available 过滤（夜半叩门被门槛拦下）/ 按钮入池 + 落库 + 在池标全过。审查修复三条（合入前）：① **dev 条目不带地点键** —— 带键会让 `settleRandomEventTrigger` 把当前地点记进 `visited`（在某座城里给一条无关事件按按钮 = 永久烧掉这座城的首访足迹，而 `visited` 是事实、无自愈路径），也会被「离开即撤」在下一个旅途回合悄悄撤下；现在它跨地点存活、触发不记足迹（`{{place}}` 仍按当前地点固化进 brief，那是快照语义）。② 「离开即撤」判据补 `placeKey === undefined` 一支（不带键的 forced 条目与地点无关，撤它没有依据）。③ `devForceArmRandomEvent` 补 `randomEventsEnabled` 闸（与另外四条钩子同档）：关闭时零写入 + warn，面板同步禁用按钮 —— 否则会写进一个注入侧永远返空串的池子，还 toast 成功。

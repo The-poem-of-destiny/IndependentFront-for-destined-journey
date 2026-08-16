@@ -40,6 +40,11 @@ export interface AgentSettingsEntry {
   presPen: number;
   maxTokens: number;
   /**
+   * 🆕 2026-08-16: 失败自动重试次数（AgentClient.chat / chatStream 循环上限，
+   * 外部取消永不重试）。缺省 = 走 `AGENT_SETTINGS_DEFAULTS`（3）。
+   */
+  maxRetries?: number;
+  /**
    * 历史对话注入层数。
    *
    * 🔴 **必须保持可缺省**：「键不存在」在这里编码的是「按 agent 类别走引擎默认」，
@@ -65,6 +70,9 @@ export const AGENT_SETTINGS_DEFAULTS = {
   presPen: 0,
   // 2026-08-08: 16384 → 65536（主人裁定：输出上限整体拉高，大纲 5×5 等重输出不再贴边）
   maxTokens: 65536,
+  // 2026-08-16: 失败自动重试次数（AgentClient 循环上限；外部取消永不重试）。
+  // 与 data/defaults/agent-config.json 的默认层同值 —— 兜底只服务「两层都没给」。
+  maxRetries: 3,
 } as const;
 
 /** settings 袋子（settings-store 的 `settings.value`） */
@@ -195,6 +203,11 @@ export function getAgentSettings(
         readOverride<number>(bag, agentId, 'maxTokens'),
         readDefault<number>(layer, agentId, 'maxTokens'),
       ) ?? AGENT_SETTINGS_DEFAULTS.maxTokens,
+    maxRetries:
+      resolve(
+        readOverride<number>(bag, agentId, 'maxRetries'),
+        readDefault<number>(layer, agentId, 'maxRetries'),
+      ) ?? AGENT_SETTINGS_DEFAULTS.maxRetries,
     // 不兜底：两层都缺 → undefined（编码「按类别走引擎默认」）
     historyLayers: resolve(
       readOverride<number>(bag, agentId, 'historyLayers'),

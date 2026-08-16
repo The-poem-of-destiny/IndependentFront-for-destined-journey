@@ -14,6 +14,9 @@ import { getAllMemoryIds, saveMemory } from './database';
 import { computeEmbedding } from './memory-store';
 // Q-05：从模型输出抢救 JSON 的唯一入口
 import { parseModelJson } from './model-json';
+// 并行化改造：MEM 编号是全库分配（跨存档），「分配 + 落库」必须同段互斥，
+// 否则并发两侧都分到同一个号、后写静默覆盖（state-write-queue 全局锁）。
+import { withGlobalWriteLock } from './state-write-queue';
 
 // ========== 常量 ==========
 
@@ -173,40 +176,47 @@ export async function summarizeAndSave(
     throw new Error(`记忆校验失败: ${validation.reason}`);
   }
 
-  // 3. 生成 ID（全库唯一，不按存档编号）
-  const id = await generateMemoryId();
+  // 🔴 并行化改造：「分配 id → 组装 → embedding → 保存」必须在同一个全局锁段内。
+  // id 是全库唯一（`generateMemoryId` 扫全库最大号 +1），分到号但没落库就放锁，
+  // 另一个任务扫库看不到这个号、也会分到它 —— 后写覆盖先写（丢一条记忆且零报错）。
+  // embedding 是网络调用，会 hold 住全局锁 1-3 秒；竞争方只有「另一次记忆写入」
+  // （低频），可接受 —— 不能把 embedding 挪出锁外，那会重新开撞号窗口。
+  return withGlobalWriteLock(async () => {
+    // 3. 生成 ID（全库唯一，不按存档编号）
+    const id = await generateMemoryId();
 
-  const now = Date.now();
-  const memory: MemoryRecord = {
-    id,
-    saveId,
-    createdAt: now,
-    realTimestamp: now,
-    timeRange: gameTimeRange || {
-      start: parsed.timeRangeStart,
-      end: parsed.timeRangeEnd,
-    },
-    content: parsed.content,
-    hiddenLine: parsed.hiddenLine,
-    keywords: parsed.keywords,
-    relatedCharacterIds,
-    importance: parsed.importance,
-  };
+    const now = Date.now();
+    const memory: MemoryRecord = {
+      id,
+      saveId,
+      createdAt: now,
+      realTimestamp: now,
+      timeRange: gameTimeRange || {
+        start: parsed.timeRangeStart,
+        end: parsed.timeRangeEnd,
+      },
+      content: parsed.content,
+      hiddenLine: parsed.hiddenLine,
+      keywords: parsed.keywords,
+      relatedCharacterIds,
+      importance: parsed.importance,
+    };
 
-  // 4. 计算 embedding
-  if (embeddingEndpoint) {
-    try {
-      const embeddingText = `[${parsed.keywords.join(', ')}] ${parsed.content}`;
-      memory.embedding = await computeEmbedding(embeddingText, embeddingEndpoint);
-    } catch {
-      // Embedding 不可用 — 保存无 embedding 的记忆
-      memory.embedding = undefined;
+    // 4. 计算 embedding
+    if (embeddingEndpoint) {
+      try {
+        const embeddingText = `[${parsed.keywords.join(', ')}] ${parsed.content}`;
+        memory.embedding = await computeEmbedding(embeddingText, embeddingEndpoint);
+      } catch {
+        // Embedding 不可用 — 保存无 embedding 的记忆
+        memory.embedding = undefined;
+      }
     }
-  }
 
-  // 5. 持久化
-  await saveMemory(memory);
-  return memory;
+    // 5. 持久化
+    await saveMemory(memory);
+    return memory;
+  });
 }
 
 // ========== 压缩摘要辅助 ==========
@@ -225,7 +235,11 @@ export async function createCompressionSummaryMemory(
   keywords: string[],
   importance: number,
 ): Promise<MemoryRecord> {
-  const id = await generateMemoryId();
+  // 🔴 并行化改造：分配段入全局锁（与 summarizeAndSave 的「分配+落库」段互斥，
+  // 防两个压缩任务分到同一个号）。⚠️ 已知残余窗口：写库发生在调用方的
+  // applyCompression（另一个函数），分配与写入之间理论上仍可被别的任务抢号 ——
+  // 压缩是用户手动低频操作，现状串行时窗口同样存在，本次不扩大不修复。
+  const id = await withGlobalWriteLock(() => generateMemoryId());
   const now = Date.now();
   const earliestTime = oldMemories.reduce(
     (min, m) => (m.createdAt < min ? m.createdAt : min),

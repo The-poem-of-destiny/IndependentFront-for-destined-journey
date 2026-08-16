@@ -460,6 +460,15 @@ export const useSettingsStore = defineStore('settings', () => {
 
   /** 手动触发存储（正常情况下不需要调用，deep watch 自动处理） */
   function saveNow(): boolean {
+    // 🔴 2026-08-16（settings-store.test.ts 幽灵复活根因）：store 已销毁（$dispose /
+    // HMR / 测试换 Pinia）后**一个字节都不许写**。此前只挡了 bootTimer 本体
+    // （onScopeDispose → bootTaskCancelled），而构造期启动任务里的异步链
+    // （loadAgentProjectDefaults → content-store → beautifier-store.refreshPresetRules）
+    // 经实例绑定的 `settingsStore.saveNow` 调用的是本闭包 —— dispose 后那条链
+    // 仍会把这份陈旧快照写回 localStorage，下一个 store 构造时把它当成自己的
+    // apiPool 读进来（脱敏条目占住 index 0，新密钥被 push 到 index 1）。
+    // 检查点放这里，覆盖所有经本实例的出写路径，不依赖调用方记得传标记。
+    if (bootTaskCancelled) return false;
     // Before migration succeeds, overwriting localStorage could destroy the only key copy.
     if (!settingsPersistenceEnabled) return false;
     return persistRedactedSettings();

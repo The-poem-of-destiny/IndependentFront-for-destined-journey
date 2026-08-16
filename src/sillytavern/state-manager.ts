@@ -50,6 +50,9 @@ import {
 import { getVar, setVar, delVar, insertVar, applyPathOps } from './var-resolver';
 import { getTierConfig } from './tier-constants';
 import { getEngineSettings } from './engine-settings';
+// 并行化改造（docs/planning/2026-08-16-pipeline-parallelism.md）：一切 Dexie 写入
+// 经 per-saveId FIFO 队列串行 —— 锁粒度 = 读-改-写区段，锁内禁止再入队列（铁律②）。
+import { withSaveWriteLock } from './state-write-queue';
 // Q-19：这三个模块此前在 14 处 handler 里各 `await import` 一次。它们都不 import
 // 本模块（已核实无环），动态化没有换来任何解耦，只是让每个 handler 多一次 await
 // 和一行噪音，还遮蔽了 1471 行那处同名解构。script-executor 仍留动态 —— 它是
@@ -256,62 +259,71 @@ export class StateManager {
       return { success: true, patchesApplied: 0, eventsGenerated: [], errors: [] };
     }
 
-    const results: PatchApplicationResult[] = [];
-    const errors: string[] = [];
+    // 🔴 并行化改造：EJS 差量段 + patches 应用段 + saveSaveSlot 是同一段
+    // 读-改-写区段，必须整段互斥（同 saveId 并发提交会各自读到旧快照、后写覆盖
+    // 先写 —— 变量 / gameTime / 事件旗互相回滚且零报错）。
+    // `reactToEvents` 刻意放在锁外：它内部的嵌套 commitChatState 需要重新排队
+    // 拿锁，留在锁内即同 saveId 自等死锁（state-write-queue 铁律②）。
+    const applied = await withSaveWriteLock(this.saveId, async () => {
+      const results: PatchApplicationResult[] = [];
+      const errors: string[] = [];
 
-    // ===== Step 0: EJS 差量先落（D5 仲裁顺序） =====
-    if (ejsDiffs.length) {
-      try {
-        let vars = await this.getCurrentVariables();
-        for (const diff of ejsDiffs) {
-          vars = applyPathOps(vars, diff);
+      // ===== Step 0: EJS 差量先落（D5 仲裁顺序） =====
+      if (ejsDiffs.length) {
+        try {
+          let vars = await this.getCurrentVariables();
+          for (const diff of ejsDiffs) {
+            vars = applyPathOps(vars, diff);
+          }
+          await this.persistVariables(vars);
+        } catch (err) {
+          // 不阻塞 AI 补丁 —— EJS 是簿记旁路，正文状态更重要
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`EJS vars 差量应用失败: ${msg}`);
+          console.warn('[StateManager] EJS vars 差量应用失败（不阻塞 AI 补丁）:', err);
         }
-        await this.persistVariables(vars);
-      } catch (err) {
-        // 不阻塞 AI 补丁 —— EJS 是簿记旁路，正文状态更重要
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`EJS vars 差量应用失败: ${msg}`);
-        console.warn('[StateManager] EJS vars 差量应用失败（不阻塞 AI 补丁）:', err);
       }
-    }
 
-    const newEvents: GameEvent[] = [];
-    for (const patch of patches) {
-      try {
-        const result = await this.applyPatch(patch);
-        results.push(result);
-        if (result.event) {
-          this.events.push(result.event);
-          newEvents.push(result.event);
+      const newEvents: GameEvent[] = [];
+      for (const patch of patches) {
+        try {
+          const result = await this.applyPatch(patch);
+          results.push(result);
+          if (result.event) {
+            this.events.push(result.event);
+            newEvents.push(result.event);
+          }
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          errors.push(`Patch ${patch.op} on ${patch.target}: ${errorMsg}`);
+          results.push({ patch, success: false, error: errorMsg });
         }
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        errors.push(`Patch ${patch.op} on ${patch.target}: ${errorMsg}`);
-        results.push({ patch, success: false, error: errorMsg });
       }
-    }
+
+      // 更新 SaveSlot 触碰时间（saveSaveSlot 内部刷新 updatedAt）
+      // M5 #27: totalTurns 不再随每次 commit 虚高，回合推进统一走 advanceTurn()
+      try {
+        const save = await getSave(this.saveId);
+        if (save) {
+          await saveSaveSlot(save);
+        }
+      } catch {
+        // 存档更新失败不阻塞
+      }
+
+      return { results, errors, newEvents };
+    });
 
     // Q-07：把本次产生的 GameEvent 发到存档 EventBus，触发已装备物品/技能的 $event.on 订阅，
     // 并把订阅脚本产出的效果转成补丁再提交一轮。此前这些事件只进 this.events（一个只被读取
     // 用于展示的数组），从未 publish —— 于是整条 emitChain 层永远空转。
-    await this.reactToEvents(newEvents);
-
-    // 更新 SaveSlot 触碰时间（saveSaveSlot 内部刷新 updatedAt）
-    // M5 #27: totalTurns 不再随每次 commit 虚高，回合推进统一走 advanceTurn()
-    try {
-      const save = await getSave(this.saveId);
-      if (save) {
-        await saveSaveSlot(save);
-      }
-    } catch {
-      // 存档更新失败不阻塞
-    }
+    await this.reactToEvents(applied.newEvents);
 
     return {
-      success: errors.length === 0,
-      patchesApplied: results.filter((r) => r.success).length,
+      success: applied.errors.length === 0,
+      patchesApplied: applied.results.filter((r) => r.success).length,
       eventsGenerated: [...this.events],
-      errors,
+      errors: applied.errors,
     };
   }
 
@@ -1428,41 +1440,46 @@ export class StateManager {
    * @param turn   对话回合游标（恢复时截断 messages 用）
    */
   async createSnapshot(reason: Snapshot['reason'], turn: number): Promise<Snapshot> {
-    const characters = await getCharacters(this.saveId);
-    const profile = await getProfile(this.saveId);
-    const plotEvents = await getPlotEvents(this.saveId);
-    // 🆕 消息随快照走：恢复时整体覆写 messages，快照才能**向前**恢复
-    // （旧实现只截断：恢复到第 N 回合后，N 之后的对话永远找不回来）。
-    const messages = await getMessages(this.saveId);
+    // 🔴 并行化改造：快照 = 读全表 + 写快照行 + 改 activeSnapshotId + trim 的整段
+    // RMW 区段，整段互斥（与提交 / advanceTurn 交错会留下「快照与状态不一致」）。
+    // 内部只调裸 DB 函数，无嵌套入队（铁律②）。
+    return withSaveWriteLock(this.saveId, async () => {
+      const characters = await getCharacters(this.saveId);
+      const profile = await getProfile(this.saveId);
+      const plotEvents = await getPlotEvents(this.saveId);
+      // 🆕 消息随快照走：恢复时整体覆写 messages，快照才能**向前**恢复
+      // （旧实现只截断：恢复到第 N 回合后，N 之后的对话永远找不回来）。
+      const messages = await getMessages(this.saveId);
 
-    const snapshot: Snapshot = {
-      id: crypto.randomUUID(),
-      saveId: this.saveId,
-      createdAt: Date.now(),
-      reason,
-      turn,
-      characters: structuredClone(characters),
-      saveProfile: structuredClone(profile),
-      plotEvents: structuredClone(plotEvents),
-      messages: structuredClone(messages),
-    };
+      const snapshot: Snapshot = {
+        id: crypto.randomUUID(),
+        saveId: this.saveId,
+        createdAt: Date.now(),
+        reason,
+        turn,
+        characters: structuredClone(characters),
+        saveProfile: structuredClone(profile),
+        plotEvents: structuredClone(plotEvents),
+        messages: structuredClone(messages),
+      };
 
-    await saveSnapshot(snapshot);
+      await saveSnapshot(snapshot);
 
-    // activeSnapshotId 指向最新快照
-    const save = await getSave(this.saveId);
-    if (save) {
-      save.activeSnapshotId = snapshot.id;
-      await saveSaveSlot(save);
-    }
+      // activeSnapshotId 指向最新快照
+      const save = await getSave(this.saveId);
+      if (save) {
+        save.activeSnapshotId = snapshot.id;
+        await saveSaveSlot(save);
+      }
 
-    // 滚动上限 + 保留模式。Q-06：此前读 Dexie `settings` 表 —— 那是一份由
-    // initializeDatabase 播种、之后只被 game-pipeline 搬过两个字段的影子配置，
-    // 桥一断用户就永远拿不到自己选的上限。现在走 engine-settings 注入缝。
-    const { maxSnapshotsPerSave, snapshotRetentionMode } = getEngineSettings();
-    await trimSnapshots(this.saveId, maxSnapshotsPerSave, snapshotRetentionMode);
+      // 滚动上限 + 保留模式。Q-06：此前读 Dexie `settings` 表 —— 那是一份由
+      // initializeDatabase 播种、之后只被 game-pipeline 搬过两个字段的影子配置，
+      // 桥一断用户就永远拿不到自己选的上限。现在走 engine-settings 注入缝。
+      const { maxSnapshotsPerSave, snapshotRetentionMode } = getEngineSettings();
+      await trimSnapshots(this.saveId, maxSnapshotsPerSave, snapshotRetentionMode);
 
-    return snapshot;
+      return snapshot;
+    });
   }
 
   /**
@@ -1473,12 +1490,18 @@ export class StateManager {
    */
   async advanceTurn(): Promise<void> {
     let newTotalTurns = 1;
-    const save = await getSave(this.saveId);
-    if (save) {
-      newTotalTurns = (save.metadata.totalTurns ?? 0) + 1;
-      save.metadata.totalTurns = newTotalTurns;
-      await saveSaveSlot(save);
-    }
+    // 🔴 并行化改造：totalTurns 读-改-写是一段 RMW 区段，整段互斥（与 commitChatState
+    // 尾部的 saveSaveSlot 争同一条 save 记录，交错会互相覆盖 totalTurns）。
+    // createSnapshot 自带锁（它也被战斗 pre-combat 直接调用），必须在锁外调用，
+    // 否则同 saveId 嵌套自等死锁（state-write-queue 铁律②）。
+    await withSaveWriteLock(this.saveId, async () => {
+      const save = await getSave(this.saveId);
+      if (save) {
+        newTotalTurns = (save.metadata.totalTurns ?? 0) + 1;
+        save.metadata.totalTurns = newTotalTurns;
+        await saveSaveSlot(save);
+      }
+    });
     await this.createSnapshot('turn', newTotalTurns);
   }
 
@@ -1497,74 +1520,79 @@ export class StateManager {
   async restoreSnapshot(snapshotId: string): Promise<StateCommitResult> {
     const errors: string[] = [];
     try {
-      // ① 读快照 + 防跨档校验
-      const snapshot = await getSnapshot(snapshotId);
-      if (!snapshot) throw new Error(`快照不存在: ${snapshotId}`);
-      if (snapshot.saveId !== this.saveId) {
-        throw new Error(`快照不属于当前存档: ${snapshot.saveId}（当前 ${this.saveId}）`);
-      }
+      // 🔴 并行化改造：快照恢复是 7 表大事务，整段互斥（与提交/侧链落库交错会留下
+      // 不一致状态 —— 恢复写到一半，并发 commit 又把部分表改回去）。UI 已由
+      // isGenerating 挡住管线运行中的恢复，这层锁是兜底（铁律②：内部无嵌套入队）。
+      await withSaveWriteLock(this.saveId, async () => {
+        // ① 读快照 + 防跨档校验
+        const snapshot = await getSnapshot(snapshotId);
+        if (!snapshot) throw new Error(`快照不存在: ${snapshotId}`);
+        if (snapshot.saveId !== this.saveId) {
+          throw new Error(`快照不属于当前存档: ${snapshot.saveId}（当前 ${this.saveId}）`);
+        }
 
-      // 🔒 P1-06: 单事务覆盖所有被修改的表 —— 快照恢复此前是顺序多步独立 DB 操作，
-      // 后段失败会留下部分恢复状态（如角色已覆写但对话/记忆未回滚）。包进单事务后任一步
-      // 抛错 Dexie 自动回滚全表，恢复要么完整成功要么完全不动。
-      const db = getDatabase();
-      await db.transaction(
-        'rw',
-        [
-          db.characters,
-          db.saveProfiles,
-          db.plotEvents,
-          db.messages,
-          db.memories,
-          db.saves,
-          db.snapshots,
-        ],
-        async () => {
-          // ② characters 整体覆写: 全删 → 写入快照副本
-          //    structuredClone 防库内对象与快照对象引用共享（快照需保持不可变，可重复恢复）
-          const current = await getCharacters(this.saveId);
-          for (const c of current) {
-            await deleteCharacter(c.id);
-          }
-          await saveCharacters(structuredClone(snapshot.characters));
+        // 🔒 P1-06: 单事务覆盖所有被修改的表 —— 快照恢复此前是顺序多步独立 DB 操作，
+        // 后段失败会留下部分恢复状态（如角色已覆写但对话/记忆未回滚）。包进单事务后任一步
+        // 抛错 Dexie 自动回滚全表，恢复要么完整成功要么完全不动。
+        const db = getDatabase();
+        await db.transaction(
+          'rw',
+          [
+            db.characters,
+            db.saveProfiles,
+            db.plotEvents,
+            db.messages,
+            db.memories,
+            db.saves,
+            db.snapshots,
+          ],
+          async () => {
+            // ② characters 整体覆写: 全删 → 写入快照副本
+            //    structuredClone 防库内对象与快照对象引用共享（快照需保持不可变，可重复恢复）
+            const current = await getCharacters(this.saveId);
+            for (const c of current) {
+              await deleteCharacter(c.id);
+            }
+            await saveCharacters(structuredClone(snapshot.characters));
 
-          // ③ saveProfile 覆写（变量/任务/时间/好感随行回滚）
-          await updateProfile(structuredClone(snapshot.saveProfile));
+            // ③ saveProfile 覆写（变量/任务/时间/好感随行回滚）
+            await updateProfile(structuredClone(snapshot.saveProfile));
 
-          // ③.b plotEvents 覆写：全删 → 写入快照副本（旧快照无 plotEvents → 写空数组=清空）
-          const currentEvents = await getPlotEvents(this.saveId);
-          for (const e of currentEvents) {
-            await deletePlotEvent(e.id);
-          }
-          await savePlotEvents(structuredClone(snapshot.plotEvents ?? []));
+            // ③.b plotEvents 覆写：全删 → 写入快照副本（旧快照无 plotEvents → 写空数组=清空）
+            const currentEvents = await getPlotEvents(this.saveId);
+            for (const e of currentEvents) {
+              await deletePlotEvent(e.id);
+            }
+            await savePlotEvents(structuredClone(snapshot.plotEvents ?? []));
 
-          // ④ 对话恢复：快照带 messages（新快照）→ 整档覆写（截断 + 找回两向都成立）；
-          //    旧快照无 messages → 退化为按 turn 截断（旧行为，只能回退不能找回）。
-          if (snapshot.messages) {
-            await deleteMessagesBySaveId(this.saveId);
-            await saveMessages(structuredClone(snapshot.messages));
-          } else {
-            await deleteMessagesAfterTurn(this.saveId, snapshot.turn);
-          }
+            // ④ 对话恢复：快照带 messages（新快照）→ 整档覆写（截断 + 找回两向都成立）；
+            //    旧快照无 messages → 退化为按 turn 截断（旧行为，只能回退不能找回）。
+            if (snapshot.messages) {
+              await deleteMessagesBySaveId(this.saveId);
+              await saveMessages(structuredClone(snapshot.messages));
+            } else {
+              await deleteMessagesAfterTurn(this.saveId, snapshot.turn);
+            }
 
-          // ④.b 清理"未来"记忆（realTimestamp > 快照创建时间；记忆 append-only 安全）
-          await deleteMemoriesAfter(this.saveId, snapshot.createdAt);
+            // ④.b 清理"未来"记忆（realTimestamp > 快照创建时间；记忆 append-only 安全）
+            await deleteMemoriesAfter(this.saveId, snapshot.createdAt);
 
-          // ④.c 🆕 清理"未来"快照（createdAt > 恢复点）：被抛弃的分支（如同轮重发
-          //     产生的第二张快照）此前从不清理，恢复后 append 新快照会让同一 turn
-          //     出现多条、后续回退 filter(turn<=target) 取错。恢复点之后创建的快照
-          //     全是该时间线之后的产物，删除安全。
-          await deleteSnapshotsAfter(this.saveId, snapshot.createdAt);
+            // ④.c 🆕 清理"未来"快照（createdAt > 恢复点）：被抛弃的分支（如同轮重发
+            //     产生的第二张快照）此前从不清理，恢复后 append 新快照会让同一 turn
+            //     出现多条、后续回退 filter(turn<=target) 取错。恢复点之后创建的快照
+            //     全是该时间线之后的产物，删除安全。
+            await deleteSnapshotsAfter(this.saveId, snapshot.createdAt);
 
-          // ⑤ activeSnapshotId 指向 + totalTurns 对齐快照 turn（防重发后 turn 编号错位）
-          const save = await getSave(this.saveId);
-          if (save) {
-            save.activeSnapshotId = snapshot.id;
-            save.metadata.totalTurns = snapshot.turn;
-            await saveSaveSlot(save);
-          }
-        },
-      );
+            // ⑤ activeSnapshotId 指向 + totalTurns 对齐快照 turn（防重发后 turn 编号错位）
+            const save = await getSave(this.saveId);
+            if (save) {
+              save.activeSnapshotId = snapshot.id;
+              save.metadata.totalTurns = snapshot.turn;
+              await saveSaveSlot(save);
+            }
+          },
+        );
+      });
     } catch (err) {
       errors.push(err instanceof Error ? err.message : String(err));
     }
@@ -1710,17 +1738,21 @@ export class StateManager {
     if (isEmptyMapPack(pack)) return;
 
     try {
-      const profile = await getProfile(this.saveId);
-      const { flags, healed } = await this.ensureMapFlags(profile, pack);
-      const planned = planJourneyFlags(
-        pack,
-        getMapIndex(),
-        flags,
-        readTravelDestination(profile.variables),
-        toEpochMinutes(profile.gameTime),
-      );
-      if (planned === null && !healed) return;
-      await updateMapFlags(profile, planned ?? flags);
+      // 🔴 并行化改造：在途旗的读-改-写（getProfile → 纯函数 → updateMapFlags）
+      // 是同一段 RMW 区段，整段互斥（与提交/时间推进争同一条 SaveProfile 记录）。
+      await withSaveWriteLock(this.saveId, async () => {
+        const profile = await getProfile(this.saveId);
+        const { flags, healed } = await this.ensureMapFlags(profile, pack);
+        const planned = planJourneyFlags(
+          pack,
+          getMapIndex(),
+          flags,
+          readTravelDestination(profile.variables),
+          toEpochMinutes(profile.gameTime),
+        );
+        if (planned === null && !healed) return;
+        await updateMapFlags(profile, planned ?? flags);
+      });
     } catch (err) {
       console.warn('[StateManager] 在途旗同步失败（不影响正文与已落库状态）:', err);
     }
@@ -1879,17 +1911,22 @@ export class StateManager {
     if (isEmptyRandomEventPack(pack)) return;
 
     try {
-      const profile = await getProfile(this.saveId);
-      const ctx = await this.buildRandomEventContext(profile);
-      const pruned = pruneRandomEvents(
-        pack.defs,
-        pack.config,
-        getRandomEventFlags(profile),
-        ctx,
-        this.gameDayOf(profile),
-      );
-      if (pruned === null) return;
-      await updateRandomEventFlags(profile, pruned);
+      // 🔴 并行化改造：保洁的读-改-写（getProfile → 纯函数 → updateRandomEventFlags）
+      // 是同一段 RMW 区段，整段互斥 —— 与结算 / 提交 / advanceTime 争同一条
+      // SaveProfile 记录，交错执行会各自读到旧快照（最后写的赢，且零报错）。
+      await withSaveWriteLock(this.saveId, async () => {
+        const profile = await getProfile(this.saveId);
+        const ctx = await this.buildRandomEventContext(profile);
+        const pruned = pruneRandomEvents(
+          pack.defs,
+          pack.config,
+          getRandomEventFlags(profile),
+          ctx,
+          this.gameDayOf(profile),
+        );
+        if (pruned === null) return;
+        await updateRandomEventFlags(profile, pruned);
+      });
     } catch (err) {
       console.warn('[StateManager] 随机事件保洁失败（不影响正文与已落库状态）:', err);
     }
@@ -1917,15 +1954,23 @@ export class StateManager {
     }
 
     try {
-      const profile = await getProfile(this.saveId);
-      const currentDay = this.gameDayOf(profile);
-      const settled = settleRandomEventTrigger(getRandomEventFlags(profile), name, currentDay);
-      if (settled === null) {
-        console.warn(`[StateManager] 随机事件不在候选池中，忽略触发回执: ${name}`);
-        return;
-      }
+      // 🔴 并行化改造：结算读-改-写（getProfile → settle → updateRandomEventFlags）
+      // 是同一段 RMW 区段，整段互斥；锁外的 reactToEvents 里的嵌套 commitChatState
+      // 自己排队拿锁（铁律②：锁内禁再入队列）。
+      const settledOut = await withSaveWriteLock(this.saveId, async () => {
+        const profile = await getProfile(this.saveId);
+        const currentDay = this.gameDayOf(profile);
+        const settled = settleRandomEventTrigger(getRandomEventFlags(profile), name, currentDay);
+        if (settled === null) {
+          console.warn(`[StateManager] 随机事件不在候选池中，忽略触发回执: ${name}`);
+          return null;
+        }
+        await updateRandomEventFlags(profile, settled.flags);
+        return { settled, currentDay };
+      });
+      if (!settledOut) return;
 
-      await updateRandomEventFlags(profile, settled.flags);
+      const { settled, currentDay } = settledOut;
 
       // emit 形状照 `applyTimeAdvance` 末尾那条（真 push 进 this.events，不是只构造），
       // 再走一次 `reactToEvents` —— 效果系统的 `$event.on('random_event')` 订阅者要吃得到
@@ -2015,92 +2060,97 @@ export class StateManager {
     // 1. 更新 SaveProfile.gameTime
     const { getCharacters } = await import('./database');
 
-    const profile = await getProfile(this.saveId);
-    profile.gameTime = advanceTime(profile.gameTime, minutes);
-    await updateProfile(profile);
+    // 🔴 并行化改造：时间推进的全部 DB 工作（gameTime / 天气 / 随机事件 / 角色
+    // 状态效果）是一段连续读-改-写区段，整段互斥；末尾的自提交 commitChatState
+    // 刻意在锁外 —— 嵌套提交要重新排队拿锁，在锁内即自死锁（铁律②）。
+    await withSaveWriteLock(this.saveId, async () => {
+      const profile = await getProfile(this.saveId);
+      profile.gameTime = advanceTime(profile.gameTime, minutes);
+      await updateProfile(profile);
 
-    // 1.5 🗺 天气重断言（地图 v1 §7）——**必须在时间推进之后**：判据是「新时间落在哪一天」，
-    //     拿旧时间去比就等于永远差一天（跨天那一次不断言、下一次同日的又不断言）
-    await this.syncMapWeather(profile);
+      // 1.5 🗺 天气重断言（地图 v1 §7）——**必须在时间推进之后**：判据是「新时间落在哪一天」，
+      //     拿旧时间去比就等于永远差一天（跨天那一次不断言、下一次同日的又不断言）
+      await this.syncMapWeather(profile);
 
-    // 1.6 🎲 随机事件逐天掷骰（随机事件 v1 §4.1）——**必须在时间推进之后**，且排在天气之后：
-    //     权重条件里有 `time.seasonAnyOf` / `timeOfDayAnyOf`，用的是推进后的新时间；
-    //     天气在前是因为它会写 `variables.sys.天气`，而条件 DSL 的 `var` 读的正是这棵树
-    await this.syncRandomEvents(profile);
+      // 1.6 🎲 随机事件逐天掷骰（随机事件 v1 §4.1）——**必须在时间推进之后**，且排在天气之后：
+      //     权重条件里有 `time.seasonAnyOf` / `timeOfDayAnyOf`，用的是推进后的新时间；
+      //     天气在前是因为它会写 `variables.sys.天气`，而条件 DSL 的 `var` 读的正是这棵树
+      await this.syncRandomEvents(profile);
 
-    // 2. 遍历所有角色, 扣减 StatusEffect.remainingTime
-    const characters = await getCharacters(this.saveId);
+      // 2. 遍历所有角色, 扣减 StatusEffect.remainingTime
+      const characters = await getCharacters(this.saveId);
 
-    for (const char of characters) {
-      let changed = false;
-      const expired: StatusEffect[] = [];
+      for (const char of characters) {
+        let changed = false;
+        const expired: StatusEffect[] = [];
 
-      for (const fx of char.statusEffects) {
-        // 永久效果跳过
-        if (fx.remainingTime === null) continue;
+        for (const fx of char.statusEffects) {
+          // 永久效果跳过
+          if (fx.remainingTime === null) continue;
 
-        // 战斗回合效果跳过 (由 combat 系统管理)
-        if (fx.timeUnit === '回合') continue;
+          // 战斗回合效果跳过 (由 combat 系统管理)
+          if (fx.timeUnit === '回合') continue;
 
-        // 按时间单位扣减
-        if (fx.timeUnit === '小时') {
-          fx.remainingTime -= Math.floor(minutes / 60);
-        } else {
-          fx.remainingTime -= minutes;
-        }
-        changed = true;
+          // 按时间单位扣减
+          if (fx.timeUnit === '小时') {
+            fx.remainingTime -= Math.floor(minutes / 60);
+          } else {
+            fx.remainingTime -= minutes;
+          }
+          changed = true;
 
-        if (fx.remainingTime <= 0) {
-          expired.push(fx);
-        }
-      }
-
-      // 过期移除 — M2 按名删除（#22，旧数据带 id 也按 name 过滤，不受影响）
-      for (const fx of expired) {
-        // 执行 onRemove 脚本
-        if (fx.onRemove && fx.scripts) {
-          const { executeScript } = await import('./script-executor');
-          const result = executeScript(fx.scripts[fx.onRemove]!, {
-            owner: char.id,
-            self: { stacks: fx.stacks, remainingTime: 0, name: fx.name },
-          });
-          patches.push(...(await convertScriptEffects(this.saveId, result)));
+          if (fx.remainingTime <= 0) {
+            expired.push(fx);
+          }
         }
 
-        char.statusEffects = char.statusEffects.filter((e) => e.name !== fx.name);
+        // 过期移除 — M2 按名删除（#22，旧数据带 id 也按 name 过滤，不受影响）
+        for (const fx of expired) {
+          // 执行 onRemove 脚本
+          if (fx.onRemove && fx.scripts) {
+            const { executeScript } = await import('./script-executor');
+            const result = executeScript(fx.scripts[fx.onRemove]!, {
+              owner: char.id,
+              self: { stacks: fx.stacks, remainingTime: 0, name: fx.name },
+            });
+            patches.push(...(await convertScriptEffects(this.saveId, result)));
+          }
 
-        patches.push({
-          op: 'remove_status_effect',
-          target: `characters.${char.name}`,
-          value: { name: fx.name },
-        });
+          char.statusEffects = char.statusEffects.filter((e) => e.name !== fx.name);
 
-        // Q-02 修复：createEvent 只构造不落库，改 push 进 events（旧代码假 emit）
-        this.events.push(
-          this.createEvent('status_effect', {
+          patches.push({
             op: 'remove_status_effect',
             target: `characters.${char.name}`,
             value: { name: fx.name },
-          }),
-        );
+          });
+
+          // Q-02 修复：createEvent 只构造不落库，改 push 进 events（旧代码假 emit）
+          this.events.push(
+            this.createEvent('status_effect', {
+              op: 'remove_status_effect',
+              target: `characters.${char.name}`,
+              value: { name: fx.name },
+            }),
+          );
+        }
+
+        // 时长扣减/移除的持久化走 saveCharacter（statusEffects 数组被 update_character 白名单
+        // 禁止直写，防 AI 假字段污染；此处引擎内存内已 mutate，一条直写即可）。Q-02 修复的
+        // 是 patches 里的脚本效果（remove/hp/stat）曾被调用点丢弃 —— 它们现在走末尾自提交。
+        if (changed) {
+          await saveCharacter(char);
+        }
       }
 
-      // 时长扣减/移除的持久化走 saveCharacter（statusEffects 数组被 update_character 白名单
-      // 禁止直写，防 AI 假字段污染；此处引擎内存内已 mutate，一条直写即可）。Q-02 修复的
-      // 是 patches 里的脚本效果（remove/hp/stat）曾被调用点丢弃 —— 它们现在走末尾自提交。
-      if (changed) {
-        await saveCharacter(char);
-      }
-    }
-
-    // 3. emit time_advanced（Q-02：改成真 push，旧代码 createEvent 不落库）
-    this.events.push(
-      this.createEvent('system', {
-        op: 'set_variable',
-        target: 'variables.gameTime',
-        value: profile.gameTime,
-      }),
-    );
+      // 3. emit time_advanced（Q-02：改成真 push，旧代码 createEvent 不落库）
+      this.events.push(
+        this.createEvent('system', {
+          op: 'set_variable',
+          target: 'variables.gameTime',
+          value: profile.gameTime,
+        }),
+      );
+    });
 
     // Q-02 修复：自提交 —— 之前返回值在唯一调用点（agent-orchestrator.ts:854）被丢弃，
     // 到期效果的 remove/hp/stat 与 onRemove 脚本全部蒸发。这里在方法内提交，符合 ADR-21

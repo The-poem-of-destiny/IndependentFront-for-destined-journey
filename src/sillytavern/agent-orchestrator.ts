@@ -210,6 +210,20 @@ export class AgentOrchestrator {
   /** @deprecated Phase 10: 旧格式 pendingCraftMarkers，新流程从 vars_update 输出直接扫描 */
   private pendingCraftMarkers: CraftRequestMarker[] = [];
 
+  /**
+   * 并行化改造（2026-08-16）：本回合 dispatcher 侧链（char_gen / item_gen /
+   * craft_gen）的完整完成 promise（LLM + 落库）。
+   *
+   * 侧链在 Stage 2 启动后**不 await** —— LLM 调用无副作用，与 vars_update 的
+   * LLM 并行；落库经 state-write-queue 串行（state-manager 收编，FIFO）。
+   * 收尾点：vars_update 提交前的回合级 barrier（3b）、combat 分支（3c）、
+   * run() 末尾与失败/abort 路径（3a/3d）。
+   */
+  private pendingSideChains: Promise<void>[] = [];
+
+  /** char_gen 侧链 promise —— combat 分支必须等它（参战方新角色先生成，原串行语义）。 */
+  private pendingCharGen: Promise<void> | null = null;
+
   constructor(options: OrchestratorOptions, events: OrchestratorEvents = {}) {
     this.pipeline = options.pipeline;
     this.context = options.context;
@@ -270,6 +284,10 @@ export class AgentOrchestrator {
       this.context.zones = buildZoneContext(this.context);
     }
 
+    // 并行化改造：新一轮清空上一轮残留的侧链簿记（正常路径已清，这里是防御）
+    this.pendingSideChains = [];
+    this.pendingCharGen = null;
+
     // 逐阶段执行
     for (let i = 0; i < this.pipeline.stages.length; i++) {
       const stage = this.pipeline.stages[i];
@@ -300,6 +318,13 @@ export class AgentOrchestrator {
         // Phase 6e: 处理标记 (craft_request / combat_trigger / char_detect)
         await this.processStageMarkers(i);
       } catch {
+        // 并行化改造（2026-08-16）：stage 失败/abort 路径也收尾侧链 —— 不悬空
+        // 不产生未处理拒绝；abort 时侧链已响应 abort 信号，allSettled 等它们
+        // resolve（毫秒级）。
+        if (this.pendingSideChains.length > 0) {
+          await Promise.allSettled(this.pendingSideChains);
+          this.pendingSideChains = [];
+        }
         // Stage failure — if retry is off, stop pipeline
         if (!this.pipeline.retryOnFail) {
           this.status = 'failed';
@@ -307,6 +332,15 @@ export class AgentOrchestrator {
         }
         // With retry on, continue to next stage (failed agents already recorded)
       }
+    }
+
+    // 🔴 并行化改造：await 本回合全部侧链完成（含落库）—— run() 返回后
+    // game-pipeline 的 advanceTurn / refreshFromDb 必须看到完整状态（快照
+    // 不缺新角色、回读不漏物品）。正常路径的 barrier（vars_update 分支）已经
+    // 清空过一次，这里兜底（如 vars_update 未产出或未进入该分支）。
+    if (this.pendingSideChains.length > 0) {
+      await Promise.allSettled(this.pendingSideChains);
+      this.pendingSideChains = [];
     }
 
     // 🎲 每回合胶水（随机事件 v1 §4.3）：本轮全部落库动作已经跑完，这时候的上下文
@@ -353,16 +387,20 @@ export class AgentOrchestrator {
       ? stage.agents.filter((a) => this.onlyAgents!.has(a))
       : stage.agents;
 
-    if (agentsToRun.length === 0) return;
+    // 并行化改造：per-agent 依赖过滤 —— 依赖失败（或从未产出）的 agent 不跑，
+    // 但**不连坐**同 stage 其他依赖满足的 agent（旧实现整 stage 一起跳过）。
+    const runnable = agentsToRun.filter((agentId) => this.depsOk(stage, agentId));
+
+    if (runnable.length === 0) return;
 
     // 并行执行同阶段所有 Agent
-    const promises = agentsToRun.map((agentId) => this.executeAgent(agentId));
+    const promises = runnable.map((agentId) => this.executeAgent(agentId));
     const results = await Promise.allSettled(promises);
 
     // 收集结果
     let hasSuccess = false;
-    for (let i = 0; i < agentsToRun.length; i++) {
-      const agentId = agentsToRun[i];
+    for (let i = 0; i < runnable.length; i++) {
+      const agentId = runnable[i];
       const settled = results[i];
 
       if (settled.status === 'fulfilled') {
@@ -389,8 +427,8 @@ export class AgentOrchestrator {
     }
 
     // If all agents in stage failed, throw to signal stage failure
-    if (!hasSuccess && agentsToRun.length > 0) {
-      throw new Error(`Stage failed: all ${agentsToRun.length} agent(s) failed`);
+    if (!hasSuccess && runnable.length > 0) {
+      throw new Error(`Stage failed: all ${runnable.length} agent(s) failed`);
     }
   }
 
@@ -478,7 +516,9 @@ export class AgentOrchestrator {
       agentId: config.agentId,
       saveId: this.saveId,
       timeout: config.timeout || endpoint.timeout,
-      maxRetries: config.retryOnFail ? 1 : 0,
+      // 🆕 2026-08-16: 重试次数可配置（AgentConfig.maxRetries，设置页 Agent 分区旋钮）。
+      // 缺省回退旧布尔语义（retryOnFail=true → 1 次）。外部取消永不重试（AgentClient 内短路）。
+      maxRetries: config.maxRetries ?? (config.retryOnFail ? 1 : 0),
     });
 
     const request: ChatRequest = {
@@ -628,7 +668,9 @@ export class AgentOrchestrator {
       agentId: config.agentId,
       saveId: this.saveId,
       timeout: config.timeout || endpoint.timeout,
-      maxRetries: config.retryOnFail ? 1 : 0,
+      // 🆕 2026-08-16: 重试次数可配置（AgentConfig.maxRetries，设置页 Agent 分区旋钮）。
+      // 缺省回退旧布尔语义（retryOnFail=true → 1 次）。外部取消永不重试（AgentClient 内短路）。
+      maxRetries: config.maxRetries ?? (config.retryOnFail ? 1 : 0),
     });
 
     const toolContext: ToolExecutionContext = {
@@ -771,6 +813,22 @@ export class AgentOrchestrator {
         }
       }
 
+      // 并行化改造：per-agent 依赖覆盖的合法性校验
+      for (const [agentId, deps] of Object.entries(stage.agentWaitFor ?? {})) {
+        if (!stage.agents.includes(agentId)) {
+          errors.push(`Stage ${i}: agentWaitFor 声明了非本 stage 的 agent "${agentId}"`);
+        }
+        for (const dep of deps) {
+          if (!knownAgents.has(dep)) {
+            errors.push(`Stage ${i}: agent "${agentId}" depends on unknown agent "${dep}"`);
+          } else if (!producedSoFar.has(dep)) {
+            errors.push(
+              `Stage ${i}: agent "${agentId}" depends on "${dep}" which is not produced before stage ${i}`,
+            );
+          }
+        }
+      }
+
       // 将本阶段 Agent 加入已产出集合
       for (const agentId of stage.agents) {
         producedSoFar.add(agentId);
@@ -780,11 +838,17 @@ export class AgentOrchestrator {
     return errors;
   }
 
-  /** 检查阶段的依赖是否满足（上游 Agent 有成功输出） */
-  private stageDependenciesMet(stage: PipelineStage): boolean {
-    if (!stage.waitFor || stage.waitFor.length === 0) return true;
-
-    for (const dep of stage.waitFor) {
+  /**
+   * per-agent 依赖判定（并行化改造 2026-08-16）：某 agent 的依赖满足与否只看
+   * 它自己声明的 deps（`agentWaitFor[agentId]` 优先，缺省回退 stage.waitFor）。
+   * 一个 agent 的依赖失败只跳过它自己 —— 这是「memory_summary 失败不连坐
+   * vars_update」的结构保证（管线重排后两者同 stage，旧整 stage 判定会把
+   * 整回合状态静默丢掉）。
+   */
+  private depsOk(stage: PipelineStage, agentId: string): boolean {
+    const deps = stage.agentWaitFor?.[agentId] ?? stage.waitFor;
+    if (!deps || deps.length === 0) return true;
+    for (const dep of deps) {
       const result = this.results.get(dep);
       // Dependency met if result exists and has no error (or was skipped via disabled)
       if (!result || result.error) {
@@ -792,6 +856,12 @@ export class AgentOrchestrator {
       }
     }
     return true;
+  }
+
+  /** 检查阶段是否还有可运行的 Agent（至少一个依赖满足）；全部不满足才跳过整 stage */
+  private stageDependenciesMet(stage: PipelineStage): boolean {
+    if (!stage.waitFor || stage.waitFor.length === 0) return true;
+    return stage.agents.some((agentId) => this.depsOk(stage, agentId));
   }
 
   /** 必需 Agent 必须存在、无错误，且产出非 null/undefined/空白字符串。 */
@@ -955,9 +1025,11 @@ export class AgentOrchestrator {
       );
 
       const promises: Promise<void>[] = [];
+      let charGenPromise: Promise<void> | null = null;
 
       if (charGenMarkers.length > 0 && this.events.onCharGenRequest) {
-        promises.push(this.events.onCharGenRequest(charGenMarkers, varsOutput, this.context));
+        charGenPromise = this.events.onCharGenRequest(charGenMarkers, varsOutput, this.context);
+        promises.push(charGenPromise);
       }
       if (itemGenMarkers.length > 0 && this.events.onItemGenRequest) {
         promises.push(this.events.onItemGenRequest(itemGenMarkers, varsOutput, this.context));
@@ -969,8 +1041,13 @@ export class AgentOrchestrator {
         promises.push(this.events.onCraftGenRequest(craftGenMarkers, varsOutput, this.context));
       }
 
+      // 🔴 并行化改造（2026-08-16）：侧链**不 await** —— LLM 调用（无副作用）
+      // 与 vars_update / plot_post_check 的 LLM 并行；落库经 state-write-queue
+      // 串行（state-manager 收编）。收尾点：vars_update barrier（下方）、
+      // combat 分支（只等 char_gen）、run() 末尾与失败/abort 路径。
       if (promises.length > 0) {
-        await Promise.all(promises);
+        this.pendingSideChains.push(...promises);
+        if (charGenPromise) this.pendingCharGen = charGenPromise;
       }
 
       // Step D: 旧格式 craft/combat（向后兼容）
@@ -1003,7 +1080,12 @@ export class AgentOrchestrator {
         (m): m is CombatTriggerMarker => m.type === 'combat_trigger',
       );
       if (combatMarkers.length > 0 && this.events.onCombatTrigger) {
-        // char/item/craft 的 promises 已在上方 Promise.all 完成，保证参战方新角色先生成再开战
+        // 🔴 并行化改造：显式等 char_gen 侧链 —— 原串行语义靠上方的
+        // `Promise.all` 保证「参战方新角色先生成再开战」，现在只等这一条
+        // （item/craft 与战斗无因果，不等）。侧链已在飞，等的是收尾。
+        if (this.pendingCharGen) {
+          await Promise.allSettled([this.pendingCharGen]);
+        }
         for (const marker of combatMarkers) {
           await this.events.onCombatTrigger(marker, dispatcherStoryOutput);
         }
@@ -1014,6 +1096,16 @@ export class AgentOrchestrator {
     if (this.isVarsUpdateStage(stageIndex)) {
       const varsOutput = this.getAgentOutputText('vars_update');
       if (!varsOutput) return;
+
+      // 🔴 回合级 barrier（并行化改造 2026-08-16）：vars_update 的 <json> 可能
+      // 按名引用本回合 char_gen 新建的 NPC（如给它 set_location / 好感度）——
+      // 侧链落库必须先完成，否则 resolveCharacter 抛「角色不存在」，patch 失败
+      // 上浮系统消息。侧链 LLM 已与 vars_update 的 LLM 并行重叠，这里等的是
+      // 收尾（侧链若仍在飞则等完整完成，这是语义保真的不二之选）。
+      if (this.pendingSideChains.length > 0) {
+        await Promise.allSettled(this.pendingSideChains);
+        this.pendingSideChains = [];
+      }
 
       // Step A: 提取 <json> 块 → 解析 char ops + item ops → StatePatch
       // Q-14: 只 parse 一次，下面的 quests 分支复用同一个 parsed —— 旧实现把同一段

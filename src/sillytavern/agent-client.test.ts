@@ -321,6 +321,99 @@ describe('AgentClient', () => {
     });
   });
 
+  describe('chat — 重试次数与 abort 短路（2026-08-16）', () => {
+    function retryClientOf(maxRetries: number): AgentClient {
+      return new AgentClient({
+        endpoint: makeEndpoint(),
+        agentId: 'test',
+        saveId: 's1',
+        maxRetries,
+      });
+    }
+
+    it('maxRetries=3 时共发 4 次请求（1 次 + 3 次重试）后仍失败', async () => {
+      vi.useFakeTimers();
+      const c = retryClientOf(3);
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          headers: new Headers(),
+          json: async () => ({}),
+          text: async () => 'Service Unavailable',
+        });
+      });
+
+      const p = c.chat({ messages: [{ role: 'user', content: 'test' }] });
+      await vi.advanceTimersByTimeAsync(20000); // 退避 1+2+4=7s
+      const result = await p;
+      expect(callCount).toBe(4);
+      expect(result.error).toContain('HTTP 503');
+    });
+
+    it('maxRetries=0 时不重试（只发 1 次）', async () => {
+      const c = retryClientOf(0);
+      globalThis.fetch = mockFetch({}, 500);
+      const result = await c.chat({ messages: [{ role: 'user', content: 'test' }] });
+      expect(result.error).toBeDefined();
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('🔴 abort 后不重试：外部取消立即停，不白等退避、不重复发请求', async () => {
+      vi.useFakeTimers();
+      const c = retryClientOf(3);
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          headers: new Headers(),
+          json: async () => ({}),
+          text: async () => 'Service Unavailable',
+        });
+      });
+
+      const controller = new AbortController();
+      controller.abort();
+      const p = c.chat({ messages: [{ role: 'user', content: 'test' }] }, controller.signal);
+      await vi.advanceTimersByTimeAsync(20000);
+      const result = await p;
+      // 关键断言：只发 1 次请求（不重试）。错误文案不苛求 —— mock fetch
+      // 不响应 abort signal（真实 fetch 会立刻 reject「请求已取消」）。
+      expect(callCount).toBe(1);
+      expect(result.error).toBeDefined();
+    });
+
+    it('🔴 abort 发生在重试退避等待期间 → 立即停', async () => {
+      vi.useFakeTimers();
+      const c = retryClientOf(3);
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          headers: new Headers(),
+          json: async () => ({}),
+          text: async () => 'Service Unavailable',
+        });
+      });
+
+      const controller = new AbortController();
+      const p = c.chat({ messages: [{ role: 'user', content: 'test' }] }, controller.signal);
+      // 第一次失败后进入退避等待（fake timers 下未推进）；此时用户取消
+      await Promise.resolve();
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(20000);
+      const result = await p;
+      expect(callCount).toBe(1);
+      expect(result.error).toBeDefined();
+    });
+  });
+
   describe('chat — 超时', () => {
     it('超时后应返回错误', async () => {
       const timeoutClient = new AgentClient({
@@ -561,6 +654,156 @@ describe('AgentClient', () => {
       expect(onComplete).not.toHaveBeenCalled();
       expect(onError).toHaveBeenCalledTimes(1);
       expect(onError).toHaveBeenCalledWith('Stream ended unexpectedly before completion');
+    });
+  });
+
+  describe('chatStream — 重试（2026-08-16）', () => {
+    function retryClientOf(maxRetries: number): AgentClient {
+      return new AgentClient({
+        endpoint: makeEndpoint(),
+        agentId: 'story',
+        saveId: 's1',
+        timeout: 5000,
+        maxRetries,
+      });
+    }
+
+    const OK_STREAM = [
+      `data: ${JSON.stringify({
+        choices: [{ delta: { content: 'retried' }, finish_reason: null }],
+      })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`,
+      'data: [DONE]\n\n',
+    ].join('');
+
+    it('🔴 失败后重试成功：fetch 2 次、onComplete 一次、重试前 onChunk("", true) 清预览', async () => {
+      vi.useFakeTimers();
+      const c = retryClientOf(2);
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: false,
+            status: 503,
+            headers: new Headers(),
+            json: async () => ({}),
+            text: async () => 'Service Unavailable',
+          });
+        }
+        // 🔴 mockStreamingFetch 返回的是 **fetch mock**（设计为直接赋给 fetch），
+        // 这里要调用它拿到 resolve 值 —— 直接返回 mock 对象会让 await 拿到
+        // vi.fn() 本身，res.body 为 undefined，第二次尝试必然失败。
+        return mockStreamingFetch([OK_STREAM])();
+      });
+
+      const onChunk = vi.fn();
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      const p = c.chatStream(
+        { messages: [{ role: 'user', content: 'test' }] },
+        { onChunk, onComplete, onError },
+      );
+      await vi.advanceTimersByTimeAsync(5000);
+      await p;
+
+      expect(callCount).toBe(2);
+      expect(onError).not.toHaveBeenCalled();
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ fullText: 'retried' }));
+      // 重试前必须清预览（onChunk('', true)），否则两段正文拼接显示
+      expect(onChunk).toHaveBeenCalledWith('', true);
+    });
+
+    it('重试耗尽 → onError 一次，不再重试', async () => {
+      vi.useFakeTimers();
+      const c = retryClientOf(2);
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          headers: new Headers(),
+          json: async () => ({}),
+          text: async () => 'Service Unavailable',
+        });
+      });
+
+      const onError = vi.fn();
+      const p = c.chatStream(
+        { messages: [{ role: 'user', content: 'test' }] },
+        { onChunk: vi.fn(), onComplete: vi.fn(), onError },
+      );
+      await vi.advanceTimersByTimeAsync(20000);
+      await p;
+
+      expect(callCount).toBe(3); // 1 + 2 重试
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(expect.stringContaining('HTTP 503'));
+    });
+
+    it('🔴 外部 abort 不重试（取消立即停）', async () => {
+      vi.useFakeTimers();
+      const c = retryClientOf(3);
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          headers: new Headers(),
+          json: async () => ({}),
+          text: async () => 'Service Unavailable',
+        });
+      });
+
+      const controller = new AbortController();
+      controller.abort();
+      const onError = vi.fn();
+      const p = c.chatStream(
+        { messages: [{ role: 'user', content: 'test' }] },
+        { onChunk: vi.fn(), onComplete: vi.fn(), onError },
+        controller.signal,
+      );
+      await vi.advanceTimersByTimeAsync(20000);
+      await p;
+
+      expect(callCount).toBe(1);
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith('Request aborted');
+    });
+
+    it('🔴 流中断（无 finish_reason 提前 EOF）可重试，重试成功后 onComplete 一次', async () => {
+      vi.useFakeTimers();
+      const c = retryClientOf(1);
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          // 第一次：流中途 EOF（没有 finish_reason / [DONE]）
+          return mockStreamingFetch([
+            `data: ${JSON.stringify({
+              choices: [{ delta: { content: 'partial' }, finish_reason: null }],
+            })}\n\n`,
+          ])();
+        }
+        return mockStreamingFetch([OK_STREAM])();
+      });
+
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      const p = c.chatStream(
+        { messages: [{ role: 'user', content: 'test' }] },
+        { onChunk: vi.fn(), onComplete, onError },
+      );
+      await vi.advanceTimersByTimeAsync(5000);
+      await p;
+
+      expect(callCount).toBe(2);
+      expect(onError).not.toHaveBeenCalled();
+      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ fullText: 'retried' }));
     });
   });
 });

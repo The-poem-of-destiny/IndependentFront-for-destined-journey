@@ -170,6 +170,10 @@ export class AgentClient {
         return result;
       } catch (e) {
         lastError = e as Error;
+        // 🔴 2026-08-16：外部取消后**不再重试** —— signal 已 aborted 时每次重试都
+        // 立刻失败，旧实现还会白等 1s/2s 的指数退避（重试次数可配置后更明显）。
+        // 用户取消 = 立即停。超时（callOnce 内部 controller）不受影响，仍可重试。
+        if (signal?.aborted) break;
         if (attempt < this.maxRetries) {
           await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
         }
@@ -341,6 +345,15 @@ export class AgentClient {
    * 发送 `stream: true`，通过 ReadableStream 解析 SSE 块，
    * 逐块回调 onChunk / onToolCall，最终回调 onComplete。
    *
+   * 🔴 2026-08-16：**带重试循环**（此前零重试，story 走的就是这条 —— 一次 500
+   * 或首字节超时直接整轮失败）。单次会话在 `streamOnce` 里，规则：
+   *   · 成功 → onComplete 一次
+   *   · 外部 abort（用户取消）→ onError('Request aborted') 立即返回，**不重试**
+   *   · 可重试错误（HTTP 5xx / 首字节超时 / 流中断）且 attempt < maxRetries →
+   *     先 `onChunk('', true)` 清玩家可见预览（与正常收尾同一条「清理临时预览」语义），
+   *     指数退避后重试
+   *   · 超限 → onError 最终失败
+   *
    * @param request ChatRequest（messages/temperature/tools 等）
    * @param callbacks StreamCallbacks（onChunk / onToolCall / onComplete / onError）
    * @param signal 可选的 AbortSignal 用于外部取消
@@ -350,8 +363,46 @@ export class AgentClient {
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      const outcome = await this.streamOnce(request, callbacks, signal);
+
+      if (outcome.kind === 'ok') return;
+      // 🔴 abort 短路：外部 signal 已 aborted 时立即停，**不重试**。
+      // 不能只认 `outcome.kind === 'aborted'` —— 真实 fetch 会 reject AbortError
+      // 走那条，但网关在取消瞬间仍可能返回 4xx/5xx（此时 outcome 是 'error'），
+      // 取消的语义是「用户不想等了」，与错误来源无关。
+      if (signal?.aborted || outcome.kind === 'aborted') {
+        callbacks.onError('Request aborted');
+        return;
+      }
+      if (attempt >= this.maxRetries) {
+        callbacks.onError(outcome.error);
+        return;
+      }
+
+      // 🔴 重试前清玩家可见预览：onChunk('', true) 与正常收尾的「清理临时预览」
+      // 同一条语义（game-pipeline 的 streamCallbacks 收到后重置 streamedRaw）。
+      // 不清理的话，重试生成的新正文会与第一段失败前的半截拼接显示。
+      callbacks.onChunk('', true);
+      await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
+    }
+  }
+
+  /**
+   * 单次流式会话（chatStream 的每 attempt）。成功/取消/错误三态返回，
+   * 不直接调 onComplete/onError —— 收尾与重试决策交给外层循环。
+   */
+  private async streamOnce(
+    request: ChatRequest,
+    callbacks: StreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<{ kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string }> {
     const startTime = Date.now();
     let settled = false;
+    let outcome: { kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string } = {
+      kind: 'error',
+      error: 'Stream ended unexpectedly',
+    };
     let postFinishTimer: ReturnType<typeof setTimeout> | undefined;
 
     const clearPostFinishTimer = () => {
@@ -360,11 +411,11 @@ export class AgentClient {
       postFinishTimer = undefined;
     };
 
-    const settleError = (message: string) => {
+    const fail = (kind: 'error' | 'aborted', message: string) => {
       if (settled) return;
       settled = true;
       clearPostFinishTimer();
-      callbacks.onError(message);
+      outcome = kind === 'aborted' ? { kind: 'aborted' } : { kind: 'error', error: message };
     };
 
     const controller = new AbortController();
@@ -413,6 +464,7 @@ export class AgentClient {
         if (settled) return;
         settled = true;
         clearPostFinishTimer();
+        outcome = { kind: 'ok' };
 
         const toolCalls: Array<{
           id: string;
@@ -594,7 +646,7 @@ export class AgentClient {
           if (sawFinishReason) {
             complete();
           } else {
-            settleError('Stream ended unexpectedly before completion');
+            fail('error', 'Stream ended unexpectedly before completion');
           }
         }
       } finally {
@@ -603,20 +655,23 @@ export class AgentClient {
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
         if (abortedByTimeout) {
-          settleError(
+          fail(
+            'error',
             `请求超时（${Math.round(streamTimeout / 1000)}秒内未收到响应），请重试或减少上下文注入`,
           );
         } else {
-          settleError('Request aborted');
+          fail('aborted', 'Request aborted');
         }
       } else {
-        settleError(e instanceof Error ? e.message : String(e));
+        fail('error', e instanceof Error ? e.message : String(e));
       }
     } finally {
       clearTimeout(timeoutId);
       clearPostFinishTimer();
       signal?.removeEventListener('abort', onExternalAbort);
     }
+
+    return outcome;
   }
 
   /**
