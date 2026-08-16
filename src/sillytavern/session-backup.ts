@@ -51,7 +51,7 @@ import type { SceneImageRecord, CharacterSessionAppearance } from './types-image
  * 清单是**导出时点的观察**，不是承诺：每一项都可能在收件人那边缺席或版本不同，
  * 这正是 `checkSessionSaveDependencies` 要回答的问题。
  */
-export interface SessionDependencies {
+interface SessionDependencies {
   /** 装着的内容包（通常 0–1 个）。版本不同不等于不能玩，但值得在导入前说一声 */
   packs: Array<{ packId: string; packVersion: string; name?: string }>;
   /**
