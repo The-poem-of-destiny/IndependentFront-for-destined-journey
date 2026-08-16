@@ -1202,6 +1202,26 @@ export const useGameStore = defineStore('game', () => {
     return result.success ? { ok: true } : { ok: false, error: result.errors.join('; ') };
   }
 
+  /**
+   * 调试面板「下回合触发」：把一条随机事件按 forced 塞进候选池（开发者模式专用）。
+   *
+   * 校验与落库全在引擎的 `devForceArmRandomEvent`（ADR-21 唯一写入口）；本层只解析「谁」
+   * 并回读 —— 不回读的话调试面板上那条「在池」标记要等下一次时间推进才亮，
+   * 而这个按钮的全部价值就是**立刻**看到它进池了。
+   */
+  async function devArmRandomEvent(name: string): Promise<{ ok: boolean; error?: string }> {
+    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' };
+    try {
+      const sm = createStateManager(activeSaveId.value);
+      const result = await sm.devForceArmRandomEvent(name);
+      if (result.ok) await refreshFromDb();
+      return result;
+    } catch (err) {
+      console.error('[game-store] 随机事件调试入池失败:', err);
+      return { ok: false, error: '调试入池失败' };
+    }
+  }
+
   return {
     saves,
     activeSaveId,
@@ -1295,5 +1315,6 @@ export const useGameStore = defineStore('game', () => {
     removeSkill,
     removeCharacter,
     setPlayerLocation,
+    devArmRandomEvent,
   };
 });

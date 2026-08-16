@@ -21,6 +21,7 @@
  * - NPC 换位置 → 一个字节都不写（player only，同地图落位钩子）
  * - 结算：清全部非 forced / forced 留在池里 / 记档案 / 起全局冷却 / emit `random_event`
  * - 结算的两条 warn-noop：名字不在池中（AI 幻觉不奖励）、系统关闭
+ * - 调试入池（`devForceArmRandomEvent`）：绕过硬门槛与权重、免疫池满与保洁、名字认不出就 no-op
  *
  * 🔴 夹具零真实地名与零真实事件名（承 D25①）：事件定义是**内容包数据**，
  *    夹具里写真名会让人误以为引擎认识它们。
@@ -32,7 +33,13 @@ import { clearAllData, getCharacters, initializeDatabase, saveCharacter } from '
 import { getProfile, getRandomEventFlags, updateProfile } from './save-profile';
 import { createStateManager } from './state-manager';
 import { setEngineSettingsProvider } from './engine-settings';
-import { installRandomEventPack, resetRandomEventRuntime } from './random-event-runtime';
+import {
+  getRandomEventPack,
+  installRandomEventPack,
+  resetRandomEventRuntime,
+} from './random-event-runtime';
+import { buildRandomEventOffer } from './random-event-context';
+import { buildRandomEventRollContext } from './random-event-snapshot';
 import { installMapPack, resetMapRuntime } from './map-runtime';
 import type { RandomEventPack } from './random-event-pack';
 import { DEFAULT_RANDOM_EVENT_CONFIG } from './types-random-events';
@@ -617,5 +624,201 @@ describe('syncRandomEventsForTurn —— 每回合的轻量保洁', () => {
     installRandomEventPack(buildPack([alwaysDef('Encounter')]));
     await createStateManager(SAVE_ID).syncRandomEventsForTurn();
     expect(await readRawFlags()).toBeUndefined();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 调试入池（开发者面板「下回合触发」）
+// ═══════════════════════════════════════════════════════════
+
+describe('devForceArmRandomEvent —— 开发者面板专用的强制入池', () => {
+  it('按 forced 入池并落库，简报按真实入池那条路固化（槽位采样 + {{place}}）', async () => {
+    installRandomEventPack(
+      buildPack([
+        alwaysDef('Encounter', {
+          // `mtthDays` 大到实质掷不中：入池只可能来自这个按钮
+          trigger: { type: 'mtth', mtthDays: 1e12 },
+          brief: 'a {{goods}} at {{place}}',
+          slots: { goods: { pick: ['relic'] } },
+        }),
+      ]),
+    );
+    await seedProfile();
+    await seedPlayer('Camp');
+
+    const result = await createStateManager(SAVE_ID).devForceArmRandomEvent('Encounter');
+
+    expect(result).toEqual({ ok: true });
+    const flags = await readFlags();
+    expect(flags.pending).toHaveLength(1);
+    expect(flags.pending?.[0]).toMatchObject({
+      name: 'Encounter',
+      forced: true,
+      armedDay: START_DAY,
+      brief: 'a relic at Camp',
+    });
+    // forced 条目不设过期（撤池条件是离开 / available 不再满足，不是时间）
+    expect(flags.pending?.[0].expiresDay).toBeUndefined();
+  });
+
+  it('🔴 绕过 available 硬门槛与权重 ×0 —— 这就是这个按钮存在的理由', async () => {
+    installRandomEventPack(
+      buildPack([
+        alwaysDef('Blocked', {
+          available: { playerLevel: { gte: 99 } },
+          weights: [{ when: {}, multiply: 0 }],
+        }),
+      ]),
+    );
+    await seedProfile();
+    await seedPlayer('Camp', 3);
+
+    expect(await createStateManager(SAVE_ID).devForceArmRandomEvent('Blocked')).toEqual({
+      ok: true,
+    });
+    expect(await pendingNames()).toEqual(['Blocked']);
+  });
+
+  it('名字不在事件包里 → warn + 一个字节都不写（换包 / 手滑都走这一条）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    installRandomEventPack(buildPack([alwaysDef('Encounter')]));
+    await seedProfile();
+    await seedPlayer('Camp');
+
+    const result = await createStateManager(SAVE_ID).devForceArmRandomEvent('Ghost');
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
+    expect(warn).toHaveBeenCalled();
+    expect(await readRawFlags()).toBeUndefined();
+  });
+
+  it('空名字 / 没装包 → 同样 no-op（不建 flags 袋子）', async () => {
+    await seedProfile();
+    await seedPlayer('Camp');
+
+    expect((await createStateManager(SAVE_ID).devForceArmRandomEvent('   ')).ok).toBe(false);
+    expect((await createStateManager(SAVE_ID).devForceArmRandomEvent('Encounter')).ok).toBe(false);
+    expect(await readRawFlags()).toBeUndefined();
+  });
+
+  it('🔴 池满时也进得去，且随后的保洁不把它撤掉（forced 免疫淘汰与过期）', async () => {
+    installRandomEventPack(
+      buildPack(
+        [
+          alwaysDef('Dev', { trigger: { type: 'mtth', mtthDays: 1e12 } }),
+          alwaysDef('A'),
+          alwaysDef('B'),
+        ],
+        { maxPending: 2 },
+      ),
+    );
+    await seedProfile({
+      pending: [
+        { name: 'A', armedDay: START_DAY, expiresDay: START_DAY + 5, priority: 5, brief: 'a' },
+        { name: 'B', armedDay: START_DAY, expiresDay: START_DAY + 5, priority: 4, brief: 'b' },
+      ],
+      lastRollDay: START_DAY,
+    });
+    await seedPlayer('Camp');
+
+    await createStateManager(SAVE_ID).devForceArmRandomEvent('Dev');
+    expect(await pendingNames()).toEqual(['A', 'B', 'Dev']);
+
+    // 每回合保洁跑一遍：forced 条目必须还在（撤掉的话「下回合触发」就是一句空话）
+    await createStateManager(SAVE_ID).syncRandomEventsForTurn();
+    expect(await pendingNames()).toContain('Dev');
+  });
+
+  it('同名条目已在池 → 换成 forced，绝不出现两行同名候选', async () => {
+    installRandomEventPack(buildPack([alwaysDef('Encounter')]));
+    await seedProfile({
+      pending: [
+        {
+          name: 'Encounter',
+          armedDay: START_DAY,
+          expiresDay: START_DAY + 5,
+          priority: 0,
+          brief: 'stale',
+        },
+      ],
+    });
+    await seedPlayer('Camp');
+
+    await createStateManager(SAVE_ID).devForceArmRandomEvent('Encounter');
+
+    const flags = await readFlags();
+    expect(flags.pending).toHaveLength(1);
+    expect(flags.pending?.[0].forced).toBe(true);
+  });
+
+  it('🔴 系统关掉时零写入 + warn（注入侧返空串，写进去的候选谁也看不见）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    setEngineSettingsProvider(() => ({ randomEventsEnabled: false }));
+    installRandomEventPack(buildPack([alwaysDef('Encounter')]));
+    await seedProfile();
+    await seedPlayer('Camp');
+
+    const result = await createStateManager(SAVE_ID).devForceArmRandomEvent('Encounter');
+
+    expect(result.ok).toBe(false);
+    expect(warn).toHaveBeenCalled();
+    expect(await readRawFlags()).toBeUndefined();
+  });
+
+  it('🔴 条目不带地点键 —— 换地方它照样在池里（离开即撤只管真首访条目）', async () => {
+    installRandomEventPack(
+      buildPack([alwaysDef('Dev', { trigger: { type: 'mtth', mtthDays: 1e12 } })]),
+    );
+    await seedProfile();
+    await seedPlayer('Outpost');
+
+    await createStateManager(SAVE_ID).devForceArmRandomEvent('Dev');
+    expect((await readFlags()).pending?.[0].placeKey).toBeUndefined();
+
+    await setLocation('Hero', 'Bravo');
+    expect(await pendingNames()).toEqual(['Dev']);
+  });
+
+  it('🔴 触发它不烧当前地点的首访足迹（visited 是事实、没有自愈路径）', async () => {
+    installRandomEventPack(
+      buildPack([
+        alwaysDef('Dev', { trigger: { type: 'mtth', mtthDays: 1e12 } }),
+        firstVisitDef('Arrival', ['Alpha']),
+      ]),
+    );
+    installMapPack(buildMapPack());
+    await seedProfile();
+    await seedPlayer('Outpost');
+
+    // 站在 Alpha（它的首访事件还没被演绎）时，给一条无关的 MTTH 事件按下调试按钮
+    await setLocation('Hero', 'Alpha');
+    await createStateManager(SAVE_ID).devForceArmRandomEvent('Dev');
+    await createStateManager(SAVE_ID).confirmRandomEventTrigger('Dev');
+
+    const flags = await readFlags();
+    expect(flags.visited).toBeUndefined();
+    // 足迹没被烧 → 作者为 Alpha 写的首访事件仍在池里（离开再回来也还会强制入池）
+    expect(await pendingNames()).toEqual(['Arrival']);
+  });
+
+  it('入池后进得了注入块，且带 forced 标（下一回合 story 真看得见）', async () => {
+    installRandomEventPack(
+      buildPack([alwaysDef('Encounter', { trigger: { type: 'mtth', mtthDays: 1e12 } })]),
+    );
+    await seedProfile();
+    await seedPlayer('Camp');
+
+    await createStateManager(SAVE_ID).devForceArmRandomEvent('Encounter');
+
+    const profile = await getProfile(SAVE_ID);
+    const offer = buildRandomEventOffer(
+      getRandomEventPack().defs,
+      getRandomEventPack().config,
+      getRandomEventFlags(profile),
+      buildRandomEventRollContext(profile, (await getCharacters(SAVE_ID))[0]),
+      START_DAY,
+    );
+    expect(offer.map((e) => [e.name, e.forced])).toEqual([['Encounter', true]]);
   });
 });
