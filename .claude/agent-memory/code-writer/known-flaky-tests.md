@@ -28,6 +28,7 @@ a length of 8 but got 0`。**已 `git stash -u` 在干净树上复现过**，与
 工坊 P1-1 后 128 files / 4452 tests、P1-3 workshop-store 后 132 files / 4543 tests、
 工坊 P2-T6（EJS 差量提交）后 **145 files / 4928 tests** 连跑两次同样全绿）。
 2026-08-04 图像生成阶段 H 后再测：**238 files / 6370 passed + 4 skipped，仍 0 failed**。
+2026-08-15（MEM 编号跨存档唯一性修复）再测：**324 files / 8296 passed + 9 skipped，仍 0 failed**。
 下面两条历史失败要么被修了，要么那次没抽中（第 1 条是概率性的）。**现在任何 failed 都要当
 成自己弄坏的来查**，只有第 1 条再次出现且症状完全吻合时才可判为已知抖动。
 
