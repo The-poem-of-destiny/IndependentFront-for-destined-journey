@@ -26,6 +26,8 @@ import type {
   WorldBook,
   WorldBookPartition,
 } from './types';
+// 第 13 分节 `randomEvents` 的形状真源在随机事件分册（type-only，边不成环）
+import type { PackRandomEventsSection } from './types-random-events';
 
 // ═══════════════════════════════════════════════════════════
 // agent 默认值（pack 承载的 per-Agent 配置）
@@ -278,6 +280,20 @@ export interface ContentPack {
   imageDialects?: PackImageDialectsSection;
   /** 地图内容包（地图系统 v1 / §3.3）—— 注册表第 8 面，整节替换 */
   mapPack?: PackMapPackSection;
+  /**
+   * 随机事件（随机事件系统 v1 / §3.3）—— 注册表**第 13 面**。
+   *
+   * 形状 `{ config?, defs }` 的真源在 `types-random-events.ts`（随机事件全部类型的分册）。
+   *
+   * 🔴 与 `mapPack` / `imageDialects` **同一档：整节替换，无 `.data` 壳**（落盘形状
+   * `data/content/random-events.json` 就是这个对象本身）。
+   *
+   * 🔴 **声明的形状比事实强**（与 `PackMapPackSection` 刻意写成 `Record<string, unknown>`
+   * 的理由相反，这里迁就的是「形状真源只有一份」）：这一节来自第三方内容包，校验器只判
+   * 「是不是 JSON 对象」，`defs` 里每一条到底能不能用由引擎侧的容错解析器
+   * `coerceRandomEventPack` 说了算（坏定义整条跳过、坏子项逐条丢）。**planner 不解释结构**。
+   */
+  randomEvents?: PackRandomEventsSection;
 
   /**
    * 构建器逐节盖章的 hash 清单。
@@ -428,6 +444,12 @@ export interface PackInstallPlan {
     locations?: PackSectionPlan<LocationNode>;
     bloodlines?: PackSectionPlan<PackBloodlinesSection>;
     namePools?: PackSectionPlan<unknown>;
+    /**
+     * 随机事件（第 13 面，§3.3）—— **整节替换**，走 bloodlines/catalog 那一档
+     * （`planOpaqueSection`）：事件定义没有 id，逐项键只能是事件名，而同名后装覆盖的
+     * 判定已经在 `coerceRandomEventPack` 里做过一次了 —— planner 再做一遍就是两处口径。
+     */
+    randomEvents?: PackSectionPlan<PackRandomEventsSection>;
   };
   agentDefaults?: {
     /** 默认层键集合（D44：解析名册 = 默认层键 ∪ 覆写层键） */

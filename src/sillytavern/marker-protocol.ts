@@ -16,6 +16,9 @@
  * 图像生成 v1 新增:
  *   <scene_image>    — 🖼 情景插画: 标记就是锚点，图就地插进正文（设计 §3）
  *
+ * 随机事件 v1 新增:
+ *   <event_trigger>  — 🎲 触发回执: Story 认领候选池里的一条随机事件（设计 §5.2）
+ *
  * 设计决策:
  * - 纯函数模块，无副作用，无外部依赖
  * - 正则扫描而非 StreamTagParser — 标记检测在已完成文本上进行
@@ -36,6 +39,7 @@ import type {
   ItemUpdateRequestMarker,
   CraftGenRequestMarker,
   PlayAudioMarker,
+  EventTriggerMarker,
   MarkerScanResult,
 } from './types';
 // 图像子系统的类型全部集中在 types-image.ts（`types.ts` 只把 SceneImageMarker
@@ -233,6 +237,18 @@ const MARKER_SPECS: { [K in BlockMarkerType]: MarkerSpec<MarkerOf<K>> } = {
       characters: splitCharacterList(a['characters']),
       rating: normalizeRating(a['rating']),
     }),
+  },
+  // 随机事件 v1: `<event_trigger name="事件名"/>` 触发回执（设计 §5.2）
+  //
+  // 🔴 `lenientClosing` 是必需的，不是保险：提示词教 AI 写的就是**自闭合**形态，
+  //    而通用骨架 `scanByTag` 只认成对写法 —— 不开宽松扫描，这个标记既不会被结算，
+  //    也不会被剥掉，那行尖括号直接漏到玩家眼前。
+  // 🔴 `name` **原样取，不归一化**（不 trim 内容、不折大小写、不过 sanitizeCaption）：
+  //    它是逻辑键，结算侧靠 `===` 比候选池（铁则 1）。收敛器是给装饰性文案用的。
+  event_trigger: {
+    emptyBody: '',
+    lenientClosing: true,
+    fields: (a) => ({ name: a['name'] }),
   },
 };
 
@@ -458,6 +474,19 @@ export function scanCraftGenRequests(text: string): CraftGenRequestMarker[] {
  */
 export function scanSceneImages(text: string): SceneImageMarker[] {
   return scanByTag(text, 'scene_image');
+}
+
+// ========== 随机事件 v1: 触发回执 ==========
+
+/**
+ * 扫描文本中的 `<event_trigger>` 标记（三种写法都认，见 `scanLenientTag`）。
+ *
+ * 结算在 `StateManager.confirmRandomEventTrigger`（按名字逐字解析候选池）；本层只认
+ * 「AI 说它触发了叫这个名字的事件」这一件事，**不判断名字在不在池里** —— 那是结算侧的
+ * 职责，两处各判一次就会出现「扫到了但没人结算」或反过来。
+ */
+export function scanEventTriggers(text: string): EventTriggerMarker[] {
+  return scanByTag(text, 'event_trigger');
 }
 
 /**

@@ -2,7 +2,7 @@
 - [combat 工具独立通道](combat-tool-independent-channel.md) — M4 5.2: combat 工具走 executeCombatToolCall+CombatToolContext（B方案），旧 executeToolCall 占位 throw 刻意保留作引导；按名寻址+patches不落库
 - [item_gen modifier 解析接入](combat-v2-itemgen-modifiers.md) — M4 5.5b: <modifiers> 子元素→parse→validate→patch 全链路；buff 不独立产出（附加效果类 modifier 带）；divinity 取 max；违规 warn 不中断
 - [Dexie stores() 是累加的](dexie-stores-cumulative.md) — database.ts v12 注释「漏写表即删表」对 Dexie 4 是错的；删表必须显式 `表名: null`（v9 chats 即先例）
-- [全量测试的既有失败基线](known-flaky-tests.md) — game-store 大纲回读 ~50% 概率失败 + SelectableCard 品质色；全量 2 failed 是基线，不是新改动弄坏的
+- [全量测试的失败基线](known-flaky-tests.md) — 基线是 0 failed（8458 passed）；content-store-registry / game-store 大纲回读是概率抖动，红了先单跑一次再下结论
 - [typecheck 查不到 .vue](typecheck-skips-vue-sfc.md) — 裸 tsc 不解析 SFC，改 Vue 必须另跑 `npm run typecheck:vue`；基线 0 条，有输出就是你弄坏的
 - [store mock 必须 reactive](reactive-store-mock-vacuous.md) — 裸对象 mock 切断响应式链，「落库后 UI 自己刷新」的断言恒真/恒假；去掉 reactive 必须变红
 - [图像上不放控件](feedback-no-furniture-on-media.md) — 画像位保持纯净（无旋钮/徽章/浮层），调节收进 Modal 内含实时预览；两层 Modal 用 `open && !childOpen` 收父层
@@ -30,3 +30,4 @@
 - [uid 446 runtime_geo 契约](uid446-runtime-geo-contract.md) — importance 越大越显著（tier 要反着映）、大陆 id 必须是字面 'continent'；直译字段名会让区域层静默空转
 - [冗余保险会互相掩护](redundant-guards-mask-mutations.md) — 决定性算法要逐条变异测试：两处重叠的保险单删都是绿的，钉不住的那处要么补用例要么降级成「保险」
 - [CRLF 会毁掉变异脚本](crlf-breaks-mutation-scripts.md) — src/** 全是 CRLF；replace(行+"\n") 静默失败留下两份代码，变异「没咬住」的结论多半是脚本没生效
+- [placeholder-hashes 只挡一半](placeholder-hashes-partial-gate.md) — 改 public/data/defaults/*.json 会让 byPreset/bySection 静默过期；CI 只校验 byBook，重跑脚本会连别人在飞的改动一起烘

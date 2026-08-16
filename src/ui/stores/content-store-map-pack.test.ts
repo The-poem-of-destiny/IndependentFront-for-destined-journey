@@ -97,6 +97,7 @@ const PLACEHOLDER_BODIES: Record<string, unknown> = {
   '/data/content/name-pools.json': { given: [] },
   '/data/content/branding.json': { appTitle: 'Placeholder Engine' },
   '/data/content/image-dialects.json': { dialects: [] },
+  '/data/content/random-events.json': { defs: [] },
   '/data/defaults/map-marker-presets.json': [],
 };
 

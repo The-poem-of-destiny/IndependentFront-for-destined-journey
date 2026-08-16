@@ -49,7 +49,19 @@ import { buildStatData } from '@engine/stat-projection';
 import { buildPassSeed } from '@engine/ejs-rng';
 // 🗺 地图 v1: `{{MAP_CONTEXT}}` 的可变半边（`worldFlags.map`）+ 天气标签（与出图同口径）
 import { getMapFlags } from '@engine/save-profile';
+// 🎲 随机事件 v1 (§5.1 读侧)：`{{RANDOM_EVENTS}}` 的候选快照 —— 供值必须在 buildContext
+import { getRandomEventFlags } from '@engine/save-profile';
+import { buildRandomEventOffer } from '@engine/random-event-context';
+import type { RandomEventOfferEntry } from '@engine/random-event-context';
+// 地点键与条件上下文的**唯一**实现（与入池侧共用；此前这里有一份逐字拷贝）
+import { buildRandomEventRollContext } from '@engine/random-event-snapshot';
+import { getRandomEventPack } from '@engine/random-event-runtime';
+import { getEngineSettings } from '@engine/engine-settings';
+import { toEpochMinutes } from '@engine/time-system';
 import { resolveSceneWeather } from './scene-image-seams';
+
+/** 一个游戏日的分钟数（口径同 `state-manager` 的 `MINUTES_PER_GAME_DAY`，那份未导出） */
+const MINUTES_PER_GAME_DAY = 1440;
 
 /** EJS `ui.log` 环形缓冲上限（能力面 §6.2） */
 import { diffVars, measureDiffSize, EJS_DIFF_SIZE_LIMIT } from '@engine/ejs-vars-diff';
@@ -783,6 +795,38 @@ export class GamePipeline {
     })) as ApiEndpoint[];
   }
 
+  /**
+   * `{{RANDOM_EVENTS}}` 的数据面（随机事件 §5.1 步 2）——**只过滤不写库**。
+   *
+   * 池空 / 没有存档档案 → `undefined`（区块整段不出，零 token）。
+   * 抛错 → 同样 `undefined` + 一条 warn：候选算不出来只是这一回合不注入，
+   * 绝不能让提示装配整个失败（承铁则 4「算不出来保持原值」）。
+   */
+  private buildRandomEventOffer(): RandomEventOfferEntry[] | undefined {
+    const profile = this.game.saveProfile;
+    if (!profile) return undefined;
+    try {
+      const flags = getRandomEventFlags(profile);
+      // 便宜的早退：池空是绝大多数回合的常态，不必为它建一份上下文快照
+      if (!flags.pending || flags.pending.length === 0) return undefined;
+      const pack = getRandomEventPack();
+      const currentDay = Math.floor(toEpochMinutes(profile.gameTime) / MINUTES_PER_GAME_DAY);
+      // 上下文快照与入池侧**共用同一份实现**（`random-event-snapshot`）：两侧不同口径的
+      // 表现是「入池了但注入面当场把它滤掉」，而两边都不报错
+      const player = this.game.characters.find((c) => c.type === 'player');
+      return buildRandomEventOffer(
+        pack.defs,
+        pack.config,
+        flags,
+        buildRandomEventRollContext(profile, player),
+        currentDay,
+      );
+    } catch (err) {
+      console.warn('[GamePipeline] 随机事件候选快照构建失败（本回合不注入）:', err);
+      return undefined;
+    }
+  }
+
   private buildContext(userInput: string, excludeMessageId?: string): AgentContext {
     // 构建历史消息（只取 user/assistant，不含 system）
     const history = this.game.messages
@@ -815,6 +859,17 @@ export class GamePipeline {
       //    与上面两行同一条铁律：供值必须在 buildContext —— 漏供的症状同样是
       //    区块静默消失（dispatcher 又开始战后重触发，谁也看不见为什么）。
       recentCombat: this._recentCombat ?? undefined,
+      // 🎲 随机事件 v1 §5.1: `{{RANDOM_EVENTS}}` 的三格输入，**同一条铁律 —— 供值必须在这里**。
+      //    ① 候选快照（纯函数产出，只过滤不写库）
+      //    ② 总开关（裁定 §13-4；关掉 = 注入空串）
+      //    ③ 战斗会话活跃位（裁定 §13-2；战斗期间全面静默，战后下一回合恢复）——
+      //      取 `isInCombat`（就绪/结算确认/v2/v3 四判据同源），**不是** `recentCombat`：
+      //      后者是战后回执，拿它当活跃位会让静默恰好落在该恢复注入的那几轮。
+      //    漏供任一格的症状都不是报错，是那个块静默消失或永远静默（blurByDefault 的教训），
+      //    故 placeholder-registry.random-events.test.ts 有一条源码断言盯着这三行。
+      randomEventOffer: this.buildRandomEventOffer(),
+      randomEventsEnabled: getEngineSettings().randomEventsEnabled,
+      combatActive: this.game.isInCombat,
       // 🔴 2026-08-02 修: 初始技能走 item_gen 链路 —— request_dispatcher 的 {{SKILL_STATE}}
       //    需要读到捏人页选的初始技能声明（存在 openingPrompt 里），否则主角 skills 落库为空的
       //    开局永远发不出 `<item_gen_request itemType="skill">`，技能没有 modifiers/automata。
@@ -1434,6 +1489,21 @@ export class GamePipeline {
           console.warn('[GamePipeline] 情景插画分流失败（不阻塞本轮）:', err);
         });
       },
+
+      // 🎲 随机事件回执（§5.2）：结算五步全在 StateManager 里（**唯一写入口**，ADR-21），
+      //    这里只把名字送过去。系统关闭 / 名字不在候选池两条 warn-noop 也在结算侧，
+      //    在这里再判一遍就是第二处口径。
+      //
+      // 🔴 **把 promise 交回去**（2026-08-16 审查修复）：结算是一次整条 SaveProfile 记录的
+      //    读-改-写，编排器要 await 它才能与 Stage 2 的提交、回合末的保洁串起来 ——
+      //    此前的 `void ... .catch()` 让三处从各自的副本整条写回去，最后写的赢。
+      //    失败仍然只 warn（结算侧自己也全程 try/catch），叙事这一轮照常完成。
+      onEventTrigger: (name) =>
+        createStateManager(this.saveId)
+          .confirmRandomEventTrigger(name)
+          .catch((err) => {
+            console.warn('[GamePipeline] 随机事件触发结算失败（不阻塞本轮）:', err);
+          }),
 
       // 工坊 P2 (D5): stage 跑完 → EJS 差量落库 → 才轮到本 stage 的 AI 补丁
       onEjsVarsFlush: (agentIds) => this.flushEjsVarsDiffs(agentIds),

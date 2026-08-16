@@ -186,6 +186,12 @@ export function planPackInstall(
     // catalog 同样是 `{ data: unknown }` 透传分节
     sections.catalog = planOpaqueSection(pack.catalog);
   }
+  if (pack.randomEvents !== undefined) {
+    // randomEvents（第 13 面）是 `{ config?, defs }` 整块替换分节 —— 事件定义没有 id，
+    // 逐项键只能是事件名，而「同名后装覆盖」的判定已经在 `coerceRandomEventPack` 里做过；
+    // planner 再做一遍就是两处口径，而不一致时先出错的那一处永远没人手工验。
+    sections.randomEvents = planOpaqueSection(pack.randomEvents);
+  }
 
   // ── agentDefaults / branding 名册/键集（透传，无四态）──
   const agentDefaults: PackInstallPlan['agentDefaults'] | undefined = pack.agentDefaults

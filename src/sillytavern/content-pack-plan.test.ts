@@ -475,6 +475,69 @@ describe('diffPackUpgrade — 升级 diff（D40）', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// 第 13 分节 randomEvents（随机事件系统 v1 / §3.3）
+// ═══════════════════════════════════════════════════════════
+
+describe('planPackInstall — randomEvents 分节（三态 + 整节替换）', () => {
+  /** 一节最小的随机事件分节（形状 = 落盘的 random-events.json，没有外层 `data` 壳） */
+  function eventsSection(names: string[]): NonNullable<ContentPack['randomEvents']> {
+    return {
+      config: { globalCooldownDays: 3, offerTtlDays: 5, maxPending: 3 },
+      defs: names.map((name) => ({
+        name,
+        brief: `${name}的简报`,
+        trigger: { type: 'mtth' as const, mtthDays: 20 },
+      })),
+    };
+  }
+
+  it('absent（pack 没声明这一节）→ sections.randomEvents 不出现（语义 = 别动）', () => {
+    const plan = planPackInstall(minimalPack());
+    expect(plan.sections.randomEvents).toBeUndefined();
+    // 🔴 键不许以 `undefined` 值的形式出现 —— 执行器判的是 `if (plan.sections.X)`，
+    //    但 `'randomEvents' in sections` 为真会让「这一节到底动没动」在诊断里说不清
+    expect('randomEvents' in plan.sections).toBe(false);
+  });
+
+  it('rows（声明了定义）→ 整节进 updated（执行器整块覆盖，不做逐条 diff）', () => {
+    const section = eventsSection(['旅途小遭遇', '夜半叩门']);
+    const plan = planPackInstall({ ...minimalPack(), randomEvents: section });
+    expect(plan.sections.randomEvents?.updated).toEqual([section]);
+    // 🔴 整节替换分节没有逐项键，所以另外三态恒空 —— 与 catalog/bloodlines 同档
+    expect(plan.sections.randomEvents?.added).toEqual([]);
+    expect(plan.sections.randomEvents?.removed).toEqual([]);
+    expect(plan.sections.randomEvents?.conflicted).toEqual([]);
+  });
+
+  it('刻意清空（defs: []）→ 这一节仍然出现（present ≠ absent）', () => {
+    const empty = { defs: [] };
+    const plan = planPackInstall({ ...minimalPack(), randomEvents: empty });
+    // 🔴 这条守的正是三态里最容易被写塌的一格：`defs: []` 是「这个包明确说本局没有随机
+    //    事件」，与「本包对随机事件无话可说」是两件事。判据若写成 `pack.randomEvents?.defs
+    //    ?.length` 之类，空包会被误判成 absent，于是清空指令永远传不下去。
+    expect(plan.sections.randomEvents).toBeDefined();
+    expect(plan.sections.randomEvents?.updated).toEqual([empty]);
+  });
+
+  it('透传原对象（planner 不解释结构、不复制、不收窄）', () => {
+    const section = eventsSection(['旅途小遭遇']);
+    const plan = planPackInstall({ ...minimalPack(), randomEvents: section });
+    // 引用相等：坏定义的剔除是 `coerceRandomEventPack` 的活，planner 一个字段都不该碰
+    expect(plan.sections.randomEvents?.updated[0]).toBe(section);
+  });
+
+  it('与其它分节共存时互不影响（randomEvents 声明不牵连 worldBooks 判定）', () => {
+    const plan = planPackInstall({
+      ...minimalPack(),
+      worldBooks: [book({ id: 'b1' })],
+      randomEvents: eventsSection(['旅途小遭遇']),
+    });
+    expect(plan.sections.worldBooks?.added).toHaveLength(1);
+    expect(plan.sections.randomEvents?.updated).toHaveLength(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
 // 常量断言
 // ═══════════════════════════════════════════════════════════
 

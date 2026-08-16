@@ -37,11 +37,34 @@ export interface EngineSettings {
   maxSnapshotsPerSave: number;
   /** 快照保留模式：tiered = 分层稀疏保留，dense = 一律保留最近 N 张 */
   snapshotRetentionMode: 'tiered' | 'dense';
+  /**
+   * 随机事件总开关（随机事件系统 v1 / 裁定 §13-4）。
+   * 关 = 调度整段 no-op（**保留 flags 不清**）+ 注入空串 + marker 忽略。
+   */
+  randomEventsEnabled: boolean;
+  /** 随机事件频率系数（0.5 / 1 / 2），乘进每次 MTTH 掷骰的权重 */
+  randomEventsFrequency: number;
 }
+
+/**
+ * 随机事件两项的缺省值**写在这里而不是取自 `DEFAULT_SETTINGS`**（与上面两项刻意不同）。
+ *
+ * 理由：这两项的真源是前端 localStorage 的 `UiSettings`（裁定 §13-4「口味开关」，不进
+ * `AppSettings`、不进存档、零迁移）。往 `AppSettings` 里加两个引擎唯一消费方的字段，
+ * 等于把「设置有两个真源」那个刚拆掉的坑再挖一次（本文件头就是那次事故的记录）。
+ *
+ * 🔴 **默认必须是「开」**：provider 由 `main.ts` 在 W3 才接上，在那之前（以及任何 headless
+ *    跑批 / 测试场合）这两个值就是系统的实际行为。默认 `false` 的症状是整个子系统装好了、
+ *    测试全绿、真机一个事件都不起，而没有任何一处会报错。
+ */
+const RANDOM_EVENTS_ENABLED_DEFAULT = true;
+const RANDOM_EVENTS_FREQUENCY_DEFAULT = 1;
 
 const FALLBACK: EngineSettings = {
   maxSnapshotsPerSave: DEFAULT_SETTINGS.maxSnapshotsPerSave,
   snapshotRetentionMode: DEFAULT_SETTINGS.snapshotRetentionMode,
+  randomEventsEnabled: RANDOM_EVENTS_ENABLED_DEFAULT,
+  randomEventsFrequency: RANDOM_EVENTS_FREQUENCY_DEFAULT,
 };
 
 type Provider = () => Partial<EngineSettings> | undefined;
@@ -70,6 +93,8 @@ export function getEngineSettings(): EngineSettings {
     return {
       maxSnapshotsPerSave: partial.maxSnapshotsPerSave ?? FALLBACK.maxSnapshotsPerSave,
       snapshotRetentionMode: partial.snapshotRetentionMode ?? FALLBACK.snapshotRetentionMode,
+      randomEventsEnabled: partial.randomEventsEnabled ?? FALLBACK.randomEventsEnabled,
+      randomEventsFrequency: partial.randomEventsFrequency ?? FALLBACK.randomEventsFrequency,
     };
   } catch (err) {
     console.error('[engine-settings] provider 抛异常，按缺省值继续:', err);

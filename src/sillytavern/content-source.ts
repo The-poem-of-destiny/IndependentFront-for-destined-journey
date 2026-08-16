@@ -318,6 +318,9 @@ export function validatePackOrThrow(pack: unknown): PackValidationNote[] {
     // 地图包（第 8 面）：裸数组/裸串在这里就被拒，`coerceMapPack` 那条「整份认不出 → 空包」
     // 的兜底因此只服务运行时，不给装包路径当遮羞布（口径同 imageDialects）
     'mapPack',
+    // 随机事件（第 13 面）：同上一条的口径 —— `coerceRandomEventPack` 那句「整份认不出 →
+    // 空包」是**运行时**的兜底，不该顺带把「装了一个裸数组当事件包」也悄悄接下来
+    'randomEvents',
   ] as const;
   for (const name of objectSectionNames) {
     const v = pack[name];

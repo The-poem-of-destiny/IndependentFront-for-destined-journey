@@ -30,6 +30,18 @@ function toggleGenre(g: string) {
   if (i >= 0) s.plotGenrePreference.splice(i, 1);
   else s.plotGenrePreference.push(g);
 }
+/**
+ * 随机事件频率三档（随机事件系统 v1 / 裁定 §13-6）。
+ *
+ * 系数乘进每次 MTTH 掷骰的权重：×0.5 = 有效 MTTH 翻倍（更稀），×2 = 减半（更密）。
+ * 🔴 说明文字里**不写具体天数** —— MTTH 是每条事件定义自带的（内容包给），
+ *    在设置页写死「约 30 天一次」会随内容包一起变成假话。
+ */
+const randomEventFrequencyOptions = [
+  { value: 0.5, label: '低', hint: '事件更稀疏，约为标准频率的一半。' },
+  { value: 1, label: '标准', hint: '按事件定义自带的平均间隔触发。' },
+  { value: 2, label: '高', hint: '事件更密集，约为标准频率的两倍。' },
+];
 const plotDifficultyOptions = [
   { value: 'adaptive', label: '动态（根据玩家层级）' },
   { value: '1', label: 'T1 普通' },
@@ -178,6 +190,50 @@ const plotDifficultyOptions = [
         </label>
       </div>
     </AppCard>
+    <!--
+      随机事件（随机事件系统 v1 / 设计 §6）。
+
+      放在剧情分区里是**语义归属**（支线/遭遇属剧情家族），不是开关耦合：
+      这两格是全局设置（localStorage，不进存档），而上面那批 plot* 是「新档默认值」。
+      剧情模式设成「完全关闭」时随机事件照常工作 —— 措辞必须把这件事说清楚，
+      否则玩家会以为关掉剧情系统就等于关掉了这里。
+    -->
+    <AppCard padding="md" class="detail-card"
+      ><h4>随机事件</h4>
+      <p class="card-desc">
+        旅途中的支线遭遇：引擎按事件定义掷骰产出候选，AI 在叙事自然的时机把其中一条编织进正文。
+        本项为<strong>全局设置</strong>，立即对所有存档生效（与上方「新档默认值」不同），
+        且与「剧情模式」开关相互独立 —— 剧情系统完全关闭时随机事件照常触发。
+      </p>
+      <div class="toggle-row">
+        <label class="toggle-label"
+          ><input v-model="s.randomEventsEnabled" type="checkbox" class="toggle-input" /><span
+            class="toggle-slider"
+          /><span>启用随机事件</span></label
+        >
+      </div>
+      <p class="form-hint random-event-note">
+        关闭后不再掷骰、不再注入提示词，AI
+        的触发回执也会被忽略；<strong>已产生的候选与已触发记录保留不清</strong>，重新打开即接着用。
+      </p>
+      <template v-if="s.randomEventsEnabled">
+        <p class="freq-title">触发频率</p>
+        <div class="freq-list" role="radiogroup" aria-label="随机事件触发频率">
+          <button
+            v-for="f in randomEventFrequencyOptions"
+            :key="f.value"
+            class="freq-item"
+            :class="{ 'freq-active': s.randomEventsFrequency === f.value }"
+            role="radio"
+            :aria-checked="s.randomEventsFrequency === f.value"
+            @click="s.randomEventsFrequency = f.value"
+          >
+            <span class="freq-label">{{ f.label }}</span>
+            <span class="freq-hint">{{ f.hint }}</span>
+          </button>
+        </div>
+      </template>
+    </AppCard>
     <!-- 大纲预览（示例来自内容包；没有示例就不出这张卡） -->
     <AppCard
       v-if="branding.plotTemplate.length > 0"
@@ -291,5 +347,61 @@ const plotDifficultyOptions = [
 /* 大纲预览下方的补充说明 */
 .plot-note {
   margin-top: var(--theme-spacing-sm);
+}
+
+/* ═══ 随机事件子块 ═══ */
+.random-event-note {
+  margin: var(--theme-spacing-sm) 0 0;
+}
+.freq-title {
+  margin: var(--theme-spacing-md) 0 var(--theme-spacing-xs);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+.freq-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+}
+.freq-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-xs);
+  min-height: 36px;
+  padding: 10px var(--theme-spacing-md);
+  text-align: left;
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  color: var(--theme-text-secondary);
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast),
+    color var(--theme-transition-fast);
+}
+.freq-item:hover {
+  background: var(--theme-tab-hover-bg);
+  color: var(--theme-text-primary);
+}
+/* 激活态照 design.md §2「激活态配方」：染底 + 混合边框，不用侧边强调条 */
+.freq-active {
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+  color: var(--theme-text-primary);
+}
+.freq-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.freq-active .freq-label {
+  color: var(--theme-primary);
+}
+.freq-hint {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--theme-text-muted);
 }
 </style>

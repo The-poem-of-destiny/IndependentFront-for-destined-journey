@@ -224,6 +224,12 @@ function getDefaults(): UiSettings {
     plotChapterCount: 0,
     plotEventsPerChapter: 0,
 
+    // 随机事件（随机事件系统 v1 / 裁定 §13-4）—— **全局设置**，不是新档默认值。
+    // 🔴 默认必须是「开 + 1×」：这两格同时也是引擎的实际行为（main.ts 的 provider 转发它们），
+    //    默认 false 的症状是整个子系统装好了、测试全绿、真机一个事件都不起，且无处报错。
+    randomEventsEnabled: true,
+    randomEventsFrequency: 1,
+
     // 记忆 & 缓存
     memoryRecallCount: 20,
     memoryCompressionThreshold: 100,

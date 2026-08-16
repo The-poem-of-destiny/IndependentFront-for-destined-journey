@@ -118,6 +118,7 @@ function emptyRegistry() {
     branding: undefined,
     imageDialects: undefined,
     mapPack: undefined,
+    randomEvents: undefined,
   };
 }
 

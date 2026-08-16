@@ -6,7 +6,7 @@
  * both while streaming and after completion.
  */
 
-import { stripPlayAudioMarkers } from './marker-protocol';
+import { scanEventTriggers, stripPlayAudioMarkers } from './marker-protocol';
 
 export interface StoryProjection {
   content: string;
@@ -19,7 +19,29 @@ const MAIN_TEXT_OPEN = /<maintext\b[^>]*>/gi;
 const MAIN_TEXT_CLOSE = /<\/maintext\s*>/i;
 const STREAM_MAIN_TEXT_OPEN = /(?:^|\r?\n)[ \t]*<maintext\b[^>]*>/gi;
 const CONTROL_TAGS = ['options', 'option', 'sum', 'vars', 'thinking', 'think', 'summary'];
-const STREAM_CONTROL_TAGS = ['maintext', 'play_audio', ...CONTROL_TAGS];
+const STREAM_CONTROL_TAGS = ['maintext', 'play_audio', 'event_trigger', ...CONTROL_TAGS];
+
+/**
+ * 剥掉 `<event_trigger>` 触发回执（随机事件 v1 / 设计 §5.2）。
+ *
+ * 与 `play_audio` 同一类：**零渲染意义的回执标记**，漏出去就是玩家眼前的一行尖括号。
+ * 结算侧（orchestrator Stage 1 → `confirmRandomEventTrigger`）读的是**未投影的原始输出**，
+ * 所以这里剥干净不会让事件漏结算 —— 两条路各看各的文本。
+ *
+ * 🔴 扫描一律走 `scanEventTriggers`，不在这里另写一条正则：提示词教 AI 写的是自闭合形态，
+ *    而那三种写法（自闭合 / 成对 / 漏写闭合）的容忍度全在 marker-protocol 那一处定义。
+ *    抄一条只认成对写法的正则，症状是「结算了、但标记还留在正文里」。
+ */
+function stripEventTriggerMarkers(text: string): string {
+  const markers = scanEventTriggers(text);
+  let out = text;
+  // 倒序删除：先删后面的，前面那些的 position 才不会失效
+  for (let i = markers.length - 1; i >= 0; i -= 1) {
+    const m = markers[i];
+    out = out.slice(0, m.position) + out.slice(m.position + m.rawContent.length);
+  }
+  return out;
+}
 
 function stripCodeFences(text: string): string {
   return text.replace(LEADING_FENCE, '').replace(TRAILING_FENCE, '');
@@ -115,7 +137,7 @@ function project(raw: string, partial: boolean): StoryProjection {
 
   if (partial) content = stripTrailingPartialControlTag(content);
 
-  content = stripPlayAudioMarkers(content)
+  content = stripEventTriggerMarkers(stripPlayAudioMarkers(content))
     .replace(/<\/?maintext\b[^>]*>/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();

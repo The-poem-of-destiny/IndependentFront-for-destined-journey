@@ -41,6 +41,15 @@ describe('projectStoryOutput', () => {
     expect(result.content).toBe('<dalian name="妲丽安">你好</dalian>');
   });
 
+  // 随机事件 v1：`<event_trigger>` 与 `<play_audio>` 同类 —— 零渲染意义的回执标记。
+  // 结算侧读的是未投影的原始输出，所以这里剥干净不会让事件漏结算。
+  it('removes non-rendering random-event trigger markers', () => {
+    const result = projectStoryOutput(
+      '<maintext>商人拦住去路。<event_trigger name="神秘商人"/></maintext>',
+    );
+    expect(result.content).toBe('商人拦住去路。');
+  });
+
   it('removes structured sections from bare legacy output', () => {
     const result = projectStoryOutput(
       '正文。\n<thinking>不展示</thinking>\n<sum>摘要</sum>\n<vars>{"x":1}</vars>',

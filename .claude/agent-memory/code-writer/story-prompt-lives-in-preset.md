@@ -12,3 +12,5 @@ metadata:
 **How to apply:** 选条目前先算「哪些条目真的进了提示词」——`assemblePresetContent` 过滤的是**条目自身的 `enabled`**、排序用 `injection_order`，**完全不读 `prompt_order`**。默认 story 预设里两者有约 30 处不一致（例如 `⚙️SETTING`、`📑时间地点天气栏` 在 `prompt_order` 里是 true，条目 `enabled: false` → 实际没进提示词；101 个条目只有 32 个进）。写之前用脚本按 `enabled !== false` 列一遍，别照着预设 UI 的勾选状态判断。教 marker 的现役条目是 `🚫正文cot`（`<content_output>`，item_info/task_info 的触发规则在这里）与 `🌐COT`（craft_request/char_detect 在思维链 Step 5/7）。
 
 文件是 400KB 单行 JSON —— 用 Edit 按转义后的原文（`\n`、`\"`）改，别 `json.load`+`json.dump` 往返，那会把整份重排。
+
+**给 story 加新占位符时的连带坑（2026-08-16 PR #109 审查逮到）：** 规范预设（命中 `STORY_PRESET_PLACEHOLDER_RE` 的哪怕只是 `{{LORE_BOOK_STATIC}}`）会让 template 被**简化成 `{{SYS_PROMPT}}`** —— 于是往 `DEFAULT_TEMPLATES.story` 和 `public/data/defaults/story-preset.json` 里新加的占位符，对**所有存量用户的已存预设**静默失效（他们的预设里没有那个 token）。新档复现不了，也没有任何报错。修法是**代码侧兜底**（渲染路径里没出现该 token 且渲染结果非空 → 追加到装配末尾），不是数据迁移（预设是用户拥有的文本）。判据必须取**替换前的原文**：替换后的空串与「预设根本没写」长得一样。

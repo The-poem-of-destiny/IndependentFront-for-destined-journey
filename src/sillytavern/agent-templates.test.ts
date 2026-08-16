@@ -481,6 +481,110 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
     expect(content).not.toContain('{{LORE_BOOK_DYNAMIC}}');
     expect(content).toContain('核心提示词。');
   });
+
+  // 随机事件 v1 §5.1 步 4：三处同步改漏一处的症状是**静默消失**。这一处漏了的表现是
+  // 「只靠 {{RANDOM_EVENTS}} 的预设不走预解析」—— 那个占位符会原样裸奔到模型眼前。
+  it('story + 预设只含 {{RANDOM_EVENTS}} → 仍判定为规范预设并预解析', () => {
+    const ctx = makeContext({ userInput: '继续赶路' });
+    const cfg = makeCfg('story', { presetId: 'random-events-preset' });
+    const presets: AgentPreset[] = [
+      {
+        id: 'random-events-preset',
+        name: 'Random Events Preset',
+        fixedSystem: '核心提示词。\n{{RANDOM_EVENTS}}',
+        fixedExamples: '',
+      } as AgentPreset,
+    ];
+
+    const content = buildAgentMessages('story', ctx, [cfg], [], presets)![0].content;
+
+    // 池空 → 渲染成空串（零 token），但**必须已经被渲染过**，不能留着裸占位符
+    expect(content).not.toContain('{{RANDOM_EVENTS}}');
+    expect(content).toContain('核心提示词。');
+  });
+});
+
+// ========== 随机事件 v1: 存量预设的兜底追加（2026-08-16 审查修复） ==========
+
+/**
+ * 钉的是一个**只有老用户会遇到**的静默缺口：本特性之前存下来的 story 预设不含
+ * `{{RANDOM_EVENTS}}`，却因为写了别的系统占位符而被判成规范预设 → template 被简化成
+ * `{{SYS_PROMPT}}` → 候选块整段消失。默认模板与 `story-preset.json` 都已写上占位符，
+ * 所以这个缺口在新档上根本复现不了，也不会报错。
+ *
+ * 三条用例互为反证：**追加一次**（老预设）/ **不重复追加**（新预设）/ **池空不追加**。
+ * 少了中间那条，一个「无脑追加」的实现会照样全绿，而生产里 AI 会看见两份候选列表。
+ */
+describe('buildAgentMessages — {{RANDOM_EVENTS}} 存量预设兜底', () => {
+  const OFFER = [{ name: 'Encounter', priority: 3, brief: 'brief-of-Encounter', forced: false }];
+
+  /** 块自带 `<random_events>` 外壳；数它出现了几次就是数追加了几段 */
+  function blockCount(content: string): number {
+    return content.split('<random_events>').length - 1;
+  }
+
+  function buildStory(presetBody: string, offer: typeof OFFER | []): string {
+    const ctx = makeContext({ userInput: '继续赶路', randomEventOffer: offer });
+    const cfg = makeCfg('story', { presetId: 'p' });
+    const presets: AgentPreset[] = [
+      { id: 'p', name: 'P', fixedSystem: presetBody, fixedExamples: '' } as AgentPreset,
+    ];
+    return buildAgentMessages('story', ctx, [cfg], [], presets)![0].content;
+  }
+
+  it('🔴 存量预设（无 {{RANDOM_EVENTS}}）+ 非空候选 → 块被追加，且只有一段', () => {
+    const content = buildStory('核心提示词。\n<世界书>{{LORE_BOOK_STATIC}}</世界书>', OFFER);
+
+    expect(blockCount(content)).toBe(1);
+    expect(content).toContain('brief-of-Encounter');
+    // 追加在末尾（每回合都可能变的内容排在最后，缓存友好）
+    expect(content.trimEnd().endsWith('</random_events>')).toBe(true);
+  });
+
+  it('🔴 预设自带 {{RANDOM_EVENTS}} + 非空候选 → 仍然只有一段（不重复注入）', () => {
+    const content = buildStory('核心提示词。\n{{RANDOM_EVENTS}}\n<尾声>', OFFER);
+
+    expect(blockCount(content)).toBe(1);
+    expect(content).toContain('brief-of-Encounter');
+  });
+
+  it('候选池空 → 两种预设都一个字节都不追加（零 token 出口）', () => {
+    expect(blockCount(buildStory('核心提示词。\n{{LORE_BOOK_STATIC}}', []))).toBe(0);
+    expect(blockCount(buildStory('核心提示词。\n{{RANDOM_EVENTS}}', []))).toBe(0);
+  });
+
+  it('系统关闭 / 战斗中 → 存量预设也不追加（判据只有 resolver 一处）', () => {
+    const cfg = makeCfg('story', { presetId: 'p' });
+    const presets: AgentPreset[] = [
+      {
+        id: 'p',
+        name: 'P',
+        fixedSystem: '核心提示词。\n{{LORE_BOOK_STATIC}}',
+        fixedExamples: '',
+      } as AgentPreset,
+    ];
+    const render = (over: Partial<AgentContext>): string =>
+      buildAgentMessages(
+        'story',
+        makeContext({ userInput: 'x', randomEventOffer: OFFER, ...over }),
+        [cfg],
+        [],
+        presets,
+      )![0].content;
+
+    expect(blockCount(render({ randomEventsEnabled: false }))).toBe(0);
+    expect(blockCount(render({ combatActive: true }))).toBe(0);
+    // 反证：两个开关都不拨时它是会出现的
+    expect(blockCount(render({}))).toBe(1);
+  });
+
+  it('非 story 的 agent 不受影响（候选只有 story 消费）', () => {
+    const ctx = makeContext({ userInput: 'x', randomEventOffer: OFFER });
+    const cfg = makeCfg('memory_summary', { systemPrompt: '总结提示词' });
+    const content = buildAgentMessages('memory_summary', ctx, [cfg])![0].content;
+
+    expect(blockCount(content)).toBe(0);
+  });
 });
 
 // ========== Phase 10: 单消息返回格式 ==========

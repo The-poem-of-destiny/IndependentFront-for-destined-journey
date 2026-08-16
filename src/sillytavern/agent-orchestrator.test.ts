@@ -6,26 +6,39 @@ import { AgentOrchestrator } from './agent-orchestrator';
 import type { AgentContext, AgentConfig, ApiEndpoint, Pipeline } from './types';
 
 // state-manager mock: 捕获 commitChatState 收到的 patches（Stage3 <json> 解析测试用）
-const { commitChatStateMock, applyTimeAdvanceMock, syncMapJourneyMock, journeySnapshot } =
-  vi.hoisted(() => {
-    const commitChatStateMock = vi.fn(async (patches: any[]) => ({
-      success: true,
-      patchesApplied: patches.length,
-      eventsGenerated: [],
-      errors: [] as string[],
-    }));
-    const applyTimeAdvanceMock = vi.fn(async () => [] as any[]);
-    // 🗺 地图 v1：在途旗同步**被调用那一刻**的先后关系。用「调用时读计数」而不是
-    // mock.invocationCallOrder，是因为各 describe 的 beforeEach 会重置实现，
-    // 而这份快照读的是调用发生时的事实，重置不影响它。
-    const journeySnapshot = { calls: 0, commitsBefore: -1, advancesBefore: -1 };
-    const syncMapJourneyMock = vi.fn(async () => {
-      journeySnapshot.calls += 1;
-      journeySnapshot.commitsBefore = commitChatStateMock.mock.calls.length;
-      journeySnapshot.advancesBefore = applyTimeAdvanceMock.mock.calls.length;
-    });
-    return { commitChatStateMock, applyTimeAdvanceMock, syncMapJourneyMock, journeySnapshot };
+const {
+  commitChatStateMock,
+  applyTimeAdvanceMock,
+  syncMapJourneyMock,
+  syncRandomEventsForTurnMock,
+  journeySnapshot,
+} = vi.hoisted(() => {
+  const commitChatStateMock = vi.fn(async (patches: any[]) => ({
+    success: true,
+    patchesApplied: patches.length,
+    eventsGenerated: [],
+    errors: [] as string[],
+  }));
+  const applyTimeAdvanceMock = vi.fn(async () => [] as any[]);
+  // 🗺 地图 v1：在途旗同步**被调用那一刻**的先后关系。用「调用时读计数」而不是
+  // mock.invocationCallOrder，是因为各 describe 的 beforeEach 会重置实现，
+  // 而这份快照读的是调用发生时的事实，重置不影响它。
+  const journeySnapshot = { calls: 0, commitsBefore: -1, advancesBefore: -1 };
+  const syncMapJourneyMock = vi.fn(async () => {
+    journeySnapshot.calls += 1;
+    journeySnapshot.commitsBefore = commitChatStateMock.mock.calls.length;
+    journeySnapshot.advancesBefore = applyTimeAdvanceMock.mock.calls.length;
   });
+  // 🎲 随机事件 v1 §4.3：每回合一次的候选池保洁（挂在 run() 末尾的胶水层）
+  const syncRandomEventsForTurnMock = vi.fn(async () => {});
+  return {
+    commitChatStateMock,
+    applyTimeAdvanceMock,
+    syncMapJourneyMock,
+    syncRandomEventsForTurnMock,
+    journeySnapshot,
+  };
+});
 vi.mock('./state-manager', async (importOriginal) => {
   const orig = await importOriginal<typeof import('./state-manager')>();
   return {
@@ -34,6 +47,7 @@ vi.mock('./state-manager', async (importOriginal) => {
       commitChatState: commitChatStateMock,
       applyTimeAdvance: applyTimeAdvanceMock,
       syncMapJourney: syncMapJourneyMock,
+      syncRandomEventsForTurn: syncRandomEventsForTurnMock,
     })),
   };
 });
@@ -1190,6 +1204,123 @@ describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
     // Both markers should be replaced
     const modifiedOutput = context.agentOutputs!.get('story');
     expect(modifiedOutput).toBe('【结果1】和【结果2】');
+  });
+});
+
+// ========== 随机事件 v1: <event_trigger> 回执 + 每回合保洁 ==========
+
+describe('AgentOrchestrator — 随机事件（设计 §5.2 / §4.3）', () => {
+  function storyRun(content: string, events: Record<string, unknown>) {
+    globalThis.fetch = mockFetch(content);
+    return new AgentOrchestrator(
+      {
+        pipeline: makeSimplePipeline(['story']),
+        context: makeContext(),
+        agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+        endpoints: [makeEndpoint()],
+        saveId: 'test',
+      },
+      events,
+    ).run();
+  }
+
+  beforeEach(() => {
+    syncRandomEventsForTurnMock.mockClear();
+  });
+
+  it('story 正文里的 <event_trigger/> → onEventTrigger 拿到名字', async () => {
+    const onEventTrigger = vi.fn();
+    await storyRun('正文……<event_trigger name="神秘商人"/>', { onEventTrigger });
+
+    expect(onEventTrigger).toHaveBeenCalledTimes(1);
+    expect(onEventTrigger).toHaveBeenCalledWith('神秘商人');
+  });
+
+  it('🔴 一轮写了多条只认第一条（提示词教的是「至多触发一个」；先写的才是它演绎的那条）', async () => {
+    const onEventTrigger = vi.fn();
+    await storyRun('<event_trigger name="甲"/>中间<event_trigger name="乙"/>', { onEventTrigger });
+
+    expect(onEventTrigger).toHaveBeenCalledTimes(1);
+    expect(onEventTrigger).toHaveBeenCalledWith('甲');
+  });
+
+  it('没写名字的标记不算数（拿空串去结算只会留一条假的「不在候选池」警报）', async () => {
+    const onEventTrigger = vi.fn();
+    await storyRun('尾声<event_trigger/>', { onEventTrigger });
+
+    expect(onEventTrigger).not.toHaveBeenCalled();
+  });
+
+  it('回调抛错不该让本轮叙事失败（事件系统只记一个事实，铁则 5）', async () => {
+    const onEventTrigger = vi.fn(() => {
+      throw new Error('结算炸了');
+    });
+    const run = await storyRun('<event_trigger name="神秘商人"/>', { onEventTrigger });
+
+    expect(run.status).toBe('completed');
+  });
+
+  it('没接回调时不报错（向后兼容）', async () => {
+    const run = await storyRun('<event_trigger name="神秘商人"/>', {});
+    expect(run.status).toBe('completed');
+  });
+
+  it('§4.3 每回合保洁：一轮跑完调一次 syncRandomEventsForTurn（与有没有触发无关）', async () => {
+    await storyRun('平平无奇的一轮正文', {});
+    expect(syncRandomEventsForTurnMock).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * 🔴 结算与保洁写的是**同一条 SaveProfile 记录**（各自 `getProfile → 改 → updateProfile`）。
+   *    回调不被 await 时，两者从各自的副本整条写回去，最后写的赢 —— 表现是「触发结算丢了」
+   *    或者「本回合的时间/变量被回滚」，而且两边都不报错。
+   *
+   *    用一条**手动兑现**的 promise 把顺序变成可断言的：回调还没兑现时保洁必须一次都没跑。
+   *    实现改回 `void` 的那一刻，这条会红在「保洁提前跑了」上。
+   */
+  it('🔴 结算回调被 await：它兑现之前不跑 syncRandomEventsForTurn（整条记录竞写，2026-08-16）', async () => {
+    let release: (() => void) | undefined;
+    const settled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const order: string[] = [];
+
+    const onEventTrigger = vi.fn(async () => {
+      order.push('settle-start');
+      await settled;
+      order.push('settle-end');
+    });
+    syncRandomEventsForTurnMock.mockImplementationOnce(async () => {
+      order.push('prune');
+    });
+
+    const run = storyRun('<event_trigger name="神秘商人"/>', { onEventTrigger });
+
+    // 让编排器跑到卡在回调上（轮询而不是数固定的 tick 数：Agent 调用链里有多少个 await
+    // 不是本用例该知道的事）。回调没兑现之前，保洁一次都不许跑
+    for (let i = 0; i < 50 && order.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(order).toEqual(['settle-start']);
+    expect(syncRandomEventsForTurnMock).not.toHaveBeenCalled();
+
+    release!();
+    await run;
+
+    expect(order).toEqual(['settle-start', 'settle-end', 'prune']);
+  });
+
+  it('🔴 保洁失败只 warn，不污染 onStateCommitError，也不改 run 状态', async () => {
+    syncRandomEventsForTurnMock.mockRejectedValueOnce(new Error('保洁炸了'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onStateCommitError = vi.fn();
+
+    const run = await storyRun('正文', { onStateCommitError });
+
+    expect(run.status).toBe('completed');
+    expect(onStateCommitError).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 
