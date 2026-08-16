@@ -752,6 +752,56 @@ describe('devForceArmRandomEvent —— 开发者面板专用的强制入池', (
     expect(flags.pending?.[0].forced).toBe(true);
   });
 
+  it('🔴 系统关掉时零写入 + warn（注入侧返空串，写进去的候选谁也看不见）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    setEngineSettingsProvider(() => ({ randomEventsEnabled: false }));
+    installRandomEventPack(buildPack([alwaysDef('Encounter')]));
+    await seedProfile();
+    await seedPlayer('Camp');
+
+    const result = await createStateManager(SAVE_ID).devForceArmRandomEvent('Encounter');
+
+    expect(result.ok).toBe(false);
+    expect(warn).toHaveBeenCalled();
+    expect(await readRawFlags()).toBeUndefined();
+  });
+
+  it('🔴 条目不带地点键 —— 换地方它照样在池里（离开即撤只管真首访条目）', async () => {
+    installRandomEventPack(
+      buildPack([alwaysDef('Dev', { trigger: { type: 'mtth', mtthDays: 1e12 } })]),
+    );
+    await seedProfile();
+    await seedPlayer('Outpost');
+
+    await createStateManager(SAVE_ID).devForceArmRandomEvent('Dev');
+    expect((await readFlags()).pending?.[0].placeKey).toBeUndefined();
+
+    await setLocation('Hero', 'Bravo');
+    expect(await pendingNames()).toEqual(['Dev']);
+  });
+
+  it('🔴 触发它不烧当前地点的首访足迹（visited 是事实、没有自愈路径）', async () => {
+    installRandomEventPack(
+      buildPack([
+        alwaysDef('Dev', { trigger: { type: 'mtth', mtthDays: 1e12 } }),
+        firstVisitDef('Arrival', ['Alpha']),
+      ]),
+    );
+    installMapPack(buildMapPack());
+    await seedProfile();
+    await seedPlayer('Outpost');
+
+    // 站在 Alpha（它的首访事件还没被演绎）时，给一条无关的 MTTH 事件按下调试按钮
+    await setLocation('Hero', 'Alpha');
+    await createStateManager(SAVE_ID).devForceArmRandomEvent('Dev');
+    await createStateManager(SAVE_ID).confirmRandomEventTrigger('Dev');
+
+    const flags = await readFlags();
+    expect(flags.visited).toBeUndefined();
+    // 足迹没被烧 → 作者为 Alpha 写的首访事件仍在池里（离开再回来也还会强制入池）
+    expect(await pendingNames()).toEqual(['Arrival']);
+  });
+
   it('入池后进得了注入块，且带 forced 标（下一回合 story 真看得见）', async () => {
     installRandomEventPack(
       buildPack([alwaysDef('Encounter', { trigger: { type: 'mtth', mtthDays: 1e12 } })]),

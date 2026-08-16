@@ -365,10 +365,15 @@ function formatJson(value: unknown): string {
             </td>
             <td>{{ formatDailyProbability(row.dailyProbability) }}</td>
             <td>
+              <!-- 系统关掉时禁用：引擎那一层同样会拒（零写入），这里只是别让人白按一次 -->
               <button
                 class="debug-btn debug-btn-sm"
-                :disabled="arming.length > 0"
-                title="按 forced 塞进候选池，下回合注入给正文（绕过掷骰/冷却/权重）"
+                :disabled="arming.length > 0 || !eventsEnabled"
+                :title="
+                  eventsEnabled
+                    ? '按 forced 塞进候选池，下回合注入给正文（绕过掷骰/冷却/权重）'
+                    : '随机事件系统已关闭：入池了也不会注入给正文'
+                "
                 @click="armEvent(row.name)"
               >
                 下回合触发

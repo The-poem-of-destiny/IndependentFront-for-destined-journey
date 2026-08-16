@@ -840,8 +840,32 @@ describe('armRandomEventForced —— 开发者面板的「下回合触发」', 
     expect(names(devArm(mtth('Dev', NEVER), flags))).toEqual(['A', 'B', 'C', 'Dev']);
   });
 
-  it('地点键写进条目（离开即撤那条过滤按它比对）', () => {
-    expect(devArm(mtth('Dev', NEVER))?.pending?.[0].placeKey).toBe('Harbor');
+  it('🔴 **不带地点键** —— 否则触发时会把当前地点的首访足迹烧掉（visited 无自愈）', () => {
+    const entry = devArm(mtth('Dev', NEVER))?.pending?.[0];
+    expect(entry?.placeKey).toBeUndefined();
+    // {{place}} 仍按当前地点固化进 brief（那是快照语义，与条目归属无关）
+    expect(devArm(mtth('Dev', NEVER, { brief: 'at {{place}}' }))?.pending?.[0].brief).toBe(
+      'at Harbor',
+    );
+  });
+
+  it('🔴 跨地点存活 —— 到一个新地方不该把调试条目「离开即撤」掉', () => {
+    const armed = devArm(mtth('Dev', NEVER)) ?? {};
+    const moved = armFirstVisitEvent(
+      [firstVisit('Arrival', ['Keep'])],
+      armed,
+      { placeKey: 'Keep' },
+      { placeKey: 'Keep', currentDay: 11, saveSeed: SEED },
+    );
+    expect(names(moved)).toContain('Dev');
+  });
+
+  it('🔴 触发它不记足迹；而真首访条目（带地点键）照样记 —— 两个方向都钉住', () => {
+    const dev = settleRandomEventTrigger(devArm(mtth('Dev', NEVER)) ?? {}, 'Dev', 10);
+    expect(dev?.flags.visited).toBeUndefined();
+
+    const real = arm([firstVisit('Arrival', ['Harbor'])], {}, 'Harbor', 10);
+    expect(settleRandomEventTrigger(real ?? {}, 'Arrival', 10)?.flags.visited).toEqual(['Harbor']);
   });
 
   it('日子非有穷 / 名字为空 → null（不拿假日子往下算）', () => {

@@ -492,8 +492,12 @@ export function armFirstVisitEvent(
   const next = normalizeFlags(flags);
 
   // 1. 离开即撤
+  //
+  // 🔴 判据里那句 `entry.placeKey === undefined` 是承重的：**不带地点键的 forced 条目
+  //    与地点无关**（调试入池的产物就是这一种），撤它没有任何依据 —— 而少了这一句，
+  //    `undefined === placeKey` 恒假，它会在玩家一动身时被无声地清掉。
   next.pending = next.pending.filter(
-    (entry) => entry.forced !== true || entry.placeKey === placeKey,
+    (entry) => entry.forced !== true || entry.placeKey === undefined || entry.placeKey === placeKey,
   );
 
   // 2. 已访问 / 已有本地 forced
@@ -563,6 +567,15 @@ function selectFirstVisitDef(
  *
  * 🔴 同名旧条目**先撤再入**：池里可能已经有一条非 forced 的它。留着就是两行同名候选 ——
  *    注入块里出现两次，而 `settleRandomEventTrigger` 只认第一条。
+ *
+ * 🔴 **绝不写 `placeKey`**（2026-08-16 审查修复，两条后果各自独立地坏）：
+ *    ① `settleRandomEventTrigger` 见 forced 条目就把它的 `placeKey` 记进 `visited` ——
+ *      在某座城里给一条**无关的** MTTH 事件按下按钮，会把这座城的首访足迹永久烧掉，
+ *      于是作者为它写的 first_visit 事件此生不再强制入池。`visited` 是**事实**、没有自愈路径，
+ *      这是真的数据损坏。
+ *    ② 上面那条「离开即撤」会在下一个旅途回合把它悄悄撤下 —— 面板刚 toast 过入池成功。
+ *    不带键的代价只有一个：`{{place}}` 仍按**当前**地点固化进 brief（那是快照语义，对的），
+ *    但条目本身与地点无关 —— 跨地点存活、触发不记足迹。调试条目本来就该是这样。
  */
 export function armRandomEventForced(
   def: RandomEventDef,
@@ -579,9 +592,7 @@ export function armRandomEventForced(
   next.pending = next.pending.filter((entry) => entry.name !== name);
 
   const rng = createEjsRng(buildRandomEventSeed(args.saveSeed, name, currentDay));
-  next.pending.push(
-    armEntry(def, ctx, rng, { armedDay: currentDay, forced: true, placeKey: ctx.placeKey }),
-  );
+  next.pending.push(armEntry(def, ctx, rng, { armedDay: currentDay, forced: true }));
 
   return finalize(next, before);
 }

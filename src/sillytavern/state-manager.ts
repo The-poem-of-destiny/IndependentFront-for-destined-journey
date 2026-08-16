@@ -1966,6 +1966,14 @@ export class StateManager {
     const wanted = typeof name === 'string' ? name.trim() : '';
     if (wanted.length === 0) return { ok: false, error: '事件名为空' };
 
+    // 🔴 关掉时**一个字节都不写**（与另外四条钩子同一道闸）：注入侧此时返回空串，
+    //    写进去的候选谁也看不见 —— 而按钮会照常 toast 成功。「入了池但永远不出现」
+    //    是这个子系统里最难查的一种假象，宁可在这里说清楚。
+    if (!getEngineSettings().randomEventsEnabled) {
+      console.warn(`[StateManager] 随机事件已关闭，忽略调试入池: ${wanted}`);
+      return { ok: false, error: '随机事件系统已关闭（设置 → 剧情）' };
+    }
+
     const pack = getRandomEventPack();
     const def = pack.defs.find((d) => d?.name === wanted);
     if (def === undefined) {

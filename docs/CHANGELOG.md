@@ -11,7 +11,7 @@
 
 ### 随机事件调试分区（DebugPanel）｜ ✅ 已实施，真机走查过（2026-08-16）
 
-游戏页调试面板（开发者模式 + Alt+Shift+D）新增「随机事件」分区，按主人裁定**只做三样**：①当前 `available` 门槛通过的事件表（名字/触发/权重连乘/日概率，含「在池」标）；②MTTH 因子活体求值（读侧全部复用生产 `evaluateEventCondition` / `computeEventWeight`，零第二实现）；③每行「下回合触发」按钮 → `game-store.devArmRandomEvent` → StateManager 具名 dev 方法 `devForceArmRandomEvent`（ADR-21，不进工具表 AI 不可见），真实槽位采样固化 brief、`forced: true` 免疫淘汰与 TTL，渲染层复用既有 forced 必演指令行（零改动）。调度器新增纯函数 `armRandomEventForced`（同名先撤再入池）。新增 39 测试。真机走查：分区渲染 / available 过滤（夜半叩门被门槛拦下）/ 按钮入池 + 落库 + 在池标全过。已知行为：dev 入池条目带当前地点键，触发前离开该地点会被「离开即撤」规则撤下（与首访 forced 同规则，调试旅途回合先按按钮再动身）。
+游戏页调试面板（开发者模式 + Alt+Shift+D）新增「随机事件」分区，按主人裁定**只做三样**：①当前 `available` 门槛通过的事件表（名字/触发/权重连乘/日概率，含「在池」标）；②MTTH 因子活体求值（读侧全部复用生产 `evaluateEventCondition` / `computeEventWeight`，零第二实现）；③每行「下回合触发」按钮 → `game-store.devArmRandomEvent` → StateManager 具名 dev 方法 `devForceArmRandomEvent`（ADR-21，不进工具表 AI 不可见），真实槽位采样固化 brief、`forced: true` 免疫淘汰与 TTL，渲染层复用既有 forced 必演指令行（零改动）。调度器新增纯函数 `armRandomEventForced`（同名先撤再入池）。新增 39 测试。真机走查：分区渲染 / available 过滤（夜半叩门被门槛拦下）/ 按钮入池 + 落库 + 在池标全过。审查修复三条（合入前）：① **dev 条目不带地点键** —— 带键会让 `settleRandomEventTrigger` 把当前地点记进 `visited`（在某座城里给一条无关事件按按钮 = 永久烧掉这座城的首访足迹，而 `visited` 是事实、无自愈路径），也会被「离开即撤」在下一个旅途回合悄悄撤下；现在它跨地点存活、触发不记足迹（`{{place}}` 仍按当前地点固化进 brief，那是快照语义）。② 「离开即撤」判据补 `placeKey === undefined` 一支（不带键的 forced 条目与地点无关，撤它没有依据）。③ `devForceArmRandomEvent` 补 `randomEventsEnabled` 闸（与另外四条钩子同档）：关闭时零写入 + warn，面板同步禁用按钮 —— 否则会写进一个注入侧永远返空串的池子，还 toast 成功。
 
 ### 随机事件系统 v1 ｜ ✅ 已实施（待真机）（2026-08-15）
 

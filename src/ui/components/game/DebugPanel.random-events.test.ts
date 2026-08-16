@@ -20,6 +20,7 @@ import { mount } from '@vue/test-utils';
 import { setActivePinia, createPinia } from 'pinia';
 import DebugPanel from './DebugPanel.vue';
 import { useGameStore } from '../../stores/game-store';
+import { useUIStore } from '../../stores/ui-store';
 import { installRandomEventPack, resetRandomEventRuntime } from '@engine/random-event-runtime';
 import { setEngineSettingsProvider } from '@engine/engine-settings';
 import { createDefaultTime } from '@engine/time-system';
@@ -149,15 +150,30 @@ describe('DebugPanel · 随机事件区块', () => {
     expect(text).toContain('50.0%'); // min(1, 2/4)
   });
 
-  it('系统关掉时区块照常显示，但明说已关闭（不是静默给一张会骗人的表）', () => {
+  it('🔴 系统关掉时区块照常显示、明说已关闭，且按钮禁用（入池了也不会注入）', () => {
     installPack([{ name: 'Rumor', brief: 'r', trigger: { type: 'mtth', mtthDays: 4 } }]);
     setEngineSettingsProvider(() => ({ randomEventsEnabled: false }));
     const game = useGameStore();
     seedSave(game);
 
-    const text = mountPanel().text();
-    expect(text).toContain('Rumor');
-    expect(text).toContain('系统已关闭');
+    const wrapper = mountPanel();
+    expect(wrapper.text()).toContain('Rumor');
+    expect(wrapper.text()).toContain('系统已关闭');
+    const button = wrapper.find('.debug-re-table button');
+    expect(button.attributes('disabled')).toBeDefined();
+  });
+
+  it('入池失败按错误播报，绝不报成功（「按了说好了、其实没写」最难查）', async () => {
+    installPack([{ name: 'Rumor', brief: 'r', trigger: { type: 'mtth', mtthDays: 4 } }]);
+    const game = useGameStore();
+    const ui = useUIStore();
+    seedSave(game);
+    vi.spyOn(game, 'devArmRandomEvent').mockResolvedValue({ ok: false, error: '系统已关闭' });
+
+    await mountPanel().find('.debug-re-table button').trigger('click');
+    await Promise.resolve();
+
+    expect(ui.toasts.map((t) => [t.type, t.message])).toEqual([['error', '系统已关闭']]);
   });
 
   it('🔴「下回合触发」按钮真的调到引擎写入口（按名字，逐字）', async () => {
