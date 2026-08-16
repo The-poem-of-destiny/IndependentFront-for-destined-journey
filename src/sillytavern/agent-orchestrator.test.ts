@@ -1270,6 +1270,46 @@ describe('AgentOrchestrator — 随机事件（设计 §5.2 / §4.3）', () => {
     expect(syncRandomEventsForTurnMock).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * 🔴 结算与保洁写的是**同一条 SaveProfile 记录**（各自 `getProfile → 改 → updateProfile`）。
+   *    回调不被 await 时，两者从各自的副本整条写回去，最后写的赢 —— 表现是「触发结算丢了」
+   *    或者「本回合的时间/变量被回滚」，而且两边都不报错。
+   *
+   *    用一条**手动兑现**的 promise 把顺序变成可断言的：回调还没兑现时保洁必须一次都没跑。
+   *    实现改回 `void` 的那一刻，这条会红在「保洁提前跑了」上。
+   */
+  it('🔴 结算回调被 await：它兑现之前不跑 syncRandomEventsForTurn（整条记录竞写，2026-08-16）', async () => {
+    let release: (() => void) | undefined;
+    const settled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const order: string[] = [];
+
+    const onEventTrigger = vi.fn(async () => {
+      order.push('settle-start');
+      await settled;
+      order.push('settle-end');
+    });
+    syncRandomEventsForTurnMock.mockImplementationOnce(async () => {
+      order.push('prune');
+    });
+
+    const run = storyRun('<event_trigger name="神秘商人"/>', { onEventTrigger });
+
+    // 让编排器跑到卡在回调上（轮询而不是数固定的 tick 数：Agent 调用链里有多少个 await
+    // 不是本用例该知道的事）。回调没兑现之前，保洁一次都不许跑
+    for (let i = 0; i < 50 && order.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(order).toEqual(['settle-start']);
+    expect(syncRandomEventsForTurnMock).not.toHaveBeenCalled();
+
+    release!();
+    await run;
+
+    expect(order).toEqual(['settle-start', 'settle-end', 'prune']);
+  });
+
   it('🔴 保洁失败只 warn，不污染 onStateCommitError，也不改 run 状态', async () => {
     syncRandomEventsForTurnMock.mockRejectedValueOnce(new Error('保洁炸了'));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

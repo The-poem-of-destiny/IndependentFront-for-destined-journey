@@ -33,7 +33,7 @@ import { getPreset, assemblePresetContent } from './preset-loader';
 import { resolveTemplateWithGlobals } from './template-resolver';
 import type { EjsCapabilityInput } from './ejs-capabilities';
 import { DANGEROUS_PATH_SEGMENTS } from './var-resolver';
-import { getDefaultTemplate } from './placeholder-registry';
+import { getDefaultTemplate, PLACEHOLDER_REGISTRY } from './placeholder-registry';
 // 地图 v1（§5 接线表）：`$map` 与 uid 446 的 `runtime_geo_compact_data` 都在装配期算。
 // 三个模块全是纯函数叶 / 无 I/O 注入缝 —— 本文件仍然不碰 Dexie。
 import { getMapPack } from './map-runtime';
@@ -601,6 +601,17 @@ const STORY_PRESET_PLACEHOLDER_RE =
   /\{\{(?:LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|USER_INPUT|CHARACTER_STATE|GAME_TIME|NARRATIVE|RANDOM_EVENTS|AGENT\.MEMORY_RECALL|AGENT\.PLOT_PRE_CHECK)\}\}/;
 
 /**
+ * `{{RANDOM_EVENTS}}` 这一个占位符本身（随机事件 v1 §5.1）。
+ *
+ * 🔴 与上面那条**不是**同一个问题：上面问「这份预设是不是规范预设」，这里问「这一份到底
+ *    渲不渲染随机事件块」。规范预设一旦命中（哪怕只因为它写了 `{{LORE_BOOK_STATIC}}`），
+ *    template 就被简化成 `{{SYS_PROMPT}}` —— 于是**存量预设**（写于本特性之前，
+ *    自然不含这个占位符）会把候选块整段吞掉，而 `DEFAULT_TEMPLATES.story` 与
+ *    `story-preset.json` 里都已经写上了。症状：老用户永远看不到随机事件，且不报错。
+ */
+const RANDOM_EVENTS_TOKEN_RE = /\{\{RANDOM_EVENTS\}\}/;
+
+/**
  * Phase 10: Build agent messages using the placeholder template system.
  *
  * For Story Agent: systemPrompt is assembled from preset entries via assemblePresetContent().
@@ -654,6 +665,9 @@ export function buildAgentMessages(
   // 真机修(2026-07-23): story 规范预设自带 <本次任务信息参考> 区块（含全套系统占位符）时，
   // 预解析预设内部占位符 + 简化 template，避免与默认 template 的追加占位符重复渲染同一段数据。
   let storyPresetHasPlaceholders = false;
+  // 随机事件 v1: 预设原文里到底有没有 `{{RANDOM_EVENTS}}`（判据必须取**替换前**的原文，
+  // 替换后拿到的是渲染结果，池空时它是空串，与「预设根本没写这个占位符」长得一模一样）
+  let presetRendersRandomEvents = false;
 
   if (agentId === 'story' && presets && config?.presetId) {
     // Story Agent: assemble from preset
@@ -666,6 +680,7 @@ export function buildAgentMessages(
       //    两条路都不会重复渲染同一段数据，故结果正确，只是这里的 '' 是无效参数。
       const presetContent = assemblePresetContent(preset, '');
       storyPresetHasPlaceholders = STORY_PRESET_PLACEHOLDER_RE.test(presetContent);
+      presetRendersRandomEvents = RANDOM_EVENTS_TOKEN_RE.test(presetContent);
       if (storyPresetHasPlaceholders) {
         // 规范预设内部写满 {{LORE_BOOK}}/{{CHARACTER_STATE}}/{{AGENT.MEMORY_RECALL}}/
         // {{NARRATIVE}}/{{USER_INPUT}} 等系统占位符。但 resolveTemplate 单层扫描只解析
@@ -733,6 +748,27 @@ export function buildAgentMessages(
     cfgs,
     allLocalParams,
   );
+
+  // 🎲 随机事件 v1: 存量预设的兜底追加（**只给 story**）。
+  //
+  // 谁需要它：本特性之前存下来的 story 预设。它们必然不含 `{{RANDOM_EVENTS}}`，却几乎必然
+  // 命中 STORY_PRESET_PLACEHOLDER_RE（写了 `{{LORE_BOOK_STATIC}}` 就够）→ template 被简化成
+  // `{{SYS_PROMPT}}` → 候选块**整段消失**。默认模板与 `story-preset.json` 都已写上占位符，
+  // 于是这个缺口只落在老用户身上，而且完全无声：没有报错，只是随机事件永远不触发。
+  //
+  // 🔴 **不做数据迁移**：预设是用户拥有的文本（可能已被逐字改写），引擎不该往里面塞句子。
+  // 🔴 判据是「**渲染路径里到底有没有那个占位符**」而不是「输出里有没有那个块」：后者要拿
+  //    渲染结果去比字符串，池空时两种情形长得一样，池非空时又会因为一处措辞改动静默失效。
+  // 🔴 块自带 `<random_events>` 外壳且**空池返回空串**（三条空串出口见 resolver），
+  //    所以追加是零成本的 —— 有内容才多一段，没内容一个 token 都不多。
+  if (agentId === 'story' && !presetRendersRandomEvents && !RANDOM_EVENTS_TOKEN_RE.test(template)) {
+    const block = PLACEHOLDER_REGISTRY['RANDOM_EVENTS'](
+      tplCtx,
+      config ?? ({ agentId } as AgentConfig),
+      {},
+    );
+    if (block.trim().length > 0) return [{ role: 'system', content: `${resolved}\n${block}` }];
+  }
 
   return [{ role: 'system', content: resolved }];
 }

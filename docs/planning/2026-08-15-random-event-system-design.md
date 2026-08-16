@@ -279,6 +279,8 @@ placeKey = 落位成功 ? 地块名 : 位置路径最深段
 | `randomEventsEnabled: boolean`  | `true` | 总开关。关 = 调度 no-op（保留 flags 不清）+ 注入空串 + marker 忽略 |
 | `randomEventsFrequency: number` | `1`    | 频率系数（0.5 / 1 / 2），乘进每次掷骰的 w                          |
 
+🔴 关闭期间的天数按「跳过不补掷」处理（2026-08-16 审查修复）：关着时掷骰整段 no-op，但钩子仍把 `lastRollDay` 盖到当天（走 `updateRandomEventFlags`，其余三格一字不动）——否则关掉系统过 200 天再打开，逐天循环会把这 200 天一次走完、候选池当场塞满。与「首次 ensure 不补历史」（§4.1）是同一条取舍：没在跑的日子不欠着。已经掷过骰的存档才盖戳（`lastRollDay` 缺席时不写库）。
+
 理由：随机事件是「口味开关」，玩家中途想关就关（比照 `beautifierEnabled` / `imageGenMode` 一档）；不涉及存档结构，零迁移。引擎读取经 `engine-settings.ts` 加两项 + `main.ts` provider 转发（现成注入缝）。设置 UI 放 `PlotSection.vue` 内新「随机事件」子块（语义上归剧情家族，开关彼此独立）；`settings-types.ts` 声明 + `getDefaults()` 默认值两处同步（🔴 漏第二处 = 默认 undefined）。
 
 与剧情系统的独立性验收：`plotSettings.mode === 'off'` 时——调度器照跑（挂在 StateManager，不在 plot agent 链上）、注入照发（story 恒在）、marker 照收（orchestrator Stage 1 恒在）。

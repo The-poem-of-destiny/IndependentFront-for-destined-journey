@@ -52,11 +52,25 @@ let installedPack: RandomEventPack = createEmptyPack();
  *   · `null`（显式卸包 —— 换存档 / 内容注册表这一面缺席）
  *   · 不是对象 / `defs` 不是数组（跨模块 JSON 边界上 TS 类型拦不住 `undefined`）
  * 两者都落成空包（= 没装）比让调度钩子在读 `pack.defs` 时抛穿好 —— 随机事件整个是**可选**子系统。
+ *
+ * 🔴 **`config` 三种「没给」一视同仁**（`null` / `undefined` / 不是对象，2026-08-16 审查修复）：
+ *    此前只挡了 `null`，于是一份手搓的 `{ defs: [...] }`（`coerceRandomEventPack` 的产物
+ *    永远带 config，但跨模块边界与测试替身不受它约束）会被装进来，随后在读
+ *    `config.offerTtlDays` 的地方抛 —— 而那些地方全在 try/catch 的调度钩子里，
+ *    表现是**随机事件整段静默失效**，一条报错都看不到。补默认（**不碰 `defs`**）而不是
+ *    整包拒收：定义是好的，缺的只是三个旋钮，而旋钮本来就有缺省。
  */
 export function installRandomEventPack(pack: RandomEventPack | null): void {
-  const usable =
-    pack !== null && typeof pack === 'object' && Array.isArray(pack.defs) && pack.config !== null;
-  installedPack = usable ? pack : createEmptyPack();
+  if (pack === null || typeof pack !== 'object' || !Array.isArray(pack.defs)) {
+    installedPack = createEmptyPack();
+    return;
+  }
+  const config: unknown = pack.config;
+  const configUsable = config !== null && typeof config === 'object' && !Array.isArray(config);
+  // 补默认时造一份新对象，**不就地改入参**（调用方那份包可能还被别处引用）
+  installedPack = configUsable
+    ? pack
+    : { config: { ...DEFAULT_RANDOM_EVENT_CONFIG }, defs: pack.defs };
 }
 
 /** 现行包；没装过 → 空包（判据一律走 `isEmptyRandomEventPack`，不比定义条数） */

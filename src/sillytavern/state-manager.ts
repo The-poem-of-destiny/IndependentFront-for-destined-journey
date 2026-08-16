@@ -65,13 +65,13 @@ import {
   updateRandomEventFlags,
 } from './save-profile';
 import { clampAffection } from './affection-system';
-import { advanceTime, getSeason, getTimeOfDay, toEpochMinutes } from './time-system';
+import { advanceTime, getSeason, toEpochMinutes } from './time-system';
 // 地图 v1 接线（设计 §5 接线表）：落位 / 天气断言 / 在途旗三条钩子的依赖。
 // 全是纯函数叶 + 一条注入缝（`map-runtime`），没有一个会读注册表或碰 Dexie ——
 // 静态 import 因此不成环（map-* 一律不 import 本模块）。
 import { getMapIndex, getMapPack } from './map-runtime';
 import { isEmptyMapPack } from './map-pack';
-import { resolveTileByLocation, splitLocationSegments, type MapIndex } from './map-index';
+import { resolveTileByLocation, type MapIndex } from './map-index';
 import { findPath } from './map-path';
 import { weatherAt, weatherZoneOfTile } from './map-weather';
 import type { MapJourneyFlag, MapPack, MapSaveFlags } from './types-map';
@@ -86,6 +86,8 @@ import {
   rollRandomEvents,
   settleRandomEventTrigger,
 } from './random-event-scheduler';
+// 地点键与上下文快照的**唯一**实现（写侧与读侧共用，见该模块文件头）
+import { buildRandomEventRollContext } from './random-event-snapshot';
 import type { RandomEventRollContext } from './types-random-events';
 import type { EjsVarsDiff } from './ejs-vars-diff';
 import {
@@ -1744,56 +1746,15 @@ export class StateManager {
   }
 
   /**
-   * 地点键（§2 词汇表）：**落位成功 = 地块名，失败 = 位置路径最深段**。
+   * 条件求值的只读快照 —— 组装整份委托给 `random-event-snapshot`（**全仓唯一一份**）。
    *
-   * 🔴 取地块**名**而不是 `lastTileId`：足迹（`visited`）要在换图后存活，名字比编号稳定
-   *    （§4.2）。也正因如此，没装地图包 / 落位失败时降级到位置路径最深段 ——
-   *    首访语义降级但不失效，且**永不模糊匹配**（承 ADR-31）。
-   */
-  private resolvePlaceKey(mapFlags: MapSaveFlags, locationPath: string): string | undefined {
-    const tileId = mapFlags.lastTileId;
-    if (tileId !== undefined && !isEmptyMapPack(getMapPack())) {
-      const name = getMapIndex().tileById.get(tileId)?.name;
-      if (typeof name === 'string' && name.length > 0) return name;
-    }
-    const segments = splitLocationSegments(locationPath ?? '');
-    return segments.length > 0 ? segments[0] : undefined;
-  }
-
-  /**
-   * 条件求值的只读快照（`RandomEventRollContext`）。
-   *
-   * 🔴 **每一格缺席时相关条件求值为假**（不是「通过」）—— 所以这里宁可少供一格，
-   *    也绝不为了让条件好过而编一个值。玩家角色不在（新档 / 已删）时 `playerLevel`
-   *    与 `placeKey` 双双缺席，于是带地点或等级门槛的事件都不会触发，这是对的。
+   * 本层只负责把**角色行**查出来（写侧走 Dexie，读侧 game-pipeline 走 store 里那份，
+   * 两条取角色的路本来就不同）；判据本身一个字都不许在这里重写：此前这两个函数在这里与
+   * game-pipeline 各有一份逐字拷贝，靠注释维持同步，漂了不报错（见那个模块的文件头）。
    */
   private async buildRandomEventContext(profile: SaveProfile): Promise<RandomEventRollContext> {
     const player = (await getCharacters(this.saveId)).find((c) => c.type === 'player');
-    const mapFlags = getMapFlags(profile);
-
-    const quests: Record<string, string> = {};
-    for (const [name, quest] of Object.entries(profile.quests ?? {})) {
-      if (typeof quest?.status === 'string') quests[name] = quest.status;
-    }
-
-    const ctx: RandomEventRollContext = {
-      journeyActive: mapFlags.journey !== undefined,
-      season: getSeason(profile.gameTime.month),
-      timeOfDay: getTimeOfDay(profile.gameTime),
-      variables: profile.variables ?? {},
-      quests,
-      affections: profile.affections ?? {},
-    };
-
-    if (player !== undefined) {
-      ctx.locationPath = player.location;
-      const placeKey = this.resolvePlaceKey(mapFlags, player.location);
-      if (placeKey !== undefined) ctx.placeKey = placeKey;
-      if (typeof player.level === 'number' && Number.isFinite(player.level)) {
-        ctx.playerLevel = player.level;
-      }
-    }
-    return ctx;
+    return buildRandomEventRollContext(profile, player);
   }
 
   /**
@@ -1807,9 +1768,12 @@ export class StateManager {
    */
   private async syncRandomEvents(profile: SaveProfile): Promise<void> {
     const settings = getEngineSettings();
-    if (!settings.randomEventsEnabled) return;
     const pack = getRandomEventPack();
     if (isEmptyRandomEventPack(pack)) return;
+    if (!settings.randomEventsEnabled) {
+      await this.skipRandomEventDays(profile);
+      return;
+    }
 
     try {
       const ctx = await this.buildRandomEventContext(profile);
@@ -1830,6 +1794,31 @@ export class StateManager {
     } catch (err) {
       // 时间已经推进、正文状态已经落库；候选池算不出来只是这一回合没有新事件
       console.warn('[StateManager] 随机事件调度失败（时间已推进，不影响正文）:', err);
+    }
+  }
+
+  /**
+   * 关闭期间的天数**按「跳过」处理，不补掷**（2026-08-16 审查修复）。
+   *
+   * 🔴 缺了它就是一次**倒灌**：关掉系统时掷骰整段 no-op，`lastRollDay` 停在关掉那天；
+   *    玩家关着系统过了 200 天再打开，下一次掷骰会把这 200 天**一次走完**，候选池当场塞满。
+   *    与「首次 ensure 不补历史」是同一条取舍（§4.1）：没在跑的日子不该欠着。
+   * 🔴 **只在已经掷过骰的存档上盖戳**（`lastRollDay` 缺席 → 什么都不做）：一个从没用过
+   *    随机事件的存档不该因为「关着」而每次时间推进都写一次库；它第一次开起来时，
+   *    纯函数的首次 ensure 自会把 `lastRollDay` 置成当天。
+   * 🔴 落库仍走命名写入口 `updateRandomEventFlags`（ADR-21），整份覆盖 —— 除 `lastRollDay`
+   *    外一格不动（关掉 ≠ 清空，§6：足迹与触发档案是**事实**，不可重算）。
+   */
+  private async skipRandomEventDays(profile: SaveProfile): Promise<void> {
+    try {
+      const flags = getRandomEventFlags(profile);
+      if (flags.lastRollDay === undefined) return;
+      const currentDay = this.gameDayOf(profile);
+      // 回退（`lastRollDay > currentDay`）交给纯函数的回退护栏，这里不抢它的活
+      if (!Number.isFinite(currentDay) || flags.lastRollDay >= currentDay) return;
+      await updateRandomEventFlags(profile, { ...flags, lastRollDay: currentDay });
+    } catch (err) {
+      console.warn('[StateManager] 随机事件跳日盖戳失败（不影响正文与已落库状态）:', err);
     }
   }
 

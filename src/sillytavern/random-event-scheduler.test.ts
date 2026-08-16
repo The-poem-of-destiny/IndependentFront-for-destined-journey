@@ -20,6 +20,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { splitLocationSegments } from './map-index';
 import {
   armFirstVisitEvent,
   buildRandomEventSeed,
@@ -140,6 +141,63 @@ describe('evaluateEventCondition —— 每种叶条件', () => {
     expect(evaluateEventCondition({ location: { anyOf: ['Coast'] } }, ctx)).toBe(true);
     expect(evaluateEventCondition({ location: { anyOf: ['Northland'] } }, ctx)).toBe(true);
     expect(evaluateEventCondition({ location: { anyOf: ['Desert'] } }, ctx)).toBe(false);
+  });
+
+  /**
+   * 🔴 分隔符集必须与 `map-index.splitLocationSegments` **逐字符相同**（正典 `[-－—–/／>＞]`）。
+   *    `resolveRandomEventPlaceKey` 用的就是那一份，两处口径不同的症状是「地点键按宽集算、
+   *    条件面按窄集算」—— `getLocationPath()` 产出的 `/` 形路径整条读不出段，
+   *    作者写下的 `location.anyOf` 永远不中，且两边都不报错。
+   */
+  it('🔴 位置路径按正典分隔符集分段（`/`、`—`、`>` 与 `-` 同权）', () => {
+    const wide = (locationPath: string): RandomEventRollContext => ({ locationPath });
+
+    expect(
+      evaluateEventCondition(
+        { location: { anyOf: ['Northland'] } },
+        wide('Realm/Northland/Harbor'),
+      ),
+    ).toBe(true);
+    expect(
+      evaluateEventCondition(
+        { location: { anyOf: ['Northland'] } },
+        wide('Realm—Northland—Harbor'),
+      ),
+    ).toBe(true);
+    expect(
+      evaluateEventCondition(
+        { location: { anyOf: ['Northland'] } },
+        wide('Realm>Northland>Harbor'),
+      ),
+    ).toBe(true);
+    expect(
+      evaluateEventCondition(
+        { location: { anyOf: ['Northland'] } },
+        wide('Realm／Northland＞Harbor'),
+      ),
+    ).toBe(true);
+    // 反证不是「什么都能中」
+    expect(
+      evaluateEventCondition({ location: { anyOf: ['Desert'] } }, wide('Realm/Northland/Harbor')),
+    ).toBe(false);
+    // noneOf 同一张面：宽分隔符下也要能命中并取反
+    expect(
+      evaluateEventCondition({ location: { noneOf: ['Harbor'] } }, wide('Realm/Northland/Harbor')),
+    ).toBe(false);
+  });
+
+  it('🔴 分段面与 `map-index.splitLocationSegments` 同源（改一处必红）', () => {
+    for (const path of [
+      'Realm/Northland/Harbor',
+      'Realm—Northland－Harbor',
+      'Realm＞Northland>Harbor',
+    ]) {
+      for (const segment of splitLocationSegments(path)) {
+        expect(
+          evaluateEventCondition({ location: { anyOf: [segment] } }, { locationPath: path }),
+        ).toBe(true);
+      }
+    }
   });
 
   it('location.noneOf 取反；两者并存时 AND', () => {

@@ -32,6 +32,7 @@
  */
 
 import { createEjsRng, type EjsRng } from './ejs-rng';
+import { splitLocationSegments } from './map-index';
 import type {
   EventCondition,
   PendingRandomEvent,
@@ -45,9 +46,6 @@ import type {
 // ═══════════════════════════════════════════════════════════
 // 常量
 // ═══════════════════════════════════════════════════════════
-
-/** 位置路径的分段符（`CharacterState.location` 的形制，ADR-31） */
-const LOCATION_SEPARATOR = '-';
 
 /** 简报里的地点占位符 —— **协议不是内容**（ASCII，随内容包换不掉） */
 const PLACE_TOKEN = 'place';
@@ -154,19 +152,23 @@ function matchLocation(
   return true;
 }
 
-/** 地点键 + 位置路径全段（去空白、丢空段） */
+/**
+ * 地点键 + 位置路径全段（去空白、丢空段）。
+ *
+ * 🔴 分段**必须走 `splitLocationSegments`**（`map-index.ts` 那份是全仓正典，分隔符集
+ *    `[-－—–/／>＞]`），不能自己写一个 `split('-')`：`resolveRandomEventPlaceKey`
+ *    （`random-event-snapshot.ts`）用的正是那一份，于是同一轮调度里
+ *    「地点键按宽分隔符算、条件面按窄分隔符算」——
+ *    `大陆/帝国/城市` 这类由 `getLocationPath()` 产出的路径整条读不出段，
+ *    作者写 `location.anyOf: ['帝国']` 就永远不中。两处都不报错。
+ */
 function collectLocationSurface(ctx: RandomEventRollContext): Set<string> {
   const out = new Set<string>();
   const placeKey = typeof ctx.placeKey === 'string' ? ctx.placeKey.trim() : '';
   if (placeKey.length > 0) out.add(placeKey);
 
   const path = typeof ctx.locationPath === 'string' ? ctx.locationPath : '';
-  if (path.length > 0) {
-    for (const segment of path.split(LOCATION_SEPARATOR)) {
-      const trimmed = segment.trim();
-      if (trimmed.length > 0) out.add(trimmed);
-    }
-  }
+  for (const segment of splitLocationSegments(path)) out.add(segment);
   return out;
 }
 

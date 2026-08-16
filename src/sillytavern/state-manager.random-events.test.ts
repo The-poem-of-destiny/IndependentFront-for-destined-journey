@@ -261,15 +261,74 @@ describe('掷骰钩子 —— applyTimeAdvance → worldFlags.randomEvents', () 
     expect(flags.pending).toBeUndefined();
   });
 
-  it('🔴 关闭时 flags 一个字节都不动（关掉 ≠ 清空，§6）', async () => {
+  it('🔴 关闭时不掷骰、不清池（关掉 ≠ 清空，§6），只把 lastRollDay 盖到当天', async () => {
     setEngineSettingsProvider(() => ({ randomEventsEnabled: false }));
     installRandomEventPack(buildPack([alwaysDef('Encounter')]));
-    await seedProfile({ lastRollDay: START_DAY });
+    const stale: PendingRandomEvent = {
+      name: 'Encounter',
+      armedDay: START_DAY,
+      expiresDay: START_DAY + 99,
+      priority: 0,
+      brief: 'brief-of-Encounter',
+    };
+    await seedProfile({
+      lastRollDay: START_DAY,
+      pending: [stale],
+      visited: ['Alpha'],
+      fired: { Encounter: { count: 1, lastDay: START_DAY } },
+    });
     await seedPlayer('Camp');
 
     await advanceDays(3);
 
-    expect(await readFlags()).toEqual({ lastRollDay: START_DAY });
+    const flags = await readFlags();
+    // 关闭期间的天数按「跳过不补掷」处理（见下一条用例的理由）
+    expect(flags.lastRollDay).toBe(START_DAY + 3);
+    // 其余三格是**事实**，一个字节都不许动
+    expect(flags.pending).toEqual([stale]);
+    expect(flags.visited).toEqual(['Alpha']);
+    expect(flags.fired).toEqual({ Encounter: { count: 1, lastDay: START_DAY } });
+  });
+
+  /**
+   * 🔴 关掉系统 → 过很多天 → 再打开，**不许倒灌**（2026-08-16 审查修复）。
+   *
+   * 关闭期间掷骰整段 no-op，`lastRollDay` 若停在关掉那天，重新打开后逐天循环会把
+   * 这些天一次走完 —— 候选池当场被塞满（`maxPending` 上限内），玩家的第一回合就被
+   * 一堆事件砸中。判据取 `armedDay`：它必须落在**重新打开之后**的那几天里。
+   */
+  it('🔴 关闭 200 天再打开 → 只掷新的那一天，池子不被倒灌', async () => {
+    installRandomEventPack(buildPack([alwaysDef('Encounter'), alwaysDef('Rumor')]));
+    await seedProfile({ lastRollDay: START_DAY });
+    await seedPlayer('Camp');
+
+    // 关着过 200 天
+    setEngineSettingsProvider(() => ({ randomEventsEnabled: false }));
+    await advanceDays(200);
+    expect((await readFlags()).pending).toBeUndefined();
+
+    // 重新打开，只过 1 天
+    setEngineSettingsProvider(undefined);
+    await advanceDays(1);
+
+    const flags = await readFlags();
+    expect(flags.lastRollDay).toBe(START_DAY + 201);
+    // 先证明这不是在比一个空池（否则本用例恒绿）
+    expect((flags.pending ?? []).length).toBeGreaterThan(0);
+    for (const entry of flags.pending ?? []) {
+      expect(entry.armedDay).toBe(START_DAY + 201);
+    }
+  });
+
+  it('从没掷过骰的存档：关着时一个字节都不写（不为「关着」也去建一袋 flags）', async () => {
+    setEngineSettingsProvider(() => ({ randomEventsEnabled: false }));
+    installRandomEventPack(buildPack([alwaysDef('Encounter')]));
+    await seedProfile();
+    await seedPlayer('Camp');
+
+    await advanceDays(5);
+
+    expect(await readRawFlags()).toBeUndefined();
   });
 
   it('🔴 频率系数 0 → 权重归零，什么都不入池（证明设置真的传到了掷骰里）', async () => {

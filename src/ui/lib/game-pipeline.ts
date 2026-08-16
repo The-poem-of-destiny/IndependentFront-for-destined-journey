@@ -29,7 +29,6 @@ import type {
   WorkshopProject,
   CharacterState,
   ChatMessage,
-  SaveProfile,
   SystemEvent,
 } from '@engine/types';
 import type {
@@ -54,13 +53,11 @@ import { getMapFlags } from '@engine/save-profile';
 import { getRandomEventFlags } from '@engine/save-profile';
 import { buildRandomEventOffer } from '@engine/random-event-context';
 import type { RandomEventOfferEntry } from '@engine/random-event-context';
-import type { RandomEventRollContext } from '@engine/types-random-events';
+// 地点键与条件上下文的**唯一**实现（与入池侧共用；此前这里有一份逐字拷贝）
+import { buildRandomEventRollContext } from '@engine/random-event-snapshot';
 import { getRandomEventPack } from '@engine/random-event-runtime';
 import { getEngineSettings } from '@engine/engine-settings';
-import { getMapIndex, getMapPack } from '@engine/map-runtime';
-import { isEmptyMapPack } from '@engine/map-pack';
-import { splitLocationSegments } from '@engine/map-index';
-import { getSeason, getTimeOfDay, toEpochMinutes } from '@engine/time-system';
+import { toEpochMinutes } from '@engine/time-system';
 import { resolveSceneWeather } from './scene-image-seams';
 
 /** 一个游戏日的分钟数（口径同 `state-manager` 的 `MINUTES_PER_GAME_DAY`，那份未导出） */
@@ -799,61 +796,6 @@ export class GamePipeline {
   }
 
   /**
-   * 地点键（随机事件设计 §2 词汇表）：**落位成功 = 地块名，失败 = 位置路径最深段**。
-   *
-   * 🔴 这是 `StateManager.resolvePlaceKey` **同一套判据的第二份实现** —— 那一份是 private，
-   *    把它导出要动 W2a 已交付的模块。两份漂了不报错，症状是「入池时按 A 键记账、
-   *    注入时按 B 键过滤」，于是首访条目在注入面静默消失。**改一处必须改另一处。**
-   */
-  private resolveRandomEventPlaceKey(
-    lastTileId: number | undefined,
-    locationPath: string,
-  ): string | undefined {
-    if (lastTileId !== undefined && !isEmptyMapPack(getMapPack())) {
-      const name = getMapIndex().tileById.get(lastTileId)?.name;
-      if (typeof name === 'string' && name.length > 0) return name;
-    }
-    const segments = splitLocationSegments(locationPath ?? '');
-    return segments.length > 0 ? segments[0] : undefined;
-  }
-
-  /**
-   * 条件求值的只读快照（`RandomEventRollContext`）。
-   *
-   * 🔴 **每一格缺席时相关条件求值为假**（不是「通过」）——所以这里宁可少供一格，也绝不为了
-   *    让条件好过而编一个值。口径与 `StateManager.buildRandomEventContext`（入池时用的那份）
-   *    刻意一致：两侧不同口径的表现是「入池了但注入面当场把它滤掉」，而两边都不报错。
-   */
-  private buildRandomEventRollContext(profile: SaveProfile): RandomEventRollContext {
-    const mapFlags = getMapFlags(profile);
-    const player = this.game.characters.find((c) => c.type === 'player');
-
-    const quests: Record<string, string> = {};
-    for (const [name, quest] of Object.entries(profile.quests ?? {})) {
-      if (typeof quest?.status === 'string') quests[name] = quest.status;
-    }
-
-    const ctx: RandomEventRollContext = {
-      journeyActive: mapFlags.journey !== undefined,
-      season: getSeason(profile.gameTime.month),
-      timeOfDay: getTimeOfDay(profile.gameTime),
-      variables: profile.variables ?? {},
-      quests,
-      affections: profile.affections ?? {},
-    };
-
-    if (player !== undefined) {
-      ctx.locationPath = player.location;
-      const placeKey = this.resolveRandomEventPlaceKey(mapFlags.lastTileId, player.location);
-      if (placeKey !== undefined) ctx.placeKey = placeKey;
-      if (typeof player.level === 'number' && Number.isFinite(player.level)) {
-        ctx.playerLevel = player.level;
-      }
-    }
-    return ctx;
-  }
-
-  /**
    * `{{RANDOM_EVENTS}}` 的数据面（随机事件 §5.1 步 2）——**只过滤不写库**。
    *
    * 池空 / 没有存档档案 → `undefined`（区块整段不出，零 token）。
@@ -869,11 +811,14 @@ export class GamePipeline {
       if (!flags.pending || flags.pending.length === 0) return undefined;
       const pack = getRandomEventPack();
       const currentDay = Math.floor(toEpochMinutes(profile.gameTime) / MINUTES_PER_GAME_DAY);
+      // 上下文快照与入池侧**共用同一份实现**（`random-event-snapshot`）：两侧不同口径的
+      // 表现是「入池了但注入面当场把它滤掉」，而两边都不报错
+      const player = this.game.characters.find((c) => c.type === 'player');
       return buildRandomEventOffer(
         pack.defs,
         pack.config,
         flags,
-        this.buildRandomEventRollContext(profile),
+        buildRandomEventRollContext(profile, player),
         currentDay,
       );
     } catch (err) {
@@ -1546,16 +1491,19 @@ export class GamePipeline {
       },
 
       // 🎲 随机事件回执（§5.2）：结算五步全在 StateManager 里（**唯一写入口**，ADR-21），
-      //    这里只把名字送过去。不 await —— 事件系统只记「触发过」这一事实（铁则 5），
-      //    记账不该进管线时序。系统关闭 / 名字不在候选池两条 warn-noop 也在结算侧，
+      //    这里只把名字送过去。系统关闭 / 名字不在候选池两条 warn-noop 也在结算侧，
       //    在这里再判一遍就是第二处口径。
-      onEventTrigger: (name) => {
-        void createStateManager(this.saveId)
+      //
+      // 🔴 **把 promise 交回去**（2026-08-16 审查修复）：结算是一次整条 SaveProfile 记录的
+      //    读-改-写，编排器要 await 它才能与 Stage 2 的提交、回合末的保洁串起来 ——
+      //    此前的 `void ... .catch()` 让三处从各自的副本整条写回去，最后写的赢。
+      //    失败仍然只 warn（结算侧自己也全程 try/catch），叙事这一轮照常完成。
+      onEventTrigger: (name) =>
+        createStateManager(this.saveId)
           .confirmRandomEventTrigger(name)
           .catch((err) => {
             console.warn('[GamePipeline] 随机事件触发结算失败（不阻塞本轮）:', err);
-          });
-      },
+          }),
 
       // 工坊 P2 (D5): stage 跑完 → EJS 差量落库 → 才轮到本 stage 的 AI 补丁
       onEjsVarsFlush: (agentIds) => this.flushEjsVarsDiffs(agentIds),

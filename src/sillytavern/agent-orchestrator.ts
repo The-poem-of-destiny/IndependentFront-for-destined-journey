@@ -140,7 +140,11 @@ export interface OrchestratorEvents {
    * 结算（清池 / 起冷却 / 记档案 / 记足迹 / emit）全在
    * `StateManager.confirmRandomEventTrigger`；本回调只是把名字送过去。
    *
-   * 🔴 **不 await、不阻塞管线**，抛错也吞掉 —— 事件系统只记「触发过」这一事实（铁则 5），
+   * 🔴 **会被 await**（与出图 / 配乐两条旁路相反，2026-08-16 审查修复）：结算是一次
+   *    **整条 SaveProfile 记录**的读-改-写，与 Stage 2 的提交、本轮末尾的
+   *    `syncRandomEventsForTurn` 争同一条记录 —— 不串行化就是最后写的那个赢（丢结算，
+   *    或者更糟：把本回合的 gameTime / variables 回滚），且两边都不报错。
+   *    抛错仍然吞掉（只 warn）：事件系统只记「触发过」这一事实（铁则 5），
    *    记不上不该让这一回合的正文失败。
    * 🔴 **一回合至多一条**：AI 写了多个标记时只取**第一个**（提示词教的是「至多触发一个」，
    *    多写就是它没守住；取第一个而不是最后一个 —— 正文里先写的那条才是它真正演绎的那条）。
@@ -874,20 +878,26 @@ export class AgentOrchestrator {
         }
       }
 
-      // 🎲 event_trigger: 就地触发，不 await —— 随机事件结算是旁路簿记（铁则 5），
-      // 不进管线时序。**只取第一条**（提示词教的是「至多触发一个」），且名字为空的不算数
-      // —— 拿空串去结算只会在日志里留一条「不在候选池」的假警报。
+      // 🎲 event_trigger: 就地触发并**等它落完库**。**只取第一条**（提示词教的是
+      // 「至多触发一个」），且名字为空的不算数 —— 拿空串去结算只会在日志里留一条
+      // 「不在候选池」的假警报。
+      //
+      // 🔴 **必须 await**（2026-08-16 审查修复）：结算走的是
+      //    `getProfile → 改 → updateProfile`，写的是**整条 SaveProfile 记录**；而 Stage 2 的提交
+      //    与本轮末尾的 `syncRandomEventsForTurn` 也各自从自己那份副本整条写回去。不等它，
+      //    三处就在竞争同一条记录，最后写的那个赢 —— 表现是「触发结算丢了」或者更糟
+      //    「本回合的 gameTime / variables 被回滚」，而且完全不报错。
+      //    等待成本是一次 Dexie 写（毫秒级），与出图/配乐那两条真正耗时的旁路不同。
       const eventMarkers = scanResult.markers.filter(
         (m): m is EventTriggerMarker => m.type === 'event_trigger',
       );
       const firstEvent = eventMarkers.find((m) => (m.name ?? '').length > 0);
       if (firstEvent && this.events.onEventTrigger) {
         try {
-          void Promise.resolve(this.events.onEventTrigger(firstEvent.name as string)).catch(
-            () => {},
-          );
-        } catch {
-          // 事件记不上账不该让这一轮叙事失败
+          await this.events.onEventTrigger(firstEvent.name as string);
+        } catch (err) {
+          // 事件记不上账不该让这一轮叙事失败（warn-only 语义不变，只是不再丢时序）
+          console.warn('[Orchestrator] 随机事件触发结算失败（不阻塞本轮）:', err);
         }
       }
     }
