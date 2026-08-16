@@ -1650,7 +1650,7 @@ export class GamePipeline {
           // Q-03：与 memory_summary 共用同一 id 发号器（MEM6位流水号），不再用 base36 时间戳
           await saveMemory({
             ...mem,
-            id: await generateMemoryId(this.saveId),
+            id: await generateMemoryId(),
           } as MemoryRecord);
         }
         console.log(

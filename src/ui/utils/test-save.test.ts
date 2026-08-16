@@ -32,6 +32,9 @@ vi.mock('@engine/database', () => ({
   saveSaveProfile: vi.fn(async () => {}),
   savePlotEvents: vi.fn(async () => {}),
   saveMemory: vi.fn(async () => {}),
+  // 记忆编号现发（不再写死 MEM000001，见 test-save.ts 第 6 节的注释）——
+  // generateMemoryId() 经这个口读全库编号。
+  getAllMemoryIds: vi.fn(async () => [] as string[]),
 }));
 
 /** 模拟一次全新页面加载，拿到一份干净模块状态。 */

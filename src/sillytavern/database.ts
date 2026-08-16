@@ -93,7 +93,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-const DB_VERSION = 21;
+export const DB_VERSION = 21;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -1194,6 +1194,18 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
 
 export async function getMemories(saveId: string): Promise<MemoryRecord[]> {
   return getDatabase().memories.where('saveId').equals(saveId).toArray();
+}
+
+/**
+ * 全库记忆主键（**跨存档**），只取键不取行 —— 记忆正文与 embedding 向量都不必读出来。
+ *
+ * 存在的唯一理由是 MEM 编号分配：`memories` 的 `id` 是全局主键，编号必须按全库分配，
+ * 否则两个存档会各自铸出同一个 `MEM000001` 并互相静默覆盖
+ * （见 `memory-summarizer.allocateMemoryIds`）。
+ */
+export async function getAllMemoryIds(): Promise<string[]> {
+  const keys = await getDatabase().memories.toCollection().primaryKeys();
+  return keys.map((k) => String(k));
 }
 
 export async function getMemoriesByIds(ids: string[]): Promise<MemoryRecord[]> {

@@ -21,6 +21,7 @@ import {
   savePlotEvents,
   saveMemory,
 } from '@engine/database';
+import { generateMemoryId } from '@engine/memory-summarizer';
 import { createDefaultCharacterState } from '@engine/types';
 import type {
   SaveSlot,
@@ -521,8 +522,12 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
   await savePlotEvents([plotEvent]);
 
   // ═══ 6. Memory ═══
+  // 🔴 编号**必须现发**，不能写死 `MEM000001`：`memories` 的 `id` 是全局主键，而
+  // {@link createTestSavePreservingData} 刻意不清库 —— 写死的编号会把用户真实存档里
+  // 那条 MEM000001 静默覆盖掉（Dexie `put` 语义，不报错也不掉行数）。
+  // 清库那一支此时表是空的，发出来的仍是 MEM000001，行为不变。
   const memory: MemoryRecord = {
-    id: 'MEM000001',
+    id: await generateMemoryId(),
     saveId,
     createdAt: Date.now(),
     realTimestamp: Date.now(),

@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, shallowRef, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
+import { useSettingsStore } from '../../stores/settings-store';
 import { VERSION } from '@engine/index';
+import type { SessionBackup } from '@engine/session-backup';
+import type { FullBackup } from '@engine/database';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
 import { useBranding } from '../../branding-defaults';
+import { buildSessionImportWarnings } from '../../lib/session-import-messages';
 
 const game = useGameStore();
 const ui = useUIStore();
+const cfg = useSettingsStore();
 
 /**
  * 创意工坊入口已开放（2026-08-04）。这个开关从来不是安全边界：入口关着的时候，
@@ -165,6 +170,76 @@ async function deleteSave(saveId: string) {
   await game.loadSaves();
 }
 
+// ═══════════ 单存档导出 / 导入 ═══════════
+
+/** 真实错误一律说出来 —— 此前那句「文件格式不正确」把每一种失败都说成了同一种 */
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** 文件名里非法的那几个字符直接剃掉（剃空了退回中性名，不生成一个以 `-` 开头的怪文件） */
+function safeFileName(name: string): string {
+  const cleaned = name.replace(/[/\\:*?"<>|]/g, '').trim();
+  return cleaned || '未命名存档';
+}
+
+/**
+ * 导出**单个存档**为可分享的 JSON。
+ *
+ * 🔴 story 预设 id 是全局 UI 状态（`activePresetId`），引擎读不到它 —— 由这里解析出
+ *    名字随行，收件人那边才能在导入前被告知「你没有这份正文预设」。查不到预设行时
+ *    **整项省略**，绝不填一个只有 id 的半成品（对面只会得到一条永远看不懂的提示）。
+ */
+async function exportSave(saveId: string) {
+  try {
+    const { exportSessionSave } = await import('@engine/session-backup');
+    const opts: { storyPreset?: { id: string; name: string } } = {};
+    const presetId = cfg.settings.activePresetId;
+    if (presetId) {
+      const { getPresets } = await import('@engine/database');
+      const hit = (await getPresets()).find((p) => p.id === presetId);
+      if (hit) opts.storyPreset = { id: hit.id, name: hit.name };
+    }
+    const backup = await exportSessionSave(saveId, opts);
+    const name = safeFileName(game.saves.find((s) => s.id === saveId)?.name || '未命名存档');
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `fated-poem-save-${name}-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    ui.toast('存档已导出', 'success');
+  } catch (err) {
+    console.error('[session-backup] 导出存档失败:', err);
+    ui.toast(`导出失败：${errText(err)}`, 'error');
+  }
+}
+
+// 待确认的两条路：单存档（缺依赖）/ 整库备份（会替换全部数据）
+// 🔴 shallowRef 不是洁癖：ref 的深代理会把解析出来的备份整棵树包成 Proxy，
+//    IndexedDB 的结构化克隆拒绝 Proxy → DataCloneError（内容包导入踩过同一颗雷）。
+const pendingSessionBackup = shallowRef<SessionBackup | null>(null);
+const pendingFullBackup = shallowRef<FullBackup | null>(null);
+const sessionWarnings = ref<string[]>([]);
+const showSessionWarnModal = ref(false);
+const showFullBackupModal = ref(false);
+
+/** 整库备份的识别判据（`isSessionBackup` 之后才问，两者不会互相误判） */
+function looksLikeFullBackup(data: unknown): data is FullBackup {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return false;
+  const v = (data as Record<string, unknown>).version;
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+/**
+ * 导入入口 —— **先分流再动手**。
+ *
+ * 🔴 此前这里无条件调 `importAllData`：用户以为自己在「导入一个存档」，
+ *    实际执行的是**整库替换**（现有存档/角色/世界书全部被文件里的内容顶掉）。
+ *    现在单存档走 `importSessionSave`（只加一个存档、全局表一行不动），
+ *    整库恢复保留但必须先看见一句说清后果的确认。
+ */
 async function importSave() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -172,18 +247,94 @@ async function importSave() {
   input.onchange = async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
     if (!file) return;
+    let data: unknown;
     try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      const { importAllData } = await import('@engine/database');
-      await importAllData(data);
-      await game.loadSaves();
-      ui.toast('存档导入成功', 'success');
+      data = JSON.parse(await file.text());
     } catch {
-      ui.toast('导入失败，文件格式不正确', 'error');
+      ui.toast('导入失败：文件不是有效的 JSON', 'error');
+      return;
+    }
+    try {
+      const { isSessionBackup } = await import('@engine/session-backup');
+      if (isSessionBackup(data)) {
+        await beginSessionImport(data);
+        return;
+      }
+      if (looksLikeFullBackup(data)) {
+        pendingFullBackup.value = data;
+        showFullBackupModal.value = true;
+        return;
+      }
+      ui.toast('导入失败：无法识别的文件格式', 'error');
+    } catch (err) {
+      console.error('[session-backup] 导入存档失败:', err);
+      ui.toast(`导入失败：${errText(err)}`, 'error');
     }
   };
   input.click();
+}
+
+/** 导入前只读体检：全都在 → 直接导；有缺失 → 列清单请用户定夺（缺内容不是错误） */
+async function beginSessionImport(backup: SessionBackup) {
+  try {
+    const { checkSessionSaveDependencies } = await import('@engine/session-backup');
+    const check = await checkSessionSaveDependencies(backup);
+    if (check.ok) {
+      await runSessionImport(backup, false);
+      return;
+    }
+    pendingSessionBackup.value = backup;
+    sessionWarnings.value = buildSessionImportWarnings(check);
+    showSessionWarnModal.value = true;
+  } catch (err) {
+    console.error('[session-backup] 导入前体检失败:', err);
+    ui.toast(`导入失败：${errText(err)}`, 'error');
+  }
+}
+
+async function runSessionImport(backup: SessionBackup, withWarnings: boolean) {
+  try {
+    const { importSessionSave } = await import('@engine/session-backup');
+    await importSessionSave(backup);
+    await game.loadSaves();
+    if (withWarnings) ui.toast('存档已导入（部分依赖内容缺失）', 'warning');
+    else ui.toast('存档导入成功', 'success');
+  } catch (err) {
+    console.error('[session-backup] 导入存档失败:', err);
+    ui.toast(`导入失败：${errText(err)}`, 'error');
+  }
+}
+
+async function confirmSessionImport() {
+  const backup = pendingSessionBackup.value;
+  closeSessionWarnModal();
+  if (backup) await runSessionImport(backup, true);
+}
+
+function closeSessionWarnModal() {
+  showSessionWarnModal.value = false;
+  pendingSessionBackup.value = null;
+  sessionWarnings.value = [];
+}
+
+async function confirmFullBackupImport() {
+  const data = pendingFullBackup.value;
+  closeFullBackupModal();
+  if (!data) return;
+  try {
+    const { importAllData } = await import('@engine/database');
+    await importAllData(data);
+    await game.loadSaves();
+    ui.toast('整库备份恢复成功', 'success');
+  } catch (err) {
+    console.error('[session-backup] 整库备份恢复失败:', err);
+    ui.toast(`导入失败：${errText(err)}`, 'error');
+  }
+}
+
+function closeFullBackupModal() {
+  showFullBackupModal.value = false;
+  pendingFullBackup.value = null;
 }
 
 function formatTime(ts: number) {
@@ -367,6 +518,15 @@ function formatTime(ts: number) {
                         formatTime(save.updatedAt)
                       }}</span>
                     </div>
+                    <AppButton
+                      variant="ghost"
+                      size="sm"
+                      class="save-export"
+                      title="导出这个存档为可分享的 JSON 文件"
+                      @click.stop="exportSave(save.id)"
+                    >
+                      导出
+                    </AppButton>
                     <button class="save-delete" title="删除存档" @click.stop="deleteSave(save.id)">
                       ✕
                     </button>
@@ -471,6 +631,58 @@ function formatTime(ts: number) {
           </div>
         </template>
       </div>
+    </AppModal>
+
+    <!--
+      单存档导入体检未通过（缺世界书条目 / 内容包版本不同 / 缺正文预设）。
+      🔴 语气是**告知**不是阻拦：缺内容不影响导入本身，只影响游玩时注入什么，
+         所以主按钮是「仍要导入」而不是把人拦在门外。措辞唯一来源是
+         lib/session-import-messages.ts，模板这边一行都不拼。
+    -->
+    <AppModal
+      :open="showSessionWarnModal"
+      title="导入前请确认"
+      size="md"
+      @update:open="!$event && closeSessionWarnModal()"
+    >
+      <p>这份存档依赖的部分内容在本机缺失或版本不同：</p>
+      <ul class="import-warn-list">
+        <li v-for="(line, i) in sessionWarnings" :key="i">{{ line }}</li>
+      </ul>
+      <p class="text-muted text-sm">
+        缺失内容<strong>不影响导入本身</strong>，但相关世界书条目在游玩时不会注入。
+      </p>
+      <template #footer>
+        <AppButton variant="ghost" size="sm" @click="closeSessionWarnModal">取消</AppButton>
+        <AppButton variant="primary" size="sm" @click="confirmSessionImport">仍要导入</AppButton>
+      </template>
+    </AppModal>
+
+    <!--
+      整库备份恢复 —— 与「导入一个存档」是两件完全不同的事，必须说明白：
+      这份文件会**替换**当前数据库的全部内容，而不是往里加一个存档。
+    -->
+    <AppModal
+      :open="showFullBackupModal"
+      title="整库备份恢复"
+      size="sm"
+      @update:open="!$event && closeFullBackupModal()"
+    >
+      <p>
+        这个文件是一份<strong>整库备份</strong>，不是单个存档。导入会用它<strong
+          style="color: var(--theme-error)"
+          >替换当前的全部数据</strong
+        >。
+      </p>
+      <p class="text-muted text-sm">
+        包括所有存档、角色、记忆、剧情与世界书等。当前数据将被覆盖，此操作不可撤销。
+      </p>
+      <template #footer>
+        <AppButton variant="ghost" size="sm" @click="closeFullBackupModal">取消</AppButton>
+        <AppButton variant="danger" size="sm" @click="confirmFullBackupImport"
+          >替换全部数据并导入</AppButton
+        >
+      </template>
     </AppModal>
   </div>
 </template>
@@ -1019,6 +1231,15 @@ function formatTime(ts: number) {
 .save-meta {
   font-size: 0.72rem;
 }
+/* 导出按钮与删除按钮同一套「悬停才现身」的节奏 —— 存档行平时只讲存档的事 */
+.save-export {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.save-item:hover .save-export {
+  opacity: 1;
+}
 .save-delete {
   width: 24px;
   height: 24px;
@@ -1196,6 +1417,18 @@ function formatTime(ts: number) {
   opacity: 0;
 }
 
+/* ═══ 导入告警清单 ═══ */
+.import-warn-list {
+  margin: var(--theme-spacing-sm, 8px) 0 var(--theme-spacing-md, 12px);
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.875rem;
+  color: var(--theme-text-secondary);
+  line-height: 1.6;
+}
+
 /* ═══ 制作人员 ═══ */
 .credits-content {
   display: flex;
@@ -1229,6 +1462,7 @@ function formatTime(ts: number) {
   .action-section {
     animation: none;
   }
+  .save-export,
   .quote-fade-enter-active,
   .quote-fade-leave-active,
   .fade-enter-active,
