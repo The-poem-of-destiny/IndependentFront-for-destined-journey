@@ -21,7 +21,7 @@
 
 ## Step 1：导出数据获取
 
-主人跑一轮游戏后，需要把以下两个文件放到 `tests/realtime_export/` 下：
+主人跑一轮游戏后，需要把以下两个文件放到 `tests/realtime_export/` 下（该目录已在 `.gitignore` 里，**本机自建、不进仓库**，全新 clone 看不到它是正常的）：
 
 | 文件 | 说明 | 来源 |
 |------|------|------|
@@ -189,10 +189,10 @@ Should it be shortened to a brief reference since world books already include it
 
 | 文件 | 内容 | 何时查阅 |
 |------|------|---------|
-| `data/defaults/agent-config.json` | 11 个 Agent 的 systemPrompt + template + preset | Agent 行为异常 |
+| `public/data/defaults/agent-config.json` | 11 个 Agent 的 systemPrompt + template + preset | Agent 行为异常 |
 | `src/sillytavern/agent-templates.ts` | buildAgentMessages + fallback 逻辑 | 预设/SYS_PROMPT 未注入 |
 | `src/sillytavern/agent-orchestrator.ts` | 编排引擎 + OrchestratorOptions | 世界书/预设传递断裂 |
-| `src/sillytavern/agency-client.ts` | API 调用 + chatWithTools + SSE 流式 | API 调用错误 |
+| `src/sillytavern/agent-client.ts` | API 调用 + chatWithTools + SSE 流式 | API 调用错误 |
 | `src/sillytavern/worldbook-loader.ts` | 世界书加载/过滤/格式化 | 世界书注入异常 |
 | `src/sillytavern/placeholder-registry.ts` | {{PLACEHOLDER}} 解析 + 默认模板 | 占位符未替换或 [object Object] |
 | `src/sillytavern/template-resolver.ts` | resolveTemplateWithGlobals | 模板解析异常 |
@@ -213,7 +213,7 @@ Should it be shortened to a brief reference since world books already include it
 ### 关于热重载 vs 重启
 
 项目使用 Vite HMR（热模块替换），大部分代码修改后会自动热重载。但以下情况需要手动刷新浏览器：
-- `data/defaults/agent-config.json` 的修改（静态文件，Vite 可能缓存旧版本）
+- `public/data/defaults/agent-config.json` 的修改（静态文件，Vite 可能缓存旧版本）
 - IndexedDB 结构变更（需要清除浏览器 IndexedDB 或在 DevTools 中删库重建）
 
 **建议**：每次修完一轮 bug 后，刷新浏览器页面再跑一轮测试。

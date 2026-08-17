@@ -8,7 +8,7 @@
  */
 
 import type { MemoryRecord } from './types';
-import { getMemories, saveMemory, deleteMemory } from './database';
+import { getMemories, saveMemory, deleteMemories } from './database';
 
 // ========== Embedding ==========
 
@@ -196,10 +196,8 @@ export async function applyCompression(
   oldMemories: MemoryRecord[],
   summaryMemory: MemoryRecord,
 ): Promise<void> {
-  // 删除旧记忆
-  for (const mem of oldMemories) {
-    await deleteMemory(mem.id);
-  }
+  // 删除旧记忆（一次 bulkDelete，压缩一次可涉及几十条，逐条删就是几十次 IDB 往返）
+  await deleteMemories(oldMemories.map((mem) => mem.id));
 
   // 保存摘要记忆
   await saveMemory(summaryMemory);

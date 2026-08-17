@@ -265,27 +265,27 @@ export function buildZoneContext(ctx: AgentContext): Record<ZoneId, VariableZone
   };
 
   // --- craft zone ---
-  // 占位 — 由 craft-resolver 在运行时填充
+  // 占位 — `ctx.craftProjects` 目前无生产方（craft-resolver 从未落地），恒为空数组
   zones.craft = {
     config: { limit: 10, injectAs: 'summary' },
     visibility: [],
-    content: { projects: (ctx as any)._craftProjects ?? [] },
+    content: { projects: ctx.craftProjects ?? [] },
   };
 
   // --- combat zone ---
-  // 占位 — 由 combat-resolver 在运行时填充
+  // 占位 — `ctx.activeCombat` 目前无生产方（战斗走 combat-v3 独立会话），恒为 null
   zones.combat = {
     config: { injectAs: 'summary' },
     visibility: [],
-    content: { active: (ctx as any)._activeCombat ?? null },
+    content: { active: ctx.activeCombat ?? null },
   };
 
   // --- outline zone ---
-  // 占位 — 由 plot-engine 在运行时填充
+  // `ctx.plotOutline` 由 game-pipeline.loadPlotData 从 DB 挂上（mode≠off 时）
   zones.outline = {
     config: { injectAs: 'summary' },
     visibility: [],
-    content: { outline: (ctx as any)._plotOutline ?? null, chapters: [] },
+    content: { outline: ctx.plotOutline ?? null, chapters: ctx.plotOutline?.chapters ?? [] },
   };
 
   // --- variable zone ---

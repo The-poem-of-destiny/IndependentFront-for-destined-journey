@@ -3,8 +3,8 @@
 
 ## 检查清单
 - [ ] `npm run typecheck` + `npm run typecheck:vue` + `npm run test:run` 本地通过
-- [ ] 文档同步检查：`AGENTS.md` / `docs/` / `docs/CHANGELOG.md` / `reference/agent流程测试/`
-- [ ] 涉及游戏数值/世界观 → 已查 `reference/world_book_index.md`
+- [ ] 文档同步检查：`AGENTS.md`（含 `src/sillytavern/AGENTS.md` / `src/ui/AGENTS.md` 两份分册）/ `docs/` / `docs/CHANGELOG.md`
+- [ ] 涉及游戏数值/世界观 → 已查世界书索引（`world_book_index.md` 在**私有内容仓** `fated_poem_independent_assets`，公开仓不可见；无该仓时请在 PR 里注明未核对）
 - [ ] 涉及数据实体字段 → 已查数据字典规范（`docs/superpowers/specs/2026-07-16-data-field-conventions-design.md`）
 - [ ] 涉及 UI → 已查 `docs/design.md`
 - [ ] 新模块已配套 `*.test.ts`

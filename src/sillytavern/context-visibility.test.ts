@@ -289,6 +289,32 @@ describe('buildZoneContext', () => {
     expect(names).not.toContain('离队的老约翰'); // present=false 被过滤
   });
 
+  it('🆕 outline zone 读 ctx.plotOutline（此前读的是无人写入的 `_plotOutline`，恒为空）', () => {
+    const ctx = makeAgentContext({
+      plotOutline: {
+        id: 'po1',
+        saveId: 'test',
+        mode: 'main',
+        title: '血色纹章',
+        summary: '一句话摘要',
+        content: '大纲正文',
+        chapters: [{ title: '第一章', summary: '开局', status: 'active' }],
+        confirmed: true,
+        version: 1,
+        timeRange: { start: '1', end: '2' },
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    });
+    const zones = buildZoneContext(ctx);
+    expect(zones.outline.content.outline?.title).toBe('血色纹章');
+    expect(zones.outline.content.chapters).toHaveLength(1);
+    // 大纲在场时 SUMMARY 不再是空串
+    expect(filterZoneContent('outline', zones.outline.content, 'SUMMARY', 'story')).toContain(
+      '第一章',
+    );
+  });
+
   it('world zone extracts world-state keys', () => {
     const ctx = makeAgentContext({
       variables: { 时间: '下午', 位置: '铁匠铺', 天气: '晴', user_count: 5 },

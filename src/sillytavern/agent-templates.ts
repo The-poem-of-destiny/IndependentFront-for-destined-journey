@@ -344,17 +344,7 @@ function formatGameTime(gt?: GameTime): string {
 
 /** 大纲摘要块: 标题/版本/摘要 + 当前章节 + 正文（截断）。大纲由 game-pipeline buildContext 挂到 ctx.plotOutline */
 function formatPlotOutline(ctx: AgentContext): string {
-  const o = (ctx as any).plotOutline as
-    | {
-        title?: string;
-        summary?: string;
-        content?: string;
-        version?: number;
-        directionAnchors?: string;
-        chapters?: Array<{ title: string; summary: string; status: string }>;
-      }
-    | undefined
-    | null;
+  const o = ctx.plotOutline;
   if (!o) return '';
   const lines: string[] = [];
   lines.push(

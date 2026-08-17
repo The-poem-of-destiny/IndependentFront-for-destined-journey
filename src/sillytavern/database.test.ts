@@ -308,15 +308,9 @@ describe('initializeDatabase', () => {
     expect(await db.settings.count()).toBe(0);
   });
 
-  it.skip('settings 应含 v4 默认字段（Q-06：不再播种，此断言随之失效）', async () => {
-    const s = await getSettings();
-    expect(s).toBeDefined();
-    expect(s!.apiEndpoints).toEqual([]);
-    expect(s!.agentConfigs).toEqual([]);
-    expect(s!.cacheStrategy).toBe('userid_isolated');
-    expect(s!.maxSnapshotsPerSave).toBe(30);
-    expect(s!.maxMemoriesRecall).toBe(20);
-  });
+  // 🪦 「settings 应含 v4 默认字段」的 it.skip 已删（Q-06 裁定不再播种，断言随之失效）。
+  //    「不播种」这件事由上面两条用例的 `expect(await db.settings.count()).toBe(0)` 正向守着，
+  //    删掉不丢覆盖。
 });
 
 // ========== v4 Tables Exist ==========

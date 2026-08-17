@@ -31,7 +31,9 @@ const activePackVersion = computed(() => activeContent.value.packVersion);
 
 /** 挂载时读一次内容态（content-store 的 store 状态） */
 onMounted(async () => {
-  loadStorageUsage();
+  // void：用量与内容态互不依赖，不必串成一条链；失败已在 loadStorageUsage 内自吞，
+  // 裸调会漏成 unhandled rejection（.vue 不在类型感知 lint 档内，闸门看不见）
+  void loadStorageUsage();
   const { useContentStore } = await import('../../stores/content-store');
   const c = useContentStore();
   await c.hydratePackState();
@@ -239,7 +241,14 @@ function showSuccessNotes(notes: unknown[], _outcome: unknown): void {
 const showClearConfirm = ref(false);
 const storageInfo = ref<{ used: number; quota: number; pct: number } | null>(null);
 async function loadStorageUsage() {
-  storageInfo.value = await cfg.getStorageUsage();
+  try {
+    storageInfo.value = await cfg.getStorageUsage();
+  } catch (err) {
+    // 隐私模式 / 浏览器不给 storage.estimate：读不出用量而已，本分区其余功能照常，
+    // 不值得弹 toast 打断用户；留一条控制台记录便于排查（此前是静默 unhandled rejection）
+    console.warn('[data] 读取存储用量失败:', err);
+    storageInfo.value = null;
+  }
 }
 function fmtBytes(b: number) {
   if (b < 1024) return `${b} B`;

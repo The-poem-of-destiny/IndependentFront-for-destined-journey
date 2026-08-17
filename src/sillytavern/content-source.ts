@@ -565,6 +565,11 @@ export function resolveSection<T>(
  * 本文件只做**委托转发**——保持 content-source.ts 作为「内容包纯函数层」的对外入口
  * （校验 + hash + planner 同一处暴露），调用方无需感知 planner 拆成了独立模块。
  *
+ * 🔴 这条转发让两个模块**互相 import**（planner 反过来取本文件的 hash / 校验工具），
+ * 是一条真实的运行时环。无害只因两侧使用点都在函数体内：**不许在本模块顶层使用
+ * `planPackInstallImpl`**（ESM 环下模块初始化期取到 undefined，且静默）。详见
+ * `content-pack-plan.ts` 的文件头。
+ *
  * 详细的四态规则、双基线 hash、按名配对迁移语义见 `content-pack-plan.ts` 的 JSDoc。
  *
  * @param pack 待安装的内容包

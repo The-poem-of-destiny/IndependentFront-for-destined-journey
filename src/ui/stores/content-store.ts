@@ -44,7 +44,7 @@ import { detach } from './db-write';
 import type { ContentStatus } from '@engine/types-content';
 // 占位基线清单：随引擎打包的静态资源（设计 §6），**不是**内容树的一部分。
 import placeholderHashesRaw from '@engine/placeholder-hashes.json';
-import type { SaveSlot, WorkshopNote, WorldBook } from '@engine/types';
+import type { ChatPreset, SaveSlot, WorkshopNote, WorldBook } from '@engine/types';
 import type {
   ContentPack,
   PackBaseline,
@@ -82,8 +82,9 @@ import {
   getDatabase,
   exportAllData,
   importAllData,
-  savePreset,
+  savePresets,
   deletePreset,
+  deletePresets,
 } from '@engine/database';
 import type { ContentPackRecord } from '@engine/database';
 
@@ -970,19 +971,25 @@ export const useContentStore = defineStore('content', () => {
       if (toUpsert.length > 0) await wb.upsertBooks(toUpsert);
     }
 
-    // b. presets 分节（savePreset 按 pack id upsert / deletePreset）
+    // b. presets 分节（savePresets 按 pack id upsert / deletePresets）
+    //    收集后一次 bulk 落库 —— 口径与上面的 worldBooks 分节一致（先删后写，
+    //    同 id 同时出现在两边时以 upsert 为准），逐条 await 是 N 次 IDB 往返
     const prePlan = plan.sections.presets;
     if (prePlan) {
-      for (const p of prePlan.added) await savePreset(p);
-      for (const p of prePlan.updated) await savePreset(p);
-      for (const p of prePlan.removed) await deletePreset(p.id);
+      const toUpsert: ChatPreset[] = [];
+      const toDelete: string[] = [];
+      for (const p of prePlan.added) toUpsert.push(p);
+      for (const p of prePlan.updated) toUpsert.push(p);
+      for (const p of prePlan.removed) toDelete.push(p.id);
       for (const c of prePlan.conflicted) {
         if (confirmConflicts) {
           const packPreset = (pack.presets ?? []).find((p) => p.id === c.key);
-          if (packPreset) await savePreset(packPreset);
-          else await deletePreset(c.key);
+          if (packPreset) toUpsert.push(packPreset);
+          else toDelete.push(c.key);
         }
       }
+      await deletePresets(toDelete);
+      await savePresets(toUpsert);
     }
 
     // c. beautifierRules（provider 内存层，不写用户表）—— 装包后重算 presetRules

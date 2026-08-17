@@ -30,6 +30,13 @@ on:
   pull_request:
     branches: [master]
 
+# 同一 ref 连推时取消上一次仍在跑的 run（连推在本仓很常见：文档直推 master、修 CI 红）。
+# master 例外：直推 master 的每一次提交都要留一条自己的绿/红记录，被取消会在历史上留空洞，
+# 且哪天给 master 加了分支保护，「被取消」会被算作检查未通过。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
   types:
     name: types

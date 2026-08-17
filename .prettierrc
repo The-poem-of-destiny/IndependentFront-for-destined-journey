@@ -5,7 +5,7 @@
   "tabWidth": 2,
   "semi": true,
   "arrowParens": "always",
-  "endOfLine": "lf",
+  "endOfLine": "auto",
   "overrides": [
     {
       "files": "*.md",
