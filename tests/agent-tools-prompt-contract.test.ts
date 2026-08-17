@@ -38,26 +38,43 @@ describe('Agent 默认提示词广告的工具 ⊆ 工具白名单', () => {
   }
 
   /**
-   * 受本闸门管辖的 agent **显式点名**，不再靠「提示词里有没有『可用工具』四个字」筛。
+   * 明确豁免本闸门的 agent（**只能减不能加**：往这里塞名字等于放弃对该 agent 的管辖）。
    *
-   * 🔴 此前是 `if (!prompt.includes('可用工具')) continue;` —— 用例在这行之后才注册，
-   * 于是把小节标题改个措辞（「可用工具」→「工具列表」）就会让该 agent 的用例**根本不生成**，
-   * 用例数从 4 掉到 3，CI 照绿。闸门自己成了「不红但坏」的东西，而它守的正是这类故障。
-   *
-   * 名单取自 `AGENT_TOOL_MAP` 中白名单非空、且提示词确实向模型广告工具的那些 agent。
-   * `vars_update` 刻意不在此列：它有工具白名单，但出厂提示词不列「可用工具」小节
-   * （工具由引擎侧喂，不教模型点名调用）—— 若哪天给它加了小节，把它加进这里即可。
+   * `vars_update`：它有工具白名单，但出厂提示词刻意不列「可用工具」小节 —— 工具由引擎侧
+   * 直接喂给它，不教模型点名调用。若哪天给它加了小节，把它从这里删掉即可自动纳管。
    */
-  const TOOL_ADVERTISING_AGENTS = ['craft_gen', 'char_gen', 'item_gen', 'combat_v3'] as const;
+  const EXCLUDED_AGENTS = new Set(['vars_update']);
+
+  /**
+   * 受本闸门管辖的 agent **从 `AGENT_TOOL_MAP` 派生**：白名单非空 - 显式豁免。
+   *
+   * 🔴 两层历史教训叠在这一段上：
+   * 1. 最早是 `if (!prompt.includes('可用工具')) continue;` —— 用例在这行之后才注册，
+   *    于是把小节标题改个措辞（「可用工具」→「工具列表」）就会让该 agent 的用例**根本不生成**，
+   *    用例数从 4 掉到 3，CI 照绿。闸门自己成了「不红但坏」的东西，而它守的正是这类故障。
+   * 2. 改成硬编码名单后又留了第二个静默口子：**新 agent 拿到工具白名单却没人想起改这里**，
+   *    它的提示词从此不受任何约束。派生之后，加白名单 = 自动纳管；要不管必须**显式**写进
+   *    `EXCLUDED_AGENTS` 并留下理由。
+   */
+  const TOOL_ADVERTISING_AGENTS = Object.keys(AGENT_TOOL_MAP)
+    .filter((id) => (AGENT_TOOL_MAP[id] ?? []).length > 0 && !EXCLUDED_AGENTS.has(id))
+    .sort();
 
   it('受管辖的 agent 名单必须非空且都存在于 agent-config.json（闸门自身的存活断言）', () => {
     expect(TOOL_ADVERTISING_AGENTS.length).toBeGreaterThan(0);
     for (const agentId of TOOL_ADVERTISING_AGENTS) {
       expect(Object.keys(cfg.agents), `agent-config.json 里没有「${agentId}」`).toContain(agentId);
+    }
+  });
+
+  it('豁免名单里的 agent 必须真的存在于 AGENT_TOOL_MAP（防止陈旧豁免变成永久免管）', () => {
+    // agent 改名/删除后，留在这里的旧名字不会报错、只会静默地什么都不豁免；
+    // 而真正危险的是反过来——新名字没人加进来，却以为「已经豁免过了」。
+    for (const agentId of EXCLUDED_AGENTS) {
       expect(
-        (AGENT_TOOL_MAP[agentId] ?? []).length,
-        `「${agentId}」的 AGENT_TOOL_MAP 白名单为空，不该受本闸门管辖`,
-      ).toBeGreaterThan(0);
+        Object.keys(AGENT_TOOL_MAP),
+        `EXCLUDED_AGENTS 里的「${agentId}」在 AGENT_TOOL_MAP 中不存在，豁免已陈旧`,
+      ).toContain(agentId);
     }
   });
 

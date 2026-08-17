@@ -3,7 +3,7 @@
  *
  * Uses fake-indexeddb (injected via src/test-setup.ts).
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   getDatabase,
   initializeDatabase,
@@ -15,7 +15,12 @@ import {
   getMemoriesByIds,
   saveMemory,
   deleteMemory,
+  deleteMemories,
   getRecentMemories,
+  // Presets
+  getPresets,
+  savePresets,
+  deletePresets,
   // PlotEvents
   getPlotEvents,
   getActivePlotEvents,
@@ -83,6 +88,7 @@ import {
 import type { FullBackup } from './database';
 import type {
   ChatMessage,
+  ChatPreset,
   MemoryRecord,
   PlotEvent,
   PlotOutline,
@@ -389,6 +395,28 @@ describe('Memories CRUD', () => {
     expect(all).toHaveLength(0);
   });
 
+  it('deleteMemories 应批量删除，且只删点名的那些', async () => {
+    await saveMemory(makeMemory({ id: 'MEM000001' }));
+    await saveMemory(makeMemory({ id: 'MEM000002' }));
+    await saveMemory(makeMemory({ id: 'MEM000003' }));
+
+    await deleteMemories(['MEM000001', 'MEM000003']);
+
+    const rest = await getMemories('save_test');
+    expect(rest.map((m) => m.id)).toEqual(['MEM000002']);
+  });
+
+  it('deleteMemories 空数组应早退（不碰 IDB）且不报错', async () => {
+    await saveMemory(makeMemory({ id: 'MEM_KEEP' }));
+    const spy = vi.spyOn(getDatabase().memories, 'bulkDelete');
+
+    await expect(deleteMemories([])).resolves.toBeUndefined();
+
+    expect(spy).not.toHaveBeenCalled();
+    expect((await getMemories('save_test')).map((m) => m.id)).toEqual(['MEM_KEEP']);
+    spy.mockRestore();
+  });
+
   it('getRecentMemories 应按时间倒序返回 limit 条', async () => {
     const base = Date.now();
     await saveMemory(makeMemory({ id: 'MEM000001', createdAt: base - 3000 }));
@@ -398,6 +426,92 @@ describe('Memories CRUD', () => {
     const recent = await getRecentMemories('save_test', 2);
     expect(recent).toHaveLength(2);
     expect(recent[0].createdAt).toBeGreaterThan(recent[1].createdAt);
+  });
+});
+
+// ========== Presets 批量口 ==========
+
+function makePreset(overrides: Partial<ChatPreset> = {}): ChatPreset {
+  return {
+    id: `preset_${Math.floor(Math.random() * 1000000)}`,
+    name: '测试预设',
+    settings: { temp_openai: 0.7, prompts: [{ identifier: 'main', content: '正文' }] },
+    createdAt: 1000,
+    updatedAt: 2000,
+    ...overrides,
+  };
+}
+
+/** 只看本用例造的预设，绕开 initializeDatabase 播种的那一行默认预设 */
+async function getTestPresets(): Promise<ChatPreset[]> {
+  return (await getPresets()).filter((p) => p.id.startsWith('preset_'));
+}
+
+describe('Presets 批量落库/删除（savePresets / deletePresets）', () => {
+  it('savePresets 应批量落库', async () => {
+    const presets = [
+      makePreset({ id: 'preset_a' }),
+      makePreset({ id: 'preset_b' }),
+      makePreset({ id: 'preset_c' }),
+    ];
+    await savePresets(presets);
+
+    const stored = await getTestPresets();
+    expect(stored.map((p) => p.id).sort()).toEqual(['preset_a', 'preset_b', 'preset_c']);
+  });
+
+  it('savePresets 空数组应早退（不碰 IDB）且不报错', async () => {
+    const spy = vi.spyOn(getDatabase().presets, 'bulkPut');
+
+    await expect(savePresets([])).resolves.toBeUndefined();
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(await getTestPresets()).toHaveLength(0);
+    spy.mockRestore();
+  });
+
+  it('savePresets 落库结果与输入深等，且不是同一个对象引用（Q-16 detach 纪律）', async () => {
+    const input = makePreset({ id: 'preset_detach', name: '深等预设' });
+    await savePresets([input]);
+
+    const stored = (await getTestPresets())[0];
+    expect(stored).toEqual(input);
+    expect(stored).not.toBe(input);
+    expect(stored.settings).not.toBe(input.settings);
+  });
+
+  it('savePresets 收下 Proxy 包裹的预设（Vue reactive 形态）而不 DataCloneError', async () => {
+    // 🔴 装包链路上 preset 会经过 Vue 响应式（DataSection.vue 的 packPending 是 ref，
+    //    存对象即深代理）—— savePreset 的 JSON 往返就是为这条真机 bug 加的（2026-08-07）。
+    //    这条用例把 savePresets 也钉进同一条纪律：直接 bulkPut 一个 Proxy 会 DataCloneError。
+    const raw = makePreset({ id: 'preset_proxy' });
+    const proxied = new Proxy(raw, {}) as ChatPreset;
+
+    await expect(savePresets([proxied])).resolves.toBeUndefined();
+    expect((await getTestPresets()).map((p) => p.id)).toEqual(['preset_proxy']);
+  });
+
+  it('deletePresets 应批量删除，且只删点名的那些', async () => {
+    await savePresets([
+      makePreset({ id: 'preset_x' }),
+      makePreset({ id: 'preset_y' }),
+      makePreset({ id: 'preset_z' }),
+    ]);
+
+    await deletePresets(['preset_x', 'preset_z']);
+
+    expect((await getTestPresets()).map((p) => p.id)).toEqual(['preset_y']);
+  });
+
+  it('deletePresets 空数组应早退（不碰 IDB）且不报错', async () => {
+    await savePresets([makePreset({ id: 'preset_keep' })]);
+    const spy = vi.spyOn(getDatabase().presets, 'bulkDelete');
+
+    await expect(deletePresets([])).resolves.toBeUndefined();
+
+    expect(spy).not.toHaveBeenCalled();
+    expect((await getTestPresets()).map((p) => p.id)).toEqual(['preset_keep']);
+    spy.mockRestore();
   });
 });
 

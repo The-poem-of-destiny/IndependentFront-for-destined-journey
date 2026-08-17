@@ -90,12 +90,15 @@ PointsBar 置顶: `转生点数: 824 / 2000 (简单)    [角色预设]`
 | 年龄          | FormStepper (1-999)               | 变量     |
 | 种族          | FormSelect (22种族+自定义)        | 变量     |
 | 身份          | FormSelect (30+身份)              | 变量     |
-| 起始地点      | FormCascader (5大区级联)          | 变量     |
+| 起始地点      | FormCascader (5大区级联) 🪦       | 变量     |
 | 等级          | FormStepper (1-25)                | 变量     |
 | 基础属性 BP×5 | AttributeEditor (maxBP=25, per=6) | 变量     |
 | 额外属性 AP×5 | AttributeEditor (maxAP=level-1)   | 变量     |
 
 联动: `tier = f(level)`, `finalAttr = BP + tierBonus + AP`, HP/MP/SP = `TIER_CONFIGS[tier] × 属性 × 10`
+
+> 🪦 `FormCascader.vue` 已于 2026-08-17 因全仓零引用随审查小修波删除，恢复走 git 历史 `8e6565c^`；
+> 7d 复工如需重建按本节设计（同批删除的还有 `FormKeyValue.vue`）。
 
 ---
 
@@ -320,7 +323,10 @@ export const useCreateStore = defineStore('create', () => {
 
 ### 已有复用
 
-AppButton, AppCard, AppModal, AppTabs, QualityBadge, ResourceBar, AvatarPanel, FormInput, FormSelect, FormStepper, FormCascader
+AppButton, AppCard, AppModal, AppTabs, QualityBadge, ResourceBar, AvatarPanel, FormInput, FormSelect, FormStepper, ~~FormCascader~~
+
+> 🪦 `FormCascader.vue`（与 `FormKeyValue.vue`）已于 2026-08-17 因全仓零引用随审查小修波删除，
+> 恢复走 git 历史 `8e6565c^`；7d 复工如需重建按本节设计。
 
 ### 新建 (17 个)
 
@@ -334,7 +340,7 @@ AppButton, AppCard, AppModal, AppTabs, QualityBadge, ResourceBar, AvatarPanel, F
 | `CreateStepBasic.vue`       | Step 1                         |
 | `AttributeEditor.vue`       | 五维属性步进器                 |
 | `CreateStepDestinyCore.vue` | Step 2                         |
-| `DestinyCoreCard.vue`       | 核心卡片                       |
+| `DestinyCoreCard.vue`       | 核心卡片 🪦（见表下墓碑注）    |
 | `CreateStepSelections.vue`  | Step 3                         |
 | `CategoryTabs.vue`          | 装备/道具/技能 标签            |
 | `QualityFilter.vue`         | rarity 筛选按钮组              |
@@ -347,7 +353,10 @@ AppButton, AppCard, AppModal, AppTabs, QualityBadge, ResourceBar, AvatarPanel, F
 | `CreateStepConfirm.vue`     | Step 6                         |
 | `PresetModal.vue`           | 预设管理弹窗                   |
 | `CustomItemForm.vue`        | 自定义物品 Modal               |
-| `PartnerWorldBookPanel.vue` | 伙伴 (占位)                    |
+| `PartnerWorldBookPanel.vue` | 伙伴 (占位) 🪦（见表下墓碑注） |
+
+> 🪦 `DestinyCoreCard.vue` 与 `PartnerWorldBookPanel.vue` 已于 2026-08-17 因全仓零引用随审查小修波删除，
+> 恢复走 git 历史 `8e6565c^`；7d 复工如需重建按本节设计。
 
 ---
 
@@ -361,7 +370,7 @@ AppButton, AppCard, AppModal, AppTabs, QualityBadge, ResourceBar, AvatarPanel, F
 | 4   | `CreatePage.vue` `CreateSteps.vue` `CreateFooter.vue` `PointsBar.vue` | ⬜      |
 | 5   | Step 0 `CreateStepDifficulty.vue`                                     | ⬜      |
 | 6   | Step 1 `CreateStepBasic.vue` `AttributeEditor.vue`                    | ⬜      |
-| 7   | Step 2 `CreateStepDestinyCore.vue` `DestinyCoreCard.vue`              | ⬜      |
+| 7   | Step 2 `CreateStepDestinyCore.vue` `DestinyCoreCard.vue` 🪦           | ⬜      |
 | 8   | Step 3 `CreateStepSelections.vue` + 子组件                            | ⬜      |
 | 9   | Step 4 `CreateStepBackground.vue` `BackgroundList.vue`                | ⬜      |
 | 10  | Step 5 `CreateStepPlot.vue` `PlotOutlinePreview.vue`                  | ⬜      |
@@ -369,6 +378,9 @@ AppButton, AppCard, AppModal, AppTabs, QualityBadge, ResourceBar, AvatarPanel, F
 | 12  | `PresetModal.vue` + DB                                                | ⬜      |
 | 13  | `CustomItemForm.vue`                                                  | ⬜      |
 | 14  | 联调                                                                  | ⬜      |
+
+> 🪦 第 7 条点名的 `DestinyCoreCard.vue` 已于 2026-08-17 因全仓零引用随审查小修波删除
+> （待办本身仍是 ⬜）。恢复走 git 历史 `8e6565c^`；7d 复工如需重建按本节设计。
 
 ---
 

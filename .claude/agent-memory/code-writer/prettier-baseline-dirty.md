@@ -35,8 +35,11 @@ format:check 的 glob 是 `{src,server,tests,scripts}/**/*.{ts,vue,css,mjs,cjs}`
 
 ## 一键跑全部闸门
 
-`npm run gates`（2026-08-17 新增，infra-2）= CI 九道闸门的本地等价，按 CI 顺序串联：
+`npm run gates`（2026-08-17 新增，infra-2）= CI **八道**闸门的本地等价，按 CI 顺序串联：
 typecheck → typecheck:vue → typecheck:tools → build → format:check → lint → knip:ratchet → test:run。
+🔴 数一下就是 8 条 —— 「九道」是 2026-08-09 那轮审查（TEST-01「八道→九道」）起就带着的**+1 误差**，
+2026-08-17 已把 ci.yml 顶注 / 根 AGENTS.md / CHANGELOG 三处统一成八道（`docs/reviews/` 与
+`docs/planning/` 里的历史报告仍写着九道，那是存档，别照抄）。
 **`typecheck:tools` 是 `tests/` `server/` `*.config.ts` 的唯一类型网**（主 tsconfig 只 include `src/**`），
 历史上两次 CI 挂红都是漏跑它（PR #109 之后的 6b9e474、更早的 37d0544）。
 

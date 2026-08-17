@@ -1,7 +1,9 @@
 name: CI
 
-# 八道闸门拆成三个并行 job（2026-08-08）。
-# 2026-08-10 起是**九道** —— types job 末尾补了 `npm run build`（TEST-01，理由写在那一行旁）。
+# 闸门拆成三个并行 job（2026-08-08，当时七道）。
+# 2026-08-10 起是**八道** —— types job 末尾补了 `npm run build`（TEST-01，理由写在那一行旁）。
+# 八道 = typecheck / typecheck:vue / typecheck:tools / build / format:check / lint / knip:ratchet / test:run，
+# 与 `npm run gates` 串起来的那串逐条对齐（改这里记得同步 package.json 的 gates 与根 AGENTS.md）。
 #
 # ## 为什么拆
 # 拆之前是单 job 串行，实测 ~178s：环境准备 14s + typecheck 11s + typecheck:vue 18s

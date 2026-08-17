@@ -1190,19 +1190,24 @@ function findMatchingPreset(character, selections, background) {
 
 ## 十一、原版 vs 当前实现 关键差异
 
-| 维度        | 原版 (custom_start_index.html)                        | 当前 Phase 7d 实现                                  |
-| ----------- | ----------------------------------------------------- | --------------------------------------------------- |
-| 步骤数      | **4 步** (信息/选择/背景/确认)                        | **7 步** (难度/基础/核心/选择/背景/剧情/确认)       |
-| 框架        | Vue 3 + Pinia + Router (CDN 注入)                     | Vue 3 + Pinia + Router (Vite 本地编译)              |
-| CSS         | 单 `<style>` 块, scoped, 暖色羊皮纸                   | 主题 CSS 变量系统 (10 主题)                         |
-| 表单组件    | 10 个自定义 Form* 组件                                | 已有 FormInput/FormSelect/FormStepper/FormCascader  |
-| Step 2 布局 | `CategorySelectionLayout` (左侧分类+右侧内容)         | `CategoryTabs` + `QualityFilter` + `1fr 260px` grid |
-| 伙伴系统    | Step 3 完整伙伴系统 (PartnerList + CustomPartnerForm) | `PartnerWorldBookPanel` (占位 `<details>`)          |
-| 预设存储    | ST character variables                                | IndexedDB `createPresets` 表 (database.ts v7)       |
-| 提交方式    | MVU 变量 + `/trigger` 斜杠命令                        | `AgentOrchestrator.run()` + 独立的开场提示词        |
-| 数据来源    | CDN JSON + JSON5 解析                                 | `start-catalog.ts` 内联常量                         |
-| 类型检查    | 无 (纯 JS)                                            | TypeScript                                          |
-| 测试        | 无                                                    | Vitest (待写)                                       |
+| 维度        | 原版 (custom_start_index.html)                        | 当前 Phase 7d 实现                                                         |
+| ----------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
+| 步骤数      | **4 步** (信息/选择/背景/确认)                        | **7 步** (难度/基础/核心/选择/背景/剧情/确认)                              |
+| 框架        | Vue 3 + Pinia + Router (CDN 注入)                     | Vue 3 + Pinia + Router (Vite 本地编译)                                     |
+| CSS         | 单 `<style>` 块, scoped, 暖色羊皮纸                   | 主题 CSS 变量系统 (10 主题)                                                |
+| 表单组件    | 10 个自定义 Form* 组件                                | 已有 FormInput/FormSelect/FormStepper（🪦 FormCascader/FormKeyValue 已删） |
+| Step 2 布局 | `CategorySelectionLayout` (左侧分类+右侧内容)         | `CategoryTabs` + `QualityFilter` + `1fr 260px` grid                        |
+| 伙伴系统    | Step 3 完整伙伴系统 (PartnerList + CustomPartnerForm) | `PartnerWorldBookPanel` (占位 `<details>`，🪦 已删)                        |
+| 预设存储    | ST character variables                                | IndexedDB `createPresets` 表 (database.ts v7)                              |
+| 提交方式    | MVU 变量 + `/trigger` 斜杠命令                        | `AgentOrchestrator.run()` + 独立的开场提示词                               |
+| 数据来源    | CDN JSON + JSON5 解析                                 | `start-catalog.ts` 内联常量                                                |
+| 类型检查    | 无 (纯 JS)                                            | TypeScript                                                                 |
+| 测试        | 无                                                    | Vitest (待写)                                                              |
+
+> 🪦 `FormCascader.vue` / `FormKeyValue.vue` / `PartnerWorldBookPanel.vue` / `DestinyCoreCard.vue`
+> 已于 2026-08-17 因全仓零引用随审查小修波删除，恢复走 git 历史 `8e6565c^`；7d 复工如需重建按本文设计。
+> 本文**第三章「原版组件清单」里的同名条目描述的是原版参考页面**（`FormCascader` / `FormKeyValueInput`
+> 带 `data-v-*` scope id 的那两行、以及 §4.1 的原版 HTML 片段），与我们删掉的实现无关，故不加注。
 
 ---
 

@@ -35,11 +35,15 @@
 npx prettier --write <你改过的每一个 .md>
 ```
 
-三条细则，缺一条就会踩坑：
+两条细则：
 
-1. **只 `--write` 你真正改过的文件**，绝不跑仓库级 `npm run format` —— Windows 上 `core.autocrlf` 会让它把约 520 个文件重写成 LF，全部显示为已修改但 `git diff` 无内容变化。
+1. **只 `--write` 你真正改过的文件**。理由已不再是行尾（`.prettierrc` 的 `endOfLine: "auto"` 落地后，
+   格式化不会再重写行尾），而是**避免无关 churn** —— 仓库级 `npm run format` 会把几百个与本次改动
+   无关的文件卷进同一个提交，淹掉真正要看的那几行。
 2. **写完之后再格式化**。先格式化再编辑等于没格式化 —— CI 跑在 Linux/LF 检出上，它是权威闸门。
-3. **`git diff --numstat` 分辨真假改动**：没有 numstat 行的文件只是行尾变化，用 `git checkout -- <file>` 还原掉，别把它带进提交。
+
+> ✅ **本地 `npm run format:check` 现在可信**：`endOfLine: "auto"` 之前它在 Windows 上把 776/776 个文件
+> 全报成未格式化（纯假红，唯一的信息量是「你在 Windows 上」），只能靠 CI 兜底。现在本地红就是真的红。
 
 推完照样要检查 CI（上一条规则对直推同样生效）。
 
@@ -90,6 +94,8 @@ node -e "const fs=require('fs');const f=process.argv[1];const s=fs.readFileSync(
 docs/
 ├── fated-poem-engine-prd.md     # 🆕 项目 PRD（产品需求文档，必读）
 ├── ARCHITECTURE.md              # 完整软件+世界观架构
+│                                #    ⚠️ 「软件架构」部分内容截止 2026-06，已过期（见文件头横幅）；
+│                                #    结构性判断以本文件 + 两份分册为准。世界观部分仍有效
 ├── CHANGELOG.md                 # 🆕 变更记录（近期 Phase 详细记录，append-only）
 ├── known-issue.md               # 🆕 已知缺陷（有现象、有根因分析的那种）← TODO.md 指定的缺陷归属地
 ├── project-introduction.md      # 项目介绍（对外说明用）
@@ -277,7 +283,7 @@ E:\Projects\POD-IF\fated_poem_independent_assets\reference\status_index.html
 
 ## 常用命令
 
-**提交前的本地闸门集合 = `.github/workflows/ci.yml` 三个 job 的全部步骤**（注释里称「九道闸门」）。
+**提交前的本地闸门集合 = `.github/workflows/ci.yml` 三个 job 的全部步骤**（注释里称「八道闸门」）。
 一条条敲容易漏，所以有一键入口：
 
 ```bash
@@ -309,7 +315,9 @@ npm run test           # 运行 Vitest 测试套件（watch 模式）
 npm run lint:fix       # lint + 自动修（会自动删未引用导入）
 npm run knip           # 死代码原始报告（人看的）
 npm run knip:update    # 清理完死代码后收紧 knip-baseline.json
-npm run format         # ⚠️ 仓库级格式化，别跑（Windows 下会把约 520 个文件重写成 LF）
+npm run format         # ⚠️ 仓库级格式化，仍不建议随手跑：它会把几百个与本次改动无关的文件
+                       #    一起重写，淹掉 diff。（`endOfLine: "auto"` 落地后已无行尾重写风险，
+                       #    但「无关 churn」这条理由不变。）本地只 --write 自己改过的文件
 npm run dev            # 开发服务器（自动杀残留进程 + 固定 5173 端口）
                        # 入口是 scripts/dev.mjs，按平台分发：Windows → dev.bat，
                        # macOS/Linux → dev.sh（行为一致，端口清理用 lsof）
@@ -317,6 +325,18 @@ npm run dev            # 开发服务器（自动杀残留进程 + 固定 5173 �
                        #    dev.bat 注释一律纯 ASCII（中文注释会让 cmd 把注释片段当命令执行）
                        #    且行尾必须 CRLF；dev.sh 反过来必须 LF（shebang 带 CR 会
                        #    报 bad interpreter）。两条都由根目录 .gitattributes 钉死
+```
+
+仓库根还有一个**不是 npm 脚本**的入口（玩家侧双击用，非开发流程）：
+
+```bash
+update.bat             # 一键更新（双击运行）：git fetch → git pull --ff-only →
+                       # 仅当 package-lock.json 的 blob 哈希变了才 npm install →
+                       # 打印最近 3 条提交并提示「关掉 dev.bat 窗口再重开」
+                       # 不在 git 仓库（下载 zip）或无法快进（本地改过文件/历史分叉）时，
+                       # 给中文指引后 pause 退出，不会静默合并或覆盖本地改动
+                       # 🔴 与 dev.bat 同一条纪律：注释必须纯 ASCII（chcp 65001 会让
+                       #    cmd 的字节偏移解析器错位，中文注释片段会被当命令执行）
 ```
 
 ## Bug 反馈处理规范
