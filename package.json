@@ -5,15 +5,6 @@
   "main": "dist/sillytavern/index.js",
   "type": "module",
   "private": true,
-  "files": [
-    "dist",
-    "dist-ui",
-    "public",
-    "src",
-    "server",
-    "scripts",
-    "docs"
-  ],
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "vite build",
@@ -30,7 +21,8 @@
     "knip:ratchet": "node scripts/knip-ratchet.mjs",
     "knip:update": "node scripts/knip-ratchet.mjs --update",
     "lint": "eslint \"{src,server,tests,scripts}/**/*.{ts,vue,mjs,cjs}\" \"*.config.{ts,js}\" --max-warnings 0",
-    "lint:fix": "eslint \"{src,server,tests,scripts}/**/*.{ts,vue,mjs,cjs}\" \"*.config.{ts,js}\" --fix --max-warnings 0"
+    "lint:fix": "eslint \"{src,server,tests,scripts}/**/*.{ts,vue,mjs,cjs}\" \"*.config.{ts,js}\" --fix --max-warnings 0",
+    "gates": "npm run typecheck && npm run typecheck:vue && npm run typecheck:tools && npm run build && npm run format:check && npm run lint && npm run knip:ratchet && npm run test:run"
   },
   "keywords": [
     "sillytavern",

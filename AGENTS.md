@@ -35,17 +35,21 @@
 npx prettier --write <你改过的每一个 .md>
 ```
 
-三条细则，缺一条就会踩坑：
+两条细则：
 
-1. **只 `--write` 你真正改过的文件**，绝不跑仓库级 `npm run format` —— Windows 上 `core.autocrlf` 会让它把约 520 个文件重写成 LF，全部显示为已修改但 `git diff` 无内容变化。
+1. **只 `--write` 你真正改过的文件**。理由已不再是行尾（`.prettierrc` 的 `endOfLine: "auto"` 落地后，
+   格式化不会再重写行尾），而是**避免无关 churn** —— 仓库级 `npm run format` 会把几百个与本次改动
+   无关的文件卷进同一个提交，淹掉真正要看的那几行。
 2. **写完之后再格式化**。先格式化再编辑等于没格式化 —— CI 跑在 Linux/LF 检出上，它是权威闸门。
-3. **`git diff --numstat` 分辨真假改动**：没有 numstat 行的文件只是行尾变化，用 `git checkout -- <file>` 还原掉，别把它带进提交。
+
+> ✅ **本地 `npm run format:check` 现在可信**：`endOfLine: "auto"` 之前它在 Windows 上把 776/776 个文件
+> 全报成未格式化（纯假红，唯一的信息量是「你在 Windows 上」），只能靠 CI 兜底。现在本地红就是真的红。
 
 推完照样要检查 CI（上一条规则对直推同样生效）。
 
 ### 🔴 改中文文本之后必须验编码（每次，别凭肉眼）
 
-本仓大量文件是中文：提示词（`data/defaults/agent-config.json`）、世界书、设计文档。
+本仓大量文件是中文：提示词（`public/data/defaults/agent-config.json`）、世界书、设计文档。
 **用脚本批量改这些文件极易悄悄毁掉编码**，而症状全都不在改动处：
 
 - **U+FFFD 替换字符**（那个菱形问号）—— 一次错误的编码往返就会产生。`agent-config.json` 一度带着
@@ -65,10 +69,14 @@ node -e "const fs=require('fs');const f=process.argv[1];const s=fs.readFileSync(
 不为 0 就别提交 —— 编码坏字**不会让测试变红**，只会让模型看到坏输入。
 
 > ✅ **2026-08-05 起这条已自动化**：`tests/encoding-invariants.test.ts` 把上面三条判据变成了 CI 断言，
-> 扫 `data/` 与 `src|server|tests|scripts` 源码（`reference/` 不扫——上游语料自带坏字）。
+> 扫 `public/data/` 与 `src|server|tests|scripts` 源码（`reference/` 不扫——上游语料自带坏字）。
+> 🔴 **磁盘路径是 `public/data/`，运行期 URL 仍是 `/data/*`** —— 别看着 URL 就去仓库根找 `data/`，
+> 根目录那个 `data/`（真实内容临时驻留区）已被 `.gitignore` 整树排除、公开仓侧不存在。
 > 它还多扫一遍**解析后的 JSON 值**：合法转义写出来的退格源码干净、`JSON.parse` 也不报错，
 > 但落进字符串值里仍是真退格。上线当天就在 `ejs-backend-parity.test.ts` 逮到两个真 0x08。
-> **手工命令仍建议在改完当场跑一次**（比等 CI 快），但漏跑不再等于漏网。
+> **手工命令仍建议在改完当场跑一次**（比等 CI 快），但漏跑不再等于漏网 ——
+> 注意这道自动闸门只覆盖**公开仓侧**（`public/data/` 占位集 + 源码树）；
+> 私有内容仓里那份真实提示词/世界书不在扫描范围内，改那边仍然只能靠手工命令。
 
 > 配套的一条纪律：在脚本里拼这些转义时，用**原始字符串**或 `chr(92)` 拼，
 > 别在多层引号里堆反斜杠。2026-08-05 那轮就是这样先写坏了 JSON、又写坏了正则；
@@ -76,8 +84,9 @@ node -e "const fs=require('fs');const f=process.argv[1];const s=fs.readFileSync(
 
 ## 文档导航
 
-**发布前待办清单在根目录 [`TODO.md`](TODO.md)**（Mac 兼容 / 正式打包 / 配乐 / 远程素材 /
-主题打磨 / 多分辨率 / 移动端）。做完一条就把它搬进 `docs/CHANGELOG.md`，别在两处并存。
+**发布前待办清单在根目录 [`TODO.md`](TODO.md)**（8 条：Mac 兼容 / 正式打包 / 配乐 / 远程素材 /
+远程内容包（探索）/ 主题打磨 / 多分辨率 / 移动端）。做完一条就把它搬进 `docs/CHANGELOG.md`，
+已知缺陷记进 `docs/known-issue.md`，别在三处并存。
 
 详细设计文档统一在 `docs/` 目录下：
 
@@ -85,7 +94,14 @@ node -e "const fs=require('fs');const f=process.argv[1];const s=fs.readFileSync(
 docs/
 ├── fated-poem-engine-prd.md     # 🆕 项目 PRD（产品需求文档，必读）
 ├── ARCHITECTURE.md              # 完整软件+世界观架构
+│                                #    ⚠️ 「软件架构」部分内容截止 2026-06，已过期（见文件头横幅）；
+│                                #    结构性判断以本文件 + 两份分册为准。世界观部分仍有效
 ├── CHANGELOG.md                 # 🆕 变更记录（近期 Phase 详细记录，append-only）
+├── known-issue.md               # 🆕 已知缺陷（有现象、有根因分析的那种）← TODO.md 指定的缺陷归属地
+├── project-introduction.md      # 项目介绍（对外说明用）
+├── design.md                    # 前端设计规范（详见下节「前端 UI 设计规范（必读）」）
+├── reviews/                     # 历次代码审查存档（6 份，含修复状态闭环表）
+├── superpowers/specs/           # 数据字段规范 + 实体字段审计（详见下节「游戏数据字段规范（必读）」）
 ├── planning/                    # 会话追踪（task_plan / findings / progress）
 ├── phases/                      # Phase 计划
 │   ├── phase4_plan.md           # Phase 4 记忆系统 & 剧情规划
@@ -175,20 +191,29 @@ docs/superpowers/specs/2026-07-16-entity-field-audit.md             # 52 项现�
 
 ## 世界观数据参考（必读）
 
-**涉及所有游戏内部改动（数值/地理/种族/品质/战斗/制作/剧情/角色/物品/技能等）时，必须先查阅 `reference/world_book_index.md`。**
+**涉及所有游戏内部改动（数值/地理/种族/品质/战斗/制作/剧情/角色/物品/技能等）时，必须先查阅世界书索引。**
+
+🔴 **这两份资料已随内容分离移入私有内容仓 `fated_poem_independent_assets`，公开仓侧不可见**
+（根 `reference/` 已被 `.gitignore` 整树排除）。本机路径：
 
 ```bash
-reference/world_book_index.md    # 世界书条目索引（605 条目 → 主世界观/数值/地理/人物/DLC）← 游戏内改动必读
-reference/audit_report.md        # 代码 vs 世界书冲突审计报告
+E:\Projects\POD-IF\fated_poem_independent_assets\reference\world_book_index.md
+                                 # 世界书条目索引（605 条目 → 主世界观/数值/地理/人物/DLC）← 游戏内改动必读
+E:\Projects\POD-IF\fated_poem_independent_assets\reference\audit_report.md
+                                 # 代码 vs 世界书冲突审计报告
 ```
+
+> 没挂私有内容仓的环境（含 CI 与外部贡献者）读不到这两份 —— 此时不要盲改数值/世界观，
+> 停下来问，或把改动限制在不依赖世界书裁定的范围内。`.claude/workflows/audit-code.js` 与
+> PR 模板里对这两个文件的引用同样按此口径理解。
 
 ## 世界观叙事内容生成规范（必读）
 
 **在生成任何与《命定之诗》世界观相关的叙事内容时，必须先查阅叙事规范。** 完整范例句
 `docs/reference/narrative_context_example.md` 已随内容分离移入**私有内容仓**
 （`fated_poem_independent_assets/docs/reference/narrative_context_example.md`，
-2026-08-07 可选扫尾）——公开仓侧不可见；本地仓库路径
-`E:\code\fated_poem_independent_assets\docs\reference\narrative_context_example.md`。
+2026-08-07 可选扫尾）——公开仓侧不可见；本机路径
+`E:\Projects\POD-IF\fated_poem_independent_assets\docs\reference\narrative_context_example.md`。
 
 规范的核心（在公开仓长期有效）：
 
@@ -204,21 +229,29 @@ reference/audit_report.md        # 代码 vs 世界书冲突审计报告
 **调试 Agent 输出格式或修改 Agent 模板/解析链路时，可参考私有内容仓的 `reference/agent流程测试/`：**
 
 ```bash
-E:\code\fated_poem_independent_assets\reference\agent流程测试\对话样本.md  # 从游戏实例提取的 4 组测试用对话正文
-E:\code\fated_poem_independent_assets\reference\agent流程测试\要求.md      # 测试需求说明
+E:\Projects\POD-IF\fated_poem_independent_assets\reference\agent流程测试\对话样本.md  # 从游戏实例提取的 4 组测试用对话正文
+E:\Projects\POD-IF\fated_poem_independent_assets\reference\agent流程测试\要求.md      # 测试需求说明
 ```
 
 > `agent预期分析.md`（6 个 Agent 完整输出追踪 + 17 条 debug 检查点）已于 2026-08-08 删除。
 
 ## 前端 UI 参考（Phase 7 必读）
 
-**写任何前端 UI 代码前，必须先查阅以下参考页面。这些是从 v4.2.1 角色卡 CDN 爬取的原始前端，需用 Vanilla TS + HTML 重新实现:**
+**写任何前端 UI 代码前，可先查阅以下参考页面。这些是从 v4.2.1 角色卡 CDN 爬取的原始前端，需用 Vanilla TS + HTML 重新实现:**
+
+🔴 **这三份页面同样已移入私有内容仓 `fated_poem_independent_assets`，公开仓侧不可见。** 本机路径：
 
 ```bash
-reference/home_index.html          # 首页 (94KB) — Vue 3 SPA, 标题画面/环境检测/用户协议/存档管理入口
-reference/custom_start_index.html  # 捏人页 (341KB) — Vue 3 + Pinia + Router, 角色创建/属性分配/品质选择/装备技能
-reference/status_index.html        # 状态栏 (477KB) — React + immer + gsap, 角色状态/资源条/Avatar/地图/详情面板
+E:\Projects\POD-IF\fated_poem_independent_assets\reference\home_index.html
+                                   # 首页 (94KB) — Vue 3 SPA, 标题画面/环境检测/用户协议/存档管理入口
+E:\Projects\POD-IF\fated_poem_independent_assets\reference\custom_start_index.html
+                                   # 捏人页 (341KB) — Vue 3 + Pinia + Router, 角色创建/属性分配/品质选择/装备技能
+E:\Projects\POD-IF\fated_poem_independent_assets\reference\status_index.html
+                                   # 状态栏 (477KB) — React + immer + gsap, 角色状态/资源条/Avatar/地图/详情面板
 ```
+
+> 读不到原页面时，下面这份「参考页面架构摘要」与数值表就是公开仓侧的等效摘录，够用；
+> 真正的现行前端约定在 [`src/ui/AGENTS.md`](src/ui/AGENTS.md) 与 `docs/design.md`，那两份才是必读。
 
 ### 参考页面架构摘要
 
@@ -250,16 +283,41 @@ reference/status_index.html        # 状态栏 (477KB) — React + immer + gsap,
 
 ## 常用命令
 
+**提交前的本地闸门集合 = `.github/workflows/ci.yml` 三个 job 的全部步骤**（注释里称「八道闸门」）。
+一条条敲容易漏，所以有一键入口：
+
 ```bash
-npm run build          # 编译 TypeScript (tsc) → dist/
-npm run typecheck      # 仅类型检查，不输出文件 (tsc --noEmit)
-npm run test           # 运行 Vitest 测试套件（watch 模式）
-npm run test -- --run  # 单次运行（非 watch 模式）
+npm run gates          # 🔴 一键跑齐 CI 的全部闸门（types + quality + test 三组步骤）
+                       # 本地只跑其中几条 = 把剩下的留给 CI 挂红，然后连环重推
+```
+
+`gates` 展开后就是下面这八条（按 ci.yml 的 job 顺序）：
+
+```bash
+# ── types job ──
+npm run typecheck      # 仅类型检查，不输出文件 (tsc --noEmit)；主 tsconfig 只 include src/**
+npm run typecheck:vue  # vue-tsc --noEmit —— .vue SFC 的类型网，裸 tsc 不解析 SFC，改 Vue 必跑
+npm run typecheck:tools # tsc -p tsconfig.tools.json —— server/ tests/ *.config.ts 唯一的类型网
+npm run build          # Vite 打包前端 → dist-ui/（顺带兜住 tsc 看不见的资源导入 / CSS url() / vite 插件报错）
+# ── quality job ──
+npm run format:check   # Prettier 闸门（CI 权威口径；本地只 --write 自己改过的文件，别跑仓库级 format）
 npm run lint           # ESLint 闸门（--max-warnings 0：一条 warning 都会挂红）
-npm run lint:fix       # 同上 + 自动修（会自动删未引用导入）
-npm run knip           # 死代码原始报告（人看的）
 npm run knip:ratchet   # 死代码棘轮闸门（CI 跑这个：只许变少不许变多）
+# ── test job ──
+npm run test:run       # 单次运行 Vitest 全量（= npm run test -- --run）
+```
+
+其余非闸门命令：
+
+```bash
+npm run build:engine   # 编译 TypeScript (tsc) → dist/（引擎产物；注意与上面的 build 不是一回事）
+npm run test           # 运行 Vitest 测试套件（watch 模式）
+npm run lint:fix       # lint + 自动修（会自动删未引用导入）
+npm run knip           # 死代码原始报告（人看的）
 npm run knip:update    # 清理完死代码后收紧 knip-baseline.json
+npm run format         # ⚠️ 仓库级格式化，仍不建议随手跑：它会把几百个与本次改动无关的文件
+                       #    一起重写，淹掉 diff。（`endOfLine: "auto"` 落地后已无行尾重写风险，
+                       #    但「无关 churn」这条理由不变。）本地只 --write 自己改过的文件
 npm run dev            # 开发服务器（自动杀残留进程 + 固定 5173 端口）
                        # 入口是 scripts/dev.mjs，按平台分发：Windows → dev.bat，
                        # macOS/Linux → dev.sh（行为一致，端口清理用 lsof）
@@ -267,6 +325,18 @@ npm run dev            # 开发服务器（自动杀残留进程 + 固定 5173 �
                        #    dev.bat 注释一律纯 ASCII（中文注释会让 cmd 把注释片段当命令执行）
                        #    且行尾必须 CRLF；dev.sh 反过来必须 LF（shebang 带 CR 会
                        #    报 bad interpreter）。两条都由根目录 .gitattributes 钉死
+```
+
+仓库根还有一个**不是 npm 脚本**的入口（玩家侧双击用，非开发流程）：
+
+```bash
+update.bat             # 一键更新（双击运行）：git fetch → git pull --ff-only →
+                       # 仅当 package-lock.json 的 blob 哈希变了才 npm install →
+                       # 打印最近 3 条提交并提示「关掉 dev.bat 窗口再重开」
+                       # 不在 git 仓库（下载 zip）或无法快进（本地改过文件/历史分叉）时，
+                       # 给中文指引后 pause 退出，不会静默合并或覆盖本地改动
+                       # 🔴 与 dev.bat 同一条纪律：注释必须纯 ASCII（chcp 65001 会让
+                       #    cmd 的字节偏移解析器错位，中文注释片段会被当命令执行）
 ```
 
 ## Bug 反馈处理规范

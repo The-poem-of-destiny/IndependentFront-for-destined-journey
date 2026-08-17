@@ -36,13 +36,15 @@ src/ui/components/create/
 ├── CreateStepBasic.vue          ← Step 1: 表单 + BP/AP + ResourceBar
 │   └── AttributeEditor.vue      ← 五维属性 +/- 步进器
 ├── CreateStepDestinyCore.vue    ← Step 2: 24 核心 3 列网格
-│   └── DestinyCoreCard.vue      ← 单张核心卡片
+│   └── DestinyCoreCard.vue      ← 🪦 单张核心卡片（2026-08-17 因全仓零引用随审查小修波删除，
+│                                    恢复走 git 历史 8e6565c^；7d 复工如需重建按本节设计）
 ├── CreateStepSelections.vue     ← Step 3: 装备/道具/技能 选择
 │   ├── CategoryTabs.vue         ← [装备] [道具] [技能] 标签
 │   ├── QualityFilter.vue        ← rarity 筛选按钮组
 │   ├── SelectableCard.vue       ← 物品卡片 (tag/effect/desc/cost)
 │   ├── SelectedPanel.vue        ← 已选列表
-│   ├── PartnerWorldBookPanel.vue← 伙伴折叠面板 (占位)
+│   ├── PartnerWorldBookPanel.vue← 🪦 伙伴折叠面板 (占位)（2026-08-17 因全仓零引用随审查小修波
+│   │                               删除，恢复走 git 历史 8e6565c^；7d 复工如需重建按本节设计）
 │   └── CustomItemForm.vue       ← 自定义物品 Modal
 ├── CreateStepBackground.vue     ← Step 4: 背景故事
 │   └── BackgroundList.vue       ← 预设背景卡片
@@ -150,6 +152,8 @@ src/ui/components/create/
   <AppButton @click="showCustomForm=true">+ 自定义物品</AppButton>
   <PartnerWorldBookPanel />
   <!-- <details> 折叠面板, 占位 -->
+  <!-- 🪦 PartnerWorldBookPanel 已于 2026-08-17 因全仓零引用随审查小修波删除，
+       恢复走 git 历史 8e6565c^；7d 复工如需重建按本节设计 -->
   <CustomItemForm :visible @save @close />
 </section>
 ```
@@ -303,7 +307,7 @@ src/ui/components/create/
 6. **CustomItemForm** — 标签/效果的 UI 输入体验不好 (小 input 挤在一起)
 7. **Step 5 剧情规划** — 占位, 没有真正调用 AI
 8. **Step 6 跳转** — `/game/:id` 页面还没做, 跳转会 404
-9. **伙伴系统** — PartnerWorldBookPanel 只是占位 `<details>`
+9. **伙伴系统** — PartnerWorldBookPanel 只是占位 `<details>`（🪦 该组件已于 2026-08-17 因全仓零引用随审查小修波删除，恢复走 git 历史 `8e6565c^`；7d 复工如需重建按本节设计）
 10. **测试** — 新建的组件没有对应的 `.test.ts` 文件
 11. **createPresets 表的 deleteSaveSlot 级联删除** — 未处理
 

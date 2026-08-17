@@ -11,7 +11,7 @@
 - [PowerShell 会毁掉 UTF-8 源文件](powershell-mangles-utf8-source.md) — PS 5.1 的 Get/Set-Content 批量替换把中文注释整份变乱码；改文件一律 Edit/Write，脚本化用 Bash
 - [备份新字段：缺席 ≠ 空数组](backup-field-absent-vs-empty.md) — FullBackup 加表时别照抄 clear-then-guard；字段 undefined 必须整表不动，否则旧备份清空用户世界书
 - [真机走查页面换不了视图](browser-pane-raf-blocks-transitions.md) — Browser pane 不显示则无 rAF，Vue transition mode="out-in" 永远卡首屏；先 reload 再打 rAF 补丁再切视图
-- [prettier 本地全红是 CRLF 假象](prettier-baseline-dirty.md) — 仓库内容其实合格（CI 绿）；只格式化自己动过的文件，别跑 npm run format，也别以为可以不管格式
+- [prettier CRLF 假红已修 + 一键 gates](prettier-baseline-dirty.md) — endOfLine 改 auto 后 format:check 本地可信；`npm run gates` 跑齐 CI 八道闸门（不是九道，历史文档有 +1 误差）；仍别跑 npm run format
 - [.bat stderr 噪音要换姿势才测得出](bat-stderr-harness-dependent.md) — Start-Process 恒报 0；只有 Git Bash 的 `cmd.exe /c 全路径 2> e.txt < /dev/null` 复现得出。测 dev.bat 先把端口改等长安全值，别碰 5173
 - [EJS 语料回退基线 17.8%](ejs-corpus-fallback-baseline.md) — 45 条含 EJS 里 8 条注定回退；`{{roll}}` 嵌在 EJS 代码块内推翻设计 D1 的宏剥离顺序
 - [v3 M0 签名改造落点](combat-v3-m0-signature-refactor.md) — performAttackCheck 改 rolls[]、morale d20 必传、AppSettings.combatEngineVersion；调用点传同值保 v2 行为；M1 起内核从 DiceTape 取真骰
@@ -28,6 +28,8 @@
 - [vite define 两个静默陷阱](vite-define-two-traps.md) — vitest 不共用 vite.config.ts；define 只替换裸标识符，成员访问读不到注入值
 - [worktree 里 knip 报假死代码](knip-ratchet-worktree-phantoms.md) — worktree 的 node_modules 是空目录，knip:ratchet 会多报 11 条工具链条目；别据此跑 knip:update
 - [uid 446 runtime_geo 契约](uid446-runtime-geo-contract.md) — importance 越大越显著（tier 要反着映）、大陆 id 必须是字面 'continent'；直译字段名会让区域层静默空转
+- [detach 测试必须喂 Proxy](idb-detach-test-needs-proxy.md) — 「深等+非同引用」测 JSON detach 恒真；只有 `new Proxy(obj,{})` 会 DataCloneError，空数组守卫只有 spy 钉得住
 - [冗余保险会互相掩护](redundant-guards-mask-mutations.md) — 决定性算法要逐条变异测试：两处重叠的保险单删都是绿的，钉不住的那处要么补用例要么降级成「保险」
 - [CRLF 会毁掉变异脚本](crlf-breaks-mutation-scripts.md) — src/** 全是 CRLF；replace(行+"\n") 静默失败留下两份代码，变异「没咬住」的结论多半是脚本没生效
 - [placeholder-hashes 只挡一半](placeholder-hashes-partial-gate.md) — 改 public/data/defaults/*.json 会让 byPreset/bySection 静默过期；CI 只校验 byBook，重跑脚本会连别人在飞的改动一起烘
+- [注册表加载器的概率红](content-registry-loader-flake.md) — content-store-registry 那条「装包后零 fetch」单跑也会偶发红；附一个证明清白的换文件实验

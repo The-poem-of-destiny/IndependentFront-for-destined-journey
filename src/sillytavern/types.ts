@@ -1551,6 +1551,26 @@ export interface AgentContext {
    */
   combatActive?: boolean;
 
+  // --- 运行时填充槽（buildZoneContext 的 craft / combat / outline 三区 + <剧情大纲> 块） ---
+  /**
+   * 剧情大纲（mode≠off 时由 `game-pipeline.loadPlotData` 从 DB 取出挂上）。
+   *
+   * 🔴 这三个槽此前是两侧各打一个 `as any` 的隐式约定，键名一度写读不一致
+   * （生产端写 `plotOutline`、`buildZoneContext` 读 `_plotOutline`，编译器两侧都看不见）。
+   * 声明成正式可选字段后，键名错配立刻是编译错误。
+   */
+  plotOutline?: PlotOutline | null;
+  /**
+   * 制作项目列表（craft zone 的输入）。
+   * 🔴 目前**没有任何生产方** —— 注释里说的 craft-resolver 从未落地，恒为 undefined。
+   */
+  craftProjects?: unknown[];
+  /**
+   * 当前战斗状态（combat zone 的输入）。
+   * 🔴 同上：**没有任何生产方**（战斗现役走 combat-v3 的独立会话，不经此槽）。
+   */
+  activeCombat?: CombatState | null;
+
   /**
    * 存档开局提示词原文（save.metadata.openingPrompt）——含捏人页选的初始技能/装备
    * 声明（`--- 初始技能 ---` 自然语言段）。request_dispatcher 的 {{SKILL_STATE}} 用它

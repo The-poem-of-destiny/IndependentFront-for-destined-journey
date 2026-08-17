@@ -954,7 +954,7 @@ export class GamePipeline {
         getLatestPlotOutline(this.saveId),
         getPlotEvents(this.saveId),
       ]);
-      if (outline) (context as any).plotOutline = outline;
+      if (outline) context.plotOutline = outline;
       if (events?.length) context.plotEvents = events;
     } catch (err) {
       console.warn('[GamePipeline] 剧情数据加载失败（不阻塞本轮）:', err);

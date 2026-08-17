@@ -17,10 +17,20 @@ import { describe, expect, it } from 'vitest';
  * 仓库级契约闸门。
  */
 describe('出厂 memory_summary 默认 prompt 与解析器契约对齐', () => {
+  /**
+   * 🔴 取不到就**当场红**，绝不 `?? ''` 静默降级：两条用例里的负向断言
+   * （`not.toMatch` / `not.toContain`）对空串**恒真** —— agent id 被改名、
+   * 字段被删、配置路径搬家，闸门都会照绿，而它守的正是「不红但坏」的故障。
+   */
   function defaultMemorySummaryPrompt(): string {
     const raw = readFileSync('public/data/defaults/agent-config.json', 'utf8');
     const cfg = JSON.parse(raw) as { agents: Record<string, { systemPrompt?: string }> };
-    return cfg.agents.memory_summary?.systemPrompt ?? '';
+    const prompt = cfg.agents.memory_summary?.systemPrompt ?? '';
+    expect(
+      prompt.length,
+      'agent-config.json 里取不到 memory_summary.systemPrompt —— agent 改名/字段删除/路径搬家？',
+    ).toBeGreaterThan(0);
+    return prompt;
   }
 
   it('不得教模型把 hiddenLine 留空（空串会被解析器弃掉整条记忆）', () => {

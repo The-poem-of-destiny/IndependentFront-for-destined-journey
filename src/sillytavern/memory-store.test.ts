@@ -14,7 +14,7 @@ import type { MemoryRecord } from './types';
 
 const mockGetMemories = vi.hoisted(() => vi.fn());
 const mockSaveMemory = vi.hoisted(() => vi.fn());
-const mockDeleteMemory = vi.hoisted(() => vi.fn());
+const mockDeleteMemories = vi.hoisted(() => vi.fn());
 const mockFetch = vi.hoisted(() => vi.fn());
 
 // Mock database module (hoisted by Vitest)
@@ -22,7 +22,7 @@ vi.mock('./database', () => ({
   getMemories: mockGetMemories,
   getRecentMemories: vi.fn(),
   saveMemory: mockSaveMemory,
-  deleteMemory: mockDeleteMemory,
+  deleteMemories: mockDeleteMemories,
 }));
 
 // Stub global fetch
@@ -535,7 +535,7 @@ describe('checkCompressionNeeded', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// 6. applyCompression — mock deleteMemory + saveMemory
+// 6. applyCompression — mock deleteMemories + saveMemory
 // ═══════════════════════════════════════════════════════════════
 
 describe('applyCompression', () => {
@@ -548,11 +548,9 @@ describe('applyCompression', () => {
 
     await applyCompression('save_1', oldMemories, summaryMemory);
 
-    // Should call deleteMemory for each old memory
-    expect(mockDeleteMemory).toHaveBeenCalledTimes(5);
-    for (const mem of oldMemories) {
-      expect(mockDeleteMemory).toHaveBeenCalledWith(mem.id);
-    }
+    // 一次 bulkDelete，且这 5 条的 id 一条不少（逐条删已改为批量，语义等价）
+    expect(mockDeleteMemories).toHaveBeenCalledTimes(1);
+    expect(mockDeleteMemories).toHaveBeenCalledWith(oldMemories.map((m) => m.id));
 
     // Should call saveMemory once with the summary
     expect(mockSaveMemory).toHaveBeenCalledTimes(1);
@@ -564,7 +562,8 @@ describe('applyCompression', () => {
 
     await applyCompression('save_1', [], summaryMemory);
 
-    expect(mockDeleteMemory).not.toHaveBeenCalled();
+    // 空数组照样交给 bulkDelete —— 它对空输入早退，一行都删不掉（等价于此前的"不调用"）
+    expect(mockDeleteMemories).toHaveBeenCalledWith([]);
     expect(mockSaveMemory).toHaveBeenCalledTimes(1);
     expect(mockSaveMemory).toHaveBeenCalledWith(summaryMemory);
   });
@@ -574,7 +573,7 @@ describe('applyCompression', () => {
     const summaryMemory = makeMemory({ id: 'MEM_SUMMARY' });
 
     const callOrder: string[] = [];
-    mockDeleteMemory.mockImplementation(async () => {
+    mockDeleteMemories.mockImplementation(async () => {
       callOrder.push('delete');
     });
     mockSaveMemory.mockImplementation(async () => {
@@ -583,9 +582,8 @@ describe('applyCompression', () => {
 
     await applyCompression('save_1', oldMemories, summaryMemory);
 
-    // All deletes before the save
-    expect(callOrder.slice(0, 3).every((s) => s === 'delete')).toBe(true);
-    expect(callOrder[callOrder.length - 1]).toBe('save');
+    // 删除（一次批量）必须发生在写摘要之前
+    expect(callOrder).toEqual(['delete', 'save']);
   });
 });
 

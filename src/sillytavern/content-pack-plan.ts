@@ -8,9 +8,15 @@
  * 为什么存在（与 content-source.ts 的分工）:
  * `content-source.ts` 承载校验 + hash 工具 + 分节解析（T1 范围）；**planner 的四态判定
  * 逻辑搬到本文件**——它是波 1 最复杂的纯函数（四态 + uid 迁移 + 卸载 + diff），独立成模块
- * 便于单测、便于执行器（content-store）只 import 一个 `planPackInstall` 入口。本文件
- * import content-source.ts 的 hash 工具（`hashWorldBook` / `hashContentDeterministic`），
- * 依赖边方向不变（planner 是 content-source 的消费者，不是反过来）。
+ * 便于单测、便于执行器（content-store）只 import 一个 `planPackInstall` 入口。
+ *
+ * 🔴 **两个文件互相 import，是一条真实的运行时环**（如实记录，别照旧注释理解成单向）：
+ * 本文件取 content-source.ts 的 hash / 校验工具（`hashWorldBook` /
+ * `hashContentDeterministic` / `validatePackOrThrow` / `PLACEHOLDER_UID_RESERVED_BASE`），
+ * 而 content-source.ts 又 import 本文件的 `planPackInstall` 做委托转发（那边:575）。
+ * 目前无害**只因为两侧的使用点全在函数体内**——ESM 环下模块初始化期取到的是 undefined，
+ * 所以**任一侧都不许在模块顶层（含字段初始值 / 顶层常量表达式）使用对方的导出**。
+ * 真要解环: 把共用的 hash 工具下沉成第三个叶子模块，或删掉 content-source 那个转发口。
  *
  * 纯度约束（与 workshop-install-plan.ts / asset-import-plan.ts 同一个规矩）:
  * 无 I/O、无 Dexie、无 Vue、无 `crypto.subtle`（异步会把 planner 传染成 async）。

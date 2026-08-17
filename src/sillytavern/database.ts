@@ -1172,8 +1172,25 @@ export async function savePreset(preset: ChatPreset): Promise<string> {
   return preset.id;
 }
 
+/**
+ * 批量落库预设（内容包安装等一次几十条的场景）。
+ * 逐条 `savePreset` 是 N 次 IDB 往返，bulkPut 一次；detach 纪律与 savePreset 完全一致。
+ */
+export async function savePresets(presets: ChatPreset[]): Promise<void> {
+  if (presets.length === 0) return;
+  await getDatabase().presets.bulkPut(
+    presets.map((p) => JSON.parse(JSON.stringify(p)) as ChatPreset),
+  );
+}
+
 export async function deletePreset(id: string): Promise<void> {
   await getDatabase().presets.delete(id);
+}
+
+/** 批量删除预设（语义等价于逐条 deletePreset，少 N-1 次 IDB 往返） */
+export async function deletePresets(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await getDatabase().presets.bulkDelete(ids);
 }
 
 export async function getSettings(): Promise<AppSettings | undefined> {
@@ -1221,6 +1238,12 @@ export async function saveMemory(memory: MemoryRecord): Promise<string> {
 
 export async function deleteMemory(id: string): Promise<void> {
   await getDatabase().memories.delete(id);
+}
+
+/** 批量删除记忆（语义等价于逐条 deleteMemory；记忆压缩一次可涉及几十条） */
+export async function deleteMemories(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await getDatabase().memories.bulkDelete(ids);
 }
 
 /** 删除 realTimestamp 严格大于给定值的记忆（快照恢复时清理"未来"记忆用；记忆 append-only，按时间清理安全） */

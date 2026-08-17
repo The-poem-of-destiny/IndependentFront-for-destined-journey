@@ -72,7 +72,8 @@ src/sillytavern/                    ← 核心引擎
   ├── agent-client.ts               ← [Phase 3] API 客户端（每 Agent 独立 userId / 重试退避 / 缓存检测）
   ├── agent-templates.ts            ← [Phase 3+9] Prompt 模板（systemPrompt 已迁 agent-config.json，留 stub + 动态上下文）
   ├── agent-config.json             ← [Phase 9] 10+ Agent 完整 systemPrompt 唯一来源
-  │      （🔴 实际文件在 `data/defaults/agent-config.json`，不在本目录）
+  │      （🔴 实际文件在 `public/data/defaults/agent-config.json`，不在本目录；
+  │        磁盘路径带 `public/`，运行时 URL 仍是 `/data/defaults/agent-config.json`）
   │      🔴 **story 是这条「唯一来源」的例外**：`buildAgentMessages(story)` 先跑
   │         `assemblePresetContent`，拿到内容就直接用、**根本不看 systemPrompt**，
   │         只有「用户一个预设都没有」时才回退 `STORY_TEMPLATE.fixedSystem + fixedExamples`。
@@ -84,7 +85,7 @@ src/sillytavern/                    ← 核心引擎
   │         **不读 `prompt_order`** —— 现行预设 101 条里只有 32 条真的进提示词，
   │         写进一条没启用的条目 = 写进空气
   │      🔴 **`image_prompt.systemPrompt` 已退役**（图像 v2 / C5，字段已从本文件删除）：
-  │         那段提示词随方言走，真源是 `data/content/image-dialects.json`（内容注册表
+  │         那段提示词随方言走，真源是 `public/data/content/image-dialects.json`（内容注册表
   │         第 7 面，pack 可整份替换），用户改动存 `imageDialectOverrides[dialectId]`。
   │         留在这里就是 D53 点名的第三份拷贝 —— 换条方言它不跟着换，用户改完看着生效、
   │         切回来又变回去。该 agent 的 model / 温度 / 世界书旋钮**不动**，仍在本文件
@@ -146,8 +147,11 @@ src/sillytavern/                    ← 核心引擎
   │         （applySetLocation 仅玩家 / applyTimeAdvance 跨天重断言 / packStamp=contentHash 自愈），
   │         设计与 14 条裁定见 docs/planning/2026-08-11-map-system-v1-integration.md
   │
-  ├── combat-intention.ts / combat-damage.ts / combat-turn.ts / combat-resolver.ts
+  ├── combat-intention.ts / combat-damage.ts / combat-turn.ts
   │   └── (以上为 v2 战斗纯计算函数，v3 内核仍调用；v2 编排层 combat-runner/combat-pipeline 由 M5 删除)
+  │       🪦 `combat-resolver.ts` 已被 M5 删除（`$combat` API + 8 步伤害管线随 v2 运行时一起退役）。
+  │          存活的纯函数（`characterToCombatParticipant` 等）迁到 `combat-v2-types.ts`，
+  │          全仓零 import，别按图找那个文件。
   │   └── combat-v3/               ← [战斗 v3] 代码内核主持流程（M0-M5 已合入）
   │       ├── kernel.ts / reducer.ts / state.ts     ← 状态机 + 原子提交 + 5 不变量
   │       ├── dice-tape.ts                          ← 分通道骰带（32/10/7/6/5）
@@ -180,7 +184,7 @@ src/sillytavern/                    ← 核心引擎
   │                                     + 纯函数（parseCatalogData 容错解析 / lookupCost 查表 /
   │                                     flattenLocationTree / classifyBackground）
   │       🪦 `start-catalog-data.ts`（8704 行）已删。七个池（装备/物品/技能、背景、命定核心、
-  │          种族/身份点数表、起始地树）住在 `data/content/catalog.json`，经内容注册表
+  │          种族/身份点数表、起始地树）住在 `public/data/content/catalog.json`，经内容注册表
   │          （content-store 的 `catalog` 面）供给、pack 可整份替换。
   │          🔴 **不许往机制文件里加任何一条具体条目** —— `start-catalog-mechanics.test.ts`
   │             有一条结构闸门专门盯这件事（导出名黑名单）。
@@ -254,7 +258,7 @@ src/sillytavern/                    ← 核心引擎
   │                                    / `SceneImageRecord.composeWarnings[]`（C15 的落库告警）
   ├── image-dialect.ts              ← [图像 v2 / C4·C6] 方言的容错解析（parseImageDialects）+ 按 id 取用
   │                                    并叠加用户覆盖（resolveImageDialect）。内容注册表**第 7 面**
-  │                                    `imageDialects` 的引擎侧；数据在 `data/content/image-dialects.json`，
+  │                                    `imageDialects` 的引擎侧；数据在 `public/data/content/image-dialects.json`，
   │                                    pack 可整份替换（与 catalog 等六面同一机制）
   │                                    🔴 **本模块永不抛**：方言 JSON 是第三方可编辑的数据，认不出的旋钮值
   │                                       回落 danbooru 形状、认不出的条目整条跳过，返回值永远是合法数组
@@ -389,7 +393,10 @@ src/sillytavern/                    ← 核心引擎
   │      契约互斥」那个 auto-import 陷阱：留下的那份改名 `var-resolver.applyPathOps`，
   │      入参形状提进 `types.ts` 的 `VarPathOps`；`VarsPatch` 保留，它是效果系统
   │      （`effect-runtime.executeVarsPatch`）的声明式载荷，两者用途不同别再混。
-  ├── api-router.ts / api-tools.ts
+  ├── api-tools.ts
+  │   🪦 `api-router.ts` 已删（BFF 同源后端重构 Phase A+B）。路由改住 `server/routes/`
+  │      （chat / models / image / embeddings / proxy / status），入口是 `server/app.ts`，
+  │      引擎目录里不再有路由层，别按图找那个文件。
   │
   └── (战斗 v2 纯计算规则见 docs/reference/combat-system-architecture.md；v3 内核见 docs/reference/combat-system-architecture-v3.md)
 ```
