@@ -52,6 +52,9 @@ const PLACEHOLDER_BODIES: Record<string, unknown> = {
       },
     ],
   },
+  // 🔴 remoteAssets（远程素材 v1）：裸数组，没有 `{ data }` 壳；缺席同样不是错误
+  //    （声明清单只剩世界书那一半，同步照跑）
+  '/data/content/remote-assets.json': [{ name: '占位角色', url: 'https://example.invalid/a.png' }],
   '/data/defaults/map-marker-presets.json': [{ id: 'marker-placeholder' }],
 };
 
@@ -126,6 +129,7 @@ describe('ensureContentRegistryLoaded —— URL 约定', () => {
       'markers',
       'namePools',
       'randomEvents',
+      'remoteAssets',
     ]);
     const byFace = Object.fromEntries(CONTENT_REGISTRY_SOURCES.map((s) => [s.face, s.url]));
     expect(byFace.catalog).toBe('/data/content/catalog.json');
@@ -140,6 +144,9 @@ describe('ensureContentRegistryLoaded —— URL 约定', () => {
     // 🔴 randomEvents（随机事件 v1 / §3.3，在 ContentPack 里是第 13 分节）：缺席同样不是
     //    错误 —— 空包 → 掷骰/首访/保洁/注入四条钩子整段 no-op
     expect(byFace.randomEvents).toBe('/data/content/random-events.json');
+    // 🔴 remoteAssets（远程素材 v1，在 ContentPack 里是第 14 分节）：缺席不是错误 ——
+    //    声明只剩世界书那一半
+    expect(byFace.remoteAssets).toBe('/data/content/remote-assets.json');
     // 🔴 地图标记预设今天就住在 data/defaults/，抽取时不搬家
     expect(byFace.markers).toBe('/data/defaults/map-marker-presets.json');
   });
@@ -221,6 +228,7 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
       'markers',
       'namePools',
       'randomEvents',
+      'remoteAssets',
     ]);
     expect(Object.values(r).every((v) => v === undefined)).toBe(true);
   });

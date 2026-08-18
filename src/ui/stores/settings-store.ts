@@ -289,6 +289,14 @@ function getDefaults(): UiSettings {
     //   下面这项是几个 id 的开关列表，体积无关紧要，继续留在设置里。
     beautifierBuiltinDisabled: [],
 
+    // 素材 —— 远程素材同步（远程素材 v1）。默认**开**：声明本来就写在世界书/内容包里，
+    // 作者的意图就是「这些图从这儿取」，默认关掉等于让每个人先去设置页找一遍开关。
+    // 关掉是彻底 no-op（连镜像删除都不做），见 settings-types.ts 那条注释。
+    remoteAssetsEnabled: true,
+    // 玩家改名/改过/删掉的远程素材槽位（「别再下回来」的备忘）。空 = 一个都没动过；
+    // 每次同步后按当前声明清单收拢，不会无限长。见 settings-types.ts 那条注释。
+    remoteAssetTombstones: [],
+
     // 图像生成（设计 §11；图像 v2 / C8 起是 per-provider 袋子）——
     // 🔴 常量一律从 `image-defaults.ts` / `image-dialect.ts` 取，**不照抄设计文档里的
     //    字面值**：抄一份进来就是第二个真相来源，而两处漂移的症状只是「画出来的

@@ -301,8 +301,9 @@ export async function loadAllDefaultBooks(): Promise<WorldBook[]> {
 
 /**
  * 内容注册表的各面（D16 / §5.1；第 7 面 imageDialects 由图像 v2 追加，
- * 第 8 面 mapPack 由地图系统 v1 追加，`randomEvents` 由随机事件系统 v1 追加 ——
- * 后者在 `ContentPack` 里是**第 13 分节**，两套编号各数各的，别混着读）。
+ * 第 8 面 mapPack 由地图系统 v1 追加，`randomEvents` 由随机事件系统 v1 追加、
+ * `remoteAssets` 由远程素材 v1 追加 —— 后两者在 `ContentPack` 里分别是**第 13 / 第 14
+ * 分节**，两套编号各数各的，别混着读）。
  *
  * 约定 URL: `/data/content/<name>.json`。本波（T2）先灌占位 = 现有代码常量；波 2 逐面接管，
  * pack 安装（T7）重灌。消费方同步读，所以灌注必须在任何 agent 执行前完成。
@@ -357,6 +358,17 @@ export interface ContentRegistry {
    * 游戏一个字节都不受影响（引擎仓零内置事件）。
    */
   randomEvents: unknown;
+  /**
+   * 远程素材声明（远程素材 v1）：`remote-assets.json` 的原始 JSON（裸数组）。
+   *
+   * 🔴 与 `mapPack` / `randomEvents` **不同：没有引擎侧的注入缝**。这一面的唯一
+   * 消费方在 UI（`lib/remote-asset-sync.ts` 的同步服务），所以 `setContentRegistry`
+   * 里没有对应的 `install*` 副作用 —— 读它的人直接 `getContentRegistry().remoteAssets`。
+   *
+   * 🔴 缺席不是错误：波 1 的 `normalizePackRemoteAssets` 吃到 `undefined` 返回空数组，
+   * 于是「声明清单」里只剩世界书那一半，同步照跑。
+   */
+  remoteAssets: unknown;
 }
 
 /**
@@ -417,6 +429,7 @@ function createEmptyRegistry(): ContentRegistry {
     imageDialects: undefined,
     mapPack: undefined,
     randomEvents: undefined,
+    remoteAssets: undefined,
   };
 }
 
@@ -462,6 +475,7 @@ export const CONTENT_REGISTRY_SOURCES: ReadonlyArray<{
   { face: 'imageDialects', url: '/data/content/image-dialects.json' },
   { face: 'mapPack', url: '/data/content/map-pack.json' },
   { face: 'randomEvents', url: '/data/content/random-events.json' },
+  { face: 'remoteAssets', url: '/data/content/remote-assets.json' },
   { face: 'markers', url: '/data/defaults/map-marker-presets.json' },
 ];
 
@@ -575,6 +589,8 @@ function packRegistryFaces(
   if (pack.imageDialects !== undefined) out.imageDialects = pack.imageDialects;
   if (pack.mapPack !== undefined) out.mapPack = pack.mapPack;
   if (pack.randomEvents !== undefined) out.randomEvents = pack.randomEvents;
+  // 远程素材分节是**裸数组**（没有 `.data` / `{ dialects }` 那层壳），故整节走
+  if (pack.remoteAssets !== undefined) out.remoteAssets = pack.remoteAssets;
   return out;
 }
 
@@ -1019,6 +1035,7 @@ export const useContentStore = defineStore('content', () => {
       imageDialects: resolveSection(packFaces.imageDialects, reg.imageDialects),
       mapPack: resolveSection(packFaces.mapPack, reg.mapPack),
       randomEvents: resolveSection(packFaces.randomEvents, reg.randomEvents),
+      remoteAssets: resolveSection(packFaces.remoteAssets, reg.remoteAssets),
     });
 
     // e. 存档 uid 迁移（D43）：rewrite 应用 + needsSelectionPartitions 标记

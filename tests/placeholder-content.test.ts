@@ -20,6 +20,7 @@ import {
 } from '../src/sillytavern/image-defaults';
 import { setContentRegistry, getContentRegistry } from '../src/ui/stores/content-store';
 import { coerceMapPack, isEmptyMapPack } from '../src/sillytavern/map-pack';
+import { normalizePackRemoteAssets } from '../src/sillytavern/remote-asset-catalogue';
 
 /**
  * 占位内容集能不能被现有解析器吃下（内容-引擎分离 §6 / T16）。
@@ -52,6 +53,7 @@ const brandingRaw = readJson(join(PLACEHOLDER_CONTENT, 'branding.json'));
 const imageDialectsRaw = readJson(join(PLACEHOLDER_CONTENT, 'image-dialects.json'));
 const mapPackRaw = readJson(join(PLACEHOLDER_CONTENT, 'map-pack.json'));
 const randomEventsRaw = readJson(join(PLACEHOLDER_CONTENT, 'random-events.json'));
+const remoteAssetsRaw = readJson(join(PLACEHOLDER_CONTENT, 'remote-assets.json'));
 const markersRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'map-marker-presets.json'));
 const audioManifestRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'audio-manifest.json'));
 const beautifierRaw = readJson(join(PLACEHOLDER_DEFAULTS, 'beautifier-rules.json')) as {
@@ -75,6 +77,7 @@ describe('占位内容 · 注册表八面能被生产解析器吃下', () => {
       imageDialects: imageDialectsRaw,
       mapPack: mapPackRaw,
       randomEvents: randomEventsRaw,
+      remoteAssets: remoteAssetsRaw,
     });
   });
 
@@ -235,6 +238,14 @@ describe('占位内容 · 注册表八面能被生产解析器吃下', () => {
   it('markers / audio manifest：空数组（面板空态，D12 / D23）', () => {
     expect(markersRaw).toEqual([]);
     expect(audioManifestRaw).toEqual([]);
+  });
+
+  it('remoteAssets：空数组，且过生产收窄器给出空清单（公开仓零外链）', () => {
+    // 🔴 公开仓**一条远程声明都不该有**：这一面的每一行都是一个会被真的去请求的
+    //    第三方地址，占位集里塞一条就等于让每个开箱即用的用户去连一次别人的图床。
+    //    真实内容仓那份由它自己的 CI 守（与其余各面同一口径）。
+    expect(remoteAssetsRaw).toEqual([]);
+    expect(normalizePackRemoteAssets(getContentRegistry().remoteAssets)).toEqual([]);
   });
 });
 
