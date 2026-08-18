@@ -1,7 +1,11 @@
 # Asset Management System — Design v1.0 (post-grill)
 
 **Date:** 2026-07-29
-**Status:** Design, pre-implementation. Point-in-time; supersede with a new dated file rather than silently rewriting.
+**Status:** ✅ **Implemented and shipped** — the system is live (asset library, zip import, render sites, large
+portrait, crop editor). §0–§14 are the design as decided; **§15 is the implementation-and-review log** and, where the
+two disagree, §15 wins. Point-in-time; supersede with a new dated file rather than silently rewriting.
+🔴 One standing caveat: the real-hardware verification in §15.10 covers the **`e818b61`-era UI only** — the shipped
+framing UI (`PortraitSettingsDialog`, `ad612d5`) has never been walked on hardware. Details in §15.10/§15.11.
 **Scope:** Image/video asset library (avatars + portrait types) and one-click zip import covering both assets and audio.
 
 **Source material:**

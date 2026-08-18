@@ -1,6 +1,10 @@
 # 战斗 Agent 会话模式改造 —— 设计定稿（2026-08-09）
 
-> 状态：**已实施（2026-08-09，lean-delegation 波 1-6 / T1-T17 全绿，7397 tests）**。引擎侧：§2.1 持久会话 / §2.2 工具增删查改（get_unit_detail 新增、get_hp_percent 删除）+ 查询命令分流 / §2.3 工具链规范 / §2.4 submit_adjudication 执行端 / §2.5 结算演绎 / §2.6 终局落库回写 / §2.7 system prompt 迁移 agent-config.json。前端侧：§3.1 CombatPanel 重写 v3 / §3.2 玩家输入 submitCombatCommand / §3.3 单位卡片 / §3.4 面板弹出修复（v3_units_snapshot + 事件链 + 玩家输入桥时序修复）/ §3.5 跳过/重开战斗 + pre-combat 快照。🔴 真机走查未做。前置决策调查见 `2026-08-09-combat-agent-session-design.md`（逐条决策已完成，本文件为落地方案）。
+> 状态：**已实施（2026-08-09，lean-delegation 波 1-6 / T1-T17 全绿，7397 tests）**。引擎侧：§2.1 持久会话 / §2.2 工具增删查改（get_unit_detail 新增、get_hp_percent 删除）+ 查询命令分流 / §2.3 工具链规范 / §2.4 submit_adjudication 执行端 / §2.5 结算演绎 / §2.6 终局落库回写 / §2.7 system prompt 迁移 agent-config.json。前端侧：§3.1 CombatPanel 重写 v3 / §3.2 玩家输入 submitCombatCommand / §3.3 单位卡片 / §3.4 面板弹出修复（v3_units_snapshot + 事件链 + 玩家输入桥时序修复）/ §3.5 跳过/重开战斗 + pre-combat 快照。
+>
+> 🔴 **2026-08-12 已过真机并有一次定位纠偏**：真机走查跑完，落地了「战斗主持人/DM 纠偏」+ 8 项真机 bug 修复（攻击卡 UUID / 火球术伤害 / stats 键中英 / 骰池续骰中断 / 逃跑语义 / 敌方熔断闪退 / 终局 AI 总结 / 结算叙事崩），进度表记 7704 tests 全绿。**本文描述的会话机制（持久会话 / 工具分流 / 结算演绎 / 前端 v3）仍是现行实现**，但 `combat_v3` 的定位已从「**敌方专属决策器**」改为「**战斗主持人/DM**」——玩家意图文本也由它解析成 Command。读下文时凡出现「敌方决策」字样，按「战斗主持人对当前行动方的裁决」理解。
+>
+> 前置决策调查见 `2026-08-09-combat-agent-session-design.md`（逐条决策已完成，本文件为落地方案）。
 > 背景：真机 debug 暴露战斗 Agent 提示词缺失、查询工具被误当 Command、战斗面板不弹出、v3 数据流未接入前端。改造核心 = 一个 agent 持久会话贯穿整场 + 工具链规范化 + 前端面板重写 v3。
 
 ---

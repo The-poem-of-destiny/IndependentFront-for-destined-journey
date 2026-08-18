@@ -18,8 +18,7 @@
 - `AGENTS.md` — 新增模块、架构变更、Phase 进展更新时需同步（进度表只留速览，详细记录进 `docs/CHANGELOG.md`）
 - `docs/` — 设计文档目录，架构变更时需更新对应阶段文档
 - `docs/CHANGELOG.md` — 近期交付的 Phase 详细记录，完成里程碑时追加
-- `reference/agent流程测试/` — Agent 模板/测试工具变更时需同步（`agent预期分析.md` 已于 2026-08-08 删除，移入私有内容仓后按需参考；`对话样本.md` / `要求.md` 仍在私有内容仓）
-- `tests/agent-framework/README.md` — 测试工具用法变更时需同步
+- **私有内容仓**的 `reference/agent流程测试/`（🔴 公开仓侧不存在，路径只在私有内容仓 `fated_poem_independent_assets` 里）— Agent 模板/测试工具变更时需同步（`对话样本.md` / `要求.md` 仍在，`agent预期分析.md` 已于 2026-08-08 删除）
 
 **如果忘了更新，push 之前主人会提醒。但是 agent 应该主动检查。**
 
@@ -114,8 +113,15 @@ docs/
 ├── reference/                   # 参考文档
 │   ├── status_page_architecture.md     # 状态栏页面架构（7e 必读）
 │   ├── effect_script_system.md         # 词条效果 & 脚本系统架构（引擎必读）
-│   ├── combat-system-architecture.md   # 🆕 战斗系统架构 v2（战斗相关必读）
-│   ├── combat-agent-api.md             # 🆕 战斗 Agent↔引擎 接口规格（combat agent 必读）
+│   ├── combat-system-architecture-v3.md
+│   │                                   # 🆕 战斗系统架构 v3（战斗相关必读 —— 现行真源）
+│   ├── combat-system-architecture.md   # 战斗系统架构 v2 —— **已退役（2026-08-01）**；只剩
+│   │                                   #    §四/§五/§八/§九（效果系统 / Buff 状态 / 8 步伤害管线 /
+│   │                                   #    核心数值）这些纯计算公式仍被 v3 引用，作公式参考
+│   ├── combat-agent-api.md             # 战斗 Agent↔引擎 接口规格 —— **已退役（v2 专用）**；现行
+│   │                                   #    combat_v3 契约散在三处：`agent-config.json`（`combat_v3`
+│   │                                   #    条目）+ `src/sillytavern/agent-tools.ts`（AGENT_TOOL_MAP）
+│   │                                   #    + `combat-v3/projection-agent.ts`（引擎→Agent 数据包）
 │   ├── agent_system_prompt_guide.md    # 🆕 Agent System Prompt 配置流程（架构/步骤/踩坑/检查清单）
 │   ├── debug-loop-handbook.md          # 🆕 游玩→导出→分析→修复 调试循环操作手册（每次发现 bug 必读）
 │   ├── audio_system.md                 # 🆕 音频系统 v1.0 说明书 ← 改音频必读
@@ -143,6 +149,11 @@ docs/
 ├── planning/2026-07-31-creative-workshop-compat-design.md
 │                                       # 🆕 创意工坊兼容层设计 v2（D1-D17）← 改工坊/世界书存储必读
 │                                       #    Phase 0 世界书迁 Dexie · Phase 1 工坊 · Phase 2 EJS 沙盒（✅ 待真机）
+├── planning/2026-07-31-workshop-phase2-ejs-design.md
+│                                       # 工坊 Phase 2 EJS 沙盒 + 只读 stats 投影（ADR-30 的**设计历史**）
+│                                       #    🔴 部分内容已被 QuickJS 能力面取代（收窄 stats / `new Function`
+│                                       #      边界 / 不支持 await 三处描述作废，见上面那份能力面设计）
+│                                       #    现行**创作者契约**在 reference/worldbook-ejs-regex-authoring-guide.md
 ├── planning/2026-08-04-image-generation-design.md
 │                                       # 🆕 图像生成 v1（v1.1 / D1-D55）← 做文生图必读。**✅ 已实施，待真机**
 │                                       #    v1 范围：NovelAI 单家 + 情景插画（标记当锚点，图就地插进正文）
@@ -155,10 +166,24 @@ docs/
 │                                       # 🆕 图像生成 v1 的 lean-delegation 编排（波次 / 逐任务 brief）
 │                                       #    开头「实际执行情况」一节记的是**实际怎么跑的**（7 波 22 任务）
 │                                       #    与原计划（6 波 19 任务）的每一处偏差及其理由 —— 下次编排照它调
+├── planning/2026-08-08-comfyui-image-provider-design.md
+│                                       # 🆕 图像生成 v2（ComfyUI 本地后端 + 提示词方言，C1-C16）
+│                                       #    ← 改图像 provider 必读。**接续 v1 的 D 编号线**：C 号与 D 号不冲突，
+│                                       #      v1 的裁定除本文明确推翻处一律继续有效
+├── planning/2026-08-05-content-engine-separation-design.md
+│                                       # 🆕 内容-引擎分离设计 v1.2 ← 改内容包/分节必读
+│                                       #    **内容包（content pack）格式契约的真源**：公开仓只带占位内容，
+│                                       #    真实内容由私有仓构建成 pack 导入
 ├── planning/2026-08-11-map-system-v1-integration.md
-│                                       # 🆕 地图系统 v1 集成设计（ADR-31）← 做地图必读。**已裁定待实施**
+│                                       # 🆕 地图系统 v1 集成设计（ADR-31）← 做地图必读。
+│                                       #    **✅ 已实施（2026-08-12），UI 真机走查过**
 │                                       #    地块/静态所有者/混合通行图寻路/天气/落位契约/AI 集成通道
 │                                       #    数据源在 sample-map 仓（CK3 形制），编译期烘 map-pack 进内容仓
+├── planning/2026-08-15-random-event-system-design.md
+│                                       # 🆕 随机事件系统 v1 设计（ADR-32）← 改随机事件必读
+│                                       #    Code 端种子化 MTTH 调度出候选池 → `{{RANDOM_EVENTS}}` 单通道注入
+│                                       #    story → AI 以 `<event_trigger>` 回执 → Code 按名字结算
+│                                       #    事件定义 = 内容包第 13 分节纯 JSON；开关与剧情系统彼此独立
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
@@ -177,6 +202,14 @@ docs/
 ```bash
 docs/design.md  # 完整前端设计规范（排版/间距/组件/装饰/动画/检查清单）
 ```
+
+**🔴 三份设计文档分工不同，别混着读**（找错地方的症状是照着一份「记录」当「规范」改代码）：
+
+- `docs/design.md` — **排版 / 间距 / 组件 / token 基线，唯一硬规范（必读）**。写 UI 代码前看这份。
+- 根目录 `DESIGN.md` — **主题视觉方向 + 已批准的主题识别决策记录**（英文）。里面的数值是首轮迭代默认值、
+  不是铁律：主人反馈、主题识别、文字可读性与实际渲染结果一律优先于它。
+- 根目录 `design-qa.md` — **主题实施后的 QA 证据存档**（逐次走查记录，按日期追加，将归档）。
+  它记的是「那一次走查的结果」，不是任何人要遵循的约定。
 
 ## 游戏数据字段规范（必读）
 
@@ -442,7 +475,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 分册                     | 覆盖范围                                                                                  | 位置                                                     |
 | ------------------------ | ----------------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | 引擎层架构（已实现部分） | `src/sillytavern/**` —— 类型/数据库/Agent 编排/战斗/制作/效果系统/图像生成等全部引擎模块  | [`src/sillytavern/AGENTS.md`](src/sillytavern/AGENTS.md) |
-| 前端架构 (Phase 7)       | `src/ui/**` —— composables / lib 桥接层 / stores / components / 设置页 13 分区 / 预设系统 | [`src/ui/AGENTS.md`](src/ui/AGENTS.md)                   |
+| 前端架构 (Phase 7)       | `src/ui/**` —— composables / lib 桥接层 / stores / components / 设置页 14 分区 / 预设系统 | [`src/ui/AGENTS.md`](src/ui/AGENTS.md)                   |
 
 拆分理由：这两份地图加起来约 4.4 万字，占本文件六成，但**只在改对应目录的代码时才用得上**；
 留在根文件里会让每一次会话（哪怕只改文档）都付它们的上下文成本。
