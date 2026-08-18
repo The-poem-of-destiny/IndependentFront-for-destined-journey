@@ -9,6 +9,44 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 远程素材 v1（URL 声明式素材目录 + 启动镜像同步）｜ ✅ 已实施，真机核心链路走查过（2026-08-17）
+
+素材此前只能靠玩家手工导入本地文件。本次让**作者**能在自己已有的载体里声明一批 URL，玩家侧启动时自动落地成本地素材行。一句话机制：从**本地**载体扫出一张远程素材声明目录（catalogue）→ 与本地素材库做差集 → 缺的下、变的换、多的删 → 落成与手工导入完全同形的 `AssetMetaRecord` + 字节，渲染面零改动。
+
+**来源双载体（都在本地，无第三方索引服务）**：
+
+- **世界书条目** —— 认上游 `char-info-ejs-builder:vN` 约定，**静态抽取**条目正文里的 profile JSON 字面量，**绝不执行 EJS**（声明面不该有求值语义，也就没有沙盒面）。只扫**启用**条目；工坊装的书天然落在同一张 Dexie 表里，故工坊内容的声明随书一起被扫到。
+- **内容包第 14 分节 `remoteAssets`** —— 纯 JSON 数组，三态语义照旧；`public/data/content/remote-assets.json` 是零 IP 占位集（`[]`）。
+- **遗留项**：工坊**后端**自身的素材声明面待其升级后接入（前两个来源已共用同一套抽取/校验，第三个来源只是多一个 collect 口）。
+
+**映射**：`avatarUrl` → `头像`；`gallery` 拍平后**首图为基础立绘**、其余按 `title` / `title+序号` 作变体。命名直接复用既有闸门 D1/D2/D16/D19（同一套 `asset-filename` 规则，不另起一套远程命名法），非法声明**单条跳过**不连坐整本书。
+
+**引擎层（纯函数，零 IO）**：新增 `src/sillytavern/remote-asset-catalogue.ts` —— `RemoteAssetDecl` 类型 + 四个纯函数 `extractRemoteAssetDecls`（单条目正文 → 声明）/ `collectWorldBookRemoteAssets`（整库启用条目）/ `normalizePackRemoteAssets`（内容包分节）/ `dedupeRemoteAssetDecls`（跨来源去重）。`AssetMetaRecord` 加**非索引**标记 `remote: { url, syncedAt }`（照 framing 先例，**不升 Dexie 版本**——非索引字段加进已有记录不需要 schema 迁移）。types-content / content-source / 占位哈希三处同步接线。
+
+**UI 层**：
+
+- `src/ui/lib/remote-asset-sync.ts` —— 纯函数 `planRemoteAssetSync`（声明目录 × 现有素材行 → 下载/替换/保留/删除四类计划）+ 注入依赖执行器 `runRemoteAssetSync`（fetch / db / 时钟全从 `RemoteAssetSyncDeps` 进，测试不打 network）。下载策略：直连 fetch → **wsrv.nl 代理回退**（移植自 `workshop-cover.ts`，直连失败的最常见原因是 CORS）、**30s 超时**、**25MB 上限**、扩展名以 `Content-Type` 优先、**并发 4**、逐条失败隔离（一张图挂不影响其余），**终态失败不再走代理重试**（404 之类重试也没用，只是白等两跳）。
+- `asset-store.syncRemoteAssets()` —— 单飞（in-flight 复用同一个 Promise，启动链与手动按钮并发也只跑一次）+ `remoteSync` 状态 + 摘要 toast（**全 kept 时静默**，无事发生就别打扰）。
+- `content-store` 注册第 10 个内容面；设置项 `remoteAssetsEnabled` **默认开**；`AssetSection` 新增 `AssetRemoteSyncStrip` 卡片（开关 + 立即同步 + 上次结果行）；`App.vue` 启动链接线，**永不阻塞启动**（同步整个失败也只是没图）。
+
+**语义三铁则**（改这套东西之前先读这三条）：
+
+1. **声明扫描 100% 本地**（世界书 + 内容包都在本机）→ 所以「镜像删除」**离线安全**：断网时扫不到声明这件事根本不会发生，不存在「网挂了把玩家素材删空」的路径。
+2. **玩家手动导入的同名素材永远赢** —— 撞名时远程侧直接跳过，不覆盖、不改名、不报错。远程是补位，不是权威。
+3. **开关关 = 完全 no-op** —— 不下也**不删**（关开关不该被解读成「清空远程素材」）。
+
+同 URL 判 kept 不重下；URL 变更则换字节并 `release` 掉旧 object URL（避免 §7.5 那套 refcount 泄漏一条）。
+
+**测试与验证**：两波共 **72** 个新测试（catalogue 抽取/去重/非法跳过、plan 四类差集、下载器超时/上限/代理回退/失败隔离、store 单飞与状态、组件渲染）；`npm run gates` **两轮全绿**（全量 339 文件 / 8693 通过）。
+
+**真机 E2E**（2026-08-17，Windows + dev 服务器）：注入 DLC 形制测试书 → 启动同步自动下载 3 张 i.ibb.co 真图 → 映射正确（`头像` / `立绘` / `立绘·主立绘2`）+ `remote` 标记 + 哈希齐全；**二次启动幂等**（全 kept，无重复行）；**删书后启动镜像清空**（0 行）且摘要 toast 正确弹出（「删除 3」）；全程控制台零报错。
+
+**留验事项**：
+
+- **设置分区 UI 未真机走查** —— 环境限制（浏览器窗格隐藏），有组件与仓库测试覆盖，已记进 `TODO.md`。
+- 顺手修：`asset-filename.ts` 一处过期注释清理。
+- 既有漂移（`defaults/agent-config` 占位哈希未重生成）**不属本次**，已另立任务。
+
 ### 全仓审查低风险小修一波（代码 8 + 配置 4 + 文档 9）｜ ✅ 已实施（2026-08-17）
 
 **来源**：`docs/planning/2026-08-16-full-repo-review.md`（10 维 101 条已验证发现）里筛出的「无需设计决策 + 改动小 + 低风险」子集，21 条落地 20 条（1 条部分落地）。

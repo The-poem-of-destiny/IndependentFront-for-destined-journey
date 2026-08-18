@@ -91,6 +91,28 @@ export function violatesNamingInvariant(name: string, variant?: string): boolean
   return false;
 }
 
+/**
+ * 名字/变体能不能原样活在一个 zip 条目名里（D19，§5.4 往返的前提）。
+ *
+ * 两类致命字符:
+ * - `/` 与 `\` —— 在包里就是**目录分隔符**，导入侧 `basenameOf` 会拍平，
+ *   `圣殿/内庭_头像.png` 回来就成了 `内庭_头像.png`，行被静默改名。
+ * - 名字**开头**的 `.` —— 导入侧按 dotfile 当噪音丢掉，整条素材消失。
+ *   变体开头的 `.` 无害（basename 以名字开头），所以不拦。
+ *
+ * 空白**不在此列**: 前后空格在 zip 条目名里可表示，D2 要求名字保持原始。
+ *
+ * 归属说明: 它与 {@link violatesNamingInvariant} 是同一类闸门（「这个名字合不合法」），
+ * 所以住在一起 —— 判据只有一份，改名入口与远程目录解析器共用；
+ * `src/ui/stores/asset-store.ts` 也从这里 import，不再持有私有副本。
+ */
+export function violatesZipEntryName(name: string, variant?: string): boolean {
+  const hasSeparator = (v: string): boolean => v.includes('/') || v.includes('\\');
+  if (hasSeparator(name)) return true;
+  if (variant !== undefined && variant !== '' && hasSeparator(variant)) return true;
+  return name.startsWith('.');
+}
+
 // ═══════════════════════════════════════════════════════════
 // 解析
 // ═══════════════════════════════════════════════════════════

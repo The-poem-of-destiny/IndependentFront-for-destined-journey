@@ -308,6 +308,11 @@ export function validatePackOrThrow(pack: unknown): PackValidationNote[] {
     }
   }
 
+  // remoteAssets 分节形状（第 14 面）
+  if (pack.remoteAssets !== undefined) {
+    notes.push(...validateRemoteAssetsSection(pack.remoteAssets));
+  }
+
   // 对象型分节的统一形状校验
   const objectSectionNames = [
     'catalog',
@@ -507,6 +512,49 @@ function validateAgentDefaultsSection(section: unknown): PackValidationNote[] {
   const agents = (section as { agents?: unknown }).agents;
   if (!isPlainObject(agents)) {
     notes.push(makeError('bad-agent-defaults-section', 'agentDefaults.agents 必须是 JSON 对象'));
+  }
+  return notes;
+}
+
+/**
+ * 校验 remoteAssets 分节形状（远程素材 v1 / 第 14 面）。
+ *
+ * 🔴 **只有「整节不是数组」是 error**（那是作者搞错了分节形状，整节没法用）；
+ * 逐行的问题一律记 `warning`。理由是这一节的运行时消费方
+ * （`normalizePackRemoteAssets`）本来就是**逐行跳过**的容错解析器 —— 为一行写坏的
+ * URL 就阻止整个内容包安装，代价与收益完全不成比例。但也不能一声不吭：静默少几张
+ * 立绘正是那种「没报错所以没人查」的症状，所以点名说出是第几行、缺什么。
+ */
+function validateRemoteAssetsSection(section: unknown): PackValidationNote[] {
+  const notes: PackValidationNote[] = [];
+  if (!Array.isArray(section)) {
+    notes.push(makeError('bad-remote-assets-section', 'remoteAssets 分节必须是数组'));
+    return notes;
+  }
+  for (let i = 0; i < section.length; i++) {
+    const row: unknown = section[i];
+    if (!isPlainObject(row)) {
+      notes.push({
+        level: 'warning',
+        code: 'bad-remote-asset-row',
+        text: `remoteAssets[${i}] 不是 JSON 对象，安装时会被跳过`,
+      });
+      continue;
+    }
+    if (typeof row.name !== 'string' || row.name.length === 0) {
+      notes.push({
+        level: 'warning',
+        code: 'bad-remote-asset-row',
+        text: `remoteAssets[${i}] 缺少非空 name，安装时会被跳过`,
+      });
+    }
+    if (typeof row.url !== 'string' || row.url.length === 0) {
+      notes.push({
+        level: 'warning',
+        code: 'bad-remote-asset-row',
+        text: `remoteAssets[${i}]（name=${String(row.name)}）缺少非空 url，安装时会被跳过`,
+      });
+    }
   }
   return notes;
 }

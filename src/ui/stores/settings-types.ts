@@ -231,6 +231,15 @@ export type UiSettings = {
   beautifierEnabled: boolean;
   beautifierBuiltinDisabled: string[];
 
+  // ═══ 素材（库本体在 Dexie，全局共享）═══
+  /**
+   * 远程素材同步总开关（远程素材 v1）。
+   *
+   * 🔴 关掉是**彻底的 no-op**，连镜像删除都不做：关掉的意思是「别替我管这件事」，
+   * 而不是「把你之前下的都收走」。库里已有的远程行原样留着，重新打开即恢复同步。
+   */
+  remoteAssetsEnabled: boolean;
+
   // ═══ 图像生成（设计 §11；图像 v2 / C8 重构成 per-provider 袋子）═══
   //
   // 🔴 这里**没有** `image_prompt` 的模型/温度/世界书 —— 那些走 `agent-settings.ts`

@@ -4043,6 +4043,18 @@ export interface AssetMetaRecord {
    * 它是"这台机器上这个框里怎么摆"的本地偏好，不是素材本身的属性。
    */
   framing?: AssetFraming;
+  /**
+   * 来源标记：远程目录同步产物（远程素材 v1）。
+   *
+   * **有它 = 这一行的字节是从 `url` 下下来的**，`syncedAt` 是那次下载完成的时刻。
+   * 用户自己导入的行没有这个字段，两者从此可区分 —— 镜像同步只重下带戳的行，
+   * 绝不碰用户手动导入的同名图。
+   *
+   * ⚠️ 落库但**不建索引**（Dexie 的 `stores()` 只声明索引，非索引字段随对象整体存取），
+   * 所以加它**不需要升版**，与 {@link AssetFraming} 同一条先例。反过来也别指望能按
+   * `remote.url` 查询。
+   */
+  remote?: { url: string; syncedAt: number };
   createdAt: number;
   updatedAt: number;
 }

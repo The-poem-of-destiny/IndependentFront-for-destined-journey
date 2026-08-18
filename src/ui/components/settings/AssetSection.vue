@@ -5,7 +5,8 @@
  * 设计: docs/planning/2026-07-29-asset-management-system-design.md §7
  * 布局对齐 AudioSection，每段一个子组件（./assets/）：
  *   ① 导入导出 AssetImportStrip     —— 一键导入 / 导出 / 进度取消 / 回执 / 配额
- *   ② 素材库   AssetLibrary         —— 按角色 / 全部素材两个视图（内含角色抽屉）
+ *   ② 远程素材 AssetRemoteSyncStrip —— 总开关 / 立即同步 / 上次同步结果（远程素材 v1）
+ *   ③ 素材库   AssetLibrary         —— 按角色 / 全部素材两个视图（内含角色抽屉）
  * 外加 AssetDialogs（确认 / 输入弹窗，provide 给各子组件用）。
  *
  * 本壳只做三件事：分区级生命周期（init）、唯一的 aria-live 播报区、以及把弹窗
@@ -23,6 +24,7 @@ import { computed, onMounted, provide, ref, watch } from 'vue';
 import { useAssetStore } from '../../stores/asset-store';
 import AppCard from '../shared/AppCard.vue';
 import AssetImportStrip from './assets/AssetImportStrip.vue';
+import AssetRemoteSyncStrip from './assets/AssetRemoteSyncStrip.vue';
 import AssetLibrary from './assets/AssetLibrary.vue';
 import AssetDialogs from './assets/AssetDialogs.vue';
 import {
@@ -109,7 +111,12 @@ watch(
       <AssetImportStrip @announce="liveMessage = $event" />
     </AppCard>
 
-    <!-- ═══ ② 素材库 ═══ -->
+    <!-- ═══ ② 远程素材（远程素材 v1）═══ -->
+    <AppCard padding="md" class="asset-card">
+      <AssetRemoteSyncStrip @announce="liveMessage = $event" />
+    </AppCard>
+
+    <!-- ═══ ③ 素材库 ═══ -->
     <AppCard padding="md" class="asset-card">
       <AssetLibrary @announce="liveMessage = $event" />
     </AppCard>

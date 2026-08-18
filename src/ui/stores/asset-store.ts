@@ -27,6 +27,9 @@
  * 4. **绝不持久化 object URL**（§7.5）: 调用方存逻辑键，渲染时再解析。
  * 5. **两个导入入口，一条管线**: `importZip` 与 `importFiles` 只在"字节从哪来"上
  *    不同，汇合于 `executeImport`。第二条并行管线就是第二套路由与第二套去重。
+ * 6. **远程素材同步同样只是执行器**（远程素材 v1）: 清单（要下什么 / 要删什么 /
+ *    谁让路）全在 `lib/remote-asset-sync.ts` 的纯函数里算完，本店只负责等齐前置、
+ *    交出 Dexie 写口与 URL 缓存的撤销口、然后报一次账。
  *
  * 边界:
  * - 字节读取走注入缝: 本模块持有**一份** {@link createAssetUrlCache}，它的 `loadBlob`
@@ -36,7 +39,7 @@
  * - 音频半边写完之后调**音频 store 的公开动作**刷库，绝不伸手进它的内部状态。
  */
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { ASSET_TYPES } from '@engine/types';
 import type { AssetFraming, AssetMetaRecord, AssetType, AudioTrack } from '@engine/types';
 import {
@@ -57,7 +60,11 @@ import type {
   ImportPlan,
   ImportWarning,
 } from '@engine/asset-import-plan';
-import { formatAssetFilename, violatesNamingInvariant } from '@engine/asset-filename';
+import {
+  formatAssetFilename,
+  violatesNamingInvariant,
+  violatesZipEntryName,
+} from '@engine/asset-filename';
 import {
   ASSET_MIME_BY_EXTENSION,
   clampAssetFraming,
@@ -85,6 +92,12 @@ import {
   type ReadAssetZipOptions,
 } from '../lib/asset-zip';
 import { createAssetUrlCache, type AssetUrlCache } from '../lib/asset-url';
+import {
+  collectDesiredRemoteAssets,
+  formatRemoteSyncCounts,
+  runRemoteAssetSync,
+  type RemoteAssetSyncResult,
+} from '../lib/remote-asset-sync';
 import { useAudioStore } from './audio-store';
 import type { AudioBatchResult } from './audio-store';
 import { isQuotaError, notify } from './store-utils';
@@ -399,24 +412,6 @@ const ZIP_MIME_TYPES = new Set([
 export function isZipFile(file: File): boolean {
   if (/\.zip$/i.test(file.name)) return true;
   return ZIP_MIME_TYPES.has(file.type);
-}
-
-/**
- * 名字/变体能不能原样活在一个 zip 条目名里（D19，§5.4 往返的前提）。
- *
- * 两类致命字符:
- * - `/` 与 `\` —— 在包里就是**目录分隔符**，导入侧 `basenameOf` 会拍平，
- *   `圣殿/内庭_头像.png` 回来就成了 `内庭_头像.png`，行被静默改名。
- * - 名字**开头**的 `.` —— 导入侧按 dotfile 当噪音丢掉，整条素材消失。
- *   变体开头的 `.` 无害（basename 以名字开头），所以不拦。
- *
- * 空白**不在此列**: 前后空格在 zip 条目名里可表示，D2 要求名字保持原始。
- */
-function violatesZipEntryName(name: string, variant?: string): boolean {
-  const hasSeparator = (v: string): boolean => v.includes('/') || v.includes('\\');
-  if (hasSeparator(name)) return true;
-  if (variant !== undefined && variant !== '' && hasSeparator(variant)) return true;
-  return name.startsWith('.');
 }
 
 /** 文件名 → 小写无点扩展名；没有扩展名（或以点开头的隐藏文件）给空串 */
@@ -798,9 +793,9 @@ export const useAssetStore = defineStore('asset', () => {
    *   trim 掉等于替用户改名。
    * - **D7 媒体规则**: mp4 只能落在不需要 alpha 的类型上。
    *
-   * 归属说明: 这三条里前两条本该与 `violatesNamingInvariant` 并排住在
-   * asset-filename.ts（引擎层，两个入口共用）。D19 暂居此处是因为本次任务的范围
-   * 栅栏不含那个文件；等有人拥有它时，整块搬过去即可，调用点不变。
+   * 归属说明: 前两条判据都住在 `@engine/asset-filename`（引擎层，全部入口共用）。
+   * D19 那条曾在本文件里另存一份私有实现，远程素材 v1 的波 1 把它提到引擎层之后
+   * 本地那份已删 —— 远程目录解析器与改名入口现在读的是**同一份**判据。
    */
   function checkNameGates(target: {
     name: string;
@@ -2070,6 +2065,112 @@ export const useAssetStore = defineStore('asset', () => {
     return out;
   }
 
+  // ═══ 远程素材同步（远程素材 v1）═══════════════════════
+
+  /**
+   * 上一次同步的状态 —— 设置页的「立即同步」按钮与结果行读它。
+   *
+   * `reactive` 而不是三个裸 ref: 三个字段永远一起变（跑完那一刻同时写 `running`
+   * / `lastResult` / `lastAt`），拆开只会给出三个可以各自过期的读法。
+   */
+  const remoteSync = reactive({
+    running: false,
+    lastResult: null as RemoteAssetSyncResult | null,
+    /** epoch ms；0 = 本次会话还没同步过 */
+    lastAt: 0,
+  });
+
+  /**
+   * 在飞的那一次 —— **单飞闸**。启动链会踢一脚，设置页的按钮也会踢一脚，
+   * 两次同时进来必须合并成一次：两条同步各自拿着**同一份**旧库快照去算镜像清单，
+   * 会双双去下同一批图（重复流量），删除那一半更糟 —— 第二条会把第一条刚落的行
+   * 当成「不在清单里的远程行」删掉（它的 `existing` 快照里根本没有那一行）。
+   */
+  let remoteSyncPromise: Promise<RemoteAssetSyncResult | null> | null = null;
+
+  /**
+   * 按本地声明同步一次远程素材（幂等、并发合并、**永不抛**）。
+   *
+   * 前置条件由本函数自己等齐（全部幂等，谁先到谁等着）:
+   * 世界书 init（声明的一半在条目正文里）· 工坊 init（工坊装的书也落在同一张表，
+   * 少等它就会漏掉那批声明）· 内容注册表（另一半声明在 `remoteAssets` 面，
+   * 且 pack 值要赢过占位）· 素材库 init。
+   *
+   * 🔴 **等的是 `ensureContentRegistryLoaded()` 而不是 `contentReadyPromise`**:
+   * 后者在模块加载时就 resolve（它的语义是「占位骨架已就位」，不是「pack 已生效」），
+   * 拿它当门等于在 pack 装进来之前就去读那一面 —— 声明清单会少掉整包那一半，
+   * 而少掉的表现是「装了包却没有立绘」，不报错。
+   *
+   * @returns 回执；开关关着 / 前置失败时返回 `null`（**不是**一份全零回执 ——
+   *   「没跑」与「跑了但什么都没变」是两件事，界面话术也不同）
+   */
+  async function syncRemoteAssets(): Promise<RemoteAssetSyncResult | null> {
+    if (remoteSyncPromise) return remoteSyncPromise;
+    const run = doSyncRemoteAssets().finally(() => {
+      if (remoteSyncPromise === run) remoteSyncPromise = null;
+    });
+    remoteSyncPromise = run;
+    return run;
+  }
+
+  async function doSyncRemoteAssets(): Promise<RemoteAssetSyncResult | null> {
+    remoteSync.running = true;
+    try {
+      const { useSettingsStore } = await import('./settings-store');
+      // 🔴 判据写成 `!== true` 而不是 `=== false`: 老档案的设置袋里没有这个键，
+      //    而「缺席」在这里必须读成「按默认走」—— 默认是开，所以要读 getDefaults
+      //    灌好的那个值。settings-store 启动时会补齐缺省键，这里只是不再猜。
+      if (useSettingsStore().settings.remoteAssetsEnabled === false) return null;
+
+      // ── 前置：声明的两个来源与落库面都得先就位 ──
+      const [{ useWorldBookStore }, { useWorkshopStore }, content] = await Promise.all([
+        import('./worldbook-store'),
+        import('./workshop-store'),
+        import('./content-store'),
+      ]);
+      const wb = useWorldBookStore();
+      await wb.init();
+      await useWorkshopStore().init();
+      await content.ensureContentRegistryLoaded();
+      await init();
+
+      const decls = collectDesiredRemoteAssets(wb.books, content.getContentRegistry().remoteAssets);
+
+      // 基准行必须是**此刻**的库（前置里的任何一步都可能刚写过素材表）
+      await refreshAssets();
+      const result = await runRemoteAssetSync({
+        decls,
+        existing: assets.value,
+        saveAsset,
+        deleteAsset: dbDeleteAsset,
+        // 同一个 id 换了字节 / 被删掉 —— 缓存里那条 object URL 已经指着旧字节了。
+        // 与 `deleteAssetById` 用的是同一个动作，两条路径不该有两种撤销时机。
+        onBytesReplaced: releaseAssetUrl,
+      });
+      await refreshAssets();
+
+      remoteSync.lastResult = result;
+      remoteSync.lastAt = Date.now();
+
+      // 🔴 **全是 kept 时一个字都不说**: 这件事每次启动都跑一遍，而绝大多数时候
+      //    结论是「什么都不用做」—— 那种情况下弹提示只会训练用户忽略它。
+      const changed = result.downloaded + result.replaced + result.deleted > 0;
+      if (changed || result.failed.length > 0) {
+        notify(
+          `远程素材同步：${formatRemoteSyncCounts(result)}`,
+          result.failed.length > 0 ? 'error' : 'info',
+        );
+      }
+      return result;
+    } catch (e) {
+      // 前置 store 起不来 / 无 Pinia 上下文 —— 同步是旁路，绝不该让它拦住任何东西
+      console.warn('[asset-store] 远程素材同步失败:', e);
+      return null;
+    } finally {
+      remoteSync.running = false;
+    }
+  }
+
   // ═══ 删除 ═════════════════════════════════════════════
 
   /**
@@ -2148,6 +2249,7 @@ export const useAssetStore = defineStore('asset', () => {
     progressTotal,
     progressPhase,
     storagePersisted,
+    remoteSync,
     // views
     flat,
     groups,
@@ -2164,6 +2266,8 @@ export const useAssetStore = defineStore('asset', () => {
     importPortraitPair,
     cancelImport,
     exportZip,
+    // 远程素材
+    syncRemoteAssets,
     // mutations
     renameAsset,
     setPrimary,

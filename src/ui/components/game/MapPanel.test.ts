@@ -119,6 +119,7 @@ function emptyRegistry() {
     imageDialects: undefined,
     mapPack: undefined,
     randomEvents: undefined,
+    remoteAssets: undefined,
   };
 }
 
