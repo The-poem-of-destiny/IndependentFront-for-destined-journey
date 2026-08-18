@@ -12,6 +12,7 @@ import {
   deleteSaveSlot,
   characterAppearanceKey,
   exportAllData,
+  saveSnapshot,
 } from './database';
 import type { ContentPackRecord } from './database';
 import { createDefaultCharacterState } from './types';
@@ -316,7 +317,8 @@ async function seedSave(): Promise<void> {
   await db.saveProfiles.put(profile);
   await db.characters.bulkPut([player, npc]);
   await db.messages.bulkPut(messages);
-  await db.snapshots.put(snapshot);
+  // v22 拆表：经 saveSnapshot 落库（它负责拆成元数据 + 载荷两行）
+  await saveSnapshot(snapshot);
   await db.memories.put(memory);
   await db.plotEvents.bulkPut([plotRoot, plotChild]);
   await db.plotOutlines.put(outline);
@@ -410,6 +412,11 @@ describe('exportSessionSave', () => {
     expect(backup.characters).toHaveLength(2);
     expect(backup.messages).toHaveLength(2);
     expect(backup.snapshots).toHaveLength(1);
+    // v22 拆表：元数据与载荷各一行，元数据行不再驮着整档历史
+    expect(backup.snapshotPayloads).toHaveLength(1);
+    expect(backup.snapshotPayloads[0].id).toBe(backup.snapshots[0].id);
+    expect(backup.snapshotPayloads[0].messages).toHaveLength(2);
+    expect((backup.snapshots[0] as unknown as Record<string, unknown>).messages).toBeUndefined();
     expect(backup.memories).toHaveLength(1);
     expect(backup.plotEvents).toHaveLength(2);
     expect(backup.plotOutlines).toHaveLength(1);
@@ -606,7 +613,8 @@ describe('importSessionSave — 往返', () => {
     const { saveId: newId } = await importSessionSave(backup);
     const db = getDatabase();
 
-    const snap = (await db.snapshots.where('saveId').equals(newId).toArray())[0];
+    // v22 拆表：内嵌副本住在载荷表里
+    const snap = (await db.snapshotPayloads.where('saveId').equals(newId).toArray())[0];
     const chars = await db.characters.where('saveId').equals(newId).toArray();
     const msgs = await db.messages.where('saveId').equals(newId).toArray();
     const events = await db.plotEvents.where('saveId').equals(newId).toArray();
@@ -619,6 +627,67 @@ describe('importSessionSave — 往返', () => {
     expect(snap.characters.every((c) => c.saveId === newId)).toBe(true);
     expect(snap.plotEvents?.every((e) => e.saveId === newId)).toBe(true);
     expect(snap.messages?.every((m) => m.saveId === newId)).toBe(true);
+  });
+
+  it('v22: 载荷行的 id 跟着元数据行的新 id 走（拆散了就恢复不了）', async () => {
+    await seedSave();
+    const backup = await exportSessionSave(SAVE_ID);
+    const { saveId: newId } = await importSessionSave(backup);
+    const db = getDatabase();
+
+    const meta = (await db.snapshots.where('saveId').equals(newId).toArray())[0];
+    const payload = await db.snapshotPayloads.get(meta.id);
+    expect(payload).toBeDefined();
+    expect(payload!.saveId).toBe(newId);
+    expect(meta.id).not.toBe(SNAP_ID);
+    // 元数据行不再驮着整档载荷
+    expect((meta as unknown as Record<string, unknown>).messages).toBeUndefined();
+    expect((meta as unknown as Record<string, unknown>).characters).toBeUndefined();
+  });
+
+  it('v22 向后兼容：旧格式单存档备份（快照整份内嵌、无 snapshotPayloads）照样导得进', async () => {
+    await seedSave();
+    const backup = await exportSessionSave(SAVE_ID);
+
+    // 造一份 v21 形状的备份：元数据 + 载荷合体塞回 snapshots，删掉新字段
+    const meta = backup.snapshots[0];
+    const payload = backup.snapshotPayloads[0];
+    const legacy = {
+      ...backup,
+      snapshots: [
+        {
+          id: meta.id,
+          saveId: meta.saveId,
+          createdAt: meta.createdAt,
+          reason: meta.reason,
+          turn: meta.turn,
+          characters: payload.characters,
+          saveProfile: payload.saveProfile,
+          plotEvents: payload.plotEvents,
+          messages: payload.messages,
+        },
+      ],
+    } as unknown as SessionBackup;
+    delete (legacy as unknown as Record<string, unknown>).snapshotPayloads;
+
+    const { saveId: newId } = await importSessionSave(legacy);
+    const db = getDatabase();
+
+    const metas = await db.snapshots.where('saveId').equals(newId).toArray();
+    expect(metas).toHaveLength(1);
+    // 元数据行被剥干净
+    expect((metas[0] as unknown as Record<string, unknown>).messages).toBeUndefined();
+    // 载荷被就地拆出来，且 id 与元数据行一致
+    const split = await db.snapshotPayloads.get(metas[0].id);
+    expect(split).toBeDefined();
+    expect(split!.saveId).toBe(newId);
+    expect(split!.characters).toHaveLength(2);
+    expect(split!.messages).toHaveLength(2);
+    // 内嵌副本同样走了 id 重发
+    const chars = await db.characters.where('saveId').equals(newId).toArray();
+    expect(new Set(split!.characters.map((c) => c.id))).toEqual(new Set(chars.map((c) => c.id)));
+    // 缩略从载荷回填（旧备份没有 preview 字段）
+    expect(metas[0].preview?.playerName).toBe('莱恩');
   });
 
   it('软引用：角色 id 跟着改，名字/契约目标各按其义', async () => {
@@ -733,6 +802,9 @@ describe('importSessionSave — 同一份文件导两次', () => {
     expect((await db.characters.where('saveId').equals(second.saveId).toArray()).length).toBe(2);
     expect((await db.messages.where('saveId').equals(second.saveId).toArray()).length).toBe(2);
     expect((await db.snapshots.where('saveId').equals(second.saveId).toArray()).length).toBe(1);
+    // v22 拆表：删存档要连载荷行一起级联，另一份的载荷不受牵连
+    expect(await db.snapshotPayloads.where('saveId').equals(first.saveId).count()).toBe(0);
+    expect(await db.snapshotPayloads.where('saveId').equals(second.saveId).count()).toBe(1);
     expect((await db.sceneImages.where('saveId').equals(second.saveId).toArray()).length).toBe(1);
     expect(
       (await db.characterAppearances.where('saveId').equals(second.saveId).toArray()).length,

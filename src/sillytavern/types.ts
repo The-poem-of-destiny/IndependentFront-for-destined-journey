@@ -24,6 +24,9 @@ import type { MapSaveFlags } from './types-map';
 // `random-event-context.ts` 自己只 import `random-event-scheduler` 与 `types-random-events`，
 // 两者都不 import 本文件。这里刻意不复述那个形状（复述一份就是第二个真源）。
 import type { RandomEventOfferEntry } from './random-event-context';
+// 捏人预设（`CreatePreset`）里的两个目录形状。**type-only 且不成环** ——
+// `start-catalog-mechanics.ts` 是零 import 的叶子模块（机制半边，D24）。
+import type { CatalogItem, BackgroundTemplate } from './start-catalog-mechanics';
 
 // 音频子系统的接口/seam 类型拆分在 types-audio.ts（本文件已逾 800 行）。
 // 从这里统一再导出，「types.ts 是唯一类型来源」这条 import 路径依然成立。
@@ -1275,8 +1278,30 @@ export function resolvePlotTree(flatEvents: PlotEvent[]): PlotEventNode[] {
 
 // ========== 存档系统 (Save System) ==========
 
-/** 快照 — 存档内的状态检查点（M5 规范 §11.2: 打快照 = 整份深拷贝 / 恢复 = 覆写 + 对话回滚） */
-export interface Snapshot {
+/**
+ * 快照列表的**冻结缩略** —— 打快照那一刻从载荷里抄下来的几个纯展示字段。
+ *
+ * 🔴 它不是第二个真源：任何**逻辑**（恢复 / 淘汰 / 导入导出）一律读 `SnapshotPayload`，
+ *    这里的值只喂快照面板那一行字。存在的理由是列表要显示「主角 HP / 游戏内日期」，
+ *    而为了这两行去读 30 份整档载荷，正是拆表要消灭的那笔开销。
+ *    旧行没有这个字段（三态：缺席 = 那一行不显示），迁移时从载荷回填。
+ */
+export interface SnapshotPreview {
+  /** 主角名（载荷 characters 里 type==='player' 那位） */
+  playerName?: string;
+  hp?: number;
+  maxHp?: number;
+  /** 游戏内时间（列表显示「纪元 X年Y月Z日」） */
+  gameTime?: GameTime;
+}
+
+/**
+ * 快照**元数据** — `snapshots` 表的一行（M5 规范 §11.2 的轻量半边）。
+ *
+ * 🔴 列表（`getSnapshots`）与淘汰（`trimSnapshots`）**只读这一层**：整份对话历史
+ *    在载荷行里，而这两个动作每回合都跑，读进来只为按 turn/createdAt 排个序。
+ */
+export interface SnapshotMeta {
   /** Code 生成 UUID */
   id: string;
   /** 所属存档（一等字段） */
@@ -1287,6 +1312,21 @@ export interface Snapshot {
   reason: 'turn' | 'manual' | 'pre-combat';
   /** 对话回合游标（恢复时截断 messages 用；旧快照无 messages 时的兜底） */
   turn: number;
+  /** 展示缩略（见 SnapshotPreview；旧行缺席） */
+  preview?: SnapshotPreview;
+}
+
+/**
+ * 快照**载荷** — `snapshotPayloads` 表的一行，`id` 与元数据行**同值**。
+ *
+ * 只有恢复 / 导入导出会读它。`saveId` 冗余在这里是为了删存档能按索引整批级联，
+ * 不必先把元数据行查出来。
+ */
+export interface SnapshotPayload {
+  /** = 对应 `SnapshotMeta.id` */
+  id: string;
+  /** 所属存档（级联删除的索引） */
+  saveId: string;
   /** 角色状态深拷贝 */
   characters: CharacterState[];
   /** 存档档案深拷贝（任务/时间/好感/变量随行） */
@@ -1299,6 +1339,14 @@ export interface Snapshot {
    */
   messages?: ChatMessage[];
 }
+
+/**
+ * 快照**合体形状** — 打快照与恢复这两个调用点用它（元数据 + 载荷各字段拼在一起）。
+ *
+ * 形状与拆表前的 `Snapshot` **逐字段相同**（`preview` 是新增的可选项），所以老备份里
+ * 那种整份内嵌的快照行照样是合法的 `Snapshot` —— 导入侧正是靠这一点吃下旧格式。
+ */
+export type Snapshot = SnapshotMeta & Omit<SnapshotPayload, 'id' | 'saveId'>;
 
 /** 存档槽 — 10 槽，快照上限见 AppSettings.maxSnapshotsPerSave */
 export interface SaveSlot {
@@ -1322,6 +1370,55 @@ export interface SaveSlot {
     /** Phase 10h: 开场 Prompt 是否已发送给 AI */
     openingPromptConsumed?: boolean;
   };
+}
+
+/**
+ * 捏人预设 —— Dexie `createPresets` 表里 `CreatePresetRecord.data` 的形状。
+ *
+ * 🔴 **定义住在这里而不是 `create-store.ts`**（分层收口）：它是**落库形状**，
+ * `database.ts` 要拿它给 `CreatePresetRecord.data` 标类型，而 `database.ts` 曾为此
+ * `import type { CreatePreset } from '../ui/stores/create-store'` —— 引擎反向依赖前端 store，
+ * 只为一个类型。按仓库铁律「`types.ts` 是唯一类型来源」，这类跨层数据形状本来就该在这儿。
+ * `create-store.ts` re-export 同一个名字，UI 消费方（`PresetModal.vue` 等）路径不变。
+ */
+export interface CreatePreset {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  difficulty: string;
+  character: {
+    name: string;
+    gender: string;
+    customGender?: string;
+    age: number;
+    race: string;
+    customRace?: string;
+    identity: string;
+    customIdentity?: string;
+    startLocation: string;
+    customStartLocation?: string;
+    level: number;
+    basePoints: Record<string, number>;
+    attributePoints: Record<string, number>;
+    money: number;
+    destinyPoints: number;
+  };
+  equipments: CatalogItem[];
+  items: CatalogItem[];
+  skills: CatalogItem[];
+  background: BackgroundTemplate | null;
+  customBackgroundText: string;
+  destinyCoreId: string | null;
+  plotSettings: PlotSettings | null;
+  /** Phase 10h: 世界书驱动字段 */
+  systemCoreEntryUid?: number | null;
+  enabledCharacterEntryUids?: number[];
+  /** 角色补充信息 */
+  personality?: string;
+  physics?: string;
+  backstory?: string;
+  extra?: string;
 }
 
 // ========== Agent 编排引擎 (Agent Orchestration) ==========

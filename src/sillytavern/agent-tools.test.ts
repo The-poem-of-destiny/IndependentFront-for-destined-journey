@@ -12,7 +12,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { executeToolCall, getToolDefinition, getToolsForAgent } from './agent-tools';
-import { getContentRegistry, setContentRegistry } from '@ui/stores/content-store';
+import { getContentRegistry, installContentRegistry } from './content-registry-runtime';
 import { craftRequestFingerprint } from './craft-request';
 import type { ToolExecutionContext, CharacterState } from './types';
 import { deleteCharacter, getCharacters, saveCharacter } from './database';
@@ -696,11 +696,11 @@ describe('executeToolCall — 失败形态只有一种', () => {
 
 describe('random_name 工具描述的品牌面（D26）', () => {
   afterEach(() => {
-    setContentRegistry({ ...getContentRegistry(), branding: undefined });
+    installContentRegistry({ ...getContentRegistry(), branding: undefined });
   });
 
   it('注册表未就绪 → 中性文案，不含任何作品名', () => {
-    setContentRegistry({ ...getContentRegistry(), branding: undefined });
+    installContentRegistry({ ...getContentRegistry(), branding: undefined });
     const def = getToolDefinition('random_name');
     expect(def).toBeDefined();
     expect(def!.function.description).toBe(
@@ -710,14 +710,14 @@ describe('random_name 工具描述的品牌面（D26）', () => {
   });
 
   it('注册表有 branding.appTitle → 描述换成带作品名的版本', () => {
-    setContentRegistry({ ...getContentRegistry(), branding: { appTitle: '某某作品' } });
+    installContentRegistry({ ...getContentRegistry(), branding: { appTitle: '某某作品' } });
     expect(getToolDefinition('random_name')!.function.description).toBe(
       '随机生成一个符合《某某作品》世界观的角色名称。根据种族和性别从名称池中随机选取，自动避开与已有角色重名。',
     );
   });
 
   it('getToolsForAgent 出口同样套上品牌面（两个读取口不许漂移）', () => {
-    setContentRegistry({ ...getContentRegistry(), branding: { appTitle: '某某作品' } });
+    installContentRegistry({ ...getContentRegistry(), branding: { appTitle: '某某作品' } });
     const tools = getToolsForAgent('char_gen');
     const def = tools.find((t) => t.function.name === 'random_name');
     expect(def).toBeDefined();
@@ -726,15 +726,15 @@ describe('random_name 工具描述的品牌面（D26）', () => {
 
   it('branding 形状不对（数组 / appTitle 非字符串 / 空串）一律回落中性文案', () => {
     for (const bad of [['x'], { appTitle: 42 }, { appTitle: '' }, 'nope']) {
-      setContentRegistry({ ...getContentRegistry(), branding: bad });
+      installContentRegistry({ ...getContentRegistry(), branding: bad });
       expect(getToolDefinition('random_name')!.function.description).toContain('符合当前世界观');
     }
   });
 
   it('非品牌工具的描述不被改写', () => {
-    setContentRegistry({ ...getContentRegistry(), branding: { appTitle: '某某作品' } });
+    installContentRegistry({ ...getContentRegistry(), branding: { appTitle: '某某作品' } });
     const before = getToolDefinition('roll_d20')!.function.description;
-    setContentRegistry({ ...getContentRegistry(), branding: undefined });
+    installContentRegistry({ ...getContentRegistry(), branding: undefined });
     expect(getToolDefinition('roll_d20')!.function.description).toBe(before);
   });
 });
@@ -747,11 +747,11 @@ describe('random_name 工具描述的品牌面（D26）', () => {
 
 describe('random_name 工具防重名', () => {
   afterEach(() => {
-    setContentRegistry({ ...getContentRegistry(), namePools: undefined });
+    installContentRegistry({ ...getContentRegistry(), namePools: undefined });
   });
 
   it('已有角色封掉池中其余名 → 必然抽出仅剩的那个名', async () => {
-    setContentRegistry({
+    installContentRegistry({
       ...getContentRegistry(),
       namePools: {
         namePools: {
@@ -779,7 +779,7 @@ describe('random_name 工具防重名', () => {
   });
 
   it('avoid 全覆盖名池 → 仍返回池内名而非空串', async () => {
-    setContentRegistry({
+    installContentRegistry({
       ...getContentRegistry(),
       namePools: {
         namePools: { 人类: { male: ['丙一'], female: [], surnames: [] } },
@@ -803,11 +803,11 @@ describe('random_name 工具防重名', () => {
 
 describe('random_name_seed 工具', () => {
   afterEach(() => {
-    setContentRegistry({ ...getContentRegistry(), namePools: undefined });
+    installContentRegistry({ ...getContentRegistry(), namePools: undefined });
   });
 
   it('有 profile 的种族 → 返回 count 组种子（工具层钳到 1-3）', async () => {
-    setContentRegistry({
+    installContentRegistry({
       ...getContentRegistry(),
       namePools: {
         namePools: { 人类: { male: ['甲'], female: [], surnames: [] } },
@@ -842,7 +842,7 @@ describe('random_name_seed 工具', () => {
   });
 
   it('无 profile → 空数组 + 提示改用 random_name（别让 AI 对着空结果自编音素）', async () => {
-    setContentRegistry({
+    installContentRegistry({
       ...getContentRegistry(),
       namePools: {
         namePools: {},

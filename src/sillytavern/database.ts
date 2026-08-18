@@ -15,6 +15,9 @@ import type {
   PlotEvent,
   CharacterState,
   Snapshot,
+  SnapshotMeta,
+  SnapshotPayload,
+  SnapshotPreview,
   SaveSlot,
   ApiEndpoint,
   PlotOutline,
@@ -30,6 +33,7 @@ import type {
   WorkshopProject,
   BeautifierRule,
   RegexStorageRecord,
+  CreatePreset,
 } from './types';
 import type {
   SceneImageRecord,
@@ -38,7 +42,6 @@ import type {
   SceneImageUsage,
   ImagePreset,
 } from './types-image';
-import type { CreatePreset } from '../ui/stores/create-store';
 import type { ContentPack } from './types-content';
 import { hashWorldBook } from './content-source';
 
@@ -93,7 +96,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-export const DB_VERSION = 21;
+export const DB_VERSION = 22;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -169,7 +172,12 @@ class AppDatabase extends Dexie {
   memories!: Table<MemoryRecord>;
   plotEvents!: Table<PlotEvent>;
   characters!: Table<CharacterState>;
-  snapshots!: Table<Snapshot>;
+  /**
+   * 🔴 v22 起这张表**只存元数据**（`SnapshotMeta`）。整档载荷（characters / saveProfile /
+   *    plotEvents / messages）搬去了 `snapshotPayloads`，因为列快照与淘汰旧快照这两个
+   *    每回合都跑的动作，此前要在主线程上反序列化约 30 份**整份对话历史**才排得出序。
+   */
+  snapshots!: Table<SnapshotMeta>;
   saves!: Table<SaveSlot>;
   apiEndpoints!: Table<ApiEndpoint>;
 
@@ -236,6 +244,12 @@ class AppDatabase extends Dexie {
   //   🔴 **不进 FullBackup**（字节进备份 = 每份备份 +12MB，照 assetBlobs 先例）。
   //   卸载 pack 刻意**保留**（重装秒开；行数少体积可控，无「零残留」负担）。
   mapBlobs!: Table<MapBlobRecord>;
+
+  // v22 (2026-08-17): 快照重载荷分表 —— 与 `snapshots` 的行 **id 相同**，一对一。
+  //   拆表的理由是读放大：快照行整份内嵌对话历史，于是「列快照」「淘汰旧快照」
+  //   这两个只需要 turn/createdAt 的动作，每次都要把 ~30 份整档历史反序列化到主线程。
+  //   索引 `saveId` 供 deleteSaveSlot / 单存档导出按存档整批取删（照 characterAppearances 的先例）。
+  snapshotPayloads!: Table<SnapshotPayload>;
 
   constructor() {
     super(DB_NAME);
@@ -598,6 +612,37 @@ class AppDatabase extends Dexie {
 
     // v21 (2026-08-07): 地图字节本地缓存 —— url 主键，同一图源天然去重。
     this.version(21).stores({ mapBlobs: 'url' });
+
+    /**
+     * v22 (2026-08-17): 快照拆表 —— `snapshots` 只留元数据，重载荷搬进 `snapshotPayloads`。
+     *
+     * 为什么要拆：快照行整份内嵌 characters / saveProfile / plotEvents / **messages**，
+     * 而每回合都会跑的两个动作（`getSnapshots` 列表、`trimSnapshots` 淘汰）只用得上
+     * `turn` 与 `createdAt` —— 却要把约 30 份整档对话历史在主线程上反序列化一遍。
+     *
+     * 索引取舍：`id` 主键与元数据行同值（一对一，join 免查询）；`saveId` 供按存档级联
+     * 删除与单存档导出整批取（与 characterAppearances 同口径）。
+     *
+     * upgrade：逐行搬。载荷四字段移出去、元数据行只留五个字段 + 顺手回填 `preview`
+     * （否则存量快照在面板上会集体丢掉「主角 HP / 游戏内日期」那一行）。
+     * 🔴 走 `toArray()` 而不是 `Collection.modify()`：要往**另一张表**写行，
+     *    modify 的回调里做跨表写在 Dexie 里不是受支持的用法。
+     */
+    this.version(22)
+      .stores({ snapshotPayloads: 'id, saveId' })
+      .upgrade(async (tx) => {
+        const fatRows = (await tx.table('snapshots').toArray()) as Snapshot[];
+        if (fatRows.length === 0) return;
+        const metas: SnapshotMeta[] = [];
+        const payloads: SnapshotPayload[] = [];
+        for (const row of fatRows) {
+          const { meta, payload } = splitSnapshot(row);
+          metas.push(meta);
+          if (payload) payloads.push(payload);
+        }
+        await tx.table('snapshots').bulkPut(metas);
+        if (payloads.length > 0) await tx.table('snapshotPayloads').bulkPut(payloads);
+      });
   }
 }
 
@@ -650,7 +695,16 @@ export interface FullBackup {
   memories: MemoryRecord[];
   plotEvents: PlotEvent[];
   characters: CharacterState[];
-  snapshots: Snapshot[];
+  /**
+   * v22 拆表后这里是**元数据行**；整档载荷在下面的 `snapshotPayloads`。
+   *
+   * 🔴 导入侧对**两种形状都要认**：旧备份（v21 及以前）的 snapshots 行整份内嵌
+   *    characters/saveProfile/plotEvents/messages，那时没有 `snapshotPayloads` 字段。
+   *    归一化在 `normalizeSnapshotBackupRows`，判据是载荷字段在不在、不是版本号。
+   */
+  snapshots: SnapshotMeta[];
+  /** v22 快照重载荷（旧备份缺此字段 → 由 snapshots 行就地拆出） */
+  snapshotPayloads: SnapshotPayload[];
   saves: SaveSlot[];
   apiEndpoints: ApiEndpoint[];
   // v5 Phase 4
@@ -700,6 +754,7 @@ export async function exportAllData(): Promise<FullBackup> {
     plotEvents,
     characters,
     snapshots,
+    snapshotPayloads,
     saves,
     apiEndpoints,
     plotOutlines,
@@ -721,6 +776,7 @@ export async function exportAllData(): Promise<FullBackup> {
     db.plotEvents.toArray(),
     db.characters.toArray(),
     db.snapshots.toArray(),
+    db.snapshotPayloads.toArray(),
     db.saves.toArray(),
     db.apiEndpoints.toArray(),
     db.plotOutlines.toArray(),
@@ -745,6 +801,7 @@ export async function exportAllData(): Promise<FullBackup> {
     plotEvents,
     characters,
     snapshots,
+    snapshotPayloads,
     saves,
     apiEndpoints,
     plotOutlines,
@@ -780,6 +837,8 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'plotEvents',
     'characters',
     'snapshots',
+    // v22 新增 —— 同上，旧备份缺这个字段照常通过（快照载荷从 snapshots 行就地拆出）
+    'snapshotPayloads',
     'saves',
     'apiEndpoints',
     'plotOutlines',
@@ -878,14 +937,30 @@ async function doImportAllData(
     }
   });
 
-  await db.transaction('rw', db.snapshots, db.saves, db.apiEndpoints, async () => {
-    await db.snapshots.clear();
-    await db.saves.clear();
-    await db.apiEndpoints.clear();
-    if (Array.isArray(backup.snapshots)) await db.snapshots.bulkPut(backup.snapshots);
-    if (Array.isArray(backup.saves)) await db.saves.bulkPut(backup.saves);
-    if (Array.isArray(backup.apiEndpoints)) await db.apiEndpoints.bulkPut(backup.apiEndpoints);
-  });
+  await db.transaction(
+    'rw',
+    db.snapshots,
+    db.snapshotPayloads,
+    db.saves,
+    db.apiEndpoints,
+    async () => {
+      await db.snapshots.clear();
+      await db.snapshotPayloads.clear();
+      await db.saves.clear();
+      await db.apiEndpoints.clear();
+      if (Array.isArray(backup.snapshots)) {
+        // v22 拆表：新备份两个字段各就各位，旧备份只有内嵌的 snapshots —— 归一化吃下两种
+        const { metas, payloads } = normalizeSnapshotBackupRows(
+          backup.snapshots,
+          Array.isArray(backup.snapshotPayloads) ? backup.snapshotPayloads : [],
+        );
+        if (metas.length > 0) await db.snapshots.bulkPut(metas);
+        if (payloads.length > 0) await db.snapshotPayloads.bulkPut(payloads);
+      }
+      if (Array.isArray(backup.saves)) await db.saves.bulkPut(backup.saves);
+      if (Array.isArray(backup.apiEndpoints)) await db.apiEndpoints.bulkPut(backup.apiEndpoints);
+    },
+  );
 
   await db.transaction('rw', db.plotOutlines, db.saveProfiles, async () => {
     await db.plotOutlines.clear();
@@ -1338,18 +1413,145 @@ export async function deleteCharacter(id: string): Promise<void> {
   await getDatabase().characters.delete(id);
 }
 
-// --- Snapshots ---
+// --- Snapshots (v22 起元数据 / 载荷分表) ---
 
-export async function getSnapshots(saveId: string): Promise<Snapshot[]> {
-  // M5: 按 createdAt 升序（旧 index 序号字段已随 §11.2 重定义删除）
+/**
+ * 从载荷里抄出列表要显示的那几个字段。
+ *
+ * 🔴 抄不出来就返回 `undefined`（而不是一个字段全空的对象）：面板按「有没有 preview」
+ *    决定要不要渲染那一行，空壳会渲染出「 · HP undefined/undefined」。
+ */
+function buildSnapshotPreview(payload: {
+  characters?: CharacterState[];
+  saveProfile?: SaveProfile;
+}): SnapshotPreview | undefined {
+  const player = Array.isArray(payload.characters)
+    ? payload.characters.find((c) => c?.type === 'player')
+    : undefined;
+  const gameTime = payload.saveProfile?.gameTime;
+  if (!player && !gameTime) return undefined;
+  const preview: SnapshotPreview = {};
+  if (player) {
+    preview.playerName = player.name;
+    preview.hp = player.hp;
+    preview.maxHp = player.maxHp;
+  }
+  if (gameTime) preview.gameTime = gameTime;
+  return preview;
+}
+
+/**
+ * 整份快照 → 元数据行 + 载荷行。**全仓唯一一处拆法**（落库 / v22 迁移 / 两种备份导入共用）。
+ *
+ * 入参也接受**已经是元数据**的行（新格式备份里的 `snapshots`）—— 那时 `payload` 为 `null`，
+ * 载荷由备份自己的 `snapshotPayloads` 数组供给。判据是载荷字段在不在，不看版本号：
+ * 版本号只是个戳，而这里要回答的是「这一行里到底有没有整档数据」。
+ */
+function splitSnapshot(row: Snapshot | SnapshotMeta): {
+  meta: SnapshotMeta;
+  payload: SnapshotPayload | null;
+} {
+  const fat = row as Snapshot;
+  const meta: SnapshotMeta = {
+    id: row.id,
+    saveId: row.saveId,
+    createdAt: row.createdAt,
+    reason: row.reason,
+    turn: row.turn,
+  };
+  const hasPayload =
+    'characters' in fat || 'saveProfile' in fat || 'plotEvents' in fat || 'messages' in fat;
+  if (!hasPayload) {
+    // 已经是元数据行：preview 原样带走（新格式备份里它就在元数据行上）
+    if (row.preview !== undefined) meta.preview = row.preview;
+    return { meta, payload: null };
+  }
+
+  const payload: SnapshotPayload = {
+    id: row.id,
+    saveId: row.saveId,
+    characters: fat.characters,
+    saveProfile: fat.saveProfile,
+  };
+  if (fat.plotEvents !== undefined) payload.plotEvents = fat.plotEvents;
+  if (fat.messages !== undefined) payload.messages = fat.messages;
+
+  // preview 优先用行上已有的（导入侧要保真），缺席才从载荷现算（v22 迁移的回填路径）
+  const preview = row.preview ?? buildSnapshotPreview(payload);
+  if (preview !== undefined) meta.preview = preview;
+  return { meta, payload };
+}
+
+/** 元数据行 + 载荷行 → 整份快照（恢复与导出用；**唯一**一处合体法） */
+function joinSnapshot(meta: SnapshotMeta, payload: SnapshotPayload): Snapshot {
+  const snapshot: Snapshot = {
+    ...meta,
+    characters: payload.characters,
+    saveProfile: payload.saveProfile,
+  };
+  if (payload.plotEvents !== undefined) snapshot.plotEvents = payload.plotEvents;
+  if (payload.messages !== undefined) snapshot.messages = payload.messages;
+  return snapshot;
+}
+
+/**
+ * 备份里的快照两表归一化 —— **新旧两种格式都吃**：
+ * - 新格式：`snapshots` 已是元数据行，载荷在 `snapshotPayloads` 里
+ * - 旧格式：`snapshots` 整份内嵌，`snapshotPayloads` 缺席 → 就地拆开
+ *
+ * 🔴 向后兼容是硬要求：用户手里那些旧备份文件必须永远导得进来。
+ */
+export function normalizeSnapshotBackupRows(
+  rows: Array<Snapshot | SnapshotMeta>,
+  payloadRows: SnapshotPayload[],
+): { metas: SnapshotMeta[]; payloads: SnapshotPayload[] } {
+  const metas: SnapshotMeta[] = [];
+  const payloads: SnapshotPayload[] = [];
+  const splitIds = new Set<string>();
+  for (const row of rows) {
+    const { meta, payload } = splitSnapshot(row);
+    metas.push(meta);
+    if (payload) {
+      payloads.push(payload);
+      splitIds.add(payload.id);
+    }
+  }
+  // 同 id 两边都有时以内嵌的那份为准（旧格式里内嵌的才是真数据）
+  for (const p of payloadRows) {
+    if (!splitIds.has(p.id)) payloads.push(p);
+  }
+  return { metas, payloads };
+}
+
+/**
+ * 列出某存档的全部快照 —— **只读元数据表**（M5: 按 createdAt 升序）。
+ *
+ * 🔴 这里**绝不能**去 join 载荷：面板一打开就要列 30 条，而载荷是整档对话历史。
+ *    要整份快照走 `getSnapshot(id)`（一次一条，恢复才需要）。
+ */
+export async function getSnapshots(saveId: string): Promise<SnapshotMeta[]> {
   return getDatabase().snapshots.where('saveId').equals(saveId).sortBy('createdAt');
 }
 
+/**
+ * 按 id 取**整份**快照（元数据 + 载荷合体）。恢复是唯一的调用点。
+ *
+ * 🔴 元数据在、载荷行不在 = 半条快照（迁移中断 / 手编备份删了 payload 数组）。
+ *    此时**必须抛**：默默返回一份没有 characters 的快照，恢复会把存档洗成空的。
+ */
 export async function getSnapshot(id: string): Promise<Snapshot | undefined> {
-  return getDatabase().snapshots.get(id);
+  const db = getDatabase();
+  const meta = await db.snapshots.get(id);
+  if (!meta) return undefined;
+  const payload = await db.snapshotPayloads.get(id);
+  if (!payload) {
+    throw new Error(`快照数据缺失：找不到载荷行（id=${id}）—— 该快照已损坏，无法恢复`);
+  }
+  return joinSnapshot(meta, payload);
 }
 
-export async function getLatestSnapshot(saveId: string): Promise<Snapshot | undefined> {
+/** 最新一张快照的**元数据**（同 getSnapshots：不碰载荷表） */
+export async function getLatestSnapshot(saveId: string): Promise<SnapshotMeta | undefined> {
   const snapshots = await getDatabase()
     .snapshots.where('saveId')
     .equals(saveId)
@@ -1358,13 +1560,28 @@ export async function getLatestSnapshot(saveId: string): Promise<Snapshot | unde
   return snapshots[0];
 }
 
+/**
+ * 落库一份整快照 —— 拆成两行，**同一个事务**里写。
+ *
+ * 半份快照（有元数据没载荷）在恢复时是硬失败，所以这一对必须原子。
+ */
 export async function saveSnapshot(snapshot: Snapshot): Promise<string> {
-  await getDatabase().snapshots.put(snapshot);
+  const db = getDatabase();
+  const { meta, payload } = splitSnapshot(snapshot);
+  await db.transaction('rw', db.snapshots, db.snapshotPayloads, async () => {
+    await db.snapshots.put(meta);
+    if (payload) await db.snapshotPayloads.put(payload);
+  });
   return snapshot.id;
 }
 
+/** 删一张快照 —— 两张表一起删（留下孤儿载荷 = 看不见的垃圾） */
 export async function deleteSnapshot(id: string): Promise<void> {
-  await getDatabase().snapshots.delete(id);
+  const db = getDatabase();
+  await db.transaction('rw', db.snapshots, db.snapshotPayloads, async () => {
+    await db.snapshots.delete(id);
+    await db.snapshotPayloads.delete(id);
+  });
 }
 
 /**
@@ -1376,17 +1593,29 @@ export async function deleteSnapshot(id: string): Promise<void> {
  * 用 createdAt 判定：恢复点之后创建的快照，全是该时间线之后的产物。
  */
 export async function deleteSnapshotsAfter(saveId: string, cutoff: number): Promise<void> {
-  await getDatabase()
-    .snapshots.where('saveId')
+  const db = getDatabase();
+  // 选行只读元数据表；删除两表同步（v22 拆表后载荷行必须跟着走）
+  const doomed = await db.snapshots
+    .where('saveId')
     .equals(saveId)
     .filter((s) => s.createdAt > cutoff)
-    .delete();
+    .toArray();
+  if (doomed.length === 0) return;
+  const ids = doomed.map((s) => s.id);
+  await db.transaction('rw', db.snapshots, db.snapshotPayloads, async () => {
+    await db.snapshots.bulkDelete(ids);
+    await db.snapshotPayloads.bulkDelete(ids);
+  });
 }
 
 /** 删除超出上限的旧快照
  *  - mode='dense'(默认): 按 createdAt 保留最新 maxCount 个（FIFO，向后兼容）
  *  - mode='tiered': 阶梯淘汰——最近5轮全留，再往前每4轮留1，更早每8/10轮留1；
  *    非 turn 档(manual/pre-combat)受保护永不淘汰；最近5个 turn 档铁律保护。
+ *
+ *  🔴 **整个选择过程只读元数据表**（拆表要治的就是这里）：淘汰每回合都跑，而它要的
+ *     只有 reason / turn / createdAt 三个字段 —— 拆表前每回合都要为此反序列化约 30 份
+ *     整档对话历史。载荷表在本函数里**只被删、不被读**，有测试盯着这条。
  */
 export async function trimSnapshots(
   saveId: string,
@@ -1427,12 +1656,17 @@ export async function trimSnapshots(
 
   const toDelete = all.filter((s) => !kept.has(s.id));
   if (toDelete.length > 0) {
-    await getDatabase().snapshots.bulkDelete(toDelete.map((s) => s.id));
+    const ids = toDelete.map((s) => s.id);
+    const db = getDatabase();
+    await db.transaction('rw', db.snapshots, db.snapshotPayloads, async () => {
+      await db.snapshots.bulkDelete(ids);
+      await db.snapshotPayloads.bulkDelete(ids);
+    });
   }
 }
 
 /** 阶梯选择要保留的 turn 快照（turnSnaps 最新在前；按"年龄"=最新turn-snap.turn 决定保留间隔） */
-function selectTieredTurnSnapshots(turnSnaps: Snapshot[]): Set<string> {
+function selectTieredTurnSnapshots(turnSnaps: SnapshotMeta[]): Set<string> {
   const keep = new Set<string>();
   if (turnSnaps.length === 0) return keep;
   const sorted = [...turnSnaps].sort((a, b) => b.turn - a.turn); // turn 降序兜底
@@ -1480,6 +1714,7 @@ export async function deleteSaveSlot(id: string): Promise<void> {
     'rw',
     [
       db.snapshots,
+      db.snapshotPayloads,
       db.memories,
       db.plotEvents,
       db.plotOutlines,
@@ -1492,7 +1727,9 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       db.characterAppearances,
     ],
     async () => {
+      // v22 拆表：元数据与载荷各有 saveId 索引，两张表各删各的（载荷表不必先查 id）
       await db.snapshots.where('saveId').equals(id).delete();
+      await db.snapshotPayloads.where('saveId').equals(id).delete();
       await db.memories.where('saveId').equals(id).delete();
       await db.plotEvents.where('saveId').equals(id).delete();
       await db.plotOutlines.where('saveId').equals(id).delete();

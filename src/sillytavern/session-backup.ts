@@ -22,7 +22,12 @@
  * 设计参考：database.ts 的 `deleteSaveSlot`（表清单）/ `validateBackupOrThrow`（三态校验）。
  */
 
-import { getDatabase, characterAppearanceKey, DB_VERSION } from './database';
+import {
+  getDatabase,
+  characterAppearanceKey,
+  normalizeSnapshotBackupRows,
+  DB_VERSION,
+} from './database';
 import type { ContentPackRecord } from './database';
 // 记忆编号分配器与 generateMemoryId() **共用同一个实现**（两处各写一份就是漂移的来路：
 // 一边补齐到 6 位、另一边截断到 6 位，撞号了也不会有任何报错）。
@@ -34,6 +39,8 @@ import type {
   CharacterState,
   ChatMessage,
   Snapshot,
+  SnapshotMeta,
+  SnapshotPayload,
   MemoryRecord,
   PlotEvent,
   PlotOutline,
@@ -113,7 +120,13 @@ export interface SessionBackup {
   profile: SaveProfile | null;
   characters: CharacterState[];
   messages: ChatMessage[];
-  snapshots: Snapshot[];
+  /**
+   * v22 拆表后是**元数据行**；整档载荷在下面的 `snapshotPayloads`。
+   * 旧的单存档备份（v21 及以前）这里整份内嵌，导入侧照样吃 —— 见 `normalizeSnapshotBackupRows`。
+   */
+  snapshots: SnapshotMeta[];
+  /** v22 快照重载荷（旧备份缺此字段 → 由 snapshots 行就地拆出） */
+  snapshotPayloads: SnapshotPayload[];
   memories: MemoryRecord[];
   plotEvents: PlotEvent[];
   plotOutlines: PlotOutline[];
@@ -386,6 +399,7 @@ export async function exportSessionSave(
     characters,
     messages,
     snapshots,
+    snapshotPayloads,
     memories,
     plotEvents,
     plotOutlines,
@@ -399,6 +413,8 @@ export async function exportSessionSave(
     db.characters.where('saveId').equals(saveId).toArray(),
     db.messages.where('saveId').equals(saveId).toArray(),
     db.snapshots.where('saveId').equals(saveId).toArray(),
+    // v22 拆表：载荷自带 saveId 索引，与元数据行各取各的（清单仍与 deleteSaveSlot 同源）
+    db.snapshotPayloads.where('saveId').equals(saveId).toArray(),
     db.memories.where('saveId').equals(saveId).toArray(),
     db.plotEvents.where('saveId').equals(saveId).toArray(),
     db.plotOutlines.where('saveId').equals(saveId).toArray(),
@@ -457,6 +473,7 @@ export async function exportSessionSave(
     characters: structuredClone(characters),
     messages: structuredClone(messages),
     snapshots: structuredClone(snapshots),
+    snapshotPayloads: structuredClone(snapshotPayloads),
     memories: structuredClone(memories),
     plotEvents: structuredClone(plotEvents),
     plotOutlines: structuredClone(plotOutlines),
@@ -640,6 +657,8 @@ function validateSessionBackupOrThrow(backup: unknown): Record<string, unknown> 
     'characters',
     'messages',
     'snapshots',
+    // v22 新增；旧备份缺这个字段照常通过（载荷从内嵌的 snapshots 行拆出）
+    'snapshotPayloads',
     'memories',
     'plotEvents',
     'plotOutlines',
@@ -675,7 +694,11 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
 
   const characters = readArray<CharacterState>(rec, 'characters');
   const messages = readArray<ChatMessage>(rec, 'messages');
-  const snapshots = readArray<Snapshot>(rec, 'snapshots');
+  // v22 拆表 —— 两种格式都吃：新备份两个数组各就各位，旧备份只有内嵌的 snapshots
+  const { metas: snapshots, payloads: snapshotPayloads } = normalizeSnapshotBackupRows(
+    readArray<Snapshot | SnapshotMeta>(rec, 'snapshots'),
+    readArray<SnapshotPayload>(rec, 'snapshotPayloads'),
+  );
   const memories = readArray<MemoryRecord>(rec, 'memories');
   const plotEvents = readArray<PlotEvent>(rec, 'plotEvents');
   const plotOutlines = readArray<PlotOutline>(rec, 'plotOutlines');
@@ -769,20 +792,29 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
   }));
   const nextProfile = rawProfile ? remapProfile(rawProfile) : null;
 
-  // 快照里嵌着 characters / saveProfile / plotEvents / messages 的深拷贝，
-  // 而 restoreSnapshot 会把它们**原样写回库**（覆写语义）—— 所以必须用同一套映射改写，
-  // 否则一次回退就把旧 id 复活到库里，两个导入出来的存档从此互相污染。
-  const nextSnapshots: Snapshot[] = snapshots.map((s) => ({
+  const nextSnapshots: SnapshotMeta[] = snapshots.map((s) => ({
     ...s,
     id: snapIds.get(s.id),
     saveId: newSaveId,
-    characters: Array.isArray(s.characters) ? s.characters.map(remapCharacter) : [],
-    saveProfile: asRecord(s.saveProfile) ? remapProfile(s.saveProfile) : s.saveProfile,
-    ...(s.plotEvents !== undefined
-      ? { plotEvents: Array.isArray(s.plotEvents) ? s.plotEvents.map(remapPlotEvent) : [] }
+  }));
+
+  // 快照载荷里嵌着 characters / saveProfile / plotEvents / messages 的深拷贝，
+  // 而 restoreSnapshot 会把它们**原样写回库**（覆写语义）—— 所以必须用同一套映射改写，
+  // 否则一次回退就把旧 id 复活到库里，两个导入出来的存档从此互相污染。
+  //
+  // 🔴 载荷行的 id **跟着它那条元数据行的新 id 走**（`snapIds` 是同一张映射表）：
+  //    各发各的号就等于把一对拆散，恢复时会报「载荷行不存在」。
+  const nextSnapshotPayloads: SnapshotPayload[] = snapshotPayloads.map((p) => ({
+    ...p,
+    id: snapIds.get(p.id),
+    saveId: newSaveId,
+    characters: Array.isArray(p.characters) ? p.characters.map(remapCharacter) : [],
+    saveProfile: asRecord(p.saveProfile) ? remapProfile(p.saveProfile) : p.saveProfile,
+    ...(p.plotEvents !== undefined
+      ? { plotEvents: Array.isArray(p.plotEvents) ? p.plotEvents.map(remapPlotEvent) : [] }
       : {}),
-    ...(s.messages !== undefined
-      ? { messages: Array.isArray(s.messages) ? s.messages.map(remapMessage) : [] }
+    ...(p.messages !== undefined
+      ? { messages: Array.isArray(p.messages) ? p.messages.map(remapMessage) : [] }
       : {}),
   }));
 
@@ -807,6 +839,7 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       db.characters,
       db.messages,
       db.snapshots,
+      db.snapshotPayloads,
       db.memories,
       db.plotEvents,
       db.plotOutlines,
@@ -842,6 +875,7 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       if (nextCharacters.length > 0) await db.characters.bulkPut(nextCharacters);
       if (nextMessages.length > 0) await db.messages.bulkPut(nextMessages);
       if (nextSnapshots.length > 0) await db.snapshots.bulkPut(nextSnapshots);
+      if (nextSnapshotPayloads.length > 0) await db.snapshotPayloads.bulkPut(nextSnapshotPayloads);
       if (nextMemories.length > 0) await db.memories.bulkPut(nextMemories);
       if (nextPlotEvents.length > 0) await db.plotEvents.bulkPut(nextPlotEvents);
       if (nextPlotOutlines.length > 0) await db.plotOutlines.bulkPut(nextPlotOutlines);

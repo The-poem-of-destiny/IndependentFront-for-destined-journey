@@ -18,6 +18,7 @@ import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import type {
   CharacterState,
+  CreatePreset,
   PlotSettings,
   PlotOutline,
   ApiEndpoint,
@@ -72,46 +73,14 @@ import {
 
 // ===== 类型 =====
 
-/** 捏人预设 */
-export interface CreatePreset {
-  id: string;
-  name: string;
-  createdAt: number;
-  updatedAt: number;
-  difficulty: string;
-  character: {
-    name: string;
-    gender: string;
-    customGender?: string;
-    age: number;
-    race: string;
-    customRace?: string;
-    identity: string;
-    customIdentity?: string;
-    startLocation: string;
-    customStartLocation?: string;
-    level: number;
-    basePoints: Record<string, number>;
-    attributePoints: Record<string, number>;
-    money: number;
-    destinyPoints: number;
-  };
-  equipments: CatalogItem[];
-  items: CatalogItem[];
-  skills: CatalogItem[];
-  background: BackgroundTemplate | null;
-  customBackgroundText: string;
-  destinyCoreId: string | null;
-  plotSettings: PlotSettings | null;
-  /** Phase 10h: 世界书驱动字段 */
-  systemCoreEntryUid?: number | null;
-  enabledCharacterEntryUids?: number[];
-  /** 角色补充信息 */
-  personality?: string;
-  physics?: string;
-  backstory?: string;
-  extra?: string;
-}
+/**
+ * 捏人预设 —— 定义已迁到 `@engine/types`（分层收口）。
+ *
+ * 它是 Dexie `createPresets` 表的落库形状，`database.ts` 要拿它标 `CreatePresetRecord.data`；
+ * 留在本 store 里就只能让引擎反向 `import type ... from '../ui/stores/create-store'`。
+ * 这里 re-export 同一个名字，`PresetModal.vue` 等既有消费方的 import 路径一字未改。
+ */
+export type { CreatePreset } from '@engine/types';
 
 // ===== 原版常量 (custom_start_index.html) =====
 const MAX_BP = 25;

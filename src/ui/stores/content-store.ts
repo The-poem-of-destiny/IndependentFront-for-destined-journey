@@ -70,6 +70,13 @@ import { installMapPack } from '@engine/map-runtime';
 // 第 13 面 randomEvents 的收窄口（永不抛）+ 引擎侧随机事件缝（见 `setContentRegistry`）
 import { coerceRandomEventPack } from '@engine/random-event-pack';
 import { installRandomEventPack } from '@engine/random-event-runtime';
+// 注册表本体的引擎侧注入缝（见 `setContentRegistry` / `getContentRegistry`）
+import {
+  createEmptyContentRegistry,
+  installContentRegistry,
+  getContentRegistry as getInstalledContentRegistry,
+} from '@engine/content-registry-runtime';
+import type { ContentRegistry } from '@engine/content-registry-runtime';
 import {
   planPackUninstall,
   diffPackUpgrade,
@@ -300,80 +307,28 @@ export async function loadAllDefaultBooks(): Promise<WorldBook[]> {
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 内容注册表的各面（D16 / §5.1；第 7 面 imageDialects 由图像 v2 追加，
- * 第 8 面 mapPack 由地图系统 v1 追加，`randomEvents` 由随机事件系统 v1 追加 ——
- * 后者在 `ContentPack` 里是**第 13 分节**，两套编号各数各的，别混着读）。
+ * 内容注册表的各面（D16 / §5.1）。
  *
- * 约定 URL: `/data/content/<name>.json`。本波（T2）先灌占位 = 现有代码常量；波 2 逐面接管，
- * pack 安装（T7）重灌。消费方同步读，所以灌注必须在任何 agent 执行前完成。
+ * 🔴 **定义已迁到引擎侧的注入缝** `@engine/content-registry-runtime`（分层收口）：
+ * 四个**同步**消费方（agent-tools / random-tables / bloodlines / $location）全在引擎里，
+ * 它们此前各自 `import '../ui/stores/content-store'` —— 依赖方向是反的。逐面的语义注释
+ * （哪一面缺席不是错误、哪两面的消费方压根不读注册表）全部原文搬进那个文件的文件头与字段注释。
  *
- * 每面的值都是 `unknown`：本波只立灌注骨架与同步读取契约，真实形状由各波（D24/D25）
- * 收窄。这与 `PackCatalogSection.data: unknown` / `PackNamePoolsSection.data: unknown`
- * （types-content.ts）同口径——pack 透传、planner 不解释结构。
+ * 这里只 re-export 同一个名字，让既有 UI 消费方（`create-store` / 组件 / 测试）路径不变。
  */
-export interface ContentRegistry {
-  /** 捏人目录池（D24） */
-  catalog: unknown;
-  /** 地点节点（D25①） */
-  locations: unknown;
-  /** 血脉集（D25②） */
-  bloodlines: unknown;
-  /** 名字池 / 发色 / 瞳色 / 性格池（D25③） */
-  namePools: unknown;
-  /** 地图标记预设（D23，MapPanel 用） */
-  markers: unknown;
-  /** 品牌面（D26：应用名/副标题/era/credits 等） */
-  branding: unknown;
-  /**
-   * 提示词方言（图像 v2 / C4）：`{ dialects: [...] }`。
-   *
-   * 🔴 与其余六面同一条纪律 —— 这一面**缺席不是错误**：`parseImageDialects` 吃到
-   * `undefined` 返回空数组，`resolveImageDialect` 于是落到内置兜底方言，出图行为
-   * 与图像 v1 逐字节相同。第 7 面是「能被内容包替换」的能力，不是运行前提。
-   */
-  imageDialects: unknown;
-  /**
-   * 地图内容包（地图系统 v1 / §3.3）：`map-pack.json` 的原始 JSON。
-   *
-   * 🔴 **本面的消费方一个都不在这里读它** —— 落位（`state-manager`）、寻路、天气、
-   * `$map` 能力面全在引擎侧，读的是 `map-runtime.getMapPack()`。本面只是那个模块级事实的
-   * **来源**：`setContentRegistry` 每次替换注册表时把这一面经 `coerceMapPack` 收窄后装进去
-   * （见那个函数）。所以 UI/引擎要地图**不要读这一面**，读 `getMapPack()`；要那张
-   * `provinces.png` 用 `MAP_PROVINCES_URL`。
-   *
-   * 🔴 与其余七面同一条纪律 —— 缺席不是错误：整份认不出 → 空包 → 落位永远 null、
-   * 天气不断言、`MAP_CONTEXT` 整段不出，游戏照常进行（`map-pack.ts` 文件头的兜底合同）。
-   */
-  mapPack: unknown;
-  /**
-   * 随机事件包（随机事件系统 v1 / §3.3）：`random-events.json` 的原始 JSON。
-   *
-   * 🔴 **消费方一个都不在这里读它**（与 `mapPack` 逐字同款）—— 掷骰与首访钩子
-   * （`state-manager`）、池子保洁、`{{RANDOM_EVENTS}}` 的 resolver 读的都是
-   * `random-event-runtime.getRandomEventPack()`。本面只是那个模块级事实的**来源**：
-   * `setContentRegistry` 每次替换注册表时把这一面经 `coerceRandomEventPack` 收窄后装进去。
-   *
-   * 🔴 缺席不是错误：整份认不出 → 空包 → 掷骰/首访/保洁/注入四条钩子整段 no-op，
-   * 游戏一个字节都不受影响（引擎仓零内置事件）。
-   */
-  randomEvents: unknown;
-}
+export type { ContentRegistry } from '@engine/content-registry-runtime';
 
 /**
- * 模块级注册表（D16）。
+ * 当前注册表（同步读取；agent-tools 等同步路径用）。
  *
- * 🔴 **模块级而非 store 实例级**：agent-tools / random-tables / bloodlines / $location
- * 这些**同步**消费方在工具执行路径里读它，不能等 Pinia store 构造（那是 `app.use(pinia)`
- * 之后的事）。模块加载时 `seedPlaceholderRegistry()` 同步灌注占位常量，保证任何
- * 同步读取都拿到非空值。
- *
- * 用 `let` + 整份替换（不深合并）：pack 安装重灌时整份盖，简单且无半状态。
+ * 🔴 **注册表只有一份存储，就在引擎侧的注入缝里**（本函数只是转发）。曾经的写法是
+ * store 与缝**各存一份**（照 `mapPack` / `randomEvents` 那两面的先例，它们装进缝的是
+ * `coerce*` 之后的**派生值**，两份不是同一个东西所以无妨）。注册表本体不同：两处存着
+ * 同一份事实，就能各说各话 —— 而症状不是报错，是「装完包了，可引擎那边的目录还是旧的」。
+ * 故这里刻意**不留**模块级 `let registry`。
  */
-let registry: ContentRegistry = createEmptyRegistry();
-
-/** 当前注册表（同步读取；agent-tools 等同步路径用） */
 export function getContentRegistry(): ContentRegistry {
-  return registry;
+  return getInstalledContentRegistry();
 }
 
 /**
@@ -397,27 +352,14 @@ export function getContentRegistry(): ContentRegistry {
  * `installMapPack` 自己也不校验。坏地图包的代价是「棋子没在图上」，不是启动失败。
  */
 export function setContentRegistry(next: ContentRegistry): void {
-  registry = next;
+  // 🔴 注册表本体也是装进引擎缝的（`content-registry-runtime`），本函数是它**唯一**的
+  //    生产灌注点 —— 与下面两面同一条纪律，只是它装的是原值而不是 coerce 后的派生值。
+  installContentRegistry(next);
   installMapPack(coerceMapPack(next.mapPack));
   // 🔴 第 13 面同理（随机事件系统 v1 / §3.3）：引擎侧读的是 `random-event-runtime` 里
   //    「当前装着哪一份事件包」那一个模块级事实，不是本注册表。漏掉这一行的症状同样不是
   //    报错，而是**沿着上一份事件包掷骰**（换包后旧事件继续入池、新事件永不出现）。
   installRandomEventPack(coerceRandomEventPack(next.randomEvents));
-}
-
-/** 造一份空注册表骨架 */
-function createEmptyRegistry(): ContentRegistry {
-  return {
-    catalog: undefined,
-    locations: undefined,
-    bloodlines: undefined,
-    namePools: undefined,
-    markers: undefined,
-    branding: undefined,
-    imageDialects: undefined,
-    mapPack: undefined,
-    randomEvents: undefined,
-  };
 }
 
 /**
@@ -432,12 +374,12 @@ function createEmptyRegistry(): ContentRegistry {
  * **异步占位加载见 `ensureContentRegistryLoaded()`**（八面各自 fetch
  * `/data/content/<name>.json`）；pack 分节由装包执行器经 `setContentRegistry` 重灌。
  *
- * 🔴 **经 `setContentRegistry` 走，不直接赋值 `registry`**：清空注册表必须连带把引擎侧的
- * 地图缝也清回空包（地图系统 v1 / §3.3）。卸载流先 seed 再重拉占位，中间那一段若还装着
- * 刚卸掉的地图包，落位就仍沿着它走 —— 而那既不报错也没人会去看。
+ * 🔴 **经 `setContentRegistry` 走，别直接调 `installContentRegistry`**：清空注册表必须连带
+ * 把引擎侧的地图缝/事件缝也清回空包（地图系统 v1 / §3.3）。卸载流先 seed 再重拉占位，
+ * 中间那一段若还装着刚卸掉的地图包，落位就仍沿着它走 —— 而那既不报错也没人会去看。
  */
 export function seedPlaceholderRegistry(): void {
-  setContentRegistry(createEmptyRegistry());
+  setContentRegistry(createEmptyContentRegistry());
 }
 
 // ═══════════════════════════════════════════════════════════

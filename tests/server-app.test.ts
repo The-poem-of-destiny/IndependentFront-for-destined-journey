@@ -1,8 +1,13 @@
 import { createServer } from 'node:http';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { brotliCompressSync } from 'node:zlib';
-import { describe, expect, it } from 'vitest';
-import { buildHonoApp, OPAQUE_ORIGIN_ERROR } from '../server/app';
+import { getRequestListener } from '@hono/node-server';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { BFF_ROUTE_PREFIXES, buildHonoApp, isBffRoute, OPAQUE_ORIGIN_ERROR } from '../server/app';
+import { CONTENT_DIR_NOT_CONFIGURED } from '../server/routes/content';
 
 describe('BFF origin boundary', () => {
   it('rejects requests from opaque sandbox origins before routing', async () => {
@@ -373,5 +378,210 @@ describe('BFF base URL 规范化（SEC-09）', () => {
     });
 
     expect(response.status).toBe(400);
+  });
+});
+
+describe('BFF 路由前缀单一真源', () => {
+  // 🔴 这一组钉的是「三处手工同步」那个坑：前缀清单此前在 server/app.ts 的 app.route()、
+  // vite 的 configureServer、vite 的 configurePreviewServer 里各写一遍，漏改一处的症状
+  // 不是报错而是「代码看着完全正确，请求 404」。现在只剩 BFF_ROUTE_TABLE 一处，
+  // 下面三条分别钉：常量内容、常量与真实挂载一致、vite 不再自己抄一份。
+
+  /** 真正挂在 app 上的路由（滤掉 app.use('*') 那两个全局中间件） */
+  function mountedApiPaths(): string[] {
+    return buildHonoApp()
+      .routes.map((route) => route.path)
+      .filter((path) => path.startsWith('/api/'));
+  }
+
+  it('常量内容被钉死 —— 加/删 BFF 路由时这条会红，提醒你顺带看一眼别处', () => {
+    expect([...BFF_ROUTE_PREFIXES]).toEqual([
+      '/api/chat',
+      '/api/status',
+      '/api/embeddings',
+      '/api/models',
+      '/api/image',
+      '/api/worldbooks',
+      '/api/defaults',
+    ]);
+  });
+
+  it('每个前缀都真的挂了路由，且没有 /api 路由落在清单之外', () => {
+    const paths = mountedApiPaths();
+    expect(paths.length).toBeGreaterThan(0);
+
+    for (const prefix of BFF_ROUTE_PREFIXES) {
+      const mounted = paths.filter((path) => path === prefix || path.startsWith(`${prefix}/`));
+      expect(mounted, `前缀 ${prefix} 在常量里，却没有任何路由挂在它下面`).not.toHaveLength(0);
+    }
+
+    for (const path of paths) {
+      expect(isBffRoute(path), `路由 ${path} 挂在 app 上，却不被 isBffRoute 认领`).toBe(true);
+    }
+  });
+
+  it('vite.config.ts 不再手抄前缀白名单，且 dev / preview 拿同一份 options', () => {
+    const source = readFileSync(resolve(__dirname, '..', 'vite.config.ts'), 'utf8');
+
+    // 判据用 `/api/` 后跟一个单词字符 —— 开头那道 `u.startsWith('/api/')` 的
+    // 通用 opaque-origin 守卫是合法的，不该被这条误伤。
+    expect(source.match(/startsWith\(['"]\/api\/\w/g)).toBeNull();
+    expect(source).toContain('isBffRoute(');
+
+    // dev 与 preview 两处都必须注入 contentDir，否则「preview 下写回 404」原地复活
+    const injections = source.match(/buildHonoApp\(\s*\{\s*contentDir:\s*poemContentDir\s*\}/g);
+    expect(injections).toHaveLength(2);
+  });
+});
+
+describe('内容 overlay 写回路由（/api/worldbooks · /api/defaults）', () => {
+  // 🔴 这两条端点此前只是 vite dev 中间件，preview 与生产必 404，而前端无条件 fetch。
+  // 搬进 hono 之后 dev / preview 共用同一份实现，下面钉的是「搬家没搬坏」。
+
+  let contentDir: string;
+
+  beforeEach(() => {
+    contentDir = mkdtempSync(join(tmpdir(), 'poem-content-'));
+  });
+
+  afterEach(() => {
+    rmSync(contentDir, { recursive: true, force: true });
+  });
+
+  /** 配好 overlay 的 app */
+  const configured = () => buildHonoApp({ contentDir });
+
+  function putJson(app: ReturnType<typeof buildHonoApp>, path: string, body: string) {
+    return app.request(path, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+  }
+
+  it('PUT /api/worldbooks/:id 写进 <overlay>/worldbooks/<id>.json，字节原样落盘', async () => {
+    // 🔴 落盘的必须是**请求体本身**：前端送的是 2 空格缩进的 JSON，
+    //    服务端若再 JSON.stringify 一遍，内容仓每次保存都会多出一整份无关 diff。
+    const body = '{\n  "id": "core",\n  "name": "核心设定"\n}';
+    const response = await putJson(configured(), '/api/worldbooks/core', body);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(readFileSync(join(contentDir, 'worldbooks', 'core.json'), 'utf8')).toBe(body);
+  });
+
+  it('路径带不带 .json 都落到同一个文件（前端两处调用都不带）', async () => {
+    const response = await putJson(configured(), '/api/worldbooks/core.json', '{"a":1}');
+
+    expect(response.status).toBe(200);
+    expect(readFileSync(join(contentDir, 'worldbooks', 'core.json'), 'utf8')).toBe('{"a":1}');
+  });
+
+  it('中文逐字节往返 —— chunk 边界切碎 UTF-8 会在这里现形（2026-08-08 真机）', async () => {
+    // 「展示」曾被切成「展□□示」：每个 chunk 各自 toString() 在切分处产生 U+FFFD。
+    // 🔴 替换字符只准算出来，**不写字面量** —— tests/ 归 encoding-invariants 那道闸门管，
+    //    源码里躺一个真的 U+FFFD 会让它当场挂红（那正是它要抓的东西）。
+    const replacementChar = String.fromCharCode(0xfffd);
+    const body = JSON.stringify({ text: '展示、顿号与更长的一段中文内容'.repeat(400) });
+    const response = await putJson(configured(), '/api/worldbooks/zh', body);
+
+    expect(response.status).toBe(200);
+    const written = readFileSync(join(contentDir, 'worldbooks', 'zh.json'), 'utf8');
+    expect(written).toBe(body);
+    expect(written).not.toContain(replacementChar);
+  });
+
+  it('目标子目录不存在时自动新建（对齐原中间件：允许新建文件）', async () => {
+    expect(existsSync(join(contentDir, 'defaults'))).toBe(false);
+
+    const response = await putJson(configured(), '/api/defaults/agent-config', '{"agents":{}}');
+
+    expect(response.status).toBe(200);
+    expect(readFileSync(join(contentDir, 'defaults', 'agent-config.json'), 'utf8')).toBe(
+      '{"agents":{}}',
+    );
+  });
+
+  it('/api/defaults 不带名字时落 agent-config.json（原中间件的兜底名）', async () => {
+    for (const path of ['/api/defaults', '/api/defaults/']) {
+      rmSync(join(contentDir, 'defaults'), { recursive: true, force: true });
+      const response = await putJson(configured(), path, `{"from":"${path}"}`);
+
+      expect(response.status, `${path} 应当落到兜底名`).toBe(200);
+      expect(readFileSync(join(contentDir, 'defaults', 'agent-config.json'), 'utf8')).toBe(
+        `{"from":"${path}"}`,
+      );
+    }
+  });
+
+  it('🔒 越界写被拒 400，且目标目录外一个字节都没动（P1-03）', async () => {
+    const outside = join(contentDir, 'evil.json');
+    mkdirSync(join(contentDir, 'worldbooks'), { recursive: true });
+    writeFileSync(outside, 'original', 'utf8');
+
+    const response = await putJson(configured(), '/api/worldbooks/%2e%2e%2fevil', 'pwned');
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'invalid path' });
+    expect(readFileSync(outside, 'utf8')).toBe('original');
+  });
+
+  it('overlay 未配置 → 501 + 中文说明，且不落任何文件（占位内容碰不到）', async () => {
+    for (const path of ['/api/worldbooks/core', '/api/defaults/agent-config']) {
+      const response = await putJson(buildHonoApp(), path, '{"a":1}');
+
+      expect(response.status, `${path} 未配置时应当 501`).toBe(501);
+      expect(await response.json()).toEqual({ error: CONTENT_DIR_NOT_CONFIGURED });
+    }
+    expect(existsSync(join(contentDir, 'worldbooks'))).toBe(false);
+    expect(existsSync(join(contentDir, 'defaults'))).toBe(false);
+  });
+
+  it('POST 与 PUT 同权（原中间件收两种方法）', async () => {
+    const response = await configured().request('/api/worldbooks/core', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"via":"post"}',
+    });
+
+    expect(response.status).toBe(200);
+    expect(readFileSync(join(contentDir, 'worldbooks', 'core.json'), 'utf8')).toBe(
+      '{"via":"post"}',
+    );
+  });
+
+  it('🔴 经 getRequestListener 走真 HTTP —— 大段中文跨 chunk 仍逐字节落盘', async () => {
+    // 上面那些用例走的是 `app.request()`，**绕开了 node 适配层**；而 dev / preview
+    // 真正跑的是 `getRequestListener(app.fetch)` + node 的 http server ——
+    // 「chunk 边界切碎多字节中文」这个坑只在这条路径上存在。故这里起一台真服务器，
+    // body 大到必然被 socket 拆成多个 chunk（约 200KB）。
+    const listener = getRequestListener(buildHonoApp({ contentDir }).fetch);
+    // listener 返回 Promise，而 http 的 handler 签名是 void —— 显式 `void` 掉
+    // （vite 那两处走 `return honoListener(req, res)`，connect 的签名收得下）
+    const server = createServer((request, response) => void listener(request, response));
+    await new Promise<void>((done, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', done);
+    });
+
+    try {
+      const address = server.address() as AddressInfo;
+      const body = JSON.stringify({ text: '展示、顿号与更长的一段中文内容'.repeat(8000) });
+      expect(body.length).toBeGreaterThan(100_000);
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/worldbooks/big`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(readFileSync(join(contentDir, 'worldbooks', 'big.json'), 'utf8')).toBe(body);
+    } finally {
+      await new Promise<void>((done, reject) => {
+        server.close((error) => (error ? reject(error) : done()));
+      });
+    }
   });
 });

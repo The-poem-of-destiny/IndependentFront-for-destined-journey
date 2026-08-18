@@ -6,9 +6,14 @@
  * `data/content/catalog.json`，经内容注册表供给：
  *
  * ```ts
- * import { getContentRegistry, ensureContentRegistryLoaded } from '../ui/stores/content-store';
+ * // 前端（有加载门可 await）：
+ * import { ensureContentRegistryLoaded, getContentRegistry } from '@ui/stores/content-store';
  * import { parseCatalogData } from '@engine/start-catalog-mechanics';
  * await ensureContentRegistryLoaded();
+ * const catalog = parseCatalogData(getContentRegistry().catalog);
+ *
+ * // 引擎（只读注入缝，**绝不** import 前端 store —— 见 content-registry-runtime.ts 文件头）：
+ * import { getContentRegistry } from './content-registry-runtime';
  * const catalog = parseCatalogData(getContentRegistry().catalog);
  * ```
  *

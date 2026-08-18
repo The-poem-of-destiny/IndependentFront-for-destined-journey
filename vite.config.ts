@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { resolve, relative, isAbsolute } from 'path';
 import fs from 'fs';
-import { buildHonoApp, isOpaqueSandboxOrigin, OPAQUE_ORIGIN_ERROR } from './server/app';
+import { buildHonoApp, isBffRoute, isOpaqueSandboxOrigin, OPAQUE_ORIGIN_ERROR } from './server/app';
 import { getRequestListener } from '@hono/node-server';
 
 // 引擎版本 —— `package.json` 是唯一真源（D26/D40）。
@@ -48,26 +48,21 @@ export default defineConfig({
 
         // === BFF (hono)：同源 API 路由，dev 挂载（Phase A）===
         // prod 走独立 server.js，见方案 §7
-        const honoListener = getRequestListener(buildHonoApp().fetch);
+        //
+        // 🔴 前缀清单由 server/app.ts 的 `isBffRoute` 派生，**不在这里再抄一份**：
+        //    此前 dev 与 preview 各有一份逐字重复的五前缀白名单，加新路由忘改
+        //    其中一处的症状是「代码看着完全正确，请求 404」。
+        //    `/api/worldbooks`、`/api/defaults` 两条写回也已搬进 hono（server/routes/content.ts），
+        //    contentDir 从这里注入，dev 与 preview 拿到同一份行为。
+        const honoListener = getRequestListener(buildHonoApp({ contentDir: poemContentDir }).fetch);
         server.middlewares.use((req, res, next) => {
-          const u = req.url || '';
-          // hono BFF 管辖的路由前缀；其余 /api/*（proxy/worldbooks/defaults）走下方 inline middleware
-          if (
-            u.startsWith('/api/chat') ||
-            u.startsWith('/api/status') ||
-            u.startsWith('/api/models') ||
-            u.startsWith('/api/embeddings') ||
-            u.startsWith('/api/image')
-          ) {
-            return honoListener(req, res);
-          }
+          if (isBffRoute(req.url || '')) return honoListener(req, res);
           next();
         });
 
-        // 🔴 条件 overlay（D14）：只有设置 POEM_CONTENT_DIR 才注册 /data 读中间件
-        // 与 PUT/POST 写入口（写回 overlay 目录）。未设置时：
-        //   - /data/* 由 public/data 静态服务（占位）
-        //   - 写入口不注册（占位内容不可被「保存为默认」污染）
+        // 🔴 条件 overlay（D14）：只有设置 POEM_CONTENT_DIR 才注册 /data 读中间件。
+        // 未设置时 /data/* 由 public/data 静态服务（占位）。
+        // 写入口（PUT/POST）已不在这里，见下方那条 📌 说明。
         if (poemContentDir !== null) {
           server.middlewares.use('/data', (req, res, next) => {
             if (req.method !== 'GET' && req.method !== 'HEAD') return next();
@@ -110,83 +105,10 @@ export default defineConfig({
           });
         }
 
-        // 写入口只在 overlay 启用时注册（D14）：写回 overlay 目录，不碰占位内容。
-        if (poemContentDir !== null)
-          server.middlewares.use('/api/worldbooks', (req, res, next) => {
-            if (req.method !== 'PUT' && req.method !== 'POST') return next();
-            const id = (req.url || '').replace(/^\//, '').replace(/\.json$/, '');
-            if (!id || id.includes('..')) return next();
-            const chunks: Buffer[] = [];
-            req.on('data', (chunk: Buffer) => {
-              // 🔴 攒 Buffer 最后统一 toString（2026-08-08 真机）：HTTP 把请求体拆成
-              //    多个 chunk 时，多字节中文可能恰被切成两半——每块各自 toString() 会
-              //    在切分处产生 U+FFFD 替换字符（"展示"曾被切成"展[替换符][替换符]示"、
-              //    顿号丢失），就是 chunk 边界切碎了 UTF-8。
-              chunks.push(chunk);
-            });
-            req.on('end', () => {
-              const body = Buffer.concat(chunks).toString('utf8');
-              try {
-                const worldbooksDir = resolve(dataDir, 'worldbooks');
-                const filePath = resolve(worldbooksDir, `${id}.json`);
-                // 🔒 P1-03 越界写防御：canonical containment —— 仅拒 '..' 不够，
-                // Windows 绝对路径（如 C:\evil）经 resolve 会吞掉 worldbooksDir 逃逸到任意位置。
-                const rel = relative(worldbooksDir, filePath);
-                if (rel.startsWith('..') || isAbsolute(rel)) {
-                  res.statusCode = 400;
-                  res.end(JSON.stringify({ error: 'invalid path' }));
-                  return;
-                }
-                // 对齐 /api/defaults 行为：允许新建文件
-                if (!fs.existsSync(worldbooksDir)) {
-                  fs.mkdirSync(worldbooksDir, { recursive: true });
-                }
-                fs.writeFileSync(filePath, body, 'utf-8');
-                res.statusCode = 200;
-                res.setHeader('Content-Type', 'application/json');
-                res.end(JSON.stringify({ ok: true }));
-              } catch (e: any) {
-                res.statusCode = 500;
-                res.end(JSON.stringify({ error: e.message }));
-              }
-            });
-          });
-
-        if (poemContentDir !== null)
-          server.middlewares.use('/api/defaults', (req, res, next) => {
-            if (req.method !== 'PUT' && req.method !== 'POST') return next();
-            const rawUrl = (req.url || '').replace(/^\//, '').replace(/\.json$/, '');
-            const fileName = rawUrl || 'agent-config';
-            if (fileName.includes('..')) return next();
-            const chunks: Buffer[] = [];
-            req.on('data', (chunk: Buffer) => {
-              // 🔴 攒 Buffer 最后统一 toString（2026-08-08 真机）：同 /api/worldbooks，
-              //    chunk 边界切碎多字节中文时每块各自 toString() 会产 U+FFFD。
-              chunks.push(chunk);
-            });
-            req.on('end', () => {
-              const body = Buffer.concat(chunks).toString('utf8');
-              try {
-                const defaultsDir = resolve(dataDir, 'defaults');
-                if (!fs.existsSync(defaultsDir)) fs.mkdirSync(defaultsDir, { recursive: true });
-                const filePath = resolve(defaultsDir, `${fileName}.json`);
-                // 🔒 P1-03 越界写防御（同 /api/worldbooks）：Windows 绝对路径会吞掉 defaultsDir。
-                const rel = relative(defaultsDir, filePath);
-                if (rel.startsWith('..') || isAbsolute(rel)) {
-                  res.statusCode = 400;
-                  res.end(JSON.stringify({ error: 'invalid path' }));
-                  return;
-                }
-                fs.writeFileSync(filePath, body, 'utf-8');
-                res.statusCode = 200;
-                res.setHeader('Content-Type', 'application/json');
-                res.end(JSON.stringify({ ok: true }));
-              } catch (e: any) {
-                res.statusCode = 500;
-                res.end(JSON.stringify({ error: e.message }));
-              }
-            });
-          });
+        // 📌 写入口（PUT/POST /api/worldbooks/:id 与 /api/defaults/:name）已迁进 hono
+        //    （server/routes/content.ts），不再是这里的 inline 中间件 —— 那份实现只活在
+        //    configureServer 分支里，`vite preview` 下必然 404。D14「只在 overlay 启用时
+        //    才可写」的语义不变：contentDir 为 null 时那两条路由回 501，占位内容仍碰不到。
 
         // 🔒 P1-03: 旧的 /api/proxy 任意 URL 透传中间件已移除（BFF 重构后死代码 + SSRF 攻击面）。
         // agent-client / memory-store / api-tools 现走同源 /api/chat|embeddings|models（server/routes/proxy.ts），
@@ -195,18 +117,14 @@ export default defineConfig({
       configurePreviewServer(server) {
         // 🔴 D14 v1.2 补：vite preview 下 /api/* 必须通（验收 #2）。buildHonoApp 的
         // BFF 路由挂在 hono listener 上，preview 走同一个 getRequestListener。
-        const honoListener = getRequestListener(buildHonoApp().fetch);
+        //
+        // 🔴 这里与 configureServer 分支**必须是同一份判据与同一份 options** ——
+        //    前缀清单走 `isBffRoute`，contentDir 同样注入，于是 dev 与 preview
+        //    再也不会出现「dev 通、preview 404」的分叉（`/api/worldbooks`、
+        //    `/api/defaults` 此前就是这么少了半边的）。
+        const honoListener = getRequestListener(buildHonoApp({ contentDir: poemContentDir }).fetch);
         server.middlewares.use((req, res, next) => {
-          const u = req.url || '';
-          if (
-            u.startsWith('/api/chat') ||
-            u.startsWith('/api/status') ||
-            u.startsWith('/api/models') ||
-            u.startsWith('/api/embeddings') ||
-            u.startsWith('/api/image')
-          ) {
-            return honoListener(req, res);
-          }
+          if (isBffRoute(req.url || '')) return honoListener(req, res);
           next();
         });
       },

@@ -13,7 +13,7 @@ import {
   getEdge,
   $location,
 } from './location-db';
-import { getContentRegistry, setContentRegistry } from '@ui/stores/content-store';
+import { getContentRegistry, installContentRegistry } from './content-registry-runtime';
 import type { LocationNode } from './types';
 
 /**
@@ -219,30 +219,30 @@ describe('getLocationNodes', () => {
   });
 
   afterEach(() => {
-    setContentRegistry({ ...getContentRegistry(), locations: saved });
+    installContentRegistry({ ...getContentRegistry(), locations: saved });
   });
 
   it('🔴 注册表该面未就绪 → 空集合，不抛（所有查询在空集合上良性）', () => {
-    setContentRegistry({ ...getContentRegistry(), locations: undefined });
+    installContentRegistry({ ...getContentRegistry(), locations: undefined });
     expect(getLocationNodes()).toEqual([]);
     expect(getLocationNode(getLocationNodes(), 'cont_a')).toBeUndefined();
     expect(getLocationPath(getLocationNodes(), 'cont_a')).toBe('');
   });
 
   it('灌注后即读得到', () => {
-    setContentRegistry({ ...getContentRegistry(), locations: NODES });
+    installContentRegistry({ ...getContentRegistry(), locations: NODES });
     expect(getLocationNodes().map((n) => n.id)).toEqual(NODES.map((n) => n.id));
   });
 
   it('🔴 不缓存：重灌（装包/卸载）即时生效', () => {
-    setContentRegistry({ ...getContentRegistry(), locations: NODES });
+    installContentRegistry({ ...getContentRegistry(), locations: NODES });
     expect(getLocationNodes()).toHaveLength(NODES.length);
-    setContentRegistry({ ...getContentRegistry(), locations: [NODES[0]] });
+    installContentRegistry({ ...getContentRegistry(), locations: [NODES[0]] });
     expect(getLocationNodes().map((n) => n.id)).toEqual(['cont_a']);
   });
 
   it('坏形状同样只回落空集合', () => {
-    setContentRegistry({ ...getContentRegistry(), locations: { oops: true } });
+    installContentRegistry({ ...getContentRegistry(), locations: { oops: true } });
     expect(getLocationNodes()).toEqual([]);
   });
 });

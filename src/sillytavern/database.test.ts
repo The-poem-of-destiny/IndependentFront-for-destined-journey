@@ -342,6 +342,11 @@ describe('v4 新表存在性', () => {
     expect(typeof count).toBe('number');
   });
 
+  it('snapshotPayloads 表应存在 (v22)', async () => {
+    const count = await getDatabase().snapshotPayloads.count();
+    expect(typeof count).toBe('number');
+  });
+
   it('saves 表应存在', async () => {
     const count = await getDatabase().saves.count();
     expect(typeof count).toBe('number');
@@ -748,6 +753,137 @@ describe('Snapshots CRUD', () => {
   });
 });
 
+// ========== Snapshots 元数据 / 载荷分表 (v22) ==========
+
+/**
+ * 载荷表的**读**入口全部挂上间谍。
+ *
+ * 拆表的全部收益就在「列表与淘汰不去碰整档历史」这一句上，而它没有任何自然症状 ——
+ * 哪天有人在 trim 里顺手 join 一下载荷，测试照样全绿、只是每回合又慢回去了。
+ * 所以这条得用间谍钉住，而不是靠注释。删除类方法（bulkDelete/delete）刻意不挂：
+ * 淘汰**本来就要**删载荷行。
+ */
+function spyPayloadReads() {
+  const t = getDatabase().snapshotPayloads;
+  return [
+    vi.spyOn(t, 'get'),
+    vi.spyOn(t, 'bulkGet'),
+    vi.spyOn(t, 'toArray'),
+    vi.spyOn(t, 'toCollection'),
+    vi.spyOn(t, 'where'),
+    vi.spyOn(t, 'each'),
+  ];
+}
+
+function expectNoPayloadReads(spies: ReturnType<typeof spyPayloadReads>): void {
+  for (const s of spies) {
+    expect(s, `载荷表读方法被调用了：${s.getMockName()}`).not.toHaveBeenCalled();
+    s.mockRestore();
+  }
+}
+
+describe('Snapshots 分表 (v22)', () => {
+  it('saveSnapshot 拆成两行：元数据剥干净，载荷单独一行且 id 同值', async () => {
+    const hero = createDefaultCharacterState({
+      id: 'h1',
+      name: '主角',
+      saveId: 'save_test',
+      type: 'player',
+      hp: 42,
+      maxHp: 90,
+    });
+    await saveSnapshot(makeSnapshot({ id: 'split_1', characters: [hero], messages: [] }));
+
+    const db = getDatabase();
+    const meta = (await db.snapshots.get('split_1')) as unknown as Record<string, unknown>;
+    expect(meta).toBeDefined();
+    expect(meta.characters).toBeUndefined();
+    expect(meta.saveProfile).toBeUndefined();
+    expect(meta.messages).toBeUndefined();
+    expect(meta.plotEvents).toBeUndefined();
+
+    const payload = await db.snapshotPayloads.get('split_1');
+    expect(payload).toBeDefined();
+    expect(payload!.saveId).toBe('save_test');
+    expect(payload!.characters[0].hp).toBe(42);
+  });
+
+  it('落库顺带记下展示缩略（列表不必为了两行字去读整档载荷）', async () => {
+    const hero = createDefaultCharacterState({
+      id: 'h1',
+      name: '莱恩',
+      saveId: 'save_test',
+      type: 'player',
+      hp: 42,
+      maxHp: 90,
+    });
+    await saveSnapshot(makeSnapshot({ id: 'prev_1', characters: [hero] }));
+
+    const listed = await getSnapshots('save_test');
+    expect(listed[0].preview?.playerName).toBe('莱恩');
+    expect(listed[0].preview?.hp).toBe(42);
+    expect(listed[0].preview?.maxHp).toBe(90);
+    expect(listed[0].preview?.gameTime).toBeDefined();
+  });
+
+  it('🔴 getSnapshots 列表**一次都不读**载荷表', async () => {
+    for (let i = 0; i < 5; i++) {
+      await saveSnapshot(makeSnapshot({ id: `list_${i}`, createdAt: 1000 + i }));
+    }
+    const spies = spyPayloadReads();
+    const listed = await getSnapshots('save_test');
+    expect(listed).toHaveLength(5);
+    expectNoPayloadReads(spies);
+  });
+
+  it('🔴 trimSnapshots 选行**一次都不读**载荷表（拆表要治的就是这里）', async () => {
+    for (let t = 1; t <= 12; t++) {
+      await saveSnapshot(makeSnapshot({ id: `trim_${t}`, turn: t, createdAt: 1000 + t }));
+    }
+    const spies = spyPayloadReads();
+    await trimSnapshots('save_test', 5, 'tiered');
+    expectNoPayloadReads(spies);
+  });
+
+  it('淘汰/删除必须连载荷行一起走（否则留下一堆看不见的孤儿）', async () => {
+    const db = getDatabase();
+    for (let i = 0; i < 8; i++) {
+      await saveSnapshot(makeSnapshot({ id: `orph_${i}`, createdAt: 1000 + i }));
+    }
+    expect(await db.snapshotPayloads.count()).toBe(8);
+
+    await trimSnapshots('save_test', 5, 'dense');
+    const remainingIds = (await getSnapshots('save_test')).map((s) => s.id).sort();
+    const payloadIds = (await db.snapshotPayloads.toArray()).map((p) => p.id).sort();
+    expect(payloadIds).toEqual(remainingIds);
+
+    await deleteSnapshotsAfter('save_test', 1006);
+    const afterIds = (await getSnapshots('save_test')).map((s) => s.id).sort();
+    expect((await db.snapshotPayloads.toArray()).map((p) => p.id).sort()).toEqual(afterIds);
+  });
+
+  it('🔴 载荷行缺失（半条快照）→ getSnapshot 明确抛错，绝不返回空壳', async () => {
+    await saveSnapshot(makeSnapshot({ id: 'half_1' }));
+    await getDatabase().snapshotPayloads.delete('half_1');
+
+    await expect(getSnapshot('half_1')).rejects.toThrow('快照数据缺失');
+    // 不存在的 id 仍是 undefined，不是抛错
+    expect(await getSnapshot('从来没有过的id')).toBeUndefined();
+  });
+
+  it('deleteSaveSlot 级联删载荷行', async () => {
+    const db = getDatabase();
+    await saveSaveSlot(makeSaveSlot({ id: 'save_cascade', slot: 4 }));
+    await saveSnapshot(makeSnapshot({ id: 'casc_1', saveId: 'save_cascade' }));
+    await saveSnapshot(makeSnapshot({ id: 'keep_1', saveId: 'save_other' }));
+
+    await deleteSaveSlot('save_cascade');
+
+    expect(await db.snapshotPayloads.where('saveId').equals('save_cascade').count()).toBe(0);
+    expect(await db.snapshotPayloads.get('keep_1')).toBeDefined();
+  });
+});
+
 // ========== SaveSlots CRUD ==========
 
 describe('SaveSlots CRUD', () => {
@@ -857,7 +993,7 @@ describe('deleteSaveSlot 事务化 (M6 Task 4)', () => {
     };
   }
 
-  /** 给一个存档在全部 8 张关联表各播 1 条数据 */
+  /** 给一个存档在全部 9 张关联表各播 1 条数据（v22 起快照占两张：元数据 + 载荷） */
   async function seedSave(saveId: string, slot: number): Promise<void> {
     await saveSaveSlot(makeSaveSlot({ id: saveId, slot }));
     await saveMemory(makeMemory({ id: `mem_${saveId}`, saveId }));
@@ -871,7 +1007,7 @@ describe('deleteSaveSlot 事务化 (M6 Task 4)', () => {
     await saveSaveProfile(createDefaultSaveProfile(saveId));
   }
 
-  /** 该存档在 8 张表中的记录数（表名 → 条数） */
+  /** 该存档在 9 张表中的记录数（表名 → 条数） */
   async function countAll(saveId: string): Promise<Record<string, number>> {
     const db = getDatabase();
     return {
@@ -880,13 +1016,14 @@ describe('deleteSaveSlot 事务化 (M6 Task 4)', () => {
       plotEvents: await db.plotEvents.where('saveId').equals(saveId).count(),
       plotOutlines: await db.plotOutlines.where('saveId').equals(saveId).count(),
       snapshots: await db.snapshots.where('saveId').equals(saveId).count(),
+      snapshotPayloads: await db.snapshotPayloads.where('saveId').equals(saveId).count(),
       messages: await db.messages.where('saveId').equals(saveId).count(),
       characters: await db.characters.where('saveId').equals(saveId).count(),
       saveProfiles: (await db.saveProfiles.get(saveId)) ? 1 : 0,
     };
   }
 
-  it('8 表全清 + 其他存档数据不受影响', async () => {
+  it('9 表全清 + 其他存档数据不受影响', async () => {
     await seedSave(TARGET, 7);
     await seedSave(OTHER, 8);
 
@@ -962,7 +1099,8 @@ describe('exportAllData / importAllData', () => {
     // 于是它把漂移**固定**下来而不是拦下来。升版时 database.ts 与这里一起改。
     // v20：内容-引擎分离波 1 / D18 —— contentPacks 表（安装持久化，不进 FullBackup）。
     // v21：地图字节本地缓存 mapBlobs（2026-08-07，D23 补强；字节同不进备份）。
-    expect(backup.version).toBe(21);
+    // v22：快照拆表（snapshots 只留元数据 + snapshotPayloads 存整档载荷，两者都进备份）。
+    expect(backup.version).toBe(22);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -970,6 +1108,8 @@ describe('exportAllData / importAllData', () => {
     expect(Array.isArray(backup.plotEvents)).toBe(true);
     expect(Array.isArray(backup.characters)).toBe(true);
     expect(Array.isArray(backup.snapshots)).toBe(true);
+    // v22 —— 元数据与载荷同进同出（少了载荷，恢复出来的快照全是坏的）
+    expect(Array.isArray(backup.snapshotPayloads)).toBe(true);
     expect(Array.isArray(backup.saves)).toBe(true);
     expect(Array.isArray(backup.apiEndpoints)).toBe(true);
     expect(Array.isArray(backup.createPresets)).toBe(true);
@@ -1055,6 +1195,97 @@ describe('exportAllData / importAllData', () => {
     expect(apis).toHaveLength(1);
     expect(mems[0].id).toBe('seed_mem');
     expect(apis[0].id).toBe('seed_api');
+  });
+
+  /**
+   * 🔴 向后兼容是硬要求：用户手里那些 v21 及以前导出的备份文件必须永远导得进来。
+   *    那时快照行整份内嵌 characters/saveProfile/plotEvents/messages，且没有
+   *    `snapshotPayloads` 字段 —— 导入侧必须就地拆开，而不是把胖行原样塞进元数据表
+   *    （那样列表与淘汰会重新开始读整档历史，且拆表白做）。
+   */
+  it('v22 向后兼容：旧备份（快照整份内嵌、无 snapshotPayloads 字段）导入时就地拆表', async () => {
+    const hero = createDefaultCharacterState({
+      id: 'legacy_hero',
+      name: '旧档主角',
+      saveId: 'save_legacy_snap',
+      type: 'player',
+      hp: 33,
+      maxHp: 70,
+    });
+    const backup = await exportAllData();
+    // 造 v21 形状：整份内嵌塞回 snapshots，删掉 v22 才有的字段
+    (backup as unknown as Record<string, unknown>).snapshots = [
+      {
+        id: 'legacy_snap',
+        saveId: 'save_legacy_snap',
+        createdAt: 1_700_000_000_000,
+        reason: 'turn',
+        turn: 4,
+        characters: [hero],
+        saveProfile: createDefaultSaveProfile('save_legacy_snap'),
+        plotEvents: [],
+        messages: [
+          {
+            id: 'legacy_msg',
+            saveId: 'save_legacy_snap',
+            turn: 4,
+            role: 'assistant',
+            content: '旧备份里的正文',
+            timestamp: 1_700_000_000_000,
+          },
+        ],
+      },
+    ];
+    delete (backup as unknown as Record<string, unknown>).snapshotPayloads;
+    backup.version = 21;
+
+    await importAllData(backup as FullBackup);
+
+    const db = getDatabase();
+    const metas = await getSnapshots('save_legacy_snap');
+    expect(metas).toHaveLength(1);
+    const rawMeta = metas[0] as unknown as Record<string, unknown>;
+    expect(rawMeta.characters).toBeUndefined();
+    expect(rawMeta.messages).toBeUndefined();
+    // 缩略从载荷回填 —— 旧备份没有 preview 字段，面板那一行不该因为导入就消失
+    expect(metas[0].preview?.playerName).toBe('旧档主角');
+    expect(metas[0].preview?.hp).toBe(33);
+
+    const payload = await db.snapshotPayloads.get('legacy_snap');
+    expect(payload).toBeDefined();
+    expect(payload!.saveId).toBe('save_legacy_snap');
+    expect(payload!.messages).toHaveLength(1);
+
+    // 合体读回来 = 旧备份里那份快照原样
+    const joined = await getSnapshot('legacy_snap');
+    expect(joined!.turn).toBe(4);
+    expect(joined!.characters[0].hp).toBe(33);
+    expect(joined!.messages![0].content).toBe('旧备份里的正文');
+  });
+
+  it('v22 新格式备份往返：元数据与载荷同进同出', async () => {
+    const hero = createDefaultCharacterState({
+      id: 'rt_hero',
+      name: '往返主角',
+      saveId: 'save_test',
+      type: 'player',
+      hp: 12,
+      maxHp: 60,
+    });
+    await saveSnapshot(makeSnapshot({ id: 'rt_snap', characters: [hero] }));
+
+    const backup = await exportAllData();
+    expect(backup.snapshots).toHaveLength(1);
+    expect(backup.snapshotPayloads).toHaveLength(1);
+
+    await clearAllData();
+    await initializeDatabase();
+    await importAllData(backup);
+
+    const joined = await getSnapshot('rt_snap');
+    expect(joined).toBeDefined();
+    expect(joined!.characters[0].hp).toBe(12);
+    expect((await getSnapshots('save_test'))[0].preview?.playerName).toBe('往返主角');
   });
 
   it('importAllData 无效格式应抛错', async () => {
@@ -1965,6 +2196,64 @@ describe('restoreSnapshot 集成 — 真实 DB (M5 §11.2)', () => {
     expect(result.success).toBe(false);
     expect(result.errors[0]).toContain('不属于当前存档');
   });
+
+  /**
+   * 🔴 `createSnapshot` 自 2026-08-17 起**不再** structuredClone（每回合省一次整档历史
+   *    深拷贝）。「快照与后续状态变化互不影响」这个契约没变，只是改由 IDB 的读写语义
+   *    保证：读出来是新反序列化的对象，写进去 Dexie 自己再克隆一次。
+   *    所以这条必须跑在**真库**上 —— 内存 mock 按引用存表，证明不了这件事。
+   */
+  it('快照落库后与后续状态变化互不影响（拿掉 structuredClone 之后仍成立）', async () => {
+    const saveId = 'save_isolation';
+    await saveSaveSlot(makeSaveSlot({ id: saveId, slot: 6 }));
+    const hero = createDefaultCharacterState({
+      id: 'iso_hero',
+      name: '主角',
+      type: 'player',
+      saveId,
+      hp: 80,
+      maxHp: 100,
+      inventory: [{ name: '铁剑', quantity: 1 }] as CharacterState['inventory'],
+    });
+    await saveCharacter(hero);
+    const { getProfile, updateProfile } = await import('./save-profile');
+    const p1 = await getProfile(saveId);
+    p1.variables = { sys: { gold: 42 } };
+    await updateProfile(p1);
+    await saveMessage({
+      id: 'iso_m1',
+      role: 'user',
+      content: '第一轮',
+      timestamp: 1,
+      saveId,
+      turn: 1,
+    });
+
+    const snap = await createStateManager(saveId).createSnapshot('turn', 1);
+
+    // 世界继续往前走：角色、嵌套背包、变量、消息全变
+    hero.hp = 1;
+    hero.inventory[0].name = '木棍';
+    await saveCharacter(hero);
+    const p2 = await getProfile(saveId);
+    p2.variables = { sys: { gold: 0 } };
+    await updateProfile(p2);
+    await saveMessage({
+      id: 'iso_m2',
+      role: 'user',
+      content: '第二轮',
+      timestamp: 2,
+      saveId,
+      turn: 2,
+    });
+
+    // 库里那份快照仍停在打它的那一刻
+    const persisted = await getSnapshot(snap.id);
+    expect(persisted!.characters[0].hp).toBe(80);
+    expect(persisted!.characters[0].inventory[0].name).toBe('铁剑');
+    expect(persisted!.saveProfile.variables).toEqual({ sys: { gold: 42 } });
+    expect(persisted!.messages!.map((m) => m.id)).toEqual(['iso_m1']);
+  });
 });
 
 // ========== Audio (v11) ==========
@@ -2409,11 +2698,13 @@ describe('Asset CRUD (v13)', () => {
     // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    expect(db.verno).toBe(21); // v20=D18 contentPacks 表; v21=地图字节缓存 mapBlobs
+    // v20=D18 contentPacks 表; v21=地图字节缓存 mapBlobs; v22=快照拆表 snapshotPayloads
+    expect(db.verno).toBe(22);
 
     // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
     //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）
-    //           + contentPacks 一张（v20/D18），一个不少
+    //           + contentPacks 一张（v20/D18）+ mapBlobs 一张（v21）
+    //           + snapshotPayloads 一张（v22 快照拆表），一个不少
     //（误写 `表名: null` 或漏声明会在这里炸 —— 尤其 lorebooks/settings 两张死表按 D3 必须保留）
     const EXPECTED_TABLES = [
       ...Object.keys(V12_STORES),
@@ -2429,6 +2720,7 @@ describe('Asset CRUD (v13)', () => {
       'characterAppearances',
       'contentPacks',
       'mapBlobs',
+      'snapshotPayloads',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 
@@ -2451,6 +2743,11 @@ describe('Asset CRUD (v13)', () => {
     expect(await db.sceneImages.count()).toBe(0);
     expect(await db.sceneImageBlobs.count()).toBe(0);
     expect(await db.imagePresets.count()).toBe(0);
+    // v22 例外：snapshotPayloads 不是空的 —— 上面那行 v12 胖快照被升版拆了出来
+    expect(await db.snapshotPayloads.count()).toBe(1);
+    expect(
+      ((await db.snapshots.get('sn1')) as unknown as Record<string, unknown>).characters,
+    ).toBeUndefined();
 
     // 升版后新表可正常写入
     const asset = makeAsset();
@@ -2458,5 +2755,126 @@ describe('Asset CRUD (v13)', () => {
     expect(await (await getAssetBlob(asset.id))!.text()).toBe('post-upgrade');
     await db.regexStorage.put({ key: 'post-upgrade', value: 'ok', updatedAt: 1 });
     expect((await db.regexStorage.get('post-upgrade'))?.value).toBe('ok');
+  });
+});
+
+// ========== v22 快照拆表迁移 ==========
+
+/**
+ * v21 完整 schema —— 迁移回归测试用（同 V12_STORES：这份副本是**刻意的**冻结快照，
+ * 改 database.ts 的 v22 块不会连带改到它）。
+ */
+const V21_STORES = {
+  ...V12_STORES,
+  assetMeta: 'id, name, type, [name+type], createdAt, updatedAt',
+  assetBlobs: 'id',
+  worldBooks: 'id, partition, updatedAt',
+  workshopProjects: 'id, installedAt, updatedAt',
+  beautifierRules: 'id, group, order',
+  regexStorage: 'key',
+  sceneImages: 'id, saveId, messageId, [saveId+messageId], turn',
+  sceneImageBlobs: 'id',
+  imagePresets: 'key, kind, name',
+  characterAppearances: 'key, saveId, name',
+  contentPacks: 'packId',
+  mapBlobs: 'url',
+} as const;
+
+describe('v22 升版 —— 快照拆表', () => {
+  it('v21 的胖快照行升到 v22 后：元数据剥干净 / 载荷分出去 / 恢复能 join 回来', async () => {
+    const dbName = getDatabase().name;
+    await clearAllData();
+
+    // ---- 以 v21 schema 打开，写两条**整份内嵌**的快照 ----
+    const legacy = new Dexie(dbName);
+    legacy.version(21).stores({ ...V21_STORES });
+    await legacy.open();
+    expect(legacy.verno).toBe(21);
+
+    const hero = createDefaultCharacterState({
+      id: 'mig_hero',
+      name: '迁移主角',
+      saveId: 'save_mig',
+      type: 'player',
+      hp: 55,
+      maxHp: 88,
+    });
+    const profile = createDefaultSaveProfile('save_mig');
+    const fatRow = (id: string, turn: number) => ({
+      id,
+      saveId: 'save_mig',
+      createdAt: 1_700_000_000_000 + turn,
+      reason: 'turn',
+      turn,
+      characters: [hero],
+      saveProfile: profile,
+      plotEvents: [],
+      messages: [
+        {
+          id: `mig_msg_${turn}`,
+          saveId: 'save_mig',
+          turn,
+          role: 'assistant',
+          content: `第 ${turn} 回合的正文`,
+          timestamp: 1_700_000_000_000 + turn,
+        },
+      ],
+    });
+    await legacy.table('snapshots').bulkPut([fatRow('mig_1', 1), fatRow('mig_2', 2)] as never[]);
+    expect(await legacy.table('snapshots').count()).toBe(2);
+    legacy.close();
+
+    // ---- 以当前版打开：触发 v22 升版 ----
+    await initializeDatabase();
+    const db = getDatabase();
+    expect(db.verno).toBe(22);
+
+    // 元数据行：五个字段 + preview，载荷四字段一个不留
+    const metas = await getSnapshots('save_mig');
+    expect(metas).toHaveLength(2);
+    for (const m of metas) {
+      const raw = m as unknown as Record<string, unknown>;
+      expect(raw.characters).toBeUndefined();
+      expect(raw.saveProfile).toBeUndefined();
+      expect(raw.plotEvents).toBeUndefined();
+      expect(raw.messages).toBeUndefined();
+    }
+    expect(metas.map((m) => m.turn)).toEqual([1, 2]);
+    // 缩略从载荷回填 —— 不回填的话，存量快照在面板上会集体丢掉那一行
+    expect(metas[0].preview?.playerName).toBe('迁移主角');
+    expect(metas[0].preview?.hp).toBe(55);
+    expect(metas[0].preview?.maxHp).toBe(88);
+    expect(metas[0].preview?.gameTime).toBeDefined();
+
+    // 载荷行：与元数据行同 id，整档数据一字不少
+    expect(await db.snapshotPayloads.count()).toBe(2);
+    const payload = await db.snapshotPayloads.get('mig_2');
+    expect(payload).toBeDefined();
+    expect(payload!.saveId).toBe('save_mig');
+    expect(payload!.characters[0].hp).toBe(55);
+    expect(payload!.messages).toHaveLength(1);
+
+    // 合体读回来 = 升版前那份快照
+    const joined = await getSnapshot('mig_2');
+    expect(joined!.turn).toBe(2);
+    expect(joined!.characters[0].name).toBe('迁移主角');
+    expect(joined!.messages![0].content).toBe('第 2 回合的正文');
+    expect(joined!.plotEvents).toEqual([]);
+  });
+
+  it('v21 库里一条快照都没有时，升版不产生任何载荷行（空库不炸）', async () => {
+    const dbName = getDatabase().name;
+    await clearAllData();
+
+    const legacy = new Dexie(dbName);
+    legacy.version(21).stores({ ...V21_STORES });
+    await legacy.open();
+    legacy.close();
+
+    await initializeDatabase();
+    const db = getDatabase();
+    expect(db.verno).toBe(22);
+    expect(await db.snapshots.count()).toBe(0);
+    expect(await db.snapshotPayloads.count()).toBe(0);
   });
 });

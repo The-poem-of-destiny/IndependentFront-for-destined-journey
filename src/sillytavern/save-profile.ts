@@ -169,21 +169,38 @@ export function getQuest(profile: SaveProfile, name: string): Quest | undefined 
   return profile.quests[name];
 }
 
-/** 设置/更新任务 (upsert) */
+/**
+ * 设置/更新任务 —— **只改内存不落库**（`setQuest` 的纯变更那一半）。
+ *
+ * 🔴 `*InPlace` 这一族的存在理由只有一个：`StateManager.commitChatState` 的**提交作用域缓存**
+ *    （见 state-manager.ts 的 `CommitScope` 注释）把「改」与「落」拆成了两拍 —— 一次提交里
+ *    十个补丁改同一份 profile，出口只落一次库。合并语义（缺省任务补 `createDefaultQuest`）
+ *    必须留在本文件一处：搬去 state-manager 抄一份，漂了不会报错，只会让两条路径产出不同形状的任务。
+ */
+export function setQuestInPlace(profile: SaveProfile, name: string, quest: Partial<Quest>): void {
+  const existing = profile.quests[name] ?? createDefaultQuest();
+  profile.quests[name] = { ...existing, ...quest };
+}
+
+/** 设置/更新任务 (upsert) —— 改内存 + 立即落库的命名写入口 */
 export async function setQuest(
   profile: SaveProfile,
   name: string,
   quest: Partial<Quest>,
 ): Promise<SaveProfile> {
-  const existing = profile.quests[name] ?? createDefaultQuest();
-  profile.quests[name] = { ...existing, ...quest };
+  setQuestInPlace(profile, name, quest);
   await updateProfile(profile);
   return profile;
 }
 
+/** 删除任务 —— **只改内存不落库**（理由同 `setQuestInPlace`） */
+export function removeQuestInPlace(profile: SaveProfile, name: string): void {
+  delete profile.quests[name];
+}
+
 /** 删除任务 */
 export async function removeQuest(profile: SaveProfile, name: string): Promise<SaveProfile> {
-  delete profile.quests[name];
+  removeQuestInPlace(profile, name);
   await updateProfile(profile);
   return profile;
 }
@@ -276,11 +293,21 @@ export async function updateMapFlags(
   profile: SaveProfile,
   flags: MapSaveFlags,
 ): Promise<SaveProfile> {
+  setMapFlagsInPlace(profile, flags);
+  await updateProfile(profile);
+  return profile;
+}
+
+/**
+ * 整份覆盖地图派生态 —— **只改内存不落库**（`updateMapFlags` 的纯变更那一半）。
+ *
+ * 存在理由同 `setQuestInPlace`：落库那一拍由 `StateManager` 的提交作用域缓存统一做。
+ * `MAP_FLAGS_KEY` 与「缺 worldFlags 就补空袋子」这条兜底因此仍然只有本文件一处。
+ */
+export function setMapFlagsInPlace(profile: SaveProfile, flags: MapSaveFlags): void {
   // 存量记录（与手搓的测试 profile）可能整个缺 worldFlags；缺了就补一个空袋子
   if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
   profile.worldFlags[MAP_FLAGS_KEY] = flags;
-  await updateProfile(profile);
-  return profile;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -318,9 +345,20 @@ export async function updateRandomEventFlags(
   profile: SaveProfile,
   flags: RandomEventSaveFlags,
 ): Promise<SaveProfile> {
+  setRandomEventFlagsInPlace(profile, flags);
+  await updateProfile(profile);
+  return profile;
+}
+
+/**
+ * 整份覆盖随机事件状态 —— **只改内存不落库**（`updateRandomEventFlags` 的纯变更那一半）。
+ * 存在理由同 `setQuestInPlace`。
+ */
+export function setRandomEventFlagsInPlace(
+  profile: SaveProfile,
+  flags: RandomEventSaveFlags,
+): void {
   // 存量记录（与手搓的测试 profile）可能整个缺 worldFlags；缺了就补一个空袋子
   if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
   profile.worldFlags[RANDOM_EVENT_FLAGS_KEY] = flags;
-  await updateProfile(profile);
-  return profile;
 }

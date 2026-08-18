@@ -11,14 +11,17 @@
  *
  * 🔴 **注册表未就绪时确定性兜底为空集**——`getBloodline` 返回 `undefined`、
  * `getBloodlineList` 返回 `[]`、`calcBloodlineModifiers` 返回 `{}`。不抛、不崩。
- * 灌注时序由 content-store 的 ready promise + `ensureContentRegistryLoaded()` 保证
- * （boot 链必经，见 `src/ui/stores/content-store.ts` 文件头 D16 时序契约）。
+ * 这条兜底是**时序契约**的一半：注册表读取经引擎侧注入缝
+ * （`content-registry-runtime.ts`，此前是反向 import 前端 store，分层收口时翻正），
+ * 而缝在引擎模块 import 的那一刻多半还是空骨架 —— 灌注由 content-store 的 ready
+ * promise + `ensureContentRegistryLoaded()` 在 boot 链上完成（见
+ * `src/ui/stores/content-store.ts` 文件头 D16 时序契约）。故读取一律**惰性、按调用时刻**发生。
  *
  * 三个函数都收一个可选的 `set` 参数（默认 = 注册表当前值），与 `location-db.ts` 的
  * `(nodes, …)` 参数式同一口径：调用方不必知道注册表，测试可直接喂 fixture。
  */
 
-import { getContentRegistry } from '../ui/stores/content-store';
+import { getContentRegistry } from './content-registry-runtime';
 
 // ========== 形状 ==========
 

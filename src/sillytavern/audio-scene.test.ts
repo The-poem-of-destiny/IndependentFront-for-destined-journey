@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { getContentRegistry, setContentRegistry } from '@ui/stores/content-store';
+import { getContentRegistry, installContentRegistry } from './content-registry-runtime';
 import {
   nameSimilarity,
   splitLocationPath,
@@ -470,11 +470,11 @@ describe('resolveSceneByTags · 边界', () => {
     });
 
     afterEach(() => {
-      setContentRegistry({ ...getContentRegistry(), locations: saved });
+      installContentRegistry({ ...getContentRegistry(), locations: saved });
     });
 
     it('注册表已灌注 → 与显式传 nodes 同结果（装包即时生效，不缓存）', () => {
-      setContentRegistry({ ...getContentRegistry(), locations: NODES });
+      installContentRegistry({ ...getContentRegistry(), locations: NODES });
       const r = resolveSceneByTags(LIB, { location: '铁炉堡的锻炉区' });
       expect(r?.resolvedLocation).toBe('奥古斯提姆帝国');
       expect(r?.fallbackDepth).toBe(1);
@@ -486,7 +486,7 @@ describe('resolveSceneByTags · 边界', () => {
     });
 
     it('🔴 注册表未就绪 → 只剩路径段，照常选曲、不崩', () => {
-      setContentRegistry({ ...getContentRegistry(), locations: undefined });
+      installContentRegistry({ ...getContentRegistry(), locations: undefined });
       // 路径里写明了层级，所以没有地图也仍然分得出深度
       const r = resolveSceneByTags(LIB, { location: '奥古斯提姆帝国-锻炉区' });
       expect(r?.resolvedLocation).toBe('奥古斯提姆帝国');
