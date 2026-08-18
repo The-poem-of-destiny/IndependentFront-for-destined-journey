@@ -23,8 +23,8 @@ v1.0 交付的能力边界：
 | 播放列表（顺序 / 单曲 / 全部循环 / 随机） | 真正的交叉淡入（A、B 两条流同时出声） |
 | 一次性音效（声池、并发上限） | 音效解码缓存 |
 | 进入新地点自动换 BGM（可在设置里关） | 音效由游戏事件触发（**仍未接线**） |
-| 按场景选曲：地点/人物/情绪/情境四维加权 | 战斗/制作等**非地点**事件自动换歌（要靠 AI 标记，prompt 侧未接） |
-| 解析 `<play_audio>` 并切换 BGM（Code 侧已接线） | 让 AI 产出该标记（**prompt 侧刻意留空**） |
+| 按场景选曲：地点/人物/情绪/情境四维加权 | 战斗/制作等**非地点**事件由 Code 自动换歌（这条仍只能靠 AI 写标记） |
+| 解析 `<play_audio>` 并切换 BGM（Code 侧 + prompt 侧**均已接线**，2026-08-18 复核） | 保证 AI 每次该换歌时都写标记（提示词是约定，不是硬约束） |
 | 按名称寻址曲目与播放列表 | 全角/半角折叠、拼音匹配 |
 | 播放列表拖拽排序 | 跨列表拖拽、拖拽到列表外、键盘排序 |
 | 曲库多选（shift 区间 / 全选筛选结果）+ 批量加入列表 / 批量删除 | 批量改标签、批量改类型 |
@@ -161,7 +161,7 @@ UI 桥接层  audio-store.ts (Pinia)  ← 应用的唯一入口
 
 ## 五、数据模型与存储
 
-Dexie（IndexedDB 封装）v12，四张表：
+Dexie（IndexedDB 封装）里的四张音频表（**这四张表在 v11/v12 引入**：`audioTracks` / `audioBlobs` / `audioPlaylists` 随 v11 落地，`audioHandles` 随 v12 追加；**库本身现已到 `DB_VERSION = 22`**，音频表的 schema 自那以后未变，2026-08-18 复核）：
 
 | 表 | 主键 / 索引 | 存什么 | 为什么单独一张 |
 |----|-------------|--------|---------------|
@@ -499,11 +499,22 @@ await audio.playByLocation('铁炉堡', { variant: 'A' })
 
 ## 九、AI 集成现状（诚实版）
 
-**结论先行：地点变化触发的场景配乐已全线接通并可用；AI 标记那条链路 Code 侧就绪、prompt 侧刻意留空（AI 不会输出 `<play_audio>`）。音效全链仍未接线。**
+**结论先行：地点变化触发的场景配乐已全线接通并可用；AI 标记那条链路 Code 侧与 prompt 侧**现在都已接线**（2026-08-18 复核，见下）。音效全链仍未接线。**
+
+> 🔄 **2026-08-18 复核更正**：本节原文写的是「prompt 侧刻意留空，AI 不会输出 `<play_audio>`」。
+> 该结论已过期 —— `public/data/defaults/agent-config.json` 里 story 的**两处**都写了这条约定：
+>
+> - `agents.story.systemPrompt`「【子系统标记】」段：`场景基调变化时换曲：<play_audio situation="探索" mood="平静" />`
+> - `agents.story.preset.settings.prompts[8]`（`identifier: "placeholder-media"`，名 `🎵🖼配乐与插画标记`，
+>   `injection_order: 90`）：`场景基调发生明显变化时，可以请求换曲（不换就不要写）` + 同一行标记范例
+>
+> 🔴 **实际生效的是预设那一份** —— story 有预设短路（见 `docs/planning/2026-08-04-image-generation-design.md` §8.5
+> 记的同一个坑），systemPrompt 那份是冗余保险。两份措辞一致，都遵守了下文说的「克制原则」（不换就别写）。
+> 原文说的「要启用时只需在 story 预设里加一个条目，Code 侧一行都不用改」已经**照此办理过了**。
 
 | 能力 | 实现 | 测试 | 生产调用方 |
 |------|------|------|-----------|
-| `playByScene` / `playByLocation` | ✅ | ✅ | ✅ `GamePipeline` 的地点变化触发 + `primeSceneAudio`；AI 标记那条仍无输入（见下） |
+| `playByScene` / `playByLocation` | ✅ | ✅ | ✅ `GamePipeline` 的地点变化触发 + `primeSceneAudio`；AI 标记那条也已有输入（prompt 侧已写，见上） |
 | `playByTag` | ✅ | ✅ | ❌ **零**（保留为单标签精确入口） |
 | `playSfx` | ✅ | ✅ | ⚠️ 唯一调用方是设置页曲库的试听按钮（`settings/audio/AudioLibrary.vue`），游戏内无任何音效触发点 |
 | `playTrackByName` / `playPlaylistByName` | ✅ | ✅ | ⚠️ 仅 UI |
@@ -554,7 +565,8 @@ await audio.playByLocation('铁炉堡', { variant: 'A' })
 
 ```
 story Agent  输出 <play_audio situation="战斗" mood="紧张"/>
-   │           ⚠️ 约定尚未写进任何 prompt —— 这一段是空的
+   │           ✅ 约定已写进 agent-config.json（story 预设 placeholder-media 条目
+   │              + systemPrompt 冗余一份），2026-08-18 复核
    ▼
 marker-protocol.ts  scanPlayAudioMarkers() → PlayAudioMarker
    │           自闭合 / 成对 / 只有开标签没闭合，三种写法都认；scanMarkers 一并收录
@@ -578,15 +590,13 @@ game-pipeline.ts  Stage 1 只**暂存**标记；run() 末尾 refreshFromDb() 之
 
 ### 还没接的
 
-**AI 标记的 prompt 侧（刻意）**：story 的 systemPrompt / 预设里**没有** `<play_audio>` 的输出约定，所以 AI 不会产出这个标记。**这不影响场景配乐本身** —— 地点变化那条主路径不经过 AI。加上它只是让 AI 能在"地点没变但气氛变了"（战斗爆发、气氛转冷）时额外插一手。这是有意为之——先把 API 接口稳定下来，prompt 怎么写、什么时候该换歌是独立的一次调整。
-
-要启用时只需在 story 预设里加一个条目，说明标记格式与"只在场景转折时输出"的克制原则。**Code 侧一行都不用改。**
-
-在此之前，`playByScene` 仍可由 UI 或调试面板手动调用来验证选曲效果。
+~~**AI 标记的 prompt 侧（刻意）**：story 的 systemPrompt / 预设里**没有** `<play_audio>` 的输出约定~~
+**（2026-08-18 更正：已接线，见本节开头的复核框）**。当初留空的理由（先把 API 接口稳定下来，prompt 怎么写是独立一次调整）仍记录在此以备追溯；现在预设条目已按原文设想加上，**Code 侧确实一行都没改**。
 
 **音效全链空白**：需要在战斗结算、制作成功、状态效果触发等处埋 `playSfx` 调用点。基建（声池 / 并发上限 / 体积门禁）早就完备，缺的只是触发方。
 
-**真机验证**：地点变化换歌、界面切换换歌、设置页试听出声、手势解锁时机**均已在浏览器里人工验证**；音效与 AI 标记两条路因为没有触发方 / prompt 侧空着，**无从验起**。完整对照表见 §十。
+**真机验证**：地点变化换歌、界面切换换歌、设置页试听出声、手势解锁时机**均已在浏览器里人工验证**；音效那条因为游戏内没有触发方，**仍无从验起**。
+AI 标记那条**不再是「无从验起」** —— prompt 侧接线后它已经可以在日常游玩里被验证（跑一轮游戏，看 story 是否在场景转折时输出 `<play_audio>`、看 BGM 是否随之切换、看正文里有没有漏出尖括号），只是**尚未做过这次走查**。完整对照表见 §十。
 
 ### 为什么给 AI 的是标签而不是 id
 
@@ -668,7 +678,7 @@ game-pipeline.ts  Stage 1 只**暂存**标记；run() 末尾 refreshFromDb() 之
 | 界面切换换歌（首页 / 捏人页） | ✅ 已验证 |
 | 手势解锁时机 | ✅ 已验证 —— 正是它暴露出"监听装在 `audio.init()` 里会错过进游戏那一下手势"，修复见 §十 |
 | 音效播放 | ❌ 未验证：游戏内**没有任何触发方**，无从验起 |
-| AI 标记 `<play_audio>` | ❌ 未验证：prompt 侧刻意留空，AI 不会产出该标记 |
+| AI 标记 `<play_audio>` | ❌ 未验证 —— 但**原因已变**（2026-08-18）：prompt 侧现已接线（story 预设 `placeholder-media` 条目），链路可验，只是**还没走查过**，不再是「无从验起」 |
 | 本机音乐文件夹（`showDirectoryPicker` / 大目录扫描 / 权限跨会话） | ❌ 未验证 |
 | 非 Chromium 浏览器 | ❌ 未验证 |
 
@@ -709,7 +719,7 @@ vitest 的 `environment: 'node'` 里**没有** `AudioContext`、`Audio`、`URL.c
 | `src/sillytavern/audio-names.ts` | 名称归一化 / `findByName` / `isNameTaken` / `uniqueAudioName` / 扩展名→MIME 表 |
 | `src/sillytavern/audio-fakes.ts` | 共享测试替身（伪 AudioContext / AudioElement） |
 | `src/sillytavern/types.ts` | `AudioSourceKind` / `AudioTrackKind` / `AudioTrack` / `AudioBlobRecord` / `AudioHandleRecord` / `AudioPlaylist` / `AudioRepeatMode` / `AudioPlaybackState` |
-| `src/sillytavern/database.ts` | Dexie v12 四表 + 音频 CRUD（事务保证元数据/字节原子） |
+| `src/sillytavern/database.ts` | 音频四表（v11 引入前三张、v12 追加 `audioHandles`；库现为 `DB_VERSION = 22`）+ 音频 CRUD（事务保证元数据/字节原子） |
 | `src/ui/lib/audio-singleton.ts` | 惰性单例 / 浏览器工厂 / 静默桩 / `setBlobResolver` / 首次手势解锁监听 |
 | `src/ui/lib/audio-folder.ts` | File System Access 唯一接触点：选择 / 持久化 / 权限 / 扫描 / 取文件 |
 | `src/ui/stores/audio-store.ts` | Pinia 薄壳，**应用的唯一入口** |

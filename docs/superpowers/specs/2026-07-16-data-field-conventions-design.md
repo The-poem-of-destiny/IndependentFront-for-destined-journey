@@ -38,7 +38,38 @@
 | `snapshots`                                                             | 存档私有     | id                 | ✅ 一等+索引                                    | 快照唯一真源                                                                                                               |
 | `lorebooks` / `presets` / `settings` / `apiEndpoints` / `createPresets` | **全局共享** | id/key             | ❌ 不设                                         | 世界书/预设/设置/API 池                                                                                                    |
 | `audioTracks` / `audioBlobs` / `audioPlaylists` / `audioHandles`        | **全局共享** | id                 | ❌ 不设                                         | 音频资源（见第 15 章）。非存档状态，不入 StatePatch，**不进备份格式**（`audioHandles` 另有一层原因：目录句柄只对本机有效） |
-| `chats`                                                                 | ⚰️ v3 遗留   | id                 | —                                               | 标记废弃，迁移批次中删除                                                                                                   |
+| `chats`                                                                 | ⚰️ v3 遗留   | id                 | —                                               | 标记废弃，迁移批次中删除 → ✅ **已删**（M1 / Dexie v9 的 `chats: null`，复核 2026-08-18）                                  |
+
+> **§1.1 补登（复核 2026-08-18）**：本节自称「新表必须先在此登记身份」，但上表停在 Dexie v12（音频），
+> 此后 v13-v22 新增的 13 张表从未登记。以下按同一表格式补登，**口径全部现读 `src/sillytavern/database.ts`**
+> （`DB_VERSION = 22`；schema 自 v13 起改走 `withSchema(基线, 增量)` 的 delta 写法，v1-v12 原样冻结）。
+> 补登不改上表的历史裁决，只是把缺席的行补齐。
+>
+> | 表                         | 身份           | 主键                     | saveId                                    | 版本 | 说明                                                                                                                                          |
+> | -------------------------- | -------------- | ------------------------ | ----------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+> | `assetMeta` / `assetBlobs` | **全局共享**   | id                       | ❌ 不设                                   | v13  | 素材库元数据 / 字节（照音频四表分表）。**不进 `FullBackup`**，走独立 zip 导出                                                                 |
+> | `worldBooks`               | **全局共享**   | id                       | ❌ 不设                                   | v14  | 世界书唯一真源（工坊 P0 迁出 localStorage；v1-v3 的 `lorebooks` 是死表）。进 `FullBackup`                                                     |
+> | `workshopProjects`         | **全局共享**   | id                       | ❌ 不设                                   | v14  | 工坊项目生命周期元数据。进 `FullBackup`                                                                                                       |
+> | `beautifierRules`          | **全局共享**   | id                       | ❌ 不设                                   | v15  | 只存**用户规则**；内置预设是派生缓存，纯内存不落库。进 `FullBackup`                                                                           |
+> | `regexStorage`             | **全局共享**   | key                      | ❌ 不设                                   | v16  | 隔离正则的共享持久 KV（iframe 只能经同步镜像访问）。进 `FullBackup`                                                                           |
+> | `sceneImages`              | **存档私有**   | id                       | ✅ 一等+索引（另有 `[saveId+messageId]`） | v17  | 情景插画元数据 = **配方**（prompt/seed/model/标题说明）。进 `FullBackup`；`deleteSaveSlot` 级联删                                             |
+> | `sceneImageBlobs`          | 字节（随插画） | id（=`sceneImages.id`）  | ❌ 不设（按 id 批删）                     | v17  | 图片字节。**不进 `FullBackup`**（字节进 JSON 要 base64，同 `audioBlobs`/`assetBlobs` 口径）                                                   |
+> | `imagePresets`             | **全局共享**   | key（`${kind}:${name}`） | ❌ 不设                                   | v17  | 角色视觉预设（**初始设定基线**）。**删存档刻意不删**；`kind==='location'` 的行已随 v18 废除。进 `FullBackup`                                  |
+> | `characterAppearances`     | **存档私有**   | key                      | ✅ 一等+索引（另有 `name`）               | v19  | 角色外貌**会话副本**（AI 唯一写得到的外貌表）。与 `imagePresets` 刻意相反：随存档隔离、级联删，且**进 `FullBackup`**                          |
+> | `contentPacks`             | **全局共享**   | packId                   | ❌ 不设                                   | v20  | 内容包安装持久化，payload 是整包。**不进 `FullBackup`**（备份会变成可转发的完整内容包 + 体积翻倍），一致性靠 `reconcilePackState()`           |
+> | `mapBlobs`                 | **全局共享**   | url                      | ❌ 不设                                   | v21  | 地图图源字节本地缓存（同一图源按 url 天然去重）。**不进 `FullBackup`**；卸载 pack 刻意保留                                                    |
+> | `snapshotPayloads`         | **存档私有**   | id（=`snapshots.id`）    | ✅ 一等+索引                              | v22  | 快照拆表：`snapshots` 只留元数据（`SnapshotMeta`），整档载荷（characters/saveProfile/plotEvents/**messages**）搬这里。进 `FullBackup`；级联删 |
+>
+> 🔴 两条随补登一起记下的现状（都不在原表的裁决范围内，但读本节的人会踩）：
+>
+> 1. **`snapshots` 行已经不是 §11.2 那个整体形状了**（v22，2026-08-17）——它现在是元数据行
+>    `{id, saveId, createdAt, reason, turn, preview}`，`characters` / `saveProfile` 住 `snapshotPayloads`，
+>    两张表**一对一同 id**。拆的理由是读放大（列快照/淘汰旧快照每回合都跑，却只用得上 turn/createdAt）。
+>    §11.2 的**语义**（打快照 = 整份深拷贝 / 恢复 = 覆写 + 按 turn 截断对话）一字未变，变的只是落库分了两张表。
+> 2. **`deleteSaveSlot` 现在级联 12 张表**（§1.2 规则 2 的现状口径）：snapshots / snapshotPayloads /
+>    memories / plotEvents / plotOutlines / messages / characters / saveProfiles / saves /
+>    sceneImages / sceneImageBlobs / characterAppearances，整段包在一个 Dexie 事务里。
+>    `imagePresets` 刻意**不在**其中（全局基线）。
 
 ### 1.2 隔离三规则
 
@@ -55,6 +86,28 @@
 ```
 
 导入时**重新生成 saveId** 及所有内部 UUID，防撞车。整库备份（`exportAllData`）另存，两者并存。
+
+> **§1.3 复核（2026-08-18）—— 与「存档互传」实装对账（2026-08-15 交付）**：
+> 单存档导出/导入已实装，落在 `src/sillytavern/session-backup.ts`
+> （`exportSessionSave` / `checkSessionSaveDependencies` / `importSessionSave`）。
+> 「重发全部 id」与「两者并存」两条**照本节执行**（不重发 id 的败法是第二次导入静默覆盖第一次），
+> 但**顶层形状与本节草案不同**，以代码为准：
+>
+> - 🔴 **没有 `formatVersion` 字段**。两种备份的版本戳都叫 `version`，值是 `DB_VERSION`（当前 **22**），
+>   不是本节写的 `formatVersion: 1`。导入侧**只拿它做一个方向的判断**：戳 > 本机 `DB_VERSION` 直接拒
+>   （`assertBackupNotFromFuture`：备份比本机新，导进来是一批读不出来的残档）；戳更老或缺席照旧原样导入
+>   （老备份必须永远导得进来）。
+>   ⚠️ 与之同名不同物的还有一个 `formatVersion`：那是**内容包**（`ContentPack`）的格式版本，唯一合法值是 `1`
+>   （`content-source.ts` 的 `CURRENT_PACK_FORMAT_VERSION`），与存档备份无关，别互相换算。
+> - 单存档备份多一个**结构判据字段** `kind: 'fated-poem-session-save'` —— 整库导入的判据
+>   （`isFullBackupFile`）靠它把两条路分开：光看「`version` 是数字」会把角色卡/预设/社区 JSON 全放行，
+>   而整库导入的下一步对字段缺席是容忍的，判据松一格的代价是把用户整个库清空。
+> - 载荷键名与本节草案有出入：`saveProfile` → **`profile`**，且随子系统扩到
+>   `plotOutlines` / `sceneImages`（**只有元数据，字节永不随行**）/ `characterAppearances` /
+>   `snapshotPayloads`（v22 拆表；旧备份整份内嵌，导入侧按**载荷字段在不在**归一化，**不看版本号**）。
+> - 多一份本节没有的东西：**内容依赖清单** `dependencies`（内容包 / 世界书条目 token / 工坊项目 /
+>   story 预设），供导入前只读体检 `checkSessionSaveDependencies`。🔴 体检**永不因内容缺失而抛错**，
+>   缺内容照样导得进，措辞一律陈述不阻拦（`src/ui/lib/session-import-messages.ts` 是那句话的唯一来源）。
 
 ---
 
@@ -466,8 +519,25 @@ interface Snapshot {
 >
 > - **#17 FP/契约/成就管线**: SaveProfile.fp/fpHistory/contracts/achievements 字段与 fp-system.ts 计算函数就位，但无游戏流程写入点（FP 获取/消费的玩法触发、契约签订、成就解锁判定均未接线）。
 > - **#29 EventBus 三件套**: game-event.ts EventBus + effect-runtime 声明式效果 + subscription-manager 持久订阅基础设施完备，GamePipeline 管线完成后的批量效果执行时序（ADR: 管线完成后批量执行）未接入 run() 主流程。
+>   → ✅ **已闭环（Q-07, 2026-08-03；复核 2026-08-18）**：注册面在 `effect-wiring.ts` 的 `wireEffectSystem(saveId, characters)`，
+>   由 `game-pipeline.ts` 在存档加载时调用（幂等，切档由 `unwireEffectSystem` 拆除后重建）；装备/卸下经 state-manager 的
+>   equip/unequip handler 调 `wireObject`/`unwireObject`。**emit 源那一半**在 `state-manager.ts`：每次 `commitChatState`
+>   提交后把本次 patch 产生的 `GameEvent` 经 `publishToEffectSystem` 发到按存档的 EventBus，脚本产出的效果经
+>   `convertScriptEffects` 转 StatePatch 再走一轮 `commitChatState`（ADR-21 未开第二条写路径），反应轮深度上限 3。
 > - **#3 memory_summary 落库**: memory_summary Agent 输出解析后的 MemoryRecord 写入（含 hiddenLine 新定义）在 orchestrator 无 Stage4 翻译点。
+>   → ✅ **已闭环（复核 2026-08-18）**：落库点不在 orchestrator 而在管线侧 —— `GamePipeline.persistMemorySummary`
+>   （`src/ui/lib/game-pipeline.ts`）在 `memory_summary` 的完成回调里调 `@engine/memory-summarizer` 的 `summarizeAndSave`
+>   （解析/校验/id 生成/embedding 全在引擎，Q-03 收回）。2026-08-16 管线并行化后它被旁路成后台任务
+>   （进 `pendingPlotTasks`，run() 末尾统一 await），故不再阻塞 stage 完成。
 > - **#18 plot 双检接线**: plot_pre_check/plot_post_check 输出目前只进 context 不产 update_plot_event patch；plotEvents 状态推进依赖手动。
+>   → ✅ **已闭环（10j 剧情系统接线；复核 2026-08-18）**：pre 侧 `handlePlotPreCheck` 同步注入「剧情导演」块供 story 读，
+>   并后台跑 `preCheckPlot()`（pending→active + visibility→revealed）；post 侧 `persistPlotPostCheck` 调 `postCheckPlot()`
+>   落库事件状态/新子事件/大纲版本，终局（completed/failed）事件转高重要度记忆（与 memory_summary 共用
+>   `generateMemoryId` 发号器 + `withGlobalWriteLock` 全局写锁，防撞号）。
+>   🔴 **但当年那句话的后半段要更正**：状态推进**不是**经 `update_plot_event` patch 走 StateManager，而是 `plot-engine.ts`
+>   直写 `plotEvents` 表（`savePlotEvent` / `savePlotEvents`）。`update_plot_event` op 至今仍在 StateManager 的 handler 表里
+>   （`state-manager.ts`，含测试），但**生产侧无发射点** —— 想按 ADR-21 把剧情落库也收回唯一写入口的话，那是一件仍未做的事，
+>   别把「已接线」读成「已收口」。
 
 ## 附录 B 现状偏差清单
 

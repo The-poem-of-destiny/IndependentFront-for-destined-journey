@@ -2,6 +2,27 @@
 
 > 审查日期：2026-08-16 · 基线：`master` @ `1133a82` · 范围：全仓代码 / 测试 / 文档 / 构建产物 / 工具链（安全议题除外，属另一条独立审查线）
 
+## 修复状态（2026-08-18）
+
+> 本节只记「本报告排期的条目现在是什么状态」，第 4 章往下的分析原文一字未改 —— 那是 `1133a82` 当时的现场。
+> 复核基线：`master` @ `890f3ec`。逐条按 `git log` + 打开代码复核，第 3 章三张表已就地补上「状态」列。
+>
+> 📌 **本文件当前放在 `docs/planning/`，属放错目录** —— 它是审查报告不是计划，后续一波文档维护会把它移进
+> `docs/reviews/`。移动之前引用它的路径以本路径为准。
+
+**两个 P0 都已修，落在同一个提交 `890f3ec`（PR #113）：**
+
+- 每回合快照深拷贝 → **Dexie v22 快照元数据/载荷分表**。列表与淘汰路径零载荷读（间谍断言钉死），`createSnapshot` 冗余 `structuredClone` 移除；老格式 FullBackup / 单存档导出走 split-on-import 永续兼容；升级改逐行流式，内存驻留从全库降到单行。
+- `commitChatState` 逐补丁全量读-改-写 → **提交级缓存**。入口读一次 profile + characters、出口冲刷一次；补丁序列可见性与部分失败语义不变，spy 回归测试钉死 I/O 预算。
+
+**同一提交还收了两条：** P1 的 BFF 路由前缀三处手抄 → `server/app.ts` 的 `BFF_ROUTE_TABLE` 单源（`BFF_ROUTE_PREFIXES` / `isBffRoute` 由它派生，两处 vite 中间件与挂载全部改读；`/api/worldbooks`、`/api/defaults` 经 `server/routes/content.ts` 升格真路由，dev / preview 行为一致，未配置内容目录返 501）；P2 的分层方向闸门 → 6 条引擎→UI 反向边收进 `content-registry-runtime.ts` 注入缝、`media-hash` 与 `CreatePreset` 迁进引擎，配 `eslint.config.js` 的 `no-restricted-imports` + `tests/layering-gate.test.ts` 双闸门（探针验证非空转），契约本身写进根 `AGENTS.md` 设计约定。
+
+**PR #113 的评审修复批还顺带收口了 ADR-21 的 P1-09 受控例外**（本报告未单列）：`persistFocusQuest` / `persistNewsRead` 改为串进 `withSaveWriteLock` 的 per-saveId 写队列，并在锁内重读新鲜 profile、只改那一个字段 —— 否则提交级缓存把写窗口拉成「整次提交一拍」之后，UI 侧的裸写会被出口那次整档 flush 盖掉。**已知同类未修（刻意出界）**：`MapPanel.vue` 的地图标记仍整份 profile 直写无锁。
+
+**第 12 章两条工具链项由 `6d5b363`（PR #112）修掉：** `.prettierrc` 加 `endOfLine: "auto"`，本地 `format:check` 的 Windows 776/776 假红消失（本地红从此就是真红）；新增 `npm run gates` 一键跑齐 CI 八道闸门。同一提交还做掉了 P0 第 4 行的 `data/ → public/data` 文档同步与 P2 的 tsconfig 严格开关（部分，见下表）。
+
+**其余条目状态见第 3 章三张表的「状态」列。** 一句话概括：**P0 四条已修三条**（剩下的是产物体积那条，且它的行号引用与「267MB 出自哪里」都需要重新取证）；**P1 六条只动了一条的后半**（两个 dev-only 端点升格真路由，转发超时仍缺）；**P2 八条已修两条、部分一条**，剩下五行是覆盖率与 `any` 棘轮 / design.md 扫描闸门 / `AppModal` 焦点契约 / LICENSE 文件 / 两个巨石拆分。
+
 ## 0. 审查方法
 
 - **9 个维度并行深读** —— 架构与模块边界 / 类型安全 / 测试质量 / 代码质量 / 性能 / 前端 UI 规范与可访问性 / 数据层与持久化 / 文档一致性 / 构建 CI 工具链与依赖，另加 **1 轮完备性补扫**，专查九维都没碰到的子系统与产物（音频、图像生成、构建产物、应用引导链路等）。
@@ -40,36 +61,36 @@
 
 ### P0 —— 成本随使用持续增长，建议最先动手
 
-| 严重度    | 问题                                                                             | 位置                                                        |
-| --------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| 🔴 high   | 每回合快照深拷贝全量消息历史，trim 时又把 30 份快照整行读回                      | `src/sillytavern/state-manager.ts:1430`、`database.ts:1368` |
-| 🔴 high   | `commitChatState` 逐补丁全量读-改-写 profile 与 characters 全表                  | `src/sillytavern/state-manager.ts:279`                      |
-| 🟡 medium | `vite build` 把 267MB 未授权且应用点不到的音频打进产物（dist-ui 共 305MB）       | `vite.config.ts:238-241`、`public/audio/manifest.json`      |
-| 🟡 medium | `data/ → public/data` 迁移未同步：AGENTS.md 编码验证铁律与内容包路径引用全部失效 | `AGENTS.md:48`、`src/sillytavern/AGENTS.md:75`              |
+| 严重度    | 问题                                                                             | 位置                                                        | 状态（2026-08-18）                                                                                                                                                                                                                                         |
+| --------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🔴 high   | 每回合快照深拷贝全量消息历史，trim 时又把 30 份快照整行读回                      | `src/sillytavern/state-manager.ts:1430`、`database.ts:1368` | ✅ **已修**（`890f3ec`）—— Dexie v22 快照元数据/载荷分表，列表与淘汰零载荷读                                                                                                                                                                               |
+| 🔴 high   | `commitChatState` 逐补丁全量读-改-写 profile 与 characters 全表                  | `src/sillytavern/state-manager.ts:279`                      | ✅ **已修**（`890f3ec`）—— 提交级缓存，入口读一次、出口冲刷一次                                                                                                                                                                                            |
+| 🟡 medium | `vite build` 把 267MB 未授权且应用点不到的音频打进产物（dist-ui 共 305MB）       | `vite.config.ts:238-241`、`public/audio/manifest.json`      | ⬜ **未动**，且引用位置已漂移：`vite.config.ts` 经 `890f3ec` 收口后从 242 行缩到 160 行，原 238-241 的 `build` 块已不在该行段。另需注意公开仓侧 `public/audio/` 只有 `README.md` + 空 `manifest.json`（9KB）—— 那 267MB 只出现在挂了私有内容仓的本机构建里 |
+| 🟡 medium | `data/ → public/data` 迁移未同步：AGENTS.md 编码验证铁律与内容包路径引用全部失效 | `AGENTS.md:48`、`src/sillytavern/AGENTS.md:75`              | ✅ **已修**（`6d5b363`）—— AGENTS.md 常用命令节重写 + `data/ → public/data` 同步，引擎分册补墓碑 ×2                                                                                                                                                        |
 
 ### P1 —— 确凿的正确性缺陷，触发条件窄但值得近期修
 
-| 严重度    | 问题                                                                                                                      | 位置                                                       |
-| --------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| 🟡 medium | content-store 两处裸写 `db.saves.put` 绕过 `saveSaveSlot`，卸载路径不刷新内存，`needs_selection` 标记可被后续写回静默抹掉 | `src/ui/stores/content-store.ts:1162,1481`                 |
-| 🟡 medium | `commitChatState` 批量落库无事务，成对补丁中途失败留半应用状态                                                            | `src/sillytavern/state-manager.ts:278`                     |
-| 🟡 medium | 快照回退不回滚 characterAppearances / sceneImages，留下被撤销的外貌与图鉴孤儿                                             | `src/sillytavern/state-manager.ts:1511`                    |
-| 🟡 medium | 整库备份不含 localStorage 设置，恢复后 Agent 提示词/预设/出图配置归零                                                     | `src/sillytavern/database.ts:693`                          |
-| 🟡 medium | BFF 转发无超时，上游挂起即请求永久挂起；`/api/worldbooks`、`/api/defaults` 仅存在于 dev 中间件，preview/生产必 404        | `server/routes/proxy.ts:110-118`、`vite.config.ts:114,155` |
-| 🟡 medium | 全仓零全局错误兜底（无 `app.config.errorHandler` / `unhandledrejection`），真机异常不可观测                               | `src/ui/main.ts`                                           |
+| 严重度    | 问题                                                                                                                      | 位置                                                       | 状态（2026-08-18）                                                                                                                                                                                                                     |
+| --------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🟡 medium | content-store 两处裸写 `db.saves.put` 绕过 `saveSaveSlot`，卸载路径不刷新内存，`needs_selection` 标记可被后续写回静默抹掉 | `src/ui/stores/content-store.ts:1162,1481`                 | ⬜ **未动** —— 两处裸写仍在（行号随 `890f3ec` 前移到 `:1118` / `:1437`），仍未走 `saveSaveSlot`                                                                                                                                        |
+| 🟡 medium | `commitChatState` 批量落库无事务，成对补丁中途失败留半应用状态                                                            | `src/sillytavern/state-manager.ts:278`                     | ⬜ **未动** —— `890f3ec` 的提交级缓存只改 I/O 预算，不改事务边界（该提交明写「部分失败语义不变」）；`state-manager.ts` 里唯一的 `db.transaction` 仍是快照恢复那处                                                                      |
+| 🟡 medium | 快照回退不回滚 characterAppearances / sceneImages，留下被撤销的外貌与图鉴孤儿                                             | `src/sillytavern/state-manager.ts:1511`                    | ⬜ **未动** —— 快照恢复事务的表清单经 `890f3ec` 只新增了 `snapshotPayloads`（v22 拆表所需），这两张表仍不在内                                                                                                                          |
+| 🟡 medium | 整库备份不含 localStorage 设置，恢复后 Agent 提示词/预设/出图配置归零                                                     | `src/sillytavern/database.ts:693`                          | ⬜ **未动**（`890f3ec` 只给 FullBackup 加了「备份版本 > DB_VERSION 明确拒绝」的前向版本闸，与本条无关）                                                                                                                                |
+| 🟡 medium | BFF 转发无超时，上游挂起即请求永久挂起；`/api/worldbooks`、`/api/defaults` 仅存在于 dev 中间件，preview/生产必 404        | `server/routes/proxy.ts:110-118`、`vite.config.ts:114,155` | 🔄 **部分** —— 后半已修（`890f3ec`）：两端点经 `server/routes/content.ts` 升格真路由并进 `BFF_ROUTE_TABLE`，dev / preview 行为一致，未配置内容目录返 501。前半**未动**：`server/routes/proxy.ts` 里 `timeout` / `AbortSignal` 仍零命中 |
+| 🟡 medium | 全仓零全局错误兜底（无 `app.config.errorHandler` / `unhandledrejection`），真机异常不可观测                               | `src/ui/main.ts`                                           | ⬜ **未动** —— `src/ui/main.ts` 里两个关键字仍零命中                                                                                                                                                                                   |
 
 ### P2 —— 防回归基建，一次投入长期受益
 
-| 严重度    | 问题                                                                                               | 位置                                                           |
-| --------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| 🟡 medium | 补分层方向机器闸门：eslint `no-restricted-imports` + layering gate 测试，顺手清 6 处引擎→UI 反向边 | `eslint.config.js`、`tests/`                                   |
-| 🟡 medium | tsconfig 四个零成本严格开关（实测 0 error 直接可开）                                               | `tsconfig.json`                                                |
-| 🟡 medium | 补覆盖率度量与 `any` 棘轮（259 处存量），照 knip 棘轮既有模式                                      | `vitest.config.ts`、`eslint.config.js:58`                      |
-| 🟡 medium | design.md 声称的「强制扫描」补成真闸门，遏制间距硬编码继续反超                                     | `docs/design.md:24`                                            |
-| 🟡 medium | 9 道 CI 闸门补本地聚合命令（如 `npm run gates`），修 `format:check` Windows 假红                   | `package.json`、`.prettierrc`                                  |
-| 🟡 medium | `AppModal` 补 dialog 语义与焦点管理，26 处调用点一次受益                                           | `src/ui/components/shared/AppModal.vue:79`                     |
-| 🟡 medium | 声明 MIT 但仓库无 LICENSE 文件，与「代码 MIT + 内容独立授权」双许可口径矛盾                        | `package.json`、仓库根目录                                     |
-| ⚪ low    | GamePipeline（2445 行 44 方法）与 create-store（148 个导出）拆分                                   | `src/ui/lib/game-pipeline.ts`、`src/ui/stores/create-store.ts` |
+| 严重度    | 问题                                                                                               | 位置                                                           | 状态（2026-08-18）                                                                                                                                                                                                                                 |
+| --------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🟡 medium | 补分层方向机器闸门：eslint `no-restricted-imports` + layering gate 测试，顺手清 6 处引擎→UI 反向边 | `eslint.config.js`、`tests/`                                   | ✅ **已修**（`890f3ec`）—— 双闸门落地（`eslint.config.js` 的 `no-restricted-imports` 挡 `../ui/*` / `@ui/*` / `vue` / `pinia`；`tests/layering-gate.test.ts` 扫源码兜动态 import），6 条反向边全清，契约写进根 `AGENTS.md` 设计约定                |
+| 🟡 medium | tsconfig 四个零成本严格开关（实测 0 error 直接可开）                                               | `tsconfig.json`                                                | 🔄 **部分**（`6d5b363`）—— `noFallthroughCasesInSwitch` / `noImplicitOverride` 已开；`useUnknownInCatchVariables` 经该 PR 的双轴审查判定为 `strict` 下已默认、作为空操作行删除（本条原文的「四个」实为三个有效项）；**`noImplicitReturns` 仍未开** |
+| 🟡 medium | 补覆盖率度量与 `any` 棘轮（259 处存量），照 knip 棘轮既有模式                                      | `vitest.config.ts`、`eslint.config.js:58`                      | ⬜ **未动** —— `coverage` 在 `package.json` / `vitest.config.ts` 仍零命中，`any` 棘轮未建                                                                                                                                                          |
+| 🟡 medium | design.md 声称的「强制扫描」补成真闸门，遏制间距硬编码继续反超                                     | `docs/design.md:24`                                            | ⬜ **未动** —— `tests/` 下仍无间距/token 闸门                                                                                                                                                                                                      |
+| 🟡 medium | 9 道 CI 闸门补本地聚合命令（如 `npm run gates`），修 `format:check` Windows 假红                   | `package.json`、`.prettierrc`                                  | ✅ **已修**（`6d5b363`）—— `npm run gates` 落地；`.prettierrc` 加 `endOfLine: "auto"` 消掉 Windows 776/776 假红。附带更正：闸门是**八道**不是九道，该 PR 已把三处口径统一                                                                          |
+| 🟡 medium | `AppModal` 补 dialog 语义与焦点管理，26 处调用点一次受益                                           | `src/ui/components/shared/AppModal.vue:79`                     | ⬜ **未动** —— `AppModal.vue` 里 `role="dialog"` / `aria-modal` / 焦点陷阱仍零命中。与 `docs/reviews/2026-08-12-ui-review.md` §UI-06 是同一条                                                                                                      |
+| 🟡 medium | 声明 MIT 但仓库无 LICENSE 文件，与「代码 MIT + 内容独立授权」双许可口径矛盾                        | `package.json`、仓库根目录                                     | ⬜ **未动** —— 仓库根仍无 `LICENSE*`。这条自 2026-08-01 审查的 DOC-01 起已挂了两轮                                                                                                                                                                 |
+| ⚪ low    | GamePipeline（2445 行 44 方法）与 create-store（148 个导出）拆分                                   | `src/ui/lib/game-pipeline.ts`、`src/ui/stores/create-store.ts` | ⬜ **未动** —— `game-pipeline.ts` 现 2487 行（管线并行化后又涨了 42 行）                                                                                                                                                                           |
 
 ---
 

@@ -34,17 +34,41 @@ ChatFlow 对话流支持三种消息来源，从用户视角看全部出现在�
 
 ### 1.3 系统事件类型
 
-| `type` | 含义 | 何时产生 | 卡片组件 |
-|--------|------|----------|----------|
-| `craft` | 制作事件 | Orc 管线 Stage2 craft_gen 完成 | `CraftSystemCard` |
-| `char_gen` | 新角色登场 | Orc 管线 Stage2 char_gen 完成 | `CharGenSystemCard` |
-| `combat` | 战斗结算 | Orc 管线战斗窗口关闭 | `CombatSystemCard` |
-| `item_gen` | 获得物品/技能/装备 | item_gen Agent 完成（char_gen 或 craft 触发） | `ItemSystemCard` |
-| `character_update` | 角色属性变动 | vars_update 写入角色状态 | `SystemNotifBar` |
-| `item_update` | 物品变动（消耗/转移/装备） | vars_update 写入物品状态 | `SystemNotifBar` |
-| `quest_update` | 任务状态更新 | vars_update 写入任务状态 | `SystemNotifBar` |
+| `type` | 含义 | 何时产生（**设计意图**） | 卡片组件 | 现状（复核 2026-08-18） |
+|--------|------|----------|----------|------|
+| `craft` | 制作事件 | Orc 管线 craft_gen 完成 | `CraftSystemCard` | ⬜ 已定义未接线 |
+| `char_gen` | 新角色登场 | 侧链 char_gen 完成 | `CharGenSystemCard` | ✅ **唯一真的会发出来的一种** |
+| `combat` | 战斗结算 | 战斗终局 | `CombatSystemCard` | ⬜ 已定义未接线（见下方战斗一条） |
+| `item_gen` | 获得物品/技能/装备 | item_gen Agent 完成（char_gen 或 craft 触发） | `ItemSystemCard` | ⬜ 已定义未接线 |
+| `character_update` | 角色属性变动 | vars_update 写入角色状态 | `SystemNotifBar` | ⬜ 已定义未接线 |
+| `item_update` | 物品变动（消耗/转移/装备） | vars_update 写入物品状态 | `SystemNotifBar` | ⬜ 已定义未接线 |
+| `quest_update` | 任务状态更新 | vars_update 写入任务状态 | `SystemNotifBar` | ⬜ 已定义未接线 |
 
 前四种为"富卡片"类型，有独立组件；后三种为"通知条"类型，共用 `SystemNotifBar`。
+
+> 📌 **现状核对（2026-08-18）—— 表里的「何时产生」是设计意图，不是今天的真实发射面。**
+>
+> 系统消息的唯一出口是 `GamePipeline.emitSystemMessage`（`src/ui/lib/game-pipeline.ts` ~L623，
+> 内含 COR-02 存档归属闸），它转发给 `game-store.addSystemMessage`。**全仓生产代码里它只有一个
+> 调用点**：`game-pipeline.ts` ~L2303，char_gen 侧链拿到新角色之后，就地拼一个
+> `{ type: 'char_gen', … }` 发出去。
+>
+> 另外七个转换函数（`craftToEvent` / `charGenToEvent` / `itemGenToEvent` / `combatToEvent` /
+> `charUpdateToEvent` / `itemUpdateToEvent` / `questUpdateToEvent`，全在 `src/ui/lib/toSystemEvent.ts`）
+> **生产侧零调用方**，只被 `src/ui/lib/test-fixtures.ts` 用来造测试数据。
+> 也就是说：`char_gen` 卡片今天真的会在对话流里出现，其余六种是**已定义、组件已写好、
+> ChatFlow 的 `CARD_COMPONENTS` 也已注册、但没有任何东西去发它们**。
+>
+> 🔴 这条差异不会以任何形式报错 —— 卡片组件与过滤开关（设置页「消息显示」的 7 种事件类型）
+> 都完整存在，看起来一切就绪。要接一种事件，改的是**发射侧**（在管线对应位置调
+> `this.emitSystemMessage(xxxToEvent(output))`），本文档第 2 节以下的视觉契约不必动。
+>
+> 🔴 **战斗那一行的口径也变了**：v2 的「战斗窗口关闭 → 发一张 combat 卡」这条路径随 M5
+> 一起退役。战斗现在由 **combat-v3 持久会话**（战斗主持人 / DM 模式，2026-08-12）主持，
+> 终局走的是**结算确认框**：玩家在面板里过一遍数值与可编辑摘要，确认后由
+> `emitMessage('【战斗摘要】…', 'assistant')` 注入正文（`game-pipeline.ts` ~L2164-2176），
+> **不是**一条 `role: 'system'` 的 combat 卡。`CombatSystemCard` 的视觉契约（第 6 节）仍然有效，
+> 但它现在等的是一个尚未接上的发射点。
 
 ---
 
@@ -881,6 +905,10 @@ import SystemNotifBar from './cards/SystemNotifBar.vue'
 ```
 
 ## 附录 B: 数据流
+
+> 📌 下图是**目标数据流**。现状（复核 2026-08-18）只有 `char_gen` 那一支真的接通，且它在
+> `game-pipeline.ts` ~L2303 就地拼事件、并未经过 `charGenToEvent()`；其余六支的转换函数存在但
+> 生产侧无调用方。详见 §1.3 的现状核对。
 
 ```
 Agent 管线执行
