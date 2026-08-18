@@ -15,6 +15,10 @@
  *   `get()` 只能拿到 `null`（活性闸拦住了死链，但那次取用确实失败了）。
  *   规矩因此是**只 release 自己 get 到的那一份**，别拿 id 当"清一下缓存"的开关
  * - 容量逐出**绝不撤销被持有的条目**：宁可超容，也不能撤掉正在显示的 URL
+ * - `evict(id)` 是**字节换掉了**时的作废口（远程素材同步换址 / 删行走这条）：条目当场
+ *   摘除让下一次 `get` 重新读字节，旧 URL 零引用时立刻撤、有人挂着则推迟到还完再撤。
+ *   ⚠️ **这件事 `release()` 做不到**：两个持有者时它只减计数、旧图一直显示到天荒地老，
+ *   恰好一个持有者时它又当场撤掉一条正在显示的 URL（死图）—— 一个 API 两种错法
  * - `revokeAll()` 是拆除口，**无视计数**全撤（分区 unmount 时那一下）
  *
  * ⚠️ 由此产生的一个**刻意的语义位移**，读代码时别被文件名骗了: 现在每条落地的
@@ -97,6 +101,22 @@ export interface AssetUrlCache {
    * get 到的那一份。**
    */
   release(id: string): void;
+  /**
+   * **同一个 id 的字节换了**（或那一行没了）—— 作废这一条缓存。
+   *
+   * 与 {@link AssetUrlCache.release} 是两件事，别拿 release 当"清一下缓存"用:
+   * release 只是把计数 -1，两个持有者时旧 URL 原样留着（界面继续显示**旧字节**，
+   * 且永远不会自己好），一个持有者时又会当场撤掉一条**正在显示**的 URL（死图）。
+   * 这个动作对两种情形都给出正确答案:
+   *
+   * - 缓存条目**立刻**摘除 → **下一次** `get(id)` 重新读字节、铸一条**新的** URL
+   * - 旧 URL: 零引用时当场撤销；还有人挂着则**推迟**到那些引用各自还完才撤销
+   *   （既不打死正在显示的图，也不泄漏 —— object URL 不撤销就是泄漏）
+   * - 在飞的那次加载一并作废（它读到的可能正是旧字节），回来时自行撤销并返回 null
+   *
+   * 未缓存的 id / 重复调用都是空转，不抛错。
+   */
+  evict(id: string): void;
   /** 拆除用（如分区 unmount）：**无视引用计数**逐条撤销全部存活 URL 并清空缓存 */
   revokeAll(): void;
   /** 当前已铸造 URL 的条目数（不含在飞加载）。持有者不还引用时**可能超过容量** */
@@ -155,6 +175,21 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
   const refs = new Map<string, number>();
   /** 在飞去重表：同一 id 的并发 get 共享同一个 Promise */
   const inflight = new Map<string, Promise<string | null>>();
+  /**
+   * 被 {@link AssetUrlCache.evict} 摘下来、但**当时还有人挂着**的旧 URL。
+   *
+   * 按摘除顺序排队，各自带着摘除那一刻的引用数。`release()` **先还这笔旧账**:
+   * 本缓存的账本只按 id 记、不记是谁欠的（文件头那条"刻意的语义位移"），所以
+   * "先摘的先还"是唯一可算的近似 —— 而它在总数上是守恒的: 旧 URL 与新 URL 各自
+   * 收到的还款笔数之和永远等于 get 的次数，两条都不会漏撤销。
+   */
+  const orphans = new Map<string, { url: string; refs: number }[]>();
+  /**
+   * 逐 id 世代号 —— `evict()` 递增。作用与下面那个全局 `generation` 完全一样，
+   * 只是粒度是**一条**: 字节换掉的那一刻若正有一次 `get(id)` 在飞，它读到的可能
+   * 正是旧字节，把它缓存下来等于"作废之后第一次取用仍然是旧图"。
+   */
+  const epochs = new Map<string, number>();
 
   /**
    * 世代号 —— revokeAll() 递增。
@@ -165,9 +200,14 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
    */
   let generation = 0;
 
-  /** 当前引用数（未持有为 0） */
+  /** 当前引用数（未持有为 0）。**不含**已被 evict 摘走的那些旧账（见 `orphans`） */
   function countOf(id: string): number {
     return refs.get(id) ?? 0;
+  }
+
+  /** 这一条的逐 id 世代号 */
+  function epochOf(id: string): number {
+    return epochs.get(id) ?? 0;
   }
 
   /** +1 份引用 */
@@ -227,7 +267,7 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
     urls.set(id, url);
   }
 
-  async function load(id: string, gen: number): Promise<string | null> {
+  async function load(id: string, gen: number, epoch: number): Promise<string | null> {
     const blob = await loadBlob(id);
     // blob 缺失不是错误（素材行还在、字节丢了），但也绝不缓存 —— 之后重试要能成功
     if (!blob) return null;
@@ -236,8 +276,9 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
     // 空串意味着环境里没有 createObjectURL，同样不缓存（否则会缓存一条死链）
     if (!url) return null;
 
-    if (gen !== generation) {
-      // 加载期间被 revokeAll() 拆过了：这个 URL 不该进缓存，当场撤销
+    if (gen !== generation || epoch !== epochOf(id)) {
+      // 加载期间被 revokeAll() 拆过、或被 evict() 作废过了：这个 URL 不该进缓存
+      // （evict 的那一支里它还可能是**旧字节**铸的），当场撤销
       revoke(url);
       return null;
     }
@@ -292,7 +333,7 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
 
       // 两个组件同时要同一张头像时，若不去重就会铸两个 URL、只记住一个，
       // 另一个永久泄漏。这是真 bug，不是优化。
-      const p = load(id, generation).finally(() => {
+      const p = load(id, generation, epochOf(id)).finally(() => {
         // 无论成功、缺失还是抛错，都必须把在飞条目撤掉，否则一次失败会把这个
         // id 永久钉死在一个已 reject 的 Promise 上。
         if (inflight.get(id) === p) inflight.delete(id);
@@ -305,6 +346,21 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
     },
 
     release(id: string): void {
+      // 🔴 旧账优先: 这一条被 evict 摘走时挂着的那些引用还没还完，先还它们。
+      //    先还旧账才能让"最早铸的那条 URL 最早被撤销"，也就不会出现"新 URL 撤了、
+      //    旧 URL 反而留着"这种颠倒（两者笔数守恒，见 `orphans` 的注释）。
+      const queue = orphans.get(id);
+      if (queue !== undefined && queue.length > 0) {
+        const head = queue[0];
+        head.refs -= 1;
+        if (head.refs <= 0) {
+          queue.shift();
+          if (queue.length === 0) orphans.delete(id);
+          revoke(head.url);
+        }
+        return;
+      }
+
       const n = countOf(id);
       // 未知 id / 已归零：不抛错、计数绝不为负。
       // （"无害"只到这一步为止 —— n === 1 那条分支撤的可能是别人的那一份，见契约）
@@ -323,12 +379,40 @@ export function createAssetUrlCache(options: AssetUrlCacheOptions): AssetUrlCach
       revoke(url);
     },
 
+    evict(id: string): void {
+      // 世代号先动: 在飞的那次加载回来时会撞上它并自行撤销（它读到的可能是旧字节）
+      epochs.set(id, epochOf(id) + 1);
+      // 在飞条目也撤掉，好让紧接着的一次 get 去发起**新的**加载，而不是搭上那班注定
+      // 返回 null 的车（老 Promise 的 finally 会校验身份，不会误删新的）
+      inflight.delete(id);
+
+      const url = urls.get(id);
+      if (url === undefined) return; // 没缓存 = 无事可做（零引用条目在本缓存里不存续）
+      const held = countOf(id);
+      urls.delete(id);
+      refs.delete(id);
+
+      if (held <= 0) {
+        // 防御分支: 公开 API 下走不到（归零即撤销，见文件头那条"刻意的语义位移"），
+        // 但"摘下来的 URL 必须有人负责撤销"这件事不该依赖那条不变式还成立
+        revoke(url);
+        return;
+      }
+      // 还有人正显示着它 —— 撤了就是把他的图打成死链。挂进旧账，等他还
+      const queue = orphans.get(id);
+      if (queue === undefined) orphans.set(id, [{ url, refs: held }]);
+      else queue.push({ url, refs: held });
+    },
+
     revokeAll(): void {
       generation += 1;
       for (const url of urls.values()) revoke(url);
       urls.clear();
       // 拆除口**无视计数**: 分区都没了，谁持有已经不重要，留着才是泄漏
       refs.clear();
+      // 旧账同理: 那些 URL 同样只有这里能收（此后不会再有人来还了）
+      for (const queue of orphans.values()) for (const item of queue) revoke(item.url);
+      orphans.clear();
       // 在飞的加载不取消 —— 它们回来时会撞上世代号校验并自行撤销
     },
   };

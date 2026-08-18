@@ -22,7 +22,7 @@
  *    所以：
  *      · 消费方**不许**在模块顶层把 `getContentRegistry()` 的读数缓存成常量；
  *        缓存一份就会让装完包的目录还是旧的，而那种漂移不报错，只是「怎么点都还是老地方」。
- *      · 没人装过时返回**空骨架**（九面全 `undefined`）而不是 `null`/抛异常 ——
+ *      · 没人装过时返回**空骨架**（十面全 `undefined`）而不是 `null`/抛异常 ——
  *        它与 content-store 此前 `createEmptyRegistry()` 的产物**逐字段相同**，
  *        于是四个消费方走的是它们本来就有的那条兜底路径（查不到 = undefined / [] / ''）。
  *
@@ -34,8 +34,9 @@
 
 /**
  * 内容注册表的各面（D16 / §5.1；第 7 面 imageDialects 由图像 v2 追加，
- * 第 8 面 mapPack 由地图系统 v1 追加，`randomEvents` 由随机事件系统 v1 追加 ——
- * 后者在 `ContentPack` 里是**第 13 分节**，两套编号各数各的，别混着读）。
+ * 第 8 面 mapPack 由地图系统 v1 追加，`randomEvents` 由随机事件系统 v1 追加、
+ * `remoteAssets` 由远程素材 v1 追加 —— 后两者在 `ContentPack` 里分别是**第 13 / 第 14
+ * 分节**，两套编号各数各的，别混着读）。
  *
  * 约定 URL: `/data/content/<name>.json`（灌注方在 content-store 的
  * `CONTENT_REGISTRY_SOURCES`；引擎侧不认识 URL，只认识值）。
@@ -79,6 +80,20 @@ export interface ContentRegistry {
    * 不是这一面。
    */
   randomEvents: unknown;
+  /**
+   * 远程素材声明（远程素材 v1）：`remote-assets.json` 的原始 JSON（裸数组）。
+   *
+   * 🔴 与 `mapPack` / `randomEvents` **不同：没有为它派生的第二条缝**。那两面装进
+   * `map-runtime` / `random-event-runtime` 的是 `coerce*` 之后的**派生包**，所以
+   * `setContentRegistry` 里各有一行对应的 `install*` 副作用；这一面没有，读它的人
+   * 直接 `getContentRegistry().remoteAssets` 拿原值。它的唯一消费方还在 UI
+   * （`ui/lib/remote-asset-sync.ts` 的同步服务）—— 引擎侧一个字节都不读它，
+   * 这一面住在本文件只是因为**注册表的形状是一整个**，不是因为引擎需要它。
+   *
+   * 🔴 缺席不是错误：波 1 的 `normalizePackRemoteAssets` 吃到 `undefined` 返回空数组，
+   * 于是「声明清单」里只剩世界书那一半，同步照跑。
+   */
+  remoteAssets: unknown;
 }
 
 /**
@@ -99,6 +114,7 @@ export function createEmptyContentRegistry(): ContentRegistry {
     imageDialects: undefined,
     mapPack: undefined,
     randomEvents: undefined,
+    remoteAssets: undefined,
   };
 }
 

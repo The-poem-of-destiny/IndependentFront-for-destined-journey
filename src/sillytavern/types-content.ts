@@ -18,6 +18,7 @@
  */
 
 import type {
+  AssetType,
   BeautifierRule,
   ChatPreset,
   LocationNode,
@@ -240,6 +241,37 @@ export interface PackImageDialectsSection {
 type PackMapPackSection = Readonly<Record<string, unknown>>;
 
 /**
+ * 远程素材分节的一行（远程素材 v1）—— 第 14 分节 `remoteAssets`。
+ *
+ * 🔴 与 `imageDialects` / `mapPack` 那一档**不同**: 这一节就是一个**裸数组**，
+ * 没有 `{ data }` 或 `{ dialects }` 那层壳 —— 每一行都是独立的一条声明，没有任何
+ * 需要挂在整节上的配置。
+ *
+ * `type` 缺省 = `头像`（同文件名约定的缺省类型）；`variant` 缺省 = 基图位。
+ * 逐行的容错收窄归引擎侧的 `normalizePackRemoteAssets`（`remote-asset-catalogue.ts`）——
+ * **校验器只判形状、不解释内容**，口径同 `PackImageDialectsSection`。
+ */
+interface RemoteAssetPackEntry {
+  /** 角色名，`===` 匹配素材行的 name（D2 不归一化） */
+  name: string;
+  /** http/https 绝对地址 */
+  url: string;
+  /** 缺省 `头像` */
+  type?: AssetType;
+  /** 缺省 = 基图位 */
+  variant?: string;
+}
+
+/**
+ * 远程素材分节（第 14 面）—— 裸数组，三态语义同其它分节。
+ *
+ * 🔴 与 `PackMapPackSection` 同款**不导出**: 消费方（`normalizePackRemoteAssets`）
+ * 收的是 `unknown` —— 这一节来自第三方内容包，拿一个「已经是对的」的类型去接它，
+ * 只会让读代码的人以为有谁校验过。要导出等到真有跨模块引用时再说（死代码棘轮盯着）。
+ */
+type PackRemoteAssetsSection = readonly RemoteAssetPackEntry[];
+
+/**
  * 内容包顶层结构（§4）。
  *
  * 分节**全部可选**，三态语义：
@@ -294,6 +326,14 @@ export interface ContentPack {
    * `coerceRandomEventPack` 说了算（坏定义整条跳过、坏子项逐条丢）。**planner 不解释结构**。
    */
   randomEvents?: PackRandomEventsSection;
+  /**
+   * 远程素材声明（远程素材 v1）—— 注册表**第 14 面**。
+   *
+   * 三态语义照旧（absent = 别动 / `[]` = 刻意清空 / rows = 替换）。
+   * 🔴 这一节只声明「从哪下」，**下载与落库全在 UI 侧**：pack 装上并不等于图已经到本地，
+   * 引擎层对它做的唯一一件事是把行收窄成 `RemoteAssetDecl`。
+   */
+  remoteAssets?: PackRemoteAssetsSection;
 
   /**
    * 构建器逐节盖章的 hash 清单。

@@ -307,7 +307,10 @@ export async function loadAllDefaultBooks(): Promise<WorldBook[]> {
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 内容注册表的各面（D16 / §5.1）。
+ * 内容注册表的各面（D16 / §5.1；第 7 面 imageDialects 由图像 v2 追加，
+ * 第 8 面 mapPack 由地图系统 v1 追加，`randomEvents` 由随机事件系统 v1 追加、
+ * `remoteAssets` 由远程素材 v1 追加 —— 后两者在 `ContentPack` 里分别是**第 13 / 第 14
+ * 分节**，两套编号各数各的，别混着读）。
  *
  * 🔴 **定义已迁到引擎侧的注入缝** `@engine/content-registry-runtime`（分层收口）：
  * 四个**同步**消费方（agent-tools / random-tables / bloodlines / $location）全在引擎里，
@@ -404,6 +407,7 @@ export const CONTENT_REGISTRY_SOURCES: ReadonlyArray<{
   { face: 'imageDialects', url: '/data/content/image-dialects.json' },
   { face: 'mapPack', url: '/data/content/map-pack.json' },
   { face: 'randomEvents', url: '/data/content/random-events.json' },
+  { face: 'remoteAssets', url: '/data/content/remote-assets.json' },
   { face: 'markers', url: '/data/defaults/map-marker-presets.json' },
 ];
 
@@ -517,6 +521,8 @@ function packRegistryFaces(
   if (pack.imageDialects !== undefined) out.imageDialects = pack.imageDialects;
   if (pack.mapPack !== undefined) out.mapPack = pack.mapPack;
   if (pack.randomEvents !== undefined) out.randomEvents = pack.randomEvents;
+  // 远程素材分节是**裸数组**（没有 `.data` / `{ dialects }` 那层壳），故整节走
+  if (pack.remoteAssets !== undefined) out.remoteAssets = pack.remoteAssets;
   return out;
 }
 
@@ -961,6 +967,7 @@ export const useContentStore = defineStore('content', () => {
       imageDialects: resolveSection(packFaces.imageDialects, reg.imageDialects),
       mapPack: resolveSection(packFaces.mapPack, reg.mapPack),
       randomEvents: resolveSection(packFaces.randomEvents, reg.randomEvents),
+      remoteAssets: resolveSection(packFaces.remoteAssets, reg.remoteAssets),
     });
 
     // e. 存档 uid 迁移（D43）：rewrite 应用 + needsSelectionPartitions 标记

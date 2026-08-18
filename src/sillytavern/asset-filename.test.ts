@@ -17,6 +17,7 @@ import {
   explainAssetFilename,
   formatAssetFilename,
   violatesNamingInvariant,
+  violatesZipEntryName,
   DEFAULT_ASSET_TYPE,
   type ParsedAssetName,
 } from './asset-filename';
@@ -203,6 +204,28 @@ describe('violatesNamingInvariant', () => {
     expect(violatesNamingInvariant('大头像')).toBe(false);
     expect(violatesNamingInvariant('苏婉', '立绘bg2')).toBe(false);
     expect(violatesNamingInvariant('半身立绘照')).toBe(false);
+  });
+});
+
+describe('violatesZipEntryName（D19 —— 名字能不能活在 zip 条目名里）', () => {
+  it('正常名字/变体放行；空白照原样留着（D2）', () => {
+    expect(violatesZipEntryName('苏婉')).toBe(false);
+    expect(violatesZipEntryName('圣殿_内庭', '微笑')).toBe(false);
+    expect(violatesZipEntryName(' 苏婉 ')).toBe(false);
+    expect(violatesZipEntryName('苏婉', '')).toBe(false);
+    expect(violatesZipEntryName('苏婉.png')).toBe(false); // 点不在开头，无害
+  });
+
+  it('分隔符会在包里变成目录 → 名字与变体都要拦', () => {
+    expect(violatesZipEntryName('圣殿/内庭')).toBe(true);
+    expect(violatesZipEntryName('圣殿\\内庭')).toBe(true);
+    expect(violatesZipEntryName('苏婉', 'a/b')).toBe(true);
+    expect(violatesZipEntryName('苏婉', 'a\\b')).toBe(true);
+  });
+
+  it('名字开头的点会被导入侧当 dotfile 丢掉；变体开头的点无害', () => {
+    expect(violatesZipEntryName('.隐藏')).toBe(true);
+    expect(violatesZipEntryName('苏婉', '.微笑')).toBe(false);
   });
 });
 

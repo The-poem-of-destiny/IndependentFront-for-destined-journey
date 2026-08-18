@@ -168,14 +168,14 @@ src/sillytavern/                    ← 核心引擎
   │
   ├── content-registry-runtime.ts   ← 🆕 [分层收口 2026-08-17] 内容注册表的注入缝
   │      installContentRegistry / getContentRegistry / createEmptyContentRegistry /
-  │      resetContentRegistryRuntime + `ContentRegistry` 类型（九面）本身
+  │      resetContentRegistryRuntime + `ContentRegistry` 类型（十面）本身
   │      🔴 **注册表只有一份存储，就在这里**：content-store 的 `getContentRegistry()` 现在只是转发，
   │         那边的模块级 `let registry` 已删。与 mapPack/randomEvents 两面刻意不同 ——
   │         那两条缝装的是 `coerce*` 之后的**派生值**（两份不是同一个东西），
   │         注册表本体两处各存一份就能各说各话，症状是「装完包了，引擎那边的目录还是旧的」
   │      🔴 时序契约：读取一律**惰性、按调用时刻**发生；消费方（agent-tools 品牌面 /
   │         random-tables 名字池 / bloodlines 血脉集 / location-db 地点集）**不许**把读数
-  │         缓存成模块级常量。没装过 → 九面全 undefined 的空骨架（不是 null、不抛）
+  │         缓存成模块级常量。没装过 → 十面全 undefined 的空骨架（不是 null、不抛）
   │
   │  🚧 **四条注入缝 = 引擎读前端的唯一合法途径**（engine-settings / map-runtime /
   │     random-event-runtime / content-registry-runtime）。`src/sillytavern/**` 里

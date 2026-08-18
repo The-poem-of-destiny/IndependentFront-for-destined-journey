@@ -234,6 +234,40 @@ describe('validatePackOrThrow', () => {
     expect(hasCode(errorNotes(notes), 'bad-randomEvents-section')).toBe(false);
   });
 
+  // ── remoteAssets（第 14 面 / 远程素材 v1）──
+
+  it('remoteAssets 不是数组 → bad-remote-assets-section (error)', () => {
+    const notes = validatePackOrThrow({ ...minimalPack(), remoteAssets: { rows: [] } });
+    expect(hasCode(errorNotes(notes), 'bad-remote-assets-section')).toBe(true);
+  });
+
+  it('remoteAssets 缺席 / [] / 合法行 → 无 error（三态语义）', () => {
+    for (const remoteAssets of [
+      undefined,
+      [],
+      [{ name: '测试角色甲', url: 'https://example.invalid/a.png', type: '立绘' as const }],
+    ]) {
+      const notes = validatePackOrThrow({ ...minimalPack(), remoteAssets });
+      expect(errorNotes(notes), JSON.stringify(remoteAssets)).toEqual([]);
+    }
+  });
+
+  it('🔴 坏行只记 warning 不阻断安装 —— 但必须点名是第几行（静默少几张图最难查）', () => {
+    const notes = validatePackOrThrow({
+      ...minimalPack(),
+      remoteAssets: [
+        { name: '测试角色甲', url: 'https://example.invalid/a.png' },
+        { name: '测试角色乙' }, // 缺 url
+        '不是对象',
+      ],
+    });
+    expect(errorNotes(notes)).toEqual([]);
+    const warnings = notes.filter((n) => n.code === 'bad-remote-asset-row');
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0].text).toContain('remoteAssets[1]');
+    expect(warnings[1].text).toContain('remoteAssets[2]');
+  });
+
   // ── creative_workshop 分区拒绝（D8）──
 
   it('worldBooks 含 creative_workshop 分区书 → workshop-partition-rejected (error)', () => {

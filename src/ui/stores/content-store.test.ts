@@ -62,6 +62,7 @@ describe('content-store — 注册表（D16 八面同步读取）', () => {
       'markers',
       'namePools',
       'randomEvents',
+      'remoteAssets',
     ]);
   });
 
@@ -76,6 +77,7 @@ describe('content-store — 注册表（D16 八面同步读取）', () => {
       imageDialects: { dialects: [] },
       mapPack: { version: 'test-map', tiles: [] },
       randomEvents: { defs: [] },
+      remoteAssets: [],
     };
     setContentRegistry(next);
     const r = getContentRegistry();
@@ -94,6 +96,7 @@ describe('content-store — 注册表（D16 八面同步读取）', () => {
       imageDialects: 'filled',
       mapPack: 'filled',
       randomEvents: 'filled',
+      remoteAssets: 'filled',
     });
     seedPlaceholderRegistry();
     const r = getContentRegistry();
