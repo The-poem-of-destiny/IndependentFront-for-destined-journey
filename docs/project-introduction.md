@@ -247,10 +247,10 @@ npm run gates        # 一键跑齐 CI 的全部闸门（类型 / 格式 / lint 
 | [known-issue.md](./known-issue.md)                                                           | 已知缺陷（有现象、有根因分析）                  |
 | [design.md](./design.md)                                                                     | 前端 UI 设计规范                                |
 | [combat-system-architecture-v3.md](./reference/combat-system-architecture-v3.md)             | 战斗 v3 内核架构                                |
-| [phase7e/game_page_design.md](./phases/phase7e/game_page_design.md)                          | 游戏页设计规划                                  |
+| [phase7e/game_page_design.md](./archive/phases/phase7e/game_page_design.md)                  | 游戏页设计规划（已归档）                        |
 | [phase8_plan.md](./phases/phase8/phase8_plan.md)                                             | Agent 上下文可见性模型                          |
 | [effect_script_system.md](./reference/effect_script_system.md)                               | 词条效果 & 脚本系统架构                         |
-| [status_page_architecture.md](./reference/status_page_architecture.md)                       | 状态栏页面架构                                  |
+| [status_page_architecture.md](./archive/reference/status_page_architecture.md)               | 状态栏页面架构（已归档）                        |
 | [agent_system_prompt_guide.md](./reference/agent_system_prompt_guide.md)                     | Agent System Prompt 配置流程                    |
 | [worldbook-ejs-regex-authoring-guide.md](./reference/worldbook-ejs-regex-authoring-guide.md) | 世界书 EJS 与输出美化正则创作者规范             |
 | [story_preset_format.md](./reference/story_preset_format.md)                                 | Story Agent 预设编写指南                        |

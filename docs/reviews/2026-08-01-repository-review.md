@@ -475,7 +475,7 @@ If the endpoints remain:
 - [`vite.config.ts`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/vite.config.ts)
 - [`src/sillytavern/worldbook-loader.ts`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/src/sillytavern/worldbook-loader.ts)
 - [`src/ui/stores/settings-store.ts`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/src/ui/stores/settings-store.ts)
-- [`docs/planning/2026-07-30-bff-api-refactor-plan.md`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/docs/planning/2026-07-30-bff-api-refactor-plan.md)
+- [`docs/archive/planning/2026-07-30-bff-api-refactor-plan.md`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/docs/archive/planning/2026-07-30-bff-api-refactor-plan.md)
 
 ### Evidence
 
@@ -979,7 +979,7 @@ Then verify:
 - [Repository governance plan](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/docs/planning/2026-07-31-repo-management.md)
 - [Previous comprehensive review](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/docs/reviews/2026-07-27-comprehensive-repository-review.md)
 - [Prior security/data-integrity remediation](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/commit/d1852867f97fb9dff1068072ca3f13fb43ae299e)
-- [Production BFF plan](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/docs/planning/2026-07-30-bff-api-refactor-plan.md)
+- [Production BFF plan](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/docs/archive/planning/2026-07-30-bff-api-refactor-plan.md)
 
 ---
 

@@ -333,8 +333,9 @@ IndependentFront-for-destined-journey（命定之诗独立前端）是一个独�
 - [CLAUDE.md](../CLAUDE.md) — Claude Code 薄壳（`@AGENTS.md` 导入正文 + skills/workflows 用法）
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — 完整软件+世界观架构
 - [CHANGELOG.md](./CHANGELOG.md) — **开发进度与逐 Phase 交付记录的现行归属地**
-  （原先此处指的 `planning/progress.md` 仍在仓库里，但只记到 2026-06 早期 Phase，已停止维护，不要当现状读）
-- [task_plan.md](./planning/task_plan.md) — 9 Phase 实施计划（成文期计划，阶段编号已不对应现状）
+  （原先此处指的 `progress.md` 仍在仓库里，已归档为 `docs/archive/planning/progress.md`，
+  但只记到 2026-06 早期 Phase，已停止维护，不要当现状读）
+- [task_plan.md](./archive/planning/task_plan.md) — 9 Phase 实施计划（已归档；成文期计划，阶段编号已不对应现状）
 - [phase8_plan.md](./phases/phase8/phase8_plan.md) — Agent 上下文可见性 & Prompt 体系
 - [effect_script_system.md](./reference/effect_script_system.md) — 词条效果 & 脚本系统架构
 - `world_book_index.md` — 世界书条目索引（605 条目）。🔴 **已随内容分离移入私有内容仓

@@ -11,7 +11,7 @@
 
 ### 全仓审查 P0/P1/P2 四项结构性重构（提交级缓存 / 快照拆表 / 分层收口 / BFF 路由单源）｜ ✅ 已实施（2026-08-17）
 
-**来源**：`docs/planning/2026-08-16-full-repo-review.md`（10 维 101 条已验证发现）里排在最前的四条**需要动结构**的项——与同日那波「低风险小修 21 条」互补，这一波是那份报告里被判为「改动大、要单独立案」的部分。
+**来源**：`docs/reviews/2026-08-16-full-repo-review.md`（10 维 101 条已验证发现）里排在最前的四条**需要动结构**的项——与同日那波「低风险小修 21 条」互补，这一波是那份报告里被判为「改动大、要单独立案」的部分。
 
 **改动清单（按项）**：
 
@@ -68,7 +68,7 @@
 
 ### 全仓审查低风险小修一波（代码 8 + 配置 4 + 文档 9）｜ ✅ 已实施（2026-08-17）
 
-**来源**：`docs/planning/2026-08-16-full-repo-review.md`（10 维 101 条已验证发现）里筛出的「无需设计决策 + 改动小 + 低风险」子集，21 条落地 20 条（1 条部分落地）。
+**来源**：`docs/reviews/2026-08-16-full-repo-review.md`（10 维 101 条已验证发现）里筛出的「无需设计决策 + 改动小 + 低风险」子集，21 条落地 20 条（1 条部分落地）。
 
 **改动清单（按组）**：
 
@@ -394,7 +394,7 @@ ADR-11 补课：此前 `level`/`tier` 只有 AI 经 `update_character` 一条改
 - **分配入口**：新模块 `src/sillytavern/attribute-allocation.ts` 的 `allocateAttributePoint(saveId, charName, attr)` —— 校验点数 > 0 与层级上限，经 `commitChatState`（ADR-21 唯一写入口）提交 delta patch `{attributes:{[attr]:1}, freeAttrPoints:-1}`；patch 刻意不含 `level`/`tier`，分配永不触发自动发放。
 - **UI**：`StatusOverview.vue` 属性区在 `freeAttrPoints > 0` 时出「自由点 N」徽章 + 每维「+」按钮（达层级上限禁用带 tooltip，层级配置未知不禁用）；单飞请求防最后一点双花；失败走既有 toast。`game-store.allocateAttrPoint` 成功后 `refreshFromDb()` 回读。
 
-测试：state-manager +8 条 / attribute-allocation 新建 7 条 / game-store +5 条 / StatusOverview.attrpoints 新建 7 条。全量 7369 passed / 9 skipped，tsc、vue-tsc、eslint 全绿。真机走查未做。交接文档：`docs/planning/2026-08-10-level-attr-points-handoff.md`。
+测试：state-manager +8 条 / attribute-allocation 新建 7 条 / game-store +5 条 / StatusOverview.attrpoints 新建 7 条。全量 7369 passed / 9 skipped，tsc、vue-tsc、eslint 全绿。真机走查未做。交接文档：`docs/archive/planning/2026-08-10-level-attr-points-handoff.md`。
 
 ### 战斗 Agent 会话模式改造 ｜ ✅ 7397 tests 全绿，待真机（2026-08-09）
 
@@ -465,7 +465,7 @@ ADR-11 补课：此前 `level`/`tier` 只有 AI 经 `update_character` 一条改
 
 以已打磨的青花瓷与血色玻璃窗为结构基准，完成羊皮纸、翡翠、月白、极光、星仪、青铜、夜樱与深海八套游戏页主题。根因修复不是逐分辨率补丁：各个实时 DOM 区域统一拥有自己的边框和接缝，背景素材只作为区域内等比裁切的纹理或装饰，不再让带框 16:9 大图与响应式 UI 争夺边界。翡翠版本移除非等比拉伸；极光左右栏恢复真实半透明磨砂；所有主题的输入区、导航栏、叙事区和状态栏接缝均收进所属布局区域。
 
-验证覆盖 `1440×900`、`1920×1080`、`2560×1440`、`3840×2160`、`1680×1050`、`3440×1440` 六档视口，八主题共 48 组几何审计全部通过；另走查输入聚焦、导航收起、装备分页与展开条目，浏览器控制台无 warning/error。新增主题表面归属回归测试 11 条；全套验证为 286 个测试文件、7336 passed / 9 skipped，TypeScript、Vue typecheck、lint 与 production build 全绿。视觉证据和逐轮差异记录见 `design-qa.md`，方向裁定见 `docs/planning/2026-08-08-selected-theme-directions.md`。
+验证覆盖 `1440×900`、`1920×1080`、`2560×1440`、`3840×2160`、`1680×1050`、`3440×1440` 六档视口，八主题共 48 组几何审计全部通过；另走查输入聚焦、导航收起、装备分页与展开条目，浏览器控制台无 warning/error。新增主题表面归属回归测试 11 条；全套验证为 286 个测试文件、7336 passed / 9 skipped，TypeScript、Vue typecheck、lint 与 production build 全绿。视觉证据和逐轮差异记录见 `docs/archive/design-qa.md`，方向裁定见 `docs/planning/2026-08-08-selected-theme-directions.md`。
 
 > > > > > > > origin/master
 
@@ -1166,7 +1166,7 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 
 ### 词条效果贯穿链路修复 S4 — prompt 模板 + 失败品链路 + Skill 落库补字段 ｜ ✅ 完成（2026-08-01）
 
-实施计划: `docs/planning/2026-08-01-item-gen-combat-link-plan.md` §3 S4；待办追踪: `docs/planning/combat-v3-fix-backlog.md`。S1-S3 打通 modifiers/automaton 代码链路后，S4 补齐 AI 侧模板 + 失败体验 + 技能生产加值落库（问题 2 + S2-2 收口）。
+实施计划: `docs/archive/planning/2026-08-01-item-gen-combat-link-plan.md` §3 S4；待办追踪: `docs/archive/planning/combat-v3-fix-backlog.md`。S1-S3 打通 modifiers/automaton 代码链路后，S4 补齐 AI 侧模板 + 失败体验 + 技能生产加值落库（问题 2 + S2-2 收口）。
 
 **S4a Skill 落库补 modifiers（收 S2-2 技能生产加值）:**
 
@@ -1197,7 +1197,7 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 
 ### 词条效果贯穿链路修复 S3 — `<automaton>` DSL 自由效果进 v3 战斗 ｜ ✅ 完成（2026-08-01）
 
-实施计划: `docs/planning/2026-08-01-item-gen-combat-link-plan.md` §3；待办追踪: `docs/planning/combat-v3-fix-backlog.md`。S1/S2 打通 modifiers 链路后，S3 让 AI 产的自由效果 DSL automaton（`<automaton>` JSON）走通「解析 → 落库 → 编译 → 战斗生效」全链路（问题 1）。
+实施计划: `docs/archive/planning/2026-08-01-item-gen-combat-link-plan.md` §3；待办追踪: `docs/archive/planning/combat-v3-fix-backlog.md`。S1/S2 打通 modifiers 链路后，S3 让 AI 产的自由效果 DSL automaton（`<automaton>` JSON）走通「解析 → 落库 → 编译 → 战斗生效」全链路（问题 1）。
 
 **解析**：
 
@@ -1214,7 +1214,7 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 
 ### 词条效果贯穿链路修复 S1+S2 — 物品/技能介入制造 + 落库链路 ｜ ✅ 完成（2026-08-01）
 
-实施计划: `docs/planning/2026-08-01-item-gen-combat-link-plan.md`；待办追踪: `docs/planning/combat-v3-fix-backlog.md`。M5 退役 v2 后排查发现，item_gen 生成的装备词条（modifiers）在 v3 战斗/制造里没生效。本批修正向链路（落库丢 modifiers）+ 反向链路（物品/技能介入制造）。
+实施计划: `docs/archive/planning/2026-08-01-item-gen-combat-link-plan.md`；待办追踪: `docs/archive/planning/combat-v3-fix-backlog.md`。M5 退役 v2 后排查发现，item_gen 生成的装备词条（modifiers）在 v3 战斗/制造里没生效。本批修正向链路（落库丢 modifiers）+ 反向链路（物品/技能介入制造）。
 
 **S1 正向链路闭环（applyAddItem 落库补收 3 字段）:**
 
@@ -1233,7 +1233,7 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 
 ### 战斗 v3 M5 — 收尾：默认翻 v3 + 退役 v2 + 文档同步 ｜ ✅ 完成（2026-08-01）
 
-架构真源: `docs/reference/combat-system-architecture-v3.md`（§十四 引擎边界 / §十五 模块迁移映射表）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §8。把 v3 从「可选引擎」翻转为「默认引擎」，退役 v2 战斗运行时。**战斗 v3 全里程碑（M0→M5）收尾**。
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§十四 引擎边界 / §十五 模块迁移映射表）；实施计划: `docs/archive/planning/2026-07-31-combat-v3-implementation-plan.md` §8。把 v3 从「可选引擎」翻转为「默认引擎」，退役 v2 战斗运行时。**战斗 v3 全里程碑（M0→M5）收尾**。
 
 **PR1（翻默认 + 文档，不删代码，观察一版本周期）:**
 
@@ -1253,7 +1253,7 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 
 ### 战斗 v3 M4 — 压力测试：7 场 fixture 全绿 + RuleKey 补全 + divinity 泛化 + eventHash 冻结 ｜ ✅ 完成（2026-08-01）
 
-架构真源: `docs/reference/combat-system-architecture-v3.md`（§八 closed RuleKey 与 divinity 压制 / §九 反射专项 R1-R8 / §十三 DomainEvent）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §7。这是**最重的一个里程碑**——机制层（4 RuleKey + divinity 泛化）+ 窗口接线层（修 M3 真实缺口）+ replay harness 升级 + 7 场 fixture 端到端 + eventHash 冻结。
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§八 closed RuleKey 与 divinity 压制 / §九 反射专项 R1-R8 / §十三 DomainEvent）；实施计划: `docs/archive/planning/2026-07-31-combat-v3-implementation-plan.md` §7。这是**最重的一个里程碑**——机制层（4 RuleKey + divinity 泛化）+ 窗口接线层（修 M3 真实缺口）+ replay harness 升级 + 7 场 fixture 端到端 + eventHash 冻结。
 
 **机制层（A4-3/A4-4）:**
 
@@ -1296,7 +1296,7 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 
 ### 战斗 v3 M3.5 — 开放性出口：CharGenRequest + BoundedAdjudication + prompt 改写 ｜ ✅ 完成（2026-08-01）
 
-架构真源: `docs/reference/combat-system-architecture-v3.md`（§十 char_gen 战斗中调用 / §十一 BoundedAdjudication 有界裁决）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §6。把 v3 内核从「封闭战斗」打开——召唤走 char_gen（CharGenRequest），创意效果走有界裁决（BoundedAdjudication），并改写 `combat_v3` / `item_gen` / `char_gen` 三个 prompt。
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§十 char_gen 战斗中调用 / §十一 BoundedAdjudication 有界裁决）；实施计划: `docs/archive/planning/2026-07-31-combat-v3-implementation-plan.md` §6。把 v3 内核从「封闭战斗」打开——召唤走 char_gen（CharGenRequest），创意效果走有界裁决（BoundedAdjudication），并改写 `combat_v3` / `item_gen` / `char_gen` 三个 prompt。
 
 **新建 3 文件:**
 
@@ -1324,7 +1324,7 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 
 ### 战斗 v3 M3 — 效果系统：DSL + 编译链 + windows 实装 + damage.preview ｜ ✅ 完成（2026-08-01）
 
-架构真源: `docs/reference/combat-system-architecture-v3.md`（§五 ReactionWindow / §六 EffectIntent / §七 EffectAutomaton DSL + 编译链 / §九 反射专项）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §5。把「效果」从 v2 的任意 JS 脚本（`new Function` 执行）翻转为**声明式 automaton + 封闭微文法表达式**，`windows.ts` 从空转变实装。**战斗内全链路零 `new Function` / `eval`**（铁律 2，C1 战斗内消解）。
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§五 ReactionWindow / §六 EffectIntent / §七 EffectAutomaton DSL + 编译链 / §九 反射专项）；实施计划: `docs/archive/planning/2026-07-31-combat-v3-implementation-plan.md` §5。把「效果」从 v2 的任意 JS 脚本（`new Function` 执行）翻转为**声明式 automaton + 封闭微文法表达式**，`windows.ts` 从空转变实装。**战斗内全链路零 `new Function` / `eval`**（铁律 2，C1 战斗内消解）。
 
 **新建 `combat-v3/automata/` 子目录 + 2 文件:**
 
@@ -1349,7 +1349,7 @@ Worker 不需要：interrupt 在主线程就能掐死死循环，宿主能力调
 
 ### 战斗 v3 M2 — 接线：Coordinator + feature flag + 双投影 + 前端桥 ｜ ✅ 完成（2026-08-01）
 
-架构真源: `docs/reference/combat-system-architecture-v3.md`（§十三 双投影 / §十四 引擎边界 + Coordinator + feature flag + 四态 UI / §十二 FP 协议）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §4。把 M1 的内核骨架接到真实业务路径：Coordinator 驱动完整战斗循环、feature flag 整场切换、投影 A（UI）/B（Agent 文本面板）、前端 Command 桥。v2 路径一行未删（flag 默认 `'v2'`）。
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§十三 双投影 / §十四 引擎边界 + Coordinator + feature flag + 四态 UI / §十二 FP 协议）；实施计划: `docs/archive/planning/2026-07-31-combat-v3-implementation-plan.md` §4。把 M1 的内核骨架接到真实业务路径：Coordinator 驱动完整战斗循环、feature flag 整场切换、投影 A（UI）/B（Agent 文本面板）、前端 Command 桥。v2 路径一行未删（flag 默认 `'v2'`）。
 
 **新建文件（`combat-v3/`）:**
 
@@ -1478,7 +1478,7 @@ worker 托管的工坊页 `cloudflare/src/pages/home/*`（~2100 行字符串拼�
 
 ### 工坊 P3 — 社交面：Discord 登录 + 点赞 + 订阅 ｜ ✅ 完成 待真机（2026-08-01）
 
-设计真源: `docs/planning/2026-08-01-workshop-social-design.md`（D18–D25，接续工坊 D 编号）。上游后端源码已取得（github.com/AkabaneSaki/myrepo，`cloudflare/src/`），全部契约**直接读自源码**并以 file:line 落进设计文档附录——判决：会话是 Bearer JWT（零 Cookie），CORS `ACAO:*` 放行 `Authorization`，**直连 REST 成立**，附录 B iframe 桥永久搁置（D18）。
+设计真源: `docs/archive/planning/2026-08-01-workshop-social-design.md`（D18–D25，接续工坊 D 编号）。上游后端源码已取得（github.com/AkabaneSaki/myrepo，`cloudflare/src/`），全部契约**直接读自源码**并以 file:line 落进设计文档附录——判决：会话是 Bearer JWT（零 Cookie），CORS `ACAO:*` 放行 `Authorization`，**直连 REST 成立**，附录 B iframe 桥永久搁置（D18）。
 
 **引擎/客户端层（P3b）:**
 
@@ -1494,7 +1494,7 @@ worker 托管的工坊页 `cloudflare/src/pages/home/*`（~2100 行字符串拼�
 
 ### 战斗 v3 M1 — 内核骨架：状态机 + 行动槽 + 原子提交 + 唯一终局 ｜ ✅ 完成（2026-08-01）
 
-架构真源: `docs/reference/combat-system-architecture-v3.md`（§二 核心控制模型 / §三 CombatState 与原子提交 / §十三 DomainEvent）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §3。M0 的地基（分通道骰带 + replay harness）之上，把 v2 的「Agent 主持流程」翻转为「代码内核主持流程」的**内核骨架**——所有变更走 `CombatSession.dispatch(command)` 单一入口，v2 代码仍不删（flag 默认 `'v2'`）。
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§二 核心控制模型 / §三 CombatState 与原子提交 / §十三 DomainEvent）；实施计划: `docs/archive/planning/2026-07-31-combat-v3-implementation-plan.md` §3。M0 的地基（分通道骰带 + replay harness）之上，把 v2 的「Agent 主持流程」翻转为「代码内核主持流程」的**内核骨架**——所有变更走 `CombatSession.dispatch(command)` 单一入口，v2 代码仍不删（flag 默认 `'v2'`）。
 
 **新建内核文件（全部在 `combat-v3/`）:**
 
@@ -1519,7 +1519,7 @@ worker 托管的工坊页 `cloudflare/src/pages/home/*`（~2100 行字符串拼�
 
 ### 战斗 v3 M0 — 地基：分通道骰带 + replay harness + 纯函数签名改造 ｜ ✅ 完成（2026-08-01）
 
-架构真源: `docs/reference/combat-system-architecture-v3.md`（§四 DiceTape / §1.4 五处代码修正）；实施计划: `docs/planning/2026-07-31-combat-v3-implementation-plan.md` §2。把 v2 的「Agent 主持流程」翻转为「代码内核主持流程」的地基——所有新代码落 `src/sillytavern/combat-v3/`（deep module，唯一公共出口 `index.ts` 留待 M1），v2 代码 M5 前一行不删，靠 feature flag 整场切换。
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§四 DiceTape / §1.4 五处代码修正）；实施计划: `docs/archive/planning/2026-07-31-combat-v3-implementation-plan.md` §2。把 v2 的「Agent 主持流程」翻转为「代码内核主持流程」的地基——所有新代码落 `src/sillytavern/combat-v3/`（deep module，唯一公共出口 `index.ts` 留待 M1），v2 代码 M5 前一行不删，靠 feature flag 整场切换。
 
 **新建 `combat-v3/` deep module:**
 
@@ -1543,7 +1543,7 @@ worker 托管的工坊页 `cloudflare/src/pages/home/*`（~2100 行字符串拼�
 
 ### 工坊 P2 — EJS 沙盒 + 只读 stats 投影（ADR-30）｜ ✅ 待真机（2026-07-31）
 
-设计: `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`（v1.2 拷问定稿，五轮）；实施计划: `docs/planning/2026-07-31-workshop-phase2-implementation-plan.md`（波次 T1-T6）。世界书条目正文的 EJS 从「原样进上下文」变成「**提示装配期求值**」。
+设计: `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`（v1.2 拷问定稿，五轮）；实施计划: `docs/archive/planning/2026-07-31-workshop-phase2-implementation-plan.md`（波次 T1-T6）。世界书条目正文的 EJS 从「原样进上下文」变成「**提示装配期求值**」。
 
 **两轴契约**（自主设计，不承诺 MVU/酒馆助手兼容，上游函数名仅作别名层）: `stats` 是**只读**面，纯代码推导数值（主角资源/等级/五维/命运点数/`世界.时间` = `formatGameTime` 规范串）；`vars` 是**与 AI 共写**的叙事变量空间（= `variables.sys` 草稿），EJS 与 AI 双写同一棵树，**冲突 AI 赢**。
 
@@ -1563,7 +1563,7 @@ worker 托管的工坊页 `cloudflare/src/pages/home/*`（~2100 行字符串拼�
 
 ### 工坊 P1 — 创意工坊（= Phase 7f） ｜ ✅ 真机走查已过（2026-07-31）
 
-设计: `docs/planning/2026-07-31-creative-workshop-compat-design.md`（v2，D1-D17）；实施计划: `docs/planning/2026-07-31-workshop-phase0-1-implementation-plan.md`。上游是【命定之诗】创意工坊（角色卡内嵌酒馆助手脚本 + Cloudflare Worker 后端），本引擎**不嵌 iframe、不跑上游 JS**，只直连其公开 REST。
+设计: `docs/planning/2026-07-31-creative-workshop-compat-design.md`（v2，D1-D17）；实施计划: `docs/archive/planning/2026-07-31-workshop-phase0-1-implementation-plan.md`。上游是【命定之诗】创意工坊（角色卡内嵌酒馆助手脚本 + Cloudflare Worker 后端），本引擎**不嵌 iframe、不跑上游 JS**，只直连其公开 REST。
 
 **新分区 `creative_workshop`**（`WorldBookPartition` 第 16 个成员）。**所有工坊条目一律归此分区**，无论上游标成系统/角色/事件/DLC —— 分区在本引擎是**信任域边界**，不是内容学分类；上游 `tags` 仅作展示与筛选，不参与判定。除分区外工坊条目与其它条目完全一视同仁（同表、同启用机制、同样可编辑、同样进备份），无门禁无特判。
 
@@ -1655,7 +1655,7 @@ worker 托管的工坊页 `cloudflare/src/pages/home/*`（~2100 行字符串拼�
 
 ### 战斗 v2 — 战斗系统架构 v2 重构 ｜ ✅ M5 完成，待 M6 真机
 
-战斗系统架构 v2 重构（管道+中间件+同构契约+6 大类效果对齐 #265160+buff 规则对齐 [状态规则]+19 event+Combat Agent+独立战斗面板+计算分工）。魔改不照抄世界书，趣味优先+代码兜底。架构: `docs/reference/combat-system-architecture.md`；计划: `docs/planning/2026-07-28-combat-system-v2-plan.md`。M1-M6 六批次，§十三 待确认清单已全收口。
+战斗系统架构 v2 重构（管道+中间件+同构契约+6 大类效果对齐 #265160+buff 规则对齐 [状态规则]+19 event+Combat Agent+独立战斗面板+计算分工）。魔改不照抄世界书，趣味优先+代码兜底。架构: `docs/reference/combat-system-architecture.md`；计划: `docs/archive/planning/2026-07-28-combat-system-v2-plan.md`。M1-M6 六批次，§十三 待确认清单已全收口。
 
 - **M1 ✅**（emitChain + script-registry，130 tests）
 - **M2 ✅**（modifier 6 大类 + buff 去重，~140 tests）
@@ -1703,7 +1703,7 @@ debug loop 5 轮修复: 物品/角色零落库根因链（AI 输出 JSON 形状�
 
 说明书: `docs/reference/audio_system.md`（← 改音频必读）。audio-channels.ts（MusicChannel 音序器 + SfxChannel 声池，69 tests）+ audio-manager.ts（音轨库注册表/主音量/手势解锁/playByTag AI 钩子，54 tests）+ audio-fakes.ts 测试替身 + Dexie 三表（audioTracks/audioBlobs/audioPlaylists，全局非存档级，排除于 FullBackup）+ types.ts 7 类型 + audio-singleton.ts/audio-store.ts 桥接 + AudioSection.vue/MiniPlayer.vue。v1 不做远程 URL 音源/解码缓存/真交叉淡入；**SFX 基建完备但刻意无触发方**；`public/audio/manifest.json` 内置库刻意空载（授权未清）。
 
-**本地音乐文件夹增补 (2026-07-27)**: audio-folder.ts（File System Access 唯一接触点，27 tests）+ Dexie v12 audioHandles 表（持久化目录句柄）+ AudioSourceKind 增 `'file'`。三后端并存；权限不跨浏览器重启需每会话一次手势；扫描永不删行。**引擎零改动**——整个新存储后端由既有 loadBlob 注入缝吸收。增补: `docs/planning/2026-07-27-audio-local-files-addendum.md`
+**本地音乐文件夹增补 (2026-07-27)**: audio-folder.ts（File System Access 唯一接触点，27 tests）+ Dexie v12 audioHandles 表（持久化目录句柄）+ AudioSourceKind 增 `'file'`。三后端并存；权限不跨浏览器重启需每会话一次手势；扫描永不删行。**引擎零改动**——整个新存储后端由既有 loadBlob 注入缝吸收。增补: `docs/archive/planning/2026-07-27-audio-local-files-addendum.md`
 
 **按名称寻址 + 名称唯一性**: audio-names.ts（normalizeAudioName 四步归一化 / findByName 稳定取最早 / isNameTaken + uniqueAudioName，40 tests）。导入路径自动编号永不失败、手动录入拒绝重名；约束仅作用于新写入，存量重名不动。
 
@@ -1719,11 +1719,11 @@ debug loop 5 轮修复: 物品/角色零落库根因链（AI 输出 JSON 形状�
 
 ### 10k — 快照面板 + 右键回退重发 ｜ ✅ 待真机验证
 
-左侧 SideToolbar「快照」按钮（SnapshotPanel 历史快照恢复）+ 最新 AI 消息右键「回退本轮/复制」（回退 = restoreSnapshot 上一轮 + 回填本轮输入 → 重发即重生成 / 编辑重发）+ Snapshot 阶梯保留（trimSnapshots tiered: 最近 5 全留 + 旧层 4/8/10 稀疏，非 turn 档受保护）+ restoreSnapshot 增强（plotEvents 捕获 + 覆写 / memories 清理 / totalTurns 对齐）+ 设置「快照保留模式」可配置（pipeline 搭桥同步 AppSettings）。计划: `docs/planning/2026-07-23-snapshot-rollback-plan.md`
+左侧 SideToolbar「快照」按钮（SnapshotPanel 历史快照恢复）+ 最新 AI 消息右键「回退本轮/复制」（回退 = restoreSnapshot 上一轮 + 回填本轮输入 → 重发即重生成 / 编辑重发）+ Snapshot 阶梯保留（trimSnapshots tiered: 最近 5 全留 + 旧层 4/8/10 稀疏，非 turn 档受保护）+ restoreSnapshot 增强（plotEvents 捕获 + 覆写 / memories 清理 / totalTurns 对齐）+ 设置「快照保留模式」可配置（pipeline 搭桥同步 AppSettings）。计划: `docs/archive/planning/2026-07-23-snapshot-rollback-plan.md`
 
 ### 10j — 剧情系统接线 ｜ ✅ 待真机验证
 
-9 断点收口 + 三 Agent systemPrompt 重写（含雷点注入 + 修改模式）。计划: `docs/planning/2026-07-19-plot-system-plan.md`；大纲仅捏人页生成（main + side），游戏内零生成，演化归 post_check.outlineChanges；plotYearlyGeneration 退役。
+9 断点收口 + 三 Agent systemPrompt 重写（含雷点注入 + 修改模式）。计划: `docs/archive/planning/2026-07-19-plot-system-plan.md`；大纲仅捏人页生成（main + side），游戏内零生成，演化归 post_check.outlineChanges；plotYearlyGeneration 退役。
 
 ### 10i — 输出美化规则库 ｜ ✅
 
@@ -1929,6 +1929,203 @@ leave 阶段），Chrome 扩展未连接。视觉与动画观感待真机确认�
 ## 历史速览
 
 已完成且稳定的旧 Phase（1-9、10a-g、6x、Geography、Audit Fix）细节由 `docs/phases/` 各计划文档 + git log 承载，不再在此处展开。状态见 `AGENTS.md`「当前进度」速览表。
+
+---
+
+## 早期日更片段归档（2026-07-12/13/23/24，2026-08-18 并入）
+
+这四份片段曾散在 `docs/planning/`，先于本文件「单一 append-only 详录」约定；原文并入于此，原件已删。
+
+### 2026-07-12 — 游戏页 ScenePanel 视觉打磨 + 三段式重构
+
+**背景**
+
+主人指出游戏页左侧 `ScenePanel` 三个问题：与顶栏时间职责重复、底部太空、在场 NPC 太简陋。经一轮 Explore + Plan 双 agent 实证后定下**三段式架构**。
+
+**完成**
+
+- **TopBar 做减法**：去除时间职责（与左侧 ScenePanel 重复），改为「首页 / 存档名 / 全屏」极简窗口控制条。
+- **ScenePanel 三段式重构**（宽度 190 → 240px，外层不滚交给内层）：
+  - **上段**：时间 + 位置 + 天气合并区。时间视觉升级为 7 档时段图标（凌晨/早晨/中午/傍晚…）+ 氛围色 glow + 纪元标题字字重层级。
+  - **中段**：在场 NPC 可滚动列表。每行升级为 hash 色首字母头像（28px）+ 名字 + tier 徽章（品质色描边），**点击单选展开心声气泡**，`scrollIntoView` 跟随。
+  - **下段**：世界消息（新闻）。未读红点 + 相对时间（刚刚/N分钟前/今天 HH:MM/昨天/M-D）+ 点击展开全文。
+- **game-store 补 4 项能力**：`latestVariables`（最新变量快照）/ `news`（带坏数据守护）/ `getThoughts()`（心里话三路径兼容 + customFields 回退）/ `hydratePreview`（预览注入 action）。
+- **顺带修一个现存 bug**：`CharacterListPanel` 心里话卡片 `v-if="customFields?.thoughts"` 在真存档下恒 false，改用 `game.getThoughts()` 双路径读取让它真正可见。
+- **新建两个纯函数工具件**（各带单测，共 33 测试）：
+  - `utils/name-color.ts` — DJB2 hash → 品质色池，`nameColorVar` + `initialsOf`（与 AvatarPanel 强一致）。
+  - `utils/time-format.ts` — 相对时间 `formatRel`，便于后续 MemoryPanel/QuestsPanel 复用。
+- **test-fixtures 扩展**：`Ctrl+Shift+T` 预览注入可看到三段式全量数据（3 NPC + 2 新闻 + 末条 `variablesAfter` 演示心里话路径 A）。
+
+**数据真相（本轮关键认知）**
+
+"心里话"是项目核心设计的一环，存于两条路径 —— 运行时流变的 `chat.variablesAfter.stat_data['关系列表'][角色名].心里话`（路径 A，由 vars_update 写）和存档固化的 `CharacterState.customFields.thoughts`（路径 B）。本轮发现 **`src/` 里没有任何环节写入 `variablesAfter`**，故路径 A 在生产中恒 null；本轮接通 **路径 B 让中段真正可见**，路径 A 仅预埋三路径 fallback，等引擎层接 vars_update 后启用。验收不得将"看不到路径 A"当 bug。
+
+**验收**
+
+- `npm run typecheck`：本次涉及文件 0 新增错误（项目预存 TS error 与本任务无关）。
+- `npm run test:run`：64 文件 / 2574 测试全绿（含本轮新增 33 工具件测试）。
+
+**提交**：分支 `feat/scenepanel-three-section` 已 push 到 origin。
+
+### 2026-07-13 — 全流程打通 Phase 1：基础设施 + 创角页改造
+
+今天完成了「验证游戏全流程可行性」工作的一半，聚焦在数据库基础设施升级和捏人页面改造。
+
+**数据库 v8**〔注：此处 v8 为当日口径，现行 `DB_VERSION` 已推进至 v22，见本文件顶部条目〕
+
+新增 `messages` 表用于独立于 ChatSession 保存对话历史，支持 `saveId` 索引隔离不同存档、`[saveId+turn]` 复合索引按轮次排序。扩展了 `ChatMessage` 类型（新增 `saveId`/`turn` 字段）、`SaveSlot.metadata`（新增 `enabledWorldBookEntries`/`openingPrompt`/`openingPromptConsumed` 字段），并在 `Snapshot` 预留了 `messageIds` 字段供后续快照系统使用。消息持久化采用只存原始 AI 输出、加载时按需 beautify 的策略 —— 正则管道处理百条消息在微秒级，无需缓存 HTML。
+
+**创角页改造**
+
+**命运核心**不再使用硬编码列表，改为从 `system_core` 世界书条目动态加载，以紧凑单选列表展示，点击展开可查看内容摘要，选中后详情卡片显示在列表上方，支持取消重选。
+
+**角色启用**为新增步骤（第 3 步），从 `character` 世界书条目加载所有角色卡，以多选网格展示，支持勾选/取消，底部显示已选计数。选中的世界书条目以 `partition:uid` 格式写入存档 metadata，游戏加载时按此列表过滤 Agent 可见的世界书上下文。
+
+**基础信息**新增四个自由文本字段：性格、身材、身世、补充，使用可拉伸的 textarea 输入，内容注入 CharacterState.customFields 和开场提示词。
+
+**装备选择**移除了下方开局/背景区域。
+
+**背景故事**新增独立的自定义背景 textarea，始终可见，与预设背景择一使用。
+
+**角色预设** Modal UI 革新，改为可展开的卡片式列表 —— 点击卡片头查看全字段详情（姓名/种族/身份/性格/身材/装备/技能等），逐项保存/加载/导出/导入。
+
+**统计数据**
+
+- 新增 1 个文件，修改 10 个文件
+- 64 个测试文件 / 2582 个测试用例全部通过
+- Build 零错误
+
+**下一步**：Plan 3（GamePipeline 桥接层 + GamePage 接入引擎）和 Plan 4（端到端集成验证）。
+
+### 2026-07-23 — 缓存 token 统计 + 输出美化修复 + 崩溃修复
+
+**缓存 token 统计（DebugPanel）**
+
+DebugPanel 新增「本轮缓存 token 汇总」：命中 / 未命中 / 输出 token（排除记忆召回），每条 Agent 日志也独立显示这三项 + 耗时。方便直观评估 DeepSeek prompt cache 效率。
+
+- `types.ts`：`AgentResult` + `DebugAgentEntry` 新增 `cacheHitTokens` / `cacheMissTokens` / `completionTokens`
+- `agent-client.ts`：`chat` / `chatWithTools` / `chatStream` 解析 DeepSeek `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` / `completion_tokens`；**流式请求补 `stream_options.include_usage`**（否则流式末尾 chunk 不返回 usage）
+- `agent-orchestrator.ts`：流式 `onComplete` 透传三字段（**此前 story 走流式恒 0/0/0**）
+- `game-pipeline.ts` / `game-store.ts` / `DebugPanel.vue`：链路透传 + 汇总展示
+
+**输出美化修复（两个 bug）**
+
+**bug1：开局正则不生效，要去设置转一圈才好**
+
+预设规则加载原绑死在 `BeautifierSection.onMounted`，`s.beautifierPresetRules` 默认空，要打开「设置→输出美化」才填充。提到 `settings-store` 启动初始化（世界书加载后），游戏页一进来就有规则。
+
+**bug2：自动管理全亮 + autoEnable 信号源错误**
+
+根因两层：
+
+- **数据层**：`beautifier-rules.json` 18 条规则挂了 `worldBookIds:["system_core"]`，核心书因含变量系统等默认 enabled 条目而恒活跃，`resolveAutoEnable` 的 OR 逻辑短路、绕过精确 uid 匹配 → 全 locked。删除该字段（uid 本就全对，保留）。
+- **信号源**（更深）：autoEnable 原以「worldBooks 条目 enabled」为信号，但那是「是否注入 prompt」的开关（核心书 480 条目几乎全 enabled），**不等于「这局选了哪个命定核心」**。命定核心是存档级单选，存于 `save.metadata.enabledWorldBookEntries`（`system_core:413` 格式）。改为以此为信号源：
+  - `beautifier.ts`：`collectActiveWorldBookSignals(books)` → `collectActiveSignalsFromEntries(entries)`
+  - 设置页 + 游戏页都按存档命定核心 uid 判断，只有玩家本局选的核心（如妲丽安 413）对应的美化才激活
+
+**AgentStatusPanel 崩溃修复**
+
+`AgentStatusPanel.vue:42` 的 `game.agentStatus.label` 在 `isGenerating=true` 但 `agentStatus=null`（**Agent 切换间隙**：上一个 clear、下一个还没 update）时崩溃。给当前 Agent 行加 `v-if="game.agentStatus"`，间隙时整行不渲染（面板仍可显示已完成的 history）。
+
+**统计**
+
+- 修改 12 个文件，新增 1 个 changelog
+- typecheck 0 错误
+
+### 2026-07-24 — 回退机制 + Story 稳定性 + 角色状态口径修复
+
+本日更新主要围绕三条线展开：一是新增快照/回退/重发能力，二是修复 Story Agent 上下文与正文输出稳定性，三是将角色资源公式和「在场」判定口径对齐世界书与真实游戏语义。
+
+**快照面板 + 右键回退重发**
+
+新增一套完整的回退机制，覆盖重新生成、编辑重发、历史回退三类需求。
+
+- `SnapshotPanel.vue`：左侧工具栏新增「快照」入口，可查看历史保存点并恢复到任意快照。
+- `ChatFlow.vue`：最新 AI 消息支持右键菜单：
+  - 「回退本轮」：恢复到上一轮快照，并把本轮玩家输入回填到输入框。
+  - 「复制」：复制当前 AI 消息正文。
+- `game-store.ts`：新增 `rollbackOneTurn()`，串联输入捕获、快照恢复、输入回填与状态刷新。
+- `state-manager.ts`：`createSnapshot()` 捕获 `plotEvents`；`restoreSnapshot()` 支持恢复剧情事件、清理快照时间之后的记忆、同步 `totalTurns`。
+- `database.ts`：`trimSnapshots()` 支持保留模式：
+  - `tiered`：最近 5 轮全留，旧快照按 4/8/10 回合阶梯稀疏保留，非 turn 档受保护。
+  - `dense`：每轮都留。
+- `SettingsPage.vue` / `settings-store.ts` / `game-pipeline.ts`：设置页新增「快照保留模式」，并在每轮管线运行前同步到数据库设置。
+
+相关测试覆盖数据库快照裁剪、状态恢复、回退本轮等关键路径。
+
+**Story 预设占位符修复 + 缓存命中优化**
+
+修复 Story Agent 走 SillyTavern 预设路径时，预设内部系统占位符不递归解析的问题。
+
+此前 `story` 是唯一通过 `assemblePresetContent()` 组装 `SYS_PROMPT` 的 Agent。预设内部的 `{{LORE_BOOK}}`、`{{CHARACTER_STATE}}`、`{{NARRATIVE}}`、`{{USER_INPUT}}`、`{{AGENT.MEMORY_RECALL}}` 等占位符会裸奔成字面文本，导致 Story 实际拿不到玩家输入、角色状态、世界书、记忆等关键上下文。
+
+本次修复：
+
+- `agent-templates.ts`：Story 分支在组装预设后检测系统占位符，并预跑 `resolveTemplateWithGlobals()`，将预设内部占位符就地渲染成真实数据。
+- Story 默认 template 简化为 `{{SYS_PROMPT}}`，避免「预设内部 + template 追加」重复注入。
+- 保留无预设、预设无系统占位符、自定义 template 三种场景的原有兜底行为。
+- 修复动态记忆区块位置导致的大段 prompt cache miss：避免每轮记忆变化打断 25 万字世界书之后的缓存命中。
+
+回归测试验证：规范预设路径占位符不裸奔，用户输入只出现一次。
+
+**Story 正文救援兜底**
+
+新增 `story-rescue.ts`，兜底修复两类真机中出现的 AI 输出缺陷：
+
+1. **正文吞进 reasoning**：`raw` 为空，但 reasoning 里存在最后一个 `<maintext>` 正文。
+2. **思维链泄漏到正文**：`raw` 非空但在 `<maintext>` 前混入前导思维链。
+
+实现要点：
+
+- `rescueStoryOutput()` 只对 `story` Agent 生效。
+- raw 空门控：只救坏轮，避免误处理正常输出。
+- 取最后一个 `<maintext>`：避开 reasoning 前部对格式的说明性提及。
+- 注入点在 `agent-orchestrator.ts` 的 `callAgent` 末尾，流式与非流式结果都覆盖最终 `AgentResult`。
+- 局限：只修最终结果，不重写流式增量内容。
+
+新增 11 个单元测试覆盖正文提取、防误判与 story 守卫。
+
+**角色资源公式对齐世界书**
+
+修复 NPC 与捏人预览的 HP / MP / SP 计算公式，统一对齐世界书 `[角色生成]` 与 `[核心数值表]`。
+
+- `tier-constants.ts`：废弃旧的 `calcHP()` / `calcMP()` / `calcSP()` 死公式，新增统一 `calcResources(tier, attrs)`：
+  - HP = 体 × 100 × hpMul + 五维和
+  - MP = (智 + 精) × 50 × mpMul
+  - SP = (力 + 敏) × 50 × mpMul
+- `char-gen-agent.ts`：NPC 生成改用 `calcResources()`，并补 `expToNext = tierConfig.expCap`。
+- `create-store.ts`：捏人预览切换到 `calcResources()`，补中文属性键到英文键的映射。
+- 示例修正：妲丽安 T3 资源从 HP 24 / MP 54 / SP 60 修正为 HP 2442 / MP 5700 / SP 5100，`expToNext` 从 100 修正为 4000。
+
+相关测试覆盖公式、创角预览、角色生成、上下文模板与战斗引用路径。
+
+**`location` / `present` 语义拆分**
+
+拆分「角色所在地点」与「角色是否在场」两个概念，解决用 `location` 前缀匹配判断在场导致的显示错误。
+
+- `types.ts`：`CharacterState` 新增 `present: boolean`，默认 `true`。
+- `state-manager.ts`：`UPDATE_CHAR_WHITELIST` 允许 AI 写入 `present`。
+- `char-query.ts`：新增 `isPresent()`；`getPresentCharacters()` 改为严格判断 `present === true`，不再依赖 `location` 前缀；`summarizeChar()` 显示 `[在场/离场]`。
+- `ScenePanel.vue` / `CharacterListPanel.vue`：前端统一按 `present === true` 展示在场角色。
+- `char-gen-agent.ts`：新生成 NPC 从上下文继承玩家 `location`，并默认 `present: true`。
+- `agent-config.json`：`vars_update` systemPrompt 补充 `present` 字段说明，进场写 `true`，离场写 `false`。
+- `docs/superpowers/specs/2026-07-16-data-field-conventions-design.md`：补充 `present` 字段规范。
+
+**网页品牌与图标**
+
+- `index.html`：页面标题从 `IndependentFront for Destined Journey` 改为「命定之诗与黄昏之歌」。
+- `public/favicon.png`：新增 256×256 favicon，并配置 `rel=icon` 与 `apple-touch-icon`。
+
+**配置与仓库维护**
+
+- `.claude/agents/code-writer.md`：新增项目专用 `code-writer` 自定义 subagent 定义。
+- `.gitignore`：忽略 `tmp/` 新文件、`tests/realtime_export/*.json`、`tests/realtime_export/log.txt` 等真机调试导出；历史已追踪脚本保留。
+- `agent-config.json`：用户手动调整 6 处 `setvar` 词汇条目，细化词汇表配置。
+
+**验证状态**
+
+- Story 预设占位符修复：`typecheck` 0 错误，全量测试 2911/2912 通过，1 个预存 `SelectableCard` CSS 失败与本改动无关。
+- 角色资源与在场字段修复：2917/2919 通过，2 个预存失败无关（`game-store` 剧情 flaky + `SelectableCard` CSS 主题化）。
 
 ---
 

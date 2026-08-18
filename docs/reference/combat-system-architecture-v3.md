@@ -1,10 +1,10 @@
 # 战斗系统架构（Combat System Architecture）v3
 
-> 📌 **文档定位**：战斗 v3 的**正式架构真源**。取代 [`docs/planning/2026-07-30-combat-kernel-v3-proposal.md`](../planning/2026-07-30-combat-kernel-v3-proposal.md) 的骨架级提案，整合 [压测 + 补丁 RFC](../planning/2026-07-31-combat-v3-real-sample-stress-test-rfc.md) §5/§6 全部补丁、[架构交接地图](../planning/2026-07-31-combat-v3-architecture-handoff.md) §3/§4 边界结论，以及 2026-07-31 主人拍板的 D1–D6 决策。
+> 📌 **文档定位**：战斗 v3 的**正式架构真源**。取代 [`docs/archive/planning/2026-07-30-combat-kernel-v3-proposal.md`](../archive/planning/2026-07-30-combat-kernel-v3-proposal.md) 的骨架级提案，整合压测 + 补丁 RFC（`2026-07-31-combat-v3-real-sample-stress-test-rfc.md`，已移入私有内容仓 `fated_poem_independent_assets/docs/planning/`，公开仓侧不可见）§5/§6 全部补丁、[架构交接地图](../archive/planning/2026-07-31-combat-v3-architecture-handoff.md) §3/§4 边界结论，以及 2026-07-31 主人拍板的 D1–D6 决策。
 >
 > ⚠️ **与 v2 的关系**：本文档**不重复** [`combat-system-architecture.md`](./combat-system-architecture.md)（v2 真源）已定义的纯计算规则。8 步伤害管线、6 大效果类别、意图层级、命中评级、战意阈值、核心数值表**原样保留**，本文只标注它们在 v3 中的调用位置与修正点，具体公式请回查 v2 对应章节。
 >
-> 🔗 **关联文档**：[v2 架构](./combat-system-architecture.md) · [v2 审查报告](../planning/2026-07-30-combat-event-system-review.md) · [压测 RFC](../planning/2026-07-31-combat-v3-real-sample-stress-test-rfc.md) · [5 场脑测案例集](../planning/2026-07-31-combat-v3-stress-test/) · [统一效果系统框架 ADR-29](../planning/unified-effect-system-framework.md) · [effect_script_system.md](./effect_script_system.md)
+> 🔗 **关联文档**：[v2 架构](./combat-system-architecture.md) · [v2 审查报告](../archive/planning/2026-07-30-combat-event-system-review.md) · 压测 RFC + 5 场脑测案例集（`2026-07-31-combat-v3-real-sample-stress-test-rfc.md` / `2026-07-31-combat-v3-stress-test/`，已移入私有内容仓 `fated_poem_independent_assets/docs/planning/`，公开仓侧不可见） · [统一效果系统框架 ADR-29](../planning/unified-effect-system-framework.md) · [effect_script_system.md](./effect_script_system.md)
 
 > 🎭 **定位纠偏（2026-08-12，读全文前必看）**：本文初稿（2026-07-31）成文时，战斗 Agent（`combat_v3`）
 > 被设计成**敌方专属决策器**——只在敌方单位轮次被叫到，玩家轮次完全绕过它。2026-08-12 的改造把它
@@ -1263,12 +1263,12 @@ async function submitCombatCommand(command: CombatCommand): Promise<void>;
 | 文档 | 贡献 |
 |------|------|
 | [`combat-system-architecture.md`](./combat-system-architecture.md) | v2 真源：全部保留的纯计算规则与数值表 |
-| [`2026-07-30-combat-event-system-review.md`](../planning/2026-07-30-combat-event-system-review.md) | 7 Critical / 15 Major / 9 Minor 断点清单，v3 的问题定义 |
-| [`2026-07-30-combat-kernel-v3-proposal.md`](../planning/2026-07-30-combat-kernel-v3-proposal.md) | 控制模型 / EffectIntent 词汇 / 5 不变量 / 状态机 / 迁移映射（骨架） |
-| [`reference/战斗架构设计参考.txt`](../../reference/战斗架构设计参考.txt) | 接口词汇：CombatEngine / CombatSession / CombatTransition / RequiredInput / CombatProvenance / ResolutionFrame / 效果事务顺序 / 否决项 |
-| [`2026-07-31-combat-v3-real-sample-stress-test-rfc.md`](../planning/2026-07-31-combat-v3-real-sample-stress-test-rfc.md) | §5 补丁详案（schema / `damage.preview` / closed RuleKey / FP 协议 / DiceTape 分通道）+ §6 反射专项 |
-| [`2026-07-31-combat-v3-architecture-handoff.md`](../planning/2026-07-31-combat-v3-architecture-handoff.md) | §3 迁移映射表、§4 前后端边界图 |
-| [`2026-07-31-combat-v3-stress-test/`](../planning/2026-07-31-combat-v3-stress-test/) | 5 场脑测案例集：EffectAutomaton 伪代码 / Command 序列 / 时间线 / 卡点实证 |
+| [`2026-07-30-combat-event-system-review.md`](../archive/planning/2026-07-30-combat-event-system-review.md) | 7 Critical / 15 Major / 9 Minor 断点清单，v3 的问题定义 |
+| [`2026-07-30-combat-kernel-v3-proposal.md`](../archive/planning/2026-07-30-combat-kernel-v3-proposal.md) | 控制模型 / EffectIntent 词汇 / 5 不变量 / 状态机 / 迁移映射（骨架） |
+| `reference/战斗架构设计参考.txt`（已移入私有内容仓，公开仓侧不可见） | 接口词汇：CombatEngine / CombatSession / CombatTransition / RequiredInput / CombatProvenance / ResolutionFrame / 效果事务顺序 / 否决项 |
+| `2026-07-31-combat-v3-real-sample-stress-test-rfc.md`（已移入私有内容仓 `fated_poem_independent_assets/docs/planning/`，公开仓侧不可见） | §5 补丁详案（schema / `damage.preview` / closed RuleKey / FP 协议 / DiceTape 分通道）+ §6 反射专项 |
+| [`2026-07-31-combat-v3-architecture-handoff.md`](../archive/planning/2026-07-31-combat-v3-architecture-handoff.md) | §3 迁移映射表、§4 前后端边界图 |
+| `2026-07-31-combat-v3-stress-test/`（已移入私有内容仓 `fated_poem_independent_assets/docs/planning/`，公开仓侧不可见） | 5 场脑测案例集：EffectAutomaton 伪代码 / Command 序列 / 时间线 / 卡点实证 |
 | [`unified-effect-system-framework.md`](../planning/unified-effect-system-framework.md) | ADR-29 统一效果框架：求值排序、在场过滤、错误隔离、modifier 非第二套系统 |
 
 ### 17.3 战斗样本

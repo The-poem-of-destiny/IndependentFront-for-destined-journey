@@ -1,6 +1,6 @@
 # 物品/技能/装备 详情弹窗 · 轻量摘要设计 v1.0
 
-> 📅 2026-08-02 · 对应 `docs/planning/combat-v3-fix-backlog.md` 最后一项
+> 📅 2026-08-02 · 对应 `docs/archive/planning/combat-v3-fix-backlog.md` 最后一项
 > 「前端 ItemsPanel 缺 modifiers 展示」
 >
 > **一句话**：点击物品/技能/装备后，在 ItemsPanel 右侧详情面板内展示**人读的轻量摘要**

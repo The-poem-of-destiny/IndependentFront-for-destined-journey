@@ -87,7 +87,7 @@ EffectRuntime.execute(effects)
 **永远进不去**，`childEffects` 恒为空数组。
 
 这不是「暂时没人用」，是**这个功能从来没有实现过**。首次记录于
-`docs/planning/2026-07-30-combat-event-system-review.md` 的 **N6**。
+`docs/archive/planning/2026-07-30-combat-event-system-review.md` 的 **N6**。
 
 🔴 写文档 / 写 AI 提示词时**不要把连锁效果当成可用能力**。需要「效果触发效果」时，现有的两条真路是：
 事件链（`$event.emit` → EventBus → 订阅者脚本）与脚本内直接 `$call` / `$status.add` 套娃。

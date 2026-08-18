@@ -1,6 +1,14 @@
 # Phase 8: Agent 上下文可见性 & Prompt 体系
 
-> 基于 `docs/planning/task_plan.md` Phase 8 章节
+> ⚠️ **标签已过时（2026-08-18 标注）**：Phase 8 早已交付（根 `AGENTS.md` 进度表 ✅）。
+> 本文的**Agent 清单（11 个）与提示装配描述已被现状取代** —— 现在是 **13 个 Agent**
+> （多出 `combat_v3` 与 `image_prompt`），提示装配走 `placeholder-registry.ts` 的占位符注册表
+> 与预设系统，不是本文描述的那套。
+> **现行入口**：[`docs/reference/agent_system_prompt_guide.md`](../../reference/agent_system_prompt_guide.md)
+> 与 [`src/sillytavern/AGENTS.md`](../../../src/sillytavern/AGENTS.md)。
+> 本文保留为**设计决策记录**（每个 Agent「应看到什么/不应看到什么」的判断依据仍然有参考价值）。
+
+> 基于 `docs/archive/planning/task_plan.md` Phase 8 章节
 >
 > 日期：2026-06-19
 

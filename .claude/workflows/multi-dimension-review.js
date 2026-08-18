@@ -13,7 +13,7 @@ export const meta = {
     { title: '验证', detail: '对抗性验证每个发现' },
     { title: '报告', detail: '综合报告' },
   ],
-}
+};
 
 // 四个审查维度，每维度不同侧重点
 const DIMENSIONS = [
@@ -41,7 +41,7 @@ const DIMENSIONS = [
     - 新类型是否都在 types.ts 中（而非散落各模块）
     - 是否遵循三层架构（DB → Engine → Store）
     - 是否有循环依赖风险
-    - API 是否与 docs/planning/findings.md 的 ADR 一致
+    - API 是否与根 AGENTS.md 的「设计约定」（ADR-11..32）一致（findings.md 已归档至 docs/archive/planning/findings.md）
     - 扩展点是否预留（角色可插拔、Agent 可配置）`,
   },
   {
@@ -53,20 +53,19 @@ const DIMENSIONS = [
     - v3 → v4 数据库迁移是否正确
     - 浏览器环境 API 使用是否正确（IndexedDB/fetch/DOM）`,
   },
-]
+];
 
 // 待审查的文件（从 args 或默认审查所有 .ts）
-const FILES = args || ['src/sillytavern/']
-const TARGET = Array.isArray(FILES) ? FILES.join(' ') : FILES
+const FILES = args || ['src/sillytavern/'];
+const TARGET = Array.isArray(FILES) ? FILES.join(' ') : FILES;
 
-phase('审查')
+phase('审查');
 
 // 每个维度审查所有文件
-const findings = await pipeline(
-  DIMENSIONS,
-  (dim) => agent(
-    `${dim.prompt}\n\n审查目标：${TARGET}`,
-    { label: `审查:${dim.key}`, schema: {
+const findings = await pipeline(DIMENSIONS, (dim) =>
+  agent(`${dim.prompt}\n\n审查目标：${TARGET}`, {
+    label: `审查:${dim.key}`,
+    schema: {
       type: 'object',
       properties: {
         findings: {
@@ -84,51 +83,52 @@ const findings = await pipeline(
           },
         },
       },
-    }}
-  )
-)
+    },
+  }),
+);
 
-phase('验证')
+phase('验证');
 
 // 对抗性验证：对每个 finding 派一个验证 agent
-const allFindings = findings.filter(Boolean).flatMap(f => f.findings || [])
+const allFindings = findings.filter(Boolean).flatMap((f) => f.findings || []);
 const verified = await pipeline(
   allFindings,
-  (f) => agent(
-    `对抗性验证这个发现——尝试证伪它：
+  (f) =>
+    agent(
+      `对抗性验证这个发现——尝试证伪它：
     ${JSON.stringify(f)}
     如果这个发现不成立（误报），返回 { isReal: false, reason: "..." }
     如果确实成立，返回 { isReal: true, confirmed: true }`,
-    {
-      label: `验证:${f.file}:${f.line}`,
-      schema: {
-        type: 'object',
-        properties: {
-          isReal: { type: 'boolean' },
-          reason: { type: 'string' },
+      {
+        label: `验证:${f.file}:${f.line}`,
+        schema: {
+          type: 'object',
+          properties: {
+            isReal: { type: 'boolean' },
+            reason: { type: 'string' },
+          },
+          required: ['isReal'],
         },
-        required: ['isReal'],
       },
-    }
-  ),
-  (result, original) => ({ ...original, verdict: result })
-)
+    ),
+  (result, original) => ({ ...original, verdict: result }),
+);
 
-phase('报告')
+phase('报告');
 
-const real = verified.filter(Boolean).filter(v => v.verdict?.isReal)
-const critical = real.filter(v => v.severity === 'critical')
-const major = real.filter(v => v.severity === 'major')
-const minor = real.filter(v => v.severity === 'minor')
+const real = verified.filter(Boolean).filter((v) => v.verdict?.isReal);
+const critical = real.filter((v) => v.severity === 'critical');
+const major = real.filter((v) => v.severity === 'major');
+const minor = real.filter((v) => v.severity === 'minor');
 
 log(`审查结果：
   🔴 Critical: ${critical.length}
   🟡 Major: ${major.length}
   🟢 Minor: ${minor.length}
-  误报（已排除）: ${allFindings.length - real.length}`)
+  误报（已排除）: ${allFindings.length - real.length}`);
 
 return {
   confirmed: real,
   summary: { critical: critical.length, major: major.length, minor: minor.length },
   dismissed: allFindings.length - real.length,
-}
+};

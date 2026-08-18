@@ -92,42 +92,42 @@ node -e "const fs=require('fs');const f=process.argv[1];const s=fs.readFileSync(
 ```bash
 docs/
 ├── fated-poem-engine-prd.md     # 🆕 项目 PRD（产品需求文档，必读）
-├── ARCHITECTURE.md              # 完整软件+世界观架构
-│                                #    ⚠️ 「软件架构」部分内容截止 2026-06，已过期（见文件头横幅）；
-│                                #    结构性判断以本文件 + 两份分册为准。世界观部分仍有效
+├── ARCHITECTURE.md              # 现行软件架构总览（2026-08-18 重写，只写层与层之间的形状）
+│                                #    + 世界观架构。一层内部的模块清单归两份分册，不在这里重复；
+│                                #    2026-06 旧版归档于 archive/ARCHITECTURE-2026-06.md
 ├── CHANGELOG.md                 # 🆕 变更记录（近期 Phase 详细记录，append-only）
 ├── known-issue.md               # 🆕 已知缺陷（有现象、有根因分析的那种）← TODO.md 指定的缺陷归属地
 ├── project-introduction.md      # 项目介绍（对外说明用）
 ├── design.md                    # 前端设计规范（详见下节「前端 UI 设计规范（必读）」）
-├── reviews/                     # 历次代码审查存档（6 份，含修复状态闭环表）
+├── archive/                     # 🆕 已归档历史文档（价值已交付的 plan/RFC/handoff 与被新版取代的旧文档）
+│                                #    按原路径镜像（docs/planning/X → docs/archive/planning/X）；
+│                                #    详见 archive/README.md。归档件只作历史脉络参考，别当现行约定
+├── reviews/                     # 历次代码审查存档（7 份，含修复状态闭环表）
 ├── superpowers/specs/           # 数据字段规范 + 实体字段审计（详见下节「游戏数据字段规范（必读）」）
-├── planning/                    # 会话追踪（task_plan / findings / progress）
-├── phases/                      # Phase 计划
-│   ├── phase4_plan.md           # Phase 4 记忆系统 & 剧情规划
-│   ├── phase7/                  # Phase 7 前端 UI 总体规格
+├── planning/                    # 现行设计文档 + 在办计划（已交付的 plan/RFC/handoff 见 archive/planning/）
+├── phases/                      # Phase 计划（仅存仍在用的两个阶段，其余已归档）
 │   ├── phase7d/                 # Phase 7d 捏人页架构/现状/差距分析
-│   ├── phase7e/                 # Phase 7e 游戏页
-│   │   └── game_page_design.md  # 游戏页设计规划 + 引擎支撑审计（7e 必读）
 │   └── phase8/                  # Phase 8 Agent 上下文可见性
 │       └── phase8_plan.md       # Agent 可见性模型 + 世界书分区 + 预设系统
 ├── reference/                   # 参考文档
-│   ├── status_page_architecture.md     # 状态栏页面架构（7e 必读）
 │   ├── effect_script_system.md         # 词条效果 & 脚本系统架构（引擎必读）
 │   ├── combat-system-architecture-v3.md
 │   │                                   # 🆕 战斗系统架构 v3（战斗相关必读 —— 现行真源）
 │   ├── combat-system-architecture.md   # 战斗系统架构 v2 —— **已退役（2026-08-01）**；只剩
 │   │                                   #    §四/§五/§八/§九（效果系统 / Buff 状态 / 8 步伤害管线 /
 │   │                                   #    核心数值）这些纯计算公式仍被 v3 引用，作公式参考
-│   ├── combat-agent-api.md             # 战斗 Agent↔引擎 接口规格 —— **已退役（v2 专用）**；现行
-│   │                                   #    combat_v3 契约散在三处：`agent-config.json`（`combat_v3`
-│   │                                   #    条目）+ `src/sillytavern/agent-tools.ts`（AGENT_TOOL_MAP）
-│   │                                   #    + `combat-v3/projection-agent.ts`（引擎→Agent 数据包）
+│   │                                   #    🔴 v2 的 combat-agent-api.md 已归档到 archive/reference/；
+│   │                                   #      现行 combat_v3 契约散在三处：`agent-config.json`
+│   │                                   #      （`combat_v3` 条目）+ `src/sillytavern/agent-tools.ts`
+│   │                                   #      （AGENT_TOOL_MAP）+ `combat-v3/projection-agent.ts`
 │   ├── agent_system_prompt_guide.md    # 🆕 Agent System Prompt 配置流程（架构/步骤/踩坑/检查清单）
+│   ├── agent_template_guide.md         # Agent 占位符模板系统修改指南（改占位符/解析链路先查这份）
 │   ├── debug-loop-handbook.md          # 🆕 游玩→导出→分析→修复 调试循环操作手册（每次发现 bug 必读）
 │   ├── audio_system.md                 # 🆕 音频系统 v1.0 说明书 ← 改音频必读
 │   ├── worldbook-ejs-regex-authoring-guide.md
 │   │                                   # 🆕 世界书 EJS + 输出美化正则创作者规范（作者入口）
 │   ├── story_preset_format.md           # 🆕 Story Agent 预设编写指南（输出标签顺序 + 占位符排列 + 可用宏）
+│   ├── system_card_spec.md             # 系统事件卡片视觉规格（写 `components/game/cards/*.vue` 时参照）
 │   ├── dev-bat-notes.md                # 🆕 dev.bat 说明书 ← **改启动器前必读**
 │                                       #    ①注释必须纯 ASCII（chcp 65001 让 cmd 字节偏移解析器错位，
 │                                       #      注释片段会被**当命令执行**）
@@ -208,7 +208,7 @@ docs/design.md  # 完整前端设计规范（排版/间距/组件/装饰/动画/
 - `docs/design.md` — **排版 / 间距 / 组件 / token 基线，唯一硬规范（必读）**。写 UI 代码前看这份。
 - 根目录 `DESIGN.md` — **主题视觉方向 + 已批准的主题识别决策记录**（英文）。里面的数值是首轮迭代默认值、
   不是铁律：主人反馈、主题识别、文字可读性与实际渲染结果一律优先于它。
-- 根目录 `design-qa.md` — **主题实施后的 QA 证据存档**（逐次走查记录，按日期追加，将归档）。
+- `docs/archive/design-qa.md` — **主题实施后的 QA 证据存档**（逐次走查记录，按日期追加；2026-08-18 已归档）。
   它记的是「那一次走查的结果」，不是任何人要遵循的约定。
 
 ## 游戏数据字段规范（必读）

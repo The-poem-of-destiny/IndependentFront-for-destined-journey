@@ -378,8 +378,8 @@ interface Snapshot {
 
 ## 第 15 章 音频资源 AudioTrack / AudioBlobRecord / AudioPlaylist / AudioHandleRecord
 
-> 新增于 2026-07-26（音频系统 v1）。设计原文见 `docs/planning/2026-07-26-audio-system-design.md`。
-> 增补于 2026-07-27（本地音乐文件夹）：`docs/planning/2026-07-27-audio-local-files-addendum.md`。
+> 新增于 2026-07-26（音频系统 v1）。设计原文见 `docs/archive/planning/2026-07-26-audio-system-design.md`。
+> 增补于 2026-07-27（本地音乐文件夹）：`docs/archive/planning/2026-07-27-audio-local-files-addendum.md`。
 > **定位**: 这是 **UI / 资源实体**，不是游戏状态——它既不进 StatePatch，也不是存档状态。
 > 因此它不受"逻辑键 = 名字"（铁律 1）约束，仍用 id 作主键；而这与铁律 3「**AI 永不产 id**」
 > 并不冲突: AI 侧唯一的寻址方式是**标签**（`playByTag(tag)`），AI 从头到尾看不到也写不出音轨 id。
