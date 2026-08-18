@@ -15,7 +15,29 @@
 ```
 src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL 状态驱动）
 ├── main.ts                          ← 应用入口（createApp + Pinia + 主题 + 音频手势解锁监听）
-├── App.vue                          ← 根组件（<router-view> + Toast + 界面级场景配乐 watch + 音频/素材库 init）
+├── App.vue                          ← 根组件 = **视图状态机 + Toast + 启动链**
+│                                       🔴 **全应用没有 vue-router**（别照旧文档去找 `<router-view>`）：
+│                                          `viewComponent` 是对 `ui.currentView` 的 computed switch，
+│                                          模板里一个 `<component :is>` + `<transition>` 渲染五个
+│                                          `defineAsyncComponent`（Home/Create/Game/Settings/Workshop）。
+│                                          「懒加载」是当年 router 留下的形状，路由本身已经不在了 ——
+│                                          `useRouter()` / `$route` 一个都没有，加回来等于新引入一套
+│                                          与 `ui.currentView` 并行的真源
+│                                       两个 watch：界面级场景配乐（`queryForView`，见 lib/view-audio.ts）
+│                                       + 减少动态效果（**必须 `immediate`** —— 设置从 localStorage
+│                                       水合回来不触发变更回调，少了它，开着该选项的用户重启后会先看
+│                                       完整一轮动画）
+│                                       启动链（全部 `void` + `catch`，任何一条都不许拦住启动）：
+│                                       `settings.initApiSecrets()` /
+│                                       `worldbooks.init() → workshop.init() → assets.syncRemoteAssets()`
+│                                       —— **这三步的顺序是契约**：远程素材的声明有一半住在世界书条目
+│                                       正文里（含工坊装进来的书），所以必须排在那两步之后；这里只是
+│                                       踢一脚，真正的前置等待在 `syncRemoteAssets()` 内部（设置页的
+│                                       「立即同步」不经过这条链，门只能在 action 里）
+│                                       / `beautifier.init()` / `audio.init()` / `assets.init()`
+│                                       —— 后两个刻意在**这里**而不是各自的设置分区：曲库与素材库要在
+│                                       游戏页与捏人页渲染，而那两处都不经过设置页（此前只在
+│                                       AssetSection.onMounted 里 init，症状是「导入过的头像不显示」）
 ├── env.d.ts
 │
 ├── composables/
@@ -40,6 +62,17 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      `?v=` 回源 + 取图 fetch `no-cache` 验新兜底 ——
 │   │                                      只堵内存层时，换包重建仍会拿浏览器缓存的旧像素
 │   ├── useHoverPopup.ts             ← 悬停浮层唯一实现（读 settings.hoverDelayMs）
+│   ├── usePresets.ts                ← 正文 Agent 预设（ChatPreset）的共享响应式状态 + Dexie 持久化
+│   │                                   🔴 Dexie `presets` 表是**唯一真源**：此前预设同时写 Dexie 与
+│   │                                      `settings.presets` 镜像、UI 全读镜像 —— 装包写 Dexie、
+│   │                                      UI 读镜像 = **装了看不见**。别把第二份镜像加回来
+│   │                                   🔴 `presetsRef` 是**模块级单例**：挪进函数体会让 PresetManager
+│   │                                      与 AgentConfigPanel 各持一份，`saveAsDefault` 写完另一边看不到。
+│   │                                      `activePresetId` 仍留在 settings-store（D22：settings 只留它）
+│   ├── useBeautify.ts               ← [工坊正则] 美化管线（从 ChatFlow.vue 抽出，CombatMessageFlow 复用）：
+│   │                                   按当前存档合并预设规则与用户规则，交给统一 narrative renderer 编译。
+│   │                                   autoEnable 解析与 BeautifierSection **同口径** ——
+│   │                                   绑的是**启用的世界书条目 uid**，不是角色名
 │   ├── useAssetImage.ts             ← [素材] 渲染缝：(name,type?) → {url,isVideo,row}，世代号守卫 + 引用计数索引
 │   │                                   `options.variant` 指定表情/差分（与 name/type 同属"要解析什么"，
 │   │                                   故收 getter）—— 位置参数已被注入缝占了，在 options 包**后面**
@@ -57,7 +90,19 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │                                       🔴 请求形状里**没有** source / quotaConfirmed 字段，所以
 │                                          「顺手给自动档开个绕过口」在这一层是类型错误，不是代码审查
 │
-├── lib/                             ← 前端↔引擎桥接层
+├── lib/                             ← 前端侧的**非组件模块**（纯逻辑 / 唯一 I/O 面 / 注入缝装配）
+│                                       🔴 **别把它读成「前端↔引擎的桥接层」** —— 那是意图不是现状：
+│                                          实测（2026-08-18）`src/ui` 下有 **134 个非测试文件**直接
+│                                          `import '@engine/*'`，其中只有 **19 个**住在本目录，
+│                                          另外 115 个是 stores / components 自己直连引擎。
+│                                          「引擎只经 lib/ 触达」这条**没有任何闸门**，写代码时不要
+│                                          依赖它成立（比如「改引擎签名只要改 lib/」是错的）
+│                                       ✅ 真正被机器闸门钉死的是**引擎侧的单向规则**（根 AGENTS.md
+│                                          「分层方向只有一个：前端 → 引擎」）：`src/sillytavern/**` 禁止
+│                                          反向 import `../ui/*` / `@ui/*` / `vue` / `pinia`（type-only 也算），
+│                                          由 `eslint.config.js` 的 `no-restricted-imports` +
+│                                          `tests/layering-gate.test.ts` 两道闸守着。**前端往引擎的方向
+│                                          不受限**，所以本目录是「值得收口的东西的家」，不是必经之路
 │   ├── game-pipeline.ts             ← GamePipeline（AgentConfig 组装/上下文/编排器/回调）
 │   │                                   [图像 v1] +onSceneImage（照 onPlayAudio 的形状）
 │   │                                   🔴 **自动档绝不追溯开火**（D15）：这个回调只在编排器**刚产出**
@@ -157,8 +202,44 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── map-provinces-raster.ts      ← [地图 v1] 取图 + 解码那一步，**唯一**碰 canvas 的地方
 │   │                                   （组件测试 mock 它；jsdom 没有 2D 上下文）。永不抛：
 │   │                                   公开仓占位包**没有** provinces.png，404 是常态
-│   ├── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
-│   └── variables.css + 10 主题 CSS（parchment/obsidian/crimson/indigo/bronze/sakura/ivory/misty-lilac/forest/ocean）
+│   ├── remote-asset-sync.ts         ← [远程素材 v1 / 波 2] 镜像同步：**算清单**（纯函数
+│   │                                   `collectDesiredRemoteAssets` / `planRemoteAssetSync`）+
+│   │                                   **执行清单**（`runRemoteAssetSync`，本模块唯一的 I/O 面，
+│   │                                   fetch/落库/删除/哈希/时钟/发号全从 deps 交进来，故不挂 Pinia 可测）。
+│   │                                   调用方是 App.vue 启动链的 `assets.syncRemoteAssets()`
+│   │                                   🔴 **清单 100% 由本地算出**（本地世界书 + 已装内容包），网络只下字节
+│   │                                      —— 所以断网时「镜像删除」是安全的（清单根本不问网络）。
+│   │                                      一次下载失败**永远不许**删掉或降级任何已有行，只进 `failed` 逐条隔离
+│   │                                   🔴 **用户的行永远赢**：同一个 `(name,type,variant)` 位上坐着没有
+│   │                                      `remote` 戳的行（用户自己导的）时，远程声明让路，只计
+│   │                                      `skippedUserOwned`。少了这条，装一次包就能把玩家配的立绘悄悄换掉
+│   │                                   🔴 **只镜像自己那一半**：删除候选**仅限带 `remote` 戳的行**。
+│   │                                      少了这道过滤，「同步」会变成「把素材库删到只剩声明里那几张」
+│   ├── agent-activity.ts            ← 13 个 Agent 的**中文活动文案**（「书写此刻」「辨认后续事件」…）
+│   │                                   + AgentToolActivity 的展示层投影；TurnActivityLedger 消费
+│   ├── chat-depth.ts                ← ST 兼容的消息深度（zero-based，从末尾倒数）。
+│   │                                   🔴 只有 user/assistant 占槽位 —— 应用自造的 system 事件**不占**，
+│   │                                      否则深度与酒馆口径对不上
+│   ├── item-effects.ts              ← 效果词条归一化纯函数（ItemsPanel 消费）。真机 2026-08-02：
+│   │                                   item_gen 落库的 `effects` 有**三种形态**（对象 / `名:描述` 分号串 /
+│   │                                   数组），全部压成 `{ name → desc }`。类型定义只描述了其中一种
+│   ├── view-audio.ts                ← [Audio] 界面 → 场景配乐映射（纯函数，不碰 store 不播放；
+│   │                                   调用方是 App.vue 的 watch）。离开游戏页**不 stop 而是换场景** ——
+│   │                                   突然死寂比继续放更突兀，与「未命中时保持当前播放」同一条道理。
+│   │                                   游戏页/设置页/工坊返回空 query = 不动音乐
+│   ├── reduced-motion.ts            ← 「现在该不该动画」的唯一判定（系统 `prefers-reduced-motion`
+│   │                                   ∪ 应用内开关）。★读 DOM 的 `data-reduced-motion` 而**不是**
+│   │                                   import settings-store：本模块被组件直接调，走 store 会把纯查询
+│   │                                   变成对 Pinia 的依赖（单测就得摆 activePinia）
+│   ├── session-import-messages.ts   ← [存档互传] 单存档导入体检结果 → 中文告警行（纯函数，除类型零依赖）。
+│   │                                   它是「到底会缺什么」这句话的**唯一措辞来源**（散进模板 = 两个入口
+│   │                                   各说各的）；🔴 告警**不是错误**，缺内容照样导得进，语气一律陈述不阻拦
+│   └── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
+│
+├── themes/                          ← 🔴 主题 CSS **住在这里，不在 lib/**：
+│                                       variables.css + 10 主题
+│                                       （parchment/obsidian/crimson/indigo/bronze/sakura/
+│                                       ivory/misty-lilac/forest/ocean），由 main.ts 逐个 import
 │
 ├── stores/
 │   ├── theme-store.ts / ui-store.ts / create-store.ts / game-store.ts
@@ -195,9 +276,43 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      落一份覆盖会把今天的默认值永久钉死在这个档案上。
 │   │                                      `systemPrompt` 无法同步比较（方言 JSON 要 fetch），一律当覆盖搬
 │   │                                      —— 内容相同的覆盖无害（行为逐字节一致，只是多存一份）
-│   ├── agent-settings.ts            ← [Q-18] per-Agent 设置唯一读写口（get/patch/reset/fillMissing
-│   │                                   /listConfigured/updateAgentWorldBookIds）+ AGENT_SETTINGS_DEFAULTS
-│   │                                   （0.7/1.0/0/0/16384 全应用唯一出处，此前四文件六处拷贝）
+│   ├── agent-settings.ts            ← [Q-18 / 内容分离波 1 D44 v1.2] per-Agent 设置唯一读写口
+│   │                                   （`getAgentSettings` / `patchAgentSettings` /
+│   │                                   `resetAgentSettings` / `listConfiguredAgents` /
+│   │                                   `updateAgentWorldBookIds` + `applyProjectDefaultToAgent`
+│   │                                   + `fingerprintValue` / `migrateLegacyAgentOverrides`）
+│   │                                   🔴 **`fillMissingAgentSettings` 已删**（D44 大修）：那条「只填空位」
+│   │                                      的路径正是「新默认永远进不来」的根因，别照旧文档去找它
+│   │                                   🔴 **两层「覆写 ?? 默认」**：覆写层 = `settings.agents[agentId]`，
+│   │                                      只装**用户显式改过的 diff**；默认层 = pack `agentDefaults` >
+│   │                                      占位文件，由调用方从 content-store 解析后当 `defaultsLayer`
+│   │                                      参数传进来。boot 播种已删 —— 它把默认值抄进覆写层、看起来像
+│   │                                      用户改过，于是 pack 的新默认永远够不到那个 agent。
+│   │                                      合并只发生在**读取咽喉** `getAgentSettings`
+│   │                                   🔴 **生产路径必须传 `defaultsLayer`**：不传时退回纯覆写层 + 兜底
+│   │                                      （给测试的安全退化），而删播种后世界书/model/数值的唯一来源就是
+│   │                                      默认层 —— 漏传的症状是**全体 agent 静默失去世界书**，不报错。
+│   │                                      `listConfiguredAgents` / `updateAgentWorldBookIds` 同理迭代
+│   │                                      **解析名册**（默认层键 ∪ 覆写层键），否则覆写层为空时工坊装书
+│   │                                      会「授权给零个 agent」，用户看到的是「装了等于没装」
+│   │                                   🔴 `historyLayers` / `historySlice` **必须保持可缺省，`undefined`
+│   │                                      是承重的**：「键不存在」编码的是「让引擎按 Agent 类别决定」
+│   │                                      （story / 侧链等类别的引擎默认各不相同）。所以这两键
+│   │                                      **无第三层兜底**（两层都缺 → 返 `undefined`），且
+│   │                                      `patchAgentSettings` 收到 `undefined` 是**删键**而不是写入
+│   │                                      `undefined` —— 后者会让「键存在」成立，从而挡掉引擎默认
+│   │                                   🔴 `resetAgentSettings` / `applyProjectDefaultToAgent` 的语义是
+│   │                                      **清覆写层**（后者保留 `model` —— 用户选的 API 池不该被默认盖掉），
+│   │                                      不再是「把来源值抄进覆写层」
+│   │                                   + `AGENT_SETTINGS_DEFAULTS`（**第三层**硬兜底、全应用唯一出处：
+│   │                                   temperature 0.7 / topP 1.0 / freqPen 0 / presPen 0 /
+│   │                                   **maxTokens 65536**（2026-08-08 由 16384 上调，大纲 5×5 等重输出
+│   │                                   不再贴边）/ **maxRetries 3**（2026-08-16，AgentClient.chat|chatStream
+│   │                                   的循环上限，外部取消永不重试））
+│   │                                   一次性 **指纹迁移**（D44 修正 3）：`@engine/agent-defaults-fingerprints.json`
+│   │                                   逐 agent 逐字段 SHA-256，覆写层里命中历史默认指纹的键**删掉**，
+│   │                                   用户真改过的（指纹不匹配）保留。指纹不泄内容，首启在
+│   │                                   `loadAgentProjectDefaults` 之后跑一次
 │   ├── agent-settings-migration.ts  ← [Q-18] 12 张并行 map → `agents` 的一次性形状迁移。
 │   │                                   **不是**六步迁移那一类：同一个对象内重排、零跨存储、
 │   │                                   无标志位（旧键在不在就是信号）、在 `ref()` **之前**同步跑
@@ -207,6 +322,69 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── worldbook-migration.ts       ← [工坊 P0] localStorage→Dexie 六步迁移（标志位判定→单事务 bulkPut→逐本回读校验→过了才删源→失败一律不动可重试；dedupeIds 防同 id 静默合并）
 │   ├── beautifier-store.ts          ← [工坊 P0b] 美化规则 Dexie 唯一入口（内置预设走纯内存 ref，不持久化）
 │   ├── beautifier-migration.ts      ← [工坊 P0b] 复用 P0 六步迁移
+│   ├── legacy-dexie-migration.ts    ← [Q-08] localStorage → Dexie 六步迁移的**唯一实现**
+│   │                                   （上面两个 migration 都调它，不再各存一份）
+│   │                                   🔴 全仓唯一「用户唯一副本 + 校验通过就删源」的数据销毁路径。
+│   │                                      铁律：**宁可迁移永不成功，也不能半成功** —— 任何一步失败都让
+│   │                                      localStorage 原封不动、标志位不置，下次启动重试
+│   │                                   🔴 之所以只许有一份：世界书与美化规则曾各存一份逐字相同的六步，
+│   │                                      而漂移已经开始（两份 `dedupeIds` 只差变量名，回读校验一份比
+│   │                                      `entries.length`、一份比 `pattern`/`replacement`）。漏改一处的
+│   │                                      代价不是编译错误，是**用户数据静默永久丢失**
+│   │                                   🔴 `api-key-migration.ts` **刻意留在外面**：它没有 dedupe、不把
+│   │                                      标志位当充分条件（还要看 `legacyKeysRetained`）、多一个带回滚的
+│   │                                      第 4 阶段 scrub、还要把本地条目 merge 回去 —— 四条差异塞进同一个
+│   │                                      泛型签名等于把骨架撑成带四个开关的怪物
+│   ├── api-key-migration.ts         ← API 密钥搬进安全存储（App.vue 的 `initApiSecrets()`）。
+│   │                                   🔴 加新 `apiType` 时**这里与 `readEntries` 的收窄三元一起改**：
+│   │                                      只改一处的症状是「图像 API 存了、重开变成 chat」——
+│   │                                      那行收窄跑在每次启动的读取路径上，把不认识的值一律翻成 `'chat'`
+│   ├── content-store.ts             ← [内容分离波 1 / D16 §5.1] provider 执行层（纯函数半边在
+│   │                                   `@engine/content-source`）。三件事：
+│   │                                   ① **模块级 ready promise**（时序契约，最承重的一条）——
+│   │                                      settings-store 的构造器在 `main.ts`、`app.mount` **之前**就
+│   │                                      `setTimeout(0)` 触发 `loadProjectDefaults()`，App.vue 的 init 链
+│   │                                      根本拦不住这个时序。所以 promise **必须在模块加载时创建**，
+│   │                                      谁先到都等它（这样装包叠加层才来得及在 fetch 落地前灌进内存层）
+│   │                                   ② **contentStatus**（§5.5）：三处 fetch + AgentConfigPanel raw 读 +
+│   │                                      audio manifest + beautifier + builtin-worldbooks 全部经 provider
+│   │                                      上报内容态。行为兜底不变（失败不阻塞启动），但失败进
+│   │                                      `contentStatus='error'` 而不是静默
+│   │                                   ③ **内容注册表**：catalog/locations/bloodlines/namePools/markers/
+│   │                                      branding/imageDialects/mapPack 等分面的同步读取入口
+│   │                                      （`/data/content/<name>.json`）
+│   ├── character-appearance-store.ts← [图像 v1 / D56·D58] 角色外貌**会话副本**的 Dexie 唯一读写口。
+│   │                                   两份定义：**基线**在 `imagePresets.appearance`（全局、跨存档、
+│   │                                   只有用户能改）；**会话**在本店（按存档隔离、由出图 AI 自动写、
+│   │                                   删存档连带删）
+│   │                                   🔴 「只有用户能改基线」这句话在 v1.3 之前是**假的**：D57 曾让 AI
+│   │                                      为没基线的角色现建一份基线，而基线是全局的 —— A 周目的即兴会
+│   │                                      成为 B 周目的定义，且两个重置口都够不着它。现在那种角色的即兴
+│   │                                      外貌也落本店，于是本店是 **AI 唯一能写的地方**
+│   │                                   🔴 自动写入之所以可接受全靠「写的是副本」，所以**必须**提供重置，
+│   │                                      且不能只给一种粒度：`resetOne(name)` 与整档重置并存（某个角色
+│   │                                      被写歪，别的角色的正确变化不该跟着丢）
+│   ├── db-write.ts                  ← [Q-16] 落库前切断 Vue Proxy 的**唯一实现**（`detach`）。
+│   │                                   这条不变式由 Dexie 的 structured clone 强制、而**类型系统完全
+│   │                                   看不见**：`db.worldBooks.put(reactiveBook)` 类型合法，只在运行时
+│   │                                   炸 `DataCloneError`。此前八处各写各的名字、全仓 30+ 次裸
+│   │                                   `JSON.parse(JSON.stringify(`
+│   │                                   🔴 **内部保持 JSON 往返，别换成 `toRaw` + `structuredClone`**：
+│   │                                      `toRaw` 只解顶层代理（嵌套 reactive 照样抛），且会改变落库形状
+│   │                                      （Date 存成对象而非 ISO 串、`undefined` 键被保留）——
+│   │                                      那是存储格式迁移，不是重构
+│   ├── store-result.ts              ← [Q-14] store 层**单条**写操作的统一回执（判别联合）。
+│   │                                   起因：`boolean` 的多义性把判定漏到每个调用点 —— AudioLibrary 曾被迫
+│   │                                   在 `renameTrack` 返回 false 后反查 `findTrack(id)` 才能分清
+│   │                                   「曲目没了」和「名字撞了」；store 明明早就知道，只是没法说出口
+│   │                                   🔴 边界是**有意的，别顺手统一掉**：❌ 不管**批量**（走「尽力做完 +
+│   │                                      分项计数」，`deleteTracks` 的 skipped 桶把 builtin + 查无此曲
+│   │                                      归为**非错误**，统一回执不许把它们翻成失败）；
+│   │                                      ❌ 不管**故意的静默无操作**（`setTrackTags`/`setTrackKind` 遇内置
+│   │                                      曲目直接 return 是既定策略，改判别式等于凭空多一个分支）
+│   ├── store-utils.ts               ← [Q-16] store 层共享小工具（`isQuotaError` 等）。此前 asset-store 与
+│   │                                   audio-store 逐字各存一份，注释亲口写着「改一处记得改另一处」——
+│   │                                   那句话本身就是本文件该存在的理由
 │   ├── scene-image-store.ts         ← [图像 v1] sceneImages/sceneImageBlobs 的 Dexie 唯一读写口 +
 │   │                                   `generate()` **串行**队列（NAI 有速率限制且并发同时扣费；
 │   │                                   手动点击进同一个队列，不另开一条）
@@ -271,9 +449,23 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── PortraitSettingsDialog.vue ← [素材] 画像唯一调节面（取景三滑块 + 换图）
 │   │   ├── AssetCropEditor.vue      ← [素材] 裁剪台（一张源图烘出立绘+头像两份真字节）
 │   │   ├── WorkshopEnableList.vue   ← [工坊] 项目粒度启用列表（捏人页与游戏页共用）
+│   │   ├── ContentStatusBanner.vue  ← [内容分离波 1 / D16 §5.5] 内容态横幅（首页与设置页顶部）：
+│   │   │                               消费 content-store 的 `contentStatus`，四态文案
+│   │   │                               （placeholder / placeholder+检测到本地真实内容 / error /
+│   │   │                               pack·needs_attention）。`activePackId` 为空时不渲染
 │   │   ├── ToastContainer.vue
-│   │   └── form/ (Input/Select/Stepper/Cascader/KeyValue)
-│   ├── home/HomePage.vue            ← 游戏标题画面
+│   │   └── form/ (FormInput / FormSelect / FormStepper —— **只有这三个**；
+│   │             早期文档里的 Cascader / KeyValue 从未落地，别照着 import)
+│   ├── home/
+│   │   ├── HomePage.vue             ← 游戏标题画面 —— **本目录唯一的生产组件**
+│   │   └── *.standalone.html        ← 🔴 8 个**设计原型**，不是生产界面（AstralDrift / AstralDriftHome /
+│   │                                   AstralDriftHomeParticles / AstralDriftHomeTuner / AstralDriftV2 /
+│   │                                   AstralDriftV2Tuner / MagicCircle / ObsidianAstrolabeV2）。
+│   │                                   自包含单页，无人 import、不进打包 —— 改它们对游戏零影响，
+│   │                                   反过来「首页看起来不对」也不要去这里找。
+│   │                                   星流首页的集成方案在
+│   │                                   `docs/planning/2026-08-09-home-astral-drift-integration-design.md`，
+│   │                                   **D6 未获准、集成尚未开始**
 │   ├── settings/                    ← [Q-25] 14 个分区**全部**是一行子组件
 │   │   ├── SettingsPage.vue         ← 纯壳层（1995 → 约 415 行）：页头 + 主导航 + Agent 子导航
 │   │   │                               只留 activeSection / activeAgent / selectSection /
@@ -299,7 +491,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   │                               新挂载，普通 watch 不触发 → 文本框空着渲染
 │   │   │   │                               → 「保存设置」把空串写进用户提示词
 │   │   │   │                               （回归测试 AgentConfigPanel.test.ts 第一条）
-│   │   │   ├── AgentParamsCard.vue   ← API 池 + 7 个 LLM 旋钮 + 世界书卡（共用 agentCfg/setAgentField）
+│   │   │   ├── AgentParamsCard.vue   ← API 池 + LLM 旋钮 + 世界书卡（共用 agentCfg/setAgentField）。
+│   │   │   │                            旋钮里除数值五参外还有 **失败重试次数**（`maxRetries`，
+│   │   │   │                            2026-08-16）与 **历史层数 / 历史截断字数**
+│   │   │   │                            （`historyLayers` / `historySlice`）
+│   │   │   │                            🔴 后两格**留空 = 写 `undefined` = 删键**（`v === '' ? undefined`），
+│   │   │   │                               编码「让引擎按 Agent 类别决定」；绑成 0 或空串会把那条语义
+│   │   │   │                               变成一个真的上限，且不报错。见 stores/agent-settings.ts
+│   │   │   │                            每格挂 `已覆写 / 默认` 角标（`isOverridden(field)`）——
+│   │   │   │                            两层模型下「这个值从哪来」是用户唯一看得见的线索
+│   │   │   ├── AgentUpdateCenter.vue  ← **覆写差异面板**（Agent 分区空态区）+ per-agent「清除覆写」。
+│   │   │   │                            🔴 它原本叫「提示词更新中心」，为 `fillMissingAgentSettings`
+│   │   │   │                               那个旧缺陷而生；D44 从源头解决后**已重定位**——
+│   │   │   │                               现在列的是「覆写层里还有条目的 agent」，一键清回默认层
+│   │   │   │                               （保留 model）。别按旧名字去理解它做什么
 │   │   │   ├── AgentPromptCard.vue   ← systemPrompt + 上下文模板 + 占位符徽章 + 预览（非 story）
 │   │   │   │                            占位符插入改用**模板 ref**，不再全局 querySelectorAll
 │   │   │   ├── PresetManager.vue     ← 预设子系统 + 两个弹窗（story）；单根，弹窗在根卡内层
@@ -325,7 +530,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                  要说实话）；「测试连接」的图像分支必须排在 baseUrl 闸**之前**，
 │   │   │                                  否则没有地址的出图端点点了会静悄悄什么都不发生
 │   │   │                                  结构断言在 ApiSection.image-endpoint.test.ts（不 mount）
-│   │   ├── WorldBookSection.vue     ← 世界书列表/导入/新建/删除/恢复 + 条目编辑器
+│   │   ├── WorldBookSection.vue     ← 世界书列表/导入/新建/删除/恢复 + 条目编辑器入口（约 368 行）
+│   │   ├── WorldBookEditor.vue      ← 条目编辑器本体（约 909 行，本目录最大的单文件）：
+│   │   │                               条目 CRUD + 关键词/插入位置/深度/触发策略 + EJS 正文
+│   │   ├── BeautifierSection.vue    ← ✨ 输出美化分区（Phase 10i 三段式：自动管理 / 已启用 /
+│   │   │                               可用规则库折叠）。预设规则从 `beautifier-rules.json` 来，
+│   │   │                               用户规则完全可控
+│   │   ├── RuleEditorModal.vue      ← 美化规则编辑弹窗；★预览直接挂 game/BeautifiedNarrative.vue
+│   │   │                               —— 与正文**同一条渲染链**，不另写一个「像正文」的预览
+│   │   ├── TemplatePreview.vue      ← 上下文模板的分段高亮（text / placeholder），AgentPromptCard 消费
+│   │   ├── PackInstallConfirmModal.vue ← [内容分离波 1 T7 / D19] 内容包安装/升级的两阶段确认：
+│   │   │                               展示 `planPackInstall` 的计划（逐节 added/updated/removed/
+│   │   │                               conflicted + 存档 uid 迁移说明 + 三类处置记录），确认后由
+│   │   │                               DataSection 以 `{ confirmConflicts: true }` 重入 `installPack`。
+│   │   │                               纯展示：不碰 store，也不判该不该显示（宿主决定传什么 plan）
 │   │   ├── PlotSection.vue / MemorySection.vue / ThemeSection.vue / MessagesSection.vue
 │   │   ├── DataSection.vue          ← 导出/导入/存储用量/清除全部（用量改为**本分区**挂载时读）
 │   │   │                               [图像 v1] +本存档插画用量与清理。🔴 这一行**刻意不在图像分区**：
@@ -334,7 +552,15 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── DeveloperSection.vue     ← 开发者模式开关 + 诊断能力说明 + 导出隐私警告
 │   │   ├── AboutSection.vue
 │   │   ├── AudioSection.vue         ← [Audio] 音频分区（壳层 + 5 子组件）
-│   │   ├── AssetSection.vue         ← [素材] 素材分区壳层 + 4 子组件
+│   │   ├── AssetSection.vue         ← [素材] 素材分区壳层 + 5 子组件（AssetImportStrip /
+│   │   │                               AssetRemoteSyncStrip / AssetLibrary / AssetCharacterDrawer /
+│   │   │                               AssetDialogs）
+│   │   │                               AssetRemoteSyncStrip = [远程素材 v1] 总开关 + 立即同步 +
+│   │   │                               上次同步结果行。与 AssetImportStrip 是同一类东西（第三条
+│   │   │                               **获取**素材的路径），故沿用 `.io-strip` 外壳与共用 `.toggle-*`。
+│   │   │                               🔴 它**不做任何判断** —— 跑不跑、跑出什么、文案怎么写全在
+│   │   │                                  asset-store 与 lib/remote-asset-sync.ts
+│   │   │                                  （结果行用的就是那边导出的 `formatRemoteSyncCounts`）
 │   │   └── image/                   ← [图像 v1] 图像生成分区（壳层 + 3 张卡）
 │   │       ├── ImageSection.vue     ← 分区壳。**单根** section.centered（.centered 是 SettingsPage 的
 │   │       │                           scoped 规则，只够得到子组件根节点；多根会在宽屏摊满整行，
@@ -415,9 +641,42 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      预设是**按名字**被出图链路查中的，编过号的名字永远查不中
 │   │                                   🔴 pinnedSeed 的说明必须照实说「同一 seed 只让构图更接近，
 │   │                                      **不保证同一张脸**」—— 写成「锁定长相」是守不住的承诺
-│   ├── create/CreatePage.vue        ← [占位] 捏人页
+│   ├── create/                      ← 捏人页（**不再是占位**：8 步向导，共 ~21 个组件 + 7 个测试）
+│   │   ├── CreatePage.vue           ← 页壳：8 个 `defineAsyncComponent` 步骤 + 进度条 + 页脚，
+│   │   │                               `store.currentStep` 决定渲染哪一步（与 App.vue 同一种
+│   │   │                               「computed 选组件」形状，同样没有 router）
+│   │   ├── CreateSteps.vue          ← 顶部进度条。★步骤名的**唯一出处** `STEP_LABELS`：
+│   │   │                               难度选择 / 基础信息 / 命定核心 / **角色启用** /
+│   │   │                               装备选择 / 背景故事 / 剧情规划 / 确认提交
+│   │   ├── CreateStepDifficulty.vue      ← ① 难度
+│   │   ├── CreateStepBasic.vue           ← ② 基础信息（姓名/性别/种族/血脉…）
+│   │   ├── CreateStepDestinyCore.vue     ← ③ 命定核心（★工坊项目粒度的启用在**这一步**，
+│   │   │                                    复用 shared/WorkshopEnableList.vue）
+│   │   ├── CreateStepCharacters.vue      ← ④ 角色启用：按**世界书条目 uid** 勾选
+│   │   │                                    （`store.enabledCharacterEntryUids`），
+│   │   │                                    与③的工坊项目粒度是两回事，别混
+│   │   ├── CreateStepSelections.vue      ← ⑤ 装备/技能/道具选择
+│   │   ├── CreateStepBackground.vue      ← ⑥ 背景故事
+│   │   ├── CreateStepPlot.vue            ← ⑦ 剧情规划
+│   │   ├── CreateStepConfirm.vue         ← ⑧ 确认提交（含素材/画像收尾）
+│   │   ├── AttributeEditor.vue / PointsBar.vue   ← 五维分配与点数条（点数余额的展示层）
+│   │   ├── QualityFilter.vue / CategoryTabs.vue / CategorySelectionLayout.vue
+│   │   │                                 ← 品质筛选 + 类目页签 + 「左类目 / 右列表」通用版式
+│   │   ├── SelectableCard.vue / SelectedPanel.vue ← 可选卡片 + 已选面板（选择步骤的两半）
+│   │   ├── BackgroundList.vue / CustomItemForm.vue / PlotOutlinePreview.vue
+│   │   │                                 ← 背景列表 / 自定义条目录入 / 大纲预览
+│   │   ├── PresetModal.vue          ← 捏人预设弹窗
+│   │   ├── CreateFooter.vue         ← 上一步/下一步/校验提示（各步共用，别在步骤里各画一套）
+│   │   └── *.test.ts                ← AttributeEditor / PointsBar / SelectableCard / CreateSteps /
+│   │                                   CreateStepDestinyCore / CreateStepConfirm.assets
 │   ├── game/
-│   │   ├── GamePage.vue             ← 游戏页主布局（三栏 + 6 弹窗；持有 --rail-w）
+│   │   ├── GamePage.vue             ← 游戏页主布局（三栏 + **10 个页面级弹窗**；持有 --rail-w）
+│   │   │                               `game.activeModal` 是**单选位**，十个取值：items / characters /
+│   │   │                               quests / plot / memory / snapshots / gallery / workshop / map /
+│   │   │                               debug（最后一个还要 `s.developerMode`）
+│   │   │                               🔴 不占这个位的两类东西别顺手塞进来：迷你播放器是**浮动卡片**
+│   │   │                                  （§6.2，必须先于 showModal 拦下），CharacterViewerModal 是
+│   │   │                                  **场景栏自己的一层**
 │   │   ├── MapPanel.vue / TopBar.vue / SideToolbar.vue / ScenePanel.vue / ChatFlow.vue / InputBar.vue
 │   │   │                               [地图 v1] MapPanel 加页签「标记地图 / 势力地图」：两个都靠
 │   │   │                               `v-show` 切（标记页签用 v-if 会拆掉 OSD 的挂载容器 ——
@@ -537,6 +796,35 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                  两格标题与图都一样、界面上无从区分
 │   │   ├── portrait-messages.ts     ← [Q-25] 画像导入路径的文案层（纯函数，零副作用，不 mount 可测）
 │   │   ├── QuestsPanel.vue / PlotPanel.vue / MemoryPanel.vue / SnapshotPanel.vue / MiniPlayer.vue
+│   │   │                               🔴 SnapshotPanel 自**快照拆表 v22**（2026-08-17）起只读
+│   │   │                                  `SnapshotMeta.preview`（玩家台词 / 游戏时间），**不再拉整份
+│   │   │                                  快照体** —— 列表渲染碰 body 会把拆表白拆
+│   │   ├── BeautifiedNarrative.vue  ← [工坊正则] 正文渲染入口：`compileBeautifierSegments` 分段 +
+│   │   │                               `splitSceneImageSegments` 切插画锚点，再分派给
+│   │   │                               BeautifierFrame（美化段）与 SceneImageSegment（插画格）。
+│   │   │                               ★设置页的 RuleEditorModal 预览也挂它 —— 编辑器与正文同一条链
+│   │   ├── BeautifierFrame.vue      ← [工坊正则] opaque iframe 的渲染面：文档由
+│   │   │                               `lib/beautifier-frame.ts` 生成（sandbox / CSP / 主题变量注入 /
+│   │   │                               消息协议），storage 会话由 `lib/beautifier-storage.ts` 开。
+│   │   │                               🔴 本组件只**装**那两份契约，不在这里另写第二套消息协议
+│   │   ├── DebugPanel.vue           ← 调试面板（`activeModal === 'debug'` 且 `developerMode`）：
+│   │   │                               Agent 请求/响应 + EJS 后端状态 + 引擎设置 + **随机事件区块**
+│   │   ├── random-event-debug.ts    ← [随机事件 v1] 上者随机事件区块的展示层判定（纯函数，不 mount 可测）
+│   │   │                               🔴 **不装任何判据的第二实现**：硬门槛走 `evaluateEventCondition`、
+│   │   │                                  权重走 `computeEventWeight`、上下文走
+│   │   │                                  `buildRandomEventRollContext` —— 全是生产函数。调试面板照抄
+│   │   │                                  一份判据是最坏的一种重复：**它会在真机上说谎，而说谎的正是
+│   │   │                                  那块用来查真相的面板**
+│   │   │                               🔴 日概率必须与 `rollRandomEvents` 同算式同顺序：
+│   │   │                                  `p = min(1, computeEventWeight(def, ctx, frequency) / mtthDays)`
+│   │   │                                  —— 频率系数在 `min` **里面**。写成 `min(1, w/mtth) × freq`
+│   │   │                                  在高权重事件上给出不同的数，不报错，只是让人拿着面板上的
+│   │   │                                  数字去怀疑调度器
+│   │   │                               🔴 本区块回答的是「调度器会不会考虑它」，**不做过期/权重 0 的
+│   │   │                                  撤池判定**（`isPendingStillValid` 那一套）；`inPool` 只原样
+│   │   │                                  报告池里有没有这个名字，不替它判活
+│   │   ├── TurnActivityLedger.vue   ← [管线并行化] 一回合的 Agent 活动账本（逐步骤状态/耗时/重试入口）；
+│   │   │                               中文步骤名出自 `lib/agent-activity.ts`，本组件不自造文案
 │   │   ├── SceneImageSegment.vue    ← [图像 v1] 正文里一格插画的六种样子。**不判定**该显示什么
 │   │   │                               （那是 scene-image-view.ts），只把判定画出来
 │   │   │                               🔴 按钮态/排队态/生成中态**占同样高度**，否则每张图落地时对话流
@@ -595,6 +883,17 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │       └── format.ts / failure-text.ts（展示层纯函数；P3: +unauthorized 分支 / Discord 头像与登录引导文案）
 │
 └── styles/                          ← base.css / transitions.css / utilities.css
+    ├── cards-shared.css             ← 系统卡片共享样式（game/cards/ 的 Craft / Combat / Item 卡引用）。
+    │                                   强调色由消费方设 `--sys-accent`（品质色/结局色），骨架用整圈
+    │                                   边框色调 + 头部色点表达 —— **禁用左侧色条**；颜色一律走变量
+    └── integrated-game-surfaces.css ← 七个主题的材质整合层（生成的底盘负责材质，组件只负责结构/
+                                        可读性/交互，绝不在底盘之上再叠一层通用应用卡片）
+                                        🔴 **加载顺序是契约**（见 main.ts 的注释）：本表刻意排在
+                                           九个主题之后、而 `themes/ivory.css` 又刻意排在**本表之后**。
+                                           ivory 的织锦浮雕要一块不透明连续布面，本表给它的却是
+                                           全屏丝绸底盘 + 近乎透明面板，两者互斥且特异度相同 ——
+                                           只靠特异度赢要给每条规则加冗余选择器，所以用顺序解决。
+                                           本表不重定义任何 `--theme-*`，故这个位置对另外九个主题零影响
 ```
 
 ### 设置页 14 分区
@@ -603,7 +902,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 🔌 API 配置    | API 池 CRUD、连接测试、模型列表获取、模型推荐                                                                                                                                                                                                                                                                                                   |
 | 🤖 Agent 配置  | 12 个汉化 Agent、模型选择、世界书开关、System Prompt 编辑                                                                                                                                                                                                                                                                                       |
-| 📚 世界书      | [占位] 导入/新建按钮                                                                                                                                                                                                                                                                                                                            |
+| 📚 世界书      | **早已不是占位**：书列表 + 导入/新建/删除/恢复（`WorldBookSection.vue`，约 368 行）+ 条目编辑器（`WorldBookEditor.vue`，约 909 行：条目 CRUD / 关键词 / 插入位置与深度 / 触发策略 / EJS 正文）。数据在 Dexie（工坊 P0 起 `settings.worldBooks` 已不存在）                                                                                       |
 | 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                                                                                                                                                                                                                                                                                       |
 | 🧠 记忆 & 缓存 | 召回数/压缩阈值/快照上限/缓存策略                                                                                                                                                                                                                                                                                                               |
 | 🎨 外观主题    | 10 主题网格、字体风格、字体大小、悬停延迟、减少动态效果                                                                                                                                                                                                                                                                                         |

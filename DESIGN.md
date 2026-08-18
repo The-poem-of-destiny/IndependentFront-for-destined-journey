@@ -114,6 +114,27 @@ Flexibility: diagnostic layout may be technical; access rules do not vary by the
 - Diagnostic exports can contain conversation text, prompts, and raw model output;
   the Settings surface must warn players to inspect an export before sharing it.
 
+## Theme identity to stylesheet map
+
+Identity names in this guide never appear in code. Every theme is selected by a `[data-theme='<slug>']`
+attribute and implemented in the matching stylesheet under `src/ui/themes/`. Use this table to go from a
+decision recorded here to the file that has to change. Slugs and display names come from `THEME_LIST` in
+`src/ui/stores/theme-store.ts`, which is the runtime registry. `variables.css` is the shared token layer,
+not a theme; it also carries the `:root` default, which is the same palette as `obsidian`.
+
+| Identity                         | `data-theme` slug | Stylesheet                      |
+| -------------------------------- | ----------------- | ------------------------------- |
+| Qinghua Porcelain / 青花瓷       | `indigo`          | `src/ui/themes/indigo.css`      |
+| Crimson Rose Window / 血色玫瑰窗 | `crimson`         | `src/ui/themes/crimson.css`     |
+| Wayfarer's Atlas / 远行者舆图    | `parchment`       | `src/ui/themes/parchment.css`   |
+| Moonwhite Brocade / 月白云锦     | `ivory`           | `src/ui/themes/ivory.css`       |
+| Jade Conservatory / 翡翠温室     | `forest`          | `src/ui/themes/forest.css`      |
+| Aurora Frostglass / 极光霜晶     | `misty-lilac`     | `src/ui/themes/misty-lilac.css` |
+| Gilded Orrery / 玄金星盘         | `obsidian`        | `src/ui/themes/obsidian.css`    |
+| Bronze Mechanism / 古铜机巧      | `bronze`          | `src/ui/themes/bronze.css`      |
+| Nocturne Sakura / 夜樱漆匣       | `sakura`          | `src/ui/themes/sakura.css`      |
+| Abyssal Cathedral / 深海圣堂     | `ocean`           | `src/ui/themes/ocean.css`       |
+
 ## Theme-specific decisions
 
 ### Qinghua porcelain

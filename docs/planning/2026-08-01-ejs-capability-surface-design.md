@@ -1,8 +1,8 @@
 # EJS 能力面设计 v1.0 —— 设计与实施记录
 
-> **作者契约已迁移**：[世界书 EJS 与输出美化正则创作指南](../reference/worldbook-ejs-regex-authoring-guide.md) 是创作者行为规范，`public/poem-ejs.d.ts` 是签名配套。本文件保留设计理由、实施切片和历史拟议值；与作者指南冲突时以作者指南为准。
+> **作者契约已迁移**：[世界书 EJS 与输出美化正则创作指南](../reference/worldbook-ejs-regex-authoring-guide.md) 是创作者行为规范，`public/engine-ejs.d.ts` 是签名配套（内容分离 D26 起由 `poem-ejs.d.ts` 更名而来）。本文件保留设计理由、实施切片和历史拟议值；与作者指南冲突时以作者指南为准。
 >
-> **状态**：✅ **T0-T8 全部实施完成（2026-08-01）**，真机走查未做。承 ADR-30（两轴契约）与 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`（工坊 P2）。
+> **状态**：✅ **T0-T8 全部实施完成（2026-08-01）**，求值后端为 **QuickJS(wasm，主线程)**（§0.1 裁定）；**工坊 P2 整体仍待真机走查**。承 ADR-30（两轴契约）与 `docs/planning/2026-07-31-workshop-phase2-ejs-design.md`（工坊 P2）。
 > **定位**：本文件是 EJS 能力面的设计与实施记录。上游（SillyTavern + 酒馆助手 + MVU）的 API 只以**兼容别名层**形式承接存量内容，不是设计约束。
 >
 > **前置阅读**：`docs/planning/2026-07-31-workshop-phase2-ejs-design.md`（D1-D10 契约）、
@@ -522,7 +522,7 @@ guest 内的原型污染污染的是 guest，pass 结束即弃。
 
 | 项           | 内容                                                                                       |
 | ------------ | ------------------------------------------------------------------------------------------ |
-| **类型定义** | 发布 `poem-ejs.d.ts`，创作者在 VSCode 里写世界书有补全与类型检查                           |
+| **类型定义** | 发布 `engine-ejs.d.ts`，创作者在 VSCode 里写世界书有补全与类型检查                         |
 | **装前预检** | `WorkshopDetailModal` 加「EJS 兼容预检」：逐条列出白名单外标识符、超预算风险、将回退的条目 |
 | **错误可见** | 回退条目在游戏页调试区列出（书名 #uid + 错误摘要 + 出错行），不只 `console.warn`           |
 | **沙盒预览** | 设置页「世界书」分区加一个条目试跑器：贴正文 → 选存档 → 看渲染结果与 `vars` 差量           |
@@ -716,7 +716,7 @@ QuickJS 单独一个 suite + 语料字节比对。
   | **T5** | `char` / `world` / `quest`；`fmt`（`ejs-fmt.ts`，含不依赖 locale 的 `compareName`）；`_` 扩面（生产 QuickJS 的可移植交集现为 25 方法） | ✅ |
   | **T6** | 别名层重接到能力面（`getChatMessage`/`getwi`/`YAML`/`TavernHelper`/`toastr`/`alert`/`localStorage`/`console`/`message_id`/`lastMessageId`）；**内置全语料回退 7 → 0** | ✅ |
   | **T7** | `QuickJsBackend`（quickjs-emscripten 0.32，主线程）+ 预算配置 + 15 个安全用例 | ✅ |
-  | **T8** | 生产默认切 QuickJS（`installProductionEjsBackend`，初始化失败时 fail-closed、保留 EJS 原文且不退 Legacy）；`public/poem-ejs.d.ts` 创作者类型定义；`ejs-preflight.ts` 装前预检 | ✅ |
+  | **T8** | 生产默认切 QuickJS（`installProductionEjsBackend`，初始化失败时 fail-closed、保留 EJS 原文且不退 Legacy）；`public/engine-ejs.d.ts` 创作者类型定义；`ejs-preflight.ts` 装前预检 | ✅ |
 
 **实测安全属性**（T7，quickjs-emscripten 0.32）：
 

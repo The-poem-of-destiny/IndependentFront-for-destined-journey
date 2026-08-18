@@ -1,8 +1,16 @@
 # Phase 7d: 捏人页 `/create` — 架构设计（最终版）
 
-> 数据对齐: `reference/custom_start_index.html` + CDN `baseInfo.json` / `skills.json`
+> 数据对齐: 原版捏人页 `custom_start_index.html` + CDN `baseInfo.json` / `skills.json`
 > 前端: Vue 3 + Pinia + Vite
 > 引擎数据: `src/sillytavern/start-catalog.ts`（已完成）
+>
+> 🔵 **2026-08-18 复核**：本文是 2026-06 的**设计文档**，设计意图与取舍论述仍然有效，
+> 但若干实现事实已经移动。全文按「保留原文 + 就地加 🔵 复核注 / 🪦 墓碑注」的方式更新，
+> **没有重写任何设计论述**。现行状态的权威快照在同目录 `current_state.md`（2026-08-18 重写）。
+> 三条最容易踩空的：①步骤已是 **8 步**（多了「角色启用」，见 §二）；
+> ②路径 `/create` 是**当年的说法**，全应用没有 vue-router，入口是 `ui.navigate('create')`；
+> ③原版参考页 `custom_start_index.html` 已随内容分离移入私有内容仓，公开仓侧读不到
+> （根 `reference/` 已被 `.gitignore` 整树排除，本机路径见根 `AGENTS.md`「前端 UI 参考」一节）。
 
 ---
 
@@ -53,14 +61,29 @@ DESTINY_CORE_WORLDBOOK_MAP: Record<string, string[]> = {};
 
 ---
 
-## 二、7 步骤总览
+## 二、步骤总览（设计时 7 步 → 🔵 现行 8 步）
+
+**设计时（2026-06）的 7 步**：
 
 ```
 Step 0         Step 1      Step 2       Step 3      Step 4      Step 5      Step 6
 难度选择  →   基础信息  →  命定核心  →  装备选择  →  背景故事  →  剧情规划  →  确认创建
 ```
 
-步骤切换: Pinia `currentStep` (0-6), `<component :is>` 切换, 非子路由。
+> 🔵 **2026-08-18 更正**：现行是 **8 步** —— 命定核心之后插入了一步「**角色启用**」
+> （`CreateStepCharacters.vue`，按**世界书条目 uid** 勾选 `store.enabledCharacterEntryUids`；
+> 与 Step 2 里那份**工坊项目粒度**的启用是两回事）。于是其后每一步的编号都 +1：
+>
+> ```
+> Step 0     Step 1     Step 2     Step 3       Step 4     Step 5     Step 6     Step 7
+> 难度选择 → 基础信息 → 命定核心 → 角色启用 → 装备选择 → 背景故事 → 剧情规划 → 确认提交
+> ```
+>
+> 步骤名的**唯一出处**是 `CreateSteps.vue` 的 `STEP_LABELS` 常量（末步的实际文案是
+> 「确认提交」不是「确认创建」）。**本文以下各节仍按设计时的旧编号书写**，读的时候
+> 对着上表换算：旧 Step 3 装备选择 = 现 Step 4，旧 Step 6 确认 = 现 Step 7。
+
+步骤切换: Pinia `currentStep`（设计时 0-6，🔵 现行 0-7）, `<component :is>` 切换, 非子路由。
 
 PointsBar 置顶: `转生点数: 824 / 2000 (简单)    [角色预设]`
 
@@ -129,6 +152,13 @@ PointsBar 置顶: `转生点数: 824 / 2000 (简单)    [角色预设]`
 
 数据来源: `start-catalog.ts` → `DEFAULT_EQUIPMENT_POOL`(28件) / `DEFAULT_ITEM_POOL`(16种) / `DEFAULT_SKILL_POOL`(20个)。
 
+> 🪦 **2026-08-18 复核：这三个常量都不存在了**（内容-引擎分离 D24）。`start-catalog.ts` 现在只剩
+> 75 行入口（机制 re-export + 属性名/品质码表/品质色/品质基础 DC），数据半边住
+> `public/data/content/catalog.json`（内容注册表 `catalog` 面，内容包可整份替换），
+> 机制半边在 `start-catalog-mechanics.ts`。装备/道具/技能三池更是**没走注册表**：
+> `create-store.ts` 构造期从上游仓库 CDN（`REPO_DATA_BASE`）fetch，保留 `{分组: [物品]}` 结构，
+> 外层分组 key 就是子分类。逐项现状见 `current_state.md` §四。
+
 自定义物品: `CustomItemForm.vue` Modal → 创意工坊接口预留。
 
 ---
@@ -164,6 +194,9 @@ PointsBar 置顶: `转生点数: 824 / 2000 (简单)    [角色预设]`
 ```
 
 **开始流程**: `buildCharacterState()` → `buildOpeningPrompt()` → 写 DB → `router.push(/game/:id)`
+
+> 🔵 2026-08-18 复核：末尾那一跳**不是 router** —— 全应用没有 vue-router，现行是
+> `CreatePage.vue` 里 `const saveId = await store.startJourney(); ui.navigate('game', saveId)`。
 
 ---
 
@@ -317,6 +350,10 @@ export const useCreateStore = defineStore('create', () => {
 - 存储: IndexedDB 新表 `createPresets` (database.ts v7)
 - UI: `PresetModal.vue` — 保存(自定义名称+重名确认) / 加载 / 导出 / 删除 / 导入
 
+> 🔵 2026-08-18 复核：`createPresets` 表确实是 v7 引入的、至今在位（现行 `DB_VERSION = 22`），
+> 且随 `FullBackup` 进出。落库形状 `CreatePreset` 已于 2026-08-17 分层收口时从
+> `create-store.ts` 迁进 `src/sillytavern/types.ts`（create-store 侧 re-export 同名）。
+
 ---
 
 ## 十三、组件清单
@@ -327,61 +364,89 @@ AppButton, AppCard, AppModal, AppTabs, QualityBadge, ResourceBar, AvatarPanel, F
 
 > 🪦 `FormCascader.vue`（与 `FormKeyValue.vue`）已于 2026-08-17 因全仓零引用随审查小修波删除，
 > 恢复走 git 历史 `8e6565c^`；7d 复工如需重建按本节设计。
+> 🔵 2026-08-18 复核：`shared/form/` 现在**只有 `FormInput` / `FormSelect` / `FormStepper` 三个**；
+> 起始地点那一格用的是普通 `FormSelect`（`flattenLocationTree` 摊平后的扁平选项），不是级联器。
+> 其余六个共用组件（AppButton / AppCard / AppModal / AppTabs / QualityBadge / ResourceBar /
+> AvatarPanel）均在 `shared/` 下健在。
 
-### 新建 (17 个)
+### 新建 (17 个) — 🔵 2026-08-18 落地对照
 
-| 组件                        | 用途                           |
-| --------------------------- | ------------------------------ |
-| `CreatePage.vue`            | 步骤容器 + 预设弹窗            |
-| `CreateSteps.vue`           | 7 步指示器                     |
-| `CreateFooter.vue`          | 底部导航 (含「角色预设」按钮)  |
-| `PointsBar.vue`             | 点数消耗条                     |
-| `CreateStepDifficulty.vue`  | Step 0                         |
-| `CreateStepBasic.vue`       | Step 1                         |
-| `AttributeEditor.vue`       | 五维属性步进器                 |
-| `CreateStepDestinyCore.vue` | Step 2                         |
-| `DestinyCoreCard.vue`       | 核心卡片 🪦（见表下墓碑注）    |
-| `CreateStepSelections.vue`  | Step 3                         |
-| `CategoryTabs.vue`          | 装备/道具/技能 标签            |
-| `QualityFilter.vue`         | rarity 筛选按钮组              |
-| `SelectableCard.vue`        | 通用可选卡片 (tag+effect 展示) |
-| `SelectedPanel.vue`         | 已选列表                       |
-| `CreateStepBackground.vue`  | Step 4                         |
-| `BackgroundList.vue`        | 背景卡片列表                   |
-| `CreateStepPlot.vue`        | Step 5                         |
-| `PlotOutlinePreview.vue`    | 大纲预览 (模糊/揭示)           |
-| `CreateStepConfirm.vue`     | Step 6                         |
-| `PresetModal.vue`           | 预设管理弹窗                   |
-| `CustomItemForm.vue`        | 自定义物品 Modal               |
-| `PartnerWorldBookPanel.vue` | 伙伴 (占位) 🪦（见表下墓碑注） |
+> 「状态」列是 2026-08-18 对着 `src/ui/components/create/` 实际文件树核过的：
+> ✅ 已建成（同名文件在位） / 🪦 已删（零引用随审查小修波） / ➕ 计划外新增。
+> 🔵 顺带一条：小标题写「17 个」，但表里其实有 **22 行**（成文时就没对上，原样保留）。
+> 22 行减去两条 🪦，加上下面两个计划外组件，正好是现行的 **22 个 .vue**。
+
+| 组件                        | 用途                           | 状态                                        |
+| --------------------------- | ------------------------------ | ------------------------------------------- |
+| `CreatePage.vue`            | 步骤容器 + 预设弹窗            | ✅（另加了内容加载门三态）                  |
+| `CreateSteps.vue`           | 7 步指示器                     | ✅（现为 **8** 步，`STEP_LABELS` 唯一出处） |
+| `CreateFooter.vue`          | 底部导航 (含「角色预设」按钮)  | ✅                                          |
+| `PointsBar.vue`             | 点数消耗条                     | ✅                                          |
+| `CreateStepDifficulty.vue`  | Step 0                         | ✅                                          |
+| `CreateStepBasic.vue`       | Step 1                         | ✅（属性区已表格化，5 列）                  |
+| `AttributeEditor.vue`       | 五维属性步进器                 | ✅                                          |
+| `CreateStepDestinyCore.vue` | Step 2                         | ✅（另挂 `shared/WorkshopEnableList.vue`）  |
+| `DestinyCoreCard.vue`       | 核心卡片                       | 🪦 已删（见表下墓碑注）                     |
+| `CreateStepSelections.vue`  | Step 3 → 🔵 现 Step 4          | ✅                                          |
+| `CategoryTabs.vue`          | 装备/道具/技能 标签            | ✅                                          |
+| `QualityFilter.vue`         | rarity 筛选按钮组              | ✅                                          |
+| `SelectableCard.vue`        | 通用可选卡片 (tag+effect 展示) | ✅（🔴 内层按钮的禁用缺口见 UI-01）         |
+| `SelectedPanel.vue`         | 已选列表                       | ✅                                          |
+| `CreateStepBackground.vue`  | Step 4 → 🔵 现 Step 5          | ✅                                          |
+| `BackgroundList.vue`        | 背景卡片列表                   | ✅                                          |
+| `CreateStepPlot.vue`        | Step 5 → 🔵 现 Step 6          | ✅                                          |
+| `PlotOutlinePreview.vue`    | 大纲预览 (模糊/揭示)           | ✅                                          |
+| `CreateStepConfirm.vue`     | Step 6 → 🔵 现 Step 7          | ✅（头像位走 `useAssetImage` 头像链）       |
+| `PresetModal.vue`           | 预设管理弹窗                   | ✅                                          |
+| `CustomItemForm.vue`        | 自定义物品 Modal               | ✅                                          |
+| `PartnerWorldBookPanel.vue` | 伙伴 (占位)                    | 🪦 已删（见表下墓碑注）                     |
+
+**➕ 计划外新增（本设计成文后才有的两个）**：
+
+| 组件                          | 用途                                                                          |
+| ----------------------------- | ----------------------------------------------------------------------------- |
+| `CreateStepCharacters.vue`    | 现 Step 3「角色启用」——按世界书条目 uid 勾选（见 §二 的 8 步更正）            |
+| `CategorySelectionLayout.vue` | 「左类目 / 右列表」通用版式（对齐原版 `CategorySelectionLayout`，选择步骤用） |
+
+（物品搜索框内联在 `CreateStepSelections.vue` 里，没有拆成独立组件。）
+
+**➕ 计划外新增的测试 6 个**：`AttributeEditor` / `PointsBar` / `SelectableCard` / `CreateSteps` /
+`CreateStepDestinyCore` / `CreateStepConfirm.assets`（本设计成文时的第 10 条已知问题「新建组件
+没有对应的 `.test.ts`」已部分还清）。
 
 > 🪦 `DestinyCoreCard.vue` 与 `PartnerWorldBookPanel.vue` 已于 2026-08-17 因全仓零引用随审查小修波删除，
 > 恢复走 git 历史 `8e6565c^`；7d 复工如需重建按本节设计。
 
 ---
 
-## 十四、实现顺序
+## 十四、实现顺序 —— ✅ 已建成（历史计划记录）
 
-| #   | 内容                                                                  | 状态    |
-| --- | --------------------------------------------------------------------- | ------- |
-| 1   | `start-catalog.ts`                                                    | ✅ 完成 |
-| 2   | `create-store.ts` 扩展                                                | ⬜      |
-| 3   | `database.ts` v7 升级                                                 | ⬜      |
-| 4   | `CreatePage.vue` `CreateSteps.vue` `CreateFooter.vue` `PointsBar.vue` | ⬜      |
-| 5   | Step 0 `CreateStepDifficulty.vue`                                     | ⬜      |
-| 6   | Step 1 `CreateStepBasic.vue` `AttributeEditor.vue`                    | ⬜      |
-| 7   | Step 2 `CreateStepDestinyCore.vue` `DestinyCoreCard.vue` 🪦           | ⬜      |
-| 8   | Step 3 `CreateStepSelections.vue` + 子组件                            | ⬜      |
-| 9   | Step 4 `CreateStepBackground.vue` `BackgroundList.vue`                | ⬜      |
-| 10  | Step 5 `CreateStepPlot.vue` `PlotOutlinePreview.vue`                  | ⬜      |
-| 11  | Step 6 `CreateStepConfirm.vue`                                        | ⬜      |
-| 12  | `PresetModal.vue` + DB                                                | ⬜      |
-| 13  | `CustomItemForm.vue`                                                  | ⬜      |
-| 14  | 联调                                                                  | ⬜      |
+> 🔵 **2026-08-18 复核：这张表已经全部建成，保留它只为记录当年的建造顺序。**
+> 原表除第 1 条外通篇 ⬜，那是 2026-06「准备开始写前端」时的状态；照它去理解「还有什么没做」
+> 会得出完全相反的结论。现行待办与缺陷看 `current_state.md` §七 与 `docs/known-issue.md`。
 
-> 🪦 第 7 条点名的 `DestinyCoreCard.vue` 已于 2026-08-17 因全仓零引用随审查小修波删除
-> （待办本身仍是 ⬜）。恢复走 git 历史 `8e6565c^`；7d 复工如需重建按本节设计。
+| #   | 内容                                                                  | 当年状态 | 2026-08-18 复核                                        |
+| --- | --------------------------------------------------------------------- | -------- | ------------------------------------------------------ |
+| 1   | `start-catalog.ts`                                                    | ✅ 完成  | ✅ 在位（数据半边已按 D24 迁去内容注册表）             |
+| 2   | `create-store.ts` 扩展                                                | ⬜       | ✅（现约 2234 行，含剧情大纲整块）                     |
+| 3   | `database.ts` v7 升级                                                 | ⬜       | ✅ `createPresets` 表自 v7 起在位（现行 DB v22）       |
+| 4   | `CreatePage.vue` `CreateSteps.vue` `CreateFooter.vue` `PointsBar.vue` | ⬜       | ✅ 四个全在                                            |
+| 5   | Step 0 `CreateStepDifficulty.vue`                                     | ⬜       | ✅                                                     |
+| 6   | Step 1 `CreateStepBasic.vue` `AttributeEditor.vue`                    | ⬜       | ✅（属性区已表格化）                                   |
+| 7   | Step 2 `CreateStepDestinyCore.vue` `DestinyCoreCard.vue` 🪦           | ⬜       | ✅ 步骤组件在位；`DestinyCoreCard.vue` 🪦 已删         |
+| 8   | Step 3 `CreateStepSelections.vue` + 子组件                            | ⬜       | ✅（🔵 现为 Step 4；另建了 `CategorySelectionLayout`） |
+| 9   | Step 4 `CreateStepBackground.vue` `BackgroundList.vue`                | ⬜       | ✅（🔵 现为 Step 5）                                   |
+| 10  | Step 5 `CreateStepPlot.vue` `PlotOutlinePreview.vue`                  | ⬜       | ✅（🔵 现为 Step 6，已接真实大纲生成/修订/流式）       |
+| 11  | Step 6 `CreateStepConfirm.vue`                                        | ⬜       | ✅（🔵 现为 Step 7）                                   |
+| 12  | `PresetModal.vue` + DB                                                | ⬜       | ✅                                                     |
+| 13  | `CustomItemForm.vue`                                                  | ⬜       | ✅                                                     |
+| 14  | 联调                                                                  | ⬜       | ✅ 可跑通（🔴 但 UI-01 P0 未修，见 known-issue.md）    |
+| ➕  | Step 3「角色启用」`CreateStepCharacters.vue`                          | （无）   | ✅ 计划外新增                                          |
+
+> 🪦 第 7 条点名的 `DestinyCoreCard.vue` 已于 2026-08-17 因全仓零引用随审查小修波删除。
+> 恢复走 git 历史 `8e6565c^`；7d 复工如需重建按本节设计。
 
 ---
 
 _最后更新: 2026-06-16 | 准备开始写前端_
+_2026-08-18 复核：补 🔵 复核注（8 步模型 / 组件落地对照 / 数据来源迁移 / 实现顺序已建成），设计论述原文未改_

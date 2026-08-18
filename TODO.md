@@ -50,6 +50,12 @@
       `docs/design.md` 的排版/间距规范是底线约束（别踩坏可读性与无障碍对比度），
       不是这一条的目的；规范之内该怎么大胆怎么大胆。
 
+  - [ ] **星海首页（Astral Drift）集成** —— 尚未开工：原型只存在于
+        `src/ui/components/home/AstralDrift*.standalone.html`（6 份独立 HTML，未接进
+        `HomePage.vue`），集成设计见
+        `docs/planning/2026-08-09-home-astral-drift-integration-design.md`。
+        🔴 其中 **D6（light 主题下怎么处理）尚未获准**，动工前需主人裁定。
+
 - [ ] **多分辨率 / 多宽高比适配** —— 目前布局按固定桌面视口调优；需要覆盖超宽、竖屏、
       高 DPI 与非 16:9 比例，确认地图、状态栏、立绘与大画像在各比例下不裁切、不溢出。
 

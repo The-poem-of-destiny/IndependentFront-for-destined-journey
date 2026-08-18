@@ -6,7 +6,7 @@
 >
 > ⚠️ **魔改声明**：我们**不完全照抄世界书**。世界书的战斗协议（#837805）是起点参考，本架构在效果系统、事件机制、计算分工上做了改造——核心改造是引入**管道 + 中间件架构**，让代码承担纯计算、AI 承担创造性、两者通过 EventBus 对接。
 >
-> 🔗 **关联文档**：[`effect_script_system.md`](./effect_script_system.md)（词条效果 & 脚本）、[`status_page_architecture.md`](./status_page_architecture.md)（状态栏 HUD）、世界书索引 [`../../reference/world_book_index.md`](../../reference/world_book_index.md)
+> 🔗 **关联文档**：[`effect_script_system.md`](./effect_script_system.md)（词条效果 & 脚本）、[`status_page_architecture.md`](../archive/reference/status_page_architecture.md)（状态栏 HUD，已归档）、世界书索引 `reference/world_book_index.md`（已移入私有内容仓 `fated_poem_independent_assets`，公开仓侧不可见）
 
 ---
 

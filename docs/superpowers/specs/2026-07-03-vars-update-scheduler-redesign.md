@@ -1,5 +1,18 @@
 # vars_update 调度器重新设计
 
+> 🔴 **头部那行「状态：设计阶段」已失实（2026-08-18 标注）**：本文的设计**已经全部落地**，
+> 且被两轮后续工作取代 ——
+>
+> - **Q-05**：标记扫描改成表驱动，全部标记规格集中在 `marker-protocol.ts` 的 `MARKER_SPECS`
+>   （11 种标记：10 种成对块标记 + 形态不同的 `play_audio`）。加标记只动那张表，别照本文改扫描器。
+> - **2026-08-16 管线并行化**：重塑了本文描述的 DAG（dispatcher‖memory_summary、
+>   vars_update‖post_check、侧链旁路化）。本文的阶段图已不是现在的跑法。
+>
+> ⚠️ 另有一条**未按本文实施**：文中的「`item_update` 独立 Agent」一节没有做 ——
+> `<item_update_request>` 标记确实存在，但**没有专属 Agent**，处理并进了 `vars_update`。
+>
+> **现行描述在** [`src/sillytavern/AGENTS.md`](../../../src/sillytavern/AGENTS.md)。本文保留为设计记录。
+
 > 日期：2026-07-03
 > 状态：设计阶段
 > 目标：将 vars_update 从"变量提取 JSON 输出器"重构为"调度器"——只负责时间/天气/新闻，其余更新以 XML request 标签委托给下游 Agent

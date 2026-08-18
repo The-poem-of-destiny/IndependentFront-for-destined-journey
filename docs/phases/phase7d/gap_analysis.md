@@ -1,6 +1,27 @@
 # Phase 7d 差距分析: 基础信息与属性 × 装备与技能
 
-> 对比: 原版 `custom_start_index.html` vs 当前 `src/ui/components/create/`
+> 🔴 **本文是 2026-06-17 对当时实现的差距分析，基线已经移动。**
+> 全文里的「当前」= 2026-06 的代码，不是现在的代码；P0-P6 清单里已有数条建成（见下）。
+> 拿它当待办清单会去修早就修好的地方。
+>
+> - **现行缺陷清单**看 `docs/reviews/2026-08-12-ui-review.md`
+>   —— 其中 **UI-01（P0，捏人页禁用装备仍可被选中）2026-08-18 复核仍未修**，
+>   已收录 `docs/known-issue.md`。
+> - **现行组件清单与页面结构**看同目录 `current_state.md`（2026-08-18 重写）。
+> - 设计意图与建成顺序看同目录 `architecture.md`（2026-08-18 加了 🔵 复核注）。
+>
+> 🔵 **2026-08-18 复核，本文优先级清单的落地情况**：
+> P0 属性面板表格化 ✅ 已建成（`CreateStepBasic.vue` 的 `.attr-table`，5 列）·
+> P1 CategorySelectionLayout 侧栏 ✅ 已建成（`CategorySelectionLayout.vue`）·
+> P6 搜索框 ✅ 已建成（内联在 `CreateStepSelections.vue`）·
+> P2 SelectableCard 增强 🔶 部分（整卡可点击已有，且正是 UI-01 那个缺口的所在）·
+> P3 SelectedPanel 聚合 / P4 禁用逻辑补全 / P5 响应式适配 ⬜ 未见落地
+> （P4 那条尤其重要 —— 它就是 UI-01）。
+>
+> 保留本文是为了留住当年的对比取证与 UX 论述，**不是**为了当路线图用。
+
+> 对比: 原版 `custom_start_index.html`（🪦 已随内容分离移入私有内容仓，公开仓侧不可见）
+> vs 2026-06 的 `src/ui/components/create/`
 > 目标: 找出 UI/UX/逻辑 层面的具体差距，按优先级列出待改进项
 
 ---
@@ -40,7 +61,7 @@
 
 ---
 
-### 1.2 属性面板: 列表 → 5 列表格 ⭐ 最重要
+### 1.2 属性面板: 列表 → 5 列表格 ⭐ 最重要 —— ✅ 2026-08-18 复核：已建成
 
 **原版** (属性面板表格):
 
@@ -137,6 +158,11 @@
 
 当前也做了 (`v-if="store.race === '自定义'"`)，但用的是 `FormInput` 而非 `FormTextarea`，且位置可以更紧凑（缩小与上方 select 的间距）。
 
+> 🪦 2026-08-18 复核：`FormTextarea` **在本仓从未落地**（它是原版参考页的组件）。
+> `src/ui/components/shared/form/` 只有 `FormInput` / `FormSelect` / `FormStepper` 三个 ——
+> `FormCascader.vue` 与 `FormKeyValue.vue` 已于 2026-08-17 因全仓零引用随审查小修波删除
+> （恢复走 git 历史 `8e6565c^`）。照本节去 import `FormTextarea` 会直接编译不过。
+
 **建议**: 把"自定义"选项统一加标记（如 `「自定义种族」✦`），且自定义输入框与上方 select 间距缩小为 0（看起来像是 select 展开的一部分）。
 
 ---
@@ -181,7 +207,10 @@ Lv. [stepper] → 第一层级 (Lv.1-4)
 
 ## 二、Step 3: 装备与技能选择
 
-### 2.1 分类导航: 水平 Tabs → 垂直侧栏 ⭐ 最重要
+> 🔵 2026-08-18 复核：该步骤**现在是 Step 4** —— 命定核心之后插了一步「角色启用」，
+> 全流程从 7 步变 8 步（见 `current_state.md` §一）。本章其余部分仍按旧编号书写。
+
+### 2.1 分类导航: 水平 Tabs → 垂直侧栏 ⭐ 最重要 —— ✅ 2026-08-18 复核：已建成
 
 **原版** (`CategorySelectionLayout`):
 
@@ -227,7 +256,9 @@ Lv. [stepper] → 第一层级 (Lv.1-4)
 | 选中计数 | 侧栏按钮上显示 badge (装备 (3)) | 无                              |
 | 视觉层次 | 侧栏 + 工具栏 + 内容三层清晰    | 全部堆叠，层次模糊              |
 
-**建议**: 实现 `CategorySelectionLayout` 模式：
+**建议**（🔵 已照做：`src/ui/components/create/CategorySelectionLayout.vue`，
+`CreateStepSelections.vue` 以 `sidebar-width="13em"` 消费；侧栏按**分组 key**
+（剑类武器/头部防具/戒指…）而不是三大类，已选计数 badge 未做）: 实现 `CategorySelectionLayout` 模式：
 
 - 左侧 140-160px 垂直侧栏导航
 - 每个分类按钮显示已选数量 badge
@@ -385,6 +416,11 @@ function isDisabled(item) {
 
 **建议**: 在 `create-store.ts` 的 `canSelect` computed 中加入种族/身份/唯一性检查。
 
+> 🔴 **2026-08-18 复核：本条仍未修，且已升级为 P0 缺陷 UI-01**。现行 `canSelect` 存在，
+> 但三层都漏：卡片级 click 守卫守不住内层「选择」按钮（`SelectableCard.vue` 无条件
+> `$emit('select')` 且 `@click.stop`），`addEquipment/addItem/addSkill` 一次都不调 `canSelect`。
+> 详见 `docs/known-issue.md` §UI-01 与 `docs/reviews/2026-08-12-ui-review.md` §UI-01。
+
 ---
 
 ### 3.2 种族切换时自动清理技能
@@ -435,6 +471,9 @@ watch(
 **当前**: 只有 QualityFilter + type buttons，无文本搜索。
 
 **建议**: 在 pool-pane 顶部添加搜索 input，支持按名称/tag 文本过滤。
+
+> ✅ 2026-08-18 复核：已建成 —— 搜索框内联在 `CreateStepSelections.vue`（`searchText` +
+> 空态分「无搜索结果」/「该分类暂无物品」），没有拆成独立组件。
 
 ---
 
@@ -570,16 +609,19 @@ watch(
 
 ## 六、当前实现的优势 (不要丢掉!)
 
-| 优势                | 说明                             |
-| ------------------- | -------------------------------- |
-| TypeScript          | 类型安全，原版纯 JS              |
-| 主题系统            | 10 主题可切换，原版写死暖色      |
-| ResourceBar 预览    | Step 1 就能看到 HP/MP/SP         |
-| 难度选择 + 命定核心 | 原版没有的 Step 0/2              |
-| 剧情规划            | 原版没有的 AI 大纲               |
-| 组件拆分            | 20 个独立 .vue，原版单文件 341KB |
-| Vite 编译           | 本地构建，原版 CDN 依赖          |
+| 优势                | 说明                                                                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| TypeScript          | 类型安全，原版纯 JS                                                                                                   |
+| 主题系统            | 10 主题可切换，原版写死暖色                                                                                           |
+| ResourceBar 预览    | Step 1 就能看到 HP/MP/SP                                                                                              |
+| 难度选择 + 命定核心 | 原版没有的 Step 0/2                                                                                                   |
+| 剧情规划            | 原版没有的 AI 大纲                                                                                                    |
+| 组件拆分            | 20 个独立 .vue，原版单文件 341KB（🔵 2026-08-18：现为 **22 个 .vue + 6 个 .test.ts**，逐个见 `current_state.md` §二） |
+| Vite 编译           | 本地构建，原版 CDN 依赖                                                                                               |
 
 ---
 
 _文档结束。建议优先解决 P0-P2，这三个改动对用户体验提升最大。_
+
+_🔵 2026-08-18 复核：P0/P1/P6 已建成，P2 部分；真正还欠着的是 P4（禁用逻辑）——
+它就是仍未修的 P0 缺陷 UI-01。历史存档，勿当路线图。_

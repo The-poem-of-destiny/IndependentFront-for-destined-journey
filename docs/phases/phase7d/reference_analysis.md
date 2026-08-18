@@ -1,7 +1,13 @@
 # Phase 7d 原版捏人页参考分析 — 页面架构与逻辑
 
-> 分析对象: `reference/custom_start_index.html` (341KB, Vue 3 SPA, 单文件编译产物)
+> 分析对象: 原版捏人页 `custom_start_index.html` (341KB, Vue 3 SPA, 单文件编译产物)
 > 用途: 重构 CreatePage.vue 时的架构与逻辑参考。重点：页面架构 / 组件结构 / 数据流 / 关键逻辑。
+>
+> 🔴 **2026-08-18 更正：这份原页面已不在公开仓里。** 它随内容分离移入了私有内容仓
+> `fated_poem_independent_assets`（公开仓根目录的 `reference/` 已被 `.gitignore` 整树排除），
+> 本机路径 `E:\Projects\POD-IF\fated_poem_independent_assets\reference\custom_start_index.html`
+> —— 口径与路径以根 `AGENTS.md`「前端 UI 参考（Phase 7 必读）」一节为准。
+> 没挂私有内容仓的环境（含 CI 与外部贡献者）读不到它，**本文就是公开仓侧的等效摘录**，够用。
 
 ---
 
@@ -1190,6 +1196,13 @@ function findMatchingPreset(character, selections, background) {
 
 ## 十一、原版 vs 当前实现 关键差异
 
+> 🔵 **2026-08-18 复核：右列是 2026-06 的「当前」，四行已经不对**（原文保留，逐行标在下面）：
+> 步骤数 → **8 步**（难度/基础/核心/**角色启用**/装备/背景/剧情/**确认提交**）·
+> 框架 → 没有 Router（`App.vue` 与 `CreatePage.vue` 都是「computed 选组件」）·
+> 数据来源 → `start-catalog.ts` 已无内联常量（D24：背景/核心/费用/地点走内容注册表
+> `public/data/content/catalog.json`，装备/道具/技能仍从上游仓库 CDN fetch）·
+> 测试 → 已有 6 个 `.test.ts`。现行状态以 `current_state.md` 为准。
+
 | 维度        | 原版 (custom_start_index.html)                        | 当前 Phase 7d 实现                                                         |
 | ----------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
 | 步骤数      | **4 步** (信息/选择/背景/确认)                        | **7 步** (难度/基础/核心/选择/背景/剧情/确认)                              |
@@ -1241,4 +1254,11 @@ function findMatchingPreset(character, selections, background) {
 
 ---
 
-_文档结束。新 session 重构时请参考此文档了解原版页面架构，结合 `docs/phases/phase7d/current_state.md` 了解当前实现状态。_
+_文档结束。新 session 重构时请参考此文档了解原版页面架构，结合
+`docs/phases/phase7d/current_state.md`（2026-08-18 按现行代码重写：8 步流程 / 22 组件 + 6 测试 /
+数据来源 / 已知问题）了解当前实现状态。_
+
+_🔵 2026-08-18 复核：§十一 对照表里「当前 Phase 7d 实现」那一列是 2026-06 的口径，
+其中两行已经不对 —— 步骤数是 **8 步**（多了「角色启用」，末步文案「确认提交」），
+框架那行的「Router」在本仓从未存在（全应用没有 vue-router，`App.vue` 是视图状态机），
+测试那行的「待写」现为 create 目录下 6 个 `.test.ts`。以 `current_state.md` 为准。_

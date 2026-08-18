@@ -6,7 +6,7 @@
 `/licenses/<文件名>` 直接访问；设置页「关于」分区也列出了同一份清单。
 
 在 2026-08-05 之前，这些资源是从 Google Fonts 与 cdnjs **运行时加载**的。改为自托管的
-理由见 `docs/design.md` §7.5。
+理由见 `docs/design.md` §7.4「字体从哪来 —— 自托管，零外部请求」。
 
 ## 分发中的字体
 
@@ -38,8 +38,9 @@
 🔴 CC BY 4.0 的署名义务是**唯一一条要求界面上可见**的 —— 光把许可证文件放进 `dist/`
 不够。署名写在 `AboutSection.vue`，删它之前先想清楚这一条。
 
-只打包用到的两套：`fontawesome.css` + `solid.css` + `regular.css`（`fa-solid` 221 处、
-`fa-regular` 2 处）。**不引 `brands.css`** —— 全仓零处使用，省掉 `fa-brands-400.woff2`。
+只打包用到的两套：`fontawesome.css` + `solid.css` + `regular.css`（截至 2026-08-18 复核：
+`src/` 下 `fa-solid` 237 处、`fa-regular` 4 处，数字仅作量级参考，会随 UI 变动）。
+**不引 `brands.css`** —— 全仓零处使用，省掉 `fa-brands-400.woff2`。
 
 ## 刻意**没有**自托管的字体
 

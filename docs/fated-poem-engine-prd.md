@@ -1,5 +1,31 @@
 # Product Requirements Document: IndependentFront-for-destined-journey
 
+> 🔴 **状态：定稿于 2026-06-21，产品论题仍然有效，但所有量化与范围性陈述已过期（复核日 2026-08-18）。**
+>
+> 本文回答的是「**为什么做**」——那部分没有过时：Prompt vs Code 边界（确定性归代码、创造性归 AI）、
+> 多 Agent DAG 编排与上下文可见性隔离、玩家画像（AIRP 玩家 / 角色卡作者）三条论题**仍是项目现行 thesis**，
+> ADR-11 / ADR-19 / ADR-20 至今照此执行。
+>
+> 但本文回答「**做成什么样**」的那部分（表格、计数、阶段编号、技术选型、Out of Scope / Post-MVP 清单）
+> 已被两个月的实现甩开，**不要照本文的数字改代码或写文档**。主要偏差：
+>
+> | 本文写的                            | 2026-08-18 现状                                                                                                     |
+> | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+> | Agent 管线 6 阶段（Stage 0→5）      | **4 层并行 DAG**（`DEFAULT_AGENT_PIPELINE`，2026-08-16 并行化重排；含 `agentWaitFor` 逐 Agent 依赖，避免同层连坐）  |
+> | IndexedDB 10 表                     | **约 30 表，`DB_VERSION = 22`**（`src/sillytavern/database.ts`）                                                    |
+> | 2121 tests                          | **342 个 `*.test.ts`、8600+ 用例**                                                                                  |
+> | Agent 名单按本文正文枚举            | **13 个 Agent**（`public/data/defaults/agent-config.json`，含 `request_dispatcher` / `combat_v3` / `image_prompt`） |
+> | EJS 沙盒 = `new Function()` 隔离    | **QuickJS wasm realm 真隔离**（`ejs-quickjs-backend.ts` / `script-quickjs-backend.ts` / `script-backend.ts`）       |
+> | 前端端口 `localhost:5174`           | **5173**（`vite.config.ts`，`npm run dev` 固定端口）                                                                |
+> | Out of Scope：function calling      | **已交付**（Phase 8.5 Agentic Agent，`agent-tools.ts`）                                                             |
+> | Post-MVP：创意工坊社区化 / 流式 SSE | **均已交付**（工坊 P1-P4 含社交面；`chatStream` 流式正文）                                                          |
+>
+> 另有本文成文后才有的大块系统（战斗 v2 已退役、v3 战斗主持人内核、地图 v1、随机事件 v1、图像生成 v1/v2、
+> 内容分离、远程素材 v1 等），本文完全没有覆盖。
+>
+> **现状以根 [`AGENTS.md`](../AGENTS.md)（进度表 + ADR）与 [`docs/ARCHITECTURE.md`](./ARCHITECTURE.md) 为准**；
+> 逐 Phase 的详细交付记录在 [`docs/CHANGELOG.md`](./CHANGELOG.md)。本文按「历史决策记录」保留原文，不逐条回改。
+
 **Version**: 1.0
 **Date**: 2026-06-21
 **Author**: Sarah (Product Owner)
@@ -301,13 +327,21 @@ IndependentFront-for-destined-journey（命定之诗独立前端）是一个独�
 
 ### References
 
-- [CLAUDE.md](../CLAUDE.md) — 项目工作指导 & 架构总览
+> 🔴 下列链接已于 2026-08-18 复核；标注失效/改道的两条按现状更正，其余保持原样。
+
+- [AGENTS.md](../AGENTS.md) — **指令正文唯一真源**（约定 / ADR / 提交前检查 / 进度速览）
+- [CLAUDE.md](../CLAUDE.md) — Claude Code 薄壳（`@AGENTS.md` 导入正文 + skills/workflows 用法）
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — 完整软件+世界观架构
-- [task_plan.md](./planning/task_plan.md) — 9 Phase 实施计划
-- [progress.md](./planning/progress.md) — 开发进度日志
+- [CHANGELOG.md](./CHANGELOG.md) — **开发进度与逐 Phase 交付记录的现行归属地**
+  （原先此处指的 `progress.md` 仍在仓库里，已归档为 `docs/archive/planning/progress.md`，
+  但只记到 2026-06 早期 Phase，已停止维护，不要当现状读）
+- [task_plan.md](./archive/planning/task_plan.md) — 9 Phase 实施计划（已归档；成文期计划，阶段编号已不对应现状）
 - [phase8_plan.md](./phases/phase8/phase8_plan.md) — Agent 上下文可见性 & Prompt 体系
 - [effect_script_system.md](./reference/effect_script_system.md) — 词条效果 & 脚本系统架构
-- [world_book_index.md](../reference/world_book_index.md) — 世界书条目索引（605 条目）
+- `world_book_index.md` — 世界书条目索引（605 条目）。🔴 **已随内容分离移入私有内容仓
+  `fated_poem_independent_assets`，公开仓侧不可见**（根 `reference/` 已被 `.gitignore` 整树排除），
+  原链接 `../reference/world_book_index.md` 失效。本机路径见根 `AGENTS.md`「世界观数据参考」一节；
+  没挂私有内容仓的环境（含 CI 与外部贡献者）读不到它 —— 此时不要盲改数值/世界观。
 
 ---
 

@@ -18,12 +18,38 @@
 - `AGENTS.md` — 新增模块、架构变更、Phase 进展更新时需同步（进度表只留速览，详细记录进 `docs/CHANGELOG.md`）
 - `docs/` — 设计文档目录，架构变更时需更新对应阶段文档
 - `docs/CHANGELOG.md` — 近期交付的 Phase 详细记录，完成里程碑时追加
-- `reference/agent流程测试/` — Agent 模板/测试工具变更时需同步（`agent预期分析.md` 已于 2026-08-08 删除，移入私有内容仓后按需参考；`对话样本.md` / `要求.md` 仍在私有内容仓）
-- `tests/agent-framework/README.md` — 测试工具用法变更时需同步
+- **私有内容仓**的 `reference/agent流程测试/`（🔴 公开仓侧不存在，路径只在私有内容仓 `fated_poem_independent_assets` 里）— Agent 模板/测试工具变更时需同步（`对话样本.md` / `要求.md` 仍在，`agent预期分析.md` 已于 2026-08-08 删除）
 
 **如果忘了更新，push 之前主人会提醒。但是 agent 应该主动检查。**
 
 **每次向远程仓库 push 后，必须主动检查对应的 GitHub Actions CI 状态；CI 失败时读取失败日志、定位根因并修复，不得只报告 push 成功。**
+
+### 🔴 文档维护守则（2026-08-18 全仓文档普查后立）
+
+> 那次普查（138 份 .md 逐条对码）发现的不是「文档没人写」，而是**六种固定的腐烂模式**。
+> 以下每条对着一种模式；写文档/交付系统时照做，就不用再做一次全仓普查。
+
+1. **状态头随实施走，同一个提交里改。** 系统合入时，其设计文档的状态行必须同步改成
+   「已实施（日期）+ 真机状态」。腐烂样本：图像 v1 挂着「设计定稿，未实施」、地图 v1 挂着
+   「已裁定待实施」各跑了一两周 —— 正文一直有人更新，只有状态行没人碰。
+2. **正文优先加带日期的更正注记，不改写历史。** 只有「本身就是现状快照」的文档
+   （current_state / 导航树 / README / 进度表）才允许整段重写。老化得最好的文档
+   全是在正文就地补「📌 2026-08-x 此条已推翻/已落地」的那批；老化得最差的是
+   状态行撒谎但正文没留任何日期锚点的那批。
+3. **价值已交付就归档。** plan / RFC / handoff 的退出通道是 `docs/archive/`
+   （按原路径镜像，规则见 `docs/archive/README.md`），归档的同一个提交里把仓内引用改指新址。
+   **不归档**：设计契约真源（被本文必读清单或源码注释引用的）、在办工作、
+   审查报告（`docs/reviews/` 是它们自己的存档地，不进 archive/）。
+4. **导航树与磁盘一一对应。** 新增必读文档 → 本文导航树同步加行；归档/移动/退役 → 同步改行。
+   普查里最险的一条毒指针就在导航树：v2 战斗文档退役两周后仍标着「战斗相关必读」，
+   而 v3 真源根本不在树上 —— 文档各自的自述横幅都是对的，误导完全来自导航。
+5. **数字要么当场实测，要么写量级。** 写进文档的计数必须当场从代码/命令数出来并标日期
+   （「2026-08-18 实测」），不许从其他文档抄，也不许从**源码头部注释**抄 ——
+   普查发现 tool 数（17→27）、占位符数（18→31）、测试数三处，文档 / 代码注释 / 旧文档
+   三个来源各自陈旧且互相矛盾。拿不准就写量级（「~30 张表」），别写会过期的精确值。
+6. **审查报告落地即建修复状态闭环表，修复逐条回写。** 仍未修的 P0/P1 必须在报告
+   老化前晋升到 `docs/known-issue.md` / `TODO.md` —— UI-01 那条 P0（禁用装备可选中）
+   曾在唯一一份没有闭环表的审查里静默躺了 6 天。
 
 ### 🟢 纯文档改动可以直推 master（免 PR）
 
@@ -77,6 +103,9 @@ node -e "const fs=require('fs');const f=process.argv[1];const s=fs.readFileSync(
 > **手工命令仍建议在改完当场跑一次**（比等 CI 快），但漏跑不再等于漏网 ——
 > 注意这道自动闸门只覆盖**公开仓侧**（`public/data/` 占位集 + 源码树）；
 > 私有内容仓里那份真实提示词/世界书不在扫描范围内，改那边仍然只能靠手工命令。
+> 🔴 **`docs/` 也不在自动扫描范围内** —— 批量改 docs/ 中文后必须跑手工命令。
+> 唯一豁免：`docs/reference/dev-bat-notes.md` 第 36 行附近有 **4 个刻意保留的 U+FFFD**
+> （引用当年 findstr 乱码 stderr 的原文证据，2026-08-18 核准）；数量不是 4 才是新损伤。
 
 > 配套的一条纪律：在脚本里拼这些转义时，用**原始字符串**或 `chr(92)` 拼，
 > 别在多层引号里堆反斜杠。2026-08-05 那轮就是这样先写坏了 JSON、又写坏了正则；
@@ -93,35 +122,42 @@ node -e "const fs=require('fs');const f=process.argv[1];const s=fs.readFileSync(
 ```bash
 docs/
 ├── fated-poem-engine-prd.md     # 🆕 项目 PRD（产品需求文档，必读）
-├── ARCHITECTURE.md              # 完整软件+世界观架构
-│                                #    ⚠️ 「软件架构」部分内容截止 2026-06，已过期（见文件头横幅）；
-│                                #    结构性判断以本文件 + 两份分册为准。世界观部分仍有效
+├── ARCHITECTURE.md              # 现行软件架构总览（2026-08-18 重写，只写层与层之间的形状）
+│                                #    + 世界观架构。一层内部的模块清单归两份分册，不在这里重复；
+│                                #    2026-06 旧版归档于 archive/ARCHITECTURE-2026-06.md
 ├── CHANGELOG.md                 # 🆕 变更记录（近期 Phase 详细记录，append-only）
 ├── known-issue.md               # 🆕 已知缺陷（有现象、有根因分析的那种）← TODO.md 指定的缺陷归属地
 ├── project-introduction.md      # 项目介绍（对外说明用）
 ├── design.md                    # 前端设计规范（详见下节「前端 UI 设计规范（必读）」）
-├── reviews/                     # 历次代码审查存档（6 份，含修复状态闭环表）
+├── archive/                     # 🆕 已归档历史文档（价值已交付的 plan/RFC/handoff 与被新版取代的旧文档）
+│                                #    按原路径镜像（docs/planning/X → docs/archive/planning/X）；
+│                                #    详见 archive/README.md。归档件只作历史脉络参考，别当现行约定
+├── reviews/                     # 历次代码审查存档（7 份，含修复状态闭环表）
 ├── superpowers/specs/           # 数据字段规范 + 实体字段审计（详见下节「游戏数据字段规范（必读）」）
-├── planning/                    # 会话追踪（task_plan / findings / progress）
-├── phases/                      # Phase 计划
-│   ├── phase4_plan.md           # Phase 4 记忆系统 & 剧情规划
-│   ├── phase7/                  # Phase 7 前端 UI 总体规格
+├── planning/                    # 现行设计文档 + 在办计划（已交付的 plan/RFC/handoff 见 archive/planning/）
+├── phases/                      # Phase 计划（仅存仍在用的两个阶段，其余已归档）
 │   ├── phase7d/                 # Phase 7d 捏人页架构/现状/差距分析
-│   ├── phase7e/                 # Phase 7e 游戏页
-│   │   └── game_page_design.md  # 游戏页设计规划 + 引擎支撑审计（7e 必读）
 │   └── phase8/                  # Phase 8 Agent 上下文可见性
 │       └── phase8_plan.md       # Agent 可见性模型 + 世界书分区 + 预设系统
 ├── reference/                   # 参考文档
-│   ├── status_page_architecture.md     # 状态栏页面架构（7e 必读）
 │   ├── effect_script_system.md         # 词条效果 & 脚本系统架构（引擎必读）
-│   ├── combat-system-architecture.md   # 🆕 战斗系统架构 v2（战斗相关必读）
-│   ├── combat-agent-api.md             # 🆕 战斗 Agent↔引擎 接口规格（combat agent 必读）
+│   ├── combat-system-architecture-v3.md
+│   │                                   # 🆕 战斗系统架构 v3（战斗相关必读 —— 现行真源）
+│   ├── combat-system-architecture.md   # 战斗系统架构 v2 —— **已退役（2026-08-01）**；只剩
+│   │                                   #    §四/§五/§八/§九（效果系统 / Buff 状态 / 8 步伤害管线 /
+│   │                                   #    核心数值）这些纯计算公式仍被 v3 引用，作公式参考
+│   │                                   #    🔴 v2 的 combat-agent-api.md 已归档到 archive/reference/；
+│   │                                   #      现行 combat_v3 契约散在三处：`agent-config.json`
+│   │                                   #      （`combat_v3` 条目）+ `src/sillytavern/agent-tools.ts`
+│   │                                   #      （AGENT_TOOL_MAP）+ `combat-v3/projection-agent.ts`
 │   ├── agent_system_prompt_guide.md    # 🆕 Agent System Prompt 配置流程（架构/步骤/踩坑/检查清单）
+│   ├── agent_template_guide.md         # Agent 占位符模板系统修改指南（改占位符/解析链路先查这份）
 │   ├── debug-loop-handbook.md          # 🆕 游玩→导出→分析→修复 调试循环操作手册（每次发现 bug 必读）
 │   ├── audio_system.md                 # 🆕 音频系统 v1.0 说明书 ← 改音频必读
 │   ├── worldbook-ejs-regex-authoring-guide.md
 │   │                                   # 🆕 世界书 EJS + 输出美化正则创作者规范（作者入口）
 │   ├── story_preset_format.md           # 🆕 Story Agent 预设编写指南（输出标签顺序 + 占位符排列 + 可用宏）
+│   ├── system_card_spec.md             # 系统事件卡片视觉规格（写 `components/game/cards/*.vue` 时参照）
 │   ├── dev-bat-notes.md                # 🆕 dev.bat 说明书 ← **改启动器前必读**
 │                                       #    ①注释必须纯 ASCII（chcp 65001 让 cmd 字节偏移解析器错位，
 │                                       #      注释片段会被**当命令执行**）
@@ -143,6 +179,11 @@ docs/
 ├── planning/2026-07-31-creative-workshop-compat-design.md
 │                                       # 🆕 创意工坊兼容层设计 v2（D1-D17）← 改工坊/世界书存储必读
 │                                       #    Phase 0 世界书迁 Dexie · Phase 1 工坊 · Phase 2 EJS 沙盒（✅ 待真机）
+├── planning/2026-07-31-workshop-phase2-ejs-design.md
+│                                       # 工坊 Phase 2 EJS 沙盒 + 只读 stats 投影（ADR-30 的**设计历史**）
+│                                       #    🔴 部分内容已被 QuickJS 能力面取代（收窄 stats / `new Function`
+│                                       #      边界 / 不支持 await 三处描述作废，见上面那份能力面设计）
+│                                       #    现行**创作者契约**在 reference/worldbook-ejs-regex-authoring-guide.md
 ├── planning/2026-08-04-image-generation-design.md
 │                                       # 🆕 图像生成 v1（v1.1 / D1-D55）← 做文生图必读。**✅ 已实施，待真机**
 │                                       #    v1 范围：NovelAI 单家 + 情景插画（标记当锚点，图就地插进正文）
@@ -155,10 +196,24 @@ docs/
 │                                       # 🆕 图像生成 v1 的 lean-delegation 编排（波次 / 逐任务 brief）
 │                                       #    开头「实际执行情况」一节记的是**实际怎么跑的**（7 波 22 任务）
 │                                       #    与原计划（6 波 19 任务）的每一处偏差及其理由 —— 下次编排照它调
+├── planning/2026-08-08-comfyui-image-provider-design.md
+│                                       # 🆕 图像生成 v2（ComfyUI 本地后端 + 提示词方言，C1-C16）
+│                                       #    ← 改图像 provider 必读。**接续 v1 的 D 编号线**：C 号与 D 号不冲突，
+│                                       #      v1 的裁定除本文明确推翻处一律继续有效
+├── planning/2026-08-05-content-engine-separation-design.md
+│                                       # 🆕 内容-引擎分离设计 v1.2 ← 改内容包/分节必读
+│                                       #    **内容包（content pack）格式契约的真源**：公开仓只带占位内容，
+│                                       #    真实内容由私有仓构建成 pack 导入
 ├── planning/2026-08-11-map-system-v1-integration.md
-│                                       # 🆕 地图系统 v1 集成设计（ADR-31）← 做地图必读。**已裁定待实施**
+│                                       # 🆕 地图系统 v1 集成设计（ADR-31）← 做地图必读。
+│                                       #    **✅ 已实施（2026-08-12），UI 真机走查过**
 │                                       #    地块/静态所有者/混合通行图寻路/天气/落位契约/AI 集成通道
 │                                       #    数据源在 sample-map 仓（CK3 形制），编译期烘 map-pack 进内容仓
+├── planning/2026-08-15-random-event-system-design.md
+│                                       # 🆕 随机事件系统 v1 设计（ADR-32）← 改随机事件必读
+│                                       #    Code 端种子化 MTTH 调度出候选池 → `{{RANDOM_EVENTS}}` 单通道注入
+│                                       #    story → AI 以 `<event_trigger>` 回执 → Code 按名字结算
+│                                       #    事件定义 = 内容包第 13 分节纯 JSON；开关与剧情系统彼此独立
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
@@ -177,6 +232,14 @@ docs/
 ```bash
 docs/design.md  # 完整前端设计规范（排版/间距/组件/装饰/动画/检查清单）
 ```
+
+**🔴 三份设计文档分工不同，别混着读**（找错地方的症状是照着一份「记录」当「规范」改代码）：
+
+- `docs/design.md` — **排版 / 间距 / 组件 / token 基线，唯一硬规范（必读）**。写 UI 代码前看这份。
+- 根目录 `DESIGN.md` — **主题视觉方向 + 已批准的主题识别决策记录**（英文）。里面的数值是首轮迭代默认值、
+  不是铁律：主人反馈、主题识别、文字可读性与实际渲染结果一律优先于它。
+- `docs/archive/design-qa.md` — **主题实施后的 QA 证据存档**（逐次走查记录，按日期追加；2026-08-18 已归档）。
+  它记的是「那一次走查的结果」，不是任何人要遵循的约定。
 
 ## 游戏数据字段规范（必读）
 
@@ -442,7 +505,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 分册                     | 覆盖范围                                                                                  | 位置                                                     |
 | ------------------------ | ----------------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | 引擎层架构（已实现部分） | `src/sillytavern/**` —— 类型/数据库/Agent 编排/战斗/制作/效果系统/图像生成等全部引擎模块  | [`src/sillytavern/AGENTS.md`](src/sillytavern/AGENTS.md) |
-| 前端架构 (Phase 7)       | `src/ui/**` —— composables / lib 桥接层 / stores / components / 设置页 13 分区 / 预设系统 | [`src/ui/AGENTS.md`](src/ui/AGENTS.md)                   |
+| 前端架构 (Phase 7)       | `src/ui/**` —— composables / lib 桥接层 / stores / components / 设置页 14 分区 / 预设系统 | [`src/ui/AGENTS.md`](src/ui/AGENTS.md)                   |
 
 拆分理由：这两份地图加起来约 4.4 万字，占本文件六成，但**只在改对应目录的代码时才用得上**；
 留在根文件里会让每一次会话（哪怕只改文档）都付它们的上下文成本。

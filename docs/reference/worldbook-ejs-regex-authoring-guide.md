@@ -1,7 +1,10 @@
 # 世界书 EJS 与输出美化正则创作指南
 
 > 文档版本：1.0（2026-08-02）<br>
-> EJS 能力面版本：`engine.version === '1.0.0'`<br>
+> EJS 能力面版本：`engine.version === '1.1.0'`（2026-08-18 复核更正；原文写的 `'1.0.0'` 已过期——
+> 实际值来自 `EJS_SURFACE_VERSION`，地图 v1 的 `$map` 只读面纯新增，故升 minor。宿主可用
+> `engineVersion` 覆盖，未覆盖时就是这个默认值。`$map` 的成员说明本指南尚未收录，见
+> `src/sillytavern/ejs-capabilities.ts` 的 `EJS_SURFACE.namespaces.$map`）<br>
 > 适用对象：世界书条目作者、创意工坊项目作者、输出美化规则作者
 
 本文是创作者可依赖的规范入口。它规定世界书条目如何激活、EJS 在何时和什么边界内执行、输出美化正则如何匹配与渲染，以及两类脚本各自能读写什么。
@@ -442,11 +445,19 @@ const selected = rng.pick(candidates) ?? 'A';
 
 ```ts
 engine.name    // 'poem-of-destiny'
-engine.version // '1.0.0'
+engine.version // '1.1.0'（= EJS_SURFACE_VERSION；2026-08-18 复核更正，原文写的 '1.0.0' 已过期）
 engine.has(path)
 ```
 
-`engine.has` 查询硬编码的能力路径，不是任意对象反射。应只用它探测本文和 `engine-ejs.d.ts` 中明确列出的路径。当前 `engine.has('world.isDaytime')` 与 `engine.has('engine.name')` 会返回 `false`，即使成员本身存在；作者不得用这两个结果反推成员不存在。
+`engine.has` 查询硬编码的能力路径，不是任意对象反射。应只用它探测本文和 `engine-ejs.d.ts` 中明确列出的路径。
+
+> ✅ **2026-08-18 复核更正**：原文写「`engine.has('world.isDaytime')` 与 `engine.has('engine.name')` 会返回 `false`，
+> 即使成员本身存在」。**这条缺陷已由 Q-09 修掉** —— 能力路径全表 `CAPABILITY_PATHS` 不再手抄，
+> 改为从唯一真源 `EJS_SURFACE` 展平生成（`src/sillytavern/ejs-capabilities.ts`），探测表与实现自此同源。
+> 这两个路径现在都返回 `true`，守卫分支可以照常写。
+>
+> 遗留的一条纪律不变：**探测结果只在本文与 `engine-ejs.d.ts` 列出的路径上有意义**，
+> 未列出的路径返回 `false` 只说明「不在契约里」，不构成对宿主内部实现的判断。
 
 ### 7.10 `_` 的可移植子集
 

@@ -20,6 +20,63 @@
 
 ---
 
+# Known issue: UI-01 捏人页禁用装备仍可被选中
+
+状态：未修（2026-08-18 复核，代码与 2026-08-12 审查时一致）
+
+来源：`docs/reviews/2026-08-12-ui-review.md` §UI-01（P0，评审原文称「应阻断发布」）。
+
+## 现象
+
+点数不足 / 种族不符 / 身份不符的物品在装备选择步骤会渲染成灰色禁用卡片，但玩家点卡片**内部**
+那颗「选择」按钮仍能把它加进选择集，最终提交出负点数或不满足资格约束的存档。
+
+## 根因
+
+三层校验全部缺席，禁用只是**外观**：
+
+1. `CreateStepSelections.vue:129` 把 `!store.canSelect(item)` 传成卡片的 `disabled` **外观**；
+2. `SelectableCard.vue:26` 的卡片级 click 守卫（`!disabled && !selected`）**只守卡片本体**——
+   内层「选择」按钮在 `SelectableCard.vue:65` 无条件 `$emit('select', item)`，`@click.stop`
+   还顺手挡掉了冒泡，那颗守卫根本轮不到；
+3. store 侧不复核：`addEquipment`/`addItem`/`addSkill`（`create-store.ts:703/713/728`）只查
+   `isSelected` 去重，**一次都没调 `canSelect`**（`create-store.ts:691`）；
+   `CreateStepSelections.vue:43` 的 `handleSelect` 同样是直通。
+
+## 后续修复方向
+
+1. 内层按钮跟着 `disabled` 一起禁用，卡片也不发 select；
+2. store mutation 独立校验 `canSelect` —— 不信任 UI（这是唯一守得住的一层）；
+3. `startJourney()` 落库前做一次完整创建约束总校验；
+4. 补「直接调 mutation」与「点禁用卡片的按钮」两层回归测试。
+
+---
+
+# Known issue: UI-02 游戏页无窄屏降级，右侧 HUD 被裁掉
+
+状态：未修（2026-08-18 复核）
+
+来源：`docs/reviews/2026-08-12-ui-review.md` §UI-02（P1）。
+
+## 现象
+
+游戏页按固定桌面三栏排版，窄视口下不进任何响应式状态：768px 时右侧 StatusHUD 直接从屏幕右边
+消失且无法平移，键盘焦点仍能进到屏幕外的控件；1024px 时中央叙事区已被两侧最小宽度提前挤压。
+
+## 根因
+
+`GamePage.vue:484` 硬编码 `min-width: 900px`，同一条规则里 `width: 100vw` + `overflow: hidden`
+（`GamePage.vue:483/487`）——排版按至少 900px 走，却没有任何横向滚动容器，作为末端 flex 子项的
+HUD 于是被裁掉。现有 1100px 媒体查询只调内部素材，不改外壳状态。
+
+## 关联
+
+与 `TODO.md`「多分辨率 / 多宽高比适配」是同一条线：那条待办覆盖超宽/竖屏/高 DPI，本缺陷是它在
+窄屏一侧最先炸的那个点。修复方向见审查报告 §UI-02（约 1100px 紧凑态 / 约 900px 抽屉化 +
+焦点管理）。
+
+---
+
 # Known issue: EJS 世界书与持久角色状态冲突
 
 状态：新存档生成链已修复；旧污染存档仍需重建（2026-08-03）
@@ -83,6 +140,9 @@ QuickJS。
 
 `request_dispatcher` 仍只负责从 Story 正文识别请求，不直接读取 `system_core`；命定核心的权威
 原文由 Story 与实际创建角色档案的 `char_gen` 读取。
+
+> 🔴 本节结论**自 2026-08-16「管线并行化」（写队列地基 + 4 层管线 + 侧链旁路化）落地后未重新复核**——
+> 那轮改动动了状态落库的时序与顺序，本节的观察是在它之前取的。真机迭代时需要重跑一遍上面三条判据。
 
 ## 影响与临时处理
 

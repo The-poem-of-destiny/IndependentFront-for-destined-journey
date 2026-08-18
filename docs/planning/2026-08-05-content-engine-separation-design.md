@@ -553,6 +553,11 @@ only 对齐）。
   `plot_post_check_prompt_draft.md`、授权协议（公开留指针，白名单）、
   `2026-07-31-combat-v3-stress-test/`（6 件）+ 同名 RFC、ARCHITECTURE.md 364 行起、
   phase7d 四件（上游卡分析）、`status_page_architecture.md`、`task_plan|findings|progress.md`。
+  > 📌 **落地现状（2026-08-18 复核）**：`narrative_context_example.md`、`plot_outline_prompt_draft.md`、
+  > `plot_post_check_prompt_draft.md`、`2026-07-31-combat-v3-stress-test/` 及同名 RFC 已移入私有内容仓
+  > `fated_poem_independent_assets/docs/planning/`（公开仓侧不可见）。
+  > `status_page_architecture.md` 与 `task_plan|findings|progress.md` 最终**未移私有**，改为就地归档到
+  > `docs/archive/`（分别是 `archive/reference/` 与 `archive/planning/`），公开仓侧仍可读。
 - **公开仓清洗（B/C 合并为「keep, cleaned」清单）**：ARCHITECTURE 前 363 行（改题）、
   PRD / project-introduction（引擎叙事重写）、known-issue（妲丽安引文抽象化）、
   zone_visibility_model（示例换通用 fixture）、audio_system（示例地名换占位）、EJS/工坊设计

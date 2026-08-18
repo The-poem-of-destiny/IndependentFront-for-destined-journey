@@ -36,34 +36,50 @@
 
 ### 全局占位符（所有 Agent 都可用）
 
+> 📌 **复核 2026-08-18**：三张表按 `placeholder-registry.ts` 的 `PLACEHOLDER_REGISTRY`（~L427 起）
+> 与 `types.ts` 的 `DEFAULT_AGENT_PIPELINE`（~L461，2026-08-16 起 **4 层并行管线**）重新对过。
+> 逐条说明见 `agent_template_guide.md` 的「占位符完整列表」，那边是这套表的详版。
+
 | 占位符 | 运行时解析为 | 参数 |
 |--------|-------------|------|
 | `{{SYS_PROMPT}}` | System Prompt 内容（预设拼接 / agent-config systemPrompt） | — |
-| `{{LORE_BOOK}}` | 世界书 keyword 激活条目，按 order 排序 | `:limit=N`（截断字符数） |
-| `{{NARRATIVE}}` | 最近 N 轮对话历史（user/assistant 消息对） | `:layers=N`（几轮，默认按 agent 类型）`:slice=N`（每条截断字数） |
+| `{{LORE_BOOK}}` | 世界书激活条目（静态区 + 动态区连拼），按 order 排序 | `:section=static\|dynamic` `:limit=N`（截断字符数） |
+| `{{LORE_BOOK_STATIC}}` | 只取世界书**静态区**（字节稳定，缓存友好） | `:limit=N` |
+| `{{LORE_BOOK_DYNAMIC}}` | 只取世界书**动态区**（含 EJS，装配时求值） | `:limit=N` |
+| `{{NARRATIVE}}` | 最近 N 轮对话历史（user/assistant 消息对） | `:layers=N`（几轮，默认按 agent 类型；`:slice` 已废弃，不再截断） |
 | `{{USER_INPUT}}` | 当前轮用户输入 | — |
 | `{{CHARACTER_STATE}}` | 主角+NPC 状态（按 agent 可见性级别格式化） | — |
 | `{{INVENTORY}}` | 所有角色的背包物品列表 | — |
-| `{{GAME_TIME}}` | 时间/位置/天气/纪元（从 variables 提取） | — |
+| `{{SKILL_STATE}}` | 各角色技能清单 + 开局初始技能声明（尚未落库的那批） | — |
+| `{{QUEST_STATE}}` | 当前所有任务（状态/优先级/目标/进度） | — |
+| `{{GAME_TIME}}` | 存档级时钟 + 位置/天气/季节/纪元等世界键 | — |
+| `{{MAP_CONTEXT}}` | `<map_context>` 块：当前地块 + 一跳邻接 + 天气 + 在途摘要（无地图包 → 空串） | — |
+| `{{RANDOM_EVENTS}}` | `<random_events>` 块：本回合候选事件（池空 / 系统关 / 战斗中 → 空串） | — |
+| `{{RECENT_COMBAT}}` | `<recent_combat>` 块：最近一场**已结算**战斗的事实（缺席 → 空串） | — |
 | `{{ACTIVE_EFFECTS}}` | 角色身上的 Buff/Debuff | — |
 | `{{MEMORY_ENTRIES}}` | Embedding 召回的记忆条目 | `:top_k=N`（限制条数） |
 | `{{PLOT_EVENTS}}` | 活跃 + 待处理的剧情事件 | — |
 
 ### Agent 间通信占位符（从上游 Agent 输出读取）
 
-| 占位符 | 来源 | 可用时机 |
-|--------|------|----------|
-| `{{AGENT.MEMORY_RECALL}}` | memory_recall | Stage 1+ |
-| `{{AGENT.PLOT_PRE_CHECK}}` | plot_pre_check | Stage 1+ |
-| `{{AGENT.STORY}}` | story | Stage 2+ |
-| `{{AGENT.VARS_UPDATE}}` | vars_update | Stage 3+ |
-| `{{AGENT.MEMORY_SUMMARY}}` | memory_summary | Stage 5+ |
-| `{{AGENT.CHAR_UPDATE}}` | char_update | Stage 4+ |
+> 🪦 `{{AGENT.CHAR_UPDATE}}` 已删：char_update 这个 Agent 已并入 `vars_update`
+> （`agent-templates.ts` ~L464），registry 里没有这个 key。现役第六条是
+> `{{AGENT.REQUEST_DISPATCHER}}`。
+
+| 占位符 | 来源 | 产出阶段 | 可用时机 |
+|--------|------|:---:|----------|
+| `{{AGENT.MEMORY_RECALL}}` | memory_recall | Stage 0 | Stage 1+ |
+| `{{AGENT.PLOT_PRE_CHECK}}` | plot_pre_check | Stage 0 | Stage 1+ |
+| `{{AGENT.STORY}}` | story | Stage 1 | Stage 2+ |
+| `{{AGENT.REQUEST_DISPATCHER}}` | request_dispatcher | Stage 2 | Stage 3+ |
+| `{{AGENT.MEMORY_SUMMARY}}` | memory_summary | Stage 2 | Stage 3+ |
+| `{{AGENT.VARS_UPDATE}}` | vars_update | Stage 3 | 主 DAG 内无下游（侧链/调试可读） |
 
 ### 链占位符（由编排层注入，不出现在普通模板中）
 
 | 占位符 | 注入方 | 消费者 |
 |--------|--------|--------|
+| `{{IMAGE_REQUEST}}` | scene-image-store 的 `runPromptAgent` 缝 → `callImagePromptAgent` | image_prompt |
 | `{{CRAFT_REQUEST}}` | craft-gen-chain | craft_gen |
 | `{{CHAR_DETECT}}` | char-gen-agent | char_gen |
 | `{{ITEM_REQUEST}}` | craft-gen-chain / char-gen-agent | item_gen |
@@ -105,8 +121,8 @@
 ### 途径 2：直接编辑 agent-config.json（批量修改 / 程序化更新）
 
 ```bash
-# 文件位置
-data/defaults/agent-config.json
+# 文件位置（磁盘路径带 public/，运行期 URL 仍是 /data/defaults/agent-config.json）
+public/data/defaults/agent-config.json
 ```
 
 每个 Agent 有两个关键字段：
@@ -143,19 +159,26 @@ data/defaults/agent-config.json
 
 以下是引擎内置的默认模板（即 `getDefaultTemplate()` 的返回值）。用户可以在设置页覆盖。
 
+> 📌 **本表 2026-08-18 按 `placeholder-registry.ts` 的 `DEFAULT_TEMPLATES`（~L805 起）逐条重生成**。
+> 三处与旧表的实质差异：①story 的 `{{LORE_BOOK}}` 已拆成 **STATIC 在 `{{CHARACTER_STATE}}` 之前、
+> DYNAMIC 在其之后**，并多了 `{{RANDOM_EVENTS}}`；②`char_update` 行**删除**——该 Agent 已并入
+> `vars_update`（`agent-templates.ts` ~L464），registry 里没有它的模板；③补上 `request_dispatcher`
+> 与 `image_prompt` 两行。另外 `:slice=N` 参数整体废弃（`{{NARRATIVE}}` 不再截断），故表中只留 `layers`。
+
 | Agent | 默认模板 |
 |-------|---------|
-| **story** | `{{SYS_PROMPT}}` `{{AGENT.MEMORY_RECALL}}` `{{AGENT.PLOT_PRE_CHECK}}` `{{LORE_BOOK}}` `{{CHARACTER_STATE}}` `{{GAME_TIME}}` `{{NARRATIVE}}` `{{USER_INPUT}}` |
-| **memory_recall** | `{{SYS_PROMPT}}` `{{MEMORY_ENTRIES}}` `{{NARRATIVE:layers=3:slice=800}}` `{{USER_INPUT}}` |
-| **plot_pre_check** | `{{SYS_PROMPT}}` `{{PLOT_EVENTS}}` `{{AGENT.MEMORY_RECALL}}` `{{NARRATIVE:layers=3:slice=1000}}` `{{USER_INPUT}}` |
-| **vars_update** | `{{SYS_PROMPT}}` `{{AGENT.STORY}}` `{{CHARACTER_STATE}}` `{{LORE_BOOK}}` |
-| **char_update** | `{{SYS_PROMPT}}` `{{AGENT.STORY}}` `{{AGENT.VARS_UPDATE}}` `{{CHARACTER_STATE}}` `{{NARRATIVE:layers=1:slice=800}}` |
-| **memory_summary** | `{{SYS_PROMPT}}` `{{AGENT.STORY}}` `{{NARRATIVE:layers=4:slice=1500}}` |
-| **plot_post_check** | `{{SYS_PROMPT}}` `{{AGENT.STORY}}` `{{AGENT.MEMORY_SUMMARY}}` `{{PLOT_EVENTS}}` `{{CHARACTER_STATE}}` `{{NARRATIVE:layers=4:slice=1000}}` |
-| **plot_outline** | `{{SYS_PROMPT}}` `{{PLOT_EVENTS}}` `{{NARRATIVE:layers=3:slice=1000}}` |
-| **craft_gen** | `<世界设定>` `{{LORE_BOOK}}` → `<制作者状态>` `{{CHARACTER_STATE}}` → `<可用材料>` `{{INVENTORY}}` → `<本次制作需求>` `{{CRAFT_REQUEST}}` → `<当前剧情>` `{{NARRATIVE}}` ★ |
-| **char_gen** | `<世界设定>` `{{LORE_BOOK}}` → `<已有角色>` `{{CHARACTER_STATE}}` → `<当前剧情场景>` `{{NARRATIVE}}` → `<新角色描述>` `{{CHAR_DETECT}}` ★ |
-| **item_gen** | `<可用物品库>` `{{INVENTORY}}` → `<角色生成结果>` `{{CHAR_GEN_RESULT}}` → `<制作结果>` `{{CRAFT_RESULT}}` → `<物品需求>` `{{ITEM_REQUEST}}` ★ |
+| **story** | `{{SYS_PROMPT}}` `{{AGENT.MEMORY_RECALL}}` `{{AGENT.PLOT_PRE_CHECK}}` `{{LORE_BOOK_STATIC}}` `{{CHARACTER_STATE}}` `{{LORE_BOOK_DYNAMIC}}` `{{GAME_TIME}}` `{{RANDOM_EVENTS}}` `{{NARRATIVE}}` `{{USER_INPUT}}`（🔴 `{{RANDOM_EVENTS}}` 刻意排在动态区之后、对话历史之前：它每回合都可能变，放前面会打碎前缀缓存；块自带 `<random_events>` 外壳，别再包中文标签） |
+| **memory_recall** | `{{SYS_PROMPT}}` `{{MEMORY_ENTRIES}}` `{{NARRATIVE:layers=3}}` `{{USER_INPUT}}` |
+| **plot_pre_check** | `<剧情事件库>` `{{PLOT_EVENTS}}` → `<记忆召回>` `{{AGENT.MEMORY_RECALL}}` → `<最近对话>` `{{NARRATIVE:layers=3}}` → `<用户输入>` `{{USER_INPUT}}` ★（`{{PLOT_EVENTS}}` 在管线里被 `localParams` 覆盖成富上下文块） |
+| **request_dispatcher** | `<世界设定>` `{{LORE_BOOK_STATIC}}` → `<已有角色>` `{{CHARACTER_STATE}}` → `<已有物品>` `{{INVENTORY}}` → `<已有技能>` `{{SKILL_STATE}}` → `<动态状态>` `{{LORE_BOOK_DYNAMIC}}` → `{{RECENT_COMBAT}}`（自带外壳，不包标签）→ `<正文内容>` `{{AGENT.STORY}}` → `<用户输入>` `{{USER_INPUT}}` ★ |
+| **vars_update** | `<世界设定>` `{{LORE_BOOK_STATIC}}` → `<已有角色>` `{{CHARACTER_STATE}}` → `<已有物品>` `{{INVENTORY}}` → `<动态状态>` `{{LORE_BOOK_DYNAMIC}}` → `<调度器输出>` `{{AGENT.REQUEST_DISPATCHER}}` → `<正文内容>` `{{AGENT.STORY}}` → `<最近对话>` `{{NARRATIVE:layers=1}}` ★ |
+| **memory_summary** | `{{SYS_PROMPT}}` `{{AGENT.STORY}}` `{{NARRATIVE:layers=4}}` |
+| **plot_post_check** | `<剧情事件库>` `{{PLOT_EVENTS}}` → `<角色状态>` `{{CHARACTER_STATE}}` → `<最近对话>` `{{NARRATIVE:layers=4}}` → `<用户输入>` `{{USER_INPUT}}` → `<本轮正文>` `{{AGENT.STORY}}` → `<本轮记忆总结>` `{{AGENT.MEMORY_SUMMARY}}` ★ |
+| **plot_outline** | `<角色背景>` `{{CHARACTER_STATE}}` → `<剧情配置>` `{{PLOT_EVENTS}}` → `<世界设定>` `{{LORE_BOOK_STATIC}}` → `<动态状态>` `{{LORE_BOOK_DYNAMIC}}` → `<用户指令>` `{{USER_INPUT}}` ★ |
+| **craft_gen** | `<世界设定>` `{{LORE_BOOK_STATIC}}` → `<制作者状态>` `{{CHARACTER_STATE}}` → `<可用材料>` `{{INVENTORY}}` → `<动态状态>` `{{LORE_BOOK_DYNAMIC}}` → `<本次制作需求>` `{{CRAFT_REQUEST}}` → `<当前剧情>` `{{NARRATIVE:layers=1}}` ★ |
+| **char_gen** | `<世界设定>` `{{LORE_BOOK_STATIC}}` → `<已有角色>` `{{CHARACTER_STATE}}` → `<动态状态>` `{{LORE_BOOK_DYNAMIC}}` → `<当前剧情场景>` `{{NARRATIVE:layers=1}}` → `<新角色描述>` `{{CHAR_DETECT}}` ★ |
+| **item_gen** | `<世界设定>` `{{LORE_BOOK_STATIC}}` → `<可用物品库>` `{{INVENTORY}}` → `<动态状态>` `{{LORE_BOOK_DYNAMIC}}` → `<角色生成结果>` `{{CHAR_GEN_RESULT}}` → `<制作结果>` `{{CRAFT_RESULT}}` → `<物品需求>` `{{ITEM_REQUEST}}` ★ |
+| **image_prompt** | `<世界设定>` `{{LORE_BOOK_STATIC}}` → `<本次插画需求>` `{{IMAGE_REQUEST}}` ★（图像 v1 的 G 阶段侧链，由情景插画队列唤起、**不走主 DAG**；刻意短——挂便宜快模型，机械转换不需要整套世界观，世界书默认关） |
 | **combat_v3** | `<战斗指令>` `{{COMBAT_BRIEF}}` → `<参战方>` `{{COMBAT_ROSTER}}` → `<世界设定>` `{{LORE_BOOK_STATIC}}` ★（真源为 `agent-config.json` 的 `combat_v3.template`，未注册 `getDefaultTemplate`；由 `renderOpeningCombatMessage` 三级回退取用。2026-08-10 真机 debug 后删除全部玩家视角区——`<玩家输入>`/`<触发正文>`/`<最近对话>` 不再注入敌方 Agent，防止它替玩家做决定） |
 
 > ★ 标记的为 Phase 10 模板系统已完成结构化的 Agent（含 XML 分区标签 + 注释）。占位符按缓存优化顺序排列：稳定在上、高频动态在下。
@@ -247,12 +270,20 @@ LLM API 的 prompt caching 从头部做前缀匹配。把**不常变**的放上�
 
 ### 已完成结构化的 Agent
 
+> 📌 **复核 2026-08-18**：结构化范围早已不止三个 Agent，本表按 `DEFAULT_TEMPLATES` 重列。
+
 | Agent | 状态 | 分区数 |
 |-------|:---:|:---:|
-| craft_gen | ✅ 完成 | 5 区 (<世界设定>/<制作者状态>/<可用材料>/<本次制作需求>/<当前剧情>) |
-| char_gen | ✅ 完成 | 4 区 (<世界设定>/<已有角色>/<当前剧情场景>/<新角色描述>) |
-| item_gen | ✅ 完成 | 4 区 (<可用物品库>/<角色生成结果>/<制作结果>/<物品需求>) |
-| 其他 8 个 | ⬜ 待迁移 | 仍为裸占位符拼接 |
+| craft_gen | ✅ 完成 | 6 区 (<世界设定>/<制作者状态>/<可用材料>/<动态状态>/<本次制作需求>/<当前剧情>) |
+| char_gen | ✅ 完成 | 5 区 (<世界设定>/<已有角色>/<动态状态>/<当前剧情场景>/<新角色描述>) |
+| item_gen | ✅ 完成 | 6 区 (<世界设定>/<可用物品库>/<动态状态>/<角色生成结果>/<制作结果>/<物品需求>) |
+| request_dispatcher | ✅ 完成 | 7 区 + `{{RECENT_COMBAT}}`（自带 `<recent_combat>` 外壳，不额外包标签） |
+| vars_update | ✅ 完成 | 7 区 (<世界设定>/<已有角色>/<已有物品>/<动态状态>/<调度器输出>/<正文内容>/<最近对话>) |
+| plot_pre_check | ✅ 完成 | 4 区 (<剧情事件库>/<记忆召回>/<最近对话>/<用户输入>) |
+| plot_post_check | ✅ 完成 | 6 区 (<剧情事件库>/<角色状态>/<最近对话>/<用户输入>/<本轮正文>/<本轮记忆总结>) |
+| plot_outline | ✅ 完成 | 5 区 (<角色背景>/<剧情配置>/<世界设定>/<动态状态>/<用户指令>) |
+| image_prompt | ✅ 完成 | 2 区 (<世界设定>/<本次插画需求>) |
+| story / memory_recall / memory_summary | ⬜ 仍为裸占位符拼接 | story 走预设系统（真源是预设条目，不在这条路上）；另两个刻意保持极简 |
 
 ---
 3. **输出格式？** XML / JSON / 纯文本？
@@ -264,7 +295,7 @@ LLM API 的 prompt caching 从头部做前缀匹配。把**不常变**的放上�
 
 **A. 前端写**（推荐）：设置 → Agent 配置 → System Prompt textarea → 保存为默认
 
-**B. 直接写 JSON**：编辑 `data/defaults/agent-config.json` → `agents.<agentId>.systemPrompt`
+**B. 直接写 JSON**：编辑 `public/data/defaults/agent-config.json` → `agents.<agentId>.systemPrompt`
 
 内容模板（参照 craft_gen / char_gen 的标准）：
 
@@ -395,7 +426,7 @@ npm run test -- --run
 # → 点击 🔍模板预览 → 彩色标签展示
 
 # 4. JSON 合法性（如果直接改了 JSON）
-node -e "JSON.parse(require('fs').readFileSync('data/defaults/agent-config.json','utf8')); console.log('OK')"
+node -e "JSON.parse(require('fs').readFileSync('public/data/defaults/agent-config.json','utf8')); console.log('OK')"
 ```
 
 ---
@@ -417,12 +448,20 @@ Story Agent 用**预设系统**替代 plain text systemPrompt。预设 = `prompt
 name: "📥 动态注入"
 content: "{{AGENT.MEMORY_RECALL}}
 {{AGENT.PLOT_PRE_CHECK}}
-{{LORE_BOOK}}
+{{LORE_BOOK_STATIC}}
 {{CHARACTER_STATE}}
+{{LORE_BOOK_DYNAMIC}}
 {{GAME_TIME}}
 {{NARRATIVE}}
 {{USER_INPUT}}"
 ```
+
+> 📌 **复核 2026-08-18**：上面这段就是 `preset-loader.ts` 的 `DEFAULT_STORY_CONTEXT_BLOCK`
+> （旧预设缺 `📥 动态注入` 条目时引擎自动追加的那一份），世界书已按静/动两区拆开。
+> 引擎给 story 的**默认模板**（`getDefaultTemplate('story')`）比它多一个 `{{SYS_PROMPT}}` 和一个
+> `{{RANDOM_EVENTS}}`。自动追加块里没有随机事件占位符，但**不必手动补**——
+> `agent-templates.ts` (~L754) 对 story 有一条兜底：渲染路径里找不到 `{{RANDOM_EVENTS}}` 时，
+> 引擎在结果末尾追加该块（空池返空串，零 token）。想控制它出现的**位置**才需要自己写这一行。
 编辑这个条目的 content 即可调整注入顺序和参数。
 
 ### 旧 ST 预设兼容

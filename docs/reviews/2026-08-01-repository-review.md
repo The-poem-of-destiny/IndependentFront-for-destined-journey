@@ -164,6 +164,8 @@ Commit [`d1852867...`](https://github.com/The-poem-of-destiny/IndependentFront-f
 
 The anonymous public corpus snapshot covers 303 projects and all 99 observed regexes (zero compile failures). The compatibility surface retains inline CSS/scripts, event attributes, fenced full documents, persistent regex storage, automatic height, remote assets, and native network calls. The report's eight storage hits are lexical; exact review found six active rules across five projects plus two comment-only false positives, and every active rule uses only `getItem`/`setItem`/`removeItem`, now covered by the shared mirror. The sixty external-origin rules are no longer degraded; persisted obsolete offline notes are filtered. This closes the credential/parent-DOM path without deleting the compatibility surface. It deliberately permits requests to remote or local networks and exfiltration of narrative or regex-namespace data visible to a rule. It does **not** solve hostile regex backtracking or script CPU loops. Sixteen rules still reach for parent/top/opener and fourteen still expect host APIs, so the workshop entry remains disabled pending broader visual QA and execution budgets. See `docs/reviews/2026-08-02-workshop-regex-compatibility.md`.
 
+**Status correction (2026-08-18):** The final sentence above is the one materially outdated line in this section. **The workshop entry was opened on 2026-08-04**: `HomePage.vue` sets `const WORKSHOP_ENTRY_ENABLED = true` (verified at `890f3ec`), and `SettingsPage.workshop-entry.test.ts` now pins the settings-page entry so it cannot silently disappear. The execution boundary described in the paragraph above did **not** change when the entry opened — it is still the required reading before touching workshop/regex code. The one gap the opening decision explicitly accepted is that **regex scripts still have no CPU budget** (a hostile rule can spin its own iframe; the host page is unaffected). See the `工坊入口已开放（2026-08-04）` entry under `进度表长注归档` in `docs/CHANGELOG.md` for the full, still-current statement of that boundary.
+
 ### Evidence
 
 At the reviewed commit, the workshop regex mapper intentionally copied `replaceString` unchanged, preserved its enabled state, and did not strip HTML. The beautifier first escaped raw model text, but then applied replacement strings as trusted output. `useBeautify` returned the resulting HTML, and `ChatFlow.vue` rendered both completed and streaming assistant content with `v-html`.
@@ -224,6 +226,8 @@ The implemented alternative keeps active workshop markup for compatibility but m
 - [`src/sillytavern/worldbook-loader.ts`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/src/sillytavern/worldbook-loader.ts)
 - [`src/ui/lib/workshop-client.ts`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/src/ui/lib/workshop-client.ts)
 - [`src/ui/components/workshop/WorkshopDetailModal.vue`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/src/ui/components/workshop/WorkshopDetailModal.vue)
+
+**Status (2026-08-18, dating the closure to 2026-08-10):** **Closed.** The 2026-08-09 review re-confirmed this finding and escalated it to its top severity (`new Function` ran on the application's same-origin main thread, and API keys had by then moved into Dexie, so a constructor escape crossed the "steal the API key" red line). It was closed on 2026-08-10 by migrating both executable surfaces into QuickJS wasm realms: worldbook EJS through `ejs-quickjs-backend.ts` (`main.ts` installs the production backend, and both load failure and runtime failure are **fail-closed** — deliberately no fallback to the legacy `new Function` backend, with the reason written at the fallback site in `ejs-backend.ts`), and effect scripts through `script-quickjs-backend.ts` / `script-backend.ts` (which has no legacy path at all). The legacy `new Function` EJS backend survives only as the unit-test default, to avoid paying wasm startup on every test. Cross-reference: `docs/reviews/2026-08-09-repository-review.md` §`修复状态（2026-08-10 更新）`, row SEC-02, and its §SEC-02 body. The original 2026-08-01 analysis below is unchanged.
 
 ### Evidence
 
@@ -471,7 +475,7 @@ If the endpoints remain:
 - [`vite.config.ts`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/vite.config.ts)
 - [`src/sillytavern/worldbook-loader.ts`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/src/sillytavern/worldbook-loader.ts)
 - [`src/ui/stores/settings-store.ts`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/src/ui/stores/settings-store.ts)
-- [`docs/planning/2026-07-30-bff-api-refactor-plan.md`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/docs/planning/2026-07-30-bff-api-refactor-plan.md)
+- [`docs/archive/planning/2026-07-30-bff-api-refactor-plan.md`](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/docs/archive/planning/2026-07-30-bff-api-refactor-plan.md)
 
 ### Evidence
 
@@ -627,6 +631,9 @@ The workflow runs:
 
 - No `npm run build`.
 - No built-artifact smoke test.
+
+> **Status correction (2026-08-18):** The first bullet no longer holds. **CI runs `npm run build`** — it was added to the `types` job on 2026-08-10 as the last step (TEST-01 in the 2026-08-09 review), taking the workflow from seven gates to eight: `typecheck` / `typecheck:vue` / `typecheck:tools` / `build` / `format:check` / `lint` / `knip:ratchet` / `test:run`, split across three parallel jobs. Its stated purpose is to catch what `tsc` cannot see (asset imports, CSS `url()`, Vite plugin errors), **not** to smoke-test the artifact — the second bullet and everything below it still stand, and `npm run gates` (added 2026-08-17) is the local mirror of the same eight steps.
+
 - No real-browser E2E runner declared in package scripts.
 - No coverage thresholds.
 - No dependency audit/update workflow in the repository.
@@ -972,7 +979,7 @@ Then verify:
 - [Repository governance plan](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/docs/planning/2026-07-31-repo-management.md)
 - [Previous comprehensive review](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/docs/reviews/2026-07-27-comprehensive-repository-review.md)
 - [Prior security/data-integrity remediation](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/commit/d1852867f97fb9dff1068072ca3f13fb43ae299e)
-- [Production BFF plan](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/docs/planning/2026-07-30-bff-api-refactor-plan.md)
+- [Production BFF plan](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/blob/097b0e8a294d7ba8bd5c50cdf128fe06305713c5/docs/archive/planning/2026-07-30-bff-api-refactor-plan.md)
 
 ---
 

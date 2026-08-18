@@ -165,9 +165,15 @@ npm 没有「按平台选 script」的机制，而我们不想为这件事引一
 
 父进程把 `SIGINT` 换成空处理：Ctrl+C 在终端里本来就投递给整个进程组，子进程自己收得到；父进程不抢着退，免得把还在收尾的 Vite 变成孤儿。
 
-### `dev.sh` 与 `dev.bat` 的差异（只有一处是实质的）
+### `dev.sh` 与 `dev.bat` 的差异（三处实质差异）
 
-端口清理换成了 `lsof -ti tcp:<port> -sTCP:LISTEN`。第二节那三个 netstat/findstr 细节**在这里全部不存在**：`-sTCP:LISTEN` 已经把 ESTABLISHED / TIME_WAIT 排除在外（对应细节 2），`lsof` 不区分 IPv4/IPv6（对应细节 1），按端口精确匹配也不会误伤 `:51730`（对应细节 3）。
+> 🔄 **2026-08-18 更正**：本节原标题写的是「只有一处是实质的」。2026-08-16 全仓审查另外查出**两处**真实差异（下方 2、3 条），都在参数解析与路径处理上，不是观感问题。
+
+**1. 端口清理实现不同（原有的那一处）。** `dev.sh` 换成了 `lsof -ti tcp:<port> -sTCP:LISTEN`。第二节那三个 netstat/findstr 细节**在这里全部不存在**：`-sTCP:LISTEN` 已经把 ESTABLISHED / TIME_WAIT 排除在外（对应细节 2），`lsof` 不区分 IPv4/IPv6（对应细节 1），按端口精确匹配也不会误伤 `:51730`（对应细节 3）。
+
+**2. `--no-content` 的扫描范围不同。** `dev.sh` 遍历**全部**参数（`dev.sh:27-30`，`for arg in "$@"` 里逐个比 `--no-content`），而 `dev.bat` 只测**前两个**位置参数（`dev.bat:37-38`，两行 `if /i "%~1"==` / `"%~2"==`）。后果：`npm run dev -- --content --foo --no-content` 这种把 `--no-content` 排到第三位以后的写法，在 macOS/Linux 上生效、在 Windows 上**静默失效**（照样进内容仓模式）。日常两参数以内两边一致，所以这条平时不显形。
+
+**3. 内容仓路径是否归一化不同。** `dev.sh` 用 `POEM_CONTENT_DIR="$(cd -- "$CANDIDATE" && pwd)"`（`dev.sh:35`）把候选目录**规范化成绝对真实路径**；`dev.bat` 则把字面量 `%~dp0..\fated_poem_independent_assets\data`（`dev.bat:40`，中间那个 `..` **不展开**）原样塞进环境变量，交给 `vite.config.ts` 自己 `resolve()`。目前 `resolve()` 能吃下这种带 `..` 的路径，所以行为正确；但任何做字符串比较、打印或路径前缀判断的下游代码，两边拿到的字符串形状是不同的 —— 改这段时别假设它已经是规范路径。
 
 其余一一对应：内容仓自动检测同样是兄弟目录 `../fated_poem_independent_assets/data`、同样尊重已设的 `POEM_CONTENT_DIR`、同样认 `--no-content`；`ping -n 2` 对应 `sleep 1`。
 

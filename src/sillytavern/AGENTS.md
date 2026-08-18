@@ -10,7 +10,7 @@
 
 ## 架构（已实现部分）
 
-```
+````
 src/sillytavern/                    ← 核心引擎
   │
   ├── types.ts                      ← 唯一类型来源；大型联合类型拆 types-*.ts（如 types-audio.ts）
@@ -111,7 +111,20 @@ src/sillytavern/                    ← 核心引擎
   │      🔴 本文件现存 47 个 U+FFFD 替换字符（16 段 / 6 个 agent），其中一处落在闭合 XML
   │         标签的标签名里（形如 `</□有物品>`，模型看到的是坏标签）。**既有问题，
   │         图像 v1 未修**，已另开任务；改这个文件时别顺手把它们当成自己弄坏的
-  ├── agent-tools.ts                ← [Phase 8.5] Agentic 工具注册表（17 tools）+ AGENT_TOOL_MAP
+  ├── agent-tools.ts                ← [Phase 8.5] Agentic 工具注册表（**27 个 tool 定义**）+ AGENT_TOOL_MAP
+  │      白名单 5 桶：craft_gen(9) / char_gen(12) / item_gen(3) / vars_update(3) / combat_v3(12)
+  │      🪦 v2 的 `['combat']` 桶随 M5 删除；`get_hp_percent` 定义还在、但**不在任何桶里**
+  │         （combat_v3 的文本面板自带 HP%）—— 定义数 27 与「AI 真够得到的」26 差的就是它
+  ├── agent-xml.ts                  ← [Q-05] AI 输出 XML 解析的**唯一**工具面：`tagInner`（取内文，trim）/
+  │                                    `tagBlock`（取含标签整块），参数顺序永远 `(source, tag)`
+  │      🔴 不再有叫 `extractTag` 的东西 —— 曾有两个同名反义实现（一个取 `match[1]`、一个取
+  │         `match[0]`），签名都是 `(string, string)`，连定义带调用抄过去**编译照过**，
+  │         运行时把整块 XML 当字段值写进角色档案
+  ├── model-json.ts                 ← [Q-05] 从模型输出里抢救 JSON 的**唯一**入口（整段直解 / ```json 围栏 /
+  │                                    `<json>` 标签 / 括号切片，顺序即优先级）。剥壳只此一份，兜底由调用方
+  │                                    传 `normalize` 回调 —— 形态上就长不出「两个分支两套兜底」
+  ├── story-output.ts               ← Story 信封投影：`<maintext>`/`<options>` 等结构化外壳 → 玩家可见正文 +
+  │                                    行动选项；流式与完成后共用这一条缝（流式期多剥一组控制标签）
   ├── agent-orchestrator.ts         ← [Phase 3+8.5] DAG 编排引擎（阶段串行+同阶段并行/M3 翻译层按名寻址零id单patch）
   │   ├── callAgenticAgent(): toolsEnabled=true → chatWithTools() 多轮循环
   │   └── Marker 回调: onCraftRequest/onCombatTrigger/onCharGenRequest/onPlayAudio
@@ -151,7 +164,49 @@ src/sillytavern/                    ← 核心引擎
   │                                    applyTimeAdvance / confirmRandomEventTrigger / sync* /
   │                                    advanceTurn / createSnapshot / restoreSnapshot
   ├── state-manager.ts              ← 唯一状态写入入口（M2按名寻址 M4名字唯一化 M5变量迁profile+快照重建）
+  │      🗃 **提交级缓存 `CommitScope`**（2026-08-17，本文件已 2664 行）：读收到入口、写收到出口 ——
+  │         一次 `commitChatState` 至多 1 读 1 写 profile + 1 读 1 次 `bulkPut` characters。
+  │         此前每个补丁各跑一趟完整读-改-写（10 个变量补丁 = 20 次 `getProfile` + 10 次 `updateProfile`）
+  │      🔴 **缓存边界只有 SaveProfile + 本存档 characters 两样**。别的表（memories / plotEvents /
+  │         saves / snapshots）照旧直读直写；作用域外的入口（快照 / 时间推进 / 三条 sync 钩子）
+  │         自动退化成直读 Dexie —— 同一个 handler 两种上下文下都对，调用点不必知道自己在不在提交里
+  │      🔴 **读失败不缓存**（`profileLoaded` 是布尔而不是 `profile !== undefined`）：EJS 差量那步
+  │         读炸之后，后面的 AI 补丁仍要能自己再读一次。flush 则**无条件发生**（哪怕有补丁失败，
+  │         先成功的那些也得落库）
+  │      🔴 缓存把 `commitChatState` 的写窗口拉成「整次提交一拍」，于是 P1-09 那两个 UI 例外写入口
+  │         （`save-profile.ts` 的 `persistFocusQuest` / `persistNewsRead`）**必须两件事都做**：
+  │         ①进 `withSaveWriteLock` 与提交串行（不进队列会被出口那次整档 flush 盖掉）；
+  │         ②**锁内重读一份新鲜 profile、只改那一个字段**（拿 UI 手里那份陈旧整档进锁写回去，
+  │         照样把提交刚落的 fp/任务/变量抹回旧值）。锁解决交错，解决不了陈旧 —— 缺一条都不算修好。
+  │         缓存之前每个补丁各自重读一次库，UI 的写被顺带吸收了 —— 那是**巧合**不是设计
+  ├── attribute-allocation.ts       ← 自由属性点分配的引擎侧唯一入口（校验上限查 `getTierConfig`，
+  │                                    落库走 `commitChatState`）。🔴 补丁只写 attributes + freeAttrPoints，
+  │                                    **绝不碰 level/tier** —— 那两个字段的差值正是自动加点钩子的判据
+  ├── quality-inference.ts          ← [Q-11] 由属性加成总和推断品质（**封顶在传说是刻意的**）。
+  │                                    此前逐字重复住在 ItemsPanel.vue / CharacterListPanel.vue 两处，
+  │                                    分叉的表现只是「同一件装备两个面板显示不同品质」，不会有东西失败
+  ├── vars-update-translator.ts     ← [Q-19] AI JSON → `StatePatch[]` 的**纯翻译层**（无 I/O，import 只有类型）。
+  │                                    从 `agent-orchestrator.processStageMarkers`（那时 1327 行）里剥出来的
+  │                                    纯映射；不违反 ADR-21 —— `commitChatState` 仍是唯一写入口
   ├── dice.ts / memory-store.ts / memory-summarizer.ts / plot-outline.ts / plot-engine.ts / location-db.ts
+  ├── index.ts                      ← barrel（Q-04/Q-12 清仓后只 re-export 活着的模块）
+  │
+  │  ── 提示装配 / 上下文 ──
+  ├── placeholder-registry.ts       ← [Phase 10] `{{PLACEHOLDER}}` → 解析函数注册表（31 个，2026-08-18 实数；
+  │                                    文件头注释写 18 是旧的）+ 每 Agent 默认模板。
+  │                                    地图 `{{MAP_CONTEXT}}` 与 `{{RANDOM_EVENTS}}` 的**中文措辞都在这里**
+  │                                    （数据面是纯函数模块，措辞在 resolver —— 那两个子系统零中文字面量的原因）
+  ├── template-resolver.ts          ← [Phase 10a] 模板解析：localParams（链上覆盖）→ 注册表 → 认不出的原样留着
+  ├── preset-loader.ts              ← [Phase 8+10] ST 预设加载 + 占位符宏预处理（setvar/getvar/random/roll/注释）；
+  │                                    EJS `<%…%>` **原样保留**交给 ejs-runtime
+  ├── worldbook-loader.ts           ← [Phase 8] 世界书加载/激活/排序/渲染（constant + keyword 双层激活），
+  │                                    条目正文经 `executeEjsEntry` 求值（ADR-30）
+  ├── builtin-worldbooks.ts         ← [Phase 8] 内置世界书运行期 fetch 预加载（刻意不用 `import.meta.glob` eager
+  │                                    —— 那会把旧数据打进构建产物，且 HMR 变全页刷新）
+  ├── context-visibility.ts         ← [Phase 8] Agent × Zone 可见性矩阵（**设计时决策，不是运行时配置**）+
+  │                                    buildZoneContext / filterZoneContent（FULL/NARRATIVE/SUMMARY/KEYS/NONE 五级）
+  ├── beautifier.ts                 ← [Phase 7e+10i] 输出美化正则管道（纯函数，编译失败静默跳过不阻断）。
+  │                                    执行边界在 UI 那个网络可用的 opaque iframe，不在本层
   │
   ├── types-map.ts                  ← [地图 v1 / ADR-31] 地图类型分册（MapPack/MapTile/MapSaveFlags/MapRoute）
   ├── map-pack.ts                   ← [地图 v1] coerceMapPack 容错解析（永不抛，坏包回退 EMPTY_MAP_PACK）
@@ -160,11 +215,40 @@ src/sillytavern/                    ← 核心引擎
   ├── map-weather.ts                ← [地图 v1] 确定性天气采样（种子随机，词汇随包，零存储）
   ├── map-context.ts                ← [地图 v1] $map 结构快照 + uid 446 runtime_geo 投影（只产数据不产中文 prose）
   ├── map-runtime.ts                ← [地图 v1] 注入缝（installMapPack/getMapIndex；content-store 第 8 面点火）
-  │      🔴 **map-*.ts 禁任何中文字面量**（map-literals-gate.test.ts 结构闸门）——随图数据全在
+  │      🔴 **map-*.ts 禁任何中文字面量**（`map-literals-gate.test.ts` 结构闸门；同款的还有
+  │         `random-event-literals-gate.test.ts`，见下面随机事件一节）——随图数据全在
   │         pack 里、中文渲染在 placeholder-registry（dispatcher）与内容仓世界书条目（story），
   │         这是 ADR-31「换图零改码」的机器保证。落位/天气/旅程接线在 state-manager
   │         （applySetLocation 仅玩家 / applyTimeAdvance 跨天重断言 / packStamp=contentHash 自愈），
   │         设计与 14 条裁定见 docs/planning/2026-08-11-map-system-v1-integration.md
+  │
+  ├── types-random-events.ts        ← [随机事件 v1 / ADR-32] 类型分册（事件定义 / 条件 DSL / 权重链 / 槽位表 /
+  │                                    `RandomEventSaveFlags` = `worldFlags.randomEvents` 的形状 / 只读快照）。
+  │                                    照 types-map / types-image 的规矩**不 import types.ts**，边不成环。
+  │                                    唯一的例外导出是 `DEFAULT_RANDOM_EVENT_CONFIG`（三个数字的兜底常量）
+  ├── random-event-pack.ts          ← [随机事件 v1] `coerceRandomEventPack` 容错解析（内容包第 13 分节 `randomEvents`）
+  │                                    🔴 **永不抛**：坏定义整条跳过 / 坏子项逐条丢 / 坏旋钮只回落那一格 /
+  │                                       整份认不出（含**数组**）→ 空包。空包是合同不是异常（引擎仓零内置事件）
+  ├── random-event-scheduler.ts     ← [随机事件 v1] ★确定性调度核（954 行，纯函数）：MTTH 逐天掷骰 `rollRandomEvents` /
+  │                                    首访强制入池 `armFirstVisitEvent` / 池子保洁 `pruneRandomEvents` /
+  │                                    触发结算 `settleRandomEventTrigger` + 条件求值与权重链两个共用判据
+  │                                    🔴 **零存储、零时钟、零 `Math.random`**：种子 = `(saveSeed, 事件名, gameDay)`，
+  │                                       随机数复用 `createEjsRng` —— 快照回退/重发天然一致。测试里有结构闸门扫源码
+  │                                    🔴 **改入参就是错**：四个入口一律「无变化返回 `null`」，有变化返回全新 flags
+  ├── random-event-snapshot.ts      ← [随机事件 v1] 条件求值只读快照的**全仓唯一一份**（地点键解析 + RollContext 组装）。
+  │                                    写侧（state-manager 入池）与读侧（game-pipeline 注入）此前各抄一份，
+  │                                    靠注释维持一致 —— 漂了不报错，症状是首访条目在注入面静默消失
+  ├── random-event-context.ts       ← [随机事件 v1] 注入块的**数据面**：候选池过滤+排序成快照。**一个字的措辞都不在这里**
+  │                                    （`<random_events>` 外壳 / `[!]` 首访标记 / 「至多触发一个」全在 resolver）。
+  │                                    过滤判据整份委托 `isPendingStillValid`，与保洁共用同一份
+  ├── random-event-runtime.ts       ← [随机事件 v1] 注入缝（`installRandomEventPack` / `getRandomEventPack`），
+  │                                    理由逐字同 map-runtime。**刻意没有索引缓存**：事件是几十条量级，
+  │                                    加一层缓存只多出「什么时候失效」这个得有人记得维护的问题
+  │      🔴 `random-event-*.ts` 同样**禁中文字面量**（`random-event-literals-gate.test.ts`，与
+  │         `map-literals-gate.test.ts` 同款结构闸门）—— 事件名/简报/槽位词全是包数据。
+  │         唯一例外是 `{{place}}` 这个 ASCII 占位符，它是**协议**不是内容。
+  │         接线在 state-manager（逐天掷骰 / 首访 / `confirmRandomEventTrigger` 按名结算），
+  │         注入在 `{{RANDOM_EVENTS}}` resolver（池空/关闭/**战斗会话活跃**时返空串零 token）
   │
   ├── content-registry-runtime.ts   ← 🆕 [分层收口 2026-08-17] 内容注册表的注入缝
   │      installContentRegistry / getContentRegistry / createEmptyContentRegistry /
@@ -176,6 +260,41 @@ src/sillytavern/                    ← 核心引擎
   │      🔴 时序契约：读取一律**惰性、按调用时刻**发生；消费方（agent-tools 品牌面 /
   │         random-tables 名字池 / bloodlines 血脉集 / location-db 地点集）**不许**把读数
   │         缓存成模块级常量。没装过 → 十面全 undefined 的空骨架（不是 null、不抛）
+  │      🔴 **「面」与「分节」是两套编号，别互相换算**（读到 `第 N 面` / `第 N 分节` 先看是哪套）：
+  │         · **面** = `ContentRegistry` 的字段，**共 10 个**，声明序 catalog / locations / bloodlines /
+  │           namePools / markers / branding / imageDialects(7) / mapPack(8) / randomEvents(9) / remoteAssets(10)
+  │         · **分节** = `ContentPack` 的可选字段（`types-content.ts`），**共 14 个**，多出
+  │           agentDefaults / presets / beautifierRules / mapMarkers 这几个不进注册表的域；
+  │           `imageDialects` 在这里是第 11 分节、`mapPack` 第 12、`randomEvents` **第 13**、`remoteAssets` **第 14**
+  │         🪦 `types-content.ts` 里那两句「注册表**第 13/14 面**」是**串号写法**（数的是分节序）。
+  │            本文件按上表口径：那两样是第 9 / 第 10 **面**，第 13 / 第 14 **分节**
+  │
+  ├── types-content.ts              ← [内容分离 波1] 内容包子系统的纯类型分册（pack 载荷 / 14 分节 / 安装计划 /
+  │                                    校验记录 / 四态基线）。落库实体仍住 types.ts，本册只 type-only import 它们
+  ├── content-source.ts             ← [内容分离 波1] ContentProvider 的引擎半边（纯同步）：`validatePackOrThrow` /
+  │                                    `hashContentDeterministic` / `hashWorldBook` / `resolveSection`（三态语义）
+  ├── content-pack-plan.ts          ← [内容分离 波1] ★安装/升级/卸载的纯函数 planner（四态判定 + 存档 uid 迁移三段式）
+  │      🔴 **本文件与 content-source 互相 import，是一条真实的运行时环**（如实记录，别按旧注释
+  │         理解成单向）。目前无害**只因为两侧的使用点全在函数体内** —— ESM 环下模块初始化期取到的是
+  │         undefined，所以**任一侧都不许在模块顶层（含字段初始值/顶层常量表达式）使用对方的导出**
+  │      纯度约束同 workshop-install-plan / asset-import-plan：无 I/O、无 Dexie、无 Vue、
+  │      **无 `crypto.subtle`**（异步会把 planner 传染成 async，所以逐书基线用同步 hash 不用 SHA-256）
+  ├── remote-asset-catalogue.ts     ← 🆕 [远程素材 v1] 远程素材**声明**的纯函数解析层：两种本地载体
+  │                                    （世界书 char-info 那段 `profile` 字面量 / 内容包第 14 分节 `remoteAssets`）
+  │                                    各自归一成 `RemoteAssetDecl`，**到此为止** —— 下载/落库/镜像同步全在 UI 波
+  │      🔴 **永不抛**（两个来源都是第三方可编辑数据）：认不出的块跳过、认不出的行跳过，
+  │         返回值永远是合法数组。一个写坏了的角色卡不该让另外十四个角色没有立绘
+  │      🔴 名字与变体走既有闸门（`asset-filename.ts` 的 `violatesNamingInvariant` /
+  │         `violatesZipEntryName`），不另立一套 —— 远程素材最终落成**普通素材行**，
+  │         这里放进一个 `圣殿/内庭`，症状会推迟到半年后某次「导出再导入之后少了几张图」
+  │
+  ├── engine-settings.ts            ← [Q-06] 引擎侧读设置的**唯一入口**（注入缝）。裁定：真源在前端
+  │                                    localStorage，引擎经本缝读，**不是**搬进 Dexie —— 引擎要的是
+  │                                    「当前生效的设置」这个能力，不是「某张表」这个位置；缝也让引擎在
+  │                                    无 UI 的场合（测试 / 未来 headless 跑批）自带可用缺省
+  │      🪦 收口前 Dexie `settings` 表是一份**影子配置**（`initializeDatabase` 播种后再没人写全），
+  │         两侧靠 `game-pipeline.syncSnapshotSettings` 那座只搬两个字段、`catch { console.warn }`
+  │         静默失败的桥连着 —— 症状是「设置页明明改了、引擎行为没变」，桥断了用户完全无感
   │
   │  🚧 **四条注入缝 = 引擎读前端的唯一合法途径**（engine-settings / map-runtime /
   │     random-event-runtime / content-registry-runtime）。`src/sillytavern/**` 里
@@ -197,9 +316,49 @@ src/sillytavern/                    ← 核心引擎
   │       ├── windows.ts / intents.ts               ← 18 窗口求值 + EffectIntent 解释执行
   │       ├── adjudication.ts / rule-keys.ts        ← BoundedAdjudication + 4 RuleKey
   │       ├── automata/                             ← DSL parser/interpreter/compile/builtins/reflection
+  │       │                                            + index-active.ts（ActiveEffectIndex：按窗口取订阅者）
+  │       ├── phases/                               ← 7 个 phase handler：round / initiative / unit-turn /
+  │       │                                            action / attack / terminal + outcome.ts（统一返回形状，
+  │       │                                            reducer 据此把 changes 累加进单一 PendingChangeSet，
+  │       │                                            末尾一次 applyPending 原子提交 —— 不变量④）
+  │       ├── player-input.ts                       ← [战斗主持人] 玩家自由文本 → `CombatCommand` 的**确定性**
+  │       │                                            解析（关键词 + 名字匹配，零 I/O 零随机）。四步拼装能直接
+  │       │                                            定 Command 时走结构化路径，只有自由文本过这里
+  │       │      🔴 解析不出意图**明确拒绝**（`ok:false` + 人话 reason），绝不静默 fallback 成 PassAttack
+  │       │         —— 那会吞掉玩家的决定（v2 runner「查询工具静默变 pass」在玩家侧的镜像）
+  │       │      🔴 名字按「文本中首次出现、同位置取长名」匹配（否则「骷髅兵」误配「骷髅兵队长」）
+  │       ├── summon-pool.ts                        ← [M3.5] 预生成召唤物池：**目前是空池 + 幂等查找 + key 归一化**
+  │       │                                            （key = `种族-层级-定位`），未命中走实时 char_gen。
+  │       │                                            池内容要靠离线脚本填，不在 plan 范围内
+  │       ├── types.ts                              ← v3 内部类型（1816 行；DiceChannel/CombatState/EffectIntent/
+  │       │                                            WindowKey/DomainEvent 等全在这里）
+  │       ├── test-utils.ts                         ← 测试共享构造（最小 2 单位 bundle + 命令）
   │       ├── projection-ui.ts / projection-agent.ts← 双投影（UI 事件 + Agent 文本面板）
-  │       ├── replay.ts / contract/                 ← contract harness + 7 场 fixture
-  │       └── index.ts                              ← 唯一公共出口（openCombat / runCombatV3）
+  │       ├── replay.ts / contract/ / fixtures/     ← contract harness + 7 场 fixture（JSON 在 fixtures/，
+  │       │                                            用例在 contract/，里程碑表在 contract/milestones.ts）
+  │       └── index.ts                              ← 唯一公共出口（openCombat / runCombatV3 / parsePlayerInput
+  │                                                    + 少数公共类型）；reducer/tape/windows/automata 全 internal
+  ├── effect-types.ts               ← [战斗 v2 M2] Modifier 6 大类（固伤/百分比/资源/检定/附加效果/特殊机制）+
+  │                                    登神 divinity 仲裁。与 StatusEffect（落库实例）/ EffectDefinition
+  │                                    （Agent 声明）是三样东西，别混
+  ├── buff-registry.ts              ← [战斗 v2 M2] buff 去重/生命周期/结算时机的**纯函数集**（不持状态不落 DB）。
+  │                                    buff id = 有 sourceKey 时 `sourceKey.name`、否则裸 name（铁律：AI 永不产 id）
+  ├── status-api.ts                 ← [战斗 v2 M2] 把沙盒收集的 `$status.apply/remove` 意图经 BuffRegistry
+  │                                    转成 StatePatch，仍交 `commitChatState` 落库（ADR-21）
+  ├── script-registry.ts            ← [战斗 v2 M1] 声明式脚本注册 facade（物品/技能自带的静态清单，装备即注册
+  │                                    整份、卸下即全注销）。与 SubscriptionManager（动态 `$event.on`）各走各的
+  │                                    注册表（chainHandlers vs handlers），**不是第三套效果系统**
+  ├── modifier-collector.ts         ← [战斗 v2 M2] `collect_mods`：用 `emitChain` 收攻/守方 modifier
+  │                                    （在场过滤 + priority 排序 + 错误隔离全复用 emitChain 内置能力）
+  ├── combat-item-validator.ts      ← [战斗 v2 M4] item_gen 产出的 modifier/buff 契约**纯校验**（空 reasons = 合规）
+  │      🔴 **`V3_WINDOW_KEYS_LIVE`(12) / `V3_WINDOW_KEYS_RESERVED`(6) / `V3_WINDOW_KEYS`(18) 住在这里，
+  │         不在 `combat-v3/`** —— `combat-v3/automata/compile.ts` 反过来 import 它们。
+  │         下文「18 窗口只有 12 个真接了求值器」那条讲的就是这两张表；接上求值器 = 把 key 从
+  │         RESERVED 挪进 LIVE。判据是「`phases/` 或 `reducer.ts` 里有 `runWindow(...)` 调用点」，
+  │         **不是「架构文档列了它」**
+  ├── describe-modifier.ts / describe-automaton.ts
+  │                                  ← Modifier / EffectAutomatonDecl → 人类可读中文摘要（纯函数，
+  │                                    前端物品详情弹窗用；18 窗口的中文名表在 describe-automaton）
   ├── craft-quality.ts / craft-dc.ts / craft-resolver.ts
   │   ├── craft-request.ts        ← [Q-21] 装配唯一口 buildCraftRequest(角色, 工具参数, 骰带)
   │   │                              🔴 **纯函数、无随机** —— 骰子由工具边界掷好传进来
@@ -236,6 +395,9 @@ src/sillytavern/                    ← 核心引擎
   │                                       失误否掉整个标记，等于把它升级成一张画不出来的图
   ├── char-gen-agent.ts             ← [Phase 6e] 角色生成编排（M3 单patch落库/正式字段直写/零id）
   ├── craft-gen-chain.ts            ← [Phase 9b] 制作生成编排（M3 零id/type归一化/单patch）
+  ├── item-gen-chain.ts             ← [Phase 9c] 独立物品/技能生成编排（上游是 dispatcher 的 `<item_gen_request>`）
+  │                                    🔴 装备落库**两步同 id**：`add_item`（进背包）+ `equip_item`（搬进装备栏）
+  │                                    —— applyEquipItem 按 itemId 从背包移除，两步 id 不同就静默丢件
   │
   ├── script-executor.ts            ← [Phase 7e+8] 脚本沙盒（$event.on/off / $call / @parent / init·cleanup）
   │      🔴 **求值跑在 QuickJS 隔离里，不再是 `new Function`**（2026-08-10 / SEC-02 收口）。
@@ -269,9 +431,15 @@ src/sillytavern/                    ← 核心引擎
   ├── audio-names.ts                ← [Audio] 按名寻址纯函数（normalizeAudioName / findByName 稳定取最早）
   ├── audio-tags.ts / audio-scene.ts ← [Audio] 四维标签 + 场景选曲（七段路径逐级回退+四维加权打分）
   ├── types-audio.ts                ← [Audio] 注入缝接口 + state/options（数据模型类型仍在 types.ts）
+  ├── audio-fakes.ts                ← [Audio] 全部注入 seam 的测试替身（vitest environment 是 node：
+  │                                    没有 AudioContext / Audio / URL.createObjectURL）
   │
   ├── asset-types.ts                ← [素材] categoryForType / allowsVideo / ASSET_MIME_BY_EXTENSION
   ├── asset-filename.ts             ← [素材] `<name>[_<type>][_<variant>].<ext>` 解析/格式化（命名不变式）
+  ├── asset-path.ts                 ← [素材 / Q-16] normalizeSlashes / basenameOf / 扩展名归一化的**唯一实现**
+  │                                    （引擎导入计划与 UI 侧 zip 往返曾各存一份逐字相同的拷贝）
+  │                                    🔴 已经咬过一次：`"苏婉_头像.png "` 的字面扩展名是 `"png "`，
+  │                                       zip 侧比引擎侧更严 → 整条被当噪音丢掉，症状是「导入了但库里查不到」
   ├── asset-index.ts                ← [素材] buildAssetIndex(rows) → 大类→名字→类型→{base,variants}
   ├── asset-resolve.ts              ← [素材] resolveAsset + 两条相反回退链（立牌链 / 脸位链）
   ├── asset-import-plan.ts          ← [素材] ★ planImport 纯同步出计划（撞号进 variant / 哈希去重 / manifest 只补元数据）
@@ -437,11 +605,11 @@ src/sillytavern/                    ← 核心引擎
   │      （`effect-runtime.executeVarsPatch`）的声明式载荷，两者用途不同别再混。
   ├── api-tools.ts
   │   🪦 `api-router.ts` 已删（BFF 同源后端重构 Phase A+B）。路由改住 `server/routes/`
-  │      （chat / models / image / embeddings / proxy / status），入口是 `server/app.ts`，
-  │      引擎目录里不再有路由层，别按图找那个文件。
+  │      （**7 个文件**：chat / models / image / embeddings / proxy / status / **content**），
+  │      入口是 `server/app.ts`，引擎目录里不再有路由层，别按图找那个文件。
   │
   └── (战斗 v2 纯计算规则见 docs/reference/combat-system-architecture.md；v3 内核见 docs/reference/combat-system-architecture-v3.md)
-```
+````
 
 > 🪦 这里曾指着一行 `src/vanilla/sillytavern-store.ts`（"框架无关响应式 Store"）——该目录早已不存在，Store 由 Pinia 接管。Q-15 清仓时删掉，别按图找那个文件。
 
@@ -452,17 +620,23 @@ src/sillytavern/                    ← 核心引擎
 ## 事件驱动架构（Phase 4.5-8 实现）
 
 ```
-Layer 5  脚本级 Script Sandbox  AI 调用: $event.on/off(持久订阅) / $call(跨对象引用)
+Layer 5  脚本级 Script Sandbox  AI 写脚本: $event.on/off(持久订阅) / $call(跨对象引用)
   ↑       (AI 可编程)            init/cleanup 生命周期 + @parent 继承链
-Layer 4  语义级 $ API           AI 调用: $combat.attack() / $craft.startProject()
-  ↑       (AI 可见)
-Layer 3  流程级 Resolver        引擎内部: CombatResolver / CraftResolver
-  ↑       (AI 不可见)
+Layer 4  语义级 工具面          AI 调工具: craft_check / craft_settle / declare_attack …
+  ↑       (AI 可见)             = agent-tools.ts 的 27 个 tool 定义（function calling），
+  │                              工具 handler 内部才去调 Layer 3。**AI 手里没有 `$` 对象**
+Layer 3  流程级 Resolver        引擎内部: CraftResolver（`$craft`，craft-resolver.ts）
+  ↑       (AI 不可见)           🪦 CombatResolver 随 v2 运行时删除；战斗流程改由 combat-v3
+  │                              内核主持（openCombat → kernel/reducer/phases），不再有 resolver
 Layer 2  计算级 纯函数          $dice.d20() / $resource.getHpPercent() / $char.getTier()
-  ↑       (AI 可读，不可写)
+  ↑       (AI 可读，不可写)      —— 这一层的 `$` 是**模块级导出对象**，见下节
 Layer 1  原语级 状态读写        StateManager.commitChatState() / $validate.effectValue()
           (仅引擎内部)
 ```
+
+🔴 **Layer 4 的名字变了但层还在**：v2 时代它真的是「AI 调 `$combat.attack()`」；现在 AI 那一侧
+只有 OpenAI function calling 的工具名，`$` 对象一个都够不到（脚本沙盒那份除外，见下节）。
+把这层理解成「AI 声明意图的语义面」仍然对（ADR-19），只是载体从 `$` API 换成了 tools。
 
 ### 关键架构决策
 
@@ -489,7 +663,7 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 - **核心模式：纯函数兜底 + AI subscribeChain 覆盖**：Code 算基础 → emitChain 传 AI → AI handler 改 outcome → AI 不响应走兜底
 - **✅ P1-11 已接线（Q-07, 2026-08-03）**：战斗外效果系统已由 `effect-wiring.ts` 接进生产——`wireEffectSystem(saveId, characters)` 在存档加载时对已装备物品/技能执行 `executeInit` + `$event.on` 订阅注册，装备/卸下经 `state-manager` 的 equip/unequip handler 调 `wireObject`/`unwireObject`。`getEventBus(saveId)` 按存档实例化，`ScriptRegistry` + `SubscriptionManager` 双 facade 随存档生命周期。
 - **✅ emit 源与效果回收也已接线（Q-07 第二半, 2026-08-03）**：`commitChatState` 每次提交后，把本次 patch 产生的 `GameEvent` 经 `publishToEffectSystem(saveId, events)` 发到存档 EventBus；`SubscriptionManager` 新增 `setEffectSink`，触发脚本产出的 `hpChanges`/`statChanges`/status 意图不再被丢弃（此前 `handleEvent` 执行完脚本直接扔掉，注释写着「由 state-manager 统一 apply」却没有那个调用方——与 Q-02 同形状的缺陷）。收上来的效果经 `convertScriptEffects` 转成 StatePatch，再走一轮 `commitChatState`（ADR-21 唯一写入口，**没有开第二条写路径**）。反应轮有深度上限 `MAX_EVENT_REACTION_DEPTH = 3`，防止「A 触发 B、B 触发 A」打成事件风暴。没接过线的存档零开销（`peekEffectWiring` 不凭空建 EventBus）。
-- **⚠️ 战斗内 18 窗口里只有 12 个真的接了求值器**：`initiative.before` / `initiative.after` / `turn.close` / `morale.before` / `morale.after` / `settlement.before` 在 `combat-v3/phases/` 里没有任何求值器。它们现在编译期就以 `WINDOW_NOT_WIRED` 掉落（`V3_WINDOW_KEYS_RESERVED`），不再静默入索引；接上求值器时把 key 挪进 `V3_WINDOW_KEYS_LIVE` 即可。窗口求值统一走 `runWindow(out.events, ...)`——它保证 `EffectRejected` 诊断必进事件流，忽略返回值是可见的 TODO 而非隐藏的丢弃。
+- **⚠️ 战斗内 18 窗口里只有 12 个真的接了求值器**：`initiative.before` / `initiative.after` / `turn.close` / `morale.before` / `morale.after` / `settlement.before` 在 `combat-v3/phases/` 里没有任何求值器。它们现在编译期就以 `WINDOW_NOT_WIRED` 掉落（`V3_WINDOW_KEYS_RESERVED`），不再静默入索引；接上求值器时把 key 挪进 `V3_WINDOW_KEYS_LIVE` 即可。🔴 **这三张表（LIVE 12 / RESERVED 6 / 合集 18）住在 `combat-item-validator.ts`，不在 `combat-v3/` 下** —— `combat-v3/automata/compile.ts` 反过来 import 它们，按目录名去 v3 里找会扑空。判据是「`phases/` 或 `reducer.ts` 里有 `runWindow(...)` 调用点」，不是「架构文档列了它」。窗口求值统一走 `runWindow(out.events, ...)`——它保证 `EffectRejected` 诊断必进事件流，忽略返回值是可见的 TODO 而非隐藏的丢弃。
 
 ## v4 三层子系统分流 (ADR-24/25/26)
 
@@ -498,21 +672,44 @@ SubSystem-Craft  制作  → 🚩 延迟型: Story 输出 <craft_request>，Stag
                           → AI 调 tools (get_inventory→craft_check→craft_settle) → 真实 DC+骰值+评级+结算 (Code)
                           → 创意效果 (AI) → 结果注入正文 + StatePatch 提交
 SubSystem-Combat 战斗  → Stage1后检测 <combat_trigger> → 暂存 → Stage2 request_dispatcher 完成 char_gen 后唤起
-                          → 独立战斗窗口 (Code循环 + AI摘要) → 摘要回注正文 + 批量StatePatch
+                          → 独立战斗窗口: **v3 内核主持流程**（openCombat → kernel/reducer/phases，
+                            骰值全出 DiceTape），combat_v3 Agent 是**战斗主持人/DM**（持久会话，
+                            经 6 个战斗工具下 Command + 4 个只读查询；玩家自由文本先过 player-input 解析）
+                          → write_summary 的终局叙事回注正文 + 批量StatePatch
 SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC → char_gen Agent 调 tools → 输出 <char_result> XML
                           → 调 item_gen Agent (仅1次, ADR-26) → 下回合可用
 ```
 
-### 9 个 $ API Namespace
+🪦 上表 Combat 一行原写作「Code循环 + AI摘要」，那是 v2 combat-runner 的形状。v3 起循环在
+`combat-v3/coordinator.ts`，AI 不再只写摘要而是**主持流程**（ADR-19 的意图声明面从 `$combat.attack()`
+换成了 `declare_attack` 等工具）。战斗内效果不走 emitChain/script-executor，走 **EffectAutomaton DSL**。
 
-| Namespace   | AI可见     | 用途     |
-| ----------- | ---------- | -------- |
-| `$combat`   | ✅         | 战斗流程 |
-| `$craft`    | ✅         | 制作流程 |
-| `$status`   | ✅         | 状态效果 |
-| `$dice`     | ✅         | 骰池系统 |
-| `$char`     | ✅(只读)   | 角色查询 |
-| `$var`      | ✅         | 变量读写 |
-| `$time`     | ✅         | 时间查询 |
-| `$resource` | ✅(只读)   | 资源查询 |
-| `$validate` | ❌(引擎内) | 数值约束 |
+### AI 能碰到的 `$` 面 = 脚本沙盒那一份
+
+**唯一面向 AI 的 `$` API 是 `script-executor.ts` 的 `ScriptSandbox`**（`buildSandbox()` 是这份名单的
+唯一真源 —— guest 面由 QuickJS 后端从它推导，加 `$foo` 不必动后端）。AI 写在物品/技能/buff 的
+`scripts` 池里的那段代码，看得见的就是下面这些，**没有别的**：
+
+| Namespace   | 方法                                                                                         | 语义                                                                      |
+| ----------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `$dice`     | `d20()` / `d100()` / `roll(公式)`                                                            | 骰池（`roll` 只认 `NdM±K`，认不出返 0）                                   |
+| `$resource` | 读 `getHp/getMaxHp/getMp/getMaxMp/getSp/getMaxSp/getHpPercent`；写 `modifyHp` / `modifyStat` | 读走 `readHooks`（**未注入时一律返 0**）；写只进收集器                    |
+| `$char`     | `getAttr(id, 五维英文键)` / `getTier(id)` / `isPresent(id)`                                  | 只读（未注入返 0 / 0 / false）                                            |
+| `$status`   | `add` / `apply` / `remove` / `setStacks` / `getStacks` / `has` / `query`                     | `apply` 走 BuffRegistry 去重（同源刷新+增层），`add` 是直接加、**不去重** |
+| `$event`    | `on(事件, scriptKey)→handle` / `off(handle 或事件)` / `emit(事件, data)`                     | 持久订阅由引擎在脚本执行后注册进 EventBus                                 |
+| `$call`     | `$call(ref)`（函数不是 namespace）                                                           | 跨对象脚本引用（`@parent` 继承链），子脚本的效果合并回本次收集器          |
+
+外加四个上下文变量：`owner` / `target` / `event` / `self`（`self.stacks` / `remainingTime` / `name` / `scripts`）。
+
+🔴 **沙盒里的写全是「收集意图」不是「改状态」**：`modifyHp` / `$status.*` / `$event.emit` 只往
+`ScriptEffects` 里 push，落库仍由调用方转成 StatePatch 走 `commitChatState`（ADR-21）。
+🔴 `$call` 有递归深度上限 `MAX_CALL_DEPTH`（旧实现靠爆栈兜底）。
+
+**退役的**：`$combat` 随 v2 运行时被 M5 删除（战斗内效果改走 `combat-v3/automata/` 的
+EffectAutomaton DSL —— 声明式窗口订阅 + 封闭表达式文法，v3 不接受任意 JS）；`$craft` / `$var` /
+`$time` / `$validate` / `$location` / `$affection` / `$effect` / `$chargen` **从来就不在沙盒里** ——
+它们是各模块的**模块级导出对象**（`craft-resolver.ts` / `var-resolver.ts` / `time-system.ts` /
+`validate.ts` / `location-db.ts` / `affection-system.ts` / `effect-parser.ts` / `char-gen-agent.ts`），
+只有引擎 TS 代码 import 得到；AI 那一侧对应的是 agent-tools 的工具名（如 `craft_check` / `craft_settle`）。
+注意 `$char` 有**两个不相干的同名对象**：沙盒里那个（三个只读方法）和 `char-query.ts` 导出的那个
+（引擎侧查询集）—— 名字撞车，边界不同，别互相照抄方法名。
