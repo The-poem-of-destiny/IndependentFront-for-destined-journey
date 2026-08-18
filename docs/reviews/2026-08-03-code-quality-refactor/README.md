@@ -43,7 +43,7 @@
 
 **核对基线**：`master` @ `02c8214` + 本 PR · `typecheck` / `typecheck:vue` / `typecheck:tools` / `lint` 全绿 · `vite build` 通过 · 213 个测试文件 · 5843 passed / 4 skipped
 
-**核对基线（2026-08-18 复核更新）**：`master` @ `890f3ec` · `npm run gates` 八道全绿（typecheck / typecheck:vue / typecheck:tools / build / format:check / lint / knip:ratchet / test:run）· **约 338 个测试文件 · 8669 passed + 8 skipped**（数字取自 `docs/CHANGELOG.md` 顶部条目）。上一行 `02c8214` 那份基线保留作历史，不删。本轮复核只动了「状态」与备注，各 findings 文件仍描述 `1c9e743` 的现场。
+**核对基线（2026-08-18 复核更新）**：`master` @ `890f3ec` · `npm run gates` 八道全绿（typecheck / typecheck:vue / typecheck:tools / build / format:check / lint / knip:ratchet / test:run）· **342 个测试文件 · 8820 passed + 8 skipped**（2026-08-18 本地 `npm run gates` 实测）。上一行 `02c8214` 那份基线保留作历史，不删。本轮复核只动了「状态」与备注，各 findings 文件仍描述 `1c9e743` 的现场。
 
 ### 按路线图步骤
 

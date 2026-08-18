@@ -154,7 +154,7 @@ craft_gen / char_gen / item_gen 通过 OpenAI function calling 调用真实 Code
 ### 总体规模
 
 - **TypeScript**：零编译错误（tsc / vue-tsc / tools 三道类型网）
-- **测试**：8669 tests（约 340 个测试文件），全部通过
+- **测试**：8820 tests（342 个测试文件，2026-08-18 实测），全部通过
 - **引擎模块**：168 个 TypeScript 文件（`src/sillytavern/`，不含测试）
 - **前端组件**：124+ Vue 组件（`src/ui/components/`）+ 10 套主题
 
