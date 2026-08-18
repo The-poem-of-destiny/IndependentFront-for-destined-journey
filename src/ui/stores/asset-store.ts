@@ -43,6 +43,7 @@ import { computed, reactive, ref } from 'vue';
 import { ASSET_TYPES } from '@engine/types';
 import type { AssetFraming, AssetMetaRecord, AssetType, AudioTrack } from '@engine/types';
 import {
+  getAsset,
   getAssets,
   saveAsset,
   deleteAsset as dbDeleteAsset,
@@ -95,6 +96,8 @@ import { createAssetUrlCache, type AssetUrlCache } from '../lib/asset-url';
 import {
   collectDesiredRemoteAssets,
   formatRemoteSyncCounts,
+  pruneRemoteAssetTombstones,
+  remoteAssetSlotKey,
   runRemoteAssetSync,
   type RemoteAssetSyncResult,
 } from '../lib/remote-asset-sync';
@@ -506,9 +509,30 @@ function compareRows(a: AssetMetaRecord, b: AssetMetaRecord): number {
   return a.createdAt - b.createdAt;
 }
 
+/**
+ * **玩家动过 = 玩家所有，镜像不再管它**（远程素材 v1 / 审查轮）。
+ *
+ * 任何由用户发起、会重写这一行的路径（改名 / 提主图 / 取景 …）都必须先过这里:
+ * 摘掉 `remote` 戳，这一行从此是**用户自己的**素材。
+ *
+ * 🔴 少了这一下的症状不是报错，是**下次启动悄悄改回去**: 那个戳是镜像同步认领所有权的
+ * 唯一凭据（`remote-asset-sync.ts` 纪律 2/3）。带着戳被改名的行，会同时满足
+ * 「声明的位空了 → 把原图再下一份」与「这一行的位不在声明里 → 镜像删掉」两条 ——
+ * 玩家眼里就是「我改的名字第二天没了，图还变回了原来那张」。
+ *
+ * 配套的另一半在 {@link rememberRemoteTombstone}: 光摘戳只保住了**这一行**，
+ * 它腾出来的那个**位**仍会被重新下一份原件。
+ */
+function claimByUser(row: AssetMetaRecord): AssetMetaRecord {
+  const next: AssetMetaRecord = { ...row };
+  delete next.remote;
+  return next;
+}
+
 /** 造一行的副本并覆盖变体位；**无变体时把键整个去掉**，不留 `variant: undefined` */
 function withVariant(row: AssetMetaRecord, variant?: string): AssetMetaRecord {
-  const next: AssetMetaRecord = { ...row, updatedAt: Date.now() };
+  // 提主图 / 降级都是用户发起的重写 —— 同样按「玩家动过 = 玩家所有」摘戳
+  const next: AssetMetaRecord = { ...claimByUser(row), updatedAt: Date.now() };
   if (variant === undefined || variant === '') delete next.variant;
   else next.variant = variant;
   return next;
@@ -687,6 +711,17 @@ export const useAssetStore = defineStore('asset', () => {
 
   function releaseAssetUrl(id: string): void {
     cache().release(id);
+  }
+
+  /**
+   * 这一条的**字节换了 / 行没了** —— 作废缓存里那条 URL。
+   *
+   * 与 {@link releaseAssetUrl} 别混: release 是「我这一份用完了」（还引用），
+   * evict 是「这条 URL 已经不代表现在的字节了」（作废条目）。拿 release 当作废用会
+   * 在两个持有者时留着旧图不更新、在一个持有者时打死一张正在显示的图。
+   */
+  function evictAssetUrl(id: string): void {
+    cache().evict(id);
   }
 
   /** 分区 unmount 时调：撤销全部存活 URL */
@@ -1756,8 +1791,10 @@ export const useAssetStore = defineStore('asset', () => {
     const row = findAsset(id);
     if (!row) return { outcome: 'not-found' };
 
+    // 取景不动槽位，但仍是一次用户重写 —— 同样按「玩家动过 = 玩家所有」摘戳立碑，
+    // 否则远程侧一旦换址就会把他调好的取景连同字节一起换掉
     const next: AssetMetaRecord = {
-      ...row,
+      ...claimByUser(row),
       framing: clampAssetFraming(framing),
       updatedAt: Date.now(),
     };
@@ -1766,6 +1803,7 @@ export const useAssetStore = defineStore('asset', () => {
     } catch {
       return { outcome: 'failed' };
     }
+    await rememberRemoteTombstone(row);
     await refreshAssets();
     return { outcome: 'ok', row: findAsset(id) ?? next };
   }
@@ -1990,7 +2028,9 @@ export const useAssetStore = defineStore('asset', () => {
     const alloc = allocateSlot({ name, type, variant, ext: row.ext }, [id]);
     if (!alloc.ok) return { outcome: alloc.reason ?? 'failed' };
 
-    const next: AssetMetaRecord = { ...row, name, type, updatedAt: Date.now() };
+    // 玩家动过 = 玩家所有（见 claimByUser）；顺带给原来那个位立墓碑，
+    // 否则下次同步会往腾空的位上再下一份原件（"改了名字，原图又回来了"）
+    const next: AssetMetaRecord = { ...claimByUser(row), name, type, updatedAt: Date.now() };
     if (alloc.variant === undefined) delete next.variant;
     else next.variant = alloc.variant;
 
@@ -1999,6 +2039,7 @@ export const useAssetStore = defineStore('asset', () => {
     } catch {
       return { outcome: 'failed' };
     }
+    await rememberRemoteTombstone(row);
     await refreshAssets();
     const out: AssetMutationResult = { outcome: 'ok', row: findAsset(id) ?? next };
     if (alloc.renumberedFrom !== undefined) out.renumberedFrom = alloc.renumberedFrom;
@@ -2036,6 +2077,7 @@ export const useAssetStore = defineStore('asset', () => {
       } catch {
         return { outcome: 'failed' };
       }
+      await rememberRemoteTombstone(row);
       await refreshAssets();
       return { outcome: 'ok', row: findAsset(id) };
     }
@@ -2059,6 +2101,9 @@ export const useAssetStore = defineStore('asset', () => {
       await refreshAssets();
       return { outcome: 'failed' };
     }
+    // 两行都换了槽位，两个原位都立碑（withVariant 已经替它们摘了戳）
+    await rememberRemoteTombstone(row);
+    await rememberRemoteTombstone(base);
     await refreshAssets();
     const out: AssetMutationResult = { outcome: 'ok', row: findAsset(id) };
     if (alloc.variant !== undefined) out.renumberedFrom = '';
@@ -2073,6 +2118,35 @@ export const useAssetStore = defineStore('asset', () => {
    * `reactive` 而不是三个裸 ref: 三个字段永远一起变（跑完那一刻同时写 `running`
    * / `lastResult` / `lastAt`），拆开只会给出三个可以各自过期的读法。
    */
+  /**
+   * 给一个**曾经是远程行**的槽位立墓碑 —— 「这个位我自己说了算，别再往里放东西」。
+   *
+   * 谁来叫: 每一条会让远程行离开原位或改变它的用户路径（改名 / 提主图 / 取景 / 删除）。
+   * 不是远程行（没有 `remote` 戳）就直接返回 —— 用户自己的行本来就赢，不需要墓碑。
+   *
+   * 🔴 光摘 `remote` 戳不够（见 {@link claimByUser}）: 摘戳保住的是**那一行**，
+   * 而它腾出来的**位**在声明清单里还在，下一次同步照样会往里下一份原件。玩家看到的是
+   * 「删掉的图第二天自己回来了」「改了名字之后多出一张原图」。
+   *
+   * 墓碑存在设置里（跟着 `UiSettings` 落 localStorage），并在每次同步后按当前声明清单
+   * 收拢（{@link pruneRemoteAssetTombstones}）—— 既不让它无限长，也让作者撤掉再重新
+   * 声明的位能重新开始。
+   *
+   * **永不抛**: 设置面起不来时删除/改名照样算数，墓碑只是「别再下回来」的备忘。
+   */
+  async function rememberRemoteTombstone(row: AssetMetaRecord | undefined): Promise<void> {
+    if (row?.remote === undefined) return;
+    try {
+      const { useSettingsStore } = await import('./settings-store');
+      const s = useSettingsStore().settings;
+      const key = remoteAssetSlotKey(row.name, row.type, row.variant);
+      const list = Array.isArray(s.remoteAssetTombstones) ? s.remoteAssetTombstones : [];
+      if (!list.includes(key)) s.remoteAssetTombstones = [...list, key];
+    } catch (e) {
+      console.warn('[asset-store] 远程素材墓碑没能记下:', e);
+    }
+  }
+
   const remoteSync = reactive({
     running: false,
     lastResult: null as RemoteAssetSyncResult | null,
@@ -2117,10 +2191,11 @@ export const useAssetStore = defineStore('asset', () => {
     remoteSync.running = true;
     try {
       const { useSettingsStore } = await import('./settings-store');
+      const settings = useSettingsStore().settings;
       // 🔴 判据写成 `!== true` 而不是 `=== false`: 老档案的设置袋里没有这个键，
       //    而「缺席」在这里必须读成「按默认走」—— 默认是开，所以要读 getDefaults
       //    灌好的那个值。settings-store 启动时会补齐缺省键，这里只是不再猜。
-      if (useSettingsStore().settings.remoteAssetsEnabled === false) return null;
+      if (settings.remoteAssetsEnabled === false) return null;
 
       // ── 前置：声明的两个来源与落库面都得先就位 ──
       const [{ useWorldBookStore }, { useWorkshopStore }, content] = await Promise.all([
@@ -2136,16 +2211,37 @@ export const useAssetStore = defineStore('asset', () => {
 
       const decls = collectDesiredRemoteAssets(wb.books, content.getContentRegistry().remoteAssets);
 
+      // 墓碑收拢**在算清单之后、跑同步之前**: 拿的是本次真正生效的声明集，
+      // 于是「作者撤掉了这条声明」这件事一发生，对应的墓碑当场作废（下次他再声明
+      // 同一个位就是一条全新的声明，该下就下）。
+      const tombstones = Array.isArray(settings.remoteAssetTombstones)
+        ? pruneRemoteAssetTombstones(settings.remoteAssetTombstones, decls)
+        : [];
+      if (tombstones.length !== (settings.remoteAssetTombstones?.length ?? 0)) {
+        settings.remoteAssetTombstones = tombstones;
+      }
+
       // 基准行必须是**此刻**的库（前置里的任何一步都可能刚写过素材表）
       await refreshAssets();
       const result = await runRemoteAssetSync({
         decls,
         existing: assets.value,
+        tombstones,
         saveAsset,
         deleteAsset: dbDeleteAsset,
+        // 🔴 写前/删前各回读一次**此刻**的行（lib 那两条 dep 的注释写着为什么）:
+        //    计划是下载前那份快照算出来的，而下载要几秒 —— 玩家在这几秒里导入/改名的
+        //    行必须赢，光看快照看不见他。
+        lookupSlot: async ({ name, type, variant }) =>
+          (await getAssets()).find(
+            (r) => r.name === name && r.type === type && (r.variant ?? '') === (variant ?? ''),
+          ),
+        lookupRow: (id: string) => getAsset(id),
         // 同一个 id 换了字节 / 被删掉 —— 缓存里那条 object URL 已经指着旧字节了。
-        // 与 `deleteAssetById` 用的是同一个动作，两条路径不该有两种撤销时机。
-        onBytesReplaced: releaseAssetUrl,
+        // 🔴 必须是 `evict` 不是 `release`: 后者只把计数 -1，两个组件同时挂着这张图时
+        //    旧 URL 原样留着（界面永远显示旧字节），恰好一个时又会撤掉一条**正在显示**
+        //    的 URL（死图）。见 lib/asset-url.ts 那两条契约。
+        onBytesReplaced: evictAssetUrl,
       });
       await refreshAssets();
 
@@ -2180,6 +2276,8 @@ export const useAssetStore = defineStore('asset', () => {
    * 自动提拔等于悄悄改写一个用户没碰过的文件名，还在猜他的意图。
    */
   async function deleteAssetById(id: string): Promise<MutationResult> {
+    // 删之前先记下这一行是谁 —— 删完就查不到了，而墓碑要按它的槽位立
+    const doomed = findAsset(id);
     try {
       await dbDeleteAsset(id);
     } catch {
@@ -2189,7 +2287,10 @@ export const useAssetStore = defineStore('asset', () => {
       notify(message, 'error');
       return mutationFail('failed', message);
     }
-    releaseAssetUrl(id);
+    // 🔴 删掉的行**立墓碑**，否则它下次启动就自己回来了（远程素材 v1 / 审查轮）
+    await rememberRemoteTombstone(doomed);
+    // 行没了 = 那条 URL 已经不代表任何东西，作废（release 只减计数，见 evictAssetUrl）
+    evictAssetUrl(id);
     await refreshAssets();
     return mutationOk();
   }
@@ -2206,13 +2307,16 @@ export const useAssetStore = defineStore('asset', () => {
   async function deleteAssetsByIds(ids: readonly string[]): Promise<AudioBatchResult> {
     const res: AudioBatchResult = { ok: 0, skipped: 0, failed: 0 };
     for (const id of ids) {
-      if (!findAsset(id)) {
+      const doomed = findAsset(id);
+      if (!doomed) {
         res.skipped += 1;
         continue;
       }
       try {
         await dbDeleteAsset(id);
-        releaseAssetUrl(id);
+        // 与单条删除同一条纪律：立墓碑（别再下回来）+ 作废 URL（行已经没了）
+        await rememberRemoteTombstone(doomed);
+        evictAssetUrl(id);
         res.ok += 1;
       } catch {
         res.failed += 1;

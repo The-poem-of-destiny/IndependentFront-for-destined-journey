@@ -293,6 +293,9 @@ function getDefaults(): UiSettings {
     // 作者的意图就是「这些图从这儿取」，默认关掉等于让每个人先去设置页找一遍开关。
     // 关掉是彻底 no-op（连镜像删除都不做），见 settings-types.ts 那条注释。
     remoteAssetsEnabled: true,
+    // 玩家改名/改过/删掉的远程素材槽位（「别再下回来」的备忘）。空 = 一个都没动过；
+    // 每次同步后按当前声明清单收拢，不会无限长。见 settings-types.ts 那条注释。
+    remoteAssetTombstones: [],
 
     // 图像生成（设计 §11；图像 v2 / C8 起是 per-provider 袋子）——
     // 🔴 常量一律从 `image-defaults.ts` / `image-dialect.ts` 取，**不照抄设计文档里的

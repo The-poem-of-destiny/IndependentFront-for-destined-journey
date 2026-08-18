@@ -16,7 +16,10 @@ import {
   collectDesiredRemoteAssets,
   downloadRemoteAsset,
   formatRemoteSyncCounts,
+  isSyncableRemoteUrl,
   planRemoteAssetSync,
+  pruneRemoteAssetTombstones,
+  remoteAssetSlotKey,
   runRemoteAssetSync,
   type RemoteAssetFetch,
   type RemoteAssetSyncDeps,
@@ -481,6 +484,353 @@ describe('runRemoteAssetSync', () => {
       failed: [],
     });
     expect(impl).not.toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 4. 审查轮修复（2026-08-17）
+// ═══════════════════════════════════════════════════════════
+
+describe('Content-Type 是第三方写的字符串 —— 反查表不许有原型', () => {
+  it('🔴 `Content-Type: constructor` 只毁掉这一条，其余照跑（此前会掀翻整次同步）', async () => {
+    // 修复前：`EXTENSION_BY_MIME['constructor']` 查出 `Object.prototype.constructor`
+    // 这个**函数**，它一路当成扩展名传到 `isMediaAllowed` → `.trim()` 抛在工作池里 →
+    // `runRemoteAssetSync` 整个 reject（对外承诺的是「永不抛、逐条隔离」）。
+    const { impl, urls } = fetchMock({
+      'https://a.invalid/mystery': () => pngResponse(PNG_BYTES, 'constructor'),
+      'https://a.invalid/ok.png': () => pngResponse(),
+    });
+    const deps = makeDeps({
+      decls: [
+        decl('怪东西', 'https://a.invalid/mystery'),
+        decl('林岚', 'https://a.invalid/ok.png'),
+      ],
+      fetchImpl: impl,
+      concurrency: 1,
+    });
+
+    const res = await runRemoteAssetSync(deps);
+
+    expect(res.failed).toEqual([
+      { url: 'https://a.invalid/mystery', reason: '不是认得出来的图片/视频格式' },
+    ]);
+    // 账目完整：坏的那条进 failed，好的那条照样落库
+    expect(res.downloaded).toBe(1);
+    expect(deps.saved.map((m) => m.name)).toEqual(['林岚']);
+    // 终态失败不再试代理（否则 reason 会变成代理那一跳的 404，盖掉真原因）
+    expect(urls).toEqual(['https://a.invalid/mystery', 'https://a.invalid/ok.png']);
+  });
+
+  it('原型上的键一律查不出来，该走 URL 后缀兜底就走兜底', async () => {
+    for (const poisoned of ['constructor', '__proto__', 'hasOwnProperty']) {
+      const { impl } = fetchMock({
+        'https://a.invalid/pic.png': () => pngResponse(PNG_BYTES, poisoned),
+      });
+      const res = await downloadRemoteAsset('https://a.invalid/pic.png', { fetchImpl: impl });
+      expect(res.ok && res.payload.ext).toBe('png');
+      expect(res.ok && res.payload.mime).toBe('image/png');
+    }
+  });
+});
+
+describe('体积上限：边读边数，不许先把 25MB 收进内存', () => {
+  /** 一份**流式**响应：分块给字节，可以在头里撒谎 */
+  function streamed(
+    chunk: Uint8Array,
+    totalChunks: number,
+    headers: Record<string, string | null>,
+  ): { res: Response; reads: () => number; cancelled: () => boolean; buffered: () => boolean } {
+    let sent = 0;
+    let cancelled = false;
+    let buffered = false;
+    const res = {
+      ok: true,
+      status: 200,
+      headers: { get: (k: string) => headers[k.toLowerCase()] ?? null },
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (sent >= totalChunks) return { done: true, value: undefined };
+            sent += 1;
+            return { done: false, value: chunk };
+          },
+          cancel: async () => {
+            cancelled = true;
+          },
+        }),
+      },
+      arrayBuffer: async () => {
+        buffered = true;
+        return new ArrayBuffer(0);
+      },
+    };
+    return {
+      res: res as unknown as Response,
+      reads: () => sent,
+      cancelled: () => cancelled,
+      buffered: () => buffered,
+    };
+  }
+
+  it('🔴 content-length 撒谎 + 分块传输：读到越界当场掐断，且不再试代理', async () => {
+    const chunk = new Uint8Array(8);
+    // 头里写着 8 字节，实际发 800 —— 只看头的那道闸对它完全无效
+    const s = streamed(chunk, 100, { 'content-length': '8', 'content-type': 'image/png' });
+    const { impl, urls } = fetchMock({ 'https://a.invalid/liar.png': () => s.res });
+
+    const res = await downloadRemoteAsset('https://a.invalid/liar.png', {
+      fetchImpl: impl,
+      maxBytes: 16,
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.ok === false && res.reason).toContain('超过单张上限');
+    // 8 + 8 = 16 还没越界，第三块才越 —— 读到边界就停，不是读完 800 字节再判
+    expect(s.reads()).toBe(3);
+    expect(s.cancelled()).toBe(true);
+    // 修复前这一条是 `await res.arrayBuffer()`（先把整份收下来）
+    expect(s.buffered()).toBe(false);
+    // 「字节到手但不能用」是终态失败：换条路再下一遍只是把同样的流量再花一次
+    expect(urls).toEqual(['https://a.invalid/liar.png']);
+  });
+
+  it('没有 content-length 也照样拦得住（分块传输本来就没有这个头）', async () => {
+    const s = streamed(new Uint8Array(8), 100, { 'content-type': 'image/png' });
+    const { impl } = fetchMock({ 'https://a.invalid/chunked.png': () => s.res });
+    const res = await downloadRemoteAsset('https://a.invalid/chunked.png', {
+      fetchImpl: impl,
+      maxBytes: 16,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.ok === false && res.reason).toContain('超过单张上限');
+  });
+
+  it('没越界的流式响应：分块拼回来的字节逐位与源相同', async () => {
+    const chunk = new Uint8Array([1, 2, 3, 4]);
+    const s = streamed(chunk, 3, { 'content-type': 'image/png' });
+    const { impl } = fetchMock({ 'https://a.invalid/small.png': () => s.res });
+    const res = await downloadRemoteAsset('https://a.invalid/small.png', {
+      fetchImpl: impl,
+      maxBytes: 1024,
+    });
+    expect(res.ok && Array.from(res.payload.bytes)).toEqual([1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4]);
+  });
+
+  it('拿不到 body 的响应（测试替身 / 老宿主）回落 arrayBuffer，判定不变', async () => {
+    const big = new Uint8Array(64);
+    const { impl } = fetchMock({ 'https://a.invalid/big.png': () => pngResponse(big) });
+    const res = await downloadRemoteAsset('https://a.invalid/big.png', {
+      fetchImpl: impl,
+      maxBytes: 16,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.ok === false && res.reason).toContain('超过单张上限');
+  });
+});
+
+describe('isSyncableRemoteUrl —— 内网/本机地址不进同步', () => {
+  const blocked = [
+    'http://localhost/a.png',
+    'http://localhost:8188/a.png',
+    'https://cdn.localhost/a.png',
+    'http://127.0.0.1/a.png',
+    'http://127.5.5.5:9/a.png',
+    'http://10.0.0.1/a.png',
+    'http://172.16.0.1/a.png',
+    'http://172.31.255.255/a.png',
+    'http://192.168.1.1/a.png',
+    'http://169.254.169.254/latest/meta-data', // 云元数据端点
+    'http://0.0.0.0/a.png',
+    'http://[::1]/a.png',
+    'http://[fe80::1]/a.png',
+    'http://[fc00::1]/a.png',
+    'http://[::ffff:127.0.0.1]/a.png',
+  ];
+  for (const url of blocked) {
+    it(`拒收 ${url}`, () => {
+      expect(isSyncableRemoteUrl(url)).toBe(false);
+    });
+  }
+
+  const allowed = [
+    'https://i.ibb.co/abc/su.png',
+    'http://example.com/a.png',
+    'https://8.8.8.8/a.png',
+    'http://172.15.0.1/a.png', // 172 网段只有 16-31 是私网
+    'http://172.32.0.1/a.png',
+    'https://[2001:db8::1]/a.png',
+    'https://not-localhost.example.com/a.png',
+  ];
+  for (const url of allowed) {
+    it(`放行 ${url}`, () => {
+      expect(isSyncableRemoteUrl(url)).toBe(true);
+    });
+  }
+
+  it('🔴 收集期就把它们滤掉，且**滤在去重之前**（否则会挡住同一个位上的合法声明）', () => {
+    const out = collectDesiredRemoteAssets(
+      [],
+      [
+        { name: '苏婉', url: 'http://127.0.0.1:8188/su.png' },
+        { name: '苏婉', url: 'https://ok.invalid/su.png' },
+        { name: '林岚', url: 'https://ok.invalid/lin.png' },
+      ],
+    );
+    expect(out).toEqual([
+      { name: '苏婉', type: '头像', url: 'https://ok.invalid/su.png' },
+      { name: '林岚', type: '头像', url: 'https://ok.invalid/lin.png' },
+    ]);
+  });
+
+  it('下载口也自己把一道（它是唯一碰网络的出口）：一次请求都不发', async () => {
+    const impl = vi.fn();
+    const res = await downloadRemoteAsset('http://192.168.0.9/a.png', {
+      fetchImpl: impl as unknown as RemoteAssetFetch,
+    });
+    expect(res).toEqual({ ok: false, reason: '不是可下载的公网地址' });
+    expect(impl).not.toHaveBeenCalled();
+  });
+});
+
+describe('墓碑：玩家动过的位，镜像不再管', () => {
+  const key = (name: string, type = '头像', variant?: string): string =>
+    remoteAssetSlotKey(name, type, variant);
+
+  it('🔴 位上有墓碑 → 让路，既不下载也不下到别处（删掉的图不会自己回来）', () => {
+    const plan = planRemoteAssetSync([decl('苏婉', 'https://a.invalid/su.png')], [], [key('苏婉')]);
+    expect(plan.toDownload).toEqual([]);
+    expect(plan.skippedUserOwned).toHaveLength(1);
+  });
+
+  it('墓碑只管自己那个位，同角色的另一个变体照下', () => {
+    const plan = planRemoteAssetSync(
+      [
+        decl('苏婉', 'https://a.invalid/su.png'),
+        decl('苏婉', 'https://a.invalid/smile.png', { type: '立绘', variant: '微笑' }),
+      ],
+      [],
+      [key('苏婉')],
+    );
+    expect(plan.toDownload.map((d) => d.decl.variant)).toEqual(['微笑']);
+  });
+
+  it('墓碑位上万一还坐着远程行 → 不删（让路的意思是「不管它」，不是「删掉它」）', () => {
+    const stray = remoteRow('苏婉', 'https://a.invalid/su.png');
+    const plan = planRemoteAssetSync(
+      [decl('苏婉', 'https://a.invalid/su.png')],
+      [stray],
+      [key('苏婉')],
+    );
+    expect(plan.toDelete).toEqual([]);
+    expect(plan.toDownload).toEqual([]);
+  });
+
+  it('runRemoteAssetSync 收下 deps.tombstones：一次请求都不发', async () => {
+    const impl = vi.fn();
+    const deps = makeDeps({
+      decls: [decl('苏婉', 'https://a.invalid/su.png')],
+      tombstones: [key('苏婉')],
+      fetchImpl: impl as unknown as RemoteAssetFetch,
+    });
+    const res = await runRemoteAssetSync(deps);
+    expect(res.skippedUserOwned).toBe(1);
+    expect(deps.saved).toEqual([]);
+    expect(impl).not.toHaveBeenCalled();
+  });
+
+  it('🔴 收拢：声明里没有的墓碑丢掉（作者撤了又加回来时要能重新开始）', () => {
+    const kept = pruneRemoteAssetTombstones(
+      [key('苏婉'), key('已下架的角色'), key('苏婉')],
+      [decl('苏婉', 'https://a.invalid/su.png')],
+    );
+    expect(kept).toEqual([key('苏婉')]);
+  });
+
+  it('键就是计划器用的那一个（各拼各的字符串 = 墓碑永远匹配不上）', () => {
+    // 变体缺省与空串是同一个位
+    expect(remoteAssetSlotKey('苏婉', '头像')).toBe(remoteAssetSlotKey('苏婉', '头像', ''));
+    expect(remoteAssetSlotKey('苏婉', '头像')).not.toBe(remoteAssetSlotKey('苏婉', '立绘'));
+  });
+});
+
+describe('写前/删前回读 —— 计划算完到落库之间那几秒', () => {
+  it('🔴 下载期间玩家导入了同一个位：写入让路，不覆盖他的行', async () => {
+    const { impl } = fetchMock({ 'https://a.invalid/su.png': () => pngResponse() });
+    const deps = makeDeps({
+      decls: [decl('苏婉', 'https://a.invalid/su.png')],
+      existing: [], // 计划算的时候位还是空的
+      fetchImpl: impl,
+      // 下载完再回读：位上已经坐着他自己导的那一行
+      lookupSlot: async () => row({ name: '苏婉' }),
+    });
+    const res = await runRemoteAssetSync(deps);
+    expect(deps.saved).toEqual([]);
+    expect(res.downloaded).toBe(0);
+    expect(res.skippedUserOwned).toBe(1);
+  });
+
+  it('换址途中那一行被换成了别人：同样让路（id 对不上就不写）', async () => {
+    const old = remoteRow('苏婉', 'https://a.invalid/1.png');
+    const { impl } = fetchMock({ 'https://a.invalid/2.png': () => pngResponse() });
+    const deps = makeDeps({
+      decls: [decl('苏婉', 'https://a.invalid/2.png')],
+      existing: [old],
+      fetchImpl: impl,
+      lookupSlot: async () => remoteRow('苏婉', 'https://a.invalid/1.png', { id: '别的行' }),
+    });
+    const res = await runRemoteAssetSync(deps);
+    expect(deps.saved).toEqual([]);
+    expect(res.replaced).toBe(0);
+    expect(res.skippedUserOwned).toBe(1);
+  });
+
+  it('回读结果与计划一致时照常落库（这道闸不许把正常路径也拦掉）', async () => {
+    const { impl } = fetchMock({ 'https://a.invalid/su.png': () => pngResponse() });
+    const deps = makeDeps({
+      decls: [decl('苏婉', 'https://a.invalid/su.png')],
+      fetchImpl: impl,
+      lookupSlot: async () => undefined,
+    });
+    const res = await runRemoteAssetSync(deps);
+    expect(res.downloaded).toBe(1);
+    expect(deps.saved).toHaveLength(1);
+  });
+
+  it('🔴 删除前那一行的 remote 戳被摘了（玩家刚改过它）→ 不删', async () => {
+    const orphan = remoteRow('旧角色', 'https://a.invalid/old.png');
+    const deps = makeDeps({
+      decls: [],
+      existing: [orphan],
+      lookupRow: async () => row({ name: '旧角色' }), // 已经是用户的行了
+    });
+    const res = await runRemoteAssetSync(deps);
+    expect(deps.removed).toEqual([]);
+    expect(res.deleted).toBe(0);
+  });
+
+  it('删除前那一行已经不在了 → 空转，不报错也不计数', async () => {
+    const orphan = remoteRow('旧角色', 'https://a.invalid/old.png');
+    const deps = makeDeps({
+      decls: [],
+      existing: [orphan],
+      lookupRow: async () => undefined,
+    });
+    const res = await runRemoteAssetSync(deps);
+    expect(deps.removed).toEqual([]);
+    expect(res.deleted).toBe(0);
+    expect(res.failed).toEqual([]);
+  });
+
+  it('回读确认它还是远程行 → 照删', async () => {
+    const orphan = remoteRow('旧角色', 'https://a.invalid/old.png');
+    const deps = makeDeps({
+      decls: [],
+      existing: [orphan],
+      lookupRow: async () => orphan,
+    });
+    const res = await runRemoteAssetSync(deps);
+    expect(deps.removed).toEqual([orphan.id]);
+    expect(res.deleted).toBe(1);
   });
 });
 

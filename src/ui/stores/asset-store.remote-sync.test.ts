@@ -21,7 +21,10 @@ import type { AssetMetaRecord } from '@engine/types';
 
 // ── 四个前置 store 的替身（asset-store 是动态 import 它们的，照样 mock 得到）──
 
-const settingsBag = { remoteAssetsEnabled: true as boolean };
+const settingsBag = {
+  remoteAssetsEnabled: true as boolean,
+  remoteAssetTombstones: [] as string[],
+};
 vi.mock('./settings-store', () => ({
   useSettingsStore: () => ({ settings: settingsBag }),
 }));
@@ -107,6 +110,7 @@ beforeEach(async () => {
   await initializeDatabase();
   setActivePinia(createPinia());
   settingsBag.remoteAssetsEnabled = true;
+  settingsBag.remoteAssetTombstones = [];
   worldbookBooks.length = 0;
   registryFace = [];
   registryGate = null;
@@ -254,6 +258,46 @@ describe('syncRemoteAssets —— 声明来源与回执', () => {
     expect(toasts[0].message).toBe('远程素材同步：新增 1 · 更新 0 · 删除 0 · 跳过 0 · 失败 0');
   });
 
+  it('🔴 同步途中玩家导入了同一个位：他的行赢，远程那一份不写（写前回读）', async () => {
+    registryFace = [{ name: '苏婉', url: 'https://a.invalid/su.png' }];
+    // 把下载卡在半路，好在「计划算完」与「落库」之间插进一次用户导入
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      await gate;
+      return pngResponse();
+    });
+    const store = useAssetStore();
+
+    const running = store.syncRemoteAssets();
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+
+    // 玩家此刻自己导了一张同名头像（计划里根本没有这一行）
+    const now = Date.now();
+    const mine: AssetMetaRecord = {
+      id: 'mine',
+      name: '苏婉',
+      type: '头像',
+      ext: 'png',
+      mime: 'image/png',
+      bytes: PNG.length,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await dbSaveAsset(mine, new Blob([PNG.slice().buffer as ArrayBuffer], { type: 'image/png' }));
+
+    release();
+    const res = await running;
+
+    expect(res).toMatchObject({ downloaded: 0, replaced: 0, skippedUserOwned: 1 });
+    const rows = await getAssets();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe('mine');
+    expect(rows[0].remote).toBeUndefined();
+  });
+
   it('前置 store 抛了也不炸：返回 null 并把 running 落回来（同步是旁路）', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     ensureContentRegistryLoaded.mockRejectedValueOnce(new Error('注册表挂了'));
@@ -262,5 +306,90 @@ describe('syncRemoteAssets —— 声明来源与回执', () => {
     await expect(store.syncRemoteAssets()).resolves.toBeNull();
     expect(store.remoteSync.running).toBe(false);
     warn.mockRestore();
+  });
+});
+
+/**
+ * 墓碑 —— 「玩家动过 = 玩家所有，镜像不再管它」（审查轮，2026-08-17）。
+ *
+ * 修复前这三条各自的症状都是**下次启动悄悄改回去**，且一声不吭：
+ * 改名 → 那一行被镜像删掉、原件又下一份；删除 → 第二天自己回来了。
+ */
+describe('syncRemoteAssets —— 玩家动过之后', () => {
+  const SU = { name: '苏婉', url: 'https://a.invalid/su.png' };
+
+  it('🔴 改名之后：改过的行留着，原来那个位也不会再下一份原件', async () => {
+    registryFace = [SU];
+    installFetchMock();
+    const store = useAssetStore();
+
+    await store.syncRemoteAssets();
+    const seeded = (await getAssets())[0];
+    expect(seeded.remote?.url).toBe(SU.url);
+
+    const renamed = await store.renameAsset(seeded.id, { name: '苏婉·我改过的' });
+    expect(renamed.outcome).toBe('ok');
+    // 改过的行从此是玩家的（没有戳，镜像的删除候选一律要求带戳）
+    expect(renamed.row?.remote).toBeUndefined();
+
+    const res = await store.syncRemoteAssets();
+
+    expect(res).toMatchObject({ downloaded: 0, replaced: 0, deleted: 0, skippedUserOwned: 1 });
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // 第二轮一个字节都没下
+    const rows = await getAssets();
+    expect(rows.map((r) => r.name)).toEqual(['苏婉·我改过的']);
+  });
+
+  it('🔴 删掉之后：不会自己回来', async () => {
+    registryFace = [SU];
+    installFetchMock();
+    const store = useAssetStore();
+
+    await store.syncRemoteAssets();
+    const seeded = (await getAssets())[0];
+    await store.deleteAsset(seeded.id);
+    expect(await getAssets()).toEqual([]);
+
+    const res = await store.syncRemoteAssets();
+
+    expect(res).toMatchObject({ downloaded: 0, skippedUserOwned: 1 });
+    expect(await getAssets()).toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('🔴 作者撤掉这条声明 → 墓碑作废；日后再声明同一个位，照常下', async () => {
+    registryFace = [SU];
+    installFetchMock();
+    const store = useAssetStore();
+
+    await store.syncRemoteAssets();
+    await store.deleteAsset((await getAssets())[0].id);
+    expect(settingsBag.remoteAssetTombstones).toHaveLength(1);
+
+    // 作者把这条声明撤了（整包下架 / 换了角色）—— 墓碑跟着这条声明一起作废
+    registryFace = [];
+    await store.syncRemoteAssets();
+    expect(settingsBag.remoteAssetTombstones).toEqual([]);
+
+    // 日后他又声明了同一个位：这是**一条新的声明**，玩家当初删的是旧的那张图
+    registryFace = [SU];
+    const res = await store.syncRemoteAssets();
+
+    expect(res).toMatchObject({ downloaded: 1 });
+    expect((await getAssets()).map((r) => r.name)).toEqual(['苏婉']);
+  });
+
+  it('玩家没动过的行照常镜像（证明上面三条不是把整条链路关掉了）', async () => {
+    registryFace = [SU];
+    installFetchMock();
+    const store = useAssetStore();
+
+    await store.syncRemoteAssets();
+    expect(settingsBag.remoteAssetTombstones).toEqual([]);
+
+    registryFace = [];
+    const res = await store.syncRemoteAssets();
+    expect(res?.deleted).toBe(1);
+    expect(await getAssets()).toEqual([]);
   });
 });

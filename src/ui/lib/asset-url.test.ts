@@ -664,6 +664,141 @@ describe('引用计数', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// evict：同一个 id 的字节换了（远程素材同步换址 / 删行）
+//
+// 这一组钉的全是**可观察行为**（下一次 get 拿到的是不是新 URL、旧 URL 什么时候被撤销），
+// 不是「某个回调被叫过」——「叫过 release」正是修复前那个 bug 的样子：它照样被叫，
+// 只是做的事情不对（两个持有者时旧图一直显示，一个持有者时打死正在显示的图）。
+// ═══════════════════════════════════════════════════════════
+
+describe('evict — 字节换了之后作废这一条', () => {
+  it('🔴 evict 之后下一次 get 重新读字节、给一条**不同的** URL', async () => {
+    const h = makeHarness();
+    const cache = createAssetUrlCache(h.options);
+
+    const first = await cache.get('a');
+    cache.evict('a');
+    const second = await cache.get('a');
+
+    expect(second).not.toBe(first);
+    expect(h.loads).toEqual(['a', 'a']); // 真的回了 loader，不是拿缓存糊弄
+    expect(h.created).toEqual([first, second]);
+    // 发起者已经把自己那份还掉（下面那条用例专测「还没还」的情形）
+  });
+
+  it('🔴 还有人挂着时**先不撤**，等他还回来才撤（撤了就是打死正在显示的图）', async () => {
+    const h = makeHarness();
+    const cache = createAssetUrlCache(h.options);
+
+    const url = await cache.get('a'); // 组件 A 正显示着它
+    cache.evict('a');
+
+    expect(h.revoked).toEqual([]); // ← 修复前这里就把它撤了（refCount 1 → release 归零）
+    // 期间新的取用照常拿到新 URL，两条并存
+    const fresh = await cache.get('a');
+    expect(fresh).not.toBe(url);
+    expect(h.revoked).toEqual([]);
+
+    cache.release('a'); // 组件 A 卸载，还掉旧的那一份
+    expect(h.revoked).toEqual([url]);
+    expect(cache.peek('a')).toBe(fresh); // 新的那条毫发无损
+
+    cache.release('a');
+    expect(h.revoked).toEqual([url, fresh]);
+    expect(cache.size).toBe(0);
+  });
+
+  it('两个持有者时旧 URL 撑到最后一个还完（少还一笔 = 泄漏，多撤一笔 = 死图）', async () => {
+    const h = makeHarness();
+    const cache = createAssetUrlCache(h.options);
+
+    const url = await cache.get('a');
+    await cache.get('a'); // 第二个组件也挂上了同一张图
+    cache.evict('a');
+
+    cache.release('a');
+    expect(h.revoked).toEqual([]); // ← 修复前：这一下什么都不做，旧图永远显示下去
+    cache.release('a');
+    expect(h.revoked).toEqual([url]);
+  });
+
+  it('零引用的 id → 空转：不抛、不二次撤销，下一次 get 照常新铸', async () => {
+    // ⚠️「零引用**且仍在缓存里**」的条目在公开 API 下不存续（归零即撤销，见文件头与
+    //    「容量与逐出」那一组的说明），所以这里能构造的零引用形态就是「已经不在缓存里」。
+    //    evict 里那条 `held <= 0` 的分支因此是**防御性的**，不是这条用例覆盖的路径。
+    const h = makeHarness();
+    const cache = createAssetUrlCache(h.options);
+
+    const url = await cache.get('a');
+    cache.release('a');
+    expect(h.revoked).toEqual([url]);
+
+    cache.evict('a'); // 已经没有这条了
+    cache.evict('从没取过的 id');
+    expect(h.revoked).toEqual([url]); // 没有二次撤销
+
+    const again = await cache.get('a');
+    expect(again).not.toBe(url);
+  });
+
+  it('🔴 作废在飞的那次加载：它读到的可能正是旧字节，不许悄悄进缓存', async () => {
+    const h = makeDeferredHarness();
+    const cache = createAssetUrlCache(h.options);
+
+    const pending = cache.get('a'); // 加载开始（此刻字节还是旧的）
+    cache.evict('a'); // 字节被换掉了
+    h.resolveOne('a'); // 旧字节的加载这才回来
+
+    expect(await pending).toBeNull(); // 拿到 null 的调用方**不欠** release（契约）
+    expect(h.revoked).toEqual(h.created); // 那条多铸的 URL 当场撤掉，不泄漏
+    expect(cache.size).toBe(0);
+
+    // 之后的 get 是一次**全新的**加载，不搭那班注定作废的车
+    const next = cache.get('a');
+    h.resolveOne('a');
+    expect(await next).toBe(h.created[1]);
+    expect(h.loads).toEqual(['a', 'a']);
+  });
+
+  it('revokeAll 把「还没人还」的旧账一并收掉（分区都没了，不会再有人来还）', async () => {
+    const h = makeHarness();
+    const cache = createAssetUrlCache(h.options);
+
+    const url = await cache.get('a');
+    cache.evict('a');
+    const fresh = await cache.get('a');
+    expect(h.revoked).toEqual([]);
+
+    cache.revokeAll();
+    expect(new Set(h.revoked)).toEqual(new Set([url, fresh]));
+
+    // 拆除之后迟到的 release 不该再撤销任何东西
+    cache.release('a');
+    cache.release('a');
+    expect(h.revoked).toHaveLength(2);
+  });
+
+  it('会计恒等式：evict 穿插 200 轮，每条 URL 恰好撤销一次、收尾一条不剩', async () => {
+    const h = makeHarness();
+    const cache = createAssetUrlCache(h.options);
+
+    for (let i = 0; i < 200; i++) {
+      await cache.get('a'); // 挂上
+      cache.evict('a'); // 字节换了
+      await cache.get('a'); // 新的挂上
+      cache.release('a'); // 旧的那份还回来（先还旧账）
+      cache.release('a'); // 新的那份也还回来
+    }
+
+    expect(h.created).toHaveLength(400);
+    expect(h.revoked).toHaveLength(400);
+    expect(new Set(h.revoked).size).toBe(h.revoked.length);
+    expect(new Set(h.revoked)).toEqual(new Set(h.created));
+    expect(cache.size).toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
 // 会计恒等式：网格用量下每个 URL 恰好撤销一次
 // ═══════════════════════════════════════════════════════════
 

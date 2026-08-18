@@ -240,6 +240,22 @@ export type UiSettings = {
    */
   remoteAssetsEnabled: boolean;
 
+  /**
+   * 远程素材的**墓碑**：玩家已经收归己有的槽位（远程素材 v1 / 审查轮）。
+   *
+   * 键由 `lib/remote-asset-sync.ts` 的 `remoteAssetSlotKey(name, type, variant)` 造 ——
+   * **别在别处另拼一份**，拼歪了的症状恰好长得像它要修的那个 bug（删了又回来）。
+   *
+   * 🔴 存在的理由: 声明清单是**作者**写的，而删除/改名是**玩家**做的。没有这张表时，
+   * 玩家删掉一张远程立绘，下次启动它照样在清单里、位又空着，于是原样再下一份 ——
+   * 删除变成了「刷新」。改名同理（原位空了 → 补下一份原件）。
+   *
+   * 🔴 每次同步后按**当前声明清单**收拢（`pruneRemoteAssetTombstones`）: 既不让它无限
+   * 长，也让「作者撤掉这条声明、日后又加回来」能重新开始 —— 那是一条新声明，玩家当初
+   * 删的是旧的那张图，拿旧墓碑挡住它等于让作者永远送不进来且无从得知。
+   */
+  remoteAssetTombstones: string[];
+
   // ═══ 图像生成（设计 §11；图像 v2 / C8 重构成 per-provider 袋子）═══
   //
   // 🔴 这里**没有** `image_prompt` 的模型/温度/世界书 —— 那些走 `agent-settings.ts`
