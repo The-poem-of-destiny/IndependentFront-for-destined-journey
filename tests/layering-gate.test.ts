@@ -24,7 +24,9 @@
  *    「供值链路」测试用 `import.meta.glob('@ui/main.ts', { query: '?raw' })` 把前端源码
  *    当**字符串**读进来，断言「main.ts 真的往缝里装了值」。它没有把任何前端模块拉进图里，
  *    而它守的恰恰是缝的另一半（blurByDefault 那个教训：单模块测试证明不了有人供值）。
- *    所以判据是「同一条语句里有没有 `?raw`」，不是文件白名单 —— 白名单会被拿去掩护真 import。
+ *    所以判据是「**命中行自己**是不是真的在读源码字符串」（说明符里带 `?raw`，或本行就是
+ *    带 raw 查询的 `import.meta.glob`），不是文件白名单、也不是「附近出现过 `?raw`」——
+ *    白名单会被拿去掩护真 import，而「附近出现过」一句 `// ?raw` 注释就能绕开（2026-08-17 收紧）。
  *
  * 用 `node:fs` 而不是 `import.meta.glob('?raw')`（与 `map-literals-gate.test.ts` 相反）：
  * `tests/**` 在 `tsconfig.tools.json` 里带 `types: ["node"]`，读盘是这里的常规写法
@@ -104,18 +106,40 @@ function isCommentLine(line: string): boolean {
   return t.startsWith('//') || t.startsWith('*') || t.startsWith('/*');
 }
 
+/** 去掉行尾的 `//` 注释 —— 判豁免只看**可执行的那半行**（见 `isRawSourceRead`） */
+function stripLineComment(line: string): string {
+  const i = line.indexOf('//');
+  return i < 0 ? line : line.slice(0, i);
+}
+
+/** 说明符自带 `?raw` 查询串：`import x from '@ui/main.ts?raw'`（引号内、紧贴结尾） */
+const RAW_IN_SPECIFIER = /['"][^'"]*\?raw['"]/;
+
+/** `import.meta.glob` 的 raw 选项：`query: '?raw'`（现行）/ `as: 'raw'`（上游旧写法） */
+const RAW_GLOB_OPTION = /(query\s*:\s*['"]\?raw['"]|as\s*:\s*['"]raw['"])/;
+
 /**
  * 这一处命中是不是 `?raw` 源码读取。
  *
- * `import.meta.glob(...)` 的选项对象跨好几行，`query: '?raw'` 通常在路径的下一两行，
- * 所以看的是**命中行往后的一小段窗口**（含本行）。窗口取 5 行：`import.meta.glob` 的
- * 选项对象最多就那么长，再宽就有可能把隔壁一段无关的 `?raw` 算进来。
+ * 🔴 **判据必须落在命中行自己身上**（2026-08-17 评审收紧）。此前的写法是「命中行往后
+ *    5 行的窗口里出现过 `?raw` 就放行」，于是一行注释就能把两道网一起绕过去：
+ *
+ *      await import('../ui/stores/content-store'); // ?raw
+ *
+ *    eslint 的 `no-restricted-imports` 看不见动态 import，本闸门又被那句注释豁免掉 ——
+ *    这正是本闸门存在的理由（真 import 藏在动态写法里）被自己的豁免口子放走。
+ *
+ * 收紧后只认两种**真的在读源码字符串**的形态：
+ *   ① 说明符里自带 `?raw`（单行就能判完，`RAW_IN_SPECIFIER`）；
+ *   ② 命中行是 `import.meta.glob(` 调用，且它的选项对象里有 raw 查询 —— 只有这一种
+ *      形态才准往后看窗口，因为它的选项对象天生跨行（三处既有的供值链路测试正是这个形状）。
+ * 两条都先剥掉行尾注释：注释里写什么都不该改变一行代码的定性。
  */
 function isRawSourceRead(lines: string[], index: number): boolean {
-  return lines
-    .slice(index, index + 5)
-    .join('\n')
-    .includes('?raw');
+  const code = stripLineComment(lines[index] ?? '');
+  if (RAW_IN_SPECIFIER.test(code)) return true;
+  if (!code.includes('import.meta.glob(')) return false;
+  return lines.slice(index, index + 5).some((l) => RAW_GLOB_OPTION.test(stripLineComment(l)));
 }
 
 /** 扫一份源码，返回违规明细（`L<行号>: <内容>`） */
@@ -202,6 +226,45 @@ describe('findLayeringViolations —— 闸门自身的可信度', () => {
       '',
     ].join('\n');
     expect(findLayeringViolations(src)).toEqual([]);
+  });
+
+  it('说明符自带 `?raw` 放行（单行形态）', () => {
+    expect(findLayeringViolations("import mainSource from '@ui/main.ts?raw';\n")).toEqual([]);
+    expect(findLayeringViolations("const s = await import('../ui/main.ts?raw');\n")).toEqual([]);
+  });
+
+  it("上游旧写法 `as: 'raw'` 的 glob 也放行", () => {
+    const src = ["const S = import.meta.glob('@ui/main.ts', {", "  as: 'raw',", '});', ''].join(
+      '\n',
+    );
+    expect(findLayeringViolations(src)).toEqual([]);
+  });
+
+  it('🔴 `// ?raw` 注释绕不过豁免（收紧前它能同时骗过两道网）', () => {
+    // eslint 的 no-restricted-imports 看不见动态 import，本闸门此前又被这句注释豁免掉
+    expect(
+      findLayeringViolations("await import('../ui/stores/content-store'); // ?raw\n"),
+    ).toHaveLength(1);
+    expect(findLayeringViolations("import { ref } from 'vue'; // ?raw\n")).toHaveLength(1);
+    // 注释单独占一行、紧挨着真 import 也不行
+    expect(
+      findLayeringViolations("// ?raw\nimport { x } from '@ui/stores/content-store';\n"),
+    ).toHaveLength(1);
+  });
+
+  it('🔴 真 import 借下方合法 glob 的 `?raw` 掩护也照抓（窗口只对 glob 行开放）', () => {
+    const src = [
+      "import { getContentRegistry } from '@ui/stores/content-store';",
+      "const S = import.meta.glob('@ui/main.ts', {",
+      '  eager: true,',
+      "  query: '?raw',",
+      '});',
+      '',
+    ].join('\n');
+    // 收紧前：第 1 行的 5 行窗口里有 '?raw' → 被豁免
+    const hits = findLayeringViolations(src);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toContain('L1');
   });
 
   it('`?raw` 放行**不是**文件级白名单：同文件里的真 import 照抓', () => {

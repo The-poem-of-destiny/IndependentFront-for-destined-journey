@@ -22,7 +22,9 @@
 
 **验证**：`npm run gates` 八道全绿（typecheck / typecheck:vue / typecheck:tools / build / format:check / lint / knip:ratchet / test:run），全量 **338 文件 8669 tests 通过 + 8 skipped**（26.5s），零 flake 重跑；knip 棘轮 141 条无新增。新增/改写测试覆盖：提交级缓存 4 条（I/O 预算 + 终态 / 失败补丁不连坐 flush / 删除角色不被后续补丁复活 / 纯变量提交零角色表查询）· 快照分表 7 条（拆行 + preview 回填 + 列表与淘汰零载荷读的间谍 + 孤儿级联 + 半条快照抛错 + deleteSaveSlot 级联）+ v22 升版 3 条 + FullBackup/单存档备份新旧双格式往返 4 条 · 分层闸门 12 条（含闸门自身可信度自检）· BFF 路由 +11 条。
 
-**留验事项**：①长存档真机计时对比（提交与快照两条热路径都是每回合跑，收益要在真机上量）；②`SnapshotPanel` 真机走查（`preview` 字段渲染 + 旧快照缺 preview 时那一行不显示）；③**P1-09 的既有洞略微加宽**——UI 直写 `updateProfile`（focusQuest / news.read）不走写锁，提交窗口内可能整份覆盖；缓存把提交窗口从「每补丁一拍」拉长成「整次提交一拍」，故窗口变宽（并非新洞，待与 P1-09 一并收口）；④`restoreSnapshot` 写路径仍保留 `structuredClone`（恢复罕用、且要防快照对象与库内对象共享引用，本次未动）。
+**评审修复（PR #113 复审 4 条，2026-08-17）**：①**P1-09 的洞就地补上**——`save-profile.ts` 新增 `persistFocusQuest` / `persistNewsRead` 两个窄字段写入口，进 `withSaveWriteLock` 的同时**在锁内重读一份新鲜 profile 再只改那一格**（只加锁而写 UI 手里那份陈旧整档，会反过来把提交刚落的 fp/任务抹回旧值——锁解决交错、重读解决陈旧，缺一条都不算修好），两个面板不再向引擎交出整份 profile（顺带省掉 JSON 克隆）。②分层闸门的 `?raw` 豁免收紧到**命中行自身**（说明符带 `?raw`，或本行就是带 raw 查询的 `import.meta.glob`）——此前「后 5 行窗口里出现过 `?raw`」的判据，一句 `// ?raw` 行尾注释就能让动态 import 同时骗过 eslint 与本闸门。③两个导入器都加**前向版本闸门**（`assertBackupNotFromFuture`）：备份戳 > `DB_VERSION` 直接拒并提示先更新应用（v22 备份进旧版会静默变成空壳快照，日后恢复才炸 DataError），戳更老或缺席照旧导入，三态容忍一格未动。④v22 升版改**逐行流式**（先取主键再逐行 get → 写载荷 → 覆盖成瘦元数据），不再 `toArray()` 把整表胖行一次性捞进内存——升版原子且每次启动重试，OOM 一次应用就永久打不开库。新增测试 16 条（UI 写入并发 4 · 闸门自测 4 · 版本闸门 7 · 3 存档 × 3 胖快照迁移 1）。
+
+**留验事项**：①长存档真机计时对比（提交与快照两条热路径都是每回合跑，收益要在真机上量）；②`SnapshotPanel` 真机走查（`preview` 字段渲染 + 旧快照缺 preview 时那一行不显示）；③~~P1-09 的既有洞略微加宽~~ **已闭合（2026-08-17 评审修）**：focusQuest / news.read 两处 UI 写现经 `persistFocusQuest` / `persistNewsRead` 串进 per-saveId 写队列并在锁内窄字段读-改-写，提交窗口再长也不会互相覆盖（详见上一段 ①）；④`restoreSnapshot` 写路径仍保留 `structuredClone`（恢复罕用、且要防快照对象与库内对象共享引用，本次未动）。
 
 ### 全仓审查低风险小修一波（代码 8 + 配置 4 + 文档 9）｜ ✅ 已实施（2026-08-17）
 

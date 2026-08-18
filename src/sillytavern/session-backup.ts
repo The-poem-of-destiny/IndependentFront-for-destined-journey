@@ -26,6 +26,7 @@ import {
   getDatabase,
   characterAppearanceKey,
   normalizeSnapshotBackupRows,
+  assertBackupNotFromFuture,
   DB_VERSION,
 } from './database';
 import type { ContentPackRecord } from './database';
@@ -113,7 +114,11 @@ interface SessionDependencies {
 /** 单存档备份文件的顶层结构 */
 export interface SessionBackup {
   kind: 'fated-poem-session-save';
-  /** = `DB_VERSION`（只作排查标记，导入侧不拿它做判断，与 FullBackup 同口径） */
+  /**
+   * = `DB_VERSION`。导入侧**只拿它做一个方向的判断**（与 FullBackup 同口径，2026-08-17 评审补）：
+   * 戳 > 本机 `DB_VERSION` 直接拒（`assertBackupNotFromFuture`：备份比本机新，导进来
+   * 会得到一批读不出来的残档）；戳更老或缺席照旧原样导入。其余场合它仍只是排查标记。
+   */
   version: number;
   exportedAt: number;
   save: SaveSlot;
@@ -638,6 +643,7 @@ function readArray<T>(source: Record<string, unknown>, field: string): T[] {
 /**
  * 三态校验（沿用 FullBackup 的 `validateBackupOrThrow` 口径）：
  * 字段**缺席**当空数组容忍，字段**在但不是数组**直接拒。
+ * 外加一道**前向版本闸门**：备份比本机新直接拒（`assertBackupNotFromFuture`）。
  */
 function validateSessionBackupOrThrow(backup: unknown): Record<string, unknown> {
   const rec = asRecord(backup);
@@ -650,6 +656,7 @@ function validateSessionBackupOrThrow(backup: unknown): Record<string, unknown> 
   if (typeof rec.version !== 'number' || !Number.isFinite(rec.version)) {
     throw new Error('备份格式无效：缺少有效的 version 字段');
   }
+  assertBackupNotFromFuture(rec.version);
   if (!asRecord(rec.save)) {
     throw new Error('备份格式无效：缺少 save 存档主记录');
   }

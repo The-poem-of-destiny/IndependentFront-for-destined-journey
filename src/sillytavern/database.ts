@@ -88,9 +88,13 @@ export interface MapBlobRecord {
 
 const DB_NAME = 'SillyTavernWebDB';
 /**
- * 🔴 **必须等于下面最后一个 `this.version(n)`**。它只出现在 `FullBackup.version` 上
- * （导入侧不拿它做判断），所以对不上时**不会有任何报错** —— 只是每份导出的备份都盖了
- * 一个过期的戳，日后靠它排查「这份备份是哪一版导的」时会被误导。
+ * 🔴 **必须等于下面最后一个 `this.version(n)`**。它出现在 `FullBackup.version` /
+ * `SessionBackup.version` 上，导入侧**只拿它做一个方向的判断**：戳 > `DB_VERSION` 直接拒
+ * （「备份比本机新」，2026-08-17 评审补，见 `assertBackupNotFromFuture`）；戳更老或缺席
+ * 照旧原样导入（三态容忍，老备份必须永远导得进来）。
+ *
+ * 所以对不上时**仍然不会有任何报错** —— 只是每份导出的备份都盖了一个过期的戳，
+ * 日后靠它排查「这份备份是哪一版导的」时会被误导，而落后的戳还会让前向闸门形同虚设。
  *
  * 曾经落后过两版：v17 那次记得改，v18（删地点预设行）与 v19（角色外貌会话副本表）都忘了，
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
@@ -625,23 +629,29 @@ class AppDatabase extends Dexie {
      *
      * upgrade：逐行搬。载荷四字段移出去、元数据行只留五个字段 + 顺手回填 `preview`
      * （否则存量快照在面板上会集体丢掉「主角 HP / 游戏内日期」那一行）。
-     * 🔴 走 `toArray()` 而不是 `Collection.modify()`：要往**另一张表**写行，
-     *    modify 的回调里做跨表写在 Dexie 里不是受支持的用法。
+     * 🔴 不走 `Collection.modify()`：要往**另一张表**写行，modify 的回调里做跨表写
+     *    在 Dexie 里不是受支持的用法。
+     * 🔴 **也不先 `toArray()` 一次性捞全表**（2026-08-17 评审修）：胖行内嵌整份对话历史，
+     *    重度多存档库里那一下就是几百 MB 同时驻留内存 —— 而升版是**原子的、每次启动都重试**，
+     *    一旦 OOM，应用就永久卡在打不开数据库的状态，用户侧无路可走。
+     *    改成先取主键（字符串，轻）再逐行 get → 写载荷 → 覆盖成瘦元数据：
+     *    同一个升版事务内完成，终态与批量版逐字节相同，而内存占用只有**一行**。
      */
     this.version(22)
       .stores({ snapshotPayloads: 'id, saveId' })
       .upgrade(async (tx) => {
-        const fatRows = (await tx.table('snapshots').toArray()) as Snapshot[];
-        if (fatRows.length === 0) return;
-        const metas: SnapshotMeta[] = [];
-        const payloads: SnapshotPayload[] = [];
-        for (const row of fatRows) {
+        const snapshots = tx.table('snapshots');
+        const payloadTable = tx.table('snapshotPayloads');
+        const keys = await snapshots.toCollection().primaryKeys();
+        for (const key of keys) {
+          const row = (await snapshots.get(key)) as Snapshot | undefined;
+          if (!row) continue;
           const { meta, payload } = splitSnapshot(row);
-          metas.push(meta);
-          if (payload) payloads.push(payload);
+          // 顺序：先写载荷再瘦身元数据 —— 整个升版是一个事务，中途失败整体回滚，
+          // 不会留下「元数据已剥、载荷没写」这种半条快照。
+          if (payload) await payloadTable.put(payload);
+          await snapshots.put(meta);
         }
-        await tx.table('snapshots').bulkPut(metas);
-        if (payloads.length > 0) await tx.table('snapshotPayloads').bulkPut(payloads);
       });
   }
 }
@@ -819,8 +829,30 @@ export async function exportAllData(): Promise<FullBackup> {
 }
 
 /**
+ * 前向版本闸门 —— **备份比本机新就拒**（两个导入器共用，2026-08-17 评审补）。
+ *
+ * 🔴 症状全在**日后**，而且没有一句话提到版本：v22 的备份导进 v21 的旧版本，
+ *    `snapshotPayloads` 那张表在旧库里压根不存在，于是快照全成了空壳（元数据在、载荷丢），
+ *    用户当时看不出任何异常 —— 直到某天点「恢复快照」，收获一句 `DataError`。
+ *    每加一张表就多一种这样的静默残档，所以判据只能落在版本号上。
+ *
+ * **只堵一个方向**：戳更老或缺席一律照旧导入（三态容忍是硬要求，用户手里的老备份
+ * 必须永远导得进来）。`Number.isFinite` 那道校验由各调用方在此之前完成。
+ */
+export function assertBackupNotFromFuture(version: number): void {
+  if (version > DB_VERSION) {
+    throw new Error(
+      `备份版本过新：这份备份来自数据库 v${version}，当前应用只支持到 v${DB_VERSION}。` +
+        `请先更新应用到最新版本再导入 —— 现在导入会得到一批读不出来的残档。`,
+    );
+  }
+}
+
+/**
  * 🔒 P0-04: 校验备份完整性 —— 空 `{}` / 残缺备份此前会让各事务的 clear() 先执行、
  * bulkPut 因字段非数组全跳过，结果全库被清空。此处要求 version 存在且实体字段为数组。
+ *
+ * 2026-08-17 起还多一道**前向版本闸门**（`assertBackupNotFromFuture`）。
  */
 function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
   if (!backup || typeof backup !== 'object') {
@@ -829,6 +861,7 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
   if (typeof backup.version !== 'number' || !Number.isFinite(backup.version)) {
     throw new Error('备份格式无效：缺少有效的 version 字段');
   }
+  assertBackupNotFromFuture(backup.version);
   const arrayFields: Array<keyof FullBackup> = [
     'lorebooks',
     'presets',

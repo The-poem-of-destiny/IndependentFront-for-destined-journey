@@ -84,6 +84,7 @@ import {
   characterAppearanceKey,
   getCharacterAppearances,
   saveCharacterAppearance,
+  DB_VERSION,
 } from './database';
 import type { FullBackup } from './database';
 import type {
@@ -1328,6 +1329,55 @@ describe('exportAllData / importAllData', () => {
     const profile = await db.saveProfiles.get('save_legacy');
     expect(profile).toBeDefined();
     expect(profile!.variables).toEqual({});
+  });
+
+  /**
+   * 前向版本闸门（2026-08-17 评审补）—— **只堵一个方向**。
+   *
+   * 拒的那一侧：v22 的备份导进 v21 的旧应用，`snapshotPayloads` 那张表在旧库里不存在，
+   * 快照全成空壳，而用户当天看不出任何异常 —— 直到点「恢复」才收获一句 DataError。
+   * 放的那一侧：戳更老一律照旧导入（老备份必须永远导得进来，与三态容忍同一条纪律）。
+   */
+  describe('importAllData × 前向版本闸门', () => {
+    it('备份版本 > DB_VERSION：拒绝，且措辞说得清该做什么', async () => {
+      const backup = await exportAllData();
+      backup.version = DB_VERSION + 1;
+
+      await expect(importAllData(backup)).rejects.toThrow('备份版本过新');
+      await expect(importAllData(backup)).rejects.toThrow(`v${DB_VERSION + 1}`);
+      await expect(importAllData(backup)).rejects.toThrow('请先更新应用');
+    });
+
+    it('备份版本 = DB_VERSION：照常导入', async () => {
+      await saveSaveSlot(makeSaveSlot({ id: 'ver_eq', name: '同版存档' }));
+      const backup = await exportAllData();
+      expect(backup.version).toBe(DB_VERSION);
+
+      await clearAllData();
+      await initializeDatabase();
+      await importAllData(backup);
+
+      expect(await getSave('ver_eq')).toBeDefined();
+    });
+
+    it('备份版本远早于 DB_VERSION：照常导入（老备份的路一格没堵）', async () => {
+      await saveSaveSlot(makeSaveSlot({ id: 'ver_old', name: '老备份存档' }));
+      const backup = await exportAllData();
+      backup.version = 8; // pre-v9 那一代
+
+      await clearAllData();
+      await initializeDatabase();
+      await importAllData(backup);
+
+      expect(await getSave('ver_old')).toBeDefined();
+    });
+
+    it('version 缺席仍走既有的「缺少有效的 version」那条（闸门没改这条路）', async () => {
+      const backup = await exportAllData();
+      delete (backup as Partial<FullBackup>).version;
+
+      await expect(importAllData(backup)).rejects.toThrow('缺少有效的 version 字段');
+    });
   });
 
   /**
@@ -2860,6 +2910,93 @@ describe('v22 升版 —— 快照拆表', () => {
     expect(joined!.characters[0].name).toBe('迁移主角');
     expect(joined!.messages![0].content).toBe('第 2 回合的正文');
     expect(joined!.plotEvents).toEqual([]);
+  });
+
+  /**
+   * 多存档胖库的迁移 —— 钉的是 upgrade **逐行搬**这件事本身（2026-08-17 评审修）。
+   *
+   * 此前那一版先 `toArray()` 把整张表捞进内存，而胖行内嵌整份对话历史：重度多存档库里
+   * 那一下就是几百 MB 同时驻留。升版是原子的、每次启动都重试，OOM 之后应用**永久**
+   * 打不开数据库 —— 属于「本地没人复现得出来、真机一次就废掉一个用户」的那类。
+   *
+   * 这条用例证不了内存占用（jsdom 里量不出），它证的是**换成流式之后终态一字不差**：
+   * 3 个存档 × 3 张快照，元数据剥干净 / 载荷各归各档 / preview 逐档回填 / join 得回原样。
+   */
+  it('3 存档 × 3 胖快照：逐行流式迁移后终态与批量版一致，且不串档', async () => {
+    const dbName = getDatabase().name;
+    await clearAllData();
+
+    const legacy = new Dexie(dbName);
+    legacy.version(21).stores({ ...V21_STORES });
+    await legacy.open();
+
+    const saveIds = ['save_a', 'save_b', 'save_c'];
+    const rows: unknown[] = [];
+    for (const [i, saveId] of saveIds.entries()) {
+      const hero = createDefaultCharacterState({
+        id: `${saveId}_hero`,
+        name: `主角${i + 1}`,
+        saveId,
+        type: 'player',
+        hp: 10 + i,
+        maxHp: 100 + i,
+      });
+      for (let turn = 1; turn <= 3; turn++) {
+        rows.push({
+          id: `${saveId}_snap_${turn}`,
+          saveId,
+          createdAt: 1_800_000_000_000 + i * 100 + turn,
+          reason: 'turn',
+          turn,
+          characters: [hero],
+          saveProfile: createDefaultSaveProfile(saveId),
+          plotEvents: [],
+          messages: [
+            {
+              id: `${saveId}_msg_${turn}`,
+              saveId,
+              turn,
+              role: 'assistant',
+              content: `${saveId} 第 ${turn} 回合的正文`,
+              timestamp: 1_800_000_000_000 + turn,
+            },
+          ],
+        });
+      }
+    }
+    await legacy.table('snapshots').bulkPut(rows as never[]);
+    expect(await legacy.table('snapshots').count()).toBe(9);
+    legacy.close();
+
+    await initializeDatabase();
+    const db = getDatabase();
+    expect(db.verno).toBe(22);
+    expect(await db.snapshots.count()).toBe(9);
+    expect(await db.snapshotPayloads.count()).toBe(9);
+
+    for (const [i, saveId] of saveIds.entries()) {
+      const metas = await getSnapshots(saveId);
+      expect(metas.map((m) => m.turn)).toEqual([1, 2, 3]);
+      for (const m of metas) {
+        const raw = m as unknown as Record<string, unknown>;
+        expect(raw.characters).toBeUndefined();
+        expect(raw.saveProfile).toBeUndefined();
+        expect(raw.plotEvents).toBeUndefined();
+        expect(raw.messages).toBeUndefined();
+        // preview 逐档回填 —— 串档的话这里会读到别人家的主角
+        expect(m.preview?.playerName).toBe(`主角${i + 1}`);
+        expect(m.preview?.hp).toBe(10 + i);
+        expect(m.preview?.maxHp).toBe(100 + i);
+      }
+
+      const joined = await getSnapshot(`${saveId}_snap_2`);
+      expect(joined!.saveId).toBe(saveId);
+      expect(joined!.characters[0].name).toBe(`主角${i + 1}`);
+      expect(joined!.messages![0].content).toBe(`${saveId} 第 2 回合的正文`);
+    }
+
+    // 载荷行的 saveId 索引可用（单存档导出与级联删除都靠它）
+    expect(await db.snapshotPayloads.where('saveId').equals('save_b').count()).toBe(3);
   });
 
   it('v21 库里一条快照都没有时，升版不产生任何载荷行（空库不炸）', async () => {

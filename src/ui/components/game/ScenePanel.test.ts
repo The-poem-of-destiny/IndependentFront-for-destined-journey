@@ -1,8 +1,12 @@
 /**
  * ScenePanel 新闻已读接线测试 (M6 Task 4, #36)
  *
- * 验证: 展开未读新闻 → 本地 reactive 标记 read=true → markNewsRead(JSON 克隆) 持久化。
- * 跟随 QuestsPanel focusQuest 回写模式（M5）: 先改内存 reactive，再 JSON 克隆落库。
+ * 验证: 展开未读新闻 → 本地 reactive 标记 read=true → persistNewsRead(saveId, newsId) 持久化。
+ * 跟随 QuestsPanel focusQuest 回写模式: 先改内存 reactive，再交给引擎的窄字段写入口落库。
+ *
+ * 🔴 2026-08-17 评审修改了这条接线的形状: 交出去的不再是整份 profile（那份写会与
+ *    commitChatState 的整档 flush 互相覆盖），而是 `(saveId, newsId)` 两个标量 ——
+ *    落库前的重读发生在引擎的锁段里（真实读-改-写的断言在 save-profile.ui-writes.test.ts）。
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -13,9 +17,9 @@ import ScenePanel from './ScenePanel.vue';
 
 // ---- Mocks ----
 
-const mockMarkNewsRead = vi.fn(async (profile: any, _newsId: string) => profile);
+const mockPersistNewsRead = vi.fn(async (_saveId: string, _newsId: string) => undefined);
 vi.mock('@engine/save-profile', () => ({
-  markNewsRead: (...args: any[]) => (mockMarkNewsRead as any)(...args),
+  persistNewsRead: (...args: any[]) => (mockPersistNewsRead as any)(...args),
 }));
 
 let mockProfile: any;
@@ -96,7 +100,7 @@ beforeEach(() => {
 });
 
 describe('ScenePanel — 新闻展开标记已读 (M6 #36)', () => {
-  it('展开未读新闻 → 本地 read=true + markNewsRead(JSON 克隆, id) 持久化', async () => {
+  it('展开未读新闻 → 本地 read=true + persistNewsRead(saveId, id) 持久化', async () => {
     const wrapper = await openWorldTab(mount(ScenePanel));
     const items = wrapper.findAll('.news-item');
     expect(items).toHaveLength(2);
@@ -106,21 +110,18 @@ describe('ScenePanel — 新闻展开标记已读 (M6 #36)', () => {
 
     // reactive 即时标记（未读红点消失、其他面板即时可见）
     expect(mockProfile.news[0].read).toBe(true);
-    // 持久化路径: markNewsRead 收到 JSON 克隆（Dexie 吃不下 Vue Proxy）+ 正确 newsId
-    expect(mockMarkNewsRead).toHaveBeenCalledTimes(1);
-    const [persistedProfile, newsId] = mockMarkNewsRead.mock.calls[0];
-    expect(newsId).toBe('n1');
-    expect(persistedProfile).not.toBe(mockProfile);
-    expect(persistedProfile.news.find((n: any) => n.id === 'n1').read).toBe(true);
+    // 持久化路径: 只交出两个标量，整份 profile 一律不出界（评审修 2026-08-17）
+    expect(mockPersistNewsRead).toHaveBeenCalledTimes(1);
+    expect(mockPersistNewsRead.mock.calls[0]).toEqual(['save_1', 'n1']);
   });
 
-  it('展开已读新闻不调用 markNewsRead（只标未读项）', async () => {
+  it('展开已读新闻不调用 persistNewsRead（只标未读项）', async () => {
     const wrapper = await openWorldTab(mount(ScenePanel));
 
     await wrapper.findAll('.news-item')[1].trigger('click'); // n2 已读
     await flushPromises();
 
-    expect(mockMarkNewsRead).not.toHaveBeenCalled();
+    expect(mockPersistNewsRead).not.toHaveBeenCalled();
     expect(mockProfile.news[1].read).toBe(true);
   });
 
@@ -135,7 +136,7 @@ describe('ScenePanel — 新闻展开标记已读 (M6 #36)', () => {
     await first().trigger('click'); // 再展开（此时已读）
     await flushPromises();
 
-    expect(mockMarkNewsRead).toHaveBeenCalledTimes(1);
+    expect(mockPersistNewsRead).toHaveBeenCalledTimes(1);
   });
 
   it('未读红点随标记消失', async () => {

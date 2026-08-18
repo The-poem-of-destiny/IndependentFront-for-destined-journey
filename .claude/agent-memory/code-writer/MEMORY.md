@@ -33,3 +33,4 @@
 - [CRLF 会毁掉变异脚本](crlf-breaks-mutation-scripts.md) — src/** 全是 CRLF；replace(行+"\n") 静默失败留下两份代码，变异「没咬住」的结论多半是脚本没生效
 - [placeholder-hashes 只挡一半](placeholder-hashes-partial-gate.md) — 改 public/data/defaults/*.json 会让 byPreset/bySection 静默过期；CI 只校验 byBook，重跑脚本会连别人在飞的改动一起烘
 - [注册表加载器的概率红](content-registry-loader-flake.md) — content-store-registry 那条「装包后零 fetch」单跑也会偶发红；附一个证明清白的换文件实验
+- [UI 写 profile 要「锁 + 锁内重读」](ui-profile-writes-need-lock.md) — focusQuest/news.read 已收口；setMapMarker/removeMapMarker 仍是老形状（整档 + 无锁）

@@ -13,6 +13,7 @@ import {
   characterAppearanceKey,
   exportAllData,
   saveSnapshot,
+  DB_VERSION,
 } from './database';
 import type { ContentPackRecord } from './database';
 import { createDefaultCharacterState } from './types';
@@ -1088,6 +1089,39 @@ describe('importSessionSave — 校验', () => {
     expect((await db.saves.get(saveId))?.name).toBe('残缺档');
     expect(await db.characters.count()).toBe(0);
     expect(await db.saveProfiles.count()).toBe(0);
+  });
+
+  /**
+   * 前向版本闸门（2026-08-17 评审补，与 FullBackup 同一个判据函数）。
+   * 只堵「备份比本机新」这一个方向：戳更老照旧导入，老文件必须永远导得进来。
+   */
+  it('version > DB_VERSION → 拒绝，措辞说清要先更新应用', async () => {
+    await seedSave();
+    const backup = await exportSessionSave(SAVE_ID);
+    backup.version = DB_VERSION + 1;
+
+    await expect(importSessionSave(backup)).rejects.toThrow('备份版本过新');
+    await expect(importSessionSave(backup)).rejects.toThrow('请先更新应用');
+    // 拒得够早：一行都没往库里写
+    expect(await getDatabase().saves.count()).toBe(1); // 只有 seedSave 那条
+  });
+
+  it('version = DB_VERSION → 照常导入', async () => {
+    await seedSave();
+    const backup = await exportSessionSave(SAVE_ID);
+    expect(backup.version).toBe(DB_VERSION);
+
+    const { saveId } = await importSessionSave(backup);
+    expect(await getDatabase().saves.get(saveId)).toBeDefined();
+  });
+
+  it('version 远早于 DB_VERSION → 照常导入（老备份一格没堵）', async () => {
+    await seedSave();
+    const backup = await exportSessionSave(SAVE_ID);
+    backup.version = 8;
+
+    const { saveId } = await importSessionSave(backup);
+    expect(await getDatabase().saves.get(saveId)).toBeDefined();
   });
 
   it('activeSnapshotId 指向备份里没有的快照 → 置 null', async () => {
