@@ -18,7 +18,7 @@ import CharacterViewerModal from './CharacterViewerModal.vue';
 let mockGame: any;
 let mockAssets: any;
 
-vi.mock('@engine/save-profile', () => ({ markNewsRead: vi.fn(async (p: any) => p) }));
+vi.mock('@engine/save-profile', () => ({ persistNewsRead: vi.fn(async () => undefined) }));
 vi.mock('../../stores/game-store', () => ({ useGameStore: () => mockGame }));
 vi.mock('../../stores/settings-store', () => ({ useSettingsStore: () => ({ settings: {} }) }));
 vi.mock('../../stores/asset-store', () => ({ useAssetStore: () => mockAssets }));

@@ -24,7 +24,7 @@
  * 设计: docs/planning/2026-08-05-content-engine-separation-design.md §4 / §5.1 / §5.2 / D8 / D17 / D19 / D20
  */
 
-import { isMediaHashAvailable, hashMediaBytes } from '../ui/lib/media-hash';
+import { isMediaHashAvailable, hashMediaBytes } from './media-hash';
 import type {
   ContentPack,
   EngineVersionGate,

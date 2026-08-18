@@ -20,9 +20,12 @@ src/sillytavern/                    ← 核心引擎
   │   │         AgentResult / OrchestratorRun / MapMarker / VarsPatch（🪦 MapTopology 从未存在过，
   │   │         地图类型在 types-map.ts 分册）
   │   ├── Audio: AudioSourceKind ('blob'|'builtin'|'file') / AudioTrack / AudioBlobRecord 等
+  │   ├── CreatePreset（捏人预设的**落库形状**，Dexie `createPresets.data`）——
+  │   │    定义 2026-08-17 从 `src/ui/stores/create-store.ts` 迁来（分层收口）：
+  │   │    `database.ts` 曾为标这一个类型反向 import 前端 store。create-store 侧 re-export 同名
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
-  ├── database.ts                   ← Dexie/IndexedDB v19
+  ├── database.ts                   ← Dexie/IndexedDB v22
   │       🔴 `DB_VERSION` 常量必须等于最后一个 `this.version(n)`。它只出现在
   │          `FullBackup.version` 上、导入侧不拿它做判断，所以**对不上不会有任何报错**，
   │          只是每份导出的备份都盖了过期的戳。它曾经落后两版（v18/v19 忘了改），
@@ -57,12 +60,28 @@ src/sillytavern/                    ← 核心引擎
   │   ├── v18+: **无新表**，只删数据 —— 地点视觉预设废除（D59），
   │   │          `imagePresets` 里 `kind==='location'` 的行清掉。故这一版
   │   │          **不带 `.stores()`**：带上就得把 v17 全套表名再抄一遍，抄漏一张就是删表
-  │   └── v19+: characterAppearances（角色外貌**会话副本**，D56）
+  │   ├── v19+: characterAppearances（角色外貌**会话副本**，D56）
   │              与 imagePresets（全局基线）刻意相反：**随存档隔离，删存档连带删**，
   │              且**进 FullBackup** —— 它与 sceneImages 同为「每存档」数据，必须同进同出。
   │              漏收它不会报错，症状是导入后每个角色的本档变化静默退回基线
   │              🔴 **这是 AI 唯一写得到的外貌表**（D60，v1.3）：没有基线的角色，
   │                 AI 即兴出来的那份也落这里（差量基准全空），**不再**去建全局基线
+  │   ├── v20+: contentPacks（内容包安装持久化，D18）—— payload 是整包，**不进 FullBackup**
+  │   ├── v21+: mapBlobs（地图图源字节本地缓存，D23 补强）—— 字节同样**不进 FullBackup**
+  │   └── v22+: snapshotPayloads（快照拆表）——`snapshots` 只留元数据
+  │              （id/saveId/createdAt/reason/turn + 展示缩略 `preview`），整档载荷
+  │              （characters/saveProfile/plotEvents/**messages**）搬进这张表，`id` 与元数据行同值。
+  │              🔴 拆的理由是**读放大**：列快照与淘汰旧快照每回合都跑，却只用得上
+  │                 turn/createdAt —— 拆表前每回合要在主线程反序列化约 30 份整档对话历史。
+  │                 故 `getSnapshots` / `trimSnapshots` **一行都不许读载荷表**
+  │                 （database.test.ts 有间谍钉着这条），整份快照只有 `getSnapshot(id)` 会 join。
+  │              🔴 元数据在、载荷行不在 = 半条快照 → `getSnapshot` **直接抛**：
+  │                 默默返回一份没有 characters 的快照，恢复会把存档洗空。
+  │              🔴 两种备份的导入侧都必须吃**旧格式**（v21 及以前整份内嵌、无
+  │                 `snapshotPayloads` 字段）：归一化在 `normalizeSnapshotBackupRows`，
+  │                 判据是载荷字段在不在、**不是版本号**。
+  │              🔴 `preview` 不是第二个真源，只喂快照面板那一行字（主角 HP / 游戏内日期）；
+  │                 任何逻辑一律读载荷。旧行缺席 = 那一行不显示，v22 升版时从载荷回填
   │       🔴 **世界书、美化规则与 API Key 现居应用 Dexie，不再在 localStorage**。正则 iframe
   │          只能经同步镜像访问 `regexStorage`，不能访问任何应用表；应用 localStorage 只存无密钥
   │          设置元数据（Agent 配置/主题/`beautifierBuiltinDisabled` 等）
@@ -146,6 +165,25 @@ src/sillytavern/                    ← 核心引擎
   │         这是 ADR-31「换图零改码」的机器保证。落位/天气/旅程接线在 state-manager
   │         （applySetLocation 仅玩家 / applyTimeAdvance 跨天重断言 / packStamp=contentHash 自愈），
   │         设计与 14 条裁定见 docs/planning/2026-08-11-map-system-v1-integration.md
+  │
+  ├── content-registry-runtime.ts   ← 🆕 [分层收口 2026-08-17] 内容注册表的注入缝
+  │      installContentRegistry / getContentRegistry / createEmptyContentRegistry /
+  │      resetContentRegistryRuntime + `ContentRegistry` 类型（十面）本身
+  │      🔴 **注册表只有一份存储，就在这里**：content-store 的 `getContentRegistry()` 现在只是转发，
+  │         那边的模块级 `let registry` 已删。与 mapPack/randomEvents 两面刻意不同 ——
+  │         那两条缝装的是 `coerce*` 之后的**派生值**（两份不是同一个东西），
+  │         注册表本体两处各存一份就能各说各话，症状是「装完包了，引擎那边的目录还是旧的」
+  │      🔴 时序契约：读取一律**惰性、按调用时刻**发生；消费方（agent-tools 品牌面 /
+  │         random-tables 名字池 / bloodlines 血脉集 / location-db 地点集）**不许**把读数
+  │         缓存成模块级常量。没装过 → 十面全 undefined 的空骨架（不是 null、不抛）
+  │
+  │  🚧 **四条注入缝 = 引擎读前端的唯一合法途径**（engine-settings / map-runtime /
+  │     random-event-runtime / content-registry-runtime）。`src/sillytavern/**` 里
+  │     **禁止**出现任何 `../ui/*` `@ui/*` `vue` `pinia` 的 import —— 收口前有 6 条这样的反向边，
+  │     全都编译得过、跑得通、测试全绿，代价是引擎拖着整条前端链。两道机器闸门钉死：
+  │     `eslint.config.js` 的 `no-restricted-imports`（静态边，含 type-only）+
+  │     `tests/layering-gate.test.ts`（源码扫描，专治动态 import / 字符串路径 / import.meta.glob）。
+  │     `?raw` 源码读取不算依赖边（供值链路测试要它）。要在引擎里用前端的东西：搬进引擎，或开一条新缝
   │
   ├── combat-intention.ts / combat-damage.ts / combat-turn.ts
   │   └── (以上为 v2 战斗纯计算函数，v3 内核仍调用；v2 编排层 combat-runner/combat-pipeline 由 M5 删除)
@@ -237,6 +275,10 @@ src/sillytavern/                    ← 核心引擎
   ├── asset-index.ts                ← [素材] buildAssetIndex(rows) → 大类→名字→类型→{base,variants}
   ├── asset-resolve.ts              ← [素材] resolveAsset + 两条相反回退链（立牌链 / 脸位链）
   ├── asset-import-plan.ts          ← [素材] ★ planImport 纯同步出计划（撞号进 variant / 哈希去重 / manifest 只补元数据）
+  ├── media-hash.ts                 ← [素材] SHA-256 全项目唯一实现（不可用返 undefined，**绝不换算法**）
+  │      2026-08-17 从 `src/ui/lib/media-hash.ts` 迁来（分层收口）：消费方横跨两层
+  │      （引擎的 content-source 算 pack 分节 hash + 前端四处写入路径），住前端就只能反向 import。
+  │      前端那个路径留了转发壳，asset-zip / asset-store / audio-store / scene-image-seams 的 import 一字未改
   │
   ├── workshop-types.ts             ← [工坊 P1] WorkshopProject / 载荷与安装计划类型 + 常量
   ├── workshop-manifest.ts          ← [工坊 P1] ★纯函数：上游 JSON → 内部形状（容忍字段增删，丢弃项记 droppedNotes）

@@ -70,7 +70,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── audio-singleton.ts           ← AudioManager 应用级单例（setBlobResolver 注入缝）
 │   ├── audio-folder.ts              ← [Audio] 本地音乐文件夹（File System Access 唯一接触点，仅 Chromium）
 │   ├── asset-zip.ts                 ← [素材] 一键 zip 读写（流式 + SHA-256 + 体积上限）
-│   ├── media-hash.ts                ← [素材] SHA-256 唯一实现（不可用返 undefined 不换算法）
+│   ├── media-hash.ts                ← [素材] **转发壳** —— 实现已迁 `@engine/media-hash`（分层收口 2026-08-17）
+│   │                                   仍是全项目唯一一份实现（不可用返 undefined 不换算法），只是换了住处：
+│   │                                   引擎的 content-source 也要算同一份 hash，住前端就只能让引擎反向 import。
+│   │                                   本文件**不许长出第二份实现**，它只为让四处既有 import 路径不变
 │   ├── asset-url.ts                 ← [素材] object URL LRU + 引用计数
 │   ├── image-crop.ts                ← [素材] 从源图切真字节（解码与画布两处注入缝）
 │   ├── crop-rects.ts                ← [素材] 裁剪框几何（纯函数，源图像素坐标系）

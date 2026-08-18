@@ -7,6 +7,7 @@
 
 import type { SaveProfile, FPTransaction, FateContract, Achievement, NewsItem } from './types';
 import { getSaveProfile, saveSaveProfile, createDefaultSaveProfile } from './database';
+import { withSaveWriteLock } from './state-write-queue';
 
 // ========== Profile CRUD ==========
 
@@ -145,11 +146,59 @@ export async function addNews(
   return profile;
 }
 
-export async function markNewsRead(profile: SaveProfile, newsId: string): Promise<SaveProfile> {
+/** 标记一条新闻已读 —— **只改内存不落库**（`markNewsRead` 的纯变更那一半，理由同 `setQuestInPlace`） */
+function markNewsReadInPlace(profile: SaveProfile, newsId: string): void {
   const item = profile.news.find((n) => n.id === newsId);
   if (item) item.read = true;
+}
+
+export async function markNewsRead(profile: SaveProfile, newsId: string): Promise<SaveProfile> {
+  markNewsReadInPlace(profile, newsId);
   await updateProfile(profile);
   return profile;
+}
+
+// ═══════════════════════════════════════════════════════════
+// P1-09 UI 辅助字段的持久化入口（**锁内窄字段读-改-写**）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 焦点任务落库（`focusQuest`，QuestsPanel 的下拉选择）。
+ *
+ * 🔴 **两件事缺一不可，各挡一种败法**（2026-08-17 评审补，提交级缓存落地后暴露）：
+ *
+ *   ① **进写队列**（`withSaveWriteLock`）—— 与 `commitChatState` 那一段串行。
+ *      不进队列时，这个写有可能落在提交的读-改-写中间，被出口那一次整档 flush 直接盖掉。
+ *      （缓存之前每个补丁各自重读一次库，UI 的写被顺带吸收了 —— 那是**巧合**不是设计，
+ *      读收进作用域之后这层意外保护就没有了。）
+ *   ② **锁内重新读一份新鲜的 profile，只改那一个字段** —— 只加锁而拿着 UI 手里那份
+ *      陈旧整档写回去，照样会把提交刚落的 fp/任务/变量全抹回旧值。锁解决的是交错，
+ *      解决不了陈旧；真正的修法是这次**锁内的重读**。
+ *
+ * 语义仍是 P1-09 那条受控例外：UI 辅助字段，**失败不致命**（调用方 try/catch 记一条日志即可，
+ * 别弹窗打断游玩）。AI 产生的 SaveProfile 变更照旧走 `vars_update`，不在此例外内。
+ */
+export async function persistFocusQuest(saveId: string, questName: string): Promise<void> {
+  await withSaveWriteLock(saveId, async () => {
+    const fresh = await getProfile(saveId);
+    fresh.focusQuest = questName;
+    await updateProfile(fresh);
+  });
+}
+
+/**
+ * 新闻已读标记落库（`news[].read`，ScenePanel 展开一条世界消息）。
+ *
+ * 两条铁律与 `persistFocusQuest` 同源（进队列 + 锁内重读窄改），此处只改中选那一条新闻的
+ * `read` 标志：整档写回去会把提交期间新增的新闻/FP/任务一起抹掉。
+ * 库里没有这个 id（快照回退把它撤掉了）时**静默不改**，与 `markNewsRead` 同口径。
+ */
+export async function persistNewsRead(saveId: string, newsId: string): Promise<void> {
+  await withSaveWriteLock(saveId, async () => {
+    const fresh = await getProfile(saveId);
+    markNewsReadInPlace(fresh, newsId);
+    await updateProfile(fresh);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -169,21 +218,38 @@ export function getQuest(profile: SaveProfile, name: string): Quest | undefined 
   return profile.quests[name];
 }
 
-/** 设置/更新任务 (upsert) */
+/**
+ * 设置/更新任务 —— **只改内存不落库**（`setQuest` 的纯变更那一半）。
+ *
+ * 🔴 `*InPlace` 这一族的存在理由只有一个：`StateManager.commitChatState` 的**提交作用域缓存**
+ *    （见 state-manager.ts 的 `CommitScope` 注释）把「改」与「落」拆成了两拍 —— 一次提交里
+ *    十个补丁改同一份 profile，出口只落一次库。合并语义（缺省任务补 `createDefaultQuest`）
+ *    必须留在本文件一处：搬去 state-manager 抄一份，漂了不会报错，只会让两条路径产出不同形状的任务。
+ */
+export function setQuestInPlace(profile: SaveProfile, name: string, quest: Partial<Quest>): void {
+  const existing = profile.quests[name] ?? createDefaultQuest();
+  profile.quests[name] = { ...existing, ...quest };
+}
+
+/** 设置/更新任务 (upsert) —— 改内存 + 立即落库的命名写入口 */
 export async function setQuest(
   profile: SaveProfile,
   name: string,
   quest: Partial<Quest>,
 ): Promise<SaveProfile> {
-  const existing = profile.quests[name] ?? createDefaultQuest();
-  profile.quests[name] = { ...existing, ...quest };
+  setQuestInPlace(profile, name, quest);
   await updateProfile(profile);
   return profile;
 }
 
+/** 删除任务 —— **只改内存不落库**（理由同 `setQuestInPlace`） */
+export function removeQuestInPlace(profile: SaveProfile, name: string): void {
+  delete profile.quests[name];
+}
+
 /** 删除任务 */
 export async function removeQuest(profile: SaveProfile, name: string): Promise<SaveProfile> {
-  delete profile.quests[name];
+  removeQuestInPlace(profile, name);
   await updateProfile(profile);
   return profile;
 }
@@ -276,11 +342,21 @@ export async function updateMapFlags(
   profile: SaveProfile,
   flags: MapSaveFlags,
 ): Promise<SaveProfile> {
+  setMapFlagsInPlace(profile, flags);
+  await updateProfile(profile);
+  return profile;
+}
+
+/**
+ * 整份覆盖地图派生态 —— **只改内存不落库**（`updateMapFlags` 的纯变更那一半）。
+ *
+ * 存在理由同 `setQuestInPlace`：落库那一拍由 `StateManager` 的提交作用域缓存统一做。
+ * `MAP_FLAGS_KEY` 与「缺 worldFlags 就补空袋子」这条兜底因此仍然只有本文件一处。
+ */
+export function setMapFlagsInPlace(profile: SaveProfile, flags: MapSaveFlags): void {
   // 存量记录（与手搓的测试 profile）可能整个缺 worldFlags；缺了就补一个空袋子
   if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
   profile.worldFlags[MAP_FLAGS_KEY] = flags;
-  await updateProfile(profile);
-  return profile;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -318,9 +394,20 @@ export async function updateRandomEventFlags(
   profile: SaveProfile,
   flags: RandomEventSaveFlags,
 ): Promise<SaveProfile> {
+  setRandomEventFlagsInPlace(profile, flags);
+  await updateProfile(profile);
+  return profile;
+}
+
+/**
+ * 整份覆盖随机事件状态 —— **只改内存不落库**（`updateRandomEventFlags` 的纯变更那一半）。
+ * 存在理由同 `setQuestInPlace`。
+ */
+export function setRandomEventFlagsInPlace(
+  profile: SaveProfile,
+  flags: RandomEventSaveFlags,
+): void {
   // 存量记录（与手搓的测试 profile）可能整个缺 worldFlags；缺了就补一个空袋子
   if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
   profile.worldFlags[RANDOM_EVENT_FLAGS_KEY] = flags;
-  await updateProfile(profile);
-  return profile;
 }

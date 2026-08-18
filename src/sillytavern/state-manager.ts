@@ -60,12 +60,14 @@ import { withSaveWriteLock } from './state-write-queue';
 import {
   getProfile,
   updateProfile,
-  setQuest,
-  removeQuest,
+  setQuestInPlace,
+  removeQuestInPlace,
   getMapFlags,
   updateMapFlags,
+  setMapFlagsInPlace,
   getRandomEventFlags,
   updateRandomEventFlags,
+  setRandomEventFlagsInPlace,
 } from './save-profile';
 import { clampAffection } from './affection-system';
 import { advanceTime, getSeason, toEpochMinutes } from './time-system';
@@ -129,6 +131,57 @@ interface PatchApplicationResult {
   success: boolean;
   error?: string;
   event?: GameEvent;
+}
+
+/**
+ * 🗃 一次 `commitChatState` 的**提交作用域缓存**（性能改造 2026-08-17）
+ *
+ * 此前每个 patch 各跑一趟完整的读-改-写：10 个变量补丁 = 20 次 `getProfile` + 10 次
+ * `updateProfile`；每个角色类补丁各扫一遍 `characters` 全表。改法是把读收到入口、把写收到出口，
+ * 中间全在内存上演进 —— 一次提交至多 1 读 1 写 profile、1 读 1 次 bulkPut characters。
+ *
+ * 🔴 四条不变式（破一条就是**不报错的错**）:
+ *   ① **缓存的边界 = SaveProfile + 本存档 characters 两样**。别的表（memories / plotEvents /
+ *      saves / snapshots）照旧直读直写 —— 它们各自是单行操作，收进来只会多一层可错的间接。
+ *   ② **锁内独占**。整个作用域活在 `withSaveWriteLock` 那一段里（`commitChatState` 进锁即建、
+ *      出锁前 flush 并清空），所以「读进来之后有别人改了库」在同 saveId 内不可能发生。
+ *      作用域外的方法（快照 / 时间推进 / 三条 sync 钩子的公开入口）**照旧直读 Dexie**，
+ *      它们各自有自己的锁段，缓存不该跨段活着。
+ *   ③ **顺序语义不变**：补丁 N 必须看得见补丁 N-1 的结果。所以按名解析走缓存里那份数组
+ *      （含本次新增/改名的角色），删除立刻从数组里摘掉、绝不被后续查询复活。
+ *   ④ **flush 无条件发生**（哪怕有补丁失败）：旧行为里先成功的补丁已经落库了，
+ *      不能因为后面某个补丁抛错就把它们一起丢掉。
+ *
+ * 📌 与旧路径唯一的可观察差异：handler 现在改的是**共享对象**而不是各自的 Dexie 副本。
+ *    所有 handler 都是「先校验后落地」（`update_character` 的原子拒绝、`remove_item` 的
+ *    库存不足、`transfer_item` 的两段式），没有一个会「改到一半再抛」，所以失败补丁不会
+ *    在缓存里留下半成品。新增 handler 必须守住这条。
+ */
+interface CommitScope {
+  /** 本存档 SaveProfile；`profileLoaded` 之前一律 undefined（惰性读，纯角色补丁零 profile 读） */
+  profile: SaveProfile | undefined;
+  /** 读过了没有 —— 用布尔而不是 `profile !== undefined` 判：mock 的 getProfile 可能给 undefined */
+  profileLoaded: boolean;
+  /** 有没有人改过 profile（出口据此决定落不落库） */
+  profileDirty: boolean;
+  /** 本存档全量角色，按补丁顺序就地演进；undefined = 这次提交还没有人要过角色 */
+  characters: CharacterState[] | undefined;
+  /** 待落库的角色（按 id 去重 —— 同一个角色被 5 个补丁改过也只落一次） */
+  dirtyCharacters: Map<string, CharacterState>;
+  /** 待删除的角色 id。与 `dirtyCharacters` **构造上互斥**（写进来时互相剔除） */
+  deletedCharacterIds: Set<string>;
+}
+
+/** 建一份空的提交作用域 */
+function createCommitScope(): CommitScope {
+  return {
+    profile: undefined,
+    profileLoaded: false,
+    profileDirty: false,
+    characters: undefined,
+    dirtyCharacters: new Map(),
+    deletedCharacterIds: new Set(),
+  };
 }
 
 // ========== update_character 白名单 (M2 T9, #19 #20 #21) ==========
@@ -227,6 +280,12 @@ export class StateManager {
   private _itemUnsubs: Map<string, () => void> = new Map();
   /** Q-07：事件反应轮的当前深度（见 reactToEvents） */
   private reactionDepth = 0;
+  /**
+   * 当前提交作用域缓存（见 `CommitScope`）。非 null 仅在 `commitChatState` 的锁段内成立。
+   * 嵌套提交（`reactToEvents` / `applyTimeAdvance` 尾部自提交）一律发生在锁**外**，
+   * 那时本字段已经复位成 null，各自建自己的作用域。
+   */
+  private commitScope: CommitScope | null = null;
 
   constructor(config: StateManagerConfig) {
     this.saveId = config.saveId;
@@ -268,50 +327,71 @@ export class StateManager {
       const results: PatchApplicationResult[] = [];
       const errors: string[] = [];
 
-      // ===== Step 0: EJS 差量先落（D5 仲裁顺序） =====
-      if (ejsDiffs.length) {
-        try {
-          let vars = await this.getCurrentVariables();
-          for (const diff of ejsDiffs) {
-            vars = applyPathOps(vars, diff);
-          }
-          await this.persistVariables(vars);
-        } catch (err) {
-          // 不阻塞 AI 补丁 —— EJS 是簿记旁路，正文状态更重要
-          const msg = err instanceof Error ? err.message : String(err);
-          errors.push(`EJS vars 差量应用失败: ${msg}`);
-          console.warn('[StateManager] EJS vars 差量应用失败（不阻塞 AI 补丁）:', err);
-        }
-      }
-
-      const newEvents: GameEvent[] = [];
-      for (const patch of patches) {
-        try {
-          const result = await this.applyPatch(patch);
-          results.push(result);
-          if (result.event) {
-            this.events.push(result.event);
-            newEvents.push(result.event);
-          }
-        } catch (err) {
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          errors.push(`Patch ${patch.op} on ${patch.target}: ${errorMsg}`);
-          results.push({ patch, success: false, error: errorMsg });
-        }
-      }
-
-      // 更新 SaveSlot 触碰时间（saveSaveSlot 内部刷新 updatedAt）
-      // M5 #27: totalTurns 不再随每次 commit 虚高，回合推进统一走 advanceTurn()
+      // 🗃 提交作用域缓存开张（不变式见 `CommitScope`）：读收在这里、写收在 flush，
+      // 中间所有 handler 都在内存上改同一份 profile / 同一批角色对象。
+      // 保存并复原上一层的作用域而不是直接置 null —— 万一将来真出现锁内嵌套提交，
+      // 内层结束时不该把外层的脏标记连同缓存一起抹掉（现在不可能：锁内嵌套即自死锁）。
+      const scope = createCommitScope();
+      const outerScope = this.commitScope;
+      this.commitScope = scope;
       try {
-        const save = await getSave(this.saveId);
-        if (save) {
-          await saveSaveSlot(save);
+        // ===== Step 0: EJS 差量先落（D5 仲裁顺序） =====
+        if (ejsDiffs.length) {
+          try {
+            let vars = await this.getCurrentVariables();
+            for (const diff of ejsDiffs) {
+              vars = applyPathOps(vars, diff);
+            }
+            await this.persistVariables(vars);
+          } catch (err) {
+            // 不阻塞 AI 补丁 —— EJS 是簿记旁路，正文状态更重要
+            const msg = err instanceof Error ? err.message : String(err);
+            errors.push(`EJS vars 差量应用失败: ${msg}`);
+            console.warn('[StateManager] EJS vars 差量应用失败（不阻塞 AI 补丁）:', err);
+          }
         }
-      } catch {
-        // 存档更新失败不阻塞
-      }
 
-      return { results, errors, newEvents };
+        const newEvents: GameEvent[] = [];
+        for (const patch of patches) {
+          try {
+            const result = await this.applyPatch(patch);
+            results.push(result);
+            if (result.event) {
+              this.events.push(result.event);
+              newEvents.push(result.event);
+            }
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            errors.push(`Patch ${patch.op} on ${patch.target}: ${errorMsg}`);
+            results.push({ patch, success: false, error: errorMsg });
+          }
+        }
+
+        // 🗃 落库唯一一拍（不变式④：有补丁失败也照落 —— 旧路径里先成功的补丁已经进库了）
+        try {
+          await this.flushCommitScope(scope);
+        } catch (err) {
+          // 落库失败必须 loud：整段状态没进库，而调用方只看 errors[] 判成败
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`状态落库失败: ${msg}`);
+          console.error('[StateManager] 提交落库失败:', err);
+        }
+
+        // 更新 SaveSlot 触碰时间（saveSaveSlot 内部刷新 updatedAt）
+        // M5 #27: totalTurns 不再随每次 commit 虚高，回合推进统一走 advanceTurn()
+        try {
+          const save = await getSave(this.saveId);
+          if (save) {
+            await saveSaveSlot(save);
+          }
+        } catch {
+          // 存档更新失败不阻塞
+        }
+
+        return { results, errors, newEvents };
+      } finally {
+        this.commitScope = outerScope;
+      }
     });
 
     // Q-07：把本次产生的 GameEvent 发到存档 EventBus，触发已装备物品/技能的 $event.on 订阅，
@@ -373,6 +453,105 @@ export class StateManager {
   /** 清空事件缓存 */
   clearEvents(): void {
     this.events = [];
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🗃 提交作用域缓存的读写口（不变式与边界见 `CommitScope`）
+  // ═══════════════════════════════════════════════════════════
+  //
+  // 这六个方法是 commit 路径上**唯一**允许碰 profile / characters 的地方。
+  // 作用域外调用（快照、时间推进、三条 sync 钩子的公开入口）会自动退化成直读直写，
+  // 所以同一个 handler 两种上下文下都对 —— 调用点不必知道自己在不在提交里。
+
+  /** 读本存档 profile：作用域内只读一次，之后全走缓存 */
+  private async readProfile(): Promise<SaveProfile> {
+    const scope = this.commitScope;
+    if (scope === null) return getProfile(this.saveId);
+    if (!scope.profileLoaded) {
+      // 🔴 失败**不缓存**：EJS 差量那一步读炸之后，后面的 AI 补丁仍要能自己再读一次
+      //    （「差量应用抛错不阻塞 AI 补丁」那条用例钉的就是这个）
+      scope.profile = await getProfile(this.saveId);
+      scope.profileLoaded = true;
+    }
+    return scope.profile as SaveProfile;
+  }
+
+  /**
+   * 标记 profile 待落库：作用域内只打脏标记（出口统一落一次），作用域外立即写。
+   *
+   * 🔴 认的是**对象身份**：传进来的若不是缓存里那一份（作用域外读来的、或者别处构造的），
+   *    立即落库才是对的 —— 打脏标记只会让这次写静默消失。
+   */
+  private async persistProfile(profile: SaveProfile): Promise<void> {
+    const scope = this.commitScope;
+    if (scope !== null && scope.profileLoaded && scope.profile === profile) {
+      scope.profileDirty = true;
+      return;
+    }
+    await updateProfile(profile);
+  }
+
+  /** 读本存档全量角色：作用域内只查一次表，之后全走缓存（含本次提交新增/删除的结果） */
+  private async readCharacters(): Promise<CharacterState[]> {
+    const scope = this.commitScope;
+    if (scope === null) return getCharacters(this.saveId);
+    if (scope.characters === undefined) {
+      // 复制一份数组再缓存：本层会就地增删，绝不去改调用方（含测试 mock）持有的那个数组。
+      // 元素对象仍是共享的 —— handler 就地改角色正是靠这一点（不变式③）。
+      scope.characters = [...(await getCharacters(this.saveId))];
+    }
+    return scope.characters;
+  }
+
+  /** 标记单个角色待落库：作用域内进脏表（出口一次 bulkPut），作用域外立即写 */
+  private async persistCharacter(char: CharacterState): Promise<void> {
+    const scope = this.commitScope;
+    if (scope === null) {
+      await saveCharacter(char);
+      return;
+    }
+    // 先删后加同一 id（remove_character 之后又 add_character）→ 这一条不再算删除
+    scope.deletedCharacterIds.delete(char.id);
+    scope.dirtyCharacters.set(char.id, char);
+    // 新增角色必须当场进缓存数组，否则同一次提交里后续补丁按名解析不到它（不变式③）
+    const chars = await this.readCharacters();
+    if (!chars.some((c) => c.id === char.id)) chars.push(char);
+  }
+
+  /** 标记多个角色待落库（transfer_item 的双方 —— 出口那次 bulkPut 仍是单事务） */
+  private async persistCharacters(chars: CharacterState[]): Promise<void> {
+    for (const char of chars) await this.persistCharacter(char);
+  }
+
+  /** 标记角色待删除：作用域内当场从缓存摘掉（不得被后续查询复活），作用域外立即删 */
+  private async dropCharacter(id: string): Promise<void> {
+    const scope = this.commitScope;
+    if (scope === null) {
+      await deleteCharacter(id);
+      return;
+    }
+    scope.dirtyCharacters.delete(id);
+    scope.deletedCharacterIds.add(id);
+    if (scope.characters !== undefined) {
+      const idx = scope.characters.findIndex((c) => c.id === id);
+      if (idx >= 0) scope.characters.splice(idx, 1);
+    }
+  }
+
+  /**
+   * 落库唯一一拍：至多 1 次 `updateProfile` + 1 次 characters bulkPut + n 次删除。
+   * 脏表与删除表构造上互斥（见 `persistCharacter` / `dropCharacter`），所以两者顺序无关。
+   */
+  private async flushCommitScope(scope: CommitScope): Promise<void> {
+    if (scope.profileDirty && scope.profile !== undefined) {
+      await updateProfile(scope.profile);
+    }
+    if (scope.dirtyCharacters.size > 0) {
+      await saveCharacters([...scope.dirtyCharacters.values()]);
+    }
+    for (const id of scope.deletedCharacterIds) {
+      await deleteCharacter(id);
+    }
   }
 
   // ========== Patch 应用 ==========
@@ -469,7 +648,8 @@ export class StateManager {
    * ③ 找不到 → throw
    */
   private async resolveCharacter(key: string): Promise<CharacterState> {
-    const chars = await getCharacters(this.saveId);
+    // 走提交作用域缓存：同一次提交里 patch N 必须解析得到 patch N-1 新增/改名的角色（不变式③）
+    const chars = await this.readCharacters();
 
     // ① 名字精确匹配
     const byName = chars.find((c) => c.name === key);
@@ -561,15 +741,15 @@ export class StateManager {
 
   /** 获取当前变量（真源: SaveProfile.variables） */
   private async getCurrentVariables(): Promise<Record<string, any>> {
-    const profile = await getProfile(this.saveId);
+    const profile = await this.readProfile();
     return profile.variables ?? {};
   }
 
-  /** 持久化变量到 SaveProfile */
+  /** 持久化变量到 SaveProfile（提交作用域内 = 改内存打脏标记，出口统一落一次库） */
   private async persistVariables(variables: Record<string, any>): Promise<void> {
-    const profile = await getProfile(this.saveId);
+    const profile = await this.readProfile();
     profile.variables = variables;
-    await updateProfile(profile);
+    await this.persistProfile(profile);
   }
 
   private async applyUpdateCharacter(patch: StatePatch): Promise<GameEvent> {
@@ -708,7 +888,7 @@ export class StateManager {
     }
     // metadata.action 保留原行为: 有则覆盖 currentAction（可与 value.currentAction 并存，metadata 优先）
     char.currentAction = patch.metadata?.action ?? char.currentAction;
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     return this.createEvent('character_action', patch);
   }
@@ -721,7 +901,7 @@ export class StateManager {
 
     const newValue = Math.max(0, Math.min(patch.value as number, char[maxField]));
     char[resource] = newValue;
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     return this.createEvent('character_action', patch);
   }
@@ -736,7 +916,7 @@ export class StateManager {
     const delta = patch.amount ?? 0;
     const newValue = Math.max(0, Math.min(current + delta, char[maxField]));
     char[resource] = newValue;
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     return this.createEvent('character_action', patch);
   }
@@ -813,7 +993,7 @@ export class StateManager {
       }
       char.statusEffects.push(effect);
     }
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     return this.createEvent('status_effect', patch);
   }
@@ -828,7 +1008,7 @@ export class StateManager {
     if (!name) throw new Error('remove_status_effect 需要 value.name');
 
     char.statusEffects = char.statusEffects.filter((e) => e.name !== name);
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     return this.createEvent('status_effect', patch);
   }
@@ -880,7 +1060,7 @@ export class StateManager {
         automata: value.automata,
       });
     }
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     return this.createEvent('item_use', patch);
   }
@@ -910,7 +1090,7 @@ export class StateManager {
     if (char.inventory[idx].quantity === 0) {
       char.inventory.splice(idx, 1);
     }
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     return this.createEvent('item_use', patch);
   }
@@ -943,7 +1123,7 @@ export class StateManager {
     if (changes.rarity !== undefined) changes.rarity = normalizeRarity(changes.rarity);
     if (changes.equippedSlot != null) changes.equippedSlot = normalizeSlot(changes.equippedSlot);
     Object.assign(item, changes);
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     return this.createEvent('item_use', patch);
   }
@@ -992,7 +1172,8 @@ export class StateManager {
     if (source.quantity <= 0) {
       from.inventory.splice(idx, 1);
     }
-    await saveCharacters([from, to]); // Dexie bulkPut 单事务，避免半持久化
+    // 双方进同一份脏表 → 出口那次 bulkPut 仍是 Dexie 单事务，避免半持久化
+    await this.persistCharacters([from, to]);
 
     return this.createEvent('item_use', patch);
   }
@@ -1034,7 +1215,7 @@ export class StateManager {
     }
 
     item.equippedSlot = slot;
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     // Q-07：装备时接线 —— init 脚本 + $event.on 持久订阅（战斗外效果系统）
     try {
@@ -1078,7 +1259,7 @@ export class StateManager {
     }
 
     item.equippedSlot = null;
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     // Q-07：卸下时拆除接线 —— cleanup 脚本 + 注销 $event.on 持久订阅
     try {
@@ -1145,7 +1326,7 @@ export class StateManager {
         damageType: value.damageType,
       });
     }
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     return this.createEvent('skill_use', patch);
   }
@@ -1168,7 +1349,7 @@ export class StateManager {
     // changes 里的 id 同样剥离（铁律1）
     const { id: _ignoredId, ...changes } = update.changes ?? {};
     Object.assign(skill, changes);
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     return this.createEvent('skill_use', patch);
   }
@@ -1188,7 +1369,7 @@ export class StateManager {
     if (!findByName(char.skills, name)) throw new Error(`技能不存在: ${name}`);
 
     char.skills = char.skills.filter((s) => s.name !== name);
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     return this.createEvent('skill_use', patch);
   }
@@ -1197,7 +1378,7 @@ export class StateManager {
     const char = await this.resolveCharTarget(patch.target);
 
     char.location = String(patch.value);
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     // 地图 v1（§8.2）：位置路径先落库，**然后**才投影成地块 —— 顺序是契约的一部分，
     // 位置路径是真源、地块只是投影（裁定 §12-1）。投影失败/抛错一律不影响上面这一步。
@@ -1220,7 +1401,8 @@ export class StateManager {
     if (!name) throw new Error('add_character 需要非空 name（名字是逻辑键，铁律1）');
 
     // 同存档同名查重（排除同 id 重放 — Dexie put 幂等覆盖无害），与 rename_character 查重口径一致（终审修复）
-    const chars = await getCharacters(this.saveId);
+    // 查的是缓存那份：同一次提交里连着加两个同名角色，第二个必须被这里拦下（不变式③）
+    const chars = await this.readCharacters();
     const clash = chars.find((c) => c.name === name && c.id !== character.id);
     if (clash) throw new Error(`同名角色已存在: ${name}`);
 
@@ -1228,7 +1410,7 @@ export class StateManager {
     // M6 T2: customFields.saveId 双写已退役 — saveId 单源一等字段
     character.saveId = this.saveId;
 
-    await saveCharacter(character);
+    await this.persistCharacter(character);
     return this.createEvent('system', patch);
   }
 
@@ -1243,7 +1425,7 @@ export class StateManager {
   private async applyRemoveCharacter(patch: StatePatch): Promise<GameEvent> {
     // M4: resolveCharTarget 仅在本存档内按名解析，跨档命中已无可能（旧守卫随之拆除）
     const char = await this.resolveCharTarget(patch.target);
-    await deleteCharacter(char.id);
+    await this.dropCharacter(char.id);
     return this.createEvent('system', patch);
   }
 
@@ -1276,7 +1458,7 @@ export class StateManager {
     }
 
     // 同存档新名查重（排除自身 — 自己改自己的名不算撞名，上面已 no-op 短路）
-    const chars = await getCharacters(this.saveId);
+    const chars = await this.readCharacters();
     const clash = chars.find((c) => c.name === newName && c.id !== char.id);
     if (clash) {
       throw new Error(`rename_character 新名已被占用: ${newName}`);
@@ -1284,14 +1466,14 @@ export class StateManager {
 
     // 改名落库
     char.name = newName;
-    await saveCharacter(char);
+    await this.persistCharacter(char);
 
     // 按名引用迁移 — 当前仅 affections（M5/M6 新增按名引用时必须回来扩这里）
-    const profile = await getProfile(this.saveId);
+    const profile = await this.readProfile();
     if (profile?.affections && Object.prototype.hasOwnProperty.call(profile.affections, oldName)) {
       profile.affections[newName] = profile.affections[oldName];
       delete profile.affections[oldName];
-      await updateProfile(profile);
+      await this.persistProfile(profile);
     }
 
     return this.createEvent('system', patch);
@@ -1324,7 +1506,7 @@ export class StateManager {
     const questData = patch.value as { name: string } & Record<string, any>;
     const questName = questData.name;
     if (!questName) throw new Error('缺少任务名称');
-    const profile = await getProfile(this.saveId);
+    const profile = await this.readProfile();
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
     // M6 #52: 用 delete 剔除寻址键，替代 `{ name: _name, ...rest }` 的未用解构 + eslint-disable
     const questFields: Record<string, any> = { ...questData };
@@ -1333,7 +1515,9 @@ export class StateManager {
     if (questFields.status !== undefined) {
       questFields.status = normalizeQuestStatus(questFields.status);
     }
-    await setQuest(profile, questName, questFields);
+    // 合并语义留在 save-profile 一处（`setQuestInPlace`），落库那一拍由提交出口统一做
+    setQuestInPlace(profile, questName, questFields);
+    await this.persistProfile(profile);
     return this.createEvent('quest_update', patch);
   }
 
@@ -1341,9 +1525,10 @@ export class StateManager {
     // #40: value 形态统一为 {name} 对象（与 update_quest 对齐）
     const questName = (patch.value as { name?: string })?.name;
     if (!questName) throw new Error('缺少任务名称');
-    const profile = await getProfile(this.saveId);
+    const profile = await this.readProfile();
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
-    await removeQuest(profile, questName);
+    removeQuestInPlace(profile, questName);
+    await this.persistProfile(profile);
     return this.createEvent('quest_update', patch);
   }
 
@@ -1364,7 +1549,7 @@ export class StateManager {
     }
     const charName = patch.target.slice(AFFECTION_PREFIX.length).trim();
     if (!charName) throw new Error(`${patch.op} target 缺少角色名: ${patch.target}`);
-    const profile = await getProfile(this.saveId);
+    const profile = await this.readProfile();
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
 
     if (patch.op === 'set_affection') {
@@ -1382,7 +1567,7 @@ export class StateManager {
       profile.affections[charName] = clampAffection(current + patch.amount);
     }
 
-    await updateProfile(profile);
+    await this.persistProfile(profile);
     // GameEventType 无 affection 成员（M1 实测），走 'system'
     return this.createEvent('system', patch);
   }
@@ -1397,7 +1582,7 @@ export class StateManager {
     const newsData = patch.value as { title?: string; content?: string; category?: string };
     if (!newsData?.title) throw new Error('add_news 缺少 title');
     if (!newsData.content) throw new Error('add_news 缺少 content');
-    const profile = await getProfile(this.saveId);
+    const profile = await this.readProfile();
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
 
     profile.news.push({
@@ -1410,7 +1595,7 @@ export class StateManager {
       read: false,
     });
 
-    await updateProfile(profile);
+    await this.persistProfile(profile);
     return this.createEvent('system', patch);
   }
 
@@ -1451,16 +1636,21 @@ export class StateManager {
       // （旧实现只截断：恢复到第 N 回合后，N 之后的对话永远找不回来）。
       const messages = await getMessages(this.saveId);
 
+      // 🔴 这里**没有** structuredClone，是刻意的（2026-08-17 快照拆表顺带）：
+      //    上面四个 getter 都是裸 Dexie 读（快照路径刻意不走提交作用域的缓存），
+      //    IndexedDB 每次读出来的都是新反序列化的对象，与库里、与别处**天然无共享**；
+      //    落库那一步 Dexie 的 put 自己还会再结构化克隆一次。于是这四次克隆是纯开销 ——
+      //    而它克隆的正是整档对话历史，每回合一次。
       const snapshot: Snapshot = {
         id: crypto.randomUUID(),
         saveId: this.saveId,
         createdAt: Date.now(),
         reason,
         turn,
-        characters: structuredClone(characters),
-        saveProfile: structuredClone(profile),
-        plotEvents: structuredClone(plotEvents),
-        messages: structuredClone(messages),
+        characters,
+        saveProfile: profile,
+        plotEvents,
+        messages,
       };
 
       await saveSnapshot(snapshot);
@@ -1508,7 +1698,8 @@ export class StateManager {
   /**
    * 恢复快照 — 整体覆写 + 对话回滚 (M5 规范 §11.2, #2 恢复死路径根治)
    *
-   * ① 按 id 读快照 + saveId 校验（防跨档恢复）
+   * ① 按 id 读快照（v22 拆表后 `getSnapshot` 负责 join 载荷行；载荷缺失它直接抛，
+   *    半份快照恢复出去会把存档洗空）+ saveId 校验（防跨档恢复）
    * ② characters: 当前存档全删后重写快照副本（整体覆写语义 — 快照后新增的角色一并消失）
    * ③ saveProfile 覆写（任务/时间/好感/变量随行回滚）
    * ③.b plotEvents 覆写（🆕 剧情事件随快照回滚；旧快照无此字段→清空）
@@ -1545,6 +1736,8 @@ export class StateManager {
             db.memories,
             db.saves,
             db.snapshots,
+            // v22 拆表：④.c 的 deleteSnapshotsAfter 要连载荷行一起删，表清单必须带上它
+            db.snapshotPayloads,
           ],
           async () => {
             // ② characters 整体覆写: 全删 → 写入快照副本
@@ -1612,7 +1805,10 @@ export class StateManager {
   // 三条钩子（落位 / 天气断言 / 在途旗）都长同一个样子:
   //   ① 空包 → 整段 no-op（地图是**可选**子系统，没装包时游戏一个字节都不受影响）
   //   ② 读 profile → `ensureMapFlags` 自愈 → 纯函数算出下一份 flags
-  //   ③ 有变化才经命名写入口 `updateMapFlags` 落库
+  //   ③ 有变化才经命名写入口 `updateMapFlags` 落库 —— **落位那一条例外**：它跑在
+  //      `commitChatState` 的提交作用域里，改的是缓存那份 profile（`setMapFlagsInPlace` +
+  //      打脏标记），整份 profile 由提交出口落一次。语义（整份覆盖）与落库时机（本次提交内）
+  //      都没变，变的只是「一次提交里落几次库」
   //   ④ 整段包在 try/catch 里：地图是**派生**投影，投影失败绝不能让正文状态提交失败
   //      （§8.2-5「解析失败 → 保持原值，位置路径原文保留」的同一个精神）
   //
@@ -1640,7 +1836,9 @@ export class StateManager {
     if (current.packStamp === pack.contentHash) return { flags: current, healed: false };
 
     const healed: MapSaveFlags = { packStamp: pack.contentHash };
-    const player = (await getCharacters(this.saveId)).find((c) => c.type === 'player');
+    // 读侧走缓存口：落位钩子跑在提交作用域内（`applySetLocation`），这里必须看得到**本次刚写完**
+    // 的 `location`；天气钩子跑在作用域外（`applyTimeAdvance` 自己的锁段），那时它退化成直读
+    const player = (await this.readCharacters()).find((c) => c.type === 'player');
     if (!player) return { flags: healed, healed: true };
 
     // currentTileId 传 null：旧包的块号在新包里没有意义（`resolveTileByLocation` 会把
@@ -1663,11 +1861,14 @@ export class StateManager {
     if (isEmptyMapPack(pack)) return;
 
     try {
-      const profile = await getProfile(this.saveId);
+      // 本钩子**只从 `applySetLocation` 来**，即永远在提交作用域内：读走缓存、写只打脏标记，
+      // 整份 profile 由提交出口落一次（`updateMapFlags` 那条「整份覆盖」的语义一字未变）
+      const profile = await this.readProfile();
       const { flags, healed } = await this.ensureMapFlags(profile, pack);
       const projected = projectLocationFlags(getMapIndex(), flags, char.location);
       if (projected === null && !healed) return; // 落位失败且无需自愈 → 一个字节都不动
-      await updateMapFlags(profile, projected ?? flags);
+      setMapFlagsInPlace(profile, projected ?? flags);
+      await this.persistProfile(profile);
     } catch (err) {
       // 位置路径已经落库了（真源没丢），投影失败只让棋子暂时不动
       console.warn('[StateManager] 地图落位失败（位置路径已落库，不影响正文）:', err);
@@ -1766,6 +1967,8 @@ export class StateManager {
   //   ① 关闭 or 空包 → 整段 no-op（随机事件是**可选**子系统；关掉时 flags 保留不清，§6）
   //   ② 读 profile → 组装只读上下文快照 → 纯函数算出下一份 flags
   //   ③ 有变化才经命名写入口 `updateRandomEventFlags` 落库（纯函数「无变化返回 null」的用途）
+  //      —— **首访那一条例外**：同地图落位钩子，它在提交作用域内改缓存（`setRandomEventFlagsInPlace`
+  //      + 打脏标记），由提交出口统一落库
   //   ④ 整段包在 try/catch 里：候选池是**旁路**账本，它失败绝不能让正文状态提交失败
   //
   // 🔴 为什么上下文组装在这里而不在 `random-event-scheduler.ts`:
@@ -1786,7 +1989,8 @@ export class StateManager {
    * game-pipeline 各有一份逐字拷贝，靠注释维持同步，漂了不报错（见那个模块的文件头）。
    */
   private async buildRandomEventContext(profile: SaveProfile): Promise<RandomEventRollContext> {
-    const player = (await getCharacters(this.saveId)).find((c) => c.type === 'player');
+    // 读侧走缓存口（理由同 `ensureMapFlags`）：首访钩子在提交作用域内，另外四条在作用域外
+    const player = (await this.readCharacters()).find((c) => c.type === 'player');
     return buildRandomEventRollContext(profile, player);
   }
 
@@ -1872,7 +2076,8 @@ export class StateManager {
     if (isEmptyRandomEventPack(pack)) return;
 
     try {
-      const profile = await getProfile(this.saveId);
+      // 同 `syncMapLocation`：只从 `applySetLocation` 来，永远在提交作用域内
+      const profile = await this.readProfile();
       const ctx = await this.buildRandomEventContext(profile);
       const placeKey = ctx.placeKey;
       // 地点键都算不出来（没落位且位置路径为空）→ 什么也不做，不拿空键去比足迹
@@ -1890,7 +2095,8 @@ export class StateManager {
 
       const next = pruned ?? armed;
       if (next === null) return;
-      await updateRandomEventFlags(profile, next);
+      setRandomEventFlagsInPlace(profile, next);
+      await this.persistProfile(profile);
     } catch (err) {
       // 位置路径与地块投影都已落库；首访没入池只是少一次遭遇
       console.warn('[StateManager] 随机事件首访入池失败（位置已落库，不影响正文）:', err);

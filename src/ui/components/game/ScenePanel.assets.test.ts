@@ -20,7 +20,7 @@ let mockGame: any;
 let mockAssets: any;
 
 vi.mock('@engine/save-profile', () => ({
-  markNewsRead: vi.fn(async (p: any) => p),
+  persistNewsRead: vi.fn(async () => undefined),
 }));
 vi.mock('../../stores/game-store', () => ({
   useGameStore: () => mockGame,

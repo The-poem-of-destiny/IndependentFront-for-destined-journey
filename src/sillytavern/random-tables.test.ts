@@ -28,7 +28,7 @@ import {
   type NamePoolsContent,
   type SeedProfile,
 } from './random-tables';
-import { getContentRegistry, setContentRegistry } from '@ui/stores/content-store';
+import { getContentRegistry, installContentRegistry } from './content-registry-runtime';
 
 /** 中性 fixture：只验形状与算法，不含任何世界观内容 */
 const FIXTURE: NamePoolsContent = {
@@ -75,7 +75,7 @@ const EMPTY: NamePoolsContent = {
 
 /** 把值灌进注册表的 namePools 面（其余五面不动） */
 function seedRegistry(value: unknown): void {
-  setContentRegistry({ ...getContentRegistry(), namePools: value });
+  installContentRegistry({ ...getContentRegistry(), namePools: value });
 }
 
 afterEach(() => {

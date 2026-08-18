@@ -17,7 +17,7 @@
  * `(nodes, …)` 参数式同一口径：调用方不必知道注册表，测试可直接喂 fixture。
  */
 
-import { getContentRegistry } from '../ui/stores/content-store';
+import { getContentRegistry } from './content-registry-runtime';
 
 // ========== 通用随机工具 ==========
 

@@ -62,12 +62,21 @@ vi.mock('./database', () => ({
 }));
 
 // save-profile 也 mock（quest 双 op 测试用；state-manager 对其为动态 import，vitest 同样拦截）
+//
+// 🔴 `*InPlace` 这一族是**纯变更、不落库**的那一半（见 save-profile.ts 的注释）——
+//    提交作用域缓存把「改」与「落」拆成两拍之后，state-manager 在提交路径上用的是它们。
+//    mock 必须真的改对象，否则「quest 落进 profile 了没有」这类断言会变成恒真。
 vi.mock('./save-profile', () => ({
   getProfile: vi.fn(),
   updateProfile: vi.fn(),
-  setQuest: vi.fn(),
-  removeQuest: vi.fn(),
-  // 🗺 地图 v1：本文件的用例全跑在**空包**上（三条地图钩子整段 no-op），这两个只为让 mock 的
+  setQuestInPlace: vi.fn((profile: any, name: string, quest: any) => {
+    profile.quests = profile.quests ?? {};
+    profile.quests[name] = { ...(profile.quests[name] ?? {}), ...quest };
+  }),
+  removeQuestInPlace: vi.fn((profile: any, name: string) => {
+    delete profile.quests?.[name];
+  }),
+  // 🗺 地图 v1：本文件的用例全跑在**空包**上（三条地图钩子整段 no-op），这几个只为让 mock 的
   // 导出面与真模块一致 —— 缺了它们，将来某个装了包的用例拿到的是 undefined，而钩子的 catch
   // 会把它降级成一条 console.warn（静默变绿）。真链路测试在 state-manager.map-wiring.test.ts。
   getMapFlags: vi.fn((profile: any) => profile?.worldFlags?.map ?? {}),
@@ -75,6 +84,21 @@ vi.mock('./save-profile', () => ({
     profile.worldFlags = profile.worldFlags ?? {};
     profile.worldFlags.map = flags;
     return profile;
+  }),
+  setMapFlagsInPlace: vi.fn((profile: any, flags: any) => {
+    profile.worldFlags = profile.worldFlags ?? {};
+    profile.worldFlags.map = flags;
+  }),
+  // 🎲 随机事件 v1：同上，本文件全跑在空包上（钩子整段 no-op）
+  getRandomEventFlags: vi.fn((profile: any) => profile?.worldFlags?.randomEvents ?? {}),
+  updateRandomEventFlags: vi.fn(async (profile: any, flags: any) => {
+    profile.worldFlags = profile.worldFlags ?? {};
+    profile.worldFlags.randomEvents = flags;
+    return profile;
+  }),
+  setRandomEventFlagsInPlace: vi.fn((profile: any, flags: any) => {
+    profile.worldFlags = profile.worldFlags ?? {};
+    profile.worldFlags.randomEvents = flags;
   }),
 }));
 
@@ -511,7 +535,7 @@ describe('StateManager', () => {
   // 4. update_character
   // ===================================================================
   describe('commitChatState — update_character', () => {
-    it('should resolve character by name and call saveCharacter (M4 名字寻址)', async () => {
+    it('should resolve character by name and persist it (M4 名字寻址)', async () => {
       const char = buildMockCharacter({ id: 'char-001' });
       vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
@@ -523,7 +547,12 @@ describe('StateManager', () => {
       expect(result.success).toBe(true);
       expect(result.patchesApplied).toBe(1);
       expect(vi.mocked(db.getCharacters)).toHaveBeenCalledWith('save-001');
-      expect(vi.mocked(db.saveCharacter)).toHaveBeenCalledTimes(1);
+      // 提交作用域缓存改造后，角色落库统一走出口那一次 bulkPut（`saveCharacters`），
+      // 不再是每个补丁各一次 `saveCharacter`
+      expect(vi.mocked(db.saveCharacters)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(db.saveCharacters).mock.calls[0][0]).toEqual([
+        expect.objectContaining({ id: 'char-001', race: '精灵' }),
+      ]);
       expect(char.race).toBe('精灵');
     });
 
@@ -606,10 +635,11 @@ describe('StateManager', () => {
       expect(result.success).toBe(false);
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0]).toContain('inventory');
-      // 原子拒绝: 合法键也不能落地
+      // 原子拒绝: 合法键也不能落地（两条落库路径都不许被走到 —— 出口 bulkPut 同样不许有它）
       expect(char.money).toBe(100);
       expect((char as any).inventory).toEqual([]);
       expect(vi.mocked(db.saveCharacter)).not.toHaveBeenCalled();
+      expect(vi.mocked(db.saveCharacters)).not.toHaveBeenCalled();
     });
 
     it('② 禁 name: value 含 name → errors', async () => {
@@ -2997,29 +3027,34 @@ describe('StateManager', () => {
       expect(vi.mocked(db.saveSaveSlot)).toHaveBeenCalled();
     });
 
-    it('深拷贝隔离: 打快照后篡改原对象不影响快照', async () => {
-      const char = buildMockCharacter({
-        id: 'char-001',
-        saveId: 'save-001',
-        hp: 80,
-        inventory: [{ name: '铁剑', quantity: 1 }] as any,
-      });
-      await db.saveCharacter(char);
-      const profile = await saveProfile.getProfile('save-001');
-      profile.variables = { sys: { gold: 42 } };
-      await saveProfile.updateProfile(profile);
+    /**
+     * 🔴 2026-08-17 快照拆表：`createSnapshot` **不再** structuredClone 那四份数据。
+     *
+     * 原来的四次克隆是纯开销 —— 四个 getter 都是裸 Dexie 读（快照路径刻意不走提交作用域
+     * 的缓存），IndexedDB 每次读出来的都是新反序列化的对象，落库时 Dexie 的 put 还会再
+     * 克隆一次。而被克隆的那份里躺着**整档对话历史**，每回合一次。
+     *
+     * 这条用引用相等钉住「没有克隆」：有人日后顺手把 structuredClone 加回来，这里会红。
+     * 「快照与后续状态变化互不影响」那个真正的契约，现在由 IDB 的读写语义保证，
+     * 验它要用真库 —— 见 database.test.ts「快照落库后与后续状态变化互不影响」。
+     */
+    it('不再深拷贝：落库的就是 DB 读出来的那几份（每回合省掉一次整档历史克隆）', async () => {
+      const chars = [buildMockCharacter({ id: 'char-001', saveId: 'save-001', hp: 80 })];
+      const profile = { saveId: 'save-001', variables: { sys: { gold: 42 } } };
+      const plotEvents = [{ id: 'pe-1' }];
+      const messages = [{ id: 'm-1', role: 'assistant', content: '正文' }];
+      vi.mocked(db.getCharacters).mockResolvedValue(chars as any);
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile as any);
+      vi.mocked(db.getPlotEvents).mockResolvedValue(plotEvents as any);
+      vi.mocked(db.getMessages).mockResolvedValue(messages as any);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const snap = await sm.createSnapshot('turn', 1);
 
-      // 篡改原对象（嵌套层级也篡改）
-      char.hp = 1;
-      char.inventory[0].name = '木棍';
-      profile.variables.sys.gold = 0;
-
-      expect(snap.characters[0].hp).toBe(80);
-      expect(snap.characters[0].inventory[0].name).toBe('铁剑');
-      expect(snap.saveProfile.variables.sys.gold).toBe(42);
+      expect(snap.characters).toBe(chars);
+      expect(snap.saveProfile).toBe(profile);
+      expect(snap.plotEvents).toBe(plotEvents);
+      expect(snap.messages).toBe(messages);
     });
 
     it('滚动上限读 engine-settings 注入缝（未注册 provider 时缺省 30）', async () => {
@@ -3069,6 +3104,9 @@ describe('StateManager', () => {
       });
       const snap = await sm.createSnapshot('turn', 5);
       expect(snap.saveProfile.variables.sys.簿记.已访问).toEqual(['旧镇']);
+      // 🔴 真库里快照在**落库那一刻**就被 Dexie 结构化克隆冻住了；这套内存 mock 的表
+      //    按引用存，不手工冻的话下一回合的提交会把快照一起改掉，测的就不是回退了。
+      const persisted = structuredClone(snap);
 
       // 回合 N+1: 状态又往前走了
       await sm.commitChatState([], {
@@ -3081,8 +3119,8 @@ describe('StateManager', () => {
         '新港',
       ]);
 
-      // 回退到 N
-      vi.mocked(db.getSnapshot).mockResolvedValue(snap as any);
+      // 回退到 N（喂上面那份冻结副本 —— 真库交回来的就是它）
+      vi.mocked(db.getSnapshot).mockResolvedValue(persisted as any);
       const result = await sm.restoreSnapshot(snap.id);
       expect(result.success).toBe(true);
       const restored = await saveProfile.getProfile('save-ejs-snap');
@@ -3652,10 +3690,12 @@ describe('StateManager', () => {
   // 19. update_quest / remove_quest — 顺带修 (#32 / #40)
   // ===================================================================
   describe('update_quest status 归一化 & remove_quest {name} 形态', () => {
+    // 🔴 断言落在**结果**（profile.quests 里躺着什么 + 落库落了几次）而不是「调了哪个写入口」：
+    //    提交作用域缓存改造后，提交路径用的是 `setQuestInPlace` + 出口统一 `updateProfile`，
+    //    盯着写入口的断言只能证明「这一版调用了那个函数」，证明不了任务真的进了 profile。
     it('update_quest 写入前 status 走 normalizeQuestStatus (#32)', async () => {
       const profile = { saveId: 'save-001', quests: {} } as any;
       vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
-      vi.mocked(saveProfile.setQuest).mockResolvedValue(profile);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
@@ -3668,17 +3708,18 @@ describe('StateManager', () => {
 
       expect(result.success).toBe(true);
       // 'active' 是自由字符串 → 别名归一化为 '进行中'
-      expect(vi.mocked(saveProfile.setQuest)).toHaveBeenCalledWith(
-        profile,
-        '试炼',
+      expect(profile.quests['试炼']).toEqual(
         expect.objectContaining({ status: '进行中', progress: '第一步' }),
       );
+      // 寻址键 name 不落进任务体（M6 #52）
+      expect(profile.quests['试炼'].name).toBeUndefined();
+      expect(vi.mocked(saveProfile.updateProfile)).toHaveBeenCalledWith(profile);
+      expect(vi.mocked(saveProfile.updateProfile)).toHaveBeenCalledTimes(1);
     });
 
     it('remove_quest value 为 {name} 对象 (#40)', async () => {
-      const profile = { saveId: 'save-001', quests: {} } as any;
+      const profile = { saveId: 'save-001', quests: { 试炼: { status: '进行中' } } } as any;
       vi.mocked(saveProfile.getProfile).mockResolvedValue(profile);
-      vi.mocked(saveProfile.removeQuest).mockResolvedValue(profile);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
@@ -3686,7 +3727,8 @@ describe('StateManager', () => {
       ]);
 
       expect(result.success).toBe(true);
-      expect(vi.mocked(saveProfile.removeQuest)).toHaveBeenCalledWith(profile, '试炼');
+      expect(profile.quests['试炼']).toBeUndefined();
+      expect(vi.mocked(saveProfile.updateProfile)).toHaveBeenCalledWith(profile);
     });
 
     it('remove_quest value 缺 name 报"缺少任务名称"', async () => {
@@ -4118,6 +4160,7 @@ describe('StateManager', () => {
       });
       await db.saveCharacter(npc);
       vi.mocked(db.saveCharacter).mockClear();
+      vi.mocked(db.saveCharacters).mockClear();
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
@@ -4127,7 +4170,9 @@ describe('StateManager', () => {
       expect(result.success).toBe(true);
       expect(result.patchesApplied).toBe(1);
       expect(npc.name).toBe('旅人');
+      // no-op 改名一个字节都不写：既不走旧的单条落库，也不许进出口那次 bulkPut
       expect(vi.mocked(db.saveCharacter)).not.toHaveBeenCalled();
+      expect(vi.mocked(db.saveCharacters)).not.toHaveBeenCalled();
     });
 
     it('rename 时 affections 无旧键 → 迁移安静跳过，改名照常成功', async () => {
@@ -4240,6 +4285,231 @@ describe('StateManager', () => {
       // 首轮 +1，之后最多 3 轮反应各 +1 —— 关键是它会停下来
       expect(char.hp).toBeGreaterThan(50);
       expect(char.hp).toBeLessThanOrEqual(55);
+    });
+  });
+
+  // ===================================================================
+  // 提交作用域缓存（性能改造 2026-08-17）
+  // ===================================================================
+  describe('commitChatState — 提交作用域缓存的 I/O 收敛', () => {
+    const SAVE_ID = 'save-commit-scope';
+
+    /**
+     * 一次混合提交（10 个变量补丁 + 3 个 profile 补丁 + 10 个角色补丁）**只准**:
+     *   1 次 getProfile · 1 次 updateProfile · 1 次 getCharacters · 1 次 bulkPut
+     *
+     * 🔴 这条用例的另一半（也是更要紧的一半）是**结果**断言：I/O 数掉下来但状态落错了，
+     *    是这类改造唯一真正危险的失败形态。所以下面把每个补丁该产生的终态逐条钉死 ——
+     *    收敛前的实现产出的就是这份终态，一个字节都不该变。
+     * 🔴 不带装备脚本（本存档没接过线）→ `reactToEvents` 零开销返回，不会有第二轮提交
+     *    把计数顶上去。
+     */
+    it('混合提交只落一次 profile + 一次角色 bulkPut，且终态与逐补丁落库时一致', async () => {
+      const hero = buildMockCharacter({
+        id: 'uuid-hero',
+        name: '主角甲',
+        type: 'player',
+        saveId: SAVE_ID,
+        hp: 100,
+        maxHp: 100,
+        money: 0,
+      });
+      const traveler = buildMockCharacter({
+        id: 'uuid-traveler',
+        name: '旅人',
+        type: 'npc',
+        saveId: SAVE_ID,
+      });
+      const goblin = buildMockCharacter({
+        id: 'uuid-goblin',
+        name: '哥布林',
+        type: 'monster',
+        saveId: SAVE_ID,
+      });
+      await db.saveCharacter(hero);
+      await db.saveCharacter(traveler);
+      await db.saveCharacter(goblin);
+      const merchant = buildMockCharacter({
+        id: 'uuid-merchant',
+        name: '商人',
+        type: 'npc',
+        saveId: SAVE_ID,
+      });
+
+      // 播种用的那几次写入不算进计数
+      vi.clearAllMocks();
+
+      const sm = new StateManager({ saveId: SAVE_ID });
+      const result = await sm.commitChatState([
+        // ── 变量 10 条（顺序可见：delta 要看得到前一条 set 的结果）──
+        { op: 'set_variable', target: 'variables.金币', value: 100 },
+        { op: 'delta_variable', target: 'variables.金币', amount: 50 },
+        { op: 'set_variable', target: 'variables.名号', value: '流浪者' },
+        { op: 'move_variable', target: 'variables.名号', metadata: { toPath: '称号' } },
+        { op: 'insert_variable', target: 'variables.队列', value: '甲' },
+        { op: 'insert_variable', target: 'variables.队列', value: '乙' },
+        { op: 'set_variable', target: 'variables.临时', value: 1 },
+        { op: 'remove_variable', target: 'variables.临时' },
+        { op: 'delta_variable', target: 'variables.经验', amount: 7 },
+        { op: 'set_variable', target: 'variables.旗标', value: true },
+        // ── profile 的另外三条写路径 ──
+        { op: 'delta_affection', target: 'affections.旅人', amount: 10 },
+        { op: 'add_news', target: 'news', value: { title: '号外', content: '正文' } },
+        {
+          op: 'update_quest',
+          target: 'quests.试炼',
+          value: { name: '试炼', status: 'active' },
+        },
+        // ── 角色 ──
+        { op: 'update_character', target: 'characters.主角甲', value: { money: 500 } },
+        { op: 'delta_hp', target: 'characters.主角甲', amount: -30 },
+        { op: 'add_item', target: 'characters.主角甲', value: { name: '药水', quantity: 2 } },
+        { op: 'add_status_effect', target: 'characters.主角甲', value: { name: '祝福' } },
+        { op: 'set_location', target: 'characters.主角甲', value: '灰岩镇/集市' },
+        // 新增角色 → 紧接着按名改它（不变式③：补丁 N 看得见补丁 N-1 的结果）
+        { op: 'add_character', target: 'characters.商人', value: merchant },
+        { op: 'update_character', target: 'characters.商人', value: { occupation: '杂货商' } },
+        // 双方落库（旧实现是一次独立 saveCharacters，现在并进出口那次 bulkPut）
+        {
+          op: 'transfer_item',
+          target: 'characters.主角甲',
+          value: { name: '药水', to: '旅人', quantity: 1 },
+        },
+        { op: 'remove_character', target: 'characters.哥布林' },
+        // 改名连带迁 affections 键（角色表与 profile 在同一次提交里各写各的）
+        { op: 'rename_character', target: 'characters.旅人', value: '旅行者' },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.patchesApplied).toBe(23);
+
+      // ── I/O 收敛（本用例的主张）──
+      // 🔴 断言写在读 profile 之前：下面的终态断言自己会调 getProfile，先读就把计数顶上去了
+      expect(vi.mocked(saveProfile.getProfile)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(saveProfile.updateProfile)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(db.getCharacters)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(db.saveCharacters)).toHaveBeenCalledTimes(1);
+      // 提交路径上不再有单条落库；删除仍是逐条 delete（与脏表构造上互斥）
+      expect(vi.mocked(db.saveCharacter)).not.toHaveBeenCalled();
+      expect(vi.mocked(db.deleteCharacter)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(db.deleteCharacter)).toHaveBeenCalledWith('uuid-goblin');
+      // 一次 bulkPut 里恰好是本次改动过的三个角色（各一份，改了五次也只落一次）
+      const bulk = vi.mocked(db.saveCharacters).mock.calls[0][0];
+      expect(bulk.map((c) => c.id).sort()).toEqual(['uuid-hero', 'uuid-merchant', 'uuid-traveler']);
+
+      // ── 终态：角色 ──
+      const stored = await db.getCharacters(SAVE_ID);
+      const storedHero = stored.find((c) => c.id === 'uuid-hero')!;
+      expect(storedHero.money).toBe(500);
+      expect(storedHero.hp).toBe(70);
+      expect(storedHero.location).toBe('灰岩镇/集市');
+      expect(storedHero.inventory).toEqual([
+        expect.objectContaining({ name: '药水', quantity: 1 }),
+      ]);
+      expect(storedHero.statusEffects.map((e) => e.name)).toEqual(['祝福']);
+      const storedTraveler = stored.find((c) => c.id === 'uuid-traveler')!;
+      expect(storedTraveler.name).toBe('旅行者');
+      expect(storedTraveler.inventory).toEqual([
+        expect.objectContaining({ name: '药水', quantity: 1 }),
+      ]);
+      expect(stored.find((c) => c.id === 'uuid-merchant')!.occupation).toBe('杂货商');
+      expect(stored.find((c) => c.id === 'uuid-goblin')).toBeUndefined();
+
+      // ── 终态：profile（变量走 sys. 命名空间，同旧实现）──
+      const profile = await saveProfile.getProfile(SAVE_ID);
+      expect(profile.variables.sys).toEqual(
+        expect.objectContaining({
+          金币: 150,
+          称号: '流浪者',
+          队列: ['甲', '乙'],
+          经验: 7,
+          旗标: true,
+        }),
+      );
+      expect(profile.variables.sys.名号).toBeUndefined();
+      expect(profile.variables.sys.临时).toBeUndefined();
+      // 改名迁走了好感度键（旧键必须消失，否则下次按名读到的是 0）
+      expect(profile.affections).toEqual({ 旅行者: 10 });
+      expect(profile.news).toEqual([expect.objectContaining({ title: '号外', read: false })]);
+      expect(profile.quests['试炼']).toEqual(expect.objectContaining({ status: '进行中' }));
+    });
+
+    it('有补丁失败时照样 flush —— 先成功的补丁不被后面那条错误连坐', async () => {
+      const hero = buildMockCharacter({
+        id: 'uuid-hero2',
+        name: '主角乙',
+        type: 'player',
+        saveId: SAVE_ID,
+        money: 0,
+      });
+      await db.saveCharacter(hero);
+      vi.clearAllMocks();
+
+      const sm = new StateManager({ saveId: SAVE_ID });
+      const result = await sm.commitChatState([
+        { op: 'set_variable', target: 'variables.金币', value: 42 },
+        { op: 'update_character', target: 'characters.主角乙', value: { money: 300 } },
+        // 白名单外的键 → 整条补丁原子拒绝
+        { op: 'update_character', target: 'characters.主角乙', value: { 乱写: 1 } as any },
+        { op: 'update_character', target: 'characters.不存在的人', value: { money: 1 } },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toHaveLength(2);
+      expect(result.patchesApplied).toBe(2);
+      // 失败的补丁不阻止落库（旧实现里前两条早已各自进库了）
+      expect(vi.mocked(saveProfile.updateProfile)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(db.saveCharacters)).toHaveBeenCalledTimes(1);
+      const stored = await db.getCharacters(SAVE_ID);
+      expect(stored.find((c) => c.id === 'uuid-hero2')!.money).toBe(300);
+      const profile = await saveProfile.getProfile(SAVE_ID);
+      expect(profile.variables.sys.金币).toBe(42);
+    });
+
+    /**
+     * 🔴 这条钉的是 `dropCharacter` **当场从缓存数组摘掉**那一步。少了它，删掉的角色仍能被
+     *    后续补丁按名解析到；而一旦被解析到并改写，它会从「待删除」翻回「待落库」——
+     *    结果是**该死的怪物又活了**，且整条链一声不吭（终态看起来只是「删除没生效」）。
+     *    这个不变式没有第二处保险，删掉那三行时全套用例曾经照样全绿。
+     */
+    it('删掉的角色不会被同一次提交里后续的补丁复活', async () => {
+      const goblin = buildMockCharacter({
+        id: 'uuid-goblin-revive',
+        name: '哥布林丙',
+        type: 'monster',
+        saveId: SAVE_ID,
+      });
+      await db.saveCharacter(goblin);
+      vi.clearAllMocks();
+
+      const sm = new StateManager({ saveId: SAVE_ID });
+      const result = await sm.commitChatState([
+        { op: 'remove_character', target: 'characters.哥布林丙' },
+        // 死人不该再被解析到 —— 这一条必须失败
+        { op: 'update_character', target: 'characters.哥布林丙', value: { money: 1 } },
+      ]);
+
+      expect(result.patchesApplied).toBe(1);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('角色不存在: 哥布林丙');
+      expect(vi.mocked(db.deleteCharacter)).toHaveBeenCalledWith('uuid-goblin-revive');
+      // 没有任何角色变脏 → 出口那次 bulkPut 压根不该发生（发生了就是它被写回来了）
+      expect(vi.mocked(db.saveCharacters)).not.toHaveBeenCalled();
+      const stored = await db.getCharacters(SAVE_ID);
+      expect(stored.find((c) => c.id === 'uuid-goblin-revive')).toBeUndefined();
+    });
+
+    it('纯变量提交一次角色表都不查（惰性读：没人要角色就不读）', async () => {
+      const sm = new StateManager({ saveId: 'save-commit-scope-vars' });
+      vi.clearAllMocks();
+      await sm.commitChatState([
+        { op: 'set_variable', target: 'variables.甲', value: 1 },
+        { op: 'set_variable', target: 'variables.乙', value: 2 },
+      ]);
+      expect(vi.mocked(db.getCharacters)).not.toHaveBeenCalled();
+      expect(vi.mocked(db.saveCharacters)).not.toHaveBeenCalled();
+      expect(vi.mocked(saveProfile.getProfile)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(saveProfile.updateProfile)).toHaveBeenCalledTimes(1);
     });
   });
 });

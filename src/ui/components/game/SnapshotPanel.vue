@@ -3,11 +3,14 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { getSnapshots } from '@engine/database';
 import AppButton from '../shared/AppButton.vue';
-import type { Snapshot, CharacterState } from '@engine/types';
+import type { SnapshotMeta } from '@engine/types';
 
 const game = useGameStore();
 
-const snapshots = ref<Snapshot[]>([]);
+// 🔴 拿的是**元数据**：列表要的只有 turn / reason / createdAt 与那一行缩略。
+//    整档载荷（characters / 对话历史）在 snapshotPayloads 表里，恢复时才 join ——
+//    为了列 30 行字去读 30 份对话历史，正是 v22 拆表要消灭的开销。
+const snapshots = ref<SnapshotMeta[]>([]);
 const restoring = ref(false);
 const errorMsg = ref('');
 
@@ -34,12 +37,16 @@ async function fetchSnapshots() {
   }
 }
 
-function playerOf(snap: Snapshot): CharacterState | undefined {
-  return snap.characters?.find((c) => c.type === 'player');
+/** 主角那一行的文字；没有缩略（v22 之前的旧快照）就不显示这一行 */
+function playerText(snap: SnapshotMeta): string {
+  const p = snap.preview;
+  if (!p?.playerName) return '';
+  if (p.hp === undefined || p.maxHp === undefined) return p.playerName;
+  return `${p.playerName} · HP ${p.hp}/${p.maxHp}`;
 }
 
-function gameTimeText(snap: Snapshot): string {
-  const t = snap.saveProfile?.gameTime;
+function gameTimeText(snap: SnapshotMeta): string {
+  const t = snap.preview?.gameTime;
   if (!t) return '';
   return `${t.era ?? ''}${t.year ?? '?'}年${t.month ?? '?'}月${t.day ?? '?'}日`;
 }
@@ -52,7 +59,7 @@ function timeText(ts: number): string {
   }
 }
 
-async function restore(snap: Snapshot) {
+async function restore(snap: SnapshotMeta) {
   if (game.isInCombat) {
     errorMsg.value = '战斗进行中，无法恢复';
     return;
@@ -103,9 +110,7 @@ watch(
             <span v-if="currentSnapshotId === snap.id" class="snap-current">当前</span>
           </div>
           <div class="snap-meta">
-            <span v-if="playerOf(snap)" class="snap-player">
-              {{ playerOf(snap)!.name }} · HP {{ playerOf(snap)!.hp }}/{{ playerOf(snap)!.maxHp }}
-            </span>
+            <span v-if="playerText(snap)" class="snap-player">{{ playerText(snap) }}</span>
             <span class="snap-game-time">{{ gameTimeText(snap) }}</span>
           </div>
           <div class="snap-realtime">存档于 {{ timeText(snap.createdAt) }}</div>

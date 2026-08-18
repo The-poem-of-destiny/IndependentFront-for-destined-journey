@@ -18,12 +18,14 @@
  */
 
 import type { LocationNode, LocationEdge, TerrainType } from './types';
-// 🔴 依赖方向的例外，与 `content-source.ts:27`（`../ui/lib/media-hash`）同一处置：
-// 注册表的**同步**读取入口住在 content-store（D16 把它定在那儿，装包执行器要在同一
-// 模块里重灌）。$location 是设计点名的四个同步消费方之一，只能来这里取。
-// 全引擎只有本文件一处读它——audio-scene / MapPanel / $location 都经 `getLocationNodes()`，
-// 日后要把这条边翻回「UI 注入引擎」时只需改这一行。
-import { getContentRegistry } from '../ui/stores/content-store';
+// 🔴 注册表**注入缝**（`content-registry-runtime.ts`），不是前端 store ——
+// 这条边曾是「引擎 import 前端」的反向依赖，已于分层收口时翻正（缝由 content-store 的
+// `setContentRegistry` 单点注入，先例 `map-runtime` / `random-event-runtime`）。
+// 时序契约不变、也仍然是这里最要紧的一条：**惰性、按调用时刻读**，
+// 引擎 import 的那一刻注册表多半还没灌注，所以下面 9 个查询函数一概 `(nodes, …)` 参数式，
+// 本模块不把读数缓存成模块级常量。
+// 全引擎只有本文件一处读它——audio-scene / MapPanel / $location 都经 `getLocationNodes()`。
+import { getContentRegistry } from './content-registry-runtime';
 
 // ========== 注册表读取（D16 / D25①） ==========
 

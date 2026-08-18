@@ -89,6 +89,50 @@ export default [
     },
   },
   {
+    /**
+     * 🔴 **分层闸门：引擎不许 import 前端**（2026-08-17 收口）。
+     *
+     * 起因：`src/sillytavern/` 下曾有 6 条反向边 —— 4 个内容注册表消费方
+     * （agent-tools / bloodlines / location-db / random-tables）import `content-store`、
+     * `content-source` import `ui/lib/media-hash`、`database` type-only import
+     * `create-store` 的 `CreatePreset`。每一条都能编译、能跑、测试全绿，
+     * 代价是**引擎从此依赖 Vue + Pinia + Dexie 整条前端链**：headless 跑批与引擎单测
+     * 都得把整个 store 拖起来，而「哪一层能依赖哪一层」这件事没有任何一处机器在管。
+     *
+     * 现在的正确形状是**注入缝**（`content-registry-runtime.ts` / `engine-settings.ts` /
+     * `map-runtime.ts` / `random-event-runtime.ts`）：前端往缝里装，引擎只读。
+     * 要在引擎里用前端的某个东西，答案永远是「把它搬进引擎，或者开一条缝」，
+     * 不是「再 import 一次」。
+     *
+     * 🔴 `vue` / `pinia` 一并封死：引擎里出现 `ref()` / `defineStore()` 是同一条边的
+     *    另一种写法，而它比路径 import 更难在 review 里看出来。
+     *
+     * 本条只管 `import`/`export from` 的**静态**边。动态 `import()`、`import.meta.glob`
+     * 与字符串路径由 `tests/layering-gate.test.ts` 的源码扫描兜住 —— 两道网互补，
+     * 少任何一道都留着一条静默的路。
+     */
+    files: ['src/sillytavern/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['../ui', '../ui/*', '../../ui', '../../ui/*', '**/src/ui/*', '@ui', '@ui/*'],
+              message:
+                '引擎不许 import 前端（src/ui）。把它搬进 src/sillytavern，或照 content-registry-runtime.ts / engine-settings.ts 开一条注入缝，由前端往缝里装。',
+            },
+            {
+              group: ['vue', 'vue/*', 'pinia', 'pinia/*'],
+              message:
+                '引擎不许依赖 Vue / Pinia。响应式与 store 属于 src/ui；引擎侧用模块级注入缝（见 content-registry-runtime.ts）。',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Q-15 补网：lint 从 src/** 扩到 {src,server,tests,scripts}/**。
     // .cjs 是**有意**的 CommonJS 一次性脚本（node 直跑，不进构建），require 是它唯一的导入方式。
     files: ['**/*.cjs'],

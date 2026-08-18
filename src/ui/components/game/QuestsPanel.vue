@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { useGameStore } from '../../stores/game-store';
-import { updateProfile } from '@engine/save-profile';
+import { persistFocusQuest } from '@engine/save-profile';
 
 const game = useGameStore();
 
@@ -10,14 +10,18 @@ const focusQuest = ref(game.saveProfile?.focusQuest || '');
 const inspectQuest = ref<string | null>(null);
 
 // #14: 焦点任务选择回写 SaveProfile 持久化（此前仅存于本地 ref，刷新即丢）。
-// 先改内存 reactive（其他面板即时可见），再 JSON 克隆落库
-// （Dexie 结构化克隆吃不下 Vue Proxy，同 game-store.markOpeningPromptConsumed 的做法）。
+// 先改内存 reactive（其他面板即时可见），再交给引擎的窄字段写入口落库。
+//
+// 🔴 **不再把整份 profile 交出去**（2026-08-17 评审修）：`persistFocusQuest` 在
+//    per-saveId 写队列里**自己重读一份新鲜的 profile**、只改 focusQuest 这一格 ——
+//    否则这次写会与 commitChatState 的整档 flush 互相覆盖（详见该函数注释）。
+//    顺带也不必再 JSON 克隆：跨过边界的只有 saveId 与一个字符串，没有 Vue Proxy。
 watch(focusQuest, async (v) => {
   const profile = game.saveProfile;
   if (!profile || profile.focusQuest === v) return;
   profile.focusQuest = v;
   try {
-    await updateProfile(JSON.parse(JSON.stringify(profile)));
+    await persistFocusQuest(profile.saveId, v);
   } catch (err) {
     console.error('[QuestsPanel] focusQuest 持久化失败:', err);
   }

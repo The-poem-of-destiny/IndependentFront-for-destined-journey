@@ -33,7 +33,7 @@ import {
   rollAttributes,
   randomAppearanceSummary,
 } from './random-tables';
-import { getContentRegistry } from '../ui/stores/content-store';
+import { getContentRegistry } from './content-registry-runtime';
 
 // ═══════════════════════════════════════════════════════════
 // Group A0: 品牌面注入（D26）

@@ -5,7 +5,7 @@ import { tierVarByName } from '../../lib/quality-colors';
 import { useHoverPopup } from '../../composables/useHoverPopup';
 import AssetMedia from '../shared/AssetMedia.vue';
 import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve';
-import { markNewsRead } from '@engine/save-profile';
+import { persistNewsRead } from '@engine/save-profile';
 import { getAffectionLabel } from '@engine/affection-system';
 import { MONTH_NAMES, WEEKDAY_NAMES, getTimeOfDay } from '@engine/time-system';
 import { nameColorVar, initialsOf } from '../../utils/name-color';
@@ -157,8 +157,12 @@ const expandedNewsId = ref<string | null>(null);
 
 /**
  * M6 #36: 展开新闻时标记已读并持久化。
- * 先改内存 reactive（红点即时消失、其他面板即时可见），再传 JSON 克隆给 markNewsRead 落库
- * （Dexie 结构化克隆吃不下 Vue Proxy，同 QuestsPanel focusQuest 回写的做法）。
+ * 先改内存 reactive（红点即时消失、其他面板即时可见），再交给引擎的窄字段写入口落库。
+ *
+ * 🔴 **不再把整份 profile 交出去**（2026-08-17 评审修）：`persistNewsRead` 在 per-saveId
+ *    写队列里**自己重读一份新鲜的 profile**、只翻这一条新闻的 read 标志 —— 否则这次写
+ *    会与 commitChatState 的整档 flush 互相覆盖（详见该函数注释）。
+ *    顺带也不必再 JSON 克隆：跨过边界的只有 saveId 与一个 newsId，没有 Vue Proxy。
  */
 async function toggleNews(id: string) {
   const opening = expandedNewsId.value !== id;
@@ -172,7 +176,7 @@ async function toggleNews(id: string) {
 
   item.read = true;
   try {
-    await markNewsRead(JSON.parse(JSON.stringify(profile)), id);
+    await persistNewsRead(profile.saveId, id);
   } catch (err) {
     console.error('[ScenePanel] 新闻已读标记持久化失败:', err);
   }
