@@ -13,8 +13,12 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildMapIndex } from '@engine/map-index';
-import type { MapPack, MapTile } from '@engine/types-map';
+import type { MapPack, MapTile, TileFactsEntry } from '@engine/types-map';
 import {
+  buildTileDetailModel,
+  developmentBarGeometry,
+  developmentLevelName,
+  formatTileHistoryLine,
   buildBorderPaths,
   buildHighlightPatch,
   buildLabelsForMode,
@@ -857,5 +861,381 @@ describe('estimateModeDays（出行方式预览）', () => {
     expect(estimateModeDays({ tilePath: [1, 2], timeDays: 1.5 }, 0)).toBe(0);
     expect(estimateModeDays({ tilePath: [1, 2], timeDays: 1.5 }, -1)).toBe(0);
     expect(estimateModeDays({ tilePath: [1, 2], timeDays: 1.5 }, Number.NaN)).toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 地块详情（地图 v1.2 / ADR-33 §5 UI）
+// ═══════════════════════════════════════════════════════════
+
+/** 合成档名表（10 档，零真实地名）—— 真表随内容包出，引擎/前端一个字都不认识 */
+const LEVELS = ['废墟', '村落', '城镇', '城市', '大城', '要邑', '重镇', '名都', '雄都', '帝都'];
+
+function facts(partial: Partial<TileFactsEntry> = {}): TileFactsEntry {
+  return { statuses: [], history: [], ...partial };
+}
+
+describe('地块详情：发展条', () => {
+  it('档位取事实、档名查包表、进度原样带出', () => {
+    const model = buildTileDetailModel(
+      tile({ id: 1, development: 2 }),
+      facts({ development: { level: 4, progress: 20 } }),
+      LEVELS,
+      0,
+    );
+    expect(model.development).toEqual({ level: 4, levelName: '城市', progress: 20 });
+    // 槽数 = 档数（严格槽位身份的直接后果）
+    expect(model.slots).toHaveLength(4);
+  });
+
+  it('包没带档名表（v1.0/v1.1 旧包）→ 退化成序号，不是错误态', () => {
+    expect(developmentLevelName(undefined, 4)).toBe('第4档');
+    expect(developmentLevelName([], 4)).toBe('第4档');
+    expect(developmentLevelName(['废墟', '  '], 2)).toBe('第2档');
+    const model = buildTileDetailModel(tile({ id: 1, development: 3 }), undefined, undefined, 0);
+    expect(model.development?.levelName).toBe('第3档');
+  });
+
+  it('无事实条目时读 pack 基线（起始档 + 初始建筑落最小空槽）', () => {
+    const model = buildTileDetailModel(
+      tile({ id: 1, development: 2, buildings: [{ name: '磨坊', ownerFlavor: '磨坊主' }] }),
+      undefined,
+      LEVELS,
+      0,
+    );
+    expect(model.development).toEqual({ level: 2, levelName: '村落', progress: 0 });
+    expect(model.slots.map((s) => s.building?.name ?? null)).toEqual(['磨坊', null]);
+    expect(model.slots[0].building?.ownerFlavor).toBe('磨坊主');
+  });
+
+  it('包里没有 development 那一格 → 界面不画发展条（旧包与占位包逐字节同以前）', () => {
+    const model = buildTileDetailModel(tile({ id: 1 }), undefined, LEVELS, 0);
+    expect(model.development).toBeNull();
+    expect(model.slots).toEqual([]);
+  });
+
+  it('旧包地块**一旦有了事实条目**就照事实画（那是真发生过的事）', () => {
+    const model = buildTileDetailModel(
+      tile({ id: 1 }),
+      facts({ development: { level: 1, progress: -12 } }),
+      LEVELS,
+      0,
+    );
+    expect(model.development).toEqual({ level: 1, levelName: '废墟', progress: -12 });
+  });
+
+  it('进度条几何：0 刻度定在 1/3 处，负进度从它往左长', () => {
+    const zero = developmentBarGeometry(0);
+    expect(zero.zeroPct).toBeCloseTo(100 / 3, 6);
+    expect(zero.widthPct).toBeCloseTo(0, 6);
+
+    const up = developmentBarGeometry(75);
+    expect(up.negative).toBe(false);
+    expect(up.startPct).toBeCloseTo(zero.zeroPct, 6);
+    expect(up.widthPct).toBeCloseTo(50, 6);
+
+    const down = developmentBarGeometry(-25);
+    expect(down.negative).toBe(true);
+    expect(down.startPct).toBeCloseTo(zero.zeroPct - 100 / 6, 6);
+    expect(down.widthPct).toBeCloseTo(100 / 6, 6);
+
+    // 越界与 NaN 一律夹到值域内，绝不产出负宽度/NaN%
+    expect(developmentBarGeometry(999).widthPct).toBeCloseTo(200 / 3, 6);
+    expect(developmentBarGeometry(-999).widthPct).toBeCloseTo(100 / 3, 6);
+    expect(developmentBarGeometry(Number.NaN).widthPct).toBeCloseTo(0, 6);
+  });
+});
+
+describe('地块详情：状态', () => {
+  it('永久 → 无倒计时；限时 → 按锚点算剩余天；已过期那一拍是 0 不是负数', () => {
+    const model = buildTileDetailModel(
+      tile({ id: 1, development: 1 }),
+      facts({
+        statuses: [
+          {
+            title: '龙脉',
+            description: '恒久的地气',
+            effects: [],
+            durationDays: -1,
+            appliedAtDay: 3,
+          },
+          {
+            title: '洪水',
+            description: '洪水席卷',
+            effects: [],
+            durationDays: 30,
+            appliedAtDay: 10,
+          },
+          {
+            title: '瘟疫',
+            description: '已近尾声',
+            effects: [],
+            durationDays: 5,
+            appliedAtDay: 10,
+          },
+        ],
+      }),
+      LEVELS,
+      25,
+    );
+    expect(model.statuses).toEqual([
+      { title: '龙脉', description: '恒久的地气', permanent: true, remainingDays: null },
+      { title: '洪水', description: '洪水席卷', permanent: false, remainingDays: 15 },
+      { title: '瘟疫', description: '已近尾声', permanent: false, remainingDays: 0 },
+    ]);
+  });
+
+  it('无标题的状态整条丢掉（渲染一行空标题只会被读成 bug）', () => {
+    const model = buildTileDetailModel(
+      tile({ id: 1, development: 1 }),
+      facts({
+        statuses: [
+          { title: '  ', description: 'x', effects: [], durationDays: -1, appliedAtDay: 0 },
+        ],
+      }),
+      LEVELS,
+      0,
+    );
+    expect(model.statuses).toEqual([]);
+  });
+});
+
+describe('地块详情：建筑槽（严格槽位身份，裁定 §8-8）', () => {
+  it('空槽照样占一格、编号连续 —— 过滤空槽会让「下一次降档谁会没」错位', () => {
+    const model = buildTileDetailModel(
+      tile({ id: 1, development: 3 }),
+      facts({
+        development: { level: 3, progress: 0 },
+        buildings: [
+          { name: '磨坊', ownerFlavor: '磨坊主' },
+          null,
+          { name: '铁匠铺', playerOwned: true, description: '玩家买下的铺子' },
+        ],
+      }),
+      LEVELS,
+      0,
+    );
+    expect(model.slots.map((s) => s.slot)).toEqual([1, 2, 3]);
+    expect(model.slots[1].building).toBeNull();
+    expect(model.slots[2].building).toEqual({
+      name: '铁匠铺',
+      description: '玩家买下的铺子',
+      ownerFlavor: '',
+      playerOwned: true,
+    });
+    // 归属缺席收敛成空串，模板里不必再 `?.`
+    expect(model.slots[0].building?.playerOwned).toBe(false);
+  });
+
+  it('槽数组比档数短时补空槽（视图只补不裁）', () => {
+    const model = buildTileDetailModel(
+      tile({ id: 1, development: 1 }),
+      facts({ development: { level: 3, progress: 0 }, buildings: [{ name: '磨坊' }] }),
+      LEVELS,
+      0,
+    );
+    expect(model.slots).toHaveLength(3);
+    expect(model.slots.map((s) => s.building?.name ?? null)).toEqual(['磨坊', null, null]);
+  });
+});
+
+describe('地块详情：编年史', () => {
+  it('逐类渲染中文；reason 缀在主干后，摧毁引用在场状态', () => {
+    const line = (entry: Parameters<typeof formatTileHistoryLine>[0]): string =>
+      formatTileHistoryLine(entry, LEVELS);
+    expect(line({ day: 1, kind: 'built', building: '河境磨坊' })).toBe('「河境磨坊」落成');
+    expect(line({ day: 1, kind: 'built', building: '河境磨坊', reason: '玩家出资重建' })).toBe(
+      '「河境磨坊」落成——玩家出资重建',
+    );
+    expect(line({ day: 2, kind: 'destroyed', building: '河境磨坊', causeStatuses: ['洪水'] })).toBe(
+      '「河境磨坊」被毁（洪水）',
+    );
+    expect(
+      line({ day: 2, kind: 'destroyed', building: '河境磨坊', causeStatuses: ['洪水', '瘟疫'] }),
+    ).toBe('「河境磨坊」被毁（洪水、瘟疫）');
+    expect(line({ day: 3, kind: 'firstVisit' })).toBe('首次到访');
+    expect(line({ day: 4, kind: 'levelUp', fromLevel: 3, toLevel: 4 })).toBe('升为「城市」');
+    expect(line({ day: 5, kind: 'levelDown', fromLevel: 4, toLevel: 3 })).toBe('降为「城镇」');
+    expect(line({ day: 6, kind: 'acquired', building: '铁匠铺' })).toBe('「铁匠铺」成为玩家产业');
+    expect(line({ day: 7, kind: 'note', text: '雨落了整整一旬。' })).toBe('雨落了整整一旬。');
+  });
+
+  it('档名表缺席时升降档退化成序号；档位缺席退化成一句话', () => {
+    expect(formatTileHistoryLine({ day: 1, kind: 'levelUp', toLevel: 4 }, undefined)).toBe(
+      '升为「第4档」',
+    );
+    expect(formatTileHistoryLine({ day: 1, kind: 'levelDown' }, LEVELS)).toBe('发展度衰退');
+  });
+
+  it('空 note / 认不出的 kind → 空串（调用方整行丢掉）', () => {
+    expect(formatTileHistoryLine({ day: 1, kind: 'note', text: '   ' }, LEVELS)).toBe('');
+    expect(formatTileHistoryLine({ day: 1, kind: 'xxx' as unknown as 'note' }, LEVELS)).toBe('');
+  });
+
+  it('模型里新的在前，空行不进列表', () => {
+    const model = buildTileDetailModel(
+      tile({ id: 1, development: 2 }),
+      facts({
+        history: [
+          { day: 1, kind: 'firstVisit' },
+          { day: 4, kind: 'note', text: '  ' },
+          { day: 9, kind: 'built', building: '磨坊' },
+        ],
+      }),
+      LEVELS,
+      0,
+    );
+    expect(model.history.map((h) => [h.day, h.text])).toEqual([
+      [9, '「磨坊」落成'],
+      [1, '首次到访'],
+    ]);
+  });
+});
+
+describe('地块详情：无发展度与空事实', () => {
+  it('水域/天堑只有状态（海上风暴合法，发展条与建筑槽永远没有）', () => {
+    const sea = buildTileDetailModel(
+      tile({ id: 5, name: '内海', water: 'sea', development: 3 }),
+      facts({
+        statuses: [
+          { title: '风暴', description: '浪高数丈', effects: [], durationDays: 7, appliedAtDay: 0 },
+        ],
+      }),
+      LEVELS,
+      2,
+    );
+    expect(sea.development).toBeNull();
+    expect(sea.slots).toEqual([]);
+    expect(sea.statuses).toHaveLength(1);
+    expect(sea.statuses[0].remainingDays).toBe(5);
+
+    const pass = buildTileDetailModel(
+      tile({ id: 6, name: '雪脊', impassable: true, development: 5 }),
+      undefined,
+      LEVELS,
+      0,
+    );
+    expect(pass.development).toBeNull();
+    expect(pass.slots).toEqual([]);
+  });
+
+  it('没有事实条目的普通地块 → 各节全空（卡片与 v1.2 之前逐字节一致）', () => {
+    expect(buildTileDetailModel(tile({ id: 1 }), undefined, LEVELS, 0)).toEqual({
+      development: null,
+      statuses: [],
+      mainBuilding: null,
+      slots: [],
+      history: [],
+    });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 地块详情：主建筑（地图 v1.2 §F4b / 裁定 §8-17~19）
+// ═══════════════════════════════════════════════════════════
+
+/** 合成主建筑通名表（10 档，零真实地名）—— 真表随内容包出 */
+const SEATS = [
+  '断垣',
+  '窝棚',
+  '营地',
+  '长屋',
+  '村公所',
+  '议事厅',
+  '镇公堂',
+  '市政厅',
+  '领主府',
+  '王城',
+];
+
+describe('地块详情：主建筑', () => {
+  it('没被点名的地块按**当前档**派生通名（档变则名变）', () => {
+    const model = buildTileDetailModel(
+      tile({ id: 1, development: 3 }),
+      facts({ development: { level: 5, progress: 0 } }),
+      LEVELS,
+      0,
+      SEATS,
+    );
+    expect(model.mainBuilding).toEqual({
+      name: '村公所',
+      description: '',
+      ownerFlavor: '',
+      playerOwned: false,
+    });
+    // 🔴 它**不在 slots 里**：档 5 = 5 个编号槽，一个都没被它占
+    expect(model.slots).toHaveLength(5);
+    expect(model.slots.every((s) => s.building === null)).toBe(true);
+  });
+
+  it('作者名与事实里钉住的名字都赢过通名，归属与玩家产业一并带出', () => {
+    const authored = buildTileDetailModel(
+      tile({
+        id: 1,
+        development: 2,
+        mainBuilding: { name: '旧堡', description: '苔痕斑驳', ownerFlavor: '男爵' },
+      }),
+      facts({ development: { level: 2, progress: 0 } }),
+      LEVELS,
+      0,
+      SEATS,
+    );
+    expect(authored.mainBuilding).toEqual({
+      name: '旧堡',
+      description: '苔痕斑驳',
+      ownerFlavor: '男爵',
+      playerOwned: false,
+    });
+
+    const pinned = buildTileDetailModel(
+      tile({ id: 1, development: 2 }),
+      facts({
+        development: { level: 2, progress: 0 },
+        mainBuilding: { name: '铁誓堡', ownerFlavor: '玩家', playerOwned: true },
+      }),
+      LEVELS,
+      0,
+      SEATS,
+    );
+    expect(pinned.mainBuilding).toMatchObject({ name: '铁誓堡', playerOwned: true });
+  });
+
+  it('🔴 包没声明发展度 → 主建筑整块不渲染（§8 末条的读侧收敛：不凭空长出一座）', () => {
+    const model = buildTileDetailModel(tile({ id: 1 }), undefined, LEVELS, 0, SEATS);
+    expect(model.development).toBeNull();
+    expect(model.mainBuilding).toBeNull();
+  });
+
+  it('水域/天堑永远没有主建筑（主建筑代表聚落，海面上没有聚落）', () => {
+    const sea = buildTileDetailModel(
+      tile({ id: 5, name: '内海', water: 'sea', development: 3 }),
+      facts({ development: { level: 3, progress: 0 } }),
+      LEVELS,
+      0,
+      SEATS,
+    );
+    expect(sea.mainBuilding).toBeNull();
+  });
+
+  it('通名表缺席（旧包）→ 退化成引擎的 ASCII 兜底串，不是错误态', () => {
+    const model = buildTileDetailModel(
+      tile({ id: 1, development: 3 }),
+      facts({ development: { level: 3, progress: 0 } }),
+      LEVELS,
+      0,
+    );
+    expect(model.mainBuilding?.name).toBe('Seat Lv3');
+  });
+
+  it('renamed 编年史条目有自己的措辞（每加一个 kind 都要回来补一支）', () => {
+    expect(formatTileHistoryLine({ day: 4, kind: 'renamed', building: '铁誓堡' }, LEVELS)).toBe(
+      '主建筑更名为「铁誓堡」',
+    );
+    expect(
+      formatTileHistoryLine(
+        { day: 4, kind: 'renamed', building: '铁誓堡', reason: '重建' },
+        LEVELS,
+      ),
+    ).toBe('主建筑更名为「铁誓堡」——重建');
   });
 });

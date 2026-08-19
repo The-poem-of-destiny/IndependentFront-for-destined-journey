@@ -33,6 +33,8 @@ import type {
   MapPack,
   MapStrait,
   MapTile,
+  MapTileInitialBuilding,
+  MapTileMainBuilding,
   MapWaterKind,
   TravelRules,
   WeatherWeight,
@@ -87,6 +89,8 @@ function createEmptyMapPack(): MapPack {
     resolution: { w: 0, h: 0 },
     kmPerPx: IDENTITY_RATE,
     terrains: [],
+    developmentLevels: [],
+    mainBuildingNames: [],
     travelRules: createIdentityTravelRules(),
     countries: [],
     midTiers: [],
@@ -190,6 +194,15 @@ function readTileColor(value: unknown): [number, number, number] | undefined {
   return [channels[0]!, channels[1]!, channels[2]!];
 }
 
+/**
+ * 发展档序数的上下界（v1.2 / §F2）：档 1..10 ↔ 建筑槽 1..10。
+ *
+ * 🔴 这**不是**中文词汇 —— 档名随包（`developmentLevels`），引擎只认序数。
+ *    10 这个数字是机制（槽数上限），不是内容，所以它留在引擎里是对的。
+ */
+const MIN_DEVELOPMENT_LEVEL = 1;
+const MAX_DEVELOPMENT_LEVEL = 10;
+
 /** 正数费率：0 与负数一律回落（见 `IDENTITY_RATE` 那条注释） */
 function readPositiveRate(value: unknown, fallback: number): number {
   const parsed = readNumber(value);
@@ -212,6 +225,99 @@ function coerceTerrains(raw: unknown): string[] {
     out.push(item);
   }
   return out;
+}
+
+/**
+ * **按下标寻址的档位序数表**（pack v1.2.0）—— 两张表共用这一份实现：
+ * `developmentLevels`（发展档名，§F2）与 `mainBuildingNames`（主建筑通名，§F4b·裁定 §8-18）。
+ * 缺席/整节坏 → 空表（v1.0/v1.1 旧包的常态；UI 退化成序号、主建筑退化成 ASCII 兜底串，
+ * 机制面一律不受影响）。
+ *
+ * 🔴 **不去重**（与 `coerceTerrains` 刻意不同）：丢掉一行会让它后面每一档的序号整体前移 ——
+ *    于是「第 7 档」在 UI 上显示成第 8 档的名字，而机制面（槽数）仍按 7 算。
+ *    地形表是集合，档位表是序列，两者的「重复」不是一回事。
+ * 🔴 **只砍不补**：多于 10 档丢掉尾部（超出的档位引擎永远到不了），少于 10 档照收 ——
+ *    「恰好 10 档」是内容仓 verify 门的判据，本层是最后一道兜底，不替作者补数据。
+ * 🔴 两张表**共用一份实现是刻意的**：它们的规则逐字相同，各抄一份的代价是两张同构表
+ *    某天行为不一样，而没有任何东西会变红。
+ */
+function coerceOrdinalNameTable(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string' || item.length === 0) continue;
+    out.push(item);
+    if (out.length >= MAX_DEVELOPMENT_LEVEL) break;
+  }
+  return out;
+}
+
+/**
+ * 地块起始档（pack v1.2.0；§F2）。认不出/缺席 → `undefined`。
+ *
+ * 🔴 **缺席不是档 1**（见 `MapTile.development` 那条注释）：`undefined` = 这块地没有
+ *    发展度（海/湖/不可通行块的常态），档 1 = 处在最低档且有 1 个建筑槽。给缺席补个 1
+ *    等于凭空给每一块海面发一个建筑槽。
+ * 🔴 小数不收（**不圆整**）：档位是序数，圆整它等于替包猜一个别的档 —— 照 `readTileColor`
+ *    对通道小数的同款口径。越界则**钳进合法带**：槽数由档数直接推导，一个 12 档的地块
+ *    会长出 12 个槽，而降档摧毁按最高号槽走 —— 那是内容错误在机制面的放大。
+ */
+function coerceTileDevelopment(raw: unknown): number | undefined {
+  const parsed = readNumber(raw);
+  if (parsed === null || !Number.isInteger(parsed)) return undefined;
+  return Math.min(MAX_DEVELOPMENT_LEVEL, Math.max(MIN_DEVELOPMENT_LEVEL, parsed));
+}
+
+/**
+ * 地块初始建筑（pack v1.2.0；§F3）。缺席/非数组 → `undefined`（那一格不长出来，
+ * 照 `color` 的写法）；坏条目整条跳过；同名首见胜（`name` 是地块内逻辑键）。
+ *
+ * 🔴 这里**不收** `playerOwned` / `income`：所有权翻转只经叙事 op（裁定 §8-9），
+ *    包里写了也当没写 —— 收下它就是给编译期开一条绕过那条通道的后门。
+ * 🔴 条数不裁（不按起始档数截断）：那是内容仓 verify 门的判据，且运行时截断会**静默**
+ *    丢掉作者写的建筑。播种时按最小空槽落位，装不下的自然落不进去，看得见。
+ */
+function coerceTileBuildings(raw: unknown): MapTileInitialBuilding[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: MapTileInitialBuilding[] = [];
+  const seen = new Set<string>();
+
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const name = readNonEmpty(item.name, '');
+    if (name.length === 0 || seen.has(name)) continue;
+    seen.add(name);
+
+    const row: MapTileInitialBuilding = { name };
+    const description = readNonEmpty(item.description, '');
+    if (description.length > 0) row.description = description;
+    const ownerFlavor = readNonEmpty(item.ownerFlavor, '');
+    if (ownerFlavor.length > 0) row.ownerFlavor = ownerFlavor;
+    out.push(row);
+  }
+  return out;
+}
+
+/**
+ * 地块主建筑的**作者命名**（pack v1.2.0；§F4b）。缺席/非对象/无名 → `undefined`
+ * （那一格不长出来，照 `color` 与 `buildings` 的写法）。
+ *
+ * 🔴 缺席**不是「这块地没有主建筑」**：每个可通行陆块恒有一座（裁定 §8-17），缺的只是
+ *    名字 —— 引擎按当前档从 `mainBuildingNames` 派生通名。所以这里绝不替作者兜一个名字：
+ *    兜出来的会**钉住**（作者名不随档变），于是那块地永远叫兜底串。
+ * 🔴 同 `buildings`：**不收** `playerOwned` / `income`（裁定 §8-9·§8-19 所有权只经叙事 op）。
+ */
+function coerceTileMainBuilding(raw: unknown): MapTileMainBuilding | undefined {
+  if (!isRecord(raw)) return undefined;
+  const name = readNonEmpty(raw.name, '');
+  if (name.length === 0) return undefined;
+
+  const row: MapTileMainBuilding = { name };
+  const description = readNonEmpty(raw.description, '');
+  if (description.length > 0) row.description = description;
+  const ownerFlavor = readNonEmpty(raw.ownerFlavor, '');
+  if (ownerFlavor.length > 0) row.ownerFlavor = ownerFlavor;
+  return row;
 }
 
 /**
@@ -311,6 +417,13 @@ function coerceTiles(raw: unknown): MapTile[] {
     // 坏色**只丢这一格**（照 `unclaimed` 的写法只在有值时挂上，不写 `color: undefined`）
     const color = readTileColor(item.color);
     if (color !== undefined) tile.color = color;
+    // v1.2 两格同口径：认不出就是缺席（旧包因此逐字节等于从前）
+    const development = coerceTileDevelopment(item.development);
+    if (development !== undefined) tile.development = development;
+    const buildings = coerceTileBuildings(item.buildings);
+    if (buildings !== undefined) tile.buildings = buildings;
+    const mainBuilding = coerceTileMainBuilding(item.mainBuilding);
+    if (mainBuilding !== undefined) tile.mainBuilding = mainBuilding;
     out.push(tile);
   }
   return out;
@@ -508,6 +621,8 @@ export function coerceMapPack(input: unknown): MapPack {
     },
     kmPerPx: readPositiveRate(input.kmPerPx, IDENTITY_RATE),
     terrains: coerceTerrains(input.terrains),
+    developmentLevels: coerceOrdinalNameTable(input.developmentLevels),
+    mainBuildingNames: coerceOrdinalNameTable(input.mainBuildingNames),
     travelRules: coerceTravelRules(input.travelRules),
     countries: dropDanglingAnchors(coerceCountries(input.countries), tileIds),
     midTiers: dropDanglingAnchors(coerceMidTiers(input.midTiers), tileIds),

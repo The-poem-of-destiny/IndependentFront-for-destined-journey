@@ -13,8 +13,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { PLACEHOLDER_REGISTRY } from './placeholder-registry';
 import { installMapPack, resetMapRuntime } from './map-runtime';
+import type { GameTime } from './time-system';
 import type { AgentConfig, AgentContext } from './types';
-import type { MapPack, MapSaveFlags } from './types-map';
+import type { MapPack, MapSaveFlags, TileFactsEntry, TileStatus } from './types-map';
 
 // ══════════════════════════════════════════════════════════════
 // 夹具
@@ -136,6 +137,10 @@ function makePack(): MapPack {
     ],
     straits: [],
     placeBindings: {},
+    // v1.2：档名随包（引擎只认「第几档」这个整数）
+    developmentLevels: ['Hamlet', 'Village', 'Township', 'Citadel'],
+    // v1.2 §F4b：主建筑通名表（同样随包）
+    mainBuildingNames: ['Camp', 'Moot Hall', 'Town Hall', 'Keep'],
   };
 }
 
@@ -422,6 +427,230 @@ describe('{{MAP_CONTEXT}} —— 保护面（§8.3）', () => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// 地块动态（v1.2 / ADR-33 §5「本块全量、邻块头条」）
+// ══════════════════════════════════════════════════════════════
+
+/** 第 118 日的正午（`toGameDay` = floor(时间戳/1440)），供剩余天数用 */
+const DAY_118: GameTime = {
+  era: 'Fixture',
+  year: 488,
+  month: 4,
+  day: 29,
+  weekday: 1,
+  hour: 12,
+  minute: 0,
+};
+
+function makeStatus(overrides: Partial<TileStatus> = {}): TileStatus {
+  return {
+    title: '洪水',
+    description: '洪水席卷了这片低地',
+    effects: [],
+    durationDays: 30,
+    appliedAtDay: 100,
+    ...overrides,
+  };
+}
+
+/** 装包 + 落位 + 事实袋 → 渲染结果（gameTime 决定「剩余 N 天」算不算得出来） */
+function renderWithFacts(
+  tiles: Record<string, TileFactsEntry>,
+  ctxOverrides?: Partial<AgentContext>,
+): string {
+  return render({ lastTileId: TILE_HOME }, { mapFacts: { tiles }, ...ctxOverrides });
+}
+
+describe('{{MAP_CONTEXT}} —— 地块动态的缺席出口', () => {
+  it('🔴 没供事实袋 → 整块与 v1.1 逐字节相同（零 token 铁律）', () => {
+    const before = render({ lastTileId: TILE_HOME });
+
+    expect(before).toBe(
+      '<map_context>\n' +
+        '位置: Homestead（Vale Province · Alpha Realm领）｜地形: flatland\n' +
+        '邻接: 北→Frostmoor(frostwaste) · 东→Palewater(shelf·Beta Realm领·需船) · ' +
+        '南→Stillmere(stillwater·不可入) · 西→Cragspine(crag·不可通行)\n' +
+        '</map_context>',
+    );
+  });
+
+  it('供了事实袋、但这块地没有条目 → 同样一行都不多（copy-on-write 没播种）', () => {
+    expect(renderWithFacts({ Farhold: { statuses: [], history: [] } })).toBe(
+      render({ lastTileId: TILE_HOME }),
+    );
+  });
+});
+
+describe('{{MAP_CONTEXT}} —— 发展 / 状态 / 建筑行', () => {
+  it('发展行：档名 + 进度（进度上界是引擎常量，不是包数据）', () => {
+    const out = renderWithFacts({
+      Homestead: { development: { level: 3, progress: 42 }, statuses: [], history: [] },
+    });
+
+    expect(out.split('\n')[2]).toBe('发展: Township（进度 42/100）');
+  });
+
+  it('状态行一条一行：剩余天数 / 永久 / 描述（描述用全角竖线隔开）', () => {
+    const out = renderWithFacts(
+      {
+        Homestead: {
+          statuses: [makeStatus(), makeStatus({ title: '丰饶之地', durationDays: -1 })],
+          history: [],
+        },
+      },
+      { gameTime: DAY_118 },
+    );
+
+    const lines = out.split('\n').filter((l) => l.startsWith('状态: '));
+    expect(lines).toEqual([
+      '状态: 洪水（剩余 12 天）｜洪水席卷了这片低地',
+      '状态: 丰饶之地（永久）｜洪水席卷了这片低地',
+    ]);
+  });
+
+  it('🔴 算不出今天是第几天时不写括注 —— 绝不把「不知道」渲染成「永久」', () => {
+    const out = renderWithFacts({ Homestead: { statuses: [makeStatus()], history: [] } });
+
+    expect(out).toContain('状态: 洪水｜洪水席卷了这片低地');
+    expect(out).not.toContain('永久');
+    expect(out).not.toContain('剩余');
+  });
+
+  it('建筑行：归属括注 + 玩家产业标记 + 空槽数（空槽 0 也写）', () => {
+    const out = renderWithFacts({
+      Homestead: {
+        development: { level: 2, progress: 0 },
+        buildings: [
+          { name: '磨坊', ownerFlavor: '镇长' },
+          { name: '商栈', playerOwned: true },
+        ],
+        statuses: [],
+        history: [],
+      },
+    });
+
+    expect(out).toContain('建筑: 磨坊（镇长） · 商栈【玩家产业】｜空槽 0');
+  });
+
+  it('主建筑行：单独一行、排在建筑行之前、不带槽位号也不进空槽账', () => {
+    const out = renderWithFacts({
+      Homestead: {
+        development: { level: 2, progress: 0 },
+        mainBuilding: { name: '铁誓堡', ownerFlavor: '男爵', playerOwned: true },
+        buildings: [{ name: '磨坊' }, null],
+        statuses: [],
+        history: [],
+      },
+    });
+
+    const lines = out.split('\n');
+    const mainIndex = lines.findIndex((l) => l.startsWith('主建筑: '));
+    const slotIndex = lines.findIndex((l) => l.startsWith('建筑: '));
+    expect(lines[mainIndex]).toBe('主建筑: 铁誓堡（男爵）【玩家产业】');
+    expect(mainIndex).toBeLessThan(slotIndex);
+    // 空槽数只数编号槽：档 2 + 一座磨坊 = 空槽 1（主建筑不占）
+    expect(lines[slotIndex]).toBe('建筑: 磨坊｜空槽 1');
+  });
+
+  it('没被点名也没有事实时，主建筑名按当前档从包的通名表派生', () => {
+    const out = renderWithFacts({
+      Homestead: { development: { level: 3, progress: 0 }, statuses: [], history: [] },
+    });
+    expect(out).toContain('主建筑: Town Hall');
+  });
+
+  it('🔴 没有发展档的地块一行主建筑都不出（零 token 铁律）', () => {
+    const out = renderWithFacts({ Homestead: { statuses: [makeStatus()], history: [] } });
+    expect(out).not.toContain('主建筑');
+  });
+
+  it('一座建筑都没有时写「无」而不是省掉整行（空槽数是能不能再盖的唯一依据）', () => {
+    const out = renderWithFacts({
+      Homestead: { development: { level: 2, progress: 0 }, statuses: [], history: [] },
+    });
+
+    expect(out).toContain('建筑: 无｜空槽 2');
+  });
+});
+
+describe('{{MAP_CONTEXT}} —— 编年史行', () => {
+  it('七类条目各有措辞，日期统一「第 N 日」，最近的在最后', () => {
+    const out = renderWithFacts({
+      Homestead: {
+        development: { level: 2, progress: 0 },
+        statuses: [],
+        history: [
+          { day: 1, kind: 'firstVisit' },
+          { day: 2, kind: 'built', building: '磨坊', reason: '玩家出资' },
+          { day: 3, kind: 'levelUp', fromLevel: 1, toLevel: 2 },
+          { day: 4, kind: 'levelDown', fromLevel: 3, toLevel: 2 },
+          { day: 5, kind: 'destroyed', building: '磨坊', causeStatuses: ['洪水'] },
+          { day: 6, kind: 'acquired', building: '商栈' },
+          { day: 7, kind: 'note', text: '这一年 很\n安静' },
+        ],
+      },
+    });
+
+    const line = out.split('\n').find((l) => l.startsWith('编年史: ')) ?? '';
+    expect(line).toBe(
+      '编年史: 第 3 日 升为「Village」 · 第 4 日 降为「Village」 · ' +
+        '第 5 日 磨坊被毁（毁于洪水） · 第 6 日 商栈归入玩家产业 · 第 7 日 这一年 很 安静',
+    );
+  });
+
+  it('op 附的 reason 落进对应条目；首访条目只有 5 条以内时才看得见', () => {
+    const out = renderWithFacts({
+      Homestead: {
+        statuses: [],
+        history: [
+          { day: 1, kind: 'firstVisit' },
+          { day: 2, kind: 'built', building: '磨坊', reason: '玩家出资' },
+        ],
+      },
+    });
+
+    expect(out).toContain('编年史: 第 1 日 玩家首次到访 · 第 2 日 磨坊落成（玩家出资）');
+  });
+
+  it('renamed（主建筑改名，v1.2 §F4b）有自己的措辞 —— 每加一个 kind 都要回来补一支', () => {
+    const out = renderWithFacts({
+      Homestead: {
+        statuses: [],
+        history: [{ day: 8, kind: 'renamed', building: '铁誓堡', reason: '重建之后' }],
+      },
+    });
+
+    expect(out).toContain('编年史: 第 8 日 主建筑更名为铁誓堡（重建之后）');
+  });
+});
+
+describe('{{MAP_CONTEXT}} —— 邻块头条行', () => {
+  it('档名紧跟地形、状态标题排最后；邻块没有描述/建筑/编年史', () => {
+    const out = render(
+      { lastTileId: TILE_HOME },
+      {
+        mapFacts: {
+          tiles: {
+            Frostmoor: {
+              development: { level: 2, progress: 90 },
+              buildings: [{ name: '瞭望塔' }],
+              statuses: [makeStatus({ title: '暴雪', description: '白毛风' })],
+              history: [{ day: 9, kind: 'built', building: '瞭望塔' }],
+            },
+          },
+        },
+      },
+    );
+
+    const line = out.split('\n').find((l) => l.startsWith('邻接: ')) ?? '';
+    expect(line).toContain('北→Frostmoor(frostwaste·Village·状态:暴雪)');
+    expect(line).not.toContain('白毛风');
+    expect(line).not.toContain('瞭望塔');
+    // 没有事实条目的邻块一个字都不多
+    expect(line).toContain('东→Palewater(shelf·Beta Realm领·需船)');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
 // 供值链路（blurByDefault 教训：单模块测试证明不了有人供值）
 // ══════════════════════════════════════════════════════════════
 
@@ -439,5 +668,11 @@ describe('AgentContext 供值', () => {
     expect(source).toContain('mapFlags: this.game.saveProfile');
     expect(source).toContain('getMapFlags(this.game.saveProfile)');
     expect(source).toContain('weather: resolveSceneWeather(this.game.saveProfile)');
+  });
+
+  it('🔴 v1.2：也传了 mapFacts（漏供的症状是动态四行静默永远不出，与「没有事实」同形）', () => {
+    const source = Object.values(UI_SOURCES)[0] ?? '';
+    expect(source).toContain('mapFacts: this.game.saveProfile');
+    expect(source).toContain('getMapFactsFlags(this.game.saveProfile)');
   });
 });

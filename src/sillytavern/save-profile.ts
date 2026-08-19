@@ -411,3 +411,58 @@ export function setRandomEventFlagsInPlace(
   if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
   profile.worldFlags[RANDOM_EVENT_FLAGS_KEY] = flags;
 }
+
+// ═══════════════════════════════════════════════════════════
+// 地块事实态（地图 v1.2 / ADR-33 §3）
+// ═══════════════════════════════════════════════════════════
+
+import type { MapFactsFlags } from './types-map';
+
+/** `worldFlags.mapFacts` 在 profile 里的键 —— 只在本节出现，读写两侧共用一处 */
+const MAP_FACTS_KEY = 'mapFacts';
+
+/**
+ * 读地块事实态（`worldFlags.mapFacts`）。
+ *
+ * 缺席（新档 / 还没有任何一块地偏离 pack 基线）返回**空袋子**（`{ tiles: {} }`）而不是
+ * `undefined`：「一块地都没记过事」与「还没有这个袋子」对每个消费方都是同一件事。
+ * 🔴 返回的空袋子是**新对象**，往里写不会落库 —— 落库只有 `updateMapFactsFlags` 这一条路。
+ * 🔴 `tiles` 缺席/被写坏时同样补空表：这一袋会随存档往返（导出/导入/手改备份），
+ *    类型说必填不等于运行期真有（口径照 `getRandomEventFlags` 的防御性读取）。
+ */
+export function getMapFactsFlags(profile: SaveProfile): MapFactsFlags {
+  const raw = profile.worldFlags?.[MAP_FACTS_KEY];
+  if (raw === null || typeof raw !== 'object') return { tiles: {} };
+  const bag = raw as MapFactsFlags;
+  if (bag.tiles === null || typeof bag.tiles !== 'object') return { ...bag, tiles: {} };
+  return bag;
+}
+
+/**
+ * 整份覆盖地块事实态（**命名写入口**，P1-09 口径，形状照 `updateRandomEventFlags`）。
+ *
+ * 🔴 **整份覆盖而不是逐字段合并**：`map-dynamics` 的纯函数返回的都是**完整的下一份**，
+ *    且「某条状态被摘掉了」「某个槽变成空的了」正是主要的变化形态 —— 合并语义下删除做不到，
+ *    症状是到期的状态永远撤不掉、被毁的建筑第二天又回来了。
+ * 🔴 **与 `worldFlags.map` 的契约刚好相反**（ADR-33 §3，与 `worldFlags.randomEvents` 同侧）：
+ *    这一袋存的是**事实不是派生态**，所以**永不随 packStamp 清空**。名字在现行包里消失只是
+ *    **休眠**（不结算、不删除），包回来自动复活。别把它接进 `ensureMapFlags` 的自愈路径。
+ */
+export async function updateMapFactsFlags(
+  profile: SaveProfile,
+  facts: MapFactsFlags,
+): Promise<SaveProfile> {
+  setMapFactsInPlace(profile, facts);
+  await updateProfile(profile);
+  return profile;
+}
+
+/**
+ * 整份覆盖地块事实态 —— **只改内存不落库**（`updateMapFactsFlags` 的纯变更那一半）。
+ * 存在理由同 `setMapFlagsInPlace`：落库那一拍由 `StateManager` 的提交作用域缓存统一做。
+ */
+export function setMapFactsInPlace(profile: SaveProfile, facts: MapFactsFlags): void {
+  // 存量记录（与手搓的测试 profile）可能整个缺 worldFlags；缺了就补一个空袋子
+  if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
+  profile.worldFlags[MAP_FACTS_KEY] = facts;
+}

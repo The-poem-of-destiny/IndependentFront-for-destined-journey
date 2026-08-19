@@ -34,6 +34,32 @@ const FIXTURE: MapPack = {
   resolution: { w: 400, h: 300 },
   kmPerPx: 2.5,
   terrains: ['plains', 'forest', 'hills', 'ridge', 'ocean', 'still-water'],
+  // v1.2.0 的档名表：同样是**包词汇**，中性 ASCII 十档就够证明引擎一个字都不认识
+  developmentLevels: [
+    'level-01',
+    'level-02',
+    'level-03',
+    'level-04',
+    'level-05',
+    'level-06',
+    'level-07',
+    'level-08',
+    'level-09',
+    'level-10',
+  ],
+  // v1.2.0 的主建筑通名表：与档名表并排随包，同样是**按下标寻址的序数表**
+  mainBuildingNames: [
+    'seat-01',
+    'seat-02',
+    'seat-03',
+    'seat-04',
+    'seat-05',
+    'seat-06',
+    'seat-07',
+    'seat-08',
+    'seat-09',
+    'seat-10',
+  ],
   travelRules: {
     rates: { land: 30, nearSea: 60, farSea: 120 },
     embarkCost: 12,
@@ -100,6 +126,11 @@ const FIXTURE: MapPack = {
       color: [12, 34, 56],
       centroid: [10, 10],
       areaPx: 900,
+      // v1.2.0 两格：起始档 + 初始建筑基线（同 `color`，只有部分地块写）
+      development: 3,
+      buildings: [{ name: 'Alpha Mill', description: 'A mill.', ownerFlavor: 'Miller' }],
+      // 主建筑的作者命名（同 `color`：可选格，只有部分地块写；缺席的按档派生通名）
+      mainBuilding: { name: 'Alpha Hall', description: 'The seat.', ownerFlavor: 'Reeve' },
     },
     {
       id: 2,
@@ -581,6 +612,278 @@ describe('地块块色 —— 权威色收下，坏色只丢这一格', () => {
   it('边界值 0 / 255 照收 —— 纯黑该不该用是 UI 那一层的判断，不在这里改数据', () => {
     expect(tileOf({ color: [0, 0, 0] })!.color).toEqual([0, 0, 0]);
     expect(tileOf({ color: [255, 255, 255] })!.color).toEqual([255, 255, 255]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// v1.2.0 三格：developmentLevels / tile.development / tile.buildings
+// ═══════════════════════════════════════════════════════════
+
+describe('developmentLevels —— 档名表是**序数表**，不是集合', () => {
+  it('合法表原样收下（词汇随包，引擎不认识任何一档）', () => {
+    expect(coerceMapPack(fixture()).developmentLevels).toEqual(FIXTURE.developmentLevels);
+  });
+
+  it('缺席 / 整节坏 → 空表（v1.0/v1.1 旧包照常吃）', () => {
+    expect(coerceMapPack(raw({ developmentLevels: undefined })).developmentLevels).toEqual([]);
+    expect(coerceMapPack(raw({ developmentLevels: 'ten' })).developmentLevels).toEqual([]);
+    expect(coerceMapPack(raw({ developmentLevels: {} })).developmentLevels).toEqual([]);
+    expect(coerceMapPack(raw({ developmentLevels: 10 })).developmentLevels).toEqual([]);
+    expect(coerceMapPack({ version: '1.0.0' }).developmentLevels).toEqual([]);
+    expect(EMPTY_MAP_PACK.developmentLevels).toEqual([]);
+  });
+
+  it('坏条目跳过（空串 / 非串），好条目保序', () => {
+    const pack = coerceMapPack(raw({ developmentLevels: ['a', '', 7, null, 'b', {}, 'c'] }));
+    expect(pack.developmentLevels).toEqual(['a', 'b', 'c']);
+  });
+
+  it('🔴 **不去重** —— 丢掉重名会让它后面每一档的序号整体前移', () => {
+    const pack = coerceMapPack(raw({ developmentLevels: ['a', 'a', 'b'] }));
+    expect(pack.developmentLevels).toEqual(['a', 'a', 'b']);
+  });
+
+  it('多于 10 档砍掉尾部（超出的档位引擎永远到不了）；少于 10 档照收，不补', () => {
+    const many = Array.from({ length: 14 }, (_, i) => `L${i + 1}`);
+    expect(coerceMapPack(raw({ developmentLevels: many })).developmentLevels).toHaveLength(10);
+    expect(coerceMapPack(raw({ developmentLevels: many })).developmentLevels?.[9]).toBe('L10');
+    expect(coerceMapPack(raw({ developmentLevels: ['a', 'b'] })).developmentLevels).toEqual([
+      'a',
+      'b',
+    ]);
+  });
+});
+
+describe('tile.development —— 起始档：整数、钳进 1..10、认不出即缺席', () => {
+  function tileOf(patch: Record<string, unknown>): MapPack['tiles'][number] {
+    const item = { id: 50, name: 'Dev', terrain: 'plains', centroid: [1, 2], ...patch };
+    return coerceMapPack(raw({ tiles: [item] })).tiles[0]!;
+  }
+
+  it('合法档原样收下（数字串也收 —— pack 由 CSV 编译而来）', () => {
+    expect(tileOf({ development: 1 }).development).toBe(1);
+    expect(tileOf({ development: 7 }).development).toBe(7);
+    expect(tileOf({ development: 10 }).development).toBe(10);
+    expect(tileOf({ development: '4' }).development).toBe(4);
+  });
+
+  it('🔴 缺席**不是档 1** —— 那格根本不长出来（海/湖/不可通行块的常态）', () => {
+    const tile = tileOf({});
+    expect(tile.development).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(tile, 'development')).toBe(false);
+  });
+
+  it('越界钳进合法带（12 档的地块会长出 12 个建筑槽，那是内容错在机制面的放大）', () => {
+    expect(tileOf({ development: 0 }).development).toBe(1);
+    expect(tileOf({ development: -4 }).development).toBe(1);
+    expect(tileOf({ development: 12 }).development).toBe(10);
+    expect(tileOf({ development: 999 }).development).toBe(10);
+  });
+
+  it('小数 / 认不出 / Number 陷阱值 → 缺席（档位是序数，圆整它等于猜）', () => {
+    for (const bad of [3.5, 'high', '', '   ', [], true, null, {}, Number.NaN, Infinity]) {
+      expect(tileOf({ development: bad }).development).toBeUndefined();
+    }
+  });
+
+  it('坏档不丢地块（它仍要在图上占位）', () => {
+    expect(tileOf({ development: 'high' }).name).toBe('Dev');
+  });
+});
+
+describe('tile.buildings —— 初始建筑基线：坏条目跳过、同名首见胜、缺席即缺席', () => {
+  function tileOf(patch: Record<string, unknown>): MapPack['tiles'][number] {
+    const item = { id: 51, name: 'Built', terrain: 'plains', centroid: [1, 2], ...patch };
+    return coerceMapPack(raw({ tiles: [item] })).tiles[0]!;
+  }
+
+  it('合法清单原样收下（三个字段齐全）', () => {
+    const tile = tileOf({
+      buildings: [
+        { name: 'Mill', description: 'A mill.', ownerFlavor: 'Miller' },
+        { name: 'Forge' },
+      ],
+    });
+    expect(tile.buildings).toEqual([
+      { name: 'Mill', description: 'A mill.', ownerFlavor: 'Miller' },
+      { name: 'Forge' },
+    ]);
+  });
+
+  it('缺席 / 非数组 → 那格不长出来（旧包逐字节等于从前）', () => {
+    for (const bad of [undefined, 'Mill', 42, {}, null]) {
+      const tile = tileOf(bad === undefined ? {} : { buildings: bad });
+      expect(tile.buildings).toBeUndefined();
+      expect(Object.prototype.hasOwnProperty.call(tile, 'buildings')).toBe(false);
+    }
+  });
+
+  it('name 空/非串 → 整条跳过（name 是地块内逻辑键，没有它无法被 op 寻址）', () => {
+    const tile = tileOf({
+      buildings: [
+        { name: 'Mill' },
+        { name: '' },
+        { name: 42 },
+        { description: 'nameless' },
+        null,
+        'Forge',
+        [],
+      ],
+    });
+    expect(tile.buildings).toEqual([{ name: 'Mill' }]);
+  });
+
+  it('同名首见胜（后来者整条丢，先到先得与遍历顺序无关）', () => {
+    const tile = tileOf({
+      buildings: [
+        { name: 'Mill', description: 'first' },
+        { name: 'Mill', description: 'impostor' },
+      ],
+    });
+    expect(tile.buildings).toEqual([{ name: 'Mill', description: 'first' }]);
+  });
+
+  it('可选格坏只丢那一格（description / ownerFlavor 空串或非串 = 没写）', () => {
+    const tile = tileOf({
+      buildings: [{ name: 'Mill', description: '', ownerFlavor: 42 }],
+    });
+    expect(tile.buildings).toEqual([{ name: 'Mill' }]);
+    expect(Object.prototype.hasOwnProperty.call(tile.buildings![0]!, 'description')).toBe(false);
+  });
+
+  it('🔴 `playerOwned` / `income` 不收 —— 所有权翻转只经叙事 op（裁定 §8-9）', () => {
+    const tile = tileOf({
+      buildings: [{ name: 'Mill', playerOwned: true, income: { amount: 100, periodDays: 30 } }],
+    });
+    expect(tile.buildings).toEqual([{ name: 'Mill' }]);
+  });
+
+  it('整份坏条目 → 空数组（数组在，只是一条都没剩），不是缺席', () => {
+    expect(tileOf({ buildings: [null, 42, { name: '' }] }).buildings).toEqual([]);
+  });
+
+  it('条数不按起始档裁（verify 门的判据，运行时静默截断会丢作者写的建筑）', () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ name: `B${i}` }));
+    expect(tileOf({ development: 2, buildings: many }).buildings).toHaveLength(12);
+  });
+});
+
+describe('mainBuildingNames —— 主建筑通名表（与档名表同一套序数表规则）', () => {
+  it('合法表原样收下（词汇随包，引擎不认识任何一档）', () => {
+    expect(coerceMapPack(fixture()).mainBuildingNames).toEqual(FIXTURE.mainBuildingNames);
+  });
+
+  it('缺席 / 整节坏 → 空表（v1.0/v1.1 旧包照常吃；派生名走引擎的 ASCII 兜底）', () => {
+    expect(coerceMapPack(raw({ mainBuildingNames: undefined })).mainBuildingNames).toEqual([]);
+    expect(coerceMapPack(raw({ mainBuildingNames: 'castle' })).mainBuildingNames).toEqual([]);
+    expect(coerceMapPack(raw({ mainBuildingNames: {} })).mainBuildingNames).toEqual([]);
+    expect(coerceMapPack(raw({ mainBuildingNames: 10 })).mainBuildingNames).toEqual([]);
+    expect(coerceMapPack({ version: '1.0.0' }).mainBuildingNames).toEqual([]);
+    expect(EMPTY_MAP_PACK.mainBuildingNames).toEqual([]);
+  });
+
+  it('坏条目跳过、好条目保序、**不去重**（丢一行会让后面每一档的通名整体前移）', () => {
+    const pack = coerceMapPack(raw({ mainBuildingNames: ['a', '', 7, null, 'a', {}, 'b'] }));
+    expect(pack.mainBuildingNames).toEqual(['a', 'a', 'b']);
+  });
+
+  it('多于 10 档砍掉尾部；少于 10 档照收，不补', () => {
+    const many = Array.from({ length: 13 }, (_, i) => `S${i + 1}`);
+    expect(coerceMapPack(raw({ mainBuildingNames: many })).mainBuildingNames).toHaveLength(10);
+    expect(coerceMapPack(raw({ mainBuildingNames: many })).mainBuildingNames?.[9]).toBe('S10');
+    expect(coerceMapPack(raw({ mainBuildingNames: ['a'] })).mainBuildingNames).toEqual(['a']);
+  });
+
+  it('🔴 两张序数表互不影响（一张坏了不该把另一张也清空）', () => {
+    const pack = coerceMapPack(raw({ mainBuildingNames: 'nope' }));
+    expect(pack.mainBuildingNames).toEqual([]);
+    expect(pack.developmentLevels).toEqual(FIXTURE.developmentLevels);
+  });
+});
+
+describe('tile.mainBuilding —— 主建筑作者命名：坏值即缺席，绝不替作者兜一个名字', () => {
+  function tileOf(patch: Record<string, unknown>): MapPack['tiles'][number] {
+    const item = { id: 52, name: 'Seat', terrain: 'plains', centroid: [1, 2], ...patch };
+    return coerceMapPack(raw({ tiles: [item] })).tiles[0]!;
+  }
+
+  it('合法条目原样收下（三个字段齐全）', () => {
+    const tile = tileOf({
+      mainBuilding: { name: 'Great Hall', description: 'The seat.', ownerFlavor: 'Lord' },
+    });
+    expect(tile.mainBuilding).toEqual({
+      name: 'Great Hall',
+      description: 'The seat.',
+      ownerFlavor: 'Lord',
+    });
+  });
+
+  it('🔴 缺席 / 非对象 / 无名 → 那一格不长出来（**不是**「这块地没有主建筑」，只是没被点名）', () => {
+    for (const bad of [undefined, 'Hall', 42, [], null, {}, { name: '' }, { name: 42 }]) {
+      const tile = tileOf(bad === undefined ? {} : { mainBuilding: bad });
+      expect(tile.mainBuilding).toBeUndefined();
+      expect(Object.prototype.hasOwnProperty.call(tile, 'mainBuilding')).toBe(false);
+    }
+  });
+
+  it('可选格坏只丢那一格（description / ownerFlavor 空串或非串 = 没写）', () => {
+    const tile = tileOf({ mainBuilding: { name: 'Hall', description: '', ownerFlavor: 42 } });
+    expect(tile.mainBuilding).toEqual({ name: 'Hall' });
+  });
+
+  it('🔴 `playerOwned` / `income` 不收 —— 所有权翻转只经叙事 op（裁定 §8-9·§8-19）', () => {
+    const tile = tileOf({
+      mainBuilding: { name: 'Hall', playerOwned: true, income: { amount: 200, periodDays: 30 } },
+    });
+    expect(tile.mainBuilding).toEqual({ name: 'Hall' });
+  });
+
+  it('坏值不丢地块，也不影响同地块的 buildings 那一格', () => {
+    const tile = tileOf({ mainBuilding: 'Hall', buildings: [{ name: 'Mill' }] });
+    expect(tile.name).toBe('Seat');
+    expect(tile.buildings).toEqual([{ name: 'Mill' }]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// v1.0 / v1.1 旧包
+// ═══════════════════════════════════════════════════════════
+
+describe('旧包（v1.0 / v1.1）—— 五格缺席时逐字节等于从前', () => {
+  /** 把 v1.2.0 夹具剥回 v1.1 形状（去掉两张序数表与三个地块格） */
+  function legacyRaw(): Record<string, unknown> {
+    const pack = fixture() as unknown as Record<string, unknown>;
+    delete pack.developmentLevels;
+    delete pack.mainBuildingNames;
+    pack.tiles = (pack.tiles as Record<string, unknown>[]).map((tile) => {
+      const copy = { ...tile };
+      delete copy.development;
+      delete copy.buildings;
+      delete copy.mainBuilding;
+      return copy;
+    });
+    return pack;
+  }
+
+  it('旧包的地块一格不多长（development / buildings / mainBuilding 都不出现）', () => {
+    const pack = coerceMapPack(legacyRaw());
+    for (const tile of pack.tiles) {
+      expect(Object.prototype.hasOwnProperty.call(tile, 'development')).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(tile, 'buildings')).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(tile, 'mainBuilding')).toBe(false);
+    }
+  });
+
+  it('旧包除两张序数表变空数组外，其余节逐字段等于旧口径', () => {
+    const pack = coerceMapPack(legacyRaw());
+    expect(pack.developmentLevels).toEqual([]);
+    expect(pack.mainBuildingNames).toEqual([]);
+    const { developmentLevels: _levels, mainBuildingNames: _seats, ...rest } = pack;
+    const expected = legacyRaw() as unknown as Omit<
+      MapPack,
+      'developmentLevels' | 'mainBuildingNames'
+    >;
+    expect(rest).toEqual(expected);
   });
 });
 

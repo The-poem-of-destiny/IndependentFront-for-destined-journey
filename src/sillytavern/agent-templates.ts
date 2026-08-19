@@ -23,7 +23,7 @@ import type {
   WorldBookEntry,
 } from './types';
 import type { GameTime } from './time-system';
-import { MONTH_NAMES } from './time-system';
+import { MONTH_NAMES, toGameDay } from './time-system';
 import {
   getEntriesForAgent,
   filterActiveEntries,
@@ -238,6 +238,12 @@ function buildCapabilityInput(
       weatherLabel: weather.length > 0 ? weather : null,
       journey: ctx.mapFlags?.journey ?? null,
       discontinuity: ctx.mapFlags?.lastMoveDiscontinuity ?? null,
+      // 地图 v1.2（ADR-33 §5）：地块动态那半边。事实态与派生态是**两袋**且自愈语义相反
+      // （`mapFacts` 永不随 packStamp 清空），供值同样在 game-pipeline 的 buildContext。
+      // 漏供的症状不是报错，是 `$map.statuses` 永远为空 —— 与「今天没有状态」长得一样。
+      facts: ctx.mapFacts ?? null,
+      // 剩余天数的基准；数据面不读时钟，故在这里换算（`{{MAP_CONTEXT}}` resolver 同款）
+      currentDay: ctx.gameTime === undefined ? null : toGameDay(ctx.gameTime),
     }),
     /**
      * uid 446 的 `runtime_geo_compact_data`（地图 v1 §8.1-2）。
