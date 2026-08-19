@@ -119,7 +119,6 @@ const STUBS = {
   MemoryPanel: true,
   SnapshotPanel: true,
   CgGalleryPanel: true,
-  WorkshopEnablePanel: true,
   MapPanel: true,
   DebugPanel: true,
 };

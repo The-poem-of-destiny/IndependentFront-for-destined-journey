@@ -43,4 +43,10 @@ describe('SideToolbar developer gate', () => {
     const wrapper = mount(SideToolbar);
     expect(wrapper.get('[data-tool="debug"]').attributes('aria-label')).toBe('调试');
   });
+
+  it('扩展入口使用扩展管理语义，不再叫工坊', () => {
+    const wrapper = mount(SideToolbar);
+    expect(wrapper.get('[data-tool="extensions"]').attributes('aria-label')).toBe('扩展');
+    expect(wrapper.find('[data-tool="workshop"]').exists()).toBe(false);
+  });
 });

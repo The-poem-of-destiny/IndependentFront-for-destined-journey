@@ -20,7 +20,7 @@ const cfg = useSettingsStore();
 const backdropReady = ref(false);
 
 /**
- * 创意工坊入口已开放（2026-08-04）。这个开关从来不是安全边界：入口关着的时候，
+ * 扩展管理入口已开放（2026-08-20）。这个开关从来不是安全边界：入口关着的时候，
  * 已安装项目照样能在游戏页启用 —— 它只挡首页那一个按钮。
  *
  * 当前执行边界：**用户装过的**正则 replacement 在 opaque `sandbox="allow-scripts"` iframe
@@ -31,7 +31,7 @@ const backdropReady = ref(false);
  * fail-closed。网络开启意味着规则仍可发送该命中的 replacement/capture，
  * 详见 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
  */
-const WORKSHOP_ENTRY_ENABLED = true;
+const EXTENSION_ENTRY_ENABLED = true;
 
 // === 存档管理 ===
 const showSaveModal = ref(false);
@@ -537,16 +537,16 @@ function formatTime(ts: number) {
           >
             <i class="btn-icon fa-solid fa-folder-tree" aria-hidden="true"></i>存 档 管 理
           </AppButton>
-          <!-- 入口开关：见 script 里的 WORKSHOP_ENTRY_ENABLED -->
+          <!-- 入口开关：见 script 里的 EXTENSION_ENTRY_ENABLED -->
           <AppButton
-            v-if="WORKSHOP_ENTRY_ENABLED"
+            v-if="EXTENSION_ENTRY_ENABLED"
             variant="secondary"
             size="lg"
             block
-            class="btn-workshop"
-            @click="ui.navigate('workshop')"
+            class="btn-extensions"
+            @click="ui.navigate('extensions')"
           >
-            <i class="btn-icon fa-solid fa-puzzle-piece" aria-hidden="true"></i>创 意 工 坊
+            <i class="btn-icon fa-solid fa-puzzle-piece" aria-hidden="true"></i>扩 展 管 理
           </AppButton>
           <div class="btn-row">
             <AppButton variant="ghost" size="md" class="btn-ghost" @click="ui.navigate('settings')">
@@ -1216,7 +1216,7 @@ function formatTime(ts: number) {
   box-shadow: 0 4px 16px color-mix(in srgb, #000 25%, transparent);
 }
 
-.btn-workshop {
+.btn-extensions {
   background: color-mix(in srgb, var(--theme-card-bg) 82%, transparent);
   border-color: var(--theme-card-border);
   color: var(--theme-text-primary);
@@ -1225,7 +1225,7 @@ function formatTime(ts: number) {
     transform 0.2s ease,
     box-shadow 0.2s ease;
 }
-.btn-workshop:hover {
+.btn-extensions:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 16px color-mix(in srgb, #000 25%, transparent);
 }
@@ -1831,13 +1831,13 @@ function formatTime(ts: number) {
   }
   .btn-new-game,
   .btn-load,
-  .btn-workshop,
+  .btn-extensions,
   .btn-ghost {
     transition: none;
   }
   .btn-new-game:hover,
   .btn-load:hover,
-  .btn-workshop:hover,
+  .btn-extensions:hover,
   .btn-ghost:hover {
     transform: none;
   }

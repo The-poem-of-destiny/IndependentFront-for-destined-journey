@@ -170,16 +170,16 @@ onMounted(() => {
         </button>
 
         <!--
-          🔴 这一条**不是分区**：它离开设置页去创意工坊，所以既不进 `navItems`、
+          🔴 这一条**不是分区**：它离开设置页去扩展管理，所以既不进 `navItems`、
           也永远不会拿到 `.nav-active`（`activeSection` 里没有它的 key）。
           分隔线 + 右侧外链箭头就是在说这件事 —— 长得和上面一模一样的话，
           用户会以为点了会在右侧开一块面板，结果整页换掉。
-          回来的路由工坊页的返回键负责（走 `ui.previousView`）。
+          回来的路由扩展管理页的返回键负责（走 `ui.previousView`）。
         -->
         <div class="nav-divider" aria-hidden="true"></div>
-        <button class="nav-item nav-external" @click="ui.navigate('workshop')">
+        <button class="nav-item nav-external" @click="ui.navigate('extensions')">
           <span class="nav-icon"><i class="fa-solid fa-puzzle-piece" aria-hidden="true"></i></span>
-          <span class="nav-label">创意工坊</span>
+          <span class="nav-label">扩展管理</span>
           <i
             class="fa-solid fa-arrow-up-right-from-square nav-external-mark"
             aria-hidden="true"

@@ -167,7 +167,7 @@ function summary(content: string, maxLen = 200): string {
       <WorkshopEnableList
         :options="store.workshopExtraOptions"
         :selected="store.enabledWorkshopProjectIds"
-        empty-text="没有可作为附加内容的工坊项目 —— 可在首页「创意工坊」中安装"
+        empty-text="没有可作为附加内容的工坊项目 —— 可在首页「扩展管理 → 创意工坊」中安装"
         @toggle="store.toggleWorkshopProject"
       />
     </div>

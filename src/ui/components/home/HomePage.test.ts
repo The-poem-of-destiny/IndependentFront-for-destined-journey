@@ -125,6 +125,18 @@ describe('HomePage 主存档按钮', () => {
   });
 });
 
+describe('HomePage 扩展管理入口', () => {
+  it('使用“扩展管理”命名并进入扩展管理页', async () => {
+    const home = await mountHome();
+    const button = home.get('.btn-extensions');
+
+    expect(button.text().replace(/\s/g, '')).toBe('扩展管理');
+    await button.trigger('click');
+
+    expect(mocks.ui.navigate).toHaveBeenCalledWith('extensions');
+  });
+});
+
 describe('HomePage 存档管理子页面', () => {
   it('将入口命名为“存档管理”并点击打开子页面', async () => {
     const home = await mountHome();

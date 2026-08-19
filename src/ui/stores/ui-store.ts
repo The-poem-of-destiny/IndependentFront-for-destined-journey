@@ -9,26 +9,34 @@ export interface Toast {
 }
 
 /** 所有页面视图 */
-export type AppView = 'home' | 'create' | 'game' | 'settings' | 'workshop';
+export type AppView = 'home' | 'create' | 'game' | 'settings' | 'extensions' | 'workshop';
 
 export const useUIStore = defineStore('ui', () => {
   // ===== 导航 =====
   const currentView = ref<AppView>('home');
   const activeSaveId = ref<string | null>(null);
+  const viewHistory = ref<AppView[]>([]);
 
   /**
-   * 离开当前视图前它是谁 —— 只服务「进去了要能原路回来」的页面（工坊）。
-   *
-   * 🔴 不是浏览器那种历史栈，**只记一层**，而且同视图内的重复 navigate 不覆盖它
-   *    （否则 workshop → workshop 会把返回目标改成自己，返回键就地失效）。
-   *    要真正的前进/后退请另起一套，别把这个变量喂大。
+   * 离开当前视图前它是谁 —— 保留给旧消费端读取；真正的多层返回由 viewHistory 承担。
+   * 同视图内的重复 navigate 不覆盖它，否则返回键会就地失效。
    */
   const previousView = ref<AppView>('home');
 
   function navigate(view: AppView, saveId?: string) {
     if (saveId !== undefined) activeSaveId.value = saveId;
-    if (view !== currentView.value) previousView.value = currentView.value;
+    if (view !== currentView.value) {
+      previousView.value = currentView.value;
+      viewHistory.value.push(currentView.value);
+    }
     currentView.value = view;
+  }
+
+  /** 返回真实来路，不经 navigate，避免把当前页重新压回历史栈。 */
+  function back(fallback: AppView = 'home') {
+    const target = viewHistory.value.pop() ?? fallback;
+    currentView.value = target;
+    previousView.value = viewHistory.value[viewHistory.value.length - 1] ?? fallback;
   }
 
   // ===== UI 状态 =====
@@ -78,8 +86,10 @@ export const useUIStore = defineStore('ui', () => {
   return {
     currentView,
     previousView,
+    viewHistory,
     activeSaveId,
     navigate,
+    back,
     statusBarOpen,
     statusTab,
     leftSidebarOpen,
