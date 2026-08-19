@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   },
   ui: {
     navigate: vi.fn(),
+    openSettings: vi.fn(),
     toast: vi.fn(),
   },
   settings: {
@@ -66,7 +67,10 @@ async function mountHome() {
   wrapper = shallowMount(HomePage, {
     global: {
       stubs: {
-        AppButton: { template: '<button v-bind="$attrs"><slot /></button>' },
+        AppButton: {
+          props: { block: Boolean },
+          template: '<button v-bind="$attrs" :class="{ \'btn-block\': block }"><slot /></button>',
+        },
         AppModal: true,
         AstralDriftBackdrop: true,
         ContentStatusBanner: true,
@@ -83,6 +87,7 @@ beforeEach(() => {
   mocks.game.saves.length = 0;
   mocks.game.loadSaves.mockReset().mockResolvedValue();
   mocks.ui.navigate.mockReset();
+  mocks.ui.openSettings.mockReset();
   mocks.ui.toast.mockReset();
   mocks.database.getSave.mockReset().mockResolvedValue(undefined);
   mocks.database.getCharacters.mockReset().mockResolvedValue([]);
@@ -134,6 +139,45 @@ describe('HomePage 扩展管理入口', () => {
     await button.trigger('click');
 
     expect(mocks.ui.navigate).toHaveBeenCalledWith('extensions');
+  });
+});
+
+describe('HomePage 次级入口布局', () => {
+  it('设置是扩展管理下方的完整按钮，关于与退出占据原双按钮行', async () => {
+    const home = await mountHome();
+    const column = home.get('.btn-column');
+    const buttons = column.findAll('button');
+
+    expect(buttons.map((button) => button.text().replace(/\s/g, ''))).toEqual([
+      '✦新建存档',
+      '存档管理',
+      '扩展管理',
+      '设置',
+      '关于',
+      '退出',
+    ]);
+    expect(home.get('.btn-settings').classes()).toContain('btn-block');
+    expect(home.get('.btn-row').findAll('button')).toHaveLength(2);
+  });
+
+  it('设置打开默认分区，关于直接打开设置页的关于分区', async () => {
+    const home = await mountHome();
+
+    await home.get('.btn-settings').trigger('click');
+    expect(mocks.ui.openSettings).toHaveBeenCalledWith();
+
+    await home.get('.btn-about').trigger('click');
+    expect(mocks.ui.openSettings).toHaveBeenCalledWith('about');
+  });
+
+  it('退出按钮请求关闭当前应用窗口', async () => {
+    const close = vi.spyOn(window, 'close').mockImplementation(() => undefined);
+    const home = await mountHome();
+
+    await home.get('.btn-exit').trigger('click');
+
+    expect(close).toHaveBeenCalledOnce();
+    close.mockRestore();
   });
 });
 

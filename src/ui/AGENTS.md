@@ -917,7 +917,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | 🖼 图像生成     | 三张卡：提示词生成（`image_prompt` 的模型/温度/世界书存 `agents` 袋子；systemPrompt 按方言存 `imageDialectOverrides`）/ 出图（后端 + 方言选择 + 三档开关 + per-provider 参数与限额，存 `UiSettings` 的 `imageNovelai`/`imageComfy` 袋）/ 视觉预设（角色初始设定存 Dexie `imagePresets`；本档外貌存 `characterAppearances`，含「存为初始设定」） |
 | 💾 存档数据    | 导出/导入/清除（排除音频库与素材库，各有独立导出口）                                                                                                                                                                                                                                                                                            |
 | 🛠 开发者模式   | 持久开关（默认关闭）；控制调试工具栏、原始 Agent 请求/响应、reasoning、工具 payload、诊断导出与 `Alt + Shift + D` 抽屉                                                                                                                                                                                                                          |
-| ℹ 关于         | 引擎版本/技术栈/统计                                                                                                                                                                                                                                                                                                                            |
+| ℹ 关于         | 制作人员、项目与技术信息、内容包世界概览、版权与第三方许可证署名                                                                                                                                                                                                                                                                                |
 
 ### 预设系统（正文 Agent 专用）
 

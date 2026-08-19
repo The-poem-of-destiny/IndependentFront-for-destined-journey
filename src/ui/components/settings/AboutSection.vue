@@ -2,8 +2,8 @@
 /**
  * 关于分区 —— 零状态，纯展示（Q-25 从 SettingsPage.vue 抽出）
  *
- * 这里的三张表是**手写常量**，不是从构建期喂进来的：改版本号/测试数还是要来改这个
- * 文件。之所以没顺手接上真实来源，是因为那是新功能而不是这次搬迁的一部分。
+ * 首页“关于”入口会直接落到本分区。制作人员、项目概览、技术信息和许可证统一在这里
+ * 展示，避免首页再维护一份内容会漂移的弹窗。
  */
 import AppCard from '../shared/AppCard.vue';
 import { VERSION } from '@engine/index';
@@ -18,34 +18,53 @@ const { branding } = useBranding();
     <h3>关于{{ branding.shortName }}</h3>
     <div class="about-grid">
       <AppCard padding="md"
-        ><h4>引擎信息</h4>
+        ><h4>制作人员</h4>
         <div class="about-table">
+          <div class="about-row"><span>项目开发</span><span>Richard</span></div>
+          <div class="about-row"><span>AI 开发协作</span><span>Claude Code</span></div>
+          <div class="about-row">
+            <span>世界观设定</span><span>{{ branding.credits }}</span>
+          </div>
+        </div></AppCard
+      ><AppCard padding="md"
+        ><h4>项目信息</h4>
+        <div class="about-table">
+          <div class="about-row">
+            <span>项目名称</span><span>{{ branding.shortName }}</span>
+          </div>
           <div class="about-row">
             <span>引擎版本</span><span>{{ VERSION }}</span>
           </div>
-          <div class="about-row"><span>UI 版本</span><span>1.0.0</span></div>
-          <div class="about-row"><span>构建时间</span><span>2026-06-15</span></div>
-        </div></AppCard
-      ><AppCard padding="md"
-        ><h4>技术栈</h4>
-        <div class="about-table">
-          <div class="about-row"><span>框架</span><span>Vue 3.5 + Pinia 2</span></div>
-          <div class="about-row"><span>构建</span><span>Vite 6</span></div>
-          <div class="about-row"><span>数据库</span><span>Dexie.js (IndexedDB)</span></div>
-          <div class="about-row"><span>语言</span><span>TypeScript 5.4</span></div>
-        </div></AppCard
-      ><AppCard padding="md"
-        ><h4>引擎统计</h4>
-        <div class="about-table">
-          <div class="about-row"><span>引擎模块</span><span>41 模块</span></div>
-          <div class="about-row"><span>单元测试</span><span>1978 tests</span></div>
-          <div class="about-row"><span>主题</span><span>10 套</span></div>
-          <!-- 纪元名是**内容**（D9/D26）：随内容包走，未装包时是中性缺省 -->
+          <div class="about-row">
+            <span>项目类型</span><span>{{ branding.about }}</span>
+          </div>
           <div class="about-row">
             <span>纪元</span><span>{{ branding.era }}</span>
           </div>
         </div></AppCard
+      ><AppCard padding="md"
+        ><h4>技术信息</h4>
+        <div class="about-table">
+          <div class="about-row"><span>前端框架</span><span>Vue 3 + Pinia</span></div>
+          <div class="about-row"><span>构建工具</span><span>Vite</span></div>
+          <div class="about-row"><span>本地数据库</span><span>Dexie.js (IndexedDB)</span></div>
+          <div class="about-row"><span>开发语言</span><span>TypeScript</span></div>
+        </div></AppCard
       >
+      <AppCard
+        v-if="branding.worldSummary.title || branding.worldSummary.lines.length"
+        padding="md"
+        class="about-world"
+      >
+        <h4>{{ branding.worldSummary.title || '世界概览' }}</h4>
+        <p
+          v-for="(line, index) in branding.worldSummary.lines"
+          :key="index"
+          class="world-summary-line"
+        >
+          {{ line }}
+        </p>
+      </AppCard>
     </div>
     <!--
       🔴 字体与图标署名 —— **不是可选装饰，是许可义务**（2026-08-05 自托管起）。
@@ -119,11 +138,29 @@ const { branding } = useBranding();
 .about-row {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--theme-spacing-md);
   font-size: 0.85rem;
   color: var(--theme-text-primary);
 }
 .about-row span:first-child {
   color: var(--theme-text-muted);
+  flex-shrink: 0;
+}
+.about-row span:last-child {
+  text-align: right;
+}
+.about-world {
+  grid-column: 1 / -1;
+}
+.world-summary-line {
+  margin: 0;
+  color: var(--theme-text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.7;
+}
+.world-summary-line + .world-summary-line {
+  margin-top: var(--theme-spacing-xs);
 }
 .about-footer {
   margin-top: var(--theme-spacing-lg);

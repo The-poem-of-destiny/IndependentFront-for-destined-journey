@@ -58,3 +58,19 @@ describe('ui-store previousView', () => {
     expect(ui.previousView).toBe('home');
   });
 });
+
+describe('ui-store 设置分区入口', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('首页关于入口导航到设置页，并只交付一次 about 请求', () => {
+    const ui = useUIStore();
+
+    ui.openSettings('about');
+
+    expect(ui.currentView).toBe('settings');
+    expect(ui.consumeSettingsSectionRequest()).toBe('about');
+    expect(ui.consumeSettingsSectionRequest()).toBeNull();
+  });
+});

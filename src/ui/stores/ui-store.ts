@@ -11,11 +11,29 @@ export interface Toast {
 /** 所有页面视图 */
 export type AppView = 'home' | 'create' | 'game' | 'settings' | 'extensions' | 'workshop';
 
+/** 设置页主分区；首页“关于”等跨页面入口通过这一类型传递目标。 */
+export type SettingsSection =
+  | 'api'
+  | 'agent'
+  | 'worldbook'
+  | 'plot'
+  | 'memory'
+  | 'theme'
+  | 'messages'
+  | 'beautifier'
+  | 'audio'
+  | 'asset'
+  | 'image'
+  | 'data'
+  | 'developer'
+  | 'about';
+
 export const useUIStore = defineStore('ui', () => {
   // ===== 导航 =====
   const currentView = ref<AppView>('home');
   const activeSaveId = ref<string | null>(null);
   const viewHistory = ref<AppView[]>([]);
+  const requestedSettingsSection = ref<SettingsSection | null>(null);
 
   /**
    * 离开当前视图前它是谁 —— 保留给旧消费端读取；真正的多层返回由 viewHistory 承担。
@@ -30,6 +48,18 @@ export const useUIStore = defineStore('ui', () => {
       viewHistory.value.push(currentView.value);
     }
     currentView.value = view;
+  }
+
+  /** 从设置页外直接打开指定分区；请求由 SettingsPage 挂载时消费一次。 */
+  function openSettings(section: SettingsSection = 'api') {
+    requestedSettingsSection.value = section;
+    navigate('settings');
+  }
+
+  function consumeSettingsSectionRequest(): SettingsSection | null {
+    const section = requestedSettingsSection.value;
+    requestedSettingsSection.value = null;
+    return section;
   }
 
   /** 返回真实来路，不经 navigate，避免把当前页重新压回历史栈。 */
@@ -88,7 +118,10 @@ export const useUIStore = defineStore('ui', () => {
     previousView,
     viewHistory,
     activeSaveId,
+    requestedSettingsSection,
     navigate,
+    openSettings,
+    consumeSettingsSectionRequest,
     back,
     statusBarOpen,
     statusTab,

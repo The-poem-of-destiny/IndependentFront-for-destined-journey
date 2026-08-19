@@ -35,7 +35,6 @@ const EXTENSION_ENTRY_ENABLED = true;
 
 // === 存档管理 ===
 const showSaveModal = ref(false);
-const showCreditsModal = ref(false);
 const savesLoaded = ref(false);
 const selectedSaveId = ref<string | null>(null);
 const selectedSave = computed(() => game.saves.find((s) => s.id === selectedSaveId.value) || null);
@@ -162,6 +161,10 @@ function onHomeKeydown(event: KeyboardEvent) {
 
 function newGame() {
   ui.navigate('create');
+}
+
+function exitApp() {
+  window.close();
 }
 
 function loadGame(saveId: string) {
@@ -548,12 +551,26 @@ function formatTime(ts: number) {
           >
             <i class="btn-icon fa-solid fa-puzzle-piece" aria-hidden="true"></i>扩 展 管 理
           </AppButton>
+          <AppButton
+            variant="secondary"
+            size="lg"
+            block
+            class="btn-settings"
+            @click="ui.openSettings()"
+          >
+            <i class="btn-icon fa-solid fa-gear" aria-hidden="true"></i>设 置
+          </AppButton>
           <div class="btn-row">
-            <AppButton variant="ghost" size="md" class="btn-ghost" @click="ui.navigate('settings')">
-              <i class="btn-icon fa-solid fa-gear" aria-hidden="true"></i>设 置
+            <AppButton
+              variant="ghost"
+              size="md"
+              class="btn-ghost btn-about"
+              @click="ui.openSettings('about')"
+            >
+              <i class="btn-icon fa-solid fa-circle-info" aria-hidden="true"></i>关 于
             </AppButton>
-            <AppButton variant="ghost" size="md" class="btn-ghost" @click="showCreditsModal = true">
-              <i class="btn-icon fa-solid fa-users" aria-hidden="true"></i>制 作 人 员
+            <AppButton variant="ghost" size="md" class="btn-ghost btn-exit" @click="exitApp">
+              <i class="btn-icon fa-solid fa-right-from-bracket" aria-hidden="true"></i>退 出
             </AppButton>
           </div>
           <!-- 🧪 开发用 — 悬停显示 -->
@@ -775,29 +792,6 @@ function formatTime(ts: number) {
         </div>
       </transition>
     </Teleport>
-
-    <!-- 制作人员弹窗 -->
-    <AppModal v-model:open="showCreditsModal" title="制作人员" size="sm">
-      <div class="credits-content">
-        <div class="credit-item"><strong>引擎开发</strong><span>Claude Code + Richard</span></div>
-        <div class="credit-item">
-          <strong>世界观设定</strong><span>{{ branding.credits }}</span>
-        </div>
-        <div class="credit-item"><strong>前端 UI</strong><span>Vue 3 + Pinia + Vite</span></div>
-        <div class="credit-item"><strong>数据引擎</strong><span>Dexie.js (IndexedDB)</span></div>
-        <template v-if="branding.worldSummary.title || branding.worldSummary.lines.length">
-          <hr class="credit-divider" />
-          <div class="world-lore">
-            <h4>{{ branding.worldSummary.title }}</h4>
-            <p class="text-muted text-sm">
-              <template v-for="(line, i) in branding.worldSummary.lines" :key="i">
-                <br v-if="i > 0" />{{ line }}
-              </template>
-            </p>
-          </div>
-        </template>
-      </div>
-    </AppModal>
 
     <!--
       单存档导入体检未通过（缺世界书条目 / 内容包版本不同 / 缺正文预设）。
@@ -1202,7 +1196,9 @@ function formatTime(ts: number) {
   transform: translateY(0);
 }
 
-.btn-load {
+.btn-load,
+.btn-extensions,
+.btn-settings {
   background: color-mix(in srgb, var(--theme-card-bg) 82%, transparent);
   border-color: var(--theme-card-border);
   color: var(--theme-text-primary);
@@ -1211,21 +1207,9 @@ function formatTime(ts: number) {
     transform 0.2s ease,
     box-shadow 0.2s ease;
 }
-.btn-load:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px color-mix(in srgb, #000 25%, transparent);
-}
-
-.btn-extensions {
-  background: color-mix(in srgb, var(--theme-card-bg) 82%, transparent);
-  border-color: var(--theme-card-border);
-  color: var(--theme-text-primary);
-  backdrop-filter: blur(6px);
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
-}
-.btn-extensions:hover {
+.btn-load:hover,
+.btn-extensions:hover,
+.btn-settings:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 16px color-mix(in srgb, #000 25%, transparent);
 }
@@ -1783,29 +1767,6 @@ function formatTime(ts: number) {
   line-height: 1.6;
 }
 
-/* ═══ 制作人员 ═══ */
-.credits-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.credit-item {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.9rem;
-  color: var(--theme-text-primary);
-  padding: 4px 0;
-}
-.credit-divider {
-  border-color: var(--theme-card-border);
-}
-.world-lore h4 {
-  font-family: var(--theme-font-title);
-  margin: 0 0 4px;
-  font-size: 0.95rem;
-  color: var(--theme-text-primary);
-}
-
 /* ═══ 无障碍：减弱动效 ═══ */
 @media (prefers-reduced-motion: reduce) {
   .bg-glow,
@@ -1832,12 +1793,14 @@ function formatTime(ts: number) {
   .btn-new-game,
   .btn-load,
   .btn-extensions,
+  .btn-settings,
   .btn-ghost {
     transition: none;
   }
   .btn-new-game:hover,
   .btn-load:hover,
   .btn-extensions:hover,
+  .btn-settings:hover,
   .btn-ghost:hover {
     transform: none;
   }

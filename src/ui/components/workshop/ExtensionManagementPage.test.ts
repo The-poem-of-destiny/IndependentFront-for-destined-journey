@@ -63,6 +63,6 @@ describe('ExtensionManagementPage', () => {
 
   it('把社区扩展启用设置放在扩展管理页', () => {
     const wrapper = mount(ExtensionManagementPage, { global });
-    expect(wrapper.get('[data-testid="community-settings"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="community-settings"]').exists()).toBe(true);
   });
 });

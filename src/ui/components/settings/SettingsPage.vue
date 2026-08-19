@@ -13,6 +13,7 @@
  */
 import { ref, computed, onMounted } from 'vue';
 import { useUIStore } from '../../stores/ui-store';
+import type { SettingsSection } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { getAgentSettings } from '../../stores/agent-settings';
 import { useWorldBookStore } from '../../stores/worldbook-store';
@@ -51,22 +52,8 @@ const hasApi = computed(() => s.apiPool.length > 0);
 // ============================================================
 // 主导航
 // ============================================================
-type Section =
-  | 'api'
-  | 'agent'
-  | 'worldbook'
-  | 'plot'
-  | 'memory'
-  | 'theme'
-  | 'messages'
-  | 'beautifier'
-  | 'audio'
-  | 'asset'
-  | 'image'
-  | 'data'
-  | 'developer'
-  | 'about';
-const activeSection = ref<Section>('api');
+type Section = SettingsSection;
+const activeSection = ref<Section>(ui.consumeSettingsSectionRequest() ?? 'api');
 
 const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'api', label: 'API 配置', icon: 'fa-solid fa-plug' },
