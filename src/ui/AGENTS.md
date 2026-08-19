@@ -457,7 +457,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   └── form/ (FormInput / FormSelect / FormStepper —— **只有这三个**；
 │   │             早期文档里的 Cascader / KeyValue 从未落地，别照着 import)
 │   ├── home/
-│   │   ├── HomePage.vue             ← 游戏标题画面 —— **本目录唯一的生产组件**
+│   │   ├── HomePage.vue             ← 游戏标题画面；DOM 操作列与 WebGL 背景分层，背景未就绪时保留 CSS 兜底
+│   │   ├── AstralDriftBackdrop.vue  ← [星流首页] 懒加载 / WebGL2 与减动效降级 / 可见性暂停 / 销毁壳
+│   │   ├── drift/runtime.ts         ← [星流首页] Three.js 场景单文件运行时；工厂 + 主题切换 + 生命周期
 │   │   └── *.standalone.html        ← 🔴 8 个**设计原型**，不是生产界面（AstralDrift / AstralDriftHome /
 │   │                                   AstralDriftHomeParticles / AstralDriftHomeTuner / AstralDriftV2 /
 │   │                                   AstralDriftV2Tuner / MagicCircle / ObsidianAstrolabeV2）。
@@ -465,7 +467,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   反过来「首页看起来不对」也不要去这里找。
 │   │                                   星流首页的集成方案在
 │   │                                   `docs/planning/2026-08-09-home-astral-drift-integration-design.md`，
-│   │                                   **D6 未获准、集成尚未开始**
+│   │                                   **2026-08-20 已实施；D6 当前已落代码但主人保留意见仍待裁定，
+│   │                                   专项降级 / 生命周期 / 多宽高比验收仍在 TODO**
 │   ├── settings/                    ← [Q-25] 14 个分区**全部**是一行子组件
 │   │   ├── SettingsPage.vue         ← 纯壳层（1995 → 约 415 行）：页头 + 主导航 + Agent 子导航
 │   │   │                               只留 activeSection / activeAgent / selectSection /
