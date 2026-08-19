@@ -856,18 +856,18 @@
         </div>
         <div class="hud-row">
           <span>rot x</span>
-          <input id="dial-rotx" type="range" min="-180" max="180" step="0.5" value="-45.5" />
-          <span id="val-rotx">-45.5°</span>
+          <input id="dial-rotx" type="range" min="-180" max="180" step="0.5" value="-31" />
+          <span id="val-rotx">-31.0°</span>
         </div>
         <div class="hud-row">
           <span>rot y</span>
-          <input id="dial-roty" type="range" min="-180" max="180" step="0.5" value="-37" />
-          <span id="val-roty">-37.0°</span>
+          <input id="dial-roty" type="range" min="-180" max="180" step="0.5" value="-31" />
+          <span id="val-roty">-31.0°</span>
         </div>
         <div class="hud-row">
           <span>rot z</span>
-          <input id="dial-rotz" type="range" min="-180" max="180" step="0.5" value="6" />
-          <span id="val-rotz">6.0°</span>
+          <input id="dial-rotz" type="range" min="-180" max="180" step="0.5" value="17" />
+          <span id="val-rotz">17.0°</span>
         </div>
         <div class="hud-row">
           <span>flank</span><input id="dial-flank" type="range" min="0" max="100" value="100" />
@@ -878,28 +878,28 @@
           <span id="val-tint">0.45</span>
         </div>
         <div class="hud-row">
-          <span>bloom</span><input id="dial-bloom" type="range" min="0" max="200" value="100" />
-          <span id="val-bloom">1.00</span>
+          <span>bloom</span><input id="dial-bloom" type="range" min="0" max="200" value="200" />
+          <span id="val-bloom">2.00</span>
         </div>
         <div class="hud-row">
-          <span>galaxy</span><input id="dial-galaxy" type="range" min="0" max="200" value="100" />
-          <span id="val-galaxy">1.00</span>
+          <span>galaxy</span><input id="dial-galaxy" type="range" min="0" max="200" value="69" />
+          <span id="val-galaxy">0.69</span>
         </div>
         <div class="hud-row">
-          <span>arc</span><input id="dial-arc" type="range" min="0" max="200" value="100" />
-          <span id="val-arc">1.00</span>
+          <span>arc</span><input id="dial-arc" type="range" min="0" max="200" value="200" />
+          <span id="val-arc">2.00</span>
         </div>
         <div class="hud-row">
-          <span>veils</span><input id="dial-veils" type="range" min="0" max="200" value="100" />
-          <span id="val-veils">1.00</span>
+          <span>veils</span><input id="dial-veils" type="range" min="0" max="200" value="200" />
+          <span id="val-veils">2.00</span>
         </div>
         <div class="hud-row">
-          <span>runes</span><input id="dial-runes" type="range" min="0" max="200" value="100" />
-          <span id="val-runes">1.00</span>
+          <span>runes</span><input id="dial-runes" type="range" min="0" max="200" value="200" />
+          <span id="val-runes">2.00</span>
         </div>
         <div class="hud-row">
-          <span>circle</span><input id="dial-circle" type="range" min="0" max="200" value="100" />
-          <span id="val-circle">1.00</span>
+          <span>circle</span><input id="dial-circle" type="range" min="0" max="200" value="200" />
+          <span id="val-circle">2.00</span>
         </div>
         <div class="hud-sep"></div>
         <div class="hud-head">
@@ -911,13 +911,23 @@
         </div>
         <div class="hud-row tune">
           <span>circle R</span
-          ><input id="tune-circleR" type="range" min="0.80" max="2.40" step="0.01" value="1.50" />
-          <span id="tval-circleR">1.500</span>
+          ><input id="tune-circleR" type="range" min="0.80" max="2.40" step="0.01" value="0.940" />
+          <span id="tval-circleR">0.940</span>
         </div>
         <div class="hud-row tune">
           <span>circle z</span
-          ><input id="tune-circleZ" type="range" min="-6.00" max="6.00" step="0.05" value="2.70" />
-          <span id="tval-circleZ">2.70</span>
+          ><input id="tune-circleZ" type="range" min="-6.00" max="6.00" step="0.05" value="1.75" />
+          <span id="tval-circleZ">1.75</span>
+        </div>
+        <div class="hud-row tune">
+          <span>static z</span
+          ><input id="tune-circleStaticZ" type="range" min="-2.00" max="2.00" step="0.02" value="-0.06" />
+          <span id="tval-circleStaticZ">-0.06</span>
+        </div>
+        <div class="hud-row tune">
+          <span>spin z</span
+          ><input id="tune-circleSpinZ" type="range" min="-2.00" max="2.00" step="0.02" value="-0.08" />
+          <span id="tval-circleSpinZ">-0.08</span>
         </div>
         <!--
           Tilts are in DEGREES, like this file's three rotation dials, not in the radians the
@@ -937,8 +947,8 @@
         </div>
         <div class="hud-row tune">
           <span>rune1 R</span
-          ><input id="tune-rune1R" type="range" min="1.00" max="2.40" step="0.005" value="1.50" />
-          <span id="tval-rune1R">1.500</span>
+          ><input id="tune-rune1R" type="range" min="1.00" max="2.40" step="0.005" value="1.735" />
+          <span id="tval-rune1R">1.735</span>
         </div>
         <div class="hud-row tune">
           <span>rune1 z</span
@@ -947,13 +957,13 @@
         </div>
         <div class="hud-row tune">
           <span>rune2 R</span
-          ><input id="tune-rune2R" type="range" min="1.00" max="2.40" step="0.005" value="1.170" />
-          <span id="tval-rune2R">1.170</span>
+          ><input id="tune-rune2R" type="range" min="1.00" max="2.40" step="0.005" value="1.245" />
+          <span id="tval-rune2R">1.245</span>
         </div>
         <div class="hud-row tune">
           <span>rune2 z</span
-          ><input id="tune-rune2Z" type="range" min="-6.00" max="6.00" step="0.05" value="0.40" />
-          <span id="tval-rune2Z">0.40</span>
+          ><input id="tune-rune2Z" type="range" min="-6.00" max="6.00" step="0.05" value="1.05" />
+          <span id="tval-rune2Z">1.05</span>
         </div>
         <div class="hud-row tune">
           <span>rail R</span
@@ -983,7 +993,7 @@
       const stage = document.querySelector('.stage');
       const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-      const dials = { bloom: 1, galaxy: 1, arc: 1, veils: 1, runes: 1, circle: 1 };
+      const dials = { bloom: 2, galaxy: 0.69, arc: 2, veils: 2, runes: 2, circle: 2 };
 
       // ----------------------------------------------------------------------------------
       // Palette.
@@ -2271,6 +2281,309 @@
       const glyphAtlas = bakeGlyphAtlas();
 
       // ==================================================================================
+      // Rune atlas for the magic-circle registers (2026-08-19).
+      //
+      // Same stroke grammar as bakeGlyphAtlas — Elder-Futhark silhouettes generated from a
+      // seeded grammar rather than a typeface — but with a DIFFERENT seed and shape so the
+      // circle's registers do not reuse the galaxy's glyphs verbatim. cols=35 fits one
+      // register round the circle exactly (uRepeat stays an integer 1); row 0 is the outer
+      // ring's 35 runes, row 1 the inner ring's 23 (the last 12 cells are empty — the inner
+      // register only fills part of its lap, which is what a gap in a seal reads as).
+      // Outer row is drawn lighter, like the galaxy atlas, so an outer register at the same
+      // stroke weight as an inner one flattens the whole figure.
+      // ==================================================================================
+      function bakeRuneAtlas({ cols = 35, rows = 2, cellW = 96, cellH = 128 } = {}) {
+        const atlas = document.createElement('canvas');
+        atlas.width = cols * cellW;
+        atlas.height = rows * cellH;
+        const ctx = atlas.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, atlas.width, atlas.height);
+        ctx.strokeStyle = '#fff';
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        let state = 0x41c64e6d; // different seed than the galaxy atlas
+        const rnd = () => {
+          state ^= state << 13;
+          state ^= state >>> 17;
+          state ^= state << 5;
+          return ((state >>> 0) % 1000000) / 1000000;
+        };
+
+        const clamp01 = (value) => Math.min(0.98, Math.max(0.02, value));
+
+        // Row 1's glyphs also stop at 23 cells; the remaining cells stay black so the inner
+        // register's lap ends in a gap rather than a stray stroke.
+        const occupied = (row) => (row === 0 ? cols : 23);
+
+        for (let row = 0; row < rows; row += 1) {
+          // Stroke weight scales with the TALL dimension, where the glyph actually lives.
+          ctx.lineWidth = Math.max(1.5, cellH * (0.09 - row * 0.02));
+          for (let col = 0; col < occupied(row); col += 1) {
+            // The glyph is TALL and NARROW, matching how the SVG's runes read (font-size 64
+            // against ~30px width). A cell is one arc-length of the register: with 35 cells
+            // round a lap that arc is ~5x the band depth, so the glyph fills ~10% of the
+            // cell WIDTH (keeps its aspect) but ~90% of the cell HEIGHT (fills the band).
+            const padX = cellW * 0.45;
+            const padY = cellH * 0.05;
+            const originX = col * cellW + padX;
+            const originY = row * cellH + padY;
+            const spanX = cellW - padX * 2;
+            const spanY = cellH - padY * 2;
+            const at = (u, v) => [originX + clamp01(u) * spanX, originY + clamp01(v) * spanY];
+
+            ctx.beginPath();
+            const stems = rnd() < 0.24 ? 2 : 1;
+            const stemAt = [];
+            for (let index = 0; index < stems; index += 1) {
+              const u = stems === 1 ? 0.5 : index === 0 ? 0.3 : 0.7;
+              stemAt.push(u);
+              ctx.moveTo(...at(u, 0.04));
+              ctx.lineTo(...at(u, 0.96));
+            }
+
+            const branches = 1 + Math.floor(rnd() * 3);
+            for (let index = 0; index < branches; index += 1) {
+              const from = stemAt[Math.floor(rnd() * stemAt.length)];
+              const height = 0.1 + rnd() * 0.78;
+              const dirX = rnd() < 0.5 ? -1 : 1;
+              const dirY = rnd() < 0.5 ? 1 : -1;
+              const length = 0.2 + rnd() * 0.24;
+              ctx.moveTo(...at(from, height));
+              ctx.lineTo(...at(from + dirX * length, height + dirY * length * 0.95));
+            }
+
+            if (rnd() < 0.3) {
+              const flip = rnd() < 0.5;
+              ctx.moveTo(...at(flip ? 0.14 : 0.86, 0.12));
+              ctx.lineTo(...at(flip ? 0.86 : 0.14, 0.88));
+            }
+
+            if (rnd() < 0.24) {
+              const centre = 0.24 + rnd() * 0.52;
+              const r = 0.13;
+              ctx.moveTo(...at(0.5, centre - r));
+              ctx.lineTo(...at(0.5 + r, centre));
+              ctx.lineTo(...at(0.5, centre + r));
+              ctx.lineTo(...at(0.5 - r, centre));
+              ctx.closePath();
+            }
+
+            ctx.stroke();
+          }
+        }
+
+        const texture = new THREE.CanvasTexture(atlas);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.generateMipmaps = true;
+        texture.colorSpace = THREE.NoColorSpace; // it is a mask, not a colour
+        texture.needsUpdate = true;
+        return { texture, cols, rows };
+      }
+
+      const runeAtlas = bakeRuneAtlas();
+      const MAGIC_CIRCLE_SVG = "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"4096\" height=\"4096\" viewBox=\"0 0 4096 4096\"><rect width=\"4096\" height=\"4096\" fill=\"#000000\"/><defs><style>@import url(\"https://fonts.googleapis.com/css2?family=Reggae+One&amp;display=swap\");\n.font-reggae-one { font-family: \"Reggae One\", cursive; }\n</style></defs><g stroke=\"#ffffff\" stroke-width=\"4\" fill=\"none\"><line x1=\"2048\" y1=\"1228.8\" x2=\"2688.47635043781\" y2=\"1537.2371543173256\"/><line x1=\"2048\" y1=\"1228.8\" x2=\"2846.66094565935\" y2=\"2230.289149097013\"/><line x1=\"2048\" y1=\"1228.8\" x2=\"2403.4375590851037\" y2=\"2786.0736965856618\"/><line x1=\"2048\" y1=\"1228.8\" x2=\"1692.5624409148961\" y2=\"2786.0736965856618\"/><line x1=\"2048\" y1=\"1228.8\" x2=\"1249.33905434065\" y2=\"2230.289149097013\"/><line x1=\"2048\" y1=\"1228.8\" x2=\"1407.5236495621898\" y2=\"1537.2371543173256\"/><line x1=\"2688.47635043781\" y1=\"1537.2371543173256\" x2=\"2846.66094565935\" y2=\"2230.289149097013\"/><line x1=\"2688.47635043781\" y1=\"1537.2371543173256\" x2=\"2403.4375590851037\" y2=\"2786.0736965856618\"/><line x1=\"2688.47635043781\" y1=\"1537.2371543173256\" x2=\"1692.5624409148961\" y2=\"2786.0736965856618\"/><line x1=\"2688.47635043781\" y1=\"1537.2371543173256\" x2=\"1249.33905434065\" y2=\"2230.289149097013\"/><line x1=\"2688.47635043781\" y1=\"1537.2371543173256\" x2=\"1407.5236495621898\" y2=\"1537.2371543173256\"/><line x1=\"2846.66094565935\" y1=\"2230.289149097013\" x2=\"2403.4375590851037\" y2=\"2786.0736965856618\"/><line x1=\"2846.66094565935\" y1=\"2230.289149097013\" x2=\"1692.5624409148961\" y2=\"2786.0736965856618\"/><line x1=\"2846.66094565935\" y1=\"2230.289149097013\" x2=\"1249.33905434065\" y2=\"2230.289149097013\"/><line x1=\"2846.66094565935\" y1=\"2230.289149097013\" x2=\"1407.5236495621898\" y2=\"1537.2371543173256\"/><line x1=\"2403.4375590851037\" y1=\"2786.0736965856618\" x2=\"1692.5624409148961\" y2=\"2786.0736965856618\"/><line x1=\"2403.4375590851037\" y1=\"2786.0736965856618\" x2=\"1249.33905434065\" y2=\"2230.289149097013\"/><line x1=\"2403.4375590851037\" y1=\"2786.0736965856618\" x2=\"1407.5236495621898\" y2=\"1537.2371543173256\"/><line x1=\"1692.5624409148961\" y1=\"2786.0736965856618\" x2=\"1249.33905434065\" y2=\"2230.289149097013\"/><line x1=\"1692.5624409148961\" y1=\"2786.0736965856618\" x2=\"1407.5236495621898\" y2=\"1537.2371543173256\"/><line x1=\"1249.33905434065\" y1=\"2230.289149097013\" x2=\"1407.5236495621898\" y2=\"1537.2371543173256\"/></g><g fill=\"#ffffff\"><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1494.871109498628, 2759.3829382918325) rotate(217.86650415503348)\">ᚹ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1317.652348928071, 2575.834787574404) rotate(234.1437142439773)\">ᛞ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1198.9828517788426, 2349.972078885471) rotate(250.42092433292117)\">ᛟ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1148.3759116700421, 2099.9013881942665) rotate(266.698134421865)\">ᛗ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1169.8884993648785, 1845.6699556360081) rotate(282.97534451080884)\">ᛒ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1261.7960304658113, 1607.658572595441) rotate(299.25255459975267)\">ᚨ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1416.7306189518, 1404.9477292233373) rotate(315.52976468869656)\">ᚦ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1622.2717332841626, 1253.7880022820552) rotate(331.8069747776404)\">ᚢ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1861.9419043708901, 1166.2973066555433) rotate(348.0841848665842)\">ᚠ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2116.5276631735105, 1149.4894470402821) rotate(364.36139495552806)\">ᚨ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2365.6198132859327, 1204.7118472264601) rotate(380.6386050444719)\">ᚹ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2589.249560543199, 1327.5375321282906) rotate(396.9158151334158)\">ᛞ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2769.4893372153447, 1508.1200219636194) rotate(413.19302522235955)\">ᛟ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2891.889988645832, 1731.9826880322269) rotate(429.47023531130344)\">ᛗ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2946.6391084100933, 1981.1792903665903) rotate(445.7474454002473)\">ᛒ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2929.347662559078, 2235.7326612543743) rotate(462.0246554891911)\">ᚨ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2841.4018421985984, 2475.236200708543) rotate(478.301865578135)\">ᚦ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2689.8519376876825, 2680.4897979308184) rotate(494.57907566707877)\">ᚢ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2486.84714299945, 2835.039033009939) rotate(510.85628575602266)\">ᚠ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2248.6615998834513, 2926.4942667611517) rotate(527.1334958449665)\">ᚨ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1994.3897602580053, 2947.5238721650503) rotate(543.4107059339103)\">ᚹ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1744.415654792623, 2896.4419837237006) rotate(559.6879160228542)\">ᛞ</text><text x=\"0\" y=\"0\" font-size=\"64\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1518.778780743062, 2777.343647047261) rotate(575.965126111798)\">ᛟ</text></g><circle cx=\"2048\" cy=\"2048\" r=\"962.56\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"4\"/><g fill=\"#ffffff\" stroke=\"none\" stroke-width=\"4\"><polygon points=\"2023.8174152217155,839.6800000000001 2048,819.2 2072.1825847782843,839.6800000000001 2048,860.1600000000001\"/><polygon points=\"2806.168189846781,1106.8289126248012 2837.85741478282,1106.6845882954 2843.218059226098,1137.9174443561521 2811.528834290059,1138.0617686855533\"/><polygon points=\"3233.763642341686,1814.3622369839652 3258.1317669014015,1834.621119282876 3242.1621658977365,1861.9926309390241 3217.794041338021,1841.7337486401134\"/><polygon points=\"3106.5271082899553,2631.2172672528345 3112.1720161703183,2662.3999999999996 3082.3445235116706,2673.102732747165 3076.6996156313076,2641.92\"/><polygon points=\"2483.9939760509556,3175.1784564361747 2468.2743521185816,3202.6942924217237 2438.545583115588,3191.720318659882 2454.265207047962,3164.204482674333\"/><polygon points=\"1657.4544168844116,3191.7203186598827 1627.7256478814184,3202.694292421724 1612.0060239490447,3175.178456436175 1641.7347929520379,3164.2044826743336\"/><polygon points=\"1013.6554764883293,2673.102732747165 983.8279838296818,2662.3999999999996 989.4728917100448,2631.2172672528345 1019.3003843686923,2641.92\"/><polygon points=\"853.8378341022637,1861.9926309390241 837.8682330985989,1834.621119282876 862.2363576583141,1814.3622369839652 878.2059586619789,1841.7337486401134\"/><polygon points=\"1252.781940773902,1137.9174443561521 1258.1425852171803,1106.6845882954 1289.831810153219,1106.8289126248012 1284.4711657099408,1138.0617686855533\"/></g><g stroke=\"#ffffff\" stroke-width=\"4\" fill=\"none\"><polygon points=\"2669.427385685788,509.91324733624765 3575.007091295184,1399.8239455717135 3586.086752663752,2669.427385685788 2696.176054428287,3575.007091295184 1426.5726143142117,3586.086752663752 520.992908704816,2696.176054428287 509.91324733624765,1426.572614314212 1399.8239455717135,520.9929087048158\" fill=\"none\"/></g><g stroke=\"#ffffff\" stroke-width=\"4\" fill=\"none\"><polygon points=\"2048,389.1199999999999 3221.00529717474,874.99470282526 3706.88,2048 3221.00529717474,3221.00529717474 2048,3706.88 874.99470282526,3221.00529717474 389.1199999999999,2048 874.9947028252598,874.99470282526\" fill=\"none\"/></g><g stroke=\"#ffffff\" stroke-width=\"4\" fill=\"none\"><path d=\"M 2048 682.5094669867049 L 3392.7456635762655 1810.885057320796 L 2515.025267811051 3331.1413776256104 L 865.4505097833326 2730.7452665066476 L 1170.2796042347854 1001.973565053594 L 2925.7203957652146 1001.9735650535938 L 3230.5494902166674 2730.7452665066476 L 1580.974732188949 3331.1413776256104 L 703.2543364237345 1810.8850573207958 Z\"/></g><g fill=\"#ffffff\"><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(555.7025693511309, 1957.4849179485334) rotate(273.4710146472304)\">ᚹ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(596.7094368290552, 1688.9731168130136) rotate(283.8951183685746)\">ᛞ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(685.6221248682039, 1432.3124762094233) rotate(294.3192220899187)\">ᛟ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(819.505704111969, 1195.9751373518668) rotate(304.7433258112629)\">ᛗ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(993.940795777005, 987.7623872014415) rotate(315.16742953260706)\">ᛒ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1203.1694514462654, 814.5471448691703) rotate(325.59153325395124)\">ᚨ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1440.285217864201, 682.0470926222827) rotate(336.01563697529537)\">ᚦ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1697.461112862998, 594.635940239077) rotate(346.43974069663955)\">ᚢ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1966.2079871357369, 555.1990527094335) rotate(356.8638444179837)\">ᚠ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2237.6547435623675, 565.038206883167) rotate(367.2879481393279)\">ᚨ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2502.841164295894, 623.8286209651751) rotate(377.7120518606721)\">ᚹ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2753.0136796450925, 729.6296752758399) rotate(388.1361555820163)\">ᛞ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2979.9143156839937, 878.9489703938352) rotate(398.56025930336045)\">ᛟ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(3176.053282682582, 1066.8576081785832) rotate(408.98436302470463)\">ᛗ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(3334.956206455189, 1287.152890347562) rotate(419.4084667460488)\">ᛒ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(3451.37784173799, 1532.5630640720242) rotate(429.83257046739294)\">ᚨ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(3521.475213105641, 1794.9873561197282) rotate(440.2566741887371)\">ᚦ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(3542.9344681982006, 2065.7633722294745) rotate(450.6807779100813)\">ᚢ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(3515.0472559452983, 2335.95303510012) rotate(461.1048816314254)\">ᚠ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(3438.734108609763, 2596.63762243343) rotate(471.5289853527696)\">ᚨ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(3316.5140558301073, 2839.212166085337) rotate(481.9530890741138)\">ᚹ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(3152.421473675484, 3055.6694944695273) rotate(492.377192795458)\">ᛞ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2951.872913452443, 3238.8645422242585) rotate(502.80129651680215)\">ᛟ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2721.4883061270243, 3382.750202513621) rotate(513.2254002381463)\">ᛗ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2468.8724442464118, 3482.576936686928) rotate(523.6495039594905)\">ᛒ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(2202.3639544490434, 3535.0495523575714) rotate(534.0736076808347)\">ᚨ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1930.7600467590655, 3538.435974795316) rotate(544.4977114021789)\">ᚦ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1663.0261264479725, 3492.6244211843946) rotate(554.9218151235231)\">ᚢ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1407.9998539195853, 3399.1270904755957) rotate(565.3459188448672)\">ᚠ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(1174.09942134037, 3261.0302470335864) rotate(575.7700225662113)\">ᚨ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(969.0456755460125, 3082.892345774206) rotate(586.1941262875555)\">ᚹ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(799.6072597019293, 2870.5935615910653) rotate(596.6182300088997)\">ᛞ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(671.3771863664501, 2631.141689972213) rotate(607.0423337302439)\">ᛟ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(588.588217082752, 2372.4408258562707) rotate(617.466437451588)\">ᛗ</text><text x=\"0\" y=\"0\" font-size=\"68\" class=\"font-reggae-one\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"translate(553.973142656203, 2103.030456434754) rotate(627.8905411729322)\">ᛒ</text></g><circle cx=\"2048\" cy=\"2048\" r=\"1454.08\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"4\"/><circle cx=\"2048\" cy=\"2048\" r=\"1658.88\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"8\"/></svg>";
+      // ==================================================================================
+      // Magic-circle SVG → two spinning layers (2026-08-19).
+      //
+      // The owner's magic-circle.svg is loaded verbatim (shape 100% preserved — nothing is
+      // re-drawn as SDF) and split into TWO textures along the middle circle r=1454:
+      //   outer (r > 1454): the heavy outer ring, the {8/1} octagon, the {8/3} star, the
+      //                      middle circle and the 35-rune register  → spins CLOCKWISE
+      //   inner (r <= 1454): the inner circle, the 8-spike star, the 8 diamonds, the hub
+      //                      lines and the 23-rune register            → spins COUNTER-CW
+      // Each half is one quad whose shader rotates the SAMPLE point by uSpin*uTime, exactly
+      // like the old SDF build, so the two halves turn independently in one draw call each.
+      // The texture is drawn with a 1.111 scale-up so the SVG's 1659px outer ring lands on
+      // quad radius 0.9 — keeping the mesh.scale /0.9 contract the tuning rows rely on.
+      // ==================================================================================
+      function splitMagicCircleSvg(svgText) {
+        const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+        const root = doc.documentElement;
+        const mk = (id) => {
+          const el = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          for (const attr of ['width', 'height', 'viewBox']) {
+            const value = root.getAttribute(attr);
+            if (value) el.setAttribute(attr, value);
+          }
+          el.setAttribute('id', id);
+          return el;
+        };
+        const outer = mk('outer');
+        const innerStatic = mk('innerStatic');
+        const innerSpin = mk('innerSpin');
+        for (const el of root.children) {
+          if (el.tagName === 'defs' || el.tagName === 'style') {
+            outer.appendChild(el.cloneNode(true));
+            innerStatic.appendChild(el.cloneNode(true));
+            innerSpin.appendChild(el.cloneNode(true));
+          }
+        }
+        const CENTRE = 2048;
+        const radiusOf = (el) => {
+          if (el.tagName === 'circle') return parseFloat(el.getAttribute('r') || '0');
+          if (el.tagName === 'polygon' || el.tagName === 'polyline') {
+            const pts = (el.getAttribute('points') || '').trim().split(/\s+/);
+            let max = 0;
+            for (const pair of pts) {
+              const [x, y] = pair.split(',').map(Number);
+              max = Math.max(max, Math.hypot(x - CENTRE, y - CENTRE));
+            }
+            return max;
+          }
+          if (el.tagName === 'line') {
+            const x1 = +el.getAttribute('x1'), y1 = +el.getAttribute('y1');
+            const x2 = +el.getAttribute('x2'), y2 = +el.getAttribute('y2');
+            return Math.max(Math.hypot(x1 - CENTRE, y1 - CENTRE), Math.hypot(x2 - CENTRE, y2 - CENTRE));
+          }
+          if (el.tagName === 'path') {
+            let max = 0;
+            for (const m of (el.getAttribute('d') || '').matchAll(/(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)/g)) {
+              max = Math.max(max, Math.hypot(+m[1] - CENTRE, +m[2] - CENTRE));
+            }
+            return max;
+          }
+          if (el.tagName === 'text') {
+            const m = (el.getAttribute('transform') || '').match(/translate\(([\d.]+),\s*([\d.]+)\)/);
+            return m ? Math.hypot(+m[1] - CENTRE, +m[2] - CENTRE) : 0;
+          }
+          return 0;
+        };
+        // Create a <g> wrapper per layer so the cloned elements inherit the same stroke,
+        // stroke-width and fill that the original SVG's <g> provided — without it the split
+        // layers would draw nothing (no stroke on the individual elements).
+        const NS = 'http://www.w3.org/2000/svg';
+        const mkG = () => {
+          const g = document.createElementNS(NS, 'g');
+          g.setAttribute('stroke', '#ffffff');
+          g.setAttribute('stroke-width', '4');
+          g.setAttribute('fill', 'none');
+          return g;
+        };
+        const outerG = mkG();
+        const staticG = mkG();
+        const spinG = mkG();
+        outer.appendChild(outerG);
+        innerStatic.appendChild(staticG);
+        innerSpin.appendChild(spinG);
+        // Walk every leaf element (not the container <g>), clone it, and place it in the
+        // correct layer — the <g> wrapper above restores the presentation attributes.
+        //
+        // Three rotation groups (owner 2026-08-19):
+        //   r >= 1454  -> OUTER half-ring, spins CLOCKWISE   (outer ring + octagon + star +
+        //                                                      middle circle + outer runes)
+        //   1209..1454 -> INNER STATIC band, holds still     (the 8 diamonds + the 8-spike
+        //                                                      star the owner wants fixed)
+        //   r < 1209   -> INNER SPIN band, spins COUNTER-CW  (inner circle + inner runes +
+        //                                                      the hub)
+        for (const el of root.querySelectorAll('circle, polygon, polyline, path, line, text')) {
+          const r = radiusOf(el);
+          const target = r >= 1454 ? outerG : r >= 1209 ? staticG : spinG;
+          target.appendChild(el.cloneNode(true));
+        }
+        const serialize = (node) => new XMLSerializer().serializeToString(node);
+        return {
+          outer: serialize(outer),
+          innerStatic: serialize(innerStatic),
+          innerSpin: serialize(innerSpin),
+        };
+      }
+
+      // Rasterise an SVG string to a canvas texture. SVG → Image (data URI) → canvas, so the
+      // standalone file needs no server and the shape is bit-for-bit the owner's artwork.
+      function makeSvgTexture(svgText) {
+        const SIZE = 2048;
+        const canvas = document.createElement('canvas');
+        canvas.width = SIZE;
+        canvas.height = SIZE;
+        const ctx = canvas.getContext('2d');
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.NoColorSpace; // it is a mask, not a colour
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        const img = new Image();
+        img.onload = () => {
+          // Full-viewBox map: viewBox 4096 → canvas SIZE. The SVG's 1659px outer ring lands
+          // on quad radius 1659/2048 ≈ 0.81 — the mesh.scale contract that lands the figure
+          // on spec.radius uses the same 0.81 (see buildMagicCircle / applyCircleRadius).
+          // Do NOT crop a centred window here: that silently trims every element beyond the
+          // window's edge (the bug that showed only the inner ring).
+          ctx.drawImage(img, 0, 0, SIZE, SIZE);
+          texture.needsUpdate = true;
+        };
+        img.onerror = () => console.warn('magic-circle svg layer failed to load');
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
+        return texture;
+      }
+
+      // A quad material that samples an SVG mask and rotates the SAMPLE point by uSpin*uTime,
+      // tinted gold with a charge bead on the rim (comet trail compatibility).
+      function buildSpinningLayer(tex, spec) {
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uTime,
+            uDial: { value: 1 },
+            uTint: { value: spec.tint.clone() },
+            uHot: { value: spec.hot.clone() },
+            uSpin: { value: spec.spin },
+            uRunRate: { value: spec.runRate },
+            uIntensity: { value: spec.intensity },
+            tSvg: { value: tex },
+          },
+          vertexShader: /* glsl */ `
+            varying vec2 vPos;
+            void main() {
+              vPos = uv * 2.0 - 1.0;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */ `
+            uniform float uTime;
+            uniform float uDial;
+            uniform vec3 uTint;
+            uniform vec3 uHot;
+            uniform float uSpin;
+            uniform float uRunRate;
+            uniform float uIntensity;
+            uniform sampler2D tSvg;
+            varying vec2 vPos;
+            void main() {
+              float a = uTime * uSpin;
+              float ca = cos(a);
+              float sa = sin(a);
+              vec2 q = mat2(ca, sa, -sa, ca) * vPos;
+              vec2 uv = q * 0.5 + 0.5;
+              float mask = texture2D(tSvg, uv).r;
+              if (mask < 0.02) discard;
+              // One charge bead on the rim, driven by the UNROTATED coordinate so the motes
+              // that ride it never slide off their own head.
+              float head = fract(uTime * uRunRate);
+              float angle01 = atan(vPos.y, vPos.x) / 6.28318530718;
+              float around = abs(fract(angle01 - head + 0.5) - 0.5);
+              float travel = pow(max(0.0, 1.0 - around * 8.0), 3.0);
+              float glow = exp(-abs(length(vPos) - 0.81) * 22.0) * 0.15;
+              vec3 color = uTint * (mask + glow) + uHot * travel * mask * 1.6;
+              gl_FragColor = vec4(color * uIntensity * uDial, 1.0);
+            }
+          `,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+        mesh.frustumCulled = false;
+        return { mesh, material };
+      }
+
+
+
+      // ==================================================================================
       // Annulus. uv.x is angle (0..1 round the circle), uv.y is radial (0 inner, 1 outer).
       // Three's own RingGeometry maps uv over the bounding box instead, which is useless for
       // anything that wants to be addressed in polar coordinates.
@@ -2487,148 +2800,80 @@
       }
 
       // ==================================================================================
-      // Magic circle — one circle with a pentagram inscribed in it, in the galaxy's plane.
+      // Magic circle — the seal. (2026-08-19: rebuilt from the owner's magic-circle.svg.)
       //
-      // Deliberately ONE figure and nothing else. The registers and the rail already carry
-      // the ornament; what this layer has to supply is the single legible SHAPE that says
-      // the disc sits inside something drawn, and a shape only reads as drawn if the eye can
-      // take it in at once. Two circles and a second star would read as texture again.
+      // Where v2 had "one circle with a pentagram inscribed in it", this is now a two-layer
+      // instrument in ONE quad and ONE distance field, split on the radius of the SVG's
+      // middle circle (r=1454/1659 = 0.877 of the outer ring):
       //
-      // The whole figure is one quad and one distance field: circle at quad radius 0.9, star
-      // as the min() over five chords of that same circle (vertex k to k+2). fwidth resolves
-      // the stroke width in screen space, so it stays a hairline at any camera distance
-      // instead of aliasing into dashes the way authored geometry would.
+      //   OUTER half-ring (r > SPLIT, spinning CLOCKWISE via +uSpin): the heavy outer
+      //     circle, the {8/1} octagon and the {8/3} star that share its rim, the middle
+      //     circle, and the outer rune register (35 runes).
+      //   INNER half-ring (r <= SPLIT, spinning COUNTER-CLOCKWISE via uSpinInner): the inner
+      //     circle, an {8/3} star, eight diamonds on a ring, the hub (hexagon + spokes), and
+      //     the inner rune register (23 runes — a broken seal, not a closed one).
       //
-      // Circle and star breathe at different rates and only the circle carries the running
-      // charge. If they shared a beat the figure would read as one flat decal switching on
-      // and off; offset, it reads as a mechanism with a ring turning inside it.
+      // The spin split keys off the UNROTATED sample radius and is applied to the sample
+      // point, so each half turns independently while still being one draw call. The rune
+      // registers are sampled from `runeAtlas` in the same shader — row 0 (35 cols) for the
+      // outer ring, row 1 for the inner — so the figure and its inscription can never
+      // separate. All radii below are QUAD units with the outer ring at 0.9 (matching the
+      // old build, so `mesh.scale` still lands the figure on spec.radius).
+      //
+      // One charge still runs the outer ring (driven by UNROTATED vPos so the comet trail
+      // does not slide off its own head), and the outer and inner halves breathe at
+      // unrelated rates so the instrument reads as a mechanism rather than one flat decal.
       // ==================================================================================
       function buildMagicCircle(spec) {
-        const material = new THREE.ShaderMaterial({
-          uniforms: {
-            uTime,
-            uDial: { value: 1 },
-            uTint: { value: PALETTE.coreGold.clone() },
-            uHot: { value: PALETTE.coreHot.clone() },
-            uSpin: { value: spec.spin },
-            uIntensity: { value: spec.intensity },
-            uShift: { value: spec.shift },
-            uRunRate: { value: spec.runRate },
-          },
-          vertexShader: /* glsl */ `
-            varying vec2 vPos;
-            void main() {
-              vPos = uv * 2.0 - 1.0;
-              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }
-          `,
-          fragmentShader: /* glsl */ `
-            uniform float uTime;
-            uniform float uDial;
-            uniform vec3 uTint;
-            uniform vec3 uHot;
-            uniform float uSpin;
-            uniform float uIntensity;
-            uniform float uShift;
-            uniform float uRunRate;
-            varying vec2 vPos;
-
-            const float TAU_F = 6.28318530718;
-            const float RAD = 0.9;
-
-            float segDist(vec2 p, vec2 a, vec2 b) {
-              vec2 pa = p - a;
-              vec2 ba = b - a;
-              float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-              return length(pa - ba * h);
-            }
-
-            // One stroke profile, resolved in screen space. Everything in this shader —
-            // circle, star, and the three chromatic taps of each — goes through this, so the
-            // whole figure is guaranteed to be one weight of line.
-            float stroke(float d, float aa) {
-              return 1.0 - smoothstep(0.0, aa * 1.7, d);
-            }
-
-            void main() {
-              // The circle is rotation-invariant, so only the star is spun. Rotating both
-              // would cost the same and show nothing.
-              float a = uTime * uSpin;
-              float ca = cos(a);
-              float sa = sin(a);
-              vec2 ps = mat2(ca, sa, -sa, ca) * vPos;
-
-              // Five vertices, one point up (+PI/2). The chord from k to k+2 is the
-              // pentagram; k+2 is taken WITHOUT a modulo because cos/sin are periodic, which
-              // also keeps the loop free of array indexing.
-              float starDist = 1e9;
-              for (int k = 0; k < 5; k++) {
-                float a0 = float(k) * TAU_F / 5.0 + 1.57079632679;
-                float a1 = float(k + 2) * TAU_F / 5.0 + 1.57079632679;
-                vec2 v0 = vec2(cos(a0), sin(a0)) * RAD;
-                vec2 v1 = vec2(cos(a1), sin(a1)) * RAD;
-                starDist = min(starDist, segDist(ps, v0, v1));
-              }
-
-              float circleSd = length(vPos) - RAD;
-              float circleDist = abs(circleSd);
-
-              // Derivatives first, discard after: fwidth inside non-uniform control flow is
-              // undefined, and the far field of this quad is mostly empty.
-              float aaC = max(fwidth(circleSd), 1e-5);
-              float aaS = max(fwidth(starDist), 1e-5);
-              if (min(circleDist, starDist) > 0.4) discard;
-
-              // Authored chromatic fringe, same construction as the rail: the same profile
-              // evaluated three times, one per channel. uShift is in quad units and has to
-              // stay well under the stroke width — past that the channels stop overlapping
-              // and the figure reads as an anaglyph rather than as a lens fringe. Same
-              // lesson the rune registers' shift comment records.
-              float cr = stroke(abs(circleSd + uShift), aaC);
-              float cg = stroke(circleDist, aaC);
-              float cb = stroke(abs(circleSd - uShift), aaC);
-              vec3 cFringe = max(vec3(cr, cg, cb) - cg, 0.0);
-
-              float sr = stroke(max(starDist - uShift, 0.0), aaS);
-              float sg = stroke(starDist, aaS);
-              float sb = stroke(starDist + uShift, aaS);
-              vec3 sFringe = max(vec3(sr, sg, sb) - sg, 0.0);
-
-              // A soft skirt either side of each stroke. A pure fwidth hairline has nothing
-              // for the bloom chain to pick up, so the figure comes out as a wire drawing
-              // sitting on top of the frame rather than as light in it.
-              float cHalo = exp(-circleDist * 24.0) * 0.35;
-              float sHalo = exp(-starDist * 24.0) * 0.35;
-
-              // One charge running the circle. Angle-driven, so it is one head per lap.
-              float head = fract(uTime * uRunRate);
-              float angle01 = atan(vPos.y, vPos.x) / TAU_F;
-              float around = abs(fract(angle01 - head + 0.5) - 0.5);
-              float travel = pow(max(0.0, 1.0 - around * 8.0), 3.0);
-
-              // Two quiet breaths at unrelated rates. Shared, they would pulse as one object.
-              float breathC = 0.78 + 0.22 * sin(uTime * 0.21);
-              float breathS = 0.78 + 0.22 * sin(uTime * 0.34 + 1.7);
-
-              vec3 color = (uTint * (cg + cHalo) + cFringe) * breathC
-                         + (uTint * (sg + sHalo) + sFringe) * breathS
-                         + uHot * travel * (cg + cHalo * 0.6) * 1.6;
-              gl_FragColor = vec4(color * uIntensity * uDial, 1.0);
-            }
-          `,
-          transparent: true,
-          blending: THREE.AdditiveBlending,
-          depthTest: false,
-          depthWrite: false,
-          side: THREE.DoubleSide,
+        const { outer, innerStatic, innerSpin } = splitMagicCircleSvg(MAGIC_CIRCLE_SVG);
+        const outerLayer = buildSpinningLayer(makeSvgTexture(outer), {
+          tint: PALETTE.coreGold,
+          hot: PALETTE.coreHot,
+          spin: spec.spin,
+          runRate: spec.runRate,
+          intensity: spec.intensity,
         });
-
-        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
-        // Quad space puts the figure at radius 0.9, so this is what lands it on
-        // spec.radius world units rather than on the quad's own edge.
-        mesh.scale.setScalar((spec.radius * 2.0) / 0.9);
+        // The static band holds still (spin 0): the owner wants the diamonds + 8-spike star
+        // fixed while the inner seal and the outer ring both turn against it. All three
+        // layers stay in the gold family (owner 2026-08-19) — depth comes from the z sliders
+        // and from the intensity falloff, not from changing the colour.
+        const staticLayer = buildSpinningLayer(makeSvgTexture(innerStatic), {
+          tint: PALETTE.coreGold,
+          hot: PALETTE.coreHot,
+          spin: 0,
+          runRate: 0,
+          intensity: spec.intensity * 0.8,
+        });
+        const spinLayer = buildSpinningLayer(makeSvgTexture(innerSpin), {
+          tint: PALETTE.coreGold,
+          hot: PALETTE.coreHot,
+          spin: spec.spinInner,
+          runRate: spec.runRate,
+          intensity: spec.intensity * 0.72,
+        });
+        // Both inner bands are CHILDREN of the outer mesh: they inherit its position/scale/
+        // tilt for free, and only their own spins differ (0 = static). The z-offsets keep
+        // additive blending from smearing the three layers into one.
+        // Startup values only: setupTuning() sync()s every row before the first frame, so
+        // TUNING_DEFAULTS and the slider markup are what actually decide these. Kept in step
+        // with them so the build call is not a lie about where the layers sit.
+        staticLayer.mesh.position.z = -0.06;
+        spinLayer.mesh.position.z = -0.08;
+        outerLayer.mesh.add(staticLayer.mesh);
+        outerLayer.mesh.add(spinLayer.mesh);
+        const mesh = outerLayer.mesh;
+        // Quad space puts the SVG's 1659px outer ring at quad radius 1659/2048 (≈0.81), so
+        // this is what lands it on spec.radius world units rather than on the quad's edge.
+        mesh.scale.setScalar((spec.radius * 2.0) / (1659 / 2048));
         mesh.frustumCulled = false;
-        return { mesh, material };
+        return {
+          mesh,
+          material: outerLayer.material,
+          staticMesh: staticLayer.mesh,
+          staticMaterial: staticLayer.material,
+          innerMesh: spinLayer.mesh,
+          innerMaterial: spinLayer.material,
+        };
       }
 
       // ==================================================================================
@@ -3509,8 +3754,14 @@
             uProjScale,
             uDial: { value: 1 },
             // Startup value only; sync() overwrites from `tuning` on the first frame.
-            uRadius: { value: galaxy.radius * 1.5 },
+            uRadius: { value: galaxy.radius * 1.1 },
             uSpin: { value: circleUniforms.uSpin.value },
+            // The inner layer is a separate material on the circle's child mesh, and its
+            // spin lives in ITS `uSpin` uniform (buildSpinningLayer names every layer's
+            // rotation uSpin; buildMagicCircle passes spinInner through as that value).
+            uSpinInner: {
+              value: circle.innerMaterial ? circle.innerMaterial.uniforms.uSpin.value : 0,
+            },
             uRunRate: { value: circleUniforms.uRunRate.value },
             uTail: { value: TAIL_TURNS },
             uEmberLife: { value: EMBER_LIFE },
@@ -3525,6 +3776,7 @@
             uniform float uDial;
             uniform float uRadius;
             uniform float uSpin;
+            uniform float uSpinInner;
             uniform float uRunRate;
             uniform float uTail;
             uniform float uEmberLife;
@@ -3533,11 +3785,10 @@
             varying vec3 vColor;
 
             const float TAU_F = 6.28318530718;
-            // The pentagram's chords cross at radius RAD / phi^2 and 36 degrees off the
-            // outer vertices. Both numbers are properties of the figure the circle shader
-            // draws, not free parameters.
-            const float INNER = 0.381966;
-            const float HALF_STEP = 0.62831853; // TAU / 10, i.e. 36 degrees
+            // The inner {8/3} star's vertices sit at 0.741 of the quad radius, which is
+            // 0.823 of the circle's 0.9 — where the embers collect and come off. Both are
+            // properties of the figure the circle shader draws, not free parameters.
+            const float INNER = 0.823;
 
             void main() {
               float param = position.x;
@@ -3571,18 +3822,18 @@
                 pow(1.0 - lag, 1.5)
                 * (0.6 + 0.6 * sin(uTime * (2.4 + seed * 3.1) + seed * 29.0));
 
-              // ---- kind 1: embers off the five chord intersections -------------------
-              float k = floor(param * 5.0);
-              float a0 = k * (TAU_F / 5.0) + 1.57079632679 + HALF_STEP;
-              float spun = a0 - uSpin * uTime + (hash11(seed * 6.1) - 0.5) * 0.05;
+              // ---- kind 1: embers off the inner {8/3} star's eight vertices -------------
+              float k = floor(param * 8.0);
+              float a0 = k * (TAU_F / 8.0) + 1.57079632679;
+              float spun = a0 - uSpinInner * uTime + (hash11(seed * 6.1) - 0.5) * 0.05;
               float life = fract(uTime / uEmberLife + phase);
               vec2 root = vec2(cos(spun), sin(spun)) * (uRadius * INNER);
               vec2 outward = normalize(root);
               vec2 tangent = vec2(-outward.y, outward.x);
-              // Travel roughly tripled. The intersections sit at 0.38 of the circle's
-              // radius, so at the old amplitude an ember never left the pentagram's own
-              // line weight; now it climbs a good way toward the ring and the gap between
-              // the two is what reads as the figure venting.
+              // Travel roughly tripled. The vertices sit at 0.82 of the circle's radius, so
+              // at the old amplitude an ember never left the star's own line weight; now it
+              // climbs a good way toward the ring and the gap between the two is what reads
+              // as the figure venting.
               float rise = life * uRadius * (0.16 + hash11(seed * 8.3) * 0.4);
               float sway = sin(life * 3.1 + seed * 13.0) * uRadius * 0.06;
               vec3 ePos = vec3(
@@ -3664,6 +3915,9 @@
           // uSpin/uRunRate are build-time constants on the circle, but reading them back
           // each frame costs nothing and means the two can never drift apart by hand.
           material.uniforms.uSpin.value = circleUniforms.uSpin.value;
+          material.uniforms.uSpinInner.value = circle.innerMaterial
+            ? circle.innerMaterial.uniforms.uSpin.value
+            : circleUniforms.uSpin.value;
           material.uniforms.uRunRate.value = circleUniforms.uRunRate.value;
         };
 
@@ -3695,12 +3949,16 @@
       // pentagram by it). v2's -0.004 is a lap every ~26 minutes, i.e. static to anyone
       // actually looking at the page; -0.084 is a lap every ~75 s, which reads as turning
       // without becoming the fastest thing in the frame.
+      // Spin is RADIANS PER SCENE SECOND. The shader rotates the SAMPLE point by uSpin*uTime,
+      // which rotates the drawn figure the other way, so a NEGATIVE outer spin turns the outer
+      // half-ring CLOCKWISE and a POSITIVE inner spin turns the inner half-ring
+      // COUNTER-CLOCKWISE — two rings drifting the same way would read as one ring.
       const magicCircle = buildMagicCircle({
-        radius: galaxy.radius * 1.5,
-        spin: -0.084,
+        radius: galaxy.radius * 1.1,
+        spin: -0.05,     // outer half-ring: clockwise, ~2 min per lap
+        spinInner: 0.12, // inner half-ring: counter-clockwise, ~52 s per lap
         runRate: 0.022,
         intensity: 0.85,
-        shift: 0.006,
       });
       // Startup value only: setupTuning() sync()s every row before the first frame, so
       // TUNING_DEFAULTS and the slider markup are what actually decide this. Kept in step
@@ -3867,9 +4125,9 @@
       const layout = {
         offset: 0.61, // disc centre X, as a fraction of frame width
         height: -0.01, // disc centre Y, as a fraction of frame height (+ is up)
-        rotX: THREE.MathUtils.degToRad(-45.5),
-        rotY: THREE.MathUtils.degToRad(-37),
-        rotZ: THREE.MathUtils.degToRad(6),
+        rotX: THREE.MathUtils.degToRad(-31),
+        rotY: THREE.MathUtils.degToRad(-31),
+        rotZ: THREE.MathUtils.degToRad(17),
         flank: 1, // 0 = arcs hug the column, 1 = arcs pushed wide
         portrait: false,
       };
@@ -4262,17 +4520,19 @@
       // composition that never shipped. The slider `value` attributes still have to agree
       // with this — bindTuner sync()s on startup, so the markup is what wins on load.
       const TUNING_DEFAULTS = {
-        circleR: 1.5,
-        circleZ: 2.7,
+        circleR: 0.94,
+        circleZ: 1.75,
+        circleStaticZ: -0.06,
+        circleSpinZ: -0.08,
         circleTiltX: 0,
         circleTiltY: 0,
-        rune1R: 1.5,
+        rune1R: 1.735,
         // Sits exactly on the slider's max. Deliberate — the hand-tune wanted the inner
         // register right out at the front of the sweep, and widening the range to give it
         // headroom would change what every other z slider's travel feels like.
         rune1Z: 6.0,
-        rune2R: 1.17,
-        rune2Z: 0.4,
+        rune2R: 1.245,
+        rune2Z: 1.05,
         railR: 1.89,
         railZ: 1.95,
       };
@@ -4289,9 +4549,9 @@
       }
 
       function applyCircleRadius() {
-        // Radius is carried entirely by mesh scale — the circle sits at quad radius 0.9, so
-        // there is no geometry to rebuild here at all.
-        magicCircle.mesh.scale.setScalar((galaxy.radius * tuning.circleR * 2.0) / 0.9);
+        // Radius is carried entirely by mesh scale — the SVG's outer ring sits at quad
+        // radius 1659/2048, so there is no geometry to rebuild here at all.
+        magicCircle.mesh.scale.setScalar((galaxy.radius * tuning.circleR * 2.0) / (1659 / 2048));
       }
 
       function applyRegisterRadius(index) {
@@ -4347,6 +4607,12 @@
         bindTuner('circleR', tuneRadius, applyCircleRadius);
         bindTuner('circleZ', tuneDepth, () => {
           magicCircle.mesh.position.z = tuning.circleZ;
+        });
+        bindTuner('circleStaticZ', tuneDepth, () => {
+          magicCircle.staticMesh.position.z = tuning.circleStaticZ;
+        });
+        bindTuner('circleSpinZ', tuneDepth, () => {
+          magicCircle.innerMesh.position.z = tuning.circleSpinZ;
         });
         bindTuner('circleTiltX', tuneAngle, () => {
           magicCircle.mesh.rotation.x = THREE.MathUtils.degToRad(tuning.circleTiltX);
@@ -4442,6 +4708,8 @@
         for (const register of runeRegisters) register.material.uniforms.uDial.value = dials.runes;
         for (const rail of runeRails) rail.material.uniforms.uDial.value = dials.runes;
         magicCircle.material.uniforms.uDial.value = dials.circle;
+        magicCircle.staticMaterial.uniforms.uDial.value = dials.circle;
+        magicCircle.innerMaterial.uniforms.uDial.value = dials.circle;
         // The particle pass rides the dials of the layer it is shed from — one control per
         // idea, not one per object. Both shaders multiply their FINAL colour by uDial, so a
         // dial at 0 emits pure black into an additive blend: off, not merely dim.

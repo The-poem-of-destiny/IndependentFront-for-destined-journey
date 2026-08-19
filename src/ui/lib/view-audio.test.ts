@@ -20,8 +20,9 @@ describe('queryForView', () => {
     expect(queryForView('game')).toBeNull();
   });
 
-  it('设置页 / 工坊返回 null —— 用户在这儿调东西，换歌只会碍事', () => {
+  it('设置页 / 扩展管理 / 工坊返回 null —— 用户在这儿调东西，换歌只会碍事', () => {
     expect(queryForView('settings')).toBeNull();
+    expect(queryForView('extensions')).toBeNull();
     expect(queryForView('workshop')).toBeNull();
   });
 

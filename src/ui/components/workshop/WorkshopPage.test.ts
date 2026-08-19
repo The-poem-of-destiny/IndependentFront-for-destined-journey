@@ -344,8 +344,8 @@ describe('WorkshopPage', () => {
     await flushPromises();
     expect(wrapper.find('.wk-row-skeleton').exists()).toBe(true);
     expect(wrapper.find('.empty-tab').exists()).toBe(false);
-    // 这时 projects 恒为空，报「已安装（0）」同样是在说假话
-    expect(wrapper.text()).not.toContain('已安装（0）');
+    // 这时 projects 恒为空，报「已安装社区项目（0）」同样是在说假话
+    expect(wrapper.text()).not.toContain('已安装社区项目（0）');
     wrapper.unmount();
   });
 

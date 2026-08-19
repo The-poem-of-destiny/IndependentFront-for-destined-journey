@@ -28,7 +28,6 @@ import PlotPanel from './PlotPanel.vue';
 import MemoryPanel from './MemoryPanel.vue';
 import SnapshotPanel from './SnapshotPanel.vue';
 import CgGalleryPanel from './CgGalleryPanel.vue';
-import WorkshopEnablePanel from './WorkshopEnablePanel.vue';
 import MapPanel from './MapPanel.vue';
 import DebugPanel from './DebugPanel.vue';
 import MiniPlayer from './MiniPlayer.vue';
@@ -294,6 +293,10 @@ function handleToolClick(id: string) {
     ui.navigate('settings');
     return;
   }
+  if (id === 'extensions') {
+    ui.navigate('extensions');
+    return;
+  }
   // 迷你播放器是浮动卡片，不走 activeModal（§6.2），必须先于 showModal 拦下
   if (id === 'audio') {
     showMiniPlayer.value = !showMiniPlayer.value;
@@ -409,16 +412,6 @@ function onModalOpenChange(v: boolean) {
       @update:open="onModalOpenChange"
     >
       <CgGalleryPanel />
-    </AppModal>
-    <AppModal
-      title="工坊内容启用"
-      :open="game.activeModal === 'workshop'"
-      size="lg"
-      closable
-      @close="game.closeModal()"
-      @update:open="onModalOpenChange"
-    >
-      <WorkshopEnablePanel />
     </AppModal>
     <AppModal
       title="地图"

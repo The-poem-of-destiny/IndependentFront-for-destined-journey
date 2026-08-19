@@ -45,7 +45,7 @@ import { setWorkshopConfig } from './lib/workshop-client';
 // 1. 形状
 // ═══════════════════════════════════════════════════════════
 
-/** 首页「制作人员」弹窗里的世界速览块 */
+/** “关于”分区里的世界速览块 */
 interface BrandingWorldSummary {
   /** 块标题（世界名）；空串 = 不渲染整块 */
   title: string;
@@ -76,9 +76,9 @@ export interface BrandingConfig {
   tagline: string;
   /** 首页风味文字轮播；空数组 = 不渲染轮播区 */
   subtitles: string[];
-  /** 首页制作人员弹窗里「世界观设定」那一行的署名 */
+  /** “关于”分区里「世界观设定」一行的署名 */
   credits: string;
-  /** 首页制作人员弹窗里的世界速览块 */
+  /** “关于”分区里的世界速览块 */
   worldSummary: BrandingWorldSummary;
   /** 设置页关于分区的页脚整句（不含版权行） */
   about: string;

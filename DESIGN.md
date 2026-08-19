@@ -114,6 +114,23 @@ Flexibility: diagnostic layout may be technical; access rules do not vary by the
 - Diagnostic exports can contain conversation text, prompts, and raw model output;
   the Settings surface must warn players to inspect an export before sharing it.
 
+### Home navigation actions
+
+Status: owner-approved interaction and layout contract
+Scope: the home screen across all themes and supported viewport widths
+Flexibility: theme materials and icons may vary; action order, relative sizing, and destinations do not
+
+- Keep the primary stack in this order: continue or create, save management,
+  extension management, then Settings. Settings is a full-width large button,
+  matching the two management entries above it.
+- Keep the final compact row as About on the left and Exit on the right.
+- About opens the Settings About section directly. That section is the single
+  surface for contributor credits, project and technical information, the
+  content-pack world summary, copyright text, and required third-party license
+  attribution; do not restore a separate home-screen credits modal.
+- Exit requests that the host close the current application window. Browser
+  security may ignore this request for an ordinary tab that was not script-opened.
+
 ## Theme identity to stylesheet map
 
 Identity names in this guide never appear in code. Every theme is selected by a `[data-theme='<slug>']`

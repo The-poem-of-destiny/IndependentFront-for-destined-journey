@@ -114,6 +114,9 @@ const HomePage = defineAsyncComponent(() => import('./components/home/HomePage.v
 const CreatePage = defineAsyncComponent(() => import('./components/create/CreatePage.vue'));
 const GamePage = defineAsyncComponent(() => import('./components/game/GamePage.vue'));
 const SettingsPage = defineAsyncComponent(() => import('./components/settings/SettingsPage.vue'));
+const ExtensionManagementPage = defineAsyncComponent(
+  () => import('./components/workshop/ExtensionManagementPage.vue'),
+);
 const WorkshopPage = defineAsyncComponent(() => import('./components/workshop/WorkshopPage.vue'));
 
 const viewComponent = computed(() => {
@@ -124,6 +127,8 @@ const viewComponent = computed(() => {
       return GamePage;
     case 'settings':
       return SettingsPage;
+    case 'extensions':
+      return ExtensionManagementPage;
     case 'workshop':
       return WorkshopPage;
     default:

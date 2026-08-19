@@ -379,17 +379,8 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
       2026-08-01 全部下沉进页面本体。
     -->
     <header class="wk-topbar">
-      <!--
-        原路返回：工坊现在有三个入口（首页 / 游戏页侧栏 / 设置页导航），
-        一律回首页会把从设置里进来的人扔到标题画面。`previousView` 只记一层，
-        够这一个用途；工坊自己不该出现在返回目标里（防返回键就地失效）。
-      -->
-      <AppButton
-        variant="ghost"
-        size="sm"
-        @click="ui.navigate(ui.previousView === 'workshop' ? 'home' : ui.previousView)"
-        >← 返回</AppButton
-      >
+      <!-- 工坊是扩展管理的子页面，返回时弹出一层历史，不把当前页重新压栈。 -->
+      <AppButton variant="ghost" size="sm" @click="ui.back('extensions')">← 返回</AppButton>
       <h2 class="wk-title">创意工坊</h2>
     </header>
 
@@ -407,7 +398,7 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
       <p v-else class="wk-intro">
         创意工坊的项目由社区投稿，未经本引擎审核。装上之后，它的世界书条目会进入
         <strong>创意工坊</strong> 分区（与内置内容彼此隔离），正则会进入「输出美化」规则库。
-        装了还不等于生效 —— 还要在存档里勾选启用。
+        项目的启用状态与相关设置统一在「扩展管理」页按存档配置。
       </p>
 
       <!--
@@ -455,9 +446,9 @@ const pendingName = computed(() => pending.value?.prepared.input.project.name ??
       </section>
 
       <section class="wk-section">
-        <!-- 水合完成前不报数：这时 projects 恒为空，报「已安装（0）」是在说假话 -->
+        <!-- 水合完成前不报数：这时 projects 恒为空，报「已安装社区项目（0）」是在说假话 -->
         <h3 class="wk-section-title">
-          已安装<template v-if="workshop.ready">（{{ projects.length }}）</template>
+          已安装社区项目<template v-if="workshop.ready">（{{ projects.length }}）</template>
         </h3>
         <WorkshopInstalledList
           :projects="projects"

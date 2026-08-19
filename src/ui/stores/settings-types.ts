@@ -204,6 +204,8 @@ export type UiSettings = {
   hoverDelayMs: number;
   /** 额外强制开启「减少动态效果」；系统偏好始终独立生效 */
   reducedMotion: boolean;
+  /** 首页 Astral Drift 动态背景；减动效开启时此值不生效且不会加载 WebGL 场景 */
+  homeBackdrop: boolean;
   /** 解锁调试入口与原始 Agent 诊断；默认关闭，不影响玩家可见的语义活动账本 */
   developerMode: boolean;
 

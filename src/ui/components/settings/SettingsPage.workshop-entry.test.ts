@@ -1,5 +1,5 @@
 /**
- * 设置页的创意工坊入口 —— 结构断言（照本目录既有做法读 SFC 源码，不 mount：
+ * 设置页的扩展管理入口 —— 结构断言（照本目录既有做法读 SFC 源码，不 mount：
  * mount 整个设置页要拖进 API 池 / 世界书 / Agent 一整片启动逻辑）。
  *
  * 守两件事：
@@ -9,20 +9,21 @@
  */
 import { describe, it, expect } from 'vitest';
 import source from '@ui/components/settings/SettingsPage.vue?raw';
+import extensionSource from '@ui/components/workshop/ExtensionManagementPage.vue?raw';
 import workshopSource from '@ui/components/workshop/WorkshopPage.vue?raw';
 
-describe('SettingsPage 创意工坊入口', () => {
-  it('导航栏底部有一个跳工坊的按钮', () => {
+describe('SettingsPage 扩展管理入口', () => {
+  it('导航栏底部有一个跳扩展管理的按钮', () => {
     expect(source).toContain(`class="nav-item nav-external"`);
-    expect(source).toContain(`@click="ui.navigate('workshop')"`);
-    expect(source).toContain('创意工坊');
+    expect(source).toContain(`@click="ui.navigate('extensions')"`);
+    expect(source).toContain('扩展管理');
   });
 
   it('不混进 navItems（它不是分区，没有对应的 activeSection 值）', () => {
     const start = source.indexOf('const navItems');
     const table = source.slice(start, source.indexOf('];', start));
     expect(start).toBeGreaterThan(-1);
-    expect(table).not.toContain('workshop');
+    expect(table).not.toContain('extensions');
   });
 
   it('带外链角标，长得和分区不一样', () => {
@@ -30,8 +31,10 @@ describe('SettingsPage 创意工坊入口', () => {
     expect(source).toContain('.nav-divider');
   });
 
-  it('工坊返回键走 previousView，不写死回首页', () => {
-    expect(workshopSource).toContain('ui.previousView');
+  it('扩展页与工坊子页面都走历史返回，不写死回首页', () => {
+    expect(extensionSource).toContain("ui.back('home')");
+    expect(workshopSource).toContain("ui.back('extensions')");
+    expect(extensionSource).not.toContain(`@click="ui.navigate('home')"`);
     expect(workshopSource).not.toContain(`@click="ui.navigate('home')"`);
   });
 });

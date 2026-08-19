@@ -19,7 +19,7 @@ import type { AppView } from '../stores/ui-store';
  *
  * - `game`: 游戏页的配乐由 `GamePipeline` 按地点/人物/情绪/情境打分决定，
  *   界面这层不该插手，否则进游戏会先放一段"游戏页的曲子"再被地点顶掉。
- * - `settings` / `workshop`: 用户来这儿是调东西的，音乐跟着变只会碍事 ——
+ * - `settings` / `extensions` / `workshop`: 用户来这儿是调东西的，音乐跟着变只会碍事 ——
  *   尤其设置页里就在试听曲目，这时换歌纯属打架。
  */
 export function queryForView(view: AppView): SceneTagQuery | null {
@@ -32,6 +32,7 @@ export function queryForView(view: AppView): SceneTagQuery | null {
       return { situations: ['仪式'], moods: ['庄严', '神圣'] };
     case 'game':
     case 'settings':
+    case 'extensions':
     case 'workshop':
       return null;
     default:

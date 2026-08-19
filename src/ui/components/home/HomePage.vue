@@ -9,15 +9,18 @@ import type { FullBackup } from '@engine/database';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
+import AstralDriftBackdrop from './AstralDriftBackdrop.vue';
 import { useBranding } from '../../branding-defaults';
 import { buildSessionImportWarnings } from '../../lib/session-import-messages';
+import { findLatestSave } from './latest-save';
 
 const game = useGameStore();
 const ui = useUIStore();
 const cfg = useSettingsStore();
+const backdropReady = ref(false);
 
 /**
- * 创意工坊入口已开放（2026-08-04）。这个开关从来不是安全边界：入口关着的时候，
+ * 扩展管理入口已开放（2026-08-20）。这个开关从来不是安全边界：入口关着的时候，
  * 已安装项目照样能在游戏页启用 —— 它只挡首页那一个按钮。
  *
  * 当前执行边界：**用户装过的**正则 replacement 在 opaque `sandbox="allow-scripts"` iframe
@@ -28,14 +31,24 @@ const cfg = useSettingsStore();
  * fail-closed。网络开启意味着规则仍可发送该命中的 replacement/capture，
  * 详见 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
  */
-const WORKSHOP_ENTRY_ENABLED = true;
+const EXTENSION_ENTRY_ENABLED = true;
 
-// === 读取存档 ===
+// === 存档管理 ===
 const showSaveModal = ref(false);
-const showCreditsModal = ref(false);
+const savesLoaded = ref(false);
 const selectedSaveId = ref<string | null>(null);
 const selectedSave = computed(() => game.saves.find((s) => s.id === selectedSaveId.value) || null);
 const selectedSaveData = ref<any>(null);
+const latestSave = computed(() => findLatestSave(game.saves));
+const saveManagerIntent = ref<'browse' | 'export' | 'delete' | 'rename'>('browse');
+const renamingSaveId = ref<string | null>(null);
+const renameDraft = ref('');
+const saveManagerHint = computed(() => {
+  if (saveManagerIntent.value === 'export') return '请选择一个存档，然后使用右侧的“导出存档”。';
+  if (saveManagerIntent.value === 'delete') return '请选择要删除的存档，然后使用右侧的“删除存档”。';
+  if (saveManagerIntent.value === 'rename') return '为选中的存档输入新名称并保存。';
+  return '选择一个存档查看详情，或继续游戏。';
+});
 
 watch(selectedSaveId, async (id) => {
   if (!id) {
@@ -123,6 +136,8 @@ onMounted(async () => {
     await game.loadSaves();
   } catch {
     /* IndexedDB 可能未初始化 */
+  } finally {
+    savesLoaded.value = true;
   }
   // 风味文字循环。
   // 🔴 取模前先挡住空数组：内容包可以显式给 `subtitles: []`（刻意关掉轮播），
@@ -131,20 +146,67 @@ onMounted(async () => {
     const n = quotes.value.length;
     currentQuote.value = n > 0 ? (currentQuote.value + 1) % n : 0;
   }, 5000);
+  document.addEventListener('keydown', onHomeKeydown);
 });
 
 onUnmounted(() => {
   if (quoteTimer) clearInterval(quoteTimer);
+  document.removeEventListener('keydown', onHomeKeydown);
   document.body.classList.remove('home-entered');
 });
+
+function onHomeKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && showSaveModal.value) closeSaveManager();
+}
 
 function newGame() {
   ui.navigate('create');
 }
 
+function exitApp() {
+  window.close();
+}
+
 function loadGame(saveId: string) {
-  showSaveModal.value = false;
+  closeSaveManager();
   ui.navigate('game', saveId);
+}
+
+async function ensureSavesLoaded() {
+  if (savesLoaded.value) return;
+  try {
+    await game.loadSaves();
+  } catch {
+    /* IndexedDB 不可用时按无存档处理 */
+  } finally {
+    savesLoaded.value = true;
+  }
+}
+
+async function startOrContinue() {
+  // 首页刚挂载时存档列表仍可能在读取中；点击不能因此误入新建流程。
+  await ensureSavesLoaded();
+
+  const save = latestSave.value;
+  if (save) loadGame(save.id);
+  else newGame();
+}
+
+async function openSaveManager(intent: 'browse' | 'export' | 'delete' | 'rename' = 'browse') {
+  await ensureSavesLoaded();
+  saveManagerIntent.value = intent;
+  showSaveModal.value = true;
+
+  const target = selectedSave.value || latestSave.value;
+  selectedSaveId.value = target?.id ?? null;
+  if (intent === 'rename' && target) beginRenameSave(target.id);
+  else cancelRenameSave();
+}
+
+function closeSaveManager() {
+  showSaveModal.value = false;
+  saveManagerIntent.value = 'browse';
+  cancelRenameSave();
 }
 
 // 🧪 开发用快速测试 (正式版移除)
@@ -165,9 +227,56 @@ async function quickTestKeep() {
 
 async function deleteSave(saveId: string) {
   if (!confirm('确定要删除这个存档吗？此操作不可撤销。')) return;
-  const { deleteSaveSlot } = await import('@engine/database');
-  await deleteSaveSlot(saveId);
-  await game.loadSaves();
+  try {
+    const { deleteSaveSlot } = await import('@engine/database');
+    await deleteSaveSlot(saveId);
+    await game.loadSaves();
+    if (selectedSaveId.value === saveId) selectedSaveId.value = game.saves[0]?.id ?? null;
+    ui.toast('存档已删除', 'success');
+  } catch (err) {
+    ui.toast(`删除失败：${errText(err)}`, 'error');
+  }
+}
+
+function beginRenameSave(saveId: string) {
+  const save = game.saves.find((candidate) => candidate.id === saveId);
+  if (!save) return;
+  selectedSaveId.value = saveId;
+  renamingSaveId.value = saveId;
+  renameDraft.value = save.name || '';
+  saveManagerIntent.value = 'rename';
+}
+
+function cancelRenameSave() {
+  renamingSaveId.value = null;
+  renameDraft.value = '';
+}
+
+async function renameSave() {
+  const saveId = renamingSaveId.value;
+  const name = renameDraft.value.trim();
+  if (!saveId) return;
+  if (!name) {
+    ui.toast('存档名称不能为空', 'warning');
+    return;
+  }
+
+  const save = game.saves.find((candidate) => candidate.id === saveId);
+  if (!save) {
+    ui.toast('重命名失败：找不到这个存档', 'error');
+    return;
+  }
+
+  try {
+    const { saveSaveSlot } = await import('@engine/database');
+    await saveSaveSlot({ ...save, name });
+    await game.loadSaves();
+    cancelRenameSave();
+    saveManagerIntent.value = 'browse';
+    ui.toast('存档已重命名', 'success');
+  } catch (err) {
+    ui.toast(`重命名失败：${errText(err)}`, 'error');
+  }
 }
 
 // ═══════════ 单存档导出 / 导入 ═══════════
@@ -344,7 +453,13 @@ function formatTime(ts: number) {
 </script>
 
 <template>
-  <div class="home-page" @mouseenter="showDevButton = true" @mouseleave="showDevButton = false">
+  <div
+    class="home-page"
+    :class="{ 'has-astral-backdrop': backdropReady }"
+    @mouseenter="showDevButton = true"
+    @mouseleave="showDevButton = false"
+  >
+    <AstralDriftBackdrop @ready="backdropReady = $event" />
     <!-- 内容态横幅（波 1 T2 / §5.8）：占位 / 检测到本地真实内容 / error -->
     <ContentStatusBanner class="home-content-banner" />
     <!-- 装饰性背景光晕 -->
@@ -367,101 +482,123 @@ function formatTime(ts: number) {
       />
     </div>
 
-    <!-- 标题区域 -->
-    <div class="title-section">
-      <div class="title-frame">
-        <div class="title-corner title-corner-tl" aria-hidden="true" />
-        <div class="title-corner title-corner-tr" aria-hidden="true" />
-        <div class="title-corner title-corner-bl" aria-hidden="true" />
-        <div class="title-corner title-corner-br" aria-hidden="true" />
+    <main class="home-stage-ui">
+      <!-- 标题区域 -->
+      <div class="title-section">
+        <div class="title-frame">
+          <div class="title-corner title-corner-tl" aria-hidden="true" />
+          <div class="title-corner title-corner-tr" aria-hidden="true" />
+          <div class="title-corner title-corner-bl" aria-hidden="true" />
+          <div class="title-corner title-corner-br" aria-hidden="true" />
 
-        <!--
+          <!--
           标题分行由 branding 供给（1-2 行都合法）。第一行套主色、其余行套次色，
           与原来「主 + 副」两行的视觉一致；只有一行时自然退化成单行主色。
         -->
-        <h1 class="main-title">
-          <span
-            v-for="(line, i) in branding.titleLines"
-            :key="i"
-            :class="i === 0 ? 'title-line-t main-line' : 'title-line-b alt-line'"
-            >{{ line }}</span
+          <h1 class="main-title">
+            <span
+              v-for="(line, i) in branding.titleLines"
+              :key="i"
+              :class="i === 0 ? 'title-line-t main-line' : 'title-line-b alt-line'"
+              >{{ line }}</span
+            >
+          </h1>
+        </div>
+
+        <div class="title-divider">
+          <span class="divider-diamond" aria-hidden="true" />
+        </div>
+
+        <p v-if="branding.tagline" class="sub-title">{{ branding.tagline }}</p>
+
+        <!-- 风味文字（branding.subtitles 为空 = 内容包刻意关掉轮播，整块不渲染） -->
+        <div v-if="quotes.length > 0" class="quote-container">
+          <transition name="quote-fade" mode="out-in">
+            <p :key="currentQuote" class="flavor-quote">「{{ quotes[currentQuote] }}」</p>
+          </transition>
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="action-section">
+        <div class="btn-column">
+          <AppButton
+            variant="primary"
+            size="lg"
+            block
+            class="btn-new-game"
+            @click="startOrContinue"
           >
-        </h1>
-      </div>
-
-      <div class="title-divider">
-        <span class="divider-diamond" aria-hidden="true" />
-      </div>
-
-      <p v-if="branding.tagline" class="sub-title">{{ branding.tagline }}</p>
-
-      <!-- 风味文字（branding.subtitles 为空 = 内容包刻意关掉轮播，整块不渲染） -->
-      <div v-if="quotes.length > 0" class="quote-container">
-        <transition name="quote-fade" mode="out-in">
-          <p :key="currentQuote" class="flavor-quote">「{{ quotes[currentQuote] }}」</p>
-        </transition>
-      </div>
-    </div>
-
-    <!-- 操作按钮 -->
-    <div class="action-section">
-      <div class="btn-column">
-        <AppButton variant="primary" size="lg" block class="btn-new-game" @click="newGame">
-          ✦ 新 建 存 档
-        </AppButton>
-        <AppButton
-          variant="secondary"
-          size="lg"
-          block
-          class="btn-load"
-          @click="showSaveModal = true"
-        >
-          <i class="btn-icon fa-solid fa-folder-open" aria-hidden="true"></i>读 取 存 档
-        </AppButton>
-        <!-- 入口开关：见 script 里的 WORKSHOP_ENTRY_ENABLED -->
-        <AppButton
-          v-if="WORKSHOP_ENTRY_ENABLED"
-          variant="secondary"
-          size="lg"
-          block
-          class="btn-workshop"
-          @click="ui.navigate('workshop')"
-        >
-          <i class="btn-icon fa-solid fa-puzzle-piece" aria-hidden="true"></i>创 意 工 坊
-        </AppButton>
-        <div class="btn-row">
-          <AppButton variant="ghost" size="md" class="btn-ghost" @click="ui.navigate('settings')">
+            {{ latestSave ? '✦ 继 续' : '✦ 新 建 存 档' }}
+          </AppButton>
+          <AppButton
+            variant="secondary"
+            size="lg"
+            block
+            class="btn-load"
+            @click="openSaveManager()"
+          >
+            <i class="btn-icon fa-solid fa-folder-tree" aria-hidden="true"></i>存 档 管 理
+          </AppButton>
+          <!-- 入口开关：见 script 里的 EXTENSION_ENTRY_ENABLED -->
+          <AppButton
+            v-if="EXTENSION_ENTRY_ENABLED"
+            variant="secondary"
+            size="lg"
+            block
+            class="btn-extensions"
+            @click="ui.navigate('extensions')"
+          >
+            <i class="btn-icon fa-solid fa-puzzle-piece" aria-hidden="true"></i>扩 展 管 理
+          </AppButton>
+          <AppButton
+            variant="secondary"
+            size="lg"
+            block
+            class="btn-settings"
+            @click="ui.openSettings()"
+          >
             <i class="btn-icon fa-solid fa-gear" aria-hidden="true"></i>设 置
           </AppButton>
-          <AppButton variant="ghost" size="md" class="btn-ghost" @click="showCreditsModal = true">
-            <i class="btn-icon fa-solid fa-users" aria-hidden="true"></i>制 作 人 员
-          </AppButton>
-        </div>
-        <!-- 🧪 开发用 — 悬停显示 -->
-        <transition name="fade">
-          <div v-if="showDevButton && isDev" class="dev-test-row">
+          <div class="btn-row">
             <AppButton
               variant="ghost"
-              size="sm"
-              class="dev-test-btn"
-              title="清空整个数据库后重建测试存档 —— 素材库与音频库会一并清掉"
-              @click="quickTest"
+              size="md"
+              class="btn-ghost btn-about"
+              @click="ui.openSettings('about')"
             >
-              🧪 快速测试
+              <i class="btn-icon fa-solid fa-circle-info" aria-hidden="true"></i>关 于
             </AppButton>
-            <AppButton
-              variant="ghost"
-              size="sm"
-              class="dev-test-btn"
-              title="创建测试存档，但不清任何数据 —— 已导入的素材与音乐保留"
-              @click="quickTestKeep"
-            >
-              🧪 快速测试（保留数据）
+            <AppButton variant="ghost" size="md" class="btn-ghost btn-exit" @click="exitApp">
+              <i class="btn-icon fa-solid fa-right-from-bracket" aria-hidden="true"></i>退 出
             </AppButton>
           </div>
-        </transition>
+          <!-- 🧪 开发用 — 悬停显示 -->
+          <transition name="fade">
+            <div v-if="showDevButton && isDev" class="dev-test-row">
+              <AppButton
+                variant="ghost"
+                size="sm"
+                class="dev-test-btn"
+                title="清空整个数据库后重建测试存档 —— 素材库与音频库会一并清掉"
+                @click="quickTest"
+              >
+                🧪 快速测试
+              </AppButton>
+              <AppButton
+                variant="ghost"
+                size="sm"
+                class="dev-test-btn"
+                title="创建测试存档，但不清任何数据 —— 已导入的素材与音乐保留"
+                @click="quickTestKeep"
+              >
+                🧪 快速测试（保留数据）
+              </AppButton>
+            </div>
+          </transition>
+        </div>
       </div>
-    </div>
+    </main>
 
     <!-- 底部信息 -->
     <footer class="home-footer">
@@ -470,17 +607,26 @@ function formatTime(ts: number) {
       <span class="footer-era">复兴纪元</span>
     </footer>
 
-    <!-- 读取存档 — 全屏界面 -->
+    <!-- 存档管理 — 全屏界面 -->
     <Teleport to="body">
       <transition name="save-slide">
-        <div v-if="showSaveModal" class="save-panel-overlay">
-          <div class="save-panel">
+        <div v-if="showSaveModal" class="save-panel-overlay" @click.self="closeSaveManager">
+          <div
+            class="save-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="save-panel-title"
+          >
             <!-- 顶部栏 -->
             <div class="save-panel-header">
-              <h2 class="save-panel-title">读取存档</h2>
+              <div class="save-panel-heading">
+                <h2 id="save-panel-title" class="save-panel-title">存档管理</h2>
+                <p class="save-panel-hint" role="status">{{ saveManagerHint }}</p>
+              </div>
               <div class="save-panel-header-actions">
+                <AppButton variant="ghost" size="sm" @click="newGame">新建存档</AppButton>
                 <AppButton variant="ghost" size="sm" @click="importSave">导入存档</AppButton>
-                <button class="save-panel-close" aria-label="关闭" @click="showSaveModal = false">
+                <button class="save-panel-close" aria-label="关闭" @click="closeSaveManager">
                   ✕
                 </button>
               </div>
@@ -514,18 +660,32 @@ function formatTime(ts: number) {
                         formatTime(save.updatedAt)
                       }}</span>
                     </div>
-                    <AppButton
-                      variant="ghost"
-                      size="sm"
-                      class="save-export"
-                      title="导出这个存档为可分享的 JSON 文件"
-                      @click.stop="exportSave(save.id)"
-                    >
-                      导出
-                    </AppButton>
-                    <button class="save-delete" title="删除存档" @click.stop="deleteSave(save.id)">
-                      ✕
-                    </button>
+                    <div class="save-row-actions">
+                      <button
+                        class="save-row-action"
+                        :aria-label="`重命名存档：${save.name || '未命名存档'}`"
+                        title="重命名存档"
+                        @click.stop="beginRenameSave(save.id)"
+                      >
+                        <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                      </button>
+                      <button
+                        class="save-row-action"
+                        :aria-label="`导出存档：${save.name || '未命名存档'}`"
+                        title="导出这个存档为可分享的 JSON 文件"
+                        @click.stop="exportSave(save.id)"
+                      >
+                        <i class="fa-solid fa-download" aria-hidden="true"></i>
+                      </button>
+                      <button
+                        class="save-row-action save-row-action-danger"
+                        :aria-label="`删除存档：${save.name || '未命名存档'}`"
+                        title="删除存档"
+                        @click.stop="deleteSave(save.id)"
+                      >
+                        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -586,14 +746,41 @@ function formatTime(ts: number) {
                       <strong class="attr-value">{{ v }}</strong>
                     </span>
                   </div>
-                  <AppButton
-                    variant="primary"
-                    size="md"
-                    class="btn-enter-game"
-                    @click="loadGame(selectedSave.id)"
+                  <form
+                    v-if="renamingSaveId === selectedSave.id"
+                    class="save-rename-form"
+                    @submit.prevent="renameSave"
                   >
-                    进入游戏
-                  </AppButton>
+                    <label for="save-rename-input">存档名称</label>
+                    <div class="save-rename-controls">
+                      <input
+                        id="save-rename-input"
+                        v-model="renameDraft"
+                        class="save-rename-input"
+                        maxlength="40"
+                        autocomplete="off"
+                        autofocus
+                      />
+                      <AppButton variant="primary" size="sm" type="submit">保存名称</AppButton>
+                      <AppButton variant="ghost" size="sm" type="button" @click="cancelRenameSave">
+                        取消
+                      </AppButton>
+                    </div>
+                  </form>
+                  <div v-else class="save-preview-actions">
+                    <AppButton variant="primary" size="md" @click="loadGame(selectedSave.id)">
+                      进入游戏
+                    </AppButton>
+                    <AppButton variant="ghost" size="md" @click="beginRenameSave(selectedSave.id)">
+                      重命名存档
+                    </AppButton>
+                    <AppButton variant="ghost" size="md" @click="exportSave(selectedSave.id)">
+                      导出存档
+                    </AppButton>
+                    <AppButton variant="danger" size="md" @click="deleteSave(selectedSave.id)">
+                      删除存档
+                    </AppButton>
+                  </div>
                 </template>
                 <div v-else class="save-preview-empty">
                   <div class="empty-icon"></div>
@@ -605,29 +792,6 @@ function formatTime(ts: number) {
         </div>
       </transition>
     </Teleport>
-
-    <!-- 制作人员弹窗 -->
-    <AppModal v-model:open="showCreditsModal" title="制作人员" size="sm">
-      <div class="credits-content">
-        <div class="credit-item"><strong>引擎开发</strong><span>Claude Code + Richard</span></div>
-        <div class="credit-item">
-          <strong>世界观设定</strong><span>{{ branding.credits }}</span>
-        </div>
-        <div class="credit-item"><strong>前端 UI</strong><span>Vue 3 + Pinia + Vite</span></div>
-        <div class="credit-item"><strong>数据引擎</strong><span>Dexie.js (IndexedDB)</span></div>
-        <template v-if="branding.worldSummary.title || branding.worldSummary.lines.length">
-          <hr class="credit-divider" />
-          <div class="world-lore">
-            <h4>{{ branding.worldSummary.title }}</h4>
-            <p class="text-muted text-sm">
-              <template v-for="(line, i) in branding.worldSummary.lines" :key="i">
-                <br v-if="i > 0" />{{ line }}
-              </template>
-            </p>
-          </div>
-        </template>
-      </div>
-    </AppModal>
 
     <!--
       单存档导入体检未通过（缺世界书条目 / 内容包版本不同 / 缺正文预设）。
@@ -689,9 +853,11 @@ function formatTime(ts: number) {
    优雅的暗色奇幻风格
    ═══════════════════════════════════════ */
 .home-page {
+  --drift-column-center: 0.191;
+  --drift-column-width: 0.242;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: flex-start;
   min-height: 100vh;
   position: relative;
@@ -724,6 +890,27 @@ function formatTime(ts: number) {
       transparent
     ),
     var(--theme-window-bg);
+}
+
+.home-page.has-astral-backdrop .bg-glow,
+.home-page.has-astral-backdrop .stars {
+  display: none;
+}
+
+.home-stage-ui {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: clamp(272px, 25vw, 348px);
+  min-height: 100vh;
+  margin-left: clamp(28px, 7vw, 108px);
+  padding: var(--theme-spacing-2xl) 0 calc(var(--theme-spacing-2xl) * 2);
+  text-align: center;
+  user-select: none;
 }
 
 /* ═══ 装饰性光晕 ═══ */
@@ -795,7 +982,8 @@ function formatTime(ts: number) {
 
 /* ═══ 标题区 ═══ */
 .title-section {
-  margin-top: 32vh;
+  width: 100%;
+  margin-top: 0;
   text-align: center;
   position: relative;
   z-index: 1;
@@ -846,7 +1034,7 @@ function formatTime(ts: number) {
 }
 .main-line {
   font-family: var(--theme-font-title);
-  font-size: clamp(2rem, 6vw, 3.2rem);
+  font-size: clamp(1.9rem, 3.1vw, 2.7rem);
   font-weight: 700;
   color: var(--theme-text-primary);
   letter-spacing: 6px;
@@ -856,7 +1044,8 @@ function formatTime(ts: number) {
   line-height: 1.3;
 }
 .alt-line {
-  font-size: clamp(1.2rem, 3.5vw, 2rem);
+  font-family: var(--theme-font-display);
+  font-size: clamp(0.85rem, 1.2vw, 1.05rem);
   font-weight: 400;
   letter-spacing: 8px;
   color: var(--theme-text-secondary);
@@ -965,7 +1154,8 @@ function formatTime(ts: number) {
 
 /* ═══ 按钮区 ═══ */
 .action-section {
-  margin-top: 2.5rem;
+  width: 100%;
+  margin-top: 2.2rem;
   position: relative;
   z-index: 1;
   animation: btnsEnter 0.8s ease-out 0.5s both;
@@ -986,7 +1176,7 @@ function formatTime(ts: number) {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  width: min(320px, 80vw);
+  width: 100%;
 }
 
 .btn-new-game {
@@ -1006,30 +1196,34 @@ function formatTime(ts: number) {
   transform: translateY(0);
 }
 
-.btn-load {
+.btn-load,
+.btn-extensions,
+.btn-settings {
+  background: color-mix(in srgb, var(--theme-card-bg) 82%, transparent);
+  border-color: var(--theme-card-border);
+  color: var(--theme-text-primary);
+  backdrop-filter: blur(6px);
   transition:
     transform 0.2s ease,
     box-shadow 0.2s ease;
 }
-.btn-load:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px color-mix(in srgb, #000 25%, transparent);
-}
-
-.btn-workshop {
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
-}
-.btn-workshop:hover {
+.btn-load:hover,
+.btn-extensions:hover,
+.btn-settings:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 16px color-mix(in srgb, #000 25%, transparent);
 }
 
 .btn-ghost {
+  background: color-mix(in srgb, var(--theme-card-bg) 55%, transparent);
+  border-color: transparent;
+  color: var(--theme-text-primary);
+  backdrop-filter: blur(7px);
   transition: transform 0.2s ease;
 }
 .btn-ghost:hover {
+  background: color-mix(in srgb, var(--theme-card-bg) 78%, transparent);
+  border-color: color-mix(in srgb, var(--theme-primary) 34%, transparent);
   transform: translateY(-1px);
 }
 
@@ -1080,8 +1274,14 @@ function formatTime(ts: number) {
 
 /* ═══ 底部 ═══ */
 .home-footer {
-  margin-top: auto;
-  padding: 2.5rem 0 1.5rem;
+  position: fixed;
+  bottom: var(--theme-spacing-lg);
+  left: clamp(28px, 7vw, 108px);
+  z-index: 2;
+  justify-content: center;
+  width: clamp(272px, 25vw, 348px);
+  margin: 0;
+  padding: 0;
   font-size: 0.75rem;
   color: var(--theme-text-muted);
   opacity: 0.4;
@@ -1089,14 +1289,62 @@ function formatTime(ts: number) {
   gap: 8px;
   align-items: center;
   letter-spacing: 1px;
-  position: relative;
-  z-index: 1;
 }
 .footer-dot {
   opacity: 0.3;
 }
 
-/* ═══ 读取存档 — 全屏面板 ═══ */
+@media (max-aspect-ratio: 23/20) {
+  .home-page {
+    --drift-column-center: 0.5;
+    --drift-column-width: 0.88;
+  }
+
+  .home-stage-ui {
+    justify-content: flex-start;
+    width: min(88vw, 380px);
+    min-height: 100vh;
+    margin: 0 auto;
+    padding-top: 6vh;
+  }
+
+  .title-frame {
+    padding: var(--theme-spacing-lg) var(--theme-spacing-xl);
+  }
+
+  .action-section {
+    margin-top: var(--theme-spacing-xl);
+  }
+
+  .home-footer {
+    left: 50%;
+    width: min(88vw, 380px);
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-height: 760px) and (min-aspect-ratio: 23/20) {
+  .home-stage-ui {
+    justify-content: flex-start;
+    padding-top: calc(var(--theme-spacing-2xl) * 2);
+  }
+
+  .title-frame {
+    padding-top: var(--theme-spacing-md);
+    padding-bottom: var(--theme-spacing-md);
+  }
+
+  .title-divider {
+    margin-top: var(--theme-spacing-md);
+    margin-bottom: var(--theme-spacing-md);
+  }
+
+  .action-section {
+    margin-top: var(--theme-spacing-lg);
+  }
+}
+
+/* ═══ 存档管理 — 全屏面板 ═══ */
 .save-panel-overlay {
   position: fixed;
   inset: 0;
@@ -1135,6 +1383,15 @@ function formatTime(ts: number) {
   margin: 0;
   color: var(--theme-text-primary);
   letter-spacing: 1px;
+}
+.save-panel-heading {
+  min-width: 0;
+}
+.save-panel-hint {
+  margin: var(--theme-spacing-xs) 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--theme-text-muted);
 }
 .save-panel-header-actions {
   display: flex;
@@ -1227,37 +1484,45 @@ function formatTime(ts: number) {
 .save-meta {
   font-size: 0.72rem;
 }
-/* 导出按钮与删除按钮同一套「悬停才现身」的节奏 —— 存档行平时只讲存档的事 */
-.save-export {
+/* 行内操作平时收起；键盘聚焦时同样显现，避免只靠 hover 才能发现 */
+.save-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   flex-shrink: 0;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--theme-transition-fast);
 }
-.save-item:hover .save-export {
+.save-item:hover .save-row-actions,
+.save-item:focus-within .save-row-actions {
   opacity: 1;
 }
-.save-delete {
-  width: 24px;
-  height: 24px;
+.save-row-action {
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: none;
   border: none;
   color: var(--theme-text-muted);
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   cursor: pointer;
-  border-radius: 4px;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s;
+  border-radius: var(--theme-radius-sm);
+  transition:
+    color var(--theme-transition-fast),
+    background-color var(--theme-transition-fast);
 }
-.save-item:hover .save-delete {
-  opacity: 1;
+.save-row-action:hover,
+.save-row-action:focus-visible {
+  color: var(--theme-text-primary);
+  background-color: var(--theme-tab-hover-bg);
+  outline: none;
 }
-.save-delete:hover {
+.save-row-action-danger:hover,
+.save-row-action-danger:focus-visible {
   color: var(--theme-error);
-  background: color-mix(in srgb, var(--theme-error) 10%, transparent);
+  background-color: color-mix(in srgb, var(--theme-error) 10%, transparent);
 }
 
 /* 右预览 */
@@ -1362,10 +1627,48 @@ function formatTime(ts: number) {
   color: var(--theme-text-primary);
 }
 
-.btn-enter-game {
+.save-preview-actions {
   margin-top: auto;
-  align-self: flex-start;
-  letter-spacing: 1px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--theme-spacing-sm);
+  align-items: center;
+}
+.save-rename-form {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-lg);
+  background: var(--theme-surface-muted);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+}
+.save-rename-form label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--theme-text-secondary);
+}
+.save-rename-controls {
+  display: flex;
+  gap: var(--theme-spacing-sm);
+  align-items: center;
+}
+.save-rename-input {
+  min-width: 0;
+  min-height: 36px;
+  flex: 1;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  color: var(--theme-text-primary);
+  background-color: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  font: inherit;
+}
+.save-rename-input:focus-visible {
+  border-color: var(--theme-primary);
+  outline: 2px solid color-mix(in srgb, var(--theme-primary) 25%, transparent);
+  outline-offset: 1px;
 }
 
 .save-preview-empty {
@@ -1379,6 +1682,45 @@ function formatTime(ts: number) {
 }
 .save-preview-empty .empty-icon {
   font-size: 2rem;
+}
+
+@media (max-width: 700px) {
+  .save-panel {
+    width: min(94vw, 900px);
+    height: min(86vh, 680px);
+  }
+  .save-panel-header {
+    align-items: flex-start;
+    padding: var(--theme-spacing-md) var(--theme-spacing-lg);
+  }
+  .save-panel-header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .save-panel-body {
+    flex-direction: column;
+  }
+  .save-panel-left {
+    width: 100%;
+    max-height: 42%;
+    border-right: none;
+    border-bottom: 1px solid var(--theme-card-border);
+  }
+  .save-panel-right {
+    padding: var(--theme-spacing-lg);
+  }
+  .save-preview-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .save-row-actions {
+    opacity: 1;
+  }
+  .save-rename-controls {
+    flex-wrap: wrap;
+  }
+  .save-rename-input {
+    flex-basis: 100%;
+  }
 }
 
 /* 空状态 */
@@ -1425,29 +1767,6 @@ function formatTime(ts: number) {
   line-height: 1.6;
 }
 
-/* ═══ 制作人员 ═══ */
-.credits-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.credit-item {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.9rem;
-  color: var(--theme-text-primary);
-  padding: 4px 0;
-}
-.credit-divider {
-  border-color: var(--theme-card-border);
-}
-.world-lore h4 {
-  font-family: var(--theme-font-title);
-  margin: 0 0 4px;
-  font-size: 0.95rem;
-  color: var(--theme-text-primary);
-}
-
 /* ═══ 无障碍：减弱动效 ═══ */
 @media (prefers-reduced-motion: reduce) {
   .bg-glow,
@@ -1458,7 +1777,8 @@ function formatTime(ts: number) {
   .action-section {
     animation: none;
   }
-  .save-export,
+  .save-row-actions,
+  .save-row-action,
   .quote-fade-enter-active,
   .quote-fade-leave-active,
   .fade-enter-active,
@@ -1472,13 +1792,15 @@ function formatTime(ts: number) {
   }
   .btn-new-game,
   .btn-load,
-  .btn-workshop,
+  .btn-extensions,
+  .btn-settings,
   .btn-ghost {
     transition: none;
   }
   .btn-new-game:hover,
   .btn-load:hover,
-  .btn-workshop:hover,
+  .btn-extensions:hover,
+  .btn-settings:hover,
   .btn-ghost:hover {
     transform: none;
   }

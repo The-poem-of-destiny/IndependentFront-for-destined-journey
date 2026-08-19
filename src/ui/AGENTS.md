@@ -243,9 +243,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │
 ├── stores/
 │   ├── theme-store.ts / ui-store.ts / create-store.ts / game-store.ts
-│   │      ui-store 的 `previousView` 只记**一层**来路，服务「进去了要能原路回来」
-│   │      （工坊有三个入口：首页 / 游戏页侧栏 / 设置页导航）。同视图重复 navigate
-│   │      刻意不覆盖它 —— 否则返回目标会变成自己，返回键就地失效。不是历史栈
+│   │      ui-store 的 `viewHistory` 负责页面级多层返回（例如设置 → 扩展管理 → 工坊），
+│   │      `previousView` 只作兼容投影；`back()` 直接弹栈，不能再经 `navigate()` 把当前页
+│   │      压回去。同视图重复 navigate 不入栈，否则返回目标会变成自己
 │   ├── settings-store.ts            ← 全应用最热的状态；deep watch 自动落 localStorage
 │   │                                   🔴 **加新设置要改两处**（Q-18）：先在 settings-types.ts
 │   │                                      的 `UiSettings` 上声明，再在 getDefaults() 给默认值。
@@ -457,7 +457,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   └── form/ (FormInput / FormSelect / FormStepper —— **只有这三个**；
 │   │             早期文档里的 Cascader / KeyValue 从未落地，别照着 import)
 │   ├── home/
-│   │   ├── HomePage.vue             ← 游戏标题画面 —— **本目录唯一的生产组件**
+│   │   ├── HomePage.vue             ← 游戏标题画面；DOM 操作列与 WebGL 背景分层，背景未就绪时保留 CSS 兜底
+│   │   ├── AstralDriftBackdrop.vue  ← [星流首页] 懒加载 / WebGL2 与减动效降级 / 可见性暂停 / 销毁壳
+│   │   ├── drift/runtime.ts         ← [星流首页] Three.js 场景单文件运行时；工厂 + 主题切换 + 生命周期
 │   │   └── *.standalone.html        ← 🔴 8 个**设计原型**，不是生产界面（AstralDrift / AstralDriftHome /
 │   │                                   AstralDriftHomeParticles / AstralDriftHomeTuner / AstralDriftV2 /
 │   │                                   AstralDriftV2Tuner / MagicCircle / ObsidianAstrolabeV2）。
@@ -465,7 +467,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   反过来「首页看起来不对」也不要去这里找。
 │   │                                   星流首页的集成方案在
 │   │                                   `docs/planning/2026-08-09-home-astral-drift-integration-design.md`，
-│   │                                   **D6 未获准、集成尚未开始**
+│   │                                   **2026-08-20 已实施；D6 当前已落代码但主人保留意见仍待裁定，
+│   │                                   专项降级 / 生命周期 / 多宽高比验收仍在 TODO**
 │   ├── settings/                    ← [Q-25] 14 个分区**全部**是一行子组件
 │   │   ├── SettingsPage.vue         ← 纯壳层（1995 → 约 415 行）：页头 + 主导航 + Agent 子导航
 │   │   │                               只留 activeSection / activeAgent / selectSection /
@@ -477,8 +480,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                  永远读不回来，每次都落在空态。重挂载由 `v-if` 保证，
 │   │   │                                  不需要拿一次用户点击去换。恢复前先对 AGENT_LIST 验，
 │   │   │                                  查不到就退空态（陈旧 id 会让页头渲染成空白）
-│   │   │                               🔴 主导航末尾那条「创意工坊」**不是分区**：它 navigate 去
-│   │   │                                  工坊页，故不进 `navItems`、也没有对应的 `activeSection`
+│   │   │                               🔴 主导航末尾那条「扩展管理」**不是分区**：它 navigate 去
+│   │   │                                  扩展管理页，故不进 `navItems`、也没有对应的 `activeSection`
 │   │   │                                  值。塞进那张表 = 多一个点了只出现空白右栏的选项
 │   │   ├── agent/                    ← [Q-25] Agent 分区（照 settings/audio/ 的样子）
 │   │   │   ├── AgentSection.vue      ← 分区壳：**单根** section.section.centered + 页头，
@@ -863,10 +866,14 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                  他只看到画面里少了个人。措辞说**「出图时的方言」不是「当前方言」**：
 │   │   │                                  告警是那一次装配留下的，把历史事实说成现状会让排查走错方向。
 │   │   │                                  不做 toast（每张图都会响）、不阻断（AI 新造 NPC 无预设仍要画场景）
-│   │   ├── WorkshopEnablePanel.vue  ← [工坊] 每存档「内容启用」面板（建档后仍可改）
 │   │   └── (战斗面板见 combat/ 子组件，docs/reference/combat-system-architecture.md)
-│   └── workshop/                    ← [工坊 P1] 创意工坊页
-│       ├── WorkshopPage.vue         ← 页面壳（已安装列表 + 浏览入口；首页与侧栏均有入口）
+│   └── workshop/                    ← 扩展管理 + [工坊 P1] 创意工坊子页面
+│       ├── ExtensionManagementPage.vue
+│       │                               ← 首页/设置/游戏侧栏统一入口；原版扩展暂为明确占位，
+│       │                                  社区扩展的按存档启用设置归本页
+│       ├── CommunityExtensionSettings.vue
+│       │                               ← 已安装社区扩展启用面（选择存档 + 项目粒度勾选）
+│       ├── WorkshopPage.vue         ← 创意工坊子页面（浏览/安装/更新/卸载/投稿，不放启用设置）
 │       ├── WorkshopBrowseModal.vue    ← 搜索 + 服务端排序（5 模式）+ 恒定四标签筛选 + 骨架屏
 │       ├── WorkshopDetailModal.vue    ← 装前检视：条目/正则逐条展开
 │       │                                 ★ 正则行的处置预告复用 `mapWorkshopRegexes`
@@ -913,7 +920,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | 🖼 图像生成     | 三张卡：提示词生成（`image_prompt` 的模型/温度/世界书存 `agents` 袋子；systemPrompt 按方言存 `imageDialectOverrides`）/ 出图（后端 + 方言选择 + 三档开关 + per-provider 参数与限额，存 `UiSettings` 的 `imageNovelai`/`imageComfy` 袋）/ 视觉预设（角色初始设定存 Dexie `imagePresets`；本档外貌存 `characterAppearances`，含「存为初始设定」） |
 | 💾 存档数据    | 导出/导入/清除（排除音频库与素材库，各有独立导出口）                                                                                                                                                                                                                                                                                            |
 | 🛠 开发者模式   | 持久开关（默认关闭）；控制调试工具栏、原始 Agent 请求/响应、reasoning、工具 payload、诊断导出与 `Alt + Shift + D` 抽屉                                                                                                                                                                                                                          |
-| ℹ 关于         | 引擎版本/技术栈/统计                                                                                                                                                                                                                                                                                                                            |
+| ℹ 关于         | 制作人员、项目与技术信息、内容包世界概览、版权与第三方许可证署名                                                                                                                                                                                                                                                                                |
 
 ### 预设系统（正文 Agent 专用）
 

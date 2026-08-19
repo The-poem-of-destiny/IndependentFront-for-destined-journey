@@ -24,7 +24,7 @@ const allTools = [
   { id: 'plot', label: '剧情', icon: 'fa-solid fa-book-open' },
   { id: 'snapshots', label: '快照', icon: 'fa-solid fa-clock-rotate-left' },
   { id: 'gallery', label: '图鉴', icon: 'fa-solid fa-images' },
-  { id: 'workshop', label: '工坊', icon: 'fa-solid fa-puzzle-piece' },
+  { id: 'extensions', label: '扩展', icon: 'fa-solid fa-puzzle-piece' },
   { id: 'audio', label: '音乐', icon: 'fa-solid fa-music' },
   { id: 'debug', label: '调试', icon: 'fa-solid fa-bug' },
   { id: 'settings', label: '设置', icon: 'fa-solid fa-gear' },

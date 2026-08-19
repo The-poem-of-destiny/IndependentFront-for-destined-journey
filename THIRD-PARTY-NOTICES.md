@@ -1,4 +1,4 @@
-# 第三方字体与图标 —— 许可与署名
+# 第三方依赖 —— 许可与署名
 
 本仓库**自带并分发**下列字体与图标字体的二进制文件（`node_modules/@fontsource-variable/*`
 与 `node_modules/@fortawesome/fontawesome-free`，构建时由 Vite 输出到 `dist/assets/`）。
@@ -7,6 +7,15 @@
 
 在 2026-08-05 之前，这些资源是从 Google Fonts 与 cdnjs **运行时加载**的。改为自托管的
 理由见 `docs/design.md` §7.4「字体从哪来 —— 自托管，零外部请求」。
+
+## 分发中的运行时库
+
+| 库       | 版权方           | 许可证 | 许可证全文                                               |
+| -------- | ---------------- | ------ | -------------------------------------------------------- |
+| three.js | three.js authors | MIT    | [`public/licenses/three.txt`](public/licenses/three.txt) |
+
+three.js 用于首页 Astral Drift 动态背景，并通过动态导入成为独立分块，不进入首屏主分块。
+MIT 不要求界面内可见署名；许可证全文随 `public/` 原样进入构建产物。
 
 ## 分发中的字体
 

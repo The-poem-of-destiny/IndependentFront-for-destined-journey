@@ -724,11 +724,12 @@ export const useGameStore = defineStore('game', () => {
    *   免得把新值也一起抹掉）。
    * - `false`：落库成功后才写内存，失败什么也不动。
    */
-  async function patchSaveMetadata(
+  async function patchSaveMetadataFor(
+    saveId: string,
     patch: Record<string, unknown>,
     opts: { optimistic: boolean; failMessage: string },
   ): Promise<boolean> {
-    const current = activeSave.value;
+    const current = saves.value.find((save: SaveSlot) => save.id === saveId);
     if (!current) return false;
 
     const idx = saves.value.findIndex((save: SaveSlot) => save.id === current.id);
@@ -753,12 +754,32 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  async function patchSaveMetadata(
+    patch: Record<string, unknown>,
+    opts: { optimistic: boolean; failMessage: string },
+  ): Promise<boolean> {
+    if (!activeSaveId.value) return false;
+    return patchSaveMetadataFor(activeSaveId.value, patch, opts);
+  }
+
   /** 改写本存档的世界书条目启用轴（`metadata.enabledWorldBookEntries`） */
   async function setEnabledWorldBookEntries(entries: string[]): Promise<boolean> {
     // 非乐观：这条路径没有重入风险，乐观写只会让面板短暂显示一个尚未落库的启用轴
     return patchSaveMetadata(
       { enabledWorldBookEntries: [...entries] },
       { optimistic: false, failMessage: '写入世界书启用轴失败' },
+    );
+  }
+
+  /** 从扩展管理页改写指定存档的工坊启用轴，不要求该存档已进入游戏。 */
+  async function setSaveEnabledWorldBookEntries(
+    saveId: string,
+    entries: string[],
+  ): Promise<boolean> {
+    return patchSaveMetadataFor(
+      saveId,
+      { enabledWorldBookEntries: [...entries] },
+      { optimistic: false, failMessage: '写入指定存档的世界书启用轴失败' },
     );
   }
 
@@ -1283,6 +1304,7 @@ export const useGameStore = defineStore('game', () => {
     markOpeningPromptConsumed,
     releaseOpeningPromptClaim,
     setEnabledWorldBookEntries,
+    setSaveEnabledWorldBookEntries,
     pendingOptions,
     setPendingOptions,
     pendingItemFocus,

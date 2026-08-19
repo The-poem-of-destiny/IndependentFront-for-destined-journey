@@ -196,7 +196,7 @@ export interface PackBrandingSection {
   tagline?: string;
   subtitles?: string[];
   credits?: string;
-  /** 首页制作人员弹窗的世界速览块 */
+  /** “关于”分区的世界速览块 */
   worldSummary?: { title?: string; lines?: string[] };
   about?: string;
   /** 关于分区页脚的版权行 */
