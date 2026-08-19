@@ -12,6 +12,7 @@ import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
 import AstralDriftBackdrop from './AstralDriftBackdrop.vue';
 import { useBranding } from '../../branding-defaults';
 import { buildSessionImportWarnings } from '../../lib/session-import-messages';
+import { findLatestSave } from './latest-save';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -32,12 +33,23 @@ const backdropReady = ref(false);
  */
 const WORKSHOP_ENTRY_ENABLED = true;
 
-// === 读取存档 ===
+// === 存档管理 ===
 const showSaveModal = ref(false);
 const showCreditsModal = ref(false);
+const savesLoaded = ref(false);
 const selectedSaveId = ref<string | null>(null);
 const selectedSave = computed(() => game.saves.find((s) => s.id === selectedSaveId.value) || null);
 const selectedSaveData = ref<any>(null);
+const latestSave = computed(() => findLatestSave(game.saves));
+const saveManagerIntent = ref<'browse' | 'export' | 'delete' | 'rename'>('browse');
+const renamingSaveId = ref<string | null>(null);
+const renameDraft = ref('');
+const saveManagerHint = computed(() => {
+  if (saveManagerIntent.value === 'export') return '请选择一个存档，然后使用右侧的“导出存档”。';
+  if (saveManagerIntent.value === 'delete') return '请选择要删除的存档，然后使用右侧的“删除存档”。';
+  if (saveManagerIntent.value === 'rename') return '为选中的存档输入新名称并保存。';
+  return '选择一个存档查看详情，或继续游戏。';
+});
 
 watch(selectedSaveId, async (id) => {
   if (!id) {
@@ -125,6 +137,8 @@ onMounted(async () => {
     await game.loadSaves();
   } catch {
     /* IndexedDB 可能未初始化 */
+  } finally {
+    savesLoaded.value = true;
   }
   // 风味文字循环。
   // 🔴 取模前先挡住空数组：内容包可以显式给 `subtitles: []`（刻意关掉轮播），
@@ -133,20 +147,63 @@ onMounted(async () => {
     const n = quotes.value.length;
     currentQuote.value = n > 0 ? (currentQuote.value + 1) % n : 0;
   }, 5000);
+  document.addEventListener('keydown', onHomeKeydown);
 });
 
 onUnmounted(() => {
   if (quoteTimer) clearInterval(quoteTimer);
+  document.removeEventListener('keydown', onHomeKeydown);
   document.body.classList.remove('home-entered');
 });
+
+function onHomeKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && showSaveModal.value) closeSaveManager();
+}
 
 function newGame() {
   ui.navigate('create');
 }
 
 function loadGame(saveId: string) {
-  showSaveModal.value = false;
+  closeSaveManager();
   ui.navigate('game', saveId);
+}
+
+async function ensureSavesLoaded() {
+  if (savesLoaded.value) return;
+  try {
+    await game.loadSaves();
+  } catch {
+    /* IndexedDB 不可用时按无存档处理 */
+  } finally {
+    savesLoaded.value = true;
+  }
+}
+
+async function startOrContinue() {
+  // 首页刚挂载时存档列表仍可能在读取中；点击不能因此误入新建流程。
+  await ensureSavesLoaded();
+
+  const save = latestSave.value;
+  if (save) loadGame(save.id);
+  else newGame();
+}
+
+async function openSaveManager(intent: 'browse' | 'export' | 'delete' | 'rename' = 'browse') {
+  await ensureSavesLoaded();
+  saveManagerIntent.value = intent;
+  showSaveModal.value = true;
+
+  const target = selectedSave.value || latestSave.value;
+  selectedSaveId.value = target?.id ?? null;
+  if (intent === 'rename' && target) beginRenameSave(target.id);
+  else cancelRenameSave();
+}
+
+function closeSaveManager() {
+  showSaveModal.value = false;
+  saveManagerIntent.value = 'browse';
+  cancelRenameSave();
 }
 
 // 🧪 开发用快速测试 (正式版移除)
@@ -167,9 +224,56 @@ async function quickTestKeep() {
 
 async function deleteSave(saveId: string) {
   if (!confirm('确定要删除这个存档吗？此操作不可撤销。')) return;
-  const { deleteSaveSlot } = await import('@engine/database');
-  await deleteSaveSlot(saveId);
-  await game.loadSaves();
+  try {
+    const { deleteSaveSlot } = await import('@engine/database');
+    await deleteSaveSlot(saveId);
+    await game.loadSaves();
+    if (selectedSaveId.value === saveId) selectedSaveId.value = game.saves[0]?.id ?? null;
+    ui.toast('存档已删除', 'success');
+  } catch (err) {
+    ui.toast(`删除失败：${errText(err)}`, 'error');
+  }
+}
+
+function beginRenameSave(saveId: string) {
+  const save = game.saves.find((candidate) => candidate.id === saveId);
+  if (!save) return;
+  selectedSaveId.value = saveId;
+  renamingSaveId.value = saveId;
+  renameDraft.value = save.name || '';
+  saveManagerIntent.value = 'rename';
+}
+
+function cancelRenameSave() {
+  renamingSaveId.value = null;
+  renameDraft.value = '';
+}
+
+async function renameSave() {
+  const saveId = renamingSaveId.value;
+  const name = renameDraft.value.trim();
+  if (!saveId) return;
+  if (!name) {
+    ui.toast('存档名称不能为空', 'warning');
+    return;
+  }
+
+  const save = game.saves.find((candidate) => candidate.id === saveId);
+  if (!save) {
+    ui.toast('重命名失败：找不到这个存档', 'error');
+    return;
+  }
+
+  try {
+    const { saveSaveSlot } = await import('@engine/database');
+    await saveSaveSlot({ ...save, name });
+    await game.loadSaves();
+    cancelRenameSave();
+    saveManagerIntent.value = 'browse';
+    ui.toast('存档已重命名', 'success');
+  } catch (err) {
+    ui.toast(`重命名失败：${errText(err)}`, 'error');
+  }
 }
 
 // ═══════════ 单存档导出 / 导入 ═══════════
@@ -415,17 +519,23 @@ function formatTime(ts: number) {
       <!-- 操作按钮 -->
       <div class="action-section">
         <div class="btn-column">
-          <AppButton variant="primary" size="lg" block class="btn-new-game" @click="newGame">
-            ✦ 新 建 存 档
+          <AppButton
+            variant="primary"
+            size="lg"
+            block
+            class="btn-new-game"
+            @click="startOrContinue"
+          >
+            {{ latestSave ? '✦ 继 续' : '✦ 新 建 存 档' }}
           </AppButton>
           <AppButton
             variant="secondary"
             size="lg"
             block
             class="btn-load"
-            @click="showSaveModal = true"
+            @click="openSaveManager()"
           >
-            <i class="btn-icon fa-solid fa-folder-open" aria-hidden="true"></i>读 取 存 档
+            <i class="btn-icon fa-solid fa-folder-tree" aria-hidden="true"></i>存 档 管 理
           </AppButton>
           <!-- 入口开关：见 script 里的 WORKSHOP_ENTRY_ENABLED -->
           <AppButton
@@ -480,17 +590,26 @@ function formatTime(ts: number) {
       <span class="footer-era">复兴纪元</span>
     </footer>
 
-    <!-- 读取存档 — 全屏界面 -->
+    <!-- 存档管理 — 全屏界面 -->
     <Teleport to="body">
       <transition name="save-slide">
-        <div v-if="showSaveModal" class="save-panel-overlay">
-          <div class="save-panel">
+        <div v-if="showSaveModal" class="save-panel-overlay" @click.self="closeSaveManager">
+          <div
+            class="save-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="save-panel-title"
+          >
             <!-- 顶部栏 -->
             <div class="save-panel-header">
-              <h2 class="save-panel-title">读取存档</h2>
+              <div class="save-panel-heading">
+                <h2 id="save-panel-title" class="save-panel-title">存档管理</h2>
+                <p class="save-panel-hint" role="status">{{ saveManagerHint }}</p>
+              </div>
               <div class="save-panel-header-actions">
+                <AppButton variant="ghost" size="sm" @click="newGame">新建存档</AppButton>
                 <AppButton variant="ghost" size="sm" @click="importSave">导入存档</AppButton>
-                <button class="save-panel-close" aria-label="关闭" @click="showSaveModal = false">
+                <button class="save-panel-close" aria-label="关闭" @click="closeSaveManager">
                   ✕
                 </button>
               </div>
@@ -524,18 +643,32 @@ function formatTime(ts: number) {
                         formatTime(save.updatedAt)
                       }}</span>
                     </div>
-                    <AppButton
-                      variant="ghost"
-                      size="sm"
-                      class="save-export"
-                      title="导出这个存档为可分享的 JSON 文件"
-                      @click.stop="exportSave(save.id)"
-                    >
-                      导出
-                    </AppButton>
-                    <button class="save-delete" title="删除存档" @click.stop="deleteSave(save.id)">
-                      ✕
-                    </button>
+                    <div class="save-row-actions">
+                      <button
+                        class="save-row-action"
+                        :aria-label="`重命名存档：${save.name || '未命名存档'}`"
+                        title="重命名存档"
+                        @click.stop="beginRenameSave(save.id)"
+                      >
+                        <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                      </button>
+                      <button
+                        class="save-row-action"
+                        :aria-label="`导出存档：${save.name || '未命名存档'}`"
+                        title="导出这个存档为可分享的 JSON 文件"
+                        @click.stop="exportSave(save.id)"
+                      >
+                        <i class="fa-solid fa-download" aria-hidden="true"></i>
+                      </button>
+                      <button
+                        class="save-row-action save-row-action-danger"
+                        :aria-label="`删除存档：${save.name || '未命名存档'}`"
+                        title="删除存档"
+                        @click.stop="deleteSave(save.id)"
+                      >
+                        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -596,14 +729,41 @@ function formatTime(ts: number) {
                       <strong class="attr-value">{{ v }}</strong>
                     </span>
                   </div>
-                  <AppButton
-                    variant="primary"
-                    size="md"
-                    class="btn-enter-game"
-                    @click="loadGame(selectedSave.id)"
+                  <form
+                    v-if="renamingSaveId === selectedSave.id"
+                    class="save-rename-form"
+                    @submit.prevent="renameSave"
                   >
-                    进入游戏
-                  </AppButton>
+                    <label for="save-rename-input">存档名称</label>
+                    <div class="save-rename-controls">
+                      <input
+                        id="save-rename-input"
+                        v-model="renameDraft"
+                        class="save-rename-input"
+                        maxlength="40"
+                        autocomplete="off"
+                        autofocus
+                      />
+                      <AppButton variant="primary" size="sm" type="submit">保存名称</AppButton>
+                      <AppButton variant="ghost" size="sm" type="button" @click="cancelRenameSave">
+                        取消
+                      </AppButton>
+                    </div>
+                  </form>
+                  <div v-else class="save-preview-actions">
+                    <AppButton variant="primary" size="md" @click="loadGame(selectedSave.id)">
+                      进入游戏
+                    </AppButton>
+                    <AppButton variant="ghost" size="md" @click="beginRenameSave(selectedSave.id)">
+                      重命名存档
+                    </AppButton>
+                    <AppButton variant="ghost" size="md" @click="exportSave(selectedSave.id)">
+                      导出存档
+                    </AppButton>
+                    <AppButton variant="danger" size="md" @click="deleteSave(selectedSave.id)">
+                      删除存档
+                    </AppButton>
+                  </div>
                 </template>
                 <div v-else class="save-preview-empty">
                   <div class="empty-icon"></div>
@@ -1200,7 +1360,7 @@ function formatTime(ts: number) {
   }
 }
 
-/* ═══ 读取存档 — 全屏面板 ═══ */
+/* ═══ 存档管理 — 全屏面板 ═══ */
 .save-panel-overlay {
   position: fixed;
   inset: 0;
@@ -1239,6 +1399,15 @@ function formatTime(ts: number) {
   margin: 0;
   color: var(--theme-text-primary);
   letter-spacing: 1px;
+}
+.save-panel-heading {
+  min-width: 0;
+}
+.save-panel-hint {
+  margin: var(--theme-spacing-xs) 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--theme-text-muted);
 }
 .save-panel-header-actions {
   display: flex;
@@ -1331,37 +1500,45 @@ function formatTime(ts: number) {
 .save-meta {
   font-size: 0.72rem;
 }
-/* 导出按钮与删除按钮同一套「悬停才现身」的节奏 —— 存档行平时只讲存档的事 */
-.save-export {
+/* 行内操作平时收起；键盘聚焦时同样显现，避免只靠 hover 才能发现 */
+.save-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   flex-shrink: 0;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--theme-transition-fast);
 }
-.save-item:hover .save-export {
+.save-item:hover .save-row-actions,
+.save-item:focus-within .save-row-actions {
   opacity: 1;
 }
-.save-delete {
-  width: 24px;
-  height: 24px;
+.save-row-action {
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: none;
   border: none;
   color: var(--theme-text-muted);
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   cursor: pointer;
-  border-radius: 4px;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s;
+  border-radius: var(--theme-radius-sm);
+  transition:
+    color var(--theme-transition-fast),
+    background-color var(--theme-transition-fast);
 }
-.save-item:hover .save-delete {
-  opacity: 1;
+.save-row-action:hover,
+.save-row-action:focus-visible {
+  color: var(--theme-text-primary);
+  background-color: var(--theme-tab-hover-bg);
+  outline: none;
 }
-.save-delete:hover {
+.save-row-action-danger:hover,
+.save-row-action-danger:focus-visible {
   color: var(--theme-error);
-  background: color-mix(in srgb, var(--theme-error) 10%, transparent);
+  background-color: color-mix(in srgb, var(--theme-error) 10%, transparent);
 }
 
 /* 右预览 */
@@ -1466,10 +1643,48 @@ function formatTime(ts: number) {
   color: var(--theme-text-primary);
 }
 
-.btn-enter-game {
+.save-preview-actions {
   margin-top: auto;
-  align-self: flex-start;
-  letter-spacing: 1px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--theme-spacing-sm);
+  align-items: center;
+}
+.save-rename-form {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-lg);
+  background: var(--theme-surface-muted);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+}
+.save-rename-form label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--theme-text-secondary);
+}
+.save-rename-controls {
+  display: flex;
+  gap: var(--theme-spacing-sm);
+  align-items: center;
+}
+.save-rename-input {
+  min-width: 0;
+  min-height: 36px;
+  flex: 1;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  color: var(--theme-text-primary);
+  background-color: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  font: inherit;
+}
+.save-rename-input:focus-visible {
+  border-color: var(--theme-primary);
+  outline: 2px solid color-mix(in srgb, var(--theme-primary) 25%, transparent);
+  outline-offset: 1px;
 }
 
 .save-preview-empty {
@@ -1483,6 +1698,45 @@ function formatTime(ts: number) {
 }
 .save-preview-empty .empty-icon {
   font-size: 2rem;
+}
+
+@media (max-width: 700px) {
+  .save-panel {
+    width: min(94vw, 900px);
+    height: min(86vh, 680px);
+  }
+  .save-panel-header {
+    align-items: flex-start;
+    padding: var(--theme-spacing-md) var(--theme-spacing-lg);
+  }
+  .save-panel-header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .save-panel-body {
+    flex-direction: column;
+  }
+  .save-panel-left {
+    width: 100%;
+    max-height: 42%;
+    border-right: none;
+    border-bottom: 1px solid var(--theme-card-border);
+  }
+  .save-panel-right {
+    padding: var(--theme-spacing-lg);
+  }
+  .save-preview-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .save-row-actions {
+    opacity: 1;
+  }
+  .save-rename-controls {
+    flex-wrap: wrap;
+  }
+  .save-rename-input {
+    flex-basis: 100%;
+  }
 }
 
 /* 空状态 */
@@ -1562,7 +1816,8 @@ function formatTime(ts: number) {
   .action-section {
     animation: none;
   }
-  .save-export,
+  .save-row-actions,
+  .save-row-action,
   .quote-fade-enter-active,
   .quote-fade-leave-active,
   .fade-enter-active,
