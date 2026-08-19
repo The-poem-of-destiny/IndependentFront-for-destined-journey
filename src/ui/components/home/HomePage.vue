@@ -9,12 +9,14 @@ import type { FullBackup } from '@engine/database';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
+import AstralDriftBackdrop from './AstralDriftBackdrop.vue';
 import { useBranding } from '../../branding-defaults';
 import { buildSessionImportWarnings } from '../../lib/session-import-messages';
 
 const game = useGameStore();
 const ui = useUIStore();
 const cfg = useSettingsStore();
+const backdropReady = ref(false);
 
 /**
  * 创意工坊入口已开放（2026-08-04）。这个开关从来不是安全边界：入口关着的时候，
@@ -344,7 +346,13 @@ function formatTime(ts: number) {
 </script>
 
 <template>
-  <div class="home-page" @mouseenter="showDevButton = true" @mouseleave="showDevButton = false">
+  <div
+    class="home-page"
+    :class="{ 'has-astral-backdrop': backdropReady }"
+    @mouseenter="showDevButton = true"
+    @mouseleave="showDevButton = false"
+  >
+    <AstralDriftBackdrop @ready="backdropReady = $event" />
     <!-- 内容态横幅（波 1 T2 / §5.8）：占位 / 检测到本地真实内容 / error -->
     <ContentStatusBanner class="home-content-banner" />
     <!-- 装饰性背景光晕 -->
@@ -367,101 +375,103 @@ function formatTime(ts: number) {
       />
     </div>
 
-    <!-- 标题区域 -->
-    <div class="title-section">
-      <div class="title-frame">
-        <div class="title-corner title-corner-tl" aria-hidden="true" />
-        <div class="title-corner title-corner-tr" aria-hidden="true" />
-        <div class="title-corner title-corner-bl" aria-hidden="true" />
-        <div class="title-corner title-corner-br" aria-hidden="true" />
+    <main class="home-stage-ui">
+      <!-- 标题区域 -->
+      <div class="title-section">
+        <div class="title-frame">
+          <div class="title-corner title-corner-tl" aria-hidden="true" />
+          <div class="title-corner title-corner-tr" aria-hidden="true" />
+          <div class="title-corner title-corner-bl" aria-hidden="true" />
+          <div class="title-corner title-corner-br" aria-hidden="true" />
 
-        <!--
+          <!--
           标题分行由 branding 供给（1-2 行都合法）。第一行套主色、其余行套次色，
           与原来「主 + 副」两行的视觉一致；只有一行时自然退化成单行主色。
         -->
-        <h1 class="main-title">
-          <span
-            v-for="(line, i) in branding.titleLines"
-            :key="i"
-            :class="i === 0 ? 'title-line-t main-line' : 'title-line-b alt-line'"
-            >{{ line }}</span
-          >
-        </h1>
-      </div>
-
-      <div class="title-divider">
-        <span class="divider-diamond" aria-hidden="true" />
-      </div>
-
-      <p v-if="branding.tagline" class="sub-title">{{ branding.tagline }}</p>
-
-      <!-- 风味文字（branding.subtitles 为空 = 内容包刻意关掉轮播，整块不渲染） -->
-      <div v-if="quotes.length > 0" class="quote-container">
-        <transition name="quote-fade" mode="out-in">
-          <p :key="currentQuote" class="flavor-quote">「{{ quotes[currentQuote] }}」</p>
-        </transition>
-      </div>
-    </div>
-
-    <!-- 操作按钮 -->
-    <div class="action-section">
-      <div class="btn-column">
-        <AppButton variant="primary" size="lg" block class="btn-new-game" @click="newGame">
-          ✦ 新 建 存 档
-        </AppButton>
-        <AppButton
-          variant="secondary"
-          size="lg"
-          block
-          class="btn-load"
-          @click="showSaveModal = true"
-        >
-          <i class="btn-icon fa-solid fa-folder-open" aria-hidden="true"></i>读 取 存 档
-        </AppButton>
-        <!-- 入口开关：见 script 里的 WORKSHOP_ENTRY_ENABLED -->
-        <AppButton
-          v-if="WORKSHOP_ENTRY_ENABLED"
-          variant="secondary"
-          size="lg"
-          block
-          class="btn-workshop"
-          @click="ui.navigate('workshop')"
-        >
-          <i class="btn-icon fa-solid fa-puzzle-piece" aria-hidden="true"></i>创 意 工 坊
-        </AppButton>
-        <div class="btn-row">
-          <AppButton variant="ghost" size="md" class="btn-ghost" @click="ui.navigate('settings')">
-            <i class="btn-icon fa-solid fa-gear" aria-hidden="true"></i>设 置
-          </AppButton>
-          <AppButton variant="ghost" size="md" class="btn-ghost" @click="showCreditsModal = true">
-            <i class="btn-icon fa-solid fa-users" aria-hidden="true"></i>制 作 人 员
-          </AppButton>
+          <h1 class="main-title">
+            <span
+              v-for="(line, i) in branding.titleLines"
+              :key="i"
+              :class="i === 0 ? 'title-line-t main-line' : 'title-line-b alt-line'"
+              >{{ line }}</span
+            >
+          </h1>
         </div>
-        <!-- 🧪 开发用 — 悬停显示 -->
-        <transition name="fade">
-          <div v-if="showDevButton && isDev" class="dev-test-row">
-            <AppButton
-              variant="ghost"
-              size="sm"
-              class="dev-test-btn"
-              title="清空整个数据库后重建测试存档 —— 素材库与音频库会一并清掉"
-              @click="quickTest"
-            >
-              🧪 快速测试
+
+        <div class="title-divider">
+          <span class="divider-diamond" aria-hidden="true" />
+        </div>
+
+        <p v-if="branding.tagline" class="sub-title">{{ branding.tagline }}</p>
+
+        <!-- 风味文字（branding.subtitles 为空 = 内容包刻意关掉轮播，整块不渲染） -->
+        <div v-if="quotes.length > 0" class="quote-container">
+          <transition name="quote-fade" mode="out-in">
+            <p :key="currentQuote" class="flavor-quote">「{{ quotes[currentQuote] }}」</p>
+          </transition>
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="action-section">
+        <div class="btn-column">
+          <AppButton variant="primary" size="lg" block class="btn-new-game" @click="newGame">
+            ✦ 新 建 存 档
+          </AppButton>
+          <AppButton
+            variant="secondary"
+            size="lg"
+            block
+            class="btn-load"
+            @click="showSaveModal = true"
+          >
+            <i class="btn-icon fa-solid fa-folder-open" aria-hidden="true"></i>读 取 存 档
+          </AppButton>
+          <!-- 入口开关：见 script 里的 WORKSHOP_ENTRY_ENABLED -->
+          <AppButton
+            v-if="WORKSHOP_ENTRY_ENABLED"
+            variant="secondary"
+            size="lg"
+            block
+            class="btn-workshop"
+            @click="ui.navigate('workshop')"
+          >
+            <i class="btn-icon fa-solid fa-puzzle-piece" aria-hidden="true"></i>创 意 工 坊
+          </AppButton>
+          <div class="btn-row">
+            <AppButton variant="ghost" size="md" class="btn-ghost" @click="ui.navigate('settings')">
+              <i class="btn-icon fa-solid fa-gear" aria-hidden="true"></i>设 置
             </AppButton>
-            <AppButton
-              variant="ghost"
-              size="sm"
-              class="dev-test-btn"
-              title="创建测试存档，但不清任何数据 —— 已导入的素材与音乐保留"
-              @click="quickTestKeep"
-            >
-              🧪 快速测试（保留数据）
+            <AppButton variant="ghost" size="md" class="btn-ghost" @click="showCreditsModal = true">
+              <i class="btn-icon fa-solid fa-users" aria-hidden="true"></i>制 作 人 员
             </AppButton>
           </div>
-        </transition>
+          <!-- 🧪 开发用 — 悬停显示 -->
+          <transition name="fade">
+            <div v-if="showDevButton && isDev" class="dev-test-row">
+              <AppButton
+                variant="ghost"
+                size="sm"
+                class="dev-test-btn"
+                title="清空整个数据库后重建测试存档 —— 素材库与音频库会一并清掉"
+                @click="quickTest"
+              >
+                🧪 快速测试
+              </AppButton>
+              <AppButton
+                variant="ghost"
+                size="sm"
+                class="dev-test-btn"
+                title="创建测试存档，但不清任何数据 —— 已导入的素材与音乐保留"
+                @click="quickTestKeep"
+              >
+                🧪 快速测试（保留数据）
+              </AppButton>
+            </div>
+          </transition>
+        </div>
       </div>
-    </div>
+    </main>
 
     <!-- 底部信息 -->
     <footer class="home-footer">
@@ -689,9 +699,11 @@ function formatTime(ts: number) {
    优雅的暗色奇幻风格
    ═══════════════════════════════════════ */
 .home-page {
+  --drift-column-center: 0.191;
+  --drift-column-width: 0.242;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: flex-start;
   min-height: 100vh;
   position: relative;
@@ -724,6 +736,27 @@ function formatTime(ts: number) {
       transparent
     ),
     var(--theme-window-bg);
+}
+
+.home-page.has-astral-backdrop .bg-glow,
+.home-page.has-astral-backdrop .stars {
+  display: none;
+}
+
+.home-stage-ui {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: clamp(272px, 25vw, 348px);
+  min-height: 100vh;
+  margin-left: clamp(28px, 7vw, 108px);
+  padding: var(--theme-spacing-2xl) 0 calc(var(--theme-spacing-2xl) * 2);
+  text-align: center;
+  user-select: none;
 }
 
 /* ═══ 装饰性光晕 ═══ */
@@ -795,7 +828,8 @@ function formatTime(ts: number) {
 
 /* ═══ 标题区 ═══ */
 .title-section {
-  margin-top: 32vh;
+  width: 100%;
+  margin-top: 0;
   text-align: center;
   position: relative;
   z-index: 1;
@@ -846,7 +880,7 @@ function formatTime(ts: number) {
 }
 .main-line {
   font-family: var(--theme-font-title);
-  font-size: clamp(2rem, 6vw, 3.2rem);
+  font-size: clamp(1.9rem, 3.1vw, 2.7rem);
   font-weight: 700;
   color: var(--theme-text-primary);
   letter-spacing: 6px;
@@ -856,7 +890,8 @@ function formatTime(ts: number) {
   line-height: 1.3;
 }
 .alt-line {
-  font-size: clamp(1.2rem, 3.5vw, 2rem);
+  font-family: var(--theme-font-display);
+  font-size: clamp(0.85rem, 1.2vw, 1.05rem);
   font-weight: 400;
   letter-spacing: 8px;
   color: var(--theme-text-secondary);
@@ -965,7 +1000,8 @@ function formatTime(ts: number) {
 
 /* ═══ 按钮区 ═══ */
 .action-section {
-  margin-top: 2.5rem;
+  width: 100%;
+  margin-top: 2.2rem;
   position: relative;
   z-index: 1;
   animation: btnsEnter 0.8s ease-out 0.5s both;
@@ -986,7 +1022,7 @@ function formatTime(ts: number) {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  width: min(320px, 80vw);
+  width: 100%;
 }
 
 .btn-new-game {
@@ -1007,6 +1043,10 @@ function formatTime(ts: number) {
 }
 
 .btn-load {
+  background: color-mix(in srgb, var(--theme-card-bg) 82%, transparent);
+  border-color: var(--theme-card-border);
+  color: var(--theme-text-primary);
+  backdrop-filter: blur(6px);
   transition:
     transform 0.2s ease,
     box-shadow 0.2s ease;
@@ -1017,6 +1057,10 @@ function formatTime(ts: number) {
 }
 
 .btn-workshop {
+  background: color-mix(in srgb, var(--theme-card-bg) 82%, transparent);
+  border-color: var(--theme-card-border);
+  color: var(--theme-text-primary);
+  backdrop-filter: blur(6px);
   transition:
     transform 0.2s ease,
     box-shadow 0.2s ease;
@@ -1027,9 +1071,15 @@ function formatTime(ts: number) {
 }
 
 .btn-ghost {
+  background: color-mix(in srgb, var(--theme-card-bg) 55%, transparent);
+  border-color: transparent;
+  color: var(--theme-text-primary);
+  backdrop-filter: blur(7px);
   transition: transform 0.2s ease;
 }
 .btn-ghost:hover {
+  background: color-mix(in srgb, var(--theme-card-bg) 78%, transparent);
+  border-color: color-mix(in srgb, var(--theme-primary) 34%, transparent);
   transform: translateY(-1px);
 }
 
@@ -1080,8 +1130,14 @@ function formatTime(ts: number) {
 
 /* ═══ 底部 ═══ */
 .home-footer {
-  margin-top: auto;
-  padding: 2.5rem 0 1.5rem;
+  position: fixed;
+  bottom: var(--theme-spacing-lg);
+  left: clamp(28px, 7vw, 108px);
+  z-index: 2;
+  justify-content: center;
+  width: clamp(272px, 25vw, 348px);
+  margin: 0;
+  padding: 0;
   font-size: 0.75rem;
   color: var(--theme-text-muted);
   opacity: 0.4;
@@ -1089,11 +1145,59 @@ function formatTime(ts: number) {
   gap: 8px;
   align-items: center;
   letter-spacing: 1px;
-  position: relative;
-  z-index: 1;
 }
 .footer-dot {
   opacity: 0.3;
+}
+
+@media (max-aspect-ratio: 23/20) {
+  .home-page {
+    --drift-column-center: 0.5;
+    --drift-column-width: 0.88;
+  }
+
+  .home-stage-ui {
+    justify-content: flex-start;
+    width: min(88vw, 380px);
+    min-height: 100vh;
+    margin: 0 auto;
+    padding-top: 6vh;
+  }
+
+  .title-frame {
+    padding: var(--theme-spacing-lg) var(--theme-spacing-xl);
+  }
+
+  .action-section {
+    margin-top: var(--theme-spacing-xl);
+  }
+
+  .home-footer {
+    left: 50%;
+    width: min(88vw, 380px);
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-height: 760px) and (min-aspect-ratio: 23/20) {
+  .home-stage-ui {
+    justify-content: flex-start;
+    padding-top: calc(var(--theme-spacing-2xl) * 2);
+  }
+
+  .title-frame {
+    padding-top: var(--theme-spacing-md);
+    padding-bottom: var(--theme-spacing-md);
+  }
+
+  .title-divider {
+    margin-top: var(--theme-spacing-md);
+    margin-bottom: var(--theme-spacing-md);
+  }
+
+  .action-section {
+    margin-top: var(--theme-spacing-lg);
+  }
 }
 
 /* ═══ 读取存档 — 全屏面板 ═══ */

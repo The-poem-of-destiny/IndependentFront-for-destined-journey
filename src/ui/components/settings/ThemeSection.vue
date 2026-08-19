@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 外观主题分区 —— 10 套主题 + 字体 / 字号 / 悬停延迟 / 减少动态效果
+ * 外观主题分区 —— 10 套主题 + 字体 / 字号 / 首页背景 / 悬停延迟 / 减少动态效果
  * （Q-25 从 SettingsPage.vue 抽出）
  *
  * 🔴 字体是**两格独立设置**（正文 / 标题），不是一个三档单选。旧的「字体风格」
@@ -111,6 +111,19 @@ function asFontChoice(e: Event): FontFamilyChoice {
             <option :value="500">很慢 (500ms)</option>
           </select></label
         >
+        <div class="form-label">
+          首页动态背景
+          <p class="form-hint">
+            在标题画面显示星流、符文火花与法阵电荷微粒。关闭后使用轻量静态背景；减少动态效果开启时也会自动停用。
+          </p>
+          <div class="toggle-row">
+            <span>{{ s.homeBackdrop ? '已开启' : '已关闭' }}</span>
+            <label class="toggle-label">
+              <input v-model="s.homeBackdrop" type="checkbox" class="toggle-input" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
         <div class="form-label">
           减少动态效果
           <p class="form-hint">
