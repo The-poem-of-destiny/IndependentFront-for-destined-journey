@@ -261,6 +261,18 @@ export function diffDays(a: GameTime, b: GameTime): number {
   return Math.floor(diffMinutes(a, b) / MINUTES_PER_DAY);
 }
 
+/**
+ * GameTime → **游戏内日序**（`floor(时间戳 / 1440)`，纪元日 = 0，负值合法）。
+ *
+ * 这个数是地图 v1.2 / 随机事件 v1 那套「锚 + 纯推导」调度的通用坐标：状态的
+ * `appliedAtDay`、收益的 `anchorDay`、编年史条目的 `day` 全都以它为单位。
+ * 单列成函数是因为它此前在提示装配侧被就地重算 —— 而重算意味着 `1440` 这个常量
+ * 要在每个调用点各抄一遍，抄错了不会红，只是「还剩几天」全线偏移。
+ */
+export function toGameDay(time: GameTime): number {
+  return Math.floor(toEpochMinutes(time) / MINUTES_PER_DAY);
+}
+
 // ========== 时间段 ==========
 
 /** 判断是否为白天 (6:00-18:00) */

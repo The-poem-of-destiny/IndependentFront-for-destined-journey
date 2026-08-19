@@ -52,6 +52,10 @@ const FIXTURE: MapPack = {
   resolution: { w: 1000, h: 400 },
   kmPerPx: 1,
   terrains: ['plains', 'forest', 'tundra', 'ridge', 'ocean', 'still-water'],
+  // v1.0.0 的包没有档名表；`coerceMapPack` 给它补空表（照 `travelRules.modes` 的先例），
+  // 所以这份「能从解析器里出来」的夹具也得带着它，否则自证那条会红
+  developmentLevels: [],
+  mainBuildingNames: [],
   travelRules: {
     rates: { land: 10, nearSea: 20, farSea: 40 },
     embarkCost: 4,

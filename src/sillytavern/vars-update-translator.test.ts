@@ -65,6 +65,85 @@ describe('buildDispatcherPatches', () => {
   it('空对象 → 空补丁，不抛', () => {
     expect(buildDispatcherPatches({})).toEqual({ patches: [], deltaTime: undefined });
   });
+
+  // ── 地块事实 op（地图 v1.2 / ADR-33 §2）──
+  describe('tile_ops', () => {
+    it('六个 op 逐条翻成 StatePatch：target 恒为 map，寻址在 value.tile', () => {
+      const { patches } = buildDispatcherPatches({
+        tile_ops: [
+          { op: 'tile_status_add', tile: ' 银帆城 ', title: '洪水', durationDays: 30 },
+          { op: 'tile_status_remove', tile: '银帆城', title: '洪水' },
+          { op: 'tile_building_add', tile: '银帆城', name: '磨坊' },
+          { op: 'tile_building_update', tile: '银帆城', name: '磨坊', playerOwned: true },
+          { op: 'tile_dev_progress_add', tile: '银帆城', amount: 20 },
+          { op: 'tile_history_note', tile: '银帆城', text: '此处立过誓' },
+        ],
+      });
+
+      expect(patches.map((p) => p.op)).toEqual([
+        'tile_status_add',
+        'tile_status_remove',
+        'tile_building_add',
+        'tile_building_update',
+        'tile_dev_progress_add',
+        'tile_history_note',
+      ]);
+      expect(patches.every((p) => p.target === 'map')).toBe(true);
+      // 地块名修边；`op` 不重复进 value
+      expect(patches[0]).toEqual({
+        op: 'tile_status_add',
+        target: 'map',
+        value: { tile: '银帆城', title: '洪水', durationDays: 30 },
+        metadata: { source: 'request_dispatcher' },
+      });
+    });
+
+    it('🔴 白名单外的 op 一律丢弃（这个分节的授权面只有六条）', () => {
+      const { patches } = buildDispatcherPatches({
+        tile_ops: [
+          { op: 'remove_character', tile: '银帆城', name: '主角' },
+          { op: 'tile_history_note', tile: '银帆城', text: '真的记一条' },
+        ],
+      });
+      expect(patches).toHaveLength(1);
+      expect(patches[0]?.op).toBe('tile_history_note');
+    });
+
+    it('坏条目只丢自己，不连坐同一轮里其他条目', () => {
+      const { patches } = buildDispatcherPatches({
+        tile_ops: [
+          null,
+          'not an object',
+          { op: 'tile_status_add', title: '缺地块名' },
+          { op: 'tile_status_add', tile: '银帆城' }, // 缺 title
+          { op: 'tile_building_add', tile: '银帆城' }, // 缺 name
+          { op: 'tile_dev_progress_add', tile: '银帆城', amount: 'x' }, // amount 不是数字
+          { op: 'tile_dev_progress_add', tile: '银帆城', amount: 0 }, // 0 = 什么都没发生
+          { op: 'tile_history_note', tile: '银帆城', text: '   ' }, // 空白文本
+          { op: 'tile_history_note', tile: '银帆城', text: '幸存的一条' },
+        ],
+      });
+      expect(patches).toHaveLength(1);
+      expect(patches[0]?.value).toEqual({ tile: '银帆城', text: '幸存的一条' });
+    });
+
+    it('整份认不出（缺席 / 不是数组）→ 当没写', () => {
+      expect(buildDispatcherPatches({}).patches).toEqual([]);
+      expect(buildDispatcherPatches({ tile_ops: null }).patches).toEqual([]);
+      expect(buildDispatcherPatches({ tile_ops: { op: 'tile_history_note' } }).patches).toEqual([]);
+      expect(buildDispatcherPatches({ tile_ops: '洪水' }).patches).toEqual([]);
+    });
+
+    it('与变量补丁共存：两个分节各自翻译，互不干扰', () => {
+      const { patches, deltaTime } = buildDispatcherPatches({
+        delta_time: 60,
+        replace: [{ path: '天气', value: '小雨' }],
+        tile_ops: [{ op: 'tile_history_note', tile: '银帆城', text: '雨夜' }],
+      });
+      expect(deltaTime).toBe(60);
+      expect(patches.map((p) => p.op)).toEqual(['set_variable', 'tile_history_note']);
+    });
+  });
 });
 
 describe('buildVarsUpdatePatches', () => {

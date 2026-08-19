@@ -13,8 +13,90 @@
  * 🔴 留在 orchestrator 的：marker 的 position 偏移重算。它会 mutate
  * `this.pendingCraftMarkers` 与 `this.context.agentOutputs`，不是翻译。
  */
-import type { StatePatch } from './types';
+import type { StatePatch, StatePatchOp } from './types';
 import { normalizeSlot } from './field-enums';
+
+/**
+ * dispatcher 的 `tile_ops` 分节认得的六个 op（地图 v1.2 / ADR-33 §2）。
+ *
+ * 🔴 白名单是**必须的**：不筛一遍就等于让 AI 从这个分节写任意 `StatePatchOp` ——
+ *    一条 `{"op":"remove_character","tile":"…"}` 会带着 `target:'map'` 直落进管线。
+ *    这个分节的授权面就是这六条，别的一律当没写。
+ */
+const TILE_OP_NAMES = new Set<string>([
+  'tile_status_add',
+  'tile_status_remove',
+  'tile_building_add',
+  'tile_building_update',
+  'tile_dev_progress_add',
+  'tile_history_note',
+]);
+
+/** 非空字符串（`tile_ops` 各 op 的必填串字段判据） */
+function isFilledString(raw: unknown): boolean {
+  return typeof raw === 'string' && raw.trim().length > 0;
+}
+
+/** 某条 `tile_ops` 除 `tile` 之外还缺不缺必填字段（缺了整条丢，不产半条补丁） */
+function tileOpMissingRequired(op: string, row: Record<string, unknown>): boolean {
+  switch (op) {
+    case 'tile_status_add':
+    case 'tile_status_remove':
+      return !isFilledString(row.title);
+    case 'tile_building_add':
+      return !isFilledString(row.name);
+    case 'tile_building_update':
+      // 🔴 `main: true` 寻址的是**主建筑**（地图 v1.2 §F4b·裁定 §8-19），它的名字随发展档
+      //    漂移、不是稳定键 —— 那条路径上 `name` 是可选的**改名**而不是必填的地址。
+      //    照旧要求 name 的话，「把城堡授予玩家」这条最要紧的 op 会在这里被静默丢掉。
+      return row.main === true ? false : !isFilledString(row.name);
+    case 'tile_dev_progress_add':
+      return !Number.isFinite(Number(row.amount)) || Number(row.amount) === 0;
+    case 'tile_history_note':
+      return !isFilledString(row.text);
+    default:
+      return true;
+  }
+}
+
+/**
+ * dispatcher `<json>.tile_ops` → 六个地块事实 op 的 StatePatch（地图 v1.2 / ADR-33 §2）。
+ *
+ * 容错口径照本文件既有惯例（`buildNewsPatches`）：**整份认不出就当没写**（不是数组 → 空数组），
+ * 单条认不出**只丢那一条**。地块 op 是叙事旁路，一条写坏的记录不该带走同一轮里其他五条。
+ *
+ * 🔴 `target` 恒为 `'map'`、寻址走 `value.tile`（`StatePatchOp` 那六行的注释讲了为什么）。
+ */
+function buildTileOpPatches(raw: unknown): StatePatch[] {
+  if (!Array.isArray(raw)) return [];
+  const patches: StatePatch[] = [];
+
+  for (const item of raw) {
+    if (item === null || typeof item !== 'object') continue;
+    const { op, ...rest } = item as Record<string, unknown>;
+    if (typeof op !== 'string' || !TILE_OP_NAMES.has(op)) {
+      console.warn('[Orchestrator] tile_ops 条目的 op 不在六个地块 op 之内，跳过:', op);
+      continue;
+    }
+    const tile = typeof rest.tile === 'string' ? rest.tile.trim() : '';
+    if (tile.length === 0) {
+      console.warn('[Orchestrator] tile_ops 条目缺 tile（地块名），跳过:', op);
+      continue;
+    }
+    if (tileOpMissingRequired(op, rest)) {
+      console.warn('[Orchestrator] tile_ops 条目缺必填字段，跳过:', op);
+      continue;
+    }
+    patches.push({
+      op: op as StatePatchOp,
+      target: 'map',
+      value: { ...rest, tile },
+      metadata: { source: 'request_dispatcher' },
+    });
+  }
+
+  return patches;
+}
 
 /** dispatcher <json> 的变量路径是否为世界新闻（含子路径，如 世界新闻.0） */
 function isWorldNewsPath(path: unknown): boolean {
@@ -123,6 +205,9 @@ export function buildDispatcherPatches(parsed: Record<string, any>): {
       metadata: { source: 'request_dispatcher', operation: 'insert', index: ins.index },
     });
   }
+
+  // 地图 v1.2（ADR-33 §2）：地块事实 op 与变量补丁同处一个 `<json>`，翻译在这里收口
+  patches.push(...buildTileOpPatches(parsed.tile_ops));
 
   const deltaTime =
     typeof parsed.delta_time === 'number' && parsed.delta_time > 0 ? parsed.delta_time : undefined;

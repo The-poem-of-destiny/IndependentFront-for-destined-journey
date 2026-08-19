@@ -25,6 +25,19 @@
 
 **验证状态**：同日后续首页页面走查证明生产首页可以加载，但目标提交未新增背景专项测试；当前 `HomePage.test.ts` 也将背景组件 stub 掉。十主题可读性、减动效 / WebGL2 / context-lost 降级矩阵、离页释放与多宽高比构图仍需独立补验，闭环项保留在 `TODO.md`。
 
+### 地图 v1.2：地块动态 · 发展度 · 建筑 · 主建筑 · 编年史（ADR-33）｜ ✅ 已实施，待真机（2026-08-18）
+
+设计（19 条裁定）：`docs/planning/2026-08-18-map-tile-dynamics-v1.2-design.md`；编排与偏差：同目录 `-implementation-plan.md`（7 波 8 任务 + 2 次定向返工）。首次给地块引入**事实态**，与 v1 的派生投影分仓：
+
+- **存储（ADR-33 核心）**：新命名空间 `worldFlags.mapFacts`（状态/发展度/建筑/编年史），照 randomEvents 先例**永不随 packStamp 清空**、按**地块名**为键（换包名字消失休眠不删、回来复活，休眠块时间冻结）、零新 Dexie 表、随 saveProfiles 进 FullBackup。copy-on-write 播种，事实一经落定即权威。
+- **写侧**：对 ADR-026 收窄改判 —— dispatcher 六个语义 op（`tile_status_add/remove` / `tile_building_add/update` / `tile_dev_progress_add` / `tile_history_note`），按名寻址、解析失败 warn 忽略不否决；owner/terrain/adjacency 依旧零写 op。教学段进 `agent-config.json`（🔴 公开仓侧已改，**私有内容仓那份未同步**——已知两仓漂移风险点）。
+- **机制**：地块状态（同名即刷新、-1 永久仅 AI 可解、effects 收窄为 `devProgressPerMonth` + 纯 flavor）；发展度 10 档随包命名 + 进度条（升清 0 / 降落 50 / 双端钳位 / **单次结算至多跨一档、溢出丢弃**）；建筑槽数=档数、**严格槽位身份**（降档毁最高号槽，玩家产业不豁免）；**主建筑**独立字段不占槽、降档免疫、作者名优先缺席按档派生通名、可授予玩家；编年史每块 10 条 FIFO **首访钉扎**、AI 经 reason/note 富化、自动条目结构化存储（渲染中文在 resolver/UI，零中文闸门照旧）。
+- **时间账本**：新 `time-ledger.ts` 零簿记调度（到期从锚纯推导，无 lastSettled 可漂移）+ `applyTimeAdvance` 锁内单钩子；每事实独立 30 天锚、跨大步 delta_time 完整补结算（上限 120 期）；收益入玩家 `money`（update_character delta，照 EXP 先例）；四类通知走 `addNews`。天气/随机事件不迁。
+- **读侧**：MAP_CONTEXT 与 `$map` 本块全量（档/状态/建筑/主建筑/编年史头条 3-5 条）、邻块单行头条、缺席零 token；实施期收敛：发展度只在「pack 声明过或已有事实」时渲染，旧包不长幻影 Lv1。`EJS_SURFACE` `$map` 补齐 11 键 + **双向**键集断言（单向断言正是缺口能活下来的原因）。UI 只做势力地图信息卡扩展（发展条/状态/槽格/编年史，纯逻辑在 `map-political.ts` 可测层）。
+- **闸门**：`map-literals-gate` 纳管 `map-dynamics.ts`（自动）与 `time-ledger.ts`（显式加 glob）。
+
+验证：`npm run gates` 八道全绿，**345 文件 9030 tests + 8 skipped**（较实施前 +161），knip 棘轮无新增，两份中文 JSON 编码三判据过。**未做**：真机走查；跨仓三件（内容仓编译管线出真实档名/起始档/主建筑数据 + verify 门、sample-map 编辑器发展档/初始建筑创作面、私有仓 uid 510 与 agent-config 同步）。
+
 ### 全仓审查 P0/P1/P2 四项结构性重构（提交级缓存 / 快照拆表 / 分层收口 / BFF 路由单源）｜ ✅ 已实施（2026-08-17）
 
 **来源**：`docs/reviews/2026-08-16-full-repo-review.md`（10 维 101 条已验证发现）里排在最前的四条**需要动结构**的项——与同日那波「低风险小修 21 条」互补，这一波是那份报告里被判为「改动大、要单独立案」的部分。

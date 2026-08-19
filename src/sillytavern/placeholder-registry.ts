@@ -36,14 +36,19 @@ import {
 import { parseSetvars, resolveGetvars, resolveRandoms } from './preset-loader';
 import { buildZoneContext, filterZoneContent, getAgentZoneVisibility } from './context-visibility';
 import { defaultHistoryLayers } from './agent-templates';
-import { formatGameTime, getSeason, type GameTime } from './time-system';
-import { buildMapSnapshot } from './map-context';
+import { formatGameTime, getSeason, toGameDay, type GameTime } from './time-system';
+import { buildMapSnapshot, developmentLevelName } from './map-context';
 import type {
   MapSnapshot,
+  MapSnapshotBuilding,
+  MapSnapshotBuildings,
   MapSnapshotJourney,
   MapSnapshotNeighbor,
   MapSnapshotPlace,
+  MapSnapshotStatus,
 } from './map-context';
+import { DEV_PROGRESS_MAX } from './map-dynamics';
+import type { TileHistoryEntry } from './types-map';
 import type { MapCompass } from './map-index';
 import { isEmptyMapPack } from './map-pack';
 import { getMapPack } from './map-runtime';
@@ -250,6 +255,8 @@ const MAP_CELL_SEP = '｜';
 const MAP_NEIGHBOR_SEP = ' · ';
 /** 单个邻接项括注内部 */
 const MAP_NOTE_SEP = '·';
+/** 顿号列表（状态标题 / 引发状态名，v1.2）—— 与 `MAP_NOTE_SEP` 不同层级，别混用 */
+const MAP_LIST_SEP = '、';
 
 /**
  * 中层 / 国家括注。
@@ -290,16 +297,183 @@ function renderMapNeighborLine(neighbors: readonly MapSnapshotNeighbor[]): strin
   const items = neighbors.map((n) => {
     const notes: string[] = [];
     if (n.terrain.trim() !== '') notes.push(n.terrain);
+    // v1.2 头条（裁定 §8-12「邻块单行头条」）：档名紧跟地形，两者都是「那边是个什么地方」
+    if (n.devLevelName !== undefined && n.devLevelName.trim() !== '') notes.push(n.devLevelName);
     if (n.ownerName !== null && n.ownerName.trim() !== '') notes.push(`${n.ownerName}领`);
     // 水域与不可通行是**通行性事实**，AI 必须看见：挡在西边的冰脊、东边那片要船才过得去的海。
     // 湖块 v1 一律不可入（§6.1），海块要船 —— 两者措辞刻意不同，因为处置不同。
     if (n.water === 'sea') notes.push('需船');
     else if (n.water === 'lake') notes.push('不可入');
     if (n.impassable) notes.push('不可通行');
+    // 状态标题排最后：它是「此刻正在发生什么」，与前面那些地理常量不是一类事实
+    if (n.statusTitles !== undefined && n.statusTitles.length > 0) {
+      notes.push(`状态:${n.statusTitles.join(MAP_LIST_SEP)}`);
+    }
     const suffix = notes.length === 0 ? '' : `(${notes.join(MAP_NOTE_SEP)})`;
     return `${MAP_COMPASS_LABELS[n.dir]}→${n.name}${suffix}`;
   });
   return `邻接: ${items.join(MAP_NEIGHBOR_SEP)}`;
+}
+
+// ── 地块动态的中文措辞（地图 v1.2 / ADR-33 §5「本块全量」）────────────────────
+// 🔴 这一整节是 v1.2 里**唯一**允许写这些词的地方（对 dispatcher 面而言）：数据面
+//    (`map-context` / `map-dynamics`) 被结构闸门禁了中文字面量，编年史条目在那边存的是
+//    `kind` + 参数。story 面的措辞在内容仓那条 EJS 世界书条目里 —— 同一份数据两个渲染器，
+//    数据不会漂、措辞可以漂（裁定 §12-9 的口径，v1.2 照旧）。
+
+/** 编年史里没有建筑名时的占位（坏数据兜底，正常路径下 op 必带名字） */
+const MAP_UNNAMED_BUILDING = '建筑';
+
+/** AI 自由文本（note / reason）里的换行折成空格 —— 一条编年史恒占一格 */
+function flattenMapText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** 发展档行：`发展: 繁荣城镇（进度 35/100）` */
+function renderMapDevelopmentLine(place: MapSnapshotPlace): string {
+  const dev = place.development;
+  if (dev === undefined) return '';
+  return `发展: ${dev.levelName}（进度 ${dev.progress}/${DEV_PROGRESS_MAX}）`;
+}
+
+/**
+ * 状态行（**一条一行**）：`状态: 洪水（剩余 12 天）｜洪水席卷了银帆城`
+ *
+ * 🔴 括注三态各有各的话：永久 / 剩余 N 天 / **算不出时什么都不写**。
+ *    把「不知道还剩几天」渲染成「永久」是这一格最容易犯、也最贵的错 ——
+ *    AI 会据此判断这场洪水永远不会退。
+ */
+function renderMapStatusLines(place: MapSnapshotPlace): string[] {
+  const statuses: readonly MapSnapshotStatus[] = place.statuses ?? [];
+  return statuses.map((s) => {
+    let line = `状态: ${s.title}`;
+    if (s.permanent) line += '（永久）';
+    else if (s.remainingDays !== null) line += `（剩余 ${s.remainingDays} 天）`;
+    const desc = flattenMapText(s.description);
+    if (desc !== '') line += `${MAP_CELL_SEP}${desc}`;
+    return line;
+  });
+}
+
+/** 一座建筑的行内片段：`磨坊（市长）【玩家产业】`（主建筑行与建筑行共用） */
+function renderMapBuildingItem(building: MapSnapshotBuilding): string {
+  let text = building.name;
+  if (building.ownerFlavor !== undefined && building.ownerFlavor.trim() !== '') {
+    text += `（${building.ownerFlavor}）`;
+  }
+  if (building.playerOwned) text += '【玩家产业】';
+  return text;
+}
+
+/**
+ * 主建筑行（v1.2 / §F4b）：`主建筑: 城堡（领主）【玩家产业】`
+ *
+ * 🔴 **单独一行、排在建筑行之前**：它不占编号槽、降档免疫，混进建筑行会让 AI 以为它
+ *    也吃「空槽」那本账（于是把「还能盖几座」算错一格），也读不出它是这块地的座席。
+ * 🔴 名字由数据面解析好（作者名 / 钉住名 / 按档派生的通名），这里一个字都不查表。
+ */
+function renderMapMainBuildingLine(place: MapSnapshotPlace): string {
+  const main = place.mainBuilding;
+  if (main === undefined) return '';
+  return `主建筑: ${renderMapBuildingItem(main)}`;
+}
+
+/**
+ * 建筑行：`建筑: 磨坊（市长） · 商栈（玛丽）【玩家产业】｜空槽 2`
+ *
+ * 空槽数**永远写**（含 0）：槽满与还能建，是 AI 决定「这里能不能再盖一座」的唯一依据，
+ * 而 0 与「这一格没说」在提示词里长得一样。
+ */
+function renderMapBuildingsLine(place: MapSnapshotPlace): string {
+  const buildings: MapSnapshotBuildings | undefined = place.buildings;
+  if (buildings === undefined) return '';
+  const items = buildings.entries.map(renderMapBuildingItem);
+  const head = items.length === 0 ? '建筑: 无' : `建筑: ${items.join(MAP_NEIGHBOR_SEP)}`;
+  return `${head}${MAP_CELL_SEP}空槽 ${buildings.freeSlots}`;
+}
+
+/**
+ * 一条编年史 → 一句中文（`kind` + 参数 → 措辞；裁定 §8-14 五类自动 + 取得产业 + AI 附注）。
+ *
+ * 🔴 认不出的 `kind` **整条不渲染**而不是印一句「未知事件」：编年史是给 AI 读的既往事实，
+ *    一条说不清是什么的事实比没有更糟。日后新增事件类时这里会静默少一行 ——
+ *    所以每加一个 `kind` 都要回来补一支（测试钉着现有七类）。
+ */
+function renderMapHistoryEntry(entry: TileHistoryEntry, levelNames: readonly string[]): string {
+  const building = flattenMapText(entry.building ?? '') || MAP_UNNAMED_BUILDING;
+  const levelOf = (level: number | undefined): string =>
+    typeof level === 'number' ? developmentLevelName(levelNames, level) : '';
+
+  let body = '';
+  switch (entry.kind) {
+    case 'built':
+      body = `${building}落成`;
+      break;
+    case 'destroyed': {
+      body = `${building}被毁`;
+      const causes = (entry.causeStatuses ?? []).map(flattenMapText).filter((s) => s !== '');
+      if (causes.length > 0) body += `（毁于${causes.join(MAP_LIST_SEP)}）`;
+      break;
+    }
+    case 'firstVisit':
+      body = '玩家首次到访';
+      break;
+    case 'levelUp': {
+      const name = levelOf(entry.toLevel);
+      body = name === '' ? '升档' : `升为「${name}」`;
+      break;
+    }
+    case 'levelDown': {
+      const name = levelOf(entry.toLevel);
+      body = name === '' ? '降档' : `降为「${name}」`;
+      break;
+    }
+    case 'acquired':
+      body = `${building}归入玩家产业`;
+      break;
+    // v1.2 §F4b：只有主建筑改得了名（槽位建筑改名 = 换一座建筑），记的是**新名字**
+    case 'renamed':
+      body = `主建筑更名为${building}`;
+      break;
+    case 'note':
+      body = flattenMapText(entry.text ?? '');
+      break;
+    default:
+      return '';
+  }
+  if (body === '') return '';
+
+  const reason = flattenMapText(entry.reason ?? '');
+  if (reason !== '' && entry.kind !== 'note') body += `（${reason}）`;
+  return `第 ${entry.day} 日 ${body}`;
+}
+
+/** 编年史行（**一整行**，新的在后）：`编年史: 第 128 日 磨坊落成 · 第 141 日 …` */
+function renderMapHistoryLine(place: MapSnapshotPlace, levelNames: readonly string[]): string {
+  const entries = place.history ?? [];
+  const items = entries.map((e) => renderMapHistoryEntry(e, levelNames)).filter((s) => s !== '');
+  return items.length === 0 ? '' : `编年史: ${items.join(MAP_NEIGHBOR_SEP)}`;
+}
+
+/**
+ * 当前地块的动态各行（发展 / 状态 / 主建筑 / 建筑 / 编年史）。
+ *
+ * 🔴 **缺席就一行都不出**（裁定 §8-12「缺席状态零 token」）：没用过 v1.2 的存档、
+ *    还没有任何叙事事实的地块，渲染结果与 v1.1 逐字节相同。判断在数据面已经做完了
+ *    （那几格是可选键），这里只是不去凭空造行。
+ */
+function renderMapFactLines(place: MapSnapshotPlace, levelNames: readonly string[]): string[] {
+  const lines: string[] = [];
+  const development = renderMapDevelopmentLine(place);
+  if (development !== '') lines.push(development);
+  lines.push(...renderMapStatusLines(place));
+  const mainBuilding = renderMapMainBuildingLine(place);
+  if (mainBuilding !== '') lines.push(mainBuilding);
+  const buildings = renderMapBuildingsLine(place);
+  if (buildings !== '') lines.push(buildings);
+  const history = renderMapHistoryLine(place, levelNames);
+  if (history !== '') lines.push(history);
+  return lines;
 }
 
 /**
@@ -359,6 +533,10 @@ function renderMapContextBlock(snapshot: MapSnapshot, gameTime: GameTime | undef
       cells.push(renderMapWeatherCell(snapshot.weatherLabel.trim(), gameTime));
     }
     lines.push(cells.join(MAP_CELL_SEP));
+
+    // v1.2 本块全量（裁定 §8-12）：位置行之后、邻接行之前 —— 由近及远读下来。
+    // 没有事实时这里返回空数组，于是整块输出与 v1.1 逐字节相同（零 token 铁律）。
+    lines.push(...renderMapFactLines(place, snapshot.developmentLevels ?? []));
 
     const neighborLine = renderMapNeighborLine(snapshot.neighbors);
     if (neighborLine !== '') lines.push(neighborLine);
@@ -629,6 +807,12 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
       weatherLabel: readWeatherLabel(ctx),
       journey: flags.journey ?? null,
       discontinuity: flags.lastMoveDiscontinuity ?? null,
+      // v1.2 地块动态（ADR-33 §5）：事实态由 game-pipeline 经 `getMapFactsFlags()` 供进
+      // `ctx.mapFacts`；缺席时快照一格动态都不产（零 token）。
+      facts: ctx.mapFacts ?? null,
+      // 「还剩几天」的基准。数据面不读时钟，所以由这里算 —— 没有 gameTime 时给 null，
+      // 状态照常展示、只是不写剩余天数（把「不知道」渲染成「永久」是这一格最贵的错）。
+      currentDay: ctx.gameTime === undefined ? null : toGameDay(ctx.gameTime),
     });
     return renderMapContextBlock(snapshot, ctx.gameTime);
   },

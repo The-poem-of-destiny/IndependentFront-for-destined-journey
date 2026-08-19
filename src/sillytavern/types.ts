@@ -19,7 +19,8 @@ import type { EffectAutomaton } from './combat-v3/types';
 // 所以这条边不成环。只为把 SceneImageMarker 接进 DetectedMarker 联合。
 import type { SceneImageMarker } from './types-image';
 // 地图 v1: `AgentContext.mapFlags` 的形状（分册 types-map.ts，口径同上 —— 只 type-only 反向引用）
-import type { MapSaveFlags } from './types-map';
+// 地图 v1.2: `AgentContext.mapFacts` 的形状（同一分册，同一条 type-only 口径）
+import type { MapFactsFlags, MapSaveFlags } from './types-map';
 // 随机事件 v1: `AgentContext.randomEventOffer` 的形状。**type-only，不成环** ——
 // `random-event-context.ts` 自己只 import `random-event-scheduler` 与 `types-random-events`，
 // 两者都不 import 本文件。这里刻意不复述那个形状（复述一份就是第二个真源）。
@@ -1597,6 +1598,17 @@ export interface AgentContext {
    */
   mapFlags?: MapSaveFlags;
   /**
+   * 地块**事实态**（`SaveProfile.worldFlags.mapFacts`，地图 v1.2 / ADR-33 §3；
+   * 由 game-pipeline 经 `getMapFactsFlags()` 取出）。
+   *
+   * 🔴 与上面那格的自愈语义**正好相反、而这是设计出来的**：`mapFlags` 是派生态
+   *    （换包清空重落位），本格是**事实**（AI 叙事产生的状态/发展度/建筑/编年史，
+   *    按地块名为键，永不随 packStamp 清空）。两格都缺席时地图读侧退回 v1.1 形态。
+   * 🔴 缺席 = 没有任何事实 / 老存档：`{{MAP_CONTEXT}}` 与 `$map` 的动态各格**一格不出**
+   *    （零 token，裁定 §8-12「缺席状态零 token」）。
+   */
+  mapFacts?: MapFactsFlags;
+  /**
    * 当前天气标签串（自由文本，如「小雪」）。
    *
    * 读法与 `resolveSceneWeather` **同口径**：`variables.sys.天气` → `worldFlags.天气` →
@@ -1912,7 +1924,16 @@ export type StatePatchOp =
   // M2: 好感度/新闻 ops (规范章节: affections §7 / news §8)
   | 'set_affection' // 设置好感度绝对值（按角色名） (规范 §7)
   | 'delta_affection' // 好感度增量（按角色名） (规范 §7)
-  | 'add_news'; // 追加世界新闻条目 (规范 §8)
+  | 'add_news' // 追加世界新闻条目 (规范 §8)
+  // 地图 v1.2 / ADR-33 §2: 地块事实 ops（**叙事产生的事实**，v1 的所有者/地形/邻接保护面不变）
+  // 🔴 寻址一律走 `value.tile`（**地块名**，承铁律1「逻辑键=名字」），`target` 只作标识用 'map' ——
+  //    地块不是 characters/quests 那种住在 profile 里的实体，往 target 里塞名字会长出第二套寻址口径
+  | 'tile_status_add' // 挂/刷新一条地块状态（同 title 即整条覆盖，裁定 §8-10）
+  | 'tile_status_remove' // 移除一条地块状态（永久状态的唯一出口）
+  | 'tile_building_add' // 记一座建筑（落最小空槽，裁定 §8-8）
+  | 'tile_building_update' // 改建筑归属/描述/收益（玩家取得产业走这条）
+  | 'tile_dev_progress_add' // 一次性发展度进度 ±N（裁定 §8-5 两种推动者之一）
+  | 'tile_history_note'; // 追加一条自由文本编年史条目（裁定 §8-15③）
 
 /** 原子状态补丁 — StateManager 的唯一输入格式 */
 export interface StatePatch {

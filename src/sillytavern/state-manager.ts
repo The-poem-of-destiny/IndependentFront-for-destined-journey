@@ -65,6 +65,10 @@ import {
   getMapFlags,
   updateMapFlags,
   setMapFlagsInPlace,
+  getMapFactsFlags,
+  updateMapFactsFlags,
+  setMapFactsInPlace,
+  addNews,
   getRandomEventFlags,
   updateRandomEventFlags,
   setRandomEventFlagsInPlace,
@@ -76,10 +80,37 @@ import { advanceTime, getSeason, toEpochMinutes } from './time-system';
 // 静态 import 因此不成环（map-* 一律不 import 本模块）。
 import { getMapIndex, getMapPack } from './map-runtime';
 import { isEmptyMapPack } from './map-pack';
-import { resolveTileByLocation, type MapIndex } from './map-index';
+import { findTileByName, resolveTileByLocation, type MapIndex } from './map-index';
 import { findPath } from './map-path';
 import { weatherAt, weatherZoneOfTile } from './map-weather';
-import type { MapJourneyFlag, MapPack, MapSaveFlags } from './types-map';
+// 地图 v1.2 接线（ADR-33 §2 六个 op / §4 结算钩子 / §F5 首访记档）。同上一组的依赖形状：
+// `map-dynamics` 是纯函数叶（零 I/O、零时钟、零随机），中文措辞与钱的账全在本接线层。
+import {
+  applyBuildingAdd as addBuildingRecord,
+  applyDevProgressDelta as addDevProgress,
+  applyTileStatusAdd as addTileStatus,
+  applyBuildingUpdate as updateBuildingRecord,
+  applyMainBuildingUpdate as updateMainBuildingRecord,
+  applyTileStatusRemove as removeTileStatus,
+  recordFirstVisit,
+  recordTileHistory,
+  settleMapFacts,
+  seedTileFacts,
+  type BuildingPatch,
+  type MainBuildingPatch,
+  type MapSettlementEvent,
+} from './map-dynamics';
+import type {
+  BuildingRecord,
+  MapFactsFlags,
+  MapJourneyFlag,
+  MapPack,
+  MapSaveFlags,
+  MapTile,
+  TileFactsEntry,
+  TileStatus,
+  TileStatusEffect,
+} from './types-map';
 // 随机事件 v1 接线（设计 §4.1 掷骰 / §4.2 首访 / §4.3 保洁 / §5.2 结算）。
 // 与地图那一组同款依赖形状：全是纯函数叶 + 一条注入缝（`random-event-runtime`），
 // 没有一个会读注册表或碰 Dexie，静态 import 不成环。
@@ -626,6 +657,14 @@ export class StateManager {
       'update_plot_event',
       'set_affection',
       'add_news',
+      // 地图 v1.2：六个地块事实 op 的整份载荷都在 value 里（含寻址用的 `value.tile`），
+      // 缺 value 就连「改哪块地」都不知道 —— 这里拦下比在 handler 里各拦一次好
+      'tile_status_add',
+      'tile_status_remove',
+      'tile_building_add',
+      'tile_building_update',
+      'tile_dev_progress_add',
+      'tile_history_note',
     ];
     if (VALUE_REQUIRED_OPS.includes(patch.op) && patch.value === undefined) {
       throw new Error(`${patch.op} 需要 value 字段`);
@@ -1384,6 +1423,9 @@ export class StateManager {
     // 位置路径是真源、地块只是投影（裁定 §12-1）。投影失败/抛错一律不影响上面这一步。
     await this.syncMapLocation(char);
 
+    // 地图 v1.2（§F5）：首访记档**必须在落位之后** —— 它读的是刚写进 flags 的 `lastTileId`
+    await this.syncTileFirstVisit(char);
+
     // 随机事件 v1（§4.2）：**必须在落位之后** —— 地点键优先取地块名，而地块名要等
     // `syncMapLocation` 把 `lastTileId` 写进 flags 才拿得到（否则每次都降级成位置路径最深段，
     // 症状是首访事件在「地块名 ≠ 路径末段」的地方永远不触发，而没有任何一处会报错）
@@ -1597,6 +1639,394 @@ export class StateManager {
 
     await this.persistProfile(profile);
     return this.createEvent('system', patch);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🧱 地块事实 op（地图 v1.2 / ADR-33 §2，六个）
+  // ═══════════════════════════════════════════════════════════
+  //
+  // 六个 handler 共用同一条骨架:
+  //   ① `openTileFacts` —— 按**地块名**解析（精确 → 归一化 → 放弃）+ 读事实 + copy-on-write 播种
+  //   ② 调 `map-dynamics` 的对应纯函数（本层不做任何算术、不写任何编年史措辞）
+  //   ③ `writeTileFacts` —— 整份覆盖回 `worldFlags.mapFacts`
+  //
+  // 🔴 **解析失败一律 warn + no-op，绝不 throw**（裁定 §8-3，照 v1 §12-4「被动解析不否决」）：
+  //    这些 op 是 AI 顺手产的旁路事实，为一个写错的地名否掉整次提交 = 把正文状态一起丢掉。
+  //    所以每条路径都返回一个正常的 GameEvent —— 提交那边看到的是「这条 patch 成功了、
+  //    只是什么都没改」，与「AI 移除一条根本不在的状态」是同一种无害。
+  // 🔴 事实的键是**地块的正式名**（`tile.name`）而不是 AI 写进 op 的那个串：绑定名/别名
+  //    与正式名指同一块地，按 AI 写法存会长出两份互不相干的事实，而两边都「工作正常」。
+
+  /**
+   * 六个 op 的公共前段。解析不出地块 → `null`（调用方直接返回空事件）。
+   *
+   * 播种（`seedTileFacts`）在这里发生而不是在写回时：**首次偏离 pack 基线**就是本次 op，
+   * 而基线（起始档 + 初始建筑）必须以**当时**的包为种子（§3 copy-on-write）。
+   */
+  private async openTileFacts(rawName: unknown, op: string): Promise<TileFactsContext | null> {
+    const name = typeof rawName === 'string' ? rawName.trim() : '';
+    if (name.length === 0) {
+      console.warn(`[StateManager] ${op} 缺少 value.tile（地块名），忽略`);
+      return null;
+    }
+    const index = getMapIndex();
+    const tileId = findTileByName(index, name);
+    const tile = tileId === null ? undefined : index.tileById.get(tileId);
+    if (tile === undefined) {
+      console.warn(`[StateManager] ${op} 认不出地块名「${name}」，忽略（不打断正文提交）`);
+      return null;
+    }
+
+    const profile = await this.readProfile();
+    const facts = getMapFactsFlags(profile);
+    const day = this.gameDayOf(profile);
+    const entry = facts.tiles[tile.name] ?? seedTileFacts(tile, day);
+    return { profile, facts, tile, entry, day };
+  }
+
+  /** 六个 op 的公共后段：整份覆盖回 `worldFlags.mapFacts`（提交作用域内只打脏标记） */
+  private async writeTileFacts(ctx: TileFactsContext, entry: TileFactsEntry): Promise<void> {
+    setMapFactsInPlace(ctx.profile, {
+      ...ctx.facts,
+      tiles: { ...ctx.facts.tiles, [ctx.tile.name]: entry },
+    });
+    await this.persistProfile(ctx.profile);
+  }
+
+  /**
+   * tile_status_add —— 挂/刷新一条地块状态（裁定 §8-10 同名即刷新）。
+   *
+   * 🔴 `value.reason` 在这条 op 上**收下就丢**：状态的挂与除**刻意不记编年史**
+   *    （裁定 §8-14 —— 同名刷新会把 10 格 FIFO 刷屏）。收下是为了让 AI 的输出格式在六个 op
+   *    之间保持一致（写了不报错），丢掉是因为没有它该落进去的地方。
+   */
+  private async applyTileStatusAdd(patch: StatePatch): Promise<GameEvent> {
+    const v = (patch.value ?? {}) as Record<string, unknown>;
+    const ctx = await this.openTileFacts(v.tile, patch.op);
+    if (ctx === null) return this.createEvent('system', patch);
+
+    const title = typeof v.title === 'string' ? v.title.trim() : '';
+    if (title.length === 0) {
+      console.warn('[StateManager] tile_status_add 缺少 value.title（状态名=地块内逻辑键），忽略');
+      return this.createEvent('system', patch);
+    }
+
+    const status: TileStatus = {
+      title,
+      description: typeof v.description === 'string' ? v.description : '',
+      effects: coerceTileStatusEffects(v.effects),
+      // 认不出的时长读作**永久**而不是 0：0 = 挂上当天就到期，等于 AI 写错一个字段就静默什么都没发生
+      durationDays: coerceDurationDays(v.durationDays),
+      appliedAtDay: ctx.day, // 到期与周期结算的锚（§4 零簿记调度）
+    };
+    await this.writeTileFacts(ctx, addTileStatus(ctx.entry, status));
+    return this.createEvent('system', patch);
+  }
+
+  /** tile_status_remove —— 按 title 精确移除（永久状态的唯一出口）；不在场即无变化 */
+  private async applyTileStatusRemove(patch: StatePatch): Promise<GameEvent> {
+    const v = (patch.value ?? {}) as Record<string, unknown>;
+    const ctx = await this.openTileFacts(v.tile, patch.op);
+    if (ctx === null) return this.createEvent('system', patch);
+
+    const title = typeof v.title === 'string' ? v.title.trim() : '';
+    if (title.length === 0) {
+      console.warn('[StateManager] tile_status_remove 缺少 value.title，忽略');
+      return this.createEvent('system', patch);
+    }
+
+    const next = removeTileStatus(ctx.entry, title);
+    // `null` = 这条状态根本不在（AI 复读）→ 一个字节都不写，连播种都不落
+    if (next !== null) await this.writeTileFacts(ctx, next);
+    return this.createEvent('system', patch);
+  }
+
+  /**
+   * tile_building_add —— 记一座建筑，落**最小空槽**（裁定 §8-8）。
+   *
+   * 收益锚（`anchorDay`）取**当天**：入账点从锚纯推导（§4），锚定错了的表现是钱在
+   * 意料之外的日子入账，而不会有任何一处报错。
+   *
+   * 🔴 这条 op **永远不碰主建筑**（裁定 §8-17）：每块地恰有一座、不可新建也不可替换，
+   *    所以 `main: true` 在这里是明确的拒绝而不是「顺手当成 update」——
+   *    静默改写会让 AI 以为它能用 add 重建一座主建筑，而那座旧的名字就这么没了。
+   */
+  private async applyTileBuildingAdd(patch: StatePatch): Promise<GameEvent> {
+    const v = (patch.value ?? {}) as Record<string, unknown>;
+    const ctx = await this.openTileFacts(v.tile, patch.op);
+    if (ctx === null) return this.createEvent('system', patch);
+
+    if (v.main === true) {
+      console.warn(
+        `[StateManager] tile_building_add 不能创建主建筑（每块地恒有一座，改用 tile_building_update + main:true）：${ctx.tile.name}`,
+      );
+      return this.createEvent('system', patch);
+    }
+
+    const name = typeof v.name === 'string' ? v.name.trim() : '';
+    if (name.length === 0) {
+      console.warn('[StateManager] tile_building_add 缺少 value.name（建筑名=地块内逻辑键），忽略');
+      return this.createEvent('system', patch);
+    }
+
+    const record: BuildingRecord = { name };
+    if (typeof v.description === 'string') record.description = v.description;
+    if (typeof v.ownerFlavor === 'string') record.ownerFlavor = v.ownerFlavor;
+    if (typeof v.playerOwned === 'boolean') record.playerOwned = v.playerOwned;
+    // 同名再落 = 当更新处理（见 `applyBuildingAdd`）→ 锚同样要沿用那一座已有的
+    const income = coerceBuildingIncome(v.income, ctx.day, existingBuildingIncome(ctx.entry, name));
+    if (income !== undefined) record.income = income;
+
+    const reason = typeof v.reason === 'string' ? v.reason : undefined;
+    const result = addBuildingRecord(
+      ctx.entry,
+      ctx.tile,
+      record,
+      ctx.day,
+      reason ? { reason } : {},
+    );
+    if (!result.ok) {
+      // 满槽 / 无发展度都是**明确的拒绝**，不静默吞（`BuildingAddResult` 存在的理由）
+      console.warn(
+        `[StateManager] tile_building_add 落位失败（${result.reason}）：${ctx.tile.name}·${name}`,
+      );
+      return this.createEvent('system', patch);
+    }
+    await this.writeTileFacts(ctx, result.entry);
+    return this.createEvent('system', patch);
+  }
+
+  /**
+   * tile_building_update —— 改建筑归属/描述/收益（玩家取得产业走这条）。
+   *
+   * 🔴 补丁里**没提的格保持原值**（`undefined` ≠ 清空，见 `applyBuildingUpdate` 的注释），
+   *    所以这里只把 AI 真写了的键塞进补丁 —— 一律照抄会把没提的字段全清成 undefined。
+   * `playerOwned` 由非真翻成 `true` 时由纯函数记 `acquired` 编年史（裁定 §8-14 第六类），
+   * `reason` 原样落进那一条。
+   *
+   * 🔴 **`value.main === true` 走主建筑分支**（裁定 §8-19）：主建筑的名字随发展档漂移，
+   *    按名字寻址一定会在升降档之后失配，所以它**只能**这么寻址 —— 那条分支里
+   *    `value.name` 不是寻址键而是**改名**。
+   */
+  private async applyTileBuildingUpdate(patch: StatePatch): Promise<GameEvent> {
+    const v = (patch.value ?? {}) as Record<string, unknown>;
+    const ctx = await this.openTileFacts(v.tile, patch.op);
+    if (ctx === null) return this.createEvent('system', patch);
+
+    if (v.main === true) return this.applyTileMainBuildingUpdate(patch, v, ctx);
+
+    const name = typeof v.name === 'string' ? v.name.trim() : '';
+    if (name.length === 0) {
+      console.warn('[StateManager] tile_building_update 缺少 value.name，忽略');
+      return this.createEvent('system', patch);
+    }
+
+    const buildingPatch: BuildingPatch = {};
+    if (typeof v.description === 'string') buildingPatch.description = v.description;
+    if (typeof v.ownerFlavor === 'string') buildingPatch.ownerFlavor = v.ownerFlavor;
+    if (typeof v.playerOwned === 'boolean') buildingPatch.playerOwned = v.playerOwned;
+    const income = coerceBuildingIncome(v.income, ctx.day, existingBuildingIncome(ctx.entry, name));
+    if (income !== undefined) buildingPatch.income = income;
+
+    const reason = typeof v.reason === 'string' ? v.reason : undefined;
+    const next = updateBuildingRecord(
+      ctx.entry,
+      name,
+      buildingPatch,
+      ctx.day,
+      reason ? { reason } : {},
+    );
+    if (next === null) {
+      console.warn(
+        `[StateManager] tile_building_update 找不到建筑「${name}」（${ctx.tile.name}），忽略`,
+      );
+      return this.createEvent('system', patch);
+    }
+    await this.writeTileFacts(ctx, next);
+    return this.createEvent('system', patch);
+  }
+
+  /**
+   * tile_building_update 的**主建筑**分支（`value.main === true`，裁定 §8-17~19）。
+   *
+   * 与槽位分支的三处差别，每一处都是设计裁定而不是实现细节:
+   *   ① **不按名字寻址** —— 主建筑随档漂移的通名不是稳定键，`main: true` 就是地址；
+   *      这里的 `value.name` 因此是**改名**（合法，记 `renamed` 编年史）。
+   *   ② **找不到是不可能的** —— 每个可通行陆块恒有一座；纯函数返回 `null` 只有两种成因：
+   *      这块地没有发展度（海/湖/不可通行），或者补丁一格都没提。两者都 warn + no-op。
+   *   ③ 派生通名表要交下去（`mainBuildingNames`）：事实里还没有名字时，本次 update
+   *      会把当前档的通名**钉住**，钉的就是那张表里的那一行。
+   */
+  private async applyTileMainBuildingUpdate(
+    patch: StatePatch,
+    v: Record<string, unknown>,
+    ctx: TileFactsContext,
+  ): Promise<GameEvent> {
+    const mainPatch: MainBuildingPatch = {};
+    const renamed = typeof v.name === 'string' ? v.name.trim() : '';
+    if (renamed.length > 0) mainPatch.name = renamed;
+    if (typeof v.description === 'string') mainPatch.description = v.description;
+    if (typeof v.ownerFlavor === 'string') mainPatch.ownerFlavor = v.ownerFlavor;
+    if (typeof v.playerOwned === 'boolean') mainPatch.playerOwned = v.playerOwned;
+    // 周期与锚同槽位建筑：铁律3，AI 只填金额；已有收益时沿用旧锚（复述不重锚）
+    const income = coerceBuildingIncome(v.income, ctx.day, ctx.entry.mainBuilding?.income);
+    if (income !== undefined) mainPatch.income = income;
+
+    const reason = typeof v.reason === 'string' ? v.reason : undefined;
+    const next = updateMainBuildingRecord(ctx.entry, ctx.tile, mainPatch, ctx.day, {
+      ...(reason ? { reason } : {}),
+      mainBuildingNames: getMapPack().mainBuildingNames ?? [],
+    });
+    if (next === null) {
+      console.warn(
+        `[StateManager] tile_building_update(main) 无变化（无发展度的地块，或补丁一格都没提）：${ctx.tile.name}`,
+      );
+      return this.createEvent('system', patch);
+    }
+    await this.writeTileFacts(ctx, next);
+    return this.createEvent('system', patch);
+  }
+
+  /**
+   * tile_dev_progress_add —— 一次性发展度进度 ±N（裁定 §8-5 两种推动者之一）。
+   *
+   * 升降档、钳位与严格槽位摧毁全在纯函数里发生（含随之产生的编年史条目）；
+   * 本层只负责把 `reason` 传下去与落库。无发展度的地块（海/湖/不可通行）恒无变化。
+   */
+  private async applyTileDevProgressAdd(patch: StatePatch): Promise<GameEvent> {
+    const v = (patch.value ?? {}) as Record<string, unknown>;
+    const ctx = await this.openTileFacts(v.tile, patch.op);
+    if (ctx === null) return this.createEvent('system', patch);
+
+    const amount = Number(v.amount);
+    if (!Number.isFinite(amount) || amount === 0) {
+      console.warn('[StateManager] tile_dev_progress_add 的 value.amount 不是非零数字，忽略');
+      return this.createEvent('system', patch);
+    }
+
+    const reason = typeof v.reason === 'string' ? v.reason : undefined;
+    const result = addDevProgress(ctx.entry, ctx.tile, amount, ctx.day, reason ? { reason } : {});
+    if (result === null) return this.createEvent('system', patch);
+    await this.writeTileFacts(ctx, result.entry);
+    return this.createEvent('system', patch);
+  }
+
+  /** tile_history_note —— AI 事后追加一条自由文本编年史（裁定 §8-15③；自动条目只加不改） */
+  private async applyTileHistoryNote(patch: StatePatch): Promise<GameEvent> {
+    const v = (patch.value ?? {}) as Record<string, unknown>;
+    const ctx = await this.openTileFacts(v.tile, patch.op);
+    if (ctx === null) return this.createEvent('system', patch);
+
+    const text = typeof v.text === 'string' ? v.text.trim() : '';
+    if (text.length === 0) {
+      console.warn('[StateManager] tile_history_note 缺少 value.text，忽略');
+      return this.createEvent('system', patch);
+    }
+
+    await this.writeTileFacts(
+      ctx,
+      recordTileHistory(ctx.entry, { day: ctx.day, kind: 'note', text }),
+    );
+    return this.createEvent('system', patch);
+  }
+
+  /**
+   * 首访记档（§F5 五类自动事件之一）—— `applySetLocation` 落位之后旁观记录。
+   *
+   * 🔴 **只跟踪玩家**（口径同 `syncMapLocation`：这条钩子只从 `applySetLocation` 来，
+   *    而那边已经 player only —— 这里再判一次是因为本方法自己也得读得懂自己）。
+   * 🔴 **记的是「玩家现在站在哪块地」**，所以读的是刚落位完的 `worldFlags.map.lastTileId`
+   *    而不是重新解析一次位置路径：重新解析等于给落位契约开第二个实现，两者漂移时
+   *    编年史会指着一块玩家从没去过的地。
+   * 🔴 `recordFirstVisit` 幂等（已有首访条目返回 `null`），所以来回走同一块地只记一次。
+   */
+  private async syncTileFirstVisit(char: CharacterState): Promise<void> {
+    if (char.type !== 'player') return;
+
+    const pack = getMapPack();
+    if (isEmptyMapPack(pack)) return;
+
+    try {
+      // 同 `syncMapLocation`：只从 `applySetLocation` 来，永远在提交作用域内
+      const profile = await this.readProfile();
+      const tileId = getMapFlags(profile).lastTileId;
+      if (tileId === undefined) return; // 还没落过位 → 没有「到访了哪块地」这回事
+      const tile = getMapIndex().tileById.get(tileId);
+      if (tile === undefined) return; // 悬空块号（换包途中）→ 不记，下次落位自会补上
+
+      const facts = getMapFactsFlags(profile);
+      const day = this.gameDayOf(profile);
+      const entry = facts.tiles[tile.name] ?? seedTileFacts(tile, day);
+      const next = recordFirstVisit(entry, day);
+      if (next === null) return; // 已经记过首访 → 一个字节都不写（连播种都不落）
+
+      setMapFactsInPlace(profile, { ...facts, tiles: { ...facts.tiles, [tile.name]: next } });
+      await this.persistProfile(profile);
+    } catch (err) {
+      // 位置路径与地块投影都已落库；编年史少一条不该让正文提交失败
+      console.warn('[StateManager] 地块首访记档失败（位置已落库，不影响正文）:', err);
+    }
+  }
+
+  /**
+   * 按期结算钩子（§4 时间账本）—— `applyTimeAdvance` 推进完时间后调用，**在锁内**。
+   *
+   * 三件事，缺一不可:
+   *   ① 纯函数结算 `(prevDay, nextDay]` 区间（到期 / 周期效果 / 收益），整份覆盖回事实袋子；
+   *   ② `incomeDue` → 玩家 `money` 的 delta patch **push 进调用方的 `patches[]`**
+   *      —— 那个数组由 `applyTimeAdvance` 在**锁外**自提交（ADR-21 唯一写入口）。
+   *      这里绝不自己调 `commitChatState`：锁内嵌套提交 = 同 saveId 自等死锁（铁律②）。
+   *   ③ 结构化事件 → 中文新闻（措辞在本接线层，`map-dynamics` 零中文字面量的原因）。
+   *
+   * 🔴 **休眠地块整块冻结**（§3）：`resolveTile` 认不出的名字返回 `undefined`，纯函数据此跳过。
+   *    换包再换回来时那座玩家酒馆不会一次性补上几十期收益。
+   */
+  private async syncMapFactsSettlement(
+    profile: SaveProfile,
+    prevDay: number,
+    patches: StatePatch[],
+  ): Promise<void> {
+    try {
+      const facts = getMapFactsFlags(profile);
+      if (Object.keys(facts.tiles).length === 0) return; // 还没有任何一块地偏离基线 → 零开销
+
+      const nextDay = this.gameDayOf(profile);
+      const index = getMapIndex();
+      const resolveTile = (name: string): MapTile | undefined => {
+        const id = findTileByName(index, name);
+        return id === null ? undefined : index.tileById.get(id);
+      };
+
+      const settled = settleMapFacts(facts, resolveTile, prevDay, nextDay);
+      if (settled === null) return;
+      await updateMapFactsFlags(profile, settled.facts);
+
+      // ── 收益入账：每座建筑一条 delta patch（总额 = 每期金额 × 补结算期数） ──
+      const player = (await this.readCharacters()).find((c) => c.type === 'player');
+      if (player !== undefined) {
+        for (const { event } of settled.events) {
+          if (event.kind !== 'incomeDue') continue;
+          patches.push({
+            op: 'update_character',
+            target: `characters.${player.name}`,
+            value: { money: event.amount * event.periods },
+            metadata: { source: 'map_dynamics', delta: true },
+          });
+        }
+      }
+
+      // ── 系统提示：每块地一条新闻（一次结算里同一块地的多条变化并成一条，别刷屏） ──
+      for (const [tileName, lines] of groupSettlementNews(settled.events)) {
+        await addNews(profile, {
+          title: `地图 · ${tileName}`,
+          content: lines.join('\n'),
+          category: MAP_NEWS_CATEGORY,
+        });
+      }
+    } catch (err) {
+      // 时间已经推进、正文状态已经落库；结算算不出来只是这一次没有到期与入账
+      console.warn('[StateManager] 地块按期结算失败（时间已推进，不影响正文）:', err);
+    }
   }
 
   // ========== 辅助 ==========
@@ -2271,6 +2701,9 @@ export class StateManager {
     // 刻意在锁外 —— 嵌套提交要重新排队拿锁，在锁内即自死锁（铁律②）。
     await withSaveWriteLock(this.saveId, async () => {
       const profile = await getProfile(this.saveId);
+      // 地图 v1.2（§4）：结算区间是**半开区间** `(prevDay, nextDay]`，所以推进**之前**
+      // 就得把起点记下来 —— 推进完再算就永远拿到同一天，一次跨 90 天的前进会静默结算 0 期
+      const prevDay = this.gameDayOf(profile);
       profile.gameTime = advanceTime(profile.gameTime, minutes);
       await updateProfile(profile);
 
@@ -2282,6 +2715,11 @@ export class StateManager {
       //     权重条件里有 `time.seasonAnyOf` / `timeOfDayAnyOf`，用的是推进后的新时间；
       //     天气在前是因为它会写 `variables.sys.天气`，而条件 DSL 的 `var` 读的正是这棵树
       await this.syncRandomEvents(profile);
+
+      // 1.7 🧱 地块按期结算（地图 v1.2 §4）——**必须在时间推进之后**（同天气/掷骰那条理由）。
+      //     排在掷骰之后是因为它会往 `patches` 里塞收益补丁，而那个数组在**锁外**统一自提交：
+      //     锁内嵌套 commitChatState 就是同 saveId 自等死锁（state-write-queue 铁律②）
+      await this.syncMapFactsSettlement(profile, prevDay, patches);
 
       // 2. 遍历所有角色, 扣减 StatusEffect.remainingTime
       const characters = await getCharacters(this.saveId);
@@ -2406,6 +2844,147 @@ const WEATHER_VAR_PATH = 'sys.天气';
  * 值是一个**名字**（地块 / 聚落 / 中层 / 国家），不是路径也不是 id。
  */
 const TRAVEL_DESTINATION_VAR_PATH = 'sys.旅行目的地';
+
+// ═══════════════════════════════════════════════════════════
+// 🧱 地块事实的接线辅助（地图 v1.2 / ADR-33）
+// ═══════════════════════════════════════════════════════════
+
+/** 六个地块 op 解析完地块之后的公共上下文（`openTileFacts` 的产物） */
+interface TileFactsContext {
+  profile: SaveProfile;
+  facts: MapFactsFlags;
+  tile: MapTile;
+  /** 已有事实条目，或**以当时 pack 基线播下的种子**（§3 copy-on-write） */
+  entry: TileFactsEntry;
+  /** 当前游戏日（状态锚 / 收益锚 / 编年史日期共用同一个口径） */
+  day: number;
+}
+
+/** 建筑收益的周期长度（§F4：v1.2 只有「每 30 天一笔」这一种，AI 不可调） */
+const BUILDING_INCOME_PERIOD_DAYS = 30;
+
+/** 地块结算新闻的分类（`NewsItem.category` 是自由文本，全仓无枚举） */
+const MAP_NEWS_CATEGORY = '地图';
+
+/**
+ * `durationDays` 的容错读取。**认不出一律读作永久（-1）而不是 0**：
+ * 0 天 = 挂上当天就到期，等于 AI 写错一个字段就静默什么都没发生；永久至少留得住，
+ * 而永久状态有明确的出口（`tile_status_remove`）。
+ */
+function coerceDurationDays(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return -1;
+  const days = Math.trunc(n);
+  return days < 0 ? -1 : days;
+}
+
+/**
+ * `effects` 的容错读取（§F1 词汇表**刻意收窄**：v1.2 只有 `devProgressPerMonth` 一种）。
+ * 认不出的条目逐条丢，整份认不出 → 空数组 = 纯 flavor（合法，不是异常）。
+ */
+function coerceTileStatusEffects(raw: unknown): TileStatusEffect[] {
+  if (!Array.isArray(raw)) return [];
+  const effects: TileStatusEffect[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    if (row.kind !== 'devProgressPerMonth') continue;
+    const amount = Number(row.amount);
+    if (!Number.isFinite(amount) || amount === 0) continue;
+    effects.push({ kind: 'devProgressPerMonth', amount });
+  }
+  return effects;
+}
+
+/**
+ * `income` 的容错读取。**周期与锚由 Code 补**（铁律3：AI 只填叙事字段，账务字段归 Code）——
+ * AI 自己写锚日就能把钱提前入账，写周期就能把「每月」改成「每天」。
+ *
+ * 🔴 **已有收益时锚**（`existing`）**原地保留，只换金额**：AI 复述现状是常态
+ *   （「你的酒馆每月仍进 50 G」），每复述一次就把 `anchorDay` 挪到今天的话，
+ *    30 天的入账点会被无限期往后推 —— 表现是「有产业但永远不发钱」，且一条日志都没有。
+ *    同名建筑刷新的幂等性（裁定 §8-10 的同款思路）本来就是给这种复读兜底的。
+ *    锚只在**新授予收益**（此前没有 income）时定在今天。
+ * 🔴 金额必须是**正的有限数**：负额 = 一条静默抽钱的 op（结算按 `amount × periods` 直接进
+ *    玩家 `money`，没有任何一处会拦），0 = 一笔永远不入账的空账。两者一律**丢掉 income 这一格**
+ *    并 warn —— 丢一格而不是否掉整条 op：建筑本身（名字/描述/归属）是合法的叙事事实。
+ */
+function coerceBuildingIncome(
+  raw: unknown,
+  day: number,
+  existing?: BuildingRecord['income'],
+): BuildingRecord['income'] | undefined {
+  if (raw === null || typeof raw !== 'object') return undefined;
+  const amount = Number((raw as Record<string, unknown>).amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    console.warn(`[StateManager] 建筑收益金额不合法（${String(amount)}），忽略 income 这一格`);
+    return undefined;
+  }
+  const anchorDay = existing && Number.isFinite(existing.anchorDay) ? existing.anchorDay : day;
+  return { amount, periodDays: BUILDING_INCOME_PERIOD_DAYS, anchorDay };
+}
+
+/** 目标建筑现有的收益锚（找不到那座建筑 = 还没有锚，由调用方定在今天） */
+function existingBuildingIncome(
+  entry: TileFactsEntry,
+  name: string,
+): BuildingRecord['income'] | undefined {
+  const slots = Array.isArray(entry.buildings) ? entry.buildings : [];
+  return slots.find((row) => row?.name === name)?.income;
+}
+
+/**
+ * 结算事件 → 每块地一段中文新闻行（§5 的四类提示：状态到期 / 升降档 / 建筑被毁 / 收益入账）。
+ *
+ * 🔴 `devPeriodApplied` **刻意不进新闻**：它是每月效果的节拍，本身没有玩家可感的结果 ——
+ *    真正的结果（升降档 / 摧毁）自会各出一条。把节拍也播出去，一场跨年的洪水会刷 12 条
+ *    「进度 −2」，而那 12 条里没有一条告诉玩家城怎么样了。
+ */
+function groupSettlementNews(events: readonly MapSettlementEvent[]): Map<string, string[]> {
+  const byTile = new Map<string, string[]>();
+  const push = (tile: string, line: string): void => {
+    const lines = byTile.get(tile);
+    if (lines === undefined) byTile.set(tile, [line]);
+    else lines.push(line);
+  };
+
+  for (const { tile, event } of events) {
+    switch (event.kind) {
+      case 'statusExpired':
+        push(tile, `状态「${event.title}」已到期结束。`);
+        break;
+      case 'levelChanged':
+        push(
+          tile,
+          event.to > event.from
+            ? `发展等级提升：第 ${event.from} 档 → 第 ${event.to} 档。`
+            : `发展等级下滑：第 ${event.from} 档 → 第 ${event.to} 档。`,
+        );
+        break;
+      case 'buildingDestroyed':
+        push(
+          tile,
+          event.causeStatuses.length > 0
+            ? `建筑「${event.building}」毁于地块衰退（${event.causeStatuses.join('、')}）。`
+            : `建筑「${event.building}」在衰退中损毁。`,
+        );
+        break;
+      case 'incomeDue':
+        // `main` 只换一个前缀：入账这件事两者一模一样（§F4b「除降档免疫外一切如常」），
+        // 但玩家该分得清这笔钱是主建筑还是某个槽里的铺子来的
+        push(
+          tile,
+          `${event.main === true ? '主建筑' : '产业'}「${event.building}」入账：每期 ${
+            event.amount
+          } G × ${event.periods} 期 = ${event.amount * event.periods} G。`,
+        );
+        break;
+      case 'devPeriodApplied':
+        break;
+    }
+  }
+  return byTile;
+}
 
 /** 两块地在**合并后的**邻接图（邻接 ∪ 海峡）上相不相邻 */
 function areTilesAdjacent(index: MapIndex, a: number, b: number): boolean {
@@ -2661,4 +3240,11 @@ const PATCH_HANDLERS: Record<
   delta_affection: (sm, p) => sm['applyAffection'](p),
   // 世界新闻
   add_news: (sm, p) => sm['applyAddNews'](p),
+  // 地块事实（地图 v1.2 / ADR-33 §2）
+  tile_status_add: (sm, p) => sm['applyTileStatusAdd'](p),
+  tile_status_remove: (sm, p) => sm['applyTileStatusRemove'](p),
+  tile_building_add: (sm, p) => sm['applyTileBuildingAdd'](p),
+  tile_building_update: (sm, p) => sm['applyTileBuildingUpdate'](p),
+  tile_dev_progress_add: (sm, p) => sm['applyTileDevProgressAdd'](p),
+  tile_history_note: (sm, p) => sm['applyTileHistoryNote'](p),
 };

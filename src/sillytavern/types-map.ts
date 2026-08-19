@@ -115,6 +115,47 @@ export interface TravelMode {
 export type MapWaterKind = 'sea' | 'lake';
 
 /**
+ * pack 里的**初始建筑**（v1.2 / 设计 §F3·裁定 §8-9 的第一条来源）。
+ *
+ * 🔴 这是**不可变基线**，不是事实：它只在某地块的事实条目**首次播种**时被抄成
+ *    `BuildingRecord`（§3 copy-on-write）。此后事实为权威 —— 被毁的初始建筑不会因为
+ *    重读 pack 而复活，pack 更新也不给旧档追加初始建筑。
+ * 🔴 故这里**没有** `playerOwned` / `income`：所有权翻转只经叙事 op（裁定 §8-9），
+ *    编译期烘一座「玩家已经拥有」的建筑等于绕过那条通道。
+ * 🔴 `name` 是该地块内的**逻辑键**（承数据字段规范铁律：逻辑键 = 名字）。
+ */
+export interface MapTileInitialBuilding {
+  /** 建筑名 —— 地块内唯一（同名后来者由容错解析丢弃，首见胜） */
+  name: string;
+  /** 叙事描述（可选，纯 flavor） */
+  description?: string;
+  /** 归属自由文本（市长 / 铁匠公会……）—— 纯 flavor，不机制化（§F4） */
+  ownerFlavor?: string;
+}
+
+/**
+ * pack 里的**主建筑作者命名**（v1.2 / 设计 §F4b·裁定 §8-18）。
+ *
+ * 每个可通行陆地块**恰有一座**主建筑（代表该地块的主聚落）—— 它**不占编号槽**、
+ * 降档免疫、不可摧毁不可移除。这一格只管**名字与风味**：写了就是作者命名
+ * （「银帆城城堡」），缺席则按当前发展档从 `MapPack.mainBuildingNames` 派生通名。
+ *
+ * 🔴 同 `MapTileInitialBuilding`：这是**不可变基线**，不是事实。没有 `playerOwned` /
+ *    `income` —— 所有权翻转只经叙事 op（裁定 §8-9·§8-19），编译期烘一座「玩家已经拥有」
+ *    的主建筑等于绕过那条通道。
+ * 🔴 作者命名一经落定即**钉住不再随档变**（裁定 §8-18）：派生通名是给没被作者点名的
+ *    那些地块的兜底，作者点了名的地方不该因为城镇缩水就改叫别的。
+ */
+export interface MapTileMainBuilding {
+  /** 主建筑名（作者命名，钉住） */
+  name: string;
+  /** 叙事描述（可选，纯 flavor） */
+  description?: string;
+  /** 归属自由文本（领主 / 市议会……）—— 纯 flavor，不机制化（§F4） */
+  ownerFlavor?: string;
+}
+
+/**
  * 一个地块 = 地图的最小地理单元（手绘省份）。比场景粗：同城换街区不换地块。
  *
  * 🔴 `id` 是 pack 内的稳定键，**AI 永远看不到它**（§8.3）—— 给 AI 的只有名字与关系
@@ -154,6 +195,31 @@ export interface MapTile {
   centroid: [x: number, y: number];
   /** 像素面积 —— 只用于「无首府的中层取最大块」那条锚地块兜底（§8.2-3） */
   areaPx: number;
+  /**
+   * **起始发展档**（pack v1.2.0 起，1..10；缺席 = 这块地没有发展度）。
+   *
+   * 🔴 档名不在这里，在 `MapPack.developmentLevels`（随包，10 档）—— 引擎持有的只有
+   *    「第几档」这个整数（§F2）。写进引擎的是序数，随图而变的是名字。
+   * 🔴 **只有可通行陆地块该有它**（裁定 §8-1）：海/湖/不可通行块永远没有发展条与建筑槽。
+   *    这条由内容仓的 verify 门守 —— 运行时把它当数据读，不替作者判空。
+   * 🔴 缺席（v1.0/v1.1 旧包的常态）与「档 1」**不是同一件事**：前者是「本块无发展度」，
+   *    后者是「本块处在最低档」（有 1 个建筑槽）。所以是 `undefined` 而不是默认 1。
+   */
+  development?: number;
+  /**
+   * **初始建筑基线**（pack v1.2.0 起；缺席 = 无）。数组下标**不是**槽位号 ——
+   * 槽位身份是每存档事实（`TileFactsEntry.buildings`），这里只是一份待播种的清单，
+   * 播种时按顺序落进最小空槽。条数应 ≤ 起始档数（由内容仓 verify 门守，运行时不裁）。
+   */
+  buildings?: MapTileInitialBuilding[];
+  /**
+   * **主建筑的作者命名**（pack v1.2.0 起；缺席 = 按当前档从 `MapPack.mainBuildingNames`
+   * 派生通名，见 `MapTileMainBuilding`）。
+   *
+   * 🔴 缺席**不是「这块地没有主建筑」**：每个可通行陆地块恒有一座（裁定 §8-17），
+   *    缺的只是名字。海/湖/不可通行块则恒无 —— 那由通行性判定，不由这一格。
+   */
+  mainBuilding?: MapTileMainBuilding;
 }
 
 /**
@@ -221,6 +287,28 @@ export interface MapPack {
   straits: MapStrait[];
   /** 地名/别名 → tileId（编译期从标记绑定 + 城镇锚点产出）= 落位的**绑定名字空间** */
   placeBindings: Record<string, number>;
+  /**
+   * **发展档名表**（pack v1.2.0 起，恰好 10 档，序号 1..10 ↔ 下标 0..9）。
+   *
+   * 🔴 词汇随包（§3.4-1 换图零改码）：引擎只认「第几档」这个整数，档名是内容。
+   *    v1.0/v1.1 旧包缺席 → 空数组，UI 退化成只显示序号，机制面（槽位数）不受影响。
+   * 🔴 「恰好 10 档」由**内容仓的 verify 门**守，不由运行时解析守（`map-pack.ts` 是
+   *    最后一道兜底，职责是别崩不是替作者修数据）—— 运行时只砍掉第 10 档之后的多余项。
+   */
+  developmentLevels?: string[];
+  /**
+   * **主建筑档位通名表**（pack v1.2.0 起，恰好 10 档，序号 1..10 ↔ 下标 0..9；
+   * 与 `developmentLevels` 并排随包，裁定 §8-18）。
+   *
+   * 没被作者点名的地块（绝大多数），主建筑名按**当前发展档**查这张表得一个通名
+   * （营地 → 王城），于是**派生名随升降档自然变化**。作者名或 AI 改名一经落定即钉住。
+   *
+   * 🔴 词汇随包（§3.4-1 换图零改码），缺表时引擎回退 **ASCII** 兜底串
+   *    （`map-dynamics.resolveMainBuilding`），不是中文默认名。
+   * 🔴 与 `developmentLevels` 同口径：「恰好 10 档」由内容仓 verify 门守，
+   *    运行时只砍掉第 10 档之后的多余项。
+   */
+  mainBuildingNames?: string[];
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -307,4 +395,167 @@ export interface MapSaveFlags {
    * 🔴 派生态，随 `packStamp` 不符一起清 —— 换图后「上一跳」这个说法本身就不成立了。
    */
   lastMoveDiscontinuity?: number;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 地块事实态（v1.2 / ADR-33 §3）—— `SaveProfile.worldFlags.mapFacts` 的形状
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 地块状态的**周期效果**（v1.2 / §F1）。
+ *
+ * 🔴 **刻意是只有一个成员的封闭联合**（承 ADR-19 语义级、不开任意数值面）：加一种效果
+ *    是加一个 `kind`，不是给作者一张能写任何字段的白纸。v1.2 只有「每 30 天对该地块
+ *    发展度进度 ±N」这一条；无发展度的地块上它静默无效（flavor 照常展示）。
+ */
+export type TileStatusEffect = { kind: 'devProgressPerMonth'; amount: number };
+
+/**
+ * 挂在地块上的一条状态（v1.2 / §F1）。AI 可给**任意地块**（含海/不可通行块）下发。
+ *
+ * 🔴 `title` 是该地块内的**逻辑键**：同地块同 title 再次下发 = **整条覆盖**
+ *    （裁定 §8-10 同名即刷新，描述/效果/时长全换、到期重算，永久↔限时可互转）。
+ *    幂等吸收 AI 复读 —— 「洪水又持续了 30 天」正是重叙的语义。
+ * 🔴 `durationDays: -1` = **永久**，不参与到期结算，仅 AI 可移除（裁定 §8-1）。
+ * 🔴 到期点从 `appliedAtDay` **纯推导**（§4 零簿记调度），故这里没有 `expiresAtDay`
+ *    也没有 `lastSettledDay` —— 派生字段一存下来就有第二个真源可漂。
+ */
+export interface TileStatus {
+  /** 状态名 = 地块内逻辑键（同名刷新的判据） */
+  title: string;
+  /** 叙事描述（AI 产的内容，原文存储） */
+  description: string;
+  /** 周期效果；空数组 = 纯 flavor（只进叙事上下文，零机制） */
+  effects: TileStatusEffect[];
+  /** 时长（游戏内天）；`-1` = 永久 */
+  durationDays: number;
+  /** 挂上时的游戏内日 —— 到期与周期结算的**锚**（§4） */
+  appliedAtDay: number;
+}
+
+/**
+ * 一座建筑的事实记录（v1.2 / §F3·§F4）。住在 `TileFactsEntry.buildings` 的编号槽里。
+ *
+ * 🔴 `playerOwned` 才有真实效果（裁定 §8-9）：`ownerFlavor` 默认纯 flavor、不机制化、
+ *    无易手模拟；所有权翻转只经叙事 op，没有直买按钮。
+ * 🔴 `income` 的入账走**每事实独立 30 天锚**（`anchorDay`）+ 跨期完整补结算
+ *    （裁定 §8-11），金额由 AI 在授予时写定，入玩家角色的 `money`（G）。
+ *    同 `TileStatus`：只存锚，不存「上次结算到哪天」。
+ */
+export interface BuildingRecord {
+  /** 建筑名 = 地块内逻辑键（AI 按名字寻址，永不产 id） */
+  name: string;
+  /** 叙事描述 */
+  description?: string;
+  /** 归属自由文本（纯 flavor，与地块 `countryId` 叠加供 AI 叙事） */
+  ownerFlavor?: string;
+  /** 真值 = 玩家产业（v1.2 里唯一有机制的所有权位） */
+  playerOwned?: boolean;
+  /** 金钱收益：每 `periodDays` 天入账 `amount`，锚在 `anchorDay` */
+  income?: { amount: number; periodDays: number; anchorDay: number };
+}
+
+/**
+ * 地块编年史的一条（v1.2 / §F5）。
+ *
+ * 🔴 **自动条目存结构化数据、不存中文**（§F5 末条）：`kind` + 参数（建筑名 / 起落档位 /
+ *    引发的状态名），中文措辞在 `placeholder-registry` 与 UI 渲染 —— 这正是引擎
+ *    `map-*.ts` 零中文字面量闸门仍然成立的原因。
+ * 🔴 `text` 是**唯一**的自由散文格，且只属于 `kind: 'note'`（AI 经 `tile_history_note`
+ *    事后追加的那一条）。`reason` 是 AI 在各 op 上附的可选缘由，同样是 AI 产的内容、
+ *    原文存储，不受零中文闸门约束（那条闸门管的是**引擎代码**，不是运行期数据）。
+ * 🔴 自动条目**不可编辑**（裁定 §8-15）：AI 只加不改。
+ */
+export interface TileHistoryEntry {
+  /** 游戏内日 */
+  day: number;
+  /**
+   * 事件类；五类自动 + `acquired`（玩家取得产业）+ `renamed`（主建筑改名，v1.2 §F4b）
+   * + `note`（AI 自由文本）。
+   *
+   * 🔴 加一个 `kind` 就要回两个渲染器（`placeholder-registry` / `ui/lib/map-political`）
+   *    各补一支：两处都是「认不出的 kind 整条不渲染」，漏补的症状是**静默少一行**。
+   */
+  kind:
+    | 'built'
+    | 'destroyed'
+    | 'firstVisit'
+    | 'levelUp'
+    | 'levelDown'
+    | 'note'
+    | 'acquired'
+    | 'renamed';
+  /** 建筑名（`built` / `destroyed` / `acquired` / `renamed` —— 后者记的是**新名字**） */
+  building?: string;
+  /** 起始档（`levelUp` / `levelDown`） */
+  fromLevel?: number;
+  /** 落点档（`levelUp` / `levelDown`） */
+  toLevel?: number;
+  /** 引发本条的在场状态名（Code 侧结算引发的摧毁自动引用当时的负面状态，裁定 §8-15②） */
+  causeStatuses?: string[];
+  /** AI 自由文本，仅 `kind: 'note'` */
+  text?: string;
+  /** AI 在 op 上附的缘由（落进对应自动条目，裁定 §8-15①） */
+  reason?: string;
+}
+
+/**
+ * 一个地块的全部事实（v1.2 / §3）。**首次偏离 pack 基线时** copy-on-write 播种，
+ * 以当时的 pack 基线（起始档 + 初始建筑）为种子；此后事实为权威。
+ *
+ * 🔴 有效视图 = **有事实条目取事实，否则取 pack 基线** —— 缺席不等于「空」。
+ */
+export interface TileFactsEntry {
+  /** 播种时的游戏内日（诊断/迁移用；缺席 = 老条目） */
+  seededAtDay?: number;
+  /**
+   * 发展档与进度；缺席 = 这块地没有发展度（照 pack 基线）。
+   * `level` 1..10、`progress` −50..100（≥100 升档清 0 / ≤−50 降档落 50，裁定 §8-7）。
+   */
+  development?: { level: number; progress: number };
+  /** 活跃状态；同 `title` 唯一（同名即刷新，裁定 §8-10） */
+  statuses: TileStatus[];
+  /**
+   * 建筑槽 —— **严格槽位身份**（裁定 §8-8）：**下标即槽位号**，`null` = 空槽。
+   *
+   * 🔴 所以这个数组**不许 compact**：`filter(Boolean)` / `splice` 会把后面每一座建筑
+   *    往前挪一格，而槽位号决定降档时谁被摧毁（永远移除最高号槽）—— 挪一格就是让
+   *    另一座建筑替它去死，且完全无声。移除建筑 = 把那一格置 `null`。
+   * 🔴 槽数 = 当前发展档数（档 1..10 ↔ 槽 1..10，无独立字段）；降档时数组从尾部截断。
+   * 🔴 缺席 = 尚未播种建筑面（不是「零建筑」—— 后者是长度为 0 或全 `null` 的数组）。
+   */
+  buildings?: (BuildingRecord | null)[];
+  /**
+   * **主建筑的事实覆盖**（v1.2 / §F4b·裁定 §8-17~19）。**不在编号槽里**，故降档免疫、
+   * 不可摧毁不可移除 —— 写面只有 `tile_building_update`（`main: true` 寻址）。
+   *
+   * 🔴 **缺席 ≠ 没有主建筑**（这是本字段最容易读错的一格）：缺席 = 还没偏离 pack 基线，
+   *    有效名按当前档从 `MapPack.mainBuildingNames` 派生（或用作者名）。播种
+   *    （`seedTileFacts`）**刻意不materialize 它** —— 一落地就等于把当天那一档的通名
+   *    永久钉死在这个存档上，此后升档再也不改名，且完全无声。
+   * 🔴 一旦有了这一格，`name` 就是**钉住的**（作者名 / AI 改名 / 授予产业时定格的通名），
+   *    不再随档漂移。所以 op 寻址用 `main: true` 而不是名字（裁定 §8-19）。
+   */
+  mainBuilding?: BuildingRecord;
+  /**
+   * 编年史。每地块 FIFO 上限 10 条，**首访条目钉住不淘汰**（FIFO 只作用于其余 9 格，
+   * 裁定 §8-16）。
+   */
+  history: TileHistoryEntry[];
+}
+
+/**
+ * `worldFlags.mapFacts` 的形状（v1.2 / ADR-33 §3；**不新增 Dexie 表**，随
+ * `saveProfiles` 进 FullBackup）。
+ *
+ * 🔴 **事实不是派生态**（照 ADR-32 `worldFlags.randomEvents` 先例）：这里**没有**
+ *    `packStamp`，换包也**永不清空** —— 与隔壁 `MapSaveFlags` 的自愈语义正好相反，
+ *    而这是设计出来的，不是不一致。派生态可重建（真源是位置路径），事实一旦清掉就没了。
+ * 🔴 键是**地块名**不是 tileId（读取时解析到地块）：换包后名字仍在 → 事实继续生效；
+ *    名字消失 → **休眠不删**（承内容包三态语义），包回来自动复活。
+ *    **休眠地块不结算** —— 不到期、不入账，时间对休眠块冻结。
+ */
+export interface MapFactsFlags {
+  /** 地块名 → 该地块的事实条目 */
+  tiles: Record<string, TileFactsEntry>;
 }

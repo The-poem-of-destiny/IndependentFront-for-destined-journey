@@ -37,9 +37,11 @@ import {
   buildPoliticalTint,
   buildRoutePolyline,
   buildRouteWaypoints,
+  buildTileDetailModel,
   clampStageView,
   composeDepartureDirective,
   describeTile,
+  developmentBarGeometry,
   estimateModeDays,
   fitStageView,
   formatPolylinePoints,
@@ -61,7 +63,8 @@ import { getMapIndex, getMapPack } from '@engine/map-runtime';
 // 落位解析（引擎的落位契约本体）—— 这里**只读**，不写任何派生态，理由见 `playerTileId`
 import { resolveTileByLocation } from '@engine/map-index';
 import { findPath } from '@engine/map-path';
-import { getMapFlags } from '@engine/save-profile';
+import { getMapFactsFlags, getMapFlags } from '@engine/save-profile';
+import { toEpochMinutes } from '@engine/time-system';
 import type { MapRoute } from '@engine/types-map';
 
 // ═══ 高亮像素色（RGBA；理由见文件头最后一条） ═══
@@ -409,6 +412,57 @@ const hoverView = computed(() =>
 const selectedView = computed(() =>
   selectedTileId.value > 0 ? describeTile(mapIndex.value, selectedTileId.value) : null,
 );
+
+// ═══ 地块事实态（地图 v1.2 / ADR-33 §5 UI）═══
+
+/** 一个游戏日的分钟数（口径同 `state-manager` / `game-pipeline` / DebugPanel，那份常量未导出） */
+const MINUTES_PER_GAME_DAY = 1440;
+
+/**
+ * 当前游戏日 —— 状态倒计时的基准（与结算器的 gameDay 同口径）。
+ *
+ * 🔴 `gameTime` **防御性读**：类型说必填，运行期不一定真有（老存档 / 手改备份 / 测试替身），
+ *    而 `toEpochMinutes(undefined)` 是从 computed 里抛穿 —— 整张信息卡当场白掉，
+ *    代价远大于「倒计时按第 0 日算」。
+ */
+const currentGameDay = computed(() => {
+  const gameTime = game.saveProfile?.gameTime;
+  if (!gameTime) return 0;
+  return Math.floor(toEpochMinutes(gameTime) / MINUTES_PER_GAME_DAY);
+});
+
+/**
+ * 选中地块的详情模型（发展条 / 状态 / 建筑槽 / 编年史）。
+ *
+ * 🔴 事实**按地块名为键**（ADR-33 §3），所以这里用 `tile.name` 取条目 —— 不是 tileId。
+ *    换包后名字还在事实就继续生效，正是那条设计的直接后果。
+ * 🔴 重算触发与 `playerTileId` 那条同款：`game.saveProfile` 是响应式的（提交后整份换新），
+ *    `mapIndex` 里那句 `void polStage.value` 管的是「换了地图包」。两者都不动时不重算。
+ * 🔴 一切措辞与判定都在 `buildTileDetailModel` 里（纯函数，可单测）——
+ *    模板里只有 `v-for` 与 `v-if`。
+ */
+const selectedDetail = computed(() => {
+  const view = selectedView.value;
+  if (view === null) return null;
+  const tile = mapIndex.value.tileById.get(view.tileId);
+  if (tile === undefined) return null;
+  const profile = game.saveProfile;
+  const entry = profile ? getMapFactsFlags(profile).tiles[tile.name] : undefined;
+  const pack = getMapPack();
+  return buildTileDetailModel(
+    tile,
+    entry,
+    pack.developmentLevels,
+    currentGameDay.value,
+    pack.mainBuildingNames,
+  );
+});
+
+/** 发展条的填充段（几何在纯函数里，模板只写 style） */
+const developmentBar = computed(() => {
+  const development = selectedDetail.value?.development;
+  return development ? developmentBarGeometry(development.progress) : null;
+});
 
 const viaNames = computed(() =>
   viaTileIds.value
@@ -1234,6 +1288,122 @@ onBeforeUnmount(() => {
           </template>
         </section>
 
+        <!--
+          ═══ 地块事实态（地图 v1.2 / ADR-33 §5 UI）═══
+
+          四节全部**缺席即整节不渲染**：没有事实的地块（新档的常态、旧包的全部地块）
+          看到的卡片与 v1.2 之前逐字节一致 —— 空的「状态」「建筑」标题只是噪音。
+          判定与措辞在 `lib/map-political.ts` 的 `buildTileDetailModel`，这里只画。
+        -->
+        <section v-if="selectedDetail?.development" class="pol-section">
+          <h5 class="pol-section-title">发展</h5>
+          <div class="pol-dev-head">
+            <span class="pol-dev-badge">{{ selectedDetail.development.levelName }}</span>
+            <span class="pol-dev-value">进度 {{ selectedDetail.development.progress }}</span>
+          </div>
+          <!--
+            −50..100 的轨道：0 刻度是一条竖线，负进度从它往左长（几何在
+            `developmentBarGeometry`）。刻意**不做过渡动画** —— 这条是 design.md
+            禁止的布局属性（width/left），而 transform 版在这里读不出真值。
+          -->
+          <div
+            v-if="developmentBar"
+            class="pol-dev-track"
+            role="img"
+            :aria-label="`发展进度 ${selectedDetail.development.progress}，范围 -50 到 100`"
+          >
+            <span class="pol-dev-zero" :style="{ left: developmentBar.zeroPct + '%' }" />
+            <span
+              class="pol-dev-fill"
+              :class="{ 'pol-dev-fill-down': developmentBar.negative }"
+              :style="{ left: developmentBar.startPct + '%', width: developmentBar.widthPct + '%' }"
+            />
+          </div>
+        </section>
+
+        <section v-if="selectedDetail && selectedDetail.statuses.length > 0" class="pol-section">
+          <h5 class="pol-section-title">状态</h5>
+          <ul class="pol-st-list">
+            <li v-for="status in selectedDetail.statuses" :key="status.title" class="pol-st-item">
+              <div class="pol-st-head">
+                <span class="pol-st-title">{{ status.title }}</span>
+                <span class="pol-st-badge" :class="{ 'pol-st-badge-perm': status.permanent }">
+                  {{ status.permanent ? '永久' : `剩余 ${status.remainingDays} 天` }}
+                </span>
+              </div>
+              <p v-if="status.description" class="pol-st-desc">{{ status.description }}</p>
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="selectedDetail && selectedDetail.slots.length > 0" class="pol-section">
+          <h5 class="pol-section-title">建筑</h5>
+          <!--
+            🔴 主建筑排在槽格**之上、且不带槽位号**（地图 v1.2 §F4b）：它不占编号槽、
+               降档免疫、不可摧毁 —— 给它编个号会让玩家以为下一次降档轮得到它。
+          -->
+          <div
+            v-if="selectedDetail.mainBuilding"
+            class="pol-main"
+            :class="{ 'pol-main-owned': selectedDetail.mainBuilding.playerOwned }"
+          >
+            <span class="pol-main-tag">主建筑</span>
+            <span class="pol-slot-body">
+              <span class="pol-slot-name">{{ selectedDetail.mainBuilding.name }}</span>
+              <span class="pol-slot-meta">
+                <span v-if="selectedDetail.mainBuilding.ownerFlavor">
+                  {{ selectedDetail.mainBuilding.ownerFlavor }}
+                </span>
+                <span v-if="selectedDetail.mainBuilding.playerOwned" class="pol-slot-own">
+                  玩家产业
+                </span>
+              </span>
+            </span>
+          </div>
+          <p v-if="selectedDetail.mainBuilding?.description" class="pol-main-desc">
+            {{ selectedDetail.mainBuilding.description }}
+          </p>
+          <!--
+            🔴 空槽**照样占一格**（裁定 §8-8 严格槽位身份）：降档永远摧毁最高号槽，
+               所以编号是「下一次降档谁会没」的唯一线索，过滤空槽会让编号错位。
+          -->
+          <ul class="pol-slots">
+            <li
+              v-for="slot in selectedDetail.slots"
+              :key="slot.slot"
+              class="pol-slot"
+              :class="{
+                'pol-slot-empty': !slot.building,
+                'pol-slot-owned': slot.building?.playerOwned,
+              }"
+            >
+              <span class="pol-slot-num">{{ slot.slot }}</span>
+              <span v-if="slot.building" class="pol-slot-body">
+                <span class="pol-slot-name">{{ slot.building.name }}</span>
+                <span class="pol-slot-meta">
+                  <span v-if="slot.building.ownerFlavor">{{ slot.building.ownerFlavor }}</span>
+                  <span v-if="slot.building.playerOwned" class="pol-slot-own">玩家产业</span>
+                </span>
+              </span>
+              <span v-else class="pol-slot-body pol-slot-vacant">空置</span>
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="selectedDetail && selectedDetail.history.length > 0" class="pol-section">
+          <h5 class="pol-section-title">编年史</h5>
+          <ol class="pol-chron">
+            <li
+              v-for="(line, index) in selectedDetail.history"
+              :key="`${line.day}-${index}-${line.kind}`"
+              class="pol-chron-item"
+            >
+              <span class="pol-chron-day">第 {{ line.day }} 日</span>
+              <span class="pol-chron-text">{{ line.text }}</span>
+            </li>
+          </ol>
+        </section>
+
         <div class="pol-card-actions">
           <button class="pol-btn" :disabled="!canSetLocation" @click="setHere">设为当前位置</button>
           <button class="pol-btn" :disabled="!canRoute" @click="showRoute">查看路线</button>
@@ -1824,6 +1994,224 @@ onBeforeUnmount(() => {
   font-size: 0.75rem;
   line-height: 1.55;
   color: var(--theme-text-secondary);
+}
+
+/* ═══ 地块事实态（地图 v1.2）═══ */
+
+/* 发展条 */
+.pol-dev-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--theme-spacing-sm);
+}
+/* 档名徽章：design.md §1「激活态/强调徽章通用配方」（染底 + 混合边框），非左侧色条 */
+.pol-dev-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  color: var(--theme-primary);
+  font-family: var(--theme-font-title);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.pol-dev-value {
+  color: var(--theme-text-muted);
+  font-size: 0.6875rem;
+}
+.pol-dev-track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--theme-card-border);
+  background: var(--theme-surface-muted);
+  overflow: hidden;
+}
+/* 0 刻度 —— 这条轨道是 −50..100，没有它读不出「在衰退」 */
+.pol-dev-zero {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--theme-text-muted) 55%, transparent);
+}
+/* 🔴 刻意无过渡：宽度/left 是布局属性（design.md §1 禁令），而这里读不出 transform 版的真值 */
+.pol-dev-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--theme-primary);
+}
+.pol-dev-fill-down {
+  background: var(--theme-warning);
+}
+
+/* 状态列表 */
+.pol-st-list,
+.pol-slots,
+.pol-chron {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pol-st-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 8px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-surface-muted);
+}
+.pol-st-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--theme-spacing-sm);
+}
+.pol-st-title {
+  font-family: var(--theme-font-title);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+.pol-st-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 30%, transparent);
+  background: color-mix(in srgb, var(--theme-warning) 12%, transparent);
+  color: var(--theme-warning);
+  font-size: 0.6875rem;
+}
+/* 永久状态不是警告 —— 它只是「不会自己消失」，用中性色说 */
+.pol-st-badge-perm {
+  border-color: var(--theme-card-border);
+  background: transparent;
+  color: var(--theme-text-muted);
+}
+.pol-st-desc {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: var(--theme-text-secondary);
+}
+
+/*
+  主建筑：与槽格同一套排版，但**实心边框 + 标签代替槽位号**，一眼看得出它不占槽。
+  强调仍走 design.md 的配方（整圈混合边框 + 染底），不加左侧色条。
+*/
+.pol-main {
+  display: flex;
+  align-items: baseline;
+  gap: var(--theme-spacing-sm);
+  margin-bottom: var(--theme-spacing-xs);
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--theme-text-muted) 35%, var(--theme-card-border));
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-surface-muted);
+}
+/* 玩家产业：与槽格同款高亮（同一套所有权语义，裁定 §8-19） */
+.pol-main-owned {
+  border-color: color-mix(in srgb, var(--theme-primary) 45%, var(--theme-card-border));
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+}
+.pol-main-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--theme-card-border);
+  color: var(--theme-text-muted);
+  font-size: 0.6875rem;
+}
+.pol-main-desc {
+  margin: 0 0 var(--theme-spacing-xs);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: var(--theme-text-secondary);
+}
+
+/* 建筑槽格 */
+.pol-slot {
+  display: flex;
+  align-items: baseline;
+  gap: var(--theme-spacing-sm);
+  padding: 6px 8px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-card-bg);
+}
+.pol-slot-empty {
+  border-style: dashed;
+  background: transparent;
+}
+/* 玩家产业：整圈混合边框 + 染底（design.md 的强调配方），**不是**左侧色条 */
+.pol-slot-owned {
+  border-color: color-mix(in srgb, var(--theme-primary) 45%, var(--theme-card-border));
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+}
+.pol-slot-num {
+  flex-shrink: 0;
+  min-width: 1.25em;
+  text-align: right;
+  color: var(--theme-text-muted);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+.pol-slot-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--theme-spacing-sm);
+  min-width: 0;
+}
+.pol-slot-name {
+  font-family: var(--theme-font-title);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+.pol-slot-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--theme-spacing-xs);
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+}
+.pol-slot-own {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, transparent);
+  color: var(--theme-primary);
+}
+.pol-slot-vacant {
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+/* 编年史（新的在前，见 buildTileDetailModel） */
+.pol-chron-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--theme-spacing-sm);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+.pol-chron-day {
+  flex-shrink: 0;
+  color: var(--theme-text-muted);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+.pol-chron-text {
+  color: var(--theme-text-secondary);
+  min-width: 0;
 }
 
 .pol-note {

@@ -449,6 +449,66 @@ describe('$map（地图 v1 §5）', () => {
     // 且整面能原样过 JSON（QuickJS 后端就是这么送过去的）
     expect(JSON.parse(JSON.stringify(caps.$map)).currentTile.name).toBe('白曜城');
   });
+
+  // ── 地块动态（v1.2 / ADR-33 §5）────────────────────────────────────────
+  // 🔴 快照那侧缺席是**没有这个键**（省提示词字节），这一面一律是**空值** ——
+  //    世界书条目要能直接写 `for (const s of $map.statuses)` 而不必先判 typeof。
+
+  const dynamicSnapshot = {
+    ...snapshot,
+    current: {
+      ...snapshot.current,
+      development: { level: 3, levelName: '城镇', progress: 42 },
+      statuses: [{ title: '洪水', description: '水漫低地', permanent: false, remainingDays: 12 }],
+      buildings: {
+        slots: 3,
+        entries: [{ name: '磨坊', ownerFlavor: '镇长', playerOwned: false }],
+        freeSlots: 2,
+      },
+      history: [{ day: 7, kind: 'built' as const, building: '磨坊' }],
+    },
+    developmentLevels: ['村落', '集镇', '城镇'],
+  };
+
+  it('v1.2 四格 + 档名表逐格转发（都取自当前地块行）', () => {
+    const { caps } = build({ mapSnapshot: dynamicSnapshot });
+
+    expect(caps.$map.development).toEqual({ level: 3, levelName: '城镇', progress: 42 });
+    expect(caps.$map.statuses[0].remainingDays).toBe(12);
+    expect(caps.$map.buildings?.freeSlots).toBe(2);
+    expect(caps.$map.history[0]).toEqual({ day: 7, kind: 'built', building: '磨坊' });
+    expect(caps.$map.developmentLevels).toEqual(['村落', '集镇', '城镇']);
+  });
+
+  it('🔴 缺席时是空值不是 undefined（`if ($map.development)` 必须能直接写）', () => {
+    const { caps } = build({ mapSnapshot: snapshot });
+
+    expect(caps.$map.development).toBeNull();
+    expect(caps.$map.buildings).toBeNull();
+    expect(caps.$map.statuses).toEqual([]);
+    expect(caps.$map.history).toEqual([]);
+    expect(caps.$map.developmentLevels).toEqual([]);
+
+    const empty = build({}).caps;
+    expect(empty.$map.development).toBeNull();
+    expect(empty.$map.statuses).toEqual([]);
+  });
+
+  it('只读孤儿：改这四格不回流宿主那份快照', () => {
+    const { caps } = build({ mapSnapshot: dynamicSnapshot });
+    caps.$map.statuses.push({
+      title: '凭空多出来的',
+      description: '',
+      permanent: true,
+      remainingDays: null,
+    });
+    caps.$map.history[0].building = '改过的';
+    caps.$map.developmentLevels[0] = '改过的';
+
+    expect(dynamicSnapshot.current.statuses).toHaveLength(1);
+    expect(dynamicSnapshot.current.history[0].building).toBe('磨坊');
+    expect(dynamicSnapshot.developmentLevels[0]).toBe('村落');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -557,6 +617,29 @@ describe('EJS_SURFACE —— engine.has 不许再说谎', () => {
       for (const m of EJS_SURFACE.namespaces[ns] as readonly string[]) {
         expect(m in obj, `${ns}.${m} 在表里但对象上没有`).toBe(true);
       }
+    }
+  });
+
+  it('🔴 $map 键集合**双向**对齐 —— 表里少一格就是 engine.has 又开始说谎', () => {
+    // 上一条（`m in obj`）只抓「表里有、对象上没有」。真正犯过两次的是**反方向**：
+    // 能力真的加了、这张表没跟上（Q-09 的 world.isDaytime，v1.2 的 $map 六格）。
+    // 那个方向不会有任何东西变红 —— 创作者写 engine.has('$map.buildings') 拿到 false，
+    // 于是他的守卫分支反过来禁用了一个可用能力。所以这里比的是**集合相等**。
+    const actual = Object.keys(build({ gameTime: TIME }).caps.$map).sort();
+    expect([...EJS_SURFACE.namespaces.$map].sort()).toEqual(actual);
+  });
+
+  it('地块动态六格（地图 v1.2）engine.has 一格不落', () => {
+    const has = caps().engine.has;
+    for (const key of [
+      'development',
+      'statuses',
+      'mainBuilding',
+      'buildings',
+      'history',
+      'developmentLevels',
+    ]) {
+      expect(has(`$map.${key}`), `engine.has('$map.${key}') 为假`).toBe(true);
     }
   });
 

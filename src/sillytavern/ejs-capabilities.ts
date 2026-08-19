@@ -21,10 +21,16 @@ import { DANGEROUS_PATH_SEGMENTS } from './var-resolver';
 // 本模块不 import `map-runtime` / `map-index`（能力面是纯投影，不碰注入缝也不建索引）。
 import type {
   MapSnapshot,
+  MapSnapshotBuilding,
+  MapSnapshotBuildings,
+  MapSnapshotDevelopment,
   MapSnapshotJourney,
   MapSnapshotNeighbor,
   MapSnapshotPlace,
+  MapSnapshotStatus,
 } from './map-context';
+// 地图 v1.2：编年史条目**结构化原样透传**（措辞归渲染层），故这一面要它的形状
+import type { TileHistoryEntry } from './types-map';
 
 // ═══════════════════════════════════════════════════════════
 // 注入面
@@ -368,6 +374,32 @@ interface EjsMap {
    * 少了这一格，渲染层要么印不出那行，要么去别处再找一遍同一个事实。
    */
   discontinuity: number | null;
+
+  // ── 地块动态（地图 v1.2 / ADR-33 §5）—— 全部只描述**当前地块** ──────────────
+  // 🔴 与快照那侧的**可选键**刻意不同：这一面一律给**空值**（null / 空数组）。
+  //    理由同 `currentTile`：世界书条目要能直接写 `if ($map.development)` /
+  //    `for (const s of $map.statuses)`，不必先判 `typeof`。缺席在快照那侧省 token
+  //    （提示词字节），在这一侧省不了什么 —— 反而会逼创作者写防御性代码。
+  /** 发展档与进度；`null` = 无发展度 / 包没声明 / 尚无事实 */
+  development: MapSnapshotDevelopment | null;
+  /** 活跃状态（含海/不可通行块）；无则空数组 */
+  statuses: MapSnapshotStatus[];
+  /**
+   * 主建筑（§F4b）—— 这块地的主聚落，**不在 `buildings.entries` 里**；
+   * `null` = 这块地没有建筑面（海/湖/不可通行块，或包没声明过发展档）。
+   */
+  mainBuilding: MapSnapshotBuilding | null;
+  /** 建筑槽概览；`null` = 这块地没有建筑面 */
+  buildings: MapSnapshotBuildings | null;
+  /** 编年史最近 5 条，**新的在后**；结构化原样透传（中文措辞归渲染层） */
+  history: TileHistoryEntry[];
+  /**
+   * 发展档名表（`developmentLevels`，下标 0 = 第 1 档）；无表时空数组。
+   *
+   * 给它是因为 `history` 里的升/降档条目存的是**档位序数** —— story 面那个渲染器
+   * （内容仓的 EJS 条目）要把它渲染成档名，与占位符那个渲染器读的是同一张表。
+   */
+  developmentLevels: string[];
 }
 
 /**
@@ -379,12 +411,21 @@ interface EjsMap {
 function buildMap(input: EjsCapabilityInput): EjsMap {
   const snap = input.mapSnapshot;
   const neighbors = snap?.neighbors;
+  // v1.2 的四格动态住在当前地块行里（快照那侧是可选键，这一面统一成空值）
+  const place = snap?.current ?? null;
+  const levels = snap?.developmentLevels;
   return {
-    currentTile: snap?.current ? clone(snap.current) : null,
+    currentTile: place ? clone(place) : null,
     neighbors: Array.isArray(neighbors) ? clone(neighbors) : [],
     weatherNow: snap?.weatherLabel ?? null,
     journey: snap?.journey ? clone(snap.journey) : null,
     discontinuity: snap?.discontinuity ?? null,
+    development: place?.development ? clone(place.development) : null,
+    statuses: Array.isArray(place?.statuses) ? clone(place.statuses) : [],
+    mainBuilding: place?.mainBuilding ? clone(place.mainBuilding) : null,
+    buildings: place?.buildings ? clone(place.buildings) : null,
+    history: Array.isArray(place?.history) ? clone(place.history) : [],
+    developmentLevels: Array.isArray(levels) ? clone(levels) : [],
   };
 }
 
@@ -676,8 +717,12 @@ function buildUi(input: EjsCapabilityInput): EjsUi {
  * 能力面契约版本。**新增能力时升 minor，移除/改语义升 major**
  *
  * 1.1.0：`$map` 只读面（地图 v1 §5）。纯新增，旧条目一字不受影响。
+ * 1.2.0：`$map` 的地块动态六格（地图 v1.2 / ADR-33 §5 + §F4b 主建筑）。同样纯新增。
+ *        🔴 这六格**在 1.1.0 那一版就已经能用了** —— 漏的是这张表（于是
+ *        `engine.has('$map.buildings')` 一直说假话）。补表连着补版本号，
+ *        否则创作者手里「1.1.0 = 只有五格」这个约定与真实能力面永远差一截。
  */
-export const EJS_SURFACE_VERSION = '1.1.0';
+export const EJS_SURFACE_VERSION = '1.2.0';
 
 /**
  * 🔴 **能力面唯一真源（Q-09）**。
@@ -701,8 +746,25 @@ export const EJS_SURFACE = {
     char: ['player', 'get', 'present', 'all', 'has', 'affection', 'affectionLabel'],
     // isDaytime 是函数，过 JSON 编组会丢；QuickJS 侧另有常量 shim 顶上
     world: ['时间', '时间详情', '地点', '天气', '回合', 'isDaytime'],
-    // 地图 v1 §5：**全是数据**（见 EjsMap 的说明——函数在这一面是禁忌）
-    $map: ['currentTile', 'neighbors', 'weatherNow', 'journey', 'discontinuity'],
+    // 地图 v1 §5 + v1.2 §5：**全是数据**（见 EjsMap 的说明——函数在这一面是禁忌）。
+    // 🔴 这一行必须与 `EjsMap` 的字段**逐个对齐**：漏一格不会报错，只会让
+    //    `engine.has('$map.buildings')` 说假话，创作者据此禁掉一个可用能力（Q-09 那条老伤，
+    //    v1.2 又原样犯了一次 —— 五格是 v1 的，后六格随 W4/W5 加进来时这张表没跟上）。
+    //    反向漏（表里有、对象上没有）由 `ejs-capabilities.test.ts` 那条 `m in obj` 钉着；
+    //    正向漏（对象上有、表里没有）由同文件的 `$map 键集合双向对齐` 钉着。
+    $map: [
+      'currentTile',
+      'neighbors',
+      'weatherNow',
+      'journey',
+      'discontinuity',
+      'development',
+      'statuses',
+      'mainBuilding',
+      'buildings',
+      'history',
+      'developmentLevels',
+    ],
     quest: ['all', 'active', 'get', 'has', 'focus'],
     lore: ['get', 'has', 'list'],
     chat: ['last', 'at', 'slice', 'match', 'text'],

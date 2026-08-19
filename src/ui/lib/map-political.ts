@@ -36,7 +36,21 @@
  */
 
 import { countryOfTile, midTierOfTile, type MapIndex } from '@engine/map-index';
-import type { MapPack, MapRoute, MapTile } from '@engine/types-map';
+import {
+  DEV_PROGRESS_MAX,
+  DEV_PROGRESS_MIN,
+  effectiveTileFacts,
+  type EffectiveTileFacts,
+} from '@engine/map-dynamics';
+import type {
+  BuildingRecord,
+  MapPack,
+  MapRoute,
+  MapTile,
+  TileFactsEntry,
+  TileHistoryEntry,
+  TileStatus,
+} from '@engine/types-map';
 
 // ═══════════════════════════════════════════════════════════
 // 1. 像素 → 地块 id
@@ -1402,4 +1416,321 @@ export function composeDepartureDirective(input: DepartureDirectiveInput): strin
   if (avoid.length > 0) text += `，避开${avoid.join('、')}`;
   if (days > 0) text += `，约 ${days} 天`;
   return text;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 8. 地块详情（地图 v1.2 / ADR-33 §5 UI「地块详情扩展」）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 这一节把「一块地的事实态」投影成信息卡**直接能渲染的形状**：中文措辞、槽位编号、
+ * 剩余天数全部在这里算好，模板里只有 `v-for` 与 `v-if`。
+ *
+ * 🔴 **中文在这一层是对的**（同文件头那条）：引擎 `map-*.ts` 的零 CJK 闸门管的是
+ *    「随图而变的数据不许焊进引擎」，而编年史的自动条目**刻意只存结构化数据**
+ *    （`kind` + 建筑名 + 起落档位），中文措辞按设计 §F5 末条就该落在渲染层 ——
+ *    dispatcher 面在 `placeholder-registry`，玩家面就是这里。
+ * 🔴 **有效视图一律走 `effectiveTileFacts`**（设计 §3 末条：有事实取事实、否则取 pack
+ *    基线）。在这里再写一遍「没有事实条目时读 pack」就是漂移的来路 —— 症状是
+ *    「卡片上这块地是第 3 档，AI 那边看到的是第 1 档」，两边都不报错。
+ */
+
+/**
+ * 信息卡的地块详情模型。
+ *
+ * 🔴 四段的形状**刻意内联在这里**、不拆成五个导出接口：它们没有任何跨文件消费方
+ *    （模板从推断里拿类型，本文件的纯函数用索引访问取别名），导出等于凭空多五条死代码
+ *    —— 死代码棘轮会当场逮住这件事。
+ */
+export interface TileDetailModel {
+  /**
+   * 发展条 —— 档位 + 档名 + 进度（−50..100，口径见 `@engine/map-dynamics`）。
+   * 无发展度（海/湖/不可通行块，或包里没给这一格）→ `null`，界面整节不渲染。
+   */
+  development: {
+    /** 当前档 1..10 */
+    level: number;
+    /** 档名（随包；包没带档名表时退化成序号，见 `developmentLevelName`） */
+    levelName: string;
+    /** 进度 −50..100 */
+    progress: number;
+  } | null;
+  statuses: {
+    title: string;
+    description: string;
+    /** 永久状态（`durationDays: -1`）—— 不参与到期结算，界面出「永久」徽章 */
+    permanent: boolean;
+    /**
+     * 剩余天数；永久 → `null`。
+     * 🔴 已过期但还没被结算摘掉的那一拍是 **0 不是负数**：负天数只会让玩家以为界面坏了，
+     *    而「0 天」正确地表达了「这一条随时会消失」。
+     */
+    remainingDays: number | null;
+  }[];
+  /**
+   * **主建筑**（地图 v1.2 §F4b）—— 这块地的主聚落。无发展度 → `null`，界面整块不渲染。
+   *
+   * 🔴 **不在 `slots` 里**：它不占编号槽、降档免疫、不可摧毁不可移除。塞进槽列表会让
+   *    槽位号整体错位一格，而槽位号正是「下一次降档谁会没」的唯一线索。
+   * 🔴 名字已由 `@engine/map-dynamics` 解析好（作者名 / 钉住名 / 按当前档派生的通名），
+   *    本层一个字都不查表 —— 卡片与 AI 那边看到的必须是同一个名字。
+   */
+  mainBuilding: {
+    name: string;
+    description: string;
+    ownerFlavor: string;
+    /** 玩家产业 —— 与槽位建筑同一套所有权语义（裁定 §8-19），界面同款高亮 */
+    playerOwned: boolean;
+  } | null;
+  /** 建筑槽格；无发展度 → 空数组（没有档位就没有槽位） */
+  slots: {
+    /**
+     * 槽位号（**1-based，就是界面上那个编号**）。
+     * 🔴 **严格槽位身份**（裁定 §8-8）：降档永远摧毁最高号槽，所以编号不是装饰 ——
+     *    它是「下一次降档谁会没」的唯一线索。列表**不许过滤掉空槽**，那会让编号错位。
+     */
+    slot: number;
+    /** 槽里那座建筑（字段全部收敛成非可选，模板里不必再 `?.`）；`null` = 空槽 */
+    building: {
+      name: string;
+      description: string;
+      ownerFlavor: string;
+      /** 玩家产业 —— v1.2 里唯一有机制的所有权位（裁定 §8-9），界面高亮 */
+      playerOwned: boolean;
+    } | null;
+  }[];
+  /** 编年史，**新的在前**（见 `buildTileDetailModel` 的注释） */
+  history: {
+    /** 游戏内日 */
+    day: number;
+    kind: TileHistoryEntry['kind'];
+    /** 已渲染成中文的一行 */
+    text: string;
+  }[];
+}
+
+/** 内部别名（非导出）—— 纯函数签名要它们，外部一律从 `TileDetailModel` 取 */
+type DetailDevelopment = NonNullable<TileDetailModel['development']>;
+type DetailStatus = TileDetailModel['statuses'][number];
+type DetailSlot = TileDetailModel['slots'][number];
+type DetailBuilding = NonNullable<DetailSlot['building']>;
+// 主建筑与槽位建筑的展示形状逐字相同（§F4b「除降档免疫外一切如常」），故共用一个别名
+type DetailMainBuilding = NonNullable<TileDetailModel['mainBuilding']>;
+type DetailHistoryLine = TileDetailModel['history'][number];
+
+function trimText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * 档名：包带了就用包的，没带（v1.0/v1.1 旧包 → 空表）退化成序号。
+ * 🔴 退化**不是错误态**，不加任何警示措辞：换图零改码那条约定的直接后果就是
+ *    「档名是内容、序号是机制」，旧包只是没有内容而已。
+ */
+export function developmentLevelName(levels: readonly string[] | undefined, level: number): string {
+  const name = Array.isArray(levels) ? trimText(levels[level - 1]) : '';
+  return name.length > 0 ? name : `第${level}档`;
+}
+
+/**
+ * 这块地在**界面上**该不该有发展条与建筑槽。
+ *
+ * 🔴 判据比引擎的 `hasDevelopment()` **更严一格**，这是刻意的：引擎那边「可通行陆块
+ *    缺字段读作档 1」是为了让结算不必分两套路径；而界面上，给每一块旧包的野地都画一条
+ *    「第1档 · 0」的空条 + 一个空槽，等于凭空发明了一屏没有任何人写过的内容
+ *    （公开仓的占位包正是这种包）。`types-map.ts` 亲口写着「缺席 = 这块地没有发展度」，
+ *    这里按那句话渲染。**有事实条目时以事实为准** —— 旧包上被 AI 记过一笔的地块
+ *    自然长出发展条，那是真发生过的事。
+ */
+function hasDevelopmentView(tile: MapTile, entry: TileFactsEntry | undefined): boolean {
+  if (entry?.development) return true;
+  return typeof tile.development === 'number' && Number.isFinite(tile.development);
+}
+
+/** 剩余天数；永久（`durationDays < 0`）→ `null`，已到期 → 0（见 `TileDetailModel`） */
+function remainingDaysOf(status: TileStatus, currentDay: number): number | null {
+  const duration = typeof status.durationDays === 'number' ? status.durationDays : -1;
+  if (!Number.isFinite(duration) || duration < 0) return null;
+  const applied =
+    typeof status.appliedAtDay === 'number' && Number.isFinite(status.appliedAtDay)
+      ? status.appliedAtDay
+      : currentDay;
+  const remaining = applied + duration - currentDay;
+  return remaining > 0 ? Math.ceil(remaining) : 0;
+}
+
+function toDetailStatus(status: TileStatus, currentDay: number): DetailStatus {
+  const remainingDays = remainingDaysOf(status, currentDay);
+  return {
+    title: trimText(status.title),
+    description: trimText(status.description),
+    permanent: remainingDays === null,
+    remainingDays,
+  };
+}
+
+function toDetailBuilding(row: BuildingRecord | null): DetailBuilding | null {
+  if (!row) return null;
+  const name = trimText(row.name);
+  if (name.length === 0) return null;
+  return {
+    name,
+    description: trimText(row.description),
+    ownerFlavor: trimText(row.ownerFlavor),
+    playerOwned: row.playerOwned === true,
+  };
+}
+
+/**
+ * 一条自动条目的中文主干（不含 `reason`）。认不出的 `kind` → 空串，调用方据此整行丢掉
+ * —— 编年史是**只加不改**的历史记录，宁可少显示一行，也别渲染一行「[object Object]」。
+ */
+function historyBaseText(entry: TileHistoryEntry, levels: readonly string[] | undefined): string {
+  const building = trimText(entry.building);
+  switch (entry.kind) {
+    case 'built':
+      return building.length > 0 ? `「${building}」落成` : '有建筑落成';
+    case 'destroyed': {
+      const base = building.length > 0 ? `「${building}」被毁` : '有建筑被毁';
+      const causes = Array.isArray(entry.causeStatuses)
+        ? entry.causeStatuses.map(trimText).filter((s) => s.length > 0)
+        : [];
+      return causes.length > 0 ? `${base}（${causes.join('、')}）` : base;
+    }
+    case 'acquired':
+      return building.length > 0 ? `「${building}」成为玩家产业` : '取得一处产业';
+    // v1.2 §F4b：只有主建筑改得了名（槽位建筑改名 = 换一座建筑），记的是**新名字**
+    case 'renamed':
+      return building.length > 0 ? `主建筑更名为「${building}」` : '主建筑更名';
+    case 'firstVisit':
+      return '首次到访';
+    case 'levelUp':
+    case 'levelDown': {
+      const verb = entry.kind === 'levelUp' ? '升' : '降';
+      const to = entry.toLevel;
+      if (typeof to !== 'number' || !Number.isFinite(to)) {
+        return entry.kind === 'levelUp' ? '发展度提升' : '发展度衰退';
+      }
+      return `${verb}为「${developmentLevelName(levels, Math.trunc(to))}」`;
+    }
+    case 'note':
+      // AI 的自由文本 —— **原文照登**，不加任何前缀（它本来就是写给玩家看的一句话）
+      return trimText(entry.text);
+    default:
+      return '';
+  }
+}
+
+/**
+ * 一条编年史 → 展示行。`reason`（AI 在 op 上附的缘由，裁定 §8-15①）以破折号缀在主干后。
+ * 主干为空 → 整行为空串（调用方丢弃）。
+ */
+export function formatTileHistoryLine(
+  entry: TileHistoryEntry,
+  levels: readonly string[] | undefined,
+): string {
+  const base = historyBaseText(entry, levels);
+  if (base.length === 0) return '';
+  const reason = trimText(entry.reason);
+  return reason.length > 0 ? `${base}——${reason}` : base;
+}
+
+/** 发展条的几何（−50..100 是一条**带 0 刻度**的轨道，不是 0..100 的普通进度条） */
+export interface DevelopmentBarGeometry {
+  /** 0 刻度在轨道上的百分比位置（定值 ≈33.33） */
+  zeroPct: number;
+  /** 填充段起点百分比 */
+  startPct: number;
+  /** 填充段宽度百分比 */
+  widthPct: number;
+  /** 进度为负（衰退）—— 模板据此换颜色，**不据此换布局** */
+  negative: boolean;
+}
+
+/**
+ * 进度值 → 填充段几何。
+ *
+ * 🔴 负进度**从 0 刻度往左长**，不是「从左端起一条短条」：−10 与 +10 在后一种画法里
+ *    长得一样长、位置也差不多，玩家读不出这块地在衰退。0 刻度是这条轨道的全部意义。
+ */
+export function developmentBarGeometry(progress: number): DevelopmentBarGeometry {
+  const span = DEV_PROGRESS_MAX - DEV_PROGRESS_MIN;
+  const value = clamp(Number.isFinite(progress) ? progress : 0, DEV_PROGRESS_MIN, DEV_PROGRESS_MAX);
+  const zeroPct = ((0 - DEV_PROGRESS_MIN) / span) * 100;
+  const valuePct = ((value - DEV_PROGRESS_MIN) / span) * 100;
+  const negative = value < 0;
+  return {
+    zeroPct,
+    startPct: negative ? valuePct : zeroPct,
+    widthPct: Math.abs(valuePct - zeroPct),
+    negative,
+  };
+}
+
+/**
+ * pack 基线 ⊕ 事实条目 → 信息卡的地块详情模型。
+ *
+ * 🔴 **编年史新的在前**：每地块只留 10 条（FIFO + 首访钉扎，裁定 §8-16），而信息卡是一栏
+ *    窄条 —— 玩家想知道的是「最近这里发生了什么」。首访那条因此沉到底部，它本来就是锚点
+ *    不是新闻。存储顺序（旧 → 新）不动，倒序只发生在这一层。
+ * 🔴 **无发展度的地块只有状态与编年史**（裁定 §8-1）：海上的风暴、不可通行山口的封路
+ *    都是合法状态，但它们永远没有发展条与建筑槽。
+ */
+export function buildTileDetailModel(
+  tile: MapTile,
+  entry: TileFactsEntry | undefined,
+  developmentLevels: readonly string[] | undefined,
+  currentDay: number,
+  mainBuildingNames?: readonly string[],
+): TileDetailModel {
+  const effective: EffectiveTileFacts = effectiveTileFacts(
+    tile,
+    entry,
+    Array.isArray(mainBuildingNames) ? mainBuildingNames : [],
+  );
+  const day = Number.isFinite(currentDay) ? currentDay : 0;
+  const level = effective.level;
+
+  const showDevelopment =
+    effective.hasDevelopment && level !== null && hasDevelopmentView(tile, entry);
+
+  const development: DetailDevelopment | null =
+    showDevelopment && level !== null
+      ? {
+          level,
+          levelName: developmentLevelName(developmentLevels, level),
+          progress: effective.progress ?? 0,
+        }
+      : null;
+
+  // 主建筑与槽格同一道闸：`development === null` 时整块建筑面都不渲染
+  // （§8 末条的读侧收敛：包没声明发展度的地块不该凭空长出一座「Seat Lv1」）
+  const mainBuilding: DetailMainBuilding | null =
+    development === null ? null : toDetailBuilding(effective.mainBuilding);
+
+  const slots: DetailSlot[] =
+    development === null
+      ? []
+      : effective.buildings.map((row, index) => ({
+          slot: index + 1,
+          building: toDetailBuilding(row),
+        }));
+
+  const statuses = effective.statuses
+    .map((status) => toDetailStatus(status, day))
+    .filter((status) => status.title.length > 0);
+
+  const history: DetailHistoryLine[] = [];
+  for (const row of effective.history) {
+    const text = formatTileHistoryLine(row, developmentLevels);
+    if (text.length === 0) continue;
+    history.push({
+      day: typeof row.day === 'number' && Number.isFinite(row.day) ? row.day : 0,
+      kind: row.kind,
+      text,
+    });
+  }
+  history.reverse();
+
+  return { development, statuses, mainBuilding, slots, history };
 }

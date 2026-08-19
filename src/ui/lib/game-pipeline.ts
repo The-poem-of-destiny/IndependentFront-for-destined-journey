@@ -48,7 +48,7 @@ import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import { buildStatData } from '@engine/stat-projection';
 import { buildPassSeed } from '@engine/ejs-rng';
 // 🗺 地图 v1: `{{MAP_CONTEXT}}` 的可变半边（`worldFlags.map`）+ 天气标签（与出图同口径）
-import { getMapFlags } from '@engine/save-profile';
+import { getMapFactsFlags, getMapFlags } from '@engine/save-profile';
 // 🎲 随机事件 v1 (§5.1 读侧)：`{{RANDOM_EVENTS}}` 的候选快照 —— 供值必须在 buildContext
 import { getRandomEventFlags } from '@engine/save-profile';
 import { buildRandomEventOffer } from '@engine/random-event-context';
@@ -870,6 +870,10 @@ export class GamePipeline {
       //    漏供的症状不是报错，是那个块静默消失（blurByDefault 的教训），
       //    故 placeholder-registry.map-context.test.ts 有一条源码断言盯着这两行。
       mapFlags: this.game.saveProfile ? getMapFlags(this.game.saveProfile) : undefined,
+      // 🗺 地图 v1.2 §5: 地块事实态（状态/发展度/建筑/编年史）。与上一行是**两袋**，
+      //    自愈语义相反（事实永不随 packStamp 清空）—— 同一条铁律：供值必须在这里，
+      //    漏供的症状是 `{{MAP_CONTEXT}}` 的动态四行与 `$map.statuses` 静默永远为空。
+      mapFacts: this.game.saveProfile ? getMapFactsFlags(this.game.saveProfile) : undefined,
       weather: resolveSceneWeather(this.game.saveProfile),
       // 🔴 2026-08-13 真机 debug：最近已结算战斗（{{RECENT_COMBAT}} 的数据源）。
       //    与上面两行同一条铁律：供值必须在 buildContext —— 漏供的症状同样是

@@ -37,14 +37,15 @@ import { describe, expect, it } from 'vitest';
  * query: '?raw' —— 文件全文作为字符串
  * import: 'default' —— `?raw` 的 default 就是全文
  *
- * 两条 pattern：`map-*.ts`（现在与将来的全部地图模块）+ `types-map.ts`（类型分册；
+ * 三条 pattern：`map-*.ts`（现在与将来的全部地图模块）+ `types-map.ts`（类型分册；
  * 它同样不许有中文字面量 —— 一个写进类型的字面量联合 `'沼泽' | '苔原'` 会把地形词汇
- * 焊死在引擎里，而那比一个 if 更难拆）。
+ * 焊死在引擎里，而那比一个 if 更难拆）+ `time-ledger.ts`（时间账本；名字不带 map-
+ * 因为它是通用机制层，但同一条理由成立 —— 机制里没有任何内容词汇，2026-08-18 纳管）。
  *
  * 别名 `@engine` 在 `vitest.config.ts` 里注册；解析不到时是导入期硬报错，不会静默退化成空集。
  */
 const SOURCES: Record<string, string> = import.meta.glob(
-  ['@engine/map-*.ts', '@engine/types-map.ts'],
+  ['@engine/map-*.ts', '@engine/types-map.ts', '@engine/time-ledger.ts'],
   { eager: true, query: '?raw', import: 'default' },
 ) as Record<string, string>;
 

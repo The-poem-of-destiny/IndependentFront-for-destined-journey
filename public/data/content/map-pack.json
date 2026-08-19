@@ -24,6 +24,30 @@
     "近海",
     "远洋"
   ],
+  "developmentLevels": [
+    "废墟",
+    "荒野",
+    "营地",
+    "聚落",
+    "村庄",
+    "乡镇",
+    "城镇",
+    "城市",
+    "大城",
+    "都会"
+  ],
+  "mainBuildingNames": [
+    "断墙残垣",
+    "野地窝棚",
+    "营地",
+    "聚落长屋",
+    "村公所",
+    "乡镇议事厅",
+    "镇公堂",
+    "市政厅",
+    "领主府",
+    "王城"
+  ],
   "travelRules": {
     "rates": { "land": 30, "nearSea": 60, "farSea": 90 },
     "embarkCost": 40,
@@ -170,7 +194,8 @@
       "midTierId": "mid_northplain",
       "color": [124, 176, 96],
       "centroid": [75, 82],
-      "areaPx": 5400
+      "areaPx": 5400,
+      "development": 5
     },
     {
       "id": 2,
@@ -182,7 +207,8 @@
       "midTierId": "mid_northplain",
       "color": [58, 112, 84],
       "centroid": [168, 74],
-      "areaPx": 4600
+      "areaPx": 4600,
+      "development": 4
     },
     {
       "id": 3,
@@ -206,7 +232,8 @@
       "midTierId": "mid_frostridge",
       "color": [146, 138, 92],
       "centroid": [170, 24],
-      "areaPx": 3600
+      "areaPx": 3600,
+      "development": 3
     },
     {
       "id": 5,
@@ -218,7 +245,8 @@
       "midTierId": null,
       "color": [190, 196, 108],
       "centroid": [78, 148],
-      "areaPx": 6200
+      "areaPx": 6200,
+      "development": 2
     },
     {
       "id": 6,
@@ -254,7 +282,8 @@
       "midTierId": "mid_harbor",
       "color": [214, 186, 104],
       "centroid": [88, 220],
-      "areaPx": 4800
+      "areaPx": 4800,
+      "development": 4
     },
     {
       "id": 9,
@@ -266,7 +295,20 @@
       "midTierId": "mid_harbor",
       "color": [206, 158, 118],
       "centroid": [182, 222],
-      "areaPx": 3900
+      "areaPx": 3900,
+      "development": 6,
+      "buildings": [
+        {
+          "name": "港口货栈",
+          "description": "临水的木构仓房，常年堆着待运的箱笼。",
+          "ownerFlavor": "港务公会"
+        }
+      ],
+      "mainBuilding": {
+        "name": "潮汐灯塔",
+        "description": "扼守湾口的石塔，塔顶的灯彻夜不熄。",
+        "ownerFlavor": "港务长"
+      }
     },
     {
       "id": 10,
@@ -314,7 +356,8 @@
       "midTierId": null,
       "color": [188, 142, 96],
       "centroid": [330, 258],
-      "areaPx": 900
+      "areaPx": 900,
+      "development": 1
     }
   ],
   "adjacency": [

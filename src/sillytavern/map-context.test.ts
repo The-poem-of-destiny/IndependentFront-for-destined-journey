@@ -17,7 +17,13 @@ import { buildMapSnapshot, buildRuntimeGeoData, type MapSnapshotOptions } from '
 import { EMPTY_MAP_PACK } from './map-pack';
 import { findPath } from './map-path';
 import type { LocationNode, TerrainType } from './types';
-import type { MapPack } from './types-map';
+import type {
+  MapFactsFlags,
+  MapPack,
+  TileFactsEntry,
+  TileHistoryEntry,
+  TileStatus,
+} from './types-map';
 
 // ══════════════════════════════════════════════════════════════
 // 夹具：8 块地（两国 + 无主 + 悬空国 + 海 + 湖 + 不可通行 + 孤块）
@@ -165,6 +171,10 @@ function makePack(): MapPack {
     ],
     straits: [[TILE_HEARTH, TILE_ISLE]],
     placeBindings: {},
+    // v1.2：档名随包（不足 10 档是刻意的 —— 运行时不替作者补表，缺行走 ASCII 兜底）
+    developmentLevels: ['Hamlet', 'Village', 'Township', 'Citadel'],
+    // v1.2 §F4b：主建筑通名表（同样刻意不足 10 档）
+    mainBuildingNames: ['Camp', 'Moot Hall', 'Town Hall', 'Keep'],
   };
 }
 
@@ -465,6 +475,346 @@ describe('buildMapSnapshot —— 在途摘要', () => {
 
   it('没有在途旗 → null', () => {
     expect(buildMapSnapshot(makePack(), makeOptions()).journey).toBeNull();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// buildMapSnapshot —— 地块动态（v1.2 / ADR-33 §5）
+// ══════════════════════════════════════════════════════════════
+
+/** 事实袋（`worldFlags.mapFacts` 的形状）—— 键是**地块名**，不是 id */
+function makeFacts(tiles: Record<string, TileFactsEntry>): MapFactsFlags {
+  return { tiles };
+}
+
+/** 一条限时状态（第 `appliedAtDay` 天挂上，持续 `durationDays` 天） */
+function makeStatus(overrides: Partial<TileStatus> = {}): TileStatus {
+  return {
+    title: 'Flood',
+    description: 'water everywhere',
+    effects: [],
+    durationDays: 30,
+    appliedAtDay: 100,
+    ...overrides,
+  };
+}
+
+describe('buildMapSnapshot —— 地块动态：缺席零 token', () => {
+  it('🔴 没供事实袋 → 当前地块与邻块的动态键**一个都不存在**（与 v1.1 逐字节相同）', () => {
+    const snapshot = buildMapSnapshot(makePack(), makeOptions());
+
+    // 键集合锁死（同「不泄露 tileId」那条的做法）：多出任何一格都会红
+    expect(Object.keys(snapshot.current ?? {}).sort()).toEqual([
+      'countryName',
+      'impassable',
+      'midTierName',
+      'name',
+      'terrain',
+      'water',
+    ]);
+    expect(Object.keys(snapshot.neighbors[0] ?? {}).sort()).toEqual([
+      'dir',
+      'impassable',
+      'name',
+      'ownerName',
+      'terrain',
+      'water',
+    ]);
+    expect('developmentLevels' in snapshot).toBe(false);
+  });
+
+  it('供了事实袋、但这块地没有事实条目 → 同样一格都不产（copy-on-write：没偏离基线）', () => {
+    const snapshot = buildMapSnapshot(
+      makePack(),
+      makeOptions({ facts: makeFacts({ Farhold: { statuses: [], history: [] } }) }),
+    );
+
+    expect(snapshot.current?.development).toBeUndefined();
+    expect(snapshot.current?.statuses).toBeUndefined();
+    expect(snapshot.current?.buildings).toBeUndefined();
+    expect(snapshot.current?.mainBuilding).toBeUndefined();
+    expect(snapshot.current?.history).toBeUndefined();
+  });
+
+  it('🔴 旧包（tiles 没烘起始档）+ 事实条目里也没有发展记录 → 不凭空产「Lv1」那一格', () => {
+    const snapshot = buildMapSnapshot(
+      makePack(),
+      makeOptions({ facts: makeFacts({ Hearth: { statuses: [makeStatus()], history: [] } }) }),
+    );
+
+    // 状态照常产（状态与发展度互不依赖），发展/建筑/主建筑三格不产
+    expect(snapshot.current?.statuses).toHaveLength(1);
+    expect(snapshot.current?.development).toBeUndefined();
+    expect(snapshot.current?.buildings).toBeUndefined();
+    expect(snapshot.current?.mainBuilding).toBeUndefined();
+  });
+});
+
+describe('buildMapSnapshot —— 发展档与建筑槽', () => {
+  it('档名查 pack 的 developmentLevels；进度原样带出', () => {
+    const snapshot = buildMapSnapshot(
+      makePack(),
+      makeOptions({
+        facts: makeFacts({
+          Hearth: { development: { level: 3, progress: 42 }, statuses: [], history: [] },
+        }),
+      }),
+    );
+
+    expect(snapshot.current?.development).toEqual({
+      level: 3,
+      levelName: 'Township',
+      progress: 42,
+    });
+    // 表随事实一起出现（渲染层要它把编年史里的档位序数翻成档名）
+    expect(snapshot.developmentLevels).toEqual(['Hamlet', 'Village', 'Township', 'Citadel']);
+  });
+
+  it('🔴 档名表缺这一行 → ASCII 兜底 `Lv{n}`（引擎不持有中文档名）', () => {
+    const pack = makePack();
+    pack.developmentLevels = [];
+    const snapshot = buildMapSnapshot(
+      pack,
+      makeOptions({
+        facts: makeFacts({
+          Hearth: { development: { level: 2, progress: 0 }, statuses: [], history: [] },
+        }),
+      }),
+    );
+
+    expect(snapshot.current?.development?.levelName).toBe('Lv2');
+    // 表本身为空时那一格也不产（不给渲染层一个空数组去判空）
+    expect('developmentLevels' in snapshot).toBe(false);
+  });
+
+  it('建筑槽：空槽不占位、槽位号不外泄、空槽数 = 槽数 − 已建成', () => {
+    const snapshot = buildMapSnapshot(
+      makePack(),
+      makeOptions({
+        facts: makeFacts({
+          Hearth: {
+            development: { level: 3, progress: 0 },
+            buildings: [
+              { name: 'Mill', ownerFlavor: 'Reeve' },
+              null,
+              { name: 'Trade Post', playerOwned: true },
+            ],
+            statuses: [],
+            history: [],
+          },
+        }),
+      }),
+    );
+
+    expect(snapshot.current?.buildings).toEqual({
+      slots: 3,
+      entries: [
+        { name: 'Mill', ownerFlavor: 'Reeve', playerOwned: false },
+        { name: 'Trade Post', playerOwned: true },
+      ],
+      freeSlots: 1,
+    });
+  });
+
+  it('主建筑：与发展档同进同出，名字按当前档从包的通名表派生', () => {
+    const snapshot = buildMapSnapshot(
+      makePack(),
+      makeOptions({
+        facts: makeFacts({
+          Hearth: { development: { level: 3, progress: 0 }, statuses: [], history: [] },
+        }),
+      }),
+    );
+
+    expect(snapshot.current?.mainBuilding).toEqual({ name: 'Town Hall', playerOwned: false });
+    // 它**不在槽里**：档 3 = 3 个空槽，一个都没被它占
+    expect(snapshot.current?.buildings).toEqual({ slots: 3, entries: [], freeSlots: 3 });
+  });
+
+  it('事实里钉住的主建筑赢过通名，归属与玩家产业标记一并带出', () => {
+    const snapshot = buildMapSnapshot(
+      makePack(),
+      makeOptions({
+        facts: makeFacts({
+          Hearth: {
+            development: { level: 3, progress: 0 },
+            mainBuilding: { name: 'Sunspire', ownerFlavor: 'the archon', playerOwned: true },
+            statuses: [],
+            history: [],
+          },
+        }),
+      }),
+    );
+
+    expect(snapshot.current?.mainBuilding).toEqual({
+      name: 'Sunspire',
+      ownerFlavor: 'the archon',
+      playerOwned: true,
+    });
+  });
+
+  it('🔴 通名表缺这一行 → ASCII 兜底（引擎不持有中文通名）', () => {
+    const snapshot = buildMapSnapshot(
+      makePack(),
+      makeOptions({
+        facts: makeFacts({
+          Hearth: { development: { level: 9, progress: 0 }, statuses: [], history: [] },
+        }),
+      }),
+    );
+
+    expect(snapshot.current?.mainBuilding?.name).toBe('Seat Lv9');
+  });
+
+  it('🔴 海/湖/不可通行块只带状态：发展与建筑两格恒不产（裁定 §8-1）', () => {
+    const facts = makeFacts({
+      Stillmere: {
+        // 手改备份/坏数据也可能在水块上写发展度 —— 有效视图不认它
+        development: { level: 5, progress: 10 },
+        buildings: [{ name: 'Ghost Dock' }],
+        statuses: [makeStatus({ title: 'Storm' })],
+        history: [],
+      },
+    });
+    const snapshot = buildMapSnapshot(makePack(), makeOptions({ currentTileId: TILE_LAKE, facts }));
+
+    expect(snapshot.current?.development).toBeUndefined();
+    expect(snapshot.current?.buildings).toBeUndefined();
+    expect(snapshot.current?.mainBuilding).toBeUndefined();
+    expect(snapshot.current?.statuses?.[0]?.title).toBe('Storm');
+  });
+});
+
+describe('buildMapSnapshot —— 状态的剩余天数', () => {
+  it('剩余 = appliedAtDay + durationDays − currentDay', () => {
+    const snapshot = buildMapSnapshot(
+      makePack(),
+      makeOptions({
+        currentDay: 118,
+        facts: makeFacts({ Hearth: { statuses: [makeStatus()], history: [] } }),
+      }),
+    );
+
+    expect(snapshot.current?.statuses?.[0]).toEqual({
+      title: 'Flood',
+      description: 'water everywhere',
+      permanent: false,
+      remainingDays: 12,
+    });
+  });
+
+  it('已过期但还没被时间账本收走 → 下钳到 0，不出负数', () => {
+    const snapshot = buildMapSnapshot(
+      makePack(),
+      makeOptions({
+        currentDay: 200,
+        facts: makeFacts({ Hearth: { statuses: [makeStatus()], history: [] } }),
+      }),
+    );
+
+    expect(snapshot.current?.statuses?.[0]?.remainingDays).toBe(0);
+  });
+
+  it('🔴 永久状态与「算不出今天是第几天」都给 null —— 但 permanent 位区分得开', () => {
+    const permanent = buildMapSnapshot(
+      makePack(),
+      makeOptions({
+        currentDay: 118,
+        facts: makeFacts({
+          Hearth: { statuses: [makeStatus({ durationDays: -1 })], history: [] },
+        }),
+      }),
+    );
+    expect(permanent.current?.statuses?.[0]).toMatchObject({
+      permanent: true,
+      remainingDays: null,
+    });
+
+    const noClock = buildMapSnapshot(
+      makePack(),
+      makeOptions({ facts: makeFacts({ Hearth: { statuses: [makeStatus()], history: [] } }) }),
+    );
+    expect(noClock.current?.statuses?.[0]).toMatchObject({
+      permanent: false,
+      remainingDays: null,
+    });
+  });
+});
+
+describe('buildMapSnapshot —— 编年史', () => {
+  const history: TileHistoryEntry[] = [
+    { day: 1, kind: 'firstVisit' },
+    { day: 2, kind: 'built', building: 'Mill' },
+    { day: 3, kind: 'levelUp', fromLevel: 1, toLevel: 2 },
+    { day: 4, kind: 'note', text: 'a quiet year' },
+    { day: 5, kind: 'destroyed', building: 'Mill', causeStatuses: ['Flood'] },
+    { day: 6, kind: 'acquired', building: 'Trade Post' },
+  ];
+
+  it('只带最近 5 条，**新的在后**（存储顺序不变）', () => {
+    const snapshot = buildMapSnapshot(
+      makePack(),
+      makeOptions({ facts: makeFacts({ Hearth: { statuses: [], history } }) }),
+    );
+
+    expect(snapshot.current?.history?.map((e) => e.day)).toEqual([2, 3, 4, 5, 6]);
+  });
+
+  it('🔴 结构化原样透传（不在数据面拼句子），且不把存档里那份数组的引用递出去', () => {
+    const facts = makeFacts({ Hearth: { statuses: [], history } });
+    const snapshot = buildMapSnapshot(makePack(), makeOptions({ facts }));
+    const kept = snapshot.current?.history ?? [];
+    const last = kept[kept.length - 1];
+
+    expect(last).toEqual({ day: 6, kind: 'acquired', building: 'Trade Post' });
+    // 改快照不回流事实袋（快照会被送进 EJS 与渲染层）
+    snapshot.current!.history![0].building = 'mutated';
+    snapshot.current!.history![3].causeStatuses!.push('mutated');
+    expect(history[1].building).toBe('Mill');
+    expect(history[4].causeStatuses).toEqual(['Flood']);
+  });
+});
+
+describe('buildMapSnapshot —— 邻块单行头条（裁定 §8-12）', () => {
+  it('只多两格：档名 + 状态标题；描述/建筑/编年史一概不给邻块', () => {
+    const snapshot = buildMapSnapshot(
+      makePack(),
+      makeOptions({
+        facts: makeFacts({
+          Frostmoor: {
+            development: { level: 2, progress: 80 },
+            buildings: [{ name: 'Watchtower' }],
+            statuses: [makeStatus({ title: 'Blizzard', description: 'whiteout' })],
+            history: [{ day: 9, kind: 'built', building: 'Watchtower' }],
+          },
+        }),
+      }),
+    );
+
+    const north = snapshot.neighbors.find((n) => n.name === 'Frostmoor');
+    expect(north?.devLevelName).toBe('Village');
+    expect(north?.statusTitles).toEqual(['Blizzard']);
+    expect(Object.keys(north ?? {}).sort()).toEqual([
+      'devLevelName',
+      'dir',
+      'impassable',
+      'name',
+      'ownerName',
+      'statusTitles',
+      'terrain',
+      'water',
+    ]);
+  });
+
+  it('没有事实条目的邻块两格都不产（同一条零 token 规则）', () => {
+    const snapshot = buildMapSnapshot(
+      makePack(),
+      makeOptions({ facts: makeFacts({ Frostmoor: { statuses: [], history: [] } }) }),
+    );
+
+    const east = snapshot.neighbors.find((n) => n.name === 'Sunfield');
+    expect(east?.devLevelName).toBeUndefined();
+    expect(east?.statusTitles).toBeUndefined();
   });
 });
 
