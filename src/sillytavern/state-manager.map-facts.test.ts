@@ -26,6 +26,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { clearAllData, getCharacters, initializeDatabase, saveCharacter } from './database';
 import { getMapFactsFlags, getProfile, updateProfile } from './save-profile';
+import { buildMapSnapshot } from './map-context';
 import { createStateManager } from './state-manager';
 import { installMapPack, resetMapRuntime } from './map-runtime';
 import { createDefaultCharacterState } from './types';
@@ -367,6 +368,90 @@ describe('tile_building_add / tile_building_update', () => {
     warn.mockRestore();
   });
 
+  it('🔴 复述已有收益**不重锚**（每复述一次就推后 30 天 = 有产业但永远不发钱）', async () => {
+    await commit([
+      tileOp('tile_building_add', {
+        tile: 'Charlie',
+        name: 'Tavern',
+        playerOwned: true,
+        income: { amount: 50 },
+      }),
+    ]);
+
+    await advanceDays(20); // 还没到第一个入账点
+    // AI 在叙事里又提了一遍这笔收益（复读是常态），顺手改了金额
+    await commit([
+      tileOp('tile_building_update', { tile: 'Charlie', name: 'Tavern', income: { amount: 60 } }),
+    ]);
+    expect((await readEntry('Charlie'))?.buildings?.[0]?.income).toEqual({
+      amount: 60,
+      periodDays: 30,
+      anchorDay: 0, // 锚仍在授予那天，不是今天（第 20 天）
+    });
+
+    await advanceDays(11); // 第 31 天：跨过第一个锚点，钱必须真的入账
+    expect(await readMoney()).toBe(100 + 60);
+  });
+
+  it('主建筑的收益同样不重锚（同一条口径，独立字段容易漏）', async () => {
+    await commit([
+      tileOp('tile_building_update', {
+        tile: 'Charlie',
+        main: true,
+        playerOwned: true,
+        income: { amount: 200 },
+      }),
+    ]);
+    await advanceDays(25);
+    await commit([
+      tileOp('tile_building_update', { tile: 'Charlie', main: true, income: { amount: 200 } }),
+    ]);
+
+    expect((await readEntry('Charlie'))?.mainBuilding?.income?.anchorDay).toBe(0);
+    await advanceDays(6); // 第 31 天
+    expect(await readMoney()).toBe(100 + 200);
+  });
+
+  it('新授予的收益锚在**当天**（不是第 0 天）', async () => {
+    await advanceDays(10);
+    await commit([
+      tileOp('tile_building_add', {
+        tile: 'Charlie',
+        name: 'Tavern',
+        playerOwned: true,
+        income: { amount: 50 },
+      }),
+    ]);
+    expect((await readEntry('Charlie'))?.buildings?.[0]?.income?.anchorDay).toBe(10);
+  });
+
+  it('🔴 负额/零额收益整格丢掉 + warn（结算直接进 money，负额 = 一条静默抽钱的 op）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await commit([
+      tileOp('tile_building_add', {
+        tile: 'Charlie',
+        name: 'Sinkhole',
+        playerOwned: true,
+        income: { amount: -80 },
+      }),
+    ]);
+
+    // 建筑本身照落（名字/归属是合法的叙事事实），只是没有收益这一格
+    const entry = await readEntry('Charlie');
+    expect(entry?.buildings?.[0]?.name).toBe('Sinkhole');
+    expect(entry?.buildings?.[0]?.income).toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+
+    await commit([
+      tileOp('tile_building_update', { tile: 'Charlie', name: 'Sinkhole', income: { amount: 0 } }),
+    ]);
+    expect((await readEntry('Charlie'))?.buildings?.[0]?.income).toBeUndefined();
+
+    await advanceDays(65);
+    expect(await readMoney()).toBe(100); // 一分钱都没被抽走
+    warn.mockRestore();
+  });
+
   it('找不到的建筑名 → warn + 无变化（不凭空造一座）', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     await commit([tileOp('tile_building_update', { tile: 'Charlie', name: 'Ghost' })]);
@@ -466,6 +551,41 @@ describe('首访记档 —— set_location 旁观', () => {
     const alpha = await readEntry('Alpha');
     expect(alpha?.history.filter((h) => h.kind === 'firstVisit')).toHaveLength(1);
     expect((await readEntry('Bravo'))?.history.map((h) => h.kind)).toEqual(['firstVisit']);
+  });
+
+  it('🔴 旧包地块（包里没起始档）首访 → 事实里没有发展面，读侧一格发展度都不产', async () => {
+    await commit([{ op: 'set_location', target: 'characters.Hero', value: 'Alpha' }]);
+
+    const entry = await readEntry('Alpha');
+    expect(entry?.history.map((h) => h.kind)).toEqual(['firstVisit']);
+    // 播种落了（首访条目住在它上面），但发展面一格都没物化
+    expect(entry?.development).toBeUndefined();
+    expect(entry?.buildings).toBeUndefined();
+
+    // 读侧（`{{MAP_CONTEXT}}` 与 `$map` 同一份快照）：发展 / 主建筑 / 建筑槽三格全不产 ——
+    // 否则光是走上一块野地，AI 就会读到「发展 Lv1 · 主建筑 Seat Lv1 · 空槽 1」这种引擎兜底值
+    const snapshot = buildMapSnapshot(buildPack('hash-v1'), {
+      currentTileId: 1,
+      weatherLabel: null,
+      facts: await readFacts(),
+      currentDay: 0,
+    });
+    expect(snapshot.current?.development).toBeUndefined();
+    expect(snapshot.current?.mainBuilding).toBeUndefined();
+    expect(snapshot.current?.buildings).toBeUndefined();
+    // 首访本身照常进上下文（少的只是那三格凭空的发展度）
+    expect(snapshot.current?.history?.map((h) => h.kind)).toEqual(['firstVisit']);
+  });
+
+  it('🔴 首访播过种的旧包地块上，发展度/建筑 op 照常生效（迟物化）', async () => {
+    await commit([{ op: 'set_location', target: 'characters.Hero', value: 'Alpha' }]);
+    expect((await readEntry('Alpha'))?.development).toBeUndefined();
+
+    await commit([tileOp('tile_dev_progress_add', { tile: 'Alpha', amount: 40, reason: '开渠' })]);
+    expect((await readEntry('Alpha'))?.development).toEqual({ level: 1, progress: 40 });
+
+    await commit([tileOp('tile_building_add', { tile: 'Alpha', name: 'Shrine' })]);
+    expect((await readEntry('Alpha'))?.buildings?.map((b) => b?.name ?? null)).toEqual(['Shrine']);
   });
 
   it('NPC 换位置一个字节都不写（player only，口径同落位钩子）', async () => {

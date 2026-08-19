@@ -262,6 +262,16 @@ describe('seedTileFacts —— copy-on-write 播种（§3）', () => {
     expect(entry.development).toBeUndefined();
     expect(entry.buildings).toBeUndefined();
   });
+
+  it('🔴 包没声明起始档的陆块（v1.0/v1.1 旧包）→ **不物化**发展面（否则走一步路就长出 Lv1）', () => {
+    const entry = seedTileFacts(MEADOW, 5);
+    expect(entry.seededAtDay).toBe(5);
+    expect(entry.development).toBeUndefined();
+    expect(entry.buildings).toBeUndefined();
+    // 播种本身仍然发生（首访编年史要落在它上面），只是没有发展面
+    expect(entry.statuses).toEqual([]);
+    expect(entry.history).toEqual([]);
+  });
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -361,6 +371,12 @@ describe('applyDevProgressDelta —— 进位算术与钳位', () => {
     });
   });
 
+  it('🔴 事实没有发展面（旧包地块）→ 按 pack 基线迟物化（播种不物化的另一半）', () => {
+    const result = applyDevProgressDelta(seedTileFacts(MEADOW, 0), MEADOW, 40, 4);
+    expect(result?.entry.development).toEqual({ level: MIN_DEV_LEVEL, progress: 40 });
+    expect(result?.entry.buildings).toEqual([null]); // 槽数 = 档数
+  });
+
   it('钳住之后什么都没变 → null；零增量 → null；无发展度地块 → null', () => {
     const capped = makeEntry(MAX_DEV_LEVEL, new Array<null>(MAX_DEV_LEVEL).fill(null), 100);
     expect(applyDevProgressDelta(capped, HEARTH, 20, 5)).toBeNull();
@@ -434,7 +450,7 @@ describe('降档摧毁 —— 严格槽位身份（裁定 §8-8）', () => {
 describe('建筑落位与更新', () => {
   it('落进最小空槽（不是尾部追加）', () => {
     const entry = makeEntry(3, [null, 'Well', null]);
-    const result: BuildingAddResult = applyBuildingAdd(entry, { name: 'Forge' }, 4);
+    const result: BuildingAddResult = applyBuildingAdd(entry, HEARTH, { name: 'Forge' }, 4);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.slot).toBe(0);
@@ -445,18 +461,44 @@ describe('建筑落位与更新', () => {
 
   it('槽全满 → 明确拒绝（不静默丢弃）', () => {
     const full = makeEntry(2, ['Mill', 'Well']);
-    const result = applyBuildingAdd(full, { name: 'Forge' }, 4);
+    const result = applyBuildingAdd(full, HEARTH, { name: 'Forge' }, 4);
     expect(result).toEqual({ ok: false, reason: 'noEmptySlot' });
   });
 
-  it('条目没有发展面（海块）→ 拒绝', () => {
-    const result = applyBuildingAdd(seedTileFacts(SHELF, 0), { name: 'Pier' }, 1);
+  it('海块 → 拒绝（判据是地块通行性，不是条目里有没有 development）', () => {
+    const result = applyBuildingAdd(seedTileFacts(SHELF, 0), SHELF, { name: 'Pier' }, 1);
     expect(result).toEqual({ ok: false, reason: 'noDevelopment' });
+    expect(applyBuildingAdd(seedTileFacts(RIDGE, 0), RIDGE, { name: 'Watchtower' }, 1)).toEqual({
+      ok: false,
+      reason: 'noDevelopment',
+    });
+  });
+
+  it('🔴 条目没有发展面的陆块 → 按 pack 基线**迟物化**，不再报 noDevelopment', () => {
+    // 旧包地块被首访播种过的形状（播种不物化发展面）
+    const result = applyBuildingAdd(seedTileFacts(MEADOW, 0), MEADOW, { name: 'Shrine' }, 7);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.slot).toBe(0); // 基线档 1 → 1 号槽
+    expect(result.entry.development).toEqual({ level: MIN_DEV_LEVEL, progress: 0 });
+    expect(result.entry.buildings?.map((b) => b?.name ?? null)).toEqual(['Shrine']);
+    expect(result.entry.history).toContainEqual({ day: 7, kind: 'built', building: 'Shrine' });
+  });
+
+  it('🔴 迟物化仍抄 pack 的初始建筑（换包后名字落到陆块时不该把它们抹掉）', () => {
+    // 事实是在这个名字还是海块时播下的：没有发展面、也没有槽数组
+    const stranded: TileFactsEntry = { seededAtDay: 0, statuses: [], history: [] };
+    const result = applyBuildingAdd(stranded, HEARTH, { name: 'Forge' }, 4);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.slot).toBe(2); // Mill / Well 占着 0 与 1
+    expect(result.entry.buildings?.map((b) => b?.name ?? null)).toEqual(['Mill', 'Well', 'Forge']);
+    expect(result.entry.development).toEqual({ level: 3, progress: 0 });
   });
 
   it('同名再落 = 当更新处理（不长出第二座同名建筑）', () => {
     const entry = makeEntry(3, ['Mill', null, null]);
-    const result = applyBuildingAdd(entry, { name: 'Mill', ownerFlavor: 'the crown' }, 6);
+    const result = applyBuildingAdd(entry, HEARTH, { name: 'Mill', ownerFlavor: 'the crown' }, 6);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.updated).toBe(true);
@@ -468,6 +510,7 @@ describe('建筑落位与更新', () => {
   it('直接落一座玩家产业时记 acquired', () => {
     const result = applyBuildingAdd(
       makeEntry(2, [null, null]),
+      HEARTH,
       { name: 'Tavern', playerOwned: true },
       8,
     );

@@ -1773,11 +1773,18 @@ export class StateManager {
     if (typeof v.description === 'string') record.description = v.description;
     if (typeof v.ownerFlavor === 'string') record.ownerFlavor = v.ownerFlavor;
     if (typeof v.playerOwned === 'boolean') record.playerOwned = v.playerOwned;
-    const income = coerceBuildingIncome(v.income, ctx.day);
+    // 同名再落 = 当更新处理（见 `applyBuildingAdd`）→ 锚同样要沿用那一座已有的
+    const income = coerceBuildingIncome(v.income, ctx.day, existingBuildingIncome(ctx.entry, name));
     if (income !== undefined) record.income = income;
 
     const reason = typeof v.reason === 'string' ? v.reason : undefined;
-    const result = addBuildingRecord(ctx.entry, record, ctx.day, reason ? { reason } : {});
+    const result = addBuildingRecord(
+      ctx.entry,
+      ctx.tile,
+      record,
+      ctx.day,
+      reason ? { reason } : {},
+    );
     if (!result.ok) {
       // 满槽 / 无发展度都是**明确的拒绝**，不静默吞（`BuildingAddResult` 存在的理由）
       console.warn(
@@ -1818,7 +1825,7 @@ export class StateManager {
     if (typeof v.description === 'string') buildingPatch.description = v.description;
     if (typeof v.ownerFlavor === 'string') buildingPatch.ownerFlavor = v.ownerFlavor;
     if (typeof v.playerOwned === 'boolean') buildingPatch.playerOwned = v.playerOwned;
-    const income = coerceBuildingIncome(v.income, ctx.day);
+    const income = coerceBuildingIncome(v.income, ctx.day, existingBuildingIncome(ctx.entry, name));
     if (income !== undefined) buildingPatch.income = income;
 
     const reason = typeof v.reason === 'string' ? v.reason : undefined;
@@ -1861,8 +1868,8 @@ export class StateManager {
     if (typeof v.description === 'string') mainPatch.description = v.description;
     if (typeof v.ownerFlavor === 'string') mainPatch.ownerFlavor = v.ownerFlavor;
     if (typeof v.playerOwned === 'boolean') mainPatch.playerOwned = v.playerOwned;
-    // 周期与锚同槽位建筑：铁律3，AI 只填金额
-    const income = coerceBuildingIncome(v.income, ctx.day);
+    // 周期与锚同槽位建筑：铁律3，AI 只填金额；已有收益时沿用旧锚（复述不重锚）
+    const income = coerceBuildingIncome(v.income, ctx.day, ctx.entry.mainBuilding?.income);
     if (income !== undefined) mainPatch.income = income;
 
     const reason = typeof v.reason === 'string' ? v.reason : undefined;
@@ -2892,15 +2899,38 @@ function coerceTileStatusEffects(raw: unknown): TileStatusEffect[] {
 /**
  * `income` 的容错读取。**周期与锚由 Code 补**（铁律3：AI 只填叙事字段，账务字段归 Code）——
  * AI 自己写锚日就能把钱提前入账，写周期就能把「每月」改成「每天」。
+ *
+ * 🔴 **已有收益时锚**（`existing`）**原地保留，只换金额**：AI 复述现状是常态
+ *   （「你的酒馆每月仍进 50 G」），每复述一次就把 `anchorDay` 挪到今天的话，
+ *    30 天的入账点会被无限期往后推 —— 表现是「有产业但永远不发钱」，且一条日志都没有。
+ *    同名建筑刷新的幂等性（裁定 §8-10 的同款思路）本来就是给这种复读兜底的。
+ *    锚只在**新授予收益**（此前没有 income）时定在今天。
+ * 🔴 金额必须是**正的有限数**：负额 = 一条静默抽钱的 op（结算按 `amount × periods` 直接进
+ *    玩家 `money`，没有任何一处会拦），0 = 一笔永远不入账的空账。两者一律**丢掉 income 这一格**
+ *    并 warn —— 丢一格而不是否掉整条 op：建筑本身（名字/描述/归属）是合法的叙事事实。
  */
 function coerceBuildingIncome(
   raw: unknown,
   day: number,
-): { amount: number; periodDays: number; anchorDay: number } | undefined {
+  existing?: BuildingRecord['income'],
+): BuildingRecord['income'] | undefined {
   if (raw === null || typeof raw !== 'object') return undefined;
   const amount = Number((raw as Record<string, unknown>).amount);
-  if (!Number.isFinite(amount)) return undefined;
-  return { amount, periodDays: BUILDING_INCOME_PERIOD_DAYS, anchorDay: day };
+  if (!Number.isFinite(amount) || amount <= 0) {
+    console.warn(`[StateManager] 建筑收益金额不合法（${String(amount)}），忽略 income 这一格`);
+    return undefined;
+  }
+  const anchorDay = existing && Number.isFinite(existing.anchorDay) ? existing.anchorDay : day;
+  return { amount, periodDays: BUILDING_INCOME_PERIOD_DAYS, anchorDay };
+}
+
+/** 目标建筑现有的收益锚（找不到那座建筑 = 还没有锚，由调用方定在今天） */
+function existingBuildingIncome(
+  entry: TileFactsEntry,
+  name: string,
+): BuildingRecord['income'] | undefined {
+  const slots = Array.isArray(entry.buildings) ? entry.buildings : [];
+  return slots.find((row) => row?.name === name)?.income;
 }
 
 /**

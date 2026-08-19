@@ -364,15 +364,40 @@ export function effectiveTileFacts(
  * 🔴 播种**不写编年史**：初始建筑不是「落成」事件，它们是这块地本来就有的东西。
  *    给它们补一条 `built` 会让每块地的编年史第一屏全是与玩家无关的记录，
  *    而 FIFO 只有 10 格。
+ * 🔴 **包里没声明起始档就不物化发展面**（设计 §5 那条「v1.0/v1.1 旧包不会凭空长出 Lv1」）：
+ *    播种的触发点不止是发展度 op —— 光是走上一块地（首访记档）就会播种，而
+ *    `hasDevelopment()` 对**任何**可通行陆块都为真。照它物化，旧包每一块走过的地都会
+ *    在 MAP_CONTEXT / `$map` / 界面上凭空长出「发展 Lv1 · 主建筑 Seat Lv1 · 空槽 1」——
+ *    那不是事实，是引擎兜底值被当成了内容（还把 ASCII 兜底串漏进了 AI 上下文）。
+ *    真有 op 碰发展面时再迟物化：`applyDevProgressDelta` / `applyBuildingAdd` /
+ *    `applyMainBuildingUpdate` 三处都带 `baselineLevel` 兜底，缺这一格照样能跑。
  */
 export function seedTileFacts(tile: MapTile, day: number): TileFactsEntry {
   const entry: TileFactsEntry = { seededAtDay: day, statuses: [], history: [] };
-  if (hasDevelopment(tile)) {
+  if (hasDevelopment(tile) && tile.development !== undefined) {
     const level = baselineLevel(tile);
     entry.development = { level, progress: 0 };
     entry.buildings = seedBuildingSlots(tile, level);
   }
   return entry;
+}
+
+/**
+ * 事实条目还没有发展面时，以 **pack 基线**就地物化一份（发展档 + 初始建筑槽）。
+ *
+ * 播种刻意不物化发展面（见 `seedTileFacts`），所以任何**真的碰到发展面**的写操作都得
+ * 自己补这一步。三处写面（进度增量 / 建筑落位 / 主建筑更新）用的是同一个 `baselineLevel`
+ * 兜底口径 —— 分叉的表现是同一块地经不同 op 物化出不同的起始档，且完全无声。
+ *
+ * 已经有发展面 → 原样返回（不克隆，调用方据此照常走 copy-on-write）。
+ */
+function materializeDevelopment(entry: TileFactsEntry, tile: MapTile): TileFactsEntry {
+  if (entry.development) return entry;
+  const level = baselineLevel(tile);
+  const next = cloneEntry(entry);
+  next.development = { level, progress: 0 };
+  next.buildings = padSlots(slotsOf(entry) ?? seedBuildingSlots(tile, level), level);
+  return next;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -584,19 +609,26 @@ export type BuildingPatch = Partial<Omit<BuildingRecord, 'name'>>;
  *
  * · 同名已存在 → **当更新处理**（AI 复读「城里有座磨坊」不该长出第二座磨坊）；
  * · 槽全满 → `ok:false` + `noEmptySlot`（调用方 warn，不静默吞）；
- * · 无发展度（海/不可通行块，或条目还没播种发展面）→ `ok:false` + `noDevelopment`。
+ * · 无发展度（海/湖/不可通行块）→ `ok:false` + `noDevelopment`。
+ *
+ * 🔴 判据是**地块的通行性**（`hasDevelopment`），不是「条目里有没有 `development`」——
+ *    与 `applyDevProgressDelta` / `applyMainBuildingUpdate` 同一套 `baselineLevel` 兜底。
+ *    照条目判的表现是：一个在旧包（或换包前那块地还是海）时播下的事实条目，读侧明明显示
+ *    着空槽，`tile_building_add` 却报 `noDevelopment` —— 一条永远修不好的静默拒绝。
  */
 export function applyBuildingAdd(
   entry: TileFactsEntry,
+  tile: MapTile,
   record: BuildingRecord,
   day: number,
   options: TileDevDeltaOptions = {},
 ): BuildingAddResult {
-  const development = entry.development;
-  if (!development) return { ok: false, reason: 'noDevelopment' };
-  const slots = clampLevel(development.level);
+  if (!hasDevelopment(tile)) return { ok: false, reason: 'noDevelopment' };
+  // 条目还没有发展面（旧包地块被首访播种过 / 换包后名字落到了陆块）→ 以 pack 基线迟物化
+  const base = materializeDevelopment(entry, tile);
+  const slots = clampLevel(base.development?.level ?? baselineLevel(tile));
 
-  const current = padSlots(slotsOf(entry) ?? [], slots);
+  const current = padSlots(slotsOf(base) ?? [], slots);
   const existing = current.findIndex((row) => row?.name === record.name);
   if (existing >= 0) {
     const patch: BuildingPatch = {};
@@ -604,9 +636,9 @@ export function applyBuildingAdd(
     if (record.ownerFlavor !== undefined) patch.ownerFlavor = record.ownerFlavor;
     if (record.playerOwned !== undefined) patch.playerOwned = record.playerOwned;
     if (record.income !== undefined) patch.income = record.income;
-    // `?? entry` 兜的是「刚在槽里找到、更新却说找不到」这条不可能路径 ——
+    // `?? base` 兜的是「刚在槽里找到、更新却说找不到」这条不可能路径 ——
     // 真出现时也只是这一次更新没生效，不该把一次合法的 add 报成满槽
-    const updated = applyBuildingUpdate(entry, record.name, patch, day, options) ?? entry;
+    const updated = applyBuildingUpdate(base, record.name, patch, day, options) ?? base;
     return { ok: true, entry: updated, slot: existing, updated: true };
   }
 
@@ -619,7 +651,7 @@ export function applyBuildingAdd(
   }
   if (slot < 0) return { ok: false, reason: 'noEmptySlot' };
 
-  const next = cloneEntry(entry);
+  const next = cloneEntry(base);
   const placed = current.slice();
   placed[slot] = { ...record };
   next.buildings = placed;

@@ -914,6 +914,19 @@ describe('地块详情：发展条', () => {
     expect(model.slots).toEqual([]);
   });
 
+  it('🔴 旧包地块只是被首访播过种（事实里没有发展面）→ 照样不画发展条与空槽', () => {
+    const model = buildTileDetailModel(
+      tile({ id: 1 }),
+      facts({ seededAtDay: 3, history: [{ day: 3, kind: 'firstVisit' }] }),
+      LEVELS,
+      3,
+    );
+    expect(model.development).toBeNull();
+    expect(model.slots).toEqual([]);
+    expect(model.mainBuilding).toBeNull();
+    expect(model.history.map((h) => h.kind)).toEqual(['firstVisit']); // 首访照常显示
+  });
+
   it('旧包地块**一旦有了事实条目**就照事实画（那是真发生过的事）', () => {
     const model = buildTileDetailModel(
       tile({ id: 1 }),
