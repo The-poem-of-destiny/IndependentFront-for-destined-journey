@@ -214,6 +214,9 @@ docs/
 │                                       #    Code 端种子化 MTTH 调度出候选池 → `{{RANDOM_EVENTS}}` 单通道注入
 │                                       #    story → AI 以 `<event_trigger>` 回执 → Code 按名字结算
 │                                       #    事件定义 = 内容包第 13 分节纯 JSON；开关与剧情系统彼此独立
+├── planning/2026-08-20-api-rpm-limiter-design.md
+│                                       # 🆕 API 凭据级 RPM 限流设计 ← 改 API 请求发送/限流/等待提示必读
+│                                       #    同端点 + Key 全请求面共桶；达限暂停 60 秒 + 全局倒计时 + 自动续行
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
@@ -494,6 +497,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 随机事件 v1    | MTTH+权重+首访+组装事件（Code 掷骰 AI 演绎，story marker 单通道）                                                                                                | ✅ 待真机                                                                                             |
 | 管线并行化     | 写队列地基（per-saveId FIFO + 记忆全局锁，修 3 个既有竞态）+ 4 层管线（dispatcher‖memory_summary、vars_update‖post_check）+ 侧链旁路化（LLM 并行、落库 barrier） | ✅ 待真机（2026-08-16）                                                                               |
 | Agent 重试     | 失败自动重试可配置（默认 3 遍，chat/chatStream 双路径 + abort 短路 + 流式清预览）+ 设置页旋钮 + 幽灵快照根因修复                                                 | ✅（2026-08-16）                                                                                      |
+| API RPM 限流   | 全局按端点 + API Key 指纹配置；Chat / Embedding / NovelAI 共桶 FIFO，超限提示并于 60 秒后自动续发（ADR-34）                                                      | ✅ 已实施并走查设置页（2026-08-21）                                                                   |
 | 远程素材 v1    | 世界书 + 内容包双载体目录（char-info 静态抽取 + 第 14 分节）→ 启动落地 / 哈希增量 / 镜像同步                                                                     | ✅ 真机核心链路已验（2026-08-17）                                                                     |
 | 地图 v1.2      | 地块动态（状态/发展度/建筑/主建筑/编年史 + 时间账本 + 六语义 op，ADR-33）                                                                                        | ✅ 9030 tests 全绿，待真机（2026-08-18）                                                              |
 | 真机迭代       | debug loop 持续修复                                                                                                                                              | 🔄                                                                                                    |

@@ -346,6 +346,35 @@ export interface ApiEndpoint {
   enableThinking?: boolean;
 }
 
+/** API RPM 配额身份的调用侧引用；完整 Key 只参与内存中的指纹计算。 */
+export interface ApiCredentialRef {
+  baseUrl: string;
+  apiKey: string;
+  /** 玩家可读名称；只进入等待快照，不参与凭据身份。 */
+  label: string;
+}
+
+/** 一份“归一化端点 + API Key”组合的持久 RPM 策略。 */
+export interface ApiRpmPolicy {
+  /** SHA-256 凭据指纹；策略表不保存第二份明文 API Key。 */
+  credentialId: string;
+  /** 每 60 秒最多真实发送次数。 */
+  rpmLimit: number;
+  updatedAt: number;
+}
+
+export interface ApiRpmWaitItem {
+  credentialId: string;
+  label: string;
+  rpmLimit: number;
+  queuedCount: number;
+  resumeAt: number;
+}
+
+export interface ApiRpmWaitSnapshot {
+  waits: ApiRpmWaitItem[];
+}
+
 /** 单个 Agent 的配置 */
 export interface AgentConfig {
   agentId: string; // 'story' | 'memory_recall' | 'plot_check' | 'request_dispatcher' | 'vars_update' | 'memory_summary' | 'plot_correct'

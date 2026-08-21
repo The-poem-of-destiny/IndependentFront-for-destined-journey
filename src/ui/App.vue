@@ -10,6 +10,7 @@ import { useWorkshopStore } from './stores/workshop-store';
 import { queryForView } from './lib/view-audio';
 import { applyReducedMotion } from './lib/reduced-motion';
 import ToastContainer from './components/shared/ToastContainer.vue';
+import ApiRateLimitWaitPopup from './components/shared/ApiRateLimitWaitPopup.vue';
 
 const ui = useUIStore();
 const audio = useAudioStore();
@@ -143,6 +144,7 @@ const viewComponent = computed(() => {
       <component :is="viewComponent" :key="ui.currentView" />
     </transition>
     <ToastContainer />
+    <ApiRateLimitWaitPopup />
   </div>
 </template>
 

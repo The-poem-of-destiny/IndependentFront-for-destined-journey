@@ -9,6 +9,7 @@
 
 import type { MemoryRecord } from './types';
 import { getMemories, saveMemory, deleteMemories } from './database';
+import { scheduleApiRequest } from './api-rpm-limiter';
 
 // ========== Embedding ==========
 
@@ -18,7 +19,7 @@ import { getMemories, saveMemory, deleteMemories } from './database';
  */
 export async function computeEmbedding(
   text: string,
-  endpoint: { baseUrl: string; apiKey: string; defaultModel: string },
+  endpoint: { baseUrl: string; apiKey: string; defaultModel: string; name?: string },
   model?: string,
   signal?: AbortSignal,
 ): Promise<number[]> {
@@ -28,16 +29,21 @@ export async function computeEmbedding(
     input: text,
   });
 
-  const res = await fetch('/api/embeddings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Target-Base-URL': baseUrl,
-      Authorization: `Bearer ${endpoint.apiKey}`,
-    },
-    body,
+  const res = await scheduleApiRequest(
+    { baseUrl, apiKey: endpoint.apiKey, label: endpoint.name || baseUrl },
     signal,
-  });
+    () =>
+      fetch('/api/embeddings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Target-Base-URL': baseUrl,
+          Authorization: `Bearer ${endpoint.apiKey}`,
+        },
+        body,
+        signal,
+      }),
+  );
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
