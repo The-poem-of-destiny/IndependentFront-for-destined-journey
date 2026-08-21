@@ -520,15 +520,7 @@ export const useSettingsStore = defineStore('settings', () => {
     settings.value.apiPool = outcome.entries;
     apiSecretsError.value = null;
     settingsPersistenceEnabled = true;
-    try {
-      apiRpmPolicies.value = await getApiRpmPolicies();
-      replaceApiRpmPolicies(apiRpmPolicies.value);
-      apiRpmPoliciesError.value = null;
-    } catch (error) {
-      apiRpmPoliciesError.value = String(error);
-      apiRpmPolicies.value = [];
-      replaceApiRpmPolicies([]);
-    }
+    await reloadRpmPolicies();
     persistRedactedSettings();
     return outcome;
   }
@@ -542,6 +534,18 @@ export const useSettingsStore = defineStore('settings', () => {
     apiRpmPolicies.value = copy;
     apiRpmPoliciesError.value = null;
     replaceApiRpmPolicies(copy);
+  }
+
+  async function reloadRpmPolicies(): Promise<void> {
+    try {
+      apiRpmPolicies.value = await getApiRpmPolicies();
+      replaceApiRpmPolicies(apiRpmPolicies.value);
+      apiRpmPoliciesError.value = null;
+    } catch (error) {
+      apiRpmPoliciesError.value = String(error);
+      apiRpmPolicies.value = [];
+      replaceApiRpmPolicies([]);
+    }
   }
 
   async function saveApiEntry(entry: ApiEntry): Promise<void> {
@@ -628,7 +632,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function reloadApiEntries(): Promise<void> {
-    const rows = await getApiEndpoints();
+    const [rows] = await Promise.all([getApiEndpoints(), reloadRpmPolicies()]);
     settings.value.apiPool = rows.map((row) => apiEndpointToEntry(row));
     settingsPersistenceEnabled = true;
     apiSecretsError.value = null;

@@ -375,9 +375,9 @@ async function deleteApi(id: string) {
       <p v-if="cfg.apiRpmPoliciesError" class="api-warn">
         RPM 设置暂时不可用，本次会话按无限制运行：{{ cfg.apiRpmPoliciesError }}
       </p>
-      <p v-if="rpmRows.length === 0" class="form-hint rpm-empty">
+      <div v-if="rpmRows.length === 0" class="empty-tab rpm-empty">
         添加 API 后，可在这里按端点与 API Key 组合设置每分钟请求上限。
-      </p>
+      </div>
       <div class="rpm-list">
         <div v-for="row in rpmRows" :key="row.credentialId" class="rpm-row">
           <div class="rpm-identity">
@@ -614,7 +614,11 @@ async function deleteApi(id: string) {
 .rpm-identity {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: var(--theme-spacing-xs);
+}
+
+.rpm-empty {
+  padding-block: var(--theme-spacing-lg);
 }
 
 .rpm-identity strong,

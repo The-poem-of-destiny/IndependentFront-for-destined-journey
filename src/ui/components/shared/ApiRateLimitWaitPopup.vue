@@ -8,11 +8,14 @@ import AppCard from './AppCard.vue';
 
 const ui = useUIStore();
 const waits = ref<ApiRpmWaitItem[]>([]);
+const resuming = ref<ApiRpmWaitItem[]>([]);
 const now = ref(Date.now());
 let unsubscribe: (() => void) | undefined;
 let clock: ReturnType<typeof setInterval> | undefined;
+let resumeNoticeTimer: ReturnType<typeof setTimeout> | undefined;
 
-const visible = computed(() => waits.value.length > 0);
+const visible = computed(() => waits.value.length > 0 || resuming.value.length > 0);
+const displayedRows = computed(() => [...waits.value, ...resuming.value]);
 
 function countdown(resumeAt: number): string {
   const seconds = Math.max(0, Math.ceil((resumeAt - now.value) / 1000));
@@ -26,6 +29,17 @@ function openSettings() {
 
 onMounted(() => {
   unsubscribe = subscribeApiRpmWaits((snapshot) => {
+    const waitingIds = new Set(snapshot.waits.map((wait) => wait.credentialId));
+    const justResumed = waits.value.filter((wait) => !waitingIds.has(wait.credentialId));
+    if (justResumed.length > 0) {
+      resuming.value = justResumed;
+      if (resumeNoticeTimer !== undefined) clearTimeout(resumeNoticeTimer);
+      resumeNoticeTimer = setTimeout(() => {
+        resuming.value = [];
+        resumeNoticeTimer = undefined;
+      }, 1200);
+    }
+    resuming.value = resuming.value.filter((wait) => !waitingIds.has(wait.credentialId));
     waits.value = snapshot.waits;
     now.value = Date.now();
   });
@@ -37,6 +51,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   unsubscribe?.();
   if (clock !== undefined) clearInterval(clock);
+  if (resumeNoticeTimer !== undefined) clearTimeout(resumeNoticeTimer);
 });
 </script>
 
@@ -46,22 +61,28 @@ onBeforeUnmount(() => {
       <AppCard v-if="visible" class="rpm-popup" padding="md" role="status" aria-live="polite">
         <div class="rpm-popup-title">
           <span class="rpm-popup-mark" aria-hidden="true">!</span>
-          <strong>API 请求已达到 RPM 限制</strong>
+          <strong>{{ waits.length > 0 ? 'API 请求已达到 RPM 限制' : 'API 请求正在继续' }}</strong>
         </div>
         <div class="rpm-popup-list">
-          <div v-for="wait in waits" :key="wait.credentialId" class="rpm-popup-row">
+          <div v-for="wait in displayedRows" :key="wait.credentialId" class="rpm-popup-row">
             <div class="rpm-popup-copy">
               <strong>{{ wait.label }}</strong>
-              <span> {{ wait.rpmLimit }} RPM · {{ wait.queuedCount }} 个请求正在等待 </span>
+              <span v-if="resuming.some((item) => item.credentialId === wait.credentialId)">
+                正在继续…
+              </span>
+              <span v-else> {{ wait.rpmLimit }} RPM · {{ wait.queuedCount }} 个请求正在等待 </span>
               <span class="sr-only">达到请求限制，系统会自动继续。</span>
             </div>
-            <span class="rpm-popup-countdown" aria-hidden="true">{{
-              countdown(wait.resumeAt)
-            }}</span>
+            <span
+              v-if="!resuming.some((item) => item.credentialId === wait.credentialId)"
+              class="rpm-popup-countdown"
+              aria-hidden="true"
+              >{{ countdown(wait.resumeAt) }}</span
+            >
           </div>
         </div>
         <div class="rpm-popup-footer">
-          <span>倒计时结束后自动继续</span>
+          <span>{{ waits.length > 0 ? '倒计时结束后自动继续' : '请求已恢复，正在继续…' }}</span>
           <AppButton variant="secondary" size="sm" @click="openSettings">
             打开 API 限制设置
           </AppButton>
@@ -128,7 +149,7 @@ onBeforeUnmount(() => {
 .rpm-popup-copy {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: var(--theme-spacing-xs);
 }
 
 .rpm-popup-copy strong {

@@ -47,6 +47,7 @@ export class ApiRpmLimiter {
   private readonly policies = new Map<string, number>();
   private readonly buckets = new Map<string, Bucket>();
   private readonly listeners = new Set<(snapshot: ApiRpmWaitSnapshot) => void>();
+  private readonly admissionTails = new Map<string, Promise<void>>();
 
   async schedule<T>(
     credential: ApiCredentialRef,
@@ -57,43 +58,49 @@ export class ApiRpmLimiter {
     // existing request/cancellation timing remains unchanged when no policy is configured.
     if (this.policies.size === 0) return dispatch();
     if (signal?.aborted) throw abortError();
-    const credentialId = await credentialIdFor(credential);
-    if (signal?.aborted) throw abortError();
-    const rpmLimit = this.policies.get(credentialId);
-    if (rpmLimit === undefined) return dispatch();
+    const leaveAdmission = await this.enterAdmission(credential);
+    try {
+      if (signal?.aborted) throw abortError();
+      const credentialId = await credentialIdFor(credential);
+      if (signal?.aborted) throw abortError();
+      const rpmLimit = this.policies.get(credentialId);
+      if (rpmLimit === undefined) return dispatch();
 
-    const bucket = this.getBucket(credentialId, credential.label, rpmLimit);
-    bucket.label = credential.label || bucket.label;
-    bucket.rpmLimit = rpmLimit;
-    const now = Date.now();
-    bucket.sentAt = bucket.sentAt.filter((sentAt) => now - sentAt < RPM_WINDOW_MS);
+      const bucket = this.getBucket(credentialId, credential.label, rpmLimit);
+      bucket.label = credential.label || bucket.label;
+      bucket.rpmLimit = rpmLimit;
+      const now = Date.now();
+      bucket.sentAt = bucket.sentAt.filter((sentAt) => now - sentAt < RPM_WINDOW_MS);
 
-    if (bucket.pausedUntil === null && bucket.sentAt.length < bucket.rpmLimit) {
-      bucket.sentAt.push(now);
-      return dispatch();
-    }
+      if (bucket.pausedUntil === null && bucket.sentAt.length < bucket.rpmLimit) {
+        bucket.sentAt.push(now);
+        return dispatch();
+      }
 
-    return new Promise<T>((resolve, reject) => {
-      const waiter: Waiter = {
-        signal,
-        reject,
-        start: () => {
-          signal?.removeEventListener('abort', waiter.onAbort!);
-          void dispatch().then(resolve, reject);
-        },
-      };
-      waiter.onAbort = () => {
-        const index = bucket.queue.indexOf(waiter);
-        if (index >= 0) bucket.queue.splice(index, 1);
-        reject(abortError());
-        this.stopPauseIfEmpty(bucket);
+      return new Promise<T>((resolve, reject) => {
+        const waiter: Waiter = {
+          signal,
+          reject,
+          start: () => {
+            signal?.removeEventListener('abort', waiter.onAbort!);
+            void dispatch().then(resolve, reject);
+          },
+        };
+        waiter.onAbort = () => {
+          const index = bucket.queue.indexOf(waiter);
+          if (index >= 0) bucket.queue.splice(index, 1);
+          reject(abortError());
+          this.stopPauseIfEmpty(bucket);
+          this.emit();
+        };
+        signal?.addEventListener('abort', waiter.onAbort, { once: true });
+        bucket.queue.push(waiter);
+        if (bucket.pausedUntil === null) this.startPause(bucket, now);
         this.emit();
-      };
-      signal?.addEventListener('abort', waiter.onAbort, { once: true });
-      bucket.queue.push(waiter);
-      if (bucket.pausedUntil === null) this.startPause(bucket, now);
-      this.emit();
-    });
+      });
+    } finally {
+      leaveAdmission();
+    }
   }
 
   replacePolicies(policies: readonly ApiRpmPolicy[]): void {
@@ -160,6 +167,21 @@ export class ApiRpmLimiter {
       this.buckets.set(credentialId, bucket);
     }
     return bucket;
+  }
+
+  private async enterAdmission(credential: ApiCredentialRef): Promise<() => void> {
+    const key = `${normalizeApiBaseUrl(credential.baseUrl)}\0${credential.apiKey}`;
+    const previous = this.admissionTails.get(key) ?? Promise.resolve();
+    let unlock!: () => void;
+    const tail = new Promise<void>((resolve) => {
+      unlock = resolve;
+    });
+    this.admissionTails.set(key, tail);
+    await previous;
+    return () => {
+      unlock();
+      if (this.admissionTails.get(key) === tail) this.admissionTails.delete(key);
+    };
   }
 
   private startPause(bucket: Bucket, now: number): void {

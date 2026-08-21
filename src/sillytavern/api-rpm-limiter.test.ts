@@ -22,6 +22,18 @@ afterEach(() => {
 });
 
 describe('ApiRpmLimiter', () => {
+  it('没有策略时默认无限制并立即发送', async () => {
+    const limiter = new ApiRpmLimiter();
+    const dispatch = vi.fn(async () => 'ok');
+
+    await Promise.all(
+      Array.from({ length: 100 }, () => limiter.schedule(credential(), undefined, dispatch)),
+    );
+
+    expect(dispatch).toHaveBeenCalledTimes(100);
+    expect(limiter.getSnapshot()).toEqual({ waits: [] });
+  });
+
   it('第 N+1 个请求等待完整 60 秒后自动继续', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);

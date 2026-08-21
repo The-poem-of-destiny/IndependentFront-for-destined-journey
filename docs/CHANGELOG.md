@@ -15,7 +15,9 @@
 
 设置页新增全局 RPM 卡片，同一凭据被多个 API 池条目复用时合并成一行；空值表示无限制。策略住 Dexie v23 的 `apiRateLimitPolicies`，进入 FullBackup，凭据编辑时迁移已有策略、最后一个引用删除时清理孤儿。根组件新增非阻断等待弹窗，展示凭据、上限、排队数和倒计时，并可直接打开 API 设置；倒计时结束自动消失、请求自动继续。
 
-验证：RPM 与设置页定向回归 9 文件 206 tests 全绿；全量 352 文件中 9,070 tests 通过 + 8 skipped，唯一失败是未改动的首页 `drift/runtime.ts` 既有外链字面量触发 `no-external-assets`（`www.w3.org` / `fonts.googleapis.com`），不属本次改动。typecheck / typecheck:vue / typecheck:tools / build / format:check / lint / knip:ratchet 均通过。设置页默认宽屏与 390 × 844 窄屏完成真机走查，控制台仅见既有 Three.js/WebGL warning。
+PR 审查返工补齐：整库恢复后立即重载并激活 RPM 策略；队列释放后短暂显示“正在继续…”再自动关闭；设置空态与紧密间距对齐设计 token；同一凭据的异步指纹准入按调用顺序串行，避免并发请求偶发打乱 FIFO。默认仍为无限制，只有保存正整数策略后才启用限流。
+
+验证：RPM 与设置页重点回归 34 tests 全绿；全量 352 文件中 9,072 tests 通过 + 8 skipped，唯一失败是未改动的首页 `drift/runtime.ts` 既有外链字面量触发 `no-external-assets`（`www.w3.org` / `fonts.googleapis.com`），不属本次改动。typecheck / typecheck:vue / typecheck:tools / build / format:check / lint / knip:ratchet 均通过。设置页默认宽屏与 390 × 844 窄屏完成真机走查，控制台仅见既有 Three.js/WebGL warning。
 
 ### 扩展管理 / 创意工坊职责拆分｜ ✅ 已实施并完成页面走查（2026-08-20）
 

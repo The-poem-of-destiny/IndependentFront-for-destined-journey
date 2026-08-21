@@ -429,6 +429,7 @@ async function confirmFullBackupImport() {
   try {
     const { importAllData } = await import('@engine/database');
     await importAllData(data);
+    await cfg.reloadApiEntries();
     await game.loadSaves();
     ui.toast('整库备份恢复成功', 'success');
   } catch (err) {

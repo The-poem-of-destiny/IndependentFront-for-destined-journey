@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 describe('ApiRateLimitWaitPopup', () => {
-  it('shows the shared credential wait, counts down, opens settings, and disappears on resume', async () => {
+  it('shows the shared credential wait, counts down, opens settings, and reports automatic resume', async () => {
     const credential = {
       baseUrl: 'https://rpm-popup.example/v1/',
       apiKey: 'popup-test-key',
@@ -65,6 +65,11 @@ describe('ApiRateLimitWaitPopup', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     await expect(queued).resolves.toBe('second');
     await flushPromises();
+    expect(document.body.textContent).toContain('正在继续…');
+    expect(document.querySelector('.rpm-popup')).not.toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1200);
+    await nextTick();
     expect(document.querySelector('.rpm-popup')).toBeNull();
   });
 });

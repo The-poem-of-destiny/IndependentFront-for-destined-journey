@@ -7,7 +7,12 @@ import { nextTick } from 'vue';
 import { setActivePinia, createPinia } from 'pinia';
 import { serializeSettingsForLocalStorage, useSettingsStore } from './settings-store';
 import { getApiEndpoints, getApiRpmPolicies, getDatabase } from '@engine/database';
-import { credentialIdFor } from '@engine/api-rpm-limiter';
+import {
+  credentialIdFor,
+  replaceApiRpmPolicies,
+  scheduleApiRequest,
+  subscribeApiRpmWaits,
+} from '@engine/api-rpm-limiter';
 
 // Mock localStorage for Node test environment
 const store_ = new Map<string, string>();
@@ -50,6 +55,7 @@ describe('settings-store', () => {
   });
 
   afterEach(async () => {
+    replaceApiRpmPolicies([]);
     // 销毁本轮 store：取消它构造期那个 `setTimeout(0)` 启动任务，少一个游荡的写入者。
     // （只能覆盖 beforeEach 建的这一个 —— 用例内部自建的 store 各自负责，
     //   所以上面 beforeEach 的「清空紧贴构造」才是真正的兜底。）
@@ -161,6 +167,49 @@ describe('settings-store', () => {
     expect(store.apiRpmPolicies).toEqual([
       expect.objectContaining({ credentialId: newCredentialId, rpmLimit: 12 }),
     ]);
+  });
+
+  it('重载整库 API 数据时同步激活恢复的 RPM 策略', async () => {
+    await store.initApiSecrets();
+    const endpoint = {
+      id: 'restored-rpm',
+      name: 'Restored endpoint',
+      baseUrl: 'https://restored.example.test/v1',
+      apiKey: 'sk-restored',
+      maskedKey: 'sk-***ored',
+      model: 'model-1',
+      models: ['model-1'],
+      apiType: 'chat' as const,
+    };
+    await store.saveApiEntry(endpoint);
+    const credentialId = await credentialIdFor(endpoint);
+    await store.saveRpmPolicies([{ credentialId, rpmLimit: 3, updatedAt: 1 }]);
+    await getDatabase().apiRateLimitPolicies.put({ credentialId, rpmLimit: 1, updatedAt: 2 });
+
+    await store.reloadApiEntries();
+
+    expect(store.apiRpmPolicies).toEqual([{ credentialId, rpmLimit: 1, updatedAt: 2 }]);
+
+    const credential = {
+      baseUrl: endpoint.baseUrl,
+      apiKey: endpoint.apiKey,
+      label: endpoint.name,
+    };
+    const dispatch = vi.fn(async () => 'ok');
+    await scheduleApiRequest(credential, undefined, dispatch);
+    const waitVisible = new Promise<void>((resolve) => {
+      const unsubscribe = subscribeApiRpmWaits((snapshot) => {
+        if (snapshot.waits.length === 0) return;
+        unsubscribe();
+        resolve();
+      });
+    });
+    const queued = scheduleApiRequest(credential, undefined, dispatch);
+    await waitVisible;
+    expect(dispatch).toHaveBeenCalledTimes(1);
+
+    replaceApiRpmPolicies([]);
+    await expect(queued).resolves.toBe('ok');
   });
 
   it('只擦除已迁移的 apiPool 密钥，不删除未知嵌套数据', () => {
