@@ -3,10 +3,13 @@
  * Used by SettingsModal for connectivity testing and model discovery.
  */
 
+import { scheduleApiRequest } from './api-rpm-limiter';
+
 export interface ApiCallTarget {
   baseUrl: string;
   apiKey: string;
   model?: string;
+  label?: string;
 }
 
 const COMMON_MODELS_BY_HOST: { match: string; models: string[] }[] = [
@@ -38,10 +41,19 @@ function normalizeBaseUrl(url: string): string {
   return url.trim().replace(/\/$/, '');
 }
 
-async function tryFetchModels(baseUrl: string, headers: Record<string, string>): Promise<string[]> {
-  const res = await fetch('/api/models', {
-    headers: { Accept: 'application/json', 'X-Target-Base-URL': baseUrl, ...headers },
-  });
+async function tryFetchModels(
+  target: ApiCallTarget,
+  baseUrl: string,
+  headers: Record<string, string>,
+): Promise<string[]> {
+  const res = await scheduleApiRequest(
+    { baseUrl, apiKey: target.apiKey, label: target.label || baseUrl },
+    undefined,
+    () =>
+      fetch('/api/models', {
+        headers: { Accept: 'application/json', 'X-Target-Base-URL': baseUrl, ...headers },
+      }),
+  );
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   // 兼容三种返回形态：顶层数组 / {data:[]} / {models:[]}；元素可为字符串或 {id}
@@ -73,13 +85,17 @@ export async function fetchModels(
   const key = target.apiKey?.trim();
   let lastError: unknown;
   try {
-    const models = await tryFetchModels(baseUrl, key ? { Authorization: `Bearer ${key}` } : {});
+    const models = await tryFetchModels(
+      target,
+      baseUrl,
+      key ? { Authorization: `Bearer ${key}` } : {},
+    );
     if (models.length > 0) return { models, source: 'remote' };
   } catch (e) {
     lastError = e;
   }
   try {
-    const models = await tryFetchModels(baseUrl, key ? { 'api-key': key } : {});
+    const models = await tryFetchModels(target, baseUrl, key ? { 'api-key': key } : {});
     if (models.length > 0) return { models, source: 'remote' };
   } catch (e) {
     // 保留 Bearer 首次错误，不被兜底覆盖：api-key 是 Azure 风格兜底，非 Azure 端点
@@ -108,20 +124,25 @@ export async function testConnection(
     return { ok: false, error: '请填写 URL 和 Key' };
   }
   try {
-    const res = await fetch('/api/chat/test', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        'X-Target-Base-URL': baseUrl,
-        Authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: 'ping' }],
-        max_tokens: 5,
-      }),
-    });
+    const res = await scheduleApiRequest(
+      { baseUrl, apiKey: key, label: target.label || baseUrl },
+      undefined,
+      () =>
+        fetch('/api/chat/test', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            'X-Target-Base-URL': baseUrl,
+            Authorization: `Bearer ${key}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: 'user', content: 'ping' }],
+            max_tokens: 5,
+          }),
+        }),
+    );
     if (!res.ok) {
       const text = await res.text();
       return { ok: false, status: res.status, errorBody: text.slice(0, 200) };

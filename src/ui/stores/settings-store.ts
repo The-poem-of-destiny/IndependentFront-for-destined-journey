@@ -20,7 +20,15 @@
  */
 import { defineStore } from 'pinia';
 import { ref, watch, onScopeDispose } from 'vue';
-import { deleteApiEndpoint, getApiEndpoints, saveApiEndpoint } from '@engine/database';
+import {
+  deleteApiEndpoint,
+  getApiEndpoints,
+  getApiRpmPolicies,
+  saveApiEndpoint,
+  saveApiRpmPolicies as persistApiRpmPolicies,
+} from '@engine/database';
+import { credentialIdFor, replaceApiRpmPolicies } from '@engine/api-rpm-limiter';
+import type { ApiRpmPolicy } from '@engine/types';
 import {
   DEFAULT_IMAGE_MAX_PER_HOUR,
   DEFAULT_IMAGE_MAX_PER_MESSAGE,
@@ -445,6 +453,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const settings = ref<UiSettings>(merged);
   const apiSecretsReady = ref(false);
   const apiSecretsError = ref<string | null>(null);
+  const apiRpmPolicies = ref<ApiRpmPolicy[]>([]);
+  const apiRpmPoliciesError = ref<string | null>(null);
   const lastApiKeyMigration = ref<ApiKeyMigrationOutcome | null>(null);
   // New/sanitized profiles can persist immediately. Legacy profiles pause until their only key
   // copy has been verified in Dexie.
@@ -510,8 +520,28 @@ export const useSettingsStore = defineStore('settings', () => {
     settings.value.apiPool = outcome.entries;
     apiSecretsError.value = null;
     settingsPersistenceEnabled = true;
+    try {
+      apiRpmPolicies.value = await getApiRpmPolicies();
+      replaceApiRpmPolicies(apiRpmPolicies.value);
+      apiRpmPoliciesError.value = null;
+    } catch (error) {
+      apiRpmPoliciesError.value = String(error);
+      apiRpmPolicies.value = [];
+      replaceApiRpmPolicies([]);
+    }
     persistRedactedSettings();
     return outcome;
+  }
+
+  async function saveRpmPolicies(policies: readonly ApiRpmPolicy[]): Promise<void> {
+    if (policies.some((policy) => !Number.isSafeInteger(policy.rpmLimit) || policy.rpmLimit <= 0)) {
+      throw new Error('RPM 必须是正整数');
+    }
+    const copy = policies.map((policy) => ({ ...policy }));
+    await persistApiRpmPolicies(copy);
+    apiRpmPolicies.value = copy;
+    apiRpmPoliciesError.value = null;
+    replaceApiRpmPolicies(copy);
   }
 
   async function saveApiEntry(entry: ApiEntry): Promise<void> {
@@ -520,10 +550,42 @@ export const useSettingsStore = defineStore('settings', () => {
       throw new Error(`API key storage is unavailable: ${initialized.message}`);
     }
     const copy = JSON.parse(JSON.stringify(entry)) as ApiEntry;
+    const previous = (settings.value.apiPool as ApiEntry[]).find((item) => item.id === copy.id);
+    const previousCredentialId = previous
+      ? await credentialIdFor({
+          baseUrl: previous.baseUrl,
+          apiKey: previous.apiKey,
+          label: previous.name,
+        })
+      : null;
+    const nextCredentialId = await credentialIdFor({
+      baseUrl: copy.baseUrl,
+      apiKey: copy.apiKey,
+      label: copy.name,
+    });
     await saveApiEndpoint(apiEntryToEndpoint(copy));
     const index = (settings.value.apiPool as ApiEntry[]).findIndex((item) => item.id === copy.id);
     if (index >= 0) settings.value.apiPool[index] = copy;
     else settings.value.apiPool.push(copy);
+    if (previousCredentialId && previousCredentialId !== nextCredentialId) {
+      const previousPolicy = apiRpmPolicies.value.find(
+        (policy) => policy.credentialId === previousCredentialId,
+      );
+      if (previousPolicy) {
+        const stillReferenced = await hasCredentialReference(previousCredentialId, copy.id);
+        const migrated = apiRpmPolicies.value.filter(
+          (policy) => stillReferenced || policy.credentialId !== previousCredentialId,
+        );
+        if (!migrated.some((policy) => policy.credentialId === nextCredentialId)) {
+          migrated.push({
+            ...previousPolicy,
+            credentialId: nextCredentialId,
+            updatedAt: Date.now(),
+          });
+        }
+        await saveRpmPolicies(migrated);
+      }
+    }
     persistRedactedSettings();
   }
 
@@ -532,11 +594,37 @@ export const useSettingsStore = defineStore('settings', () => {
     if (initialized.status === 'failed') {
       throw new Error(`API key storage is unavailable: ${initialized.message}`);
     }
+    const removed = (settings.value.apiPool as ApiEntry[]).find((entry) => entry.id === id);
+    const removedCredentialId = removed
+      ? await credentialIdFor({
+          baseUrl: removed.baseUrl,
+          apiKey: removed.apiKey,
+          label: removed.name,
+        })
+      : null;
     await deleteApiEndpoint(id);
     settings.value.apiPool = (settings.value.apiPool as ApiEntry[]).filter(
       (entry) => entry.id !== id,
     );
+    if (removedCredentialId && !(await hasCredentialReference(removedCredentialId))) {
+      await saveRpmPolicies(
+        apiRpmPolicies.value.filter((policy) => policy.credentialId !== removedCredentialId),
+      );
+    }
     persistRedactedSettings();
+  }
+
+  async function hasCredentialReference(credentialId: string, exceptId?: string): Promise<boolean> {
+    for (const candidate of settings.value.apiPool as ApiEntry[]) {
+      if (candidate.id === exceptId) continue;
+      const candidateId = await credentialIdFor({
+        baseUrl: candidate.baseUrl,
+        apiKey: candidate.apiKey,
+        label: candidate.name,
+      });
+      if (candidateId === credentialId) return true;
+    }
+    return false;
   }
 
   async function reloadApiEntries(): Promise<void> {
@@ -675,12 +763,15 @@ export const useSettingsStore = defineStore('settings', () => {
     settings,
     apiSecretsReady,
     apiSecretsError,
+    apiRpmPolicies,
+    apiRpmPoliciesError,
     lastApiKeyMigration,
     saveNow,
     initApiSecrets,
     saveApiEntry,
     removeApiEntry,
     reloadApiEntries,
+    saveRpmPolicies,
     resetAll,
     resetWorldBooksToDefaults,
     getStorageUsage,

@@ -516,6 +516,7 @@ async function sendViaNovelai(
   //    `resolveImageBaseUrl`。
   const result = await send({
     token: endpoint.apiKey ?? '',
+    endpointLabel: endpoint.name,
     body,
     signal,
   });

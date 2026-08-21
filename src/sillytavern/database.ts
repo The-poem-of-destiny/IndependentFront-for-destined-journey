@@ -20,6 +20,7 @@ import type {
   SnapshotPreview,
   SaveSlot,
   ApiEndpoint,
+  ApiRpmPolicy,
   PlotOutline,
   SaveProfile,
   ChatMessage,
@@ -100,7 +101,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-export const DB_VERSION = 22;
+export const DB_VERSION = 23;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -184,6 +185,9 @@ class AppDatabase extends Dexie {
   snapshots!: Table<SnapshotMeta>;
   saves!: Table<SaveSlot>;
   apiEndpoints!: Table<ApiEndpoint>;
+
+  // v23: API 凭据级 RPM 策略；主键是端点 + Key 的 SHA-256 指纹，不存第二份明文 Key。
+  apiRateLimitPolicies!: Table<ApiRpmPolicy>;
 
   // v5 new table (Phase 4)
   plotOutlines!: Table<PlotOutline>;
@@ -653,6 +657,8 @@ class AppDatabase extends Dexie {
           await snapshots.put(meta);
         }
       });
+
+    this.version(23).stores({ apiRateLimitPolicies: 'credentialId, updatedAt' });
   }
 }
 
@@ -717,6 +723,8 @@ export interface FullBackup {
   snapshotPayloads: SnapshotPayload[];
   saves: SaveSlot[];
   apiEndpoints: ApiEndpoint[];
+  /** v23 API 凭据级 RPM 策略；旧备份缺席时导入不碰现有策略。 */
+  apiRateLimitPolicies: ApiRpmPolicy[];
   // v5 Phase 4
   plotOutlines: PlotOutline[];
   // v6 Phase 4.6
@@ -767,6 +775,7 @@ export async function exportAllData(): Promise<FullBackup> {
     snapshotPayloads,
     saves,
     apiEndpoints,
+    apiRateLimitPolicies,
     plotOutlines,
     saveProfiles,
     createPresets,
@@ -789,6 +798,7 @@ export async function exportAllData(): Promise<FullBackup> {
     db.snapshotPayloads.toArray(),
     db.saves.toArray(),
     db.apiEndpoints.toArray(),
+    db.apiRateLimitPolicies.toArray(),
     db.plotOutlines.toArray(),
     db.saveProfiles.toArray(),
     db.createPresets.toArray(),
@@ -814,6 +824,7 @@ export async function exportAllData(): Promise<FullBackup> {
     snapshotPayloads,
     saves,
     apiEndpoints,
+    apiRateLimitPolicies,
     plotOutlines,
     saveProfiles,
     createPresets,
@@ -874,6 +885,7 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'snapshotPayloads',
     'saves',
     'apiEndpoints',
+    'apiRateLimitPolicies',
     'plotOutlines',
     'saveProfiles',
     'createPresets',
@@ -994,6 +1006,16 @@ async function doImportAllData(
       if (Array.isArray(backup.apiEndpoints)) await db.apiEndpoints.bulkPut(backup.apiEndpoints);
     },
   );
+
+  // v23：旧备份对 RPM 策略无话可说，字段缺席时整表保留。
+  await db.transaction('rw', db.apiRateLimitPolicies, async () => {
+    if (backup.apiRateLimitPolicies !== undefined) {
+      await db.apiRateLimitPolicies.clear();
+      if (Array.isArray(backup.apiRateLimitPolicies)) {
+        await db.apiRateLimitPolicies.bulkPut(backup.apiRateLimitPolicies);
+      }
+    }
+  });
 
   await db.transaction('rw', db.plotOutlines, db.saveProfiles, async () => {
     await db.plotOutlines.clear();
@@ -1828,6 +1850,20 @@ export async function saveApiEndpoint(endpoint: ApiEndpoint): Promise<string> {
 
 export async function deleteApiEndpoint(id: string): Promise<void> {
   await getDatabase().apiEndpoints.delete(id);
+}
+
+// --- API RPM Policies (v23) ---
+
+export async function getApiRpmPolicies(): Promise<ApiRpmPolicy[]> {
+  return getDatabase().apiRateLimitPolicies.toArray();
+}
+
+export async function saveApiRpmPolicies(policies: readonly ApiRpmPolicy[]): Promise<void> {
+  const db = getDatabase();
+  await db.transaction('rw', db.apiRateLimitPolicies, async () => {
+    await db.apiRateLimitPolicies.clear();
+    if (policies.length > 0) await db.apiRateLimitPolicies.bulkPut([...policies]);
+  });
 }
 
 // --- Plot Outlines (Phase 4) ---

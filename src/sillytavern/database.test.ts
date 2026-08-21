@@ -50,6 +50,7 @@ import {
   getApiEndpoints,
   saveApiEndpoint,
   deleteApiEndpoint,
+  saveApiRpmPolicies,
   // Settings
   getSettings,
   saveSettings,
@@ -355,6 +356,11 @@ describe('v4 新表存在性', () => {
 
   it('apiEndpoints 表应存在', async () => {
     const count = await getDatabase().apiEndpoints.count();
+    expect(typeof count).toBe('number');
+  });
+
+  it('apiRateLimitPolicies 表应存在 (v23)', async () => {
+    const count = await getDatabase().apiRateLimitPolicies.count();
     expect(typeof count).toBe('number');
   });
 });
@@ -1093,6 +1099,7 @@ describe('exportAllData / importAllData', () => {
     await saveMemory(makeMemory({ id: 'exp_mem' }));
     await savePlotEvent(makePlotEvent({ id: 'exp_plot' }));
     await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
+    await saveApiRpmPolicies([{ credentialId: 'credential_a', rpmLimit: 12, updatedAt: 1 }]);
 
     const backup = await exportAllData();
     // 🔴 跟随 DB_VERSION，而 DB_VERSION 必须等于最后一个 `this.version(n)` ——
@@ -1101,7 +1108,8 @@ describe('exportAllData / importAllData', () => {
     // v20：内容-引擎分离波 1 / D18 —— contentPacks 表（安装持久化，不进 FullBackup）。
     // v21：地图字节本地缓存 mapBlobs（2026-08-07，D23 补强；字节同不进备份）。
     // v22：快照拆表（snapshots 只留元数据 + snapshotPayloads 存整档载荷，两者都进备份）。
-    expect(backup.version).toBe(22);
+    // v23：API 凭据级 RPM 策略表。
+    expect(backup.version).toBe(23);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -1113,6 +1121,9 @@ describe('exportAllData / importAllData', () => {
     expect(Array.isArray(backup.snapshotPayloads)).toBe(true);
     expect(Array.isArray(backup.saves)).toBe(true);
     expect(Array.isArray(backup.apiEndpoints)).toBe(true);
+    expect(backup.apiRateLimitPolicies).toEqual([
+      { credentialId: 'credential_a', rpmLimit: 12, updatedAt: 1 },
+    ]);
     expect(Array.isArray(backup.createPresets)).toBe(true);
     expect(Array.isArray(backup.messages)).toBe(true);
     expect(Array.isArray(backup.worldBooks)).toBe(true);
@@ -2748,13 +2759,13 @@ describe('Asset CRUD (v13)', () => {
     // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    // v20=D18 contentPacks 表; v21=地图字节缓存 mapBlobs; v22=快照拆表 snapshotPayloads
-    expect(db.verno).toBe(22);
+    // v20=D18 contentPacks 表; v21=地图字节缓存; v22=快照拆表; v23=API RPM 策略
+    expect(db.verno).toBe(23);
 
     // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
     //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）
     //           + contentPacks 一张（v20/D18）+ mapBlobs 一张（v21）
-    //           + snapshotPayloads 一张（v22 快照拆表），一个不少
+    //           + snapshotPayloads 一张（v22）+ apiRateLimitPolicies 一张（v23），一个不少
     //（误写 `表名: null` 或漏声明会在这里炸 —— 尤其 lorebooks/settings 两张死表按 D3 必须保留）
     const EXPECTED_TABLES = [
       ...Object.keys(V12_STORES),
@@ -2771,6 +2782,7 @@ describe('Asset CRUD (v13)', () => {
       'contentPacks',
       'mapBlobs',
       'snapshotPayloads',
+      'apiRateLimitPolicies',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 
@@ -2795,6 +2807,7 @@ describe('Asset CRUD (v13)', () => {
     expect(await db.imagePresets.count()).toBe(0);
     // v22 例外：snapshotPayloads 不是空的 —— 上面那行 v12 胖快照被升版拆了出来
     expect(await db.snapshotPayloads.count()).toBe(1);
+    expect(await db.apiRateLimitPolicies.count()).toBe(0);
     expect(
       ((await db.snapshots.get('sn1')) as unknown as Record<string, unknown>).characters,
     ).toBeUndefined();
@@ -2877,7 +2890,7 @@ describe('v22 升版 —— 快照拆表', () => {
     // ---- 以当前版打开：触发 v22 升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    expect(db.verno).toBe(22);
+    expect(db.verno).toBe(DB_VERSION);
 
     // 元数据行：五个字段 + preview，载荷四字段一个不留
     const metas = await getSnapshots('save_mig');
@@ -2970,7 +2983,7 @@ describe('v22 升版 —— 快照拆表', () => {
 
     await initializeDatabase();
     const db = getDatabase();
-    expect(db.verno).toBe(22);
+    expect(db.verno).toBe(DB_VERSION);
     expect(await db.snapshots.count()).toBe(9);
     expect(await db.snapshotPayloads.count()).toBe(9);
 
@@ -3010,7 +3023,7 @@ describe('v22 升版 —— 快照拆表', () => {
 
     await initializeDatabase();
     const db = getDatabase();
-    expect(db.verno).toBe(22);
+    expect(db.verno).toBe(DB_VERSION);
     expect(await db.snapshots.count()).toBe(0);
     expect(await db.snapshotPayloads.count()).toBe(0);
   });

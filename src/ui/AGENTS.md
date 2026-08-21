@@ -247,6 +247,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │      `previousView` 只作兼容投影；`back()` 直接弹栈，不能再经 `navigate()` 把当前页
 │   │      压回去。同视图重复 navigate 不入栈，否则返回目标会变成自己
 │   ├── settings-store.ts            ← 全应用最热的状态；deep watch 自动落 localStorage
+│   │                                   API RPM 策略例外：住 Dexie v23，经 `saveRpmPolicies` 整表替换并
+│   │                                   热更新全局 limiter；端点凭据编辑时迁移其既有限制
 │   │                                   🔴 **加新设置要改两处**（Q-18）：先在 settings-types.ts
 │   │                                      的 `UiSettings` 上声明，再在 getDefaults() 给默认值。
 │   │                                      「任意新字段零改动」那条设计意图已于 2026-08-04 反转
@@ -453,6 +455,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               消费 content-store 的 `contentStatus`，四态文案
 │   │   │                               （placeholder / placeholder+检测到本地真实内容 / error /
 │   │   │                               pack·needs_attention）。`activePackId` 为空时不渲染
+│   │   ├── ApiRateLimitWaitPopup.vue ← 全局 RPM 等待提示（端点 / 队列 / 倒计时；到时自动消失续发）
 │   │   ├── ToastContainer.vue
 │   │   └── form/ (FormInput / FormSelect / FormStepper —— **只有这三个**；
 │   │             早期文档里的 Cascader / KeyValue 从未落地，别照着 import)
@@ -471,6 +474,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   专项降级 / 生命周期 / 多宽高比验收仍在 TODO**
 │   ├── settings/                    ← [Q-25] 14 个分区**全部**是一行子组件
 │   │   ├── SettingsPage.vue         ← 纯壳层（1995 → 约 415 行）：页头 + 主导航 + Agent 子导航
+│   │   │                               ≤720px 时主导航与 Agent 子导航改为顶部横向滚动条，内容恢复全宽；
+│   │   │                               固定 180px 侧栏会把 390px 视口的设置表单压成逐字换行
 │   │   │                               只留 activeSection / activeAgent / selectSection /
 │   │   │                               selectAgent / restoreAgent / agentModelOf 与
 │   │   │                               wb.init()（世界书分区也靠它）
@@ -522,7 +527,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               .form-*/.toggle-*/.detail-card）。各分区（含壳层）用
 │   │   │                               `<style scoped src>` 引入 —— 一份源码，各自作用域。
 │   │   │                               父组件的 scoped 样式只能命中子组件**根节点**，够不到里面
-│   │   ├── ApiSection.vue           ← API 池 CRUD + 连接测试 + 模型列表（含添加/编辑弹窗）
+│   │   ├── ApiSection.vue           ← API 池 CRUD + 凭据组合 RPM 设置 + 连接测试 + 模型列表（含添加/编辑弹窗）
 │   │   │                               🔴 必须**单根**：弹窗放 <section> 内层，否则父级 `.centered`
 │   │   │                                  命不中根节点，本分区在宽屏下摊满整行（真机走查逮到）
 │   │   │                               🔴 **出图端点只填名称 + API Key**（2026-08-05）：`isImageEntry`

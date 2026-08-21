@@ -25,7 +25,7 @@ src/sillytavern/                    ← 核心引擎
   │   │    `database.ts` 曾为标这一个类型反向 import 前端 store。create-store 侧 re-export 同名
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
-  ├── database.ts                   ← Dexie/IndexedDB v22
+  ├── database.ts                   ← Dexie/IndexedDB v23
   │       🔴 `DB_VERSION` 常量必须等于最后一个 `this.version(n)`。它只出现在
   │          `FullBackup.version` 上、导入侧不拿它做判断，所以**对不上不会有任何报错**，
   │          只是每份导出的备份都盖了过期的戳。它曾经落后两版（v18/v19 忘了改），
@@ -68,7 +68,7 @@ src/sillytavern/                    ← 核心引擎
   │                 AI 即兴出来的那份也落这里（差量基准全空），**不再**去建全局基线
   │   ├── v20+: contentPacks（内容包安装持久化，D18）—— payload 是整包，**不进 FullBackup**
   │   ├── v21+: mapBlobs（地图图源字节本地缓存，D23 补强）—— 字节同样**不进 FullBackup**
-  │   └── v22+: snapshotPayloads（快照拆表）——`snapshots` 只留元数据
+  │   ├── v22+: snapshotPayloads（快照拆表）——`snapshots` 只留元数据
   │              （id/saveId/createdAt/reason/turn + 展示缩略 `preview`），整档载荷
   │              （characters/saveProfile/plotEvents/**messages**）搬进这张表，`id` 与元数据行同值。
   │              🔴 拆的理由是**读放大**：列快照与淘汰旧快照每回合都跑，却只用得上
@@ -82,13 +82,17 @@ src/sillytavern/                    ← 核心引擎
   │                 判据是载荷字段在不在、**不是版本号**。
   │              🔴 `preview` 不是第二个真源，只喂快照面板那一行字（主角 HP / 游戏内日期）；
   │                 任何逻辑一律读载荷。旧行缺席 = 那一行不显示，v22 升版时从载荷回填
+  │   └── v23+: apiRateLimitPolicies（全局 API RPM 策略）——按
+  │              `SHA-256(归一化 baseUrl + API Key)` 指纹存上限，不落明文密钥；进 FullBackup
   │       🔴 **世界书、美化规则与 API Key 现居应用 Dexie，不再在 localStorage**。正则 iframe
   │          只能经同步镜像访问 `regexStorage`，不能访问任何应用表；应用 localStorage 只存无密钥
   │          设置元数据（Agent 配置/主题/`beautifierBuiltinDisabled` 等）
   │
   ├── session-backup.ts             ← 单存档导出/导入：每存档表整取（清单同 deleteSaveSlot，字节不随行）+ 内容依赖清单（世界书 token / 工坊项目 / 内容包 / story 预设，导入前只读体检）+ 导入**一律重发 id**（不重发 = 第二次导入静默覆盖第一次），全局表一行不改
   │
-  ├── agent-client.ts               ← [Phase 3] API 客户端（每 Agent 独立 userId / 重试退避 / 缓存检测）
+  ├── api-rpm-limiter.ts            ← [ADR-34] 应用级凭据桶：默认不限；达到上限后的请求按 FIFO
+  │                                    暂停整 60 秒，发布等待快照后自动续发；网络 timeout 从放行后才计
+  ├── agent-client.ts               ← [Phase 3] API 客户端（每 Agent 独立 userId / 重试退避 / 缓存检测 / RPM 许可）
   ├── agent-templates.ts            ← [Phase 3+9] Prompt 模板（systemPrompt 已迁 agent-config.json，留 stub + 动态上下文）
   ├── agent-config.json             ← [Phase 9] 10+ Agent 完整 systemPrompt 唯一来源
   │      （🔴 实际文件在 `public/data/defaults/agent-config.json`，不在本目录；

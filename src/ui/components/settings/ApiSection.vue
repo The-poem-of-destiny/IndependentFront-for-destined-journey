@@ -9,21 +9,23 @@
  *    且 `api` 是默认分区，所以进设置页仍然会立刻跑一次；切走再回来会多调一次，
  *    那次直接命中已解密的缓存。
  */
-import { ref, reactive, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, watch } from 'vue';
 import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import { useSettingsStore, type ApiEntry } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
 import { fetchModels } from '@engine/api-tools';
+import { credentialIdFor, scheduleApiRequest } from '@engine/api-rpm-limiter';
 import { NAI_IMAGE_API_BASE } from '../../lib/image-client';
 
 const cfg = useSettingsStore();
 const s = cfg.settings;
 const ui = useUIStore();
 
-onMounted(() => {
-  void cfg.initApiSecrets();
+onMounted(async () => {
+  await cfg.initApiSecrets();
+  await refreshRpmRows();
 });
 
 const showAddApi = ref(false);
@@ -64,6 +66,80 @@ const showAdvancedApi = ref(false);
 const apiFormTesting = ref(false);
 const apiFormFetchingModels = ref(false);
 const editingApiId = ref<string | null>(null);
+
+type RpmRow = {
+  credentialId: string;
+  names: string[];
+  baseUrl: string;
+  maskedKey: string;
+};
+
+const rpmRows = ref<RpmRow[]>([]);
+const rpmDraft = reactive<Record<string, string>>({});
+const rpmSaving = ref(false);
+let rpmRefreshSeq = 0;
+
+async function refreshRpmRows() {
+  const seq = ++rpmRefreshSeq;
+  const grouped = new Map<string, RpmRow>();
+  for (const entry of s.apiPool) {
+    const credentialId = await credentialIdFor({
+      baseUrl: entry.baseUrl,
+      apiKey: entry.apiKey,
+      label: entry.name,
+    });
+    const current = grouped.get(credentialId);
+    if (current) {
+      if (!current.names.includes(entry.name)) current.names.push(entry.name);
+    } else {
+      grouped.set(credentialId, {
+        credentialId,
+        names: [entry.name],
+        baseUrl: entry.baseUrl.replace(/\/+$/, ''),
+        maskedKey: entry.maskedKey || maskKey(entry.apiKey),
+      });
+    }
+  }
+  if (seq !== rpmRefreshSeq) return;
+  rpmRows.value = [...grouped.values()];
+  const activeIds = new Set(rpmRows.value.map((row) => row.credentialId));
+  for (const key of Object.keys(rpmDraft)) {
+    if (!activeIds.has(key)) delete rpmDraft[key];
+  }
+  for (const row of rpmRows.value) {
+    const policy = cfg.apiRpmPolicies.find((item) => item.credentialId === row.credentialId);
+    rpmDraft[row.credentialId] = policy ? String(policy.rpmLimit) : '';
+  }
+}
+
+watch(
+  () => s.apiPool.map((entry) => [entry.id, entry.baseUrl, entry.apiKey, entry.name]),
+  () => void refreshRpmRows(),
+  { deep: true },
+);
+
+async function saveRpmLimits() {
+  const policies = [];
+  for (const row of rpmRows.value) {
+    const raw = (rpmDraft[row.credentialId] ?? '').trim();
+    if (!raw) continue;
+    const rpmLimit = Number(raw);
+    if (!Number.isSafeInteger(rpmLimit) || rpmLimit <= 0) {
+      ui.toast(`${row.names.join(' / ')} 的 RPM 必须是正整数`, 'warning');
+      return;
+    }
+    policies.push({ credentialId: row.credentialId, rpmLimit, updatedAt: Date.now() });
+  }
+  rpmSaving.value = true;
+  try {
+    await cfg.saveRpmPolicies(policies);
+    ui.toast('RPM 限制已保存', 'success');
+  } catch (error) {
+    ui.toast(`RPM 限制保存失败：${String(error)}`, 'error');
+  } finally {
+    rpmSaving.value = false;
+  }
+}
 
 function maskKey(key: string): string {
   if (!key || key.length < 8) return key ? key.slice(0, 3) + '***' : '';
@@ -116,15 +192,21 @@ async function testApiAndFetch() {
             messages: [{ role: 'user', content: 'hi' }],
             max_tokens: 1,
           });
-    const r = await fetch(testUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Target-Base-URL': apiForm.baseUrl.replace(/\/+$/, ''),
-        Authorization: 'Bearer ' + realKey,
-      },
-      body: testBody,
-    });
+    const testBaseUrl = apiForm.baseUrl.replace(/\/+$/, '');
+    const r = await scheduleApiRequest(
+      { baseUrl: testBaseUrl, apiKey: realKey, label: apiForm.name || testBaseUrl },
+      undefined,
+      () =>
+        fetch(testUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Target-Base-URL': testBaseUrl,
+            Authorization: 'Bearer ' + realKey,
+          },
+          body: testBody,
+        }),
+    );
     if (!r.ok) {
       const t = await r.text().catch(() => '');
       throw new Error(r.status + ' ' + t.slice(0, 100));
@@ -155,7 +237,11 @@ async function fetchModelList(opts: { fromConnectionTest?: boolean; silentFail?:
   const rk = (apiForm._realKey || apiForm.apiKey).trim();
   try {
     // 去重：复用 api-tools.fetchModels（同源 /api/models + Bearer/api-key 双鉴权 + 三形态解析）
-    const { models, source, error } = await fetchModels({ baseUrl: apiForm.baseUrl, apiKey: rk });
+    const { models, source, error } = await fetchModels({
+      baseUrl: apiForm.baseUrl,
+      apiKey: rk,
+      label: apiForm.name || apiForm.baseUrl,
+    });
     if (source === 'remote' && models.length > 0) {
       apiModels.value = [...new Set(models)];
       console.log('[fetchModelList] remote → unique models:', JSON.stringify(apiModels.value));
@@ -270,6 +356,49 @@ async function deleteApi(id: string) {
       <p class="api-warn" style="margin: 0">
         API 密钥安全存储不可用。旧密钥仍保留且本次会话不会覆盖原设置；请检查浏览器存储后重新加载。
       </p>
+    </AppCard>
+    <AppCard padding="md" class="rpm-card">
+      <div class="rpm-card-head">
+        <div>
+          <h4>全局 RPM 限制</h4>
+          <p class="form-hint">相同端点与 API Key 共用一个请求额度。留空表示无限制。</p>
+        </div>
+        <AppButton
+          variant="secondary"
+          size="sm"
+          :disabled="rpmSaving || rpmRows.length === 0"
+          @click="saveRpmLimits"
+        >
+          {{ rpmSaving ? '保存中…' : '保存限制' }}
+        </AppButton>
+      </div>
+      <p v-if="cfg.apiRpmPoliciesError" class="api-warn">
+        RPM 设置暂时不可用，本次会话按无限制运行：{{ cfg.apiRpmPoliciesError }}
+      </p>
+      <p v-if="rpmRows.length === 0" class="form-hint rpm-empty">
+        添加 API 后，可在这里按端点与 API Key 组合设置每分钟请求上限。
+      </p>
+      <div class="rpm-list">
+        <div v-for="row in rpmRows" :key="row.credentialId" class="rpm-row">
+          <div class="rpm-identity">
+            <strong>{{ row.names.join(' / ') }}</strong>
+            <span>{{ row.baseUrl }}</span>
+            <span>{{ row.maskedKey }}</span>
+          </div>
+          <label class="rpm-input-label">
+            每分钟请求数
+            <input
+              v-model="rpmDraft[row.credentialId]"
+              class="form-input rpm-input"
+              type="number"
+              min="1"
+              step="1"
+              inputmode="numeric"
+              placeholder="无限制"
+            />
+          </label>
+        </div>
+      </div>
     </AppCard>
     <div class="api-pool">
       <AppCard v-for="ep in s.apiPool" :key="ep.id" padding="md"
@@ -442,6 +571,100 @@ async function deleteApi(id: string) {
 
 <!-- 共用外壳（.section>h3 / .section-desc / .form-* / .toggle-*）：唯一一份在 settings-chrome.css -->
 <style scoped src="./settings-chrome.css"></style>
+
+<style scoped>
+.rpm-card {
+  display: grid;
+  gap: var(--theme-spacing-md);
+  margin-bottom: var(--theme-spacing-lg);
+}
+
+.rpm-card-head,
+.rpm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--theme-spacing-lg);
+}
+
+.rpm-card-head h4 {
+  margin: 0 0 var(--theme-spacing-xs);
+  color: var(--theme-text-primary);
+  font-family: var(--theme-font-title);
+  font-size: 0.95rem;
+}
+
+.rpm-card-head .form-hint {
+  margin: 0;
+}
+
+.rpm-list {
+  display: grid;
+  gap: var(--theme-spacing-sm);
+}
+
+.rpm-row {
+  min-width: 0;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: color-mix(in srgb, var(--theme-primary) 5%, var(--theme-card-bg));
+}
+
+.rpm-identity {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.rpm-identity strong,
+.rpm-identity span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rpm-identity strong {
+  color: var(--theme-text-primary);
+  font-size: 0.8125rem;
+}
+
+.rpm-identity span {
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
+}
+
+.rpm-input-label {
+  display: grid;
+  flex: 0 0 9rem;
+  gap: var(--theme-spacing-xs);
+  color: var(--theme-text-secondary);
+  font-size: 0.75rem;
+}
+
+.rpm-input {
+  min-height: 36px;
+}
+
+@media (max-width: 620px) {
+  .section-head,
+  .rpm-card-head,
+  .rpm-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .section-head > button,
+  .rpm-card-head > button,
+  .rpm-input-label {
+    width: 100%;
+  }
+
+  .rpm-input-label {
+    flex-basis: auto;
+  }
+}
+</style>
 
 <style scoped>
 /* 出图端点没有「主链接」输入框，这一行提示顶替它的位置。`.form-hint` 的 margin 是

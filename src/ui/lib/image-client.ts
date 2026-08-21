@@ -51,6 +51,7 @@ import {
   type ComfySubstitutionValues,
 } from '@engine/image-providers/comfyui';
 import { IMAGE_BAD_RESPONSE_MESSAGE, IMAGE_FAILURE_RETRYABLE } from '@engine/image-defaults';
+import { scheduleApiRequest } from '@engine/api-rpm-limiter';
 import type { ImageGenFailure, ImageGenFailureKind } from '@engine/types-image';
 
 // ═══════════════════════════════════════════════════════════
@@ -416,6 +417,8 @@ export interface NaiGenerateOptions {
   body: NaiRequestBody;
   /** 上游 base，缺省 {@link NAI_IMAGE_API_BASE}。设置页「端点」输入框会传进来 */
   baseUrl?: string;
+  /** API 池里的玩家可读名称；仅用于 RPM 等待提示。 */
+  endpointLabel?: string;
   /** 调用方主动取消（切存档 / 离开页面 / 用户点了取消，§8.2） */
   signal?: AbortSignal;
   /** 覆盖 {@link IMAGE_REQUEST_TIMEOUT_MS}，仅测试与特殊网络环境用 */
@@ -462,33 +465,41 @@ export async function generateNaiImage(opts: NaiGenerateOptions): Promise<NaiGen
   const base = resolved.base;
 
   const timeoutMs = opts.timeoutMs ?? IMAGE_REQUEST_TIMEOUT_MS;
-  const guard = armTimeout(timeoutMs, opts.signal);
+  let guard: ReturnType<typeof armTimeout> | undefined;
 
   /** 中断类错误的统一归类: 超时优先于取消（超时也会让外部看到 aborted） */
   const abortFailure = (): ImageGenFailure | undefined => {
-    if (guard.timedOut()) return fail('network', `等待上游超过 ${Math.round(timeoutMs / 1000)} 秒`);
+    if (guard?.timedOut())
+      return fail('network', `等待上游超过 ${Math.round(timeoutMs / 1000)} 秒`);
     if (opts.signal?.aborted) return fail('aborted');
     return undefined;
   };
 
   try {
-    const init: ImageFetchInit = {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // §12.1 第 3 条: 由前端设置，`forward()` 已透传
-        Accept: NAI_ZIP_ACCEPT,
-        Authorization: `Bearer ${token}`,
-        // `forward()` 从这个 header 取上游 base（SSRF 黑名单在那边，本层不重复判）
-        'X-Target-Base-URL': base,
-      },
-      body: JSON.stringify(opts.body),
-      ...(guard.signal ? { signal: guard.signal } : {}),
-    };
-
     let res: ImageResponseLike;
     try {
-      res = await impl(IMAGE_BFF_ENDPOINT, init);
+      res = await scheduleApiRequest(
+        { baseUrl: base, apiKey: token, label: opts.endpointLabel || 'NovelAI 图像 API' },
+        opts.signal,
+        () => {
+          // 网络 timeout 从拿到 RPM 名额后才开始，排队一分钟本身不算上游超时。
+          guard = armTimeout(timeoutMs, opts.signal);
+          const init: ImageFetchInit = {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              // §12.1 第 3 条: 由前端设置，`forward()` 已透传
+              Accept: NAI_ZIP_ACCEPT,
+              Authorization: `Bearer ${token}`,
+              // `forward()` 从这个 header 取上游 base（SSRF 黑名单在那边，本层不重复判）
+              'X-Target-Base-URL': base,
+            },
+            body: JSON.stringify(opts.body),
+            ...(guard.signal ? { signal: guard.signal } : {}),
+          };
+          return impl(IMAGE_BFF_ENDPOINT, init);
+        },
+      );
     } catch (err) {
       return abortFailure() ?? fail('network', describeError(err));
     }
@@ -529,7 +540,7 @@ export async function generateNaiImage(opts: NaiGenerateOptions): Promise<NaiGen
 
     return { ok: true, images: parsed.images, contentType };
   } finally {
-    guard.dispose();
+    guard?.dispose();
   }
 }
 

@@ -6,7 +6,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { setActivePinia, createPinia } from 'pinia';
 import { serializeSettingsForLocalStorage, useSettingsStore } from './settings-store';
-import { getApiEndpoints, getDatabase } from '@engine/database';
+import { getApiEndpoints, getApiRpmPolicies, getDatabase } from '@engine/database';
+import { credentialIdFor } from '@engine/api-rpm-limiter';
 
 // Mock localStorage for Node test environment
 const store_ = new Map<string, string>();
@@ -31,6 +32,7 @@ describe('settings-store', () => {
   let store: ReturnType<typeof useSettingsStore>;
   beforeEach(async () => {
     await getDatabase().apiEndpoints.clear();
+    await getDatabase().apiRateLimitPolicies.clear();
     // 🔴 清 localStorage 必须**紧贴 store 构造**，中间不许有 await。
     //
     //    此前它在 `await` 之前，于是留出了一个让出事件循环的窗口 —— 上一轮 store
@@ -53,6 +55,7 @@ describe('settings-store', () => {
     //   所以上面 beforeEach 的「清空紧贴构造」才是真正的兜底。）
     store?.$dispose();
     await getDatabase().apiEndpoints.clear();
+    await getDatabase().apiRateLimitPolicies.clear();
   });
 
   it('应创建 store 实例', () => {
@@ -121,6 +124,43 @@ describe('settings-store', () => {
     const raw = localStorage.getItem('fated-poem-settings')!;
     expect(raw).not.toContain('sk-runtime-secret');
     expect(JSON.parse(raw).apiPool[0].apiKey).toBe('');
+  });
+
+  it('RPM 限制按端点与密钥指纹持久化，编辑凭据时迁移到新组合', async () => {
+    await store.initApiSecrets();
+    const endpoint = {
+      id: 'rpm-1',
+      name: 'RPM endpoint',
+      baseUrl: 'https://rpm.example.test/v1/',
+      apiKey: 'sk-rpm-old',
+      maskedKey: 'sk-***-old',
+      model: 'model-1',
+      models: ['model-1'],
+      apiType: 'chat' as const,
+    };
+    await store.saveApiEntry(endpoint);
+    const oldCredentialId = await credentialIdFor(endpoint);
+    await store.saveRpmPolicies([
+      { credentialId: oldCredentialId, rpmLimit: 12, updatedAt: Date.now() },
+    ]);
+
+    await store.saveApiEntry({
+      ...endpoint,
+      baseUrl: 'https://rpm.example.test/v2',
+      apiKey: 'sk-rpm-new',
+      maskedKey: 'sk-***-new',
+    });
+
+    const newCredentialId = await credentialIdFor({
+      baseUrl: 'https://rpm.example.test/v2',
+      apiKey: 'sk-rpm-new',
+    });
+    expect(await getApiRpmPolicies()).toEqual([
+      expect.objectContaining({ credentialId: newCredentialId, rpmLimit: 12 }),
+    ]);
+    expect(store.apiRpmPolicies).toEqual([
+      expect.objectContaining({ credentialId: newCredentialId, rpmLimit: 12 }),
+    ]);
   });
 
   it('只擦除已迁移的 apiPool 密钥，不删除未知嵌套数据', () => {

@@ -11,6 +11,7 @@
  */
 
 import type { ApiEndpoint, AgentResult, ToolDefinition } from './types';
+import { scheduleApiRequest } from './api-rpm-limiter';
 
 /** 内部扩展 — 包含原始 tool_calls 数据 */
 type InternalAgentResult = AgentResult & { _toolCalls?: any[] };
@@ -397,6 +398,23 @@ export class AgentClient {
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<{ kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string }> {
+    return scheduleApiRequest(
+      {
+        baseUrl: this.baseUrl,
+        apiKey: this.endpoint.apiKey,
+        label: this.endpoint.name || this.baseUrl,
+      },
+      signal,
+      () => this.streamOnceGranted(request, callbacks, signal),
+    );
+  }
+
+  /** 已获得 RPM 名额后的单次流式发送；网络 timeout 从这里才开始。 */
+  private async streamOnceGranted(
+    request: ChatRequest,
+    callbacks: StreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<{ kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string }> {
     const startTime = Date.now();
     let settled = false;
     let outcome: { kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string } = {
@@ -761,6 +779,22 @@ export class AgentClient {
   }
 
   private async callOnce(request: ChatRequest, signal?: AbortSignal): Promise<InternalAgentResult> {
+    return scheduleApiRequest(
+      {
+        baseUrl: this.baseUrl,
+        apiKey: this.endpoint.apiKey,
+        label: this.endpoint.name || this.baseUrl,
+      },
+      signal,
+      () => this.callOnceGranted(request, signal),
+    );
+  }
+
+  /** 已获得 RPM 名额后的非流式发送；等待配额不占用网络 timeout。 */
+  private async callOnceGranted(
+    request: ChatRequest,
+    signal?: AbortSignal,
+  ): Promise<InternalAgentResult> {
     const controller = new AbortController();
     let abortedByTimeout = false;
     const timeoutId = setTimeout(() => {

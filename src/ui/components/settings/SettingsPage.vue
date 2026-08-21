@@ -462,6 +462,57 @@ onMounted(() => {
   max-width: 780px;
   margin: 0 auto;
 }
+
+@media (max-width: 720px) {
+  .settings-content-banner {
+    margin: var(--theme-spacing-sm);
+  }
+
+  .settings-header {
+    padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  }
+
+  .settings-body {
+    flex-direction: column;
+  }
+
+  .main-nav,
+  .sub-nav {
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--theme-card-border);
+  }
+
+  .main-nav {
+    padding: var(--theme-spacing-xs) var(--theme-spacing-sm);
+  }
+
+  .sub-nav {
+    padding: var(--theme-spacing-xs) var(--theme-spacing-sm);
+  }
+
+  .nav-item,
+  .sub-nav-item {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .nav-divider {
+    width: 1px;
+    height: auto;
+    margin: var(--theme-spacing-xs);
+    flex: 0 0 1px;
+  }
+
+  .settings-content,
+  .content-with-subnav {
+    padding: var(--theme-spacing-lg) var(--theme-spacing-md);
+  }
+}
+
 /* 减少动态效果（design.md 检查清单）。
    `.storage-bar-fill` 随 DataSection 走了；`.template-preview-panel` 随
    agent-chrome.css 走了（它与自己的 @keyframes 必须同组件，否则 Vue 的
