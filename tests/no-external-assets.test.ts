@@ -163,6 +163,8 @@ function collectSourceFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+const NON_NETWORK_URIS = new Set(['http://www.w3.org/2000/svg', 'http://www.w3.org/1999/xlink']);
+
 /**
  * 从一份源码里摘出所有外部主机。
  *
@@ -173,6 +175,7 @@ function collectSourceFiles(dir: string, out: string[] = []): string[] {
 function extractExternalHosts(source: string): string[] {
   const hosts: string[] = [];
   for (const m of source.matchAll(/https?:\/\/([^\s"'`<>)\\]*)/g)) {
+    if (NON_NETWORK_URIS.has(m[0])) continue;
     const rest = m[1] ?? '';
     const host = rest.split(/[/?#]/)[0];
     if (!host) continue; // 裸协议前缀
@@ -190,6 +193,14 @@ describe('src/** 不引用未声明的外部主机', () => {
 
   it('扫描面非空（防止 collectSourceFiles 悄悄扫了个空目录）', () => {
     expect(files.length).toBeGreaterThan(200);
+  });
+
+  it('忽略标准 XML 命名空间，但不放行同主机的网络资源', () => {
+    expect(
+      extractExternalHosts(
+        '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://www.w3.org/asset.png"/></svg>',
+      ),
+    ).toEqual(['www.w3.org']);
   });
 
   it('每一条 https?:// 字面量的主机都在白名单里', () => {
