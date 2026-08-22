@@ -1818,6 +1818,18 @@ export interface AgentResult {
    * provider 不返回该字段时为 undefined —— 主动预算判断据此「不猜」（设计 §8.3）。
    */
   promptTokens?: number;
+  /**
+   * 🆕 LLM 组装层 Delta 会话（T3）: 本次请求对应的 session revision（1-based；无 session /
+   * 排除路径 / regenerate 时 undefined）。诊断字段（设计 §11.2），只喂现有日志出口，无逻辑消费方。
+   */
+  promptSessionRevision?: number;
+  /** 🆕 LLM 组装层 Delta 会话（T3）: 本次请求是否发生重基线（设计 §11.2 诊断字段）。 */
+  promptRebased?: boolean;
+  /**
+   * 🆕 LLM 组装层 Delta 会话（T3）: 重基线原因（machine-readable token，设计 §11.2 诊断字段；
+   * 值为 prompt-session-assembler 的 `PromptSessionRebaseReason`）。
+   */
+  promptRebaseReason?: string;
   /** 🆕 模型停止原因（stop=正常结束 / length=输出截断 / tool_calls=工具调用）—— 大纲诊断等用它区分「截断」与「格式坏」 */
   finishReason?: string;
   duration: number; // ms

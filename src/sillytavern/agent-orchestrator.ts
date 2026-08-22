@@ -44,6 +44,13 @@ import {
   buildQuestPatches,
   buildVarsUpdatePatches,
 } from './vars-update-translator';
+// T3: LLM 组装层 Delta 会话深模块（独占 (saveId, agentId) 会话状态；orchestrator 只跨小 interface）
+import {
+  completePromptSession,
+  invalidatePromptSession,
+  preparePromptSession,
+  type PromptSessionHandle,
+} from './prompt-session-assembler';
 
 // ========== Types ==========
 
@@ -224,6 +231,14 @@ export class AgentOrchestrator {
   /** char_gen 侧链 promise —— combat 分支必须等它（参战方新角色先生成，原串行语义）。 */
   private pendingCharGen: Promise<void> | null = null;
 
+  /**
+   * 🆕 T3: 每个 Agent 最近一次 prepare 返回的 session handle（key = agentId）。
+   * 用途只有一处 —— `regenerateAgent` 先精确失效该 Agent 的 session（设计 §10 适用矩阵：
+   * 手动重生成走无状态完整请求并使旧 session 失效），防止替代回复混入正式 transcript。
+   * saveId 切换后 module 侧可能已清 session，此时 handle 失效（sessionId 不匹配）→ invalidate no-op。
+   */
+  private sessionHandles = new Map<string, PromptSessionHandle>();
+
   constructor(options: OrchestratorOptions, events: OrchestratorEvents = {}) {
     this.pipeline = options.pipeline;
     this.context = options.context;
@@ -367,8 +382,18 @@ export class AgentOrchestrator {
       };
     }
 
+    // 🆕 T3: 手动重生成 → 先使该 Agent 的旧 session 失效，再走现有**完整无状态**请求
+    //（skipSession），**不写入** session（设计 §10 适用矩阵 / §8.1「手动重新生成」）。
+    // 若不失效，下一轮正常回合 prepare 会复用旧 transcript 把「替代回复」混进正式轮次；
+    // 失效后下一轮 prepare 发现 session 已删 → 从当前权威状态重基线（不污染正常回合）。
+    const handle = this.sessionHandles.get(agentId);
+    if (handle) {
+      invalidatePromptSession(handle);
+      this.sessionHandles.delete(agentId);
+    }
+
     this.events.onAgentStart?.(agentId, config);
-    const result = await this.callAgent(config);
+    const result = await this.callAgent(config, { skipSession: true });
     this.results.set(agentId, result);
 
     if (result.error) {
@@ -462,7 +487,10 @@ export class AgentOrchestrator {
     return this.callAgent(config);
   }
 
-  private async callAgent(config: AgentConfig): Promise<AgentResult> {
+  private async callAgent(
+    config: AgentConfig,
+    options?: { skipSession?: boolean },
+  ): Promise<AgentResult> {
     const endpoint = this.endpoints.get(config.apiEndpointId);
     if (!endpoint) {
       return {
@@ -491,24 +519,60 @@ export class AgentOrchestrator {
 
     // 构建 messages (Phase 8: 四部分拼接)
     const configsArr = Array.from(this.agentConfigs.values());
-    const messages = await buildAgentMessagesAsync(
-      config.agentId,
-      this.context,
-      configsArr,
-      this.worldBooks,
-      this.presets,
-      undefined, // localParams: main pipeline agents don't need chain params
-    );
-    if (!messages) {
-      return {
+
+    // 🆕 T3: Delta 会话 —— 非 embedding、非 tools 的主 DAG 普通路径先 prepare。
+    //    handle===null → 不在 v1 范围（如无有效模板）→ 走现有无状态完整渲染；
+    //    options.skipSession（regenerate）→ 跳过 prepare，直接走现有无状态完整请求。
+    //    provider 内部自动重试复用同一份 prepared messages，不重复 prepare（设计 §5.3）。
+    let messages: ChatRequest['messages'] | null = null;
+    let handle: PromptSessionHandle | null = null;
+    let promptSessionRevision: number | undefined;
+    let promptRebased: boolean | undefined;
+    let promptRebaseReason: string | undefined;
+
+    if (!options?.skipSession) {
+      const prepared = await preparePromptSession({
+        saveId: this.saveId,
         agentId: config.agentId,
-        output: null,
-        rawResponse: '',
-        tokensUsed: 0,
-        cacheHit: false,
-        duration: 0,
-        error: `No template found for agent "${config.agentId}"`,
-      };
+        ctx: this.context,
+        configs: configsArr,
+        worldBooks: this.worldBooks,
+        presets: this.presets,
+        endpointId: config.apiEndpointId,
+        model: config.model || endpoint.defaultModel,
+        // T4 接线 ApiEndpoint.contextWindowTokens / AgentConfig.tailPrompt（设计 §9）
+      });
+      if (prepared.handle) {
+        messages = prepared.messages;
+        handle = prepared.handle;
+        this.sessionHandles.set(config.agentId, prepared.handle);
+        promptSessionRevision = prepared.handle.revision;
+        promptRebased = prepared.rebased;
+        promptRebaseReason = prepared.rebaseReason;
+      }
+    }
+
+    if (!messages) {
+      // 无状态路径（不在 v1 范围 / regenerate skipSession）—— 现有完整渲染
+      messages = await buildAgentMessagesAsync(
+        config.agentId,
+        this.context,
+        configsArr,
+        this.worldBooks,
+        this.presets,
+        undefined, // localParams: main pipeline agents don't need chain params
+      );
+      if (!messages) {
+        return {
+          agentId: config.agentId,
+          output: null,
+          rawResponse: '',
+          tokensUsed: 0,
+          cacheHit: false,
+          duration: 0,
+          error: `No template found for agent "${config.agentId}"`,
+        };
+      }
     }
 
     const client = new AgentClient({
@@ -535,13 +599,35 @@ export class AgentOrchestrator {
 
     // 🆕 流式路径: 如果配置了 streamCallbacks，使用 chatStream() 逐块输出
     if (config.streamCallbacks) {
-      result = await this.callAgentStreaming(client, request, config);
+      result = await this.callAgentStreaming(client, request, config, handle);
     } else {
       result = await client.chat(request, config.abortSignal);
+      // 🆕 T3: 非流式成功 → complete；最终 error/abort → invalidate（设计 §4 / §8.1）。
+      if (handle) {
+        if (result.error) {
+          invalidatePromptSession(handle);
+          this.sessionHandles.delete(config.agentId);
+        } else {
+          completePromptSession(handle, {
+            rawResponse: result.rawResponse,
+            promptTokens: result.promptTokens,
+            cacheHitTokens: result.cacheHitTokens,
+            cacheMissTokens: result.cacheMissTokens,
+            completionTokens: result.completionTokens,
+          });
+        }
+      }
     }
 
-    // 🆕 注入请求消息供 debug 面板使用
+    // 🆕 注入请求消息供 debug 面板使用 —— 记录**实际 wire messages**（session 路径 =
+    //    prepare 返回的那份，而非规范化前的内部数组；无状态路径 = 现有完整渲染结果）。
     result.requestMessages = messages;
+
+    // 🆕 T3 诊断（设计 §11.2）：promptSessionRevision / promptRebased+reason；
+    //    promptTokens 已由 agent-client 解析进 result（若有）。
+    if (promptSessionRevision !== undefined) result.promptSessionRevision = promptSessionRevision;
+    if (promptRebased !== undefined) result.promptRebased = promptRebased;
+    if (promptRebaseReason !== undefined) result.promptRebaseReason = promptRebaseReason;
 
     // 🆕 Story 正文救援：修正"正文吞进思维链"(raw 空) 与"思维链泄漏进正文"(raw 含前导思维链) 两类 AI 缺陷
     if (config.agentId === 'story') {
@@ -559,6 +645,7 @@ export class AgentOrchestrator {
     client: AgentClient,
     request: ChatRequest,
     config: AgentConfig,
+    handle: PromptSessionHandle | null = null,
   ): Promise<AgentResult> {
     const startTime = Date.now();
     const callbacks = config.streamCallbacks!;
@@ -583,6 +670,18 @@ export class AgentOrchestrator {
               try {
                 callbacks.onComplete(streamResult);
               } finally {
+                // 🆕 T3: 流式只在形成成功结果后 complete（设计 §4 / §8.1「成功后才推进」）。
+                //    provider 内部自动重试成功也走这里 —— 复用同一 prepared messages，不重复 prepare。
+                if (handle) {
+                  completePromptSession(handle, {
+                    rawResponse: streamResult.fullText,
+                    // 流式 StreamCallbacks 不携带 prompt_tokens（agent-client 现状）→ undefined 不猜
+                    promptTokens: undefined,
+                    cacheHitTokens: streamResult.cacheHitTokens,
+                    cacheMissTokens: streamResult.cacheMissTokens,
+                    completionTokens: streamResult.completionTokens,
+                  });
+                }
                 resolve({
                   agentId: config.agentId,
                   output: streamResult.fullText,
@@ -601,6 +700,11 @@ export class AgentOrchestrator {
               try {
                 callbacks.onError(error);
               } finally {
+                // 🆕 T3: 流式最终错误/取消 → invalidate（设计 §4 / §8.1「失败、取消、流中断」）。
+                if (handle) {
+                  invalidatePromptSession(handle);
+                  this.sessionHandles.delete(config.agentId);
+                }
                 resolve({
                   agentId: config.agentId,
                   output: null,
@@ -616,6 +720,11 @@ export class AgentOrchestrator {
           config.abortSignal,
         )
         .catch((error: unknown) => {
+          // 🆕 T3: promise reject（onError 回调自身抛 / finally 里出事）→ invalidate。
+          if (handle) {
+            invalidatePromptSession(handle);
+            this.sessionHandles.delete(config.agentId);
+          }
           resolve({
             agentId: config.agentId,
             output: null,
