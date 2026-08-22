@@ -217,6 +217,10 @@ docs/
 ├── planning/2026-08-20-api-rpm-limiter-design.md
 │                                       # 🆕 API 凭据级 RPM 限流设计 ← 改 API 请求发送/限流/等待提示必读
 │                                       #    同端点 + Key 全请求面共桶；达限暂停 60 秒 + 全局倒计时 + 自动续行
+├── planning/2026-08-22-llm-assembly-delta-architecture-scratch.md
+│                                       # 🆕 LLM 组装层 Delta 会话架构 ← 改主 DAG prompt 组装/缓存会话必读
+├── planning/2026-08-22-llm-assembly-delta-implementation-plan.md
+│                                       # Delta 会话 T0-T5 实施顺序、跨环境交接与验收计划
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
