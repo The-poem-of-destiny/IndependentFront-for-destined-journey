@@ -6,14 +6,27 @@ import {
   AGENT_TEMPLATES,
   getAgentTemplate,
   buildAgentMessages,
+  buildAgentMessagesAsync,
   REGISTERED_AGENT_IDS,
   defaultHistoryLayers,
   defaultHistorySlice,
   buildEjsHistoryText,
 } from './agent-templates';
 import { getDefaultTemplate } from './placeholder-registry';
+import { hasDynamic } from './worldbook-loader';
 import type { AgentContext, AgentConfig, AgentPreset, WorldBook, WorldBookEntry } from './types';
 import { createDefaultCharacterState } from './types';
+import {
+  FIXTURE_SAVE_ID,
+  fixtureCharacters,
+  fixtureItem,
+  fixtureNpc,
+  fixturePlayer,
+  fixtureSkill,
+  fixtureTranscript,
+  fixtureWorldBook,
+  fixtureWorldBookEntry,
+} from './fixtures/prompt-session/prompt-session-fixture';
 
 // ========== Test Context ==========
 
@@ -1178,5 +1191,138 @@ describe('buildAgentMessages × EJS 回退诊断出口', () => {
     });
     const cfg = makeCfg('story', { worldBookIds: ['wb_broken'] });
     expect(() => buildAgentMessages('story', ctx, [cfg], [brokenBook()])).not.toThrow();
+  });
+});
+
+// ========== LLM 组装层 Delta 会话 T0：首轮契约钉住 ==========
+
+/**
+ * 见 docs/planning/2026-08-22-llm-assembly-delta-implementation-plan.md §4（T0：钉现状契约）。
+ * T0 不改生产行为 —— 这里把「现状」钉成契约，供 T1–T4 在改装配前对齐：
+ * 首轮 `buildAgentMessagesAsync` 只产一条 system 消息，没有 user 消息（触发由 AgentClient 补）。
+ * 数据一律来自匿名 fixture（`fixtures/prompt-session/`），不碰真实导出/世界书/API Key。
+ */
+describe('buildAgentMessagesAsync — 首轮只产一条 system 消息（Delta T0）', () => {
+  function transcriptHistory(): AgentContext['history'] {
+    return fixtureTranscript.map((m, i) => ({
+      id: `fixture-msg-${i}`,
+      timestamp: 0,
+      role: m.role,
+      content: m.content,
+    }));
+  }
+
+  it('story 首轮只产一条 system 消息（后续 delta 会话要拿它当 baseline）', async () => {
+    const ctx = makeContext({
+      userInput: fixtureTranscript[0].content,
+      history: transcriptHistory(),
+      characters: fixtureCharacters,
+    });
+    const cfg = makeCfg('story', { worldBookIds: [fixtureWorldBook.id] });
+    const messages = await buildAgentMessagesAsync('story', ctx, [cfg], [fixtureWorldBook]);
+    expect(messages).not.toBeNull();
+    expect(messages).toHaveLength(1);
+    expect(messages![0].role).toBe('system');
+    expect(messages![0].content.length).toBeGreaterThan(0);
+    // 首轮等价：动态世界书已被预渲染进同一条 system（不是漏渲染成裸占位符）
+    expect(messages![0].content).toContain('雨夜旅店的檐下挂着');
+  });
+
+  it('memory_recall 首轮同样只产一条 system 消息', async () => {
+    const ctx = makeContext({
+      userInput: fixtureTranscript[0].content,
+      history: transcriptHistory(),
+      characters: fixtureCharacters,
+    });
+    const cfg = makeCfg('memory_recall', { systemPrompt: 'Memory recall system' });
+    const messages = await buildAgentMessagesAsync('memory_recall', ctx, [cfg]);
+    expect(messages).not.toBeNull();
+    expect(messages).toHaveLength(1);
+    expect(messages![0].role).toBe('system');
+  });
+});
+
+// ========== LLM 组装层 Delta 会话 T0：动态世界书每 pass 求值一次 ==========
+
+describe('buildAgentMessagesAsync — 动态世界书每个 assembly pass 只求值一次（Delta T0）', () => {
+  // fixture 的动态条目自带 `旅店灯盏` 计数器（`setMessageVar` +1）。
+  // base=N 时求值一次 → draft=N+1；求值两次会变 N+2 —— 差值把「每 pass 恰好一次」钉死。
+  it('一个 assembly pass 内动态条目恰好求值一次（0 → 1，不是 2）', async () => {
+    const drafts = new Map<string, { base: Record<string, any>; draft: Record<string, any> }>();
+    const ctx = makeContext({
+      userInput: fixtureTranscript[0].content,
+      variables: { sys: { 旅店灯盏: 0 } },
+      ejsVarsDrafts: drafts,
+    });
+    const cfg = makeCfg('story', {
+      worldBookIds: [fixtureWorldBook.id],
+      ejsVarsCommit: true,
+    });
+    const messages = await buildAgentMessagesAsync('story', ctx, [cfg], [fixtureWorldBook]);
+    expect(messages).not.toBeNull();
+    // 恰好一次：0 → 1（若求值两次 draft 会变 2）
+    expect(drafts.get('story')!.base.旅店灯盏).toBe(0);
+    expect(drafts.get('story')!.draft.旅店灯盏).toBe(1);
+    // 渲染结果消费了这一次求值（正文显示 1 盏，不是 2 盏）
+    expect(messages![0].content).toContain('雨夜旅店的檐下挂着1盏灯');
+    expect(messages![0].content).not.toContain('雨夜旅店的檐下挂着2盏灯');
+  });
+
+  it('第二次 assembly pass 从干净 base 重新计数，同样恰好一次', async () => {
+    const drafts = new Map<string, { base: Record<string, any>; draft: Record<string, any> }>();
+    const ctx = makeContext({
+      userInput: fixtureTranscript[2].content,
+      variables: { sys: { 旅店灯盏: 0 } },
+      ejsVarsDrafts: drafts,
+    });
+    const cfg = makeCfg('story', {
+      worldBookIds: [fixtureWorldBook.id],
+      ejsVarsCommit: true,
+    });
+    const messages = await buildAgentMessagesAsync('story', ctx, [cfg], [fixtureWorldBook]);
+    expect(messages).not.toBeNull();
+    expect(messages![0].content).toContain('雨夜旅店的檐下挂着1盏灯');
+    // 每一 pass 独立求值一次（不累积、不跨 pass 泄漏）
+    expect(drafts.get('story')!.draft.旅店灯盏).toBe(1);
+  });
+});
+
+// ========== LLM 组装层 Delta 会话 T0：fixture 自身契约 ==========
+
+/**
+ * fixture 是 T1–T4 的公共样本数据，它的**结构**本身就是契约：
+ * 两角色 / 一物品 / 一技能 / 一条动态世界书 / 三组消息 —— 少一个、多一个、或「动态」不再动态，
+ * 后续 delta 测试都会在错误的样本上对错答案。这里把结构钉死；顺带让 fixture 的命名导出全部被消费
+ * （否则 knip 棘轮会把它们当新增死导出挂红，见 scripts/knip-ratchet.mjs）。
+ */
+describe('prompt-session fixture 自身契约（Delta T0）', () => {
+  it('恰好两个虚构角色：player + npc，同属同一虚构存档', () => {
+    expect(fixtureCharacters).toEqual([fixturePlayer, fixtureNpc]);
+    expect(fixturePlayer.type).toBe('player');
+    expect(fixtureNpc.type).toBe('npc');
+    expect(fixturePlayer.saveId).toBe(FIXTURE_SAVE_ID);
+    expect(fixtureNpc.saveId).toBe(FIXTURE_SAVE_ID);
+  });
+
+  it('一个物品 + 一个技能', () => {
+    expect(fixtureItem.name).toBe('薄荷油灯');
+    expect(fixtureItem.quantity).toBeGreaterThan(0);
+    expect(fixtureSkill.name).toBe('夜行');
+    expect(fixtureSkill.type).toBe('passive');
+  });
+
+  it('世界书条目是「动态」的（含 EJS，命中 hasDynamic）—— 每 pass 求值一次契约的前提', () => {
+    expect(hasDynamic(fixtureWorldBookEntry.content)).toBe(true);
+    expect(fixtureWorldBook.entries).toEqual([fixtureWorldBookEntry]);
+  });
+
+  it('三组 user/assistant 消息（六条，严格交替）', () => {
+    expect(fixtureTranscript).toHaveLength(6);
+    for (let i = 0; i < fixtureTranscript.length; i += 2) {
+      expect(fixtureTranscript[i].role).toBe('user');
+      expect(fixtureTranscript[i + 1].role).toBe('assistant');
+    }
+    // 正文与角色自洽（不是随便凑的数）：assistant 说话人是小铃
+    expect(fixtureTranscript[1].content).toContain('小铃');
   });
 });
