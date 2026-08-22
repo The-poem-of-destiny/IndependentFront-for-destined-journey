@@ -1813,6 +1813,11 @@ export interface AgentResult {
   cacheMissTokens?: number;
   /** 🆕 输出 token 数（usage.completion_tokens） */
   completionTokens?: number;
+  /**
+   * 🆕 LLM 组装层 Delta 会话（T2）: 本次请求的 prompt token 数（usage.prompt_tokens）。
+   * provider 不返回该字段时为 undefined —— 主动预算判断据此「不猜」（设计 §8.3）。
+   */
+  promptTokens?: number;
   /** 🆕 模型停止原因（stop=正常结束 / length=输出截断 / tool_calls=工具调用）—— 大纲诊断等用它区分「截断」与「格式坏」 */
   finishReason?: string;
   duration: number; // ms

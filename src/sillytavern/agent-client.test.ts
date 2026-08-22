@@ -2,7 +2,13 @@
  * agent-client.ts — API 客户端测试
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { AgentClient, buildUserId, parseUserId, USER_PLACEHOLDER_CONTENT } from './agent-client';
+import {
+  AgentClient,
+  buildUserId,
+  ensureUserMessage,
+  parseUserId,
+  USER_PLACEHOLDER_CONTENT,
+} from './agent-client';
 import type { ApiEndpoint } from './types';
 
 function makeEndpoint(overrides: Partial<ApiEndpoint> = {}): ApiEndpoint {
@@ -169,6 +175,30 @@ describe('AgentClient', () => {
       expect(result.cacheHit).toBe(true);
     });
 
+    it('🆕 Delta T2: 应解析 usage.prompt_tokens 到 AgentResult.promptTokens', async () => {
+      const mockRes = {
+        choices: [{ message: { content: 'ok' } }],
+        usage: { total_tokens: 12345, prompt_tokens: 12000, completion_tokens: 345 },
+      };
+      globalThis.fetch = mockFetch(mockRes);
+
+      const result = await client.chat({ messages: [{ role: 'user', content: 'test' }] });
+      expect(result.promptTokens).toBe(12000);
+    });
+
+    it('🆕 Delta T2: provider 不返回 prompt_tokens 时 promptTokens 为 undefined（不猜）', async () => {
+      // 某些 provider 只在流式返回 usage、或完全不报 prompt_tokens —— 缺省必须保持 undefined，
+      // 不能用 `?? 0` 把「没报」伪装成「0」（Delta 预算判断据此决定不猜）。
+      const mockRes = {
+        choices: [{ message: { content: 'ok' } }],
+        usage: { total_tokens: 10 },
+      };
+      globalThis.fetch = mockFetch(mockRes);
+
+      const result = await client.chat({ messages: [{ role: 'user', content: 'test' }] });
+      expect(result.promptTokens).toBeUndefined();
+    });
+
     it('fetch 应带 user_id 参数（DeepSeek 缓存隔离）', async () => {
       const mockFn = mockFetch({
         choices: [{ message: { content: 'ok' } }],
@@ -220,6 +250,23 @@ describe('AgentClient', () => {
 
     it('常量自身非空（换占位词时的护栏）', () => {
       expect(USER_PLACEHOLDER_CONTENT.trim()).not.toBe('');
+    });
+
+    it('🆕 Delta T2: ensureUserMessage 是幂等纯函数（模块级导出，T3 复用）', () => {
+      // 全 system → 追加「继续」user
+      expect(ensureUserMessage([{ role: 'system', content: 'sys' }])).toEqual([
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: USER_PLACEHOLDER_CONTENT },
+      ]);
+      // 已有 user → 原样返回（幂等，不重复追加）
+      const withUser = [{ role: 'user', content: 'hi' }];
+      expect(ensureUserMessage(withUser)).toBe(withUser);
+      // 空列表 → 原样返回
+      expect(ensureUserMessage([])).toEqual([]);
+      // 不修改调用方数组（同一份 messages 可复用为下一轮前缀）
+      const original = [{ role: 'system', content: 'sys' }];
+      ensureUserMessage(original);
+      expect(original).toEqual([{ role: 'system', content: 'sys' }]);
     });
 
     it('已有 user 消息时不追加、不改写', async () => {
