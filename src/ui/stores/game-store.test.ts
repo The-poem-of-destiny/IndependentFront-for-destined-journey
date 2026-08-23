@@ -42,6 +42,13 @@ vi.mock('@engine/attribute-allocation', () => ({
   allocateAttributePoint: allocateAttributePointMock,
 }));
 
+// 🔴 2026-08-23 真机 bug：快照回退/重开战斗后必须失效 prompt session（delta transcript
+// 残留旧分支正文）。这里替身掉 invalidatePromptSession，断言三个回退点都把它叫到。
+const invalidatePromptSessionMock = vi.hoisted(() => vi.fn());
+vi.mock('@engine/prompt-session-assembler', () => ({
+  invalidatePromptSession: invalidatePromptSessionMock,
+}));
+
 // ===== 辅助 =====
 
 const SAVE_ID = 'save-refresh-test';
@@ -349,6 +356,7 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     }
     await initializeDatabase();
     store = makeStore();
+    invalidatePromptSessionMock.mockClear();
   });
 
   /** 种入两回合：存档当前在 turn2，并有一张 turn1 快照(上一轮状态) */
@@ -435,6 +443,8 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     expect(store.saveProfile?.fp).toBe(5);
     // totalTurns 对齐到快照 turn
     expect(store.activeSave?.metadata?.totalTurns).toBe(1);
+    // 🔴 2026-08-23 bug：回退后必须失效该存档 prompt session（防 delta transcript 残留旧分支）
+    expect(invalidatePromptSessionMock).toHaveBeenCalledWith(SAVE_ID);
   });
 
   it('rollbackOneTurn: 战斗中拒绝回退', async () => {
@@ -486,6 +496,8 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     // 状态恢复到 turn1 快照
     expect(store.characters.find((c) => c.id === 'hero')?.hp).toBe(80);
     expect(store.activeSave?.metadata?.totalTurns).toBe(1);
+    // 🔴 2026-08-23 bug：恢复快照后必须失效该存档 prompt session
+    expect(invalidatePromptSessionMock).toHaveBeenCalledWith(SAVE_ID);
   });
 
   // 🔴 2026-08-08 真机：恢复后内存角色必须**整表替换**。refreshFromDb 的角色同步是
@@ -813,6 +825,7 @@ describe('M2 v3 战斗接线', () => {
     );
 
     let restarted = false;
+    invalidatePromptSessionMock.mockClear();
     store.setCombatCoordinator({
       abandon: () => {},
       preSnapshotId: 'snap-pre-combat',
@@ -830,6 +843,8 @@ describe('M2 v3 战斗接线', () => {
     expect(store.isInCombat).toBe(false);
     expect(store.characters.find((c) => c.id === 'hero')?.hp).toBe(80); // 快照恢复
     expect(store.activeSave?.metadata?.totalTurns).toBe(2); // totalTurns 对齐快照 turn
+    // 🔴 2026-08-23 bug：重开战斗（恢复开战前快照）后必须失效该存档 prompt session
+    expect(invalidatePromptSessionMock).toHaveBeenCalledWith(SAVE_ID);
   });
 
   it('restartCombat：没有 pre-combat 快照时拒绝（不静默）', async () => {
