@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   API_KEYS_MIGRATED_FLAG,
+  apiEndpointToEntry,
+  apiEntryToEndpoint,
   migrateApiKeysToDexie,
   type StoredApiEntry,
 } from './api-key-migration';
@@ -102,5 +104,48 @@ describe('API key migration', () => {
 
     expect(outcome.status).toBe('already-migrated');
     expect(outcome.entries[0].apiKey).toBe('sk-from-indexeddb');
+  });
+});
+
+describe('contextWindowTokens —— ApiEntry/ApiEndpoint 映射保留（T4）', () => {
+  it('apiEntryToEndpoint 保留正整数 contextWindowTokens', () => {
+    const endpoint = apiEntryToEndpoint({ ...entry(), contextWindowTokens: 128000 });
+    expect(endpoint.contextWindowTokens).toBe(128000);
+  });
+
+  it('apiEntryToEndpoint 缺省 contextWindowTokens → undefined（不做预算判断）', () => {
+    const endpoint = apiEntryToEndpoint(entry());
+    expect(endpoint.contextWindowTokens).toBeUndefined();
+  });
+
+  it('apiEndpointToEntry 反向映射保留 endpoint.contextWindowTokens', () => {
+    const stored = apiEndpointToEntry({
+      id: 'ep-1',
+      name: 'Primary',
+      provider: 'chat',
+      baseUrl: 'https://api.example.test',
+      apiKey: 'sk-x',
+      defaultModel: 'model-1',
+      models: ['model-1'],
+      timeout: 60000,
+      contextWindowTokens: 8192,
+    });
+    expect(stored.contextWindowTokens).toBe(8192);
+  });
+
+  it('migrate 落库时把 contextWindowTokens 一起写进 Dexie（非密钥字段跟着走）', async () => {
+    const settings: Record<string, unknown> = {
+      apiPool: [{ ...entry(), contextWindowTokens: 64000 }],
+    };
+    const { db, rows } = fakeDb();
+
+    const outcome = await migrateApiKeysToDexie({
+      settings,
+      persistSettings: vi.fn(() => true),
+      db,
+    });
+
+    expect(outcome.status).toBe('migrated');
+    expect(rows.get('ep-1')?.contextWindowTokens).toBe(64000);
   });
 });

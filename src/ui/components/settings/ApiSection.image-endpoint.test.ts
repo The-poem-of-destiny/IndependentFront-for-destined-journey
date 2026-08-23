@@ -19,8 +19,10 @@ import seamsSource from '@ui/lib/scene-image-seams.ts?raw';
 describe('出图端点：只填名称与 API Key', () => {
   it('「主链接」与「模型」两格对出图端点隐藏', () => {
     expect(source).toContain('const isImageEntry');
-    // 两格各一个 v-if；隐藏之后要有一句话交代地址去哪了，否则看起来像功能缺了
-    expect(source.match(/v-if="!isImageEntry"/g) ?? []).toHaveLength(2);
+    // 两格各一个 v-if；隐藏之后要有一句话交代地址去哪了，否则看起来像功能缺了。
+    // 🔴 4 处（2026-08-22 T4）：主链接 / 模型 / contextWindowTokens 输入格 / 它的说明行 ——
+    //    后两处是 Delta 会话新增的可选配置，对出图端点同样无意义，故一并隐藏。
+    expect(source.match(/v-if="!isImageEntry"/g) ?? []).toHaveLength(4);
     expect(source).toContain('fixed-endpoint-hint');
     expect(source).toContain('NAI_IMAGE_API_BASE');
   });
@@ -44,5 +46,16 @@ describe('出图端点：只填名称与 API Key', () => {
     // 与 scene-image-seams.test.ts 的行为断言互补：那边证明「没传」，
     // 这边证明「源码里没有这条读法」——有人加回来时两处会同时红
     expect(seamsSource).not.toContain('endpoint.baseUrl');
+  });
+
+  it('🆕 T4：contextWindowTokens 是聊天/embedding 端点的可选数字字段', () => {
+    // 高级区只在非出图端点显示（出图端点没有聊天 prompt，这一格无意义）
+    expect(source).toContain('apiForm.contextWindowTokens');
+    expect(source).toContain('type="number"');
+    expect(source).toContain('min="1"');
+    expect(source).toContain('v-if="!isImageEntry"');
+    // 保存时归一化：正整数才写，坏值落 undefined
+    expect(source).toContain('normalizeContextWindowTokens(apiForm.contextWindowTokens)');
+    expect(source).toContain('Number.isSafeInteger');
   });
 });

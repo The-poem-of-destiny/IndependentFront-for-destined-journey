@@ -18,9 +18,39 @@ type InternalAgentResult = AgentResult & { _toolCalls?: any[] };
 
 /**
  * 全 system 消息时补的那条 user 消息的内容 —— **不许改成空串**，理由见 `ensureUserMessage`。
- * 导出仅供单测断言「它非空」，生产代码只有 `ensureUserMessage` 一个消费者。
+ * 导出仅供单测断言「它非空」；Delta 会话（T2）首轮 user 也以它为「继续」触发开头。
  */
 export const USER_PLACEHOLDER_CONTENT = '继续';
+
+/**
+ * 确保 messages 至少包含一条**非空** user 消息（幂等纯函数）。
+ *
+ * `buildAgentMessages` 对**每一个** Agent 都只产出一条 system 消息
+ * （agent-templates.ts 末尾 `return [{ role: 'system', content: resolved }]`，
+ * 玩家输入与历史全拼进那一条里），所以这个补丁不是边缘路径 —— 它落在每一次请求上。
+ *
+ * 修复(2026-07-30): 部分 API（如 ollama.com）当 messages 只有 system 消息时
+ * 返回 finish_reason="load" 和空内容（模型不加载），导致所有 agent 空回。
+ * 当 messages 全是 system 时追加一条 user 消息以触发正常生成。
+ *
+ * 🔴 修复(2026-08-13): 追加的这条**必须有内容**，`content: ''` 会打死 Gemini 系网关。
+ * OpenAI→Gemini 的转换层把 system 收进 `system_instruction`、其余收进 `contents`，
+ * 空文本那条在转换中被丢掉 → `contents` 空 → `HTTP 400: contents field is required`。
+ * 真机症状（gcli.ggchan.dev + gemini-3-flash-preview）：第 0 轮 memory_recall 400，
+ * 而 story stage 的 `waitFor` 含 memory_recall、`stageDependenciesMet` 要求依赖全部无
+ * error，于是**整轮正文被跳过、界面一片空白**。
+ * 占位内容取「继续」而非标点：中文语料下最中性、且是常量（不随轮次变化），
+ * 不破坏 DeepSeek KVCache 的静态前缀命中。
+ *
+ * 幂等：已含 user 消息的列表原样返回（不重复追加）；空列表原样返回。
+ * 2026-08-22（T2）从 private 方法提为模块级导出，`prompt-session-assembler` 与 T3 也复用。
+ */
+export function ensureUserMessage(messages: ChatRequest['messages']): ChatRequest['messages'] {
+  if (messages.length === 0) return messages;
+  const hasUser = messages.some((m) => m.role === 'user');
+  if (hasUser) return messages;
+  return [...messages, { role: 'user', content: USER_PLACEHOLDER_CONTENT }];
+}
 
 // ========== Types ==========
 
@@ -149,13 +179,6 @@ export class AgentClient {
    * 占位内容取「继续」而非标点：中文语料下最中性、且是常量（不随轮次变化），
    * 不破坏 DeepSeek KVCache 的静态前缀命中。
    */
-  private ensureUserMessage(messages: ChatRequest['messages']): ChatRequest['messages'] {
-    if (messages.length === 0) return messages;
-    const hasUser = messages.some((m) => m.role === 'user');
-    if (hasUser) return messages;
-    return [...messages, { role: 'user', content: USER_PLACEHOLDER_CONTENT }];
-  }
-
   /**
    * 发送 chat completion 请求（非 agentic 路径）
    * @returns AgentResult — 即使失败也返回带 error 字段的结果（不抛异常）
@@ -705,7 +728,7 @@ export class AgentClient {
   private buildRequestBody(request: ChatRequest, stream: boolean): Record<string, any> {
     const body: Record<string, any> = {
       model: request.model || this.endpoint.defaultModel,
-      messages: this.ensureUserMessage(request.messages),
+      messages: ensureUserMessage(request.messages),
       temperature: request.temperature ?? 0.7,
       // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
       // 2026-08-08: 兜底 16384 → 65536（全 Agent 输出上限整体拉高，与 AGENT_SETTINGS_DEFAULTS 对齐）
@@ -829,6 +852,11 @@ export class AgentClient {
       const cacheHitTokens: number = data.usage?.prompt_cache_hit_tokens ?? 0;
       const cacheMissTokens: number = data.usage?.prompt_cache_miss_tokens ?? 0;
       const completionTokens: number = data.usage?.completion_tokens ?? 0;
+      // 🆕 LLM 组装层 Delta 会话（T2）: prompt token 数（usage.prompt_tokens）。
+      // provider 不返回该字段时保持 undefined —— 主动预算判断据此「不猜」（设计 §8.3），
+      // 不能用 `?? 0`（0 与「没报」长得一样，会把「不猜」静默变成「猜了个 0」）。
+      const promptTokens: number | undefined =
+        typeof data.usage?.prompt_tokens === 'number' ? data.usage.prompt_tokens : undefined;
 
       // 提取 tool_calls（如果存在）
       const toolCalls = message?.tool_calls;
@@ -849,6 +877,7 @@ export class AgentClient {
         cacheHitTokens,
         cacheMissTokens,
         completionTokens,
+        promptTokens,
         finishReason,
         duration: 0,
         _toolCalls: toolCalls,

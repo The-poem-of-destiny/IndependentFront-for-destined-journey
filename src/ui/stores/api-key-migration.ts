@@ -20,6 +20,8 @@ export interface StoredApiEntry {
    */
   apiType: 'chat' | 'embedding' | 'image';
   enableThinking?: boolean;
+  /** 🆕 2026-08-22 Delta 会话（T4）：上下文窗口 token 上限（非密钥字段，跟着映射走） */
+  contextWindowTokens?: number;
 }
 
 export type ApiKeyMigrationOutcome =
@@ -80,6 +82,13 @@ function readEntries(settings: Record<string, unknown>): StoredApiEntry[] {
           : [],
         apiType: normalizeApiType(entry.apiType),
         enableThinking: entry.enableThinking === true,
+        // 🆕 2026-08-22：contextWindowTokens 只认正整数，其余一律 undefined（不做主动预算判断）
+        contextWindowTokens:
+          typeof entry.contextWindowTokens === 'number' &&
+          Number.isSafeInteger(entry.contextWindowTokens) &&
+          entry.contextWindowTokens > 0
+            ? entry.contextWindowTokens
+            : undefined,
       };
     });
 }
@@ -95,6 +104,7 @@ export function apiEntryToEndpoint(entry: StoredApiEntry): ApiEndpoint {
     models: [...entry.models],
     timeout: 60000,
     enableThinking: entry.enableThinking,
+    contextWindowTokens: entry.contextWindowTokens,
   };
 }
 
@@ -110,6 +120,7 @@ export function apiEndpointToEntry(endpoint: ApiEndpoint, local?: StoredApiEntry
     models: local?.models?.length ? [...local.models] : [...(endpoint.models ?? [])],
     apiType: local?.apiType ?? normalizeApiType(endpoint.provider),
     enableThinking: local?.enableThinking ?? endpoint.enableThinking ?? false,
+    contextWindowTokens: local?.contextWindowTokens ?? endpoint.contextWindowTokens,
   };
 }
 

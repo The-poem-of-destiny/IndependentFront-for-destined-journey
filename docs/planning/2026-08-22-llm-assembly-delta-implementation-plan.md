@@ -1,11 +1,46 @@
 # LLM 组装层 Delta 会话实施计划
 
-> **状态**：待实施（2026-08-22）
+> **状态**：已完成（2026-08-23）
 >
 > **设计真源**：[`2026-08-22-llm-assembly-delta-architecture-scratch.md`](2026-08-22-llm-assembly-delta-architecture-scratch.md)
 >
 > **适用对象**：使用不同操作系统、编辑器、AI 工具或纯人工流程的开发者。本文不要求任何
 > Codex/Claude skill、浏览器会话、私有内容仓或远端 API 凭据。
+
+## 0. 实际执行情况（2026-08-23 补记）
+
+> 本计划已按 §3 顺序完成 T0–T4 与 T5 的文档 + 全量 gates 部分，共 **5 个提交**（19535c9 →
+> e116051，分支 `feat/prompt-delta-session`）。生产 usage 运营验收按约定留给仓库所有者，
+> 不在本计划执行范围内。以下逐项记录与原计划的偏差；**无偏差的也写明**。
+
+| 任务 | 提交                                                               | 实际做法                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 与计划偏差                                                                                                                                                                                                                                                                                                                                        |
+| ---- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T0   | `19535c9` test(prompt): pin baseline wire-message contract         | 新增 `src/sillytavern/fixtures/prompt-session/prompt-session-fixture.ts`（两虚构角色 + 一物品 + 一技能 + 一条动态世界书 + 三组消息），钉 `buildAgentMessagesAsync` 首轮只产一条 system 消息、AgentClient 补「继续」非空 user 触发、动态世界书每 assembly pass 只求值一次。**纯测试提交，不改生产行为**                                                                                                                                                                                                                                                                 | 额外加了「fixture 自身契约」测试：断言 fixture 的全部命名导出都被消费，否则 `scripts/knip-ratchet.mjs` 会把它们当新增死导出挂红 —— 计划 §4 未提这一步                                                                                                                                                                                             |
+| T1   | `9d88d9a` feat(prompt): add read-only state projection diff        | 新增 `prompt-state-projection.ts` + 测试：封闭 scope 联合（14 个）、`set/upsert/remove` + `rebase` 控制信号、按逻辑名字归一化 + 规范化内容深比较、固定排序字节稳定、NARRATIVE append cursor                                                                                                                                                                                                                                                                                                                                                                            | **无偏差**。计划的「三函数 interface」原样落地                                                                                                                                                                                                                                                                                                    |
+| T2   | `613f6a9` feat(prompt): add per-save per-agent prompt sessions     | 新增 `prompt-session-assembler.ts`（prepare/complete/invalidate 三入口 + `(saveId, agentId)` 内存态），`ensureUserMessage` 从 AgentClient 私有方法提为模块级导出纯函数，`AgentResult` 增 `promptTokens`，provider 不返回 `usage.prompt_tokens` 时保持 undefined                                                                                                                                                                                                                                                                                                        | 计划 §6 之外的**额外导出**：`agent-templates.ts` 的 `buildEjsPassContext` / `reportEjsFallback` 提为导出 —— assembler 每轮用同一个 EJS pass 单独求值动态世界书（投影的 `lore_dynamic`），并走与 `buildAgentMessagesAsync` 同一条回退诊断出口                                                                                                      |
+| T3   | `2d4027d` feat(prompt): wire main DAG chat/chatStream              | `callAgent` 非 embedding / 非 tools / 非 skipSession 时先 `preparePromptSession`；非流式成功 complete、最终 error/abort invalidate；流式只在 `onComplete` complete、`onError` + promise reject invalidate；provider retry 复用同一 prepared messages；`result.requestMessages` 记录实际 wire messages；`regenerateAgent` 先 `invalidatePromptSession(handle)` 再走现有无状态完整请求（`skipSession`）；`AgentResult` 增 `promptSessionRevision` / `promptRebased` / `promptRebaseReason` 三个诊断字段                                                                  | 计划 §11 建议的第 4 个提交「wire main DAG **and minimal settings**」实际拆成两个：`2d4027d` 只做核心接线（orchestrator + 诊断字段），**此时 `ApiEndpoint.contextWindowTokens` / `AgentConfig.tailPrompt` 尚未接线**（prepare 调用未传这两个字段），配置面留到 T4 的 `e116051` 才补传                                                              |
+| T4   | `e116051` feat(prompt): add minimal settings and lifecycle cleanup | `types.ts` 增 `ApiEndpoint.contextWindowTokens?` / `AgentConfig.tailPrompt?`；`agent-settings.ts` / `settings-store.ts` / `api-key-migration.ts` 三处 store 字段与迁移；`AgentParamsCard.vue` 加单一 `tailPrompt` 文本框、`ApiSection.vue` 聊天/embedding endpoint 高级区加 `contextWindowTokens` 数字字段（只接受正整数，坏值归一化 undefined）；orchestrator 补传两个字段；`game-pipeline.ts` 的 endpoint 构建透传 `contextWindowTokens`（正整数校验）、`resolveAgentConfig` 读 `tailPrompt`（空白归一化 undefined）；新增 `invalidatePromptSessions()` 存档清理方法 | 清理点实际挂在 **`GamePage.vue` 的 `onUnmounted`**（离开游戏页 = 存档切换/销毁的既有清理点，与 `abort()` / sceneImages 清理并列），而**方法本体定义在 `game-pipeline.ts`**（per-save 实例方法，内部调 `invalidatePromptSession(saveId)` 只清本存档全部 agent 的 session）。计划 §8 只说「在存档销毁/切换的既有清理点 invalidate」，未指定挂哪一侧 |
+| T5   | —                                                                  | 文档同步（设计状态 / 计划状态 + 本节 / ARCHITECTURE / 引擎分册 / 两份 guide / CHANGELOG）+ 全量 gates                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | **生产 usage 验收未执行**（计划 §9 第三段），留给仓库所有者                                                                                                                                                                                                                                                                                       |
+
+**流式不携带 `prompt_tokens`（实施细节，影响预算判断对 story 不生效）**：story 是主 DAG 里唯一
+走 chatStream 的 Agent。流式路径的 `StreamCallbacks` 现状不携带 `usage.prompt_tokens`
+（orchestrator 在流式 `onComplete` 里传 `promptTokens: undefined`），因此 §8.3 的预算重基线判据
+对 story **不生效**（`lastPromptTokens` 恒为 undefined → `shouldRebaseForBudget` 恒 false）。
+story 只靠签名变化 / 失败 / 取消 / 重入 / 显式 invalidate 等其它判据重基线。这与设计 §10 停止条件
+「若某 provider 不返回 prompt token，只缺少主动预算判断」同口径：**不为它引入 tokenizer，也不伪造
+流式 token 数**。非流式主 DAG Agent（其余六个）不受影响，provider 返回 `prompt_tokens` 时预算
+判断照常工作。
+
+**全量验证**：`npm run gates` 八道全绿（typecheck / typecheck:vue / typecheck:tools / build /
+format:check / lint / knip:ratchet / test:run）；全量 **355 文件 9169 tests 通过 + 8 skipped**。
+
+**T5 文档同步范围**（本次改动）：
+
+- 设计真源状态改为「已实施（2026-08-23），真机运营验收待执行」，§7.2 加 rebase 控制信号实施注记。
+- `docs/ARCHITECTURE.md` 增 prompt-session-assembler 模块 seam。
+- `src/sillytavern/AGENTS.md` 架构图增两行条目。
+- `docs/reference/agent_system_prompt_guide.md` / `agent_template_guide.md` 各增 delta 会话说明。
+- `docs/CHANGELOG.md` 追加实施记录。
 
 ## 1. 交付范围
 

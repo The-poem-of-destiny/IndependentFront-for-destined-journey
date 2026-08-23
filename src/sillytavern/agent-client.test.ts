@@ -2,7 +2,13 @@
  * agent-client.ts — API 客户端测试
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { AgentClient, buildUserId, parseUserId, USER_PLACEHOLDER_CONTENT } from './agent-client';
+import {
+  AgentClient,
+  buildUserId,
+  ensureUserMessage,
+  parseUserId,
+  USER_PLACEHOLDER_CONTENT,
+} from './agent-client';
 import type { ApiEndpoint } from './types';
 
 function makeEndpoint(overrides: Partial<ApiEndpoint> = {}): ApiEndpoint {
@@ -169,6 +175,30 @@ describe('AgentClient', () => {
       expect(result.cacheHit).toBe(true);
     });
 
+    it('🆕 Delta T2: 应解析 usage.prompt_tokens 到 AgentResult.promptTokens', async () => {
+      const mockRes = {
+        choices: [{ message: { content: 'ok' } }],
+        usage: { total_tokens: 12345, prompt_tokens: 12000, completion_tokens: 345 },
+      };
+      globalThis.fetch = mockFetch(mockRes);
+
+      const result = await client.chat({ messages: [{ role: 'user', content: 'test' }] });
+      expect(result.promptTokens).toBe(12000);
+    });
+
+    it('🆕 Delta T2: provider 不返回 prompt_tokens 时 promptTokens 为 undefined（不猜）', async () => {
+      // 某些 provider 只在流式返回 usage、或完全不报 prompt_tokens —— 缺省必须保持 undefined，
+      // 不能用 `?? 0` 把「没报」伪装成「0」（Delta 预算判断据此决定不猜）。
+      const mockRes = {
+        choices: [{ message: { content: 'ok' } }],
+        usage: { total_tokens: 10 },
+      };
+      globalThis.fetch = mockFetch(mockRes);
+
+      const result = await client.chat({ messages: [{ role: 'user', content: 'test' }] });
+      expect(result.promptTokens).toBeUndefined();
+    });
+
     it('fetch 应带 user_id 参数（DeepSeek 缓存隔离）', async () => {
       const mockFn = mockFetch({
         choices: [{ message: { content: 'ok' } }],
@@ -222,6 +252,23 @@ describe('AgentClient', () => {
       expect(USER_PLACEHOLDER_CONTENT.trim()).not.toBe('');
     });
 
+    it('🆕 Delta T2: ensureUserMessage 是幂等纯函数（模块级导出，T3 复用）', () => {
+      // 全 system → 追加「继续」user
+      expect(ensureUserMessage([{ role: 'system', content: 'sys' }])).toEqual([
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: USER_PLACEHOLDER_CONTENT },
+      ]);
+      // 已有 user → 原样返回（幂等，不重复追加）
+      const withUser = [{ role: 'user', content: 'hi' }];
+      expect(ensureUserMessage(withUser)).toBe(withUser);
+      // 空列表 → 原样返回
+      expect(ensureUserMessage([])).toEqual([]);
+      // 不修改调用方数组（同一份 messages 可复用为下一轮前缀）
+      const original = [{ role: 'system', content: 'sys' }];
+      ensureUserMessage(original);
+      expect(original).toEqual([{ role: 'system', content: 'sys' }]);
+    });
+
     it('已有 user 消息时不追加、不改写', async () => {
       const mockFn = mockFetch(okRes);
       globalThis.fetch = mockFn;
@@ -236,6 +283,37 @@ describe('AgentClient', () => {
       const body = JSON.parse(mockFn.mock.calls[0][1].body);
       expect(body.messages).toHaveLength(2);
       expect(body.messages[1].content).toBe('玩家输入');
+    });
+
+    // 🔴 Delta T0：这条钉的是**实际发送的 wire 消息形态**（设计 §6.1 的 baseline）。
+    // `buildAgentMessages` 对每个 Agent 都只产出一条 system 消息，于是补位后的
+    // wire 序列恒为 `[system(完整 prompt), user(「继续」触发)]` —— Delta 会话把这份
+    // 序列当 baseline 保存，后续请求以前一次 wire 消息为前缀追加。形态一变，T1–T4 全要跟着改。
+    it('🔴 Delta T0: 全 system 请求的 wire 形态 = [system, user(继续)]', async () => {
+      const mockFn = mockFetch(okRes);
+      globalThis.fetch = mockFn;
+
+      await client.chat({
+        messages: [{ role: 'system', content: '首轮完整 system prompt' }],
+      });
+
+      const body = JSON.parse(mockFn.mock.calls[0][1].body);
+      expect(body.messages).toEqual([
+        { role: 'system', content: '首轮完整 system prompt' },
+        { role: 'user', content: USER_PLACEHOLDER_CONTENT },
+      ]);
+    });
+
+    // 🔴 Delta T0：补位必须**不改写调用方数组** —— Delta 会话要把同一份 messages
+    // 复用作下一轮的前缀（设计 §6.2），若 ensureUserMessage 就地 push，前缀会在重试/续轮时被污染。
+    it('🔴 Delta T0: 补位不修改调用方数组（消息可安全复用为下一轮前缀）', async () => {
+      const mockFn = mockFetch(okRes);
+      globalThis.fetch = mockFn;
+      const original = [{ role: 'system', content: 'sys' }];
+
+      await client.chat({ messages: original });
+
+      expect(original).toEqual([{ role: 'system', content: 'sys' }]);
     });
 
     it('空 messages 数组保持原样（不无中生有）', async () => {

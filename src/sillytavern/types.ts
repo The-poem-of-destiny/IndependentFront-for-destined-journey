@@ -344,6 +344,14 @@ export interface ApiEndpoint {
   timeout: number;
   /** DeepSeek 思考模式：设 true 后所有走这个 endpoint 的请求都会开启 thinking */
   enableThinking?: boolean;
+  /**
+   * 🆕 2026-08-22 Delta 会话（ADR 设计 §8.3 / §9）：该端点的上下文窗口 token 上限，
+   * 由使用者按实际 provider 配置；**不维护内置模型能力表，不按 model 名硬编码上限**。
+   * 缺省（undefined）= 不做主动预算判断（provider 不返回 prompt token 时同样不猜）。
+   * 消费方：prompt-session-assembler 的预算重基线公式
+   *   `lastPromptTokens + max(0, lastGrowthTokens) + agent.maxTokens >= contextWindowTokens`。
+   */
+  contextWindowTokens?: number;
 }
 
 /** API RPM 配额身份的调用侧引用；完整 Key 只参与内存中的指纹计算。 */
@@ -414,6 +422,13 @@ export interface AgentConfig {
   /** 🆕 Phase 9: 覆盖模板中的 fixedSystem（agent-config.json 的 systemPrompt 字段）。
    * 如果设置了此字段，buildAgentMessages 将优先使用它，而不是模板中的 fixedSystem+fixedExamples。 */
   systemPrompt?: string;
+  /**
+   * 🆕 2026-08-22 Delta 会话（设计 §9）：该 Agent 的**单一**用户自定义末尾指令。
+   * 每轮最新 user 消息末尾的一段文本（`tail_prompt` 区块），空值（undefined / 空白）
+   * = 不注入。消费方：prompt-session-assembler（签名材料 + 最末区块渲染）。
+   * 🔴 v1 只此一个 tail：不增加第二个 tail、优先级列表、条件表达式或 per-scope 配置。
+   */
+  tailPrompt?: string;
   /** 🆕 Phase 10: Custom template string with {{PLACEHOLDER}} references.
    *  If not set, the default template from placeholder-registry.ts is used. */
   template?: string;
@@ -1813,6 +1828,23 @@ export interface AgentResult {
   cacheMissTokens?: number;
   /** 🆕 输出 token 数（usage.completion_tokens） */
   completionTokens?: number;
+  /**
+   * 🆕 LLM 组装层 Delta 会话（T2）: 本次请求的 prompt token 数（usage.prompt_tokens）。
+   * provider 不返回该字段时为 undefined —— 主动预算判断据此「不猜」（设计 §8.3）。
+   */
+  promptTokens?: number;
+  /**
+   * 🆕 LLM 组装层 Delta 会话（T3）: 本次请求对应的 session revision（1-based；无 session /
+   * 排除路径 / regenerate 时 undefined）。诊断字段（设计 §11.2），只喂现有日志出口，无逻辑消费方。
+   */
+  promptSessionRevision?: number;
+  /** 🆕 LLM 组装层 Delta 会话（T3）: 本次请求是否发生重基线（设计 §11.2 诊断字段）。 */
+  promptRebased?: boolean;
+  /**
+   * 🆕 LLM 组装层 Delta 会话（T3）: 重基线原因（machine-readable token，设计 §11.2 诊断字段；
+   * 值为 prompt-session-assembler 的 `PromptSessionRebaseReason`）。
+   */
+  promptRebaseReason?: string;
   /** 🆕 模型停止原因（stop=正常结束 / length=输出截断 / tool_calls=工具调用）—— 大纲诊断等用它区分「截断」与「格式坏」 */
   finishReason?: string;
   duration: number; // ms

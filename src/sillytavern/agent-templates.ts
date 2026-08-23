@@ -278,7 +278,14 @@ function buildCapabilityInput(
   };
 }
 
-function buildEjsPassContext(
+/**
+ * 构造本次装配 pass 的 EJS 求值上下文（设计 D4/D5/D6）。
+ *
+ * 导出给 `prompt-session-assembler.ts`（Delta 会话 · T2）复用：该模块每轮要单独求值
+ * 动态世界书（作为投影的 `loreDynamic`），必须与 `buildAgentMessagesAsync` 用同一个
+ * pass 构造，保证「同一份 EJS pass 每轮至多求值一次」。
+ */
+export function buildEjsPassContext(
   agentId: string,
   ctx: AgentContext,
   config: AgentConfig | undefined,
@@ -310,8 +317,12 @@ function buildEjsPassContext(
  * 把 EJS 回退条目送进 `ctx.ejsFallback`（带上书名，光有 uid 在 UI 上没法读）。
  *
  * 永不抛：诊断出口挂了不能反过来打断提示装配。
+ *
+ * 导出给 `prompt-session-assembler.ts`（Delta 会话 · T2）复用：该模块自己走
+ * `buildEjsPassContext` + `prerenderWorldBookEntries` 求值动态世界书，回退诊断
+ * 与 `buildAgentMessagesAsync` 走同一条出口，避免复制实现。
  */
-function reportEjsFallback(
+export function reportEjsFallback(
   agentId: string,
   ctx: AgentContext,
   entries: Array<{ uid: number; error: string }>,

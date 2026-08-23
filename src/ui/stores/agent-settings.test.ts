@@ -172,6 +172,32 @@ describe('getAgentSettings —— 修正 1（合默认层）', () => {
     expect(got.systemPrompt).toBe('x');
     expect(got.historyLayers).toBeUndefined();
   });
+
+  it('🆕 T4：tailPrompt 两层都没给 → undefined（不注入，与 historyLayers 同纪律）', () => {
+    const got = getAgentSettings(bag(), 'story');
+    expect(got.tailPrompt).toBeUndefined();
+  });
+
+  it('🆕 T4：tailPrompt 覆写层有非空值就赢（哪怕默认层给了别的）', () => {
+    const b: Record<string, any> = { agents: { story: { tailPrompt: '请用简体中文作答' } } };
+    const layer: AgentDefaultsLayer = { story: { tailPrompt: '默认尾注' } };
+    expect(getAgentSettings(b, 'story', layer).tailPrompt).toBe('请用简体中文作答');
+  });
+
+  it('🆕 T4：tailPrompt 覆写层没给 → 落默认层', () => {
+    const layer: AgentDefaultsLayer = { story: { tailPrompt: '默认尾注' } };
+    expect(getAgentSettings(bag(), 'story', layer).tailPrompt).toBe('默认尾注');
+  });
+
+  it('🆕 T4：tailPrompt 空白（全空白串）归一化为 undefined —— 覆写层给空白 = 未配置', () => {
+    const b: Record<string, any> = { agents: { story: { tailPrompt: '   \n\t ' } } };
+    expect(getAgentSettings(b, 'story').tailPrompt).toBeUndefined();
+  });
+
+  it('🆕 T4：tailPrompt 默认层给空白同样归一化为 undefined（不产 tail 区块）', () => {
+    const layer: AgentDefaultsLayer = { story: { tailPrompt: '   ' } };
+    expect(getAgentSettings(bag(), 'story', layer).tailPrompt).toBeUndefined();
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════

@@ -46,6 +46,29 @@
 
 ---
 
+## Delta 会话：template 只控制首轮完整 prompt（2026-08-23 起）
+
+主 DAG 普通 chat/chatStream 接入 delta session 后，**template（及 story 预设）只控制首轮完整
+prompt 的拼装顺序与注入内容**。首轮 / 重基线仍由 `buildAgentMessages` 照你配置的 template 完整
+渲染；后续轮不再重新渲染模板，而是复用上一次实际 wire messages，只追加一条 user 增量消息
+（`<context_delta>` + `<turn_context>` + 可选 `tailPrompt`）。
+
+**后续轮的增量如何产生**：`prompt-session-assembler.ts` 会从当前 template / story 预设原文提取
+占位符，并按**代码固定的四类清单**（`prompt-session-assembler.ts` 内的分类表）决定每一类的去留：
+
+| 类别 | 占位符 | 后续回合行为 |
+| ---- | ------ | ------------ |
+| baseline-only | `SYS_PROMPT`、`LORE_BOOK`、`LORE_BOOK_STATIC` | 只存在于完整 baseline；原文或可见配置变化时重基线 |
+| projection-backed | `CHARACTER_STATE`、`INVENTORY`、`SKILL_STATE`、`QUEST_STATE`、`GAME_TIME`、`MAP_CONTEXT`、`ACTIVE_EFFECTS`、`MEMORY_ENTRIES`、`PLOT_EVENTS`、`LORE_BOOK_DYNAMIC` | 从当前权威状态生成幂等 delta（`prompt-state-projection.ts`），变化进 `<context_delta>` |
+| append-cursor | `NARRATIVE` | baseline 按 `historyLayers` 播种；后续只追加尚未表示的持久消息 |
+| ephemeral | `USER_INPUT`、`RANDOM_EVENTS`、`RECENT_COMBAT`、`AGENT.*` 与链占位符 | 每轮按 template 出现顺序放入 `<turn_context>` |
+
+这条分类**不是第二种模板语言、也不允许配置**——你仍只编辑现有 template / 预设；未注册的
+占位符按既有规则原样保留在 baseline。改动 template 会进 baseline signature，自动触发重基线，
+所以「改了模板想立即生效」照旧成立，无需额外步骤。
+
+---
+
 ## 占位符完整列表
 
 ### 全局占位符（17 个，所有 Agent 可用）

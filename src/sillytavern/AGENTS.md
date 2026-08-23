@@ -94,6 +94,15 @@ src/sillytavern/                    ← 核心引擎
   │                                    暂停整 60 秒，发布等待快照后自动续发；网络 timeout 从放行后才计
   ├── agent-client.ts               ← [Phase 3] API 客户端（每 Agent 独立 userId / 重试退避 / 缓存检测 / RPM 许可）
   ├── agent-templates.ts            ← [Phase 3+9] Prompt 模板（systemPrompt 已迁 agent-config.json，留 stub + 动态上下文）
+  ├── prompt-session-assembler.ts   ← [Delta 会话 v1 / 2026-08-23] 主 DAG 普通 chat/chatStream 的 delta session 深模块：
+  │      独占 `(saveId, agentId)` 的 transcript / baselineSignature / revision / 投影 diff 起点，只开
+  │      prepare/complete/invalidate 三入口；首轮完整渲染 baseline，后续复用 wire transcript 只追加
+  │      `context_delta + turn_context + tailPrompt` 增量；**不写 Dexie**（内存态随刷新冷建基线）。
+  │      embedding / tools / combat / 侧链 / regenerate 走原路径（handle===null 或 skipSession）。
+  │      设计：docs/planning/2026-08-22-llm-assembly-delta-architecture-scratch.md
+  ├── prompt-state-projection.ts    ← [Delta 会话 v1] 读取型、幂等投影 + 纯 diff（prompt-session-assembler 的基座）：
+  │      封闭 scope 联合（14 个）、数据面 `set/upsert/remove` + `rebase` 控制信号、按逻辑名字归一化 +
+  │      规范化内容深比较、固定排序字节稳定，序列化进 `<context_delta>` 外壳。**无 I/O、无全局状态**。
   ├── agent-config.json             ← [Phase 9] 10+ Agent 完整 systemPrompt 唯一来源
   │      （🔴 实际文件在 `public/data/defaults/agent-config.json`，不在本目录；
   │        磁盘路径带 `public/`，运行时 URL 仍是 `/data/defaults/agent-config.json`）

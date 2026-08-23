@@ -25,6 +25,8 @@ enableAutoUnmount(afterEach);
 
 /** 本次挂载建出来的那个管线替身的 abort spy */
 const abortSpy = vi.fn();
+/** 管线替身的 invalidatePromptSessions spy（T4：离开游戏页清该存档全部 session） */
+const invalidatePromptSessionsSpy = vi.fn();
 /** 管线替身被构造了几次 —— 用来等 onMounted 里那串 await 走完，不靠猜时间 */
 const constructedSpy = vi.fn();
 
@@ -34,6 +36,7 @@ vi.mock('../../lib/game-pipeline', () => ({
       constructedSpy();
     }
     abort = abortSpy;
+    invalidatePromptSessions = invalidatePromptSessionsSpy;
     primeSceneAudio(): void {}
     async sendOpeningPrompt(): Promise<void> {}
     async runImagePromptAgent(): Promise<unknown> {
@@ -145,5 +148,25 @@ describe('COR-02：GamePage 卸载时 abort 在飞的管线', () => {
     expect(abortSpy).toHaveBeenCalledTimes(1);
     // 兜底解锁仍在（abort 之后才清，顺序见 GamePage.onUnmounted 的注释）
     expect(gameStore.isGenerating).toBe(false);
+  });
+
+  it('🆕 T4：卸载时也清掉本存档的全部 prompt session（存档切换/销毁的既有清理点）', async () => {
+    setActivePinia(createPinia());
+    abortSpy.mockClear();
+    invalidatePromptSessionsSpy.mockClear();
+    constructedSpy.mockClear();
+    gameStore.isGenerating = false;
+
+    const wrapper = mount(GamePage, { global: { stubs: STUBS } });
+    for (let i = 0; i < 100 && constructedSpy.mock.calls.length === 0; i += 1) {
+      await flushPromises();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(constructedSpy).toHaveBeenCalledTimes(1);
+
+    wrapper.unmount();
+
+    // 离开游戏页 = 存档切换/销毁的前置；per-save pipeline 只清自己的 saveId
+    expect(invalidatePromptSessionsSpy).toHaveBeenCalledTimes(1);
   });
 });

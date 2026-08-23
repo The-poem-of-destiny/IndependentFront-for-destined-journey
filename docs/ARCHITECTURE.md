@@ -220,6 +220,15 @@ commitChatState()（state-manager.ts）—— ADR-21 唯一写入口
 Dexie
 ```
 
+**提示装配 seam（2026-08-23 新增）**：`prompt-session-assembler.ts` 是深模块，独占
+`(saveId, agentId)` 的 delta 会话状态（transcript / baseline signature / revision / 投影 diff
+起点），只对 orchestrator 开 `preparePromptSession` / `completePromptSession` /
+`invalidatePromptSession` 三个入口；diff 由只读、幂等的 `prompt-state-projection.ts` 提供。
+主 DAG 普通 chat/chatStream 首轮完整渲染 baseline，后续轮复用 wire transcript 只追加
+`context_delta + turn_context + tailPrompt` 增量。模块不写 Dexie（内存态随刷新冷建基线）；
+embedding / tools / 战斗 / 侧链 / regenerate 走原路径。设计见
+`docs/planning/2026-08-22-llm-assembly-delta-architecture-scratch.md`。
+
 **两条旁路**：
 
 - **战斗 v3 是持久会话旁路**：`<combat_trigger>` 命中后进 `combat-v3/` 的

@@ -4,6 +4,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AgentOrchestrator } from './agent-orchestrator';
 import type { AgentContext, AgentConfig, ApiEndpoint, Pipeline } from './types';
+// T3: Delta 会话 module 的测试可观测入口（reset 保证每用例从干净 session 开始，
+// 不污染现有用例；activePromptSessionCount 断言「不创建 session」类排除路径）
+import { activePromptSessionCount, resetPromptSessionsForTest } from './prompt-session-assembler';
+
+// T3: 每个用例（含现有）从干净的 session 表开始 —— 与 T3 前「无 session 状态」语义一致
+beforeEach(() => {
+  resetPromptSessionsForTest();
+});
 
 // state-manager mock: 捕获 commitChatState 收到的 patches（Stage3 <json> 解析测试用）
 const {
@@ -2503,5 +2511,332 @@ describe('AgentOrchestrator — 失败回执分家（Q-14）', () => {
     expect(ops).toContain('update_quest');
     // 两批各自提交，互不连累
     expect(commitChatStateMock.mock.calls.length).toBe(2);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// T3: LLM 组装层 Delta 会话接线（计划 §7）
+// ═══════════════════════════════════════════════════════════
+
+describe('AgentOrchestrator — Delta 会话接线（T3）', () => {
+  /** requestMessages → 可比的 role/content 序列（忽略 wire id/timestamp） */
+  function wireContent(
+    messages: Array<{ role: string; content: string | null }> | undefined,
+  ): Array<{ role: string; content: string | null }> {
+    return (messages ?? []).map((m) => ({ role: m.role, content: m.content }));
+  }
+
+  /** 首轮完整 wire + 成功 assistant = 第二轮精确前缀（设计 §3-1 wire prefix 不变量） */
+  function expectedSecondPrefix(
+    first: Array<{ role: string; content: string | null }> | undefined,
+    assistant: string,
+  ): Array<{ role: string; content: string | null }> {
+    return [...wireContent(first), { role: 'assistant', content: assistant }];
+  }
+
+  function systemContent(
+    messages: Array<{ role: string; content: string | null }> | undefined,
+  ): string {
+    return messages?.find((m) => m.role === 'system')?.content ?? '';
+  }
+
+  function okFetch() {
+    return vi.fn().mockImplementation(() => {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: 'ok' } }],
+          usage: { total_tokens: 10 },
+        }),
+        text: async () => '',
+      });
+    });
+  }
+
+  /** SSE 流式 fetch mock（同 agent-client.test.ts 的 mockStreamingFetch） */
+  function mockStreamingFetch(chunks: string[]) {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    });
+    return vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body,
+      text: async () => '',
+    });
+  }
+
+  function storyStreamConfig(overrides: Partial<AgentConfig> = {}) {
+    return makeAgentConfig({
+      agentId: 'story',
+      retryOnFail: false,
+      streamCallbacks: { onChunk: vi.fn(), onComplete: vi.fn(), onError: vi.fn() },
+      ...overrides,
+    });
+  }
+
+  it('focused: 两个并行 Agent 使用不同 session（各自 delta，互不串状态）', async () => {
+    globalThis.fetch = okFetch();
+    const orch = new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['memory_recall', 'plot_pre_check']),
+      context: makeContext(),
+      agentConfigs: [
+        makeAgentConfig({ agentId: 'memory_recall' }),
+        makeAgentConfig({ agentId: 'plot_pre_check' }),
+      ],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_delta_parallel',
+    });
+
+    await orch.run();
+    expect(activePromptSessionCount()).toBe(2); // 每 Agent 一条独立 session
+    const mr1 = orch.getResults().get('memory_recall')!;
+    const pp1 = orch.getResults().get('plot_pre_check')!;
+    expect(systemContent(mr1.requestMessages)).not.toBe('');
+    expect(systemContent(mr1.requestMessages)).not.toBe(systemContent(pp1.requestMessages));
+
+    // 第二轮：各自走 delta 追加（revision 2），未重基线；A 的 transcript 不带 B 的内容
+    await orch.run();
+    const mr2 = orch.getResults().get('memory_recall')!;
+    const pp2 = orch.getResults().get('plot_pre_check')!;
+    expect(mr2.promptSessionRevision).toBe(2);
+    expect(pp2.promptSessionRevision).toBe(2);
+    expect(mr2.promptRebased).toBe(false);
+    expect(wireContent(mr2.requestMessages).slice(0, 1)).toEqual(
+      wireContent(mr1.requestMessages).slice(0, 1),
+    );
+    expect(systemContent(mr2.requestMessages)).toBe(systemContent(mr1.requestMessages));
+  });
+
+  it('focused: story 流式完成后推进一次（成功 complete → 下一轮 delta）', async () => {
+    const stream = [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: '第一轮正文' }, finish_reason: null }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`,
+      'data: [DONE]\n\n',
+    ].join('');
+    globalThis.fetch = mockStreamingFetch([stream]);
+
+    const orch = new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['story']),
+      context: makeContext(),
+      agentConfigs: [storyStreamConfig()],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_delta_stream_ok',
+    });
+
+    await orch.run();
+    const r1 = orch.getResults().get('story')!;
+    expect(r1.output).toBe('第一轮正文');
+    expect(r1.promptSessionRevision).toBe(1);
+    expect(activePromptSessionCount()).toBe(1);
+
+    // 第二轮：session 已 complete → delta 追加（前缀 = 第一轮 + assistant），非重基线
+    await orch.run();
+    const r2 = orch.getResults().get('story')!;
+    expect(r2.promptSessionRevision).toBe(2);
+    expect(r2.promptRebased).toBe(false);
+    const prefix = expectedSecondPrefix(r1.requestMessages, '第一轮正文');
+    expect(wireContent(r2.requestMessages).slice(0, prefix.length)).toEqual(prefix);
+  });
+
+  it('focused: story 流式错误后不推进（invalidate → 下一轮重建基线）', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      headers: new Headers(),
+      json: async () => ({}),
+      text: async () => 'Server Error',
+    });
+
+    const orch = new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['story']),
+      context: makeContext(),
+      agentConfigs: [storyStreamConfig()],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_delta_stream_fail',
+    });
+
+    await orch.run();
+    const r1 = orch.getResults().get('story')!;
+    expect(r1.error).toBeDefined();
+    expect(activePromptSessionCount()).toBe(0); // 流错误 → session 已失效
+
+    // 下一轮从当前权威状态重建基线（不是继续失败前的 delta 链）
+    const okStream = [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: '重建正文' }, finish_reason: null }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`,
+      'data: [DONE]\n\n',
+    ].join('');
+    globalThis.fetch = mockStreamingFetch([okStream]);
+    await orch.run();
+    const r2 = orch.getResults().get('story')!;
+    expect(r2.error).toBeUndefined();
+    expect(r2.promptRebased).toBe(true);
+    expect(r2.promptSessionRevision).toBe(1);
+    expect(activePromptSessionCount()).toBe(1);
+  });
+
+  it('focused: memory_recall embedding 不创建 session（原路径）', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({
+        data: [{ object: 'embedding', index: 0, embedding: [0.1, 0.2, 0.3] }],
+        model: 'text-embedding-3-small',
+      }),
+      text: async () => '',
+    });
+
+    const orch = new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['memory_recall']),
+      context: makeContext(),
+      agentConfigs: [
+        makeAgentConfig({ agentId: 'memory_recall', model: 'text-embedding-3-small' }),
+      ],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_delta_embed',
+    });
+
+    await orch.run();
+    const r = orch.getResults().get('memory_recall')!;
+    expect(r.error).toBeUndefined();
+    expect(activePromptSessionCount()).toBe(0);
+    expect(r.promptSessionRevision).toBeUndefined();
+  });
+
+  it('focused: toolsEnabled 不创建 session（原路径）', async () => {
+    globalThis.fetch = okFetch();
+    const orch = new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['vars_update']),
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'vars_update', toolsEnabled: true })],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_delta_tools',
+    });
+
+    await orch.run();
+    const r = orch.getResults().get('vars_update')!;
+    expect(r.error).toBeUndefined();
+    expect(activePromptSessionCount()).toBe(0);
+    expect(r.promptSessionRevision).toBeUndefined();
+  });
+
+  it('focused: regenerate 不污染下一次正常回合（先 invalidate，再走无状态完整请求）', async () => {
+    globalThis.fetch = okFetch();
+    const orch = new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['story']),
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_delta_regen',
+    });
+
+    await orch.run();
+    expect(activePromptSessionCount()).toBe(1);
+
+    const regen = await orch.regenerateAgent('story');
+    expect(regen.output).toBe('ok');
+    // regenerate：无状态完整请求，不建 session、不写 session
+    expect(activePromptSessionCount()).toBe(0);
+    expect(regen.promptSessionRevision).toBeUndefined();
+
+    // 下一次正常回合：旧 session 已失效 → 从当前状态重建基线（不污染）
+    await orch.run();
+    const r2 = orch.getResults().get('story')!;
+    expect(r2.promptRebased).toBe(true);
+    expect(r2.promptSessionRevision).toBe(1);
+    expect(activePromptSessionCount()).toBe(1);
+  });
+
+  it('focused: requestMessages 与 mock provider 实际收到的 messages 相同（wire messages）', async () => {
+    const sent: Array<Array<{ role: string; content: string | null }>> = [];
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: any) => {
+      const body = JSON.parse(init?.body ?? '{}');
+      sent.push((body.messages ?? []).map((m: any) => ({ role: m.role, content: m.content })));
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: 'ok' } }],
+          usage: { total_tokens: 10 },
+        }),
+        text: async () => '',
+      });
+    });
+    const orch = new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['story']),
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_delta_wire',
+    });
+
+    await orch.run();
+    const r1 = orch.getResults().get('story')!;
+    expect(wireContent(r1.requestMessages)).toEqual(sent[0]);
+
+    // 第二轮：仍是 wire 一致，且以第一轮 + assistant 为精确前缀
+    await orch.run();
+    const r2 = orch.getResults().get('story')!;
+    const r2Wire = wireContent(r2.requestMessages);
+    expect(r2Wire).toEqual(sent[1]);
+    // 第二轮 wire = 第一轮完整请求 + assistant + 本轮 delta user；前 3 项以第一轮 + assistant 为精确前缀
+    const prefix = expectedSecondPrefix(r1.requestMessages, 'ok');
+    expect(r2Wire.slice(0, prefix.length)).toEqual(prefix);
+  });
+
+  it('provider 自动重试复用同一 prepared messages，不重复 prepare（不重基线）', async () => {
+    let callCount = 0;
+    globalThis.fetch = vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({
+          ok: false,
+          status: 503,
+          headers: new Headers(),
+          json: async () => ({}),
+          text: async () => 'Service Unavailable',
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: 'ok' } }],
+          usage: { total_tokens: 10 },
+        }),
+        text: async () => '',
+      });
+    });
+
+    const orch = new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['story']),
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'story', retryOnFail: true })],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_delta_retry',
+    });
+
+    await orch.run();
+    const r1 = orch.getResults().get('story')!;
+    expect(r1.error).toBeUndefined();
+    expect(callCount).toBe(2); // 失败 1 次 + 重试 1 次（同一 prepared messages）
+    expect(r1.promptSessionRevision).toBe(1);
+
+    // 第二轮仍是 delta：retry 没有触发重基线 / 重复 prepare
+    await orch.run();
+    const r2 = orch.getResults().get('story')!;
+    expect(r2.promptSessionRevision).toBe(2);
+    expect(r2.promptRebased).toBe(false);
   });
 });
