@@ -60,6 +60,11 @@ export interface ApiEntry {
   /** `'image'` = 出图端点（NovelAI），由图像生成分区的端点选择器筛选 */
   apiType: 'chat' | 'embedding' | 'image';
   enableThinking?: boolean;
+  /**
+   * 🆕 2026-08-22 Delta 会话（T4）：上下文窗口 token 上限（可选主动重基线依据）。
+   * 只接受正整数；空值（undefined）表示不做主动预算判断。映射进 `ApiEndpoint.contextWindowTokens`。
+   */
+  contextWindowTokens?: number;
 }
 
 export interface PresetItem {
@@ -92,6 +97,8 @@ export interface AgentDefaultEntry {
   historySlice?: number;
   /** Phase 10: Custom template string with {{PLACEHOLDER}} references */
   template?: string;
+  /** 🆕 2026-08-22 Delta 会话（T4）：该 Agent 的单一用户自定义末尾指令（与 `AgentSettingsEntry` 同形） */
+  tailPrompt?: string;
 }
 
 export interface AgentProjectDefaults {

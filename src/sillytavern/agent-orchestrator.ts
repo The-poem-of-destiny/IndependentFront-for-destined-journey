@@ -540,7 +540,11 @@ export class AgentOrchestrator {
         presets: this.presets,
         endpointId: config.apiEndpointId,
         model: config.model || endpoint.defaultModel,
-        // T4 接线 ApiEndpoint.contextWindowTokens / AgentConfig.tailPrompt（设计 §9）
+        // 🆕 T4 接线（设计 §9 / 2026-08-22）：endpoint.contextWindowTokens（可选主动
+        //    重基线依据，§8.3）+ config.tailPrompt（该 Agent 单一末尾指令，§6.2）。
+        //    两者缺省时 assembler 侧自然回落：不判断 / 不产 tail 标签。
+        contextWindowTokens: endpoint.contextWindowTokens,
+        tailPrompt: config.tailPrompt,
       });
       if (prepared.handle) {
         messages = prepared.messages;

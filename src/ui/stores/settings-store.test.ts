@@ -132,6 +132,27 @@ describe('settings-store', () => {
     expect(JSON.parse(raw).apiPool[0].apiKey).toBe('');
   });
 
+  it('🆕 T4：contextWindowTokens 跟着端点条目一起持久化（localStorage + Dexie）', async () => {
+    await store.initApiSecrets();
+    await store.saveApiEntry({
+      id: 'ctx-1',
+      name: 'ctx',
+      baseUrl: 'https://api.example.test',
+      apiKey: 'sk-ctx',
+      maskedKey: 'sk-***-ctx',
+      model: 'model-1',
+      models: ['model-1'],
+      apiType: 'chat',
+      contextWindowTokens: 128000,
+    });
+
+    expect(store.settings.apiPool[0].contextWindowTokens).toBe(128000);
+    const raw = JSON.parse(localStorage.getItem('fated-poem-settings')!);
+    expect(raw.apiPool[0].contextWindowTokens).toBe(128000);
+    const rows = await getApiEndpoints();
+    expect(rows[0].contextWindowTokens).toBe(128000);
+  });
+
   it('RPM 限制按端点与密钥指纹持久化，编辑凭据时迁移到新组合', async () => {
     await store.initApiSecrets();
     const endpoint = {

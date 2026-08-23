@@ -101,6 +101,16 @@ vi.mock('../stores/scene-image-store', () => ({
   useSceneImageStore: () => sceneImageStore,
 }));
 
+// 🆕 T4：invalidatePromptSessions 的唯一职责 = 把本 pipeline 的 saveId 交给引擎清理。
+// mock 掉引擎模块，直接 spy 收到的入参（断言「只清对应 saveId」）。
+const { invalidatePromptSessionSpy } = vi.hoisted(() => ({
+  invalidatePromptSessionSpy: vi.fn(),
+}));
+
+vi.mock('@engine/prompt-session-assembler', () => ({
+  invalidatePromptSession: invalidatePromptSessionSpy,
+}));
+
 import { preCheckPlot, postCheckPlot } from '@engine/plot-engine';
 
 function makeGameStore(overrides: Record<string, any> = {}) {
@@ -322,6 +332,75 @@ describe('buildAgentConfigs — combat_v3 侧链装配', () => {
 
     expect(combat).toBeDefined();
     expect(combat.systemPrompt).toBe(defaultPrompt);
+  });
+});
+
+describe('buildAgentConfigs / buildEndpoints —— Delta 会话两个配置面（T4）', () => {
+  it('buildAgentConfigs 把覆写层 tailPrompt 灌进 AgentConfig', () => {
+    const pipeline = makePipeline();
+    const settings = (pipeline as any).settings.settings;
+    patchAgentSettings(settings, 'story', { tailPrompt: '请用简体中文作答' });
+
+    const configs = (pipeline as any).buildAgentConfigs({});
+    const story = configs.find((config: any) => config.agentId === 'story');
+
+    expect(story.tailPrompt).toBe('请用简体中文作答');
+  });
+
+  it('buildAgentConfigs 未配置 tailPrompt → undefined（不发该字段）', () => {
+    const pipeline = makePipeline();
+    const configs = (pipeline as any).buildAgentConfigs({});
+    const story = configs.find((config: any) => config.agentId === 'story');
+
+    expect(story.tailPrompt).toBeUndefined();
+  });
+
+  it('buildEndpoints 把 ApiEntry.contextWindowTokens 灌进 ApiEndpoint', () => {
+    const pipeline = makePipeline(
+      {},
+      {
+        apiPool: [{ id: 'ep1', name: 'ep', model: 'm', contextWindowTokens: 128000 }],
+      },
+    );
+
+    const endpoints = (pipeline as any).buildEndpoints();
+    expect(endpoints[0].contextWindowTokens).toBe(128000);
+  });
+
+  it('buildEndpoints 对非正整数 contextWindowTokens 归一化为 undefined', () => {
+    const pipeline = makePipeline(
+      {},
+      {
+        apiPool: [
+          { id: 'ep1', name: 'ep', model: 'm', contextWindowTokens: 0 },
+          { id: 'ep2', name: 'ep', model: 'm', contextWindowTokens: -5 },
+          { id: 'ep3', name: 'ep', model: 'm', contextWindowTokens: 1.5 },
+          { id: 'ep4', name: 'ep', model: 'm', contextWindowTokens: 'big' as any },
+        ],
+      },
+    );
+
+    const endpoints = (pipeline as any).buildEndpoints();
+    expect(endpoints.map((e: any) => e.contextWindowTokens)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it('🆕 invalidatePromptSessions 只清本 pipeline 的 saveId', () => {
+    invalidatePromptSessionSpy.mockClear();
+    const pipeline = new GamePipeline({
+      gameStore: makeGameStore(),
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-T4',
+    });
+
+    pipeline.invalidatePromptSessions();
+
+    expect(invalidatePromptSessionSpy).toHaveBeenCalledTimes(1);
+    expect(invalidatePromptSessionSpy).toHaveBeenCalledWith('save-T4');
   });
 });
 

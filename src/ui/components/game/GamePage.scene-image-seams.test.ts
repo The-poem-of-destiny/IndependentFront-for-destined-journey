@@ -62,6 +62,9 @@ vi.mock('../../lib/game-pipeline', () => ({
     // COR-02 起 GamePage.onUnmounted 会调它 —— 替身缺这个方法，卸载当场 TypeError，
     // 而报出来的是 vue-test-utils 的 `Cannot read properties of null`，指向完全无关的地方
     abort(): void {}
+    // 🆕 T4 起 GamePage.onUnmounted 也调它（存档切换/销毁清本存档 prompt session）——
+    // 与 abort 同一条纪律：替身缺方法，卸载当场 TypeError
+    invalidatePromptSessions(): void {}
   },
 }));
 

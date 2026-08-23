@@ -54,6 +54,11 @@ export interface AgentSettingsEntry {
   historyLayers?: number;
   /** 每条历史正文截断字数。缺省语义同 `historyLayers` */
   historySlice?: number;
+  /**
+   * 🆕 2026-08-22 Delta 会话（T4）：该 Agent 的**单一**用户自定义末尾指令。
+   * 空白归一化为 undefined（未配置 = 不注入 tail 区块）。
+   */
+  tailPrompt?: string;
 }
 
 /**
@@ -129,6 +134,17 @@ function resolve<T>(...values: (T | undefined)[]): T | undefined {
     if (v !== undefined) return v;
   }
   return undefined;
+}
+
+/**
+ * 空白 tailPrompt 归一化为 undefined（T4 配置面约束 1）：
+ * 覆写层 / 默认层给的空白串一律视为「未配置」，不产 `<tail_prompt>` 区块。
+ * 与 assembler 侧 `normalizeTail` 同口径（trim 后为空 → 空）。
+ */
+function normalizeTailPrompt(v: string | undefined): string | undefined {
+  if (v === undefined) return undefined;
+  const trimmed = v.trim();
+  return trimmed === '' ? undefined : v;
 }
 
 /**
@@ -216,6 +232,14 @@ export function getAgentSettings(
     historySlice: resolve(
       readOverride<number>(bag, agentId, 'historySlice'),
       readDefault<number>(layer, agentId, 'historySlice'),
+    ),
+    // 🆕 2026-08-22 Delta 会话（T4）：单一 tailPrompt。无兜底（undefined = 不注入），
+    // 覆写层 ?? 默认层 后归一化空白 → undefined。两层都没该键同样落 undefined。
+    tailPrompt: normalizeTailPrompt(
+      resolve(
+        readOverride<string>(bag, agentId, 'tailPrompt'),
+        readDefault<string>(layer, agentId, 'tailPrompt'),
+      ),
     ),
   };
 }

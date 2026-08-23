@@ -58,6 +58,8 @@ import { buildRandomEventRollContext } from '@engine/random-event-snapshot';
 import { getRandomEventPack } from '@engine/random-event-runtime';
 import { getEngineSettings } from '@engine/engine-settings';
 import { toEpochMinutes } from '@engine/time-system';
+// 🆕 Delta 会话（T4）：存档切换/销毁时清理该存档的 prompt session（string 入参 = 清整个 saveId）
+import { invalidatePromptSession } from '@engine/prompt-session-assembler';
 import { resolveSceneWeather } from './scene-image-seams';
 
 /** 一个游戏日的分钟数（口径同 `state-manager` 的 `MINUTES_PER_GAME_DAY`，那份未导出） */
@@ -566,6 +568,21 @@ export class GamePipeline {
     this.game.isGenerating = false;
   }
 
+  /**
+   * 🆕 T4（设计 §8.1 / §9）：存档切换/销毁时清掉本 pipeline 所属存档的全部 prompt
+   * session。`invalidatePromptSession` 传 string（saveId）入参 = 清该存档全部
+   * agent 的 session，其他存档 session 不受影响。本 pipeline 是 per-save 实例
+   * （构造时带 saveId），所以这里只需要清自己的 saveId。
+   *
+   * 接线点：GamePage 的 onUnmounted（离开游戏页 = 存档切换/销毁的既有清理点，
+   * 与 abort / sceneImages.abortAll 并列）。切档/删档都发生在离开游戏页之后，
+   * 而 session 是模块级内存态 —— 不清的话旧存档的 transcript/签名会在内存里
+   * 一直驻留。
+   */
+  invalidatePromptSessions(): void {
+    invalidatePromptSession(this.saveId);
+  }
+
   private updateAgentActivityStatus(agentId: string, runActivityId?: string): void {
     if (runActivityId === undefined) {
       this.game.updateAgentStatus(agentId);
@@ -748,6 +765,10 @@ export class GamePipeline {
       // （AgentConfig 里 undefined = 不发该字段，与原 `defaults.X || undefined` 行为一致）。
       const resolvedSystemPrompt: string | undefined = agentCfg.systemPrompt || undefined;
       const resolvedTemplate: string | undefined = agentCfg.template || undefined;
+      // 🆕 T4（设计 §9 / 2026-08-22）：单一 tailPrompt 从 agentCfg 读（getAgentSettings
+      //    已把空白归一化为 undefined = 不注入）。AgentConfig 缺省时 assembler 侧不产
+      //    tail 标签，也不改变 baseline signature 的其余项。
+      const resolvedTailPrompt: string | undefined = agentCfg.tailPrompt || undefined;
 
       return {
         agentId,
@@ -778,6 +799,8 @@ export class GamePipeline {
         //    两层，直接读它即可。
         systemPrompt: resolvedSystemPrompt,
         template: resolvedTemplate,
+        // 🆕 T4（设计 §9 / 2026-08-22）：单一末尾指令。空白已在 agentCfg 归一化。
+        tailPrompt: resolvedTailPrompt,
         // 工坊 P2 (ADR-30 D5): 只有持权 Agent 的装配 pass 产出 EJS vars 提交候选。
         // 代码级兜底：agent-config.json 没加载上（fetch 失败/离线）或该 agent 未声明本字段时，
         // story 默认持权 —— 与设计「默认仅 story 持权」一致。否则一次网络抖动就让整条
@@ -808,6 +831,15 @@ export class GamePipeline {
       models: entry.models || [],
       timeout: entry.timeout ?? 60000,
       enableThinking: entry.enableThinking ?? false, // API 池思考链开关
+      // 🆕 T4（设计 §8.3 / §9）：contextWindowTokens 透传，但只认正整数 ——
+      //    localStorage 是用户可编辑的，坏值（0/负数/浮点/字符串）一律 undefined
+      //    （不做主动预算判断），与 api-key-migration 的 readEntries 同一口径。
+      contextWindowTokens:
+        typeof entry.contextWindowTokens === 'number' &&
+        Number.isSafeInteger(entry.contextWindowTokens) &&
+        entry.contextWindowTokens > 0
+          ? entry.contextWindowTokens
+          : undefined,
     })) as ApiEndpoint[];
   }
 

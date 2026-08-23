@@ -76,6 +76,16 @@ function onHistorySliceInput(ev: Event) {
 }
 
 /**
+ * 🆕 2026-08-22 Delta 会话（T4）：单一 tailPrompt。
+ * 留空 = 写 `undefined` = 删键 —— 与 historyLayers/historySlice 同一条纪律：
+ * 「键不存在」编码「未配置」，不会挡掉引擎对空值的处理（tail 区块整个省略）。
+ */
+function onTailPromptInput(ev: Event) {
+  const v = (ev.target as HTMLTextAreaElement).value;
+  setAgentField({ tailPrompt: v.trim() === '' ? undefined : v });
+}
+
+/**
  * 勾选/取消一本世界书。
  *
  * 🔴 这里刻意**重新调** `getAgentSettings` 而不是读上面的 `agentCfg`：
@@ -289,6 +299,25 @@ void ref;
         />
       </label>
     </div>
+
+    <!-- 🆕 2026-08-22 Delta 会话（T4）：单一 tailPrompt —— 每轮最新 user 消息末尾的指令。
+         与上面的数值旋钮分开成段（它是文本指令，不是采样参数）；留空 = 删键 = 不注入。 -->
+    <label class="form-label tail-prompt-field">
+      末尾指令 (tailPrompt)
+      <span class="source-badge" :class="{ overridden: isOverridden('tailPrompt') }">{{
+        isOverridden('tailPrompt') ? '已覆写' : '默认'
+      }}</span>
+      <p class="form-hint">
+        Delta 会话：每轮最新的 user 消息末尾都会追加这段指令。留空 = 不注入（缺省）。
+      </p>
+      <textarea
+        class="form-input form-textarea"
+        :value="agentCfg.tailPrompt ?? ''"
+        placeholder="例如：请用简体中文作答，并保持第二人称叙事。"
+        rows="3"
+        @input="onTailPromptInput($event)"
+      />
+    </label>
   </AppCard>
 
   <!-- 世界书配置 (Phase 8) -->
@@ -380,6 +409,14 @@ void ref;
 /* 竖直堆叠的 key-row（上面还有一行同类控件时留一跳） */
 .key-row-stacked {
   margin-bottom: var(--theme-spacing-sm);
+}
+/* 🆕 tailPrompt 文本域：与数值网格之间留一跳呼吸（它跟在 form-grid 后面） */
+.tail-prompt-field {
+  margin-top: var(--theme-spacing-md);
+}
+.tail-prompt-field .form-textarea {
+  width: 100%;
+  line-height: 1.5;
 }
 /* 「默认 / 已覆写」徽标 —— D44 修正 4 来源标识 */
 .source-badge {
