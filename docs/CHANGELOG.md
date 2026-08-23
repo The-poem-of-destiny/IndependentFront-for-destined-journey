@@ -9,6 +9,25 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### LLM 组装层 Delta 会话 v1｜ ✅ 已实施，真机运营验收待执行（2026-08-23）
+
+主 DAG 普通 chat/chatStream 接入 **delta session**：七个主 DAG Agent（memory_recall 聊天路径 / plot_pre_check / story / request_dispatcher / memory_summary / vars_update / plot_post_check）首轮沿用现有完整 prompt 渲染（首轮 user 消息保留「继续」触发 + code 固定增量协议说明 + 可选 `tailPrompt`），后续成功轮复用该 Agent 的实际 wire transcript，只追加一条 user 增量消息（`<context_delta>` + `<turn_context>` + 可选 `tailPrompt`）；目标是把多个 Agent 各自重复携带的动态后缀从每轮成本里拆掉，预热后主 DAG 每回合 `prompt_cache_miss_tokens` 控制在 30,000 以内（真机验收项）。
+
+**范围**：默认主 DAG 普通 chat/chatStream；`memory_recall` embedding、toolsEnabled / `chatWithTools`、`combat_v3`、char/item/craft/image 侧链、手动 `regenerateAgent`（先 invalidate 旧 session 再走无状态完整请求）一律走原路径。不持久化 transcript（内存态随刷新冷建基线）、不引入 tokenizer、不建模型能力表、不新增用户可编辑模板。
+
+**新增/改动**：
+
+- 新增 `src/sillytavern/prompt-state-projection.ts`（读取型、幂等投影 + 纯 diff：封闭 scope 联合 14 个、`set/upsert/remove` + `rebase` 控制信号、按逻辑名字归一化 + 规范化内容深比较、固定排序字节稳定，序列化进 `<context_delta>`；无 I/O 无全局状态）。
+- 新增 `src/sillytavern/prompt-session-assembler.ts`（深模块，独占 `(saveId, agentId)` 的 transcript / baselineSignature / revision / 投影 diff 起点，只开 `preparePromptSession` / `completePromptSession` / `invalidatePromptSession` 三入口；成功后才推进、handle 代际 + revision 双校验防过期回写、动态世界书每轮同一 EJS pass 至多求值一次、§8.3 预算公式不猜模型上限）。
+- `agent-client.ts`：`ensureUserMessage` 提为模块级导出纯函数；`usage.prompt_tokens` 解析到 `AgentResult.promptTokens`（provider 不返回时 undefined 不猜）。`agent-templates.ts`：`buildEjsPassContext` / `reportEjsFallback` 提为导出。
+- `agent-orchestrator.ts`：callAgent 接线（非流式成功 complete / error abort invalidate；流式只在 onComplete complete、onError + reject invalidate；provider retry 复用同一 prepared messages；`requestMessages` 记录实际 wire messages）；`AgentResult` 增 `promptSessionRevision` / `promptRebased` / `promptRebaseReason` 诊断字段。
+- 配置面：`AgentConfig.tailPrompt?`（单一末尾指令，空白归一化 undefined）+ `ApiEndpoint.contextWindowTokens?`（可选主动重基线依据，只接受正整数）；`agent-settings` / `settings-store` / `api-key-migration` 三处 store 迁移，`AgentParamsCard.vue` 加 tailPrompt 文本框、`ApiSection.vue` 加 contextWindowTokens 数字字段。
+- 生命周期清理：`GamePage.vue` `onUnmounted`（离开游戏页 = 存档切换/销毁的既有清理点）调 `game-pipeline.ts` 的 `invalidatePromptSessions()`（per-save 实例方法，只清本存档全部 session，不影响其他存档）。
+
+**提交**：5 个（19535c9 → e116051，分支 `feat/prompt-delta-session`）：`test(prompt): pin baseline wire-message contract` → `feat(prompt): add read-only state projection diff` → `feat(prompt): add per-save per-agent prompt sessions` → `feat(prompt): wire main DAG chat/chatStream` → `feat(prompt): add minimal settings and lifecycle cleanup`。逐项偏差记录见 `docs/planning/2026-08-22-llm-assembly-delta-implementation-plan.md` §0。
+
+**验证**：`npm run gates` 八道全绿（typecheck / typecheck:vue / typecheck:tools / build / format:check / lint / knip:ratchet / test:run），全量 **355 文件 9169 tests 通过 + 8 skipped**（31.5s）。**未做**：生产 usage 运营验收（两个预热回合 + 五个连续普通主线回合、主 DAG miss 合计 ≤ 30k）——留给仓库所有者。
+
 ### API 凭据级 RPM 限流（ADR-34）｜ ✅ 已实施并走查设置页（2026-08-21）
 
 新增应用级 `ApiRpmLimiter`，按“归一化端点 + API Key”的 SHA-256 指纹共享配额桶；Chat（含重试与工具后续轮次）、Embedding、模型列表/连接测试与 NovelAI 出图的每次真实 HTTP 发送都先取得许可，ComfyUI 本地后端不纳入。默认无限制；达到上限后的下一批请求按 FIFO 排队，整 60 秒后自动续发，且网络超时只从实际放行后开始计算。

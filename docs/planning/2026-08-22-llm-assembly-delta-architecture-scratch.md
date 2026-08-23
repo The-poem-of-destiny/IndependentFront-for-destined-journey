@@ -1,6 +1,6 @@
 # LLM 组装层 Delta 会话架构
 
-> **状态**：设计定稿，未实施（2026-08-22）
+> **状态**：已实施（2026-08-23），真机运营验收待执行
 >
 > **用途**：约束 LLM 组装层 v1 的实现范围、接口、不变量和验收口径。实施步骤见
 > [`2026-08-22-llm-assembly-delta-implementation-plan.md`](2026-08-22-llm-assembly-delta-implementation-plan.md)。
@@ -252,6 +252,17 @@ type PromptDeltaOp =
 
 实现中 `scope` 是封闭联合类型，不接受用户自定义任意路径。上面的展示使用 `string` 只是简化
 文档，正式类型必须列出 v1 实际支持的 scope。
+
+> 📌 **2026-08-23 实施注记**：数据面仍只有 `set` / `upsert` / `remove` 三种 op，但实现额外加了
+> 第四个 `rebase` **控制信号** op（`prompt-state-projection.ts` 的 `PromptDeltaOp` 联合）：
+> NARRATIVE append cursor 检测到已表示消息被修改 / 删除 / 重排（或 previous/current 分属不同
+> Agent）时，只返回 `{ op: 'rebase', reason }` 信号，**不产伪 delta**；该信号只给 session
+> assembler 读，`renderPromptDelta` 收到即抛错，永不渲染进 `<context_delta>`。v1 投影 scope
+> 封闭联合实为 14 个（推导依据与索引口径见 `prompt-state-projection.ts` 头部注释的映射表）：
+>
+> - `character` / `resource` / `inventory` / `skill` / `status_effect`
+> - `quest` / `affection` / `variable` / `time` / `plot`
+> - `map` / `lore_dynamic` / `memory` / `narrative`
 
 ### 7.3 投影粒度
 
