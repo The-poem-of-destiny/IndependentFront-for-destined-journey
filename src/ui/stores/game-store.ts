@@ -27,6 +27,7 @@ import {
 } from '@engine/database';
 import { saveMessage, getMessages, saveSaveSlot } from '@engine/database';
 import { createStateManager } from '@engine/state-manager';
+import { invalidatePromptSession } from '@engine/prompt-session-assembler';
 import { allocateAttributePoint } from '@engine/attribute-allocation';
 import type { AllocatableAttr } from '@engine/attribute-allocation';
 import { detach } from './db-write';
@@ -372,6 +373,10 @@ export const useGameStore = defineStore('game', () => {
     await restoreMessages();
     const lastMsg = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant').pop();
     turnCounter = lastMsg?.turn ?? 0;
+
+    // 🔴 同 rollbackOneTurn：重开战斗 = 恢复到开战前快照，权威状态回退。战斗结束后
+    //    回归普通回合的主 DAG session 必须失效重建，否则残留开战前/上一轮分支正文。
+    invalidatePromptSession(activeSaveId.value);
 
     // ③ 重触发 combat_trigger（pipeline 持 marker；异常不阻断恢复本身）
     if (restartFn) {
@@ -1121,6 +1126,13 @@ export const useGameStore = defineStore('game', () => {
     await restoreMessages();
     const lastMsg = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant').pop();
     turnCounter = lastMsg?.turn ?? 0;
+
+    // 🔴 2026-08-23 真机 bug：回退快照后**必须失效 prompt session**。delta 会话的
+    // transcript 是跨轮累积的内存态，回退只恢复了 Dexie 里的权威状态，session 里
+    // 仍躺着被回退掉那轮的 user/assistant —— 重新发送会复用旧 transcript，把
+    // 「上一分支」的正文当上下文喂给模型（症状：重 roll 出的正文残留旧分支台词）。
+    // 失效后下一轮 prepare 发现 session 已删 → 从当前权威状态重基线，不留尾巴。
+    invalidatePromptSession(activeSaveId.value);
     return { ok: true };
   }
 
@@ -1137,6 +1149,10 @@ export const useGameStore = defineStore('game', () => {
     await restoreMessages();
     const lastMsg = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant').pop();
     turnCounter = lastMsg?.turn ?? 0;
+
+    // 🔴 2026-08-23 真机 bug（同 rollbackOneTurn）：恢复到历史快照 = 权威状态回退，
+    //    必须失效该存档全部 prompt session，否则 delta transcript 残留旧分支正文。
+    invalidatePromptSession(activeSaveId.value);
     return { ok: true };
   }
 

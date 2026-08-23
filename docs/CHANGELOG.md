@@ -9,6 +9,17 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### Delta 会话 v1 真机 bug：快照回退/重开战斗未失效 prompt session 致旧分支正文残留｜ ✅ 已修复（2026-08-23）
+
+主人在真机验收 delta 会话时发现：同一轮 roll 出不满意的分支后回退快照再重新 roll，新正文里残留上一分支的台词（22:44 分支幻说「天亮前到东门等我」，回退到 15:17 再 roll 的 22:50 分支里妲丽安复述「她只说了天亮前到东门等她」）。根因两层：
+
+1. **回退不清 session**：`game-store.ts` 的 `rollbackOneTurn` / `restoreToSnapshot` / `restartCombat` 恢复快照只还原 Dexie 权威状态，但 delta session 的 transcript 是跨轮累积的**内存态**，仍躺着被回退掉那轮的 user/assistant —— 重新发送时 `preparePromptSession` 复用旧 transcript，把「上一分支」的正文当上下文喂给模型。T4 的清理只挂在 `GamePage.onUnmounted`（离开游戏页才清），回退不离开页面。
+2. **NARRATIVE append cursor 恰好检测不到**：每轮投影在 `buildContext` 时构建（先于 `emitMessage`，不含本轮 user 消息），回退后重新 roll 的投影与上一轮记录的投影完全一致 → `diffNarrative` 判「无变化」→ 不触发 rebase。
+
+**修复**：三个回退点成功恢复后调 `invalidatePromptSession(saveId)`（传 string = 清该存档全部 session），下一轮 `prepare` 发现 session 已删 → 走 `missing_session` 重基线，从当前权威状态完整重建，不留尾巴。补三个断言测试。
+
+**验证**：`npm run gates` 八道全绿，**355 文件 9169 tests 通过 + 8 skipped**。
+
 ### LLM 组装层 Delta 会话 v1｜ ✅ 已实施，真机运营验收待执行（2026-08-23）
 
 主 DAG 普通 chat/chatStream 接入 **delta session**：七个主 DAG Agent（memory_recall 聊天路径 / plot_pre_check / story / request_dispatcher / memory_summary / vars_update / plot_post_check）首轮沿用现有完整 prompt 渲染（首轮 user 消息保留「继续」触发 + code 固定增量协议说明 + 可选 `tailPrompt`），后续成功轮复用该 Agent 的实际 wire transcript，只追加一条 user 增量消息（`<context_delta>` + `<turn_context>` + 可选 `tailPrompt`）；目标是把多个 Agent 各自重复携带的动态后缀从每轮成本里拆掉，预热后主 DAG 每回合 `prompt_cache_miss_tokens` 控制在 30,000 以内（真机验收项）。
