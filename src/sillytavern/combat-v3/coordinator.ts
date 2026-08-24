@@ -63,7 +63,8 @@ import type {
   ToolResult,
   WorldBook,
 } from '../types';
-import { getCombatCoefficient } from '../tier-constants';
+import { getExperienceCoefficient } from '../exp-table';
+import type { ExperienceMode } from '../types';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 类型定义
@@ -103,6 +104,9 @@ export interface RunCombatV3Opts {
     endpoint: ApiEndpoint;
     stateManager?: { commitChatState: (patches: StatePatch[]) => Promise<void> };
     characters: Array<Record<string, unknown>>;
+    // 🆕 经验档位（简单/普通模式，2026-08-24）：战斗胜利经验按存档模式查系数表。
+    // 缺省 = normal（普通）；由调用方（game-pipeline）从 SaveProfile 读经 getExperienceMode 传入。
+    experienceMode?: ExperienceMode;
     variables?: Record<string, unknown>;
     context: AgentContext;
     // Agent 配置（agent-config.json 经 game-pipeline 透传）。routeEnemyCommand 用它读
@@ -483,12 +487,16 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
   const finalFp = finalSnapshot.resourceSnapshots.FP;
   const fpDelta = finalFp - initialFp;
   const combatOutcome = outcomeOf(session);
-  // §12.4 EXP 结算：ally_win 时按「被杀敌方 level × 战斗系数」求和平分给存活队友。
+  // §12.4 EXP 结算：ally_win 时按「被杀敌方 level × 经验档位系数」求和平分给存活队友。
+  // 🔴 2026-08-24 修复「用错系数」：原实现用核心数值表的 combatCoefficient（2.0/2.8/…，
+  //    那是**战斗伤害**用的），世界书 [经验值获取规则] 规定经验用另一张层级系数表
+  //    （normal: 10/20/50/100/250/600）。经验档位（experienceMode）缺省 normal。
   const expReward = buildExpRewardPatches(
     finalSnapshot.units,
     opts.bundle.participants,
     deps.characters,
     combatOutcome,
+    deps.experienceMode ?? 'normal',
   );
   // T10（设计 2026-08-09 §2.6 方案 1）：终局 Code 覆写回写 —— 把战斗结束时的单位
   // 资源（hp/mp/sp）与状态效果按 characterId 匹配存档角色，生成 StatePatch 与 FP
@@ -2094,9 +2102,11 @@ function toPatches(
  * v3 内核 M1 只结算 FP 净变动，EXP/战利品留给 coordinator 补（terminal.ts 注释明说）。
  * 本函数补上 EXP：仅 ally_win 结算；fled / enemy_win / draw 不给经验。
  *
- * 公式（世界书 #417617 战斗系数表 + ADR-11 确定性归 Code）：
- *   每个被击杀的敌方单位贡献 EXP = level × getCombatCoefficient(tier)
- *   求和后平分给玩家方存活（hp > 0）且有存档角色对应的单位。
+ * 公式（世界书 [经验值获取规则] 层级系数表 + ADR-11 确定性归 Code，2026-08-24 修正）：
+ *   每个被击杀的敌方单位贡献 EXP = level × getExperienceCoefficient(mode, tier)
+ *   —— mode 按存档经验档位（normal 世界书系数 10/20/50/100/250/600；easy 高系数
+ *   20/36/76/130/260/500）。求和后平分给玩家方存活（hp > 0）且有存档角色对应的单位。
+ *   🔴 不再用 `getCombatCoefficient`（核心数值表 2.0/2.8/… 是**战斗伤害**系数，用错来源）。
  *
  * 被击杀敌方的 level/tier 取自 CombatParticipant（CombatUnitView 不带 level），
  * 按 characterId（= unit.id）匹配。匹配不到 participant 时 tier 兜底取 unit.tier，
@@ -2109,6 +2119,7 @@ export function buildExpRewardPatches(
   participants: readonly CombatParticipant[],
   characters: ReadonlyArray<Record<string, unknown>>,
   outcome: CombatV3Result['outcome'],
+  mode: ExperienceMode = 'normal',
 ): { patches: StatePatch[]; totalExp: number } {
   if (outcome !== 'ally_win') return { patches: [], totalExp: 0 };
 
@@ -2120,7 +2131,7 @@ export function buildExpRewardPatches(
     const p = participants.find((pp) => pp.characterId === enemy.id);
     const tier = p?.tier ?? enemy.tier ?? 1;
     const level = p?.level ?? 1;
-    rawExp += level * getCombatCoefficient(tier);
+    rawExp += level * getExperienceCoefficient(mode, tier);
   }
   const totalExp = Math.round(rawExp);
   if (totalExp <= 0) return { patches: [], totalExp: 0 };

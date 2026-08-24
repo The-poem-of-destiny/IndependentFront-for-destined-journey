@@ -7,6 +7,27 @@
 
 ## 待办
 
+- [ ] **LLM 组装层 Delta 会话 v1 —— 生产运营验收（下个对话说「继续 delta 生产验收」接上）**
+      🔴 引擎代码已合入 master（PR #118 delta session + #119 vars_update 字段规范），内容仓 pack 已发
+      **2.5.0 / 2.5.1 / 2.5.2**。只剩这一项真机验收没做。
+
+  - **必读**：`docs/planning/2026-08-22-llm-assembly-delta-architecture-scratch.md` §2.3「运营验收」
+    - `docs/planning/2026-08-22-llm-assembly-delta-implementation-plan.md` §9「生产 usage 验收」。
+  - **前置**：引擎加载最新 pack **2.5.2**（story 默认注入 extra_setting；三条生产规则 436/437/440 默认关；
+    vars_update 提示词字段规范 G3-G6 已落地）；设置页主 endpoint 填 `contextWindowTokens=512k`。
+  - **步骤**：① 两个预热普通回合 → ② 五个连续、无侧链的普通主线回合 → ③ 记录七个主 DAG Agent
+    （memory_recall chat 版 / plot_pre_check / story / request_dispatcher / memory_summary /
+    vars_update / plot_post_check）每轮的 hit/miss/completion、实际调用集合、session revision、
+    rebase reason。
+  - **验收判据**：每回合主 DAG miss 合计 ≤ 30,000 tokens；侧链若意外触发则单列并重做该样本。
+  - **产出**：新开带日期的 review 报告放 `docs/reviews/`（聚合 usage + 匿名场景 + 版本 SHA，
+    不提交 API Key / 完整 prompt / 私有世界书），**别改写** `docs/reviews/2026-08-21-*` 历史报告。
+  - **验收后重点盯**：① vars_update / request_dispatcher 的累积 delta 认知负担（AI 合并"基线+delta"
+    出当前状态的准确性）；② story 注入 extra_setting 后 token 涨幅；③ 流式 story 不带 prompt_tokens，
+    预算自动重基线对 story 暂不生效（设计 §8.3，已知）；④ 侧链若使总轮超 30k，记录独立 usage 另立设计。
+  - **可选后续（已搁置，验收后可再议）**：模板占位符驱动 scope 裁剪（story 关 NARRATIVE delta 之类）；
+    dlc.json uid 486「神秘使 › 生产与制作」默认关闭（主人裁定暂不动）。
+
 - [ ] **Mac 兼容性** —— 目前只在 Windows 11 上开发和验证过。
 
   - [x] **开发启动器**（2026-08-14）：`npm run dev` 经 `scripts/dev.mjs` 按平台分发，
@@ -62,3 +83,9 @@
 
 - [ ] **移动端支持** —— 触屏交互（无 hover）、安全区、虚拟键盘遮挡、手势与地图缩放，
       以及移动浏览器上的 QuickJS(wasm) / IndexedDB 表现验证。
+
+- [ ] **扫荡机制（探索，未裁定）** —— 主人 2026-08-24 提出，暂不实施，留档备查。
+      投骰 `(属性 + 等级×层级) + d20` vs `目标难度 + d20`：成功直接结算（正常经验+战利品），失败进战斗。
+      主人要的曲线：同层成功率低、低一层 ~~80%。当时推的公式：`层差 D×10`（每低一层 +10）+ 同层惩罚（敌方 +3），
+      对应成功率 同层 34% / 低1层 77~~80%（平局算败/算胜）/ 低2层 99%+ / 低3层 100%。
+      未定：平局算哪边、属性取哪维、失败是否要代价（纯零代价会变"无脑扫荡"）。

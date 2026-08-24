@@ -39,7 +39,8 @@ describe('createDefaultCharacterState', () => {
     const c = createDefaultCharacterState();
     expect(c.level).toBe(1);
     expect(c.totalExp).toBe(0);
-    expect(c.expToNext).toBe(100);
+    // 🆕 累计表语义（2026-08-24）：Lv1 累计门槛 = 120（旧 expCap 100 已退役）
+    expect(c.expToNext).toBe(120);
   });
 
   it('五维属性默认 10', () => {
@@ -398,6 +399,7 @@ describe('Snapshot 重定义 (M5 规范 §11.2)', () => {
       characters: [],
       saveProfile: {
         saveId: 's1',
+        experienceMode: 'normal',
         fp: 0,
         fpHistory: [],
         contracts: [],

@@ -27,6 +27,14 @@ vi.mock('../../stores/settings-store', () => ({
   }),
 }));
 
+// game-store：DataSection 的经验档位切换只用到 refreshFromDb（切完回读让战斗分档即时生效）。
+// 真实 game-store 构造会拉起整条前端链（IndexedDB / state-manager），本测试不碰它。
+vi.mock('../../stores/game-store', () => ({
+  useGameStore: () => ({
+    refreshFromDb: async () => {},
+  }),
+}));
+
 const getSceneImageUsage = vi.fn<(saveId: string) => Promise<SceneImageUsage>>();
 const listCleanableSceneImageIds = vi.fn<(saveId: string) => Promise<string[]>>();
 const dropSceneImageBlobs = vi.fn<(ids: readonly string[]) => Promise<number>>();
@@ -37,6 +45,8 @@ vi.mock('@engine/database', () => ({
   exportAllData: async () => ({}),
   importAllData: async () => {},
   clearAllData: async () => {},
+  // 经验档位读取（loadExperienceMode）—— 返回一个含 experienceMode 的假 profile
+  getSaveProfile: async () => ({ saveId: 'x', experienceMode: 'normal' }),
 }));
 
 import DataSection from './DataSection.vue';

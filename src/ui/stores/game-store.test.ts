@@ -74,6 +74,7 @@ function makeSaveSlot(overrides: Partial<SaveSlot> = {}): SaveSlot {
 function makeProfile(overrides: Partial<SaveProfile> = {}): SaveProfile {
   return {
     saveId: SAVE_ID,
+    experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
     contracts: [],

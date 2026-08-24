@@ -11,15 +11,22 @@ import type { SceneImageUsage } from '@engine/types-image';
 import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
+import FormSelect from '../shared/form/FormSelect.vue';
 import PackInstallConfirmModal from './PackInstallConfirmModal.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
+import { useGameStore } from '../../stores/game-store';
 import type { FullBackup } from '@engine/database';
+// 经验档位读取（loadExperienceMode）走静态导入：与 loadSceneUsage 的动态 import 并存时，
+// Vitest 的 vi.mock 对同一模块的多次动态 import 有竞态（挂起到环境拆除、dexie 加载失败），
+// 静态 import 由 vi.mock 稳定拦截，规避之（2026-08-24）。
+import { getSaveProfile } from '@engine/database';
 import type { PackInstallPlan } from '@engine/types-content';
 import type { PackUpgradeDiff } from '@engine/content-pack-plan';
 
 const cfg = useSettingsStore();
 const ui = useUIStore();
+const game = useGameStore();
 
 /** 内容态（内容包是否已装） */
 const activeContent = ref<{ packId: string | null; packVersion: string | null }>({
@@ -34,6 +41,7 @@ onMounted(async () => {
   // void：用量与内容态互不依赖，不必串成一条链；失败已在 loadStorageUsage 内自吞，
   // 裸调会漏成 unhandled rejection（.vue 不在类型感知 lint 档内，闸门看不见）
   void loadStorageUsage();
+  void loadExperienceMode();
   const { useContentStore } = await import('../../stores/content-store');
   const c = useContentStore();
   await c.hydratePackState();
@@ -250,6 +258,51 @@ async function loadStorageUsage() {
     storageInfo.value = null;
   }
 }
+
+// ═══════════ 经验档位（简单/普通模式，2026-08-24）═══════════
+// 当前存档的 experienceMode 下拉 + 命名写入口切换（persistExperienceMode，照 persistFocusQuest
+// 的 withSaveWriteLock 锁内重读窄改模式）。为什么在存档数据分区：它是**每存档**的设置，
+// 与插画用量同一逻辑（图像生成设计 §7.5 / D47 同款理由），放这里找得到。
+const experienceMode = ref<'normal' | 'easy'>('normal');
+
+/** 读当前存档的经验档位（旧档缺字段兜底 normal） */
+async function loadExperienceMode() {
+  const saveId = ui.activeSaveId;
+  if (!saveId) {
+    experienceMode.value = 'normal';
+    return;
+  }
+  try {
+    const profile = await getSaveProfile(saveId);
+    experienceMode.value = profile?.experienceMode === 'easy' ? 'easy' : 'normal';
+  } catch {
+    experienceMode.value = 'normal';
+  }
+}
+
+/** 切换当前存档经验档位 —— 走命名写入口；成功后轻量回读 game-store（战斗分档立即生效） */
+async function changeExperienceMode(mode: 'normal' | 'easy') {
+  const saveId = ui.activeSaveId;
+  if (!saveId) return;
+  const next = mode === 'easy' ? 'easy' : 'normal';
+  try {
+    const { persistExperienceMode } = await import('@engine/save-profile');
+    await persistExperienceMode(saveId, next);
+    experienceMode.value = next;
+    ui.toast(next === 'easy' ? '已切换为简单模式（经验获取更快）' : '已切换为普通模式', 'success');
+    // 🔴 同步 game-store 的 saveProfile 内存：战斗经验分档读 game.experienceMode，
+    //    不刷新的话下一次战斗仍用旧档。失败不致命（下次 loadSave/refreshFromDb 会补上）。
+    try {
+      await game.refreshFromDb();
+    } catch {
+      /* 回读失败仅影响本次会话内的分档，存档已正确落库 */
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[data] 切换经验档位失败:', err);
+    ui.toast(`切换经验档位失败：${msg}`, 'error');
+  }
+}
 function fmtBytes(b: number) {
   if (b < 1024) return `${b} B`;
   if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`;
@@ -453,6 +506,23 @@ async function clearAll() {
           <p class="text-xs text-muted">IndexedDB + localStorage</p>
         </div>
         <p v-else class="text-muted text-sm">获取中…</p></AppCard
+      ><AppCard padding="md" class="mode-card"
+        ><h4>经验档位</h4>
+        <p class="text-muted text-sm">
+          简单模式升级更快：一层约2倍、二层约1.8倍、三层约1.5倍战斗经验，层级越高差距越小，六层起与普通持平。
+        </p>
+        <FormSelect
+          :model-value="experienceMode"
+          :options="[
+            { label: '普通', value: 'normal' },
+            { label: '简单', value: 'easy' },
+          ]"
+          :disabled="!ui.activeSaveId"
+          @update:model-value="(v) => changeExperienceMode(v as 'normal' | 'easy')"
+        />
+        <p v-if="!ui.activeSaveId" class="text-muted text-sm">
+          未载入存档 —— 经验档位按存档保存，进入游戏后可在此切换。
+        </p></AppCard
       ><AppCard padding="md"
         ><h4>本存档插画</h4>
         <!-- 一张都没有时照常显示「0 张 / 0 B」，不把这一行藏起来 ——

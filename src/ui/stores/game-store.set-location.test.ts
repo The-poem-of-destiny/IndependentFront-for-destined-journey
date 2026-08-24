@@ -65,6 +65,7 @@ function makeSaveSlot(): SaveSlot {
 function makeProfile(): SaveProfile {
   return {
     saveId: SAVE_ID,
+    experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
     contracts: [],

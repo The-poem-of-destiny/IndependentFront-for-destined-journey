@@ -31,7 +31,12 @@ vi.mock('./database', () => ({
   createDefaultSaveProfile: (...args: any[]) => mockCreateDefaultSaveProfile(...args),
 }));
 
-import { persistFocusQuest, persistNewsRead } from './save-profile';
+import {
+  persistFocusQuest,
+  persistNewsRead,
+  persistQuestStatus,
+  persistRemoveQuest,
+} from './save-profile';
 import { withSaveWriteLock } from './state-write-queue';
 
 /** 假库本体 */
@@ -40,6 +45,7 @@ let rows: Map<string, SaveProfile>;
 function makeProfile(saveId: string, overrides: Partial<SaveProfile> = {}): SaveProfile {
   return {
     saveId,
+    experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
     contracts: [],
@@ -189,5 +195,98 @@ describe('persistNewsRead —— 锁内窄字段读-改-写', () => {
 
     await expect(persistNewsRead(saveId, '不存在的新闻')).resolves.toBeUndefined();
     expect(rows.get(saveId)!.news.every((n) => !n.read)).toBe(true);
+  });
+});
+
+describe('persistQuestStatus / persistRemoveQuest —— 锁内窄字段读-改-写', () => {
+  /** 测试任务的最小形状 */
+  function makeQuest(status: string, priority: '低' | '中' | '高') {
+    return { status, priority, progress: '', detail: '', objective: '', reward: '' };
+  }
+
+  it('persistQuestStatus 只翻那一个任务的 status；提交期间的整档 flush 互不吞噬', async () => {
+    const saveId = 'save_quest_status';
+    rows.set(
+      saveId,
+      makeProfile(saveId, {
+        quests: { 找回项链: makeQuest('进行中', '高') },
+      }),
+    );
+
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const commitSection = withSaveWriteLock(saveId, () => held);
+
+    // 玩家此刻在任务面板点「标记完成」
+    const uiWrite = persistQuestStatus(saveId, '找回项链', '已完成');
+    await settleMicrotasks();
+    expect(
+      mockSaveSaveProfile,
+      'UI 的写必须排队，不能插进提交的读-改-写中间',
+    ).not.toHaveBeenCalled();
+
+    // 提交在锁里落它那份整档（fp 涨了、还多开了一个任务；找回项链仍是进锁时的「进行中」）
+    commitFlush(saveId, (p) => {
+      p.fp = 123;
+      p.quests['另一任务'] = makeQuest('进行中', '中');
+    });
+
+    release();
+    await commitSection;
+    await uiWrite;
+
+    const stored = rows.get(saveId)!;
+    // UI 那一格改上了 —— 不进队列的话它会被 commitFlush 的整档盖掉
+    expect(stored.quests['找回项链'].status).toBe('已完成');
+    // 提交写进去的其余字段一格没丢 —— 拿 UI 手里那份陈旧整档写回去的话会被抹回旧值
+    expect(stored.fp).toBe(123);
+    expect(stored.quests['另一任务']).toBeDefined();
+    expect(mockSaveSaveProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('persistRemoveQuest 只删那一个任务键；提交期间的整档 flush 互不吞噬', async () => {
+    const saveId = 'save_quest_remove';
+    rows.set(
+      saveId,
+      makeProfile(saveId, {
+        quests: {
+          讨伐魔物: makeQuest('已完成', '中'),
+          继续赶路: makeQuest('进行中', '高'),
+        },
+      }),
+    );
+
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const commitSection = withSaveWriteLock(saveId, () => held);
+
+    const uiWrite = persistRemoveQuest(saveId, '讨伐魔物');
+    await settleMicrotasks();
+    expect(mockSaveSaveProfile).not.toHaveBeenCalled();
+
+    commitFlush(saveId, (p) => {
+      p.fp = 456;
+      p.quests['又一任务'] = makeQuest('进行中', '低');
+    });
+
+    release();
+    await commitSection;
+    await uiWrite;
+
+    const stored = rows.get(saveId)!;
+    expect(stored.quests['讨伐魔物']).toBeUndefined();
+    // 提交期间新增的任务与 fp 都留着
+    expect(stored.quests['又一任务']).toBeDefined();
+    expect(stored.quests['继续赶路']).toBeDefined();
+    expect(stored.fp).toBe(456);
+  });
+
+  it('两者对不存在的任务都静默跳过，不抛', async () => {
+    const saveId = 'save_quest_missing';
+    rows.set(saveId, makeProfile(saveId));
+
+    await expect(persistQuestStatus(saveId, '不存在的任务', '已完成')).resolves.toBeUndefined();
+    await expect(persistRemoveQuest(saveId, '不存在的任务')).resolves.toBeUndefined();
+    expect(Object.keys(rows.get(saveId)!.quests)).toEqual([]);
   });
 });

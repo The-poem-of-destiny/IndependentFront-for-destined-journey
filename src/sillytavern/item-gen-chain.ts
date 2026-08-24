@@ -109,6 +109,41 @@ export interface ItemGenChainResult {
   itemOutput: ItemGenOutput;
 }
 
+// ========== 重铸（单条目，2026-08-24） ==========
+
+/** 重铸目标：要重写的那一个条目（三选一，按名字寻址） */
+export type RewriteTarget =
+  | { kind: 'skill'; entry: ItemGenOutput['skills'][number] }
+  | { kind: 'equipment'; entry: ItemGenOutput['equipment'][number] }
+  | { kind: 'inventory'; entry: ItemGenOutput['inventory'][number] };
+
+export interface RewriteLoadoutRequest {
+  saveId: string;
+  /** 持有者角色名（按名寻址，铁律1） */
+  characterId: string;
+  /** 要重铸的条目当前完整数据（喂给 item_gen 当 <重铸目标>） */
+  target: RewriteTarget;
+  /** 玩家对现状问题的描述（可能含 debug 线索，可空） */
+  userDescription?: string;
+  /** 当前正文（供 item_gen 参考，可空 —— 手动重铸不一定有正文上下文） */
+  storyOutput?: string;
+  context: AgentContext;
+  endpoint: ApiEndpoint;
+  configs?: import('./types').AgentConfig[];
+  worldBooks?: import('./types').WorldBook[];
+  presets?: import('./types').AgentPreset[];
+}
+
+export interface RewriteLoadoutResult {
+  ok: boolean;
+  patches: StatePatch[];
+  itemOutput: ItemGenOutput;
+  /** !ok 时的人话原因（给 UI toast 用） */
+  reason?: string;
+}
+
+const EMPTY_ITEM_OUTPUT: ItemGenOutput = { skills: [], equipment: [], inventory: [] };
+
 // ========== Public API ==========
 
 /**
@@ -145,7 +180,7 @@ export async function runItemGenChain(
       '[item-gen-chain] 无 owner 且无玩家角色，跳过该 item_gen_request:',
       firstMarker?.bodyText.slice(0, 50),
     );
-    return { patches: [], itemOutput: { skills: [], equipment: [], inventory: [] } };
+    return { patches: [], itemOutput: EMPTY_ITEM_OUTPUT };
   }
   const patches = buildItemGenPatches(itemOutput, characterId);
 
@@ -208,6 +243,26 @@ async function callItemGenForRequest(
     CRAFT_RESULT: '',
   };
 
+  return callItemGenRaw(request, deps, itemLocalParams);
+}
+
+/**
+ * 调 item_gen 的公共执行体（独立链与重铸链共用，避免两处各抄一份 Agentic 调用）。
+ * localParams 由调用方决定（独立链填 ITEM_REQUEST，重铸链填 REWRITE_TARGET/REWRITE_REASON）。
+ */
+async function callItemGenRaw(
+  request: {
+    context: AgentContext;
+    endpoint: ApiEndpoint;
+    saveId: string;
+    configs?: import('./types').AgentConfig[];
+    worldBooks?: import('./types').WorldBook[];
+    presets?: import('./types').AgentPreset[];
+    storyOutput: string;
+  },
+  deps: ItemGenChainDeps,
+  localParams: Record<string, string>,
+): Promise<ItemGenOutput> {
   // 构建 item_gen 上下文 — agentOutputs['story'] 传正文，对标 char/craft 链
   const contextWithStory: AgentContext = {
     ...request.context,
@@ -222,12 +277,12 @@ async function callItemGenForRequest(
       request.configs,
       request.worldBooks,
       request.presets,
-      itemLocalParams,
+      localParams,
     );
     if (!messages || messages.length === 0) {
       // item_gen 模板找不到 / 产出空 messages 时返回空，不阻塞主流程
       // （避免空 messages 打 API 触发 HTTP 400 "missing field messages"）
-      return { skills: [], equipment: [], inventory: [] };
+      return EMPTY_ITEM_OUTPUT;
     }
 
     const client = deps.clientFactory('item_gen', request.endpoint, request.saveId);
@@ -258,7 +313,7 @@ async function callItemGenForRequest(
       //   item_gen 的 system 提示含 function-calling 工具指令，不带 tools 再调只会让 AI 混乱、
       //   且极易重蹈 HTTP 400，纯属浪费一次失败调用。直接当失败返回空。
       console.warn('item_gen (独立链) Agentic 路径无 output:', result.error ?? 'no output');
-      return { skills: [], equipment: [], inventory: [] };
+      return EMPTY_ITEM_OUTPUT;
     }
 
     // Fallback: 仅当 client 不支持 chatWithTools（如测试 mock）时走普通 chat
@@ -271,7 +326,7 @@ async function callItemGenForRequest(
     console.warn('item_gen (独立链) 调用失败，物品将无详细数值:', err);
   }
 
-  return { skills: [], equipment: [], inventory: [] };
+  return EMPTY_ITEM_OUTPUT;
 }
 
 /**
@@ -395,6 +450,177 @@ function guessSlot(bodyText: string, itemType: string): string {
   if (/项链|护符|项圈/.test(t)) return '饰品';
   if (/腰带|束带/.test(t)) return '腰带';
   return '身体';
+}
+
+// ========== 重铸（单条目，2026-08-24） ==========
+
+/**
+ * 把重铸输出转成「替换 patch」—— remove 旧的（按名）+ add 新的，同一次 commitChatState 原子落库。
+ *
+ * 🔴 只认 `replace === targetName` 的那一条（AI 在重铸模式下用它点名被替换的已知条目）；
+ *    其余输出条目一律忽略（重铸是单条目手术，AI 多写的东西不该顺手落库）。
+ */
+export function buildRewritePatches(
+  itemOutput: ItemGenOutput,
+  characterId: string,
+  targetName: string,
+): { patches: StatePatch[]; ok: boolean; reason?: string } {
+  const patches: StatePatch[] = [];
+  let matched: RewriteTarget | null = null;
+
+  for (const sk of itemOutput.skills) {
+    if (sk.replace && sk.replace === targetName) {
+      matched = { kind: 'skill', entry: sk };
+      break;
+    }
+  }
+  if (!matched) {
+    for (const eq of itemOutput.equipment) {
+      if (eq.replace && eq.replace === targetName) {
+        matched = { kind: 'equipment', entry: eq };
+        break;
+      }
+    }
+  }
+  if (!matched) {
+    for (const inv of itemOutput.inventory) {
+      if (inv.replace && inv.replace === targetName) {
+        matched = { kind: 'inventory', entry: inv };
+        break;
+      }
+    }
+  }
+  if (!matched) {
+    return {
+      patches: [],
+      ok: false,
+      reason: 'item_gen 未声明替换目标（replace 属性缺失或点名与目标不符）',
+    };
+  }
+
+  // 1. remove 旧的（按名；技能 remove_skill，物品/装备 remove_item）
+  if (matched.kind === 'skill') {
+    patches.push({
+      op: 'remove_skill',
+      target: `characters.${characterId}`,
+      value: { name: targetName },
+    });
+  } else {
+    patches.push({
+      op: 'remove_item',
+      target: `characters.${characterId}`,
+      value: { name: targetName },
+    });
+  }
+
+  // 2. add 新的（照 buildItemGenPatches 的形状，透传全部战斗声明）
+  if (matched.kind === 'skill') {
+    const sk = matched.entry;
+    patches.push({
+      op: 'add_skill',
+      target: `characters.${characterId}`,
+      value: {
+        name: sk.name,
+        description: sk.description,
+        type: sk.type,
+        cost: sk.cost,
+        cooldown: sk.cooldown,
+        effects: sk.effects,
+        scripts: sk.scripts,
+        ...(sk.modifiers?.length ? { modifiers: sk.modifiers } : {}),
+        ...(sk.buffs?.length ? { buffs: sk.buffs } : {}),
+        ...(sk.divinity !== undefined ? { divinity: sk.divinity } : {}),
+        ...(sk.automata?.length ? { automata: sk.automata } : {}),
+        ...(sk.skillPower !== undefined ? { skillPower: sk.skillPower } : {}),
+        ...(sk.relevantAttribute ? { relevantAttribute: sk.relevantAttribute } : {}),
+        ...(sk.damageType ? { damageType: sk.damageType } : {}),
+      },
+      metadata: { source: 'item_gen', kind: 'skill', rewriteOf: targetName },
+    });
+  } else if (matched.kind === 'equipment') {
+    const eq = matched.entry;
+    patches.push({
+      op: 'add_item',
+      target: `characters.${characterId}`,
+      value: {
+        name: eq.name,
+        description: eq.description,
+        quantity: 1,
+        type: '装备',
+        rarity: eq.quality,
+        equippedSlot: normalizeSlot(eq.slot),
+        stats: eq.stats,
+        durability: eq.durability,
+        maxDurability: eq.durability,
+        ...(eq.effects && Object.keys(eq.effects).length > 0 ? { effects: eq.effects } : {}),
+        ...(eq.scripts && Object.keys(eq.scripts).length > 0 ? { scripts: eq.scripts } : {}),
+        ...(eq.modifiers?.length ? { modifiers: eq.modifiers } : {}),
+        ...(eq.buffs?.length ? { buffs: eq.buffs } : {}),
+        ...(eq.divinity !== undefined ? { divinity: eq.divinity } : {}),
+        ...(eq.automata?.length ? { automata: eq.automata } : {}),
+      },
+      metadata: { source: 'item_gen', kind: 'equipment', rewriteOf: targetName },
+    });
+  } else {
+    const inv = matched.entry;
+    patches.push({
+      op: 'add_item',
+      target: `characters.${characterId}`,
+      value: {
+        name: inv.name,
+        description: inv.description,
+        quantity: inv.quantity,
+        type: inv.type,
+        rarity: inv.rarity,
+        ...(inv.effects && Object.keys(inv.effects).length > 0 ? { effects: inv.effects } : {}),
+        ...(inv.scripts && Object.keys(inv.scripts).length > 0 ? { scripts: inv.scripts } : {}),
+        ...(inv.modifiers?.length ? { modifiers: inv.modifiers } : {}),
+        ...(inv.buffs?.length ? { buffs: inv.buffs } : {}),
+        ...(inv.divinity !== undefined ? { divinity: inv.divinity } : {}),
+        ...(inv.automata?.length ? { automata: inv.automata } : {}),
+      },
+      metadata: { source: 'item_gen', kind: 'inventory', rewriteOf: targetName },
+    });
+  }
+
+  return { patches, ok: true };
+}
+
+/**
+ * 单条目重铸：以条目当前数据 + 玩家描述为输入，调 item_gen 重新编写该条目，
+ * 然后 remove 旧的 + add 新的（同一次 commitChatState，原子）。
+ *
+ * 🔴 存档安全：零 id 变更（按名寻址）、remove+add 同一事务、失败不阻断（返回 ok:false + reason）。
+ *    玩家随时可用既有快照回退（每回合自动打快照）。
+ */
+export async function rewriteLoadoutItem(
+  request: RewriteLoadoutRequest,
+  deps: ItemGenChainDeps,
+): Promise<RewriteLoadoutResult> {
+  const targetName = request.target.entry.name;
+  const localParams: Record<string, string> = {
+    // 重铸模式：<物品需求> 给一句意图说明（重铸的主输入是 <重铸目标> / <重铸原因>）
+    ITEM_REQUEST: `重铸模式：请重写条目「${targetName}」，输出对应条目并在其上带 replace="${targetName}" 属性声明替换。`,
+    REWRITE_TARGET: JSON.stringify(request.target.entry, null, 2),
+    REWRITE_REASON: request.userDescription ?? '',
+    CHAR_GEN_RESULT: '',
+    CRAFT_RESULT: '',
+  };
+
+  const itemOutput = await callItemGenRaw(
+    { ...request, storyOutput: request.storyOutput ?? '' },
+    deps,
+    localParams,
+  );
+
+  const r = buildRewritePatches(itemOutput, request.characterId, targetName);
+  if (!r.ok) return { ok: false, patches: [], itemOutput, reason: r.reason };
+
+  if (deps.stateManager && r.patches.length > 0) {
+    await deps.stateManager.commitChatState(r.patches);
+  }
+
+  return { ok: true, patches: r.patches, itemOutput };
 }
 
 // ========== Lazy Import for parseItemGenOutput ==========

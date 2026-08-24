@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue';
-import { useGameStore } from '../../stores/game-store';
+import { useGameStore, setRewriteLoadoutImpl } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAudioStore } from '../../stores/audio-store';
@@ -161,6 +161,13 @@ onMounted(async () => {
                 retryable: true,
               }),
       }),
+    );
+    // 🆕 重铸（2026-08-24）：单条目重铸的注入缝 —— GamePipeline 装配
+    //     endpoint / chainData（含 worldBooks） / stateManager；store 与面板不直接碰装配。
+    setRewriteLoadoutImpl((characterId, target, userDescription) =>
+      pipeline
+        ? pipeline.rewriteLoadoutItem(characterId, target, userDescription)
+        : Promise.resolve({ ok: false, reason: '游戏管线还没就绪，稍后再试' }),
     );
     // 🎵 曲库必须在这里装 —— 此前只有设置页音频分区和迷你播放器会 init()，
     // 没打开过它们的会话曲库是空的，选曲永远命中不了任何东西。

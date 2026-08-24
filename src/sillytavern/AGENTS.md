@@ -150,9 +150,14 @@ src/sillytavern/                    ← 核心引擎
   ├── random-tables.ts              ← [Phase 8.5] NPC 生成随机表
   │
   ├── field-enums.ts                ← [M1] 中文枚举集中定义 + 归一化（铁律5）
-  ├── tier-constants.ts / bloodlines.ts / validate.ts / char-query.ts
-  ├── resource-calc.ts / var-resolver.ts / namespace-normalizer.ts / time-system.ts
-  │
+├── tier-constants.ts / bloodlines.ts / validate.ts / char-query.ts
+├── resource-calc.ts / var-resolver.ts / namespace-normalizer.ts / time-system.ts
+├── exp-table.ts                  ← 🆕 [经验系统 v2 2026-08-24] 累计经验表（LEVEL_XP_TABLE，照参考脚本）
+│                                     + Code 接管升级（resolveLevelUps）+ 登神长阶放宽版（resolveAscensionFlyup）
+│                                     + 战斗经验系数按档（EXPERIENCE_COEFFICIENTS normal/easy）
+│                                     + 旧档归一化（applyExpFloor 幂等只提升）。char-gen / resource-calc /
+│                                     tier-constants / combat-v3 coordinator 的等级经验逻辑统一委托此处
+│
   ├── save-profile.ts               ← [Phase 4.6] 存档级 FP 元货币（M5: +variables 变量唯一真源）
   ├── effect-parser.ts / effect-runtime.ts
   ├── ejs-backend.ts                ← [能力面 T1] EjsBackend 接口 + LegacyBackend + 生产切换入口

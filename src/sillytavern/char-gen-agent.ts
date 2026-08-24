@@ -39,6 +39,7 @@ import type { EffectAutomaton } from './combat-v3/types';
 import { scanCharDetects } from './marker-protocol';
 import { buildAgentMessagesAsync } from './agent-templates';
 import { getTierConfig, calcResources } from './tier-constants';
+import { xpToNextNumber } from './exp-table';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { normalizeSlot } from './field-enums';
 import { validateItemOutput } from './combat-item-validator';
@@ -416,7 +417,7 @@ export function assembleCharacterState(
     level: charData.level,
     attributes: charData.attributes,
     ...calcResources(charData.tier, charData.attributes),
-    expToNext: tierConfig?.expCap ?? 100,
+    expToNext: xpToNextNumber(charData.level),
     ascension: {
       enabled: charData.ascension.enabled,
       elements: (charData.ascension.elements ?? []).map((e, i) => ({
@@ -1245,6 +1246,8 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
         ...(typeof it.skillPower === 'number' ? { skillPower: it.skillPower } : {}),
         ...(it.relevantAttribute ? { relevantAttribute: it.relevantAttribute } : {}),
         ...(it.damageType ? { damageType: it.damageType } : {}),
+        // 🆕 重铸 (2026-08-24): JSON 兜底路径同样收 replace（声明替换目标）
+        ...(typeof it.replace === 'string' && it.replace ? { replace: it.replace } : {}),
       });
     } else if (isEquip) {
       out.equipment.push({
@@ -1262,6 +1265,8 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
         ...(elemDivinity !== undefined ? { divinity: elemDivinity } : {}),
         // 🆕 战斗 v3 (S3 2026-08-01): automata 透传（JSON 兜底路径）
         ...(itAutomata.length > 0 ? { automata: itAutomata } : {}),
+        // 🆕 重铸 (2026-08-24): JSON 兜底路径同样收 replace（声明替换目标）
+        ...(typeof it.replace === 'string' && it.replace ? { replace: it.replace } : {}),
       } as ItemGenOutput['equipment'][number]);
     } else {
       out.inventory.push({
@@ -1277,6 +1282,8 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
         ...(elemDivinity !== undefined ? { divinity: elemDivinity } : {}),
         // 🆕 战斗 v3 (S3 2026-08-01): automata 透传（JSON 兜底路径）
         ...(itAutomata.length > 0 ? { automata: itAutomata } : {}),
+        // 🆕 重铸 (2026-08-24): JSON 兜底路径同样收 replace（声明替换目标）
+        ...(typeof it.replace === 'string' && it.replace ? { replace: it.replace } : {}),
       } as ItemGenOutput['inventory'][number]);
     }
   }
@@ -1382,6 +1389,8 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
       ...(skillPowerAttr !== undefined ? { skillPower: skillPowerAttr } : {}),
       ...(relevantAttribute ? { relevantAttribute } : {}),
       ...(damageType ? { damageType } : {}),
+      // 🆕 重铸 (2026-08-24): replace 属性 → 声明替换目标（AI 在重铸模式下点名被替换的已知条目）
+      ...(attrs['replace'] ? { replace: attrs['replace'] } : {}),
     });
   }
   return results;
@@ -1436,6 +1445,8 @@ function parseEquipmentXML(xml: string): ItemGenOutput['equipment'] {
       ...(combat.divinity !== undefined ? { divinity: combat.divinity } : {}),
       // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传
       ...(rawAutomata.length > 0 ? { automata: rawAutomata } : {}),
+      // 🆕 重铸 (2026-08-24): replace 属性 → 声明替换目标（AI 在重铸模式下点名被替换的已知条目）
+      ...(attrs['replace'] ? { replace: attrs['replace'] } : {}),
     });
   }
   return results;
@@ -1483,6 +1494,8 @@ function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
       ...(combat.divinity !== undefined ? { divinity: combat.divinity } : {}),
       // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传
       ...(rawAutomata.length > 0 ? { automata: rawAutomata } : {}),
+      // 🆕 重铸 (2026-08-24): replace 属性 → 声明替换目标（AI 在重铸模式下点名被替换的已知条目）
+      ...(attrs['replace'] ? { replace: attrs['replace'] } : {}),
     });
   }
   return results;

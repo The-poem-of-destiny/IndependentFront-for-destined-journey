@@ -1584,18 +1584,18 @@ describe('T10：终局落库回写（2026-08-09 §2.6 方案 1：战斗后角色
     const patches = commit.mock.calls[0][0] as StatePatch[];
 
     // FP delta=0（本场景无人花 FP）→ 不发 FP patch；EXP 结算走 update_character delta
-    // （乙 tier3/Lv10 → 10×4.0=40 EXP，甲独享）
+    // （乙 tier3/Lv10 → 10×50=500 EXP，normal 经验档位系数表 T3=50，甲独享）
     expect(patches.some((p) => p.target === 'users.fp' || p.target === 'profile.fp')).toBe(false);
     expect(
       patches.some(
         (p) =>
           p.op === 'update_character' &&
           p.target === 'characters.甲' &&
-          (p.value as { totalExp?: number })?.totalExp === 40 &&
+          (p.value as { totalExp?: number })?.totalExp === 500 &&
           (p.metadata as { delta?: boolean })?.delta === true,
       ),
     ).toBe(true);
-    expect(result.totalExp).toBe(40);
+    expect(result.totalExp).toBe(500);
 
     // 甲：满血 500 / mp 100 / sp 50 覆写（战斗无消耗，原样回写）
     expect(patches).toContainEqual({ op: 'set_hp', target: 'characters.甲', value: 500 });
@@ -1668,8 +1668,9 @@ describe('§12.4 EXP 结算 + FP patch 修复（2026-08-12 真机 bug）', () =>
     ] as Array<Record<string, unknown>>,
   });
 
-  it('ally_win：被杀敌方 level×战斗系数 求和后平分给存活玩家方角色', () => {
-    // 丙 T1 Lv.5 → 5×2.0=10；甲乙均分 → 各 5
+  it('ally_win：被杀敌方 level×经验系数 求和后平分给存活玩家方角色', () => {
+    // 🔴 2026-08-24 修正系数来源：经验用世界书 [经验值获取规则] 层级系数（normal T1=10），
+    // 不再用核心数值表 combatCoefficient（2.0 是战斗伤害系数）。丙 T1 Lv.5 → 5×10=50；甲乙均分 → 各 25
     const { units, participants, characters } = mkExpScene(1, 5);
     const { patches, totalExp } = buildExpRewardPatches(
       units,
@@ -1677,22 +1678,22 @@ describe('§12.4 EXP 结算 + FP patch 修复（2026-08-12 真机 bug）', () =>
       characters,
       'ally_win',
     );
-    expect(totalExp).toBe(10);
+    expect(totalExp).toBe(50);
     expect(patches).toContainEqual({
       op: 'update_character',
       target: 'characters.甲',
-      value: { totalExp: 5 },
+      value: { totalExp: 25 },
       metadata: { source: 'combat_v3', delta: true },
     });
     expect(patches).toContainEqual({
       op: 'update_character',
       target: 'characters.乙',
-      value: { totalExp: 5 },
+      value: { totalExp: 25 },
       metadata: { source: 'combat_v3', delta: true },
     });
   });
 
-  it('ally_win：高 tier 敌方给的 EXP 按 combatCoefficient 放大（T3 Lv.10 → 10×4.0=40）', () => {
+  it('ally_win：高 tier 敌方给的 EXP 按经验系数放大（T3 Lv.10 → 10×50=500）', () => {
     const { units, participants, characters } = mkExpScene(3, 10);
     const { totalExp, patches } = buildExpRewardPatches(
       units,
@@ -1700,9 +1701,29 @@ describe('§12.4 EXP 结算 + FP patch 修复（2026-08-12 真机 bug）', () =>
       characters,
       'ally_win',
     );
-    expect(totalExp).toBe(40);
+    expect(totalExp).toBe(500);
     expect(patches).toHaveLength(2);
-    expect(patches.every((p) => (p.value as { totalExp?: number }).totalExp === 20)).toBe(true);
+    expect(patches.every((p) => (p.value as { totalExp?: number }).totalExp === 250)).toBe(true);
+  });
+
+  it('easy 模式（简单）：按方案 B 系数分档（T1 Lv.5 → 5×20=100；T3 Lv.10 → 10×76=760）', () => {
+    const { units, participants, characters } = mkExpScene(1, 5);
+    const resT1 = buildExpRewardPatches(units, participants, characters, 'ally_win', 'easy');
+    expect(resT1.totalExp).toBe(100);
+    expect(resT1.patches).toHaveLength(2);
+    expect(resT1.patches.every((p) => (p.value as { totalExp?: number }).totalExp === 50)).toBe(
+      true,
+    );
+
+    const t3 = mkExpScene(3, 10);
+    const resT3 = buildExpRewardPatches(
+      t3.units,
+      t3.participants,
+      t3.characters,
+      'ally_win',
+      'easy',
+    );
+    expect(resT3.totalExp).toBe(760);
   });
 
   it('非 ally_win（fled / enemy_win / draw）→ 不给 EXP', () => {
@@ -1742,7 +1763,7 @@ describe('§12.4 EXP 结算 + FP patch 修复（2026-08-12 真机 bug）', () =>
     });
   });
 
-  it('EXP 整除向下取整：T1 Lv.1 → 1×2.0=2 / 3 存活 → 各 0 → 不发 patch（余数丢弃且 0 无意义）', () => {
+  it('EXP 整除向下取整：T1 Lv.1 → 1×10=10 / 3 存活 → 各 3（余数丢弃）', () => {
     const { participants } = mkExpScene(1, 1);
     const units = {
       甲: { ...unitView('甲', 500, 500, 100, 100, 50, 50), side: 'player' as const },
@@ -1761,8 +1782,9 @@ describe('§12.4 EXP 结算 + FP patch 修复（2026-08-12 真机 bug）', () =>
       characters,
       'ally_win',
     );
-    expect(totalExp).toBe(0); // floor(2/3)=0 → 无人拿到 → 实际授予 0
-    expect(patches).toEqual([]);
+    expect(totalExp).toBe(10);
+    expect(patches).toHaveLength(3);
+    expect(patches.every((p) => (p.value as { totalExp?: number }).totalExp === 3)).toBe(true);
   });
 });
 
