@@ -64,7 +64,6 @@
   "exports|src/ui/lib/workshop-client.ts|buildToggleUrl",
   "exports|src/ui/stores/api-key-migration.ts|maskApiKey",
   "exports|src/ui/stores/asset-store.ts|ASSET_IMPORT_STALL_TIMEOUT_MS",
-  "exports|src/ui/stores/theme-store.ts|THEME_LIST",
   "types|src/sillytavern/asset-filename.ts|AssetFilenameRejection",
   "types|src/sillytavern/asset-import-plan.ts|PlannedAsset",
   "types|src/sillytavern/asset-import-plan.ts|PlannedAudio",
@@ -125,6 +124,7 @@
   "types|src/sillytavern/workshop-diff.ts|WorkshopDiffGroup",
   "types|src/sillytavern/workshop-diff.ts|WorkshopEntryChange",
   "types|src/sillytavern/workshop-diff.ts|WorkshopRuleChange",
+  "types|src/ui/components/home/drift/pointer-parallax.ts|PointerParallaxState",
   "types|src/ui/composables/useManualSceneImage.ts|ManualSceneImagePending",
   "types|src/ui/lib/asset-url.ts|AssetBlobLoader",
   "types|src/ui/lib/asset-zip.ts|AssetZipManifestMeta",
@@ -138,6 +138,5 @@
   "types|src/ui/stores/settings-types.ts|AudioRepeatMode",
   "types|src/ui/stores/settings-types.ts|PlotDifficultyTier",
   "types|src/ui/stores/settings-types.ts|SnapshotRetentionMode",
-  "types|src/ui/stores/theme-store.ts|ThemeDefinition",
   "types|src/ui/stores/worldbook-migration.ts|WorldBookIdRename"
 ]
