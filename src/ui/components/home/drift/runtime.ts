@@ -9,6 +9,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { THEME_LIST } from '../../../stores/theme-store';
+import { bindPointerParallax } from './pointer-parallax';
 
 export interface AstralDriftScene {
   applyTheme(themeId: string): void;
@@ -3460,19 +3461,10 @@ export function createAstralDriftScene(
   // free. Targets are damped rather than followed: an undamped camera tracks the mouse
   // exactly and immediately looks like a cheap mousemove handler.
   // ==================================================================================
-  const pointer = { x: 0, y: 0, targetX: 0, targetY: 0 };
-
-  function setupPointer() {
-    stage.addEventListener('pointermove', (event) => {
-      const bounds = stage.getBoundingClientRect();
-      pointer.targetX = ((event.clientX - bounds.left) / bounds.width - 0.5) * 2;
-      pointer.targetY = ((event.clientY - bounds.top) / bounds.height - 0.5) * 2;
-    });
-    stage.addEventListener('pointerleave', () => {
-      pointer.targetX = 0;
-      pointer.targetY = 0;
-    });
-  }
+  // The canvas layer is deliberately non-interactive, so listen on its hit-testable home
+  // container while continuing to normalise coordinates against the rendered stage.
+  const pointerBinding = bindPointerParallax(stage);
+  const pointer = pointerBinding.state;
 
   // Copied out of src/ui/themes/*.css by the generator, so the accent the shader grades
   // toward is the same hex the CSS uses. `kind` decides astral vs chart — it is the
@@ -3870,7 +3862,6 @@ export function createAstralDriftScene(
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(stage);
   resize();
-  setupPointer();
   applyTheme(options.themeId);
 
   // Warm the pipeline before the loop is allowed to measure anything.
@@ -3917,6 +3908,7 @@ export function createAstralDriftScene(
       running = false;
       cancelAnimationFrame(animationFrameId);
       resizeObserver.disconnect();
+      pointerBinding.dispose();
 
       const textures = new Set();
       scene.traverse((object) => {
