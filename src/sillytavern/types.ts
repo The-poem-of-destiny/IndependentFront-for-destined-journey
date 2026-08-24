@@ -1151,7 +1151,9 @@ export function createDefaultCharacterState(
     tierName: '普通',
     level: 1,
     totalExp: 0,
-    expToNext: 100,
+    // 🆕 累计表语义（2026-08-24）：Lv1 累计门槛 = 120（旧 expCap=100 已退役）。
+    //    types.ts 不 import exp-table（会成环），此处用字面量对齐 exp-table.LEVEL_XP_TABLE[1]。
+    expToNext: 120,
     attributes: { str: 10, dex: 10, con: 10, int: 10, spi: 10 },
     freeAttrPoints: 0,
     hp: 100,
@@ -3043,8 +3045,13 @@ export interface CraftProduct {
 
 // ========== SaveProfile (Phase 4.6) ==========
 
+/** 🆕 经验档位：normal=普通（世界书系数），easy=简单（高经验系数，主人裁定 2026-08-24） */
+export type ExperienceMode = 'normal' | 'easy';
+
 export interface SaveProfile {
   saveId: string;
+  /** 🆕 经验档位：normal=普通（世界书系数），easy=简单（高经验系数）。旧存档缺失时读取侧 `?? 'normal'` 兜底 */
+  experienceMode: ExperienceMode;
   fp: number;
   fpHistory: FPTransaction[];
   contracts: FateContract[];
@@ -3771,6 +3778,8 @@ export interface ItemGenOutput {
     relevantAttribute?: 'str' | 'dex' | 'con' | 'int' | 'spi';
     /** 🆕 skillPower 链路修复: 主体威力伤害类型 */
     damageType?: DamageType;
+    /** 🆕 重铸 (2026-08-24): 声明「把 replace 指定的已知条目替换成本条目」（item_gen `<skill replace="...">`） */
+    replace?: string;
   }>;
   /** 装备列表 */
   equipment: Array<{
@@ -3796,6 +3805,8 @@ export interface ItemGenOutput {
     divinity?: DivinityLevel;
     /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（来自 item_gen `<automaton>` JSON） */
     automata?: EffectAutomaton[];
+    /** 🆕 重铸 (2026-08-24): 声明「把 replace 指定的已知条目替换成本条目」（item_gen `<equip replace="...">`） */
+    replace?: string;
   }>;
   /** 背包物品列表 */
   inventory: Array<{
@@ -3817,6 +3828,8 @@ export interface ItemGenOutput {
     divinity?: DivinityLevel;
     /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（来自 item_gen `<automaton>` JSON） */
     automata?: EffectAutomaton[];
+    /** 🆕 重铸 (2026-08-24): 声明「把 replace 指定的已知条目替换成本条目」（item_gen `<item replace="...">`） */
+    replace?: string;
   }>;
   /** 🆕 Phase 9: 登神要素 (含 scripts + effectDescriptions) */
   elements?: Array<

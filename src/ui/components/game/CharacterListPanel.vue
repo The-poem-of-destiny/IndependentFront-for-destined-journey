@@ -10,6 +10,8 @@ import { qualityVar } from '../../lib/quality-colors';
 import { inferQualityFromStats as inferQuality } from '@engine/quality-inference';
 import ResourceBar from '../shared/ResourceBar.vue';
 import BuffChip from '../shared/BuffChip.vue';
+// 🆕 重铸（2026-08-24）：单条目重铸 —— NPC 的装备/技能/背包条目都能重写
+import type { RewriteTarget } from '@engine/item-gen-chain';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -17,7 +19,9 @@ const ui = useUIStore();
 // ═══ NPC 列表 ═══
 const selectedIdx = ref(0);
 const showScripts = ref(false);
-const detailTab = ref<'equipment' | 'skills' | 'overview' | 'ascension' | 'status'>('overview');
+const detailTab = ref<'equipment' | 'skills' | 'overview' | 'ascension' | 'status' | 'bag'>(
+  'overview',
+);
 const selStatusInspected = ref<string | null>(null);
 
 const npcs = computed(() => game.npcs || []);
@@ -67,6 +71,9 @@ function affectionPercent(npcName: string): number {
 const selEquipment = computed(() =>
   ((selected.value as any)?.inventory || []).filter((i: any) => i.equippedSlot),
 );
+const selBag = computed(() =>
+  ((selected.value as any)?.inventory || []).filter((i: any) => !i.equippedSlot),
+);
 const selSkills = computed(() => (selected.value as any)?.skills || []);
 const selScripts = computed(() => {
   const tab = detailTab.value;
@@ -77,6 +84,23 @@ const selScripts = computed(() => {
   return undefined;
 });
 const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.value).length > 0);
+// 🆕 2026-08-24：查看脚本升级为「主角物品栏（ItemsPanel）」同款 —— 除 scripts 外
+//    还展示 modifiers/automata 的原始 JSON（旧版只取第一个条目的 scripts，看不到战斗声明）。
+const selRaw = computed(() => {
+  const tab = detailTab.value;
+  const row =
+    tab === 'equipment'
+      ? (selEquipment.value[0] as any)
+      : tab === 'skills'
+        ? (selSkills.value[0] as any)
+        : undefined;
+  if (!row) return '';
+  const parts: string[] = [];
+  if (row.modifiers?.length) parts.push(JSON.stringify(row.modifiers, null, 2));
+  if (row.automata?.length) parts.push(JSON.stringify(row.automata, null, 2));
+  return parts.join('\n\n');
+});
+const hasRaw = computed(() => selRaw.value.length > 0);
 
 // ═══ 删除角色（清理龙套 NPC）═══
 const removing = ref(false);
@@ -96,6 +120,122 @@ async function deleteSelectedNpc() {
     ui.toast(`已删除角色「${name}」`, 'info');
   } else {
     ui.toast(result.error || '删除失败', 'error');
+  }
+}
+
+// ═══ 重铸（单条目，2026-08-24）═══
+
+/** 正在展开重铸输入区的条目（kind + 名字）；null = 未展开 */
+const rewriteOf = ref<{ kind: 'equipment' | 'skills' | 'bag'; name: string } | null>(null);
+const rewriteDesc = ref('');
+const rewriting = ref(false);
+
+watch(detailTab, () => {
+  rewriteOf.value = null;
+  rewriteDesc.value = '';
+});
+
+function toggleRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) {
+  if (rewriteOf.value?.kind === kind && rewriteOf.value.name === name) {
+    rewriteOf.value = null;
+    rewriteDesc.value = '';
+  } else {
+    rewriteOf.value = { kind, name };
+    rewriteDesc.value = '';
+  }
+}
+
+function isRewriting(kind: 'equipment' | 'skills' | 'bag', name: string): boolean {
+  return rewriteOf.value?.kind === kind && rewriteOf.value.name === name;
+}
+
+/** 从当前 NPC 的存档数据里找条目并转成 RewriteTarget（喂给 item_gen 当 <重铸目标>） */
+function buildNpcRewriteTarget(
+  kind: 'equipment' | 'skills' | 'bag',
+  name: string,
+): RewriteTarget | null {
+  const c = selected.value as any;
+  if (!c) return null;
+  if (kind === 'skills') {
+    const sk = (c.skills ?? []).find((s: any) => s.name === name);
+    if (!sk) return null;
+    return {
+      kind: 'skill',
+      entry: {
+        name: sk.name,
+        description: sk.description ?? '',
+        type: sk.type === 'passive' ? 'passive' : 'active',
+        ...(sk.cost ? { cost: sk.cost } : {}),
+        ...(sk.cooldown !== undefined ? { cooldown: sk.cooldown } : {}),
+        ...(sk.effects ? { effects: sk.effects } : {}),
+        ...(sk.scripts ? { scripts: sk.scripts } : {}),
+        ...(sk.modifiers?.length ? { modifiers: sk.modifiers } : {}),
+        ...(sk.buffs?.length ? { buffs: sk.buffs } : {}),
+        ...(sk.divinity !== undefined ? { divinity: sk.divinity } : {}),
+        ...(sk.automata?.length ? { automata: sk.automata } : {}),
+        ...(sk.skillPower !== undefined ? { skillPower: sk.skillPower } : {}),
+        ...(sk.relevantAttribute ? { relevantAttribute: sk.relevantAttribute } : {}),
+        ...(sk.damageType ? { damageType: sk.damageType } : {}),
+      },
+    };
+  }
+  const inv = (c.inventory ?? []).find((i: any) => i.name === name);
+  if (!inv) return null;
+  if (inv.equippedSlot) {
+    return {
+      kind: 'equipment',
+      entry: {
+        slot: inv.equippedSlot,
+        name: inv.name,
+        description: inv.description ?? '',
+        stats: inv.stats ?? {},
+        ...(inv.durability !== undefined ? { durability: inv.durability } : {}),
+        ...(inv.rarity ? { quality: inv.rarity } : {}),
+        ...(inv.effects ? { effects: inv.effects } : {}),
+        ...(inv.scripts ? { scripts: inv.scripts } : {}),
+        ...(inv.modifiers?.length ? { modifiers: inv.modifiers } : {}),
+        ...(inv.buffs?.length ? { buffs: inv.buffs } : {}),
+        ...(inv.divinity !== undefined ? { divinity: inv.divinity } : {}),
+        ...(inv.automata?.length ? { automata: inv.automata } : {}),
+      },
+    };
+  }
+  return {
+    kind: 'inventory',
+    entry: {
+      name: inv.name,
+      description: inv.description ?? '',
+      quantity: inv.quantity ?? 1,
+      type: inv.type ?? '物品',
+      ...(inv.rarity ? { rarity: inv.rarity } : {}),
+      ...(inv.effects ? { effects: inv.effects } : {}),
+      ...(inv.scripts ? { scripts: inv.scripts } : {}),
+      ...(inv.modifiers?.length ? { modifiers: inv.modifiers } : {}),
+      ...(inv.buffs?.length ? { buffs: inv.buffs } : {}),
+      ...(inv.divinity !== undefined ? { divinity: inv.divinity } : {}),
+      ...(inv.automata?.length ? { automata: inv.automata } : {}),
+    },
+  };
+}
+
+/** 执行 NPC 单条目重铸（remove 旧 + add 新同一事务，引擎侧） */
+async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) {
+  if (!selected.value?.name) return;
+  const target = buildNpcRewriteTarget(kind, name);
+  if (!target) return;
+  rewriting.value = true;
+  const result = await game.rewriteLoadoutItem(
+    selected.value.name,
+    target,
+    rewriteDesc.value.trim(),
+  );
+  rewriting.value = false;
+  rewriteOf.value = null;
+  rewriteDesc.value = '';
+  if (result.ok) {
+    ui.toast(`已重铸「${name}」`, 'success');
+  } else {
+    ui.toast(result.reason || '重铸失败', 'error');
   }
 }
 </script>
@@ -247,6 +387,15 @@ async function deleteSelectedNpc() {
             "
           >
             登神
+          </button>
+          <button
+            :class="{ active: detailTab === 'bag' }"
+            @click="
+              detailTab = 'bag';
+              showScripts = false;
+            "
+          >
+            背包 {{ selBag.length }}
           </button>
         </div>
 
@@ -464,6 +613,24 @@ async function deleteSelectedNpc() {
               <div v-if="eq.durability" class="eq-meta">
                 耐久 {{ eq.durability }}/{{ eq.maxDurability }}
               </div>
+              <button class="rewrite-btn" @click="toggleRewrite('equipment', eq.name)">
+                {{ isRewriting('equipment', eq.name) ? '收起重铸' : '重铸' }}
+              </button>
+              <div v-if="isRewriting('equipment', eq.name)" class="rewrite-body">
+                <textarea
+                  v-model="rewriteDesc"
+                  rows="3"
+                  class="rewrite-desc"
+                  placeholder="可选：哪里不对…"
+                />
+                <button
+                  class="rewrite-confirm"
+                  :disabled="rewriting"
+                  @click="doNpcRewrite('equipment', eq.name)"
+                >
+                  {{ rewriting ? '重铸中…' : '确认重铸' }}
+                </button>
+              </div>
             </div>
           </template>
 
@@ -487,6 +654,60 @@ async function deleteSelectedNpc() {
                   <span class="fx-n">{{ name }}</span
                   ><span class="fx-d">{{ desc }}</span>
                 </div>
+              </div>
+              <button class="rewrite-btn" @click="toggleRewrite('skills', sk.name)">
+                {{ isRewriting('skills', sk.name) ? '收起重铸' : '重铸' }}
+              </button>
+              <div v-if="isRewriting('skills', sk.name)" class="rewrite-body">
+                <textarea
+                  v-model="rewriteDesc"
+                  rows="3"
+                  class="rewrite-desc"
+                  placeholder="可选：哪里不对…"
+                />
+                <button
+                  class="rewrite-confirm"
+                  :disabled="rewriting"
+                  @click="doNpcRewrite('skills', sk.name)"
+                >
+                  {{ rewriting ? '重铸中…' : '确认重铸' }}
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <!-- 背包 -->
+          <template v-if="detailTab === 'bag'">
+            <div v-if="selBag.length === 0" class="empty-tab">行囊空空</div>
+            <div v-for="item in selBag" :key="item.name" class="equip-card">
+              <div class="eq-header">
+                <span class="eq-name">{{ item.name }}</span>
+                <span v-if="item.quantity > 1" class="eq-slot">×{{ item.quantity }}</span>
+              </div>
+              <div v-if="item.description" class="eq-desc">{{ item.description }}</div>
+              <div v-if="item.effects && Object.keys(item.effects).length" class="fx-list">
+                <div v-for="(desc, name) in item.effects" :key="name" class="fx-row">
+                  <span class="fx-n">{{ name }}</span
+                  ><span class="fx-d">{{ desc }}</span>
+                </div>
+              </div>
+              <button class="rewrite-btn" @click="toggleRewrite('bag', item.name)">
+                {{ isRewriting('bag', item.name) ? '收起重铸' : '重铸' }}
+              </button>
+              <div v-if="isRewriting('bag', item.name)" class="rewrite-body">
+                <textarea
+                  v-model="rewriteDesc"
+                  rows="3"
+                  class="rewrite-desc"
+                  placeholder="可选：哪里不对…"
+                />
+                <button
+                  class="rewrite-confirm"
+                  :disabled="rewriting"
+                  @click="doNpcRewrite('bag', item.name)"
+                >
+                  {{ rewriting ? '重铸中…' : '确认重铸' }}
+                </button>
               </div>
             </div>
           </template>
@@ -525,19 +746,25 @@ async function deleteSelectedNpc() {
           <!-- 背景 -->
         </div>
 
-        <!-- 脚本 (装备/技能 tab 时显示) -->
+        <!-- 脚本 / 原始数据 (装备/技能 tab 时显示) -->
         <div v-if="detailTab === 'equipment' || detailTab === 'skills'" class="script-section">
           <button class="script-toggle" @click="showScripts = !showScripts">
-            {{ showScripts ? '收起脚本' : '查看脚本' }}
+            {{ showScripts ? '收起原始数据' : '查看原始数据' }}
           </button>
           <div v-if="showScripts" class="script-body">
-            <template v-if="hasScripts">
-              <div v-for="(code, name) in selScripts" :key="name" class="script-block">
-                <div class="script-label">{{ name }}</div>
-                <pre class="script-code">{{ code }}</pre>
+            <template v-if="hasRaw || hasScripts">
+              <div v-if="hasRaw" class="script-block">
+                <div class="script-label">modifiers / automata</div>
+                <pre class="script-code">{{ selRaw }}</pre>
+              </div>
+              <div v-if="hasScripts" class="script-block">
+                <div v-for="(code, name) in selScripts" :key="name" class="script-block">
+                  <div class="script-label">{{ name }}</div>
+                  <pre class="script-code">{{ code }}</pre>
+                </div>
               </div>
             </template>
-            <div v-else class="script-empty">(该物品无脚本效果)</div>
+            <div v-else class="script-empty">(该条目无原始数据)</div>
           </div>
         </div>
       </div>
@@ -1181,6 +1408,70 @@ async function deleteSelectedNpc() {
   font-size: 0.6875rem;
   color: var(--theme-text-muted);
   font-style: italic;
+}
+
+/* ═══ 重铸（单条目，2026-08-24）═══ */
+.rewrite-btn {
+  margin-top: 8px;
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  color: var(--theme-primary, #c9a24b);
+  background: color-mix(in srgb, var(--theme-primary, #c9a24b) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-primary, #c9a24b) 40%, transparent);
+  border-radius: var(--theme-radius-sm, 4px);
+  cursor: pointer;
+  transition: all var(--theme-transition-fast);
+}
+.rewrite-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--theme-primary, #c9a24b) 18%, transparent);
+}
+.rewrite-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.rewrite-body {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--theme-surface-muted);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm, 4px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rewrite-desc {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--theme-text-primary);
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm, 4px);
+  resize: vertical;
+}
+.rewrite-desc:focus {
+  outline: none;
+  border-color: var(--theme-primary, #c9a24b);
+}
+.rewrite-confirm {
+  align-self: flex-end;
+  padding: 5px 14px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  color: var(--theme-primary-text, #fff);
+  background: var(--theme-primary, #c9a24b);
+  border: none;
+  border-radius: var(--theme-radius-sm, 4px);
+  cursor: pointer;
+  transition: opacity var(--theme-transition-fast);
+}
+.rewrite-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 空态 */

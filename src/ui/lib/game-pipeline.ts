@@ -61,6 +61,8 @@ import { toEpochMinutes } from '@engine/time-system';
 // 🆕 Delta 会话（T4）：存档切换/销毁时清理该存档的 prompt session（string 入参 = 清整个 saveId）
 import { invalidatePromptSession } from '@engine/prompt-session-assembler';
 import { resolveSceneWeather } from './scene-image-seams';
+// 🆕 重铸（2026-08-24）：单条目重铸的引擎侧类型（RewriteTarget = 要重写的技能/装备/物品三选一）
+import type { RewriteTarget } from '@engine/item-gen-chain';
 
 /** 一个游戏日的分钟数（口径同 `state-manager` 的 `MINUTES_PER_GAME_DAY`，那份未导出） */
 const MINUTES_PER_GAME_DAY = 1440;
@@ -2142,6 +2144,8 @@ export class GamePipeline {
           endpoint,
           stateManager: this.getStateManager(),
           characters: this.game.characters,
+          // 🆕 经验档位（简单/普通模式，2026-08-24）：战斗胜利经验按存档模式分档
+          experienceMode: this.game.experienceMode,
           variables: context.variables,
           context,
           // 2026-08-09 §2.7: 战斗 Agent 的 systemPrompt 从 agent-config 读（此前恒 undefined，
@@ -2519,5 +2523,56 @@ export class GamePipeline {
     );
     this.chainData = { agentConfigs, worldBooks, presets };
     return this.chainData;
+  }
+
+  /**
+   * 单条目重铸（2026-08-24）：玩家主动把某角色的一条技能/装备/物品交给 item_gen 重写。
+   *
+   * 🔴 手动触发不经过 run()，照 image_prompt 手动档先例（runImagePromptAgent）：
+   *    ensureChainData() 惰性装配 configs/worldBooks/presets + 独立活动账本。
+   *    存档安全：引擎侧 remove 旧 + add 新同一次 commitChatState（原子），零 id 变更；
+   *    玩家随时可用既有快照回退（每回合自动打快照）。
+   */
+  async rewriteLoadoutItem(
+    characterId: string,
+    target: RewriteTarget,
+    userDescription = '',
+  ): Promise<{ ok: boolean; reason?: string }> {
+    const endpoint = this.getEndpointForAgent('item_gen');
+    if (!endpoint) return { ok: false, reason: '未配置 item_gen 的 API endpoint' };
+
+    const activityRunId = this.activeRunId ?? this.game.startAgentActivityRun(undefined, true);
+    this.game.updateAgentStatus('item_gen', activityRunId);
+    let activityError: string | undefined;
+
+    try {
+      const chain = await this.ensureChainData();
+      const { rewriteLoadoutItem: runRewrite } = await import('@engine/item-gen-chain');
+      const result = await runRewrite(
+        {
+          saveId: this.saveId,
+          characterId,
+          target,
+          userDescription,
+          context: this.currentContext ?? this.buildContext(''),
+          endpoint,
+          configs: chain.agentConfigs,
+          worldBooks: chain.worldBooks,
+          presets: chain.presets,
+        },
+        {
+          clientFactory: this.getClientFactory(activityRunId),
+          stateManager: this.getStateManager(),
+        },
+      );
+      if (!result.ok) activityError = result.reason;
+      return { ok: result.ok, reason: result.reason };
+    } catch (err) {
+      activityError = err instanceof Error ? err.message : String(err);
+      console.error('[GamePipeline] item_gen 重铸失败:', err);
+      return { ok: false, reason: activityError };
+    } finally {
+      this.game.clearAgentStatus('item_gen', activityError, activityRunId);
+    }
   }
 }

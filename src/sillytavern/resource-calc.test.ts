@@ -405,19 +405,17 @@ describe('getAdventurerRank', () => {
 // ========== 经验值计算 ==========
 
 describe('expToLevel', () => {
-  it('Lv.1 → Lv.2 需要 100 经验', () => {
-    // floor(100 * 1.5^0) = floor(100 * 1) = 100
-    expect(expToLevel(1)).toBe(100);
+  it('Lv.1 累计门槛 = 120（经验系统改造 v1：累计经验表语义，与 tier-constants 同表）', () => {
+    expect(expToLevel(1)).toBe(120);
   });
 
-  it('Lv.5 → Lv.6 需要 506 经验', () => {
-    // floor(100 * 1.5^4) = floor(100 * 5.0625) = 506
-    expect(expToLevel(5)).toBe(506);
+  it('Lv.5 累计门槛 = 2400', () => {
+    expect(expToLevel(5)).toBe(2400);
   });
 
-  it('expToLevel 应单调递增', () => {
+  it('expToLevel 应单调递增（1-24；满级 25 为哨兵）', () => {
     let prev = expToLevel(1);
-    for (let lv = 2; lv <= 25; lv++) {
+    for (let lv = 2; lv < 25; lv++) {
       const curr = expToLevel(lv);
       expect(curr).toBeGreaterThan(prev);
       prev = curr;
@@ -434,13 +432,12 @@ describe('expToLevel', () => {
 });
 
 describe('totalExpForLevel', () => {
-  it('Lv.1 总经验应为 0 (未升级过)', () => {
-    expect(totalExpForLevel(1)).toBe(0);
+  it('Lv.1 累计门槛 = 120', () => {
+    expect(totalExpForLevel(1)).toBe(120);
   });
 
-  it('到达 Lv.5 总经验应为前4级之和', () => {
-    const expected = expToLevel(1) + expToLevel(2) + expToLevel(3) + expToLevel(4);
-    expect(totalExpForLevel(5)).toBe(expected);
+  it('Lv.5 累计门槛 = 2400', () => {
+    expect(totalExpForLevel(5)).toBe(2400);
   });
 
   it('totalExpForLevel 应单调递增', () => {
@@ -452,8 +449,7 @@ describe('totalExpForLevel', () => {
     }
   });
 
-  it('Lv 0 边界: 循环不执行, 返回 0', () => {
-    // level=0 时 for (i=1; i<0; i++) 不执行, 返回 0
+  it('Lv 0 边界: 查表兜底 0', () => {
     expect(totalExpForLevel(0)).toBe(0);
   });
 });

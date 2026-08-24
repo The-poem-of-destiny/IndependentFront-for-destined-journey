@@ -28,6 +28,7 @@
 import { describe, it, expect } from 'vitest';
 import * as engineDatabase from '@engine/database';
 import * as engineSessionBackup from '@engine/session-backup';
+import * as engineSaveProfile from '@engine/save-profile';
 // 源码用 Vite 的 `?raw` 拿，**不用 node 的 fs / path / __dirname**:
 //   · 仓库没装 `@types/node` —— `src/**` 下 `import 'fs'` 会让裸 tsc 报 TS2307，
 //     `__dirname` 在 ESM 里也不存在（TS2304）；
@@ -53,6 +54,8 @@ const KNOWN_MODULES: Record<string, Record<string, unknown>> = {
   '@engine/database': engineDatabase as unknown as Record<string, unknown>,
   // DataSection 的整库导入闸门（isFullBackupFile）—— 单存档导出/导入随存档互传上线
   '@engine/session-backup': engineSessionBackup as unknown as Record<string, unknown>,
+  // DataSection 的经验档位切换（persistExperienceMode）—— 命名写入口
+  '@engine/save-profile': engineSaveProfile as unknown as Record<string, unknown>,
 };
 
 interface DestructureSite {

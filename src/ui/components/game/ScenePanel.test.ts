@@ -20,6 +20,20 @@ import ScenePanel from './ScenePanel.vue';
 const mockPersistNewsRead = vi.fn(async (_saveId: string, _newsId: string) => undefined);
 vi.mock('@engine/save-profile', () => ({
   persistNewsRead: (...args: any[]) => (mockPersistNewsRead as any)(...args),
+  // 轻量替身（本文件 fixture 的 quests 恒为空对象；真实实现见 save-profile.ts 的 getGroupedQuests，
+  // 引擎侧的排序/分组正确性由 save-profile.test.ts 负责）
+  getGroupedQuests: (profile: any) => {
+    const quests = profile?.quests ?? {};
+    const order: Record<string, number> = { 高: 0, 中: 1, 低: 2 };
+    const isDone = (q: any) => q?.status === '已完成' || q?.status === '失败';
+    const cmp = (a: [string, any], b: [string, any]) =>
+      (order[a[1]?.priority] ?? 2) - (order[b[1]?.priority] ?? 2) || a[0].localeCompare(b[0]);
+    const entries = Object.entries(quests);
+    return {
+      active: entries.filter(([, q]) => !isDone(q)).sort(cmp),
+      done: entries.filter(([, q]) => isDone(q)).sort(cmp),
+    };
+  },
 }));
 
 let mockProfile: any;

@@ -458,7 +458,8 @@ describe('assembleCharacterState', () => {
     expect(result.maxHp).toBe(20042);
     expect(result.maxMp).toBe(28000);
     expect(result.maxSp).toBe(28000);
-    expect(result.expToNext).toBe(25000); // T5 expCap
+    // 经验系统改造 v1：expToNext = 当前等级累计门槛（Lv15 = LEVEL_XP_TABLE[15]）
+    expect(result.expToNext).toBe(62040);
   });
 });
 
@@ -1782,5 +1783,53 @@ describe('extractPersonalityText', () => {
     const xml =
       '<char_result><personality code="wOaGz(A)"><description>冷静果断</description><note>细节</note></personality></char_result>';
     expect(extractPersonalityText(xml)).toBe('wOaGz(A)+冷静果断\n细节');
+  });
+});
+
+// ========== parseItemGenOutput — replace 属性（重铸范式，2026-08-24） ==========
+
+describe('parseItemGenOutput — replace 属性（重铸范式）', () => {
+  it('XML: <skill replace="..."> → skills[0].replace', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = `<item_result><skills>
+<skill name="火球术" type="active" power="400" dtype="能量" replace="火球术">新火球</skill>
+</skills></item_result>`;
+    const out = parseItemGenOutput(raw);
+    expect(out.skills[0].replace).toBe('火球术');
+    expect(out.skills[0].name).toBe('火球术');
+  });
+
+  it('XML: <equip replace="..."> → equipment[0].replace', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = `<item_result><equipment>
+<equip slot="武器" name="炽炎剑" replace="铁剑">新剑</equip>
+</equipment></item_result>`;
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment[0].replace).toBe('铁剑');
+  });
+
+  it('XML: <item replace="..."> → inventory[0].replace', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = `<item_result><inventory>
+<item name="治疗药水" quantity="3" type="消耗品" replace="治疗药水">新药水</item>
+</inventory></item_result>`;
+    const out = parseItemGenOutput(raw);
+    expect(out.inventory[0].replace).toBe('治疗药水');
+  });
+
+  it('JSON 兜底: replace 字段 → 各容器透传', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = `<item_result>{"skills":[{"name":"火球术","type":"active","replace":"火球术"}],"equipment":[{"name":"炽炎剑","slot":"武器","replace":"铁剑"}],"inventory":[{"name":"药水","quantity":1,"type":"消耗品","replace":"药水"}]}</item_result>`;
+    const out = parseItemGenOutput(raw);
+    expect(out.skills[0].replace).toBe('火球术');
+    expect(out.equipment[0].replace).toBe('铁剑');
+    expect(out.inventory[0].replace).toBe('药水');
+  });
+
+  it('旧范式无 replace → 字段缺省（undefined，不污染普通新增链路）', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = `<item_result><skills><skill name="灼热射线" type="active">无 replace</skill></skills></item_result>`;
+    const out = parseItemGenOutput(raw);
+    expect(out.skills[0].replace).toBeUndefined();
   });
 });

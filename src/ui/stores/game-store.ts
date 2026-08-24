@@ -26,13 +26,33 @@ import {
   getSnapshots,
 } from '@engine/database';
 import { saveMessage, getMessages, saveSaveSlot } from '@engine/database';
+// 旧档经验保底归一化（方案 A，2026-08-24）：加载时对主角自愈「等级与累计经验矛盾」
+//（旧档 totalExp 是层级内语义，新系统是全程累计）。幂等，正常存档零影响。
+import { normalizePlayerProgression } from '@engine/database';
 import { createStateManager } from '@engine/state-manager';
+import { getExperienceMode } from '@engine/save-profile';
 import { invalidatePromptSession } from '@engine/prompt-session-assembler';
 import { allocateAttributePoint } from '@engine/attribute-allocation';
 import type { AllocatableAttr } from '@engine/attribute-allocation';
 import { detach } from './db-write';
 import type { CombatEvent } from '@engine/combat-v2-types';
 import { agentActivityLabel, presentToolActivity } from '../lib/agent-activity';
+// 🆕 重铸（2026-08-24）：单条目重铸的类型 + 注入缝（实现由 GamePage 挂 GamePipeline.rewriteLoadoutItem）
+import type { RewriteTarget } from '@engine/item-gen-chain';
+
+/** 重铸实现注入缝 —— GamePipeline 装配好 endpoint/chainData/stateManager 后由 GamePage 挂进来 */
+export type RewriteLoadoutImpl = (
+  characterId: string,
+  target: RewriteTarget,
+  userDescription: string,
+) => Promise<{ ok: boolean; reason?: string }>;
+
+let rewriteLoadoutImpl: RewriteLoadoutImpl | null = null;
+
+/** 由 GamePage 在创建 GamePipeline 后调用，把引擎实现挂进 store（照 scene-image-seams 的缝模式） */
+export function setRewriteLoadoutImpl(impl: RewriteLoadoutImpl): void {
+  rewriteLoadoutImpl = impl;
+}
 
 /** 单条 Agent 调试日志（含完整请求/响应上下文） */
 export interface DebugAgentEntry {
@@ -446,6 +466,10 @@ export const useGameStore = defineStore('game', () => {
   const saveProfile = ref<SaveProfile | null>(null);
   const fp = computed(() => saveProfile.value?.fp || 0);
   const gameTime = computed(() => saveProfile.value?.gameTime ?? null);
+  /** 🆕 经验档位（简单/普通模式，2026-08-24）：读 SaveProfile.experienceMode，旧档缺字段兜底 normal */
+  const experienceMode = computed(() =>
+    getExperienceMode(saveProfile.value ?? ({} as SaveProfile)),
+  );
 
   // === 新闻（存档级，守护非可选字段的运行时缺失与坏数据） ===
   const news = computed(() =>
@@ -983,7 +1007,7 @@ export const useGameStore = defineStore('game', () => {
       getLatestPlotOutline(saveId),
     ]);
 
-    characters.value = (chars as CharacterState[]) ?? [];
+    characters.value = (await normalizePlayerProgression(chars as CharacterState[])) ?? [];
     recentMemories.value = (mems as MemoryRecord[]) ?? [];
     activePlotEvents.value = (events as PlotEvent[]) ?? [];
     plotOutline.value = (outline as PlotOutline) ?? null;
@@ -1023,6 +1047,8 @@ export const useGameStore = defineStore('game', () => {
 
       // 2. characters：合并语义 —— DB 版本覆盖同 id 内存版本（拿到最新背包/装备/资源），
       //    DB 里属于本存档但内存没有的角色追加（查询已按 saveId 索引预过滤）；内存独有的（预览注入等）保留。
+      //    先做旧档经验保底归一化（就地改 + 有变化落库），这样合并进内存的也是归一化后的数。
+      await normalizePlayerProgression(dbChars as CharacterState[]);
       const dbById = new Map((dbChars as CharacterState[]).map((c) => [c.id, c]));
       characters.value = characters.value.map((c) => dbById.get(c.id) ?? c);
       const memIds = new Set(characters.value.map((c) => c.id));
@@ -1195,6 +1221,25 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
+   * 单条目重铸（2026-08-24）：把某角色的一条技能/装备/物品交给 item_gen 重写。
+   *
+   * 🔴 实现走注入缝（GamePipeline.rewriteLoadoutItem），store 不直接碰引擎装配；
+   *    成功即 refreshFromDb 回读最新 characters（含替换后的条目），面板随之刷新。
+   *    存档安全：remove 旧 + add 新同一次 commitChatState（原子），玩家可用快照回退。
+   */
+  async function rewriteLoadoutItem(
+    characterId: string,
+    target: RewriteTarget,
+    userDescription = '',
+  ): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    if (!rewriteLoadoutImpl) return { ok: false, reason: '游戏管线未就绪' };
+    const result = await rewriteLoadoutImpl(characterId, target, userDescription);
+    if (result.ok) await refreshFromDb();
+    return result;
+  }
+
+  /**
    * 手动落位：把玩家的位置路径改成某个地块名（势力地图「设为当前位置」唯一写入口）。
    *
    * 🔴 **只提交一条 `set_location`，绝不自己写 `worldFlags.map`**：地块是位置路径的
@@ -1296,6 +1341,7 @@ export const useGameStore = defineStore('game', () => {
     saveProfile,
     fp,
     gameTime,
+    experienceMode,
     news,
     getThoughts,
     sidebarCollapsed,
@@ -1353,6 +1399,7 @@ export const useGameStore = defineStore('game', () => {
     removeSkill,
     removeCharacter,
     setPlayerLocation,
+    rewriteLoadoutItem,
     devArmRandomEvent,
   };
 });

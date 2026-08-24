@@ -9,6 +9,7 @@
  */
 
 import type { CharacterState, ResourceQuery, ResourceResult } from './types';
+import { getRequiredXpForLevel, EXP_MAX_NUMBER } from './exp-table';
 
 // ========== 百分比 ==========
 
@@ -111,18 +112,19 @@ export function getAdventurerRank(char: CharacterState): string {
 
 // ========== 经验值计算 ==========
 
-/** 计算升级所需经验 */
+/**
+ * 计算升级所需经验 —— **当前等级对应的累计经验门槛**（经验系统改造 v1，2026-08-24）。
+ * 原公式 100×1.5^(level-1) 已退役；与 tier-constants.calcExpToNext 委托同一张表（exp-table），
+ * 两处不会漂移。满级（Lv25）返回 EXP_MAX_NUMBER 哨兵。
+ */
 export function expToLevel(level: number): number {
-  return Math.floor(100 * Math.pow(1.5, level - 1));
+  const v = getRequiredXpForLevel(level);
+  return typeof v === 'number' ? v : EXP_MAX_NUMBER;
 }
 
-/** 计算总经验值 */
+/** 计算总经验值（该等级累计经验门槛，照脚本 LevelXpTable，Lv1=120） */
 export function totalExpForLevel(level: number): number {
-  let total = 0;
-  for (let i = 1; i < level; i++) {
-    total += expToLevel(i);
-  }
-  return total;
+  return expToLevel(level);
 }
 
 /** 计算怪物经验奖励 */

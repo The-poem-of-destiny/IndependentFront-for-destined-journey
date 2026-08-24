@@ -61,6 +61,18 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
           placeholder="输入地点名称"
           class="custom-field"
         />
+        <!-- 🆕 经验档位（简单/普通模式，2026-08-24）：游戏内可随时切换，捏人时先选一份默认 -->
+        <FormSelect
+          v-model="store.experienceMode"
+          label="经验档位"
+          :options="[
+            { label: '普通', value: 'normal' },
+            { label: '简单', value: 'easy' },
+          ]"
+        />
+        <p class="form-hint">
+          简单模式升级更快：一层约2倍、二层约1.8倍、三层约1.5倍战斗经验，层级越高差距越小，六层起与普通持平。可随时切换。
+        </p>
         <FormInput
           v-model="store.personality"
           label="性格"
@@ -314,6 +326,13 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
   background: color-mix(in srgb, var(--theme-color-primary) 6%, transparent);
   border: 1px solid color-mix(in srgb, var(--theme-color-primary) 25%, var(--theme-card-border));
   border-radius: var(--theme-radius-sm);
+}
+/* 🆕 经验档位说明小字（对齐 FormInput.vue 的 .form-hint 口径：0.75rem + muted） */
+.form-hint {
+  margin: -2px 0 0;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--theme-text-muted);
 }
 
 /* ===== 右侧 ===== */

@@ -99,6 +99,7 @@ const gameStore = {
 
 vi.mock('../../stores/game-store', () => ({
   useGameStore: vi.fn(() => gameStore),
+  setRewriteLoadoutImpl: vi.fn(),
 }));
 
 vi.mock('../../stores/ui-store', () => ({

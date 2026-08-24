@@ -176,17 +176,17 @@ describe('calcResources', () => {
 // ========== calcExpToNext 升级经验 ==========
 
 describe('calcExpToNext', () => {
-  it('level=1 → floor(100 × 1.5^0) = 100', () => {
-    expect(calcExpToNext(1)).toBe(100);
+  it('level=1 → 累计门槛 120（经验系统改造 v1：累计经验表语义）', () => {
+    expect(calcExpToNext(1)).toBe(120);
   });
 
-  it('level=5 → floor(100 × 1.5^4) = floor(506.25) = 506', () => {
-    expect(calcExpToNext(5)).toBe(506);
+  it('level=5 → 累计门槛 2400', () => {
+    expect(calcExpToNext(5)).toBe(2400);
   });
 
-  it('应单调递增: 1 到 25 级每级所需经验只增不减', () => {
+  it('应单调递增: 1 到 24 级门槛只增不减（满级 25 为哨兵）', () => {
     let prev = calcExpToNext(1);
-    for (let lv = 2; lv <= 25; lv++) {
+    for (let lv = 2; lv < 25; lv++) {
       const curr = calcExpToNext(lv);
       expect(curr).toBeGreaterThanOrEqual(prev);
       prev = curr;
@@ -210,23 +210,16 @@ describe('calcExpToNext', () => {
 // ========== totalExpForLevel 总经验值 ==========
 
 describe('totalExpForLevel', () => {
-  it('level=1 总经验应为 0 (无升级)', () => {
-    expect(totalExpForLevel(1)).toBe(0);
+  it('level=1 总经验应为累计门槛 120', () => {
+    expect(totalExpForLevel(1)).toBe(120);
   });
 
-  it('level=0 边界: 循环不执行, 返回 0', () => {
+  it('level=0 边界: 查表兜底 0', () => {
     expect(totalExpForLevel(0)).toBe(0);
   });
 
-  it('level=5 → 前 4 级 exp 之和', () => {
-    const expected = calcExpToNext(1) + calcExpToNext(2) + calcExpToNext(3) + calcExpToNext(4);
-    // 100 + 150 + 225 + 337 = 812
-    expect(totalExpForLevel(5)).toBe(expected);
-  });
-
-  it('level=5 具体值应为 812', () => {
-    // 100 + 150 + 225 + 337 = 812
-    expect(totalExpForLevel(5)).toBe(812);
+  it('level=5 → 累计门槛 2400', () => {
+    expect(totalExpForLevel(5)).toBe(2400);
   });
 
   it('应单调非递减', () => {

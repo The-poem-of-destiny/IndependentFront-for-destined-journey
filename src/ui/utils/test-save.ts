@@ -412,6 +412,7 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
   const { getBranding } = await import('../branding-defaults');
   const profile: SaveProfile = {
     saveId,
+    experienceMode: 'normal',
     fp: 500,
     fpHistory: [
       {

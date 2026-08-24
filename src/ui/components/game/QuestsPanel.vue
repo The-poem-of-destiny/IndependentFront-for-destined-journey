@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { useGameStore } from '../../stores/game-store';
-import { persistFocusQuest } from '@engine/save-profile';
+import {
+  persistFocusQuest,
+  persistQuestStatus,
+  persistRemoveQuest,
+  getGroupedQuests,
+} from '@engine/save-profile';
+import type { Quest } from '@engine/types';
 
 const game = useGameStore();
 
@@ -41,34 +47,76 @@ const inspected = computed(() => {
   return quests?.[inspectQuest.value] || null;
 });
 
-const questEntries = computed(() => {
-  const quests = game.saveProfile?.quests;
-  if (!quests) return [];
-  const priorityOrder: Record<string, number> = { 高: 0, 中: 1, 低: 2 };
-  return Object.entries(quests).sort(
-    ([, a], [, b]) => (priorityOrder[a.priority] ?? 2) - (priorityOrder[b.priority] ?? 2),
-  );
-});
+const grouped = computed(() =>
+  game.saveProfile ? getGroupedQuests(game.saveProfile) : { active: [], done: [] },
+);
+
+/** 平铺合并（分组内已按关注度排序），供概览计数 / 筛选 / 焦点下拉使用 */
+const questEntries = computed(() => [...grouped.value.active, ...grouped.value.done]);
 
 const statusFilters = computed(() => {
   const statuses = new Set(questEntries.value.map(([, q]) => q.status || '未开始'));
   return ['全部', ...Array.from(statuses)];
 });
 
-const filteredEntries = computed(() => {
-  if (activeFilter.value === '全部') return questEntries.value;
-  return questEntries.value.filter(([, q]) => (q.status || '未开始') === activeFilter.value);
-});
+const matchesFilter = (q: Quest): boolean =>
+  activeFilter.value === '全部' || (q.status || '未开始') === activeFilter.value;
 
-const activeCount = computed(
-  () => questEntries.value.filter(([, q]) => q.status !== '已完成' && q.status !== '失败').length,
-);
+/** 进行中段（非已完成/非失败），段内已按关注度排序 —— 渲染在列表上半部 */
+const activeSection = computed(() => grouped.value.active.filter(([, q]) => matchesFilter(q)));
+
+/** 已完成段（已完成/失败），段内已按关注度排序 —— 渲染在列表底部 */
+const doneSection = computed(() => grouped.value.done.filter(([, q]) => matchesFilter(q)));
+
+/** 任一筛选结果非空（列表 / 空态切换） */
+const hasAny = computed(() => activeSection.value.length + doneSection.value.length > 0);
+
+/** 分段渲染数据：进行中在上、已完成在下（空段由模板隐藏标题） */
+const questSections = computed(() => [
+  { title: '进行中', entries: activeSection.value },
+  { title: '已完成', entries: doneSection.value },
+]);
+
+/** 进行中计数 —— 只数 active，不含已完成/失败 */
+const activeCount = computed(() => grouped.value.active.length);
 
 const focusQuestData = computed(() => {
   const quests = game.saveProfile?.quests;
   if (!quests || !focusQuest.value) return null;
   return quests[focusQuest.value] || null;
 });
+
+/**
+ * 手动标记完成 —— 先改内存 reactive（即时分段移位、其他面板即时可见），
+ * 再交给引擎的窄字段写入口落库。失败不致命，记日志即可（persistFocusQuest 同款）。
+ */
+async function markDone(name: string | null) {
+  if (!name) return;
+  const profile = game.saveProfile;
+  const quest = profile?.quests?.[name];
+  if (!profile || !quest) return;
+  quest.status = '已完成';
+  try {
+    await persistQuestStatus(profile.saveId, name, '已完成');
+  } catch (err) {
+    console.error('[QuestsPanel] 标记任务完成持久化失败:', err);
+  }
+}
+
+/**
+ * 手动删除一个已完成任务 —— 先改内存 reactive，再交给引擎的窄字段写入口落库。
+ */
+async function removeQuestEntry(name: string | null) {
+  if (!name) return;
+  const profile = game.saveProfile;
+  if (!profile || !profile.quests?.[name]) return;
+  delete profile.quests[name];
+  try {
+    await persistRemoveQuest(profile.saveId, name);
+  } catch (err) {
+    console.error('[QuestsPanel] 删除任务持久化失败:', err);
+  }
+}
 </script>
 
 <template>
@@ -124,37 +172,53 @@ const focusQuestData = computed(() => {
       </button>
     </div>
 
-    <!-- ═══ 任务卡片 ═══ -->
-    <div v-if="filteredEntries.length > 0" class="quest-list">
-      <div
-        v-for="[name, q] in filteredEntries"
-        :key="name"
-        class="quest-card"
-        @click="inspectQuest = name"
-      >
-        <div class="qc-header">
-          <span class="qc-name">{{ name }}</span>
-          <span class="qc-prio" :class="'p-' + q.priority">{{ q.priority }}</span>
-          <span class="qc-status">{{ q.status || '未开始' }}</span>
-        </div>
-
-        <div v-if="q.progress" class="qc-progress">
-          {{ q.progress }}
-        </div>
-
-        <div v-if="q.detail" class="qc-detail">
-          {{ q.detail }}
-        </div>
-
-        <div class="qc-meta">
-          <div v-if="q.objective" class="qc-row">
-            <span>目标</span><span>{{ q.objective }}</span>
+    <!-- ═══ 任务卡片（进行中在上 / 已完成在下） ═══ -->
+    <div v-if="hasAny" class="quest-list">
+      <template v-for="sec in questSections" :key="sec.title">
+        <div v-if="sec.entries.length" class="quest-section-title">{{ sec.title }}</div>
+        <div
+          v-for="[name, q] in sec.entries"
+          :key="name"
+          class="quest-card"
+          @click="inspectQuest = name"
+        >
+          <div class="qc-header">
+            <span class="qc-name">{{ name }}</span>
+            <span class="qc-prio" :class="'p-' + q.priority">{{ q.priority }}</span>
+            <span class="qc-status">{{ q.status || '未开始' }}</span>
           </div>
-          <div v-if="q.reward" class="qc-row">
-            <span>奖励</span><span>{{ q.reward }}</span>
+
+          <div v-if="q.progress" class="qc-progress">
+            {{ q.progress }}
+          </div>
+
+          <div v-if="q.detail" class="qc-detail">
+            {{ q.detail }}
+          </div>
+
+          <div class="qc-meta">
+            <div v-if="q.objective" class="qc-row">
+              <span>目标</span><span>{{ q.objective }}</span>
+            </div>
+            <div v-if="q.reward" class="qc-row">
+              <span>奖励</span><span>{{ q.reward }}</span>
+            </div>
+          </div>
+
+          <div class="qc-actions">
+            <button v-if="q.status !== '已完成'" class="qc-action-btn" @click.stop="markDone(name)">
+              标记完成
+            </button>
+            <button
+              v-else
+              class="qc-action-btn qc-action-danger"
+              @click.stop="removeQuestEntry(name)"
+            >
+              删除
+            </button>
           </div>
         </div>
-      </div>
+      </template>
     </div>
     <div v-else class="empty">暂无符合条件的任务</div>
 
@@ -211,6 +275,18 @@ const focusQuestData = computed(() => {
             <div class="im-block">
               <div class="im-label">奖励</div>
               <div class="im-text">{{ inspected.reward || '暂无奖励' }}</div>
+            </div>
+            <div class="im-actions">
+              <button
+                v-if="inspected.status !== '已完成'"
+                class="im-btn"
+                @click="markDone(inspectQuest)"
+              >
+                标记完成
+              </button>
+              <button v-else class="im-btn im-btn-danger" @click="removeQuestEntry(inspectQuest)">
+                删除
+              </button>
             </div>
           </div>
         </div>
@@ -435,6 +511,49 @@ const focusQuestData = computed(() => {
   color: var(--theme-text-primary);
 }
 
+/* ═══ 任务段标题（进行中 / 已完成） ═══ */
+.quest-section-title {
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--theme-text-muted);
+  padding: 8px 2px 0;
+}
+
+/* ═══ 卡片操作按钮（标记完成 / 删除） ═══ */
+.qc-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 2px;
+}
+.qc-action-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--theme-primary);
+  border-radius: 14px;
+  background: none;
+  color: var(--theme-primary);
+  font-size: 0.6875rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.qc-action-btn:hover {
+  background: var(--theme-primary-bg);
+  color: var(--theme-primary-text);
+}
+.qc-action-danger {
+  border-color: var(--theme-error);
+  color: var(--theme-error);
+}
+.qc-action-danger:hover {
+  background: color-mix(in srgb, var(--theme-error) 12%, transparent);
+  color: var(--theme-error);
+}
+
 .empty {
   padding: 40px;
   text-align: center;
@@ -548,5 +667,39 @@ const focusQuestData = computed(() => {
 .im-dash {
   border-top: 1px dashed var(--theme-card-border);
   margin: 0;
+}
+
+/* ═══ 浮层操作按钮（标记完成 / 删除） ═══ */
+.im-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 0 2px;
+}
+.im-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--theme-primary);
+  border-radius: var(--theme-radius-sm, 4px);
+  background: var(--theme-primary-bg);
+  color: var(--theme-primary);
+  font-size: 0.8125rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.im-btn:hover {
+  background: var(--theme-primary);
+  color: var(--theme-primary-text);
+}
+.im-btn-danger {
+  border-color: var(--theme-error);
+  background: color-mix(in srgb, var(--theme-error) 8%, transparent);
+  color: var(--theme-error);
+}
+.im-btn-danger:hover {
+  background: var(--theme-error);
+  color: #fff;
 }
 </style>

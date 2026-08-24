@@ -23,8 +23,11 @@ import type {
   PlotOutline,
   ApiEndpoint,
   AgentConfig,
+  ExperienceMode,
 } from '@engine/types';
-import { TIER_CONFIGS, calcResources } from '@engine/tier-constants';
+import { calcResources } from '@engine/tier-constants';
+// 🆕 经验系统改造 v1：创建角色时 totalExp/expToNext 用累计表语义（旧 expCap 已退役）
+import { getRequiredXpForLevel, xpToNextNumber } from '@engine/exp-table';
 // Q-05：从模型输出抢救 JSON 的唯一入口
 import { extractJsonPayload } from '@engine/model-json';
 import { getBloodlineList, getBloodlineSet, type BloodlineSet } from '@engine/bloodlines';
@@ -268,6 +271,8 @@ export const useCreateStore = defineStore('create', () => {
   // 等级 & 属性 (→ 变量路径) — 对齐原版 custom_start_index.html
   // ═══════════════════════════════════════════════════════
   const level = ref(1);
+  /** 🆕 经验档位（简单/普通模式，2026-08-24）：创建存档时写入 SaveProfile.experienceMode，游戏内可随时切换 */
+  const experienceMode = ref<ExperienceMode>('normal');
   const basePoints = ref<Record<string, number>>({ 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 });
   const attributePoints = ref<Record<string, number>>({
     力量: 0,
@@ -1570,8 +1575,11 @@ export const useCreateStore = defineStore('create', () => {
       tier: tier.value,
       tierName: tierName.value,
       level: level.value,
-      totalExp: 0,
-      expToNext: TIER_CONFIGS[tier.value - 1]?.expCap ?? 100,
+      // 🆕 累计表语义（2026-08-24）：totalExp = 升到当前等级所需累计门槛（Lv1 → 0），
+      //    expToNext = 当前级累计门槛。与旧 expCap 语义解耦，新档即符合累加式。
+      //    level-1 ∈ [1,24] 恒为 number（Lv25 的 level-1=24 有值），as number 安全。
+      totalExp: level.value <= 1 ? 0 : (getRequiredXpForLevel(level.value - 1) as number),
+      expToNext: xpToNextNumber(level.value),
       attributes: englishAttrs as CharacterState['attributes'],
       freeAttrPoints: 0,
       hp: hpPreview.value,
@@ -1812,10 +1820,15 @@ export const useCreateStore = defineStore('create', () => {
     // ADR-22: FP 是存档级元货币，独立于 CharacterState。此前 destinyPoints 只写进
     // customFields.destinyPoints，游戏内 FP(SaveProfile.fp) 从未拿到这笔，开局兑换的 FP 丢失。
     if (destinyPoints.value > 0) {
-      const { getProfile, addFP } = await import('@engine/save-profile');
+      const { getProfile, addFP, updateProfile } = await import('@engine/save-profile');
       // 🔴 era 必须透传（T12 的 D9 线程化）：SaveProfile 是惰性创建的，这里是生产上
-      // 唯一的创建点。不传就等于让新档的纪元名落成空串，而存档一旦盖章就永不重读内容包。
+      //    唯一的创建点。不传就等于让新档的纪元名落成空串，而存档一旦盖章就永不重读内容包。
       const profile = await getProfile(saveId, era.value);
+      // 🆕 经验档位（简单/普通模式，2026-08-24）：存档创建即盖章，游戏内可随时切换。
+      // 🔴 惰性语义：未兑换命运点时不强制创建 SaveProfile（profile 仍 undefined、不落库），
+      //    此时经验档位由读取侧 `?? 'normal'` 兜底，进游戏后可在设置页切换。
+      profile.experienceMode = experienceMode.value === 'easy' ? 'easy' : 'normal';
+      await updateProfile(profile);
       await addFP(profile, destinyPoints.value, '开局兑换的命运点', 'other');
     }
 
@@ -2100,6 +2113,7 @@ export const useCreateStore = defineStore('create', () => {
     extra,
     // 属性 (→ 变量)
     level,
+    experienceMode,
     basePoints,
     attributePoints,
     tier,

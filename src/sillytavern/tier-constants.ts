@@ -14,6 +14,7 @@
  */
 
 import type { TierConfig } from './types';
+import { getRequiredXpForLevel, EXP_MAX_NUMBER } from './exp-table';
 
 // ========== 7 层生命层级表 ==========
 
@@ -146,18 +147,20 @@ export function calcResources(
 
 // ========== 经验计算 ==========
 
-/** 升级所需经验: 100 × 1.5^(level-1) */
+/**
+ * 升级所需经验: **当前等级对应的累计经验门槛**（经验系统改造 v1，2026-08-24）。
+ * 原公式 100×1.5^(level-1) 已退役 —— 生产路径零调用，语义换成脚本 LevelXpTable 的累计表
+ * （Lv1=120, Lv2=360, ...）。满级（Lv25）返回 `EXP_MAX_NUMBER` 哨兵。
+ * 真源在 exp-table.ts，本函数是委托壳（resource-calc.ts 的同名函数同样委托，统一口径）。
+ */
 export function calcExpToNext(level: number, _tier?: number): number {
-  return Math.floor(100 * Math.pow(1.5, level - 1));
+  const v = getRequiredXpForLevel(level);
+  return typeof v === 'number' ? v : EXP_MAX_NUMBER;
 }
 
-/** 总经验值（到指定等级） */
+/** 总经验值（到指定等级）: 该等级的累计经验门槛（照脚本 LevelXpTable，Lv1=120） */
 export function totalExpForLevel(level: number): number {
-  let total = 0;
-  for (let i = 1; i < level; i++) {
-    total += calcExpToNext(i);
-  }
-  return total;
+  return calcExpToNext(level);
 }
 
 // ========== 属性点数 ==========

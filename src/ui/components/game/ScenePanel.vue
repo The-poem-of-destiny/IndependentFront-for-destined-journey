@@ -5,7 +5,7 @@ import { tierVarByName } from '../../lib/quality-colors';
 import { useHoverPopup } from '../../composables/useHoverPopup';
 import AssetMedia from '../shared/AssetMedia.vue';
 import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve';
-import { persistNewsRead } from '@engine/save-profile';
+import { persistNewsRead, getGroupedQuests } from '@engine/save-profile';
 import { getAffectionLabel } from '@engine/affection-system';
 import { MONTH_NAMES, WEEKDAY_NAMES, getTimeOfDay } from '@engine/time-system';
 import { nameColorVar, initialsOf } from '../../utils/name-color';
@@ -90,14 +90,21 @@ const sceneTabs = computed(() => [
 ]);
 
 // ═══ 任务（原在右侧状态栏「任务追踪」，M6 起改挂左栏页签） ═══
-const questEntries = computed(() => {
-  const quests = game.saveProfile?.quests;
-  if (!quests) return [];
-  const order: Record<string, number> = { 高: 0, 中: 1, 低: 2 };
-  return Object.entries(quests).sort(
-    ([, a], [, b]) => (order[a.priority] ?? 2) - (order[b.priority] ?? 2),
-  );
+/**
+ * 任务页签 —— 分段渲染（进行中在上 / 已完成在下），每段内按关注度排序。
+ * 分组与排序逻辑的唯一真源在引擎 `getGroupedQuests`，本组件只消费不重写。
+ */
+const questSections = computed(() => {
+  const profile = game.saveProfile;
+  if (!profile) return [];
+  const { active, done } = getGroupedQuests(profile);
+  return [
+    { title: '进行中', entries: active },
+    { title: '已完成', entries: done },
+  ];
 });
+
+const questTotal = computed(() => questSections.value.reduce((n, s) => n + s.entries.length, 0));
 
 function openQuests() {
   game.showModal('quests');
@@ -240,7 +247,7 @@ const viewingName = ref<string | null>(null);
       <!-- ─── 任务 ─── -->
       <template v-if="activeTab === 'quests'">
         <div class="scene-section-title scene-pane-title">
-          <span>任务 ({{ questEntries.length }})</span>
+          <span>任务 ({{ questTotal }})</span>
           <button
             class="scene-title-action"
             title="打开任务面板"
@@ -251,9 +258,10 @@ const viewingName = ref<string | null>(null);
           </button>
         </div>
 
-        <div v-if="questEntries.length" class="quest-list">
+        <template v-for="sec in questSections" :key="sec.title">
+          <div v-if="sec.entries.length" class="quest-section-title">{{ sec.title }}</div>
           <div
-            v-for="[name, q] in questEntries"
+            v-for="[name, q] in sec.entries"
             :key="name"
             class="quest-item"
             :class="{ open: expandedQuest === name }"
@@ -296,9 +304,9 @@ const viewingName = ref<string | null>(null);
               </div>
             </div>
           </div>
-        </div>
+        </template>
 
-        <div v-else class="empty-tab">尚无在办之事…</div>
+        <div v-if="questTotal === 0" class="empty-tab">尚无在办之事…</div>
       </template>
 
       <!-- ─── 角色 ─── -->
@@ -570,6 +578,16 @@ const viewingName = ref<string | null>(null);
   opacity: 0.85;
 }
 /* ═══ 任务页签 ═══ */
+.quest-section-title {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--theme-text-muted);
+  margin: 8px 0 2px;
+}
+.quest-section-title:first-child {
+  margin-top: 4px;
+}
 .quest-list {
   display: flex;
   flex-direction: column;

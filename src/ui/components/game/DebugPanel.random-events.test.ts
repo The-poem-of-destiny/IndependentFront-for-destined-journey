@@ -34,6 +34,7 @@ import {
 function buildProfile(flags?: RandomEventSaveFlags): SaveProfile {
   return {
     saveId: 'save-debug',
+    experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
     contracts: [],

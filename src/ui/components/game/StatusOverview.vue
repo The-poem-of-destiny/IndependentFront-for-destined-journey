@@ -6,6 +6,7 @@ import { useHoverPopup } from '../../composables/useHoverPopup';
 import { usePlayerPortrait } from '../../composables/usePlayerPortrait';
 import { normalizeItemType } from '@engine/field-enums';
 import { getTierConfig } from '@engine/tier-constants';
+import { getRequiredXpForLevel } from '@engine/exp-table';
 import type { AllocatableAttr } from '@engine/attribute-allocation';
 import ResourceBar from '../shared/ResourceBar.vue';
 import AvatarPanel from '../shared/AvatarPanel.vue';
@@ -101,6 +102,17 @@ const ATTR_LABELS: Record<string, string> = {
 //    已经到手的点数扣在手里，且引擎那侧对同一情况也是放行的。
 const freeAttrPoints = computed(() => player.value?.freeAttrPoints ?? 0);
 const attributeCap = computed(() => getTierConfig(player.value?.tier ?? 0)?.attributeCap);
+
+/**
+ * 🆕 经验条上限 = 当前等级对应的累计门槛（经验系统改造 v1，2026-08-24）。
+ * current = 累计经验 `totalExp`，max = `getRequiredXpForLevel(level)`（Lv1=120, Lv2=360, …）。
+ * 满级（Lv25 返回 'MAX'）→ null，模板整条隐藏并显示「已满级」。
+ */
+const expMax = computed<number | null>(() => {
+  const lv = player.value?.level ?? 1;
+  const required = getRequiredXpForLevel(lv);
+  return typeof required === 'number' ? required : null;
+});
 
 /** 一次只放一个请求过去 —— 最后 1 点被连点两下会拿到一次「没有可用的自由属性点」 */
 const allocating = ref(false);
@@ -391,17 +403,19 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
               :show-values="true"
             />
 
-            <!-- 经验条 —— 与 HP/MP/SP 同宽同形
-             totalExp = 本层级已积累，expToNext = 距上限还差多少，两者之和 = 该层级 EXP 上限
-             （实测 8500 + 1500 = 10000，正是核心数值表 T4 的 expCap；创角时 0 + expCap 亦自洽） -->
+            <!-- 经验条 —— 逐级累计显示（经验系统改造 v1 2026-08-24）
+             current = 累计经验 totalExp，max = 当前等级对应的累计门槛 getRequiredXpForLevel(level)
+             （Lv1=120, Lv2=360, …；totalExp 永不清空，攒过门槛即升级）。满级（Lv25）→ 隐藏整条。 -->
             <ResourceBar
+              v-if="expMax !== null"
               label="EXP"
               :current="player.totalExp"
-              :max="player.totalExp + player.expToNext"
+              :max="expMax"
               color="color-mix(in srgb, var(--theme-exp) 65%, #000)"
               :height="20"
               :show-values="true"
             />
+            <div v-else class="exp-max">EXP 已满级（Lv.25 登神）</div>
 
             <!-- 五维属性保持单行 -->
             <!-- 有自由点时每格底下长出一个通栏的「+」: 加的是**高度**不是宽度，
@@ -868,6 +882,21 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+/* ═══ EXP 满级 ═══ */
+/* 满级时经验条整条隐藏（ResourceBar 的 current/max 没有「满级」表达），
+   用一行等高的说明文字占住位置 —— 与资源条同宽同形，避免折叠抖动 */
+.exp-max {
+  display: flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: var(--theme-radius-sm, 4px);
+  background: color-mix(in srgb, var(--theme-exp) 10%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-exp) 25%, var(--theme-card-border));
+  color: var(--theme-exp);
+  font-size: 0.625rem;
+  font-weight: 600;
 }
 /* 通栏的「+」: 宽度吃满格子换取指点面积。
    🔴 高度刻意低于 design.md §4.1 那条 36px 触摸目标: 这是侧栏里 5 列的紧凑网格，

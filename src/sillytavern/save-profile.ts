@@ -34,6 +34,16 @@ export async function updateProfile(profile: SaveProfile): Promise<void> {
   await saveSaveProfile(profile);
 }
 
+// ========== 经验档位（简单/普通模式，2026-08-24） ==========
+
+/**
+ * 读存档经验档位 —— 旧存档（createDefaultSaveProfile 加字段前的存量行）缺 `experienceMode`
+ * 时兜底 `'normal'`（普通）。唯一读取辅助，消费方（战斗经验分档 / 前端显示）统一走这里。
+ */
+export function getExperienceMode(profile: SaveProfile): 'normal' | 'easy' {
+  return profile.experienceMode === 'easy' ? 'easy' : 'normal';
+}
+
 // ========== FP Operations ==========
 
 export function getFP(profile: SaveProfile): number {
@@ -201,6 +211,61 @@ export async function persistNewsRead(saveId: string, newsId: string): Promise<v
   });
 }
 
+/**
+ * 经验档位落库（`experienceMode`，设置页/游戏内「简单/普通」切换）。
+ *
+ * 两条铁律与 `persistFocusQuest` 同源（进写队列 + 锁内重读窄改，2026-08-17 评审补）：
+ * ① 进 `withSaveWriteLock` 与 `commitChatState` 串行 —— 不进队列会被出口那次整档 flush 盖掉；
+ * ② 锁内重读一份新鲜 profile、只改这一个字段 —— 拿 UI 手里那份陈旧整档写回去会抹掉提交刚落的
+ *    fp/任务/变量。语义仍是 P1-09 那条受控例外：UI 辅助字段，失败不致命（调用方 try/catch）。
+ */
+export async function persistExperienceMode(
+  saveId: string,
+  mode: 'normal' | 'easy',
+): Promise<void> {
+  await withSaveWriteLock(saveId, async () => {
+    const fresh = await getProfile(saveId);
+    fresh.experienceMode = mode === 'easy' ? 'easy' : 'normal';
+    await updateProfile(fresh);
+  });
+}
+
+/**
+ * 手动标记一个任务的状态（QuestsPanel 的「标记完成」）。
+ *
+ * 两条铁律与 `persistFocusQuest` 同源（进队列 + 锁内重读窄改），此处只改那一个任务的
+ * `status` 字段：整档写回去会把提交期间落下的 fp / 变量 / 新闻一起抹掉。
+ * 库里没有这个名字（快照回退把它撤掉了）时**静默跳过**，不抛。
+ * AI 产生的任务状态变更仍走 `vars_update`，不经此入口。
+ */
+export async function persistQuestStatus(
+  saveId: string,
+  questName: string,
+  status: string,
+): Promise<void> {
+  await withSaveWriteLock(saveId, async () => {
+    const fresh = await getProfile(saveId);
+    if (fresh.quests[questName]) fresh.quests[questName].status = status;
+    await updateProfile(fresh);
+  });
+}
+
+/**
+ * 手动删除一个任务（QuestsPanel 已完成任务上的「删除」）。
+ *
+ * 两条铁律与 `persistFocusQuest` 同源（进队列 + 锁内重读窄改），此处只 `delete` 那一个
+ * 任务键：整档写回去会把提交期间落下的其它字段一起抹掉。
+ * 库里没有这个名字（快照回退把它撤掉了）时**静默跳过**，不抛。
+ * AI 产生的任务删除仍走 `vars_update`，不经此入口。
+ */
+export async function persistRemoveQuest(saveId: string, questName: string): Promise<void> {
+  await withSaveWriteLock(saveId, async () => {
+    const fresh = await getProfile(saveId);
+    delete fresh.quests[questName];
+    await updateProfile(fresh);
+  });
+}
+
 // ═══════════════════════════════════════════════════════════
 // Quest 便利函数 (Phase 7e)
 // ═══════════════════════════════════════════════════════════
@@ -261,14 +326,38 @@ export function getActiveQuests(profile: SaveProfile): [string, Quest][] {
   );
 }
 
+/** 关注度序：高→中→低（未登记值回落「低」档） */
+const QUEST_PRIORITY_ORDER: Record<string, number> = { 高: 0, 中: 1, 低: 2 };
+
+/** 任务比较器：关注度 高→中→低，同关注度按名称（`getSortedQuests` 与 `getGroupedQuests` 共用） */
+function compareQuests([aName, a]: [string, Quest], [bName, b]: [string, Quest]): number {
+  return (
+    (QUEST_PRIORITY_ORDER[a.priority] ?? 2) - (QUEST_PRIORITY_ORDER[b.priority] ?? 2) ||
+    aName.localeCompare(bName)
+  );
+}
+
 /** 按关注度排序: 高→中→低，同关注度按名称 */
 export function getSortedQuests(profile: SaveProfile): [string, Quest][] {
-  const priorityOrder: Record<string, number> = { 高: 0, 中: 1, 低: 2 };
-  return Object.entries(profile.quests ?? {}).sort(
-    ([aName, a], [bName, b]) =>
-      (priorityOrder[a.priority] ?? 2) - (priorityOrder[b.priority] ?? 2) ||
-      aName.localeCompare(bName),
-  );
+  return Object.entries(profile.quests ?? {}).sort(compareQuests);
+}
+
+/**
+ * 任务分段排序（QuestsPanel / ScenePanel 共用）：
+ * `active` = 状态不是「已完成」也不是「失败」的任务（含未开始/进行中/搁置等）；
+ * `done` = 状态是「已完成」或「失败」的任务。
+ * 两组各自按关注度 高→中→低 排序，同关注度按名称。
+ */
+export function getGroupedQuests(profile: SaveProfile): {
+  active: [string, Quest][];
+  done: [string, Quest][];
+} {
+  const isDone = (q: Quest): boolean => q.status === '已完成' || q.status === '失败';
+  const entries = Object.entries(profile.quests ?? {});
+  return {
+    active: entries.filter(([, q]) => !isDone(q)).sort(compareQuests),
+    done: entries.filter(([, q]) => isDone(q)).sort(compareQuests),
+  };
 }
 
 // ═══════════════════════════════════════════════════════════

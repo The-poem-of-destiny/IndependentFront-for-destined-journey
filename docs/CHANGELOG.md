@@ -9,6 +9,52 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 重铸系统：单条目物品/技能/装备主动重写｜ ✅ 已实施（2026-08-24）
+
+主人需求：玩家主动重新生成角色的物品/技能（给定已知条目 + 可选用户描述做 debug 线索，如「火球术伤害不对，应该 400 能量伤害却只有 200 物理伤害」）。三处既有疑点一并查证/修复：**NPC 角色面板（CharacterListPanel）确实缺背包 tab**（CharacterViewerModal 有）、**查看脚本是旧版**（只取第一个条目的 scripts，主角 ItemsPanel 是新版 scripts + modifiers/automata JSON）、CharacterViewerModal 完全没有脚本查看。
+
+**「替换」做在 item_gen 输出范式里（主人裁定：方便维护，只加一个范式）**，不是代码层 remove+add 硬替换：
+
+- `agent-config.json` item_gen systemPrompt 新增**重铸模式**工作机制（<重铸目标> 区块非空时只重写那一条，条目带 `replace="目标条目名"` 属性声明替换）+ 输出范式三个条目（skill/equip/item）各加可选 `replace` 属性；template 新增 `<重铸目标>{{REWRITE_TARGET}}</重铸目标>` / `<重铸原因>{{REWRITE_REASON}}</重铸原因>` 区块（占位符经 localParams 注入，同 ITEM_REQUEST 机制；placeholder-registry 的兜底 template 同步）。
+- `ItemGenOutput` 三元素各加 `replace?: string`；`parseSkillsXML`/`parseEquipmentXML`/`parseInventoryXML` + JSON 兜底各读 replace（缺省 undefined，**普通新增链路零影响**）。
+- 引擎 `item-gen-chain.ts` 新增 `rewriteLoadoutItem(request, deps)` 编排（输入 = 角色名 + 目标条目完整数据 + 玩家描述 → REWRITE_TARGET/REWRITE_REASON 注入 → item_gen → patch 落库）+ 纯函数 `buildRewritePatches`（**只认 `replace === 目标名` 的那一条**，remove 旧（按名 remove_skill/remove_item）+ add 新（照 buildItemGenPatches 透传全部战斗声明）**同一次 commitChatState 原子**；其余输出条目一律忽略——重铸是单条目手术）。调用执行体抽成 `callItemGenRaw`（独立链与重铸链共用，不复制 Agentic 调用）。
+- 前端：`GamePipeline.rewriteLoadoutItem`（照 image_prompt 手动档先例 `ensureChainData()` 惰性装配 + 独立活动账本）→ game-store 注入缝 `setRewriteLoadoutImpl` + `rewriteLoadoutItem` action（GamePage 挂缝）。主角 ItemsPanel、NPC CharacterListPanel（装备/技能/背包）各条目加「重铸」按钮 + 描述输入；**CharacterListPanel 补背包 tab** + **查看脚本升级为新版**（modifiers/automata JSON + scripts）。
+
+**存档安全**（主人最关心的）：零 id 变更（按名寻址）、remove+add 同一事务（中途失败不留下「删了旧的没加新的」）、失败不阻断（返回 ok:false + 人话 reason 给 UI toast）；玩家随时可用既有快照回退（每回合自动打快照）。重铸不新增任何 Dexie 表/迁移，旧档照常读。
+
+**验证**：`npm run gates` 八道全绿（typecheck / typecheck:vue / typecheck:tools / build / format:check / lint / knip:ratchet 139 无新增 / test:run），全量 **358 文件 9248 tests 通过 + 8 skipped**（37.9s）；新增引擎测试（parse replace XML+JSON / buildRewritePatches 三态+错点+忽略多余 / 编排集成 mock）与前端组件测试（ItemsPanel.rewrite / CharacterListPanel.rewrite：背包 tab / 重铸按钮 / 描述透传 / 脚本升级）；编码校验 17 个改动文件全 0。**未做**：真机游玩验收（手动重铸一条技能看数值修正 + 快照回退兜底）。
+
+### 任务系统完善 + 经验系统 v2 + 旧档经验归一化｜ ✅ 已实施（2026-08-24）
+
+两波改造同批合入（任务 Agent A 提交后，经验 Agent B 卡在 typecheck 由主 agent 接手收尾）：
+`npm run gates` 八道全绿，**356 文件 9223 tests 通过 + 8 skipped**，编码校验 35 个改动文件全 0。
+
+**任务系统完善**：
+
+- **reward 提示词**（`agent-config.json` vars_update systemPrompt，主人定稿措辞）：`任务 upsert 字段：priority(低/中/高) / progress / reward；reward 严格参照正文写的奖励，如没有明确说明就按任务等级编写奖励，通常为金钱。` —— AI 不再乱编奖励。
+- **手动任务完成 / 删除**：`save-profile.ts` 新增 `persistQuestStatus` / `persistRemoveQuest` 两个命名写入口，照 P1-09 先例进 `withSaveWriteLock` 且**锁内重读一份新鲜 profile 只改目标任务字段**（不被提交级缓存那次整档 flush 盖掉、也不拿 UI 手里的陈旧整档回写抹掉提交结果）；QuestsPanel 加「标记完成」「删除」按钮。
+- **任务分组排序**：新增纯函数 `getGroupedQuests` —— 进行中优先，已完成 / 失败分段沉底，段内按 priority 排；QuestsPanel 与 ScenePanel 复用它。
+
+**经验系统 v2（LevelXpTable 累计经验表迁移）**：
+
+- 新增 `src/sillytavern/exp-table.ts`（引擎纯函数，照参考脚本仓 `config/index.ts` 的 `LevelXpTable` + `services/experience.ts` 的 `processExperienceAndLevel`）：`LEVEL_XP_TABLE` 累计经验表（Lv1=120 … Lv20=185840 … Lv24=401840，Lv25='MAX'）、`resolveLevelUps` 升级循环、`resolveAscensionFlyup` 登神长阶放宽版（持要素/权能/法则/神位即飞升到层级起点 13/17/21/25，**硬性限制**：当前层级必须 = 目标层级-1，否则只升级不飞升）、`getRequiredXpForLevel` / `xpToNextNumber` / `getTierUpgradeConfig` / `applyExpFloor`。
+- **战斗经验系数修错**：此前战斗 EXP 误用核心数值表的 `combatCoefficient`（2.0/2.8/4.0/…，那是**战斗伤害**系数）；现按世界书 [经验值获取规则] 查 `EXPERIENCE_COEFFICIENTS`（normal: 10/20/50/100/250/600）。修正后 coordinator.test A2-1 断言 40→500。
+- **简单 / 普通模式**：`SaveProfile.experienceMode: 'normal' | 'easy'`（默认 `'normal'`），easy 系数 [20,36,76,130,260,500]；**生产经验不分档**；随时可切（DataSection 下拉，切档即时生效）。旧档 `?? 'normal'`。
+- **数值源收敛**：char-gen-agent / resource-calc / tier-constants / combat-v3 coordinator 的等级经验逻辑统一委托 exp-table，消除重复源；`createDefaultCharacter.expToNext` 100 → 120（对齐累计表 Lv1 门槛）。
+- **UI**：StatusOverview 经验条改逐级累计（current=totalExp / max=当前级门槛）、CreateStepBasic 经验档位下拉、DataSection 模式切换（`loadExperienceMode` 改静态 import `getSaveProfile` —— 修掉 DataSection 动态 import 竞态）。
+
+**旧存档经验归一化（方案 A，幂等只提升，2026-08-24）**：
+
+旧档 `totalExp` 是「层级内已积累」语义（Lv5 只存 2），新语义是「全程累计」；打开旧档会显示 `2/2400`。归一化三件：
+
+- `exp-table.ts` 新增 `applyExpFloor`：`totalExp = max(totalExp, 升到当前等级的门槛)`、`expToNext` 重算当前级门槛 —— **纯幂等**，已符合新语义的档 `changed=false` 零落库（绝不破坏正常存档），Lv5 旧档自愈为 `1200/2400`。
+- `database.ts` 新增 `normalizePlayerProgression`（只处理主角、有变化才写库），game-store 的 `loadSave` / `refreshFromDb` 与 state-manager 的 `applyPlayerProgression` 三处接入（打开存档即刻自愈 + 任何战斗/制作提交兜底）。
+- 新档初始化（create-store / types）同步用累计表语义，清掉旧 expCap 残留。
+
+**Agent B 遗留修复**（经验 Agent 卡死点）：exp-table.ts 缺 `AscensionLike` 类型、state-manager 的 `ATTRIBUTE_KEYS` import 冲突、950 行 keys 作用域（改 `touchedKeys`）、types.test / coordinator.test 断言更新、create-store 恢复 lazy 创建 SaveProfile、DataSection.test.ts 动态 import 竞态修复 + game-store mock、engine-imports 测试 KNOWN_MODULES 补 `@engine/save-profile`；删除误产物 `src/ui/components/home/ThaumicCircle.standalone.html`。
+
+**验证**：`npm run gates` 八道全绿，全量 **356 文件 9223 tests 通过 + 8 skipped**（34.0s）；新增 exp-table.test（升级/登神/系数/applyExpFloor 45 条）、char-gen-agent.test、save-profile 手动完成删除、QuestsPanel/ScenePanel/DataSection/StatusOverview 断言。**未做**：真机游玩验收（旧档自愈显示、升级自动加点、登神飞升、简单模式经验手感）。
+
 ### Delta 会话 v1 真机 bug：快照回退/重开战斗未失效 prompt session 致旧分支正文残留｜ ✅ 已修复（2026-08-23）
 
 主人在真机验收 delta 会话时发现：同一轮 roll 出不满意的分支后回退快照再重新 roll，新正文里残留上一分支的台词（22:44 分支幻说「天亮前到东门等我」，回退到 15:17 再 roll 的 22:50 分支里妲丽安复述「她只说了天亮前到东门等她」）。根因两层：

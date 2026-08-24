@@ -7,7 +7,13 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { runItemGenChain, buildItemGenPatches, buildItemRequestsXML } from './item-gen-chain';
+import {
+  runItemGenChain,
+  buildItemGenPatches,
+  buildItemRequestsXML,
+  buildRewritePatches,
+  rewriteLoadoutItem,
+} from './item-gen-chain';
 import type { ItemGenChainClient, ItemGenChainDeps } from './item-gen-chain';
 import type { ItemGenRequestMarker, ItemGenOutput, ApiEndpoint, AgentContext } from './types';
 import { parseItemGenOutput } from './char-gen-agent';
@@ -477,5 +483,173 @@ describe('runItemGenChain', () => {
     expect(xml.match(/<request type="skill">/g)).toHaveLength(1);
     expect(xml.match(/<request type="equipment"[^>]*>/g)).toHaveLength(1);
     expect(xml.match(/<\/item_requests>/g)).toHaveLength(1);
+  });
+});
+
+// ========== 重铸（单条目，2026-08-24） ==========
+
+function makeRewriteSkillXML(): string {
+  return `<item_result>
+<skills>
+<skill name="火球术" type="active" cost_type="MP" cost_amount="120" cooldown="1" power="400" attr="int" dtype="能量" replace="火球术">
+  修正后的火球术：造成 400 能量伤害。
+  <effect name="能量伤害">造成400%能量伤害</effect>
+</skill>
+</skills>
+<equipment></equipment>
+<inventory></inventory>
+</item_result>`;
+}
+
+function makeRewriteRequest(overrides: Record<string, unknown> = {}) {
+  return {
+    saveId: 'save-test',
+    characterId: '理查德',
+    target: {
+      kind: 'skill' as const,
+      entry: { name: '火球术', description: '旧火球', type: 'active' as const },
+    },
+    userDescription: '火球术伤害不对，应该 400 能量伤害却只有 200 物理伤害',
+    storyOutput: '',
+    context: makeContext(),
+    endpoint: makeEndpoint(),
+    ...overrides,
+  };
+}
+
+describe('buildRewritePatches', () => {
+  it('技能：AI 用 replace 点名目标 → remove_skill + add_skill 成对，透传 skillPower/damageType', () => {
+    const output = parseItemGenOutput(makeRewriteSkillXML());
+    const r = buildRewritePatches(output, '理查德', '火球术');
+
+    expect(r.ok).toBe(true);
+    expect(r.patches).toHaveLength(2);
+    expect(r.patches[0]).toEqual({
+      op: 'remove_skill',
+      target: 'characters.理查德',
+      value: { name: '火球术' },
+    });
+    const add = r.patches[1];
+    expect(add.op).toBe('add_skill');
+    expect(add.target).toBe('characters.理查德');
+    const v = add.value as any;
+    expect(v.name).toBe('火球术');
+    expect(v.skillPower).toBe(400);
+    expect(v.relevantAttribute).toBe('int');
+    expect(v.damageType).toBe('能量');
+  });
+
+  it('装备：replace → remove_item + add_item（带 equippedSlot + 战斗声明透传）', () => {
+    const xml = `<item_result><equipment><equip slot="武器" name="炽炎剑" quality="稀有" durability="100" stats="攻击力:130" replace="铁剑">一把炽红的剑。</equip></equipment></item_result>`;
+    const output = parseItemGenOutput(xml);
+    const r = buildRewritePatches(output, '理查德', '铁剑');
+
+    expect(r.ok).toBe(true);
+    expect(r.patches).toHaveLength(2);
+    expect(r.patches[0]).toEqual({
+      op: 'remove_item',
+      target: 'characters.理查德',
+      value: { name: '铁剑' },
+    });
+    const add = r.patches[1];
+    expect(add.op).toBe('add_item');
+    expect((add.value as any).name).toBe('炽炎剑');
+    expect((add.value as any).equippedSlot).toBe('武器');
+    expect((add.value as any).rarity).toBe('稀有');
+  });
+
+  it('背包物品：replace → remove_item + add_item（数量保留）', () => {
+    const xml = `<item_result><inventory><item name="治疗药水" quantity="3" type="消耗品" rarity="优良" replace="治疗药水">更强的治疗药水。</item></inventory></item_result>`;
+    const output = parseItemGenOutput(xml);
+    const r = buildRewritePatches(output, '理查德', '治疗药水');
+
+    expect(r.ok).toBe(true);
+    expect(r.patches).toHaveLength(2);
+    expect(r.patches[0]).toEqual({
+      op: 'remove_item',
+      target: 'characters.理查德',
+      value: { name: '治疗药水' },
+    });
+    expect((r.patches[1].value as any).name).toBe('治疗药水');
+    expect((r.patches[1].value as any).quantity).toBe(3);
+  });
+
+  it('AI 未声明 replace → ok:false + reason，零 patch', () => {
+    const output = parseItemGenOutput(makeItemGenXML()); // makeItemGenXML 无 replace 属性
+    const r = buildRewritePatches(output, '理查德', '火球术');
+    expect(r.ok).toBe(false);
+    expect(r.patches).toEqual([]);
+    expect(r.reason).toBeTruthy();
+  });
+
+  it('replace 点名的是别的条目 → ok:false', () => {
+    const xml = `<item_result><skills><skill name="治愈术" type="active" replace="铁剑">错点目标</skill></skills></item_result>`;
+    const output = parseItemGenOutput(xml);
+    const r = buildRewritePatches(output, '理查德', '火球术');
+    expect(r.ok).toBe(false);
+    expect(r.patches).toEqual([]);
+  });
+
+  it('AI 多输出的普通条目被忽略（重铸是单条目手术）', () => {
+    const xml = `<item_result>
+<skills><skill name="火球术" type="active" replace="火球术">新火球</skill></skills>
+<inventory><item name="多余金币" quantity="1" type="特殊">不该落库</item></inventory>
+</item_result>`;
+    const output = parseItemGenOutput(xml);
+    const r = buildRewritePatches(output, '理查德', '火球术');
+    expect(r.ok).toBe(true);
+    expect(r.patches).toHaveLength(2); // 只有 remove_skill + add_skill
+    expect(r.patches.filter((p) => p.op === 'add_item')).toHaveLength(0);
+  });
+});
+
+describe('rewriteLoadoutItem', () => {
+  it('集成：REWRITE_TARGET/REWRITE_REASON 注入 + remove/add 成对落库', async () => {
+    const client = makeMockClient(makeRewriteSkillXML());
+    const commitChatState = vi.fn().mockResolvedValue(undefined);
+    const deps: ItemGenChainDeps = {
+      clientFactory: () => client,
+      stateManager: { commitChatState },
+    };
+
+    const result = await rewriteLoadoutItem(makeRewriteRequest() as any, deps);
+
+    expect(result.ok).toBe(true);
+    expect(result.patches).toHaveLength(2);
+    expect(commitChatState).toHaveBeenCalledTimes(1);
+    expect(commitChatState).toHaveBeenCalledWith(result.patches);
+
+    // 校验发给模型的 messages 里重铸上下文被注入（<重铸目标> JSON + 玩家描述）
+    const sent = (client.chat as ReturnType<typeof vi.fn>).mock.calls[0][0] as Array<{
+      role: string;
+      content: string;
+    }>;
+    const all = sent.map((m) => m.content).join('\n');
+    expect(all).toContain('200 物理伤害'); // REWRITE_REASON
+    expect(all).toContain('"name": "火球术"'); // REWRITE_TARGET JSON
+  });
+
+  it('AI 没给 replace → ok:false + reason，不落库', async () => {
+    const client = makeMockClient(makeItemGenXML()); // 无 replace 属性
+    const commitChatState = vi.fn().mockResolvedValue(undefined);
+    const deps: ItemGenChainDeps = {
+      clientFactory: () => client,
+      stateManager: { commitChatState },
+    };
+
+    const result = await rewriteLoadoutItem(makeRewriteRequest() as any, deps);
+
+    expect(result.ok).toBe(false);
+    expect(result.patches).toEqual([]);
+    expect(result.reason).toBeTruthy();
+    expect(commitChatState).not.toHaveBeenCalled();
+  });
+
+  it('无 stateManager 时（测试场景）不落库也不报错', async () => {
+    const client = makeMockClient(makeRewriteSkillXML());
+    const deps: ItemGenChainDeps = { clientFactory: () => client };
+    const result = await rewriteLoadoutItem(makeRewriteRequest() as any, deps);
+    expect(result.ok).toBe(true);
+    expect(result.patches).toHaveLength(2);
   });
 });

@@ -6,7 +6,7 @@
  * addAchievement / addNews / markNewsRead
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { SaveProfile, FateContract, Achievement, NewsItem, MapMarker } from './types';
+import type { SaveProfile, FateContract, Achievement, NewsItem, MapMarker, Quest } from './types';
 
 // ---- Mocks ----
 const mockGetSaveProfile = vi.fn();
@@ -41,6 +41,7 @@ import { createDefaultTime } from './time-system';
 function makeProfile(overrides: Partial<SaveProfile> = {}): SaveProfile {
   return {
     saveId: 'save_test',
+    experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
     contracts: [],
@@ -60,6 +61,7 @@ function makeProfile(overrides: Partial<SaveProfile> = {}): SaveProfile {
 function makeDefaultProfile(saveId: string): SaveProfile {
   return {
     saveId,
+    experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
     contracts: [],
@@ -821,7 +823,21 @@ describe('chained operations', () => {
 // Quest 测试 (Phase 7e)
 // ═══════════════════════════════════════════════════════════
 
-import { getQuests, setQuest, removeQuest, getActiveQuests, getSortedQuests } from './save-profile';
+import {
+  getQuests,
+  setQuest,
+  removeQuest,
+  getActiveQuests,
+  getSortedQuests,
+  getGroupedQuests,
+  persistQuestStatus,
+  persistRemoveQuest,
+} from './save-profile';
+
+/** 最小任务对象（测试便利构造，字段齐全避免空值陷阱） */
+function createQuest(status: string, priority: Quest['priority']): Quest {
+  return { status, priority, progress: '', detail: '', objective: '', reward: '' };
+}
 
 describe('Quest', () => {
   beforeEach(() => {
@@ -896,6 +912,82 @@ describe('Quest', () => {
 
     const sorted = getSortedQuests(profile);
     expect(sorted.map(([n]) => n)).toEqual(['A任务', 'B任务', 'C任务', 'D任务']);
+  });
+
+  it('getGroupedQuests splits active vs done and sorts both by priority then name', async () => {
+    const profile = makeProfile();
+    mockSaveSaveProfile.mockResolvedValue(undefined);
+
+    await setQuest(profile, 'B任务', { status: '进行中', priority: '中' });
+    await setQuest(profile, 'A任务', { status: '进行中', priority: '高' });
+    await setQuest(profile, 'D任务', { status: '已完成', priority: '低' });
+    await setQuest(profile, 'C任务', { status: '失败', priority: '高' });
+    await setQuest(profile, 'E任务', { status: '搁置', priority: '中' });
+
+    const grouped = getGroupedQuests(profile);
+    // active = 非已完成/非失败（含 进行中 / 搁置），按优先级 高→中→低，同优先级按名称
+    expect(grouped.active.map(([n]) => n)).toEqual(['A任务', 'B任务', 'E任务']);
+    // done = 已完成/失败，同样按优先级排序
+    expect(grouped.done.map(([n]) => n)).toEqual(['C任务', 'D任务']);
+  });
+
+  it('getGroupedQuests returns empty groups when there are no quests', () => {
+    const profile = makeProfile();
+    const grouped = getGroupedQuests(profile);
+    expect(grouped.active).toEqual([]);
+    expect(grouped.done).toEqual([]);
+  });
+
+  it('persistQuestStatus updates a quest status via locked narrow write', async () => {
+    const saveId = 'save_persist_status';
+    const profile = makeProfile({ saveId });
+    profile.quests['追查商队'] = createQuest('进行中', '中');
+    mockGetSaveProfile.mockResolvedValue(profile);
+    mockSaveSaveProfile.mockResolvedValue(undefined);
+
+    await persistQuestStatus(saveId, '追查商队', '已完成');
+
+    expect(profile.quests['追查商队'].status).toBe('已完成');
+    expect(mockSaveSaveProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('persistQuestStatus silently skips when quest does not exist', async () => {
+    const saveId = 'save_persist_status_missing';
+    const profile = makeProfile({ saveId });
+    mockGetSaveProfile.mockResolvedValue(profile);
+    let written!: SaveProfile;
+    mockSaveSaveProfile.mockImplementation(async (p: SaveProfile) => {
+      written = p;
+    });
+
+    await expect(persistQuestStatus(saveId, '不存在的任务', '已完成')).resolves.toBeUndefined();
+    expect(written.quests['不存在的任务']).toBeUndefined();
+  });
+
+  it('persistRemoveQuest deletes a quest via locked narrow write', async () => {
+    const saveId = 'save_persist_remove';
+    const profile = makeProfile({ saveId });
+    profile.quests['讨伐魔物'] = createQuest('已完成', '低');
+    mockGetSaveProfile.mockResolvedValue(profile);
+    mockSaveSaveProfile.mockResolvedValue(undefined);
+
+    await persistRemoveQuest(saveId, '讨伐魔物');
+
+    expect(profile.quests['讨伐魔物']).toBeUndefined();
+    expect(mockSaveSaveProfile).toHaveBeenCalledTimes(1);
+  });
+
+  it('persistRemoveQuest silently skips when quest does not exist', async () => {
+    const saveId = 'save_persist_remove_missing';
+    const profile = makeProfile({ saveId });
+    mockGetSaveProfile.mockResolvedValue(profile);
+    let written!: SaveProfile;
+    mockSaveSaveProfile.mockImplementation(async (p: SaveProfile) => {
+      written = p;
+    });
+
+    await expect(persistRemoveQuest(saveId, '不存在的任务')).resolves.toBeUndefined();
+    expect(Object.keys(written.quests)).toEqual([]);
   });
 });
 

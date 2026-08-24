@@ -120,6 +120,7 @@ vi.mock('../../stores/game-store', () => ({
     toggleFullscreen: vi.fn(),
     closeModal: vi.fn(),
   })),
+  setRewriteLoadoutImpl: vi.fn(),
 }));
 
 vi.mock('../../stores/ui-store', () => ({

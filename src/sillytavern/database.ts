@@ -45,6 +45,7 @@ import type {
 } from './types-image';
 import type { ContentPack } from './types-content';
 import { hashWorldBook } from './content-source';
+import { applyExpFloor } from './exp-table';
 
 /** 捏人预设记录 (DB 存储格式) */
 export interface CreatePresetRecord {
@@ -1464,6 +1465,30 @@ export async function saveCharacters(characters: CharacterState[]): Promise<void
   await getDatabase().characters.bulkPut(characters);
 }
 
+/**
+ * 存档角色经验保底归一化（旧档兼容 v1，2026-08-24，方案 A）。
+ *
+ * 只处理**主角**（player）：就地 `applyExpFloor`（totalExp 抬到「升到当前等级门槛」、
+ * expToNext 重算为当前级累计门槛），有变化的批量落库并返回全部角色（供前端同步内存）。
+ *
+ * 🔴 幂等：已符合新语义的主角原地不变、零落库 —— 正常存档不受影响；
+ *    `totalExp` 只增不减，绝不削减任何数据。
+ */
+export async function normalizePlayerProgression(
+  characters: CharacterState[],
+): Promise<CharacterState[]> {
+  const changed: CharacterState[] = [];
+  for (const c of characters) {
+    if (c.type === 'player' && applyExpFloor(c).changed) {
+      changed.push(c);
+    }
+  }
+  if (changed.length > 0) {
+    await saveCharacters(changed);
+  }
+  return characters;
+}
+
 export async function deleteCharacter(id: string): Promise<void> {
   await getDatabase().characters.delete(id);
 }
@@ -1937,6 +1962,7 @@ import { createDefaultTime } from './time-system';
 export function createDefaultSaveProfile(saveId: string, era?: string): SaveProfile {
   return {
     saveId,
+    experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
     contracts: [],

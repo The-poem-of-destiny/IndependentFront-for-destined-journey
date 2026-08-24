@@ -11,6 +11,8 @@ import { describeAutomata } from '@engine/describe-automaton';
 import { normalizeEffects } from '../../lib/item-effects';
 import type { InventoryItem, QualityLevel, Skill } from '@engine/types';
 import { QUALITY_RANK } from '@engine/types';
+// 🆕 重铸（2026-08-24）：单条目重铸 —— 把当前条目的完整数据喂给 item_gen 重写
+import type { RewriteTarget } from '@engine/item-gen-chain';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -231,6 +233,102 @@ async function removeSelectedSkill() {
     ui.toast(result.error || '删除失败', 'error');
   }
 }
+
+// ═══ 重铸（单条目，2026-08-24）═══
+
+const rewriteOpen = ref(false);
+const rewriteDesc = ref('');
+const rewriting = ref(false);
+
+// 切换条目 / 类目时收起重铸面板
+watch([selectedIdx, activeCategory], () => {
+  rewriteOpen.value = false;
+  rewriteDesc.value = '';
+});
+
+/**
+ * 把当前选中的条目转成引擎的 RewriteTarget（喂给 item_gen 当 <重铸目标> 的「当前完整数据」）。
+ * 关键字段（effects/scripts/modifiers/buffs/divinity/automata/skillPower…）逐项透传，
+ * 让 AI 能看到这条现状 —— 否则它无从知道「哪里不对」。
+ */
+function buildRewriteTarget(entry: PanelEntry): RewriteTarget {
+  const row = entry.row as any;
+  if (entry.kind === 'skill') {
+    return {
+      kind: 'skill',
+      entry: {
+        name: row.name,
+        description: row.description ?? '',
+        type: row.type === 'passive' ? 'passive' : 'active',
+        ...(row.cost ? { cost: row.cost } : {}),
+        ...(row.cooldown !== undefined ? { cooldown: row.cooldown } : {}),
+        ...(row.effects ? { effects: row.effects } : {}),
+        ...(row.scripts ? { scripts: row.scripts } : {}),
+        ...(row.modifiers?.length ? { modifiers: row.modifiers } : {}),
+        ...(row.buffs?.length ? { buffs: row.buffs } : {}),
+        ...(row.divinity !== undefined ? { divinity: row.divinity } : {}),
+        ...(row.automata?.length ? { automata: row.automata } : {}),
+        ...(row.skillPower !== undefined ? { skillPower: row.skillPower } : {}),
+        ...(row.relevantAttribute ? { relevantAttribute: row.relevantAttribute } : {}),
+        ...(row.damageType ? { damageType: row.damageType } : {}),
+      },
+    };
+  }
+  if (row.equippedSlot) {
+    return {
+      kind: 'equipment',
+      entry: {
+        slot: row.equippedSlot,
+        name: row.name,
+        description: row.description ?? '',
+        stats: row.stats ?? {},
+        ...(row.durability !== undefined ? { durability: row.durability } : {}),
+        ...(row.rarity ? { quality: row.rarity } : {}),
+        ...(row.effects ? { effects: row.effects } : {}),
+        ...(row.scripts ? { scripts: row.scripts } : {}),
+        ...(row.modifiers?.length ? { modifiers: row.modifiers } : {}),
+        ...(row.buffs?.length ? { buffs: row.buffs } : {}),
+        ...(row.divinity !== undefined ? { divinity: row.divinity } : {}),
+        ...(row.automata?.length ? { automata: row.automata } : {}),
+      },
+    };
+  }
+  return {
+    kind: 'inventory',
+    entry: {
+      name: row.name,
+      description: row.description ?? '',
+      quantity: row.quantity ?? 1,
+      type: row.type ?? '物品',
+      ...(row.rarity ? { rarity: row.rarity } : {}),
+      ...(row.effects ? { effects: row.effects } : {}),
+      ...(row.scripts ? { scripts: row.scripts } : {}),
+      ...(row.modifiers?.length ? { modifiers: row.modifiers } : {}),
+      ...(row.buffs?.length ? { buffs: row.buffs } : {}),
+      ...(row.divinity !== undefined ? { divinity: row.divinity } : {}),
+      ...(row.automata?.length ? { automata: row.automata } : {}),
+    },
+  };
+}
+
+/** 执行重铸：remove 旧 + add 新同一事务（引擎侧），成功回读刷新。 */
+async function doRewrite() {
+  const entry = selected.value;
+  if (!entry || !game.player?.name) return;
+  rewriting.value = true;
+  const result = await game.rewriteLoadoutItem(
+    game.player.name,
+    buildRewriteTarget(entry),
+    rewriteDesc.value.trim(),
+  );
+  rewriting.value = false;
+  rewriteOpen.value = false;
+  if (result.ok) {
+    ui.toast(`已重铸「${entry.row.name}」`, 'success');
+  } else {
+    ui.toast(result.reason || '重铸失败', 'error');
+  }
+}
 </script>
 
 <template>
@@ -383,6 +481,25 @@ async function removeSelectedSkill() {
             @click="removeSelectedSkill"
           >
             删除技能
+          </button>
+          <button class="rewrite-btn" :disabled="rewriting" @click="rewriteOpen = !rewriteOpen">
+            {{ rewriteOpen ? '收起重铸' : '重铸' }}
+          </button>
+        </div>
+
+        <!-- 重铸描述（可选：玩家说哪里不对，AI 据此修正） -->
+        <div v-if="rewriteOpen" class="rewrite-body">
+          <p class="rewrite-hint">
+            描述这条现状的问题（可留空）。例：火球术伤害不对，应该 400 能量伤害却只有 200 物理伤害。
+          </p>
+          <textarea
+            v-model="rewriteDesc"
+            rows="3"
+            class="rewrite-desc"
+            placeholder="可选：哪里不对…"
+          />
+          <button class="rewrite-confirm" :disabled="rewriting" @click="doRewrite">
+            {{ rewriting ? '重铸中…' : '确认重铸' }}
           </button>
         </div>
       </div>
@@ -822,6 +939,76 @@ async function removeSelectedSkill() {
   background: color-mix(in srgb, var(--theme-danger, #e5484d) 18%, transparent);
 }
 .remove-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ═══ 重铸（单条目，2026-08-24）═══ */
+.rewrite-btn {
+  margin-left: 8px;
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  color: var(--theme-primary, #c9a24b);
+  background: color-mix(in srgb, var(--theme-primary, #c9a24b) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-primary, #c9a24b) 40%, transparent);
+  border-radius: var(--theme-radius-sm, 4px);
+  cursor: pointer;
+  transition: all var(--theme-transition-fast);
+}
+.rewrite-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--theme-primary, #c9a24b) 18%, transparent);
+}
+.rewrite-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.rewrite-body {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--theme-surface-muted);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm, 4px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rewrite-hint {
+  margin: 0;
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+  line-height: 1.5;
+}
+.rewrite-desc {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--theme-text-primary);
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm, 4px);
+  resize: vertical;
+}
+.rewrite-desc:focus {
+  outline: none;
+  border-color: var(--theme-primary, #c9a24b);
+}
+.rewrite-confirm {
+  align-self: flex-end;
+  padding: 5px 14px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  color: var(--theme-primary-text, #fff);
+  background: var(--theme-primary, #c9a24b);
+  border: none;
+  border-radius: var(--theme-radius-sm, 4px);
+  cursor: pointer;
+  transition: opacity var(--theme-transition-fast);
+}
+.rewrite-confirm:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
