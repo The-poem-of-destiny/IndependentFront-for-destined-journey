@@ -40,6 +40,21 @@
 - [ ] **正式发布打包** —— 把当前的开发态收敛成可分发的正式版本：产物形态（桌面壳 / 纯静态站
       / 两者）、版本号与更新渠道、内容仓 pack 的随包策略、首次启动的资产落地流程。
 
+- [ ] **地图系统集成收尾** —— v1 / v1.2 引擎、内容仓 map-pack v1.2.0 校验门，以及地图编辑器的
+      发展度 / 初始建筑 / 主建筑创作面均已落地。当前缺口是同步私有内容仓：给
+      `request_dispatcher` 补 `{{MAP_CONTEXT}}` 与六个 `tile_ops`，并让世界书 uid 510 展示 v1.2
+      的状态 / 发展度 / 建筑 / 编年史。同步后需在当前主线完成真实 AI 轮次、浏览器内 EJS
+      地图投影、v1.2 UI 与时间结算的端到端真机走查。现行契约见
+      `docs/planning/2026-08-11-map-system-v1-integration.md` 与
+      `docs/planning/2026-08-18-map-tile-dynamics-v1.2-design.md`。
+
+- [ ] **文生图集成复验** —— 在当前主线重新走通完整游玩链路：story 产出 `<scene_image>` 标记 →
+      `image_prompt` 侧链 → NovelAI / ComfyUI provider → 图片落库 → 正文就地渲染与 CG 图鉴，
+      同时覆盖手动 / 自动模式、失败恢复、重画、存档恢复和设置迁移。历史版本曾分别完成
+      NovelAI 与 ComfyUI 真机验证，但 `artifacts/` 中没有保留对应的当前主线验收证据；设计契约见
+      `docs/planning/2026-08-04-image-generation-design.md` 与
+      `docs/planning/2026-08-08-comfyui-image-provider-design.md`。
+
 - [ ] **配乐重制/精选** —— 现有曲目**不够 ambient**，存在感太强，会把注意力从正文上拽走。
       需要按场景重新甄选或重制成低存在感的环境音床，并复核音量包络与循环点。
       音频系统本身见 `docs/reference/audio_system.md`（改音频必读）。
