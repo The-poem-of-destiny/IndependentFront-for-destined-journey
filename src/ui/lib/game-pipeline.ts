@@ -30,6 +30,7 @@ import type {
   CharacterState,
   ChatMessage,
   SystemEvent,
+  DebugAgentEntry,
 } from '@engine/types';
 import type {
   ImageGenFailure,
@@ -194,6 +195,9 @@ export class GamePipeline {
    * 两件都只在「我还是当前那一轮」时才做。
    */
   private runSeq = 0;
+  /** 当前回合内按 Agent 递增，生成不会因同名 Agent 而覆盖的调试调用 ID。 */
+  private debugInvocationCounts = new Map<string, number>();
+  private mainInvocationIds = new Map<string, string>();
   /** 真机修(2026-07-17): run() 加载的配置/世界书/预设，供侧链 buildAgentMessages 使用（此前恒 undefined → systemPrompt 退化 stub + 世界书恒空） */
   private chainData: {
     agentConfigs: AgentConfig[];
@@ -348,8 +352,13 @@ export class GamePipeline {
         : existingSourceMessageId;
       activityRunId = this.game.startAgentActivityRun(boundSourceMessageId);
       this.activeRunId = activityRunId;
+      this.game.startAgentLogTurn({
+        id: activityRunId,
+        saveId: this.saveId,
+        turn: (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1,
+        sourceMessageId: boundSourceMessageId,
+      });
       this.game.setPendingOptions([]); // 新一轮开始，清掉上一轮的行动选项
-      this.game.clearAgentLog();
 
       // 2. 构建 endpoints & context
       const endpoints = this.buildEndpoints();
@@ -473,6 +482,14 @@ export class GamePipeline {
       this.flushPendingAudio();
       if (activityRunId) {
         this.game.finishAgentActivityRun(activityRunId, activityOutcome, activityMessage);
+        this.game.finishAgentLogTurn(activityRunId, activityOutcome);
+        const debugPrefix = `${activityRunId}\u0000`;
+        for (const key of this.debugInvocationCounts.keys()) {
+          if (key.startsWith(debugPrefix)) this.debugInvocationCounts.delete(key);
+        }
+        for (const key of this.mainInvocationIds.keys()) {
+          if (key.startsWith(debugPrefix)) this.mainInvocationIds.delete(key);
+        }
       }
       if (this.activeRunId === activityRunId) {
         this.activeRunId = null;
@@ -1139,12 +1156,20 @@ export class GamePipeline {
     return apiPool.find((ep) => ep.id === poolId) || apiPool[0];
   }
 
+  private nextDebugInvocation(agentId: string, runId = this.activeRunId ?? 'detached') {
+    const key = `${runId}\u0000${agentId}`;
+    const ordinal = (this.debugInvocationCounts.get(key) ?? 0) + 1;
+    this.debugInvocationCounts.set(key, ordinal);
+    return { invocationId: `${runId}:${agentId}:${ordinal}`, ordinal };
+  }
+
   /** 创建 AgentClient 工厂 —— 供 craft_gen / char_gen / item_gen 链使用。
    *  🆕 包裹一层 LogClient：拦截 chat / chatWithTools，自动写 agentLog，
    *  让侧链 Agent 在 DebugPanel 可见（否则绕过 orchestrator 时无日志）。 */
   private getClientFactory(runActivityId = this.activeRunId ?? undefined) {
     const saveId = this.saveId;
     const game = this.game;
+    const debugTurnId = runActivityId ?? this.activeRunId ?? 'detached';
     // 🔴 侧链的取消信号（2026-08-10）。此前侧链**完全不响应 abort**：下面的包装层把
     // `signal` 当入参转发，而 char_gen / item_gen / craft_gen / 战斗的调用方一个都没传，
     // 于是 `abort()` 只掐得动 story（`callAgent` 显式传了 signal）。后果有两层：
@@ -1174,9 +1199,9 @@ export class GamePipeline {
         maxRetries: chainCfg?.maxRetries ?? 1,
       });
       const label = AGENT_LABELS[agentId] ?? agentId;
-      let callSeq = 0;
-
       const record = (
+        invocation: { invocationId: string; ordinal: number },
+        startedAt: number,
         messages: Array<{ role: string; content: string | null }>,
         result:
           | {
@@ -1189,19 +1214,21 @@ export class GamePipeline {
               cacheMissTokens?: number;
               completionTokens?: number;
               toolCalls?: AgentResult['toolCalls'];
+              providerRounds?: AgentResult['providerRounds'];
+              promptSessionRevision?: number;
+              promptRebased?: boolean;
+              promptRebaseReason?: string;
               error?: string;
               duration?: number;
             }
           | undefined,
         duration: number,
       ) => {
-        callSeq += 1;
-        // 同一 Agent 一轮内被多次调用时（如 2 个新角色 → char_gen 跑 2 次），
-        // addAgentLogEntry 按 agentId 覆盖同名条目，故给 agentId/label 加序号后缀避免互相覆盖。
-        const seqId = callSeq > 1 ? `${agentId}#${callSeq}` : agentId;
         game.addAgentLogEntry({
-          agentId: seqId,
-          label: callSeq > 1 ? `${label} #${callSeq}` : label,
+          invocationId: invocation.invocationId,
+          turnId: debugTurnId,
+          agentId,
+          label: invocation.ordinal > 1 ? `${label} #${invocation.ordinal}` : label,
           endpointId: endpoint.id,
           endpointName: endpoint.name || '',
           baseUrl: endpoint.baseUrl || '',
@@ -1210,6 +1237,10 @@ export class GamePipeline {
           rawResponse: result?.rawResponse ?? result?.output ?? '',
           reasoning: result?.reasoning,
           toolCalls: result?.toolCalls,
+          providerRounds: result?.providerRounds,
+          promptSessionRevision: result?.promptSessionRevision,
+          promptRebased: result?.promptRebased,
+          promptRebaseReason: result?.promptRebaseReason,
           error: result?.error,
           tokensUsed: result?.tokensUsed ?? 0,
           cacheHit: result?.cacheHit ?? false,
@@ -1217,6 +1248,8 @@ export class GamePipeline {
           cacheMissTokens: result?.cacheMissTokens,
           completionTokens: result?.completionTokens,
           duration: result?.duration ?? duration,
+          startedAt,
+          completedAt: Date.now(),
         });
       };
 
@@ -1237,23 +1270,27 @@ export class GamePipeline {
         },
         chat: async (request: any, signal?: any) => {
           const t0 = startTs();
+          const invocation = this.nextDebugInvocation(agentId, runActivityId);
           let result: any;
           try {
             // 调用方给了就用它的，没给才回落本轮信号（见 turnSignal 那段注释）
             result = await real.chat(request, signal ?? turnSignal);
           } catch (err: any) {
             record(
+              invocation,
+              t0,
               extractMessages(request),
               { error: String(err?.message ?? err) },
               Date.now() - t0,
             );
             throw err;
           }
-          record(extractMessages(request), result, Date.now() - t0);
+          record(invocation, t0, extractMessages(request), result, Date.now() - t0);
           return result;
         },
         chatWithTools: async (request: any, toolExecutor: any, options?: any) => {
           const t0 = startTs();
+          const invocation = this.nextDebugInvocation(agentId, runActivityId);
           let result: any;
           try {
             result = await real.chatWithTools(
@@ -1281,13 +1318,15 @@ export class GamePipeline {
             );
           } catch (err: any) {
             record(
+              invocation,
+              t0,
               extractMessages(request),
               { error: String(err?.message ?? err) },
               Date.now() - t0,
             );
             throw err;
           }
-          record(extractMessages(request), result, Date.now() - t0);
+          record(invocation, t0, extractMessages(request), result, Date.now() - t0);
           return result;
         },
         // chatStream 不常用（侧链不走流式），直接透传（信号回落同上）
@@ -1537,6 +1576,7 @@ export class GamePipeline {
   }
 
   private buildEventHandlers(runActivityId?: string): OrchestratorEvents {
+    const debugTurnId = runActivityId ?? this.activeRunId ?? 'detached';
     return {
       // 🎵 配乐：只暂存，**不在 Stage 1 就播** —— 见 run() 末尾的说明
       onPlayAudio: (marker) => {
@@ -1572,26 +1612,40 @@ export class GamePipeline {
       onAgentStart: (agentId, config) => {
         console.log(`[GamePipeline] Agent 开始: ${agentId}`);
         this.game.updateAgentStatus(agentId, runActivityId);
+        const invocation = this.nextDebugInvocation(agentId, runActivityId);
+        this.mainInvocationIds.set(`${debugTurnId}\u0000${agentId}`, invocation.invocationId);
+        const endpoint = this.buildEndpoints().find((item) => item.id === config.apiEndpointId);
         // 初始化日志空条目 (等 complete 时补全 messages + result)
         this.game.addAgentLogEntry({
+          invocationId: invocation.invocationId,
+          turnId: debugTurnId,
           agentId,
-          label: AGENT_LABELS[agentId] ?? agentId,
+          label:
+            invocation.ordinal > 1
+              ? `${AGENT_LABELS[agentId] ?? agentId} #${invocation.ordinal}`
+              : (AGENT_LABELS[agentId] ?? agentId),
           endpointId: config.apiEndpointId,
-          endpointName: '', // 暂不解析 endpoint name，后续从 buildEndpoints 传入时再补
-          baseUrl: '',
-          model: config.model,
+          endpointName: endpoint?.name ?? '',
+          baseUrl: endpoint?.baseUrl ?? '',
+          model: config.model || endpoint?.defaultModel || '',
           messages: [],
           rawResponse: '',
           tokensUsed: 0,
           cacheHit: false,
           duration: 0,
+          startedAt: Date.now(),
         });
       },
       onAgentComplete: async (result) => {
         this.game.clearAgentStatus(result.agentId, result.error, runActivityId);
         // 补全本轮已启动日志的剩余字段（保留 onAgentStart 写入的占位条目）
-        const prev = this.game.agentLog.find((e) => e.agentId === result.agentId);
+        const invocationId = this.mainInvocationIds.get(`${debugTurnId}\u0000${result.agentId}`);
+        const prev = this.game.agentLog.find(
+          (e: DebugAgentEntry) => e.invocationId === invocationId,
+        );
         this.game.addAgentLogEntry({
+          invocationId: invocationId ?? `${runActivityId}:${result.agentId}:unknown`,
+          turnId: debugTurnId,
           agentId: result.agentId,
           label: prev?.label ?? AGENT_LABELS[result.agentId] ?? result.agentId,
           endpointId: prev?.endpointId ?? '',
@@ -1602,6 +1656,10 @@ export class GamePipeline {
           rawResponse: result.rawResponse,
           reasoning: result.reasoning,
           toolCalls: result.toolCalls,
+          providerRounds: result.providerRounds,
+          promptSessionRevision: result.promptSessionRevision,
+          promptRebased: result.promptRebased,
+          promptRebaseReason: result.promptRebaseReason,
           error: result.error,
           tokensUsed: result.tokensUsed,
           cacheHit: result.cacheHit,
@@ -1609,6 +1667,8 @@ export class GamePipeline {
           cacheMissTokens: result.cacheMissTokens,
           completionTokens: result.completionTokens,
           duration: result.duration,
+          startedAt: prev?.startedAt ?? Date.now() - result.duration,
+          completedAt: Date.now(),
         });
         await this.handleAgentResult(result);
       },
@@ -1616,8 +1676,13 @@ export class GamePipeline {
         console.error(`[GamePipeline] Agent 错误: ${agentId}`, error);
         this.game.clearAgentStatus(agentId, error, runActivityId);
         // 补充错误日志
-        const prev = this.game.agentLog.find((e) => e.agentId === agentId);
+        const invocationId = this.mainInvocationIds.get(`${debugTurnId}\u0000${agentId}`);
+        const prev = this.game.agentLog.find(
+          (e: DebugAgentEntry) => e.invocationId === invocationId,
+        );
         this.game.addAgentLogEntry({
+          invocationId: invocationId ?? `${runActivityId}:${agentId}:unknown`,
+          turnId: debugTurnId,
           agentId,
           label: prev?.label ?? AGENT_LABELS[agentId] ?? agentId,
           endpointId: prev?.endpointId ?? '',
@@ -1630,6 +1695,8 @@ export class GamePipeline {
           tokensUsed: 0,
           cacheHit: false,
           duration: 0,
+          startedAt: prev?.startedAt ?? Date.now(),
+          completedAt: Date.now(),
         });
       },
 

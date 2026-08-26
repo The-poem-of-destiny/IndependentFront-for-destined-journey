@@ -25,7 +25,7 @@ src/sillytavern/                    ← 核心引擎
   │   │    `database.ts` 曾为标这一个类型反向 import 前端 store。create-store 侧 re-export 同名
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
-  ├── database.ts                   ← Dexie/IndexedDB v23
+  ├── database.ts                   ← Dexie/IndexedDB v24
   │       🔴 `DB_VERSION` 常量必须等于最后一个 `this.version(n)`。它只出现在
   │          `FullBackup.version` 上、导入侧不拿它做判断，所以**对不上不会有任何报错**，
   │          只是每份导出的备份都盖了过期的戳。它曾经落后两版（v18/v19 忘了改），
@@ -82,11 +82,14 @@ src/sillytavern/                    ← 核心引擎
   │                 判据是载荷字段在不在、**不是版本号**。
   │              🔴 `preview` 不是第二个真源，只喂快照面板那一行字（主角 HP / 游戏内日期）；
   │                 任何逻辑一律读载荷。旧行缺席 = 那一行不显示，v22 升版时从载荷回填
-  │   └── v23+: apiRateLimitPolicies（全局 API RPM 策略）——按
+  │   ├── v23+: apiRateLimitPolicies（全局 API RPM 策略）——按
   │              `SHA-256(归一化 baseUrl + API Key)` 指纹存上限，不落明文密钥；进 FullBackup
   │       🔴 **世界书、美化规则与 API Key 现居应用 Dexie，不再在 localStorage**。正则 iframe
   │          只能经同步镜像访问 `regexStorage`，不能访问任何应用表；应用 localStorage 只存无密钥
   │          设置元数据（Agent 配置/主题/`beautifierBuiltinDisabled` 等）
+  │   └── v24+: debugTurns（每存档最近 10 回合完整 Agent 调试历史）——按 invocationId
+  │              保留同名侧链的每次调用、agentic provider 往返 usage 与 Delta 重基线诊断；
+  │              删存档级联删，不进 FullBackup（调试提示词/响应不混入日常备份）
   │
   ├── session-backup.ts             ← 单存档导出/导入：每存档表整取（清单同 deleteSaveSlot，字节不随行）+ 内容依赖清单（世界书 token / 工坊项目 / 内容包 / story 预设，导入前只读体检）+ 导入**一律重发 id**（不重发 = 第二次导入静默覆盖第一次），全局表一行不改
   │

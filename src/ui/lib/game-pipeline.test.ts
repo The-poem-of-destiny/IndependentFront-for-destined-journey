@@ -5,7 +5,7 @@ import {
   GamePipeline,
   withImagePromptSystem,
 } from './game-pipeline';
-import type { AgentConfig } from '@engine/types';
+import type { AgentConfig, ApiEndpoint } from '@engine/types';
 import { patchAgentSettings } from '../stores/agent-settings';
 import type { AgentResult } from '@engine/types';
 
@@ -138,6 +138,10 @@ function makeGameStore(overrides: Record<string, any> = {}) {
     addSystemMessage: vi.fn(),
     setPendingOptions: vi.fn(),
     clearAgentLog: vi.fn(),
+    startAgentLogTurn: vi.fn(),
+    finishAgentLogTurn: vi.fn(),
+    flushAgentLogWrites: vi.fn(async () => {}),
+    agentLogHistory: [],
     clearAllAgentStatus: vi.fn(),
     startAgentActivityRun: vi.fn(() => 'activity-test'),
     finishAgentActivityRun: vi.fn(),
@@ -189,6 +193,50 @@ function makePipeline(
 function makeResult(agentId: string, rawResponse: string): AgentResult {
   return { agentId, output: rawResponse, rawResponse, tokensUsed: 0, cacheHit: false, duration: 0 };
 }
+
+describe('侧链 Agent 调试调用身份', () => {
+  it('同回合新建两个同名 client 时仍生成不同 invocationId', async () => {
+    const addAgentLogEntry = vi.fn();
+    const pipeline = makePipeline({ addAgentLogEntry });
+    const factory = (pipeline as any).getClientFactory('run-debug');
+    const endpoint: ApiEndpoint = {
+      id: 'ep',
+      name: 'DeepSeek',
+      provider: 'deepseek',
+      baseUrl: 'https://api.example.test/v1',
+      apiKey: 'key',
+      defaultModel: 'model',
+      models: ['model'],
+      timeout: 1000,
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+        usage: { total_tokens: 1 },
+      }),
+      text: async () => '',
+    } as Response);
+
+    try {
+      await factory('char_gen', endpoint, 'save-test').chat({
+        messages: [{ role: 'user', content: 'first' }],
+      });
+      await factory('char_gen', endpoint, 'save-test').chat({
+        messages: [{ role: 'user', content: 'second' }],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(addAgentLogEntry).toHaveBeenCalledTimes(2);
+    const ids = addAgentLogEntry.mock.calls.map(([entry]) => entry.invocationId);
+    expect(ids).toEqual(['run-debug:char_gen:1', 'run-debug:char_gen:2']);
+  });
+});
 
 describe('sendOpeningPrompt', () => {
   it('two pipeline instances sharing one save generate the opening only once', async () => {

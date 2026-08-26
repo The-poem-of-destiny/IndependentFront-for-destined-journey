@@ -60,6 +60,8 @@ import {
   getMessages,
   deleteMessagesBySaveId,
   deleteMessagesAfterTurn,
+  getDebugTurns,
+  saveDebugTurn,
   // Audio (v11)
   getAudioTracks,
   getAudioTrack,
@@ -104,6 +106,7 @@ import type {
   AssetMetaRecord,
   WorkshopProject,
   WorldBook,
+  DebugTurnRecord,
 } from './types';
 import { DEFAULT_SETTINGS } from './types';
 import Dexie from 'dexie';
@@ -1109,7 +1112,7 @@ describe('exportAllData / importAllData', () => {
     // v21：地图字节本地缓存 mapBlobs（2026-08-07，D23 补强；字节同不进备份）。
     // v22：快照拆表（snapshots 只留元数据 + snapshotPayloads 存整档载荷，两者都进备份）。
     // v23：API 凭据级 RPM 策略表。
-    expect(backup.version).toBe(23);
+    expect(backup.version).toBe(24);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     expect(Array.isArray(backup.settings)).toBe(true);
@@ -2124,6 +2127,56 @@ describe('Messages CRUD (Phase 10h)', () => {
   });
 });
 
+describe('Debug turn history (v24)', () => {
+  const makeTurn = (saveId: string, turn: number): DebugTurnRecord => ({
+    id: `${saveId}:debug:${turn}`,
+    saveId,
+    turn,
+    status: 'completed',
+    startedAt: 1_800_000_000_000 + turn,
+    completedAt: 1_800_000_000_100 + turn,
+    entries: [
+      {
+        invocationId: `${saveId}:story:${turn}`,
+        turnId: `${saveId}:debug:${turn}`,
+        agentId: 'story',
+        label: '正文',
+        endpointId: 'ep',
+        endpointName: 'DeepSeek',
+        baseUrl: 'https://api.example.test',
+        model: 'model',
+        messages: [{ role: 'system', content: `prompt-${turn}` }],
+        rawResponse: `response-${turn}`,
+        tokensUsed: turn,
+        cacheHit: false,
+        duration: 10,
+        startedAt: 1_800_000_000_000 + turn,
+        completedAt: 1_800_000_000_010 + turn,
+      },
+    ],
+  });
+
+  it('持久化完整调用内容，并只保留每存档最近 10 回合', async () => {
+    for (let turn = 1; turn <= 12; turn++) await saveDebugTurn(makeTurn('save-debug', turn));
+    await saveDebugTurn(makeTurn('other-save', 1));
+
+    const rows = await getDebugTurns('save-debug');
+    expect(rows.map((row) => row.turn)).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(rows[9].entries[0]).toEqual(
+      expect.objectContaining({
+        invocationId: 'save-debug:story:12',
+        messages: [{ role: 'system', content: 'prompt-12' }],
+        rawResponse: 'response-12',
+      }),
+    );
+    expect(await getDebugTurns('other-save')).toHaveLength(1);
+
+    await deleteSaveSlot('save-debug');
+    expect(await getDebugTurns('save-debug')).toHaveLength(0);
+    expect(await getDebugTurns('other-save')).toHaveLength(1);
+  });
+});
+
 // ========== v9: characters saveId 一等索引 (M1 #43) ==========
 
 describe('v9: characters saveId 一等索引', () => {
@@ -2759,8 +2812,8 @@ describe('Asset CRUD (v13)', () => {
     // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    // v20=D18 contentPacks 表; v21=地图字节缓存; v22=快照拆表; v23=API RPM 策略
-    expect(db.verno).toBe(23);
+    // v20=D18 contentPacks; v21=地图字节; v22=快照拆表; v23=API RPM; v24=调试历史
+    expect(db.verno).toBe(24);
 
     // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
     //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）
@@ -2783,6 +2836,7 @@ describe('Asset CRUD (v13)', () => {
       'mapBlobs',
       'snapshotPayloads',
       'apiRateLimitPolicies',
+      'debugTurns',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 

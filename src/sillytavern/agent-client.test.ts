@@ -345,6 +345,64 @@ describe('AgentClient', () => {
     });
   });
 
+  describe('chatWithTools — provider 往返诊断', () => {
+    it('保留每一轮独立 usage，不只留下合计', async () => {
+      const responses = [
+        {
+          choices: [
+            {
+              message: {
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'call_1',
+                    type: 'function',
+                    function: { name: 'lookup', arguments: '{"name":"Luna"}' },
+                  },
+                ],
+              },
+              finish_reason: 'tool_calls',
+            },
+          ],
+          usage: {
+            total_tokens: 110,
+            prompt_tokens: 100,
+            prompt_cache_hit_tokens: 80,
+            prompt_cache_miss_tokens: 20,
+            completion_tokens: 10,
+          },
+        },
+        {
+          choices: [{ message: { content: 'done' }, finish_reason: 'stop' }],
+          usage: {
+            total_tokens: 215,
+            prompt_tokens: 200,
+            prompt_cache_hit_tokens: 150,
+            prompt_cache_miss_tokens: 50,
+            completion_tokens: 15,
+          },
+        },
+      ];
+      globalThis.fetch = vi.fn().mockImplementation(() => mockFetch(responses.shift())());
+
+      const result = await client.chatWithTools(
+        {
+          messages: [{ role: 'user', content: 'test' }],
+          tools: [
+            { type: 'function', function: { name: 'lookup', description: '', parameters: {} } },
+          ],
+        },
+        async () => ({ found: true }),
+      );
+
+      expect(result.tokensUsed).toBe(325);
+      expect(result.providerRounds).toEqual([
+        expect.objectContaining({ round: 1, tokensUsed: 110, cacheHitTokens: 80 }),
+        expect.objectContaining({ round: 2, tokensUsed: 215, cacheHitTokens: 150 }),
+      ]);
+    });
+  });
+
   describe('chat — 重试', () => {
     it('应在重试后成功', async () => {
       const retryClient = new AgentClient({

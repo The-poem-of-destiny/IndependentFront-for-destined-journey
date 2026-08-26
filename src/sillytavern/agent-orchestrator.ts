@@ -822,6 +822,7 @@ export class AgentOrchestrator {
     );
 
     result.duration = Date.now() - startTime;
+    result.requestMessages = messages;
     return result;
   }
 

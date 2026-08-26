@@ -9,6 +9,10 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### DebugPanel 最近 10 回合完整调用历史｜ ✅ 已实施，待真机（2026-08-25）
+
+修复 debug 导出只剩当前回合、同名 `char_gen` / `item_gen` 侧链互相覆盖的问题：每次 Agent 调用改以回合活动 ID + Agent + 序号组成 `invocationId`，Dexie v24 新增 `debugTurns` 按存档持久化并原子淘汰到最近 10 回合，删存档时级联删除且不进入日常 FullBackup。`chatWithTools` 额外保留每轮真实 provider usage，主 DAG 的 Delta revision / 重基线原因也贯通到面板与 JSON。DebugPanel 可切换 10 回合查看，汇总纳入 `memory_recall`；导出新增 `agentHistory`，同时保留最新回合 `agentLog` 兼容旧分析脚本。
+
 ### 重铸系统：单条目物品/技能/装备主动重写｜ ✅ 已实施（2026-08-24）
 
 主人需求：玩家主动重新生成角色的物品/技能（给定已知条目 + 可选用户描述做 debug 线索，如「火球术伤害不对，应该 400 能量伤害却只有 200 物理伤害」）。三处既有疑点一并查证/修复：**NPC 角色面板（CharacterListPanel）确实缺背包 tab**（CharacterViewerModal 有）、**查看脚本是旧版**（只取第一个条目的 scripts，主角 ItemsPanel 是新版 scripts + modifiers/automata JSON）、CharacterViewerModal 完全没有脚本查看。

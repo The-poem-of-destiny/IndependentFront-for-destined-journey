@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useGameStore, type DebugAgentEntry } from '../../stores/game-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
@@ -19,6 +19,23 @@ import {
 const game = useGameStore();
 const settings = useSettingsStore();
 const ui = useUIStore();
+const selectedTurnId = ref('');
+
+const selectedTurn = computed(() => {
+  return (
+    game.agentLogHistory.find((turn) => turn.id === selectedTurnId.value) ??
+    game.agentLogHistory[game.agentLogHistory.length - 1] ??
+    null
+  );
+});
+const displayedAgentLog = computed(() => selectedTurn.value?.entries ?? []);
+watch(
+  () => game.agentLogHistory[game.agentLogHistory.length - 1]?.id,
+  (id) => {
+    if (id && !selectedTurnId.value) selectedTurnId.value = id;
+  },
+  { immediate: true },
+);
 
 // ═══════════════════════════════════════════════════════════
 // 随机事件（随机事件 v1 §4）
@@ -99,9 +116,9 @@ async function armEvent(name: string): Promise<void> {
   }
 }
 
-/** 本轮 token 汇总（排除 memory_recall 记忆召回，只看正文链路的缓存效率） */
+/** 所选回合全部真实 Agent 调用的 token 汇总（含 memory_recall）。 */
 const tokenSummary = computed(() => {
-  const entries = game.agentLog.filter((e) => !e.agentId.startsWith('memory_recall'));
+  const entries = displayedAgentLog.value;
   const sum = (sel: (e: DebugAgentEntry) => number | undefined) =>
     entries.reduce((s, e) => s + (sel(e) ?? 0), 0);
   return {
@@ -139,7 +156,34 @@ async function buildExportData() {
   // 🆕 导出前先把 Dexie 最新的 characters / save.metadata / saveProfile 回读进内存，
   // 避免导出开局快照（inventory=[] / totalTurns=0 假象）
   await game.refreshFromDb();
+  await game.flushAgentLogWrites();
   const sysSettings = settings.settings;
+  const serializeAgentEntry = (e: DebugAgentEntry) => ({
+    invocationId: e.invocationId,
+    turnId: e.turnId,
+    agentId: e.agentId,
+    label: e.label,
+    model: e.model,
+    endpointName: e.endpointName,
+    baseUrl: e.baseUrl,
+    startedAt: e.startedAt,
+    completedAt: e.completedAt,
+    duration: e.duration,
+    tokensUsed: e.tokensUsed,
+    cacheHit: e.cacheHit,
+    cacheHitTokens: e.cacheHitTokens,
+    cacheMissTokens: e.cacheMissTokens,
+    completionTokens: e.completionTokens,
+    promptSessionRevision: e.promptSessionRevision,
+    promptRebased: e.promptRebased,
+    promptRebaseReason: e.promptRebaseReason,
+    providerRounds: e.providerRounds,
+    error: e.error,
+    rawResponse: e.rawResponse,
+    reasoning: e.reasoning,
+    toolCalls: e.toolCalls,
+    messages: e.messages,
+  });
   return {
     exportedAt: new Date().toISOString(),
     save: {
@@ -158,23 +202,16 @@ async function buildExportData() {
       timestamp: m.timestamp,
     })),
     saveProfile: game.saveProfile,
-    agentLog: game.agentLog.map((e) => ({
-      agentId: e.agentId,
-      label: e.label,
-      model: e.model,
-      endpointName: e.endpointName,
-      baseUrl: e.baseUrl,
-      duration: e.duration,
-      tokensUsed: e.tokensUsed,
-      cacheHit: e.cacheHit,
-      cacheHitTokens: e.cacheHitTokens,
-      cacheMissTokens: e.cacheMissTokens,
-      completionTokens: e.completionTokens,
-      error: e.error,
-      rawResponse: e.rawResponse,
-      reasoning: e.reasoning,
-      toolCalls: e.toolCalls,
-      messages: e.messages,
+    // 兼容既有分析脚本：agentLog 仍指最新回合；完整历史在 agentHistory。
+    agentLog: game.agentLog.map(serializeAgentEntry),
+    agentHistory: game.agentLogHistory.map((turn) => ({
+      id: turn.id,
+      turn: turn.turn,
+      sourceMessageId: turn.sourceMessageId,
+      status: turn.status,
+      startedAt: turn.startedAt,
+      completedAt: turn.completedAt,
+      entries: turn.entries.map(serializeAgentEntry),
     })),
     apiPool: (sysSettings.apiPool as any[]).map((ep: any) => ({
       id: ep.id,
@@ -386,18 +423,33 @@ function formatJson(value: unknown): string {
 
     <!-- Agent 调用日志 -->
     <div class="debug-section">
-      <h4>本轮 Agent 调用 ({{ game.agentLog.length }})</h4>
-      <div v-if="game.agentLog.length === 0" class="debug-empty">
+      <div class="debug-agent-title-row">
+        <h4>Agent 调用历史 ({{ game.agentLogHistory.length }}/10 回合)</h4>
+        <select
+          v-if="game.agentLogHistory.length"
+          v-model="selectedTurnId"
+          class="debug-turn-select"
+        >
+          <option
+            v-for="turn in [...game.agentLogHistory].reverse()"
+            :key="turn.id"
+            :value="turn.id"
+          >
+            第 {{ turn.turn }} 回合 · {{ turn.status }} · {{ turn.entries.length }} 次调用
+          </option>
+        </select>
+      </div>
+      <div v-if="displayedAgentLog.length === 0" class="debug-empty">
         暂无日志（等待下一轮管线触发）
       </div>
       <div v-else class="debug-token-summary">
-        本轮汇总（排除记忆召回 · {{ tokenSummary.count }} 个 Agent）: 命中
+        所选回合汇总（含记忆召回 · {{ tokenSummary.count }} 次调用）: 命中
         <strong>{{ tokenSummary.hit }}</strong> / 未命中 <strong>{{ tokenSummary.miss }}</strong> /
         输出 <strong>{{ tokenSummary.completion }}</strong>
       </div>
       <div
-        v-for="entry in game.agentLog"
-        :key="entry.agentId"
+        v-for="entry in displayedAgentLog"
+        :key="entry.invocationId"
         class="debug-agent-entry"
         :class="{ 'has-error': entry.error }"
       >
@@ -409,6 +461,10 @@ function formatJson(value: unknown): string {
             >命中 {{ entry.cacheHitTokens ?? 0 }} / 未命中 {{ entry.cacheMissTokens ?? 0 }} / 输出
             {{ entry.completionTokens ?? 0 }} · {{ entry.duration }}ms</span
           >
+        </div>
+        <div v-if="entry.promptSessionRevision" class="debug-agent-meta">
+          Delta revision {{ entry.promptSessionRevision }} · 重基线
+          {{ entry.promptRebased ? `是（${entry.promptRebaseReason ?? '未注明原因'}）` : '否' }}
         </div>
         <details class="debug-agent-details">
           <summary>请求 ({{ entry.messages.length }} 条消息) / 响应</summary>
@@ -442,6 +498,10 @@ function formatJson(value: unknown): string {
                   <pre>结果: {{ truncate(formatJson(tool.result), 1200) }}</pre>
                 </details>
               </template>
+              <template v-if="entry.providerRounds?.length">
+                <h6 class="debug-reasoning-h">Provider 往返 ({{ entry.providerRounds.length }})</h6>
+                <pre class="debug-provider-rounds">{{ formatJson(entry.providerRounds) }}</pre>
+              </template>
             </div>
           </div>
         </details>
@@ -462,6 +522,34 @@ function formatJson(value: unknown): string {
 .debug-actions {
   display: flex;
   gap: 8px;
+}
+.debug-agent-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--theme-spacing-sm, 8px);
+  flex-wrap: wrap;
+}
+.debug-agent-title-row h4 {
+  margin: 0;
+}
+.debug-turn-select {
+  min-width: 220px;
+  padding: 6px 10px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm, 4px);
+  background: var(--theme-surface-muted);
+  color: var(--theme-text-primary);
+  font: inherit;
+}
+.debug-agent-meta {
+  margin-top: 4px;
+  color: var(--theme-text-secondary);
+  font-size: 0.75rem;
+}
+.debug-provider-rounds {
+  max-height: 220px;
+  overflow: auto;
 }
 .debug-btn {
   padding: 6px 14px;
