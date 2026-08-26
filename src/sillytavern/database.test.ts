@@ -4,6 +4,7 @@
  * Uses fake-indexeddb (injected via src/test-setup.ts).
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { withSaveWriteLock } from './state-write-queue';
 import {
   getDatabase,
   initializeDatabase,
@@ -2174,6 +2175,23 @@ describe('Debug turn history (v24)', () => {
     await deleteSaveSlot('save-debug');
     expect(await getDebugTurns('save-debug')).toHaveLength(0);
     expect(await getDebugTurns('other-save')).toHaveLength(1);
+  });
+
+  it('与同存档的其他写入共用 withSaveWriteLock 队列', async () => {
+    let release!: () => void;
+    const held = withSaveWriteLock(
+      'save-locked-debug',
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const pending = saveDebugTurn(makeTurn('save-locked-debug', 1));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await getDebugTurns('save-locked-debug')).toHaveLength(0);
+
+    release();
+    await held;
+    await pending;
+    expect(await getDebugTurns('save-locked-debug')).toHaveLength(1);
   });
 });
 

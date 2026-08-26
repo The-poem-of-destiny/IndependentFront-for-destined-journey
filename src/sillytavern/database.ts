@@ -7,6 +7,7 @@
  */
 
 import Dexie, { Table } from 'dexie';
+import { withSaveWriteLock } from './state-write-queue';
 import type {
   Lorebook,
   ChatPreset,
@@ -2061,15 +2062,17 @@ export async function getDebugTurns(saveId: string): Promise<DebugTurnRecord[]> 
 
 /** 保存一回合的最新快照，并在同一事务内淘汰该存档最旧的超额记录。 */
 export async function saveDebugTurn(record: DebugTurnRecord): Promise<void> {
-  const db = getDatabase();
-  await db.transaction('rw', db.debugTurns, async () => {
-    await db.debugTurns.put(record);
-    const keys = await db.debugTurns
-      .where('[saveId+startedAt]')
-      .between([record.saveId, Dexie.minKey], [record.saveId, Dexie.maxKey], true, true)
-      .primaryKeys();
-    const overflow = keys.length - DEBUG_TURN_HISTORY_LIMIT;
-    if (overflow > 0) await db.debugTurns.bulkDelete(keys.slice(0, overflow));
+  await withSaveWriteLock(record.saveId, async () => {
+    const db = getDatabase();
+    await db.transaction('rw', db.debugTurns, async () => {
+      await db.debugTurns.put(record);
+      const keys = await db.debugTurns
+        .where('[saveId+startedAt]')
+        .between([record.saveId, Dexie.minKey], [record.saveId, Dexie.maxKey], true, true)
+        .primaryKeys();
+      const overflow = keys.length - DEBUG_TURN_HISTORY_LIMIT;
+      if (overflow > 0) await db.debugTurns.bulkDelete(keys.slice(0, overflow));
+    });
   });
 }
 

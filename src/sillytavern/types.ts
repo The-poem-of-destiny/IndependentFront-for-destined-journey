@@ -1897,6 +1897,7 @@ export interface DebugAgentEntry {
   cacheHitTokens?: number;
   cacheMissTokens?: number;
   completionTokens?: number;
+  promptTokens?: number;
   duration: number;
   startedAt: number;
   completedAt?: number;

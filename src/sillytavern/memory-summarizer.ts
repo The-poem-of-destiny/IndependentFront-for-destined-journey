@@ -11,7 +11,7 @@
 
 import type { MemoryRecord } from './types';
 import { getAllMemoryIds, saveMemory } from './database';
-import { computeEmbedding } from './memory-store';
+import { computeEmbedding, type EmbeddingRequestObserver } from './memory-store';
 // Q-05：从模型输出抢救 JSON 的唯一入口
 import { parseModelJson } from './model-json';
 // 并行化改造：MEM 编号是全库分配（跨存档），「分配 + 落库」必须同段互斥，
@@ -140,7 +140,9 @@ export interface SummarizeAndSaveOptions {
   /** 关联的角色 ID 列表 */
   relatedCharacterIds?: string[];
   /** Embedding API 端点（可选，不提供则不计算 embedding） */
-  embeddingEndpoint?: { baseUrl: string; apiKey: string; defaultModel: string };
+  embeddingEndpoint?: { baseUrl: string; apiKey: string; defaultModel: string; name?: string };
+  /** 调试旁路：每个真实 Embedding 请求完成后回传 usage，不接触 API Key。 */
+  onEmbeddingRequest?: EmbeddingRequestObserver;
   /** 游戏时间 */
   gameTimeRange?: { start: string; end: string };
 }
@@ -161,6 +163,7 @@ export async function summarizeAndSave(
     agentRawOutput,
     relatedCharacterIds = [],
     embeddingEndpoint,
+    onEmbeddingRequest,
     gameTimeRange,
   } = options;
 
@@ -206,7 +209,13 @@ export async function summarizeAndSave(
     if (embeddingEndpoint) {
       try {
         const embeddingText = `[${parsed.keywords.join(', ')}] ${parsed.content}`;
-        memory.embedding = await computeEmbedding(embeddingText, embeddingEndpoint);
+        memory.embedding = await computeEmbedding(
+          embeddingText,
+          embeddingEndpoint,
+          undefined,
+          undefined,
+          onEmbeddingRequest,
+        );
       } catch {
         // Embedding 不可用 — 保存无 embedding 的记忆
         memory.embedding = undefined;

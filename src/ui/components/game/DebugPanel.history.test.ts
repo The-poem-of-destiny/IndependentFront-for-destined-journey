@@ -60,6 +60,10 @@ describe('DebugPanel · Agent 历史', () => {
     );
 
     const wrapper = mount(DebugPanel);
+
+    expect(wrapper.get('select.debug-turn-select').attributes('aria-label')).toBe(
+      '选择调试历史回合',
+    );
     expect(wrapper.text()).toContain('Agent 调用历史 (2/10 回合)');
     expect(wrapper.findAll('.debug-turn-select option')).toHaveLength(2);
     expect(wrapper.text()).toContain('含记忆召回 · 1 次调用');

@@ -25,7 +25,7 @@
 
 | 文件 | 说明 | 来源 |
 |------|------|------|
-| `fated-poem-debug-*.json` | Agent 日志导出（`agentHistory` 含当前存档最近 **10 回合**的每次调用：messages、rawResponse、duration、usage、工具轮次与 Delta 诊断；`agentLog` 兼容指向最新回合；另含整张 `agents` 设置表与 EJS 三类诊断） | 游戏页 DebugPanel 导出按钮（`src/ui/components/game/DebugPanel.vue`） |
+| `fated-poem-debug-*.json` | Agent 日志导出（`agentHistory` 含当前存档最近 **10 回合**的每次调用：messages、rawResponse、duration、usage、工具轮次与 Delta 诊断，并单列 `memory_embedding` 与 `memory_recall` 的 Embedding provider usage；`agentLog` 兼容指向最新回合；另含整张 `agents` 设置表与 EJS 三类诊断） | 游戏页 DebugPanel 导出按钮（`src/ui/components/game/DebugPanel.vue`） |
 | `log.txt` | 浏览器 Console 日志（含 console.log/error/warn） | 浏览器 F12 Console 复制 |
 
 **命名约定**：保持 debug JSON 自动生成的文件名不变，方便追溯。

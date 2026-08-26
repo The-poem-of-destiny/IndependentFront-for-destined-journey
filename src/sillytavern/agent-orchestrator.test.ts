@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AgentOrchestrator } from './agent-orchestrator';
 import type { AgentContext, AgentConfig, ApiEndpoint, Pipeline } from './types';
+import { deleteMemory, saveMemory } from './database';
 // T3: Delta 会话 module 的测试可观测入口（reset 保证每用例从干净 session 开始，
 // 不污染现有用例；activePromptSessionCount 断言「不创建 session」类排除路径）
 import { activePromptSessionCount, resetPromptSessionsForTest } from './prompt-session-assembler';
@@ -2684,6 +2685,19 @@ describe('AgentOrchestrator — Delta 会话接线（T3）', () => {
   });
 
   it('focused: memory_recall embedding 不创建 session（原路径）', async () => {
+    await saveMemory({
+      id: 'MEM-DEBUG-USAGE',
+      saveId: 'save_delta_embed',
+      createdAt: 1,
+      realTimestamp: 1,
+      timeRange: { start: '001-01-01', end: '001-01-01' },
+      content: '用于验证 embedding usage 进入调试历史的记忆。',
+      hiddenLine: '',
+      keywords: ['usage'],
+      relatedCharacterIds: [],
+      importance: 5,
+      embedding: [0.1, 0.2, 0.3],
+    });
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -2691,6 +2705,7 @@ describe('AgentOrchestrator — Delta 会话接线（T3）', () => {
       json: async () => ({
         data: [{ object: 'embedding', index: 0, embedding: [0.1, 0.2, 0.3] }],
         model: 'text-embedding-3-small',
+        usage: { prompt_tokens: 8, total_tokens: 8 },
       }),
       text: async () => '',
     });
@@ -2710,6 +2725,12 @@ describe('AgentOrchestrator — Delta 会话接线（T3）', () => {
     expect(r.error).toBeUndefined();
     expect(activePromptSessionCount()).toBe(0);
     expect(r.promptSessionRevision).toBeUndefined();
+    expect(r.tokensUsed).toBe(8);
+    expect(r.promptTokens).toBe(8);
+    expect(r.providerRounds).toEqual([
+      expect.objectContaining({ round: 1, tokensUsed: 8, promptTokens: 8 }),
+    ]);
+    await deleteMemory('MEM-DEBUG-USAGE');
   });
 
   it('focused: toolsEnabled 不创建 session（原路径）', async () => {

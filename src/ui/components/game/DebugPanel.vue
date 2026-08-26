@@ -158,32 +158,8 @@ async function buildExportData() {
   await game.refreshFromDb();
   await game.flushAgentLogWrites();
   const sysSettings = settings.settings;
-  const serializeAgentEntry = (e: DebugAgentEntry) => ({
-    invocationId: e.invocationId,
-    turnId: e.turnId,
-    agentId: e.agentId,
-    label: e.label,
-    model: e.model,
-    endpointName: e.endpointName,
-    baseUrl: e.baseUrl,
-    startedAt: e.startedAt,
-    completedAt: e.completedAt,
-    duration: e.duration,
-    tokensUsed: e.tokensUsed,
-    cacheHit: e.cacheHit,
-    cacheHitTokens: e.cacheHitTokens,
-    cacheMissTokens: e.cacheMissTokens,
-    completionTokens: e.completionTokens,
-    promptSessionRevision: e.promptSessionRevision,
-    promptRebased: e.promptRebased,
-    promptRebaseReason: e.promptRebaseReason,
-    providerRounds: e.providerRounds,
-    error: e.error,
-    rawResponse: e.rawResponse,
-    reasoning: e.reasoning,
-    toolCalls: e.toolCalls,
-    messages: e.messages,
-  });
+  const serializeAgentEntry = (entry: DebugAgentEntry): DebugAgentEntry =>
+    JSON.parse(JSON.stringify(entry)) as DebugAgentEntry;
   return {
     exportedAt: new Date().toISOString(),
     save: {
@@ -429,6 +405,7 @@ function formatJson(value: unknown): string {
           v-if="game.agentLogHistory.length"
           v-model="selectedTurnId"
           class="debug-turn-select"
+          aria-label="选择调试历史回合"
         >
           <option
             v-for="turn in [...game.agentLogHistory].reverse()"
@@ -535,7 +512,7 @@ function formatJson(value: unknown): string {
 }
 .debug-turn-select {
   min-width: 220px;
-  padding: 6px 10px;
+  padding: var(--theme-spacing-xs) var(--theme-spacing-sm);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-sm, 4px);
   background: var(--theme-surface-muted);
@@ -543,7 +520,7 @@ function formatJson(value: unknown): string {
   font: inherit;
 }
 .debug-agent-meta {
-  margin-top: 4px;
+  margin-top: var(--theme-spacing-xs);
   color: var(--theme-text-secondary);
   font-size: 0.75rem;
 }

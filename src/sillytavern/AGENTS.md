@@ -89,6 +89,7 @@ src/sillytavern/                    ← 核心引擎
   │          设置元数据（Agent 配置/主题/`beautifierBuiltinDisabled` 等）
   │   └── v24+: debugTurns（每存档最近 10 回合完整 Agent 调试历史）——按 invocationId
   │              保留同名侧链的每次调用、agentic provider 往返 usage 与 Delta 重基线诊断；
+  │              Embedding 召回/记忆向量化也记录真实 provider usage；写入服从 withSaveWriteLock；
   │              删存档级联删，不进 FullBackup（调试提示词/响应不混入日常备份）
   │
   ├── session-backup.ts             ← 单存档导出/导入：每存档表整取（清单同 deleteSaveSlot，字节不随行）+ 内容依赖清单（世界书 token / 工坊项目 / 内容包 / story 预设，导入前只读体检）+ 导入**一律重发 id**（不重发 = 第二次导入静默覆盖第一次），全局表一行不改

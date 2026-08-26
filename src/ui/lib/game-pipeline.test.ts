@@ -51,6 +51,7 @@ const {
   createSnapshotSpy,
   runCombatV3Mock,
   callImagePromptAgentMock,
+  summarizeAndSaveMock,
 } = vi.hoisted(() => ({
   commitSpy: vi.fn(async () => ({
     success: true,
@@ -65,6 +66,7 @@ const {
   toastSpy: vi.fn(),
   runCombatV3Mock: vi.fn(),
   callImagePromptAgentMock: vi.fn(),
+  summarizeAndSaveMock: vi.fn(),
 }));
 
 vi.mock('@engine/state-manager', () => ({
@@ -83,6 +85,10 @@ vi.mock('@engine/combat-v3', () => ({
 
 vi.mock('@engine/image-prompt-agent', () => ({
   callImagePromptAgent: callImagePromptAgentMock,
+}));
+
+vi.mock('@engine/memory-summarizer', () => ({
+  summarizeAndSave: summarizeAndSaveMock,
 }));
 
 vi.mock('../stores/ui-store', () => ({
@@ -1494,6 +1500,83 @@ describe('runImagePromptAgent — activity ledger', () => {
       'activity-old',
     );
     expect(gameStore.clearAgentStatus).toHaveBeenCalledWith('story', '已取消', 'activity-old');
+  });
+
+  it('preserves the completed provider payload when completion handling later fails', () => {
+    const gameStore = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    const events = (pipeline as any).buildEventHandlers('activity-failed');
+    const result = {
+      ...makeResult('story', 'billable response'),
+      requestMessages: [{ role: 'user', content: 'billable request' }],
+      tokensUsed: 73,
+      duration: 42,
+      error: 'completion handler failed',
+    };
+
+    events.onAgentStart('story', { apiEndpointId: 'ep-story', model: 'story-model' });
+    events.onAgentError('story', result.error, result);
+
+    expect(gameStore.addAgentLogEntry).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messages: result.requestMessages,
+        rawResponse: 'billable response',
+        tokensUsed: 73,
+        duration: 42,
+        error: 'completion handler failed',
+      }),
+    );
+  });
+
+  it('records memory-summary embedding usage as its own billable invocation', async () => {
+    const gameStore = makeGameStore();
+    const settingsStore = makeSettingsStore({
+      embeddingEndpointId: 'ep-embedding',
+      embeddingModel: 'embed-model',
+      apiPool: [
+        {
+          id: 'ep-embedding',
+          name: 'Embedding API',
+          baseUrl: 'https://api.example.test/v1',
+          apiKey: 'secret',
+          defaultModel: 'fallback-model',
+        },
+      ],
+    });
+    summarizeAndSaveMock.mockImplementationOnce(async (options: any) => {
+      options.onEmbeddingRequest({
+        input: 'summary embedding input',
+        model: 'embed-model',
+        baseUrl: 'https://api.example.test/v1',
+        startedAt: 100,
+        completedAt: 125,
+        promptTokens: 11,
+        totalTokens: 11,
+        dimensions: 1536,
+      });
+      return null;
+    });
+    const pipeline = new GamePipeline({ gameStore, settingsStore, saveId: 'save-test' });
+
+    await (pipeline as any).persistMemorySummary(
+      makeResult('memory_summary', '{"content":"summary"}'),
+      'activity-embedding',
+    );
+
+    expect(gameStore.addAgentLogEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnId: 'activity-embedding',
+        agentId: 'memory_embedding',
+        model: 'embed-model',
+        messages: [{ role: 'user', content: 'summary embedding input' }],
+        tokensUsed: 11,
+        promptTokens: 11,
+      }),
+    );
   });
 });
 
