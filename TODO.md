@@ -48,6 +48,14 @@
       `docs/planning/2026-08-11-map-system-v1-integration.md` 与
       `docs/planning/2026-08-18-map-tile-dynamics-v1.2-design.md`。
 
+- [ ] **随机事件系统集成收尾** —— v1 引擎调度、候选池、Story 注入、`<event_trigger>` 回执结算、
+      设置与开发者诊断均已落地，公开占位包也有两条格式样例；正式私有内容仓尚未接通：新增
+      `data/content/random-events.json`（含基于真实地块的 `first_visit` 与世界观事件），让
+      `tools/build-pack.mjs` 读取、输出、校验并哈希 `randomEvents` 分节，同时给正式 Story 预设补
+      `{{RANDOM_EVENTS}}` 与 `<event_trigger>` 教学。发布并导入新版 pack 后，需真机覆盖 MTTH / 首访
+      入池、AI 认领、冷却与档案结算、开关、快照回退重放及候选过期。现行契约见
+      `docs/planning/2026-08-15-random-event-system-design.md`。
+
 - [ ] **文生图集成复验** —— 在当前主线重新走通完整游玩链路：story 产出 `<scene_image>` 标记 →
       `image_prompt` 侧链 → NovelAI / ComfyUI provider → 图片落库 → 正文就地渲染与 CG 图鉴，
       同时覆盖手动 / 自动模式、失败恢复、重画、存档恢复和设置迁移。历史版本曾分别完成
