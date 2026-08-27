@@ -34,6 +34,7 @@ import { saveMessage, getMessages, saveSaveSlot } from '@engine/database';
 //（旧档 totalExp 是层级内语义，新系统是全程累计）。幂等，正常存档零影响。
 import { normalizePlayerProgression } from '@engine/database';
 import { createStateManager } from '@engine/state-manager';
+import { wireEffectSystem, unwireEffectSystem } from '@engine/effect-wiring';
 import { getExperienceMode } from '@engine/save-profile';
 import { invalidatePromptSession } from '@engine/prompt-session-assembler';
 import { allocateAttributePoint } from '@engine/attribute-allocation';
@@ -50,6 +51,11 @@ export type RewriteLoadoutImpl = (
   target: RewriteTarget,
   userDescription: string,
 ) => Promise<{ ok: boolean; reason?: string }>;
+
+export type TimelineRestoreResult =
+  | { status: 'rejected'; error: string }
+  | { status: 'restored'; warning?: string }
+  | { status: 'projection-failed'; error: string };
 
 let rewriteLoadoutImpl: RewriteLoadoutImpl | null = null;
 
@@ -357,37 +363,33 @@ export const useGameStore = defineStore('game', () => {
    *  整表覆写回开战前，HP 等天然一致）③ 调 coordinator 句柄的 restart 回调重触发 ——
    *  pipeline 持有 combat marker（本 store 接触不到 pipeline），经它重新走
    *  handleCombatTriggerV3 重建战斗。确认弹窗文案由组件负责。 */
-  async function restartCombat(): Promise<{ ok: boolean; error?: string }> {
-    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' };
+  async function restartCombat(): Promise<TimelineRestoreResult> {
+    if (!activeSaveId.value) return { status: 'rejected', error: '无活跃存档' };
     const coordinator = combatCoordinator.value;
     const preSnapshotId = coordinator?.preSnapshotId ?? null;
     const restartFn = coordinator?.restart;
+    if (!preSnapshotId) {
+      return { status: 'rejected', error: '没有 pre-combat 快照，无法重开' };
+    }
+    if (!restartFn) return { status: 'rejected', error: '战斗重开流程未就绪' };
+
     abandonCombat(); // ① 丢弃 session → 面板关闭 → 不落库
-    if (!preSnapshotId) return { ok: false, error: '没有 pre-combat 快照，无法重开' };
+    // 战斗属于当前 GamePipeline.run，正常情况下 isGenerating 仍为 true；abandon 已明确
+    // 终止这一条战斗分支，所以在进入只接受静止状态的公共恢复 module 前解除该占用。
+    isGenerating.value = false;
 
-    // ② 恢复开战前快照（照 rollbackOneTurn 的恢复姿势：整表替换角色内存态 + 同步 + 对齐）
-    const sm = createStateManager(activeSaveId.value);
-    const result = await sm.restoreSnapshot(preSnapshotId);
-    if (!result.success) return { ok: false, error: result.errors.join('; ') || '恢复快照失败' };
-    characters.value = (await getCharacters(activeSaveId.value)) as CharacterState[];
-    await refreshFromDb();
-    await restoreMessages();
-    const lastMsg = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant').pop();
-    turnCounter = lastMsg?.turn ?? 0;
-
-    // 🔴 同 rollbackOneTurn：重开战斗 = 恢复到开战前快照，权威状态回退。战斗结束后
-    //    回归普通回合的主 DAG session 必须失效重建，否则残留开战前/上一轮分支正文。
-    invalidatePromptSession(activeSaveId.value);
+    // ② 恢复开战前时间线；失败分类、投影与效果接线统一由公共 module 负责。
+    const result = await restoreTimeline(preSnapshotId);
+    if (result.status !== 'restored') return result;
 
     // ③ 重触发 combat_trigger（pipeline 持 marker；异常不阻断恢复本身）
-    if (restartFn) {
-      try {
-        await restartFn();
-      } catch (err) {
-        console.warn('[GameStore] 重开战斗重触发失败:', err);
-      }
+    try {
+      await restartFn();
+    } catch (err) {
+      console.warn('[GameStore] 重开战斗重触发失败:', err);
+      return { status: 'restored', warning: '已回到战斗前，但战斗未能重新开始' };
     }
-    return { ok: true };
+    return result;
   }
 
   /** 🆕 结算确认（2026-08-13 需求 D）：pipeline 战斗终局调用 —— 投结算确认面板并
@@ -1068,6 +1070,35 @@ export const useGameStore = defineStore('game', () => {
     turnCounter = lastMsg?.turn ?? 0;
   }
 
+  async function readTimelineProjection(saveId: string) {
+    const [save, chars, mems, events, profile, outline, restoredMessages] = await Promise.all([
+      getSave(saveId),
+      getCharacters(saveId),
+      getMemories(saveId),
+      getPlotEvents(saveId),
+      getSaveProfile(saveId),
+      getLatestPlotOutline(saveId),
+      getMessages(saveId),
+    ]);
+    if (!save) throw new Error(`Save ${saveId} not found after timeline restore`);
+
+    const restoredCharacters = (await normalizePlayerProgression(chars as CharacterState[])) ?? [];
+    const lastMessage = restoredMessages
+      .filter((message) => message.role === 'user' || message.role === 'assistant')
+      .pop();
+
+    return {
+      save,
+      characters: restoredCharacters,
+      memories: (mems as MemoryRecord[]) ?? [],
+      plotEvents: (events as PlotEvent[]) ?? [],
+      profile: (profile as SaveProfile) ?? null,
+      outline: (outline as PlotOutline) ?? null,
+      messages: restoredMessages,
+      turn: lastMessage?.turn ?? 0,
+    };
+  }
+
   /** 🆕 轻量回读：管线跑完后 StateManager / 侧链直接写了 Dexie，
    *  把 DB 里更新后的 save.metadata / characters / saveProfile 同步回内存。
    *  不动 messages / agentLog / combat 等 UI 态（与 loadSave 的全量重载区分开）。 */
@@ -1113,19 +1144,96 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  function clearActive() {
+  function clearSessionRuntime() {
     clearAllAgentStatus();
-    activeSaveId.value = null;
     isGenerating.value = false;
     characters.value = [];
     messages.value = [];
     recentMemories.value = [];
     activePlotEvents.value = [];
     plotOutline.value = null;
-    activeCombat.value = null;
     saveProfile.value = null;
+    pendingInput.value = '';
+    pendingOptions.value = [];
+    pendingItemFocus.value = null;
+    activeModal.value = null;
+    ejsVarsRejections.value = [];
+    ejsFallbacks.value = [];
+    ejsUiLog.value = [];
+    exitCombat();
+    combatSummaryReview.value = null;
+    turnCounter = 0;
+  }
+
+  function clearActive() {
+    clearSessionRuntime();
     agentLogHistory.value = [];
-    combatReady.value = null;
+    activeSaveId.value = null;
+  }
+
+  async function restoreTimeline(snapshotId: string): Promise<TimelineRestoreResult> {
+    const saveId = activeSaveId.value;
+    if (!saveId) return { status: 'rejected', error: '无活跃存档' };
+    if (isGenerating.value) return { status: 'rejected', error: '生成进行中，无法恢复' };
+    if (isInCombat.value) return { status: 'rejected', error: '战斗进行中，无法恢复' };
+
+    isGenerating.value = true;
+    let authorityRestored = false;
+    try {
+      const result = await createStateManager(saveId).restoreSnapshot(snapshotId);
+      if (!result.success) {
+        return { status: 'rejected', error: result.errors.join('; ') || '恢复快照失败' };
+      }
+      authorityRestored = true;
+
+      invalidatePromptSession(saveId);
+      unwireEffectSystem(saveId);
+
+      if (activeSaveId.value !== saveId) {
+        return { status: 'restored', warning: '时间线已恢复；当前已切换到其他存档' };
+      }
+
+      const projection = await readTimelineProjection(saveId);
+      if (activeSaveId.value !== saveId) {
+        return { status: 'restored', warning: '时间线已恢复；当前已切换到其他存档' };
+      }
+
+      clearSessionRuntime();
+      activeSaveId.value = saveId;
+      saves.value = [projection.save];
+      characters.value = projection.characters;
+      recentMemories.value = projection.memories;
+      activePlotEvents.value = projection.plotEvents;
+      saveProfile.value = projection.profile;
+      plotOutline.value = projection.outline;
+      messages.value = projection.messages;
+      turnCounter = projection.turn;
+      wireEffectSystem(saveId, projection.characters);
+
+      return { status: 'restored' };
+    } catch (err) {
+      if (!authorityRestored) {
+        console.error('[game-store] 时间线恢复失败:', err);
+        return {
+          status: 'rejected',
+          error: err instanceof Error ? err.message : '恢复快照失败',
+        };
+      }
+
+      console.error('[game-store] 时间线恢复后的投影重载失败:', err);
+      try {
+        unwireEffectSystem(saveId);
+      } catch (cleanupError) {
+        console.error('[game-store] 清理失败的效果接线时出错:', cleanupError);
+      }
+      if (activeSaveId.value === saveId) clearActive();
+      return {
+        status: 'projection-failed',
+        error: '时间线已恢复，但界面重载失败，请重新进入存档',
+      };
+    } finally {
+      if (activeSaveId.value === saveId) isGenerating.value = false;
+    }
   }
 
   /**
@@ -1160,71 +1268,36 @@ export const useGameStore = defineStore('game', () => {
 
   /** 右键「回退」：撤回当前回合 → 恢复上一轮快照 + 把这轮玩家输入回填输入框。
    *  回退后原样发送 = 重新生成；编辑后发送 = 编辑重发。
-   *  不可回退（最早回合/战斗中/无存档/无快照）时返回 {ok:false,error}。 */
-  async function rollbackOneTurn(): Promise<{ ok: boolean; error?: string }> {
-    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' };
-    if (isInCombat.value) return { ok: false, error: '战斗进行中，无法回退' };
+   *  不可回退（最早回合/生成中/战斗中/无存档/无快照）时返回 rejected。 */
+  async function rollbackOneTurn(): Promise<TimelineRestoreResult> {
+    if (!activeSaveId.value) return { status: 'rejected', error: '无活跃存档' };
+    if (isGenerating.value) return { status: 'rejected', error: '生成进行中，无法回退' };
+    if (isInCombat.value) return { status: 'rejected', error: '战斗进行中，无法回退' };
 
     // 当前回合 = 最新一条 user 消息（删除前先捕获其输入）
     const userMsgs = messages.value.filter((m) => m.role === 'user');
     const currentUserMsg = userMsgs[userMsgs.length - 1];
-    if (!currentUserMsg) return { ok: false, error: '已是最早回合，无可回退' };
+    if (!currentUserMsg) return { status: 'rejected', error: '已是最早回合，无可回退' };
     const currentTurn = currentUserMsg.turn ?? 0;
     const capturedInput = currentUserMsg.content;
 
     // 找上一轮快照（turn <= currentTurn-1 中最新者；快照 turn = 已完成回合数）
     const prevTargetTurn = currentTurn - 1;
-    if (prevTargetTurn < 1) return { ok: false, error: '已是最早回合，无可回退' };
+    if (prevTargetTurn < 1) return { status: 'rejected', error: '已是最早回合，无可回退' };
     const snapshots = await getSnapshots(activeSaveId.value);
     const prevSnapshot = snapshots
       .filter((s) => s.turn <= prevTargetTurn)
       .sort((a, b) => b.turn - a.turn)[0];
-    if (!prevSnapshot) return { ok: false, error: '找不到上一轮快照' };
+    if (!prevSnapshot) return { status: 'rejected', error: '找不到上一轮快照' };
 
-    // 恢复快照（characters/saveProfile/plotEvents/memories/messages 全回滚 + totalTurns 对齐）
-    const sm = createStateManager(activeSaveId.value);
-    const result = await sm.restoreSnapshot(prevSnapshot.id);
-    if (!result.success) return { ok: false, error: result.errors.join('; ') || '恢复快照失败' };
-
-    // 🔴 恢复后**整表替换**角色内存态：refreshFromDb 的角色同步是合并语义
-    //（内存独有角色保留）——快照回退删掉的角色（如回退点之后才生成的 NPC）
-    // 会永远留在内存/UI/导出里。先替换再 refreshFromDb（此时合并是幂等）。
-    characters.value = (await getCharacters(activeSaveId.value)) as CharacterState[];
-
-    // 回填这轮玩家输入 + 同步内存 + turnCounter 对齐（防重发后 turn 编号错位）
-    fillInput(capturedInput);
-    await refreshFromDb();
-    await restoreMessages();
-    const lastMsg = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant').pop();
-    turnCounter = lastMsg?.turn ?? 0;
-
-    // 🔴 2026-08-23 真机 bug：回退快照后**必须失效 prompt session**。delta 会话的
-    // transcript 是跨轮累积的内存态，回退只恢复了 Dexie 里的权威状态，session 里
-    // 仍躺着被回退掉那轮的 user/assistant —— 重新发送会复用旧 transcript，把
-    // 「上一分支」的正文当上下文喂给模型（症状：重 roll 出的正文残留旧分支台词）。
-    // 失效后下一轮 prepare 发现 session 已删 → 从当前权威状态重基线，不留尾巴。
-    invalidatePromptSession(activeSaveId.value);
-    return { ok: true };
+    const result = await restoreTimeline(prevSnapshot.id);
+    if (result.status === 'restored') fillInput(capturedInput);
+    return result;
   }
 
   /** 快照面板「恢复」：恢复到指定历史快照（不回填输入，从该点继续游戏）。 */
-  async function restoreToSnapshot(snapshotId: string): Promise<{ ok: boolean; error?: string }> {
-    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' };
-    if (isInCombat.value) return { ok: false, error: '战斗进行中，无法恢复' };
-    const sm = createStateManager(activeSaveId.value);
-    const result = await sm.restoreSnapshot(snapshotId);
-    if (!result.success) return { ok: false, error: result.errors.join('; ') || '恢复快照失败' };
-    // 🔴 同 rollbackOneTurn：整表替换角色内存态，别让回退删掉的角色留在 UI 里
-    characters.value = (await getCharacters(activeSaveId.value)) as CharacterState[];
-    await refreshFromDb();
-    await restoreMessages();
-    const lastMsg = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant').pop();
-    turnCounter = lastMsg?.turn ?? 0;
-
-    // 🔴 2026-08-23 真机 bug（同 rollbackOneTurn）：恢复到历史快照 = 权威状态回退，
-    //    必须失效该存档全部 prompt session，否则 delta transcript 残留旧分支正文。
-    invalidatePromptSession(activeSaveId.value);
-    return { ok: true };
+  async function restoreToSnapshot(snapshotId: string): Promise<TimelineRestoreResult> {
+    return restoreTimeline(snapshotId);
   }
 
   // === 玩家主动删除（物品/装备/技能/角色）—— 用户可自由清理持有物 ===

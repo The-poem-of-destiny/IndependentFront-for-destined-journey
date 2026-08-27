@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useGameStore } from '../../../stores/game-store';
+import { useUIStore } from '../../../stores/ui-store';
 import { projectUnitsBySide, type V3Unit } from './combat-v3-projection';
 import CombatHeader from './CombatHeader.vue';
 import CombatUnitCard from './CombatUnitCard.vue';
@@ -10,6 +11,7 @@ import AppModal from '../../shared/AppModal.vue';
 import AppButton from '../../shared/AppButton.vue';
 
 const game = useGameStore();
+const ui = useUIStore();
 
 // 🆕 v3 数据源（设计 §3.1 决策 A2）：从 v3ActiveCombat.units 字典按
 // initiativeOrder + side 投影成有序数组，原生吃 v3 形状，不写 v3→v2 适配层。
@@ -79,9 +81,17 @@ function confirmSkip() {
   game.skipCombat();
 }
 
-function confirmRestart() {
+async function confirmRestart() {
   restartOpen.value = false;
-  void game.restartCombat();
+  const result = await game.restartCombat();
+  if (result.status === 'projection-failed') {
+    ui.toast(result.error, 'error');
+    ui.navigate('home');
+  } else if (result.status === 'rejected') {
+    ui.toast(result.error, 'warning');
+  } else if (result.warning) {
+    ui.toast(result.warning, 'warning');
+  }
 }
 
 // ── 面板折叠（收起时游戏仍锁定，留小条重新展开；主链路「就绪→开始」不依赖它）──

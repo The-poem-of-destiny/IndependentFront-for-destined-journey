@@ -94,6 +94,12 @@ Vue 3 SFC + Pinia。**没有 vue-router**：`App.vue` 用 `ui.currentView` 在�
 每个页面 `defineAsyncComponent` 懒加载。主题/字体系统在 `themes/` + `styles/`，
 由 `theme-surface-ownership` / `theme-fonts-invariant` 两道结构闸门守着。
 
+`stores/game-store.ts` 是时间线恢复的 UI 侧唯一编排边界：回退一轮、恢复指定快照与重开战斗
+共用私有 `restoreTimeline()`。`StateManager` 仍负责 Dexie 权威状态的原子恢复；store 只在权威恢复
+成功后重建 Pinia 投影、失效 prompt session 并重接效果系统。公开 action 统一返回
+`rejected` / `restored` / `projection-failed` 三态；第三态表示权威状态已恢复但投影失败，必须隔离
+当前会话并回首页重新进入存档。
+
 ### ② 引擎（`src/sillytavern/`）
 
 框架无关的纯 TypeScript。子目录只有两处：`combat-v3/`（`automata/` `contract/` `phases/` `fixtures/`）

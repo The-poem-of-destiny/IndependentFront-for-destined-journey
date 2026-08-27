@@ -221,6 +221,9 @@ docs/
 │                                       # 🆕 LLM 组装层 Delta 会话架构 ← 改主 DAG prompt 组装/缓存会话必读
 ├── planning/2026-08-22-llm-assembly-delta-implementation-plan.md
 │                                       # Delta 会话 T0-T5 实施顺序、跨环境交接与验收计划
+├── planning/2026-08-27-timeline-restore-implementation-plan.md
+│                                       # 时间线恢复深模块（✅ 已实施，真机待验证）：
+│                                       # 私有 seam + 三态结果 + 完整投影 + 效果重接线
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
