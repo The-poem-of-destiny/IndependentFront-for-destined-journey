@@ -8,6 +8,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useGameStore } from './game-store';
+import * as database from '@engine/database';
+import * as effectWiring from '@engine/effect-wiring';
 import {
   initializeDatabase,
   clearAllData,
@@ -22,6 +24,12 @@ import {
   getSave,
 } from '@engine/database';
 import { createDefaultCharacterState } from '@engine/types';
+import {
+  clearAllEffectWirings,
+  ownerKeyOf,
+  peekEffectWiring,
+  wireEffectSystem,
+} from '@engine/effect-wiring';
 import type { SaveSlot, SaveProfile, CharacterState, PlotOutline, PlotEvent } from '@engine/types';
 import {
   runCombatV3,
@@ -358,6 +366,25 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     await initializeDatabase();
     store = makeStore();
     invalidatePromptSessionMock.mockClear();
+    clearAllEffectWirings();
+  });
+
+  it('restoreToSnapshot: 生成中在写数据库前拒绝时间线恢复', async () => {
+    store.activeSaveId = SAVE_ID;
+    store.isGenerating = true;
+
+    const result = await store.restoreToSnapshot('missing-snapshot');
+
+    expect(result).toEqual({ status: 'rejected', error: '生成进行中，无法恢复' });
+  });
+
+  it('rollbackOneTurn: 生成中在读取回退目标前拒绝时间线恢复', async () => {
+    store.activeSaveId = SAVE_ID;
+    store.isGenerating = true;
+
+    const result = await store.rollbackOneTurn();
+
+    expect(result).toEqual({ status: 'rejected', error: '生成进行中，无法回退' });
   });
 
   /** 种入两回合：存档当前在 turn2，并有一张 turn1 快照(上一轮状态) */
@@ -431,7 +458,7 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
 
     const result = await store.rollbackOneTurn();
 
-    expect(result.ok).toBe(true);
+    expect(result.status).toBe('restored');
     // 输入框回填 turn2 的玩家输入
     expect(store.pendingInput).toBe('第二轮输入(待回填)');
     // turn2 消息删除，turn1 保留
@@ -453,8 +480,7 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     store.activeCombat = { status: 'ongoing' } as any;
     expect(store.isInCombat).toBe(true);
     const result = await store.rollbackOneTurn();
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain('战斗');
+    expect(result).toEqual({ status: 'rejected', error: '战斗进行中，无法回退' });
     // 未回退：turn2 消息仍在
     expect(store.messages.map((m) => m.id)).toContain('a2');
   });
@@ -482,14 +508,13 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     });
     await store.loadSave(SAVE_ID);
     const result = await store.rollbackOneTurn();
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain('最早回合');
+    expect(result).toEqual({ status: 'rejected', error: '已是最早回合，无可回退' });
   });
 
   it('restoreToSnapshot: 恢复到指定历史快照(不回填输入) + 状态恢复', async () => {
     await seedTwoTurns();
     const result = await store.restoreToSnapshot('snap-turn1');
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({ status: 'restored', continuation: 'same-save' });
     // 不回填输入
     expect(store.pendingInput).toBe('');
     // turn2 消息删除
@@ -512,10 +537,194 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     store.characters.push(makeChar({ id: 'npc-late', name: '后来者', type: 'npc' }));
 
     const result = await store.restoreToSnapshot('snap-turn1');
-    expect(result.ok).toBe(true);
+    expect(result.status).toBe('restored');
     // 恢复后 DB 只剩快照角色 → 内存必须同步为整表替换，后来者消失
     expect(store.characters.find((c) => c.id === 'npc-late')).toBeUndefined();
     expect(store.characters.find((c) => c.id === 'hero')).toBeDefined();
+  });
+
+  it('restoreToSnapshot: 权威恢复后投影读取失败会隔离会话并保留已恢复存档', async () => {
+    await seedTwoTurns();
+    const readMessages = vi
+      .spyOn(database, 'getMessages')
+      .mockRejectedValueOnce(new Error('projection read failed'));
+
+    const result = await store.restoreToSnapshot('snap-turn1');
+
+    expect(result).toEqual({
+      status: 'projection-failed',
+      error: '时间线已恢复，但界面重载失败，请重新进入存档',
+    });
+    expect(store.activeSaveId).toBeNull();
+    readMessages.mockRestore();
+
+    await store.loadSave(SAVE_ID);
+    expect(store.activeSave?.metadata?.totalTurns).toBe(1);
+  });
+
+  it('restoreToSnapshot: 清除旧分支瞬态并保留布局偏好', async () => {
+    await seedTwoTurns();
+    store.fillInput('旧分支输入');
+    store.setPendingOptions(['旧选项']);
+    store.focusItem('inventory', '旧物品');
+    store.startAgentLogTurn({ id: 'run-before-restore', saveId: SAVE_ID, turn: 2 });
+    store.addAgentLogEntry({
+      invocationId: 'run-before-restore:story:1',
+      turnId: 'run-before-restore',
+      agentId: 'story',
+    } as never);
+    await store.flushAgentLogWrites();
+    store.recordEjsVarsRejection('story', '旧差量', 10);
+    store.recordEjsFallback('story', [{ uid: 1, error: '旧错误' }]);
+    store.recordEjsUiLog('旧日志');
+    store.setCombatCoordinator({ submit: async () => {} });
+    store.sidebarCollapsed = true;
+    store.fullscreenStatus = true;
+
+    const result = await store.restoreToSnapshot('snap-turn1');
+
+    expect(result.status).toBe('restored');
+    expect(store.pendingInput).toBe('');
+    expect(store.pendingOptions).toEqual([]);
+    expect(store.pendingItemFocus).toBeNull();
+    expect(store.activeModal).toBeNull();
+    expect(store.agentLogHistory).toHaveLength(1);
+    expect(store.agentLog).toHaveLength(1);
+    expect(store.ejsVarsRejections).toEqual([]);
+    expect(store.ejsFallbacks).toEqual([]);
+    expect(store.ejsUiLog).toEqual([]);
+    expect(store.combatCoordinator).toBeNull();
+    expect(store.sidebarCollapsed).toBe(true);
+    expect(store.fullscreenStatus).toBe(true);
+  });
+
+  it('restoreToSnapshot: 用恢复分支的角色替换旧效果 owner', async () => {
+    await seedTwoTurns();
+    const oldCharacter = makeChar({
+      id: 'hero',
+      name: '理查德',
+      type: 'player',
+      inventory: [
+        {
+          name: '旧分支之剑',
+          quantity: 1,
+          equippedSlot: '武器',
+          scripts: { init: '// old branch' },
+        },
+      ],
+    });
+    const restoredCharacter = makeChar({
+      id: 'hero',
+      name: '理查德',
+      type: 'player',
+      inventory: [
+        {
+          name: '恢复分支之剑',
+          quantity: 1,
+          equippedSlot: '武器',
+          scripts: { init: '// restored branch' },
+        },
+      ],
+    });
+    wireEffectSystem(SAVE_ID, [oldCharacter]);
+    await saveSnapshot({
+      id: 'snap-turn1',
+      saveId: SAVE_ID,
+      createdAt: 1000,
+      reason: 'turn',
+      turn: 1,
+      characters: [restoredCharacter],
+      saveProfile: makeProfile({ fp: 5 }),
+      plotEvents: [],
+    });
+
+    const result = await store.restoreToSnapshot('snap-turn1');
+
+    expect(result.status).toBe('restored');
+    const owners = peekEffectWiring(SAVE_ID)?.owners;
+    expect(owners?.has(ownerKeyOf('hero', 'item', '旧分支之剑'))).toBe(false);
+    expect(owners?.has(ownerKeyOf('hero', 'item', '恢复分支之剑'))).toBe(true);
+  });
+
+  it('restoreToSnapshot: 效果重接线失败进入第三态并清掉半成品 owner', async () => {
+    await seedTwoTurns();
+    const restoredCharacter = makeChar({
+      id: 'hero',
+      name: '理查德',
+      type: 'player',
+      inventory: [
+        {
+          name: '恢复分支之剑',
+          quantity: 1,
+          equippedSlot: '武器',
+          scripts: { init: '// restored branch' },
+        },
+      ],
+    });
+    await saveSnapshot({
+      id: 'snap-wire-failure',
+      saveId: SAVE_ID,
+      createdAt: 1000,
+      reason: 'turn',
+      turn: 1,
+      characters: [restoredCharacter],
+      saveProfile: makeProfile({ fp: 5 }),
+      plotEvents: [],
+    });
+    const realWireEffectSystem = effectWiring.wireEffectSystem;
+    const wire = vi
+      .spyOn(effectWiring, 'wireEffectSystem')
+      .mockImplementationOnce((saveId, characters) => {
+        realWireEffectSystem(saveId, characters);
+        throw new Error('effect wiring failed');
+      });
+
+    const result = await store.restoreToSnapshot('snap-wire-failure');
+
+    expect(result).toEqual({
+      status: 'projection-failed',
+      error: '时间线已恢复，但界面重载失败，请重新进入存档',
+    });
+    expect(store.activeSaveId).toBeNull();
+    expect(peekEffectWiring(SAVE_ID)).toBeUndefined();
+    wire.mockRestore();
+  });
+
+  it('rollbackOneTurn: 投影读取期间切档不会覆写或清空新存档输入', async () => {
+    await seedTwoTurns();
+    const originalGetMessages = database.getMessages;
+    let releaseRead: (messages: Awaited<ReturnType<typeof database.getMessages>>) => void = () => {
+      throw new Error('projection read did not start');
+    };
+    let markReadStarted: (() => void) | null = null;
+    const readStarted = new Promise<void>((resolve) => (markReadStarted = resolve));
+    const readMessages = vi.spyOn(database, 'getMessages').mockImplementation((saveId) => {
+      if (saveId !== SAVE_ID) return originalGetMessages(saveId);
+      markReadStarted?.();
+      return new Promise((resolve) => (releaseRead = resolve));
+    });
+
+    const restoring = store.rollbackOneTurn();
+    await readStarted;
+
+    const otherSaveId = 'save-opened-during-restore';
+    await saveSaveSlot(makeSaveSlot({ id: otherSaveId, name: 'Other Save' }));
+    await saveSaveProfile(makeProfile({ saveId: otherSaveId }));
+    await store.loadSave(otherSaveId);
+    store.fillInput('新存档草稿');
+    releaseRead([]);
+
+    const result = await restoring;
+
+    expect(result).toEqual({
+      status: 'restored',
+      continuation: 'save-switched',
+      warning: '时间线已恢复；当前已切换到其他存档',
+    });
+    expect(store.activeSaveId).toBe(otherSaveId);
+    expect(store.activeSave?.name).toBe('Other Save');
+    expect(store.pendingInput).toBe('新存档草稿');
+    readMessages.mockRestore();
   });
 });
 
@@ -838,7 +1047,7 @@ describe('M2 v3 战斗接线', () => {
 
     const result = await store.restartCombat();
 
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({ status: 'restored', continuation: 'same-save' });
     expect(restarted).toBe(true); // 重触发回调被调（pipeline 重走 handleCombatTriggerV3）
     expect(store.v3ActiveCombat).toBeNull(); // 旧战斗已被放弃
     expect(store.isInCombat).toBe(false);
@@ -854,12 +1063,109 @@ describe('M2 v3 战斗接线', () => {
     await saveSaveSlot(save);
     await saveSaveProfile(makeProfile());
     await store.loadSave(SAVE_ID);
-    store.setCombatCoordinator({ abandon: () => {}, preSnapshotId: null });
+    let abandoned = false;
+    store.setCombatCoordinator({ abandon: () => (abandoned = true), preSnapshotId: null });
     store.v3ActiveCombat = {} as never;
 
     const result = await store.restartCombat();
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain('pre-combat');
+    expect(result).toEqual({ status: 'rejected', error: '没有 pre-combat 快照，无法重开' });
+    expect(abandoned).toBe(false);
+    expect(store.isInCombat).toBe(true);
+  });
+
+  it('restartCombat：恢复期间切档不会触发旧战斗重启回调', async () => {
+    const store = useGameStore();
+    const preChar = makeChar({ id: 'hero', name: '理查德', type: 'player' });
+    await saveSaveSlot(makeSaveSlot());
+    await saveCharacter(preChar);
+    await saveSaveProfile(makeProfile());
+    await saveSnapshot({
+      id: 'snap-pre-combat-switch',
+      saveId: SAVE_ID,
+      createdAt: 1000,
+      reason: 'pre-combat',
+      turn: 0,
+      characters: [preChar],
+      saveProfile: makeProfile(),
+      plotEvents: [],
+    });
+    await store.loadSave(SAVE_ID);
+
+    const restart = vi.fn(async () => {});
+    store.setCombatCoordinator({
+      abandon: () => {},
+      preSnapshotId: 'snap-pre-combat-switch',
+      restart,
+    });
+    store.v3ActiveCombat = {} as never;
+    const originalGetMessages = database.getMessages;
+    let releaseRead: (messages: Awaited<ReturnType<typeof database.getMessages>>) => void = () => {
+      throw new Error('projection read did not start');
+    };
+    let markReadStarted: (() => void) | null = null;
+    const readStarted = new Promise<void>((resolve) => (markReadStarted = resolve));
+    const readMessages = vi.spyOn(database, 'getMessages').mockImplementation((saveId) => {
+      if (saveId !== SAVE_ID) return originalGetMessages(saveId);
+      markReadStarted?.();
+      return new Promise((resolve) => (releaseRead = resolve));
+    });
+
+    const restarting = store.restartCombat();
+    await readStarted;
+    const otherSaveId = 'save-opened-during-combat-restart';
+    await saveSaveSlot(makeSaveSlot({ id: otherSaveId, name: 'Other Save' }));
+    await saveSaveProfile(makeProfile({ saveId: otherSaveId }));
+    await store.loadSave(otherSaveId);
+    releaseRead([]);
+
+    const result = await restarting;
+
+    expect(result).toEqual({
+      status: 'restored',
+      continuation: 'save-switched',
+      warning: '时间线已恢复；当前已切换到其他存档',
+    });
+    expect(restart).not.toHaveBeenCalled();
+    expect(store.activeSaveId).toBe(otherSaveId);
+    readMessages.mockRestore();
+  });
+
+  it('restartCombat：时间线恢复成功但重触发失败时返回 warning 并保留存档', async () => {
+    const store = useGameStore();
+    const preChar = makeChar({ id: 'hero', name: '理查德', type: 'player', hp: 80, maxHp: 100 });
+    await saveSaveSlot(makeSaveSlot());
+    await saveCharacter(preChar);
+    await saveSaveProfile(makeProfile());
+    await saveSnapshot({
+      id: 'snap-pre-combat-warning',
+      saveId: SAVE_ID,
+      createdAt: 1000,
+      reason: 'pre-combat',
+      turn: 0,
+      characters: [preChar],
+      saveProfile: makeProfile(),
+      plotEvents: [],
+    });
+    await store.loadSave(SAVE_ID);
+    store.setCombatCoordinator({
+      abandon: () => {},
+      preSnapshotId: 'snap-pre-combat-warning',
+      restart: async () => {
+        throw new Error('restart failed');
+      },
+    });
+    store.v3ActiveCombat = {} as never;
+    store.isGenerating = true;
+
+    const result = await store.restartCombat();
+
+    expect(result).toEqual({
+      status: 'restored',
+      continuation: 'same-save',
+      warning: '已回到战斗前，但战斗未能重新开始',
+    });
+    expect(store.activeSaveId).toBe(SAVE_ID);
+    expect(store.characters.find((character) => character.id === 'hero')?.hp).toBe(80);
   });
 
   it('T16：runCombatV3 期间经 store.submitCombatCommand 喂入玩家命令并推进战斗（coordinator 句柄先挂）', async () => {

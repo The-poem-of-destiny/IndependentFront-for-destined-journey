@@ -9,6 +9,23 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 时间线恢复深模块｜已实施（2026-08-27，真机待验证）
+
+将 `game-store.ts` 原有三份快照恢复编排收进私有 `restoreTimeline()`，由
+`rollbackOneTurn()`、`restoreToSnapshot()`、`restartCombat()` 共用。`StateManager` 继续作为
+Dexie 权威恢复边界；store 在事务成功后一次性回读完整存档投影，清除旧分支运行态，失效 prompt
+session，并以恢复后的角色集合重接效果系统。
+
+- 三个公开 action 统一返回 `rejected` / `restored` / `projection-failed`；调用面能区分恢复前拒绝与
+  「权威状态已恢复、但 UI 投影失败」。后一状态会隔离当前会话、提示玩家并回到首页，避免继续操作
+  旧分支内存态。
+- 恢复锁复用 `isGenerating`，普通回合与战斗中的恢复请求在接触数据库前拒绝；重开战斗先验证
+  pre-combat 快照与重触发句柄，再丢弃当前战斗。
+- 全量投影覆盖 save、角色、消息、记忆、剧情事件、大纲与 profile，同时清除输入草稿、选项、
+  Agent 活动、EJS 诊断、弹窗和战斗瞬态；主题、侧栏与全屏等布局偏好保持不变。
+- 回归测试覆盖三态、事务成功后投影失败、旧分支瞬态清理、效果 owner 替换、恢复期间切换存档、
+  缺失 pre-combat 快照及重触发失败。聚焦测试与 `npm run gates` 全部通过；未做真机游玩恢复走查。
+
 ### DebugPanel 最近 10 回合完整调用历史｜ ✅ 已实施，真机通过（2026-08-25）
 
 修复 debug 导出只剩当前回合、同名 `char_gen` / `item_gen` 侧链互相覆盖的问题：每次 Agent 调用改以回合活动 ID + Agent + 序号组成 `invocationId`，Dexie v24 新增 `debugTurns` 按存档持久化并原子淘汰到最近 10 回合，删存档时级联删除且不进入日常 FullBackup。`chatWithTools` 额外保留每轮真实 provider usage，主 DAG 的 Delta revision / 重基线原因也贯通到面板与 JSON。DebugPanel 可切换 10 回合查看，汇总纳入 `memory_recall`；导出新增 `agentHistory`，同时保留最新回合 `agentLog` 兼容旧分析脚本。

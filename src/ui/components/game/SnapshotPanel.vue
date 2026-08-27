@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
+import { useUIStore } from '../../stores/ui-store';
 import { getSnapshots } from '@engine/database';
 import AppButton from '../shared/AppButton.vue';
 import type { SnapshotMeta } from '@engine/types';
 
 const game = useGameStore();
+const ui = useUIStore();
 
 // 🔴 拿的是**元数据**：列表要的只有 turn / reason / createdAt 与那一行缩略。
 //    整档载荷（characters / 对话历史）在 snapshotPayloads 表里，恢复时才 join ——
@@ -71,12 +73,23 @@ async function restore(snap: SnapshotMeta) {
   if (!ok) return;
   restoring.value = true;
   errorMsg.value = '';
-  const result = await game.restoreToSnapshot(snap.id);
-  restoring.value = false;
-  if (result.ok) {
-    game.closeModal();
-  } else {
-    errorMsg.value = result.error || '恢复失败';
+  try {
+    const result = await game.restoreToSnapshot(snap.id);
+    if (result.status === 'restored') {
+      if (result.continuation === 'save-switched') {
+        ui.toast(result.warning ?? '时间线已恢复；当前已切换到其他存档', 'warning');
+      } else game.closeModal();
+    } else if (result.status === 'projection-failed') {
+      ui.toast(result.error, 'error');
+      ui.navigate('home');
+    } else {
+      errorMsg.value = result.error;
+    }
+  } catch (err) {
+    console.error('[SnapshotPanel] 恢复快照失败:', err);
+    errorMsg.value = '恢复失败';
+  } finally {
+    restoring.value = false;
   }
 }
 

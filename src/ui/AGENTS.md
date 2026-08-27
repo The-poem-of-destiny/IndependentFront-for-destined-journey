@@ -242,10 +242,15 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │                                       ivory/misty-lilac/forest/ocean），由 main.ts 逐个 import
 │
 ├── stores/
-│   ├── theme-store.ts / ui-store.ts / create-store.ts / game-store.ts
+│   ├── theme-store.ts / ui-store.ts / create-store.ts
 │   │      ui-store 的 `viewHistory` 负责页面级多层返回（例如设置 → 扩展管理 → 工坊），
 │   │      `previousView` 只作兼容投影；`back()` 直接弹栈，不能再经 `navigate()` 把当前页
 │   │      压回去。同视图重复 navigate 不入栈，否则返回目标会变成自己
+│   ├── game-store.ts                ← 时间线恢复唯一 UI 编排边界：rollbackOneTurn /
+│   │                                   restoreToSnapshot / restartCombat 共用私有 restoreTimeline；
+│   │                                   三态结果区分恢复前拒绝、完整恢复、权威已恢复但投影失败。
+│   │                                   成功后全量重建存档投影、失效 prompt session、重接效果系统；
+│   │                                   projection-failed 必须清空当前会话并回首页重新进入存档
 │   ├── settings-store.ts            ← 全应用最热的状态；deep watch 自动落 localStorage
 │   │                                   API RPM 策略例外：住 Dexie v23，经 `saveRpmPolicies` 整表替换并
 │   │                                   热更新全局 limiter；端点凭据编辑时迁移其既有限制
