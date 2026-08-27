@@ -291,6 +291,7 @@ async function ctxRollback() {
     return;
   }
   if (result.status === 'rejected') ui.toast(result.error, 'warning');
+  else if (result.warning) ui.toast(result.warning, 'warning');
 }
 
 async function ctxCopy() {

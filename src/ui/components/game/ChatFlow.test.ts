@@ -156,6 +156,27 @@ describe('ChatFlow 右键菜单 — user 消息', () => {
     expect(ui.navigate).not.toHaveBeenCalled();
   });
 
+  it('回退期间切换存档会提示 warning，不返回首页', async () => {
+    game.rollbackOneTurn.mockResolvedValueOnce({
+      status: 'restored',
+      warning: '时间线已恢复；当前已切换到其他存档',
+    });
+    const wrapper = mount(ChatFlow, {
+      global: { stubs: { teleport: true } },
+      props: { messages: [userMsg('u1', '第一条'), userMsg('u2', '第二条')] },
+    });
+
+    await wrapper.findAll('.bubble-row-player')[1].trigger('contextmenu');
+    await wrapper
+      .findAll('.ctx-menu .ctx-item')
+      .find((button) => button.text().includes('回退'))!
+      .trigger('click');
+    await flushPromises();
+
+    expect(ui.toast).toHaveBeenCalledWith('时间线已恢复；当前已切换到其他存档', 'warning');
+    expect(ui.navigate).not.toHaveBeenCalled();
+  });
+
   it('复制 user 消息内容调 clipboard，内容是那一条的正文', async () => {
     const writeText = vi.fn(async () => {});
     Object.assign(navigator, { clipboard: { writeText } });

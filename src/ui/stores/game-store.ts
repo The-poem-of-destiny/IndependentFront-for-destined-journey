@@ -380,7 +380,7 @@ export const useGameStore = defineStore('game', () => {
 
     // ② 恢复开战前时间线；失败分类、投影与效果接线统一由公共 module 负责。
     const result = await restoreTimeline(preSnapshotId);
-    if (result.status !== 'restored') return result;
+    if (result.status !== 'restored' || result.warning) return result;
 
     // ③ 重触发 combat_trigger（pipeline 持 marker；异常不阻断恢复本身）
     try {
@@ -1291,7 +1291,7 @@ export const useGameStore = defineStore('game', () => {
     if (!prevSnapshot) return { status: 'rejected', error: '找不到上一轮快照' };
 
     const result = await restoreTimeline(prevSnapshot.id);
-    if (result.status === 'restored') fillInput(capturedInput);
+    if (result.status === 'restored' && !result.warning) fillInput(capturedInput);
     return result;
   }
 

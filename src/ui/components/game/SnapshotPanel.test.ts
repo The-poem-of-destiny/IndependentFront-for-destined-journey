@@ -67,6 +67,22 @@ describe('SnapshotPanel 时间线恢复结果', () => {
     expect(ui.navigate).not.toHaveBeenCalled();
   });
 
+  it('恢复期间切换存档只提示 warning，不关闭新存档的弹窗', async () => {
+    game.restoreToSnapshot.mockResolvedValueOnce({
+      status: 'restored',
+      warning: '时间线已恢复；当前已切换到其他存档',
+    });
+    const wrapper = mount(SnapshotPanel);
+    await flushPromises();
+
+    await wrapper.get('.snap-actions button').trigger('click');
+    await flushPromises();
+
+    expect(ui.toast).toHaveBeenCalledWith('时间线已恢复；当前已切换到其他存档', 'warning');
+    expect(game.closeModal).not.toHaveBeenCalled();
+    expect(ui.navigate).not.toHaveBeenCalled();
+  });
+
   it('恢复前被拒绝会在面板内显示原因且恢复按钮可再次使用', async () => {
     game.restoreToSnapshot.mockResolvedValueOnce({
       status: 'rejected',

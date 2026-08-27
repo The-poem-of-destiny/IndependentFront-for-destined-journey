@@ -76,7 +76,8 @@ async function restore(snap: SnapshotMeta) {
   try {
     const result = await game.restoreToSnapshot(snap.id);
     if (result.status === 'restored') {
-      game.closeModal();
+      if (result.warning) ui.toast(result.warning, 'warning');
+      else game.closeModal();
     } else if (result.status === 'projection-failed') {
       ui.toast(result.error, 'error');
       ui.navigate('home');
