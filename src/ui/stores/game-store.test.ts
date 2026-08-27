@@ -1207,6 +1207,50 @@ describe('T15 v3 事件链路（真实 runCombatV3 → store）', () => {
   });
 });
 
+// ===== Agent 调试历史 =====
+
+describe('Agent 调试历史', () => {
+  it('同名 Agent 的不同 invocation 不覆盖，并可从 IndexedDB 恢复', async () => {
+    await saveSaveSlot(makeSaveSlot());
+    const game = makeStore();
+    await game.loadSave(SAVE_ID);
+    game.startAgentLogTurn({ id: 'run-1', saveId: SAVE_ID, turn: 1, sourceMessageId: 'msg-1' });
+
+    const makeEntry = (invocationId: string, rawResponse: string) => ({
+      invocationId,
+      turnId: 'run-1',
+      agentId: 'char_gen',
+      label: '角色生成',
+      endpointId: 'ep',
+      endpointName: 'DeepSeek',
+      baseUrl: 'https://api.example.test',
+      model: 'model',
+      messages: [{ role: 'system', content: 'prompt' }],
+      rawResponse,
+      tokensUsed: 10,
+      cacheHit: false,
+      duration: 20,
+      startedAt: 100,
+      completedAt: 120,
+    });
+
+    game.addAgentLogEntry(makeEntry('run-1:char_gen:1', 'first'));
+    game.addAgentLogEntry(makeEntry('run-1:char_gen:2', 'second'));
+    game.addAgentLogEntry({ ...makeEntry('run-1:char_gen:1', 'first-updated'), tokensUsed: 11 });
+    game.finishAgentLogTurn('run-1', 'completed');
+    await game.flushAgentLogWrites();
+
+    expect(game.agentLog).toHaveLength(2);
+    expect(game.agentLog.map((entry) => entry.rawResponse)).toEqual(['first-updated', 'second']);
+
+    const reloaded = makeStore();
+    await reloaded.loadSave(SAVE_ID);
+    expect(reloaded.agentLogHistory).toHaveLength(1);
+    expect(reloaded.agentLog).toHaveLength(2);
+    expect(reloaded.agentLogHistory[0].status).toBe('completed');
+  });
+});
+
 // ===== EJS 诊断（工坊 P2 / 能力面）=====
 
 /**

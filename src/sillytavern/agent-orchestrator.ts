@@ -33,7 +33,7 @@ import { AgentClient } from './agent-client';
 import type { ChatRequest } from './agent-client';
 import { buildAgentMessagesAsync } from './agent-templates';
 import { scanMarkers } from './marker-protocol';
-import { recallMemories } from './memory-store';
+import { recallMemories, type EmbeddingRequestTrace } from './memory-store';
 import { buildZoneContext } from './context-visibility';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { rescueStoryOutput } from './story-rescue';
@@ -76,7 +76,7 @@ export interface OrchestratorEvents {
   onStageStart?: (stageIndex: number, agents: string[]) => void;
   onAgentStart?: (agentId: string, config: AgentConfig) => void;
   onAgentComplete?: (result: AgentResult) => void | Promise<void>;
-  onAgentError?: (agentId: string, error: string) => void;
+  onAgentError?: (agentId: string, error: string, result?: AgentResult) => void;
   onStageComplete?: (stageIndex: number) => void;
   /** StatePatch 提交后存在失败项时触发（source = 'request_dispatcher' | 'vars_update' 等） */
   onStateCommitError?: (source: string, errors: string[]) => void;
@@ -397,7 +397,7 @@ export class AgentOrchestrator {
     this.results.set(agentId, result);
 
     if (result.error) {
-      this.events.onAgentError?.(agentId, result.error);
+      this.events.onAgentError?.(agentId, result.error, result);
     } else {
       await this.publishAgentCompletion(result);
     }
@@ -434,7 +434,7 @@ export class AgentOrchestrator {
         if (!result.error) {
           hasSuccess = (await this.publishAgentCompletion(result)) || hasSuccess;
         } else {
-          this.events.onAgentError?.(agentId, result.error);
+          this.events.onAgentError?.(agentId, result.error, result);
         }
       } else {
         const result: AgentResult = {
@@ -447,7 +447,7 @@ export class AgentOrchestrator {
           error: settled.reason?.message ?? String(settled.reason),
         };
         this.results.set(agentId, result);
-        this.events.onAgentError?.(agentId, result.error!);
+        this.events.onAgentError?.(agentId, result.error!, result);
       }
     }
 
@@ -822,6 +822,7 @@ export class AgentOrchestrator {
     );
 
     result.duration = Date.now() - startTime;
+    result.requestMessages = messages;
     return result;
   }
 
@@ -838,13 +839,23 @@ export class AgentOrchestrator {
     const startTime = Date.now();
     const topK = 20; // 使用合理默认值，与 settings-store 的 memoryRecallCount 默认对齐
     const query = this.context.userInput || '';
+    let embeddingTrace: EmbeddingRequestTrace | undefined;
 
     try {
-      const recalled = await recallMemories(this.saveId, query, topK, {
-        baseUrl: endpoint.baseUrl,
-        apiKey: endpoint.apiKey,
-        defaultModel: config.model || endpoint.defaultModel,
-      });
+      const recalled = await recallMemories(
+        this.saveId,
+        query,
+        topK,
+        {
+          baseUrl: endpoint.baseUrl,
+          apiKey: endpoint.apiKey,
+          defaultModel: config.model || endpoint.defaultModel,
+        },
+        undefined,
+        (trace) => {
+          embeddingTrace = trace;
+        },
+      );
 
       // 格式化为与 LLM 路径兼容的输出结构
       const memories = recalled.map((r) => ({
@@ -861,8 +872,26 @@ export class AgentOrchestrator {
         agentId: config.agentId,
         output,
         rawResponse: JSON.stringify(output),
-        tokensUsed: 0, // Embedding API 按 token 计费但在 /chat/completions 口径下为 0
+        tokensUsed: embeddingTrace?.totalTokens ?? 0,
         cacheHit: false,
+        cacheMissTokens: embeddingTrace?.promptTokens,
+        promptTokens: embeddingTrace?.promptTokens,
+        completionTokens: 0,
+        requestMessages: [{ role: 'user', content: query }],
+        providerRounds: embeddingTrace
+          ? [
+              {
+                round: 1,
+                tokensUsed: embeddingTrace.totalTokens ?? 0,
+                cacheHit: false,
+                cacheMissTokens: embeddingTrace.promptTokens,
+                promptTokens: embeddingTrace.promptTokens,
+                completionTokens: 0,
+                duration: embeddingTrace.completedAt - embeddingTrace.startedAt,
+                error: embeddingTrace.error,
+              },
+            ]
+          : undefined,
         duration,
       };
     } catch (err) {
@@ -999,7 +1028,7 @@ export class AgentOrchestrator {
       }`;
       result.error = message;
       this.context.agentOutputs!.delete(result.agentId);
-      this.events.onAgentError?.(result.agentId, message);
+      this.events.onAgentError?.(result.agentId, message, result);
       return false;
     }
   }

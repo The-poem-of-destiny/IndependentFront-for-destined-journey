@@ -13,6 +13,22 @@ import { scheduleApiRequest } from './api-rpm-limiter';
 
 // ========== Embedding ==========
 
+/** 一次真实 Embedding Provider 请求的可导出诊断信息（不包含 API Key 或向量字节）。 */
+export interface EmbeddingRequestTrace {
+  input: string;
+  model: string;
+  baseUrl: string;
+  startedAt: number;
+  completedAt: number;
+  promptTokens?: number;
+  totalTokens?: number;
+  dimensions?: number;
+  responseSummary?: string;
+  error?: string;
+}
+
+export type EmbeddingRequestObserver = (trace: EmbeddingRequestTrace) => void;
+
 /**
  * 调用 OpenAI 兼容的 /embeddings 端点计算向量
  * 直接使用 fetch（浏览器/Node 18+ 均可用）
@@ -22,44 +38,85 @@ export async function computeEmbedding(
   endpoint: { baseUrl: string; apiKey: string; defaultModel: string; name?: string },
   model?: string,
   signal?: AbortSignal,
+  onRequest?: EmbeddingRequestObserver,
 ): Promise<number[]> {
   const baseUrl = endpoint.baseUrl.replace(/\/+$/, '');
+  const resolvedModel = model || endpoint.defaultModel;
+  const startedAt = Date.now();
   const body = JSON.stringify({
-    model: model || endpoint.defaultModel,
+    model: resolvedModel,
     input: text,
   });
-
-  const res = await scheduleApiRequest(
-    { baseUrl, apiKey: endpoint.apiKey, label: endpoint.name || baseUrl },
-    signal,
-    () =>
-      fetch('/api/embeddings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Target-Base-URL': baseUrl,
-          Authorization: `Bearer ${endpoint.apiKey}`,
-        },
-        body,
-        signal,
-      }),
-  );
-
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => '');
-    throw new Error(`Embedding API ${res.status}: ${errBody.slice(0, 200)}`);
-  }
-
-  const json = (await res.json()) as {
-    data: Array<{ embedding: number[]; index: number }>;
+  let observed = false;
+  const observe = (extra: Partial<EmbeddingRequestTrace>) => {
+    if (observed) return;
+    observed = true;
+    try {
+      onRequest?.({
+        input: text,
+        model: resolvedModel,
+        baseUrl,
+        startedAt,
+        completedAt: Date.now(),
+        ...extra,
+      });
+    } catch (error) {
+      console.warn('[memory-store] Embedding 调试观察器失败（不影响请求）:', error);
+    }
   };
 
-  const embedding = json.data?.[0]?.embedding;
-  if (!embedding || !Array.isArray(embedding)) {
-    throw new Error('Embedding API 返回数据格式异常');
-  }
+  try {
+    const res = await scheduleApiRequest(
+      { baseUrl, apiKey: endpoint.apiKey, label: endpoint.name || baseUrl },
+      signal,
+      () =>
+        fetch('/api/embeddings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Target-Base-URL': baseUrl,
+            Authorization: `Bearer ${endpoint.apiKey}`,
+          },
+          body,
+          signal,
+        }),
+    );
 
-  return embedding;
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`Embedding API ${res.status}: ${errBody.slice(0, 200)}`);
+    }
+
+    const json = (await res.json()) as {
+      object?: string;
+      model?: string;
+      data: Array<{ embedding: number[]; index: number }>;
+      usage?: { prompt_tokens?: number; total_tokens?: number };
+    };
+
+    const embedding = json.data?.[0]?.embedding;
+    if (!embedding || !Array.isArray(embedding)) {
+      throw new Error('Embedding API 返回数据格式异常');
+    }
+
+    const responseSummary = JSON.stringify({
+      object: json.object,
+      model: json.model,
+      dataCount: json.data.length,
+      dimensions: embedding.length,
+      usage: json.usage,
+    });
+    observe({
+      promptTokens: json.usage?.prompt_tokens,
+      totalTokens: json.usage?.total_tokens,
+      dimensions: embedding.length,
+      responseSummary,
+    });
+    return embedding;
+  } catch (error) {
+    observe({ error: error instanceof Error ? error.message : String(error) });
+    throw error;
+  }
 }
 
 // ========== 相似度 ==========
@@ -110,6 +167,7 @@ export async function recallMemories(
   topK: number,
   endpoint: { baseUrl: string; apiKey: string; defaultModel: string },
   signal?: AbortSignal,
+  onEmbeddingRequest?: EmbeddingRequestObserver,
 ): Promise<RecalledMemory[]> {
   const allMemories = await getMemories(saveId);
   if (allMemories.length === 0) return [];
@@ -117,7 +175,7 @@ export async function recallMemories(
   // 计算查询向量
   let queryEmbedding: number[];
   try {
-    queryEmbedding = await computeEmbedding(query, endpoint, undefined, signal);
+    queryEmbedding = await computeEmbedding(query, endpoint, undefined, signal, onEmbeddingRequest);
   } catch {
     // Embedding API 失败 → 回退到按重要度 + 时间排序
     return allMemories

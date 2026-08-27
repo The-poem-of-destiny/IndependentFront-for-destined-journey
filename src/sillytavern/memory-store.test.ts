@@ -227,6 +227,30 @@ describe('computeEmbedding', () => {
     expect(fetchUrl).toBe('/api/embeddings');
   });
 
+  it('reports provider usage and request metadata to the debug observer', async () => {
+    mockFetchResolved([0.1, 0.2, 0.3]);
+    const observe = vi.fn();
+
+    await (computeEmbedding as any)(
+      'billable input',
+      makeEndpoint(),
+      undefined,
+      undefined,
+      observe,
+    );
+
+    expect(observe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: 'billable input',
+        model: 'deepseek-chat',
+        baseUrl: 'https://api.deepseek.com/v1',
+        promptTokens: 8,
+        totalTokens: 8,
+        dimensions: 3,
+      }),
+    );
+  });
+
   it('should use custom model when provided', async () => {
     mockFetchResolved([0.1, 0.2]);
 

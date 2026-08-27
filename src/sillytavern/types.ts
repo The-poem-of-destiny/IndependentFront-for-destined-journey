@@ -1853,8 +1853,66 @@ export interface AgentResult {
   error?: string;
   /** 🆕 Agentic: 本 Agent 产生的所有工具调用记录 */
   toolCalls?: Array<{ name: string; arguments: any; result: any }>;
+  /** Agentic 多轮调用中，每次真实 provider 响应的 usage。普通 chat 不填。 */
+  providerRounds?: AgentProviderRound[];
   /** 🆕 Debug: 发送给 AI 的完整请求消息（含系统提示词+上下文），用于调试面板导出 */
   requestMessages?: Array<{ role: string; content: string | null }>;
+}
+
+/** 一次 agentic provider 往返的计量快照。 */
+export interface AgentProviderRound {
+  round: number;
+  tokensUsed: number;
+  cacheHit: boolean;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
+  completionTokens?: number;
+  promptTokens?: number;
+  finishReason?: string;
+  duration: number;
+  error?: string;
+}
+
+/** 单次 Agent 调用的完整调试记录。 */
+export interface DebugAgentEntry {
+  invocationId: string;
+  turnId: string;
+  agentId: string;
+  label: string;
+  endpointId: string;
+  endpointName: string;
+  baseUrl: string;
+  model: string;
+  messages: Array<{ role: string; content: string | null }>;
+  rawResponse: string;
+  reasoning?: string;
+  toolCalls?: AgentResult['toolCalls'];
+  providerRounds?: AgentProviderRound[];
+  promptSessionRevision?: number;
+  promptRebased?: boolean;
+  promptRebaseReason?: string;
+  error?: string;
+  tokensUsed: number;
+  cacheHit: boolean;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
+  completionTokens?: number;
+  promptTokens?: number;
+  duration: number;
+  startedAt: number;
+  completedAt?: number;
+}
+
+/** 每存档持久化的单回合调试历史；只保留最近 10 条。 */
+export interface DebugTurnRecord {
+  id: string;
+  saveId: string;
+  turn: number;
+  sourceMessageId?: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  startedAt: number;
+  completedAt?: number;
+  entries: DebugAgentEntry[];
 }
 
 /** 玩家可见的单次 Agent 工具活动；只保留语义化文案，不携带原始参数或响应。 */

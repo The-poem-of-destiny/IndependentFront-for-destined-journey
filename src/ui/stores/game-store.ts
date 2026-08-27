@@ -10,10 +10,12 @@ import type {
   CombatState,
   CombatSummaryResult,
   SaveProfile,
-  AgentResult,
   AgentActivityRun,
   AgentActivityStep,
+  DebugAgentEntry,
+  DebugTurnRecord,
 } from '@engine/types';
+export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types';
 import type { CombatView, CombatCommand } from '@engine/combat-v3';
 import {
   getSave,
@@ -24,6 +26,8 @@ import {
   getSaveProfile,
   getLatestPlotOutline,
   getSnapshots,
+  getDebugTurns,
+  saveDebugTurn,
 } from '@engine/database';
 import { saveMessage, getMessages, saveSaveSlot } from '@engine/database';
 // 旧档经验保底归一化（方案 A，2026-08-24）：加载时对主角自愈「等级与累计经验矛盾」
@@ -52,29 +56,6 @@ let rewriteLoadoutImpl: RewriteLoadoutImpl | null = null;
 /** 由 GamePage 在创建 GamePipeline 后调用，把引擎实现挂进 store（照 scene-image-seams 的缝模式） */
 export function setRewriteLoadoutImpl(impl: RewriteLoadoutImpl): void {
   rewriteLoadoutImpl = impl;
-}
-
-/** 单条 Agent 调试日志（含完整请求/响应上下文） */
-export interface DebugAgentEntry {
-  agentId: string;
-  label: string;
-  endpointId: string;
-  endpointName: string;
-  baseUrl: string;
-  model: string;
-  messages: Array<{ role: string; content: string | null }>;
-  rawResponse: string;
-  /** 🆕 DeepSeek 思维链（reasoning_content），可能为空 */
-  reasoning?: string;
-  /** Agentic 工具往返；只在开发调试面板展示。 */
-  toolCalls?: AgentResult['toolCalls'];
-  error?: string;
-  tokensUsed: number;
-  cacheHit: boolean;
-  cacheHitTokens?: number;
-  cacheMissTokens?: number;
-  completionTokens?: number;
-  duration: number;
 }
 
 /** 战斗消息流条目（CombatMessageFlow 渲染） */
@@ -635,22 +616,83 @@ export const useGameStore = defineStore('game', () => {
     return activeSave.value?.metadata?.openingPrompt ?? null;
   });
 
-  /** Agent 调用日志 — 每轮管线追加 */
-  const agentLog = ref<DebugAgentEntry[]>([]);
+  /** 最近 10 回合的 Agent 调试历史；当前回合永远是最后一条。 */
+  const agentLogHistory = ref<DebugTurnRecord[]>([]);
+  const agentLog = computed(
+    () => agentLogHistory.value[agentLogHistory.value.length - 1]?.entries ?? [],
+  );
+  let debugLogWriteQueue: Promise<void> = Promise.resolve();
 
-  /** 追加一条 Agent 调试日志 (idempotent: 同名 agent 替换) */
-  function addAgentLogEntry(entry: DebugAgentEntry) {
-    const existing = agentLog.value.findIndex((e) => e.agentId === entry.agentId);
-    if (existing >= 0) {
-      agentLog.value[existing] = entry;
-    } else {
-      agentLog.value.push(entry);
+  function queueDebugTurnWrite(turn: DebugTurnRecord): void {
+    let snapshot: DebugTurnRecord;
+    try {
+      // Pinia 把嵌套对象包成 Proxy，structuredClone 会直接抛 DataCloneError。
+      // 调试导出本来就是 JSON 契约，按同一口径取不可变快照最稳妥。
+      snapshot = JSON.parse(JSON.stringify(turn)) as DebugTurnRecord;
+    } catch (error) {
+      console.error('[game-store] 调试历史序列化失败:', error);
+      return;
     }
+    debugLogWriteQueue = debugLogWriteQueue
+      .then(() => saveDebugTurn(snapshot))
+      .catch((error) => console.error('[game-store] 调试历史持久化失败:', error));
   }
 
-  /** 清除本轮所有调试日志 (新一轮开始时调用) */
+  async function flushAgentLogWrites(): Promise<void> {
+    await debugLogWriteQueue;
+  }
+
+  function startAgentLogTurn(input: {
+    id: string;
+    saveId: string;
+    turn: number;
+    sourceMessageId?: string;
+    startedAt?: number;
+  }): void {
+    if (!activeSaveId.value || activeSaveId.value !== input.saveId) return;
+    const record: DebugTurnRecord = {
+      id: input.id,
+      saveId: input.saveId,
+      turn: input.turn,
+      sourceMessageId: input.sourceMessageId,
+      status: 'running',
+      startedAt: input.startedAt ?? Date.now(),
+      entries: [],
+    };
+    agentLogHistory.value.push(record);
+    if (agentLogHistory.value.length > 10) agentLogHistory.value.splice(0, 1);
+    queueDebugTurnWrite(record);
+  }
+
+  /** 追加或补全一次 Agent 调用；只按 invocationId 更新，不再覆盖同名 Agent 的其他调用。 */
+  function addAgentLogEntry(entry: DebugAgentEntry) {
+    const turn = agentLogHistory.value.find((candidate) => candidate.id === entry.turnId);
+    if (!turn) return;
+    const existing = turn.entries.findIndex(
+      (e: DebugAgentEntry) => e.invocationId === entry.invocationId,
+    );
+    if (existing >= 0) {
+      turn.entries[existing] = entry;
+    } else {
+      turn.entries.push(entry);
+    }
+    queueDebugTurnWrite(turn);
+  }
+
+  function finishAgentLogTurn(id: string, status: DebugTurnRecord['status']): void {
+    const turn = agentLogHistory.value.find((candidate) => candidate.id === id);
+    if (!turn || turn.status !== 'running') return;
+    turn.status = status;
+    turn.completedAt = Date.now();
+    queueDebugTurnWrite(turn);
+  }
+
+  /** 兼容手动清空当前回合；不会删除此前回合。 */
   function clearAgentLog() {
-    agentLog.value = [];
+    const turn = agentLogHistory.value[agentLogHistory.value.length - 1];
+    if (!turn) return;
+    turn.entries = [];
+    queueDebugTurnWrite(turn);
   }
 
   /**
@@ -999,12 +1041,13 @@ export const useGameStore = defineStore('game', () => {
     );
 
     // 加载关联数据（始终覆写，DB 返回 undefined 时写默认空值）
-    const [chars, mems, events, profile, outline] = await Promise.all([
+    const [chars, mems, events, profile, outline, debugTurns] = await Promise.all([
       getCharacters(saveId),
       getMemories(saveId),
       getPlotEvents(saveId),
       getSaveProfile(saveId),
       getLatestPlotOutline(saveId),
+      getDebugTurns(saveId),
     ]);
 
     characters.value = (await normalizePlayerProgression(chars as CharacterState[])) ?? [];
@@ -1013,6 +1056,7 @@ export const useGameStore = defineStore('game', () => {
     plotOutline.value = (outline as PlotOutline) ?? null;
     activeCombat.value = null;
     saveProfile.value = (profile as SaveProfile) ?? null;
+    agentLogHistory.value = debugTurns;
 
     // 快照恢复走 snapshots 表（规范 §11.2），机制在 M5 重建 (#2)
 
@@ -1080,6 +1124,7 @@ export const useGameStore = defineStore('game', () => {
     plotOutline.value = null;
     activeCombat.value = null;
     saveProfile.value = null;
+    agentLogHistory.value = [];
     combatReady.value = null;
   }
 
@@ -1382,7 +1427,11 @@ export const useGameStore = defineStore('game', () => {
     clearAgentStatus,
     clearAllAgentStatus,
     agentLog,
+    agentLogHistory,
+    startAgentLogTurn,
     addAgentLogEntry,
+    finishAgentLogTurn,
+    flushAgentLogWrites,
     clearAgentLog,
     ejsVarsRejections,
     recordEjsVarsRejection,

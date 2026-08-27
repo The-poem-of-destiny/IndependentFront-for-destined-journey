@@ -7,6 +7,7 @@
  */
 
 import Dexie, { Table } from 'dexie';
+import { withSaveWriteLock } from './state-write-queue';
 import type {
   Lorebook,
   ChatPreset,
@@ -35,6 +36,7 @@ import type {
   BeautifierRule,
   RegexStorageRecord,
   CreatePreset,
+  DebugTurnRecord,
 } from './types';
 import type {
   SceneImageRecord,
@@ -102,7 +104,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-export const DB_VERSION = 23;
+export const DB_VERSION = 24;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -259,6 +261,9 @@ class AppDatabase extends Dexie {
   //   这两个只需要 turn/createdAt 的动作，每次都要把 ~30 份整档历史反序列化到主线程。
   //   索引 `saveId` 供 deleteSaveSlot / 单存档导出按存档整批取删（照 characterAppearances 的先例）。
   snapshotPayloads!: Table<SnapshotPayload>;
+
+  // v24: 每存档最近 10 回合的完整 Agent 调试历史；不进日常备份。
+  debugTurns!: Table<DebugTurnRecord>;
 
   constructor() {
     super(DB_NAME);
@@ -660,6 +665,7 @@ class AppDatabase extends Dexie {
       });
 
     this.version(23).stores({ apiRateLimitPolicies: 'credentialId, updatedAt' });
+    this.version(24).stores({ debugTurns: 'id, saveId, [saveId+startedAt]' });
   }
 }
 
@@ -1805,6 +1811,7 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       db.sceneImages,
       db.sceneImageBlobs,
       db.characterAppearances,
+      db.debugTurns,
     ],
     async () => {
       // v22 拆表：元数据与载荷各有 saveId 索引，两张表各删各的（载荷表不必先查 id）
@@ -1826,6 +1833,7 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       await db.sceneImages.where('saveId').equals(id).delete();
       // v19 (D56): 会话外貌随存档走 —— 与 imagePresets（全局基线）刻意相反
       await db.characterAppearances.where('saveId').equals(id).delete();
+      await db.debugTurns.where('saveId').equals(id).delete();
       await db.saves.delete(id);
     },
   );
@@ -2035,6 +2043,37 @@ export async function deleteMessagesAfterTurn(saveId: string, turn: number): Pro
     .messages.where('[saveId+turn]')
     .between([saveId, turn], [saveId, Dexie.maxKey], false, true)
     .delete();
+}
+
+// ═══════════════════════════════════════════════════════════
+// Debug turn history (v24)
+// ═══════════════════════════════════════════════════════════
+
+export const DEBUG_TURN_HISTORY_LIMIT = 10;
+
+/** 读取最近 10 回合，按时间升序返回。 */
+export async function getDebugTurns(saveId: string): Promise<DebugTurnRecord[]> {
+  const rows = await getDatabase()
+    .debugTurns.where('[saveId+startedAt]')
+    .between([saveId, Dexie.minKey], [saveId, Dexie.maxKey], true, true)
+    .toArray();
+  return rows.slice(-DEBUG_TURN_HISTORY_LIMIT);
+}
+
+/** 保存一回合的最新快照，并在同一事务内淘汰该存档最旧的超额记录。 */
+export async function saveDebugTurn(record: DebugTurnRecord): Promise<void> {
+  await withSaveWriteLock(record.saveId, async () => {
+    const db = getDatabase();
+    await db.transaction('rw', db.debugTurns, async () => {
+      await db.debugTurns.put(record);
+      const keys = await db.debugTurns
+        .where('[saveId+startedAt]')
+        .between([record.saveId, Dexie.minKey], [record.saveId, Dexie.maxKey], true, true)
+        .primaryKeys();
+      const overflow = keys.length - DEBUG_TURN_HISTORY_LIMIT;
+      if (overflow > 0) await db.debugTurns.bulkDelete(keys.slice(0, overflow));
+    });
+  });
 }
 
 // ========== Audio (v11) ==========

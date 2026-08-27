@@ -10,7 +10,7 @@
  * - 🆕 Phase 8.5: chatWithTools() 多轮工具调用
  */
 
-import type { ApiEndpoint, AgentResult, ToolDefinition } from './types';
+import type { AgentProviderRound, ApiEndpoint, AgentResult, ToolDefinition } from './types';
 import { scheduleApiRequest } from './api-rpm-limiter';
 
 /** 内部扩展 — 包含原始 tool_calls 数据 */
@@ -247,6 +247,7 @@ export class AgentClient {
     let totalCacheMissTokens = 0;
     let totalCompletionTokens = 0;
     const allReasoning: string[] = []; // 跨轮次收集 reasoning
+    const providerRounds: AgentProviderRound[] = [];
 
     for (let round = 0; round < maxRounds; round++) {
       const roundRequest: ChatRequest = {
@@ -261,6 +262,18 @@ export class AgentClient {
       totalCacheHitTokens += innerResult.cacheHitTokens ?? 0;
       totalCacheMissTokens += innerResult.cacheMissTokens ?? 0;
       totalCompletionTokens += innerResult.completionTokens ?? 0;
+      providerRounds.push({
+        round: round + 1,
+        tokensUsed: innerResult.tokensUsed,
+        cacheHit: innerResult.cacheHit,
+        cacheHitTokens: innerResult.cacheHitTokens,
+        cacheMissTokens: innerResult.cacheMissTokens,
+        completionTokens: innerResult.completionTokens,
+        promptTokens: innerResult.promptTokens,
+        finishReason: innerResult.finishReason,
+        duration: innerResult.duration,
+        error: innerResult.error,
+      });
 
       // 收集每轮的 reasoning（不会被子调用覆盖）
       if (innerResult.reasoning) {
@@ -277,6 +290,7 @@ export class AgentClient {
           cacheMissTokens: totalCacheMissTokens,
           completionTokens: totalCompletionTokens,
           duration: Date.now() - startTime,
+          providerRounds,
         };
       }
 
@@ -343,6 +357,7 @@ export class AgentClient {
         completionTokens: totalCompletionTokens,
         duration: Date.now() - startTime,
         toolCalls: toolCallHistory,
+        providerRounds,
       };
     }
 
@@ -360,6 +375,7 @@ export class AgentClient {
       duration: Date.now() - startTime,
       error: `Exceeded max tool-calling rounds (${maxRounds})`,
       toolCalls: toolCallHistory,
+      providerRounds,
     };
   }
 
