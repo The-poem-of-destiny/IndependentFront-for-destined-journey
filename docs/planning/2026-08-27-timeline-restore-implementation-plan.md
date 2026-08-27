@@ -96,7 +96,11 @@ async function restoreTimeline(snapshotId: string): Promise<TimelineRestoreResul
 ```ts
 export type TimelineRestoreResult =
   | { status: 'rejected'; error: string }
-  | { status: 'restored'; warning?: string }
+  | {
+      status: 'restored';
+      continuation: 'same-save' | 'save-switched';
+      warning?: string;
+    }
   | { status: 'projection-failed'; error: string };
 ```
 

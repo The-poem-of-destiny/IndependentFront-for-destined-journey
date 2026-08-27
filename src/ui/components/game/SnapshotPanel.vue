@@ -76,8 +76,9 @@ async function restore(snap: SnapshotMeta) {
   try {
     const result = await game.restoreToSnapshot(snap.id);
     if (result.status === 'restored') {
-      if (result.warning) ui.toast(result.warning, 'warning');
-      else game.closeModal();
+      if (result.continuation === 'save-switched') {
+        ui.toast(result.warning ?? '时间线已恢复；当前已切换到其他存档', 'warning');
+      } else game.closeModal();
     } else if (result.status === 'projection-failed') {
       ui.toast(result.error, 'error');
       ui.navigate('home');

@@ -20,6 +20,7 @@ const startCombat = vi.fn(async () => {});
 const skipCombat = vi.fn();
 const restartCombat = vi.fn<() => Promise<TimelineRestoreResult>>(async () => ({
   status: 'restored',
+  continuation: 'same-save',
 }));
 const confirmCombatSummary = vi.fn();
 const discardCombatSummary = vi.fn();
@@ -34,7 +35,7 @@ import CombatPanel from './CombatPanel.vue';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  restartCombat.mockResolvedValue({ status: 'restored' });
+  restartCombat.mockResolvedValue({ status: 'restored', continuation: 'same-save' });
   mockGame = reactive({
     isInCombat: true,
     // F2 就绪态：战斗还没开（v3ActiveCombat=null），面板数据 = marker 快照
@@ -61,6 +62,69 @@ beforeEach(() => {
 });
 
 describe('CombatPanel 重开战斗结果', () => {
+  it('完整恢复并重启成功时不显示额外提示', async () => {
+    mockGame.combatReady = null;
+    mockGame.v3ActiveCombat = {
+      combatId: 'c1',
+      revision: 0,
+      phase: 'CombatOpen',
+      round: 1,
+      initiativeOrder: [],
+      currentTurnIndex: 0,
+      units: {},
+      resourceSnapshots: { FP: 0 },
+    };
+    const wrapper = await mountPanel();
+
+    await wrapper
+      .findAll('.combat-panel-actions button')
+      .find((button) => button.text().includes('重开战斗'))!
+      .trigger('click');
+    await nextTick();
+    await wrapper
+      .findAll('button.btn-primary')
+      .find((button) => button.text().trim() === '重新开始')!
+      .trigger('click');
+    await nextTick();
+
+    expect(restartCombat).toHaveBeenCalledTimes(1);
+    expect(toast).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('恢复前被拒绝会提示原因且不返回首页', async () => {
+    mockGame.combatReady = null;
+    mockGame.v3ActiveCombat = {
+      combatId: 'c1',
+      revision: 0,
+      phase: 'CombatOpen',
+      round: 1,
+      initiativeOrder: [],
+      currentTurnIndex: 0,
+      units: {},
+      resourceSnapshots: { FP: 0 },
+    };
+    restartCombat.mockResolvedValueOnce({
+      status: 'rejected',
+      error: '战斗重开流程未就绪',
+    });
+    const wrapper = await mountPanel();
+
+    await wrapper
+      .findAll('.combat-panel-actions button')
+      .find((button) => button.text().includes('重开战斗'))!
+      .trigger('click');
+    await nextTick();
+    await wrapper
+      .findAll('button.btn-primary')
+      .find((button) => button.text().trim() === '重新开始')!
+      .trigger('click');
+    await nextTick();
+
+    expect(toast).toHaveBeenCalledWith('战斗重开流程未就绪', 'warning');
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it('投影重载失败会提示并返回首页', async () => {
     mockGame.combatReady = null;
     mockGame.v3ActiveCombat = {
@@ -108,6 +172,7 @@ describe('CombatPanel 重开战斗结果', () => {
     };
     restartCombat.mockResolvedValueOnce({
       status: 'restored',
+      continuation: 'same-save',
       warning: '已回到战斗前，但战斗未能重新开始',
     });
     const wrapper = await mountPanel();

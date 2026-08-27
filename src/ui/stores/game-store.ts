@@ -54,7 +54,11 @@ export type RewriteLoadoutImpl = (
 
 export type TimelineRestoreResult =
   | { status: 'rejected'; error: string }
-  | { status: 'restored'; warning?: string }
+  | {
+      status: 'restored';
+      continuation: 'same-save' | 'save-switched';
+      warning?: string;
+    }
   | { status: 'projection-failed'; error: string };
 
 let rewriteLoadoutImpl: RewriteLoadoutImpl | null = null;
@@ -380,14 +384,18 @@ export const useGameStore = defineStore('game', () => {
 
     // ② 恢复开战前时间线；失败分类、投影与效果接线统一由公共 module 负责。
     const result = await restoreTimeline(preSnapshotId);
-    if (result.status !== 'restored' || result.warning) return result;
+    if (result.status !== 'restored' || result.continuation === 'save-switched') return result;
 
     // ③ 重触发 combat_trigger（pipeline 持 marker；异常不阻断恢复本身）
     try {
       await restartFn();
     } catch (err) {
       console.warn('[GameStore] 重开战斗重触发失败:', err);
-      return { status: 'restored', warning: '已回到战斗前，但战斗未能重新开始' };
+      return {
+        status: 'restored',
+        continuation: 'same-save',
+        warning: '已回到战斗前，但战斗未能重新开始',
+      };
     }
     return result;
   }
@@ -1190,12 +1198,20 @@ export const useGameStore = defineStore('game', () => {
       unwireEffectSystem(saveId);
 
       if (activeSaveId.value !== saveId) {
-        return { status: 'restored', warning: '时间线已恢复；当前已切换到其他存档' };
+        return {
+          status: 'restored',
+          continuation: 'save-switched',
+          warning: '时间线已恢复；当前已切换到其他存档',
+        };
       }
 
       const projection = await readTimelineProjection(saveId);
       if (activeSaveId.value !== saveId) {
-        return { status: 'restored', warning: '时间线已恢复；当前已切换到其他存档' };
+        return {
+          status: 'restored',
+          continuation: 'save-switched',
+          warning: '时间线已恢复；当前已切换到其他存档',
+        };
       }
 
       clearSessionRuntime();
@@ -1210,7 +1226,7 @@ export const useGameStore = defineStore('game', () => {
       turnCounter = projection.turn;
       wireEffectSystem(saveId, projection.characters);
 
-      return { status: 'restored' };
+      return { status: 'restored', continuation: 'same-save' };
     } catch (err) {
       if (!authorityRestored) {
         console.error('[game-store] 时间线恢复失败:', err);
@@ -1291,7 +1307,9 @@ export const useGameStore = defineStore('game', () => {
     if (!prevSnapshot) return { status: 'rejected', error: '找不到上一轮快照' };
 
     const result = await restoreTimeline(prevSnapshot.id);
-    if (result.status === 'restored' && !result.warning) fillInput(capturedInput);
+    if (result.status === 'restored' && result.continuation === 'same-save') {
+      fillInput(capturedInput);
+    }
     return result;
   }
 

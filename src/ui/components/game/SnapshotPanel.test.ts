@@ -56,7 +56,10 @@ describe('SnapshotPanel 时间线恢复结果', () => {
   });
 
   it('完整恢复成功会关闭面板且不导航', async () => {
-    game.restoreToSnapshot.mockResolvedValueOnce({ status: 'restored' });
+    game.restoreToSnapshot.mockResolvedValueOnce({
+      status: 'restored',
+      continuation: 'same-save',
+    });
     const wrapper = mount(SnapshotPanel);
     await flushPromises();
 
@@ -70,6 +73,7 @@ describe('SnapshotPanel 时间线恢复结果', () => {
   it('恢复期间切换存档只提示 warning，不关闭新存档的弹窗', async () => {
     game.restoreToSnapshot.mockResolvedValueOnce({
       status: 'restored',
+      continuation: 'save-switched',
       warning: '时间线已恢复；当前已切换到其他存档',
     });
     const wrapper = mount(SnapshotPanel);

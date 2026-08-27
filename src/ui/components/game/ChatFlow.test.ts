@@ -29,6 +29,7 @@ const game = vi.hoisted(() => ({
   clearPendingInput: vi.fn(),
   rollbackOneTurn: vi.fn<() => Promise<TimelineRestoreResult>>(async () => ({
     status: 'restored',
+    continuation: 'same-save',
   })),
 }));
 const ui = vi.hoisted(() => ({ toast: vi.fn(), navigate: vi.fn() }));
@@ -54,7 +55,7 @@ describe('ChatFlow 右键菜单 — user 消息', () => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     game.agentActivityRuns = [];
-    game.rollbackOneTurn.mockResolvedValue({ status: 'restored' });
+    game.rollbackOneTurn.mockResolvedValue({ status: 'restored', continuation: 'same-save' });
     // 配图档关掉 → user 消息菜单只剩回退/复制两项（配图是给正文的）
     useSettingsStore().settings.imageGenMode = 'off';
     Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => {}) } });
@@ -159,6 +160,7 @@ describe('ChatFlow 右键菜单 — user 消息', () => {
   it('回退期间切换存档会提示 warning，不返回首页', async () => {
     game.rollbackOneTurn.mockResolvedValueOnce({
       status: 'restored',
+      continuation: 'save-switched',
       warning: '时间线已恢复；当前已切换到其他存档',
     });
     const wrapper = mount(ChatFlow, {

@@ -514,7 +514,7 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
   it('restoreToSnapshot: 恢复到指定历史快照(不回填输入) + 状态恢复', async () => {
     await seedTwoTurns();
     const result = await store.restoreToSnapshot('snap-turn1');
-    expect(result).toEqual({ status: 'restored' });
+    expect(result).toEqual({ status: 'restored', continuation: 'same-save' });
     // 不回填输入
     expect(store.pendingInput).toBe('');
     // turn2 消息删除
@@ -718,6 +718,7 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
 
     expect(result).toEqual({
       status: 'restored',
+      continuation: 'save-switched',
       warning: '时间线已恢复；当前已切换到其他存档',
     });
     expect(store.activeSaveId).toBe(otherSaveId);
@@ -1046,7 +1047,7 @@ describe('M2 v3 战斗接线', () => {
 
     const result = await store.restartCombat();
 
-    expect(result).toEqual({ status: 'restored' });
+    expect(result).toEqual({ status: 'restored', continuation: 'same-save' });
     expect(restarted).toBe(true); // 重触发回调被调（pipeline 重走 handleCombatTriggerV3）
     expect(store.v3ActiveCombat).toBeNull(); // 旧战斗已被放弃
     expect(store.isInCombat).toBe(false);
@@ -1121,6 +1122,7 @@ describe('M2 v3 战斗接线', () => {
 
     expect(result).toEqual({
       status: 'restored',
+      continuation: 'save-switched',
       warning: '时间线已恢复；当前已切换到其他存档',
     });
     expect(restart).not.toHaveBeenCalled();
@@ -1159,6 +1161,7 @@ describe('M2 v3 战斗接线', () => {
 
     expect(result).toEqual({
       status: 'restored',
+      continuation: 'same-save',
       warning: '已回到战斗前，但战斗未能重新开始',
     });
     expect(store.activeSaveId).toBe(SAVE_ID);
