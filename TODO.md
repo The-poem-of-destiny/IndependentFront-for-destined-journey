@@ -40,21 +40,23 @@
 - [ ] **正式发布打包** —— 把当前的开发态收敛成可分发的正式版本：产物形态（桌面壳 / 纯静态站
       / 两者）、版本号与更新渠道、内容仓 pack 的随包策略、首次启动的资产落地流程。
 
-- [ ] **地图系统集成收尾** —— v1 / v1.2 引擎、内容仓 map-pack v1.2.0 校验门，以及地图编辑器的
-      发展度 / 初始建筑 / 主建筑创作面均已落地。当前缺口是同步私有内容仓：给
-      `request_dispatcher` 补 `{{MAP_CONTEXT}}` 与六个 `tile_ops`，并让世界书 uid 510 展示 v1.2
-      的状态 / 发展度 / 建筑 / 编年史。同步后需在当前主线完成真实 AI 轮次、浏览器内 EJS
-      地图投影、v1.2 UI 与时间结算的端到端真机走查。现行契约见
-      `docs/planning/2026-08-11-map-system-v1-integration.md` 与
-      `docs/planning/2026-08-18-map-tile-dynamics-v1.2-design.md`。
+- [ ] **内容包更新** —— 更新并发布私有内容包，完成以下引擎功能的正式内容接入与真机验收。
 
-- [ ] **随机事件系统集成收尾** —— v1 引擎调度、候选池、Story 注入、`<event_trigger>` 回执结算、
-      设置与开发者诊断均已落地，公开占位包也有两条格式样例；正式私有内容仓尚未接通：新增
-      `data/content/random-events.json`（含基于真实地块的 `first_visit` 与世界观事件），让
-      `tools/build-pack.mjs` 读取、输出、校验并哈希 `randomEvents` 分节，同时给正式 Story 预设补
-      `{{RANDOM_EVENTS}}` 与 `<event_trigger>` 教学。发布并导入新版 pack 后，需真机覆盖 MTTH / 首访
-      入池、AI 认领、冷却与档案结算、开关、快照回退重放及候选过期。现行契约见
-      `docs/planning/2026-08-15-random-event-system-design.md`。
+  - [ ] **地图系统集成收尾** —— v1 / v1.2 引擎、内容仓 map-pack v1.2.0 校验门，以及地图编辑器的
+        发展度 / 初始建筑 / 主建筑创作面均已落地。当前缺口是同步私有内容仓：给
+        `request_dispatcher` 补 `{{MAP_CONTEXT}}` 与六个 `tile_ops`，并让世界书 uid 510 展示 v1.2
+        的状态 / 发展度 / 建筑 / 编年史。同步后需在当前主线完成真实 AI 轮次、浏览器内 EJS
+        地图投影、v1.2 UI 与时间结算的端到端真机走查。现行契约见
+        `docs/planning/2026-08-11-map-system-v1-integration.md` 与
+        `docs/planning/2026-08-18-map-tile-dynamics-v1.2-design.md`。
+
+  - [ ] **随机事件系统集成收尾** —— v1 引擎调度、候选池、Story 注入、`<event_trigger>` 回执结算、
+        设置与开发者诊断均已落地，公开占位包也有两条格式样例；正式私有内容仓尚未接通：新增
+        `data/content/random-events.json`（含基于真实地块的 `first_visit` 与世界观事件），让
+        `tools/build-pack.mjs` 读取、输出、校验并哈希 `randomEvents` 分节，同时给正式 Story 预设补
+        `{{RANDOM_EVENTS}}` 与 `<event_trigger>` 教学。发布并导入新版 pack 后，需真机覆盖 MTTH / 首访
+        入池、AI 认领、冷却与档案结算、开关、快照回退重放及候选过期。现行契约见
+        `docs/planning/2026-08-15-random-event-system-design.md`。
 
 - [ ] **文生图集成复验** —— 在当前主线重新走通完整游玩链路：story 产出 `<scene_image>` 标记 →
       `image_prompt` 侧链 → NovelAI / ComfyUI provider → 图片落库 → 正文就地渲染与 CG 图鉴，
