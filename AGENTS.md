@@ -113,8 +113,7 @@ node -e "const fs=require('fs');const f=process.argv[1];const s=fs.readFileSync(
 
 ## 文档导航
 
-**发布前待办清单在根目录 [`TODO.md`](TODO.md)**（8 条：Mac 兼容 / 正式打包 / 配乐 / 远程素材 /
-远程内容包（探索）/ 主题打磨 / 多分辨率 / 移动端）。做完一条就把它搬进 `docs/CHANGELOG.md`，
+**发布前待办清单在根目录 [`TODO.md`](TODO.md)**。做完一条就把它搬进 `docs/CHANGELOG.md`，
 已知缺陷记进 `docs/known-issue.md`，别在三处并存。
 
 详细设计文档统一在 `docs/` 目录下：
@@ -132,7 +131,7 @@ docs/
 ├── archive/                     # 🆕 已归档历史文档（价值已交付的 plan/RFC/handoff 与被新版取代的旧文档）
 │                                #    按原路径镜像（docs/planning/X → docs/archive/planning/X）；
 │                                #    详见 archive/README.md。归档件只作历史脉络参考，别当现行约定
-├── reviews/                     # 历次代码审查存档（7 份，含修复状态闭环表）
+├── reviews/                     # 历次代码审查存档（含修复状态闭环表）
 ├── superpowers/specs/           # 数据字段规范 + 实体字段审计（详见下节「游戏数据字段规范（必读）」）
 ├── planning/                    # 现行设计文档 + 在办计划（已交付的 plan/RFC/handoff 见 archive/planning/）
 ├── phases/                      # Phase 计划（仅存仍在用的两个阶段，其余已归档）
