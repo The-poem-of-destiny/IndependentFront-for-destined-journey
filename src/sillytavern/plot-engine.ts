@@ -4,7 +4,7 @@
  * Phase 4 核心模块。职责:
  * 1. 正文前: 解析 plot_pre_check Agent 输出 → 触发 pending 事件
  * 2. 正文后: 解析 plot_post_check Agent 输出 → 更新事件/大纲/世界线
- * 3. EJS 条件表达式评估
+ * 3. 将剧情 Agent 的语义触发裁决落库
  * 4. 世界线变动级联传播
  * 5. 事件完成/失败 → 自动生成关联记忆
  */
@@ -14,58 +14,6 @@ import { getPlotEvents, savePlotEvent, savePlotEvents } from './database';
 // Q-05：从模型输出抢救 JSON 的唯一入口
 import { parseModelJson, asArray, asString } from './model-json';
 import { getActiveOutline, updateOutlineVersion } from './plot-outline';
-
-// ========== 条件评估 ==========
-
-/**
- * 评估 EJS 风格的条件表达式
- * 支持的语法:
- * - 简单比较: `{{hp}} < 50`, `{{location}} == "白曜城"`
- * - 逻辑组合: `condition1 && condition2`, `condition1 || condition2`
- * - 变量引用: `{{变量名}}` 或 `{{对象.属性}}`
- */
-export function evaluateCondition(
-  condition: string | undefined,
-  variables: Record<string, any>,
-): boolean {
-  if (!condition || condition.trim() === '') return true; // 无条件 = 总是触发
-
-  try {
-    // 替换模板变量
-    const expr = condition.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {
-      const value = resolveVariablePath(path.trim(), variables);
-      if (typeof value === 'string') return JSON.stringify(value);
-      return String(value);
-    });
-
-    // 安全评估（使用 Function 构造器，限制可用全局）
-    const fn = new Function(
-      'variables',
-      `
-      try {
-        return !!(${expr});
-      } catch {
-        return false;
-      }
-    `,
-    );
-    return fn(variables);
-  } catch {
-    // 简单字符串匹配（回退）
-    return condition.includes('true') && !condition.includes('false');
-  }
-}
-
-/** 解析变量路径 "a.b.c" */
-function resolveVariablePath(path: string, vars: Record<string, any>): any {
-  const parts = path.split('.');
-  let value: any = vars;
-  for (const part of parts) {
-    if (value === undefined || value === null) return undefined;
-    value = value[part.trim()];
-  }
-  return value;
-}
 
 // ========== Pre-Check 结果类型 ==========
 
@@ -122,7 +70,7 @@ function resolveEventByTitle(
 export async function preCheckPlot(
   saveId: string,
   agentOutput: string,
-  variables: Record<string, any>,
+  _variables: Record<string, unknown>,
 ): Promise<{ triggeredEvents: PlotEvent[]; background: string }> {
   const parsed = parsePreCheckOutput(agentOutput);
   if (!parsed || parsed.triggeredEvents.length === 0) {
@@ -140,10 +88,8 @@ export async function preCheckPlot(
     // 只有 pending 的事件可以被触发
     if (event.status !== 'pending') continue;
 
-    // 验证触发条件
-    if (event.triggerCondition && !evaluateCondition(event.triggerCondition, variables)) {
-      continue;
-    }
+    // triggerCondition 的契约是自然语言提示，由 plot_pre_check 结合当前输入、记忆与状态
+    // 做语义判断。这里仅验证 Agent 选中的标题与 pending 状态，绝不把内容当代码二次执行。
 
     // 激活事件 + 揭示给玩家
     event.status = 'active';
@@ -437,17 +383,16 @@ export function eventToMemory(
 // ========== 触发辅助 ==========
 
 /**
- * 获取应被触发的 pending 事件
- * 按 triggerCondition 评估
+ * 获取所有待交给剧情 Agent 做语义判断的 pending 事件。
+ *
+ * `_variables` 保留在签名中用于兼容旧调用方；自然语言 triggerCondition 不在 Code 侧求值。
  */
 export async function getPendingEventsForTrigger(
   saveId: string,
-  variables: Record<string, any>,
+  _variables: Record<string, unknown>,
 ): Promise<PlotEvent[]> {
   const allEvents = await getPlotEvents(saveId);
-  return allEvents.filter(
-    (e) => e.status === 'pending' && evaluateCondition(e.triggerCondition, variables),
-  );
+  return allEvents.filter((e) => e.status === 'pending');
 }
 
 /**

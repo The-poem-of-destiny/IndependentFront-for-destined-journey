@@ -472,11 +472,15 @@ async function clearAll() {
       存档导出<strong>不含内容包本体</strong> ——
       恢复后若发现内容包拥有的世界书或预设与本地不一致，会在内容状态处提示，可一键从本地内容包重放。
     </p>
+    <p class="data-note">
+      <strong>API 端点与 API 密钥不包含在备份中。</strong>
+      导入不会覆盖本机已保存的 API 凭据；换到新设备后需要重新配置 API。
+    </p>
     <div class="data-actions">
       <AppCard padding="md"
         ><h4>导出数据</h4>
         <p class="text-muted text-sm">
-          将所有存档、角色、记忆、剧情导出为 JSON 文件（不含音频库与素材库）
+          将所有存档、角色、记忆、剧情导出为 JSON 文件（不含音频库、素材库、API 端点与密钥）
         </p>
         <AppButton variant="secondary" size="sm" class="card-action" @click="exportAll"
           >导出全部数据</AppButton
@@ -484,7 +488,7 @@ async function clearAll() {
       ><AppCard padding="md"
         ><h4>导入数据</h4>
         <p class="text-muted text-sm">
-          从 JSON 文件恢复数据，将合并到现有数据库（同样不含音频与素材）
+          从 JSON 文件恢复数据；备份中的数据会替换现有内容，本机 API 凭据不会被覆盖
         </p>
         <AppButton variant="secondary" size="sm" class="card-action" @click="importAll"
           >导入数据</AppButton
@@ -604,7 +608,7 @@ async function clearAll() {
       ></AppModal
     >
     <!--
-      整库导入确认：这个动作是**替换**不是合并，点之前必须先说清楚。
+      整库导入确认：备份包含的数据会被替换，设备本地凭据保留，点之前必须先说清楚。
     -->
     <AppModal
       :open="showImportConfirm"
@@ -619,11 +623,13 @@ async function clearAll() {
         }
       "
       ><p>
-        整库导入会用备份文件<strong style="color: var(--theme-error)">替换全部现有数据</strong
+        整库导入会用备份文件<strong style="color: var(--theme-error)"
+          >替换备份范围内的现有数据</strong
         >，包括所有存档、角色、记忆、剧情与世界书。
       </p>
       <p class="text-muted text-sm">
-        当前数据将被覆盖且不可撤销（音频库与素材库不在备份范围内，不受影响）。建议先「导出全部数据」留一份备份。
+        API 端点与 API 密钥不会从备份恢复，本机已保存的 API 凭据不会被覆盖；换到新设备后需要重新配置
+        API。备份范围内的现有数据将被覆盖且不可撤销（音频库与素材库也不受影响）。建议先「导出全部数据」留一份备份。
       </p>
       <template #footer
         ><AppButton
@@ -635,7 +641,7 @@ async function clearAll() {
           "
           >取消</AppButton
         ><AppButton variant="danger" size="sm" @click="confirmImportAll"
-          >替换全部数据并导入</AppButton
+          >替换备份数据并导入</AppButton
         ></template
       ></AppModal
     >

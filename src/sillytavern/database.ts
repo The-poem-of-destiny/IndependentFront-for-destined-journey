@@ -713,7 +713,8 @@ export interface FullBackup {
   exportedAt: number;
   lorebooks: Lorebook[];
   presets: ChatPreset[];
-  settings: AppSettings[];
+  /** @deprecated 仅用于识别旧备份；新备份不导出设备本地设置与其中可能残留的凭据。 */
+  settings?: AppSettings[];
   // v4
   memories: MemoryRecord[];
   plotEvents: PlotEvent[];
@@ -729,7 +730,8 @@ export interface FullBackup {
   /** v22 快照重载荷（旧备份缺此字段 → 由 snapshots 行就地拆出） */
   snapshotPayloads: SnapshotPayload[];
   saves: SaveSlot[];
-  apiEndpoints: ApiEndpoint[];
+  /** @deprecated API 端点与凭据是设备本地数据；新备份不导出，导入也不会改动。 */
+  apiEndpoints?: ApiEndpoint[];
   /** v23 API 凭据级 RPM 策略；旧备份缺席时导入不碰现有策略。 */
   apiRateLimitPolicies: ApiRpmPolicy[];
   // v5 Phase 4
@@ -774,14 +776,12 @@ export async function exportAllData(): Promise<FullBackup> {
   const [
     lorebooks,
     presets,
-    settings,
     memories,
     plotEvents,
     characters,
     snapshots,
     snapshotPayloads,
     saves,
-    apiEndpoints,
     apiRateLimitPolicies,
     plotOutlines,
     saveProfiles,
@@ -797,14 +797,12 @@ export async function exportAllData(): Promise<FullBackup> {
   ] = await Promise.all([
     db.lorebooks.toArray(),
     db.presets.toArray(),
-    db.settings.toArray(),
     db.memories.toArray(),
     db.plotEvents.toArray(),
     db.characters.toArray(),
     db.snapshots.toArray(),
     db.snapshotPayloads.toArray(),
     db.saves.toArray(),
-    db.apiEndpoints.toArray(),
     db.apiRateLimitPolicies.toArray(),
     db.plotOutlines.toArray(),
     db.saveProfiles.toArray(),
@@ -823,14 +821,12 @@ export async function exportAllData(): Promise<FullBackup> {
     exportedAt: Date.now(),
     lorebooks,
     presets,
-    settings,
     memories,
     plotEvents,
     characters,
     snapshots,
     snapshotPayloads,
     saves,
-    apiEndpoints,
     apiRateLimitPolicies,
     plotOutlines,
     saveProfiles,
@@ -949,14 +945,11 @@ async function doImportAllData(
   backup: FullBackup,
 ): Promise<void> {
   // Split into multiple transactions — 单事务覆盖 13 张表在 Dexie 上有性能/锁问题
-  // `lorebooks` 与 `settings` 是死表（无生产读写，见 Q-06 与 AGENTS.md 架构图）。
-  // 这里仍然照搬**只为老备份往返不丢字节**：老包里带着这两张表的行，导入时丢掉
-  // 就等于这份备份进去再出来变小了。新包里它们是空数组，clear + bulkPut([]) 是 no-op。
-  await db.transaction('rw', db.lorebooks, db.settings, async () => {
+  // `settings` 是生产死表，但历史行可能仍含 API Key。SEC-01 起它与 apiEndpoints 一样
+  // 视为设备本地敏感数据：普通备份不导出，导入旧包时也不读取或覆盖。
+  await db.transaction('rw', db.lorebooks, async () => {
     await db.lorebooks.clear();
-    await db.settings.clear();
     if (Array.isArray(backup.lorebooks)) await db.lorebooks.bulkPut(backup.lorebooks);
-    if (Array.isArray(backup.settings)) await db.settings.bulkPut(backup.settings);
   });
 
   // 🔴 内容-引擎分离波 1 / D22：presets 拆出 lorebooks/settings 事务，改三态护栏。
@@ -989,30 +982,21 @@ async function doImportAllData(
     }
   });
 
-  await db.transaction(
-    'rw',
-    db.snapshots,
-    db.snapshotPayloads,
-    db.saves,
-    db.apiEndpoints,
-    async () => {
-      await db.snapshots.clear();
-      await db.snapshotPayloads.clear();
-      await db.saves.clear();
-      await db.apiEndpoints.clear();
-      if (Array.isArray(backup.snapshots)) {
-        // v22 拆表：新备份两个字段各就各位，旧备份只有内嵌的 snapshots —— 归一化吃下两种
-        const { metas, payloads } = normalizeSnapshotBackupRows(
-          backup.snapshots,
-          Array.isArray(backup.snapshotPayloads) ? backup.snapshotPayloads : [],
-        );
-        if (metas.length > 0) await db.snapshots.bulkPut(metas);
-        if (payloads.length > 0) await db.snapshotPayloads.bulkPut(payloads);
-      }
-      if (Array.isArray(backup.saves)) await db.saves.bulkPut(backup.saves);
-      if (Array.isArray(backup.apiEndpoints)) await db.apiEndpoints.bulkPut(backup.apiEndpoints);
-    },
-  );
+  await db.transaction('rw', db.snapshots, db.snapshotPayloads, db.saves, async () => {
+    await db.snapshots.clear();
+    await db.snapshotPayloads.clear();
+    await db.saves.clear();
+    if (Array.isArray(backup.snapshots)) {
+      // v22 拆表：新备份两个字段各就各位，旧备份只有内嵌的 snapshots —— 归一化吃下两种
+      const { metas, payloads } = normalizeSnapshotBackupRows(
+        backup.snapshots,
+        Array.isArray(backup.snapshotPayloads) ? backup.snapshotPayloads : [],
+      );
+      if (metas.length > 0) await db.snapshots.bulkPut(metas);
+      if (payloads.length > 0) await db.snapshotPayloads.bulkPut(payloads);
+    }
+    if (Array.isArray(backup.saves)) await db.saves.bulkPut(backup.saves);
+  });
 
   // v23：旧备份对 RPM 策略无话可说，字段缺席时整表保留。
   await db.transaction('rw', db.apiRateLimitPolicies, async () => {

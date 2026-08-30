@@ -200,6 +200,10 @@ export interface ApiRpmPolicy {
 策略与 `apiEndpoints` 分表，原因是 Endpoint ID 不是配额身份；相同地址 + Key 的重复池条目必须天然落到
 同一条策略。该表进入 FullBackup，与 `apiEndpoints` 一同导入导出。策略行没有明文 Key。
 
+> 📌 2026-08-29（SEC-01）：上句中“与 `apiEndpoints` 一同导入导出”已推翻。
+> `apiEndpoints` 与可能残留凭据的旧 `settings` 行现按设备本地敏感数据处理：新 FullBackup 不导出，
+> 导入新旧备份也不读取或覆盖。本表仍进入 FullBackup；它只含不可逆凭据指纹与限速值，不含明文 Key。
+
 数据库升级只加表，不需要扫描或重写现有端点。旧用户没有策略行，等价于不限。
 
 ### 6.2 全局管理面

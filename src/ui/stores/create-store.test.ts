@@ -195,7 +195,13 @@ function makeStore() {
   return useCreateStore();
 }
 
-/** 快速设置一个基础角色 */
+const TEST_ATTRIBUTES = ['力量', '敏捷', '体质', '智力', '精神'];
+
+function allocateBasePoints(store: ReturnType<typeof useCreateStore>, count = 25) {
+  for (let i = 0; i < count; i++) {
+    store.addBasePoint(TEST_ATTRIBUTES[i % TEST_ATTRIBUTES.length]);
+  }
+}
 
 // ===== 难度系统 =====
 
@@ -805,6 +811,7 @@ describe('背景四分类过滤', () => {
 
 describe('stepValid 步骤验证', () => {
   let store: ReturnType<typeof useCreateStore>;
+
   beforeEach(() => {
     store = makeStore();
   });
@@ -818,9 +825,85 @@ describe('stepValid 步骤验证', () => {
   it('Step 1: 角色名为空时无效', () => {
     store.selectDifficulty('normal');
     store.race = '人类';
+    allocateBasePoints(store);
     expect(store.stepValid[1]).toBe(false);
     store.name = '艾琳';
     expect(store.stepValid[1]).toBe(true);
+  });
+
+  it('Step 1: 基础属性 0/25 与 24/25 时无效，25/25 时有效', () => {
+    store.name = '艾琳';
+    store.race = '人类';
+
+    expect(store.usedBP).toBe(0);
+    expect(store.stepValid[1]).toBe(false);
+
+    allocateBasePoints(store, 24);
+    expect(store.remainingBP).toBe(1);
+    expect(store.stepValid[1]).toBe(false);
+
+    allocateBasePoints(store, 1);
+    expect(store.remainingBP).toBe(0);
+    expect(store.stepValid[1]).toBe(true);
+  });
+
+  it('Step 1: 高于 1 级时必须分配全部额外属性点', () => {
+    store.name = '艾琳';
+    store.race = '人类';
+    allocateBasePoints(store);
+    store.level = 3;
+
+    expect(store.remainingAP).toBe(2);
+    expect(store.stepValid[1]).toBe(false);
+
+    store.addAttributePoint('力量');
+    expect(store.remainingAP).toBe(1);
+    expect(store.stepValid[1]).toBe(false);
+
+    store.addAttributePoint('敏捷');
+    expect(store.remainingAP).toBe(0);
+    expect(store.stepValid[1]).toBe(true);
+  });
+
+  it('Step 1: nextStep 在属性未分完时阻止前进，分完后放行', () => {
+    store.currentStep = 1;
+    store.name = '艾琳';
+    store.race = '人类';
+    allocateBasePoints(store, 24);
+
+    store.nextStep();
+    expect(store.currentStep).toBe(1);
+
+    allocateBasePoints(store, 1);
+    store.nextStep();
+    expect(store.currentStep).toBe(2);
+  });
+
+  it('Step 7: 晚加载未分配属性的旧预设应退回 Step 1，并由最终建档边界拒绝', async () => {
+    store.name = '艾琳';
+    store.race = '人类';
+    allocateBasePoints(store);
+    store.currentStep = 7;
+
+    const current = store.getCurrentPresetData();
+    store.applyPresetData({
+      id: 'legacy-unallocated',
+      name: '旧版未分配预设',
+      createdAt: 1,
+      updatedAt: 1,
+      ...current,
+      character: {
+        ...current.character,
+        level: 1,
+        basePoints: {},
+        attributePoints: {},
+      },
+    });
+
+    expect(store.attributesFullyAllocated).toBe(false);
+    expect(store.stepValid[7]).toBe(false);
+    expect(store.currentStep).toBe(1);
+    await expect(store.startJourney()).rejects.toThrow('请先分配全部基础属性点和额外属性点');
   });
 
   it('Step 2: 未选命定核心时无效', () => {
@@ -830,11 +913,13 @@ describe('stepValid 步骤验证', () => {
     expect(store.stepValid[2]).toBe(true);
   });
 
-  it('Steps 3-7: 应始终有效(无强制要求)', () => {
+  it('Steps 3-6 始终有效；Step 7 仍须满足属性分配不变量', () => {
     expect(store.stepValid[3]).toBe(true);
     expect(store.stepValid[4]).toBe(true);
     expect(store.stepValid[5]).toBe(true);
     expect(store.stepValid[6]).toBe(true);
+    expect(store.stepValid[7]).toBe(false);
+    allocateBasePoints(store);
     expect(store.stepValid[7]).toBe(true);
   });
 });
@@ -1342,6 +1427,7 @@ function setupPlotStore() {
   const store = useCreateStore();
   store.plotMode = 'main';
   store.name = '艾琳';
+  allocateBasePoints(store);
   return store;
 }
 
@@ -1644,6 +1730,7 @@ describe('startJourney 剧情落库', () => {
     setActivePinia(createPinia());
     const store = useCreateStore();
     store.name = '测试';
+    allocateBasePoints(store);
     const saveId = await store.startJourney();
     const { getLatestPlotOutline, getPlotEvents } = await import('@engine/database');
     expect(await getLatestPlotOutline(saveId)).toBeUndefined();
@@ -1654,26 +1741,34 @@ describe('startJourney 剧情落库', () => {
     setActivePinia(createPinia());
     const store = useCreateStore();
     store.name = '测试';
+    store.experienceMode = 'easy';
     store.destinyPoints = 100;
+    allocateBasePoints(store);
     const saveId = await store.startJourney();
     const { getSaveProfile } = await import('@engine/database');
     const profile = await getSaveProfile(saveId);
     expect(profile).toBeDefined();
+    expect(profile!.experienceMode).toBe('easy');
     expect(profile!.fp).toBe(100);
     expect(profile!.fpHistory).toHaveLength(1);
     expect(profile!.fpHistory[0].amount).toBe(100);
     expect(profile!.fpHistory[0].reason).toContain('开局');
   });
 
-  it('未兑换命运点时不强制创建 SaveProfile（保持 lazy 初始化语义）', async () => {
+  it('未兑换命运点时仍应创建 SaveProfile 并保存所选经验档位', async () => {
     setActivePinia(createPinia());
     const store = useCreateStore();
     store.name = '测试';
+    store.experienceMode = 'easy';
     // destinyPoints 默认 0
+    allocateBasePoints(store);
     const saveId = await store.startJourney();
     const { getSaveProfile } = await import('@engine/database');
     const profile = await getSaveProfile(saveId);
-    expect(profile).toBeUndefined();
+    expect(profile).toBeDefined();
+    expect(profile!.experienceMode).toBe('easy');
+    expect(profile!.fp).toBe(0);
+    expect(profile!.fpHistory).toHaveLength(0);
   });
 });
 

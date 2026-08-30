@@ -111,11 +111,7 @@ export const useCreateStore = defineStore('create', () => {
 
   const stepValid = computed<Record<number, boolean>>(() => ({
     0: difficulty.value !== null,
-    1:
-      name.value.trim().length > 0 &&
-      race.value !== '' &&
-      remainingBP.value >= 0 &&
-      remainingAP.value >= 0,
+    1: name.value.trim().length > 0 && race.value !== '' && attributesFullyAllocated.value,
     // 命定核心：内置条目**或**工坊系统项目，二者择一即可放行。
     // 只认前者时，选了工坊核心的用户会卡死在这一步（按钮永远不亮，且没有任何提示）。
     2: selectedSystemCoreEntryUid.value !== null || selectedWorkshopCoreProjectId.value !== null,
@@ -123,7 +119,7 @@ export const useCreateStore = defineStore('create', () => {
     4: true, // 装备选择
     5: true, // 背景故事
     6: true, // 剧情规划
-    7: true, // 确认提交
+    7: attributesFullyAllocated.value, // 确认提交前再次守住预设晚加载等绕过路径
   }));
 
   function nextStep() {
@@ -303,6 +299,9 @@ export const useCreateStore = defineStore('create', () => {
   const maxAP = computed(() => Math.max(0, level.value - 1));
   const usedAP = computed(() => Object.values(attributePoints.value).reduce((a, b) => a + b, 0));
   const remainingAP = computed(() => maxAP.value - usedAP.value);
+  const attributesFullyAllocated = computed(
+    () => remainingBP.value === 0 && remainingAP.value === 0,
+  );
 
   function addAttributePoint(attr: string) {
     if (remainingAP.value > 0) {
@@ -1782,6 +1781,12 @@ export const useCreateStore = defineStore('create', () => {
   // ═══════════════════════════════════════════════════════
 
   async function startJourney(): Promise<string> {
+    // 最终持久化边界必须重验；角色预设可以在任一步加载，不能只依赖曾经通过过 Step 1。
+    if (!attributesFullyAllocated.value) {
+      currentStep.value = 1;
+      throw new Error('请先分配全部基础属性点和额外属性点');
+    }
+
     const saveId = crypto.randomUUID();
     const charState = buildCharacterState(saveId);
     const openingPrompt = buildOpeningPrompt();
@@ -1819,17 +1824,17 @@ export const useCreateStore = defineStore('create', () => {
     // 真机修(2026-07-23): 开局兑换的命运点 → 初始化到存档级 SaveProfile.fp
     // ADR-22: FP 是存档级元货币，独立于 CharacterState。此前 destinyPoints 只写进
     // customFields.destinyPoints，游戏内 FP(SaveProfile.fp) 从未拿到这笔，开局兑换的 FP 丢失。
+    const { getProfile, addFP, updateProfile } = await import('@engine/save-profile');
+    // 🔴 era 必须透传（T12 的 D9 线程化）：SaveProfile 是惰性创建的，这里是生产上
+    //    唯一的创建点。不传就等于让新档的纪元名落成空串，而存档一旦盖章就永不重读内容包。
+    const profile = await getProfile(saveId, era.value);
+    // 经验档位与命运点兑换彼此独立：零兑换也必须把用户选择盖章进新存档。
+    profile.experienceMode = experienceMode.value === 'easy' ? 'easy' : 'normal';
     if (destinyPoints.value > 0) {
-      const { getProfile, addFP, updateProfile } = await import('@engine/save-profile');
-      // 🔴 era 必须透传（T12 的 D9 线程化）：SaveProfile 是惰性创建的，这里是生产上
-      //    唯一的创建点。不传就等于让新档的纪元名落成空串，而存档一旦盖章就永不重读内容包。
-      const profile = await getProfile(saveId, era.value);
-      // 🆕 经验档位（简单/普通模式，2026-08-24）：存档创建即盖章，游戏内可随时切换。
-      // 🔴 惰性语义：未兑换命运点时不强制创建 SaveProfile（profile 仍 undefined、不落库），
-      //    此时经验档位由读取侧 `?? 'normal'` 兜底，进游戏后可在设置页切换。
-      profile.experienceMode = experienceMode.value === 'easy' ? 'easy' : 'normal';
-      await updateProfile(profile);
+      // addFP 会持久化 profile，正数分支不重复 updateProfile。
       await addFP(profile, destinyPoints.value, '开局兑换的命运点', 'other');
+    } else {
+      await updateProfile(profile);
     }
 
     // §5.2: 主线/支线已生成大纲 → 落库确认版 + 结构化事件树（全部 hidden）；历史版本不落库
@@ -2020,6 +2025,9 @@ export const useCreateStore = defineStore('create', () => {
           plotEventsPerChapter.value = data.plotSettings.side.eventsPerChapter;
       }
     }
+
+    // 预设入口在全部步骤都可用；晚加载的旧预设若没有完整分配属性，立即返回基础信息页。
+    if (!attributesFullyAllocated.value && currentStep.value > 1) currentStep.value = 1;
   }
 
   // ═══════════════════════════════════════════════════════
@@ -2127,6 +2135,7 @@ export const useCreateStore = defineStore('create', () => {
     maxAP,
     usedAP,
     remainingAP,
+    attributesFullyAllocated,
     addBasePoint,
     removeBasePoint,
     addAttributePoint,
