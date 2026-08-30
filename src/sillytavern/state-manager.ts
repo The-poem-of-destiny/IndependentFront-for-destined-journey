@@ -151,6 +151,16 @@ export interface StateManagerConfig {
   saveId: string;
 }
 
+/** 玩家在游玩中主动修订的叙事人设；只开放三个玩家可写正式字段。 */
+export interface PlayerPersonaDraft {
+  personality: string;
+  appearance: string;
+  background: string;
+}
+
+export type PlayerPersonaUpdateResult =
+  { ok: true; changed: boolean; character: CharacterState } | { ok: false; error: string };
+
 /** commitChatState 的可选载荷（工坊 P2 / ADR-30 D5） */
 export interface CommitChatStateOptions {
   /**
@@ -306,6 +316,11 @@ const UPDATE_CHAR_NUMERIC_FIELDS = new Set<string>([
 /** 五维属性键（英文，对齐 CharacterState.attributes；升层自动加点逐键遍历用） */
 const ATTRIBUTE_KEYS = ['str', 'dex', 'con', 'int', 'spi'] as const;
 
+/** 保留段落，只统一跨平台换行并清掉字段外围空白。 */
+function normalizePersonaText(value: string): string {
+  return value.replace(/\r\n?/g, '\n').trim();
+}
+
 // ========== StateManager ==========
 
 /**
@@ -333,6 +348,52 @@ export class StateManager {
   }
 
   // ========== 主入口 ==========
+
+  /**
+   * 玩家主动修订叙事人设。
+   *
+   * 这是元设定写入，不是世界内行动：不用 `update_character`，因此不创建
+   * `character_action`，也不会误触装备/技能订阅。仍由 StateManager 持有写入口，并在
+   * per-save 锁内重读唯一主角，只窄改三个字段，避免拿 UI 陈旧对象覆盖刚提交的状态。
+   */
+  async updatePlayerPersona(draft: PlayerPersonaDraft): Promise<PlayerPersonaUpdateResult> {
+    try {
+      return await withSaveWriteLock(this.saveId, async () => {
+        const players = (await getCharacters(this.saveId)).filter((char) => char.type === 'player');
+        if (players.length !== 1) {
+          return { ok: false, error: '当前存档找不到唯一主角' };
+        }
+
+        const current = players[0];
+        const normalized: PlayerPersonaDraft = {
+          personality: normalizePersonaText(draft.personality),
+          appearance: normalizePersonaText(draft.appearance),
+          background: normalizePersonaText(draft.background),
+        };
+        const changed =
+          (current.personality ?? '') !== normalized.personality ||
+          (current.appearance ?? '') !== normalized.appearance ||
+          (current.background ?? '') !== normalized.background;
+        if (!changed) return { ok: true, changed: false, character: current };
+
+        const next: CharacterState = { ...current, ...normalized };
+        await saveCharacter(next);
+
+        // 与 commitChatState 同口径：角色主写已成功，更新时间触碰失败只告警，不能把成功伪装成失败。
+        try {
+          const save = await getSave(this.saveId);
+          if (save) await saveSaveSlot(save);
+        } catch (error) {
+          console.warn('[StateManager] 人设已保存，但存档更新时间刷新失败:', error);
+        }
+
+        return { ok: true, changed: true, character: next };
+      });
+    } catch (error) {
+      console.error('[StateManager] 玩家人设保存失败:', error);
+      return { ok: false, error: '人设保存失败，请重试' };
+    }
+  }
 
   /**
    * 提交状态变更 — 唯一写入入口

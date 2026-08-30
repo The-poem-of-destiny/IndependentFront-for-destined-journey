@@ -230,6 +230,50 @@ describe('diffPromptState — 标量 set', () => {
     );
   });
 
+  it('玩家人设修改在下一次生成中成为最小 character Delta', () => {
+    const before = baseContext();
+    const after = baseContext();
+    after.characters = [
+      {
+        ...fixturePlayer,
+        appearance: '银白短发，金色眼眸',
+        background: '在边境长大，后来被召唤至帝国。',
+        personality: '冷静，但对弱者心软',
+      },
+      fixtureNpc,
+    ];
+
+    const ops = diffPromptState(project('story', before, ''), project('story', after, ''));
+
+    expect(ops).toEqual([
+      {
+        op: 'set',
+        scope: 'character',
+        owner: fixturePlayer.name,
+        field: 'appearance',
+        value: '银白短发，金色眼眸',
+      },
+      {
+        op: 'set',
+        scope: 'character',
+        owner: fixturePlayer.name,
+        field: 'background',
+        value: '在边境长大，后来被召唤至帝国。',
+      },
+      {
+        op: 'set',
+        scope: 'character',
+        owner: fixturePlayer.name,
+        field: 'personality',
+        value: '冷静，但对弱者心软',
+      },
+    ]);
+    const rendered = renderPromptDelta(2, ops);
+    expect(rendered).toContain('"owner":"阿岚"');
+    expect(rendered).toContain('"field":"personality"');
+    expect(rendered).toContain('冷静，但对弱者心软');
+  });
+
   it('好感度变化 → 一个标量 set（owner=角色名，AI 可见名字而非内部 id）', () => {
     const ctxA = baseContext();
     const ctxB = baseContext();

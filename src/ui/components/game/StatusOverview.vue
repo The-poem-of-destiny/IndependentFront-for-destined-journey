@@ -8,12 +8,15 @@ import { normalizeItemType } from '@engine/field-enums';
 import { getTierConfig } from '@engine/tier-constants';
 import { getRequiredXpForLevel } from '@engine/exp-table';
 import type { AllocatableAttr } from '@engine/attribute-allocation';
+import type { PlayerPersonaDraft } from '@engine/state-manager';
 import ResourceBar from '../shared/ResourceBar.vue';
 import AvatarPanel from '../shared/AvatarPanel.vue';
 import CharacterPortrait from '../shared/CharacterPortrait.vue';
 import PortraitSettingsDialog from '../shared/PortraitSettingsDialog.vue';
 import AppTabs from '../shared/AppTabs.vue';
+import AppButton from '../shared/AppButton.vue';
 import BuffChip from '../shared/BuffChip.vue';
+import PlayerPersonaEditorModal from './PlayerPersonaEditorModal.vue';
 // 裁剪台是 shared/ 的东西（它只认「一份源字节 + 一个名字」，跟设置页零耦合；
 // 正因为这里也在用它，它才不该住在 settings/assets/ 下）。这里**原样消费**
 // 它的 props/events，不复制一份 —— 复制一份就等于把 D16 不变式、撞位分配、
@@ -24,6 +27,51 @@ const game = useGameStore();
 const ui = useUIStore();
 
 const player = computed(() => game.player);
+
+// ═══ 玩家叙事人设编辑 ════════════════════════════════════════
+const personaOpen = ref(false);
+const personaSaving = ref(false);
+const personaError = ref('');
+const playerPersona = computed<PlayerPersonaDraft>(() => ({
+  personality: player.value?.personality ?? '',
+  appearance: player.value?.appearance ?? '',
+  background: player.value?.background ?? '',
+}));
+const personaBlockedReason = computed(() => {
+  if (game.isGenerating) return '当前回合生成中，结束后可编辑人设';
+  if (game.isInCombat) return '战斗结束后可编辑人设';
+  return '';
+});
+
+function openPersonaEditor() {
+  if (personaBlockedReason.value) return;
+  personaError.value = '';
+  personaOpen.value = true;
+}
+
+function closePersonaEditor() {
+  if (personaSaving.value) return;
+  personaOpen.value = false;
+  personaError.value = '';
+}
+
+async function savePersona(draft: PlayerPersonaDraft) {
+  if (personaSaving.value) return;
+  personaSaving.value = true;
+  personaError.value = '';
+  try {
+    const result = await game.updatePlayerPersona(draft);
+    if (!result.ok) {
+      personaError.value = result.error;
+      ui.toast(result.error, 'error');
+      return;
+    }
+    personaOpen.value = false;
+    ui.toast('人设已更新，将从下一次行动起生效', 'success');
+  } finally {
+    personaSaving.value = false;
+  }
+}
 
 // ═══ 玩家画像 ═══════════════════════════════════════════════
 //
@@ -353,6 +401,16 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
           @change="onPortraitFile"
         />
         <div class="summary-name">{{ player.name }}</div>
+        <AppButton
+          class="persona-edit-button"
+          variant="ghost"
+          size="sm"
+          :disabled="Boolean(personaBlockedReason)"
+          :title="personaBlockedReason || '编辑影响后续叙事的玩家人设'"
+          @click="openPersonaEditor"
+        >
+          编辑人设
+        </AppButton>
       </div>
     </div>
 
@@ -643,6 +701,15 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
     @close="closeCrop"
     @saved="onCropSaved"
   />
+
+  <PlayerPersonaEditorModal
+    :open="personaOpen"
+    :persona="playerPersona"
+    :saving="personaSaving"
+    :error="personaError"
+    @close="closePersonaEditor"
+    @save="savePersona"
+  />
 </template>
 
 <style scoped>
@@ -813,6 +880,10 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   font-size: 1.0625rem;
   font-weight: 700;
   color: var(--theme-text-primary);
+}
+
+.persona-edit-button {
+  min-height: 36px;
 }
 
 /* ═══ KV 行 ═══ */

@@ -395,7 +395,7 @@ function formatZoneNarrative(
 /** 格式化单个角色为 NARRATIVE 视图 */
 function formatCharacterNarrative(char: CharacterState): string {
   const cf = char.customFields ?? {};
-  const typeLabel = char.type === 'player' ? '你' : char.type === 'monster' ? '敌人' : char.name;
+  const typeLabel = char.type === 'monster' ? '敌人' : char.name;
 
   const lines: string[] = [];
 
@@ -595,7 +595,7 @@ function formatNpcSummary(content: Record<string, any>): string {
         )
         .join(', ') || '无';
     lines.push(
-      `[${char.type === 'player' ? '你' : char.name}] ${char.race} · T${char.tier} ${char.tierName || ''} · Lv.${char.level}`,
+      `[${char.name}] ${char.race} · T${char.tier} ${char.tierName || ''} · Lv.${char.level}`,
       `  HP: ${char.hp}/${char.maxHp}  MP: ${char.mp}/${char.maxMp}  SP: ${char.sp}/${char.maxSp}`,
       `  位置: ${char.location || '未知'} · 状态: ${char.currentAction || '待机中'}`,
       `  状态效果: ${statusEffects}`,

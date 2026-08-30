@@ -359,6 +359,45 @@ describe('prompt-session-assembler', () => {
     expect(p3.rebaseReason).toBe('signature_changed');
   });
 
+  it('人设保存后的下一次 Story 请求追加三字段 Delta，不强制重基线', async () => {
+    const cfg = makeCfg('story', {
+      template: '{{SYS_PROMPT}}\n{{CHARACTER_STATE}}\n{{USER_INPUT}}',
+    });
+    const firstInput = input({
+      agentId: 'story',
+      configs: [cfg],
+      ctx: baseContext(),
+    });
+    const p1 = await preparePromptSession(firstInput);
+    completePromptSession(p1.handle!, { rawResponse: '第一轮正文' });
+
+    const changed = baseContext();
+    changed.characters = [
+      {
+        ...fixturePlayer,
+        inventory: [fixtureItem],
+        skills: [fixtureSkill],
+        personality: '冷静，但对弱者心软',
+        appearance: '银白短发，金色眼眸',
+        background: '在边境长大，后来被召唤至帝国。',
+      },
+      fixtureNpc,
+    ];
+    const p2 = await preparePromptSession(
+      input({ agentId: 'story', configs: [cfg], ctx: changed }),
+    );
+
+    expect(p2.rebased).toBe(false);
+    const delta = lastUserContent(p2.messages);
+    expect(delta).toContain('<context_delta');
+    expect(delta).toContain('"field":"appearance"');
+    expect(delta).toContain('"field":"background"');
+    expect(delta).toContain('"field":"personality"');
+    expect(delta).toContain('冷静，但对弱者心软');
+    expect(delta).toContain('银白短发，金色眼眸');
+    expect(delta).toContain('在边境长大，后来被召唤至帝国。');
+  });
+
   it('tailPrompt 变化属于签名变化（触发重基线）', async () => {
     const p1 = await preparePromptSession(input({ tailPrompt: '旧指令' }));
     completePromptSession(p1.handle!, { rawResponse: 'r1' });

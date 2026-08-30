@@ -33,7 +33,11 @@ import { saveMessage, getMessages, saveSaveSlot } from '@engine/database';
 // 旧档经验保底归一化（方案 A，2026-08-24）：加载时对主角自愈「等级与累计经验矛盾」
 //（旧档 totalExp 是层级内语义，新系统是全程累计）。幂等，正常存档零影响。
 import { normalizePlayerProgression } from '@engine/database';
-import { createStateManager } from '@engine/state-manager';
+import {
+  createStateManager,
+  type PlayerPersonaDraft,
+  type PlayerPersonaUpdateResult,
+} from '@engine/state-manager';
 import { wireEffectSystem, unwireEffectSystem } from '@engine/effect-wiring';
 import { getExperienceMode } from '@engine/save-profile';
 import { invalidatePromptSession } from '@engine/prompt-session-assembler';
@@ -1280,6 +1284,37 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  /**
+   * 玩家主动修订当前存档的叙事人设。
+   *
+   * 引擎负责锁内重读与窄字段落库；本层只做运行态守卫，并在成功后接入引擎返回的
+   * 权威角色。这里不失效 prompt session —— 下一次组装会用现有投影产生最小 Delta。
+   */
+  async function updatePlayerPersona(
+    draft: PlayerPersonaDraft,
+  ): Promise<PlayerPersonaUpdateResult> {
+    const saveId = activeSaveId.value;
+    if (!saveId) return { ok: false, error: '无活跃存档' };
+    if (!player.value) return { ok: false, error: '找不到主角' };
+    if (isGenerating.value) {
+      return { ok: false, error: '当前回合生成中，暂时无法编辑人设' };
+    }
+    if (isInCombat.value) return { ok: false, error: '战斗结束后才能编辑人设' };
+
+    try {
+      const result = await createStateManager(saveId).updatePlayerPersona(draft);
+      if (!result.ok || activeSaveId.value !== saveId) return result;
+
+      const index = characters.value.findIndex((char) => char.id === result.character.id);
+      if (index >= 0) characters.value.splice(index, 1, result.character);
+      if (result.changed) saves.value = await getSaves();
+      return result;
+    } catch (error) {
+      console.error('[game-store] 玩家人设保存失败:', error);
+      return { ok: false, error: '人设保存失败，请重试' };
+    }
+  }
+
   // === 快照回退 (快照面板 + 右键回退重发) ===
 
   /** 右键「回退」：撤回当前回合 → 恢复上一轮快照 + 把这轮玩家输入回填输入框。
@@ -1533,6 +1568,7 @@ export const useGameStore = defineStore('game', () => {
     persistMessage,
     restoreMessages,
     allocateAttrPoint,
+    updatePlayerPersona,
     rollbackOneTurn,
     restoreToSnapshot,
     removeItem,

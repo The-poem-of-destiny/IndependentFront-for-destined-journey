@@ -39,6 +39,7 @@ import {
 } from '@engine/plot-outline';
 import type { AgentContext } from '@engine/types';
 import { createDefaultTime, formatGameTime, GAME_EPOCH_YEAR } from '@engine/time-system';
+import { normalizeRarity } from '@engine/field-enums';
 import { useSettingsStore } from './settings-store';
 import {
   type CatalogItem,
@@ -1533,9 +1534,9 @@ export const useCreateStore = defineStore('create', () => {
   // 模板替换: <user> → 角色名
   // ═══════════════════════════════════════════════════════
 
-  /** 将文本中的 &lt;user&gt; 替换为当前角色名（未填写时用 "你"） */
+  /** 将文本中的 &lt;user&gt; 替换为当前角色名（未填写时用中性占位名） */
   function substituteUser(text: string): string {
-    const userName = name.value.trim() || '你';
+    const userName = name.value.trim() || '未命名者';
     return text.replace(/<user>/g, userName);
   }
 
@@ -1626,31 +1627,45 @@ export const useCreateStore = defineStore('create', () => {
   // 原则：
   // - name / LV / 五维 / HP / race / identity / location → 写死在 CharacterState 字段
   //   → {{CHARACTER_STATE}} system prompt 占位符自动格式化注入
-  // - 装备 / 技能 / 物品 / 背景 / 命定核心 / 性格身材身世 → 下游 Agent 需要处理
+  // - 装备 / 技能 / 物品 / 背景 / 性格身材身世 → 下游 Agent 需要处理
   //   → 组装为自然语言，作为开场 user 消息注入，走 story→request_dispatcher→vars_update 链路
+  // - 命定核心由已启用的 system_core 世界书条目单独注入；开场 user 消息不替它规定人格或显现方式
 
   function buildOpeningPrompt(): string {
     const charName = name.value.trim() || '未命名';
     const lines: string[] = [];
 
-    lines.push(`【创角完成，${charName} 的初始数据】`);
+    const openingTime = formatGameTime(createDefaultTime(era.value)).replace(
+      /^(.+年)-(\d{2}月)-(\d{2}日)-(周.)-(\d{2}:\d{2})$/,
+      '$1$2$3，$4$5',
+    );
+    lines.push(`${openingTime}，${charName}的故事由此开始。`);
 
-    // 初始金钱（🆕 2026-08-08）：把开局经济作为**既成事实**写进开场白，与初始装备同地位。
+    // 开局剧情是已经发生的事实。直接把场景交给 story，不用「数据」「区块」等元语言
+    // 给首轮定下清单式语气。
+    if (selectedBackground.value) {
+      lines.push('');
+      lines.push(substituteUser(selectedBackground.value.fullText));
+    } else if (customBackgroundText.value.trim()) {
+      lines.push('');
+      lines.push(substituteUser(customBackgroundText.value.trim()));
+    }
+
+    // 初始金钱（2026-08-08）：把开局经济作为**既成事实**写进开场白，与初始装备同地位。
     // 🔴 防的是「系统权威数值被 AI 叙事覆盖」：story prompt 的 CHARACTER_STATE 里明明有
     //    金钱: N G，AI 却会因为它和「前文推导的金额」对不上，主动判面板为错误、改用叙事值。
-    //    开局就钉死「这 N G 是开局既成事实」，AI 无从质疑它该不该存在。
+    //    保留精确金额，但用世界内语言表达，不把 G 与「开局财产」写成面板播报。
     lines.push('');
-    lines.push('--- 初始金钱 ---');
     if (money.value > 0) {
-      lines.push(`你随身带着 ${money.value} G 帝冕币，这是你开局的全部财产。`);
+      lines.push(`${charName}随身带着 ${money.value} 枚帝冕币，除此之外再无钱财。`);
     } else {
-      lines.push('你身无分文——口袋空空，这是你开局的全部财产。');
+      lines.push(`${charName}身无分文，衣袋里连一枚帝冕币也没有。`);
     }
 
     // 装备
     if (selectedEquipments.value.length > 0) {
       lines.push('');
-      lines.push('--- 初始装备 ---');
+      lines.push(`${charName}带着这些装备。`);
       const STATS_CN: Record<string, string> = {
         atk: '攻击力',
         defense: '防御',
@@ -1660,117 +1675,87 @@ export const useCreateStore = defineStore('create', () => {
         dr: '减伤',
       };
       for (const e of selectedEquipments.value) {
-        const desc = e.description ? `：${e.description}` : '';
+        const rarity = normalizeRarity(e.rarity) ?? e.rarity;
+        const desc = e.description ? `，${e.description}` : '';
         const effects =
           e.effect && Object.keys(e.effect).length > 0
-            ? ` [${Object.entries(e.effect)
-                .map(([k, v]) => `${k}:${v}`)
-                .join(', ')}]`
+            ? `；它的特性包括${Object.entries(e.effect)
+                .map(([k, v]) => `${k}（${v}）`)
+                .join('、')}`
             : '';
-        const tags = e.tag?.length ? ` (${e.tag.join(', ')})` : '';
+        const tags = e.tag?.length ? `，常被归为${e.tag.join('、')}` : '';
         const statsStr =
           e.stats && Object.keys(e.stats).length > 0
-            ? ` 「${Object.entries(e.stats)
-                .map(([k, v]) => `${STATS_CN[k] ?? k}:${v}`)
-                .join(', ')}」`
+            ? `；其${Object.entries(e.stats)
+                .map(([k, v]) => `${STATS_CN[k] ?? k}为${v}`)
+                .join('、')}`
             : '';
-        lines.push(`  ${e.name}（${e.type}·${e.rarity}${tags}）${desc}${effects}${statsStr}`);
+        lines.push(`${e.name}是一件${rarity}品质的${e.type}${desc}${tags}${effects}${statsStr}。`);
       }
     }
 
     // 技能
     if (selectedSkills.value.length > 0) {
       lines.push('');
-      lines.push('--- 初始技能 ---');
+      lines.push(`${charName}已经掌握这些本领。`);
       for (const s of selectedSkills.value) {
-        const desc = s.description ? `：${s.description}` : '';
+        const rarity = normalizeRarity(s.rarity) ?? s.rarity;
+        const desc = s.description ? `，${s.description}` : '';
         const effects =
           s.effect && Object.keys(s.effect).length > 0
-            ? ` [${Object.entries(s.effect)
-                .map(([k, v]) => `${k}:${v}`)
-                .join(', ')}]`
+            ? `；它能带来${Object.entries(s.effect)
+                .map(([k, v]) => `${k}（${v}）`)
+                .join('、')}`
             : '';
-        const consume = s.consume ? ` · 消耗:${s.consume}` : '';
-        const tags = s.tag?.length ? ` (${s.tag.join(', ')})` : '';
-        lines.push(`  ${s.name}（${s.type}·${s.rarity}${tags}）${desc}${effects}${consume}`);
+        const consume = s.consume ? `；施展时需要${s.consume}` : '';
+        const tags = s.tag?.length ? `，属于${s.tag.join('、')}` : '';
+        lines.push(
+          `${s.name}是一项${rarity}品质的${s.type}本领${desc}${tags}${effects}${consume}。`,
+        );
       }
     }
 
     // 背包物品
     if (selectedItems.value.length > 0) {
       lines.push('');
-      lines.push('--- 背包物品 ---');
+      lines.push(`${charName}的行囊里还有这些东西。`);
       for (const i of selectedItems.value) {
-        const desc = i.description ? `：${i.description}` : '';
+        const rarity = normalizeRarity(i.rarity) ?? i.rarity;
+        const desc = i.description ? `，${i.description}` : '';
         const effects =
           i.effect && Object.keys(i.effect).length > 0
-            ? ` [${Object.entries(i.effect)
-                .map(([k, v]) => `${k}:${v}`)
-                .join(', ')}]`
+            ? `；它的用途包括${Object.entries(i.effect)
+                .map(([k, v]) => `${k}（${v}）`)
+                .join('、')}`
             : '';
-        const tags = i.tag?.length ? ` (${i.tag.join(', ')})` : '';
+        const tags = i.tag?.length ? `，常被归为${i.tag.join('、')}` : '';
         lines.push(
-          `  ${i.name} ×${i.quantity || 1}（${i.type}·${i.rarity}${tags}）${desc}${effects}`,
+          `${charName}有${i.quantity || 1}件${i.name}，那是${rarity}品质的${i.type}${desc}${tags}${effects}。`,
         );
       }
-    }
-
-    // 开局剧情（已发生的既成事实：不要复述背景，从当前时间地点直接叙事）
-    if (selectedBackground.value) {
-      lines.push('');
-      lines.push(`--- 开局剧情：「${selectedBackground.value.name}」---`);
-      lines.push(substituteUser(selectedBackground.value.fullText));
-    } else if (customBackgroundText.value.trim()) {
-      lines.push('');
-      lines.push('--- 开局剧情：自定义 ---');
-      lines.push(substituteUser(customBackgroundText.value.trim()));
-    }
-
-    // 开局时间（时间戳基准 = 纪元年 488年01月01日，开局时刻 08:00；供 memory_summary 等
-    // Agent 作为时间锚点）。纪元名由内容侧供给（D9），此处不写死。
-    lines.push('');
-    lines.push('--- 开局时间 ---');
-    lines.push(formatGameTime(createDefaultTime(era.value)));
-
-    // 起源印记（D9）——**可选的通用区块**：内容侧没给命定核心/起源设定时整块不出现。
-    // 优先用 UI 捏人选中的 system_core 世界书条目（selectedSystemCoreEntry）；
-    // 兼容旧的 DestinyCore 池对象（保留兜底）。
-    // 🔴 措辞刻意保持通用奇幻、不含任何专有名词：具体叫什么由内容侧的条目名决定。
-    const originMarkName = selectedSystemCoreEntry.value?.name ?? destinyCore.value?.name ?? '';
-    if (originMarkName) {
-      lines.push('');
-      lines.push(`--- 起源印记：「${originMarkName}」---`);
-      lines.push(`起源印记「${originMarkName}」已在此刻苏醒，其具体表现参见世界书对应条目。`);
     }
 
     // 角色补充信息
     if (personality.value.trim()) {
       lines.push('');
-      lines.push(`--- 性格 ---\n${personality.value.trim()}`);
+      lines.push(`${charName}生性${personality.value.trim()}。`);
     }
     if (physics.value.trim()) {
       lines.push('');
-      lines.push(`--- 身材 ---\n${physics.value.trim()}`);
+      lines.push(`${charName}的身形与外貌给人的印象是：${physics.value.trim()}。`);
     }
     if (backstory.value.trim() || extra.value.trim()) {
       lines.push('');
       lines.push(
-        `--- 身世 ---\n${[backstory.value.trim(), extra.value.trim()].filter(Boolean).join('\n\n')}`,
+        `关于${charName}的来历，已知的是：\n${[backstory.value.trim(), extra.value.trim()].filter(Boolean).join('\n\n')}`,
       );
     }
 
-    // 收尾
-    // 真机迭代2: 首轮叙事 = 开局剧情的"复述+续写"（以开局场景为舞台重新演绎再推进），
-    // 不再指示"跳过不复述"。
-    // 🔴 起源印记那一句**跟着区块一起可选**（D9）：没有印记时还留着"必须展现其苏醒"
-    //    的指令，等于让模型去演一件根本不存在的事。
+    // 收尾只做世界内的叙事交接，不再写「请复述 / 不要解释」一类元指令。命定核心不在这里
+    // 点名或规定演出，完全服从单独注入的世界书条目。
     lines.push('');
-    lines.push('---');
-    const originMarkClause = originMarkName
-      ? '起源印记的苏醒是这段开场的一部分，必须在叙事中具体展现其显现的过程与表征（表现细节参见世界书对应条目）。'
-      : '';
     lines.push(
-      `以上是${charName}的角色设定与开局剧情。首轮叙事请以「开局剧情」描写的时间地点为舞台：先将这段开场以你的笔触重新演绎（可扩写细节与氛围，不可改变既定事实），再自然续写后续发展。${originMarkClause}`,
+      `故事便从这个瞬间继续。周遭的景象、人物的目光与声音渐次鲜明，而接下来发生的一切，都将从${charName}此刻的处境自然延伸。`,
     );
 
     return lines.join('\n');
