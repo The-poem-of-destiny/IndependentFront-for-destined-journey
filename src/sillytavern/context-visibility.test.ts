@@ -443,7 +443,7 @@ describe('filterZoneContent — SUMMARY', () => {
     expect(result).not.toBeNull();
     // Should contain basic status
     expect(result).toContain('HP: 85/100');
-    expect(result).toContain('[你]'); // player type → [你]
+    expect(result).toContain('[凯恩]'); // 第三人称投影使用主角姓名
     // Should NOT contain attributes numeric detail
     expect(result).not.toContain('力量12');
     // Should NOT contain equipment details

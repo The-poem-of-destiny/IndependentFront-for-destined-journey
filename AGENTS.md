@@ -223,6 +223,9 @@ docs/
 ├── planning/2026-08-27-timeline-restore-implementation-plan.md
 │                                       # 时间线恢复深模块（✅ 已实施，真机待验证）：
 │                                       # 私有 seam + 三态结果 + 完整投影 + 效果重接线
+├── planning/2026-08-30-player-persona-editing-design.md
+│                                       # 游玩中玩家人设编辑（✅ 已实施，UI 真机走查通过）：
+│                                       # 三字段真源 + 命名写入口 + 下一轮 Delta 生效
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 

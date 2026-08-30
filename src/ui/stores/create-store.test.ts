@@ -937,9 +937,9 @@ describe('substituteUser 模板替换', () => {
     expect(store.substituteUser('<user>走在路上')).toBe('艾琳走在路上');
   });
 
-  it('角色名为空时 <user> 应替换为 你', () => {
+  it('角色名为空时 <user> 应替换为中性第三人称占位名', () => {
     store.name = '';
-    expect(store.substituteUser('<user>醒了')).toBe('你醒了');
+    expect(store.substituteUser('<user>醒了')).toBe('未命名者醒了');
   });
 
   it('多个 <user> 应全部替换', () => {
@@ -1043,23 +1043,45 @@ describe('buildOpeningPrompt', () => {
     store.selectDifficulty('creative');
   });
 
-  it('空选择时返回仅包含标题头的开场', () => {
+  it('空选择时返回自然叙述式开场，不含数据表分节', () => {
     const prompt = store.buildOpeningPrompt();
-    expect(prompt).toContain('创角完成');
-    expect(prompt).toContain('测试');
-    // 没有选择任何装备/技能/物品 → 不应有 --- 初始* --- 标签
-    expect(prompt).not.toContain('--- 初始装备 ---');
-    expect(prompt).not.toContain('--- 初始技能 ---');
-    expect(prompt).not.toContain('--- 背包物品 ---');
+    expect(prompt).toContain('测试的故事由此开始。');
+    expect(prompt).not.toContain('创角完成');
+    expect(prompt).not.toContain('初始数据');
+    expect(prompt).not.toContain('---');
+    // 没有选择任何装备/技能/物品 → 不应生成对应的自然语言引导句
+    expect(prompt).not.toContain('测试带着这些装备');
+    expect(prompt).not.toContain('测试已经掌握这些本领');
+    expect(prompt).not.toContain('测试的行囊里还有这些东西');
     // 初始金钱段总是存在（0 G 时写「身无分文」，>0 时写具体数）——开局经济是既成事实
-    expect(prompt).toContain('--- 初始金钱 ---');
     expect(prompt).toContain('身无分文');
     // 开局时间总是存在（纪元基准 488 年）；纪元名由内容侧 branding 面供给（D9）
-    expect(prompt).toContain('--- 开局时间 ---');
     expect(prompt).toContain(`${FIXTURE_ERA}0488年`);
-    // 🔴 D9：没有起源印记时整块不出现，收尾指令里也不许留「展现其苏醒」的悬空指令
-    expect(prompt).not.toContain('--- 起源印记');
-    expect(prompt).not.toContain('起源印记的苏醒');
+    expect(prompt).toContain('故事便从这个瞬间继续');
+    expect(prompt).not.toContain('不要解释规则');
+  });
+
+  it('用户示例路径以故事语言交接剧情与人物特征，不输出核心说明', () => {
+    store.name = '阿黑';
+    store.customBackgroundText =
+      '帝国女皇命令圣女施展古魔法阵召唤异世勇者。四位勇者现身后，唯独阿黑身边没有任何异象。';
+    store.personality = '天真';
+    store.physics = '男娘';
+    store.selectDestinyCore(FIXTURE_DESTINY_CORES[0].id);
+
+    const prompt = store.buildOpeningPrompt();
+
+    expect(prompt).toContain(`${FIXTURE_ERA}0488年01月01日，周日08:00，阿黑的故事由此开始。`);
+    expect(prompt).toContain('帝国女皇命令圣女施展古魔法阵召唤异世勇者');
+    expect(prompt).toContain('阿黑身无分文，衣袋里连一枚帝冕币也没有。');
+    expect(prompt).toContain('阿黑生性天真。');
+    expect(prompt).toContain('阿黑的身形与外貌给人的印象是：男娘。');
+    expect(prompt).toContain('都将从阿黑此刻的处境自然延伸');
+    expect(prompt).not.toContain('---');
+    expect(prompt).not.toContain('初始数据');
+    expect(prompt).not.toContain('起源印记');
+    expect(prompt).not.toContain(FIXTURE_DESTINY_CORES[0].name);
+    expect(prompt).not.toMatch(/(^|\n)你(?:身|生|随|带|有|的)/);
   });
 
   it('纪元名整条取自内容侧：内容缺席时落中性默认名，绝不出现 IP 纪元名', () => {
@@ -1088,28 +1110,27 @@ describe('buildOpeningPrompt', () => {
     const item = FIXTURE_EQUIPMENT_POOL[0];
     store.addEquipment(item);
     const prompt = store.buildOpeningPrompt();
-    expect(prompt).toContain('--- 初始装备 ---');
+    expect(prompt).toContain('测试带着这些装备');
     expect(prompt).toContain(item.name);
   });
 
-  it('有起源印记应输出通用区块 + 收尾指令（D9）', () => {
+  it('有起源印记时也不在开场消息中描述或指挥核心演出', () => {
     const core = FIXTURE_DESTINY_CORES[0];
     store.selectDestinyCore(core.id);
     const prompt = store.buildOpeningPrompt();
-    expect(prompt).toContain('--- 起源印记');
-    expect(prompt).toContain(core.name);
-    expect(prompt).toContain('起源印记的苏醒');
+    expect(prompt).not.toContain(core.name);
+    expect(prompt).not.toContain('起源印记');
+    expect(prompt).not.toContain('苏醒');
   });
 
   it('🆕 初始金钱段：money>0 时写明具体数额（开局经济既成事实）', () => {
     store.money = 10012;
     const prompt = store.buildOpeningPrompt();
-    expect(prompt).toContain('--- 初始金钱 ---');
-    expect(prompt).toContain('10012 G');
+    expect(prompt).toContain('10012 枚帝冕币');
     expect(prompt).not.toContain('身无分文');
   });
 
-  it('选中 system_core 世界书条目时应输出激活指针而非条目全文（起源印记）', () => {
+  it('选中 system_core 世界书条目时开场消息保持沉默，交由世界书通道注入', () => {
     // 新的 UI 起源印记选择走 selectedSystemCoreEntry（system_core 世界书条目）
     store.systemCoreEntries = [
       {
@@ -1127,13 +1148,12 @@ describe('buildOpeningPrompt', () => {
     ];
     store.selectSystemCoreEntry(413);
     const prompt = store.buildOpeningPrompt();
-    expect(prompt).toContain('--- 起源印记：');
-    expect(prompt).toContain('占位印记');
-    // e42f971 起开场白仅输出激活指针；条目全文由世界书通道注入
-    // （buildEnabledWorldBookEntries → SaveSlot.metadata.enabledWorldBookEntries → worldbook-loader），
-    // 避免同一内容在开场 user 消息中重复占用 token。
-    expect(prompt).toContain('起源印记「占位印记」已在此刻苏醒，其具体表现参见世界书对应条目。');
+    // 条目名与全文都由世界书通道注入
+    // （buildEnabledWorldBookEntries → SaveSlot.metadata.enabledWorldBookEntries → worldbook-loader）。
+    // 开场 user 消息不再用通用话术覆盖不同核心的人格与出场方式。
+    expect(prompt).not.toContain('占位印记');
     expect(prompt).not.toContain('寄宿于灵魂深处的占位设定');
+    expect(prompt).not.toContain('起源印记');
   });
 });
 

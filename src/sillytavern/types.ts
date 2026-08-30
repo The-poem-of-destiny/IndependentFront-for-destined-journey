@@ -1728,7 +1728,7 @@ export interface AgentContext {
 
   /**
    * 存档开局提示词原文（save.metadata.openingPrompt）——含捏人页选的初始技能/装备
-   * 声明（`--- 初始技能 ---` 自然语言段）。request_dispatcher 的 {{SKILL_STATE}} 用它
+   * 自然语言声明（兼容旧档的 `--- 初始技能 ---` 分隔段）。request_dispatcher 的 {{SKILL_STATE}} 用它
    * 补出「主角落库 skills 为空」时的初始技能清单，引导发 `<item_gen_request itemType="skill">`。
    */
   openingPrompt?: string;
