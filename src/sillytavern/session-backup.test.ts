@@ -39,6 +39,7 @@ import {
   importSessionSave,
 } from './session-backup';
 import type { SessionBackup } from './session-backup';
+import { preCheckPlot } from './plot-engine';
 
 // ========== Helpers ==========
 
@@ -50,6 +51,8 @@ const MSG_B = 'msg_b';
 const SNAP_ID = 'snap_1';
 const PLOT_ROOT = 'plot_root';
 const PLOT_CHILD = 'plot_child';
+const HOST_CONDITION_SENTINEL = '__session_import_plot_condition_host_sentinel__';
+const MALICIOUS_LOOKING_CONDITION = `(globalThis[${JSON.stringify(HOST_CONDITION_SENTINEL)}] = 'executed', true)`;
 
 function makeWorldBook(overrides: Partial<WorldBook> = {}): WorldBook {
   return {
@@ -628,6 +631,58 @@ describe('importSessionSave — 往返', () => {
     expect(snap.characters.every((c) => c.saveId === newId)).toBe(true);
     expect(snap.plotEvents?.every((e) => e.saveId === newId)).toBe(true);
     expect(snap.messages?.every((m) => m.saveId === newId)).toBe(true);
+  });
+
+  it('导入的恶意外观 triggerCondition 保持为数据，后续 pre_check 也不在宿主域执行', async () => {
+    await seedSave();
+    const backup = await exportSessionSave(SAVE_ID);
+    const exportedEvent = backup.plotEvents.find((event) => event.id === PLOT_CHILD);
+    const snapshotEvent = backup.snapshotPayloads[0].plotEvents?.find(
+      (event) => event.id === PLOT_CHILD,
+    );
+    expect(exportedEvent).toBeDefined();
+    expect(snapshotEvent).toBeDefined();
+    exportedEvent!.status = 'pending';
+    exportedEvent!.triggerCondition = MALICIOUS_LOOKING_CONDITION;
+    snapshotEvent!.status = 'pending';
+    snapshotEvent!.triggerCondition = MALICIOUS_LOOKING_CONDITION;
+
+    const host = globalThis as Record<string, unknown>;
+    delete host[HOST_CONDITION_SENTINEL];
+
+    try {
+      const { saveId: newId } = await importSessionSave(backup);
+      expect(host[HOST_CONDITION_SENTINEL]).toBeUndefined();
+
+      const db = getDatabase();
+      const importedEvent = (await db.plotEvents.where('saveId').equals(newId).toArray()).find(
+        (event) => event.title === '搜索森林',
+      );
+      const importedSnapshot = (
+        await db.snapshotPayloads.where('saveId').equals(newId).toArray()
+      )[0];
+      const importedSnapshotEvent = importedSnapshot.plotEvents?.find(
+        (event) => event.title === '搜索森林',
+      );
+      expect(importedEvent?.status).toBe('pending');
+      expect(importedEvent?.triggerCondition).toBe(MALICIOUS_LOOKING_CONDITION);
+      expect(importedSnapshotEvent?.triggerCondition).toBe(MALICIOUS_LOOKING_CONDITION);
+
+      const result = await preCheckPlot(
+        newId,
+        JSON.stringify({
+          triggeredEvents: [{ title: '搜索森林', reason: 'Agent 判定语义条件已满足' }],
+          relevantBackground: '',
+          outlineRelevance: '',
+        }),
+        {},
+      );
+      expect(result.triggeredEvents.map((event) => event.title)).toEqual(['搜索森林']);
+      expect(host[HOST_CONDITION_SENTINEL]).toBeUndefined();
+      expect((await db.plotEvents.get(importedEvent!.id))?.status).toBe('active');
+    } finally {
+      delete host[HOST_CONDITION_SENTINEL];
+    }
   });
 
   it('v22: 载荷行的 id 跟着元数据行的新 id 走（拆散了就恢复不了）', async () => {

@@ -325,7 +325,7 @@ async function exportSave(saveId: string) {
   }
 }
 
-// 待确认的两条路：单存档（缺依赖）/ 整库备份（会替换全部数据）
+// 待确认的两条路：单存档（缺依赖）/ 整库备份（会替换备份范围内的应用数据）
 // 🔴 shallowRef 不是洁癖：ref 的深代理会把解析出来的备份整棵树包成 Proxy，
 //    IndexedDB 的结构化克隆拒绝 Proxy → DataCloneError（内容包导入踩过同一颗雷）。
 const pendingSessionBackup = shallowRef<SessionBackup | null>(null);
@@ -821,7 +821,7 @@ function formatTime(ts: number) {
 
     <!--
       整库备份恢复 —— 与「导入一个存档」是两件完全不同的事，必须说明白：
-      这份文件会**替换**当前数据库的全部内容，而不是往里加一个存档。
+      这份文件会**替换**备份范围内的应用数据，但不碰设备本地 API 凭据。
     -->
     <AppModal
       :open="showFullBackupModal"
@@ -832,16 +832,18 @@ function formatTime(ts: number) {
       <p>
         这个文件是一份<strong>整库备份</strong>，不是单个存档。导入会用它<strong
           style="color: var(--theme-error)"
-          >替换当前的全部数据</strong
+          >替换备份范围内的现有数据</strong
         >。
       </p>
       <p class="text-muted text-sm">
-        包括所有存档、角色、记忆、剧情与世界书等。当前数据将被覆盖，此操作不可撤销。
+        包括所有存档、角色、记忆、剧情与世界书等。API 端点与 API 密钥不会从备份恢复，本机已保存的
+        API 凭据不会被覆盖；换到新设备后需要重新配置
+        API。备份范围内的现有数据将被覆盖，此操作不可撤销。
       </p>
       <template #footer>
         <AppButton variant="ghost" size="sm" @click="closeFullBackupModal">取消</AppButton>
         <AppButton variant="danger" size="sm" @click="confirmFullBackupImport"
-          >替换全部数据并导入</AppButton
+          >替换备份数据并导入</AppButton
         >
       </template>
     </AppModal>

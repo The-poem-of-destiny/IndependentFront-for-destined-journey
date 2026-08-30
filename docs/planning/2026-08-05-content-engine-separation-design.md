@@ -202,6 +202,11 @@ console.warn（census 见 §5.5）。
 | 「静默失败变断言」守门测试                         | `no-external-assets.test.ts`（WIP）                                          | 字体自托管工作，模式照抄                                                                                                                         |
 | 二进制资产载体（音频走这条）                       | asset-zip 流式解包 + 限额 + 根 manifest（含逐轨 `tags`，`asset-zip.ts:417`） | `asset-zip.ts` / `asset-import-plan.ts`                                                                                                          |
 
+> 📌 **2026-08-29（SEC-01 更正）：** 上表保留设计时的历史基线。现行 `FullBackup` 已将
+> `settings` 与 `apiEndpoints` 定义为设备本地敏感数据：新备份不导出，导入新旧备份均不清空、
+> 恢复或覆盖这两张表。`lorebooks` 仍按备份内容替换，`presets` 继续采用字段缺席时保留、数组存在时
+> 替换的三态护栏。
+
 **内容包 ≈ 一个本地安装的官方工坊项目 + agent 配置载荷**。不发明第二套机制。
 
 ---

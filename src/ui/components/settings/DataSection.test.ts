@@ -81,6 +81,47 @@ beforeEach(() => {
   dropSceneImageBlobs.mockResolvedValue(0);
 });
 
+describe('DataSection —— 整库备份的 API 凭据边界', () => {
+  it('导出与导入说明应明确排除 API 凭据、保留本机凭据并提示新设备重配', async () => {
+    const w = await mountWithSave('save_1');
+    const text = w.text();
+
+    expect(text).toContain('API 端点与 API 密钥不包含在备份中');
+    expect(text).toContain('导入不会覆盖本机已保存的 API 凭据');
+    expect(text).toContain('换到新设备后需要重新配置 API');
+    expect(text).toContain('备份中的数据会替换现有内容');
+    expect(text).not.toContain('合并到现有数据库');
+  });
+
+  it('整库导入确认框应重申凭据保留范围，且按钮不再声称替换全部数据', async () => {
+    const w = await mountWithSave('save_1');
+    const file = new File(['{}'], 'backup.json', { type: 'application/json' });
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (
+      this: HTMLInputElement,
+    ) {
+      Object.defineProperty(this, 'files', { configurable: true, value: [file] });
+      this.dispatchEvent(new Event('change'));
+    });
+
+    try {
+      await w
+        .findAll('button')
+        .find((button) => button.text() === '导入数据')!
+        .trigger('click');
+      await flushPromises();
+    } finally {
+      clickSpy.mockRestore();
+    }
+
+    const text = w.text();
+    expect(text).toContain('API 端点与 API 密钥不会从备份恢复');
+    expect(text).toContain('本机已保存的 API 凭据不会被覆盖');
+    expect(text).toContain('换到新设备后需要重新配置');
+    expect(text).toContain('替换备份数据并导入');
+    expect(text).not.toContain('替换全部数据并导入');
+  });
+});
+
 describe('DataSection —— 本存档插画用量', () => {
   it('一张图都没有 → 照常显示「0 张 / 0 B」，按钮禁用', async () => {
     const w = await mountWithSave('save_1');

@@ -1099,10 +1099,29 @@ describe('API Endpoints CRUD', () => {
 // ========== Full Backup ==========
 
 describe('exportAllData / importAllData', () => {
-  it('exportAllData 应包含所有表数据', async () => {
+  it('exportAllData 应包含可迁移数据，并排除设备本地设置、API 端点与明文密钥', async () => {
     await saveMemory(makeMemory({ id: 'exp_mem' }));
     await savePlotEvent(makePlotEvent({ id: 'exp_plot' }));
-    await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api' }));
+    await saveApiEndpoint(makeApiEndpoint({ id: 'exp_api', apiKey: 'sk-endpoint-export-secret' }));
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      api: {
+        ...DEFAULT_SETTINGS.api,
+        apiKey: 'sk-legacy-primary-export-secret',
+        secondary: {
+          enabled: true,
+          baseUrl: 'https://legacy-secondary.example.test',
+          apiKey: 'sk-legacy-secondary-export-secret',
+          model: 'legacy-secondary-model',
+        },
+      },
+      apiEndpoints: [
+        makeApiEndpoint({
+          id: 'legacy-settings-api',
+          apiKey: 'sk-legacy-nested-export-secret',
+        }),
+      ],
+    });
     await saveApiRpmPolicies([{ credentialId: 'credential_a', rpmLimit: 12, updatedAt: 1 }]);
 
     const backup = await exportAllData();
@@ -1116,7 +1135,8 @@ describe('exportAllData / importAllData', () => {
     expect(backup.version).toBe(24);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
-    expect(Array.isArray(backup.settings)).toBe(true);
+    // SEC-01：settings 死表与 apiEndpoints 都可能含明文 Key，只留在本机，不进普通备份。
+    expect('settings' in backup).toBe(false);
     expect(Array.isArray(backup.memories)).toBe(true);
     expect(Array.isArray(backup.plotEvents)).toBe(true);
     expect(Array.isArray(backup.characters)).toBe(true);
@@ -1124,7 +1144,7 @@ describe('exportAllData / importAllData', () => {
     // v22 —— 元数据与载荷同进同出（少了载荷，恢复出来的快照全是坏的）
     expect(Array.isArray(backup.snapshotPayloads)).toBe(true);
     expect(Array.isArray(backup.saves)).toBe(true);
-    expect(Array.isArray(backup.apiEndpoints)).toBe(true);
+    expect('apiEndpoints' in backup).toBe(false);
     expect(backup.apiRateLimitPolicies).toEqual([
       { credentialId: 'credential_a', rpmLimit: 12, updatedAt: 1 },
     ]);
@@ -1142,6 +1162,16 @@ describe('exportAllData / importAllData', () => {
     // v20 —— contentPacks 刻意不进 FullBackup（D18 / §5.7）：payload 进备份 = 每份日常备份
     // 都成了可自由转发的完整内容包 + 体积翻倍。备份/恢复一致性由 reconcilePackState() 解决。
     expect('contentPacks' in backup).toBe(false);
+
+    const serialized = JSON.stringify(backup);
+    for (const secret of [
+      'sk-endpoint-export-secret',
+      'sk-legacy-primary-export-secret',
+      'sk-legacy-secondary-export-secret',
+      'sk-legacy-nested-export-secret',
+    ]) {
+      expect(serialized).not.toContain(secret);
+    }
   });
 
   /**
@@ -1193,10 +1223,8 @@ describe('exportAllData / importAllData', () => {
     expect(kept[0].patch).toEqual({ hairStyle: 'short hair' });
   });
 
-  it('importAllData 应还原数据', async () => {
-    // Seed some data
+  it('importAllData 应还原可迁移数据', async () => {
     await saveMemory(makeMemory({ id: 'seed_mem' }));
-    await saveApiEndpoint(makeApiEndpoint({ id: 'seed_api' }));
 
     const backup = await exportAllData();
 
@@ -1206,11 +1234,88 @@ describe('exportAllData / importAllData', () => {
     await importAllData(backup);
 
     const mems = await getMemories('save_test');
-    const apis = await getApiEndpoints();
     expect(mems).toHaveLength(1);
-    expect(apis).toHaveLength(1);
     expect(mems[0].id).toBe('seed_mem');
-    expect(apis[0].id).toBe('seed_api');
+  });
+
+  async function seedDeviceLocalApiState() {
+    await saveSettings({
+      ...DEFAULT_SETTINGS,
+      api: {
+        ...DEFAULT_SETTINGS.api,
+        apiKey: 'sk-local-settings-primary',
+        secondary: {
+          enabled: true,
+          baseUrl: 'https://local-secondary.example.test',
+          apiKey: 'sk-local-settings-secondary',
+          model: 'local-secondary-model',
+        },
+      },
+      apiEndpoints: [
+        makeApiEndpoint({ id: 'local-settings-endpoint', apiKey: 'sk-local-settings-nested' }),
+      ],
+    });
+    await saveApiEndpoint(
+      makeApiEndpoint({ id: 'local-endpoint-primary', apiKey: 'sk-local-endpoint-primary' }),
+    );
+    await saveApiEndpoint(
+      makeApiEndpoint({ id: 'local-endpoint-backup', apiKey: 'sk-local-endpoint-backup' }),
+    );
+
+    return {
+      settings: await getSettings(),
+      endpoints: (await getApiEndpoints()).sort((a, b) => a.id.localeCompare(b.id)),
+    };
+  }
+
+  it('导入含明文凭据的旧备份应忽略旧 settings/apiEndpoints，保留本机凭据', async () => {
+    const before = await seedDeviceLocalApiState();
+    const legacyBackup = await exportAllData();
+    legacyBackup.settings = [
+      {
+        ...DEFAULT_SETTINGS,
+        api: {
+          ...DEFAULT_SETTINGS.api,
+          apiKey: 'sk-imported-settings-primary',
+          secondary: {
+            enabled: true,
+            baseUrl: 'https://imported-secondary.example.test',
+            apiKey: 'sk-imported-settings-secondary',
+            model: 'imported-secondary-model',
+          },
+        },
+        apiEndpoints: [
+          makeApiEndpoint({
+            id: 'imported-settings-endpoint',
+            apiKey: 'sk-imported-settings-nested',
+          }),
+        ],
+      },
+    ];
+    legacyBackup.apiEndpoints = [
+      makeApiEndpoint({ id: 'imported-endpoint', apiKey: 'sk-imported-endpoint' }),
+    ];
+
+    await importAllData(legacyBackup);
+
+    expect(await getSettings()).toEqual(before.settings);
+    expect((await getApiEndpoints()).sort((a, b) => a.id.localeCompare(b.id))).toEqual(
+      before.endpoints,
+    );
+  });
+
+  it('导入 settings/apiEndpoints 为空数组的旧备份也不得清空本机凭据', async () => {
+    const before = await seedDeviceLocalApiState();
+    const legacyBackup = await exportAllData();
+    legacyBackup.settings = [];
+    legacyBackup.apiEndpoints = [];
+
+    await importAllData(legacyBackup);
+
+    expect(await getSettings()).toEqual(before.settings);
+    expect((await getApiEndpoints()).sort((a, b) => a.id.localeCompare(b.id))).toEqual(
+      before.endpoints,
+    );
   });
 
   /**
@@ -2015,8 +2120,8 @@ describe('reconcilePackState (D18 / §5.7)', () => {
 
 describe('Settings Persistence', () => {
   // Q-06：settings 表不再被播种，所以先写一行再读。
-  // 这张表在生产里已无读写（只剩 FullBackup 为老备份往返照搬），
-  // 这几条只是保住表本身的读写 API 还能用。
+  // 这张表在生产里已无读写；SEC-01 起普通 FullBackup 也刻意排除并忽略它，
+  // 防止历史行中的 API Key 进入可分享 JSON。这几条只保住表本身的读写 API 还能用。
   it('saveSettings + getSettings 应正常读写', async () => {
     await saveSettings({ ...DEFAULT_SETTINGS, key: 'settings' });
     const s = await getSettings();

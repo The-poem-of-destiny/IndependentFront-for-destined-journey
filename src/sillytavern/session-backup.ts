@@ -1,8 +1,8 @@
 /**
  * session-backup.ts — 单存档（一周目）导出 / 导入
  *
- * 与 `FullBackup`（database.ts）刻意分工：那份是「整个库照原样搬走再照原样放回去」，
- * 这份是「**把一周目送给别人**」。差别不在体积，在三条语义：
+ * 与 `FullBackup`（database.ts）刻意分工：那份迁移应用级备份范围内的数据，但排除设备本地
+ * 凭据与二进制素材库；这份是「**把一周目送给别人**」。差别不在体积，在三条语义：
  *
  * 1. **只收每存档的表** —— 表清单与 `deleteSaveSlot` 同源（它是「什么算这个存档的」
  *    唯一权威判据）。全局库（worldBooks / presets / imagePresets / contentPacks /

@@ -39,9 +39,11 @@ src/sillytavern/                    ← 核心引擎
   │   │              DEFAULT_SETTINGS 的影子配置（症状：设置页改了、引擎行为没变）。
   │   │              现在引擎经 `engine-settings.ts` 注入缝读真源，播种与那座只搬两个
   │   │              字段的桥（game-pipeline.syncSnapshotSettings）都已删除。
-  │   │              两张死表刻意保留（删表要写 `表名: null`，会永久抹掉老用户的 v1–v3 行）；
-  │   │              FullBackup 仍照搬它们的行，只为老备份往返不丢字节。
+  │   │              两张死表刻意保留（删表要写 `表名: null`，会永久抹掉老用户的 v1–v3 行）。
+  │   │              lorebooks 仍随 FullBackup 往返；settings 可能残留旧 API Key，SEC-01 起
+  │   │              新备份不导出、旧备份导入也不读取或覆盖。
   │   ├── v4+: memories / plotEvents / characters / snapshots / saves / apiEndpoints
+  │   │         🔒 apiEndpoints 是设备本地凭据表：不进 FullBackup；导入新旧备份都不改本机行。
   │   ├── v11+: audioTracks / audioBlobs / audioPlaylists（全局共享，排除 FullBackup）
   │   ├── v12+: audioHandles（持久化 FileSystemDirectoryHandle）
   │   ├── v13+: assetMeta / assetBlobs（素材库，全局共享，排除 FullBackup，走 zip 导出）

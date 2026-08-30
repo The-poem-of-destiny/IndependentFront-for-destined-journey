@@ -1,14 +1,13 @@
 /**
  * plot-engine.ts — 剧情运行时引擎测试
  *
- * 覆盖: evaluateCondition / parsePreCheckOutput / parsePostCheckOutput /
- *       eventToMemory / propagateWorldLineChange / preCheckPlot /
+ * 覆盖: parsePreCheckOutput / parsePostCheckOutput / eventToMemory /
+ *       propagateWorldLineChange / preCheckPlot /
  *       postCheckPlot / getPendingEventsForTrigger / autoGenerateMemoriesFromEvents
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { PlotEvent, PlotOutline } from './types';
 import {
-  evaluateCondition,
   parsePreCheckOutput,
   parsePostCheckOutput,
   eventToMemory,
@@ -18,6 +17,9 @@ import {
   getPendingEventsForTrigger,
   autoGenerateMemoriesFromEvents,
 } from './plot-engine';
+
+const HOST_CONDITION_SENTINEL = '__plot_condition_host_sentinel__';
+const MALICIOUS_LOOKING_CONDITION = `(globalThis[${JSON.stringify(HOST_CONDITION_SENTINEL)}] = 'executed', true)`;
 
 // ========== 工具函数 ==========
 
@@ -64,108 +66,6 @@ function makeOutline(overrides: Partial<PlotOutline> = {}): PlotOutline {
     updatedAt: overrides.updatedAt ?? Date.now(),
   };
 }
-
-// ====================================================================
-// evaluateCondition
-// ====================================================================
-
-describe('evaluateCondition', () => {
-  // --- 简单比较 ---
-
-  it('应正确处理 == 比较为真', () => {
-    const vars = { hp: 100 };
-    expect(evaluateCondition('{{hp}} == 100', vars)).toBe(true);
-  });
-
-  it('应正确处理 == 比较为假', () => {
-    const vars = { hp: 50 };
-    expect(evaluateCondition('{{hp}} == 100', vars)).toBe(false);
-  });
-
-  it('应正确处理 < 比较', () => {
-    const vars = { hp: 30 };
-    expect(evaluateCondition('{{hp}} < 50', vars)).toBe(true);
-  });
-
-  it('应正确处理 > 比较', () => {
-    const vars = { hp: 80 };
-    expect(evaluateCondition('{{hp}} > 50', vars)).toBe(true);
-  });
-
-  it('应正确处理字符串 == 比较', () => {
-    const vars = { location: '白曜城' };
-    expect(evaluateCondition('{{location}} == "白曜城"', vars)).toBe(true);
-    expect(evaluateCondition('{{location}} == "黑曜城"', vars)).toBe(false);
-  });
-
-  // --- 逻辑 AND / OR ---
-
-  it('应正确处理 && 逻辑', () => {
-    const vars = { hp: 60, mp: 30 };
-    expect(evaluateCondition('{{hp}} > 50 && {{mp}} > 20', vars)).toBe(true);
-    expect(evaluateCondition('{{hp}} > 50 && {{mp}} > 50', vars)).toBe(false);
-  });
-
-  it('应正确处理 || 逻辑', () => {
-    const vars = { hp: 30, mp: 80 };
-    expect(evaluateCondition('{{hp}} > 50 || {{mp}} > 50', vars)).toBe(true);
-    expect(evaluateCondition('{{hp}} > 50 || {{mp}} > 100', vars)).toBe(false);
-  });
-
-  // --- 模板变量替换 ---
-
-  it('应替换模板变量 {{var}} 为值', () => {
-    const vars = { hp: 42 };
-    // {{hp}} 会替换为 42，表达式变成 42 == 42
-    expect(evaluateCondition('{{hp}} == 42', vars)).toBe(true);
-  });
-
-  // --- 嵌套路径解析 ---
-
-  it('应解析嵌套路径 {{a.b.c}}', () => {
-    const vars = { player: { stats: { hp: 75 } } };
-    expect(evaluateCondition('{{player.stats.hp}} > 50', vars)).toBe(true);
-    expect(evaluateCondition('{{player.stats.hp}} < 50', vars)).toBe(false);
-  });
-
-  it('嵌套路径不存在时应返回 undefined 并可能导致 false', () => {
-    const vars = { player: { stats: {} } };
-    // {{player.stats.hp}} 会解析为 undefined → 字符串 "undefined"
-    // 表达式 "undefined" > 50 → false
-    expect(evaluateCondition('{{player.stats.hp}} > 50', vars)).toBe(false);
-  });
-
-  // --- undefined 条件 ---
-
-  it('undefined 条件应返回 true（无条件 = 总是触发）', () => {
-    expect(evaluateCondition(undefined, {})).toBe(true);
-  });
-
-  it('空字符串条件应返回 true', () => {
-    expect(evaluateCondition('', {})).toBe(true);
-  });
-
-  it('纯空白字符串条件应返回 true', () => {
-    expect(evaluateCondition('   ', {})).toBe(true);
-  });
-
-  // --- 无效表达式 ---
-
-  it('无效表达式应不抛异常，返回回退值', () => {
-    // 语法错误应被 catch 捕获，走回退逻辑
-    // 回退: condition.includes('true') && !condition.includes('false')
-    const vars = { x: 1 };
-    expect(() => evaluateCondition('{{{bad', vars)).not.toThrow();
-  });
-
-  // --- 边界: truthy/falsy ---
-
-  it('应正确评估 truthy 值', () => {
-    const vars = { flag: 1, zero: 0 };
-    expect(evaluateCondition('{{flag}}', vars)).toBe(true);
-    expect(evaluateCondition('{{zero}}', vars)).toBe(false);
-  });
-});
 
 // ====================================================================
 // parsePreCheckOutput
@@ -494,21 +394,21 @@ describe('preCheckPlot', () => {
     vi.clearAllMocks();
   });
 
-  it('应触发符合条件的 pending 事件', async () => {
+  it('Agent 选中的自然语言触发条件应激活 pending 事件', async () => {
     const event = makeEvent({
       id: 'evt-1',
       title: '濒死觉醒',
       status: 'pending',
-      triggerCondition: '{{hp}} < 50',
+      triggerCondition: '角色生命垂危且命定核心开始苏醒',
     });
     vi.mocked(getPlotEvents).mockResolvedValue([event]);
     vi.mocked(savePlotEvent).mockResolvedValue('evt-1');
 
     const agentOutput = JSON.stringify({
-      triggeredEvents: [{ title: '濒死觉醒', reason: '血量低触发事件' }],
+      triggeredEvents: [{ title: '濒死觉醒', reason: '当前叙事满足自然语言条件' }],
       relevantBackground: '角色濒死',
     });
-    const vars = { hp: 30 };
+    const vars = { hp: 100 };
 
     const result = await preCheckPlot('save-1', agentOutput, vars);
     expect(result.triggeredEvents).toHaveLength(1);
@@ -552,24 +452,33 @@ describe('preCheckPlot', () => {
     expect(savePlotEvent).not.toHaveBeenCalled();
   });
 
-  it('应跳过条件不满足的 pending 事件', async () => {
-    const event = makeEvent({
-      id: 'evt-1',
-      title: '低血量事件',
-      status: 'pending',
-      triggerCondition: '{{hp}} < 30',
-    });
-    vi.mocked(getPlotEvents).mockResolvedValue([event]);
+  it('恶意外观 triggerCondition 只作文本，pre_check 选中时也不在宿主域执行', async () => {
+    const host = globalThis as Record<string, unknown>;
+    delete host[HOST_CONDITION_SENTINEL];
 
-    const agentOutput = JSON.stringify({
-      triggeredEvents: [{ title: '低血量事件', reason: '不会触发' }],
-      relevantBackground: '',
-    });
-    const vars = { hp: 100 };
+    try {
+      const event = makeEvent({
+        id: 'evt-host-probe',
+        title: '宿主隔离探针',
+        status: 'pending',
+        triggerCondition: MALICIOUS_LOOKING_CONDITION,
+      });
+      vi.mocked(getPlotEvents).mockResolvedValue([event]);
+      vi.mocked(savePlotEvent).mockResolvedValue('evt-host-probe');
 
-    const result = await preCheckPlot('save-1', agentOutput, vars);
-    expect(result.triggeredEvents).toHaveLength(0);
-    expect(savePlotEvent).not.toHaveBeenCalled();
+      const agentOutput = JSON.stringify({
+        triggeredEvents: [{ title: '宿主隔离探针', reason: 'Agent 判定语义条件已满足' }],
+        relevantBackground: '',
+      });
+
+      const result = await preCheckPlot('save-1', agentOutput, {});
+      expect(result.triggeredEvents).toHaveLength(1);
+      expect(result.triggeredEvents[0].status).toBe('active');
+      expect(host[HOST_CONDITION_SENTINEL]).toBeUndefined();
+      expect(savePlotEvent).toHaveBeenCalledTimes(1);
+    } finally {
+      delete host[HOST_CONDITION_SENTINEL];
+    }
   });
 
   it('空的 parse 结果应返回空 triggeredEvents', async () => {
@@ -692,7 +601,12 @@ describe('postCheckPlot', () => {
       eventUpdates: [],
       newChildEvents: [
         { title: '新支线1', description: '描述1', depth: 1 },
-        { title: '新支线2', description: '描述2', triggerCondition: '{{flag}} == 1', depth: 2 },
+        {
+          title: '新支线2',
+          description: '描述2',
+          triggerCondition: '旧城警钟再次响起时',
+          depth: 2,
+        },
       ],
     });
 
@@ -702,7 +616,7 @@ describe('postCheckPlot', () => {
     expect(result.newEvents[0].status).toBe('pending');
     expect(result.newEvents[0].saveId).toBe('save-1');
     expect(result.newEvents[0].visibility).toBe('hidden');
-    expect(result.newEvents[1].triggerCondition).toBe('{{flag}} == 1');
+    expect(result.newEvents[1].triggerCondition).toBe('旧城警钟再次响起时');
     expect(result.newEvents[1].depth).toBe(2);
     expect(savePlotEvents).toHaveBeenCalled();
   });
@@ -917,13 +831,13 @@ describe('getPendingEventsForTrigger', () => {
     vi.clearAllMocks();
   });
 
-  it('应返回满足条件的 pending 事件', async () => {
-    const evt1 = makeEvent({ id: 'evt-1', status: 'pending', triggerCondition: '{{x}} > 10' });
+  it('应返回全部待交给 Agent 语义判断的 pending 事件', async () => {
+    const evt1 = makeEvent({ id: 'evt-1', status: 'pending', triggerCondition: '抵达官道时' });
     const evt2 = makeEvent({ id: 'evt-2', status: 'pending', triggerCondition: undefined });
-    const evt3 = makeEvent({ id: 'evt-3', status: 'completed', triggerCondition: '{{x}} > 10' });
+    const evt3 = makeEvent({ id: 'evt-3', status: 'completed', triggerCondition: '章节结束后' });
     vi.mocked(getPlotEvents).mockResolvedValue([evt1, evt2, evt3]);
 
-    const result = await getPendingEventsForTrigger('save-1', { x: 20 });
+    const result = await getPendingEventsForTrigger('save-1', { x: 0 });
     expect(result).toHaveLength(2);
     const ids = result.map((e) => e.id);
     expect(ids).toContain('evt-1');
@@ -931,12 +845,24 @@ describe('getPendingEventsForTrigger', () => {
     // evt-3 不是 pending
   });
 
-  it('应排除条件不满足的 pending 事件', async () => {
-    const evt = makeEvent({ id: 'evt-1', status: 'pending', triggerCondition: '{{x}} > 100' });
-    vi.mocked(getPlotEvents).mockResolvedValue([evt]);
+  it('恶意外观 triggerCondition 不执行，也不把 pending 事件从候选集移除', async () => {
+    const host = globalThis as Record<string, unknown>;
+    delete host[HOST_CONDITION_SENTINEL];
 
-    const result = await getPendingEventsForTrigger('save-1', { x: 5 });
-    expect(result).toEqual([]);
+    try {
+      const evt = makeEvent({
+        id: 'evt-host-probe',
+        status: 'pending',
+        triggerCondition: MALICIOUS_LOOKING_CONDITION,
+      });
+      vi.mocked(getPlotEvents).mockResolvedValue([evt]);
+
+      const result = await getPendingEventsForTrigger('save-1', { x: 5 });
+      expect(result).toEqual([evt]);
+      expect(host[HOST_CONDITION_SENTINEL]).toBeUndefined();
+    } finally {
+      delete host[HOST_CONDITION_SENTINEL];
+    }
   });
 
   it('空事件列表应返回空数组', async () => {

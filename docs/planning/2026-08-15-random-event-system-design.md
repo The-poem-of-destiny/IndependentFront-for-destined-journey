@@ -302,7 +302,11 @@ placeKey = 落位成功 ? 地块名 : 位置路径最深段
 
 ### 8.3 P2：脚本权重钩子
 
-若声明式 DSL 撑不住二创想象力，再开 `weightScript?: string` 口子：**只走 `script-backend.ts` 的 QuickJS 后端**（fail-closed、墙钟 50ms、内存 32MB；绝不 `new Function`——`plot-engine.evaluateCondition:27` 那个裸 `new Function` 是历史遗留，不是先例），沙盒注入只读快照 + 种子化 rng（照 `ejs-runtime.buildSandboxArgs` 的样子把 `createEjsRng` 实例交进去，保确定性）。
+若声明式 DSL 撑不住二创想象力，再开 `weightScript?: string` 口子：**只走 `script-backend.ts` 的 QuickJS 后端**（fail-closed、墙钟 50ms、内存 32MB；绝不 `new Function`）。沙盒注入只读快照 + 种子化 rng（照 `ejs-runtime.buildSandboxArgs` 的样子把 `createEjsRng` 实例交进去，保确定性）。
+
+> 📌 2026-08-29（CRIT-01）：`plot-engine.evaluateCondition` 的宿主域 `new Function` 已删除。
+> `PlotEvent.triggerCondition` 的现行契约是自然语言提示，由 `plot_pre_check` 做语义裁决；Code 侧只校验
+> Agent 选中的事件标题与 `pending` 状态，绝不执行条件文本。
 
 ## 9. 为什么不复用 plot_pre_check（决策记录）
 

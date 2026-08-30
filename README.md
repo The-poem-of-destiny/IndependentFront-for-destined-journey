@@ -30,15 +30,15 @@
 
 ### 方式二：从源码运行（当前可用）
 
-**前置**：[Node.js](https://nodejs.org/) 18+（LTS 推荐）
+**前置**：[Node.js](https://nodejs.org/) 20.19+（Node 20 仅保留依赖兼容范围；推荐仍受上游支持的 Node 22.23+ 或 24+）和 npm 10.9.3
 
 ```bash
 # 1. 下载源码
 git clone https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey.git
 cd IndependentFront-for-destined-journey
 
-# 2. 安装依赖
-npm install
+# 2. 按锁文件安装依赖
+npm ci
 
 # 3. 启动开发服务器
 npm run dev
