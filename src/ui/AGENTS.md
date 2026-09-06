@@ -112,6 +112,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   🔴 checkQuota 在 image_prompt 侧链**之前**（D32）；限额拒绝时
 │   │                                      **绝不丢弃标记** —— 什么都不做，让它落到「无记录」格渲染成
 │   │                                      手动按钮（D21）。off 档标记照扫（否则会漏成文本）但不建记录
+│   ├── endpoint-resolver.ts          ← [F10] Agent API 池绑定的 fail-closed 纯解析器（pool id → ApiEndpoint）：
+│   │                                   「未设置（可走默认）」与「显式绑定但解析不到（stale，**绝不 reroute**）」
+│   │                                   语义拆分的**唯一实现**（game-pipeline buildAgentConfigs / 侧链
+│   │                                   getEndpointForAgent / create-store plot_outline 共用）。纯函数、
+│   │                                   不持 UI 通知与网络 I/O；消费方自主处置 missing-pool / stale-binding。
+│   │                                   🔴 Agent 设置里那个叫 `model` 的键实际存 **API 池 id**（历史命名，
+│   │                                      不改名），传 `boundPoolId` 进解析器即可
 │   ├── audio-singleton.ts           ← AudioManager 应用级单例（setBlobResolver 注入缝）
 │   ├── audio-folder.ts              ← [Audio] 本地音乐文件夹（File System Access 唯一接触点，仅 Chromium）
 │   ├── asset-zip.ts                 ← [素材] 一键 zip 读写（流式 + SHA-256 + 体积上限）

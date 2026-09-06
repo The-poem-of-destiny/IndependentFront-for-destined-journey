@@ -298,11 +298,42 @@ export function mergeRules(
     return r;
   });
 
-  // Step 3: 追加用户规则（同名 ID 覆盖预设）
-  const presetIds = new Set(merged.map((r) => r.id));
-  const uniqueUserRules = userRules.filter((r) => !presetIds.has(r.id));
+  // Step 3: 合并用户规则 —— 文档契约「同名 ID 用户优先」（F15）。
+  // 旧实现 `userRules.filter(r => !presetIds.has(r.id))` 把同 ID 用户规则**整个丢弃**、
+  // 预设原样保留，与注释宣称的方向正好相反。
+  //
+  // 这里改为「原位替换」：
+  // - 用户规则 ID 命中**非 locked** 预设 → 在该槽位整条替换（保持预设原有顺序与槽位）
+  // - 用户规则 ID 命中 **locked** 预设（auto-enable 激活的系统受保护规则）→ 不可替换，
+  //   保持既有抑制语义（不替换不追加，避免产出重复 ID）
+  // - 未命中任何预设的独有用户规则 → 按用户原始顺序追加到末尾
+  // - 用户规则自身重复 ID：后到覆盖（确定性，不产生重复 ID）
+  const effective = merged.map((preset) => ({ ...preset }));
+  const userByLast = new Map<string, BeautifierRule>();
+  for (const r of userRules) userByLast.set(r.id, r);
 
-  return [...merged, ...uniqueUserRules];
+  const presetIdSet = new Set(effective.map((r) => r.id));
+  const overriddenIds = new Set<string>();
+  for (const preset of effective) {
+    if (preset.locked) continue;
+    const override = userByLast.get(preset.id);
+    if (override) {
+      Object.assign(preset, override);
+      overriddenIds.add(preset.id);
+    }
+  }
+  for (const id of overriddenIds) userByLast.delete(id);
+  // locked 预设命中：用户规则不可替换也不追加（受保护，避免重复 ID）
+  for (const id of presetIdSet) userByLast.delete(id);
+  // 未命中（且非重复占位）的独有用户规则按用户顺序追加
+  for (const r of userRules) {
+    if (userByLast.has(r.id)) {
+      effective.push(userByLast.get(r.id)!);
+      userByLast.delete(r.id);
+    }
+  }
+
+  return effective;
 }
 
 // ========== Processing Pipeline ==========

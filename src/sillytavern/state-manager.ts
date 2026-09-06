@@ -1133,18 +1133,26 @@ export class StateManager {
     const incomingStacks = typeof value.stacks === 'number' && value.stacks > 0 ? value.stacks : 1;
 
     // 刷新时长: 双方有限取 max；新效果永久(null) 覆盖为永久；未提供(undefined) 不动
+    // F07：时长被真正拉长（取到了更大的新窗口）时 carryMinutes 归零 —— 余量属于旧窗口的
+    // 已流逝分钟，新起点不应继承；反之保留现有时长则保留其已累积余量。
     const refreshTime = (existing: StatusEffect): void => {
       if (value.remainingTime === undefined) return;
       if (value.remainingTime === null) {
         existing.remainingTime = null;
+        existing.carryMinutes = undefined;
       } else if (existing.remainingTime == null) {
         // 遗留数据 remainingTime === undefined → 直接取来值，防 Math.max(undefined, n) 产 NaN（终审修复）
         // existing 已是永久(null) → 保持永久不覆盖
         if (existing.remainingTime === undefined) {
           existing.remainingTime = value.remainingTime;
+          existing.carryMinutes = undefined;
         }
       } else {
+        const prev = existing.remainingTime;
         existing.remainingTime = Math.max(existing.remainingTime, value.remainingTime);
+        if (existing.remainingTime !== prev) {
+          existing.carryMinutes = undefined;
+        }
       }
     };
 
@@ -2128,19 +2136,16 @@ export class StateManager {
    *
    * 三件事，缺一不可:
    *   ① 纯函数结算 `(prevDay, nextDay]` 区间（到期 / 周期效果 / 收益），整份覆盖回事实袋子；
-   *   ② `incomeDue` → 玩家 `money` 的 delta patch **push 进调用方的 `patches[]`**
-   *      —— 那个数组由 `applyTimeAdvance` 在**锁外**自提交（ADR-21 唯一写入口）。
+   *   ② `incomeDue` → **持久借据**（`worldFlags.mapIncome`）—— 与事实态同一份 profile、
+   *      同一次落库（🔴 拆开就是 F08 病灶：窗口先推进、该给的钱后记账，记账失败即永久丢账）。
+   *      钱由锁外 `settlePendingMapIncome()` 以「给钱 + 标记 applied 同事务」原子消费。
    *      这里绝不自己调 `commitChatState`：锁内嵌套提交 = 同 saveId 自等死锁（铁律②）。
    *   ③ 结构化事件 → 中文新闻（措辞在本接线层，`map-dynamics` 零中文字面量的原因）。
    *
    * 🔴 **休眠地块整块冻结**（§3）：`resolveTile` 认不出的名字返回 `undefined`，纯函数据此跳过。
    *    换包再换回来时那座玩家酒馆不会一次性补上几十期收益。
    */
-  private async syncMapFactsSettlement(
-    profile: SaveProfile,
-    prevDay: number,
-    patches: StatePatch[],
-  ): Promise<void> {
+  private async syncMapFactsSettlement(profile: SaveProfile, prevDay: number): Promise<void> {
     try {
       const facts = getMapFactsFlags(profile);
       if (Object.keys(facts.tiles).length === 0) return; // 还没有任何一块地偏离基线 → 零开销
@@ -2154,20 +2159,40 @@ export class StateManager {
 
       const settled = settleMapFacts(facts, resolveTile, prevDay, nextDay);
       if (settled === null) return;
-      await updateMapFactsFlags(profile, settled.facts);
 
-      // ── 收益入账：每座建筑一条 delta patch（总额 = 每期金额 × 补结算期数） ──
-      const player = (await this.readCharacters()).find((c) => c.type === 'player');
-      if (player !== undefined) {
-        for (const { event } of settled.events) {
-          if (event.kind !== 'incomeDue') continue;
-          patches.push({
-            op: 'update_character',
-            target: `characters.${player.name}`,
-            value: { money: event.amount * event.periods },
-            metadata: { source: 'map_dynamics', delta: true },
-          });
+      // ── 记收（F08）：事实与应得收益**同一次落库**，收益不再走锁外补丁 ──
+      // 旧实现：事实先进 `updateMapFactsFlags` 落库（结算窗口推进），收益只往 `patches[]`
+      // 塞 delta 等锁外自提交 —— 自提交失败 = 窗口已推进、收益永久蒸发（时间账本零簿记，
+      // 没有游标可重放；known-issue「两条收益丢账」第 2 条，本文件「🧾 收益记收账本」节）。
+      // 现在把每一笔收益折叠成**持久借据**，与事实态同一份 profile、同一次落库；
+      // 钱由锁外 `settlePendingMapIncome()` 以「给钱 + 标记 applied」同事务原子消费。
+      const incomeEvents = settled.events.filter((e) => e.event.kind === 'incomeDue');
+      if (incomeEvents.length > 0) {
+        const player = (await this.readCharacters()).find((c) => c.type === 'player');
+        if (player === undefined) {
+          // 存档病态（没有玩家角色）：收益没有入账对象。**不记借据**（与旧实现一致），
+          // 但这次起明确告警而不是静默丢账。
+          console.warn(
+            '[StateManager] 地块结算产出收益但存档没有玩家角色，本次收益未入账（也不会补记）',
+          );
+          await updateMapFactsFlags(profile, settled.facts);
+        } else {
+          const nextIncome: MapIncomeFlags = {
+            pending: mergeMapIncomePending(getMapIncomeFlags(profile).pending, incomeEvents, {
+              recipient: player.name,
+              fromDay: prevDay,
+              toDay: nextDay,
+            }),
+          };
+          // 🔴 同一次 `persistProfile` 落库：窗口推进与「该给的钱」同生共死 —— 写失败时
+          //    两者都不落，下一次结算会从旧窗口重算，不会丢账。先落事实、后落借据就是
+          //    病灶本身，**任何时候都不要拆开**。
+          setMapFactsInPlace(profile, settled.facts);
+          setMapIncomeInPlace(profile, nextIncome);
+          await this.persistProfile(profile);
         }
+      } else {
+        await updateMapFactsFlags(profile, settled.facts);
       }
 
       // ── 系统提示：每块地一条新闻（一次结算里同一块地的多条变化并成一条，别刷屏） ──
@@ -2872,9 +2897,10 @@ export class StateManager {
       await this.syncRandomEvents(profile);
 
       // 1.7 🧱 地块按期结算（地图 v1.2 §4）——**必须在时间推进之后**（同天气/掷骰那条理由）。
-      //     排在掷骰之后是因为它会往 `patches` 里塞收益补丁，而那个数组在**锁外**统一自提交：
-      //     锁内嵌套 commitChatState 就是同 saveId 自等死锁（state-write-queue 铁律②）
-      await this.syncMapFactsSettlement(profile, prevDay, patches);
+      //     收益改走持久借据（F08）：锁内与事实态同一次落库，锁外由 `settlePendingMapIncome`
+      //     原子入账 —— 不再往 `patches` 塞收益补丁（锁内嵌套 commitChatState ≠ 病灶根因，
+      //     锁外自提交失败才丢账，借据机制消灭的是那个失败窗口）。
+      await this.syncMapFactsSettlement(profile, prevDay);
 
       // 2. 遍历所有角色, 扣减 StatusEffect.remainingTime
       const characters = await getCharacters(this.saveId);
@@ -2892,7 +2918,14 @@ export class StateManager {
 
           // 按时间单位扣减
           if (fx.timeUnit === '小时') {
-            fx.remainingTime -= Math.floor(minutes / 60);
+            // F07 分区不变式：小时型效果把「不足整小时」的分钟余量累进 carryMinutes，
+            // 满 60 分钟才扣 1 个 remainingTime。旧的 Math.floor(minutes/60) 会在
+            // 每次 30 分钟推进时把 0.5 小时地板吞掉，导致两段 30 分钟永远凑不成 1 小时。
+            const carryFrom = fx.carryMinutes ?? 0;
+            const totalMinutes = carryFrom + minutes;
+            const wholeHours = Math.floor(totalMinutes / 60);
+            fx.carryMinutes = totalMinutes % 60;
+            fx.remainingTime -= wholeHours;
           } else {
             fx.remainingTime -= minutes;
           }
@@ -2958,7 +2991,96 @@ export class StateManager {
       await this.commitChatState(patches);
     }
 
+    // F08 收益重放：收益从「锁外补丁」改为「持久借据的原子入账」，与上面的正文自提交
+    // **互不连坐** —— 正文补丁失败不影响收益入账，收益入账失败也不回滚已提交的正文。
+    await this.settlePendingMapIncome();
+
     return patches;
+  }
+
+  /**
+   * F08 — 消费收益借据袋（`worldFlags.mapIncome`），**恰一次入账**。
+   *
+   * 调度（§4）：`applyTimeAdvance` 每次推进后调用一次；原则上也可以在任何「存档活着且
+   * 想收账」的时刻调用（崩溃重开后由下一次推进重放，本方法自身幂等）。
+   *
+   * 实现（简报 §4 备选方案的第二笔交易）：
+   *   · 锁外 + 自带 `withSaveWriteLock`（per-saveId FIFO，与 commitChatState 串行），
+   *     锁内开 db 显式**跨表事务** `(saveProfiles + characters)` —— 给钱与标记 applied
+   *     在同一事务里翻转，任一步失败 Dexie 整事务回滚：**崩在任何一点都回到
+   *     「未给钱 + 未标记」**，下次调用重放；事务提交后丢确认，重放读到的已是
+   *     applied → 跳过。两条路都恰一次，靠记账本身而非 retry 计数。
+   *   · 事务内**重读** profile 与玩家角色（同一把锁、同一事务）：绝不拿调用方手里的
+   *     陈旧整档覆写刚改过的 money（简报 §3 第 2 条 —— 提交级缓存那轮吃过同样的亏，
+   *     P1-09 的「锁内重读新鲜」是同款纪律）。
+   *   · 防御性消费：畸形金额（非有限/`<= 0`）与重复 id（手改备份塞了两条同 id）跳过
+   *     不标记、不丢账，warn 留痕；没有玩家角色 = 永久错误，借据原样保留待查。
+   *   · applied 的借据**保留**在袋里作账目审计（不裁剪）：正常存档每个收益窗口一条、
+   *     量级极小；裁剪会引入「借据历史被吞」的静默删账，收益小于复杂度。
+   *
+   * @returns 本次尝试的统计（见 {@link MapIncomeSettleResult}）。调用方不需要对一个
+   *          non-zero 结果做补偿动作 —— 未入账的借据仍然留着，下次调用自会重放。
+   */
+  async settlePendingMapIncome(): Promise<MapIncomeSettleResult> {
+    let pendingCount = 0; // 事务里抓到的未应用条数（整轮回滚时用来报 failed）
+    let credited = 0;
+    try {
+      await withSaveWriteLock(this.saveId, async () => {
+        const db = getDatabase();
+        await db.transaction('rw', [db.saveProfiles, db.characters], async () => {
+          // 🔴 事务内重读（不给调用方手里的对象留覆写机会）；same-lock 串行 + IDB 事务
+          //    双保险，这里读到的 profile / 玩家就是应用当前的最新值。
+          const profile = await db.saveProfiles.get(this.saveId);
+          if (!profile) return;
+          const bag = getMapIncomeFlags(profile);
+          const notApplied = bag.pending.filter((p) => !p.applied);
+          if (notApplied.length === 0) return;
+          pendingCount = notApplied.length;
+
+          const player = (await db.characters.where('saveId').equals(this.saveId).toArray()).find(
+            (c) => c.type === 'player',
+          );
+          if (player === undefined) {
+            // 永久错误：入账对象不存在。借据保留待查，不标记不删除（简报 §4「expose
+            // permanent errors, such as a missing recipient, instead of dropping the event」）
+            console.warn(
+              '[StateManager] 收益借据待入账但没有玩家角色，账目保留待查:',
+              notApplied.map((p) => p.id).join(', '),
+            );
+            return; // 一条都没改，无需落库
+          }
+
+          const day = Math.floor(toEpochMinutes(profile.gameTime) / MINUTES_PER_GAME_DAY);
+          let total = 0;
+          const seen = new Set<string>();
+          for (const entry of notApplied) {
+            if (seen.has(entry.id)) {
+              console.warn(`[StateManager] 重复收益借据 ${entry.id} 已跳过（只入账首条）`);
+              continue;
+            }
+            seen.add(entry.id);
+            if (!Number.isFinite(entry.amount) || entry.amount <= 0) {
+              console.warn(`[StateManager] 畸形收益借据 ${entry.id} 已跳过不标记（金额非法）`);
+              continue;
+            }
+            total += entry.amount;
+            entry.applied = true;
+            entry.appliedAtDay = day;
+            credited++;
+          }
+          if (total <= 0) return; // 全是跳过项，一个字节都不写
+
+          player.money = (Number.isFinite(player.money) ? player.money : 0) + total;
+          await db.characters.put(player);
+          await db.saveProfiles.put(profile);
+        });
+      });
+    } catch (err) {
+      // 事务级回滚：钱没给、标记没写，借据原样保留 —— 正是「可恢复」的落点
+      console.warn('[StateManager] 地图收益入账失败（借据保留，下次结算自动重放）:', err);
+      return { credited: 0, failed: pendingCount, rolledBack: true };
+    }
+    return { credited, failed: pendingCount - credited, rolledBack: false };
   }
 }
 
@@ -3020,6 +3142,159 @@ const BUILDING_INCOME_PERIOD_DAYS = 30;
 
 /** 地块结算新闻的分类（`NewsItem.category` 是自由文本，全仓无枚举） */
 const MAP_NEWS_CATEGORY = '地图';
+
+// ═══════════════════════════════════════════════════════════
+// 🧾 收益记收账本（F08 可恢复收益 / docs/known-issue.md「地图 v1.2 结算的两条收益丢账」第 2 条）
+// ═══════════════════════════════════════════════════════════
+//
+// 病灶：`syncMapFactsSettlement` 先 `updateMapFactsFlags` 落库（结算窗口推进），收益却只往
+// `patches[]` 里塞一条 delta，由 `applyTimeAdvance` 锁外的自提交消费 —— 自提交失败（抛错或
+// 补丁级失败落进被调用点丢弃的 `errors`）时，窗口已推进、该笔收益永久蒸发（时间账本是零簿记
+// 推导，没有游标可重放）。
+//
+// 修复（选「持久化 pending 记收 + 幂等重放」，不接单事务 —— 单事务要把时间/天气/随机事件/
+// 结算/角色状态的多次既存 best-effort 写全收进一个 IDB 事务，等于改掉整个 applyTimeAdvance
+// 的失败语义，F08 简报 §4 明确允许在这种前提下选备用方案）：
+//   · **记收**（锁内）：每一笔 `incomeDue` 折叠成一条**持久 pending 记录**（金额算死 =
+//     每期 × 期数，不随以后的所有权/费率重算），与事实态同一份 profile、同一次落库 ——
+//     「窗口推进」与「该给的钱」同生共死：写失败时两者都不落，下次结算从旧窗口重算。
+//   · **重放**（锁外）：`settlePendingMapIncome` 以「给钱 + 标记 applied 原子同事务」消费；
+//     崩溃/写失败 = 事务回滚，账目保持未应用未入账，下次调用自动重放。恰好一次入账由
+//     **记录本身**保证（applied 位与钱在同一事务里翻转），而非靠 retry 计数。
+//   · **去重身份**：id = `地块::建筑::main|slot::fromDay..toDay`，把覆盖区间钉死在记录里；
+//     同区间重复结算（应当不可能）或手改备份塞重复行时按 id 合并/跳过，绝不双付。
+//   · **随档语义**：借 `worldFlags.mapFacts` 先例（ADR-33），零新 Dexie 表、随 saveProfiles 进
+//     FullBackup；与事实态同袋，故快照回退/存档导入把借据和已入账的钱**一起**回滚/搬走，
+//     没有「旧借据压掉新重放」的穿越问题。历史已丢的收益**不回溯补偿**（F08 简报 §5）。
+//
+// 🔴 为什么住接线层而不是 `save-profile.ts` / `types-map.ts`：F08 修复的任务边界只允许动
+//    state-manager.ts / map-dynamics.ts / 测试 / known-issue.md。`worldFlags` 在 types.ts 里是
+//    `Record<string, any>`，不需要动 schema；读写口放接线层（与 `groupSettlementNews` 同级）——
+//    mapIncome 本来就是**结算接线层的私有账本**，其他模块（含 UI）都不该碰它。
+
+/** `worldFlags.mapIncome` 里一条等待入账（或已入账）的收益借据 */
+export interface MapIncomePendingEntry {
+  /** 稳定结算身份：`{tile}::{building}::{main|slot}::{fromDay}..{toDay}`（重放去重键） */
+  id: string;
+  /** 来源地块名（逻辑键，不随包版本漂移） */
+  tile: string;
+  /** 来源建筑名 */
+  building: string;
+  /** 是否来自主建筑（入口用；槽位建筑缺席） */
+  main?: true;
+  /** 入账对象 = 玩家逻辑名（存档导入重发 id 不影响名字，无需重映射） */
+  recipient: string;
+  /** 入账总额 = 每期金额 × 覆盖期数（**记收时算死**，不随以后所有权/费率重算） */
+  amount: number;
+  /** 覆盖的结算区间（游戏日，半开左端 `fromDay` + 闭右端 `toDay`，与 settlement 同口径） */
+  fromDay: number;
+  /** 覆盖的结算区间（游戏日，闭右端） */
+  toDay: number;
+  /** 已入账标记（与给钱同一事务翻转） */
+  applied: boolean;
+  /** 入账完成的游戏日（诊断；未入账时缺席） */
+  appliedAtDay?: number;
+  /** 本借据落库当天的游戏日（诊断） */
+  recordedAtDay: number;
+}
+
+/** `worldFlags.mapIncome` 的形状（照 `worldFlags.mapFacts` 先例：零新表、随档往返） */
+export interface MapIncomeFlags {
+  /** 待入账 + 已入账的历史借据（applied 的保留作账目审计，见消费端的说明） */
+  pending: MapIncomePendingEntry[];
+}
+
+/** `settlePendingMapIncome` 的返回值 */
+export interface MapIncomeSettleResult {
+  /** 本次成功入账的条数 */
+  credited: number;
+  /** 本次尝试但未能入账的条数（畸形金额 / 重复 id 跳过，或整轮回滚时 = 尝试条数） */
+  failed: number;
+  /** true = 事务整体回滚（一条都没入、一条都没标记），借据原样保留待下次重放 */
+  rolledBack: boolean;
+}
+
+/** `worldFlags.mapIncome` 在 profile 里的键 —— 只在本节出现 */
+const MAP_INCOME_FLAGS_KEY = 'mapIncome';
+
+/**
+ * 读收益借据袋（`worldFlags.mapIncome`）。
+ *
+ * 缺席（新档 / 这个存档从没产出过地块收益）返回**空账本**（`{ pending: [] }`）而不是
+ * `undefined`：「没有借据」与「还没有这一袋」对每个消费方都是同一件事 —— 这也是
+ * `applyTimeAdvance` 对它零加载成本的来源。🔴 返回的是**新对象**，往里写不会落库 ——
+ * 落库只有 `setMapIncomeInPlace` + profile 落库这一条路。
+ */
+export function getMapIncomeFlags(profile: SaveProfile): MapIncomeFlags {
+  const raw = profile.worldFlags?.[MAP_INCOME_FLAGS_KEY];
+  if (raw === null || typeof raw !== 'object') return { pending: [] };
+  const bag = raw as MapIncomeFlags;
+  if (!Array.isArray(bag.pending)) return { ...bag, pending: [] };
+  return bag;
+}
+
+/**
+ * 整份覆盖收益借据袋（**只改内存不落库**；落库那拍由调用方与事实态合并成同一次 profile 写）。
+ * 存在理由同 `setMapFactsInPlace`（save-profile.ts）：F08 要求「窗口推进与借据同一次落库」。
+ */
+function setMapIncomeInPlace(profile: SaveProfile, flags: MapIncomeFlags): void {
+  if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
+  profile.worldFlags[MAP_INCOME_FLAGS_KEY] = flags;
+}
+
+/**
+ * 一条 `incomeDue` 结算事件 → 持久借据条目。
+ *
+ * 🔴 金额在这里**算死**（每期 × 期数）：重放时不再重新推导 —— 推进之后所有权/费率再变，
+ *    这份借据仍按「欠账时的契约」入账（简报 §4「do not recalculate the amount」）。
+ *    `amount` 是每期金额、`periods` 是覆盖期数（settle 已过滤非有限），这里再防御一道：
+ *    两者乘出来不合法 → `amount: 0`（记账层丢这条，不参与入账也不崩结算）。
+ */
+function buildMapIncomeEntry(
+  tile: string,
+  event: Extract<MapSettlementEvent['event'], { kind: 'incomeDue' }>,
+  ctx: { recipient: string; fromDay: number; toDay: number },
+): MapIncomePendingEntry {
+  const main = event.main === true;
+  const total = event.amount * event.periods;
+  const safeTotal = Number.isFinite(total) && total > 0 ? total : 0;
+  return {
+    id: `${tile}::${event.building}::${main ? 'main' : 'slot'}::${ctx.fromDay}..${ctx.toDay}`,
+    tile,
+    building: event.building,
+    main: main || undefined,
+    recipient: ctx.recipient,
+    amount: safeTotal,
+    fromDay: ctx.fromDay,
+    toDay: ctx.toDay,
+    recordedAtDay: ctx.toDay,
+    applied: false,
+  };
+}
+
+/**
+ * 把一批收入事件并入既有借据袋（幂等合并）：同 **id** 已存在 → 保留旧记录不动。
+ *
+ * 正常流程里同一窗口同一来源只会产出一条事件（`settleMapFacts` 的半开区间是排他的），
+ * 这条去重是给「同一窗口被重复结算」（快照回退后同一段区间再被推进？不会 —— 窗口由
+ * `prevDay` 推导，回退会把 time 一起回退）与「手改/导入坏备份塞了重复行」兜底。
+ */
+function mergeMapIncomePending(
+  existing: MapIncomePendingEntry[],
+  incomeEvents: readonly MapSettlementEvent[],
+  ctx: { recipient: string; fromDay: number; toDay: number },
+): MapIncomePendingEntry[] {
+  const out = existing.slice();
+  const known = new Set(out.map((p) => p.id));
+  for (const { tile, event } of incomeEvents) {
+    if (event.kind !== 'incomeDue') continue;
+    const fresh = buildMapIncomeEntry(tile, event, ctx);
+    if (known.has(fresh.id)) continue;
+    out.push(fresh);
+    known.add(fresh.id);
+  }
+  return out;
+}
 
 /**
  * `durationDays` 的容错读取。**认不出一律读作永久（-1）而不是 0**：

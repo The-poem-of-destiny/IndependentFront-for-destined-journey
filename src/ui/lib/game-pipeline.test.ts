@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   collectSelectedSystemCoreWorkshopBookIds,
+  EndpointBindingError,
   extractStoryOptions,
   GamePipeline,
   withImagePromptSystem,
@@ -2303,5 +2304,156 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     const names = captured!.bundle.participants.map((p: { name: string }) => p.name).sort();
     // 期望数组按 .sort() 的 UTF-16 码点序（乙 U+4E59 在 甲 U+7532 前），与 received 同口径
     expect(names).toEqual(['理查德', '路人乙', '路人甲']);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// F10（2026-09-04）：显式 API 绑定失效必须 fail-closed，绝不把请求换到别的 provider
+// ══════════════════════════════════════════════════════════════════════════
+describe('F10 端点绑定 fail-closed（buildAgentConfigs）', () => {
+  it('🔴 主 DAG（story）显式绑定的池已删除 → 抛 EndpointBindingError（fail-stop）', () => {
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    patchAgentSettings((pipeline as any).settings.settings, 'story', { model: 'A' });
+
+    expect(() => (pipeline as any).buildAgentConfigs({})).toThrow(EndpointBindingError);
+  });
+
+  it('🔴 错误携带 agentId 与失效 id（用户可见的修整指引）', () => {
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    patchAgentSettings((pipeline as any).settings.settings, 'story', { model: 'DELETED' });
+
+    try {
+      (pipeline as any).buildAgentConfigs({});
+      expect.unreachable('应当抛错');
+    } catch (err) {
+      expect(err).toBeInstanceOf(EndpointBindingError);
+      expect((err as EndpointBindingError).agentId).toBe('story');
+      expect((err as EndpointBindingError).requestedPoolId).toBe('DELETED');
+    }
+  });
+
+  it('🔴 侧链（item_gen）显式绑定失效 → 不抛（本轮不拖垮主 DAG），但端点不装配', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    patchAgentSettings((pipeline as any).settings.settings, 'item_gen', { model: 'A' });
+
+    const configs = (pipeline as any).buildAgentConfigs({});
+    const story = configs.find((c: { agentId: string }) => c.agentId === 'story');
+    const itemGen = configs.find((c: { agentId: string }) => c.agentId === 'item_gen');
+
+    // 主 DAG 照常（走默认 B），侧链端点悬空（apiEndpointId='' → 调用点再判跳过）
+    expect(story.apiEndpointId).toBe('B');
+    expect(itemGen.apiEndpointId).toBe('');
+    // 跳过是可见的：console.warn 带 agent 名与失效 id
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('item_gen'));
+    expect(warn.mock.calls.join('\n')).toContain('fail-closed');
+    warn.mockRestore();
+  });
+
+  it('未设置 + 空池 → 不抛（首次配置淡失败走老路，apiEndpointId 为空）', () => {
+    const pipeline = makePipeline(); // 默认 apiPool: []
+    const configs = (pipeline as any).buildAgentConfigs({});
+    const story = configs.find((c: { agentId: string }) => c.agentId === 'story');
+    expect(story).toBeDefined();
+    expect(story.apiEndpointId).toBe('');
+  });
+
+  it('未设置 + 非空池 → 默认端点（池首项）—— 首次配置体验不回归', () => {
+    const pipeline = makePipeline(
+      {},
+      {
+        apiPool: [
+          { id: 'B', name: 'B', model: 'm-b' },
+          { id: 'C', name: 'C', model: 'm-c' },
+        ],
+      },
+    );
+    const configs = (pipeline as any).buildAgentConfigs({});
+    const story = configs.find((c: { agentId: string }) => c.agentId === 'story');
+    expect(story.apiEndpointId).toBe('B');
+    expect(story.model).toBe('m-b');
+  });
+
+  it('重排池不改变既有显式绑定（绑定语义与池顺序无关）', () => {
+    const pipeline = makePipeline(
+      {},
+      {
+        apiPool: [
+          { id: 'C', name: 'C', model: 'm-c' },
+          { id: 'B', name: 'B', model: 'm-b' },
+        ],
+      },
+    );
+    patchAgentSettings((pipeline as any).settings.settings, 'story', { model: 'B' });
+    const configs = (pipeline as any).buildAgentConfigs({});
+    const story = configs.find((c: { agentId: string }) => c.agentId === 'story');
+    expect(story.apiEndpointId).toBe('B');
+    expect(story.model).toBe('m-b');
+  });
+});
+
+describe('F10 端点绑定 fail-closed（getEndpointForAgent 侧链热路径）', () => {
+  it('🔴 显式绑定失效 → undefined + console.error（绝不换用池里别的 provider）', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    patchAgentSettings((pipeline as any).settings.settings, 'combat_v3', { model: 'A' });
+
+    const endpoint = (pipeline as any).getEndpointForAgent('combat_v3');
+    expect(endpoint).toBeUndefined();
+    expect(error.mock.calls[0][0]).toContain('combat_v3');
+    expect(error.mock.calls[0][0]).toContain('fail-closed');
+    expect(error.mock.calls[0][0]).toContain('A');
+    error.mockRestore();
+    vi.restoreAllMocks();
+  });
+
+  it('未设置 + 非空池 → 默认端点（侧链老路也不回归）', () => {
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    const endpoint = (pipeline as any).getEndpointForAgent('item_gen');
+    expect(endpoint?.id).toBe('B');
+  });
+});
+
+describe('F10 🔴 集成：选中 A 删掉 A，provider B 一个字节都收不到', () => {
+  it('run() 在 dispatch 之前停轮：story 绑定失效 → fetch 零调用 + 可见报错', async () => {
+    // 池里只剩 B；story 显式绑定的 A 已被删除 —— 旧实现会静默把请求发给 B
+    const settings = makeSettingsStore({
+      apiPool: [
+        {
+          id: 'B',
+          name: 'B',
+          provider: 'provider-b',
+          baseUrl: 'https://b.example.test/v1',
+          apiKey: 'k',
+          model: 'm-b',
+        },
+      ],
+    });
+    patchAgentSettings(settings.settings, 'story', { model: 'A' });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({}),
+      text: async () => '',
+    } as Response);
+
+    const pipeline = new GamePipeline({
+      gameStore: makeGameStore(),
+      settingsStore: settings,
+      saveId: 'save-test',
+    });
+
+    const ok = await pipeline.run('向 B 发起一次不该发生的请求');
+
+    expect(ok).toBe(false);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    // 用户可见：toastSpy（ui-store mock）与 activityMessage 都带着修整指引
+    expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('story'), 'error', 6000);
+
+    globalThis.fetch = originalFetch;
   });
 });

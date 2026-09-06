@@ -18,16 +18,22 @@ import type { MemoryRecord } from './types';
 
 const mockGetAllMemoryIds = vi.fn();
 const mockSaveMemory = vi.fn();
-const mockComputeEmbedding = vi.fn();
+const mockComputeEmbeddingWithMeta = vi.fn();
 
 vi.mock('./database', () => ({
   getAllMemoryIds: (...args: any[]) => mockGetAllMemoryIds(...args),
   saveMemory: (...args: any[]) => mockSaveMemory(...args),
 }));
 
-vi.mock('./memory-store', () => ({
-  computeEmbedding: (...args: any[]) => mockComputeEmbedding(...args),
-}));
+// F09：memory-summarizer 改用 computeEmbeddingWithMeta（向量 + 溯源元数据原子成对）。
+// 保留 real 导出（buildEmbeddingText 等纯函数），只替换网络入口。
+vi.mock('./memory-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./memory-store')>();
+  return {
+    ...actual,
+    computeEmbeddingWithMeta: (...args: any[]) => mockComputeEmbeddingWithMeta(...args),
+  };
+});
 
 import {
   allocateMemoryIds,
@@ -469,10 +475,19 @@ describe('summarizeAndSave', () => {
   beforeEach(() => {
     mockGetAllMemoryIds.mockResolvedValue([]); // 默认全库无记忆 → MEM000001
     mockSaveMemory.mockResolvedValue('MEM000001');
-    mockComputeEmbedding.mockResolvedValue(new Array(128).fill(0.1));
+    mockComputeEmbeddingWithMeta.mockResolvedValue({
+      embedding: new Array(128).fill(0.1),
+      meta: {
+        spaceId: 'emb:v1|https://api.deepseek.com/v1|deepseek-chat|d128|fmt-v1',
+        model: 'deepseek-chat',
+        dimensions: 128,
+        preprocessingVersion: 'fmt-v1',
+        contentRevision: 'deadbeef',
+      },
+    });
   });
 
-  it('完整管线（含 embedding）应成功保存并返回 MemoryRecord', async () => {
+  it('完整管线（含 embedding）应成功保存并返回 MemoryRecord + 溯源元数据', async () => {
     const result = await summarizeAndSave({
       saveId: 'save_1',
       agentRawOutput: validOutput,
@@ -491,8 +506,11 @@ describe('summarizeAndSave', () => {
     expect(result!.relatedCharacterIds).toEqual(['char_a', 'char_b']);
     expect(result!.embedding).toBeDefined();
     expect(result!.embedding).toHaveLength(128);
+    // F09：向量与溯源元数据原子成对落库
+    expect(result!.embeddingMeta).toBeDefined();
+    expect(result!.embeddingMeta?.spaceId).toContain('deepseek-chat|d128');
 
-    expect(mockComputeEmbedding).toHaveBeenCalledTimes(1);
+    expect(mockComputeEmbeddingWithMeta).toHaveBeenCalledTimes(1);
     expect(mockSaveMemory).toHaveBeenCalledWith(result);
   });
 
@@ -504,12 +522,13 @@ describe('summarizeAndSave', () => {
 
     expect(result).not.toBeNull();
     expect(result!.embedding).toBeUndefined();
-    expect(mockComputeEmbedding).not.toHaveBeenCalled();
+    expect(result!.embeddingMeta).toBeUndefined();
+    expect(mockComputeEmbeddingWithMeta).not.toHaveBeenCalled();
     expect(mockSaveMemory).toHaveBeenCalledWith(result);
   });
 
-  it('embedding 计算失败时应降级保存（无 embedding）', async () => {
-    mockComputeEmbedding.mockRejectedValue(new Error('Embedding API 不可用'));
+  it('embedding 计算失败时应降级保存（无 embedding，元数据一并清空）', async () => {
+    mockComputeEmbeddingWithMeta.mockRejectedValue(new Error('Embedding API 不可用'));
 
     const result = await summarizeAndSave({
       saveId: 'save_3',
@@ -519,6 +538,7 @@ describe('summarizeAndSave', () => {
 
     expect(result).not.toBeNull();
     expect(result!.embedding).toBeUndefined();
+    expect(result!.embeddingMeta).toBeUndefined();
     expect(mockSaveMemory).toHaveBeenCalled(); // 仍然保存
   });
 
