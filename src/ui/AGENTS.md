@@ -946,3 +946,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 ### 预设系统（正文 Agent 专用）
 
 仿 SillyTavern AI Response Configuration 面板：预设选择器 + 导入 ST JSON / 新建 / 导出 / 删除；采样器参数预览；条目列表（启用/名称/角色/字数/编辑）；ST 导入完整保留 `prompts[]`。
+
+### 2026-09-05 键盘契约补注
+
+共享 `AppModal` 经 `lib/modal-focus.ts` 管理嵌套焦点、Tab 环绕、Escape 与焦点归还；Toast 使用 live region，点击型 AppCard 支持键盘。存档选择与背景选择使用独立原生按钮，避免包裹行内其他交互控件。

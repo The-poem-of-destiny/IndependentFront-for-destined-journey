@@ -115,10 +115,16 @@ const selectedId = computed(() => props.modelValue?.id ?? null);
       @click="checkConditions(bg).valid ? emit('update:modelValue', bg) : undefined"
     >
       <!-- 卡片头部 -->
-      <div class="bg-header">
+      <button
+        type="button"
+        class="bg-header"
+        :disabled="!checkConditions(bg).valid"
+        :aria-pressed="selectedId === bg.id"
+        @click.stop="emit('update:modelValue', bg)"
+      >
         <strong class="bg-name">{{ bg.name }}</strong>
         <span v-if="selectedId === bg.id" class="bg-check">✓</span>
-      </div>
+      </button>
 
       <!-- 条件徽章 (仅有限定条件的背景显示) -->
       <div v-if="getRequirementTags(bg).length > 0" class="bg-requirements">
@@ -165,6 +171,21 @@ const selectedId = computed(() => props.modelValue?.id ?? null);
 </template>
 
 <style scoped>
+button.bg-header {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.bg-header:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 3px;
+}
+
 /* ===== 列表容器 ===== */
 .bg-list {
   display: flex;

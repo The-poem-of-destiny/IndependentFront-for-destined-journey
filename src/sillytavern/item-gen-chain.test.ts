@@ -355,16 +355,16 @@ describe('runItemGenChain', () => {
     expect(result.patches.filter((p) => p.op === 'equip_item')).toHaveLength(0);
   });
 
-  it('应调用 stateManager.commitChatState', async () => {
+  it('应调用 stateManager.commitDomainCommand', async () => {
     const client = makeMockClient(makeItemGenXML());
-    const commitChatState = vi.fn().mockResolvedValue(undefined);
+    const commitDomainCommand = vi.fn().mockResolvedValue(undefined);
     const deps: ItemGenChainDeps = {
       clientFactory: () => client,
-      stateManager: { commitChatState },
+      stateManager: { commitDomainCommand },
     };
     const result = await runItemGenChain(makeRequest(makeMarker()), deps);
-    expect(commitChatState).toHaveBeenCalledTimes(1);
-    expect(commitChatState).toHaveBeenCalledWith(result.patches);
+    expect(commitDomainCommand).toHaveBeenCalledTimes(1);
+    expect(commitDomainCommand).toHaveBeenCalledWith(result.patches);
   });
 
   it('无 stateManager 时不应报错', async () => {
@@ -438,10 +438,10 @@ describe('runItemGenChain', () => {
 
   it('🔴 批量: markers 数组一次调用生成全部条目（不重复 patches，调用仅 1 次）', async () => {
     const client = makeMockClient(makeItemGenXML());
-    const commitChatState = vi.fn().mockResolvedValue(undefined);
+    const commitDomainCommand = vi.fn().mockResolvedValue(undefined);
     const deps: ItemGenChainDeps = {
       clientFactory: () => client,
-      stateManager: { commitChatState },
+      stateManager: { commitDomainCommand },
     };
     const markers = [
       makeMarker({ attributes: { itemType: 'skill', source: 'story', owner: 'char-001' } }),
@@ -457,7 +457,7 @@ describe('runItemGenChain', () => {
     expect(client.chat).toHaveBeenCalledTimes(1);
     // 不重复: makeItemGenXML 产 3 条目（1 技能 + 1 装备 + 1 物品），批量也只落 3 patches
     expect(result.patches).toHaveLength(3);
-    expect(commitChatState).toHaveBeenCalledTimes(1);
+    expect(commitDomainCommand).toHaveBeenCalledTimes(1);
   });
 
   it('🔴 批量: 所有 markers 打包进 {{ITEM_REQUEST}}（N 个 <request>）', async () => {
@@ -606,18 +606,18 @@ describe('buildRewritePatches', () => {
 describe('rewriteLoadoutItem', () => {
   it('集成：REWRITE_TARGET/REWRITE_REASON 注入 + remove/add 成对落库', async () => {
     const client = makeMockClient(makeRewriteSkillXML());
-    const commitChatState = vi.fn().mockResolvedValue(undefined);
+    const commitDomainCommand = vi.fn().mockResolvedValue(undefined);
     const deps: ItemGenChainDeps = {
       clientFactory: () => client,
-      stateManager: { commitChatState },
+      stateManager: { commitDomainCommand },
     };
 
     const result = await rewriteLoadoutItem(makeRewriteRequest() as any, deps);
 
     expect(result.ok).toBe(true);
     expect(result.patches).toHaveLength(2);
-    expect(commitChatState).toHaveBeenCalledTimes(1);
-    expect(commitChatState).toHaveBeenCalledWith(result.patches);
+    expect(commitDomainCommand).toHaveBeenCalledTimes(1);
+    expect(commitDomainCommand).toHaveBeenCalledWith(result.patches);
 
     // 校验发给模型的 messages 里重铸上下文被注入（<重铸目标> JSON + 玩家描述）
     const sent = (client.chat as ReturnType<typeof vi.fn>).mock.calls[0][0] as Array<{
@@ -631,10 +631,10 @@ describe('rewriteLoadoutItem', () => {
 
   it('AI 没给 replace → ok:false + reason，不落库', async () => {
     const client = makeMockClient(makeItemGenXML()); // 无 replace 属性
-    const commitChatState = vi.fn().mockResolvedValue(undefined);
+    const commitDomainCommand = vi.fn().mockResolvedValue(undefined);
     const deps: ItemGenChainDeps = {
       clientFactory: () => client,
-      stateManager: { commitChatState },
+      stateManager: { commitDomainCommand },
     };
 
     const result = await rewriteLoadoutItem(makeRewriteRequest() as any, deps);
@@ -642,7 +642,7 @@ describe('rewriteLoadoutItem', () => {
     expect(result.ok).toBe(false);
     expect(result.patches).toEqual([]);
     expect(result.reason).toBeTruthy();
-    expect(commitChatState).not.toHaveBeenCalled();
+    expect(commitDomainCommand).not.toHaveBeenCalled();
   });
 
   it('无 stateManager 时（测试场景）不落库也不报错', async () => {

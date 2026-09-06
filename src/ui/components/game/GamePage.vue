@@ -6,6 +6,7 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useAudioStore } from '../../stores/audio-store';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
+import { unwireEffectSystem } from '@engine/effect-wiring';
 import { GamePipeline, waitForGameSaveIdle } from '../../lib/game-pipeline';
 import { buildSceneImageSeams, resolveSceneWeather } from '../../lib/scene-image-seams';
 import { getContentRegistry } from '../../stores/content-store';
@@ -284,6 +285,7 @@ onBeforeUnmount(() => {
   // 会把为 A 生成的正文追加进 B 并以 saveId:B 落库，永久留在 B 的历史里。
   // （漏网写入还有第二道闸：GamePipeline 内的 emitMessage 存档归属检查。）
   pipeline?.dispose();
+  if (requestedSaveId) unwireEffectSystem(requestedSaveId);
   // 🆕 T4（设计 §8.1 / §9）：离开游戏页 = 存档切换/销毁的既有清理点。本 pipeline 是
   //    per-save 实例，invalidatePromptSessions 只清自己的 saveId 的全部 prompt session
   //    （切档/删档都发生在离开游戏页之后，而 session 是模块级内存态，不清会一直驻留）。

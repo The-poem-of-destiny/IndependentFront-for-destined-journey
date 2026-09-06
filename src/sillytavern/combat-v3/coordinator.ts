@@ -7,7 +7,7 @@
  * 职责（架构 §十四 14.3）：
  *   - runCombatV3(opts)：从 openCombat 驱动完整战斗循环直到结束
  *   - routeRequiredInput(req)：RequiredInput 路由（A2-3，穷尽 switch，never 兜底）
- *   - 终局：Dispatch RequestSettlement → 翻译 DomainEvent → StatePatch[] → 一次 commitChatState
+ *   - 终局：Dispatch RequestSettlement → 翻译 DomainEvent → StatePatch[] → 一次 commitDomainCommand
  *     （T10 §2.6：合并单位资源/状态覆写回写，战斗后角色伤势持久化）
  *   - 终局摘要（T11 §2.2）：write_summary 不再返回占位 Choose —— AI 调 write_summary(text)
  *     时 text 收集进 combatSession.summary，终局经 narrativeSummary 回注正文（game-pipeline
@@ -24,7 +24,7 @@
  *   - BoundedAdjudication / CharGenRequest → M2 throw UnsupportedInM2
  *
  * 验收断言：
- *   A2-1  第 09 场 fixture 端到端跑通，最终一次 commitChatState
+ *   A2-1  第 09 场 fixture 端到端跑通，最终一次 commitDomainCommand
  *   A2-3  RequiredInput 路由穷尽（漏一路编译不过）
  *   A2-4  abandon 后 session 丢弃、isGenerating 解除、FP 不落库
  *   A2-5  战斗摘要以【战斗摘要】assistant 消息回注 Story
@@ -102,7 +102,7 @@ export interface RunCombatV3Opts {
   deps: {
     clientFactory: (agentId: string, endpoint: ApiEndpoint, saveId: string) => CombatClient;
     endpoint: ApiEndpoint;
-    stateManager?: { commitChatState: (patches: StatePatch[]) => Promise<void> };
+    stateManager?: { commitDomainCommand: (patches: StatePatch[]) => Promise<void> };
     characters: Array<Record<string, unknown>>;
     // 🆕 经验档位（简单/普通模式，2026-08-24）：战斗胜利经验按存档模式查系数表。
     // 缺省 = normal（普通）；由调用方（game-pipeline）从 SaveProfile 读经 getExperienceMode 传入。
@@ -184,7 +184,7 @@ function nextCmdId(prefix: string): string {
  *   1. openCombat 建 session
  *   2. 首个 SupplyDice 喂 60 颗骰（deps.drawDice 提供）
  *   3. 循环 dispatch：无 requiredInput 且未终局则自动推进；有 requiredInput 则 route；到 Terminal dispatch RequestSettlement
- *   4. 终局：翻译 DomainEvent → StatePatch[]（含 T10 §2.6 单位资源/状态覆写回写）→ 一次 commitChatState → 摘要回注
+ *   4. 终局：翻译 DomainEvent → StatePatch[]（含 T10 §2.6 单位资源/状态覆写回写）→ 一次 commitDomainCommand → 摘要回注
  */
 export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result> {
   const { deps } = opts;
@@ -480,7 +480,7 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
     };
   }
 
-  // 终局落库（唯一一次 commitChatState）——A2-1 要求整场只 commit 一次。
+  // 终局落库（唯一一次 commitDomainCommand）——A2-1 要求整场只 commit 一次。
   // FP 净变动 = 终局快照 − 开战快照（架构 §十二 12.2 Δ = snapshot.FP − 初始 FP）。
   const finalSnapshot = session.snapshot();
   const initialFp = opts.bundle.resourceSnapshots.FP;
@@ -500,7 +500,7 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
   );
   // T10（设计 2026-08-09 §2.6 方案 1）：终局 Code 覆写回写 —— 把战斗结束时的单位
   // 资源（hp/mp/sp）与状态效果按 characterId 匹配存档角色，生成 StatePatch 与 FP
-  // patch **合并进同一次 commitChatState**（A2-1：整场只 commit 一次，不开第二次）。
+  // patch **合并进同一次 commitDomainCommand**（A2-1：整场只 commit 一次，不开第二次）。
   // 召唤物（characterId 匹配不到存档角色）跳过，不硬造角色。
   const patches = [
     ...toPatches(allEvents, opts.bundle, fpDelta),
@@ -508,12 +508,12 @@ export async function runCombatV3(opts: RunCombatV3Opts): Promise<CombatV3Result
     ...buildUnitPersistPatches(finalSnapshot.units, deps.characters, opts.bundle.participants),
   ];
   if (deps.stateManager) {
-    await deps.stateManager.commitChatState(patches);
+    await deps.stateManager.commitDomainCommand(patches);
   }
 
   // 🆕 战斗终局 AI 总结（2026-08-12）：终局结算完成后，把整场战斗事实喂持久会话，
   // AI 写一段面向玩家的战斗总结叙事（替代「战斗直接中断、只靠战斗中 write_summary
-  // 收集」）。顺序刻意如此：commitChatState 先落库（战斗结果铁定保存）→ 总结（失败
+  // 收集」）。顺序刻意如此：commitDomainCommand 先落库（战斗结果铁定保存）→ 总结（失败
   // 只损失叙事，不阻塞主流程）→ 优先级 endSummary || collectedSummary || 兜底
   // （总结失败回落既有兜底语义，game-pipeline 照常注入【战斗摘要】，不崩）。
   const endFacts = collectCombatEndFacts(session, initialFp, opts.bundle.participants);
@@ -1570,7 +1570,7 @@ export function buildCombatEndFactText(facts: CombatEndFacts): string {
  * AI 写一段面向玩家的战斗总结叙事（2-4 句，收束胜负 / 关键转折 / 幸存者命运）。
  *
  * 与 narrateSettlement 同形（三条铁则照抄）：
- *  - **不产 Command、不改战斗状态**：总结只读，战斗结果已由 commitChatState 落库。
+ *  - **不产 Command、不改战斗状态**：总结只读，战斗结果已由 commitDomainCommand 落库。
  *  - **走 client.chat（非工具路径）**：总结是纯文本一段，无需工具；也不消费主决策
  *    的 chatWithTools 工具轮预算。
  *  - **失败优雅降级**：无 client / 调用抛错 / 空输出 → 返回 ''，调用方回落
@@ -2069,7 +2069,7 @@ function outcomeOf(session: CombatSession): CombatV3Result['outcome'] {
  * 把终局 DomainEvent 翻译成 StatePatch[]（M2 最小：FP 结算落库）。
  *
  * M1 内核 settle 不产 SettlementCommitted 事件（只产 CombatEnded + FP NarrativeCue），
- * 故这里直接按 fpDelta 生成 FP 结算 patch，保证终局一次 commitChatState（A2-1）。
+ * 故这里直接按 fpDelta 生成 FP 结算 patch，保证终局一次 commitDomainCommand（A2-1）。
  * 遵循数据字典五铁律 ④（FP 走 SaveProfile 唯一真源）。
  *
  * 🔴 2026-08-12（真机 bug：Patch set on users.fp: 未知操作: set）：

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { watch, onMounted, onUnmounted } from 'vue';
+import { watch, onMounted, onUnmounted, ref, useId } from 'vue';
+import { ownModalFocus } from '../../lib/modal-focus';
 
 const props = withDefaults(
   defineProps<{
@@ -40,33 +41,20 @@ function doClose() {
   emit('close');
 }
 
-watch(
-  () => props.open,
-  (val) => {
-    document.body.style.overflow = val ? 'hidden' : '';
-  },
-);
-
-/**
- * 🔴 卸载时必须把滚动锁还回去。
- *
- * 上面那个 watch 只在 `open` **变化**时跑；组件带着 `open === true` 被销毁时它不会
- * 触发，`body` 就永远停在 `overflow: hidden` —— 整页从此滚不动，直到刷新。
- *
- * 此前碰不到：所有弹窗都挂在页面根上，不会被分区切换销毁。Q-25 把预设的两个弹窗
- * 搬进了 `agent/PresetManager.vue`（只在 story 分区存在），这条路径就通了。
- * 一行守卫，顺带给另外十来个调用点都上了保险。
- */
-onUnmounted(() => {
-  if (props.open) document.body.style.overflow = '';
-});
-
-// Escape key — document level, always works
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && props.open) doClose();
+const dialog = ref<HTMLElement | null>(null);
+const titleId = useId();
+let releaseFocus: (() => void) | undefined;
+function syncFocus() {
+  if (props.open && dialog.value && !releaseFocus)
+    releaseFocus = ownModalFocus(dialog.value, doClose);
+  if (!props.open) {
+    releaseFocus?.();
+    releaseFocus = undefined;
+  }
 }
-onMounted(() => document.addEventListener('keydown', onKeydown));
-onUnmounted(() => document.removeEventListener('keydown', onKeydown));
+watch(() => props.open, syncFocus, { flush: 'post' });
+onMounted(syncFocus);
+onUnmounted(() => releaseFocus?.());
 
 function onOverlayClick(e: MouseEvent) {
   if (e.target === e.currentTarget) doClose();
@@ -76,16 +64,19 @@ function onOverlayClick(e: MouseEvent) {
 <template>
   <Teleport to="body">
     <transition name="modal">
-      <div
-        v-if="open"
-        class="modal-overlay"
-        tabindex="-1"
-        @click="onOverlayClick"
-        @keydown="onKeydown"
-      >
-        <div class="modal-content" :class="[`modal-${size || 'md'}`, { 'modal-bare': bare }]">
+      <div v-if="open" class="modal-overlay" tabindex="-1" @click="onOverlayClick">
+        <div
+          ref="dialog"
+          role="dialog"
+          aria-modal="true"
+          :aria-labelledby="title && !bare ? titleId : undefined"
+          :aria-label="bare || !title ? title || '对话框' : undefined"
+          tabindex="-1"
+          class="modal-content"
+          :class="[`modal-${size || 'md'}`, { 'modal-bare': bare }]"
+        >
           <div v-if="!bare && (title || $slots.header || closable !== false)" class="modal-header">
-            <h3 v-if="title" class="modal-title">{{ title }}</h3>
+            <h3 v-if="title" :id="titleId" class="modal-title">{{ title }}</h3>
             <slot name="header" />
             <button
               v-if="closable !== false"

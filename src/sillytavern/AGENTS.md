@@ -738,3 +738,8 @@ EffectAutomaton DSL —— 声明式窗口订阅 + 封闭表达式文法，v3 �
 只有引擎 TS 代码 import 得到；AI 那一侧对应的是 agent-tools 的工具名（如 `craft_check` / `craft_settle`）。
 注意 `$char` 有**两个不相干的同名对象**：沙盒里那个（三个只读方法）和 `char-query.ts` 导出的那个
 （引擎侧查询集）—— 名字撞车，边界不同，别互相照抄方法名。
+
+### 2026-09-05 可靠性契约补注
+
+- `reconcileEffectWiring(saveId, characters)` 以权威角色集合增删/替换订阅；提交后对账，离页/切档/删档拆线，覆盖上述早期仅 equip/unequip 的说明。
+- `StateManager.commitAiPatches` 为明确的 best-effort AI 接口，`commitChatState` 保留兼容；`commitDomainCommand` 在同一 save lock 与 Dexie 事务内整批提交，失败抛出且不发布事件。制作、战斗、物品生成/重铸使用后者。领域命令的 `delta_variable profile.fp` 调用既有 FP 账务函数，不写入故事变量。

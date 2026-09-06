@@ -23,13 +23,13 @@
 | DATA-01   | P1     | 已修（2026-09-05） | `docs/known-issue.md`；§8.4                          |
 | LIFE-01   | P1     | 已修（2026-09-05） | `docs/known-issue.md`；§8.5                          |
 | LIFE-02   | P1     | 已修（2026-09-05） | `docs/known-issue.md`；§8.6                          |
-| EFFECT-01 | P1     | 未修               | `docs/known-issue.md`；§8.7                          |
-| STATE-01  | P1     | 未修               | `docs/known-issue.md`；§8.8                          |
+| EFFECT-01 | P1     | 已修（2026-09-05） | `docs/known-issue.md`；§8.7                          |
+| STATE-01  | P1     | 已修（2026-09-05） | `docs/known-issue.md`；§8.8                          |
 | REL-01    | P1     | 未修               | `TODO.md`“正式发布打包”；§8.9                        |
-| A11Y-01   | P1     | 未修               | `docs/known-issue.md`；§8.10                         |
+| A11Y-01   | P1     | 已修（2026-09-05） | `docs/known-issue.md`；§8.10                         |
 | RESP-01   | P1     | 未修               | `docs/known-issue.md` UI-02、`TODO.md` 移动端；§8.11 |
 | BUILD-01  | —      | 已撤销（产品裁定） | `docs/known-issue.md`；§8.12                         |
-| DEV-01    | P1     | 未修               | `docs/known-issue.md`；§8.13                         |
+| DEV-01    | P1     | 已修（2026-09-05） | `docs/known-issue.md`；§8.13                         |
 | TOOL-01   | P1     | 已修               | `docs/known-issue.md`；§8.14、§13.3                  |
 | GOV-01    | —      | 已撤销（产品裁定） | `docs/known-issue.md`；§8.15                         |
 | PRIV-01   | P2     | 未修               | §9.1                                                 |
@@ -473,3 +473,5 @@ CRIT-01 与凭据导出问题已关闭，当前无未闭环 P0。然而，在 BF
 本报告以 `7e2cf93` 为原始审查快照；原始分析保留不改写，后续修复与产品裁定以文首状态表、正文日期注记、验证记录及 `docs/known-issue.md` 形成闭环。
 
 > 2026-09-05 更正：ONB-01、DATA-01、LIFE-01、LIFE-02 本轮修复见 [首轮可靠性验收](2026-09-05-first-session-reliability.md)。原始分析与历史计数保留；ONB-01 的自动推荐映射和成本估算不属本轮范围。
+
+> 2026-09-05：EFFECT-01 / STATE-01 / A11Y-01 / DEV-01 已实施；效果按权威集合对账，领域命令整批事务提交，共享弹窗与必选控件补齐键盘支持，启动器端口冲突不再终止进程。范围与验收见 [剩余四项可靠性修复](2026-09-05-remaining-reliability.md)。

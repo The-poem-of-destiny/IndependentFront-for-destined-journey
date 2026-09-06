@@ -79,7 +79,7 @@ export interface CraftGenDeps {
   clientFactory: (agentId: string, endpoint: ApiEndpoint, saveId: string) => CraftGenClient;
   /** StateManager 写入入口 (可选，测试可不提供) */
   stateManager?: {
-    commitChatState: (patches: StatePatch[]) => Promise<void>;
+    commitDomainCommand: (patches: StatePatch[]) => Promise<void>;
   };
 }
 
@@ -568,7 +568,7 @@ export async function runCraftGenChain(
 
   // Step 4: optional persistence
   if (deps.stateManager) {
-    await deps.stateManager.commitChatState(patches);
+    await deps.stateManager.commitDomainCommand(patches);
   }
 
   return {

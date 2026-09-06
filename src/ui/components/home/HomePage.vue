@@ -649,18 +649,26 @@ function formatTime(ts: number) {
                     :class="{ 'save-item-active': selectedSaveId === save.id }"
                     @click="selectedSaveId = save.id"
                   >
-                    <div class="save-avatar">{{ (save.metadata?.characterName || '?')[0] }}</div>
-                    <div class="save-info">
-                      <span class="save-name">{{ save.name || '未命名存档' }}</span>
-                      <span class="save-meta text-muted">
-                        <!-- M5 #27 语义修正: totalTurns 是对话回合数（每轮管线 +1），不是等级 -->
-                        {{ save.metadata?.characterName || '未知角色' }} · 第
-                        {{ save.metadata?.totalTurns ?? 0 }} 回合
-                      </span>
-                      <span class="save-meta text-muted text-xs">{{
-                        formatTime(save.updatedAt)
-                      }}</span>
-                    </div>
+                    <button
+                      type="button"
+                      class="save-select"
+                      :aria-pressed="selectedSaveId === save.id"
+                      :aria-label="`选择存档：${save.name || '未命名存档'}`"
+                      @click.stop="selectedSaveId = save.id"
+                    >
+                      <div class="save-avatar">{{ (save.metadata?.characterName || '?')[0] }}</div>
+                      <div class="save-info">
+                        <span class="save-name">{{ save.name || '未命名存档' }}</span>
+                        <span class="save-meta text-muted">
+                          <!-- M5 #27 语义修正: totalTurns 是对话回合数（每轮管线 +1），不是等级 -->
+                          {{ save.metadata?.characterName || '未知角色' }} · 第
+                          {{ save.metadata?.totalTurns ?? 0 }} 回合
+                        </span>
+                        <span class="save-meta text-muted text-xs">{{
+                          formatTime(save.updatedAt)
+                        }}</span>
+                      </div>
+                    </button>
                     <div class="save-row-actions">
                       <button
                         class="save-row-action"
@@ -851,6 +859,25 @@ function formatTime(ts: number) {
 </template>
 
 <style scoped>
+.save-select {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+.save-select:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 3px;
+}
+
 /* ═══════════════════════════════════════
    首页 — 标题画面
    优雅的暗色奇幻风格

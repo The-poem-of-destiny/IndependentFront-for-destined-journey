@@ -35,6 +35,16 @@ export interface EffectWiring {
   subscriptions: SubscriptionManager;
   /** 已注册的 ownerKey 集合（幂等 + 调试） */
   owners: Set<string>;
+  sources: Map<
+    string,
+    {
+      char: CharacterState;
+      objectType: 'item' | 'skill';
+      name: string;
+      scripts: Record<string, string>;
+      parentScripts?: Record<string, string>;
+    }
+  >;
   /** 本轮 publish 的效果收集桶（非 publish 期间为 undefined） */
   collector?: ScriptEffects;
 }
@@ -71,6 +81,7 @@ export function getEffectWiring(saveId: string): EffectWiring {
       registry: new ScriptRegistry(bus),
       subscriptions: new SubscriptionManager(bus),
       owners: new Set(),
+      sources: new Map(),
     };
     // Q-07：订阅脚本产出的效果汇进本轮 publish 的桶（无桶 = 非 publish 期间触发，丢弃并告警）
     wiring.subscriptions.setEffectSink((effects) => {
@@ -141,8 +152,25 @@ export function wireObject(
   const w = getEffectWiring(saveId);
   const ownerKey = ownerKeyOf(char.id, objectType, name);
 
-  // 幂等：已注册过则跳过
-  if (w.owners.has(ownerKey)) return undefined;
+  const previous = w.sources.get(ownerKey);
+  if (
+    previous &&
+    JSON.stringify(previous.scripts) === JSON.stringify(scripts) &&
+    JSON.stringify(previous.parentScripts) === JSON.stringify(parentScripts)
+  )
+    return undefined;
+  if (previous)
+    unwireObject(
+      saveId,
+      previous.char,
+      previous.objectType,
+      previous.name,
+      previous.scripts,
+      previous.parentScripts,
+    );
+  scripts = { ...scripts };
+  parentScripts = parentScripts ? { ...parentScripts } : undefined;
+  w.sources.set(ownerKey, { char, objectType, name, scripts, parentScripts });
   w.owners.add(ownerKey);
 
   // 执行 init 脚本，收集 $event.on 持久订阅 → SubscriptionManager
@@ -161,6 +189,7 @@ export function wireObject(
   return () => {
     w.subscriptions.unregisterAll(ownerKey);
     w.owners.delete(ownerKey);
+    w.sources.delete(ownerKey);
   };
 }
 
@@ -168,7 +197,7 @@ export function wireObject(
  * 对一件已装备物品/技能执行 cleanup 并注销其效果脚本。
  * @returns cleanup 收集的效果（供调用方按现有语义提交，可为空）
  */
-export function unwireObject(
+function unwireObject(
   saveId: string,
   char: CharacterState,
   objectType: 'item' | 'skill',
@@ -180,6 +209,7 @@ export function unwireObject(
   const ownerKey = ownerKeyOf(char.id, objectType, name);
   w.subscriptions.unregisterAll(ownerKey);
   w.owners.delete(ownerKey);
+  w.sources.delete(ownerKey);
   if (!scripts) return createScriptEffects();
   return executeCleanup(scripts, parentScripts, char.id);
 }
@@ -189,7 +219,34 @@ export function unwireObject(
  * 对所有带 scripts 的技能执行 init + 注册。幂等 —— 重复调用对已注册对象跳过。
  */
 export function wireEffectSystem(saveId: string, characters: CharacterState[]): EffectWiring {
+  return reconcileEffectWiring(saveId, characters);
+}
+
+/** Replace subscriptions only when their authoritative owner or script changes. */
+export function reconcileEffectWiring(saveId: string, characters: CharacterState[]): EffectWiring {
   const w = getEffectWiring(saveId);
+  const desired = new Set<string>();
+  for (const char of characters) {
+    for (const item of char.inventory ?? []) {
+      if (item.equippedSlot && item.scripts && Object.keys(item.scripts).length)
+        desired.add(ownerKeyOf(char.id, 'item', item.name));
+    }
+    for (const skill of char.skills ?? []) {
+      if (skill.scripts && Object.keys(skill.scripts).length)
+        desired.add(ownerKeyOf(char.id, 'skill', skill.name));
+    }
+  }
+  for (const [key, source] of w.sources) {
+    if (!desired.has(key))
+      unwireObject(
+        saveId,
+        source.char,
+        source.objectType,
+        source.name,
+        source.scripts,
+        source.parentScripts,
+      );
+  }
   for (const char of characters) {
     for (const item of char.inventory ?? []) {
       if (item.equippedSlot) {
@@ -212,6 +269,7 @@ export function unwireEffectSystem(saveId: string): void {
     w.subscriptions.clear();
     w.registry.clear();
     w.owners.clear();
+    w.sources.clear();
     destroyEventBus(saveId);
     wirings.delete(saveId);
   }

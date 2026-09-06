@@ -1087,6 +1087,7 @@ export const useGameStore = defineStore('game', () => {
     messages.value = projection.messages;
     agentLogHistory.value = debugTurns;
     turnCounter = projection.turn;
+    wireEffectSystem(saveId, projection.characters);
     return true;
   }
 
@@ -1190,6 +1191,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function clearActive() {
+    if (activeSaveId.value) unwireEffectSystem(activeSaveId.value);
     invalidatePendingLoads();
     clearSessionRuntime();
     agentLogHistory.value = [];
