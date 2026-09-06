@@ -2,6 +2,7 @@
 import AppButton from '../shared/AppButton.vue';
 
 defineProps<{
+  busy?: boolean;
   canPrev?: boolean;
   canNext?: boolean;
   nextLabel?: string;
@@ -16,7 +17,7 @@ defineEmits<{
 
 <template>
   <footer class="create-footer">
-    <AppButton variant="ghost" size="sm" @click="$emit('openPreset')">
+    <AppButton variant="ghost" size="sm" :disabled="busy" @click="$emit('openPreset')">
       <i class="btn-icon fa-solid fa-bookmark" aria-hidden="true"></i>角色预设
     </AppButton>
 

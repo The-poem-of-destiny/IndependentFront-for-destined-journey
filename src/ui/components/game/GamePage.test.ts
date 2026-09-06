@@ -56,7 +56,8 @@ vi.mock('../../stores/game-store', () => ({
     sidebarCollapsed: false,
     rightPanelMode: 'status',
     fullscreenStatus: false,
-    loadSave: vi.fn(),
+    loadSave: vi.fn(async () => true),
+    invalidatePendingLoads: vi.fn(),
     toggleSidebar: vi.fn(),
     setRightPanel: vi.fn(),
     toggleFullscreen: vi.fn(),
@@ -114,6 +115,7 @@ describe('GamePage', () => {
       rightPanelMode: 'status',
       fullscreenStatus: false,
       loadSave: mockLoadSave,
+      invalidatePendingLoads: vi.fn(),
       toggleSidebar: vi.fn(),
       setRightPanel: vi.fn(),
       toggleFullscreen: vi.fn(),
@@ -121,9 +123,14 @@ describe('GamePage', () => {
       hasOpeningPromptConsumed: true,
       openingPrompt: null as string | null,
     });
-    (useUIStore as any).mockReturnValue({ activeSaveId: 'test-save-123', navigate: vi.fn() });
+    (useUIStore as any).mockReturnValue({
+      activeSaveId: 'test-save-123',
+      currentView: 'game',
+      navigate: vi.fn(),
+    });
 
     mount(GamePage);
+    await flushPromises();
     expect(mockLoadSave).toHaveBeenCalledWith('test-save-123');
   });
 
@@ -152,7 +159,8 @@ describe('GamePage', () => {
       fullscreenStatus: false,
       hasOpeningPromptConsumed: true,
       openingPrompt: null,
-      loadSave: vi.fn(),
+      loadSave: vi.fn(async () => true),
+      invalidatePendingLoads: vi.fn(),
       toggleSidebar: vi.fn(),
       setRightPanel: vi.fn(),
       toggleFullscreen: vi.fn(),
@@ -222,7 +230,8 @@ describe('GamePage', () => {
       fullscreenStatus: false,
       hasOpeningPromptConsumed: true,
       openingPrompt: null,
-      loadSave: vi.fn(),
+      loadSave: vi.fn(async () => true),
+      invalidatePendingLoads: vi.fn(),
       toggleSidebar: vi.fn(),
       setRightPanel: vi.fn(),
       toggleFullscreen: vi.fn(),
@@ -316,7 +325,8 @@ describe('GamePage', () => {
       fullscreenStatus: false,
       hasOpeningPromptConsumed: true,
       openingPrompt: null,
-      loadSave: vi.fn(),
+      loadSave: vi.fn(async () => true),
+      invalidatePendingLoads: vi.fn(),
       toggleSidebar: vi.fn(),
       setRightPanel: vi.fn(),
       toggleFullscreen: vi.fn(),

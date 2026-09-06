@@ -59,18 +59,24 @@ export const useCharacterAppearanceStore = defineStore('characterAppearance', ()
    * 载入某个存档的会话副本。**切存档必须调**，否则会拿上一个存档的外貌去出图
    * （同一个角色名在两周目里长得不一样是正常的，这正是会话副本存在的理由）。
    */
-  async function load(saveId: string): Promise<void> {
+  let loadGeneration = 0;
+  async function load(saveId: string, isCurrent: () => boolean = () => true): Promise<void> {
+    const generation = ++loadGeneration;
+    const ownsLoad = () => generation === loadGeneration && isCurrent();
     loading.value = true;
     try {
-      rows.value = await getCharacterAppearances(saveId);
+      const loaded = await getCharacterAppearances(saveId);
+      if (!ownsLoad()) return;
+      rows.value = loaded;
       activeSaveId.value = saveId;
     } catch {
+      if (!ownsLoad()) return;
       // IndexedDB 不可用 → 空覆盖层。出图会退回基线，是可接受的降级：
       // 少一件衣服总比整条出图链路挂掉好（对齐 image-preset-store 的降级）
       rows.value = [];
       activeSaveId.value = saveId;
     } finally {
-      loading.value = false;
+      if (generation === loadGeneration) loading.value = false;
     }
   }
 

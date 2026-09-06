@@ -1683,6 +1683,33 @@ describe('reviseOutline 重 roll 与 outlineHistory', () => {
 // ===== startJourney 落库（plotSettings metadata + 大纲 + 事件树） =====
 
 describe('startJourney 剧情落库', () => {
+  it('concurrent submissions create one complete journey', async () => {
+    const store = setupPlotStore();
+    const [first, second] = await Promise.all([store.startJourney(), store.startJourney()]);
+    const { getSaves, getCharacters } = await import('@engine/database');
+    expect(first).toBe(second);
+    expect(await getSaves()).toHaveLength(1);
+    expect(await getCharacters(first)).toHaveLength(1);
+  });
+
+  it('a profile write failure rolls back the whole journey and permits retry', async () => {
+    const store = setupPlotStore();
+    const { getDatabase, getSaves } = await import('@engine/database');
+    const db = getDatabase();
+    const failure = vi
+      .spyOn(db.saveProfiles, 'put')
+      .mockRejectedValueOnce(new Error('disk failure'));
+    try {
+      await expect(store.startJourney()).rejects.toThrow('disk failure');
+      expect(await getSaves()).toHaveLength(0);
+      expect(await db.characters.count()).toBe(0);
+      await expect(store.startJourney()).resolves.toEqual(expect.any(String));
+      expect(await getSaves()).toHaveLength(1);
+    } finally {
+      failure.mockRestore();
+    }
+  });
+
   beforeEach(async () => {
     chatMock.mockReset();
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })) as any);
