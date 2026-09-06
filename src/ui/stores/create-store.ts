@@ -67,6 +67,8 @@ import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { useWorldBookStore } from './worldbook-store';
 import { useWorkshopStore } from './workshop-store';
 import { getAgentSettings } from './agent-settings';
+// 🆕 F10（2026-09-04）：plot_outline 端点解析与 game-pipeline 走同一个 fail-closed 解析器
+import { resolveAgentEndpoint } from '../lib/endpoint-resolver';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import type { WorldBook, WorldBookEntry } from '@engine/types';
 import {
@@ -968,8 +970,15 @@ export const useCreateStore = defineStore('create', () => {
   // 剧情大纲生成 — 捏人页走模板系统 (buildAgentMessagesAsync)
   // ═══════════════════════════════════════════════════════
 
-  /** 端点解析（对齐 game-pipeline.buildEndpoints: 每个 Agent 的 `model` 存 API 池 id，ApiEntry.model → defaultModel） */
-  function resolvePlotOutlineEndpoint(): ApiEndpoint | null {
+  /**
+   * 端点解析（对齐 game-pipeline.buildEndpoints + resolveAgentEndpoint）。
+   * 🔴 F10：`plot_outline` 的 `model` 键存 **API 池 id**（历史命名不改），显式绑定失效时
+   *    绝不回落 `pool[0]`（那会把大纲偷偷送去另一家 provider）——返回带原因的失败，
+   *    调用方（runOutlineGeneration）把原因翻译成用户可见文案。
+   */
+  function resolvePlotOutlineEndpoint():
+    | { ok: true; endpoint: ApiEndpoint }
+    | { ok: false; reason: 'missing-pool' | 'stale-binding'; requestedPoolId?: string } {
     try {
       const store = useSettingsStore();
       const s = store.settings;
@@ -989,9 +998,14 @@ export const useCreateStore = defineStore('create', () => {
         'plot_outline',
         store.projectAgentDefaults?.agents ?? {},
       ).model;
-      return pool.find((ep) => ep.id === poolId) || pool[0] || null;
+      const resolution = resolveAgentEndpoint({ boundPoolId: poolId, apiPool: pool });
+      if (resolution.status === 'resolved') return { ok: true, endpoint: resolution.endpoint };
+      if (resolution.status === 'stale-binding') {
+        return { ok: false, reason: 'stale-binding', requestedPoolId: resolution.requestedId };
+      }
+      return { ok: false, reason: 'missing-pool' };
     } catch {
-      return null;
+      return { ok: false, reason: 'missing-pool' };
     }
   }
 
@@ -1246,8 +1260,18 @@ export const useCreateStore = defineStore('create', () => {
   async function runOutlineGeneration(initialUserMessage: string): Promise<boolean> {
     plotGenerationError.value = null;
     await useSettingsStore().initApiSecrets();
-    const endpoint = resolvePlotOutlineEndpoint();
-    if (!endpoint || !endpoint.defaultModel) {
+    // 🔴 F10：端点解析失败时区分「还没配」与「绑定了但已失效」——
+    //    前者让人去配置，后者是设置页里那个池被删了，指引到 Agent 配置重选。
+    const resolved = resolvePlotOutlineEndpoint();
+    if (!resolved.ok) {
+      plotGenerationError.value =
+        resolved.reason === 'stale-binding'
+          ? `「大纲生成」Agent 绑定的 API 池已失效（原 id: ${resolved.requestedPoolId ?? ''}），请在设置 → Agent 配置重新选择`
+          : '未配置 API 端点或模型，请在设置页为「大纲生成」Agent 配置 API';
+      return false;
+    }
+    const endpoint = resolved.endpoint;
+    if (!endpoint.defaultModel) {
       plotGenerationError.value = '未配置 API 端点或模型，请在设置页为「大纲生成」Agent 配置 API';
       return false;
     }

@@ -9,6 +9,37 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 综合代码审查修复批 C 组 + 安全小组｜已实施（2026-09-05，`npm run gates` 全绿）
+
+按 2026-09-04 风险聚焦代码审查（baseline `0cad0b9`）与 `Coding_Agent_Fix_References`
+修复简报推进 7 条修复，合并为一批合入：
+
+- **F07** 状态效果时间分区不变式：小时型效果每次推进直接 `Math.floor(minutes/60)`，
+  两段 30 分钟永远凑不成 1 小时 → 引入 `StatusEffect.carryMinutes` 整数累积，满整小时才扣
+  `remainingTime`；刷新拉长时长时余量归零（新窗口起点）；旧档缺省按 0 处理不凭空延长。
+  回归钉死 60 / 30+30 / 10×6 分区不变式与中间态。
+- **F08** 地图收益可恢复（known-issue 第 2 条闭环）：`incomeDue` 折叠成持久借据
+  （`worldFlags.mapIncome`，零新 Dexie 表、随 FullBackup），与地图事实态同一次 profile 落库；
+  `settlePendingMapIncome()` 以「给钱 + 标记 applied」同一 IDB 事务原子消费，崩溃重放恰一次。
+  历史损失不回溯补偿，如实记入 known-issue。
+- **F09** 嵌入向量溯源与安全召回：新增 `EmbeddingMetadata`（端点身份+模型+维度+预处理版本
+  归一化指纹，不含凭据）随向量存储；召回四桶分类，只对兼容向量算余弦，坏行跳过不毒化整库；
+  无指纹 legacy 记录走重要性/recency 兜底。存量向量停止语义排名直到显式重嵌入。
+- **F10** 显式 API 端点绑定 fail-closed：新增纯解析器 `endpoint-resolver.ts` 统一主 DAG
+  / 侧链 / 标题大纲路径，区分「未设置走默认」与「显式绑定失效报错」，杜绝 `find || apiPool[0]`
+  静默改道；主 Agent 失效停轮 + toast，可选侧链按既有策略跳过（绝不换 provider）。
+- **F11** 代理目的地策略：IPv6 字面量归一化后比对 SSRF 黑名单（补 IPv4-mapped 条目）；
+  `redirect:'manual'` + 3xx 显式拒绝，不跟随绕过策略。
+- **F13** 内容写原子性：边读边限 10 MiB（413）、JSON 校验（400）、临时文件 + 原子 rename，
+  失败保留旧版本。
+- **F15** 美化规则同 ID 用户优先：`mergeRules` / `useBeautify` 改为原位整条替换
+  （保槽位顺序），locked 受保护不可替，重复 ID 后到覆盖，输入不被就地修改。
+
+验证：新增回归覆盖以上各条（state-manager.map-income / endpoint-resolver 独立测试文件 +
+各模块扩展）。完整 `npm run gates` 通过：**367 个测试文件、9,380 项通过与 8 项跳过**，
+typecheck（引擎/Vue/工具）×3 + build + format + lint + knip 棘轮（140 基线无新增）全绿；
+F08 并发审查（锁序/事务重放/陈档覆写）确认无死锁与丢更新。
+
 ### 游玩中玩家人设编辑｜已实施（2026-08-30，UI 真机走查通过）
 
 主角状态栏新增“编辑人设”入口，仅编辑当前存档角色表中的 `personality`、

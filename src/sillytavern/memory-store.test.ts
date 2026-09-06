@@ -6,7 +6,9 @@
  *         saveMemoryWithEmbedding
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { MemoryRecord } from './types';
+import type { EmbeddingMetadata, MemoryRecord } from './types';
+// type-only import：不产生运行时依赖，vi.mock 仍能正常拦截 './memory-store'
+import type { RecallDiagnostics } from './memory-store';
 
 // ═══════════════════════════════════════════════════════════════
 // Mock hoisting — function refs available before module import
@@ -34,12 +36,22 @@ vi.stubGlobal('fetch', mockFetch);
 
 const {
   computeEmbedding,
+  computeEmbeddingWithMeta,
   cosineSimilarity,
   recallMemories,
   getRoundCount,
   checkCompressionNeeded,
   applyCompression,
   saveMemoryWithEmbedding,
+  computeEmbeddingSpaceId,
+  normalizeEndpointIdentity,
+  buildEmbeddingMetadata,
+  buildEmbeddingText,
+  validateEmbeddingVector,
+  classifyStoredVector,
+  hashTextDeterministic,
+  EMBEDDING_PREPROCESSING_VERSION,
+  MAX_EMBEDDING_DIMENSIONS,
 } = await import('./memory-store');
 
 // ═══════════════════════════════════════════════════════════════
@@ -55,6 +67,14 @@ function makeEndpoint(
     defaultModel: 'deepseek-chat',
     ...overrides,
   };
+}
+
+/**
+ * 为某条记忆构造与 `makeEndpoint()` 同空间的元数据（recall 余弦用例需要查询端与
+ * 存储端 spaceId 一致，否则按 F09 语义会判 incompatible）。
+ */
+function metaFor(embedding: number[], model = 'deepseek-chat'): EmbeddingMetadata {
+  return buildEmbeddingMetadata(embedding, makeEndpoint(), model, 'test-input');
 }
 
 function makeMemory(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
@@ -373,9 +393,27 @@ describe('recallMemories', () => {
   });
 
   it('should rank memories with embeddings by cosine similarity (topK)', async () => {
-    const mem1 = makeMemory({ id: 'MEM000001', embedding: [1, 0, 0], importance: 1 });
-    const mem2 = makeMemory({ id: 'MEM000002', embedding: [0, 1, 0], importance: 5 });
-    const mem3 = makeMemory({ id: 'MEM000003', embedding: [1, 1, 0], importance: 3 });
+    const emb1 = [1, 0, 0];
+    const emb2 = [0, 1, 0];
+    const emb3 = [1, 1, 0];
+    const mem1 = makeMemory({
+      id: 'MEM000001',
+      embedding: emb1,
+      importance: 1,
+      embeddingMeta: metaFor(emb1),
+    });
+    const mem2 = makeMemory({
+      id: 'MEM000002',
+      embedding: emb2,
+      importance: 5,
+      embeddingMeta: metaFor(emb2),
+    });
+    const mem3 = makeMemory({
+      id: 'MEM000003',
+      embedding: emb3,
+      importance: 3,
+      embeddingMeta: metaFor(emb3),
+    });
     mockGetMemoriesResolved([mem1, mem2, mem3]);
 
     // Query embedding = [1, 0, 0] — most similar to mem1
@@ -409,7 +447,13 @@ describe('recallMemories', () => {
   });
 
   it('should put memories with embeddings before those without', async () => {
-    const memEmbedded = makeMemory({ id: 'MEM000001', embedding: [0.9, 0.1, 0.0], importance: 1 });
+    const emb = [0.9, 0.1, 0.0];
+    const memEmbedded = makeMemory({
+      id: 'MEM000001',
+      embedding: emb,
+      importance: 1,
+      embeddingMeta: metaFor(emb),
+    });
     const memNoEmbedding = makeMemory({ id: 'MEM000002', embedding: undefined, importance: 10 });
     mockGetMemoriesResolved([memEmbedded, memNoEmbedding]);
     // Query embedding matches memEmbedded
@@ -446,7 +490,11 @@ describe('recallMemories', () => {
   });
 
   it('should apply topK limit correctly', async () => {
-    const memories = makeMemories(20, 'save_1', { embedding: [0.1, 0.2, 0.3] });
+    const emb = [0.1, 0.2, 0.3];
+    const memories = makeMemories(20, 'save_1', {
+      embedding: emb,
+      embeddingMeta: metaFor(emb),
+    });
     mockGetMemoriesResolved(memories);
     mockFetchResolved([0.1, 0.2, 0.3]);
 
@@ -456,7 +504,11 @@ describe('recallMemories', () => {
   });
 
   it('should return all memories when topK exceeds available count', async () => {
-    const memories = makeMemories(3, 'save_1', { embedding: [0.1, 0.2] });
+    const emb = [0.1, 0.2];
+    const memories = makeMemories(3, 'save_1', {
+      embedding: emb,
+      embeddingMeta: metaFor(emb),
+    });
     mockGetMemoriesResolved(memories);
     mockFetchResolved([0.1, 0.2]);
 
@@ -473,6 +525,445 @@ describe('recallMemories', () => {
     const result = await recallMemories('save_1', 'query', 5, makeEndpoint(), controller.signal);
     expect(result).toEqual([]);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 3b. F09 — 空间指纹 / 向量校验 / 召回分区 / 溯源兜底
+// ═══════════════════════════════════════════════════════════════
+
+describe('F09 normalizeEndpointIdentity / computeEmbeddingSpaceId', () => {
+  it('同一端点 + 模型 + 维度 → 空间指纹稳定', () => {
+    const a = computeEmbeddingSpaceId(makeEndpoint(), 'deepseek-chat', 3);
+    const b = computeEmbeddingSpaceId(makeEndpoint(), 'deepseek-chat', 3);
+    expect(a).toBe(b);
+  });
+
+  it('key 轮换不改变空间指纹（同端 + 同模型 + 同维度照常兼容）', () => {
+    const a = computeEmbeddingSpaceId(
+      { baseUrl: 'https://api.deepseek.com/v1' },
+      'deepseek-chat',
+      3,
+    );
+    const b = computeEmbeddingSpaceId(
+      { baseUrl: 'https://api.deepseek.com/v1' },
+      'deepseek-chat',
+      3,
+    );
+    expect(a).toBe(b);
+    expect(a).not.toContain('sk-');
+  });
+
+  it('尾斜杠 / 显式默认端口 / userinfo / query 不改变指纹', () => {
+    const base = computeEmbeddingSpaceId({ baseUrl: 'https://api.example.com/v1' }, 'm', 3);
+    expect(computeEmbeddingSpaceId({ baseUrl: 'https://api.example.com/v1/' }, 'm', 3)).toBe(base);
+    expect(computeEmbeddingSpaceId({ baseUrl: 'https://api.example.com:443/v1' }, 'm', 3)).toBe(
+      base,
+    );
+    expect(
+      computeEmbeddingSpaceId({ baseUrl: 'https://user:pass@api.example.com/v1' }, 'm', 3),
+    ).toBe(base);
+    expect(computeEmbeddingSpaceId({ baseUrl: 'https://api.example.com/v1?x=1#h' }, 'm', 3)).toBe(
+      base,
+    );
+  });
+
+  it('不同模型 / 不同维度 → 不同空间', () => {
+    const base = computeEmbeddingSpaceId({ baseUrl: 'https://api.example.com/v1' }, 'm', 3);
+    expect(computeEmbeddingSpaceId({ baseUrl: 'https://api.example.com/v1' }, 'other', 3)).not.toBe(
+      base,
+    );
+    expect(computeEmbeddingSpaceId({ baseUrl: 'https://api.example.com/v1' }, 'm', 128)).not.toBe(
+      base,
+    );
+  });
+
+  it('非 URL baseUrl 同样稳定且剥离敏感片段', () => {
+    const base = normalizeEndpointIdentity('api.example.com/v1');
+    expect(normalizeEndpointIdentity('api.example.com/v1/')).toBe(base);
+    expect(normalizeEndpointIdentity('user:pw@api.example.com/v1')).not.toContain('user:pw');
+    expect(normalizeEndpointIdentity('api.example.com/v1?token=secret')).not.toContain('token');
+  });
+});
+
+describe('F09 buildEmbeddingMetadata / hashTextDeterministic / buildEmbeddingText', () => {
+  it('同一文本 + 同一配置 → 元数据可复现（contentRevision 稳定）', () => {
+    const m1 = buildEmbeddingMetadata([1, 2, 3], makeEndpoint(), 'deepseek-chat', 'x');
+    const m2 = buildEmbeddingMetadata([1, 2, 3], makeEndpoint(), 'deepseek-chat', 'x');
+    expect(m1.spaceId).toBe(m2.spaceId);
+    expect(m1.contentRevision).toBe(m2.contentRevision);
+    expect(hashTextDeterministic('x')).toBe('fd0c5087'); // 钉死算法，防静默漂移
+  });
+
+  it('文本变 → contentRevision 变', () => {
+    const m1 = buildEmbeddingMetadata([1, 2, 3], makeEndpoint(), 'm', 'a');
+    const m2 = buildEmbeddingMetadata([1, 2, 3], makeEndpoint(), 'm', 'b');
+    expect(m1.contentRevision).not.toBe(m2.contentRevision);
+  });
+
+  it('buildEmbeddingText 收敛记忆输入的拼接格式', () => {
+    expect(buildEmbeddingText(['战斗', '胜利'], '正文')).toBe('[战斗, 胜利] 正文');
+    expect(buildEmbeddingText([], '正文')).toBe('[] 正文');
+  });
+});
+
+describe('F09 validateEmbeddingVector', () => {
+  it('合法向量通过', () => {
+    expect(validateEmbeddingVector([1, 2, 3])).toEqual({ valid: true });
+  });
+
+  it('空 / 非数组 / NaN / Infinity / 字符串元素 / 零向量 / 超上限 → 非法', () => {
+    expect(validateEmbeddingVector([]).valid).toBe(false);
+    expect(validateEmbeddingVector('nope' as unknown).valid).toBe(false);
+    expect(validateEmbeddingVector([1, NaN]).valid).toBe(false);
+    expect(validateEmbeddingVector([1, Infinity]).valid).toBe(false);
+    expect(validateEmbeddingVector(['x' as unknown, 2]).valid).toBe(false);
+    expect(validateEmbeddingVector([0, 0, 0]).valid).toBe(false);
+    expect(validateEmbeddingVector(new Array(MAX_EMBEDDING_DIMENSIONS + 1).fill(1)).valid).toBe(
+      false,
+    );
+  });
+
+  it('expectedDimensions 精确比对', () => {
+    expect(validateEmbeddingVector([1, 2], { expectedDimensions: 3 }).valid).toBe(false);
+    expect(validateEmbeddingVector([1, 2, 3], { expectedDimensions: 3 }).valid).toBe(true);
+  });
+});
+
+describe('F09 classifyStoredVector', () => {
+  const spaceId = computeEmbeddingSpaceId({ baseUrl: 'https://api.example.com/v1' }, 'm', 3);
+  const meta = buildEmbeddingMetadata(
+    [1, 2, 3],
+    { baseUrl: 'https://api.example.com/v1' },
+    'm',
+    't',
+  );
+
+  it('无向量 → missing', () => {
+    expect(classifyStoredVector(undefined, undefined, spaceId, 3).kind).toBe('missing');
+  });
+
+  it('空 / NaN / 零向量 → invalid（坏数据只丢自己）', () => {
+    expect(classifyStoredVector([], meta, spaceId, 3).kind).toBe('invalid');
+    expect(classifyStoredVector([1, NaN], meta, spaceId, 3).kind).toBe('invalid');
+    expect(classifyStoredVector([0, 0, 0], meta, spaceId, 3).kind).toBe('invalid');
+  });
+
+  it('无元数据（legacy）→ incompatible，哪怕维度相同也不假定同一空间', () => {
+    expect(classifyStoredVector([1, 2, 3], undefined, spaceId, 3).kind).toBe('incompatible');
+  });
+
+  it('spaceId 不同 → incompatible（同维不同模型同端不同名也拒绝余弦）', () => {
+    const otherSpace = computeEmbeddingSpaceId(
+      { baseUrl: 'https://api.example.com/v1' },
+      'other',
+      3,
+    );
+    // meta 属于 'm' 空间，查询在 'other' 空间
+    expect(classifyStoredVector([1, 2, 3], meta, otherSpace, 3).kind).toBe('incompatible');
+  });
+
+  it('元数据维度与查询不符 → invalid（空间同但维度矛盾 = 元数据损坏）', () => {
+    const badMeta = { ...meta, dimensions: 99 };
+    expect(classifyStoredVector([1, 2, 3], badMeta, spaceId, 3).kind).toBe('invalid');
+  });
+
+  it('同空间 + 同维度 → compatible', () => {
+    expect(classifyStoredVector([1, 2, 3], meta, spaceId, 3).kind).toBe('compatible');
+  });
+});
+
+describe('F09 computeEmbeddingWithMeta', () => {
+  it('返回向量 + 同空间元数据（模型/维度/预处理版本齐全）', async () => {
+    const embedding = [0.1, 0.2, 0.3];
+    mockFetchResolved(embedding);
+
+    const result = await computeEmbeddingWithMeta('text', makeEndpoint());
+    expect(result.embedding).toEqual(embedding);
+    expect(result.meta).toMatchObject({
+      model: 'deepseek-chat',
+      dimensions: 3,
+      preprocessingVersion: EMBEDDING_PREPROCESSING_VERSION,
+    });
+    expect(result.meta.spaceId).toContain('deepseek-chat|d3|');
+  });
+
+  it('provider 报告模型不同时记入 modelRevision', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        object: 'list',
+        data: [{ embedding: [1, 2, 3], index: 0 }],
+        model: 'resolved-other-model',
+      }),
+      text: async () => '',
+    });
+
+    const result = await computeEmbeddingWithMeta('text', makeEndpoint());
+    expect(result.meta.modelRevision).toBe('resolved-other-model');
+  });
+
+  it('provider 返回空数组 → 抛「向量非法」', async () => {
+    mockFetchResolved([]);
+    await expect(computeEmbeddingWithMeta('text', makeEndpoint())).rejects.toThrow('向量非法');
+  });
+
+  it('provider 返回含 NaN 的向量 → 抛「向量非法」', async () => {
+    mockFetchResolved([1, NaN]);
+    await expect(computeEmbeddingWithMeta('text', makeEndpoint())).rejects.toThrow('向量非法');
+  });
+
+  it('provider 返回零向量 → 抛「向量非法」', async () => {
+    mockFetchResolved([0, 0, 0]);
+    await expect(computeEmbeddingWithMeta('text', makeEndpoint())).rejects.toThrow('向量非法');
+  });
+});
+
+describe('F09 recallMemories — 溯源与兜底', () => {
+  it('换维度模型：旧向量与查询不同维 → 不抛、不参与余弦、重要性兜底', async () => {
+    // 旧档 3 维向量（无元数据 = legacy），查询端模型返回 128 维
+    const memHigh = makeMemory({ id: 'MEM000002', importance: 9, embedding: [1, 0, 0] });
+    const memLow = makeMemory({ id: 'MEM000001', importance: 2, embedding: [0, 1, 0] });
+    mockGetMemoriesResolved([memLow, memHigh]);
+    mockFetchResolved(new Array(128).fill(0.1));
+
+    let diag: RecallDiagnostics | undefined;
+    const result = await recallMemories(
+      'save_1',
+      'query',
+      2,
+      makeEndpoint(),
+      undefined,
+      undefined,
+      (d) => {
+        diag = d;
+      },
+    );
+
+    expect(result).toHaveLength(2);
+    // importance 兜底：9 分的在前面；score 恒 0（不冒充余弦分）
+    expect(result[0].memory.id).toBe('MEM000002');
+    expect(result[0].score).toBe(0);
+    expect(result[0].source).toBe('fallback');
+    expect(diag?.queryDimensions).toBe(128);
+    expect(diag?.incompatible).toBe(2);
+    expect(diag?.compatible).toBe(0);
+  });
+
+  it('同维不同模型：spaceId 不同 → 不按余弦排序，按 importance 兜底', async () => {
+    const emb = [1, 0, 0];
+    // 存储端来自另一个模型 → 不同空间（哪怕维度同为 3）
+    const foreignMeta = buildEmbeddingMetadata(
+      emb,
+      { baseUrl: 'https://api.deepseek.com/v1' },
+      'text-embedding-v1',
+      't',
+    );
+    const memA = makeMemory({
+      id: 'MEM000001',
+      importance: 3,
+      embedding: [1, 0, 0],
+      embeddingMeta: foreignMeta,
+    });
+    const memB = makeMemory({
+      id: 'MEM000002',
+      importance: 8,
+      embedding: [0, 0, 1],
+      embeddingMeta: foreignMeta,
+    });
+    mockGetMemoriesResolved([memA, memB]);
+    mockFetchResolved([1, 0, 0]); // 查询端 'deepseek-chat'
+
+    const result = await recallMemories('save_1', 'query', 2, makeEndpoint());
+
+    // 与查询向量最像的 memA 不得排第一 —— 跨空间余弦被禁止，8 分兜底优先
+    expect(result[0].memory.id).toBe('MEM000002');
+    expect(result[0].score).toBe(0);
+    expect(result.every((r) => r.source === 'fallback')).toBe(true);
+  });
+
+  it('key 轮换（同空间）：余弦照常参与，不被误判不兼容', async () => {
+    const emb = [1, 0, 0];
+    const mem = makeMemory({
+      id: 'MEM000001',
+      embedding: emb,
+      embeddingMeta: metaFor(emb),
+    });
+    mockGetMemoriesResolved([mem]);
+    mockFetchResolved([1, 0, 0]);
+
+    const result = await recallMemories(
+      'save_1',
+      'query',
+      1,
+      makeEndpoint({ apiKey: 'sk-rotated-key' }),
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('cosine');
+    expect(result[0].score).toBeCloseTo(1, 5);
+  });
+
+  it('一条坏数据不毒化整次召回：compatible 正常排名，坏条目走兜底', async () => {
+    const goodEmb = [1, 0, 0];
+    const good = makeMemory({
+      id: 'MEM000001',
+      importance: 3,
+      embedding: goodEmb,
+      embeddingMeta: metaFor(goodEmb),
+    });
+    const zeroVec = makeMemory({ id: 'MEM000002', importance: 9, embedding: [0, 0, 0] }); // invalid
+    const noEmb = makeMemory({ id: 'MEM000003', importance: 7 }); // missing
+    mockGetMemoriesResolved([good, zeroVec, noEmb]);
+    mockFetchResolved([1, 0, 0]);
+
+    const result = await recallMemories('save_1', 'query', 3, makeEndpoint());
+
+    expect(result).toHaveLength(3);
+    expect(result[0].memory.id).toBe('MEM000001'); // 唯一 compatible 排最前
+    expect(result[0].score).toBeCloseTo(1, 5);
+    // 坏数据只被剥夺「余弦资格」，记忆文本仍以兜底身份补进剩余槽
+    expect(result.map((r) => r.memory.id)).toEqual(['MEM000001', 'MEM000002', 'MEM000003']);
+    expect(result[1].source).toBe('fallback');
+    expect(result[1].score).toBe(0);
+  });
+
+  it('存量无指纹（legacy 全库）：纯 importance/recency 兜底且诊断诚实', async () => {
+    const mem1 = makeMemory({ id: 'MEM000001', importance: 3, embedding: [1, 0, 0] });
+    const mem2 = makeMemory({ id: 'MEM000002', importance: 8, embedding: [0, 1, 0] });
+    mockGetMemoriesResolved([mem1, mem2]);
+    mockFetchResolved([1, 0, 0]);
+
+    let diag: RecallDiagnostics | undefined;
+    const result = await recallMemories(
+      'save_1',
+      'query',
+      2,
+      makeEndpoint(),
+      undefined,
+      undefined,
+      (d) => {
+        diag = d;
+      },
+    );
+
+    expect(result.map((r) => r.memory.id)).toEqual(['MEM000002', 'MEM000001']);
+    expect(result.every((r) => r.source === 'fallback' && r.score === 0)).toBe(true);
+    expect(diag?.incompatible).toBe(2);
+    expect(diag?.compatible).toBe(0);
+    expect(diag?.spaceId).toContain('deepseek-chat');
+    expect(JSON.stringify(diag)).not.toContain('sk-');
+  });
+
+  it('查询失败（provider 500）→ 非致命兜底 + queryError 诊断，不抛', async () => {
+    const mem1 = makeMemory({ id: 'MEM000001', importance: 3, embedding: [1, 0, 0] });
+    const mem2 = makeMemory({ id: 'MEM000002', importance: 8, embedding: [0, 1, 0] });
+    mockGetMemoriesResolved([mem1, mem2]);
+    mockFetchErrorResolved(500, 'Server Error');
+
+    let diag: RecallDiagnostics | undefined;
+    const result = await recallMemories(
+      'save_1',
+      'query',
+      2,
+      makeEndpoint(),
+      undefined,
+      undefined,
+      (d) => {
+        diag = d;
+      },
+    );
+
+    expect(result).toHaveLength(2);
+    expect(result[0].memory.id).toBe('MEM000002');
+    expect(result.every((r) => r.score === 0)).toBe(true);
+    expect(diag?.queryError).toContain('Embedding API 500');
+    expect(diag?.total).toBe(2);
+  });
+
+  it('查询向量非法（provider 返回 NaN）→ 同样兜底，queryError 给出原因', async () => {
+    mockGetMemoriesResolved([makeMemory({ id: 'MEM000001', importance: 5 })]);
+    mockFetchResolved([NaN, 1, 2]);
+
+    let diag: RecallDiagnostics | undefined;
+    const result = await recallMemories(
+      'save_1',
+      'query',
+      1,
+      makeEndpoint(),
+      undefined,
+      undefined,
+      (d) => {
+        diag = d;
+      },
+    );
+
+    expect(result[0].score).toBe(0);
+    expect(result[0].source).toBe('fallback');
+    expect(diag?.queryError).toContain('向量非法');
+  });
+
+  it('兼容足量时不掺兜底；不足才按槽位补齐（fallbackUsed 语义）', async () => {
+    const emb = [1, 0, 0];
+    const compatible = makeMemory({
+      id: 'MEM000001',
+      importance: 1,
+      embedding: emb,
+      embeddingMeta: metaFor(emb),
+    });
+    const legacy = makeMemory({
+      id: 'MEM000002',
+      importance: 9,
+      embedding: [0, 1, 0],
+    });
+    mockGetMemories.mockResolvedValue([compatible, legacy]);
+    // 本用例连续召回两次（topK 不同），fetch 也必须是常驻 mock
+    mockFetch.mockResolvedValue(makeEmbeddingResponse([1, 0, 0]));
+
+    // topK=1：只要 cosine，不掺兜底
+    const oneResult = await recallMemories('save_1', 'query', 1, makeEndpoint());
+    expect(oneResult).toHaveLength(1);
+    expect(oneResult[0].source).toBe('cosine');
+    expect(oneResult[0].memory.id).toBe('MEM000001');
+
+    // topK=2：余 1 槽由 importance 兜底补上，score=0
+    const twoResults = await recallMemories('save_1', 'query', 2, makeEndpoint());
+    expect(twoResults).toHaveLength(2);
+    expect(twoResults[0].source).toBe('cosine');
+    expect(twoResults[1].source).toBe('fallback');
+    expect(twoResults[1].memory.id).toBe('MEM000002');
+    expect(twoResults[1].score).toBe(0);
+  });
+
+  it('诊断：compatible / missing / invalid 计数分离且不含凭据', async () => {
+    const goodEmb = [1, 0, 0];
+    mockGetMemoriesResolved([
+      makeMemory({
+        id: 'MEM000001',
+        embedding: goodEmb,
+        embeddingMeta: metaFor(goodEmb),
+      }),
+      makeMemory({ id: 'MEM000002', embedding: [NaN, 1, 1] }), // invalid
+      makeMemory({ id: 'MEM000003' }), // missing
+    ]);
+    mockFetchResolved([1, 0, 0]);
+
+    let diag: RecallDiagnostics | undefined;
+    await recallMemories('save_1', 'query', 3, makeEndpoint(), undefined, undefined, (d) => {
+      diag = d;
+    });
+
+    expect(diag).toMatchObject({
+      total: 3,
+      compatible: 1,
+      missing: 1,
+      invalid: 1,
+      incompatible: 0,
+      fallbackUsed: true,
+      queryDimensions: 3,
+    });
+    expect(JSON.stringify(diag)).not.toContain('sk-');
   });
 });
 
@@ -623,24 +1114,54 @@ describe('saveMemoryWithEmbedding', () => {
     const memory = makeMemory({ embedding: undefined, keywords: ['战斗', '胜利'] });
     const result = await saveMemoryWithEmbedding(memory, makeEndpoint());
 
-    // The embedding should be set on the memory
+    // The embedding should be set on the memory, plus its provenance metadata
     expect(result.embedding).toEqual(embedding);
+    expect(result.embeddingMeta).toBeDefined();
+    expect(result.embeddingMeta?.dimensions).toBe(4);
+    expect(result.embeddingMeta?.spaceId).toContain('deepseek-chat|d4|');
+    expect(result.embeddingMeta?.preprocessingVersion).toBe(EMBEDDING_PREPROCESSING_VERSION);
     // saveMemory should be called with the memory (now with embedding)
     expect(mockSaveMemory).toHaveBeenCalledTimes(1);
     expect(mockSaveMemory).toHaveBeenCalledWith(memory);
   });
 
-  it('should save memory without embedding on API failure', async () => {
+  it('should save memory without embedding on API failure (metadata cleared atomically)', async () => {
     mockFetchRejected(new Error('Network error'));
 
-    const memory = makeMemory({ embedding: [1, 2, 3], keywords: ['探索'] });
+    const staleMeta = buildEmbeddingMetadata(
+      [1, 2, 3],
+      makeEndpoint(),
+      'deepseek-chat',
+      'old-text',
+    );
+    const memory = makeMemory({
+      embedding: [1, 2, 3],
+      embeddingMeta: staleMeta,
+      keywords: ['探索'],
+    });
     const result = await saveMemoryWithEmbedding(memory, makeEndpoint());
 
-    // Original embedding should be cleared
+    // Original embedding AND its metadata should both be cleared (atomic pair)
     expect(result.embedding).toBeUndefined();
+    expect(result.embeddingMeta).toBeUndefined();
     // saveMemory should still be called
     expect(mockSaveMemory).toHaveBeenCalledTimes(1);
     expect(mockSaveMemory).toHaveBeenCalledWith(memory);
+  });
+
+  it('provider 返回非法向量时保存为无 embedding（并原子清空元数据）', async () => {
+    mockFetchResolved([NaN, 1, 2]);
+
+    const memory = makeMemory({
+      embedding: [1, 2, 3],
+      embeddingMeta: metaFor([1, 2, 3]),
+      keywords: ['探索'],
+    });
+    const result = await saveMemoryWithEmbedding(memory, makeEndpoint());
+
+    expect(result.embedding).toBeUndefined();
+    expect(result.embeddingMeta).toBeUndefined();
+    expect(mockSaveMemory).toHaveBeenCalledTimes(1);
   });
 
   it('should build embedding text from keywords and content', async () => {

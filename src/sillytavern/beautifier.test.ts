@@ -149,6 +149,66 @@ describe('mergeRules — 手动翻转内置默认状态', () => {
 
     expect(merged).toMatchObject({ enabled: true, locked: true });
   });
+
+  // ===================================================================
+  // F15: 文档契约「同名 ID 用户优先」—— 旧实现把同 ID 用户规则静默丢弃、预设原样保留
+  // ===================================================================
+  it('用户规则同 ID 命中原槽位 → 整条替换预设（非追加、保留槽位顺序）', () => {
+    const presetA = rule({ id: 'a', pattern: 'preset-a', order: 1, isBuiltin: true });
+    const presetB = rule({ id: 'b', pattern: 'preset-b', order: 2, isBuiltin: true });
+    const userA = rule({ id: 'a', pattern: 'user-a', order: 99, isBuiltin: false });
+
+    const merged = mergeRules([presetA, presetB], [userA], [], new Set(), new Set(), new Set());
+
+    expect(merged).toHaveLength(2);
+    // 槽位顺序保持：a 仍在 b 之前
+    expect(merged.map((r) => r.id)).toEqual(['a', 'b']);
+    // 同 ID 项被用户规则替换（pattern 与 isBuiltin 都来自用户）
+    expect(merged[0]).toMatchObject({ id: 'a', pattern: 'user-a', isBuiltin: false, order: 99 });
+    expect(merged[1]?.id).toBe('b');
+  });
+
+  it('独有用户规则仍按用户顺序追加，未触碰的预设原样保留', () => {
+    const preset = rule({ id: 'preset', pattern: 'preset-x', isBuiltin: true });
+    const userA = rule({ id: 'user-a', pattern: 'ua', isBuiltin: false });
+    const userB = rule({ id: 'user-b', pattern: 'ub', isBuiltin: false });
+
+    const merged = mergeRules([preset], [userA, userB], [], new Set(), new Set(), new Set());
+
+    expect(merged.map((r) => r.id)).toEqual(['preset', 'user-a', 'user-b']);
+    expect(merged[0]).toMatchObject({ id: 'preset', pattern: 'preset-x', isBuiltin: true });
+  });
+
+  it('用户规则重复 ID → 后到覆盖，不产生重复 ID', () => {
+    const userA1 = rule({ id: 'u', pattern: 'first', isBuiltin: false });
+    const userA2 = rule({ id: 'u', pattern: 'second', isBuiltin: false });
+
+    const merged = mergeRules([], [userA1, userA2], [], new Set(), new Set(), new Set());
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.pattern).toBe('second');
+  });
+
+  it('locked 预设不可被同 ID 用户规则替换（受保护）', () => {
+    const preset = rule({ id: 'sys', pattern: 'preset', isBuiltin: true, locked: true });
+    const user = rule({ id: 'sys', pattern: 'user', isBuiltin: false });
+
+    const merged = mergeRules([preset], [user], [], new Set(), new Set(), new Set());
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ id: 'sys', pattern: 'preset', locked: true });
+  });
+
+  it('输入对象不被就地修改（返回新鲜对象）', () => {
+    const preset = rule({ id: 'p', pattern: 'preset-p', isBuiltin: true });
+    const user = rule({ id: 'p', pattern: 'user-p', isBuiltin: false });
+
+    const merged = mergeRules([preset], [user], [], new Set(), new Set(), new Set());
+
+    expect(preset.pattern).toBe('preset-p');
+    expect(user.pattern).toBe('user-p');
+    expect(merged).toHaveLength(1);
+  });
 });
 
 // ========== processRules ==========

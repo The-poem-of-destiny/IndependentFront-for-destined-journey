@@ -80,6 +80,8 @@ import type { CombatCommand } from '@engine/combat-v3';
 import { rollDice } from '@engine/dice';
 import { getAgentSettings } from '../stores/agent-settings';
 import type { EmbeddingRequestTrace } from '@engine/memory-store';
+// 🆕 F10（2026-09-04）：Agent API 池绑定的 fail-closed 解析（pool id → ApiEndpoint 唯一纯实现）
+import { resolveAgentEndpoint } from './endpoint-resolver';
 
 export interface GamePipelineDeps {
   gameStore: ReturnType<typeof useGameStore>;
@@ -100,6 +102,42 @@ export type StoryChunkCallback = (chunk: string, isComplete: boolean) => void;
 function isAbortError(err: unknown): boolean {
   return (err as { name?: string } | null | undefined)?.name === 'AbortError';
 }
+
+/**
+ * 🔴 F10（2026-09-04）：Agent 显式绑定的 API 池解析失败时抛出 —— 主协调者的 fail-stop。
+ *
+ * 语义与 `resolveAgentEndpoint` 对齐：**只有「显式绑定但解析不到」才抛**。
+ * 「从未设置 + 空池」（missing-pool）不抛 —— 那是首次配置还没走完，老路是
+ * `apiEndpointId=''` 交给编排器按 `.not found` 淡失败，行为保持不变。
+ *
+ * 抛错目的是在 provider dispatch **之前**停掉整轮：story/dispatcher/vars_update 这些
+ * 主 DAG agent 失效时绝不能用池里另一家 provider 顶替（改了模型行为、成本甚至隐私偏好）。
+ */
+export class EndpointBindingError extends Error {
+  constructor(
+    public readonly agentId: string,
+    public readonly requestedPoolId: string,
+  ) {
+    super(
+      `Agent「${agentId}」绑定的 API 池已失效（原 id: ${requestedPoolId}）。` +
+        '本轮已停止发送请求（fail-closed，不会换用别的 provider）——请到设置 → Agent 配置重新选择 API 池。',
+    );
+    this.name = 'EndpointBindingError';
+  }
+}
+
+/**
+ * 🔴 F10：侧链 Agent 名单。这些 agent 不在主 DAG 里（各自被 marker / 按钮唤起），
+ * 端点失效不能拖垮整轮叙事 —— 装配置时跳过（不装配端点），真被调用时由
+ * `getEndpointForAgent` 再判一次并按既有 optional 策略跳过。
+ */
+const SIDE_CHAIN_AGENT_IDS = new Set([
+  'craft_gen',
+  'char_gen',
+  'item_gen',
+  'image_prompt',
+  'combat_v3',
+]);
 
 interface DebugEntryInput {
   invocationId: string;
@@ -257,6 +295,10 @@ export class GamePipeline {
     agentConfigs: AgentConfig[];
     worldBooks: WorldBook[];
     presets: AgentPreset[];
+    // 🆕 F10: 默认层也挂在这里 —— 侧链 getEndpointForAgent 与主 DAG buildAgentConfigs
+    //    走**同一个** boundPoolId 解析（覆写 ?? 默认），否则两侧对同一个 agent 会给出
+    //    不同的解析结果（一侧吃默认层 model、另一侧裸读覆写）。
+    agentDefaults: Record<string, Record<string, unknown>>;
   } | null = null;
   /** 步5: 本轮共享 context 引用 — pre_check 剧情导演区块注入 / post_check 年度大纲检测需要 */
   private currentContext: AgentContext | null = null;
@@ -437,7 +479,7 @@ export class GamePipeline {
       // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
       // configs/worldBooks/presets 才能拿到完整 systemPrompt + 世界书上下文，
       // 把这三个值挂实例传给事件回调（回调通过闭包捕获 run() 局部变量）。
-      this.chainData = { agentConfigs, worldBooks, presets };
+      this.chainData = { agentConfigs, worldBooks, presets, agentDefaults };
 
       // Q-07：战斗外效果系统接线 —— 对当前存档已装备物品执行 init + 注册
       // （幂等；存档切换时由 unwireEffectSystem 拆除后重建）
@@ -505,6 +547,19 @@ export class GamePipeline {
         console.log('[GamePipeline] 管线已中止');
         activityOutcome = 'cancelled';
         activityMessage = '本回合已停下，可以再次尝试。';
+        return false;
+      }
+      // 🔴 F10：显式端点绑定失效 = fail-stop。此时**任何 provider 都尚未收到请求**，
+      // 本轮直接放弃（用户输入已入消息流、回合不推进，可修设置后重发）。
+      if (err instanceof EndpointBindingError) {
+        console.error('[GamePipeline] 端点绑定失效，本轮停发（fail-closed）:', err.message);
+        activityOutcome = 'failed';
+        activityMessage = err.message;
+        try {
+          useUIStore().toast(err.message, 'error', 6000);
+        } catch {
+          /* toast 失败不影响本轮失败判定 */
+        }
         return false;
       }
       console.error('[GamePipeline] 管线运行失败:', err);
@@ -756,12 +811,38 @@ export class GamePipeline {
     // 复用 buildEndpoints() 的映射结果（ApiEntry.model → ApiEndpoint.defaultModel）
     const apiPool = this.buildEndpoints();
 
-    // 每个 Agent 的 `model` 存的是 **API 池 id** → 匹配对应端点
-    // 🔴 D44 修正 1：传默认层（agentDefaults）——model 也是 12 键之一，删 boot 播种后
-    //    用户没覆写时唯一来源就是默认层。agentDefaults 在本方法参数里、闭包可直接用。
+    // 🔴 F10（2026-09-04）：pool id → 端点的解析统一切到 `resolveAgentEndpoint`。
+    //   Agent 设置层的 `model` 键（存 API 池 id，历史命名不改）经
+    //   `getAgentSettings(覆写 ?? 默认层)` 得到「有效绑定」。语义拆分为：
+    //     · 未设置（空串）          → 走默认端点（池首项）—— 首次配置体验不回归；
+    //     · 显式绑定 + 池里有       → 精确命中；
+    //     · 显式绑定 + 池里没有     → **fail-closed**：
+    //         主 DAG agent（story/dispatcher/vars_update 等）= 抛 EndpointBindingError，
+    //         run() 在 dispatch 之前停轮（绝不拿 apiPool[0] 顶替用户显式选过的 provider）；
+    //         侧链 agent（craft/char/item/image_prompt/combat_v3）= warn + 不装配端点，
+    //         真被调用时由 getEndpointForAgent 再判并按 optional 策略跳过。
+    //   · 空池 + 未设置             → 与旧行为一致：endpoint undefined →
+    //       apiEndpointId='' → 编排器按 `Endpoint "" not found` 淡失败（不抛新错）。
+    //   D44 修正 1 保留：传默认层（agentDefaults）——model 也是 12 键之一，删 boot 播种后
+    //   用户没覆写时唯一来源就是默认层。agentDefaults 在本方法参数里、闭包可直接用。
     const getEndpoint = (agentId: string): ApiEndpoint | undefined => {
       const poolId = getAgentSettings(s, agentId, agentDefaults).model;
-      return apiPool.find((ep) => ep.id === poolId) || apiPool[0];
+      const resolution = resolveAgentEndpoint({ boundPoolId: poolId, apiPool });
+      if (resolution.status === 'resolved') return resolution.endpoint;
+      if (SIDE_CHAIN_AGENT_IDS.has(agentId)) {
+        console.warn(
+          resolution.status === 'stale-binding'
+            ? `[GamePipeline] 侧链 Agent "${agentId}" 显式绑定的 API 池已不存在（原 id: ${resolution.requestedId}），本轮不装配端点（fail-closed，不会换 provider）`
+            : `[GamePipeline] 侧链 Agent "${agentId}" 解析不到端点（API 池为空），本轮不装配端点`,
+        );
+        return undefined;
+      }
+      // 主 DAG：显式绑定失效 = 停轮（run() 捕获 EndpointBindingError → 放弃本轮，不发请求）
+      if (resolution.status === 'stale-binding') {
+        throw new EndpointBindingError(agentId, resolution.requestedId);
+      }
+      // missing-pool（空池 + 未设置）：老路淡失败，交给编排器报 not found
+      return undefined;
     };
 
     return agentIds.map((agentId) => {
@@ -1193,21 +1274,35 @@ export class GamePipeline {
     }
   }
 
-  /** 获取当前默认 API endpoint */
-  private getDefaultEndpoint(): ApiEndpoint {
-    return this.buildEndpoints()[0];
-  }
-
-  /** 按 agentId 解析 endpoint —— 尊重设置页为各 Agent 选的 API 池；
-   *  未配置或映射失效时回退到默认 endpoint（与 createAgentClients 一致）。
-   *  修复(2026-07-30): 此前 char_gen/item_gen/craft_gen/combat 等侧链一律走
-   *  getDefaultEndpoint()（API 池第一项），无视用户在设置页为各 Agent 选的 API 池，
-   *  导致"全部设了 glm5.2，侧链却用 d4f"。 */
-  private getEndpointForAgent(agentId: string): ApiEndpoint {
+  /**
+   * 按 agentId 解析侧链 endpoint —— 尊重设置页为各 Agent 选的 API 池。
+   * 🔴 F10（2026-09-04）：解析语义已与主 DAG 统一到 `resolveAgentEndpoint`。
+   *    · 未设置              → 默认端点（池首项）；
+   *    · 显式绑定 + 池里有   → 精确命中；
+   *    · 显式绑定失效        → console.error（带 agent 名 + 失效 id，肉眼可见）
+   *        + 返回 undefined → 调用方的 `if (!endpoint)` 守卫按既有 optional 策略跳过，
+   *        **绝不换用池里别的 provider**；
+   *    · 空池 + 未设置       → undefined（老路淡失败）。
+   *   与 buildAgentConfigs 同一 boundPoolId 口径：也过默认层（chainData.agentDefaults），
+   *   否则两侧对同一个 agent 可能解析出不同的池。（createAgentClients 已在 2026-07-30
+   *   退役；此前它拿 getDefaultEndpoint() 池首项无视用户选择的历史错误不再可能复现。）
+   */
+  private getEndpointForAgent(agentId: string): ApiEndpoint | undefined {
     const s = this.settings.settings;
     const apiPool = this.buildEndpoints();
-    const poolId = getAgentSettings(s, agentId).model;
-    return apiPool.find((ep) => ep.id === poolId) || apiPool[0];
+    const poolId = getAgentSettings(s, agentId, this.chainData?.agentDefaults ?? {}).model;
+    const resolution = resolveAgentEndpoint({ boundPoolId: poolId, apiPool });
+    if (resolution.status === 'resolved') return resolution.endpoint;
+    if (resolution.status === 'stale-binding') {
+      // 侧链是 optional —— 跳过即可，但跳过必须是**可见**的，不是静默换 provider
+      console.error(
+        `[GamePipeline] 侧链 Agent "${agentId}" 显式绑定的 API 池已不存在（原 id: ${resolution.requestedId}）。` +
+          '按 fail-closed 策略跳过该侧链（绝不换用别的 provider），请到设置 → Agent 配置重新选择 API 池',
+      );
+      return undefined;
+    }
+    console.warn(`[GamePipeline] 侧链 Agent "${agentId}" 解析不到端点（API 池为空），跳过`);
+    return undefined;
   }
 
   private nextDebugInvocation(agentId: string, runId = this.activeRunId ?? 'detached') {
@@ -2636,6 +2731,7 @@ export class GamePipeline {
     agentConfigs: AgentConfig[];
     worldBooks: WorldBook[];
     presets: AgentPreset[];
+    agentDefaults: Record<string, Record<string, unknown>>;
   }> {
     if (this.chainData) return this.chainData;
     const { presets, agentDefaults } = await this.loadPresets();
@@ -2646,7 +2742,7 @@ export class GamePipeline {
       undefined,
       systemCoreWorkshopBookIds,
     );
-    this.chainData = { agentConfigs, worldBooks, presets };
+    this.chainData = { agentConfigs, worldBooks, presets, agentDefaults };
     return this.chainData;
   }
 

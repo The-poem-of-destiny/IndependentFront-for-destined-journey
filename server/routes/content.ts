@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 
@@ -24,6 +24,9 @@ import type { Context } from 'hono';
 /** overlay 未配置时的应答文案（前端 toast 只显示状态码，这句给的是 devtools 里的真话） */
 export const CONTENT_DIR_NOT_CONFIGURED =
   '内容目录未配置：未设置 POEM_CONTENT_DIR 环境变量，无法写回项目默认内容';
+
+/** F13：单个 overlay 文件写入的上限（防止无界 body 分配拖垮进程） */
+const MAX_CONTENT_BODY_BYTES = 10 * 1024 * 1024; // 10 MiB
 
 export interface ContentWriteOptions {
   /** overlay 根目录的绝对路径；`null` = 未配置 */
@@ -77,10 +80,50 @@ async function writeContentFile(c: Context, options: ContentWriteOptions): Promi
   //    `c.req.text()` 是「收完整个 body 再按 UTF-8 解一次」，天然没有切分问题。
   //    落盘的是**原样文本**：前端送来的是 2 空格缩进的 JSON，这里若再 JSON.stringify
   //    一遍，内容仓每次保存都会多出一整份无关 diff。
-  const body = await c.req.text();
+  //
+  //    🔴 F13：不能信任 `Content-Length`（可伪造/被 chunked 绕过），也不能在读完才判。
+  //    必须一边读一边计数，超限即中止读取并回 413，避免无界内存分配。
+  let body = '';
+  const rawBody = c.req.raw.body;
+  if (rawBody) {
+    const reader = rawBody.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_CONTENT_BODY_BYTES) {
+        await reader.cancel();
+        return c.json({ error: `content too large (limit ${MAX_CONTENT_BODY_BYTES} bytes)` }, 413);
+      }
+      chunks.push(value);
+    }
+    body = Buffer.concat(chunks, total).toString('utf-8');
+  }
+
+  // F13：拒绝无效 JSON。旧实现把坏 JSON 原样落盘还回 200 —— 下一次加载整份内容就崩。
+  // 只校验解析，仍落**原样文本**（保持 2 空格缩进/注释等既有契约不被打折）。
+  try {
+    JSON.parse(body);
+  } catch {
+    return c.json({ error: 'invalid JSON body' }, 400);
+  }
+
   try {
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-    fs.writeFileSync(filePath, body, 'utf-8');
+    // 🔴 F13：先写同目录临时文件再原子 rename（async + 完整流）。
+    //    旧实现直接 writeFileSync(filePath) —— 写入中途崩溃会把最后一个好版本截断成半截，
+    //    且同步大文件 I/O 阻塞事件循环。rename 在同一文件系统内是原子的；
+    //    失败时临时文件 best-effort 清理、目标文件原封未动。
+    const tmpPath = join(targetDir, `.${name}.${process.pid}.${Date.now().toString(36)}.tmp`);
+    try {
+      await fs.promises.writeFile(tmpPath, body, 'utf-8');
+      await fs.promises.rename(tmpPath, filePath);
+    } catch (e) {
+      await fs.promises.rm(tmpPath, { force: true }).catch(() => {});
+      throw e;
+    }
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

@@ -37,7 +37,6 @@ export function useBeautify() {
   function getBeautifierRules(): BeautifierRule[] {
     const preset = beautifier.presetRules;
     const user = beautifier.userRules;
-    const presetIds = new Set(preset.map((r) => r.id));
 
     const enabledEntries: string[] =
       (game.activeSave?.metadata as any)?.enabledWorldBookEntries ?? [];
@@ -66,7 +65,29 @@ export function useBeautify() {
       };
     });
 
-    return [...resolved, ...scopedUserRules.filter((r) => !presetIds.has(r.id))];
+    // 文档契约「同名 ID 用户优先」（F15）：与 mergeRules 同语义 ——
+    // 用户规则 ID 命中非 locked 预设 → 在原槽位整条替换；locked 预设不可替换；
+    // 独有用户规则按用户顺序追加。
+    const scopedById = new Map<string, BeautifierRule>();
+    for (const r of scopedUserRules) scopedById.set(r.id, r);
+    const effective = resolved.map((r) => ({ ...r }));
+    const presetIdSet = new Set(effective.map((r) => r.id));
+    const overridden = new Set<string>();
+    for (const preset of effective) {
+      if (preset.locked) continue;
+      const override = scopedById.get(preset.id);
+      if (override) {
+        Object.assign(preset, override);
+        overridden.add(preset.id);
+      }
+    }
+    for (const id of overridden) scopedById.delete(id);
+    // locked 预设命中：用户规则不可替换也不追加（受保护，避免重复 ID）
+    for (const id of presetIdSet) scopedById.delete(id);
+    return [
+      ...effective,
+      ...scopedUserRules.filter((r) => scopedById.has(r.id) && !overridden.has(r.id)),
+    ];
   }
 
   function isBeautifierEnabled(): boolean {

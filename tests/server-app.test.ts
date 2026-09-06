@@ -1,5 +1,13 @@
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -583,5 +591,214 @@ describe('内容 overlay 写回路由（/api/worldbooks · /api/defaults）', ()
         server.close((error) => (error ? reject(error) : done()));
       });
     }
+  });
+});
+
+// ===================================================================
+// F11: 代理目的地策略 — IPv6 黑名单归一化 + 默认拒绝上游 3xx 重定向
+//      审查现场：URL.hostname 对 IPv6 带括号（[fd00:ec2::254]），而黑名单存无括号
+//      地址，纯字符串比对永远漏掉 → IPv6 元数据项整行失效；fetch 默认跟 3xx 同样绕过策略。
+// ===================================================================
+describe('BFF proxy target policy (F11)', () => {
+  const CHAT_URL = '/api/chat/completions';
+
+  it('IPv6 字面量（带括号）命中黑名单 → 403，不发网络请求', async () => {
+    const response = await buildHonoApp().request(CHAT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Target-Base-URL': 'http://[fd00:ec2::254]',
+      },
+      body: JSON.stringify({ messages: [], stream: false }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: 'blocked target by SSRF protection' });
+  });
+
+  it('IPv6 字面量大小写混写同样命中（归一化后比对）', async () => {
+    const response = await buildHonoApp().request(CHAT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Target-Base-URL': 'http://[FD00:EC2::254]',
+      },
+      body: JSON.stringify({ messages: [], stream: false }),
+    });
+
+    expect(response.status).toBe(403);
+  });
+
+  it('IPv4-mapped IPv6 形态命中黑名单 → 403', async () => {
+    const response = await buildHonoApp().request(CHAT_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Target-Base-URL': 'http://[::ffff:169.254.169.254]',
+      },
+      body: JSON.stringify({ messages: [], stream: false }),
+    });
+
+    expect(response.status).toBe(403);
+  });
+
+  it('上行方返回 3xx 重定向 → 拒绝并回 502，绝不跟随', async () => {
+    // 上游 A 永远回 302 → Location 指向 BFF 自己；若 fetch 默认 follow 会再打一次 BFF。
+    // 断言：BFF 回 502（不是 200/302），且不泄露任何上游主体。
+    const hitCount = { value: 0 };
+    const upstream = createServer((req, res) => {
+      hitCount.value += 1;
+      req.resume();
+      req.on('end', () => {
+        const base = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`;
+        res.writeHead(302, { Location: `${base}/redirected-target` });
+        res.end();
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      upstream.once('error', reject);
+      upstream.listen(0, '127.0.0.1', resolve);
+    });
+
+    try {
+      const address = upstream.address() as AddressInfo;
+      const response = await buildHonoApp().request(CHAT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Target-Base-URL': `http://127.0.0.1:${address.port}`,
+        },
+        body: JSON.stringify({ messages: [], stream: false }),
+      });
+
+      expect(response.status).toBe(502);
+      const body = await response.json();
+      expect(JSON.stringify(body)).toContain('rejected by proxy redirect policy');
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        upstream.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it('正常本地 LLM 端点不受影响（非黑名单目标照常透传）', async () => {
+    const body = JSON.stringify({ choices: [{ message: { content: 'still-works' } }] });
+    const upstream = createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(body);
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      upstream.once('error', reject);
+      upstream.listen(0, '127.0.0.1', resolve);
+    });
+
+    try {
+      const address = upstream.address() as AddressInfo;
+      const response = await buildHonoApp().request(CHAT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Target-Base-URL': `http://127.0.0.1:${address.port}`,
+        },
+        body: JSON.stringify({ messages: [], stream: false }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ choices: [{ message: { content: 'still-works' } }] });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        upstream.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+});
+
+// ===================================================================
+// F13: 内容写入 — 无效 JSON 拒绝 + 原子替换（失败不毁旧文件）
+//      旧实现把请求体 writeFileSync 直接落盘：坏 JSON 也回 200，
+//      中途失败把最后一个好版本截成半截。
+// ===================================================================
+describe('BFF content-write validation and atomicity (F13)', () => {
+  let contentDir: string;
+
+  beforeEach(() => {
+    contentDir = mkdtempSync(join(tmpdir(), 'poem-content-f13-'));
+  });
+
+  afterEach(() => {
+    rmSync(contentDir, { recursive: true, force: true });
+  });
+
+  const app = () => buildHonoApp({ contentDir });
+
+  it('无效 JSON 被 400 拒绝，且保留上一个有效版本', async () => {
+    // 先写一个有效版本
+    const good = '{\n  "kind": "core",\n  "ok": true\n}';
+    const first = await app().request('/api/worldbooks/core', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: good,
+    });
+    expect(first.status).toBe(200);
+
+    // 再写坏 JSON —— 必须 400，且原文件逐字节不变
+    const bad = '{"half": ';
+    const second = await app().request('/api/worldbooks/core', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: bad,
+    });
+    expect(second.status).toBe(400);
+    expect(readFileSync(join(contentDir, 'worldbooks', 'core.json'), 'utf8')).toBe(good);
+  });
+
+  it('超大 body → 413，目标文件与原样保持一致', async () => {
+    // 造一个刚超限的 body（10 MiB + 一点）—— 不能无界分配进内存
+    const oversized = JSON.stringify({ blob: 'x'.repeat(10 * 1024 * 1024 + 1) });
+
+    const response = await app().request('/api/worldbooks/big', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: oversized,
+    });
+
+    expect(response.status).toBe(413);
+    expect(existsSync(join(contentDir, 'worldbooks', 'big.json'))).toBe(false);
+  });
+
+  it('合法 JSON 照常原子落盘且格式原样保留（2 空格缩进不被重排）', async () => {
+    const body = '{\n  "id": "fmt",\n  "name": "格式不动"\n}';
+    const response = await app().request('/api/worldbooks/fmt', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+
+    expect(response.status).toBe(200);
+    expect(readFileSync(join(contentDir, 'worldbooks', 'fmt.json'), 'utf8')).toBe(body);
+  });
+
+  it('多次覆盖同一文件仍原子（无残留临时文件）', async () => {
+    for (let i = 0; i < 3; i++) {
+      const body = JSON.stringify({ round: i });
+      const response = await app().request('/api/worldbooks/round', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      expect(response.status).toBe(200);
+    }
+
+    expect(readFileSync(join(contentDir, 'worldbooks', 'round.json'), 'utf8')).toBe('{"round":2}');
+    // 临时文件不该残留
+    const leftovers = readdirSync(contentDir)
+      .concat(readdirSync(join(contentDir, 'worldbooks')))
+      .filter((f) => f.includes('.tmp'));
+    expect(leftovers).toEqual([]);
   });
 });

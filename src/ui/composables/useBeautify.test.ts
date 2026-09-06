@@ -110,4 +110,26 @@ describe('useBeautify rule resolution', () => {
     stores.game.activeSave.metadata.enabledWorldBookEntries.push('creative_workshop:901');
     expect(useBeautify().getBeautifierRules()[0].enabled).toBe(true);
   });
+
+  it('同 ID 用户规则在渲染路径上替换预设（F15 用户优先契约）', () => {
+    stores.beautifier.presetRules = [rule({ id: 'dup', pattern: 'preset', isBuiltin: true })];
+    stores.beautifier.userRules = [rule({ id: 'dup', pattern: 'user', isBuiltin: false })];
+
+    const rules = useBeautify().getBeautifierRules();
+
+    expect(rules).toHaveLength(1);
+    expect(rules[0]).toMatchObject({ id: 'dup', pattern: 'user', isBuiltin: false });
+  });
+
+  it('locked 预设不可被同 ID 用户规则替换（F15 受保护）', () => {
+    stores.beautifier.presetRules = [
+      rule({ id: 'sys', pattern: 'preset', isBuiltin: true, locked: true }),
+    ];
+    stores.beautifier.userRules = [rule({ id: 'sys', pattern: 'user', isBuiltin: false })];
+
+    const rules = useBeautify().getBeautifierRules();
+
+    expect(rules).toHaveLength(1);
+    expect(rules[0]).toMatchObject({ id: 'sys', pattern: 'preset', locked: true });
+  });
 });

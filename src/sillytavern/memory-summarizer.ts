@@ -11,7 +11,11 @@
 
 import type { MemoryRecord } from './types';
 import { getAllMemoryIds, saveMemory } from './database';
-import { computeEmbedding, type EmbeddingRequestObserver } from './memory-store';
+import {
+  buildEmbeddingText,
+  computeEmbeddingWithMeta,
+  type EmbeddingRequestObserver,
+} from './memory-store';
 // Q-05：从模型输出抢救 JSON 的唯一入口
 import { parseModelJson } from './model-json';
 // 并行化改造：MEM 编号是全库分配（跨存档），「分配 + 落库」必须同段互斥，
@@ -205,20 +209,24 @@ export async function summarizeAndSave(
       importance: parsed.importance,
     };
 
-    // 4. 计算 embedding
+    // 4. 计算 embedding（向量 + 溯源元数据原子成对，F09；失败/非法输出整对放弃）
     if (embeddingEndpoint) {
       try {
-        const embeddingText = `[${parsed.keywords.join(', ')}] ${parsed.content}`;
-        memory.embedding = await computeEmbedding(
+        const embeddingText = buildEmbeddingText(parsed.keywords, parsed.content);
+        const { embedding, meta } = await computeEmbeddingWithMeta(
           embeddingText,
           embeddingEndpoint,
           undefined,
           undefined,
           onEmbeddingRequest,
         );
+        memory.embedding = embedding;
+        memory.embeddingMeta = meta;
       } catch {
-        // Embedding 不可用 — 保存无 embedding 的记忆
+        // Embedding 不可用或响应非法 — 保存无 embedding 的记忆（元数据随向量一起清空，
+        // 不允许「有向量无元数据」或「无向量有元数据」的孤儿字段）
         memory.embedding = undefined;
+        memory.embeddingMeta = undefined;
       }
     }
 

@@ -25,9 +25,33 @@ const STRIP_RESP_HEADERS = new Set([
 const SSRF_BLOCKLIST = new Set([
   '169.254.169.254', // AWS / GCP / Azure IMDS（IPv4）
   'fd00:ec2::254', // AWS IMDS（IPv6）
+  '::ffff:169.254.169.254', // IMDS 的 IPv4-mapped IPv6 形态（点分）
+  '::ffff:a9fe:a9fe', // IMDS 的 IPv4-mapped IPv6 形态（hex，Node URL 规范化的样子）
   'metadata.google.internal',
   'metadata.azure.com',
 ]);
+
+/**
+ * 🔒 F11：把 URL.hostname 归一化成黑名单可比的权威形式。
+ *
+ * Node 的 URL.hostname 对 IPv6 字面量**带方括号**返回（`[fd00:ec2::254]`），而
+ * SSRF_BLOCKLIST 存的是无括号地址 —— 直接 `.has(hostname)` 永远比不中，等于
+ * IPv6 项整行失效（P1-03 的漏网）。这里剥括号 + 小写归一，使带不带括号、
+ * 大小写都落到同一个面。
+ *
+ * IPv4-mapped IPv6（`::ffff:169.254.169.254`）不在这里折叠 —— Node 的 URL
+ * 会把它保留成 IPv6 字面量形态；若要防映射地址也需要显式覆盖（见测试）。
+ */
+function normalizeHostname(hostname: string): string {
+  let h = hostname.trim().toLowerCase();
+  if (h.startsWith('[') && h.endsWith(']')) h = h.slice(1, -1);
+  return h;
+}
+
+/** 黑名单判定（F11 归一化版本） */
+function isBlocked(llmTargetHost: string): boolean {
+  return SSRF_BLOCKLIST.has(normalizeHostname(llmTargetHost));
+}
 
 export function stripHopHeaders(src: Headers): Record<string, string> {
   const out: Record<string, string> = {};
@@ -77,8 +101,9 @@ export async function forward(c: Context, suffix: string): Promise<Response> {
   parsed.hash = '';
   const base = parsed.href.replace(/\/+$/, '');
 
-  // 🔒 P1-03 SSRF 防护：拒绝云元数据端点（见 SSRF_BLOCKLIST 注释）
-  if (SSRF_BLOCKLIST.has(parsed.hostname)) {
+  // 🔒 P1-03 SSRF 防护：拒绝云元数据端点（见 SSRF_BLOCKLIST 注释）；F11 归一化，
+  //   IPv6 字面量带/不带括号、大小写都命中同一黑名单项。
+  if (isBlocked(parsed.hostname)) {
     return c.json({ error: 'blocked target by SSRF protection' }, 403);
   }
 
@@ -95,9 +120,13 @@ export async function forward(c: Context, suffix: string): Promise<Response> {
   try {
     const reqBody = c.req.raw.body;
     const streaming = !!reqBody && c.req.method !== 'GET' && c.req.method !== 'HEAD';
+    // F11：默认拒绝上游 3xx。fetch 的 redirect:'follow' 会在无策略复核的情况下跟去
+    // 任意 Location —— 黑名单只在初始目的地验过一次，跟随后的目标可绕过 SSRF 防护。
+    // 明确要求 final provider base URL 本身，而不是透传一个会引走请求的 3xx。
     upstream = await fetch(`${base}${suffix}`, {
       method: c.req.method,
       headers,
+      redirect: 'manual',
       ...(streaming ? { body: reqBody, duplex: 'half' as const } : {}),
     });
   } catch (e) {
@@ -117,6 +146,18 @@ export async function forward(c: Context, suffix: string): Promise<Response> {
       cause: cause ? { code: cause.code, message: cause.message } : undefined,
     });
     return c.json({ error: `upstream unreachable: ${reason}` }, 502);
+  }
+
+  // F11：manual 模式下 3xx 不外发。透传给客户端一个会自带的 302/307，客户端 fetch
+  // 仍会跟随 —— 等于绕过本端策略。改为显式策略错误，提示用户直接在
+  // X-Target-Base-URL 配置最终地址。
+  if (upstream.status >= 300 && upstream.status < 400) {
+    return c.json(
+      {
+        error: `upstream redirect (${upstream.status}) rejected by proxy redirect policy; configure the final base URL directly`,
+      },
+      502,
+    );
   }
 
   // 上游 body（ReadableStream）直接管道转发，SSE 不缓冲

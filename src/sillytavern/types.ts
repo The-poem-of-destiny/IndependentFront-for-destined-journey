@@ -979,6 +979,11 @@ export interface StatusEffect {
   /** 🆕 是否可叠加层数, 默认 true. false=永远1层 */
   stackable?: boolean;
   remainingTime: number | null; // 剩余时间, null=永久
+  /** 🆕 F07: 已流逝但不足一个时间单位的小数余量。当前仅供 timeUnit='小时' 使用——
+   *   `applyTimeAdvance` 把本次推进的分钟累进这里，每满整小时才扣 remainingTime，
+   *   避免「30 分钟×2 次两次 floor(30/60)=0、一小时效果永不到期」的分区依赖。
+   *   缺省 undefined = 0；旧存档缺失即按无余量处理（迁移只认当时表示的整值，不回溯）。 */
+  carryMinutes?: number;
   timeUnit: '回合' | '分钟' | '小时'; // 时间单位（战斗中=回合，脱战=分钟/小时）
   source: string; // 来源 [分类]-[施加者]; [解除方式]
   effects: Record<string, number>; // 效果数值化 (保留, 简单数值效果)
@@ -1222,6 +1227,33 @@ export interface CharacterCard {
 
 // ========== 记忆系统 (Memory System) ==========
 
+/**
+ * Embedding 空间元数据（F09 — 向量溯源指纹）
+ *
+ * 描述「这条向量是在哪个 embedding 空间里算出来的」。召回时只有 `spaceId` 相同的
+ * 向量参与余弦排名；无此元数据的存量记录视为 legacy，**不假定兼容**（维度相同也
+ * 不能证明同一空间），走 importance/recency 兜底直到显式重嵌入。
+ *
+ * 🔴 `spaceId` 只由非机密语义输入派生（归一化 endpoint 身份 + 模型 + 维度 +
+ * 预处理版本）—— **绝不含 API Key / URL userinfo / query / hash**；key 轮换不改变
+ * 空间身份。模型别名背后换了真模型而没改别名时本指纹无法察觉，需显式的空间版本
+ * bump（空间指纹含预处理版本，bump 版本即换空间），不宣称做不到的兼容检测。
+ */
+export interface EmbeddingMetadata {
+  /** 空间指纹：归一化 endpoint 身份 + 模型 + 维度 + 预处理版本的派生串 */
+  spaceId: string;
+  /** 产生这条向量时实际使用的模型别名 */
+  model: string;
+  /** 向量维度 */
+  dimensions: number;
+  /** 文本预处理版本（输入拼接规则集的标识；变更会推导进新空间） */
+  preprocessingVersion: string;
+  /** 被嵌入文本的确定性指纹（重嵌入时校验「要嵌的文本没变」用） */
+  contentRevision: string;
+  /** provider 报告的模型版本（OpenAI 兼容端点通常不可得；缺席即诚实不宣称） */
+  modelRevision?: string;
+}
+
 /** 记忆记录 — MEM00XXX 编号 */
 export interface MemoryRecord {
   id: string; // 'MEM000001'
@@ -1245,6 +1277,8 @@ export interface MemoryRecord {
   importance: number;
   /** Embedding 向量（Phase 4 — 用于语义召回，维度取决于 embedding 模型） */
   embedding?: number[];
+  /** Embedding 空间元数据（F09 — 缺失 = legacy 记录，召回走重要性兜底） */
+  embeddingMeta?: EmbeddingMetadata;
 }
 
 // ========== 剧情系统 (Plot System) ==========

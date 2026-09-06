@@ -131,10 +131,17 @@ export function applyBuff(existing: StatusEffect[], newEffect: StatusEffect): Bu
   }
 
   // 合并：保持现有字段，覆盖 stacks / remainingTime（其余字段以现有为准 —— 避免异源重新声明 description 等）
+  // F07：时长被拉长（刷新到更大的窗口）时 carryMinutes 归零 —— 余量属于旧窗口，新起点不应继承；
+  // 保留现有时长则保留其已累积余量。extended 里把 refreshedTime 一并收窄为 number。
+  const extended =
+    refreshedTime != null &&
+    current.remainingTime !== null &&
+    refreshedTime > current.remainingTime;
   const merged: StatusEffect = {
     ...current,
     stacks: newStacks,
     remainingTime: refreshedTime,
+    carryMinutes: extended ? undefined : current.carryMinutes,
   };
 
   return {
