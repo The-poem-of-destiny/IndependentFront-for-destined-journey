@@ -2,6 +2,13 @@
 const dialogs: HTMLElement[] = [];
 let previousOverflow = '';
 
+function hasHiddenAncestor(element: HTMLElement): boolean {
+  for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+    if (getComputedStyle(current).display === 'none') return true;
+  }
+  return false;
+}
+
 export function ownModalFocus(dialog: HTMLElement, close: () => void): () => void {
   const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   if (!dialogs.length) previousOverflow = document.body.style.overflow;
@@ -18,7 +25,7 @@ export function ownModalFocus(dialog: HTMLElement, close: () => void): () => voi
         element.tabIndex >= 0 &&
         !element.matches(':disabled, [type="hidden"]') &&
         !element.closest('[hidden], [inert]') &&
-        getComputedStyle(element).display !== 'none' &&
+        !hasHiddenAncestor(element) &&
         getComputedStyle(element).visibility !== 'hidden',
     );
   const focusFirst = () => (controls()[0] ?? dialog).focus();

@@ -31,7 +31,7 @@ No balance rules or dependencies changed.
   launcher returned the occupied-port error. The initial wildcard-listener harness allowed Vite
   to bind separately on Windows; that test-owned Vite was identified and stopped before retrying
   successfully with the actual loopback address.
-- Mechanical UI detector returned no findings. All local gates passed (373 test files; 9,413 passed, 8 skipped). The dead-code check initially found the no-longer-public cleanup helper; it was made private, then the ratchet and full suite passed. Independent review is pending.
+- Mechanical UI detector returned no findings. All local gates passed (373 test files; 9,413 passed, 8 skipped). The dead-code check initially found the no-longer-public cleanup helper; it was made private, then the ratchet and full suite passed. Independent review findings and their fixes are recorded below.
 
 ## Bounds
 
@@ -41,4 +41,12 @@ Effect reactions remain bounded follow-up work after the primary command commits
 
 ## Independent review
 
-Pending PR creation. Review both standards and the four requirements above.
+PR #130 received an independent Astra review against both repository standards and the four requirements.
+
+| Finding                                                       | Resolution                                                                                                                                                                                      |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1: crafting settled costs before the product command         | Tool settlement is staged in the craft run and committed with the product. Standalone settlement uses the atomic entry point. EXP uses the canonical character field; rewards are applied once. |
+| P2: hidden map-tab controls entered focus wrapping            | Focus candidates exclude ancestors with `display: none`.                                                                                                                                        |
+| P2 follow-up: an empty settlement suppressed fallback rewards | Empty settlement remains absent, preserving existing ordinary-chat fallback rewards.                                                                                                            |
+
+Five regression tests cover missing materials, failed product writes, exactly-once rewards, ordinary-chat fallback and hidden modal controls. All pass. Astra confirmed no remaining actionable Standards or Spec findings in the final working tree. CI is checked before merge.
