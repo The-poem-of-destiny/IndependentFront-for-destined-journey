@@ -68,3 +68,30 @@ export function resolveAgentEndpoint(input: ResolveEndpointInput): EndpointResol
     ? { status: 'resolved', endpoint: match }
     : { status: 'stale-binding', requestedId: boundPoolId };
 }
+
+export function buildApiEndpoints(apiPool: readonly unknown[]): ApiEndpoint[] {
+  // 前后端 model 结构不同:
+  //   localStorage: ApiEntry    { model: string, models: string[], apiType: string }
+  //   引擎:         ApiEndpoint { defaultModel: string, models: string[], provider: string }
+  // 映射补齐，避免下游读错字段（defaultModel → 空串 → API 请求缺 model）
+  return (apiPool as any[]).map((entry: any) => ({
+    id: entry.id || '',
+    name: entry.name || '',
+    provider: entry.provider || entry.apiType || 'custom',
+    baseUrl: entry.baseUrl || '',
+    apiKey: entry.apiKey || '',
+    defaultModel: entry.defaultModel || entry.model || '', // ← 关键：ApiEntry.model → ApiEndpoint.defaultModel
+    models: entry.models || [],
+    timeout: entry.timeout ?? 60000,
+    enableThinking: entry.enableThinking ?? false, // API 池思考链开关
+    // 🆕 T4（设计 §8.3 / §9）：contextWindowTokens 透传，但只认正整数 ——
+    //    localStorage 是用户可编辑的，坏值（0/负数/浮点/字符串）一律 undefined
+    //    （不做主动预算判断），与 api-key-migration 的 readEntries 同一口径。
+    contextWindowTokens:
+      typeof entry.contextWindowTokens === 'number' &&
+      Number.isSafeInteger(entry.contextWindowTokens) &&
+      entry.contextWindowTokens > 0
+        ? entry.contextWindowTokens
+        : undefined,
+  })) as ApiEndpoint[];
+}

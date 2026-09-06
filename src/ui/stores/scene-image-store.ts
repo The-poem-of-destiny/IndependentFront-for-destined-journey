@@ -351,18 +351,24 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
   // ═══ 读 ═══════════════════════════════════════════════
 
   /** 载入某个存档的全部记录。切存档时**先取消在飞的**，否则上一个存档的图会落到新库上 */
-  async function load(saveId: string): Promise<void> {
+  let loadGeneration = 0;
+  async function load(saveId: string, isCurrent: () => boolean = () => true): Promise<void> {
+    const generation = ++loadGeneration;
+    const ownsLoad = () => generation === loadGeneration && isCurrent();
     if (activeSaveId.value !== null && activeSaveId.value !== saveId) abortAll();
     activeSaveId.value = saveId;
     loading.value = true;
     try {
-      records.value = await getSceneImages(saveId);
+      const loaded = await getSceneImages(saveId);
+      if (!ownsLoad()) return;
+      records.value = loaded;
       await reconcileStale();
     } catch {
+      if (!ownsLoad()) return;
       // IndexedDB 不可用 → 空库，正文照样渲染（对齐 asset-store 的降级）
       records.value = [];
     } finally {
-      loading.value = false;
+      if (generation === loadGeneration) loading.value = false;
     }
   }
 

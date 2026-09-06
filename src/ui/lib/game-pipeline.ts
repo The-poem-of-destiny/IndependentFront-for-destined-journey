@@ -81,7 +81,7 @@ import { rollDice } from '@engine/dice';
 import { getAgentSettings } from '../stores/agent-settings';
 import type { EmbeddingRequestTrace } from '@engine/memory-store';
 // 🆕 F10（2026-09-04）：Agent API 池绑定的 fail-closed 解析（pool id → ApiEndpoint 唯一纯实现）
-import { resolveAgentEndpoint } from './endpoint-resolver';
+import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
 
 export interface GamePipelineDeps {
   gameStore: ReturnType<typeof useGameStore>;
@@ -275,18 +275,9 @@ export class GamePipeline {
   private abortController: AbortController | null = null;
   /** 当前 run 的所有权标识；abort 后直到 finally 收尾前都保持，防止旧 run 清掉新 run。 */
   private activeRunId: string | null = null;
-  /**
-   * 本管线跑到第几轮（run() 每次进入自增）。
-   *
-   * 🔴 用来判「我的 finally 还是不是当前这一轮的 finally」（2026-08-10）。
-   * `abort()` 会**立刻**把 isGenerating 清成 false，输入框随之解锁，于是玩家可以在上一轮
-   * 收尾之前就发下一轮。此时旧 run 的 finally 会做两件破坏性的事：
-   *   ① `isGenerating = false` —— 在新一轮飞行途中解锁输入；
-   *   ② `abortController = null` —— 把**新一轮**的控制器抹掉，从此「停止生成」变成
-   *      一个静默的 no-op（`this.abortController?.abort()` 里的 `?.` 会吃掉它）。
-   * 两件都只在「我还是当前那一轮」时才做。
-   */
+  /** Reject overlapping runs until cancellation, background writes and refresh have drained. */
   private runSeq = 0;
+  private disposed = false;
   /** 当前回合内按 Agent 递增，生成不会因同名 Agent 而覆盖的调试调用 ID。 */
   private debugInvocationCounts = new Map<string, number>();
   private mainInvocationIds = new Map<string, string>();
@@ -419,6 +410,7 @@ export class GamePipeline {
     isUserMessage = true,
     sourceMessageId?: string,
   ): Promise<boolean> {
+    if (this.abortController || !this.ownsActiveSave) return false;
     console.log(
       '[GamePipeline] run() called — userInput length:',
       userInput.length,
@@ -581,14 +573,14 @@ export class GamePipeline {
       // DebugPanel 导出和右侧状态栏才能拿到最新数据。abort/报错时部分 patch 可能已提交，同样需要回读。
       // 🔴 COR-02：存档已切走时**不回读** —— refreshFromDb 读的是 store 里那个（新的）
       // activeSaveId，孤儿回合替新存档跑一次回读没有意义，还会跟新存档自己的加载打架。
-      if (this.ownsActiveSave) await this.game.refreshFromDb();
+      if (this.ownsActiveSave) await this.game.refreshFromDb(this.saveId);
       // 🎵 配乐放在**回读之后**才触发。
       //
       // story 在 Stage 1 就写下了标记，但那时 player.location / character.present
       // 还是上一轮的值 —— 它们要等 Stage 2 的 request_dispatcher / vars_update 落库、
       // 再经这里的 refreshFromDb 才更新。而**转场恰恰是唯一真正该换歌的时刻**：
       // 在 Stage 1 播，正文已经进了熔火裂谷，BGM 还在放上一座城的曲子。
-      this.flushPendingAudio();
+      if (this.ownsActiveSave) this.flushPendingAudio();
       if (activityRunId) {
         this.game.finishAgentActivityRun(activityRunId, activityOutcome, activityMessage);
         this.game.finishAgentLogTurn(activityRunId, activityOutcome);
@@ -606,7 +598,7 @@ export class GamePipeline {
       // 🔴 只有「我还是当前那一轮」才收拾这两样 —— 否则会解锁新一轮的输入框，
       // 并且把新一轮的控制器抹成 null（「停止生成」从此静默失效）。见 runSeq 的注释。
       if (this.runSeq === mySeq) {
-        this.game.isGenerating = false;
+        if (this.ownsActiveSave) this.game.isGenerating = false;
         this.abortController = null;
       }
     }
@@ -689,11 +681,16 @@ export class GamePipeline {
     }
   }
 
+  dispose(): void {
+    this.disposed = true;
+    this.abort();
+    this.invalidatePromptSessions();
+  }
+
   /** 中止当前管线运行 */
   abort(): void {
     if (this.activeRunId) this.game.markAgentActivityStopping(this.activeRunId);
     this.abortController?.abort();
-    this.game.isGenerating = false;
   }
 
   /**
@@ -738,7 +735,7 @@ export class GamePipeline {
    * 生成中途切到别的存档，孤儿回合的正文会以那个存档的 saveId 落库。
    */
   private get ownsActiveSave(): boolean {
-    return this.game.activeSaveId === this.saveId;
+    return !this.disposed && this.game.activeSaveId === this.saveId;
   }
 
   /**
@@ -970,31 +967,7 @@ export class GamePipeline {
   }
 
   private buildEndpoints(): ApiEndpoint[] {
-    const s = this.settings.settings;
-    // 前后端 model 结构不同:
-    //   localStorage: ApiEntry    { model: string, models: string[], apiType: string }
-    //   引擎:         ApiEndpoint { defaultModel: string, models: string[], provider: string }
-    // 映射补齐，避免下游读错字段（defaultModel → 空串 → API 请求缺 model）
-    return ((s.apiPool ?? []) as any[]).map((entry: any) => ({
-      id: entry.id || '',
-      name: entry.name || '',
-      provider: entry.provider || entry.apiType || 'custom',
-      baseUrl: entry.baseUrl || '',
-      apiKey: entry.apiKey || '',
-      defaultModel: entry.defaultModel || entry.model || '', // ← 关键：ApiEntry.model → ApiEndpoint.defaultModel
-      models: entry.models || [],
-      timeout: entry.timeout ?? 60000,
-      enableThinking: entry.enableThinking ?? false, // API 池思考链开关
-      // 🆕 T4（设计 §8.3 / §9）：contextWindowTokens 透传，但只认正整数 ——
-      //    localStorage 是用户可编辑的，坏值（0/负数/浮点/字符串）一律 undefined
-      //    （不做主动预算判断），与 api-key-migration 的 readEntries 同一口径。
-      contextWindowTokens:
-        typeof entry.contextWindowTokens === 'number' &&
-        Number.isSafeInteger(entry.contextWindowTokens) &&
-        entry.contextWindowTokens > 0
-          ? entry.contextWindowTokens
-          : undefined,
-    })) as ApiEndpoint[];
+    return buildApiEndpoints(this.settings.settings.apiPool ?? []);
   }
 
   /**
@@ -2402,7 +2375,7 @@ export class GamePipeline {
       //（store.startCombat → coordinator.start → startCombatV3）不经过 run() 的
       // finally —— store 从不回读，HUD 一直是开战前的血量/经验（满血假象）。
       // 终局落库后回读一次（含 COR-02 存档切走守卫）。
-      if (this.ownsActiveSave) await this.game.refreshFromDb();
+      if (this.ownsActiveSave) await this.game.refreshFromDb(this.saveId);
       // 同一真机 debug：记录「最近已结算战斗」供下一轮 dispatcher 上下文（{{RECENT_COMBAT}}）
       // —— 没有它 dispatcher 不知道正文里的战斗描写是已结算战斗的战后延续，会再发
       // combat_trigger 把打完的战斗重演一遍。内存级（与 _lastCombatMarker 同口径）；

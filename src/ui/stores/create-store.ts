@@ -21,6 +21,7 @@ import type {
   CreatePreset,
   PlotSettings,
   PlotOutline,
+  SaveSlot,
   ApiEndpoint,
   AgentConfig,
   ExperienceMode,
@@ -34,6 +35,7 @@ import { getBloodlineList, getBloodlineSet, type BloodlineSet } from '@engine/bl
 import { AgentClient } from '@engine/agent-client';
 import {
   tryParseOutline,
+  outlineToEvents,
   createOutlineFromAgent,
   type ParsedOutlineOutput,
 } from '@engine/plot-outline';
@@ -1789,7 +1791,20 @@ export const useCreateStore = defineStore('create', () => {
   // 提交: 写入 DB + 跳转
   // ═══════════════════════════════════════════════════════
 
-  async function startJourney(): Promise<string> {
+  const isCreating = ref(false);
+  let creationPromise: Promise<string> | null = null;
+
+  function startJourney(): Promise<string> {
+    if (creationPromise) return creationPromise;
+    isCreating.value = true;
+    creationPromise = persistJourney().finally(() => {
+      creationPromise = null;
+      isCreating.value = false;
+    });
+    return creationPromise;
+  }
+
+  async function persistJourney(): Promise<string> {
     // 最终持久化边界必须重验；角色预设可以在任一步加载，不能只依赖曾经通过过 Step 1。
     if (!attributesFullyAllocated.value) {
       currentStep.value = 1;
@@ -1802,16 +1817,12 @@ export const useCreateStore = defineStore('create', () => {
     console.log('[create-store] startJourney — openingPrompt:', openingPrompt.slice(0, 200));
     console.log('[create-store] startJourney — openingPrompt length:', openingPrompt.length);
 
-    const { saveCharacter, saveSaveSlot } = await import('@engine/database');
-
-    await saveCharacter(charState);
-
     // 存档名：主角名 + 层级 + 日期
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const saveName = `${charState.name} · ${charState.tierName} · ${dateStr}`;
 
-    await saveSaveSlot({
+    const save: SaveSlot = {
       id: saveId,
       name: saveName,
       slot: 0, // TODO: 自动分配空闲槽位（多槽位属产品功能非字段规范）
@@ -1828,42 +1839,30 @@ export const useCreateStore = defineStore('create', () => {
         openingPromptConsumed: false, // 🆕
         plotSettings: JSON.parse(JSON.stringify(plotSettings.value)), // §5.2: 本档剧情配置随档落库（含雷点）
       } as any,
-    });
+    };
 
-    // 真机修(2026-07-23): 开局兑换的命运点 → 初始化到存档级 SaveProfile.fp
-    // ADR-22: FP 是存档级元货币，独立于 CharacterState。此前 destinyPoints 只写进
-    // customFields.destinyPoints，游戏内 FP(SaveProfile.fp) 从未拿到这笔，开局兑换的 FP 丢失。
-    const { getProfile, addFP, updateProfile } = await import('@engine/save-profile');
-    // 🔴 era 必须透传（T12 的 D9 线程化）：SaveProfile 是惰性创建的，这里是生产上
-    //    唯一的创建点。不传就等于让新档的纪元名落成空串，而存档一旦盖章就永不重读内容包。
-    const profile = await getProfile(saveId, era.value);
-    // 经验档位与命运点兑换彼此独立：零兑换也必须把用户选择盖章进新存档。
-    profile.experienceMode = experienceMode.value === 'easy' ? 'easy' : 'normal';
-    if (destinyPoints.value > 0) {
-      // addFP 会持久化 profile，正数分支不重复 updateProfile。
-      await addFP(profile, destinyPoints.value, '开局兑换的命运点', 'other');
-    } else {
-      await updateProfile(profile);
-    }
-
-    // §5.2: 主线/支线已生成大纲 → 落库确认版 + 结构化事件树（全部 hidden）；历史版本不落库
-    if ((plotMode.value === 'main' || plotMode.value === 'side') && plotOutline.value) {
-      const { savePlotOutline, savePlotEvents } = await import('@engine/database');
-      const { outlineToEvents } = await import('@engine/plot-outline');
-      const confirmed: PlotOutline = {
-        ...JSON.parse(JSON.stringify(plotOutline.value)),
-        saveId,
-        confirmed: true,
-      };
-      await savePlotOutline(confirmed);
-      const events = outlineToEvents(JSON.parse(JSON.stringify(plotOutlineChapters.value)), saveId);
-      if (events.length > 0) await savePlotEvents(events);
-    } else if (plotOutline.value) {
-      const { savePlotOutline } = await import('@engine/database');
-      await savePlotOutline({ ...JSON.parse(JSON.stringify(plotOutline.value)), saveId });
-    }
-
-    return saveId;
+    const confirmed =
+      (plotMode.value === 'main' || plotMode.value === 'side') && !!plotOutline.value;
+    const outline = plotOutline.value
+      ? ({
+          ...JSON.parse(JSON.stringify(plotOutline.value)),
+          saveId,
+          ...(confirmed ? { confirmed: true } : {}),
+        } as PlotOutline)
+      : undefined;
+    const input = {
+      character: charState,
+      save,
+      era: era.value,
+      experienceMode: experienceMode.value === 'easy' ? ('easy' as const) : ('normal' as const),
+      destinyPoints: destinyPoints.value,
+      outline,
+      events: confirmed
+        ? outlineToEvents(JSON.parse(JSON.stringify(plotOutlineChapters.value)), saveId)
+        : [],
+    };
+    const { createJourney } = await import('@engine/create-journey');
+    return createJourney(input);
   }
 
   /** 成功开局后清除草稿 */
@@ -2248,6 +2247,7 @@ export const useCreateStore = defineStore('create', () => {
     buildCharacterState,
     buildOpeningPrompt,
     startJourney: startJourneyAndClearDraft,
+    isCreating,
     // 模板
     substituteUser,
     // localStorage 草稿

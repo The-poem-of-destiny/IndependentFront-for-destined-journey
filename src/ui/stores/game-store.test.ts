@@ -61,6 +61,76 @@ vi.mock('@engine/prompt-session-assembler', () => ({
 
 const SAVE_ID = 'save-refresh-test';
 
+describe('save loading ownership', () => {
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    await initializeDatabase();
+    await clearAllData();
+    await saveSaveSlot(makeSaveSlot());
+    await saveSaveSlot(makeSaveSlot({ id: 'save-b', name: 'B' }));
+  });
+
+  it('a slow earlier load cannot overwrite the latest requested save', async () => {
+    const game = useGameStore();
+    const original = database.getSave;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi.spyOn(database, 'getSave').mockImplementation(async (id) => {
+      if (id === SAVE_ID) await gate;
+      return original(id);
+    });
+    try {
+      const first = game.loadSave(SAVE_ID);
+      await game.loadSave('save-b');
+      release();
+      await first;
+      expect(game.activeSaveId).toBe('save-b');
+      expect(game.activeSave?.name).toBe('B');
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+  });
+
+  it('leaving while loading does not reactivate the save', async () => {
+    const game = useGameStore();
+    const loading = game.loadSave(SAVE_ID);
+    game.clearActive();
+    await loading;
+    expect(game.activeSaveId).toBeNull();
+    expect(game.characters).toEqual([]);
+  });
+
+  it('a pending refresh cannot apply the previous save profile after switching', async () => {
+    const game = useGameStore();
+    await saveSaveProfile(makeProfile({ fp: 99 }));
+    await saveSaveProfile(makeProfile({ saveId: 'save-b', fp: 7 }));
+    await game.loadSave(SAVE_ID);
+    const original = database.getSaveProfile;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi.spyOn(database, 'getSaveProfile').mockImplementation(async (id) => {
+      if (id === SAVE_ID) await gate;
+      return original(id);
+    });
+    try {
+      const pending = game.refreshFromDb(SAVE_ID);
+      await game.loadSave('save-b');
+      release();
+      await pending;
+      expect(game.saveProfile?.saveId).toBe('save-b');
+      expect(game.fp).toBe(7);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+  });
+});
+
 function makeSaveSlot(overrides: Partial<SaveSlot> = {}): SaveSlot {
   return {
     id: SAVE_ID,

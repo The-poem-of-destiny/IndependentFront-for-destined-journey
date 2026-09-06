@@ -36,6 +36,10 @@ vi.mock('../../lib/game-pipeline', () => ({
       constructedSpy();
     }
     abort = abortSpy;
+    dispose() {
+      abortSpy();
+      invalidatePromptSessionsSpy();
+    }
     invalidatePromptSessions = invalidatePromptSessionsSpy;
     primeSceneAudio(): void {}
     async sendOpeningPrompt(): Promise<void> {}
@@ -85,12 +89,14 @@ const gameStore = {
   activeSave: null,
   activeModal: null,
   activeSaveId: 'save_A',
+  currentView: 'game',
   sidebarCollapsed: false,
   rightPanelMode: 'status',
   fullscreenStatus: false,
   hasOpeningPromptConsumed: true,
   openingPrompt: null,
-  loadSave: vi.fn(),
+  loadSave: vi.fn(async () => true),
+  invalidatePendingLoads: vi.fn(),
   toggleSidebar: vi.fn(),
   setRightPanel: vi.fn(),
   toggleFullscreen: vi.fn(),
@@ -103,7 +109,7 @@ vi.mock('../../stores/game-store', () => ({
 }));
 
 vi.mock('../../stores/ui-store', () => ({
-  useUIStore: vi.fn(() => ({ activeSaveId: 'save_A', navigate: vi.fn() })),
+  useUIStore: vi.fn(() => ({ activeSaveId: 'save_A', currentView: 'game', navigate: vi.fn() })),
 }));
 
 const STUBS = {
@@ -128,6 +134,23 @@ const STUBS = {
 };
 
 describe('COR-02：GamePage 卸载时 abort 在飞的管线', () => {
+  it('leaving during save loading never constructs a pipeline or starts an opening', async () => {
+    setActivePinia(createPinia());
+    constructedSpy.mockClear();
+    let release!: (loaded: boolean) => void;
+    gameStore.loadSave.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const wrapper = mount(GamePage, { global: { stubs: STUBS } });
+    wrapper.unmount();
+    release(true);
+    await flushPromises();
+    expect(constructedSpy).not.toHaveBeenCalled();
+    expect(gameStore.invalidatePendingLoads).toHaveBeenCalled();
+  });
   it('🔴 生成中途卸载 → pipeline.abort() 被调用', async () => {
     setActivePinia(createPinia());
     abortSpy.mockClear();

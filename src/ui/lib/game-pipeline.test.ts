@@ -246,6 +246,31 @@ describe('侧链 Agent 调试调用身份', () => {
 });
 
 describe('sendOpeningPrompt', () => {
+  it('Stop keeps input locked until pending work drains and rejects an overlapping run', async () => {
+    const game = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore: game,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(pipeline as any, 'buildContext').mockImplementation(() => {
+      (pipeline as any).pendingPlotTasks.push(pending);
+      throw new Error('early failure with pending work');
+    });
+    const running = pipeline.run('first');
+    pipeline.abort();
+    const locked = game.isGenerating;
+    const overlapping = pipeline.run('second');
+    release();
+    await Promise.all([running, overlapping]);
+    expect(locked).toBe(true);
+    expect((pipeline as any).buildContext).toHaveBeenCalledTimes(1);
+    expect(game.isGenerating).toBe(false);
+  });
   it('two pipeline instances sharing one save generate the opening only once', async () => {
     let consumed = false;
     const gameStore = makeGameStore({

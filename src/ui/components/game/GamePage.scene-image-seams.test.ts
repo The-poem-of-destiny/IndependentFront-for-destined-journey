@@ -62,6 +62,7 @@ vi.mock('../../lib/game-pipeline', () => ({
     // COR-02 起 GamePage.onUnmounted 会调它 —— 替身缺这个方法，卸载当场 TypeError，
     // 而报出来的是 vue-test-utils 的 `Cannot read properties of null`，指向完全无关的地方
     abort(): void {}
+    dispose(): void {}
     // 🆕 T4 起 GamePage.onUnmounted 也调它（存档切换/销毁清本存档 prompt session）——
     // 与 abort 同一条纪律：替身缺方法，卸载当场 TypeError
     invalidatePromptSessions(): void {}
@@ -114,7 +115,8 @@ vi.mock('../../stores/game-store', () => ({
     // 开场白已消费：这条测试只关心缝，不该顺带跑一遍开场生成
     hasOpeningPromptConsumed: true,
     openingPrompt: null,
-    loadSave: vi.fn(),
+    loadSave: vi.fn(async () => true),
+    invalidatePendingLoads: vi.fn(),
     toggleSidebar: vi.fn(),
     setRightPanel: vi.fn(),
     toggleFullscreen: vi.fn(),
@@ -124,7 +126,11 @@ vi.mock('../../stores/game-store', () => ({
 }));
 
 vi.mock('../../stores/ui-store', () => ({
-  useUIStore: vi.fn(() => ({ activeSaveId: 'save_seam_wiring', navigate: vi.fn() })),
+  useUIStore: vi.fn(() => ({
+    activeSaveId: 'save_seam_wiring',
+    currentView: 'game',
+    navigate: vi.fn(),
+  })),
 }));
 
 /** 一条内容包方言：id 用默认那个，于是设置一格都不用动 */

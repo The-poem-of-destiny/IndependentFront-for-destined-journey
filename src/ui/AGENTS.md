@@ -103,6 +103,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │                                          由 `eslint.config.js` 的 `no-restricted-imports` +
 │                                          `tests/layering-gate.test.ts` 两道闸守着。**前端往引擎的方向
 │                                          不受限**，所以本目录是「值得收口的东西的家」，不是必经之路
+│   ├── journey-readiness.ts         ← 创角前本机配置检查；复用 endpoint-resolver 与主 DAG 名册，不发网络请求
 │   ├── game-pipeline.ts             ← GamePipeline（AgentConfig 组装/上下文/编排器/回调）
 │   │                                   [图像 v1] +onSceneImage（照 onPlayAudio 的形状）
 │   │                                   🔴 **自动档绝不追溯开火**（D15）：这个回调只在编排器**刚产出**
@@ -253,11 +254,14 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │      ui-store 的 `viewHistory` 负责页面级多层返回（例如设置 → 扩展管理 → 工坊），
 │   │      `previousView` 只作兼容投影；`back()` 直接弹栈，不能再经 `navigate()` 把当前页
 │   │      压回去。同视图重复 navigate 不入栈，否则返回目标会变成自己
+│   │      create-store 的 startJourney 合并并发提交；isCreating 贯穿持久化与错误恢复。
 │   ├── game-store.ts                ← 时间线恢复唯一 UI 编排边界：rollbackOneTurn /
 │   │                                   restoreToSnapshot / restartCombat 共用私有 restoreTimeline；
 │   │                                   三态结果区分恢复前拒绝、完整恢复、权威已恢复但投影失败。
 │   │                                   成功后全量重建存档投影、失效 prompt session、重接效果系统；
 │   │                                   projection-failed 必须清空当前会话并回首页重新进入存档
+│   │                                   loadSave 先读完整投影再按世代提交；离页使在途加载失效。
+│   │                                   ui.activeSaveId 只表达导航目标，活跃投影由 game-store 持有。
 │   ├── settings-store.ts            ← 全应用最热的状态；deep watch 自动落 localStorage
 │   │                                   API RPM 策略例外：住 Dexie v23，经 `saveRpmPolicies` 整表替换并
 │   │                                   热更新全局 limiter；端点凭据编辑时迁移其既有限制

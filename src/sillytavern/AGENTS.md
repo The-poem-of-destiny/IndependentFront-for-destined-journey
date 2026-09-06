@@ -25,6 +25,7 @@ src/sillytavern/                    ← 核心引擎
   │   │    `database.ts` 曾为标这一个类型反向 import 前端 store。create-store 侧 re-export 同名
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
+  ├── create-journey.ts             ← 新旅程唯一原子落库入口（角色/存档/档案/大纲/事件同一事务）
   ├── database.ts                   ← Dexie/IndexedDB v24
   │       🔴 `DB_VERSION` 常量必须等于最后一个 `this.version(n)`。它只出现在
   │          `FullBackup.version` 上、导入侧不拿它做判断，所以**对不上不会有任何报错**，

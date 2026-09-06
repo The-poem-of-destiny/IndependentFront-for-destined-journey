@@ -88,6 +88,11 @@ export const useGameStore = defineStore('game', () => {
   // === 存档 ===
   const saves = ref<SaveSlot[]>([]);
   const activeSaveId = ref<string | null>(null);
+  let loadGeneration = 0;
+
+  function invalidatePendingLoads() {
+    loadGeneration++;
+  }
   const activeSave = computed(
     () => saves.value.find((s: SaveSlot) => s.id === activeSaveId.value) || null,
   );
@@ -982,13 +987,16 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /** 从 IndexedDB 恢复消息到内存（始终覆写，无消息时清空） */
-  async function restoreMessages() {
-    if (!activeSaveId.value) return;
+  async function restoreMessages(saveId = activeSaveId.value) {
+    if (!saveId || saveId !== activeSaveId.value) return;
+    const generation = loadGeneration;
     try {
-      messages.value = await getMessages(activeSaveId.value);
+      const restored = await getMessages(saveId);
+      if (generation !== loadGeneration || saveId !== activeSaveId.value) return;
+      messages.value = restored;
     } catch (err) {
       console.error('[game-store] 恢复消息失败:', err);
-      messages.value = [];
+      if (generation === loadGeneration && saveId === activeSaveId.value) messages.value = [];
     }
   }
 
@@ -1034,52 +1042,25 @@ export const useGameStore = defineStore('game', () => {
     saves.value = await getSaves();
   }
 
-  async function loadSave(saveId: string) {
-    const save = await getSave(saveId);
-    if (!save) throw new Error(`Save ${saveId} not found`);
-
-    // 🔴 关键：先清空旧存档的所有内存状态，避免 DB 无数据时旧值残留
+  async function loadSave(saveId: string): Promise<boolean> {
     clearActive();
+    const generation = loadGeneration;
+    const projection = await readTimelineProjection(saveId);
+    if (generation !== loadGeneration) return false;
+    const debugTurns = await getDebugTurns(saveId);
+    if (generation !== loadGeneration) return false;
+
     activeSaveId.value = saveId;
-    saves.value = [save];
-
-    // 关键：先设置 activeSaveId，让 activeSave computed 能正确引用到 save
-    console.log(
-      '[game-store] activeSave after set:',
-      JSON.stringify({
-        id: activeSave.value?.id,
-        hasMetadata: !!activeSave.value?.metadata,
-        hasOpeningPrompt: !!activeSave.value?.metadata?.openingPrompt,
-        openingPromptConsumed: activeSave.value?.metadata?.openingPromptConsumed,
-      }),
-    );
-
-    // 加载关联数据（始终覆写，DB 返回 undefined 时写默认空值）
-    const [chars, mems, events, profile, outline, debugTurns] = await Promise.all([
-      getCharacters(saveId),
-      getMemories(saveId),
-      getPlotEvents(saveId),
-      getSaveProfile(saveId),
-      getLatestPlotOutline(saveId),
-      getDebugTurns(saveId),
-    ]);
-
-    characters.value = (await normalizePlayerProgression(chars as CharacterState[])) ?? [];
-    recentMemories.value = (mems as MemoryRecord[]) ?? [];
-    activePlotEvents.value = (events as PlotEvent[]) ?? [];
-    plotOutline.value = (outline as PlotOutline) ?? null;
-    activeCombat.value = null;
-    saveProfile.value = (profile as SaveProfile) ?? null;
+    saves.value = [projection.save];
+    characters.value = projection.characters;
+    recentMemories.value = projection.memories;
+    activePlotEvents.value = projection.plotEvents;
+    plotOutline.value = projection.outline;
+    saveProfile.value = projection.profile;
+    messages.value = projection.messages;
     agentLogHistory.value = debugTurns;
-
-    // 快照恢复走 snapshots 表（规范 §11.2），机制在 M5 重建 (#2)
-
-    // 从 messages 表恢复对话历史（始终覆写，无消息时为空数组）
-    await restoreMessages();
-
-    // 恢复 turnCounter（取最后一条 user/assistant 消息的 turn）
-    const lastMsg = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant').pop();
-    turnCounter = lastMsg?.turn ?? 0;
+    turnCounter = projection.turn;
+    return true;
   }
 
   async function readTimelineProjection(saveId: string) {
@@ -1114,16 +1095,21 @@ export const useGameStore = defineStore('game', () => {
   /** 🆕 轻量回读：管线跑完后 StateManager / 侧链直接写了 Dexie，
    *  把 DB 里更新后的 save.metadata / characters / saveProfile 同步回内存。
    *  不动 messages / agentLog / combat 等 UI 态（与 loadSave 的全量重载区分开）。 */
-  async function refreshFromDb() {
-    if (!activeSaveId.value) return;
+  async function refreshFromDb(saveId = activeSaveId.value) {
+    if (!saveId || saveId !== activeSaveId.value) return;
+    const generation = loadGeneration;
     try {
       const [save, dbChars, profile, outline, dbPlotEvents] = await Promise.all([
-        getSave(activeSaveId.value),
-        getCharacters(activeSaveId.value), // M6: saveId 索引查询（M1 建索引；侧链 NPC 由 applyAddCharacter 注入 saveId）
-        getSaveProfile(activeSaveId.value),
-        getLatestPlotOutline(activeSaveId.value),
-        getPlotEvents(activeSaveId.value),
+        getSave(saveId),
+        getCharacters(saveId), // M6: saveId 索引查询（M1 建索引；侧链 NPC 由 applyAddCharacter 注入 saveId）
+        getSaveProfile(saveId),
+        getLatestPlotOutline(saveId),
+        getPlotEvents(saveId),
       ]);
+
+      if (generation !== loadGeneration || saveId !== activeSaveId.value) return;
+      await normalizePlayerProgression(dbChars as CharacterState[]);
+      if (generation !== loadGeneration || saveId !== activeSaveId.value) return;
 
       // 1. save.metadata（totalTurns / openingPromptConsumed 等）
       if (save) {
@@ -1135,7 +1121,6 @@ export const useGameStore = defineStore('game', () => {
       // 2. characters：合并语义 —— DB 版本覆盖同 id 内存版本（拿到最新背包/装备/资源），
       //    DB 里属于本存档但内存没有的角色追加（查询已按 saveId 索引预过滤）；内存独有的（预览注入等）保留。
       //    先做旧档经验保底归一化（就地改 + 有变化落库），这样合并进内存的也是归一化后的数。
-      await normalizePlayerProgression(dbChars as CharacterState[]);
       const dbById = new Map((dbChars as CharacterState[]).map((c) => [c.id, c]));
       characters.value = characters.value.map((c) => dbById.get(c.id) ?? c);
       const memIds = new Set(characters.value.map((c) => c.id));
@@ -1178,6 +1163,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function clearActive() {
+    invalidatePendingLoads();
     clearSessionRuntime();
     agentLogHistory.value = [];
     activeSaveId.value = null;
@@ -1527,6 +1513,7 @@ export const useGameStore = defineStore('game', () => {
     addSystemMessage,
     loadSaves,
     loadSave,
+    invalidatePendingLoads,
     refreshFromDb,
     clearActive,
     pendingInput,
