@@ -1803,6 +1803,38 @@ describe('markOpeningPromptConsumed', () => {
     expect((await getSave(SAVE_ID))?.metadata.openingPromptConsumed).toBe(true);
   });
 
+  it('releases only the original save after switching, and preserves completed openings', async () => {
+    const base = makeSaveSlot();
+    await saveSaveSlot(
+      makeSaveSlot({ metadata: { ...base.metadata, openingPromptConsumed: true } }),
+    );
+    await saveSaveSlot(
+      makeSaveSlot({
+        id: 'save-b',
+        slot: 2,
+        metadata: { ...base.metadata, openingPromptConsumed: true },
+      }),
+    );
+    const store = makeStore();
+    await store.loadSave('save-b');
+    expect(await store.releaseOpeningPromptClaim(SAVE_ID)).toBe(true);
+    expect((await getSave(SAVE_ID))?.metadata.openingPromptConsumed).toBe(false);
+    expect((await getSave('save-b'))?.metadata.openingPromptConsumed).toBe(true);
+    expect(store.activeSaveId).toBe('save-b');
+    expect(store.hasOpeningPromptConsumed).toBe(true);
+
+    await saveMessage({
+      id: 'opening-b',
+      saveId: 'save-b',
+      role: 'assistant',
+      content: 'Opening narrative',
+      timestamp: 1,
+      turn: 1,
+    });
+    expect(await store.releaseOpeningPromptClaim('save-b')).toBe(false);
+    expect((await getSave('save-b'))?.metadata.openingPromptConsumed).toBe(true);
+  });
+
   it('releases a claim back to disk so a failed opening can be retried', async () => {
     const base = makeSaveSlot();
     await saveSaveSlot(

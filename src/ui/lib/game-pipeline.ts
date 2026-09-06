@@ -267,7 +267,36 @@ export function withImagePromptSystem(
   return [...configs, { agentId: 'image_prompt', systemPrompt: override } as AgentConfig];
 }
 
+const saveWork = new Map<
+  string,
+  { owner: GamePipeline; depth: number; idle: Promise<void>; resolve: () => void }
+>();
+
+/** A remounted page must read its save only after the previous pipeline drains. */
+export async function waitForGameSaveIdle(saveId: string): Promise<void> {
+  while (saveWork.has(saveId)) await saveWork.get(saveId)!.idle;
+}
+
 export class GamePipeline {
+  private acquireSaveWork(): (() => void) | null {
+    let work = saveWork.get(this.saveId);
+    if (work && work.owner !== this) return null;
+    if (!work) {
+      let resolve!: () => void;
+      const idle = new Promise<void>((done) => {
+        resolve = done;
+      });
+      work = { owner: this, depth: 0, idle, resolve };
+      saveWork.set(this.saveId, work);
+    }
+    work.depth++;
+    return () => {
+      if (--work.depth === 0) {
+        saveWork.delete(this.saveId);
+        work.resolve();
+      }
+    };
+  }
   private game: ReturnType<typeof useGameStore>;
   private settings: ReturnType<typeof useSettingsStore>;
   private saveId: string;
@@ -369,12 +398,27 @@ export class GamePipeline {
 
   /** 发送开场 Prompt（首次加载存档时调用），作为首条用户消息注入管线 */
   async sendOpeningPrompt(onStoryChunk?: StoryChunkCallback): Promise<void> {
+    if (!this.ownsActiveSave) return;
+    const release = this.acquireSaveWork();
+    if (!release) return;
+    try {
+      await this.executeOpeningPrompt(onStoryChunk);
+    } finally {
+      release();
+    }
+  }
+
+  private async executeOpeningPrompt(onStoryChunk?: StoryChunkCallback): Promise<void> {
     const prompt = this.game.openingPrompt;
     if (!prompt) return;
     // Claim before starting the long pipeline. A page remount can create a second
     // GamePipeline while the first one is still running.
     const claimed = await this.game.markOpeningPromptConsumed();
     if (!claimed) return;
+    if (!this.ownsActiveSave) {
+      await this.game.releaseOpeningPromptClaim(this.saveId);
+      return;
+    }
 
     // run() 会先落库用户消息，所以重试前得知道这条已经在了 —— 否则归还认领等于放行重复。
     const promptAlreadyRendered = this.game.messages.some(
@@ -384,27 +428,29 @@ export class GamePipeline {
     const ok = await this.run(prompt, onStoryChunk, /* isUserMessage */ !promptAlreadyRendered);
     if (ok) return;
 
-    // 🔴 COR-02：存档已切走就到此为止。下面两行读的是 `this.game.messages`（此刻已是新存档的）、
-    // 写的是 `releaseOpeningPromptClaim` → `patchSaveMetadata` → **activeSave**（也是新存档）。
-    // 失败场景：新建存档 A 开场生成中 → 回首页 → 打开同样刚开场的存档 B（B 自己的开场还在飞、
-    // 尚无 assistant 正文）→ A 这一路判定「什么都没产出」，把 **B 的** openingPromptConsumed
-    // 归还成 false → B 下次挂载重放开场，同一段叙事写两遍。
-    if (!this.ownsActiveSave) {
-      console.warn('[GamePipeline] 存档已切换，不归还开场认领（那会写到别的存档上）', {
-        pipelineSaveId: this.saveId,
-        activeSaveId: this.game.activeSaveId,
-      });
-      return;
+    // The store verifies persisted narrative against the original save before releasing.
+    if (!this.ownsActiveSave || !this.game.messages.some((msg) => msg.role === 'assistant')) {
+      await this.game.releaseOpeningPromptClaim(this.saveId);
     }
-
-    // 只有「一句叙事都没产出」才归还认领：API 抽风不该把开场永久烧掉。
-    // 已经有 assistant 正文时保持已消费，重跑会把那段叙事再写一遍。
-    const producedNarrative = this.game.messages.some((msg) => msg.role === 'assistant');
-    if (!producedNarrative) await this.game.releaseOpeningPromptClaim();
   }
 
   /** 核心: 将用户输入送入 Agent 管线。返回 true 表示管线成功完成。 */
   async run(
+    userInput: string,
+    onStoryChunk?: StoryChunkCallback,
+    isUserMessage = true,
+    sourceMessageId?: string,
+  ): Promise<boolean> {
+    const release = this.acquireSaveWork();
+    if (!release) return false;
+    try {
+      return await this.executeRun(userInput, onStoryChunk, isUserMessage, sourceMessageId);
+    } finally {
+      release();
+    }
+  }
+
+  private async executeRun(
     userInput: string,
     onStoryChunk?: StoryChunkCallback,
     isUserMessage = true,
@@ -1981,7 +2027,7 @@ export class GamePipeline {
       });
 
       // 更新本地 recentMemories 供下一轮召回
-      if (memory) {
+      if (memory && this.ownsActiveSave) {
         this.game.recentMemories = [...(this.game.recentMemories || []), memory];
         console.log(
           `[GamePipeline] memory_summary 落库成功: ${memory.id} importance=${memory.importance} keywords=${memory.keywords.join(',')}`,

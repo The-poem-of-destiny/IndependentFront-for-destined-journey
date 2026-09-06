@@ -294,7 +294,7 @@ describe('sendOpeningPrompt', () => {
     await Promise.all([first.sendOpeningPrompt(), second.sendOpeningPrompt()]);
 
     expect(firstRun.mock.calls.length + secondRun.mock.calls.length).toBe(1);
-    expect(gameStore.markOpeningPromptConsumed).toHaveBeenCalledTimes(2);
+    expect(gameStore.markOpeningPromptConsumed).toHaveBeenCalledTimes(1);
   });
 
   it('releases the claim when the run produced no narrative at all', async () => {
@@ -2481,4 +2481,80 @@ describe('F10 🔴 集成：选中 A 删掉 A，provider B 一个字节都收不
 
     globalThis.fetch = originalFetch;
   });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+describe('independent review ownership repros', () => {
+  it('disposed memory task cannot publish into another save', async () => {
+    const gate = deferred<any>();
+    summarizeAndSaveMock.mockReturnValueOnce(gate.promise);
+    const game = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore: game,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    const task = (pipeline as any).persistMemorySummary(makeResult('memory_summary', 'summary'));
+    await vi.waitFor(() => expect(summarizeAndSaveMock).toHaveBeenCalled());
+    pipeline.dispose();
+    game.activeSaveId = 'save-b';
+    game.recentMemories = [];
+    gate.resolve({ id: 'memory-a', saveId: 'save-test', importance: 5, keywords: [] });
+    await task;
+    expect(game.recentMemories).toEqual([]);
+  });
+
+  it('leaving during the opening claim does not permanently consume an empty opening', async () => {
+    const gate = deferred<boolean>();
+    const game = makeGameStore({
+      openingPrompt: 'Opening',
+      markOpeningPromptConsumed: vi.fn(() => gate.promise),
+    });
+    const pipeline = new GamePipeline({
+      gameStore: game,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    const task = pipeline.sendOpeningPrompt();
+    expect(game.markOpeningPromptConsumed).toHaveBeenCalled();
+    pipeline.dispose();
+    gate.resolve(true);
+    await task;
+    expect(game.addMessage).not.toHaveBeenCalled();
+    expect(game.releaseOpeningPromptClaim).toHaveBeenCalled();
+  });
+});
+it('Stop then same-save remount cannot start a run before old cleanup drains', async () => {
+  const game = makeGameStore();
+  const settings = makeSettingsStore();
+  const first = new GamePipeline({ gameStore: game, settingsStore: settings, saveId: 'save-test' });
+  const gate = deferred<void>();
+  vi.spyOn(first as any, 'buildContext').mockImplementation(() => {
+    (first as any).pendingPlotTasks.push(gate.promise);
+    throw new Error('controlled failure while a background task is pending');
+  });
+  const running = first.run('first');
+  first.abort();
+  first.dispose();
+  game.isGenerating = false; // GamePage.onBeforeUnmount and loadSave.clearActive both do this.
+  const second = new GamePipeline({
+    gameStore: game,
+    settingsStore: settings,
+    saveId: 'save-test',
+  });
+  const buildSecond = vi.spyOn(second as any, 'buildContext').mockImplementation(() => {
+    throw new Error('new run entered while previous cleanup remained pending');
+  });
+  const next = second.run('second');
+  const admittedBeforeCleanup = buildSecond.mock.calls.length;
+  gate.resolve();
+  await Promise.all([running, next]);
+  expect(admittedBeforeCleanup).toBe(0);
 });

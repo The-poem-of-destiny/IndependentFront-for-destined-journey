@@ -48,6 +48,7 @@ const PACK_PROMPT = '内容包写的：把场景写成一句英文散文。<imag
 const promptCalls: (string | undefined)[] = [];
 
 vi.mock('../../lib/game-pipeline', () => ({
+  waitForGameSaveIdle: vi.fn(async () => {}),
   GamePipeline: class {
     async runImagePromptAgent(
       _request: ImagePromptRequest,

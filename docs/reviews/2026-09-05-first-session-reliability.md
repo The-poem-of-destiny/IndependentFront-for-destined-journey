@@ -1,6 +1,6 @@
 # First-session reliability — 2026-09-05
 
-Status: implemented; local gates and bounded browser checks passed. PR review pending.
+Status: implemented; local gates and bounded browser checks passed. Independent Astra review complete; all three findings fixed and rechecked.
 
 Base: `c06442705c8a766dc5724804a0457a74e5109e77`.
 
@@ -26,7 +26,7 @@ then have a separate Astra agent review it. No merge is included in this request
   keyless local services, optional helpers, stale refreshes, image/appearance load races and page exit
   before pipeline construction.
 - `npm run gates`: all three type checks, build, formatting, lint, Knip ratchet and the full suite passed.
-  2026-09-05 measured: 370 test files; 9,398 passed and 8 skipped.
+  2026-09-05 measured: 370 test files; 9,403 passed and 8 skipped.
 - The first sandbox build failed to replace an existing `dist-ui` asset with Windows `EPERM`.
   The same gates command passed outside the sandbox; no build configuration workaround was added.
 - Browser: isolated local origin `http://127.0.0.1:5188`, placeholder content, no configured endpoints.
@@ -46,4 +46,19 @@ then have a separate Astra agent review it. No merge is included in this request
 
 ## Independent PR review
 
-Pending after PR creation. Findings and any follow-up fixes will be recorded here.
+PR: [#129](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey/pull/129).
+
+A separate GPT-6 Astra agent reviewed `3adff63` against the standards and authorized scope.
+Standards: no actionable finding. Spec: three P1 lifecycle findings, all reproduced with
+controlled promises and no provider calls.
+
+| Finding                                                                | Root cause and follow-up                                                                                                                                                                                     | Status                  |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- |
+| Empty opening remained consumed after leaving during claim persistence | Disposal rejected generation and also prevented recovery. Recovery now reads and updates the original save in a transaction, preserves persisted narrative, and cannot project into a different active save. | Fixed; regression added |
+| Delayed memory appeared in the next save                               | Memory completion bypassed ownership checks. Check ownership after the asynchronous summary finishes.                                                                                                        | Fixed; regression added |
+| Stop followed by reopening the same save admitted an overlapping run   | The drain lock belonged to one pipeline instance. A save-scoped barrier now covers opening claims and run cleanup across instances; the page waits before loading and keeps input hidden while waiting.      | Fixed; regression added |
+
+Follow-up Astra review found no actionable standards or spec findings. All three independent
+reproductions and five focused opening-recovery/page-loading tests passed. The complete local
+`npm run gates` also passed after these fixes (370 files; 9,403 passed, 8 skipped).
+GitHub Actions status is tracked on the PR; no merge was requested.

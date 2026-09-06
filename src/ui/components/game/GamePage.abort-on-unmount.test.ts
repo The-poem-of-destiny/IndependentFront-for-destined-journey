@@ -31,6 +31,7 @@ const invalidatePromptSessionsSpy = vi.fn();
 const constructedSpy = vi.fn();
 
 vi.mock('../../lib/game-pipeline', () => ({
+  waitForGameSaveIdle: vi.fn(async () => {}),
   GamePipeline: class {
     constructor() {
       constructedSpy();
@@ -134,6 +135,28 @@ const STUBS = {
 };
 
 describe('COR-02：GamePage 卸载时 abort 在飞的管线', () => {
+  it('waits for previous save work before loading and hides input while waiting', async () => {
+    setActivePinia(createPinia());
+    const { waitForGameSaveIdle } = await import('../../lib/game-pipeline');
+    let release!: () => void;
+    vi.mocked(waitForGameSaveIdle).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    gameStore.loadSave.mockClear();
+    const wrapper = mount(GamePage, { global: { stubs: STUBS } });
+    await flushPromises();
+    expect(gameStore.loadSave).not.toHaveBeenCalled();
+    expect(wrapper.find('[role="status"]').exists()).toBe(true);
+    expect(wrapper.find('chat-flow-stub').exists()).toBe(false);
+    release();
+    await flushPromises();
+    expect(gameStore.loadSave).toHaveBeenCalledWith('save_A');
+    wrapper.unmount();
+  });
+
   it('leaving during save loading never constructs a pipeline or starts an opening', async () => {
     setActivePinia(createPinia());
     constructedSpy.mockClear();
@@ -145,6 +168,7 @@ describe('COR-02：GamePage 卸载时 abort 在飞的管线', () => {
         }),
     );
     const wrapper = mount(GamePage, { global: { stubs: STUBS } });
+    await flushPromises();
     wrapper.unmount();
     release(true);
     await flushPromises();

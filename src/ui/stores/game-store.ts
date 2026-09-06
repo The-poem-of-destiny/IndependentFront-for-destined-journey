@@ -30,6 +30,8 @@ import {
   saveDebugTurn,
 } from '@engine/database';
 import { saveMessage, getMessages, saveSaveSlot } from '@engine/database';
+import { getDatabase } from '@engine/database';
+import { withSaveWriteLock } from '@engine/state-write-queue';
 // 旧档经验保底归一化（方案 A，2026-08-24）：加载时对主角自愈「等级与累计经验矛盾」
 //（旧档 totalExp 是层级内语义，新系统是全程累计）。幂等，正常存档零影响。
 import { normalizePlayerProgression } from '@engine/database';
@@ -891,12 +893,37 @@ export const useGameStore = defineStore('game', () => {
    * 开场永久烧掉 —— 玩家拿到一个只有自己那句话、没有任何叙事、也没法重来的存档。
    * 归还之后重挂载会重跑开场；调用方负责保证不会重复插同一条用户消息。
    */
-  async function releaseOpeningPromptClaim(): Promise<boolean> {
-    if (!activeSave.value?.metadata?.openingPromptConsumed) return false;
-    return patchSaveMetadata(
-      { openingPromptConsumed: false },
-      { optimistic: true, failMessage: '归还开场 Prompt 认领失败' },
-    );
+  async function releaseOpeningPromptClaim(saveId = activeSaveId.value): Promise<boolean> {
+    if (!saveId) return false;
+    const generation = loadGeneration;
+    try {
+      const restored = await withSaveWriteLock(saveId, async () => {
+        const db = getDatabase();
+        return db.transaction('rw', db.saves, db.messages, async () => {
+          const save = await db.saves.get(saveId);
+          if (!save?.metadata?.openingPromptConsumed) return null;
+          const narrative = await db.messages
+            .where('saveId')
+            .equals(saveId)
+            .filter((msg) => msg.role === 'assistant')
+            .first();
+          if (narrative) return null;
+          save.metadata.openingPromptConsumed = false;
+          save.updatedAt = Date.now();
+          await db.saves.put(save);
+          return save;
+        });
+      });
+      if (!restored) return false;
+      if (generation === loadGeneration && activeSaveId.value === saveId) {
+        const index = saves.value.findIndex((save) => save.id === saveId);
+        if (index >= 0) saves.value[index] = restored;
+      }
+      return true;
+    } catch (err) {
+      console.error('[GameStore] 归还开场 Prompt 认领失败:', err);
+      return false;
+    }
   }
 
   // === 选项管理 ===

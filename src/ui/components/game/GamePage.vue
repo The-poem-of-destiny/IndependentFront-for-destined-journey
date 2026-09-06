@@ -6,7 +6,7 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useAudioStore } from '../../stores/audio-store';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
-import { GamePipeline } from '../../lib/game-pipeline';
+import { GamePipeline, waitForGameSaveIdle } from '../../lib/game-pipeline';
 import { buildSceneImageSeams, resolveSceneWeather } from '../../lib/scene-image-seams';
 import { getContentRegistry } from '../../stores/content-store';
 import { useCharacterAppearanceStore } from '../../stores/character-appearance-store';
@@ -49,6 +49,7 @@ const requestedSaveId = ui.activeSaveId;
 const ownsPage = () =>
   !disposed && ui.currentView === 'game' && ui.activeSaveId === requestedSaveId;
 const streamingText = ref('');
+const loadingSave = ref(true);
 let streamingFrame: number | null = null;
 let pendingStreamingText = '';
 
@@ -79,6 +80,8 @@ onMounted(async () => {
   if (requestedSaveId) {
     try {
       console.log('[GamePage] loading save...');
+      await waitForGameSaveIdle(requestedSaveId);
+      if (!ownsPage()) return;
       if (!(await game.loadSave(requestedSaveId)) || !ownsPage()) return;
       // API endpoint construction is synchronous, so hydrate/migrate its secrets before creating it.
       await settings.initApiSecrets();
@@ -185,6 +188,7 @@ onMounted(async () => {
         .then(() => (ownsPage() ? pipeline?.primeSceneAudio() : undefined))
         .catch((err) => console.warn('[GamePage] 音频初始化失败（不影响游戏）:', err));
       // 首次加载 → 自动发送开场 Prompt
+      loadingSave.value = false;
       if (!game.hasOpeningPromptConsumed && game.openingPrompt) {
         console.log('[GamePage] sending opening prompt...');
         await pipeline.sendOpeningPrompt(handleStoryChunk);
@@ -351,7 +355,11 @@ function onModalOpenChange(v: boolean) {
     <div class="game-body" :class="{ 'rail-collapsed': game.sidebarCollapsed }">
       <SideToolbar @tool-click="handleToolClick" />
       <ScenePanel />
+      <div v-if="loadingSave" class="save-loading" role="status">
+        正在加载存档，等待上一回合收尾…
+      </div>
       <ChatFlow
+        v-else
         :messages="game.messages"
         :is-generating="game.isGenerating"
         :system-events-visible="s.systemEventsVisible"
@@ -496,6 +504,14 @@ function onModalOpenChange(v: boolean) {
 </template>
 
 <style scoped>
+.save-loading {
+  flex: 1;
+  align-self: center;
+  padding: var(--theme-spacing-lg);
+  color: var(--theme-text-secondary);
+  text-align: center;
+}
+
 .game-page-layout {
   display: flex;
   flex-direction: column;

@@ -123,9 +123,14 @@ describe('GamePage', () => {
       hasOpeningPromptConsumed: true,
       openingPrompt: null as string | null,
     });
-    (useUIStore as any).mockReturnValue({ activeSaveId: 'test-save-123', navigate: vi.fn() });
+    (useUIStore as any).mockReturnValue({
+      activeSaveId: 'test-save-123',
+      currentView: 'game',
+      navigate: vi.fn(),
+    });
 
     mount(GamePage);
+    await flushPromises();
     expect(mockLoadSave).toHaveBeenCalledWith('test-save-123');
   });
 
