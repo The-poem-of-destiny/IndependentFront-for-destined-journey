@@ -41,24 +41,7 @@ if [ -n "${POEM_CONTENT_DIR:-}" ]; then
 fi
 
 # ------------------------------------------------------------------
-# 清掉开发端口段上的残留监听。
-# lsof 的 -sTCP:LISTEN 已经把 ESTABLISHED / TIME_WAIT 排除在外，也不区分
-# IPv4/IPv6 —— 所以这里不需要 dev.bat 那三个 netstat/findstr 细节的对应物。
-# lsof 无匹配时退出码为 1，必须 `|| true`，否则 set -e 会当场终止。
-if command -v lsof >/dev/null 2>&1; then
-  for port in 5173 5174 5175 5176 5177 5178 5179; do
-    pids="$(lsof -ti "tcp:$port" -sTCP:LISTEN 2>/dev/null || true)"
-    for pid in $pids; do
-      echo "[clean] 杀掉端口 $port 上的进程 PID=$pid ..."
-      kill -9 "$pid" 2>/dev/null || true
-    done
-  done
-  # 给 kill 一点落地时间（对应 dev.bat 里那句 ping -n 2）。
-  sleep 1
-else
-  echo "[clean] 未找到 lsof，跳过端口清理；若 5173 被占用，--strictPort 会直接报错退出。"
-fi
-
+# A busy port fails safely via --strictPort; never kill unknown listeners.
 echo "[dev] 启动 Vite: http://localhost:5173/"
 echo
 exec npx vite --port 5173 --strictPort

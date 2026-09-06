@@ -79,7 +79,7 @@ export interface CraftGenDeps {
   clientFactory: (agentId: string, endpoint: ApiEndpoint, saveId: string) => CraftGenClient;
   /** StateManager 写入入口 (可选，测试可不提供) */
   stateManager?: {
-    commitChatState: (patches: StatePatch[]) => Promise<void>;
+    commitDomainCommand: (patches: StatePatch[]) => Promise<void>;
   };
 }
 
@@ -120,6 +120,8 @@ export interface CraftGenClient {
  * craft_gen 解析后的结构化输出
  */
 export interface CraftGenOutput {
+  /** Engine settlement, never parsed from model output. */
+  settlementPatches?: StatePatch[];
   success: boolean;
   productName: string;
   quality: QualityLevel;
@@ -212,10 +214,16 @@ export async function callCraftGenAgent(
   if (client.chatWithTools) {
     const tools = getToolsForAgent('craft_gen');
 
+    const settlementPatches: StatePatch[] = [];
+    const parseOutput = (output: string): CraftGenOutput => ({
+      ...parseCraftResultXML(output),
+      settlementPatches: settlementPatches.length ? settlementPatches : undefined,
+    });
     const toolContext: ToolExecutionContext = {
       characters: request.context.characters ?? [],
       variables: request.context.variables ?? {},
       saveId: request.saveId,
+      stageCraftSettlement: (patches) => settlementPatches.push(...patches),
     };
 
     const result = await client.chatWithTools(
@@ -235,7 +243,7 @@ export async function callCraftGenAgent(
       // 如果 Agentic 失败，回退到普通 chat
       const fallbackResult = await client.chat(messages);
       if (fallbackResult.output) {
-        return parseCraftResultXML(fallbackResult.output);
+        return parseOutput(fallbackResult.output);
       }
       throw new Error(`craft_gen Agentic 调用失败: ${result.error}`);
     }
@@ -244,7 +252,7 @@ export async function callCraftGenAgent(
       throw new Error('craft_gen 未返回输出');
     }
 
-    return parseCraftResultXML(result.output);
+    return parseOutput(result.output);
   }
 
   // Fallback: 普通 chat
@@ -420,7 +428,7 @@ export function parseCraftResultXML(xml: string): CraftGenOutput {
  * - equip_item: 装备类产物自动装备到对应槽位
  * - delta_exp: 经验奖励
  * - delta_fp: FP 奖励
- * - delta_hp/delta_mp/delta_sp: 资源消耗（由 craft_settle 工具内部提交，这里做兜底）
+ * - delta_hp/delta_mp/delta_sp: 资源消耗（由 craft_settle 暂存，与制品同事务提交）
  */
 export function buildCraftPatches(
   craftOutput: CraftGenOutput,
@@ -508,7 +516,11 @@ export function buildCraftPatches(
 
   // 3. 经验奖励 → update_character delta（M3: 不再走 delta_variable，#12 exp 侧）
   // S4d：失败/大失败不结算 EXP/FP（craft_gen 失败时 expGained/fpGained 为 0，这里双重保险）
-  if (craftOutput.success && craftOutput.craftParams.expGained > 0) {
+  if (
+    !craftOutput.settlementPatches &&
+    craftOutput.success &&
+    craftOutput.craftParams.expGained > 0
+  ) {
     patches.push({
       op: 'update_character',
       target: `characters.${characterId}`,
@@ -517,7 +529,11 @@ export function buildCraftPatches(
     });
   }
   // 4. FP 奖励 → delta_variable profile.fp（M5 改 FP op 前保持现状）
-  if (craftOutput.success && craftOutput.craftParams.fpGained > 0) {
+  if (
+    !craftOutput.settlementPatches &&
+    craftOutput.success &&
+    craftOutput.craftParams.fpGained > 0
+  ) {
     patches.push({
       op: 'delta_variable',
       target: 'profile.fp',
@@ -564,11 +580,14 @@ export async function runCraftGenChain(
     console.warn('[craft-gen-chain] 无 owner 且无玩家角色，craft patches 将跳过角色目标');
     return { narrative: craftOutput.narrative, patches: [], craftOutput, itemOutput };
   }
-  const patches = buildCraftPatches(craftOutput, itemOutput, characterId);
+  const patches = [
+    ...(craftOutput.settlementPatches ?? []),
+    ...buildCraftPatches(craftOutput, itemOutput, characterId),
+  ];
 
   // Step 4: optional persistence
   if (deps.stateManager) {
-    await deps.stateManager.commitChatState(patches);
+    await deps.stateManager.commitDomainCommand(patches);
   }
 
   return {

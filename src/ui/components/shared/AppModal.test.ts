@@ -145,3 +145,43 @@ describe('AppModal — 交互与副作用', () => {
     expect(document.querySelector('.modal-overlay')).toBeNull();
   });
 });
+
+it('names the dialog, traps keyboard focus and returns focus on close', async () => {
+  const opener = document.createElement('button');
+  document.body.append(opener);
+  opener.focus();
+  const w = modal(
+    { title: 'Keyboard dialog' },
+    { default: '<button id="last-control">Last</button>' },
+  );
+  await w.vm.$nextTick();
+  const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
+  expect(dialog).not.toBeNull();
+  expect(dialog.getAttribute('aria-modal')).toBe('true');
+  expect(document.getElementById(dialog.getAttribute('aria-labelledby')!)?.textContent).toBe(
+    'Keyboard dialog',
+  );
+  const last = document.getElementById('last-control')!;
+  last.focus();
+  last.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+  expect(document.activeElement).toBe(document.querySelector('.modal-close'));
+  await w.setProps({ open: false });
+  expect(document.activeElement).toBe(opener);
+});
+
+it('only the top nested dialog handles Escape and retains the outer scroll lock', async () => {
+  const outer = modal({ title: 'Outer' });
+  await outer.vm.$nextTick();
+  const inner = mount(AppModal, { props: { open: true, title: 'Inner' } });
+  try {
+    await inner.vm.$nextTick();
+    pressEscape();
+    expect(inner.emitted('close')).toHaveLength(1);
+    expect(outer.emitted('close')).toBeUndefined();
+    await inner.setProps({ open: false });
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(document.querySelector('.modal-content')?.contains(document.activeElement)).toBe(true);
+  } finally {
+    inner.unmount();
+  }
+});

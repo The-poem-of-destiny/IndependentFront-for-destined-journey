@@ -1562,6 +1562,8 @@ export interface ToolExecutionContext {
    * `takeCraftTape` 用到时才建。
    */
   craftDice?: Record<string, CraftDiceTape>;
+  /** Defer settlement until the craft chain can commit its product in the same command. */
+  stageCraftSettlement?: (patches: StatePatch[]) => void;
 }
 
 /** Agent 定义 */

@@ -1271,7 +1271,7 @@ describe('M2 v3 战斗接线', () => {
             chat: async () => ({ output: null, rawResponse: '' }),
           }) as never,
         endpoint: { id: 'ep' } as never,
-        stateManager: { commitChatState: async () => {} },
+        stateManager: { commitDomainCommand: async () => {} },
         characters: [],
         context: {} as never,
         submitCommand: async () => {}, // 等待态由 v3_awaiting_player_input 事件驱动 store
@@ -1409,7 +1409,7 @@ describe('M2 v3 战斗接线', () => {
             chat: async () => ({ output: null, rawResponse: '' }),
           }) as never,
         endpoint: { id: 'ep' } as never,
-        stateManager: { commitChatState: async () => {} },
+        stateManager: { commitDomainCommand: async () => {} },
         characters: [],
         context: {} as never,
         submitCommand: async () => {},
@@ -1526,7 +1526,7 @@ describe('T15 v3 事件链路（真实 runCombatV3 → store）', () => {
       deps: {
         clientFactory: () => fakeEnemyClient([]),
         endpoint: { id: 'ep' } as never,
-        stateManager: { commitChatState: commit },
+        stateManager: { commitDomainCommand: commit },
         characters: [],
         context: {} as never,
         submitCommand: async () => {},

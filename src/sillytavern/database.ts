@@ -1821,6 +1821,8 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       await db.saves.delete(id);
     },
   );
+  const { unwireEffectSystem } = await import('./effect-wiring');
+  unwireEffectSystem(id);
 }
 
 // --- 角色外貌会话副本 (v19, D56) ---

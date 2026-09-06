@@ -2,7 +2,7 @@
  * combat-v3/coordinator.test.ts — Coordinator 路由 + 终局落库 + abandon（M2）
  *
  * 验收对应（plan §4.9 / §4.1）：
- *   A2-1  终局只调一次 commitChatState（基础攻击 → hp_zero → settle）
+ *   A2-1  终局只调一次 commitDomainCommand（基础攻击 → hp_zero → settle）
  *   A2-3  RequiredInput 路由穷尽（编译期 never 兜底 + M2 未支持分支 throw）
  *   A2-4  abandon（C4）：FP 不落库
  *   PlayerCommand 玩家方路由到 store；敌方路由到 Agent
@@ -94,7 +94,7 @@ function mkOpts(
     deps: {
       clientFactory: () => fakeEnemyClient(enemyScript),
       endpoint: { id: 'ep' } as never,
-      stateManager: { commitChatState: commit },
+      stateManager: { commitDomainCommand: commit },
       characters: over.characters ?? [],
       context: {} as never,
       submitCommand,
@@ -174,7 +174,7 @@ describe('COR-12：恢复用的是当前行动单位，不是先攻首位', () =
   });
 });
 
-describe('A2-1：终局一次 commitChatState', () => {
+describe('A2-1：终局一次 commitDomainCommand', () => {
   it('甲攻击乙 → 乙死亡 → hp_zero → settle → 只 commit 一次', async () => {
     const { opts, commit, abandon, setQueue } = mkOpts();
     // 甲的玩家路由：第一次问就声明攻击乙（其余凑数）
@@ -773,7 +773,7 @@ describe('查询/命令分流（2026-08-09 §2.2 决策 3C：查询工具不产 
       ],
       [{ name: 'pass_slot', args: { actorName: '乙', slot: 'action' } }],
     ]);
-    const commit = opts.deps.stateManager!.commitChatState;
+    const commit = opts.deps.stateManager!.commitDomainCommand;
     await runCombatV3(opts);
 
     // 关键回归断言：查询结果不再是 Command（旧代码 get_* 落 default → 静默 PassAttack）
@@ -804,7 +804,7 @@ describe('查询/命令分流（2026-08-09 §2.2 决策 3C：查询工具不产 
       ],
       [{ name: 'pass_slot', args: { actorName: '乙', slot: 'action' } }],
     ]);
-    const commit = opts.deps.stateManager!.commitChatState;
+    const commit = opts.deps.stateManager!.commitDomainCommand;
     await runCombatV3(opts);
 
     // 关键回归断言：get_unit_detail 在 COMBAT_QUERY_TOOLS 名单里（T7 补名单前它落
@@ -839,7 +839,7 @@ describe('查询/命令分流（2026-08-09 §2.2 决策 3C：查询工具不产 
     ]);
     const events: CombatEvent[] = [];
     opts.onCombatEvent = (evt) => events.push(evt);
-    const commit = opts.deps.stateManager!.commitChatState;
+    const commit = opts.deps.stateManager!.commitDomainCommand;
     await runCombatV3(opts);
 
     // 末尾查询调用返回的是数据，不是 Command
@@ -862,7 +862,7 @@ describe('查询/命令分流（2026-08-09 §2.2 决策 3C：查询工具不产 
       [{ name: 'get_character', args: { characterId: '乙' } }],
       [{ name: 'pass_slot', args: { actorName: '乙', slot: 'action' } }],
     ]);
-    const commit = opts.deps.stateManager!.commitChatState;
+    const commit = opts.deps.stateManager!.commitDomainCommand;
     await runCombatV3(opts);
 
     // 查询返回数据，不产 Command；AI 未做决定 → 乙 pass 攻击槽推进（行为合法，不是 bug）
@@ -1478,7 +1478,7 @@ describe('结算演绎（2026-08-09 §2.5：数字即时 + AI 叙事补上）', 
     });
     const events: CombatEvent[] = [];
     opts.onCombatEvent = (evt) => events.push(evt);
-    const commit = opts.deps.stateManager!.commitChatState;
+    const commit = opts.deps.stateManager!.commitDomainCommand;
     await runCombatV3(opts);
 
     // 结算短调用真的被触发（client.chat 非工具路径收到持久会话消息）
@@ -1503,7 +1503,7 @@ describe('结算演绎（2026-08-09 §2.5：数字即时 + AI 叙事补上）', 
     });
     const events: CombatEvent[] = [];
     opts.onCombatEvent = (evt) => events.push(evt);
-    const commit = opts.deps.stateManager!.commitChatState;
+    const commit = opts.deps.stateManager!.commitDomainCommand;
     const result = await runCombatV3(opts);
 
     // 战斗照常结束（结算叙事失败不崩战斗、不阻塞终局）：1500 血线下战意崩溃
@@ -2714,7 +2714,7 @@ describe('敌方 Agent 中文名 → Command UUID（TARGET_NOT_PRESENT 根因回
         },
         chat: async () => ({ output: null, rawResponse: '' }) as never,
       }) as never;
-    const commit = opts.deps.stateManager!.commitChatState;
+    const commit = opts.deps.stateManager!.commitDomainCommand;
     const abandon = opts.deps.abandon;
 
     const result = await runCombatV3(opts);
@@ -2820,7 +2820,7 @@ describe('F4：敌方多命令按序全部 dispatch（SLOT_EXHAUSTED 卡死根�
       }) as never;
     const events: CombatEvent[] = [];
     opts.onCombatEvent = (evt) => events.push(evt);
-    const commit = opts.deps.stateManager!.commitChatState;
+    const commit = opts.deps.stateManager!.commitDomainCommand;
 
     const result = await runCombatV3(opts);
 
@@ -3112,7 +3112,7 @@ describe('BeginOutput：攻击撞骰池耗尽 → 续骰后自动重放，玩家
           } as unknown as CombatClient;
         },
         endpoint: { id: 'ep' } as never,
-        stateManager: { commitChatState: commit },
+        stateManager: { commitDomainCommand: commit },
         characters: [],
         context: {} as never,
         submitCommand,

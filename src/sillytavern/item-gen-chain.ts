@@ -67,7 +67,7 @@ export interface ItemGenChainDeps {
   clientFactory: (agentId: string, endpoint: ApiEndpoint, saveId: string) => ItemGenChainClient;
   /** StateManager 写入入口 (可选，测试可不提供) */
   stateManager?: {
-    commitChatState: (patches: StatePatch[]) => Promise<void>;
+    commitDomainCommand: (patches: StatePatch[]) => Promise<void>;
   };
 }
 
@@ -150,7 +150,7 @@ const EMPTY_ITEM_OUTPUT: ItemGenOutput = { skills: [], equipment: [], inventory:
  * 完整独立 item_gen 链:
  * 1. callItemGenForRequest() — 调 item_gen Agent 生成 skills/equipment/inventory
  * 2. buildItemGenPatches() — 转成 StatePatch[] (补 id)
- * 3. 可选持久化 (stateManager.commitChatState)
+ * 3. 可选持久化 (stateManager.commitDomainCommand)
  *
  * 🔴 2026-08-02 批量: request.markers（数组）存在时一次生成全部（调用次数 N → 1）；
  * 仅 request.marker（单个）时为旧路径（兼容测试与单请求场景）。
@@ -186,7 +186,7 @@ export async function runItemGenChain(
 
   // Step 3: optional persistence
   if (deps.stateManager && patches.length > 0) {
-    await deps.stateManager.commitChatState(patches);
+    await deps.stateManager.commitDomainCommand(patches);
   }
 
   return {
@@ -455,7 +455,7 @@ function guessSlot(bodyText: string, itemType: string): string {
 // ========== 重铸（单条目，2026-08-24） ==========
 
 /**
- * 把重铸输出转成「替换 patch」—— remove 旧的（按名）+ add 新的，同一次 commitChatState 原子落库。
+ * 把重铸输出转成「替换 patch」—— remove 旧的（按名）+ add 新的，同一次 commitDomainCommand 原子落库。
  *
  * 🔴 只认 `replace === targetName` 的那一条（AI 在重铸模式下用它点名被替换的已知条目）；
  *    其余输出条目一律忽略（重铸是单条目手术，AI 多写的东西不该顺手落库）。
@@ -588,7 +588,7 @@ export function buildRewritePatches(
 
 /**
  * 单条目重铸：以条目当前数据 + 玩家描述为输入，调 item_gen 重新编写该条目，
- * 然后 remove 旧的 + add 新的（同一次 commitChatState，原子）。
+ * 然后 remove 旧的 + add 新的（同一次 commitDomainCommand，原子）。
  *
  * 🔴 存档安全：零 id 变更（按名寻址）、remove+add 同一事务、失败不阻断（返回 ok:false + reason）。
  *    玩家随时可用既有快照回退（每回合自动打快照）。
@@ -617,7 +617,7 @@ export async function rewriteLoadoutItem(
   if (!r.ok) return { ok: false, patches: [], itemOutput, reason: r.reason };
 
   if (deps.stateManager && r.patches.length > 0) {
-    await deps.stateManager.commitChatState(r.patches);
+    await deps.stateManager.commitDomainCommand(r.patches);
   }
 
   return { ok: true, patches: r.patches, itemOutput };

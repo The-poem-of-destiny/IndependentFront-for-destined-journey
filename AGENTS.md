@@ -393,7 +393,7 @@ npm run knip:update    # 清理完死代码后收紧 knip-baseline.json
 npm run format         # ⚠️ 仓库级格式化，仍不建议随手跑：它会把几百个与本次改动无关的文件
                        #    一起重写，淹掉 diff。（`endOfLine: "auto"` 落地后已无行尾重写风险，
                        #    但「无关 churn」这条理由不变。）本地只 --write 自己改过的文件
-npm run dev            # 开发服务器（自动杀残留进程 + 固定 5173 端口）
+npm run dev            # 开发服务器（固定 5173 端口；占用时报错，不终止已有进程）
                        # 入口是 scripts/dev.mjs，按平台分发：Windows → dev.bat，
                        # macOS/Linux → dev.sh（行为一致，端口清理用 lsof）
                        # 🔴 改任一启动器前必读 docs/reference/dev-bat-notes.md ——

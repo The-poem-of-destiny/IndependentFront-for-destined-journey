@@ -345,9 +345,10 @@ export function resolveCraft(request: CraftActionRequest): CraftActionResult {
   }
   if (settleResult.breakdown.expReward.actualExp > 0) {
     patches.push({
-      op: 'delta_variable',
-      target: `characters.${request.characterId}.exp`,
-      amount: settleResult.breakdown.expReward.actualExp,
+      op: 'update_character',
+      target: `characters.${request.characterId}`,
+      value: { totalExp: settleResult.breakdown.expReward.actualExp },
+      metadata: { delta: true, source: 'craft_gen' },
     });
   }
   if (settleResult.breakdown.fpReward > 0) {

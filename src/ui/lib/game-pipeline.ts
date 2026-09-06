@@ -1,3 +1,4 @@
+import type { StatePatch } from '@engine/types';
 /**
  * GamePipeline — 前端 ↔ AgentOrchestrator 桥接层
  *
@@ -523,7 +524,7 @@ export class GamePipeline {
       // （幂等；存档切换时由 unwireEffectSystem 拆除后重建）
       try {
         const { wireEffectSystem } = await import('@engine/effect-wiring');
-        wireEffectSystem(this.saveId, this.game.characters);
+        if (this.ownsActiveSave) wireEffectSystem(this.saveId, this.game.characters);
       } catch (err) {
         console.warn('[GamePipeline] 效果系统接线失败（不阻塞本轮）:', err);
       }
@@ -1568,8 +1569,9 @@ export class GamePipeline {
     const sm = createStateManager(this.saveId);
     return sm
       ? {
+          commitDomainCommand: (patches: StatePatch[]) => sm.commitDomainCommand(patches),
           commitChatState: async (patches: any[]) => {
-            const result = await sm.commitChatState(patches);
+            const result = await sm.commitAiPatches(patches);
             if (result.errors.length > 0) {
               console.error(
                 `[GamePipeline] 状态提交失败 ${result.errors.length}/${patches.length} 条:`,

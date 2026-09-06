@@ -215,3 +215,29 @@ describe('effect-wiring（Q-07 战斗外接线）', () => {
     expect(effects.hpChanges).toEqual([]);
   });
 });
+
+it('reconciles removed owners and changed scripts against the authoritative projection', async () => {
+  clearAllEffectWirings();
+  const char = mockCharacter({
+    skills: [
+      {
+        name: 'Ward',
+        description: '',
+        type: 'passive',
+        scripts: {
+          init: "$event.on('npc_talk', 'talk');",
+          talk: "$resource.modifyHp('英雄', -5);",
+        },
+      },
+    ],
+  });
+  wireEffectSystem('s1', [char]);
+  char.skills[0].scripts = {
+    init: "$event.on('npc_talk', 'talk');",
+    talk: "$resource.modifyHp('英雄', -9);",
+  };
+  wireEffectSystem('s1', [char]);
+  expect((await publishToEffectSystem('s1', [mockEvent('npc_talk')])).hpChanges[0].amount).toBe(-9);
+  wireEffectSystem('s1', []);
+  expect((await publishToEffectSystem('s1', [mockEvent('npc_talk')])).hpChanges).toEqual([]);
+});

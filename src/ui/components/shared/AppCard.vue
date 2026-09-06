@@ -12,12 +12,17 @@ defineProps<{
 <template>
   <div
     class="app-card"
+    :role="clickable ? 'button' : undefined"
+    :tabindex="clickable ? 0 : undefined"
+    :aria-pressed="clickable && selected !== undefined ? selected : undefined"
     :class="{
       [`card-${quality || 'default'}`]: true,
       'card-clickable': clickable,
       'card-selected': selected,
       [`card-padding-${padding || 'md'}`]: true,
     }"
+    @keydown.enter.self="clickable && ($event.currentTarget as HTMLElement).click()"
+    @keydown.space.self.prevent="clickable && ($event.currentTarget as HTMLElement).click()"
   >
     <slot />
   </div>
@@ -42,6 +47,10 @@ defineProps<{
 
 .card-clickable {
   cursor: pointer;
+}
+.card-clickable:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 3px;
 }
 .card-clickable:hover {
   border-color: var(--theme-primary);

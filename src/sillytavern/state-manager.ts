@@ -8,7 +8,7 @@
  * 1. 接收 StatePatch[] → 验证 → 应用 → 持久化
  * 2. 自动生成 GameEvent 记录变更
  * 3. 快照管理（M5 §11.2: createSnapshot 整份深拷贝 / restoreSnapshot 覆写 + 对话回滚）
- * 4. 事务性提交（全部成功或全部回滚）
+ * 4. AI patches are best-effort; domain commands commit atomically.
  */
 
 import type {
@@ -69,6 +69,8 @@ import { withSaveWriteLock } from './state-write-queue';
 // 唯一可能成环的那个（沙盒会回调状态层），单独验证后再说。
 import {
   getProfile,
+  addFP,
+  spendFP,
   updateProfile,
   setQuestInPlace,
   removeQuestInPlace,
@@ -332,8 +334,6 @@ const MAX_EVENT_REACTION_DEPTH = 3;
 export class StateManager {
   private saveId: string;
   private events: GameEvent[] = [];
-  /** Q-07：已装备物品的脚本注销函数缓存（key=ownerKey，卸下时调用） */
-  private _itemUnsubs: Map<string, () => void> = new Map();
   /** Q-07：事件反应轮的当前深度（见 reactToEvents） */
   private reactionDepth = 0;
   /**
@@ -395,6 +395,68 @@ export class StateManager {
     }
   }
 
+  /** All required changes succeed together; rejection publishes no events or effects. */
+  async commitDomainCommand(patches: StatePatch[]): Promise<void> {
+    if (!patches.length) return;
+    const newEvents = await withSaveWriteLock(this.saveId, async () => {
+      const db = getDatabase();
+      const events = await db.transaction(
+        'rw',
+        [db.characters, db.saveProfiles, db.saves, db.memories, db.plotEvents],
+        async () => {
+          const scope = createCommitScope();
+          this.commitScope = scope;
+          try {
+            const events: GameEvent[] = [];
+            for (const patch of patches) {
+              if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
+                this.validatePatch(patch);
+                const amount = patch.amount!;
+                if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
+                const profile = await this.readProfile();
+                if (amount >= 0) await addFP(profile, amount, '行动结算');
+                else await spendFP(profile, -amount, '行动结算');
+                events.push(this.createEvent('variable_change', patch));
+                continue;
+              }
+              const result = await this.applyPatch(patch);
+              if (result.event) events.push(result.event);
+            }
+            await this.flushCommitScope(scope);
+            const save = await getSave(this.saveId);
+            if (save) await saveSaveSlot(save);
+            return events;
+          } finally {
+            this.commitScope = null;
+          }
+        },
+      );
+      this.events.push(...events);
+      await this.reconcileCommittedEffects();
+      return events;
+    });
+    await this.reactToEvents(newEvents);
+  }
+
+  private async reconcileCommittedEffects(): Promise<void> {
+    try {
+      const { peekEffectWiring, reconcileEffectWiring } = await import('./effect-wiring');
+      if (!peekEffectWiring(this.saveId)) return;
+      const characters = await getCharacters(this.saveId);
+      if (peekEffectWiring(this.saveId)) reconcileEffectWiring(this.saveId, characters);
+    } catch (error) {
+      console.warn('[StateManager] Committed state could not refresh effect subscriptions:', error);
+    }
+  }
+
+  /** Compatibility entry point; AI batches retain valid patches when another is rejected. */
+  async commitChatState(
+    patches: StatePatch[],
+    options?: CommitChatStateOptions,
+  ): Promise<StateCommitResult> {
+    return this.commitAiPatches(patches, options);
+  }
+
   /**
    * 提交状态变更 — 唯一写入入口
    *
@@ -408,7 +470,7 @@ export class StateManager {
    * M5: 不再自动创建快照（杀 #28 patchCount%N 即建即抛），
    * 快照由 createSnapshot()/advanceTurn() 显式触发（GamePipeline 每轮一拍）。
    */
-  async commitChatState(
+  async commitAiPatches(
     patches: StatePatch[],
     options?: CommitChatStateOptions,
   ): Promise<StateCommitResult> {
@@ -490,6 +552,7 @@ export class StateManager {
           // 存档更新失败不阻塞
         }
 
+        await this.reconcileCommittedEffects();
         return { results, errors, newEvents };
       } finally {
         this.commitScope = outerScope;
@@ -1419,18 +1482,6 @@ export class StateManager {
     item.equippedSlot = slot;
     await this.persistCharacter(char);
 
-    // Q-07：装备时接线 —— init 脚本 + $event.on 持久订阅（战斗外效果系统）
-    try {
-      const { wireObject, ownerKeyOf } = await import('./effect-wiring');
-      const unsub = wireObject(this.saveId, char, 'item', item.name, item.scripts);
-      // 暂存注销函数，供同物品卸下时用（挂内存，不落库）
-      if (unsub) {
-        this._itemUnsubs.set(ownerKeyOf(char.id, 'item', item.name), unsub);
-      }
-    } catch (err) {
-      console.warn('[StateManager] equip_item 效果接线失败（不阻断落库）:', err);
-    }
-
     return this.createEvent('item_use', patch);
   }
 
@@ -1462,19 +1513,6 @@ export class StateManager {
 
     item.equippedSlot = null;
     await this.persistCharacter(char);
-
-    // Q-07：卸下时拆除接线 —— cleanup 脚本 + 注销 $event.on 持久订阅
-    try {
-      const { unwireObject, ownerKeyOf } = await import('./effect-wiring');
-      const unsub = this._itemUnsubs.get(ownerKeyOf(char.id, 'item', item.name));
-      if (unsub) {
-        unsub();
-        this._itemUnsubs.delete(ownerKeyOf(char.id, 'item', item.name));
-      }
-      unwireObject(this.saveId, char, 'item', item.name, item.scripts);
-    } catch (err) {
-      console.warn('[StateManager] unequip_item 效果拆除失败（不阻断落库）:', err);
-    }
 
     return this.createEvent('item_use', patch);
   }

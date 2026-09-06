@@ -20,13 +20,18 @@ function handleClick(t: { id: string; message: string; type: string }) {
 
 <template>
   <Teleport to="body">
-    <div class="toast-container">
+    <div class="toast-container" role="status" aria-live="polite" aria-relevant="additions">
       <transition-group name="toast">
         <div
           v-for="t in ui.toasts"
           :key="t.id"
           class="toast-item"
           :class="[`toast-${t.type}`]"
+          role="button"
+          tabindex="0"
+          :aria-label="`${t.message}，关闭通知${t.type === 'error' || t.type === 'warning' ? '并复制内容' : ''}`"
+          @keydown.enter.prevent="handleClick(t)"
+          @keydown.space.prevent="handleClick(t)"
           @click="handleClick(t)"
         >
           <span class="toast-icon">{{ iconMap[t.type] }}</span>
