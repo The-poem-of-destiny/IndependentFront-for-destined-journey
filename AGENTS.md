@@ -226,6 +226,9 @@ docs/
 ├── planning/2026-08-30-player-persona-editing-design.md
 │                                       # 游玩中玩家人设编辑（✅ 已实施，UI 真机走查通过）：
 │                                       # 三字段真源 + 命名写入口 + 下一轮 Delta 生效
+├── planning/2026-09-07-mainline-refinement-layer-design.md
+│                                       # 🆕 主线细化层设计（剧情颗粒度弥补，未实施）：
+│                                       # pre_check 现编 NPC 行动 + 伏笔连线 + worldFlags.plotThreads
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
@@ -272,9 +275,9 @@ docs/superpowers/specs/2026-07-16-entity-field-audit.md             # 52 项现�
 （根 `reference/` 已被 `.gitignore` 整树排除）。本机路径：
 
 ```bash
-E:\Projects\POD-IF\fated_poem_independent_assets\reference\world_book_index.md
+D:\Code\fated_poem_independent_assets\reference\world_book_index.md
                                  # 世界书条目索引（605 条目 → 主世界观/数值/地理/人物/DLC）← 游戏内改动必读
-E:\Projects\POD-IF\fated_poem_independent_assets\reference\audit_report.md
+D:\Code\fated_poem_independent_assets\reference\audit_report.md
                                  # 代码 vs 世界书冲突审计报告
 ```
 
@@ -288,7 +291,7 @@ E:\Projects\POD-IF\fated_poem_independent_assets\reference\audit_report.md
 `docs/reference/narrative_context_example.md` 已随内容分离移入**私有内容仓**
 （`fated_poem_independent_assets/docs/reference/narrative_context_example.md`，
 2026-08-07 可选扫尾）——公开仓侧不可见；本机路径
-`E:\Projects\POD-IF\fated_poem_independent_assets\docs\reference\narrative_context_example.md`。
+`D:\Code\fated_poem_independent_assets\docs\reference\narrative_context_example.md`。
 
 规范的核心（在公开仓长期有效）：
 
@@ -304,8 +307,8 @@ E:\Projects\POD-IF\fated_poem_independent_assets\reference\audit_report.md
 **调试 Agent 输出格式或修改 Agent 模板/解析链路时，可参考私有内容仓的 `reference/agent流程测试/`：**
 
 ```bash
-E:\Projects\POD-IF\fated_poem_independent_assets\reference\agent流程测试\对话样本.md  # 从游戏实例提取的 4 组测试用对话正文
-E:\Projects\POD-IF\fated_poem_independent_assets\reference\agent流程测试\要求.md      # 测试需求说明
+D:\Code\fated_poem_independent_assets\reference\agent流程测试\对话样本.md  # 从游戏实例提取的 4 组测试用对话正文
+D:\Code\fated_poem_independent_assets\reference\agent流程测试\要求.md      # 测试需求说明
 ```
 
 > `agent预期分析.md`（6 个 Agent 完整输出追踪 + 17 条 debug 检查点）已于 2026-08-08 删除。
@@ -317,11 +320,11 @@ E:\Projects\POD-IF\fated_poem_independent_assets\reference\agent流程测试\要
 🔴 **这三份页面同样已移入私有内容仓 `fated_poem_independent_assets`，公开仓侧不可见。** 本机路径：
 
 ```bash
-E:\Projects\POD-IF\fated_poem_independent_assets\reference\home_index.html
+D:\Code\fated_poem_independent_assets\reference\home_index.html
                                    # 首页 (94KB) — Vue 3 SPA, 标题画面/环境检测/用户协议/存档管理入口
-E:\Projects\POD-IF\fated_poem_independent_assets\reference\custom_start_index.html
+D:\Code\fated_poem_independent_assets\reference\custom_start_index.html
                                    # 捏人页 (341KB) — Vue 3 + Pinia + Router, 角色创建/属性分配/品质选择/装备技能
-E:\Projects\POD-IF\fated_poem_independent_assets\reference\status_index.html
+D:\Code\fated_poem_independent_assets\reference\status_index.html
                                    # 状态栏 (477KB) — React + immer + gsap, 角色状态/资源条/Avatar/地图/详情面板
 ```
 

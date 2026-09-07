@@ -5,7 +5,7 @@
 >
 > 🔴 **2026-08-18 更正：这份原页面已不在公开仓里。** 它随内容分离移入了私有内容仓
 > `fated_poem_independent_assets`（公开仓根目录的 `reference/` 已被 `.gitignore` 整树排除），
-> 本机路径 `E:\Projects\POD-IF\fated_poem_independent_assets\reference\custom_start_index.html`
+> 本机路径 `D:\Code\fated_poem_independent_assets\reference\custom_start_index.html`
 > —— 口径与路径以根 `AGENTS.md`「前端 UI 参考（Phase 7 必读）」一节为准。
 > 没挂私有内容仓的环境（含 CI 与外部贡献者）读不到它，**本文就是公开仓侧的等效摘录**，够用。
 
