@@ -555,3 +555,116 @@ export function setMapFactsInPlace(profile: SaveProfile, facts: MapFactsFlags): 
   if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
   profile.worldFlags[MAP_FACTS_KEY] = facts;
 }
+
+// ═══════════════════════════════════════════════════════════
+// 主线细化层状态（事件线 / plot threads，实施计划 §3.2）
+// ═══════════════════════════════════════════════════════════
+
+import type { PlotThreadFlags } from './plot-threads';
+
+/** `worldFlags.plotThreads` 在 profile 里的键 —— 只在本节出现，读写两侧共用一处 */
+const PLOT_THREADS_FLAGS_KEY = 'plotThreads';
+
+/**
+ * 读主线细化层状态（`worldFlags.plotThreads`）。
+ *
+ * 缺席（新档 / 从未推进过细化）返回**空袋子**（`{ nodes: {} }`）而不是 `undefined`：
+ * 「一个节点都没有」与「还没有这个袋子」对每个消费方都是同一件事（§11.1）。
+ * 🔴 返回的空袋子是**新对象**，往里写不会落库 —— 落库只有 `commitPlotThreadTurn` 这一条路。
+ * 🔴 与 `worldFlags.map` 恰好相反（照 `randomEvents`/`mapFacts` 先例）：这一袋存**事实**，
+ *    永不随 packStamp / 内容变更清空；节点名消失只休眠不删除。
+ */
+export function getPlotThreadFlags(profile: SaveProfile): PlotThreadFlags {
+  const raw = profile.worldFlags?.[PLOT_THREADS_FLAGS_KEY];
+  if (raw === null || typeof raw !== 'object') return { nodes: {} };
+  const bag = raw as PlotThreadFlags;
+  if (bag.nodes === null || typeof bag.nodes !== 'object') return { nodes: {} };
+  return bag;
+}
+
+/**
+ * 整份覆盖主线细化层状态 —— **只改内存不落库**（`commitPlotThreadTurn` 的纯变更那一半）。
+ * 存在理由同 `setMapFlagsInPlace`：落库那一拍由 StateManager 的提交作用域缓存统一做。
+ */
+export function setPlotThreadFlagsInPlace(profile: SaveProfile, flags: PlotThreadFlags): void {
+  // 存量记录（与手搓的测试 profile）可能整个缺 worldFlags；缺了就补一个空袋子
+  if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
+  profile.worldFlags[PLOT_THREADS_FLAGS_KEY] = flags;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 主线细化层：成功回合窄写入口（实施计划 §3.5 —— P1-09 受控例外扩展）
+// ═══════════════════════════════════════════════════════════
+
+import {
+  applyPlotThreadRevealed,
+  applyThreadDeclarations,
+  applyThreadUpdates,
+} from './plot-threads';
+import type { PlotThreadDeclaration, PlotThreadUpdate } from './plot-threads';
+
+/** 成功回合收口的批次（全是归一化对象 + Code 回合信息；时间戳一律游戏 epoch minutes） */
+export interface PlotThreadCommitBatch {
+  turnNo: number;
+  declarations: PlotThreadDeclaration[];
+  updates: PlotThreadUpdate[];
+  revealedNames: string[];
+  seededAtEpochMinutes: number;
+}
+
+/**
+ * 成功回合收口：把本轮细化暂存（pre 声明 + post 结算 + 揭示）落进 `worldFlags.plotThreads`。
+ *
+ * 两条铁律与 `persistFocusQuest` 同源（2026-08-17 评审补，提交级缓存落地后暴露）：
+ * ① 进 `withSaveWriteLock` 与 `commitChatState` 串行 —— 不进队列会被出口那次整档 flush 盖掉；
+ * ② **锁内重读一份新鲜 profile** —— 拿管线侧手里的陈旧 profile 进锁写回去，会把提交刚落的
+ *    fp/变量/地图状态抹回旧值。锁解决交错，解决不了陈旧。
+ *
+ * 幂等：`lastCommittedTurn === turnNo` 时 no-op（同回合重复提交不推进冷却/时间戳）。
+ * 失败（抛）由调用方（game-pipeline）进既有诊断通道；本入口不追加自动 LLM 重试。
+ *
+ * 🔴 **不**把细化结果转为 `PlotEvent` / StatePatch / 记忆记录 —— 它是独立事实态，
+ *    与大纲事件树 / vars / 记忆三足分立（设计 §2）。
+ */
+export async function commitPlotThreadTurn(
+  saveId: string,
+  batch: PlotThreadCommitBatch,
+): Promise<{ committed: boolean; nodeCount: number; settledCount: number; revealedCount: number }> {
+  return withSaveWriteLock(saveId, async () => {
+    const fresh = await getProfile(saveId);
+    const current = getPlotThreadFlags(fresh);
+    if (current.lastCommittedTurn === batch.turnNo) {
+      return {
+        committed: false,
+        nodeCount: Object.keys(current.nodes).length,
+        settledCount: 0,
+        revealedCount: 0,
+      };
+    }
+
+    // 顺序是契约：① 结算（仅 post 有正文证据，先固化终态）→ ② 揭示（单向置 bit）
+    // ③ 声明（新建/推进；reducer 保证终态节点不被 pre 降级）。
+    const afterUpdates = applyThreadUpdates(current, batch.updates, batch.seededAtEpochMinutes);
+    const afterRevealed = applyPlotThreadRevealed(afterUpdates.flags, batch.revealedNames);
+    const afterDeclarations = applyThreadDeclarations(
+      afterRevealed.flags,
+      batch.declarations,
+      batch.seededAtEpochMinutes,
+    );
+
+    const next: PlotThreadFlags = {
+      ...afterDeclarations.flags,
+      lastAdvancedTurn: batch.turnNo,
+      lastCommittedTurn: batch.turnNo,
+    };
+    setPlotThreadFlagsInPlace(fresh, next);
+    await updateProfile(fresh);
+
+    return {
+      committed: true,
+      nodeCount: Object.keys(next.nodes).length,
+      settledCount: afterUpdates.settled.length,
+      revealedCount: afterRevealed.revealed.length,
+    };
+  });
+}

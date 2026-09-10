@@ -7,7 +7,7 @@ import { getEjsBackend } from '@engine/ejs-backend';
 import { getEngineSettings } from '@engine/engine-settings';
 import { getRandomEventPack } from '@engine/random-event-runtime';
 import { buildRandomEventRollContext } from '@engine/random-event-snapshot';
-import { getRandomEventFlags } from '@engine/save-profile';
+import { getRandomEventFlags, getPlotThreadFlags } from '@engine/save-profile';
 import { toEpochMinutes } from '@engine/time-system';
 import {
   buildRandomEventDebugRows,
@@ -15,6 +15,11 @@ import {
   formatEventWeight,
   type RandomEventDebugRow,
 } from './random-event-debug';
+import {
+  buildPlotThreadDebugInfo,
+  plotThreadGateReasonLabel,
+  type PlotThreadDebugInfo,
+} from './plot-thread-debug';
 
 const game = useGameStore();
 const settings = useSettingsStore();
@@ -98,6 +103,44 @@ const currentGameDay = computed(() => {
   if (!profile) return null;
   return Math.floor(toEpochMinutes(profile.gameTime) / MINUTES_PER_GAME_DAY);
 });
+
+// ═══════════════════════════════════════════════════════════
+// 主线细化（事件线）：只读诊断 —— 判据全在生产函数（查看不推进随机状态）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 挂载即取一次（setup 同步，同随机事件区块的理由：面板每次打开都是新挂载）。
+ * 🔴 第二行原则：绝不在这里重写概率/冷却/窗口判据 —— gate 是生产函数的直接输出。
+ */
+const threadInfo = ref<PlotThreadDebugInfo | null>(null);
+
+function refreshPlotThreads(): void {
+  const profile = game.saveProfile;
+  if (!profile) {
+    threadInfo.value = null;
+    return;
+  }
+  try {
+    const meta = game.activeSave?.metadata as Record<string, any> | undefined;
+    const mode = (meta?.plotSettings?.mode ?? 'off') as 'off' | 'side' | 'main';
+    threadInfo.value = buildPlotThreadDebugInfo({
+      flags: getPlotThreadFlags(profile),
+      mode,
+      saveId: game.activeSaveId ?? '',
+      totalTurns: (meta?.totalTurns ?? 0) as number,
+      currentTime: profile.gameTime,
+      combatActive: game.isInCombat,
+      outlineTitle: game.plotOutline?.title,
+      chapterTitles: (game.plotOutline?.chapters ?? []).map((c) => c.title),
+      plotEvents: game.activePlotEvents ?? [],
+    });
+  } catch (err) {
+    console.warn('[DebugPanel] 主线细化诊断构建失败:', err);
+    threadInfo.value = null;
+  }
+}
+
+refreshPlotThreads();
 
 /** 「下回合触发」：按 forced 入池 → 下一轮 `{{RANDOM_EVENTS}}` 里带 `[!]` 出现 */
 async function armEvent(name: string): Promise<void> {
@@ -395,6 +438,26 @@ function formatJson(value: unknown): string {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- 主线细化（事件线）：闸门/计数/冷却 —— 判据全部来自生产函数 -->
+    <div class="debug-section">
+      <h4>主线细化 (plot threads)</h4>
+      <div v-if="!threadInfo" class="debug-empty">无活跃存档 / 诊断构建失败</div>
+      <template v-else>
+        <pre>
+节点: {{ threadInfo.nodeCount }}
+  活跃 {{ threadInfo.counts.active }} · 沉睡 {{ threadInfo.counts.dormant }} ·
+  已回收 {{ threadInfo.counts.resolved }} · 已消散 {{ threadInfo.counts.dissolved }}
+  未揭示 {{ threadInfo.hiddenCount }} · 连线 {{ threadInfo.edgeCount }}
+上次推进回合: {{ threadInfo.lastAdvancedTurn ?? '—' }} · 上次收口回合: {{ threadInfo.lastCommittedTurn ?? '—' }}
+模式: {{ threadInfo.mode }}<span v-if="!threadInfo.enabled">（非主线模式 → 不产生节点；闸门恒关）</span></pre>
+        <h5 class="debug-sub-h">下一轮闸门（按当前状态在生产函数上求值；查看不推进随机状态）</h5>
+        <pre :class="{ 'debug-warn': !threadInfo.gate.allowed }"
+          >{{ threadInfo.gate.allowed ? '✅ 将放行' : '🔒 未放行' }} — {{
+            plotThreadGateReasonLabel(threadInfo)
+          }}</pre>
+      </template>
     </div>
 
     <!-- Agent 调用日志 -->

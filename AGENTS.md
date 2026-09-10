@@ -227,8 +227,9 @@ docs/
 │                                       # 游玩中玩家人设编辑（✅ 已实施，UI 真机走查通过）：
 │                                       # 三字段真源 + 命名写入口 + 下一轮 Delta 生效
 ├── planning/2026-09-07-mainline-refinement-layer-design.md
-│                                       # 🆕 主线细化层设计（剧情颗粒度弥补，未实施）：
+│                                       # ✅ 主线细化层设计（2026-09-09 已实施，真机待验证）：
 │                                       # pre_check 现编 NPC 行动 + 伏笔连线 + worldFlags.plotThreads
+│                                       # 实施收口参数见设计 §11；实施方案见同目录 implementation-plan
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
@@ -446,6 +447,18 @@ update.bat             # 一键更新（双击运行）：git fetch → git pull
 - **EJS 世界书求值契约 (ADR-30)**：世界书条目正文 EJS 由 Code 在提示装配期求值（承 ADR-04），契约自主设计、不承诺 MVU/酒馆助手兼容（上游函数名仅作别名层）。**两轴**：`stats` 只读面（纯代码推导数值：资源/等级/五维/命运点数/时间）+ `vars` 共写叙事变量空间（= `variables.sys` 草稿，AI 与 EJS 双写同一棵树，**冲突 AI 赢**——EJS 差量先落、vars_update 补丁后落）。提交权按 Agent 声明（`ejsVarsCommit`，默认仅 story——前瞻扩展设计）。缓存分层：含 `<%`/`{{random`/`{{getvar` 的条目沉到 LORE_BOOK 展开尾部，静态前缀保字节稳定；EJS 失败条目原文注入（零回归兜底）。创作者规范：`docs/reference/worldbook-ejs-regex-authoring-guide.md`；设计全文：`docs/planning/2026-07-31-workshop-phase2-ejs-design.md`；词汇：根目录 `CONTEXT.md`。
 - **地图 v1 契约 (ADR-31)**：位置路径（`CharacterState.location` 自由文本）为唯一位置真源，地块是**落位**投影（绝不模糊匹配、失败不动）；地图对 AI **只教不管**——读侧持续展示真实地块名 + 路线/天数锚定（story 走世界书 EJS 条目、dispatcher 走 `{{MAP_CONTEXT}}`），写侧被动解析不否决、`delta_time` 不 clamp、天气 Code 兜底 AI 覆盖（跨天重断言）。寻路是一张**混合通行图**（陆海同图按边类型计价 + via/avoid 途经点，不做交通方式状态展开；出行方式（pack v1.1.0 `travelRules.modes`：步行/马车/骑乘/空艇）只是路线预览里给玩家看的**参考行**（各方式天数 = 取整前路线时间 × 倍率并排展示，不可选），不进出发指令、不进寻路状态也不进存档 —— 要坐什么玩家在输入框自己说）。所有者静态不可易手（`history.txt` 不读）。地图状态只跟踪玩家、不新增 Dexie 表（可变状态全在 `worldFlags.map`）。**换图零改码**：随图数据（地形系数/费率/气候与天气词汇/绑定表/比例尺）全在 pack、默认规则表归编译脚本，引擎地图模块零中文字面量（结构闸门钉死）；**存档不钉包版本**——位置路径为真源使投影可自愈，包版本戳不符就清派生态重落位，旧存档永不崩。裁定记录与设计全文：`docs/planning/2026-08-11-map-system-v1-integration.md`；词汇：根目录 `CONTEXT.md`「地图系统」节。
 - **随机事件 v1 契约 (ADR-32)**：Code 端**种子化确定性调度**（每条事件独立 MTTH × 声明式权重链、`available` 硬门槛先于一切求值、全存档共享全局冷却、作者点名地点首访强制入池）逐天掷骰产出**候选池**（跨回合驻留，池满按 priority 淘汰、forced 免疫）→ 经 `{{RANDOM_EVENTS}}` 注入 story（**不新开 Agent**、不注给 dispatcher，单通道免双写；池空/关闭/**战斗会话活跃**时返空串零 token）→ AI 在叙事方便的时机至多演绎一条并以 `<event_trigger name="事件名"/>` 回执 → Code **按名字**结算（不在池中的名字 warn 忽略 / 清掉全部非 forced 候选 / 起全局冷却 / forced 触发时才记足迹）。**触发纯叙事零副作用**：v1 没有 `onTrigger` 效果表，状态变化由既有 dispatcher/vars_update 管线自然捕获，事件系统只记「触发过」这一事实。事件定义 = **内容包第 13 分节纯 JSON**（`randomEvents`，三态语义照旧、坏定义单条跳过不连坐；引擎侧只带零 IP 占位集）。每存档状态住 `worldFlags.randomEvents`（**事实不是派生态**，故与 `worldFlags.map` 相反：没有 packStamp 自愈清空，零新 Dexie 表、随 saveProfiles 进 FullBackup）。开关是**全局设置两字段**（`randomEventsEnabled` / `randomEventsFrequency`，经 `engine-settings.ts` 注入缝读），与剧情系统三个 Agent 的开关**彼此独立**——`plotMode === 'off'` 时调度/注入/回执三面照常。设计全文：`docs/planning/2026-08-15-random-event-system-design.md`；词汇：根目录 `CONTEXT.md`「随机事件系统」节。
+- **主线细化层契约 (ADR-35)**：在剧情事件窗口之间的空白期，`plot_pre_check` 按 **Code 节奏闸门**
+  （main-only、4 回合冷却、窗口距离概率 0.15/0.30/0.50/0.70、确定性种子随机不重掷）现编「主线细化
+  节点」：把宏观主线落地为带动机的 NPC 行动，节点带伏笔引用（`foreshadows`/`payoffs`）自动连成
+  事件线；`plot_post_check` 在正文落定后结算（resolved/dissolved）并单向置 `revealedNames`。
+  节点/状态袋住 `worldFlags.plotThreads`（照 ADR-32/33 事实态先例：零新 Dexie 表、按**节点名**寻址、
+  永不随 packStamp 清空、随档往返）。三足分立：细化层是主线的**投影**、事件树是主线的**骨架**、
+  随机事件是主线的**题外话** —— 不碰 `plotEvents` title 寻址契约、不推进主线状态、不写 `delta_time`、
+  不建任务补丁或记忆记录。闸门只控制「新建/推进」；post 对已有节点有正文证据的结算不受闸门约束。
+  侧链实体化按**实体化时点**分流：角色未出现 → 节点全量行为化（场景 A），已出现 → 表层投影
+  （场景 B：name/gist/involvedNpcs/thread，无 motive 无连线意向，拿不准走 B）；
+  motive 本体绝不进角色档案，身份型伏笔埋模糊钩子。AI 输出契约与持久化时机见
+  `docs/planning/2026-09-07-mainline-refinement-layer-implementation-plan.md` §3/§11。
 - **地块事实与时间账本契约 (ADR-33)**：地图 v1.2 首次给地块引入**事实态**（AI 叙事产生的地块状态/发展度/建筑/编年史），住新命名空间 `worldFlags.mapFacts` —— 照 ADR-32 先例**永不随 packStamp 清空**（与派生态 `worldFlags.map` 的自愈语义**刻意相反**）、按**地块名**为键（换包名字消失只休眠不删、名字回来自动复活，休眠块时间冻结不结算）、零新 Dexie 表、随 saveProfiles 进 FullBackup。写侧对 ADR-026「无地图写 op」**收窄改判**：只开六个叙事事实 op（状态挂/除、建筑记/改、一次性进度、编年史附注），owner/terrain/adjacency/impassable 依旧零写 op；按名寻址解析失败 warn 忽略不否决。一切按期结算（状态到期/每月进度效果/每月产业收益）走**回合驱动时间账本**（`time-ledger.ts` 纯函数 + `applyTimeAdvance` 单钩子）：到期点从事实锚纯推导（零 lastSettled 簿记）、每事实独立 30 天锚、跨大步 `delta_time` 完整补结算带迭代上限；**永不建自走时钟**，天气/随机事件的既有时间逻辑本次不迁。发展度进度**零后台增长**（只被状态周期效果与一次性 op 推动）；降档按**严格槽位身份**摧毁最高号槽（玩家产业不豁免）。设计全文：`docs/planning/2026-08-18-map-tile-dynamics-v1.2-design.md`；词汇：根目录 `CONTEXT.md`「地图系统」节新增六词。
 
 ## 事件驱动架构 / v4 子系统分流 / $ API（已迁入引擎分册）
@@ -516,6 +529,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 经验系统 v2    | LevelXpTable 累计经验表迁移 + Code 接管升级（exp-table.ts）+ 登神长阶放宽版 + 战斗经验系数按档（修错用伤害系数）+ 简单/普通模式 + 旧档经验归一化（幂等只提升）       | ✅ 9223 tests 全绿（2026-08-24）                                                                      |
 | 重铸系统       | 单条目重铸（item_gen replace 属性范式 + REWRITE_TARGET/REWRITE_REASON + remove/add 同事务）+ 主角/NPC 面板入口 + NPC 补背包 tab + 查看脚本升级（modifiers/automata） | ✅ 9248 tests 全绿（2026-08-24）                                                                      |
 | 审查修复批     | 2026-09-04 综合审查 F07/F08/F09/F10/F11/F13/F15 七条（时间分区不变式 / 地图收入可恢复 / 嵌入溯源 / 端点 fail-closed / IPv6+重定向 / 内容原子写 / 规则优先级）        | ✅ 9380 tests 全绿（2026-09-05）；F12/F14/F05/F06/F01-04 待 B/A 组                                    |
+| 主线细化 v1    | ADR-35：事件窗口空白期 pre 现编 NPC 明线 + 伏笔连线 + plotThreads 事实袋 + 侧链实体化时点分流                                                                        | ✅ 9484 tests 全绿（2026-09-09），真机游玩与真实 LLM 回合待验证；pack 2.7.0                           |
 | 真机迭代       | debug loop 持续修复                                                                                                                                                  | 🔄                                                                                                    |
 
 > 📦 **进度表长注已迁出（2026-08-13）**：原挂在此处的六条长注（🔓 工坊入口执行边界 / 🟡 工坊 P4 / 🩹 走查后修的三处 / 🟡 图像生成 v1 + 两条真机踩坑 / 🩹 实施中两处 / 🟡 工坊 P2 EJS）已按本文件「详细记录进 CHANGELOG」的规则**原文**迁入 `docs/CHANGELOG.md`「进度表长注归档」节。🔴 其中〔工坊入口已开放〕一条是工坊/正则的**安全执行边界**，读工坊/正则代码前仍必读。

@@ -36,6 +36,7 @@ import type {
   Skill,
   StatusEffect,
 } from './types';
+import { buildPlotThreadSnapshot } from './plot-threads';
 
 // ═══════════════════════════════════════════════════════════
 // 封闭 scope 联合
@@ -416,7 +417,24 @@ export function projectPromptState(
     .filter((e) => e.status === 'active' || e.status === 'pending')
     .sort((a, b) => a.order - b.order)
     .map((e) => ({ title: e.title, status: e.status }));
-  const plot: unknown = plotEvents.length > 0 ? { events: plotEvents } : null;
+  // 🧵 主线细化层（2026-09-09）：节点快照并入同一 plot scope —— 持久节点走 plot（baseline 与
+  // delta 字段语义一致；快照数据面由 buildPlotThreadSnapshot 定序、稳定字节）。
+  // 只投影「账务/寻址」子集（name/status/thread/visibility）；motive/gist 等叙事字段由
+  // 富块部分（buildPlotContextBlock）在基线轮全量给出，这里保持 delta 轻量。
+  // 🔴 未揭示节点对 pre/post 可见是既定设计（防剧透只在 UI/dispatcher 面），
+  //    此投影只消费 context.plotThreadFlags（game-pipeline 供值），resolver 不自己读库。
+  const threadEntries = context.plotThreadFlags
+    ? buildPlotThreadSnapshot(context.plotThreadFlags, 0).entries.map((e) => ({
+        name: e.name,
+        status: e.status,
+        thread: e.thread,
+        visibility: e.visibility,
+      }))
+    : null;
+  const plot: unknown =
+    plotEvents.length > 0 || threadEntries !== null
+      ? { events: plotEvents, threads: threadEntries }
+      : null;
 
   // 地图上下文：派生态 + 事实态 + 天气（原始数据快照，整块 upsert；渲染归 T2/resolver）
   const hasWeather = typeof context.weather === 'string' && context.weather.trim() !== '';
@@ -716,10 +734,11 @@ export function diffPromptState(
   diffVariables(previous.variables, current.variables, out);
   diffTime(previous.time, current.time, out);
 
+  // 🔴 2026-09-09（🧵 主线细化）：plot 变化一律发 set —— 连「变回 null」也显式清空。
+  //    旧实现只发非 null，模型（尤其 delta 会话里）会保留上一份节点视图，造成
+  //    「事件线清空了、模型还以为有旧节点」的静默陈旧。
   if (!deepEqualValues(previous.plot, current.plot)) {
-    if (current.plot !== null) {
-      out.push({ op: 'set', scope: 'plot', field: 'value', value: current.plot });
-    }
+    out.push({ op: 'set', scope: 'plot', field: 'value', value: current.plot });
   }
 
   if (!deepEqualValues(previous.map, current.map)) {

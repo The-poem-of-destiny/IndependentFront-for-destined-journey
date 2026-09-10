@@ -823,6 +823,16 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 SnapshotPanel 自**快照拆表 v22**（2026-08-17）起只读
 │   │   │                                  `SnapshotMeta.preview`（玩家台词 / 游戏时间），**不再拉整份
 │   │   │                                  快照体** —— 列表渲染碰 body 会把拆表白拆
+│   │   ├── PlotThreadsPanel.vue     ← 🆕 [主线细化 ADR-35 / 2026-09-09] 事件线面板（挂在 PlotPanel 内、
+│   │   │                               有节点才渲染）：按主线锚分组节点卡 + 轻量方向连线（`A → B` 按钮）。
+│   │   │                               🔴 防剧透三件套全在 `plot-thread-view.ts`：蒙版判定（reveal + peek，
+│   │   │                                  剧透模式只**允许** peek 不直接解除）、组名整组蒙版、边任一端隐藏
+│   │   │                                  整条遮蔽；**引用行（埋向/回收）同样过滤可见端点** —— 组件测试
+│   │   │                                  抓过一处「已揭示节点详情引用隐藏节点名」的真实泄漏
+│   │   │                               🔴 只从 `game.saveProfile.worldFlags.plotThreads` 派生只读视图，
+│   │   │                                  不建第二份持久 store；motive 仅剧透模式显式展开可见
+│   │   ├── plot-thread-view.ts      ← 上者的展示层判定（纯函数，不 mount 可测）：分组/蒙版/边遮蔽/
+│   │   │                               状态中文标签（引用引擎集中映射，UI 不内联第二份）
 │   │   ├── BeautifiedNarrative.vue  ← [工坊正则] 正文渲染入口：`compileBeautifierSegments` 分段 +
 │   │   │                               `splitSceneImageSegments` 切插画锚点，再分派给
 │   │   │                               BeautifierFrame（美化段）与 SceneImageSegment（插画格）。
@@ -847,6 +857,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 本区块回答的是「调度器会不会考虑它」，**不做过期/权重 0 的
 │   │   │                                  撤池判定**（`isPendingStillValid` 那一套）；`inPool` 只原样
 │   │   │                                  报告池里有没有这个名字，不替它判活
+│   │   ├── plot-thread-debug.ts     ← 🆕 [主线细化 ADR-35] DebugPanel 事件线区块的展示层判定（纯函数）：
+│   │   │                               节点状态计数/未揭示数/收口游标 + **下一轮闸门预览**（直接调生产
+│   │   │                               `evaluatePlotThreadGate`，不复制判据；纯函数无副作用，查看面板
+│   │   │                               不推进随机状态）。DebugPanel 区块对上一轮实际结果与下一轮预览
+│   │   │                               分别标注
 │   │   ├── TurnActivityLedger.vue   ← [管线并行化] 一回合的 Agent 活动账本（逐步骤状态/耗时/重试入口）；
 │   │   │                               中文步骤名出自 `lib/agent-activity.ts`，本组件不自造文案
 │   │   ├── SceneImageSegment.vue    ← [图像 v1] 正文里一格插画的六种样子。**不判定**该显示什么

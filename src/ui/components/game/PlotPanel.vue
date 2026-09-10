@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import type { PlotEvent } from '@engine/types';
+import { getPlotThreadFlags } from '@engine/save-profile';
 import { useGameStore } from '../../stores/game-store';
+import PlotThreadsPanel from './PlotThreadsPanel.vue';
 
 const game = useGameStore();
 
 const outline = computed(() => game.plotOutline);
 const events = computed(() => game.activePlotEvents);
+
+/** 🧵 主线明线（事件线）：有节点数据时才挂面板（无大纲但有历史节点仍可查看） */
+const threadFlags = computed(() =>
+  game.saveProfile ? getPlotThreadFlags(game.saveProfile) : null,
+);
+const hasThreads = computed(() => Object.keys(threadFlags.value?.nodes ?? {}).length > 0);
 
 const plotMode = computed<string>(() => {
   return (game.activeSave?.metadata as any)?.plotSettings?.mode ?? 'off';
@@ -208,6 +216,11 @@ const emptyText = computed(() => EMPTY_TEXT[plotMode.value] ?? EMPTY_TEXT.off);
     </template>
 
     <div v-else class="empty-tab">{{ emptyText }}</div>
+
+    <!-- 🧵 主线明线（事件线）——带文字入口；无大纲但有历史节点仍可查看 -->
+    <section v-if="hasThreads" class="thread-slot" aria-label="主线明线事件线">
+      <PlotThreadsPanel />
+    </section>
   </div>
 </template>
 

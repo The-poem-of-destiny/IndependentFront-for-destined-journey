@@ -54,6 +54,8 @@ import { isEmptyMapPack } from './map-pack';
 import { getMapPack } from './map-runtime';
 // 随机事件 v1 (§5.1 渲染)：只要形状，不要数据 —— 候选快照由 game-pipeline 供进 ctx
 import type { RandomEventOfferEntry } from './random-event-context';
+// 🧵 主线细化层（2026-09-09）：表层投影是纯函数；措辞在本 resolver（照 map/random 先例）
+import { projectPlotThreadSurface } from './plot-threads';
 
 // ═══════════════════════════════════════════════════════════
 // Module-Level Globals
@@ -950,6 +952,68 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     return `**活跃剧情事件:**\n${formatted}`;
   },
 
+  /**
+   * 🧵 {{PLOT_THREAD_TURN}} — 本轮主线细化闸门结果 + 同轮已接受声明（turn_context 入口）。
+   *
+   * 只给 pre/post 两个消费方（默认模板）；Story 见的是经处理的导演块（AGENT.PLOT_PRE_CHECK），
+   * 不进本块 —— 本块是**结构化语义**（post 需要知道同轮接受了什么），不是可演绎文案。
+   * 闸门原因给中文一行；门未放行时无声明（AI 越权声明不在此块出现，也不落库）。
+   * 🔴 无 gate（mode=off / 求值失败）→ 空串零 token（同 {{RANDOM_EVENTS}} 口径）。
+   */
+  PLOT_THREAD_TURN: (ctx, _config, _params) => {
+    const gate = ctx.plotThreadGate;
+    if (!gate) return '';
+    const lines: string[] = [];
+    if (gate.allowed) {
+      lines.push(
+        `<plot_thread_gate allowed="true">主线细化本轮放行（距最近事件窗口 ${gate.distanceDays ?? '?'} 天）</plot_thread_gate>`,
+      );
+    } else {
+      const reasons: Record<string, string> = {
+        mode_off: '剧情模式未开启主线',
+        no_anchor: '无有效主线锚',
+        no_window: '近期无大纲事件窗口',
+        blank_period: '当前处于大纲事件进行期或窗口期内',
+        combat_active: '战斗会话进行中',
+        cooldown: `冷却中（还需 ${gate.cooldownRemaining ?? '?'} 个成功回合）`,
+        roll_failed: '本轮随机未命中',
+      };
+      lines.push(
+        `<plot_thread_gate allowed="false">${reasons[gate.reason] ?? gate.reason}</plot_thread_gate>`,
+      );
+    }
+    const turn = ctx.plotThreadTurnContext;
+    if (turn && turn.acceptedDeclarations.length > 0) {
+      lines.push('<plot_thread_accept>本轮正文前已接受以下主线明线声明（正文内不再产出新声明）:');
+      for (const d of turn.acceptedDeclarations) {
+        const state = d.status === 'dormant' ? '（沉睡）' : '';
+        lines.push(`- ${d.name}：${d.gist}${state}`);
+      }
+      lines.push('</plot_thread_accept>');
+    }
+    return lines.join('\n');
+  },
+
+  /**
+   * 🧵 {{PLOT_THREAD_SURFACE}} — dispatcher 视线里的主线条目表层投影（§11.4 裁定 1/3）。
+   *
+   * 只有 revealed+active 节点的 name/gist/involvedNpcs/thread ——
+   * 无 motive、无连线意向（foreshadows/payoffs）、无 hidden/dormant/终态节点。
+   * 供 dispatcher 撰写贴合主线的 `<char_gen_request>`；也是 §3.4 场景 B 的投影来源。
+   * 空 → 空串零 token。
+   */
+  PLOT_THREAD_SURFACE: (ctx, _config, _params) => {
+    const flags = ctx.plotThreadFlags;
+    if (!flags) return '';
+    const entries = projectPlotThreadSurface(flags);
+    if (entries.length === 0) return '';
+    const lines = entries.map(
+      (e) =>
+        `- ${e.name}：${e.gist}（隶属「${e.thread}」${e.involvedNpcs.length > 0 ? `；涉及：${e.involvedNpcs.join('、')}` : ''}）`,
+    );
+    return `<plot_thread_surface>\n${lines.join('\n')}\n</plot_thread_surface>`;
+  },
+
   // ---- Agent Communication Placeholders (6) ----
   // 多 Agent 间通过 agentOutputs Map 传递输出。输出可能是字符串或对象（如 memory_recall embedding 路径返回 { memories: [...] }）。
   // 对象 → JSON.stringify，字符串 → 原样返回，避免隐式 String(obj) 产生 "[object Object]"。
@@ -1038,15 +1102,15 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   // {{PLOT_EVENTS}} 在管线中被 buildAgentMessages 的 localParams 覆盖为富上下文块
   // （<剧情大纲>+<剧情事件列表>+<当前状态>，见 agent-templates.ts buildPlotContextBlock）。
   plot_pre_check:
-    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你判断剧情触发所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<剧情事件库>\n{{PLOT_EVENTS}}\n</剧情事件库>\n<!-- 引擎注入的剧情全景数据，内含三个子区块：<剧情大纲>(标题/版本/当前章节/章节进度/正文节选)、\n     <剧情事件列表>(全部活跃与待触发事件的标题+描述+状态+触发条件——含尚未向玩家揭示的 hidden 事件，\n     防剧透只在 UI 层，你必须全量审视)、<当前状态>(时间/位置/主角层级一行摘要)。\n     这是你触发判断的唯一事件来源——triggeredEvents 的 title 必须与 <剧情事件列表> 逐字一致。\n     区块为空或缺大纲时（如支线模式初期）以现有内容为准，保守判断，不编造事件。-->\n\n<记忆召回>\n{{AGENT.MEMORY_RECALL}}\n</记忆召回>\n<!-- 上游记忆召回 Agent 给出的相关历史记忆。用于核对触发条件中的历史前提\n     （如「与铁匠建立信任之后」）。为空表示本轮无相关记忆——缺证据时按条件未满足处理。-->\n\n<最近对话>\n{{NARRATIVE:layers=3}}\n</最近对话>\n<!-- 🔴 每轮变化。最近 3 轮正文与玩家输入。评估证据强度时它是第二优先级——\n     低于本轮 <用户输入> 的明确行动，高于 <记忆召回> 中的旧线索。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 🔴 每轮变化。本轮玩家的行动宣言——触发判断的首要证据来源。-->',
+    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你判断剧情触发所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<剧情事件库>\n{{PLOT_EVENTS}}\n</剧情事件库>\n<!-- 引擎注入的剧情全景数据，内含三个子区块：<剧情大纲>(标题/版本/当前章节/章节进度/正文节选)、\n     <剧情事件列表>(全部活跃与待触发事件的标题+描述+状态+触发条件——含尚未向玩家揭示的 hidden 事件，\n     防剧透只在 UI 层，你必须全量审视)、<当前状态>(时间/位置/主角层级一行摘要)。\n     这是你触发判断的唯一事件来源——triggeredEvents 的 title 必须与 <剧情事件列表> 逐字一致。\n     区块为空或缺大纲时（如支线模式初期）以现有内容为准，保守判断，不编造事件。-->\n\n{{PLOT_THREAD_TURN}}\n<!-- 🧵 主线细化层（引擎阶段）：<plot_thread_gate> 表明本轮是否放行主线细化（随机+冷却+窗口距离，\n     由引擎判定，你只需要在 allowed=true 时产出 threadDeclarations，绝不用本块做闸门判据）。-->\n\n<记忆召回>\n{{AGENT.MEMORY_RECALL}}\n</记忆召回>\n<!-- 上游记忆召回 Agent 给出的相关历史记忆。用于核对触发条件中的历史前提\n     （如「与铁匠建立信任之后」）。为空表示本轮无相关记忆——缺证据时按条件未满足处理。-->\n\n<最近对话>\n{{NARRATIVE:layers=3}}\n</最近对话>\n<!-- 🔴 每轮变化。最近 3 轮正文与玩家输入。评估证据强度时它是第二优先级——\n     低于本轮 <用户输入> 的明确行动，高于 <记忆召回> 中的旧线索。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 🔴 每轮变化。本轮玩家的行动宣言——触发判断的首要证据来源。-->',
   request_dispatcher:
-    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你完成变量调度所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力文化、地理信息等。\n     判断角色种族和势力归属时参考此处。——稳定数据，优先查阅。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 当前存档中所有已有角色的列表（ID/Name/Race/Type/Tier/Location）。\n     这是你判断\"新角色 vs 已有角色\"的唯一依据——\n     角色名不在此表中 → 新角色 → <char_gen_request>；\n     角色名在此表中 → 已有角色 → <char_update_request>。-->\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n<!-- 所有角色背包中的物品、装备、材料清单。\n     这是你判断\"新物品 vs 已有物品\"的唯一依据——\n     物品名不在背包中 → 新物品 → <item_gen_request>；\n     物品名在背包中 → 已有物品 → <item_update_request>。-->\n\n<已有技能>\n{{SKILL_STATE}}\n</已有技能>\n<!-- 🔴 2026-08-02 新增: 所有角色的技能清单（含开局初始技能声明）。\n     这是你判断\"新技能 vs 已有技能\"的唯一依据——\n     技能名不在下表中 → 新技能 → <item_gen_request itemType="skill">（逐条单独发）；\n     技能名已在表中 → 已有技能，不重复生成。\n     开局初始技能声明标了「尚未落库，需生成」→ 逐条发 <item_gen_request itemType="skill">\n     让 item_gen 生成 stats/modifiers/automata。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n{{RECENT_COMBAT}}\n<!-- 最近一场已结算战斗的事实块（<recent_combat>，自带外壳）。战斗刚打完的那几轮它\n     会出现——正文里的战斗痕迹（尸体/焦痕/伤口）属于已结算战斗的战后延续，不要重发\n     <combat_trigger> 重演。缺席 = 没有已结算战斗记录，此区块零 token。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n<!-- 🔴 高频变化：本回合 Story Agent 生成的叙事正文。\n     仔细阅读全文，从中提取所有变量变化、新角色/物品出现、制作场景。——这是你的核心输入。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 本轮用户的原始输入。开局轮此处是自然叙述式开场提示词，含初始装备与技能的原名、描述及必要机制信息。\n     正文里改写过的装备/技能若与此处声明对应，按此处的原名与原描述发 request，\n     不要用正文改写名——否则 item_gen 会丢数值重掷。-->',
+    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你完成变量调度所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力文化、地理信息等。\n     判断角色种族和势力归属时参考此处。——稳定数据，优先查阅。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 当前存档中所有已有角色的列表（ID/Name/Race/Type/Tier/Location）。\n     这是你判断\"新角色 vs 已有角色\"的唯一依据——\n     角色名不在此表中 → 新角色 → <char_gen_request>；\n     角色名在此表中 → 已有角色 → <char_update_request>。-->\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n<!-- 所有角色背包中的物品、装备、材料清单。\n     这是你判断\"新物品 vs 已有物品\"的唯一依据——\n     物品名不在背包中 → 新物品 → <item_gen_request>；\n     物品名在背包中 → 已有物品 → <item_update_request>。-->\n\n<已有技能>\n{{SKILL_STATE}}\n</已有技能>\n<!-- 🔴 2026-08-02 新增: 所有角色的技能清单（含开局初始技能声明）。\n     这是你判断\"新技能 vs 已有技能\"的唯一依据——\n     技能名不在下表中 → 新技能 → <item_gen_request itemType="skill">（逐条单独发）；\n     技能名已在表中 → 已有技能，不重复生成。\n     开局初始技能声明标了「尚未落库，需生成」→ 逐条发 <item_gen_request itemType="skill">\n     让 item_gen 生成 stats/modifiers/automata。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n{{RECENT_COMBAT}}\n<!-- 最近一场已结算战斗的事实块（<recent_combat>，自带外壳）。战斗刚打完的那几轮它\n     会出现——正文里的战斗痕迹（尸体/焦痕/伤口）属于已结算战斗的战后延续，不要重发\n     <combat_trigger> 重演。缺席 = 没有已结算战斗记录，此区块零 token。-->\n\n\n{{PLOT_THREAD_SURFACE}}\n<!-- 🧵 主线细化层：已向玩家呈现的主线节点名称/简述/涉及人物（表层投影）。\n     其中的人物若在本轮正文里首次实质出场（已有名字但没有角色），发 <char_gen_request> 时\n     人物描述可与此处事件自然贴合；不在此列的主线信息不要打探/渲染。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n<!-- 🔴 高频变化：本回合 Story Agent 生成的叙事正文。\n     仔细阅读全文，从中提取所有变量变化、新角色/物品出现、制作场景。——这是你的核心输入。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 本轮用户的原始输入。开局轮此处是自然叙述式开场提示词，含初始装备与技能的原名、描述及必要机制信息。\n     正文里改写过的装备/技能若与此处声明对应，按此处的原名与原描述发 request，\n     不要用正文改写名——否则 item_gen 会丢数值重掷。-->',
   vars_update:
     '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你更新角色/物品状态的完整上下文数据。       -->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。         -->\n<!-- ⚠️ 需要写脚本时调用 get_script_reference 工具。     -->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n\n<调度器输出>\n{{AGENT.REQUEST_DISPATCHER}}\n</调度器输出>\n<!-- request_dispatcher 的完整输出，包含 <char_update_request> 和 <item_update_request> 标签。\n     逐条读取每个标签，这是你需要处理的变更清单。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n\n<最近对话>\n{{NARRATIVE:layers=1}}\n</最近对话>',
   memory_summary: '{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{NARRATIVE:layers=4}}',
   // Phase 10 结构化（2026-07-20）: 同 plot_pre_check，{{PLOT_EVENTS}} 由 localParams 覆盖为富上下文块。
   plot_post_check:
-    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你审视世界线与事件状态所需的完整上下文。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<剧情事件库>\n{{PLOT_EVENTS}}\n</剧情事件库>\n<!-- 引擎注入的剧情全景数据，内含三个子区块：<剧情大纲>(标题/版本/当前章节/章节进度/正文节选)、\n     <剧情事件列表>(全部活跃与待触发事件的标题+描述+状态+触发条件)、<当前状态>(时间/位置/主角层级)。\n     eventUpdates 与 newChildEvents.parentTitle 只能引用 <剧情事件列表> 中逐字一致的标题；\n     世界线偏离程度以 <剧情大纲> 的预设走向为标尺。区块缺大纲时以事件列表为准，保守判断。-->\n\n<角色状态>\n{{CHARACTER_STATE}}\n</角色状态>\n<!-- 场景中角色的状态快照(层级/资源/位置等)。用于佐证事件完成/失败的客观后果\n     （如关键角色死亡 → 相关事件 fail）。以区块内容为准，缺失时不做推断。-->\n\n<最近对话>\n{{NARRATIVE:layers=4}}\n</最近对话>\n<!-- 最近 4 轮对话历史（不含本轮正文）。提供剧情连续性——判断世界线是否偏离时\n     结合前几轮走向一起看，避免把连续铺垫误判为突发变动。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 🔴 每轮变化。本轮玩家的行动宣言，与 <本轮正文> 对照理解玩家意图与选择后果。-->\n\n<本轮正文>\n{{AGENT.STORY}}\n</本轮正文>\n<!-- 🔴 每轮变化。本回合正文 AI 的完整输出——你审视的核心对象。\n     事件完成/失败、世界线变动的一切判断都必须以此处的直接证据为准。-->\n\n<本轮记忆总结>\n{{AGENT.MEMORY_SUMMARY}}\n</本轮记忆总结>\n<!-- 🔴 每轮变化。记忆总结 Agent 对本轮的压缩记录(含暗线线索)。\n     辅助你快速把握本轮要点；与 <本轮正文> 冲突时以正文为准。-->',
+    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你审视世界线与事件状态所需的完整上下文。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<剧情事件库>\n{{PLOT_EVENTS}}\n</剧情事件库>\n<!-- 引擎注入的剧情全景数据，内含三个子区块：<剧情大纲>(标题/版本/当前章节/章节进度/正文节选)、\n     <剧情事件列表>(全部活跃与待触发事件的标题+描述+状态+触发条件)、<当前状态>(时间/位置/主角层级)。\n     eventUpdates 与 newChildEvents.parentTitle 只能引用 <剧情事件列表> 中逐字一致的标题；\n     世界线偏离程度以 <剧情大纲> 的预设走向为标尺。区块缺大纲时以事件列表为准，保守判断。-->\n\n{{PLOT_THREAD_TURN}}\n<!-- 🧵 主线细化层（引擎阶段）：<plot_thread_gate> 为本轮闸门结果；<plot_thread_accept> 是\n     本轮正文前 pre 已声明、正文中应已演绎的主线明线——结算（threadUpdates/revealedNames）\n     只许引用它或事件线中已存在的节点名。闸门关闭时本轮无声明，勿编造。-->\n\n<角色状态>\n{{CHARACTER_STATE}}\n</角色状态>\n<!-- 场景中角色的状态快照(层级/资源/位置等)。用于佐证事件完成/失败的客观后果\n     （如关键角色死亡 → 相关事件 fail）。以区块内容为准，缺失时不做推断。-->\n\n<最近对话>\n{{NARRATIVE:layers=4}}\n</最近对话>\n<!-- 最近 4 轮对话历史（不含本轮正文）。提供剧情连续性——判断世界线是否偏离时\n     结合前几轮走向一起看，避免把连续铺垫误判为突发变动。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 🔴 每轮变化。本轮玩家的行动宣言，与 <本轮正文> 对照理解玩家意图与选择后果。-->\n\n<本轮正文>\n{{AGENT.STORY}}\n</本轮正文>\n<!-- 🔴 每轮变化。本回合正文 AI 的完整输出——你审视的核心对象。\n     事件完成/失败、世界线变动的一切判断都必须以此处的直接证据为准。-->\n\n<本轮记忆总结>\n{{AGENT.MEMORY_SUMMARY}}\n</本轮记忆总结>\n<!-- 🔴 每轮变化。记忆总结 Agent 对本轮的压缩记录(含暗线线索)。\n     辅助你快速把握本轮要点；与 <本轮正文> 冲突时以正文为准。-->',
   plot_outline:
     '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你生成剧情大纲所需的完整上下文。      -->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。    -->\n<!-- ────────────────────────────────────────────── -->\n\n<角色背景>\n{{CHARACTER_STATE}}\n</角色背景>\n<!-- 主角的种族/血脉/层级/属性/身份/背景故事/装备/技能/起源印记。\n     所有剧情必须以主角为核心展开——章节和事件的推动力必须来自主角的选择和成长。\n     不能偏成 NPC 传、世界观说明书或编年史。\n     以区块实际内容为准；缺字段时不做推断。-->\n\n<剧情配置>\n{{PLOT_EVENTS}}\n</剧情配置>\n<!-- 🔴 引擎注入的剧情配置（非事件列表）。由 create-store 通过 localParams 覆盖。\n     包含：模式(main=主线/side=支线)、持续年份、难度层级(T1-T7)、剧情偏向(战斗/解密/人际/恋爱/探索/政治/生存/悲剧)、\n     自定义偏好、是否允许世界书外NPC、专注区域(支线模式)、雷点(绝对禁止级)。\n     雷点优先级高于一切剧情偏好——绝对禁止生成雷点描述的任何内容。\n     区块为空时：默认 off 模式，不做推断。-->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前激活的世界书条目。涵盖势力/地理/种族/文化/组织/行业/怪物生态。\n     大纲的势力冲突、地理锚点、文化背景必须以此为准。\n     区块为空时以通用奇幻设定为准，不凭空发明势力名/地名。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n<用户指令>\n{{USER_INPUT}}\n</用户指令>\n<!-- 🔴 每轮变化。初始生成 → "请根据以上信息生成剧情大纲" + 角色摘要；\n     修改模式 → 用户修改要求 + 上一版大纲完整 JSON。-->',
   // Phase 10 结构化模板：XML 分区 + 注释 + 缓存优化排序（稳定在上，动态在下）

@@ -142,6 +142,35 @@ describe('parsePreCheckOutput', () => {
     expect(result).not.toBeNull();
     expect(result!.triggeredEvents).toEqual([]);
   });
+
+  it('🧵 threadDeclarations：缺失按空数组、坏条目独立丢弃、有效条目归一化', () => {
+    const raw = JSON.stringify({
+      triggeredEvents: [],
+      threadDeclarations: [
+        {
+          name: 'A',
+          gist: 'g',
+          thread: 't',
+          motive: 'm',
+          involvedNpcs: ['N'],
+          status: 'active',
+          foreshadows: [' B '],
+        },
+        { name: '', status: 'active' },
+        { name: 'C', status: 'weird' },
+        'junk',
+      ],
+    });
+    const result = parsePreCheckOutput(raw);
+    expect(result!.threadDeclarations).toHaveLength(1);
+    expect(result!.threadDeclarations[0].name).toBe('A');
+    expect(result!.threadDeclarations[0].foreshadows).toEqual(['B']);
+  });
+
+  it('🧵 旧 JSON（无 threadDeclarations 字段）按空数组兼容', () => {
+    const raw = JSON.stringify({ triggeredEvents: [], relevantBackground: 'bg' });
+    expect(parsePreCheckOutput(raw)!.threadDeclarations).toEqual([]);
+  });
 });
 
 // ====================================================================
@@ -236,6 +265,30 @@ describe('parsePostCheckOutput', () => {
     expect(result).not.toBeNull();
     expect(result!.eventUpdates).toEqual([]);
     expect(result!.newChildEvents).toEqual([]);
+  });
+
+  it('🧵 threadUpdates/revealedNames：缺失按空数组、坏字段独立丢弃、旧 JSON 兼容', () => {
+    const raw = JSON.stringify({
+      worldLineChanged: false,
+      eventUpdates: [],
+      newChildEvents: [],
+      threadUpdates: [
+        { name: 'A', status: 'resolved', payoffs: ['B'] },
+        { name: 'Ghost', status: 'whatever' },
+        { name: '', status: 'resolved' },
+      ],
+      revealedNames: ['A', '  ', 42, 'B'],
+    });
+    const result = parsePostCheckOutput(raw);
+    expect(result!.threadUpdates).toEqual([{ name: 'A', status: 'resolved', payoffs: ['B'] }]);
+    expect(result!.revealedNames).toEqual(['A', 'B']);
+  });
+
+  it('🧵 旧 JSON（无新字段）threadUpdates/revealedNames 为空数组', () => {
+    const raw = JSON.stringify({ worldLineChanged: false, eventUpdates: [], newChildEvents: [] });
+    const result = parsePostCheckOutput(raw);
+    expect(result!.threadUpdates).toEqual([]);
+    expect(result!.revealedNames).toEqual([]);
   });
 });
 

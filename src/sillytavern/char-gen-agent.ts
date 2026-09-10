@@ -77,6 +77,12 @@ export interface CharGenRequest {
   configs?: import('./types').AgentConfig[];
   worldBooks?: import('./types').WorldBook[];
   presets?: import('./types').AgentPreset[];
+  /**
+   * 🧵 主线细化层（2026-09-09 / §3.4）：按实体化时点分流生产的节点投影（行为约束）。
+   * `undefined` = 未命中 `involvedNpcs`，不加戏。**只进请求描述**（charLocalParams），
+   * motive 本体不进角色档案；`foreshadows`/`payoffs` 一律不带。
+   */
+  plotThreadInjection?: string;
 }
 
 export interface CharGenAgentDeps {
@@ -181,7 +187,8 @@ export async function callCharGenAgent(
   ]
     .filter(Boolean)
     .join('\n');
-  const requestContent = [attrLines, bodyText].filter(Boolean).join('\n');
+  const injection = request.plotThreadInjection ?? '';
+  const requestContent = [attrLines, injection, bodyText].filter(Boolean).join('\n');
 
   // Bug fix 1: Set BOTH keys so templates with {{CHAR_DETECT}} or {{CHAR_GEN_REQUEST}} both resolve.
   // The char_gen template in agent-config.json uses {{CHAR_DETECT}}, but Phase 10 flows

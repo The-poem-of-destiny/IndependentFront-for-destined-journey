@@ -580,6 +580,55 @@ describe('importSessionSave — 往返', () => {
     expect((await db.saveProfiles.get(newId))?.saveId).toBe(newId);
   });
 
+  it('🧵 事件线节点/引用/揭示/游戏时间戳/冷却游标随单档往返保留，且不串档', async () => {
+    await seedSave();
+    const db = getDatabase();
+    const profile = (await db.saveProfiles.get(SAVE_ID))!;
+    profile.worldFlags = {
+      ...(profile.worldFlags ?? {}),
+      plotThreads: {
+        nodes: {
+          雾蕈收购: {
+            name: '雾蕈收购',
+            gist: '商贩们被神秘买家暗中抬价收购雾蕈',
+            thread: '血色纹章',
+            motive: '幕后势力在囤积关键物资',
+            involvedNpcs: ['商贩'],
+            status: 'active',
+            foreshadows: ['外乡人'],
+            payoffs: [],
+            visibility: 'revealed',
+            seededAt: 70840, // 游戏 epoch minutes
+          },
+          外乡人: {
+            name: '外乡人',
+            gist: '一名身份不明的旅人在邻近村落出没',
+            thread: '血色纹章',
+            motive: '秘密监视收购动向',
+            involvedNpcs: [],
+            status: 'dormant',
+            foreshadows: [],
+            payoffs: ['雾蕈收购'],
+            visibility: 'hidden',
+            seededAt: 70960,
+          },
+        },
+        lastAdvancedTurn: 7,
+        lastCommittedTurn: 7,
+      },
+    };
+    await db.saveProfiles.put(profile);
+
+    const backup = await exportSessionSave(SAVE_ID);
+    const { saveId: newId } = await importSessionSave(backup);
+
+    const restored = (await db.saveProfiles.get(newId))!;
+    expect(restored.worldFlags.plotThreads).toEqual(profile.worldFlags.plotThreads);
+    // 原档的袋仍在（不串档：新档引用名字而非 id，且不含旧存档标识）
+    expect((await db.saveProfiles.get(SAVE_ID))!.worldFlags.plotThreads).toBeDefined();
+    expect(JSON.stringify(restored.worldFlags.plotThreads)).not.toContain(SAVE_ID);
+  });
+
   it('内部引用指向重发后的行', async () => {
     await seedSave();
     const backup = await exportSessionSave(SAVE_ID);
