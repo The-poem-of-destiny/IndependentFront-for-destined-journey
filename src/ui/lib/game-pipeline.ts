@@ -32,6 +32,7 @@ import type {
   ChatMessage,
   SystemEvent,
   DebugAgentEntry,
+  PlotEvent,
 } from '@engine/types';
 import type {
   ImageGenFailure,
@@ -60,6 +61,21 @@ import { buildRandomEventRollContext } from '@engine/random-event-snapshot';
 import { getRandomEventPack } from '@engine/random-event-runtime';
 import { getEngineSettings } from '@engine/engine-settings';
 import { toEpochMinutes } from '@engine/time-system';
+// 🧵 主线细化层（2026-09-09 接线）：闸门/快照/投影响应都在 game-pipeline 供值（buildContext 铁律）
+import { getPlotThreadFlags, commitPlotThreadTurn } from '@engine/save-profile';
+import {
+  evaluatePlotThreadGate,
+  parseThreadDeclarations,
+  buildCharGenProjectionA,
+  buildCharGenProjectionB,
+} from '@engine/plot-threads';
+import type {
+  PlotThreadGateResult,
+  PlotThreadTurnContext,
+  PlotThreadDeclaration,
+  PlotThreadUpdate,
+} from '@engine/plot-threads';
+import { countAcceptableTriggers } from '@engine/plot-engine';
 // 🆕 Delta 会话（T4）：存档切换/销毁时清理该存档的 prompt session（string 入参 = 清整个 saveId）
 import { invalidatePromptSession } from '@engine/prompt-session-assembler';
 import { resolveSceneWeather } from './scene-image-seams';
@@ -370,6 +386,17 @@ export class GamePipeline {
    * 自带 hp=0/死亡状态可判。放弃的战斗不记录（没发生过）。
    */
   private _recentCombat: RecentCombatInfo | null = null;
+  /**
+   * 🧵 主线细化层（2026-09-09）：本轮闸门结果（pre 开始前求值一次）与同轮临时工作集。
+   * 工作集 = pre 接受的声明 + post 暂存结算/揭示；**成功回合收口**才由 commitPlotThreadTurn
+   * 落库，失败/取消整体丢弃、不消费冷却（实施计划 §3.5）。
+   */
+  private plotThreadGate: PlotThreadGateResult | null = null;
+  private plotThreadTurn: PlotThreadTurnContext | null = null;
+  private plotThreadSettlement: { updates: PlotThreadUpdate[]; revealedNames: string[] } = {
+    updates: [],
+    revealedNames: [],
+  };
 
   /**
    * 取 EJS `ui.log` 调试日志快照（能力面 §3.11）。
@@ -502,6 +529,8 @@ export class GamePipeline {
       this.pendingAudioMarker = null;
       this.lastStoryMessage = null;
       await this.loadPlotData(context);
+      // 🧵 主线细化层：pre 开始前先求本轮闸门（on 时供值；失败静默 over）
+      this.preparePlotThreadGate(context);
 
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets();
@@ -568,6 +597,14 @@ export class GamePipeline {
       if (this.pendingPlotTasks.length > 0) {
         await Promise.all(this.pendingPlotTasks);
         this.pendingPlotTasks = [];
+      }
+
+      // 4.6 🧵 主线细化层收口：成功回合在 advanceTurn **之前**提交（幂等；
+      //     失败只警示不阻塞本轮 —— 退出通道是既有诊断日志，不追加自动 LLM 重试）。
+      try {
+        await this.commitPlotThreadTurnIfAny();
+      } catch (err) {
+        console.warn('[GamePipeline] 主线细化收口失败（本回合细化未保存）:', err);
       }
 
       // 5. 回合推进（M5 每轮一拍）: totalTurns +1 + 打 reason='turn' 快照。
@@ -1913,10 +1950,175 @@ export class GamePipeline {
   }
 
   /**
+   * 🧵 主线细化层 —— pre 开始前（loadPlotData 之后）求本轮闸门。
+   *
+   * 判据全部来自生产纯函数（plot-threads.evaluatePlotThreadGate），调试面板直接消费
+   * `context.plotThreadGate` 的同一次求值结果（照 random-event-debug 的「不装第二份判据」口径）。
+   * 供值必须在这里 —— resolver 自己去读 Dexie 会把引擎依赖方向反过来（同 mapFlags 铁律）。
+   */
+  private preparePlotThreadGate(context: AgentContext): void {
+    this.plotThreadGate = null;
+    this.plotThreadTurn = null;
+    this.plotThreadSettlement = { updates: [], revealedNames: [] };
+    try {
+      const profile = this.game.saveProfile;
+      if (!profile) return;
+      const events: PlotEvent[] = context.plotEvents ?? [];
+      const outline = context.plotOutline ?? null;
+      const flags = getPlotThreadFlags(profile);
+      const gate = evaluatePlotThreadGate({
+        saveId: this.saveId,
+        turnNo: (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1,
+        currentTime: profile.gameTime,
+        combatActive: this.game.isInCombat,
+        mode: context.plotSettings?.mode ?? 'off',
+        outlineTitle: outline?.title,
+        chapterTitles: (outline?.chapters ?? []).map((c) => c.title),
+        chapterEventTitles: events
+          .map((e) => e.chapterTitle)
+          .filter((t): t is string => typeof t === 'string' && t.trim() !== ''),
+        pendingEvents: events,
+        activeEventCount: events.filter((e) => e.status === 'active').length,
+        flags,
+      });
+      this.plotThreadGate = gate;
+      context.plotThreadGate = gate;
+      context.plotThreadFlags = flags;
+    } catch (err) {
+      console.warn('[GamePipeline] 主线细化闸门求值失败（本轮不推进细化）:', err);
+    }
+  }
+
+  /**
+   * 🧵 接受 pre 声明 → 导演段（可演绎行动 + 场景融合要求）。
+   *
+   * 规则（实施计划 §3.1/§3.3）：
+   * - 闸门未放行 → 不入工作集、不产块（AI 越权声明不保存）。
+   * - 同轮大纲触发优先：`triggeredEvents` 里有**实际可接受**（pending + 精确标题）时，
+   *   丢弃本轮细化推进声明（不能按无效标题误关闸）。
+   * - 声明归一化只此一处（parseThreadDeclarations）；坏条目在解析层已独立丢弃。
+   * - 导演块放 gist/动机（本轮呈现内容）与行为化要求；**不放**节点账务、未揭示终局、
+   *   连线意向、全量事件线 JSON 标题。
+   * - 同轮声明是临时工作集（post 可见），不是持久真源。
+   */
+  private acceptPlotThreadDeclarations(parsed: Record<string, unknown>): string | undefined {
+    const gate = this.plotThreadGate;
+    const context = this.currentContext;
+    if (!gate?.allowed || !context) return undefined;
+
+    const declarations = parseThreadDeclarations(parsed['threadDeclarations']);
+    if (declarations.length === 0) return undefined;
+
+    const triggerTitles = (
+      Array.isArray(parsed['triggeredEvents']) ? parsed['triggeredEvents'] : []
+    )
+      .map((e) =>
+        e && typeof e === 'object' ? (e as Record<string, unknown>)['title'] : undefined,
+      )
+      .filter((t): t is string => typeof t === 'string' && t.trim() !== '');
+
+    if (countAcceptableTriggers(context.plotEvents ?? [], triggerTitles) > 0) {
+      console.log('[GamePipeline] 同轮大纲触发优先，丢弃本轮主线细化声明（闸门不算被消耗）');
+      return undefined;
+    }
+
+    this.plotThreadTurn = {
+      turnNo: (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1,
+      acceptedDeclarations: declarations,
+      acceptedUpdates: [],
+      revealedNames: [],
+      gate,
+    };
+    context.plotThreadTurnContext = this.plotThreadTurn;
+    return GamePipeline.formatPlotThreadDirectorBlock(declarations);
+  }
+
+  /**
+   * 成功回合收口：本轮有声明/结算/揭示任一 → `commitPlotThreadTurn`（锁内窄写，幂等）。
+   * 失败只走既有诊断日志；不追加自动 LLM 重试（实施计划 §3.5）。
+   */
+  private async commitPlotThreadTurnIfAny(): Promise<void> {
+    const turn = this.plotThreadTurn;
+    const settlement = this.plotThreadSettlement;
+    const hasDeclarations = !!turn && turn.acceptedDeclarations.length > 0;
+    const hasSettlement = settlement.updates.length > 0 || settlement.revealedNames.length > 0;
+    if (!hasDeclarations && !hasSettlement) return;
+    const profile = this.game.saveProfile;
+    if (!profile) return;
+    const turnNo = (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1;
+    const result = await commitPlotThreadTurn(this.saveId, {
+      turnNo,
+      declarations: turn?.acceptedDeclarations ?? [],
+      updates: settlement.updates,
+      revealedNames: settlement.revealedNames,
+      seededAtEpochMinutes: toEpochMinutes(profile.gameTime),
+    });
+    if (result.committed) {
+      console.log(
+        `[GamePipeline] 主线细化收口成功: 节点=${result.nodeCount} 结算=${result.settledCount} 揭示=${result.revealedCount}`,
+      );
+    }
+  }
+
+  /** 导演段：通过闸门的可演绎行动 + 场景融合要求（§3.3：不含账务/连线/终局/窗口标题） */
+  private static formatPlotThreadDirectorBlock(declarations: PlotThreadDeclaration[]): string {
+    const lines = declarations.map((d) => {
+      const actors = d.involvedNpcs.length > 0 ? `（人物：${d.involvedNpcs.join('、')}）` : '';
+      return `- ${d.name} —— ${d.gist}${actors}\n  动机与行为：${d.motive}`;
+    });
+    return (
+      `**主线明线（世界在主线方向上自然运转的一角）:**\n${lines.join('\n')}\n\n` +
+      `**要求:** 以上内容只作背景片段融入正文，不点破其与主线的关联、不预告后续、` +
+      `不用它质问/引导玩家；玩家可遇见也可不遇见，不改变玩家手头正在做的事。`
+    );
+  }
+
+  /**
+   * 🧵 侧链角色实体化投影（实施计划 §3.4 时点分流；Code 背书，不依赖 AI 自觉）。
+   *
+   * marker 的 characterName 命中某节点 `involvedNpcs` 时：
+   * - **场景 A**（角色尚未在角色库/正文出现）：节点全量（含 motive 行为化改写）——
+   *   玩家未见该角色另一面，无剧透风险；
+   * - **场景 B**（角色已存在）：正文证据 + 表层投影（name/gist/involvedNpcs/thread），
+   *   motive 与连线意向必须藏；拿不准走 B。
+   * - 未命中：不加戏（返回 undefined）。
+   * 注入的是**请求描述**（进 char_gen prompt 的 CHAR_DETECT 槽），motive 本体一律
+   * **不进角色档案**。
+   */
+  private buildCharGenPlotInjection(marker: CharGenRequestMarker): string | undefined {
+    const name = marker.attributes?.characterName;
+    if (!name) return undefined;
+    const flags = this.currentContext?.plotThreadFlags;
+    if (!flags) return undefined;
+
+    // 时点分流：角色已在角色库 → 场景 B（表层投影）；否则场景 A（全量行为化）。
+    // 拿不准走 B —— B 只赔信息量，A 可能剧透。投影内容全部来自 plot-threads 的纯函数
+    // （§11.4 裁定 1-4：motive 不进档案、连线意向不外泄）。
+    const existing = this.game.characters.some((c) => c.name === name);
+    if (existing) {
+      const surface = buildCharGenProjectionB(flags, name);
+      if (!surface) return undefined;
+      return [
+        `该角色与主线明线相关（仅作背景，其本人可对此一无所知，不应主动知情）：`,
+        `涉及事件：${surface.gist}（隶属「${surface.thread}」）。`,
+      ].join('\n');
+    }
+    const full = buildCharGenProjectionA(flags, name);
+    if (!full) return undefined;
+    return [
+      `该角色承担主线角色（内部信息；行为可体现、身份不得披露）：`,
+      `事件轮廓：${full.gist}（隶属「${full.thread}」）。`,
+      `行为约束：请将下列动机转译成其言谈举止的隐性倾向，不点破因果——${full.motive}`,
+    ].join('\n');
+  }
+
+  /**
    * 步5: pre_check 完成 →
    * 1. 同步解析 directive/relevantBackground 并注入剧情导演区块到 context.agentOutputs
    *    （story 在 Stage 1 经 {{AGENT.PLOT_PRE_CHECK}} 占位符读取，必须在 story 启动前同步写入）
-   * 2. 异步 preCheckPlot() 落库事件激活（pending→active + visibility→revealed）
+   * 2. 🧵 主线细化层：闸门通过且同轮无实际可接受大纲触发时，接受声明进临时工作集，
+   *    并追加「主线明线」导演段（可演绎行动 + 场景融合要求；不放节点账务/连线/窗口标题）。
+   * 3. 异步 preCheckPlot() 落库事件激活（pending→active + visibility→revealed）
    */
   private handlePlotPreCheck(result: AgentResult) {
     const raw = result.rawResponse || '';
@@ -1930,6 +2132,11 @@ export class GamePipeline {
       const blocks: string[] = [];
       if (background) blocks.push(`**剧情背景（须自然编织进正文）:**\n${background}`);
       if (directive) blocks.push(`**本轮推进建议:**\n${directive}`);
+
+      // 🧵 主线细化：只接受「通过闸门 + 无实际可接受大纲触发」的声明
+      const directorBlock = this.acceptPlotThreadDeclarations(parsed as Record<string, unknown>);
+      if (directorBlock) blocks.push(directorBlock);
+
       if (blocks.length > 0) {
         this.currentContext?.agentOutputs.set(
           'plot_pre_check',
@@ -1965,9 +2172,20 @@ export class GamePipeline {
     const raw = result.rawResponse || '';
     if (!raw) return;
     try {
-      const { postCheckPlot, eventToMemory } = await import('@engine/plot-engine');
+      const { postCheckPlot, parsePostCheckOutput, eventToMemory } =
+        await import('@engine/plot-engine');
       const jsonStr = GamePipeline.extractJsonBlock(raw);
       const outcome = await postCheckPlot(this.saveId, jsonStr);
+
+      // 🧵 主线细化：post 暂存结算/揭示（闸门只约束新建/推进；有正文证据的结算任何轮都可发生）。
+      // 成功回合收口见 commitPlotThreadTurnIfAny —— 不读后台旧 pre 落库寻找节点。
+      const parsedPost = parsePostCheckOutput(jsonStr);
+      if (parsedPost) {
+        if (parsedPost.threadUpdates.length > 0 || parsedPost.revealedNames.length > 0) {
+          this.plotThreadSettlement.updates.push(...parsedPost.threadUpdates);
+          this.plotThreadSettlement.revealedNames.push(...parsedPost.revealedNames);
+        }
+      }
 
       // 完成/失败事件 → 高重要度记忆
       const terminal = outcome.eventsUpdated.filter(
@@ -2561,6 +2779,8 @@ export class GamePipeline {
           configs: this.chainData?.agentConfigs,
           worldBooks: this.chainData?.worldBooks,
           presets: this.chainData?.presets,
+          // 🧵 时点分流投影（命中 involvedNpcs 才注入；未命中不加戏）
+          plotThreadInjection: this.buildCharGenPlotInjection(marker),
         } as any;
         const result = await runCharGenChain(charGenRequest, {
           clientFactory,

@@ -1,6 +1,8 @@
 # 主线细化层设计（剧情颗粒度弥补）
 
-> **状态：设计定稿，未实施（2026-09-07）**
+> **状态：已实施（2026-09-09），真机游玩待验证** —— 实施方案见
+> [实施计划](2026-09-07-mainline-refinement-layer-implementation-plan.md)（T0-T4 完成、
+> T5 UI 组件测试通过、真机走查未做）。实施中收口的参数以本文 §11 为准。
 >
 > **适用范围**：剧情系统的结构性空白期——大纲事件窗口未到达时的日常轮次。改剧情 Agent
 > 提示词、`worldFlags.plotThreads` 事件线、事件线面板前先读本文。
@@ -105,7 +107,9 @@ resolvedAt    回收时间
 住 `worldFlags.plotThreads`，每存档一份。照 ADR-32（`randomEvents`）/ ADR-33（`mapFacts`）
 事实态先例：
 
-- 零新 Dexie 表（随 `saveProfiles.variables.worldFlags` 进 FullBackup，随单存档导出/导入往返）。
+- 零新 Dexie 表（随 `SaveProfile.worldFlags` 进 FullBackup，随单存档导出/导入往返）。
+  📌 2026-09-09 更正：初稿写的 `saveProfiles.variables.worldFlags` 不存在 —— `worldFlags`
+  与 `variables` 是 `SaveProfile` 上的两个并列字段，此处取后者相邻的 `worldFlags`。
 - 按**节点名**为键寻址；休眠节点不删，名字回来自动复活。
 - 刻意**不**塞进 `plotEvents` 表：那是大纲驱动的事件树（预生成、title 逐字一致、被
   `syncOutlineEvents` 维护），混入 AI 即兴节点会污染 title 寻址契约与上下文注入面。
@@ -127,6 +131,29 @@ pre_check 埋（active/dormant）→ 正文演绎 → post_check 结算（resolv
 | 用户              | 游戏内事件线面板：节点 + 伏笔连线，照 PlotPanel 的剧透模式口径（未揭示节点蒙层）                                                    |
 | 上下文注入        | pre_check 每轮注入事件线快照（活跃节点 + 未回收伏笔 + 近期回收记录）——「AI 自动连线」的原料                                         |
 | Delta 会话        | 事件线快照纳入既有 `plot` scope 的投影；节点变化时走 delta 而非重基线                                                               |
+
+### 6.1 侧链角色实体化的可见性（📌 2026-09-09 补注）
+
+> 本节为 2026-09-09 讨论新增裁定，不在 2026-09-07 定稿范围内；实施归属与完整契约见
+> 实施计划 §3.4（`2026-09-07-mainline-refinement-layer-implementation-plan.md`）。
+
+`char_gen`（角色生成侧链）**不直接读节点快照**，新 NPC 由 dispatcher 的
+`<char_gen_request>` 触发、只服从请求描述。为让新角色贴合主线且不剧透，按「实体化时点」
+分流：
+
+- **场景 A（节点先于角色）**：角色尚未在正文/角色库出现 → 请求描述带该节点全量（含
+  motive 的行为化改写），无剧透（玩家未见该角色另一面）。
+- **场景 B（角色先于节点）**：角色已出现 → 只给正文证据 + 表层投影（name/gist/
+  involvedNpcs/thread），motive 与连线意向必须藏。
+
+三条红线：
+
+1. **行为暗示，不身份披露**——motive 本体**不进角色档案**（玩家可打开查看），进请求
+   描述的只有行为约束（如「人前装作寡言行商、回避出身」）；档案出现未揭示身份即剧透。
+2. **身份型伏笔埋模糊钩子**——pre 对角色型/身份型伏笔只埋模糊目标（「一名身份不明的
+   外乡人」），真身在揭示动作时由 pre/post 补；char_gen 自由生成的背景与节点永无冲突。
+3. **连线意向不外泄**——`foreshadows`/`payoffs` 不随任何投影给 char_gen；dispatcher 的
+   可见面只持过滤后的表层投影，不自动持有全量内部节点。
 
 ## 7. 节奏闸门（Code 保证）
 
@@ -162,6 +189,85 @@ pre_check 埋（active/dormant）→ 正文演绎 → post_check 结算（resolv
 - 小事件不推进主线状态、不改世界线、不写 `delta_time`。
 
 ## 10. 对既有系统的影响（不变项清单）
+
+| 系统                    | 影响                                                              |
+| ----------------------- | ----------------------------------------------------------------- |
+| 大纲事件树 `plotEvents` | 无（只读锚定，不新增节点）                                        |
+| ADR-32 随机事件         | 无（职责分离，独立开关）                                          |
+| `plot_pre_check` 模板   | 扩展输出契约（新增节点声明字段），既有 `triggeredEvents` 语义不变 |
+| `plot_post_check` 模板  | 扩展输出契约（新增节点结算字段），既有结算语义不变                |
+| 记忆系统                | 无（细化层自带结构化节点，不额外占用记忆）                        |
+| FullBackup / 存档互传   | 自动包含（`worldFlags` 随 `saveProfiles` 往返）                   |
+| 调试面板                | 增加事件线只读区块（照随机事件区块口径，判据全部复用生产函数）    |
+
+## 11. 📌 2026-09-09 实施补齐裁定（本实施细则正式收口）
+
+> 初稿定稿于 2026-09-07，未含以下参数；2026-09-09 实施计划
+> （`2026-09-07-mainline-refinement-layer-implementation-plan.md` §3）收口后以带日期补注
+> 同步回本文。本节为**生效裁定**，与 §1-§9 冲突处本条优先。
+
+### 11.1 存储形状与账务字段
+
+- `worldFlags.plotThreads = { nodes: Record<节点名, PlotThreadNode>, lastAdvancedTurn?, lastCommittedTurn? }`。
+  字段缺席读取为空；getter 不写库，不迁移全库，不新增存储版本框架。
+- 节点新增最小账务字段：`visibility: 'hidden' | 'revealed'`（与 `PlotEvent.visibility` 同值域）。
+- `name` 是稳定身份：同名更新不重复插入；空字段不覆盖已有非空叙事；不提供重命名操作。
+- `seededAt` 首次插入由 Code 写**游戏 epoch minutes**（游戏历法，非宿主 Unix 毫秒），更新不改；
+  `resolvedAt` 仅首次确认回收时写。
+- pre 只声明 `active/dormant`，post 才确认 `resolved/dissolved`；dormant 再次按名声明可复活
+  （status 转回 active）。首版终态保留历史、不自动复活；续写终态节点须产生新名并以引用承接。
+- pre 新声明默认 `hidden`；post 依据正文明确报告 `revealedNames`，Code 单向置 `revealed`。
+  用户临时揭示不写持久字段（UI 会话内存态）。
+
+### 11.2 节奏判据（§7 的具体化）
+
+| 项目     | 裁定                                                                                                              |
+| -------- | ----------------------------------------------------------------------------------------------------------------- |
+| 启用范围 | 仅 `plotSettings.mode === 'main'` 且存在有效主线锚；`side/off` 不产生节点                                         |
+| 主线锚   | 当前大纲标题、章节标题与所属大纲事件标题的**去重精确名字集合**；`directionAnchors` 为自由文本，**不**拆成虚构标题 |
+| 窗口候选 | 有合法 `timeWindow` 的 pending 大纲事件；窗口距离取最近未来窗口起点，月窗口从该月首日开始                         |
+| 空白期   | 有 active 大纲事件，或当前已处于任一 pending 事件窗口时关闭推进；该轮仍运行原大纲检查                             |
+| 同轮冲突 | pre 返回**实际可接受**的大纲触发时优先大纲，丢弃本轮细化推进声明                                                  |
+| 无窗口   | 无可用未来窗口时保守不生成，返回明确原因                                                                          |
+| 冷却     | 全存档每 4 个成功普通回合至多一次推进；首次无冷却；若上次推进于回合 t，则 t+4 最早再次允许                        |
+| 概率     | 距窗口 >60 游戏日：0.15；31–60：0.30；8–30：0.50；1–7：0.70                                                       |
+| 额度     | 至多一个新建节点或既有节点的叙事推进；连线可引用已有节点                                                          |
+| 战斗     | 回合入口 `combatActive` 时关闭                                                                                    |
+| 重试     | 稳定存档标识 + 成功回合序号 + 专用 salt 取确定性随机值；同一未完成回合重试不重掷                                  |
+
+**闸门只控制「新建/推进」**：post 对已存在节点进行有正文证据的结算不受闸门约束。未提及不
+消散，等待不会自动 resolved/dissolved，不要求补齐伏笔配额。
+
+### 11.3 AI 输出契约
+
+| Agent | 新字段                                                                                           | 权限                                            |
+| ----- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| pre   | `threadDeclarations: Array<{name,gist,thread,motive,involvedNpcs,status,foreshadows?,payoffs?}>` | 提出节点与连线；不产时间戳/id/揭示状态/账务游标 |
+| post  | `threadUpdates: Array<{name,status:'resolved'\|'dissolved',payoffs?:string[]}>`                  | 只结算已有节点或同轮接受节点；不凭空创建节点    |
+| post  | `revealedNames: string[]`                                                                        | 指定正文已向玩家呈现的节点；未知名字告警并跳过  |
+
+无字段按空数组处理；坏条目独立丢弃并告警，不把有效大纲输出一起判废。归一化仅在模型输出
+入口执行一次。状态枚举按本文四值英文存储，集中定义处给中文显示映射（对「中文枚举」通则
+的明确例外）。
+
+### 11.4 侧链实体化（§6.1 的时点分流细则）
+
+1. `char_gen_request` 的 characterName 命中节点 `involvedNpcs` 时：未在正文/角色库出现 → 场景 A
+   （节点全量行为化改写进请求描述）；已出现 → 场景 B（正文证据 + 表层投影 name/gist/
+   involvedNpcs/thread）。拿不准走 B。
+2. motive 本体**不进角色档案**（玩家可打开），进请求描述的只有行为约束。
+3. pre 对身份型伏笔只埋模糊钩子（「一名身份不明的外乡人」），不把幕后身份写死在节点里；
+   真身在揭示动作时由 pre/post 补。
+4. `foreshadows`/`payoffs` 不随任何投影给 char_gen；dispatcher 可见面只开放过滤后的表层投影。
+5. Code 背书注入（时点分流 + 按名锚定）；char_gen 不负责猜动机。
+
+### 11.5 持久化时机
+
+pre/post 暂存 → 成功回合收口写入：`orchResult.status === 'completed'` 且既有后台任务收口后，
+以命名 StateManager 方法提交细化结果，随后才 `advanceTurn()`。写入口在 per-save 锁内重读最新
+profile、只改 `worldFlags.plotThreads`，一次保存节点/冷却/`lastCommittedTurn`；同回合重复提交
+no-op。失败/取消丢弃临时工作集、不消费冷却。post 失败而回合 completed 时只保存 pre 接受的
+隐藏节点，不写回收结算。不建全管线事务。
 
 | 系统                    | 影响                                                              |
 | ----------------------- | ----------------------------------------------------------------- |

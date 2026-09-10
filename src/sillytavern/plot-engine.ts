@@ -14,6 +14,13 @@ import { getPlotEvents, savePlotEvent, savePlotEvents } from './database';
 // Q-05：从模型输出抢救 JSON 的唯一入口
 import { parseModelJson, asArray, asString } from './model-json';
 import { getActiveOutline, updateOutlineVersion } from './plot-outline';
+// 主线细化层（2026-09-09 接入）：AI 输出归一化只此一份（plot-threads 的 parse 函数）
+import {
+  parseThreadDeclarations,
+  parseThreadUpdates,
+  parsePlotThreadRevealedNames,
+} from './plot-threads';
+import type { PlotThreadDeclaration, PlotThreadUpdate } from './plot-threads';
 
 // ========== Pre-Check 结果类型 ==========
 
@@ -22,6 +29,8 @@ export interface PreCheckResult {
   triggeredEvents: Array<{ title: string; reason: string }>;
   relevantBackground: string;
   outlineRelevance: string;
+  /** 主线细化层（2026-09-09）：节点声明；缺字段按空数组，旧输出兼容 */
+  threadDeclarations: PlotThreadDeclaration[];
 }
 
 /** 解析 plot_pre_check Agent 的 JSON 输出 */
@@ -35,8 +44,27 @@ export function parsePreCheckOutput(rawOutput: string): PreCheckResult | null {
       triggeredEvents: o.triggeredEvents.filter((e) => e?.title),
       relevantBackground: asString(o.relevantBackground),
       outlineRelevance: asString(o.outlineRelevance),
+      threadDeclarations: parseThreadDeclarations(
+        (o as Record<string, unknown>).threadDeclarations,
+      ),
     };
   });
+}
+
+/**
+ * 纯同步判定一组 trigger title 中「实际可接受」的数量（pending + 精确标题命中）。
+ *
+ * 🔴 与 `preCheckPlot` 的裁决**同一个口径**（resolveEventByTitle + pending 检查），
+ *    但保持纯同步 —— 细化层用它处理「同轮大纲触发优先大纲」（实施计划 §3.1），
+ *    不能拿无效标题误关细化闸。
+ */
+export function countAcceptableTriggers(events: PlotEvent[], titles: string[]): number {
+  let count = 0;
+  for (const title of titles) {
+    const event = resolveEventByTitle(events, title, 'countAcceptableTriggers');
+    if (event && event.status === 'pending') count += 1;
+  }
+  return count;
 }
 
 /** 按标题在本存档事件中唯一匹配（精确匹配优先，匹配不到返回 undefined 并 warn） */
@@ -127,6 +155,9 @@ export interface PostCheckResult {
     triggerCondition?: string;
     depth?: number;
   }>;
+  /** 主线细化层（2026-09-09）：节点结算 + 揭示名单；缺字段按空数组，旧输出兼容 */
+  threadUpdates: PlotThreadUpdate[];
+  revealedNames: string[];
 }
 
 /**
@@ -147,6 +178,8 @@ export function parsePostCheckOutput(rawOutput: string): PostCheckResult | null 
       outlineChanges: o.outlineChanges || { action: 'none', changes: '' },
       eventUpdates: asArray<PostCheckResult['eventUpdates'][number]>(o.eventUpdates),
       newChildEvents: asArray<PostCheckResult['newChildEvents'][number]>(o.newChildEvents),
+      threadUpdates: parseThreadUpdates((o as Record<string, unknown>).threadUpdates),
+      revealedNames: parsePlotThreadRevealedNames((o as Record<string, unknown>).revealedNames),
     };
   });
 }

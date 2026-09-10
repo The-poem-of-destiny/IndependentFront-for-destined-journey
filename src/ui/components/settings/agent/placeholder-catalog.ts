@@ -63,6 +63,18 @@ export const ALL_PLACEHOLDER_META: readonly PlaceholderBadge[] = [
   { key: 'MEMORY_ENTRIES', color: '#ff7043', desc: '记忆条目 — embedding 召回', category: '记忆' },
   { key: 'PLOT_EVENTS', color: '#ff7043', desc: '剧情事件 — 活跃+待处理', category: '剧情' },
   {
+    key: 'PLOT_THREAD_TURN',
+    color: '#ff7043',
+    desc: '主线细化 — 本轮闸门结果 + 同轮已接受声明（仅 plot_pre_check / plot_post_check）',
+    category: '剧情',
+  },
+  {
+    key: 'PLOT_THREAD_SURFACE',
+    color: '#ff7043',
+    desc: '主线表层投影 — 已揭示节点的名/简述/人物（仅 request_dispatcher，无动机无连线）',
+    category: '剧情',
+  },
+  {
     key: 'AGENT.MEMORY_RECALL',
     color: '#ef5350',
     desc: 'memory_recall 输出',
@@ -151,8 +163,10 @@ const CHAIN_ONLY: Record<string, readonly string[]> = {
  *    命中后会就地预解析）—— 所以这个按钮对 story 是真的有用，与 MAP_CONTEXT 的情况不同。
  */
 const AGENT_SCOPED: Record<string, readonly string[]> = {
-  request_dispatcher: ['MAP_CONTEXT'],
+  request_dispatcher: ['MAP_CONTEXT', 'PLOT_THREAD_SURFACE'],
   story: ['RANDOM_EVENTS'],
+  plot_pre_check: ['PLOT_THREAD_TURN'],
+  plot_post_check: ['PLOT_THREAD_TURN'],
 };
 
 /**

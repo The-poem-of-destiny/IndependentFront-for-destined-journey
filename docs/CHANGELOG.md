@@ -9,6 +9,38 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 主线细化层 v1（ADR-35）｜已实施（2026-09-09，真机待验证）
+
+在剧情事件窗口之间的空白期，`plot_pre_check` 按 Code 节奏闸门现编「主线细化节点」，把宏观主线
+落地为带动机的 NPC 行动；节点带 `foreshadows`/`payoffs` 伏笔引用自动连成事件线，
+`plot_post_check` 在正文落定后结算（resolved/dissolved）并单向置揭示。设计与收口参数见
+[设计文档](planning/2026-09-07-mainline-refinement-layer-design.md) §11；
+实施方案与逐项验收记录见[实施计划](planning/2026-09-07-mainline-refinement-layer-implementation-plan.md) §6。
+
+- **领域逻辑**：新增 `src/sillytavern/plot-threads.ts`（纯函数：闸门 `evaluatePlotThreadGate`、
+  declarations/updates/revealed 三 reducer、边推导、快照与表层投影、char_gen 实体化投影 A/B）。
+  确定性随机经 `createEjsRng` 专用 salt，同一未完成回合重试不重掷；`Math.random`/时钟/DB 全禁。
+- **存储**：`worldFlags.plotThreads`（照 ADR-32/33 事实态先例：零新 Dexie 表、按节点名寻址、
+  永不随 packStamp 清空、随档/备份/快照往返）。写入口 `commitPlotThreadTurn`（per-save 锁内
+  重读窄写 + `lastCommittedTurn` 幂等），成功回合在 `advanceTurn` 之前收口。
+- **管线**：`plot-engine` 解析可选新字段（旧 JSON 兼容）；game-pipeline 求闸门 → 接受声明 →
+  导演块（只给可演绎行动与场景融合要求）→ post 暂存 → 成功收口；char_gen 请求按
+  §3.4 时点分流注入（未出现角色给全量行为化 / 已出现只给表层，motive 不进档案）。
+- **上下文**：plot 投影并入节点快照并**显式清空**；新增 ephemeral 占位符
+  `PLOT_THREAD_TURN`（pre/post 的闸门与同轮声明）与 `PLOT_THREAD_SURFACE`
+  （dispatcher 表层投影）；pre/post 富块追加事件线快照。
+- **内容**：公开占位集与私有内容仓的 plot_pre/post systemPrompt + 模板同步
+  （编码三判据通过），私有仓 pack **2.7.0** 构建成功；`agent流程测试/要求.md` 追加细化测试要求。
+  ⚠ 真实 LLM 回合验证留待真机。
+- **UI**：`PlotThreadsPanel.vue`（剧情面板内带文字入口、按主线锚分组、轻量方向连线）+
+  防剧透判定 `plot-thread-view.ts`（蒙版/组名/边/引用行四重遮蔽）+ 调试区块
+  `plot-thread-debug.ts`（闸门预览直接调生产函数）。组件测试抓出并修复一处真实防剧透漏洞
+  （已揭示节点详情里的「埋向/回收」引用隐藏端点）。⚠ 真机浏览器走查未做。
+
+验证：`npm run gates` 全绿（**383 个测试文件、9,484 项通过、8 项跳过**）；新增 focused 覆盖：
+领域逻辑 28 条、写入口并发/幂等 4 条、解析/投影/assembler 12 条、UI 组件 17 条、
+单档往返 1 条、快照恢复 2 条。未调用付费 provider，真机游玩与 provider usage 数据留待验证。
+
 ### 剩余四项可靠性修复｜已实施（2026-09-05）
 
 - EFFECT-01：效果订阅按权威角色集合对账，删除失效 owner、刷新脚本，离页/切档/删档拆线。

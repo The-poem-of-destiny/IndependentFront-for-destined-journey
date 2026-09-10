@@ -22,6 +22,16 @@ vi.mock('@engine/plot-engine', () => ({
     worldLineChanged: false,
     changeLevel: 'none',
   })),
+  // 🧵 主线细化（2026-09-09）：post 结算/揭示的解析面
+  parsePostCheckOutput: vi.fn(() => ({
+    worldLineChanged: false,
+    changeLevel: 'none',
+    outlineChanges: { action: 'none', changes: '' },
+    eventUpdates: [],
+    newChildEvents: [],
+    threadUpdates: [],
+    revealedNames: [],
+  })),
   eventToMemory: vi.fn(() => ({
     content: 'mem',
     keywords: [],

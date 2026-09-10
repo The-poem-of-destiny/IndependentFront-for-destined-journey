@@ -1849,6 +1849,26 @@ export interface AgentContext {
       fallbackEntries: Array<{ uid: number; error: string }>;
     };
   };
+
+  // --- 主线细化层（事件线，2026-09-09 接通；设计 docs/planning/2026-09-07-*-design.md） ---
+  /**
+   * 事件线**持久节点袋**（`SaveProfile.worldFlags.plotThreads`，由 game-pipeline 经
+   * `getPlotThreadFlags()` 取出）。
+   *
+   * 🔴 这里只供 pre/post 的快照构建（`buildPlotThreadSnapshot` 与其数据源）；
+   *    未揭示 motive 与连线意向**不得**随任何投影流出到 Story / dispatcher / char_gen ——
+   *    那是 `projectPlotThreadSurface` 的职责，本袋永远不是渲染入口。
+   * 🔴 缺席 = 从未推进细化 / 旧档：`{{PLOT_THREADS}}` 整段不出（零 token，与
+   *    `mapFlags` / `randomEvents` 同一句「供值必须在这里」的铁律）。
+   */
+  plotThreadFlags?: import('./plot-threads').PlotThreadFlags;
+  /** 本轮细化闸门结果（pre 开始时由 Code 求值一次；调试面板直接消费同一函数产出的对象） */
+  plotThreadGate?: import('./plot-threads').PlotThreadGateResult;
+  /**
+   * 同轮临时工作集（pre 接受声明 + post 暂存结算；post 可见，**不是持久真源**）。
+   * 成功回合收口由 `commitPlotThreadTurn` 落库；失败/取消整体丢弃。
+   */
+  plotThreadTurnContext?: import('./plot-threads').PlotThreadTurnContext;
 }
 
 /** 单个 Agent 的运行结果 */

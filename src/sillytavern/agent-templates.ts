@@ -23,7 +23,8 @@ import type {
   WorldBookEntry,
 } from './types';
 import type { GameTime } from './time-system';
-import { MONTH_NAMES, toGameDay } from './time-system';
+import { MONTH_NAMES, toGameDay, fromEpochMinutes } from './time-system';
+import { buildPlotThreadSnapshot, plotThreadStatusLabel } from './plot-threads';
 import {
   getEntriesForAgent,
   filterActiveEntries,
@@ -594,7 +595,35 @@ export function buildPlotContextBlock(agentId: string, ctx: AgentContext): strin
   if (events) parts.push(`<剧情事件列表>\n${events}\n</剧情事件列表>`);
   const state = formatStateSummary(ctx);
   if (state) parts.push(`<当前状态>\n${state}\n</当前状态>`);
+  // 🧵 主线细化层（2026-09-09）：事件线富块只进 pre/post（PLOT_AGENT_IDS 的消费方）。
+  //    含未揭示节点（防剧透只在 UI/dispatcher 面）；**不进 Story / dispatcher / char_gen**。
+  const threads = formatPlotThreadsBlock(ctx);
+  if (threads) parts.push(threads);
   return parts.join('\n\n');
+}
+
+/**
+ * 🔴 富块只被 buildPlotContextBlock（→ PLOT_EVENTS localParam）使用；本身对未揭示
+ * motive 与连线**全量可见**（pre/post 的伏笔原料，设计 §6）。底层快照排序由
+ * `buildPlotThreadSnapshot` 一把定死（活跃→休眠→近期终态，seededAt → 名字）。
+ */
+function formatPlotThreadsBlock(ctx: AgentContext): string {
+  const flags = ctx.plotThreadFlags;
+  if (!flags) return '';
+  const snapshot = buildPlotThreadSnapshot(flags, 0);
+  if (snapshot.entries.length === 0) return '';
+  const era = ctx.gameTime?.era ?? '';
+  const lines = snapshot.entries.map((e) => {
+    const label = plotThreadStatusLabel(e.status);
+    const time = formatGameTime(fromEpochMinutes(e.seededAt, era));
+    const actors = e.involvedNpcs.length > 0 ? `　参与:${e.involvedNpcs.join('、')}` : '';
+    const refs: string[] = [];
+    if (e.foreshadows.length > 0) refs.push(`埋向:${e.foreshadows.join('、')}`);
+    if (e.payoffs.length > 0) refs.push(`回收:${e.payoffs.join('、')}`);
+    const link = refs.length > 0 ? `\n  连线:${refs.join('；')}` : '';
+    return `- [${label}] ${e.name}（${time}）${e.thread ? `【${e.thread}】` : ''}\n  简述:${e.gist}\n  动机:${e.motive}${actors}${link}`;
+  });
+  return `<主线事件线>\n${lines.join('\n')}\n</主线事件线>\n<!-- 🧵 主线细化节点（含未揭示者与未回收伏笔：仍是伏笔原料，只需感知，勿向玩家点名）。 -->`;
 }
 
 const PLOT_AGENT_IDS = new Set(['plot_pre_check', 'plot_post_check', 'plot_outline']);

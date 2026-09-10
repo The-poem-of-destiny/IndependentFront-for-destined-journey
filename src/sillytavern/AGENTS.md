@@ -166,6 +166,8 @@ src/sillytavern/                    ← 核心引擎
 │                                     tier-constants / combat-v3 coordinator 的等级经验逻辑统一委托此处
 │
   ├── save-profile.ts               ← [Phase 4.6] 存档级 FP 元货币（M5: +variables 变量唯一真源）
+  │                                      [2026-09-09] +`worldFlags.plotThreads` 袋的读/写（getPlotThreadFlags /
+  │                                    setPlotThreadFlagsInPlace + commitPlotThreadTurn 成功回合收口写入口）
   ├── effect-parser.ts / effect-runtime.ts
   ├── ejs-backend.ts                ← [能力面 T1] EjsBackend 接口 + LegacyBackend + 生产切换入口
   ├── ejs-quickjs-backend.ts        ← [能力面 T7] ★ QuickJS(wasm,主线程) 隔离后端 —— SEC-02 的边界
@@ -187,7 +189,8 @@ src/sillytavern/                    ← 核心引擎
   │                                    否则同 saveId 自等死锁）。LLM 调用无副作用可并行；
   │                                    一切 Dexie 写入必须经此串行。收编点：commitChatState /
   │                                    applyTimeAdvance / confirmRandomEventTrigger / sync* /
-  │                                    advanceTurn / createSnapshot / restoreSnapshot
+  │                                    advanceTurn / createSnapshot / restoreSnapshot /
+  │                                    commitPlotThreadTurn（2026-09-09 主线细化收口）
   ├── state-manager.ts              ← 唯一状态写入入口（M2按名寻址 M4名字唯一化 M5变量迁profile+快照重建）
   │      🗃 **提交级缓存 `CommitScope`**（2026-08-17，本文件已 2664 行）：读收到入口、写收到出口 ——
   │         一次 `commitChatState` 至多 1 读 1 写 profile + 1 读 1 次 `bulkPut` characters。
@@ -214,6 +217,18 @@ src/sillytavern/                    ← 核心引擎
   │                                    从 `agent-orchestrator.processStageMarkers`（那时 1327 行）里剥出来的
   │                                    纯映射；不违反 ADR-21 —— `commitChatState` 仍是唯一写入口
   ├── dice.ts / memory-store.ts / memory-summarizer.ts / plot-outline.ts / plot-engine.ts / location-db.ts
+  ├── plot-threads.ts               ← 🆕 [主线细化层 ADR-35 / 2026-09-09] 事件线纯领域逻辑：
+  │                                    PlotThreadNode/Flags + 节奏闸门 evaluatePlotThreadGate
+  │                                    （main-only、4 回合冷却、窗口距离概率带、createEjsRng 专用 salt
+  │                                    确定性抽样，同回合重试不重掷）+ reducer（declarations/updates/
+  │                                    revealed 三入口，按名寻址、终态不被 pre 降级、前向引用不造空节点）
+  │                                    + 边推导 collectPlotThreadEdges（foreshadows/payoffs 双向合一）
+  │                                    + 快照/表层投影 buildPlotThreadSnapshot / projectPlotThreadSurface
+  │                                    + char_gen 实体化投影 A/B（§3.4: 未出现给全量行为化，已出现只给表层）
+  │                                    🔴 存储用英文四值 + 中文标签集中映射（「中文枚举」通则的明确例外）
+  │                                    🔴 禁 Math.random/时钟/DB（快照回退可复现，同 ejs-rng）；禁中文字面量
+  │                                    于判据（状态标签是显示面不是判据；措辞在 placeholder 与 UI 层）
+  │                                    写入口见 save-profile.commitPlotThreadTurn（锁内重读窄写+幂等）
   ├── index.ts                      ← barrel（Q-04/Q-12 清仓后只 re-export 活着的模块）
   │
   │  ── 提示装配 / 上下文 ──
