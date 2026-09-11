@@ -1062,7 +1062,7 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).toContain('身无分文');
     // 开局时间总是存在（纪元基准 488 年）；纪元名由内容侧 branding 面供给（D9）
     expect(prompt).toContain(`${FIXTURE_ERA}0488年`);
-    expect(prompt).toContain('故事便从这个瞬间继续');
+    expect(prompt).toContain('首轮叙事请以「开局剧情」');
     expect(prompt).not.toContain('不要解释规则');
   });
 
@@ -1081,7 +1081,7 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).toContain('阿黑身无分文，衣袋里连一枚帝冕币也没有。');
     expect(prompt).toContain('阿黑生性天真。');
     expect(prompt).toContain('阿黑的身形与外貌给人的印象是：男娘。');
-    expect(prompt).toContain('都将从阿黑此刻的处境自然延伸');
+    expect(prompt).toContain('再自然续写后续发展');
     expect(prompt).not.toContain('---');
     expect(prompt).not.toContain('初始数据');
     expect(prompt).not.toContain('起源印记');
@@ -1189,6 +1189,63 @@ describe('预设系统', () => {
     expect(store2.name).toBe('预设测试');
     expect(store2.level).toBe(5);
     expect(store2.difficulty?.id).toBe('normal');
+  });
+
+  it('保存/加载预设往返剧情大纲本体（plotOutline + plotOutlineChapters）', () => {
+    store.plotOutline = {
+      id: 'o1',
+      saveId: '',
+      mode: 'main',
+      title: '血色纹章',
+      summary: '一句话摘要',
+      content: '大纲正文',
+      chapters: [{ title: '第一章', summary: '开端', status: 'pending' }],
+      confirmed: false,
+      version: 1,
+      timeRange: { start: '488-01', end: '488-03' },
+      createdAt: 1,
+      updatedAt: 1,
+    } as any;
+    store.plotOutlineChapters = [
+      { title: '第一章', summary: '开端', keyEvents: [{ title: '事件一', description: '描述一' }] },
+    ] as any;
+
+    const data = store.getCurrentPresetData();
+    expect(data.plotOutline?.title).toBe('血色纹章');
+    expect(data.plotOutlineChapters).toHaveLength(1);
+
+    const store2 = makeStore();
+    store2.applyPresetData({
+      id: 'test',
+      name: 'test-preset',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      ...data,
+    });
+    expect(store2.plotOutline?.title).toBe('血色纹章');
+    expect(store2.plotOutlineChapters[0].keyEvents).toHaveLength(1);
+  });
+
+  it('旧预设（无大纲字段）不清空当前大纲（A 口径）', () => {
+    const data = store.getCurrentPresetData();
+    // 模拟旧预设：两个新增字段都不存在
+    delete (data as any).plotOutline;
+    delete (data as any).plotOutlineChapters;
+
+    const store2 = makeStore();
+    const existing = { title: '已有大纲' } as any;
+    store2.plotOutline = existing;
+    store2.plotOutlineChapters = [{ title: '已有章', summary: '', keyEvents: [] }] as any;
+
+    store2.applyPresetData({
+      id: 'test',
+      name: 'old-preset',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      ...data,
+    });
+    expect(store2.plotOutline?.title).toBe('已有大纲');
+    expect(store2.plotOutlineChapters).toHaveLength(1);
   });
 });
 

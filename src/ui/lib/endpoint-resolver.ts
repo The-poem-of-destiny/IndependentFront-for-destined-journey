@@ -17,6 +17,12 @@
  *    但它存的是 **API 池 id**（每 Agent 一个池选择）；真正叫 model 的是
  *    `ApiEndpoint.defaultModel`（模型名）与 `ApiEntry.model`。调用方在传参处
  *    把那个键的值读出来当 `boundPoolId` 传进本解析器即可，字段名不在这里翻新。
+ *
+ * 📌 2026-09-11 行为更正（**调用侧**）：`boundPoolId` 的**来源**决定 stale-binding 的处置 ——
+ *    用户覆写层给的 = 用户显式选择 → fail-closed（本解析器语义不变，绝不 reroute）；
+ *    内容包默认层（`agentDefaults`）给的 = 设备本地 pool id、换机必然悬空 →
+ *    由 `game-pipeline.getEndpointForAgent` 回落默认端点 + 可见 warn，不再静默掐掉整条链。
+ *    来源判定在调用侧（`hasExplicitAgentModel`），本解析器仍只认「有效绑定」这一个维度。
  */
 import type { ApiEndpoint } from '@engine/types';
 

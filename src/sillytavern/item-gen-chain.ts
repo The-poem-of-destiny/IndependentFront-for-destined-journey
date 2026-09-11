@@ -241,6 +241,13 @@ async function callItemGenForRequest(
     CHAR_GEN_RESULT:
       '（无 — 本次为 request_dispatcher 直接触发的独立物品生成，参考上方 <物品需求>）',
     CRAFT_RESULT: '',
+    // 🔴 普通链显式填空：item_gen 模板带 <重铸目标>/<重铸原因> 占位符，模板注释写明
+    //    「空 = 普通新增模式」。localParams 不提供时，解析器对认不出的占位符**原样保留**
+    //    （template-resolver:118-119），字面量 {{REWRITE_TARGET}} 会泄漏进提示词，模型
+    //    被迫自行判断「这是不是重铸模式」——弱模型有误入重铸模式的真实风险。
+    //    重铸链（rewriteLoadoutItem）会覆盖这两个键。
+    REWRITE_TARGET: '',
+    REWRITE_REASON: '',
   };
 
   return callItemGenRaw(request, deps, itemLocalParams);
@@ -248,7 +255,8 @@ async function callItemGenForRequest(
 
 /**
  * 调 item_gen 的公共执行体（独立链与重铸链共用，避免两处各抄一份 Agentic 调用）。
- * localParams 由调用方决定（独立链填 ITEM_REQUEST，重铸链填 REWRITE_TARGET/REWRITE_REASON）。
+ * localParams 由调用方决定：独立链填 ITEM_REQUEST + 空 REWRITE_TARGET/REWRITE_REASON
+ * （普通新增模式），重铸链填 ITEM_REQUEST 意图 + 真实 REWRITE_TARGET/REWRITE_REASON。
  */
 async function callItemGenRaw(
   request: {

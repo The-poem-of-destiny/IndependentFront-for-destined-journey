@@ -8,7 +8,13 @@
  * 4. 世界线变动时更新大纲
  */
 
-import type { PlotOutline, PlotSettings, PlotEvent, CharacterState } from './types';
+import type {
+  PlotOutline,
+  PlotSettings,
+  PlotEvent,
+  CharacterState,
+  PlotChapterOutput,
+} from './types';
 import { getLatestPlotOutline, savePlotOutline, getPlotEvents, savePlotEvents } from './database';
 // Q-05：从模型输出抢救 JSON 的唯一入口
 import { parseModelJson } from './model-json';
@@ -34,25 +40,8 @@ export interface ParsedOutlineOutput {
   content: string;
   /** 大方向锚（核心张力 / 主角主题 / 关键关系人）— post_check 演化时的「不偏离」判据 */
   directionAnchors?: string;
-  chapters: Array<{
-    title: string;
-    summary: string;
-    /** 此大事件涉及的关键 NPC 议程（去中心化行动线索，自然语言多议程描述；主要 depth 0 大事件用） */
-    npcAgendas?: string;
-    /** 主角不介入时，该态势的世界默认演化（反事实基线；主要 depth 0 大事件用） */
-    ifAbsent?: string;
-    keyEvents: Array<{
-      title: string;
-      description: string;
-      triggerHint?: string;
-      /** 事件时间窗口（年-月粒度，如 "512-03" 到 "512-05"） */
-      timeWindow?: { start: string; end: string };
-      /** 完成条件提示 */
-      completeHint?: string;
-      /** 失败条件提示 */
-      failHint?: string;
-    }>;
-  }>;
+  /** 章节结构 —— 与捏人预设共用 `PlotChapterOutput`（定义只在 types.ts 一份） */
+  chapters: PlotChapterOutput[];
   selfCritique?: string;
 }
 

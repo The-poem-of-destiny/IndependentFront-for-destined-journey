@@ -2448,6 +2448,35 @@ describe('F10 端点绑定 fail-closed（getEndpointForAgent 侧链热路径）'
     const endpoint = (pipeline as any).getEndpointForAgent('item_gen');
     expect(endpoint?.id).toBe('B');
   });
+
+  it('🔴 默认层悬空绑定（内容包硬编码坏 id）→ 回落默认端点，不静默掐链', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    // 内容包 agentDefaults 塞了设备本地 pool id；用户覆写层没有 item_gen
+    (pipeline as any).chainData = { agentDefaults: { item_gen: { model: '42f7ea15-stale' } } };
+
+    const endpoint = (pipeline as any).getEndpointForAgent('item_gen');
+    expect(endpoint?.id).toBe('B');
+    expect(error).not.toHaveBeenCalled();
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('item_gen'))).toBe(true);
+    vi.restoreAllMocks();
+  });
+
+  it('🔴 默认层悬空，但用户覆写层也显式绑了同一个坏 id → 仍 fail-closed', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    (pipeline as any).chainData = { agentDefaults: { item_gen: { model: '42f7ea15-stale' } } };
+    patchAgentSettings((pipeline as any).settings.settings, 'item_gen', {
+      model: '42f7ea15-stale',
+    });
+
+    const endpoint = (pipeline as any).getEndpointForAgent('item_gen');
+    expect(endpoint).toBeUndefined();
+    expect(error.mock.calls[0][0]).toContain('item_gen');
+    vi.restoreAllMocks();
+  });
 });
 
 describe('F10 🔴 集成：选中 A 删掉 A，provider B 一个字节都收不到', () => {

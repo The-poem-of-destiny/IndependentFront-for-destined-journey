@@ -595,6 +595,37 @@ export interface PlotOutline {
   updatedAt: number;
 }
 
+/**
+ * 大纲章节里的单个关键事件（plot_outline Agent 输出的结构化形状）。
+ * 与 {@link PlotOutline.chapters} 的简版（仅 title/summary/status）不同 —— 这个带
+ * 触发/完成/失败条件与时间窗口，供 `outlineToEvents` 在开局时生成事件树。
+ */
+export interface PlotKeyEventOutput {
+  title: string;
+  description: string;
+  triggerHint?: string;
+  /** 事件时间窗口（年-月粒度，如 "512-03" 到 "512-05"） */
+  timeWindow?: { start: string; end: string };
+  /** 完成条件提示 */
+  completeHint?: string;
+  /** 失败条件提示 */
+  failHint?: string;
+}
+
+/**
+ * 剧情大纲章节（AI 输出的结构化形状）—— `ParsedOutlineOutput.chapters` 与捏人预设共用，
+ * 定义只此一份（避免 plot-outline 与 types 各写一套导致漂移）。
+ */
+export interface PlotChapterOutput {
+  title: string;
+  summary: string;
+  /** 此大事件涉及的关键 NPC 议程（去中心化行动线索；主要 depth 0 大事件用） */
+  npcAgendas?: string;
+  /** 主角不介入时，该态势的世界默认演化（反事实基线；主要 depth 0 大事件用） */
+  ifAbsent?: string;
+  keyEvents: PlotKeyEventOutput[];
+}
+
 export interface AppSettings {
   key?: string;
   api: ApiSettings;
@@ -1500,6 +1531,12 @@ export interface CreatePreset {
   physics?: string;
   backstory?: string;
   extra?: string;
+  /**
+   * 剧情大纲本体 + 结构化章节。此前只存 `plotSettings`（参数），读回预设时生成的大纲丢失。
+   * 旧预设没有这两个字段 → `applyPresetData` 保持当前大纲不动（不误清）。
+   */
+  plotOutline?: PlotOutline | null;
+  plotOutlineChapters?: PlotChapterOutput[];
 }
 
 // ========== Agent 编排引擎 (Agent Orchestration) ==========

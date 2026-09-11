@@ -245,6 +245,19 @@ export function getAgentSettings(
 }
 
 /**
+ * 该 Agent 的 `model`（= API 池 id）是否由**用户覆写层**显式给出（非空）。
+ *
+ * 存在的理由：默认层（内容包 `agentDefaults`）可能塞进一个**设备本地**的 pool id ——
+ * 换台机器必然悬空。悬空绑定的处置要按来源分：覆写层 = 用户显式选择（fail-closed，
+ * 绝不改道）；默认层 = 内容包塞的，不该静默废掉整条链。消费方见 game-pipeline
+ * `getEndpointForAgent`。
+ */
+export function hasExplicitAgentModel(bag: SettingsBag, agentId: string): boolean {
+  const v = readOverride<unknown>(bag, agentId, 'model');
+  return typeof v === 'string' && v.trim() !== '';
+}
+
+/**
  * 改一个 Agent 的若干项（写进**覆写层**）。
  *
  * `undefined` 表示**删掉这个键**而不是写入 undefined —— 对

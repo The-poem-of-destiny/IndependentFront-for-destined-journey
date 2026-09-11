@@ -16,6 +16,7 @@ import {
   applyProjectDefaultToAgent,
   fingerprintValue,
   getAgentSettings,
+  hasExplicitAgentModel,
   listConfiguredAgents,
   migrateLegacyAgentOverrides,
   patchAgentSettings,
@@ -526,5 +527,24 @@ describe('migrateLegacyAgentOverrides —— 修正 3（指纹迁移）', () => 
     };
     migrateLegacyAgentOverrides(b, TEST_FINGERPRINTS);
     expect(b.agents.item_gen).toEqual({ model: 'user-picked-pool' }); // 只剩 model
+  });
+});
+
+describe('hasExplicitAgentModel — 悬空绑定的来源判定', () => {
+  it('覆写层有非空 model → true', () => {
+    expect(hasExplicitAgentModel({ agents: { item_gen: { model: 'pool-x' } } }, 'item_gen')).toBe(
+      true,
+    );
+  });
+
+  it('覆写层无 model / 空串 / 只有默认层 → false', () => {
+    expect(hasExplicitAgentModel(bag(), 'item_gen')).toBe(false);
+    expect(hasExplicitAgentModel({ agents: { item_gen: { model: '' } } }, 'item_gen')).toBe(false);
+    expect(hasExplicitAgentModel({ agents: { item_gen: { model: '   ' } } }, 'item_gen')).toBe(
+      false,
+    );
+    expect(hasExplicitAgentModel({ agents: { item_gen: { temperature: 0.5 } } }, 'item_gen')).toBe(
+      false,
+    );
   });
 });

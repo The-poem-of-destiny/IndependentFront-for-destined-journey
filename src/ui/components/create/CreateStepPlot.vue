@@ -266,6 +266,14 @@ const DIFFICULTY_OPTIONS = [
         >
           生成剧情大纲
         </AppButton>
+        <AppButton
+          variant="ghost"
+          :disabled="store.isPlotGenerating"
+          title="从 JSON 文件导入大纲"
+          @click="triggerImportOutline"
+        >
+          导入大纲
+        </AppButton>
       </template>
       <template v-else>
         <div class="reroll-btns">
@@ -355,15 +363,16 @@ const DIFFICULTY_OPTIONS = [
             </div>
           </div>
         </div>
-        <input
-          ref="importInput"
-          type="file"
-          accept=".json"
-          style="display: none"
-          @change="handleImportOutline"
-        />
-        <p v-if="exportError" class="error-msg">{{ exportError }}</p>
       </template>
+      <!-- 隐藏 file input 放在两个分支之外：无大纲时也能「导入大纲」 -->
+      <input
+        ref="importInput"
+        type="file"
+        accept=".json"
+        style="display: none"
+        @change="handleImportOutline"
+      />
+      <p v-if="exportError" class="error-msg">{{ exportError }}</p>
       <p v-if="store.plotGenerationError" class="error-msg">{{ store.plotGenerationError }}</p>
       <p class="warning">此操作将调用 AI，可能需要等待较长时间</p>
     </div>

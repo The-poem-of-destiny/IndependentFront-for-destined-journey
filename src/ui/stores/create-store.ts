@@ -1791,11 +1791,13 @@ export const useCreateStore = defineStore('create', () => {
       );
     }
 
-    // 收尾只做世界内的叙事交接，不再写「请复述 / 不要解释」一类元指令。命定核心不在这里
-    // 点名或规定演出，完全服从单独注入的世界书条目。
+    // 收尾：约束首轮叙事流程 —— 先以开局背景为舞台重新演绎（既定事实不变），再自然续写。
+    // 🔴 这一句同时是 `{{SKILL_STATE}}` 从开场消息里截取初始技能声明的结束边界
+    //    （placeholder-registry 的 isNaturalOpeningSkillEnd），改措辞要同步改那里。
+    // 命定核心不在这里点名或规定演出，完全服从单独注入的世界书条目。
     lines.push('');
     lines.push(
-      `故事便从这个瞬间继续。周遭的景象、人物的目光与声音渐次鲜明，而接下来发生的一切，都将从${charName}此刻的处境自然延伸。`,
+      `以上是${charName}的角色设定与开局剧情。首轮叙事请以「开局剧情」描写的时间地点为舞台：先将这段开场以你的笔触重新演绎（可扩写细节与氛围，不可改变既定事实），再自然续写后续发展。`,
     );
 
     return lines.join('\n');
@@ -1988,6 +1990,11 @@ export const useCreateStore = defineStore('create', () => {
       physics: physics.value,
       backstory: backstory.value,
       extra: extra.value,
+      // 剧情大纲本体（含解析出的章节）——此前只存 plotSettings，读回预设时大纲丢失
+      plotOutline: plotOutline.value
+        ? (JSON.parse(JSON.stringify(plotOutline.value)) as PlotOutline)
+        : null,
+      plotOutlineChapters: JSON.parse(JSON.stringify(plotOutlineChapters.value)),
     };
   }
 
@@ -2046,6 +2053,20 @@ export const useCreateStore = defineStore('create', () => {
         if (data.plotSettings.side.eventsPerChapter)
           plotEventsPerChapter.value = data.plotSettings.side.eventsPerChapter;
       }
+    }
+
+    // 剧情大纲本体：新预设带此字段（可能为 null = 存的时候就没大纲）；旧预设两字段都缺 →
+    // 保持当前大纲不动（A 口径，避免「加载旧预设反而清掉刚生成的大纲」）。恢复后清历史并刷新草稿。
+    if (data.plotOutline !== undefined || data.plotOutlineChapters !== undefined) {
+      plotOutline.value = data.plotOutline
+        ? (JSON.parse(JSON.stringify(data.plotOutline)) as PlotOutline)
+        : null;
+      plotOutlineChapters.value = data.plotOutlineChapters
+        ? (JSON.parse(JSON.stringify(data.plotOutlineChapters)) as typeof plotOutlineChapters.value)
+        : [];
+      outlineHistory.value = [];
+      chaptersHistory.value = [];
+      autoSaveDraft();
     }
 
     // 预设入口在全部步骤都可用；晚加载的旧预设若没有完整分配属性，立即返回基础信息页。

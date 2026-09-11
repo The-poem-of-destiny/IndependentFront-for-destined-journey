@@ -29,6 +29,15 @@ import TemplatePreview from '../TemplatePreview.vue';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { useUIStore } from '../../../stores/ui-store';
 import { usePresets } from '../../../composables/usePresets';
+import {
+  canonicalPresetEntries,
+  makeCustomPresetEntry,
+  appendPresetEntry,
+  updatePresetEntry,
+  removePresetEntry,
+  movePresetEntry,
+  duplicatePresetEntry,
+} from '../../../lib/preset-entries';
 import { preprocessPresetForPreview } from '@engine/preset-loader';
 import type { ChatPreset } from '@engine/types';
 
@@ -82,6 +91,25 @@ function getStoryContextTemplate(): string {
  */
 const activePreset = computed(() => presets.value.find((p) => p.id === s.activePresetId) || null);
 
+/** 🔴 条目列表按**生效顺序**（injection_order）渲染 —— 引擎 `assemblePresetContent` 就是这么排的。
+ *  模板里的 `idx` 一律是这个顺序下的下标，增删改序的 helper 也按同一口径取条目。 */
+const activePrompts = computed(() =>
+  activePreset.value ? canonicalPresetEntries(activePreset.value) : [],
+);
+
+function presetById(id: string): ChatPreset | null {
+  return presets.value.find((p) => p.id === id) || null;
+}
+
+/** 统一落库：写 Dexie + 刷新内存 ref；失败时静默（兼容 IndexedDB 不可用环境）。 */
+async function persistPreset(next: ChatPreset): Promise<void> {
+  try {
+    await upsertPreset(next);
+  } catch {
+    /* DB 写入失败：upsertPreset 先写 Dexie 再改 ref，失败则 ref 也不变 */
+  }
+}
+
 // 条目展开/折叠
 const expandedEntries = ref(new Set<string>());
 function toggleEntry(presetId: string, idx: number) {
@@ -92,34 +120,28 @@ function toggleEntry(presetId: string, idx: number) {
 
 // 条目启用/禁用开关 — 自动保存
 async function togglePresetEntryEnabled(presetId: string, idx: number) {
-  const p = presets.value.find((x) => x.id === presetId);
-  if (!p?.settings?.prompts) return;
-  const prompts = [...p.settings.prompts];
-  if (!prompts[idx]) return;
-  prompts[idx] = { ...prompts[idx], enabled: !(prompts[idx].enabled !== false) };
-  const raw: ChatPreset = JSON.parse(
-    JSON.stringify({ ...p, settings: { ...p.settings, prompts }, updatedAt: Date.now() }),
-  );
-  try {
-    await upsertPreset(raw);
-  } catch {
-    /* DB 写入失败时内存 ref 已乐观更新（upsertPreset 内部先写 Dexie 再改 ref，
-       Dexie 失败则 ref 也不变；此处保留 catch 以兼容 IndexedDB 不可用环境） */
-  }
+  const p = presetById(presetId);
+  if (!p) return;
+  const entry = canonicalPresetEntries(p)[idx];
+  if (!entry) return;
+  await persistPreset(updatePresetEntry(p, idx, { enabled: !(entry.enabled !== false) }));
 }
 
-// 条目编辑弹窗
+// 条目编辑弹窗（新增 / 编辑共用）
 const showEntryEditor = ref(false);
+const isNewEntry = ref(false);
 const editingEntryIdx = ref(-1);
 const editingEntryPresetId = ref('');
 const entryEditForm = reactive({ name: '', content: '', enabled: true, role: 'system' });
 
 function openEntryEditor(presetId: string, idx: number) {
-  const p = presets.value.find((x) => x.id === presetId);
-  if (!p?.settings?.prompts?.[idx]) return;
-  const sp = p.settings.prompts[idx];
+  const p = presetById(presetId);
+  if (!p) return;
+  const sp = canonicalPresetEntries(p)[idx];
+  if (!sp) return;
   editingEntryPresetId.value = presetId;
   editingEntryIdx.value = idx;
+  isNewEntry.value = false;
   entryEditForm.name = sp.name || '';
   entryEditForm.content = sp.content || '';
   entryEditForm.enabled = sp.enabled !== false;
@@ -127,27 +149,81 @@ function openEntryEditor(presetId: string, idx: number) {
   showEntryEditor.value = true;
 }
 
-async function saveEntry() {
-  const p = presets.value.find((x) => x.id === editingEntryPresetId.value);
+/** 新增条目（追加到生效顺序末尾）—— 复用编辑弹窗，落库走 append。 */
+function openNewEntry() {
+  const p = presetById(s.activePresetId);
   if (!p) return;
-  const idx = editingEntryIdx.value;
-  const prompts = [...(p.settings.prompts || [])];
-  if (prompts[idx]) {
-    prompts[idx] = {
-      ...prompts[idx],
-      name: entryEditForm.name,
-      content: entryEditForm.content,
-      enabled: entryEditForm.enabled,
-      role: entryEditForm.role,
-    };
-    const raw: ChatPreset = JSON.parse(
-      JSON.stringify({ ...p, settings: { ...p.settings, prompts }, updatedAt: Date.now() }),
-    );
-    await upsertPreset(raw);
-    s.activePresetId = raw.id;
-    showEntryEditor.value = false;
-    ui.toast('条目已保存', 'success');
-  }
+  editingEntryPresetId.value = p.id;
+  editingEntryIdx.value = -1;
+  isNewEntry.value = true;
+  entryEditForm.name = '';
+  entryEditForm.content = '';
+  entryEditForm.enabled = true;
+  entryEditForm.role = 'system';
+  showEntryEditor.value = true;
+}
+
+async function saveEntry() {
+  const p = presetById(editingEntryPresetId.value);
+  if (!p) return;
+  const patch = {
+    name: entryEditForm.name,
+    content: entryEditForm.content,
+    enabled: entryEditForm.enabled,
+    role: entryEditForm.role,
+  };
+  const next = isNewEntry.value
+    ? appendPresetEntry(p, makeCustomPresetEntry(patch))
+    : updatePresetEntry(p, editingEntryIdx.value, patch);
+  await persistPreset(next);
+  s.activePresetId = next.id;
+  showEntryEditor.value = false;
+  ui.toast(isNewEntry.value ? '条目已新增' : '条目已保存', 'success');
+}
+
+/** 上/下移一位（delta = ±1）；越界（顶部上移 / 底部下移）helper 返回原引用，不落库。 */
+async function moveEntry(idx: number, delta: number) {
+  const p = presetById(s.activePresetId);
+  if (!p) return;
+  const next = movePresetEntry(p, idx, delta);
+  if (next === p) return;
+  expandedEntries.value.clear();
+  await persistPreset(next);
+}
+
+/** 复制一条到它的正下方 — 副本进数组后立刻落库。 */
+async function duplicateEntry(idx: number) {
+  const p = presetById(s.activePresetId);
+  if (!p) return;
+  const next = duplicatePresetEntry(p, idx);
+  if (next === p) return;
+  expandedEntries.value.clear();
+  await persistPreset(next);
+  ui.toast('条目已复制', 'success');
+}
+
+// 删除条目 — 二次确认
+const showDeleteEntry = ref(false);
+const pendingDeleteIdx = ref(-1);
+const pendingDeleteName = ref('');
+
+function openDeleteEntry(idx: number) {
+  const p = presetById(s.activePresetId);
+  if (!p) return;
+  const entry = canonicalPresetEntries(p)[idx];
+  if (!entry) return;
+  pendingDeleteIdx.value = idx;
+  pendingDeleteName.value = entry.name || `条目 #${idx + 1}`;
+  showDeleteEntry.value = true;
+}
+
+async function confirmDeleteEntry() {
+  const p = presetById(s.activePresetId);
+  if (!p) return;
+  await persistPreset(removePresetEntry(p, pendingDeleteIdx.value));
+  expandedEntries.value.clear();
+  showDeleteEntry.value = false;
+  ui.toast('条目已删除', 'info');
 }
 const showPresetEditor = ref(false);
 const presetForm = reactive({
@@ -353,11 +429,12 @@ void reactive;
 
       <!-- 条目列表（子提示词） -->
       <div class="preset-prompts-list">
-        <h4 class="text-sm text-muted" style="margin: 0 0 8px; padding: 0 16px">
-          条目列表（{{ activePreset.settings?.prompts?.length || 0 }} 个）
-        </h4>
+        <div class="preset-prompts-head">
+          <h4 class="text-sm text-muted">条目列表（{{ activePrompts.length }} 个）</h4>
+          <AppButton variant="ghost" size="sm" @click="openNewEntry">＋ 新增条目</AppButton>
+        </div>
         <div
-          v-for="(sp, idx) in activePreset.settings?.prompts || []"
+          v-for="(sp, idx) in activePrompts"
           :key="sp.identifier || idx"
           class="subprompt-item"
           :class="{ 'subprompt-disabled': sp.enabled === false }"
@@ -377,10 +454,40 @@ void reactive;
             <div class="subprompt-meta">
               <button
                 class="subprompt-edit-btn"
+                title="上移"
+                :disabled="Number(idx) === 0"
+                @click.stop="moveEntry(Number(idx), -1)"
+              >
+                ↑
+              </button>
+              <button
+                class="subprompt-edit-btn"
+                title="下移"
+                :disabled="Number(idx) === activePrompts.length - 1"
+                @click.stop="moveEntry(Number(idx), 1)"
+              >
+                ↓
+              </button>
+              <button
+                class="subprompt-edit-btn"
                 title="编辑此条目"
                 @click.stop="openEntryEditor(s.activePresetId, Number(idx))"
               >
                 ✎
+              </button>
+              <button
+                class="subprompt-edit-btn"
+                title="复制到下方"
+                @click.stop="duplicateEntry(Number(idx))"
+              >
+                ⧉
+              </button>
+              <button
+                class="subprompt-edit-btn subprompt-delete-btn"
+                title="删除此条目"
+                @click.stop="openDeleteEntry(Number(idx))"
+              >
+                🗑
               </button>
               <span class="subprompt-chars text-xs text-muted"
                 >{{ (sp.content || '').length }} 字</span
@@ -399,11 +506,7 @@ void reactive;
             }}{{ (sp.content || '').length > 300 ? '...' : '' }}
           </div>
         </div>
-        <p
-          v-if="!activePreset.settings?.prompts?.length"
-          class="text-muted text-sm"
-          style="padding: 12px 16px"
-        >
+        <p v-if="activePrompts.length === 0" class="text-muted text-sm" style="padding: 12px 16px">
           此预设没有条目
         </p>
       </div>
@@ -466,7 +569,7 @@ void reactive;
 
     <AppModal
       :open="showEntryEditor"
-      title="编辑条目"
+      :title="isNewEntry ? '新增条目' : '编辑条目'"
       size="md"
       @update:open="showEntryEditor = $event"
     >
@@ -507,7 +610,26 @@ void reactive;
       </div>
       <template #footer>
         <AppButton variant="ghost" size="sm" @click="showEntryEditor = false">取消</AppButton>
-        <AppButton variant="primary" size="sm" @click="saveEntry">保存条目</AppButton>
+        <AppButton variant="primary" size="sm" @click="saveEntry">{{
+          isNewEntry ? '新增条目' : '保存条目'
+        }}</AppButton>
+      </template>
+    </AppModal>
+
+    <!-- 删除条目 — 二次确认（删掉携带输出契约的条目会破坏正文解析，必须显式确认） -->
+    <AppModal
+      :open="showDeleteEntry"
+      title="删除条目"
+      size="sm"
+      @update:open="showDeleteEntry = $event"
+    >
+      <p>确定删除条目「{{ pendingDeleteName }}」吗？此操作不可撤销。</p>
+      <p class="form-hint">
+        若该条目携带正文输出格式（如 &lt;maintext&gt;）或必需的系统占位符，删除后正文解析可能异常。
+      </p>
+      <template #footer>
+        <AppButton variant="ghost" size="sm" @click="showDeleteEntry = false">取消</AppButton>
+        <AppButton variant="danger" size="sm" @click="confirmDeleteEntry">删除</AppButton>
       </template>
     </AppModal>
 
@@ -645,6 +767,16 @@ void reactive;
   display: flex;
   flex-direction: column;
 }
+.preset-prompts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px;
+}
+.preset-prompts-head h4 {
+  margin: 0;
+}
 .subprompt-item {
   padding: 8px 16px;
   border-bottom: 1px solid var(--theme-card-border);
@@ -723,6 +855,17 @@ void reactive;
 .subprompt-edit-btn:hover {
   color: var(--theme-primary);
   background: var(--theme-tab-hover-bg);
+}
+.subprompt-edit-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.subprompt-edit-btn:disabled:hover {
+  color: var(--theme-text-muted);
+  background: none;
+}
+.subprompt-delete-btn:hover {
+  color: var(--theme-error);
 }
 .subprompt-content {
   padding: 6px 8px 6px 44px;

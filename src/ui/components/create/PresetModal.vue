@@ -338,6 +338,10 @@ const busy = ref(false);
                 <span class="detail-label">道具</span
                 ><span>{{ p.data.items?.length || 0 }} 个</span>
               </div>
+              <div class="detail-row">
+                <span class="detail-label">剧情大纲</span
+                ><span class="truncate">{{ p.data.plotOutline?.title || '无' }}</span>
+              </div>
             </div>
           </div>
         </div>

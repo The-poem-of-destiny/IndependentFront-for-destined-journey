@@ -95,7 +95,7 @@ import { useWorldBookStore } from '../stores/worldbook-store';
 import { useUIStore } from '../stores/ui-store';
 import type { CombatCommand } from '@engine/combat-v3';
 import { rollDice } from '@engine/dice';
-import { getAgentSettings } from '../stores/agent-settings';
+import { getAgentSettings, hasExplicitAgentModel } from '../stores/agent-settings';
 import type { EmbeddingRequestTrace } from '@engine/memory-store';
 // 🆕 F10（2026-09-04）：Agent API 池绑定的 fail-closed 解析（pool id → ApiEndpoint 唯一纯实现）
 import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
@@ -1351,7 +1351,19 @@ export class GamePipeline {
     const resolution = resolveAgentEndpoint({ boundPoolId: poolId, apiPool });
     if (resolution.status === 'resolved') return resolution.endpoint;
     if (resolution.status === 'stale-binding') {
-      // 侧链是 optional —— 跳过即可，但跳过必须是**可见**的，不是静默换 provider
+      // 🔴 悬空 id 按来源分（2026-09 真机）：用户覆写层 = 用户显式选择 → fail-closed；
+      //    默认层（内容包 `agentDefaults`）= 内容包塞的设备本地 pool id → 不是用户的选择，
+      //    更不该因为一个坏字段把整条链静默掐掉（真机：item_gen 默认层绑了个坏 id，
+      //    dispatcher 发的 8 条 `<item_gen_request>` 一条都没落库）。回落默认端点 + 可见 warn。
+      if (!hasExplicitAgentModel(s, agentId)) {
+        console.warn(
+          `[GamePipeline] 侧链 Agent "${agentId}" 的内容包默认 API 池已不存在（id: ${resolution.requestedId}）` +
+            ' —— 不是用户显式选择，回落默认端点（内容包应把 agentDefaults.model 留空）',
+        );
+        const fallback = resolveAgentEndpoint({ boundPoolId: undefined, apiPool });
+        return fallback.status === 'resolved' ? fallback.endpoint : undefined;
+      }
+      // 用户显式选择的池没了 → 跳过即可，但跳过必须是**可见**的，不是静默换 provider
       console.error(
         `[GamePipeline] 侧链 Agent "${agentId}" 显式绑定的 API 池已不存在（原 id: ${resolution.requestedId}）。` +
           '按 fail-closed 策略跳过该侧链（绝不换用别的 provider），请到设置 → Agent 配置重新选择 API 池',
