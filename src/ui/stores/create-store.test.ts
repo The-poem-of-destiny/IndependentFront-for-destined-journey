@@ -142,21 +142,26 @@ vi.mock('@engine/agent-client', () => ({
       const result = await chatMock(_req);
       if (result.error) {
         callbacks.onError(result.error);
-      } else {
-        const raw = result.rawResponse || '';
-        if (raw) callbacks.onChunk?.(raw, false);
-        callbacks.onComplete({
-          fullText: raw,
-          toolCalls: [],
-          reasoning: result.reasoning || '',
-          tokensUsed: result.tokensUsed || 0,
-          cacheHit: false,
-          cacheHitTokens: 0,
-          cacheMissTokens: 0,
-          completionTokens: 0,
-          duration: result.duration || 0,
-        });
+        return;
       }
+      // 允许测试自定义流式时序（如「先思维链、后正文」），未提供则走最小默认时序
+      if (typeof result.__stream === 'function') {
+        await result.__stream(callbacks);
+        return;
+      }
+      const raw = result.rawResponse || '';
+      if (raw) callbacks.onChunk?.(raw, false);
+      callbacks.onComplete({
+        fullText: raw,
+        toolCalls: [],
+        reasoning: result.reasoning || '',
+        tokensUsed: result.tokensUsed || 0,
+        cacheHit: false,
+        cacheHitTokens: 0,
+        cacheMissTokens: 0,
+        completionTokens: 0,
+        duration: result.duration || 0,
+      });
     }
   },
 }));
@@ -1535,6 +1540,40 @@ describe('generatePlotOutline 大纲生成', () => {
     const ok = await store.generatePlotOutline();
     expect(ok).toBe(true);
     expect(store.plotStreamStats).toBeNull();
+  });
+
+  it('推理模型：仅思维链先到达也应进入 thinking 态并累计字数，正文到达后转 streaming', async () => {
+    const store = setupPlotStore();
+    const snapshots: Array<{ phase: string; chars: number; reasoningChars: number }> = [];
+    const reasoning = '思'.repeat(600);
+    const raw = outlineJson(8);
+    chatMock.mockResolvedValueOnce({
+      __stream: async (cb: any) => {
+        cb.onReasoning?.(reasoning);
+        const st = store.plotStreamStats!;
+        snapshots.push({ phase: st.phase, chars: st.chars, reasoningChars: st.reasoningChars });
+        cb.onChunk?.(raw, false);
+        const st2 = store.plotStreamStats!;
+        snapshots.push({ phase: st2.phase, chars: st2.chars, reasoningChars: st2.reasoningChars });
+        cb.onComplete({
+          fullText: raw,
+          toolCalls: [],
+          reasoning,
+          tokensUsed: 0,
+          cacheHit: false,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          completionTokens: 0,
+          duration: 0,
+        });
+      },
+    });
+    const ok = await store.generatePlotOutline();
+    expect(ok).toBe(true);
+    expect(snapshots[0]).toEqual({ phase: 'thinking', chars: 0, reasoningChars: 600 });
+    expect(snapshots[1].phase).toBe('streaming');
+    expect(snapshots[1].chars).toBe(raw.length);
+    expect(snapshots[1].reasoningChars).toBe(600);
   });
 
   it('输出解析失败时应设置错误状态', async () => {

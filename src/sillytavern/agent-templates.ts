@@ -398,7 +398,7 @@ function formatPlotEventsFull(ctx: AgentContext): string {
       // 大事件（depth 0）附带 NPC 议程 + 反事实基线，供 post_check 做议程级演化判断
       const agendas = e.depth === 0 && e.npcAgendas ? `\nNPC议程: ${e.npcAgendas}` : '';
       const absent = e.depth === 0 && e.ifAbsent ? `\n不介入演化: ${e.ifAbsent}` : '';
-      return `《${e.title}》(${e.status})\n${e.description.slice(0, 300)}${cond}${tw}${agendas}${absent}`;
+      return `《${e.title}》(${e.status})\n${e.description}${cond}${tw}${agendas}${absent}`;
     })
     .join('\n---\n');
 }

@@ -11,6 +11,7 @@ import {
   defaultHistoryLayers,
   defaultHistorySlice,
   buildEjsHistoryText,
+  buildPlotContextBlock,
 } from './agent-templates';
 import { getDefaultTemplate } from './placeholder-registry';
 import { hasDynamic } from './worldbook-loader';
@@ -43,6 +44,33 @@ function makeContext(overrides: Partial<AgentContext> = {}): AgentContext {
     ...overrides,
   };
 }
+
+describe('plot 事件描述注入不截断', () => {
+  it('超过 300 字的 description 完整进入 plot 上下文（不再 slice）', () => {
+    const longDesc = '事'.repeat(800);
+    const ctx = makeContext({
+      plotEvents: [
+        {
+          id: 'e1',
+          saveId: 's1',
+          title: '测试事件',
+          description: longDesc,
+          status: 'active',
+          childrenIds: [],
+          order: 0,
+          relatedCharacterIds: [],
+          worldLineChanged: false,
+          visibility: 'revealed',
+          depth: 0,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    });
+    const block = buildPlotContextBlock('plot_pre_check', ctx);
+    expect(block).toContain(longDesc);
+  });
+});
 
 function makeCfg(agentId: string, overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
