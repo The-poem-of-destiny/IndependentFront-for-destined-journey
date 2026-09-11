@@ -149,4 +149,13 @@ describe('stripKnownChildBlocks', () => {
   it('自闭合的 <modifiers/> / <automaton/> 也剥掉', () => {
     expect(stripKnownChildBlocks('一把剑<modifiers/><automaton />').trim()).toBe('一把剑');
   });
+
+  it('剥掉 <buffs> 块与其 JSON 正文（2026-09-11 真机：JSON 曾漏进 description）', () => {
+    const s = '一道能量射线。\n<buffs>\n  {"name":"灼烧","effects":{"dot":30}}\n</buffs>';
+    expect(stripKnownChildBlocks(s).trim()).toBe('一道能量射线。');
+  });
+
+  it('自闭合的 <buffs/> / <buff/> 也剥掉', () => {
+    expect(stripKnownChildBlocks('一把剑<buffs/><buff />').trim()).toBe('一把剑');
+  });
 });

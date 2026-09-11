@@ -339,6 +339,23 @@ describe('assembleCharacterState', () => {
     expect((skill as any).automata[0]).toMatchObject({ subscribe: 'damage.after' });
   });
 
+  it('🆕 2026-09-11 技能 quality → Skill.rarity（normalizeRarity 归一；缺省不写键）', () => {
+    const charData = makeCharGenOutput();
+    const itemData = makeItemGenOutput({
+      skills: [
+        { name: '灼热射线', description: '一道射线。', type: 'active', quality: '优良' },
+        { name: '火球术', description: '一团火球。', type: 'active', quality: 'rare' },
+        { name: '无品质', description: '没有品质。', type: 'passive' },
+      ],
+    });
+    const result = assembleCharacterState(charData, itemData);
+    expect(result.skills.find((s) => s.name === '灼热射线')?.rarity).toBe('优良');
+    // 英文码也归一（rare → 稀有）
+    expect(result.skills.find((s) => s.name === '火球术')?.rarity).toBe('稀有');
+    // 缺省不写键 —— UI 回落中性色，不再编造「史诗」
+    expect(result.skills.find((s) => s.name === '无品质')?.rarity).toBeUndefined();
+  });
+
   it('应合并装备列表', () => {
     const charData = makeCharGenOutput();
     const itemData = makeItemGenOutput({
@@ -1355,6 +1372,65 @@ describe('parseSkillsXML — 嵌套 description 子标签 + 中文 type 归一',
     expect(out.skills[1].type).toBe('passive');
     // effects 提取不受影响
     expect(out.skills[0].effects?.['召来']).toContain('召唤');
+  });
+});
+
+// ========== 2026-09-11: <buffs> 解析 + <skill quality> ==========
+
+describe('parseItemGenOutput — <skill> 的 <buffs> JSON 解析 + quality', () => {
+  it('解析 <buffs> 进 skills[].buffs，不污染 description，并透传 quality', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result>',
+      '<skills>',
+      '<skill name="灼热射线" type="active" cost_type="MP" cost_amount="100" quality="优良" power="150" attr="int" dtype="能量">',
+      '  指尖射出一道远比火焰箭炽热凝练的能量射线。',
+      '  <modifiers>',
+      '    {"category":"附加效果","source":"灼热射线","buffName":"灼烧","sourceKey":"灼热射线","stacks":1,"duration":2,"lifecycle":"战斗"}',
+      '  </modifiers>',
+      '  <buffs>',
+      '    {"name":"灼烧","description":"残留的凝练高温","category":"减益","stacks":1,"remainingTime":2,"timeUnit":"回合","effects":{"dot":30},"effectDescriptions":["每回合开始承受30点能量伤害"],"source":"[魔法]-灼热射线","sourceKey":"灼热射线","lifecycle":"战斗"}',
+      '  </buffs>',
+      '</skill>',
+      '</skills>',
+      '</item_result>',
+    ].join('\n');
+
+    const out = parseItemGenOutput(raw);
+    expect(out.skills).toHaveLength(1);
+    const sk = out.skills[0];
+    // 品质透传
+    expect(sk.quality).toBe('优良');
+    // <buffs> 解析进 buffs（此前整块被丢弃）
+    expect(sk.buffs).toHaveLength(1);
+    expect(sk.buffs?.[0].name).toBe('灼烧');
+    expect(sk.buffs?.[0].effects?.dot).toBe(30);
+    // description 不被 <buffs> JSON 污染（真机症状：尾部粘着 {"name":"灼烧",...}）
+    expect(sk.description).toContain('指尖射出一道远比火焰箭炽热凝练的能量射线');
+    expect(sk.description).not.toContain('"name"');
+    expect(sk.description).not.toContain('dot');
+  });
+
+  it('<equip> 的 <buffs> 同样解析，不污染装备 description', async () => {
+    const { parseItemGenOutput } = await import('./char-gen-agent');
+    const raw = [
+      '<item_result>',
+      '<equipment>',
+      '<equip slot="武器" name="钢锋长剑" quality="优良" stats="攻击力:75">',
+      '  百炼精钢锻造的单手长剑。',
+      '  <buffs>',
+      '    {"name":"流血","description":"撕裂伤口持续失血","category":"减益","stacks":1,"remainingTime":2,"timeUnit":"回合","effects":{"dot":150},"source":"[物理]-钢锋长剑","sourceKey":"钢锋长剑","lifecycle":"战斗"}',
+      '  </buffs>',
+      '</equip>',
+      '</equipment>',
+      '</item_result>',
+    ].join('\n');
+
+    const out = parseItemGenOutput(raw);
+    expect(out.equipment[0].buffs).toHaveLength(1);
+    expect(out.equipment[0].buffs?.[0].name).toBe('流血');
+    expect(out.equipment[0].description.trim()).toBe('百炼精钢锻造的单手长剑。');
+    expect(out.equipment[0].description).not.toContain('"name"');
   });
 });
 

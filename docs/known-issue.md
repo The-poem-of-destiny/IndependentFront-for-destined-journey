@@ -1,3 +1,31 @@
+# Known issue: 主动技能的 on-hit 战斗效果不生效 + `资源` modifier 方向反（2026-09-11 记档）
+
+状态：**已定位根因、暂不修**（涉及战斗语义设计，需先定「主动技能的效果该挂在谁身上」）
+
+真机现象（`fated-poem-debug-655aa8ec-1789147265734.json`）：item_gen 产出的主动技能
+`火球术`（法力燃烧：目标额外损失 400MP）、`灼热射线`（灼烧 DOT：目标每回合开始 30 点能量伤害）
+在战斗里**不产生任何附加效果**。仅 `skillPower` 进伤害公式（火球术初始伤害
+`int(8)×10×2.8 + 400 + weaponAtk(75) = 699`，减免前 —— 这个数字本身是对的）。
+
+根因两端：
+
+1. **主动技能的 modifiers / buffs / automata 根本没被收集进战斗**
+   （`src/sillytavern/combat-v2-types.ts:characterToCombatParticipant`）：participant 的 `modifiers` 只收
+   **已装备物品**；`automata` 只收「已装备物品 + **被动**技能」；主动技能仅摘了
+   `skillPower/relevantAttribute/damageType` 进 `activeSkills`（只喂伤害公式）。
+   故主动技能声明的 `<modifiers>` / `<buffs>` / `<automaton>` 全部落空。
+2. **即便接通，`附加效果` / `资源` modifier 的编译方向也是反的**
+   （`src/sillytavern/combat-v3/automata/compile.ts`）：`ApplyStatus` / `SpendResource` 的 `targetId`
+   一律写死 `seed.owner`（施法者自己），且 `资源` 订阅 `round.open`（每回合无条件）。
+   对**装备**（owner = 穿戴者）语义正确；对**主动攻击技能**应是「命中目标时对其施加」，
+   直接接通会变成「自己每回合掉 400MP / 自己中灼烧」——比现在更糟。
+
+修法方向：给主动技能的效果编译一条独立路径 —— 目标取防守方、窗口取 `check.hit` / `damage.after`，
+与装备的 owner 自身订阅区分开（可能需要在 modifier 上多一个「作用对象」判别字段）。
+在定下这条语义前，**不建议「顺手把主动技能也收进 participant.modifiers」**。
+
+---
+
 # Known issue: 地图 v1.2 结算的两条收益丢账（低危，只少给钱不多给钱）
 
 状态：**第 1 条仍存；第 2 条已修**（2026-09-05 修复 F08 可恢复收益，见下方 📌 注记；原裁定见

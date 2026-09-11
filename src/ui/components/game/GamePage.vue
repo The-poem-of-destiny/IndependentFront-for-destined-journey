@@ -413,7 +413,7 @@ function onModalOpenChange(v: boolean) {
     <AppModal
       title="剧情规划"
       :open="game.activeModal === 'plot'"
-      size="lg"
+      size="xxl"
       closable
       @close="game.closeModal()"
       @update:open="onModalOpenChange"

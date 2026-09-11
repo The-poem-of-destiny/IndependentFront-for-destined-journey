@@ -9,6 +9,60 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-09-11 剧情时间线视图｜已实施（真机走查未做）
+
+把「剧情」面板从纯竖向列表升级出一张**可按天缩放的连线图**（主人要求）：**横轴 = 游戏时间（天）**。
+
+- **x = 游戏时间**：`x = startX + (day - minDay) * pxPerDay`，每天占 `pxPerDay` 像素；大纲关键事件
+  取 `timeWindow.start` 年-月 → 该月首日，事件线节点取 `seededAt`。🔴 depth 0 章节容器不落节点。
+  无 `timeWindow` 的节点进最左「未定时间」竖条。
+- **顶部章节跨度条**：章节按其关键事件的时间跨度横跨一段、**章节名居中**；重叠的章节自动分多行。
+- **ComfyUI 式连线**：章节条 → 关键事件（从条底扇出）、父事件 → 子事件、事件线伏笔/回收
+  （`foreshadows`/`payoffs`），全部贝塞尔曲线。🔴 首轮真机走查修正：初版把 depth-0 章节当
+  普通节点（它没有 `timeWindow`）而炸成一团，且错砍了结构连线 —— 现章节只作跨度条、连线保留。
+- **时间缩放标尺**：控件（− / 滑块 / ＋）横向放大缩小时间跨度，刻度密度随缩放自动选（日 / 月 / 年）。
+- **定位到现在**：一键把「现在」游标滚到视口中央（进面板自动定位一次）。
+- **防剧透**：蒙版节点零字段进 DOM、隐藏端点的边整条不画；剧透模式逐条点击揭示（会话内存态）。
+- **节点卡面**：事件名 + **一行摘要**（大纲 = `description`、事件线 = `gist`）+ 状态徽章；
+  节点放大到 `220×76`、字号提一档；章节条改成**低调的下划线规则**（不再实心大条压顶）；
+  画布给 `min-height` 撑满面板。悬停 tooltip 显示摘要全文。
+- **落地**：纯布局函数 `src/ui/components/game/plot-timeline.ts`；组件 `PlotTimeline.vue`；
+  `PlotPanel` 加「时间线 / 列表」切换（**默认时间线，旧章节手风琴 + 事件线竖向列表保留**）；
+  剧情弹窗 `size` `lg → xxl`（`min(94vw, 1600px)`）。**零新依赖**（纯 SVG + CSS）。
+  设计注记已回写 `docs/planning/2026-09-07-mainline-refinement-layer-design.md` §4.2。
+
+验证：`npm run gates` 全绿（**387 个测试文件、9,537 项通过 / 8 项跳过**）；`build:engine` 含声明产物通过。
+
+### 2026-09-11 修复批②｜技能品质链路 / `<buffs>` 描述泄漏（真机 debug）
+
+真机导出（`fated-poem-debug-655aa8ec-*`）三个问题：
+
+- **`<buffs>` 块整块丢失 + JSON 泄漏进 description**：item_gen 输出
+  `<buffs>{...状态效果 JSON...}</buffs>`，但 `stripKnownChildBlocks` 只剥
+  `effect/script/modifiers/automaton`、**没剥 `<buffs>`**；且三处
+  `validateAndCollectCombatEffects(x, mods, undefined)` 的 buffs 参数永远 `undefined` —— 于是
+  `Skill.buffs` / `InventoryItem.buffs` 恒空，JSON 正文再经 `stripInnerTags` 落进 `description`
+  （灼热射线 / 钢锋长剑 描述尾部粘着 `{"name":"灼烧",…}`）。修：剥离补 `<buffs>`/`<buff>`；
+  新增 `parseBuffsXML` 按行解析（交 `validateItemOutput` 校验，坏 buff 丢弃不中断）+ 三处调用点接入。
+- **技能品质一律显示「史诗」**：`ItemsPanel.qualityOf` 对技能硬编码 `return '史诗'`（注释自述是为消除
+  「列表灰点 / 详情史诗」的不一致 —— 把两边都改成了错的）。真根因是品质在整条链上无处可存：
+  捏人预设的自定义技能有 `rarity`（开局提示渲染成「优良 / 稀有 / 普通」），但开局 `skills: []`
+  按设计不落库、交 item_gen 生成，而 `<skill>` 格式没有 quality 字段、`Skill` 类型也没有 rarity。
+  修：`Skill.rarity` + `<skill quality="…">`（parser 读 + JSON 兜底收）+ `assembleCharacterState`
+  经 `normalizeRarity` 归一透传 + UI 改读 `skill.rarity`（缺省回落「普通」，不再编造）；
+  两份 agent-config（公开占位 + 私有包）的 item_gen `<skill>` 格式补 `quality`，并指示开局初始技能
+  照 dispatcher 请求里标明的品质原样填。
+  > ⚠️ 首轮真机验收发现**两处漏网（与 2026-08-12 skillPower 完全同款）**：开局初始技能走的是
+  > **item_gen 独立链**、不经 `assembleCharacterState` —— `buildItemGenPatches` 的 `add_skill` patch
+  > 与 `state-manager.applyAddSkill` 的新技能字段白名单**都没收 `rarity`**，于是 AI 明明输出了
+  > `quality="优良/稀有/普通"` 却落库即丢、技能全变「普通」。两处已补齐（归一化在 `applyAddSkill`，
+  > 同 `applyAddItem` 的 `rarity`）。
+- **火球术伤害核对**：`关联属性×10×层级系数 + 技能威力 + 武器攻击力`，火球术 = `8×10×2.8 + 400 + 75 = 699`
+  （减免前）—— 数字本身正确；但技能的 on-hit 效果（法力燃烧 / 灼烧 DOT）战斗中不生效、且 `资源`
+  modifier 编译方向反，**另记 [`docs/known-issue.md`](known-issue.md)**（涉战斗语义设计，暂不修）。
+
+验证：受影响测试全绿；两处 `agent-config.json` 编码三判据（U+FFFD 0 / 控制字符 0 / JSON 可解析）通过。
+
 ### 2026-09-11 修复批｜开局注入 / 预设条目与大纲 / 端点悬空回落
 
 - **item_gen 重铸占位符泄漏**：独立链 `itemLocalParams` 未提供 `{{REWRITE_TARGET}}`/`{{REWRITE_REASON}}`，

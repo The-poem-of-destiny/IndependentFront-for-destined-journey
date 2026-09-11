@@ -4,6 +4,8 @@ import type { PlotEvent } from '@engine/types';
 import { getPlotThreadFlags } from '@engine/save-profile';
 import { useGameStore } from '../../stores/game-store';
 import PlotThreadsPanel from './PlotThreadsPanel.vue';
+import PlotTimeline from './PlotTimeline.vue';
+import { OUTLINE_STATUS_LABELS } from './plot-timeline';
 
 const game = useGameStore();
 
@@ -15,6 +17,12 @@ const threadFlags = computed(() =>
   game.saveProfile ? getPlotThreadFlags(game.saveProfile) : null,
 );
 const hasThreads = computed(() => Object.keys(threadFlags.value?.nodes ?? {}).length > 0);
+
+/** 有没有任何可展示的剧情内容（大纲 / 大纲事件 / 事件线节点）—— 决定视图切换显不显示 */
+const hasAny = computed(() => !!outline.value || hasThreads.value || events.value.length > 0);
+
+/** 视图：时间线（默认，2026-09-11 新增） / 列表（原章节手风琴 + 事件线竖向列表） */
+const view = ref<'timeline' | 'list'>('timeline');
 
 const plotMode = computed<string>(() => {
   return (game.activeSave?.metadata as any)?.plotSettings?.mode ?? 'off';
@@ -99,17 +107,21 @@ function toggleChapter(title: string) {
   expanded.value = next;
 }
 
-// ═══ 事件状态徽标 ═══
-const STATUS_BADGE: Record<string, { icon: string; label: string; cls: string }> = {
-  active: { icon: '', label: '活跃', cls: 'st-active' },
-  pending: { icon: '', label: '待触发', cls: 'st-pending' },
-  completed: { icon: '', label: '已完成', cls: 'st-completed' },
-  failed: { icon: '', label: '失败', cls: 'st-failed' },
-  skipped: { icon: '', label: '已跳过', cls: 'st-skipped' },
+// ═══ 事件状态徽标（文案复用 plot-timeline 的唯一映射，避免两处漂移）═══
+const STATUS_CLS: Record<string, string> = {
+  active: 'st-active',
+  pending: 'st-pending',
+  completed: 'st-completed',
+  failed: 'st-failed',
+  skipped: 'st-skipped',
 };
 
 function badgeOf(ev: PlotEvent) {
-  return STATUS_BADGE[ev.status] ?? STATUS_BADGE.pending;
+  return {
+    icon: '',
+    label: OUTLINE_STATUS_LABELS[ev.status] ?? ev.status,
+    cls: STATUS_CLS[ev.status] ?? 'st-pending',
+  };
 }
 
 const EMPTY_TEXT: Record<string, string> = {
@@ -122,105 +134,133 @@ const emptyText = computed(() => EMPTY_TEXT[plotMode.value] ?? EMPTY_TEXT.off);
 
 <template>
   <div class="plot-panel">
-    <template v-if="outline">
-      <!-- ═══ 头部 ═══ -->
-      <div class="outline-header">
-        <div class="oh-title-row">
-          <span class="oh-title">{{ outline.title || '未命名大纲' }}</span>
-          <button
-            class="spoiler-toggle"
-            :class="{ on: spoilerMode }"
-            :aria-pressed="spoilerMode"
-            :aria-label="spoilerMode ? '关闭剧透模式' : '开启剧透模式'"
-            :title="
-              spoilerMode
-                ? '关闭剧透模式（重新蒙回全部未揭示事件）'
-                : '开启剧透模式（可逐条点击揭示）'
-            "
-            @click="spoilerMode = !spoilerMode"
-          >
-            <i :class="spoilerMode ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash'" />
-            <span>剧透模式</span>
-          </button>
-        </div>
-        <p v-if="outline.summary" class="oh-summary">{{ outline.summary }}</p>
-        <div class="oh-meta">
-          <span v-if="worldLineShifts > 0" class="oh-badge shift"
-            >世界线已变动×{{ worldLineShifts }}</span
-          >
-          <span v-if="chapterTotal > 0" class="oh-badge progress"
-            >章节进度 {{ chapterDone }}/{{ chapterTotal }}</span
-          >
-        </div>
-      </div>
+    <!-- 视图切换（时间线 / 列表）；无任何剧情内容时不显示 -->
+    <div v-if="hasAny" class="view-switch" role="tablist" aria-label="剧情视图切换">
+      <button
+        role="tab"
+        class="vs-btn"
+        :class="{ on: view === 'timeline' }"
+        :aria-selected="view === 'timeline'"
+        @click="view = 'timeline'"
+      >
+        时间线
+      </button>
+      <button
+        role="tab"
+        class="vs-btn"
+        :class="{ on: view === 'list' }"
+        :aria-selected="view === 'list'"
+        @click="view = 'list'"
+      >
+        列表
+      </button>
+    </div>
 
-      <!-- ═══ 章节手风琴 ═══ -->
-      <div class="chapter-list">
-        <div
-          v-for="group in chapterGroups"
-          :key="group.title"
-          class="chapter-item"
-          :class="'ch-' + group.status"
-        >
-          <button
-            class="chap-header"
-            :aria-expanded="expanded.has(group.title)"
-            @click="toggleChapter(group.title)"
-          >
-            <span class="chap-dot" :class="'dot-' + group.status" />
-            <span class="chap-title">{{ group.title }}</span>
-            <span v-if="group.events.length > 0" class="chap-count"
-              >{{ group.events.length }} 事件</span
+    <!-- 时间线视图（默认）：大纲事件 + 事件线节点铺在同一根游戏时间轴上 -->
+    <PlotTimeline v-if="hasAny && view === 'timeline'" />
+
+    <!-- 列表视图：原章节手风琴 + 事件线竖向列表（尽量保留） -->
+    <template v-else>
+      <template v-if="outline">
+        <!-- ═══ 头部 ═══ -->
+        <div class="outline-header">
+          <div class="oh-title-row">
+            <span class="oh-title">{{ outline.title || '未命名大纲' }}</span>
+            <button
+              class="spoiler-toggle"
+              :class="{ on: spoilerMode }"
+              :aria-pressed="spoilerMode"
+              :aria-label="spoilerMode ? '关闭剧透模式' : '开启剧透模式'"
+              :title="
+                spoilerMode
+                  ? '关闭剧透模式（重新蒙回全部未揭示事件）'
+                  : '开启剧透模式（可逐条点击揭示）'
+              "
+              @click="spoilerMode = !spoilerMode"
             >
-            <span class="chap-chevron" :class="{ open: expanded.has(group.title) }">▸</span>
-          </button>
+              <i :class="spoilerMode ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash'" />
+              <span>剧透模式</span>
+            </button>
+          </div>
+          <p v-if="outline.summary" class="oh-summary">{{ outline.summary }}</p>
+          <div class="oh-meta">
+            <span v-if="worldLineShifts > 0" class="oh-badge shift"
+              >世界线已变动×{{ worldLineShifts }}</span
+            >
+            <span v-if="chapterTotal > 0" class="oh-badge progress"
+              >章节进度 {{ chapterDone }}/{{ chapterTotal }}</span
+            >
+          </div>
+        </div>
 
-          <div class="chap-body" :class="{ open: expanded.has(group.title) }">
-            <div class="chap-inner">
-              <p v-if="group.summary" class="chap-summary">{{ group.summary }}</p>
+        <!-- ═══ 章节手风琴 ═══ -->
+        <div class="chapter-list">
+          <div
+            v-for="group in chapterGroups"
+            :key="group.title"
+            class="chapter-item"
+            :class="'ch-' + group.status"
+          >
+            <button
+              class="chap-header"
+              :aria-expanded="expanded.has(group.title)"
+              @click="toggleChapter(group.title)"
+            >
+              <span class="chap-dot" :class="'dot-' + group.status" />
+              <span class="chap-title">{{ group.title }}</span>
+              <span v-if="group.events.length > 0" class="chap-count"
+                >{{ group.events.length }} 事件</span
+              >
+              <span class="chap-chevron" :class="{ open: expanded.has(group.title) }">▸</span>
+            </button>
 
-              <div v-if="group.events.length > 0" class="event-list">
-                <template v-for="ev in group.events" :key="ev.id">
-                  <Transition name="peek" mode="out-in">
-                    <div
-                      v-if="isMasked(ev)"
-                      key="masked"
-                      class="event-card masked"
-                      :class="{ peekable: spoilerMode }"
-                      :role="spoilerMode ? 'button' : undefined"
-                      :tabindex="spoilerMode ? 0 : undefined"
-                      :aria-label="spoilerMode ? '点击揭示隐藏事件' : '隐藏事件'"
-                      @click="peekEvent(ev)"
-                      @keydown.enter="peekEvent(ev)"
-                    >
-                      <span class="masked-text">？？？</span>
-                      <span v-if="spoilerMode" class="masked-hint">点击揭示</span>
-                    </div>
-                    <div v-else key="revealed" class="event-card">
-                      <div class="ev-header">
-                        <span class="ev-title">{{ ev.title }}</span>
-                        <span class="ev-badge" :class="badgeOf(ev).cls"
-                          >{{ badgeOf(ev).icon }} {{ badgeOf(ev).label }}</span
-                        >
+            <div class="chap-body" :class="{ open: expanded.has(group.title) }">
+              <div class="chap-inner">
+                <p v-if="group.summary" class="chap-summary">{{ group.summary }}</p>
+
+                <div v-if="group.events.length > 0" class="event-list">
+                  <template v-for="ev in group.events" :key="ev.id">
+                    <Transition name="peek" mode="out-in">
+                      <div
+                        v-if="isMasked(ev)"
+                        key="masked"
+                        class="event-card masked"
+                        :class="{ peekable: spoilerMode }"
+                        :role="spoilerMode ? 'button' : undefined"
+                        :tabindex="spoilerMode ? 0 : undefined"
+                        :aria-label="spoilerMode ? '点击揭示隐藏事件' : '隐藏事件'"
+                        @click="peekEvent(ev)"
+                        @keydown.enter="peekEvent(ev)"
+                      >
+                        <span class="masked-text">？？？</span>
+                        <span v-if="spoilerMode" class="masked-hint">点击揭示</span>
                       </div>
-                      <p v-if="ev.description" class="ev-desc">{{ ev.description }}</p>
-                    </div>
-                  </Transition>
-                </template>
+                      <div v-else key="revealed" class="event-card">
+                        <div class="ev-header">
+                          <span class="ev-title">{{ ev.title }}</span>
+                          <span class="ev-badge" :class="badgeOf(ev).cls"
+                            >{{ badgeOf(ev).icon }} {{ badgeOf(ev).label }}</span
+                          >
+                        </div>
+                        <p v-if="ev.description" class="ev-desc">{{ ev.description }}</p>
+                      </div>
+                    </Transition>
+                  </template>
+                </div>
+                <div v-else class="event-empty">本章暂无事件</div>
               </div>
-              <div v-else class="event-empty">本章暂无事件</div>
             </div>
           </div>
         </div>
-      </div>
+      </template>
+
+      <div v-else class="empty-tab">{{ emptyText }}</div>
+
+      <!-- 🧵 主线明线（事件线）——带文字入口；无大纲但有历史节点仍可查看 -->
+      <section v-if="hasThreads" class="thread-slot" aria-label="主线明线事件线">
+        <PlotThreadsPanel />
+      </section>
     </template>
-
-    <div v-else class="empty-tab">{{ emptyText }}</div>
-
-    <!-- 🧵 主线明线（事件线）——带文字入口；无大纲但有历史节点仍可查看 -->
-    <section v-if="hasThreads" class="thread-slot" aria-label="主线明线事件线">
-      <PlotThreadsPanel />
-    </section>
   </div>
 </template>
 
@@ -230,6 +270,39 @@ const emptyText = computed(() => EMPTY_TEXT[plotMode.value] ?? EMPTY_TEXT.off);
   flex-direction: column;
   gap: var(--theme-spacing-md);
   min-height: 400px;
+}
+
+/* ═══ 视图切换（分段按钮式 Tab，design.md §4.3）═══ */
+.view-switch {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 4px;
+  background: var(--theme-surface-muted);
+  border-radius: var(--theme-radius-md);
+}
+.vs-btn {
+  padding: 6px 16px;
+  min-height: 32px;
+  border: none;
+  border-radius: var(--theme-radius-sm);
+  background: transparent;
+  color: var(--theme-text-secondary);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition:
+    background var(--theme-transition-fast, 0.15s ease),
+    color var(--theme-transition-fast, 0.15s ease);
+}
+.vs-btn:hover {
+  background: var(--theme-tab-hover-bg);
+  color: var(--theme-text-primary);
+}
+.vs-btn.on {
+  background: var(--theme-card-bg);
+  color: var(--theme-text-primary);
+  font-weight: 600;
+  box-shadow: var(--theme-shadow-sm);
 }
 
 /* ═══ 头部 ═══ */
@@ -553,7 +626,8 @@ const emptyText = computed(() => EMPTY_TEXT[plotMode.value] ?? EMPTY_TEXT.off);
   .peek-leave-active,
   .spoiler-toggle,
   .chap-header,
-  .event-card.masked.peekable {
+  .event-card.masked.peekable,
+  .vs-btn {
     transition: none;
   }
 }

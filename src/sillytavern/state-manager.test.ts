@@ -2796,6 +2796,37 @@ describe('StateManager', () => {
       expect(skill.damageType).toBe('能量');
     });
 
+    it('🔴 回归 (2026-09-11): add_skill 透传 rarity 并经 normalizeRarity 归一（开局技能品质）', async () => {
+      const char = buildMockCharacter({
+        id: 'uuid-1',
+        name: '理德',
+        type: 'player',
+        saveId: 's1',
+        skills: [],
+      });
+      await db.saveCharacter(char);
+
+      const sm = new StateManager({ saveId: 's1' });
+      const result = await sm.commitChatState([
+        {
+          op: 'add_skill',
+          target: 'characters.理德',
+          value: {
+            name: '灼热射线',
+            description: '凝练的能量射线',
+            type: 'active',
+            // item_gen 产出的英文码也要归一（与 applyAddItem 的 rarity 同口径）
+            rarity: 'uncommon',
+          },
+        },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      // 断点: 新技能白名单此前漏收 rarity → 落库即丢
+      expect(char.skills[0].rarity).toBe('优良');
+    });
+
     it('同名 add_skill = 覆盖升级：提供的字段覆盖，未提供的保留，不重复插入（规范 §4）', async () => {
       const existing: Skill = {
         name: '斩击',

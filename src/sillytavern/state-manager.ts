@@ -1549,6 +1549,10 @@ export class StateManager {
         level: value.level,
         effects: value.effects,
         scripts: value.scripts,
+        // 🆕 2026-09-11: 技能品质（item_gen `<skill quality>` → rarity）。白名单此前漏收本字段，
+        //   开局初始技能经 item_gen 独立链 add_skill 落库即丢 → UI 一律显示「史诗」。
+        //   归一化口径同 applyAddItem（normalizeRarity）。
+        rarity: value.rarity !== undefined ? normalizeRarity(value.rarity) : undefined,
         // 🔴 2026-08-02 修: 补战斗声明透传 —— 此前只收 8 字段丢 modifiers/buffs/divinity/automata，
         //   item_gen 合法产出的技能 modifiers（如高等材料学 checkType:"生产" bonus:4）落库即丢，
         //   生产检定加值不生效。与 applyAddItem（S1/S3 已补）对齐。

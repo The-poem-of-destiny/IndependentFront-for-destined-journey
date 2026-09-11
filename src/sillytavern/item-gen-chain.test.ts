@@ -284,6 +284,20 @@ describe('buildItemGenPatches', () => {
     expect(skill.damageType).toBe('能量');
   });
 
+  it('🔴 回归 (2026-09-11): add_skill patch 透传 rarity（item_gen `<skill quality>` → 开局技能品质不丢）', () => {
+    const itemOutput: ItemGenOutput = {
+      skills: [
+        { name: '灼热射线', description: '凝练的能量射线', type: 'active', quality: '优良' },
+      ],
+      equipment: [],
+      inventory: [],
+    };
+    const patches = buildItemGenPatches(itemOutput, 'char-001');
+    const skill = patches[0].value as any;
+    // 断点: 本链此前漏接 rarity → 开局初始技能落库无品质 → UI 一律显示中性/曾硬编码「史诗」
+    expect(skill.rarity).toBe('优良');
+  });
+
   it('🔴 全链路 (2026-08-12): 开局技能声明 → buildItemRequestsXML → parseItemGenOutput → patch 含主体威力三字段', async () => {
     // ① request_dispatcher 从 {{SKILL_STATE}} 的开局声明发 marker（bodyText 含「威力:400」原文）
     const marker: ItemGenRequestMarker = {
