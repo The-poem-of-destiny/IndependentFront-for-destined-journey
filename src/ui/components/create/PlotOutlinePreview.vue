@@ -9,7 +9,7 @@ const props = defineProps<{
   revealed: boolean;
   /** 流式生成实时统计（null = 非生成中） */
   streamStats?: {
-    phase: 'connecting' | 'streaming';
+    phase: 'connecting' | 'thinking' | 'streaming';
     round: number;
     chars: number;
     reasoningChars: number;
@@ -73,8 +73,10 @@ function formatRemaining(sec: number): string {
         </template>
         <template v-else>
           <p class="stream-line">
-            第 {{ streamStats.round }} 轮 · 正文 {{ streamStats.chars.toLocaleString() }} 字 ·
-            思维链 {{ streamStats.reasoningChars.toLocaleString() }} 字 ·
+            <template v-if="streamStats.phase === 'thinking'">模型思考中 · </template>
+            <template v-else>第 {{ streamStats.round }} 轮 · </template>
+            正文 {{ streamStats.chars.toLocaleString() }} 字 · 思维链
+            {{ streamStats.reasoningChars.toLocaleString() }} 字 ·
             {{ streamStats.charsPerSec }} 字/秒
             <span v-if="streamStats.estimatedRemainingSec !== null">
               · 预计剩余 {{ formatRemaining(streamStats.estimatedRemainingSec) }}
@@ -85,7 +87,12 @@ function formatRemaining(sec: number): string {
             :style="{
               width:
                 streamStats.estimatedTotal > 0
-                  ? Math.min(100, (streamStats.chars / streamStats.estimatedTotal) * 100) + '%'
+                  ? Math.min(
+                      100,
+                      ((streamStats.chars + streamStats.reasoningChars) /
+                        streamStats.estimatedTotal) *
+                        100,
+                    ) + '%'
                   : '0%',
             }"
           />

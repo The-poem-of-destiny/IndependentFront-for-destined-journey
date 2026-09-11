@@ -856,7 +856,7 @@ export const useCreateStore = defineStore('create', () => {
 
   /** 流式生成实时统计（捏人页统计条用；null = 非生成中） */
   const plotStreamStats = ref<{
-    phase: 'connecting' | 'streaming';
+    phase: 'connecting' | 'thinking' | 'streaming';
     round: number;
     chars: number;
     reasoningChars: number;
@@ -1189,7 +1189,8 @@ export const useCreateStore = defineStore('create', () => {
         estimatedRemainingSec: null,
         elapsedSec: 0,
       };
-      // 速率滑动窗口（近 10s 平均；开头数据少不估算）
+      // 速率滑动窗口（近 10s 平均；开头数据少不估算）。分子记**正文 + 思维链**总字数：
+      // 推理模型先流一大段思维链，只按正文算会让速率与剩余长时间停在 0 / 无。
       const window_: Array<{ ts: number; chars: number }> = [];
 
       const finishStats = () => {
@@ -1199,38 +1200,46 @@ export const useCreateStore = defineStore('create', () => {
         plotStreamStats.value.elapsedSec = Math.round((Date.now() - startedAt) / 1000);
       };
 
+      // 正文与思维链的每个增量都走这里 —— 任意流数据到达都算「已连上」。
+      // 只认正文（旧实现）会让推理模型在整段思考期卡在 connecting（正文 0 字 → 永不翻态）。
+      const updateStats = (phase: 'thinking' | 'streaming') => {
+        const st = plotStreamStats.value;
+        if (!st) return;
+        const now = Date.now();
+        const totalChars = fullText.length + fullReasoning.length;
+        window_.push({ ts: now, chars: totalChars });
+        const cutoff = now - 10000;
+        while (window_.length > 0 && window_[0].ts < cutoff) window_.shift();
+        const first = window_[0];
+        const last = window_[window_.length - 1];
+        const span = last.ts - first.ts;
+        const delta = last.chars - first.chars;
+        const cps = span > 0 ? (delta * 1000) / span : 0;
+        st.phase = phase;
+        st.chars = fullText.length;
+        st.reasoningChars = fullReasoning.length;
+        st.charsPerSec = Math.round(cps);
+        st.elapsedSec = Math.round((now - startedAt) / 1000);
+        // 数据足够（≥500 字）才给剩余估算；宁偏大不偏小（×1.15 缓冲）
+        if (totalChars >= 500 && cps > 0) {
+          const remaining = Math.max(0, st.estimatedTotal - totalChars);
+          st.estimatedRemainingSec = Math.round((remaining / cps) * 1.15);
+        } else {
+          st.estimatedRemainingSec = null;
+        }
+      };
+
       void client.chatStream(
         request,
         {
           onChunk(text, _isComplete) {
             fullText += text;
-            const now = Date.now();
-            window_.push({ ts: now, chars: fullText.length });
-            const cutoff = now - 10000;
-            while (window_.length > 0 && window_[0].ts < cutoff) window_.shift();
-            const first = window_[0];
-            const last = window_[window_.length - 1];
-            const span = last.ts - first.ts;
-            const delta = last.chars - first.chars;
-            const cps = span > 0 ? (delta * 1000) / span : 0;
-            const st = plotStreamStats.value;
-            if (!st) return;
-            st.phase = 'streaming';
-            st.chars = fullText.length;
-            st.charsPerSec = Math.round(cps);
-            st.elapsedSec = Math.round((now - startedAt) / 1000);
-            // 数据足够（≥500 字）才给剩余估算；宁偏大不偏小（×1.15 缓冲）
-            if (fullText.length >= 500 && cps > 0) {
-              const remaining = Math.max(0, st.estimatedTotal - fullText.length);
-              st.estimatedRemainingSec = Math.round((remaining / cps) * 1.15);
-            } else {
-              st.estimatedRemainingSec = null;
-            }
+            updateStats('streaming');
           },
           onReasoning(text) {
             fullReasoning += text;
-            const st = plotStreamStats.value;
-            if (st) st.reasoningChars = fullReasoning.length;
+            // 正文尚未开始 = 思考阶段；正文已开始（思考与正文交错）保持 streaming
+            updateStats(fullText.length > 0 ? 'streaming' : 'thinking');
           },
           onComplete(result) {
             fullText = result.fullText;
