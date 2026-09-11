@@ -41,9 +41,11 @@ function mountWith(streamStats: Stats | null) {
 }
 
 describe('PlotOutlinePreview 流式统计', () => {
-  it('connecting：只显示连接提示', () => {
+  it('connecting：显示连接提示与预估总字数', () => {
     const w = mountWith(stats({ phase: 'connecting' }));
     expect(w.text()).toContain('正在连接模型');
+    expect(w.text()).toContain('预估总字数约');
+    expect(w.text()).toContain('5,000');
     expect(w.text()).not.toContain('模型思考中');
   });
 
@@ -68,6 +70,7 @@ describe('PlotOutlinePreview 流式统计', () => {
     expect(w.text()).toContain('第 1 轮');
     expect(w.text()).toContain('正文 800 字');
     expect(w.text()).toContain('思维链 600 字');
+    expect(w.text()).toContain('预估共 5,000 字');
     expect(w.text()).toContain('预计剩余 1 分 30 秒');
   });
 
