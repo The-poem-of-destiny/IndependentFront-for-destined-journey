@@ -69,7 +69,10 @@ function formatRemaining(sec: number): string {
       <div class="shimmer" />
       <div v-if="streamStats" class="stream-stats">
         <template v-if="streamStats.phase === 'connecting'">
-          <p class="stream-line">正在连接模型，请稍候…（首次响应可能需数十秒）</p>
+          <p class="stream-line">
+            正在连接模型，请稍候…（预估总字数约
+            {{ streamStats.estimatedTotal.toLocaleString() }} 字 · 首次响应可能需数十秒）
+          </p>
         </template>
         <template v-else>
           <p class="stream-line">
@@ -77,7 +80,8 @@ function formatRemaining(sec: number): string {
             <template v-else>第 {{ streamStats.round }} 轮 · </template>
             正文 {{ streamStats.chars.toLocaleString() }} 字 · 思维链
             {{ streamStats.reasoningChars.toLocaleString() }} 字 ·
-            {{ streamStats.charsPerSec }} 字/秒
+            {{ streamStats.charsPerSec }} 字/秒 · 预估共
+            {{ streamStats.estimatedTotal.toLocaleString() }} 字
             <span v-if="streamStats.estimatedRemainingSec !== null">
               · 预计剩余 {{ formatRemaining(streamStats.estimatedRemainingSec) }}
             </span>

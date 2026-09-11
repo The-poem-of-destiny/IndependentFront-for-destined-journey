@@ -1419,11 +1419,12 @@ function outlineJson(score = 8, title = '血色纹章') {
   });
 }
 
-function okResult(raw: string) {
+function okResult(raw: string, reasoning = '') {
   return {
     agentId: 'plot_outline',
     output: raw,
     rawResponse: raw,
+    reasoning,
     tokensUsed: 100,
     cacheHit: false,
     duration: 10,
@@ -1574,6 +1575,34 @@ describe('generatePlotOutline 大纲生成', () => {
     expect(snapshots[1].phase).toBe('streaming');
     expect(snapshots[1].chars).toBe(raw.length);
     expect(snapshots[1].reasoningChars).toBe(600);
+  });
+
+  it('预计总字数含上一轮思维链（与实时统计同口径，不再只算正文）', async () => {
+    const store = setupPlotStore();
+    const raw = outlineJson(8);
+    const reasoning = '思'.repeat(700);
+    chatMock.mockResolvedValueOnce(okResult(raw, reasoning));
+    expect(await store.generatePlotOutline()).toBe(true);
+
+    let estimatedTotalAtStart = 0;
+    chatMock.mockResolvedValueOnce({
+      __stream: async (cb: any) => {
+        estimatedTotalAtStart = store.plotStreamStats!.estimatedTotal;
+        cb.onComplete({
+          fullText: raw,
+          toolCalls: [],
+          reasoning: '',
+          tokensUsed: 0,
+          cacheHit: false,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          completionTokens: 0,
+          duration: 0,
+        });
+      },
+    });
+    expect(await store.generatePlotOutline()).toBe(true);
+    expect(estimatedTotalAtStart).toBe(raw.length + reasoning.length);
   });
 
   it('输出解析失败时应设置错误状态', async () => {

@@ -869,19 +869,24 @@ export const useCreateStore = defineStore('create', () => {
   let plotAbortController: AbortController | null = null;
 
   /**
-   * 预计大纲总字数 —— 三档：上轮 raw 实际长度最准 → 历史版 content 膨胀 → 公式兜底。
-   * 公式：章节数 × 每章事件数 × 每事件 220 字 × XML 膨胀 1.8 + 固定开销 1800；
-   * 思维链 ≈ 正文 × 0.5（deepseek 类推理模型经验值）。
+   * 预计大纲总字数 —— 三档：上轮实际（正文 + 思维链）最准 → 历史版 content 膨胀 → 公式兜底。
+   * 🔴 分子/分母同口径：实时统计的「已生成字数」= 正文 + 思维链，故这里也必须含思维链，
+   *    否则首次/再次生成的「预计剩余」都会偏小（只算正文时思维链被丢）。
+   * 公式（首次生成无历史可用）：每子态势按新提示词产出规模估算
+   * （desc 200~400 + trigger/complete/fail + XML 标签开销 ≈ 520），再乘思维链系数 ≈ 0.5。
    */
   function estimateOutlineChars(): number {
-    const lastRaw = lastPlotGenerationMeta.value?.rawResponse?.length;
-    if (lastRaw && lastRaw > 0) return lastRaw;
+    const lastMeta = lastPlotGenerationMeta.value;
+    if (lastMeta) {
+      const total = (lastMeta.rawResponse?.length ?? 0) + (lastMeta.reasoning?.length ?? 0);
+      if (total > 0) return total;
+    }
     const hist = outlineHistory.value[outlineHistory.value.length - 1];
     if (hist?.content?.length) return Math.round(hist.content.length * 1.6);
     const ps = plotSettings.value;
-    const chapters = ps.main?.chapterCount || 3;
-    const eventsPerCh = ps.main?.eventsPerChapter || 3;
-    const body = chapters * eventsPerCh * 220 * 1.8 + 1800;
+    const chapters = ps.main?.chapterCount || ps.side?.chapterCount || 3;
+    const eventsPerCh = ps.main?.eventsPerChapter || ps.side?.eventsPerChapter || 3;
+    const body = chapters * eventsPerCh * 520 + 1800;
     return Math.round(body + body * 0.5);
   }
 
@@ -1220,8 +1225,8 @@ export const useCreateStore = defineStore('create', () => {
         st.reasoningChars = fullReasoning.length;
         st.charsPerSec = Math.round(cps);
         st.elapsedSec = Math.round((now - startedAt) / 1000);
-        // 数据足够（≥500 字）才给剩余估算；宁偏大不偏小（×1.15 缓冲）
-        if (totalChars >= 500 && cps > 0) {
+        // 数据足够（≥200 字）才给剩余估算；宁偏大不偏小（×1.15 缓冲）
+        if (totalChars >= 200 && cps > 0) {
           const remaining = Math.max(0, st.estimatedTotal - totalChars);
           st.estimatedRemainingSec = Math.round((remaining / cps) * 1.15);
         } else {
