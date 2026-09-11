@@ -419,6 +419,9 @@ export function buildItemGenPatches(itemOutput: ItemGenOutput, characterId: stri
         type: skill.type,
         cost: skill.cost,
         cooldown: skill.cooldown,
+        // 🆕 2026-09-11: 技能品质透传（`<skill quality="...">` → rarity）。与 char_gen 链路的
+        //    assembleCharacterState 同口径；归一化在落库口 applyAddSkill 做（同 applyAddItem 的 rarity）。
+        ...(skill.quality ? { rarity: skill.quality } : {}),
         effects: skill.effects,
         scripts: skill.scripts,
         // 🔴 同上: 透传战斗声明（S4 生产检定 modifier 在此落库，craft_check/settle 消费）

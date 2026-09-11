@@ -41,7 +41,7 @@ import { buildAgentMessagesAsync } from './agent-templates';
 import { getTierConfig, calcResources } from './tier-constants';
 import { xpToNextNumber } from './exp-table';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
-import { normalizeSlot } from './field-enums';
+import { normalizeRarity, normalizeSlot } from './field-enums';
 import { validateItemOutput } from './combat-item-validator';
 import type { ToolExecutionContext } from './types';
 // Q-05：XML / JSON 解析的唯一工具面。参数顺序一律 (source, tag)，
@@ -339,27 +339,33 @@ export function assembleCharacterState(
   // item_gen 的 skill 不覆盖 char_gen 同名
   const mergedSkills = [...itemGenSkills.filter((s) => !charSkillNames.has(s.name)), ...charSkills];
 
-  const skills = mergedSkills.map((s) => ({
-    name: s.name,
-    description: s.description,
-    type: s.type,
-    cost: s.cost ? { type: s.cost.type, amount: s.cost.amount } : undefined,
-    cooldown: s.cooldown,
-    level: 1,
-    effects: s.effects,
-    scripts: s.scripts,
-    // 战斗 v2 (M4 5.5b): <modifiers>/<buffs>/<divinity> 透传（技能生产检定加值落库，S4 收 S2-2）
-    // Q-13：这四个字段在 CharGenOutput / ItemGenOutput 上都已显式声明，不需要 as any
-    ...(s.modifiers && s.modifiers.length > 0 ? { modifiers: s.modifiers } : {}),
-    ...(s.buffs && s.buffs.length > 0 ? { buffs: s.buffs } : {}),
-    ...(s.divinity !== undefined ? { divinity: s.divinity } : {}),
-    // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传到 Skill 落库
-    ...(s.automata && s.automata.length > 0 ? { automata: s.automata } : {}),
-    // 🆕 skillPower 链路修复 (2026-08-04): 主体威力三字段透传到 Skill 落库
-    ...(s.skillPower !== undefined ? { skillPower: s.skillPower } : {}),
-    ...(s.relevantAttribute ? { relevantAttribute: s.relevantAttribute } : {}),
-    ...(s.damageType ? { damageType: s.damageType } : {}),
-  }));
+  const skills = mergedSkills.map((s) => {
+    // 🆕 2026-09-11: 技能品质透传（item_gen `<skill quality="...">` → Skill.rarity，走 normalizeRarity 归一；
+    //   中文/英文码都认，认不出 → 不写键，UI 回落中性色而非编造「史诗」）
+    const rarity = normalizeRarity(s.quality ?? '');
+    return {
+      name: s.name,
+      description: s.description,
+      type: s.type,
+      cost: s.cost ? { type: s.cost.type, amount: s.cost.amount } : undefined,
+      cooldown: s.cooldown,
+      level: 1,
+      ...(rarity ? { rarity } : {}),
+      effects: s.effects,
+      scripts: s.scripts,
+      // 战斗 v2 (M4 5.5b): <modifiers>/<buffs>/<divinity> 透传（技能生产检定加值落库，S4 收 S2-2）
+      // Q-13：这四个字段在 CharGenOutput / ItemGenOutput 上都已显式声明，不需要 as any
+      ...(s.modifiers && s.modifiers.length > 0 ? { modifiers: s.modifiers } : {}),
+      ...(s.buffs && s.buffs.length > 0 ? { buffs: s.buffs } : {}),
+      ...(s.divinity !== undefined ? { divinity: s.divinity } : {}),
+      // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 透传到 Skill 落库
+      ...(s.automata && s.automata.length > 0 ? { automata: s.automata } : {}),
+      // 🆕 skillPower 链路修复 (2026-08-04): 主体威力三字段透传到 Skill 落库
+      ...(s.skillPower !== undefined ? { skillPower: s.skillPower } : {}),
+      ...(s.relevantAttribute ? { relevantAttribute: s.relevantAttribute } : {}),
+      ...(s.damageType ? { damageType: s.damageType } : {}),
+    };
+  });
 
   // 合并装备: char_gen 自产优先
   // M3: 装备产物直接写成带 equippedSlot 的 InventoryItem（规范 §3），scripts 无损传递（#45）
@@ -774,6 +780,70 @@ function parseModifiersXML(innerContent: string): Modifier[] {
     modifiers.push(obj as Modifier);
   }
   return modifiers;
+}
+
+/**
+ * 🆕 2026-09-11：从元素 innerContent 提取 <buffs> 子元素，按行 parse JSON 成 StatusEffect[]。
+ *
+ * 格式（item_gen systemPrompt §输出格式）:
+ *   <buffs>
+ *     {"name":"灼烧","category":"减益","stacks":1,"remainingTime":2,"timeUnit":"回合","effects":{"dot":30},...}
+ *   </buffs>
+ *
+ * 🔴 此前 <buffs> 块**根本没有解析器**（三处 validateAndCollectCombatEffects 都传 undefined），
+ * 且未被 stripKnownChildBlocks 剥离 → 整块 JSON 作为纯文本漏进 description（真机：灼热射线 / 钢锋长剑）。
+ * 本函数补齐这条通路，解析结果交 validateItemOutput 校验（坏 buff 丢弃不中断）。
+ *
+ * 容错（复用 parseModifiersXML 模式）:
+ * - 支持 <buffs/> / <buff/> 自闭合（视为空）
+ * - 跳过空行 / `<!-- 注释 -->` / `// 注释` 行
+ * - 单行 parse 失败 → console.warn 跳过该行，不抛
+ * - 缺 name 字段 → 跳过并 warn（非 buff 形状）
+ */
+function parseBuffsXML(
+  innerContent: string,
+): NonNullable<ItemGenOutput['skills'][number]['buffs']> {
+  const blockMatch = innerContent.match(/<buffs?\b[^>]*>([\s\S]*?)<\/buffs?>/i);
+  if (!blockMatch) return [];
+  const block = blockMatch[1];
+
+  const buffs: NonNullable<ItemGenOutput['skills'][number]['buffs']> = [];
+  const lines = block.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    if (raw.startsWith('<!--') || raw.startsWith('//') || raw.startsWith('/*')) continue;
+    const commentIdx = raw.indexOf('//');
+    const jsonCandidate = commentIdx > 0 ? raw.slice(0, commentIdx).trim() : raw;
+
+    const braceStart = jsonCandidate.indexOf('{');
+    const braceEnd = jsonCandidate.lastIndexOf('}');
+    if (braceStart < 0 || braceEnd <= braceStart) {
+      console.warn(`[item_gen] <buffs> 第 ${i + 1} 行非 JSON 对象，跳过: ${raw.slice(0, 100)}`);
+      continue;
+    }
+    const jsonStr = jsonCandidate.slice(braceStart, braceEnd + 1);
+
+    let obj: unknown;
+    try {
+      obj = JSON.parse(jsonStr);
+    } catch (e) {
+      console.warn(
+        `[item_gen] <buffs> 第 ${i + 1} 行 JSON parse 失败，跳过: ${(e as Error).message} | 原文: ${raw.slice(0, 120)}`,
+      );
+      continue;
+    }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      console.warn(`[item_gen] <buffs> 第 ${i + 1} 行非对象，跳过: ${raw.slice(0, 100)}`);
+      continue;
+    }
+    if (!('name' in obj)) {
+      console.warn(`[item_gen] <buffs> 第 ${i + 1} 行缺 name 字段，跳过: ${raw.slice(0, 100)}`);
+      continue;
+    }
+    buffs.push(obj as NonNullable<ItemGenOutput['skills'][number]['buffs']>[number]);
+  }
+  return buffs;
 }
 
 /**
@@ -1242,6 +1312,8 @@ function parseItemGenJSONLoose(text: string): ItemGenOutput | null {
         type: typeStr === 'passive' ? 'passive' : 'active',
         cost: it.cost,
         cooldown: it.cooldown,
+        // 🆕 2026-09-11: JSON 直出路径同样收技能品质（quality↔rarity 互备，对齐装备/背包）
+        ...(it.quality || it.rarity ? { quality: it.quality ?? it.rarity } : {}),
         effects: it.effects,
         scripts: it.scripts,
         ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
@@ -1345,7 +1417,7 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
     const combat = validateAndCollectCombatEffects(
       attrs['name'] ?? '未命名技能',
       rawModifiers,
-      undefined,
+      parseBuffsXML(innerContent),
     );
     // 🆕 战斗 v3 (S3 2026-08-01): 提取 <automaton> 子元素 → EffectAutomaton[]（编译期校验由 compileEffectProgram 做）
     const rawAutomata = parseAutomataXML(innerContent);
@@ -1373,6 +1445,9 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
         : undefined;
     const dtypeRaw = attrs['dtype'];
     const damageType = dtypeRaw && DMG_TYPES.has(dtypeRaw) ? (dtypeRaw as DamageType) : undefined;
+    // 🆕 2026-09-11: <skill quality="..."> 品质（与 <equip quality> 同口径，缺省 / '?' → undefined）
+    const qualityRaw = attrs['quality'];
+    const quality = qualityRaw && qualityRaw !== '?' ? qualityRaw : undefined;
 
     results.push({
       name: attrs['name'] ?? '未命名技能',
@@ -1385,6 +1460,7 @@ function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
           }
         : undefined,
       cooldown: attrs['cooldown'] ? parseInt(attrs['cooldown']) : undefined,
+      ...(quality ? { quality } : {}),
       effects: Object.keys(effects).length > 0 ? effects : undefined,
       scripts: Object.keys(scripts).length > 0 ? scripts : undefined,
       ...(combat.modifiers.length > 0 ? { modifiers: combat.modifiers } : {}),
@@ -1431,7 +1507,7 @@ function parseEquipmentXML(xml: string): ItemGenOutput['equipment'] {
     const combat = validateAndCollectCombatEffects(
       attrs['name'] ?? '未命名装备',
       rawModifiers,
-      undefined,
+      parseBuffsXML(innerContent),
     );
     // 🆕 战斗 v3 (S3 2026-08-01): 提取 <automaton> 子元素 → EffectAutomaton[]
     const rawAutomata = parseAutomataXML(innerContent);
@@ -1481,7 +1557,7 @@ function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
     const combat = validateAndCollectCombatEffects(
       attrs['name'] ?? '未命名物品',
       rawModifiers,
-      undefined,
+      parseBuffsXML(innerContent),
     );
     // 🆕 战斗 v3 (S3 2026-08-01): 提取 <automaton> 子元素 → EffectAutomaton[]
     const rawAutomata = parseAutomataXML(innerContent);

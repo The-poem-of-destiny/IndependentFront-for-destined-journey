@@ -215,6 +215,13 @@
 | cost {type:'HP'\|'MP'\|'SP', amount} | 可选                  | AI   |
 | cooldown / maxCooldown / level       | number                | 可选 | AI+Code      |
 | effects / scripts                    | Record<string,string> | 可选 | AI           |
+| rarity                               | 7级品质（普通~唯一）  | 可选 | AI           |
+
+> 📌 **2026-09-11 新增 `rarity`**（技能品质，与物品 `rarity` 同名同义）：来源是 item_gen 的
+> `<skill quality="...">`（对齐 `<equip quality>`），落库前经 `normalizeRarity` 归一（英文码也认）。
+> 缺省 = 未定，**UI 不得编造** —— `ItemsPanel.qualityOf` 曾对技能硬编码返回「史诗」，导致开局写着
+> 「优良/稀有/普通」的技能一律显示史诗。开局初始技能照 `request_dispatcher` 的 `<item_gen_request>`
+> 正文里标明的品质原样填。
 
 **StatePatch**: `add_skill` value=`{name,...}`（同名 = 覆盖升级，Code 不再要求 id，修 #4）；`update_skill` value=`{name, changes}`；`remove_skill` 🆕 value=`{name}`（替代 `{removeSkill:...}` 假字段，修 #21）。
 

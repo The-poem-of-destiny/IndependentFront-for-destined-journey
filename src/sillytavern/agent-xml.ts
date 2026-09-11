@@ -142,10 +142,16 @@ export function parseNamedChildren(
  * skills/equipment/inventory 解析各抄一遍）。
  */
 export function stripKnownChildBlocks(inner: string): string {
-  return inner
-    .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
-    .replace(/<modifiers\b[^>]*>[\s\S]*?<\/modifiers>/gi, '')
-    .replace(/<modifiers\b[^>]*\/>/gi, '')
-    .replace(/<automaton\b[^>]*>[\s\S]*?<\/automaton>/gi, '')
-    .replace(/<automaton\b[^>]*\/>/gi, '');
+  return (
+    inner
+      .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/gi, '')
+      .replace(/<modifiers\b[^>]*>[\s\S]*?<\/modifiers>/gi, '')
+      .replace(/<modifiers\b[^>]*\/>/gi, '')
+      // 🔴 2026-09-11 修复：<buffs> 块此前**既没剥也没解析**，其 JSON 正文会经 stripInnerTags
+      //    落进 description（真机：灼热射线 / 钢锋长剑 描述尾部粘着状态效果 JSON）。
+      .replace(/<buffs?\b[^>]*>[\s\S]*?<\/buffs?>/gi, '')
+      .replace(/<buffs?\b[^>]*\/>/gi, '')
+      .replace(/<automaton\b[^>]*>[\s\S]*?<\/automaton>/gi, '')
+      .replace(/<automaton\b[^>]*\/>/gi, '')
+  );
 }

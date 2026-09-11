@@ -933,6 +933,9 @@ export interface Skill {
   name: string;
   description: string;
   type: 'active' | 'passive';
+  /** 🆕 2026-09-11: 技能品质（普通~唯一）。item_gen `<skill quality="...">` 产出，与物品 `rarity` 同名同义。
+   *  缺省 = 未定（UI 不再编造「史诗」，回落 `inferQuality` / 中性色） */
+  rarity?: QualityLevel;
   cost?: { type: 'HP' | 'MP' | 'SP'; amount: number };
   cooldown?: number; // 剩余冷却时间
   maxCooldown?: number;
@@ -3839,6 +3842,8 @@ export interface CharGenOutput {
     cooldown?: number;
     effects?: Record<string, string>;
     scripts?: Record<string, string>;
+    /** 🆕 2026-09-11: 技能品质（对齐 ItemGenOutput.skills.quality） */
+    quality?: string;
     /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
     modifiers?: Modifier[];
     /** 🆕 战斗 v2 (M4 5.5b): 该技能附带的 buff 定义 */
@@ -3910,6 +3915,8 @@ export interface ItemGenOutput {
     };
     /** 冷却回合数 (可选) */
     cooldown?: number;
+    /** 🆕 2026-09-11: 技能品质（来自 `<skill quality="...">`，对齐 `<equip quality>`） */
+    quality?: string;
     /** 🆕 Phase 8.5: 词条效果 <effect name="...">...</effect> */
     effects?: Record<string, string>;
     /** 🆕 Phase 8.5: 脚本 <script name="init|cast|tick|cleanup">code</script> */

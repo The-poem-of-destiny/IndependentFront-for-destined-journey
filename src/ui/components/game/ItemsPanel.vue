@@ -75,13 +75,12 @@ function facetOf(entry: PanelEntry): string | undefined {
 /**
  * 这一行的品质：优先存储的 rarity，缺失才推断（推断规则在 @engine/quality-inference）。
  *
- * ⚠️ 顺带统一了一处**列表与详情不一致**：技能没有 rarity 字段，旧代码里详情头
- * （`selQuality`）给技能返回「史诗」，而列表的色点/名字色却走 `inferQuality(undefined)`
- * 得到「普通」——同一个技能左边是灰点、右边写着史诗。现在两处共用本函数，
- * 技能列表的色点随之从灰变成史诗色。
+ * 📌 2026-09-11 更正：技能此前**一律硬编码返回「史诗」**（注释自述是为了消除「列表灰点 / 详情史诗」
+ * 的不一致——把两边都改成了错的）。现技能带 `rarity`（item_gen `<skill quality="...">` 产出，
+ * 开局初始技能照 dispatcher 请求里的品质原样填），有就显示、没有回落中性「普通」，不再编造。
  */
 function qualityOf(entry: PanelEntry): string {
-  if (entry.kind === 'skill') return '史诗';
+  if (entry.kind === 'skill') return entry.row.rarity || '普通';
   return entry.row.rarity || inferQuality(entry.row.stats);
 }
 
