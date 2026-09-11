@@ -484,6 +484,24 @@ describe('runItemGenChain', () => {
     expect(xml.match(/<request type="equipment"[^>]*>/g)).toHaveLength(1);
     expect(xml.match(/<\/item_requests>/g)).toHaveLength(1);
   });
+
+  it('🔴 普通链不得泄漏未渲染的 {{REWRITE_*}} 占位符（模板注释：空 = 普通新增模式）', async () => {
+    const client = makeMockClient(makeItemGenXML());
+    const deps: ItemGenChainDeps = { clientFactory: () => client };
+    await runItemGenChain(makeRequest(makeMarker()), deps);
+
+    const sent = (client.chat as ReturnType<typeof vi.fn>).mock.calls[0][0] as Array<{
+      role: string;
+      content: string;
+    }>;
+    const all = sent.map((m) => m.content).join('\n');
+    // 未提供 localParams 时解析器对未知占位符原样保留 → 字面量泄漏（本测试即防回归）
+    expect(all).not.toContain('{{REWRITE_TARGET}}');
+    expect(all).not.toContain('{{REWRITE_REASON}}');
+    // 两个区块内容为空（普通新增模式）
+    expect(all).toMatch(/<重铸目标>\s*<\/重铸目标>/);
+    expect(all).toMatch(/<重铸原因>\s*<\/重铸原因>/);
+  });
 });
 
 // ========== 重铸（单条目，2026-08-24） ==========

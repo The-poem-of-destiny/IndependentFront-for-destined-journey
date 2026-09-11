@@ -9,6 +9,27 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-09-11 修复批｜开局注入 / 预设条目与大纲 / 端点悬空回落
+
+- **item_gen 重铸占位符泄漏**：独立链 `itemLocalParams` 未提供 `{{REWRITE_TARGET}}`/`{{REWRITE_REASON}}`，
+  模板占位符被解析器**原样保留**、字面量泄漏进提示词（模型被迫自问「这是不是重铸模式」）。
+  补空串修复（模板注释写明「空 = 普通新增模式」）+ 回归测试。
+- **捏人预设条目 CRUD**：`PresetManager` 新增条目增 / 删 / 改序（↑↓）/ 复制（副本插正下方）。
+  纯逻辑剥到 `src/ui/lib/preset-entries.ts`（按 `injection_order` 取生效顺序、每次改动后按位置
+  重编号，保证「界面顺序 = 生效顺序」）+ 单测；删除走二次确认。
+- **开局收尾**：`buildOpeningPrompt` 结尾改回复述 + 续写指令
+  （「首轮叙事请以『开局剧情』…先将这段开场重新演绎…再自然续写」）；`isNaturalOpeningSkillEnd`
+  同步新增边界（旧自然语言边界保留，兼容旧档）。
+- **捏人预设保存剧情大纲**：`CreatePreset` 新增 `plotOutline` / `plotOutlineChapters`，
+  预设保存 / 读取往返（旧预设缺这两字段 → 保持当前大纲不动）；`CreateStepPlot` 在无大纲时
+  也显示「导入大纲」（隐藏 file input 移出条件分支，否则无大纲时点不到）。
+- **F10 端点悬空回落**：`getEndpointForAgent` 按绑定**来源**分档 —— 用户覆写层的悬空 id 维持
+  fail-closed；**内容包默认层**塞的设备本地 pool id 换机必然悬空，改为回落默认端点 + 可见 warn
+  （真机：item_gen 默认层绑了坏 id，dispatcher 发出的 8 条 `<item_gen_request>` 一条都没落库）。
+  新增 `hasExplicitAgentModel`；私有内容仓 `agentDefaults.item_gen`/`plot_outline.model` 改空串。
+
+验证：`npm run gates` 全绿（**385 个测试文件、9,513 项通过 / 8 项跳过**）。
+
 ### 主线细化层 v1（ADR-35）｜已实施（2026-09-09，真机待验证）
 
 在剧情事件窗口之间的空白期，`plot_pre_check` 按 Code 节奏闸门现编「主线细化节点」，把宏观主线

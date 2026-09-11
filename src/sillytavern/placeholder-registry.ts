@@ -127,7 +127,10 @@ function isNaturalOpeningSkillEnd(line: string): boolean {
     /.+生性.+。$/.test(line) ||
     line.includes('的身形与外貌给人的印象是：') ||
     (line.startsWith('关于') && line.includes('的来历，已知的是：')) ||
-    line.startsWith('故事便从这个瞬间继续。')
+    // 自然语言版收尾（2026-08-30 ~ 结构化约束版之间的旧档）
+    line.startsWith('故事便从这个瞬间继续。') ||
+    // 结构化约束版收尾（现行）
+    line.includes('首轮叙事请以')
   );
 }
 
