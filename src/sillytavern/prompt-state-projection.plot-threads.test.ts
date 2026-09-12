@@ -145,8 +145,6 @@ describe('prompt-session-assembler —— wire transcript 与 turn_context', () 
     ctx.plotThreadGate = {
       allowed: true,
       reason: 'allowed',
-      probability: 0.5,
-      sample: 0.1,
       distanceDays: 12,
       windowAt: '489-02',
     };
@@ -189,7 +187,7 @@ describe('prompt-session-assembler —— wire transcript 与 turn_context', () 
     const { completePromptSession } = await import('./prompt-session-assembler');
     completePromptSession(first.handle!, { rawResponse: '{}', output: null } as never);
 
-    // 第二轮：新增节点 C + 闸门冷却 → 同 session delta（plot set + turn_context），不重基线
+    // 第二轮：新增节点 C + 闸门变化 → 同 session delta（plot set + turn_context），不重基线
     const evolved = applyThreadDeclarations(
       ctx.plotThreadFlags,
       [{ name: 'C', gist: 'g-new', thread: 't', motive: 'm', involvedNpcs: [], status: 'active' }],
@@ -201,8 +199,7 @@ describe('prompt-session-assembler —— wire transcript 与 turn_context', () 
       plotThreadFlags: evolved,
       plotThreadGate: {
         allowed: false,
-        reason: 'cooldown',
-        cooldownRemaining: 2,
+        reason: 'combat_active',
         distanceDays: 12,
         windowAt: '489-02',
       },
@@ -217,7 +214,7 @@ describe('prompt-session-assembler —— wire transcript 与 turn_context', () 
     const userDelta = second.messages[second.messages.length - 1].content;
     expect(userDelta).toContain('context_delta');
     expect(userDelta).toContain('"name":"C"'); // 新节点进 plot delta（投影面只含 name/status/thread/visibility）
-    expect(userDelta).toContain('冷却中'); // 闸门进 turn_context（PLOT_THREAD_TURN 的中文行）
+    expect(userDelta).toContain('战斗会话进行中'); // 闸门进 turn_context（PLOT_THREAD_TURN 的中文行）
     resetPromptSessionsForTest();
   });
 });

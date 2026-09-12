@@ -88,30 +88,14 @@ export function plotThreadGateReasonLabel(info: PlotThreadDebugInfo): string {
   const g = info.gate;
   switch (g.reason) {
     case 'allowed':
-      return `放行（距事件窗口 ${g.distanceDays ?? '?'} 天，概率 ${formatP(g.probability)}，抽样 ${formatSample(g.sample)}）`;
+      return `放行（距事件窗口 ${g.distanceDays ?? '?'} 天）`;
     case 'mode_off':
       return '剧情模式未开启主线（side/off 不产生节点）';
     case 'no_anchor':
       return '无有效主线锚（需要大纲标题/章节/事件标题）';
-    case 'no_window':
-      return '近期无大纲事件窗口（没有合法 timeWindow 的 pending 事件）';
-    case 'blank_period':
-      return '当前处于大纲事件进行期或窗口期内（空白期关闭推进）';
     case 'combat_active':
       return '战斗会话进行中（战斗期间不推进细化）';
-    case 'cooldown':
-      return `冷却中（还需 ${g.cooldownRemaining ?? '?'} 个成功回合）`;
-    case 'roll_failed':
-      return `随机未命中（概率 ${formatP(g.probability)}，抽样 ${formatSample(g.sample)}）`;
     default:
       return g.reason;
   }
-}
-
-function formatP(p?: number): string {
-  return p === undefined ? '—' : `${(100 * p).toFixed(0)}%`;
-}
-
-function formatSample(s?: number): string {
-  return s === undefined ? '—' : s.toFixed(3);
 }

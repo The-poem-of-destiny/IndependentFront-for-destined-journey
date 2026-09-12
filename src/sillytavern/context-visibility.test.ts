@@ -274,7 +274,7 @@ describe('buildZoneContext', () => {
     expect(zones.npc.content.characters).toHaveLength(2);
   });
 
-  it('🆕 present=false 的角色不进 npc zone（2026-08-08 在场判定断链修复）', () => {
+  it('🔴 2026-09-11 present 语义拆分：npc zone 收全量（名册面）；NARRATIVE/SUMMARY 才按 present 过滤', () => {
     const ctx = makeAgentContext({
       characters: [
         makeCharacter({ id: 'p1', type: 'player', name: '凯恩' }),
@@ -284,9 +284,22 @@ describe('buildZoneContext', () => {
     });
     const zones = buildZoneContext(ctx);
     const names = zones.npc.content.characters.map((c: CharacterState) => c.name);
-    expect(names).toContain('凯恩'); // player 恒在场
-    expect(names).toContain('在场的老铁匠');
-    expect(names).not.toContain('离队的老约翰'); // present=false 被过滤
+    // 名册面（KEYS/FULL）必须看得见离场者，否则回来的老角色会被当新人重生成
+    expect(names).toContain('离队的老约翰');
+
+    // KEYS 表带 Present 列（AI 看得见在场状态）
+    const keys = filterZoneContent('npc', zones.npc.content, 'KEYS', 'request_dispatcher') ?? '';
+    expect(keys).toContain('Present');
+    expect(keys).toContain('离队的老约翰');
+    expect(keys).toMatch(/\| 离场 \|/);
+    expect(keys).toMatch(/\| 在场 \|/);
+
+    // 场景面（NARRATIVE/SUMMARY）仍过滤离场者（2026-08-08 语义迁到这里）
+    const narrative = filterZoneContent('npc', zones.npc.content, 'NARRATIVE', 'story') ?? '';
+    expect(narrative).toContain('在场的老铁匠');
+    expect(narrative).not.toContain('离队的老约翰');
+    const summary = filterZoneContent('npc', zones.npc.content, 'SUMMARY', 'plot_post_check') ?? '';
+    expect(summary).not.toContain('离队的老约翰');
   });
 
   it('🆕 outline zone 读 ctx.plotOutline（此前读的是无人写入的 `_plotOutline`，恒为空）', () => {

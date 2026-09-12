@@ -9,6 +9,45 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-09-11 剧情编剧化 + 角色在场判定｜已实施（真机未验）
+
+两个真机诊断（`fated-poem-debug-b9e71606-*`）驱动的引擎改动：
+
+**A. 剧情预检从「触发检查员」升为「编剧」（ADR-35 修订）**
+
+- 诊断：`worldFlags.plotThreads` 恒 null、十轮 `threadDeclarations` 全空。根因两条：闸门
+  `activeEventCount>0 || insideWindow → blank_period` 把细化层整月关死；提示词只让它判触发、
+  明令禁具体情节 → 没人设计剧情，正文只能即兴（真相/回收无人规划）。
+- **闸门只留硬保险**（`plot-threads.ts`）：非主线模式 / 无大纲锚 / 战斗进行中三因关门，其余一律
+  放行；窗口距离仅作调试展示。删掉概率分带 / 回合冷却 / `roll_failed` / `blank_period`。
+- **账本加 3 栏**：`PlotThreadNode`/`PlotThreadDeclaration` 补 `truth`（谜底）、`payoffPlan`
+  （回收计划）、`revealLevel`（`seed/partial/full` = 埋/半揭/全揭），reducer 透传、老档兼容
+  （可选字段）。
+- **pre/post 富块加宽**（`agent-templates.formatPlotThreadsBlock`）：`<主线事件线>` 每条补
+  谜底 / 回收计划，状态行缀揭晓程度。🔴 不动 delta 的轻量 `plot` scope（那面与其他 Agent
+  共享，加 motive/truth 会漏给 story）。
+- **提示词改写**（`public/data/defaults/agent-config.json` + 私有内容包同名文件）：角色改「编剧」；
+  新增**第 0 步场合判断**（`sceneMode`/`suitableForPlot`/`sceneNote`：关系亲密/日常/自主行动/
+  主线推进/战斗/过渡）；新增硬规则（埋必配收 · 不许只埋不收 · 一轮最多埋 1 收 2 · 埋收隔开 ·
+  贴窗口收 · 真相不外泄）；`directive` 放宽为「给落点但不给真相」；输出 schema 补字段。
+
+**B. 角色离场/入场判定（present）**
+
+- 诊断：玩家从港口街走到城北浅林（跨场景），秋尔/诺恩/摊主仍 `present=true`；调度器看不到
+  present，且 present=false 的角色被**整批滤出** npc zone → 名册不完整（回来的老角色会被当
+  新人重生成）。
+- **快照结构**（`context-visibility.ts`）：npc zone 改收**全量**角色；过滤下移到**场景面**
+  （NARRATIVE/SUMMARY 仍按 present 过滤，保留 2026-08-08 语义）；**名册面**（KEYS 表）加
+  `Present` 列（在场/离场/—），FULL 面随之收全量。
+- **调度器提示词**：在场判定从「正文出现的人物」改为**遍历全表**，位置与主角不同场景者
+  （哪怕本轮没出场）标 `present=false`。
+
+验证：`npm run gates` 全绿（387 文件 / **9,534 通过 / 8 跳过**）。编码三判据（U+FFFD 0 / ctrl 0 /
+JSON 可解析）两仓 agent-config 均过。
+
+延后：`char_gen` 新角色 `present` 仍默认 true（需动召唤链 marker）；post_check「计划该收未收 →
+顺延」；时间线显示揭晓程度 / 回收计划。
+
 ### 2026-09-11 剧情时间线视图｜已实施（真机走查未做）
 
 把「剧情」面板从纯竖向列表升级出一张**可按天缩放的连线图**（主人要求）：**横轴 = 游戏时间（天）**。
