@@ -135,9 +135,7 @@ onMounted(() => {
     <ContentStatusBanner class="settings-content-banner" />
     <!-- 顶部栏 -->
     <div class="settings-header">
-      <AppButton variant="ghost" size="sm" @click="ui.navigate(ui.activeSaveId ? 'game' : 'home')"
-        >← 返回</AppButton
-      >
+      <AppButton variant="ghost" size="sm" @click="ui.back('home')">← 返回</AppButton>
       <h2 class="settings-title">系统设置</h2>
       <div class="header-spacer" />
     </div>

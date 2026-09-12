@@ -38,3 +38,10 @@ describe('SettingsPage 扩展管理入口', () => {
     expect(workshopSource).not.toContain(`@click="ui.navigate('home')"`);
   });
 });
+
+describe('SettingsPage 返回入口', () => {
+  it('按真实页面来路返回，不用仍保留的存档导航目标猜测来源', () => {
+    expect(source).toContain(`@click="ui.back('home')"`);
+    expect(source).not.toContain(`ui.activeSaveId ? 'game' : 'home'`);
+  });
+});
