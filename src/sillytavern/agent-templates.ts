@@ -24,7 +24,11 @@ import type {
 } from './types';
 import type { GameTime } from './time-system';
 import { MONTH_NAMES, toGameDay, fromEpochMinutes } from './time-system';
-import { buildPlotThreadSnapshot, plotThreadStatusLabel } from './plot-threads';
+import {
+  buildPlotThreadSnapshot,
+  plotThreadRevealLabel,
+  plotThreadStatusLabel,
+} from './plot-threads';
 import {
   getEntriesForAgent,
   filterActiveEntries,
@@ -615,13 +619,16 @@ function formatPlotThreadsBlock(ctx: AgentContext): string {
   const era = ctx.gameTime?.era ?? '';
   const lines = snapshot.entries.map((e) => {
     const label = plotThreadStatusLabel(e.status);
+    const reveal = plotThreadRevealLabel(e.revealLevel);
     const time = formatGameTime(fromEpochMinutes(e.seededAt, era));
     const actors = e.involvedNpcs.length > 0 ? `　参与:${e.involvedNpcs.join('、')}` : '';
     const refs: string[] = [];
     if (e.foreshadows.length > 0) refs.push(`埋向:${e.foreshadows.join('、')}`);
     if (e.payoffs.length > 0) refs.push(`回收:${e.payoffs.join('、')}`);
     const link = refs.length > 0 ? `\n  连线:${refs.join('；')}` : '';
-    return `- [${label}] ${e.name}（${time}）${e.thread ? `【${e.thread}】` : ''}\n  简述:${e.gist}\n  动机:${e.motive}${actors}${link}`;
+    const truth = e.truth ? `\n  谜底:${e.truth}` : '';
+    const plan = e.payoffPlan ? `\n  回收计划:${e.payoffPlan}` : '';
+    return `- [${label}·${reveal}] ${e.name}（${time}）${e.thread ? `【${e.thread}】` : ''}\n  简述:${e.gist}\n  动机:${e.motive}${actors}${truth}${plan}${link}`;
   });
   return `<主线事件线>\n${lines.join('\n')}\n</主线事件线>\n<!-- 🧵 主线细化节点（含未揭示者与未回收伏笔：仍是伏笔原料，只需感知，勿向玩家点名）。 -->`;
 }

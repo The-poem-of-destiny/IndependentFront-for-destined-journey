@@ -447,9 +447,12 @@ update.bat             # 一键更新（双击运行）：git fetch → git pull
 - **EJS 世界书求值契约 (ADR-30)**：世界书条目正文 EJS 由 Code 在提示装配期求值（承 ADR-04），契约自主设计、不承诺 MVU/酒馆助手兼容（上游函数名仅作别名层）。**两轴**：`stats` 只读面（纯代码推导数值：资源/等级/五维/命运点数/时间）+ `vars` 共写叙事变量空间（= `variables.sys` 草稿，AI 与 EJS 双写同一棵树，**冲突 AI 赢**——EJS 差量先落、vars_update 补丁后落）。提交权按 Agent 声明（`ejsVarsCommit`，默认仅 story——前瞻扩展设计）。缓存分层：含 `<%`/`{{random`/`{{getvar` 的条目沉到 LORE_BOOK 展开尾部，静态前缀保字节稳定；EJS 失败条目原文注入（零回归兜底）。创作者规范：`docs/reference/worldbook-ejs-regex-authoring-guide.md`；设计全文：`docs/planning/2026-07-31-workshop-phase2-ejs-design.md`；词汇：根目录 `CONTEXT.md`。
 - **地图 v1 契约 (ADR-31)**：位置路径（`CharacterState.location` 自由文本）为唯一位置真源，地块是**落位**投影（绝不模糊匹配、失败不动）；地图对 AI **只教不管**——读侧持续展示真实地块名 + 路线/天数锚定（story 走世界书 EJS 条目、dispatcher 走 `{{MAP_CONTEXT}}`），写侧被动解析不否决、`delta_time` 不 clamp、天气 Code 兜底 AI 覆盖（跨天重断言）。寻路是一张**混合通行图**（陆海同图按边类型计价 + via/avoid 途经点，不做交通方式状态展开；出行方式（pack v1.1.0 `travelRules.modes`：步行/马车/骑乘/空艇）只是路线预览里给玩家看的**参考行**（各方式天数 = 取整前路线时间 × 倍率并排展示，不可选），不进出发指令、不进寻路状态也不进存档 —— 要坐什么玩家在输入框自己说）。所有者静态不可易手（`history.txt` 不读）。地图状态只跟踪玩家、不新增 Dexie 表（可变状态全在 `worldFlags.map`）。**换图零改码**：随图数据（地形系数/费率/气候与天气词汇/绑定表/比例尺）全在 pack、默认规则表归编译脚本，引擎地图模块零中文字面量（结构闸门钉死）；**存档不钉包版本**——位置路径为真源使投影可自愈，包版本戳不符就清派生态重落位，旧存档永不崩。裁定记录与设计全文：`docs/planning/2026-08-11-map-system-v1-integration.md`；词汇：根目录 `CONTEXT.md`「地图系统」节。
 - **随机事件 v1 契约 (ADR-32)**：Code 端**种子化确定性调度**（每条事件独立 MTTH × 声明式权重链、`available` 硬门槛先于一切求值、全存档共享全局冷却、作者点名地点首访强制入池）逐天掷骰产出**候选池**（跨回合驻留，池满按 priority 淘汰、forced 免疫）→ 经 `{{RANDOM_EVENTS}}` 注入 story（**不新开 Agent**、不注给 dispatcher，单通道免双写；池空/关闭/**战斗会话活跃**时返空串零 token）→ AI 在叙事方便的时机至多演绎一条并以 `<event_trigger name="事件名"/>` 回执 → Code **按名字**结算（不在池中的名字 warn 忽略 / 清掉全部非 forced 候选 / 起全局冷却 / forced 触发时才记足迹）。**触发纯叙事零副作用**：v1 没有 `onTrigger` 效果表，状态变化由既有 dispatcher/vars_update 管线自然捕获，事件系统只记「触发过」这一事实。事件定义 = **内容包第 13 分节纯 JSON**（`randomEvents`，三态语义照旧、坏定义单条跳过不连坐；引擎侧只带零 IP 占位集）。每存档状态住 `worldFlags.randomEvents`（**事实不是派生态**，故与 `worldFlags.map` 相反：没有 packStamp 自愈清空，零新 Dexie 表、随 saveProfiles 进 FullBackup）。开关是**全局设置两字段**（`randomEventsEnabled` / `randomEventsFrequency`，经 `engine-settings.ts` 注入缝读），与剧情系统三个 Agent 的开关**彼此独立**——`plotMode === 'off'` 时调度/注入/回执三面照常。设计全文：`docs/planning/2026-08-15-random-event-system-design.md`；词汇：根目录 `CONTEXT.md`「随机事件系统」节。
-- **主线细化层契约 (ADR-35)**：在剧情事件窗口之间的空白期，`plot_pre_check` 按 **Code 节奏闸门**
-  （main-only、4 回合冷却、窗口距离概率 0.15/0.30/0.50/0.70、确定性种子随机不重掷）现编「主线细化
-  节点」：把宏观主线落地为带动机的 NPC 行动，节点带伏笔引用（`foreshadows`/`payoffs`）自动连成
+- **主线细化层契约 (ADR-35)**：`plot_pre_check` 按 **Code 硬保险闸门**（main-only、有有效大纲锚、
+  非战斗）现编「主线细化节点」（📌 **2026-09-11 修订**：删掉 4 回合冷却与窗口距离概率带 —— 旧版
+  「有 active 事件即 `blank_period`」把细化层整月关死，真机 `plotThreads` 恒 null；软时机改由
+  AI 的**第 0 步场合判断** `sceneMode`/`suitableForPlot` 决定；节点补 `truth`（谜底）/
+  `payoffPlan`（回收计划）/`revealLevel`（埋/半揭/全揭）；pre_check 角色从「触发检查员」升为
+  「编剧」）：把宏观主线落地为带动机的 NPC 行动，节点带伏笔引用（`foreshadows`/`payoffs`）自动连成
   事件线；`plot_post_check` 在正文落定后结算（resolved/dissolved）并单向置 `revealedNames`。
   节点/状态袋住 `worldFlags.plotThreads`（照 ADR-32/33 事实态先例：零新 Dexie 表、按**节点名**寻址、
   永不随 packStamp 清空、随档往返）。三足分立：细化层是主线的**投影**、事件树是主线的**骨架**、

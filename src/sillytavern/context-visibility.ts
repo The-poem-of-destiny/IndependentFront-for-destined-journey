@@ -214,14 +214,17 @@ export function buildZoneContext(ctx: AgentContext): Record<ZoneId, VariableZone
   };
 
   // --- npc zone ---
-  // 🔴 2026-08-08 在场判定断链修复：present=false 的角色（离队/远处/退场）不进
-  //    CHARACTER_STATE 上下文。此前 buildZoneContext 不按 present 过滤，所有角色
-  //    无论在场与否都注入 AI —— 在场状态形同虚设。player 恒在场不受过滤。
+  // 🔴 2026-09-11：npc zone 现在带**全量**角色（含 present=false），由各格式化级别自己取舍：
+  //    · KEYS / FULL = 名册面（dispatcher/char_gen/vars_update/plot 判「新 vs 已有」、按名寻址）
+  //      —— 必须看得见离场者，否则回来的老角色会被当成新人重生成。KEYS 表带 Present 列。
+  //    · NARRATIVE / SUMMARY = 场景面（story/plot_post 演当前戏）
+  //      —— 仍按 present 过滤（2026-08-08 在场判定断链修复的语义，迁到这里）。
+  //    player 恒在场，不受过滤。
   zones.npc = {
     config: { injectAs: 'list' },
     visibility: [],
     content: {
-      characters: ctx.characters?.filter((c) => c.type === 'player' || c.present !== false) ?? [],
+      characters: ctx.characters ?? [],
     },
   };
 
@@ -374,7 +377,10 @@ function formatZoneNarrative(
     return formatZoneFull(zoneId, content);
   }
 
-  const characters: CharacterState[] = content.characters ?? [];
+  // 场景面：只演在场者（present=false 的离队/远处/退场者不进正文上下文，2026-08-08 语义）
+  const characters: CharacterState[] = (content.characters ?? []).filter(
+    (c: CharacterState) => c.type === 'player' || c.present !== false,
+  );
   if (characters.length === 0) return '';
 
   const parts: string[] = ['## 👥 在场角色\n'];
@@ -583,7 +589,10 @@ function formatMemorySummary(content: Record<string, any>): string {
 }
 
 function formatNpcSummary(content: Record<string, any>): string {
-  const characters = content.characters ?? [];
+  // 场景面：只演在场者（同 NARRATIVE）
+  const characters = (content.characters ?? []).filter(
+    (c: CharacterState) => c.type === 'player' || c.present !== false,
+  );
   if (characters.length === 0) return '';
   const lines = ['## 👥 在场角色 (摘要)'];
   for (const char of characters) {
@@ -723,13 +732,13 @@ function formatNpcKeys(content: Record<string, any>): string {
   return [
     '=== 已有角色 (npc zone — KEYS only) ===',
     '',
-    '以下角色已存在于当前存档。新生成角色名必须与此列表无冲突。',
+    '以下角色已存在于当前存档（含离场者）。新生成角色名必须与此列表无冲突。',
     '',
-    '| ID | Name | Race | Type | Tier | Location |',
-    '|----|------|------|------|------|----------|',
+    '| ID | Name | Race | Type | Tier | Location | Present |',
+    '|----|------|------|------|------|----------|---------|',
     ...characters.map(
       (c: CharacterState) =>
-        `| ${c.id} | ${c.name} | ${c.race} | ${c.type} | T${c.tier} | ${c.location || '未知'} |`,
+        `| ${c.id} | ${c.name} | ${c.race} | ${c.type} | T${c.tier} | ${c.location || '未知'} | ${c.present === true ? '在场' : c.present === false ? '离场' : '—'} |`,
     ),
     '',
     '注意: 上述角色的五维/技能/装备/背包已被安全屏蔽。此列表仅用于重名检查和关系判断。',

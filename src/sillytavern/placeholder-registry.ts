@@ -975,11 +975,7 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
       const reasons: Record<string, string> = {
         mode_off: '剧情模式未开启主线',
         no_anchor: '无有效主线锚',
-        no_window: '近期无大纲事件窗口',
-        blank_period: '当前处于大纲事件进行期或窗口期内',
         combat_active: '战斗会话进行中',
-        cooldown: `冷却中（还需 ${gate.cooldownRemaining ?? '?'} 个成功回合）`,
-        roll_failed: '本轮随机未命中',
       };
       lines.push(
         `<plot_thread_gate allowed="false">${reasons[gate.reason] ?? gate.reason}</plot_thread_gate>`,

@@ -2,9 +2,8 @@
  * plot-threads.test.ts — 主线细化层纯领域逻辑守卫测试
  *
  * 钉的都是「改坏了不报错、只会静默把节点算错/泄露」那一类：
- * - **确定性**：同 `(saveId, turnNo)` 永远同闸门结果。破了的症状是快照回退 / 重发后
- *   本轮随机推进发生或不发生（ejs-rng 文件头那整段理由）
- * - **冷却边界**：t+3 关闭 / t+4 进入概率判定；首次无冷却
+ * - **闸门只留硬保险**（2026-09-11）：非主线 / 无大纲锚 / 战斗进行中三因关门，其余一律放行
+ *   —— 软时机（窗口距离、空白期、冷却）撤销，交 AI 的场合判断（sceneMode/suitableForPlot）
  * - **reducer 语义**：同名不增行、空字段不覆盖、pre 不终结、post 未提及不消散、
  *   dormant 复活、终态保留、去重边、前向引用不造空节点、揭示单向
  * - **投影防剧透**：surface 只含 revealed+active 四字段；snapshot 必须含 dormant 与引用闭包
@@ -13,7 +12,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  PLOT_THREAD_COOLDOWN_TURNS,
   applyPlotThreadRevealed,
   applyThreadDeclarations,
   applyThreadUpdates,
@@ -21,10 +19,8 @@ import {
   collectDanglingReferences,
   collectPlotThreadAnchors,
   collectPlotThreadEdges,
-  cooldownRemainingTurns,
   evaluateNextPlotWindow,
   evaluatePlotThreadGate,
-  plotThreadProbabilityForDistance,
   projectPlotThreadSurface,
 } from './plot-threads';
 import type { PlotThreadFlags, PlotThreadGateInput } from './plot-threads';
@@ -73,75 +69,46 @@ describe('evaluatePlotThreadGate', () => {
     ).toBe('no_anchor');
   });
 
-  it('无可用未来窗口 → no_window（旧窗口不当作距离为零）', () => {
+  it('2026-09-11 改版：无未来窗口 / 有 active 事件 / 已在窗口内，一律不再拦截（放行）', () => {
+    // 旧窗口不当作距离为零，但也不再阻挡
     expect(
       evaluatePlotThreadGate(
         gateInput({ pendingEvents: [{ timeWindow: { start: '450-01', end: '450-02' } }] }),
-      ).reason,
-    ).toBe('no_window');
+      ).allowed,
+    ).toBe(true);
     expect(
       evaluatePlotThreadGate(
         gateInput({ pendingEvents: [{ timeWindow: { start: 'bad', end: 'worse' } }] }),
       ).reason,
-    ).toBe('no_window');
-  });
-
-  it('空白期：有 active 大纲事件或已进入窗口 → blank_period', () => {
-    expect(evaluatePlotThreadGate(gateInput({ activeEventCount: 1 })).reason).toBe('blank_period');
-    // 当前 488-01-01，窗口 488-01 ~ 488-02 → 已在窗口内
+    ).toBe('allowed');
+    // 有 active 大纲事件（旧 blank_period）→ 现在放行
+    expect(evaluatePlotThreadGate(gateInput({ activeEventCount: 1 })).allowed).toBe(true);
+    // 当前 488-01-01，窗口 488-01 ~ 488-02 → 已在窗口内 → 放行
     expect(
       evaluatePlotThreadGate(
         gateInput({ pendingEvents: [{ timeWindow: { start: '488-01', end: '488-02' } }] }),
       ).reason,
-    ).toBe('blank_period');
+    ).toBe('allowed');
   });
 
-  it('战斗会话活跃 → combat_active', () => {
-    expect(evaluatePlotThreadGate(gateInput({ combatActive: true })).reason).toBe('combat_active');
+  it('战斗会话活跃 → combat_active（唯一会因时机关闭的硬保险）', () => {
+    const g = evaluatePlotThreadGate(gateInput({ combatActive: true }));
+    expect(g.allowed).toBe(false);
+    expect(g.reason).toBe('combat_active');
   });
 
-  it('冷却边界：t+4 最早再次允许（t=5 推进 → 回合 8 关、回合 9 进概率判定）', () => {
-    const eight = evaluatePlotThreadGate(
-      gateInput({ turnNo: 8, flags: { nodes: {}, lastAdvancedTurn: 5 } }),
-    );
-    expect(eight.allowed).toBe(false);
-    expect(eight.reason).toBe('cooldown');
-    expect(eight.cooldownRemaining).toBe(1);
-    // 9 - 5 = 4 ≥ cooldown → 越过冷却层；是否放行只取决于抽样（此处断言「不再报冷却」）
-    const nine = evaluatePlotThreadGate(
-      gateInput({ turnNo: 9, flags: { nodes: {}, lastAdvancedTurn: 5 } }),
-    );
-    expect(['allowed', 'roll_failed']).toContain(nine.reason);
-    expect(nine.cooldownRemaining).toBeUndefined();
-  });
-
-  it('首次无冷却直接进概率判定', () => {
-    expect(cooldownRemainingTurns(PLOT_THREAD_COOLDOWN_TURNS, undefined, 1)).toBe(0);
-    expect(cooldownRemainingTurns(PLOT_THREAD_COOLDOWN_TURNS, 2, 3)).toBe(3);
-    expect(cooldownRemainingTurns(PLOT_THREAD_COOLDOWN_TURNS, 2, 6)).toBe(0);
-  });
-
-  it('确定性：同 (saveId, turnNo) 结果完全一致；turnNo 变则采样重掷', () => {
+  it('确定性：同输入结果完全一致（已无随机抽样）', () => {
     const a = evaluatePlotThreadGate(gateInput());
     const b = evaluatePlotThreadGate(gateInput());
     expect(a).toEqual(b);
+    expect(a.reason).toBe('allowed');
   });
 
-  it('概率分带与距离（488-06 窗口约 150 天 → 0.15）', () => {
-    expect(plotThreadProbabilityForDistance(200)).toBe(0.15);
-    expect(plotThreadProbabilityForDistance(61)).toBe(0.15);
-    expect(plotThreadProbabilityForDistance(60)).toBe(0.3);
-    expect(plotThreadProbabilityForDistance(31)).toBe(0.3);
-    expect(plotThreadProbabilityForDistance(30)).toBe(0.5);
-    expect(plotThreadProbabilityForDistance(8)).toBe(0.5);
-    expect(plotThreadProbabilityForDistance(7)).toBe(0.7);
-    expect(plotThreadProbabilityForDistance(1)).toBe(0.7);
-
+  it('窗口距离仅作展示（488-06 窗口约 149 天），不再影响放行', () => {
     const gate = evaluatePlotThreadGate(gateInput());
-    // 488-01-01 08:00 → 488-06-01 00:00 = 4 整月(120天) + 29.67 天 → floor 149
     expect(gate.distanceDays).toBe(149);
-    expect(gate.probability).toBe(0.15);
     expect(gate.windowAt).toBe('488-06');
+    expect(gate.allowed).toBe(true);
   });
 
   it('跨年窗口（489-01 以 488 为纪元计算距离）', () => {
@@ -149,7 +116,7 @@ describe('evaluatePlotThreadGate', () => {
       gateInput({ pendingEvents: [{ timeWindow: { start: '489-01', end: '489-02' } }] }),
     );
     expect(gate.windowAt).toBe('489-01');
-    expect(['allowed', 'roll_failed']).toContain(gate.reason);
+    expect(gate.allowed).toBe(true);
     expect(gate.distanceDays).toBe(359); // 488-01-01 08:00 → 489-01-01 00:00 = 359 天 + 16 小时
   });
 });

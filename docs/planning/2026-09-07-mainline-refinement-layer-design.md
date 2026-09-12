@@ -4,6 +4,14 @@
 > [实施计划](2026-09-07-mainline-refinement-layer-implementation-plan.md)（T0-T4 完成、
 > T5 UI 组件测试通过、真机走查未做）。实施中收口的参数以本文 §11 为准。
 >
+> 📌 **2026-09-11 改版（真机 `fated-poem-debug-b9e71606-*` 诊断）**：Code 节奏闸门只留硬保险
+> （非主线 / 无锚 / 战斗中），**删掉 4 回合冷却与窗口距离概率带** —— 旧版「有 active 事件即
+> `blank_period`」把细化层整月关死（真机 `plotThreads` 恒 null、十轮 `threadDeclarations` 全空）。
+> 软时机改由 AI 的**第 0 步场合判断**（`sceneMode`/`suitableForPlot`/`sceneNote`）决定；节点补
+> `truth`（谜底）/`payoffPlan`（回收计划）/`revealLevel`（埋/半揭/全揭）；pre_check 角色从
+> 「触发检查员」升为「编剧」，`directive` 放宽为「给落点但不给真相」。本文 §0/§4/§6 关于
+> 「空白期 / 闸门 / 不保证回收」的措辞以此注为准。
+>
 > **适用范围**：剧情系统的结构性空白期——大纲事件窗口未到达时的日常轮次。改剧情 Agent
 > 提示词、`worldFlags.plotThreads` 事件线、事件线面板前先读本文。
 >

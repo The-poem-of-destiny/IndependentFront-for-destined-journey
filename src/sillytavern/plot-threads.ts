@@ -18,7 +18,6 @@
  */
 import type { GameTime } from './time-system';
 import { toEpochMinutes, parseMonthTime, compareMonthTime } from './time-system';
-import { createEjsRng } from './ejs-rng';
 
 // ═══════════════════════════════════════════════════════════
 // 类型
@@ -30,6 +29,9 @@ export type PlotThreadStatus = 'dormant' | 'active' | 'resolved' | 'dissolved';
 /** 玩家可见性：hidden=玩家未见过 / revealed=正文已向玩家呈现（与 PlotEvent.visibility 同值域） */
 export type PlotThreadVisibility = 'hidden' | 'revealed';
 
+/** 揭晓程度（节奏控制；三值英文存储，中文映射在 UI 层） */
+export type PlotThreadRevealLevel = 'seed' | 'partial' | 'full';
+
 /** 一个主线细化节点（设计 §4.1 + 实施计划 §3.2 的最小账务字段） */
 export interface PlotThreadNode {
   /** 节点名 —— AI 产，铁律①按名寻址，pre/post 都用名字引用；稳定身份，无重命名 */
@@ -40,6 +42,12 @@ export interface PlotThreadNode {
   thread: string;
   /** 动机：谁、因为什么、做了这件事（未揭示时玩家不可见） */
   motive: string;
+  /** 谜底：这条线索**实际是什么**（未揭示时玩家不可见；只给 pre/post，绝不进表层投影） */
+  truth?: string;
+  /** 回收计划：打算在什么时机、用什么方式揭开（pre 据此决定"怎么圆"） */
+  payoffPlan?: string;
+  /** 揭晓程度：当前向玩家揭到了哪一步（seed=埋 / partial=半揭 / full=已揭） */
+  revealLevel?: PlotThreadRevealLevel;
   /** 涉及 NPC 名单 */
   involvedNpcs: string[];
   status: PlotThreadStatus;
@@ -70,6 +78,12 @@ export interface PlotThreadDeclaration {
   gist: string;
   thread: string;
   motive: string;
+  /** 谜底（新增；只落库给 pre/post，绝不进表层投影） */
+  truth?: string;
+  /** 回收计划（新增；pre 决定"怎么圆"的依据） */
+  payoffPlan?: string;
+  /** 揭晓程度（新增；留给下一轮判断节奏） */
+  revealLevel?: PlotThreadRevealLevel;
   involvedNpcs: string[];
   status: 'active' | 'dormant';
   foreshadows?: string[];
@@ -103,29 +117,15 @@ export interface PlotThreadTurnContext {
   gate: PlotThreadGateResult;
 }
 
-/** 闸门原因（机器可读 token；中文展示在 UI 层） */
-export type PlotThreadGateReason =
-  | 'allowed'
-  | 'mode_off'
-  | 'no_anchor'
-  | 'no_window'
-  | 'blank_period'
-  | 'combat_active'
-  | 'cooldown'
-  | 'roll_failed';
+/** 闸门原因（机器可读 token；中文展示在 UI 层）。2026-09-11 改版后只剩硬冲突三因 + 放行 */
+export type PlotThreadGateReason = 'allowed' | 'mode_off' | 'no_anchor' | 'combat_active';
 
 /** 闸门结果（调试面板直接消费） */
 export interface PlotThreadGateResult {
   allowed: boolean;
   reason: PlotThreadGateReason;
-  /** 最近未来窗口起点距今天数（游戏日）—— 概率分带的依据 */
+  /** 最近未来窗口起点距今天数（游戏日）—— 仅供调试展示，不再参与拦截 */
   distanceDays?: number;
-  /** 本轮采用的概率 */
-  probability?: number;
-  /** 掷出的 [0,1) 抽样值 */
-  sample?: number;
-  /** 距允许推进还需几个成功回合 */
-  cooldownRemaining?: number;
   /** 最近未来窗口起点（"512-03"；undefined = 无可用窗口） */
   windowAt?: string;
 }
@@ -141,6 +141,18 @@ export const PLOT_THREAD_STATUS_LABELS: Record<PlotThreadStatus, string> = {
 /** 状态 → 中文标签（唯一映射；UI 与模板层共用，别各处内联） */
 export function plotThreadStatusLabel(status: PlotThreadStatus): string {
   return PLOT_THREAD_STATUS_LABELS[status] ?? status;
+}
+
+/** 揭晓程度中文标签（同「英文存储、中文映射」例外） */
+const PLOT_THREAD_REVEAL_LABELS: Record<PlotThreadRevealLevel, string> = {
+  seed: '埋',
+  partial: '半揭',
+  full: '全揭',
+};
+
+/** 揭晓程度 → 中文标签（唯一映射；UI 与模板层共用，别各处内联） */
+export function plotThreadRevealLabel(level: PlotThreadRevealLevel): string {
+  return PLOT_THREAD_REVEAL_LABELS[level] ?? level;
 }
 
 /**
@@ -193,6 +205,9 @@ export interface PlotThreadSnapshotEntry {
   gist: string;
   thread: string;
   motive: string;
+  truth: string;
+  payoffPlan: string;
+  revealLevel: PlotThreadRevealLevel;
   involvedNpcs: string[];
   status: PlotThreadStatus;
   visibility: PlotThreadVisibility;
@@ -218,28 +233,11 @@ export interface PlotThreadSurfaceEntry {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 常量与默认策略（实施计划 §3.1 收口；测试固定输入不要求真实概率分布）
+// 常量与默认策略
 // ═══════════════════════════════════════════════════════════
-
-/** 每 N 个成功普通回合至多推进一次（全存档冷却） */
-export const PLOT_THREAD_COOLDOWN_TURNS = 4;
-
-/** 距离窗口概率分带（game days → p）。窗口起点当天由 blank_period 拦截，不进本表。 */
-export const PLOT_THREAD_PROBABILITY_BANDS: ReadonlyArray<{
-  minDays: number;
-  probability: number;
-}> = [
-  { minDays: 61, probability: 0.15 }, // > 60 日
-  { minDays: 31, probability: 0.3 }, // 31–60 日
-  { minDays: 8, probability: 0.5 }, // 8–30 日
-  { minDays: 1, probability: 0.7 }, // 1–7 日
-];
 
 /** 上下文中保留的近期终态节点条数（其余仍在库中、UI 可查） */
 export const PLOT_THREAD_RESOLVED_HISTORY_LIMIT = 10;
-
-/** 闸门随机盐的命名空间前缀（专用 salt，不挤占 ADR-32/33 的随机序列） */
-const PLOT_THREAD_SALT = 'plot-thread';
 
 // ═══════════════════════════════════════════════════════════
 // 纯函数工具
@@ -257,14 +255,6 @@ function monthWindowEpochRange(t: { year: number; month: number }): [number, num
     t.month === 12 ? { year: t.year + 1, month: 1 } : { year: t.year, month: t.month + 1 };
   const end = monthStartEpochMinutes(nextMonth.year, nextMonth.month);
   return [start, end];
-}
-
-/** 概率分带（days > 0）；days <= 0 表示已在窗口内（正常由 blank_period 拦截，这里兜底 0.7） */
-export function plotThreadProbabilityForDistance(days: number): number {
-  for (const band of PLOT_THREAD_PROBABILITY_BANDS) {
-    if (days >= band.minDays) return band.probability;
-  }
-  return 0.7;
 }
 
 /** 名字空（trim 后为空）视为无效 */
@@ -353,14 +343,20 @@ export interface PlotThreadGateInput {
 }
 
 /**
- * 純闸门求值（幂等）：决定本轮是否放行「新建/推进」细化节点。
+ * 纯闸门求值（幂等）：2026-09-11 改版，**只保留硬保险**。
  *
- * 顺序：mode → 锚 → 窗口 → 空白期 → 战斗 → 冷却 → 概率抽样。
- * 抽样 = createEjsRng(`plot-thread|saveId|turnNo|gate`).float()；同回合重试输入不变 → 结果不变。
+ * 顺序：mode → 大纲锚 → 战斗。三种硬冲突才关门；其余「时机好不好」交给 AI 的场合判断
+ * （`plot_pre_check` 的 `sceneMode` / `suitableForPlot`）——正文该不该推剧情，AI 比时钟懂。
+ *
+ * 先前版本按「窗口距离概率带 + 回合冷却 + 空白期」做软节流，副作用是：主线事件一旦开始
+ * （`activeEventCount > 0` 或身处窗口内）**整段期间零放行**，细化层形同虚设。软节流撤销后每轮
+ * 都放行，是否新增/推进完全由 AI 依当前场合决定。
+ *
+ * 窗口距离仍在结果里返回（`distanceDays`/`windowAt`），仅供调试面板展示，不再拦截。
  * 闸门只控制「新建/推进」；post 对已存在节点做有正文证据的结算不受闸门约束。
  */
 export function evaluatePlotThreadGate(input: PlotThreadGateInput): PlotThreadGateResult {
-  const { saveId, turnNo, currentTime, combatActive, mode, activeEventCount, flags } = input;
+  const { currentTime, combatActive, mode } = input;
 
   if (mode !== 'main') return { allowed: false, reason: 'mode_off' };
 
@@ -372,74 +368,13 @@ export function evaluatePlotThreadGate(input: PlotThreadGateInput): PlotThreadGa
   if (anchors.length === 0) return { allowed: false, reason: 'no_anchor' };
 
   const windowInfo = evaluateNextPlotWindow(input.pendingEvents, currentTime);
-  if (windowInfo === null) return { allowed: false, reason: 'no_window' };
+  const display: Pick<PlotThreadGateResult, 'distanceDays' | 'windowAt'> = windowInfo
+    ? { distanceDays: windowInfo.distanceDays, windowAt: windowInfo.windowStart }
+    : {};
 
-  if (activeEventCount > 0 || windowInfo.insideWindow) {
-    return {
-      allowed: false,
-      reason: 'blank_period',
-      distanceDays: windowInfo.insideWindow ? 0 : windowInfo.distanceDays,
-      windowAt: windowInfo.windowStart,
-    };
-  }
+  if (combatActive) return { allowed: false, reason: 'combat_active', ...display };
 
-  if (combatActive) {
-    return {
-      allowed: false,
-      reason: 'combat_active',
-      distanceDays: windowInfo.distanceDays,
-      windowAt: windowInfo.windowStart,
-    };
-  }
-
-  const cooldownRemaining = cooldownRemainingTurns(
-    PLOT_THREAD_COOLDOWN_TURNS,
-    flags.lastAdvancedTurn,
-    turnNo,
-  );
-  if (cooldownRemaining > 0) {
-    return {
-      allowed: false,
-      reason: 'cooldown',
-      distanceDays: windowInfo.distanceDays,
-      windowAt: windowInfo.windowStart,
-      cooldownRemaining,
-    };
-  }
-
-  const probability = plotThreadProbabilityForDistance(windowInfo.distanceDays);
-  const rng = createEjsRng(`${PLOT_THREAD_SALT}|${saveId}|${turnNo}|gate`);
-  const sample = rng.float();
-
-  if (sample >= probability) {
-    return {
-      allowed: false,
-      reason: 'roll_failed',
-      distanceDays: windowInfo.distanceDays,
-      windowAt: windowInfo.windowStart,
-      probability,
-      sample,
-    };
-  }
-
-  return {
-    allowed: true,
-    reason: 'allowed',
-    distanceDays: windowInfo.distanceDays,
-    windowAt: windowInfo.windowStart,
-    probability,
-    sample,
-  };
-}
-
-/** 冷却判据：若上次推进于成功回合 t，则 t + COOLDOWN 最早再次允许 */
-export function cooldownRemainingTurns(
-  cooldown: number,
-  lastAdvancedTurn: number | undefined,
-  turnNo: number,
-): number {
-  if (lastAdvancedTurn === undefined) return 0; // 首次无冷却
-  return Math.max(0, cooldown - (turnNo - lastAdvancedTurn));
+  return { allowed: true, reason: 'allowed', ...display };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -517,6 +452,11 @@ export function parsePlotThreadRevealedNames(value: unknown): string[] {
   return out;
 }
 
+/** 揭晓程度归一化：认不出的值返回 undefined（调用方按「未给」处理，不覆盖既有） */
+function normalizeRevealLevel(value: unknown): PlotThreadRevealLevel | undefined {
+  return value === 'seed' || value === 'partial' || value === 'full' ? value : undefined;
+}
+
 /** 清洗一条声明：坏条目丢弃（返回 null），不含自引用 */
 function normalizeDeclaration(decl: Partial<PlotThreadDeclaration>): PlotThreadDeclaration | null {
   if (!decl || typeof decl !== 'object') return null;
@@ -528,6 +468,9 @@ function normalizeDeclaration(decl: Partial<PlotThreadDeclaration>): PlotThreadD
     gist: typeof decl.gist === 'string' ? decl.gist : '',
     thread: typeof decl.thread === 'string' ? decl.thread : '',
     motive: typeof decl.motive === 'string' ? decl.motive : '',
+    truth: typeof decl.truth === 'string' ? decl.truth : '',
+    payoffPlan: typeof decl.payoffPlan === 'string' ? decl.payoffPlan : '',
+    revealLevel: normalizeRevealLevel(decl.revealLevel),
     involvedNpcs: nonEmptyArray(decl.involvedNpcs).map((n) => n.trim()),
     status,
     foreshadows: nonEmptyArray(decl.foreshadows)
@@ -578,6 +521,9 @@ export function applyThreadDeclarations(
         gist: decl.gist,
         thread: decl.thread,
         motive: decl.motive,
+        truth: decl.truth ?? '',
+        payoffPlan: decl.payoffPlan ?? '',
+        revealLevel: decl.revealLevel ?? 'seed',
         involvedNpcs: dedupeStrings(decl.involvedNpcs),
         status: decl.status,
         foreshadows: dedupeStrings(decl.foreshadows ?? []),
@@ -597,6 +543,11 @@ export function applyThreadDeclarations(
     if (decl.gist !== '') existing.gist = decl.gist;
     if (decl.thread !== '') existing.thread = decl.thread;
     if (decl.motive !== '') existing.motive = decl.motive;
+    if (decl.truth !== undefined && decl.truth !== '') existing.truth = decl.truth;
+    if (decl.payoffPlan !== undefined && decl.payoffPlan !== '') {
+      existing.payoffPlan = decl.payoffPlan;
+    }
+    if (decl.revealLevel !== undefined) existing.revealLevel = decl.revealLevel;
     if (decl.involvedNpcs.length > 0) existing.involvedNpcs = dedupeStrings(decl.involvedNpcs);
     if (decl.foreshadows && decl.foreshadows.length > 0) {
       existing.foreshadows = dedupeStrings([...existing.foreshadows, ...decl.foreshadows]);
@@ -765,6 +716,9 @@ function nodeToEntry(node: PlotThreadNode): PlotThreadSnapshotEntry {
     gist: node.gist,
     thread: node.thread,
     motive: node.motive,
+    truth: node.truth ?? '',
+    payoffPlan: node.payoffPlan ?? '',
+    revealLevel: node.revealLevel ?? 'seed',
     involvedNpcs: [...node.involvedNpcs],
     status: node.status,
     visibility: node.visibility,

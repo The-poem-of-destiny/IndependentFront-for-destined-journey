@@ -6,7 +6,6 @@ import { describe, expect, it } from 'vitest';
 import {
   applyThreadDeclarations,
   applyPlotThreadRevealed,
-  PLOT_THREAD_COOLDOWN_TURNS,
   type PlotThreadFlags,
 } from '@engine/plot-threads';
 import type { PlotEvent } from '@engine/types';
@@ -79,8 +78,7 @@ describe('buildPlotThreadDebugInfo —— 生产判据 + 计数', () => {
     expect(info.lastCommittedTurn).toBe(5);
   });
 
-  it('🔴 闸门结果是生产函数（evaluatePlotThreadGate）的直接输出：冷却与概率同构', () => {
-    // 8 + 1 = 9 回合；lastAdvancedTurn=5 → 9-5=4 ≥ 4 → 越冷却（此前断言过 same 语义在 engine 测试）
+  it('🔴 闸门结果是生产函数（evaluatePlotThreadGate）的直接输出：主线 + 非战斗 → 放行', () => {
     const info = buildPlotThreadDebugInfo({
       flags: flagsWith(),
       mode: 'main',
@@ -92,10 +90,8 @@ describe('buildPlotThreadDebugInfo —— 生产判据 + 计数', () => {
       chapterTitles: [],
       plotEvents: pendingEvents(),
     });
-    expect(['allowed', 'roll_failed']).toContain(info.gate.reason);
+    expect(info.gate.reason).toBe('allowed');
     expect(info.gate.distanceDays).toBe(149); // 与 plot-threads.test 同口径
-    // 手动代入 production 常量验证一致（不可在本文件重算判据，只对常量做引用断言）
-    void PLOT_THREAD_COOLDOWN_TURNS;
   });
 
   it('非主线模式 → enabled=false 且 gate=mode_off', () => {
@@ -114,7 +110,7 @@ describe('buildPlotThreadDebugInfo —— 生产判据 + 计数', () => {
     expect(info.gate.reason).toBe('mode_off');
   });
 
-  it('战斗会话中 → combat_active；空白期 → blank_period', () => {
+  it('战斗会话中 → combat_active；已在事件窗口内也不再拦截（改版后放行）', () => {
     const combat = buildPlotThreadDebugInfo({
       flags: flagsWith(),
       mode: 'main',
@@ -128,7 +124,7 @@ describe('buildPlotThreadDebugInfo —— 生产判据 + 计数', () => {
     });
     expect(combat.gate.reason).toBe('combat_active');
 
-    const blank = buildPlotThreadDebugInfo({
+    const inWindow = buildPlotThreadDebugInfo({
       flags: flagsWith(),
       mode: 'main',
       saveId: 's',
@@ -139,7 +135,7 @@ describe('buildPlotThreadDebugInfo —— 生产判据 + 计数', () => {
       chapterTitles: [],
       plotEvents: pendingEvents([{ start: '488-01', end: '488-02' }]),
     });
-    expect(blank.gate.reason).toBe('blank_period');
+    expect(inWindow.gate.reason).toBe('allowed');
   });
 
   it('原因标签给中文（展示层），机器 token 保留在判据侧', () => {
