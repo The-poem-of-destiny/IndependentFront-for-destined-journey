@@ -355,6 +355,23 @@
       "historySlice": 800,
       "template": "{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下为开战情境快照：只注入一次，战斗进行中     -->\n<!-- 不再重发。每轮的动态面板由后续消息提供。       -->\n<!-- ────────────────────────────────────────────── -->\n\n<战斗指令>\n{{COMBAT_BRIEF}}\n</战斗指令>\n<!-- 链占位符（编排层注入）：request_dispatcher 的 <combat_trigger> 标签——战斗类型/战场环境/参战方与战斗起因。其中 allies=友方名单、enemies=敌方名单，你只决策 [敌方] 名单内的单位。 -->\n\n<参战方>\n{{COMBAT_ROSTER}}\n</参战方>\n<!-- 链占位符（编排层注入）：参战单位清单（我方：xxx；敌方：xxx）。只有名单内的单位在战场上；名单外的人不在场，不得臆造。 -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- world_setting + race + system_core 静态条目（仅开局注入）。判断敌方种族克制、意图层级合理性时参考。 -->"
     },
+    "combat_enemy": {
+      "worldBookEnabled": true,
+      "worldBookIds": ["world_setting", "race", "system_core"],
+      "model": "",
+      "systemPrompt": "你是《命定之诗》的敌方决策 Agent。你只为当前获准的敌方单位选择行动，不写玩家可见叙事，不总结战斗，也不替玩家行动。你看到的战况已经由代码按角色裁剪：敌方单位可见精确战斗数据，玩家单位只可见生命比例、公开状态与战斗中已揭示的技能。不得猜测或索取玩家精确 HP、MP、SP、未揭示技能、背包、装备或玩家原始输入。每次只通过获准工具为当前单位提交合法行动；单位名与目标名必须逐字使用面板中的展示名。战斗状态、骰子、伤害、生死、战意和终局均以代码内核为准。工具报错时根据错误修正调用，不得用文本假装行动已经发生。\n\n可用工具：declare_attack、declare_action、pass_slot、flee、end_turn、get_character、get_inventory、get_combat_state、get_unit_detail。",
+      "presetId": "",
+      "preset": null,
+      "temperature": 0.7,
+      "topP": 1,
+      "freqPen": 0,
+      "presPen": 0,
+      "maxTokens": 65536,
+      "maxRetries": 3,
+      "historyLayers": 0,
+      "historySlice": 800,
+      "template": "{{SYS_PROMPT}}\n\n<战斗指令>\n{{COMBAT_BRIEF}}\n</战斗指令>\n\n<参战方>\n{{COMBAT_ROSTER}}\n</参战方>\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n\n<!-- 动态战况由协调器按敌方可见策略逐轮附加；本模板不接收玩家原始输入、触发正文或最近对话。 -->"
+    },
     "image_prompt": {
       "worldBookEnabled": false,
       "worldBookIds": [],

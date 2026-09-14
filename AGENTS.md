@@ -230,6 +230,9 @@ docs/
 │                                       # ✅ 主线细化层设计（2026-09-09 已实施，真机待验证）：
 │                                       # pre_check 现编 NPC 行动 + 伏笔连线 + worldFlags.plotThreads
 │                                       # 实施收口参数见设计 §11；实施方案见同目录 implementation-plan
+├── planning/2026-09-12-combat-agent-split-implementation-plan.md
+│                                       # 战斗 V3 主持人/敌方决策切割（公开仓已实施，真机待验）：
+│                                       # 单 Kernel + 双隔离会话 + 动态权限/可见性 + 失败暂停
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 

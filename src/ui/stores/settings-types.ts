@@ -189,6 +189,9 @@ export type UiSettings = {
    */
   randomEventsFrequency: number;
 
+  /** 一场战斗内固定：主持人与敌方使用隔离的模型会话，默认关闭以兼容旧存档。 */
+  combatAgentSplitEnabled: boolean;
+
   // ═══ 记忆 & 缓存 ═══
   memoryRecallCount: number;
   memoryCompressionThreshold: number;

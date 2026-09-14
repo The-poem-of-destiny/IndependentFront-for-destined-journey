@@ -244,6 +244,7 @@ function getDefaults(): UiSettings {
     //    默认 false 的症状是整个子系统装好了、测试全绿、真机一个事件都不起，且无处报错。
     randomEventsEnabled: true,
     randomEventsFrequency: 1,
+    combatAgentSplitEnabled: false,
 
     // 记忆 & 缓存
     memoryRecallCount: 20,

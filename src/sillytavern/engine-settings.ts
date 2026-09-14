@@ -44,6 +44,8 @@ export interface EngineSettings {
   randomEventsEnabled: boolean;
   /** 随机事件频率系数（0.5 / 1 / 2），乘进每次 MTTH 掷骰的权重 */
   randomEventsFrequency: number;
+  /** 战斗主持人 / 敌方决策会话拆分；开战时由协调器固定。 */
+  combatAgentSplitEnabled: boolean;
 }
 
 /**
@@ -65,6 +67,7 @@ const FALLBACK: EngineSettings = {
   snapshotRetentionMode: DEFAULT_SETTINGS.snapshotRetentionMode,
   randomEventsEnabled: RANDOM_EVENTS_ENABLED_DEFAULT,
   randomEventsFrequency: RANDOM_EVENTS_FREQUENCY_DEFAULT,
+  combatAgentSplitEnabled: false,
 };
 
 type Provider = () => Partial<EngineSettings> | undefined;
@@ -95,6 +98,7 @@ export function getEngineSettings(): EngineSettings {
       snapshotRetentionMode: partial.snapshotRetentionMode ?? FALLBACK.snapshotRetentionMode,
       randomEventsEnabled: partial.randomEventsEnabled ?? FALLBACK.randomEventsEnabled,
       randomEventsFrequency: partial.randomEventsFrequency ?? FALLBACK.randomEventsFrequency,
+      combatAgentSplitEnabled: partial.combatAgentSplitEnabled ?? FALLBACK.combatAgentSplitEnabled,
     };
   } catch (err) {
     console.error('[engine-settings] provider 抛异常，按缺省值继续:', err);

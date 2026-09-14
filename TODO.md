@@ -7,6 +7,12 @@
 
 ## 待办
 
+- [ ] **战斗 V3 双角色 Agent 正式内容与真机验收** —— 公开仓已于 2026-09-14 落地
+      `combat_v3` 主持人 + `combat_enemy` 敌方决策的隔离会话、动态权限、可见性裁剪、失败暂停与
+      默认关闭开关；待私有内容仓可用后同步正式 `combat_enemy` 配置并发布 pack，覆盖单敌/多敌、
+      玩家复杂意图、失败重试/退出、终局与取消重开，记录两角色 usage、延迟及脱敏 wire evidence。
+      现行计划见 `docs/planning/2026-09-12-combat-agent-split-implementation-plan.md`。
+
 - [ ] **LLM 组装层 Delta 会话 v1 —— 生产运营验收（下个对话说「继续 delta 生产验收」接上）**
       🔴 引擎代码已合入 master（PR #118 delta session + #119 vars_update 字段规范），内容仓 pack 已发
       **2.5.0 / 2.5.1 / 2.5.2**。只剩这一项真机验收没做。

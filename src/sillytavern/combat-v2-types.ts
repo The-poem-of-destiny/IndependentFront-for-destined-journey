@@ -128,6 +128,15 @@ export type CombatEvent =
   | { type: 'v3_narrative'; text: string; round: number }
   | { type: 'v3_awaiting_player_input'; unit: string; unitId: string; round: number }
   | {
+      type: 'v3_agent_paused';
+      role: 'combat_host' | 'combat_enemy';
+      message: string;
+      unit: string;
+      unitId: string;
+      round: number;
+    }
+  | { type: 'v3_agent_resumed'; role: 'combat_host' | 'combat_enemy' }
+  | {
       /**
        * 🆕 2026-08-12（Bug 2 修复）：玩家侧命令被内核 rejection 的友好提示。
        * 典型场景：玩家攻击槽已耗尽仍再点攻击 → SLOT_EXHAUSTED。这是**玩家误操作**，

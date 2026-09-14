@@ -154,6 +154,7 @@ const SIDE_CHAIN_AGENT_IDS = new Set([
   'item_gen',
   'image_prompt',
   'combat_v3',
+  'combat_enemy',
 ]);
 
 interface DebugEntryInput {
@@ -887,6 +888,7 @@ export class GamePipeline {
       // 按 agentId === 'combat_v3' 从 ctx.configs 读（见 combat-v3/coordinator.ts 的
       // combatSystemPrompt），设置页 Agent 子导航可编辑。
       'combat_v3',
+      'combat_enemy',
     ];
 
     // 复用 buildEndpoints() 的映射结果（ApiEntry.model → ApiEndpoint.defaultModel）
@@ -1372,6 +1374,16 @@ export class GamePipeline {
     }
     console.warn(`[GamePipeline] 侧链 Agent "${agentId}" 解析不到端点（API 池为空），跳过`);
     return undefined;
+  }
+
+  /** 敌方未独立绑定时继承本场已解析的主持人端点；独立绑定则沿用 fail-closed 解析。 */
+  private getCombatEnemyEndpoint(hostEndpoint: ApiEndpoint): ApiEndpoint | undefined {
+    const configuredPoolId = getAgentSettings(
+      this.settings.settings,
+      'combat_enemy',
+      this.chainData?.agentDefaults ?? {},
+    ).model.trim();
+    return configuredPoolId ? this.getEndpointForAgent('combat_enemy') : hostEndpoint;
   }
 
   private nextDebugInvocation(agentId: string, runId = this.activeRunId ?? 'detached') {
@@ -2438,6 +2450,16 @@ export class GamePipeline {
       this.game.exitCombat();
       return null;
     }
+    // 开战快照：进行中切换设置不会合并/拆分当前两份模型会话。
+    const combatAgentSplitEnabled = this.settings.settings.combatAgentSplitEnabled;
+    const enemyEndpoint = combatAgentSplitEnabled
+      ? this.getCombatEnemyEndpoint(endpoint)
+      : undefined;
+    if (combatAgentSplitEnabled && !enemyEndpoint) {
+      console.error('[GamePipeline] combat_enemy 跳过: 显式绑定的 API endpoint 已失效');
+      this.game.exitCombat();
+      return null;
+    }
     try {
       const context = this.currentContext ?? this.buildContext('');
       this.game.enterCombat();
@@ -2536,9 +2558,13 @@ export class GamePipeline {
       //   coordinator 玩家分支优先走意图（waitForPlayerIntent → routePlayerIntent →
       //   主持人会话解析），Command 桥留给测试/直捣兜底。两个 pending resolver
       //   互斥使用：某轮要么等意图、要么等 Command，不会同时挂起。
-      let pendingIntentResolve: ((text: string) => void) | null = null;
+      let pendingIntentResolve: ((text: string | null) => void) | null = null;
       const waitForPlayerIntent = () =>
-        new Promise<string>((resolve) => (pendingIntentResolve = resolve));
+        new Promise<string | null>((resolve) => (pendingIntentResolve = resolve));
+
+      let pendingAgentResumeResolve: ((action: 'retry' | 'exit') => void) | null = null;
+      const waitForAgentResume = () =>
+        new Promise<'retry' | 'exit'>((resolve) => (pendingAgentResumeResolve = resolve));
 
       // ── 🔴 T16 时序修复（玩家首决策永久挂起的根因）────────────────────────────
       // 此前 setCombatCoordinator 在 `await runCombatV3(...)` **之后**才执行，而
@@ -2582,6 +2608,13 @@ export class GamePipeline {
             r(text);
           }
         },
+        resumeAgent: (action: 'retry' | 'exit') => {
+          if (pendingAgentResumeResolve) {
+            const resolve = pendingAgentResumeResolve;
+            pendingAgentResumeResolve = null;
+            resolve(action);
+          }
+        },
         abandon: () => {
           if (pendingResolve) {
             const r = pendingResolve;
@@ -2594,6 +2627,16 @@ export class GamePipeline {
               cost: 'attack',
               payload: {},
             } as CombatCommand);
+          }
+          if (pendingIntentResolve) {
+            const resolve = pendingIntentResolve;
+            pendingIntentResolve = null;
+            resolve(null);
+          }
+          if (pendingAgentResumeResolve) {
+            const resolve = pendingAgentResumeResolve;
+            pendingAgentResumeResolve = null;
+            resolve('exit');
           }
         },
         waitForCommand,
@@ -2613,6 +2656,8 @@ export class GamePipeline {
         deps: {
           clientFactory: this.getClientFactory(),
           endpoint,
+          enemyEndpoint,
+          combatAgentSplitEnabled,
           stateManager: this.getStateManager(),
           characters: this.game.characters,
           // 🆕 经验档位（简单/普通模式，2026-08-24）：战斗胜利经验按存档模式分档
@@ -2637,6 +2682,7 @@ export class GamePipeline {
           //   coordinator 玩家分支据此走 routePlayerIntent（主持人解析玩家意图）。
           submitPlayerIntent: async () => {},
           waitForPlayerIntent,
+          waitForAgentResume,
           abandon: () => {},
           // 真实随机源（Q-01）：唯一注入点，委托 dice.ts 的 rollDice（内核禁 Math.random）。
           // 每次续杯调用会换一批新骰（BeginOutput 后再取，outputId 用计数器区分）。

@@ -16,6 +16,12 @@
  */
 
 import type { CombatView } from './types';
+import type { CombatLogicalRole } from './agent-permissions';
+import {
+  createCombatVisibilityState,
+  projectCombatStateForRole,
+  type CombatVisibilityState,
+} from './agent-visibility';
 
 /**
  * 把 v3 CombatView 投影为战斗 Agent 的文本面板（战况总览 + 行动顺序）。
@@ -24,30 +30,42 @@ import type { CombatView } from './types';
  * 拿到 view，拿不到内部 CombatState（内核把 state 藏在闭包里）。供 coordinator
  * 组装 Agent prompt 上下文（§4.3 敌方 PlayerCommand 路由用）。
  */
-export function projectToAgent(view: Readonly<CombatView>): string {
+export function projectToAgent(
+  view: Readonly<CombatView>,
+  role: CombatLogicalRole = 'combat_host',
+  visibility: CombatVisibilityState = createCombatVisibilityState(),
+): string {
   const lines: string[] = [];
   lines.push('<action_info>');
   lines.push(`  {战况总览}`);
   lines.push(`  | 回合: ${view.round} |`);
 
-  // 沿 initiativeOrder 顺序列单位（view.units 唯一源）
-  const order = view.initiativeOrder.length > 0 ? view.initiativeOrder : Object.keys(view.units);
-  for (const id of order) {
-    const u = view.units[id];
-    if (!u) continue;
-    const sideLabel = u.side === 'player' ? '友方' : '敌方';
-    const hpPct = u.maxHp > 0 ? Math.round((u.hp / u.maxHp) * 100) : 0;
-    lines.push(
-      `  | [${sideLabel}] ${u.name}: HP ${u.hp}/${u.maxHp} (${hpPct}%) | MP ${u.mp}/${u.maxMp} | SP ${u.sp}/${u.maxSp} | 攻${u.attacksRemaining} 动${u.actionsRemaining} |`,
-    );
-    if (u.statusEffects.length > 0) {
-      const statusStr = u.statusEffects
-        .map((s) => `${s.name}(${s.remainingTime ?? 0}回合)`)
+  const projected = projectCombatStateForRole(view, role, visibility);
+  const units = projected.units as Array<Record<string, unknown>>;
+  for (const unit of units) {
+    const sideLabel = unit.side === 'player' ? '友方' : '敌方';
+    const resources =
+      typeof unit.hp === 'number'
+        ? `HP ${unit.hp}/${unit.maxHp} (${unit.hpPercent}%) | MP ${unit.mp}/${unit.maxMp} | SP ${unit.sp}/${unit.maxSp}`
+        : `HP ${unit.hpPercent}%`;
+    const slots =
+      typeof unit.attacksRemaining === 'number'
+        ? ` | 攻${unit.attacksRemaining} 动${unit.actionsRemaining}`
+        : '';
+    lines.push(`  | [${sideLabel}] ${unit.name}: ${resources}${slots} |`);
+    const statuses = unit.statusEffects as Array<Record<string, unknown>>;
+    if (statuses.length > 0) {
+      const statusStr = statuses
+        .map((status) => `${status.name}(${status.remainingTime ?? 0}回合)`)
         .join(', ');
       lines.push(`  | 状态: ${statusStr} |`);
     }
-    if (u.morale && u.morale !== 'steady') {
-      lines.push(`  | 战意: ${u.morale} |`);
+    if (unit.morale && unit.morale !== 'steady') {
+      lines.push(`  | 战意: ${unit.morale} |`);
+    }
+    const revealedSkills = unit.revealedSkills as string[] | undefined;
+    if (revealedSkills && revealedSkills.length > 0) {
+      lines.push(`  | 已公开技能: ${revealedSkills.join('、')} |`);
     }
   }
 
@@ -58,9 +76,9 @@ export function projectToAgent(view: Readonly<CombatView>): string {
     lines.push(`  | 序列: ${names} |`);
   }
 
-  const fp = view.resourceSnapshots?.FP;
-  if (fp !== undefined) {
-    lines.push(`  | FP: ${fp} |`);
+  const resources = projected.resourceSnapshots as { FP?: number } | undefined;
+  if (resources?.FP !== undefined) {
+    lines.push(`  | FP: ${resources.FP} |`);
   }
 
   lines.push('</action_info>');

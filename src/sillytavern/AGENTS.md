@@ -132,7 +132,8 @@ src/sillytavern/                    ← 核心引擎
   │         标签的标签名里（形如 `</□有物品>`，模型看到的是坏标签）。**既有问题，
   │         图像 v1 未修**，已另开任务；改这个文件时别顺手把它们当成自己弄坏的
   ├── agent-tools.ts                ← [Phase 8.5] Agentic 工具注册表（**27 个 tool 定义**）+ AGENT_TOOL_MAP
-  │      白名单 5 桶：craft_gen(9) / char_gen(12) / item_gen(3) / vars_update(3) / combat_v3(12)
+  │      白名单 6 桶（2026-09-14 实测）：craft_gen(9) / char_gen(12) / item_gen(3) /
+  │      vars_update(3) / combat_v3(11) / combat_enemy(9)
   │      🪦 v2 的 `['combat']` 桶随 M5 删除；`get_hp_percent` 定义还在、但**不在任何桶里**
   │         （combat_v3 的文本面板自带 HP%）—— 定义数 27 与「AI 真够得到的」26 差的就是它
   ├── agent-xml.ts                  ← [Q-05] AI 输出 XML 解析的**唯一**工具面：`tagInner`（取内文，trim）/
@@ -713,8 +714,9 @@ SubSystem-Craft  制作  → 🚩 延迟型: Story 输出 <craft_request>，Stag
                           → 创意效果 (AI) → 结果注入正文 + StatePatch 提交
 SubSystem-Combat 战斗  → Stage1后检测 <combat_trigger> → 暂存 → Stage2 request_dispatcher 完成 char_gen 后唤起
                           → 独立战斗窗口: **v3 内核主持流程**（openCombat → kernel/reducer/phases，
-                            骰值全出 DiceTape），combat_v3 Agent 是**战斗主持人/DM**（持久会话，
-                            经 6 个战斗工具下 Command + 4 个只读查询；玩家自由文本先过 player-input 解析）
+                            骰值全出 DiceTape）；分离开关开启时仍共用唯一 Kernel，但模型侧为
+                            combat_v3 **主持人** + combat_enemy **敌方决策**两个隔离持久会话，
+                            动态权限按 phase/actor 收窄，敌方只读面隐藏玩家私有资源与输入
                           → write_summary 的终局叙事回注正文 + 批量StatePatch
 SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC → char_gen Agent 调 tools → 输出 <char_result> XML
                           → 调 item_gen Agent (仅1次, ADR-26) → 下回合可用

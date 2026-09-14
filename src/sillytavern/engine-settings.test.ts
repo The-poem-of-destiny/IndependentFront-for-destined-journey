@@ -23,6 +23,7 @@ describe('getEngineSettings', () => {
       snapshotRetentionMode: DEFAULT_SETTINGS.snapshotRetentionMode,
       randomEventsEnabled: true,
       randomEventsFrequency: 1,
+      combatAgentSplitEnabled: false,
     });
   });
 
@@ -32,12 +33,14 @@ describe('getEngineSettings', () => {
       snapshotRetentionMode: 'dense',
       randomEventsEnabled: false,
       randomEventsFrequency: 2,
+      combatAgentSplitEnabled: false,
     }));
     expect(getEngineSettings()).toEqual({
       maxSnapshotsPerSave: 7,
       snapshotRetentionMode: 'dense',
       randomEventsEnabled: false,
       randomEventsFrequency: 2,
+      combatAgentSplitEnabled: false,
     });
   });
 
@@ -70,6 +73,7 @@ describe('getEngineSettings', () => {
       snapshotRetentionMode: 'dense',
       randomEventsEnabled: true,
       randomEventsFrequency: 1,
+      combatAgentSplitEnabled: false,
     });
   });
 

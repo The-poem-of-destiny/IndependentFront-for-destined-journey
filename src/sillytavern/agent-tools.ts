@@ -649,7 +649,7 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
   item_gen: ['get_script_reference', 'get_character', 'get_inventory'],
   vars_update: ['get_script_reference', 'get_character', 'get_inventory'],
   // Combat Agent V3（M2 新增，对应 v3 内核）— 见 docs/reference/combat-system-architecture-v3.md §4.4
-  //   v3 工具集 6+4 个（6 个战斗工具 + 4 个只读查询；get_hp_percent 已删除，面板自带 HP%；
+  //   v3 工具集 7+4 个（7 个战斗工具 + 4 个只读查询；get_hp_percent 已删除，面板自带 HP%；
   //   get_unit_detail 为 combat session revamp §2.2 新增，五维+技能+装备一把抓）。
   //   v2 的 ['combat'] 已随 M5 真正退役删除。
   combat_v3: [
@@ -662,6 +662,19 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'submit_adjudication',
     'write_summary',
     // 只读查询（复用现有）
+    'get_character',
+    'get_inventory',
+    'get_combat_state',
+    'get_unit_detail',
+  ],
+  // Combat Enemy：仅当前获准敌方单位的决策与受策略裁剪的只读查询。
+  // 动态决策上下文还会在 coordinator 逐调用收窄，静态白名单不是授权边界。
+  combat_enemy: [
+    'declare_attack',
+    'declare_action',
+    'pass_slot',
+    'flee',
+    'end_turn',
     'get_character',
     'get_inventory',
     'get_combat_state',

@@ -167,6 +167,20 @@
     "historyLayers": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
     "historySlice": "1a1cf797fabe7f95836fabeca626907c77b3e6c9aff7c2290b396a238c69362e"
   },
+  "combat_enemy": {
+    "model": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+    "worldBookEnabled": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b",
+    "worldBookIds": "b7cb1866a8f449732d54c2e65775021beeecc7003927904093972e5695386b58",
+    "systemPrompt": "47b5955d45314844767cfadcc688c3a18b8145e16cd592422dfdde10b3804845",
+    "template": "7c3a40bbe49a61c306b78e57944300ffc8a6d321e1eb4927850ac66ab8b06c07",
+    "temperature": "973b372a514f91db8219fef585cdf81b09196afd7948f5fb1e29c2016dd995a0",
+    "topP": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+    "freqPen": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+    "presPen": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+    "maxTokens": "0f255ec16482c343fd099ba9668863778be40dc166a6856b1d470e0bc97cc6fd",
+    "historyLayers": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+    "historySlice": "1a1cf797fabe7f95836fabeca626907c77b3e6c9aff7c2290b396a238c69362e"
+  },
   "image_prompt": {
     "model": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
     "worldBookEnabled": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",

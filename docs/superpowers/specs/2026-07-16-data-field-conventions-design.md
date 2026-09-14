@@ -19,6 +19,12 @@
 | 铁律 4 | **每类数据唯一真源（SSOT）** | 每类数据只有一个家（见第 13 章 SSOT 总表）。发现双轨即为 bug                                                                                                                           |
 | 铁律 5 | **枚举值统一中文、集中定义** | slot/type/rarity/quest.status/statusEffect.category 等枚举在 `src/sillytavern/field-enums.ts`（新建）一处定义，写入时统一做归一化校验                                                  |
 
+> 📌 **2026-09-14 战斗 Agent 控制边界补记**：`combat_host` / `combat_enemy`、battle/session/
+> decisionWindow、authorizedActor 与 allowedCommandKinds 都是 Code 协调器的调用上下文，不是
+> AI 生成字段，也不进入 StatePatch 或存档实体。AI 仍只按展示名提交工具参数；Code 负责名字解析、
+> 当前 actor/阶段/命令种类授权与最终 id 绑定。敌方看到的 HP 百分比、公开状态和已揭示技能是从
+> 最新 Combat Kernel 投影出的临时只读视图，不建立第二份战斗真源，也不允许查询工具绕过同一策略。
+
 ---
 
 ## 第 1 章 存储拓扑（目标态）

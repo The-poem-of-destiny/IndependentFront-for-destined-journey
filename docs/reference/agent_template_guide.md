@@ -40,7 +40,7 @@
 | `src/sillytavern/template-resolver.ts` | **解析引擎** — `resolveTemplate()` + `resolveTemplateWithGlobals()` |
 | `src/sillytavern/agent-templates.ts` | **入口** — `buildAgentMessages()` 选模板 → 调 resolver |
 | `src/sillytavern/preset-loader.ts` | **预设适配** — `assemblePresetContent()` + 自动补 `📥动态注入` |
-| `public/data/defaults/agent-config.json` | **配置** — 13 Agent 的 `systemPrompt` + `template` + LLM 参数（🔴 磁盘路径带 `public/`，运行期 URL 仍是 `/data/defaults/agent-config.json`） |
+| `public/data/defaults/agent-config.json` | **配置** — 14 Agent（2026-09-14 实测）的 `systemPrompt` + `template` + LLM 参数（🔴 磁盘路径带 `public/`，运行期 URL 仍是 `/data/defaults/agent-config.json`） |
 | `src/ui/components/settings/SettingsPage.vue` | **UI** — 模板编辑器 + Story 预设面板 + 预览 |
 | `src/ui/components/settings/TemplatePreview.vue` | **UI 组件** — 彩色占位符标签渲染 |
 
@@ -127,8 +127,8 @@ prompt 的拼装顺序与注入内容**。首轮 / 重基线仍由 `buildAgentMe
 | `{{ITEM_REQUEST}}` | craft-gen-chain / char-gen-agent | item_gen | 从上游输出 XML 提取 |
 | `{{CHAR_GEN_RESULT}}` | char-gen-agent | item_gen | `ctx.agentOutputs` |
 | `{{CRAFT_RESULT}}` | craft-gen-chain | item_gen | `ctx.agentOutputs` |
-| `{{COMBAT_BRIEF}}` | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 | 开局消息渲染的 `localParams`（`renderOpeningCombatMessage`） |
-| `{{COMBAT_ROSTER}}` | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 | 同上（从 `<combat_trigger>` 的 allies/enemies 组装「我方/敌方」名单） |
+| `{{COMBAT_BRIEF}}` | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 / combat_enemy | 开局消息渲染的 `localParams`；开启分离时按角色建立隔离消息 |
+| `{{COMBAT_ROSTER}}` | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 / combat_enemy | 同上（从 `<combat_trigger>` 的 allies/enemies 组装「我方/敌方」名单，敌方后续只读投影另行裁剪） |
 
 **重要**: 链占位符不出现在 `PLACEHOLDER_REGISTRY` 的正常解析路径中——registry 只返回空串 fallback。实际值由 `resolveTemplate()` 的 `localParams` 参数接管（优先级高于 registry）。
 

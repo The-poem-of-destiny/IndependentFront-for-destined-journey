@@ -19,9 +19,12 @@
  */
 import { computed } from 'vue';
 import AgentConfigPanel from './AgentConfigPanel.vue';
+import AppCard from '../../shared/AppCard.vue';
 import { AGENT_LIST } from './agent-list';
+import { useSettingsStore } from '../../../stores/settings-store';
 
 const props = defineProps<{ agentId: string }>();
+const settings = useSettingsStore();
 
 const agentMeta = computed(() => AGENT_LIST.find((a) => a.id === props.agentId));
 </script>
@@ -32,6 +35,24 @@ const agentMeta = computed(() => AGENT_LIST.find((a) => a.id === props.agentId))
       <h3>{{ agentMeta?.name }}</h3>
       <span class="text-sm text-muted">{{ agentMeta?.desc }}</span>
     </div>
+
+    <AppCard v-if="agentId === 'combat_v3'" padding="md" class="combat-split-card">
+      <div class="toggle-row">
+        <div class="combat-split-copy">
+          <strong>拆分主持人与敌方决策</strong>
+          <span class="text-sm text-muted">开启后使用两份隔离会话，下一场战斗生效</span>
+        </div>
+        <label class="toggle-label">
+          <input
+            v-model="settings.settings.combatAgentSplitEnabled"
+            type="checkbox"
+            class="toggle-input"
+            aria-label="拆分战斗主持人与敌方决策"
+          />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </AppCard>
 
     <AgentConfigPanel :agent-id="agentId" />
   </section>
@@ -50,5 +71,13 @@ const agentMeta = computed(() => AGENT_LIST.find((a) => a.id === props.agentId))
   font-family: var(--theme-font-title);
   font-size: 1.3rem;
   margin: 0 0 6px;
+}
+.combat-split-card {
+  margin-bottom: var(--theme-spacing-lg);
+}
+.combat-split-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-xs);
 }
 </style>

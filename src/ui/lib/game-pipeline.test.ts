@@ -2428,6 +2428,27 @@ describe('F10 端点绑定 fail-closed（buildAgentConfigs）', () => {
 });
 
 describe('F10 端点绑定 fail-closed（getEndpointForAgent 侧链热路径）', () => {
+  it('combat_enemy 未独立绑定时继承本场已解析的主持人端点', () => {
+    const pipeline = makePipeline(
+      {},
+      { apiPool: [{ id: 'H', name: 'host', model: 'host-model' }] },
+    );
+    const host = (pipeline as any).getEndpointForAgent('combat_v3');
+    expect((pipeline as any).getCombatEnemyEndpoint(host)).toBe(host);
+  });
+
+  it('combat_enemy 显式绑定失效时 fail-closed，不回落主持人端点', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const pipeline = makePipeline(
+      {},
+      { apiPool: [{ id: 'H', name: 'host', model: 'host-model' }] },
+    );
+    patchAgentSettings((pipeline as any).settings.settings, 'combat_enemy', { model: 'gone' });
+    const host = (pipeline as any).getEndpointForAgent('combat_v3');
+    expect((pipeline as any).getCombatEnemyEndpoint(host)).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
   it('🔴 显式绑定失效 → undefined + console.error（绝不换用池里别的 provider）', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});

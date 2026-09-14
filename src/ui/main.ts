@@ -88,6 +88,7 @@ setEngineSettingsProvider(() => {
     //    把值提到 provider 外面存一份快照，等于把开关永久钉在启动那一刻。
     randomEventsEnabled: s.randomEventsEnabled,
     randomEventsFrequency: s.randomEventsFrequency,
+    combatAgentSplitEnabled: s.combatAgentSplitEnabled,
   };
 });
 

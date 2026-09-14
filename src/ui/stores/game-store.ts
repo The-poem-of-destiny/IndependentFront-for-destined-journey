@@ -166,6 +166,13 @@ export const useGameStore = defineStore('game', () => {
     round: number;
     requiredInputKind?: string;
   } | null>(null);
+  const combatAgentPause = ref<{
+    role: 'combat_host' | 'combat_enemy';
+    message: string;
+    unit: string;
+    unitId: string;
+    round: number;
+  } | null>(null);
   /** 当前行动者 characterId（turn_started 事件更新，单位卡片高亮用） */
   const combatCurrentUnitId = ref<string | null>(null);
   /** 🆕 v3：Coordinator 句柄（submitCommand / abandon / 重开），供前端 Command 路由与放弃（C4）
@@ -176,6 +183,7 @@ export const useGameStore = defineStore('game', () => {
     submit?: (cmd: CombatCommand) => Promise<void>;
     /** 🎭 主持人/DM 模式（2026-08-12）：提交玩家意图文本 → 主持人解析 → Command */
     submitPlayerIntent?: (text: string) => Promise<void>;
+    resumeAgent?: (action: 'retry' | 'exit') => void;
     abandon?: () => void;
     waitForCommand?: () => Promise<CombatCommand>;
     preSnapshotId?: string | null;
@@ -187,6 +195,7 @@ export const useGameStore = defineStore('game', () => {
   function enterCombat() {
     combatLog.value = [];
     combatAwaitingInput.value = null;
+    combatAgentPause.value = null;
     combatCurrentUnitId.value = null;
     v3ActiveCombat.value = null;
     combatReady.value = null;
@@ -293,6 +302,19 @@ export const useGameStore = defineStore('game', () => {
           requiredInputKind: 'PlayerCommand',
         };
         break;
+      case 'v3_agent_paused':
+        combatAgentPause.value = {
+          role: evt.role,
+          message: evt.message,
+          unit: evt.unit,
+          unitId: evt.unitId,
+          round: evt.round,
+        };
+        combatAwaitingInput.value = null;
+        break;
+      case 'v3_agent_resumed':
+        if (combatAgentPause.value?.role === evt.role) combatAgentPause.value = null;
+        break;
       case 'v3_combat_ended':
         if (v3ActiveCombat.value) {
           v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'Terminal' };
@@ -341,11 +363,19 @@ export const useGameStore = defineStore('game', () => {
     await coordinator.submitPlayerIntent(text);
   }
 
+  function resumeCombatAgent(action: 'retry' | 'exit') {
+    const coordinator = combatCoordinator.value;
+    if (action === 'retry') combatAgentPause.value = null;
+    coordinator?.resumeAgent?.(action);
+    if (action === 'exit') abandonCombat();
+  }
+
   /** v3：放弃战斗（C4）——句柄 abandon → 丢弃 session → exitCombat */
   function abandonCombat() {
     v3ActiveCombat.value = null;
     combatLog.value = [];
     combatAwaitingInput.value = null;
+    combatAgentPause.value = null;
     combatCurrentUnitId.value = null;
     combatReady.value = null;
     const c = combatCoordinator.value;
@@ -450,6 +480,7 @@ export const useGameStore = defineStore('game', () => {
     activeCombat.value = null;
     combatLog.value = [];
     combatAwaitingInput.value = null;
+    combatAgentPause.value = null;
     combatCurrentUnitId.value = null;
     combatCoordinator.value = null;
     v3ActiveCombat.value = null;
@@ -1506,6 +1537,7 @@ export const useGameStore = defineStore('game', () => {
     isInCombat,
     combatLog,
     combatAwaitingInput,
+    combatAgentPause,
     combatCurrentUnitId,
     v3ActiveCombat,
     combatReady,
@@ -1516,6 +1548,7 @@ export const useGameStore = defineStore('game', () => {
     setCombatCoordinator,
     submitCombatCommand,
     submitCombatIntent,
+    resumeCombatAgent,
     abandonCombat,
     skipCombat,
     startCombat,

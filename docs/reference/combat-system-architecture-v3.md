@@ -15,6 +15,13 @@
 >   校验并消费槽位。前端四步拼装那条结构化路径仍直接产 Command，不过主持人（真源：
 >   `combat-v3/coordinator.ts` 的 `routeHostCommand` / `routePlayerIntent`，均带 `🎭 2026-08-12` 注释；
 >   prompt 真源：`public/data/defaults/agent-config.json` 的 `combat_v3.systemPrompt` 首句
+
+> 📌 **2026-09-14 双角色会话更正**：开启 `combatAgentSplitEnabled` 后，`combat_v3` 只承担
+> **主持人**职责（玩家意图解析、开场、已结算事实演绎与终局总结），新增 `combat_enemy` 只为
+> 当前获准敌方单位决策。两者共享唯一 Combat Kernel，但使用隔离的 client / messages / session；
+> 动态权限在每次工具调用时按 battle、phase、actor 与 command kind 复核，敌方投影不含玩家精确
+> HP/MP/SP、隐藏技能、背包与玩家私有输入。开关默认关闭，关闭时保留本文 2026-08-12 所述的
+> 单 `combat_v3` 主持流程；正式内容包与真实 LLM 战斗仍待验收。
 >   「你是《命定之诗》**战斗主持人（DM）**」）。
 > - **敌方轮次**：扮演当前敌方单位做战术决策——**这只是主持人诸多职责之一**，不再是它的全部定位。
 > - **结算演绎**：内核算完后写结果句。
