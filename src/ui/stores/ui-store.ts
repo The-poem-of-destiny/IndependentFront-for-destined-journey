@@ -62,6 +62,17 @@ export const useUIStore = defineStore('ui', () => {
     return section;
   }
 
+  /** 应用级存档管理窗口；不参与页面导航，游戏页打开时保持当前叙事挂载。 */
+  const saveManagerOpen = ref(false);
+
+  function openSaveManager() {
+    saveManagerOpen.value = true;
+  }
+
+  function closeSaveManager() {
+    saveManagerOpen.value = false;
+  }
+
   /** 返回真实来路，不经 navigate，避免把当前页重新压回历史栈。 */
   function back(fallback: AppView = 'home') {
     const target = viewHistory.value.pop() ?? fallback;
@@ -119,9 +130,12 @@ export const useUIStore = defineStore('ui', () => {
     viewHistory,
     activeSaveId,
     requestedSettingsSection,
+    saveManagerOpen,
     navigate,
     openSettings,
     consumeSettingsSectionRequest,
+    openSaveManager,
+    closeSaveManager,
     back,
     statusBarOpen,
     statusTab,

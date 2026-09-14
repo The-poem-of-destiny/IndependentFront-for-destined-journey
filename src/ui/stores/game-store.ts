@@ -613,7 +613,10 @@ export const useGameStore = defineStore('game', () => {
   // === UI 布局状态 (Phase 7e) ===
   const sidebarCollapsed = ref(false);
   const activeModal = ref<string | null>(null);
-  const fullscreenStatus = ref(false);
+  // 📌 2026-09-13：`fullscreenStatus` / `toggleFullscreen` 已删除 —— 它们唯一的 UI 消费者
+  // 是顶栏那颗全屏按钮（后来搬进游戏菜单，再后来连菜单项一起退役）。全应用零读点，
+  // 留着就是「点一下什么都不会变」的死状态。要恢复全屏布局请重新设计（真正的
+  // Fullscreen API 与这个纯布局布尔值不是一回事）。
 
   // 选项填充 — ChatFlow 点击选项 → InputBar 填入
   const pendingInput = ref('');
@@ -957,9 +960,6 @@ export const useGameStore = defineStore('game', () => {
   }
   function closeModal() {
     activeModal.value = null;
-  }
-  function toggleFullscreen() {
-    fullscreenStatus.value = !fullscreenStatus.value;
   }
 
   /** 预览/测试注入：供 Ctrl+Shift+T 直接灌入 characters 与 saveProfile，不绕 IndexedDB。
@@ -1532,11 +1532,9 @@ export const useGameStore = defineStore('game', () => {
     getThoughts,
     sidebarCollapsed,
     activeModal,
-    fullscreenStatus,
     toggleSidebar,
     showModal,
     closeModal,
-    toggleFullscreen,
     hydratePreview,
     addMessage,
     addSystemMessage,

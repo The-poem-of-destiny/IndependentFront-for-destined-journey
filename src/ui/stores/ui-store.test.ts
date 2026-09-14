@@ -74,3 +74,32 @@ describe('ui-store 设置分区入口', () => {
     expect(ui.consumeSettingsSectionRequest()).toBeNull();
   });
 });
+
+/** 存档管理是应用级窗口，打开和关闭都不能改变当前页面。 */
+describe('ui-store 存档管理入口', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('从游戏页打开窗口时保持游戏页与当前存档', () => {
+    const ui = useUIStore();
+    ui.navigate('game', 'save-1');
+
+    ui.openSaveManager();
+
+    expect(ui.currentView).toBe('game');
+    expect(ui.activeSaveId).toBe('save-1');
+    expect(ui.saveManagerOpen).toBe(true);
+  });
+
+  it('关闭窗口时同样不导航', () => {
+    const ui = useUIStore();
+    ui.navigate('game', 'save-1');
+    ui.openSaveManager();
+
+    ui.closeSaveManager();
+
+    expect(ui.saveManagerOpen).toBe(false);
+    expect(ui.currentView).toBe('game');
+  });
+});

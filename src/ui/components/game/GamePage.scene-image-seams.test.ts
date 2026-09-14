@@ -169,6 +169,7 @@ const STUBS = {
   InputBar: true,
   MiniPlayer: true,
   CombatPanel: true,
+  GameMenu: true,
   ItemsPanel: true,
   CharacterListPanel: true,
   QuestsPanel: true,

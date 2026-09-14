@@ -2,6 +2,18 @@
 const dialogs: HTMLElement[] = [];
 let previousOverflow = '';
 
+/**
+ * 当前是否有打开的对话框。
+ *
+ * 给「最下层」的快捷键触发器用（游戏菜单的 Esc）：对话框在 `document` 的 **capture**
+ * 阶段就把 Esc 吃掉并 `stopImmediatePropagation`，所以浮层开着时下层监听器收不到事件；
+ * 但底层监听器若改到 capture 更早的位置（window），就会抢在浮层之前 —— 那时必须自己
+ * 问一句「有浮层吗」。问错了的症状不是报错，是「关掉一个弹窗的同时另一个东西弹出来」。
+ */
+export function hasOpenDialog(): boolean {
+  return dialogs.length > 0;
+}
+
 function hasHiddenAncestor(element: HTMLElement): boolean {
   for (let current: HTMLElement | null = element; current; current = current.parentElement) {
     if (getComputedStyle(current).display === 'none') return true;

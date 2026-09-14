@@ -5,9 +5,10 @@
  * 「有没有人调 abort」是**接线**问题，任何 GamePipeline 层的单测都证明不了它。
  *
  * 失败场景（2026-08-09 审查复核确认）：
- *   存档 A 正在生成（story 在飞，约 20 秒）→ 玩家点「← 首页」（TopBar 上一个**始终
- *   可点**的按钮）→ 打开存档 B。应用没有 KeepAlive（App.vue 用 `:key="ui.currentView"`），
- *   所以 GamePage 当场卸载，而 `onUnmounted` 此前只清 `isGenerating`、不调 abort。
+ *   存档 A 正在生成（story 在飞，约 20 秒）→ 玩家走「菜单 → 返回首页」（2026-09-13 前
+ *   是 TopBar 上那颗**始终可点**的「← 首页」按钮）→ 打开存档 B。应用没有 KeepAlive
+ *   （App.vue 用 `:key="ui.currentView"`），所以 GamePage 当场卸载，而 `onUnmounted`
+ *   此前只清 `isGenerating`、不调 abort。
  *   仍在跑的 `run()` 之后走到 `handleAgentResult` → `game.addMessage(...)`，
  *   而 game-store 是从 **store** 取存档号的 → 为 A 生成的正文落进 B 并永久留在 B 的历史里。
  *   顺带，清掉的 `isGenerating` 还解锁了 handleSend，重进游戏页能再起一个并发 run()。
@@ -123,6 +124,7 @@ const STUBS = {
   AgentStatusPanel: true,
   MiniPlayer: true,
   CombatPanel: true,
+  GameMenu: true,
   ItemsPanel: true,
   CharacterListPanel: true,
   QuestsPanel: true,

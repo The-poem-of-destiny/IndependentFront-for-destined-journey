@@ -33,6 +33,8 @@ import MapPanel from './MapPanel.vue';
 import DebugPanel from './DebugPanel.vue';
 import MiniPlayer from './MiniPlayer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
+import GameMenu from './GameMenu.vue';
+import { hasOpenDialog } from '../../lib/modal-focus';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -51,6 +53,10 @@ const ownsPage = () =>
   !disposed && ui.currentView === 'game' && ui.activeSaveId === requestedSaveId;
 const streamingText = ref('');
 const loadingSave = ref(true);
+/** 二级菜单开合（顶栏统一入口按钮 / Esc 两处都能开）。 */
+const menuOpen = ref(false);
+/** 消息右键菜单的开合由 ChatFlow 自持 —— 这里只读它，见 `onEscapeCapture`。 */
+const chatFlowRef = ref<InstanceType<typeof ChatFlow> | null>(null);
 let streamingFrame: number | null = null;
 let pendingStreamingText = '';
 
@@ -77,6 +83,7 @@ function handleStoryChunk(chunk: string, isComplete: boolean) {
 
 onMounted(async () => {
   window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keydown', onEscapeCapture, true);
   console.log('[GamePage] onMounted, activeSaveId:', ui.activeSaveId);
   if (requestedSaveId) {
     try {
@@ -246,6 +253,24 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
 }
 
 // Alt+Shift+D 属于用户可控的开发者模式；Ctrl+Shift+T 测试注入仍只在 DEV 构建响应。
+/**
+ * Esc 的层级（2026-09-13）：游戏菜单是**最底下**的一层触发器。
+ *
+ * 上层每一样东西都有自己的 Esc 通道 —— AppModal 走 `modal-focus`（document capture，
+ * 关掉最上层那个）、迷你播放器与消息右键菜单各自关自己。谁在更上层谁先吃掉 Esc，
+ * 菜单只能在这轮事件里让路，否则症状是「刚关掉一个浮层，菜单自己弹了出来」。
+ *
+ * 🔴 这里挂在 **capture** 上是为了抢在组件级监听（bubble）之前作判断，代价是不能再
+ * 指望「别人 stopPropagation 我就收不到」—— 判据必须自己认全。
+ */
+function onEscapeCapture(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return;
+  if (menuOpen.value) return; // 菜单开着：交给 AppModal 自己关，Esc 的开关两半走两条路
+  if (hasOpenDialog() || game.activeModal !== null) return;
+  if (game.isInCombat || showMiniPlayer.value || chatFlowRef.value?.ctxMenuOpen) return;
+  menuOpen.value = true;
+}
+
 function onKeyDown(e: KeyboardEvent) {
   if (!s.developerMode) return;
   if (import.meta.env.DEV && e.ctrlKey && e.shiftKey && e.key === 'T') {
@@ -277,9 +302,11 @@ onBeforeUnmount(() => {
   disposed = true;
   game.invalidatePendingLoads();
   window.removeEventListener('keydown', onKeyDown);
+  window.removeEventListener('keydown', onEscapeCapture, true);
   // 🔴 COR-02（2026-08-09 审查）：**先 abort 再清 isGenerating**。
-  // 应用没有 KeepAlive（App.vue 用 `:key="ui.currentView"`），而「← 首页」是一个
-  // 始终可点的按钮 —— 生成中途导航就会在这里卸载 GamePage。此前不调 abort，仍在飞的
+  // 应用没有 KeepAlive（App.vue 用 `:key="ui.currentView"`），而「菜单 → 返回首页」
+  // 是始终可达的入口（2026-09-13 之前是 TopBar 上的「← 首页」按钮）——
+  // 生成中途导航就会在这里卸载 GamePage。此前不调 abort，仍在飞的
   // run() 之后会走到 handleAgentResult → game.addMessage(...)，而 game-store 是从
   // **store** 而不是从 pipeline 取存档号的。于是「存档 A 生成中 → 回首页 → 打开存档 B」
   // 会把为 A 生成的正文追加进 B 并以 saveId:B 落库，永久留在 B 的历史里。
@@ -322,14 +349,6 @@ function handleStop() {
 }
 
 function handleToolClick(id: string) {
-  if (id === 'settings') {
-    ui.navigate('settings');
-    return;
-  }
-  if (id === 'extensions') {
-    ui.navigate('extensions');
-    return;
-  }
   // 迷你播放器是浮动卡片，不走 activeModal（§6.2），必须先于 showModal 拦下
   if (id === 'audio') {
     showMiniPlayer.value = !showMiniPlayer.value;
@@ -353,7 +372,7 @@ function onModalOpenChange(v: boolean) {
 
 <template>
   <div class="game-page-layout">
-    <TopBar />
+    <TopBar @open-menu="menuOpen = true" />
     <div class="game-body" :class="{ 'rail-collapsed': game.sidebarCollapsed }">
       <SideToolbar @tool-click="handleToolClick" />
       <ScenePanel />
@@ -362,6 +381,7 @@ function onModalOpenChange(v: boolean) {
       </div>
       <ChatFlow
         v-else
+        ref="chatFlowRef"
         :messages="game.messages"
         :is-generating="game.isGenerating"
         :system-events-visible="s.systemEventsVisible"
@@ -376,6 +396,9 @@ function onModalOpenChange(v: boolean) {
     </div>
 
     <MiniPlayer :open="showMiniPlayer" @close="showMiniPlayer = false" />
+
+    <!-- 二级菜单（顶栏统一入口 / Esc 呼出）→ 设置 / 扩展 / 存档管理 / 返回首页 / 帮助说明 -->
+    <GameMenu :open="menuOpen" @close="menuOpen = false" />
 
     <!-- M5 战斗面板（isInCombat 驱动，覆盖层） -->
     <CombatPanel />
