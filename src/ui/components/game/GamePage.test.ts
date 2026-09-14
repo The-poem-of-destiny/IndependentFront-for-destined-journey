@@ -6,13 +6,17 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { defineComponent, h } from 'vue';
 import GamePage from './GamePage.vue';
+import AppModal from '../shared/AppModal.vue';
 import {
   seedPlaceholderRegistry,
   ensureContentRegistryLoaded,
   resetContentRegistryLoadedForTests,
 } from '../../stores/content-store';
 import { useSettingsStore } from '../../stores/settings-store';
+import { useGameStore } from '../../stores/game-store';
+import { useUIStore } from '../../stores/ui-store';
 
 enableAutoUnmount(afterEach);
 
@@ -178,6 +182,7 @@ describe('GamePage', () => {
           StatusHUD: true,
           MiniPlayer: true,
           CombatPanel: true,
+          GameMenu: true,
           ItemsPanel: true,
           CharacterListPanel: true,
           QuestsPanel: true,
@@ -249,6 +254,7 @@ describe('GamePage', () => {
           StatusHUD: true,
           MiniPlayer: true,
           CombatPanel: true,
+          GameMenu: true,
           ItemsPanel: true,
           CharacterListPanel: true,
           QuestsPanel: true,
@@ -414,5 +420,223 @@ describe('ChatFlow — 三源消息渲染', () => {
     const wrapper = mount(ChatFlow, { props: { messages: [] } });
     expect(wrapper.find('.chat-empty').exists()).toBe(true);
     expect(wrapper.text()).toContain('等待冒险开始');
+  });
+});
+
+/* ===== 游戏菜单的 Esc 分层（2026-09-13） ===== */
+/**
+ * Esc 是**一条链上多个东西都想吃**的键：消息右键菜单、迷你播放器、各种弹窗、
+ * 以及这里新加的游戏菜单。菜单是链条的**最下层**，判据写错的症状是
+ * 「关掉一个浮层的同时菜单自己弹出来」—— 断言全绿但玩家会觉得键坏了。
+ *
+ * 🔴 事件必须从 `document.body` 上冒泡（而不是直接 `window.dispatchEvent`）才测得准：
+ * 目标是 window 的路径里**没有 document**，`modal-focus` 的 document-capture 监听器
+ * 根本收不到，于是「浮层吃掉 Esc」这条路上什么都不会发生，测试会假绿。
+ */
+describe('GamePage — 菜单 Esc 分层', () => {
+  /** 右键菜单的开合由 ChatFlow 自持，测试里用一个会暴露 ctxMenuOpen 的替身驱动 */
+  const ctxMenu = { open: false };
+  let mockGame: any;
+
+  /**
+   * 具名替身：VTU 的 `findComponent({ name })` 认组件 name，匿名替身找不到。
+   *
+   * 🔴 这里**故意写裸对象而不是 `defineComponent(...)`**：本文件已经有 `ChatFlowStub`
+   *    一个真组件定义，再来两个就踩 `vue/one-component-per-file`
+   *    （`--max-warnings 0` 直接挂 lint 闸门）。VTU 对 `stubs` 里的对象走同一条
+   *    「custom implementation」分支（`Object.assign({}, stub)`），裸对象和
+   *    `defineComponent` 包过一遍在运行期没有区别。
+   */
+  const stubFor = (name: string) => ({ name, render: () => h('div') });
+  const ChatFlowStub = defineComponent({
+    name: 'ChatFlow',
+    setup(_props, { expose }) {
+      expose({
+        get ctxMenuOpen() {
+          return ctxMenu.open;
+        },
+      });
+      return () => h('div', { class: 'chat-flow-stub' });
+    },
+  });
+
+  const stubs = {
+    TopBar: stubFor('TopBar'),
+    SideToolbar: stubFor('SideToolbar'),
+    ScenePanel: stubFor('ScenePanel'),
+    ChatFlow: ChatFlowStub,
+    StatusHUD: stubFor('StatusHUD'),
+    MiniPlayer: stubFor('MiniPlayer'),
+    CombatPanel: stubFor('CombatPanel'),
+    ItemsPanel: stubFor('ItemsPanel'),
+    CharacterListPanel: stubFor('CharacterListPanel'),
+    QuestsPanel: stubFor('QuestsPanel'),
+    PlotPanel: stubFor('PlotPanel'),
+    MemoryPanel: stubFor('MemoryPanel'),
+    SnapshotPanel: stubFor('SnapshotPanel'),
+    MapPanel: stubFor('MapPanel'),
+    DebugPanel: stubFor('DebugPanel'),
+    // GameMenu **故意不 stub** —— 这一组测的就是它跟别人的 Esc 分工
+  };
+
+  function pressEsc() {
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  }
+
+  /** 菜单是否开着 —— 它在 body 上（AppModal 走 Teleport） */
+  const menuShown = () => document.body.querySelector('[data-menu="home"]') !== null;
+
+  function page(over: Record<string, unknown> = {}) {
+    ctxMenu.open = false;
+    mockGame = {
+      player: null,
+      npcs: [],
+      characters: [],
+      messages: [],
+      isGenerating: false,
+      recentMemories: [],
+      activePlotEvents: [],
+      plotOutline: null,
+      activeCombat: null,
+      activeModal: null,
+      isInCombat: false,
+      sidebarCollapsed: false,
+      rightPanelMode: 'status',
+      fullscreenStatus: false,
+      activeSave: null,
+      pendingOptions: [],
+      hasOpeningPromptConsumed: true,
+      openingPrompt: null,
+      loadSave: vi.fn(async () => true),
+      invalidatePendingLoads: vi.fn(),
+      toggleSidebar: vi.fn(),
+      setRightPanel: vi.fn(),
+      toggleFullscreen: vi.fn(),
+      showModal: vi.fn(),
+      closeModal: vi.fn(),
+      fillInput: vi.fn(),
+      ...over,
+    };
+    (useGameStore as any).mockReturnValue(mockGame);
+    // 🔴 `activeSaveId` 必须有值：没有它 GamePage 停在「正在加载存档」分支，
+    //    ChatFlow / MiniPlayer 根本不挂载 —— 那样这一组会以「菜单在浮层面前没让路」
+    //    的假象全绿，实际上那两条判据里的 ref 一直是 null。
+    (useUIStore as any).mockReturnValue({
+      activeSaveId: 'save-1',
+      currentView: 'game',
+      navigate: vi.fn(),
+      toast: vi.fn(),
+    });
+    return mount(GamePage, { attachTo: document.body, global: { stubs } });
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    useSettingsStore().settings.developerMode = false;
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+    document.body.style.overflow = '';
+  });
+
+  it('平地按 Esc → 菜单打开；再按一次 Esc → 关掉', async () => {
+    const wrapper = page();
+    await flushPromises();
+
+    pressEsc();
+    await flushPromises();
+    expect(menuShown()).toBe(true);
+
+    // 第二次由 AppModal 自己那条通道关掉（菜单在 dialogs 栈里，GamePage 那层让路）
+    pressEsc();
+    await flushPromises();
+    expect(menuShown()).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it('顶栏那颗入口按钮走同一条路（不经过 Esc 判据）', async () => {
+    const wrapper = page();
+    await flushPromises();
+
+    wrapper.findComponent({ name: 'TopBar' }).vm.$emit('openMenu');
+    await flushPromises();
+    expect(menuShown()).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it('有弹窗时不抢 Esc：浮层关掉，菜单不冒出来', async () => {
+    const wrapper = page();
+    await flushPromises();
+
+    const overlay = mount(AppModal, {
+      props: { open: true, title: '测试浮层' },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    pressEsc();
+    await flushPromises();
+
+    expect(overlay.emitted('close')).toHaveLength(1);
+    expect(menuShown()).toBe(false);
+
+    overlay.unmount();
+    wrapper.unmount();
+  });
+
+  it('消息右键菜单开着时不抢 Esc', async () => {
+    const wrapper = page();
+    // 🔴 等 ChatFlow 替身**真的挂上**再测：载入链路里串着 Dexie（场景插画 / 会话外貌），
+    //    单次 flushPromises 推不到 `loadingSave = false`；此时 chatFlowRef 是 null，
+    //    这条判据会以「没抢 Esc」的假象通过。
+    await vi.waitFor(() => expect(wrapper.find('.chat-flow-stub').exists()).toBe(true), {
+      timeout: 3000,
+    });
+
+    ctxMenu.open = true;
+    pressEsc();
+    await flushPromises();
+    expect(menuShown()).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it('迷你播放器开着时不抢 Esc', async () => {
+    const wrapper = page();
+    await flushPromises();
+
+    wrapper.findComponent({ name: 'SideToolbar' }).vm.$emit('tool-click', 'audio');
+    await flushPromises();
+
+    pressEsc();
+    await flushPromises();
+    expect(menuShown()).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it('战斗中不抢 Esc（战斗覆盖层在屏上）', async () => {
+    const wrapper = page({ isInCombat: true });
+    await flushPromises();
+
+    pressEsc();
+    await flushPromises();
+    expect(menuShown()).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it('有页面级弹窗位时不抢 Esc（activeModal 有值）', async () => {
+    const wrapper = page({ activeModal: 'items' });
+    await flushPromises();
+
+    pressEsc();
+    await flushPromises();
+    expect(menuShown()).toBe(false);
+
+    wrapper.unmount();
   });
 });

@@ -11,6 +11,7 @@ import { queryForView } from './lib/view-audio';
 import { applyReducedMotion } from './lib/reduced-motion';
 import ToastContainer from './components/shared/ToastContainer.vue';
 import ApiRateLimitWaitPopup from './components/shared/ApiRateLimitWaitPopup.vue';
+import SaveManager from './components/shared/SaveManager.vue';
 
 const ui = useUIStore();
 const audio = useAudioStore();
@@ -136,13 +137,19 @@ const viewComponent = computed(() => {
       return HomePage;
   }
 });
+
+/** 切换正在游玩的存档时重挂 GamePage；其它页面仍只按视图身份重挂。 */
+const viewKey = computed(() =>
+  ui.currentView === 'game' ? `game:${ui.activeSaveId ?? 'none'}` : ui.currentView,
+);
 </script>
 
 <template>
   <div class="app-shell">
     <transition name="fade" mode="out-in">
-      <component :is="viewComponent" :key="ui.currentView" />
+      <component :is="viewComponent" :key="viewKey" />
     </transition>
+    <SaveManager />
     <ToastContainer />
     <ApiRateLimitWaitPopup />
   </div>

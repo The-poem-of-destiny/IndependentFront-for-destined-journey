@@ -15,11 +15,13 @@
 ```
 src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL 状态驱动）
 ├── main.ts                          ← 应用入口（createApp + Pinia + 主题 + 音频手势解锁监听）
-├── App.vue                          ← 根组件 = **视图状态机 + Toast + 启动链**
+├── App.vue                          ← 根组件 = **视图状态机 + 全局存档窗口 + Toast + 启动链**
 │                                       🔴 **全应用没有 vue-router**（别照旧文档去找 `<router-view>`）：
 │                                          `viewComponent` 是对 `ui.currentView` 的 computed switch，
-│                                          模板里一个 `<component :is>` + `<transition>` 渲染五个
-│                                          `defineAsyncComponent`（Home/Create/Game/Settings/Workshop）。
+│                                          模板里一个 `<component :is>` + `<transition>` 渲染六个
+│                                          `defineAsyncComponent`（Home/Create/Game/Settings/Extensions/Workshop）。
+│                                          Game 的 key 包含 `activeSaveId`，应用级存档窗口切换存档时
+│                                          会重挂 GamePage；只开关窗口不会动当前页面
 │                                          「懒加载」是当年 router 留下的形状，路由本身已经不在了 ——
 │                                          `useRouter()` / `$route` 一个都没有，加回来等于新引入一套
 │                                          与 `ui.currentView` 并行的真源
@@ -472,6 +474,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               （placeholder / placeholder+检测到本地真实内容 / error /
 │   │   │                               pack·needs_attention）。`activePackId` 为空时不渲染
 │   │   ├── ApiRateLimitWaitPopup.vue ← 全局 RPM 等待提示（端点 / 队列 / 倒计时；到时自动消失续发）
+│   │   ├── SaveManager.vue          ← 应用级存档管理窗口（列表 / 读取 / 导入导出 / 删除 / 改名）：
+│   │   │                               常驻 App.vue，不属于 HomePage；首页与游戏菜单打开同一 store 状态
 │   │   ├── ToastContainer.vue
 │   │   └── form/ (FormInput / FormSelect / FormStepper —— **只有这三个**；
 │   │             早期文档里的 Cascader / KeyValue 从未落地，别照着 import)
@@ -701,7 +705,23 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 不占这个位的两类东西别顺手塞进来：迷你播放器是**浮动卡片**
 │   │   │                                  （§6.2，必须先于 showModal 拦下），CharacterViewerModal 是
 │   │   │                                  **场景栏自己的一层**
+│   │   ├── GameMenu.vue             ← 游戏页**唯一**的「离开当前叙事」入口（2026-09-13）：顶栏只留一颗
+│   │   │                               入口按钮（点它或按 `Esc`），五项 = 设置 / 扩展 / 存档管理 /
+│   │   │                               返回首页 / 帮助说明；侧栏那颗重复的「设置」工具项已随之删除。
+│   │   │                               📌 第二版（同日）：**「全屏」项退役**（它只翻一个全应用零读点的
+│   │   │                                  布局布尔值），空出的菜单项换成从侧栏搬来的「扩展」；
+│   │   │                                  store 侧 `fullscreenStatus` / `toggleFullscreen` 一并删除
+│   │   │                               两级面板（主菜单 / 帮助说明）用一个 `panel` 状态机 + `watch(open)`
+│   │   │                               归位，**不按 `open` 重挂组件**
+│   │   │                               🔴 「存档管理」**不导航**：`ui.openSaveManager()` 打开 App.vue
+│   │   │                                  常驻的 `shared/SaveManager.vue`，GamePage 保持挂载；切换存档时
+│   │   │                                  App.vue 的 view key 才随 `activeSaveId` 改变并重挂 GamePage
+│   │   │                               🔴 帮助说明里的键位与交互**逐条对着代码写**（改键位时两处一起改）
 │   │   ├── MapPanel.vue / TopBar.vue / SideToolbar.vue / ScenePanel.vue / ChatFlow.vue / InputBar.vue
+│   │   │                               [游戏菜单 2026-09-13] TopBar 只剩存档名 + 轮数 + 那颗入口按钮
+│   │   │                               （只 `emit('openMenu')`，**不 import ui-store** —— 有 `?raw`
+│   │   │                                  源码断言钉着）；SideToolbar 10 项工具（debug 仍要开发者模式），
+│   │   │                               设置/退出/扩展不再各占一个入口（设置与扩展都收进菜单）
 │   │   │                               [地图 v1] MapPanel 加页签「标记地图 / 势力地图」：两个都靠
 │   │   │                               `v-show` 切（标记页签用 v-if 会拆掉 OSD 的挂载容器 ——
 │   │   │                               切一次地图就白），势力页签额外一次性 `v-if` 懒挂载
@@ -965,3 +985,14 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 ### 2026-09-05 键盘契约补注
 
 共享 `AppModal` 经 `lib/modal-focus.ts` 管理嵌套焦点、Tab 环绕、Escape 与焦点归还；Toast 使用 live region，点击型 AppCard 支持键盘。存档选择与背景选择使用独立原生按钮，避免包裹行内其他交互控件。
+
+### 2026-09-13 游戏菜单与 Esc 分层补注
+
+游戏页的三颗常驻按钮（「← 首页」「设置」「全屏」）与侧栏「设置」合并成 `GameMenu` 一颗入口：点击或按 `Esc` 呼出，五项 = 设置 / 扩展 / 存档管理 / 返回首页 / 帮助说明。`Esc` 的裁决在 **`GamePage.vue` 的 `onEscapeCapture`**，挂在 **window + capture**：
+
+- 📌 **同日第二版的两处收尾**：①「全屏」从菜单退役 —— 它唯二的动作是翻 `game.fullscreenStatus`，而那个布尔值**在游戏页布局里一个读点都没有**（顶栏那颗删掉后就成了空转），连同 `fullscreenStatus` / `toggleFullscreen` 从 `game-store` 一起删除；②侧栏的「扩展」工具项搬进菜单（`ui.navigate('extensions')` → `components/workshop/ExtensionManagementPage.vue`，其「← 返回」走 `ui.back('home')` —— `'home'` 只是**兜底**：`navigate` 会把来路压进 `viewHistory`，从游戏页进来时 pop 出来的就是游戏页），侧栏剩 10 项。**别再往侧栏加回扩展**：跨页面入口集中在菜单里才不用猜哪颗是真的。
+
+- 🔴 **为什么非得是自己挂 window capture**：`modal-focus.ownModalFocus` 在 **document + capture** 上处理 Escape 并 `preventDefault` + `stopImmediatePropagation` —— 想「让路给浮层」就只能比它更早拿到事件，然后**主动**判断该不该开菜单。
+- 分层判据（自上而下，任一成立就让路）：`menuOpen`（菜单自己开着，关它归 `AppModal`）→ `hasOpenDialog()`（任意浮层在栈里）→ `game.activeModal !== null`（页面级弹窗位有值，注意 mock 里漏给这个字段时是 `undefined` → 判据恒真）→ `game.isInCombat` / `showMiniPlayer` / `ChatFlow` 暴露的 `ctxMenuOpen`（右键菜单）。
+- 「存档管理」是 `App.vue` 常驻的应用级 `shared/SaveManager.vue`：首页与游戏菜单只开同一 store 状态，不导航；从游戏页打开、关闭都保持 GamePage 挂载。选择另一存档进入时，App.vue 的 view key 随 `activeSaveId` 改变，才重挂 GamePage。
+- 测试注意：`Esc` 必须从 `document.body` 冒泡派发（`bubbles: true`），否则事件路径里没有 document、`modal-focus` 那条「浮层吃掉 Esc」的路会**假绿**；GamePage 的 `ChatFlow` 在 `v-else`（`loadingSave` 为 false 才渲染）后面，替身要等挂上再断言（`vi.waitFor`），否则 `chatFlowRef` 是 null、判据同样假绿。

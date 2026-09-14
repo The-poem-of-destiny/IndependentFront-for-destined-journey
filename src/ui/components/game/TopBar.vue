@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { useUIStore } from '../../stores/ui-store';
 import { useGameStore } from '../../stores/game-store';
 
-const ui = useUIStore();
 const game = useGameStore();
+
+/**
+ * 游戏页**唯一**的常驻入口按钮（2026-09-13）：原来的「← 首页」「设置」「全屏」三颗
+ * 一并搬进 `GameMenu` 二级菜单 —— 顶栏只留这颗按钮，点它或按 Esc 呼出菜单。
+ * 把入口收敛成一颗的理由：退出/设置是**离开当前叙事**的操作，和全屏一样不属于
+ * 常用动线，常驻在顶栏上既占位又容易被误触。
+ */
+const emit = defineEmits<{ openMenu: [] }>();
 
 const turnCount = computed(() => {
   const last = [...game.messages]
@@ -16,10 +22,8 @@ const turnCount = computed(() => {
 
 <template>
   <div class="top-bar">
-    <!-- 左: 导航 + 存档名 -->
+    <!-- 左: 存档名 -->
     <div class="top-left">
-      <button class="top-btn" title="回到首页" @click="ui.navigate('home')">← 首页</button>
-      <span class="top-divider" aria-hidden="true" />
       <span class="top-save-name" :title="game.activeSave?.name ?? '冒险之途'">
         {{ game.activeSave?.name ?? '冒险之途' }}
       </span>
@@ -32,14 +36,16 @@ const turnCount = computed(() => {
       <span class="top-title-rule" aria-hidden="true" />
     </span>
 
-    <!-- 右: 设置 + 全屏；Agent 活动在对话流中按回合展示 -->
+    <!-- 右: 统一入口（菜单入口；内部条目见 GameMenu） -->
     <div class="top-right">
-      <button class="top-btn icon-btn" title="设置" @click="ui.navigate('settings')">
-        <i class="fa-solid fa-gear" />
-      </button>
-      <button class="top-btn" title="全屏" @click="game.toggleFullscreen()">
-        <i :class="game.fullscreenStatus ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" />
-        {{ game.fullscreenStatus ? '退出' : '全屏' }}
+      <button
+        class="top-btn menu-btn"
+        title="游戏菜单（Esc）"
+        aria-haspopup="dialog"
+        @click="emit('openMenu')"
+      >
+        <i class="fa-solid fa-bars" aria-hidden="true" />
+        菜单
       </button>
     </div>
   </div>
@@ -78,14 +84,10 @@ const turnCount = computed(() => {
 .top-btn:hover {
   background: var(--theme-title-bar-btn-hover);
 }
-.icon-btn {
-  padding: 4px 8px;
-}
-.top-divider {
-  width: 1px;
-  height: 1rem;
-  background: var(--theme-card-border);
-  flex-shrink: 0;
+.menu-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .top-save-name {
   font-family: var(--theme-font-title, 'Noto Serif SC', serif);

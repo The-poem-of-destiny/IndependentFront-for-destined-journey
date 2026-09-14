@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   ui: {
     navigate: vi.fn(),
     openSettings: vi.fn(),
+    openSaveManager: vi.fn(),
     toast: vi.fn(),
   },
   settings: {
@@ -88,6 +89,7 @@ beforeEach(() => {
   mocks.game.loadSaves.mockReset().mockResolvedValue();
   mocks.ui.navigate.mockReset();
   mocks.ui.openSettings.mockReset();
+  mocks.ui.openSaveManager.mockReset();
   mocks.ui.toast.mockReset();
   mocks.database.getSave.mockReset().mockResolvedValue(undefined);
   mocks.database.getCharacters.mockReset().mockResolvedValue([]);
@@ -170,6 +172,17 @@ describe('HomePage 次级入口布局', () => {
     expect(mocks.ui.openSettings).toHaveBeenCalledWith('about');
   });
 
+  it('存档管理按钮打开应用级窗口，不触发页面导航', async () => {
+    const home = await mountHome();
+    expect(home.find('.save-panel').exists()).toBe(false);
+
+    await home.get('.btn-load').trigger('click');
+
+    expect(mocks.ui.openSaveManager).toHaveBeenCalledOnce();
+    expect(mocks.ui.navigate).not.toHaveBeenCalled();
+    expect(home.find('.save-panel').exists()).toBe(false);
+  });
+
   it('退出按钮请求关闭当前应用窗口', async () => {
     const close = vi.spyOn(window, 'close').mockImplementation(() => undefined);
     const home = await mountHome();
@@ -178,74 +191,5 @@ describe('HomePage 次级入口布局', () => {
 
     expect(close).toHaveBeenCalledOnce();
     close.mockRestore();
-  });
-});
-
-describe('HomePage 存档管理子页面', () => {
-  it('将入口命名为“存档管理”并点击打开子页面', async () => {
-    const home = await mountHome();
-    const management = home.get('.btn-load');
-
-    expect(management.text().replace(/\s/g, '')).toBe('存档管理');
-    expect(home.find('.save-panel').exists()).toBe(false);
-
-    await management.trigger('click');
-    await flushPromises();
-
-    expect(home.get('.save-panel-title').text()).toBe('存档管理');
-    expect(home.get('.save-panel').attributes('role')).toBe('dialog');
-    expect(home.get('.save-panel-header-actions').text()).toContain('新建存档');
-    expect(home.get('.save-panel-header-actions').text()).toContain('导入存档');
-  });
-
-  it('从子页面进入新建存档流程', async () => {
-    const home = await mountHome();
-    await home.get('.btn-load').trigger('click');
-    await flushPromises();
-
-    const newSave = home
-      .get('.save-panel-header-actions')
-      .findAll('button')
-      .find((button) => button.text().includes('新建存档'));
-    expect(newSave).toBeTruthy();
-
-    await newSave!.trigger('click');
-    expect(mocks.ui.navigate).toHaveBeenCalledWith('create');
-  });
-
-  it('在子页面集中提供导出、删除与重命名，并可保存新名称', async () => {
-    const save = {
-      id: 'save-1',
-      name: '旧名称',
-      slot: 0,
-      createdAt: 100,
-      updatedAt: 200,
-      activeSnapshotId: null,
-      metadata: {
-        characterName: '测试角色',
-        userName: '测试玩家',
-        gameStartTime: '测试纪元',
-        totalTurns: 3,
-      },
-    };
-    mocks.game.saves.push(save);
-    mocks.database.getSave.mockResolvedValue(save);
-    const home = await mountHome();
-    await home.get('.btn-load').trigger('click');
-    await flushPromises();
-
-    const actions = home.get('.save-preview-actions');
-    expect(actions.text()).toContain('导出存档');
-    expect(actions.text()).toContain('删除存档');
-    const rename = actions.findAll('button').find((button) => button.text().includes('重命名存档'));
-    await rename!.trigger('click');
-    await flushPromises();
-
-    await home.get('#save-rename-input').setValue('新名称');
-    await home.get('.save-rename-form').trigger('submit');
-    await flushPromises();
-
-    expect(mocks.database.saveSaveSlot).toHaveBeenCalledWith({ ...save, name: '新名称' });
-    expect(mocks.ui.toast).toHaveBeenCalledWith('存档已重命名', 'success');
   });
 });

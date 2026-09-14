@@ -24,10 +24,8 @@ const allTools = [
   { id: 'plot', label: '剧情', icon: 'fa-solid fa-book-open' },
   { id: 'snapshots', label: '快照', icon: 'fa-solid fa-clock-rotate-left' },
   { id: 'gallery', label: '图鉴', icon: 'fa-solid fa-images' },
-  { id: 'extensions', label: '扩展', icon: 'fa-solid fa-puzzle-piece' },
   { id: 'audio', label: '音乐', icon: 'fa-solid fa-music' },
   { id: 'debug', label: '调试', icon: 'fa-solid fa-bug' },
-  { id: 'settings', label: '设置', icon: 'fa-solid fa-gear' },
 ];
 // 原始请求、响应、思维链与工具参数只在用户明确开启开发者模式后出现。
 const tools = computed(() =>

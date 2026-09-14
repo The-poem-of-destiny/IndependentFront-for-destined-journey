@@ -9,6 +9,50 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-09-13 游戏页统一出口菜单（顶栏三按钮 → 一颗入口 + Esc）｜已实施（真机验证通过）
+
+游戏页顶栏原先直接摆着「← 首页」「设置」「全屏」三颗常驻按钮，侧栏底部还另有一颗「设置」。
+现在收敛成一颗入口按钮（点它或按 `Esc`），二级菜单 `GameMenu.vue` 提供五项：
+
+| 菜单项   | 行为                                                                                    |
+| -------- | --------------------------------------------------------------------------------------- |
+| 设置     | `ui.navigate('settings')`                                                               |
+| 扩展     | `ui.navigate('extensions')` → `ExtensionManagementPage.vue`（其「← 返回」回得到游戏页） |
+| 存档管理 | `ui.openSaveManager()` 直接打开应用级窗口，保持 GamePage 挂载                           |
+| 返回首页 | `ui.navigate('home')`                                                                   |
+| 帮助说明 | 二级面板：操作 + 快捷键两组，逐条对着代码写                                             |
+
+📌 **同日第二版（收尾）**：①「全屏」从菜单退役、连 store 字段一起删 —— 它唯二的动作是翻
+`game.fullscreenStatus`，而那个布尔值在游戏页布局里**一个读点都没有**（纯空转状态），
+`game-store` 的 `fullscreenStatus` / `toggleFullscreen` 及 `game-store.test.ts` 里那半句
+「保留布局偏好」断言一并移除（`sidebarCollapsed` 继续代表这组偏好）；②侧栏的「扩展」工具项
+搬进菜单，侧栏剩 **10 项**，`GamePage.handleToolClick` 里的 `extensions` 分支随之删除
+（跨页面入口集中在菜单里，不用再猜哪颗是真的）。
+
+- **为什么收敛**：退出/设置与全屏一样是「离开当前叙事」的操作，不属于常用动线，常驻顶栏既占位又容易误触。
+- **Esc 分层**（本次最硬的坑）：`onEscapeCapture` 挂在 **window + capture**，为的是抢在
+  `modal-focus.ownModalFocus`（document + capture，`preventDefault` + `stopImmediatePropagation`）
+  之前自己裁决；判据自上而下 —— `menuOpen`（菜单自己开着，关它归 AppModal）→ `hasOpenDialog()`
+  → `game.activeModal !== null` → `game.isInCombat` / `showMiniPlayer` / ChatFlow 暴露的
+  `ctxMenuOpen`，任一成立就让路。ChatFlow 的右键菜单 Esc 是 window **bubble**（最晚），
+  无脑开菜单会出现「关右键菜单 + 弹游戏菜单」的双动作。
+- **「存档管理」从首页拆成应用级窗口**：`shared/SaveManager.vue` 常驻 `App.vue`，首页与游戏菜单
+  只打开 `ui.saveManagerOpen`，不会导航或卸载 GamePage；从游戏页进入时优先选中当前存档。
+  若选择另一存档进入，`App.vue` 的 view key 会随 `activeSaveId` 改变并重挂 GamePage，避免沿用旧存档状态。
+- 新增 `modal-focus.hasOpenDialog()`、`ui-store.openSaveManager()/closeSaveManager()`、
+  ChatFlow 的 `defineExpose({ ctxMenuOpen })`；`TopBar.vue` 重写为「存档名 + 轮数 + 入口」且
+  **不 import ui-store**（有 `?raw` 源码断言钉住），`SideToolbar.vue` 删掉「设置」与「扩展」两个工具项。
+- 测试（2026-09-13 实测）：新增 `GameMenu.test.ts`（10 例）、`TopBar.test.ts`（4 例）、`GamePage.test.ts`
+  的「菜单 Esc 分层」7 例（浮层让路 / 右键菜单让路 / 迷你播放器让路 / 战斗中让路 / 页面级弹窗位让路 /
+  平地开合 / 顶栏按钮走同一条路）；`SideToolbar.test.ts`（5 例，含「不再有设置/扩展入口」）、
+  `ui-store.test.ts`、`HomePage.test.ts` 各补对应用例；新增 `SaveManager.test.ts` 覆盖应用级打开、
+  当前存档优先选择与重命名接线。
+  🔴 两条易假绿的写法已写进 `src/ui/AGENTS.md`：Esc 必须从 `document.body` 冒泡派发，
+  ChatFlow 替身要用 `vi.waitFor` 等挂上（否则 `chatFlowRef` 为 null，判据照样「通过」）。
+  🔴 另有一条 lint 坑：这份测试文件里替身组件超过一个就踩 `vue/one-component-per-file`
+  （`--max-warnings 0` 直接挂闸门），具名替身改用裸对象即可 —— VTU 对 `stubs` 里的对象走
+  同一条 custom-implementation 分支，与 `defineComponent` 包一遍运行期无差别。
+
 ### 2026-09-12 设置页返回误入游戏修复｜已实施（首页路径真机验证通过）
 
 - **现象**：会话里曾进入过存档时，从首页打开设置再点击返回会错误进入游戏；若对应存档已删除，

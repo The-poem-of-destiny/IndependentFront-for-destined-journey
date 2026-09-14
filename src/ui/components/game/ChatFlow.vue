@@ -388,6 +388,12 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleEsc);
   window.removeEventListener('scroll', handleScrollClose, true);
 });
+
+/**
+ * 游戏页要读这一层：Esc 是分层的，游戏菜单在最底下 —— 右键菜单开着时菜单必须让路，
+ * 否则一次 Esc 会同时关掉右键菜单并把游戏菜单弹出来。
+ */
+defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
 </script>
 
 <template>

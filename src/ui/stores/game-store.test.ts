@@ -649,7 +649,6 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     store.recordEjsUiLog('旧日志');
     store.setCombatCoordinator({ submit: async () => {} });
     store.sidebarCollapsed = true;
-    store.fullscreenStatus = true;
 
     const result = await store.restoreToSnapshot('snap-turn1');
 
@@ -665,7 +664,6 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     expect(store.ejsUiLog).toEqual([]);
     expect(store.combatCoordinator).toBeNull();
     expect(store.sidebarCollapsed).toBe(true);
-    expect(store.fullscreenStatus).toBe(true);
   });
 
   it('restoreToSnapshot: 用恢复分支的角色替换旧效果 owner', async () => {
