@@ -13,6 +13,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import source from '@ui/components/settings/SettingsPage.vue?raw';
+import agentSectionSource from '@ui/components/settings/agent/AgentSection.vue?raw';
 import { AGENT_LIST, resolveAgentSelection } from '@ui/components/settings/agent/agent-list';
 
 describe('resolveAgentSelection', () => {
@@ -72,5 +73,12 @@ describe('SettingsPage 主导航接线', () => {
 
   it('初值也过同一道校验，不直接吃 s.activeAgent', () => {
     expect(source).toContain('ref<string | null>(resolveAgentSelection(s.activeAgent))');
+  });
+});
+
+describe('双角色方案定案后的设置面', () => {
+  it('不再渲染试运行开关或读取旧配置键', () => {
+    expect(agentSectionSource).not.toContain('拆分主持人与敌方决策');
+    expect(agentSectionSource).not.toContain('combatAgentSplitEnabled');
   });
 });

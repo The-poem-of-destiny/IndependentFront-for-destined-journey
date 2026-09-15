@@ -714,10 +714,10 @@ SubSystem-Craft  制作  → 🚩 延迟型: Story 输出 <craft_request>，Stag
                           → 创意效果 (AI) → 结果注入正文 + StatePatch 提交
 SubSystem-Combat 战斗  → Stage1后检测 <combat_trigger> → 暂存 → Stage2 request_dispatcher 完成 char_gen 后唤起
                           → 独立战斗窗口: **v3 内核主持流程**（openCombat → kernel/reducer/phases，
-                            骰值全出 DiceTape）；分离开关开启时仍共用唯一 Kernel，但模型侧为
+                            骰值全出 DiceTape）；共用唯一 Kernel，但模型侧固定为
                             combat_v3 **主持人** + combat_enemy **敌方决策**两个隔离持久会话，
                             动态权限按 phase/actor 收窄，敌方只读面隐藏玩家私有资源与输入
-                          → write_summary 的终局叙事回注正文 + 批量StatePatch
+                          → 主持人终局叙事回注正文 + 批量StatePatch
 SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC → char_gen Agent 调 tools → 输出 <char_result> XML
                           → 调 item_gen Agent (仅1次, ADR-26) → 下回合可用
 ```

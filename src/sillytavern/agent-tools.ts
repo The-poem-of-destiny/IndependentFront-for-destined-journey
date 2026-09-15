@@ -585,22 +585,6 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
       },
     },
   },
-  {
-    type: 'function',
-    function: {
-      name: 'write_summary',
-      description:
-        '（v3）在战斗终局写一段不超过 500 字的战斗摘要，供回注 Story。这是收尾动作，不产出 Command。',
-      parameters: {
-        type: 'object',
-        properties: {
-          text: { type: 'string', description: '战斗摘要（≤500 字）' },
-        },
-        required: ['text'],
-      },
-    },
-  },
-
   // ── Combat Query (只读查询, M4 任务 5.3 新建) ──
   {
     type: 'function',
@@ -649,7 +633,7 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
   item_gen: ['get_script_reference', 'get_character', 'get_inventory'],
   vars_update: ['get_script_reference', 'get_character', 'get_inventory'],
   // Combat Agent V3（M2 新增，对应 v3 内核）— 见 docs/reference/combat-system-architecture-v3.md §4.4
-  //   v3 工具集 7+4 个（7 个战斗工具 + 4 个只读查询；get_hp_percent 已删除，面板自带 HP%；
+  //   v3 工具集 6+4 个（6 个战斗工具 + 4 个只读查询；get_hp_percent 已删除，面板自带 HP%；
   //   get_unit_detail 为 combat session revamp §2.2 新增，五维+技能+装备一把抓）。
   //   v2 的 ['combat'] 已随 M5 真正退役删除。
   combat_v3: [
@@ -660,7 +644,6 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'flee',
     'end_turn',
     'submit_adjudication',
-    'write_summary',
     // 只读查询（复用现有）
     'get_character',
     'get_inventory',

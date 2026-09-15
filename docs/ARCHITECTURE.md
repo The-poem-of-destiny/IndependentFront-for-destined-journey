@@ -28,8 +28,8 @@
 ```
 docs/reference/
 ├── effect_script_system.md              # 词条效果 & 脚本沙盒（引擎必读）
-├── combat-system-architecture-v3.md     # 战斗系统 v3（唯一 Kernel；可选 combat_v3 主持人
-│                                        #   + combat_enemy 敌方决策双隔离会话；契约在
+├── combat-system-architecture-v3.md     # 战斗系统 v3（唯一 Kernel；combat_v3 主持人
+│                                        #   + combat_enemy 敌方决策固定使用双隔离会话；契约在
 │                                        #   agent-config.json + agent-tools.ts + combat-v3/agent-*.ts）
 ├── agent_system_prompt_guide.md         # Agent System Prompt 配置流程
 ├── audio_system.md                      # 音频系统 v1.0

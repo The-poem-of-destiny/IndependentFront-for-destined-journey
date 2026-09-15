@@ -17,7 +17,6 @@ export interface CombatAgentSession {
   readonly endpoint: ApiEndpoint;
   readonly messages: CombatAgentMessage[];
   client: CombatClient | null;
-  summary?: string;
 }
 
 export interface CombatRequestToken {
@@ -55,7 +54,6 @@ export function createCombatAgentSessions(input: {
     endpoint,
     messages: [],
     client: null,
-    ...(logicalRole === 'combat_host' ? { summary: '' } : {}),
   });
   const host = create('combat_host', 'combat_v3', input.hostEndpoint);
   const enemy = create('combat_enemy', 'combat_enemy', input.enemyEndpoint ?? input.hostEndpoint);
@@ -90,7 +88,6 @@ export function createCombatAgentSessions(input: {
       enemy.messages.length = 0;
       host.client = null;
       enemy.client = null;
-      host.summary = '';
     },
   };
 }

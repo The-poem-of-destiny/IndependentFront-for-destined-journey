@@ -47,7 +47,6 @@ function setup(hostResult: unknown, enemyResult: unknown) {
     } as unknown as CombatClient;
   });
   const ctx = {
-    splitEnabled: true,
     agentSessions: sessions,
     getVisibility: () => ({ revealedSkillsByUnit: {} }),
     clientFactory: factory,

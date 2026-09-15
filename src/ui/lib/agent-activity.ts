@@ -43,7 +43,6 @@ const TOOL_ACTIVITY_LABELS: Record<string, string> = {
   flee: '判断撤离时机',
   end_turn: '结束当前行动',
   submit_adjudication: '裁定战斗结果',
-  write_summary: '记录战况',
 };
 
 function recordOf(value: unknown): Record<string, unknown> | undefined {

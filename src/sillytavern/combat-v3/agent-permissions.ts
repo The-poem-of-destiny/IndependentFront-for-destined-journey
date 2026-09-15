@@ -126,7 +126,8 @@ export function resolveAuthorizedTargetName(
   if (!target) {
     throw new CombatAuthorizationError('TARGET_UNKNOWN', '未找到可寻址的战斗目标');
   }
-  if (!actor || target.side === actor.side || !target.canAct || target.hp <= 0) {
+  // `canAct` 只表示目标当前是否还能消费行动槽，不影响其作为存活敌方单位被攻击。
+  if (!actor || target.side === actor.side || target.hp <= 0) {
     throw new CombatAuthorizationError('TARGET_NOT_ALLOWED', '该单位不是当前行动可选的敌对目标');
   }
   return target.id;

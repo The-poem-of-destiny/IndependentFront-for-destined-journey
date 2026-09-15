@@ -57,6 +57,11 @@ describe('combat agent permissions', () => {
 
   it('攻击目标必须是当前 actor 的存活对方单位', () => {
     expect(resolveAuthorizedTargetName(context(), view, '甲')).toBe('甲');
+    const spentTarget = {
+      ...view,
+      units: { ...view.units, 甲: { ...view.units.甲, canAct: false } },
+    };
+    expect(resolveAuthorizedTargetName(context(), spentTarget, '甲')).toBe('甲');
     expect(() => resolveAuthorizedTargetName(context(), view, '乙')).toThrowError(
       CombatAuthorizationError,
     );

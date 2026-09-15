@@ -245,6 +245,15 @@ describe('settings-store', () => {
     });
   });
 
+  it('不再持久化已退役的战斗双角色试运行开关', () => {
+    const serialized = serializeSettingsForLocalStorage({
+      combatAgentSplitEnabled: false,
+      developerMode: true,
+    });
+
+    expect(JSON.parse(serialized)).toEqual({ developerMode: true });
+  });
+
   it('旧 localStorage 密钥校验落库后才擦除，并在运行时恢复', async () => {
     store_.set(
       'fated-poem-settings',

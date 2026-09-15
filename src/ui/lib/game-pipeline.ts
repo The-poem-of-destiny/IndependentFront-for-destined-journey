@@ -2450,12 +2450,8 @@ export class GamePipeline {
       this.game.exitCombat();
       return null;
     }
-    // 开战快照：进行中切换设置不会合并/拆分当前两份模型会话。
-    const combatAgentSplitEnabled = this.settings.settings.combatAgentSplitEnabled;
-    const enemyEndpoint = combatAgentSplitEnabled
-      ? this.getCombatEnemyEndpoint(endpoint)
-      : undefined;
-    if (combatAgentSplitEnabled && !enemyEndpoint) {
+    const enemyEndpoint = this.getCombatEnemyEndpoint(endpoint);
+    if (!enemyEndpoint) {
       console.error('[GamePipeline] combat_enemy 跳过: 显式绑定的 API endpoint 已失效');
       this.game.exitCombat();
       return null;
@@ -2675,7 +2671,6 @@ export class GamePipeline {
           clientFactory: this.getClientFactory(combatRunId),
           endpoint,
           enemyEndpoint,
-          combatAgentSplitEnabled,
           stateManager: this.getStateManager(),
           characters: this.game.characters,
           // 🆕 经验档位（简单/普通模式，2026-08-24）：战斗胜利经验按存档模式分档
