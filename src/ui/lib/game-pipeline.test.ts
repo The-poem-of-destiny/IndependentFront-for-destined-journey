@@ -413,7 +413,7 @@ describe('buildAgentConfigs — combat_v3 侧链装配', () => {
 
   it('未覆写时 systemPrompt 回落默认层（agent-config.json 的 combat_v3）', () => {
     const pipeline = makePipeline();
-    const defaultPrompt = '你是《命定之诗》战斗决策 Agent。';
+    const defaultPrompt = '你是战斗决策 Agent。';
 
     const configs = (pipeline as any).buildAgentConfigs({
       combat_v3: { systemPrompt: defaultPrompt },

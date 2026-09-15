@@ -565,7 +565,7 @@ async function clearAll() {
       ><AppCard padding="md" class="pack-card"
         ><h4>内容包</h4>
         <p class="text-muted text-sm">
-          导入《命定之诗》内容包以加载完整的世界书、Agent 提示词、预设与目录数据。<template
+          导入内容包以加载完整的世界书、Agent 提示词、预设与目录数据。<template
             v-if="activePackVersion"
             >当前：{{ activePackVersion }}。</template
           >未装包时运行在演示级占位内容上。
