@@ -85,6 +85,11 @@ async function handleNext() {
   }
 }
 
+function handleStepSelect(step: number) {
+  if (store.isCreating || step < 0 || step >= stepComponents.length) return;
+  store.currentStep = step;
+}
+
 onMounted(() => {
   void checkReadiness();
 });
@@ -101,7 +106,13 @@ onMounted(() => {
       ← 首页
     </button>
 
-    <CreateSteps v-if="ready" :current="store.currentStep" :total="8" />
+    <CreateSteps
+      v-if="ready"
+      :current="store.currentStep"
+      :total="8"
+      :disabled="store.isCreating"
+      @select="handleStepSelect"
+    />
 
     <PointsBar
       v-if="ready"

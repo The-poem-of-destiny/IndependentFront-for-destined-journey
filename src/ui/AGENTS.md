@@ -675,7 +675,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               「computed 选组件」形状，同样没有 router）
 │   │   ├── CreateSteps.vue          ← 顶部进度条。★步骤名的**唯一出处** `STEP_LABELS`：
 │   │   │                               难度选择 / 基础信息 / 命定核心 / **角色启用** /
-│   │   │                               装备选择 / 背景故事 / 剧情规划 / 确认提交
+│   │   │                               装备选择 / 背景故事 / 剧情规划 / 确认提交；八个步骤按钮
+│   │   │                               均可直接跳转，存档创建提交期间统一禁用
 │   │   ├── CreateStepDifficulty.vue      ← ① 难度
 │   │   ├── CreateStepBasic.vue           ← ② 基础信息（姓名/性别/种族/血脉…）
 │   │   ├── CreateStepDestinyCore.vue     ← ③ 命定核心（★工坊项目粒度的启用在**这一步**，

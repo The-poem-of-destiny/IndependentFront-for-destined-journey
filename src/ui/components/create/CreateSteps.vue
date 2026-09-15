@@ -2,6 +2,11 @@
 defineProps<{
   current: number;
   total?: number;
+  disabled?: boolean;
+}>();
+
+const emit = defineEmits<{
+  select: [step: number];
 }>();
 
 const STEP_LABELS = [
@@ -30,13 +35,16 @@ const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八'];
       />
 
       <button
+        type="button"
         class="step-dot"
         :class="{
           active: i === current,
           done: i < current,
         }"
         :aria-current="i === current ? 'step' : undefined"
-        :tabindex="i <= current ? 0 : -1"
+        :aria-label="`第 ${i + 1} 步：${label}`"
+        :disabled="disabled"
+        @click="emit('select', i)"
       >
         <span class="step-num">
           <span v-if="i < current" class="step-check">✓</span>
@@ -80,14 +88,23 @@ const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八'];
   gap: 4px;
   border: none;
   background: transparent;
-  cursor: default;
+  cursor: pointer;
   padding: 4px var(--theme-spacing-sm);
   border-radius: var(--theme-radius-sm);
   min-width: 64px;
 }
-.step-dot.active,
-.step-dot.done {
-  cursor: pointer;
+.step-dot:hover:not(:disabled) .step-num,
+.step-dot:focus-visible .step-num {
+  border-color: color-mix(in srgb, var(--theme-primary) 70%, var(--theme-card-border));
+  color: var(--theme-primary);
+}
+.step-dot:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
+}
+.step-dot:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .step-num {

@@ -47,4 +47,25 @@ describe('CreateSteps', () => {
     expect(labels[6].text()).toBe('剧情规划');
     expect(labels[7].text()).toBe('确认提交');
   });
+
+  it('点击任意步骤都会发出对应的切换事件', async () => {
+    const wrapper = mount(CreateSteps, {
+      props: { current: 0 },
+    });
+
+    await wrapper.findAll('.step-dot')[7].trigger('click');
+
+    expect(wrapper.emitted('select')).toEqual([[7]]);
+    expect(wrapper.findAll('.step-dot')[7].attributes('tabindex')).toBeUndefined();
+  });
+
+  it('禁用时不可切换步骤', async () => {
+    const wrapper = mount(CreateSteps, {
+      props: { current: 0, disabled: true },
+    });
+
+    await wrapper.findAll('.step-dot')[3].trigger('click');
+
+    expect(wrapper.emitted('select')).toBeUndefined();
+  });
 });
