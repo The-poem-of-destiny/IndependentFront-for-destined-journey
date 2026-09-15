@@ -35,7 +35,6 @@ const apiForm = reactive({
   apiKey: '',
   model: '',
   apiType: 'chat' as ApiEntry['apiType'],
-  enableThinking: false,
   /** 🆕 2026-08-22 Delta 会话（T4）：上下文窗口 token 上限（表单用 string，保存时归一化） */
   contextWindowTokens: '' as string,
   _realKey: '' as string,
@@ -285,7 +284,6 @@ function openAddApi() {
   apiForm.apiKey = '';
   apiForm.model = '';
   apiForm.apiType = 'chat';
-  apiForm.enableThinking = false;
   apiForm.contextWindowTokens = '';
   apiForm._realKey = '';
   apiForm._masked = false;
@@ -304,7 +302,6 @@ async function openEditApi(ep: ApiEntry) {
   apiForm._masked = key ? true : false;
   apiForm.model = hydrated.model;
   apiForm.apiType = hydrated.apiType || 'chat';
-  apiForm.enableThinking = hydrated.enableThinking ?? false;
   apiForm.contextWindowTokens =
     hydrated.contextWindowTokens != null ? String(hydrated.contextWindowTokens) : '';
   apiModels.value = hydrated.models?.length
@@ -337,7 +334,6 @@ async function saveApi() {
     model: apiForm.model,
     models: apiModels.value.length > 0 ? apiModels.value : [apiForm.model].filter(Boolean),
     apiType: apiForm.apiType,
-    enableThinking: apiForm.enableThinking,
     contextWindowTokens: normalizeContextWindowTokens(apiForm.contextWindowTokens),
   };
   const wasEditing = Boolean(editingApiId.value);
@@ -562,17 +558,6 @@ async function deleteApi(id: string) {
             高级设置
           </button>
           <div v-if="showAdvancedApi" class="advanced-body">
-            <label class="form-label form-label-stacked">
-              <span class="form-check-row">
-                <input v-model="apiForm.enableThinking" type="checkbox" />
-                开启思维链 (DeepSeek thinking)
-              </span>
-            </label>
-            <p class="form-hint">
-              启用后每次调用该 API 池的请求都会携带
-              <code>thinking: {"{"} type: 'enabled' {"}"}</code> +
-              <code>reasoning_effort: 'high'</code>，让模型在输出前先进行深度思考。
-            </p>
             <!-- 🆕 2026-08-22 Delta 会话（T4）：可选上下文窗口 token 上限。出图端点没有聊天
                  prompt，这一格对它们无意义，隐藏掉。 -->
             <label v-if="!isImageEntry" class="form-label form-label-stacked">

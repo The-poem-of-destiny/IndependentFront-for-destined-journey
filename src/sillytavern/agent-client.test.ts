@@ -212,6 +212,20 @@ describe('AgentClient', () => {
       expect(body.user_id).toBe('fp|story');
     });
 
+    it('请求体不注入供应商专属的思考开关', async () => {
+      const mockFn = mockFetch({
+        choices: [{ message: { content: 'ok' } }],
+        usage: { total_tokens: 10 },
+      });
+      globalThis.fetch = mockFn;
+
+      await client.chat({ messages: [{ role: 'user', content: 'test' }] });
+
+      const body = JSON.parse(mockFn.mock.calls[0][1].body);
+      expect(body).not.toHaveProperty('thinking');
+      expect(body).not.toHaveProperty('reasoning_effort');
+    });
+
     it('应解包 Cline 网关的 data 信封（非流式响应包在顶层 data 里）', async () => {
       // 真机踩坑(2026-07-31): api.cline.bot 的非流式响应形如 {data:{choices:[...],usage:{...}}}，
       // 直接读顶层 choices 会静默解析成空字符串。流式 chunk 是标准形态，不受影响。

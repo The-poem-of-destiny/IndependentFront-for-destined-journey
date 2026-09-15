@@ -59,7 +59,6 @@ export interface ApiEntry {
   models: string[];
   /** `'image'` = 出图端点（NovelAI），由图像生成分区的端点选择器筛选 */
   apiType: 'chat' | 'embedding' | 'image';
-  enableThinking?: boolean;
   /**
    * 🆕 2026-08-22 Delta 会话（T4）：上下文窗口 token 上限（可选主动重基线依据）。
    * 只接受正整数；空值（undefined）表示不做主动预算判断。映射进 `ApiEndpoint.contextWindowTokens`。

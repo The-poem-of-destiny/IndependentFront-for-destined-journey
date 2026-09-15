@@ -19,7 +19,6 @@ export interface StoredApiEntry {
    *    值一律翻成 `'chat'`，而它跑在每次启动的读取路径上。
    */
   apiType: 'chat' | 'embedding' | 'image';
-  enableThinking?: boolean;
   /** 🆕 2026-08-22 Delta 会话（T4）：上下文窗口 token 上限（非密钥字段，跟着映射走） */
   contextWindowTokens?: number;
 }
@@ -81,7 +80,6 @@ function readEntries(settings: Record<string, unknown>): StoredApiEntry[] {
           ? entry.models.filter((model): model is string => typeof model === 'string')
           : [],
         apiType: normalizeApiType(entry.apiType),
-        enableThinking: entry.enableThinking === true,
         // 🆕 2026-08-22：contextWindowTokens 只认正整数，其余一律 undefined（不做主动预算判断）
         contextWindowTokens:
           typeof entry.contextWindowTokens === 'number' &&
@@ -103,7 +101,6 @@ export function apiEntryToEndpoint(entry: StoredApiEntry): ApiEndpoint {
     defaultModel: entry.model,
     models: [...entry.models],
     timeout: 60000,
-    enableThinking: entry.enableThinking,
     contextWindowTokens: entry.contextWindowTokens,
   };
 }
@@ -119,7 +116,6 @@ export function apiEndpointToEntry(endpoint: ApiEndpoint, local?: StoredApiEntry
     model: local?.model ?? endpoint.defaultModel,
     models: local?.models?.length ? [...local.models] : [...(endpoint.models ?? [])],
     apiType: local?.apiType ?? normalizeApiType(endpoint.provider),
-    enableThinking: local?.enableThinking ?? endpoint.enableThinking ?? false,
     contextWindowTokens: local?.contextWindowTokens ?? endpoint.contextWindowTokens,
   };
 }

@@ -342,8 +342,6 @@ export interface ApiEndpoint {
   defaultModel: string;
   models: string[]; // 可用模型列表
   timeout: number;
-  /** DeepSeek 思考模式：设 true 后所有走这个 endpoint 的请求都会开启 thinking */
-  enableThinking?: boolean;
   /**
    * 🆕 2026-08-22 Delta 会话（ADR 设计 §8.3 / §9）：该端点的上下文窗口 token 上限，
    * 由使用者按实际 provider 配置；**不维护内置模型能力表，不按 model 名硬编码上限**。

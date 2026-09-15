@@ -89,7 +89,6 @@ export function buildApiEndpoints(apiPool: readonly unknown[]): ApiEndpoint[] {
     defaultModel: entry.defaultModel || entry.model || '', // ← 关键：ApiEntry.model → ApiEndpoint.defaultModel
     models: entry.models || [],
     timeout: entry.timeout ?? 60000,
-    enableThinking: entry.enableThinking ?? false, // API 池思考链开关
     // 🆕 T4（设计 §8.3 / §9）：contextWindowTokens 透传，但只认正整数 ——
     //    localStorage 是用户可编辑的，坏值（0/负数/浮点/字符串）一律 undefined
     //    （不做主动预算判断），与 api-key-migration 的 readEntries 同一口径。

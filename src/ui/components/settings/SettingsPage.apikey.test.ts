@@ -92,3 +92,10 @@ describe('ApiSection.vue API Key 编辑态', () => {
     expect(source).toMatch(/_realKey\s*\|\|\s*apiForm\.apiKey/);
   });
 });
+
+describe('ApiSection.vue 高级设置', () => {
+  it('不再提供 DeepSeek 专属的思维链开关', () => {
+    expect(apiSectionSource).not.toContain('开启思维链');
+    expect(apiSectionSource).not.toContain('reasoning_effort');
+  });
+});

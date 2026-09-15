@@ -241,7 +241,6 @@ async function buildExportData() {
       defaultModel: ep.defaultModel,
       apiType: ep.apiType,
       provider: ep.provider,
-      enableThinking: ep.enableThinking,
     })),
     // Q-18: per-Agent 设置已合并成一张 `agents` 表；导出整张，调试面要的是全貌
     agents: sysSettings.agents,

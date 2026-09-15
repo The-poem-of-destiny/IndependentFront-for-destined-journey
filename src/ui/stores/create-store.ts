@@ -998,7 +998,6 @@ export const useCreateStore = defineStore('create', () => {
         defaultModel: entry.defaultModel || entry.model || '',
         models: entry.models || [],
         timeout: entry.timeout ?? 60000,
-        enableThinking: entry.enableThinking ?? false,
       })) as ApiEndpoint[];
       const poolId = getAgentSettings(
         s,

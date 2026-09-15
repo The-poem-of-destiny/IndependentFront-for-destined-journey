@@ -767,22 +767,6 @@ export class AgentClient {
       body.tool_choice = request.tool_choice ?? 'auto';
     }
 
-    // 🆕 思考模式控制：
-    // - enableThinking=true → 开启思考（DeepSeek: thinking + reasoning_effort=high；Ollama: 默认开启）
-    // - enableThinking=false → 显式关闭思考（thinking.type=disabled）
-    //   关键修复(2026-07-30): Ollama 思考模型（glm-5.2 等）默认开启 thinking，且 think:false
-    //   在 /v1/chat/completions 上被静默忽略（ollama#14820）。若不显式关闭，思考会耗尽
-    //   max_tokens 导致 content 永远为空 → 所有 agent 输出空白。
-    //   注意: 不用 reasoning_effort=none，因为非思考模型（如 deepseek-v4-flash）
-    //   不认识 'none'（只认 high/low/medium/max/xhigh），会报 HTTP 400。
-    //   改用标准 OpenAI 字段 thinking.type=disabled 关闭，兼容性更好。
-    if (this.endpoint.enableThinking) {
-      body.thinking = { type: 'enabled' };
-      body.reasoning_effort = 'high';
-    } else {
-      body.thinking = { type: 'disabled' };
-    }
-
     return body;
   }
 
