@@ -25,7 +25,7 @@
 
 | 文件 | 说明 | 来源 |
 |------|------|------|
-| `fated-poem-debug-*.json` | Agent 日志导出（`agentHistory` 含当前存档最近 **10 回合**的每次调用：messages、rawResponse、duration、usage、工具轮次与 Delta 诊断，并单列 `memory_embedding` 与 `memory_recall` 的 Embedding provider usage；`agentLog` 兼容指向最新回合；另含整张 `agents` 设置表与 EJS 三类诊断） | 游戏页 DebugPanel 导出按钮（`src/ui/components/game/DebugPanel.vue`） |
+| `fated-poem-debug-*.json` | Agent 日志导出（`agentHistory` 含当前存档最近 **10 条调试回合**的每次调用：messages、rawResponse、duration、usage、工具轮次与 Delta 诊断；剧情回合与延后启动的整场战斗各占一条，战斗条目内按 `combat_v3` / `combat_enemy` 区分角色；`agentLog` 兼容指向最新调试回合；另含整张 `agents` 设置表与 EJS 三类诊断） | 游戏页 DebugPanel 导出按钮（`src/ui/components/game/DebugPanel.vue`） |
 | `log.txt` | 浏览器 Console 日志（含 console.log/error/warn） | 浏览器 F12 Console 复制 |
 
 **命名约定**：保持 debug JSON 自动生成的文件名不变，方便追溯。
@@ -41,7 +41,7 @@ Claude 接收到导出数据后，按以下清单**并行分派 Agent**（一个
 | # | 分析维度 | Agent 任务描述 | 关注点 |
 |---|---------|---------------|--------|
 | 1 | **Story 思维链** | 读 JSON 中 story agent 的 system message + rawResponse | System prompt 是否完整？输出是否有 `<thinking>` / Step 标记？是否按 `<maintext>/<option>/...` XML 格式输出？ |
-| 2 | **其他 Agent 调用** | 读 JSON 中**所有**已注册 Agent 的状态（`agent-config.json` 13 个：story / memory_recall / plot_pre_check / craft_gen / char_gen / item_gen / memory_summary / plot_post_check / plot_outline / request_dispatcher / vars_update / combat_v3 / image_prompt） | 哪些被跳过（model 空）？哪些报错？rawResponse 是否为空？是否有 "missing field `model`" 等 API 错误？ |
+| 2 | **其他 Agent 调用** | 读 JSON 中**所有**已注册 Agent 的状态（`agent-config.json` 2026-09-15 实测 14 个：story / memory_recall / plot_pre_check / craft_gen / char_gen / item_gen / memory_summary / plot_post_check / plot_outline / request_dispatcher / vars_update / combat_v3 / combat_enemy / image_prompt） | 哪些被跳过（model 空）？哪些报错？rawResponse 是否为空？是否有 "missing field `model`" 等 API 错误？ |
 | 3 | **memory_summary 质量** | 读 JSON 中 memory_summary 的 rawResponse | content 是否过于啰嗦？hiddenLine 是否在数据为空时编造内容？keywords 是否有重复？ |
 | 4 | **前端 UI 行为** | 读 log.txt + 相关 Vue 组件 | `isGenerating` 是否正确切换？中断按钮是否出现？开场白是否过长？ |
 | 5 | **开场白质量** | 读 log.txt 中 `openingPrompt length` + JSON 中 story 的 rawResponse | 开场白是否包含过长的命定核心全文？是否包含 `[object Object]` 等字符串污染？ |
@@ -66,8 +66,10 @@ Agent 5: 分析开场白 → 读 tests/realtime_export/log.txt + create-store.ts
 > 🔴 **这五个维度定型于战斗 v3 会话、图像生成、地图、随机事件、管线并行化落地之前（2026-08-18 补注）**。
 > 它们仍是默认起手式，但遇到下列子系统的 bug 时，**按需临时加一个维度**，并在导出 JSON / log.txt 里多看这几样：
 >
-> - **战斗 v3 会话**（战斗主持人/DM）：看 `combat_v3` 那条 Agent 记录的 tools 调用序列与 `<combat_summary>`；
->   熔断（`SLOT_EXHAUSTED` 之类）与骰池续骰中断都只在 log.txt 里留痕。
+> - **战斗 v3 会话**：看整场战斗的独立调试回合，其中 `combat_v3` 是主持人、`combat_enemy` 是敌方决策；
+>   每个角色的请求、响应、工具参数/结果与重试会按 invocation 序号保留。熔断（`SLOT_EXHAUSTED` 之类）
+>   与骰池续骰中断仍只在 log.txt 里留痕。📌 2026-09-15 起，战斗从就绪页延后启动时也会显式创建并收尾
+>   Debug Turn，不再落入不存在的 `detached` 回合而被静默丢弃。
 > - **图像生成**：看 `image_prompt` 的三个输出标签是否齐全，以及 story 正文里 `<scene_image>` 锚点的位置与数量（一回合至多一处）。
 > - **地图**：看 `player.location` 这条路径真源与地块落位是否一致 —— 落位失败是**静默不动**，只有日志会说话。
 > - **随机事件**：看 `{{RANDOM_EVENTS}}` 注入串与 story 回执的 `<event_trigger name="…"/>`；名字不在池中会 warn 后忽略。
@@ -204,8 +206,8 @@ Should it be shortened to a brief reference since world books already include it
 
 | 文件 | 内容 | 何时查阅 |
 |------|------|---------|
-| `public/data/defaults/agent-config.json` | **13 个** Agent 的 systemPrompt + template + preset（2026-08-18 复核） | Agent 行为异常 |
-| `src/sillytavern/agent-templates.ts` | buildAgentMessages + fallback 逻辑；`AGENT_TEMPLATES` 现有 **15** 条（上表 13 个中 `combat_v3` 在这里键名是 `combat`，另加 `plot_check` / `plot_correct` 两条 v3 兼容别名） | 预设/SYS_PROMPT 未注入 |
+| `public/data/defaults/agent-config.json` | **14 个** Agent 的 systemPrompt + template + preset（2026-09-15 实测，含 `combat_v3` / `combat_enemy`） | Agent 行为异常 |
+| `src/sillytavern/agent-templates.ts` | buildAgentMessages + fallback 逻辑；`AGENT_TEMPLATES` 现有 **15** 条（2026-09-15 实测；`combat_v3` 的旧闭包键名是 `combat`，`combat_enemy` 直接走配置模板，另有 `plot_check` / `plot_correct` 两条 v3 兼容别名） | 预设/SYS_PROMPT 未注入 |
 | `src/sillytavern/agent-orchestrator.ts` | 编排引擎 + OrchestratorOptions | 世界书/预设传递断裂 |
 | `src/sillytavern/agent-client.ts` | API 调用 + chatWithTools + SSE 流式 | API 调用错误 |
 | `src/sillytavern/worldbook-loader.ts` | 世界书加载/过滤/格式化 | 世界书注入异常 |

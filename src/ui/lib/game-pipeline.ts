@@ -2460,10 +2460,17 @@ export class GamePipeline {
       this.game.exitCombat();
       return null;
     }
+    // 战斗从「就绪」页由玩家另行启动，此时触发它的剧情回合已经在 run() finally 中
+    // 结束，activeRunId 也已清空。若继续无参调用 getClientFactory()，包装器会把请求
+    // 归到不存在的 `detached` turn，addAgentLogEntry 随即静默丢弃整场战斗日志。
+    // 因此真开战后单独建立一条 activity/debug 共用账本；主持人和敌方的多次请求都
+    // 用同一 runId，以 agentId + invocation ordinal 区分，暂停重试期间保持 running。
+    let combatRunId: string | null = null;
+    let combatRunOutcome: 'completed' | 'failed' | 'cancelled' = 'failed';
+    let combatRunMessage: string | undefined;
     try {
       const context = this.currentContext ?? this.buildContext('');
       this.game.enterCombat();
-      this.game.updateAgentStatus('combat_v3');
 
       const { runCombatV3 } = await import('@engine/combat-v3');
       const { characterToCombatParticipant } = await import('@engine/combat-v2-types');
@@ -2523,9 +2530,20 @@ export class GamePipeline {
       };
       if (participants.length === 0 || !playerC) {
         this.game.exitCombat();
-        this.game.clearAgentStatus('combat_v3');
         return null;
       }
+
+      const sourceMessageId = [...this.game.messages]
+        .reverse()
+        .find((message) => message.role === 'user')?.id;
+      combatRunId = this.game.startAgentActivityRun(sourceMessageId, true);
+      this.game.startAgentLogTurn({
+        id: combatRunId,
+        saveId: this.saveId,
+        turn: this.game.activeSave?.metadata?.totalTurns ?? 0,
+        sourceMessageId,
+      });
+      this.game.updateAgentStatus('combat_v3', combatRunId);
 
       // T16 §3.5：_lastCombatMarker 已由就绪版 handleCombatTriggerV3 存档
       //（重开战斗 restart 回调与二次开始都复用它），这里不再重复赋值。
@@ -2654,7 +2672,7 @@ export class GamePipeline {
         saveId: this.saveId,
         bundle,
         deps: {
-          clientFactory: this.getClientFactory(),
+          clientFactory: this.getClientFactory(combatRunId),
           endpoint,
           enemyEndpoint,
           combatAgentSplitEnabled,
@@ -2694,7 +2712,8 @@ export class GamePipeline {
         onCombatEvent: (evt) => this.game.applyCombatEvent(evt),
       });
 
-      this.game.clearAgentStatus('combat_v3');
+      combatRunOutcome = result.aborted ? 'cancelled' : 'completed';
+      if (result.aborted) combatRunMessage = '战斗已放弃。';
       // 🔴 2026-08-13 真机 debug：战斗终局的 commitChatState 只写 Dexie，而本条链路
       //（store.startCombat → coordinator.start → startCombatV3）不经过 run() 的
       // finally —— store 从不回读，HUD 一直是开战前的血量/经验（满血假象）。
@@ -2746,15 +2765,29 @@ export class GamePipeline {
       if (isAbortError(err)) {
         // 战斗被取消：照样 exitCombat（不能把玩家留在一个不再推进的战斗面板里），
         // 但不报错状态。内核状态本来就只在终局才落库，中途取消零写入。
-        this.game.clearAgentStatus('combat_v3');
+        combatRunOutcome = 'cancelled';
+        combatRunMessage = '战斗已取消。';
         this.game.exitCombat();
         console.log('[GamePipeline] combat_v3 已取消（离开游戏页 / 停止生成）');
         return null;
       }
-      this.game.clearAgentStatus('combat_v3', String(err));
+      combatRunOutcome = 'failed';
+      combatRunMessage = err instanceof Error ? err.message : String(err);
       this.game.exitCombat();
       console.error('[GamePipeline] combat_v3 失败:', err);
       return null;
+    } finally {
+      if (combatRunId) {
+        this.game.finishAgentActivityRun(combatRunId, combatRunOutcome, combatRunMessage);
+        this.game.finishAgentLogTurn(combatRunId, combatRunOutcome);
+        const debugPrefix = `${combatRunId}\u0000`;
+        for (const key of this.debugInvocationCounts.keys()) {
+          if (key.startsWith(debugPrefix)) this.debugInvocationCounts.delete(key);
+        }
+        for (const key of this.mainInvocationIds.keys()) {
+          if (key.startsWith(debugPrefix)) this.mainInvocationIds.delete(key);
+        }
+      }
     }
   }
 

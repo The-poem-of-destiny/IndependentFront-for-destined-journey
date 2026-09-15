@@ -864,6 +864,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 本组件只**装**那两份契约，不在这里另写第二套消息协议
 │   │   ├── DebugPanel.vue           ← 调试面板（`activeModal === 'debug'` 且 `developerMode`）：
 │   │   │                               Agent 请求/响应 + EJS 后端状态 + 引擎设置 + **随机事件区块**
+│   │   │                               战斗从就绪页延后启动时由 `game-pipeline` 建独立 Debug Turn；
+│   │   │                               `combat_v3` / `combat_enemy` 共账本分条记录，禁止回落 `detached`
 │   │   ├── random-event-debug.ts    ← [随机事件 v1] 上者随机事件区块的展示层判定（纯函数，不 mount 可测）
 │   │   │                               🔴 **不装任何判据的第二实现**：硬门槛走 `evaluateEventCondition`、
 │   │   │                                  权重走 `computeEventWeight`、上下文走
