@@ -7,13 +7,17 @@ import type { ApiEndpoint } from '../types';
 import type { CombatClient } from '../combat-v2-types';
 
 function resultWith(name: string, args: Record<string, unknown>) {
+  return resultWithMany([{ name, args }]);
+}
+
+function resultWithMany(calls: Array<{ name: string; args: Record<string, unknown> }>) {
   return {
     output: '',
     rawResponse: '',
     tokensUsed: 0,
     cacheHit: false,
     duration: 0,
-    toolCalls: [{ name, arguments: args, result: { ok: true } }],
+    toolCalls: calls.map(({ name, args }) => ({ name, arguments: args, result: { ok: true } })),
   };
 }
 
@@ -132,5 +136,81 @@ describe('combat agent split coordinator wire', () => {
         empty.ctx as never,
       ),
     ).rejects.toThrow('没有提交任何获准的战斗命令');
+  });
+
+  it('允许敌方在攻击后以 EndTurn 收尾', async () => {
+    const wire = setup(
+      resultWith('pass_slot', { actorName: '甲', slot: 'attack' }),
+      resultWithMany([
+        {
+          name: 'declare_attack',
+          args: { actorName: '乙', targetName: '甲', intentionLevel: '战术' },
+        },
+        { name: 'end_turn', args: { actorName: '乙' } },
+      ]),
+    );
+
+    const result = await routeEnemyCommand(
+      { kind: 'PlayerCommand', unitId: '乙', unitName: '乙', round: 1 },
+      wire.session,
+      wire.ctx as never,
+    );
+
+    expect(result.commands.map((command) => command.kind)).toEqual(['DeclareAttack', 'EndTurn']);
+  });
+
+  it('非法结束顺序暂停后，把精确校验原因回馈给重试请求', async () => {
+    const wire = setup(
+      resultWith('pass_slot', { actorName: '甲', slot: 'attack' }),
+      resultWith('pass_slot', { actorName: '乙', slot: 'attack' }),
+    );
+    const responses = [
+      resultWithMany([
+        { name: 'end_turn', args: { actorName: '乙' } },
+        {
+          name: 'declare_attack',
+          args: { actorName: '乙', targetName: '甲', intentionLevel: '战术' },
+        },
+      ]),
+      resultWith('pass_slot', { actorName: '乙', slot: 'attack' }),
+    ];
+    wire.factory.mockImplementation((agentId: string) => {
+      return {
+        chatWithTools: vi.fn(async (request) => {
+          const rows = wire.requests.get(agentId) ?? [];
+          rows.push({
+            messages: structuredClone(request.messages),
+            tools: structuredClone((request.tools ?? []) as unknown[]),
+          });
+          wire.requests.set(agentId, rows);
+          return responses.shift();
+        }),
+        chat: vi.fn(),
+      } as unknown as CombatClient;
+    });
+    const onCombatEvent = vi.fn();
+    Object.assign(wire.ctx, {
+      onCombatEvent,
+      waitForAgentResume: vi.fn().mockResolvedValue('retry'),
+    });
+
+    const result = await routeEnemyCommand(
+      { kind: 'PlayerCommand', unitId: '乙', unitName: '乙', round: 1 },
+      wire.session,
+      wire.ctx as never,
+    );
+
+    expect(result.commands.map((command) => command.kind)).toEqual(['PassAttack']);
+    expect(onCombatEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'v3_agent_paused',
+        role: 'combat_enemy',
+        message: '结束回合命令必须是本次决策批次的最后一条命令',
+      }),
+    );
+    const retryMessages = JSON.stringify(wire.requests.get('combat_enemy')?.[1]?.messages);
+    expect(retryMessages).toContain('上次决策未通过代码校验');
+    expect(retryMessages).toContain('end_turn → declare_attack');
+    expect(retryMessages).toContain('结束回合命令必须是本次决策批次的最后一条命令');
   });
 });

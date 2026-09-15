@@ -310,6 +310,7 @@ export const useGameStore = defineStore('game', () => {
           unitId: evt.unitId,
           round: evt.round,
         };
+        recordCombatAgentPauseError(evt.role, evt.message);
         combatAwaitingInput.value = null;
         break;
       case 'v3_agent_resumed':
@@ -695,6 +696,30 @@ export const useGameStore = defineStore('game', () => {
 
   async function flushAgentLogWrites(): Promise<void> {
     await debugLogWriteQueue;
+  }
+
+  /**
+   * Provider 请求可能已成功，但 Coordinator 在工具批次校验阶段仍会暂停。
+   * 把这层失败回写到最近一次对应 Agent 调用，否则导出日志会错误显示 error=null。
+   */
+  function recordCombatAgentPauseError(
+    role: 'combat_host' | 'combat_enemy',
+    message: string,
+  ): void {
+    const turn = [...agentLogHistory.value]
+      .reverse()
+      .find((candidate) => candidate.status === 'running');
+    if (!turn) return;
+    const agentId = role === 'combat_enemy' ? 'combat_enemy' : 'combat_v3';
+    const entry = [...turn.entries].reverse().find((candidate) => candidate.agentId === agentId);
+    if (!entry) return;
+    const coordinatorError = `战斗协调器：${message}`;
+    if (!entry.error) {
+      entry.error = coordinatorError;
+    } else if (!entry.error.includes(message)) {
+      entry.error = `${entry.error}；${coordinatorError}`;
+    }
+    queueDebugTurnWrite(turn);
   }
 
   function startAgentLogTurn(input: {

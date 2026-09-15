@@ -1394,6 +1394,37 @@ export async function routeHostCommand(
     throw new CombatAgentDecisionError(role, result.error);
   }
 
+  let commands: CombatCommand[];
+  try {
+    commands = commandsFromResult(
+      result,
+      decisionContext?.sourceRevision ?? session.snapshot().revision,
+      req.unitId,
+      session,
+      decisionContext,
+      split,
+    );
+  } catch (error) {
+    // 调用已经在 Provider 侧成功结束，失败发生在 Code 的整批命令校验阶段。
+    // 不能只弹「重试」却不给模型原因，否则同一战况下它会原样提交同一批命令。
+    // 保留本次请求前已经存在的 system/战况消息，不回流未提交的 tool roundtrip，
+    // 只追加一条明确纠错；下一次 decide 会再附最新 Kernel 面板。
+    if (split) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const attempted = (result.toolCalls ?? [])
+        .filter((call) => !isCombatQueryTool(call.name) && call.name !== 'write_summary')
+        .map((call) => call.name)
+        .join(' → ');
+      messages.push({
+        role: 'user',
+        content:
+          `【上次决策未通过代码校验】${attempted ? `尝试顺序：${attempted}。` : ''}` +
+          `这些命令均未提交，原因：${reason}。请依据下一条最新战况重新调用工具，不要用文本假装行动已发生。`,
+      });
+    }
+    throw error;
+  }
+
   // T11（设计 2026-08-09 §2.2 write_summary 改造）：终局摘要收集 —— 扫描本次回合的
   // 工具调用，把 write_summary(text) 收进 combatSession.summary（终局回注正文用）。
   // 放在统一收口处而非 executor 内部：真实 agent-client 会执行 executor，但测试 mock
@@ -1420,14 +1451,7 @@ export async function routeHostCommand(
   }
 
   return {
-    commands: commandsFromResult(
-      result,
-      decisionContext?.sourceRevision ?? session.snapshot().revision,
-      req.unitId,
-      session,
-      decisionContext,
-      split,
-    ),
+    commands,
     narration,
   };
 }
@@ -2345,18 +2369,38 @@ function commandsFromResult(
     const actor = view.units[actorId];
     const attackCosts = commands.filter((command) => command.cost === 'attack').length;
     const actionCosts = commands.filter((command) => command.cost === 'action').length;
-    const terminalCommands = commands.filter(
-      (command) => command.kind === 'Flee' || command.kind === 'EndTurn',
+    const terminalIndexes = commands.flatMap((command, index) =>
+      command.kind === 'Flee' || command.kind === 'EndTurn' ? [index] : [],
     );
+    const fleeIndex = commands.findIndex((command) => command.kind === 'Flee');
+    if (!actor) {
+      throw new CombatAgentDecisionError(
+        decisionContext?.logicalRole ?? 'combat_host',
+        '当前行动单位已不在战场',
+      );
+    }
     if (
-      !actor ||
       (UNIT_TURN_PHASES.has(view.phase) && attackCosts > actor.attacksRemaining) ||
-      (UNIT_TURN_PHASES.has(view.phase) && actionCosts > actor.actionsRemaining) ||
-      (terminalCommands.length > 0 && commands.length > 1)
+      (UNIT_TURN_PHASES.has(view.phase) && actionCosts > actor.actionsRemaining)
     ) {
       throw new CombatAgentDecisionError(
         decisionContext?.logicalRole ?? 'combat_host',
-        '本次命令批次超过当前单位的可用槽位或在结束类命令后仍附带行动',
+        '本次命令批次超过当前单位的可用槽位',
+      );
+    }
+    // EndTurn 可以合法地放在已执行攻击/动作之后，reducer 本来就支持
+    // 「DeclareAttack → EndTurn」；只禁止结束类命令后继续夹带行动。
+    // Flee 自身会消耗整轮资源，仍要求独占批次。
+    if (
+      terminalIndexes.length > 1 ||
+      (terminalIndexes.length === 1 && terminalIndexes[0] !== commands.length - 1) ||
+      (fleeIndex >= 0 && commands.length > 1)
+    ) {
+      throw new CombatAgentDecisionError(
+        decisionContext?.logicalRole ?? 'combat_host',
+        fleeIndex >= 0
+          ? '逃跑命令必须独占本次决策批次'
+          : '结束回合命令必须是本次决策批次的最后一条命令',
       );
     }
   }

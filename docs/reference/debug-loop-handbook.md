@@ -69,7 +69,8 @@ Agent 5: 分析开场白 → 读 tests/realtime_export/log.txt + create-store.ts
 > - **战斗 v3 会话**：看整场战斗的独立调试回合，其中 `combat_v3` 是主持人、`combat_enemy` 是敌方决策；
 >   每个角色的请求、响应、工具参数/结果与重试会按 invocation 序号保留。熔断（`SLOT_EXHAUSTED` 之类）
 >   与骰池续骰中断仍只在 log.txt 里留痕。📌 2026-09-15 起，战斗从就绪页延后启动时也会显式创建并收尾
->   Debug Turn，不再落入不存在的 `detached` 回合而被静默丢弃。
+>   Debug Turn，不再落入不存在的 `detached` 回合而被静默丢弃；Coordinator 的批次校验暂停原因
+>   也会写入触发它的 Agent 调用 `error`，不要再把 Provider 成功但 `error=null` 解读为命令已提交。
 > - **图像生成**：看 `image_prompt` 的三个输出标签是否齐全，以及 story 正文里 `<scene_image>` 锚点的位置与数量（一回合至多一处）。
 > - **地图**：看 `player.location` 这条路径真源与地块落位是否一致 —— 落位失败是**静默不动**，只有日志会说话。
 > - **随机事件**：看 `{{RANDOM_EVENTS}}` 注入串与 story 回执的 `<event_trigger name="…"/>`；名字不在池中会 warn 后忽略。

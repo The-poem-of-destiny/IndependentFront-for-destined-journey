@@ -1623,6 +1623,48 @@ describe('Agent 调试历史', () => {
     expect(reloaded.agentLog).toHaveLength(2);
     expect(reloaded.agentLogHistory[0].status).toBe('completed');
   });
+
+  it('把 Coordinator 暂停原因写入对应战斗 Agent 调用并持久化', async () => {
+    await saveSaveSlot(makeSaveSlot());
+    const game = makeStore();
+    await game.loadSave(SAVE_ID);
+    game.startAgentLogTurn({ id: 'combat-run', saveId: SAVE_ID, turn: 2 });
+    game.addAgentLogEntry({
+      invocationId: 'combat-run:combat_enemy:1',
+      turnId: 'combat-run',
+      agentId: 'combat_enemy',
+      label: '敌方决策',
+      endpointId: 'enemy-ep',
+      endpointName: 'Enemy API',
+      baseUrl: 'https://api.example.test',
+      model: 'model',
+      messages: [{ role: 'system', content: 'prompt' }],
+      rawResponse: '',
+      tokensUsed: 10,
+      cacheHit: false,
+      duration: 20,
+      startedAt: 100,
+      completedAt: 120,
+    });
+
+    game.applyCombatEvent({
+      type: 'v3_agent_paused',
+      role: 'combat_enemy',
+      message: '结束回合命令必须是本次决策批次的最后一条命令',
+      unit: '乙',
+      unitId: '乙',
+      round: 1,
+    });
+    game.finishAgentLogTurn('combat-run', 'failed');
+    await game.flushAgentLogWrites();
+
+    expect(game.agentLog[0].error).toBe('战斗协调器：结束回合命令必须是本次决策批次的最后一条命令');
+    const reloaded = makeStore();
+    await reloaded.loadSave(SAVE_ID);
+    expect(reloaded.agentLog[0].error).toBe(
+      '战斗协调器：结束回合命令必须是本次决策批次的最后一条命令',
+    );
+  });
 });
 
 // ===== EJS 诊断（工坊 P2 / 能力面）=====
