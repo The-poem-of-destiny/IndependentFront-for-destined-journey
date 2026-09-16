@@ -57,6 +57,7 @@ import type {
   ImagePromptRequest,
 } from '@engine/types-image';
 import type { UiSettings } from '../stores/settings-types';
+import type { ImageApiConnection } from '@engine/types-api';
 import type {
   SceneImageSeams,
   SceneImageSendInput,
@@ -148,6 +149,8 @@ export interface SceneImageWorld {
 export interface SceneImageSeamDeps {
   /** 读设置快照（每次调用现取 —— 用户改完设置不必重挂缝） */
   settings: () => ImageRuntimeSettings;
+  /** Device-local image connections; legacy apiPool fallback exists only for pre-v25 tests/migration. */
+  imageConnections?: () => readonly ImageApiConnection[];
   /**
    * 内容注册表 `imageDialects` 面的**原始值**（生产是 `getContentRegistry().imageDialects`）。
    *
@@ -470,13 +473,14 @@ async function sendOne(
 
   return caps.id === 'comfyui'
     ? sendViaComfy(s, dialect, composed, signal, sendComfy, hash)
-    : sendViaNovelai(s, composed, signal, send, hash);
+    : sendViaNovelai(s, composed, signal, deps, send, hash);
 }
 
 async function sendViaNovelai(
   s: ImageRuntimeSettings,
   composed: ComposedPrompt,
   signal: AbortSignal,
+  deps: SceneImageSeamDeps,
   send: typeof generateNaiImage,
   hash: (bytes: Uint8Array) => Promise<string | undefined>,
 ): Promise<SceneImageSendResult | ImageGenFailure> {
@@ -486,7 +490,9 @@ async function sendViaNovelai(
   // 🔴 这一段**只属于 NAI 分支**（C16）：ComfyUI 的地址住在 `imageComfy.baseUrl`，
   //    根本不进 API 池 —— 让它也来查一次端点，会让本地后端在一个它永远填不上的
   //    「还没选出图端点」上被拦死。
-  const endpoint = (s.apiPool ?? []).find((entry) => entry.id === s.imageNovelai.endpointId);
+  const endpoint =
+    deps.imageConnections?.().find((entry) => entry.id === s.imageNovelai.endpointId) ??
+    (s.apiPool ?? []).find((entry) => entry.id === s.imageNovelai.endpointId);
   if (!endpoint) {
     return localFailure('auth', '还没有选择出图端点，去设置的「图像生成」里选一条', false);
   }

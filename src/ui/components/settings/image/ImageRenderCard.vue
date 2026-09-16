@@ -46,7 +46,8 @@ import { computed, onMounted, ref } from 'vue';
 import AppCard from '../../shared/AppCard.vue';
 import AppButton from '../../shared/AppButton.vue';
 import AppModal from '../../shared/AppModal.vue';
-import { useSettingsStore, type ApiEntry } from '../../../stores/settings-store';
+import { useSettingsStore } from '../../../stores/settings-store';
+import { useApiSourceStore } from '../../../stores/api-source-store';
 import { ensureContentRegistryLoaded, getContentRegistry } from '../../../stores/content-store';
 import { estimateAnlasCost } from '@engine/image-anlas';
 import {
@@ -65,6 +66,7 @@ import type {
 
 const cfg = useSettingsStore();
 const s = cfg.settings;
+const apiSources = useApiSourceStore();
 
 // ═══ 后端（C1/C16）═══
 
@@ -72,7 +74,7 @@ const PROVIDERS: { key: ImageProviderId; label: string; hint: string }[] = [
   {
     key: 'novelai',
     label: 'NovelAI',
-    hint: '远端付费出图。API Key 在「API 配置」里加一条「图像生成」端点，地址由代码持有。',
+    hint: '远端付费出图。API Key 在上方「API 接口设置」中保存，地址由代码持有。',
   },
   {
     key: 'comfyui',
@@ -98,6 +100,7 @@ const isComfy = computed(() => s.imageProvider === 'comfyui');
 const dialectFace = ref<unknown>(getContentRegistry().imageDialects);
 
 onMounted(() => {
+  void apiSources.initialize();
   void ensureContentRegistryLoaded().then(() => {
     dialectFace.value = getContentRegistry().imageDialects;
   });
@@ -197,8 +200,8 @@ function confirmAuto() {
 
 // ═══ 端点（apiType: 'image'）═══
 
-const imageEndpoints = computed<ApiEntry[]>(() =>
-  s.apiPool.filter((entry) => entry.apiType === 'image'),
+const imageEndpoints = computed(() =>
+  apiSources.imageConnections.filter((entry) => entry.provider === 'novelai'),
 );
 
 // ═══ 免费额度指示（D43 / §11.2）═══
@@ -403,8 +406,10 @@ const RATINGS: { key: ImageRating; label: string }[] = [
     <div v-else class="provider-block">
       <div class="form-grid image-grid">
         <label class="form-label"
-          >图像端点
-          <p class="form-hint">在「API 配置」里把类型设为「图像生成」的那些端点会出现在这里</p>
+          >NovelAI 连接
+          <p class="form-hint">
+            连接在上方「API 接口设置」卡中管理；这里选择本次实际出图使用哪一条。
+          </p>
           <select v-model="s.imageNovelai.endpointId" class="form-input">
             <option :value="null">（未选择）</option>
             <option v-for="ep in imageEndpoints" :key="ep.id" :value="ep.id">{{ ep.name }}</option>

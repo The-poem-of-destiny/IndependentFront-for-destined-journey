@@ -149,14 +149,14 @@ describe('ImageSection —— 分区壳', () => {
     expect(w.classes()).toContain('centered');
   });
 
-  it('三张卡都在，且顺序是 提示词生成 → 出图 → 视觉预设（两处花钱的地方在前）', () => {
+  it('四张卡都在，且图像连接在出图参数之前', () => {
     const w = mount(ImageSection, { shallow: true });
     expect(w.findComponent(ImagePromptCard).exists()).toBe(true);
     expect(w.findComponent(ImageRenderCard).exists()).toBe(true);
     expect(w.findComponent(ImagePresetList).exists()).toBe(true);
 
     const order = w.findAll('.image-cards > *').map((el) => el.element.tagName.toLowerCase());
-    expect(order).toHaveLength(3);
+    expect(order).toHaveLength(4);
   });
 });
 

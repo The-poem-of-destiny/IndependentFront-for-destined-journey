@@ -100,19 +100,26 @@ Vue 3 SFC + Pinia。**没有 vue-router**：`App.vue` 用 `ui.currentView` 在�
 `rejected` / `restored` / `projection-failed` 三态；第三态表示权威状态已恢复但投影失败，必须隔离
 当前会话并回首页重新进入存档。
 
+API 配置由 `stores/api-source-store.ts` 水合 Dexie 中的类型化通用源与独立图像连接；
+`settings-store.ts` 只保留绑定 ID、召回模式和非敏感参数。设置页的 Agent 选择器只暴露 LLM，
+记忆页显式绑定 Embedding/Reranker，图像页单独管理 NovelAI/ComfyUI 连接面。
+
 ### ② 引擎（`src/sillytavern/`）
 
-框架无关的纯 TypeScript。子目录只有两处：`combat-v3/`（`automata/` `contract/` `phases/` `fixtures/`）
-与 `image-providers/`。**类型唯一真源是 `types.ts`**，大型联合类型拆 `types-*.ts`
-（现有 `types-audio` / `types-content` / `types-image` / `types-map` / `types-random-events`）。
+框架无关的纯 TypeScript。主要子目录有 `combat-v3/`、`image-providers/` 与 `api/`。
+`api/` 按 OpenAI Chat、Gemini、Claude Messages 分开原生编解码，并为 Embedding/Reranker 提供
+受保护的 OpenAI 兼容请求入口；`AgentClient` 只负责业务重试、取消、RPM 与工具调度。
+**类型唯一真源是 `types.ts`**，大型联合类型拆 `types-*.ts`（API 联合在 `types-api.ts`）。
 
 ### ③ Hono BFF（`server/`）
 
 透传型 BFF：**key 由前端持有**，BFF 只做「加 CORS 头的 fetch 转发器」，零状态。三条硬形状：
 
 - **`BFF_ROUTE_TABLE` 是前缀清单的唯一真源**（`server/app.ts`）。挂载、`BFF_ROUTE_PREFIXES`、
-  `vite.config.ts` 的 dev/preview 两处中间件全部从它派生。现有 7 个前缀：
-  `/api/chat` `/api/status` `/api/embeddings` `/api/models` `/api/image` `/api/worldbooks` `/api/defaults`。
+  `vite.config.ts` 的 dev/preview 两处中间件全部从它派生。2026-09-16 实测为 9 个前缀：
+  `/api/chat` `/api/llm` `/api/status` `/api/embeddings` `/api/rerank` `/api/models` `/api/image`
+  `/api/worldbooks` `/api/defaults`。`/api/llm` 只接受固定协议/操作并安全拼原生路径，模型分页令牌
+  只作为编码后的查询值转发；Gemini/Claude 的鉴权与版本头由同一转发器白名单放行。
   🔴 此前这份白名单在 vite 里被逐字抄了两遍（合计三处手工同步），漏改的症状是
   「代码看着完全正确，请求 404」。加路由**只改这张表**。
 - **`Origin: null` 一律 403**。沙箱 srcdoc frame 会发这个头；放行等于把带凭据的 BFF 变成
@@ -124,9 +131,11 @@ Vue 3 SFC + Pinia。**没有 vue-router**：`App.vue` 用 `ui.currentView` 在�
 
 ### ④ 持久化 + 内容层
 
-- **Dexie v22 / IndexedDB**，30 张表（`database.ts`）。v22 把快照拆成
+- **Dexie v25 / IndexedDB**，34 张表（2026-09-16 实测，`database.ts`）。v22 把快照拆成
   `snapshots`（元数据）+ `snapshotPayloads`（重载荷）—— 列表与淘汰每回合都跑，
   却只用得上 `turn` / `createdAt`，拆表前要把约 30 份整档对话历史在主线程反序列化一遍。
+- v25 新增 `imageApiConnections` 与 `apiConfigMigrations`；两者同 `apiEndpoints` 一样属于设备本地配置，
+  不进入普通整库或单档备份。通用源只承载 LLM / Embedding / Reranker，图像凭据独立存储。
 - **内容包覆盖层**：公开仓只带**零 IP 占位集**（磁盘 `public/data/`，运行期 URL 仍是 `/data/*`）；
   真实内容挂在私有内容仓，dev 期由 `POEM_CONTENT_DIR` 指向内容树做 overlay（中间件先于 Vite
   publicDir 注册，overlay 必然赢）。发行期走内容包（`contentPacks` 表 + 内容注册表注入缝）。

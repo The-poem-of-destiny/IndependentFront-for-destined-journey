@@ -92,6 +92,10 @@ provider 缓存被淘汰时应记录为环境事件并重测，不能修改本�
 
 ## 3. 缓存与正确性不变量
 
+> 📌 2026-09-16 更正：wire transcript 不再假设只有 OpenAI `messages`。逻辑消息之外还可保存对应协议的
+> 原生 assistant 续接数据；Gemini 的 `thoughtSignature` 与 Claude 的 thinking/signature、内容块顺序及
+> 工具 ID 必须原样保留，并且只交回同协议适配器。调试输出不保存这些不透明签名。
+
 1. **wire prefix 才是缓存前缀**：本地保存的必须是实际发给 provider 的 messages，包括
    `AgentClient` 为纯 system 请求补的非空 user 触发消息。
 2. **正确性不依赖缓存命中**：远端缓存缺失只增加成本，不能改变模型收到的语义。
@@ -137,7 +141,9 @@ invalidatePromptSession(handleOrSaveId: PromptSessionHandle | string): void;
 - `completePromptSession` 只接受成功结果；失败和取消走 `invalidatePromptSession`。
 - module 内部可以拆纯函数，但不把 diff 细节、Map 或重基线规则暴露给调用方。
 
-不新增 provider adapter。provider 请求仍由 `AgentClient` 负责；组装 module 只处理进程内数据。
+> 📌 2026-09-16 更正：多协议重构已新增 provider adapter；`AgentClient` 负责业务重试、取消和工具调度，
+> OpenAI Chat、Gemini 与 Claude Messages 的原生编解码分别由 `api/` 下适配器负责。组装 module 仍只处理
+> 进程内会话状态，但保存成功结果附带的原生 assistant 续接数据。
 
 ## 5. 会话身份、签名与生命周期
 
@@ -150,6 +156,7 @@ invalidatePromptSession(handleOrSaveId: PromptSessionHandle | string): void;
 
 - delta 协议版本。
 - endpoint id 与实际 model。
+- endpoint protocol、规范化 URL、连接 revision、body 覆盖/省略配置与适配器版本；Key 不进入签名。
 - Agent systemPrompt 或 story preset 原文。
 - 上下文 template 原文。
 - Agent 可见世界书的 id、enabled、order 与条目原文。
@@ -198,8 +205,8 @@ user:   “继续”触发 + delta 协议说明 + 可选 tail_prompt
 
 这避免在 v1 中重写 story preset、用户自定义 template 或占位符顺序。
 
-成功后保存 provider 返回的 assistant content。下一次请求以前一次完整请求加该 assistant 响应
-作为精确前缀。
+成功后保存 provider 返回的 assistant content 及可选原生续接块。下一次请求以前一次完整请求加该
+assistant 响应作为精确前缀；原生协议由适配器使用未重排、未重建的原始块编码。
 
 ### 6.2 后续请求
 
@@ -340,10 +347,11 @@ baseline 建立时播种的最近窗口；会话存续期间的新消息持续�
 若该值存在，module 使用 provider 最近两次返回的 `prompt_tokens` 计算最近增长量，并在
 
 ```text
-lastPromptTokens + max(0, lastGrowthTokens) + agent.maxTokens >= contextWindowTokens
+lastPromptTokens + max(0, lastGrowthTokens) + actualOutputBudget >= contextWindowTokens
 ```
 
-时于下一轮重基线。若 provider 不返回 prompt token 或字段未配置，则不做不可靠的字符换算；
+其中 `actualOutputBudget` 来自源覆盖/省略之后的真实请求体，而不是旧 Agent 值。若 provider 不返回
+prompt token、字段未配置或扩展参数无法可靠解读，则不做不可靠的字符换算；
 上下文错误沿用现有错误路径，并使本地会话失效，用户重试时从当前状态重基线。
 
 ## 9. 自定义边界

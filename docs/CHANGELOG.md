@@ -9,6 +9,23 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-09-16 API 配置重构｜已实施（设置页宽屏/390px 已走查，真实供应商待验）
+
+- 通用源按 `kind + protocol` 分型为 LLM / Embedding / Reranker；LLM 支持 OpenAI Chat、Gemini 与
+  Claude Messages 原生协议，自定义 body 覆盖/JSON Pointer 省略、实际输出预算和连接 revision 共用一条入口。
+- 新协议适配层归一化普通响应、SSE、usage 与工具调用，同时无损保留 Gemini `thoughtSignature` 和
+  Claude thinking/signature/content blocks；Delta 与战斗会话使用完整 continuation，不再从日志重建。
+- Hono BFF 增加受控 `/api/llm` 与 `/api/rerank`，模型列表支持协议分页；Gemini/Claude 鉴权头进入
+  转发白名单，取消信号贯穿上游请求。
+- Dexie 升至 v25，新增独立 `imageApiConnections` 与可恢复 `apiConfigMigrations`；旧图像端点保留 ID 迁出，
+  localStorage 旧镜像清理后不会复活，NovelAI/ComfyUI 连接归图像分区管理。
+- 修复保存 API 后 Pinia 将嵌套请求体包装为 Proxy、`structuredClone` 因而抛 `DataCloneError` 的阻断问题；
+  通用源投影与独立图像连接统一经 `db-write.detach()` 切断响应式代理，并由真实 Pinia Proxy 用例锁定。
+- 记忆设置改为显式 LLM/Embedding 模式并可选 Reranker；向量空间包含非密钥参数指纹，候选池受数量与
+  字符预算约束，绑定失效或上游失败均返回诊断并以本地重要度/时效非致命兜底。
+- 自动化覆盖协议编解码、流式错误、原生续接、迁移幂等、用途绑定、向量与重排；未使用用户凭据进行
+  OpenAI/Gemini/Claude/Embedding/Reranker/NovelAI/ComfyUI 的真实或付费调用。
+
 ### 2026-09-16 API 池移除供应商专属思维链开关｜已实施
 
 - 删除 API 添加/编辑弹窗中的“开启思维链”选项，并从端点类型、密钥迁移、运行时映射与调试导出中移除对应字段。

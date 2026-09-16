@@ -46,6 +46,7 @@ import type {
   ImagePreset,
 } from './types-image';
 import type { ContentPack } from './types-content';
+import type { ApiConfigMigrationRecord, ImageApiConnection } from './types-api';
 import { hashWorldBook } from './content-source';
 import { applyExpFloor } from './exp-table';
 
@@ -104,7 +105,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-export const DB_VERSION = 24;
+export const DB_VERSION = 25;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -188,6 +189,10 @@ class AppDatabase extends Dexie {
   snapshots!: Table<SnapshotMeta>;
   saves!: Table<SaveSlot>;
   apiEndpoints!: Table<ApiEndpoint>;
+
+  // v25: API configuration v2 device-local image connections and migration checkpoints.
+  imageApiConnections!: Table<ImageApiConnection>;
+  apiConfigMigrations!: Table<ApiConfigMigrationRecord>;
 
   // v23: API 凭据级 RPM 策略；主键是端点 + Key 的 SHA-256 指纹，不存第二份明文 Key。
   apiRateLimitPolicies!: Table<ApiRpmPolicy>;
@@ -666,6 +671,63 @@ class AppDatabase extends Dexie {
 
     this.version(23).stores({ apiRateLimitPolicies: 'credentialId, updatedAt' });
     this.version(24).stores({ debugTurns: 'id, saveId, [saveId+startedAt]' });
+    this.version(25)
+      .stores({
+        imageApiConnections: 'id, provider, name',
+        apiConfigMigrations: 'id, version, status, updatedAt',
+      })
+      .upgrade(async (tx) => {
+        const endpoints = tx.table('apiEndpoints');
+        const imageConnections = tx.table('imageApiConnections');
+        const migrations = tx.table('apiConfigMigrations');
+        const rows = (await endpoints.toArray()) as ApiEndpoint[];
+        for (const row of rows) {
+          const legacyKind = row.kind ?? row.provider;
+          if (legacyKind === 'image') {
+            await imageConnections.put({
+              id: row.id,
+              name: row.name,
+              provider: 'novelai',
+              baseUrl: 'https://image.novelai.net',
+              apiKey: row.apiKey,
+              timeoutMs: row.timeout > 0 ? row.timeout : 120_000,
+              revision: 1,
+            } satisfies ImageApiConnection);
+            await endpoints.delete(row.id);
+            continue;
+          }
+          const kind =
+            legacyKind === 'embedding'
+              ? 'embedding'
+              : legacyKind === 'reranker'
+                ? 'reranker'
+                : 'llm';
+          const protocol =
+            row.protocol ??
+            (kind === 'embedding'
+              ? 'openai-embeddings'
+              : kind === 'reranker'
+                ? 'openai-rerank'
+                : 'openai-chat');
+          await endpoints.put({
+            ...row,
+            provider: kind,
+            kind,
+            protocol,
+            timeoutMs: row.timeoutMs ?? (row.timeout > 0 ? row.timeout : 60_000),
+            bodyOverrides: row.bodyOverrides ?? {},
+            bodyOmitPaths: row.bodyOmitPaths ?? [],
+            revision: row.revision ?? 1,
+          });
+        }
+        await migrations.put({
+          id: 'api-configuration-v2',
+          version: 2,
+          status: 'written',
+          updatedAt: Date.now(),
+          details: { migratedBy: 'dexie-v25' },
+        } satisfies ApiConfigMigrationRecord);
+      });
   }
 }
 
@@ -1871,6 +1933,32 @@ export async function deleteApiEndpoint(id: string): Promise<void> {
   await getDatabase().apiEndpoints.delete(id);
 }
 
+// --- Image API connections / API config migration checkpoints (v25) ---
+
+export async function getImageApiConnections(): Promise<ImageApiConnection[]> {
+  return getDatabase().imageApiConnections.toArray();
+}
+
+export async function saveImageApiConnection(connection: ImageApiConnection): Promise<string> {
+  await getDatabase().imageApiConnections.put(connection);
+  return connection.id;
+}
+
+export async function deleteImageApiConnection(id: string): Promise<void> {
+  await getDatabase().imageApiConnections.delete(id);
+}
+
+export async function getApiConfigMigration(
+  id: string,
+): Promise<ApiConfigMigrationRecord | undefined> {
+  return getDatabase().apiConfigMigrations.get(id);
+}
+
+export async function saveApiConfigMigration(record: ApiConfigMigrationRecord): Promise<string> {
+  await getDatabase().apiConfigMigrations.put(record);
+  return record.id;
+}
+
 // --- API RPM Policies (v23) ---
 
 export async function getApiRpmPolicies(): Promise<ApiRpmPolicy[]> {
@@ -1883,6 +1971,14 @@ export async function saveApiRpmPolicies(policies: readonly ApiRpmPolicy[]): Pro
     await db.apiRateLimitPolicies.clear();
     if (policies.length > 0) await db.apiRateLimitPolicies.bulkPut([...policies]);
   });
+}
+
+export async function saveApiRpmPolicy(policy: ApiRpmPolicy): Promise<void> {
+  await getDatabase().apiRateLimitPolicies.put(policy);
+}
+
+export async function deleteApiRpmPolicy(credentialId: string): Promise<void> {
+  await getDatabase().apiRateLimitPolicies.delete(credentialId);
 }
 
 // --- Plot Outlines (Phase 4) ---

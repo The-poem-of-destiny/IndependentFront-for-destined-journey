@@ -115,6 +115,14 @@ export async function forward(c: Context, suffix: string): Promise<Response> {
   if (auth) headers['Authorization'] = auth;
   const apiKey = c.req.header('api-key'); // Azure 风格
   if (apiKey) headers['api-key'] = apiKey;
+  const googleApiKey = c.req.header('x-goog-api-key');
+  if (googleApiKey) headers['x-goog-api-key'] = googleApiKey;
+  const anthropicApiKey = c.req.header('x-api-key');
+  if (anthropicApiKey) headers['x-api-key'] = anthropicApiKey;
+  const anthropicVersion = c.req.header('anthropic-version');
+  if (anthropicVersion) headers['anthropic-version'] = anthropicVersion;
+  const anthropicBeta = c.req.header('anthropic-beta');
+  if (anthropicBeta) headers['anthropic-beta'] = anthropicBeta;
 
   let upstream: Response;
   try {
@@ -127,6 +135,7 @@ export async function forward(c: Context, suffix: string): Promise<Response> {
       method: c.req.method,
       headers,
       redirect: 'manual',
+      signal: c.req.raw.signal,
       ...(streaming ? { body: reqBody, duplex: 'half' as const } : {}),
     });
   } catch (e) {

@@ -4,6 +4,7 @@ import { useUIStore } from './stores/ui-store';
 import { useAudioStore } from './stores/audio-store';
 import { useAssetStore } from './stores/asset-store';
 import { useSettingsStore } from './stores/settings-store';
+import { useApiSourceStore } from './stores/api-source-store';
 import { useWorldBookStore } from './stores/worldbook-store';
 import { useBeautifierStore } from './stores/beautifier-store';
 import { useWorkshopStore } from './stores/workshop-store';
@@ -17,6 +18,7 @@ const ui = useUIStore();
 const audio = useAudioStore();
 const assets = useAssetStore();
 const settings = useSettingsStore();
+const apiSources = useApiSourceStore();
 const worldbooks = useWorldBookStore();
 const beautifier = useBeautifierStore();
 const workshop = useWorkshopStore();
@@ -27,7 +29,11 @@ void settings.initApiSecrets().then((outcome) => {
       'API 密钥无法迁移到安全存储；旧密钥仍保留，本次会话不会覆盖原设置。请检查浏览器存储后重试。',
       'error',
     );
+    return;
   }
+  void apiSources.initialize().catch(() => {
+    ui.toast('API 配置迁移失败；远端调用已暂停，请在设置页重试。', 'error');
+  });
 });
 
 // ═══ 世界书（Phase 0 / 设计 D4）═══════════════════════════

@@ -5,10 +5,15 @@
  * 一行自有 CSS 都没有: 整段只用共用外壳（form-grid / form-label / form-input /
  * form-hint），见 settings-chrome.css。
  */
+import { onMounted } from 'vue';
 import AppCard from '../shared/AppCard.vue';
 import { useSettingsStore } from '../../stores/settings-store';
+import { useApiSourceStore } from '../../stores/api-source-store';
 
 const s = useSettingsStore().settings;
+const apiSources = useApiSourceStore();
+
+onMounted(() => void apiSources.initialize());
 </script>
 
 <template>
@@ -20,6 +25,54 @@ const s = useSettingsStore().settings;
     </p>
     <AppCard padding="md"
       ><div class="form-grid">
+        <label class="form-label"
+          >召回模式
+          <p class="form-hint">
+            LLM 沿用 memory_recall Agent；Embedding 使用下方明确绑定的向量源。
+          </p>
+          <select v-model="s.memoryRecallMode" class="form-input">
+            <option value="llm">LLM 召回（兼容模式）</option>
+            <option value="embedding">Embedding 向量召回</option>
+          </select></label
+        >
+        <label v-if="s.memoryRecallMode === 'embedding'" class="form-label"
+          >Embedding 源
+          <p class="form-hint">写入与查询共用同一来源；绑定失效时只做本地兜底，不会换到别家。</p>
+          <select v-model="s.embeddingSourceId" class="form-input">
+            <option value="">（未选择）</option>
+            <option
+              v-for="source in apiSources.embeddingSources"
+              :key="source.id"
+              :value="source.id"
+            >
+              {{ source.name }} · {{ source.defaultModel }}
+            </option>
+          </select></label
+        >
+        <label v-if="s.memoryRecallMode === 'embedding'" class="form-label"
+          >Reranker 源（可选）
+          <p class="form-hint">先取候选池再重排；上游失败时保留原候选顺序。</p>
+          <select v-model="s.rerankerSourceId" class="form-input">
+            <option value="">关闭重排</option>
+            <option
+              v-for="source in apiSources.rerankerSources"
+              :key="source.id"
+              :value="source.id"
+            >
+              {{ source.name }} · {{ source.defaultModel }}
+            </option>
+          </select></label
+        >
+        <label v-if="s.memoryRecallMode === 'embedding'" class="form-label"
+          >候选记忆数
+          <p class="form-hint">必须不小于最终召回数；默认取最终数量的三倍。</p>
+          <input
+            v-model.number="s.memoryCandidateCount"
+            type="number"
+            :min="s.memoryRecallCount"
+            max="100"
+            class="form-input"
+        /></label>
         <label class="form-label"
           >每轮最大召回记忆数
           <p class="form-hint">每次对话时从记忆库中召回的最多条目数</p>

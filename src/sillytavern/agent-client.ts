@@ -12,9 +12,15 @@
 
 import type { AgentProviderRound, ApiEndpoint, AgentResult, ToolDefinition } from './types';
 import { scheduleApiRequest } from './api-rpm-limiter';
+import type { LlmMessage, NativeLlmContent } from './types-api';
+import { buildLlmRequest, createLlmStreamAccumulator, parseLlmResponse } from './api/llm-adapter';
+import { postLlmRequest } from './api/transport';
 
 /** 内部扩展 — 包含原始 tool_calls 数据 */
-type InternalAgentResult = AgentResult & { _toolCalls?: any[] };
+type InternalAgentResult = AgentResult & {
+  _toolCalls?: any[];
+  _nativeAssistant?: NativeLlmContent;
+};
 
 /**
  * 全 system 消息时补的那条 user 消息的内容 —— **不许改成空串**，理由见 `ensureUserMessage`。
@@ -56,13 +62,7 @@ export function ensureUserMessage(messages: ChatRequest['messages']): ChatReques
 
 export interface ChatRequest {
   model?: string;
-  messages: Array<{
-    role: string;
-    content: string | null;
-    tool_calls?: any[];
-    tool_call_id?: string;
-    name?: string;
-  }>;
+  messages: LlmMessage[];
   temperature?: number;
   maxTokens?: number;
   topP?: number;
@@ -120,6 +120,8 @@ export interface StreamCallbacks {
     cacheMissTokens: number;
     completionTokens: number;
     duration: number;
+    /** 仅供会话组装层续传 provider 原生签名，不进入普通结果或调试导出。 */
+    nativeAssistant?: NativeLlmContent;
   }) => void;
   /** 流式传输中的错误 */
   onError: (error: string) => void;
@@ -135,7 +137,9 @@ export class AgentClient {
   private maxRetries: number;
 
   constructor(options: AgentClientOptions) {
-    this.endpoint = options.endpoint;
+    // One business call (including retries and tool rounds) owns one immutable
+    // connection snapshot. Store edits take effect on the next client/call.
+    this.endpoint = structuredClone(options.endpoint);
     this.agentId = options.agentId;
     this.saveId = options.saveId;
     this.timeout = options.timeout ?? 60000;
@@ -242,6 +246,7 @@ export class AgentClient {
 
     // 复制消息列表（后续轮次会追加 assistant + tool 消息）
     const conversation = [...request.messages];
+    const initialConversationLength = conversation.length;
     let totalTokens = 0;
     let totalCacheHitTokens = 0;
     let totalCacheMissTokens = 0;
@@ -302,6 +307,7 @@ export class AgentClient {
           role: 'assistant',
           content: innerResult.rawResponse || null,
           tool_calls: toolCalls,
+          native: innerResult._nativeAssistant,
         });
 
         // 逐个执行工具调用
@@ -345,6 +351,11 @@ export class AgentClient {
       }
 
       // 没有 tool_calls — 这是最终响应
+      conversation.push({
+        role: 'assistant',
+        content: innerResult.rawResponse || null,
+        native: innerResult._nativeAssistant,
+      });
       return {
         agentId: this.agentId,
         output: innerResult.output,
@@ -357,6 +368,7 @@ export class AgentClient {
         completionTokens: totalCompletionTokens,
         duration: Date.now() - startTime,
         toolCalls: toolCallHistory,
+        continuationMessages: conversation.slice(initialConversationLength),
         providerRounds,
       };
     }
@@ -495,7 +507,7 @@ export class AgentClient {
 
     try {
       const body = this.buildRequestBody(request, true);
-      const res = await this.postCompletions(body, controller.signal);
+      const res = await this.postCompletions(body, controller.signal, true);
 
       // Parse SSE stream
       const reader = res.body?.getReader();
@@ -505,56 +517,54 @@ export class AgentClient {
 
       const decoder = new TextDecoder();
       let buffer = '';
-      let fullText = '';
-      let fullReasoning = '';
-      let tokensUsed = 0;
-      let cacheHit = false;
-      let cacheHitTokens = 0;
-      let cacheMissTokens = 0;
-      let completionTokens = 0;
-      let sawFinishReason = false;
-
-      // Accumulate tool calls by index
-      const toolCallAccum: Map<number, { id: string; name: string; arguments: string }> = new Map();
+      const protocol = this.endpoint.protocol ?? 'openai-chat';
+      if (
+        protocol !== 'openai-chat' &&
+        protocol !== 'gemini' &&
+        protocol !== 'anthropic-messages'
+      ) {
+        throw new Error(`Endpoint ${this.endpoint.name || this.endpoint.id} is not an LLM source`);
+      }
+      const accumulator = createLlmStreamAccumulator(protocol);
 
       const complete = () => {
         if (settled) return;
+        const snapshot = accumulator.snapshot();
+        let toolCalls: Array<{ id: string; name: string; arguments: Record<string, any> }>;
+        try {
+          toolCalls = snapshot.toolCalls.map((call) => {
+            let argumentsObject: Record<string, any> = {};
+            argumentsObject = JSON.parse(call.arguments || '{}');
+            return { id: call.id, name: call.name, arguments: argumentsObject };
+          });
+        } catch {
+          fail('error', 'Incomplete tool arguments in streaming response');
+          return;
+        }
+
         settled = true;
         clearPostFinishTimer();
         outcome = { kind: 'ok' };
-
-        const toolCalls: Array<{
-          id: string;
-          name: string;
-          arguments: Record<string, any>;
-        }> = [];
-        for (const [, acc] of toolCallAccum) {
-          let parsedArgs: Record<string, any> = {};
-          try {
-            parsedArgs = JSON.parse(acc.arguments || '{}');
-          } catch {
-            parsedArgs = {};
-          }
-          toolCalls.push({
-            id: acc.id,
-            name: acc.name,
-            arguments: parsedArgs,
-          });
-        }
+        const inputTokens = snapshot.usage.inputTokens ?? 0;
+        const outputTokens = snapshot.usage.outputTokens ?? 0;
+        const cacheHitTokens = snapshot.usage.cacheReadTokens ?? 0;
+        const cacheMissTokens =
+          snapshot.usage.cacheMissTokens ?? Math.max(0, inputTokens - cacheHitTokens);
 
         try {
-          callbacks.onChunk(fullText, true);
+          callbacks.onChunk(snapshot.fullText, true);
         } finally {
           callbacks.onComplete({
-            fullText,
+            fullText: snapshot.fullText,
             toolCalls,
-            reasoning: fullReasoning,
-            tokensUsed,
-            cacheHit,
+            reasoning: snapshot.reasoning,
+            tokensUsed: snapshot.usage.totalTokens ?? inputTokens + outputTokens,
+            cacheHit: snapshot.usage.cacheHit === true || cacheHitTokens > 0,
             cacheHitTokens,
             cacheMissTokens,
-            completionTokens,
+            completionTokens: outputTokens,
             duration: Date.now() - startTime,
+            nativeAssistant: snapshot.nativeAssistant,
           });
         }
       };
@@ -575,74 +585,27 @@ export class AgentClient {
           return;
         }
 
-        let chunk: any;
+        let chunk: unknown;
         try {
           chunk = JSON.parse(dataStr);
         } catch {
           // Skip unparseable chunks gracefully
           return;
         }
-
-        if (typeof chunk.usage?.total_tokens === 'number') {
-          tokensUsed = chunk.usage.total_tokens;
-        }
-        if (typeof chunk.usage?.prompt_cache_hit_tokens === 'number') {
-          cacheHitTokens = chunk.usage.prompt_cache_hit_tokens;
-        }
-        if (typeof chunk.usage?.prompt_cache_miss_tokens === 'number') {
-          cacheMissTokens = chunk.usage.prompt_cache_miss_tokens;
-        }
-        if (typeof chunk.usage?.completion_tokens === 'number') {
-          completionTokens = chunk.usage.completion_tokens;
-        }
-
-        if (chunk.cache_hit === true || chunk.usage?.prompt_cache_hit_tokens > 0) {
-          cacheHit = true;
-        }
-
-        const delta = chunk.choices?.[0]?.delta;
-        const finishReason = chunk.choices?.[0]?.finish_reason;
-
-        if (delta) {
-          if (delta.content) {
-            fullText += delta.content;
-            callbacks.onChunk(delta.content, false);
+        for (const event of accumulator.accept(chunk)) {
+          if (event.error) {
+            fail('error', event.error);
+            return;
           }
-
-          if (delta.reasoning_content) {
-            fullReasoning += delta.reasoning_content;
-            callbacks.onReasoning?.(delta.reasoning_content);
-          }
-
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              const idx: number = tc.index ?? 0;
-
-              let acc = toolCallAccum.get(idx);
-              if (!acc) {
-                acc = { id: '', name: '', arguments: '' };
-                toolCallAccum.set(idx, acc);
-              }
-
-              if (tc.id) acc.id = tc.id;
-              if (tc.function?.name) acc.name = tc.function.name;
-              if (tc.function?.arguments) {
-                acc.arguments += tc.function.arguments;
-              }
-
-              callbacks.onToolCall?.({
-                id: acc.id,
-                name: acc.name,
-                arguments: acc.arguments,
-              });
-            }
+          if (event.textDelta) callbacks.onChunk(event.textDelta, false);
+          if (event.reasoningDelta) callbacks.onReasoning?.(event.reasoningDelta);
+          if (event.toolCall) callbacks.onToolCall?.(event.toolCall);
+          if (event.done) {
+            complete();
+            return;
           }
         }
-
-        if (finishReason !== null && finishReason !== undefined) {
-          sawFinishReason = true;
-        }
-        if (sawFinishReason) {
+        if (accumulator.terminal) {
           armPostFinishTimer();
         }
       };
@@ -700,7 +663,7 @@ export class AgentClient {
         }
 
         if (!settled) {
-          if (sawFinishReason) {
+          if (accumulator.terminal) {
             complete();
           } else {
             fail('error', 'Stream ended unexpectedly before completion');
@@ -742,32 +705,27 @@ export class AgentClient {
    * 部分网关会拒绝非流式请求携带它。
    */
   private buildRequestBody(request: ChatRequest, stream: boolean): Record<string, any> {
-    const body: Record<string, any> = {
+    const protocol = this.endpoint.protocol ?? 'openai-chat';
+    if (protocol !== 'openai-chat' && protocol !== 'gemini' && protocol !== 'anthropic-messages') {
+      throw new Error(`Endpoint ${this.endpoint.name || this.endpoint.id} is not an LLM source`);
+    }
+    return buildLlmRequest({
+      protocol,
       model: request.model || this.endpoint.defaultModel,
       messages: ensureUserMessage(request.messages),
-      temperature: request.temperature ?? 0.7,
-      // 真机修(2026-07-17): 侧链 request 不带 maxTokens，2048 兜底会截断 char_gen 思考链+XML → 静默解析失败
-      // 2026-08-08: 兜底 16384 → 65536（全 Agent 输出上限整体拉高，与 AGENT_SETTINGS_DEFAULTS 对齐）
-      max_tokens: request.maxTokens ?? 65536,
-      top_p: request.topP ?? 1.0,
-      frequency_penalty: request.frequencyPenalty ?? 0,
-      presence_penalty: request.presencePenalty ?? 0,
-      stream,
+      temperature: request.temperature,
+      maxTokens: request.maxTokens,
+      topP: request.topP,
+      frequencyPenalty: request.frequencyPenalty,
+      presencePenalty: request.presencePenalty,
       stop: request.stop,
-      user_id: this.userId,
-    };
-
-    // 🆕 让流式末尾 chunk 返回 usage（DeepSeek 命中/未命中/输出 token），否则流式永远拿不到 usage。
-    //    非流式**不能**带 —— 部分网关会拒。
-    if (stream) body.stream_options = { include_usage: true };
-
-    // 🆕 注入 tools / tool_choice（如果提供）
-    if (request.tools && request.tools.length > 0) {
-      body.tools = request.tools;
-      body.tool_choice = request.tool_choice ?? 'auto';
-    }
-
-    return body;
+      tools: request.tools,
+      toolChoice: request.tool_choice,
+      stream,
+      userId: this.userId,
+      bodyOverrides: this.endpoint.bodyOverrides ?? {},
+      bodyOmitPaths: this.endpoint.bodyOmitPaths ?? [],
+    }).body as Record<string, any>;
   }
 
   /**
@@ -775,15 +733,15 @@ export class AgentClient {
    *
    * 只负责「发出去、确认 HTTP 层没炸」；响应体怎么读（SSE vs json）留给调用方。
    */
-  private async postCompletions(body: Record<string, any>, signal: AbortSignal): Promise<Response> {
-    const res = await fetch('/api/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Target-Base-URL': this.baseUrl,
-        Authorization: `Bearer ${this.endpoint.apiKey}`,
-      },
-      body: JSON.stringify(body),
+  private async postCompletions(
+    body: Record<string, any>,
+    signal: AbortSignal,
+    stream: boolean,
+  ): Promise<Response> {
+    const res = await postLlmRequest({
+      endpoint: this.endpoint,
+      body,
+      stream,
       signal,
     });
 
@@ -834,38 +792,38 @@ export class AgentClient {
 
     try {
       const body = this.buildRequestBody(request, false);
-      const res = await this.postCompletions(body, controller.signal);
+      const res = await this.postCompletions(body, controller.signal, false);
 
       const raw = await res.json();
-      // Cline 网关(api.cline.bot)把非流式响应整个包在顶层 data 里（流式 chunk 是标准形态）。
-      // 顶层无 choices 而 data.choices 存在时解包；标准 OpenAI 网关不受影响。
-      const data = !raw.choices && raw.data?.choices ? raw.data : raw;
-      const choice = data.choices?.[0];
-      const message = choice?.message;
-      const rawResponse: string = message?.content ?? '';
-      const reasoningContent: string = message?.reasoning_content ?? '';
-      // 🆕 2026-08-08: 捕获停止原因（length=输出截断）。此前不读 finish_reason，
-      // 截断和格式损坏混成同一个「解析失败」，5×5 大纲生成失败原因不可查。
-      const finishReason: string | undefined = choice?.finish_reason;
-      const tokensUsed: number = data.usage?.total_tokens ?? 0;
-      // 🆕 缓存命中/未命中/输出 token 明细（缺失当 0）
-      const cacheHitTokens: number = data.usage?.prompt_cache_hit_tokens ?? 0;
-      const cacheMissTokens: number = data.usage?.prompt_cache_miss_tokens ?? 0;
-      const completionTokens: number = data.usage?.completion_tokens ?? 0;
-      // 🆕 LLM 组装层 Delta 会话（T2）: prompt token 数（usage.prompt_tokens）。
-      // provider 不返回该字段时保持 undefined —— 主动预算判断据此「不猜」（设计 §8.3），
-      // 不能用 `?? 0`（0 与「没报」长得一样，会把「不猜」静默变成「猜了个 0」）。
-      const promptTokens: number | undefined =
-        typeof data.usage?.prompt_tokens === 'number' ? data.usage.prompt_tokens : undefined;
-
-      // 提取 tool_calls（如果存在）
-      const toolCalls = message?.tool_calls;
-
-      // DeepSeek 缓存命中标记
-      const cacheHit: boolean =
-        data.cache_hit === true ||
-        data.usage?.prompt_cache_hit_tokens > 0 ||
+      const protocol = this.endpoint.protocol ?? 'openai-chat';
+      if (
+        protocol !== 'openai-chat' &&
+        protocol !== 'gemini' &&
+        protocol !== 'anthropic-messages'
+      ) {
+        throw new Error(`Endpoint ${this.endpoint.name || this.endpoint.id} is not an LLM source`);
+      }
+      const normalized = parseLlmResponse(protocol, raw);
+      const rawResponse = normalized.text;
+      const reasoningContent = normalized.reasoning;
+      const finishReason = normalized.finishReason;
+      const promptTokens = normalized.usage.inputTokens;
+      const completionTokens = normalized.usage.outputTokens ?? 0;
+      const tokensUsed =
+        normalized.usage.totalTokens ??
+        (normalized.usage.inputTokens ?? 0) + (normalized.usage.outputTokens ?? 0);
+      const cacheHitTokens = normalized.usage.cacheReadTokens ?? 0;
+      const cacheMissTokens =
+        normalized.usage.cacheMissTokens ?? Math.max(0, (promptTokens ?? 0) - cacheHitTokens);
+      const cacheHit =
+        normalized.usage.cacheHit === true ||
+        cacheHitTokens > 0 ||
         res.headers.get('x-ds-cache-hit') === 'true';
+      const toolCalls = normalized.toolCalls.map((call) => ({
+        id: call.id,
+        type: 'function',
+        function: { name: call.name, arguments: call.arguments },
+      }));
 
       return {
         agentId: this.agentId,
@@ -881,6 +839,7 @@ export class AgentClient {
         finishReason,
         duration: 0,
         _toolCalls: toolCalls,
+        _nativeAssistant: normalized.nativeAssistant,
       };
     } catch (e) {
       // 真机修(2026-07-21): 非流式路径原先只有 try/finally 无 catch，浏览器原生

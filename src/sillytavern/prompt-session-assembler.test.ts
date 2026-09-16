@@ -246,6 +246,21 @@ describe('prompt-session-assembler', () => {
     expect(last.content).not.toBe(p1.messages[p1.messages.length - 1].content);
   });
 
+  it('第二轮原样续传 provider 原生 assistant 块，不把签名降格成展示文本', async () => {
+    const p1 = await preparePromptSession(input());
+    const native = {
+      protocol: 'gemini' as const,
+      value: {
+        role: 'model',
+        parts: [{ functionCall: { name: 'lookup', args: {} }, thoughtSignature: 'opaque' }],
+      },
+    };
+    completePromptSession(p1.handle!, { rawResponse: '', nativeAssistant: native });
+
+    const p2 = await preparePromptSession(input());
+    expect(p2.messages.find((message) => message.role === 'assistant')?.native).toEqual(native);
+  });
+
   // ── 隔离 ──
 
   it('两个 agentId 与两个 saveId 完全隔离', async () => {

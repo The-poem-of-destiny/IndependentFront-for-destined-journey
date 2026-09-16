@@ -26,6 +26,8 @@ import {
   getApiRpmPolicies,
   saveApiEndpoint,
   saveApiRpmPolicies as persistApiRpmPolicies,
+  saveApiRpmPolicy as persistApiRpmPolicy,
+  deleteApiRpmPolicy as persistDeleteApiRpmPolicy,
 } from '@engine/database';
 import { credentialIdFor, replaceApiRpmPolicies } from '@engine/api-rpm-limiter';
 import type { ApiRpmPolicy } from '@engine/types';
@@ -43,6 +45,7 @@ import type { UiSettings } from './settings-types';
 import {
   apiEndpointToEntry,
   apiEntryToEndpoint,
+  API_KEYS_MIGRATED_FLAG,
   migrateApiKeysToDexie,
   type ApiKeyMigrationOutcome,
 } from './api-key-migration';
@@ -58,7 +61,15 @@ export interface ApiEntry {
   model: string;
   models: string[];
   /** `'image'` = 出图端点（NovelAI），由图像生成分区的端点选择器筛选 */
-  apiType: 'chat' | 'embedding' | 'image';
+  apiType: 'chat' | 'embedding' | 'reranker' | 'image';
+  kind?: import('@engine/types-api').ApiSourceKind;
+  protocol?: import('@engine/types-api').ApiProtocol;
+  timeoutMs?: number;
+  bodyOverrides?: import('@engine/types-api').JsonObject;
+  bodyOmitPaths?: string[];
+  revision?: number;
+  anthropicVersion?: string;
+  anthropicBeta?: string[];
   /**
    * 🆕 2026-08-22 Delta 会话（T4）：上下文窗口 token 上限（可选主动重基线依据）。
    * 只接受正整数；空值（undefined）表示不做主动预算判断。映射进 `ApiEndpoint.contextWindowTokens`。
@@ -125,7 +136,9 @@ function containsApiPoolKey(settings: Record<string, unknown>): boolean {
 /** localStorage is configuration metadata only; API secrets live in Dexie `apiEndpoints`. */
 export function serializeSettingsForLocalStorage(settings: Record<string, unknown>): string {
   const copy = detach(settings);
-  if (Array.isArray(copy.apiPool)) {
+  if (copy[API_KEYS_MIGRATED_FLAG]) {
+    delete copy.apiPool;
+  } else if (Array.isArray(copy.apiPool)) {
     for (const entry of copy.apiPool) {
       if (entry && typeof entry === 'object' && 'apiKey' in entry) {
         (entry as Record<string, unknown>).apiKey = '';
@@ -245,6 +258,10 @@ function getDefaults(): UiSettings {
     randomEventsFrequency: 1,
 
     // 记忆 & 缓存
+    memoryRecallMode: 'llm',
+    embeddingSourceId: '',
+    rerankerSourceId: '',
+    memoryCandidateCount: 60,
     memoryRecallCount: 20,
     memoryCompressionThreshold: 100,
     memorySnapshotLimit: 30,
@@ -366,6 +383,58 @@ export const useSettingsStore = defineStore('settings', () => {
     if (raw) saved = JSON.parse(raw);
   } catch {
     /* 解析失败用默认值 */
+  }
+
+  // API configuration v2: reproduce the old runtime heuristic exactly once, while the explicit
+  // mode field is absent. If the old memory source was also used by another Agent, derive a stable
+  // embedding-only copy instead of changing that Agent's LLM source underneath it.
+  if (!Object.prototype.hasOwnProperty.call(saved, 'memoryRecallMode')) {
+    const pool = Array.isArray(saved.apiPool) ? saved.apiPool : [];
+    const recallBinding = saved.agents?.memory_recall?.model;
+    const legacyEmbeddingId =
+      typeof saved.embeddingEndpointId === 'string' ? saved.embeddingEndpointId : '';
+    const bound = pool.find((entry: any) => entry?.id === (legacyEmbeddingId || recallBinding));
+    const oldModel =
+      typeof saved.embeddingModel === 'string' && saved.embeddingModel.trim()
+        ? saved.embeddingModel.trim()
+        : typeof bound?.model === 'string'
+          ? bound.model
+          : '';
+    if (legacyEmbeddingId || bound?.apiType === 'embedding' || /embedding/i.test(oldModel)) {
+      saved.memoryRecallMode = 'embedding';
+      if (bound) {
+        const usedByOtherAgent = Object.entries(saved.agents ?? {}).some(
+          ([agentId, config]: [string, any]) =>
+            agentId !== 'memory_recall' && config?.model === bound.id,
+        );
+        if (usedByOtherAgent && (bound.apiType !== 'embedding' || bound.model !== oldModel)) {
+          const baseId = `${bound.id}__embedding`;
+          let derivedId = baseId;
+          let suffix = 2;
+          while (pool.some((entry: any) => entry?.id === derivedId)) {
+            derivedId = `${baseId}_${suffix++}`;
+          }
+          pool.push({
+            ...bound,
+            id: derivedId,
+            name: `${bound.name}（Embedding）`,
+            model: oldModel,
+            apiType: 'embedding',
+          });
+          saved.embeddingSourceId = derivedId;
+        } else {
+          bound.apiType = 'embedding';
+          bound.model = oldModel;
+          saved.embeddingSourceId = bound.id;
+        }
+      } else {
+        saved.embeddingSourceId = legacyEmbeddingId;
+      }
+    } else {
+      saved.memoryRecallMode = 'llm';
+    }
+    delete saved.embeddingEndpointId;
+    delete saved.embeddingModel;
   }
 
   // 合并：已存值覆盖默认值（支持未来新增字段自动补默认值）
@@ -540,6 +609,26 @@ export const useSettingsStore = defineStore('settings', () => {
     apiRpmPolicies.value = copy;
     apiRpmPoliciesError.value = null;
     replaceApiRpmPolicies(copy);
+  }
+
+  async function updateRpmPolicy(credentialId: string, rpmLimit?: number): Promise<void> {
+    if (rpmLimit !== undefined && (!Number.isSafeInteger(rpmLimit) || rpmLimit <= 0)) {
+      throw new Error('RPM 必须是正整数');
+    }
+    if (rpmLimit === undefined) {
+      await persistDeleteApiRpmPolicy(credentialId);
+      apiRpmPolicies.value = apiRpmPolicies.value.filter(
+        (policy) => policy.credentialId !== credentialId,
+      );
+    } else {
+      const policy = { credentialId, rpmLimit, updatedAt: Date.now() };
+      await persistApiRpmPolicy(policy);
+      const next = apiRpmPolicies.value.filter((item) => item.credentialId !== credentialId);
+      next.push(policy);
+      apiRpmPolicies.value = next;
+    }
+    replaceApiRpmPolicies(apiRpmPolicies.value);
+    apiRpmPoliciesError.value = null;
   }
 
   async function reloadRpmPolicies(): Promise<void> {
@@ -782,6 +871,7 @@ export const useSettingsStore = defineStore('settings', () => {
     removeApiEntry,
     reloadApiEntries,
     saveRpmPolicies,
+    updateRpmPolicy,
     resetAll,
     resetWorldBooksToDefaults,
     getStorageUsage,

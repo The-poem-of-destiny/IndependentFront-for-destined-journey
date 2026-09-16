@@ -6,6 +6,8 @@ import { embeddingsRoutes } from './routes/embeddings';
 import { modelsRoutes } from './routes/models';
 import { imageRoutes } from './routes/image';
 import { createContentWriteRoutes } from './routes/content';
+import { llmRoutes } from './routes/llm';
+import { rerankRoutes } from './routes/rerank';
 
 export const OPAQUE_ORIGIN_ERROR = 'opaque sandbox origins cannot access application APIs';
 
@@ -36,8 +38,10 @@ interface BffRouteEntry {
  */
 const BFF_ROUTE_TABLE: readonly BffRouteEntry[] = [
   { prefix: '/api/chat', create: () => chatRoutes },
+  { prefix: '/api/llm', create: () => llmRoutes },
   { prefix: '/api/status', create: () => statusRoutes },
   { prefix: '/api/embeddings', create: () => embeddingsRoutes },
+  { prefix: '/api/rerank', create: () => rerankRoutes },
   { prefix: '/api/models', create: () => modelsRoutes },
   { prefix: '/api/image', create: () => imageRoutes },
   {
@@ -91,7 +95,18 @@ export function buildHonoApp(options: BffAppOptions = {}): Hono {
     cors({
       origin: '*',
       allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization', 'X-Target-Base-URL', 'api-key'],
+      allowHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Target-Base-URL',
+        'X-Model-ID',
+        'X-LLM-Stream',
+        'api-key',
+        'x-goog-api-key',
+        'x-api-key',
+        'anthropic-version',
+        'anthropic-beta',
+      ],
       exposeHeaders: ['Content-Type'],
     }),
   );

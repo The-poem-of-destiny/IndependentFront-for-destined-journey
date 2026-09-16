@@ -32,7 +32,10 @@ const s = cfg.settings;
 const wb = useWorldBookStore();
 
 /** 配过 API 池没有 —— 一行派生，与子导航那处各算各的（不穿成 prop） */
-const hasApi = computed(() => s.apiPool.length > 0);
+const llmEndpoints = computed(() =>
+  s.apiPool.filter((entry) => !entry.kind || entry.kind === 'llm'),
+);
+const hasApi = computed(() => llmEndpoints.value.length > 0);
 
 /** 当前 Agent 的默认层（pack > 占位）—— 传给 getAgentSettings 合覆写 ?? 默认 */
 const defaultsLayer = computed<AgentDefaultsLayer>(() => {
@@ -123,7 +126,7 @@ void ref;
         @change="setAgentField({ model: ($event.target as HTMLSelectElement).value })"
       >
         <option value="">— 请选择 API 池 —</option>
-        <option v-for="ep in s.apiPool" :key="ep.id" :value="ep.id">
+        <option v-for="ep in llmEndpoints" :key="ep.id" :value="ep.id">
           {{ ep.name }} — {{ ep.model || '未选择模型' }}
         </option>
       </select>

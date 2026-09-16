@@ -14,11 +14,22 @@ export function checkJourneyReadiness(
   defaults: AgentDefaultsLayer,
   plotMode: string,
 ): ReadinessIssue[] {
-  const apiPool = buildApiEndpoints(settings.apiPool ?? []);
-  if (!apiPool.length)
+  const rawPool = settings.apiPool ?? [];
+  const apiPool = buildApiEndpoints(rawPool);
+  if (!apiPool.length) {
+    if (rawPool.length > 0) {
+      return [
+        {
+          message: 'story：需要选择对话 API。',
+          section: 'api',
+          blocking: true,
+        },
+      ];
+    }
     return [
       { message: '尚未配置 API，请添加服务地址并选择模型。', section: 'api', blocking: true },
     ];
+  }
   const issues: ReadinessIssue[] = [];
   const agentIds = DEFAULT_AGENT_PIPELINE.stages.flatMap((stage) => stage.agents);
   for (const id of agentIds) {

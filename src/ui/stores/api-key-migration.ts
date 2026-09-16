@@ -18,7 +18,7 @@ export interface StoredApiEntry {
    *    只改一处的症状是「图像 API 存了、重开变成 chat」—— 收窄那一行会把不认识的
    *    值一律翻成 `'chat'`，而它跑在每次启动的读取路径上。
    */
-  apiType: 'chat' | 'embedding' | 'image';
+  apiType: 'chat' | 'embedding' | 'reranker' | 'image';
   /** 🆕 2026-08-22 Delta 会话（T4）：上下文窗口 token 上限（非密钥字段，跟着映射走） */
   contextWindowTokens?: number;
 }
@@ -54,7 +54,7 @@ export function maskApiKey(key: string): string {
  * 「图像 API 存了、重开变成 chat」（设计 §11 的原话）。
  */
 function normalizeApiType(raw: unknown): StoredApiEntry['apiType'] {
-  return raw === 'embedding' || raw === 'image' ? raw : 'chat';
+  return raw === 'embedding' || raw === 'reranker' || raw === 'image' ? raw : 'chat';
 }
 
 function readEntries(settings: Record<string, unknown>): StoredApiEntry[] {
@@ -92,6 +92,13 @@ function readEntries(settings: Record<string, unknown>): StoredApiEntry[] {
 }
 
 export function apiEntryToEndpoint(entry: StoredApiEntry): ApiEndpoint {
+  const kind = entry.apiType === 'chat' ? 'llm' : entry.apiType;
+  const protocol =
+    kind === 'embedding'
+      ? 'openai-embeddings'
+      : kind === 'reranker'
+        ? 'openai-rerank'
+        : 'openai-chat';
   return {
     id: entry.id,
     name: entry.name,
@@ -101,6 +108,12 @@ export function apiEntryToEndpoint(entry: StoredApiEntry): ApiEndpoint {
     defaultModel: entry.model,
     models: [...entry.models],
     timeout: 60000,
+    timeoutMs: 60000,
+    kind: kind === 'image' ? undefined : kind,
+    protocol: kind === 'image' ? undefined : protocol,
+    bodyOverrides: {},
+    bodyOmitPaths: [],
+    revision: 1,
     contextWindowTokens: entry.contextWindowTokens,
   };
 }

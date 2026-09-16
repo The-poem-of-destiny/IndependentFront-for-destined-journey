@@ -230,6 +230,9 @@ docs/
 │                                       # ✅ 主线细化层设计（2026-09-09 已实施，真机待验证）：
 │                                       # pre_check 现编 NPC 行动 + 伏笔连线 + worldFlags.plotThreads
 │                                       # 实施收口参数见设计 §11；实施方案见同目录 implementation-plan
+├── planning/2026-09-16-api-configuration-refactor-design.md
+│                                       # ✅ 多协议 API 配置重构设计（2026-09-16 已实施，真实供应商待验）：LLM / Embedding /
+│                                       # Reranker 分型、Gemini/Claude 原生协议、独立出图连接与源参数覆盖
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 

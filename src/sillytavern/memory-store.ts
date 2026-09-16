@@ -21,7 +21,8 @@
 import type { EmbeddingMetadata, MemoryRecord } from './types';
 export type { EmbeddingMetadata } from './types';
 import { getMemories, saveMemory, deleteMemories } from './database';
-import { scheduleApiRequest } from './api-rpm-limiter';
+import type { JsonObject } from './types-api';
+import { requestEmbedding } from './api/embedding';
 
 // ========== 常量与空间指纹 (F09) ==========
 
@@ -37,10 +38,14 @@ export const MAX_EMBEDDING_DIMENSIONS = 65536;
 
 /** Embedding API 端点（与 computeEmbedding 既有入参形状一致，仅起名复用） */
 export interface EmbeddingEndpoint {
+  id?: string;
   baseUrl: string;
   apiKey: string;
   defaultModel: string;
   name?: string;
+  bodyOverrides?: JsonObject;
+  bodyOmitPaths?: string[];
+  revision?: number;
 }
 
 /**
@@ -80,12 +85,31 @@ export function normalizeEndpointIdentity(baseUrl: string): string {
  * 摘要不含任何凭据，可安全随记忆记录进备份。
  */
 export function computeEmbeddingSpaceId(
-  endpoint: Pick<EmbeddingEndpoint, 'baseUrl'>,
+  endpoint: Pick<EmbeddingEndpoint, 'baseUrl' | 'bodyOverrides' | 'bodyOmitPaths'>,
   model: string,
   dimensions: number,
 ): string {
   const identity = normalizeEndpointIdentity(endpoint.baseUrl);
-  return `emb:v1|${identity}|${model}|d${dimensions}|${EMBEDDING_PREPROCESSING_VERSION}`;
+  const canonicalJson = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+    if (value && typeof value === 'object') {
+      return `{${Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map(
+          (key) =>
+            `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`,
+        )
+        .join(',')}}`;
+    }
+    return JSON.stringify(value);
+  };
+  const parameterFingerprint = hashTextDeterministic(
+    canonicalJson({
+      bodyOverrides: endpoint.bodyOverrides ?? {},
+      bodyOmitPaths: [...(endpoint.bodyOmitPaths ?? [])].sort(),
+    }),
+  );
+  return `emb:v2|${identity}|${model}|d${dimensions}|${EMBEDDING_PREPROCESSING_VERSION}|p${parameterFingerprint}`;
 }
 
 /**
@@ -121,7 +145,7 @@ export function buildEmbeddingText(keywords: string[], content: string): string 
  */
 export function buildEmbeddingMetadata(
   embedding: number[],
-  endpoint: Pick<EmbeddingEndpoint, 'baseUrl'>,
+  endpoint: Pick<EmbeddingEndpoint, 'baseUrl' | 'bodyOverrides' | 'bodyOmitPaths'>,
   model: string,
   embeddingText: string,
   modelRevision?: string,
@@ -248,10 +272,6 @@ export async function computeEmbeddingWithMeta(
   const baseUrl = endpoint.baseUrl.replace(/\/+$/, '');
   const resolvedModel = model || endpoint.defaultModel;
   const startedAt = Date.now();
-  const body = JSON.stringify({
-    model: resolvedModel,
-    input: text,
-  });
   let observed = false;
   const observe = (extra: Partial<EmbeddingRequestTrace>) => {
     if (observed) return;
@@ -271,56 +291,43 @@ export async function computeEmbeddingWithMeta(
   };
 
   try {
-    const res = await scheduleApiRequest(
-      { baseUrl, apiKey: endpoint.apiKey, label: endpoint.name || baseUrl },
+    const result = await requestEmbedding(
+      {
+        id: endpoint.id ?? `embedding:${baseUrl}`,
+        name: endpoint.name || baseUrl,
+        kind: 'embedding',
+        protocol: 'openai-embeddings',
+        baseUrl,
+        apiKey: endpoint.apiKey,
+        defaultModel: resolvedModel,
+        models: [resolvedModel],
+        timeoutMs: 60_000,
+        bodyOverrides: endpoint.bodyOverrides ?? {},
+        bodyOmitPaths: endpoint.bodyOmitPaths ?? [],
+        revision: endpoint.revision,
+      },
+      text,
       signal,
-      () =>
-        fetch('/api/embeddings', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Target-Base-URL': baseUrl,
-            Authorization: `Bearer ${endpoint.apiKey}`,
-          },
-          body,
-          signal,
-        }),
     );
 
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      throw new Error(`Embedding API ${res.status}: ${errBody.slice(0, 200)}`);
-    }
-
-    const json = (await res.json()) as {
-      object?: string;
-      model?: string;
-      data: Array<{ embedding: number[]; index: number }>;
-      usage?: { prompt_tokens?: number; total_tokens?: number };
-    };
-
-    const embedding = json.data?.[0]?.embedding;
-    if (!embedding || !Array.isArray(embedding)) {
-      throw new Error('Embedding API 返回数据格式异常');
-    }
+    const embedding = result.embedding;
     const validation = validateEmbeddingVector(embedding);
     if (!validation.valid) {
       throw new Error(`Embedding 响应向量非法: ${validation.reason}`);
     }
 
     // 向量与元数据同批派生；modelRevision = provider 实际报告（别名解析后）的模型
-    const meta = buildEmbeddingMetadata(embedding, endpoint, resolvedModel, text, json.model);
+    const meta = buildEmbeddingMetadata(embedding, endpoint, resolvedModel, text, result.model);
 
     const responseSummary = JSON.stringify({
-      object: json.object,
-      model: json.model,
-      dataCount: json.data.length,
+      model: result.model,
+      dataCount: 1,
       dimensions: embedding.length,
-      usage: json.usage,
+      usage: result.usage,
     });
     observe({
-      promptTokens: json.usage?.prompt_tokens,
-      totalTokens: json.usage?.total_tokens,
+      promptTokens: result.usage.inputTokens,
+      totalTokens: result.usage.totalTokens,
       dimensions: embedding.length,
       responseSummary,
     });
@@ -407,6 +414,16 @@ export type RecallObserver = (diag: RecallDiagnostics) => void;
 /** importance desc，平手按 createdAt desc（recency）—— 兜底排序的唯一口径 */
 function rankByImportanceRecency(memories: MemoryRecord[]): MemoryRecord[] {
   return [...memories].sort((a, b) => b.importance - a.importance || b.createdAt - a.createdAt);
+}
+
+/** 不发起远端请求的显式兜底；用于未绑定/失效绑定，并保持与查询失败同一排序口径。 */
+export async function recallMemoriesLocally(
+  saveId: string,
+  topK: number,
+): Promise<RecalledMemory[]> {
+  return rankByImportanceRecency(await getMemories(saveId))
+    .slice(0, topK)
+    .map((memory) => ({ memory, score: 0, source: 'fallback' as const }));
 }
 
 /**

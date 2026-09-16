@@ -70,7 +70,7 @@ import { useWorldBookStore } from './worldbook-store';
 import { useWorkshopStore } from './workshop-store';
 import { getAgentSettings } from './agent-settings';
 // 🆕 F10（2026-09-04）：plot_outline 端点解析与 game-pipeline 走同一个 fail-closed 解析器
-import { resolveAgentEndpoint } from '../lib/endpoint-resolver';
+import { buildApiEndpoints, resolveAgentEndpoint } from '../lib/endpoint-resolver';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import type { WorldBook, WorldBookEntry } from '@engine/types';
 import {
@@ -989,16 +989,7 @@ export const useCreateStore = defineStore('create', () => {
     try {
       const store = useSettingsStore();
       const s = store.settings;
-      const pool = ((s.apiPool ?? []) as any[]).map((entry: any) => ({
-        id: entry.id || '',
-        name: entry.name || '',
-        provider: entry.provider || entry.apiType || 'custom',
-        baseUrl: entry.baseUrl || '',
-        apiKey: entry.apiKey || '',
-        defaultModel: entry.defaultModel || entry.model || '',
-        models: entry.models || [],
-        timeout: entry.timeout ?? 60000,
-      })) as ApiEndpoint[];
+      const pool = buildApiEndpoints(s.apiPool ?? []);
       const poolId = getAgentSettings(
         s,
         'plot_outline',

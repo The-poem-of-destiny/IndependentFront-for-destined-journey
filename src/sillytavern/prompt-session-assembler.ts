@@ -32,14 +32,8 @@
  *   append-cursor / ephemeral；不新增用户可编辑模板。
  */
 
-import type {
-  AgentConfig,
-  AgentContext,
-  AgentPreset,
-  AgentResult,
-  ChatMessage,
-  WorldBook,
-} from './types';
+import type { AgentConfig, AgentContext, AgentPreset, ChatMessage, WorldBook } from './types';
+import type { NativeLlmContent } from './types-api';
 import {
   buildAgentMessages,
   buildEjsPassContext,
@@ -124,6 +118,10 @@ export interface PreparePromptSessionInput {
   endpointId?: string;
   /** 该 Agent 实际使用的 model（签名材料，静态）。 */
   model?: string;
+  /** Protocol/URL/body override/revision signature. Never includes the API key. */
+  endpointSignature?: string;
+  /** Provider-native output ceiling after source overrides/omissions. */
+  outputBudget?: number;
   /** 可选的主动重基线依据（设计 §9 / T4 接 ApiEndpoint.contextWindowTokens）。 */
   contextWindowTokens?: number;
   /** 该 Agent 的单一用户自定义末尾指令（设计 §9 / T4 接 AgentConfig.tailPrompt）。 */
@@ -133,18 +131,23 @@ export interface PreparePromptSessionInput {
 /** `preparePromptSession` 的返回（设计 §4）。 */
 export interface PreparedPromptSession {
   /** 可直接发送的 wire messages；调用方不得再改内容或顺序。 */
-  messages: ChatMessage[];
+  messages: PromptWireMessage[];
   /** null = 不在 v1 范围（如无有效模板），调用方继续走现有无状态路径。 */
   handle: PromptSessionHandle | null;
   rebased: boolean;
   rebaseReason?: PromptSessionRebaseReason;
 }
 
-/** `completePromptSession` 只接受成功结果（设计 §4）；形状 = Pick<AgentResult, ...>。 */
-export type PromptSessionCompleteResult = Pick<
-  AgentResult,
-  'rawResponse' | 'promptTokens' | 'cacheHitTokens' | 'cacheMissTokens' | 'completionTokens'
->;
+/** `completePromptSession` 只接受成功结果（设计 §4）。 */
+export interface PromptSessionCompleteResult {
+  rawResponse: string;
+  promptTokens?: number;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
+  completionTokens?: number;
+  /** 仅驻留会话内存，用于 Gemini/Claude 原生签名续传；不进入普通 AgentResult/debug 导出。 */
+  nativeAssistant?: NativeLlmContent;
+}
 
 // ═══════════════════════════════════════════════════════════
 // 会话内存状态（设计 §5.2 —— 不写 Dexie）
@@ -161,13 +164,13 @@ interface PromptSession {
   inFlight: boolean;
   baselineSignature: string;
   /** 上一次实际 wire transcript（含 baseline + 各轮 assistant；不含本轮未提交 user）。 */
-  transcript: ChatMessage[];
+  transcript: PromptWireMessage[];
   /** 上一成功轮的投影（下一轮 diff 的起点）。 */
   projection: PromptStateProjection;
   /** 本轮 prepare 算好的投影（complete 时才 commit，失败则弃）。 */
   pendingProjection: PromptStateProjection | null;
   /** 本轮 prepare 拼好的 user delta（complete 时才写进 transcript）。 */
-  pendingUserMessage: ChatMessage | null;
+  pendingUserMessage: PromptWireMessage | null;
   /** 最近一次 provider prompt_tokens（§8.3 预算用）。 */
   lastPromptTokens?: number;
   /** 倒数第二次 provider prompt_tokens（§8.3 预算用）。 */
@@ -185,13 +188,17 @@ let nextSessionId = 1;
 /** wire 消息 id 计数器（wire 消息不是持久化消息，id 只要求唯一）。 */
 let wireCounter = 0;
 
+/** 会话内部 wire 消息；原生 provider 块不会进入持久化 ChatMessage。 */
+interface PromptWireMessage extends ChatMessage {
+  native?: NativeLlmContent;
+}
 /** session key（saveId / agentId 分隔，杜绝拼接歧义）。 */
 function sessionKey(saveId: string, agentId: string): string {
   return `${saveId}\u0000${agentId}`;
 }
 
-/** 把 wire 消息包装成 ChatMessage（id / timestamp 无业务语义，只要求稳定）。 */
-function toWireMessage(role: ChatMessage['role'], content: string): ChatMessage {
+/** 构造 provider-independent wire message；原生 assistant 块仅由 complete 写入。 */
+function toWireMessage(role: ChatMessage['role'], content: string): PromptWireMessage {
   return { id: `wire-${wireCounter++}`, role, content, timestamp: 0 };
 }
 
@@ -273,7 +280,16 @@ function serializeVisibleWorldBooks(
 
 /** 计算 baseline signature（只含静态配置；不包含本轮状态 / EJS 结果 / 玩家输入 / 上游输出）。 */
 function computeBaselineSignature(input: PreparePromptSessionInput): string {
-  const { agentId, configs, worldBooks, presets, endpointId, model, tailPrompt } = input;
+  const {
+    agentId,
+    configs,
+    worldBooks,
+    presets,
+    endpointId,
+    model,
+    tailPrompt,
+    endpointSignature,
+  } = input;
   const config = configs?.find((c) => c.agentId === agentId);
 
   // systemPrompt 原文：story 走预设原文（assemblePresetContent 结果），其余用 config.systemPrompt。
@@ -290,6 +306,7 @@ function computeBaselineSignature(input: PreparePromptSessionInput): string {
     PROMPT_SESSION_PROTOCOL_VERSION,
     endpointId ?? '',
     model ?? '',
+    endpointSignature ?? '',
     systemSource,
     template,
     serializeVisibleWorldBooks(agentId, configs ?? [], worldBooks ?? []),
@@ -429,6 +446,7 @@ function composeDeltaUserMessage(
 
 /** 该 Agent 的 maxTokens（预算公式用；configs 未提供/找不到时返回 undefined → 不猜）。 */
 function resolveAgentMaxTokens(input: PreparePromptSessionInput): number | undefined {
+  if (typeof input.outputBudget === 'number') return input.outputBudget;
   const config = input.configs?.find((c) => c.agentId === input.agentId);
   return config?.maxTokens;
 }
@@ -487,7 +505,7 @@ async function buildBaseline(
   }
 
   const firstUserContent = composeFirstUserMessage(tailPrompt);
-  const transcript: ChatMessage[] = [
+  const transcript: PromptWireMessage[] = [
     ...raw.map((m) => toWireMessage(m.role as ChatMessage['role'], m.content)),
     toWireMessage('user', firstUserContent),
   ];
@@ -614,7 +632,10 @@ export function completePromptSession(
 
   // 提交：把本轮 user delta + assistant 写进已提交 transcript。
   if (session.pendingUserMessage) session.transcript.push(session.pendingUserMessage);
-  session.transcript.push(toWireMessage('assistant', result.rawResponse));
+  session.transcript.push({
+    ...toWireMessage('assistant', result.rawResponse),
+    native: result.nativeAssistant,
+  });
 
   session.projection = session.pendingProjection ?? session.projection;
   session.pendingProjection = null;

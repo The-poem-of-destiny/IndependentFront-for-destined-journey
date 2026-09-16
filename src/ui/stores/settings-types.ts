@@ -190,6 +190,10 @@ export type UiSettings = {
   randomEventsFrequency: number;
 
   // ═══ 记忆 & 缓存 ═══
+  memoryRecallMode: 'llm' | 'embedding';
+  embeddingSourceId: string;
+  rerankerSourceId: string;
+  memoryCandidateCount: number;
   memoryRecallCount: number;
   memoryCompressionThreshold: number;
   /** 🔴 `main.ts` 原样转发给引擎，无运行时校验 —— 必须是 number */

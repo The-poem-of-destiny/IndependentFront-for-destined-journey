@@ -203,10 +203,13 @@ UI 沿用 queued/generating + 「已用 N 秒」。
 
 ### C16 ComfyUI 地址住 provider 袋，不进 API 池
 
+> 📌 2026-09-16 更正：通用 API 池现已完全移除图像用途；NovelAI 与 ComfyUI 都在图像生成分区管理。
+> NovelAI 使用设备本地 `imageApiConnections` 命名连接，ComfyUI 仍按本裁定保存无 Key 的本地地址，
+> 两者均不进入 LLM / Embedding / Reranker 通用源表。
+
 `imageComfy.baseUrl` 在图像分区「出图」卡上，与工作流粘贴框相邻。
-API 池维持 NAI-only，`ApiSection.isImageEntry` 与两处钉死测试原样存活 ——
-不重开 2026-08-05 那格误导过两轮排查的输入框。不对称是真实的:
-池建模的是带 key 的远端服务，ComfyUI 是无 key 的本地地址，
+原文“API 池维持 NAI-only”已由上方更正推翻；不再在通用池重开图像输入框。不对称仍是真实的：
+NovelAI 是带 Key 的独立命名连接，ComfyUI 是无 Key 的本地地址，
 且这格填错的败法是诚实的 connection-refused，不是指向别处的上游错。
 
 ## 3. 完成定义（DoD）

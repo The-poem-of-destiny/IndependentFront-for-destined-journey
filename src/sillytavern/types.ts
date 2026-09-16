@@ -34,6 +34,7 @@ import type { CatalogItem, BackgroundTemplate } from './start-catalog-mechanics'
 // 注意: 音频**数据模型**类型 (AudioTrack / AudioPlaylist / ...) 仍定义在本文件下方，
 // 不在 types-audio.ts 里 —— 避免第二个真相来源。
 export * from './types-audio';
+export * from './types-api';
 
 // ========== World Book (Lorebook) Types (v3, deprecated) ==========
 // Phase 8 用新 WorldBook 类型替代，旧 Lorebook/LorebookEntry 保留兼容导入
@@ -342,6 +343,16 @@ export interface ApiEndpoint {
   defaultModel: string;
   models: string[]; // 可用模型列表
   timeout: number;
+  /** Canonical v2 name; `timeout` remains as a compatibility alias during migration. */
+  timeoutMs?: number;
+  /** T1 compatibility bridge; new persisted sources require these fields. */
+  kind?: import('./types-api').ApiSourceKind;
+  protocol?: import('./types-api').ApiProtocol;
+  bodyOverrides?: import('./types-api').JsonObject;
+  bodyOmitPaths?: string[];
+  anthropicVersion?: string;
+  anthropicBeta?: string[];
+  revision?: number;
   /**
    * 🆕 2026-08-22 Delta 会话（ADR 设计 §8.3 / §9）：该端点的上下文窗口 token 上限，
    * 由使用者按实际 provider 配置；**不维护内置模型能力表，不按 model 名硬编码上限**。
@@ -1947,6 +1958,8 @@ export interface AgentResult {
   error?: string;
   /** 🆕 Agentic: 本 Agent 产生的所有工具调用记录 */
   toolCalls?: Array<{ name: string; arguments: any; result: any }>;
+  /** Lossless provider-native message delta produced by a successful tool loop. */
+  continuationMessages?: import('./types-api').LlmMessage[];
   /** Agentic 多轮调用中，每次真实 provider 响应的 usage。普通 chat 不填。 */
   providerRounds?: AgentProviderRound[];
   /** 🆕 Debug: 发送给 AI 的完整请求消息（含系统提示词+上下文），用于调试面板导出 */

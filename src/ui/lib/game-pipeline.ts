@@ -567,6 +567,16 @@ export class GamePipeline {
         saveId: this.saveId,
         presets,
         worldBooks,
+        memoryRetrieval: {
+          mode: this.settings.settings.memoryRecallMode ?? 'llm',
+          embeddingEndpoint: this.buildRetrievalEndpoint('embedding'),
+          rerankerEndpoint: this.buildRetrievalEndpoint('reranker'),
+          candidateCount: Math.max(
+            this.settings.settings.memoryRecallCount ?? 20,
+            this.settings.settings.memoryCandidateCount ?? 60,
+          ),
+          resultCount: this.settings.settings.memoryRecallCount ?? 20,
+        },
       };
       const events = this.buildEventHandlers(activityRunId);
       this.orch = new AgentOrchestrator(options, events);
@@ -2321,17 +2331,33 @@ export class GamePipeline {
    *  未配置 embedding endpoint → 返回 undefined（summarizeAndSave 不计算向量，退化为重要度排序）。 */
   private buildEmbeddingEndpoint():
     Pick<ApiEndpoint, 'id' | 'name' | 'baseUrl' | 'apiKey' | 'defaultModel'> | undefined {
+    return this.buildRetrievalEndpoint('embedding');
+  }
+
+  private buildRetrievalEndpoint(kind: 'embedding' | 'reranker'): ApiEndpoint | undefined {
     const s = this.settings.settings;
-    const endpointId = s.embeddingEndpointId as string | null;
+    const endpointId =
+      kind === 'embedding' ? s.embeddingSourceId || s.embeddingEndpointId : s.rerankerSourceId;
     if (!endpointId) return undefined;
-    const ep = this.buildEndpoints().find((e) => e.id === endpointId);
-    if (!ep) return undefined;
+    const entry = (s.apiPool ?? []).find(
+      (candidate) => candidate.id === endpointId && (candidate.kind ?? candidate.apiType) === kind,
+    );
+    if (!entry) return undefined;
     return {
-      id: ep.id,
-      name: ep.name,
-      baseUrl: ep.baseUrl,
-      apiKey: ep.apiKey,
-      defaultModel: s.embeddingModel || ep.defaultModel,
+      id: entry.id,
+      name: entry.name,
+      provider: kind,
+      kind,
+      protocol: kind === 'embedding' ? 'openai-embeddings' : 'openai-rerank',
+      baseUrl: entry.baseUrl,
+      apiKey: entry.apiKey,
+      defaultModel: kind === 'embedding' && s.embeddingModel ? s.embeddingModel : entry.model,
+      models: entry.models ?? [],
+      timeout: entry.timeoutMs ?? 60_000,
+      timeoutMs: entry.timeoutMs ?? 60_000,
+      bodyOverrides: entry.bodyOverrides ?? {},
+      bodyOmitPaths: entry.bodyOmitPaths ?? [],
+      revision: entry.revision,
     };
   }
 

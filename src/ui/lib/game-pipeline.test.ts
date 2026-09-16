@@ -1571,15 +1571,17 @@ describe('runImagePromptAgent — activity ledger', () => {
   it('records memory-summary embedding usage as its own billable invocation', async () => {
     const gameStore = makeGameStore();
     const settingsStore = makeSettingsStore({
-      embeddingEndpointId: 'ep-embedding',
+      embeddingSourceId: 'ep-embedding',
       embeddingModel: 'embed-model',
       apiPool: [
         {
           id: 'ep-embedding',
           name: 'Embedding API',
+          kind: 'embedding',
+          apiType: 'embedding',
           baseUrl: 'https://api.example.test/v1',
           apiKey: 'secret',
-          defaultModel: 'fallback-model',
+          model: 'fallback-model',
         },
       ],
     });

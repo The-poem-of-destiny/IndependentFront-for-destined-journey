@@ -33,6 +33,14 @@ vi.mock('../../../stores/settings-store', () => ({
   useSettingsStore: () => ({ settings: mockSettings }),
 }));
 
+const mockImageConnections = reactive<Array<Record<string, any>>>([]);
+vi.mock('../../../stores/api-source-store', () => ({
+  useApiSourceStore: () => ({
+    imageConnections: mockImageConnections,
+    initialize: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
 /**
  * 内容注册表的第 7 面（方言）。整层替掉是为了不把 Dexie / fetch 拖进 jsdom ——
  * 本文件关心的是「下拉里列了什么」「supportsNegative 怎么影响那一格」，
@@ -73,6 +81,7 @@ import AppButton from '../../shared/AppButton.vue';
 
 function resetSettings() {
   for (const k of Object.keys(mockSettings)) delete mockSettings[k];
+  mockImageConnections.splice(0);
   Object.assign(mockSettings, {
     apiPool: [],
     imageGenMode: 'manual',
@@ -284,15 +293,19 @@ describe('ImageRenderCard —— 三档开关与自动档确认（D44）', () =>
 });
 
 describe('ImageRenderCard —— 端点筛选与两处提示词的边界', () => {
-  it('端点下拉只列 apiType === image 的条目', () => {
-    mockSettings.apiPool = [
-      { id: 'a', name: '文本站', apiType: 'chat' },
-      { id: 'b', name: 'NAI', apiType: 'image' },
-      { id: 'c', name: '向量站', apiType: 'embedding' },
-    ];
+  it('端点下拉只列独立图像连接，不再读取通用 API 池', () => {
+    mockSettings.apiPool = [{ id: 'legacy-image', name: '旧混合条目', apiType: 'image' }];
+    mockImageConnections.push({
+      id: 'b',
+      name: 'NAI',
+      provider: 'novelai',
+      baseUrl: 'https://image.novelai.net',
+      apiKey: 'secret',
+      timeoutMs: 60_000,
+    });
 
     const options = mount(ImageRenderCard).findAll('select')[0].findAll('option');
-    // 「（未选择）」+ 唯一一条 image
+    // 「（未选择）」+ 独立图像连接；旧 apiPool image 条目不得复活。
     expect(options).toHaveLength(2);
     expect(options[1].text()).toBe('NAI');
   });

@@ -226,6 +226,55 @@ describe('AgentClient', () => {
       expect(body).not.toHaveProperty('reasoning_effort');
     });
 
+    it('API 源参数覆盖 Agent 同名参数，并在覆盖后省略字段', async () => {
+      client = new AgentClient({
+        endpoint: makeEndpoint({
+          protocol: 'openai-chat',
+          bodyOverrides: {
+            temperature: 0.2,
+            max_tokens: 512,
+            provider_extension: { mode: 'fast' },
+          },
+          bodyOmitPaths: ['/frequency_penalty'],
+        }),
+        agentId: 'story',
+        saveId: 'save_test',
+        maxRetries: 0,
+      });
+      const mockFn = mockFetch({ choices: [{ message: { content: 'ok' } }] });
+      globalThis.fetch = mockFn;
+
+      await client.chat({
+        messages: [{ role: 'user', content: 'test' }],
+        temperature: 0.8,
+        maxTokens: 4096,
+        frequencyPenalty: 1,
+      });
+
+      const body = JSON.parse(mockFn.mock.calls[0][1].body);
+      expect(body.temperature).toBe(0.2);
+      expect(body.max_tokens).toBe(512);
+      expect(body.provider_extension).toEqual({ mode: 'fast' });
+      expect(body).not.toHaveProperty('frequency_penalty');
+    });
+
+    it('API 源不能覆盖运行时消息和工具权限', async () => {
+      client = new AgentClient({
+        endpoint: makeEndpoint({
+          bodyOverrides: { messages: [] },
+        }),
+        agentId: 'story',
+        saveId: 'save_test',
+        maxRetries: 0,
+      });
+      globalThis.fetch = mockFetch({ choices: [{ message: { content: 'never sent' } }] });
+
+      const result = await client.chat({ messages: [{ role: 'user', content: 'test' }] });
+
+      expect(result.error).toContain('Cannot override protected field /messages');
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    });
+
     it('应解包 Cline 网关的 data 信封（非流式响应包在顶层 data 里）', async () => {
       // 真机踩坑(2026-07-31): api.cline.bot 的非流式响应形如 {data:{choices:[...],usage:{...}}}，
       // 直接读顶层 choices 会静默解析成空字符串。流式 chunk 是标准形态，不受影响。

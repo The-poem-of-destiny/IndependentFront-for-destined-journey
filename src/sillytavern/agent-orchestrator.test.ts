@@ -2718,6 +2718,12 @@ describe('AgentOrchestrator — Delta 会话接线（T3）', () => {
       ],
       endpoints: [makeEndpoint()],
       saveId: 'save_delta_embed',
+      memoryRetrieval: {
+        mode: 'embedding',
+        embeddingEndpoint: makeEndpoint(),
+        candidateCount: 20,
+        resultCount: 20,
+      },
     });
 
     await orch.run();
@@ -2731,6 +2737,33 @@ describe('AgentOrchestrator — Delta 会话接线（T3）', () => {
       expect.objectContaining({ round: 1, tokensUsed: 8, promptTokens: 8 }),
     ]);
     await deleteMemory('MEM-DEBUG-USAGE');
+  });
+
+  it('focused: Embedding 绑定失效时非致命本地兜底，不换源也不阻断下游', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    fetchSpy.mockClear();
+    const orch = new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['memory_recall']),
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'memory_recall' })],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_delta_missing_embedding',
+      memoryRetrieval: {
+        mode: 'embedding',
+        embeddingEndpoint: undefined,
+        candidateCount: 20,
+        resultCount: 20,
+      },
+    });
+
+    await orch.run();
+    const result = orch.getResults().get('memory_recall')!;
+    expect(result.error).toBeUndefined();
+    expect(result.output).toMatchObject({
+      memories: [],
+      retrievalDiagnostic: { type: 'binding_invalid' },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('focused: toolsEnabled 不创建 session（原路径）', async () => {

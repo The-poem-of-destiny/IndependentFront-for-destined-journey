@@ -405,8 +405,10 @@ describe('BFF 路由前缀单一真源', () => {
   it('常量内容被钉死 —— 加/删 BFF 路由时这条会红，提醒你顺带看一眼别处', () => {
     expect([...BFF_ROUTE_PREFIXES]).toEqual([
       '/api/chat',
+      '/api/llm',
       '/api/status',
       '/api/embeddings',
+      '/api/rerank',
       '/api/models',
       '/api/image',
       '/api/worldbooks',

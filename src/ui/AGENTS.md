@@ -265,8 +265,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   loadSave 先读完整投影再按世代提交；离页使在途加载失效。
 │   │                                   ui.activeSaveId 只表达导航目标，活跃投影由 game-store 持有。
 │   ├── settings-store.ts            ← 全应用最热的状态；deep watch 自动落 localStorage
-│   │                                   API RPM 策略例外：住 Dexie v23，经 `saveRpmPolicies` 整表替换并
-│   │                                   热更新全局 limiter；端点凭据编辑时迁移其既有限制
+│   │                                   API 完整连接不再住此处；只保留 Agent/记忆/图像绑定及兼容投影。
+│   │                                   API RPM 策略住 Dexie v23，按策略行保存并热更新全局 limiter
 │   │                                   🔴 **加新设置要改两处**（Q-18）：先在 settings-types.ts
 │   │                                      的 `UiSettings` 上声明，再在 getDefaults() 给默认值。
 │   │                                      「任意新字段零改动」那条设计意图已于 2026-08-04 反转
@@ -359,6 +359,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   🔴 加新 `apiType` 时**这里与 `readEntries` 的收窄三元一起改**：
 │   │                                      只改一处的症状是「图像 API 存了、重开变成 chat」——
 │   │                                      那行收窄跑在每次启动的读取路径上，把不认识的值一律翻成 `'chat'`
+│   ├── api-source-store.ts          ← [API 配置重构] Dexie 通用源 + 图像连接的 Pinia 权威投影；
+│   │                                   初始化时执行迁移，CRUD 后按跨表引用清理 RPM，完整连接不回写 localStorage
+│   │                                   🔴 Pinia 会递归代理嵌套 body/连接；投影或落库前必须走 `db-write.detach()`，
+│   │                                      不可直接 `structuredClone` Proxy（浏览器会抛 `DataCloneError`）
+│   ├── api-config-migration.ts      ← 旧 chat/embedding/image 行确定性迁移；保留 ID、移动图像连接、
+│   │                                   写入/清理两阶段检查点，重复启动不把 cleaned 状态倒退
 │   ├── content-store.ts             ← [内容分离波 1 / D16 §5.1] provider 执行层（纯函数半边在
 │   │                                   `@engine/content-source`）。三件事：
 │   │                                   ① **模块级 ready promise**（时序契约，最承重的一条）——
@@ -547,17 +553,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               .form-*/.toggle-*/.detail-card）。各分区（含壳层）用
 │   │   │                               `<style scoped src>` 引入 —— 一份源码，各自作用域。
 │   │   │                               父组件的 scoped 样式只能命中子组件**根节点**，够不到里面
-│   │   ├── ApiSection.vue           ← API 池 CRUD + 凭据组合 RPM 设置 + 连接测试 + 模型列表（含添加/编辑弹窗）
+│   │   ├── ApiSection.vue           ← LLM / Embedding / Reranker 源 CRUD + 跨连接 RPM + 生产适配器测试/
+│   │   │                               模型分页；协议、超时、上下文、bodyOverrides/bodyOmitPaths 可编辑
 │   │   │                               🔴 必须**单根**：弹窗放 <section> 内层，否则父级 `.centered`
 │   │   │                                  命不中根节点，本分区在宽屏下摊满整行（真机走查逮到）
-│   │   │                               🔴 **出图端点只填名称 + API Key**（2026-08-05）：`isImageEntry`
-│   │   │                                  把「主链接」与「模型」两格藏掉 —— 地址是常量（见
-│   │   │                                  lib/image-client.ts 那条），出图模型在「图像生成 → 出图」卡上。
-│   │   │                                  留着它们只会让人以为生效，而填错的后果全是**上游报一句指向
-│   │   │                                  别处的错**。保存时 baseUrl 写成常量而非留空（卡片上那行地址
-│   │   │                                  要说实话）；「测试连接」的图像分支必须排在 baseUrl 闸**之前**，
-│   │   │                                  否则没有地址的出图端点点了会静悄悄什么都不发生
-│   │   │                                  结构断言在 ApiSection.image-endpoint.test.ts（不 mount）
+│   │   │                               🔴 图像用途已于 2026-09-16 移出通用池，NovelAI 命名连接只在
+│   │   │                                  图像生成分区编辑；Agent 选择器及运行时只接受 LLM 源
 │   │   ├── WorldBookSection.vue     ← 世界书列表/导入/新建/删除/恢复 + 条目编辑器入口（约 368 行）
 │   │   ├── WorldBookEditor.vue      ← 条目编辑器本体（约 909 行，本目录最大的单文件）：
 │   │   │                               条目 CRUD + 关键词/插入位置/深度/触发策略 + EJS 正文
@@ -572,7 +573,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               conflicted + 存档 uid 迁移说明 + 三类处置记录），确认后由
 │   │   │                               DataSection 以 `{ confirmConflicts: true }` 重入 `installPack`。
 │   │   │                               纯展示：不碰 store，也不判该不该显示（宿主决定传什么 plan）
-│   │   ├── PlotSection.vue / MemorySection.vue / ThemeSection.vue / MessagesSection.vue
+│   │   ├── PlotSection.vue / ThemeSection.vue / MessagesSection.vue
+│   │   ├── MemorySection.vue        ← 显式 LLM/Embedding 召回模式、Embedding/Reranker 源绑定、
+│   │   │                               候选数与最终召回数；绑定失效只显示诊断，不静默换源
 │   │   ├── DataSection.vue          ← 导出/导入/存储用量/清除全部（用量改为**本分区**挂载时读）
 │   │   │                               [图像 v1] +本存档插画用量与清理。🔴 这一行**刻意不在图像分区**：
 │   │   │                               用量是**每存档**的数字，而图像分区是全局设置；且「清理」与
@@ -609,8 +612,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │       │                              占位符显示的是**方言 JSON 的默认形态**（显示叠加后的值，
 │   │       │                              用户就再也看不出自己改没改过）。留着那个旧框的下场正是 C6
 │   │       │                              点名的静默漂移：两个长得一样的框，一个跟方言走一个不跟
-│   │       ├── ImageRenderCard.vue  ← 第二卡「出图」：后端选择 + 三档开关 + per-provider 参数与限额，
-│   │       │                           全存 UiSettings
+│   │       ├── ImageConnectionCard.vue ← NovelAI 命名连接 CRUD（Key/固定地址）+ ComfyUI 本地地址入口
+│   │       ├── ImageRenderCard.vue  ← 第三卡「出图」：后端选择 + 三档开关 + per-provider 参数与限额，
+│   │       │                           NovelAI 绑定读独立图像连接，其他 provider 参数仍存 UiSettings
 │   │       │                           🔴 三档不是三个光秃秃的单选（D44）：auto 项底下带后果行，
 │   │       │                              首次切到 auto 弹一次确认（imageAutoConfirmed 记住）。
 │   │       │                              后果行的数字取**当前设置值**，照文案写死会变成一句假话
@@ -962,22 +966,22 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 
 ### 设置页 14 分区
 
-| 分区           | 内容                                                                                                                                                                                                                                                                                                                                            |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 🔌 API 配置    | API 池 CRUD、连接测试、模型列表获取、模型推荐                                                                                                                                                                                                                                                                                                   |
-| 🤖 Agent 配置  | 12 个汉化 Agent、模型选择、世界书开关、System Prompt 编辑                                                                                                                                                                                                                                                                                       |
-| 📚 世界书      | **早已不是占位**：书列表 + 导入/新建/删除/恢复（`WorldBookSection.vue`，约 368 行）+ 条目编辑器（`WorldBookEditor.vue`，约 909 行：条目 CRUD / 关键词 / 插入位置与深度 / 触发策略 / EJS 正文）。数据在 Dexie（工坊 P0 起 `settings.worldBooks` 已不存在）                                                                                       |
-| 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                                                                                                                                                                                                                                                                                       |
-| 🧠 记忆 & 缓存 | 召回数/压缩阈值/快照上限/缓存策略                                                                                                                                                                                                                                                                                                               |
-| 🎨 外观主题    | 10 主题网格、字体风格、字体大小、悬停延迟、减少动态效果                                                                                                                                                                                                                                                                                         |
-| 💬 消息显示    | 系统通知开关 + 7 种事件类型过滤                                                                                                                                                                                                                                                                                                                 |
-| ✨ 输出美化    | 预设规则库 (22条) + auto-enable 绑定 + 三段式 UI + CRUD                                                                                                                                                                                                                                                                                         |
-| 🎵 音频        | 混音台 + 播放列表 + 音轨库（音乐文件夹条/上传/搜索/场景配乐开关）                                                                                                                                                                                                                                                                               |
-| 🖼 素材         | 导入条 + 素材库（按角色分组/扁平表/多选批删）+ 变体抽屉（设主图/裁剪/改名）                                                                                                                                                                                                                                                                     |
-| 🖼 图像生成     | 三张卡：提示词生成（`image_prompt` 的模型/温度/世界书存 `agents` 袋子；systemPrompt 按方言存 `imageDialectOverrides`）/ 出图（后端 + 方言选择 + 三档开关 + per-provider 参数与限额，存 `UiSettings` 的 `imageNovelai`/`imageComfy` 袋）/ 视觉预设（角色初始设定存 Dexie `imagePresets`；本档外貌存 `characterAppearances`，含「存为初始设定」） |
-| 💾 存档数据    | 导出/导入/清除（排除音频库与素材库，各有独立导出口）                                                                                                                                                                                                                                                                                            |
-| 🛠 开发者模式   | 持久开关（默认关闭）；控制调试工具栏、原始 Agent 请求/响应、reasoning、工具 payload、诊断导出与 `Alt + Shift + D` 抽屉                                                                                                                                                                                                                          |
-| ℹ 关于         | 制作人员、项目与技术信息、内容包世界概览、版权与第三方许可证署名                                                                                                                                                                                                                                                                                |
+| 分区           | 内容                                                                                                                                                                                                                                                      |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🔌 API 配置    | LLM / Embedding / Reranker 分类源 CRUD、三种 LLM 协议、请求体覆盖/省略、连接测试、分页模型列表、跨连接 RPM                                                                                                                                                |
+| 🤖 Agent 配置  | 12 个汉化 Agent、模型选择、世界书开关、System Prompt 编辑                                                                                                                                                                                                 |
+| 📚 世界书      | **早已不是占位**：书列表 + 导入/新建/删除/恢复（`WorldBookSection.vue`，约 368 行）+ 条目编辑器（`WorldBookEditor.vue`，约 909 行：条目 CRUD / 关键词 / 插入位置与深度 / 触发策略 / EJS 正文）。数据在 Dexie（工坊 P0 起 `settings.worldBooks` 已不存在） |
+| 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                                                                                                                                                                                                 |
+| 🧠 记忆 & 缓存 | 显式 LLM/Embedding 召回模式、Embedding 与可选 Reranker 绑定、候选数/最终召回数、压缩阈值/快照上限/缓存策略                                                                                                                                                |
+| 🎨 外观主题    | 10 主题网格、字体风格、字体大小、悬停延迟、减少动态效果                                                                                                                                                                                                   |
+| 💬 消息显示    | 系统通知开关 + 7 种事件类型过滤                                                                                                                                                                                                                           |
+| ✨ 输出美化    | 预设规则库 (22条) + auto-enable 绑定 + 三段式 UI + CRUD                                                                                                                                                                                                   |
+| 🎵 音频        | 混音台 + 播放列表 + 音轨库（音乐文件夹条/上传/搜索/场景配乐开关）                                                                                                                                                                                         |
+| 🖼 素材         | 导入条 + 素材库（按角色分组/扁平表/多选批删）+ 变体抽屉（设主图/裁剪/改名）                                                                                                                                                                               |
+| 🖼 图像生成     | 四张卡：提示词生成 / 独立出图连接 / 出图参数 / 视觉预设；NovelAI 连接存 Dexie `imageApiConnections`，ComfyUI 地址与 provider 参数留在 `UiSettings`，`image_prompt` 仍绑定通用 LLM 源                                                                      |
+| 💾 存档数据    | 导出/导入/清除（排除音频库与素材库，各有独立导出口）                                                                                                                                                                                                      |
+| 🛠 开发者模式   | 持久开关（默认关闭）；控制调试工具栏、原始 Agent 请求/响应、reasoning、工具 payload、诊断导出与 `Alt + Shift + D` 抽屉                                                                                                                                    |
+| ℹ 关于         | 制作人员、项目与技术信息、内容包世界概览、版权与第三方许可证署名                                                                                                                                                                                          |
 
 ### 预设系统（正文 Agent 专用）
 

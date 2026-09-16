@@ -47,7 +47,7 @@ const wb = useWorldBookStore();
  * 左侧 Agent 子导航的红色 `!` 角标，以及 Agent 分区里"没选模型且没配 API"那句提示。
  * 读的是 store，与 ApiSection 天然同源，不需要跨组件传。
  */
-const hasApi = computed(() => s.apiPool.length > 0);
+const hasApi = computed(() => s.apiPool.some((entry) => !entry.kind || entry.kind === 'llm'));
 
 // ============================================================
 // 主导航

@@ -70,6 +70,16 @@
 >    memories / plotEvents / plotOutlines / messages / characters / saveProfiles / saves /
 >    sceneImages / sceneImageBlobs / characterAppearances，整段包在一个 Dexie 事务里。
 >    `imagePresets` 刻意**不在**其中（全局基线）。
+>
+> **§1.1 补登（2026-09-16）**：Dexie v25 增加两个设备本地全局表：
+>
+> | 表                    | 身份                 | 主键 | saveId  | 版本 | 说明                                                                            |
+> | --------------------- | -------------------- | ---- | ------- | ---- | ------------------------------------------------------------------------------- |
+> | `imageApiConnections` | **设备本地敏感配置** | id   | ❌ 不设 | v25  | NovelAI 命名连接；与 `apiEndpoints` 一样不进普通整库/单档备份，旧备份导入不覆盖 |
+> | `apiConfigMigrations` | **设备本地迁移状态** | id   | ❌ 不设 | v25  | API 配置跨 Dexie/localStorage 迁移检查点；不进备份，也不参与存档级联            |
+>
+> 同版将 `apiEndpoints` 行规范化为 LLM / Embedding / Reranker 的 `kind + protocol` 联合；图像连接迁出，
+> 端点 ID 与绑定 ID 保持稳定。设备本地连接及其自定义请求体都不得因整库导入、单档导入或恢复操作被覆盖。
 
 ### 1.2 隔离三规则
 
@@ -309,6 +319,11 @@ saveProfiles 进 FullBackup / 单档互传 / 快照恢复。写入口 = `save-pr
 **id**: 内部生成（MEM 自增 / UUID），不出现在 AI 契约（AI 通过 keywords/content 交互）。
 **清理**: `relatedPlotEventId`（@deprecated）删除；PlotOutline version 原地覆盖与 getLatestPlotOutline 排序的语义冗余二选一（裁决: 保留 version 递增，删除排序依赖）。
 **范围外标注**: memory_summary 输出未持久化（#3）、plot 管线 mode:'off'（#18）属**管线接线**问题，不是字段问题——本规范只锁定它们落库时的形状，接线单独立项。
+
+> 📌 2026-09-16 更正：记忆召回现使用显式 `llm` / `embedding` 模式，不再在运行期按模型名猜测。
+> 向量空间由 Embedding 源 ID、规范化 URL、实际模型、维度及不含 Key 的规范化参数指纹共同标识；
+> Key 轮换不制造新空间，模型或影响向量的参数变化会隔离旧向量。可选 Reranker 只重排有数量与总字符
+> 上限的本地候选池；绑定失效或上游失败返回非致命诊断并按本地重要度/时效兜底，不自动换源或重嵌入。
 
 ---
 

@@ -1122,6 +1122,10 @@ story 被教了「克制使用」，所以必然存在「AI 没配图但我想�
 
 ## 11. 设置项
 
+> 📌 2026-09-16 更正：NovelAI 凭据已从通用 API 池移入图像生成分区的独立命名连接表
+> `imageApiConnections`；`imageNovelai.endpointId` 仍保留原 ID 绑定语义，但查询目标改为该表。
+> 固定 NovelAI 地址和 ComfyUI 本地地址的职责不变，`image_prompt` 仍是绑定通用 LLM 源的文字 Agent。
+
 新增第 13 分区 `🖼 图像生成`，**整个功能都在里面** —— 包括 `image_prompt` 的 Agent 配置（D50–D54，§11.3）。
 
 ⚠️ **`UiSettings` 要改两处**（Q-18 硬规矩）：`settings-types.ts` 的声明 **+** `getDefaults()` 给默认值。⚠️ **`AGENTS.md` 的「设置页 12 分区」表要改成 13**（实施时改，现在不改 —— 那张表描述的是现状）。

@@ -74,6 +74,8 @@ export interface CombatClientResult {
    * 持久消息数组（查询结果随之保留进历史）。仅 chatWithTools 路径填充。
    */
   toolCalls?: Array<{ name: string; arguments: unknown; result?: unknown }>;
+  /** Successful tool-loop transcript delta with provider-native continuation blocks. */
+  continuationMessages?: import('./types-api').LlmMessage[];
 }
 
 /**

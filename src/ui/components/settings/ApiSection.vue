@@ -14,17 +14,25 @@ import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import { useSettingsStore, type ApiEntry } from '../../stores/settings-store';
+import { useApiSourceStore } from '../../stores/api-source-store';
+import { sourceForStorage } from '../../stores/api-config-migration';
 import { useUIStore } from '../../stores/ui-store';
 import { fetchModels } from '@engine/api-tools';
-import { credentialIdFor, scheduleApiRequest } from '@engine/api-rpm-limiter';
-import { NAI_IMAGE_API_BASE } from '../../lib/image-client';
+import { credentialIdFor } from '@engine/api-rpm-limiter';
+import { AgentClient } from '@engine/agent-client';
+import { requestEmbedding } from '@engine/api/embedding';
+import { requestRerank } from '@engine/api/reranker';
+import { fetchLlmModels } from '@engine/api/transport';
+import { parseApiSource } from '@engine/api/source-config';
+import type { ApiSource, ApiSourceKind, LlmProtocol } from '@engine/types-api';
 
 const cfg = useSettingsStore();
+const sourceStore = useApiSourceStore();
 const s = cfg.settings;
 const ui = useUIStore();
 
 onMounted(async () => {
-  await cfg.initApiSecrets();
+  await sourceStore.initialize();
   await refreshRpmRows();
 });
 
@@ -34,7 +42,13 @@ const apiForm = reactive({
   baseUrl: '',
   apiKey: '',
   model: '',
-  apiType: 'chat' as ApiEntry['apiType'],
+  kind: 'llm' as ApiSourceKind,
+  protocol: 'openai-chat' as LlmProtocol | 'openai-embeddings' | 'openai-rerank',
+  timeoutMs: '60000',
+  bodyOverrides: '{}',
+  bodyOmitPaths: '',
+  anthropicVersion: '2023-06-01',
+  anthropicBeta: '',
   /** 🆕 2026-08-22 Delta 会话（T4）：上下文窗口 token 上限（表单用 string，保存时归一化） */
   contextWindowTokens: '' as string,
   _realKey: '' as string,
@@ -48,7 +62,18 @@ const apiForm = reactive({
  * 而它们填错的后果全都是**上游报一句指向别处的错**（真机连坑两轮：一次被报成
  * 「模型枚举非法」，一次被报成「header 非法」）。所以这里只剩名称 + API Key。
  */
-const isImageEntry = computed(() => apiForm.apiType === 'image');
+const isLlmEntry = computed(() => apiForm.kind === 'llm');
+
+watch(
+  () => apiForm.kind,
+  (kind) => {
+    if (kind === 'embedding') apiForm.protocol = 'openai-embeddings';
+    else if (kind === 'reranker') apiForm.protocol = 'openai-rerank';
+    else if (apiForm.protocol === 'openai-embeddings' || apiForm.protocol === 'openai-rerank') {
+      apiForm.protocol = 'openai-chat';
+    }
+  },
+);
 
 const apiModels = ref<string[]>([]);
 const showModelList = ref(false);
@@ -83,7 +108,7 @@ let rpmRefreshSeq = 0;
 async function refreshRpmRows() {
   const seq = ++rpmRefreshSeq;
   const grouped = new Map<string, RpmRow>();
-  for (const entry of s.apiPool) {
+  for (const entry of [...s.apiPool, ...sourceStore.imageConnections]) {
     const credentialId = await credentialIdFor({
       baseUrl: entry.baseUrl,
       apiKey: entry.apiKey,
@@ -97,7 +122,7 @@ async function refreshRpmRows() {
         credentialId,
         names: [entry.name],
         baseUrl: entry.baseUrl.replace(/\/+$/, ''),
-        maskedKey: entry.maskedKey || maskKey(entry.apiKey),
+        maskedKey: ('maskedKey' in entry ? entry.maskedKey : '') || maskKey(entry.apiKey),
       });
     }
   }
@@ -114,26 +139,39 @@ async function refreshRpmRows() {
 }
 
 watch(
-  () => s.apiPool.map((entry) => [entry.id, entry.baseUrl, entry.apiKey, entry.name]),
+  () => [
+    ...s.apiPool.map((entry) => [entry.id, entry.baseUrl, entry.apiKey, entry.name]),
+    ...sourceStore.imageConnections.map((entry) => [
+      entry.id,
+      entry.baseUrl,
+      entry.apiKey,
+      entry.name,
+    ]),
+  ],
   () => void refreshRpmRows(),
   { deep: true },
 );
 
 async function saveRpmLimits() {
-  const policies = [];
+  const changes: Array<{ credentialId: string; rpmLimit?: number }> = [];
   for (const row of rpmRows.value) {
     const raw = (rpmDraft[row.credentialId] ?? '').trim();
-    if (!raw) continue;
+    if (!raw) {
+      changes.push({ credentialId: row.credentialId });
+      continue;
+    }
     const rpmLimit = Number(raw);
     if (!Number.isSafeInteger(rpmLimit) || rpmLimit <= 0) {
       ui.toast(`${row.names.join(' / ')} 的 RPM 必须是正整数`, 'warning');
       return;
     }
-    policies.push({ credentialId: row.credentialId, rpmLimit, updatedAt: Date.now() });
+    changes.push({ credentialId: row.credentialId, rpmLimit });
   }
   rpmSaving.value = true;
   try {
-    await cfg.saveRpmPolicies(policies);
+    for (const change of changes) {
+      await cfg.updateRpmPolicy(change.credentialId, change.rpmLimit);
+    }
     ui.toast('RPM 限制已保存', 'success');
   } catch (error) {
     ui.toast(`RPM 限制保存失败：${String(error)}`, 'error');
@@ -152,72 +190,54 @@ function onApiKeyInput() {
   apiForm._realKey = '';
   apiForm._masked = false;
 }
+
+function draftSource(): ApiSource {
+  const bodyOverrides = JSON.parse(apiForm.bodyOverrides || '{}') as unknown;
+  return parseApiSource({
+    id: editingApiId.value || 'connection-test',
+    name: apiForm.name || '未命名连接',
+    kind: apiForm.kind,
+    protocol: apiForm.protocol,
+    baseUrl: apiForm.baseUrl,
+    apiKey: (apiForm._realKey || apiForm.apiKey).trim(),
+    defaultModel: apiForm.model,
+    models: apiModels.value.length ? apiModels.value : [apiForm.model].filter(Boolean),
+    timeoutMs: Number(apiForm.timeoutMs),
+    bodyOverrides,
+    bodyOmitPaths: apiForm.bodyOmitPaths
+      .split('\n')
+      .map((path) => path.trim())
+      .filter(Boolean),
+    contextWindowTokens: normalizeContextWindowTokens(apiForm.contextWindowTokens),
+    anthropicVersion: apiForm.anthropicVersion,
+    anthropicBeta: apiForm.anthropicBeta
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+  });
+}
+
 async function testApiAndFetch() {
-  // 🔴 图像端点没有 /chat/completions 也没有 /embeddings，更没有 /models（NovelAI
-  //    的出图接口是单一 POST）。拿现有两条通道去测它只会得到一个误导性的 401/404，
-  //    所以这里如实说「测不了」而不是假装测过。真正的验证在第一次出图时发生。
-  //
-  //    🔴 这一支必须排在下面那道 `baseUrl` 闸**之前**：出图端点已经没有地址那一格了
-  //    （地址是常量），排在闸后面的话点「测试连接」会静悄悄什么都不发生 ——
-  //    比一句「测不了」更让人以为是按钮坏了。
-  if (apiForm.apiType === 'image') {
-    ui.toast('图像端点没有可用的测试通道，请直接保存，出图时会验证密钥', 'info');
-    return;
-  }
-  if (!apiForm.baseUrl || !apiForm.apiKey) return;
   apiFormTesting.value = true;
-  // trim 与 fetchModels 对齐：粘贴带尾随空白/换行的 key 时，避免"获取模型能通、测试反而 401"
-  const realKey = (apiForm._realKey || apiForm.apiKey).trim();
   try {
-    await fetchModelList({ fromConnectionTest: true });
-    let testModel = apiForm.model;
-    if (!testModel && apiModels.value.length > 0) {
-      if (apiForm.apiType === 'embedding') {
-        const emb = apiModels.value.find((m) => m.toLowerCase().includes('embedding'));
-        testModel = emb || apiModels.value[0];
-      } else {
-        testModel = apiModels.value[0];
-      }
+    const source = draftSource();
+    if (source.kind === 'llm') {
+      const result = await new AgentClient({
+        endpoint: sourceForStorage(source),
+        agentId: 'connection_test',
+        saveId: 'settings-test',
+        maxRetries: 0,
+      }).chat({ messages: [{ role: 'user', content: 'Reply with OK.' }], maxTokens: 8 });
+      if (result.error) throw new Error(result.error);
+    } else if (source.kind === 'embedding') {
+      await requestEmbedding(source, 'connection test');
+    } else {
+      await requestRerank(source, 'connection test', ['relevant document', 'other document'], 1);
     }
-    if (!testModel) {
-      ui.toast('未获取到模型，请先点「获取模型」并选择一个模型再测试', 'warning');
-      apiFormTesting.value = false;
-      return;
-    }
-    const testUrl = apiForm.apiType === 'embedding' ? '/api/embeddings' : '/api/chat/test';
-    const testBody =
-      apiForm.apiType === 'embedding'
-        ? JSON.stringify({ model: testModel, input: 'test' })
-        : JSON.stringify({
-            model: testModel,
-            messages: [{ role: 'user', content: 'hi' }],
-            max_tokens: 1,
-          });
-    const testBaseUrl = apiForm.baseUrl.replace(/\/+$/, '');
-    const r = await scheduleApiRequest(
-      { baseUrl: testBaseUrl, apiKey: realKey, label: apiForm.name || testBaseUrl },
-      undefined,
-      () =>
-        fetch(testUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Target-Base-URL': testBaseUrl,
-            Authorization: 'Bearer ' + realKey,
-          },
-          body: testBody,
-        }),
-    );
-    if (!r.ok) {
-      const t = await r.text().catch(() => '');
-      throw new Error(r.status + ' ' + t.slice(0, 100));
-    }
-    apiForm._realKey = realKey;
-    apiForm.apiKey = maskKey(realKey);
+    apiForm._realKey = source.apiKey;
+    apiForm.apiKey = maskKey(source.apiKey);
     apiForm._masked = true;
-    ui.toast('ok', 'success');
-    // 测试通过后兜底重拉一次列表；首次已弹过提示，这次失败保持安静
-    if (apiModels.value.length === 0) await fetchModelList({ silentFail: true });
+    ui.toast('连接测试通过', 'success');
   } catch (e: any) {
     const msg = (e?.message || '').slice(0, 80);
     const hint =
@@ -226,7 +246,7 @@ async function testApiAndFetch() {
         : msg.indexOf('404') >= 0
           ? '（模型名或接口路径不对，检查 baseUrl/模型）'
           : '';
-    ui.toast('fail: ' + msg + hint, 'error');
+    ui.toast('连接测试失败：' + msg + hint, 'error');
   }
   apiFormTesting.value = false;
 }
@@ -237,13 +257,20 @@ async function fetchModelList(opts: { fromConnectionTest?: boolean; silentFail?:
   apiFormFetchingModels.value = true;
   const rk = (apiForm._realKey || apiForm.apiKey).trim();
   try {
-    // 去重：复用 api-tools.fetchModels（同源 /api/models + Bearer/api-key 双鉴权 + 三形态解析）
-    const { models, source, error } = await fetchModels({
-      baseUrl: apiForm.baseUrl,
-      apiKey: rk,
-      label: apiForm.name || apiForm.baseUrl,
-    });
-    if (source === 'remote' && models.length > 0) {
+    let models: string[] = [];
+    let error = '';
+    if (apiForm.kind === 'llm') {
+      models = await fetchLlmModels(sourceForStorage(draftSource()));
+    } else {
+      const result = await fetchModels({
+        baseUrl: apiForm.baseUrl,
+        apiKey: rk,
+        label: apiForm.name || apiForm.baseUrl,
+      });
+      models = result.models;
+      error = result.error ?? '';
+    }
+    if (models.length > 0) {
       apiModels.value = [...new Set(models)];
       console.log('[fetchModelList] remote → unique models:', JSON.stringify(apiModels.value));
       ui.toast(
@@ -283,7 +310,13 @@ function openAddApi() {
   apiForm.baseUrl = '';
   apiForm.apiKey = '';
   apiForm.model = '';
-  apiForm.apiType = 'chat';
+  apiForm.kind = 'llm';
+  apiForm.protocol = 'openai-chat';
+  apiForm.timeoutMs = '60000';
+  apiForm.bodyOverrides = '{}';
+  apiForm.bodyOmitPaths = '';
+  apiForm.anthropicVersion = '2023-06-01';
+  apiForm.anthropicBeta = '';
   apiForm.contextWindowTokens = '';
   apiForm._realKey = '';
   apiForm._masked = false;
@@ -291,7 +324,8 @@ function openAddApi() {
   showAddApi.value = true;
 }
 async function openEditApi(ep: ApiEntry) {
-  await cfg.initApiSecrets();
+  await sourceStore.initialize();
+  const source = sourceStore.sources.find((entry) => entry.id === ep.id);
   const hydrated = s.apiPool.find((entry) => entry.id === ep.id) ?? ep;
   editingApiId.value = ep.id;
   apiForm.name = hydrated.name;
@@ -301,7 +335,18 @@ async function openEditApi(ep: ApiEntry) {
   apiForm._realKey = key;
   apiForm._masked = key ? true : false;
   apiForm.model = hydrated.model;
-  apiForm.apiType = hydrated.apiType || 'chat';
+  apiForm.kind = source?.kind ?? hydrated.kind ?? 'llm';
+  apiForm.protocol = source?.protocol ?? hydrated.protocol ?? 'openai-chat';
+  apiForm.timeoutMs = String(source?.timeoutMs ?? hydrated.timeoutMs ?? 60_000);
+  apiForm.bodyOverrides = JSON.stringify(
+    source?.bodyOverrides ?? hydrated.bodyOverrides ?? {},
+    null,
+    2,
+  );
+  apiForm.bodyOmitPaths = (source?.bodyOmitPaths ?? hydrated.bodyOmitPaths ?? []).join('\n');
+  apiForm.anthropicVersion =
+    source?.kind === 'llm' ? (source.anthropicVersion ?? '2023-06-01') : '';
+  apiForm.anthropicBeta = source?.kind === 'llm' ? (source.anthropicBeta ?? []).join(', ') : '';
   apiForm.contextWindowTokens =
     hydrated.contextWindowTokens != null ? String(hydrated.contextWindowTokens) : '';
   apiModels.value = hydrated.models?.length
@@ -321,34 +366,39 @@ function normalizeContextWindowTokens(raw: string): number | undefined {
 }
 
 async function saveApi() {
-  // trim 防脏存：这里不 trim 的话，带空白的 key 会原样进库，之后每次运行时调用都 401
-  const realKey = (apiForm._realKey || apiForm.apiKey).trim();
-  const e: ApiEntry = {
-    id: editingApiId.value || crypto.randomUUID(),
-    name: apiForm.name,
-    // 出图端点的地址由代码决定（见 isImageEntry）。这里照写常量而不是留空，是为了
-    // 卡片上那行地址说的是**实话** —— 留空会让它看起来像"没配好"
-    baseUrl: isImageEntry.value ? NAI_IMAGE_API_BASE : apiForm.baseUrl,
-    apiKey: realKey,
-    maskedKey: maskKey(realKey),
-    model: apiForm.model,
-    models: apiModels.value.length > 0 ? apiModels.value : [apiForm.model].filter(Boolean),
-    apiType: apiForm.apiType,
-    contextWindowTokens: normalizeContextWindowTokens(apiForm.contextWindowTokens),
-  };
   const wasEditing = Boolean(editingApiId.value);
   try {
-    await cfg.saveApiEntry(e);
+    const source = draftSource();
+    const previous = sourceStore.sources.find((entry) => entry.id === editingApiId.value);
+    if (previous && previous.kind !== source.kind) {
+      const agentBindings = Object.entries(s.agents ?? {})
+        .filter(([, value]) => value?.model === previous.id)
+        .map(([agentId]) => agentId);
+      const retrievalBindings = [
+        s.embeddingSourceId === previous.id ? 'Embedding 召回' : '',
+        s.rerankerSourceId === previous.id ? 'Reranker' : '',
+      ].filter(Boolean);
+      const bindings = [...agentBindings, ...retrievalBindings];
+      if (bindings.length) {
+        throw new Error(`请先解除这些绑定再修改用途：${bindings.join('、')}`);
+      }
+    }
+    await sourceStore.saveSource({
+      ...source,
+      id: editingApiId.value || crypto.randomUUID(),
+      revision: previous?.revision,
+    });
     showAddApi.value = false;
     editingApiId.value = null;
-    ui.toast(wasEditing ? 'API updated' : 'API added', 'success');
+    ui.toast(wasEditing ? 'API 已更新' : 'API 已添加', 'success');
   } catch (error) {
-    ui.toast(`API 密钥保存失败：${String(error)}`, 'error');
+    const message = error instanceof Error ? error.message : String(error);
+    ui.toast(`API 配置无效：${message}`, 'error');
   }
 }
 async function deleteApi(id: string) {
   try {
-    await cfg.removeApiEntry(id);
+    await sourceStore.removeSource(id);
     ui.toast('API 已删除', 'info');
   } catch (error) {
     ui.toast(`API 删除失败：${String(error)}`, 'error');
@@ -361,7 +411,7 @@ async function deleteApi(id: string) {
     <div class="section-head">
       <div>
         <h3>API 池管理</h3>
-        <p class="section-desc">管理 AI 模型连接端点。支持所有 OpenAI 兼容 API。</p>
+        <p class="section-desc">按用途与协议管理 LLM、Embedding 和 Reranker 来源。</p>
       </div>
       <AppButton variant="primary" size="sm" @click="openAddApi">+ 添加 API</AppButton>
     </div>
@@ -421,6 +471,8 @@ async function deleteApi(id: string) {
             ><span class="api-card-model text-secondary text-sm">{{
               ep.model || '未选择模型'
             }}</span
+            ><span class="text-muted text-xs"
+              >{{ ep.kind || 'llm' }} · {{ ep.protocol || 'openai-chat' }}</span
             ><span class="api-card-url text-muted text-xs">{{ ep.baseUrl }}</span>
           </div>
           <div class="api-card-actions">
@@ -466,25 +518,33 @@ async function deleteApi(id: string) {
             class="form-input"
             placeholder="如: DeepSeek 生产" /></label
         ><label class="form-label"
-          >类型<select v-model="apiForm.apiType" class="form-input">
-            <option value="chat">文本补全 (Chat)</option>
+          >用途<select v-model="apiForm.kind" class="form-input">
+            <option value="llm">文字 LLM</option>
             <option value="embedding">向量嵌入 (Embedding)</option>
-            <option value="image">图像生成 (NovelAI)</option>
+            <option value="reranker">候选重排 (Reranker)</option>
           </select>
           <p class="form-hint">
-            Chat 模型用 /chat/completions 测试；Embedding 模型用 /embeddings
-            测试；图像端点没有测试通道，保存后在「图像生成」分区里选用
+            用途决定哪些消费者可以绑定；图像生成连接请到「图像生成」分区设置。
           </p></label
-        ><label v-if="!isImageEntry" class="form-label"
+        ><label class="form-label"
+          >协议<select v-model="apiForm.protocol" class="form-input" :disabled="!isLlmEntry">
+            <option v-if="isLlmEntry" value="openai-chat">OpenAI Chat Completions</option>
+            <option v-if="isLlmEntry" value="gemini">Gemini 原生 GenerateContent</option>
+            <option v-if="isLlmEntry" value="anthropic-messages">Claude 原生 Messages</option>
+            <option v-if="apiForm.kind === 'embedding'" value="openai-embeddings">
+              OpenAI 兼容 Embeddings
+            </option>
+            <option v-if="apiForm.kind === 'reranker'" value="openai-rerank">
+              OpenAI 兼容 Rerank
+            </option>
+          </select>
+          <p class="form-hint">协议必须与上游真实接口一致，不会按模型名或域名自动猜测。</p></label
+        ><label class="form-label"
           >主链接<input
             v-model="apiForm.baseUrl"
             class="form-input"
             placeholder="https://api.deepseek.com/v1"
         /></label>
-        <p v-else class="form-hint fixed-endpoint-hint">
-          出图地址固定为 <code>{{ NAI_IMAGE_API_BASE }}</code
-          >，不需要填。出图模型在「图像生成 → 出图」那张卡上设置。
-        </p>
         <label class="form-label"
           >API Key
           <div class="key-row">
@@ -506,15 +566,16 @@ async function deleteApi(id: string) {
             /><AppButton
               variant="secondary"
               size="sm"
-              :disabled="apiFormTesting"
-              @click="testApiAndFetch"
-              >{{ apiFormTesting ? '测试中...' : '测试连接' }}</AppButton
+              :disabled="apiFormFetchingModels"
+              @click="fetchModelList"
+              >{{ apiFormFetchingModels ? '获取中...' : '获取模型' }}</AppButton
             >
           </div>
           <p class="form-hint">
-            编辑已有 API 时密钥默认隐藏。点击测试连接验证密钥并获取模型列表。
+            可手动填写模型 id，或点「获取模型」拉取列表后选择。获取失败时按服务商文档手动填（如 z.ai
+            填 glm-4.6）。
           </p></label
-        ><label v-if="!isImageEntry" class="form-label"
+        ><label class="form-label"
           >模型
           <div class="key-row">
             <div class="model-combo">
@@ -541,14 +602,13 @@ async function deleteApi(id: string) {
             <AppButton
               variant="secondary"
               size="sm"
-              :disabled="apiFormFetchingModels"
-              @click="fetchModelList"
-              >{{ apiFormFetchingModels ? '获取中...' : '获取模型' }}</AppButton
+              :disabled="apiFormTesting"
+              @click="testApiAndFetch"
+              >{{ apiFormTesting ? '测试中...' : '测试连接' }}</AppButton
             >
           </div>
           <p class="form-hint">
-            可手动填写模型 id，或点「获取模型」拉取列表后选择。获取失败时按服务商文档手动填（如 z.ai
-            填 glm-4.6）。
+            编辑已有 API 时密钥默认隐藏。点击测试连接验证密钥并获取模型列表。
           </p></label
         >
         <!-- 高级设置（可折叠） -->
@@ -560,7 +620,7 @@ async function deleteApi(id: string) {
           <div v-if="showAdvancedApi" class="advanced-body">
             <!-- 🆕 2026-08-22 Delta 会话（T4）：可选上下文窗口 token 上限。出图端点没有聊天
                  prompt，这一格对它们无意义，隐藏掉。 -->
-            <label v-if="!isImageEntry" class="form-label form-label-stacked">
+            <label v-if="isLlmEntry" class="form-label form-label-stacked">
               上下文窗口 token 上限
               <input
                 v-model="apiForm.contextWindowTokens"
@@ -572,10 +632,50 @@ async function deleteApi(id: string) {
                 placeholder="留空 = 不判断"
               />
             </label>
-            <p v-if="!isImageEntry" class="form-hint">
+            <p v-if="isLlmEntry" class="form-hint">
               按实际 provider 配置填写（如 128000）。Delta 会话在请求接近此上限时自动重基线； 留空 =
               不做主动预算判断。
             </p>
+            <label class="form-label form-label-stacked">
+              请求超时（毫秒）
+              <input
+                v-model="apiForm.timeoutMs"
+                class="form-input"
+                type="number"
+                min="1"
+                step="1"
+              />
+            </label>
+            <label class="form-label form-label-stacked">
+              自定义请求体参数（JSON）
+              <textarea
+                v-model="apiForm.bodyOverrides"
+                class="form-input api-json"
+                rows="6"
+                spellcheck="false"
+              ></textarea>
+              <span class="form-hint">源参数优先；输入、模型、工具和鉴权等结构字段受保护。</span>
+            </label>
+            <label class="form-label form-label-stacked">
+              省略字段（JSON Pointer，每行一条）
+              <textarea
+                v-model="apiForm.bodyOmitPaths"
+                class="form-input api-json"
+                rows="3"
+                spellcheck="false"
+                placeholder="/frequency_penalty"
+              ></textarea>
+            </label>
+            <template v-if="apiForm.protocol === 'anthropic-messages'">
+              <label class="form-label form-label-stacked"
+                >Anthropic 版本<input v-model="apiForm.anthropicVersion" class="form-input"
+              /></label>
+              <label class="form-label form-label-stacked"
+                >Anthropic Beta（逗号分隔）<input
+                  v-model="apiForm.anthropicBeta"
+                  class="form-input"
+              /></label>
+            </template>
           </div>
         </div>
       </div>
@@ -796,6 +896,13 @@ async function deleteApi(id: string) {
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 0.68rem;
+}
+.api-json {
+  min-height: 5rem;
+  font-family: 'Cascadia Code', monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  resize: vertical;
 }
 .form-check-row {
   display: flex;

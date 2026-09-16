@@ -553,6 +553,7 @@ interface CombatAgentMessage {
   content: string | null;
   tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
   tool_call_id?: string;
+  native?: import('../types-api').NativeLlmContent;
   name?: string;
 }
 
@@ -1064,10 +1065,9 @@ async function openCombatScene(
       },
       { maxRounds: MAX_TOOL_ROUNDS },
     );
-    // 工具往返回流持久数组（查询结果保留进历史，与 routeEnemyCommand 同款）
-    appendToolRoundtrip(messages, result.toolCalls ?? []);
+    appendProviderContinuation(messages, result);
     sceneText = (result.output ?? result.rawResponse ?? '').trim();
-    if (sceneText.length > 0) {
+    if (!result.continuationMessages && sceneText.length > 0) {
       messages.push({ role: 'assistant', content: sceneText });
     }
   } catch {
@@ -1183,11 +1183,11 @@ export async function routeHostCommand(
   // 只活在 chatWithTools 的内部副本里，这里按 result.toolCalls（name/args/result 按执行序）
   // 重建回流 —— 查询工具结果（get_* 数据）随之完整保留进历史，后续轮次可见。重建消息对
   // API 合法：tool_call_id ↔ assistant.tool_calls.id 一一对应（id 用确定性序号，铁律 1）。
-  appendToolRoundtrip(messages, result.toolCalls ?? []);
+  appendProviderContinuation(messages, result);
   // 最终决策正文（assistant content，含声明演绎）也保留进历史
   const finalText = result.output ?? result.rawResponse;
   const narration = (finalText ?? '').trim();
-  if (narration.length > 0) {
+  if (!result.continuationMessages && narration.length > 0) {
     messages.push({ role: 'assistant', content: narration });
   }
   // 声明演绎（§2.5）：随 declare_attack 的 assistant content 一起产出 → 投进 combatLog
@@ -1273,6 +1273,30 @@ function appendToolRoundtrip(
       tool_call_id: id,
       name: tc.name,
       content: JSON.stringify(tc.result ?? {}),
+    });
+  }
+}
+
+/** Prefer the adapter's lossless provider-native delta; legacy mocks fall back to reconstruction. */
+function appendProviderContinuation(
+  messages: CombatAgentMessage[],
+  result: {
+    continuationMessages?: import('../types-api').LlmMessage[];
+    toolCalls?: Array<{ name: string; arguments: unknown; result?: unknown }>;
+  },
+): void {
+  if (!result.continuationMessages) {
+    appendToolRoundtrip(messages, result.toolCalls ?? []);
+    return;
+  }
+  for (const message of result.continuationMessages) {
+    messages.push({
+      role: message.role,
+      content: message.content,
+      tool_calls: message.tool_calls as CombatAgentMessage['tool_calls'],
+      tool_call_id: message.tool_call_id,
+      name: message.name,
+      native: message.native,
     });
   }
 }

@@ -1132,7 +1132,7 @@ describe('exportAllData / importAllData', () => {
     // v21：地图字节本地缓存 mapBlobs（2026-08-07，D23 补强；字节同不进备份）。
     // v22：快照拆表（snapshots 只留元数据 + snapshotPayloads 存整档载荷，两者都进备份）。
     // v23：API 凭据级 RPM 策略表。
-    expect(backup.version).toBe(24);
+    expect(backup.version).toBe(25);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     // SEC-01：settings 死表与 apiEndpoints 都可能含明文 Key，只留在本机，不进普通备份。
@@ -2936,7 +2936,7 @@ describe('Asset CRUD (v13)', () => {
     await initializeDatabase();
     const db = getDatabase();
     // v20=D18 contentPacks; v21=地图字节; v22=快照拆表; v23=API RPM; v24=调试历史
-    expect(db.verno).toBe(24);
+    expect(db.verno).toBe(25);
 
     // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
     //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）
@@ -2960,6 +2960,8 @@ describe('Asset CRUD (v13)', () => {
       'snapshotPayloads',
       'apiRateLimitPolicies',
       'debugTurns',
+      'imageApiConnections',
+      'apiConfigMigrations',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 

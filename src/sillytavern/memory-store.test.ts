@@ -578,6 +578,35 @@ describe('F09 normalizeEndpointIdentity / computeEmbeddingSpaceId', () => {
     );
   });
 
+  it('参数对象键顺序不改变空间指纹，实际参数变化会改变', () => {
+    const first = computeEmbeddingSpaceId(
+      {
+        baseUrl: 'https://api.example.com/v1',
+        bodyOverrides: { dimensions: 3, extra: { b: 2, a: 1 } },
+      },
+      'm',
+      3,
+    );
+    const reordered = computeEmbeddingSpaceId(
+      {
+        baseUrl: 'https://api.example.com/v1',
+        bodyOverrides: { extra: { a: 1, b: 2 }, dimensions: 3 },
+      },
+      'm',
+      3,
+    );
+    const changed = computeEmbeddingSpaceId(
+      {
+        baseUrl: 'https://api.example.com/v1',
+        bodyOverrides: { dimensions: 4, extra: { a: 1, b: 2 } },
+      },
+      'm',
+      3,
+    );
+    expect(reordered).toBe(first);
+    expect(changed).not.toBe(first);
+  });
+
   it('非 URL baseUrl 同样稳定且剥离敏感片段', () => {
     const base = normalizeEndpointIdentity('api.example.com/v1');
     expect(normalizeEndpointIdentity('api.example.com/v1/')).toBe(base);

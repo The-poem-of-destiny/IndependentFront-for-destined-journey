@@ -14,6 +14,7 @@
 src/sillytavern/                    ← 核心引擎
   │
   ├── types.ts                      ← 唯一类型来源；大型联合类型拆 types-*.ts（如 types-audio.ts）
+  │   ├── types-api.ts: API source 的 kind/protocol 联合、JSON 请求体类型（2026-09-16 T1）
   │   ├── v3 兼容: Lorebook / ChatPreset / AppSettings / ChatSession / ChatMessage
   │   ├── v4+: CharacterState / MemoryRecord / PlotEvent / Snapshot / SaveSlot
   │   │         ApiEndpoint / AgentConfig / AgentDefinition / Pipeline / AgentContext
@@ -26,7 +27,7 @@ src/sillytavern/                    ← 核心引擎
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
   ├── create-journey.ts             ← 新旅程唯一原子落库入口（角色/存档/档案/大纲/事件同一事务）
-  ├── database.ts                   ← Dexie/IndexedDB v24
+  ├── database.ts                   ← Dexie/IndexedDB v25
   │       🔴 `DB_VERSION` 常量必须等于最后一个 `this.version(n)`。它只出现在
   │          `FullBackup.version` 上、导入侧不拿它做判断，所以**对不上不会有任何报错**，
   │          只是每份导出的备份都盖了过期的戳。它曾经落后两版（v18/v19 忘了改），
@@ -90,21 +91,35 @@ src/sillytavern/                    ← 核心引擎
   │       🔴 **世界书、美化规则与 API Key 现居应用 Dexie，不再在 localStorage**。正则 iframe
   │          只能经同步镜像访问 `regexStorage`，不能访问任何应用表；应用 localStorage 只存无密钥
   │          设置元数据（Agent 配置/主题/`beautifierBuiltinDisabled` 等）
-  │   └── v24+: debugTurns（每存档最近 10 回合完整 Agent 调试历史）——按 invocationId
+  │   ├── v24+: debugTurns（每存档最近 10 回合完整 Agent 调试历史）——按 invocationId
   │              保留同名侧链的每次调用、agentic provider 往返 usage 与 Delta 重基线诊断；
   │              Embedding 召回/记忆向量化也记录真实 provider usage；写入服从 withSaveWriteLock；
   │              删存档级联删，不进 FullBackup（调试提示词/响应不混入日常备份）
+  │   └── v25+: imageApiConnections / apiConfigMigrations —— 前者保存 NovelAI 独立命名连接，
+  │              后者记录 API 配置跨 Dexie/localStorage 迁移检查点；两表均为设备本地数据，
+  │              不进 FullBackup。apiEndpoints 同版规范化为 LLM / Embedding / Reranker 联合形状
   │
   ├── session-backup.ts             ← 单存档导出/导入：每存档表整取（清单同 deleteSaveSlot，字节不随行）+ 内容依赖清单（世界书 token / 工坊项目 / 内容包 / story 预设，导入前只读体检）+ 导入**一律重发 id**（不重发 = 第二次导入静默覆盖第一次），全局表一行不改
   │
   ├── api-rpm-limiter.ts            ← [ADR-34] 应用级凭据桶：默认不限；达到上限后的请求按 FIFO
   │                                    暂停整 60 秒，发布等待快照后自动续发；网络 timeout 从放行后才计
-  ├── agent-client.ts               ← [Phase 3] API 客户端（每 Agent 独立 userId / 重试退避 / 缓存检测 / RPM 许可）
+  ├── api/                           ← [API 配置重构 / 2026-09-16] 协议无关配置与 provider adapter
+  │   ├── source-config.ts          ← 新 schema 严格解析；旧缺省规则只准留在迁移器
+  │   ├── body-parameters.ts        ← 源参数优先的不可变深合并 / JSON Pointer 省略 / 保护字段 / 实际预算
+  │   ├── llm-adapter.ts            ← 三种 LLM 协议统一入口、规范化响应/usage/工具调用及原生续接类型
+  │   ├── openai-chat.ts            ← Chat Completions 普通/SSE/工具调用编解码
+  │   ├── gemini.ts                 ← generateContent/SSE + functionCall/Response + thoughtSignature 保真
+  │   ├── anthropic-messages.ts     ← Messages SSE + content blocks + thinking/signature/tool ID 保真
+  │   ├── transport.ts              ← 受控 BFF 请求、模型分页、超时与 RPM 发送缝
+  │   └── embedding.ts / reranker.ts ← OpenAI 兼容检索请求；受保护字段、响应校验与候选重排
+  ├── agent-client.ts               ← [Phase 3 + API 重构] API 客户端（配置快照 / 重试 / 缓存 / RPM；
+  │                                    协议适配、流式归一化、工具调度及 continuationMessages）
   ├── agent-templates.ts            ← [Phase 3+9] Prompt 模板（systemPrompt 已迁 agent-config.json，留 stub + 动态上下文）
-  ├── prompt-session-assembler.ts   ← [Delta 会话 v1 / 2026-08-23] 主 DAG 普通 chat/chatStream 的 delta session 深模块：
+  ├── prompt-session-assembler.ts   ← [Delta 会话 v1 + API 重构] 主 DAG普通 chat/chatStream 的 delta session 深模块：
   │      独占 `(saveId, agentId)` 的 transcript / baselineSignature / revision / 投影 diff 起点，只开
   │      prepare/complete/invalidate 三入口；首轮完整渲染 baseline，后续复用 wire transcript 只追加
-  │      `context_delta + turn_context + tailPrompt` 增量；**不写 Dexie**（内存态随刷新冷建基线）。
+  │      `context_delta + turn_context + tailPrompt` 增量；保存原生 assistant 续接块但不写 Dexie，
+  │      baselineSignature 含协议/端点修订/参数签名，预算读取覆盖后的实际输出上限。
   │      embedding / tools / combat / 侧链 / regenerate 走原路径（handle===null 或 skipSession）。
   │      设计：docs/planning/2026-08-22-llm-assembly-delta-architecture-scratch.md
   ├── prompt-state-projection.ts    ← [Delta 会话 v1] 读取型、幂等投影 + 纯 diff（prompt-session-assembler 的基座）：

@@ -76,6 +76,48 @@ describe('settings-store', () => {
     expect(store.settings.developerMode).toBe(false);
   });
 
+  it('一次性把旧模型名启用的向量召回迁成显式源，且共享 LLM 源时派生独立副本', () => {
+    store.$dispose();
+    localStorage.setItem(
+      'fated-poem-settings',
+      JSON.stringify({
+        apiPool: [
+          {
+            id: 'shared',
+            name: '共享源',
+            baseUrl: 'https://api.example.test/v1',
+            apiKey: 'secret',
+            maskedKey: '',
+            model: 'text-embedding-3-small',
+            models: [],
+            apiType: 'chat',
+          },
+        ],
+        agents: {
+          memory_recall: { model: 'shared' },
+          story: { model: 'shared' },
+        },
+      }),
+    );
+    setActivePinia(createPinia());
+    store = useSettingsStore();
+
+    expect(store.settings.memoryRecallMode).toBe('embedding');
+    expect(store.settings.embeddingSourceId).toBe('shared__embedding');
+    expect(store.settings.apiPool).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'shared', apiType: 'chat' }),
+        expect.objectContaining({
+          id: 'shared__embedding',
+          apiType: 'embedding',
+          model: 'text-embedding-3-small',
+        }),
+      ]),
+    );
+    expect((store.settings as any).embeddingEndpointId).toBeUndefined();
+    expect((store.settings as any).embeddingModel).toBeUndefined();
+  });
+
   it('开发者模式默认关闭，并随设置袋持久化', async () => {
     expect(store.settings.developerMode).toBe(false);
 
@@ -107,8 +149,7 @@ describe('settings-store', () => {
     const raw = localStorage.getItem('fated-poem-settings');
     expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw!);
-    expect(parsed.apiPool).toHaveLength(1);
-    expect(parsed.apiPool[0].apiKey).toBe('');
+    expect(parsed.apiPool).toBeUndefined();
     expect(raw).not.toContain('"k"');
   });
 
@@ -129,7 +170,7 @@ describe('settings-store', () => {
     expect((await getApiEndpoints())[0].apiKey).toBe('sk-runtime-secret');
     const raw = localStorage.getItem('fated-poem-settings')!;
     expect(raw).not.toContain('sk-runtime-secret');
-    expect(JSON.parse(raw).apiPool[0].apiKey).toBe('');
+    expect(JSON.parse(raw).apiPool).toBeUndefined();
   });
 
   it('🆕 T4：contextWindowTokens 跟着端点条目一起持久化（localStorage + Dexie）', async () => {
@@ -148,7 +189,7 @@ describe('settings-store', () => {
 
     expect(store.settings.apiPool[0].contextWindowTokens).toBe(128000);
     const raw = JSON.parse(localStorage.getItem('fated-poem-settings')!);
-    expect(raw.apiPool[0].contextWindowTokens).toBe(128000);
+    expect(raw.apiPool).toBeUndefined();
     const rows = await getApiEndpoints();
     expect(rows[0].contextWindowTokens).toBe(128000);
   });

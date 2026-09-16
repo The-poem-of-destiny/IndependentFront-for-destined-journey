@@ -9,6 +9,7 @@ import { useImagePresetStore } from '../../stores/image-preset-store';
 import { unwireEffectSystem } from '@engine/effect-wiring';
 import { GamePipeline, waitForGameSaveIdle } from '../../lib/game-pipeline';
 import { buildSceneImageSeams, resolveSceneWeather } from '../../lib/scene-image-seams';
+import { useApiSourceStore } from '../../stores/api-source-store';
 import { getContentRegistry } from '../../stores/content-store';
 import { useCharacterAppearanceStore } from '../../stores/character-appearance-store';
 import {
@@ -39,6 +40,7 @@ import { hasOpenDialog } from '../../lib/modal-focus';
 const game = useGameStore();
 const ui = useUIStore();
 const settings = useSettingsStore();
+const apiSources = useApiSourceStore();
 const audio = useAudioStore();
 const sceneImages = useSceneImageStore();
 const imagePresets = useImagePresetStore();
@@ -113,6 +115,8 @@ onMounted(async () => {
       //    `lib/scene-image-seams.ts`（不碰 Pinia，可单测），这里只负责接线。
       await sceneImages.load(requestedSaveId, ownsPage);
       if (!ownsPage()) return;
+      await apiSources.initialize().catch(() => undefined);
+      if (!ownsPage()) return;
       void imagePresets.init();
       // 🔴 会话外貌副本**必须按存档载入**（D56）：不载入就会拿上一个存档的外貌去出图，
       //    而同一个角色名在两周目里长得不一样是正常的 —— 那正是会话副本存在的理由。
@@ -121,6 +125,7 @@ onMounted(async () => {
       sceneImages.setSeams(
         buildSceneImageSeams({
           settings: () => settings.settings,
+          imageConnections: () => apiSources.imageConnections,
           // 🔴 交出去的是注册表那一面的**原始值**（图像 v2 / C4）：解析与用户覆盖的叠加
           //    留在 seams 里（纯函数、有测试）。这里现取现给 —— 内容包换了方言表之后
           //    不必重挂缝，与 `settings` 同一条纪律

@@ -33,7 +33,15 @@ import { AgentClient } from './agent-client';
 import type { ChatRequest } from './agent-client';
 import { buildAgentMessagesAsync } from './agent-templates';
 import { scanMarkers } from './marker-protocol';
-import { recallMemories, type EmbeddingRequestTrace } from './memory-store';
+import {
+  recallMemories,
+  recallMemoriesLocally,
+  type EmbeddingRequestTrace,
+  type RecallDiagnostics,
+} from './memory-store';
+import { applyRerank, requestRerank } from './api/reranker';
+import type { RerankerApiSource } from './types-api';
+import { buildLlmRequest } from './api/llm-adapter';
 import { buildZoneContext } from './context-visibility';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { rescueStoryOutput } from './story-rescue';
@@ -70,6 +78,13 @@ export interface OrchestratorOptions {
   fetch?: typeof fetch;
   /** 手动指定要运行的 Agent（空 = 全部） */
   onlyAgents?: string[];
+  memoryRetrieval?: {
+    mode: 'llm' | 'embedding';
+    embeddingEndpoint?: ApiEndpoint;
+    rerankerEndpoint?: ApiEndpoint;
+    candidateCount: number;
+    resultCount: number;
+  };
 }
 
 export interface OrchestratorEvents {
@@ -203,6 +218,7 @@ export class AgentOrchestrator {
   private saveId: string;
   private events: OrchestratorEvents;
   private onlyAgents?: Set<string>;
+  private memoryRetrieval?: OrchestratorOptions['memoryRetrieval'];
 
   private results: Map<string, AgentResult> = new Map();
   private completedStages: string[] = [];
@@ -247,6 +263,7 @@ export class AgentOrchestrator {
     this.worldBooks = options.worldBooks ?? [];
     this.presets = options.presets ?? [];
     this.runId = crypto.randomUUID();
+    this.memoryRetrieval = options.memoryRetrieval;
 
     // Build lookup maps
     this.agentConfigs = new Map();
@@ -491,6 +508,14 @@ export class AgentOrchestrator {
     config: AgentConfig,
     options?: { skipSession?: boolean },
   ): Promise<AgentResult> {
+    if (config.agentId === 'memory_recall' && this.memoryRetrieval?.mode === 'embedding') {
+      const endpoint = this.memoryRetrieval.embeddingEndpoint;
+      if (!endpoint) {
+        return this.callMemoryRecallLocalFallback(config, 'binding_invalid');
+      }
+      return this.callMemoryRecallEmbedding(endpoint, config);
+    }
+
     const endpoint = this.endpoints.get(config.apiEndpointId);
     if (!endpoint) {
       return {
@@ -502,14 +527,6 @@ export class AgentOrchestrator {
         duration: 0,
         error: `Endpoint "${config.apiEndpointId}" not found`,
       };
-    }
-
-    // 🆕 自动检测：memory_recall 模型名含 "embedding" 或 apiType 为 embedding → 走向量召回路径
-    if (
-      config.agentId === 'memory_recall' &&
-      (/embedding/i.test(config.model) || (endpoint as any).apiType === 'embedding')
-    ) {
-      return this.callMemoryRecallEmbedding(endpoint, config);
     }
 
     // 🆕 Phase 8.5 Agentic 路径
@@ -540,6 +557,27 @@ export class AgentOrchestrator {
         presets: this.presets,
         endpointId: config.apiEndpointId,
         model: config.model || endpoint.defaultModel,
+        endpointSignature: JSON.stringify({
+          protocol: endpoint.protocol ?? 'openai-chat',
+          baseUrl: endpoint.baseUrl.trim().replace(/\/+$/u, ''),
+          defaultModel: endpoint.defaultModel,
+          bodyOverrides: endpoint.bodyOverrides ?? {},
+          bodyOmitPaths: endpoint.bodyOmitPaths ?? [],
+          revision: endpoint.revision ?? 0,
+        }),
+        outputBudget: buildLlmRequest({
+          protocol:
+            endpoint.protocol === 'gemini' || endpoint.protocol === 'anthropic-messages'
+              ? endpoint.protocol
+              : 'openai-chat',
+          model: config.model || endpoint.defaultModel,
+          messages: [{ role: 'user', content: 'budget' }],
+          maxTokens: config.maxTokens,
+          stream: false,
+          userId: 'budget',
+          bodyOverrides: endpoint.bodyOverrides,
+          bodyOmitPaths: endpoint.bodyOmitPaths,
+        }).outputBudget,
         // 🆕 T4 接线（设计 §9 / 2026-08-22）：endpoint.contextWindowTokens（可选主动
         //    重基线依据，§8.3）+ config.tailPrompt（该 Agent 单一末尾指令，§6.2）。
         //    两者缺省时 assembler 侧自然回落：不判断 / 不产 tail 标签。
@@ -618,6 +656,11 @@ export class AgentOrchestrator {
             cacheHitTokens: result.cacheHitTokens,
             cacheMissTokens: result.cacheMissTokens,
             completionTokens: result.completionTokens,
+            nativeAssistant: (
+              result as AgentResult & {
+                _nativeAssistant?: import('./types-api').NativeLlmContent;
+              }
+            )._nativeAssistant,
           });
         }
       }
@@ -684,6 +727,7 @@ export class AgentOrchestrator {
                     cacheHitTokens: streamResult.cacheHitTokens,
                     cacheMissTokens: streamResult.cacheMissTokens,
                     completionTokens: streamResult.completionTokens,
+                    nativeAssistant: streamResult.nativeAssistant,
                   });
                 }
                 resolve({
@@ -830,42 +874,106 @@ export class AgentOrchestrator {
 
   /**
    * 使用 Embedding API 做向量相似度召回（不经 LLM）
-   * 自动检测条件：config.model 包含 "embedding"（大小写不敏感）
+   * 仅由显式 memoryRetrieval.mode === 'embedding' 进入；模型名不参与运行时猜测。
    */
   private async callMemoryRecallEmbedding(
     endpoint: ApiEndpoint,
     config: AgentConfig,
   ): Promise<AgentResult> {
     const startTime = Date.now();
-    const topK = 20; // 使用合理默认值，与 settings-store 的 memoryRecallCount 默认对齐
+    const candidateCount = Math.min(
+      100,
+      Math.max(this.memoryRetrieval?.resultCount ?? 20, this.memoryRetrieval?.candidateCount ?? 20),
+    );
+    const topK = this.memoryRetrieval?.resultCount ?? 20;
     const query = this.context.userInput || '';
     let embeddingTrace: EmbeddingRequestTrace | undefined;
+    let recallDiagnostics: RecallDiagnostics | undefined;
 
     try {
       const recalled = await recallMemories(
         this.saveId,
         query,
-        topK,
+        candidateCount,
         {
+          id: endpoint.id,
           baseUrl: endpoint.baseUrl,
           apiKey: endpoint.apiKey,
-          defaultModel: config.model || endpoint.defaultModel,
+          defaultModel: endpoint.defaultModel,
+          name: endpoint.name,
+          bodyOverrides: endpoint.bodyOverrides,
+          bodyOmitPaths: endpoint.bodyOmitPaths,
+          revision: endpoint.revision,
         },
-        undefined,
+        config.abortSignal,
         (trace) => {
           embeddingTrace = trace;
         },
+        (diagnostics) => {
+          recallDiagnostics = diagnostics;
+        },
       );
 
+      let selected = recalled.slice(0, topK);
+      let rerankFallback: string | undefined;
+      const reranker = this.memoryRetrieval?.rerankerEndpoint;
+      if (reranker && recalled.length > 0) {
+        try {
+          const documents: string[] = [];
+          let remainingCharacters = 100_000;
+          for (const item of recalled) {
+            if (remainingCharacters <= 0) break;
+            const document = item.memory.content.slice(0, remainingCharacters);
+            if (!document) break;
+            documents.push(document);
+            remainingCharacters -= document.length;
+          }
+          const scores = await requestRerank(
+            {
+              id: reranker.id,
+              name: reranker.name,
+              kind: 'reranker',
+              protocol: 'openai-rerank',
+              baseUrl: reranker.baseUrl,
+              apiKey: reranker.apiKey,
+              defaultModel: reranker.defaultModel,
+              models: reranker.models,
+              timeoutMs: reranker.timeoutMs ?? reranker.timeout,
+              bodyOverrides: reranker.bodyOverrides ?? {},
+              bodyOmitPaths: reranker.bodyOmitPaths ?? [],
+              revision: reranker.revision,
+            } satisfies RerankerApiSource,
+            query,
+            documents,
+            topK,
+            config.abortSignal,
+          );
+          selected = applyRerank(recalled, scores, topK);
+        } catch (error) {
+          rerankFallback = error instanceof Error ? error.message : String(error);
+        }
+      }
+
       // 格式化为与 LLM 路径兼容的输出结构
-      const memories = recalled.map((r) => ({
+      const memories = selected.map((r) => ({
         id: r.memory.id,
         relevance: Math.round(r.score * 100) / 100,
         reason:
           r.score > 0 ? `Embedding 余弦相似度: ${r.score.toFixed(3)}` : '无向量，按重要度排序',
       }));
 
-      const output = { memories };
+      const output = {
+        memories,
+        ...(recallDiagnostics?.queryError
+          ? {
+              retrievalDiagnostic: {
+                type: 'upstream_failed',
+                message: recallDiagnostics.queryError,
+              },
+            }
+          : {}),
+        ...(rerankFallback ? { rerankFallback } : {}),
+      };
       const duration = Date.now() - startTime;
 
       return {
@@ -905,6 +1013,39 @@ export class AgentOrchestrator {
         error: `Embedding 召回失败: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+  }
+
+  private async callMemoryRecallLocalFallback(
+    config: AgentConfig,
+    type: 'binding_invalid' | 'disabled',
+  ): Promise<AgentResult> {
+    const startTime = Date.now();
+    const topK = this.memoryRetrieval?.resultCount ?? 20;
+    const recalled = await recallMemoriesLocally(this.saveId, topK);
+    const output = {
+      memories: recalled.map((item) => ({
+        id: item.memory.id,
+        relevance: 0,
+        reason: '未使用远端向量，按重要度与时间排序',
+      })),
+      retrievalDiagnostic: {
+        type,
+        message:
+          type === 'binding_invalid'
+            ? 'Embedding 召回绑定源无效，已使用本地兜底'
+            : 'Embedding 召回未启用',
+      },
+    };
+    return {
+      agentId: config.agentId,
+      output,
+      rawResponse: JSON.stringify(output),
+      tokensUsed: 0,
+      cacheHit: false,
+      completionTokens: 0,
+      requestMessages: [{ role: 'user', content: this.context.userInput || '' }],
+      duration: Date.now() - startTime,
+    };
   }
 
   // ========== Internal: Validation ==========
