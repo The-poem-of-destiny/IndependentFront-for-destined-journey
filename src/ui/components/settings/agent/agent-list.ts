@@ -46,8 +46,14 @@ export const AGENT_LIST: readonly AgentListEntry[] = [
   },
   {
     id: 'combat_v3',
-    name: '战斗决策',
-    desc: '战斗侧链 Agent：内核主持战斗流程，它做敌方单位战术决策并输出结算演绎',
+    name: '战斗主持人',
+    desc: '理解玩家意图，并负责战斗开场、结算与终局叙事',
+    stage: 1,
+  },
+  {
+    id: 'combat_enemy',
+    name: '敌方决策',
+    desc: '只为当前获准的敌方单位选择行动，不接触玩家私密战斗数据',
     stage: 1,
   },
   {

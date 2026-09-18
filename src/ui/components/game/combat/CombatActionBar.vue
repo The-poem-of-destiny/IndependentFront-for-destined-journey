@@ -97,6 +97,8 @@ const selectedTargetId = ref<string>('');
 
 /** 自由文本框内容 */
 const inputText = ref('');
+/** 结束回合意图提交期间立即锁定按钮，避免状态投影更新前重复提交。 */
+const isEndingTurn = ref(false);
 
 // ════════════════════════════════════════
 //  单位 → CharacterState 查询（读技能/道具/武器）
@@ -271,14 +273,20 @@ const canAssemble = computed(() => {
  * 🎭 主持人/DM 模式（2026-08-12）：走意图文本 → 主持人理解「结束回合」→ 调 end_turn
  * （内核 consumeSlot 全量消费 → MoraleCheck → 下一位），与「跳过战斗」刻意区分。
  */
-function handleEndTurn() {
+async function handleEndTurn() {
   const actorId = currentActorId();
-  if (!actorId || isLocked.value) return;
-  void game.submitCombatIntent(`我方「${currentUnit.value?.name ?? actorId}」结束本回合`);
-  // 本单位轮次结束，清空拼装选择（下次轮到该单位时由 watch 重新锁定）
-  selectedAction.value = '';
-  selectedDetail.value = '';
-  selectedTargetId.value = '';
+  if (!actorId || isLocked.value || isEndingTurn.value) return;
+
+  isEndingTurn.value = true;
+  try {
+    await game.submitCombatIntent(`我方「${currentUnit.value?.name ?? actorId}」结束本回合`);
+    // 本单位轮次结束，清空拼装选择（下次轮到该单位时由 watch 重新锁定）
+    selectedAction.value = '';
+    selectedDetail.value = '';
+    selectedTargetId.value = '';
+  } finally {
+    isEndingTurn.value = false;
+  }
 }
 
 // ════════════════════════════════════════
@@ -437,8 +445,8 @@ function handleKeydown(e: KeyboardEvent) {
         <div class="input-actions">
           <button
             class="end-turn-btn"
-            :class="{ 'is-disabled': isLocked }"
-            :disabled="isLocked"
+            :class="{ 'is-disabled': isLocked || isEndingTurn }"
+            :disabled="isLocked || isEndingTurn"
             @click="handleEndTurn"
           >
             结束回合

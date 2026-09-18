@@ -12,6 +12,7 @@ import { toView } from './state';
 import { createCombatState } from './state';
 import { mkBundle } from './test-utils';
 import type { CombatState } from './types';
+import { accumulateVisibleCombatFacts, createCombatVisibilityState } from './agent-visibility';
 
 describe('projectToAgent：从唯一 CombatView 取数', () => {
   it('输出 <action_info> 面板，含回合/单位 HP%/先攻序列/FP', () => {
@@ -61,5 +62,25 @@ describe('projectToAgent：从唯一 CombatView 取数', () => {
     const panel = projectToAgent(view);
     expect(panel).toContain('状态: 流血');
     expect(panel).toContain('战意: routing');
+  });
+
+  it('敌方投影隐藏玩家精确资源，仅登记已执行事实中的公开技能', () => {
+    const view = toView(createCombatState(mkBundle()));
+    const visibility = accumulateVisibleCombatFacts(createCombatVisibilityState(), [
+      {
+        kind: 'AttackDeclared',
+        attackerId: '甲',
+        targetId: '乙',
+        skill: '秘剑',
+        intentionLevel: '常规',
+      },
+    ]);
+    const panel = projectToAgent(view, 'combat_enemy', visibility);
+
+    expect(panel).toContain('[友方] 甲: HP 100%');
+    expect(panel).not.toContain('[友方] 甲: HP 500/500');
+    expect(panel).toContain('已公开技能: 秘剑');
+    expect(panel).not.toContain('FP:');
+    expect(panel).toContain('[敌方] 乙: HP 500/500');
   });
 });

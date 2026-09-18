@@ -106,8 +106,13 @@ const isCombatThinking = computed(() => {
   const combat = game.v3ActiveCombat;
   if (!combat) return false;
   if (game.combatAwaitingInput) return false;
+  if (game.combatAgentPause) return false;
   return combat.phase !== 'Terminal' && combat.phase !== 'SettlementCommitted';
 });
+
+const pausedRoleLabel = computed(() =>
+  game.combatAgentPause?.role === 'combat_enemy' ? '敌方决策' : '战斗主持人',
+);
 </script>
 
 <template>
@@ -239,6 +244,20 @@ const isCombatThinking = computed(() => {
               <section class="combat-ledger" aria-labelledby="combat-ledger-label">
                 <div class="combat-ledger-heading">
                   <span id="combat-ledger-label">战斗记录</span>
+                </div>
+                <div v-if="game.combatAgentPause" class="combat-agent-pause" role="alert">
+                  <div class="combat-agent-pause-copy">
+                    <strong>{{ pausedRoleLabel }}已暂停</strong>
+                    <span>{{ game.combatAgentPause.message }}</span>
+                  </div>
+                  <div class="combat-agent-pause-actions">
+                    <AppButton variant="primary" size="sm" @click="game.resumeCombatAgent('retry')">
+                      重试当前决策
+                    </AppButton>
+                    <AppButton variant="ghost" size="sm" @click="game.resumeCombatAgent('exit')">
+                      退出战斗
+                    </AppButton>
+                  </div>
                 </div>
                 <CombatMessageFlow
                   :entries="game.combatLog"
@@ -628,6 +647,40 @@ const isCombatThinking = computed(() => {
   border: 1px solid var(--combat-inlay);
   background: color-mix(in srgb, var(--theme-content-bg) 88%, var(--theme-card-bg));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-card-border) 50%, transparent);
+}
+.combat-ledger:has(.combat-agent-pause) {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+.combat-agent-pause {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--theme-spacing-md);
+  margin: 0 var(--theme-spacing-md) var(--theme-spacing-sm);
+  padding: var(--theme-spacing-md);
+  color: var(--theme-warning);
+  background: color-mix(in srgb, var(--theme-warning) 10%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 35%, var(--theme-card-border));
+  border-radius: var(--theme-radius-md);
+  box-shadow: var(--paper-stack);
+}
+.combat-agent-pause-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-xs);
+  min-width: 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.combat-agent-pause-copy strong {
+  font-family: var(--theme-font-title);
+  font-size: 0.875rem;
+}
+.combat-agent-pause-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--theme-spacing-sm);
+  flex-shrink: 0;
 }
 
 .combat-ledger-heading {

@@ -136,6 +136,8 @@ function containsApiPoolKey(settings: Record<string, unknown>): boolean {
 /** localStorage is configuration metadata only; API secrets live in Dexie `apiEndpoints`. */
 export function serializeSettingsForLocalStorage(settings: Record<string, unknown>): string {
   const copy = detach(settings);
+  // 双角色战斗会话已成为唯一模式，旧试运行开关不再持久化。
+  delete copy.combatAgentSplitEnabled;
   if (copy[API_KEYS_MIGRATED_FLAG]) {
     delete copy.apiPool;
   } else if (Array.isArray(copy.apiPool)) {
@@ -388,6 +390,8 @@ export const useSettingsStore = defineStore('settings', () => {
   // 合并：已存值覆盖默认值（支持未来新增字段自动补默认值）
   const defaults = getDefaults();
   const merged = { ...defaults, ...saved };
+  // 旧版本可能在 localStorage 留有试运行开关；新方案无条件启用，加载时主动清掉幽灵键。
+  delete (merged as Record<string, unknown>).combatAgentSplitEnabled;
 
   // Q-18：老用户那 12 张 per-Agent map → `agents`。
   //

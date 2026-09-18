@@ -541,8 +541,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   ├── AgentPromptCard.vue   ← systemPrompt + 上下文模板 + 占位符徽章 + 预览（非 story）
 │   │   │   │                            占位符插入改用**模板 ref**，不再全局 querySelectorAll
 │   │   │   ├── PresetManager.vue     ← 预设子系统 + 两个弹窗（story）；单根，弹窗在根卡内层
-│   │   │   ├── agent-list.ts         ← 12 个 Agent 的展示元数据 + getDefaultTemplateForAgent
-│   │   │   │                            （combat_v3 战斗侧链：不进主 DAG 但在设置页有入口）
+│   │   │   ├── agent-list.ts         ← 13 个 Agent 的展示元数据 + getDefaultTemplateForAgent
+│   │   │   │                            （combat_v3 主持人 + combat_enemy 敌方决策均为战斗侧链；
+│   │   │   │                              设置页 combat_v3 卡含默认关闭的双角色会话开关）
 │   │   │   ├── placeholder-catalog.ts← 23 项占位符 + 按 Agent 过滤（DAG 偏序 + 侧链归属）
 │   │   │   ├── agent-defaults.ts     ← buildAgentDefaultEntry（纯装配；patch 副作用留调用方）
 │   │   │   └── agent-chrome.css      ← ★跨组件共用：.prompt-editor / .template-preview-panel
@@ -867,6 +868,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 本组件只**装**那两份契约，不在这里另写第二套消息协议
 │   │   ├── DebugPanel.vue           ← 调试面板（`activeModal === 'debug'` 且 `developerMode`）：
 │   │   │                               Agent 请求/响应 + EJS 后端状态 + 引擎设置 + **随机事件区块**
+│   │   │                               战斗从就绪页延后启动时由 `game-pipeline` 建独立 Debug Turn；
+│   │   │                               `combat_v3` / `combat_enemy` 共账本分条记录，禁止回落 `detached`
+│   │   │                               Coordinator 批次校验暂停要回写对应调用 `error`
 │   │   ├── random-event-debug.ts    ← [随机事件 v1] 上者随机事件区块的展示层判定（纯函数，不 mount 可测）
 │   │   │                               🔴 **不装任何判据的第二实现**：硬门槛走 `evaluateEventCondition`、
 │   │   │                                  权重走 `computeEventWeight`、上下文走
@@ -968,7 +972,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | 分区           | 内容                                                                                                                                                                                                                                                      |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 🔌 API 配置    | LLM / Embedding / Reranker 分类源 CRUD、三种 LLM 协议、请求体覆盖/省略、连接测试、分页模型列表、跨连接 RPM                                                                                                                                                |
-| 🤖 Agent 配置  | 12 个汉化 Agent、模型选择、世界书开关、System Prompt 编辑                                                                                                                                                                                                 |
+| 🤖 Agent 配置  | 13 个汉化 Agent、模型选择、世界书开关、System Prompt 编辑；战斗固定使用主持人与敌方决策双角色会话                                                                                                                                                         |
 | 📚 世界书      | **早已不是占位**：书列表 + 导入/新建/删除/恢复（`WorldBookSection.vue`，约 368 行）+ 条目编辑器（`WorldBookEditor.vue`，约 909 行：条目 CRUD / 关键词 / 插入位置与深度 / 触发策略 / EJS 正文）。数据在 Dexie（工坊 P0 起 `settings.worldBooks` 已不存在） |
 | 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                                                                                                                                                                                                 |
 | 🧠 记忆 & 缓存 | 显式 LLM/Embedding 召回模式、Embedding 与可选 Reranker 绑定、候选数/最终召回数、压缩阈值/快照上限/缓存策略                                                                                                                                                |

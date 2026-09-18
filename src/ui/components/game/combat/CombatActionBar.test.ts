@@ -175,6 +175,27 @@ describe('CombatActionBar — 结束回合按钮', () => {
     expect(arg).toContain('结束本回合');
   });
 
+  it('提交处理中立即锁定按钮，快速连点只触发一次；提交完成后解锁', async () => {
+    let resolveSubmit!: () => void;
+    submitCombatIntent.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (resolveSubmit = resolve)),
+    );
+    const w = await mountBar();
+    const btn = w.find('button.end-turn-btn');
+
+    const firstClick = btn.trigger('click');
+    const secondClick = btn.trigger('click');
+    await Promise.all([firstClick, secondClick]);
+
+    expect(submitCombatIntent).toHaveBeenCalledTimes(1);
+    expect((btn.element as HTMLButtonElement).disabled).toBe(true);
+
+    resolveSubmit();
+    await nextTick();
+    await nextTick();
+    expect((btn.element as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('锁定态（敌方回合）→ 结束回合按钮禁用，不触发提交', async () => {
     mockGame.combatAwaitingInput = null;
     const w = await mountBar();

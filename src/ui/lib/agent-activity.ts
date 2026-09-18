@@ -13,6 +13,7 @@ const AGENT_ACTIVITY_LABELS: Record<string, string> = {
   item_gen: '准备新物品',
   image_prompt: '构思场景画面',
   combat_v3: '推演战局',
+  combat_enemy: '筹划敌方行动',
   plot_outline: '编织剧情大纲',
 };
 
@@ -42,7 +43,6 @@ const TOOL_ACTIVITY_LABELS: Record<string, string> = {
   flee: '判断撤离时机',
   end_turn: '结束当前行动',
   submit_adjudication: '裁定战斗结果',
-  write_summary: '记录战况',
 };
 
 function recordOf(value: unknown): Record<string, unknown> | undefined {

@@ -54,11 +54,10 @@ function fakeEnemyClient(script: Array<{ name: string; args: Record<string, any>
   let idx = 0;
   return {
     chatWithTools: async (_req, _toolExecutor) => {
-      const step = script[Math.min(idx, script.length - 1)];
+      const scripted = script[idx];
+      const fallbackActor = script[0]?.args.actorName ?? '乙';
+      const step = scripted ?? { name: 'end_turn', args: { actorName: fallbackActor } };
       idx++;
-      if (!step) {
-        return { output: null, rawResponse: '', toolCalls: [] } as never;
-      }
       return {
         output: 'ok',
         rawResponse: '',
@@ -444,7 +443,7 @@ describe('玩家方 / 敌方路由', () => {
       ]);
     };
     await runCombatV3(opts);
-    expect(seenAgents).toContain('combat_v3');
+    expect(seenAgents).toContain('combat_enemy');
   });
 });
 
@@ -544,21 +543,24 @@ describe('战斗 agent tools 注入（2026-08-08 真机 bug 回归）', () => {
     });
     setQueue(atkTurn());
     let capturedReq: { tools?: unknown } | null = null;
+    let decisionCalls = 0;
 
     // 敌方路由 → 战斗 agent；捕获它收到的 request，断言 tools 已注入
     opts.deps.clientFactory = () =>
       ({
         chatWithTools: async (req: { tools?: unknown }) => {
           capturedReq = req;
-          // 返回一个合法 declare_attack
+          decisionCalls++;
           return {
             output: 'ok',
             rawResponse: '',
             toolCalls: [
-              {
-                name: 'declare_attack',
-                arguments: { actorName: '乙', targetName: '甲', intentionLevel: '战术' },
-              },
+              decisionCalls === 1
+                ? {
+                    name: 'declare_attack',
+                    arguments: { actorName: '乙', targetName: '甲', intentionLevel: '战术' },
+                  }
+                : { name: 'end_turn', arguments: { actorName: '乙' } },
             ],
           } as never;
         },
@@ -575,10 +577,10 @@ describe('战斗 agent tools 注入（2026-08-08 真机 bug 回归）', () => {
   });
 });
 
-describe('combat system prompt 来源（2026-08-09 §2.7：configs 优先，删硬编码）', () => {
+describe('敌方 system prompt 来源（双角色会话：configs 优先）', () => {
   const combatConfig = (systemPrompt: string): AgentConfig =>
     ({
-      agentId: 'combat_v3',
+      agentId: 'combat_enemy',
       enabled: true,
       apiEndpointId: 'ep',
       model: '',
@@ -616,18 +618,22 @@ describe('combat system prompt 来源（2026-08-09 §2.7：configs 优先，删�
     if (over.configs) opts.deps.configs = over.configs;
     setQueue(atkTurn());
     let systemContent: string | undefined;
+    let decisionCalls = 0;
     opts.deps.clientFactory = () =>
       ({
         chatWithTools: async (req: { messages: Array<{ role: string; content: string }> }) => {
           systemContent = req.messages.find((m) => m.role === 'system')?.content;
+          decisionCalls++;
           return {
             output: 'ok',
             rawResponse: '',
             toolCalls: [
-              {
-                name: 'declare_attack',
-                arguments: { actorName: '乙', targetName: '甲', intentionLevel: '战术' },
-              },
+              decisionCalls === 1
+                ? {
+                    name: 'declare_attack',
+                    arguments: { actorName: '乙', targetName: '甲', intentionLevel: '战术' },
+                  }
+                : { name: 'end_turn', arguments: { actorName: '乙' } },
             ],
           } as never;
         },
@@ -637,19 +643,18 @@ describe('combat system prompt 来源（2026-08-09 §2.7：configs 优先，删�
     return systemContent;
   }
 
-  it('从 configs 读 combat_v3.systemPrompt（旧硬编码 125 字不再作 system 内容）', async () => {
+  it('从 configs 读 combat_enemy.systemPrompt', async () => {
     const sys = await captureSystemContent({
       configs: [combatConfig('TEST_COMBAT_SYSTEM_PROMPT_V3_FULL')],
     });
     expect(sys).toBe('TEST_COMBAT_SYSTEM_PROMPT_V3_FULL');
-    // 旧硬编码文本的独有片段不应出现在 system 内容里（§2.7 删硬编码）
     expect(sys).not.toContain('禁止传骰值');
   });
 
-  it('configs 缺失 → 回退兜底文本（无配置环境下行为与改造前一致）', async () => {
+  it('configs 缺失 → 回退敌方专用兜底文本', async () => {
     const sys = await captureSystemContent({});
-    expect(sys).toContain('禁止传骰值');
-    expect(sys).toContain('declare_attack');
+    expect(sys).toContain('敌方决策 Agent');
+    expect(sys).toContain('不替玩家行动');
   });
 });
 
@@ -778,11 +783,11 @@ describe('查询/命令分流（2026-08-09 §2.2 决策 3C：查询工具不产 
 
     // 关键回归断言：查询结果不再是 Command（旧代码 get_* 落 default → 静默 PassAttack）
     expect(history[0].name).toBe('get_character');
-    expect(history[0].result).toMatchObject({ found: true, name: '乙' });
+    expect(history[0].result).toMatchObject({ found: true, character: { name: '乙' } });
     expect(history[0].result).not.toHaveProperty('commandId');
     // T3 字段随查询返回（skills 供 declare_attack 决策用）
-    expect(history[0].result).toHaveProperty('skills');
-    expect(history[0].result).toHaveProperty('equipment');
+    expect(history[0].result).toHaveProperty('character.skills');
+    expect(history[0].result).toHaveProperty('character.inventory');
 
     // 命令类照常翻译成 Command
     expect(history[1].result).toMatchObject({ kind: 'DeclareAttack', cost: 'attack' });
@@ -810,12 +815,12 @@ describe('查询/命令分流（2026-08-09 §2.2 决策 3C：查询工具不产 
     // 关键回归断言：get_unit_detail 在 COMBAT_QUERY_TOOLS 名单里（T7 补名单前它落
     // toolCallToCommand 的 default → 静默 PassAttack，result 带 commandId 而非数据）
     expect(history[0].name).toBe('get_unit_detail');
-    expect(history[0].result).toMatchObject({ found: true, name: '乙' });
+    expect(history[0].result).toMatchObject({ found: true, character: { name: '乙' } });
     expect(history[0].result).not.toHaveProperty('commandId');
     // T8 聚合形状：五维+技能+装备一把抓（declare_attack 的 skillName 依据）
-    expect(history[0].result).toHaveProperty('attributes');
-    expect(history[0].result).toHaveProperty('skills');
-    expect(history[0].result).toHaveProperty('equipment');
+    expect(history[0].result).toHaveProperty('character.attributes');
+    expect(history[0].result).toHaveProperty('character.skills');
+    expect(history[0].result).toHaveProperty('character.inventory');
 
     // 命令类照常翻译成 Command
     expect(history[1].result).toMatchObject({ kind: 'DeclareAttack', cost: 'attack' });
@@ -843,7 +848,7 @@ describe('查询/命令分流（2026-08-09 §2.2 决策 3C：查询工具不产 
     await runCombatV3(opts);
 
     // 末尾查询调用返回的是数据，不是 Command
-    expect(history[1].result).toMatchObject({ found: true, name: '乙' });
+    expect(history[1].result).toMatchObject({ found: true, character: { name: '乙' } });
     expect(history[1].result).not.toHaveProperty('commandId');
 
     // 乙的攻击真的进了内核（v3_action 动作卡片 attackerId=乙）——
@@ -855,26 +860,21 @@ describe('查询/命令分流（2026-08-09 §2.2 决策 3C：查询工具不产 
     expect(commit).toHaveBeenCalledTimes(1);
   });
 
-  it('纯查询收尾（无命令）：攻击槽防御性 pass，下一槽决策正常，战斗不中断', async () => {
-    // 第 1 次调用（攻击槽）：只查 get_character → 无命令 → 防御性 pass 攻击槽；
-    // 第 2 次调用（动作槽）：pass_slot action 正常消费动作槽 → 回合推进。
+  it('纯查询收尾（无命令）显式失败，不再防御性 pass', async () => {
     const { opts, history } = enemyTurnOpts([
       [{ name: 'get_character', args: { characterId: '乙' } }],
       [{ name: 'pass_slot', args: { actorName: '乙', slot: 'action' } }],
     ]);
     const commit = opts.deps.stateManager!.commitDomainCommand;
-    await runCombatV3(opts);
+    await expect(runCombatV3(opts)).rejects.toThrow('模型没有提交任何获准的战斗命令');
 
-    // 查询返回数据，不产 Command；AI 未做决定 → 乙 pass 攻击槽推进（行为合法，不是 bug）
-    expect(history[0].result).toMatchObject({ found: true, name: '乙' });
+    expect(history[0].result).toMatchObject({ found: true, character: { name: '乙' } });
     expect(history[0].result).not.toHaveProperty('commandId');
-    expect(commit).toHaveBeenCalledTimes(1);
+    expect(commit).not.toHaveBeenCalled();
   });
 
-  it('submit_adjudication（命令类）→ Adjudicate Command，不再落 default 静默 pass（§2.4 补执行端）', async () => {
-    // 第 1 次调用（乙的攻击槽决策）：提交有界裁决 → toolCallToCommand 翻译成 Adjudicate
-    // Command（cost none，不走槽位）；第 2 次调用（乙的动作槽决策）：pass_slot action 照常。
-    const { opts, history } = enemyTurnOpts([
+  it('敌方普通决策无权调用 submit_adjudication', async () => {
+    const { opts } = enemyTurnOpts([
       [
         {
           name: 'submit_adjudication',
@@ -889,28 +889,8 @@ describe('查询/命令分流（2026-08-09 §2.2 决策 3C：查询工具不产 
       ],
       [{ name: 'pass_slot', args: { actorName: '乙', slot: 'action' } }],
     ]);
-    const events: CombatEvent[] = [];
-    opts.onCombatEvent = (evt) => events.push(evt);
-    await runCombatV3(opts);
-
-    // 关键回归断言：不再是静默 PassAttack（旧代码落 default → nextPassCommand）
-    expect(history[0].result).toMatchObject({ kind: 'Adjudicate', cost: 'none' });
-    // payload 形状对齐 evaluateAdjudication 入参（ProposedAdjudication）
-    const cmd = history[0].result as Extract<CombatCommand, { kind: 'Adjudicate' }>;
-    expect(cmd.payload.requestId).toMatch(/^adj-/);
-    expect(cmd.payload.adjudication.divinity).toBe(5);
-    expect(cmd.payload.adjudication.effectDescription).toBe('目标下回合失去行动能力');
-    expect(cmd.payload.adjudication.verifiableBounds.targetLegal).toBe(true);
-    expect(cmd.payload.adjudication.verifiableBounds.invariantCompliant).toEqual([]);
-    expect(cmd.payload.adjudication.requestedRuleOverride).toBe('terminal.forceTerminal');
-    expect(cmd.payload.adjudication.reason).toBe('法则级压制');
-
-    // 裁决真的进了内核（reducer 消费 Adjudicate → evaluateAdjudication → 事件投影，
-    // accepted → v3_rule_override / rejected → v3_effect_rejected）
-    const adjudicated = events.find(
-      (e) => e.type === 'v3_rule_override' || e.type === 'v3_effect_rejected',
-    );
-    expect(adjudicated).toBeDefined();
+    await expect(runCombatV3(opts)).rejects.toThrow('无权调用「submit_adjudication」');
+    expect(opts.deps.stateManager!.commitDomainCommand).not.toHaveBeenCalled();
   });
 });
 
@@ -979,11 +959,11 @@ describe('持久会话（2026-08-09 §2.1 决策 1A：整场一个 client + 消�
           args: { actorName: '乙', targetName: '甲', intentionLevel: '战术' },
         },
       ],
-      // 第 2 次调用（丙·攻击槽）：直接攻
+      // 第 2 次调用（乙的下一次决策）：直接攻
       [
         {
           name: 'declare_attack',
-          args: { actorName: '丙', targetName: '甲', intentionLevel: '常规' },
+          args: { actorName: '乙', targetName: '甲', intentionLevel: '常规' },
         },
       ],
     ];
@@ -1024,9 +1004,9 @@ describe('持久会话（2026-08-09 §2.1 决策 1A：整场一个 client + 消�
       ctx,
     );
     expect(cmd1.commands[0].kind).toBe('DeclareAttack');
-    // 单位 2（丙）行动 —— 同一会话句柄
+    // 同一单位的下一次决策 —— 仍复用同一敌方会话句柄
     const cmd2 = await routeEnemyCommand(
-      { kind: 'PlayerCommand', unitId: '丙', unitName: '丙', round: 1 },
+      { kind: 'PlayerCommand', unitId: '乙', unitName: '乙', round: 1 },
       session,
       ctx,
     );
@@ -1073,7 +1053,7 @@ describe('持久会话（2026-08-09 §2.1 决策 1A：整场一个 client + 消�
    * 战斗拖长 → intentCheck 通道耗尽 → 续杯 → firstInitiative 错位 → INVALID_PHASE
    * → 熔断 abandon（2026-08-09 实测，已调低血线）。
    */
-  it('端到端：runCombatV3 整场 client 只建一次、跨调用历史累积', async () => {
+  it('端到端：runCombatV3 每个角色各建一个 client、敌方跨调用历史累积', async () => {
     const { opts } = mkOpts();
     opts.bundle = mkBundle({
       combatId: 'coord-session-e2e',
@@ -1118,7 +1098,7 @@ describe('持久会话（2026-08-09 §2.1 决策 1A：整场一个 client + 消�
       factoryCalls++;
       return {
         chatWithTools: async (req, toolExecutor) => {
-          seenMessages.push(req.messages);
+          seenMessages.push(structuredClone(req.messages));
           const script = scripts[callIdx % scripts.length];
           callIdx++;
           const history: Array<{ name: string; arguments: unknown; result: unknown }> = [];
@@ -1133,15 +1113,11 @@ describe('持久会话（2026-08-09 §2.1 决策 1A：整场一个 client + 消�
     };
     const result = await runCombatV3(opts);
 
-    // 整场战斗 client 只建一次（不再每单位每行动新建）
-    expect(factoryCalls).toBe(1);
+    // 主持人与敌方各建一次；敌方不再按单位或行动重复建 client。
+    expect(factoryCalls).toBe(2);
     // 乙活到第一回合行动（攻击槽 + 动作槽 = ≥2 次 agent 调用）
     expect(seenMessages.length).toBeGreaterThanOrEqual(2);
-    // 所有快照是同一个数组引用（消息在整场战斗中持续累积）
-    for (const m of seenMessages) {
-      expect(m).toBe(seenMessages[0]);
-    }
-    // system 只一条且在首位
+    // 每次请求都从同一持久历史增长；测试克隆快照，避免战斗结束销毁会话后清空活引用。
     const firstSnapshot = seenMessages[0];
     expect(firstSnapshot.filter((x) => x.role === 'system').length).toBe(1);
     expect(firstSnapshot[0].role).toBe('system');
@@ -1251,7 +1227,7 @@ describe('结算演绎（2026-08-09 §2.5：数字即时 + AI 叙事补上）', 
     expect(text).toContain('目标 HP：100 → 74');
   });
 
-  it('routeEnemyCommand 返回 { command, narration } 且 narration 来自 assistant content（§2.5）', async () => {
+  it('routeEnemyCommand 不把敌方自由文本送入玩家可见叙事通道', async () => {
     const { opts } = mkOpts();
     const { routeEnemyCommand } = await import('./coordinator');
     const { openCombat } = await import('./index');
@@ -1291,8 +1267,7 @@ describe('结算演绎（2026-08-09 §2.5：数字即时 + AI 叙事补上）', 
     expect(res.commands[0].kind).toBe('DeclareAttack');
     // ② narration 来自 assistant content（chatWithTools 的 output）
     expect(res.narration).toBe('乙压低身形，利刃带风直取甲！');
-    // ③ 声明演绎经 onNarration 投进 combatLog 通道（v3_narrative）
-    expect(narrationSeen).toEqual(['乙压低身形，利刃带风直取甲！']);
+    expect(narrationSeen).toEqual([]);
   });
 
   // 🎭 主持人/DM 模式（2026-08-12）：玩家意图 → 主持人解析 → Command
@@ -1360,7 +1335,7 @@ describe('结算演绎（2026-08-09 §2.5：数字即时 + AI 叙事补上）', 
     expect(narrationSeen).toEqual(['明白了，我替你执行。']);
   });
 
-  it('routePlayerIntent 空意图文本 → 兜底文案喂主持人，不抛错', async () => {
+  it('routePlayerIntent 空意图文本显式要求玩家补充，不替玩家发明行动', async () => {
     const { opts } = mkOpts();
     const { routePlayerIntent } = await import('./coordinator');
     const { openCombat } = await import('./index');
@@ -1400,15 +1375,15 @@ describe('结算演绎（2026-08-09 §2.5：数字即时 + AI 叙事补上）', 
       context: {} as never,
       combatSession,
     };
-    const res = await routePlayerIntent(
-      '   ',
-      { kind: 'PlayerCommand', unitId: '甲', unitName: '甲', round: 1 },
-      session,
-      ctx,
-    );
-    expect(seenUser).toContain('玩家未给出具体指令');
-    // 空输出 + 无工具调用 → 防御性 PassAttack（commandsFromResult 兜底）
-    expect(res.commands[0].kind).toBe('PassAttack');
+    await expect(
+      routePlayerIntent(
+        '   ',
+        { kind: 'PlayerCommand', unitId: '甲', unitName: '甲', round: 1 },
+        session,
+        ctx,
+      ),
+    ).rejects.toThrow('玩家意图为空');
+    expect(seenUser).toBeNull();
   });
 
   /**
@@ -1473,7 +1448,7 @@ describe('结算演绎（2026-08-09 §2.5：数字即时 + AI 叙事补上）', 
   it('结算事实串喂同一持久会话 → 结果句以 v3_narrative 进 combatLog（§2.5 结算演绎）', async () => {
     let chatSeen: Array<{ role: string; content: string | null }> | null = null;
     const opts = settleNarrateOpts(async (messages) => {
-      chatSeen = messages as never;
+      chatSeen = structuredClone(messages as never);
       return { output: '甲的重斩撕裂空气，重重劈在乙身上！', rawResponse: '' };
     });
     const events: CombatEvent[] = [];
@@ -1788,14 +1763,9 @@ describe('§12.4 EXP 结算 + FP patch 修复（2026-08-12 真机 bug）', () =>
   });
 });
 
-describe('T11：write_summary 终局摘要收集（2026-08-09 §2.2 改造：不再返回占位 Choose）', () => {
-  /**
-   * 端到端（照持久会话端到端先例）：乙（enemy，1000 HP）在 R1 行动轮经 fake agent 调
-   * write_summary(text)（脚本循环消费 → 两个槽位各调一次，模拟 AI 分次补全）；甲两刀
-   * 杀乙 → hp_zero 终局。断言终局 narrativeSummary 用的是收集到的 text —— 摘要回注
-   * 正文的现有路径（game-pipeline.ts:1638 的 【战斗摘要】assistant 消息）读的正是这个字段。
-   */
-  it('端到端：AI 调 write_summary(text) → 终局摘要用收集到的 text（多段追加合并）', async () => {
+describe('双角色工具边界：write_summary 不属于普通决策阶段', () => {
+  /** 双角色方案中 write_summary 已退役，任何决策阶段调用都必须显式拒绝。 */
+  it('端到端：敌方行动夹带 write_summary 时显式拒绝', async () => {
     const { opts } = mkOpts();
     opts.bundle = mkBundle({
       combatId: 'coord-t11-e2e',
@@ -1810,8 +1780,7 @@ describe('T11：write_summary 终局摘要收集（2026-08-09 §2.2 改造：不
         }),
       ],
     });
-    // 乙的行动脚本（每次 chatWithTools 调用 = 乙一个槽位的决策；照持久会话端到端先例
-    // 的多 step 写法：命令类 + write_summary 附加收尾 —— 模拟 AI「先做槽位决定、再补摘要」）
+    // 乙的行动脚本夹带已退役工具，验证动态授权不会接受旧协议。
     const scripts: Array<Array<{ name: string; args: Record<string, any> }>> = [
       // 乙·攻击槽：显式放弃 + 写摘要
       [
@@ -1853,12 +1822,7 @@ describe('T11：write_summary 终局摘要收集（2026-08-09 §2.2 改造：不
       };
     })();
 
-    const result = await runCombatV3(opts);
-    expect(result.outcome).toBe('ally_win');
-    // 终局摘要 = AI 收集的 text（替代旧的「战斗结束（reason）」兜底；两段合并）
-    expect(result.narrativeSummary).toContain('乙军溃败的预感笼罩战场。');
-    expect(result.narrativeSummary).toContain('乙军在甲的重击下溃败。');
-    expect(result.narrativeSummary).not.toContain('战斗结束（');
+    await expect(runCombatV3(opts)).rejects.toThrow('无权调用「write_summary」');
   });
 
   it('没有 write_summary 时兜底不崩：战斗照常结束、摘要用兜底文本', async () => {
@@ -1871,7 +1835,7 @@ describe('T11：write_summary 终局摘要收集（2026-08-09 §2.2 改造：不
     expect(result.narrativeSummary).toContain('战斗结束');
   });
 
-  it('直捣：write_summary 经 executor 分流不产 Command（不再返回占位 Choose），text 收集进 combatSession.summary', async () => {
+  it('直捣：敌方 write_summary 被角色权限拒绝', async () => {
     const { opts } = mkOpts();
     const { routeEnemyCommand } = await import('./coordinator');
     const { openCombat } = await import('./index');
@@ -1904,21 +1868,19 @@ describe('T11：write_summary 终局摘要收集（2026-08-09 §2.2 改造：不
       abandon: () => undefined,
       combatSession,
     };
-    const res = await routeEnemyCommand(
-      { kind: 'PlayerCommand', unitId: '乙', unitName: '乙', round: 1 },
-      session,
-      ctx,
-    );
-    // write_summary 不产 Command：最后一条命令类工具不存在 → 防御性 pass（不再是占位 Choose）
-    expect(res.commands[0].kind).toBe('PassAttack');
-    // 收集点生效：text 进了 combatSession.summary（终局回注正文的数据源）
-    expect(combatSession.summary ?? '').toContain('终局摘要文本');
+    await expect(
+      routeEnemyCommand(
+        { kind: 'PlayerCommand', unitId: '乙', unitName: '乙', round: 1 },
+        session,
+        ctx,
+      ),
+    ).rejects.toThrow('无权调用「write_summary」');
   });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 战斗终局 AI 总结（2026-08-12 新增）：终局结算完成后，专门调一次 AI 写总结叙事，
-// 不再只靠战斗中 write_summary 顺手收集。优先级：总结 || collectedSummary || 兜底。
+// 终局只由主持人专用总结调用生成；失败时回落内核事实文本。
 // ══════════════════════════════════════════════════════════════════════════════
 describe('战斗终局 AI 总结（终局后专门调 AI 写总结叙事）', () => {
   const combatConfig = (systemPrompt: string): AgentConfig =>
@@ -1976,7 +1938,7 @@ describe('战斗终局 AI 总结（终局后专门调 AI 写总结叙事）', ()
         chat: async (req: { messages: Array<{ role: string; content: string }> }) => {
           const last = req.messages[req.messages.length - 1];
           if (last?.role === 'user' && last.content.includes('【战斗终局】')) {
-            endSummaryMessages = req.messages;
+            endSummaryMessages = structuredClone(req.messages);
             return {
               output: '甲在电光石火间了结乙，战场归于沉寂。',
               rawResponse: '',
@@ -2017,8 +1979,7 @@ describe('战斗终局 AI 总结（终局后专门调 AI 写总结叙事）', ()
 
     const result = await runCombatV3(opts);
     expect(result.outcome).toBe('ally_win');
-    // 总结失败（narrateCombatEnd 静默吞掉）→ 回落 collectedSummary || 兜底
-    // （本用例无 write_summary → 兜底文本，终局流程不崩）
+    // 总结失败（narrateCombatEnd 静默吞掉）→ 回落内核事实文本，终局流程不崩。
     expect(result.narrativeSummary).toContain('战斗结束');
   });
 
@@ -2193,9 +2154,9 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
     '</战斗面板>',
   ].join('\n');
 
-  function makeCombatV3Config(over: Partial<AgentConfig> = {}): AgentConfig {
+  function makeCombatEnemyConfig(over: Partial<AgentConfig> = {}): AgentConfig {
     return {
-      agentId: 'combat_v3',
+      agentId: 'combat_enemy',
       enabled: true,
       apiEndpointId: 'ep',
       model: 'm',
@@ -2255,7 +2216,17 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
             messages: Array<{ role: string; content: string | null }>;
           }) => {
             seen.push(req.messages);
-            return { output: '战斗演绎', rawResponse: '战斗演绎', toolCalls: [] } as never;
+            return {
+              output: '',
+              rawResponse: '',
+              toolCalls: [
+                {
+                  name: 'pass_slot',
+                  arguments: { actorName: '乙', slot: 'attack' },
+                  result: { ok: true },
+                },
+              ],
+            } as never;
           },
           chat: async () => ({ output: null, rawResponse: '' }) as never,
         } as unknown as CombatClient;
@@ -2278,7 +2249,7 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
     resetPlaceholderGlobals();
   });
 
-  it('首轮 user 消息 = 模板渲染结果：含 COMBAT_BRIEF / 世界书 / userInput / storyOutput / NARRATIVE', async () => {
+  it('敌方自定义模板只注入安全战斗上下文，不泄漏玩家输入、剧情正文或最近对话', async () => {
     const { opts } = mkOpts();
     const { routeEnemyCommand } = await import('./coordinator');
     const { openCombat } = await import('./index');
@@ -2288,7 +2259,7 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
     const seen: Array<Array<{ role: string; content: string | null }>> = [];
     const ctx = capturingCtx({ messages, client: null } as never, seen, {
       context: {} as never,
-      configs: [makeCombatV3Config()],
+      configs: [makeCombatEnemyConfig()],
       worldBooks: makeWorldBooks(),
       combatBrief: '战斗类型: 死斗｜环境: 竞技场｜决一死战',
       combatRoster: '我方: 理查德；敌方: 冠军',
@@ -2307,11 +2278,10 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
     );
 
     // system 一次 + 首轮 user = 模板渲染结果（情境快照）+ assistant 演绎
-    expect(messages.length).toBe(3);
+    expect(messages.length).toBeGreaterThanOrEqual(2);
     expect(messages[0].role).toBe('system');
     expect(messages[0].content).toBe('战斗系统提示词');
     expect(messages[1].role).toBe('user');
-    expect(messages[2].role).toBe('assistant');
     const firstUser = messages[1].content ?? '';
     // COMBAT_BRIEF 注入
     expect(firstUser).toContain('战斗类型: 死斗｜环境: 竞技场｜决一死战');
@@ -2319,13 +2289,9 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
     expect(firstUser).toContain('我方: 理查德；敌方: 冠军');
     // LORE_BOOK_STATIC：按 config.worldBookIds 过滤后的世界书条目正文
     expect(firstUser).toContain('战意规则：士气低于 0 溃逃。');
-    // USER_INPUT 注入
-    expect(firstUser).toContain('我要挑战竞技场冠军');
-    // AGENT.STORY 注入
-    expect(firstUser).toContain('理查德推开了竞技场的大门，冠军早已等候。');
-    // NARRATIVE：history 最近 1 轮（layers=1）逐条 [role]: content
-    expect(firstUser).toContain('[user]: 我要挑战竞技场冠军');
-    expect(firstUser).toContain('[assistant]: 守卫为你打开了竞技场大门。');
+    expect(firstUser).not.toContain('我要挑战竞技场冠军');
+    expect(firstUser).not.toContain('理查德推开了竞技场的大门');
+    expect(firstUser).not.toContain('守卫为你打开了竞技场大门');
     // SYS_PROMPT 置空（system 已单独承载，user 内不重复）
     expect(firstUser).not.toContain('战斗系统提示词');
     // 面板经 COMBAT_PANEL 注入（现存模板引用它）
@@ -2346,7 +2312,7 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
     const seen: Array<Array<{ role: string; content: string | null }>> = [];
     const ctx = capturingCtx({ messages, client: null } as never, seen, {
       context: {} as never,
-      configs: [makeCombatV3Config()],
+      configs: [makeCombatEnemyConfig()],
       worldBooks: makeWorldBooks(),
       combatBrief: '战斗类型: 死斗｜环境: 竞技场｜决一死战',
       userInput: '我要挑战竞技场冠军',
@@ -2360,7 +2326,7 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
       ctx,
     );
     await routeEnemyCommand(
-      { kind: 'PlayerCommand', unitId: '丙', unitName: '丙', round: 2 },
+      { kind: 'PlayerCommand', unitId: '乙', unitName: '乙', round: 2 },
       session,
       ctx,
     );
@@ -2369,7 +2335,7 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
     const userMsgs = messages.filter((m) => m.role === 'user' && m.content !== null);
     expect(userMsgs.length).toBe(2);
     expect(userMsgs[0].content ?? '').toContain('<战斗指令>');
-    expect(userMsgs[1].content ?? '').toContain('轮到敌方「丙」行动');
+    expect(userMsgs[1].content ?? '').toContain('当前获准单位「乙」');
     // 模板独有内容不再出现（情境快照只在首轮）
     expect(userMsgs[1].content ?? '').not.toContain('<战斗指令>');
     expect(userMsgs[1].content ?? '').not.toContain('竞技场冠军');
@@ -2396,10 +2362,10 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
       ctx,
     );
 
-    expect(messages.length).toBe(3);
+    expect(messages.length).toBe(4);
     expect(messages[0].role).toBe('system');
     expect(messages[1].role).toBe('user');
-    expect(messages[1].content ?? '').toContain('轮到敌方「乙」行动');
+    expect(messages[1].content ?? '').toContain('当前获准单位「乙」');
     expect(messages[1].content ?? '').not.toContain('{{');
   });
 
@@ -2414,7 +2380,7 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
     const ctx = capturingCtx({ messages, client: null } as never, seen, {
       context: {} as never,
       // 有 config（带 template），但 combatBrief / worldBooks / userInput / storyOutput 全缺省
-      configs: [makeCombatV3Config()],
+      configs: [makeCombatEnemyConfig()],
     }) as unknown as Parameters<typeof routeEnemyCommand>[2];
 
     await routeEnemyCommand(
@@ -2459,7 +2425,7 @@ describe('T2：首轮 user = combat_v3.template 模板渲染结果（情境快�
     const seen: Array<Array<{ role: string; content: string | null }>> = [];
     const ctx = capturingCtx({ messages, client: null } as never, seen, {
       context: {} as never,
-      configs: [makeCombatV3Config({ template: THREE_ZONE_TEMPLATE })],
+      configs: [makeCombatEnemyConfig({ template: THREE_ZONE_TEMPLATE })],
       worldBooks: makeWorldBooks(),
       combatBrief: '战斗类型: 死斗｜环境: 竞技场｜决一死战',
       combatRoster: '我方: 理查德；敌方: 冠军',
@@ -2914,7 +2880,7 @@ describe('Bug 2：玩家攻击槽耗尽后再次点攻击 → 提示 + 继续等
     expect(result.narrativeSummary).not.toContain('战斗被放弃');
   });
 
-  it('敌方侧 rejection（SLOT_EXHAUSTED）→ 降级 PassAttack 推进，不再熔断 abandon（Bug B 修复）', async () => {
+  it('敌方侧 rejection（SLOT_EXHAUSTED）→ 暂停当前决策，不再伪造 PassAttack', async () => {
     // 🔴 Bug B（2026-08-12）：敌方 SLOT_EXHAUSTED 此前走 `steps > 3 break` 熔断 →
     //   aborted=true → deps.abandon() → 整场战斗被放弃（真机「页面闪退」）。
     //   现在任何 rejection 都不再熔断：emit v3_rejection_notice + 降级 PassAttack
@@ -2970,17 +2936,13 @@ describe('Bug 2：玩家攻击槽耗尽后再次点攻击 → 提示 + 继续等
     const events: CombatEvent[] = [];
     opts.onCombatEvent = (evt) => events.push(evt);
 
-    const result = await runCombatV3(opts);
+    await expect(runCombatV3(opts)).rejects.toThrow('本次命令批次超过当前单位的可用槽位');
 
     // ① 不再 abandon（修复前的根因：熔断 → 整场被放弃）
     expect(abandon).not.toHaveBeenCalled();
-    // ② 敌方的 rejection 有通知事件（v3_rejection_notice）
-    const notices = events.filter((e) => e.type === 'v3_rejection_notice');
-    expect(notices.length).toBeGreaterThan(0);
-    expect((notices[0] as { code?: string }).code).toBe('SLOT_EXHAUSTED');
-    // ③ 战斗照常推进到终局落库（甲每轮攻击，乙每轮白费槽位后回合结束）
-    expect(result.narrativeSummary).not.toContain('战斗被放弃');
-    expect(result.outcome).toBe('ally_win');
+    const pauses = events.filter((e) => e.type === 'v3_agent_paused');
+    expect(pauses).toHaveLength(1);
+    expect(pauses[0]).toMatchObject({ role: 'combat_enemy' });
   });
 });
 
@@ -3248,7 +3210,7 @@ describe('F5：开局先调 AI 构建战斗场景（氛围描写 + 信息获取�
           req: { messages: Array<{ role: string; content: string | null }> },
           toolExecutor: (n: string, a: Record<string, any>) => Promise<unknown>,
         ) => {
-          seen.push(req.messages);
+          seen.push(structuredClone(req.messages));
           callIdx++;
           if (callIdx === 1) {
             // 开局氛围调用：只输出氛围描写，不返回任何命令
@@ -3281,7 +3243,7 @@ describe('F5：开局先调 AI 构建战斗场景（氛围描写 + 信息获取�
     expect(narratives).toContain('战场杀意弥漫，双方对峙。');
     // ③ 随后才进入正式决策：第二次调用的最后一条 user = 「轮到敌方X行动」
     const secondUsers = seen[1].filter((m) => m.role === 'user' && m.content !== null);
-    expect(secondUsers[secondUsers.length - 1].content ?? '').toContain('轮到敌方「乙」行动');
+    expect(secondUsers[secondUsers.length - 1].content ?? '').toContain('当前获准单位「乙」');
     // ④ 开局调用不产命令、不改状态：战斗正常结算（不 abandon）
     expect(opts.deps.abandon).not.toHaveBeenCalled();
     expect(result.outcome).toBe('ally_win');
@@ -3319,7 +3281,7 @@ describe('F5：开局先调 AI 构建战斗场景（氛围描写 + 信息获取�
     expect(result.outcome).toBe('ally_win');
   });
 
-  it('未配置 combat_v3 agent → 开局调用跳过（不建 client），战斗照常', async () => {
+  it('未配置 combat_v3 agent → 跳过开场请求，但仍为两角色各建一次 client', async () => {
     // 乙的行动脚本（攻击槽/动作槽；fakeEnemyClient 超界重复最后一条）
     const { opts } = mkOpts({
       enemyScript: [
@@ -3339,8 +3301,7 @@ describe('F5：开局先调 AI 构建战斗场景（氛围描写 + 信息获取�
       return originalFactory(agentId, endpoint, saveId);
     };
     const result = await runCombatV3(opts);
-    // 无 configs → 开局调用跳过；首个 client 来自乙的正式决策（只建一次）
-    expect(factoryCalls).toBe(1);
+    expect(factoryCalls).toBe(2);
     expect(opts.deps.abandon).not.toHaveBeenCalled();
     expect(result.outcome).toBe('ally_win');
   });

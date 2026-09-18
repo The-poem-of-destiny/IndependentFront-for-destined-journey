@@ -212,7 +212,7 @@ function makeResult(agentId: string, rawResponse: string): AgentResult {
 }
 
 describe('侧链 Agent 调试调用身份', () => {
-  it('同回合新建两个同名 client 时仍生成不同 invocationId', async () => {
+  it('同名调用有独立序号，战斗主持人与敌方也按 agentId 分开记录', async () => {
     const addAgentLogEntry = vi.fn();
     const pipeline = makePipeline({ addAgentLogEntry });
     const factory = (pipeline as any).getClientFactory('run-debug');
@@ -245,13 +245,28 @@ describe('侧链 Agent 调试调用身份', () => {
       await factory('char_gen', endpoint, 'save-test').chat({
         messages: [{ role: 'user', content: 'second' }],
       });
+      await factory('combat_v3', endpoint, 'save-test').chat({
+        messages: [{ role: 'user', content: 'host' }],
+      });
+      await factory('combat_enemy', endpoint, 'save-test').chat({
+        messages: [{ role: 'user', content: 'enemy' }],
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }
 
-    expect(addAgentLogEntry).toHaveBeenCalledTimes(2);
+    expect(addAgentLogEntry).toHaveBeenCalledTimes(4);
     const ids = addAgentLogEntry.mock.calls.map(([entry]) => entry.invocationId);
-    expect(ids).toEqual(['run-debug:char_gen:1', 'run-debug:char_gen:2']);
+    expect(ids).toEqual([
+      'run-debug:char_gen:1',
+      'run-debug:char_gen:2',
+      'run-debug:combat_v3:1',
+      'run-debug:combat_enemy:1',
+    ]);
+    expect(addAgentLogEntry.mock.calls.slice(2).map(([entry]) => entry.agentId)).toEqual([
+      'combat_v3',
+      'combat_enemy',
+    ]);
   });
 });
 
@@ -1816,11 +1831,20 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     const pipeline = makePipeline(gameStore, {
       apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
     });
+    const combatClientFactory = vi.fn();
+    const getClientFactorySpy = vi
+      .spyOn(pipeline as any, 'getClientFactory')
+      .mockReturnValue(combatClientFactory);
 
     // fake runCombatV3：断言时序（句柄已挂）+ 用句柄完成一次「等待 → 提交」往返
-    runCombatV3Mock.mockImplementation(async () => {
+    runCombatV3Mock.mockImplementation(async (opts: any) => {
       // 🔴 时序修复契约：战斗进行中 coordinator 句柄已在 store 上
       expect(holder.handle).not.toBeNull();
+      // 战斗由就绪页延后启动，必须先建立独立 Debug Turn，再把同一 ID 绑定给 ClientFactory。
+      expect(gameStore.startAgentLogTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'activity-test', saveId: 'save-test', turn: 3 }),
+      );
+      expect(opts.deps.clientFactory).toBe(combatClientFactory);
       // 模拟玩家回合：waitForCommand 挂起 → handle.submit 喂入 → resolve
       const p = holder.handle!.waitForCommand!();
       await holder.handle!.submit!({
@@ -1870,8 +1894,92 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     // pre-combat 快照：createSnapshot('pre-combat', 当前回合数)
     expect(createSnapshotSpy).toHaveBeenCalledWith('pre-combat', 3);
     expect(holder.handle?.preSnapshotId).toBe('snap-pre-combat');
+    expect(getClientFactorySpy).toHaveBeenCalledWith('activity-test');
+    expect(gameStore.finishAgentLogTurn).toHaveBeenCalledWith('activity-test', 'completed');
+    expect(gameStore.finishAgentActivityRun).toHaveBeenCalledWith(
+      'activity-test',
+      'completed',
+      undefined,
+    );
     // 终局后的清理仍在 runCombatV3 完成之后执行（顺序未被提前破坏）
     expect(gameStore.exitCombat).toHaveBeenCalled();
+  });
+
+  it('战斗调用失败时关闭独立 Debug Turn 并保留失败原因', async () => {
+    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
+    const gameStore = makeGameStore({
+      characters: [playerCharStub()],
+      messages: [{ id: 'player-msg', role: 'user', content: '开始战斗' }],
+      enterCombat: vi.fn(),
+      exitCombat: vi.fn(),
+      applyCombatEvent: vi.fn(),
+      setCombatCoordinator: vi.fn((h: unknown) => (holder.handle = h as never)),
+      activeSave: { id: 's', metadata: { totalTurns: 4 } },
+    });
+    const pipeline = makePipeline(gameStore, {
+      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
+    });
+    vi.spyOn(pipeline as any, 'getClientFactory').mockReturnValue(vi.fn());
+    runCombatV3Mock.mockRejectedValue(new Error('provider failed'));
+
+    await (pipeline as any).handleCombatTrigger(
+      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
+      '',
+    );
+    await holder.handle!.start!();
+
+    expect(gameStore.startAgentActivityRun).toHaveBeenCalledWith('player-msg', true);
+    expect(gameStore.startAgentLogTurn).toHaveBeenCalledWith({
+      id: 'activity-test',
+      saveId: 'save-test',
+      turn: 4,
+      sourceMessageId: 'player-msg',
+    });
+    expect(gameStore.finishAgentLogTurn).toHaveBeenCalledWith('activity-test', 'failed');
+    expect(gameStore.finishAgentActivityRun).toHaveBeenCalledWith(
+      'activity-test',
+      'failed',
+      'provider failed',
+    );
+  });
+
+  it('玩家放弃战斗时以 cancelled 关闭独立 Debug Turn', async () => {
+    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
+    const gameStore = makeGameStore({
+      characters: [playerCharStub()],
+      enterCombat: vi.fn(),
+      exitCombat: vi.fn(),
+      applyCombatEvent: vi.fn(),
+      setCombatCoordinator: vi.fn((h: unknown) => (holder.handle = h as never)),
+      activeSave: { id: 's', metadata: { totalTurns: 5 } },
+    });
+    const pipeline = makePipeline(gameStore, {
+      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
+    });
+    vi.spyOn(pipeline as any, 'getClientFactory').mockReturnValue(vi.fn());
+    runCombatV3Mock.mockResolvedValue({
+      aborted: true,
+      narrativeSummary: '',
+      patches: [],
+      totalExp: 0,
+      totalFp: 0,
+      loot: [],
+      rounds: 1,
+      outcome: 'draw',
+    });
+
+    await (pipeline as any).handleCombatTrigger(
+      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
+      '',
+    );
+    await holder.handle!.start!();
+
+    expect(gameStore.finishAgentLogTurn).toHaveBeenCalledWith('activity-test', 'cancelled');
+    expect(gameStore.finishAgentActivityRun).toHaveBeenCalledWith(
+      'activity-test',
+      'cancelled',
+      '战斗已放弃。',
+    );
   });
 
   it('🔴 2026-08-13 真机 debug：战斗终局落库后回读 store（refreshFromDb）—— 满血假象修复', async () => {
@@ -2430,6 +2538,27 @@ describe('F10 端点绑定 fail-closed（buildAgentConfigs）', () => {
 });
 
 describe('F10 端点绑定 fail-closed（getEndpointForAgent 侧链热路径）', () => {
+  it('combat_enemy 未独立绑定时继承本场已解析的主持人端点', () => {
+    const pipeline = makePipeline(
+      {},
+      { apiPool: [{ id: 'H', name: 'host', model: 'host-model' }] },
+    );
+    const host = (pipeline as any).getEndpointForAgent('combat_v3');
+    expect((pipeline as any).getCombatEnemyEndpoint(host)).toBe(host);
+  });
+
+  it('combat_enemy 显式绑定失效时 fail-closed，不回落主持人端点', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const pipeline = makePipeline(
+      {},
+      { apiPool: [{ id: 'H', name: 'host', model: 'host-model' }] },
+    );
+    patchAgentSettings((pipeline as any).settings.settings, 'combat_enemy', { model: 'gone' });
+    const host = (pipeline as any).getEndpointForAgent('combat_v3');
+    expect((pipeline as any).getCombatEnemyEndpoint(host)).toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
   it('🔴 显式绑定失效 → undefined + console.error（绝不换用池里别的 provider）', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});

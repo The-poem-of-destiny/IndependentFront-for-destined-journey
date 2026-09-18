@@ -585,22 +585,6 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
       },
     },
   },
-  {
-    type: 'function',
-    function: {
-      name: 'write_summary',
-      description:
-        '（v3）在战斗终局写一段不超过 500 字的战斗摘要，供回注 Story。这是收尾动作，不产出 Command。',
-      parameters: {
-        type: 'object',
-        properties: {
-          text: { type: 'string', description: '战斗摘要（≤500 字）' },
-        },
-        required: ['text'],
-      },
-    },
-  },
-
   // ── Combat Query (只读查询, M4 任务 5.3 新建) ──
   {
     type: 'function',
@@ -660,8 +644,20 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'flee',
     'end_turn',
     'submit_adjudication',
-    'write_summary',
     // 只读查询（复用现有）
+    'get_character',
+    'get_inventory',
+    'get_combat_state',
+    'get_unit_detail',
+  ],
+  // Combat Enemy：仅当前获准敌方单位的决策与受策略裁剪的只读查询。
+  // 动态决策上下文还会在 coordinator 逐调用收窄，静态白名单不是授权边界。
+  combat_enemy: [
+    'declare_attack',
+    'declare_action',
+    'pass_slot',
+    'flee',
+    'end_turn',
     'get_character',
     'get_inventory',
     'get_combat_state',

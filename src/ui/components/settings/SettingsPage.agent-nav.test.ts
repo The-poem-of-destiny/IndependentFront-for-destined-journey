@@ -13,6 +13,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import source from '@ui/components/settings/SettingsPage.vue?raw';
+import agentSectionSource from '@ui/components/settings/agent/AgentSection.vue?raw';
 import { AGENT_LIST, resolveAgentSelection } from '@ui/components/settings/agent/agent-list';
 
 describe('resolveAgentSelection', () => {
@@ -36,6 +37,12 @@ describe('resolveAgentSelection', () => {
     const entry = AGENT_LIST.find((a) => a.id === 'combat_v3');
     expect(entry?.name).toBeTruthy();
     expect(entry?.desc).toBeTruthy();
+  });
+
+  it('双角色使用稳定配置 id 与明确显示名', () => {
+    expect(AGENT_LIST.find((a) => a.id === 'combat_v3')?.name).toBe('战斗主持人');
+    expect(AGENT_LIST.find((a) => a.id === 'combat_enemy')?.name).toBe('敌方决策');
+    expect(resolveAgentSelection('combat_enemy')).toBe('combat_enemy');
   });
 
   it('空值一律 null，不抛', () => {
@@ -66,5 +73,12 @@ describe('SettingsPage 主导航接线', () => {
 
   it('初值也过同一道校验，不直接吃 s.activeAgent', () => {
     expect(source).toContain('ref<string | null>(resolveAgentSelection(s.activeAgent))');
+  });
+});
+
+describe('双角色方案定案后的设置面', () => {
+  it('不再渲染试运行开关或读取旧配置键', () => {
+    expect(agentSectionSource).not.toContain('拆分主持人与敌方决策');
+    expect(agentSectionSource).not.toContain('combatAgentSplitEnabled');
   });
 });

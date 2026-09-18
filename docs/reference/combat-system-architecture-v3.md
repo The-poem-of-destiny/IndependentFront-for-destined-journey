@@ -6,22 +6,27 @@
 >
 > 🔗 **关联文档**：[v2 架构](./combat-system-architecture.md) · [v2 审查报告](../archive/planning/2026-07-30-combat-event-system-review.md) · 压测 RFC + 5 场脑测案例集（`2026-07-31-combat-v3-real-sample-stress-test-rfc.md` / `2026-07-31-combat-v3-stress-test/`，已移入私有内容仓 `fated_poem_independent_assets/docs/planning/`，公开仓侧不可见） · [统一效果系统框架 ADR-29](../planning/unified-effect-system-framework.md) · [effect_script_system.md](./effect_script_system.md)
 
-> 🎭 **定位纠偏（2026-08-12，读全文前必看）**：本文初稿（2026-07-31）成文时，战斗 Agent（`combat_v3`）
-> 被设计成**敌方专属决策器**——只在敌方单位轮次被叫到，玩家轮次完全绕过它。2026-08-12 的改造把它
-> **重定位为「战斗主持人 / DM」**：同一条持久会话贯穿整场、同时服务两侧。
+> 🎭 **历史定位纠偏（2026-08-12）**：本文初稿（2026-07-31）成文时，战斗 Agent（`combat_v3`）
+> 被设计成敌方专属决策器。2026-08-12 曾把它重定位为「战斗主持人 / DM」，并让同一条持久会话
+> 同时服务两侧；这段历史设计已被下方 2026-09-15 定案取代。
 >
 > - **玩家轮次**：玩家提交的是**自由意图文本**（不是拼装好的 Command）→ 主持人读懂意图 → 调
 >   `declare_attack` / `declare_action` / `pass_slot` / `flee` / `end_turn` 替玩家声明动作 → 内核照旧
 >   校验并消费槽位。前端四步拼装那条结构化路径仍直接产 Command，不过主持人（真源：
 >   `combat-v3/coordinator.ts` 的 `routeHostCommand` / `routePlayerIntent`，均带 `🎭 2026-08-12` 注释；
->   prompt 真源：`public/data/defaults/agent-config.json` 的 `combat_v3.systemPrompt` 首句
->   「你是《命定之诗》**战斗主持人（DM）**」）。
+>   prompt 真源：`public/data/defaults/agent-config.json` 的 `combat_v3.systemPrompt`）。
 > - **敌方轮次**：扮演当前敌方单位做战术决策——**这只是主持人诸多职责之一**，不再是它的全部定位。
 > - **结算演绎**：内核算完后写结果句。
 >
-> 权责边界**未变**：内核仍主持状态机 / 骰子 / 伤害 / 生死 / 战意 / 终局，主持人只读意图、做战术决策、
-> 写演绎（P4 / ADR-11 原样成立）。下文 §2.3 / §14.7 已按新定位改写；其余章节里凡写「敌方决策」处，
-> 请按「主持人的敌方轮次职责」理解。
+> 📌 **2026-09-15 双角色会话定案（现行）**：`combat_v3` 只承担主持人职责（玩家意图解析、开场、
+> 已结算事实演绎与终局总结），`combat_enemy` 只为当前获准敌方单位决策。两者共享唯一 Combat Kernel，
+> 但使用隔离的 client / messages / session；动态权限在每次工具调用时按 battle、phase、actor 与
+> command kind 复核，敌方投影不含玩家精确 HP/MP/SP、隐藏技能、背包与玩家私有输入。试运行开关、
+> 单 `combat_v3` 兼容路径和战斗中 `write_summary` 工具均已退役；终局总结由主持人专用调用直接返回正文。
+> 正式内容包与真实 LLM 战斗仍待验收。
+>
+> 权责边界未变：内核仍主持状态机 / 骰子 / 伤害 / 生死 / 战意 / 终局，主持人负责玩家意图与叙事，
+> 敌方决策只负责当前获准敌方单位的行动。
 >
 > 另有一条**确定性兜底**：自由文本还有一条零 I/O 的规则解析路径 `combat-v3/player-input.ts`
 > （关键词 + 名字匹配，解析不出就明确拒绝、绝不静默 fallback 成 PassAttack），详见 §14.1。
@@ -1121,13 +1126,11 @@ async function submitCombatCommand(command: CombatCommand): Promise<void>;
 | RequiredInput | Coordinator 去处 |
 |---------------|------------------|
 | `PlayerCommand`（玩家方单位） | game-store ⇒ 前端 UI。四步拼装 ⇒ 直接产 Command；**自由意图文本 ⇒ 走战斗主持人**（`routePlayerIntent`：把【玩家意图】append 进同一持久会话 → 主持人调 `declare_*` 替玩家声明）。另有确定性规则解析兜底 `player-input.ts` |
-| `PlayerCommand`（敌方单位） | 战斗主持人的敌方轮次职责 ⇒ `routeEnemyCommand`（`routeHostCommand` 的敌方封装）⇒ `agent-client.chatWithTools()` |
-| `EffectChoice` | 视 owner 归属：玩家方 ⇒ UI；敌方 ⇒ 战斗主持人 |
+| `PlayerCommand`（敌方单位） | `combat_enemy` 敌方决策会话 ⇒ `routeEnemyCommand`（按敌方角色投影与动态权限调用 `routeHostCommand`）⇒ `agent-client.chatWithTools()` |
+| `EffectChoice` | M2 当前仍显式拒绝，等待后续实现 |
 | `BoundedAdjudication` | 战斗主持人（可选加一道玩家确认，见 14.6） |
 
-> 🎭 **2026-08-12 定位纠偏**：本表原写「敌方 ⇒ 战斗 Agent」，把 `combat_v3` 当成敌方专属决策器。
-> 改造后它是**贯穿整场的战斗主持人（DM）**——玩家轮次与敌方轮次共用**同一条持久会话**，
-> 主持人因此有全程记忆（记得玩家说过什么、敌方做过什么）。详见文首定位纠偏说明。
+> 📌 **2026-09-15 更正**：2026-08-12 的单主持人会话已退役；上表是固定双角色会话的现行路由。
 | `CharGenRequest` | `char-gen-agent.ts` 链（优先查预生成召唤物池，未命中才实时生成） |
 | `BeginOutput` | Coordinator 自行注骰（60 颗，按 §四 4.3 分配） |
 
@@ -1172,7 +1175,7 @@ async function submitCombatCommand(command: CombatCommand): Promise<void>;
 | `subscription-manager.ts` | 🔻 **战斗内由 ActiveEffectIndex 取代** | 战斗外保留（ADR-29 的动态注册 facade） |
 | `state-manager.ts` | 🔧 **持久化 adapter** | 战斗外权威不变；战斗内不再是第二状态权威；终局一次 `commitChatState()` |
 | `char-gen-agent.ts` | 🔧 **扩展战斗中调用入口** | 处理 `CharGenRequest`，产 `SummonedUnitDefinition`（§十） |
-| `agent-tools.ts` | ✅ **已落地：`AGENT_TOOL_MAP.combat_v3` 无 `roll_d20`** | 骰值只能来自 DiceTape（不变量③）。现行工具集 **7 个战斗工具 + 4 个只读查询**：`declare_attack` / `declare_action` / `pass_slot` / `flee` / `end_turn` / `submit_adjudication` / `write_summary` + `get_character` / `get_inventory` / `get_combat_state` / `get_unit_detail`（真源 `agent-tools.ts` 的 `combat_v3` 数组）。`roll_d20` 工具定义本身仍在（供 dispatcher 等其他 Agent 用），只是战斗 Agent 拿不到 |
+| `agent-tools.ts` | ✅ **已落地：`AGENT_TOOL_MAP.combat_v3` 无 `roll_d20`** | 骰值只能来自 DiceTape（不变量③）。现行主持人工具集 **6 个战斗工具 + 4 个只读查询**：`declare_attack` / `declare_action` / `pass_slot` / `flee` / `end_turn` / `submit_adjudication` + `get_character` / `get_inventory` / `get_combat_state` / `get_unit_detail`；`combat_enemy` 不含 `submit_adjudication`。终局总结走主持人专用正文调用，不再暴露 `write_summary`。`roll_d20` 定义仍供其他 Agent 使用 |
 | `agent-config.json` | 🔧 **item_gen / char_gen prompt 改写** | 从"输出 scripts JS"改为"输出 automaton JSON" |
 | `types.ts` | 🔧 **新增 `AppSettings.combatEngineVersion`** | `'v2' \| 'v3'`。~~默认 `'v2'`~~ ⇒ **现状默认 `'v3'`**（types.ts:669，复核 2026-08-18，见 §14.5） |
 

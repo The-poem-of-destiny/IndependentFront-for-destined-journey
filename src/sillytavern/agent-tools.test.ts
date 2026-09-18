@@ -17,6 +17,18 @@ import { craftRequestFingerprint } from './craft-request';
 import type { ToolExecutionContext, CharacterState } from './types';
 import { deleteCharacter, getCharacters, saveCharacter } from './database';
 
+describe('战斗双角色定案后的工具面', () => {
+  it('彻底移除旧 write_summary 工具，终局改走主持人正文调用', () => {
+    expect(getToolDefinition('write_summary')).toBeUndefined();
+    expect(getToolsForAgent('combat_v3').map((tool) => tool.function.name)).not.toContain(
+      'write_summary',
+    );
+    expect(getToolsForAgent('combat_enemy').map((tool) => tool.function.name)).not.toContain(
+      'write_summary',
+    );
+  });
+});
+
 // ═══════════════════════════════════════════════════════════
 // 测试夹具
 // ═══════════════════════════════════════════════════════════

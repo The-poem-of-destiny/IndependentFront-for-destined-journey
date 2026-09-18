@@ -268,9 +268,9 @@ describe('占位内容 · 美化规则', () => {
 });
 
 describe('占位内容 · agent-config', () => {
-  // §6 规格：占位版固定 13 个 agent id（与真实内容侧相同的 id 集由私有仓 CI 守）
-  it('agent id 恰好 13 个，一个不多一个不少', () => {
-    expect(Object.keys(agentConfigRaw.agents)).toHaveLength(13);
+  // §6 规格：占位版固定 14 个 agent id（2026-09-14 实测；与真实内容侧同名集由私有仓 CI 守）
+  it('agent id 恰好 14 个，一个不多一个不少', () => {
+    expect(Object.keys(agentConfigRaw.agents)).toHaveLength(14);
   });
 
   it('每个 agent 的 systemPrompt 与 template 都非空（image_prompt 除外 —— 它的那份归方言）', () => {
@@ -345,7 +345,8 @@ describe('占位内容 · agent-config', () => {
       memory_recall: ['"memories"', '"relevance"'],
       // 🔴 image_prompt 不在这张表里：它的提示词住在方言 JSON（C5），三个输出标签由
       //    上面 imageDialects 那条用例逐条钉（两条方言各钉一遍 —— 换方言不换协议）
-      combat_v3: ['declare_attack', 'declare_action', 'pass_slot', 'write_summary'],
+      combat_v3: ['declare_attack', 'declare_action', 'pass_slot', '直接用 assistant 正文写'],
+      combat_enemy: ['declare_attack', 'declare_action', 'pass_slot', '不写玩家可见叙事'],
     };
     for (const [id, tokens] of Object.entries(CONTRACT)) {
       const prompt = agentConfigRaw.agents[id].systemPrompt as string;
