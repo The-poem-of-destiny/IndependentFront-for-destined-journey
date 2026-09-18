@@ -95,16 +95,16 @@ src/sillytavern/                    ← 核心引擎
   │              保留同名侧链的每次调用、agentic provider 往返 usage 与 Delta 重基线诊断；
   │              Embedding 召回/记忆向量化也记录真实 provider usage；写入服从 withSaveWriteLock；
   │              删存档级联删，不进 FullBackup（调试提示词/响应不混入日常备份）
-  │   └── v25+: imageApiConnections / apiConfigMigrations —— 前者保存 NovelAI 独立命名连接，
-  │              后者记录 API 配置跨 Dexie/localStorage 迁移检查点；两表均为设备本地数据，
-  │              不进 FullBackup。apiEndpoints 同版规范化为 LLM / Embedding / Reranker 联合形状
+  │   └── v25+: imageApiConnections —— 保存 NovelAI/ComfyUI 独立命名连接；与 apiEndpoints
+  │              同为设备本地数据，不进 FullBackup。apiEndpoints 只接受显式 kind + protocol，
+  │              启动时不补旧字段、不移动旧 image 行；旧配置需由用户重新配置
   │
   ├── session-backup.ts             ← 单存档导出/导入：每存档表整取（清单同 deleteSaveSlot，字节不随行）+ 内容依赖清单（世界书 token / 工坊项目 / 内容包 / story 预设，导入前只读体检）+ 导入**一律重发 id**（不重发 = 第二次导入静默覆盖第一次），全局表一行不改
   │
   ├── api-rpm-limiter.ts            ← [ADR-34] 应用级凭据桶：默认不限；达到上限后的请求按 FIFO
   │                                    暂停整 60 秒，发布等待快照后自动续发；网络 timeout 从放行后才计
   ├── api/                           ← [API 配置重构 / 2026-09-16] 协议无关配置与 provider adapter
-  │   ├── source-config.ts          ← 新 schema 严格解析；旧缺省规则只准留在迁移器
+  │   ├── source-config.ts          ← 新 schema 严格解析；不推断旧用途/协议，不改写旧行
   │   ├── body-parameters.ts        ← 源参数优先的不可变深合并 / JSON Pointer 省略 / 保护字段 / 实际预算
   │   ├── llm-adapter.ts            ← 三种 LLM 协议统一入口、规范化响应/usage/工具调用及原生续接类型
   │   ├── openai-chat.ts            ← Chat Completions 普通/SSE/工具调用编解码

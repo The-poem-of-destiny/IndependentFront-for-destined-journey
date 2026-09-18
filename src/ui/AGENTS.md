@@ -360,11 +360,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      只改一处的症状是「图像 API 存了、重开变成 chat」——
 │   │                                      那行收窄跑在每次启动的读取路径上，把不认识的值一律翻成 `'chat'`
 │   ├── api-source-store.ts          ← [API 配置重构] Dexie 通用源 + 图像连接的 Pinia 权威投影；
-│   │                                   初始化时执行迁移，CRUD 后按跨表引用清理 RPM，完整连接不回写 localStorage
+│   │                                   初始化时严格读取现行 schema，不补旧字段、不移动旧 image 行；
+│   │                                   CRUD 后按跨表引用清理 RPM，完整连接不回写 localStorage
 │   │                                   🔴 Pinia 会递归代理嵌套 body/连接；投影或落库前必须走 `db-write.detach()`，
 │   │                                      不可直接 `structuredClone` Proxy（浏览器会抛 `DataCloneError`）
-│   ├── api-config-migration.ts      ← 旧 chat/embedding/image 行确定性迁移；保留 ID、移动图像连接、
-│   │                                   写入/清理两阶段检查点，重复启动不把 cleaned 状态倒退
 │   ├── content-store.ts             ← [内容分离波 1 / D16 §5.1] provider 执行层（纯函数半边在
 │   │                                   `@engine/content-source`）。三件事：
 │   │                                   ① **模块级 ready promise**（时序契约，最承重的一条）——

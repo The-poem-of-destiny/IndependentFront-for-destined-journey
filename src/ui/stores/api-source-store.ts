@@ -3,17 +3,27 @@ import { defineStore } from 'pinia';
 import {
   deleteApiEndpoint,
   deleteImageApiConnection,
-  getDatabase,
+  getApiEndpoints,
+  getImageApiConnections,
   saveApiEndpoint,
   saveImageApiConnection,
 } from '@engine/database';
+import type { ApiEndpoint } from '@engine/types';
 import { parseApiSource } from '@engine/api/source-config';
 import type { ApiSource, ApiSourceKind, ImageApiConnection } from '@engine/types-api';
 import { credentialIdFor } from '@engine/api-rpm-limiter';
 import { maskApiKey } from './api-key-migration';
-import { migrateApiConfiguration, sourceForStorage } from './api-config-migration';
 import { detach } from './db-write';
 import { useSettingsStore, type ApiEntry } from './settings-store';
+
+export function sourceForStorage(source: ApiSource): ApiEndpoint {
+  const parsed = parseApiSource(source);
+  return {
+    ...parsed,
+    provider: parsed.kind,
+    timeout: parsed.timeoutMs,
+  };
+}
 
 function toProjection(source: ApiSource): ApiEntry {
   return {
@@ -97,11 +107,13 @@ export const useApiSourceStore = defineStore('api-sources', () => {
     initPromise = (async () => {
       try {
         await useSettingsStore().initApiSecrets();
-        const result = await migrateApiConfiguration();
-        sources.value = result.sources;
-        imageConnections.value = result.imageConnections;
+        const [storedSources, storedImageConnections] = await Promise.all([
+          getApiEndpoints(),
+          getImageApiConnections(),
+        ]);
+        sources.value = storedSources.map((source) => parseApiSource(source));
+        imageConnections.value = storedImageConnections.map((connection) => detach(connection));
         publishProjection();
-        if (useSettingsStore().saveNow()) await markMigrationCleaned();
         error.value = null;
         initialized.value = true;
       } catch (cause) {
@@ -172,17 +184,6 @@ export const useApiSourceStore = defineStore('api-sources', () => {
     }
   }
 
-  async function markMigrationCleaned(): Promise<void> {
-    const db = getDatabase();
-    await db.apiConfigMigrations.put({
-      id: 'api-configuration-v2',
-      version: 2,
-      status: 'cleaned',
-      updatedAt: Date.now(),
-      details: { apiPoolRemovedFromLocalStorage: true },
-    });
-  }
-
   function byKind(kind: ApiSourceKind): ApiSource[] {
     return sources.value.filter((source) => source.kind === kind);
   }
@@ -200,7 +201,6 @@ export const useApiSourceStore = defineStore('api-sources', () => {
     removeSource,
     saveImageConnection,
     removeImageConnection,
-    markMigrationCleaned,
     byKind,
     credentialStillReferenced,
   };

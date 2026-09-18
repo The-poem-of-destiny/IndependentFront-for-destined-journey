@@ -7,7 +7,8 @@
 
 > 📌 2026-09-16 实施注记：T0—T7 已落地。三种 LLM 协议统一经适配器与受控 BFF；Gemini
 > `thoughtSignature`、Claude 原生内容块及工具续接可无损进入 Delta/战斗会话；Dexie v25 完成
-> 通用源、独立图像连接和迁移检查点；显式 Embedding/Reranker 召回与失败本地兜底已接线。
+> 通用源与独立图像连接存储；显式 Embedding/Reranker 召回与失败本地兜底已接线。API 配置采用
+> 严格激活策略，不自动转换旧端点、移动旧图像行或推断旧记忆召回设置。
 
 ## 1. 需求与范围
 
@@ -96,7 +97,7 @@ type ApiSource = {
 
 ### 3.2 存储与写入口
 
-建议继续使用 Dexie `apiEndpoints` 表保存通用源，保留原 ID，但将行结构升级成 `ApiSource`。增加 `imageApiConnections` 保存 NovelAI 命名连接，增加设备本地 `apiConfigMigrations` 保存迁移版本和跨存储清理进度。
+继续使用 Dexie `apiEndpoints` 表保存通用源，行结构必须满足 `ApiSource`；增加 `imageApiConnections` 保存 NovelAI/ComfyUI 命名连接。两张表直接保存当前 schema，不设置 API 配置迁移检查点。
 
 - 新 `api-source-store.ts` 拥有初始化、CRUD、图像连接与凭据引用枚举；底层数据库函数仍在引擎层。
 - 新配置的完整权威记录只存 Dexie；settings store 可以临时提供只读 `apiPool` 投影，让调用方逐批迁移。
@@ -298,37 +299,17 @@ API 配置页继续保留全局凭据 RPM 面，枚举通用源和独立图像�
 - 地址/Key 修改及 RPM 迁移在同一写入口内处理；目标凭据已有策略时保留目标策略并可见提示。
 - 保留 ADR-34 的 FIFO、溢出后等待 60 秒、排队不计网络超时、取消清理规则。
 
-## 10. 迁移与恢复
+## 10. 严格激活与恢复
 
-当前 `DB_VERSION = 24`（2026-09-16 从 `database.ts` 实测）。实施时重新检查最新版本再选择下一版，不能直接按早期文档的 v23 写迁移。
+Dexie v25 只创建 `imageApiConnections` 表，不扫描或改写 `apiEndpoints`，也不建立 API 配置迁移检查点。启动读取遵循以下规则：
 
-### 10.1 确定性映射
+1. 通用源必须显式包含合法的 `kind`、`protocol`、`timeoutMs`、`bodyOverrides` 和 `bodyOmitPaths`；缺失或非法字段直接使初始化失败并显示错误。
+2. 旧 `provider: image` 行不会自动移动到 `imageApiConnections`，旧 chat/embedding 行也不会补用途、协议或请求体默认值。
+3. 不根据旧模型名、旧 Agent 绑定或 `embeddingEndpointId` 推断 `memoryRecallMode`，也不派生 Embedding 副本。
+4. 严格解析失败后不执行配置 schema 写回。用户在当前配置界面重新建立连接并显式选择绑定后，才产生符合当前 schema 的记录。
+5. 既有 API Key 安全存储初始化仍可将凭据从 localStorage 水合到 Dexie，但不承担用途/协议转换、图像行搬运或记忆模式推断。
 
-| 旧数据                                        | 新数据                                                                       |
-| --------------------------------------------- | ---------------------------------------------------------------------------- |
-| `apiType: chat` 或经旧版本规则确认的缺省 chat | `kind: llm` + `protocol: openai-chat`                                        |
-| `apiType: embedding`                          | `kind: embedding` + `protocol: openai-embeddings`                            |
-| `apiType: image`                              | 同 ID 迁入 `imageApiConnections`，provider 为 NovelAI                        |
-| `ApiEntry.model`                              | `ApiSource.defaultModel`                                                     |
-| 旧 Agent 的池 ID                              | ID 原样保留                                                                  |
-| 旧 source 无自定义 body                       | `bodyOverrides: {}`、`bodyOmitPaths: []`                                     |
-| `imageNovelai.endpointId`                     | 值不变，查找目标改为图像表                                                   |
-| `embeddingEndpointId` / `embeddingModel`      | 合并到统一 Embedding 绑定；覆写模型不相同时保留为独立迁移出的 Embedding 配置 |
-
-不能用域名猜原生协议：现有 Claude/Gemini 名称的中转地址也按旧 OAI 行为迁移，由用户之后切换。
-
-记忆模式的旧判断仅在迁移器中复现一次：若旧 `memory_recall` 已走 Embedding 分支，则迁到显式 Embedding 模式。若与写入端的 Embedding 地址/模型冲突，保留两份源并展示迁移待选择状态，选择前只使用本地兜底；不擅自为用户选择新的付费服务。普通 LLM 模式原样保留。
-
-### 10.2 跨存储步骤
-
-1. 阻止尚未水合完成的配置用于发请求，读取旧 localStorage 和 Dexie；按现行密钥迁移规则恢复完整数据。
-2. 在内存中校验全部目标行和引用，生成稳定的 ID 映射；旧 ID 不重新生成，派生条目 ID 通过迁移记录稳定复用。
-3. 在一个 Dexie 事务中写新通用行、图像行、必要的 RPM 调整及迁移记录，完成后校验关键字段。
-4. 新读取器依据迁移记录使用新表。此时旧 localStorage 即使尚未清理，也不能再被旧合并函数导回并复活已删除的连接。
-5. 将非敏感绑定/模式补丁写入 localStorage，清除旧 `apiPool`；成功后标记清理完成。清理失败可重试，不重复迁移、不覆盖迁移后用户编辑。
-6. 所有凭据可靠落库前不清除唯一旧副本。事务失败显示迁移错误并允许重试，不启动半迁移配置的远端调用。
-
-新 schema 落地后的代码回退必须理解该 schema；不承诺直接运行旧二进制可自动降级。普通游戏备份不含 API 凭据，不能当作凭据回滚副本。迁移失败优先前向修复，任何凭据备份都需专门的本机敏感数据路径。
+新 schema 落地后的代码回退必须理解该 schema；不承诺直接运行旧二进制可自动降级。普通游戏备份不含 API 凭据，不能当作凭据回滚副本；需要保留旧配置时，应在升级前通过专门的本机敏感数据路径备份。
 
 ## 11. 页面组织建议
 
@@ -354,9 +335,9 @@ API 配置页继续保留全局凭据 RPM 面，枚举通用源和独立图像�
 | 数据字段规范 §1、§9                          | 新设备本地表身份、备份排除与向量空间兼容说明                 |
 | 两份源码 `AGENTS.md`、`docs/ARCHITECTURE.md` | 实际模块归属与单向分层                                       |
 
-完成判据是：三种 LLM 协议分别通过普通、流式、工具续接及会话回归；Embedding 写入查询一致；Reranker 能重排且失败可回退；出图连接与通用配置分离；用户原有连接和绑定可迁移；覆盖参数真正反映在发包、预算和 UI 中。具体阶段与验证矩阵见已归档实施计划。
+完成判据是：三种 LLM 协议分别通过普通、流式、工具续接及会话回归；Embedding 写入查询一致；Reranker 能重排且失败可回退；出图连接与通用配置分离；旧配置被明确拒绝且不发生写回；覆盖参数真正反映在发包、预算和 UI 中。具体阶段与验证矩阵见已归档实施计划。
 
-> 📌 2026-09-16 验收记录：协议编码/解码、SSE、原生工具续接、迁移幂等、用途绑定、向量空间、
+> 📌 2026-09-18 验收记录：协议编码/解码、SSE、原生工具续接、旧配置拒绝改写、用途绑定、向量空间、
 > Reranker 与非致命回退均有自动化覆盖；API、记忆和图像设置在宽屏及 390×844 视口完成浏览器走查。
 > 未使用用户凭据执行真实 OpenAI、Gemini、Claude、Embedding、Reranker、NovelAI 或 ComfyUI 请求，
 > 因而真实供应商兼容性、付费调用和实际出图继续明确标为待验。

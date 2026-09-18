@@ -385,58 +385,6 @@ export const useSettingsStore = defineStore('settings', () => {
     /* 解析失败用默认值 */
   }
 
-  // API configuration v2: reproduce the old runtime heuristic exactly once, while the explicit
-  // mode field is absent. If the old memory source was also used by another Agent, derive a stable
-  // embedding-only copy instead of changing that Agent's LLM source underneath it.
-  if (!Object.prototype.hasOwnProperty.call(saved, 'memoryRecallMode')) {
-    const pool = Array.isArray(saved.apiPool) ? saved.apiPool : [];
-    const recallBinding = saved.agents?.memory_recall?.model;
-    const legacyEmbeddingId =
-      typeof saved.embeddingEndpointId === 'string' ? saved.embeddingEndpointId : '';
-    const bound = pool.find((entry: any) => entry?.id === (legacyEmbeddingId || recallBinding));
-    const oldModel =
-      typeof saved.embeddingModel === 'string' && saved.embeddingModel.trim()
-        ? saved.embeddingModel.trim()
-        : typeof bound?.model === 'string'
-          ? bound.model
-          : '';
-    if (legacyEmbeddingId || bound?.apiType === 'embedding' || /embedding/i.test(oldModel)) {
-      saved.memoryRecallMode = 'embedding';
-      if (bound) {
-        const usedByOtherAgent = Object.entries(saved.agents ?? {}).some(
-          ([agentId, config]: [string, any]) =>
-            agentId !== 'memory_recall' && config?.model === bound.id,
-        );
-        if (usedByOtherAgent && (bound.apiType !== 'embedding' || bound.model !== oldModel)) {
-          const baseId = `${bound.id}__embedding`;
-          let derivedId = baseId;
-          let suffix = 2;
-          while (pool.some((entry: any) => entry?.id === derivedId)) {
-            derivedId = `${baseId}_${suffix++}`;
-          }
-          pool.push({
-            ...bound,
-            id: derivedId,
-            name: `${bound.name}（Embedding）`,
-            model: oldModel,
-            apiType: 'embedding',
-          });
-          saved.embeddingSourceId = derivedId;
-        } else {
-          bound.apiType = 'embedding';
-          bound.model = oldModel;
-          saved.embeddingSourceId = bound.id;
-        }
-      } else {
-        saved.embeddingSourceId = legacyEmbeddingId;
-      }
-    } else {
-      saved.memoryRecallMode = 'llm';
-    }
-    delete saved.embeddingEndpointId;
-    delete saved.embeddingModel;
-  }
-
   // 合并：已存值覆盖默认值（支持未来新增字段自动补默认值）
   const defaults = getDefaults();
   const merged = { ...defaults, ...saved };

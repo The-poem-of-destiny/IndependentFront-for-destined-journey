@@ -2961,7 +2961,6 @@ describe('Asset CRUD (v13)', () => {
       'apiRateLimitPolicies',
       'debugTurns',
       'imageApiConnections',
-      'apiConfigMigrations',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 

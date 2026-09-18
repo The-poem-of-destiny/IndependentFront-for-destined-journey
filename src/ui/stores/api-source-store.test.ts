@@ -13,22 +13,16 @@ const state = vi.hoisted(() => ({
 
 const saveApiEndpoint = vi.hoisted(() => vi.fn(async () => undefined));
 const saveImageApiConnection = vi.hoisted(() => vi.fn(async () => undefined));
+const getApiEndpoints = vi.hoisted(() => vi.fn(async () => [] as unknown[]));
+const getImageApiConnections = vi.hoisted(() => vi.fn(async () => [] as unknown[]));
 
 vi.mock('@engine/database', () => ({
   deleteApiEndpoint: vi.fn(async () => undefined),
   deleteImageApiConnection: vi.fn(async () => undefined),
-  getDatabase: vi.fn(),
+  getApiEndpoints,
+  getImageApiConnections,
   saveApiEndpoint,
   saveImageApiConnection,
-}));
-
-vi.mock('./api-key-migration', () => ({
-  maskApiKey: (key: string) => `${key.slice(0, 2)}***`,
-}));
-
-vi.mock('./api-config-migration', () => ({
-  migrateApiConfiguration: async () => ({ sources: [], imageConnections: [] }),
-  sourceForStorage: (source: unknown) => source,
 }));
 
 vi.mock('./settings-store', () => ({
@@ -49,6 +43,31 @@ describe('api-source-store Vue proxy boundaries', () => {
     state.settings.apiPool = [];
     saveApiEndpoint.mockClear();
     saveImageApiConnection.mockClear();
+    getApiEndpoints.mockReset();
+    getApiEndpoints.mockResolvedValue([]);
+    getImageApiConnections.mockReset();
+    getImageApiConnections.mockResolvedValue([]);
+  });
+
+  it('rejects legacy rows without rewriting them', async () => {
+    const legacy = {
+      id: 'legacy-chat',
+      name: 'Legacy chat',
+      provider: 'chat',
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'secret-key',
+      defaultModel: 'model-a',
+      models: ['model-a'],
+      timeout: 60_000,
+    };
+    getApiEndpoints.mockResolvedValue([legacy]);
+
+    const store = useApiSourceStore();
+    await expect(store.initialize()).rejects.toThrow('kind must be a non-empty string');
+
+    expect(saveApiEndpoint).not.toHaveBeenCalled();
+    expect(store.sources).toEqual([]);
+    expect(store.error).toContain('kind must be a non-empty string');
   });
 
   it('publishes nested body overrides after Pinia makes the saved source reactive', async () => {

@@ -69,15 +69,6 @@ export interface ImageApiConnection {
   revision?: number;
 }
 
-/** Durable checkpoint for cross-storage API configuration migrations. */
-export interface ApiConfigMigrationRecord {
-  id: string;
-  version: number;
-  status: 'written' | 'cleaned';
-  updatedAt: number;
-  details?: JsonObject;
-}
-
 /** Provider-native assistant payload retained verbatim for tool continuation. */
 export interface NativeLlmContent {
   protocol: LlmProtocol;

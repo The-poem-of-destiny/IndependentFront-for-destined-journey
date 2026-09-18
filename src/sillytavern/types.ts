@@ -343,9 +343,9 @@ export interface ApiEndpoint {
   defaultModel: string;
   models: string[]; // 可用模型列表
   timeout: number;
-  /** Canonical v2 name; `timeout` remains as a compatibility alias during migration. */
+  /** Canonical API source timeout; `timeout` remains for the legacy endpoint shape. */
   timeoutMs?: number;
-  /** T1 compatibility bridge; new persisted sources require these fields. */
+  /** Current persisted sources require both fields; legacy rows fail strict loading. */
   kind?: import('./types-api').ApiSourceKind;
   protocol?: import('./types-api').ApiProtocol;
   bodyOverrides?: import('./types-api').JsonObject;

@@ -131,11 +131,12 @@ API 配置由 `stores/api-source-store.ts` 水合 Dexie 中的类型化通用源
 
 ### ④ 持久化 + 内容层
 
-- **Dexie v25 / IndexedDB**，34 张表（2026-09-16 实测，`database.ts`）。v22 把快照拆成
+- **Dexie v25 / IndexedDB**，33 张表（2026-09-18 实测，`database.ts`）。v22 把快照拆成
   `snapshots`（元数据）+ `snapshotPayloads`（重载荷）—— 列表与淘汰每回合都跑，
   却只用得上 `turn` / `createdAt`，拆表前要把约 30 份整档对话历史在主线程反序列化一遍。
-- v25 新增 `imageApiConnections` 与 `apiConfigMigrations`；两者同 `apiEndpoints` 一样属于设备本地配置，
-  不进入普通整库或单档备份。通用源只承载 LLM / Embedding / Reranker，图像凭据独立存储。
+- v25 新增 `imageApiConnections`；它与 `apiEndpoints` 一样属于设备本地配置，不进入普通整库或单档备份。
+  通用源只承载 LLM / Embedding / Reranker，图像凭据独立存储；启动时严格读取现行 schema，
+  不自动补写旧用途/协议，也不把旧图像端点移动到图像连接表。
 - **内容包覆盖层**：公开仓只带**零 IP 占位集**（磁盘 `public/data/`，运行期 URL 仍是 `/data/*`）；
   真实内容挂在私有内容仓，dev 期由 `POEM_CONTENT_DIR` 指向内容树做 overlay（中间件先于 Vite
   publicDir 注册，overlay 必然赢）。发行期走内容包（`contentPacks` 表 + 内容注册表注入缝）。
