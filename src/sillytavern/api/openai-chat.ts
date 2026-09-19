@@ -2,6 +2,14 @@ import type { JsonObject, NormalizedLlmResponse } from '../types-api';
 import type { LlmBuildInput, LlmStreamAccumulator, LlmStreamEventResult } from './llm-adapter';
 import { asObject, finiteNumber, parseToolArguments } from './adapter-utils';
 
+function cacheReadTokens(usage: JsonObject): number | undefined {
+  const details =
+    usage.prompt_tokens_details && typeof usage.prompt_tokens_details === 'object'
+      ? asObject(usage.prompt_tokens_details, 'prompt_tokens_details')
+      : {};
+  return finiteNumber(details.cached_tokens);
+}
+
 export function buildOpenAiBody(input: LlmBuildInput): JsonObject {
   const body: JsonObject = {
     model: input.model,
@@ -61,7 +69,7 @@ export function parseOpenAiResponse(input: unknown): NormalizedLlmResponse {
       outputTokens: finiteNumber(usage.completion_tokens),
       totalTokens: finiteNumber(usage.total_tokens),
       cacheHit: unwrapped.cache_hit === true,
-      cacheReadTokens: finiteNumber(usage.prompt_cache_hit_tokens),
+      cacheReadTokens: cacheReadTokens(usage),
       cacheMissTokens: finiteNumber(usage.prompt_cache_miss_tokens),
     },
     nativeAssistant: {
@@ -89,7 +97,7 @@ export class OpenAiStreamAccumulator implements LlmStreamAccumulator {
       inputTokens: finiteNumber(usage.prompt_tokens) ?? this.usage.inputTokens,
       outputTokens: finiteNumber(usage.completion_tokens) ?? this.usage.outputTokens,
       totalTokens: finiteNumber(usage.total_tokens) ?? this.usage.totalTokens,
-      cacheReadTokens: finiteNumber(usage.prompt_cache_hit_tokens) ?? this.usage.cacheReadTokens,
+      cacheReadTokens: cacheReadTokens(usage) ?? this.usage.cacheReadTokens,
       cacheMissTokens: finiteNumber(usage.prompt_cache_miss_tokens) ?? this.usage.cacheMissTokens,
     };
     const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : undefined;

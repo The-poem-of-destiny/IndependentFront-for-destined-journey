@@ -164,10 +164,10 @@ describe('AgentClient', () => {
       expect(result.cacheHit).toBe(true);
     });
 
-    it('应检测缓存命中 (prompt_cache_hit_tokens > 0)', async () => {
+    it('应检测缓存命中 (prompt_tokens_details.cached_tokens > 0)', async () => {
       const mockRes = {
         choices: [{ message: { content: 'cached' } }],
-        usage: { total_tokens: 100, prompt_cache_hit_tokens: 500 },
+        usage: { total_tokens: 100, prompt_tokens_details: { cached_tokens: 500 } },
       };
       globalThis.fetch = mockFetch(mockRes);
 
@@ -430,7 +430,7 @@ describe('AgentClient', () => {
           usage: {
             total_tokens: 110,
             prompt_tokens: 100,
-            prompt_cache_hit_tokens: 80,
+            prompt_tokens_details: { cached_tokens: 80 },
             prompt_cache_miss_tokens: 20,
             completion_tokens: 10,
           },
@@ -440,7 +440,7 @@ describe('AgentClient', () => {
           usage: {
             total_tokens: 215,
             prompt_tokens: 200,
-            prompt_cache_hit_tokens: 150,
+            prompt_tokens_details: { cached_tokens: 150 },
             prompt_cache_miss_tokens: 50,
             completion_tokens: 15,
           },
@@ -683,7 +683,7 @@ describe('AgentClient', () => {
             choices: [],
             usage: {
               total_tokens: 42,
-              prompt_cache_hit_tokens: 12,
+              prompt_tokens_details: { cached_tokens: 12 },
               prompt_cache_miss_tokens: 5,
               completion_tokens: 7,
             },

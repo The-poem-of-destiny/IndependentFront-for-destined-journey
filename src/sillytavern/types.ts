@@ -1929,7 +1929,7 @@ export interface AgentResult {
   reasoning?: string;
   tokensUsed: number;
   cacheHit: boolean; // DeepSeek 缓存命中
-  /** 🆕 命中缓存的 prompt token 数（usage.prompt_cache_hit_tokens） */
+  /** 命中缓存的 prompt token 数（usage.prompt_tokens_details.cached_tokens） */
   cacheHitTokens?: number;
   /** 🆕 未命中缓存的 prompt token 数（usage.prompt_cache_miss_tokens，缺失当 0） */
   cacheMissTokens?: number;

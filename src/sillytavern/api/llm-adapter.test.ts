@@ -27,6 +27,14 @@ describe('LLM protocol adapters', () => {
     expect(built.outputBudget).toBe(32);
   });
 
+  it('reads OpenAI cached prompt tokens from the official response field', () => {
+    const response = parseLlmResponse('openai-chat', {
+      choices: [{ message: { content: 'cached' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 100, prompt_tokens_details: { cached_tokens: 80 } },
+    });
+    expect(response.usage.cacheReadTokens).toBe(80);
+  });
+
   it('maps Gemini system/tool messages and preserves thought signatures for continuation', () => {
     const response = parseLlmResponse('gemini', {
       candidates: [
@@ -111,6 +119,13 @@ describe('LLM protocol adapters', () => {
   });
 
   it('decodes provider-native streaming terminal and in-stream errors', () => {
+    const openai = createLlmStreamAccumulator('openai-chat');
+    openai.accept({
+      choices: [{ delta: { content: 'cached' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 100, prompt_tokens_details: { cached_tokens: 80 } },
+    });
+    expect(openai.snapshot().usage.cacheReadTokens).toBe(80);
+
     const gemini = createLlmStreamAccumulator('gemini');
     expect(
       gemini.accept({
