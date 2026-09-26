@@ -95,9 +95,13 @@ src/sillytavern/                    ← 核心引擎
   │              保留同名侧链的每次调用、agentic provider 往返 usage 与 Delta 重基线诊断；
   │              Embedding 召回/记忆向量化也记录真实 provider usage；写入服从 withSaveWriteLock；
   │              删存档级联删，不进 FullBackup（调试提示词/响应不混入日常备份）
-  │   └── v25+: imageApiConnections —— 保存 NovelAI/ComfyUI 独立命名连接；与 apiEndpoints
-  │              同为设备本地数据，不进 FullBackup。apiEndpoints 只接受显式 kind + protocol，
-  │              启动时不补旧字段、不移动旧 image 行；旧配置需由用户重新配置
+  │   ├── v25+: imageApiConnections —— 保存 NovelAI/ComfyUI 独立命名连接；与 apiEndpoints
+  │   │          同为设备本地数据，不进 FullBackup。apiEndpoints 只接受显式 kind + protocol，
+  │   │          启动时不补旧字段、不移动旧 image 行；旧配置需由用户重新配置
+  │   └── v26+: promptSessions（Delta 会话持久化，2026-09-26 问题 2）—— 每 `(saveId, agentId)`
+  │              一行，主键 `key`、`saveId` 索引；**rebuildable 缓存**，不进 FullBackup /
+  │              单存档导出，删存档级联删、快照回退/切档由 `invalidatePromptSession` 删。
+  │              装了它刷新页面后续用上一轮 wire transcript（签名不符自动冷建）
   │
   ├── session-backup.ts             ← 单存档导出/导入：每存档表整取（清单同 deleteSaveSlot，字节不随行）+ 内容依赖清单（世界书 token / 工坊项目 / 内容包 / story 预设，导入前只读体检）+ 导入**一律重发 id**（不重发 = 第二次导入静默覆盖第一次），全局表一行不改
   │
@@ -118,10 +122,18 @@ src/sillytavern/                    ← 核心引擎
   ├── prompt-session-assembler.ts   ← [Delta 会话 v1 + API 重构] 主 DAG普通 chat/chatStream 的 delta session 深模块：
   │      独占 `(saveId, agentId)` 的 transcript / baselineSignature / revision / 投影 diff 起点，只开
   │      prepare/complete/invalidate 三入口；首轮完整渲染 baseline，后续复用 wire transcript 只追加
-  │      `context_delta + turn_context + tailPrompt` 增量；保存原生 assistant 续接块但不写 Dexie，
-  │      baselineSignature 含协议/端点修订/参数签名，预算读取覆盖后的实际输出上限。
+  │      `context_delta + turn_context + tailPrompt` 增量；保存原生 assistant 续接块。
+  │      baselineSignature 含协议/端点修订/参数签名；重基线判据 = 投影 rebase 信号 →
+  │      token 保险（可选 `contextWindowTokens`；`lastPromptTokens >= 窗口` 时自动忽略）→
+  │      **增长比**（累积 transcript / 当轮纯 prompt 层 > 1.2，`transcript_growth`，
+  │      不依赖 provider token，故 story 流式同样生效）。
+  │      🆕 2026-09-26（问题 2）：经注入缝 `PromptSessionStore` 持久化会话（默认不装 = 纯内存，
+  │      引擎单测零改动）；刷新后签名一致即续用；invalidate 同时删持久化行（回退整体失效，不 fork）。
   │      embedding / tools / combat / 侧链 / regenerate 走原路径（handle===null 或 skipSession）。
   │      设计：docs/planning/2026-08-22-llm-assembly-delta-architecture-scratch.md
+  ├── prompt-session-store.ts       ← [Delta 会话持久化 / 2026-09-26] `PromptSessionStore` 的 Dexie 实现
+  │      （`createDexiePromptSessionStore`）：读写走 `withSaveWriteLock`（与提交串行 + save/delete 时序），
+  │      落库前 JSON 往返切断 Proxy。**唯一生产实现在 `src/ui/main.ts` 安装**——引擎默认不装。
   ├── prompt-state-projection.ts    ← [Delta 会话 v1] 读取型、幂等投影 + 纯 diff（prompt-session-assembler 的基座）：
   │      封闭 scope 联合（14 个）、数据面 `set/upsert/remove` + `rebase` 控制信号、按逻辑名字归一化 +
   │      规范化内容深比较、固定排序字节稳定，序列化进 `<context_delta>` 外壳。**无 I/O、无全局状态**。

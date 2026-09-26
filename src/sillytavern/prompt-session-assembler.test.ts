@@ -443,6 +443,39 @@ describe('prompt-session-assembler', () => {
     expect(p4.rebaseReason).toBe('budget_exhausted');
   });
 
+  it('配置窗口小于当前 prompt 时不据其重基线（绝对保险无意义 → 交由增长比）', async () => {
+    const p1 = await preparePromptSession(input());
+    completePromptSession(p1.handle!, { rawResponse: 'r1', promptTokens: 200000 });
+    const p2 = await preparePromptSession(input({ contextWindowTokens: 128000 }));
+    completePromptSession(p2.handle!, { rawResponse: 'r2', promptTokens: 210000 });
+
+    // last=210000、secondLast=200000、window=128000：旧公式必触发；现应被忽略（不重基线）
+    const p3 = await preparePromptSession(input({ contextWindowTokens: 128000 }));
+    expect(p3.rebased).toBe(false);
+  });
+
+  it('增长重基线：累积 transcript 比当轮纯 prompt 层长出阈值时重基线（不依赖 provider token）', async () => {
+    const p1 = await preparePromptSession(input());
+    // 一个远超纯 prompt 层 1.2 倍的 assistant 响应（无 promptTokens，故与 token 预算无关）
+    completePromptSession(p1.handle!, { rawResponse: 'x'.repeat(20000) });
+
+    const p2 = await preparePromptSession(input());
+    expect(p2.rebased).toBe(true);
+    expect(p2.rebaseReason).toBe('transcript_growth');
+  });
+
+  it('增长重基线不误伤：小响应连续多轮不触发', async () => {
+    let handle = (await preparePromptSession(input())).handle!;
+    completePromptSession(handle, { rawResponse: '短回复一。' });
+    for (let i = 0; i < 3; i += 1) {
+      const next = await preparePromptSession(input());
+      expect(next.rebased).toBe(false);
+      completePromptSession(next.handle!, { rawResponse: '短回复。' });
+      handle = next.handle!;
+    }
+    expect(handle.revision).toBeGreaterThan(1);
+  });
+
   // ── tailPrompt ──
 
   it('空 tailPrompt 不产标签；非空值位于最后', async () => {

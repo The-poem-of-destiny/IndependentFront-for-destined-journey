@@ -49,6 +49,8 @@ import type { ContentPack } from './types-content';
 import type { ImageApiConnection } from './types-api';
 import { hashWorldBook } from './content-source';
 import { applyExpFloor } from './exp-table';
+// type-only：Dexie 表行形状复用 assembler 的快照类型（运行时不构成依赖边）
+import type { PersistedPromptSession } from './prompt-session-assembler';
 
 /** 捏人预设记录 (DB 存储格式) */
 export interface CreatePresetRecord {
@@ -105,7 +107,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-export const DB_VERSION = 25;
+export const DB_VERSION = 26;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -268,6 +270,11 @@ class AppDatabase extends Dexie {
 
   // v24: 每存档最近 10 回合的完整 Agent 调试历史；不进日常备份。
   debugTurns!: Table<DebugTurnRecord>;
+
+  // v26 (2026-09-26，问题 2): Delta 会话持久化 —— 刷新后可续用上一轮 wire transcript。
+  //   每 (saveId, agentId) 一行；rebuildable 的缓存，**不进 FullBackup / 单存档导出**；
+  //   删存档级联删、快照回退/切档由 `invalidatePromptSession` 显式删。
+  promptSessions!: Table<PersistedPromptSession>;
 
   constructor() {
     super(DB_NAME);
@@ -671,6 +678,17 @@ class AppDatabase extends Dexie {
     this.version(23).stores({ apiRateLimitPolicies: 'credentialId, updatedAt' });
     this.version(24).stores({ debugTurns: 'id, saveId, [saveId+startedAt]' });
     this.version(25).stores({ imageApiConnections: 'id, provider, name' });
+
+    /**
+     * v26 (2026-09-26，问题 2): Delta 会话持久化表。
+     *
+     * 为什么加表而不是塞进别的表：它是 per-(saveId, agentId) 的 rebuildable 缓存，
+     * 与任何既有实体不同生命期 —— 既不随快照/导出走，又要能独立按 saveId 级联删。
+     *
+     * 索引取舍：`key` 主键（= `${saveId}\u0000${agentId}`，与 assembler 的 sessionKey 同源）；
+     * `saveId` 单独建索引供 deleteSaveSlot / invalidate(saveId) 整批删。
+     */
+    this.version(26).stores({ promptSessions: 'key, saveId' });
   }
 }
 
@@ -1801,6 +1819,7 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       db.sceneImageBlobs,
       db.characterAppearances,
       db.debugTurns,
+      db.promptSessions,
     ],
     async () => {
       // v22 拆表：元数据与载荷各有 saveId 索引，两张表各删各的（载荷表不必先查 id）
@@ -1823,6 +1842,8 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       // v19 (D56): 会话外貌随存档走 —— 与 imagePresets（全局基线）刻意相反
       await db.characterAppearances.where('saveId').equals(id).delete();
       await db.debugTurns.where('saveId').equals(id).delete();
+      // v26：Delta 会话是 rebuildable 缓存，但存档都没了没有理由留着
+      await db.promptSessions.where('saveId').equals(id).delete();
       await db.saves.delete(id);
     },
   );

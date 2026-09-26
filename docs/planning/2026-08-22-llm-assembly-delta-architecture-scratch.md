@@ -1,6 +1,7 @@
 # LLM 组装层 Delta 会话架构
 
-> **状态**：已实施（2026-08-23），真机运营验收待执行
+> **状态**：已实施（2026-08-23）；**2026-09-26 两处修订**（§8.3 增长重基线 / §5.2 会话
+> 持久化），真机运营验收待执行
 >
 > **用途**：约束 LLM 组装层 v1 的实现范围、接口、不变量和验收口径。实施步骤见
 > [`2026-08-22-llm-assembly-delta-implementation-plan.md`](2026-08-22-llm-assembly-delta-implementation-plan.md)。
@@ -8,6 +9,19 @@
 > **替代说明**：本文由同路径的讨论初稿修订而来。原始测量保留为背景证据；原初稿中
 > “只按 saveId 共享状态”“清空 delta 回到旧基线”“直接复用 StatePatch”“字符新增量等同
 > cache miss token”等结论已废止。
+>
+> 📌 **2026-09-26 修订摘要**（真机反馈驱动）：
+>
+> 1. **重基线判据改用「增长比」**（§8.3）：旧 token 绝对公式把 `outputBudget`（默认
+>    `maxTokens=65536`）也预留进阈值，于是 `contextWindowTokens=128000` 时实际 prompt 上限只有
+>    约 62k —— 开局正文本身很大的存档每回合都判预算不足、delta 永远累积不起来。现改为
+>    「累积 wire transcript 字符长度 / 当轮从零全量渲染的纯 prompt 层 > 1.2」时重基线
+>    （`transcript_growth`），与实际上下文窗口解耦、也不再依赖 provider 返回 prompt token
+>    （story 流式因此同样生效）。`contextWindowTokens` 的 token 判据保留为可选绝对保险，清空即停用。
+> 2. **会话持久化**（§5.2 / §12 反向裁定）：`(saveId, agentId)` 会话写入 Dexie v26
+>    `promptSessions`，**刷新页面后**可续用上一轮 wire transcript，省掉一次冷基线。该表是
+>    rebuildable 缓存，不进 FullBackup / 单存档导出；签名不符自动冷建，快照回退/切档/删档
+>    由 `invalidatePromptSession` / `deleteSaveSlot` 清除。**回退仍整体失效、不做 fork 延续**。
 
 ## 1. 问题、目标与范围
 
@@ -47,6 +61,8 @@
 - 不改 `image_prompt`、剧情大纲等侧链的上下文策略。
 - 不顺带修复 `historySlice`、缩减动态投影或新增全量 prompt 诊断平台。
 - 不持久化会话 transcript，不跨浏览器重启追求缓存连续性。
+  > 📌 2026-09-26 更正：会话**已**持久化到本机 Dexie（见 §5.2 修订），本条只保留
+  > 「不跨浏览器 / 不跨设备 / 不进备份追求连续性」—— 持久化只服务同一浏览器的页面刷新。
 - 不引入 tokenizer、模型能力注册表、新模板语言或第三方依赖。
 
 这些项目即使有价值，也必须由独立任务和独立证据进入范围。
@@ -178,6 +194,15 @@ invalidatePromptSession(handleOrSaveId: PromptSessionHandle | string): void;
 - 是否存在未完成调用。
 
 不写 Dexie。页面刷新、应用重启或 module 重新初始化后，下一次请求自然从当前状态建立新基线。
+
+> 📌 2026-09-26 更正（问题 2，替代上一段）：会话**改为持久化**到 Dexie v26 `promptSessions`
+> 表（每 `(saveId, agentId)` 一行）。内存仍持同一份结构；内存未命中（刷新/重启）时经注入缝
+> `PromptSessionStore.load` 回读，`baselineSignature` 一致即续用上一轮 wire transcript，
+> 不一致/无行/读失败则冷建基线。落库只保存 transcript + 投影 + 签名 + 最近两次 token；
+> `inFlight` / `pending*` 不落库（刷新后不存在未完成调用）。该表是 rebuildable 缓存：
+> **不进 FullBackup / 单存档导出**，删除存档级联删，快照回退/切档由 `invalidatePromptSession`
+> 删除（回退**整体失效**，不回滚到旧 fork）。引擎默认不装持久化实现（纯内存），生产入口
+> `src/ui/main.ts` 安装 `createDexiePromptSessionStore()`。
 
 ### 5.3 并发与失败
 
@@ -354,6 +379,16 @@ lastPromptTokens + max(0, lastGrowthTokens) + actualOutputBudget >= contextWindo
 prompt token、字段未配置或扩展参数无法可靠解读，则不做不可靠的字符换算；
 上下文错误沿用现有错误路径，并使本地会话失效，用户重试时从当前状态重基线。
 
+> 📌 2026-09-26 更正（问题 1）：上面的 token 绝对公式**降级为可选保险**，主判据改为
+> **增长比**：当累积 wire transcript 的字符长度超过「当轮从零全量渲染的纯 prompt 层」
+> 的 `REBASE_GROWTH_RATIO`（当前 1.2）倍时重基线，`rebaseReason='transcript_growth'`。
+> 纯 prompt 层复用同一 `ejsPass` 调 `buildAgentMessages`（不二次求值世界书），故这是**本地
+> 字符长度比**、不依赖 provider token，story 流式路径同样生效。触发顺序仍是：
+> 投影 rebase 信号 → token 保险（若配置）→ 增长比。token 保险的阈值按旧公式
+> （含 `outputBudget`），并在 `lastPromptTokens >= contextWindowTokens`（配置窗口已小于当前
+> prompt）时**自动忽略** —— 那种配置下重基线只会得到同样大小的全量 prompt，本就无意义。
+> 不再需要它的用户把 `contextWindowTokens` 清空即可停用（空值 = 不判断）。
+
 ## 9. 自定义边界
 
 v1 只新增两个配置面：
@@ -409,17 +444,17 @@ v1 只新增两个配置面：
 
 ## 12. 已解决问题
 
-| 原问题              | v1 裁定                                                    |
-| ------------------- | ---------------------------------------------------------- |
-| delta 最小单位      | 标量 set；命名集合元素整条 upsert/remove                   |
-| 索引格式            | 结构化 scope/owner/name/field，不使用自由字符串路径        |
-| 覆盖哪些变量        | 只覆盖主 DAG 当前可见的固定投影；scope 是代码封闭联合      |
-| 每轮末尾提示词      | 单一 `tailPrompt`，固定在最新 user 消息末尾                |
-| 可自定义程度        | 仅 tail 文本与 endpoint 上限可配；机制不可配               |
-| 是否复用 StatePatch | 不复用；使用读取型幂等投影                                 |
-| 何时重置            | 缺会话、签名变化、失败/取消/重入、手动重生成、已知预算不足 |
-| 是否持久化          | 不持久化；重启后从当前状态冷建 baseline                    |
-| 侧链是否纳入 30k    | 不纳入；报告时单列，后续凭证据另立范围                     |
+| 原问题              | v1 裁定                                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------------------ |
+| delta 最小单位      | 标量 set；命名集合元素整条 upsert/remove                                                               |
+| 索引格式            | 结构化 scope/owner/name/field，不使用自由字符串路径                                                    |
+| 覆盖哪些变量        | 只覆盖主 DAG 当前可见的固定投影；scope 是代码封闭联合                                                  |
+| 每轮末尾提示词      | 单一 `tailPrompt`，固定在最新 user 消息末尾                                                            |
+| 可自定义程度        | 仅 tail 文本与 endpoint 上限可配；机制不可配                                                           |
+| 是否复用 StatePatch | 不复用；使用读取型幂等投影                                                                             |
+| 何时重置            | 缺会话、签名变化、失败/取消/重入、手动重生成、已知预算不足                                             |
+| 是否持久化          | v1 原为不持久化；**2026-09-26 修订**：持久化到 Dexie v26（§5.2），刷新后签名一致即续用，回退仍整体失效 |
+| 侧链是否纳入 30k    | 不纳入；报告时单列，后续凭证据另立范围                                                                 |
 
 ## 13. 现状代码索引
 

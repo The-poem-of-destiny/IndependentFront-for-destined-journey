@@ -9,6 +9,34 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-09-26 Delta 会话两处修订（增长重基线 + 会话持久化）｜已实施，待真机
+
+真机反馈驱动的两处设计修订（设计真源 `docs/planning/2026-08-22-llm-assembly-delta-architecture-scratch.md`，
+状态行与 §1.3/§5.2/§8.3/§12 均已加带日期的更正注记）：
+
+- **问题 1 · 重基线判据改为「增长比」**（`prompt-session-assembler.ts`）：旧 token 绝对公式
+  `lastPromptTokens + growth + outputBudget >= contextWindowTokens` 把默认 `maxTokens=65536`
+  也预留进阈值，`contextWindowTokens=128000` 时实际 prompt 上限只有约 62k —— 开局正文本身很大的
+  存档会**每回合都判预算不足**、delta 永远累积不起来。现改为「累积 wire transcript 字符长度 /
+  当轮从零全量渲染的纯 prompt 层 > `REBASE_GROWTH_RATIO`（1.2）」时重基线
+  （`rebaseReason='transcript_growth'`）。纯 prompt 层复用同一 `ejsPass` 调 `buildAgentMessages`
+  （不二次求值世界书），是**本地字符长度比**、不依赖 provider token —— 旧 token 预算对 story 流式
+  恒 false 的缺口一并消失。触发顺序：投影 rebase 信号 → token 保险 → 增长比。
+  同时给 token 保险加一条**自动忽略**：`lastPromptTokens >= contextWindowTokens`（配置窗口已小于
+  当前 prompt，如「开局正文就超过配置窗口」）时它本就无意义，直接跳过（否则每回合重置）。
+  `renderDynamicLore`/`projectPromptState`/`diffPromptState` 收进 `preparePromptSession` 每轮只算一次。
+- **问题 2 · 会话持久化**（新增 `prompt-session-store.ts` + Dexie **v26** `promptSessions` 表）：
+  `(saveId, agentId)` 会话写入 Dexie，**刷新页面后**内存未命中时经注入缝 `PromptSessionStore.load`
+  回读，`baselineSignature` 一致即续用上一轮 wire transcript（省一次冷基线），不一致/无行/读失败
+  退回冷建。落库只存 transcript + 投影 + 签名 + 最近两次 token，`inFlight`/`pending*` 不落库。
+  该表是 rebuildable 缓存：**不进 FullBackup / 单存档导出**，`deleteSaveSlot` 级联删，
+  快照回退/切档由 `invalidatePromptSession` 删除（**回退仍整体失效，不做 fork**）。
+  Dexie 实现读写走 `withSaveWriteLock`（与提交串行 + save/delete 时序），生产在 `src/ui/main.ts`
+  安装 `createDexiePromptSessionStore()`；引擎默认不装 = 纯内存，既有引擎单测零改动。
+- 验证：`prompt-session-assembler.test.ts` 加增长重基线两条；新增
+  `prompt-session-store.test.ts`（刷新续用 / 签名不符冷建 / invalidate 删行 / 删档级联）；
+  `database.test.ts` 版本与表清单升至 v26。
+
 ### 2026-09-26 API 配置三处修复（获取模型死循环 / 旧行连坐 / structuredClone 回归）
 
 2026-09-16 多协议 API 配置重构合入后暴露的三个缺陷，一次修掉：

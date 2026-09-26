@@ -7,6 +7,8 @@ import { installUnlockListener } from './lib/audio-singleton';
 import { installProductionEjsBackend } from '@engine/ejs-backend';
 import { installProductionScriptBackend } from '@engine/script-backend';
 import { setEngineSettingsProvider } from '@engine/engine-settings';
+import { installPromptSessionStore } from '@engine/prompt-session-assembler';
+import { createDexiePromptSessionStore } from '@engine/prompt-session-store';
 import { useSettingsStore } from './stores/settings-store';
 // 字体与图标 —— **自托管**，零外部请求（2026-08-05，替掉 index.html 里的两个 CDN）。
 //
@@ -90,6 +92,14 @@ setEngineSettingsProvider(() => {
     randomEventsFrequency: s.randomEventsFrequency,
   };
 });
+
+// Delta 会话持久化（问题 2，2026-09-26）。
+//
+// 装了它，页面**刷新后**下一轮就能续用上一轮实际发出的 wire transcript，省掉一次
+// 冷基线（缓存未命中）；不装则退回纯内存、每次刷新冷建。会话表是 rebuildable 缓存，
+// 不进 FullBackup / 单存档导出；回退/切档/删档由 `invalidatePromptSession` 与
+// `deleteSaveSlot` 清理（引擎侧 `prompt-session-store.ts` / database v26）。
+installPromptSessionStore(createDexiePromptSessionStore());
 
 // 首次手势解锁监听 —— 必须在**应用启动时**就装，不能等到音频用起来才装。
 //

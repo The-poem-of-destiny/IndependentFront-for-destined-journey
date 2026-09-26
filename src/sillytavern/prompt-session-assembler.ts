@@ -53,6 +53,7 @@ import {
   diffPromptState,
   projectPromptState,
   renderPromptDelta,
+  type PromptDeltaOp,
   type PromptRebaseReason,
   type PromptStateProjection,
 } from './prompt-state-projection';
@@ -63,6 +64,29 @@ import {
 
 /** delta 协议版本 —— baseline signature 的一部分，升版即全局重基线（设计 §5.1）。 */
 export const PROMPT_SESSION_PROTOCOL_VERSION = 'delta-v1';
+
+/**
+ * 增量重基线阈值（2026-09-26 修正，问题 1）。
+ *
+ * 判据：累积的 wire transcript 字符长度 相对「当轮从零全量渲染的纯 prompt 层」超过该比例
+ * （>1.2，即多出 20%）时重基线。
+ *
+ * 为什么不沿用 token 绝对公式（`lastPromptTokens + growth + outputBudget >= contextWindowTokens`）：
+ * 该公式把 `outputBudget`（默认 `maxTokens=65536`）也预留进阈值，于是 `contextWindowTokens=128000`
+ * 时实际 prompt 上限只有约 62k —— 开局正文本身就超过 128k 的存档会**每回合都判预算不足**，
+ * delta 永远累积不起来、形同虚设。改用**相对增长比**后，重基线只反映「累积的 delta 已经比
+ * 重新全量渲染还长 20%」，与实际上下文窗口大小解耦，也不再依赖 provider 返回 prompt token
+ * （story 流式拿不到 usage 的缺口一并消失）。
+ *
+ * `contextWindowTokens` 的 token 预算判据仍保留为**可选的绝对溢出保险**（清空即停用）。
+ */
+const REBASE_GROWTH_RATIO = 1.2;
+
+/** 一次装配 pass 预渲染的产物（EJS pass + 动态世界书文本）；供预算判断与 delta/baseline 共用。 */
+interface RenderPass {
+  ejsPass: NonNullable<AgentContext['ejsPass']>;
+  dynamicLore: string;
+}
 
 /**
  * 首轮 user 消息里 code 固定的增量会话协议说明（设计 §6.1 / §9：协议说明由 code 固定注入
@@ -86,7 +110,12 @@ const DELTA_PROTOCOL_NOTE = [
  * projection 层三个（`PromptRebaseReason`）+ session 层四个。
  */
 export type PromptSessionRebaseReason =
-  PromptRebaseReason | 'missing_session' | 'signature_changed' | 'budget_exhausted' | 'reentered';
+  | PromptRebaseReason
+  | 'missing_session'
+  | 'signature_changed'
+  | 'budget_exhausted'
+  | 'reentered'
+  | 'transcript_growth';
 
 /**
  * 会话句柄 —— 调用方回传给 complete / invalidate 的身份凭证。
@@ -188,14 +217,66 @@ let nextSessionId = 1;
 /** wire 消息 id 计数器（wire 消息不是持久化消息，id 只要求唯一）。 */
 let wireCounter = 0;
 
-/** 会话内部 wire 消息；原生 provider 块不会进入持久化 ChatMessage。 */
+/** 会话内部 wire 消息；原生 provider 块随会话内存/持久化往返，不进入普通 ChatMessage。 */
 interface PromptWireMessage extends ChatMessage {
   native?: NativeLlmContent;
 }
-/** session key（saveId / agentId 分隔，杜绝拼接歧义）。 */
-function sessionKey(saveId: string, agentId: string): string {
+
+/**
+ * 可持久化的会话快照（2026-09-26，问题 2 设计修正）。
+ *
+ * 只含重建下一轮增量所需的最小状态：transcript（含原生续接块）+ 投影 diff 起点 +
+ * 签名 + 最近两次 provider token。`inFlight` / `pending*` 刻意不落库 —— 刷新后不存在
+ * 未完成调用，落进去只会让恢复时误判「重入」。
+ */
+export interface PersistedPromptSession {
+  /** 主键 = `promptSessionKey(saveId, agentId)`。 */
+  key: string;
+  saveId: string;
+  agentId: string;
+  sessionId: number;
+  revision: number;
+  baselineSignature: string;
+  transcript: PromptWireMessage[];
+  projection: PromptStateProjection;
+  lastPromptTokens?: number;
+  secondLastPromptTokens?: number;
+  lastCacheHitTokens?: number;
+  lastCacheMissTokens?: number;
+  lastCompletionTokens?: number;
+  /** 落库时刻（仅诊断用；不参与任何判据）。 */
+  savedAt: number;
+}
+
+/**
+ * 会话持久化注入缝（2026-09-26）。
+ *
+ * 引擎默认**不**配置（`sessionStore === null`）→ 纯内存，所有既有引擎单测零改动。
+ * 生产在 `game-pipeline` 安装 Dexie 实现，于是**刷新页面后**可续用上一轮的 wire
+ * transcript，省掉一次冷基线（问题 2）。规则变化/回退/删除存档时签名校验或显式
+ * `invalidatePromptSession` 会让它失效 —— 见各调用点注释。
+ *
+ * `delete` 的 `agentId` 省略 = 删该存档全部 Agent 的会话（回退/切档用）。
+ */
+export interface PromptSessionStore {
+  load(saveId: string, agentId: string): Promise<PersistedPromptSession | null>;
+  save(record: PersistedPromptSession): Promise<void>;
+  delete(saveId: string, agentId?: string): Promise<void>;
+}
+
+/** 已安装的持久化实现；null = 纯内存（默认）。 */
+let sessionStore: PromptSessionStore | null = null;
+
+/** 安装/卸载会话持久化实现（生产由 game-pipeline 安装；测试传 null 回退纯内存）。 */
+export function installPromptSessionStore(store: PromptSessionStore | null): void {
+  sessionStore = store;
+}
+
+/** session key（saveId / agentId 分隔，杜绝拼接歧义）；同时是 Dexie `promptSessions` 主键。 */
+export function promptSessionKey(saveId: string, agentId: string): string {
   return `${saveId}\u0000${agentId}`;
 }
+const sessionKey = promptSessionKey;
 
 /** 构造 provider-independent wire message；原生 assistant 块仅由 complete 写入。 */
 function toWireMessage(role: ChatMessage['role'], content: string): PromptWireMessage {
@@ -206,6 +287,91 @@ function toWireMessage(role: ChatMessage['role'], content: string): PromptWireMe
 function normalizeTail(tailPrompt: string | undefined): string {
   if (tailPrompt === undefined) return '';
   return tailPrompt.trim() === '' ? '' : tailPrompt;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 持久化：序列化 / 水合 / 恢复（问题 2，2026-09-26）
+// ═══════════════════════════════════════════════════════════
+
+/** 内存会话 → 可持久化快照。 */
+function toPersistedSession(session: PromptSession): PersistedPromptSession {
+  return {
+    key: sessionKey(session.saveId, session.agentId),
+    saveId: session.saveId,
+    agentId: session.agentId,
+    sessionId: session.sessionId,
+    revision: session.revision,
+    baselineSignature: session.baselineSignature,
+    transcript: session.transcript,
+    projection: session.projection,
+    lastPromptTokens: session.lastPromptTokens,
+    secondLastPromptTokens: session.secondLastPromptTokens,
+    lastCacheHitTokens: session.lastCacheHitTokens,
+    lastCacheMissTokens: session.lastCacheMissTokens,
+    lastCompletionTokens: session.lastCompletionTokens,
+    savedAt: Date.now(),
+  };
+}
+
+/** 可持久化快照 → 内存会话。恢复出来的会话一定不是「未完成调用」。 */
+function fromPersistedSession(record: PersistedPromptSession): PromptSession {
+  return {
+    saveId: record.saveId,
+    agentId: record.agentId,
+    sessionId: record.sessionId,
+    revision: record.revision,
+    inFlight: false,
+    baselineSignature: record.baselineSignature,
+    transcript: record.transcript,
+    projection: record.projection,
+    pendingProjection: null,
+    pendingUserMessage: null,
+    lastPromptTokens: record.lastPromptTokens,
+    secondLastPromptTokens: record.secondLastPromptTokens,
+    lastCacheHitTokens: record.lastCacheHitTokens,
+    lastCacheMissTokens: record.lastCacheMissTokens,
+    lastCompletionTokens: record.lastCompletionTokens,
+  };
+}
+
+/**
+ * 内存未命中时尝试从持久化恢复（刷新后继续用上一轮的 wire transcript）。
+ * 只接受签名一致、投影属本 Agent、transcript 非空的行；任何异常都退回冷基线。
+ */
+async function restorePersistedSession(
+  input: PreparePromptSessionInput,
+): Promise<PromptSession | null> {
+  if (!sessionStore) return null;
+  try {
+    const record = await sessionStore.load(input.saveId, input.agentId);
+    if (!record) return null;
+    if (record.projection?.agentId !== input.agentId) return null; // 防御：跨 Agent 脏数据
+    if (!Array.isArray(record.transcript) || record.transcript.length === 0) return null;
+    // 代际令牌防撞：新基线取值必须高于已恢复会话的 sessionId。
+    nextSessionId = Math.max(nextSessionId, record.sessionId + 1);
+    // 签名是否一致交给 prepare 的既有判据处理 —— 这样重基线原因仍是准确的
+    // `signature_changed`，而不是笼统的 `missing_session`。
+    return fromPersistedSession(record);
+  } catch (error) {
+    console.warn('[prompt-session] 读取持久化会话失败，改用冷基线:', error);
+    return null;
+  }
+}
+
+/** 尽力持久化当前会话（fire-and-forget；失败只记日志，不影响本轮结果）。 */
+function persistSession(session: PromptSession): void {
+  if (!sessionStore) return;
+  void sessionStore.save(toPersistedSession(session)).catch((error) => {
+    console.warn('[prompt-session] 持久化会话失败（不影响本轮）:', error);
+  });
+}
+
+/** 尽力删除持久化会话（fire-and-forget；`agentId` 省略 = 整个存档）。 */
+function deletePersistedSessions(saveId: string, agentId?: string): void {
+  if (!sessionStore) return;
+  void sessionStore.delete(saveId, agentId).catch((error) => {
+    console.warn('[prompt-session] 删除持久化会话失败:', error);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -463,10 +629,62 @@ function shouldRebaseForBudget(session: PromptSession, input: PreparePromptSessi
   if (typeof lastPromptTokens !== 'number' || typeof secondLastPromptTokens !== 'number') {
     return false;
   }
+  // 🔴 2026-09-26（问题 1）：配置窗口已小于当前 prompt 时，这条绝对保险**无意义** ——
+  //    重基线只会得到同样大小的全量 prompt（「开局正文就超过配置窗口」的存档正是如此），
+  //    继续触发就是每回合重置。此时忽略它，交给增长比判据；窗口配错/模型窗口确实更小的
+  //    情形应由用户改配置，而不是靠一次次无效果的重基线掩盖。
+  if (lastPromptTokens >= contextWindowTokens) return false;
   const growth = lastPromptTokens - secondLastPromptTokens;
   const agentMaxTokens = resolveAgentMaxTokens(input);
   if (typeof agentMaxTokens !== 'number' || agentMaxTokens <= 0) return false;
   return lastPromptTokens + Math.max(0, growth) + agentMaxTokens >= contextWindowTokens;
+}
+
+/** 累加 wire transcript 里各消息正文的字符数。 */
+function measureTranscript(transcript: PromptWireMessage[]): number {
+  let total = 0;
+  for (const m of transcript) total += m.content?.length ?? 0;
+  return total;
+}
+
+/**
+ * 当轮「纯 prompt 层」的字符数 —— 即若此刻从零全量渲染 baseline，会发出的 system + 首轮 user。
+ *
+ * 复用同一个 `ejsPass` 调 `buildAgentMessages`（与 `buildBaseline` 同一条路径），因此**不会**
+ * 二次求值世界书 EJS。返回 0 表示本 Agent 无有效模板（此时不做增长判断）。
+ */
+function measureFreshPrompt(
+  input: PreparePromptSessionInput,
+  ejsPass: NonNullable<AgentContext['ejsPass']>,
+): number {
+  const raw = buildAgentMessages(
+    input.agentId,
+    { ...input.ctx, ejsPass },
+    input.configs,
+    input.worldBooks,
+    input.presets,
+    input.localParams,
+  );
+  if (!raw || raw.length === 0) return 0;
+  let total = composeFirstUserMessage(input.tailPrompt).length;
+  for (const m of raw) total += m.content?.length ?? 0;
+  return total;
+}
+
+/**
+ * 增长重基线判据（问题 1 修正）：累积 transcript 已比「当轮纯 prompt 层」长出
+ * `REBASE_GROWTH_RATIO` 以上时重基线，把它收回成紧凑的全量渲染。
+ *
+ * 不做 provider token 依赖，故 story 流式路径同样生效（旧 token 预算对它是恒 false）。
+ */
+function shouldRebaseForGrowth(
+  session: PromptSession,
+  input: PreparePromptSessionInput,
+  ejsPass: NonNullable<AgentContext['ejsPass']>,
+): boolean {
+  const fresh = measureFreshPrompt(input, ejsPass);
+  if (fresh <= 0) return false;
+  return measureTranscript(session.transcript) > fresh * REBASE_GROWTH_RATIO;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -478,18 +696,15 @@ async function buildBaseline(
   input: PreparePromptSessionInput,
   signature: string,
   reason: PromptSessionRebaseReason,
+  pass?: RenderPass,
 ): Promise<PreparedPromptSession> {
   const { saveId, agentId, ctx, configs, worldBooks, presets, localParams, tailPrompt } = input;
   const config = configs?.find((c) => c.agentId === agentId);
 
   // 同一个 EJS pass：预渲染动态世界书 + 挂 memo，再同步渲染 system（等价 buildAgentMessagesAsync）。
-  const { ejsPass, dynamicLore } = await renderDynamicLore(
-    agentId,
-    ctx,
-    config,
-    configs,
-    worldBooks,
-  );
+  // 调用方若已算过（预算判断用到纯 prompt 层）就复用，保证每轮 EJS 至多求值一次。
+  const { ejsPass, dynamicLore } =
+    pass ?? (await renderDynamicLore(agentId, ctx, config, configs, worldBooks));
 
   const raw = buildAgentMessages(
     agentId,
@@ -534,23 +749,21 @@ async function buildBaseline(
   return { messages: [...transcript], handle, rebased: true, rebaseReason: reason };
 }
 
-/** 追加 delta（已有 session 且签名/预算/重入均无需重基线）。 */
-async function buildDelta(
+/** `buildDelta` 的输入：已算好的当前投影与 diff（调用方每轮只算一次）。 */
+interface DeltaInput {
+  currentProjection: PromptStateProjection;
+  ops: PromptDeltaOp[];
+}
+
+/** 追加 delta（已有 session 且签名/预算/重入/增长均无需重基线）。 */
+function buildDelta(
   session: PromptSession,
   input: PreparePromptSessionInput,
-): Promise<PreparedPromptSession> {
+  delta: DeltaInput,
+): PreparedPromptSession {
   const { saveId, agentId, ctx, configs, worldBooks, presets, localParams, tailPrompt } = input;
   const config = configs?.find((c) => c.agentId === agentId);
-
-  const { dynamicLore } = await renderDynamicLore(agentId, ctx, config, configs, worldBooks);
-  const currentProjection = projectPromptState(agentId, ctx, dynamicLore);
-
-  const ops = diffPromptState(session.projection, currentProjection);
-  const rebaseOp = ops.find((op) => op.op === 'rebase');
-  if (rebaseOp) {
-    // projection 层检测到历史被编辑/删除/重排 → 从当前状态重基线（禁止回滚，§8.2）。
-    return buildBaseline(input, computeBaselineSignature(input), rebaseOp.reason);
-  }
+  const { currentProjection, ops } = delta;
 
   const nextRevision = session.revision + 1;
   const deltaText = renderPromptDelta(nextRevision, ops);
@@ -591,8 +804,18 @@ export async function preparePromptSession(
 ): Promise<PreparedPromptSession> {
   const { saveId, agentId } = input;
   const key = sessionKey(saveId, agentId);
-  const existing = sessions.get(key);
+  let existing = sessions.get(key);
   const signature = computeBaselineSignature(input);
+
+  // 问题 2（2026-09-26）：内存未命中时尝试从持久化恢复（页面刷新后继续上一轮 wire
+  // transcript，省掉一次冷基线）。签名不符/无存储/读失败一律退回冷基线。
+  if (!existing && sessionStore) {
+    const restored = await restorePersistedSession(input);
+    if (restored) {
+      sessions.set(key, restored);
+      existing = restored;
+    }
+  }
 
   if (!existing) {
     return buildBaseline(input, signature, 'missing_session');
@@ -604,11 +827,26 @@ export async function preparePromptSession(
   if (existing.baselineSignature !== signature) {
     return buildBaseline(input, signature, 'signature_changed');
   }
+
+  // 每轮只求值一次 EJS / 投影一次，供重基线判断与 delta 组装共用（设计 §6 工作 5）。
+  const config = input.configs?.find((c) => c.agentId === agentId);
+  const pass = await renderDynamicLore(agentId, input.ctx, config, input.configs, input.worldBooks);
+  const currentProjection = projectPromptState(agentId, input.ctx, pass.dynamicLore);
+  const ops = diffPromptState(existing.projection, currentProjection);
+
+  const rebaseOp = ops.find((op) => op.op === 'rebase');
+  if (rebaseOp) {
+    // projection 层检测到历史被编辑/删除/重排 → 从当前状态重基线（禁止回滚，§8.2）。
+    return buildBaseline(input, signature, rebaseOp.reason, pass);
+  }
   if (shouldRebaseForBudget(existing, input)) {
-    return buildBaseline(input, signature, 'budget_exhausted');
+    return buildBaseline(input, signature, 'budget_exhausted', pass);
+  }
+  if (shouldRebaseForGrowth(existing, input, pass.ejsPass)) {
+    return buildBaseline(input, signature, 'transcript_growth', pass);
   }
 
-  return buildDelta(existing, input);
+  return buildDelta(existing, input, { currentProjection, ops });
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -651,11 +889,14 @@ export function completePromptSession(
   session.lastCacheHitTokens = result.cacheHitTokens ?? 0;
   session.lastCacheMissTokens = result.cacheMissTokens ?? 0;
   session.lastCompletionTokens = result.completionTokens ?? 0;
+
+  persistSession(session);
 }
 
 /**
  * 使会话失效（设计 §4 / §8.1）。
- * - 传 string（saveId）→ 清理该存档下全部 session（存档切换/销毁，T4 生命周期清理）。
+ * - 传 string（saveId）→ 清理该存档下全部 session（存档切换/销毁、快照回退，
+ *   T4 生命周期清理 + 问题 2：持久化行一并删除，防止回退后续用旧分支 transcript）。
  * - 传 handle → 删除该 session；过期 handle（sessionId 不匹配）不误删新 session。
  */
 export function invalidatePromptSession(handleOrSaveId: PromptSessionHandle | string): void {
@@ -664,6 +905,7 @@ export function invalidatePromptSession(handleOrSaveId: PromptSessionHandle | st
       const session = sessions.get(key);
       if (session && session.saveId === handleOrSaveId) sessions.delete(key);
     }
+    deletePersistedSessions(handleOrSaveId);
     return;
   }
   const handle = handleOrSaveId;
@@ -671,6 +913,7 @@ export function invalidatePromptSession(handleOrSaveId: PromptSessionHandle | st
   if (!session) return;
   if (handle.sessionId !== session.sessionId) return; // 过期 handle 不误删新 session
   sessions.delete(sessionKey(handle.saveId, handle.agentId));
+  deletePersistedSessions(handle.saveId, handle.agentId);
 }
 
 // ═══════════════════════════════════════════════════════════
