@@ -1918,6 +1918,11 @@ export interface AgentContext {
    * 成功回合收口由 `commitPlotThreadTurn` 落库；失败/取消整体丢弃。
    */
   plotThreadTurnContext?: import('./plot-threads').PlotThreadTurnContext;
+  /**
+   * 本轮角色计划（2026-09-12；pre 产出、同轮 ephemeral、**不落库**）。
+   * 可下发面经 `projectPlotCastPlan` 剥离 `secret`；`{{PLOT_CAST_PLAN}}` 与 char_gen 直注读它。
+   */
+  plotCastPlan?: import('./plot-threads').PlotCastPlanEntry[];
 }
 
 /** 单个 Agent 的运行结果 */

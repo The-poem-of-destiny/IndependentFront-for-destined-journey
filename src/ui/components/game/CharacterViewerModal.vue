@@ -28,7 +28,7 @@ import ResourceBar from '../shared/ResourceBar.vue';
 import { useAssetImage } from '../../composables/useAssetImage';
 import { useAssetStore } from '../../stores/asset-store';
 import { useGameStore } from '../../stores/game-store';
-import { qualityVar, tierVarByName } from '../../lib/quality-colors';
+import { tierVarByName } from '../../lib/quality-colors';
 import { initialsOf } from '../../utils/name-color';
 import type { AssetType, CharacterState, StatusEffect } from '@engine/types';
 import {
@@ -38,10 +38,11 @@ import {
   buildProfileFields,
   buildSubtitleSegments,
   hasAnyAscension,
-  itemQuality,
   splitInventory,
   type AlbumTile,
 } from './character-viewer';
+// 装备/技能/背包详情与玩家背包面板**共用**同一份渲染（数据结构等价，避免显示分叉）
+import ItemDetailBody from './ItemDetailBody.vue';
 
 /** 见文件头那条铁律 —— 这一位**没有**第三档兜底 */
 const VIEWER_PORTRAIT_CHAIN: readonly AssetType[] = ['立绘bg', '立绘'];
@@ -140,6 +141,15 @@ const ATTR_ROWS: { key: 'str' | 'dex' | 'con' | 'int' | 'spi'; label: string }[]
 const inventory = computed(() => splitInventory(char.value?.inventory));
 const skills = computed(() => char.value?.skills ?? []);
 const statusEffects = computed(() => char.value?.statusEffects ?? []);
+
+// ItemDetailBody 的判别联合入参（玩家侧同款形状）
+const equipmentEntries = computed(() =>
+  inventory.value.equipped.map((row) => ({ kind: 'item' as const, row })),
+);
+const bagEntries = computed(() =>
+  inventory.value.carried.map((row) => ({ kind: 'item' as const, row })),
+);
+const skillEntries = computed(() => skills.value.map((row) => ({ kind: 'skill' as const, row })));
 
 function chipType(fx: StatusEffect): 'buff' | 'debuff' | 'special' {
   if (fx.category === '增益') return 'buff';
@@ -417,50 +427,16 @@ function toggleTile(tile: AlbumTile) {
           <!-- ─────── 装备 ─────── -->
           <template v-else-if="activeTab === 'equipment'">
             <div v-if="!inventory.equipped.length" class="empty-tab">未着寸铁…</div>
-            <div v-for="eq in inventory.equipped" :key="eq.name" class="thing-card">
-              <div class="thing-head">
-                <span class="q-dot" :style="{ background: qualityVar(itemQuality(eq)) }" />
-                <span class="thing-name" :style="{ color: qualityVar(itemQuality(eq)) }">{{
-                  eq.name
-                }}</span>
-                <span class="thing-tag">{{ eq.equippedSlot }}</span>
-              </div>
-              <p v-if="eq.description" class="thing-desc">{{ eq.description }}</p>
-              <div v-if="eq.effects && Object.keys(eq.effects).length" class="kv-list">
-                <div v-for="(desc, key) in eq.effects" :key="key" class="kv-row">
-                  <span class="kv-k">{{ key }}</span
-                  ><span class="kv-v">{{ desc }}</span>
-                </div>
-              </div>
-              <div v-if="eq.durability !== undefined" class="thing-foot">
-                耐久 {{ eq.durability
-                }}<template v-if="eq.maxDurability">/{{ eq.maxDurability }}</template>
-              </div>
+            <div v-for="eq in equipmentEntries" :key="eq.row.name" class="thing-card">
+              <ItemDetailBody :entry="eq" category="equipment" />
             </div>
           </template>
 
           <!-- ─────── 技能 ─────── -->
           <template v-else-if="activeTab === 'skills'">
-            <div v-if="!skills.length" class="empty-tab">未修得一技…</div>
-            <div v-for="sk in skills" :key="sk.name" class="thing-card">
-              <div class="thing-head">
-                <span class="thing-name">{{ sk.name }}</span>
-                <span class="thing-tag"
-                  >{{ sk.type === 'active' ? '主动' : '被动'
-                  }}<template v-if="sk.level"> · Lv.{{ sk.level }}</template></span
-                >
-              </div>
-              <div v-if="sk.cost || sk.cooldown" class="thing-cost">
-                <template v-if="sk.cost">{{ sk.cost.amount }} {{ sk.cost.type }}</template>
-                <template v-if="sk.cooldown"> · 冷却 {{ sk.cooldown }} 回合</template>
-              </div>
-              <p v-if="sk.description" class="thing-desc">{{ sk.description }}</p>
-              <div v-if="sk.effects && Object.keys(sk.effects).length" class="kv-list">
-                <div v-for="(desc, key) in sk.effects" :key="key" class="kv-row">
-                  <span class="kv-k">{{ key }}</span
-                  ><span class="kv-v">{{ desc }}</span>
-                </div>
-              </div>
+            <div v-if="!skillEntries.length" class="empty-tab">未修得一技…</div>
+            <div v-for="sk in skillEntries" :key="sk.row.name" class="thing-card">
+              <ItemDetailBody :entry="sk" category="skills" />
             </div>
           </template>
 
@@ -470,22 +446,9 @@ function toggleTile(tile: AlbumTile) {
               <span class="purse-label">随身钱财</span>
               <span class="purse-value">{{ char.money ?? 0 }} G</span>
             </div>
-            <div v-if="!inventory.carried.length" class="empty-tab">行囊空空…</div>
-            <div v-for="item in inventory.carried" :key="item.name" class="thing-card">
-              <div class="thing-head">
-                <span class="q-dot" :style="{ background: qualityVar(itemQuality(item)) }" />
-                <span class="thing-name" :style="{ color: qualityVar(itemQuality(item)) }">{{
-                  item.name
-                }}</span>
-                <span v-if="item.quantity > 1" class="thing-tag">×{{ item.quantity }}</span>
-              </div>
-              <p v-if="item.description" class="thing-desc">{{ item.description }}</p>
-              <div v-if="item.effects && Object.keys(item.effects).length" class="kv-list">
-                <div v-for="(desc, key) in item.effects" :key="key" class="kv-row">
-                  <span class="kv-k">{{ key }}</span
-                  ><span class="kv-v">{{ desc }}</span>
-                </div>
-              </div>
+            <div v-if="!bagEntries.length" class="empty-tab">行囊空空…</div>
+            <div v-for="item in bagEntries" :key="item.row.name" class="thing-card">
+              <ItemDetailBody :entry="item" category="inventory" />
             </div>
           </template>
 
@@ -1048,66 +1011,6 @@ function toggleTile(tile: AlbumTile) {
 .thing-card + .thing-card {
   margin-top: var(--theme-spacing-sm);
 }
-.thing-head {
-  display: flex;
-  align-items: center;
-  gap: var(--theme-spacing-sm);
-}
-.q-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.thing-name {
-  font-family: var(--theme-font-title);
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--theme-text-primary);
-}
-.thing-tag {
-  margin-left: auto;
-  font-size: 0.6875rem;
-  color: var(--theme-text-muted);
-  letter-spacing: 0.04em;
-}
-.thing-cost {
-  margin-top: var(--theme-spacing-xs);
-  font-size: 0.6875rem;
-  color: var(--theme-text-muted);
-}
-.thing-desc {
-  margin: var(--theme-spacing-xs) 0 0;
-  font-size: 0.8125rem;
-  line-height: 1.6;
-  color: var(--theme-text-secondary);
-}
-.thing-foot {
-  margin-top: var(--theme-spacing-xs);
-  font-size: 0.6875rem;
-  color: var(--theme-text-muted);
-}
-.kv-list {
-  margin-top: var(--theme-spacing-sm);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.kv-row {
-  display: flex;
-  gap: var(--theme-spacing-sm);
-  font-size: 0.75rem;
-}
-.kv-k {
-  min-width: 4rem;
-  flex-shrink: 0;
-  color: var(--theme-text-secondary);
-  font-weight: 500;
-}
-.kv-v {
-  color: var(--theme-text-primary);
-}
-
 /* ═══ 背包钱袋 ═══ */
 .purse {
   display: flex;

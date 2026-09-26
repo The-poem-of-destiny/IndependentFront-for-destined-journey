@@ -204,3 +204,40 @@ describe('CharacterListPanel — 查看脚本升级（modifiers/automata）', ()
     expect(body.text()).toContain('"source": "精铁剑"');
   });
 });
+
+/**
+ * ★ 2026-09-12：NPC 角色面板的装备/技能/背包改用与玩家背包面板共用的 ItemDetailBody ——
+ * 此前技能卡**完全没有品质显示**、没有「战斗修正」、effects 未归一化。这条钉住一致性。
+ */
+describe('CharacterListPanel — 与主角同款渲染', () => {
+  it('技能卡显示品质 + 战斗修正 + 效果归一化', async () => {
+    mockGame.npcs = [
+      {
+        ...makeNpc(),
+        skills: [
+          {
+            name: '火球术',
+            type: 'active',
+            description: '掷出火球',
+            level: 3,
+            rarity: '史诗',
+            cost: { type: 'MP', amount: 10 },
+            effects: ['灼烧:每回合造成伤害'],
+            modifiers: [{ category: '固伤', source: '火球术', amount: 30 }],
+          },
+        ],
+      },
+    ];
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    const tabs = wrapper.findAll('.tab-row button');
+    await tabs.find((b) => b.text().startsWith('技能'))!.trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('.d-quality').text()).toBe('史诗');
+    expect(wrapper.text()).toContain('战斗修正');
+    const fxNames = wrapper.findAll('.fx-name').map((n) => n.text());
+    expect(fxNames).toContain('灼烧');
+  });
+});

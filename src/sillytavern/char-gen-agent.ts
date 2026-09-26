@@ -178,7 +178,7 @@ export async function callCharGenAgent(
   const attrs = (request.marker?.attributes ?? {}) as Record<string, string | undefined>;
   const attrLines = [
     attrs.characterName
-      ? `指定名称: ${attrs.characterName}（正文已出现的名字必须沿用；若这是描述性称呼而正文里有真名，用真名）`
+      ? `指定名称: ${attrs.characterName}（若这是正文给出的真名则沿用；若只是「神秘女子」「守卫」等描述性称呼，除类型 enemy 的战斗单位沿用外，一律视为未指定，须调用 random_name_seed 生成真名）`
       : '',
     attrs.race && attrs.race !== '未知' ? `种族: ${attrs.race}` : '',
     attrs.tier && attrs.tier !== '未知' ? `层级: ${attrs.tier}` : '',

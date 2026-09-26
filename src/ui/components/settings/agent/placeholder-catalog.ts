@@ -75,6 +75,12 @@ export const ALL_PLACEHOLDER_META: readonly PlaceholderBadge[] = [
     category: '剧情',
   },
   {
+    key: 'PLOT_CAST_PLAN',
+    color: '#ff7043',
+    desc: '本轮角色计划 — pre 计划出场的角色（仅 request_dispatcher，同轮临时、无谜底）',
+    category: '剧情',
+  },
+  {
     key: 'AGENT.MEMORY_RECALL',
     color: '#ef5350',
     desc: 'memory_recall 输出',
@@ -164,7 +170,7 @@ const CHAIN_ONLY: Record<string, readonly string[]> = {
  *    命中后会就地预解析）—— 所以这个按钮对 story 是真的有用，与 MAP_CONTEXT 的情况不同。
  */
 const AGENT_SCOPED: Record<string, readonly string[]> = {
-  request_dispatcher: ['MAP_CONTEXT', 'PLOT_THREAD_SURFACE'],
+  request_dispatcher: ['MAP_CONTEXT', 'PLOT_THREAD_SURFACE', 'PLOT_CAST_PLAN'],
   story: ['RANDOM_EVENTS'],
   plot_pre_check: ['PLOT_THREAD_TURN'],
   plot_post_check: ['PLOT_THREAD_TURN'],

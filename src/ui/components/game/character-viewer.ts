@@ -9,8 +9,8 @@
  * 纯度约束: 无 Vue、无 Pinia、无 I/O、无浏览器全局。
  */
 import { clampAffection, getAffectionLabel } from '@engine/affection-system';
-import { inferQualityFromStats } from '@engine/quality-inference';
 import { getTierConfig } from '@engine/tier-constants';
+import { qualityOf } from '../../lib/item-view';
 import { ASSET_TYPES } from '@engine/types';
 import type {
   AssetMetaRecord,
@@ -240,7 +240,9 @@ export interface InventorySplit {
  * 推断只服务于没有显式品质的条目（AI 临时造的、旧存档里的）。
  */
 export function itemQuality(item: InventoryItem): string {
-  return item.rarity ?? inferQualityFromStats(item.stats);
+  // 2026-09-12：品质判定收敛到 item-view.qualityOf（全应用唯一一份），
+  // 本函数保留为「物品」形状的薄包装（查看器/测试的既有入口）。
+  return qualityOf({ kind: 'item', row: item });
 }
 
 export function splitInventory(items: readonly InventoryItem[] | undefined): InventorySplit {

@@ -300,11 +300,6 @@ async function copyJson() {
   }
 }
 
-function truncate(str: string, max: number): string {
-  if (!str) return '';
-  return str.length > max ? str.slice(0, max) + '…' : str;
-}
-
 function formatJson(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2);
@@ -512,7 +507,7 @@ function formatJson(value: unknown): string {
               <h5>请求</h5>
               <div v-for="(m, i) in entry.messages" :key="i" class="debug-msg">
                 <span class="debug-role">{{ m.role }}</span>
-                <pre>{{ truncate(m.content ?? '', 500) }}</pre>
+                <pre>{{ m.content ?? '' }}</pre>
               </div>
               <div v-if="entry.messages.length === 0" class="debug-empty-sub">
                 消息未捕获（流式模式下请求由编排器内部构造）
@@ -520,10 +515,10 @@ function formatJson(value: unknown): string {
             </div>
             <div class="debug-half">
               <h5>响应 @ {{ entry.baseUrl || '—' }}</h5>
-              <pre>{{ truncate(entry.rawResponse, 1000) || '（空响应）' }}</pre>
+              <pre>{{ entry.rawResponse || '（空响应）' }}</pre>
               <template v-if="entry.reasoning">
                 <h6 class="debug-reasoning-h">思维链</h6>
-                <pre class="debug-reasoning-pre">{{ truncate(entry.reasoning, 2000) }}</pre>
+                <pre class="debug-reasoning-pre">{{ entry.reasoning }}</pre>
               </template>
               <template v-if="entry.toolCalls?.length">
                 <h6 class="debug-reasoning-h">工具调用 ({{ entry.toolCalls.length }})</h6>
@@ -533,8 +528,8 @@ function formatJson(value: unknown): string {
                   class="debug-tool-call"
                 >
                   <summary>{{ tool.name }}</summary>
-                  <pre>参数: {{ truncate(formatJson(tool.arguments), 1200) }}</pre>
-                  <pre>结果: {{ truncate(formatJson(tool.result), 1200) }}</pre>
+                  <pre>参数: {{ formatJson(tool.arguments) }}</pre>
+                  <pre>结果: {{ formatJson(tool.result) }}</pre>
                 </details>
               </template>
               <template v-if="entry.providerRounds?.length">
@@ -587,7 +582,7 @@ function formatJson(value: unknown): string {
   font-size: 0.75rem;
 }
 .debug-provider-rounds {
-  max-height: 220px;
+  max-height: 60vh;
   overflow: auto;
 }
 .debug-btn {
@@ -760,7 +755,7 @@ function formatJson(value: unknown): string {
 }
 .debug-half pre {
   font-size: 0.625rem;
-  max-height: 200px;
+  max-height: 60vh;
   overflow: auto;
   background: var(--theme-card-bg);
   padding: 4px 6px;
@@ -784,7 +779,7 @@ function formatJson(value: unknown): string {
 }
 .debug-reasoning-pre {
   font-size: 0.625rem;
-  max-height: 200px;
+  max-height: 60vh;
   overflow: auto;
   background: var(--theme-card-bg);
   padding: 4px 6px;
@@ -808,5 +803,7 @@ function formatJson(value: unknown): string {
   margin: 4px 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  max-height: 60vh;
+  overflow: auto;
 }
 </style>

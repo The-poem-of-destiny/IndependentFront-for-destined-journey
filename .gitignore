@@ -19,6 +19,10 @@ dist-ui/
 opencode.json
 .claude/agent-memory/
 
+# 外部 skill 安装锁（`npx skills add` 在仓库根生成的产物，内容指向上面被 ignore 的
+# .agents/skills/，本身没有可追踪价值；需要复现安装时重跑 skills add 即可）
+skills-lock.json
+
 # 🔒 内容分离波 0 (D1/D45)：worktrees 挂完整工作副本（含全部世界书），整目录拷贝会泄内容。
 # 预防性 ignore —— 本机此刻没有该目录，但快照切仓前任何机器出现都立刻入 ignore。
 .claude/worktrees/

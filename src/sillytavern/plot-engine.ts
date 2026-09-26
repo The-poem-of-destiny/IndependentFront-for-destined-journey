@@ -19,8 +19,9 @@ import {
   parseThreadDeclarations,
   parseThreadUpdates,
   parsePlotThreadRevealedNames,
+  parsePlotCastPlan,
 } from './plot-threads';
-import type { PlotThreadDeclaration, PlotThreadUpdate } from './plot-threads';
+import type { PlotThreadDeclaration, PlotThreadUpdate, PlotCastPlanEntry } from './plot-threads';
 
 // ========== Pre-Check 结果类型 ==========
 
@@ -31,6 +32,8 @@ export interface PreCheckResult {
   outlineRelevance: string;
   /** 主线细化层（2026-09-09）：节点声明；缺字段按空数组，旧输出兼容 */
   threadDeclarations: PlotThreadDeclaration[];
+  /** 本轮角色计划（2026-09-12）：同轮 ephemeral 选角；缺字段按空数组，旧输出兼容 */
+  castPlan: PlotCastPlanEntry[];
 }
 
 /** 解析 plot_pre_check Agent 的 JSON 输出 */
@@ -47,6 +50,7 @@ export function parsePreCheckOutput(rawOutput: string): PreCheckResult | null {
       threadDeclarations: parseThreadDeclarations(
         (o as Record<string, unknown>).threadDeclarations,
       ),
+      castPlan: parsePlotCastPlan((o as Record<string, unknown>).castPlan),
     };
   });
 }

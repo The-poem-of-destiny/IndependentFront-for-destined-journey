@@ -150,6 +150,92 @@ Debug Turn，并让 `combat_v3` / `combat_enemy` 的请求、响应、工具调�
 验证：2026-09-12 实测“首页 → 设置 → 返回”正确回到首页且控制台无存档加载错误；`npm run gates`
 全绿（385 个测试文件、9,514 项通过、8 项跳过），中文编码三判据通过。
 
+### 2026-09-12 物品/技能展示共用组件｜已实施（真机未验）
+
+NPC 角色面板（`CharacterListPanel.vue`，游戏页「角色」弹窗）与通栏档案（`CharacterViewerModal.vue`）
+的装备/技能/背包，和玩家背包面板（`ItemsPanel.vue`）是**各写一套**渲染，NPC 那两套都是简化版，
+显示与主角不一致：技能卡**完全没有品质显示**、三块都没有「战斗修正」（modifiers/automata 中文
+摘要）、effects 未归一化（数组形态会吐出 `"0" "1"` 数字键）。数据结构上主角与 NPC 等价
+（都是 `InventoryItem[]` / `Skill[]`），故抽共用组件。
+
+- **纯逻辑** `src/ui/lib/item-view.ts`：`PanelEntry` 判别联合 + `qualityOf`/`qualityRank`/
+  `facetOf`/`listExtra`/`typeLabel`/`detailExtra`/`entryEffects`/`entryCombatLines`/
+  `entryRawCombatJson`（品质判定走引擎唯一真源 `inferQualityFromStats`，不再各写一份）。
+- **共用组件** `src/ui/components/game/ItemDetailBody.vue`：品质头 + 效果（归一化）+ 战斗修正 +
+  描述 + 原始数据折叠（从 `ItemsPanel` 抽出，含样式）；纯展示，动作（丢弃/删除/重铸）仍由宿主提供。
+- `ItemsPanel.vue` 详情正文改用共用件；**`CharacterListPanel.vue`（NPC 角色面板）与
+  `CharacterViewerModal.vue` 的装备/技能/背包三 tab** 均改用共用件；`CharacterListPanel` 的
+  旧「查看原始数据」tab 级区块删除（并入 `ItemDetailBody` 的逐条目原始数据折叠）；
+  `character-viewer.itemQuality` 收敛为 `item-view.qualityOf` 的薄包装。
+
+验证：`npm run gates` 全绿（389 文件 / 9,561 通过 / 8 跳过）；新增 `item-view.test.ts` +
+`CharacterListPanel` / `CharacterViewerModal` 技能页「品质/战斗修正/归一化」回归测试。
+真机 UI 走查待做。
+
+### 2026-09-12 本轮角色计划（castPlan）｜已实施（真机未验）
+
+补 ADR-35 主线细化层的一条断链：`plot_pre_check` 的本轮选角意图过去在 story 之后就丢了
+（dispatcher 只看得到「已揭示+已提交」的旧节点表层，char_gen 只认旧节点 `involvedNpcs` 精确同名）。
+设计全文见 [本轮角色计划设计](planning/2026-09-12-plot-cast-plan-design.md)（ADR-35 §3.4 的增量）。
+
+- **pre_check 多透漏**：输出新增可选 `castPlan`（`ref`/`role`/`behavior`/`surface`/`nameConstraint`/
+  `secret`）+ 工作流「选角盘点」一步 + 自检项。`secret`（幕后真相）**只进结构化，永不外发**。
+- **dispatcher 完整复述**：新增 `{{PLOT_CAST_PLAN}}` 占位符（同轮 ephemeral，进 turn_context）；
+  正文真出现的计划角色，`char_gen_request` 必须沿用 `ref` 并完整复述身份/行为/命名约束，不得改写。
+- **Code 兜底直注 char_gen**：`buildCharGenPlotInjection` 扩展 —— 按 `ref` 命中即注入
+  role/behavior/nameConstraint（不赌 dispatcher 转述质量）；与 §3.4 历史节点投影互补。
+- **命名约束是「名字即线索」的明确窄口**（设计 §1.1）：`{mode:'full'|'segment'}`，仅在名字本身是
+  线索（如家族共享姓氏）时给；默认仍由 `random_name_seed` 生成。优先级：castPlan 约束 > 描述性
+  称呼→生成 > 默认随机。story 导演块同注入，保证正文用同一称呼。
+- **不持久化**：plan 是计划不是事实，同轮 ephemeral，不写 `worldFlags`。
+- 落点：`plot-threads.ts`（类型 + parse/project/find/format 纯函数）、`plot-engine.ts`（PreCheckResult）、
+  `types.ts`（AgentContext）、`placeholder-registry.ts` + `placeholder-catalog.ts`、
+  `prompt-session-assembler.ts`（ephemeral 正则）、`game-pipeline.ts`（注入编排）、两仓
+  `agent-config.json`（三条提示词 + dispatcher 模板占位符）。
+
+验证：`npm run gates` 全绿（388 文件 / 9,547 通过 / 8 跳过）；`plot-cast-plan.test.ts` 13 条；
+私仓 `agent-config.json` 编码三判据通过。真实 LLM 回合验证留待真机。
+
+> 📌 已知取舍：无 `ref` 的角色 Code 无法按名兜底（behavior 仅靠 dispatcher best-effort）；
+> `nameConstraint.mode=segment` 时 `ref` 是引用键而非最终名（不做 ref→真名持久映射）；
+> 名字约束角色若参战，宜用 `mode=full` 且 `ref` 即最终名（战斗名单按 characterName 精确匹配）。
+
+### 2026-09-12 调试面板长文可查｜已实施（真机未验）
+
+`DebugPanel.vue` 此前对请求消息（`m.content`，500 字）、响应（`rawResponse`，1000 字）、
+思维链（`reasoning`，2000 字）、工具调用参数/结果（各 1200 字）用 `truncate()` 截断显示。
+数据层本就完整（`buildDebugEntry` 原样存 `content`/`reasoning`），只是视图砍了 —— 排查时
+看不到完整提示词/思维链。
+
+- 删除 `truncate()` 及其全部调用点，四类内容全文渲染。
+- 滚动容器从 `200~220px` 放宽到 `60vh`（`.debug-half pre` / `.debug-reasoning-pre` /
+  `.debug-provider-rounds`，并给 `.debug-tool-call pre` 补上 `60vh` + `overflow:auto`），
+  长文可完整滑动查看。
+
+验证：`DebugPanel.*.test.ts` 21 条通过；`npm run gates` 全绿（387 文件 / 9,534 通过 / 8 跳过）。
+
+### 2026-09-12 char_gen 命名约束｜已实施（真机未验）
+
+正文未给真名时，`request_dispatcher` 会把「神秘女子」「守卫」「摊主」这类**描述性称呼**填进
+`<char_gen_request characterName>`；char_gen 的「正文角色名非空则沿用」条款把它**当成真名**，
+于是从不调用 `random_name_seed` 取名。名字是逻辑主键（数据字段规范铁律①），落库后改不了，
+描述性称呼就被永久锁成角色名。
+
+- **char_gen 提示词**（两仓 `agent-config.json`）：命名规则节新增「描述性称呼不是真名」硬规则 +
+  自检条款③改写 —— 仅 `类型=enemy` 的战斗单位（敌方/怪物/召唤物）沿用称呼作名字（**战斗名单
+  按名匹配，改名会让敌人进不了战斗**）；其余（npc/ally/未知）一律视为未指定，必须
+  `random_name_seed` 生成真名。
+- **dispatcher 提示词**：战斗参战方新角色**必须标 `characterType`**（敌 `enemy` / 己 `ally`），
+  `characterName` 原样填称呼/物种名，保证阵营名单匹配。
+- **引擎注入措辞**（`char-gen-agent.ts:181`）：与提示词口径对齐，避免「提示词教生成、注入行教沿用」。
+
+验证：`char-gen-agent.test.ts` 90 条全绿；`tsc --noEmit` 通过；两仓 `agent-config.json`
+编码三判据（U+FFFD 0 / 控制字符 0 / JSON 可解析）通过。真实 LLM 回合验证留待真机。
+
+> 📌 关联未落地项：主人此前讨论的「让 `plot_pre_check` 约束本轮 char_gen 行为」**未实现**。
+> 现有只有 ADR-35 §3.4 的 `buildCharGenPlotInjection`（按 `involvedNpcs` 命中的**已提交**节点做
+> 行为投影），既不覆盖本轮 pre 新声明、也不管名字。本次只修命名。
+
 ### 2026-09-11 剧情编剧化 + 角色在场判定｜已实施（真机未验）
 
 两个真机诊断（`fated-poem-debug-b9e71606-*`）驱动的引擎改动：

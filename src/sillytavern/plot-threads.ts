@@ -232,6 +232,49 @@ export interface PlotThreadSurfaceEntry {
   thread: string;
 }
 
+/**
+ * 命名约束（设计 2026-09-12 §1.1）：**仅在「名字本身是线索 / 名字错了线索对不上」时**由 pre
+ * 声明（如同一家族成员须共享姓氏）。默认新角色名字仍由 `random_name_seed` 生成 ——
+ * 这是数据字段规范铁律①的**明确窄口**，不是「pre 随便指定名字」的许可证。
+ */
+interface PlotCastNameConstraint {
+  /** full=全名必须等于 value；segment=value 必须作为「·」分隔的一段出现 */
+  mode: 'full' | 'segment';
+  value: string;
+}
+
+/**
+ * pre 的「本轮角色计划」条目（设计 2026-09-12；**同轮 ephemeral，不落库**）。
+ * 是计划不是事实，也是预测不是命令：正文没引入就不得凭空生成。
+ * `secret` 只进结构化字段，**绝不随任何面向 AI 的文本下发**。
+ */
+export interface PlotCastPlanEntry {
+  /** 稳定引用键：story/dispatcher/char_gen 用它称呼该角色，Code 按它对账（必填、同轮唯一） */
+  ref: string;
+  /** 挂靠的主线锚/节点名（可选；须与事件线标题逐字一致） */
+  nodeRef?: string;
+  /** 身份定位（玩家可感知的安全面） */
+  role: string;
+  /** 本轮要求的行为（安全面） */
+  behavior: string;
+  /** 可展示的外在信息：外貌/身份线索（安全面，供 char_gen 建档案） */
+  surface: string;
+  /** 命名约束（可选；仅名字是线索时） */
+  nameConstraint?: PlotCastNameConstraint;
+  /** 幕后真相/动机 —— 永不下发 */
+  secret: string;
+}
+
+/** 可下发面（story/dispatcher/char_gen 可见；**无 secret**） */
+export interface PlotCastPlanSurfaceEntry {
+  ref: string;
+  nodeRef?: string;
+  role: string;
+  behavior: string;
+  surface: string;
+  nameConstraint?: PlotCastNameConstraint;
+}
+
 // ═══════════════════════════════════════════════════════════
 // 常量与默认策略
 // ═══════════════════════════════════════════════════════════
@@ -746,6 +789,99 @@ export function projectPlotThreadSurface(flags: PlotThreadFlags): PlotThreadSurf
       involvedNpcs: [...n.involvedNpcs],
       thread: n.thread,
     }));
+}
+
+// ═══════════════════════════════════════════════════════════
+// 本轮角色计划（castPlan，设计 2026-09-12；同轮 ephemeral）
+// ═══════════════════════════════════════════════════════════
+
+/** 归一化命名约束：mode 认不出或 value 空 → undefined（调用方按「未给」处理） */
+function normalizeCastNameConstraint(value: unknown): PlotCastNameConstraint | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const o = value as Record<string, unknown>;
+  const mode = o.mode === 'full' ? 'full' : o.mode === 'segment' ? 'segment' : null;
+  if (!mode) return undefined;
+  if (!hasName(o.value)) return undefined;
+  return { mode, value: o.value.trim() };
+}
+
+/**
+ * AI 输出 → 本轮角色计划（容错：非数组返空、无 ref 的坏条目逐条丢弃、同名 ref 去重）。
+ * **永不抛**；`secret` 原样保留在结构里，由投影层负责永不下发。
+ */
+export function parsePlotCastPlan(value: unknown): PlotCastPlanEntry[] {
+  if (!Array.isArray(value)) return [];
+  const out: PlotCastPlanEntry[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const o = raw as Record<string, unknown>;
+    if (!hasName(o.ref)) continue;
+    const ref = o.ref.trim();
+    if (seen.has(ref)) continue;
+    seen.add(ref);
+    out.push({
+      ref,
+      nodeRef: typeof o.nodeRef === 'string' && o.nodeRef.trim() ? o.nodeRef.trim() : undefined,
+      role: typeof o.role === 'string' ? o.role : '',
+      behavior: typeof o.behavior === 'string' ? o.behavior : '',
+      surface: typeof o.surface === 'string' ? o.surface : '',
+      nameConstraint: normalizeCastNameConstraint(o.nameConstraint),
+      secret: typeof o.secret === 'string' ? o.secret : '',
+    });
+  }
+  return out;
+}
+
+/** 可下发面投影：只留安全字段，**剥离 secret**（设计 §1.2） */
+export function projectPlotCastPlan(
+  entries: ReadonlyArray<PlotCastPlanEntry>,
+): PlotCastPlanSurfaceEntry[] {
+  return entries.map((e) => {
+    const surface: PlotCastPlanSurfaceEntry = {
+      ref: e.ref,
+      role: e.role,
+      behavior: e.behavior,
+      surface: e.surface,
+    };
+    if (e.nodeRef) surface.nodeRef = e.nodeRef;
+    if (e.nameConstraint) surface.nameConstraint = { ...e.nameConstraint };
+    return surface;
+  });
+}
+
+/** 按 ref 命中计划条目（精确匹配，trim 后比较；多条同名已由 parse 去重） */
+export function findCastPlanEntry(
+  entries: ReadonlyArray<PlotCastPlanEntry> | undefined,
+  ref: string | undefined,
+): PlotCastPlanEntry | undefined {
+  if (!entries || !ref) return undefined;
+  const target = ref.trim();
+  if (!target) return undefined;
+  return entries.find((e) => e.ref === target);
+}
+
+/** 可下发面的文本行（story 导演块 / dispatcher 占位符共用；空计划返空串） */
+export function formatPlotCastPlanLines(entries: ReadonlyArray<PlotCastPlanSurfaceEntry>): string {
+  if (entries.length === 0) return '';
+  return entries
+    .map((e) => {
+      const parts = [
+        `- ${e.ref}`,
+        `身份：${e.role || '（未定）'}`,
+        `行为要求：${e.behavior || '（未定）'}`,
+      ];
+      if (e.surface) parts.push(`外在信息：${e.surface}`);
+      if (e.nameConstraint) {
+        parts.push(
+          e.nameConstraint.mode === 'full'
+            ? `命名约束：名字必须是「${e.nameConstraint.value}」`
+            : `命名约束：名字必须含「${e.nameConstraint.value}」（作为「·」分隔的一段）`,
+        );
+      }
+      return parts.join('；');
+    })
+    .join('\n');
 }
 
 /** 深层重检：快照中的引用是否都指向存在的节点（调试/测试辅助，不参与运行时） */

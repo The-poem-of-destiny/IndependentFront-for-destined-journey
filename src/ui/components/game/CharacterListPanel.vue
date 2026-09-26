@@ -5,11 +5,11 @@ import { useUIStore } from '../../stores/ui-store';
 import AssetMedia from '../shared/AssetMedia.vue';
 import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/asset-resolve';
 import { getAffectionLabel } from '@engine/affection-system';
-import { qualityVar } from '../../lib/quality-colors';
-// Q-11: 见 quality-inference 的文件头 —— 这条规则不再住在视图组件里
-import { inferQualityFromStats as inferQuality } from '@engine/quality-inference';
 import ResourceBar from '../shared/ResourceBar.vue';
 import BuffChip from '../shared/BuffChip.vue';
+// 装备/技能/背包详情与玩家背包面板（ItemsPanel）**共用**同一份渲染（数据结构等价，避免显示分叉）
+import ItemDetailBody from './ItemDetailBody.vue';
+import { type PanelEntry } from '../../lib/item-view';
 // 🆕 重铸（2026-08-24）：单条目重铸 —— NPC 的装备/技能/背包条目都能重写
 import type { RewriteTarget } from '@engine/item-gen-chain';
 
@@ -18,7 +18,6 @@ const ui = useUIStore();
 
 // ═══ NPC 列表 ═══
 const selectedIdx = ref(0);
-const showScripts = ref(false);
 const detailTab = ref<'equipment' | 'skills' | 'overview' | 'ascension' | 'status' | 'bag'>(
   'overview',
 );
@@ -35,7 +34,6 @@ watch(
   () => npcs.value.length,
   () => {
     selectedIdx.value = 0;
-    showScripts.value = false;
   },
 );
 
@@ -75,32 +73,17 @@ const selBag = computed(() =>
   ((selected.value as any)?.inventory || []).filter((i: any) => !i.equippedSlot),
 );
 const selSkills = computed(() => (selected.value as any)?.skills || []);
-const selScripts = computed(() => {
-  const tab = detailTab.value;
-  if (tab === 'equipment')
-    return (selEquipment.value[0] as any)?.scripts as Record<string, string> | undefined;
-  if (tab === 'skills')
-    return (selSkills.value[0] as any)?.scripts as Record<string, string> | undefined;
-  return undefined;
-});
-const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.value).length > 0);
-// 🆕 2026-08-24：查看脚本升级为「主角物品栏（ItemsPanel）」同款 —— 除 scripts 外
-//    还展示 modifiers/automata 的原始 JSON（旧版只取第一个条目的 scripts，看不到战斗声明）。
-const selRaw = computed(() => {
-  const tab = detailTab.value;
-  const row =
-    tab === 'equipment'
-      ? (selEquipment.value[0] as any)
-      : tab === 'skills'
-        ? (selSkills.value[0] as any)
-        : undefined;
-  if (!row) return '';
-  const parts: string[] = [];
-  if (row.modifiers?.length) parts.push(JSON.stringify(row.modifiers, null, 2));
-  if (row.automata?.length) parts.push(JSON.stringify(row.automata, null, 2));
-  return parts.join('\n\n');
-});
-const hasRaw = computed(() => selRaw.value.length > 0);
+
+// ItemDetailBody 的判别联合入参（玩家侧同款形状）
+const equipmentEntries = computed<PanelEntry[]>(() =>
+  (selEquipment.value as any[]).map((row) => ({ kind: 'item' as const, row })),
+);
+const bagEntries = computed<PanelEntry[]>(() =>
+  (selBag.value as any[]).map((row) => ({ kind: 'item' as const, row })),
+);
+const skillEntries = computed<PanelEntry[]>(() =>
+  (selSkills.value as any[]).map((row) => ({ kind: 'skill' as const, row })),
+);
 
 // ═══ 删除角色（清理龙套 NPC）═══
 const removing = ref(false);
@@ -260,7 +243,6 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
           @click="
             selectedIdx = i;
             detailTab = 'overview';
-            showScripts = false;
           "
         >
           <!-- 2.5rem 圆 = 脸位，走脸位链 头像 → 立绘 → 立绘bg（只有立绘的角色也不留洞） -->
@@ -343,58 +325,22 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
 
         <!-- 详情 Tab -->
         <div class="tab-row">
-          <button
-            :class="{ active: detailTab === 'overview' }"
-            @click="
-              detailTab = 'overview';
-              showScripts = false;
-            "
-          >
+          <button :class="{ active: detailTab === 'overview' }" @click="detailTab = 'overview'">
             概览
           </button>
-          <button
-            :class="{ active: detailTab === 'status' }"
-            @click="
-              detailTab = 'status';
-              showScripts = false;
-            "
-          >
+          <button :class="{ active: detailTab === 'status' }" @click="detailTab = 'status'">
             状态 {{ (selected as any)?.statusEffects?.length || 0 }}
           </button>
-          <button
-            :class="{ active: detailTab === 'equipment' }"
-            @click="
-              detailTab = 'equipment';
-              showScripts = false;
-            "
-          >
+          <button :class="{ active: detailTab === 'equipment' }" @click="detailTab = 'equipment'">
             装备 {{ selEquipment.length }}
           </button>
-          <button
-            :class="{ active: detailTab === 'skills' }"
-            @click="
-              detailTab = 'skills';
-              showScripts = false;
-            "
-          >
+          <button :class="{ active: detailTab === 'skills' }" @click="detailTab = 'skills'">
             技能 {{ selSkills.length }}
           </button>
-          <button
-            :class="{ active: detailTab === 'ascension' }"
-            @click="
-              detailTab = 'ascension';
-              showScripts = false;
-            "
-          >
+          <button :class="{ active: detailTab === 'ascension' }" @click="detailTab = 'ascension'">
             登神
           </button>
-          <button
-            :class="{ active: detailTab === 'bag' }"
-            @click="
-              detailTab = 'bag';
-              showScripts = false;
-            "
-          >
+          <button :class="{ active: detailTab === 'bag' }" @click="detailTab = 'bag'">
             背包 {{ selBag.length }}
           </button>
         </div>
@@ -593,30 +539,15 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
             </div>
           </template>
 
-          <!-- 装备 -->
+          <!-- 装备（详情正文与玩家背包面板共用 ItemDetailBody） -->
           <template v-if="detailTab === 'equipment'">
             <div v-if="selEquipment.length === 0" class="empty-tab">暂无装备</div>
-            <div v-for="eq in selEquipment" :key="eq.name" class="equip-card">
-              <div class="eq-header">
-                <span class="eq-name" :style="{ color: qualityVar(inferQuality(eq.stats)) }">{{
-                  eq.name
-                }}</span>
-                <span class="eq-slot">[{{ eq.equippedSlot }}]</span>
-              </div>
-              <div v-if="eq.description" class="eq-desc">{{ eq.description }}</div>
-              <div v-if="eq.effects && Object.keys(eq.effects).length" class="fx-list">
-                <div v-for="(desc, name) in eq.effects" :key="name" class="fx-row">
-                  <span class="fx-n">{{ name }}</span
-                  ><span class="fx-d">{{ desc }}</span>
-                </div>
-              </div>
-              <div v-if="eq.durability" class="eq-meta">
-                耐久 {{ eq.durability }}/{{ eq.maxDurability }}
-              </div>
-              <button class="rewrite-btn" @click="toggleRewrite('equipment', eq.name)">
-                {{ isRewriting('equipment', eq.name) ? '收起重铸' : '重铸' }}
+            <div v-for="eq in equipmentEntries" :key="eq.row.name" class="equip-card">
+              <ItemDetailBody :entry="eq" category="equipment" />
+              <button class="rewrite-btn" @click="toggleRewrite('equipment', eq.row.name)">
+                {{ isRewriting('equipment', eq.row.name) ? '收起重铸' : '重铸' }}
               </button>
-              <div v-if="isRewriting('equipment', eq.name)" class="rewrite-body">
+              <div v-if="isRewriting('equipment', eq.row.name)" class="rewrite-body">
                 <textarea
                   v-model="rewriteDesc"
                   rows="3"
@@ -626,7 +557,7 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
                 <button
                   class="rewrite-confirm"
                   :disabled="rewriting"
-                  @click="doNpcRewrite('equipment', eq.name)"
+                  @click="doNpcRewrite('equipment', eq.row.name)"
                 >
                   {{ rewriting ? '重铸中…' : '确认重铸' }}
                 </button>
@@ -634,31 +565,15 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
             </div>
           </template>
 
-          <!-- 技能 -->
+          <!-- 技能（同上，共用 ItemDetailBody —— 品质/战斗修正/效果归一化与主角一致） -->
           <template v-if="detailTab === 'skills'">
             <div v-if="selSkills.length === 0" class="empty-tab">暂无技能</div>
-            <div v-for="sk in selSkills" :key="sk.name" class="skill-card">
-              <div class="sk-header">
-                <span class="sk-name">{{ sk.name }}</span>
-                <span class="sk-tag"
-                  >{{ sk.type === 'active' ? '主动' : '被动' }} Lv.{{ sk.level }}</span
-                >
-              </div>
-              <div v-if="sk.cost" class="sk-cost">
-                {{ sk.cost.amount }} {{ sk.cost.type
-                }}{{ sk.cooldown ? ` · 冷却 ${sk.cooldown}回合` : '' }}
-              </div>
-              <div v-if="sk.description" class="sk-desc">{{ sk.description }}</div>
-              <div v-if="sk.effects && Object.keys(sk.effects).length" class="fx-list">
-                <div v-for="(desc, name) in sk.effects" :key="name" class="fx-row">
-                  <span class="fx-n">{{ name }}</span
-                  ><span class="fx-d">{{ desc }}</span>
-                </div>
-              </div>
-              <button class="rewrite-btn" @click="toggleRewrite('skills', sk.name)">
-                {{ isRewriting('skills', sk.name) ? '收起重铸' : '重铸' }}
+            <div v-for="sk in skillEntries" :key="sk.row.name" class="skill-card">
+              <ItemDetailBody :entry="sk" category="skills" />
+              <button class="rewrite-btn" @click="toggleRewrite('skills', sk.row.name)">
+                {{ isRewriting('skills', sk.row.name) ? '收起重铸' : '重铸' }}
               </button>
-              <div v-if="isRewriting('skills', sk.name)" class="rewrite-body">
+              <div v-if="isRewriting('skills', sk.row.name)" class="rewrite-body">
                 <textarea
                   v-model="rewriteDesc"
                   rows="3"
@@ -668,7 +583,7 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
                 <button
                   class="rewrite-confirm"
                   :disabled="rewriting"
-                  @click="doNpcRewrite('skills', sk.name)"
+                  @click="doNpcRewrite('skills', sk.row.name)"
                 >
                   {{ rewriting ? '重铸中…' : '确认重铸' }}
                 </button>
@@ -679,22 +594,12 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
           <!-- 背包 -->
           <template v-if="detailTab === 'bag'">
             <div v-if="selBag.length === 0" class="empty-tab">行囊空空</div>
-            <div v-for="item in selBag" :key="item.name" class="equip-card">
-              <div class="eq-header">
-                <span class="eq-name">{{ item.name }}</span>
-                <span v-if="item.quantity > 1" class="eq-slot">×{{ item.quantity }}</span>
-              </div>
-              <div v-if="item.description" class="eq-desc">{{ item.description }}</div>
-              <div v-if="item.effects && Object.keys(item.effects).length" class="fx-list">
-                <div v-for="(desc, name) in item.effects" :key="name" class="fx-row">
-                  <span class="fx-n">{{ name }}</span
-                  ><span class="fx-d">{{ desc }}</span>
-                </div>
-              </div>
-              <button class="rewrite-btn" @click="toggleRewrite('bag', item.name)">
-                {{ isRewriting('bag', item.name) ? '收起重铸' : '重铸' }}
+            <div v-for="item in bagEntries" :key="item.row.name" class="equip-card">
+              <ItemDetailBody :entry="item" category="inventory" />
+              <button class="rewrite-btn" @click="toggleRewrite('bag', item.row.name)">
+                {{ isRewriting('bag', item.row.name) ? '收起重铸' : '重铸' }}
               </button>
-              <div v-if="isRewriting('bag', item.name)" class="rewrite-body">
+              <div v-if="isRewriting('bag', item.row.name)" class="rewrite-body">
                 <textarea
                   v-model="rewriteDesc"
                   rows="3"
@@ -704,7 +609,7 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
                 <button
                   class="rewrite-confirm"
                   :disabled="rewriting"
-                  @click="doNpcRewrite('bag', item.name)"
+                  @click="doNpcRewrite('bag', item.row.name)"
                 >
                   {{ rewriting ? '重铸中…' : '确认重铸' }}
                 </button>
@@ -744,28 +649,6 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
           </template>
 
           <!-- 背景 -->
-        </div>
-
-        <!-- 脚本 / 原始数据 (装备/技能 tab 时显示) -->
-        <div v-if="detailTab === 'equipment' || detailTab === 'skills'" class="script-section">
-          <button class="script-toggle" @click="showScripts = !showScripts">
-            {{ showScripts ? '收起原始数据' : '查看原始数据' }}
-          </button>
-          <div v-if="showScripts" class="script-body">
-            <template v-if="hasRaw || hasScripts">
-              <div v-if="hasRaw" class="script-block">
-                <div class="script-label">modifiers / automata</div>
-                <pre class="script-code">{{ selRaw }}</pre>
-              </div>
-              <div v-if="hasScripts" class="script-block">
-                <div v-for="(code, name) in selScripts" :key="name" class="script-block">
-                  <div class="script-label">{{ name }}</div>
-                  <pre class="script-code">{{ code }}</pre>
-                </div>
-              </div>
-            </template>
-            <div v-else class="script-empty">(该条目无原始数据)</div>
-          </div>
         </div>
       </div>
       <div v-else class="detail-empty">选择一个角色查看详情</div>
@@ -1276,62 +1159,6 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
   margin-bottom: 6px;
   border: 1px solid var(--theme-card-border);
 }
-.eq-header,
-.sk-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.eq-name,
-.sk-name {
-  font-weight: 600;
-  font-size: 0.8125rem;
-  font-family: var(--theme-font-title, 'Cinzel', serif);
-}
-.eq-slot,
-.sk-tag {
-  font-size: 0.625rem;
-  color: var(--theme-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.eq-desc,
-.sk-desc {
-  font-size: 0.75rem;
-  color: var(--theme-text-secondary);
-  margin-top: 6px;
-  line-height: 1.5;
-}
-.eq-meta {
-  font-size: 0.625rem;
-  color: var(--theme-text-muted);
-  margin-top: 4px;
-}
-.sk-cost {
-  font-size: 0.6875rem;
-  color: var(--theme-text-muted);
-  margin-top: 4px;
-}
-
-/* 效果 */
-.fx-list {
-  margin-top: 6px;
-}
-.fx-row {
-  display: flex;
-  gap: 8px;
-  padding: 2px 0;
-  font-size: 0.75rem;
-}
-.fx-n {
-  color: var(--theme-text-secondary);
-  font-weight: 500;
-  min-width: 3.75rem;
-}
-.fx-d {
-  color: var(--theme-text-primary);
-}
-
 .d-label {
   font-size: 0.625rem;
   color: var(--theme-text-muted);
@@ -1356,58 +1183,6 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
   font-size: 0.75rem;
   color: var(--theme-text-primary);
   padding: 2px 0;
-}
-
-/* 脚本 */
-.script-section {
-  margin-top: auto;
-  border-top: 1px solid var(--theme-card-border);
-  padding-top: 6px;
-}
-.script-toggle {
-  padding: 5px 10px;
-  border: 1px solid var(--theme-card-border);
-  background: var(--theme-surface-muted);
-  color: var(--theme-text-muted);
-  font-size: 0.6875rem;
-  cursor: pointer;
-  font-family: inherit;
-  border-radius: var(--theme-radius-sm, 4px);
-  transition: color 0.15s;
-}
-.script-toggle:hover {
-  color: var(--theme-text-primary);
-}
-.script-body {
-  margin-top: 6px;
-}
-.script-block {
-  margin-bottom: 6px;
-}
-.script-label {
-  font-size: 0.6875rem;
-  color: var(--theme-accent, #f59e0b);
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-.script-code {
-  background: #0d1117;
-  color: #c9d1d9;
-  font-family: 'Cascadia Code', monospace;
-  font-size: 0.625rem;
-  padding: 8px;
-  border-radius: var(--theme-radius-sm, 4px);
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  margin: 0;
-  max-height: 8.75rem;
-  overflow-y: auto;
-}
-.script-empty {
-  font-size: 0.6875rem;
-  color: var(--theme-text-muted);
-  font-style: italic;
 }
 
 /* ═══ 重铸（单条目，2026-08-24）═══ */

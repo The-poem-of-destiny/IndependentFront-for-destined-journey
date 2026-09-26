@@ -3,14 +3,9 @@ import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { qualityVar } from '../../lib/quality-colors';
-// Q-11: 品质推断是确定性游戏规则（ADR-11），已下沉引擎侧；这里与
-// CharacterListPanel 曾各存一份逐字相同的实现，两份阈值一致纯属运气。
-import { inferQualityFromStats as inferQuality } from '@engine/quality-inference';
-import { describeModifiers } from '@engine/describe-modifier';
-import { describeAutomata } from '@engine/describe-automaton';
-import { normalizeEffects } from '../../lib/item-effects';
-import type { InventoryItem, QualityLevel, Skill } from '@engine/types';
-import { QUALITY_RANK } from '@engine/types';
+// 条目展示逻辑（品质/分类/详情字段/效果/战斗修正）收敛到 item-view —— 与 NPC 查看器共用同一份
+import { qualityOf, qualityRank, facetOf, listExtra, type PanelEntry } from '../../lib/item-view';
+import ItemDetailBody from './ItemDetailBody.vue';
 // 🆕 重铸（2026-08-24）：单条目重铸 —— 把当前条目的完整数据喂给 item_gen 重写
 import type { RewriteTarget } from '@engine/item-gen-chain';
 
@@ -32,17 +27,7 @@ const equipmentItems = computed(() =>
 );
 const skillItems = computed(() => player.value?.skills || []);
 
-/**
- * 面板里的一行 —— 判别联合（Q-11）。
- *
- * 此前 `currentItems` 是 `computed<any[]>`，类型擦除一路漏到模板：18 处
- * `(item as any).xxx`。代价是**引擎里改个字段名（比如 equippedSlot）会在 typecheck
- * 全绿的情况下让背包面板运行时炸掉**。
- *
- * 物品与技能是两种真实不同的形状（quantity/equippedSlot/rarity/stats vs
- * cost/level/type:'active'|'passive'），所以不是「取交集」而是判别联合。
- */
-type PanelEntry = { kind: 'item'; row: InventoryItem } | { kind: 'skill'; row: Skill };
+// 面板里的一行 = item-view 的 PanelEntry（判别联合；Q-11 起沿用，与 NPC 查看器共用）
 
 const currentItems = computed<PanelEntry[]>(() => {
   const inv = Array.isArray(player.value?.inventory) ? player.value.inventory : [];
@@ -58,44 +43,10 @@ const currentItems = computed<PanelEntry[]>(() => {
   return []; // ← 防御
 });
 
-/**
- * 这一行归到哪个子分类 —— 筛选选项与筛选判据**共用同一份**（Q-11）。
- *
- * 刻意**不**把 `selTypeLabel` 并进来：那个返回「主动技能」「被动技能」并对缺失值
- * 回退「装备」「物品」，是详情头的展示文案，合并会改掉界面上的字。
- */
-function facetOf(entry: PanelEntry): string | undefined {
-  if (activeCategory.value === 'equipment') {
-    return entry.kind === 'item' ? (entry.row.equippedSlot ?? undefined) : undefined;
-  }
-  if (entry.kind === 'skill') return entry.row.type === 'active' ? '主动' : '被动';
-  return entry.row.type;
-}
-
-/**
- * 这一行的品质：优先存储的 rarity，缺失才推断（推断规则在 @engine/quality-inference）。
- *
- * 📌 2026-09-11 更正：技能此前**一律硬编码返回「史诗」**（注释自述是为了消除「列表灰点 / 详情史诗」
- * 的不一致——把两边都改成了错的）。现技能带 `rarity`（item_gen `<skill quality="...">` 产出，
- * 开局初始技能照 dispatcher 请求里的品质原样填），有就显示、没有回落中性「普通」，不再编造。
- */
-function qualityOf(entry: PanelEntry): string {
-  if (entry.kind === 'skill') return entry.row.rarity || '普通';
-  return entry.row.rarity || inferQuality(entry.row.stats);
-}
-
-/** 列表行尾部的那点补充信息 */
-function listExtra(entry: PanelEntry): string {
-  if (entry.kind === 'skill') return `Lv.${entry.row.level ?? 1}`;
-  return activeCategory.value === 'equipment'
-    ? `[${entry.row.equippedSlot}]`
-    : `×${entry.row.quantity}`;
-}
-
 const filterOptions = computed(() => {
   const types = new Set<string>();
   for (const entry of currentItems.value) {
-    const t = facetOf(entry);
+    const t = facetOf(entry, activeCategory.value);
     if (t) types.add(t);
   }
   return ['全部', ...Array.from(types)];
@@ -103,22 +54,20 @@ const filterOptions = computed(() => {
 
 const filteredItems = computed(() => {
   if (activeFilter.value === '全部') return currentItems.value;
-  return currentItems.value.filter((entry) => facetOf(entry) === activeFilter.value);
+  return currentItems.value.filter(
+    (entry) => facetOf(entry, activeCategory.value) === activeFilter.value,
+  );
 });
 
 const sortedItems = computed(() => {
-  // 品质序号走引擎的唯一真源（Q-11：此前这里内联了一张 1 起、字面倒序的第二张 rank 表，
-  // 与 types.ts 的 QUALITY_RANK（0 起）并存）
-  return [...filteredItems.value].sort((a, b) => {
-    const qb = QUALITY_RANK[qualityOf(b) as QualityLevel] ?? -1;
-    const qa = QUALITY_RANK[qualityOf(a) as QualityLevel] ?? -1;
-    return qb - qa || a.row.name.localeCompare(b.row.name);
-  });
+  // 品质序号走 item-view 的 qualityRank（引擎 QUALITY_RANK 唯一真源）
+  return [...filteredItems.value].sort(
+    (a, b) => qualityRank(b) - qualityRank(a) || a.row.name.localeCompare(b.row.name),
+  );
 });
 
 watch([activeCategory, activeFilter], () => {
   selectedIdx.value = 0;
-  showRaw.value = false;
 });
 
 // ═══ 外部聚焦 — StatusOverview 点击持有物 → 切类目并选中该物品 ═══
@@ -138,60 +87,6 @@ onMounted(applyItemFocus);
 
 // ═══ 选中物品 ═══
 const selected = computed(() => sortedItems.value[selectedIdx.value] || null);
-
-const selQuality = computed(() => (selected.value ? qualityOf(selected.value) : '普通'));
-
-/**
- * 详情头的类型文案。**不与 `facetOf` 合并**：这里返回「主动技能」「被动技能」，
- * 并对缺失值回退「装备」「物品」—— 是给人看的字，不是筛选键。
- */
-const selTypeLabel = computed(() => {
-  const entry = selected.value;
-  if (!entry) return '';
-  if (entry.kind === 'skill') return entry.row.type === 'active' ? '主动技能' : '被动技能';
-  // M6 完整重构: equippedSlot 已是中文槽位枚举，直接展示
-  if (activeCategory.value === 'equipment') return entry.row.equippedSlot || '装备';
-  return entry.row.type || '物品';
-});
-
-const selExtra = computed(() => {
-  const entry = selected.value;
-  if (!entry) return '';
-  if (entry.kind === 'skill') {
-    const cost = entry.row.cost;
-    return `Lv.${entry.row.level || 1}${cost ? ` · ${cost.amount}${cost.type}` : ''}`;
-  }
-  if (activeCategory.value === 'equipment') {
-    return `${entry.row.durability || '?'}/${entry.row.maxDurability || '?'} 耐久`;
-  }
-  return `×${entry.row.quantity || 1}`;
-});
-
-const selEffects = computed(() => normalizeEffects(selected.value?.row.effects));
-const selScripts = computed(() => selected.value?.row.scripts);
-const hasScripts = computed(() => selScripts.value && Object.keys(selScripts.value).length > 0);
-
-// ═══ 战斗修正（modifiers + automata 中文摘要）═══
-const modifierLines = computed(() => describeModifiers(selected.value?.row.modifiers));
-const automatonLines = computed(() => describeAutomata(selected.value?.row.automata));
-const combatLines = computed(() => [...modifierLines.value, ...automatonLines.value]);
-const hasCombat = computed(() => combatLines.value.length > 0);
-
-// ═══ 原始数据折叠（modifiers + automata JSON）═══
-const showRaw = ref(false);
-const rawCombatJson = computed(() => {
-  const row = selected.value?.row;
-  if (!row) return '';
-  const parts: string[] = [];
-  if (row.modifiers?.length) parts.push(JSON.stringify(row.modifiers, null, 2));
-  if (row.automata?.length) parts.push(JSON.stringify(row.automata, null, 2));
-  return parts.join('\n\n');
-});
-
-// 切换选中物品时收起原始数据折叠
-watch([selectedIdx, activeCategory], () => {
-  showRaw.value = false;
-});
 
 // ═══ 玩家主动丢弃/删除（清理持有物）═══
 
@@ -385,83 +280,14 @@ async function doRewrite() {
           <span class="i-name" :style="{ color: qualityVar(qualityOf(entry)) }">{{
             entry.row.name
           }}</span>
-          <span class="i-tag">{{ facetOf(entry) }}</span>
-          <span class="i-extra">{{ listExtra(entry) }}</span>
+          <span class="i-tag">{{ facetOf(entry, activeCategory) }}</span>
+          <span class="i-extra">{{ listExtra(entry, activeCategory) }}</span>
         </div>
       </div>
 
-      <!-- 右: 详情 -->
-      <div
-        v-if="selected"
-        class="detail"
-        :style="{
-          '--item-detail-border': qualityVar(selQuality),
-          '--item-detail-glow': qualityVar(selQuality),
-        }"
-      >
-        <div class="d-header">
-          <span class="d-name" :style="{ color: qualityVar(selQuality) }">{{
-            selected.row.name
-          }}</span>
-          <span
-            class="d-quality"
-            :style="{ color: qualityVar(selQuality), borderColor: qualityVar(selQuality) }"
-            >{{ selQuality }}</span
-          >
-        </div>
-        <div class="d-meta">
-          <span>{{ selTypeLabel }}</span
-          ><span>{{ selExtra }}</span>
-        </div>
-
-        <!-- 效果词条 -->
-        <div v-if="selEffects && Object.keys(selEffects).length > 0" class="fx-section">
-          <div class="d-label">效果</div>
-          <div v-for="(desc, name) in selEffects" :key="name" class="fx-row">
-            <span class="fx-name">{{ name }}</span
-            ><span class="fx-desc">{{ desc }}</span>
-          </div>
-        </div>
-
-        <!-- 战斗修正（modifiers + automata 中文摘要） -->
-        <div class="fx-section">
-          <div class="d-label">战斗修正</div>
-          <div v-if="hasCombat" class="combat-list">
-            <div v-for="(line, i) in combatLines" :key="i" class="combat-row">
-              <span class="combat-icon" aria-hidden="true">⚔</span>
-              <span>{{ line }}</span>
-            </div>
-          </div>
-          <div v-else class="fx-empty">该物品无战斗效果</div>
-        </div>
-
-        <!-- 描述 -->
-        <div v-if="selected.row.description" class="desc-section">
-          <div class="d-label">描述</div>
-          <p class="d-desc">{{ selected.row.description }}</p>
-        </div>
-
-        <!-- 脚本 / 原始数据 -->
-        <div class="script-section">
-          <button class="script-toggle" @click="showRaw = !showRaw">
-            {{ showRaw ? '收起原始数据' : '查看原始数据' }}
-          </button>
-          <div v-if="showRaw" class="script-body">
-            <template v-if="rawCombatJson || hasScripts">
-              <div v-if="rawCombatJson" class="script-block">
-                <div class="script-label">modifiers / automata</div>
-                <pre class="script-code">{{ rawCombatJson }}</pre>
-              </div>
-              <div v-if="hasScripts" class="script-block">
-                <div v-for="(code, name) in selScripts" :key="name" class="script-block">
-                  <div class="script-label">{{ name }}</div>
-                  <pre class="script-code">{{ code }}</pre>
-                </div>
-              </div>
-            </template>
-            <div v-else class="script-empty">(该物品无原始数据)</div>
-          </div>
-        </div>
+      <!-- 右: 详情（正文与 NPC 查看器共用 ItemDetailBody） -->
+      <div v-if="selected" class="detail">
+        <ItemDetailBody :entry="selected" :category="activeCategory" />
 
         <!-- 删除/丢弃 -->
         <div class="detail-remove">
@@ -736,164 +562,6 @@ async function doRewrite() {
   border-radius: var(--theme-radius-md, 6px);
   box-shadow: var(--paper-stack);
 }
-.d-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding-bottom: 10px;
-  border-bottom: 2px solid var(--item-detail-border, var(--theme-card-border));
-  /* 品质光晕 */
-  --glow: color-mix(in srgb, var(--item-detail-glow, var(--theme-text-muted)) 20%, transparent);
-  box-shadow: 0 1px 0 0 var(--glow);
-}
-.d-name {
-  font-family: var(--theme-font-title, 'Cinzel', serif);
-  font-size: 1.125rem;
-  font-weight: 700;
-}
-.d-quality {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  padding: 2px 10px;
-  border-radius: var(--theme-radius-sm, 4px);
-  border: 1px solid;
-  letter-spacing: 0.03em;
-}
-.d-meta {
-  font-size: 0.75rem;
-  color: var(--theme-text-secondary);
-  display: flex;
-  gap: 16px;
-}
-.d-label {
-  font-size: 0.625rem;
-  color: var(--theme-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-bottom: 4px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.d-label::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(to right, var(--theme-card-border), transparent);
-}
-
-.fx-section {
-}
-.fx-row {
-  display: flex;
-  gap: 10px;
-  padding: 3px 0;
-  font-size: 0.8125rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border) 40%, transparent);
-}
-.fx-row:last-child {
-  border-bottom: none;
-}
-.fx-name {
-  color: var(--theme-text-secondary);
-  font-weight: 500;
-  min-width: 4.375rem;
-}
-.fx-desc {
-  color: var(--theme-text-primary);
-}
-
-/* 战斗修正（modifiers + automata 摘要行） */
-.combat-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.combat-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 0;
-  font-size: 0.8125rem;
-  color: var(--theme-text-primary);
-  border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border) 40%, transparent);
-}
-.combat-row:last-child {
-  border-bottom: none;
-}
-.combat-icon {
-  color: var(--theme-primary, #c9a24b);
-  font-size: 0.75rem;
-  flex-shrink: 0;
-}
-.fx-empty {
-  font-size: 0.75rem;
-  color: var(--theme-text-muted);
-  font-style: italic;
-  padding: 3px 0;
-}
-
-.d-desc {
-  font-size: 0.8125rem;
-  color: var(--theme-text-secondary);
-  line-height: 1.7;
-  margin: 0;
-  font-style: italic;
-}
-
-/* 脚本 */
-.script-section {
-  margin-top: auto;
-  border-top: 1px solid var(--theme-card-border);
-  padding-top: 8px;
-}
-.script-toggle {
-  padding: 5px 10px;
-  border: 1px solid var(--theme-card-border);
-  background: var(--theme-surface-muted);
-  color: var(--theme-text-muted);
-  font-size: 0.6875rem;
-  cursor: pointer;
-  font-family: inherit;
-  border-radius: var(--theme-radius-sm, 4px);
-  transition: color 0.15s;
-}
-.script-toggle:hover {
-  color: var(--theme-text-primary);
-}
-.script-body {
-  margin-top: 8px;
-}
-.script-block {
-  margin-bottom: 8px;
-}
-.script-label {
-  font-size: 0.6875rem;
-  color: var(--theme-accent, #f59e0b);
-  font-weight: 600;
-  margin-bottom: 2px;
-}
-.script-code {
-  background: #0d1117;
-  color: #c9d1d9;
-  font-family: 'Cascadia Code', 'JetBrains Mono', monospace;
-  font-size: 0.625rem;
-  padding: 10px;
-  border-radius: var(--theme-radius-sm, 4px);
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  margin: 0;
-  max-height: 160px;
-  overflow-y: auto;
-}
-.script-empty {
-  font-size: 0.6875rem;
-  color: var(--theme-text-muted);
-  font-style: italic;
-}
-
 /* 未选择 */
 .detail-empty {
   flex: 1;

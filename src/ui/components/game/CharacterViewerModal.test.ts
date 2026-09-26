@@ -331,6 +331,31 @@ describe('CharacterViewerModal — 页签', () => {
     expect(document.querySelector('.empty-tab')?.textContent).toContain('未修得一技');
   });
 
+  /**
+   * ★ 2026-09-12：技能页改用与玩家背包面板共用的 ItemDetailBody ——
+   * 此前 NPC 技能卡**完全没有品质显示**、没有「战斗修正」，且 effects 未归一化
+   * （数组形态会吐数字键）。这条钉住「和主角显示一致」。
+   */
+  it('★ 技能页与主角同款渲染：品质 + 战斗修正 + 效果归一化', async () => {
+    await open('技能', {
+      skills: [
+        {
+          name: '火球术',
+          type: 'active',
+          description: '掷出火球',
+          level: 3,
+          rarity: '史诗',
+          cost: { type: 'MP', amount: 10 },
+          effects: ['灼烧:每回合造成伤害'],
+        } as never,
+      ],
+    } as never);
+    expect(document.querySelector('.d-quality')?.textContent).toBe('史诗');
+    expect(document.querySelector('.viewer')?.textContent).toContain('战斗修正');
+    const fxNames = [...document.querySelectorAll('.fx-name')].map((n) => n.textContent);
+    expect(fxNames).toContain('灼烧');
+  });
+
   /** ★ 变体寻址：这是本次给渲染缝新开的能力，没有它相册只能显示每个类型的主图 */
   it('★ 相册按 (名字, 类型, 变体) 逐格取图', async () => {
     mockAssets.assets = [

@@ -68,12 +68,17 @@ import {
   parseThreadDeclarations,
   buildCharGenProjectionA,
   buildCharGenProjectionB,
+  parsePlotCastPlan,
+  projectPlotCastPlan,
+  formatPlotCastPlanLines,
+  findCastPlanEntry,
 } from '@engine/plot-threads';
 import type {
   PlotThreadGateResult,
   PlotThreadTurnContext,
   PlotThreadDeclaration,
   PlotThreadUpdate,
+  PlotCastPlanEntry,
 } from '@engine/plot-threads';
 import { countAcceptableTriggers } from '@engine/plot-engine';
 // 🆕 Delta 会话（T4）：存档切换/销毁时清理该存档的 prompt session（string 入参 = 清整个 saveId）
@@ -2122,28 +2127,74 @@ export class GamePipeline {
   private buildCharGenPlotInjection(marker: CharGenRequestMarker): string | undefined {
     const name = marker.attributes?.characterName;
     if (!name) return undefined;
-    const flags = this.currentContext?.plotThreadFlags;
-    if (!flags) return undefined;
+    const parts: string[] = [];
 
-    // 时点分流：角色已在角色库 → 场景 B（表层投影）；否则场景 A（全量行为化）。
-    // 拿不准走 B —— B 只赔信息量，A 可能剧透。投影内容全部来自 plot-threads 的纯函数
-    // （§11.4 裁定 1-4：motive 不进档案、连线意向不外泄）。
-    const existing = this.game.characters.some((c) => c.name === name);
-    if (existing) {
-      const surface = buildCharGenProjectionB(flags, name);
-      if (!surface) return undefined;
-      return [
-        `该角色与主线明线相关（仅作背景，其本人可对此一无所知，不应主动知情）：`,
-        `涉及事件：${surface.gist}（隶属「${surface.thread}」）。`,
-      ].join('\n');
+    // 🎭 同轮角色计划（castPlan，2026-09-12）优先：pre 明确计划了该角色 → Code 直注
+    //    行为/命名约束（不赌 dispatcher 转述质量）。secret 一律不读、不外发。
+    const cast = findCastPlanEntry(this.currentContext?.plotCastPlan, name);
+    if (cast) {
+      const lines = [
+        `本轮角色计划（内部要求；行为须自然体现，身份/谜底不得披露）：`,
+        `定位：${cast.role || '（未定）'}`,
+      ];
+      if (cast.behavior) lines.push(`行为要求：${cast.behavior}`);
+      if (cast.surface) lines.push(`可展示的设定线索：${cast.surface}`);
+      if (cast.nameConstraint) {
+        lines.push(
+          cast.nameConstraint.mode === 'full'
+            ? `🔴 命名约束：<name> 必须为「${cast.nameConstraint.value}」（名字是剧情线索，不得改名或另起）`
+            : `🔴 命名约束：<name> 必须含「${cast.nameConstraint.value}」（作为「·」分隔的一段；名字是剧情线索）`,
+        );
+      }
+      parts.push(lines.join('\n'));
     }
-    const full = buildCharGenProjectionA(flags, name);
-    if (!full) return undefined;
-    return [
-      `该角色承担主线角色（内部信息；行为可体现、身份不得披露）：`,
-      `事件轮廓：${full.gist}（隶属「${full.thread}」）。`,
-      `行为约束：请将下列动机转译成其言谈举止的隐性倾向，不点破因果——${full.motive}`,
-    ].join('\n');
+
+    // 🧵 历史节点投影（§3.4 时点分流）：角色已在角色库 → 场景 B（表层投影）；
+    //    否则场景 A（全量行为化）。拿不准走 B —— B 只赔信息量，A 可能剧透。
+    //    投影内容全部来自 plot-threads 的纯函数（§11.4 裁定 1-4：motive 不进档案、连线不外泄）。
+    const flags = this.currentContext?.plotThreadFlags;
+    if (flags) {
+      const existing = this.game.characters.some((c) => c.name === name);
+      if (existing) {
+        const surface = buildCharGenProjectionB(flags, name);
+        if (surface) {
+          parts.push(
+            [
+              `该角色与主线明线相关（仅作背景，其本人可对此一无所知，不应主动知情）：`,
+              `涉及事件：${surface.gist}（隶属「${surface.thread}」）。`,
+            ].join('\n'),
+          );
+        }
+      } else {
+        const full = buildCharGenProjectionA(flags, name);
+        if (full) {
+          parts.push(
+            [
+              `该角色承担主线角色（内部信息；行为可体现、身份不得披露）：`,
+              `事件轮廓：${full.gist}（隶属「${full.thread}」）。`,
+              `行为约束：请将下列动机转译成其言谈举止的隐性倾向，不点破因果——${full.motive}`,
+            ].join('\n'),
+          );
+        }
+      }
+    }
+
+    return parts.length > 0 ? parts.join('\n\n') : undefined;
+  }
+
+  /**
+   * 🎭 本轮角色计划 → story 导演块（2026-09-12；安全面，**secret 不外泄**）。
+   * 与 `formatPlotThreadDirectorBlock` 并列：那个是「历史主线明线」，这个是「本轮选角」。
+   */
+  private formatPlotCastPlanDirectorBlock(entries: PlotCastPlanEntry[]): string {
+    if (entries.length === 0) return '';
+    const lines = formatPlotCastPlanLines(projectPlotCastPlan(entries));
+    if (!lines) return '';
+    return (
+      `**本轮角色规划（若引入下列角色，请沿用其称呼/名字，并自然体现其行为要求）:**\n${lines}\n\n` +
+      `**要求:** 这些是叙事层面的选角与行为约束，不含谜底；只在行文中自然出现，` +
+      `不点破其与主线的关联，也不预告后续。`
+    );
   }
 
   /**
@@ -2170,6 +2221,13 @@ export class GamePipeline {
       // 🧵 主线细化：只接受「通过闸门 + 无实际可接受大纲触发」的声明
       const directorBlock = this.acceptPlotThreadDeclarations(parsed as Record<string, unknown>);
       if (directorBlock) blocks.push(directorBlock);
+
+      // 🎭 本轮角色计划（castPlan，2026-09-12）：同轮 ephemeral —— 供 story 导演块 +
+      //    dispatcher {{PLOT_CAST_PLAN}} + char_gen 按 ref 直注。secret 永不下发。
+      const castPlan = parsePlotCastPlan((parsed as Record<string, unknown>).castPlan);
+      if (this.currentContext) this.currentContext.plotCastPlan = castPlan;
+      const castBlock = this.formatPlotCastPlanDirectorBlock(castPlan);
+      if (castBlock) blocks.push(castBlock);
 
       if (blocks.length > 0) {
         this.currentContext?.agentOutputs.set(

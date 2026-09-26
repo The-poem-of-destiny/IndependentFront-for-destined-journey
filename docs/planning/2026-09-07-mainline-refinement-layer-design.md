@@ -173,6 +173,15 @@ pre_check 埋（active/dormant）→ 正文演绎 → post_check 结算（resolv
 3. **连线意向不外泄**——`foreshadows`/`payoffs` 不随任何投影给 char_gen；dispatcher 的
    可见面只持过滤后的表层投影，不自动持有全量内部节点。
 
+> 📌 **2026-09-12 增量：本节是「历史节点投影」，另有「同轮计划投影」**
+>
+> 本节 §6.1 的时点分流读的是 `worldFlags.plotThreads` **已提交**节点 —— 管「角色与既有主线
+> 节点有关」。round 内 `plot_pre_check` 的**新**选角意图过去没有通道（同轮声明要回合成功才
+> 落库，char_gen 在这之前就跑完）。2026-09-12 补 `castPlan`（同轮 ephemeral）：pre 现编的
+> 出场角色按 `ref` 精确同名，把 role/behavior/nameConstraint 直注 dispatcher 与 char_gen，
+> `secret` 永不下发。两条通道互补、可同时命中。完整契约见
+> [`2026-09-12-plot-cast-plan-design.md`](2026-09-12-plot-cast-plan-design.md)。
+
 ## 7. 节奏闸门（Code 保证）
 
 频率是 Code 的事，内容是 AI 的事：
