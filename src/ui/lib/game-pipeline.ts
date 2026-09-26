@@ -2107,8 +2107,10 @@ export class GamePipeline {
     });
     return (
       `**主线明线（世界在主线方向上自然运转的一角）:**\n${lines.join('\n')}\n\n` +
-      `**要求:** 以上内容只作背景片段融入正文，不点破其与主线的关联、不预告后续、` +
-      `不用它质问/引导玩家；玩家可遇见也可不遇见，不改变玩家手头正在做的事。`
+      `**要求:** 上述明线须演成这一段正文里看得见的具体事件——谁做了什么、局面因此变成什么样——` +
+      `且要玩家察觉得到、回应得了；这出戏的身份与因果尽可隐去，既不点破它与主线的关联，也不预告` +
+      `后续，唯独「发生了什么」不许含糊，尤忌以沉默观察、隐秘行事、转身离开这类既无信息又无后果的` +
+      `段落顶替篇幅；明线片段至多占去一到两个自然段，其余篇幅仍归还给玩家当前的行动与场景。`
     );
   }
 
@@ -2193,7 +2195,7 @@ export class GamePipeline {
     return (
       `**本轮角色规划（若引入下列角色，请沿用其称呼/名字，并自然体现其行为要求）:**\n${lines}\n\n` +
       `**要求:** 这些是叙事层面的选角与行为约束，不含谜底；只在行文中自然出现，` +
-      `不点破其与主线的关联，也不预告后续。`
+      `不点破其与主线的关联，也不预告后续。角色照常可以说话、互动、提出诉求。`
     );
   }
 
@@ -2216,7 +2218,7 @@ export class GamePipeline {
       const directive: string = parsed.directive || parsed.outlineRelevance || '';
       const blocks: string[] = [];
       if (background) blocks.push(`**剧情背景（须自然编织进正文）:**\n${background}`);
-      if (directive) blocks.push(`**本轮推进建议:**\n${directive}`);
+      if (directive) blocks.push(`**本轮推进（须演成具体事件）:**\n${directive}`);
 
       // 🧵 主线细化：只接受「通过闸门 + 无实际可接受大纲触发」的声明
       const directorBlock = this.acceptPlotThreadDeclarations(parsed as Record<string, unknown>);
