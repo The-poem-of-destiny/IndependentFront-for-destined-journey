@@ -32,8 +32,12 @@
 验证：`npm run gates` 全绿（406 文件 / 9,677 通过 / 8 跳过）；新增
 `tests/server-content-pack.test.ts`（加密往返 / 版本比对 / 两条路由 / 投毒拒绝）与
 `src/ui/lib/content-pack-updater.test.ts`。**端到端已验证**：发布仓
-`The-poem-of-destiny/poem-dist` 已创建，首个 release `v2.7.5` 已发布，引擎服务端模块
-对真实 GitHub 拉取 → 解密 → 解压 → 解析成功（15 本世界书 / 13 个 agent）。UI 真机走查待做。
+`The-poem-of-destiny/poem-dist` 已创建，当前最新 release `v2.8.0`
+（15 本世界书 / 14 个 agent），引擎服务端模块对真实 GitHub 拉取 → 解密 → 解压 → 解析成功。
+UI 真机走查待做。
+
+> 📌 同日更正：首个 release `v2.7.5` 是 2026-09-11 构建的旧包（仅 13 agent，缺
+> `combat_enemy`），已用 `v2.8.0`（14 agent）取代；旧 release 保留备查，`latest` 取到的是 v2.8.0。
 
 ### 2026-09-16 API 配置重构｜已实施（设置页宽屏/390px 已走查，真实供应商待验）
 

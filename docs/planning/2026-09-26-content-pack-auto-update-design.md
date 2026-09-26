@@ -1,9 +1,11 @@
 # 内容包自动更新 v1 设计（Release-only 加密分发）
 
 > **状态：✅ 已实施（2026-09-26），端到端链路已验证。** 发布仓
-> `The-poem-of-destiny/poem-dist` 已创建（release-only 公开仓），首个 release
-> `v2.7.5` 已发布；用引擎 `server/content-pack-release.ts` 对真实 GitHub
-> 拉取 → 解密 → 解压 → 解析成功（15 本世界书 / 13 个 agent）。
+> `The-poem-of-destiny/poem-dist` 已创建（release-only 公开仓）。当前最新 release =
+> `v2.8.0`（14 个 agent，含 `combat_enemy`），引擎 `server/content-pack-release.ts`
+> 对真实 GitHub 拉取 → 解密 → 解压 → 解析成功（15 本世界书 / 14 个 agent）。
+> 📌 同日更正：首个 release 是 `v2.7.5`，但它是 2026-09-11 构建的旧包（仅 13 个 agent，
+> 缺 `combat_enemy`），已用 `v2.8.0` 取代（旧 release 保留备查，不影响 `latest` 取值）。
 > **未做**：设置页「检查更新」按钮的 UI 真机走查。
 
 ## 1. 背景与目标
@@ -111,9 +113,12 @@ Release 资产名固定为 `manifest.json` / `pack.bin`，tag 约定 `v<packVers
 
 ## 6. 已知取舍与待办
 
-- ✅ **端到端已验**（2026-09-26）：发布仓 `The-poem-of-destiny/poem-dist` 已建，首个
-  release `v2.7.5`（`pack.bin` + `manifest.json`）已发布，引擎服务端模块对真实
+- ✅ **端到端已验**（2026-09-26）：发布仓 `The-poem-of-destiny/poem-dist` 已建，当前最新
+  release `v2.8.0`（`pack.bin` + `manifest.json`，14 个 agent），引擎服务端模块对真实
   GitHub 拉取/解密成功。**剩下**：设置页「检查更新」按钮的 UI 真机走查。
+  - 📌 首个 release `v2.7.5` 是 2026-09-11 构建的旧包（13 agent），同日已用 `v2.8.0` 取代；
+    旧 release 保留。🔴 发版前务必确认 `build-pack` 自检的 agent 数（现为 14）与私仓
+    `data/defaults/agent-config.json` 一致，别直接抓 `dist/` 里的旧包发。
 - **只有 JSON 内容包**：图片 / 音频 / 地图底图**不在** pack 里，本机制不覆盖它们。
   若将来要让 pack 里的 §14 `remoteAssets` 指向 GitHub Release 资产，**图片同样会被 CORS 挡**，
   得一起走 BFF 或换有 CORS 的图床。
