@@ -9,6 +9,32 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-09-26 内容包自动更新 v1｜已实施（端到端已验证，UI 走查待做）
+
+内容包过去只能手动把 `fated-poem-pack-<ver>.json` 交给玩家导入。本版给一条
+「检查更新 → 一键拉取 → 自动装/升级」的闭环，同时不把真实内容明文放进公开仓。
+
+- **发布侧**（私有仓 `tools/build-release.mjs`）：`pack.json` → gzip → AES-256-GCM →
+  `pack.bin` + 极小明文 `manifest.json`（只有版本号与两个 sha256，无世界观文字）。
+- **下载通道**：新增 BFF `GET /api/content-pack/latest`（比对版本）与
+  `/api/content-pack/blob`（拉取并解密回明文）。🔴 GitHub Release 资产下载会 302 到
+  `release-assets.githubusercontent.com`，实测（2026-09-26）302 与最终 200 **都不带
+  `Access-Control-Allow-Origin`**，浏览器直连必被 CORS 拦 —— 故拉取/解密全在服务端。
+- **前端**：`src/ui/lib/content-pack-updater.ts`（纯 fetch 包装、判别联合永不抛穿）+
+  DataSection 内容包卡加「检查更新 / 更新到 X」，复用**既有** install/upgrade 两阶段确认，
+  不新开安装路径；版本比较复用引擎 `semverGte`。
+- **威胁模型**（🔴 见设计 §2）：密钥内嵌公开源码 = **混淆不是保密**，只求「不明文 / 不被
+  自动扫描 / 不扎眼」；真正保密需服务端持钥，与 release-only 前提冲突。
+- 两道 sha256（密文 + 明文）校验防投毒；资产下载限 GitHub 主机白名单；路由**不接受任何
+  URL/仓库参数**（从根上防 SSRF）。
+- 设计全文：[内容包自动更新 v1](planning/2026-09-26-content-pack-auto-update-design.md)。
+
+验证：`npm run gates` 全绿（406 文件 / 9,677 通过 / 8 跳过）；新增
+`tests/server-content-pack.test.ts`（加密往返 / 版本比对 / 两条路由 / 投毒拒绝）与
+`src/ui/lib/content-pack-updater.test.ts`。**端到端已验证**：发布仓
+`The-poem-of-destiny/poem-dist` 已创建，首个 release `v2.7.5` 已发布，引擎服务端模块
+对真实 GitHub 拉取 → 解密 → 解压 → 解析成功（15 本世界书 / 13 个 agent）。UI 真机走查待做。
+
 ### 2026-09-16 API 配置重构｜已实施（设置页宽屏/390px 已走查，真实供应商待验）
 
 - 通用源按 `kind + protocol` 分型为 LLM / Embedding / Reranker；LLM 支持 OpenAI Chat、Gemini 与

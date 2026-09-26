@@ -6,6 +6,7 @@ import { embeddingsRoutes } from './routes/embeddings';
 import { modelsRoutes } from './routes/models';
 import { imageRoutes } from './routes/image';
 import { createContentWriteRoutes } from './routes/content';
+import { contentPackRoutes } from './routes/content-pack';
 import { llmRoutes } from './routes/llm';
 import { rerankRoutes } from './routes/rerank';
 
@@ -44,6 +45,7 @@ const BFF_ROUTE_TABLE: readonly BffRouteEntry[] = [
   { prefix: '/api/rerank', create: () => rerankRoutes },
   { prefix: '/api/models', create: () => modelsRoutes },
   { prefix: '/api/image', create: () => imageRoutes },
+  { prefix: '/api/content-pack', create: () => contentPackRoutes },
   {
     prefix: '/api/worldbooks',
     create: ({ contentDir }) => createContentWriteRoutes({ contentDir, subDir: 'worldbooks' }),

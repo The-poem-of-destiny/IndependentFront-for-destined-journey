@@ -23,6 +23,11 @@ import type { FullBackup } from '@engine/database';
 import { getSaveProfile } from '@engine/database';
 import type { PackInstallPlan } from '@engine/types-content';
 import type { PackUpgradeDiff } from '@engine/content-pack-plan';
+import {
+  checkPackUpdate,
+  downloadLatestPack,
+  type PackUpdateInfo,
+} from '../../lib/content-pack-updater';
 
 const cfg = useSettingsStore();
 const ui = useUIStore();
@@ -66,6 +71,48 @@ const packPending = shallowRef<unknown | null>(null); // 待确认的原始 pack
 const packDiff = ref<PackUpgradeDiff | null>(null);
 const packError = ref<string | null>(null);
 const packInstalling = ref(false);
+
+/**
+ * 内容包自动更新 v1（2026-09-26）：向 BFF 查发布源最新版，下载后走**既有**的
+ * 安装/升级两阶段流程（`runInstall`）。加解密与 GitHub 拉取都在服务端，
+ * 前端只读本地 BFF 的明文。
+ */
+const packUpdate = ref<PackUpdateInfo | null>(null);
+const packCheckingUpdate = ref(false);
+
+async function checkForPackUpdate() {
+  packCheckingUpdate.value = true;
+  try {
+    const result = await checkPackUpdate(activePackVersion.value);
+    if (result.status === 'error') {
+      ui.toast(result.message, 'error');
+      return;
+    }
+    packUpdate.value = result.info;
+    if (!result.info.available) ui.toast('发布源暂无内容包', 'info');
+    else if (result.info.updateAvailable)
+      ui.toast(`发现新版本 ${result.info.packVersion}`, 'success');
+    else ui.toast('已是最新版本', 'info');
+  } finally {
+    packCheckingUpdate.value = false;
+  }
+}
+
+/** 下载最新包并复用 `runInstall`（同 packId 自动走升级 diff 两阶段） */
+async function applyPackUpdate() {
+  if (packInstalling.value) return;
+  packInstalling.value = true;
+  try {
+    const result = await downloadLatestPack();
+    if (result.status === 'error') {
+      ui.toast(result.message, 'error');
+      return;
+    }
+    await runInstall(result.pack);
+  } finally {
+    packInstalling.value = false;
+  }
+}
 
 async function pickPackFile() {
   const i = document.createElement('input');
@@ -588,7 +635,30 @@ async function clearAll() {
             @click="requestUninstall"
             >卸载内容包</AppButton
           >
+          <AppButton
+            variant="ghost"
+            size="sm"
+            class="card-action"
+            :loading="packCheckingUpdate"
+            :disabled="packInstalling"
+            @click="checkForPackUpdate"
+            >检查更新</AppButton
+          >
+          <AppButton
+            v-if="packUpdate?.updateAvailable"
+            variant="primary"
+            size="sm"
+            class="card-action"
+            :loading="packInstalling"
+            @click="applyPackUpdate"
+            >更新到 {{ packUpdate.packVersion }}</AppButton
+          >
         </div>
+        <p v-if="packUpdate && !packUpdate.updateAvailable" class="text-muted text-sm">
+          已是最新版本<template v-if="packUpdate.packVersion"
+            >（{{ packUpdate.packVersion }}）</template
+          >。
+        </p>
       </AppCard>
     </div>
     <AppModal

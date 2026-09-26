@@ -411,6 +411,7 @@ describe('BFF 路由前缀单一真源', () => {
       '/api/rerank',
       '/api/models',
       '/api/image',
+      '/api/content-pack',
       '/api/worldbooks',
       '/api/defaults',
     ]);

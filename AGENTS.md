@@ -237,6 +237,10 @@ docs/
 ├── planning/2026-09-16-api-configuration-refactor-design.md
 │                                       # ✅ 多协议 API 配置重构设计（2026-09-16 已实施，真实供应商待验）：LLM / Embedding /
 │                                       # Reranker 分型、Gemini/Claude 原生协议、独立出图连接与源参数覆盖
+├── planning/2026-09-26-content-pack-auto-update-design.md
+│                                       # ✅ 内容包自动更新 v1（2026-09-26 已实施，端到端已验证；UI 走查待做）：
+│                                       # release-only 公开仓 poem-dist + AES-GCM 加密 blob + BFF 代理拉取
+│                                       # 威胁模型仅「不明文/防扫描」（密钥内嵌=混淆非保密）；只覆盖 JSON 包
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
