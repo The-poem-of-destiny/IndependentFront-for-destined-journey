@@ -28,4 +28,11 @@ describe('图像连接与通用 API 源分离', () => {
     expect(apiSource).toContain('apiForm.bodyOmitPaths');
     expect(apiSource).toContain('normalizeContextWindowTokens(apiForm.contextWindowTokens)');
   });
+
+  it('🔴 获取模型走允许空模型的临时端点 —— 新建连接不再「先选模型才能拉列表」', () => {
+    // 拉列表本就不需要已选模型（BFF 的 GET /models 不读 X-Model-ID）；
+    // 若退回 parseApiSource 那条严格路径，模型为空会直接抛错，形成死循环。
+    expect(apiSource).toContain('fetchLlmModels(draftEndpointForModelList())');
+    expect(apiSource).not.toContain('fetchLlmModels(sourceForStorage(draftSource()))');
+  });
 });

@@ -9,6 +9,29 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-09-26 API 配置三处修复（获取模型死循环 / 旧行连坐 / structuredClone 回归）
+
+2026-09-16 多协议 API 配置重构合入后暴露的三个缺陷，一次修掉：
+
+- **获取模型死循环**：新建 LLM 连接时点「获取模型」，`fetchModelList` 走
+  `draftSource()` → `parseApiSource()` 的严格校验，而该校验要求 `defaultModel` 非空，
+  于是「要先选模型才能拉列表、可拉列表才能选模型」。改为拉列表用**允许空模型的临时端点**
+  （`ApiSection.vue` 的 `draftEndpointForModelList`），保存/测试仍走严格校验；BFF 的
+  `GET /api/llm/:protocol/models` 本就不读 `X-Model-ID`。
+- **一条旧 API 行连坐整个分区**：`api-source-store.initialize()` 对每条已存行 `parseApiSource`，
+  任何一条旧格式行（缺 `kind`）都会让整批抛错 —— 而保存/删除入口都先 `await initialize()`，
+  结果「坏行删不掉，新配置也保存不了」（报 `kind must be a non-empty string`）。改为**逐行解析、
+  坏行跳过不抛**（不自动迁移、不自动删除），新增 `invalidSourceIds` + 显式
+  `purgeInvalidSources()` 与 API 分区「清理 N 条无效配置」按钮。
+- **🔴 structuredClone 回归（高严重度）**：API 重构新加了 `agent-client.ts` 构造器里的
+  `structuredClone(options.endpoint)`，同时 `endpoint-resolver.buildApiEndpoints` 把响应式
+  `apiPool` 里的嵌套 `models`/`bodyOverrides` 按引用塞进 endpoint —— Vue Proxy 不可 structuredClone，
+  症状是**所有走 LLM 的 Agent 在发请求前全挂**（真机 debug 里 `plot_pre_check` 首当其冲，
+  error=`DataCloneError`、0 token）。修复：`buildApiEndpoints` 末尾 `detach(endpoint)`
+  切断响应式（`db-write.detach` 是全仓唯一一份切断实现）。
+- 验证：`npm run gates` 全绿；`endpoint-resolver.test.ts` 加「响应式池 → 结果可 structuredClone」回归钉；
+  `api-source-store.test.ts` 坏行跳过/清理用例；`ApiSection.image-endpoint.test.ts` 拉列表路径钉。
+
 ### 2026-09-26 内容包自动更新 v1｜已实施（端到端已验证，UI 走查待做）
 
 内容包过去只能手动把 `fated-poem-pack-<ver>.json` 交给玩家导入。本版给一条

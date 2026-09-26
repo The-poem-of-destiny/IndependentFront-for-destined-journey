@@ -13,11 +13,12 @@ const state = vi.hoisted(() => ({
 
 const saveApiEndpoint = vi.hoisted(() => vi.fn(async () => undefined));
 const saveImageApiConnection = vi.hoisted(() => vi.fn(async () => undefined));
+const deleteApiEndpoint = vi.hoisted(() => vi.fn(async () => undefined));
 const getApiEndpoints = vi.hoisted(() => vi.fn(async () => [] as unknown[]));
 const getImageApiConnections = vi.hoisted(() => vi.fn(async () => [] as unknown[]));
 
 vi.mock('@engine/database', () => ({
-  deleteApiEndpoint: vi.fn(async () => undefined),
+  deleteApiEndpoint,
   deleteImageApiConnection: vi.fn(async () => undefined),
   getApiEndpoints,
   getImageApiConnections,
@@ -43,13 +44,26 @@ describe('api-source-store Vue proxy boundaries', () => {
     state.settings.apiPool = [];
     saveApiEndpoint.mockClear();
     saveImageApiConnection.mockClear();
+    deleteApiEndpoint.mockClear();
     getApiEndpoints.mockReset();
     getApiEndpoints.mockResolvedValue([]);
     getImageApiConnections.mockReset();
     getImageApiConnections.mockResolvedValue([]);
   });
 
-  it('rejects legacy rows without rewriting them', async () => {
+  const VALID_LLM = {
+    id: 'good-llm',
+    name: 'Good LLM',
+    kind: 'llm',
+    protocol: 'openai-chat',
+    baseUrl: 'https://api.example.com/v1',
+    apiKey: 'secret-key',
+    defaultModel: 'model-a',
+    models: ['model-a'],
+    timeoutMs: 60_000,
+  };
+
+  it('🔴 一条旧格式行不再连坐：坏行跳过不抛，有效行照常加载，且不重写坏行', async () => {
     const legacy = {
       id: 'legacy-chat',
       name: 'Legacy chat',
@@ -60,14 +74,31 @@ describe('api-source-store Vue proxy boundaries', () => {
       models: ['model-a'],
       timeout: 60_000,
     };
-    getApiEndpoints.mockResolvedValue([legacy]);
+    getApiEndpoints.mockResolvedValue([legacy, VALID_LLM]);
 
     const store = useApiSourceStore();
-    await expect(store.initialize()).rejects.toThrow('kind must be a non-empty string');
+    // 修之前这里会 reject（'kind must be a non-empty string'），把保存/删除全锁死
+    await expect(store.initialize()).resolves.toBeUndefined();
 
+    expect(store.sources.map((entry) => entry.id)).toEqual(['good-llm']);
+    expect(store.invalidSourceIds).toEqual(['legacy-chat']);
+    // 刻意设计：不自动迁移 / 不自动删除旧行
     expect(saveApiEndpoint).not.toHaveBeenCalled();
-    expect(store.sources).toEqual([]);
-    expect(store.error).toContain('kind must be a non-empty string');
+    expect(deleteApiEndpoint).not.toHaveBeenCalled();
+  });
+
+  it('purgeInvalidSources 只删被跳过的坏行（用户显式触发）', async () => {
+    getApiEndpoints.mockResolvedValue([
+      { id: 'legacy-chat', name: 'Legacy', provider: 'chat', baseUrl: 'https://x/v1', apiKey: '' },
+      VALID_LLM,
+    ]);
+    const store = useApiSourceStore();
+    await store.initialize();
+
+    expect(await store.purgeInvalidSources()).toBe(1);
+    expect(deleteApiEndpoint).toHaveBeenCalledWith('legacy-chat');
+    expect(store.invalidSourceIds).toEqual([]);
+    expect(store.sources.map((entry) => entry.id)).toEqual(['good-llm']);
   });
 
   it('publishes nested body overrides after Pinia makes the saved source reactive', async () => {

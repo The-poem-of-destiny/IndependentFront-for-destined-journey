@@ -23,6 +23,7 @@ import { requestEmbedding } from '@engine/api/embedding';
 import { requestRerank } from '@engine/api/reranker';
 import { fetchLlmModels } from '@engine/api/transport';
 import { parseApiSource } from '@engine/api/source-config';
+import type { ApiEndpoint } from '@engine/types';
 import type { ApiSource, ApiSourceKind, LlmProtocol } from '@engine/types-api';
 
 const cfg = useSettingsStore();
@@ -53,6 +54,21 @@ const apiForm = reactive({
   _realKey: '' as string,
   _masked: false,
 });
+
+/** 清理无法识别的旧配置行（显式按钮，不自动删数据） */
+const purgingInvalid = ref(false);
+async function purgeInvalidApis() {
+  if (!sourceStore.invalidSourceIds.length) return;
+  purgingInvalid.value = true;
+  try {
+    const removed = await sourceStore.purgeInvalidSources();
+    ui.toast(`已清理 ${removed} 条无效配置`, 'success');
+  } catch (e) {
+    ui.toast('清理失败：' + (e instanceof Error ? e.message : String(e)), 'error');
+  } finally {
+    purgingInvalid.value = false;
+  }
+}
 /**
  * 出图端点：**地址与模型都不由这张表管**（2026-08-05）。
  *
@@ -216,6 +232,34 @@ function draftSource(): ApiSource {
   });
 }
 
+/**
+ * 「获取模型」专用的临时端点（🔴 不经过 `parseApiSource`，故允许 `defaultModel` 为空）。
+ *
+ * 拉取模型列表本就不需要已选模型 —— BFF 的 `GET /api/llm/:protocol/models` 连
+ * `X-Model-ID` 都不读。而 `parseApiSource` 把「模型必填」当硬校验，若拉列表也走它，
+ * 新建连接就会陷入「要先选模型才能拉列表、可拉列表才能选模型」的死循环。
+ * 保存与「测试连接」仍走严格的 `draftSource()`，本函数只服务列表拉取。
+ */
+function draftEndpointForModelList(): ApiEndpoint {
+  return {
+    id: editingApiId.value || 'connection-test',
+    name: apiForm.name || '未命名连接',
+    provider: 'llm',
+    baseUrl: apiForm.baseUrl.trim().replace(/\/+$/, ''),
+    apiKey: (apiForm._realKey || apiForm.apiKey).trim(),
+    defaultModel: apiForm.model.trim(),
+    models: [],
+    timeout: Number(apiForm.timeoutMs) || 60_000,
+    kind: 'llm',
+    protocol: apiForm.protocol as LlmProtocol,
+    anthropicVersion: apiForm.anthropicVersion || undefined,
+    anthropicBeta: apiForm.anthropicBeta
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+  };
+}
+
 async function testApiAndFetch() {
   apiFormTesting.value = true;
   try {
@@ -259,7 +303,7 @@ async function fetchModelList(opts: { fromConnectionTest?: boolean; silentFail?:
     let models: string[] = [];
     let error = '';
     if (apiForm.kind === 'llm') {
-      models = await fetchLlmModels(sourceForStorage(draftSource()));
+      models = await fetchLlmModels(draftEndpointForModelList());
     } else {
       const result = await fetchModels({
         baseUrl: apiForm.baseUrl,
@@ -463,6 +507,15 @@ async function deleteApi(id: string) {
       </div>
     </AppCard>
     <div class="api-pool">
+      <AppCard v-if="sourceStore.invalidSourceIds.length" padding="md" class="invalid-api-card">
+        <p class="text-sm" style="margin: 0 0 6px">
+          检测到 <strong>{{ sourceStore.invalidSourceIds.length }}</strong> 条旧版本的 API
+          配置无法识别（缺少「用途」等字段），已跳过、不影响使用。这些旧配置需要重新添加；也可以直接清理掉。
+        </p>
+        <AppButton variant="ghost" size="sm" :loading="purgingInvalid" @click="purgeInvalidApis"
+          >清理 {{ sourceStore.invalidSourceIds.length }} 条无效配置</AppButton
+        >
+      </AppCard>
       <AppCard v-for="ep in s.apiPool" :key="ep.id" padding="md"
         ><div class="api-card-body">
           <div class="api-card-info">

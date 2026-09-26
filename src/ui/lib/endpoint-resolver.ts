@@ -25,6 +25,7 @@
  *    来源判定在调用侧（`hasExplicitAgentModel`），本解析器仍只认「有效绑定」这一个维度。
  */
 import type { ApiEndpoint } from '@engine/types';
+import { detach } from '../stores/db-write';
 
 /** 端点解析结果 —— 判别联合。「池空」与「绑定失效」是两种失败，调用方按需分档。 */
 export type EndpointResolution =
@@ -80,37 +81,45 @@ export function buildApiEndpoints(apiPool: readonly unknown[]): ApiEndpoint[] {
   //   localStorage: ApiEntry    { model: string, models: string[], apiType: string }
   //   引擎:         ApiEndpoint { defaultModel: string, models: string[], provider: string }
   // 映射补齐，避免下游读错字段（defaultModel → 空串 → API 请求缺 model）
+  //
+  // 🔴 末尾必须 `detach`（JSON 往返切断 Vue Proxy）：`settings.apiPool` 是响应式的，
+  //    这里原样按引用搬运的 `models` 数组 / `bodyOverrides` 对象都是 Proxy，而引擎
+  //    `AgentClient` 构造时会 `structuredClone(endpoint)` —— 拿到 Proxy 直接抛
+  //    `DataCloneError`，症状是**所有 LLM Agent 在发请求前全挂**（plot_pre_check 首当其冲）。
+  //    这是 API 配置重构（1fd73e2）引入的回归，`detach` 是本仓唯一一份切断实现的入口。
   return (apiPool as any[])
     .filter((entry: any) =>
       !entry?.kind && !entry?.apiType
         ? true
         : (entry.kind ?? (entry.apiType === 'chat' ? 'llm' : entry.apiType)) === 'llm',
     )
-    .map((entry: any) => ({
-      id: entry.id || '',
-      name: entry.name || '',
-      provider: entry.provider || entry.apiType || 'custom',
-      baseUrl: entry.baseUrl || '',
-      apiKey: entry.apiKey || '',
-      defaultModel: entry.defaultModel || entry.model || '', // ← 关键：ApiEntry.model → ApiEndpoint.defaultModel
-      models: entry.models || [],
-      timeout: entry.timeout ?? 60000,
-      timeoutMs: entry.timeoutMs ?? entry.timeout ?? 60000,
-      kind: 'llm',
-      protocol: entry.protocol ?? 'openai-chat',
-      bodyOverrides: entry.bodyOverrides ?? {},
-      bodyOmitPaths: entry.bodyOmitPaths ?? [],
-      revision: entry.revision,
-      anthropicVersion: entry.anthropicVersion,
-      anthropicBeta: entry.anthropicBeta,
-      // 🆕 T4（设计 §8.3 / §9）：contextWindowTokens 透传，但只认正整数 ——
-      //    localStorage 是用户可编辑的，坏值（0/负数/浮点/字符串）一律 undefined
-      //    （不做主动预算判断），与 api-key-migration 的 readEntries 同一口径。
-      contextWindowTokens:
-        typeof entry.contextWindowTokens === 'number' &&
-        Number.isSafeInteger(entry.contextWindowTokens) &&
-        entry.contextWindowTokens > 0
-          ? entry.contextWindowTokens
-          : undefined,
-    })) as ApiEndpoint[];
+    .map((entry: any) =>
+      detach({
+        id: entry.id || '',
+        name: entry.name || '',
+        provider: entry.provider || entry.apiType || 'custom',
+        baseUrl: entry.baseUrl || '',
+        apiKey: entry.apiKey || '',
+        defaultModel: entry.defaultModel || entry.model || '', // ← 关键：ApiEntry.model → ApiEndpoint.defaultModel
+        models: entry.models || [],
+        timeout: entry.timeout ?? 60000,
+        timeoutMs: entry.timeoutMs ?? entry.timeout ?? 60000,
+        kind: 'llm',
+        protocol: entry.protocol ?? 'openai-chat',
+        bodyOverrides: entry.bodyOverrides ?? {},
+        bodyOmitPaths: entry.bodyOmitPaths ?? [],
+        revision: entry.revision,
+        anthropicVersion: entry.anthropicVersion,
+        anthropicBeta: entry.anthropicBeta,
+        // 🆕 T4（设计 §8.3 / §9）：contextWindowTokens 透传，但只认正整数 ——
+        //    localStorage 是用户可编辑的，坏值（0/负数/浮点/字符串）一律 undefined
+        //    （不做主动预算判断），与 api-key-migration 的 readEntries 同一口径。
+        contextWindowTokens:
+          typeof entry.contextWindowTokens === 'number' &&
+          Number.isSafeInteger(entry.contextWindowTokens) &&
+          entry.contextWindowTokens > 0
+            ? entry.contextWindowTokens
+            : undefined,
+      }),
+    ) as ApiEndpoint[];
 }

@@ -54,6 +54,15 @@ export const useApiSourceStore = defineStore('api-sources', () => {
   const imageConnections = ref<ImageApiConnection[]>([]);
   const initialized = ref(false);
   const error = ref<string | null>(null);
+  /**
+   * 加载时被跳过的旧格式行 id（缺 kind/protocol 等，无法识别）。
+   *
+   * 🔴 旧行**不自动迁移、不自动删除**（「rejects legacy rows without rewriting them」是
+   * 刻意设计）：这里只记住 id 供 UI 提示，清理必须由用户显式触发（`purgeInvalidSources`）。
+   * 之所以要单独记：一条坏行不能让整批加载抛错 —— 那会连「保存 / 删除」都做不了
+   * （那些入口都先 `await initialize()`），等于把 API 分区锁死。
+   */
+  const invalidSourceIds = ref<string[]>([]);
   let initPromise: Promise<void> | null = null;
 
   const llmSources = computed(() => sources.value.filter((source) => source.kind === 'llm'));
@@ -111,7 +120,22 @@ export const useApiSourceStore = defineStore('api-sources', () => {
           getApiEndpoints(),
           getImageApiConnections(),
         ]);
-        sources.value = storedSources.map((source) => parseApiSource(source));
+        // 🔴 逐行解析、坏行跳过：一条旧格式行（缺 kind/protocol）不能让整批加载抛错，
+        //    否则所有先 `await initialize()` 的入口（保存 / 删除）全被连坐锁死。
+        //    坏行不重写不删除，只记 id，等用户显式清理。
+        const valid: ApiSource[] = [];
+        const invalid: string[] = [];
+        for (const raw of storedSources) {
+          try {
+            valid.push(parseApiSource(raw));
+          } catch (cause) {
+            const id = (raw as { id?: unknown })?.id;
+            if (typeof id === 'string' && id) invalid.push(id);
+            console.warn('[api-sources] 跳过无法识别的旧配置行:', cause);
+          }
+        }
+        sources.value = valid;
+        invalidSourceIds.value = invalid;
         imageConnections.value = storedImageConnections.map((connection) => detach(connection));
         publishProjection();
         error.value = null;
@@ -124,6 +148,15 @@ export const useApiSourceStore = defineStore('api-sources', () => {
       }
     })();
     return initPromise;
+  }
+
+  /** 显式清理无法识别的旧配置行（用户点按钮才调；不重写有效行）。返回清理条数。 */
+  async function purgeInvalidSources(): Promise<number> {
+    await initialize();
+    const ids = [...invalidSourceIds.value];
+    for (const id of ids) await deleteApiEndpoint(id);
+    invalidSourceIds.value = [];
+    return ids.length;
   }
 
   async function saveSource(input: ApiSource): Promise<ApiSource> {
@@ -191,12 +224,14 @@ export const useApiSourceStore = defineStore('api-sources', () => {
   return {
     sources,
     imageConnections,
+    invalidSourceIds,
     llmSources,
     embeddingSources,
     rerankerSources,
     initialized,
     error,
     initialize,
+    purgeInvalidSources,
     saveSource,
     removeSource,
     saveImageConnection,

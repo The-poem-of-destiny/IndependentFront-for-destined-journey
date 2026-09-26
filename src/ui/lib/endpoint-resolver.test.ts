@@ -5,7 +5,8 @@
  * 畸形绑定 / 重复 id。核心断言：「显式绑定失效」与「未设置」永不相混。
  */
 import { describe, it, expect } from 'vitest';
-import { resolveAgentEndpoint } from './endpoint-resolver';
+import { reactive } from 'vue';
+import { resolveAgentEndpoint, buildApiEndpoints } from './endpoint-resolver';
 import type { ApiEndpoint } from '@engine/types';
 
 function endpoint(id: string): ApiEndpoint {
@@ -131,5 +132,33 @@ describe('resolveAgentEndpoint — 重复 id（防御性可预期）', () => {
     const dupSecond = endpoint('A');
     const resolution = resolveAgentEndpoint({ boundPoolId: 'A', apiPool: [dupFirst, dupSecond] });
     expect(resolution).toEqual({ status: 'resolved', endpoint: dupFirst });
+  });
+});
+
+describe('buildApiEndpoints — 交给引擎的端点必须脱离 Vue 响应式', () => {
+  // 🔴 回归：API 配置重构（1fd73e2）后 `AgentClient` 会 `structuredClone(endpoint)`，
+  //    而响应式 apiPool 里的 `models`/`bodyOverrides` 是 Vue Proxy → DataCloneError，
+  //    症状是「所有 LLM Agent 在发请求前全挂」（plot_pre_check 首当其冲）。
+  it('🔴 响应式 apiPool → 结果可被 structuredClone，且保留嵌套字段', () => {
+    const pool = reactive([
+      {
+        id: 'ep1',
+        name: 'DS',
+        apiType: 'chat',
+        baseUrl: 'https://api.deepseek.com',
+        apiKey: 'k',
+        model: 'deepseek-chat',
+        models: ['deepseek-chat', 'deepseek-reasoner'],
+        bodyOverrides: { thinking: { type: 'enabled' } },
+        bodyOmitPaths: ['/frequency_penalty'],
+      },
+    ]);
+
+    const endpoints = buildApiEndpoints(pool);
+    expect(endpoints).toHaveLength(1);
+    expect(() => structuredClone(endpoints[0])).not.toThrow();
+    expect(endpoints[0].models).toEqual(['deepseek-chat', 'deepseek-reasoner']);
+    expect(endpoints[0].bodyOverrides).toEqual({ thinking: { type: 'enabled' } });
+    expect(endpoints[0].defaultModel).toBe('deepseek-chat');
   });
 });
