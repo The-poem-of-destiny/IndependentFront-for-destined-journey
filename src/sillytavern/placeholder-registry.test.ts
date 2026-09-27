@@ -728,6 +728,18 @@ describe('CHARACTER_STATE', () => {
     expect(result).toBe('');
   });
 
+  it('🆕 主角命运点数（FP）追加在末尾；未供值时不出现', () => {
+    const char = makeChar({ name: '主角甲' });
+    const withFp = mockCtx({ characters: [char] });
+    withFp.statData = { 命运点数: 42 };
+    const out = PLACEHOLDER_REGISTRY['CHARACTER_STATE'](withFp, mockConfig({ agentId: 'story' }));
+    expect(out).toContain('命运点数(FP): 42');
+
+    const noFp = mockCtx({ characters: [char] });
+    const out2 = PLACEHOLDER_REGISTRY['CHARACTER_STATE'](noFp, mockConfig({ agentId: 'story' }));
+    expect(out2).not.toContain('命运点数(FP)');
+  });
+
   it('does not throw on various agentIds', () => {
     const char = makeChar();
     const ctx = mockCtx({ characters: [char] });

@@ -716,7 +716,15 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     if (!npcZone) return '';
     const visibility = getAgentZoneVisibility(agentId).npc;
     if (visibility === 'NONE') return '';
-    return filterZoneContent('npc', npcZone.content, visibility, agentId, ctx) || '';
+    const body = filterZoneContent('npc', npcZone.content, visibility, agentId, ctx) || '';
+    if (body === '') return '';
+    // 🆕 2026-09-26：主角命运点数（FP，SaveProfile.fp 经 `statData.命运点数` 投影）。
+    //    FP 不在 CharacterState 上，此前正文读不到；这里只给主角追加一行。
+    //    🔴 与 prompt-state-projection 的 `fate` scope 同源 —— 否则 delta 会话里
+    //    FP 变化不会进 `<context_delta>`，正文只会看到基线里的旧值。
+    const fp = ctx.statData?.['命运点数'];
+    if (typeof fp !== 'number') return body;
+    return `${body}\n命运点数(FP): ${fp}`;
   },
 
   /** {{INVENTORY}} — 遍历所有角色的背包物品 */

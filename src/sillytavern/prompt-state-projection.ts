@@ -63,6 +63,7 @@ import { buildPlotThreadSnapshot } from './plot-threads';
  * | `lore_dynamic`  | LORE_BOOK_DYNAMIC      | 动态世界书整块：`upsert`/`remove`          | name='dynamic'                |
  * | `memory`        | MEMORY_ENTRIES         | 记忆条目整元素：`upsert`/`remove`          | name=记忆 id（AI 已见）       |
  * | `narrative`     | NARRATIVE              | 历史 append：`upsert`；异常时 `rebase`     | name=消息 id（append cursor） |
+ * | `fate`          | CHARACTER_STATE（主角） | 主角命运点数（FP，SaveProfile.fp）：`set`   | field='命运点数'              |
  *
  * 不进入投影（设计 §7.3 / §7.4）：`USER_INPUT`、`RANDOM_EVENTS`、`RECENT_COMBAT`、
  * `AGENT.*` 与链占位符 —— 它们属于每轮的 `turn_context`，不是持久状态。
@@ -81,7 +82,8 @@ export type PromptScope =
   | 'map'
   | 'lore_dynamic'
   | 'memory'
-  | 'narrative';
+  | 'narrative'
+  | 'fate';
 
 /**
  * delta 操作（设计 §7.2 最小操作集 + narrative 控制信号）。
@@ -142,6 +144,8 @@ export interface PromptStateProjection {
   memories: Record<string, unknown>;
   /** 历史消息（含 id —— append cursor 依据；只保留 AI 可见字段） */
   narrative: Array<Pick<ChatMessage, 'id' | 'role' | 'content'>>;
+  /** 主角命运点数（SaveProfile.fp）；null = 未供值（不产 delta） */
+  fate: number | null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -461,6 +465,11 @@ export function projectPromptState(
 
   const loreDynamic = renderedDynamicLore.trim() === '' ? null : renderedDynamicLore;
 
+  // 主角命运点数（SaveProfile.fp 的只读投影来源：`ctx.statData.命运点数`）。
+  // 只给主角，与 CHARACTER_STATE 里追加的那一行同源，保证 baseline 与 delta 一致。
+  const fpRaw = context.statData?.['命运点数'];
+  const fate = typeof fpRaw === 'number' ? fpRaw : null;
+
   return {
     agentId,
     characters,
@@ -487,6 +496,7 @@ export function projectPromptState(
     loreDynamic,
     memories,
     narrative,
+    fate,
   };
 }
 
@@ -733,6 +743,14 @@ export function diffPromptState(
   diffAffections(previous.affections, current.affections, out);
   diffVariables(previous.variables, current.variables, out);
   diffTime(previous.time, current.time, out);
+
+  // 主角命运点数：标量 set（null ↔ number 也显式发，避免 delta 会话里保留旧值）。
+  // `?? null` 兼容本字段引入前持久化的旧投影（fate=undefined）。
+  const prevFate = previous.fate ?? null;
+  const curFate = current.fate ?? null;
+  if (prevFate !== curFate) {
+    out.push({ op: 'set', scope: 'fate', field: '命运点数', value: curFate });
+  }
 
   // 🔴 2026-09-09（🧵 主线细化）：plot 变化一律发 set —— 连「变回 null」也显式清空。
   //    旧实现只发非 null，模型（尤其 delta 会话里）会保留上一份节点视图，造成

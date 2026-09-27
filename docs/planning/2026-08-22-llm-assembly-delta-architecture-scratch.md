@@ -290,11 +290,13 @@ type PromptDeltaOp =
 > NARRATIVE append cursor 检测到已表示消息被修改 / 删除 / 重排（或 previous/current 分属不同
 > Agent）时，只返回 `{ op: 'rebase', reason }` 信号，**不产伪 delta**；该信号只给 session
 > assembler 读，`renderPromptDelta` 收到即抛错，永不渲染进 `<context_delta>`。v1 投影 scope
-> 封闭联合实为 14 个（推导依据与索引口径见 `prompt-state-projection.ts` 头部注释的映射表）：
+> 封闭联合实为 15 个（推导依据与索引口径见 `prompt-state-projection.ts` 头部注释的映射表）：
 >
 > - `character` / `resource` / `inventory` / `skill` / `status_effect`
 > - `quest` / `affection` / `variable` / `time` / `plot`
 > - `map` / `lore_dynamic` / `memory` / `narrative`
+> - 📌 **2026-09-26 追加** `fate`（主角命运点数 FP，源 `statData.命运点数`）—— 与
+>   `{{CHARACTER_STATE}}` 末尾追加的那一行同源，保证 delta 会话里 FP 变化也能进正文。
 
 ### 7.3 投影粒度
 

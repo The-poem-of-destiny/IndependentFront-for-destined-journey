@@ -189,6 +189,24 @@ describe('diffPromptState — 无变化', () => {
     expect(diffPromptState(previous, current)).toEqual([]);
   });
 
+  it('fate：主角命运点数变化 → set scope=fate；相同/两侧都无 → 不产 op', () => {
+    const proj = (fp?: number) =>
+      project('story', makeContext(fp === undefined ? {} : { statData: { 命运点数: fp } }), '');
+    expect(diffPromptState(proj(10), proj(25))).toEqual([
+      { op: 'set', scope: 'fate', field: '命运点数', value: 25 },
+    ]);
+    expect(diffPromptState(proj(10), proj(10))).toEqual([]);
+    // 两侧都未供值 → 不产 op（fate 均为 null）
+    expect(diffPromptState(proj(), proj())).toEqual([]);
+    // 旧持久化投影缺 fate（undefined）→ 视作 null：null vs null 不误报；
+    // 而 null vs 具体值仍应正常发 set（FP 从「未知」变为 10）。
+    const legacyUndefined = { ...proj(), fate: undefined } as unknown as PromptStateProjection;
+    expect(diffPromptState(legacyUndefined, proj())).toEqual([]);
+    expect(diffPromptState(legacyUndefined, proj(10))).toEqual([
+      { op: 'set', scope: 'fate', field: '命运点数', value: 10 },
+    ]);
+  });
+
   it('数组重排不产生操作（集合按逻辑名字归一化成 Map）', () => {
     const ctxA = baseContext();
     ctxA.characters = [{ ...fixturePlayer, inventory: [oilLamp, dryFood] }, fixtureNpc];
@@ -742,10 +760,11 @@ describe('PromptScope — 封闭联合覆盖 v1 全部支持面', () => {
     'lore_dynamic',
     'memory',
     'narrative',
+    'fate',
   ];
 
-  it('枚举 14 个 scope（新增任意字符串会在编译期被封闭联合拦下）', () => {
-    expect(allScopes).toHaveLength(14);
+  it('枚举 15 个 scope（新增任意字符串会在编译期被封闭联合拦下）', () => {
+    expect(allScopes).toHaveLength(15);
     // 编译期守卫：一旦有人往 PromptScope 加了成员却忘了同步清单，下面这行也会让每个
     // 新成员出现在类型推导的联合里 —— 长度断言保证「成员数 = 清单数」。
     const rebaseReason: PromptRebaseReason = 'narrative_changed';
