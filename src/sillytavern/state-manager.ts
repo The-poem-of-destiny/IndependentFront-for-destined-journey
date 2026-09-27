@@ -283,8 +283,10 @@ const UPDATE_CHAR_WHITELIST = new Set<string>([
   'gender',
   'outfit',
   'thoughts',
-  // 扩展字段
-  'customFields',
+  // 🔴 `customFields` **刻意不在白名单**（2026-09-26）：它是建号快照 / 真扩展数据袋
+  //    （age / destinyCoreId / destinyPoints / extra）。此前 AI 会写 `customFields.destinyPoints`
+  //    （点路径被拒）或整对象 `customFields`（Object.assign 会连带盖掉其余键）。
+  //    命运点数(FP) 的真源是 SaveProfile.fp，走 `fp.delta → delta_variable profile.fp`。
 ]);
 
 /** 禁止的数组实体字段 → 必须走各自专用 op（杀 #21 假字段污染） */

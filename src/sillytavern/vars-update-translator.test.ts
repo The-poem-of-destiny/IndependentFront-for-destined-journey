@@ -179,6 +179,22 @@ describe('buildVarsUpdatePatches', () => {
     expect(buildVarsUpdatePatches({ affections: { set: [{ value: 40 }] } })).toEqual([]);
   });
 
+  it('fp.delta → delta_variable profile.fp（正向获得 / 负向消耗）', () => {
+    const gained = buildVarsUpdatePatches({ fp: { delta: 100 } });
+    expect(gained.map((p) => p.op)).toEqual(['delta_variable']);
+    expect(gained[0]).toMatchObject({ target: 'profile.fp', amount: 100 });
+
+    const spent = buildVarsUpdatePatches({ fp: { delta: -250 } });
+    expect(spent[0]).toMatchObject({ target: 'profile.fp', amount: -250 });
+  });
+
+  it('fp.delta 为 0 / 缺失 / 非数值 → 不产 patch', () => {
+    expect(buildVarsUpdatePatches({ fp: { delta: 0 } })).toEqual([]);
+    expect(buildVarsUpdatePatches({ fp: {} })).toEqual([]);
+    expect(buildVarsUpdatePatches({ fp: { delta: '很多' } })).toEqual([]);
+    expect(buildVarsUpdatePatches({ fp: { delta: Infinity } })).toEqual([]);
+  });
+
   it('空对象 → 空数组，不抛', () => {
     expect(buildVarsUpdatePatches({})).toEqual([]);
   });

@@ -744,6 +744,23 @@ describe('StateManager', () => {
       expect(result.errors[0]).toContain('hpp');
     });
 
+    it('🔴 customFields 不在白名单（建号快照/扩展袋，AI 不得写整个对象）', async () => {
+      const char = buildMockCharacter({ id: 'char-001' });
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      const result = await sm.commitChatState([
+        {
+          op: 'update_character',
+          target: 'characters.Test Hero',
+          value: { customFields: { destinyPoints: 999 } } as any,
+        },
+      ]);
+
+      expect(result.success).toBe(false);
+      expect(result.errors[0]).toContain('customFields');
+    });
+
     it('④ currentAction 正常写入且不顶掉 location', async () => {
       const char = buildMockCharacter({
         id: 'char-001',

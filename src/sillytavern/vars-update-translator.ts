@@ -524,6 +524,20 @@ export function buildVarsUpdatePatches(parsed: Record<string, any>): StatePatch[
     });
   }
 
+  // --- fp.delta → delta_variable profile.fp（命运点数：**存档级**元货币，可由叙事驱动盈亏） ---
+  // 🔴 FP 不在角色身上 —— `customFields.destinyPoints` 只是建号快照（`create-journey.ts` 已把它
+  //    作为开局 FP 计入 profile.fp）。故 AI 只声明 `fp.delta`，由既有 FP 账务（addFP/spendFP）落库；
+  //    只接受有限非零数值，0 / 缺省不产 patch。
+  const fpDelta = parsed.fp?.delta;
+  if (typeof fpDelta === 'number' && Number.isFinite(fpDelta) && fpDelta !== 0) {
+    patches.push({
+      op: 'delta_variable',
+      target: 'profile.fp',
+      amount: fpDelta,
+      metadata: { source: 'vars_update' },
+    });
+  }
+
   return patches;
 }
 

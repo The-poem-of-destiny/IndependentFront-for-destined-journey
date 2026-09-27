@@ -9,6 +9,22 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-09-26 命运点数（FP）叙事读写打通（正文可见 + AI 可盈亏）｜已实施，待真机
+
+起因：真机报 `vars_update 未能写入: update_character 不认识的字段 "customFields.destinyPoints"`。
+排查发现 FP 只有 EJS `stats.命运点数` 一条通道、且无人读；`customFields.destinyPoints` 只是**建号快照**
+（`create-journey.ts` 已把它作为开局 FP 计入 `profile.fp`），AI 却把它当成当前 FP 去写。
+
+- **正文可见 FP**：`{{CHARACTER_STATE}}` 末尾为主角追加一行 `命运点数(FP): N`（源 `ctx.statData.命运点数`）。
+  `prompt-state-projection` 新增封闭 scope **`fate`**（15 个）—— 否则 delta 会话里正文只会看到基线旧值。
+- **AI 可声明 FP 盈亏**：`vars-update-translator` 新增 `fp.delta` → `delta_variable profile.fp`，
+  走既有 addFP/spendFP 账务。内容包 `vars_update` 提示词同步（可写 path 去掉 `customFields`、
+  新增「命运点数（FP）」小节 + 输出 schema 的 `fp` 键）。
+- **收紧写面**：`customFields` 从 `update_character` 白名单移除（扩展袋 AI 不得写；整对象写还会
+  `Object.assign` 盖掉 `age/destinyCoreId/extra`）。
+- 验证：`vars-update-translator.test.ts` 加 `fp.delta` 用例；`state-manager.test.ts` 加 customFields 拒绝；
+  新增 `prompt-state-projection` 的 `fate` scope 用例与 CHARACTER_STATE 的 FP 行用例；`npm run gates` 全绿（9693）。
+
 ### 2026-09-26 主线细化叙事节奏修订（pre_check 交戏 + 导演段去阉割）｜已实施，待真机
 
 真机反馈「主线明线演成 1000+ 字无对白哑剧」。诊断：story 被设计为只渲染不编剧（分工不变），
