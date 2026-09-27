@@ -1536,6 +1536,25 @@ describe('generatePlotOutline 大纲生成', () => {
     expect(store.plotGenerationError).toBeNull();
   });
 
+  it('①② 大纲上下文包含开场背景与初始装备/技能/物品', async () => {
+    chatMock.mockResolvedValueOnce(okResult(outlineJson(8)));
+    const store = setupPlotStore();
+    store.selectBackground({ name: '预设', fullText: '艾琳在雨夜被逐出家门。' } as any);
+    store.selectedEquipments = [{ name: '旧铁剑', type: '武器', rarity: '普通' } as any];
+    store.selectedSkills = [{ name: '疾风斩', type: '主动', rarity: '普通' } as any];
+    store.selectedItems = [{ name: '干粮', type: '消耗品', quantity: 2 } as any];
+
+    const ok = await store.generatePlotOutline();
+    expect(ok).toBe(true);
+
+    const messages = chatMock.mock.calls[0][0].messages as Array<{ role: string; content: string }>;
+    const sys = messages.find((m) => m.role === 'system')?.content ?? '';
+    expect(sys).toContain('艾琳在雨夜被逐出家门');
+    expect(sys).toContain('旧铁剑');
+    expect(sys).toContain('疾风斩');
+    expect(sys).toContain('干粮');
+  });
+
   it('score < 6 时应带 weaknesses/suggestions 自动重试一次（总共 2 次调用）', async () => {
     chatMock
       .mockResolvedValueOnce(okResult(outlineJson(4, '初版大纲')))

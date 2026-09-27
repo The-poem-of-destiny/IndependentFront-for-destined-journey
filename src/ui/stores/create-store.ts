@@ -1023,7 +1023,9 @@ export const useCreateStore = defineStore('create', () => {
       parts.push(`难度层级: ${ps.main.difficultyTier ?? '自适应'}`);
       parts.push(`允许世界书外NPC: ${ps.main.allowNonWorldbookNpc ? '是' : '否'}`);
       parts.push(`剧情偏向: ${ps.main.genrePreference.join('、')}`);
-      if (ps.main.customPreference) parts.push(`自定义偏好: ${ps.main.customPreference}`);
+      // 🆕 2026-09-26：「主要事件」暂并入自定义偏好（不新增字段）——用户在此写主要事件/主要阴谋，
+      //    留空则由大纲 AI 自行构思主轴。
+      if (ps.main.customPreference) parts.push(`自定义偏好/主要事件: ${ps.main.customPreference}`);
       if (ps.main.chapterCount) parts.push(`章节数量: ${ps.main.chapterCount} 章`);
       if (ps.main.eventsPerChapter) parts.push(`每章事件: ${ps.main.eventsPerChapter} 个`);
     }
@@ -1038,6 +1040,38 @@ export const useCreateStore = defineStore('create', () => {
       parts.push(ps.tabooContent);
     }
     return parts.join('\n');
+  }
+
+  /**
+   * 大纲生成的「开局状态」补充文本。
+   *
+   * 缺口：`buildCharacterState().background` 只含「基础信息」步骤的 `backstory`+`extra`；
+   * 而「背景故事」步骤选中的开场背景（`selectedBackground`/`customBackgroundText`）与初始
+   * 装备/技能/物品只进开场 prompt，大纲生成看不到，导致大纲与开场脱节。
+   *
+   * 这里把它们拼成一段自然语言，追加进**大纲上下文专用**的角色 background —— 只动局部
+   * 副本，不影响 `startJourney` 落库的真实角色档案。
+   */
+  function buildOutlineOpeningContext(): string {
+    const parts: string[] = [];
+    const bg = selectedBackground.value?.fullText?.trim() || customBackgroundText.value.trim();
+    if (bg) parts.push(`【开场背景】\n${substituteUser(bg)}`);
+    if (selectedEquipments.value.length > 0) {
+      parts.push(
+        `【初始装备】${selectedEquipments.value.map((e) => `${e.name}（${e.type}）`).join('、')}`,
+      );
+    }
+    if (selectedSkills.value.length > 0) {
+      parts.push(
+        `【初始技能】${selectedSkills.value.map((s) => `${s.name}（${s.type}）`).join('、')}`,
+      );
+    }
+    if (selectedItems.value.length > 0) {
+      parts.push(
+        `【初始物品】${selectedItems.value.map((i) => `${i.name}×${i.quantity || 1}`).join('、')}`,
+      );
+    }
+    return parts.join('\n\n');
   }
 
   /** 加载 agent-config.json 中的 Agent 配置 */
@@ -1297,10 +1331,19 @@ export const useCreateStore = defineStore('create', () => {
       const worldBooks = await loadPlotOutlineWorldBooks(agentConfigs);
 
       // 构建 AgentContext
+      // 🆕 大纲必须看到主角开局状态：把开场背景 + 初始装备/技能/物品补进角色 background
+      //     （只动大纲副本，见 buildOutlineOpeningContext 注释）。
+      const outlineCharacter = buildOutlineCharacterState();
+      const openingContext = buildOutlineOpeningContext();
+      if (openingContext) {
+        outlineCharacter.background = [outlineCharacter.background, openingContext]
+          .filter(Boolean)
+          .join('\n\n');
+      }
       const ctx: AgentContext = {
         userInput: initialUserMessage,
         history: [],
-        characters: [buildOutlineCharacterState()],
+        characters: [outlineCharacter],
         memories: [],
         plotEvents: [],
         plotSettings: plotSettings.value,

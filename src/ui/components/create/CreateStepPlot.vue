@@ -209,8 +209,15 @@ const DIFFICULTY_OPTIONS = [
           </div>
         </div>
         <div class="field-group">
-          <label class="field-label">自定义偏好</label>
-          <textarea v-model="store.plotCustomPreference" rows="2" placeholder="其他偏好描述..." />
+          <label class="field-label">自定义偏好 / 主要事件</label>
+          <p class="field-hint">
+            可写剧情偏好；也可写你希望贯穿全文的主要事件或主要阴谋。留空则由 AI 自行构思主轴。
+          </p>
+          <textarea
+            v-model="store.plotCustomPreference"
+            rows="3"
+            placeholder="例如：主线围绕「旧王朝血脉的复辟阴谋」展开，主角与儿时好友分属两阵营最终对立..."
+          />
         </div>
       </template>
 

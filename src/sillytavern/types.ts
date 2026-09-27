@@ -558,7 +558,7 @@ export interface PlotSettings {
       | 'survival'
       | 'tragedy'
     >;
-    customPreference: string; // 自定义偏好输入框
+    customPreference: string; // 自定义偏好 / 主要事件输入框（可留空；留空由大纲 AI 自行构思主轴）
     chapterCount?: number; // 章节数量（用户输入的数字，空=AI 自己判断）
     eventsPerChapter?: number; // 每章事件数（用户输入的数字，空=AI 自己判断）
   };

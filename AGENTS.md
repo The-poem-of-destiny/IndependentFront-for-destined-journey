@@ -429,6 +429,32 @@ update.bat             # 一键更新（双击运行）：git fetch → git pull
                        #    cmd 的字节偏移解析器错位，中文注释片段会被当命令执行）
 ```
 
+## 内容包发布 = `poem-dist`（🔴 不是本仓）
+
+**主人说「给公开仓库弄个 release」= 在 `The-poem-of-destiny/poem-dist` 发内容包，不是给本引擎仓发
+release。** 本引擎仓从来没有过 release；内容包（真实世界书 / 提示词 / 预设 / 目录等）经**私有内容
+仓** `fated_poem_independent_assets`（本机 `D:\Code\fated_poem_independent_assets`）构建后，以加密
+blob 发到 `poem-dist`。
+
+发布流程（在**私有内容仓**执行）：
+
+```bash
+# 1. 改 data/**（世界书 / data/defaults/agent-config.json 的提示词 / 预设 …）
+# 2. 构建 pack（--engine-version 取引擎仓 package.json 的 version）
+node tools/build-pack.mjs --version <X.Y.Z> --engine-version <引擎版本>
+#    → dist/fated-poem-pack-<X.Y.Z>.json
+# 3. 封装加密发布件 → dist/pack.bin（nonce‖AES-256-GCM(gzip(JSON))‖tag）+ dist/manifest.json
+node tools/build-release.mjs --pack dist/fated-poem-pack-<X.Y.Z>.json
+# 4. 把 pack.bin + manifest.json 传到 poem-dist 的 release v<X.Y.Z>
+#    --upload 走 gh；本机没 gh 时用 GitHub API 手动建 release + 上传两个资产
+```
+
+- 引擎侧 `server/content-pack-release.ts` 拉取解密；BFF 路由 `/api/content-pack/blob`。
+- 🔴 `build-release.mjs` 的 `PACK_BLOB_KEY_B64` 必须与引擎仓 `server/content-pack-release.ts` 的
+  `PACK_BLOB_KEY_B64` **逐字一致**（纯混淆、密钥内嵌，只求不明文/防扫描，不是访问控制）。
+- 改中文内容后按私有仓 `AGENTS.md` 跑编码门与 `node tools/scan-secrets.mjs .`。
+- `dist/` 是 gitignored，不进私有仓提交；版本号是**内容包版本**，与引擎仓 version 无关。
+
 ## Bug 反馈处理规范
 
 收到主人反馈"xx 有问题 / xx 坏了 / xx 不行"时，**禁止直接动手改代码**。必须先反问确认：
