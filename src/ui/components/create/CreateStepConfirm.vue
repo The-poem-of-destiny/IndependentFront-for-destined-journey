@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { useCreateStore } from '../../stores/create-store';
 import { useAssetImage } from '../../composables/useAssetImage';
-import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/asset-resolve';
-import { ATTRIBUTE_NAMES } from '@engine/start-catalog';
+import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/assets/asset-resolve';
+import { ATTRIBUTE_NAMES } from '@engine/content/start-catalog';
 // Q-11: 两处 `as QualityLevel` 强转是因为 RARITY_TO_QUALITY 的值类型是裸 string；
 // 换成归一化入口后返回类型已经是 Rarity，模板里不必再强转，也不必再 `|| '普通'`。
 import { qualityLabelFromRarity } from '../../lib/quality-colors';

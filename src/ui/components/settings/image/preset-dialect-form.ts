@@ -13,8 +13,8 @@
  *
  * 设计: `docs/planning/2026-08-08-comfyui-image-provider-design.md` C15。
  */
-import { hasAppearanceContent } from '@engine/character-appearance-resolve';
-import type { ImageDialect, ImagePreset } from '@engine/types-image';
+import { hasAppearanceContent } from '@engine/character/character-appearance-resolve';
+import type { ImageDialect, ImagePreset } from '@engine/types/types-image';
 
 /**
  * 角标/提示行那句中文 —— **常量而不是模板里的字面量**，测试与界面读同一份。

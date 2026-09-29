@@ -20,9 +20,9 @@ import {
   saveSaveProfile,
   savePlotEvents,
   saveMemory,
-} from '@engine/database';
-import { generateMemoryId } from '@engine/memory-summarizer';
-import { createDefaultCharacterState } from '@engine/types';
+} from '@engine/persistence/database';
+import { generateMemoryId } from '@engine/memory/memory-summarizer';
+import { createDefaultCharacterState } from '@engine/types/types';
 import type {
   SaveSlot,
   CharacterState,
@@ -31,7 +31,7 @@ import type {
   MemoryRecord,
   Quest,
   NewsItem,
-} from '@engine/types';
+} from '@engine/types/types';
 
 let initialized = false;
 let clearedThisLoad = false;
@@ -407,7 +407,7 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
   await saveCharacters([player, ...npcs]);
 
   // ═══ 4. SaveProfile ═══
-  const { createDefaultTime } = await import('@engine/time-system');
+  const { createDefaultTime } = await import('@engine/time/time-system');
   // 演示存档的纪元名同样走品牌面（D9）：引擎缺省是空串，演示档不该显示成「0488年」。
   const { getBranding } = await import('../branding-defaults');
   const profile: SaveProfile = {

@@ -19,9 +19,9 @@
  * 这里不必为散装路径分叉任何显示逻辑。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import type { ImportWarning } from '@engine/asset-import-plan';
-import { ASSET_MIME_BY_EXTENSION } from '@engine/asset-types';
-import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names';
+import type { ImportWarning } from '@engine/assets/asset-import-plan';
+import { ASSET_MIME_BY_EXTENSION } from '@engine/assets/asset-types';
+import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio/audio-names';
 import AppButton from '../../shared/AppButton.vue';
 import {
   useAssetStore,

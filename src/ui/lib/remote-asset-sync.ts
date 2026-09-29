@@ -1,7 +1,7 @@
 /**
  * remote-asset-sync.ts — 远程素材的镜像同步服务（远程素材 v1 / 波 2）
  *
- * 波 1（`@engine/remote-asset-catalogue`）把两种本地载体（世界书条目正文里的
+ * 波 1（`@engine/assets/remote-asset-catalogue`）把两种本地载体（世界书条目正文里的
  * `profile` 字面量 / 内容包的 `remoteAssets` 分节）归一成了 {@link RemoteAssetDecl}。
  * 本模块接着做剩下的两件事：**算清单**（纯函数）与**执行清单**（唯一的 I/O 面）。
  *
@@ -34,9 +34,13 @@ import {
   dedupeRemoteAssetDecls,
   normalizePackRemoteAssets,
   type RemoteAssetDecl,
-} from '@engine/remote-asset-catalogue';
-import { ASSET_MIME_BY_EXTENSION, isAssetExtension, isMediaAllowed } from '@engine/asset-types';
-import type { AssetMetaRecord, WorldBook } from '@engine/types';
+} from '@engine/assets/remote-asset-catalogue';
+import {
+  ASSET_MIME_BY_EXTENSION,
+  isAssetExtension,
+  isMediaAllowed,
+} from '@engine/assets/asset-types';
+import type { AssetMetaRecord, WorldBook } from '@engine/types/types';
 import { hashMediaBlob } from './media-hash';
 
 // ═══════════════════════════════════════════════════════════
@@ -645,9 +649,9 @@ export interface RemoteAssetSyncDeps {
    * 缺席 = 一个都没有（老档案）。
    */
   tombstones?: readonly string[];
-  /** 落库（元数据 + 字节），生产传 `@engine/database` 的 `saveAsset` */
+  /** 落库（元数据 + 字节），生产传 `@engine/persistence/database` 的 `saveAsset` */
   saveAsset(meta: AssetMetaRecord, blob: Blob): Promise<unknown>;
-  /** 删行（元数据 + 字节），生产传 `@engine/database` 的 `deleteAsset` */
+  /** 删行（元数据 + 字节），生产传 `@engine/persistence/database` 的 `deleteAsset` */
   deleteAsset(id: string): Promise<void>;
   /**
    * **写入前**按槽位回读此刻的行（生产传 Dexie 的即时查询）。缺席 = 不复查。

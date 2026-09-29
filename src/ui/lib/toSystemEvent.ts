@@ -5,7 +5,7 @@
  * content 字段存纯文本摘要（给 AI 看），systemEvent 字段存结构化数据（给前端渲染卡片）。
  */
 
-import type { ChatMessage, SystemEvent } from '@engine/types';
+import type { ChatMessage, SystemEvent } from '@engine/types/types';
 
 export function toSystemMessage(event: SystemEvent): ChatMessage {
   return {
@@ -25,7 +25,7 @@ import type {
   ItemGenOutput,
   CombatSummaryResult,
   QualityLevel,
-} from '@engine/types';
+} from '@engine/types/types';
 
 export function craftToEvent(output: CraftGenOutput): SystemEvent {
   return {

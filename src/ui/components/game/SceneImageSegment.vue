@@ -36,9 +36,9 @@ import type {
   ImageRating,
   SceneImageAnchorKind,
   SceneImageMarker,
-} from '@engine/types-image';
-import { clampRating } from '@engine/image-prompt';
-import { hasEffectiveAppearance } from '@engine/character-appearance-resolve';
+} from '@engine/types/types-image';
+import { clampRating } from '@engine/image/image-prompt';
+import { hasEffectiveAppearance } from '@engine/character/character-appearance-resolve';
 import { useManualSceneImage } from '../../composables/useManualSceneImage';
 import { useSceneImageUrls } from '../../composables/useSceneImageUrls';
 import { useSceneImageStore } from '../../stores/scene-image-store';

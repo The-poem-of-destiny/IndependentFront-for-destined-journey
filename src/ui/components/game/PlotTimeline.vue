@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
-import { getPlotThreadFlags } from '@engine/save-profile';
-import { toEpochMinutes } from '@engine/time-system';
+import { getPlotThreadFlags } from '@engine/state/save-profile';
+import { toEpochMinutes } from '@engine/time/time-system';
 import { useGameStore } from '../../stores/game-store';
 import { buildThreadDisplayView } from './plot-thread-view';
 import { buildPlotTimeline, type TimelineNodeBox } from './plot-timeline';

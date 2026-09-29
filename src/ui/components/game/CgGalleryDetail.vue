@@ -31,7 +31,7 @@ import { computed, ref, watch } from 'vue';
 import AppButton from '../shared/AppButton.vue';
 import { composeWarningLines, dialectIdOf, providerLabelOf, soleCharacterOf } from './cg-gallery';
 import { REDRAW_DIALECT_MISMATCH_HINT, isRedrawDialectMismatch } from './scene-image-actions';
-import type { SceneImageRecord } from '@engine/types-image';
+import type { SceneImageRecord } from '@engine/types/types-image';
 
 const props = defineProps<{
   /** 当前正在看的那一 take */

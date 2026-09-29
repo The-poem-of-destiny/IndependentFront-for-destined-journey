@@ -23,8 +23,8 @@
  * 用户的感受是「这两个滑块在互相打架」。
  */
 import { computed } from 'vue';
-import { clampAssetFraming } from '@engine/asset-types';
-import type { AssetFraming } from '@engine/types';
+import { clampAssetFraming } from '@engine/assets/asset-types';
+import type { AssetFraming } from '@engine/types/types';
 
 const props = withDefaults(
   defineProps<{

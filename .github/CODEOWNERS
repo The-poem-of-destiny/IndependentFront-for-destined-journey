@@ -8,8 +8,8 @@
 
 # 类型来源 / 数据库 / Agent 配置（冲突磁铁）
 # 波 1 T2（D28）：agent-config.json 真实路径在 data/defaults/，根路径那条是空匹配
-/src/sillytavern/types.ts                 @Richardoooo
-/src/sillytavern/database.ts              @Richardoooo
+/src/core/types/types.ts                 @Richardoooo
+/src/core/persistence/database.ts              @Richardoooo
 /data/defaults/agent-config.json          @Richardoooo
 
 # 治理规范

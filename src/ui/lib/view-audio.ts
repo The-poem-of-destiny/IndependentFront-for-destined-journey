@@ -11,7 +11,7 @@
  * 纯函数模块: 只做映射，不碰 store、不播放。谁来调见 `App.vue` 的 watch。
  */
 
-import type { SceneTagQuery } from '@engine/audio-scene';
+import type { SceneTagQuery } from '@engine/audio/audio-scene';
 import type { AppView } from '../stores/ui-store';
 
 /**

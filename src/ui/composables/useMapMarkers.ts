@@ -7,7 +7,7 @@
 
 import { ref, computed, type Ref } from 'vue';
 import OpenSeadragon from 'openseadragon';
-import type { MapMarker, MapMarkerIcon } from '@engine/types';
+import type { MapMarker, MapMarkerIcon } from '@engine/types/types';
 
 export const DEFAULT_MARKER_COLOR = '#ffcc66';
 export const DEFAULT_MARKER_ICON: MapMarkerIcon = 'fa-solid fa-location-dot';

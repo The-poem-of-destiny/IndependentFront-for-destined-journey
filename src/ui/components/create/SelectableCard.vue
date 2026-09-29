@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CatalogItem } from '@engine/start-catalog';
+import type { CatalogItem } from '@engine/content/start-catalog';
 import QualityBadge from '../shared/QualityBadge.vue';
 import AppButton from '../shared/AppButton.vue';
 import { computed } from 'vue';

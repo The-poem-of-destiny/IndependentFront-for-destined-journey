@@ -6,7 +6,7 @@
  * creative_workshop:<uid>，不新增全局开关或第二份状态。
  */
 import { computed, onMounted, ref } from 'vue';
-import type { SaveSlot, WorldBook } from '@engine/types';
+import type { SaveSlot, WorldBook } from '@engine/types/types';
 import { useGameStore } from '../../stores/game-store';
 import { useWorkshopStore } from '../../stores/workshop-store';
 import { useWorldBookStore } from '../../stores/worldbook-store';

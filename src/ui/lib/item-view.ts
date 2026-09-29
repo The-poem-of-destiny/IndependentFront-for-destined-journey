@@ -10,11 +10,11 @@
  *    `inferQualityFromStats`（Q-11 起是全仓唯一一份，别再内联第二张阈值表）。
  */
 
-import type { InventoryItem, QualityLevel, Skill } from '@engine/types';
-import { QUALITY_RANK } from '@engine/types';
-import { inferQualityFromStats } from '@engine/quality-inference';
-import { describeModifiers } from '@engine/describe-modifier';
-import { describeAutomata } from '@engine/describe-automaton';
+import type { InventoryItem, QualityLevel, Skill } from '@engine/types/types';
+import { QUALITY_RANK } from '@engine/types/types';
+import { inferQualityFromStats } from '@engine/crafting/quality-inference';
+import { describeModifiers } from '@engine/combat/describe-modifier';
+import { describeAutomata } from '@engine/combat/describe-automaton';
 import { normalizeEffects } from './item-effects';
 
 /** 面板/查看器的分类（技能与物品是两种形状，故用判别联合而非取交集） */

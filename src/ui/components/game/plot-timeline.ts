@@ -12,8 +12,8 @@
  * 🔴 防剧透：蒙版节点的名字不进任何输出字段（title/subtitle 置空）；边只要一端蒙版就整条丢弃 ——
  *    与 `plot-thread-view.ts` 的四重遮蔽同口径。
  */
-import type { PlotEvent } from '@engine/types';
-import { fromEpochMinutes, parseMonthTime, toGameDay } from '@engine/time-system';
+import type { PlotEvent } from '@engine/types/types';
+import { fromEpochMinutes, parseMonthTime, toGameDay } from '@engine/time/time-system';
 import type { ThreadDisplayView } from './plot-thread-view';
 import { threadStatusLabel } from './plot-thread-view';
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue';
-import type { PlayerPersonaDraft } from '@engine/state-manager';
+import type { PlayerPersonaDraft } from '@engine/state/state-manager';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 

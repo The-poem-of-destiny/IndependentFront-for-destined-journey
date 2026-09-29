@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_PIPELINE } from '@engine/types';
+import { DEFAULT_AGENT_PIPELINE } from '@engine/types/types';
 import { getAgentSettings, type AgentDefaultsLayer } from '../stores/agent-settings';
 import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
 

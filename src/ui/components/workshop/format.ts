@@ -6,9 +6,9 @@
  *
  * 纯度约束: 无 Vue、无 store、无 I/O。
  */
-import type { WorkshopNoteKind } from '@engine/types';
-import type { WorkshopNoteGroups } from '@engine/workshop-types';
-import { WORKSHOP_BASE_TAGS, WORKSHOP_NOTE_KINDS } from '@engine/workshop-types';
+import type { WorkshopNoteKind } from '@engine/types/types';
+import type { WorkshopNoteGroups } from '@engine/workshop/workshop-types';
+import { WORKSHOP_BASE_TAGS, WORKSHOP_NOTE_KINDS } from '@engine/workshop/workshop-types';
 
 /** 字节 → 人类可读。上游 `fileSize` 缺失或为 0 时返回空串（调用方据此不渲染那一格） */
 export function formatBytes(bytes: number | undefined): string {

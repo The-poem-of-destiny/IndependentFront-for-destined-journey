@@ -389,7 +389,7 @@ export function updateAgentWorldBookIds(
  * 指纹不泄内容（SHA-256 不可逆）。覆盖 12 键里 agent-config.json 真的有的字段。
  * 未来新默认版本由私有构建重新跑生成脚本补指纹。
  */
-import fingerprintsJson from '@engine/agent-defaults-fingerprints.json';
+import fingerprintsJson from '@engine/agents/agent-defaults-fingerprints.json';
 
 /** { agentId: { field: sha256hex } } */
 type FingerprintTable = Record<string, Record<string, string>>;

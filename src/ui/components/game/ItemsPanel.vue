@@ -7,7 +7,7 @@ import { qualityVar } from '../../lib/quality-colors';
 import { qualityOf, qualityRank, facetOf, listExtra, type PanelEntry } from '../../lib/item-view';
 import ItemDetailBody from './ItemDetailBody.vue';
 // 🆕 重铸（2026-08-24）：单条目重铸 —— 把当前条目的完整数据喂给 item_gen 重写
-import type { RewriteTarget } from '@engine/item-gen-chain';
+import type { RewriteTarget } from '@engine/agents/item-gen-chain';
 
 const game = useGameStore();
 const ui = useUIStore();

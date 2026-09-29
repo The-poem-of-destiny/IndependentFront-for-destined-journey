@@ -8,8 +8,8 @@
  *
  * 现在所有表都从 `RARITY_LEVELS` / `TIER_CONFIGS` 派生 —— 加第八级不可能漏。
  */
-import { RARITY_LEVELS, normalizeRarity, type Rarity } from '@engine/field-enums';
-import { TIER_CONFIGS } from '@engine/tier-constants';
+import { RARITY_LEVELS, normalizeRarity, type Rarity } from '@engine/content/field-enums';
+import { TIER_CONFIGS } from '@engine/character/tier-constants';
 
 /** 调色板令牌后缀，顺序与 `RARITY_LEVELS` 一一对应 */
 const QUALITY_VAR_SUFFIX: readonly string[] = [

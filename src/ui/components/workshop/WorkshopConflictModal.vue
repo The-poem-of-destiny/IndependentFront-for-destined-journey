@@ -20,8 +20,8 @@
  * 谁就把 D15 变成了一句注释。
  */
 import { computed } from 'vue';
-import type { InstallConflict } from '@engine/workshop-types';
-import type { WorkshopUpdateDiff } from '@engine/workshop-diff';
+import type { InstallConflict } from '@engine/workshop/workshop-types';
+import type { WorkshopUpdateDiff } from '@engine/workshop/workshop-diff';
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';
 import { truncate } from './format';

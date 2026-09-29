@@ -1,6 +1,6 @@
 import type { Table } from 'dexie';
-import { getDatabase } from '@engine/database';
-import type { RegexStorageRecord } from '@engine/types';
+import { getDatabase } from '@engine/persistence/database';
+import type { RegexStorageRecord } from '@engine/types/types';
 import {
   BEAUTIFIER_STORAGE_MAX_KEY_BYTES,
   BEAUTIFIER_STORAGE_MAX_KEYS,

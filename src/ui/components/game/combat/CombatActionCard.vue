@@ -13,7 +13,7 @@
  */
 
 import { ref, computed } from 'vue';
-import type { CombatActionResult, CombatDamageBreakdown } from '@engine/types';
+import type { CombatActionResult, CombatDamageBreakdown } from '@engine/types/types';
 
 const props = defineProps<{
   /** 工具调用结果（CombatActionResult 形状，可能不完整） */

@@ -35,7 +35,7 @@ import {
   FALLBACK_IMAGE_DIALECT,
   parseImageDialects,
   resolveImageDialect,
-} from '@engine/image-dialect';
+} from '@engine/image/image-dialect';
 
 /** 唯一常量：这张卡服务的 agent。写死是刻意的 —— 它不是一个可选项 */
 const AGENT_ID = 'image_prompt';

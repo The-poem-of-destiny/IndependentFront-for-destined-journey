@@ -38,8 +38,8 @@ import {
   movePresetEntry,
   duplicatePresetEntry,
 } from '../../../lib/preset-entries';
-import { preprocessPresetForPreview } from '@engine/preset-loader';
-import type { ChatPreset } from '@engine/types';
+import { preprocessPresetForPreview } from '@engine/prompts/preset-loader';
+import type { ChatPreset } from '@engine/types/types';
 
 const props = defineProps<{ agentId: string }>();
 

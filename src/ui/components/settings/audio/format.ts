@@ -5,7 +5,7 @@
  * 隐藏判定则被壳层与曲库共用 —— 与其各抄一份，不如上提到这里。
  * 这里刻意不 import 任何 store，保持可单测、可随处引用。
  */
-import type { AudioTrack } from '@engine/types';
+import type { AudioTrack } from '@engine/types/types';
 
 export function fmtBytes(n?: number): string {
   if (!n || n <= 0) return '—';

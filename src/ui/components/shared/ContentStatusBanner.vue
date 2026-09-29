@@ -31,7 +31,7 @@ const localEntryScale = ref(-1);
 async function detectLocalScale(): Promise<void> {
   try {
     // 惰性取 Dexie：避免在测试 / 未挂载时硬依赖。worldBooks 表是 v14 全局共享表。
-    const { getDatabase } = await import('@engine/database');
+    const { getDatabase } = await import('@engine/persistence/database');
     const db = getDatabase();
     const books = await db.worldBooks.toArray();
     let total = 0;

@@ -214,7 +214,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
-import type { WorldBook, WorldBookEntry } from '@engine/types';
+import type { WorldBook, WorldBookEntry } from '@engine/types/types';
 
 const editNameInput = ref<HTMLInputElement | null>(null);
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { CharGenSystemEvent } from '@engine/types';
+import type { CharGenSystemEvent } from '@engine/types/types';
 import { tierVar } from '../../../lib/quality-colors';
 import { nameColorVar } from '../../../utils/name-color';
 

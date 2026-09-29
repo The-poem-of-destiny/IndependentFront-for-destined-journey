@@ -1,4 +1,4 @@
-import type { ChatMessage } from '@engine/types';
+import type { ChatMessage } from '@engine/types/types';
 
 /**
  * Zero-based ST-compatible message depth. App-owned system events do not occupy

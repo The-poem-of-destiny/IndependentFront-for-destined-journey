@@ -7,11 +7,11 @@ import {
   getImageApiConnections,
   saveApiEndpoint,
   saveImageApiConnection,
-} from '@engine/database';
-import type { ApiEndpoint } from '@engine/types';
+} from '@engine/persistence/database';
+import type { ApiEndpoint } from '@engine/types/types';
 import { parseApiSource } from '@engine/api/source-config';
-import type { ApiSource, ApiSourceKind, ImageApiConnection } from '@engine/types-api';
-import { credentialIdFor } from '@engine/api-rpm-limiter';
+import type { ApiSource, ApiSourceKind, ImageApiConnection } from '@engine/types/types-api';
+import { credentialIdFor } from '@engine/api/api-rpm-limiter';
 import { maskApiKey } from './api-key-migration';
 import { detach } from './db-write';
 import { useSettingsStore, type ApiEntry } from './settings-store';

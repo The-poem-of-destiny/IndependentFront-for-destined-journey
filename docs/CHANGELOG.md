@@ -9,6 +9,15 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-09-30 src 引擎文件按职责归类
+
+- 引擎目录由 `src/sillytavern/` 改为 `src/core/`，对应测试放入 `tests/core/`；`@engine` 别名继续保留并指向新目录，引擎编译入口为 `dist/core/index.js`。
+- 将引擎根目录平铺的实现和 JSON 清单迁入 Agent、提示词、状态、持久化、角色、战斗、制作、效果、脚本、EJS、内容、工坊、素材、音频、图像、地图、随机事件、剧情、记忆、变量、正文、时间、运行设置、工具和类型目录；图像后端移至 `image/providers/`。
+- 保留 `src/core/index.ts` 公共入口和既有 v3 战斗内核、API 子目录；UI 沿用现有分类。全部自动化测试独立迁入 `tests/core/` 与 `tests/ui/`，测试夹具、音频替身和公共初始化一并迁移，Vitest 仅发现 `tests/**/*.test.ts`。应用内可调用的测试存档/场景预览服务仍为运行时代码。
+- 同步静态/动态导入、mock、源码 glob、夹具、生成脚本与 CODEOWNERS；Knip 基线仅迁移既有问题的文件路径身份，不增加豁免。
+- 新增 `docs/reference/src-directory-structure.md`，同步根目录及引擎/UI 分册的路径说明。新增源码布局闸门，禁止测试回到 `src/` 或实现文件重新平铺到引擎根目录。业务规则、状态写入契约和存档结构未变。
+- 验证：`npm run gates` 全绿（408 个测试文件，9696 项通过、8 项跳过）；`npm run build:engine` 成功生成 `dist/core/index.js`。修改文件编码检查通过，JSON 正常解析，Knip 保持原有 146 项问题且仅迁移路径身份；测试辅助文件的未使用导出已收回或删除。
+
 ### 2026-09-26 命运点数（FP）叙事读写打通（正文可见 + AI 可盈亏）｜已实施，待真机
 
 起因：真机报 `vars_update 未能写入: update_character 不认识的字段 "customFields.destinyPoints"`。
@@ -471,7 +480,7 @@ JSON 可解析）两仓 agent-config 均过。
 [设计文档](planning/2026-09-07-mainline-refinement-layer-design.md) §11；
 实施方案与逐项验收记录见[实施计划](planning/2026-09-07-mainline-refinement-layer-implementation-plan.md) §6。
 
-- **领域逻辑**：新增 `src/sillytavern/plot-threads.ts`（纯函数：闸门 `evaluatePlotThreadGate`、
+- **领域逻辑**：新增 `src/core/plot/plot-threads.ts`（纯函数：闸门 `evaluatePlotThreadGate`、
   declarations/updates/revealed 三 reducer、边推导、快照与表层投影、char_gen 实体化投影 A/B）。
   确定性随机经 `createEjsRng` 专用 salt，同一未完成回合重试不重掷；`Math.random`/时钟/DB 全禁。
 - **存储**：`worldFlags.plotThreads`（照 ADR-32/33 事实态先例：零新 Dexie 表、按节点名寻址、
@@ -632,7 +641,7 @@ PR 审查补强：失败回调现在携带完整 `AgentResult`，不会再用空
 
 **经验系统 v2（LevelXpTable 累计经验表迁移）**：
 
-- 新增 `src/sillytavern/exp-table.ts`（引擎纯函数，照参考脚本仓 `config/index.ts` 的 `LevelXpTable` + `services/experience.ts` 的 `processExperienceAndLevel`）：`LEVEL_XP_TABLE` 累计经验表（Lv1=120 … Lv20=185840 … Lv24=401840，Lv25='MAX'）、`resolveLevelUps` 升级循环、`resolveAscensionFlyup` 登神长阶放宽版（持要素/权能/法则/神位即飞升到层级起点 13/17/21/25，**硬性限制**：当前层级必须 = 目标层级-1，否则只升级不飞升）、`getRequiredXpForLevel` / `xpToNextNumber` / `getTierUpgradeConfig` / `applyExpFloor`。
+- 新增 `src/core/character/exp-table.ts`（引擎纯函数，照参考脚本仓 `config/index.ts` 的 `LevelXpTable` + `services/experience.ts` 的 `processExperienceAndLevel`）：`LEVEL_XP_TABLE` 累计经验表（Lv1=120 … Lv20=185840 … Lv24=401840，Lv25='MAX'）、`resolveLevelUps` 升级循环、`resolveAscensionFlyup` 登神长阶放宽版（持要素/权能/法则/神位即飞升到层级起点 13/17/21/25，**硬性限制**：当前层级必须 = 目标层级-1，否则只升级不飞升）、`getRequiredXpForLevel` / `xpToNextNumber` / `getTierUpgradeConfig` / `applyExpFloor`。
 - **战斗经验系数修错**：此前战斗 EXP 误用核心数值表的 `combatCoefficient`（2.0/2.8/4.0/…，那是**战斗伤害**系数）；现按世界书 [经验值获取规则] 查 `EXPERIENCE_COEFFICIENTS`（normal: 10/20/50/100/250/600）。修正后 coordinator.test A2-1 断言 40→500。
 - **简单 / 普通模式**：`SaveProfile.experienceMode: 'normal' | 'easy'`（默认 `'normal'`），easy 系数 [20,36,76,130,260,500]；**生产经验不分档**；随时可切（DataSection 下拉，切档即时生效）。旧档 `?? 'normal'`。
 - **数值源收敛**：char-gen-agent / resource-calc / tier-constants / combat-v3 coordinator 的等级经验逻辑统一委托 exp-table，消除重复源；`createDefaultCharacter.expToNext` 100 → 120（对齐累计表 Lv1 门槛）。
@@ -669,8 +678,8 @@ PR 审查补强：失败回调现在携带完整 `AgentResult`，不会再用空
 
 **新增/改动**：
 
-- 新增 `src/sillytavern/prompt-state-projection.ts`（读取型、幂等投影 + 纯 diff：封闭 scope 联合 14 个、`set/upsert/remove` + `rebase` 控制信号、按逻辑名字归一化 + 规范化内容深比较、固定排序字节稳定，序列化进 `<context_delta>`；无 I/O 无全局状态）。
-- 新增 `src/sillytavern/prompt-session-assembler.ts`（深模块，独占 `(saveId, agentId)` 的 transcript / baselineSignature / revision / 投影 diff 起点，只开 `preparePromptSession` / `completePromptSession` / `invalidatePromptSession` 三入口；成功后才推进、handle 代际 + revision 双校验防过期回写、动态世界书每轮同一 EJS pass 至多求值一次、§8.3 预算公式不猜模型上限）。
+- 新增 `src/core/prompts/prompt-state-projection.ts`（读取型、幂等投影 + 纯 diff：封闭 scope 联合 14 个、`set/upsert/remove` + `rebase` 控制信号、按逻辑名字归一化 + 规范化内容深比较、固定排序字节稳定，序列化进 `<context_delta>`；无 I/O 无全局状态）。
+- 新增 `src/core/prompts/prompt-session-assembler.ts`（深模块，独占 `(saveId, agentId)` 的 transcript / baselineSignature / revision / 投影 diff 起点，只开 `preparePromptSession` / `completePromptSession` / `invalidatePromptSession` 三入口；成功后才推进、handle 代际 + revision 双校验防过期回写、动态世界书每轮同一 EJS pass 至多求值一次、§8.3 预算公式不猜模型上限）。
 - `agent-client.ts`：`ensureUserMessage` 提为模块级导出纯函数；`usage.prompt_tokens` 解析到 `AgentResult.promptTokens`（provider 不返回时 undefined 不猜）。`agent-templates.ts`：`buildEjsPassContext` / `reportEjsFallback` 提为导出。
 - `agent-orchestrator.ts`：callAgent 接线（非流式成功 complete / error abort invalidate；流式只在 onComplete complete、onError + reject invalidate；provider retry 复用同一 prepared messages；`requestMessages` 记录实际 wire messages）；`AgentResult` 增 `promptSessionRevision` / `promptRebased` / `promptRebaseReason` 诊断字段。
 - 配置面：`AgentConfig.tailPrompt?`（单一末尾指令，空白归一化 undefined）+ `ApiEndpoint.contextWindowTokens?`（可选主动重基线依据，只接受正整数）；`agent-settings` / `settings-store` / `api-key-migration` 三处 store 迁移，`AgentParamsCard.vue` 加 tailPrompt 文本框、`ApiSection.vue` 加 contextWindowTokens 数字字段。
@@ -727,7 +736,7 @@ PR 审查返工补齐：整库恢复后立即重载并激活 RPM 策略；队列
 
 - **① `commitChatState` 提交级缓存（P0-high，性能）**：此前每个 patch 各跑一趟完整的读-改-写——10 个变量补丁 = 20 次 `getProfile` + 10 次 `updateProfile`，每个角色类补丁各扫一遍 `characters` 全表。现改为**入口读一次、出口冲刷一次**：`state-manager.ts` 新增 `CommitScope`（profile 惰性读 + 脏标记、本存档角色数组按补丁顺序就地演进、脏表与删除表构造上互斥）与六个读写口（`readProfile`/`persistProfile`/`readCharacters`/`persistCharacter`/`persistCharacters`/`dropCharacter`），作用域**只活在 `withSaveWriteLock` 那一段里**、`finally` 无条件复位；作用域外调用（快照 / 时间推进 / 在途旗 / 保洁 / 结算）自动退化成直读直写，调用点不必知道自己在不在提交里。四条不变式写进类型注释：缓存边界只有 SaveProfile + 本存档 characters（memories/plotEvents/saves 照旧直读直写）· 锁内独占 · 补丁 N 必须看得见补丁 N-1（按名解析走缓存那份数组，删除当场摘掉不得被后续补丁复活）· **flush 无条件发生**（有补丁失败也照落——旧路径里先成功的补丁本来就已进库）。`save-profile.ts` 顺势拆成**纯变更 + 落库包装**两半（`setQuestInPlace`/`removeQuestInPlace`/`setMapFlagsInPlace`/`setRandomEventFlagsInPlace` 与四个既有 async 写入口），合并语义与「缺 worldFlags 补空袋子」的兜底仍只有那一处。回归测试用间谍钉住 **I/O 预算**（23 个补丁的混合提交 = 1 读 1 写 profile + 1 读 1 次 bulkPut characters + 1 次 delete），且每条断言都配一份**终态**断言——I/O 掉下来而状态落错是这类改造唯一真正危险的失败形态。
 - **② 快照元数据 / 载荷分表，Dexie v22（P0-high，性能）**：`snapshots` 行整份内嵌 characters/saveProfile/plotEvents/**messages**，而「列快照」「淘汰旧快照」这两个每回合都跑的动作只用得上 `turn`/`createdAt`——拆表前每回合要在主线程反序列化约 30 份整档对话历史。现 `snapshots` 只留 `SnapshotMeta`（id/saveId/createdAt/reason/turn + 展示缩略 `preview`），整档载荷搬进新表 `snapshotPayloads`（`id` 与元数据行同值，`saveId` 索引供级联删与单存档导出整批取）；`getSnapshots`/`getLatestSnapshot`/`trimSnapshots`/`deleteSnapshotsAfter` **一行都不读载荷表**（六个读方法全挂间谍钉死），只有 `getSnapshot(id)` 会 join，且**元数据在、载荷不在时直接抛**（半份快照恢复出去会把存档洗空）。`saveSnapshot`/`deleteSnapshot`/`trimSnapshots` 的两表写删各自包进单事务。v22 升版逐行拆胖快照并顺手回填 `preview`（`SnapshotPreview` = 打快照那一刻冻结的主角名/HP/游戏内日期，**不是第二个真源**，任何逻辑一律读载荷；旧行缺席 = 面板那一行不显示）。两种备份的导入侧都吃**旧格式**（v21 及以前整份内嵌、无 `snapshotPayloads` 字段），归一化在 `normalizeSnapshotBackupRows`，判据是载荷字段在不在、**不是版本号**；单存档导入时载荷行的 id **跟着元数据行重发的新 id 走**（各发各的号 = 把一对拆散）。`deleteSaveSlot` 与 `restoreSnapshot` 的表清单同步补上载荷表。`SnapshotPanel.vue` 改读 `SnapshotMeta.preview`。顺带补记 **v20/v21 两版既有未记档的 schema 漂移**（`contentPacks` / `mapBlobs`），`DB_VERSION` 21 → 22。`createSnapshot` 的四次 `structuredClone` 一并拿掉：四个 getter 都是裸 Dexie 读、天然与库无共享，落库那一步 Dexie 的 put 自己还会再克隆一次——被克隆的正是整档对话历史，每回合一次。
-- **③ 引擎 → UI 反向依赖收口（P1，架构）**：`src/sillytavern/**` 曾有 6 条 `import ... from '../ui/*'` 的反向边，全都编译得过、跑得通、测试全绿，代价是引擎拖着整条前端链。新增注入缝 `content-registry-runtime.ts`（`ContentRegistry` 类型本体 + `installContentRegistry`/`getContentRegistry`/`createEmptyContentRegistry`/`resetContentRegistryRuntime`），四个同步消费方（agent-tools 品牌面 / random-tables 名字池 / bloodlines 血脉集 / location-db 地点集）改从缝里读；**注册表只有一份存储就在缝里**，content-store 的 `getContentRegistry()` 降级为转发、模块级 `let registry` 删除（与 mapPack/randomEvents 两面刻意不同——那两条缝装的是 `coerce*` 之后的派生值，本体两处各存一份就能各说各话）。`media-hash.ts`（SHA-256 全项目唯一实现）迁进引擎，`src/ui/lib/media-hash.ts` 留转发壳，前端四处 import 路径一字未改；`CreatePreset`（Dexie `createPresets` 的落库形状）从 `create-store.ts` 迁进 `types.ts`，create-store re-export 同名。两道机器闸门钉死方向：`eslint.config.js` 的 `no-restricted-imports`（静态边，含 type-only）+ `tests/layering-gate.test.ts`（源码扫描，专治动态 import / require / 字符串路径 / `vue`·`pinia` 说明符；`?raw` 源码读取放行且**不是文件级白名单**，豁免清单断言为空，扫描面非空自检防空转）。
+- **③ 引擎 → UI 反向依赖收口（P1，架构）**：`src/core/**` 曾有 6 条 `import ... from '../ui/*'` 的反向边，全都编译得过、跑得通、测试全绿，代价是引擎拖着整条前端链。新增注入缝 `content-registry-runtime.ts`（`ContentRegistry` 类型本体 + `installContentRegistry`/`getContentRegistry`/`createEmptyContentRegistry`/`resetContentRegistryRuntime`），四个同步消费方（agent-tools 品牌面 / random-tables 名字池 / bloodlines 血脉集 / location-db 地点集）改从缝里读；**注册表只有一份存储就在缝里**，content-store 的 `getContentRegistry()` 降级为转发、模块级 `let registry` 删除（与 mapPack/randomEvents 两面刻意不同——那两条缝装的是 `coerce*` 之后的派生值，本体两处各存一份就能各说各话）。`media-hash.ts`（SHA-256 全项目唯一实现）迁进引擎，`src/ui/lib/media-hash.ts` 留转发壳，前端四处 import 路径一字未改；`CreatePreset`（Dexie `createPresets` 的落库形状）从 `create-store.ts` 迁进 `types.ts`，create-store re-export 同名。两道机器闸门钉死方向：`eslint.config.js` 的 `no-restricted-imports`（静态边，含 type-only）+ `tests/layering-gate.test.ts`（源码扫描，专治动态 import / require / 字符串路径 / `vue`·`pinia` 说明符；`?raw` 源码读取放行且**不是文件级白名单**，豁免清单断言为空，扫描面非空自检防空转）。
 - **④ BFF 路由前缀单一真源（P2，配置漂移）**：`server/app.ts` 立 `BFF_ROUTE_TABLE`，`app.route()` 挂载与 `BFF_ROUTE_PREFIXES`/`isBffRoute` 全部由它派生——此前那份五前缀白名单在 `vite.config.ts` 的 dev 与 preview 分支里被**逐字抄了两遍**，加路由漏改一处的症状是「代码看着完全正确，请求 404」。顺带把 `/api/worldbooks`、`/api/defaults` 两条写回从 vite inline 中间件升格为真路由（新 `server/routes/content.ts`）：它们原先只活在 `configureServer` 分支里，`vite preview` 下必然 404 而前端是无条件 fetch 的；现在 dev 与 preview 共用同一份实现，`contentDir` 从两处同样注入，D14「只在 overlay 启用时才可写」的语义不变（未配置回 **501 + 中文说明**，不是落到 SPA fallback 拿回 200 的 index.html）。P1-03 越界写防御（canonical containment）与「整个 body 收完再解码」（防 chunk 边界切碎多字节中文产 U+FFFD）原样保留。`vite.config.ts` 净减 128 行里的两份白名单 + 两段 inline 写中间件。
 
 **验证**：`npm run gates` 八道全绿（typecheck / typecheck:vue / typecheck:tools / build / format:check / lint / knip:ratchet / test:run），全量 **338 文件 8669 tests 通过 + 8 skipped**（26.5s），零 flake 重跑；knip 棘轮 141 条无新增。新增/改写测试覆盖：提交级缓存 4 条（I/O 预算 + 终态 / 失败补丁不连坐 flush / 删除角色不被后续补丁复活 / 纯变量提交零角色表查询）· 快照分表 7 条（拆行 + preview 回填 + 列表与淘汰零载荷读的间谍 + 孤儿级联 + 半条快照抛错 + deleteSaveSlot 级联）+ v22 升版 3 条 + FullBackup/单存档备份新旧双格式往返 4 条 · 分层闸门 12 条（含闸门自身可信度自检）· BFF 路由 +11 条。
@@ -748,7 +757,7 @@ PR 审查返工补齐：整库恢复后立即重载并激活 RPM 策略；队列
 
 **映射**：`avatarUrl` → `头像`；`gallery` 拍平后**首图为基础立绘**、其余按 `title` / `title+序号` 作变体。命名直接复用既有闸门 D1/D2/D16/D19（同一套 `asset-filename` 规则，不另起一套远程命名法），非法声明**单条跳过**不连坐整本书。
 
-**引擎层（纯函数，零 IO）**：新增 `src/sillytavern/remote-asset-catalogue.ts` —— `RemoteAssetDecl` 类型 + 四个纯函数 `extractRemoteAssetDecls`（单条目正文 → 声明）/ `collectWorldBookRemoteAssets`（整库启用条目）/ `normalizePackRemoteAssets`（内容包分节）/ `dedupeRemoteAssetDecls`（跨来源去重）。`AssetMetaRecord` 加**非索引**标记 `remote: { url, syncedAt }`（照 framing 先例，**不升 Dexie 版本**——非索引字段加进已有记录不需要 schema 迁移）。types-content / content-source / 占位哈希三处同步接线。
+**引擎层（纯函数，零 IO）**：新增 `src/core/assets/remote-asset-catalogue.ts` —— `RemoteAssetDecl` 类型 + 四个纯函数 `extractRemoteAssetDecls`（单条目正文 → 声明）/ `collectWorldBookRemoteAssets`（整库启用条目）/ `normalizePackRemoteAssets`（内容包分节）/ `dedupeRemoteAssetDecls`（跨来源去重）。`AssetMetaRecord` 加**非索引**标记 `remote: { url, syncedAt }`（照 framing 先例，**不升 Dexie 版本**——非索引字段加进已有记录不需要 schema 迁移）。types-content / content-source / 占位哈希三处同步接线。
 
 **UI 层**：
 
@@ -784,7 +793,7 @@ PR 审查返工补齐：整库恢复后立即重载并激活 RPM 策略；队列
 
 - **代码**：AgentContext 三个隐式 `as any` 槽转正（`plotOutline`/`craftProjects`/`activeCombat`），修掉写读键名不一致导致 outline 可见性区恒空的笔误（含变异验证过的回归测试）；DataSection.vue floating promise 补 `void` + try/catch；`database.ts` 新增 `deleteMemories`/`savePresets`/`deletePresets` 批量口，记忆压缩与内容包 presets 落库改 bulk（N 次 IDB 往返 → 1 次）；content-pack-plan/content-source 两处与事实相反的依赖方向 JSDoc 改为如实描述运行时环；提示词契约闸门（agent-tools / memory-summary）补「取不到就红」硬断言，杜绝措辞漂移时用例静默不生成；删除 database.test.ts 一条自我宣告失效的 `it.skip` 死测试；删除 knip 认定整文件未引用的 4 个死 Vue 组件（DestinyCoreCard / PartnerWorldBookPanel / FormCascader / FormKeyValue，共 516 行，含动态引用面排查；⚠️ 原挂 Phase 7d 在途豁免，要接回走 git 历史）并收紧棘轮基线 145→141。
 - **配置**：`npm run gates` 一键聚合 CI 八道闸门（types→quality→test 顺序）；`.prettierrc` `endOfLine: "auto"` 修 Windows 下 `format:check` 776/776 假红（入库仍靠 autocrlf 保 LF，Linux CI 口径不变）；ci.yml 加 concurrency 取消组（master 不取消、其余 ref 取消旧 run）；tsconfig 补 `noFallthroughCasesInSwitch`/`noImplicitOverride` 两个零成本严格开关（`useUnknownInCatchVariables` 经查在 `strict: true` 下已默认开启，写出来是空操作，故不另列；`noImplicitReturns` 因 server/app.ts:27 与 vite.config.ts:52,199 三处 TS7030 暂缓，见留验）；package.json 删掉与 .npmignore 互斥的 `files` 死白名单。
-- **文档**：根 AGENTS.md「常用命令」重写（`build`=Vite 前端打包的真实语义、八道闸门补全、`gates` 入口）+ `data/`→`public/data/` 路径全面同步 + 三节「必读」reference/ 资料补私有内容仓迁移说明（顺带修正文档里写错的私有仓路径：实为 `E:\Projects\POD-IF\fated_poem_independent_assets`）+ 文档导航树补漏；src/sillytavern/AGENTS.md 四处内容包路径同步 + combat-resolver / api-router 两块墓碑；docs/ARCHITECTURE.md 加过期横幅；debug-loop-handbook 修 `agency-client` 笔误与失效路径；PR 模板删公开仓不可见的死引用；public/audio/README.md 改为与空 manifest 现状一致；.gitattributes 过期注释修正。
+- **文档**：根 AGENTS.md「常用命令」重写（`build`=Vite 前端打包的真实语义、八道闸门补全、`gates` 入口）+ `data/`→`public/data/` 路径全面同步 + 三节「必读」reference/ 资料补私有内容仓迁移说明（顺带修正文档里写错的私有仓路径：实为 `E:\Projects\POD-IF\fated_poem_independent_assets`）+ 文档导航树补漏；src/core/AGENTS.md 四处内容包路径同步 + combat-resolver / api-router 两块墓碑；docs/ARCHITECTURE.md 加过期横幅；debug-loop-handbook 修 `agency-client` 笔误与失效路径；PR 模板删公开仓不可见的死引用；public/audio/README.md 改为与空 manifest 现状一致；.gitattributes 过期注释修正。
 
 **验证**：`npm run gates` 八道全绿（typecheck ×3 / build / format:check / lint / knip:ratchet / test:run），全量 336 文件 8603 tests 通过；全部含中文改动文件过编码体检（U+FFFD 0 / 控制字符 0）。
 
@@ -1101,7 +1110,7 @@ ADR-11 补课：此前 `level`/`tier` 只有 AI 经 `update_character` 一条改
 - **升级发点**：玩家角色 `level` 提升 N 级 → `freeAttrPoints +N`（`applyUpdateCharacter` 落地后钩子，仅 `type==='player'`）。
 - **升层加属性**：玩家角色 `tier` 提升 N 层 → 五维各 +N，按**新层级** `attributeCap` 封顶；钳制只封顶不回削（delta 五维加法不钳上限，已超上限的属性升层时不得被静默压低）。
 - **双重发放 guard**：AI 在同一 patch 里显式写了 `freeAttrPoints` / `attributes` 时对应自动发放跳过；降级降层不回收；NPC/怪物/召唤不发。
-- **分配入口**：新模块 `src/sillytavern/attribute-allocation.ts` 的 `allocateAttributePoint(saveId, charName, attr)` —— 校验点数 > 0 与层级上限，经 `commitChatState`（ADR-21 唯一写入口）提交 delta patch `{attributes:{[attr]:1}, freeAttrPoints:-1}`；patch 刻意不含 `level`/`tier`，分配永不触发自动发放。
+- **分配入口**：新模块 `src/core/character/attribute-allocation.ts` 的 `allocateAttributePoint(saveId, charName, attr)` —— 校验点数 > 0 与层级上限，经 `commitChatState`（ADR-21 唯一写入口）提交 delta patch `{attributes:{[attr]:1}, freeAttrPoints:-1}`；patch 刻意不含 `level`/`tier`，分配永不触发自动发放。
 - **UI**：`StatusOverview.vue` 属性区在 `freeAttrPoints > 0` 时出「自由点 N」徽章 + 每维「+」按钮（达层级上限禁用带 tooltip，层级配置未知不禁用）；单飞请求防最后一点双花；失败走既有 toast。`game-store.allocateAttrPoint` 成功后 `refreshFromDb()` 回读。
 
 测试：state-manager +8 条 / attribute-allocation 新建 7 条 / game-store +5 条 / StatusOverview.attrpoints 新建 7 条。全量 7369 passed / 9 skipped，tsc、vue-tsc、eslint 全绿。真机走查未做。交接文档：`docs/archive/planning/2026-08-10-level-attr-points-handoff.md`。
@@ -1112,7 +1121,7 @@ ADR-11 补课：此前 `level`/`tier` 只有 AI 经 `update_character` 一条改
 `-design.md`，实施编排在 `-implementation-plan.md`）。lean-delegation 波 1-6 / T1-T17，
 **7397 tests 全绿（288 文件 / 9 跳过）**。真机 debug 暴露的 8 个战斗问题本轮修复。
 
-**核心改造（引擎侧 `src/sillytavern/combat-v3/`）**
+**核心改造（引擎侧 `src/core/combat-v3/`）**
 
 - **持久会话（§2.1）**：整场战斗一个 client + 一条消息数组贯穿，system 只发一次、
   前缀稳定 → LLM 前缀缓存命中。回合压缩不做（战斗不会拖很久）。
@@ -1367,7 +1376,7 @@ agents 分层）已于 PR #36-#43 合入，本轮交付 **波 2（T8a + T8-T14�
 - **T15** —— 15 本占位世界书（同 id / 同分区 / `builtIn:true`，38 条目，
   uid 全在 900001-901402 保留段内，1 条 EJS 动态 + 37 条静态）+
   `scripts/build-placeholder-hashes.mjs`（输入目录参数化，波 4 换 `public/data` 重跑）→
-  `src/sillytavern/placeholder-hashes.json`。hash 一致性不靠自觉：测试同时 import 构建脚本与
+  `src/core/content/placeholder-hashes.json`。hash 一致性不靠自觉：测试同时 import 构建脚本与
   `content-source.ts` / `content-pack-plan.ts`，两侧产出必须同串 —— 任一侧改了另一侧没改
   就当场变红（若失守，D20 会把每本没动过的占位书判成「已改」）。
 - **T16** —— 占位 agent-config（13 个 id 与真实侧逐字相同，输出契约与工具约定保真，
@@ -1386,7 +1395,7 @@ agents 分层）已于 PR #36-#43 合入，本轮交付 **波 2（T8a + T8-T14�
 4. 真实图源移进 `data/content/branding.json` 的 `mapSources` —— 波 2 铁律是「行为不变」，
    而 T11 删热链时没有把它们放回内容侧，地图会空。
 5. 🔴 **占位基线清单读不到**：波 1 的 T7 写的是 `fetch('/data/placeholder-hashes.json')`，
-   而清单由 T15 产在 `src/sillytavern/` 下随引擎打包 —— 那次 fetch **永远 404**，
+   而清单由 T15 产在 `src/core/` 下随引擎打包 —— 那次 fetch **永远 404**，
    而空清单是**合法态**（四态回落 updated/conflicted），所以它不报错、不变红，
    只是让 D20 基线、D42 重播种、卸载 re-seed 三处一起静默失效。改成静态 import
    （`resolveJsonModule`），并补测试覆写口 `setPlaceholderHashesForTests`。
@@ -2229,7 +2238,7 @@ worker 托管的工坊页 `cloudflare/src/pages/home/*`（~2100 行字符串拼�
 
 ### 战斗 v3 M0 — 地基：分通道骰带 + replay harness + 纯函数签名改造 ｜ ✅ 完成（2026-08-01）
 
-架构真源: `docs/reference/combat-system-architecture-v3.md`（§四 DiceTape / §1.4 五处代码修正）；实施计划: `docs/archive/planning/2026-07-31-combat-v3-implementation-plan.md` §2。把 v2 的「Agent 主持流程」翻转为「代码内核主持流程」的地基——所有新代码落 `src/sillytavern/combat-v3/`（deep module，唯一公共出口 `index.ts` 留待 M1），v2 代码 M5 前一行不删，靠 feature flag 整场切换。
+架构真源: `docs/reference/combat-system-architecture-v3.md`（§四 DiceTape / §1.4 五处代码修正）；实施计划: `docs/archive/planning/2026-07-31-combat-v3-implementation-plan.md` §2。把 v2 的「Agent 主持流程」翻转为「代码内核主持流程」的地基——所有新代码落 `src/core/combat-v3/`（deep module，唯一公共出口 `index.ts` 留待 M1），v2 代码 M5 前一行不删，靠 feature flag 整场切换。
 
 **新建 `combat-v3/` deep module:**
 
@@ -2279,7 +2288,7 @@ worker 托管的工坊页 `cloudflare/src/pages/home/*`（~2100 行字符串拼�
 
 **模块**（照素材系统「纯函数出计划 / 执行器只落库」分层）:
 
-- 引擎纯函数层 `src/sillytavern/`: `workshop-types.ts` / `workshop-manifest.ts`（上游 JSON → 内部形状，容忍字段增删）/ `workshop-regex-map.ts`（ST 正则 → BeautifierRule）/ `workshop-install-plan.ts`（★ `planInstall` 纯同步出计划：发号/转换/匹配/冲突/丢弃全在无副作用函数里算完并可完整断言）
+- 引擎纯函数层 `src/core/`: `workshop-types.ts` / `workshop-manifest.ts`（上游 JSON → 内部形状，容忍字段增删）/ `workshop-regex-map.ts`（ST 正则 → BeautifierRule）/ `workshop-install-plan.ts`（★ `planInstall` 纯同步出计划：发号/转换/匹配/冲突/丢弃全在无副作用函数里算完并可完整断言）
 - UI 层 `src/ui/`: `lib/workshop-client.ts`（唯一网络接触点，判别联合永不抛穿 + 超时 + 取消）/ `lib/workshop-enable.ts`（启用展开纯函数）/ `stores/workshop-store.ts`（执行器，只落库）/ `components/workshop/` 6 组件 + `format.ts`·`failure-text.ts` / `shared/WorkshopEnableList.vue` / `game/WorkshopEnablePanel.vue`（每存档「内容启用」，建档后仍可改）；入口在首页「创意工坊」按钮 + 游戏页侧栏「工坊」 + 捏人页（原「角色启用」步骤改名「内容启用」）
 
 **关键决策**:

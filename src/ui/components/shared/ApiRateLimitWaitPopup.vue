@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { subscribeApiRpmWaits } from '@engine/api-rpm-limiter';
-import type { ApiRpmWaitItem } from '@engine/types';
+import { subscribeApiRpmWaits } from '@engine/api/api-rpm-limiter';
+import type { ApiRpmWaitItem } from '@engine/types/types';
 import { useUIStore } from '../../stores/ui-store';
 import AppButton from './AppButton.vue';
 import AppCard from './AppCard.vue';

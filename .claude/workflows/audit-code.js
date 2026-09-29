@@ -1,8 +1,8 @@
 /**
  * 世界书对齐审计 — 审查代码与世界书 reference 的冲突
  *
- * 用法: /workflow audit-code -- 'src/sillytavern/combat-damage.ts'
- *       /workflow audit-code -- 'src/sillytavern/tier-constants.ts,src/sillytavern/dice.ts'
+ * 用法: /workflow audit-code -- 'src/core/combat/combat-damage.ts'
+ *       /workflow audit-code -- 'src/core/character/tier-constants.ts,src/core/utils/dice.ts'
  *       /workflow audit-code  (默认审计最近修改的战斗/制作模块)
  *
  * 检查项:
@@ -25,7 +25,7 @@ export const meta = {
 }
 
 // 审计目标文件
-const TARGET = args || 'src/sillytavern/combat-damage.ts,src/sillytavern/combat-intention.ts,src/sillytavern/combat-resolver.ts,src/sillytavern/tier-constants.ts,src/sillytavern/types.ts'
+const TARGET = args || 'src/core/combat/combat-damage.ts,src/core/combat/combat-intention.ts,src/core/combat-resolver.ts,src/core/character/tier-constants.ts,src/core/types/types.ts'
 const FILES = Array.isArray(TARGET) ? TARGET.join(',') : TARGET
 
 phase('读取')

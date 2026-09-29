@@ -48,10 +48,13 @@
  *   日后往 `ImageNovelaiSettings` / `ImageComfySettings` 里加字段，老用户拿到的是
  *   `undefined` ——「加新设置要改两处」那条约定在袋子内部会静默失效。
  */
-import { FALLBACK_IMAGE_DIALECT } from '@engine/image-dialect';
-import { DEFAULT_IMAGE_BASE_NEGATIVE, DEFAULT_IMAGE_QUALITY_SUFFIX } from '@engine/image-defaults';
-import fingerprintsJson from '@engine/agent-defaults-fingerprints.json';
-import type { ImageDialectOverride, NaiBillingTier } from '@engine/types-image';
+import { FALLBACK_IMAGE_DIALECT } from '@engine/image/image-dialect';
+import {
+  DEFAULT_IMAGE_BASE_NEGATIVE,
+  DEFAULT_IMAGE_QUALITY_SUFFIX,
+} from '@engine/image/image-defaults';
+import fingerprintsJson from '@engine/agents/agent-defaults-fingerprints.json';
+import type { ImageDialectOverride, NaiBillingTier } from '@engine/types/types-image';
 import { fingerprintValue } from './agent-settings';
 import type { ImageComfySettings, ImageNovelaiSettings } from './settings-types';
 

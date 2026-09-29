@@ -16,9 +16,9 @@
  * 的 getAudioHandle / saveAudioHandle / deleteAudioHandle。
  */
 
-import { getAudioHandle, saveAudioHandle, deleteAudioHandle } from '@engine/database';
-import type { AudioHandleRecord } from '@engine/types';
-import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names';
+import { getAudioHandle, saveAudioHandle, deleteAudioHandle } from '@engine/persistence/database';
+import type { AudioHandleRecord } from '@engine/types/types';
+import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio/audio-names';
 
 /** 扫描结果 —— 磁盘上的一个音频文件的最小描述 */
 export interface ScannedFile {

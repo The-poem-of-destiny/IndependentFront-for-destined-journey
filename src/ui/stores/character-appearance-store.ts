@@ -31,21 +31,24 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
-import type { CharacterAppearance, CharacterAppearancePatch } from '@engine/character-appearance';
+import type {
+  CharacterAppearance,
+  CharacterAppearancePatch,
+} from '@engine/character/character-appearance';
 import {
   diffFromBase,
   isMeaningfulPatch,
   mergeAppearance,
   stackPatches,
-} from '@engine/character-appearance';
-import type { CharacterSessionAppearance } from '@engine/types-image';
+} from '@engine/character/character-appearance';
+import type { CharacterSessionAppearance } from '@engine/types/types-image';
 import {
   characterAppearanceKey,
   clearCharacterAppearances,
   deleteCharacterAppearance,
   getCharacterAppearances,
   saveCharacterAppearance,
-} from '@engine/database';
+} from '@engine/persistence/database';
 import { detach } from './db-write';
 import { mutationFail, mutationOk, type MutationResult } from './store-result';
 

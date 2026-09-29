@@ -16,7 +16,7 @@
     "ignoreDeprecations": "5.0",
     "paths": {
       "@/*": ["src/*"],
-      "@engine/*": ["src/sillytavern/*"],
+      "@engine/*": ["src/core/*"],
       "@ui/*": ["src/ui/*"]
     },
     "declaration": true,

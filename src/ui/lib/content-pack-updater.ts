@@ -1,4 +1,4 @@
-import { semverGte } from '@engine/content-source';
+import { semverGte } from '@engine/content/content-source';
 
 /**
  * content-pack-updater.ts — 内容包自动更新 v1 的前端侧（BFF 同源）。

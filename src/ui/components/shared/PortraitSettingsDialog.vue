@@ -25,8 +25,8 @@ import {
   ASSET_FRAMING_MAX_SCALE,
   ASSET_FRAMING_MIN_SCALE,
   clampAssetFraming,
-} from '@engine/asset-types';
-import { DEFAULT_ASSET_FRAMING, type AssetFraming } from '@engine/types';
+} from '@engine/assets/asset-types';
+import { DEFAULT_ASSET_FRAMING, type AssetFraming } from '@engine/types/types';
 import { useAssetStore } from '../../stores/asset-store';
 import AppButton from './AppButton.vue';
 import AppModal from './AppModal.vue';

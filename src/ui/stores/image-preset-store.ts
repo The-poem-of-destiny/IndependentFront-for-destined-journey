@@ -17,14 +17,14 @@
  */
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import type { ImagePreset, ImagePresetKind } from '@engine/types-image';
-import type { CharacterAppearance } from '@engine/character-appearance';
+import type { ImagePreset, ImagePresetKind } from '@engine/types/types-image';
+import type { CharacterAppearance } from '@engine/character/character-appearance';
 import {
   deleteImagePreset,
   getImagePreset,
   getImagePresets,
   saveImagePreset,
-} from '@engine/database';
+} from '@engine/persistence/database';
 import { detach } from './db-write';
 import { mutationFail, mutationOk, type MutationResult } from './store-result';
 

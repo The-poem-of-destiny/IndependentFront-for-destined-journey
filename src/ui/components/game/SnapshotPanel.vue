@@ -2,9 +2,9 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
-import { getSnapshots } from '@engine/database';
+import { getSnapshots } from '@engine/persistence/database';
 import AppButton from '../shared/AppButton.vue';
-import type { SnapshotMeta } from '@engine/types';
+import type { SnapshotMeta } from '@engine/types/types';
 
 const game = useGameStore();
 const ui = useUIStore();

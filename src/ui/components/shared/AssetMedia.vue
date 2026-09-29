@@ -18,7 +18,7 @@
  * （当时的范围栅栏不允许新建共享组件文件）—— 现在两处都用这一份。
  */
 import { useAssetImage } from '../../composables/useAssetImage';
-import type { AssetType } from '@engine/types';
+import type { AssetType } from '@engine/types/types';
 
 const props = withDefaults(
   defineProps<{

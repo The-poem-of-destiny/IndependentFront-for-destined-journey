@@ -38,14 +38,14 @@
  *   于是设置页换方言不必重挂缝。
  */
 
-import { checkQuota } from '@engine/image-quota';
-import { composePrompt } from '@engine/image-prompt';
-import { buildWorldTags } from '@engine/image-world-tags';
-import { buildNaiRequest } from '@engine/image-providers/novelai';
-import { parseImageDialects, resolveImageDialect } from '@engine/image-dialect';
-import type { GameTime } from '@engine/time-system';
-import type { ParsedCharacterAppearance } from '@engine/character-appearance';
-import type { ComfySubstitutionValues } from '@engine/image-providers/comfyui';
+import { checkQuota } from '@engine/image/image-quota';
+import { composePrompt } from '@engine/image/image-prompt';
+import { buildWorldTags } from '@engine/image/image-world-tags';
+import { buildNaiRequest } from '@engine/image/providers/novelai';
+import { parseImageDialects, resolveImageDialect } from '@engine/image/image-dialect';
+import type { GameTime } from '@engine/time/time-system';
+import type { ParsedCharacterAppearance } from '@engine/character/character-appearance';
+import type { ComfySubstitutionValues } from '@engine/image/providers/comfyui';
 import type {
   ComposedPrompt,
   ImageDialect,
@@ -55,9 +55,9 @@ import type {
   ImageProviderId,
   ImagePromptOutput,
   ImagePromptRequest,
-} from '@engine/types-image';
+} from '@engine/types/types-image';
 import type { UiSettings } from '../stores/settings-types';
-import type { ImageApiConnection } from '@engine/types-api';
+import type { ImageApiConnection } from '@engine/types/types-api';
 import type {
   SceneImageSeams,
   SceneImageSendInput,

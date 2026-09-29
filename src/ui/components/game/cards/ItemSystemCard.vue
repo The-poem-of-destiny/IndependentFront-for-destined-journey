@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ItemGenSystemEvent } from '@engine/types';
+import type { ItemGenSystemEvent } from '@engine/types/types';
 import { qualityVar } from '../../../lib/quality-colors';
 
 // 模板里直接用 `event`，无需在 script 里持有引用 —— defineProps 只是声明

@@ -23,9 +23,9 @@
  */
 
 import { onBeforeUnmount, ref, shallowRef } from 'vue';
-import { getMapPack } from '@engine/map-runtime';
-import { isEmptyMapPack } from '@engine/map-pack';
-import type { MapPack } from '@engine/types-map';
+import { getMapPack } from '@engine/map/map-runtime';
+import { isEmptyMapPack } from '@engine/map/map-pack';
+import type { MapPack } from '@engine/types/types-map';
 import {
   buildBorderPaths,
   buildPoliticalPaint,

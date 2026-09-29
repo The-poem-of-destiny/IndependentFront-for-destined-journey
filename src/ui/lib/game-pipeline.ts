@@ -1,4 +1,4 @@
-import type { StatePatch } from '@engine/types';
+import type { StatePatch } from '@engine/types/types';
 /**
  * GamePipeline — 前端 ↔ AgentOrchestrator 桥接层
  *
@@ -8,11 +8,11 @@ import type { StatePatch } from '@engine/types';
  * Phase 7e: story agent 使用 chatStream() 逐块接收原文，
  * 通过 onStoryChunk 将累计的玩家可见投影实时推送到前端 UI。
  */
-import { AgentOrchestrator } from '@engine/agent-orchestrator';
+import { AgentOrchestrator } from '@engine/agents/agent-orchestrator';
 // Q-05：从模型输出抢救 JSON 的唯一入口（裸 / 围栏 / <json> / 前后夹带解说四种形态）
-import { extractJsonPayload } from '@engine/model-json';
-import type { OrchestratorOptions, OrchestratorEvents } from '@engine/agent-orchestrator';
-import { DEFAULT_AGENT_PIPELINE } from '@engine/types';
+import { extractJsonPayload } from '@engine/utils/model-json';
+import type { OrchestratorOptions, OrchestratorEvents } from '@engine/agents/agent-orchestrator';
+import { DEFAULT_AGENT_PIPELINE } from '@engine/types/types';
 import type {
   AgentContext,
   AgentConfig,
@@ -33,36 +33,36 @@ import type {
   SystemEvent,
   DebugAgentEntry,
   PlotEvent,
-} from '@engine/types';
+} from '@engine/types/types';
 import type {
   ImageGenFailure,
   ImagePromptOutput,
   ImagePromptRequest,
   SceneImageMarker,
-} from '@engine/types-image';
-import { splitSceneImageSegments } from '@engine/image-segments';
-import { stripMarkers } from '@engine/marker-protocol';
-import { AgentClient } from '@engine/agent-client';
-import type { StreamCallbacks } from '@engine/agent-client';
-import { createStateManager } from '@engine/state-manager';
-import { projectStoryOutput, projectStreamingStory } from '@engine/story-output';
-import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
-import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
-import { buildStatData } from '@engine/stat-projection';
-import { buildPassSeed } from '@engine/ejs-rng';
+} from '@engine/types/types-image';
+import { splitSceneImageSegments } from '@engine/image/image-segments';
+import { stripMarkers } from '@engine/story/marker-protocol';
+import { AgentClient } from '@engine/agents/agent-client';
+import type { StreamCallbacks } from '@engine/agents/agent-client';
+import { createStateManager } from '@engine/state/state-manager';
+import { projectStoryOutput, projectStreamingStory } from '@engine/story/story-output';
+import { loadWorldBooksWithFallback } from '@engine/content/builtin-worldbooks';
+import { filterBooksByEnabledEntries } from '@engine/content/worldbook-loader';
+import { buildStatData } from '@engine/character/stat-projection';
+import { buildPassSeed } from '@engine/ejs/ejs-rng';
 // 🗺 地图 v1: `{{MAP_CONTEXT}}` 的可变半边（`worldFlags.map`）+ 天气标签（与出图同口径）
-import { getMapFactsFlags, getMapFlags } from '@engine/save-profile';
+import { getMapFactsFlags, getMapFlags } from '@engine/state/save-profile';
 // 🎲 随机事件 v1 (§5.1 读侧)：`{{RANDOM_EVENTS}}` 的候选快照 —— 供值必须在 buildContext
-import { getRandomEventFlags } from '@engine/save-profile';
-import { buildRandomEventOffer } from '@engine/random-event-context';
-import type { RandomEventOfferEntry } from '@engine/random-event-context';
+import { getRandomEventFlags } from '@engine/state/save-profile';
+import { buildRandomEventOffer } from '@engine/random-events/random-event-context';
+import type { RandomEventOfferEntry } from '@engine/random-events/random-event-context';
 // 地点键与条件上下文的**唯一**实现（与入池侧共用；此前这里有一份逐字拷贝）
-import { buildRandomEventRollContext } from '@engine/random-event-snapshot';
-import { getRandomEventPack } from '@engine/random-event-runtime';
-import { getEngineSettings } from '@engine/engine-settings';
-import { toEpochMinutes } from '@engine/time-system';
+import { buildRandomEventRollContext } from '@engine/random-events/random-event-snapshot';
+import { getRandomEventPack } from '@engine/random-events/random-event-runtime';
+import { getEngineSettings } from '@engine/runtime/engine-settings';
+import { toEpochMinutes } from '@engine/time/time-system';
 // 🧵 主线细化层（2026-09-09 接线）：闸门/快照/投影响应都在 game-pipeline 供值（buildContext 铁律）
-import { getPlotThreadFlags, commitPlotThreadTurn } from '@engine/save-profile';
+import { getPlotThreadFlags, commitPlotThreadTurn } from '@engine/state/save-profile';
 import {
   evaluatePlotThreadGate,
   parseThreadDeclarations,
@@ -72,36 +72,36 @@ import {
   projectPlotCastPlan,
   formatPlotCastPlanLines,
   findCastPlanEntry,
-} from '@engine/plot-threads';
+} from '@engine/plot/plot-threads';
 import type {
   PlotThreadGateResult,
   PlotThreadTurnContext,
   PlotThreadDeclaration,
   PlotThreadUpdate,
   PlotCastPlanEntry,
-} from '@engine/plot-threads';
-import { countAcceptableTriggers } from '@engine/plot-engine';
+} from '@engine/plot/plot-threads';
+import { countAcceptableTriggers } from '@engine/plot/plot-engine';
 // 🆕 Delta 会话（T4）：存档切换/销毁时清理该存档的 prompt session（string 入参 = 清整个 saveId）
-import { invalidatePromptSession } from '@engine/prompt-session-assembler';
+import { invalidatePromptSession } from '@engine/prompts/prompt-session-assembler';
 import { resolveSceneWeather } from './scene-image-seams';
 // 🆕 重铸（2026-08-24）：单条目重铸的引擎侧类型（RewriteTarget = 要重写的技能/装备/物品三选一）
-import type { RewriteTarget } from '@engine/item-gen-chain';
+import type { RewriteTarget } from '@engine/agents/item-gen-chain';
 
 /** 一个游戏日的分钟数（口径同 `state-manager` 的 `MINUTES_PER_GAME_DAY`，那份未导出） */
 const MINUTES_PER_GAME_DAY = 1440;
 
 /** EJS `ui.log` 环形缓冲上限（能力面 §6.2） */
-import { diffVars, measureDiffSize, EJS_DIFF_SIZE_LIMIT } from '@engine/ejs-vars-diff';
-import type { EjsVarsDiff } from '@engine/ejs-vars-diff';
+import { diffVars, measureDiffSize, EJS_DIFF_SIZE_LIMIT } from '@engine/ejs/ejs-vars-diff';
+import type { EjsVarsDiff } from '@engine/ejs/ejs-vars-diff';
 import type { useGameStore } from '../stores/game-store';
 import type { useSettingsStore } from '../stores/settings-store';
 import { useAudioStore } from '../stores/audio-store';
 import { useWorldBookStore } from '../stores/worldbook-store';
 import { useUIStore } from '../stores/ui-store';
 import type { CombatCommand } from '@engine/combat-v3';
-import { rollDice } from '@engine/dice';
+import { rollDice } from '@engine/utils/dice';
 import { getAgentSettings, hasExplicitAgentModel } from '../stores/agent-settings';
-import type { EmbeddingRequestTrace } from '@engine/memory-store';
+import type { EmbeddingRequestTrace } from '@engine/memory/memory-store';
 // 🆕 F10（2026-09-04）：Agent API 池绑定的 fail-closed 解析（pool id → ApiEndpoint 唯一纯实现）
 import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
 
@@ -558,7 +558,7 @@ export class GamePipeline {
       // Q-07：战斗外效果系统接线 —— 对当前存档已装备物品执行 init + 注册
       // （幂等；存档切换时由 unwireEffectSystem 拆除后重建）
       try {
-        const { wireEffectSystem } = await import('@engine/effect-wiring');
+        const { wireEffectSystem } = await import('@engine/effects/effect-wiring');
         if (this.ownsActiveSave) wireEffectSystem(this.saveId, this.game.characters);
       } catch (err) {
         console.warn('[GamePipeline] 效果系统接线失败（不阻塞本轮）:', err);
@@ -1213,7 +1213,7 @@ export class GamePipeline {
   private async loadPlotData(context: AgentContext): Promise<void> {
     if (context.plotSettings?.mode === 'off') return;
     try {
-      const { getLatestPlotOutline, getPlotEvents } = await import('@engine/database');
+      const { getLatestPlotOutline, getPlotEvents } = await import('@engine/persistence/database');
       const [outline, events] = await Promise.all([
         getLatestPlotOutline(this.saveId),
         getPlotEvents(this.saveId),
@@ -1240,7 +1240,7 @@ export class GamePipeline {
 
     // 1. DB 优先：用户可能通过设置页修改过预设
     try {
-      const { getPresets } = await import('@engine/database');
+      const { getPresets } = await import('@engine/persistence/database');
       const dbPresets = await getPresets();
       if (dbPresets && dbPresets.length > 0) {
         presets = dbPresets as unknown as AgentPreset[];
@@ -1339,7 +1339,7 @@ export class GamePipeline {
       return [];
     }
     try {
-      const { getDatabase } = await import('@engine/database');
+      const { getDatabase } = await import('@engine/persistence/database');
       const projects = await getDatabase().workshopProjects.toArray();
       return collectSelectedSystemCoreWorkshopBookIds(worldBooks, projects);
     } catch (err) {
@@ -2243,7 +2243,7 @@ export class GamePipeline {
 
     const task = (async () => {
       try {
-        const { preCheckPlot } = await import('@engine/plot-engine');
+        const { preCheckPlot } = await import('@engine/plot/plot-engine');
         const { triggeredEvents } = await preCheckPlot(
           this.saveId,
           jsonStr,
@@ -2267,7 +2267,7 @@ export class GamePipeline {
     if (!raw) return;
     try {
       const { postCheckPlot, parsePostCheckOutput, eventToMemory } =
-        await import('@engine/plot-engine');
+        await import('@engine/plot/plot-engine');
       const jsonStr = GamePipeline.extractJsonBlock(raw);
       const outcome = await postCheckPlot(this.saveId, jsonStr);
 
@@ -2286,12 +2286,12 @@ export class GamePipeline {
         (e) => e.status === 'completed' || e.status === 'failed',
       );
       if (terminal.length > 0) {
-        const { saveMemory } = await import('@engine/database');
-        const { generateMemoryId } = await import('@engine/memory-summarizer');
+        const { saveMemory } = await import('@engine/persistence/database');
+        const { generateMemoryId } = await import('@engine/memory/memory-summarizer');
         // 🔴 并行化改造：「分配 id + 落库」必须与 memory_summary 的落库互斥（同全局
         // 锁段）—— 两条链现在可能并行（方案③把 memory_summary 旁路成后台），
         // 各自扫全库分配会撞号，后写覆盖先写（state-write-queue 全局锁）。
-        const { withGlobalWriteLock } = await import('@engine/state-write-queue');
+        const { withGlobalWriteLock } = await import('@engine/state/state-write-queue');
         const gt = this.currentContext?.gameTime;
         const timeStr = gt ? `${gt.era}${gt.year}年${gt.month}月${gt.day}日` : '未知';
         for (const event of terminal) {
@@ -2323,7 +2323,7 @@ export class GamePipeline {
    *  本方法只负责喂入 Agent 输出与 embedding 端点。门槛统一 MEMORY_MIN_CHARS（100 字）。 */
   private async persistMemorySummary(result: AgentResult, debugTurnId?: string) {
     try {
-      const { summarizeAndSave } = await import('@engine/memory-summarizer');
+      const { summarizeAndSave } = await import('@engine/memory/memory-summarizer');
       const raw = result.rawResponse || '';
 
       // 从设置构建 embedding 端点（embeddingEndpointId 指向 API 池，model 覆盖默认）
@@ -2555,7 +2555,7 @@ export class GamePipeline {
       this.game.enterCombat();
 
       const { runCombatV3 } = await import('@engine/combat-v3');
-      const { characterToCombatParticipant } = await import('@engine/combat-v2-types');
+      const { characterToCombatParticipant } = await import('@engine/combat/combat-v2-types');
 
       // 组装 bundle：参战角色 → CombatParticipant。
       // 🔴 2026-08-08 阵营修复：调度器在 combat_trigger 上声明 allies/enemies 名单，
@@ -2884,7 +2884,7 @@ export class GamePipeline {
       return;
     }
 
-    const { runCraftGenChain } = await import('@engine/craft-gen-chain');
+    const { runCraftGenChain } = await import('@engine/crafting/craft-gen-chain');
     const clientFactory = this.getClientFactory(runActivityId);
     const stateManager = this.getStateManager();
 
@@ -2934,7 +2934,7 @@ export class GamePipeline {
       return;
     }
 
-    const { runCharGenChain } = await import('@engine/char-gen-agent');
+    const { runCharGenChain } = await import('@engine/agents/char-gen-agent');
     const clientFactory = this.getClientFactory(runActivityId);
     const stateManager = this.getStateManager();
 
@@ -3011,7 +3011,7 @@ export class GamePipeline {
 
   /** 处理独立物品生成链 (request_dispatcher 的 <item_gen_request>) */
   private async handleItemGen(
-    markers: import('@engine/types').ItemGenRequestMarker[],
+    markers: import('@engine/types/types').ItemGenRequestMarker[],
     ctx: AgentContext,
     runActivityId?: string,
   ) {
@@ -3022,7 +3022,7 @@ export class GamePipeline {
       return;
     }
 
-    const { runItemGenChain } = await import('@engine/item-gen-chain');
+    const { runItemGenChain } = await import('@engine/agents/item-gen-chain');
     const clientFactory = this.getClientFactory(runActivityId);
     const stateManager = this.getStateManager();
     const storyOutput = ctx.agentOutputs?.get('story') ?? '';
@@ -3109,7 +3109,7 @@ export class GamePipeline {
     try {
       // 手动档可能在任何时候点（甚至本会话还没跑过一轮），chainData 不能假定已就绪
       const chain = await this.ensureChainData();
-      const { callImagePromptAgent } = await import('@engine/image-prompt-agent');
+      const { callImagePromptAgent } = await import('@engine/image/image-prompt-agent');
       const result = await callImagePromptAgent(
         {
           saveId: this.saveId,
@@ -3181,7 +3181,7 @@ export class GamePipeline {
 
     try {
       const chain = await this.ensureChainData();
-      const { rewriteLoadoutItem: runRewrite } = await import('@engine/item-gen-chain');
+      const { rewriteLoadoutItem: runRewrite } = await import('@engine/agents/item-gen-chain');
       const result = await runRewrite(
         {
           saveId: this.saveId,

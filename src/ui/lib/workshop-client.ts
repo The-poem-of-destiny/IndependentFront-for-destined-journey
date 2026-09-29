@@ -50,7 +50,7 @@ import {
   parseProjectMeta,
   parseSocialMeta,
   parseToggleAck,
-} from '@engine/workshop-manifest';
+} from '@engine/workshop/workshop-manifest';
 import type {
   WorkshopInstallInput,
   WorkshopListingMeta,
@@ -60,7 +60,7 @@ import type {
   WorkshopSourceEntry,
   WorkshopSourceRegex,
   WorkshopToggleAck,
-} from '@engine/workshop-types';
+} from '@engine/workshop/workshop-types';
 import { describePlatformFailure, describeRawBody } from './workshop-upstream-error';
 
 // ═══════════════════════════════════════════════════════════

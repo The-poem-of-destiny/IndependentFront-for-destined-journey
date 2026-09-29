@@ -13,7 +13,7 @@
  *    陈述而不是阻拦语气。
  */
 
-import type { SessionImportCheck } from '@engine/session-backup';
+import type { SessionImportCheck } from '@engine/persistence/session-backup';
 
 /** 条目标题一行最多列几个，多出来的用「等 N 条」收尾 */
 const MAX_TITLES_PER_BOOK = 5;

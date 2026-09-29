@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useGameStore } from '../../stores/game-store';
-import { deleteMemory } from '@engine/database';
-import type { MemoryRecord } from '@engine/types';
+import { deleteMemory } from '@engine/persistence/database';
+import type { MemoryRecord } from '@engine/types/types';
 import AppButton from '../shared/AppButton.vue';
 
 const game = useGameStore();

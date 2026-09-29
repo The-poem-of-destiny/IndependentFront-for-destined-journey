@@ -6,7 +6,7 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useAudioStore } from '../../stores/audio-store';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
-import { unwireEffectSystem } from '@engine/effect-wiring';
+import { unwireEffectSystem } from '@engine/effects/effect-wiring';
 import { GamePipeline, waitForGameSaveIdle } from '../../lib/game-pipeline';
 import { buildSceneImageSeams, resolveSceneWeather } from '../../lib/scene-image-seams';
 import { useApiSourceStore } from '../../stores/api-source-store';
@@ -16,7 +16,7 @@ import {
   appearanceWriteTarget,
   buildEffectivePresets,
   needsBaselineReport,
-} from '@engine/character-appearance-resolve';
+} from '@engine/character/character-appearance-resolve';
 import TopBar from './TopBar.vue';
 import SideToolbar from './SideToolbar.vue';
 import ChatFlow from './ChatFlow.vue';

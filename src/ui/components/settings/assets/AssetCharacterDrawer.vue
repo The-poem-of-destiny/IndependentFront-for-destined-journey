@@ -18,8 +18,8 @@
  * 于是任何一次落库刷新后抽屉自动跟上（不缓存一份会过期的行）。
  */
 import { computed, inject, reactive, ref, useId, watch } from 'vue';
-import { ASSET_TYPES, type AssetMetaRecord, type AssetType } from '@engine/types';
-import { isVideoExtension } from '@engine/asset-types';
+import { ASSET_TYPES, type AssetMetaRecord, type AssetType } from '@engine/types/types';
+import { isVideoExtension } from '@engine/assets/asset-types';
 import { useAssetStore, type AssetMutationOutcome } from '../../../stores/asset-store';
 import { useUIStore } from '../../../stores/ui-store';
 import AppButton from '../../shared/AppButton.vue';

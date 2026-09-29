@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import type { PlotEvent } from '@engine/types';
-import { getPlotThreadFlags } from '@engine/save-profile';
+import type { PlotEvent } from '@engine/types/types';
+import { getPlotThreadFlags } from '@engine/state/save-profile';
 import { useGameStore } from '../../stores/game-store';
 import PlotThreadsPanel from './PlotThreadsPanel.vue';
 import PlotTimeline from './PlotTimeline.vue';

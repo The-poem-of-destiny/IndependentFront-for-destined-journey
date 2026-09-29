@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useCreateStore } from '../../stores/create-store';
-import { ATTRIBUTE_NAMES } from '@engine/start-catalog';
+import { ATTRIBUTE_NAMES } from '@engine/content/start-catalog';
 import FormInput from '../shared/form/FormInput.vue';
 import FormSelect from '../shared/form/FormSelect.vue';
 import FormStepper from '../shared/form/FormStepper.vue';

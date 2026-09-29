@@ -26,7 +26,7 @@
  * 拿它当持有会 release 掉别人的引用）。
  */
 import { onUnmounted, ref, watch } from 'vue';
-import type { AssetMetaRecord } from '@engine/types';
+import type { AssetMetaRecord } from '@engine/types/types';
 import { useAssetStore } from '../../../stores/asset-store';
 
 export interface AssetThumbs {

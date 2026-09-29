@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
 import CharGenSystemCard from '../../../src/ui/components/game/cards/CharGenSystemCard.vue';
-import type { CharGenSystemEvent } from '@engine/types';
+import type { CharGenSystemEvent } from '@engine/types/types';
 
 describe('CharGenSystemCard', () => {
   const mockFull: CharGenSystemEvent = {

@@ -13,9 +13,9 @@
  */
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { getDatabase } from '@engine/database';
-import { loadBuiltInWorldBooks } from '@engine/builtin-worldbooks';
-import type { WorldBook, WorldBookEntry } from '@engine/types';
+import { getDatabase } from '@engine/persistence/database';
+import { loadBuiltInWorldBooks } from '@engine/content/builtin-worldbooks';
+import type { WorldBook, WorldBookEntry } from '@engine/types/types';
 import { migrateWorldBooksToDexie, type WorldBookMigrationOutcome } from './worldbook-migration';
 import { useSettingsStore } from './settings-store';
 import { detach, stamped } from './db-write';

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import InputBar from './InputBar.vue';
-import type { AgentActivityRun, ChatMessage, SystemEvent } from '@engine/types';
-import { escapeHtml } from '@engine/beautifier';
-import { splitSceneImageSegments } from '@engine/image-segments';
+import type { AgentActivityRun, ChatMessage, SystemEvent } from '@engine/types/types';
+import { escapeHtml } from '@engine/story/beautifier';
+import { splitSceneImageSegments } from '@engine/image/image-segments';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';

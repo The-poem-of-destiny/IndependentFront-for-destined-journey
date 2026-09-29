@@ -1,5 +1,5 @@
 /**
- * media-hash.ts — 前端侧的**转发壳**，实现已迁到 `@engine/media-hash`。
+ * media-hash.ts — 前端侧的**转发壳**，实现已迁到 `@engine/assets/media-hash`。
  *
  * 为什么搬家: `content-source.ts`（引擎，pack 分节 hash）与素材/音频三条前端写入路径
  * 都要算同一份 SHA-256，而实现住在 `src/ui/lib/` 时，引擎只能反向 import 前端 ——
@@ -14,4 +14,4 @@
  * 设计: docs/planning/2026-07-29-asset-management-system-design.md §4.4 / D12 / D18
  */
 
-export { isMediaHashAvailable, hashMediaBytes, hashMediaBlob } from '@engine/media-hash';
+export { isMediaHashAvailable, hashMediaBytes, hashMediaBlob } from '@engine/assets/media-hash';

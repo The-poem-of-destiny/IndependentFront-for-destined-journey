@@ -44,7 +44,7 @@ import {
   resetAgentSettings,
   type AgentDefaultsLayer,
 } from '../../../stores/agent-settings';
-import { getAgentTemplate } from '@engine/agent-templates';
+import { getAgentTemplate } from '@engine/prompts/agent-templates';
 
 const props = defineProps<{
   agentId: string;

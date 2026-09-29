@@ -9,7 +9,7 @@
  */
 import { computed } from 'vue';
 import { useCreateStore } from '../../stores/create-store';
-import type { BackgroundTemplate } from '@engine/start-catalog';
+import type { BackgroundTemplate } from '@engine/content/start-catalog';
 
 const store = useCreateStore();
 

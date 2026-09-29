@@ -35,13 +35,13 @@
  * 设计全文: `docs/planning/2026-08-11-map-system-v1-integration.md`（§9 UI / §8.2 出发指令）。
  */
 
-import { countryOfTile, midTierOfTile, type MapIndex } from '@engine/map-index';
+import { countryOfTile, midTierOfTile, type MapIndex } from '@engine/map/map-index';
 import {
   DEV_PROGRESS_MAX,
   DEV_PROGRESS_MIN,
   effectiveTileFacts,
   type EffectiveTileFacts,
-} from '@engine/map-dynamics';
+} from '@engine/map/map-dynamics';
 import type {
   BuildingRecord,
   MapPack,
@@ -50,7 +50,7 @@ import type {
   TileFactsEntry,
   TileHistoryEntry,
   TileStatus,
-} from '@engine/types-map';
+} from '@engine/types/types-map';
 
 // ═══════════════════════════════════════════════════════════
 // 1. 像素 → 地块 id
@@ -1444,7 +1444,7 @@ export function composeDepartureDirective(input: DepartureDirectiveInput): strin
  */
 export interface TileDetailModel {
   /**
-   * 发展条 —— 档位 + 档名 + 进度（−50..100，口径见 `@engine/map-dynamics`）。
+   * 发展条 —— 档位 + 档名 + 进度（−50..100，口径见 `@engine/map/map-dynamics`）。
    * 无发展度（海/湖/不可通行块，或包里没给这一格）→ `null`，界面整节不渲染。
    */
   development: {
@@ -1472,7 +1472,7 @@ export interface TileDetailModel {
    *
    * 🔴 **不在 `slots` 里**：它不占编号槽、降档免疫、不可摧毁不可移除。塞进槽列表会让
    *    槽位号整体错位一格，而槽位号正是「下一次降档谁会没」的唯一线索。
-   * 🔴 名字已由 `@engine/map-dynamics` 解析好（作者名 / 钉住名 / 按当前档派生的通名），
+   * 🔴 名字已由 `@engine/map/map-dynamics` 解析好（作者名 / 钉住名 / 按当前档派生的通名），
    *    本层一个字都不查表 —— 卡片与 AI 那边看到的必须是同一个名字。
    */
   mainBuilding: {

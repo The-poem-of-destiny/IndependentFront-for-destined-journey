@@ -21,10 +21,10 @@
  * 「哪些工坊项目在这个存档里启用」是另一条轴（P1-5，捏人页 + 每存档面板），不在这里。
  */
 import { computed, onMounted, ref, watch } from 'vue';
-import type { WorkshopProject } from '@engine/types';
-import type { InstallConflict, WorkshopProjectMeta } from '@engine/workshop-types';
-import type { WorkshopUpdateDiff } from '@engine/workshop-diff';
-import { groupWorkshopNotes } from '@engine/workshop-types';
+import type { WorkshopProject } from '@engine/types/types';
+import type { InstallConflict, WorkshopProjectMeta } from '@engine/workshop/workshop-types';
+import type { WorkshopUpdateDiff } from '@engine/workshop/workshop-diff';
+import { groupWorkshopNotes } from '@engine/workshop/workshop-types';
 import { useUIStore } from '../../stores/ui-store';
 import { useWorkshopStore } from '../../stores/workshop-store';
 import type { WorkshopPrepared } from '../../stores/workshop-store';

@@ -30,7 +30,7 @@
  */
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import type { WorkshopSocialMeta } from '@engine/workshop-types';
+import type { WorkshopSocialMeta } from '@engine/workshop/workshop-types';
 import {
   clearWorkshopCache,
   decodeJwtPayload,

@@ -15,8 +15,8 @@
  *    AgentConfigPanel 各持一份，saveAsDefault 写入后另一边看不到。
  */
 import { ref, type Ref } from 'vue';
-import { deletePreset, getPresets, savePreset } from '@engine/database';
-import type { ChatPreset } from '@engine/types';
+import { deletePreset, getPresets, savePreset } from '@engine/persistence/database';
+import type { ChatPreset } from '@engine/types/types';
 
 const presetsRef: Ref<ChatPreset[]> = ref<ChatPreset[]>([]);
 let loaded = false;

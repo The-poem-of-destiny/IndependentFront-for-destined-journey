@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { QualityLevel } from '@engine/types';
+import type { QualityLevel } from '@engine/types/types';
 
 defineProps<{
   quality?: QualityLevel;

@@ -45,11 +45,11 @@
  */
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { getDatabase } from '@engine/database';
-import type { BeautifierRule, WorkshopProject } from '@engine/types';
-import { planInstall } from '@engine/workshop-install-plan';
-import { diffInstallPlan } from '@engine/workshop-diff';
-import type { WorkshopUpdateDiff } from '@engine/workshop-diff';
+import { getDatabase } from '@engine/persistence/database';
+import type { BeautifierRule, WorkshopProject } from '@engine/types/types';
+import { planInstall } from '@engine/workshop/workshop-install-plan';
+import { diffInstallPlan } from '@engine/workshop/workshop-diff';
+import type { WorkshopUpdateDiff } from '@engine/workshop/workshop-diff';
 import {
   WORKSHOP_PARTITION,
   grantWorkshopBookToAgents,
@@ -57,14 +57,14 @@ import {
   revokeWorkshopBookFromAgents,
   workshopBookId,
   workshopRuleId,
-} from '@engine/workshop-types';
+} from '@engine/workshop/workshop-types';
 import type {
   BeautifierRuleDraft,
   InstallConflict,
   InstallPlan,
   InstallRegistry,
   WorkshopInstallInput,
-} from '@engine/workshop-types';
+} from '@engine/workshop/workshop-types';
 import { fetchInstallInput, fetchProject } from '../lib/workshop-client';
 import type { WorkshopBundle, WorkshopFailure } from '../lib/workshop-client';
 import { useBeautifierStore } from './beautifier-store';

@@ -4,7 +4,7 @@
 > EJS 能力面版本：`engine.version === '1.1.0'`（2026-08-18 复核更正；原文写的 `'1.0.0'` 已过期——
 > 实际值来自 `EJS_SURFACE_VERSION`，地图 v1 的 `$map` 只读面纯新增，故升 minor。宿主可用
 > `engineVersion` 覆盖，未覆盖时就是这个默认值。`$map` 的成员说明本指南尚未收录，见
-> `src/sillytavern/ejs-capabilities.ts` 的 `EJS_SURFACE.namespaces.$map`）<br>
+> `src/core/ejs/ejs-capabilities.ts` 的 `EJS_SURFACE.namespaces.$map`）<br>
 > 适用对象：世界书条目作者、创意工坊项目作者、输出美化规则作者
 
 本文是创作者可依赖的规范入口。它规定世界书条目如何激活、EJS 在何时和什么边界内执行、输出美化正则如何匹配与渲染，以及两类脚本各自能读写什么。
@@ -54,16 +54,16 @@
 
 关键区别：
 
-| 维度 | 世界书 EJS | 输出美化正则 |
-| --- | --- | --- |
-| 输入 | 世界书条目 `content` | 已提交的 assistant 正文 |
-| 执行时机 | Agent 提示装配时 | 模型输出完成并提交后 |
-| 主要用途 | 条件注入、只读查询、叙事变量簿记 | HTML/CSS/JS 卡片、状态栏、交互展示 |
-| 浏览器 DOM | 无 | 只有当前富命中自己的 iframe DOM |
-| 网络 | 无 | 允许 HTTP(S)、WS(S) 等浏览器网络能力 |
-| 持久状态 | `vars` / EJS `local`，按存档 | 共享 `regexStorage`，跨存档 |
-| 能否修改游戏实体 | 不能 | 不能 |
-| 失败结果 | 当前条目回退为 EJS 原文 | 当前规则不命中或脚本在 frame 内失败 |
+| 维度             | 世界书 EJS                       | 输出美化正则                         |
+| ---------------- | -------------------------------- | ------------------------------------ |
+| 输入             | 世界书条目 `content`             | 已提交的 assistant 正文              |
+| 执行时机         | Agent 提示装配时                 | 模型输出完成并提交后                 |
+| 主要用途         | 条件注入、只读查询、叙事变量簿记 | HTML/CSS/JS 卡片、状态栏、交互展示   |
+| 浏览器 DOM       | 无                               | 只有当前富命中自己的 iframe DOM      |
+| 网络             | 无                               | 允许 HTTP(S)、WS(S) 等浏览器网络能力 |
+| 持久状态         | `vars` / EJS `local`，按存档     | 共享 `regexStorage`，跨存档          |
+| 能否修改游戏实体 | 不能                             | 不能                                 |
+| 失败结果         | 当前条目回退为 EJS 原文          | 当前规则不命中或脚本在 frame 内失败  |
 
 以下内容不在本契约内：
 
@@ -74,17 +74,17 @@
 
 ## 3. 应该选择哪一种机制
 
-| 需求 | 使用机制 |
-| --- | --- |
-| 固定设定或固定提示 | 普通世界书正文 |
-| 简单文本变量或随机宏 | 世界书 `{{setvar}}` / `{{getvar}}` / `{{random}}` 宏 |
-| 依据状态条件生成提示 | 世界书 EJS |
-| 让后续 EJS 和 AI 共享叙事状态 | `vars` |
-| 保存 EJS 自用的小型偏好或游标 | EJS `local`；必须使用作者前缀 |
-| 把模型标签转换成卡片 | 输出美化正则 |
-| 在卡片内运行交互脚本 | replacement 的 iframe JavaScript |
-| 跨消息保存卡片主题或折叠状态 | `window.regexStorage` |
-| 修改角色、背包、任务或战斗状态 | 由 AI 输出引擎规定的语义指令；EJS/正则都不负责 |
+| 需求                           | 使用机制                                             |
+| ------------------------------ | ---------------------------------------------------- |
+| 固定设定或固定提示             | 普通世界书正文                                       |
+| 简单文本变量或随机宏           | 世界书 `{{setvar}}` / `{{getvar}}` / `{{random}}` 宏 |
+| 依据状态条件生成提示           | 世界书 EJS                                           |
+| 让后续 EJS 和 AI 共享叙事状态  | `vars`                                               |
+| 保存 EJS 自用的小型偏好或游标  | EJS `local`；必须使用作者前缀                        |
+| 把模型标签转换成卡片           | 输出美化正则                                         |
+| 在卡片内运行交互脚本           | replacement 的 iframe JavaScript                     |
+| 跨消息保存卡片主题或折叠状态   | `window.regexStorage`                                |
+| 修改角色、背包、任务或战斗状态 | 由 AI 输出引擎规定的语义指令；EJS/正则都不负责       |
 
 ## 4. 世界书条目契约
 
@@ -92,17 +92,17 @@
 
 创意工坊载荷可使用标准 SillyTavern 世界书条目形状。导入后核心字段如下：
 
-| 上游字段 | 内部字段 | 当前语义 |
-| --- | --- | --- |
-| `comment` / `name` | `name` | 条目稳定逻辑名；项目更新按名字匹配 |
-| `content` | `content` | 注入正文；只有这里会执行世界书 EJS |
-| `enabled` / `disable` | `enabled` | `false` 时不注入任何 Agent |
-| `order` | `order` | 数值升序；数值越大越靠后 |
-| `key` / `keys` | `key` | 保留用于导入兼容和编辑，不触发当前运行时激活 |
-| `keysecondary` | `keysecondary` | 同上 |
-| `selectiveLogic` | `selectiveLogic` | 保留，当前运行时不做关键词判定 |
-| `position` | `position` | 保留，当前装配不按 ST position 分槽 |
-| `uid` | 重新分配的 `uid` | 上游 uid 仅留作溯源，作者不得把它当跨安装稳定标识 |
+| 上游字段              | 内部字段         | 当前语义                                          |
+| --------------------- | ---------------- | ------------------------------------------------- |
+| `comment` / `name`    | `name`           | 条目稳定逻辑名；项目更新按名字匹配                |
+| `content`             | `content`        | 注入正文；只有这里会执行世界书 EJS                |
+| `enabled` / `disable` | `enabled`        | `false` 时不注入任何 Agent                        |
+| `order`               | `order`          | 数值升序；数值越大越靠后                          |
+| `key` / `keys`        | `key`            | 保留用于导入兼容和编辑，不触发当前运行时激活      |
+| `keysecondary`        | `keysecondary`   | 同上                                              |
+| `selectiveLogic`      | `selectiveLogic` | 保留，当前运行时不做关键词判定                    |
+| `position`            | `position`       | 保留，当前装配不按 ST position 分槽               |
+| `uid`                 | 重新分配的 `uid` | 上游 uid 仅留作溯源，作者不得把它当跨安装稳定标识 |
 
 作者必须给每条条目提供项目内稳定且尽量唯一的名字。更新时改名等价于删除旧条目并新增条目，可能改变存档启用引用。
 
@@ -148,14 +148,14 @@ EJS 先执行，文本位中产生或保留的 `{{...}}` 再交给世界书宏�
 
 一个条目的全部 `content` 会作为一个 strict-mode 程序单元编译，因此多个代码块可以共享局部变量和控制流。
 
-| 写法 | 语义 |
-| --- | --- |
-| `<% code %>` | 执行代码，不直接输出 |
-| `<%= expression %>` | 把表达式结果转成文本并输出 |
+| 写法                | 语义                                |
+| ------------------- | ----------------------------------- |
+| `<% code %>`        | 执行代码，不直接输出                |
+| `<%= expression %>` | 把表达式结果转成文本并输出          |
 | `<%- expression %>` | 与 `<%=` 相同；本引擎不做 HTML 转义 |
-| `<%# comment %>` | EJS 注释，不输出 |
-| `<%%` | 输出字面 `<%` |
-| `print(value)` | 从代码块直接追加输出 |
+| `<%# comment %>`    | EJS 注释，不输出                    |
+| `<%%`               | 输出字面 `<%`                       |
+| `print(value)`      | 从代码块直接追加输出                |
 
 `null` 和 `undefined` 的输出为空串。未闭合的 `<%` 会按普通文本处理，不触发编译错误。
 
@@ -194,13 +194,13 @@ EJS 先执行，文本位中产生或保留的 `{{...}}` 再交给世界书宏�
 
 ### 6.1 状态与持久化矩阵
 
-| 面 | 可读 | 可写 | 作用域 | 持久条件 | 保密边界 |
-| --- | --- | --- | --- | --- | --- |
-| `stats` | 是 | 不得写 | 当前装配 pass | 不持久 | 不是 |
-| `vars` | 是 | 是 | 当前存档、当前 pass | 当前 Agent 有 `ejsVarsCommit` | AI 与 EJS 共写 |
-| EJS `local` | 是 | 是 | 当前存档的共享 EJS 桶 | 同 `vars` | 不是秘密存储 |
-| regex `regexStorage` | 仅 regex frame | 是 | 整个应用共享 | 异步写入 Dexie | 所有 regex 都可读写 |
-| regex `sessionStorage` | 仅当前 frame | 是 | 单个消息 frame | 不持久 | 同 frame 脚本共享 |
+| 面                     | 可读           | 可写   | 作用域                | 持久条件                      | 保密边界            |
+| ---------------------- | -------------- | ------ | --------------------- | ----------------------------- | ------------------- |
+| `stats`                | 是             | 不得写 | 当前装配 pass         | 不持久                        | 不是                |
+| `vars`                 | 是             | 是     | 当前存档、当前 pass   | 当前 Agent 有 `ejsVarsCommit` | AI 与 EJS 共写      |
+| EJS `local`            | 是             | 是     | 当前存档的共享 EJS 桶 | 同 `vars`                     | 不是秘密存储        |
+| regex `regexStorage`   | 仅 regex frame | 是     | 整个应用共享          | 异步写入 Dexie                | 所有 regex 都可读写 |
+| regex `sessionStorage` | 仅当前 frame   | 是     | 单个消息 frame        | 不持久                        | 同 frame 脚本共享   |
 
 ### 6.2 `stats`：只读投影
 
@@ -208,12 +208,12 @@ EJS 先执行，文本位中产生或保留的 `{{...}}` 再交给世界书宏�
 
 可选顶层：
 
-| 路径 | 形状 |
-| --- | --- |
-| `stats.主角` | 主角完整只读投影 |
-| `stats.队伍` | 当前队伍成员数组 |
-| `stats.命运点数` | 数字 |
-| `stats.世界` | 时间、时段、回合、天气、地点 |
+| 路径             | 形状                         |
+| ---------------- | ---------------------------- |
+| `stats.主角`     | 主角完整只读投影             |
+| `stats.队伍`     | 当前队伍成员数组             |
+| `stats.命运点数` | 数字                         |
+| `stats.世界`     | 时间、时段、回合、天气、地点 |
 
 `stats.主角` 字段：
 
@@ -313,51 +313,51 @@ if (!local.has(KEY)) local.set(KEY, mode);
 
 ### 7.1 `char`
 
-| 方法 | 返回 |
-| --- | --- |
-| `char.player()` | 主角投影或 `null` |
-| `char.get(name)` | 精确名字匹配的角色或 `null` |
-| `char.present()` | `生命值 > 0` 的角色；不表示地理位置“在场” |
-| `char.all()` | 当前上下文提供的角色数组 |
-| `char.has(name)` | 是否存在 |
-| `char.affection(name)` | -100～100；缺失为 0 |
-| `char.affectionLabel(name)` | 好感文字标签；缺失为空串 |
+| 方法                        | 返回                                      |
+| --------------------------- | ----------------------------------------- |
+| `char.player()`             | 主角投影或 `null`                         |
+| `char.get(name)`            | 精确名字匹配的角色或 `null`               |
+| `char.present()`            | `生命值 > 0` 的角色；不表示地理位置“在场” |
+| `char.all()`                | 当前上下文提供的角色数组                  |
+| `char.has(name)`            | 是否存在                                  |
+| `char.affection(name)`      | -100～100；缺失为 0                       |
+| `char.affectionLabel(name)` | 好感文字标签；缺失为空串                  |
 
 角色投影包含名字、类型、种族、身份、职业、三类资源、等级、层级、五维属性和地点。创作者不得假定 `char.all()` 一定包含整个存档的所有角色；上下文之外的可见性不属于稳定保证。
 
 ### 7.2 `world`
 
 ```ts
-world.时间
-world.时间详情 // { 纪元, 年, 月, 日, 星期, 时, 分, 时段 } | null
-world.地点
-world.天气
-world.回合
-world.isDaytime()
+world.时间;
+world.时间详情; // { 纪元, 年, 月, 日, 星期, 时, 分, 时段 } | null
+world.地点;
+world.天气;
+world.回合;
+world.isDaytime();
 ```
 
 `world.isDaytime()` 使用 06:00～17:59 作为白天；无时间详情时返回 `true`。地点、天气等缺失时为空串。不要使用宿主 `Date` 推导游戏时间。
 
 ### 7.3 `quest`
 
-| 方法 | 语义 |
-| --- | --- |
-| `quest.all()` | 当前上下文任务投影 |
-| `quest.active()` | 状态为“进行中”、`active` 或空状态 |
-| `quest.get(name)` | 按名字查找 |
-| `quest.has(name)` | 是否存在 |
-| `quest.focus()` | 玩家当前焦点任务 |
+| 方法              | 语义                              |
+| ----------------- | --------------------------------- |
+| `quest.all()`     | 当前上下文任务投影                |
+| `quest.active()`  | 状态为“进行中”、`active` 或空状态 |
+| `quest.get(name)` | 按名字查找                        |
+| `quest.has(name)` | 是否存在                          |
+| `quest.focus()`   | 玩家当前焦点任务                  |
 
 任务投影为 `{ 名字, 状态, 描述, 目标[], 进度, 奖励[], 关注度 }`。
 
 ### 7.4 `lore`
 
 ```ts
-lore.get(entryName)
-lore.get(bookName, entryName)
-lore.has(entryName)
-lore.has(bookName, entryName)
-lore.list(bookName)
+lore.get(entryName);
+lore.get(bookName, entryName);
+lore.has(entryName);
+lore.has(bookName, entryName);
+lore.list(bookName);
 ```
 
 规则：
@@ -410,14 +410,14 @@ chat.text()
 ### 7.7 `rng`
 
 ```ts
-rng.roll('2d6+3')
-rng.rollDetail('1d100')
-rng.int(min, max)       // 闭区间
-rng.float()             // [0, 1)
-rng.pick(items)
-rng.pickN(items, n)     // 不重复
-rng.shuffle(items)
-rng.chance(p)           // p 自动夹在 0..1
+rng.roll('2d6+3');
+rng.rollDetail('1d100');
+rng.int(min, max); // 闭区间
+rng.float(); // [0, 1)
+rng.pick(items);
+rng.pickN(items, n); // 不重复
+rng.shuffle(items);
+rng.chance(p); // p 自动夹在 0..1
 ```
 
 种子由“存档 ID + 回合号 + 条目精确正文”构成。同一存档点、同一回合、同一正文、同一调用顺序会得到相同结果。修改条目正文会改变序列；两条正文完全相同的条目在同一 pass 会得到相同序列。
@@ -444,16 +444,16 @@ const selected = rng.pick(candidates) ?? 'A';
 ### 7.9 `engine`
 
 ```ts
-engine.name    // 'poem-of-destiny'
-engine.version // '1.1.0'（= EJS_SURFACE_VERSION；2026-08-18 复核更正，原文写的 '1.0.0' 已过期）
-engine.has(path)
+engine.name; // 'poem-of-destiny'
+engine.version; // '1.1.0'（= EJS_SURFACE_VERSION；2026-08-18 复核更正，原文写的 '1.0.0' 已过期）
+engine.has(path);
 ```
 
 `engine.has` 查询硬编码的能力路径，不是任意对象反射。应只用它探测本文和 `engine-ejs.d.ts` 中明确列出的路径。
 
 > ✅ **2026-08-18 复核更正**：原文写「`engine.has('world.isDaytime')` 与 `engine.has('engine.name')` 会返回 `false`，
 > 即使成员本身存在」。**这条缺陷已由 Q-09 修掉** —— 能力路径全表 `CAPABILITY_PATHS` 不再手抄，
-> 改为从唯一真源 `EJS_SURFACE` 展平生成（`src/sillytavern/ejs-capabilities.ts`），探测表与实现自此同源。
+> 改为从唯一真源 `EJS_SURFACE` 展平生成（`src/core/ejs/ejs-capabilities.ts`），探测表与实现自此同源。
 > 这两个路径现在都返回 `true`，守卫分支可以照常写。
 >
 > 遗留的一条纪律不变：**探测结果只在本文与 `engine-ejs.d.ts` 列出的路径上有意义**，
@@ -473,23 +473,23 @@ engine.has(path)
 
 别名只为导入存量 SillyTavern / 酒馆助手 / MVU 内容存在。新内容应直接使用命名空间 API。
 
-| 存量名字 | 当前映射 |
-| --- | --- |
-| `getMessageVar` / `getvar` | 先读 `stats`，再读 `vars` |
-| `setMessageVar` / `setvar` | 只写 `vars` |
-| `getLocalVar` / `setLocalVar` | EJS `local` |
-| EJS `localStorage.getItem/setItem/removeItem` | EJS `local` 的字符串兼容层 |
-| `variables.stat_data` | `vars` 与 `stats` 的合并读视图，`stats` 胜 |
-| `matchChatMessages` | `chat.match` |
-| `getChatMessage` / `getChatMessages` | `chat.at` / `chat.slice(...).join('\n')`；后者返回字符串 |
-| `getwi` | `lore.get` |
-| `YAML.stringify` | `fmt.yaml` |
-| `TavernHelper.getLastMessageId` | `world.回合` |
-| `TavernHelper.getVariables` | `variables.stat_data` 兼容视图 |
-| `toastr.*` / `alert` | `ui.notify`；`alert` 不阻塞 |
-| `message_id` / `lastMessageId` | `world.回合` |
-| `console.log/info/warn/error` | `ui.log` |
-| `charLoreBook` | 当前配置中的首个世界书 ID |
+| 存量名字                                      | 当前映射                                                 |
+| --------------------------------------------- | -------------------------------------------------------- |
+| `getMessageVar` / `getvar`                    | 先读 `stats`，再读 `vars`                                |
+| `setMessageVar` / `setvar`                    | 只写 `vars`                                              |
+| `getLocalVar` / `setLocalVar`                 | EJS `local`                                              |
+| EJS `localStorage.getItem/setItem/removeItem` | EJS `local` 的字符串兼容层                               |
+| `variables.stat_data`                         | `vars` 与 `stats` 的合并读视图，`stats` 胜               |
+| `matchChatMessages`                           | `chat.match`                                             |
+| `getChatMessage` / `getChatMessages`          | `chat.at` / `chat.slice(...).join('\n')`；后者返回字符串 |
+| `getwi`                                       | `lore.get`                                               |
+| `YAML.stringify`                              | `fmt.yaml`                                               |
+| `TavernHelper.getLastMessageId`               | `world.回合`                                             |
+| `TavernHelper.getVariables`                   | `variables.stat_data` 兼容视图                           |
+| `toastr.*` / `alert`                          | `ui.notify`；`alert` 不阻塞                              |
+| `message_id` / `lastMessageId`                | `world.回合`                                             |
+| `console.log/info/warn/error`                 | `ui.log`                                                 |
+| `charLoreBook`                                | 当前配置中的首个世界书 ID                                |
 
 这里的 EJS `localStorage` **不是浏览器 localStorage**，也不是 regex frame 的 `localStorage`。两个同名兼容层的含义完全不同：
 
@@ -519,16 +519,16 @@ engine.has(path)
 
 ### 10.1 资源预算
 
-| 项目 | 当前上限 | 超限结果 |
-| --- | ---: | --- |
-| 单条目执行 | 50 ms | 当前条目回退原文 |
-| 单 Agent 装配 pass | 5000 ms | 当前及剩余动态条目回退原文 |
-| QuickJS heap | 64 MiB | 条目或 pass 回退 |
-| QuickJS stack | 512 KiB | 当前条目回退 |
-| `vars` 差量 | 256 KiB UTF-8 | 整份差量拒绝 |
-| EJS `local` 单值 / 总量 | 16 / 64 KiB UTF-8 | 当前写入忽略 |
-| `lore.get` | 每条目 8 次、每次 64K 字符 | 返回空串或截断 |
-| 每个 `fmt.*` 字符串 | 64K 字符 | 截断并带标记 |
+| 项目                    |                   当前上限 | 超限结果                   |
+| ----------------------- | -------------------------: | -------------------------- |
+| 单条目执行              |                      50 ms | 当前条目回退原文           |
+| 单 Agent 装配 pass      |                    5000 ms | 当前及剩余动态条目回退原文 |
+| QuickJS heap            |                     64 MiB | 条目或 pass 回退           |
+| QuickJS stack           |                    512 KiB | 当前条目回退               |
+| `vars` 差量             |              256 KiB UTF-8 | 整份差量拒绝               |
+| EJS `local` 单值 / 总量 |          16 / 64 KiB UTF-8 | 当前写入忽略               |
+| `lore.get`              | 每条目 8 次、每次 64K 字符 | 返回空串或截断             |
+| 每个 `fmt.*` 字符串     |                   64K 字符 | 截断并带标记               |
 
 当前没有“整个 EJS 条目输出 256 KiB”的硬上限。作者仍应控制体积，因为输出会直接增加提示 token 和装配延迟。
 
@@ -556,8 +556,8 @@ interface BeautifierRule {
   id: string;
   name: string;
   scope: 'maintext' | 'options' | 'summary' | 'thinking' | 'global';
-  pattern: string;       // 不带 /.../ 定界符
-  flags: string;         // 例如 'gim'
+  pattern: string; // 不带 /.../ 定界符
+  flags: string; // 例如 'gim'
   replacement: string;
   enabled: boolean;
   order: number;
@@ -570,22 +570,22 @@ interface BeautifierRule {
 
 ### 11.2 工坊 ST 正则字段映射
 
-| ST 字段 | 导入结果 | 兼容状态 |
-| --- | --- | --- |
-| `id` | 带项目命名空间的规则 ID | 支持 |
-| `scriptName` | `name`；空值按项目内序号命名 | 支持 |
-| `findRegex` | `pattern` + `flags` | 支持两种写法 |
-| `replaceString` | `replacement`，存储时逐字保留 | 支持 |
-| `disabled` | `enabled = !disabled` | 支持 |
-| `placement` 含 `2` | assistant 输出显示侧 | 支持 |
-| `minDepth` / `maxDepth` | 同名字段 | 支持，零基且含边界 |
-| `markdownOnly=true` | 只使用显示侧 | 支持 |
-| `markdownOnly=false` | 显示侧保留，提示词侧丢失 | 部分支持 |
-| `promptOnly=true` | 整条不导入 | 不支持 |
-| `placement` 不含 `2` | 整条不导入 | 不支持 user-only 等位置 |
-| `trimStrings` | 忽略并报告 | 不支持 |
-| `substituteRegex` | 仅在 pattern 真含宏时产生缺口 | pattern 宏未接线 |
-| `runOnEdit` | 不执行 | 当前无消息编辑运行入口 |
+| ST 字段                 | 导入结果                      | 兼容状态                |
+| ----------------------- | ----------------------------- | ----------------------- |
+| `id`                    | 带项目命名空间的规则 ID       | 支持                    |
+| `scriptName`            | `name`；空值按项目内序号命名  | 支持                    |
+| `findRegex`             | `pattern` + `flags`           | 支持两种写法            |
+| `replaceString`         | `replacement`，存储时逐字保留 | 支持                    |
+| `disabled`              | `enabled = !disabled`         | 支持                    |
+| `placement` 含 `2`      | assistant 输出显示侧          | 支持                    |
+| `minDepth` / `maxDepth` | 同名字段                      | 支持，零基且含边界      |
+| `markdownOnly=true`     | 只使用显示侧                  | 支持                    |
+| `markdownOnly=false`    | 显示侧保留，提示词侧丢失      | 部分支持                |
+| `promptOnly=true`       | 整条不导入                    | 不支持                  |
+| `placement` 不含 `2`    | 整条不导入                    | 不支持 user-only 等位置 |
+| `trimStrings`           | 忽略并报告                    | 不支持                  |
+| `substituteRegex`       | 仅在 pattern 真含宏时产生缺口 | pattern 宏未接线        |
+| `runOnEdit`             | 不执行                        | 当前无消息编辑运行入口  |
 
 工坊项目当前必须至少包含一个世界书条目，才能在存档启用面板中形成项目启用信号。纯正则、零世界书条目的项目会安装规则，但规则在任何存档都无法激活。发布纯视觉项目时应附带至少一个稳定命名的世界书条目，直到该限制解除。
 
@@ -658,14 +658,14 @@ interface BeautifierRule {
 
 支持原生 JavaScript 语义：
 
-| token | 含义 |
-| --- | --- |
-| `$$` | 字面 `$` |
-| `$&` | 完整匹配 |
-| `$1`…`$99` | 编号捕获组 |
+| token              | 含义                 |
+| ------------------ | -------------------- |
+| `$$`               | 字面 `$`             |
+| `$&`               | 完整匹配             |
+| `$1`…`$99`         | 编号捕获组           |
 | 美元符号后接反引号 | 当前匹配之前的源文本 |
-| `$'` | 当前匹配之后的源文本 |
-| `$<name>` | 命名捕获组 |
+| `$'`               | 当前匹配之后的源文本 |
+| `$<name>`          | 命名捕获组           |
 
 未参与匹配的捕获组输出空串。两位捕获不存在时按 JavaScript 规则尝试首位捕获加后一位字面字符。公共语料已验证到 `$39`。
 
@@ -728,7 +728,7 @@ mapper 存储的 replacement 字符串保持原样，但渲染器会去外层空
 frame 使用：
 
 ```html
-<iframe sandbox="allow-scripts" credentialless referrerpolicy="no-referrer">
+<iframe sandbox="allow-scripts" credentialless referrerpolicy="no-referrer"></iframe>
 ```
 
 没有 `allow-same-origin`，因此内容运行在 opaque origin 中。它可以操作自己的 DOM，但不能读取父应用 DOM、Vue 状态、应用 localStorage、应用 Dexie、存档、API Key 或其它消息 frame。
@@ -790,8 +790,8 @@ frame 提供少量空数据或 no-op shim，让部分存量脚本不立即崩溃
 每个 frame 中以下两个名字指向同一个 Storage-like 对象：
 
 ```js
-window.regexStorage
-window.localStorage
+window.regexStorage;
+window.localStorage;
 ```
 
 新内容应使用 `window.regexStorage` 表明意图；`localStorage` 只为存量规则兼容。
@@ -819,12 +819,12 @@ const KEY = 'com.example.project:theme:v1';
 支持以下同步接口：
 
 ```js
-regexStorage.length
-regexStorage.getItem(key)
-regexStorage.setItem(key, value)
-regexStorage.removeItem(key)
-regexStorage.clear()
-regexStorage.key(index)
+regexStorage.length;
+regexStorage.getItem(key);
+regexStorage.setItem(key, value);
+regexStorage.removeItem(key);
+regexStorage.clear();
+regexStorage.key(index);
 
 regexStorage.myKey = 'value';
 const value = regexStorage.myKey;
@@ -852,11 +852,11 @@ key/value 都会转成字符串。frame 创建时，持久快照会在作者 `he
 
 ### 14.3 配额
 
-| 项目 | 上限 |
-| --- | ---: |
+| 项目       |                          上限 |
+| ---------- | ----------------------------: |
 | 全共享空间 | 5 MiB UTF-8，key + value 合计 |
-| key 数量 | 1024 |
-| 单个 key | 4096 UTF-8 bytes |
+| key 数量   |                          1024 |
+| 单个 key   |              4096 UTF-8 bytes |
 
 超限时 `setItem` 同步抛出 `DOMException`，`name === 'QuotaExceededError'`。作者应捕获并降级：
 
@@ -916,7 +916,7 @@ const lowResource = Boolean(
 <!doctype html>
 <html lang="zh-CN">
   <head>
-    <meta charset="UTF-8">
+    <meta charset="UTF-8" />
     <style>
       body {
         margin: 0;
@@ -929,7 +929,7 @@ const lowResource = Boolean(
         border-radius: 10px;
       }
 
-      .panel[data-mode="compact"] .detail {
+      .panel[data-mode='compact'] .detail {
         display: none;
       }
     </style>

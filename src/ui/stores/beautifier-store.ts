@@ -17,10 +17,10 @@
  */
 import { defineStore } from 'pinia';
 import { ref, watch } from 'vue';
-import { getDatabase } from '@engine/database';
-import { loadPresetRules, mergeRules, normalizeRuleRuntime } from '@engine/beautifier';
-import { getPackRules } from '@engine/content-source';
-import type { BeautifierRule } from '@engine/types';
+import { getDatabase } from '@engine/persistence/database';
+import { loadPresetRules, mergeRules, normalizeRuleRuntime } from '@engine/story/beautifier';
+import { getPackRules } from '@engine/content/content-source';
+import type { BeautifierRule } from '@engine/types/types';
 import {
   migrateBeautifierRulesToDexie,
   pruneLegacyBuiltinOverrides,

@@ -16,8 +16,8 @@
  *
  * **纯度**: 无 I/O、无 Vue、无浏览器全局、无 `Date.now()`（时刻从 `now` 进）。
  */
-import { IMAGE_FAILURE_RETRYABLE } from '@engine/image-defaults';
-import type { ImageGenMode, SceneImageRecord } from '@engine/types-image';
+import { IMAGE_FAILURE_RETRYABLE } from '@engine/image/image-defaults';
+import type { ImageGenMode, SceneImageRecord } from '@engine/types/types-image';
 
 /** story 没写 `title` 时占位框上的标签（`title` 是 sanitizeCaption 后的，可能是空串） */
 export const SCENE_IMAGE_UNTITLED = '插画';

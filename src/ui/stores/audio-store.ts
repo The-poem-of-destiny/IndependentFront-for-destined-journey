@@ -18,7 +18,7 @@ import type {
   AudioRepeatMode,
   AudioTrack,
   AudioTrackKind,
-} from '@engine/types';
+} from '@engine/types/types';
 import {
   getAudioTracks,
   saveAudioTrack,
@@ -27,10 +27,10 @@ import {
   saveAudioPlaylist,
   deleteAudioPlaylist as dbDeleteAudioPlaylist,
   getAudioBlob,
-} from '@engine/database';
-import { findByName, isNameTaken, uniqueAudioName } from '@engine/audio-names';
-import { resolveSceneByTags } from '@engine/audio-scene';
-import type { SceneTagQuery, SceneTagResult, SceneVariant } from '@engine/audio-scene';
+} from '@engine/persistence/database';
+import { findByName, isNameTaken, uniqueAudioName } from '@engine/audio/audio-names';
+import { resolveSceneByTags } from '@engine/audio/audio-scene';
+import type { SceneTagQuery, SceneTagResult, SceneVariant } from '@engine/audio/audio-scene';
 import { getAudioManager, installUnlockListener, setBlobResolver } from '../lib/audio-singleton';
 import {
   isFolderSupported,

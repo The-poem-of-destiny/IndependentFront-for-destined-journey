@@ -4,10 +4,10 @@ import {
   compileBeautifierSegments,
   type BeautifierMatchSegment,
   type BeautifierSegment,
-} from '@engine/beautifier';
-import { splitSceneImageSegments } from '@engine/image-segments';
-import type { BeautifierRule } from '@engine/types';
-import type { ImageGenMode, ImageRating, SceneImageMarker } from '@engine/types-image';
+} from '@engine/story/beautifier';
+import { splitSceneImageSegments } from '@engine/image/image-segments';
+import type { BeautifierRule } from '@engine/types/types';
+import type { ImageGenMode, ImageRating, SceneImageMarker } from '@engine/types/types-image';
 import { useBeautify } from '../../composables/useBeautify';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import BeautifierFrame from './BeautifierFrame.vue';

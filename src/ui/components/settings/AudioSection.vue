@@ -19,7 +19,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, provide } from 'vue';
 import { useAudioStore } from '../../stores/audio-store';
 import { useSettingsStore } from '../../stores/settings-store';
-import type { AudioTrack } from '@engine/types';
+import type { AudioTrack } from '@engine/types/types';
 import AppCard from '../shared/AppCard.vue';
 import AudioMixer from './audio/AudioMixer.vue';
 import AudioPlaylists from './audio/AudioPlaylists.vue';

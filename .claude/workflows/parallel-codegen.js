@@ -25,74 +25,74 @@ const MODULES = args?.modules || [
   // Phase 2: 数据结构
   {
     key: 'types-v4',
-    path: 'src/sillytavern/types.ts',
+    path: 'src/core/types/types.ts',
     desc: '扩展所有 v4 新类型（CharacterState/AgentConfig/ApiEndpoint/Memory/PlotEvent/Snapshot）',
   },
   {
     key: 'database-v4',
-    path: 'src/sillytavern/database.ts',
+    path: 'src/core/persistence/database.ts',
     desc: '新增表（memories/plot_events/characters/snapshots/saves/api_endpoints）+ 迁移 v3→v4',
   },
 
   // Phase 3: Agent 编排引擎
   {
     key: 'agent-orchestrator',
-    path: 'src/sillytavern/agent-orchestrator.ts',
+    path: 'src/core/agents/agent-orchestrator.ts',
     desc: 'DAG 依赖调度器，串行/并行混合',
   },
   {
     key: 'agent-templates',
-    path: 'src/sillytavern/agent-templates.ts',
+    path: 'src/core/prompts/agent-templates.ts',
     desc: '每 Agent 的 Prompt 模板系统',
   },
   {
     key: 'deepseek-client',
-    path: 'src/sillytavern/deepseek-client.ts',
+    path: 'src/core/deepseek-client.ts',
     desc: 'DeepSeek 特化 fetch 封装（独立 userId）',
   },
 
   // Phase 4: 记忆 & 剧情
   {
     key: 'memory-system',
-    path: 'src/sillytavern/memory-system.ts',
+    path: 'src/core/memory-system.ts',
     desc: '记忆召回/总结逻辑，MEM 编号系统',
   },
   {
     key: 'plot-engine',
-    path: 'src/sillytavern/plot-engine.ts',
+    path: 'src/core/plot/plot-engine.ts',
     desc: '嵌套事件结构，世界线变动修正',
   },
 
   // Phase 5: 角色 & 变量
   {
     key: 'character-manager',
-    path: 'src/sillytavern/character-manager.ts',
+    path: 'src/core/character-manager.ts',
     desc: '统一角色状态管理（登神长阶/要素/权能）',
   },
   {
     key: 'variable-patch',
-    path: 'src/sillytavern/variable-patch.ts',
+    path: 'src/core/variable-patch.ts',
     desc: 'JSON Patch 操作（replace/delta/insert）',
   },
 
   // Phase 6: 战斗 & 制作
-  { key: 'combat-resolver', path: 'src/sillytavern/combat-resolver.ts', desc: 'd20 战斗结算引擎' },
+  { key: 'combat-resolver', path: 'src/core/combat-resolver.ts', desc: 'd20 战斗结算引擎' },
   {
     key: 'crafting-resolver',
-    path: 'src/sillytavern/crafting-resolver.ts',
+    path: 'src/core/crafting-resolver.ts',
     desc: '制作品质检定引擎',
   },
 
   // 工具
   {
     key: 'snapshot-manager',
-    path: 'src/sillytavern/snapshot-manager.ts',
+    path: 'src/core/snapshot-manager.ts',
     desc: '快照创建/回滚（10档×30快照）',
   },
-  { key: 'ejs-renderer', path: 'src/sillytavern/ejs-renderer.ts', desc: 'EJS 模板静态化渲染器' },
+  { key: 'ejs-renderer', path: 'src/core/ejs-renderer.ts', desc: 'EJS 模板静态化渲染器' },
   {
     key: 'violation-checker',
-    path: 'src/sillytavern/violation-checker.ts',
+    path: 'src/core/violation-checker.ts',
     desc: 'AI 输出违规检测器',
   },
 ];
@@ -112,7 +112,7 @@ const results = await pipeline(
     - 导出清晰的公共 API
     - 用 JSDoc 注释关键接口
     - 参考根 AGENTS.md 的「设计约定」（ADR-11..32）中的架构决策（findings.md 已归档至 docs/archive/planning/findings.md）
-    - 已有代码在 src/sillytavern/ 下，不要破坏现有导出`,
+    - 已有代码在 src/core/ 下，不要破坏现有导出`,
       { phase: '生成', label: mod.key, isolation: 'worktree' },
     ),
   (result, mod) => {

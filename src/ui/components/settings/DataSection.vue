@@ -7,7 +7,7 @@
  *    `navigator.storage.estimate()` —— 那是个便宜的浏览器查询。
  */
 import { ref, shallowRef, computed, onMounted } from 'vue';
-import type { SceneImageUsage } from '@engine/types-image';
+import type { SceneImageUsage } from '@engine/types/types-image';
 import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
@@ -16,13 +16,13 @@ import PackInstallConfirmModal from './PackInstallConfirmModal.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useGameStore } from '../../stores/game-store';
-import type { FullBackup } from '@engine/database';
+import type { FullBackup } from '@engine/persistence/database';
 // 经验档位读取（loadExperienceMode）走静态导入：与 loadSceneUsage 的动态 import 并存时，
 // Vitest 的 vi.mock 对同一模块的多次动态 import 有竞态（挂起到环境拆除、dexie 加载失败），
 // 静态 import 由 vi.mock 稳定拦截，规避之（2026-08-24）。
-import { getSaveProfile } from '@engine/database';
-import type { PackInstallPlan } from '@engine/types-content';
-import type { PackUpgradeDiff } from '@engine/content-pack-plan';
+import { getSaveProfile } from '@engine/persistence/database';
+import type { PackInstallPlan } from '@engine/types/types-content';
+import type { PackUpgradeDiff } from '@engine/content/content-pack-plan';
 import {
   checkPackUpdate,
   downloadLatestPack,
@@ -333,7 +333,7 @@ async function changeExperienceMode(mode: 'normal' | 'easy') {
   if (!saveId) return;
   const next = mode === 'easy' ? 'easy' : 'normal';
   try {
-    const { persistExperienceMode } = await import('@engine/save-profile');
+    const { persistExperienceMode } = await import('@engine/state/save-profile');
     await persistExperienceMode(saveId, next);
     experienceMode.value = next;
     ui.toast(next === 'easy' ? '已切换为简单模式（经验获取更快）' : '已切换为普通模式', 'success');
@@ -388,7 +388,7 @@ async function loadSceneUsage() {
     sceneUsage.value = null;
     return;
   }
-  const { getSceneImageUsage } = await import('@engine/database');
+  const { getSceneImageUsage } = await import('@engine/persistence/database');
   sceneUsage.value = await getSceneImageUsage(saveId);
 }
 onMounted(loadSceneUsage);
@@ -397,7 +397,8 @@ async function cleanSceneImages() {
   if (!saveId) return;
   cleaningImages.value = true;
   try {
-    const { listCleanableSceneImageIds, dropSceneImageBlobs } = await import('@engine/database');
+    const { listCleanableSceneImageIds, dropSceneImageBlobs } =
+      await import('@engine/persistence/database');
     // 名单在**点下确认这一刻**重新取：面板可能已经开着好一会儿了
     const ids = await listCleanableSceneImageIds(saveId);
     const dropped = await dropSceneImageBlobs(ids);
@@ -412,7 +413,7 @@ async function cleanSceneImages() {
   }
 }
 async function exportAll() {
-  const { exportAllData } = await import('@engine/database');
+  const { exportAllData } = await import('@engine/persistence/database');
   const d = await exportAllData();
   const b = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
   const u = URL.createObjectURL(b);
@@ -456,12 +457,12 @@ async function confirmImportAll() {
     // 🔴 进 importAllData 之前必须先认形状：validateBackupOrThrow 对「实体数组全缺席」
     //    是容忍的（三态语义，为老备份留的），于是一份只带 `version` 的角色卡 / 预设 JSON
     //    能一路走到 doImportAllData 把整个库清空。判据用引擎那份严格的，不在这里另写一个。
-    const { isFullBackupFile } = await import('@engine/session-backup');
+    const { isFullBackupFile } = await import('@engine/persistence/session-backup');
     if (!isFullBackupFile(raw)) {
       ui.toast('导入失败：这个文件看起来不是整库备份', 'error');
       return;
     }
-    const { importAllData } = await import('@engine/database');
+    const { importAllData } = await import('@engine/persistence/database');
     await importAllData(raw as FullBackup);
     await cfg.reloadApiEntries();
     ui.toast('导入成功', 'success');
@@ -485,7 +486,7 @@ async function confirmImportAll() {
  * assetBlobs / audio* 全部表）。守护测试见 SettingsPage.engine-imports.test.ts。
  */
 async function clearAll() {
-  const { clearAllData } = await import('@engine/database');
+  const { clearAllData } = await import('@engine/persistence/database');
   await clearAllData();
   cfg.resetAll();
   showClearConfirm.value = false;

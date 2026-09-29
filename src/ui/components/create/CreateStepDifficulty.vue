@@ -3,7 +3,7 @@ import { useCreateStore } from '../../stores/create-store';
 // 🔴 直接 import **机制**模块（D24）：难度档位是玩法规则、不进内容包，
 //    所以本组件天然不需要走捏人页的内容加载门。指向 `start-catalog-mechanics`
 //    而不是聚合入口，是为了让这条「它不是内容」的边界在 import 行上就看得见。
-import { DIFFICULTY_PRESETS } from '@engine/start-catalog-mechanics';
+import { DIFFICULTY_PRESETS } from '@engine/content/start-catalog-mechanics';
 import AppCard from '../shared/AppCard.vue';
 
 const store = useCreateStore();

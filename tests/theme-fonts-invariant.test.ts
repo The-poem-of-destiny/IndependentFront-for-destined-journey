@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
  *
  * 字体的唯一决定者是设置页那两格（正文 / 标题），`theme-store.initFonts()` 把它们写成
  * `<html>` 的**内联变量**，内联压得过任何 `[data-theme]` 规则。主题只管颜色。
- * 行为侧的断言在 `src/ui/stores/theme-store.fonts.test.ts`；本闸门守的是「别再往主题里
+ * 行为侧的断言在 `tests/ui/stores/theme-store.fonts.test.ts`；本闸门守的是「别再往主题里
  * 写字体」这条源码约束 —— 写了虽然已经不生效，但会让下一个人以为主题能定字体。
  *
  * ## 为什么在 tests/ 而不是 src/ui/themes/

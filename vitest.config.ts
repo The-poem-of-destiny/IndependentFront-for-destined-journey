@@ -59,14 +59,14 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@engine': resolve(__dirname, 'src/sillytavern'),
+      '@engine': resolve(__dirname, 'src/core'),
       '@ui': resolve(__dirname, 'src/ui'),
     },
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
-    setupFiles: ['src/test-setup.ts'],
+    include: ['tests/**/*.test.ts'],
+    setupFiles: ['tests/setup.ts'],
     globals: true,
     ...(maxWorkers ? { maxWorkers } : {}),
   },

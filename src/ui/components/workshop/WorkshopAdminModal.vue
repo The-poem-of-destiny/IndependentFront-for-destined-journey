@@ -27,7 +27,7 @@ import type {
   WorkshopAdminUser,
   WorkshopFailure,
 } from '../../lib/workshop-client';
-import type { WorkshopProjectMeta } from '@engine/workshop-types';
+import type { WorkshopProjectMeta } from '@engine/workshop/workshop-types';
 import { useWorkshopSocialStore } from '../../stores/workshop-social-store';
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';

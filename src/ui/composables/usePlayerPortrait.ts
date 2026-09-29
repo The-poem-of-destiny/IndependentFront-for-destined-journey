@@ -33,9 +33,9 @@
  * **做什么**，不拼句子。
  */
 import { computed, ref, toValue, type ComputedRef, type MaybeRefOrGetter, type Ref } from 'vue';
-import { ASSET_MIME_BY_EXTENSION, mimeForAssetExtension } from '@engine/asset-types';
-import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/asset-resolve';
-import type { AssetMetaRecord, AssetType } from '@engine/types';
+import { ASSET_MIME_BY_EXTENSION, mimeForAssetExtension } from '@engine/assets/asset-types';
+import { ASSET_TYPE_FALLBACK_CHAIN } from '@engine/assets/asset-resolve';
+import type { AssetMetaRecord, AssetType } from '@engine/types/types';
 import { useAssetImage } from './useAssetImage';
 import { useAssetStore } from '../stores/asset-store';
 import { useUIStore } from '../stores/ui-store';

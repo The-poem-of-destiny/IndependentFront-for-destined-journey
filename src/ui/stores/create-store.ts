@@ -25,23 +25,23 @@ import type {
   ApiEndpoint,
   AgentConfig,
   ExperienceMode,
-} from '@engine/types';
-import { calcResources } from '@engine/tier-constants';
+} from '@engine/types/types';
+import { calcResources } from '@engine/character/tier-constants';
 // 🆕 经验系统改造 v1：创建角色时 totalExp/expToNext 用累计表语义（旧 expCap 已退役）
-import { getRequiredXpForLevel, xpToNextNumber } from '@engine/exp-table';
+import { getRequiredXpForLevel, xpToNextNumber } from '@engine/character/exp-table';
 // Q-05：从模型输出抢救 JSON 的唯一入口
-import { extractJsonPayload } from '@engine/model-json';
-import { getBloodlineList, getBloodlineSet, type BloodlineSet } from '@engine/bloodlines';
-import { AgentClient } from '@engine/agent-client';
+import { extractJsonPayload } from '@engine/utils/model-json';
+import { getBloodlineList, getBloodlineSet, type BloodlineSet } from '@engine/character/bloodlines';
+import { AgentClient } from '@engine/agents/agent-client';
 import {
   tryParseOutline,
   outlineToEvents,
   createOutlineFromAgent,
   type ParsedOutlineOutput,
-} from '@engine/plot-outline';
-import type { AgentContext } from '@engine/types';
-import { createDefaultTime, formatGameTime, GAME_EPOCH_YEAR } from '@engine/time-system';
-import { normalizeRarity } from '@engine/field-enums';
+} from '@engine/plot/plot-outline';
+import type { AgentContext } from '@engine/types/types';
+import { createDefaultTime, formatGameTime, GAME_EPOCH_YEAR } from '@engine/time/time-system';
+import { normalizeRarity } from '@engine/content/field-enums';
 import { useSettingsStore } from './settings-store';
 import {
   type CatalogItem,
@@ -62,17 +62,17 @@ import {
   flattenLocationTree,
   filterBackgroundsByCategory,
   countBackgroundsByCategory,
-} from '@engine/start-catalog';
+} from '@engine/content/start-catalog';
 import { ensureContentRegistryLoaded, getContentRegistry } from './content-store';
 import { getBranding } from '../branding-defaults';
-import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
+import { loadWorldBooksWithFallback } from '@engine/content/builtin-worldbooks';
 import { useWorldBookStore } from './worldbook-store';
 import { useWorkshopStore } from './workshop-store';
 import { getAgentSettings } from './agent-settings';
 // 🆕 F10（2026-09-04）：plot_outline 端点解析与 game-pipeline 走同一个 fail-closed 解析器
 import { buildApiEndpoints, resolveAgentEndpoint } from '../lib/endpoint-resolver';
-import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
-import type { WorldBook, WorldBookEntry } from '@engine/types';
+import { filterBooksByEnabledEntries } from '@engine/content/worldbook-loader';
+import type { WorldBook, WorldBookEntry } from '@engine/types/types';
 import {
   applyWorkshopSelection,
   buildWorkshopEnableOptions,
@@ -82,13 +82,13 @@ import {
 // ===== 类型 =====
 
 /**
- * 捏人预设 —— 定义已迁到 `@engine/types`（分层收口）。
+ * 捏人预设 —— 定义已迁到 `@engine/types/types`（分层收口）。
  *
  * 它是 Dexie `createPresets` 表的落库形状，`database.ts` 要拿它标 `CreatePresetRecord.data`；
  * 留在本 store 里就只能让引擎反向 `import type ... from '../ui/stores/create-store'`。
  * 这里 re-export 同一个名字，`PresetModal.vue` 等既有消费方的 import 路径一字未改。
  */
-export type { CreatePreset } from '@engine/types';
+export type { CreatePreset } from '@engine/types/types';
 
 // ===== 原版常量 (custom_start_index.html) =====
 const MAX_BP = 25;
@@ -1326,7 +1326,7 @@ export const useCreateStore = defineStore('create', () => {
       //    同步的 `buildAgentMessages` 会在宿主 realm 直接 `new Function` 求值它们 ——
       //    绕开 `getEjsBackend()` 的隔离后端（无中断、无预算、构造器可逃逸），
       //    而应用此时对外报告的是「已隔离」。异步版先预渲染再灌 memo，EJS 只在后端里跑。
-      const { buildAgentMessagesAsync } = await import('@engine/agent-templates');
+      const { buildAgentMessagesAsync } = await import('@engine/prompts/agent-templates');
       const agentConfigs = await loadOutlineAgentConfigs();
       const worldBooks = await loadPlotOutlineWorldBooks(agentConfigs);
 
@@ -1910,7 +1910,7 @@ export const useCreateStore = defineStore('create', () => {
         ? outlineToEvents(JSON.parse(JSON.stringify(plotOutlineChapters.value)), saveId)
         : [],
     };
-    const { createJourney } = await import('@engine/create-journey');
+    const { createJourney } = await import('@engine/persistence/create-journey');
     return createJourney(input);
   }
 

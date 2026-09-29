@@ -8,7 +8,7 @@
 import { ref, computed, inject } from 'vue';
 import { useAudioStore } from '../../../stores/audio-store';
 import { useUIStore } from '../../../stores/ui-store';
-import type { AudioTrack } from '@engine/types';
+import type { AudioTrack } from '@engine/types/types';
 import AppButton from '../../shared/AppButton.vue';
 import { audioDialogsKey } from './dialogs';
 

@@ -123,7 +123,7 @@ npm run dev
 | 文档                                                                               | 给谁             | 内容                                            |
 | ---------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------- |
 | [AGENTS.md](AGENTS.md)                                                             | 开发者 / AI 助手 | 指令正文：架构约定、命令、规范、进度（最全）    |
-| [src/sillytavern/AGENTS.md](src/sillytavern/AGENTS.md)                             | 引擎开发         | 引擎层架构分册（类型 / 数据库 / Agent / 战斗…） |
+| [src/core/AGENTS.md](src/core/AGENTS.md)                                           | 引擎开发         | 引擎层架构分册（类型 / 数据库 / Agent / 战斗…） |
 | [src/ui/AGENTS.md](src/ui/AGENTS.md)                                               | 前端开发         | 前端架构分册（stores / 组件 / 设置页 / 预设）   |
 | [CLAUDE.md](CLAUDE.md)                                                             | Claude Code      | 薄壳：导入 AGENTS.md + skills / workflows 用法  |
 | [CHANGELOG.md](CHANGELOG.md)                                                       | 玩家             | 面向玩家的更新日志                              |
@@ -136,7 +136,7 @@ npm run dev
 
 ## 技术栈
 
-- **引擎**：TypeScript（`src/sillytavern/`，160+ 模块）
+- **引擎**：TypeScript（`src/core/`，160+ 模块）
 - **前端**：Vue 3 + Pinia + Vite（`src/ui/`）
 - **存储**：IndexedDB（Dexie）
 - **AI**：OpenAI 兼容 API + function calling

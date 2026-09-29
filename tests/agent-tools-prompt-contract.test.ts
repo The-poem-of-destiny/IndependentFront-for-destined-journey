@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { AGENT_TOOL_MAP } from '../src/sillytavern/agent-tools';
+import { AGENT_TOOL_MAP } from '../src/core/agents/agent-tools';
 
 /**
  * Agent 默认 prompt 与工具白名单契约（真机 bug 回归：2026-08-08）

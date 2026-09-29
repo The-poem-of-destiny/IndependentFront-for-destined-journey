@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from 'vue';
-import type { FullBackup } from '@engine/database';
-import type { SessionBackup } from '@engine/session-backup';
+import type { FullBackup } from '@engine/persistence/database';
+import type { SessionBackup } from '@engine/persistence/session-backup';
 import { useGameStore } from '../../stores/game-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
@@ -43,7 +43,7 @@ watch(selectedSaveId, async (id) => {
     return;
   }
   try {
-    const { getSave, getCharacters, getSaveProfile } = await import('@engine/database');
+    const { getSave, getCharacters, getSaveProfile } = await import('@engine/persistence/database');
     const save = await getSave(id);
     const chars = await getCharacters(id);
     const profile = await getSaveProfile(id);
@@ -140,7 +140,7 @@ function loadGame(saveId: string) {
 async function deleteSave(saveId: string) {
   if (!confirm('确定要删除这个存档吗？此操作不可撤销。')) return;
   try {
-    const { deleteSaveSlot } = await import('@engine/database');
+    const { deleteSaveSlot } = await import('@engine/persistence/database');
     await deleteSaveSlot(saveId);
     await game.loadSaves();
     if (selectedSaveId.value === saveId) selectedSaveId.value = game.saves[0]?.id ?? null;
@@ -185,7 +185,7 @@ async function renameSave() {
   }
 
   try {
-    const { saveSaveSlot } = await import('@engine/database');
+    const { saveSaveSlot } = await import('@engine/persistence/database');
     await saveSaveSlot({ ...save, name });
     await game.loadSaves();
     cancelRenameSave();
@@ -207,11 +207,11 @@ function safeFileName(name: string): string {
 
 async function exportSave(saveId: string) {
   try {
-    const { exportSessionSave } = await import('@engine/session-backup');
+    const { exportSessionSave } = await import('@engine/persistence/session-backup');
     const opts: { storyPreset?: { id: string; name: string } } = {};
     const presetId = cfg.settings.activePresetId;
     if (presetId) {
-      const { getPresets } = await import('@engine/database');
+      const { getPresets } = await import('@engine/persistence/database');
       const hit = (await getPresets()).find((preset) => preset.id === presetId);
       if (hit) opts.storyPreset = { id: hit.id, name: hit.name };
     }
@@ -253,7 +253,8 @@ async function importSave() {
       return;
     }
     try {
-      const { isSessionBackup, isFullBackupFile } = await import('@engine/session-backup');
+      const { isSessionBackup, isFullBackupFile } =
+        await import('@engine/persistence/session-backup');
       if (isSessionBackup(data)) {
         await beginSessionImport(data);
         return;
@@ -274,7 +275,7 @@ async function importSave() {
 
 async function beginSessionImport(backup: SessionBackup) {
   try {
-    const { checkSessionSaveDependencies } = await import('@engine/session-backup');
+    const { checkSessionSaveDependencies } = await import('@engine/persistence/session-backup');
     const check = await checkSessionSaveDependencies(backup);
     if (check.ok) {
       await runSessionImport(backup, false);
@@ -291,7 +292,7 @@ async function beginSessionImport(backup: SessionBackup) {
 
 async function runSessionImport(backup: SessionBackup, withWarnings: boolean) {
   try {
-    const { importSessionSave } = await import('@engine/session-backup');
+    const { importSessionSave } = await import('@engine/persistence/session-backup');
     await importSessionSave(backup);
     await game.loadSaves();
     if (withWarnings) ui.toast('存档已导入（部分依赖内容缺失）', 'warning');
@@ -319,7 +320,7 @@ async function confirmFullBackupImport() {
   closeFullBackupModal();
   if (!data) return;
   try {
-    const { importAllData } = await import('@engine/database');
+    const { importAllData } = await import('@engine/persistence/database');
     await importAllData(data);
     await cfg.reloadApiEntries();
     await game.loadSaves();

@@ -11,10 +11,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { parseImageDialects, resolveImageDialect } from '@engine/image-dialect';
-import { composePrompt } from '@engine/image-prompt';
-import { buildNaiRequest } from '@engine/image-providers/novelai';
-import { DEFAULT_IMAGE_MODEL } from '@engine/image-defaults';
+import { parseImageDialects, resolveImageDialect } from '@engine/image/image-dialect';
+import { composePrompt } from '@engine/image/image-prompt';
+import { buildNaiRequest } from '@engine/image/providers/novelai';
+import { DEFAULT_IMAGE_MODEL } from '@engine/image/image-defaults';
 import { generateNaiImage, setImageFetch } from '@ui/lib/image-client';
 
 async function main(): Promise<void> {

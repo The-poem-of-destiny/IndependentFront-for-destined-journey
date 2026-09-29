@@ -49,7 +49,7 @@ import type {
   ImageProviderId,
   ImageRating,
   NaiBillingTier,
-} from '@engine/types-image';
+} from '@engine/types/types-image';
 
 /** 剧情难度层级。`'adaptive'` = 按玩家层级动态；数字 = 钉死 T1-T7 */
 export type PlotDifficultyTier = 'adaptive' | number | string;

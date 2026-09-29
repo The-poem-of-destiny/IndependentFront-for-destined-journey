@@ -200,7 +200,7 @@ export function useMapViewer(
       // ① 地图字节本地化（v21 / mapBlobs）：先查 IndexedDB 缓存，命中则不再走网络。
       //    12MB 图源（i.ibb.co）每次打开都重新下载 + 30 秒硬超时中断，是慢网络下
       //    地图「加载失败」的根因（2026-08-07 真机：206 分块下载被 abort）。
-      const { getDatabase } = await import('@engine/database');
+      const { getDatabase } = await import('@engine/persistence/database');
       let blob = (await getDatabase().mapBlobs.get(config.url))?.blob;
       if (!blob) {
         blob = await downloadMapBlob(config, controller.signal, onProgress);

@@ -49,20 +49,20 @@ import AppModal from '../../shared/AppModal.vue';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { useApiSourceStore } from '../../../stores/api-source-store';
 import { ensureContentRegistryLoaded, getContentRegistry } from '../../../stores/content-store';
-import { estimateAnlasCost } from '@engine/image-anlas';
+import { estimateAnlasCost } from '@engine/image/image-anlas';
 import {
   FALLBACK_IMAGE_DIALECT,
   parseImageDialects,
   resolveImageDialect,
-} from '@engine/image-dialect';
-import { parseComfyWorkflow } from '@engine/image-providers/comfyui';
+} from '@engine/image/image-dialect';
+import { parseComfyWorkflow } from '@engine/image/providers/comfyui';
 import { COMFY_DEFAULT_BASE_URL } from '../../../lib/image-client';
 import type {
   ImageGenMode,
   ImageProviderId,
   ImageRating,
   NaiBillingTier,
-} from '@engine/types-image';
+} from '@engine/types/types-image';
 
 const cfg = useSettingsStore();
 const s = cfg.settings;

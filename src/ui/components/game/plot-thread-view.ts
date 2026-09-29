@@ -11,9 +11,9 @@
  * - 边只要一端隐藏 → 整条边遮蔽（不能只显示「A → ？？？」泄露 B 的存在）；
  * - motive 只在「剧透模式 + 显式点开详情」时显示；「见过节点」≠「知道全部内幕」。
  */
-import { PLOT_THREAD_STATUS_LABELS } from '@engine/plot-threads';
-import type { PlotThreadFlags, PlotThreadStatus } from '@engine/plot-threads';
-import { collectPlotThreadEdges } from '@engine/plot-threads';
+import { PLOT_THREAD_STATUS_LABELS } from '@engine/plot/plot-threads';
+import type { PlotThreadFlags, PlotThreadStatus } from '@engine/plot/plot-threads';
+import { collectPlotThreadEdges } from '@engine/plot/plot-threads';
 
 export interface ThreadDisplayNode {
   name: string;

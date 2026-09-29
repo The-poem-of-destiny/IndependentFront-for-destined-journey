@@ -14,8 +14,8 @@
  * 🔴 本模块**不做**七态判定 —— 那是 `scene-image-view.ts` 的唯一职责。这里的输入
  * 已经是 `done` 那一格之内的东西。
  */
-import { FALLBACK_IMAGE_DIALECT } from '@engine/image-dialect';
-import type { SceneImageRecord } from '@engine/types-image';
+import { FALLBACK_IMAGE_DIALECT } from '@engine/image/image-dialect';
+import type { SceneImageRecord } from '@engine/types/types-image';
 
 /** {@link copyablePromptOf} 需要的最小切面 —— 三个候选字段 */
 export type PromptBearingRecord = Pick<

@@ -33,9 +33,9 @@ import {
   MARKER_ICON_OPTIONS,
   MARKER_COLOR_OPTIONS,
 } from '../../composables/useMapMarkers';
-import { getLocationNode, getLocationNodes } from '@engine/location-db';
-import { getMapMarkers, removeMapMarker, setMapMarker } from '@engine/save-profile';
-import type { LocationNode, MapMarker } from '@engine/types';
+import { getLocationNode, getLocationNodes } from '@engine/map/location-db';
+import { getMapMarkers, removeMapMarker, setMapMarker } from '@engine/state/save-profile';
+import type { LocationNode, MapMarker } from '@engine/types/types';
 import { getContentRegistry, ensureContentRegistryLoaded } from '../../stores/content-store';
 
 // ═══ Stores ═══
@@ -46,7 +46,7 @@ const game = useGameStore();
  * 🔴 本组件**不许**再出现任何指向 `data/` 的静态 import。
  *
  * 原来这里有两条硬耦合：`map-marker-presets.json` 的静态 ESM import（删文件直接 break
- * build）与 `@engine/location-db` 的 `DEFAULT_LOCATIONS` 模块常量。两者都是世界内容，
+ * build）与 `@engine/map/location-db` 的 `DEFAULT_LOCATIONS` 模块常量。两者都是世界内容，
  * 现在统一从内容注册表（`content-store` 的六面之一）同步读——占位 JSON 或已装内容包供给。
  *
  * 注册表未加载时该面是 `undefined`：进面板前 `await ensureContentRegistryLoaded()`

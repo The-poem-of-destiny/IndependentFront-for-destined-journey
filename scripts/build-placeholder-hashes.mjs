@@ -6,7 +6,7 @@
  *
  * ## 它产出什么
  *
- * `placeholder-hashes.json`（默认 `src/sillytavern/placeholder-hashes.json`）:
+ * `placeholder-hashes.json`（默认 `src/core/content/placeholder-hashes.json`）:
  *
  * ```jsonc
  * {
@@ -27,7 +27,7 @@
  * ## hash 算法与引擎侧的一致性
  *
  * 🔴 本文件里的 `hashContentDeterministic` / `hashWorldBook` / `stableSerialize` 是
- * `src/sillytavern/content-source.ts` 与 `content-pack-plan.ts` 里同名函数的**逐行等价复刻**
+ * `src/core/content/content-source.ts` 与 `content-pack-plan.ts` 里同名函数的**逐行等价复刻**
  * （构建脚本是 `.mjs`，不能 import TS 源）。一致性不靠自觉，靠
  * `tests/build-placeholder-hashes.test.ts` —— 它同时 import 本脚本与那两个 TS 模块，
  * 对同一批输入断言两侧产出**同一个 hash 串**。改动任一侧而不改另一侧，那条测试立刻变红。
@@ -61,7 +61,7 @@ const REPO_ROOT = resolve(SCRIPT_DIR, '..');
 export const DEFAULT_INPUT_DIR = 'public/data';
 
 /** 默认输出文件（随引擎打包，D20：不进内容树，overlay 覆盖不到） */
-export const DEFAULT_OUTPUT_FILE = 'src/sillytavern/placeholder-hashes.json';
+export const DEFAULT_OUTPUT_FILE = 'src/core/content/placeholder-hashes.json';
 
 /**
  * 占位集版本戳（D42）。
@@ -79,7 +79,7 @@ export const PLACEHOLDER_VERSION = '1.0.0';
 /**
  * 内容正文的确定性 hash（同步，不依赖 `crypto.subtle`）。
  *
- * 与 `src/sillytavern/content-source.ts` 的 `hashContentDeterministic` **逐行等价**：
+ * 与 `src/core/content/content-source.ts` 的 `hashContentDeterministic` **逐行等价**：
  * 双种子 FNV-1a 32 位拼成 16 位十六进制。长度也进哈希，故截断/追加空白可被区分。
  *
  * @param {string} content

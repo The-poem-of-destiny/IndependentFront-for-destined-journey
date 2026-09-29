@@ -7,15 +7,15 @@
  *
  * 对齐 docs/design.md §2.5（首行缩进）/ §1（叙事衬线）。
  */
-import { collectActiveSignalsFromEntries, resolveAutoEnable } from '@engine/beautifier';
-import type { BeautifierRule } from '@engine/types';
+import { collectActiveSignalsFromEntries, resolveAutoEnable } from '@engine/story/beautifier';
+import type { BeautifierRule } from '@engine/types/types';
 import { useSettingsStore } from '../stores/settings-store';
 import { useGameStore } from '../stores/game-store';
 import { useBeautifierStore } from '../stores/beautifier-store';
 import { useWorkshopStore } from '../stores/workshop-store';
 import { useWorldBookStore } from '../stores/worldbook-store';
 import { buildWorkshopEnableOptions, selectedWorkshopProjectIds } from '../lib/workshop-enable';
-import { workshopBookId } from '@engine/workshop-types';
+import { workshopBookId } from '@engine/workshop/workshop-types';
 
 export function useBeautify() {
   const settings = useSettingsStore();

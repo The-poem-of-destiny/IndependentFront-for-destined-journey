@@ -19,7 +19,7 @@
  */
 
 import { computed, ref } from 'vue';
-import { MORALE_STATE_LABELS, type CharacterState, type StatusEffect } from '@engine/types';
+import { MORALE_STATE_LABELS, type CharacterState, type StatusEffect } from '@engine/types/types';
 import { useGameStore } from '../../../stores/game-store';
 import { qualityLabelForTier, qualityVar } from '../../../lib/quality-colors';
 import type { V3Unit } from './combat-v3-projection';

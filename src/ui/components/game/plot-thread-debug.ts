@@ -9,10 +9,14 @@
  * 只读无副作用：evaluatePlotThreadGate 是纯函数（确定性随机、不写库），
  * 「查看面板」不推进任何随机状态（实施计划 T5 第 7 条）。
  */
-import type { PlotThreadFlags, PlotThreadGateResult, PlotThreadStatus } from '@engine/plot-threads';
-import { evaluatePlotThreadGate, collectPlotThreadEdges } from '@engine/plot-threads';
-import type { PlotEvent } from '@engine/types';
-import type { GameTime } from '@engine/time-system';
+import type {
+  PlotThreadFlags,
+  PlotThreadGateResult,
+  PlotThreadStatus,
+} from '@engine/plot/plot-threads';
+import { evaluatePlotThreadGate, collectPlotThreadEdges } from '@engine/plot/plot-threads';
+import type { PlotEvent } from '@engine/types/types';
+import type { GameTime } from '@engine/time/time-system';
 
 export interface PlotThreadDebugInfo {
   enabled: boolean;

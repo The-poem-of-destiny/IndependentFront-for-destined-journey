@@ -12,8 +12,8 @@
  *
  * 启动顺序：迁移 → 之后才跑内置书合并（针对 Dexie）。见 worldbook-store 的 `init()`。
  */
-import { getDatabase } from '@engine/database';
-import type { WorldBook } from '@engine/types';
+import { getDatabase } from '@engine/persistence/database';
+import type { WorldBook } from '@engine/types/types';
 import { runLegacyMigration, type IdRename } from './legacy-dexie-migration';
 
 /** `AppDatabase` 类本身未导出，用返回类型取到它 */

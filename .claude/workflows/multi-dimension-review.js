@@ -1,7 +1,7 @@
 /**
  * 多维度代码审查 — 从正确性/性能/安全/架构四个维度并行审查
  *
- * 用法: /workflow multi-dimension-review -- 'src/sillytavern/types.ts'
+ * 用法: /workflow multi-dimension-review -- 'src/core/types/types.ts'
  * 场景: 任何文件修改后，提交前审查
  */
 
@@ -56,7 +56,7 @@ const DIMENSIONS = [
 ];
 
 // 待审查的文件（从 args 或默认审查所有 .ts）
-const FILES = args || ['src/sillytavern/'];
+const FILES = args || ['src/core/'];
 const TARGET = Array.isArray(FILES) ? FILES.join(' ') : FILES;
 
 phase('审查');

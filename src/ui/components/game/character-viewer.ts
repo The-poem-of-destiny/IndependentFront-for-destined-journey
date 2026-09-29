@@ -8,10 +8,10 @@
  *
  * 纯度约束: 无 Vue、无 Pinia、无 I/O、无浏览器全局。
  */
-import { clampAffection, getAffectionLabel } from '@engine/affection-system';
-import { getTierConfig } from '@engine/tier-constants';
+import { clampAffection, getAffectionLabel } from '@engine/character/affection-system';
+import { getTierConfig } from '@engine/character/tier-constants';
 import { qualityOf } from '../../lib/item-view';
-import { ASSET_TYPES } from '@engine/types';
+import { ASSET_TYPES } from '@engine/types/types';
 import type {
   AssetMetaRecord,
   AssetType,
@@ -20,7 +20,7 @@ import type {
   ElementDetail,
   InventoryItem,
   LawDetail,
-} from '@engine/types';
+} from '@engine/types/types';
 
 // ═══════════════════════════════════════════════════════════
 // 头部

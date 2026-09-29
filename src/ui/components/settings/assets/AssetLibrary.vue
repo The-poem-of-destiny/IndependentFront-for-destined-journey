@@ -15,8 +15,8 @@
  * `revokeAllUrls()`。**绝不持久化 URL** —— 要存就存逻辑键，渲染时再解析。
  */
 import { computed, inject, onUnmounted, ref, watch } from 'vue';
-import { ASSET_TYPES, type AssetMetaRecord, type AssetType } from '@engine/types';
-import { isVideoExtension } from '@engine/asset-types';
+import { ASSET_TYPES, type AssetMetaRecord, type AssetType } from '@engine/types/types';
+import { isVideoExtension } from '@engine/assets/asset-types';
 import { useAssetStore, type AssetGroup } from '../../../stores/asset-store';
 import AppButton from '../../shared/AppButton.vue';
 import AssetCharacterDrawer from './AssetCharacterDrawer.vue';

@@ -19,12 +19,15 @@
  *    名字，不替它判活。
  */
 
-import { computeEventWeight, evaluateEventCondition } from '@engine/random-event-scheduler';
+import {
+  computeEventWeight,
+  evaluateEventCondition,
+} from '@engine/random-events/random-event-scheduler';
 import type {
   RandomEventDef,
   RandomEventRollContext,
   RandomEventSaveFlags,
-} from '@engine/types-random-events';
+} from '@engine/types/types-random-events';
 
 /** 表里的一行。中文措辞全在组件模板里，本层只出结构与数字 */
 export interface RandomEventDebugRow {

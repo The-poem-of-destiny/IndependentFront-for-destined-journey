@@ -1,5 +1,5 @@
 /**
- * layering-gate.test.ts — 结构闸门：`src/sillytavern/`（引擎）不许依赖 `src/ui/`（前端）
+ * layering-gate.test.ts — 结构闸门：`src/core/`（引擎）不许依赖 `src/ui/`（前端）
  *
  * 钉的是**依赖方向**这条契约本身。收口之前引擎里有 6 条反向边：
  *   · agent-tools / bloodlines / location-db / random-tables → `ui/stores/content-store`
@@ -16,7 +16,7 @@
  * `random-event-runtime.ts`。要在引擎里用前端的东西，答案永远是「搬进引擎」或「开一条缝」。
  *
  * 🔴 **为什么 eslint 之外还要这一道**：`no-restricted-imports`（eslint.config.js 里
- *    `files: ['src/sillytavern/**\/*.ts']` 那一档）只认**静态** import/export-from。
+ *    `files: ['src/core/**\/*.ts']` 那一档）只认**静态** import/export-from。
  *    动态 `import('../ui/x')`、`import.meta.glob`、以及把路径存进变量再 import 的写法，
  *    它一概看不见。本闸门直接扫源码字符串，专治那三种。两道网互补，缺一条就留一条静默的路。
  *
@@ -38,7 +38,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const REPO_ROOT = join(__dirname, '..');
-const ENGINE_DIR = join(REPO_ROOT, 'src', 'sillytavern');
+const ENGINE_DIR = join(REPO_ROOT, 'src', 'core');
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 判据
@@ -160,8 +160,8 @@ function findLayeringViolations(source: string): string[] {
 // 覆盖面
 // ──────────────────────────────────────────────────────────────────────────────
 
-/** 递归列 `src/sillytavern/**\/*.ts`（含 `.test.ts`；相对 ENGINE_DIR，正斜杠） */
-function engineSourceFiles(): string[] {
+/** 递归列指定目录下的 TypeScript 文件，返回正斜杠相对路径。 */
+function engineSourceFiles(root = ENGINE_DIR): string[] {
   const out: string[] = [];
   const walk = (dir: string, prefix: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -171,7 +171,7 @@ function engineSourceFiles(): string[] {
       else if (entry.name.endsWith('.ts')) out.push(rel);
     }
   };
-  walk(ENGINE_DIR, '');
+  walk(root, '');
   return out;
 }
 
@@ -304,20 +304,19 @@ describe('分层闸门：引擎不依赖前端', () => {
 
   it('扫描面非空且确实覆盖到已知文件与子目录（确认不是在空转）', () => {
     expect(files.length).toBeGreaterThan(100);
-    expect(files).toContain('content-registry-runtime.ts');
-    expect(files).toContain('database.ts');
-    expect(files).toContain('media-hash.ts');
+    expect(files).toContain('content/content-registry-runtime.ts');
+    expect(files).toContain('persistence/database.ts');
+    expect(files).toContain('assets/media-hash.ts');
     // 子目录也递归到了
     expect(files.some((f) => f.startsWith('combat-v3/'))).toBe(true);
-    // `.test.ts` 一并扫 —— 引擎单测拿前端 store 当夹具正是被收口的一类
-    expect(files.some((f) => f.endsWith('.test.ts'))).toBe(true);
+    expect(files.some((f) => f.endsWith('.test.ts'))).toBe(false);
   });
 
   it('豁免清单为空（有例外先问「这不是该开一条缝吗」）', () => {
     expect(Object.keys(EXEMPTIONS)).toEqual([]);
   });
 
-  it('src/sillytavern/**/*.ts 零前端依赖（含 vue / pinia / 动态 import / 字符串路径）', () => {
+  it('src/core/**/*.ts 零前端依赖（含 vue / pinia / 动态 import / 字符串路径）', () => {
     const violations: string[] = [];
     for (const rel of files) {
       if (rel in EXEMPTIONS) continue;
@@ -327,9 +326,9 @@ describe('分层闸门：引擎不依赖前端', () => {
     expect(
       violations,
       [
-        '引擎（src/sillytavern）里出现了对前端（src/ui）或 Vue/Pinia 的依赖。',
+        '引擎（src/core）里出现了对前端（src/ui）或 Vue/Pinia 的依赖。',
         '依赖方向只有一个：前端 → 引擎。要在引擎里用前端的东西，',
-        '要么把它搬进 src/sillytavern（先例：media-hash.ts、types.ts 的 CreatePreset），',
+        '要么把它搬进 src/core（先例：media-hash.ts、types.ts 的 CreatePreset），',
         '要么开一条注入缝由前端往里装（先例：content-registry-runtime.ts / engine-settings.ts /',
         'map-runtime.ts / random-event-runtime.ts）。违规明细:',
         ...violations,
@@ -339,12 +338,24 @@ describe('分层闸门：引擎不依赖前端', () => {
 
   it('四条注入缝都还在（闸门要求的那条退路不能被顺手删掉）', () => {
     for (const seam of [
-      'content-registry-runtime.ts',
-      'engine-settings.ts',
-      'map-runtime.ts',
-      'random-event-runtime.ts',
+      'content/content-registry-runtime.ts',
+      'runtime/engine-settings.ts',
+      'map/map-runtime.ts',
+      'random-events/random-event-runtime.ts',
     ]) {
       expect(files, `注入缝 ${seam} 不见了`).toContain(seam);
     }
+  });
+
+  it('独立存放的引擎测试仍不依赖前端', () => {
+    const testRoot = join(REPO_ROOT, 'tests', 'core');
+    const testFiles = engineSourceFiles(testRoot);
+    expect(testFiles.some((f) => f.endsWith('.test.ts'))).toBe(true);
+    const violations = testFiles.flatMap((rel) =>
+      findLayeringViolations(readFileSync(join(testRoot, rel), 'utf8')).map(
+        (hit) => `${rel} ${hit}`,
+      ),
+    );
+    expect(violations, violations.join('\n')).toEqual([]);
   });
 });

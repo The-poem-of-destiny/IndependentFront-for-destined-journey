@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SystemEvent } from '@engine/types';
+import type { SystemEvent } from '@engine/types/types';
 const props = defineProps<{ event: SystemEvent }>();
 
 function notifIcon(): string {

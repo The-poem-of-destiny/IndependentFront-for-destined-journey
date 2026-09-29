@@ -6,7 +6,7 @@
  */
 import { computed, ref } from 'vue';
 import { useCreateStore } from '../../stores/create-store';
-import type { CatalogItem } from '@engine/start-catalog';
+import type { CatalogItem } from '@engine/content/start-catalog';
 import CategorySelectionLayout from './CategorySelectionLayout.vue';
 import CategoryTabs from './CategoryTabs.vue';
 import QualityFilter from './QualityFilter.vue';

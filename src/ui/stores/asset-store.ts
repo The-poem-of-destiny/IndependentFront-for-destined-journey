@@ -40,8 +40,8 @@
  */
 import { defineStore } from 'pinia';
 import { computed, reactive, ref } from 'vue';
-import { ASSET_TYPES } from '@engine/types';
-import type { AssetFraming, AssetMetaRecord, AssetType, AudioTrack } from '@engine/types';
+import { ASSET_TYPES } from '@engine/types/types';
+import type { AssetFraming, AssetMetaRecord, AssetType, AudioTrack } from '@engine/types/types';
 import {
   getAsset,
   getAssets,
@@ -52,27 +52,27 @@ import {
   saveAudioTrack,
   getAudioBlob,
   getDatabase,
-} from '@engine/database';
-import { allocateVariantSlot, planImport } from '@engine/asset-import-plan';
+} from '@engine/persistence/database';
+import { allocateVariantSlot, planImport } from '@engine/assets/asset-import-plan';
 import type {
   DecodedEntry,
   ExistingRows,
   ImportManifest,
   ImportPlan,
   ImportWarning,
-} from '@engine/asset-import-plan';
+} from '@engine/assets/asset-import-plan';
 import {
   formatAssetFilename,
   violatesNamingInvariant,
   violatesZipEntryName,
-} from '@engine/asset-filename';
+} from '@engine/assets/asset-filename';
 import {
   ASSET_MIME_BY_EXTENSION,
   clampAssetFraming,
   isDefaultAssetFraming,
   isMediaAllowed,
   mimeForAssetExtension,
-} from '@engine/asset-types';
+} from '@engine/assets/asset-types';
 import { hashMediaBlob } from '../lib/media-hash';
 import {
   cropImageBlob,
@@ -82,7 +82,7 @@ import {
   type CropRect,
   type ImageCropSeams,
 } from '../lib/image-crop';
-import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names';
+import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio/audio-names';
 import {
   readAssetZip,
   writeAssetZip,
@@ -828,7 +828,7 @@ export const useAssetStore = defineStore('asset', () => {
    *   trim 掉等于替用户改名。
    * - **D7 媒体规则**: mp4 只能落在不需要 alpha 的类型上。
    *
-   * 归属说明: 前两条判据都住在 `@engine/asset-filename`（引擎层，全部入口共用）。
+   * 归属说明: 前两条判据都住在 `@engine/assets/asset-filename`（引擎层，全部入口共用）。
    * D19 那条曾在本文件里另存一份私有实现，远程素材 v1 的波 1 把它提到引擎层之后
    * 本地那份已删 —— 远程目录解析器与改名入口现在读的是**同一份**判据。
    */

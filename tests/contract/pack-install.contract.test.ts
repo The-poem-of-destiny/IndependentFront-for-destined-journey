@@ -16,11 +16,11 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
-import { planPackInstall, type CurrentLibrary } from '../../src/sillytavern/content-pack-plan';
-import { AGENT_TOOL_MAP } from '../../src/sillytavern/agent-tools';
-import { hashWorldBook, validatePackOrThrow } from '../../src/sillytavern/content-source';
-import type { ContentPack, PackBaseline } from '../../src/sillytavern/types-content';
-import type { WorldBook } from '../../src/sillytavern/types';
+import { planPackInstall, type CurrentLibrary } from '../../src/core/content/content-pack-plan';
+import { AGENT_TOOL_MAP } from '../../src/core/agents/agent-tools';
+import { hashWorldBook, validatePackOrThrow } from '../../src/core/content/content-source';
+import type { ContentPack, PackBaseline } from '../../src/core/types/types-content';
+import type { WorldBook } from '../../src/core/types/types';
 
 const REPO_ROOT = join(__dirname, '..', '..');
 const PACK_FILE = process.env.POEM_PACK_FILE;

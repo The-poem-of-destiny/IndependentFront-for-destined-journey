@@ -12,7 +12,7 @@ import { useAudioStore } from '../../../stores/audio-store';
 import { useAssetStore } from '../../../stores/asset-store';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { useUIStore } from '../../../stores/ui-store';
-import type { AudioTrack, AudioTrackKind } from '@engine/types';
+import type { AudioTrack, AudioTrackKind } from '@engine/types/types';
 import AppButton from '../../shared/AppButton.vue';
 import AudioFolderStrip from './AudioFolderStrip.vue';
 import { audioDialogsKey } from './dialogs';

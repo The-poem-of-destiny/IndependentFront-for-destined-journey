@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { CatalogRarityCode } from '@engine/start-catalog';
-import { RARITY_LABELS } from '@engine/start-catalog';
+import type { CatalogRarityCode } from '@engine/content/start-catalog';
+import { RARITY_LABELS } from '@engine/content/start-catalog';
 // Q-11: 标签与颜色都从唯一入口派生 —— 此前这里内联了第三份七级表
 import { qualityLabelFromRarity, qualityVarFromRarity } from '../../lib/quality-colors';
 

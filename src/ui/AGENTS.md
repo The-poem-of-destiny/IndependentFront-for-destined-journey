@@ -12,6 +12,10 @@
 
 ## 前端架构 (Phase 7)
 
+引擎文件已按职责归类，前端通过 `@engine/<目录>/<模块>` 引用；类型入口为
+`@engine/types/types`。完整目录约定见 [src 目录与模块归属](../../docs/reference/src-directory-structure.md)。
+前端测试独立放入 `tests/ui/`，按组件、store、服务及辅助逻辑分类。
+
 ```
 src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL 状态驱动）
 ├── main.ts                          ← 应用入口（createApp + Pinia + 主题 + 音频手势解锁监听）
@@ -100,7 +104,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │                                          「引擎只经 lib/ 触达」这条**没有任何闸门**，写代码时不要
 │                                          依赖它成立（比如「改引擎签名只要改 lib/」是错的）
 │                                       ✅ 真正被机器闸门钉死的是**引擎侧的单向规则**（根 AGENTS.md
-│                                          「分层方向只有一个：前端 → 引擎」）：`src/sillytavern/**` 禁止
+│                                          「分层方向只有一个：前端 → 引擎」）：`src/core/**` 禁止
 │                                          反向 import `../ui/*` / `@ui/*` / `vue` / `pinia`（type-only 也算），
 │                                          由 `eslint.config.js` 的 `no-restricted-imports` +
 │                                          `tests/layering-gate.test.ts` 两道闸守着。**前端往引擎的方向
@@ -700,7 +704,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                 ← 背景列表 / 自定义条目录入 / 大纲预览
 │   │   ├── PresetModal.vue          ← 捏人预设弹窗
 │   │   ├── CreateFooter.vue         ← 上一步/下一步/校验提示（各步共用，别在步骤里各画一套）
-│   │   └── *.test.ts                ← AttributeEditor / PointsBar / SelectableCard / CreateSteps /
+│   │       测试位于 tests/ui/components/create/ ← AttributeEditor / PointsBar / SelectableCard / CreateSteps /
 │   │                                   CreateStepDestinyCore / CreateStepConfirm.assets
 │   ├── game/
 │   │   ├── GamePage.vue             ← 游戏页主布局（三栏 + **10 个页面级弹窗**；持有 --rail-w）

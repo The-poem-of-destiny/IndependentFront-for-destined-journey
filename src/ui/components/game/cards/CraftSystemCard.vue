@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CraftSystemEvent } from '@engine/types';
+import type { CraftSystemEvent } from '@engine/types/types';
 import { qualityVar } from '../../../lib/quality-colors';
 
 defineProps<{ event: CraftSystemEvent }>();

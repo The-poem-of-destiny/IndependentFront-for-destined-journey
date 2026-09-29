@@ -11,13 +11,13 @@
  * 的那一类逻辑（漏掉一段筛选，界面上只是多几个格子），而挂载一个网格去断言它们
  * 既慢又绕。分出来之后这三条能被直接钉住。
  */
-import { FALLBACK_IMAGE_DIALECT } from '@engine/image-dialect';
+import { FALLBACK_IMAGE_DIALECT } from '@engine/image/image-dialect';
 import type {
   ComposeWarning,
   ImageProviderId,
   SceneImageAnchorKind,
   SceneImageRecord,
-} from '@engine/types-image';
+} from '@engine/types/types-image';
 
 /**
  * 一格 —— 同一个锚点 `(messageId, anchorKind, occurrence)` 的全部 take 折在一起（§10.3）。

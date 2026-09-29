@@ -8,10 +8,10 @@
 
 **本文描述的 JS 脚本机制只适用于「战斗之外」的效果面。战斗内不走这条路。**
 
-| 场景                                                | 效果机制                                                                                     |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 场景                                              | 效果机制                                                                                     |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | 战斗**外**（装备/卸下、状态到期、读档接线、制作） | 本文的 `scripts` + `$` API（`script-executor.ts` + `subscription-manager.ts` + `emitChain`） |
-| 战斗**内**（v3 内核主持的整场战斗）               | **EffectAutomaton DSL**（`src/sillytavern/combat-v3/automata/`，18 窗口声明 + 8 大类 intent） |
+| 战斗**内**（v3 内核主持的整场战斗）               | **EffectAutomaton DSL**（`src/core/combat-v3/automata/`，18 窗口声明 + 8 大类 intent）       |
 
 ADR-20 的原文是「声明式优先，复杂动态逻辑走脚本沙盒」；**战斗内那半边已在 v3 收紧成
 「任意 JS 一律废止」** —— 战斗要的是可回放、可仲裁、可静态校验的效果声明，而任意 JS 三条都给不了。
@@ -41,22 +41,20 @@ Layer 4  脚本沙盒     ScriptExecutor    AI 用 $ API 编写逻辑       AI �
 
 ```typescript
 // 输入: AI 写的中文
-"攻击力: +50, DR: 5%, 火焰抗性: +30"
-
-// $effect.parse() → 
-[
-  { key: "atk", rawKey: "攻击力", value: 50, isPercentage: false },
-  { key: "dr", rawKey: "DR", value: 5, isPercentage: true },
-  { key: "fireResist", rawKey: "火焰抗性", value: 30, isPercentage: false }
-]
+'攻击力: +50, DR: 5%, 火焰抗性: +30'[
+  // $effect.parse() →
+  ({ key: 'atk', rawKey: '攻击力', value: 50, isPercentage: false },
+  { key: 'dr', rawKey: 'DR', value: 5, isPercentage: true },
+  { key: 'fireResist', rawKey: '火焰抗性', value: 30, isPercentage: false })
+];
 ```
 
 **50+ 中→英键映射表**：攻击力→atk, 防御力→def, 暴击率→critRate, 火焰抗性→fireResist...
 
 ```typescript
-$effect.parse(text)          // 解析声明字符串
-$effect.getValue(list, key)  // 查找指定 key 的值
-$effect.sumValues(list, key) // 多个效果同 key 求和
+$effect.parse(text); // 解析声明字符串
+$effect.getValue(list, key); // 查找指定 key 的值
+$effect.sumValues(list, key); // 多个效果同 key 求和
 ```
 
 ---
@@ -145,18 +143,18 @@ bus.emit({ type: 'status_effect', data: { ... } })
 **几乎所有 GameEvent 都由 `state-manager` 的 `createEvent()` 一处产出**（每个 patch handler
 返回一条），随后经 `commitChatState` 的 `publishToEffectSystem` 发到该存档的 EventBus。
 
-| 模块 | 事件 | 时机 |
-|------|------|------|
-| `state-manager` | `status_effect` | addEffect / removeEffect 后（:998 / :1013） |
-| `state-manager` | `variable_change` | set_variable / delta_variable 等变量补丁后（:689-735） |
-| `state-manager` | `character_action` | 角色属性/资源类补丁后（:893-921） |
-| `state-manager` | `item_use` | 物品增删/装备/卸下等补丁后（:1065-1277） |
-| `state-manager` | `skill_use` | 技能使用/学习/遗忘补丁后（:1331-1374） |
-| `state-manager` | `location_change` | set_location 后（:1392） |
-| `state-manager` | `quest_update` | 任务补丁后（:1521 / :1532） |
-| `state-manager` | `plot_trigger` | 剧情补丁后（:1502） |
-| `state-manager` | `random_event` | 随机事件按名结算后（:2184，随机事件 v1） |
-| `state-manager` | `system` | 时间推进等杂项补丁（:1414-1599） |
+| 模块            | 事件               | 时机                                                   |
+| --------------- | ------------------ | ------------------------------------------------------ |
+| `state-manager` | `status_effect`    | addEffect / removeEffect 后（:998 / :1013）            |
+| `state-manager` | `variable_change`  | set_variable / delta_variable 等变量补丁后（:689-735） |
+| `state-manager` | `character_action` | 角色属性/资源类补丁后（:893-921）                      |
+| `state-manager` | `item_use`         | 物品增删/装备/卸下等补丁后（:1065-1277）               |
+| `state-manager` | `skill_use`        | 技能使用/学习/遗忘补丁后（:1331-1374）                 |
+| `state-manager` | `location_change`  | set_location 后（:1392）                               |
+| `state-manager` | `quest_update`     | 任务补丁后（:1521 / :1532）                            |
+| `state-manager` | `plot_trigger`     | 剧情补丁后（:1502）                                    |
+| `state-manager` | `random_event`     | 随机事件按名结算后（:2184，随机事件 v1）               |
+| `state-manager` | `system`           | 时间推进等杂项补丁（:1414-1599）                       |
 
 **🪦 三条已失效的行（原表所载）**：
 
@@ -183,12 +181,12 @@ AI 用 `$` API 编写效果逻辑，引擎在沙盒中执行。
 **这里的「沙盒」是真隔离，不是形参遮蔽。** 求值后端在 `script-backend.ts`（接缝）→
 `script-quickjs-backend.ts`（实现），四条硬性质：
 
-| 性质 | 说明 |
-|------|------|
-| **realm 隔离** | 脚本跑在 QuickJS(wasm) 的 guest realm 里。guest 中**不存在**宿主 `globalThis` / `indexedDB` / `fetch` —— 不是「被挡住」，是那些对象根本没被造出来，够不到 Dexie 与 API Key |
-| **墙钟预算 50ms** | `init` 里写一句 `for(;;);` 不再冻死标签页；内存上限 32MB。一次脚本一个 runtime+context（脚本之间零泄漏，`$call` 重入互不干扰） |
-| **fail-closed** | 没装隔离 = 脚本**一行都不跑**，不是「先用 `new Function` 跑着」 |
-| **无 Legacy 回落** | 与 `ejs-backend.ts` **刻意不同：脚本面没有 `LegacyBackend`**，`setScriptBackend` 也不导出。留一个可安装的 `new Function` 实现，等于把刚拆掉的枪放回抽屉 |
+| 性质               | 说明                                                                                                                                                                       |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **realm 隔离**     | 脚本跑在 QuickJS(wasm) 的 guest realm 里。guest 中**不存在**宿主 `globalThis` / `indexedDB` / `fetch` —— 不是「被挡住」，是那些对象根本没被造出来，够不到 Dexie 与 API Key |
+| **墙钟预算 50ms**  | `init` 里写一句 `for(;;);` 不再冻死标签页；内存上限 32MB。一次脚本一个 runtime+context（脚本之间零泄漏，`$call` 重入互不干扰）                                             |
+| **fail-closed**    | 没装隔离 = 脚本**一行都不跑**，不是「先用 `new Function` 跑着」                                                                                                            |
+| **无 Legacy 回落** | 与 `ejs-backend.ts` **刻意不同：脚本面没有 `LegacyBackend`**，`setScriptBackend` 也不导出。留一个可安装的 `new Function` 实现，等于把刚拆掉的枪放回抽屉                    |
 
 🪦 **旧实现是 `new Function` + 13 个同名形参遮蔽**，那不是安全边界：
 `({}).constructor.constructor("return globalThis")()` 能拿回应用自己的真全局，
@@ -245,12 +243,12 @@ AI 用 `$` API 编写效果逻辑，引擎在沙盒中执行。
 
 ### 层数控制
 
-| 配置 | 行为 |
-|------|------|
-| 无 stackable/maxStacks | 自由叠加 (现状) |
-| `stackable: false` | 永远 1 层，重复施加只刷新时间 |
-| `maxStacks: N` | 累加到 N 停止 |
-| 两者合用 | `stackable: false, maxStacks: 1` = 不可叠 |
+| 配置                   | 行为                                      |
+| ---------------------- | ----------------------------------------- |
+| 无 stackable/maxStacks | 自由叠加 (现状)                           |
+| `stackable: false`     | 永远 1 层，重复施加只刷新时间             |
+| `maxStacks: N`         | 累加到 N 停止                             |
+| 两者合用               | `stackable: false, maxStacks: 1` = 不可叠 |
 
 ### 脚本沙盒 API
 
@@ -273,27 +271,27 @@ executeScript(script, context)
 **完整方法表**（读侧全部走 `ctx.readHooks`，未注入时返回下表的缺省值；写侧全部只写进
 `ScriptEffects` 收集器，由调用方统一 apply —— 脚本本身**碰不到数据库**）：
 
-| Namespace | 方法 | 读/写 | 缺省值 |
-|-----------|------|-------|--------|
-| `$dice` | `d20()` / `d100()` / `roll(formula)` | — | `roll` 解析不出公式返回 `0` |
-| `$resource` | `getHp(id)` / `getMaxHp(id)` / `getMp(id)` / `getMaxMp(id)` / `getSp(id)` / `getMaxSp(id)` | 读 | `0` |
-| `$resource` | `getHpPercent(id)` — 0~1 | 读 | `0` |
-| `$resource` | `modifyHp(id, amount)` → `hpChanges` | 写 | — |
-| `$resource` | `modifyStat(id, stat, amount)` → `statChanges` | 写 | — |
-| `$char` | `getAttr(id, attr)` — 五维，英文键 `str/dex/con/int/spi` | 读 | `0` |
-| `$char` | `getTier(id)` — 层级 1~7 | 读 | `0` |
-| `$char` | `isPresent(id)` — 是否在场（配合 `emitChain` 在场过滤） | 读 | `false` |
-| `$status` | `add(id, effect)` → `adds`（直接加、**不去重**，兼容旧脚本） | 写 | — |
-| `$status` | `apply(target, buffDef)` → `statusApplies`（🆕 M2：走 BuffRegistry 去重 —— 同源刷新时间+增层，异源共存） | 写 | — |
-| `$status` | `remove(target, buffIdOrName)` → `statusRemoves`（M2 新语义：按 buffId **或**裸 name 匹配） | 写 | — |
-| `$status` | `setStacks(id, effectId, stacks)` → `stackSets`（旧 API） | 写 | — |
-| `$status` | `getStacks(id, buffIdOrName)` | 读 | `0` |
-| `$status` | `has(id, buffIdOrName)` | 读 | `false` |
-| `$status` | `query(id)` — 返回 `StatusEffect[]` | 读 | `[]` |
-| `$event` | `on(eventType, scriptKey)` → `subscriptions`，返回 handle 字符串 | 写 | — |
-| `$event` | `off(handleOrType)` → `unsubscriptions` | 写 | — |
-| `$event` | `emit(eventType, data?)` → `events` | 写 | — |
-| `$call` | `$call(ref)` — 解析 ref 并在**同一上下文**执行，子脚本的**全部** 10 类效果自动合并回当前 `ScriptEffects`；固定返回 `undefined` | 写 | — |
+| Namespace   | 方法                                                                                                                           | 读/写 | 缺省值                      |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------ | ----- | --------------------------- |
+| `$dice`     | `d20()` / `d100()` / `roll(formula)`                                                                                           | —     | `roll` 解析不出公式返回 `0` |
+| `$resource` | `getHp(id)` / `getMaxHp(id)` / `getMp(id)` / `getMaxMp(id)` / `getSp(id)` / `getMaxSp(id)`                                     | 读    | `0`                         |
+| `$resource` | `getHpPercent(id)` — 0~1                                                                                                       | 读    | `0`                         |
+| `$resource` | `modifyHp(id, amount)` → `hpChanges`                                                                                           | 写    | —                           |
+| `$resource` | `modifyStat(id, stat, amount)` → `statChanges`                                                                                 | 写    | —                           |
+| `$char`     | `getAttr(id, attr)` — 五维，英文键 `str/dex/con/int/spi`                                                                       | 读    | `0`                         |
+| `$char`     | `getTier(id)` — 层级 1~7                                                                                                       | 读    | `0`                         |
+| `$char`     | `isPresent(id)` — 是否在场（配合 `emitChain` 在场过滤）                                                                        | 读    | `false`                     |
+| `$status`   | `add(id, effect)` → `adds`（直接加、**不去重**，兼容旧脚本）                                                                   | 写    | —                           |
+| `$status`   | `apply(target, buffDef)` → `statusApplies`（🆕 M2：走 BuffRegistry 去重 —— 同源刷新时间+增层，异源共存）                       | 写    | —                           |
+| `$status`   | `remove(target, buffIdOrName)` → `statusRemoves`（M2 新语义：按 buffId **或**裸 name 匹配）                                    | 写    | —                           |
+| `$status`   | `setStacks(id, effectId, stacks)` → `stackSets`（旧 API）                                                                      | 写    | —                           |
+| `$status`   | `getStacks(id, buffIdOrName)`                                                                                                  | 读    | `0`                         |
+| `$status`   | `has(id, buffIdOrName)`                                                                                                        | 读    | `false`                     |
+| `$status`   | `query(id)` — 返回 `StatusEffect[]`                                                                                            | 读    | `[]`                        |
+| `$event`    | `on(eventType, scriptKey)` → `subscriptions`，返回 handle 字符串                                                               | 写    | —                           |
+| `$event`    | `off(handleOrType)` → `unsubscriptions`                                                                                        | 写    | —                           |
+| `$event`    | `emit(eventType, data?)` → `events`                                                                                            | 写    | —                           |
+| `$call`     | `$call(ref)` — 解析 ref 并在**同一上下文**执行，子脚本的**全部** 10 类效果自动合并回当前 `ScriptEffects`；固定返回 `undefined` | 写    | —                           |
 
 🔴 **`add` 与 `apply` 是两件事，别混**：`add` 是「直接加一条」，`apply` 走 BuffRegistry 去重。
 新脚本一律用 `apply`；`add` 只为旧脚本保留。
@@ -339,14 +337,14 @@ executeScript(script, context)
 
 ### 🆕 脚本引用路径规范
 
-| 引用写法 | 解析目标 | 使用场景 |
-|----------|---------|---------|
-| `"tick"` | 当前对象 `scripts["tick"]` | 同对象内 |
-| `"@parent.burnFormula"` | 创建者的 `scripts["burnFormula"]` | 子 StatusEffect 回调父 Item |
-| `"@item.灼烧之剑.burnLogic"` | 指定物品的脚本 | 跨物品显式引用 |
-| `"@skill.重击.damageCalc"` | 指定技能的脚本 | 技能间互相调用 |
-| `"@status.burn_001.tick"` | 指定状态效果的脚本 | 状态链联动 |
-| `"@ascension.生命摇篮.onActivate"` | 登神能力的脚本 | 权能/法则联动 |
+| 引用写法                           | 解析目标                          | 使用场景                    |
+| ---------------------------------- | --------------------------------- | --------------------------- |
+| `"tick"`                           | 当前对象 `scripts["tick"]`        | 同对象内                    |
+| `"@parent.burnFormula"`            | 创建者的 `scripts["burnFormula"]` | 子 StatusEffect 回调父 Item |
+| `"@item.灼烧之剑.burnLogic"`       | 指定物品的脚本                    | 跨物品显式引用              |
+| `"@skill.重击.damageCalc"`         | 指定技能的脚本                    | 技能间互相调用              |
+| `"@status.burn_001.tick"`          | 指定状态效果的脚本                | 状态链联动                  |
+| `"@ascension.生命摇篮.onActivate"` | 登神能力的脚本                    | 权能/法则联动               |
 
 **继承链自动建立**：`$status.add()` 时引擎自动将当前对象的 scripts 作为 `parentScripts` 传给子 StatusEffect。子对象可通过 `@parent.xxx` 回调父对象脚本。
 
@@ -405,35 +403,35 @@ $status.add(owner, {
   name: '护盾',
   scripts: {
     absorb: [
-      'var dmg = event.damage || 0;',   // 大段逻辑塞在子级
+      'var dmg = event.damage || 0;', // 大段逻辑塞在子级
       'var armor = self.stacks;',
       'if (armor <= 0) { ... }',
-      '// ... 20 行 ...'
-    ].join('\n')
+      '// ... 20 行 ...',
+    ].join('\n'),
   },
-  onTrigger: 'absorb'
+  onTrigger: 'absorb',
 });
 ```
 
 #### 为什么要这样做
 
-| 理由 | 说明 |
-|------|------|
-| 不套娃 | 所有逻辑在父级扁平铺开，一个 key 一个函数 |
-| 可复用 | 多个子对象共享父级公式池（`@parent` 继承链自动建立） |
-| 好维护 | 改一处公式，所有引用自动生效 |
-| 好测试 | 直接测父级 `scripts['absorbDamage']`，无需构造深层 StatusEffect |
-| AI 友好 | 每个 script key 是独立小函数，AI 生成/理解更准确 |
+| 理由    | 说明                                                            |
+| ------- | --------------------------------------------------------------- |
+| 不套娃  | 所有逻辑在父级扁平铺开，一个 key 一个函数                       |
+| 可复用  | 多个子对象共享父级公式池（`@parent` 继承链自动建立）            |
+| 好维护  | 改一处公式，所有引用自动生效                                    |
+| 好测试  | 直接测父级 `scripts['absorbDamage']`，无需构造深层 StatusEffect |
+| AI 友好 | 每个 script key 是独立小函数，AI 生成/理解更准确                |
 
 ### 🆕 init / cleanup 生命周期
 
 对象激活时引擎执行 `scripts.init`，失效时执行 `scripts.cleanup`：
 
-| 对象类型 | init 触发时机 | cleanup 触发时机 |
-|----------|-------------|-----------------|
-| Equipment | 装备时 | 卸下时 |
-| StatusEffect | 施加时 (onApply 之前) | 移除时 (onRemove 之后) |
-| Ascension 要素 | 获得时 | 升级/失去时 |
+| 对象类型       | init 触发时机         | cleanup 触发时机       |
+| -------------- | --------------------- | ---------------------- |
+| Equipment      | 装备时                | 卸下时                 |
+| StatusEffect   | 施加时 (onApply 之前) | 移除时 (onRemove 之后) |
+| Ascension 要素 | 获得时                | 升级/失去时            |
 
 **init 模式**：在 init 中调用 `$event.on()` 注册持久监听。
 **cleanup 模式**：在 cleanup 中调用 `$event.off()` 取消监听。
@@ -464,6 +462,7 @@ $call(ref: string): undefined
 ```
 
 **示例**：
+
 ```javascript
 // Item 定义
 scripts: {
@@ -505,10 +504,10 @@ ScriptEffects {
 
 ```typescript
 // 回合结束时执行所有状态的 onTick
-executeHook(character.statusEffects, 'onTick', { owner: charId, event: { turn: 3 } })
+executeHook(character.statusEffects, 'onTick', { owner: charId, event: { turn: 3 } });
 
 // 施加时执行 onApply
-executeHook([newEffect], 'onApply', { owner: charId })
+executeHook([newEffect], 'onApply', { owner: charId });
 ```
 
 ---
@@ -571,26 +570,26 @@ AI (item_gen / vars_update) 生成物品/状态时需遵循 **ADR-27 scripts 池
 ```
 
 $ API 可用（2026-08-18 复核补全，完整表见 §五「完整方法表」）:
-  $dice.d20() / $dice.d100() / $dice.roll('2d6+3')  — 骰子
-  $resource.getHp/getMaxHp/getMp/getMaxMp/getSp/getMaxSp/getHpPercent(id)  — 资源只读
-  $resource.modifyHp(id, amount)  — 修改HP (负数为伤害)
-  $resource.modifyStat(id, stat, amount)  — 修改属性
-  $char.getAttr(id, 'str')/getTier(id)/isPresent(id)  — 角色只读查询
-  $status.apply(id, {name, category, ...})  — 🆕 添加状态（走去重，新脚本用这个）
-  $status.add(id, {name, scripts, onTick, ...})  — 添加状态（不去重，旧脚本兼容）
-  $status.remove(id, effectName)  — 移除状态
-  $status.setStacks(id, effectName, n)  — 设置层数
-  $status.getStacks(id, name)/has(id, name)/query(id)  — 状态只读查询
-  $call(ref)  — 跨对象脚本调用（效果自动合并）
-  $event.emit(type, data)  — 触发事件
+  $dice.d20() / $dice.d100() / $dice.roll('2d6+3') — 骰子
+$resource.getHp/getMaxHp/getMp/getMaxMp/getSp/getMaxSp/getHpPercent(id)  — 资源只读
+  $resource.modifyHp(id, amount) — 修改HP (负数为伤害)
+$resource.modifyStat(id, stat, amount)  — 修改属性
+  $char.getAttr(id, 'str')/getTier(id)/isPresent(id) — 角色只读查询
+$status.apply(id, {name, category, ...})  — 🆕 添加状态（走去重，新脚本用这个）
+  $status.add(id, {name, scripts, onTick, ...}) — 添加状态（不去重，旧脚本兼容）
+$status.remove(id, effectName)  — 移除状态
+  $status.setStacks(id, effectName, n) — 设置层数
+$status.getStacks(id, name)/has(id, name)/query(id)  — 状态只读查询
+  $call(ref) — 跨对象脚本调用（效果自动合并）
+$event.emit(type, data)  — 触发事件
   $event.on(type, scriptKey) — 注册持久监听（init 中使用）
-  $event.off(handleOrType) — 取消监听（cleanup 中使用）
+$event.off(handleOrType) — 取消监听（cleanup 中使用）
 
 上下文变量:
-  owner  — 效果持有者
-  target — 事件目标
-  self   — 当前效果自身 { stacks, remainingTime, name }
-  event  — 触发事件数据
+owner — 效果持有者
+target — 事件目标
+self — 当前效果自身 { stacks, remainingTime, name }
+event — 触发事件数据
 
 ---
 
@@ -600,10 +599,10 @@ $ API 可用（2026-08-18 复核补全，完整表见 §五「完整方法表」
 
 ```typescript
 // SaveProfile — 存档级全局时间
-gameTime: GameTime  // { era, year, month, day, weekday, hour, minute }
+gameTime: GameTime; // { era, year, month, day, weekday, hour, minute }
 
 // StatusEffect — 剩余时间
-remainingTime: number | null;  // null = 永久
+remainingTime: number | null; // null = 永久
 timeUnit: '回合' | '分钟' | '小时';
 ```
 
@@ -629,9 +628,12 @@ AgentOrchestrator Stage 2 后处理
 
 ### 层数控制
 
-| 字段 | 行为 |
-|------|------|
+| 字段               | 行为                          |
+| ------------------ | ----------------------------- |
 | `stackable: false` | 永远 1 层，重复施加只刷新时间 |
-| `maxStacks: N` | 累加到 N 停止 |
-| 默认 | 无上限累加 |
+| `maxStacks: N`     | 累加到 N 停止                 |
+| 默认               | 无上限累加                    |
+
+```
+
 ```

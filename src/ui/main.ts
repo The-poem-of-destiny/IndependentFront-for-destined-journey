@@ -4,11 +4,11 @@ import App from './App.vue';
 import { useThemeStore } from './stores/theme-store';
 import { useUIStore } from './stores/ui-store';
 import { installUnlockListener } from './lib/audio-singleton';
-import { installProductionEjsBackend } from '@engine/ejs-backend';
-import { installProductionScriptBackend } from '@engine/script-backend';
-import { setEngineSettingsProvider } from '@engine/engine-settings';
-import { installPromptSessionStore } from '@engine/prompt-session-assembler';
-import { createDexiePromptSessionStore } from '@engine/prompt-session-store';
+import { installProductionEjsBackend } from '@engine/ejs/ejs-backend';
+import { installProductionScriptBackend } from '@engine/scripting/script-backend';
+import { setEngineSettingsProvider } from '@engine/runtime/engine-settings';
+import { installPromptSessionStore } from '@engine/prompts/prompt-session-assembler';
+import { createDexiePromptSessionStore } from '@engine/prompts/prompt-session-store';
 import { useSettingsStore } from './stores/settings-store';
 // 字体与图标 —— **自托管**，零外部请求（2026-08-05，替掉 index.html 里的两个 CDN）。
 //

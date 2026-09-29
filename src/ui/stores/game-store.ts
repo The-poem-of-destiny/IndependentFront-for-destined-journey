@@ -14,8 +14,8 @@ import type {
   AgentActivityStep,
   DebugAgentEntry,
   DebugTurnRecord,
-} from '@engine/types';
-export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types';
+} from '@engine/types/types';
+export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types/types';
 import type { CombatView, CombatCommand } from '@engine/combat-v3';
 import {
   getSave,
@@ -28,28 +28,28 @@ import {
   getSnapshots,
   getDebugTurns,
   saveDebugTurn,
-} from '@engine/database';
-import { saveMessage, getMessages, saveSaveSlot } from '@engine/database';
-import { getDatabase } from '@engine/database';
-import { withSaveWriteLock } from '@engine/state-write-queue';
+} from '@engine/persistence/database';
+import { saveMessage, getMessages, saveSaveSlot } from '@engine/persistence/database';
+import { getDatabase } from '@engine/persistence/database';
+import { withSaveWriteLock } from '@engine/state/state-write-queue';
 // 旧档经验保底归一化（方案 A，2026-08-24）：加载时对主角自愈「等级与累计经验矛盾」
 //（旧档 totalExp 是层级内语义，新系统是全程累计）。幂等，正常存档零影响。
-import { normalizePlayerProgression } from '@engine/database';
+import { normalizePlayerProgression } from '@engine/persistence/database';
 import {
   createStateManager,
   type PlayerPersonaDraft,
   type PlayerPersonaUpdateResult,
-} from '@engine/state-manager';
-import { wireEffectSystem, unwireEffectSystem } from '@engine/effect-wiring';
-import { getExperienceMode } from '@engine/save-profile';
-import { invalidatePromptSession } from '@engine/prompt-session-assembler';
-import { allocateAttributePoint } from '@engine/attribute-allocation';
-import type { AllocatableAttr } from '@engine/attribute-allocation';
+} from '@engine/state/state-manager';
+import { wireEffectSystem, unwireEffectSystem } from '@engine/effects/effect-wiring';
+import { getExperienceMode } from '@engine/state/save-profile';
+import { invalidatePromptSession } from '@engine/prompts/prompt-session-assembler';
+import { allocateAttributePoint } from '@engine/character/attribute-allocation';
+import type { AllocatableAttr } from '@engine/character/attribute-allocation';
 import { detach } from './db-write';
-import type { CombatEvent } from '@engine/combat-v2-types';
+import type { CombatEvent } from '@engine/combat/combat-v2-types';
 import { agentActivityLabel, presentToolActivity } from '../lib/agent-activity';
 // 🆕 重铸（2026-08-24）：单条目重铸的类型 + 注入缝（实现由 GamePage 挂 GamePipeline.rewriteLoadoutItem）
-import type { RewriteTarget } from '@engine/item-gen-chain';
+import type { RewriteTarget } from '@engine/agents/item-gen-chain';
 
 /** 重铸实现注入缝 —— GamePipeline 装配好 endpoint/chainData/stateManager 后由 GamePage 挂进来 */
 export type RewriteLoadoutImpl = (
@@ -1106,7 +1106,7 @@ export const useGameStore = defineStore('game', () => {
     return msg;
   }
 
-  function addSystemMessage(systemEvent: import('@engine/types').SystemEvent): void {
+  function addSystemMessage(systemEvent: import('@engine/types/types').SystemEvent): void {
     const msg: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'system',

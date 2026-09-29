@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import type { CatalogItem, CatalogRarityCode } from '@engine/start-catalog';
-import { RARITY_LABELS } from '@engine/start-catalog';
+import type { CatalogItem, CatalogRarityCode } from '@engine/content/start-catalog';
+import { RARITY_LABELS } from '@engine/content/start-catalog';
 // Q-11: 英文码 → 中文名走唯一入口（RARITY_TO_QUALITY 已删）
 import { qualityLabelFromRarity } from '../../lib/quality-colors';
 import AppModal from '../shared/AppModal.vue';

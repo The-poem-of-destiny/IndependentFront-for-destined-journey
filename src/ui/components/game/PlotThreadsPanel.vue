@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { getPlotThreadFlags } from '@engine/save-profile';
-import { fromEpochMinutes, formatGameTime } from '@engine/time-system';
+import { getPlotThreadFlags } from '@engine/state/save-profile';
+import { fromEpochMinutes, formatGameTime } from '@engine/time/time-system';
 import { useGameStore } from '../../stores/game-store';
 import { buildThreadDisplayView, threadStatusLabel } from './plot-thread-view';
 

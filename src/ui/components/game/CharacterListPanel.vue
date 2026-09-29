@@ -3,15 +3,15 @@ import { ref, computed, watch } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import AssetMedia from '../shared/AssetMedia.vue';
-import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/asset-resolve';
-import { getAffectionLabel } from '@engine/affection-system';
+import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/assets/asset-resolve';
+import { getAffectionLabel } from '@engine/character/affection-system';
 import ResourceBar from '../shared/ResourceBar.vue';
 import BuffChip from '../shared/BuffChip.vue';
 // 装备/技能/背包详情与玩家背包面板（ItemsPanel）**共用**同一份渲染（数据结构等价，避免显示分叉）
 import ItemDetailBody from './ItemDetailBody.vue';
 import { type PanelEntry } from '../../lib/item-view';
 // 🆕 重铸（2026-08-24）：单条目重铸 —— NPC 的装备/技能/背包条目都能重写
-import type { RewriteTarget } from '@engine/item-gen-chain';
+import type { RewriteTarget } from '@engine/agents/item-gen-chain';
 
 const game = useGameStore();
 const ui = useUIStore();

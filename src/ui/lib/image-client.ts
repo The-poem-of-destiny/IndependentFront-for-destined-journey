@@ -38,7 +38,7 @@
  * 注入缝: `setImageFetch()`。测试全程 mock，**绝不发真实请求**。
  */
 
-import { parseNaiZip, type NaiRequestBody } from '@engine/image-providers/novelai';
+import { parseNaiZip, type NaiRequestBody } from '@engine/image/providers/novelai';
 import {
   BUILTIN_COMFY_WORKFLOW,
   comfyFail,
@@ -49,10 +49,10 @@ import {
   substituteWorkflow,
   type ComfyImageRef,
   type ComfySubstitutionValues,
-} from '@engine/image-providers/comfyui';
-import { IMAGE_BAD_RESPONSE_MESSAGE, IMAGE_FAILURE_RETRYABLE } from '@engine/image-defaults';
-import { scheduleApiRequest } from '@engine/api-rpm-limiter';
-import type { ImageGenFailure, ImageGenFailureKind } from '@engine/types-image';
+} from '@engine/image/providers/comfyui';
+import { IMAGE_BAD_RESPONSE_MESSAGE, IMAGE_FAILURE_RETRYABLE } from '@engine/image/image-defaults';
+import { scheduleApiRequest } from '@engine/api/api-rpm-limiter';
+import type { ImageGenFailure, ImageGenFailureKind } from '@engine/types/types-image';
 
 // ═══════════════════════════════════════════════════════════
 // 常量

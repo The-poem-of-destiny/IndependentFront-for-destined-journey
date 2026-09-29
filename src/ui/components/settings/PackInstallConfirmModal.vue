@@ -10,9 +10,9 @@
 -->
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { PackInstallPlan } from '@engine/types-content';
-import type { PackUpgradeDiff } from '@engine/content-pack-plan';
-import type { WorldBook, ChatPreset } from '@engine/types';
+import type { PackInstallPlan } from '@engine/types/types-content';
+import type { PackUpgradeDiff } from '@engine/content/content-pack-plan';
+import type { WorldBook, ChatPreset } from '@engine/types/types';
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';
 

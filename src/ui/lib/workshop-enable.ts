@@ -13,8 +13,8 @@
  *
  * 纯度约束: 无 I/O、无 Dexie、无 Vue、无浏览器全局。
  */
-import type { WorkshopProject, WorldBook } from '@engine/types';
-import { WORKSHOP_PARTITION, workshopBookId } from '@engine/workshop-types';
+import type { WorkshopProject, WorldBook } from '@engine/types/types';
+import { WORKSHOP_PARTITION, workshopBookId } from '@engine/workshop/workshop-types';
 
 /** `creative_workshop:` —— 存档 token 的前缀 */
 const TOKEN_PREFIX = `${WORKSHOP_PARTITION}:`;

@@ -2,7 +2,7 @@
   "name": "narrative-engine",
   "version": "1.0.0",
   "description": "多 Agent 协作的文字 RPG 引擎（世界内容以内容包形式外挂）",
-  "main": "dist/sillytavern/index.js",
+  "main": "dist/core/index.js",
   "type": "module",
   "private": true,
   "packageManager": "npm@10.9.3",

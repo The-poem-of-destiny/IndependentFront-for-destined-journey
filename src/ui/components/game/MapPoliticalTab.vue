@@ -59,13 +59,13 @@ import {
   type MapTintModeChoice,
   type StageView,
 } from '../../lib/map-political';
-import { getMapIndex, getMapPack } from '@engine/map-runtime';
+import { getMapIndex, getMapPack } from '@engine/map/map-runtime';
 // 落位解析（引擎的落位契约本体）—— 这里**只读**，不写任何派生态，理由见 `playerTileId`
-import { resolveTileByLocation } from '@engine/map-index';
-import { findPath } from '@engine/map-path';
-import { getMapFactsFlags, getMapFlags } from '@engine/save-profile';
-import { toEpochMinutes } from '@engine/time-system';
-import type { MapRoute } from '@engine/types-map';
+import { resolveTileByLocation } from '@engine/map/map-index';
+import { findPath } from '@engine/map/map-path';
+import { getMapFactsFlags, getMapFlags } from '@engine/state/save-profile';
+import { toEpochMinutes } from '@engine/time/time-system';
+import type { MapRoute } from '@engine/types/types-map';
 
 // ═══ 高亮像素色（RGBA；理由见文件头最后一条） ═══
 const ROUTE_RGBA = [255, 236, 178, 92] as const;
@@ -938,7 +938,7 @@ async function loadBaseArt(): Promise<void> {
 
   let bytes: Blob | undefined;
   try {
-    const { getDatabase } = await import('@engine/database');
+    const { getDatabase } = await import('@engine/persistence/database');
     bytes = (await getDatabase().mapBlobs.get(first.url))?.blob;
   } catch {
     /* 缓存拿不到就现取 */

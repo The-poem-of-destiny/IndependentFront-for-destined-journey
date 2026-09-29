@@ -28,15 +28,15 @@ import {
   saveApiRpmPolicies as persistApiRpmPolicies,
   saveApiRpmPolicy as persistApiRpmPolicy,
   deleteApiRpmPolicy as persistDeleteApiRpmPolicy,
-} from '@engine/database';
-import { credentialIdFor, replaceApiRpmPolicies } from '@engine/api-rpm-limiter';
-import type { ApiRpmPolicy } from '@engine/types';
+} from '@engine/persistence/database';
+import { credentialIdFor, replaceApiRpmPolicies } from '@engine/api/api-rpm-limiter';
+import type { ApiRpmPolicy } from '@engine/types/types';
 import {
   DEFAULT_IMAGE_MAX_PER_HOUR,
   DEFAULT_IMAGE_MAX_PER_MESSAGE,
   DEFAULT_IMAGE_MODEL,
-} from '@engine/image-defaults';
-import { FALLBACK_IMAGE_DIALECT } from '@engine/image-dialect';
+} from '@engine/image/image-defaults';
+import { FALLBACK_IMAGE_DIALECT } from '@engine/image/image-dialect';
 import { detach } from './db-write';
 import { migrateLegacyAgentOverrides } from './agent-settings';
 import { migrateLegacyAgentMaps } from './agent-settings-migration';
@@ -62,10 +62,10 @@ export interface ApiEntry {
   models: string[];
   /** `'image'` = 出图端点（NovelAI），由图像生成分区的端点选择器筛选 */
   apiType: 'chat' | 'embedding' | 'reranker' | 'image';
-  kind?: import('@engine/types-api').ApiSourceKind;
-  protocol?: import('@engine/types-api').ApiProtocol;
+  kind?: import('@engine/types/types-api').ApiSourceKind;
+  protocol?: import('@engine/types/types-api').ApiProtocol;
   timeoutMs?: number;
-  bodyOverrides?: import('@engine/types-api').JsonObject;
+  bodyOverrides?: import('@engine/types/types-api').JsonObject;
   bodyOmitPaths?: string[];
   revision?: number;
   anthropicVersion?: string;
@@ -176,7 +176,7 @@ async function migratePresetsMirrorToDexie(
     return;
   }
   try {
-    const { getPresets, savePreset } = await import('@engine/database');
+    const { getPresets, savePreset } = await import('@engine/persistence/database');
     const existing = await getPresets();
     if (!existing || existing.length === 0) {
       // Dexie 空 → 迁入镜像里的每一条
@@ -754,7 +754,7 @@ export const useSettingsStore = defineStore('settings', () => {
     for (const [, entry] of Object.entries(pd)) {
       if (entry.preset && entry.presetId) {
         try {
-          const { getPresets, savePreset } = await import('@engine/database');
+          const { getPresets, savePreset } = await import('@engine/persistence/database');
           const existing = await getPresets();
           const embedded = JSON.parse(JSON.stringify(entry.preset)) as PresetItem;
           if (!existing || existing.length === 0) {

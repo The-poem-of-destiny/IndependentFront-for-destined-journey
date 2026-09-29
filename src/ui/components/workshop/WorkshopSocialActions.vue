@@ -19,7 +19,7 @@
  * 乐观更新/校正/回滚/节流全在 store 里（D23），本组件只渲染状态。
  */
 import { computed } from 'vue';
-import type { WorkshopSocialMeta } from '@engine/workshop-types';
+import type { WorkshopSocialMeta } from '@engine/workshop/workshop-types';
 import { useUIStore } from '../../stores/ui-store';
 import { useWorkshopSocialStore } from '../../stores/workshop-social-store';
 import type { WorkshopToggleOutcome } from '../../stores/workshop-social-store';

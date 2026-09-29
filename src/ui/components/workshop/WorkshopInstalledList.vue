@@ -23,9 +23,9 @@
  * 本组件纯呈现: 更新/卸载只 emit，实际动作由 WorkshopPage 走 store 的两段式提交。
  */
 import { computed, ref } from 'vue';
-import type { WorkshopNoteKind, WorkshopProject } from '@engine/types';
-import type { WorkshopNoteGroups } from '@engine/workshop-types';
-import { WORKSHOP_NOTE_KINDS, groupWorkshopNotes } from '@engine/workshop-types';
+import type { WorkshopNoteKind, WorkshopProject } from '@engine/types/types';
+import type { WorkshopNoteGroups } from '@engine/workshop/workshop-types';
+import { WORKSHOP_NOTE_KINDS, groupWorkshopNotes } from '@engine/workshop/workshop-types';
 import AppButton from '../shared/AppButton.vue';
 import {
   WORKSHOP_NOTE_HINT,

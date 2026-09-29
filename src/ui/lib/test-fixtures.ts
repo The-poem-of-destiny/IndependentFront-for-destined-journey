@@ -8,14 +8,14 @@
  * 往里塞真实世界观的专名，等于把内容偷渡回引擎仓。
  */
 
-import type { ChatMessage } from '@engine/types';
+import type { ChatMessage } from '@engine/types/types';
 import { toSystemMessage } from './toSystemEvent';
 import type {
   CraftGenOutput,
   CharGenOutput,
   ItemGenOutput,
   CombatSummaryResult,
-} from '@engine/types';
+} from '@engine/types/types';
 
 // ========== Mock 数据构造 ==========
 

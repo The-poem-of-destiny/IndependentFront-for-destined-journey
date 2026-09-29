@@ -2,7 +2,7 @@
  * content-store.ts — 内容-引擎分离（波 1）的 provider 执行层（D16 / §5.1）。
  *
  * 设计全文: `docs/planning/2026-08-05-content-engine-separation-design.md` §5.1 / §5.5 / §5.8 / D16。
- * 纯函数半边在 `src/sillytavern/content-source.ts`（T1，已落地）。
+ * 纯函数半边在 `src/core/content/content-source.ts`（T1，已落地）。
  *
  * 本文件管三件事:
  *
@@ -41,17 +41,17 @@
 import { defineStore, getActivePinia } from 'pinia';
 import { ref } from 'vue';
 import { detach } from './db-write';
-import type { ContentStatus } from '@engine/types-content';
+import type { ContentStatus } from '@engine/types/types-content';
 // 占位基线清单：随引擎打包的静态资源（设计 §6），**不是**内容树的一部分。
-import placeholderHashesRaw from '@engine/placeholder-hashes.json';
-import type { ChatPreset, SaveSlot, WorkshopNote, WorldBook } from '@engine/types';
+import placeholderHashesRaw from '@engine/content/placeholder-hashes.json';
+import type { ChatPreset, SaveSlot, WorkshopNote, WorldBook } from '@engine/types/types';
 import type {
   ContentPack,
   PackBaseline,
   PackInstallPlan,
   PackSaveUidMigration,
   PackValidationNote,
-} from '@engine/types-content';
+} from '@engine/types/types-content';
 import {
   setContentFetchReporter,
   validatePackOrThrow,
@@ -63,20 +63,20 @@ import {
   //    在 setup 作用域里会遮蔽这个模块级导入。模块级路径（注册表加载器）用别名，
   //    读代码时一眼能分清「引擎注入缝」与「store action」。
   reportContentFetch as reportEngineContentFetch,
-} from '@engine/content-source';
+} from '@engine/content/content-source';
 // 第 8 面 mapPack 的收窄口（永不抛）+ 引擎侧地图缝（见 `setContentRegistry`）
-import { coerceMapPack } from '@engine/map-pack';
-import { installMapPack } from '@engine/map-runtime';
+import { coerceMapPack } from '@engine/map/map-pack';
+import { installMapPack } from '@engine/map/map-runtime';
 // 第 13 面 randomEvents 的收窄口（永不抛）+ 引擎侧随机事件缝（见 `setContentRegistry`）
-import { coerceRandomEventPack } from '@engine/random-event-pack';
-import { installRandomEventPack } from '@engine/random-event-runtime';
+import { coerceRandomEventPack } from '@engine/random-events/random-event-pack';
+import { installRandomEventPack } from '@engine/random-events/random-event-runtime';
 // 注册表本体的引擎侧注入缝（见 `setContentRegistry` / `getContentRegistry`）
 import {
   createEmptyContentRegistry,
   installContentRegistry,
   getContentRegistry as getInstalledContentRegistry,
-} from '@engine/content-registry-runtime';
-import type { ContentRegistry } from '@engine/content-registry-runtime';
+} from '@engine/content/content-registry-runtime';
+import type { ContentRegistry } from '@engine/content/content-registry-runtime';
 import {
   planPackUninstall,
   diffPackUpgrade,
@@ -84,7 +84,7 @@ import {
   type CurrentLibrary,
   type PackUninstallPlan,
   type PackUpgradeDiff,
-} from '@engine/content-pack-plan';
+} from '@engine/content/content-pack-plan';
 import {
   getDatabase,
   exportAllData,
@@ -92,8 +92,8 @@ import {
   savePresets,
   deletePreset,
   deletePresets,
-} from '@engine/database';
-import type { ContentPackRecord } from '@engine/database';
+} from '@engine/persistence/database';
+import type { ContentPackRecord } from '@engine/persistence/database';
 
 // ═══════════════════════════════════════════════════════════
 // 1. 模块级 ready promise（D16 时序契约）
@@ -143,7 +143,7 @@ export function markContentReady(): void {
  * 真实内容树）。它是 D20 四态基线、D42 重播种、卸载 re-seed 三处的共同输入。
  *
  * 清单由 T15 的 `scripts/build-placeholder-hashes.mjs` 生成到
- * `src/sillytavern/placeholder-hashes.json`，本模块**静态 import**（见 `loadPlaceholderHashes`）。
+ * `src/core/content/placeholder-hashes.json`，本模块**静态 import**（见 `loadPlaceholderHashes`）。
  * 「空清单」仍是合法态（四态规则的「无占位基线 → 首次安装回落 updated / conflicted」分支
  * 仍可用，卸载 re-seed 与 D42 重播种在该态是 no-op）—— 但**空清单不该再由取不到文件造成**，
  * 那正是它此前静默失效的方式。
@@ -169,7 +169,7 @@ let placeholderHashesCache: PlaceholderHashManifest = { version: '' };
  *
  * 🔴 **静态 import，不 fetch**（设计 §6）。T7 初版写的是
  * `fetch('/data/placeholder-hashes.json')`，那条路两头都不对：
- * ① 清单由 T15 产在 `src/sillytavern/placeholder-hashes.json`（随引擎打包），
+ * ① 清单由 T15 产在 `src/core/content/placeholder-hashes.json`（随引擎打包），
  *    `/data/` 下**根本没有这个文件** —— 那次 fetch 永远 404、永远回落空清单，
  *    而空清单是**合法态**（四态回落 updated/conflicted），所以它不报错、不变红，
  *    只是让 D20 基线、D42 重播种、卸载 re-seed 三处一起静默失效。
@@ -283,7 +283,7 @@ export async function loadDefaultBook(id: string): Promise<WorldBook | undefined
     const found = pack.worldBooks.find((b) => b.id === id);
     if (found) return { ...found, builtIn: true };
   }
-  const { loadBuiltInWorldBooks } = await import('@engine/builtin-worldbooks');
+  const { loadBuiltInWorldBooks } = await import('@engine/content/builtin-worldbooks');
   const books = await loadBuiltInWorldBooks();
   return books.find((b) => b.id === id);
 }
@@ -298,7 +298,7 @@ export async function loadAllDefaultBooks(): Promise<WorldBook[]> {
   if (pack?.worldBooks !== undefined) {
     return pack.worldBooks.map((b) => ({ ...b, builtIn: true }));
   }
-  const { loadBuiltInWorldBooks } = await import('@engine/builtin-worldbooks');
+  const { loadBuiltInWorldBooks } = await import('@engine/content/builtin-worldbooks');
   return loadBuiltInWorldBooks();
 }
 
@@ -312,14 +312,14 @@ export async function loadAllDefaultBooks(): Promise<WorldBook[]> {
  * `remoteAssets` 由远程素材 v1 追加 —— 后两者在 `ContentPack` 里分别是**第 13 / 第 14
  * 分节**，两套编号各数各的，别混着读）。
  *
- * 🔴 **定义已迁到引擎侧的注入缝** `@engine/content-registry-runtime`（分层收口）：
+ * 🔴 **定义已迁到引擎侧的注入缝** `@engine/content/content-registry-runtime`（分层收口）：
  * 四个**同步**消费方（agent-tools / random-tables / bloodlines / $location）全在引擎里，
  * 它们此前各自 `import '../ui/stores/content-store'` —— 依赖方向是反的。逐面的语义注释
  * （哪一面缺席不是错误、哪两面的消费方压根不读注册表）全部原文搬进那个文件的文件头与字段注释。
  *
  * 这里只 re-export 同一个名字，让既有 UI 消费方（`create-store` / 组件 / 测试）路径不变。
  */
-export type { ContentRegistry } from '@engine/content-registry-runtime';
+export type { ContentRegistry } from '@engine/content/content-registry-runtime';
 
 /**
  * 当前注册表（同步读取；agent-tools 等同步路径用）。
@@ -1071,7 +1071,7 @@ export const useContentStore = defineStore('content', () => {
       await wb.deleteBook(id);
     }
     // 2) 从占位文件灌回同 id 的占位书（builtIn:true，uid 保留段）
-    const { loadBuiltInWorldBooks } = await import('@engine/builtin-worldbooks');
+    const { loadBuiltInWorldBooks } = await import('@engine/content/builtin-worldbooks');
     const placeholders = await loadBuiltInWorldBooks();
     const toReload = placeholders.filter((b) => ownedIds.includes(b.id));
     if (toReload.length > 0) {
@@ -1459,7 +1459,7 @@ export const useContentStore = defineStore('content', () => {
     const reseeded: string[] = [];
     const db = getDatabase();
     const books = await db.worldBooks.toArray();
-    const { loadBuiltInWorldBooks } = await import('@engine/builtin-worldbooks');
+    const { loadBuiltInWorldBooks } = await import('@engine/content/builtin-worldbooks');
     const placeholderBooks = await loadBuiltInWorldBooks();
     const wbPlan = new Map(placeholderBooks.map((b) => [b.id, b]));
     for (const book of books) {

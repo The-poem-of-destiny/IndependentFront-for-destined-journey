@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CombatSystemEvent } from '@engine/types';
+import type { CombatSystemEvent } from '@engine/types/types';
 
 defineProps<{ event: CombatSystemEvent }>();
 const emit = defineEmits<{ collapse: [] }>();

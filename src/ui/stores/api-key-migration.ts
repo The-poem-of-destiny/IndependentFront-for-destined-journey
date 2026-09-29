@@ -1,5 +1,5 @@
-import { getDatabase } from '@engine/database';
-import type { ApiEndpoint } from '@engine/types';
+import { getDatabase } from '@engine/persistence/database';
+import type { ApiEndpoint } from '@engine/types/types';
 
 type AppDatabase = ReturnType<typeof getDatabase>;
 

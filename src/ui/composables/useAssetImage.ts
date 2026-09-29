@@ -42,10 +42,10 @@ import {
   type MaybeRefOrGetter,
   type Ref,
 } from 'vue';
-import { buildAssetIndex, type AssetIndex } from '@engine/asset-index';
-import { resolveAsset, ASSET_TYPE_AVATAR_CHAIN } from '@engine/asset-resolve';
-import { isVideoExtension } from '@engine/asset-types';
-import type { AssetMetaRecord, AssetType } from '@engine/types';
+import { buildAssetIndex, type AssetIndex } from '@engine/assets/asset-index';
+import { resolveAsset, ASSET_TYPE_AVATAR_CHAIN } from '@engine/assets/asset-resolve';
+import { isVideoExtension } from '@engine/assets/asset-types';
+import type { AssetMetaRecord, AssetType } from '@engine/types/types';
 import { useAssetStore } from '../stores/asset-store';
 
 /**

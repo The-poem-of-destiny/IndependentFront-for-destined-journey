@@ -3,12 +3,12 @@ import { computed, ref, watch } from 'vue';
 import { useGameStore, type DebugAgentEntry } from '../../stores/game-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
-import { getEjsBackend } from '@engine/ejs-backend';
-import { getEngineSettings } from '@engine/engine-settings';
-import { getRandomEventPack } from '@engine/random-event-runtime';
-import { buildRandomEventRollContext } from '@engine/random-event-snapshot';
-import { getRandomEventFlags, getPlotThreadFlags } from '@engine/save-profile';
-import { toEpochMinutes } from '@engine/time-system';
+import { getEjsBackend } from '@engine/ejs/ejs-backend';
+import { getEngineSettings } from '@engine/runtime/engine-settings';
+import { getRandomEventPack } from '@engine/random-events/random-event-runtime';
+import { buildRandomEventRollContext } from '@engine/random-events/random-event-snapshot';
+import { getRandomEventFlags, getPlotThreadFlags } from '@engine/state/save-profile';
+import { toEpochMinutes } from '@engine/time/time-system';
 import {
   buildRandomEventDebugRows,
   formatDailyProbability,

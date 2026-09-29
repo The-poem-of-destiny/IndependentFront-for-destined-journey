@@ -22,11 +22,11 @@ import type { FileReader } from '../scripts/build-placeholder-hashes.mjs';
 import {
   hashContentDeterministic as engineHashContent,
   hashWorldBook as engineHashBook,
-} from '../src/sillytavern/content-source';
-import { buildPackBaseline } from '../src/sillytavern/content-pack-plan';
-import { compileEjsEntry, executeEjsEntry } from '../src/sillytavern/ejs-runtime';
-import type { ContentPack } from '../src/sillytavern/types-content';
-import type { WorldBook } from '../src/sillytavern/types';
+} from '../src/core/content/content-source';
+import { buildPackBaseline } from '../src/core/content/content-pack-plan';
+import { compileEjsEntry, executeEjsEntry } from '../src/core/ejs/ejs-runtime';
+import type { ContentPack } from '../src/core/types/types-content';
+import type { WorldBook } from '../src/core/types/types';
 
 /**
  * `scripts/build-placeholder-hashes.mjs` 的测试。
@@ -40,7 +40,7 @@ import type { WorldBook } from '../src/sillytavern/types';
 
 const REPO_ROOT = resolve(__dirname, '..');
 const PLACEHOLDER_DIR = join(REPO_ROOT, DEFAULT_INPUT_DIR);
-const MANIFEST_FILE = join(REPO_ROOT, 'src/sillytavern/placeholder-hashes.json');
+const MANIFEST_FILE = join(REPO_ROOT, 'src/core/content/placeholder-hashes.json');
 
 /** 内存目录树 → FileReader（不碰磁盘，缺文件路径天然可控） */
 function memoryFs(files: Record<string, string>): FileReader {
@@ -326,7 +326,7 @@ describe('parseArgs', () => {
   it('默认值指向占位树与引擎目录', () => {
     const o = parseArgs([]);
     expect(o.input).toBe(DEFAULT_INPUT_DIR);
-    expect(o.out).toBe('src/sillytavern/placeholder-hashes.json');
+    expect(o.out).toBe('src/core/content/placeholder-hashes.json');
     expect(o.version).toBe(PLACEHOLDER_VERSION);
     expect(o.quiet).toBe(false);
   });

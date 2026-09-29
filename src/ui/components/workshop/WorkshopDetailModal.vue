@@ -20,9 +20,9 @@
  * （冲突要先弹警告，D15）。组件里各写一条安装路径 = 各写一条绕过警告的路径。
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import type { WorkshopProject } from '@engine/types';
-import { groupWorkshopNotes } from '@engine/workshop-types';
-import { mapWorkshopRegexes } from '@engine/workshop-regex-map';
+import type { WorkshopProject } from '@engine/types/types';
+import { groupWorkshopNotes } from '@engine/workshop/workshop-types';
+import { mapWorkshopRegexes } from '@engine/workshop/workshop-regex-map';
 import { fetchProject } from '../../lib/workshop-client';
 import { coverCandidates } from '../../lib/workshop-cover';
 import type { WorkshopFailure, WorkshopProjectDetail } from '../../lib/workshop-client';

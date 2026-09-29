@@ -21,9 +21,9 @@ import type {
   WorkshopListingMeta,
   WorkshopProjectMeta,
   WorkshopSocialMeta,
-} from '@engine/workshop-types';
-import { WORKSHOP_BASE_TAGS } from '@engine/workshop-types';
-import type { WorkshopProject } from '@engine/types';
+} from '@engine/workshop/workshop-types';
+import { WORKSHOP_BASE_TAGS } from '@engine/workshop/workshop-types';
+import type { WorkshopProject } from '@engine/types/types';
 import {
   deleteProject,
   invalidateWorkshopProject,

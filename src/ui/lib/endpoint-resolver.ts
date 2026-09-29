@@ -24,7 +24,7 @@
  *    由 `game-pipeline.getEndpointForAgent` 回落默认端点 + 可见 warn，不再静默掐掉整条链。
  *    来源判定在调用侧（`hasExplicitAgentModel`），本解析器仍只认「有效绑定」这一个维度。
  */
-import type { ApiEndpoint } from '@engine/types';
+import type { ApiEndpoint } from '@engine/types/types';
 import { detach } from '../stores/db-write';
 
 /** 端点解析结果 —— 判别联合。「池空」与「绑定失效」是两种失败，调用方按需分档。 */

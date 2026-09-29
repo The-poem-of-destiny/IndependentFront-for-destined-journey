@@ -28,7 +28,7 @@ import {
   uploadProjectFile,
 } from '../../lib/workshop-client';
 import type { WorkshopFailure } from '../../lib/workshop-client';
-import { WORKSHOP_BASE_TAGS } from '@engine/workshop-types';
+import { WORKSHOP_BASE_TAGS } from '@engine/workshop/workshop-types';
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';
 import { describeFailure } from './failure-text';

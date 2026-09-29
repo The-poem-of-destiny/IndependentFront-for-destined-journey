@@ -16,18 +16,18 @@
 
 v1.0 交付的能力边界：
 
-| 能做 | 不做 |
-|------|------|
-| 播放本地磁盘文件夹里的音乐 | 播放远程 URL 音源 |
-| 播放上传进 IndexedDB 的音频 | 音频格式转码 |
-| 播放列表（顺序 / 单曲 / 全部循环 / 随机） | 真正的交叉淡入（A、B 两条流同时出声） |
-| 一次性音效（声池、并发上限） | 音效解码缓存 |
-| 进入新地点自动换 BGM（可在设置里关） | 音效由游戏事件触发（**仍未接线**） |
-| 按场景选曲：地点/人物/情绪/情境四维加权 | 战斗/制作等**非地点**事件由 Code 自动换歌（这条仍只能靠 AI 写标记） |
-| 解析 `<play_audio>` 并切换 BGM（Code 侧 + prompt 侧**均已接线**，2026-08-18 复核） | 保证 AI 每次该换歌时都写标记（提示词是约定，不是硬约束） |
-| 按名称寻址曲目与播放列表 | 全角/半角折叠、拼音匹配 |
-| 播放列表拖拽排序 | 跨列表拖拽、拖拽到列表外、键盘排序 |
-| 曲库多选（shift 区间 / 全选筛选结果）+ 批量加入列表 / 批量删除 | 批量改标签、批量改类型 |
+| 能做                                                                               | 不做                                                                |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| 播放本地磁盘文件夹里的音乐                                                         | 播放远程 URL 音源                                                   |
+| 播放上传进 IndexedDB 的音频                                                        | 音频格式转码                                                        |
+| 播放列表（顺序 / 单曲 / 全部循环 / 随机）                                          | 真正的交叉淡入（A、B 两条流同时出声）                               |
+| 一次性音效（声池、并发上限）                                                       | 音效解码缓存                                                        |
+| 进入新地点自动换 BGM（可在设置里关）                                               | 音效由游戏事件触发（**仍未接线**）                                  |
+| 按场景选曲：地点/人物/情绪/情境四维加权                                            | 战斗/制作等**非地点**事件由 Code 自动换歌（这条仍只能靠 AI 写标记） |
+| 解析 `<play_audio>` 并切换 BGM（Code 侧 + prompt 侧**均已接线**，2026-08-18 复核） | 保证 AI 每次该换歌时都写标记（提示词是约定，不是硬约束）            |
+| 按名称寻址曲目与播放列表                                                           | 全角/半角折叠、拼音匹配                                             |
+| 播放列表拖拽排序                                                                   | 跨列表拖拽、拖拽到列表外、键盘排序                                  |
+| 曲库多选（shift 区间 / 全选筛选结果）+ 批量加入列表 / 批量删除                     | 批量改标签、批量改类型                                              |
 
 ---
 
@@ -59,7 +59,7 @@ UI 桥接层  audio-store.ts (Pinia)  ← 应用的唯一入口
 
 **依赖方向是单向的**，这条约束比看起来重要：
 
-- 引擎层（`src/sillytavern/audio-*.ts`）**不认识 Vue，也不碰 Dexie**。它连 `AudioContext` 和 `Audio` 都不直接构造——全部走注入。原因见第九节：`src/sillytavern/` 必须能在 vitest `environment: 'node'` 下被 import，模块顶层碰一下 `new AudioContext()` 就会把整个引擎测试套件炸掉。
+- 引擎层（`src/core/audio-*.ts`）**不认识 Vue，也不碰 Dexie**。它连 `AudioContext` 和 `Audio` 都不直接构造——全部走注入。原因见第九节：`src/core/` 必须能在 vitest `environment: 'node'` 下被 import，模块顶层碰一下 `new AudioContext()` 就会把整个引擎测试套件炸掉。
 - 引擎层也**不能 import `src/ui/`**。所以当"扩展名 → MIME 表"需要被引擎（名称归一化要剥扩展名）和 UI（文件夹扫描要筛 MIME）共用时，做法是把表**上提**到 `audio-names.ts`，由 UI 反向 import。
 - `AudioManager` 的实例**不住在引擎层**。引擎只导出类，单例在 `src/ui/lib/audio-singleton.ts` 里惰性创建。
 
@@ -125,11 +125,11 @@ UI 桥接层  audio-store.ts (Pinia)  ← 应用的唯一入口
 
 `AudioTrack.source` 决定字节从哪来。三种后端并存，互不感知：
 
-| source | 字节来源 | 浏览器要求 | 典型用途 |
-|--------|----------|-----------|----------|
-| `file` | 用户本机音乐文件夹（File System Access API） | 仅 Chromium | 主路径：几百 MB 音乐不占浏览器配额 |
-| `blob` | IndexedDB `audioBlobs` 表 | 全部 | 兜底：非 Chromium 浏览器上传入库 |
-| `builtin` | `public/audio/` 下的静态文件，由 `manifest.json` 声明 | 全部 | 内置素材（v1 **空载**） |
+| source    | 字节来源                                              | 浏览器要求  | 典型用途                           |
+| --------- | ----------------------------------------------------- | ----------- | ---------------------------------- |
+| `file`    | 用户本机音乐文件夹（File System Access API）          | 仅 Chromium | 主路径：几百 MB 音乐不占浏览器配额 |
+| `blob`    | IndexedDB `audioBlobs` 表                             | 全部        | 兜底：非 Chromium 浏览器上传入库   |
+| `builtin` | `public/audio/` 下的静态文件，由 `manifest.json` 声明 | 全部        | 内置素材（v1 **空载**）            |
 
 **File System Access API** 是浏览器提供的一套让网页读写用户本机文件/目录的接口。用户通过 `showDirectoryPicker()` 亲手选一个目录，网页拿到一个「目录句柄」（`FileSystemDirectoryHandle`）。句柄可以被结构化克隆，因此能存进 IndexedDB 跨会话保留——但**权限不跨浏览器重启**。
 
@@ -163,12 +163,12 @@ UI 桥接层  audio-store.ts (Pinia)  ← 应用的唯一入口
 
 Dexie（IndexedDB 封装）里的四张音频表（**这四张表在 v11/v12 引入**：`audioTracks` / `audioBlobs` / `audioPlaylists` 随 v11 落地，`audioHandles` 随 v12 追加；**库本身现已到 `DB_VERSION = 22`**，音频表的 schema 自那以后未变，2026-08-18 复核）：
 
-| 表 | 主键 / 索引 | 存什么 | 为什么单独一张 |
-|----|-------------|--------|---------------|
-| `audioTracks` | `id, name, kind, *tags, updatedAt` | 曲目元数据（名称/类型/来源/标签/相对路径/missing） | 列表查询只需要它 |
-| `audioBlobs` | `id` | 音频字节（`{ id, blob }`，id 与曲目同值） | 见下 |
-| `audioPlaylists` | `id, name, updatedAt` | 有序的 `trackIds[]` | 播放列表只是曲目的有序引用 |
-| `audioHandles` | `id` | File System Access 目录句柄（当前只有 `'library-root'` 一行） | 句柄不是 JSON，进不了 localStorage |
+| 表               | 主键 / 索引                        | 存什么                                                        | 为什么单独一张                     |
+| ---------------- | ---------------------------------- | ------------------------------------------------------------- | ---------------------------------- |
+| `audioTracks`    | `id, name, kind, *tags, updatedAt` | 曲目元数据（名称/类型/来源/标签/相对路径/missing）            | 列表查询只需要它                   |
+| `audioBlobs`     | `id`                               | 音频字节（`{ id, blob }`，id 与曲目同值）                     | 见下                               |
+| `audioPlaylists` | `id, name, updatedAt`              | 有序的 `trackIds[]`                                           | 播放列表只是曲目的有序引用         |
+| `audioHandles`   | `id`                               | File System Access 目录句柄（当前只有 `'library-root'` 一行） | 句柄不是 JSON，进不了 localStorage |
 
 ### 为什么元数据与字节要分表
 
@@ -200,38 +200,38 @@ Dexie（IndexedDB 封装）里的四张音频表（**这四张表在 v11/v12 引
 
 ### 6.1 生命周期
 
-| 方法 | 签名 | 说明 |
-|------|------|------|
-| `init` | `() => Promise<void>` | 幂等。订阅 Manager、装入 `loadBlob`、挂手势解锁监听、恢复设置、拉 manifest、读库、恢复文件夹状态 |
-| `dispose` | `() => void` | 停轮询、卸下 blob 解析器、退订 |
-| `loadLibrary` | `() => Promise<void>` | 从 Dexie 读曲目+列表，与内置曲目合并后灌给 Manager |
-| `loadManifest` | `() => Promise<void>` | 拉 `/audio/manifest.json`；缺文件或解析失败一律静默 |
-| `refreshTracks` / `refreshPlaylists` | `() => Promise<void>` | 写操作后的局部刷新 |
-| `restoreSettings` | `() => void` | 从 settings-store 恢复音量/循环/随机 |
+| 方法                                 | 签名                  | 说明                                                                                             |
+| ------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------ |
+| `init`                               | `() => Promise<void>` | 幂等。订阅 Manager、装入 `loadBlob`、挂手势解锁监听、恢复设置、拉 manifest、读库、恢复文件夹状态 |
+| `dispose`                            | `() => void`          | 停轮询、卸下 blob 解析器、退订                                                                   |
+| `loadLibrary`                        | `() => Promise<void>` | 从 Dexie 读曲目+列表，与内置曲目合并后灌给 Manager                                               |
+| `loadManifest`                       | `() => Promise<void>` | 拉 `/audio/manifest.json`；缺文件或解析失败一律静默                                              |
+| `refreshTracks` / `refreshPlaylists` | `() => Promise<void>` | 写操作后的局部刷新                                                                               |
+| `restoreSettings`                    | `() => void`          | 从 settings-store 恢复音量/循环/随机                                                             |
 
 ### 6.2 播放控制
 
-| 方法 | 签名 | 返回值语义 |
-|------|------|-----------|
-| `playTrack` | `(trackId: string) => Promise<void>` | 单曲播放，队列长度 1 |
-| `playPlaylist` | `(playlistId: string, startIndex?: number) => Promise<void>` | 顺带把该列表记为"上次播放" |
-| `playTrackByName` | `(name: string) => Promise<boolean>` | **`false` = 没找到**，且**不动当前播放** |
-| `playPlaylistByName` | `(name: string, startIndex?: number) => Promise<boolean>` | 同上 |
+| 方法                                 | 签名                                                                        | 返回值语义                                                                                                                          |
+| ------------------------------------ | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `playTrack`                          | `(trackId: string) => Promise<void>`                                        | 单曲播放，队列长度 1                                                                                                                |
+| `playPlaylist`                       | `(playlistId: string, startIndex?: number) => Promise<void>`                | 顺带把该列表记为"上次播放"                                                                                                          |
+| `playTrackByName`                    | `(name: string) => Promise<boolean>`                                        | **`false` = 没找到**，且**不动当前播放**                                                                                            |
+| `playPlaylistByName`                 | `(name: string, startIndex?: number) => Promise<boolean>`                   | 同上                                                                                                                                |
 | `play` / `pause` / `toggle` / `stop` | `() => Promise<void>` / `() => void` / `() => Promise<void>` / `() => void` | `stop` 回到 0 且清空 pending，队列保留；`pause` 保留选中曲目（加载中被暂停会落到「已选中未装载」态，`play()` 重新加载）——差别见 §三 |
-| `next` / `prev` | `() => Promise<void>` | `next` 到队尾总是回绕到 0；`prev` 在队首重放当前曲 |
-| `seek` | `(sec: number) => void` | 顺带同步 `positionSec` |
-| `setRepeat` | `(mode: 'off' \| 'all' \| 'one') => void` | 同时写进设置 |
-| `setShuffle` | `(on: boolean) => void` | 同时写进设置 |
-| `unlock` | `() => Promise<void>` | 手动触发解锁；通常由手势监听自动调用 |
+| `next` / `prev`                      | `() => Promise<void>`                                                       | `next` 到队尾总是回绕到 0；`prev` 在队首重放当前曲                                                                                  |
+| `seek`                               | `(sec: number) => void`                                                     | 顺带同步 `positionSec`                                                                                                              |
+| `setRepeat`                          | `(mode: 'off' \| 'all' \| 'one') => void`                                   | 同时写进设置                                                                                                                        |
+| `setShuffle`                         | `(on: boolean) => void`                                                     | 同时写进设置                                                                                                                        |
+| `unlock`                             | `() => Promise<void>`                                                       | 手动触发解锁；通常由手势监听自动调用                                                                                                |
 
 ### 6.3 混音
 
-| 方法 | 签名 | 说明 |
-|------|------|------|
-| `setMasterVolume` | `(v: number) => void` | 钳制到 0..1，写进设置 |
-| `setMasterMuted` | `(m: boolean) => void` | 静音不破坏 volume 数值 |
-| `setChannelVolume` | `(ch: 'music' \| 'sfx', v: number) => void` | |
-| `setChannelMuted` | `(ch: 'music' \| 'sfx', m: boolean) => void` | |
+| 方法               | 签名                                         | 说明                   |
+| ------------------ | -------------------------------------------- | ---------------------- |
+| `setMasterVolume`  | `(v: number) => void`                        | 钳制到 0..1，写进设置  |
+| `setMasterMuted`   | `(m: boolean) => void`                       | 静音不破坏 volume 数值 |
+| `setChannelVolume` | `(ch: 'music' \| 'sfx', v: number) => void`  |                        |
+| `setChannelMuted`  | `(ch: 'music' \| 'sfx', m: boolean) => void` |                        |
 
 ### 6.4 曲库与播放列表 CRUD
 
@@ -239,51 +239,51 @@ Dexie（IndexedDB 封装）里的四张音频表（**这四张表在 v11/v12 引
 >
 > 唯一的例外是上传撞上**存储配额耗尽**：它不是个案，后面的文件基本也没戏，所以就地停下并给出「改用音乐文件夹」的出路。
 
-| 方法 | 签名 | 返回值语义 |
-|------|------|-----------|
-| `uploadFiles` | `(files: File[], kind?: AudioTrackKind) => Promise<AudioTrack[]>` | 每个文件建一条 `source: 'blob'` 曲目；重名**自动编号**；返回**实际建成**的曲目，失败的不在其中 |
-| `findTrack` | `(id: string) => AudioTrack \| undefined` | |
-| `findTrackByName` | `(name: string) => AudioTrack \| undefined` | 归一化比较；多命中取 `createdAt` 最早者 |
-| `renameTrack` | `(id: string, name: string) => Promise<boolean>` | **`false` = 曲目不存在 / 是内置曲目 / 重名被拒** |
-| `setTrackTags` | `(id: string, tags: string[]) => Promise<void>` | 内置曲目空转 |
-| `setTrackKind` | `(id: string, kind: AudioTrackKind) => Promise<void>` | 内置曲目空转 |
-| `deleteTrack` | `(id: string) => Promise<void>` | 内置曲目不可删；顺带剪掉播放列表悬挂引用 |
-| `deleteTracks` | `(ids: string[]) => Promise<AudioBatchResult>` | 曲库多选批量删。内置曲目 / 查无此曲计 `skipped`；逐条尽力做完 |
-| `findPlaylist` | `(id: string) => AudioPlaylist \| undefined` | |
-| `findPlaylistByName` | `(name: string) => AudioPlaylist \| undefined` | |
-| `createPlaylist` | `(name: string) => Promise<AudioPlaylist \| null>` | **`null` = 重名被拒**（不抛） |
-| `renamePlaylist` | `(id: string, name: string) => Promise<boolean>` | **`false` = 不存在 / 重名被拒** |
-| `deletePlaylist` | `(id: string) => Promise<void>` | 不级联删曲目 |
-| `addTrackToPlaylist` / `removeTrackFromPlaylist` | `(playlistId: string, trackId: string) => Promise<void>` | 重复添加空转 |
-| `addTracksToPlaylist` | `(playlistId: string, trackIds: string[]) => Promise<AudioBatchResult>` | 曲库多选批量加入。已在列表中的计 `skipped`；**只落一次库**（整序覆盖），写失败即整批 `failed`，不谎称部分成功；列表已不存在时全额 `failed` |
-| `reorderPlaylist` | `(playlistId: string, trackIds: string[]) => Promise<void>` | 整序覆盖（拖拽排序的唯一写路径） |
+| 方法                                             | 签名                                                                    | 返回值语义                                                                                                                                 |
+| ------------------------------------------------ | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `uploadFiles`                                    | `(files: File[], kind?: AudioTrackKind) => Promise<AudioTrack[]>`       | 每个文件建一条 `source: 'blob'` 曲目；重名**自动编号**；返回**实际建成**的曲目，失败的不在其中                                             |
+| `findTrack`                                      | `(id: string) => AudioTrack \| undefined`                               |                                                                                                                                            |
+| `findTrackByName`                                | `(name: string) => AudioTrack \| undefined`                             | 归一化比较；多命中取 `createdAt` 最早者                                                                                                    |
+| `renameTrack`                                    | `(id: string, name: string) => Promise<boolean>`                        | **`false` = 曲目不存在 / 是内置曲目 / 重名被拒**                                                                                           |
+| `setTrackTags`                                   | `(id: string, tags: string[]) => Promise<void>`                         | 内置曲目空转                                                                                                                               |
+| `setTrackKind`                                   | `(id: string, kind: AudioTrackKind) => Promise<void>`                   | 内置曲目空转                                                                                                                               |
+| `deleteTrack`                                    | `(id: string) => Promise<void>`                                         | 内置曲目不可删；顺带剪掉播放列表悬挂引用                                                                                                   |
+| `deleteTracks`                                   | `(ids: string[]) => Promise<AudioBatchResult>`                          | 曲库多选批量删。内置曲目 / 查无此曲计 `skipped`；逐条尽力做完                                                                              |
+| `findPlaylist`                                   | `(id: string) => AudioPlaylist \| undefined`                            |                                                                                                                                            |
+| `findPlaylistByName`                             | `(name: string) => AudioPlaylist \| undefined`                          |                                                                                                                                            |
+| `createPlaylist`                                 | `(name: string) => Promise<AudioPlaylist \| null>`                      | **`null` = 重名被拒**（不抛）                                                                                                              |
+| `renamePlaylist`                                 | `(id: string, name: string) => Promise<boolean>`                        | **`false` = 不存在 / 重名被拒**                                                                                                            |
+| `deletePlaylist`                                 | `(id: string) => Promise<void>`                                         | 不级联删曲目                                                                                                                               |
+| `addTrackToPlaylist` / `removeTrackFromPlaylist` | `(playlistId: string, trackId: string) => Promise<void>`                | 重复添加空转                                                                                                                               |
+| `addTracksToPlaylist`                            | `(playlistId: string, trackIds: string[]) => Promise<AudioBatchResult>` | 曲库多选批量加入。已在列表中的计 `skipped`；**只落一次库**（整序覆盖），写失败即整批 `failed`，不谎称部分成功；列表已不存在时全额 `failed` |
+| `reorderPlaylist`                                | `(playlistId: string, trackIds: string[]) => Promise<void>`             | 整序覆盖（拖拽排序的唯一写路径）                                                                                                           |
 
 ### 6.5 音乐文件夹
 
-| 方法 | 签名 | 返回值语义 |
-|------|------|-----------|
-| `pickFolder` | `() => Promise<boolean>` | 需要用户手势。**`false` = 不支持 / 用户取消**；成功即扫描 |
-| `grantFolderPermission` | `() => Promise<boolean>` | 需要用户手势。**`false` = 无句柄 / 被拒**；成功即扫描 |
-| `rescanFolder` | `() => Promise<void>` | 增量对账，永不删行；扫描中重入直接空转。单条落库失败不中断，结束后汇总提示 |
-| `forgetFolder` | `() => Promise<boolean>` | 只删句柄，曲目全部标 `missing`。**`false` = 没能完全做到**：句柄删不掉则整个中止、内存态一个字不改（关联其实还在，谎称取消是最坏结果）；句柄删了但个别曲目标不上 `missing` 则部分成功。失败已 toast 说明爆炸半径，调用方无需再报 |
-| `loadBlob` | `(trackId: string) => Promise<Blob \| undefined>` | 装给 Manager 的字节解析器；`undefined` = 取不到（`file` 源会顺带标 `missing`）。这条在播放路径上，所以「`missing` 标记本身没能落库」的告警**按 trackId 去重**——同一首只提示一次，等哪次真标上了再把记号清掉，否则反复播放就是一屏 toast |
+| 方法                    | 签名                                              | 返回值语义                                                                                                                                                                                                                              |
+| ----------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pickFolder`            | `() => Promise<boolean>`                          | 需要用户手势。**`false` = 不支持 / 用户取消**；成功即扫描                                                                                                                                                                               |
+| `grantFolderPermission` | `() => Promise<boolean>`                          | 需要用户手势。**`false` = 无句柄 / 被拒**；成功即扫描                                                                                                                                                                                   |
+| `rescanFolder`          | `() => Promise<void>`                             | 增量对账，永不删行；扫描中重入直接空转。单条落库失败不中断，结束后汇总提示                                                                                                                                                              |
+| `forgetFolder`          | `() => Promise<boolean>`                          | 只删句柄，曲目全部标 `missing`。**`false` = 没能完全做到**：句柄删不掉则整个中止、内存态一个字不改（关联其实还在，谎称取消是最坏结果）；句柄删了但个别曲目标不上 `missing` 则部分成功。失败已 toast 说明爆炸半径，调用方无需再报        |
+| `loadBlob`              | `(trackId: string) => Promise<Blob \| undefined>` | 装给 Manager 的字节解析器；`undefined` = 取不到（`file` 源会顺带标 `missing`）。这条在播放路径上，所以「`missing` 标记本身没能落库」的告警**按 trackId 去重**——同一首只提示一次，等哪次真标上了再把记号清掉，否则反复播放就是一屏 toast |
 
 响应式状态：`folderPermission`（`AudioFolderPermission`）、`folderName`（string）、`scanning`（boolean）。
 
 ### 6.6 音效
 
-| 方法 | 签名 | 返回值语义 |
-|------|------|-----------|
-| `playSfx` | `(trackId: string) => Promise<boolean>` | **`false` = 未解锁 / 曲目不存在 / 门禁拒绝 / 解码拥塞 / 解码失败** |
-| `stopAllSfx` | `() => void` | 掐掉全部在响声部 |
+| 方法         | 签名                                    | 返回值语义                                                         |
+| ------------ | --------------------------------------- | ------------------------------------------------------------------ |
+| `playSfx`    | `(trackId: string) => Promise<boolean>` | **`false` = 未解锁 / 曲目不存在 / 门禁拒绝 / 解码拥塞 / 解码失败** |
+| `stopAllSfx` | `() => void`                            | 掐掉全部在响声部                                                   |
 
 ### 6.7 AI 钩子
 
-| 方法 | 签名 | 返回值语义 |
-|------|------|-----------|
-| `playByTag` | `(tag: string, fallback?: 'keep' \| 'stop') => Promise<boolean>` | **`false` = 无曲目带此标签**。未命中时 `keep`（默认）保持当前曲继续播，`stop` 停止 |
-| `playByScene` | `(query: SceneTagQuery) => Promise<SceneTagResult \| null>` | **`null` = 没有任何维度达标**，此时**保持当前播放**。命中时返回命中详情与逐维度得分（见第八节） |
-| `playByLocation` | `(location: string, opts?: { variant?: 'A' \| 'B' }) => Promise<SceneTagResult \| null>` | `playByScene({ location, variant })` 的便捷入口，**同一套打分**，不是另一种语义 |
+| 方法             | 签名                                                                                     | 返回值语义                                                                                      |
+| ---------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `playByTag`      | `(tag: string, fallback?: 'keep' \| 'stop') => Promise<boolean>`                         | **`false` = 无曲目带此标签**。未命中时 `keep`（默认）保持当前曲继续播，`stop` 停止              |
+| `playByScene`    | `(query: SceneTagQuery) => Promise<SceneTagResult \| null>`                              | **`null` = 没有任何维度达标**，此时**保持当前播放**。命中时返回命中详情与逐维度得分（见第八节） |
+| `playByLocation` | `(location: string, opts?: { variant?: 'A' \| 'B' }) => Promise<SceneTagResult \| null>` | `playByScene({ location, variant })` 的便捷入口，**同一套打分**，不是另一种语义                 |
 
 `playByTag` 只匹配 `kind === 'music'` 的曲目；多命中时用注入的随机源挑一首。它是**单标签精确匹配**，适合"我就要这一首/这一组"。
 
@@ -291,28 +291,33 @@ Dexie（IndexedDB 封装）里的四张音频表（**这四张表在 v11/v12 引
 
 ### 6.8 观察状态
 
-| 属性 | 类型 | 说明 |
-|------|------|------|
-| `state` | `AudioPlaybackState` | **离散**状态镜像：music（status/trackId/playlistId/index/durationSec/volume/muted/repeat/shuffle）、sfx（volume/muted/liveVoices）、masterVolume、masterMuted、unlocked |
-| `positionSec` | `number` | 播放位置。**不在 `state` 里**——它每秒变几十次，广播它等于把 60fps 扇出请回来。改为约 4Hz（250ms）轮询，且**只在有人看的时候跑** |
-| `startPositionPolling` / `stopPositionPolling` | `() => void` / `(force?: boolean) => void` | 引用计数：两个进度条同时挂载不互相掐，没人看时不跑定时器 |
-| `tracks` / `playlists` / `builtinTracks` / `loading` | | 曲库镜像 |
+| 属性                                                 | 类型                                       | 说明                                                                                                                                                                    |
+| ---------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state`                                              | `AudioPlaybackState`                       | **离散**状态镜像：music（status/trackId/playlistId/index/durationSec/volume/muted/repeat/shuffle）、sfx（volume/muted/liveVoices）、masterVolume、masterMuted、unlocked |
+| `positionSec`                                        | `number`                                   | 播放位置。**不在 `state` 里**——它每秒变几十次，广播它等于把 60fps 扇出请回来。改为约 4Hz（250ms）轮询，且**只在有人看的时候跑**                                         |
+| `startPositionPolling` / `stopPositionPolling`       | `() => void` / `(force?: boolean) => void` | 引用计数：两个进度条同时挂载不互相掐，没人看时不跑定时器                                                                                                                |
+| `tracks` / `playlists` / `builtinTracks` / `loading` |                                            | 曲库镜像                                                                                                                                                                |
 
 ### 6.9 调用示例
 
 ```ts
 // 1) 组件挂载：初始化 + 进度轮询（务必配对卸载）
-const audio = useAudioStore()
-onMounted(() => { void audio.init(); audio.startPositionPolling() })
-onUnmounted(() => { audio.stopPositionPolling() })
+const audio = useAudioStore();
+onMounted(() => {
+  void audio.init();
+  audio.startPositionPolling();
+});
+onUnmounted(() => {
+  audio.stopPositionPolling();
+});
 
 // 2) 上传文件进 IndexedDB 兜底路径
-const created = await audio.uploadFiles(Array.from(input.files ?? []), 'music')
-console.log(`导入 ${created.length} 首`)
+const created = await audio.uploadFiles(Array.from(input.files ?? []), 'music');
+console.log(`导入 ${created.length} 首`);
 
 // 3) 手工改名：重名要给用户反馈，不能默默改掉
 if (!(await audio.renameTrack(track.id, newName))) {
-  toast('已有同名曲目', 'error')
+  toast('已有同名曲目', 'error');
 }
 
 // 4) 按名称播放（未来 AI/脚本的调用形状）
@@ -322,7 +327,7 @@ if (!(await audio.playTrackByName('雨夜的旅店'))) {
 
 // 5) 关联本机音乐文件夹（必须在用户点击的回调里调用）
 async function onPickFolder() {
-  if (await audio.pickFolder()) toast(`已关联「${audio.folderName}」`, 'success')
+  if (await audio.pickFolder()) toast(`已关联「${audio.folderName}」`, 'success');
 }
 ```
 
@@ -347,10 +352,10 @@ async function onPickFolder() {
 
 ### 唯一性策略：导入自动编号，手动录入拒绝
 
-| 路径 | 策略 | 理由 |
-|------|------|------|
-| 上传 / 文件夹扫描 | `uniqueAudioName()` **自动编号**，永不失败 | 导入是批量的，一个重名就中断整批不可接受 |
-| 手工改名 / 新建播放列表 | `isNameTaken()` **拒绝**，返回 false/null | 用户是在有意起名，替他悄悄改是骗人 |
+| 路径                    | 策略                                       | 理由                                     |
+| ----------------------- | ------------------------------------------ | ---------------------------------------- |
+| 上传 / 文件夹扫描       | `uniqueAudioName()` **自动编号**，永不失败 | 导入是批量的，一个重名就中断整批不可接受 |
+| 手工改名 / 新建播放列表 | `isNameTaken()` **拒绝**，返回 false/null  | 用户是在有意起名，替他悄悄改是骗人       |
 
 `uniqueAudioName()` 在已带 ` (n)` 尾缀时**换号而不是叠加**：已有 `战斗 (2)` 时，`战斗` 和 `战斗 (2)` 都得到 `战斗 (3)`，绝不产出 `战斗 (2) (2)`。返回值保留调用方原本的大小写与空格——只有**比较**走归一化。
 
@@ -381,11 +386,11 @@ ${大陆方位}-${区域}-${势力}-${子级势力}-${聚落/地标}-${区位}-$
 
 `nameSimilarity(a, b) → [0, 1]`，档与档之间**刻意不重叠**：
 
-| 档 | 条件 | 取值 |
-|----|------|------|
-| 相等 | 归一化后相同（复用 `normalizeAudioName`） | `1` |
-| 包含 | 一方是另一方的子串 | `0.6 + 0.4 × 长度比`，落在 `(0.6, 1)` |
-| 字形 | 二元组 Dice 系数 | `× 0.55`，上限 `0.55` |
+| 档   | 条件                                      | 取值                                  |
+| ---- | ----------------------------------------- | ------------------------------------- |
+| 相等 | 归一化后相同（复用 `normalizeAudioName`） | `1`                                   |
+| 包含 | 一方是另一方的子串                        | `0.6 + 0.4 × 长度比`，落在 `(0.6, 1)` |
+| 字形 | 二元组 Dice 系数                          | `× 0.55`，上限 `0.55`                 |
 
 低于 `SCENE_MATCH_THRESHOLD`（`0.5`）一律不算命中。
 
@@ -423,43 +428,43 @@ ${大陆方位}-${区域}-${势力}-${子级势力}-${聚落/地标}-${区位}-$
 
 ```ts
 type SceneTagQuery = {
-  location?: string          // 位置路径
-  characters?: string[]      // 在场角色
-  moods?: string[]           // 情绪
-  situations?: string[]      // 情境
-  variant?: 'A' | 'B'
-  kind?: AudioTrackKind      // 缺省 'music'
-}
+  location?: string; // 位置路径
+  characters?: string[]; // 在场角色
+  moods?: string[]; // 情绪
+  situations?: string[]; // 情境
+  variant?: 'A' | 'B';
+  kind?: AudioTrackKind; // 缺省 'music'
+};
 ```
 
 **总分 = 各维度加权分之和**：
 
-| 维度 | 权重 | 说明 |
-|------|------|------|
-| `location` | `1.00` | 再乘 `LOCATION_DEPTH_DECAY ** fallbackDepth`（`0.8 ** depth`） |
-| `situation` | `0.75` | |
-| `character` | `0.55` | |
-| `mood` | `0.35` | 独木难支，用来在同分里挑边 |
-| `variant` | `0.20` | **加分项**，自己不足以让一首曲子入选 |
+| 维度        | 权重   | 说明                                                           |
+| ----------- | ------ | -------------------------------------------------------------- |
+| `location`  | `1.00` | 再乘 `LOCATION_DEPTH_DECAY ** fallbackDepth`（`0.8 ** depth`） |
+| `situation` | `0.75` |                                                                |
+| `character` | `0.55` |                                                                |
+| `mood`      | `0.35` | 独木难支，用来在同分里挑边                                     |
+| `variant`   | `0.20` | **加分项**，自己不足以让一首曲子入选                           |
 
 地点分随回退深度衰减，于是跨维度的强弱是**可推算**的：
 
-| 对比 | 结果 |
-|------|------|
-| 地点 depth 0 (1.00) vs 情境 (0.75) | 站在有专属曲的地点上，地点曲赢 |
-| 地点 depth 2 (0.64) vs 情境 (0.75) | 只能回退两级时，战斗/潜行曲接管 |
+| 对比                               | 结果                               |
+| ---------------------------------- | ---------------------------------- |
+| 地点 depth 0 (1.00) vs 情境 (0.75) | 站在有专属曲的地点上，地点曲赢     |
+| 地点 depth 2 (0.64) vs 情境 (0.75) | 只能回退两级时，战斗/潜行曲接管    |
 | 地点 depth 3 (0.51) vs 人物 (0.55) | 地点已经很泛，在场角色的主题曲接管 |
 
 **这组权重是起始值，不是真理**——什么时候该让战斗曲盖过地点曲、人物主题该多强势，是配乐口味问题。改 `SCENE_TAG_WEIGHTS` 即可，也可以按次传 `opts.weights` 覆盖。
 
 返回值：
 
-| 字段 | 说明 |
-|------|------|
-| `track` / `score` | 选中的音轨与总分 |
-| `breakdown` | 逐维度得分，便于排查"为什么选了这首" |
+| 字段                                 | 说明                                                  |
+| ------------------------------------ | ----------------------------------------------------- |
+| `track` / `score`                    | 选中的音轨与总分                                      |
+| `breakdown`                          | 逐维度得分，便于排查"为什么选了这首"                  |
 | `resolvedLocation` / `fallbackDepth` | 地点维命中的地点名与回退深度；地点维没命中时为 `null` |
-| `matchedTags` | 各维度命中的标签值 |
+| `matchedTags`                        | 各维度命中的标签值                                    |
 
 五条关键语义：
 
@@ -483,11 +488,11 @@ const hit = await audio.playByScene({
   situations: ['战斗'],
   moods: ['紧张'],
   variant: 'B',
-})
-console.log(hit?.breakdown) // 排查为什么选了这首
+});
+console.log(hit?.breakdown); // 排查为什么选了这首
 
 // 只有地点时的便捷入口，走的是同一套打分
-await audio.playByLocation('铁炉堡', { variant: 'A' })
+await audio.playByLocation('铁炉堡', { variant: 'A' });
 ```
 
 两条只有 store 层才有的行为：
@@ -512,13 +517,13 @@ await audio.playByLocation('铁炉堡', { variant: 'A' })
 > 记的同一个坑），systemPrompt 那份是冗余保险。两份措辞一致，都遵守了下文说的「克制原则」（不换就别写）。
 > 原文说的「要启用时只需在 story 预设里加一个条目，Code 侧一行都不用改」已经**照此办理过了**。
 
-| 能力 | 实现 | 测试 | 生产调用方 |
-|------|------|------|-----------|
-| `playByScene` / `playByLocation` | ✅ | ✅ | ✅ `GamePipeline` 的地点变化触发 + `primeSceneAudio`；AI 标记那条也已有输入（prompt 侧已写，见上） |
-| `playByTag` | ✅ | ✅ | ❌ **零**（保留为单标签精确入口） |
-| `playSfx` | ✅ | ✅ | ⚠️ 唯一调用方是设置页曲库的试听按钮（`settings/audio/AudioLibrary.vue`），游戏内无任何音效触发点 |
-| `playTrackByName` / `playPlaylistByName` | ✅ | ✅ | ⚠️ 仅 UI |
-| `public/audio/manifest.json` | ✅ 57 首内置曲目（作者 Aoo） | — | 测试占位素材，正式发布前需复核，见 `public/audio/README.md`。⚠️ **mp3 字节本身不在仓库里**（见下） |
+| 能力                                     | 实现                         | 测试 | 生产调用方                                                                                         |
+| ---------------------------------------- | ---------------------------- | ---- | -------------------------------------------------------------------------------------------------- |
+| `playByScene` / `playByLocation`         | ✅                           | ✅   | ✅ `GamePipeline` 的地点变化触发 + `primeSceneAudio`；AI 标记那条也已有输入（prompt 侧已写，见上） |
+| `playByTag`                              | ✅                           | ✅   | ❌ **零**（保留为单标签精确入口）                                                                  |
+| `playSfx`                                | ✅                           | ✅   | ⚠️ 唯一调用方是设置页曲库的试听按钮（`settings/audio/AudioLibrary.vue`），游戏内无任何音效触发点   |
+| `playTrackByName` / `playPlaylistByName` | ✅                           | ✅   | ⚠️ 仅 UI                                                                                           |
+| `public/audio/manifest.json`             | ✅ 57 首内置曲目（作者 Aoo） | —    | 测试占位素材，正式发布前需复核，见 `public/audio/README.md`。⚠️ **mp3 字节本身不在仓库里**（见下） |
 
 > ⚠️ **内置 mp3 不随仓库分发（2026-07-28）**
 >
@@ -541,12 +546,12 @@ await audio.playByLocation('铁炉堡', { variant: 'A' })
 
 做法**不是"离开就 stop"**：突然死寂比继续放着更突兀，与「未命中时保持当前播放」是同一条道理。改为给每个界面一个默认场景，照常走 `playByScene` 打分选曲。
 
-| 界面 | 查询 | 在当前内置库上命中 |
-|------|------|-------------------|
-| `home` | `situations: ['系统','菜单','界面']` + `moods: ['平静']` | 系统·菜单 |
-| `create` | `situations: ['仪式']` + `moods: ['庄严','神圣']` | 神圣·仪式 |
-| `game` | **不动音乐** | 归 ② / ③ 管，界面层插手会先放一段再被地点顶掉 |
-| `settings` / `workshop` | **不动音乐** | 用户来这儿是调东西的；设置页里正在试听曲目，换歌纯属打架 |
+| 界面                    | 查询                                                     | 在当前内置库上命中                                       |
+| ----------------------- | -------------------------------------------------------- | -------------------------------------------------------- |
+| `home`                  | `situations: ['系统','菜单','界面']` + `moods: ['平静']` | 系统·菜单                                                |
+| `create`                | `situations: ['仪式']` + `moods: ['庄严','神圣']`        | 神圣·仪式                                                |
+| `game`                  | **不动音乐**                                             | 归 ② / ③ 管，界面层插手会先放一段再被地点顶掉            |
+| `settings` / `workshop` | **不动音乐**                                             | 用户来这儿是调东西的；设置页里正在试听曲目，换歌纯属打架 |
 
 界面查询**刻意不带 `location`**——界面不是地点，混进去会污染地点维打分。
 
@@ -626,13 +631,13 @@ AI 标记那条**不再是「无从验起」** —— prompt 侧接线后它已�
 
 真能免手势的路，都不在音频代码里：
 
-| 路径 | 可行性 |
-|------|--------|
-| Chrome 媒体参与度（MEI） | 用户在固定域名上反复播放过媒体后，Chrome 会自动放行。**不可控、不可测**，只能当作"运气好会有" |
-| 装成 PWA | 已安装的 Web 应用判定更宽松。日后走 PWA 路线可顺带解决 |
-| 打包成桌面应用（Electron / Tauri） | **唯一能保证的办法**，可直接设 `--autoplay-policy=no-user-gesture-required` |
-| 开发期给 Chrome 带同名 flag | 只对开发者自己的机器有效，验证音效时方便，不是产品方案 |
-| 静音播放再解除静音 | 解除静音出声仍受同一套策略管；行为不稳定，且这种"偷偷等着突袭"的做法本项目不采用 |
+| 路径                               | 可行性                                                                                        |
+| ---------------------------------- | --------------------------------------------------------------------------------------------- |
+| Chrome 媒体参与度（MEI）           | 用户在固定域名上反复播放过媒体后，Chrome 会自动放行。**不可控、不可测**，只能当作"运气好会有" |
+| 装成 PWA                           | 已安装的 Web 应用判定更宽松。日后走 PWA 路线可顺带解决                                        |
+| 打包成桌面应用（Electron / Tauri） | **唯一能保证的办法**，可直接设 `--autoplay-policy=no-user-gesture-required`                   |
+| 开发期给 Chrome 带同名 flag        | 只对开发者自己的机器有效，验证音效时方便，不是产品方案                                        |
+| 静音播放再解除静音                 | 解除静音出声仍受同一套策略管；行为不稳定，且这种"偷偷等着突袭"的做法本项目不采用              |
 
 现有架构已经把代价压到最小：锁定期的播放请求进 `pending`，解锁瞬间自动兑现，用户感知是"点了一下，音乐从该放的那首开始"，而不是丢掉一首。键盘也算激活（监听带 `keydown`），玩家打第一句话同样解锁。
 
@@ -640,20 +645,20 @@ AI 标记那条**不再是「无从验起」** —— prompt 侧接线后它已�
 
 ### 其他限制
 
-| 限制 | 说明 |
-|------|------|
-| 仅 Chromium 支持文件夹 | Firefox / Safari 没有 File System Access，`folderPermission` 恒为 `unsupported`，降级到上传入 IndexedDB 的路径 |
-| 无远程 URL 音源 | `AudioSourceKind` 里 `'url'` 在 v1 被砍掉；重新加入是纯增量改动 |
-| 无音效解码缓存 | 每一发都重新解码；加 LRU 是零接口变更的内部优化 |
-| 单元素淡入淡出 | 换曲有一段短暂静默，不是真交叉淡入 |
-| 名称归一化不做全角/半角折叠 | `Ａ` 与 `A` 视为不同名 |
-| 名称归一化不做拼音/罗马化 | `战斗` 与 `zhandou` 视为不同名 |
-| 名称归一化不做 NFC/NFKC | Unicode 等价字符视为不同名 |
-| 目录扫描不递归 | 只扫目录**顶层**，子文件夹里的文件不会被发现 |
+| 限制                                   | 说明                                                                                                                                                                                                                                    |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 仅 Chromium 支持文件夹                 | Firefox / Safari 没有 File System Access，`folderPermission` 恒为 `unsupported`，降级到上传入 IndexedDB 的路径                                                                                                                          |
+| 无远程 URL 音源                        | `AudioSourceKind` 里 `'url'` 在 v1 被砍掉；重新加入是纯增量改动                                                                                                                                                                         |
+| 无音效解码缓存                         | 每一发都重新解码；加 LRU 是零接口变更的内部优化                                                                                                                                                                                         |
+| 单元素淡入淡出                         | 换曲有一段短暂静默，不是真交叉淡入                                                                                                                                                                                                      |
+| 名称归一化不做全角/半角折叠            | `Ａ` 与 `A` 视为不同名                                                                                                                                                                                                                  |
+| 名称归一化不做拼音/罗马化              | `战斗` 与 `zhandou` 视为不同名                                                                                                                                                                                                          |
+| 名称归一化不做 NFC/NFKC                | Unicode 等价字符视为不同名                                                                                                                                                                                                              |
+| 目录扫描不递归                         | 只扫目录**顶层**，子文件夹里的文件不会被发现                                                                                                                                                                                            |
 | 播放列表排序仅支持拖拽，键盘用户不可用 | 原生 HTML5 拖放需要指针，而原先每行的 ▲▼ 兜底**已按需求移除**，且刻意不提供任何键盘替代路径（Alt+方向键、隐藏按钮等一律不加）。键盘/辅助技术用户无法调整播放列表次序；排序结果的 `aria-live` 播报仍在，但那只是结果播报，不构成操作入口 |
-| 排序按**可见行**下标索引 | `moveTrack` 拿到的是渲染行的位次，而写回的是 `trackIds` 的整序覆盖。列表里若有解析不出曲目的悬挂 id（渲染时被滤掉），下标会错位。属**既有行为**：`deleteAudioTrack` 会在同一事务里剪掉悬挂引用，正常路径下不会留下这种 id |
-| 无法免手势自动播放 | 浏览器自动播放策略所致，**非缺陷**。零交互直达游戏页时首曲进 `pending`，等第一次点击/按键兑现。详见上文 |
-| 部分路径尚未真机验证 | 音效 / AI 标记 / 本机文件夹 / 非 Chromium 浏览器；已验证的部分见下 |
+| 排序按**可见行**下标索引               | `moveTrack` 拿到的是渲染行的位次，而写回的是 `trackIds` 的整序覆盖。列表里若有解析不出曲目的悬挂 id（渲染时被滤掉），下标会错位。属**既有行为**：`deleteAudioTrack` 会在同一事务里剪掉悬挂引用，正常路径下不会留下这种 id               |
+| 无法免手势自动播放                     | 浏览器自动播放策略所致，**非缺陷**。零交互直达游戏页时首曲进 `pending`，等第一次点击/按键兑现。详见上文                                                                                                                                 |
+| 部分路径尚未真机验证                   | 音效 / AI 标记 / 本机文件夹 / 非 Chromium 浏览器；已验证的部分见下                                                                                                                                                                      |
 
 #### 踩坑记录：勾选框不能靠 `@click.prevent` 回滚
 
@@ -671,16 +676,16 @@ AI 标记那条**不再是「无从验起」** —— prompt 侧接线后它已�
 
 **自动化测试全部跑在注入的测试替身上**（`audio-fakes.ts` 的伪 `AudioContext` / 伪 `AudioElement`、`audio-folder.ts` 的 `__setFolderTestHooks`），因此以下几条只能靠真机确认，且**已经在浏览器里人工走过**：
 
-| 路径 | 状态 |
-|------|------|
-| 设置页曲库试听出声（Web Audio 图 → 内置音源） | ✅ 已验证 |
-| 游戏内地点变化换歌 | ✅ 已验证 |
-| 界面切换换歌（首页 / 捏人页） | ✅ 已验证 |
-| 手势解锁时机 | ✅ 已验证 —— 正是它暴露出"监听装在 `audio.init()` 里会错过进游戏那一下手势"，修复见 §十 |
-| 音效播放 | ❌ 未验证：游戏内**没有任何触发方**，无从验起 |
-| AI 标记 `<play_audio>` | ❌ 未验证 —— 但**原因已变**（2026-08-18）：prompt 侧现已接线（story 预设 `placeholder-media` 条目），链路可验，只是**还没走查过**，不再是「无从验起」 |
-| 本机音乐文件夹（`showDirectoryPicker` / 大目录扫描 / 权限跨会话） | ❌ 未验证 |
-| 非 Chromium 浏览器 | ❌ 未验证 |
+| 路径                                                              | 状态                                                                                                                                                  |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 设置页曲库试听出声（Web Audio 图 → 内置音源）                     | ✅ 已验证                                                                                                                                             |
+| 游戏内地点变化换歌                                                | ✅ 已验证                                                                                                                                             |
+| 界面切换换歌（首页 / 捏人页）                                     | ✅ 已验证                                                                                                                                             |
+| 手势解锁时机                                                      | ✅ 已验证 —— 正是它暴露出"监听装在 `audio.init()` 里会错过进游戏那一下手势"，修复见 §十                                                               |
+| 音效播放                                                          | ❌ 未验证：游戏内**没有任何触发方**，无从验起                                                                                                         |
+| AI 标记 `<play_audio>`                                            | ❌ 未验证 —— 但**原因已变**（2026-08-18）：prompt 侧现已接线（story 预设 `placeholder-media` 条目），链路可验，只是**还没走查过**，不再是「无从验起」 |
+| 本机音乐文件夹（`showDirectoryPicker` / 大目录扫描 / 权限跨会话） | ❌ 未验证                                                                                                                                             |
+| 非 Chromium 浏览器                                                | ❌ 未验证                                                                                                                                             |
 
 仍未覆盖的部分，联调时优先怀疑：`crossOrigin` 与 `MediaElementSource` 的相互作用、大文件夹扫描耗时、`revokeObjectURL` 的时序。
 
@@ -688,16 +693,16 @@ AI 标记那条**不再是「无从验起」** —— prompt 侧接线后它已�
 
 ## 十一、测试
 
-| 文件 | 用例数 | 覆盖范围 |
-|------|-------|----------|
-| `src/sillytavern/audio-channels.test.ts` | 69 | 队列推进矩阵、shuffle、淡入淡出、object URL 回收、**加载世代号作废矩阵**、时长广播、`pruneTracks`、声池抢占/并发上限/三道门禁 |
-| `src/sillytavern/audio-manager.test.ts` | 54 | 曲库注册表、master gain、解锁与 pending 兑现、`playByTag` 命中/多命中/fallback、状态广播 |
-| `src/sillytavern/audio-names.test.ts` | 40 | 归一化四步、扩展名边界、`findByName` 稳定性、`isNameTaken`、`uniqueAudioName` 换号 |
-| `src/ui/lib/audio-folder.test.ts` | 27 | 能力探测、句柄持久化、权限归一化、扫描过滤/排序/单文件容错、`resolveFile` NotFound |
-| `src/ui/lib/audio-singleton.test.ts` | 26 | 惰性单例、无 Web Audio 时的静默桩、`setBlobResolver`、首次手势解锁监听与自摘 |
-| `src/ui/stores/audio-store.test.ts` | 40 | 库加载、上传编号与配额中止、CRUD 拒绝路径、**批量删除/批量加入的分项计数**、文件夹对账与部分失败汇总、按名播放 |
-| `src/ui/components/settings/AudioSection.test.ts` | 35 | 设置页三段式交互（拆分后仍从壳层挂载整棵子树）、拖拽排序、曲库多选与批量动作 |
-| `src/ui/components/game/MiniPlayer.test.ts` | 12 | 迷你播放器交互与轮询配对 |
+| 文件                                              | 用例数 | 覆盖范围                                                                                                                      |
+| ------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `src/core/audio/audio-channels.test.ts`           | 69     | 队列推进矩阵、shuffle、淡入淡出、object URL 回收、**加载世代号作废矩阵**、时长广播、`pruneTracks`、声池抢占/并发上限/三道门禁 |
+| `src/core/audio/audio-manager.test.ts`            | 54     | 曲库注册表、master gain、解锁与 pending 兑现、`playByTag` 命中/多命中/fallback、状态广播                                      |
+| `src/core/audio/audio-names.test.ts`              | 40     | 归一化四步、扩展名边界、`findByName` 稳定性、`isNameTaken`、`uniqueAudioName` 换号                                            |
+| `src/ui/lib/audio-folder.test.ts`                 | 27     | 能力探测、句柄持久化、权限归一化、扫描过滤/排序/单文件容错、`resolveFile` NotFound                                            |
+| `src/ui/lib/audio-singleton.test.ts`              | 26     | 惰性单例、无 Web Audio 时的静默桩、`setBlobResolver`、首次手势解锁监听与自摘                                                  |
+| `src/ui/stores/audio-store.test.ts`               | 40     | 库加载、上传编号与配额中止、CRUD 拒绝路径、**批量删除/批量加入的分项计数**、文件夹对账与部分失败汇总、按名播放                |
+| `src/ui/components/settings/AudioSection.test.ts` | 35     | 设置页三段式交互（拆分后仍从壳层挂载整棵子树）、拖拽排序、曲库多选与批量动作                                                  |
+| `src/ui/components/game/MiniPlayer.test.ts`       | 12     | 迷你播放器交互与轮询配对                                                                                                      |
 
 ### 为什么引擎层必须有注入缝
 
@@ -711,19 +716,19 @@ vitest 的 `environment: 'node'` 里**没有** `AudioContext`、`Audio`、`URL.c
 
 ## 附：关键文件清单
 
-| 文件 | 职责 |
-|------|------|
-| `src/sillytavern/audio-channels.ts` | `MusicChannel`（音序器） / `SfxChannel`（声池） / `clamp01`（音量归一化，子系统内唯一一份） |
-| `src/sillytavern/types-audio.ts` | 注入 seam 接口 + 两声道与 Manager 的 state/options 形状（由 `types.ts` 再导出） |
-| `src/sillytavern/audio-manager.ts` | `AudioManager` 门面：曲库注册表 / master gain / 解锁 / `playByTag` |
-| `src/sillytavern/audio-names.ts` | 名称归一化 / `findByName` / `isNameTaken` / `uniqueAudioName` / 扩展名→MIME 表 |
-| `src/sillytavern/audio-fakes.ts` | 共享测试替身（伪 AudioContext / AudioElement） |
-| `src/sillytavern/types.ts` | `AudioSourceKind` / `AudioTrackKind` / `AudioTrack` / `AudioBlobRecord` / `AudioHandleRecord` / `AudioPlaylist` / `AudioRepeatMode` / `AudioPlaybackState` |
-| `src/sillytavern/database.ts` | 音频四表（v11 引入前三张、v12 追加 `audioHandles`；库现为 `DB_VERSION = 22`）+ 音频 CRUD（事务保证元数据/字节原子） |
-| `src/ui/lib/audio-singleton.ts` | 惰性单例 / 浏览器工厂 / 静默桩 / `setBlobResolver` / 首次手势解锁监听 |
-| `src/ui/lib/audio-folder.ts` | File System Access 唯一接触点：选择 / 持久化 / 权限 / 扫描 / 取文件 |
-| `src/ui/stores/audio-store.ts` | Pinia 薄壳，**应用的唯一入口** |
-| `src/ui/components/settings/AudioSection.vue` | 设置页音频分区的**编排壳**：生命周期 / 跨段派生 / 唯一 aria-live 播报区 |
-| `src/ui/components/settings/audio/` | `AudioMixer`（混音台） / `AudioPlaylists`（播放列表 + 拖拽排序） / `AudioLibrary`（曲库 + 文件夹条 + 多选批量） / `AudioFolderStrip` / `AudioDialogs` + `format.ts` / `dialogs.ts` |
-| `src/ui/components/game/MiniPlayer.vue` | 游戏页浮动迷你播放器 |
-| `public/audio/manifest.json` | 内置曲库清单（v1 为 `[]`） |
+| 文件                                          | 职责                                                                                                                                                                               |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/core/audio/audio-channels.ts`            | `MusicChannel`（音序器） / `SfxChannel`（声池） / `clamp01`（音量归一化，子系统内唯一一份）                                                                                        |
+| `src/core/types/types-audio.ts`               | 注入 seam 接口 + 两声道与 Manager 的 state/options 形状（由 `types.ts` 再导出）                                                                                                    |
+| `src/core/audio/audio-manager.ts`             | `AudioManager` 门面：曲库注册表 / master gain / 解锁 / `playByTag`                                                                                                                 |
+| `src/core/audio/audio-names.ts`               | 名称归一化 / `findByName` / `isNameTaken` / `uniqueAudioName` / 扩展名→MIME 表                                                                                                     |
+| `src/core/audio/audio-fakes.ts`               | 共享测试替身（伪 AudioContext / AudioElement）                                                                                                                                     |
+| `src/core/types/types.ts`                     | `AudioSourceKind` / `AudioTrackKind` / `AudioTrack` / `AudioBlobRecord` / `AudioHandleRecord` / `AudioPlaylist` / `AudioRepeatMode` / `AudioPlaybackState`                         |
+| `src/core/persistence/database.ts`            | 音频四表（v11 引入前三张、v12 追加 `audioHandles`；库现为 `DB_VERSION = 22`）+ 音频 CRUD（事务保证元数据/字节原子）                                                                |
+| `src/ui/lib/audio-singleton.ts`               | 惰性单例 / 浏览器工厂 / 静默桩 / `setBlobResolver` / 首次手势解锁监听                                                                                                              |
+| `src/ui/lib/audio-folder.ts`                  | File System Access 唯一接触点：选择 / 持久化 / 权限 / 扫描 / 取文件                                                                                                                |
+| `src/ui/stores/audio-store.ts`                | Pinia 薄壳，**应用的唯一入口**                                                                                                                                                     |
+| `src/ui/components/settings/AudioSection.vue` | 设置页音频分区的**编排壳**：生命周期 / 跨段派生 / 唯一 aria-live 播报区                                                                                                            |
+| `src/ui/components/settings/audio/`           | `AudioMixer`（混音台） / `AudioPlaylists`（播放列表 + 拖拽排序） / `AudioLibrary`（曲库 + 文件夹条 + 多选批量） / `AudioFolderStrip` / `AudioDialogs` + `format.ts` / `dialogs.ts` |
+| `src/ui/components/game/MiniPlayer.vue`       | 游戏页浮动迷你播放器                                                                                                                                                               |
+| `public/audio/manifest.json`                  | 内置曲库清单（v1 为 `[]`）                                                                                                                                                         |

@@ -18,8 +18,8 @@
  *
  * 中间那行是本次最大的净收益：直接省掉 ~378 KB，且修掉「派生数据被当真源持久化」。
  */
-import { getDatabase } from '@engine/database';
-import type { BeautifierRule } from '@engine/types';
+import { getDatabase } from '@engine/persistence/database';
+import type { BeautifierRule } from '@engine/types/types';
 import { runLegacyMigration, type IdRename } from './legacy-dexie-migration';
 
 /** `AppDatabase` 类本身未导出，用返回类型取到它 */

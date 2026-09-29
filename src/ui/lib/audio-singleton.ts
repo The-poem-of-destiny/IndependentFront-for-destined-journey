@@ -14,7 +14,7 @@ import {
   AudioManager,
   AUDIO_DEFAULT_FADE_MS,
   type ManagerAudioContextLike,
-} from '@engine/audio-manager';
+} from '@engine/audio/audio-manager';
 import type {
   AudioBufferLike,
   AudioBufferSourceLike,
@@ -22,8 +22,8 @@ import type {
   AudioGainLike,
   AudioNodeLike,
   AudioParamLike,
-} from '@engine/audio-channels';
-import { getAudioBlob } from '@engine/database';
+} from '@engine/audio/audio-channels';
+import { getAudioBlob } from '@engine/persistence/database';
 
 // ═══════════════════════════════════════════════════════════
 // 静默桩 —— 无 Web Audio 环境下的兜底实现

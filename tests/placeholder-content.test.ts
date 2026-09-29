@@ -2,25 +2,25 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { parseCatalogData, isCatalogPopulated } from '../src/sillytavern/start-catalog-mechanics';
-import { coerceLocationNodes, getChildren, getNeighbors } from '../src/sillytavern/location-db';
-import { getBloodlineSet, calcBloodlineModifiers } from '../src/sillytavern/bloodlines';
+import { parseCatalogData, isCatalogPopulated } from '../src/core/content/start-catalog-mechanics';
+import { coerceLocationNodes, getChildren, getNeighbors } from '../src/core/map/location-db';
+import { getBloodlineSet, calcBloodlineModifiers } from '../src/core/character/bloodlines';
 import {
   getNamePoolsContent,
   randomName,
   randomNameSeed,
   randomHairColor,
-} from '../src/sillytavern/random-tables';
+} from '../src/core/agents/random-tables';
 import { resolveBranding, NEUTRAL_BRANDING } from '../src/ui/branding-defaults';
-import { parseImageDialects, FALLBACK_IMAGE_DIALECT } from '../src/sillytavern/image-dialect';
+import { parseImageDialects, FALLBACK_IMAGE_DIALECT } from '../src/core/image/image-dialect';
 import {
   DEFAULT_IMAGE_BASE_NEGATIVE,
   DEFAULT_IMAGE_COMPOSITION_TAGS,
   DEFAULT_IMAGE_QUALITY_SUFFIX,
-} from '../src/sillytavern/image-defaults';
+} from '../src/core/image/image-defaults';
 import { setContentRegistry, getContentRegistry } from '../src/ui/stores/content-store';
-import { coerceMapPack, isEmptyMapPack } from '../src/sillytavern/map-pack';
-import { normalizePackRemoteAssets } from '../src/sillytavern/remote-asset-catalogue';
+import { coerceMapPack, isEmptyMapPack } from '../src/core/map/map-pack';
+import { normalizePackRemoteAssets } from '../src/core/assets/remote-asset-catalogue';
 
 /**
  * 占位内容集能不能被现有解析器吃下（内容-引擎分离 §6 / T16）。

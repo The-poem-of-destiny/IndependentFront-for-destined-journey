@@ -45,15 +45,15 @@ import type {
   QuotaVerdict,
   SceneImageAnchorKind,
   SceneImageRecord,
-} from '@engine/types-image';
+} from '@engine/types/types-image';
 import {
   deleteSceneImage,
   getSceneImage,
   getSceneImageBlob,
   getSceneImages,
   saveSceneImage,
-} from '@engine/database';
-import { FALLBACK_IMAGE_DIALECT } from '@engine/image-dialect';
+} from '@engine/persistence/database';
+import { FALLBACK_IMAGE_DIALECT } from '@engine/image/image-dialect';
 import { detach } from './db-write';
 
 // ═══════════════════════════════════════════════════════════
@@ -225,7 +225,7 @@ export type SceneImageGenerateResult =
 // 🪦 **用量统计与「清理」不在本 store**（2026-08-05 收口）。
 //
 // 这里曾经有一份 `SceneImageUsage` + `usage` computed + `cleanup()`，与
-// `@engine/database` 的 `getSceneImageUsage` / `listCleanableSceneImageIds` /
+// `@engine/persistence/database` 的 `getSceneImageUsage` / `listCleanableSceneImageIds` /
 // `dropSceneImageBlobs` 是**同一件事的第二份实现**，而且类型同名、字段不同 ——
 // 一个 import 写错就拿到另一套语义。三条理由删掉本店那份而不是留着：
 //
@@ -541,7 +541,7 @@ export const useSceneImageStore = defineStore('sceneImage', () => {
     forgetLocal(id);
   }
 
-  // 🪦 「清理」（删字节留记录，D47 / §7.5）走 `@engine/database` 的
+  // 🪦 「清理」（删字节留记录，D47 / §7.5）走 `@engine/persistence/database` 的
   //    `listCleanableSceneImageIds` + `dropSceneImageBlobs`，不在本店重写一遍判据
   //    （见文件上方那块墓志铭）。清理完想刷新本店投影就调 `load(saveId)`。
   //

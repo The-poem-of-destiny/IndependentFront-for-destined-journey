@@ -25,7 +25,7 @@
 import { ref, computed, watch } from 'vue';
 import { useGameStore } from '../../../stores/game-store';
 import { useUIStore } from '../../../stores/ui-store';
-import type { CharacterState, Skill, InventoryItem } from '@engine/types';
+import type { CharacterState, Skill, InventoryItem } from '@engine/types/types';
 import { projectUnitsBySide, type V3Unit } from './combat-v3-projection';
 
 const game = useGameStore();

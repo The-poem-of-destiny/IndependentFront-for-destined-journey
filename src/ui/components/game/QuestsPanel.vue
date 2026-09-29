@@ -6,8 +6,8 @@ import {
   persistQuestStatus,
   persistRemoveQuest,
   getGroupedQuests,
-} from '@engine/save-profile';
-import type { Quest } from '@engine/types';
+} from '@engine/state/save-profile';
+import type { Quest } from '@engine/types/types';
 
 const game = useGameStore();
 

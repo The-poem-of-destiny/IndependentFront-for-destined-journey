@@ -40,7 +40,7 @@ _private-staging/
 /reference/
 # 含 key 的 .api-config*.json 也在这个目录里，一并罩住。
 tests/agent-framework/
-src/sillytavern/worldbook-ejs-corpus.test.ts
+tests/core/ejs/worldbook-ejs-corpus.test.ts
 scripts/scramble-worldbook-ejs.mjs
 scripts/build-agent-fingerprints.mjs
 scripts/extract-map-markers.cjs

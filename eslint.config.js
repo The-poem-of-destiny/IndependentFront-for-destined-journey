@@ -92,7 +92,7 @@ export default [
     /**
      * 🔴 **分层闸门：引擎不许 import 前端**（2026-08-17 收口）。
      *
-     * 起因：`src/sillytavern/` 下曾有 6 条反向边 —— 4 个内容注册表消费方
+     * 起因：`src/core/` 下曾有 6 条反向边 —— 4 个内容注册表消费方
      * （agent-tools / bloodlines / location-db / random-tables）import `content-store`、
      * `content-source` import `ui/lib/media-hash`、`database` type-only import
      * `create-store` 的 `CreatePreset`。每一条都能编译、能跑、测试全绿，
@@ -111,7 +111,7 @@ export default [
      * 与字符串路径由 `tests/layering-gate.test.ts` 的源码扫描兜住 —— 两道网互补，
      * 少任何一道都留着一条静默的路。
      */
-    files: ['src/sillytavern/**/*.ts'],
+    files: ['src/core/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -120,7 +120,7 @@ export default [
             {
               group: ['../ui', '../ui/*', '../../ui', '../../ui/*', '**/src/ui/*', '@ui', '@ui/*'],
               message:
-                '引擎不许 import 前端（src/ui）。把它搬进 src/sillytavern，或照 content-registry-runtime.ts / engine-settings.ts 开一条注入缝，由前端往缝里装。',
+                '引擎不许 import 前端（src/ui）。把它搬进 src/core，或照 content-registry-runtime.ts / engine-settings.ts 开一条注入缝，由前端往缝里装。',
             },
             {
               group: ['vue', 'vue/*', 'pinia', 'pinia/*'],

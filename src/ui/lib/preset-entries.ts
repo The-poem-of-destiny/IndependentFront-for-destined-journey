@@ -13,7 +13,7 @@
  *
  * 🔴 纯函数、无 I/O、无 Pinia：可直接单测（见 preset-entries.test.ts）。
  */
-import type { ChatPreset } from '@engine/types';
+import type { ChatPreset } from '@engine/types/types';
 
 /** `ChatPreset.settings.prompts` 里单条目的形状（SillyTavern 兼容，字段全可选）。 */
 export interface PresetPromptEntry {

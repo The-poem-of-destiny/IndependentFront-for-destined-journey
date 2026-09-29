@@ -30,7 +30,7 @@ import { useAssetStore } from '../../stores/asset-store';
 import { useGameStore } from '../../stores/game-store';
 import { tierVarByName } from '../../lib/quality-colors';
 import { initialsOf } from '../../utils/name-color';
-import type { AssetType, CharacterState, StatusEffect } from '@engine/types';
+import type { AssetType, CharacterState, StatusEffect } from '@engine/types/types';
 import {
   buildAffectionView,
   buildAlbumGroups,

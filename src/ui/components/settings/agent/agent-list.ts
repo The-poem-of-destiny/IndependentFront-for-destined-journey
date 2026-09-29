@@ -12,7 +12,7 @@
  *    引擎那边决定它跑不跑，这里决定它在设置页里看不看得见。
  */
 
-import { getDefaultTemplate } from '@engine/placeholder-registry';
+import { getDefaultTemplate } from '@engine/prompts/placeholder-registry';
 
 export interface AgentListEntry {
   /** 与 agent-config.json / agent-templates.ts 一致的 id */

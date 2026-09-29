@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
 import CraftSystemCard from '../../../src/ui/components/game/cards/CraftSystemCard.vue';
-import type { CraftSystemEvent } from '@engine/types';
+import type { CraftSystemEvent } from '@engine/types/types';
 
 describe('CraftSystemCard', () => {
   const mockSuccess: CraftSystemEvent = {

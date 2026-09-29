@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
 import CombatSystemCard from '../../../src/ui/components/game/cards/CombatSystemCard.vue';
-import type { CombatSystemEvent } from '../../../src/sillytavern/types';
+import type { CombatSystemEvent } from '../../../src/core/types/types';
 
 describe('CombatSystemCard', () => {
   const mockWin: CombatSystemEvent = {

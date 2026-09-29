@@ -23,10 +23,10 @@
 
 主人跑一轮游戏后，需要把以下两个文件放到 `tests/realtime_export/` 下（该目录已在 `.gitignore` 里，**本机自建、不进仓库**，全新 clone 看不到它是正常的）：
 
-| 文件 | 说明 | 来源 |
-|------|------|------|
+| 文件                      | 说明                                                                                                                                                                                                                                                                                                           | 来源                                                                  |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | `fated-poem-debug-*.json` | Agent 日志导出（`agentHistory` 含当前存档最近 **10 条调试回合**的每次调用：messages、rawResponse、duration、usage、工具轮次与 Delta 诊断；剧情回合与延后启动的整场战斗各占一条，战斗条目内按 `combat_v3` / `combat_enemy` 区分角色；`agentLog` 兼容指向最新调试回合；另含整张 `agents` 设置表与 EJS 三类诊断） | 游戏页 DebugPanel 导出按钮（`src/ui/components/game/DebugPanel.vue`） |
-| `log.txt` | 浏览器 Console 日志（含 console.log/error/warn） | 浏览器 F12 Console 复制 |
+| `log.txt`                 | 浏览器 Console 日志（含 console.log/error/warn）                                                                                                                                                                                                                                                               | 浏览器 F12 Console 复制                                               |
 
 **命名约定**：保持 debug JSON 自动生成的文件名不变，方便追溯。
 
@@ -38,13 +38,13 @@ Claude 接收到导出数据后，按以下清单**并行分派 Agent**（一个
 
 ### 分析维度清单
 
-| # | 分析维度 | Agent 任务描述 | 关注点 |
-|---|---------|---------------|--------|
-| 1 | **Story 思维链** | 读 JSON 中 story agent 的 system message + rawResponse | System prompt 是否完整？输出是否有 `<thinking>` / Step 标记？是否按 `<maintext>/<option>/...` XML 格式输出？ |
-| 2 | **其他 Agent 调用** | 读 JSON 中**所有**已注册 Agent 的状态（`agent-config.json` 2026-09-15 实测 14 个：story / memory_recall / plot_pre_check / craft_gen / char_gen / item_gen / memory_summary / plot_post_check / plot_outline / request_dispatcher / vars_update / combat_v3 / combat_enemy / image_prompt） | 哪些被跳过（model 空）？哪些报错？rawResponse 是否为空？是否有 "missing field `model`" 等 API 错误？ |
-| 3 | **memory_summary 质量** | 读 JSON 中 memory_summary 的 rawResponse | content 是否过于啰嗦？hiddenLine 是否在数据为空时编造内容？keywords 是否有重复？ |
-| 4 | **前端 UI 行为** | 读 log.txt + 相关 Vue 组件 | `isGenerating` 是否正确切换？中断按钮是否出现？开场白是否过长？ |
-| 5 | **开场白质量** | 读 log.txt 中 `openingPrompt length` + JSON 中 story 的 rawResponse | 开场白是否包含过长的命定核心全文？是否包含 `[object Object]` 等字符串污染？ |
+| #   | 分析维度                | Agent 任务描述                                                                                                                                                                                                                                                                              | 关注点                                                                                                       |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 1   | **Story 思维链**        | 读 JSON 中 story agent 的 system message + rawResponse                                                                                                                                                                                                                                      | System prompt 是否完整？输出是否有 `<thinking>` / Step 标记？是否按 `<maintext>/<option>/...` XML 格式输出？ |
+| 2   | **其他 Agent 调用**     | 读 JSON 中**所有**已注册 Agent 的状态（`agent-config.json` 2026-09-15 实测 14 个：story / memory_recall / plot_pre_check / craft_gen / char_gen / item_gen / memory_summary / plot_post_check / plot_outline / request_dispatcher / vars_update / combat_v3 / combat_enemy / image_prompt） | 哪些被跳过（model 空）？哪些报错？rawResponse 是否为空？是否有 "missing field `model`" 等 API 错误？         |
+| 3   | **memory_summary 质量** | 读 JSON 中 memory_summary 的 rawResponse                                                                                                                                                                                                                                                    | content 是否过于啰嗦？hiddenLine 是否在数据为空时编造内容？keywords 是否有重复？                             |
+| 4   | **前端 UI 行为**        | 读 log.txt + 相关 Vue 组件                                                                                                                                                                                                                                                                  | `isGenerating` 是否正确切换？中断按钮是否出现？开场白是否过长？                                              |
+| 5   | **开场白质量**          | 读 log.txt 中 `openingPrompt length` + JSON 中 story 的 rawResponse                                                                                                                                                                                                                         | 开场白是否包含过长的命定核心全文？是否包含 `[object Object]` 等字符串污染？                                  |
 
 ### 并行分派示例
 
@@ -59,6 +59,7 @@ Agent 5: 分析开场白 → 读 tests/realtime_export/log.txt + create-store.ts
 ```
 
 **关键原则**：
+
 - 每个 Agent 聚焦单一维度，避免分析范围过大
 - 5 个 Agent 在同一个消息中发起，并行执行
 - Agent 返回后 Claude 汇总，按严重度排序
@@ -82,20 +83,20 @@ Agent 5: 分析开场白 → 读 tests/realtime_export/log.txt + create-store.ts
 
 Claude 汇总各 Agent 的分析结果，按以下优先级排序：
 
-| 优先级 | 标签 | 含义 | 示例 |
-|--------|------|------|------|
-| 🔴 P0 | 阻断性 | 游戏完全无法正常运转 | 无法中断生成、API 调用全部失败 |
-| 🔴 P1 | 严重 | 核心功能缺失或数据错误 | story 预设未注入、memory 编造内容 |
-| 🟡 P2 | 中等 | 影响体验但不阻断 | 开场白过长、UI 显示异常 |
-| 🟢 P3 | 轻微 | 可优化但不紧急 | 格式不遵守、内容稍微啰嗦 |
+| 优先级 | 标签   | 含义                   | 示例                              |
+| ------ | ------ | ---------------------- | --------------------------------- |
+| 🔴 P0  | 阻断性 | 游戏完全无法正常运转   | 无法中断生成、API 调用全部失败    |
+| 🔴 P1  | 严重   | 核心功能缺失或数据错误 | story 预设未注入、memory 编造内容 |
+| 🟡 P2  | 中等   | 影响体验但不阻断       | 开场白过长、UI 显示异常           |
+| 🟢 P3  | 轻微   | 可优化但不紧急         | 格式不遵守、内容稍微啰嗦          |
 
 **报告格式**（每次必须用这个表格）：
 
 ```markdown
-| # | 优先级 | 问题简述 | 根因 | 修法 | 涉及文件 |
-|---|--------|---------|------|------|---------|
-| 1 | P0 | ... | ... | ... | ... |
-| 2 | P1 | ... | ... | ... | ... |
+| #   | 优先级 | 问题简述 | 根因 | 修法 | 涉及文件 |
+| --- | ------ | -------- | ---- | ---- | -------- |
+| 1   | P0     | ...      | ...  | ...  | ...      |
+| 2   | P1     | ...      | ...  | ...  | ...      |
 ```
 
 ---
@@ -114,17 +115,17 @@ Claude 汇总各 Agent 的分析结果，按以下优先级排序：
 
 ### 常见修复模式速查
 
-| 问题类型 | 典型根因 | 典型修法 | 检查点 |
-|---------|---------|---------|--------|
-| Agent 输出为空/格式不对 | `config.systemPrompt` 空 | 检查 agent-config.json 对应字段 | `buildAgentMessages()` |
-| Agent 被跳过 | model 配置为空字符串 | 设置页选择模型 | agent-config.json `model` 字段 |
-| API 调用报 missing field `model` | `endpoint.defaultModel` 为 undefined | `buildEndpoints()` vs 原始类型转换 | `agent-client.ts:493` |
-| 预设未注入 | `config.presetId` 为空 | `buildAgentConfigs()` 读 `projectAgentDefaults` | `agent-templates.ts:325` |
-| 世界书未注入 | `OrchestratorOptions.worldBooks` 为空 | `loadActiveWorldBooks()` → `filterBooksByEnabledEntries()` | `game-pipeline.ts` |
-| `{{LORE_BOOK}}` 为空 | `placeholder-registry` 全局变量未设 | `resolveTemplateWithGlobals()` → `setPlaceholderGlobals()` | `placeholder-registry.ts:31-32` |
-| `[object Object]` 字符串污染 | placeholder resolver 返回了对象 | `String()` 包裹之前检查类型 | `placeholder-registry.ts` 各 resolver |
-| 前端按钮不切换 | state ref 没更新 | 设 `isGenerating = true` | `game-pipeline.ts:run()` |
-| 旧存档数据残留 | `loadSave()` 条件覆盖守卫 | `clearActive()` 无条件清空 + 始终覆写 | `game-store.ts` |
+| 问题类型                         | 典型根因                              | 典型修法                                                   | 检查点                                |
+| -------------------------------- | ------------------------------------- | ---------------------------------------------------------- | ------------------------------------- |
+| Agent 输出为空/格式不对          | `config.systemPrompt` 空              | 检查 agent-config.json 对应字段                            | `buildAgentMessages()`                |
+| Agent 被跳过                     | model 配置为空字符串                  | 设置页选择模型                                             | agent-config.json `model` 字段        |
+| API 调用报 missing field `model` | `endpoint.defaultModel` 为 undefined  | `buildEndpoints()` vs 原始类型转换                         | `agent-client.ts:493`                 |
+| 预设未注入                       | `config.presetId` 为空                | `buildAgentConfigs()` 读 `projectAgentDefaults`            | `agent-templates.ts:325`              |
+| 世界书未注入                     | `OrchestratorOptions.worldBooks` 为空 | `loadActiveWorldBooks()` → `filterBooksByEnabledEntries()` | `game-pipeline.ts`                    |
+| `{{LORE_BOOK}}` 为空             | `placeholder-registry` 全局变量未设   | `resolveTemplateWithGlobals()` → `setPlaceholderGlobals()` | `placeholder-registry.ts:31-32`       |
+| `[object Object]` 字符串污染     | placeholder resolver 返回了对象       | `String()` 包裹之前检查类型                                | `placeholder-registry.ts` 各 resolver |
+| 前端按钮不切换                   | state ref 没更新                      | 设 `isGenerating = true`                                   | `game-pipeline.ts:run()`              |
+| 旧存档数据残留                   | `loadSave()` 条件覆盖守卫             | `clearActive()` 无条件清空 + 始终覆写                      | `game-store.ts`                       |
 
 ---
 
@@ -148,7 +149,7 @@ npm run test -- --run  # 全量测试，必须全部通过
 ### 分析维度 1：Story Agent 思维链
 
 ```
-Read `tests/realtime_export/fated-poem-debug-*.json`. 
+Read `tests/realtime_export/fated-poem-debug-*.json`.
 Focus on the story agent (agentId: "story").
 1. Extract the first 300 and last 300 chars of the system message.
 2. Does the system prompt contain thinking chain requirements (Step 1/2/3, CoT)?
@@ -205,24 +206,24 @@ Should it be shortened to a brief reference since world books already include it
 
 ## 关键文件速查
 
-| 文件 | 内容 | 何时查阅 |
-|------|------|---------|
-| `public/data/defaults/agent-config.json` | **14 个** Agent 的 systemPrompt + template + preset（2026-09-15 实测，含 `combat_v3` / `combat_enemy`） | Agent 行为异常 |
-| `src/sillytavern/agent-templates.ts` | buildAgentMessages + fallback 逻辑；`AGENT_TEMPLATES` 现有 **15** 条（2026-09-15 实测；`combat_v3` 的旧闭包键名是 `combat`，`combat_enemy` 直接走配置模板，另有 `plot_check` / `plot_correct` 两条 v3 兼容别名） | 预设/SYS_PROMPT 未注入 |
-| `src/sillytavern/agent-orchestrator.ts` | 编排引擎 + OrchestratorOptions | 世界书/预设传递断裂 |
-| `src/sillytavern/agent-client.ts` | API 调用 + chatWithTools + SSE 流式 | API 调用错误 |
-| `src/sillytavern/worldbook-loader.ts` | 世界书加载/过滤/格式化 | 世界书注入异常 |
-| `src/sillytavern/placeholder-registry.ts` | {{PLACEHOLDER}} 解析 + 默认模板 | 占位符未替换或 [object Object] |
-| `src/sillytavern/template-resolver.ts` | resolveTemplateWithGlobals | 模板解析异常 |
-| `src/sillytavern/preset-loader.ts` | 预设加载 + assemblePresetContent | 预设装配异常 |
-| `src/sillytavern/memory-summarizer.ts` | 记忆摘要解析 | memory_summary 输出格式 |
-| `src/ui/lib/game-pipeline.ts` | 前端→引擎桥接 + AgentConfig 构建 | pipeline 配置/注入断裂 |
-| `src/ui/stores/game-store.ts` | Pinia 游戏状态 | 消息残留/isGenerating |
-| `src/ui/stores/create-store.ts` | 捏人页 + buildOpeningPrompt | 开场白内容 |
-| `src/ui/stores/settings-store.ts` | 设置持久化 + projectAgentDefaults | Agent/API 配置 |
-| `src/sillytavern/char-gen-agent.ts` | char_gen→item_gen 链 | char_gen 调用失败 |
-| `src/sillytavern/craft-gen-chain.ts` | craft_gen→item_gen 链 | craft_gen 调用失败 |
-| `src/sillytavern/item-gen-chain.ts` | item_gen 独立链 | item_gen 调用失败 |
+| 文件                                       | 内容                                                                                                                                                                                                             | 何时查阅                       |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `public/data/defaults/agent-config.json`   | **14 个** Agent 的 systemPrompt + template + preset（2026-09-15 实测，含 `combat_v3` / `combat_enemy`）                                                                                                          | Agent 行为异常                 |
+| `src/core/prompts/agent-templates.ts`      | buildAgentMessages + fallback 逻辑；`AGENT_TEMPLATES` 现有 **15** 条（2026-09-15 实测；`combat_v3` 的旧闭包键名是 `combat`，`combat_enemy` 直接走配置模板，另有 `plot_check` / `plot_correct` 两条 v3 兼容别名） | 预设/SYS_PROMPT 未注入         |
+| `src/core/agents/agent-orchestrator.ts`    | 编排引擎 + OrchestratorOptions                                                                                                                                                                                   | 世界书/预设传递断裂            |
+| `src/core/agents/agent-client.ts`          | API 调用 + chatWithTools + SSE 流式                                                                                                                                                                              | API 调用错误                   |
+| `src/core/content/worldbook-loader.ts`     | 世界书加载/过滤/格式化                                                                                                                                                                                           | 世界书注入异常                 |
+| `src/core/prompts/placeholder-registry.ts` | {{PLACEHOLDER}} 解析 + 默认模板                                                                                                                                                                                  | 占位符未替换或 [object Object] |
+| `src/core/prompts/template-resolver.ts`    | resolveTemplateWithGlobals                                                                                                                                                                                       | 模板解析异常                   |
+| `src/core/prompts/preset-loader.ts`        | 预设加载 + assemblePresetContent                                                                                                                                                                                 | 预设装配异常                   |
+| `src/core/memory/memory-summarizer.ts`     | 记忆摘要解析                                                                                                                                                                                                     | memory_summary 输出格式        |
+| `src/ui/lib/game-pipeline.ts`              | 前端→引擎桥接 + AgentConfig 构建                                                                                                                                                                                 | pipeline 配置/注入断裂         |
+| `src/ui/stores/game-store.ts`              | Pinia 游戏状态                                                                                                                                                                                                   | 消息残留/isGenerating          |
+| `src/ui/stores/create-store.ts`            | 捏人页 + buildOpeningPrompt                                                                                                                                                                                      | 开场白内容                     |
+| `src/ui/stores/settings-store.ts`          | 设置持久化 + projectAgentDefaults                                                                                                                                                                                | Agent/API 配置                 |
+| `src/core/agents/char-gen-agent.ts`        | char_gen→item_gen 链                                                                                                                                                                                             | char_gen 调用失败              |
+| `src/core/crafting/craft-gen-chain.ts`     | craft_gen→item_gen 链                                                                                                                                                                                            | craft_gen 调用失败             |
+| `src/core/agents/item-gen-chain.ts`        | item_gen 独立链                                                                                                                                                                                                  | item_gen 调用失败              |
 
 ---
 
@@ -231,6 +232,7 @@ Should it be shortened to a brief reference since world books already include it
 ### 关于热重载 vs 重启
 
 项目使用 Vite HMR（热模块替换），大部分代码修改后会自动热重载。但以下情况需要手动刷新浏览器：
+
 - `public/data/defaults/agent-config.json` 的修改（静态文件，Vite 可能缓存旧版本）
 - IndexedDB 结构变更（需要清除浏览器 IndexedDB 或在 DevTools 中删库重建）
 
@@ -239,6 +241,7 @@ Should it be shortened to a brief reference since world books already include it
 ### 关于 token 效率
 
 导出 JSON 文件通常 1MB+，**不要一次读完整个文件让 Claude 主线程分析**。应该：
+
 1. 先用 `grep -n` / `wc -c` 摸清文件结构（行数、Agent 数量）
 2. 按 Agent 分块（每个 Agent 的 messages/rawResponse 独立），派 Agent 分段读
 3. 控制每个 Agent 的 single-context 不超过 ~2000 行

@@ -9,7 +9,7 @@
 import { ref, computed, onUnmounted } from 'vue';
 import { useAudioStore } from '../../../stores/audio-store';
 import { useSettingsStore } from '../../../stores/settings-store';
-import type { AudioTrack, AudioRepeatMode } from '@engine/types';
+import type { AudioTrack, AudioRepeatMode } from '@engine/types/types';
 import { fmtDuration } from './format';
 
 const audio = useAudioStore();

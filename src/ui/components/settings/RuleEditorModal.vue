@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import type { BeautifierRule } from '@engine/types';
+import type { BeautifierRule } from '@engine/types/types';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import BeautifiedNarrative from '../game/BeautifiedNarrative.vue';

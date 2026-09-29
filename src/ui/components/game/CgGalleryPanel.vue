@@ -24,7 +24,7 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useSceneImageUrls } from '../../composables/useSceneImageUrls';
 import { buildGalleryCells, isNearViewport, GALLERY_PRELOAD_MARGIN } from './cg-gallery';
 import CgGalleryDetail from './CgGalleryDetail.vue';
-import type { SceneImageRecord } from '@engine/types-image';
+import type { SceneImageRecord } from '@engine/types/types-image';
 
 const game = useGameStore();
 const ui = useUIStore();

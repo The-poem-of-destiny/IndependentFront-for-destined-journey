@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { QualityLevel } from '@engine/types';
+import type { QualityLevel } from '@engine/types/types';
 
 const props = defineProps<{
   quality: QualityLevel;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import type { AgentActivityRun, AgentActivityStep } from '@engine/types';
+import type { AgentActivityRun, AgentActivityStep } from '@engine/types/types';
 
 const props = defineProps<{
   run: AgentActivityRun;

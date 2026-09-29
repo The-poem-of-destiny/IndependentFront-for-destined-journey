@@ -1,4 +1,4 @@
-import type { SaveSlot } from '@engine/types';
+import type { SaveSlot } from '@engine/types/types';
 
 /**
  * 按存档更新时间选出继续游戏的目标。

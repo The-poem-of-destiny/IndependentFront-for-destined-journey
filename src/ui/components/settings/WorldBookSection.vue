@@ -14,7 +14,7 @@ import WorldBookEditor from './WorldBookEditor.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useWorldBookStore } from '../../stores/worldbook-store';
-import type { WorldBook } from '@engine/types';
+import type { WorldBook } from '@engine/types/types';
 
 const cfg = useSettingsStore();
 const s = cfg.settings;

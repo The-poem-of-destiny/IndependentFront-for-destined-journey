@@ -1,4 +1,4 @@
-import type { AgentToolActivity } from '@engine/types';
+import type { AgentToolActivity } from '@engine/types/types';
 
 const AGENT_ACTIVITY_LABELS: Record<string, string> = {
   memory_recall: '追忆相关经历',

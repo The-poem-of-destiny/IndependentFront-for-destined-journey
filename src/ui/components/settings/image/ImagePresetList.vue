@@ -32,14 +32,14 @@ import { useCharacterAppearanceStore } from '../../../stores/character-appearanc
 import { useSettingsStore } from '../../../stores/settings-store';
 import { useUIStore } from '../../../stores/ui-store';
 import { ensureContentRegistryLoaded, getContentRegistry } from '../../../stores/content-store';
-import type { ImageDialect, ImagePreset, ImagePresetKind } from '@engine/types-image';
-import { parseImageDialects, resolveImageDialect } from '@engine/image-dialect';
+import type { ImageDialect, ImagePreset, ImagePresetKind } from '@engine/types/types-image';
+import { parseImageDialects, resolveImageDialect } from '@engine/image/image-dialect';
 import {
   APPEARANCE_SLOT_ORDER,
   EMPTY_APPEARANCE,
   type CharacterAppearance,
-} from '@engine/character-appearance';
-import { bootstrapAppearance } from '@engine/character-appearance-agent';
+} from '@engine/character/character-appearance';
+import { bootstrapAppearance } from '@engine/character/character-appearance-agent';
 import { PRESET_NO_FORM_HINT, lacksFormUnderDialect } from './preset-dialect-form';
 
 const store = useImagePresetStore();

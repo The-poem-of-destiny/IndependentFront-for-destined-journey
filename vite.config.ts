@@ -133,7 +133,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
-      '@engine': resolve(__dirname, 'src/sillytavern'),
+      '@engine': resolve(__dirname, 'src/core'),
       '@ui': resolve(__dirname, 'src/ui'),
     },
   },

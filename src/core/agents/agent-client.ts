@@ -1,0 +1,891 @@
+/**
+ * Agent API Client — OpenAI 兼容 /chat/completions 客户端
+ *
+ * 特性:
+ * - 每 Agent 独立 userId (DeepSeek 缓存隔离)
+ * - 自动重试 (指数退避)
+ * - 超时控制
+ * - 缓存命中检测
+ * - 支持 AbortSignal 外部取消
+ * - 🆕 Phase 8.5: chatWithTools() 多轮工具调用
+ */
+
+import type { AgentProviderRound, ApiEndpoint, AgentResult, ToolDefinition } from '../types/types';
+import { scheduleApiRequest } from '../api/api-rpm-limiter';
+import type { LlmMessage, NativeLlmContent } from '../types/types-api';
+import { buildLlmRequest, createLlmStreamAccumulator, parseLlmResponse } from '../api/llm-adapter';
+import { postLlmRequest } from '../api/transport';
+
+/** 内部扩展 — 包含原始 tool_calls 数据 */
+type InternalAgentResult = AgentResult & {
+  _toolCalls?: any[];
+  _nativeAssistant?: NativeLlmContent;
+};
+
+/**
+ * 全 system 消息时补的那条 user 消息的内容 —— **不许改成空串**，理由见 `ensureUserMessage`。
+ * 导出仅供单测断言「它非空」；Delta 会话（T2）首轮 user 也以它为「继续」触发开头。
+ */
+export const USER_PLACEHOLDER_CONTENT = '继续';
+
+/**
+ * 确保 messages 至少包含一条**非空** user 消息（幂等纯函数）。
+ *
+ * `buildAgentMessages` 对**每一个** Agent 都只产出一条 system 消息
+ * （agent-templates.ts 末尾 `return [{ role: 'system', content: resolved }]`，
+ * 玩家输入与历史全拼进那一条里），所以这个补丁不是边缘路径 —— 它落在每一次请求上。
+ *
+ * 修复(2026-07-30): 部分 API（如 ollama.com）当 messages 只有 system 消息时
+ * 返回 finish_reason="load" 和空内容（模型不加载），导致所有 agent 空回。
+ * 当 messages 全是 system 时追加一条 user 消息以触发正常生成。
+ *
+ * 🔴 修复(2026-08-13): 追加的这条**必须有内容**，`content: ''` 会打死 Gemini 系网关。
+ * OpenAI→Gemini 的转换层把 system 收进 `system_instruction`、其余收进 `contents`，
+ * 空文本那条在转换中被丢掉 → `contents` 空 → `HTTP 400: contents field is required`。
+ * 真机症状（gcli.ggchan.dev + gemini-3-flash-preview）：第 0 轮 memory_recall 400，
+ * 而 story stage 的 `waitFor` 含 memory_recall、`stageDependenciesMet` 要求依赖全部无
+ * error，于是**整轮正文被跳过、界面一片空白**。
+ * 占位内容取「继续」而非标点：中文语料下最中性、且是常量（不随轮次变化），
+ * 不破坏 DeepSeek KVCache 的静态前缀命中。
+ *
+ * 幂等：已含 user 消息的列表原样返回（不重复追加）；空列表原样返回。
+ * 2026-08-22（T2）从 private 方法提为模块级导出，`prompt-session-assembler` 与 T3 也复用。
+ */
+export function ensureUserMessage(messages: ChatRequest['messages']): ChatRequest['messages'] {
+  if (messages.length === 0) return messages;
+  const hasUser = messages.some((m) => m.role === 'user');
+  if (hasUser) return messages;
+  return [...messages, { role: 'user', content: USER_PLACEHOLDER_CONTENT }];
+}
+
+// ========== Types ==========
+
+export interface ChatRequest {
+  model?: string;
+  messages: LlmMessage[];
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  stop?: string[];
+  /** 🆕 Agentic: 可用工具列表 */
+  tools?: ToolDefinition[];
+  /** 🆕 Agentic: 工具调用策略 */
+  tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
+  /** 🆕 DeepSeek 思考模式 */
+  reasoning?: boolean;
+}
+
+export interface AgentClientOptions {
+  endpoint: ApiEndpoint;
+  agentId: string;
+  saveId: string;
+  timeout?: number;
+  maxRetries?: number;
+}
+
+export interface ChatWithToolsOptions {
+  /** 最大工具调用轮数，默认 5 */
+  maxRounds?: number;
+  signal?: AbortSignal;
+}
+
+// ========== Streaming Types ==========
+
+const POST_FINISH_GRACE_MS = 1000;
+
+/**
+ * 流式请求首字节等待期的超时倍率（Q-17：原为 `this.timeout * 3` 的裸字面量）。
+ * 流式含模型加载 + 大上下文处理，云端 API（ollama.com 等）首字节延迟可能 >120s。
+ */
+const STREAM_TIMEOUT_MULTIPLIER = 3;
+
+/** 流式响应回调集合 */
+export interface StreamCallbacks {
+  /** 增量文本块（delta），isComplete 在最后一块为 true */
+  onChunk: (text: string, isComplete: boolean) => void;
+  /** 思维链增量（delta.reasoning_content）——实时字数统计用；可选，不传则只在 onComplete 拿最终值 */
+  onReasoning?: (text: string) => void;
+  /** 工具调用增量（name + 当前已累积的 arguments JSON 字符串） */
+  onToolCall?: (toolCall: { id: string; name: string; arguments: string }) => void;
+  /** 流式完成，携带最终累积状态 */
+  onComplete: (result: {
+    fullText: string;
+    toolCalls: Array<{ id: string; name: string; arguments: Record<string, any> }>;
+    reasoning: string;
+    tokensUsed: number;
+    cacheHit: boolean;
+    cacheHitTokens: number;
+    cacheMissTokens: number;
+    completionTokens: number;
+    duration: number;
+    /** 仅供会话组装层续传 provider 原生签名，不进入普通结果或调试导出。 */
+    nativeAssistant?: NativeLlmContent;
+  }) => void;
+  /** 流式传输中的错误 */
+  onError: (error: string) => void;
+}
+
+// ========== AgentClient ==========
+
+export class AgentClient {
+  private endpoint: ApiEndpoint;
+  private agentId: string;
+  private saveId: string;
+  private timeout: number;
+  private maxRetries: number;
+
+  constructor(options: AgentClientOptions) {
+    // One business call (including retries and tool rounds) owns one immutable
+    // connection snapshot. Store edits take effect on the next client/call.
+    this.endpoint = structuredClone(options.endpoint);
+    this.agentId = options.agentId;
+    this.saveId = options.saveId;
+    this.timeout = options.timeout ?? 60000;
+    this.maxRetries = options.maxRetries ?? 1;
+  }
+
+  /** 标准化 baseUrl：去掉尾斜杠，避免拼接时出现双斜杠 */
+  private get baseUrl(): string {
+    return this.endpoint.baseUrl.trim().replace(/\/$/, '');
+  }
+
+  /**
+   * 每 Agent 独立 userId — DeepSeek KVCache 缓存隔离的关键。
+   *
+   * 🔴 2026-08-02 修: **不再含 saveId**，只按 agent 区分。
+   * 此前 `fp|saveId|agentId` 让每个存档都有不同 userId → DeepSeek KVCache 跨存档
+   * 完全 miss（文档: user_id 参与缓存隔离），开新档每次全价重算（~0.5 元/次）。
+   * 改成 `fp|agentId` 后同一 agent 的缓存跨存档复用（systemPrompt 静态前缀命中）。
+   */
+  get userId(): string {
+    return `fp|${this.agentId}`;
+  }
+
+  /**
+   * 确保 messages 至少包含一条**非空** user 消息。
+   *
+   * `buildAgentMessages` 对**每一个** Agent 都只产出一条 system 消息
+   * （agent-templates.ts 末尾 `return [{ role: 'system', content: resolved }]`，
+   * 玩家输入与历史全拼进那一条里），所以这个补丁不是边缘路径 —— 它落在每一次请求上。
+   *
+   * 修复(2026-07-30): 部分 API（如 ollama.com）当 messages 只有 system 消息时
+   * 返回 finish_reason="load" 和空内容（模型不加载），导致所有 agent 空回。
+   * 当 messages 全是 system 时追加一条 user 消息以触发正常生成。
+   *
+   * 🔴 修复(2026-08-13): 追加的这条**必须有内容**，`content: ''` 会打死 Gemini 系网关。
+   * OpenAI→Gemini 的转换层把 system 收进 `system_instruction`、其余收进 `contents`，
+   * 空文本那条在转换中被丢掉 → `contents` 空 → `HTTP 400: contents field is required`。
+   * 真机症状（gcli.ggchan.dev + gemini-3-flash-preview）：第 0 轮 memory_recall 400，
+   * 而 story stage 的 `waitFor` 含 memory_recall、`stageDependenciesMet` 要求依赖全部无
+   * error，于是**整轮正文被跳过、界面一片空白**。
+   * 占位内容取「继续」而非标点：中文语料下最中性、且是常量（不随轮次变化），
+   * 不破坏 DeepSeek KVCache 的静态前缀命中。
+   */
+  /**
+   * 发送 chat completion 请求（非 agentic 路径）
+   * @returns AgentResult — 即使失败也返回带 error 字段的结果（不抛异常）
+   */
+  async chat(request: ChatRequest, signal?: AbortSignal): Promise<InternalAgentResult> {
+    const startTime = Date.now();
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      try {
+        const result = await this.callOnce(request, signal);
+        result.duration = Date.now() - startTime;
+        return result;
+      } catch (e) {
+        lastError = e as Error;
+        // 🔴 2026-08-16：外部取消后**不再重试** —— signal 已 aborted 时每次重试都
+        // 立刻失败，旧实现还会白等 1s/2s 的指数退避（重试次数可配置后更明显）。
+        // 用户取消 = 立即停。超时（callOnce 内部 controller）不受影响，仍可重试。
+        if (signal?.aborted) break;
+        if (attempt < this.maxRetries) {
+          await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
+        }
+      }
+    }
+
+    return {
+      agentId: this.agentId,
+      output: null,
+      rawResponse: '',
+      tokensUsed: 0,
+      cacheHit: false,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+      completionTokens: 0,
+      duration: Date.now() - startTime,
+      error: lastError?.message ?? 'Unknown error',
+    };
+  }
+
+  /**
+   * 🆕 Agentic 路径: 发送带工具的消息，支持多轮工具调用。
+   *
+   * 流程:
+   *   1. 发送初始 messages + tools + tool_choice
+   *   2. 如果 AI 返回 tool_calls → 执行工具 → 追加 tool result 消息 → 回到步骤 1
+   *   3. 如果 AI 返回 content（无 tool_calls）→ 最终输出
+   *   4. 超过 maxRounds → 强制结束
+   *
+   * @param request 包含 tools 的 ChatRequest
+   * @param toolExecutor 工具执行回调 (name, args) => result
+   * @param options maxRounds / signal
+   */
+  async chatWithTools(
+    request: ChatRequest,
+    toolExecutor: (name: string, args: Record<string, any>) => Promise<any>,
+    options: ChatWithToolsOptions = {},
+  ): Promise<AgentResult> {
+    const maxRounds = options.maxRounds ?? 5;
+    const startTime = Date.now();
+    const toolCallHistory: Array<{ name: string; arguments: any; result: any }> = [];
+
+    // 复制消息列表（后续轮次会追加 assistant + tool 消息）
+    const conversation = [...request.messages];
+    const initialConversationLength = conversation.length;
+    let totalTokens = 0;
+    let totalCacheHitTokens = 0;
+    let totalCacheMissTokens = 0;
+    let totalCompletionTokens = 0;
+    const allReasoning: string[] = []; // 跨轮次收集 reasoning
+    const providerRounds: AgentProviderRound[] = [];
+
+    for (let round = 0; round < maxRounds; round++) {
+      const roundRequest: ChatRequest = {
+        ...request,
+        messages: conversation,
+        tools: request.tools,
+        tool_choice: request.tool_choice,
+      };
+
+      const innerResult = await this.chat(roundRequest, options.signal);
+      totalTokens += innerResult.tokensUsed;
+      totalCacheHitTokens += innerResult.cacheHitTokens ?? 0;
+      totalCacheMissTokens += innerResult.cacheMissTokens ?? 0;
+      totalCompletionTokens += innerResult.completionTokens ?? 0;
+      providerRounds.push({
+        round: round + 1,
+        tokensUsed: innerResult.tokensUsed,
+        cacheHit: innerResult.cacheHit,
+        cacheHitTokens: innerResult.cacheHitTokens,
+        cacheMissTokens: innerResult.cacheMissTokens,
+        completionTokens: innerResult.completionTokens,
+        promptTokens: innerResult.promptTokens,
+        finishReason: innerResult.finishReason,
+        duration: innerResult.duration,
+        error: innerResult.error,
+      });
+
+      // 收集每轮的 reasoning（不会被子调用覆盖）
+      if (innerResult.reasoning) {
+        allReasoning.push(`[Round ${round + 1}] ${innerResult.reasoning}`);
+      }
+
+      if (innerResult.error) {
+        return {
+          ...innerResult,
+          reasoning: allReasoning.join('\n'),
+          toolCalls: toolCallHistory,
+          tokensUsed: totalTokens,
+          cacheHitTokens: totalCacheHitTokens,
+          cacheMissTokens: totalCacheMissTokens,
+          completionTokens: totalCompletionTokens,
+          duration: Date.now() - startTime,
+          providerRounds,
+        };
+      }
+
+      // 检查是否有 tool_calls（从 raw API 响应中获取）
+      const toolCalls = innerResult._toolCalls;
+      if (toolCalls && toolCalls.length > 0) {
+        // 添加 assistant 消息（含 tool_calls）
+        conversation.push({
+          role: 'assistant',
+          content: innerResult.rawResponse || null,
+          tool_calls: toolCalls,
+          native: innerResult._nativeAssistant,
+        });
+
+        // 逐个执行工具调用
+        for (const tc of toolCalls) {
+          const funcName = tc.function?.name ?? tc.name ?? '';
+          const funcArgsStr = tc.function?.arguments ?? '{}';
+
+          let args: Record<string, any>;
+          try {
+            args = JSON.parse(funcArgsStr);
+          } catch {
+            args = {};
+          }
+
+          let toolResult: any;
+          let toolError: string | undefined;
+          try {
+            toolResult = await toolExecutor(funcName, args);
+          } catch (e) {
+            toolError = e instanceof Error ? e.message : String(e);
+            toolResult = null;
+          }
+
+          toolCallHistory.push({
+            name: funcName,
+            arguments: args,
+            result: toolError ? { error: toolError } : toolResult,
+          });
+
+          // 追加 tool 结果消息
+          conversation.push({
+            role: 'tool',
+            tool_call_id: tc.id ?? '',
+            name: funcName,
+            content: JSON.stringify(toolError ? { error: toolError } : toolResult),
+          });
+        }
+
+        // 继续下一轮 — AI 会看到工具结果并决定下一步
+        continue;
+      }
+
+      // 没有 tool_calls — 这是最终响应
+      conversation.push({
+        role: 'assistant',
+        content: innerResult.rawResponse || null,
+        native: innerResult._nativeAssistant,
+      });
+      return {
+        agentId: this.agentId,
+        output: innerResult.output,
+        rawResponse: innerResult.rawResponse,
+        reasoning: allReasoning.join('\n'),
+        tokensUsed: totalTokens,
+        cacheHit: innerResult.cacheHit,
+        cacheHitTokens: totalCacheHitTokens,
+        cacheMissTokens: totalCacheMissTokens,
+        completionTokens: totalCompletionTokens,
+        duration: Date.now() - startTime,
+        toolCalls: toolCallHistory,
+        continuationMessages: conversation.slice(initialConversationLength),
+        providerRounds,
+      };
+    }
+
+    // 超出最大轮数
+    return {
+      agentId: this.agentId,
+      output: null,
+      rawResponse: '',
+      reasoning: allReasoning.join('\n'),
+      tokensUsed: totalTokens,
+      cacheHit: false,
+      cacheHitTokens: totalCacheHitTokens,
+      cacheMissTokens: totalCacheMissTokens,
+      completionTokens: totalCompletionTokens,
+      duration: Date.now() - startTime,
+      error: `Exceeded max tool-calling rounds (${maxRounds})`,
+      toolCalls: toolCallHistory,
+      providerRounds,
+    };
+  }
+
+  /**
+   * 流式 chat completion 请求。
+   *
+   * 发送 `stream: true`，通过 ReadableStream 解析 SSE 块，
+   * 逐块回调 onChunk / onToolCall，最终回调 onComplete。
+   *
+   * 🔴 2026-08-16：**带重试循环**（此前零重试，story 走的就是这条 —— 一次 500
+   * 或首字节超时直接整轮失败）。单次会话在 `streamOnce` 里，规则：
+   *   · 成功 → onComplete 一次
+   *   · 外部 abort（用户取消）→ onError('Request aborted') 立即返回，**不重试**
+   *   · 可重试错误（HTTP 5xx / 首字节超时 / 流中断）且 attempt < maxRetries →
+   *     先 `onChunk('', true)` 清玩家可见预览（与正常收尾同一条「清理临时预览」语义），
+   *     指数退避后重试
+   *   · 超限 → onError 最终失败
+   *
+   * @param request ChatRequest（messages/temperature/tools 等）
+   * @param callbacks StreamCallbacks（onChunk / onToolCall / onComplete / onError）
+   * @param signal 可选的 AbortSignal 用于外部取消
+   */
+  async chatStream(
+    request: ChatRequest,
+    callbacks: StreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      const outcome = await this.streamOnce(request, callbacks, signal);
+
+      if (outcome.kind === 'ok') return;
+      // 🔴 abort 短路：外部 signal 已 aborted 时立即停，**不重试**。
+      // 不能只认 `outcome.kind === 'aborted'` —— 真实 fetch 会 reject AbortError
+      // 走那条，但网关在取消瞬间仍可能返回 4xx/5xx（此时 outcome 是 'error'），
+      // 取消的语义是「用户不想等了」，与错误来源无关。
+      if (signal?.aborted || outcome.kind === 'aborted') {
+        callbacks.onError('Request aborted');
+        return;
+      }
+      if (attempt >= this.maxRetries) {
+        callbacks.onError(outcome.error);
+        return;
+      }
+
+      // 🔴 重试前清玩家可见预览：onChunk('', true) 与正常收尾的「清理临时预览」
+      // 同一条语义（game-pipeline 的 streamCallbacks 收到后重置 streamedRaw）。
+      // 不清理的话，重试生成的新正文会与第一段失败前的半截拼接显示。
+      callbacks.onChunk('', true);
+      await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
+    }
+  }
+
+  /**
+   * 单次流式会话（chatStream 的每 attempt）。成功/取消/错误三态返回，
+   * 不直接调 onComplete/onError —— 收尾与重试决策交给外层循环。
+   */
+  private async streamOnce(
+    request: ChatRequest,
+    callbacks: StreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<{ kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string }> {
+    return scheduleApiRequest(
+      {
+        baseUrl: this.baseUrl,
+        apiKey: this.endpoint.apiKey,
+        label: this.endpoint.name || this.baseUrl,
+      },
+      signal,
+      () => this.streamOnceGranted(request, callbacks, signal),
+    );
+  }
+
+  /** 已获得 RPM 名额后的单次流式发送；网络 timeout 从这里才开始。 */
+  private async streamOnceGranted(
+    request: ChatRequest,
+    callbacks: StreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<{ kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string }> {
+    const startTime = Date.now();
+    let settled = false;
+    let outcome: { kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string } = {
+      kind: 'error',
+      error: 'Stream ended unexpectedly',
+    };
+    let postFinishTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearPostFinishTimer = () => {
+      if (postFinishTimer === undefined) return;
+      clearTimeout(postFinishTimer);
+      postFinishTimer = undefined;
+    };
+
+    const fail = (kind: 'error' | 'aborted', message: string) => {
+      if (settled) return;
+      settled = true;
+      clearPostFinishTimer();
+      outcome = kind === 'aborted' ? { kind: 'aborted' } : { kind: 'error', error: message };
+    };
+
+    const controller = new AbortController();
+    let abortedByTimeout = false;
+    // 流式超时：首字节等待期用 this.timeout * 3（流式请求含模型加载 + 大上下文处理，
+    // ollama.com 等云端 API 首字节延迟可能 >120s）。收到首个 chunk 后清除超时
+    // （数据在流动说明请求活着，不应因总时长超限而中断长文本生成）
+    const streamTimeout = this.timeout * STREAM_TIMEOUT_MULTIPLIER;
+    const timeoutId = setTimeout(() => {
+      abortedByTimeout = true;
+      controller.abort();
+    }, streamTimeout);
+
+    const onExternalAbort = () => controller.abort();
+    if (signal?.aborted) {
+      controller.abort();
+    } else {
+      signal?.addEventListener('abort', onExternalAbort, { once: true });
+    }
+
+    try {
+      const body = this.buildRequestBody(request, true);
+      const res = await this.postCompletions(body, controller.signal, true);
+
+      // Parse SSE stream
+      const reader = res.body?.getReader();
+      if (!reader) {
+        throw new Error('Response body is not readable (no ReadableStream)');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const protocol = this.endpoint.protocol ?? 'openai-chat';
+      if (
+        protocol !== 'openai-chat' &&
+        protocol !== 'gemini' &&
+        protocol !== 'anthropic-messages'
+      ) {
+        throw new Error(`Endpoint ${this.endpoint.name || this.endpoint.id} is not an LLM source`);
+      }
+      const accumulator = createLlmStreamAccumulator(protocol);
+
+      const complete = () => {
+        if (settled) return;
+        const snapshot = accumulator.snapshot();
+        let toolCalls: Array<{ id: string; name: string; arguments: Record<string, any> }>;
+        try {
+          toolCalls = snapshot.toolCalls.map((call) => {
+            let argumentsObject: Record<string, any> = {};
+            argumentsObject = JSON.parse(call.arguments || '{}');
+            return { id: call.id, name: call.name, arguments: argumentsObject };
+          });
+        } catch {
+          fail('error', 'Incomplete tool arguments in streaming response');
+          return;
+        }
+
+        settled = true;
+        clearPostFinishTimer();
+        outcome = { kind: 'ok' };
+        const inputTokens = snapshot.usage.inputTokens ?? 0;
+        const outputTokens = snapshot.usage.outputTokens ?? 0;
+        const cacheHitTokens = snapshot.usage.cacheReadTokens ?? 0;
+        const cacheMissTokens =
+          snapshot.usage.cacheMissTokens ?? Math.max(0, inputTokens - cacheHitTokens);
+
+        try {
+          callbacks.onChunk(snapshot.fullText, true);
+        } finally {
+          callbacks.onComplete({
+            fullText: snapshot.fullText,
+            toolCalls,
+            reasoning: snapshot.reasoning,
+            tokensUsed: snapshot.usage.totalTokens ?? inputTokens + outputTokens,
+            cacheHit: snapshot.usage.cacheHit === true || cacheHitTokens > 0,
+            cacheHitTokens,
+            cacheMissTokens,
+            completionTokens: outputTokens,
+            duration: Date.now() - startTime,
+            nativeAssistant: snapshot.nativeAssistant,
+          });
+        }
+      };
+
+      const armPostFinishTimer = () => {
+        clearPostFinishTimer();
+        postFinishTimer = setTimeout(() => {
+          if (settled) return;
+          void reader.cancel().catch(() => undefined);
+          controller.abort();
+          complete();
+        }, POST_FINISH_GRACE_MS);
+      };
+
+      const processData = (dataStr: string) => {
+        if (dataStr === '[DONE]') {
+          complete();
+          return;
+        }
+
+        let chunk: unknown;
+        try {
+          chunk = JSON.parse(dataStr);
+        } catch {
+          // Skip unparseable chunks gracefully
+          return;
+        }
+        for (const event of accumulator.accept(chunk)) {
+          if (event.error) {
+            fail('error', event.error);
+            return;
+          }
+          if (event.textDelta) callbacks.onChunk(event.textDelta, false);
+          if (event.reasoningDelta) callbacks.onReasoning?.(event.reasoningDelta);
+          if (event.toolCall) callbacks.onToolCall?.(event.toolCall);
+          if (event.done) {
+            complete();
+            return;
+          }
+        }
+        if (accumulator.terminal) {
+          armPostFinishTimer();
+        }
+      };
+
+      const processEvent = (event: string) => {
+        if (!event.trim() || settled) return;
+
+        const dataLines: string[] = [];
+        for (const line of event.split(/\r?\n/)) {
+          if (!line.startsWith('data:')) continue;
+          dataLines.push(line.slice(5).trimStart());
+        }
+        if (dataLines.length > 0) {
+          processData(dataLines.join('\n'));
+        }
+      };
+
+      const processCompleteEvents = () => {
+        const events = buffer.split(/\r?\n\r?\n/);
+        buffer = events.pop() ?? '';
+        for (const event of events) {
+          processEvent(event);
+          if (settled) break;
+        }
+      };
+
+      try {
+        let firstChunkReceived = false;
+        while (!settled) {
+          // Check for external abort between reads
+          if (signal?.aborted) {
+            throw new DOMException('Aborted by external signal', 'AbortError');
+          }
+
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          // 收到首个数据块后清除超时 — 流式响应只要数据在流动就不应超时
+          if (!firstChunkReceived) {
+            firstChunkReceived = true;
+            clearTimeout(timeoutId);
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          processCompleteEvents();
+        }
+
+        if (!settled) {
+          buffer += decoder.decode();
+          processCompleteEvents();
+          if (buffer.trim()) {
+            processEvent(buffer);
+            buffer = '';
+          }
+        }
+
+        if (!settled) {
+          if (accumulator.terminal) {
+            complete();
+          } else {
+            fail('error', 'Stream ended unexpectedly before completion');
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        if (abortedByTimeout) {
+          fail(
+            'error',
+            `请求超时（${Math.round(streamTimeout / 1000)}秒内未收到响应），请重试或减少上下文注入`,
+          );
+        } else {
+          fail('aborted', 'Request aborted');
+        }
+      } else {
+        fail('error', e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      clearPostFinishTimer();
+      signal?.removeEventListener('abort', onExternalAbort);
+    }
+
+    return outcome;
+  }
+
+  /**
+   * 组装 chat completion 请求体 —— **流式与非流式共用这一份**（Q-17）。
+   *
+   * 此前 `chatStream` 与 `callOnce` 各写一份逐字相同的装配：每调一个采样参数、
+   * 每加一个厂商兼容字段（Cline 解包、ollama thinking 这类已经踩过两次）都要记得改两处，
+   * 漏一处就是「流式能跑、非流式空回」这种最难查的症状。
+   *
+   * `stream` 是**真形参**而不是事后 merge：`stream_options` 只能在 `stream: true` 时出现，
+   * 部分网关会拒绝非流式请求携带它。
+   */
+  private buildRequestBody(request: ChatRequest, stream: boolean): Record<string, any> {
+    const protocol = this.endpoint.protocol ?? 'openai-chat';
+    if (protocol !== 'openai-chat' && protocol !== 'gemini' && protocol !== 'anthropic-messages') {
+      throw new Error(`Endpoint ${this.endpoint.name || this.endpoint.id} is not an LLM source`);
+    }
+    return buildLlmRequest({
+      protocol,
+      model: request.model || this.endpoint.defaultModel,
+      messages: ensureUserMessage(request.messages),
+      temperature: request.temperature,
+      maxTokens: request.maxTokens,
+      topP: request.topP,
+      frequencyPenalty: request.frequencyPenalty,
+      presencePenalty: request.presencePenalty,
+      stop: request.stop,
+      tools: request.tools,
+      toolChoice: request.tool_choice,
+      stream,
+      userId: this.userId,
+      bodyOverrides: this.endpoint.bodyOverrides ?? {},
+      bodyOmitPaths: this.endpoint.bodyOmitPaths ?? [],
+    }).body as Record<string, any>;
+  }
+
+  /**
+   * 发请求 + `!res.ok` 抛错 —— 流式与非流式共用（Q-17）。
+   *
+   * 只负责「发出去、确认 HTTP 层没炸」；响应体怎么读（SSE vs json）留给调用方。
+   */
+  private async postCompletions(
+    body: Record<string, any>,
+    signal: AbortSignal,
+    stream: boolean,
+  ): Promise<Response> {
+    const res = await postLlmRequest({
+      endpoint: this.endpoint,
+      body,
+      stream,
+      signal,
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => '');
+      console.error(
+        '[AgentClient] API error — status:',
+        res.status,
+        'body:',
+        errorText.slice(0, 500),
+      );
+      console.error('[AgentClient] Request model:', body.model, 'has model:', !!body.model);
+      throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 200)}`);
+    }
+    return res;
+  }
+
+  private async callOnce(request: ChatRequest, signal?: AbortSignal): Promise<InternalAgentResult> {
+    return scheduleApiRequest(
+      {
+        baseUrl: this.baseUrl,
+        apiKey: this.endpoint.apiKey,
+        label: this.endpoint.name || this.baseUrl,
+      },
+      signal,
+      () => this.callOnceGranted(request, signal),
+    );
+  }
+
+  /** 已获得 RPM 名额后的非流式发送；等待配额不占用网络 timeout。 */
+  private async callOnceGranted(
+    request: ChatRequest,
+    signal?: AbortSignal,
+  ): Promise<InternalAgentResult> {
+    const controller = new AbortController();
+    let abortedByTimeout = false;
+    const timeoutId = setTimeout(() => {
+      abortedByTimeout = true;
+      controller.abort();
+    }, this.timeout);
+
+    const onExternalAbort = () => controller.abort();
+    if (signal?.aborted) {
+      controller.abort();
+    } else {
+      signal?.addEventListener('abort', onExternalAbort, { once: true });
+    }
+
+    try {
+      const body = this.buildRequestBody(request, false);
+      const res = await this.postCompletions(body, controller.signal, false);
+
+      const raw = await res.json();
+      const protocol = this.endpoint.protocol ?? 'openai-chat';
+      if (
+        protocol !== 'openai-chat' &&
+        protocol !== 'gemini' &&
+        protocol !== 'anthropic-messages'
+      ) {
+        throw new Error(`Endpoint ${this.endpoint.name || this.endpoint.id} is not an LLM source`);
+      }
+      const normalized = parseLlmResponse(protocol, raw);
+      const rawResponse = normalized.text;
+      const reasoningContent = normalized.reasoning;
+      const finishReason = normalized.finishReason;
+      const promptTokens = normalized.usage.inputTokens;
+      const completionTokens = normalized.usage.outputTokens ?? 0;
+      const tokensUsed =
+        normalized.usage.totalTokens ??
+        (normalized.usage.inputTokens ?? 0) + (normalized.usage.outputTokens ?? 0);
+      const cacheHitTokens = normalized.usage.cacheReadTokens ?? 0;
+      const cacheMissTokens =
+        normalized.usage.cacheMissTokens ?? Math.max(0, (promptTokens ?? 0) - cacheHitTokens);
+      const cacheHit =
+        normalized.usage.cacheHit === true ||
+        cacheHitTokens > 0 ||
+        res.headers.get('x-ds-cache-hit') === 'true';
+      const toolCalls = normalized.toolCalls.map((call) => ({
+        id: call.id,
+        type: 'function',
+        function: { name: call.name, arguments: call.arguments },
+      }));
+
+      return {
+        agentId: this.agentId,
+        output: rawResponse,
+        rawResponse,
+        reasoning: reasoningContent || undefined,
+        tokensUsed,
+        cacheHit,
+        cacheHitTokens,
+        cacheMissTokens,
+        completionTokens,
+        promptTokens,
+        finishReason,
+        duration: 0,
+        _toolCalls: toolCalls,
+        _nativeAssistant: normalized.nativeAssistant,
+      };
+    } catch (e) {
+      // 真机修(2026-07-21): 非流式路径原先只有 try/finally 无 catch，浏览器原生
+      // "The user aborted a request." 直接冒泡 → 用户看不懂。翻译成友好信息（区分超时/外部取消）。
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        if (abortedByTimeout) {
+          throw new Error(
+            `请求超时（${Math.round(this.timeout / 1000)}秒内未收到完整响应），请重试或减少上下文注入`,
+          );
+        }
+        throw new Error('请求已取消');
+      }
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', onExternalAbort);
+    }
+  }
+}
+
+// ========== UserId 工具函数 ==========
+
+/**
+ * 构建 userId —— 只按 agent 区分，不区分存档。
+ *
+ * 🔴 2026-08-02 修: 去掉 saveId。此前 `fp|saveId|agentId` 导致 DeepSeek KVCache
+ * 跨存档全 miss（user_id 参与缓存隔离），开新档每次全价重算。现在同一 agent
+ * 的缓存跨存档复用。
+ */
+export function buildUserId(saveId: string, agentId: string): string {
+  // saveId 参数保留以兼容调用方；实际返回只含 agentId
+  void saveId;
+  return `fp|${agentId}`;
+}
+
+/** 从 userId 解析 agentId（saveId 已废弃 —— 2026-08-02 起 userId 不再区分存档） */
+export function parseUserId(userId: string): { saveId: string; agentId: string } | null {
+  const parts = userId.split('|');
+  if (parts[0] !== 'fp') return null;
+  if (parts.length === 3) {
+    // 兼容旧格式 fp|saveId|agentId（老数据回溯）
+    return { saveId: parts[1], agentId: parts[2] };
+  }
+  if (parts.length === 2) {
+    // 新格式 fp|agentId
+    return { saveId: '', agentId: parts[1] };
+  }
+  return null;
+}

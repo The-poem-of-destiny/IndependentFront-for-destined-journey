@@ -9,7 +9,7 @@
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useAudioStore } from '../../stores/audio-store';
-import type { AudioRepeatMode } from '@engine/types';
+import type { AudioRepeatMode } from '@engine/types/types';
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: [] }>();

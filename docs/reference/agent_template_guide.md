@@ -4,14 +4,14 @@
 
 ## 快速导航
 
-| 你想做什么 | 去哪里改 |
-|------------|----------|
-| 修改某个 Agent 的占位符**排列顺序** | `public/data/defaults/agent-config.json` → 对应 Agent 的 `template` 字段 |
-| 修改一个占位符**被解析成什么内容** | `src/sillytavern/placeholder-registry.ts` → 对应 resolver |
-| 新增一个占位符 | registry + resolver 函数 + `getDefaultTemplate()` 里加 |
-| 修改 Story Agent 的**预设注入顺序** | 预设面板 → 拖拽 `📥 动态注入` 条目，或在预设条目里直接编辑 content |
+| 你想做什么                              | 去哪里改                                                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 修改某个 Agent 的占位符**排列顺序**     | `public/data/defaults/agent-config.json` → 对应 Agent 的 `template` 字段                                |
+| 修改一个占位符**被解析成什么内容**      | `src/core/prompts/placeholder-registry.ts` → 对应 resolver                                              |
+| 新增一个占位符                          | registry + resolver 函数 + `getDefaultTemplate()` 里加                                                  |
+| 修改 Story Agent 的**预设注入顺序**     | 预设面板 → 拖拽 `📥 动态注入` 条目，或在预设条目里直接编辑 content                                      |
 | 修改某个 Agent 的 `NARRATIVE` 层数/截断 | 模板中用 `{{NARRATIVE:layers=N:slice=N}}` 参数，或 `agent-config.json` → `historyLayers`/`historySlice` |
-| 查看**运行时实际发出的 prompt** | 设置页 → 对应 Agent → 🔍模板预览 |
+| 查看**运行时实际发出的 prompt**         | 设置页 → 对应 Agent → 🔍模板预览                                                                        |
 
 ---
 
@@ -34,15 +34,15 @@
 
 ## 关键文件
 
-| 文件 | 职责 |
-|------|------|
-| `src/sillytavern/placeholder-registry.ts` | **31 个 resolver**（复核 2026-08-18；17 全局 + 6 Agent 通信 + 8 链） + `getDefaultTemplate()` + `setPlaceholderGlobals()` |
-| `src/sillytavern/template-resolver.ts` | **解析引擎** — `resolveTemplate()` + `resolveTemplateWithGlobals()` |
-| `src/sillytavern/agent-templates.ts` | **入口** — `buildAgentMessages()` 选模板 → 调 resolver |
-| `src/sillytavern/preset-loader.ts` | **预设适配** — `assemblePresetContent()` + 自动补 `📥动态注入` |
-| `public/data/defaults/agent-config.json` | **配置** — 14 Agent（2026-09-14 实测）的 `systemPrompt` + `template` + LLM 参数（🔴 磁盘路径带 `public/`，运行期 URL 仍是 `/data/defaults/agent-config.json`） |
-| `src/ui/components/settings/SettingsPage.vue` | **UI** — 模板编辑器 + Story 预设面板 + 预览 |
-| `src/ui/components/settings/TemplatePreview.vue` | **UI 组件** — 彩色占位符标签渲染 |
+| 文件                                             | 职责                                                                                                                                                           |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/core/prompts/placeholder-registry.ts`       | **31 个 resolver**（复核 2026-08-18；17 全局 + 6 Agent 通信 + 8 链） + `getDefaultTemplate()` + `setPlaceholderGlobals()`                                      |
+| `src/core/prompts/template-resolver.ts`          | **解析引擎** — `resolveTemplate()` + `resolveTemplateWithGlobals()`                                                                                            |
+| `src/core/prompts/agent-templates.ts`            | **入口** — `buildAgentMessages()` 选模板 → 调 resolver                                                                                                         |
+| `src/core/prompts/preset-loader.ts`              | **预设适配** — `assemblePresetContent()` + 自动补 `📥动态注入`                                                                                                 |
+| `public/data/defaults/agent-config.json`         | **配置** — 14 Agent（2026-09-14 实测）的 `systemPrompt` + `template` + LLM 参数（🔴 磁盘路径带 `public/`，运行期 URL 仍是 `/data/defaults/agent-config.json`） |
+| `src/ui/components/settings/SettingsPage.vue`    | **UI** — 模板编辑器 + Story 预设面板 + 预览                                                                                                                    |
+| `src/ui/components/settings/TemplatePreview.vue` | **UI 组件** — 彩色占位符标签渲染                                                                                                                               |
 
 ---
 
@@ -56,12 +56,12 @@ prompt 的拼装顺序与注入内容**。首轮 / 重基线仍由 `buildAgentMe
 **后续轮的增量如何产生**：`prompt-session-assembler.ts` 会从当前 template / story 预设原文提取
 占位符，并按**代码固定的四类清单**（`prompt-session-assembler.ts` 内的分类表）决定每一类的去留：
 
-| 类别 | 占位符 | 后续回合行为 |
-| ---- | ------ | ------------ |
-| baseline-only | `SYS_PROMPT`、`LORE_BOOK`、`LORE_BOOK_STATIC` | 只存在于完整 baseline；原文或可见配置变化时重基线 |
+| 类别              | 占位符                                                                                                                                                           | 后续回合行为                                                                           |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| baseline-only     | `SYS_PROMPT`、`LORE_BOOK`、`LORE_BOOK_STATIC`                                                                                                                    | 只存在于完整 baseline；原文或可见配置变化时重基线                                      |
 | projection-backed | `CHARACTER_STATE`、`INVENTORY`、`SKILL_STATE`、`QUEST_STATE`、`GAME_TIME`、`MAP_CONTEXT`、`ACTIVE_EFFECTS`、`MEMORY_ENTRIES`、`PLOT_EVENTS`、`LORE_BOOK_DYNAMIC` | 从当前权威状态生成幂等 delta（`prompt-state-projection.ts`），变化进 `<context_delta>` |
-| append-cursor | `NARRATIVE` | baseline 按 `historyLayers` 播种；后续只追加尚未表示的持久消息 |
-| ephemeral | `USER_INPUT`、`RANDOM_EVENTS`、`RECENT_COMBAT`、`AGENT.*` 与链占位符 | 每轮按 template 出现顺序放入 `<turn_context>` |
+| append-cursor     | `NARRATIVE`                                                                                                                                                      | baseline 按 `historyLayers` 播种；后续只追加尚未表示的持久消息                         |
+| ephemeral         | `USER_INPUT`、`RANDOM_EVENTS`、`RECENT_COMBAT`、`AGENT.*` 与链占位符                                                                                             | 每轮按 template 出现顺序放入 `<turn_context>`                                          |
 
 这条分类**不是第二种模板语言、也不允许配置**——你仍只编辑现有 template / 预设；未注册的
 占位符按既有规则原样保留在 baseline。改动 template 会进 baseline signature，自动触发重基线，
@@ -78,25 +78,25 @@ prompt 的拼装顺序与注入内容**。首轮 / 重基线仍由 `buildAgentMe
 > `MAP_CONTEXT` / `RANDOM_EVENTS` / `RECENT_COMBAT` 七条。
 > 🔴 文件头注释里那句「18 个」同样是陈旧数字，**以代码里那张表为准**。
 
-| 占位符 | 解析来源 |  resolver 位置 | 参数 |
-|--------|----------|:---:|------|
-| `{{SYS_PROMPT}}` | Story: 预设拼接；其他: `config.systemPrompt` | registry ~L431 | — |
-| `{{LORE_BOOK}}` | `resolveLoreBookSection`（静态区 + 动态区连拼） | registry ~L440 | `:section=static\|dynamic` `:limit=N` |
-| `{{LORE_BOOK_STATIC}}` | 同上，只取**静态区**（裸名写法，能穿过 story 预设链路的正则闸门） | registry ~L453 | `:limit=N` |
-| `{{LORE_BOOK_DYNAMIC}}` | 同上，只取**动态区**（含 EJS 的条目） | registry ~L461 | `:limit=N` |
-| `{{NARRATIVE}}` | `ctx.history` 从底部数 N 层 | registry ~L465 | `:layers=N`（`:slice` 已废弃，不再截断） |
-| `{{USER_INPUT}}` | `ctx.userInput` | registry ~L477 | — |
-| `{{CHARACTER_STATE}}` | `buildZoneContext` → `filterZoneContent` (npc zone, agent 可见性级别) | registry ~L482 | — |
-| `{{INVENTORY}}` | 遍历 `ctx.characters[*].inventory` | registry ~L493 | — |
-| `{{SKILL_STATE}}` | 各角色 `skills` + 开局 `--- 初始技能 ---` 声明段 | registry ~L512 | — |
-| `{{QUEST_STATE}}` | `ctx.quests`（Phase 10g） | registry ~L554 | — |
-| `{{GAME_TIME}}` | `formatGameTime(ctx.gameTime)` 优先，`ctx.variables` 的世界键补天气/季节等 | registry ~L582 | — |
-| `{{MAP_CONTEXT}}` | `buildMapSnapshot` → `<map_context>` 块（**没装地图包时是空串**） | registry ~L623 | — |
-| `{{RANDOM_EVENTS}}` | 候选池 → `<random_events>` 块（池空/系统关闭/**战斗会话活跃**时空串） | registry ~L652 | — |
-| `{{RECENT_COMBAT}}` | `ctx.recentCombat` → `<recent_combat>` 块（缺席即空串） | registry ~L673 | — |
-| `{{ACTIVE_EFFECTS}}` | 遍历 `ctx.characters[*].statusEffects` | registry ~L691 | — |
-| `{{MEMORY_ENTRIES}}` | `ctx.memories` 格式化 | registry ~L709 | `:top_k=N` |
-| `{{PLOT_EVENTS}}` | `ctx.plotEvents` (active + pending) | registry ~L721 | — |
+| 占位符                  | 解析来源                                                                   | resolver 位置  | 参数                                     |
+| ----------------------- | -------------------------------------------------------------------------- | :------------: | ---------------------------------------- |
+| `{{SYS_PROMPT}}`        | Story: 预设拼接；其他: `config.systemPrompt`                               | registry ~L431 | —                                        |
+| `{{LORE_BOOK}}`         | `resolveLoreBookSection`（静态区 + 动态区连拼）                            | registry ~L440 | `:section=static\|dynamic` `:limit=N`    |
+| `{{LORE_BOOK_STATIC}}`  | 同上，只取**静态区**（裸名写法，能穿过 story 预设链路的正则闸门）          | registry ~L453 | `:limit=N`                               |
+| `{{LORE_BOOK_DYNAMIC}}` | 同上，只取**动态区**（含 EJS 的条目）                                      | registry ~L461 | `:limit=N`                               |
+| `{{NARRATIVE}}`         | `ctx.history` 从底部数 N 层                                                | registry ~L465 | `:layers=N`（`:slice` 已废弃，不再截断） |
+| `{{USER_INPUT}}`        | `ctx.userInput`                                                            | registry ~L477 | —                                        |
+| `{{CHARACTER_STATE}}`   | `buildZoneContext` → `filterZoneContent` (npc zone, agent 可见性级别)      | registry ~L482 | —                                        |
+| `{{INVENTORY}}`         | 遍历 `ctx.characters[*].inventory`                                         | registry ~L493 | —                                        |
+| `{{SKILL_STATE}}`       | 各角色 `skills` + 开局 `--- 初始技能 ---` 声明段                           | registry ~L512 | —                                        |
+| `{{QUEST_STATE}}`       | `ctx.quests`（Phase 10g）                                                  | registry ~L554 | —                                        |
+| `{{GAME_TIME}}`         | `formatGameTime(ctx.gameTime)` 优先，`ctx.variables` 的世界键补天气/季节等 | registry ~L582 | —                                        |
+| `{{MAP_CONTEXT}}`       | `buildMapSnapshot` → `<map_context>` 块（**没装地图包时是空串**）          | registry ~L623 | —                                        |
+| `{{RANDOM_EVENTS}}`     | 候选池 → `<random_events>` 块（池空/系统关闭/**战斗会话活跃**时空串）      | registry ~L652 | —                                        |
+| `{{RECENT_COMBAT}}`     | `ctx.recentCombat` → `<recent_combat>` 块（缺席即空串）                    | registry ~L673 | —                                        |
+| `{{ACTIVE_EFFECTS}}`    | 遍历 `ctx.characters[*].statusEffects`                                     | registry ~L691 | —                                        |
+| `{{MEMORY_ENTRIES}}`    | `ctx.memories` 格式化                                                      | registry ~L709 | `:top_k=N`                               |
+| `{{PLOT_EVENTS}}`       | `ctx.plotEvents` (active + pending)                                        | registry ~L721 | —                                        |
 
 > 🔴 `MAP_CONTEXT` / `RANDOM_EVENTS` / `RECENT_COMBAT` 三块**自带 XML 外壳**，模板里不要再包一层中文标签——
 > 包了就会在子系统未启用时留下一对空标签，把「零 token」那条设计意图静默作废。
@@ -108,27 +108,27 @@ prompt 的拼装顺序与注入内容**。首轮 / 重基线仍由 `buildAgentMe
 > 现役第六条是 `{{AGENT.REQUEST_DISPATCHER}}`（vars_update 的默认模板正在用它）。
 > 「可用时机」按 `DEFAULT_AGENT_PIPELINE`（`types.ts` ~L461，2026-08-16 起 **4 层**）重算。
 
-| 占位符 | 来源 Agent | 产出阶段 | 可用时机 |
-|--------|-----------|:---:|----------|
-| `{{AGENT.MEMORY_RECALL}}` | memory_recall | Stage 0 | Stage 1+ |
-| `{{AGENT.PLOT_PRE_CHECK}}` | plot_pre_check | Stage 0 | Stage 1+ |
-| `{{AGENT.STORY}}` | story | Stage 1 | Stage 2+ |
-| `{{AGENT.REQUEST_DISPATCHER}}` | request_dispatcher | Stage 2 | Stage 3+ |
-| `{{AGENT.MEMORY_SUMMARY}}` | memory_summary | Stage 2 | Stage 3+ |
-| `{{AGENT.VARS_UPDATE}}` | vars_update | Stage 3 | 主 DAG 内无下游（侧链/调试可读） |
+| 占位符                         | 来源 Agent         | 产出阶段 | 可用时机                         |
+| ------------------------------ | ------------------ | :------: | -------------------------------- |
+| `{{AGENT.MEMORY_RECALL}}`      | memory_recall      | Stage 0  | Stage 1+                         |
+| `{{AGENT.PLOT_PRE_CHECK}}`     | plot_pre_check     | Stage 0  | Stage 1+                         |
+| `{{AGENT.STORY}}`              | story              | Stage 1  | Stage 2+                         |
+| `{{AGENT.REQUEST_DISPATCHER}}` | request_dispatcher | Stage 2  | Stage 3+                         |
+| `{{AGENT.MEMORY_SUMMARY}}`     | memory_summary     | Stage 2  | Stage 3+                         |
+| `{{AGENT.VARS_UPDATE}}`        | vars_update        | Stage 3  | 主 DAG 内无下游（侧链/调试可读） |
 
 ### 链占位符（8 个，由编排层 `localParams` 注入）
 
-| 占位符 | 谁注入 | 消费者 | 注入方式 |
-|--------|--------|--------|----------|
-| `{{IMAGE_REQUEST}}` | scene-image-store → `callImagePromptAgent` | image_prompt | `resolveTemplate` 的 `localParams` 参数 |
-| `{{CRAFT_REQUEST}}` | craft-gen-chain | craft_gen | 同上 |
-| `{{CHAR_DETECT}}` | char-gen-agent | char_gen | 同上 |
-| `{{ITEM_REQUEST}}` | craft-gen-chain / char-gen-agent | item_gen | 从上游输出 XML 提取 |
-| `{{CHAR_GEN_RESULT}}` | char-gen-agent | item_gen | `ctx.agentOutputs` |
-| `{{CRAFT_RESULT}}` | craft-gen-chain | item_gen | `ctx.agentOutputs` |
-| `{{COMBAT_BRIEF}}` | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 / combat_enemy | 开局消息渲染的 `localParams`；开启分离时按角色建立隔离消息 |
-| `{{COMBAT_ROSTER}}` | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 / combat_enemy | 同上（从 `<combat_trigger>` 的 allies/enemies 组装「我方/敌方」名单，敌方后续只读投影另行裁剪） |
+| 占位符                | 谁注入                                                      | 消费者                   | 注入方式                                                                                        |
+| --------------------- | ----------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------- |
+| `{{IMAGE_REQUEST}}`   | scene-image-store → `callImagePromptAgent`                  | image_prompt             | `resolveTemplate` 的 `localParams` 参数                                                         |
+| `{{CRAFT_REQUEST}}`   | craft-gen-chain                                             | craft_gen                | 同上                                                                                            |
+| `{{CHAR_DETECT}}`     | char-gen-agent                                              | char_gen                 | 同上                                                                                            |
+| `{{ITEM_REQUEST}}`    | craft-gen-chain / char-gen-agent                            | item_gen                 | 从上游输出 XML 提取                                                                             |
+| `{{CHAR_GEN_RESULT}}` | char-gen-agent                                              | item_gen                 | `ctx.agentOutputs`                                                                              |
+| `{{CRAFT_RESULT}}`    | craft-gen-chain                                             | item_gen                 | `ctx.agentOutputs`                                                                              |
+| `{{COMBAT_BRIEF}}`    | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 / combat_enemy | 开局消息渲染的 `localParams`；开启分离时按角色建立隔离消息                                      |
+| `{{COMBAT_ROSTER}}`   | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 / combat_enemy | 同上（从 `<combat_trigger>` 的 allies/enemies 组装「我方/敌方」名单，敌方后续只读投影另行裁剪） |
 
 **重要**: 链占位符不出现在 `PLACEHOLDER_REGISTRY` 的正常解析路径中——registry 只返回空串 fallback。实际值由 `resolveTemplate()` 的 `localParams` 参数接管（优先级高于 registry）。
 
@@ -169,6 +169,7 @@ prompt 的拼装顺序与注入内容**。首轮 / 重基线仍由 `buildAgentMe
 **缓存优化规则**：`{{SYS_PROMPT}}` 最上 → 静态数据上半 → 高频动态数据最底部。
 
 **注释三要素**：
+
 - 数据来源和含义
 - AI 应该如何理解和使用
 - Agentic Agent 需补充：如果区块数据不够，调用什么工具
@@ -209,7 +210,7 @@ public/data/defaults/agent-config.json
 
 例如想让 `{{GAME_TIME}}` 还输出当前 NPC 数量：
 
-1. 打开 `src/sillytavern/placeholder-registry.ts`
+1. 打开 `src/core/prompts/placeholder-registry.ts`
 2. 找到 `GAME_TIME: (ctx, _config, _params) => { ... }` (~line 582，复核 2026-08-18)
 3. 修改解析函数，返回你想要的文本
 4. `npm run test -- --run` 确认通过
@@ -232,11 +233,13 @@ if (!hasOurPlaceholders) {
 ```
 
 这意味着：
+
 - **旧预设 100% 兼容**，不需要人工添加条目
 - **新预设**在编辑时编辑 `📥 动态注入` 条目即可接管注入顺序
 - 删除 `📥 动态注入` 条目 → 引擎自动补回默认块
 
 ---
+
 ---
 
 ## Story Agent 预设中的 ST 占位符（正文 AI 专用）
@@ -378,41 +381,43 @@ ST 预设中 COT（思维链）条目大量使用 EJS 条件模板来控制不�
 用户在设置页 → Story Agent → 预设管理 → 展开条目 → ✎ 编辑，可以自由使用上述占位符。常用的模式：
 
 **声明一组互斥选项**：
+
 ```
 条目A: {{setvar::抢话::允许扮演<user>}}      ← 只开这个 → 允许扮演
 条目B: {{setvar::抢话::禁止替<user>做决定}}   ← 或只开这个 → 禁止扮演
 ```
 
 **在 COT 或指令条目中引用**：
+
 ```
 根据设定：{{getvar::抢话}}
 当前字数要求：{{getvar::字数}}
 ```
 
 **随机注入**：
+
 ```
 今天的天气：{{random::晴朗,多云,小雨,暴风雨}}
 ```
 
 ### 实现文件
 
-| 函数 | 文件 | 行数 |
-|------|------|------|
-| `parseSetvars()` | `preset-loader.ts` | ~49 |
-| `resolveGetvars()` | `preset-loader.ts` | ~68 |
-| `resolveRandoms()` | `preset-loader.ts` | ~87 |
-| `replaceCharUser()` | `preset-loader.ts` | ~139 |
-| `preprocessEntry()` | `preset-loader.ts` | ~155 |
+| 函数                      | 文件               | 行数 |
+| ------------------------- | ------------------ | ---- |
+| `parseSetvars()`          | `preset-loader.ts` | ~49  |
+| `resolveGetvars()`        | `preset-loader.ts` | ~68  |
+| `resolveRandoms()`        | `preset-loader.ts` | ~87  |
+| `replaceCharUser()`       | `preset-loader.ts` | ~139 |
+| `preprocessEntry()`       | `preset-loader.ts` | ~155 |
 | `assemblePresetContent()` | `preset-loader.ts` | ~206 |
 
 ### 测试
 
 ```bash
-npx vitest run src/sillytavern/preset-loader.test.ts  # 48 tests，覆盖所有占位符类型
+npx vitest run src/core/prompts/preset-loader.test.ts  # 48 tests，覆盖所有占位符类型
 ```
 
 ---
-
 
 ## 调试技巧
 
@@ -420,7 +425,15 @@ npx vitest run src/sillytavern/preset-loader.test.ts  # 48 tests，覆盖所有�
 
 ```typescript
 // 在 buildAgentMessages() 返回前加 log
-const resolved = resolveTemplateWithGlobals(template, agentId, tplCtx, config, wbs, cfgs, allLocalParams);
+const resolved = resolveTemplateWithGlobals(
+  template,
+  agentId,
+  tplCtx,
+  config,
+  wbs,
+  cfgs,
+  allLocalParams,
+);
 console.log(`[Phase10] ${agentId} resolved prompt:`, resolved.slice(0, 500) + '...');
 ```
 

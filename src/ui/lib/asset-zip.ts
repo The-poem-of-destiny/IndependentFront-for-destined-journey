@@ -57,15 +57,15 @@
  */
 
 import { AsyncUnzipInflate, Unzip, zip, type UnzipFile } from 'fflate';
-import { clampAssetFraming, isAssetExtension } from '@engine/asset-types';
-import { basenameOf, normalizeSlashes, normalizedExtensionOf } from '@engine/asset-path';
-import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names';
+import { clampAssetFraming, isAssetExtension } from '@engine/assets/asset-types';
+import { basenameOf, normalizeSlashes, normalizedExtensionOf } from '@engine/assets/asset-path';
+import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio/audio-names';
 import type {
   DecodedEntry,
   ImportManifest,
   ImportManifestMeta,
   ImportWarning,
-} from '@engine/asset-import-plan';
+} from '@engine/assets/asset-import-plan';
 import { hashMediaBytes, isMediaHashAvailable } from './media-hash';
 
 // ═══════════════════════════════════════════════════════════
@@ -257,7 +257,7 @@ export class AssetZipError extends Error {
 // ═══════════════════════════════════════════════════════════
 
 // Q-16: normalizeSlashes / basenameOf / extensionOf / normalizedExtensionOf
-// 统一在 `@engine/asset-path`（本模块与 asset-import-plan 曾各存一份逐字相同的实现）。
+// 统一在 `@engine/assets/asset-path`（本模块与 asset-import-plan 曾各存一份逐字相同的实现）。
 
 /**
  * 这个 basename 有没有可能成为一行数据 —— 路由闸门的判据。

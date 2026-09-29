@@ -13,7 +13,7 @@
  * 写入路径本身（往哪一格写、mp4 为什么不写头像）在 `composables/usePlayerPortrait.ts`，
  * 那是策略；本文件只把策略的**结果**翻译成人话。
  */
-import type { AssetMetaRecord, AssetType } from '@engine/types';
+import type { AssetMetaRecord, AssetType } from '@engine/types/types';
 import type { AssetMutationOutcome } from '../../stores/asset-store';
 
 /** 一条待播报的提示 —— 文案 + 档位，调用方转给 `ui.toast` */
