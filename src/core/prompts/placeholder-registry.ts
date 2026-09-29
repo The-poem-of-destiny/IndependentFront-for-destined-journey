@@ -1150,11 +1150,7 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   // 不走主 DAG。刻意短 —— 挂便宜快模型，机械转换不需要整套世界观（世界书默认关，§8.5）。
   image_prompt:
     '{{SYS_PROMPT}}\n\n<!-- image_prompt 侧链由情景插画队列唤起，不走主 DAG（设计 §8.5 / D28）。 -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 世界书对本 Agent 默认关闭。开了才有内容——地点/服饰的设定能提升画面保真度，代价是 token。-->\n\n<本次插画需求>\n{{IMAGE_REQUEST}}\n</本次插画需求>\n<!-- 引擎装配：story 写的那句中文 + 出场角色名 + 当前地点 + 分级 + 所属消息正文。\n     这是你转换的唯一输入——不要从别处推断画面内容，也不要复述这段文字。-->',
-  // Q-04: 以下三个是**退役/别名** agentId，生产链路不会调它们（战斗主持已换 combat_v3，
-  // 走 coordinator 自己的装配；plot_check / plot_correct 是 v3 兼容别名）。它们仍留在
-  // AGENT_TEMPLATES 与 context-visibility 的可见性表里，所以这里给一条最小模板 ——
-  // 让「没有默认模板」这个状态在仓库里彻底不存在，buildAgentMessages 只剩一条路。
-  combat: '{{SYS_PROMPT}}\n{{LORE_BOOK}}\n{{CHARACTER_STATE}}\n{{USER_INPUT}}',
+  // Retired plot aliases retain their minimal templates.
   plot_check: '{{SYS_PROMPT}}\n{{LORE_BOOK}}\n{{CHARACTER_STATE}}\n{{USER_INPUT}}',
   plot_correct: '{{SYS_PROMPT}}\n{{LORE_BOOK}}\n{{CHARACTER_STATE}}\n{{USER_INPUT}}',
 };

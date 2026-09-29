@@ -330,7 +330,7 @@ onBeforeUnmount(() => {
   // ⚔️ 结算确认框挂起时离开页面（2026-08-13 需求 D）：裁决不可能发生了，
   //    exitCombat 收掉挂起的 await（resolve(null)）并清确认态——否则 pipeline 的
   //    await 永久悬挂。战斗进行中/就绪态**不清**：切设置页再回来战斗还能接着打
-  //    （CombatPanel 重新挂载后 v3ActiveCombat 还在，这是现状下能工作的场景）。
+  //    （CombatPanel 重新挂载后 activeCombat 还在，这是现状下能工作的场景）。
   if (game.combatSummaryReview) game.exitCombat();
 });
 

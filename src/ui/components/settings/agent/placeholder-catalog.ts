@@ -151,7 +151,7 @@ const CHAIN_ONLY: Record<string, readonly string[]> = {
   craft_gen: ['CRAFT_REQUEST', 'ITEM_REQUEST', 'CRAFT_RESULT'],
   char_gen: ['CHAR_DETECT', 'CHAR_GEN_RESULT'],
   item_gen: ['ITEM_REQUEST', 'CHAR_GEN_RESULT', 'CRAFT_RESULT'],
-  combat_v3: ['COMBAT_BRIEF', 'COMBAT_ROSTER'],
+  combat: ['COMBAT_BRIEF', 'COMBAT_ROSTER'],
   combat_enemy: ['COMBAT_BRIEF', 'COMBAT_ROSTER'],
 };
 

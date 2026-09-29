@@ -1,7 +1,7 @@
 /**
  * CombatActionCard.test.ts — v3 攻击卡片渲染（2026-08-12）
  *
- * 背景（真机 bug）：v3 的 v3_action(attack) 卡片是**扁平字段**
+ * 背景（真机 bug）：v3 的 action(attack) 卡片是**扁平字段**
  * （{ attackerId, targetId, skill?, checkValue?, rating?, hit?, final?, ... }），
  * 而 CombatActionCard 此前只认 v2 的 CombatActionResult（request/attackRoll/damage 嵌套）
  * → hasDamageBreakdown=false → 落兜底「attack」空卡，点开没内容。

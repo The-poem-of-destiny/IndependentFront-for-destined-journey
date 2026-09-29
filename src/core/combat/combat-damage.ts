@@ -344,7 +344,7 @@ export interface AttackCheckInput {
    * - 层级优势（高T对低T）：传两颗 `[n, m]`，取 `Math.max`。
    * - 层级劣势（低T对高T）：传两颗 `[n, m]`，取 `Math.min`。
    *
-   * v3 M0 修复架构 §1.4 M-5：v2 此处用 `Math.random()` 内部伪造第二颗骰，
+   * v3 M0 修复架构 §1.4 M-5：v2 此处用 `implicit random dice` 内部伪造第二颗骰，
    * 现改为调用方显式传入，战斗 v3 由 DiceTape `attackHit` 通道供骰。
    * v2 行为保持：调用方传入的值正是 v2 内部会自产的那个值（见各调用点）。
    */
@@ -398,7 +398,7 @@ export function performAttackCheck(input: AttackCheckInput): AttackCheckResult {
   let disadvantage = false;
 
   // 层级比较决定优劣势。第二颗骰由调用方显式传入（M0 修复架构 §1.4 M-5，
-  // 取代 v2 内部的 Math.random() 伪造骰值）。
+  // 取代 v2 内部的 implicit random dice 伪造骰值）。
   if (attackerTier > defenderTier) {
     // 高T对低T → 优势 (2d20取高)；第二颗缺省时退化为单骰
     const r1 = input.rolls[0];
@@ -458,47 +458,5 @@ export function performAttackCheck(input: AttackCheckInput): AttackCheckResult {
     effectiveDodge,
     checkValue,
     rating,
-  };
-}
-
-// ========== 状态触发判定 ==========
-
-/**
- * 状态施加判定 (对齐世界书):
- *   任意暴击(≥20) → 必触发
- *   有效/勉强 → (攻方属性+d20) vs (守方属性+d20) 对抗检定
- *   擦伤/失手 → 不触发
- *   控制类状态 → 守方对抗检定额外+5
- */
-export function checkStatusTrigger(
-  ratingCoefficient: number,
-  attackerStat: number,
-  defenderStat: number,
-  attackerD20: number,
-  defenderD20: number,
-  isControlEffect: boolean,
-): { triggered: boolean; narrative: string } {
-  // 暴击(≥1.3) → 必触发
-  if (ratingCoefficient >= 1.3) {
-    return { triggered: true, narrative: `暴击(系数${ratingCoefficient}) → 状态效果必触发` };
-  }
-
-  // 擦伤(0.3) / 失手(0) → 不触发
-  if (ratingCoefficient <= 0.3) {
-    return { triggered: false, narrative: `擦伤/失手(系数${ratingCoefficient}) → 状态效果不触发` };
-  }
-
-  // 有效(1.0) / 勉强(0.8) → 对抗检定
-  const controlBonus = isControlEffect ? 5 : 0;
-  const attackerCheck = attackerStat + attackerD20;
-  const defenderCheck = defenderStat + defenderD20 + controlBonus;
-
-  const triggered = attackerCheck >= defenderCheck;
-
-  return {
-    triggered,
-    narrative: triggered
-      ? `对抗检定成功 (${attackerCheck} ≥ ${defenderCheck}${controlBonus > 0 ? ` [+${controlBonus}控制加固]` : ''}) → 状态触发`
-      : `对抗检定失败 (${attackerCheck} < ${defenderCheck}${controlBonus > 0 ? ` [+${controlBonus}控制加固]` : ''}) → 状态未触发`,
   };
 }

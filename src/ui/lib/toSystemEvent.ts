@@ -23,7 +23,6 @@ import type {
   CraftGenOutput,
   CharGenOutput,
   ItemGenOutput,
-  CombatSummaryResult,
   QualityLevel,
 } from '@engine/types/types';
 
@@ -66,21 +65,6 @@ export function itemGenToEvent(output: ItemGenOutput): SystemEvent {
     itemType: output.equipment?.[0] ? '装备' : output.skills?.[0] ? '技能' : '物品',
     narrative: `[获得] ${firstName}`,
     details: output,
-  };
-}
-
-export function combatToEvent(result: CombatSummaryResult): SystemEvent {
-  const outcomeLabel: Record<string, string> = {
-    ally_win: '胜利',
-    enemy_win: '败北',
-    draw: '平局',
-    fled: '逃跑',
-  };
-  return {
-    type: 'combat',
-    outcome: result.outcome,
-    narrative: `[战斗] ${outcomeLabel[result.outcome] ?? result.outcome} · ${result.rounds}回合 · EXP +${result.totalExp}`,
-    details: result,
   };
 }
 

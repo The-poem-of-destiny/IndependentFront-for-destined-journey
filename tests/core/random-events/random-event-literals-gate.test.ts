@@ -23,7 +23,7 @@
  *    真要合并，正确的做法是把 glob 加进 `map-literals-gate.test.ts` 那一份并给它改名 ——
  *    那是一次跨文件重构，不在 W1 的范围里。
  *
- * 为什么不用 node:fs（照 `map-literals-gate.test.ts` / `combat-v3/no-nondeterminism.test.ts`）：
+ * 为什么不用 node:fs（照 `map-literals-gate.test.ts` / `combat/no-nondeterminism.test.ts`）：
  * 仓库 tsconfig 里 `types: []`、没装 @types/node —— `src/**` 下 import 'fs' 测试能跑但
  * `npm run typecheck` 会 TS2307 红。
  */

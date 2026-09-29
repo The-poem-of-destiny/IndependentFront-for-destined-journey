@@ -1,7 +1,7 @@
 // tests/core/combat/describe-automaton.test.ts
 import { describe, it, expect } from 'vitest';
 import { describeAutomaton, describeAutomata } from '../../../src/core/combat/describe-automaton';
-import type { EffectAutomatonDecl } from '../../../src/core/combat-v3/types';
+import type { EffectAutomatonDecl } from '../../../src/core/combat/types';
 
 function makeA(over: Partial<EffectAutomatonDecl>): EffectAutomatonDecl {
   return {

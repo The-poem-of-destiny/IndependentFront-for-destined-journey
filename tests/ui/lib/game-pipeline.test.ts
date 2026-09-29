@@ -60,7 +60,7 @@ const {
   advanceTurnSpy,
   toastSpy,
   createSnapshotSpy,
-  runCombatV3Mock,
+  runCombatMock,
   callImagePromptAgentMock,
   summarizeAndSaveMock,
 } = vi.hoisted(() => ({
@@ -75,7 +75,7 @@ const {
     async () => ({ id: 'snap-pre-combat', reason: 'pre-combat', turn: 0 }) as any,
   ),
   toastSpy: vi.fn(),
-  runCombatV3Mock: vi.fn(),
+  runCombatMock: vi.fn(),
   callImagePromptAgentMock: vi.fn(),
   summarizeAndSaveMock: vi.fn(),
 }));
@@ -88,10 +88,10 @@ vi.mock('@engine/state/state-manager', () => ({
   })),
 }));
 
-// T16：handleCombatTriggerV3 的动态 import('@engine/combat-v3/index') 被替换为可编排的 fake ——
-// 断言 setCombatCoordinator 在 runCombatV3 **之前**挂好（玩家首决策挂起的根因修复）。
-vi.mock('@engine/combat-v3/index', () => ({
-  runCombatV3: runCombatV3Mock,
+// T16：handleCombatTrigger 的动态 import('@engine/combat/index') 被替换为可编排的 fake ——
+// 断言 setCombatCoordinator 在 runCombat **之前**挂好（玩家首决策挂起的根因修复）。
+vi.mock('@engine/combat/index', () => ({
+  runCombat: runCombatMock,
 }));
 
 vi.mock('@engine/image/image-prompt-agent', () => ({
@@ -245,7 +245,7 @@ describe('侧链 Agent 调试调用身份', () => {
       await factory('char_gen', endpoint, 'save-test').chat({
         messages: [{ role: 'user', content: 'second' }],
       });
-      await factory('combat_v3', endpoint, 'save-test').chat({
+      await factory('combat', endpoint, 'save-test').chat({
         messages: [{ role: 'user', content: 'host' }],
       });
       await factory('combat_enemy', endpoint, 'save-test').chat({
@@ -260,11 +260,11 @@ describe('侧链 Agent 调试调用身份', () => {
     expect(ids).toEqual([
       'run-debug:char_gen:1',
       'run-debug:char_gen:2',
-      'run-debug:combat_v3:1',
+      'run-debug:combat:1',
       'run-debug:combat_enemy:1',
     ]);
     expect(addAgentLogEntry.mock.calls.slice(2).map(([entry]) => entry.agentId)).toEqual([
-      'combat_v3',
+      'combat',
       'combat_enemy',
     ]);
   });
@@ -411,29 +411,29 @@ describe('buildAgentConfigs — selected system core visibility', () => {
   });
 });
 
-describe('buildAgentConfigs — combat_v3 侧链装配', () => {
-  it('agentConfigs 包含 combat_v3，systemPrompt 来自设置覆写', () => {
+describe('buildAgentConfigs — combat 侧链装配', () => {
+  it('agentConfigs 包含 combat，systemPrompt 来自设置覆写', () => {
     const pipeline = makePipeline();
     const settings = (pipeline as any).settings.settings;
-    patchAgentSettings(settings, 'combat_v3', {
+    patchAgentSettings(settings, 'combat', {
       systemPrompt: '你是战斗决策 Agent（设置页覆写）',
     });
 
     const configs = (pipeline as any).buildAgentConfigs({});
-    const combat = configs.find((config: any) => config.agentId === 'combat_v3');
+    const combat = configs.find((config: any) => config.agentId === 'combat');
 
     expect(combat).toBeDefined();
     expect(combat.systemPrompt).toBe('你是战斗决策 Agent（设置页覆写）');
   });
 
-  it('未覆写时 systemPrompt 回落默认层（agent-config.json 的 combat_v3）', () => {
+  it('未覆写时 systemPrompt 回落默认层（agent-config.json 的 combat）', () => {
     const pipeline = makePipeline();
     const defaultPrompt = '你是战斗决策 Agent。';
 
     const configs = (pipeline as any).buildAgentConfigs({
-      combat_v3: { systemPrompt: defaultPrompt },
+      combat: { systemPrompt: defaultPrompt },
     });
-    const combat = configs.find((config: any) => config.agentId === 'combat_v3');
+    const combat = configs.find((config: any) => config.agentId === 'combat');
 
     expect(combat).toBeDefined();
     expect(combat.systemPrompt).toBe(defaultPrompt);
@@ -1772,11 +1772,11 @@ describe('handleSceneImages — 三档分流', () => {
   });
 });
 
-// ===== T16：combat_v3 玩家输入桥时序 + pre-combat 快照 =====
-// 设计 2026-08-09 §3.5：handleCombatTriggerV3 必须在 `await runCombatV3(...)` **之前**
+// ===== T16：combat 玩家输入桥时序 + pre-combat 快照 =====
+// 设计 2026-08-09 §3.5：handleCombatTrigger 必须在 `await runCombat(...)` **之前**
 // setCombatCoordinator —— 此前句柄在战斗结束后才挂，waitForCommand（玩家首决策）永远
 // 没人 resolve（T15 确认的「面板不弹」疑似根因）。顺带验证 pre-combat 快照在开战前打上。
-describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
+describe('T16 combat 玩家输入桥时序 + pre-combat 快照', () => {
   /** 最小 player 角色桩（characterToCombatParticipant 消费的字段） */
   function playerCharStub() {
     return {
@@ -1799,11 +1799,11 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
   }
 
   beforeEach(() => {
-    runCombatV3Mock.mockReset();
+    runCombatMock.mockReset();
     createSnapshotSpy.mockClear();
   });
 
-  it('F2：检出 → 只弹就绪面板（不 runCombatV3）→ 点开始 → startCombatV3 真开打（句柄先挂、pre-combat 快照已打）', async () => {
+  it('F2：检出 → 只弹就绪面板（不 runCombat）→ 点开始 → startCombatSession 真开打（句柄先挂、pre-combat 快照已打）', async () => {
     // 句柄形状照 game-store 的 combatCoordinator（submit/abandon/waitForCommand/preSnapshotId/restart/start）
     // 🔴 用 holder 对象而不是裸 let：直接 `coordinatorHandle = h` 会让 TS 的 CFA 把变量收窄
     //    成回调参数的类型（甚至 never），属性访问跟着报错。
@@ -1836,8 +1836,8 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       .spyOn(pipeline as any, 'getClientFactory')
       .mockReturnValue(combatClientFactory);
 
-    // fake runCombatV3：断言时序（句柄已挂）+ 用句柄完成一次「等待 → 提交」往返
-    runCombatV3Mock.mockImplementation(async (opts: any) => {
+    // fake runCombat：断言时序（句柄已挂）+ 用句柄完成一次「等待 → 提交」往返
+    runCombatMock.mockImplementation(async (opts: any) => {
       // 🔴 时序修复契约：战斗进行中 coordinator 句柄已在 store 上
       expect(holder.handle).not.toBeNull();
       // 战斗由就绪页延后启动，必须先建立独立 Debug Turn，再把同一 ID 绑定给 ClientFactory。
@@ -1867,16 +1867,16 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       };
     });
 
-    // ① combat_trigger 检出 → 只弹就绪面板：v3_combat_ready 投进 store、**不 runCombatV3**
+    // ① combat_trigger 检出 → 只弹就绪面板：combat_ready 投进 store、**不 runCombat**
     const readyResult = await (pipeline as any).handleCombatTrigger(
       { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
       '',
     );
     expect(readyResult).toBeNull();
-    expect(runCombatV3Mock).not.toHaveBeenCalled();
+    expect(runCombatMock).not.toHaveBeenCalled();
     expect(gameStore.applyCombatEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'v3_combat_ready',
+        type: 'combat_ready',
         combatType: '标准',
         allies: ['理查德'],
         enemies: ['骷髅'],
@@ -1886,10 +1886,10 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     expect(typeof holder.handle?.start).toBe('function');
     expect(holder.handle?.submit).toBeUndefined();
 
-    // ② 玩家点「开始战斗」→ store.startCombat → 占位句柄 start → startCombatV3 真开打
+    // ② 玩家点「开始战斗」→ store.startCombat → 占位句柄 start → startCombatSession 真开打
     await holder.handle!.start!();
 
-    // 时序修复：完整句柄（submit/waitForCommand/...）在 runCombatV3 之前已挂（fake 内部断言成立）
+    // 时序修复：完整句柄（submit/waitForCommand/...）在 runCombat 之前已挂（fake 内部断言成立）
     expect(gameStore.setCombatCoordinator).toHaveBeenCalledTimes(2); // 占位 + 完整
     // pre-combat 快照：createSnapshot('pre-combat', 当前回合数)
     expect(createSnapshotSpy).toHaveBeenCalledWith('pre-combat', 3);
@@ -1901,7 +1901,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       'completed',
       undefined,
     );
-    // 终局后的清理仍在 runCombatV3 完成之后执行（顺序未被提前破坏）
+    // 终局后的清理仍在 runCombat 完成之后执行（顺序未被提前破坏）
     expect(gameStore.exitCombat).toHaveBeenCalled();
   });
 
@@ -1920,7 +1920,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
     });
     vi.spyOn(pipeline as any, 'getClientFactory').mockReturnValue(vi.fn());
-    runCombatV3Mock.mockRejectedValue(new Error('provider failed'));
+    runCombatMock.mockRejectedValue(new Error('provider failed'));
 
     await (pipeline as any).handleCombatTrigger(
       { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
@@ -1957,7 +1957,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
     });
     vi.spyOn(pipeline as any, 'getClientFactory').mockReturnValue(vi.fn());
-    runCombatV3Mock.mockResolvedValue({
+    runCombatMock.mockResolvedValue({
       aborted: true,
       narrativeSummary: '',
       patches: [],
@@ -1983,7 +1983,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
   });
 
   it('🔴 2026-08-13 真机 debug：战斗终局落库后回读 store（refreshFromDb）—— 满血假象修复', async () => {
-    // 战斗链路（store.startCombat → startCombatV3）不经过 run() 的 finally，
+    // 战斗链路（store.startCombat → startCombatSession）不经过 run() 的 finally，
     // 终局 commitChatState 只写 Dexie；不回读的话 HUD 一直显示开战前的血量/经验。
     const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
     const gameStore = makeGameStore({
@@ -1997,7 +1997,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       awaitCombatSummaryReview: vi.fn(async (p: { summaryText: string }) => p.summaryText),
       activeSave: { id: 's', metadata: { totalTurns: 1 } },
     });
-    runCombatV3Mock.mockResolvedValue({
+    runCombatMock.mockResolvedValue({
       narrativeSummary: 'ok',
       patches: [],
       totalExp: 2,
@@ -2060,7 +2060,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     });
 
     // ① 正常终局：确认框收到结算数据，注入的是**编辑后**的文本
-    runCombatV3Mock.mockResolvedValue({
+    runCombatMock.mockResolvedValue({
       narrativeSummary: 'AI 原始摘要',
       patches: [],
       totalExp: 2,
@@ -2095,7 +2095,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     (gameStore.awaitCombatSummaryReview as ReturnType<typeof vi.fn>).mockClear();
     (gameStore.addMessage as ReturnType<typeof vi.fn>).mockClear();
     (gameStore.exitCombat as ReturnType<typeof vi.fn>).mockClear();
-    runCombatV3Mock.mockResolvedValue({
+    runCombatMock.mockResolvedValue({
       narrativeSummary: '战斗被放弃（M2 coordinator abandon）',
       patches: [],
       totalExp: 0,
@@ -2132,7 +2132,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     const pipeline = makePipeline(gameStore, {
       apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
     });
-    runCombatV3Mock.mockResolvedValue({
+    runCombatMock.mockResolvedValue({
       narrativeSummary: 'ok',
       patches: [],
       totalExp: 0,
@@ -2153,11 +2153,11 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// T2（2026-08-10）：handleCombatTriggerV3 向 runCombatV3 传模板系统上下文 ——
+// T2（2026-08-10）：handleCombatTrigger 向 runCombat 传模板系统上下文 ——
 // combatBrief（marker 组装）/ 过滤后的世界书（world_setting + race + system_core）/
 // userInput / storyOutput / history。全部可选，缺省不崩。
 // ══════════════════════════════════════════════════════════════════════════════
-describe('T2 combat_v3 模板系统上下文传参', () => {
+describe('T2 combat 模板系统上下文传参', () => {
   /** 最小 player 角色桩（characterToCombatParticipant 消费的字段） */
   function playerCharStub() {
     return {
@@ -2193,7 +2193,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
   }
 
   beforeEach(() => {
-    runCombatV3Mock.mockReset();
+    runCombatMock.mockReset();
     createSnapshotSpy.mockClear();
   });
 
@@ -2215,7 +2215,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
         { id: 'wb_ws', name: '工坊', partition: 'creative_workshop', entries: [] },
       ],
     };
-    // currentContext：本轮玩家输入 + 最近对话（startCombatV3 优先用它）
+    // currentContext：本轮玩家输入 + 最近对话（startCombatSession 优先用它）
     (pipeline as any).currentContext = {
       userInput: '我走进竞技场，向冠军发起挑战',
       history: [
@@ -2231,7 +2231,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     };
 
     let captured: Record<string, any> | null = null;
-    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
+    runCombatMock.mockImplementation(async (opts: Record<string, any>) => {
       captured = opts;
       return {
         narrativeSummary: 'ok',
@@ -2255,7 +2255,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
       } as never,
       '理查德推开了竞技场的大门，冠军早已等候。',
     );
-    expect(runCombatV3Mock).not.toHaveBeenCalled();
+    expect(runCombatMock).not.toHaveBeenCalled();
     await holder.handle!.start!();
 
     expect(captured).not.toBeNull();
@@ -2284,7 +2284,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     // 不设 chainData / currentContext —— 缺省兜底路径
 
     let captured: Record<string, any> | null = null;
-    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
+    runCombatMock.mockImplementation(async (opts: Record<string, any>) => {
       captured = opts;
       return {
         narrativeSummary: 'ok',
@@ -2321,7 +2321,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     });
 
     let captured: Record<string, any> | null = null;
-    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
+    runCombatMock.mockImplementation(async (opts: Record<string, any>) => {
       captured = opts;
       return {
         narrativeSummary: 'ok',
@@ -2378,7 +2378,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     });
 
     let captured: Record<string, any> | null = null;
-    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
+    runCombatMock.mockImplementation(async (opts: Record<string, any>) => {
       captured = opts;
       return {
         narrativeSummary: 'ok',
@@ -2391,14 +2391,14 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
       };
     });
 
-    // F2：检出 → 就绪面板（v3_combat_ready 带名单数组）→ 点开始 → 真开打
+    // F2：检出 → 就绪面板（combat_ready 带名单数组）→ 点开始 → 真开打
     await (pipeline as any).handleCombatTrigger(
       { combatType: '标准', allies: '妲丽安', enemies: '沼泥潜兽' } as never,
       '',
     );
     expect(gameStore.applyCombatEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'v3_combat_ready',
+        type: 'combat_ready',
         allies: ['妲丽安'],
         enemies: ['沼泥潜兽'],
       }),
@@ -2425,7 +2425,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     });
 
     let captured: Record<string, any> | null = null;
-    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
+    runCombatMock.mockImplementation(async (opts: Record<string, any>) => {
       captured = opts;
       return {
         narrativeSummary: 'ok',
@@ -2439,7 +2439,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     });
 
     await (pipeline as any).handleCombatTrigger({ combatType: '标准' } as never, '');
-    // 无名单 → v3_combat_ready 不带 allies/enemies（缺省缺席）
+    // 无名单 → combat_ready 不带 allies/enemies（缺省缺席）
     expect(gameStore.applyCombatEvent).toHaveBeenCalledWith(
       expect.not.objectContaining({ allies: expect.anything() }) as never,
     );
@@ -2543,7 +2543,7 @@ describe('F10 端点绑定 fail-closed（getEndpointForAgent 侧链热路径）'
       {},
       { apiPool: [{ id: 'H', name: 'host', model: 'host-model' }] },
     );
-    const host = (pipeline as any).getEndpointForAgent('combat_v3');
+    const host = (pipeline as any).getEndpointForAgent('combat');
     expect((pipeline as any).getCombatEnemyEndpoint(host)).toBe(host);
   });
 
@@ -2554,7 +2554,7 @@ describe('F10 端点绑定 fail-closed（getEndpointForAgent 侧链热路径）'
       { apiPool: [{ id: 'H', name: 'host', model: 'host-model' }] },
     );
     patchAgentSettings((pipeline as any).settings.settings, 'combat_enemy', { model: 'gone' });
-    const host = (pipeline as any).getEndpointForAgent('combat_v3');
+    const host = (pipeline as any).getEndpointForAgent('combat');
     expect((pipeline as any).getCombatEnemyEndpoint(host)).toBeUndefined();
     vi.restoreAllMocks();
   });
@@ -2563,11 +2563,11 @@ describe('F10 端点绑定 fail-closed（getEndpointForAgent 侧链热路径）'
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
-    patchAgentSettings((pipeline as any).settings.settings, 'combat_v3', { model: 'A' });
+    patchAgentSettings((pipeline as any).settings.settings, 'combat', { model: 'A' });
 
-    const endpoint = (pipeline as any).getEndpointForAgent('combat_v3');
+    const endpoint = (pipeline as any).getEndpointForAgent('combat');
     expect(endpoint).toBeUndefined();
-    expect(error.mock.calls[0][0]).toContain('combat_v3');
+    expect(error.mock.calls[0][0]).toContain('combat');
     expect(error.mock.calls[0][0]).toContain('fail-closed');
     expect(error.mock.calls[0][0]).toContain('A');
     error.mockRestore();

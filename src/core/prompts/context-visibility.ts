@@ -276,11 +276,11 @@ export function buildZoneContext(ctx: AgentContext): Record<ZoneId, VariableZone
   };
 
   // --- combat zone ---
-  // 占位 — `ctx.activeCombat` 目前无生产方（战斗走 combat-v3 独立会话），恒为 null
+  // 战斗使用独立会话，此资料区仅保留空占位。
   zones.combat = {
     config: { injectAs: 'summary' },
     visibility: [],
-    content: { active: ctx.activeCombat ?? null },
+    content: { active: null },
   };
 
   // --- outline zone ---

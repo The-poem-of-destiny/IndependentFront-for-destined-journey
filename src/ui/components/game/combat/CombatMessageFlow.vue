@@ -21,7 +21,7 @@ const props = defineProps<{
   entries: CombatLogEntry[];
   /** 单位 id → 名字字典（透传给动作卡片：v3 攻击卡反查 UUID → 中文名） */
   units?: Record<string, string>;
-  /** 🆕 AI 思考中：战斗面板收到 combat_v3 Agent 在跑（非等玩家输入、非终局）时为 true，
+  /** 🆕 AI 思考中：战斗面板收到 combat Agent 在跑（非等玩家输入、非终局）时为 true，
    *  在消息流底部渲染低调的「思考中…」转圈提示，让玩家知道引擎没卡死 */
   isThinking?: boolean;
 }>();

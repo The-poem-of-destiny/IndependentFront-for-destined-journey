@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { useGameStore } from '../../../stores/game-store';
 import { useUIStore } from '../../../stores/ui-store';
-import { projectUnitsBySide, type V3Unit } from './combat-v3-projection';
+import { projectUnitsBySide, type CombatUnit } from './combat-projection';
 import CombatHeader from './CombatHeader.vue';
 import CombatUnitCard from './CombatUnitCard.vue';
 import CombatMessageFlow from './CombatMessageFlow.vue';
@@ -13,15 +13,15 @@ import AppButton from '../../shared/AppButton.vue';
 const game = useGameStore();
 const ui = useUIStore();
 
-// 🆕 v3 数据源（设计 §3.1 决策 A2）：从 v3ActiveCombat.units 字典按
+// 🆕 v3 数据源（设计 §3.1 决策 A2）：从 activeCombat.units 字典按
 // initiativeOrder + side 投影成有序数组，原生吃 v3 形状，不写 v3→v2 适配层。
-const enemies = computed<V3Unit[]>(() => projectUnitsBySide(game.v3ActiveCombat, 'enemy'));
-const allies = computed<V3Unit[]>(() => projectUnitsBySide(game.v3ActiveCombat, 'player'));
+const enemies = computed<CombatUnit[]>(() => projectUnitsBySide(game.activeCombat, 'enemy'));
+const allies = computed<CombatUnit[]>(() => projectUnitsBySide(game.activeCombat, 'player'));
 
 /** 🆕 v3 单位 id → 名字字典：CombatActionCard 反查攻击卡片里的 UUID → 中文名。
- *  （生产路径 v3_action 的 attackerId/targetId 是角色 UUID，units 字典里有 name） */
+ *  （生产路径 action 的 attackerId/targetId 是角色 UUID，units 字典里有 name） */
 const unitNames = computed<Record<string, string>>(() => {
-  const units = game.v3ActiveCombat?.units;
+  const units = game.activeCombat?.units;
   if (!units) return {};
   const out: Record<string, string> = {};
   for (const id of Object.keys(units)) {
@@ -98,12 +98,12 @@ async function confirmRestart() {
 const collapsed = ref(false);
 
 /**
- * 🆕 战斗「思考中」判定：combat_v3 Agent 正在跑（非等玩家输入、非终局）。
+ * 🆕 战斗「思考中」判定：combat Agent 正在跑（非等玩家输入、非终局）。
  * 条件：v3 战斗进行中 + 不在等玩家输入 + phase 还没进 Terminal/SettlementCommitted。
  * 传给 CombatMessageFlow 在消息流末尾显示「思考中…」转圈，让玩家知道引擎没卡死。
  */
 const isCombatThinking = computed(() => {
-  const combat = game.v3ActiveCombat;
+  const combat = game.activeCombat;
   if (!combat) return false;
   if (game.combatAwaitingInput) return false;
   if (game.combatAgentPause) return false;

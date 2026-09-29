@@ -363,16 +363,16 @@ export function validateItemOutput(output: {
 // ═══════════════════════════════════════════════════════════
 // v3 编译期校验（M3 战斗 v3，供 automata/compile.ts 调用）
 // ═══════════════════════════════════════════════════════════
-// 保留 v2 运行时入口（validateModifier / validateBuff / validateItemOutput）不删。
+// 内容产出校验与效果 DSL 编译共享规则表。
 // 这里是战斗 v3 的 EffectAutomaton DSL 编译期共享校验（架构 §七 7.4 / plan §5.5）。
 
 /**
  * **有求值器**的 12 个窗口（Q-07）—— 订阅这些的 automaton 会真正被跑到。
  *
- * 判据是「`combat-v3/phases/` 或 `reducer.ts` 里有 `runWindow(...)` 调用点」，
+ * 判据是「`combat/phases/` 或 `reducer.ts` 里有 `runWindow(...)` 调用点」，
  * 不是「架构文档列了它」。
  */
-export const V3_WINDOW_KEYS_LIVE: ReadonlySet<string> = new Set([
+export const COMBAT_WINDOW_KEYS_LIVE: ReadonlySet<string> = new Set([
   'round.open',
   'round.close',
   'turn.open',
@@ -399,7 +399,7 @@ export const V3_WINDOW_KEYS_LIVE: ReadonlySet<string> = new Set([
  * 已存档里订阅这 6 个窗口的 automaton 会开始被拒（它们本来也从未生效，
  * 区别只是从「静默不跑」变成「明确报错」）。接上求值器时把 key 挪进 LIVE 即可。
  */
-export const V3_WINDOW_KEYS_RESERVED: ReadonlySet<string> = new Set([
+export const COMBAT_WINDOW_KEYS_RESERVED: ReadonlySet<string> = new Set([
   'initiative.before',
   'initiative.after',
   'turn.close',
@@ -409,13 +409,13 @@ export const V3_WINDOW_KEYS_RESERVED: ReadonlySet<string> = new Set([
 ]);
 
 /** 18 个 ReactionWindow 清单（架构 §五 5.1）= LIVE ∪ RESERVED */
-export const V3_WINDOW_KEYS: ReadonlySet<string> = new Set([
-  ...V3_WINDOW_KEYS_LIVE,
-  ...V3_WINDOW_KEYS_RESERVED,
+export const COMBAT_WINDOW_KEYS: ReadonlySet<string> = new Set([
+  ...COMBAT_WINDOW_KEYS_LIVE,
+  ...COMBAT_WINDOW_KEYS_RESERVED,
 ]);
 
 /** 8 大类 EffectIntent kind + Outcome 子类（架构 §六 6.1） */
-export const V3_INTENT_KINDS: ReadonlySet<string> = new Set([
+export const COMBAT_INTENT_KINDS: ReadonlySet<string> = new Set([
   'AddModifier',
   'DealDamage',
   'Heal',
@@ -432,40 +432,12 @@ export const V3_INTENT_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /** closed RuleKey 白名单（架构 §八 8.2） */
-export const V3_RULE_KEYS: ReadonlySet<string> = new Set([
+export const COMBAT_RULE_KEYS: ReadonlySet<string> = new Set([
   'morale.forceState',
   'terminal.forceTerminal',
   'action.freezeSlot',
   'death.threshold',
 ]);
-
-/** 校验 subscribe 是否为合法窗口（返回中文违规原因或 null） */
-export function validateV3Window(subscribe: unknown): string | null {
-  if (typeof subscribe !== 'string' || !V3_WINDOW_KEYS.has(subscribe)) {
-    return `subscribe 必须是 18 窗口之一，当前=${JSON.stringify(subscribe)}（架构 §五 5.1）`;
-  }
-  // Q-07：窗口在枚举里、但没有求值器 —— 与其静默入索引再什么都不做，不如当场说清楚
-  if (V3_WINDOW_KEYS_RESERVED.has(subscribe)) {
-    return `窗口 ${subscribe} 尚未接求值器（WINDOW_NOT_WIRED），订阅它的效果永远不会触发；请改订阅 ${[...V3_WINDOW_KEYS_LIVE].join(' / ')} 之一`;
-  }
-  return null;
-}
-
-/** 校验 intent kind 是否 ∈ 8 大类（返回中文违规原因或 null） */
-export function validateV3IntentKind(kind: unknown): string | null {
-  if (typeof kind !== 'string' || !V3_INTENT_KINDS.has(kind)) {
-    return `intents[].kind 必须是 8 大类之一，当前=${JSON.stringify(kind)}（架构 §六 6.1）`;
-  }
-  return null;
-}
-
-/** 校验 OverrideIntent.ruleKey ∈ closed 白名单（返回中文违规原因或 null，合法则 null） */
-export function validateV3RuleKey(ruleKey: unknown): string | null {
-  if (typeof ruleKey !== 'string' || !V3_RULE_KEYS.has(ruleKey)) {
-    return `OverrideIntent.ruleKey 必须在 closed RuleKey 白名单内，当前=${JSON.stringify(ruleKey)}（架构 §八 8.2）`;
-  }
-  return null;
-}
 
 // ═══════════════════════════════════════════════════════════
 // 类型再导出（仅类型，零运行时依赖）—— 方便调用方一处 import

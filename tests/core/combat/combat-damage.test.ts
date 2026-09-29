@@ -15,7 +15,6 @@ import {
   applyClusterMultiplier,
   runDamagePipeline,
   performAttackCheck,
-  checkStatusTrigger,
   getHitRating,
 } from '../../../src/core/combat/combat-damage';
 
@@ -434,50 +433,5 @@ describe('getHitRating', () => {
     expect(getHitRating(2).level).toBe('失手');
     expect(getHitRating(2).coefficient).toBe(0);
     expect(getHitRating(-5).level).toBe('失手');
-  });
-});
-
-// ========== 状态触发判定 ==========
-
-describe('checkStatusTrigger', () => {
-  it('暴击(≥1.3) → 必触发', () => {
-    const result = checkStatusTrigger(1.3, 10, 10, 5, 5, false);
-    expect(result.triggered).toBe(true);
-    expect(result.narrative).toContain('必触发');
-  });
-
-  it('擦伤(0.3) → 不触发', () => {
-    const result = checkStatusTrigger(0.3, 10, 10, 5, 5, false);
-    expect(result.triggered).toBe(false);
-    expect(result.narrative).toContain('不触发');
-  });
-
-  it('失手(0) → 不触发', () => {
-    const result = checkStatusTrigger(0, 10, 10, 5, 5, false);
-    expect(result.triggered).toBe(false);
-  });
-
-  it('有效(1.0) + 对抗检定成功', () => {
-    // 攻方: 15+18=33, 守方: 12+10=22 → 成功
-    const result = checkStatusTrigger(1.0, 15, 12, 18, 10, false);
-    expect(result.triggered).toBe(true);
-  });
-
-  it('有效(1.0) + 对抗检定失败', () => {
-    // 攻方: 10+8=18, 守方: 15+12=27 → 失败
-    const result = checkStatusTrigger(1.0, 10, 15, 8, 12, false);
-    expect(result.triggered).toBe(false);
-  });
-
-  it('控制类状态: 守方+5 加固', () => {
-    // 攻方: 20+15=35, 守方: 20+10+5=35 → 平局成功
-    const result = checkStatusTrigger(1.0, 20, 20, 15, 10, true);
-    expect(result.triggered).toBe(true);
-  });
-
-  it('控制类状态: 加固后失败', () => {
-    // 攻方: 15+10=25, 守方: 18+10+5=33 → 失败
-    const result = checkStatusTrigger(1.0, 15, 18, 10, 10, true);
-    expect(result.triggered).toBe(false);
   });
 });

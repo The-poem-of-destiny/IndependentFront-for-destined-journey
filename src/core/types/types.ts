@@ -12,9 +12,9 @@ import { RARITY_LEVELS, type Rarity } from '../content/field-enums';
 import type { GameTime } from '../time/time-system';
 // type-only 循环安全：effect-types 反向 import 本文件的 AttributeName/DivinityLevel/DamageType 也是 type-only
 import type { Modifier } from '../effects/effect-types';
-// type-only 循环安全：combat-v3/types.ts 反向 import 本文件的 CombatParticipant/StatusEffect 也是 type-only
-// EffectAutomaton 定义在 combat-v3/types.ts（v3 内核 DSL），这里只做类型引用不引入运行时
-import type { EffectAutomaton } from '../combat-v3/types';
+// type-only 循环安全：combat/types.ts 反向 import 本文件的 CombatParticipant/StatusEffect 也是 type-only
+// EffectAutomaton 定义在 combat/types.ts（v3 内核 DSL），这里只做类型引用不引入运行时
+import type { EffectAutomaton } from '../combat/types';
 // type-only 单向边：types-image.ts **不 import 本文件**（图像子系统的类型全部自持），
 // 所以这条边不成环。只为把 SceneImageMarker 接进 DetectedMarker 联合。
 import type { SceneImageMarker } from './types-image';
@@ -690,15 +690,6 @@ export interface AppSettings {
    *   现算出来的派生缓存，给它任何持久化字段位都是制造第二真相来源。
    */
   beautifierRules: BeautifierRule[];
-  /**
-   * v3 M0：战斗引擎版本 feature flag（架构 §14.5）。
-   * - `'v2'`（默认）：走现有 `combat-runner` + Agent 主持流程
-   * - `'v3'`：走 `combat-v3` 内核主持流程
-   * 分支点唯一（game-pipeline.handleCombatTrigger），粒度按整场战斗，
-   * openCombat 时冻结进 CombatState.provenance 不可中途变更。
-   * M5 已翻转为 `'v3'`（默认走 v3 内核）。打回 `'v2'` 仍可用（保留一个版本周期）。
-   */
-  combatEngineVersion: 'v2' | 'v3';
 }
 
 export const DEFAULT_FORMAT_PROMPT = `你必须严格按照以下 XML 标签格式输出回复，不要使用 Markdown 包裹：
@@ -751,7 +742,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   beautifierEnabled: true,
   beautifierRules: [],
   /** v3 M5: 战斗引擎版本（M5 翻为 v3 默认；打回 v2 仍可用，保留一个版本周期） */
-  combatEngineVersion: 'v3',
 };
 
 // ========== Chat Types ==========
@@ -1805,11 +1795,6 @@ export interface AgentContext {
    * 🔴 目前**没有任何生产方** —— 注释里说的 craft-resolver 从未落地，恒为 undefined。
    */
   craftProjects?: unknown[];
-  /**
-   * 当前战斗状态（combat zone 的输入）。
-   * 🔴 同上：**没有任何生产方**（战斗现役走 combat-v3 的独立会话，不经此槽）。
-   */
-  activeCombat?: CombatState | null;
 
   /**
    * 存档开局提示词原文（save.metadata.openingPrompt）——含捏人页选的初始技能/装备
@@ -2626,126 +2611,6 @@ export interface CombatParticipant {
   }>;
 }
 
-// ========== Combat State ==========
-
-/** 完整战斗状态 — 一场战斗的瞬时快照 */
-export interface CombatState {
-  combatId: string;
-  combatType: CombatType;
-  round: number;
-  participants: CombatParticipant[];
-  turnOrder: CombatUnitTurn[];
-  /** 当前行动者索引 */
-  currentTurnIndex: number;
-  /** 战斗状态 */
-  status: 'active' | 'paused' | 'ended';
-  /** 胜利方 */
-  winner?: 'ally' | 'enemy' | 'draw';
-  /** 环境描述 */
-  environment: string;
-  /** 本次战斗产生的所有 StatePatch */
-  patches: StatePatch[];
-  /** 回合日志 */
-  roundLogs: CombatRoundLog[];
-}
-
-/** 单回合战斗日志 */
-export interface CombatRoundLog {
-  round: number;
-  actions: CombatActionLog[];
-  summary: string;
-}
-
-/** 单次行动日志 */
-export interface CombatActionLog {
-  attackerId: string;
-  defenderId: string;
-  action: string;
-  hitRating: HitRating;
-  damage: number;
-  effects: string[];
-  description: string;
-}
-
-// ========== Combat Action Request/Result ==========
-
-/** 战斗动作请求 — AI 调用 $combat.attack() 时生成 */
-export interface CombatActionRequest {
-  attackerId: string;
-  defenderId: string;
-  action: 'attack' | 'defend' | 'skill' | 'item' | 'flee' | 'wait';
-  skillId?: string;
-  skillName?: string;
-  itemId?: string;
-  /** 意图描述关键词（来自用户输入） */
-  intentionKeywords?: string;
-  /** 非致死标记 */
-  nonLethal?: boolean;
-  /** 技能标签 (如多段/连击/范围等) */
-  skillTags?: string[];
-  /** 多段攻击次数 */
-  multiHitCount?: number;
-  /** 战斗类型 */
-  combatType?: CombatType;
-  /** 当前回合 */
-  round?: number;
-  /** 技能威力 */
-  skillPower?: number;
-  /** 关联属性 (用于伤害公式) */
-  relevantAttribute?: string;
-  /** 伤害类型 */
-  damageType?: DamageType;
-  /** 武器名称 */
-  weaponName?: string;
-  /** 武器攻击力 */
-  weaponAtk?: number;
-  /** 消耗 */
-  costs?: { hp?: number; mp?: number; sp?: number };
-}
-
-/** 完整的战斗动作结果 (对齐世界书三级面板) */
-export interface CombatActionResult {
-  request: CombatActionRequest;
-
-  // 意图判定
-  intention: IntentionResult;
-
-  // 攻击检定
-  attackRoll: {
-    diceUsed: number;
-    advantage: boolean;
-    disadvantage: boolean;
-    diceRolls: number[];
-    dodgeNegated: boolean;
-    dodgeNegatedReason?: string;
-    hitBonus: number;
-    dodgeBonus: number;
-    checkValue: number;
-    rating: HitRating;
-  };
-
-  // 伤害管线 (8 步)
-  damage: CombatDamageBreakdown;
-
-  // 最终结算
-  finalHp: number;
-  maxHp: number;
-  isDead: boolean;
-  isNarrativeAlive: boolean;
-
-  // 状态施加
-  statusApplied: Array<{ name: string; duration: number; effect: string }>;
-
-  // 产生的 StatePatch
-  patches: StatePatch[];
-
-  // 面板描述 (用于 <action_info> 生成)
-  panelLines: string[];
-
-  // 人类可读描述
-  description: string;
-}
-
 /** 伤害管线 8 步分解 (对齐世界书) */
 export interface CombatDamageBreakdown {
   // Step 1: 初始伤害 = 关联属性×10×层级系数 + 技能威力 + 武器攻击力
@@ -3371,7 +3236,7 @@ export interface TierConfig {
 
 // ========== Intention System (Phase 6a) — see INTENTION_CONFIGS and IntentionResult above ==========
 // IntentionTier is defined above as an alias for IntentionLevel
-// DamageInput/DamageResult replaced by CombatDamageBreakdown and CombatActionResult
+// Damage calculations use CombatDamageBreakdown.
 
 // ========== Cluster & Morale (Phase 6c) ==========
 
@@ -3449,13 +3314,6 @@ export const MORALE_STATE_LABELS: Record<MoraleState, string> = {
   wavering: '战意动摇',
   routing: '丧失战意/崩溃',
 };
-
-// ========== Turn & Initiative (Phase 6a) ==========
-
-export interface TurnOrder {
-  sequence: CombatUnitTurn[];
-  round: number;
-}
 
 export interface CombatUnitTurn {
   characterId: string;

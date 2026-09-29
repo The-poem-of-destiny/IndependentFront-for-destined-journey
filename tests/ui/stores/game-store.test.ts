@@ -38,13 +38,14 @@ import type {
   PlotEvent,
 } from '@engine/types/types';
 import {
-  runCombatV3,
+  runCombat,
   type CombatCommand,
   type CombatView,
-  type RunCombatV3Opts,
-} from '@engine/combat-v3/index';
-import type { CombatClient, CombatEvent } from '@engine/combat/combat-v2-types';
-import { mkAttack, mkBundle, mkParticipant, mkPass } from '../../core/combat-v3/test-utils';
+  type RunCombatOpts,
+} from '@engine/combat/index';
+import type { CombatClient } from '@engine/combat/client';
+import type { CombatEvent } from '@engine/combat/ui-events';
+import { mkAttack, mkBundle, mkParticipant, mkPass } from '../../core/combat/test-utils';
 
 /**
  * 引擎的 `allocateAttributePoint` 在这里被替身掉 —— 它自己的校验/落库有一整份真实 DB
@@ -182,8 +183,8 @@ function makeChar(overrides: Partial<CharacterState> = {}): CharacterState {
   });
 }
 
-/** v3 单位替身（T13：v3_units_snapshot 载荷）——照 combat-v3-projection.ts 的 V3Unit 推导 */
-function makeV3Unit(id: string, side: 'player' | 'enemy'): CombatView['units'][string] {
+/** v3 单位替身（T13：units_snapshot 载荷）——照 combat-projection.ts 的 CombatUnit 推导 */
+function makeCombatUnit(id: string, side: 'player' | 'enemy'): CombatView['units'][string] {
   return {
     id,
     name: id,
@@ -553,7 +554,7 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
 
   it('rollbackOneTurn: 战斗中拒绝回退', async () => {
     await seedTwoTurns();
-    store.activeCombat = { status: 'ongoing' } as any;
+    store.activeCombat = { phase: 'RoundOpen' } as any;
     expect(store.isInCombat).toBe(true);
     const result = await store.rollbackOneTurn();
     expect(result).toEqual({ status: 'rejected', error: '战斗进行中，无法回退' });
@@ -851,10 +852,10 @@ describe('M2 v3 战斗接线', () => {
     const store = useGameStore();
     let abandoned = false;
     store.setCombatCoordinator({ abandon: () => (abandoned = true) });
-    store.v3ActiveCombat = {} as never; // 模拟进行中的 v3 战斗
+    store.activeCombat = {} as never; // 模拟进行中的 v3 战斗
     store.abandonCombat();
     expect(abandoned).toBe(true);
-    expect(store.v3ActiveCombat).toBeNull();
+    expect(store.activeCombat).toBeNull();
     expect(store.combatAwaitingInput).toBeNull();
   });
 
@@ -878,66 +879,53 @@ describe('M2 v3 战斗接线', () => {
   it('应用 v3 战斗事件驱动面板状态', () => {
     const store = useGameStore();
     store.applyCombatEvent({
-      type: 'v3_combat_started',
+      type: 'combat_started',
       combatId: 'c1',
       round: 1,
       unitNames: ['甲'],
     });
-    expect(store.v3ActiveCombat).not.toBeNull();
+    expect(store.activeCombat).not.toBeNull();
     expect(store.isInCombat).toBe(true);
-    store.applyCombatEvent({ type: 'v3_combat_ended', reason: 'hp_zero', winner: 'player' });
-    store.applyCombatEvent({ type: 'v3_settlement', fpDelta: 0, reason: 'hp_zero' });
-    expect(store.v3ActiveCombat?.phase).toBe('SettlementCommitted');
+    store.applyCombatEvent({ type: 'combat_ended', reason: 'hp_zero', winner: 'player' });
+    store.applyCombatEvent({ type: 'settlement', fpDelta: 0, reason: 'hp_zero' });
+    expect(store.activeCombat?.phase).toBe('SettlementCommitted');
     expect(store.isInCombat).toBe(false);
   });
 
-  it('T13：v3_units_snapshot 到达后填充 v3ActiveCombat.units（问题 4 核心：面板不再空）', () => {
+  it('T13：units_snapshot 到达后填充 activeCombat.units（问题 4 核心：面板不再空）', () => {
     const store = useGameStore();
     store.applyCombatEvent({
-      type: 'v3_combat_started',
+      type: 'combat_started',
       combatId: 'c1',
       round: 1,
       unitNames: ['甲', '乙'],
     });
     // 开战事件本身不带 units（主通道是独立快照事件）→ 先空
-    expect(store.v3ActiveCombat?.units).toEqual({});
+    expect(store.activeCombat?.units).toEqual({});
 
     store.applyCombatEvent({
-      type: 'v3_units_snapshot',
-      units: { 甲: makeV3Unit('甲', 'player'), 乙: makeV3Unit('乙', 'enemy') },
+      type: 'units_snapshot',
+      units: { 甲: makeCombatUnit('甲', 'player'), 乙: makeCombatUnit('乙', 'enemy') },
     });
-    expect(store.v3ActiveCombat?.units['甲']).toMatchObject({ id: '甲', side: 'player', hp: 100 });
-    expect(store.v3ActiveCombat?.units['乙']).toMatchObject({ id: '乙', side: 'enemy' });
-    expect(Object.keys(store.v3ActiveCombat?.units ?? {})).toHaveLength(2);
+    expect(store.activeCombat?.units['甲']).toMatchObject({ id: '甲', side: 'player', hp: 100 });
+    expect(store.activeCombat?.units['乙']).toMatchObject({ id: '乙', side: 'enemy' });
+    expect(Object.keys(store.activeCombat?.units ?? {})).toHaveLength(2);
     // 快照只填 units，不碰其他字段
-    expect(store.v3ActiveCombat?.initiativeOrder).toEqual(['甲', '乙']);
-    expect(store.v3ActiveCombat?.phase).toBe('CombatOpen');
-  });
-
-  it('T13：v3_combat_started 带 units 载荷时不再留空 units（兼容路径）', () => {
-    const store = useGameStore();
-    store.applyCombatEvent({
-      type: 'v3_combat_started',
-      combatId: 'c1',
-      round: 1,
-      unitNames: ['甲'],
-      units: { 甲: makeV3Unit('甲', 'player') },
-    });
-    expect(store.v3ActiveCombat?.units['甲']).toMatchObject({ id: '甲', side: 'player' });
-    expect(Object.keys(store.v3ActiveCombat?.units ?? {})).toHaveLength(1);
+    expect(store.activeCombat?.initiativeOrder).toEqual(['甲', '乙']);
+    expect(store.activeCombat?.phase).toBe('CombatOpen');
   });
 
   // ════════════════════════════════════════════════════════════════════════
   // F2（2026-08-10）：就绪态 —— combat_trigger 检出 → combatReady 置位
   // （isInCombat 认它，面板先弹）→ 玩家点「开始战斗」（startCombat →
-  // coordinator.start）→ 才 openCombat + runCombatV3 真开打。
+  // coordinator.start）→ 才 openCombat + runCombat 真开打。
   // ════════════════════════════════════════════════════════════════════════
   describe('F2：就绪态（就绪面板 → 点开始 → 才开打）', () => {
-    it('v3_combat_ready 到达：combatReady 置位（含名单数组）+ isInCombat=true + 战斗视图未开', () => {
+    it('combat_ready 到达：combatReady 置位（含名单数组）+ isInCombat=true + 战斗视图未开', () => {
       const store = useGameStore();
       expect(store.isInCombat).toBe(false);
       store.applyCombatEvent({
-        type: 'v3_combat_ready',
+        type: 'combat_ready',
         combatType: '死斗',
         environment: '竞技场',
         allies: ['理查德', '妲丽安'],
@@ -951,9 +939,9 @@ describe('M2 v3 战斗接线', () => {
         enemies: ['冠军'],
         bodyText: '决一死战',
       });
-      // 就绪态 = 战斗中（覆盖层锁 UI），但战斗视图（v3ActiveCombat）还没开
+      // 就绪态 = 战斗中（覆盖层锁 UI），但战斗视图（activeCombat）还没开
       expect(store.isInCombat).toBe(true);
-      expect(store.v3ActiveCombat).toBeNull();
+      expect(store.activeCombat).toBeNull();
       // 就绪事件不污染消息流
       expect(store.combatLog).toHaveLength(0);
     });
@@ -962,7 +950,7 @@ describe('M2 v3 战斗接线', () => {
       const store = useGameStore();
       let started = 0;
       store.setCombatCoordinator({ start: async () => (started += 1) });
-      store.applyCombatEvent({ type: 'v3_combat_ready', combatType: '标准' });
+      store.applyCombatEvent({ type: 'combat_ready', combatType: '标准' });
       await store.startCombat();
       expect(started).toBe(1);
       expect(store.combatReady).toBeNull();
@@ -971,23 +959,23 @@ describe('M2 v3 战斗接线', () => {
     it('startCombat：句柄无 start（战斗已开/占位缺失）时不崩', async () => {
       const store = useGameStore();
       store.setCombatCoordinator({ abandon: () => {} });
-      store.applyCombatEvent({ type: 'v3_combat_ready', combatType: '标准' });
+      store.applyCombatEvent({ type: 'combat_ready', combatType: '标准' });
       await store.startCombat();
       expect(store.combatReady).toBeNull();
     });
 
     it('skipCombat / enterCombat / exitCombat 都清就绪态', () => {
       const store = useGameStore();
-      store.applyCombatEvent({ type: 'v3_combat_ready', combatType: '标准' });
+      store.applyCombatEvent({ type: 'combat_ready', combatType: '标准' });
       store.skipCombat();
       expect(store.combatReady).toBeNull();
       expect(store.isInCombat).toBe(false);
 
-      store.applyCombatEvent({ type: 'v3_combat_ready', combatType: '标准' });
+      store.applyCombatEvent({ type: 'combat_ready', combatType: '标准' });
       store.enterCombat();
       expect(store.combatReady).toBeNull();
 
-      store.applyCombatEvent({ type: 'v3_combat_ready', combatType: '标准' });
+      store.applyCombatEvent({ type: 'combat_ready', combatType: '标准' });
       store.exitCombat();
       expect(store.combatReady).toBeNull();
     });
@@ -1008,9 +996,9 @@ describe('M2 v3 战斗接线', () => {
       const store = useGameStore();
       const p = store.awaitCombatSummaryReview(payload);
       expect(store.combatSummaryReview).not.toBeNull();
-      // v3_settlement 已把 phase 置 SettlementCommitted（isInCombat 其它判据都 false），
+      // settlement 已把 phase 置 SettlementCommitted（isInCombat 其它判据都 false），
       // 确认面板期间 isInCombat 必须仍为 true（否则面板自己关掉）
-      store.v3ActiveCombat = {
+      store.activeCombat = {
         combatId: 'c1',
         revision: 0,
         phase: 'SettlementCommitted',
@@ -1049,11 +1037,11 @@ describe('M2 v3 战斗接线', () => {
     const store = useGameStore();
     let abandoned = false;
     store.setCombatCoordinator({ abandon: () => (abandoned = true) });
-    store.v3ActiveCombat = {} as never; // 模拟进行中的 v3 战斗
+    store.activeCombat = {} as never; // 模拟进行中的 v3 战斗
     store.combatAwaitingInput = { unit: '甲', unitId: '甲', round: 1 };
     store.skipCombat();
     expect(abandoned).toBe(true); // 走 coordinator abandon（FP 不落库）
-    expect(store.v3ActiveCombat).toBeNull(); // 面板关闭（isInCombat=false）
+    expect(store.activeCombat).toBeNull(); // 面板关闭（isInCombat=false）
     expect(store.isInCombat).toBe(false);
     expect(store.combatAwaitingInput).toBeNull();
   });
@@ -1117,13 +1105,13 @@ describe('M2 v3 战斗接线', () => {
         restarted = true;
       },
     });
-    store.v3ActiveCombat = {} as never; // 进行中的战斗（重开前先被放弃）
+    store.activeCombat = {} as never; // 进行中的战斗（重开前先被放弃）
 
     const result = await store.restartCombat();
 
     expect(result).toEqual({ status: 'restored', continuation: 'same-save' });
-    expect(restarted).toBe(true); // 重触发回调被调（pipeline 重走 handleCombatTriggerV3）
-    expect(store.v3ActiveCombat).toBeNull(); // 旧战斗已被放弃
+    expect(restarted).toBe(true); // 重触发回调被调（pipeline 重走 prepareCombat）
+    expect(store.activeCombat).toBeNull(); // 旧战斗已被放弃
     expect(store.isInCombat).toBe(false);
     expect(store.characters.find((c) => c.id === 'hero')?.hp).toBe(80); // 快照恢复
     expect(store.activeSave?.metadata?.totalTurns).toBe(2); // totalTurns 对齐快照 turn
@@ -1139,7 +1127,7 @@ describe('M2 v3 战斗接线', () => {
     await store.loadSave(SAVE_ID);
     let abandoned = false;
     store.setCombatCoordinator({ abandon: () => (abandoned = true), preSnapshotId: null });
-    store.v3ActiveCombat = {} as never;
+    store.activeCombat = {} as never;
 
     const result = await store.restartCombat();
     expect(result).toEqual({ status: 'rejected', error: '没有 pre-combat 快照，无法重开' });
@@ -1171,7 +1159,7 @@ describe('M2 v3 战斗接线', () => {
       preSnapshotId: 'snap-pre-combat-switch',
       restart,
     });
-    store.v3ActiveCombat = {} as never;
+    store.activeCombat = {} as never;
     const originalGetMessages = database.getMessages;
     let releaseRead: (messages: Awaited<ReturnType<typeof database.getMessages>>) => void = () => {
       throw new Error('projection read did not start');
@@ -1228,7 +1216,7 @@ describe('M2 v3 战斗接线', () => {
         throw new Error('restart failed');
       },
     });
-    store.v3ActiveCombat = {} as never;
+    store.activeCombat = {} as never;
     store.isGenerating = true;
 
     const result = await store.restartCombat();
@@ -1242,16 +1230,16 @@ describe('M2 v3 战斗接线', () => {
     expect(store.characters.find((character) => character.id === 'hero')?.hp).toBe(80);
   });
 
-  it('T16：runCombatV3 期间经 store.submitCombatCommand 喂入玩家命令并推进战斗（coordinator 句柄先挂）', async () => {
+  it('T16：runCombat 期间经 store.submitCombatCommand 喂入玩家命令并推进战斗（coordinator 句柄先挂）', async () => {
     const store = useGameStore();
     const seen: CombatEvent[] = [];
     // 模拟 game-pipeline 的桥（T16 时序修复后的真实形状）：submitCommand 是 no-op
     // （等待态由事件驱动 store），waitForCommand 暴露 pendingResolve，coordinator 句柄
-    // 在 runCombatV3 **之前**挂到 store —— 战斗进行中玩家命令才能经 submit 喂入。
+    // 在 runCombat **之前**挂到 store —— 战斗进行中玩家命令才能经 submit 喂入。
     let pendingResolve: ((c: CombatCommand) => void) | null = null;
     const waitForCommand = () => new Promise<CombatCommand>((r) => (pendingResolve = r));
 
-    const opts: RunCombatV3Opts = {
+    const opts: RunCombatOpts = {
       saveId: SAVE_ID,
       bundle: mkBundle({
         combatId: 't16-bridge',
@@ -1278,7 +1266,7 @@ describe('M2 v3 战斗接线', () => {
         stateManager: { commitDomainCommand: async () => {} },
         characters: [],
         context: {} as never,
-        submitCommand: async () => {}, // 等待态由 v3_awaiting_player_input 事件驱动 store
+        submitCommand: async () => {}, // 等待态由 awaiting_player_input 事件驱动 store
         waitForCommand,
         abandon: () => {},
         drawDice: () => ({ outputId: 't16-dice', dice: Array.from({ length: 60 }, () => 10) }),
@@ -1289,7 +1277,7 @@ describe('M2 v3 战斗接线', () => {
       },
     };
 
-    // 🔴 时序修复契约：句柄先挂（runCombatV3 之前），战斗进行中才能喂命令
+    // 🔴 时序修复契约：句柄先挂（runCombat 之前），战斗进行中才能喂命令
     store.setCombatCoordinator({
       submit: async (cmd: CombatCommand) => {
         if (pendingResolve) {
@@ -1302,9 +1290,9 @@ describe('M2 v3 战斗接线', () => {
       waitForCommand,
     });
 
-    const runPromise = runCombatV3(opts); // 不 await：让战斗在玩家回合挂起
+    const runPromise = runCombat(opts); // 不 await：让战斗在玩家回合挂起
 
-    // 等轮到玩家（v3_awaiting_player_input 到达 → combatAwaitingInput 亮起「轮到你了」）
+    // 等轮到玩家（awaiting_player_input 到达 → combatAwaitingInput 亮起「轮到你了」）
     await vi.waitFor(() => {
       expect(store.combatAwaitingInput?.unitId).toBe('甲');
     });
@@ -1321,7 +1309,7 @@ describe('M2 v3 战斗接线', () => {
     });
     // 等第二枚等待事件（攻击后内核要求消费 action 槽）
     await vi.waitFor(() => {
-      expect(seen.filter((e) => e.type === 'v3_awaiting_player_input').length).toBe(2);
+      expect(seen.filter((e) => e.type === 'awaiting_player_input').length).toBe(2);
     });
     await store.submitCombatCommand({
       kind: 'PassAction',
@@ -1332,14 +1320,14 @@ describe('M2 v3 战斗接线', () => {
 
     const result = await runPromise;
     expect(result.outcome).toBe('ally_win');
-    expect(seen.some((e) => e.type === 'v3_awaiting_player_input')).toBe(true);
+    expect(seen.some((e) => e.type === 'awaiting_player_input')).toBe(true);
   });
 
   it('🎭 主持人/DM 模式：玩家意图文本 → 主持人解析 → Command → 内核推进（submitCombatIntent 链路）', async () => {
     const store = useGameStore();
     const seen: CombatEvent[] = [];
     // game-pipeline 意图文本桥（主持人模式）：waitForPlayerIntent 暴露 pending resolve，
-    // coordinator 句柄在 runCombatV3 之前挂到 store。
+    // coordinator 句柄在 runCombat 之前挂到 store。
     let pendingIntentResolve: ((text: string) => void) | null = null;
     const waitForPlayerIntent = () => new Promise<string>((r) => (pendingIntentResolve = r));
 
@@ -1347,7 +1335,7 @@ describe('M2 v3 战斗接线', () => {
     // 首个 chatWithTools 调用是开局氛围（F5：openCombatScene，含「战斗开场」user）
     // ——返回氛围描写、不产命令；此后进入正式决策（【玩家意图】/轮到敌方）。
     let hostCallIdx = 0;
-    const opts: RunCombatV3Opts = {
+    const opts: RunCombatOpts = {
       saveId: SAVE_ID,
       bundle: mkBundle({
         combatId: 't16-host-bridge',
@@ -1367,7 +1355,7 @@ describe('M2 v3 战斗接线', () => {
       deps: {
         configs: [
           {
-            agentId: 'combat_v3',
+            agentId: 'combat',
             systemPrompt: 'TEST_HOST_SYSTEM_PROMPT',
           } as never,
         ],
@@ -1431,7 +1419,7 @@ describe('M2 v3 战斗接线', () => {
       },
     };
 
-    // 🔴 句柄先挂（runCombatV3 之前），战斗进行中玩家意图才能喂入
+    // 🔴 句柄先挂（runCombat 之前），战斗进行中玩家意图才能喂入
     store.setCombatCoordinator({
       submitPlayerIntent: async (text: string) => {
         if (pendingIntentResolve) {
@@ -1443,7 +1431,7 @@ describe('M2 v3 战斗接线', () => {
       abandon: () => {},
     });
 
-    const runPromise = runCombatV3(opts); // 不 await：让战斗在玩家回合挂起
+    const runPromise = runCombat(opts); // 不 await：让战斗在玩家回合挂起
 
     // 等轮到玩家 → 喂意图「攻击乙」→ 主持人解析成 DeclareAttack → 内核结算
     await vi.waitFor(() => {
@@ -1452,25 +1440,25 @@ describe('M2 v3 战斗接线', () => {
     await store.submitCombatIntent('攻击乙');
     // 等第二枚等待事件（攻击后内核要求消费 action 槽）→ 喂「结束本回合」
     await vi.waitFor(() => {
-      expect(seen.filter((e) => e.type === 'v3_awaiting_player_input').length).toBe(2);
+      expect(seen.filter((e) => e.type === 'awaiting_player_input').length).toBe(2);
     });
     await store.submitCombatIntent('我方「甲」结束本回合');
 
     const result = await runPromise;
     // 主持人链路推进战斗并正常结算（意图文本 → 主持人 → Command → 内核）
     expect(result.outcome).toBe('ally_win');
-    // 敌人真的被攻击（v3_action 攻击卡片来自内核真实结算）
-    expect(seen.some((e) => e.type === 'v3_action' && e.toolName === 'attack')).toBe(true);
+    // 敌人真的被攻击（action 攻击卡片来自内核真实结算）
+    expect(seen.some((e) => e.type === 'action' && e.toolName === 'attack')).toBe(true);
   });
 });
 
-// ===== T15：v3 事件链路（真实 runCombatV3 → store.applyCombatEvent） =====
+// ===== T15：v3 事件链路（真实 runCombat → store.applyCombatEvent） =====
 // 设计 2026-08-09 §3.4 问题 3（面板不弹）：从 coordinator 的 emitEvents（含 T13 的
-// v3_units_snapshot 补发）一路跑到 game-store，验证事件**完整到达**且 v3ActiveCombat
+// units_snapshot 补发）一路跑到 game-store，验证事件**完整到达**且 activeCombat
 // 正确填充（含 units）。驱动方式照 coordinator.test.ts 的先例（玩家命令队列 + fake
-// 敌方 agent）；onCombatEvent 桥与 game-pipeline.handleCombatTriggerV3 的接法一致
+// 敌方 agent）；onCombatEvent 桥与 game-pipeline.prepareCombat 的接法一致
 // （evt => game.applyCombatEvent(evt)）。
-describe('T15 v3 事件链路（真实 runCombatV3 → store）', () => {
+describe('T15 v3 事件链路（真实 runCombat → store）', () => {
   beforeEach(async () => {
     setActivePinia(createPinia());
     await initializeDatabase();
@@ -1498,7 +1486,7 @@ describe('T15 v3 事件链路（真实 runCombatV3 → store）', () => {
     };
   }
 
-  it('v3_combat_started 先行、v3_units_snapshot 紧随到达 store；v3ActiveCombat 含完整 units；isInCombat 驱动面板显示', async () => {
+  it('combat_started 先行、units_snapshot 紧随到达 store；activeCombat 含完整 units；isInCombat 驱动面板显示', async () => {
     const store = useGameStore();
     const seen: CombatEvent[] = [];
     // 事件到达**那一刻**的 store 状态快照（证明面板驱动与数据填充是事件本身完成的）
@@ -1510,7 +1498,7 @@ describe('T15 v3 事件链路（真实 runCombatV3 → store）', () => {
       mkAttack('t15-att', -1, '甲', '乙'),
       mkPass('t15-act', -1, '甲', 'action'),
     ];
-    const opts: RunCombatV3Opts = {
+    const opts: RunCombatOpts = {
       saveId: SAVE_ID,
       bundle: mkBundle({
         combatId: 't15-link',
@@ -1544,45 +1532,45 @@ describe('T15 v3 事件链路（真实 runCombatV3 → store）', () => {
         snapshots.push({
           type: evt.type,
           isInCombat: store.isInCombat,
-          unitsCount: Object.keys(store.v3ActiveCombat?.units ?? {}).length,
+          unitsCount: Object.keys(store.activeCombat?.units ?? {}).length,
         });
       },
     };
 
-    const result = await runCombatV3(opts);
+    const result = await runCombat(opts);
 
-    // ① T13 时序契约：v3_combat_started 先落 store（建 v3ActiveCombat），
-    //    v3_units_snapshot 紧随（填 units 字典）——顺序不可换。
+    // ① T13 时序契约：combat_started 先落 store（建 activeCombat），
+    //    units_snapshot 紧随（填 units 字典）——顺序不可换。
     //    （注意：首次 dispatch 是 SupplyDice，reducer 有独立短路只产「骰池续杯」
-    //    NarrativeCue，不走 autoFn——所以 v3_combat_started 在第 2 次 dispatch 才发，
+    //    NarrativeCue，不走 autoFn——所以 combat_started 在第 2 次 dispatch 才发，
     //    但它的到达与随后的快照仍是同一对、相邻且有序。）
-    const startedIdx = seen.findIndex((e) => e.type === 'v3_combat_started');
+    const startedIdx = seen.findIndex((e) => e.type === 'combat_started');
     expect(startedIdx).toBeGreaterThanOrEqual(0);
-    expect(seen[startedIdx]).toMatchObject({ type: 'v3_combat_started', combatId: 't15-link' });
-    expect(seen[startedIdx + 1]).toMatchObject({ type: 'v3_units_snapshot' });
+    expect(seen[startedIdx]).toMatchObject({ type: 'combat_started', combatId: 't15-link' });
+    expect(seen[startedIdx + 1]).toMatchObject({ type: 'units_snapshot' });
 
-    // ② 面板弹出驱动（§3.4 问题 3）：v3_combat_started 到达的瞬间 isInCombat 已为 true
-    //    （CombatPanel 的 v-if 显示条件），v3_units_snapshot 随后把 units 补齐（面板有数据）
-    const startedSnapshot = snapshots.find((s) => s.type === 'v3_combat_started');
+    // ② 面板弹出驱动（§3.4 问题 3）：combat_started 到达的瞬间 isInCombat 已为 true
+    //    （CombatPanel 的 v-if 显示条件），units_snapshot 随后把 units 补齐（面板有数据）
+    const startedSnapshot = snapshots.find((s) => s.type === 'combat_started');
     expect(startedSnapshot).toMatchObject({ isInCombat: true, unitsCount: 0 });
-    const snapshotShot = snapshots.find((s) => s.type === 'v3_units_snapshot');
+    const snapshotShot = snapshots.find((s) => s.type === 'units_snapshot');
     expect(snapshotShot).toMatchObject({ isInCombat: true, unitsCount: 2 });
 
-    // ③ v3ActiveCombat 填充正确（含 units 完整字典）
-    expect(store.v3ActiveCombat).not.toBeNull();
-    expect(store.v3ActiveCombat?.units['甲']).toMatchObject({ id: '甲', side: 'player' });
-    expect(store.v3ActiveCombat?.units['乙']).toMatchObject({ id: '乙', side: 'enemy' });
-    expect(Object.keys(store.v3ActiveCombat?.units ?? {})).toHaveLength(2);
+    // ③ activeCombat 填充正确（含 units 完整字典）
+    expect(store.activeCombat).not.toBeNull();
+    expect(store.activeCombat?.units['甲']).toMatchObject({ id: '甲', side: 'player' });
+    expect(store.activeCombat?.units['乙']).toMatchObject({ id: '乙', side: 'enemy' });
+    expect(Object.keys(store.activeCombat?.units ?? {})).toHaveLength(2);
 
     // ④ 战斗正常走完（非熔断 abandon）→ 终局事件到达 store。M1 内核 settle 只产
     //    CombatEnded + NarrativeCue（**不产 SettlementCommitted**，projection-ui 注释
-    //    明说那要 M2 补）→ store 的 v3_combat_ended 分支把 phase 置 Terminal；面板最终
-    //    关闭由 game-pipeline.handleCombatTriggerV3 终局后的 exitCombat() 兜底（这里模拟）
+    //    明说那要 M2 补）→ store 的 combat_ended 分支把 phase 置 Terminal；面板最终
+    //    关闭由 game-pipeline.prepareCombat 终局后的 exitCombat() 兜底（这里模拟）
     expect(result.outcome).toBe('ally_win');
-    expect(seen.some((e) => e.type === 'v3_combat_ended')).toBe(true);
-    expect(store.v3ActiveCombat?.phase).toBe('Terminal');
+    expect(seen.some((e) => e.type === 'combat_ended')).toBe(true);
+    expect(store.activeCombat?.phase).toBe('Terminal');
     store.exitCombat();
-    expect(store.v3ActiveCombat).toBeNull();
+    expect(store.activeCombat).toBeNull();
     expect(store.isInCombat).toBe(false);
   });
 });
@@ -1654,7 +1642,7 @@ describe('Agent 调试历史', () => {
     });
 
     game.applyCombatEvent({
-      type: 'v3_agent_paused',
+      type: 'agent_paused',
       role: 'combat_enemy',
       message: '结束回合命令必须是本次决策批次的最后一条命令',
       unit: '乙',

@@ -417,20 +417,6 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
-      name: 'get_hp_percent',
-      description: '查询角色的 HP 百分比 (0-100)。',
-      parameters: {
-        type: 'object',
-        properties: {
-          characterId: { type: 'string', description: '角色名（兼容旧 UUID）' },
-        },
-        required: ['characterId'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'get_inventory',
       description:
         '查询角色背包中的所有物品。返回物品名称、数量、类型、品质、效果词条。craft_gen 必须调用此工具获取材料清单，禁止凭空编造材料。',
@@ -468,7 +454,7 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
 
-  // ── Combat V3 工具集（M2 新增，对应 AGENT_TOOL_MAP['combat_v3']）──
+  // ── Combat V3 工具集（M2 新增，对应 AGENT_TOOL_MAP['combat']）──
   //   v3 工具集只有 6 个（§4.4），一次工具调用 = 一个 Command = 一个槽位或一次 pass。
   //   v2 的 19 个 combat 工具（AGENT_TOOL_MAP['combat']）已随 M5 真正退役删除。
   {
@@ -640,7 +626,7 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
   //   v3 工具集 6+4 个（6 个战斗工具 + 4 个只读查询；get_hp_percent 已删除，面板自带 HP%；
   //   get_unit_detail 为 combat session revamp §2.2 新增，五维+技能+装备一把抓）。
   //   v2 的 ['combat'] 已随 M5 真正退役删除。
-  combat_v3: [
+  combat: [
     // 战斗控制（一次工具调用 = 一个 Command）
     'declare_attack',
     'declare_action',
@@ -699,7 +685,7 @@ export function getToolDefinition(functionName: string): ToolDefinition | undefi
  * 回喂给模型。执行器自己再造一种 `return { error }` 的话，同一个分发口里「参数不合法」
  * 就有两种长相，prompt 侧没法统一教模型如何应对。
  *
- * 注意区分：**查询未命中不是失败**。`status_query` 对不存在的角色返回
+ * 注意区分：**查询未命中不是失败**。`get_unit_detail` 对不存在的角色返回
  * `{ found: false, message }` 是这个工具的正常回答，不在上面这条规则内。
  *
  * @param functionName 工具名（如 'roll_d20', 'craft_check'）
@@ -971,12 +957,6 @@ export async function executeToolCall(
           })),
       };
     }
-    case 'get_hp_percent': {
-      const char = findCharacter(args.characterId, context);
-      if (!char) throw new Error(`未找到角色: ${args.characterId}`);
-      const percent = char.maxHp > 0 ? Math.round((char.hp / char.maxHp) * 100) : 0;
-      return { characterId: args.characterId, hpPercent: percent, hp: char.hp, maxHp: char.maxHp };
-    }
     case 'get_inventory': {
       const char = findCharacter(args.characterId, context);
       if (!char) throw new Error(`未找到角色: ${args.characterId}`);
@@ -1083,79 +1063,6 @@ temp.<path>    — 会话临时 (不持久化)
       throw new Error(`未知分类 "${query}"，可用: ${Object.keys(SCRIPT_REF).join(', ')}`);
     }
 
-    // ── Async dispatch: call_item_gen (Phase 9 removed — orchest now calls item_gen directly) ──
-    // call_item_gen has been removed from the registry. char_gen no longer dispatches item_gen
-    // asynchronously; the orchestrator calls item_gen directly after char_gen completes.
-
-    // ── Combat Control (M4 任务 5.3) ──
-    // 底层走管道版 (combat-pipeline.ts / combat-actions-pipeline.ts / combat-settlement-pipeline.ts),
-    // 需 PipelineContext (EventBus + combatants + 战斗实例)。
-    // 当前 ToolExecutionContext 只有 { characters, variables, saveId }，缺 bus/combatants/战斗实例,
-    // 暂留占位等 M4 orchestrator 接入 (任务 5.2/5.7) 后再把 PipelineContext 注入进来。
-    case 'combat_start':
-    case 'combat_attack':
-    case 'combat_use_skill':
-    case 'combat_use_item':
-    case 'combat_block':
-    case 'combat_move':
-    case 'combat_focus':
-    case 'combat_flee':
-    case 'combat_end':
-    case 'get_combat_state':
-      throw new Error(
-        `combat 工具「${functionName}」需 M4 orchestrator 接入 PipelineContext (EventBus + combatants + 战斗实例) 后生效，` +
-          `当前 ToolExecutionContext 仅含 { characters, variables, saveId }。详见 docs/reference/combat-agent-api.md §8。`,
-      );
-
-    // ── Status Tools (M4 任务 5.3) ──
-    // status_query: 只读查询角色 buff, ToolExecutionContext 有 characters 即可, 接真函数。
-    // status_apply / status_remove: 底层 status-api 能生成 patches, 但战斗内 buff 需配合
-    //   PipelineContext 协调落库时机 + ADR-21 统一走 state-manager.commitChatState,
-    //   为避免脱离战斗上下文乱上 buff, 暂留占位。
-    case 'status_apply':
-    case 'status_remove':
-      throw new Error(
-        `status 工具「${functionName}」需 M4 orchestrator 接入 PipelineContext 协调落库时机后生效。` +
-          `当前 ToolExecutionContext 缺 bus/combatants。详见 docs/reference/combat-agent-api.md §2.2/§8。`,
-      );
-    case 'status_query': {
-      const target = args.target;
-      const char = findCharacterByName(target, context);
-      if (!char) {
-        return { target, found: false, message: `未找到角色: ${target}` };
-      }
-      const effects = char.statusEffects ?? [];
-      const query = args.buffIdOrName;
-      if (!query) {
-        // 缺省返回全部 StatusEffect
-        return {
-          target,
-          found: true,
-          characterName: char.name,
-          count: effects.length,
-          statusEffects: effects,
-        };
-      }
-      // 完整 buffId（"sourceKey.name"，含点号）→ 精确单匹配；
-      // 裸 name（不含点号）→ 匹配所有同名并聚合层数。
-      const hasDot = query.includes('.');
-      const matched = hasDot
-        ? effects.filter((e) => buffIdMatches(e, query))
-        : effects.filter((e) => e.name === query);
-      if (matched.length === 0) {
-        return { target, has: false, query, stacks: 0 };
-      }
-      // 聚合层数（同名多源取和；精确匹配通常 1 个）
-      const totalStacks = matched.reduce((s, e) => s + (e.stacks ?? 1), 0);
-      return {
-        target,
-        has: true,
-        query,
-        stacks: totalStacks,
-        matched,
-      };
-    }
-
     default:
       // 🔴 2026-08-08 真机：旧版 char_gen 提示词把 `call_item_gen` 列为可用工具，
       // 但白名单（AGENT_TOOL_MAP）没有它 —— 模型一调就报「未知工具」，随即放弃
@@ -1183,16 +1090,6 @@ function findCharacter(key: string, ctx: ToolExecutionContext): CharacterState |
  */
 function findCharacterByName(name: string, ctx: ToolExecutionContext): CharacterState | undefined {
   return ctx.characters.find((c) => c.name === name);
-}
-
-/**
- * buffId 精确匹配：buff 的完整 id 形如 "sourceKey.name"（见 buff-registry.buffIdOf）。
- * StatusEffect 上没有单独的 buffId 字段，这里用 sourceKey + name 组装比对。
- * query 既可能是完整 buffId（"剑.流血"）也可能是裸 name，裸 name 由调用方走 name 相等分支。
- */
-function buffIdMatches(effect: { name: string; sourceKey?: string }, query: string): boolean {
-  const fullId = effect.sourceKey ? `${effect.sourceKey}.${effect.name}` : effect.name;
-  return fullId === query || effect.name === query;
 }
 
 /**

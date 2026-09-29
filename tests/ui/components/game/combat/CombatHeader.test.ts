@@ -18,7 +18,7 @@ import CombatHeader from '../../../../../src/ui/components/game/combat/CombatHea
 
 beforeEach(() => {
   mockGame = reactive({
-    v3ActiveCombat: {
+    activeCombat: {
       round: 2,
       initiativeOrder: ['莱恩', '灰刃', '紫岚'],
       units: {

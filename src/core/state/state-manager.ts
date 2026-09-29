@@ -1068,7 +1068,7 @@ export class StateManager {
     }
 
     // ===== 经验系统改造 v1：totalExp / ascension 驱动的主角推进（升级循环 + 登神飞升）=====
-    // 战斗（combat_v3）与制作（craft_gen）的经验都经 update_character delta 累加 totalExp；
+    // 战斗（combat）与制作（craft_gen）的经验都经 update_character delta 累加 totalExp；
     // 登神物（ascension 字段）由 AI 写入。这两条变化一落地，升级/登神就由 Code 统一接管。
     // 放在旧自动加点块之外、且在 value 落地之后 —— resolveLevelUps 读的是「落地后」的新状态。
     // 🔴 keys 是上面 `if (patch.value ...)` 块内的局部变量，这里在块外要用得重取一份。

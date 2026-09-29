@@ -546,8 +546,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   │                            占位符插入改用**模板 ref**，不再全局 querySelectorAll
 │   │   │   ├── PresetManager.vue     ← 预设子系统 + 两个弹窗（story）；单根，弹窗在根卡内层
 │   │   │   ├── agent-list.ts         ← 13 个 Agent 的展示元数据 + getDefaultTemplateForAgent
-│   │   │   │                            （combat_v3 主持人 + combat_enemy 敌方决策均为战斗侧链；
-│   │   │   │                              设置页 combat_v3 卡含默认关闭的双角色会话开关）
+│   │   │   │                            （combat 主持人 + combat_enemy 敌方决策均为战斗侧链；
+│   │   │   │                              设置页 combat 卡含默认关闭的双角色会话开关）
 │   │   │   ├── placeholder-catalog.ts← 23 项占位符 + 按 Agent 过滤（DAG 偏序 + 侧链归属）
 │   │   │   ├── agent-defaults.ts     ← buildAgentDefaultEntry（纯装配；patch 副作用留调用方）
 │   │   │   └── agent-chrome.css      ← ★跨组件共用：.prompt-editor / .template-preview-panel
@@ -609,7 +609,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │       │                           🔴 **渲染位置 ≠ 存储位置**（D52）：渲染的是 `agents` 袋子里的
 │   │       │                              **同一份存储**，不复制到 UiSettings
 │   │       │                           🔴 它**不进 agent-list.ts 的 AGENT_LIST**（D53）——同一份配置
-│   │       │                              开两个入口，用户就要猜哪个是权威的（先例：combat_v3）
+│   │       │                              开两个入口，用户就要猜哪个是权威的（先例：combat）
 │   │       │                           🔴 [图像 v2 / C3·C6] 给 AgentConfigPanel 传 **`hide-prompt`**
 │   │       │                              （该 prop 为此新增），自己画一个**按方言**的编辑器：
 │   │       │                              systemPrompt 是方言属性，存 `imageDialectOverrides[id]`，
@@ -873,7 +873,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── DebugPanel.vue           ← 调试面板（`activeModal === 'debug'` 且 `developerMode`）：
 │   │   │                               Agent 请求/响应 + EJS 后端状态 + 引擎设置 + **随机事件区块**
 │   │   │                               战斗从就绪页延后启动时由 `game-pipeline` 建独立 Debug Turn；
-│   │   │                               `combat_v3` / `combat_enemy` 共账本分条记录，禁止回落 `detached`
+│   │   │                               `combat` / `combat_enemy` 共账本分条记录，禁止回落 `detached`
 │   │   │                               Coordinator 批次校验暂停要回写对应调用 `error`
 │   │   ├── random-event-debug.ts    ← [随机事件 v1] 上者随机事件区块的展示层判定（纯函数，不 mount 可测）
 │   │   │                               🔴 **不装任何判据的第二实现**：硬门槛走 `evaluateEventCondition`、

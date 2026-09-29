@@ -7,7 +7,6 @@ import type {
   MemoryRecord,
   PlotEvent,
   PlotOutline,
-  CombatState,
   CombatSummaryResult,
   SaveProfile,
   AgentActivityRun,
@@ -16,7 +15,7 @@ import type {
   DebugTurnRecord,
 } from '@engine/types/types';
 export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types/types';
-import type { CombatView, CombatCommand } from '@engine/combat-v3';
+import type { CombatView, CombatCommand } from '@engine/combat';
 import {
   getSave,
   getSaves,
@@ -46,7 +45,7 @@ import { invalidatePromptSession } from '@engine/prompts/prompt-session-assemble
 import { allocateAttributePoint } from '@engine/character/attribute-allocation';
 import type { AllocatableAttr } from '@engine/character/attribute-allocation';
 import { detach } from './db-write';
-import type { CombatEvent } from '@engine/combat/combat-v2-types';
+import type { CombatEvent } from '@engine/combat/ui-events';
 import { agentActivityLabel, presentToolActivity } from '../lib/agent-activity';
 // 🆕 重铸（2026-08-24）：单条目重铸的类型 + 注入缝（实现由 GamePage 挂 GamePipeline.rewriteLoadoutItem）
 import type { RewriteTarget } from '@engine/agents/item-gen-chain';
@@ -81,7 +80,7 @@ export interface CombatLogEntry {
   round?: number;
   /** narrative 文本 */
   text?: string;
-  /** action: 工具返回结果（CombatActionResult 或其他动作工具） */
+  /** action: 工具返回结果（内核动作投影） */
   result?: Record<string, any>;
   toolName?: string;
 }
@@ -115,11 +114,8 @@ export const useGameStore = defineStore('game', () => {
   const plotOutline = ref<PlotOutline | null>(null);
 
   // === 战斗 & 制作 ===
-  const activeCombat = ref<CombatState | null>(null);
-
-  // 🆕 v3：独立 v3ActiveCombat ref（CombatView 形状，与 v2 activeCombat 并存）。
-  //   v2 事件写 activeCombat，v3 事件写 v3ActiveCombat；isInCombat 同时看两者。
-  const v3ActiveCombat = ref<CombatView | null>(null);
+  /** Current combat view projected from kernel events. */
+  const activeCombat = ref<CombatView | null>(null);
 
   // 🆕 F2（2026-08-10）：就绪态 —— combat_trigger 检出后、玩家点「开始战斗」前的
   //   面板数据（marker 快照）。非 null = 就绪面板显示中（覆盖层锁 UI，战斗还没开）。
@@ -135,7 +131,7 @@ export const useGameStore = defineStore('game', () => {
 
   // 🆕 结算确认态（2026-08-13 需求 D）：战斗终局落库后、摘要注入正文前的确认面板。
   //   非 null = 结算确认面板显示中（数值卡 + 可编辑摘要 textarea）。isInCombat 认它
-  //   —— v3_settlement 已把 phase 置 SettlementCommitted（isInCombat 第三判据本会翻
+  //   —— settlement 已把 phase 置 SettlementCommitted（isInCombat 第三判据本会翻
   //   false 关面板），确认面板需要面板继续开着，所以它必须进 isInCombat。
   const combatSummaryReview = ref<{
     outcome: 'ally_win' | 'enemy_win' | 'draw' | 'fled';
@@ -152,8 +148,7 @@ export const useGameStore = defineStore('game', () => {
     () =>
       combatReady.value !== null ||
       combatSummaryReview.value !== null ||
-      (activeCombat.value !== null && activeCombat.value.status !== 'ended') ||
-      (v3ActiveCombat.value !== null && v3ActiveCombat.value.phase !== 'SettlementCommitted'),
+      (activeCombat.value !== null && activeCombat.value.phase !== 'SettlementCommitted'),
   );
 
   // === M5 战斗面板状态 ===
@@ -191,13 +186,13 @@ export const useGameStore = defineStore('game', () => {
     start?: () => Promise<void>;
   } | null>(null);
 
-  /** 战斗开始：清空面板状态（activeCombat 由 combat_started 事件填；v3 清 v3 ref；F2 清就绪态） */
+  /** 战斗开始：清空面板状态（战斗视图由 combat_started 事件填入，清空就绪态） */
   function enterCombat() {
     combatLog.value = [];
     combatAwaitingInput.value = null;
     combatAgentPause.value = null;
     combatCurrentUnitId.value = null;
-    v3ActiveCombat.value = null;
+    activeCombat.value = null;
     combatReady.value = null;
   }
 
@@ -205,30 +200,11 @@ export const useGameStore = defineStore('game', () => {
   function applyCombatEvent(evt: CombatEvent) {
     const id = crypto.randomUUID();
     switch (evt.type) {
-      case 'combat_started':
-        activeCombat.value = evt.state;
-        break;
-      case 'action_resolved':
-        combatLog.value.push({ id, kind: 'action', result: evt.result, toolName: evt.toolName });
-        break;
-      case 'round_narrative':
-        if (evt.text)
-          combatLog.value.push({ id, kind: 'narrative', text: evt.text, round: evt.round });
-        break;
-      case 'round_started':
-        combatLog.value.push({ id, kind: 'round_divider', round: evt.round });
-        break;
-      case 'awaiting_player_input':
-        combatAwaitingInput.value = { unit: evt.unit, unitId: evt.unitId, round: evt.round };
-        break;
-      case 'turn_started':
-        combatCurrentUnitId.value = evt.unitId;
-        break;
       // ── v3 扩展变体（投影 A 输出，M2）──
       // 🆕 F2：就绪面板事件（combat_trigger 检出后 pipeline 直接构造，先于
-      //   v3_combat_started 到达）——置 combatReady（isInCombat 据此弹就绪面板）。
-      //   战斗还没开，不动 v3ActiveCombat / combatLog。
-      case 'v3_combat_ready':
+      //   combat_started 到达）——置 combatReady（isInCombat 据此弹就绪面板）。
+      //   战斗还没开，不动 activeCombat / combatLog。
+      case 'combat_ready':
         combatReady.value = {
           combatType: evt.combatType,
           environment: evt.environment,
@@ -238,55 +214,55 @@ export const useGameStore = defineStore('game', () => {
           brief: evt.brief,
         };
         break;
-      case 'v3_combat_started':
-        v3ActiveCombat.value = {
+      case 'combat_started':
+        activeCombat.value = {
           revision: 0,
           phase: 'CombatOpen',
           round: evt.round,
           combatId: evt.combatId,
           initiativeOrder: evt.unitNames,
           currentTurnIndex: 0,
-          // T13：载荷里带 units（其他 emit 源的兼容路径）就一并填，不再留空字典
-          units: evt.units ? { ...evt.units } : {},
+          // 单位数据由紧随开局事件的 units_snapshot 填入。
+          units: {},
           resourceSnapshots: { FP: 0 },
         };
         combatLog.value.push({ id, kind: 'round_divider', round: evt.round });
         break;
-      // 🆕 T13（设计 2026-08-09 §3.1）：开局单位字典整体快照 → 填充 v3ActiveCombat.units
-      case 'v3_units_snapshot':
-        if (v3ActiveCombat.value) {
-          v3ActiveCombat.value = { ...v3ActiveCombat.value, units: { ...evt.units } };
+      // 🆕 T13（设计 2026-08-09 §3.1）：开局单位字典整体快照 → 填充 activeCombat.units
+      case 'units_snapshot':
+        if (activeCombat.value) {
+          activeCombat.value = { ...activeCombat.value, units: { ...evt.units } };
         }
         break;
-      case 'v3_round_started':
+      case 'round_started':
         combatLog.value.push({ id, kind: 'round_divider', round: evt.round });
-        if (v3ActiveCombat.value) {
-          v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'RoundOpen', round: evt.round };
+        if (activeCombat.value) {
+          activeCombat.value = { ...activeCombat.value, phase: 'RoundOpen', round: evt.round };
         }
         break;
-      case 'v3_turn_started':
+      case 'turn_started':
         combatCurrentUnitId.value = evt.unitId;
         break;
-      case 'v3_turn_ended':
+      case 'turn_ended':
         if (combatCurrentUnitId.value === evt.unitId) combatCurrentUnitId.value = null;
         break;
-      case 'v3_initiative':
-        if (v3ActiveCombat.value) {
-          v3ActiveCombat.value = { ...v3ActiveCombat.value, initiativeOrder: evt.order };
+      case 'initiative':
+        if (activeCombat.value) {
+          activeCombat.value = { ...activeCombat.value, initiativeOrder: evt.order };
         }
         break;
-      case 'v3_action':
+      case 'action':
         combatLog.value.push({ id, kind: 'action', result: evt.result, toolName: evt.toolName });
         break;
-      case 'v3_narrative':
+      case 'narrative':
         if (evt.text)
           combatLog.value.push({ id, kind: 'narrative', text: evt.text, round: evt.round });
         break;
       // 🆕 2026-08-12（Bug 2 修复）：玩家侧命令被内核 rejection 的友好提示。
       // 典型：攻击槽/动作槽已耗尽仍再点 → SLOT_EXHAUSTED。此前 coordinator 熔断
       // abandon 整场（页面闪退根因）；现在只推一条提示行，随后 coordinator 重新 emit
-      // v3_awaiting_player_input 亮「等待输入」，玩家可换动作或点「结束回合」。
-      case 'v3_rejection_notice':
+      // awaiting_player_input 亮「等待输入」，玩家可换动作或点「结束回合」。
+      case 'rejection_notice':
         combatLog.value.push({
           id,
           kind: 'narrative',
@@ -294,7 +270,7 @@ export const useGameStore = defineStore('game', () => {
           round: undefined,
         });
         break;
-      case 'v3_awaiting_player_input':
+      case 'awaiting_player_input':
         combatAwaitingInput.value = {
           unit: evt.unit,
           unitId: evt.unitId,
@@ -302,7 +278,7 @@ export const useGameStore = defineStore('game', () => {
           requiredInputKind: 'PlayerCommand',
         };
         break;
-      case 'v3_agent_paused':
+      case 'agent_paused':
         combatAgentPause.value = {
           role: evt.role,
           message: evt.message,
@@ -313,17 +289,17 @@ export const useGameStore = defineStore('game', () => {
         recordCombatAgentPauseError(evt.role, evt.message);
         combatAwaitingInput.value = null;
         break;
-      case 'v3_agent_resumed':
+      case 'agent_resumed':
         if (combatAgentPause.value?.role === evt.role) combatAgentPause.value = null;
         break;
-      case 'v3_combat_ended':
-        if (v3ActiveCombat.value) {
-          v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'Terminal' };
+      case 'combat_ended':
+        if (activeCombat.value) {
+          activeCombat.value = { ...activeCombat.value, phase: 'Terminal' };
         }
         break;
-      case 'v3_settlement':
-        if (v3ActiveCombat.value) {
-          v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'SettlementCommitted' };
+      case 'settlement':
+        if (activeCombat.value) {
+          activeCombat.value = { ...activeCombat.value, phase: 'SettlementCommitted' };
         }
         break;
     }
@@ -338,7 +314,7 @@ export const useGameStore = defineStore('game', () => {
   async function submitCombatCommand(partial: Partial<CombatCommand>): Promise<void> {
     const coordinator = combatCoordinator.value;
     if (!coordinator?.submit) return;
-    const rev = v3ActiveCombat.value?.revision ?? 0;
+    const rev = activeCombat.value?.revision ?? 0;
     const cmd = {
       commandId: partial.commandId ?? `ui-${crypto.randomUUID()}`,
       expectedRevision: partial.expectedRevision ?? rev,
@@ -373,7 +349,7 @@ export const useGameStore = defineStore('game', () => {
 
   /** v3：放弃战斗（C4）——句柄 abandon → 丢弃 session → exitCombat */
   function abandonCombat() {
-    v3ActiveCombat.value = null;
+    activeCombat.value = null;
     combatLog.value = [];
     combatAwaitingInput.value = null;
     combatAgentPause.value = null;
@@ -385,14 +361,14 @@ export const useGameStore = defineStore('game', () => {
 
   /** v3：跳过战斗（设计 2026-08-09 §3.5）——abandonCombat 的包装。
    *  战斗被放弃后：session 丢弃、FP 不落库（coordinator abandon 路径）、面板关闭
-   *  （v3ActiveCombat=null → isInCombat=false）。确认弹窗文案由组件负责。 */
+   *  （activeCombat=null → isInCombat=false）。确认弹窗文案由组件负责。 */
   function skipCombat() {
     abandonCombat();
   }
 
   /** 🆕 F2：玩家点「开始战斗」——立即清就绪态（面板从「就绪」切到「开打中」），
-   *  再调 coordinator.start()（pipeline 的 startCombatV3 真开打：enterCombat →
-   *  participants → pre-combat 快照 → runCombatV3，会重新 setCombatCoordinator
+   *  再调 coordinator.start()（pipeline 的 startCombatSession 真开打：enterCombat →
+   *  participants → pre-combat 快照 → runCombat，会重新 setCombatCoordinator
    *  成完整句柄）。start 抛错也不回填就绪态（开打失败走 exitCombat 收面板）。 */
   async function startCombat(): Promise<void> {
     const c = combatCoordinator.value;
@@ -408,7 +384,7 @@ export const useGameStore = defineStore('game', () => {
    *  流程：① 放弃当前战斗（面板关闭、不落库）② 恢复开战前快照（角色/对话/状态/变量
    *  整表覆写回开战前，HP 等天然一致）③ 调 coordinator 句柄的 restart 回调重触发 ——
    *  pipeline 持有 combat marker（本 store 接触不到 pipeline），经它重新走
-   *  handleCombatTriggerV3 重建战斗。确认弹窗文案由组件负责。 */
+   *  prepareCombat 重建战斗。确认弹窗文案由组件负责。 */
   async function restartCombat(): Promise<TimelineRestoreResult> {
     if (!activeSaveId.value) return { status: 'rejected', error: '无活跃存档' };
     const coordinator = combatCoordinator.value;
@@ -478,13 +454,12 @@ export const useGameStore = defineStore('game', () => {
 
   /** 战斗结束：清空面板（activeCombat=null → isInCombat=false） */
   function exitCombat() {
-    activeCombat.value = null;
     combatLog.value = [];
     combatAwaitingInput.value = null;
     combatAgentPause.value = null;
     combatCurrentUnitId.value = null;
     combatCoordinator.value = null;
-    v3ActiveCombat.value = null;
+    activeCombat.value = null;
     combatReady.value = null;
     // 结算确认挂起时被 exitCombat（离开页面 / 停止生成 / 战斗失败路径）——
     // 必须 resolve(null)，否则 pipeline 的 await 永久悬挂。
@@ -710,7 +685,7 @@ export const useGameStore = defineStore('game', () => {
       .reverse()
       .find((candidate) => candidate.status === 'running');
     if (!turn) return;
-    const agentId = role === 'combat_enemy' ? 'combat_enemy' : 'combat_v3';
+    const agentId = role === 'combat_enemy' ? 'combat_enemy' : 'combat';
     const entry = [...turn.entries].reverse().find((candidate) => candidate.agentId === agentId);
     if (!entry) return;
     const coordinatorError = `战斗协调器：${message}`;
@@ -1558,13 +1533,12 @@ export const useGameStore = defineStore('game', () => {
     recentMemories,
     activePlotEvents,
     plotOutline,
-    activeCombat,
     isInCombat,
     combatLog,
     combatAwaitingInput,
     combatAgentPause,
     combatCurrentUnitId,
-    v3ActiveCombat,
+    activeCombat,
     combatReady,
     combatSummaryReview,
     combatCoordinator,

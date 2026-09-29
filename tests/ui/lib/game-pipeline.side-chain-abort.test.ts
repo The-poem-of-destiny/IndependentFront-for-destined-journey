@@ -8,7 +8,7 @@
  * 的先例另起一个文件。
  *
  * ## 修的是什么
- * 侧链（char_gen / item_gen / craft_gen / combat_v3）此前**完全不响应 abort**：
+ * 侧链（char_gen / item_gen / craft_gen / combat）此前**完全不响应 abort**：
  * `getClientFactory` 的包装层把 `signal` 当入参转发，而这四条链的调用方一个都没传，
  * 于是 `run()` 的 `abortController` 只到得了 story（`callAgent` 显式传了）。两层后果：
  *

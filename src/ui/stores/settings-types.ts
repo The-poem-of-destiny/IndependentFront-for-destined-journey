@@ -332,13 +332,4 @@ export type UiSettings = {
    * 由 `workshop-store` 按常量键读写，不进 `getDefaults()` —— 全新用户没有它。
    */
   workshopUidCursor?: number;
-  /**
-   * 战斗引擎分支开关（架构 §14.5）。
-   *
-   * 🔴 同样**无人写入**，且这是刻意的：v2 运行时已在 M5 真正删除，
-   *    `game-pipeline.ts:1329` 的 `?? 'v3'` 兜底就是生产行为，打回 `'v2'` 那条
-   *    分支只会弹一句退役提示。声明成可选是为了让这个读取点有类型可依，
-   *    不是暗示应该给它做个开关。
-   */
-  combatEngineVersion?: 'v2' | 'v3';
 };

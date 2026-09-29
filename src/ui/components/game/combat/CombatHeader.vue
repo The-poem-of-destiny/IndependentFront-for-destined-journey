@@ -5,7 +5,7 @@ import { useGameStore } from '../../../stores/game-store';
 const game = useGameStore();
 
 const initiative = computed(() => {
-  const combat = game.v3ActiveCombat;
+  const combat = game.activeCombat;
   if (!combat) return [];
   return combat.initiativeOrder.map((id) => ({ id, unit: combat.units[id] }));
 });
@@ -20,9 +20,9 @@ const activeUnitId = computed(
     <div class="combat-title">
       <i class="fa-solid fa-hand-fist combat-title-icon" />
       <!-- v3 CombatView 无 combatType / environment 字段（开战 bundle 不投影），
-           类型固定显示「战斗」，回合读 v3ActiveCombat.round -->
+           类型固定显示「战斗」，回合读 activeCombat.round -->
       <span class="combat-type">战斗</span>
-      <span class="combat-round">第 {{ game.v3ActiveCombat?.round ?? 1 }} 回合</span>
+      <span class="combat-round">第 {{ game.activeCombat?.round ?? 1 }} 回合</span>
     </div>
 
     <ol v-if="initiative.length" class="combat-initiative" aria-label="本回合行动顺序">

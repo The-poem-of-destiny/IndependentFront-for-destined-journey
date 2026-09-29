@@ -32,14 +32,14 @@ export interface ModifierBase {
 // ========== 6 大类 modifier 接口（每类进管线位置见架构 §4.1） ==========
 
 /** 固伤 —— 进管线 Step 6a（+ 额外固定伤害） */
-export interface FixedDamageModifier extends ModifierBase {
+interface FixedDamageModifier extends ModifierBase {
   category: '固伤';
   amount: number;
   damageType?: DamageType;
 }
 
 /** 百分比 —— 进管线 Step 6（× 乘算系数；增伤 +0.2 / 减伤 -0.2） */
-export interface PercentageModifier extends ModifierBase {
+interface PercentageModifier extends ModifierBase {
   category: '百分比';
   /** 增益正值（+0.2=+20%）、减益负值 */
   coefficient: number;
@@ -57,7 +57,7 @@ export interface ResourceModifier extends ModifierBase {
 /** 检定 —— 命中/闪避/先攻/抵抗/属性/生产修正（五维只能走这类，#265160 铁律）。
  *  🆕 checkType='生产'（2026-08-01 制造反向链路 S2）：由物品/技能声明「生产检定修正」，
  *    进制造链路的 fixedBonus（世界书《生产制作协议》检定加值: 属性+技能+道具+身份）。
- *    ⚠️ 只进制造，不编译进战斗——combat-v3/automata/compile.ts 对 checkType='生产' 返回 null */
+ *    ⚠️ 只进制造，不编译进战斗——combat/automata/compile.ts 对 checkType='生产' 返回 null */
 export interface CheckModifier extends ModifierBase {
   category: '检定';
   checkType: '命中' | '闪避' | '先攻' | '抵抗' | '属性' | '生产';

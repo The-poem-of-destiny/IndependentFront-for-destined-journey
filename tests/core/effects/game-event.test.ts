@@ -7,7 +7,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   EventBus,
   createGameEvent,
-  createCombatEvent,
   createCraftEvent,
   createDiceEvent,
   createStatusEffectEvent,
@@ -18,22 +17,9 @@ import {
   destroyEventBus,
   destroyAllEventBuses,
 } from '../../../src/core/effects/game-event';
-import type {
-  CombatActionRequest,
-  CraftActionRequest,
-  DiceRollPayload,
-} from '../../../src/core/types/types';
+import type { CraftActionRequest, DiceRollPayload } from '../../../src/core/types/types';
 
 // ========== Helpers ==========
-
-function makeCombatAction(overrides: Partial<CombatActionRequest> = {}): CombatActionRequest {
-  return {
-    attackerId: 'char_1',
-    defenderId: 'char_2',
-    action: 'attack',
-    ...overrides,
-  };
-}
 
 function makeCraftRequest(overrides: Partial<CraftActionRequest> = {}): CraftActionRequest {
   return {
@@ -400,17 +386,6 @@ describe('事件工厂', () => {
     expect(event.source).toBe('system');
   });
 
-  it('createCombatEvent 应包含 CombatActionRequest 数据', () => {
-    const action = makeCombatAction({ action: 'defend', skillId: 'shield_block' });
-    const event = createCombatEvent(action, 'agent_story');
-
-    expect(event.type).toBe('combat_action');
-    expect(event.source).toBe('agent_story');
-    expect(event.data.action).toEqual(action);
-    expect(event.data.action.action).toBe('defend');
-    expect(event.data.action.skillId).toBe('shield_block');
-  });
-
   it('createCraftEvent 应包含 CraftActionRequest 数据', () => {
     const request = makeCraftRequest({ recipeId: 'potion_001', toolBonus: 3 });
     const event = createCraftEvent(request);
@@ -505,14 +480,13 @@ describe('事件工厂', () => {
   it('不同类型工厂创建的事件 ID 也应唯一', () => {
     const ids = new Set<string>();
     ids.add(createGameEvent('combat_action', {}).id);
-    ids.add(createCombatEvent(makeCombatAction()).id);
     ids.add(createCraftEvent(makeCraftRequest()).id);
     ids.add(createDiceEvent(makeDicePayload()).id);
     ids.add(createStatusEffectEvent('c1', 'add', 'poison').id);
     ids.add(createLocationEvent('c2', 'A', 'B').id);
     ids.add(createPlotTriggerEvent('p1', 'activate').id);
     // 应有 7 个不重复 ID
-    expect(ids.size).toBe(7);
+    expect(ids.size).toBe(6);
   });
 });
 

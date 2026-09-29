@@ -429,7 +429,7 @@ describe('weatherZoneOfTile —— 落位 → 气候区（weatherStamp.zoneId �
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 扫本模块源码文本（先例 `combat-v3/no-nondeterminism.test.ts`：不用 node:fs，仓库
+ * 扫本模块源码文本（先例 `combat/no-nondeterminism.test.ts`：不用 node:fs，仓库
  * `types: []` 没装 @types/node，`src/**` 下 import 'fs' 会让裸 tsc 报 TS2307）。
  */
 const SELF_SOURCE: Record<string, string> = import.meta.glob('@engine/map/map-weather.ts', {

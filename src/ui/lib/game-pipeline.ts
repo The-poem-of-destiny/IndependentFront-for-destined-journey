@@ -98,7 +98,7 @@ import type { useSettingsStore } from '../stores/settings-store';
 import { useAudioStore } from '../stores/audio-store';
 import { useWorldBookStore } from '../stores/worldbook-store';
 import { useUIStore } from '../stores/ui-store';
-import type { CombatCommand } from '@engine/combat-v3';
+import type { CombatCommand } from '@engine/combat';
 import { rollDice } from '@engine/utils/dice';
 import { getAgentSettings, hasExplicitAgentModel } from '../stores/agent-settings';
 import type { EmbeddingRequestTrace } from '@engine/memory/memory-store';
@@ -158,7 +158,7 @@ const SIDE_CHAIN_AGENT_IDS = new Set([
   'char_gen',
   'item_gen',
   'image_prompt',
-  'combat_v3',
+  'combat',
   'combat_enemy',
 ]);
 
@@ -378,7 +378,7 @@ export class GamePipeline {
   /**
    * T16（设计 2026-08-09 §3.5）：最近一次 combat_trigger marker 的存档副本。
    *
-   * coordinator 句柄的 `restart` 回调（重开战斗）拿它重新走 handleCombatTriggerV3
+   * coordinator 句柄的 `restart` 回调（重开战斗）拿它重新走 handleCombatTrigger
    * —— store 层接触不到 pipeline，重触发必须由本实例完成（它持有 marker 与全部
    * 引擎依赖）。整场战斗生命周期内有效；下次 combat_trigger 覆盖。
    */
@@ -386,7 +386,7 @@ export class GamePipeline {
   /**
    * 最近一场**已结算**战斗（2026-08-13 真机 debug：dispatcher 战后轮重触发战斗）。
    *
-   * 战斗终局落库时记录（startCombatV3），`buildContext` 供给 `ctx.recentCombat` →
+   * 战斗终局落库时记录（startCombatSession），`buildContext` 供给 `ctx.recentCombat` →
    * `{{RECENT_COMBAT}}` 渲染。内存级（与 `_lastCombatMarker` 同口径，不持久化）：
    * 战斗后的紧接着的下一轮是误触发高发窗口，覆盖它就够；跨会话场景里已有角色表
    * 自带 hp=0/死亡状态可判。放弃的战斗不记录（没发生过）。
@@ -900,9 +900,9 @@ export class GamePipeline {
       'image_prompt',
       // 侧链: 战斗决策（combat-v3 Coordinator 在战斗会话中按 RequiredInput.PlayerCommand
       // 唤起，不走主 DAG）。systemPrompt/模型/温度/世界书照旧从这里装配 —— coordinator
-      // 按 agentId === 'combat_v3' 从 ctx.configs 读（见 combat-v3/coordinator.ts 的
+      // 按 agentId === 'combat' 从 ctx.configs 读（见 combat/coordinator.ts 的
       // combatSystemPrompt），设置页 Agent 子导航可编辑。
-      'combat_v3',
+      'combat',
       'combat_enemy',
     ];
 
@@ -917,7 +917,7 @@ export class GamePipeline {
     //     · 显式绑定 + 池里没有     → **fail-closed**：
     //         主 DAG agent（story/dispatcher/vars_update 等）= 抛 EndpointBindingError，
     //         run() 在 dispatch 之前停轮（绝不拿 apiPool[0] 顶替用户显式选过的 provider）；
-    //         侧链 agent（craft/char/item/image_prompt/combat_v3）= warn + 不装配端点，
+    //         侧链 agent（craft/char/item/image_prompt/combat）= warn + 不装配端点，
     //         真被调用时由 getEndpointForAgent 再判并按 optional 策略跳过。
     //   · 空池 + 未设置             → 与旧行为一致：endpoint undefined →
     //       apiEndpointId='' → 编排器按 `Endpoint "" not found` 淡失败（不抛新错）。
@@ -1143,7 +1143,7 @@ export class GamePipeline {
       //    ① 候选快照（纯函数产出，只过滤不写库）
       //    ② 总开关（裁定 §13-4；关掉 = 注入空串）
       //    ③ 战斗会话活跃位（裁定 §13-2；战斗期间全面静默，战后下一回合恢复）——
-      //      取 `isInCombat`（就绪/结算确认/v2/v3 四判据同源），**不是** `recentCombat`：
+      //      取 `isInCombat`（就绪/结算确认/内核视图三判据同源），**不是** `recentCombat`：
       //      后者是战后回执，拿它当活跃位会让静默恰好落在该恢复注入的那几轮。
       //    漏供任一格的症状都不是报错，是那个块静默消失或永远静默（blurByDefault 的教训），
       //    故 placeholder-registry.random-events.test.ts 有一条源码断言盯着这三行。
@@ -2433,34 +2433,6 @@ export class GamePipeline {
     };
   }
 
-  /** 处理战斗触发 — 唤起 combo v3 Coordinator（v2 分支 M5 已退役 → 优雅提示） */
-  private async handleCombatTrigger(
-    marker: CombatTriggerMarker,
-    storyOutput: string,
-  ): Promise<CombatSummaryResult | null> {
-    // feature flag（架构 §十四 14.5）：分支点唯一。v3 走 coordinator；打回 'v2' 走优雅退役提示。
-    const engineVersion = this.settings?.settings?.combatEngineVersion ?? 'v3';
-    if (engineVersion === 'v3') {
-      return this.handleCombatTriggerV3(marker, storyOutput);
-    }
-    // ⚠️ v2 战斗运行时已于 M5 真正退役删除（combat-runner/pipeline/resolver/settlement）。
-    //    打回 'v2' 不再真实开局战斗——改为优雅退役提示，避免悬空 import 与编译错误。
-    const message =
-      '【系统】v2 战斗引擎已退役删除。若非显式切换，战斗请走 v3（当前 AppSettings.combatEngineVersion）' +
-      `。当前设置被显式打回 'v2'，本场战斗不执行。`;
-    console.warn('[GamePipeline] combat v2 分支已退役，返回优雅提示而非真实开局');
-    this.emitMessage(message, 'assistant');
-    return {
-      narrativeSummary: message,
-      patches: [],
-      totalExp: 0,
-      totalFp: 0,
-      loot: [],
-      rounds: 1,
-      outcome: 'draw',
-    };
-  }
-
   /**
    * T2（2026-08-10）：战斗 Agent 模板系统上下文 —— 战斗 Agent 的模板只挂这三类分区书
    * （世界观设定/种族特性/核心数值），与请求调度器的可见面同口径。过滤在 pipeline 侧
@@ -2472,24 +2444,24 @@ export class GamePipeline {
     'system_core',
   ]);
 
-  /** 🆕 M2 v3 分支：combat_trigger 检出 → **只弹就绪面板**（F2，2026-08-10）。
-   *  就绪内容 = marker 快照（参战方/战斗类型/环境/起因），由 v3_combat_ready 事件
+  /** 🆕 combat_trigger 检出 → **只弹就绪面板**（F2，2026-08-10）。
+   *  就绪内容 = marker 快照（参战方/战斗类型/环境/起因），由 combat_ready 事件
    *  投进 store（combatReady 置位 → isInCombat=true → CombatPanel 显示就绪分支）。
-   *  玩家点「开始战斗」→ store.startCombat → 占位句柄的 start → startCombatV3 真开打。
-   *  返回 null（orchestrator 不消费返回值；就绪期不 enterCombat / 不 runCombatV3）。 */
-  private async handleCombatTriggerV3(
+   *  玩家点「开始战斗」→ store.startCombat → 占位句柄的 start → startCombatSession 真开打。
+   *  返回 null（orchestrator 不消费返回值；就绪期不 enterCombat / 不 runCombat）。 */
+  private async handleCombatTrigger(
     marker: CombatTriggerMarker,
     storyOutput: string,
   ): Promise<CombatSummaryResult | null> {
-    const endpoint = this.getEndpointForAgent('combat_v3');
+    const endpoint = this.getEndpointForAgent('combat');
     if (!endpoint) {
-      console.warn('[GamePipeline] combat_v3 跳过: 未配置 API endpoint');
+      console.warn('[GamePipeline] combat 跳过: 未配置 API endpoint');
       return null;
     }
-    // 存档 marker（startCombatV3 / 重开战斗 restart 回调复用）
+    // 存档 marker（startCombatSession / 重开战斗 restart 回调复用）
     this._lastCombatMarker = marker;
 
-    // marker 快照 → v3_combat_ready（名字名单拆成数组；空名单字段缺席）
+    // marker 快照 → combat_ready（名字名单拆成数组；空名单字段缺席）
     const splitNames = (s: string | undefined): string[] | undefined => {
       if (!s) return undefined;
       const names = s
@@ -2499,7 +2471,7 @@ export class GamePipeline {
       return names.length > 0 ? names : undefined;
     };
     this.game.applyCombatEvent({
-      type: 'v3_combat_ready',
+      type: 'combat_ready',
       combatType: marker.combatType,
       environment: marker.environment,
       allies: splitNames(marker.allies),
@@ -2511,28 +2483,28 @@ export class GamePipeline {
           .join('｜') || undefined,
     });
     // 就绪期占位句柄：只有 start（store.startCombat 点「开始」才触发真开打）。
-    // startCombatV3 里会 setCombatCoordinator 替换成完整句柄（submit/abandon/restart）。
+    // startCombatSession 里会 setCombatCoordinator 替换成完整句柄（submit/abandon/restart）。
     this.game.setCombatCoordinator({
       start: async () => {
-        await this.startCombatV3(storyOutput);
+        await this.startCombatSession(storyOutput);
       },
     });
     return null;
   }
 
-  /** 🆕 M2 v3 分支（F2）：就绪面板点「开始」后的真开打 —— 原 handleCombatTriggerV3
+  /** 🆕 M2 v3 分支（F2）：就绪面板点「开始」后的真开打 —— 原 handleCombatTrigger
    *  主体（enterCombat → participants → pre-combat 快照 → setCombatCoordinator →
-   *  runCombatV3 → 摘要回注）。marker 取自已存档的 _lastCombatMarker。 */
-  private async startCombatV3(storyOutput: string): Promise<CombatSummaryResult | null> {
+   *  runCombat → 摘要回注）。marker 取自已存档的 _lastCombatMarker。 */
+  private async startCombatSession(storyOutput: string): Promise<CombatSummaryResult | null> {
     const marker = this._lastCombatMarker;
     if (!marker) {
-      console.warn('[GamePipeline] startCombatV3 跳过: 无已存档 combat marker');
+      console.warn('[GamePipeline] startCombatSession 跳过: 无已存档 combat marker');
       this.game.exitCombat();
       return null;
     }
-    const endpoint = this.getEndpointForAgent('combat_v3');
+    const endpoint = this.getEndpointForAgent('combat');
     if (!endpoint) {
-      console.warn('[GamePipeline] combat_v3 跳过: 未配置 API endpoint');
+      console.warn('[GamePipeline] combat 跳过: 未配置 API endpoint');
       this.game.exitCombat();
       return null;
     }
@@ -2554,8 +2526,8 @@ export class GamePipeline {
       const context = this.currentContext ?? this.buildContext('');
       this.game.enterCombat();
 
-      const { runCombatV3 } = await import('@engine/combat-v3');
-      const { characterToCombatParticipant } = await import('@engine/combat/combat-v2-types');
+      const { runCombat } = await import('@engine/combat');
+      const { characterToCombatParticipant } = await import('@engine/combat/participant');
 
       // 组装 bundle：参战角色 → CombatParticipant。
       // 🔴 2026-08-08 阵营修复：调度器在 combat_trigger 上声明 allies/enemies 名单，
@@ -2625,9 +2597,9 @@ export class GamePipeline {
         turn: this.game.activeSave?.metadata?.totalTurns ?? 0,
         sourceMessageId,
       });
-      this.game.updateAgentStatus('combat_v3', combatRunId);
+      this.game.updateAgentStatus('combat', combatRunId);
 
-      // T16 §3.5：_lastCombatMarker 已由就绪版 handleCombatTriggerV3 存档
+      // T16 §3.5：_lastCombatMarker 已由就绪版 handleCombatTrigger 存档
       //（重开战斗 restart 回调与二次开始都复用它），这里不再重复赋值。
 
       // T2（2026-08-10）：模板系统上下文 —— 从 marker 组装战斗指令（战斗类型｜环境｜
@@ -2667,12 +2639,12 @@ export class GamePipeline {
         new Promise<'retry' | 'exit'>((resolve) => (pendingAgentResumeResolve = resolve));
 
       // ── 🔴 T16 时序修复（玩家首决策永久挂起的根因）────────────────────────────
-      // 此前 setCombatCoordinator 在 `await runCombatV3(...)` **之后**才执行，而
+      // 此前 setCombatCoordinator 在 `await runCombat(...)` **之后**才执行，而
       // coordinator 的 waitForCommand（玩家单位轮次）依赖 store 经
       // combatCoordinator.submit 喂入 pendingResolve —— 战斗一开局玩家就永远等不到
       // 自己的回合（pendingResolve 有值但没人能 resolve）。必须把句柄挂到 store 的
       // **开战之前**：战斗进行中 submit/abandon 才可用。clearAgentStatus/exitCombat/
-      // 摘要回注仍保留在 runCombatV3 完成之后（闭包引用关系不变）。
+      // 摘要回注仍保留在 runCombat 完成之后（闭包引用关系不变）。
       // F2：就绪期占位句柄（只有 start）在这里被替换成完整句柄 —— submit/abandon/
       // waitForCommand/restart 从此刻起可用；start 不再需要（就绪面板已关）。
       // ────────────────────────────────────────────────────────────────────────────
@@ -2690,7 +2662,7 @@ export class GamePipeline {
         console.warn('[GamePipeline] pre-combat 快照失败（重开战斗不可用，不阻塞开战）:', err);
       }
 
-      // 暴露 coordinator 句柄给 store（前端提交/放弃/重开）。🔴 必须在 runCombatV3 之前。
+      // 暴露 coordinator 句柄给 store（前端提交/放弃/重开）。🔴 必须在 runCombat 之前。
       this.game.setCombatCoordinator({
         submit: async (cmd: CombatCommand) => {
           if (pendingResolve) {
@@ -2745,12 +2717,12 @@ export class GamePipeline {
         preSnapshotId,
         restart: async () => {
           if (this._lastCombatMarker) {
-            await this.handleCombatTriggerV3(this._lastCombatMarker, '');
+            await this.handleCombatTrigger(this._lastCombatMarker, '');
           }
         },
       });
 
-      const result = await runCombatV3({
+      const result = await runCombat({
         saveId: this.saveId,
         bundle,
         deps: {
@@ -2775,7 +2747,7 @@ export class GamePipeline {
           userInput: context.userInput,
           storyOutput,
           history: context.history,
-          submitCommand: async () => {}, // 等待态由 v3_awaiting_player_input 事件驱动 store
+          submitCommand: async () => {}, // 等待态由 awaiting_player_input 事件驱动 store
           waitForCommand,
           // 🎭 主持人/DM 模式（2026-08-12）：玩家意图文本桥（生产主路径）。
           //   coordinator 玩家分支据此走 routePlayerIntent（主持人解析玩家意图）。
@@ -2796,7 +2768,7 @@ export class GamePipeline {
       combatRunOutcome = result.aborted ? 'cancelled' : 'completed';
       if (result.aborted) combatRunMessage = '战斗已放弃。';
       // 🔴 2026-08-13 真机 debug：战斗终局的 commitChatState 只写 Dexie，而本条链路
-      //（store.startCombat → coordinator.start → startCombatV3）不经过 run() 的
+      //（store.startCombat → coordinator.start → startCombatSession）不经过 run() 的
       // finally —— store 从不回读，HUD 一直是开战前的血量/经验（满血假象）。
       // 终局落库后回读一次（含 COR-02 存档切走守卫）。
       if (this.ownsActiveSave) await this.game.refreshFromDb(this.saveId);
@@ -2831,7 +2803,7 @@ export class GamePipeline {
           this.emitMessage(`【战斗摘要】${finalText}`, 'assistant');
         }
       }
-      this.game.exitCombat(); // 确认收尾后关面板（终局已由 onCombatEvent 置 v3ActiveCombat）
+      this.game.exitCombat(); // 确认收尾后关面板（终局已由 onCombatEvent 置 activeCombat）
       const summary: CombatSummaryResult = {
         narrativeSummary: result.narrativeSummary,
         patches: result.patches,
@@ -2849,13 +2821,13 @@ export class GamePipeline {
         combatRunOutcome = 'cancelled';
         combatRunMessage = '战斗已取消。';
         this.game.exitCombat();
-        console.log('[GamePipeline] combat_v3 已取消（离开游戏页 / 停止生成）');
+        console.log('[GamePipeline] combat 已取消（离开游戏页 / 停止生成）');
         return null;
       }
       combatRunOutcome = 'failed';
       combatRunMessage = err instanceof Error ? err.message : String(err);
       this.game.exitCombat();
-      console.error('[GamePipeline] combat_v3 失败:', err);
+      console.error('[GamePipeline] combat 失败:', err);
       return null;
     } finally {
       if (combatRunId) {

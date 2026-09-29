@@ -12,7 +12,7 @@ const AGENT_ACTIVITY_LABELS: Record<string, string> = {
   char_gen: '塑造新登场角色',
   item_gen: '准备新物品',
   image_prompt: '构思场景画面',
-  combat_v3: '推演战局',
+  combat: '推演战局',
   combat_enemy: '筹划敌方行动',
   plot_outline: '编织剧情大纲',
 };
@@ -33,7 +33,6 @@ const TOOL_ACTIVITY_LABELS: Record<string, string> = {
   roll_attributes: '生成角色属性',
   get_character: '查看角色状态',
   get_unit_detail: '查看参战者状态',
-  get_hp_percent: '查看角色伤势',
   get_inventory: '查看随身物品',
   get_script_reference: '查阅世界规则',
   get_combat_state: '观察当前战局',

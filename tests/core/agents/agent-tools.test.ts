@@ -1,13 +1,7 @@
 /**
  * agent-tools.test.ts — Agent 工具注册表测试
  *
- * M5-PR2 后 v2 combat 工具（combat_start / combat_attack / ... / status_query）及其
- * executeCombatToolCall 独立通道已随 v2 战斗运行时退役删除。本文件只测试**存活**的共享工具基础设施：
- *
- * 覆盖范围:
- *  1. status_query 接真函数（按名寻址 / 缺省返回全部 / 指定 buff 聚合层数）——executeToolCall 内仍保留
- *  2. 复用工具 (roll_d20 / get_hp_percent 等) 仍可正常工作（回归保护）
- *  3. random_name 工具描述的品牌面（D26）——注册表未就绪时必须是**不含作品名**的中性文案
+ * Tests shared Agent tools and current combat tool routing.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -31,7 +25,7 @@ import {
 describe('战斗双角色定案后的工具面', () => {
   it('彻底移除旧 write_summary 工具，终局改走主持人正文调用', () => {
     expect(getToolDefinition('write_summary')).toBeUndefined();
-    expect(getToolsForAgent('combat_v3').map((tool) => tool.function.name)).not.toContain(
+    expect(getToolsForAgent('combat').map((tool) => tool.function.name)).not.toContain(
       'write_summary',
     );
     expect(getToolsForAgent('combat_enemy').map((tool) => tool.function.name)).not.toContain(
@@ -83,142 +77,6 @@ function makeCtx(characters: CharacterState[] = [], saveId = 'save_test'): ToolE
 function itemNames(result: Record<string, unknown>): string[] {
   return (result.items as Array<{ name: string }>).map((item) => item.name);
 }
-
-// ═══════════════════════════════════════════════════════════
-// 5. status_query 接真函数
-// ═══════════════════════════════════════════════════════════
-
-describe('executeToolCall status_query（接真函数）', () => {
-  it('按名寻址：找不到角色返回 found:false', async () => {
-    const ctx = makeCtx([]);
-    const r = await executeToolCall('status_query', { target: '不存在的人' }, ctx);
-    expect(r.found).toBe(false);
-    expect(r.target).toBe('不存在的人');
-  });
-
-  it('缺省 buffIdOrName 返回全部 statusEffects', async () => {
-    const char = makeCharacter({
-      name: '勇者',
-      statusEffects: [
-        {
-          name: '流血',
-          description: 'd',
-          category: '减益',
-          stacks: 2,
-          remainingTime: 3,
-          timeUnit: '回合',
-          source: 's',
-          effects: {},
-          sourceKey: '剑',
-        } as any,
-        {
-          name: '专注',
-          description: 'd',
-          category: '增益',
-          stacks: 1,
-          remainingTime: null,
-          timeUnit: '回合',
-          source: 's',
-          effects: {},
-        } as any,
-      ],
-    });
-    const ctx = makeCtx([char]);
-    const r = await executeToolCall('status_query', { target: '勇者' }, ctx);
-    expect(r.found).toBe(true);
-    expect(r.count).toBe(2);
-    expect(r.statusEffects).toHaveLength(2);
-  });
-
-  it('指定裸 name 聚合同名多源层数', async () => {
-    const char = makeCharacter({
-      name: '战士',
-      statusEffects: [
-        {
-          name: '流血',
-          description: 'd',
-          category: '减益',
-          stacks: 2,
-          remainingTime: 3,
-          timeUnit: '回合',
-          source: 's',
-          effects: {},
-          sourceKey: '剑A',
-        } as any,
-        {
-          name: '流血',
-          description: 'd',
-          category: '减益',
-          stacks: 3,
-          remainingTime: 3,
-          timeUnit: '回合',
-          source: 's',
-          effects: {},
-          sourceKey: '剑B',
-        } as any,
-        {
-          name: '中毒',
-          description: 'd',
-          category: '减益',
-          stacks: 1,
-          remainingTime: 3,
-          timeUnit: '回合',
-          source: 's',
-          effects: {},
-        } as any,
-      ],
-    });
-    const ctx = makeCtx([char]);
-    const r = await executeToolCall('status_query', { target: '战士', buffIdOrName: '流血' }, ctx);
-    expect(r.has).toBe(true);
-    expect(r.stacks).toBe(5); // 2 + 3
-    expect(r.matched).toHaveLength(2);
-  });
-
-  it('指定完整 buffId 精确匹配', async () => {
-    const char = makeCharacter({
-      name: '法师',
-      statusEffects: [
-        {
-          name: '灼烧',
-          description: 'd',
-          category: '减益',
-          stacks: 1,
-          remainingTime: 3,
-          timeUnit: '回合',
-          source: 's',
-          effects: {},
-          sourceKey: '火杖',
-        } as any,
-      ],
-    });
-    const ctx = makeCtx([char]);
-    const r = await executeToolCall(
-      'status_query',
-      { target: '法师', buffIdOrName: '火杖.灼烧' },
-      ctx,
-    );
-    expect(r.has).toBe(true);
-    expect(r.stacks).toBe(1);
-    expect(r.matched).toHaveLength(1);
-  });
-
-  it('指定不存在的 buff 返回 has:false', async () => {
-    const char = makeCharacter({ name: '游侠', statusEffects: [] });
-    const ctx = makeCtx([char]);
-    const r = await executeToolCall('status_query', { target: '游侠', buffIdOrName: '冰冻' }, ctx);
-    expect(r.has).toBe(false);
-    expect(r.stacks).toBe(0);
-  });
-
-  it('角色无 statusEffects 字段时容错返回空', async () => {
-    const char = makeCharacter({ name: '新人', statusEffects: undefined as any });
-    const ctx = makeCtx([char]);
-    const r = await executeToolCall('status_query', { target: '新人' }, ctx);
-    expect(r.found).toBe(true);
-    expect(r.count).toBe(0);
-  });
-});
 
 // ═══════════════════════════════════════════════════════════
 // 6. 复用工具回归保护
@@ -352,20 +210,6 @@ describe('复用工具回归保护', () => {
     );
     expect(r.found).toBe(false);
     expect(r.characterId).toBe('不存在的单位');
-  });
-
-  it('get_hp_percent 按角色名寻址', async () => {
-    const char = makeCharacter({ id: 'uuid_hp', name: '测试员', hp: 30, maxHp: 100 });
-    const ctx = makeCtx([char]);
-    const r = await executeToolCall('get_hp_percent', { characterId: '测试员' }, ctx);
-    expect(r.hpPercent).toBe(30);
-  });
-
-  it('get_hp_percent 兼容旧 UUID 寻址', async () => {
-    const char = makeCharacter({ id: 'char_1', name: '测试员', hp: 30, maxHp: 100 });
-    const ctx = makeCtx([char]);
-    const r = await executeToolCall('get_hp_percent', { characterId: 'char_1' }, ctx);
-    expect(r.hpPercent).toBe(30);
   });
 
   it('get_inventory 接受中文材料类型并按角色名寻址', async () => {
@@ -705,11 +549,6 @@ describe('executeToolCall — 失败形态只有一种', () => {
     await expect(
       executeToolCall('craft_get_production_bonus', { quality: '不存在的品质' }, makeCtx()),
     ).rejects.toThrow(/未知品质.*可用/s);
-  });
-
-  it('status_query 查无此角色**不算失败** —— 那是这个工具的正常回答', async () => {
-    const r = await executeToolCall('status_query', { target: '查无此人' }, makeCtx());
-    expect(r.found).toBe(false);
   });
 });
 

@@ -157,8 +157,8 @@ describe('getPlaceholdersForAgent — 侧链专属', () => {
     expect(k).not.toContain('CRAFT_REQUEST');
   });
 
-  it('combat_v3 拿到战斗链的 COMBAT_BRIEF 与 COMBAT_ROSTER', () => {
-    const k = keysFor('combat_v3');
+  it('combat 拿到战斗链的 COMBAT_BRIEF 与 COMBAT_ROSTER', () => {
+    const k = keysFor('combat');
     expect(k).toContain('COMBAT_BRIEF');
     expect(k).toContain('COMBAT_ROSTER');
     expect(k).not.toContain('CRAFT_REQUEST');

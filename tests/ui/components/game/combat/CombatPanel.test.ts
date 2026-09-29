@@ -6,7 +6,7 @@
  * 1. combatReady 置位时渲染就绪分支（战斗就绪 + 类型/环境 + 我方（player 排头）/
  *    敌方名单 + 起因），**不渲染**开打态视图（CombatActionBar / CombatMessageFlow）。
  * 2. 点「开始战斗」→ game.startCombat 被调（就绪态到开打态的唯一入口）。
- * 3. 开打态（v3ActiveCombat 有值、combatReady null）→ 不渲染就绪分支，渲染战斗视图。
+ * 3. 开打态（activeCombat 有值、combatReady null）→ 不渲染就绪分支，渲染战斗视图。
  * 4. 就绪态「跳过战斗」→ game.skipCombat 确认弹窗路径可用（AppModal 确认后调用）。
  *
  * @vitest-environment jsdom
@@ -40,7 +40,7 @@ beforeEach(() => {
   restartCombat.mockResolvedValue({ status: 'restored', continuation: 'same-save' });
   mockGame = reactive({
     isInCombat: true,
-    // F2 就绪态：战斗还没开（v3ActiveCombat=null），面板数据 = marker 快照
+    // F2 就绪态：战斗还没开（activeCombat=null），面板数据 = marker 快照
     combatReady: {
       combatType: '死斗',
       environment: '竞技场',
@@ -49,7 +49,7 @@ beforeEach(() => {
       bodyText: '决一死战',
     },
     combatSummaryReview: null,
-    v3ActiveCombat: null,
+    activeCombat: null,
     combatLog: [],
     combatAwaitingInput: null,
     combatCurrentUnitId: null,
@@ -66,7 +66,7 @@ beforeEach(() => {
 describe('CombatPanel 重开战斗结果', () => {
   it('完整恢复并重启成功时不显示额外提示', async () => {
     mockGame.combatReady = null;
-    mockGame.v3ActiveCombat = {
+    mockGame.activeCombat = {
       combatId: 'c1',
       revision: 0,
       phase: 'CombatOpen',
@@ -96,7 +96,7 @@ describe('CombatPanel 重开战斗结果', () => {
 
   it('恢复前被拒绝会提示原因且不返回首页', async () => {
     mockGame.combatReady = null;
-    mockGame.v3ActiveCombat = {
+    mockGame.activeCombat = {
       combatId: 'c1',
       revision: 0,
       phase: 'CombatOpen',
@@ -129,7 +129,7 @@ describe('CombatPanel 重开战斗结果', () => {
 
   it('投影重载失败会提示并返回首页', async () => {
     mockGame.combatReady = null;
-    mockGame.v3ActiveCombat = {
+    mockGame.activeCombat = {
       combatId: 'c1',
       revision: 0,
       phase: 'CombatOpen',
@@ -162,7 +162,7 @@ describe('CombatPanel 重开战斗结果', () => {
 
   it('重触发失败 warning 只提示，不返回首页', async () => {
     mockGame.combatReady = null;
-    mockGame.v3ActiveCombat = {
+    mockGame.activeCombat = {
       combatId: 'c1',
       revision: 0,
       phase: 'CombatOpen',
@@ -256,9 +256,9 @@ describe('CombatPanel F2 就绪态', () => {
     expect(skipCombat).toHaveBeenCalledTimes(1);
   });
 
-  it('开打态（combatReady=null + v3ActiveCombat 有值）：不渲染就绪分支，渲染战斗视图', async () => {
+  it('开打态（combatReady=null + activeCombat 有值）：不渲染就绪分支，渲染战斗视图', async () => {
     mockGame.combatReady = null;
-    mockGame.v3ActiveCombat = {
+    mockGame.activeCombat = {
       combatId: 'c1',
       revision: 0,
       phase: 'CombatOpen',
@@ -311,12 +311,12 @@ describe('CombatPanel F2 就绪态', () => {
     expect(wrapper.text()).toContain('100 / 100');
   });
 
-  it('开打态 v3_action 日志（attackerId/targetId 是 UUID）：units 字典经 CombatMessageFlow 透传，卡片标题渲染中文名', async () => {
+  it('开打态 action 日志（attackerId/targetId 是 UUID）：units 字典经 CombatMessageFlow 透传，卡片标题渲染中文名', async () => {
     mockGame.combatReady = null;
-    // 生产形状：单位 id 是 UUID、name 是中文名；v3_action 里塞的是 UUID
+    // 生产形状：单位 id 是 UUID、name 是中文名；action 里塞的是 UUID
     const A = '2011502d-0fb3-4d0e-97d9-cd1e300edd86';
     const B = '7f3c9b21-5a4e-4d8f-9b1a-2c6d8e0f4a53';
-    mockGame.v3ActiveCombat = {
+    mockGame.activeCombat = {
       combatId: 'c1',
       revision: 0,
       phase: 'CombatOpen',
@@ -393,7 +393,7 @@ describe('CombatPanel F2 就绪态', () => {
 
   it('开打态 AI 思考中（非等玩家输入）→ 消息流末尾显示「思考中…」转圈；等玩家输入时不显示', async () => {
     mockGame.combatReady = null;
-    mockGame.v3ActiveCombat = {
+    mockGame.activeCombat = {
       combatId: 'c1',
       revision: 0,
       phase: 'SlotConsume',
@@ -452,7 +452,7 @@ describe('CombatPanel F2 就绪态', () => {
 
   it('终局 phase（Terminal / SettlementCommitted）→ 不显示思考中（战斗已结束）', async () => {
     mockGame.combatReady = null;
-    mockGame.v3ActiveCombat = {
+    mockGame.activeCombat = {
       combatId: 'c1',
       revision: 0,
       phase: 'SettlementCommitted',

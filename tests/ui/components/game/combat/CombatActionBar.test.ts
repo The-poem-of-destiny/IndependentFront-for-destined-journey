@@ -15,11 +15,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { reactive, nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
-import type { CombatView } from '@engine/combat-v3/index';
+import type { CombatView } from '@engine/combat/index';
 import type { CharacterState } from '@engine/types/types';
 
 /** CombatUnitView 不在 combat-v3 公共出口（index.ts 只导 CombatView 等），照
- *  combat-v3-projection.ts 的方式从 CombatView.units 索引推导 */
+ *  combat-projection.ts 的方式从 CombatView.units 索引推导 */
 type CombatUnitView = CombatView['units'][string];
 
 const submitCombatIntent = vi.fn(async (_text: unknown) => {});
@@ -78,7 +78,7 @@ const hero = {
 beforeEach(() => {
   vi.clearAllMocks();
   mockGame = reactive({
-    v3ActiveCombat: combatView(),
+    activeCombat: combatView(),
     combatAwaitingInput: { unit: '艾萨', unitId: '艾萨', round: 1 },
     characters: [hero],
     submitCombatIntent,
@@ -244,7 +244,7 @@ describe('CombatActionBar — 攻击槽耗尽时禁用攻击/技能（Bug 2 UI �
   it('attacksRemaining=0 → 普攻/技能 Tab 禁用 + 行内提示可见', async () => {
     const view = combatView();
     const exhaustedUnit = { ...view.units['艾萨'], attacksRemaining: 0 };
-    mockGame.v3ActiveCombat = reactive({
+    mockGame.activeCombat = reactive({
       ...view,
       units: { ...view.units, 艾萨: exhaustedUnit },
     });

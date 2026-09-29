@@ -250,10 +250,3 @@ export function checkNonLethal(input: NonLethalCheckInput): NonLethalCheckResult
     narrative: `非致死攻击，评级系数≤有效(${input.ratingCoefficient}) → HP锁定为1并施加[昏迷]`,
   };
 }
-
-// ========== 集群意图限制 ==========
-
-/** 集群单位无法触发意图/部位攻击 (世界书 §5 集群修正) */
-export function isClusterIntentionBlocked(isClusterTarget: boolean): boolean {
-  return isClusterTarget;
-}

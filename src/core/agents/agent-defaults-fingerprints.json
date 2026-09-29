@@ -153,7 +153,7 @@
     "historyLayers": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
     "historySlice": "1a1cf797fabe7f95836fabeca626907c77b3e6c9aff7c2290b396a238c69362e"
   },
-  "combat_v3": {
+  "combat": {
     "model": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
     "worldBookEnabled": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa",
     "worldBookIds": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",

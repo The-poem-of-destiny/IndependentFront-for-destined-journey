@@ -30,7 +30,7 @@
  *
  * 用 `node:fs` 而不是 `import.meta.glob('?raw')`（与 `map-literals-gate.test.ts` 相反）：
  * `tests/**` 在 `tsconfig.tools.json` 里带 `types: ["node"]`，读盘是这里的常规写法
- * （先例 `tests/no-world-content.test.ts`），顺带把 `combat-v3/` 等子目录一并递归到。
+ * （先例 `tests/no-world-content.test.ts`），顺带把 `combat/` 等子目录一并递归到。
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
@@ -308,7 +308,7 @@ describe('分层闸门：引擎不依赖前端', () => {
     expect(files).toContain('persistence/database.ts');
     expect(files).toContain('assets/media-hash.ts');
     // 子目录也递归到了
-    expect(files.some((f) => f.startsWith('combat-v3/'))).toBe(true);
+    expect(files.some((f) => f.startsWith('combat/'))).toBe(true);
     expect(files.some((f) => f.endsWith('.test.ts'))).toBe(false);
   });
 

@@ -31,16 +31,16 @@ describe('resolveAgentSelection', () => {
     expect(resolveAgentSelection('image_prompt')).toBeNull();
   });
 
-  it('combat_v3 在清单里 —— 战斗侧链不进主 DAG，但设置页要能选中编辑（接线修复）', () => {
-    expect(AGENT_LIST.some((a) => a.id === 'combat_v3')).toBe(true);
-    expect(resolveAgentSelection('combat_v3')).toBe('combat_v3');
-    const entry = AGENT_LIST.find((a) => a.id === 'combat_v3');
+  it('combat 在清单里 —— 战斗侧链不进主 DAG，但设置页要能选中编辑（接线修复）', () => {
+    expect(AGENT_LIST.some((a) => a.id === 'combat')).toBe(true);
+    expect(resolveAgentSelection('combat')).toBe('combat');
+    const entry = AGENT_LIST.find((a) => a.id === 'combat');
     expect(entry?.name).toBeTruthy();
     expect(entry?.desc).toBeTruthy();
   });
 
   it('双角色使用稳定配置 id 与明确显示名', () => {
-    expect(AGENT_LIST.find((a) => a.id === 'combat_v3')?.name).toBe('战斗主持人');
+    expect(AGENT_LIST.find((a) => a.id === 'combat')?.name).toBe('战斗主持人');
     expect(AGENT_LIST.find((a) => a.id === 'combat_enemy')?.name).toBe('敌方决策');
     expect(resolveAgentSelection('combat_enemy')).toBe('combat_enemy');
   });

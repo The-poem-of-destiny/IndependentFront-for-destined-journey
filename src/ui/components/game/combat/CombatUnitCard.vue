@@ -22,14 +22,14 @@ import { computed, ref } from 'vue';
 import { MORALE_STATE_LABELS, type CharacterState, type StatusEffect } from '@engine/types/types';
 import { useGameStore } from '../../../stores/game-store';
 import { qualityLabelForTier, qualityVar } from '../../../lib/quality-colors';
-import type { V3Unit } from './combat-v3-projection';
+import type { CombatUnit } from './combat-projection';
 import ResourceBar from '../../shared/ResourceBar.vue';
 import BuffChip from '../../shared/BuffChip.vue';
 
 const props = withDefaults(
   defineProps<{
     /** v3 参战单位数据（CombatUnitView，经 CombatView.units 索引推导） */
-    unit: V3Unit;
+    unit: CombatUnit;
     /** 是否为当前行动者（高亮环绕光晕） */
     isCurrentTurn?: boolean;
   }>(),

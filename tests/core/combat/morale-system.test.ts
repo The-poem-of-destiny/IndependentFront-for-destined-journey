@@ -7,18 +7,8 @@ import {
   getMoraleThreshold,
   isAutoTriggerType,
   isCheckTriggerType,
-  getBaseMoraleState,
-  getMoraleSeverity,
   checkMorale,
   pickRandomOutcome,
-  getMoraleOutcomePool,
-  getMoraleModifiers,
-  canExecute,
-  getExecutionModifiers,
-  formatMoralePanel,
-  checkAllMorale,
-  AUTO_TRIGGER_TYPES,
-  CHECK_TRIGGER_TYPES,
 } from '../../../src/core/combat/morale-system';
 
 // ========== 阈值查询 ==========
@@ -77,58 +67,6 @@ describe('isCheckTriggerType', () => {
     expect(isCheckTriggerType('竞技')).toBe(false);
     expect(isCheckTriggerType('压制')).toBe(false);
   });
-});
-
-describe('AUTO_TRIGGER_TYPES', () => {
-  it('有 3 个高阈值类型', () => {
-    expect(AUTO_TRIGGER_TYPES).toHaveLength(3);
-    expect(AUTO_TRIGGER_TYPES).toContain('切磋');
-    expect(AUTO_TRIGGER_TYPES).toContain('竞技');
-    expect(AUTO_TRIGGER_TYPES).toContain('压制');
-  });
-});
-
-describe('CHECK_TRIGGER_TYPES', () => {
-  it('有 3 个低阈值类型', () => {
-    expect(CHECK_TRIGGER_TYPES).toHaveLength(3);
-    expect(CHECK_TRIGGER_TYPES).toContain('死斗');
-    expect(CHECK_TRIGGER_TYPES).toContain('标准');
-    expect(CHECK_TRIGGER_TYPES).toContain('守卫');
-  });
-});
-
-// ========== 基础战意状态 ==========
-
-describe('getBaseMoraleState', () => {
-  it('HP > 阈值 → steady', () => {
-    expect(getBaseMoraleState(0.5, 0.3)).toBe('steady');
-    expect(getBaseMoraleState(0.31, 0.3)).toBe('steady');
-  });
-
-  it('阈值 ≥ HP > 阈值×50% → shaken', () => {
-    expect(getBaseMoraleState(0.3, 0.3)).toBe('shaken');
-    expect(getBaseMoraleState(0.2, 0.3)).toBe('shaken'); // 0.2 > 0.15
-    expect(getBaseMoraleState(0.16, 0.3)).toBe('shaken'); // 0.16 > 0.15
-  });
-
-  it('阈值×50% ≥ HP > 阈值×25% → wavering', () => {
-    expect(getBaseMoraleState(0.15, 0.3)).toBe('wavering'); // 0.15 = 0.3*0.5
-    expect(getBaseMoraleState(0.1, 0.3)).toBe('wavering'); // 0.1 > 0.075
-    expect(getBaseMoraleState(0.08, 0.3)).toBe('wavering'); // 0.08 > 0.075
-  });
-
-  it('HP ≤ 阈值×25% → routing', () => {
-    expect(getBaseMoraleState(0.075, 0.3)).toBe('routing');
-    expect(getBaseMoraleState(0.05, 0.3)).toBe('routing');
-    expect(getBaseMoraleState(0.0, 0.3)).toBe('routing');
-  });
-});
-
-describe('getMoraleSeverity', () => {
-  it('steady → 0', () => expect(getMoraleSeverity('steady')).toBe(0));
-  it('shaken → 1', () => expect(getMoraleSeverity('shaken')).toBe(1));
-  it('wavering → 2', () => expect(getMoraleSeverity('wavering')).toBe(2));
-  it('routing → 3', () => expect(getMoraleSeverity('routing')).toBe(3));
 });
 
 // ========== 完整士气检测 ==========
@@ -257,155 +195,7 @@ describe('pickRandomOutcome', () => {
   });
 
   it('seed 取模循环', () => {
-    const pool = getMoraleOutcomePool('routing');
+    const pool = ['溃逃', '阵线溃散', '被击昏', '被俘虏', '内讧', '投降', '求饶'];
     expect(pickRandomOutcome('routing', pool.length)).toBe(pool[0]);
-  });
-});
-
-describe('getMoraleOutcomePool', () => {
-  it('steady 结果池为空', () => {
-    expect(getMoraleOutcomePool('steady')).toEqual([]);
-  });
-
-  it('shaken 有2个结果', () => {
-    expect(getMoraleOutcomePool('shaken')).toHaveLength(2);
-  });
-
-  it('wavering 有5个结果', () => {
-    expect(getMoraleOutcomePool('wavering')).toHaveLength(5);
-  });
-
-  it('routing 有7个结果', () => {
-    expect(getMoraleOutcomePool('routing')).toHaveLength(7);
-  });
-});
-
-// ========== 战意修正 ==========
-
-describe('getMoraleModifiers', () => {
-  it('steady → 无惩罚', () => {
-    const mod = getMoraleModifiers('steady');
-    expect(mod.attackPenalty).toBe(0);
-    expect(mod.dodgeNegated).toBe(false);
-    expect(mod.canAct).toBe(true);
-    expect(mod.canBeExecuted).toBe(false);
-  });
-
-  it('shaken → 攻击-2', () => {
-    const mod = getMoraleModifiers('shaken');
-    expect(mod.attackPenalty).toBe(-2);
-    expect(mod.dodgeNegated).toBe(false);
-    expect(mod.canAct).toBe(true);
-    expect(mod.canBeExecuted).toBe(false);
-  });
-
-  it('wavering → 攻击-4, 闪避无效, 无法行动, 可被处决', () => {
-    const mod = getMoraleModifiers('wavering');
-    expect(mod.attackPenalty).toBe(-4);
-    expect(mod.dodgeNegated).toBe(true);
-    expect(mod.canAct).toBe(false);
-    expect(mod.canBeExecuted).toBe(true);
-  });
-
-  it('routing → 无法行动, 闪避无效, 可被处决', () => {
-    const mod = getMoraleModifiers('routing');
-    expect(mod.attackPenalty).toBe(-999);
-    expect(mod.dodgeNegated).toBe(true);
-    expect(mod.canAct).toBe(false);
-    expect(mod.canBeExecuted).toBe(true);
-  });
-});
-
-// ========== 处决条件 ==========
-
-describe('canExecute', () => {
-  it('wavering → 可处决', () => {
-    expect(canExecute('wavering')).toBe(true);
-  });
-
-  it('routing → 可处决', () => {
-    expect(canExecute('routing')).toBe(true);
-  });
-
-  it('steady → 不可处决', () => {
-    expect(canExecute('steady')).toBe(false);
-  });
-
-  it('shaken → 不可处决', () => {
-    expect(canExecute('shaken')).toBe(false);
-  });
-});
-
-describe('getExecutionModifiers', () => {
-  it('提供处决修正', () => {
-    const mod = getExecutionModifiers();
-    expect(mod.intentionAutoSuccess).toBe(true);
-    expect(mod.dodgeNegated).toBe(true);
-    expect(mod.minRatingCoefficient).toBe(1.3);
-    expect(mod.narrativeNote).toContain('保底暴击');
-  });
-});
-
-// ========== 面板格式化 ==========
-
-describe('formatMoralePanel', () => {
-  it('HP 高于阈值时生成未触发面板', () => {
-    const panel = formatMoralePanel('哥布林A', 80, 100, 0.3, '标准');
-    expect(panel).toContain('哥布林A');
-    expect(panel).toContain('HP [80/100]');
-    expect(panel).toContain('未触发');
-  });
-
-  it('低阈值 d20 检定面板', () => {
-    const panel = formatMoralePanel('兽人战士', 20, 100, 0.3, '标准', 8);
-    expect(panel).toContain('兽人战士');
-    expect(panel).toContain('需要检定');
-    expect(panel).toContain('d20=8 vs 12');
-    expect(panel).toContain('崩溃');
-  });
-
-  it('高阈值自动触发面板', () => {
-    const panel = formatMoralePanel('竞技场对手', 30, 100, 0.4, '切磋');
-    expect(panel).toContain('无需检定');
-    expect(panel).toContain('自动触发');
-  });
-});
-
-// ========== 批量士气检测 ==========
-
-describe('checkAllMorale', () => {
-  it('对所有非user单位执行检测', () => {
-    const participants = [
-      { id: 'usr', name: '主角', hp: 100, maxHp: 100, isUser: true },
-      { id: 'a1', name: '盟友A', hp: 80, maxHp: 100, isUser: false },
-      { id: 'e1', name: '敌人A', hp: 15, maxHp: 100, isUser: false },
-      { id: 'e2', name: '敌人B', hp: 8, maxHp: 100, isUser: false },
-    ];
-
-    const results = checkAllMorale(participants, '标准', [10, 10, 5, 8]);
-    // 只检测非user: a1(e1,e2)
-    // a1: HP 80% > 30% → 不触发
-    // e1: HP 15% < 30%, d20=5 < 12 → routing ✓
-    // e2: HP 8% < 30%, d20=8 < 12 → routing ✓
-    expect(results).toHaveLength(2);
-    expect(results[0].participantId).toBe('e1');
-    expect(results[0].result.triggered).toBe(true);
-    expect(results[0].result.moraleState).toBe('routing');
-    expect(results[1].participantId).toBe('e2');
-  });
-
-  it('user 不会被检测', () => {
-    const participants = [{ id: 'usr', name: '主角', hp: 10, maxHp: 100, isUser: true }];
-    const results = checkAllMorale(participants, '死斗', [5]);
-    expect(results).toHaveLength(0);
-  });
-
-  it('全部高于阈值 → 无触发', () => {
-    const participants = [
-      { id: 'e1', name: '敌人A', hp: 80, maxHp: 100, isUser: false },
-      { id: 'e2', name: '敌人B', hp: 70, maxHp: 100, isUser: false },
-    ];
-    const results = checkAllMorale(participants, '压制', [10, 10]);
-    expect(results).toHaveLength(0);
   });
 });

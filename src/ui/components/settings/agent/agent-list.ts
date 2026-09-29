@@ -45,7 +45,7 @@ export const AGENT_LIST: readonly AgentListEntry[] = [
     stage: 1,
   },
   {
-    id: 'combat_v3',
+    id: 'combat',
     name: '战斗主持人',
     desc: '理解玩家意图，并负责战斗开场、结算与终局叙事',
     stage: 1,

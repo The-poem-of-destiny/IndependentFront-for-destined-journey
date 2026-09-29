@@ -13,7 +13,7 @@
  * 同一份测试的 setup 成本上。
  *
  * 战斗 v3 已经做过同一刀 —— `projection-agent.ts` / `projection-ui.ts` 在内核之外
- * 把 `DomainEvent[]` 翻成文本与 UI 事件，`combat-v3/index.ts` 明写投影是
+ * 把 `DomainEvent[]` 翻成文本与 UI 事件，`combat/index.ts` 明写投影是
  * 「内部但分离」的。制作照抄这个形状。
  *
  * ## ADR-28 提醒

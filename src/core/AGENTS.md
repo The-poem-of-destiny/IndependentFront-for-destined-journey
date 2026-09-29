@@ -163,11 +163,9 @@ src/core/                    ← 核心引擎
   │      🔴 本文件现存 47 个 U+FFFD 替换字符（16 段 / 6 个 agent），其中一处落在闭合 XML
   │         标签的标签名里（形如 `</□有物品>`，模型看到的是坏标签）。**既有问题，
   │         图像 v1 未修**，已另开任务；改这个文件时别顺手把它们当成自己弄坏的
-  ├── agents/agent-tools.ts                ← [Phase 8.5] Agentic 工具注册表（**27 个 tool 定义**）+ AGENT_TOOL_MAP
-  │      白名单 6 桶（2026-09-14 实测）：craft_gen(9) / char_gen(12) / item_gen(3) /
-  │      vars_update(3) / combat_v3(11) / combat_enemy(9)
-  │      🪦 v2 的 `['combat']` 桶随 M5 删除；`get_hp_percent` 定义还在、但**不在任何桶里**
-  │         （combat_v3 的文本面板自带 HP%）—— 定义数 27 与「AI 真够得到的」26 差的就是它
+  ├── agents/agent-tools.ts                ← [Phase 8.5] Agentic 工具注册表（**现役工具定义**）+ AGENT_TOOL_MAP
+  │      白名单 6 桶：craft_gen(9) / char_gen(12) / item_gen(3) /
+  │      vars_update(3) / combat(11) / combat_enemy(9)
   ├── agents/agent-xml.ts                  ← [Q-05] AI 输出 XML 解析的**唯一**工具面：`tagInner`（取内文，trim）/
   │                                    `tagBlock`（取含标签整块），参数顺序永远 `(source, tag)`
   │      🔴 不再有叫 `extractTag` 的东西 —— 曾有两个同名反义实现（一个取 `match[1]`、一个取
@@ -377,40 +375,38 @@ src/core/                    ← 核心引擎
   │     `tests/layering-gate.test.ts`（源码扫描，专治动态 import / 字符串路径 / import.meta.glob）。
   │     `?raw` 源码读取不算依赖边（供值链路测试要它）。要在引擎里用前端的东西：搬进引擎，或开一条新缝
   │
-  ├── combat/combat-intention.ts / combat-damage.ts / combat-turn.ts
-  │   └── (以上为 v2 战斗纯计算函数，v3 内核仍调用；v2 编排层 combat-runner/combat-pipeline 由 M5 删除)
-  │       🪦 `combat-resolver.ts` 已被 M5 删除（`$combat` API + 8 步伤害管线随 v2 运行时一起退役）。
-  │          存活的纯函数（`characterToCombatParticipant` 等）迁到 `combat-v2-types.ts`，
-  │          全仓零 import，别按图找那个文件。
-  │   └── combat-v3/               ← [战斗 v3] 代码内核主持流程（M0-M5 已合入）
-  │       ├── kernel.ts / reducer.ts / state.ts     ← 状态机 + 原子提交 + 5 不变量
-  │       ├── dice-tape.ts                          ← 分通道骰带（32/10/7/6/5）
-  │       ├── coordinator.ts                        ← 战斗循环 + RequiredInput 路由
-  │       ├── windows.ts / intents.ts               ← 18 窗口求值 + EffectIntent 解释执行
-  │       ├── adjudication.ts / rule-keys.ts        ← BoundedAdjudication + 4 RuleKey
-  │       ├── automata/                             ← DSL parser/interpreter/compile/builtins/reflection
-  │       │                                            + index-active.ts（ActiveEffectIndex：按窗口取订阅者）
-  │       ├── phases/                               ← 7 个 phase handler：round / initiative / unit-turn /
-  │       │                                            action / attack / terminal + outcome.ts（统一返回形状，
-  │       │                                            reducer 据此把 changes 累加进单一 PendingChangeSet，
-  │       │                                            末尾一次 applyPending 原子提交 —— 不变量④）
-  │       ├── player-input.ts                       ← [战斗主持人] 玩家自由文本 → `CombatCommand` 的**确定性**
-  │       │                                            解析（关键词 + 名字匹配，零 I/O 零随机）。四步拼装能直接
-  │       │                                            定 Command 时走结构化路径，只有自由文本过这里
-  │       │      🔴 解析不出意图**明确拒绝**（`ok:false` + 人话 reason），绝不静默 fallback 成 PassAttack
-  │       │         —— 那会吞掉玩家的决定（v2 runner「查询工具静默变 pass」在玩家侧的镜像）
-  │       │      🔴 名字按「文本中首次出现、同位置取长名」匹配（否则「骷髅兵」误配「骷髅兵队长」）
-  │       ├── summon-pool.ts                        ← [M3.5] 预生成召唤物池：**目前是空池 + 幂等查找 + key 归一化**
-  │       │                                            （key = `种族-层级-定位`），未命中走实时 char_gen。
-  │       │                                            池内容要靠离线脚本填，不在 plan 范围内
-  │       ├── types.ts                              ← v3 内部类型（1816 行；DiceChannel/CombatState/EffectIntent/
-  │       │                                            WindowKey/DomainEvent 等全在这里）
-  │       │   测试共享构造位于 tests/core/combat-v3/test-utils.ts（最小 2 单位 bundle + 命令）
-  │       ├── projection-ui.ts / projection-agent.ts← 双投影（UI 事件 + Agent 文本面板）
-  │       │   tests/core/combat-v3/                ← 独立 contract harness；replay.ts / fixtures/ /
-  │       │                                            contract/ 用例与 milestones.ts 均在测试目录
-  │       └── index.ts                              ← 唯一公共出口（openCombat / runCombatV3 / parsePlayerInput
-  │                                                    + 少数公共类型）；reducer/tape/windows/automata 全 internal
+  ├── combat/                             ← 统一战斗模块（现役内核与基础规则）
+  │   ├── combat-intention.ts / combat-damage.ts / combat-turn.ts / morale-system.ts
+  │   │                                    ← 意图、伤害、先攻与士气计算；旧编排与兼容层已删除
+  │   ├── participant.ts / client.ts / ui-events.ts ← 角色转换、Agent 客户端与 UI 事件契约
+  │   ├── kernel.ts / reducer.ts / state.ts     ← 状态机 + 原子提交 + 5 不变量
+  │   ├── dice-tape.ts                          ← 分通道骰带（32/10/7/6/5）
+  │   ├── coordinator.ts                        ← 战斗循环 + RequiredInput 路由
+  │   ├── windows.ts / intents.ts               ← 18 窗口求值 + EffectIntent 解释执行
+  │   ├── adjudication.ts / rule-keys.ts        ← BoundedAdjudication + 4 RuleKey
+  │   ├── automata/                             ← DSL parser/interpreter/compile/builtins/reflection
+  │   │                                            + index-active.ts（ActiveEffectIndex：按窗口取订阅者）
+  │   ├── phases/                               ← 7 个 phase handler：round / initiative / unit-turn /
+  │   │                                            action / attack / terminal + outcome.ts（统一返回形状，
+  │   │                                            reducer 据此把 changes 累加进单一 PendingChangeSet，
+  │   │                                            末尾一次 applyPending 原子提交 —— 不变量④）
+  │   ├── player-input.ts                       ← [战斗主持人] 玩家自由文本 → `CombatCommand` 的**确定性**
+  │   │                                            解析（关键词 + 名字匹配，零 I/O 零随机）。四步拼装能直接
+  │   │                                            定 Command 时走结构化路径，只有自由文本过这里
+  │   │      🔴 解析不出意图**明确拒绝**（`ok:false` + 人话 reason），绝不静默 fallback 成 PassAttack
+  │   │         —— 那会吞掉玩家的决定（v2 runner「查询工具静默变 pass」在玩家侧的镜像）
+  │   │      🔴 名字按「文本中首次出现、同位置取长名」匹配（否则「骷髅兵」误配「骷髅兵队长」）
+  │   ├── summon-pool.ts                        ← [M3.5] 预生成召唤物池：**目前是空池 + 幂等查找 + key 归一化**
+  │   │                                            （key = `种族-层级-定位`），未命中走实时 char_gen。
+  │   │                                            池内容要靠离线脚本填，不在 plan 范围内
+  │   ├── types.ts                              ← v3 内部类型（1816 行；DiceChannel/CombatState/EffectIntent/
+  │   │                                            WindowKey/DomainEvent 等全在这里）
+  │   │   测试共享构造位于 tests/core/combat/test-utils.ts（最小 2 单位 bundle + 命令）
+  │   ├── projection-ui.ts / projection-agent.ts← 双投影（UI 事件 + Agent 文本面板）
+  │   │   tests/core/combat/                ← 独立 contract harness；replay.ts / fixtures/ /
+  │   │                                            contract/ 用例与 milestones.ts 均在测试目录
+  │   └── index.ts                              ← 唯一公共出口（openCombat / runCombat / parsePlayerInput
+  │                                                + 少数公共类型）；reducer/tape/windows/automata 全 internal
   ├── effects/effect-types.ts               ← [战斗 v2 M2] Modifier 6 大类（固伤/百分比/资源/检定/附加效果/特殊机制）+
   │                                    登神 divinity 仲裁。与 StatusEffect（落库实例）/ EffectDefinition
   │                                    （Agent 声明）是三样东西，别混
@@ -421,11 +417,9 @@ src/core/                    ← 核心引擎
   ├── scripting/script-registry.ts            ← [战斗 v2 M1] 声明式脚本注册 facade（物品/技能自带的静态清单，装备即注册
   │                                    整份、卸下即全注销）。与 SubscriptionManager（动态 `$event.on`）各走各的
   │                                    注册表（chainHandlers vs handlers），**不是第三套效果系统**
-  ├── combat/modifier-collector.ts         ← [战斗 v2 M2] `collect_mods`：用 `emitChain` 收攻/守方 modifier
-  │                                    （在场过滤 + priority 排序 + 错误隔离全复用 emitChain 内置能力）
   ├── combat/combat-item-validator.ts      ← [战斗 v2 M4] item_gen 产出的 modifier/buff 契约**纯校验**（空 reasons = 合规）
-  │      🔴 **`V3_WINDOW_KEYS_LIVE`(12) / `V3_WINDOW_KEYS_RESERVED`(6) / `V3_WINDOW_KEYS`(18) 住在这里，
-  │         不在 `combat-v3/`** —— `combat-v3/automata/compile.ts` 反过来 import 它们。
+  │      🔴 **`COMBAT_WINDOW_KEYS_LIVE`(12) / `COMBAT_WINDOW_KEYS_RESERVED`(6) / `COMBAT_WINDOW_KEYS`(18) 住在这里，
+  │         由 `combat/automata/compile.ts` 共享，基础规则与内核同属 combat。
   │         下文「18 窗口只有 12 个真接了求值器」那条讲的就是这两张表；接上求值器 = 把 key 从
   │         RESERVED 挪进 LIVE。判据是「`phases/` 或 `reducer.ts` 里有 `runWindow(...)` 调用点」，
   │         **不是「架构文档列了它」**
@@ -728,7 +722,7 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 
 战斗 v2 (M1-M5) 已验证一套**统一 subscribeChain 链式管道**机制，制作系统直接复用，不发明第二套。完整设计见 `docs/planning/unified-effect-system-framework.md`。
 
-> 📌 **v3 演进**：战斗内已由 v3 内核接管（`combat-v3/`），效果走 **EffectAutomaton DSL**（18 窗口声明 / **12 个已接求值器** + 8 大类 intent + 封闭表达式文法），不再走 emitChain/script-executor。**本框架仍是制作系统与战斗外的效果基座**（ADR-29 继续适用）。
+> 📌 **v3 演进**：战斗内已由 v3 内核接管（`combat/`），效果走 **EffectAutomaton DSL**（18 窗口声明 / **12 个已接求值器** + 8 大类 intent + 封闭表达式文法），不再走 emitChain/script-executor。**本框架仍是制作系统与战斗外的效果基座**（ADR-29 继续适用）。
 
 - **统一机制**：`EventBus.emitChain(type, params, ctx)` 链式参数管道——`(priority, order, 注册序)` 稳定排序、`ctx.combatants`+`subscription.owner` 在场过滤、错误隔离、递归保护
 - **两个注册 facade**（互不干扰）：`ScriptRegistry`（声明式，物品装备/卸下）+ `SubscriptionManager`（动态，AI script 运行时 `$event.on`）
@@ -736,7 +730,7 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 - **核心模式：纯函数兜底 + AI subscribeChain 覆盖**：Code 算基础 → emitChain 传 AI → AI handler 改 outcome → AI 不响应走兜底
 - **✅ P1-11 已接线（Q-07, 2026-08-03）**：战斗外效果系统已由 `effect-wiring.ts` 接进生产——`wireEffectSystem(saveId, characters)` 在存档加载时对已装备物品/技能执行 `executeInit` + `$event.on` 订阅注册，装备/卸下经 `state-manager` 的 equip/unequip handler 调 `wireObject`/`unwireObject`。`getEventBus(saveId)` 按存档实例化，`ScriptRegistry` + `SubscriptionManager` 双 facade 随存档生命周期。
 - **✅ emit 源与效果回收也已接线（Q-07 第二半, 2026-08-03）**：`commitChatState` 每次提交后，把本次 patch 产生的 `GameEvent` 经 `publishToEffectSystem(saveId, events)` 发到存档 EventBus；`SubscriptionManager` 新增 `setEffectSink`，触发脚本产出的 `hpChanges`/`statChanges`/status 意图不再被丢弃（此前 `handleEvent` 执行完脚本直接扔掉，注释写着「由 state-manager 统一 apply」却没有那个调用方——与 Q-02 同形状的缺陷）。收上来的效果经 `convertScriptEffects` 转成 StatePatch，再走一轮 `commitChatState`（ADR-21 唯一写入口，**没有开第二条写路径**）。反应轮有深度上限 `MAX_EVENT_REACTION_DEPTH = 3`，防止「A 触发 B、B 触发 A」打成事件风暴。没接过线的存档零开销（`peekEffectWiring` 不凭空建 EventBus）。
-- **⚠️ 战斗内 18 窗口里只有 12 个真的接了求值器**：`initiative.before` / `initiative.after` / `turn.close` / `morale.before` / `morale.after` / `settlement.before` 在 `combat-v3/phases/` 里没有任何求值器。它们现在编译期就以 `WINDOW_NOT_WIRED` 掉落（`V3_WINDOW_KEYS_RESERVED`），不再静默入索引；接上求值器时把 key 挪进 `V3_WINDOW_KEYS_LIVE` 即可。🔴 **这三张表（LIVE 12 / RESERVED 6 / 合集 18）住在 `combat-item-validator.ts`，不在 `combat-v3/` 下** —— `combat-v3/automata/compile.ts` 反过来 import 它们，按目录名去 v3 里找会扑空。判据是「`phases/` 或 `reducer.ts` 里有 `runWindow(...)` 调用点」，不是「架构文档列了它」。窗口求值统一走 `runWindow(out.events, ...)`——它保证 `EffectRejected` 诊断必进事件流，忽略返回值是可见的 TODO 而非隐藏的丢弃。
+- **⚠️ 战斗内 18 窗口里只有 12 个真的接了求值器**：`initiative.before` / `initiative.after` / `turn.close` / `morale.before` / `morale.after` / `settlement.before` 在 `combat/phases/` 里没有任何求值器。它们现在编译期就以 `WINDOW_NOT_WIRED` 掉落（`COMBAT_WINDOW_KEYS_RESERVED`），不再静默入索引；接上求值器时把 key 挪进 `COMBAT_WINDOW_KEYS_LIVE` 即可。🔴 **这三张表（LIVE 12 / RESERVED 6 / 合集 18）住在 `combat-item-validator.ts`，由同目录的 `automata/compile.ts` 共享**。判据是「`phases/` 或 `reducer.ts` 里有 `runWindow(...)` 调用点」，不是「架构文档列了它」。窗口求值统一走 `runWindow(out.events, ...)`——它保证 `EffectRejected` 诊断必进事件流，忽略返回值是可见的 TODO 而非隐藏的丢弃。
 
 ## v4 三层子系统分流 (ADR-24/25/26)
 
@@ -747,7 +741,7 @@ SubSystem-Craft  制作  → 🚩 延迟型: Story 输出 <craft_request>，Stag
 SubSystem-Combat 战斗  → Stage1后检测 <combat_trigger> → 暂存 → Stage2 request_dispatcher 完成 char_gen 后唤起
                           → 独立战斗窗口: **v3 内核主持流程**（openCombat → kernel/reducer/phases，
                             骰值全出 DiceTape）；共用唯一 Kernel，但模型侧固定为
-                            combat_v3 **主持人** + combat_enemy **敌方决策**两个隔离持久会话，
+                            combat **主持人** + combat_enemy **敌方决策**两个隔离持久会话，
                             动态权限按 phase/actor 收窄，敌方只读面隐藏玩家私有资源与输入
                           → 主持人终局叙事回注正文 + 批量StatePatch
 SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC → char_gen Agent 调 tools → 输出 <char_result> XML
@@ -755,7 +749,7 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC → ch
 ```
 
 🪦 上表 Combat 一行原写作「Code循环 + AI摘要」，那是 v2 combat-runner 的形状。v3 起循环在
-`combat-v3/coordinator.ts`，AI 不再只写摘要而是**主持流程**（ADR-19 的意图声明面从 `$combat.attack()`
+`combat/coordinator.ts`，AI 不再只写摘要而是**主持流程**（ADR-19 的意图声明面从 `$combat.attack()`
 换成了 `declare_attack` 等工具）。战斗内效果不走 emitChain/script-executor，走 **EffectAutomaton DSL**。
 
 ### AI 能碰到的 `$` 面 = 脚本沙盒那一份
@@ -779,7 +773,7 @@ SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC → ch
 `ScriptEffects` 里 push，落库仍由调用方转成 StatePatch 走 `commitChatState`（ADR-21）。
 🔴 `$call` 有递归深度上限 `MAX_CALL_DEPTH`（旧实现靠爆栈兜底）。
 
-**退役的**：`$combat` 随 v2 运行时被 M5 删除（战斗内效果改走 `combat-v3/automata/` 的
+**退役的**：`$combat` 随 v2 运行时被 M5 删除（战斗内效果改走 `combat/automata/` 的
 EffectAutomaton DSL —— 声明式窗口订阅 + 封闭表达式文法，v3 不接受任意 JS）；`$craft` / `$var` /
 `$time` / `$validate` / `$location` / `$affection` / `$effect` / `$chargen` **从来就不在沙盒里** ——
 它们是各模块的**模块级导出对象**（`craft-resolver.ts` / `var-resolver.ts` / `time-system.ts` /

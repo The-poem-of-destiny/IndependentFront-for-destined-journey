@@ -35,7 +35,7 @@ import { createDefaultCharacterState } from '../types/types';
 import type { Modifier } from '../effects/effect-types';
 import type { DivinityLevel } from '../types/types';
 // 🆕 战斗 v3 (S3 2026-08-01): <automaton> 解析 → EffectAutomaton[]（v3 内核 DSL 类型）
-import type { EffectAutomaton } from '../combat-v3/types';
+import type { EffectAutomaton } from '../combat/types';
 import { scanCharDetects } from '../story/marker-protocol';
 import { buildAgentMessagesAsync } from '../prompts/agent-templates';
 import { getTierConfig, calcResources } from '../character/tier-constants';
@@ -573,7 +573,7 @@ export async function runCharGenForCombat(
     base: CharGenRequest;
   },
   deps: CharGenAgentDeps,
-): Promise<import('../combat-v3/types').SummonedUnitDefinition> {
+): Promise<import('../combat/types').SummonedUnitDefinition> {
   // 构造一个 char_gen 可消费的 marker（bodyText 携带召唤引导，attribute 携带指定信息）
   const tierStr = req.prompt.tier !== undefined ? String(req.prompt.tier) : undefined;
   const rawContent = [

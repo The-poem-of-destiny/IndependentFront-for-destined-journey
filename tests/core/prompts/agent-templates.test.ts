@@ -7,7 +7,6 @@ import {
   getAgentTemplate,
   buildAgentMessages,
   buildAgentMessagesAsync,
-  REGISTERED_AGENT_IDS,
   defaultHistoryLayers,
   defaultHistorySlice,
   buildEjsHistoryText,
@@ -101,10 +100,6 @@ function makeCfg(agentId: string, overrides: Partial<AgentConfig> = {}): AgentCo
 // ========== Template Existence ==========
 
 describe('AGENT_TEMPLATES', () => {
-  it('应注册全部 15 个 Agent (含 Phase 10 重命名 + M4 combat + 图像 image_prompt)', () => {
-    expect(REGISTERED_AGENT_IDS).toHaveLength(15);
-  });
-
   // Phase 3-6e 完整模板 Agent
   const fullAgents = [
     'memory_recall',

@@ -8,7 +8,6 @@ import {
   getIntentionConfig,
   resolveIntention,
   checkNonLethal,
-  isClusterIntentionBlocked,
 } from '../../../src/core/combat/combat-intention';
 
 // ========== 关键词解析 ==========
@@ -293,14 +292,5 @@ describe('checkNonLethal', () => {
     expect(result.applied).toBe(false);
     expect(result.adjustedHp).toBe(40);
     expect(result.accidentalKill).toBe(false);
-  });
-});
-
-// ========== 集群意图限制 ==========
-
-describe('isClusterIntentionBlocked', () => {
-  it('集群目标阻止意图/部位攻击', () => {
-    expect(isClusterIntentionBlocked(true)).toBe(true);
-    expect(isClusterIntentionBlocked(false)).toBe(false);
   });
 });

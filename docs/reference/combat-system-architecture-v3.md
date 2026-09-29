@@ -1,34 +1,36 @@
 # 战斗系统架构（Combat System Architecture）v3
 
+> 📌 **2026-09-30 目录与命名收口**：现役战斗统一位于 `src/core/combat/`，测试与夹具位于 `tests/core/combat/`。主持人 Agent 为 `combat`，敌方决策仍为 `combat_enemy`。旧版运行时契约、事件分支与 `combatEngineVersion` 已删除；运行入口为 `runCombat`，前端唯一战斗视图为 `activeCombat`。本文保留 v3 架构名称用于追溯。
+
 > 📌 **文档定位**：战斗 v3 的**正式架构真源**。取代 [`docs/archive/planning/2026-07-30-combat-kernel-v3-proposal.md`](../archive/planning/2026-07-30-combat-kernel-v3-proposal.md) 的骨架级提案，整合压测 + 补丁 RFC（`2026-07-31-combat-v3-real-sample-stress-test-rfc.md`，已移入私有内容仓 `fated_poem_independent_assets/docs/planning/`，公开仓侧不可见）§5/§6 全部补丁、[架构交接地图](../archive/planning/2026-07-31-combat-v3-architecture-handoff.md) §3/§4 边界结论，以及 2026-07-31 主人拍板的 D1–D6 决策。
 >
 > ⚠️ **与 v2 的关系**：本文档**不重复** [`combat-system-architecture.md`](./combat-system-architecture.md)（v2 真源）已定义的纯计算规则。8 步伤害管线、6 大效果类别、意图层级、命中评级、战意阈值、核心数值表**原样保留**，本文只标注它们在 v3 中的调用位置与修正点，具体公式请回查 v2 对应章节。
 >
 > 🔗 **关联文档**：[v2 架构](./combat-system-architecture.md) · [v2 审查报告](../archive/planning/2026-07-30-combat-event-system-review.md) · 压测 RFC + 5 场脑测案例集（`2026-07-31-combat-v3-real-sample-stress-test-rfc.md` / `2026-07-31-combat-v3-stress-test/`，已移入私有内容仓 `fated_poem_independent_assets/docs/planning/`，公开仓侧不可见） · [统一效果系统框架 ADR-29](../planning/unified-effect-system-framework.md) · [effect_script_system.md](./effect_script_system.md)
 
-> 🎭 **历史定位纠偏（2026-08-12）**：本文初稿（2026-07-31）成文时，战斗 Agent（`combat_v3`）
+> 🎭 **历史定位纠偏（2026-08-12）**：本文初稿（2026-07-31）成文时，战斗 Agent（`combat`）
 > 被设计成敌方专属决策器。2026-08-12 曾把它重定位为「战斗主持人 / DM」，并让同一条持久会话
 > 同时服务两侧；这段历史设计已被下方 2026-09-15 定案取代。
 >
 > - **玩家轮次**：玩家提交的是**自由意图文本**（不是拼装好的 Command）→ 主持人读懂意图 → 调
 >   `declare_attack` / `declare_action` / `pass_slot` / `flee` / `end_turn` 替玩家声明动作 → 内核照旧
 >   校验并消费槽位。前端四步拼装那条结构化路径仍直接产 Command，不过主持人（真源：
->   `combat-v3/coordinator.ts` 的 `routeHostCommand` / `routePlayerIntent`，均带 `🎭 2026-08-12` 注释；
->   prompt 真源：`public/data/defaults/agent-config.json` 的 `combat_v3.systemPrompt`）。
+>   `combat/coordinator.ts` 的 `routeHostCommand` / `routePlayerIntent`，均带 `🎭 2026-08-12` 注释；
+>   prompt 真源：`public/data/defaults/agent-config.json` 的 `combat.systemPrompt`）。
 > - **敌方轮次**：扮演当前敌方单位做战术决策——**这只是主持人诸多职责之一**，不再是它的全部定位。
 > - **结算演绎**：内核算完后写结果句。
 >
-> 📌 **2026-09-15 双角色会话定案（现行）**：`combat_v3` 只承担主持人职责（玩家意图解析、开场、
+> 📌 **2026-09-15 双角色会话定案（现行）**：`combat` 只承担主持人职责（玩家意图解析、开场、
 > 已结算事实演绎与终局总结），`combat_enemy` 只为当前获准敌方单位决策。两者共享唯一 Combat Kernel，
 > 但使用隔离的 client / messages / session；动态权限在每次工具调用时按 battle、phase、actor 与
 > command kind 复核，敌方投影不含玩家精确 HP/MP/SP、隐藏技能、背包与玩家私有输入。试运行开关、
-> 单 `combat_v3` 兼容路径和战斗中 `write_summary` 工具均已退役；终局总结由主持人专用调用直接返回正文。
+> 单 `combat` 兼容路径和战斗中 `write_summary` 工具均已退役；终局总结由主持人专用调用直接返回正文。
 > 正式内容包与真实 LLM 战斗仍待验收。
 >
 > 权责边界未变：内核仍主持状态机 / 骰子 / 伤害 / 生死 / 战意 / 终局，主持人负责玩家意图与叙事，
 > 敌方决策只负责当前获准敌方单位的行动。
 >
-> 另有一条**确定性兜底**：自由文本还有一条零 I/O 的规则解析路径 `combat-v3/player-input.ts`
+> 另有一条**确定性兜底**：自由文本还有一条零 I/O 的规则解析路径 `combat/player-input.ts`
 > （关键词 + 名字匹配，解析不出就明确拒绝、绝不静默 fallback 成 PassAttack），详见 §14.1。
 
 ---
@@ -396,7 +398,7 @@ interface CombatProvenance {
 
 ReactionWindow 是内核在结算流程中预留的 **typed seam**。automaton 在窗口内读同一份 immutable snapshot、返回 intent batch，**不能**推进流程或直接写状态（这是与 v2 `emitChain` 依次修改共享参数对象的根本差别）。
 
-> 🔴 **枚举 ≠ 已接线（Q-07, 2026-08-03 修订）**：下表 18 行是**声明面**，但只有标 ✅ 的 12 个在 `combat-v3/phases/` 里有求值器。标 ⛔ 的 6 个从未被求值——以前订阅它们的 automaton 能过全部编译校验、进 `ActiveEffectIndex`、在 tooltip 里显示出来，然后什么都不做，没有日志也没有 `EffectRejected`。现在编译期就以 `WINDOW_NOT_WIRED` 掉落（真源：`combat-item-validator.ts` 的 `V3_WINDOW_KEYS_LIVE` / `V3_WINDOW_KEYS_RESERVED`）。**这改变了老存档的加载行为**：已存档里订阅这 6 个窗口的 automaton 会开始被拒——它们本来也从未生效，区别只是从「静默不跑」变成「明确报错」。接上求值器时把 key 从 RESERVED 挪进 LIVE。
+> 🔴 **枚举 ≠ 已接线（Q-07, 2026-08-03 修订）**：下表 18 行是**声明面**，但只有标 ✅ 的 12 个在 `combat/phases/` 里有求值器。标 ⛔ 的 6 个从未被求值——以前订阅它们的 automaton 能过全部编译校验、进 `ActiveEffectIndex`、在 tooltip 里显示出来，然后什么都不做，没有日志也没有 `EffectRejected`。现在编译期就以 `WINDOW_NOT_WIRED` 掉落（真源：`combat-item-validator.ts` 的 `COMBAT_WINDOW_KEYS_LIVE` / `COMBAT_WINDOW_KEYS_RESERVED`）。**这改变了老存档的加载行为**：已存档里订阅这 6 个窗口的 automaton 会开始被拒——它们本来也从未生效，区别只是从「静默不跑」变成「明确报错」。接上求值器时把 key 从 RESERVED 挪进 LIVE。
 
 | Window                                   | 接线 | 时机                   | 典型用途                                           |
 | ---------------------------------------- | ---- | ---------------------- | -------------------------------------------------- |
@@ -909,7 +911,7 @@ EXP 与战利品同样在 `settlement.before` 窗口内结算，与 FP diff 共�
 
 > 📌 **本小节是 2026-07-31 的来源文档纠错记录**（对象是当时还在的 `combat-panel.ts` 与 v2 的 runner 通道），
 > 原文保留。复核 2026-08-18：这两个 v2 文件都已随 M5 删除，**结论（双投影必须分开）不变**，
-> 只是投影 B 的实现换成了 `combat-v3/projection-agent.ts`（见 13.2 表）。
+> 只是投影 B 的实现换成了 `combat/projection-agent.ts`（见 13.2 表）。
 
 ### 13.2 双投影
 
@@ -930,10 +932,10 @@ EXP 与战利品同样在 `settlement.before` 窗口内结算，与 FP diff 共�
               CombatMessageFlow / CombatActionBar
 ```
 
-| 投影                | 目标                       | 实现                                                                   | 变更策略                                                                                                                                                                                     |
-| ------------------- | -------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **A：UI 投影**      | 6 个 Vue 组件 + game-store | 新建 `combat-v3/projection-ui.ts`：DomainEvent → `CombatEvent`         | **保住现有契约**。已有 CombatEvent 变体原样映射；v3 新增 DomainEvent 映射为**新增** CombatEvent 变体（组件按需消费，不强制全改）                                                             |
-| **B：文本面板投影** | 战斗主持人的 prompt        | 新建 **`combat-v3/projection-agent.ts`**：`CombatView` → Markdown 面板 | ~~复用 `combat-panel.ts` 的格式化函数、只换数据源~~ ⇒ 复核 2026-08-18：`combat-panel.ts` 已随 M5 删除，实际是照同一套 `<action_info>` 风格**重写**（v3 state 形状不同，v2 面板函数喂不进去） |
+| 投影                | 目标                       | 实现                                                                | 变更策略                                                                                                                                                                                     |
+| ------------------- | -------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A：UI 投影**      | 6 个 Vue 组件 + game-store | 新建 `combat/projection-ui.ts`：DomainEvent → `CombatEvent`         | **保住现有契约**。已有 CombatEvent 变体原样映射；v3 新增 DomainEvent 映射为**新增** CombatEvent 变体（组件按需消费，不强制全改）                                                             |
+| **B：文本面板投影** | 战斗主持人的 prompt        | 新建 **`combat/projection-agent.ts`**：`CombatView` → Markdown 面板 | ~~复用 `combat-panel.ts` 的格式化函数、只换数据源~~ ⇒ 复核 2026-08-18：`combat-panel.ts` 已随 M5 删除，实际是照同一套 `<action_info>` 风格**重写**（v3 state 形状不同，v2 面板函数喂不进去） |
 
 ### 13.3 DomainEvent 目录（29 个）
 
@@ -989,14 +991,14 @@ EXP 与战利品同样在 `settlement.before` 窗口内结算，与 FP diff 共�
 
 ### 14.1 目录与模块边界（D1）
 
-所有 v3 新代码放 `src/core/combat-v3/`，作为一个 **deep module**：
+所有 v3 新代码放 `src/core/combat/`，作为一个 **deep module**：
 
 **落地现状（复核 2026-08-18）**——设计期规划的 `kernel/` `dice/` `windows/` `intents/` `rules/` 五个子目录
 最终**落成了同名平铺模块**（单文件足够，没必要为一个文件开一层目录），只有 `automata/` `phases/`
 `contract/` `fixtures/` 真的是目录。实际树：
 
 ```
-src/core/combat-v3/
+src/core/combat/
 ├── index.ts                 ← 唯一公共出口：只暴露 openCombat + 公共类型
 ├── types.ts                 ← 🆕 v3 自有类型：CombatState / CombatCommand / CombatView /
 │                               DomainEvent / EffectIntent / RequiredInput 等全部 v3 契约类型
@@ -1047,15 +1049,15 @@ readonly（session 只能读 snapshot / journal / provenance，dispatch 一律 r
 
 ### 14.3 CombatSessionCoordinator 职责
 
-Coordinator（`combat-v3/coordinator.ts`）是 v2 `combat-runner.ts` 的接替者，也是 v3 与外界的**唯一接线点**：
+Coordinator（`combat/coordinator.ts`）是 v2 `combat-runner.ts` 的接替者，也是 v3 与外界的**唯一接线点**：
 
-| 职责                   | 说明                                                                                                                                                                                           |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **接手入口**           | 从 `game-pipeline.ts` 的 `handleCombatTrigger`（`src/ui/lib/game-pipeline.ts:1045`）接手——这是**唯一调用点接缝**，v2 在此 `await import('@engine/combat-runner')` 调 `runCombat`（:1055-1061） |
-| **组装 bundle**        | 构造 `CombatDefinitionBundle`：参战单位快照 + `compileEffectProgram` 编译结果 + FP 快照 + ruleset 版本                                                                                         |
-| **路由 RequiredInput** | 四（五）个去处，见 14.6 表                                                                                                                                                                     |
-| **终局落库**           | 把 settlement 产出的 DomainEvent 翻译成 `StatePatch[]`，**一次** `commitChatState()`，metadata 带 `combatId + settlementId` 幂等键                                                             |
-| **摘要回注**           | 照旧以【战斗摘要】assistant 消息回注 Story（v2 §十二不变）                                                                                                                                     |
+| 职责                   | 说明                                                                                                                               |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| **接手入口**           | game-pipeline prepares combat; the player starts runCombat through the coordinator handle.                                         |
+| **组装 bundle**        | 构造 `CombatDefinitionBundle`：参战单位快照 + `compileEffectProgram` 编译结果 + FP 快照 + ruleset 版本                             |
+| **路由 RequiredInput** | 四（五）个去处，见 14.6 表                                                                                                         |
+| **终局落库**           | 把 settlement 产出的 DomainEvent 翻译成 `StatePatch[]`，**一次** `commitChatState()`，metadata 带 `combatId + settlementId` 幂等键 |
+| **摘要回注**           | 照旧以【战斗摘要】assistant 消息回注 Story（v2 §十二不变）                                                                         |
 
 ### 14.4 与 orchestrator / StateManager 的对接
 
@@ -1063,9 +1065,9 @@ Coordinator（`combat-v3/coordinator.ts`）是 v2 `combat-runner.ts` 的接替�
 Story 输出 <combat_trigger>
    ↓ marker-protocol 检测 → Stage 1 暂存
    ↓ Stage 2 request_dispatcher 完成 char_gen 后唤起
-game-pipeline.handleCombatTrigger        ← feature flag 分支点（14.5）
-   ├─ v2: ⚰️ 已退役（M5 删除 combat-runner，走到这条只会拿到一句「v2 战斗引擎已退役删除」提示）
-   └─ v3: await import('@engine/combat-v3').openCombat(...) → Coordinator 驱动   ← 现行唯一实路径
+game-pipeline.handleCombatTrigger → combat_ready
+   ↓ player starts combat
+await import('@engine/combat').runCombat(...) → Coordinator
    ↓
 （战斗进行中：CombatState 是内存权威，不写存档 —— ADR-21 的战斗期表现）
    ↓
@@ -1078,25 +1080,9 @@ StateManager.commitChatState({ patches, metadata: { combatId, settlementId } }) 
 
 **ADR-21 的战斗期表述**：战斗内 `CombatState` 是内存权威，`StateManager` 不再充当"战斗中的第二状态权威"；但终局落库仍**必须**且**只能**走 `commitChatState()`，这一点不变。
 
-### 14.5 feature flag
+### 14.5 单一战斗运行入口
 
-v2 **现状为零 feature flag**。v3 新增：
-
-```ts
-// AppSettings（types.ts:616 类型 / :669 默认值）
-combatEngineVersion: 'v2' | 'v3'; // 🔴 现状默认 'v3'（M5 已切）
-```
-
-> 🔧 **现状更正（复核 2026-08-18）**：本节初稿写「默认 `'v2'`，M5 后切 `'v3'`」——那是**设计期的**
-> 过渡口径。M5 收尾后代码默认值已改为 `'v3'`（`src/core/types/types.ts:669` 的
-> `DEFAULT_SETTINGS.combatEngineVersion = 'v3'`），且 `src/ui/lib/game-pipeline.ts:1835` 读设置时
-> 的兜底也是 `?? 'v3'`。**v2 引擎本体已随 M5 退役删除**：走到 v2 分支只会拿到一条
-> 「【系统】v2 战斗引擎已退役删除」的提示（`game-pipeline.ts:1842`），不是可用回滚路径——
-> 这个 flag 现在只剩历史开关的形状，不再是双引擎切换器。
-
-- **分支点唯一**：`game-pipeline.handleCombatTrigger`；
-- **粒度**：按**整场战斗**切换，同场混用被否决（§1.6）；
-- **固定时机**：`openCombat` 时把 `engineVersion` / ruleset / bundleHash / DiceTape owner / settlement owner 一并冻结进 `CombatState.provenance`，战斗中途不可变更。
+`combatEngineVersion` 与 v2 退役提示分支已删除。`handleCombatTrigger` 直接准备就绪面板，玩家开始后由 `runCombat` 驱动当前内核。状态来源、效果 schema、数值规则版本与骰带归属仍由 `CombatState.provenance` 记录。
 
 ### 14.6 game-store 桥与前端改动
 
@@ -1151,41 +1137,41 @@ async function submitCombatCommand(command: CombatCommand): Promise<void>;
 > 📌 **本表是迁移计划的历史记录**（成文 2026-07-31），列的是「当时的 v2 文件打算变成什么」。
 > **M5 收尾后 v2 接线层已真正删除**，复核 2026-08-18 的磁盘现状：`src/core/` 下仅存
 > `combat-damage.ts` / `combat-intention.ts` / `combat-turn.ts` / `combat-item-validator.ts` /
-> `combat-v2-types.ts` 五个（前四个正是本表标 ✅ 保留的纯函数 + 编译期校验器）；标 🔻/🔧 的
+> `participant.ts` 五个（前四个正是本表标 ✅ 保留的纯函数 + 编译期校验器）；标 🔻/🔧 的
 > `combat-runner` / `combat-pipeline` / `combat-resolver` / `combat-panel` / `combat-modifier-inject` /
 > `combat-actions-pipeline` / `combat-morale-pipeline` / `combat-settlement-pipeline` **文件已不存在**，
-> 其职责按本表所述落进了 `combat-v3/`（士气进 `phases/`、settlement 进 `phases/terminal.ts`）。
+> 其职责按本表所述落进了 `combat/`（士气进 `phases/`、settlement 进 `phases/terminal.ts`）。
 > 表格原文保留作决策记录，**不要当成现存文件清单读**。
 
-| v2 文件                         | v3 命运                                                 | 说明                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `combat-runner.ts`              | 🔻 **替换为 `combat-v3/coordinator.ts`**                | 连接 UI / Agent / 内核；移除 `awaitPlayerInput()` 挂起；不再主持流程                                                                                                                                                                                                                                                                                                                                 |
-| `combat-pipeline.ts`            | 🔻 **内核 internal implementation**                     | 不再独立存在                                                                                                                                                                                                                                                                                                                                                                                         |
-| `combat-resolver.ts`            | 🔻 **内核 internal implementation**                     | DAG 编排逻辑进内核微步骤                                                                                                                                                                                                                                                                                                                                                                             |
-| `combat-damage.ts`              | ✅ **保留 + 修正**（纯函数）                            | 8 步管线 / 评级 / 防御计算保留。修正：`performAttackCheck` 改为显式接收两颗骰（§1.4）；最终伤害 clamp ≥ 0（C7）；真伤走 `damageType:'true'` + `bypass` 短路                                                                                                                                                                                                                                          |
-| `combat-intention.ts`           | ✅ **保留 + 修正**（纯函数）                            | 公式保留。修正：消费两颗独立骰（`intentCheck` 通道，C5）+ 补回 `checkNonLethal`（C6）                                                                                                                                                                                                                                                                                                                |
-| `combat-turn.ts`                | ✅ **保留**（纯函数）                                   | 先攻公式 + 行动槽模型保留，**必须由内核实际调用**（v2 未接线）                                                                                                                                                                                                                                                                                                                                       |
-| `combat-panel.ts`               | 🔻 **重写为 `combat-v3/projection-agent.ts`（投影 B）** | ⚠️ **不是** UI adapter（§13.1 修正）。复核 2026-08-18：原计划的「格式化逻辑保留、只换数据源」**没有落成**，`combat-panel.ts` 已随 M5 删除；投影 B 的现行实现是 `combat-v3/projection-agent.ts`——沿用同一套 `<action_info>` 三阶段风格，但从唯一权威 `CombatView` 重新取数（v3 的 state 形状与 v2 不同，`buildOverviewPanel(state)` 喂不进去）。**给 Agent 的文本面板要改，改 `projection-agent.ts`** |
-| `combat-modifier-inject.ts`     | 🔻 **并入 EffectProgram 编译链**                        | 六大类别编译为 push-handler automaton（§7.4 ①）                                                                                                                                                                                                                                                                                                                                                      |
-| `combat-actions-pipeline.ts`    | 🔻 **战术动作 Command 处理**                            | 道具 / 格挡 / 移动 / 专注 / 逃跑 ⇒ `DeclareAction` / `DeclareBlock` / `Flee`                                                                                                                                                                                                                                                                                                                         |
-| `combat-morale-pipeline.ts`     | ✅ **保留 + 修正**（纯函数）                            | 阈值 / 战斗类型规则保留；士气 d20 改从 `statusContest` 通道取（M-4）；加 `morale.forceState` RuleKey                                                                                                                                                                                                                                                                                                 |
-| `combat-settlement-pipeline.ts` | 🔻 **settlement（幂等）**                               | 挂 `combatId + settlementId`；FP diff 终局提交（§十二）                                                                                                                                                                                                                                                                                                                                              |
-| `combat-item-validator.ts`      | 🔻 **演进为编译期校验器**                               | 窗口存在 / RuleKey 白名单 / divinity 不超所有者 / 数值范围（§7.4）                                                                                                                                                                                                                                                                                                                                   |
+| v2 文件                         | v3 命运                                              | 说明                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `combat-runner.ts`              | 🔻 **替换为 `combat/coordinator.ts`**                | 连接 UI / Agent / 内核；移除 `awaitPlayerInput()` 挂起；不再主持流程                                                                                                                                                                                                                                                                                                                              |
+| `combat-pipeline.ts`            | 🔻 **内核 internal implementation**                  | 不再独立存在                                                                                                                                                                                                                                                                                                                                                                                      |
+| `combat-resolver.ts`            | 🔻 **内核 internal implementation**                  | DAG 编排逻辑进内核微步骤                                                                                                                                                                                                                                                                                                                                                                          |
+| `combat-damage.ts`              | ✅ **保留 + 修正**（纯函数）                         | 8 步管线 / 评级 / 防御计算保留。修正：`performAttackCheck` 改为显式接收两颗骰（§1.4）；最终伤害 clamp ≥ 0（C7）；真伤走 `damageType:'true'` + `bypass` 短路                                                                                                                                                                                                                                       |
+| `combat-intention.ts`           | ✅ **保留 + 修正**（纯函数）                         | 公式保留。修正：消费两颗独立骰（`intentCheck` 通道，C5）+ 补回 `checkNonLethal`（C6）                                                                                                                                                                                                                                                                                                             |
+| `combat-turn.ts`                | ✅ **保留**（纯函数）                                | 先攻公式 + 行动槽模型保留，**必须由内核实际调用**（v2 未接线）                                                                                                                                                                                                                                                                                                                                    |
+| `combat-panel.ts`               | 🔻 **重写为 `combat/projection-agent.ts`（投影 B）** | ⚠️ **不是** UI adapter（§13.1 修正）。复核 2026-08-18：原计划的「格式化逻辑保留、只换数据源」**没有落成**，`combat-panel.ts` 已随 M5 删除；投影 B 的现行实现是 `combat/projection-agent.ts`——沿用同一套 `<action_info>` 三阶段风格，但从唯一权威 `CombatView` 重新取数（v3 的 state 形状与 v2 不同，`buildOverviewPanel(state)` 喂不进去）。**给 Agent 的文本面板要改，改 `projection-agent.ts`** |
+| `combat-modifier-inject.ts`     | 🔻 **并入 EffectProgram 编译链**                     | 六大类别编译为 push-handler automaton（§7.4 ①）                                                                                                                                                                                                                                                                                                                                                   |
+| `combat-actions-pipeline.ts`    | 🔻 **战术动作 Command 处理**                         | 道具 / 格挡 / 移动 / 专注 / 逃跑 ⇒ `DeclareAction` / `DeclareBlock` / `Flee`                                                                                                                                                                                                                                                                                                                      |
+| `combat-morale-pipeline.ts`     | ✅ **保留 + 修正**（纯函数）                         | 阈值 / 战斗类型规则保留；士气 d20 改从 `statusContest` 通道取（M-4）；加 `morale.forceState` RuleKey                                                                                                                                                                                                                                                                                              |
+| `combat-settlement-pipeline.ts` | 🔻 **settlement（幂等）**                            | 挂 `combatId + settlementId`；FP diff 终局提交（§十二）                                                                                                                                                                                                                                                                                                                                           |
+| `combat-item-validator.ts`      | 🔻 **演进为编译期校验器**                            | 窗口存在 / RuleKey 白名单 / divinity 不超所有者 / 数值范围（§7.4）                                                                                                                                                                                                                                                                                                                                |
 
 ### 15.2 后端相关模块
 
-| v2 文件                   | v3 命运                                                 | 说明                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `game-event.ts`           | 🔻 **拆分**                                             | 战斗内 `emitChain` ⇒ ReactionWindow evaluator；战斗外 `publish` / `emitChain` **原样保留**给剧情 / 任务 / 地点 / 制作（ADR-29 不受影响）                                                                                                                                                                                                                                                                |
-| `script-executor.ts`      | 🔻 **战斗内废止**                                       | 任意 JS 路径在战斗内不再可达；战斗外维持现状直到统一效果框架收口                                                                                                                                                                                                                                                                                                                                        |
-| `effect-parser.ts`        | 🔧 **成为编译链输入源**                                 | ParsedEffect（中文词条）经内建映射表编译为可信 TS adapter automaton（§7.4 ②）                                                                                                                                                                                                                                                                                                                           |
-| `effect-runtime.ts`       | 🔻 **`new Function` 条件求值被替换**                    | 改用 §7.3 的表达式解释器                                                                                                                                                                                                                                                                                                                                                                                |
-| `subscription-manager.ts` | 🔻 **战斗内由 ActiveEffectIndex 取代**                  | 战斗外保留（ADR-29 的动态注册 facade）                                                                                                                                                                                                                                                                                                                                                                  |
-| `state-manager.ts`        | 🔧 **持久化 adapter**                                   | 战斗外权威不变；战斗内不再是第二状态权威；终局一次 `commitChatState()`                                                                                                                                                                                                                                                                                                                                  |
-| `char-gen-agent.ts`       | 🔧 **扩展战斗中调用入口**                               | 处理 `CharGenRequest`，产 `SummonedUnitDefinition`（§十）                                                                                                                                                                                                                                                                                                                                               |
-| `agent-tools.ts`          | ✅ **已落地：`AGENT_TOOL_MAP.combat_v3` 无 `roll_d20`** | 骰值只能来自 DiceTape（不变量③）。现行主持人工具集 **6 个战斗工具 + 4 个只读查询**：`declare_attack` / `declare_action` / `pass_slot` / `flee` / `end_turn` / `submit_adjudication` + `get_character` / `get_inventory` / `get_combat_state` / `get_unit_detail`；`combat_enemy` 不含 `submit_adjudication`。终局总结走主持人专用正文调用，不再暴露 `write_summary`。`roll_d20` 定义仍供其他 Agent 使用 |
-| `agent-config.json`       | 🔧 **item_gen / char_gen prompt 改写**                  | 从"输出 scripts JS"改为"输出 automaton JSON"                                                                                                                                                                                                                                                                                                                                                            |
-| `types.ts`                | 🔧 **新增 `AppSettings.combatEngineVersion`**           | `'v2' \| 'v3'`。~~默认 `'v2'`~~ ⇒ **现状默认 `'v3'`**（types.ts:669，复核 2026-08-18，见 §14.5）                                                                                                                                                                                                                                                                                                        |
+| v2 文件                   | v3 命运                                              | 说明                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `game-event.ts`           | 🔻 **拆分**                                          | 战斗内 `emitChain` ⇒ ReactionWindow evaluator；战斗外 `publish` / `emitChain` **原样保留**给剧情 / 任务 / 地点 / 制作（ADR-29 不受影响）                                                                                                                                                                                                                                                                |
+| `script-executor.ts`      | 🔻 **战斗内废止**                                    | 任意 JS 路径在战斗内不再可达；战斗外维持现状直到统一效果框架收口                                                                                                                                                                                                                                                                                                                                        |
+| `effect-parser.ts`        | 🔧 **成为编译链输入源**                              | ParsedEffect（中文词条）经内建映射表编译为可信 TS adapter automaton（§7.4 ②）                                                                                                                                                                                                                                                                                                                           |
+| `effect-runtime.ts`       | 🔻 **`new Function` 条件求值被替换**                 | 改用 §7.3 的表达式解释器                                                                                                                                                                                                                                                                                                                                                                                |
+| `subscription-manager.ts` | 🔻 **战斗内由 ActiveEffectIndex 取代**               | 战斗外保留（ADR-29 的动态注册 facade）                                                                                                                                                                                                                                                                                                                                                                  |
+| `state-manager.ts`        | 🔧 **持久化 adapter**                                | 战斗外权威不变；战斗内不再是第二状态权威；终局一次 `commitChatState()`                                                                                                                                                                                                                                                                                                                                  |
+| `char-gen-agent.ts`       | 🔧 **扩展战斗中调用入口**                            | 处理 `CharGenRequest`，产 `SummonedUnitDefinition`（§十）                                                                                                                                                                                                                                                                                                                                               |
+| `agent-tools.ts`          | ✅ **已落地：`AGENT_TOOL_MAP.combat` 无 `roll_d20`** | 骰值只能来自 DiceTape（不变量③）。现行主持人工具集 **6 个战斗工具 + 4 个只读查询**：`declare_attack` / `declare_action` / `pass_slot` / `flee` / `end_turn` / `submit_adjudication` + `get_character` / `get_inventory` / `get_combat_state` / `get_unit_detail`；`combat_enemy` 不含 `submit_adjudication`。终局总结走主持人专用正文调用，不再暴露 `write_summary`。`roll_d20` 定义仍供其他 Agent 使用 |
+| `agent-config.json`       | 🔧 **item_gen / char_gen prompt 改写**               | 从"输出 scripts JS"改为"输出 automaton JSON"                                                                                                                                                                                                                                                                                                                                                            |
+| `types.ts`                | 🔧 **新增 `AppSettings.combatEngineVersion`**        | `'v2' \| 'v3'`。~~默认 `'v2'`~~ ⇒ **现状默认 `'v3'`**（types.ts:669，复核 2026-08-18，见 §14.5）                                                                                                                                                                                                                                                                                                        |
 
 ### 15.3 前端
 
@@ -1201,14 +1187,14 @@ async function submitCombatCommand(command: CombatCommand): Promise<void>;
 
 ### 16.1 已确认决策（2026-07-31 主人拍板）
 
-| #      | 决策                         | 定法                                                                                                                                                                                                                                                                                                                                                                                                             | 落点    |
-| ------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| **D1** | CombatSession 生命周期与对接 | v3 代码全部放 `combat-v3/`（deep module，`index.ts` 只暴露 `openCombat` + 类型）；生命周期 `openCombat → dispatch 循环 → Terminal → settlement（幂等）→ readonly`，内核不存 Promise；Coordinator 从 `game-pipeline.handleCombatTrigger` 接手（唯一接缝）；终局一次 `commitChatState()`；**checkpoint 落 IndexedDB 属 M5+ 可选增强，不是 M1 需求**（v2 中途崩溃本来就全丢，v3 内存 journal + 原子结算已严格更优） | §十四   |
-| **D2** | EffectAutomaton DSL          | 声明式 JSON + 封闭微文法表达式字符串；手写递归下降 parser 编译为 AST、解释执行于 immutable snapshot；**全链路零 `new Function` / `eval`**（根治审查报告 C1）；`effect-parser` 的 ParsedEffect 走可信 TS adapter；`script-executor` 的任意 JS 在战斗内废止                                                                                                                                                        | §七     |
-| **D3** | EffectProgram 编译链         | `compileEffectProgram(entity)` 三来源（modifiers[] / ParsedEffect / AI automaton JSON）；`combat-item-validator` 演进为**编译期**校验器；`ActiveEffectIndex` 战斗内取代 `ScriptRegistry` + `SubscriptionManager`                                                                                                                                                                                                 | §七     |
-| **D4** | 双投影                       | ⚠️ 修正交接文档：`combat-panel.ts` 是给 LLM 的**文本面板格式化器**（全部返回 string），前端不消费。故投影 A（DomainEvent → CombatEvent，保住 6 组件与 game-store 契约）与投影 B（CombatState → 文本面板，喂战斗 Agent）**分开**                                                                                                                                                                                  | §十三   |
-| **D5** | contract test 黄金参照系     | 三层：① v2 纯函数测试全绿（差分：同输入过内核结果一致）；② 5 场案例编成固定 DiceTape + Command 序列的 replay fixture，断言时间线里程碑（伤害数值 / 终局原因 / FP 净变动）；③ v2 真机输出为**可选增强**（M6 真机待定，不阻塞）。replay 语义：同 bundle + 同 tape + 同 command 序列 ⇒ DomainEvent 序列 hash 一致                                                                                                   | §四 4.6 |
-| **D6** | DiceTape 通道预算            | 5 场聚合实测 `attackHit 57% / initiative 18% / intentCheck 11% / statusContest 10% / procCheck 4%` ⇒ 60 颗加权分配 **32 / 10 / 7 / 6 / 5**（RFC §5.7 的"各 12 颗均分"被实测推翻）；任一通道耗尽 ⇒ `RequiredInput.BeginOutput` 注入全新 60 颗 epoch、各通道 cursor 重置、上一 epoch 余骰作废；**不做通道间借用**（保 replay 干净）                                                                                | §四 4.3 |
+| #      | 决策                         | 定法                                                                                                                                                                                                                                                                                                                                                                                                          | 落点    |
+| ------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| **D1** | CombatSession 生命周期与对接 | v3 代码全部放 `combat/`（deep module，`index.ts` 只暴露 `openCombat` + 类型）；生命周期 `openCombat → dispatch 循环 → Terminal → settlement（幂等）→ readonly`，内核不存 Promise；Coordinator 从 `game-pipeline.handleCombatTrigger` 接手（唯一接缝）；终局一次 `commitChatState()`；**checkpoint 落 IndexedDB 属 M5+ 可选增强，不是 M1 需求**（v2 中途崩溃本来就全丢，v3 内存 journal + 原子结算已严格更优） | §十四   |
+| **D2** | EffectAutomaton DSL          | 声明式 JSON + 封闭微文法表达式字符串；手写递归下降 parser 编译为 AST、解释执行于 immutable snapshot；**全链路零 `new Function` / `eval`**（根治审查报告 C1）；`effect-parser` 的 ParsedEffect 走可信 TS adapter；`script-executor` 的任意 JS 在战斗内废止                                                                                                                                                     | §七     |
+| **D3** | EffectProgram 编译链         | `compileEffectProgram(entity)` 三来源（modifiers[] / ParsedEffect / AI automaton JSON）；`combat-item-validator` 演进为**编译期**校验器；`ActiveEffectIndex` 战斗内取代 `ScriptRegistry` + `SubscriptionManager`                                                                                                                                                                                              | §七     |
+| **D4** | 双投影                       | ⚠️ 修正交接文档：`combat-panel.ts` 是给 LLM 的**文本面板格式化器**（全部返回 string），前端不消费。故投影 A（DomainEvent → CombatEvent，保住 6 组件与 game-store 契约）与投影 B（CombatState → 文本面板，喂战斗 Agent）**分开**                                                                                                                                                                               | §十三   |
+| **D5** | contract test 黄金参照系     | 三层：① v2 纯函数测试全绿（差分：同输入过内核结果一致）；② 5 场案例编成固定 DiceTape + Command 序列的 replay fixture，断言时间线里程碑（伤害数值 / 终局原因 / FP 净变动）；③ v2 真机输出为**可选增强**（M6 真机待定，不阻塞）。replay 语义：同 bundle + 同 tape + 同 command 序列 ⇒ DomainEvent 序列 hash 一致                                                                                                | §四 4.6 |
+| **D6** | DiceTape 通道预算            | 5 场聚合实测 `attackHit 57% / initiative 18% / intentCheck 11% / statusContest 10% / procCheck 4%` ⇒ 60 颗加权分配 **32 / 10 / 7 / 6 / 5**（RFC §5.7 的"各 12 颗均分"被实测推翻）；任一通道耗尽 ⇒ `RequiredInput.BeginOutput` 注入全新 60 颗 epoch、各通道 cursor 重置、上一 epoch 余骰作废；**不做通道间借用**（保 replay 干净）                                                                             | §四 4.3 |
 
 ### 16.2 来源文档矛盾与取舍
 
@@ -1298,7 +1284,7 @@ async function submitCombatCommand(command: CombatCommand): Promise<void>;
 
 ## 变更记录
 
-| 日期       | 变更                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | 作者   |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| 2026-08-18 | **文档维护：对齐代码现状**（不改设计裁定，只改与代码不符的陈述）。① 文首补 **2026-08-12 战斗主持人 / DM 定位纠偏**说明，并改写 §2.3 `PlayerCommand` 行与 §14.7 路由表——`combat_v3` 不再是「敌方专属决策器」；② §14.5 / §15.2：`combatEngineVersion` 默认由 `'v2'` 更正为 **`'v3'`**（types.ts:669 / game-pipeline.ts:1835 兜底），并记 v2 引擎已随 M5 删除；③ §15.2：`roll_d20` 移除已落地，补现行 **7 战斗工具 + 4 只读**工具集清单；④ §13.2 / §15.1：投影 B 的实现更正为 **`combat-v3/projection-agent.ts`**（`combat-panel.ts` 已删，不是「复用格式化函数」）；⑤ §14.1 目录树改为磁盘现状，补 `types.ts` / `player-input.ts` / `summon-pool.ts` / `phases/` / `contract/`；⑥ §14.4 分支图、§15.1 表头、§16.4 路线表补现状注（原文保留作决策记录） | Claude |
-| 2026-07-31 | **v3 初版正式架构**：整合 v3 提案骨架 + 参考文档接口词汇 + 压测 RFC §5/§6 全部补丁 + 交接文档 §3/§4 边界结论 + 主人 D1–D6 拍板决策。取代 `2026-07-30-combat-kernel-v3-proposal.md` 成为战斗 v3 架构真源。含 5 处代码现状修正（`performAttackCheck` 内部 `Math.random`、意图对抗单骰、缺 `checkNonLethal`、伤害未 clamp、士气骰源）与 2 处来源文档修正（`combat-panel` 实为文本面板格式化器 ⇒ 双投影；DiceTape 通道预算按实测加权而非均分）                                                                                                                                                                                                                                                                                                           | Claude |
+| 日期       | 变更                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 作者   |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| 2026-08-18 | **文档维护：对齐代码现状**（不改设计裁定，只改与代码不符的陈述）。① 文首补 **2026-08-12 战斗主持人 / DM 定位纠偏**说明，并改写 §2.3 `PlayerCommand` 行与 §14.7 路由表——`combat` 不再是「敌方专属决策器」；② §14.5 / §15.2：`combatEngineVersion` 默认由 `'v2'` 更正为 **`'v3'`**（types.ts:669 / game-pipeline.ts:1835 兜底），并记 v2 引擎已随 M5 删除；③ §15.2：`roll_d20` 移除已落地，补现行 **7 战斗工具 + 4 只读**工具集清单；④ §13.2 / §15.1：投影 B 的实现更正为 **`combat/projection-agent.ts`**（`combat-panel.ts` 已删，不是「复用格式化函数」）；⑤ §14.1 目录树改为磁盘现状，补 `types.ts` / `player-input.ts` / `summon-pool.ts` / `phases/` / `contract/`；⑥ §14.4 分支图、§15.1 表头、§16.4 路线表补现状注（原文保留作决策记录） | Claude |
+| 2026-07-31 | **v3 初版正式架构**：整合 v3 提案骨架 + 参考文档接口词汇 + 压测 RFC §5/§6 全部补丁 + 交接文档 §3/§4 边界结论 + 主人 D1–D6 拍板决策。取代 `2026-07-30-combat-kernel-v3-proposal.md` 成为战斗 v3 架构真源。含 5 处代码现状修正（`performAttackCheck` 内部 `Math.random`、意图对抗单骰、缺 `checkNonLethal`、伤害未 clamp、士气骰源）与 2 处来源文档修正（`combat-panel` 实为文本面板格式化器 ⇒ 双投影；DiceTape 通道预算按实测加权而非均分）                                                                                                                                                                                                                                                                                                     | Claude |

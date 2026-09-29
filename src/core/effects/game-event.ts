@@ -13,7 +13,6 @@
 import type {
   GameEvent,
   GameEventType,
-  CombatActionRequest,
   CraftActionRequest,
   DiceRollPayload,
   ReadonlyHookSet,
@@ -349,14 +348,6 @@ export function createGameEvent(
     data,
     processed: false,
   };
-}
-
-/** 创建战斗事件 */
-export function createCombatEvent(
-  action: CombatActionRequest,
-  source: string = 'system',
-): GameEvent {
-  return createGameEvent('combat_action', { action }, source);
 }
 
 /** 创建制作事件 */

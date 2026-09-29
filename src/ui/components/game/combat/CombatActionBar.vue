@@ -4,12 +4,12 @@
  *
  * 🎭 主持人/DM 模式（2026-08-12）：玩家输入**一律走意图文本 → 战斗主持人解析**。
  * 四步拼装（单位→行动类型→技能/道具→目标）把玩家的选择**格式化成一句自然语言**
- * 经 `submitCombatIntent` 交给 combat_v3 主持人会话；自由文本框原样提交。AI 理解
+ * 经 `submitCombatIntent` 交给 combat 主持人会话；自由文本框原样提交。AI 理解
  * 玩家想做什么 → 调 declare_* 工具声明动作 → 内核校验执行。拼装与对话同一条链路。
  *
- * 数据来源：useGameStore（v3ActiveCombat / combatAwaitingInput / characters /
- * submitCombatIntent）。敌我单位从 v3ActiveCombat.units 字典按 initiativeOrder
- * + side 投影（决策 A2，见 combat-v3-projection.ts）。
+ * 数据来源：useGameStore（activeCombat / combatAwaitingInput / characters /
+ * submitCombatIntent）。敌我单位从 activeCombat.units 字典按 initiativeOrder
+ * + side 投影（决策 A2，见 combat-projection.ts）。
  *
  * 设计规范遵循 docs/design.md：
  * - 间距用 --theme-spacing-* 变量（§3）
@@ -26,7 +26,7 @@ import { ref, computed, watch } from 'vue';
 import { useGameStore } from '../../../stores/game-store';
 import { useUIStore } from '../../../stores/ui-store';
 import type { CharacterState, Skill, InventoryItem } from '@engine/types/types';
-import { projectUnitsBySide, type V3Unit } from './combat-v3-projection';
+import { projectUnitsBySide, type CombatUnit } from './combat-projection';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -43,12 +43,12 @@ const isLocked = computed(() => !awaiting.value);
 
 /**
  * 当前行动单位（awaiting.unitId 对应的在场单位）——读攻击/动作槽剩余量，
- * 决定哪些行动按钮可用。v3 单位卡片数据源：v3ActiveCombat.units 字典。
+ * 决定哪些行动按钮可用。v3 单位卡片数据源：activeCombat.units 字典。
  */
-const currentUnit = computed<V3Unit | undefined>(() => {
+const currentUnit = computed<CombatUnit | undefined>(() => {
   const id = awaiting.value?.unitId;
-  if (!id || !game.v3ActiveCombat) return undefined;
-  return game.v3ActiveCombat.units[id];
+  if (!id || !game.activeCombat) return undefined;
+  return game.activeCombat.units[id];
 });
 
 /**
@@ -71,13 +71,13 @@ const actionSlotExhausted = computed(() => {
 });
 
 /** 我方参战单位列表（v3：player 阵营 + 存活） */
-const allyUnits = computed<V3Unit[]>(() =>
-  projectUnitsBySide(game.v3ActiveCombat, 'player').filter((u) => u.hp > 0),
+const allyUnits = computed<CombatUnit[]>(() =>
+  projectUnitsBySide(game.activeCombat, 'player').filter((u) => u.hp > 0),
 );
 
 /** 敌方参战单位列表（选目标用，v3：enemy 阵营 + 存活） */
-const enemyUnits = computed<V3Unit[]>(() =>
-  projectUnitsBySide(game.v3ActiveCombat, 'enemy').filter((u) => u.hp > 0),
+const enemyUnits = computed<CombatUnit[]>(() =>
+  projectUnitsBySide(game.activeCombat, 'enemy').filter((u) => u.hp > 0),
 );
 
 // ════════════════════════════════════════
@@ -211,7 +211,7 @@ function currentActorId(): string {
  * 四步拼装 → **自然语言意图文本**（主持人/DM 模式，2026-08-12）。
  *
  * 🎭 重大改造：拼装不再直接产结构化 Command 喂内核，而是把玩家的选择格式化成
- * 一句意图文本，经 `submitCombatIntent` 交给战斗主持人（combat_v3 会话）解析——
+ * 一句意图文本，经 `submitCombatIntent` 交给战斗主持人（combat 会话）解析——
  * AI 理解玩家想做什么 → 调 declare_* 工具声明动作 → 内核校验执行。这样拼装和
  * 自由对话走同一条「玩家跟 AI 对话」链路，AI 统一理解意图。
  *
@@ -244,9 +244,9 @@ function assembleIntentText(): string | null {
   }
 }
 
-/** 从 v3ActiveCombat.units 按 id 查展示名（拼装意图文本用） */
+/** 从 activeCombat.units 按 id 查展示名（拼装意图文本用） */
 function currentUnitNameOf(unitId: string): string {
-  const u = game.v3ActiveCombat?.units?.[unitId];
+  const u = game.activeCombat?.units?.[unitId];
   return u?.name ?? unitId;
 }
 

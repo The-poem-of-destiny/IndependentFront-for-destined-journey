@@ -14,7 +14,7 @@
  * 覆盖面用 glob 取，**新增 `map-*.ts` 自动纳入**（不用手工维护清单 —— 清单会漏，
  * 而漏掉的那个文件恰恰是没人想起来的那个）。
  *
- * 为什么不用 node:fs（照 `combat-v3/no-nondeterminism.test.ts` 与
+ * 为什么不用 node:fs（照 `combat/no-nondeterminism.test.ts` 与
  * `SettingsPage.engine-imports.test.ts` 的先例）：
  *   - 仓库 tsconfig 里 `types: []`、没装 @types/node —— `src/**` 下 import 'fs'
  *     测试能跑但 `npm run typecheck` 会 TS2307 红
