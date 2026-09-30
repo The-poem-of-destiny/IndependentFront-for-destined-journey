@@ -8,18 +8,6 @@
 
 ---
 
-## 这是什么
-
-命定之诗是一个**文字 RPG 游戏引擎**。你创建一名角色，之后由多 Agent 编排引擎驱动一轮又一轮的叙事：
-
-- **确定性游戏系统**——战斗、制作、角色生成、数值、状态都由引擎严格计算，不靠 AI 瞎编。你看到的 HP、伤害、品质、好感度都是真实可供游玩的数据。
-- **AI 叙事创造性**——故事正文、角色对白、剧情演化由 AI 生成。引擎负责"规则对不对"，AI 负责"故事好不好"。
-- **开放世界剧情**——AI 构造世界初始态（各方 NPC 有自己的议程，世界在自行运转），主角是自由介入的变量。没有预设的 A/B/C 分支，你想做什么就输入什么。
-
-> ⚠️ **当前为开发版**。需自备 AI API，暂无独立安装包。详见下方[快速开始](#快速开始)。
-
----
-
 ## 快速开始
 
 ### 方式一：下载 Release（推荐 · 待发布）
@@ -56,42 +44,51 @@ npm run dev
 
 启动后先进入**设置页**，完成以下配置才能正常游玩。
 
-### 1. 创建 3 个 AI API（必须 ⚡）
+### 1. 创建 2 个 AI API（必须 ⚡）
 
-游戏需要 3 个 API：两个 DeepSeek（主力叙事）+ 一个 Embedding（记忆召回）。
+游戏需要 2 个 API：一个 DeepSeek（负责全部 Agent 的叙事与判断）+ 一个 Embedding（记忆召回）。
 
-**设置页 → 🔌 API 配置 → 新建**，依次创建：
+**设置页 → 🔌 API 配置 → + 添加 API**，依次创建：
 
-**① DeepSeek V4 Flash**（便宜 · 用于大部分 Agent）
+**① DeepSeek**（主力 · 所有 Agent 都用它）
 
+- 名称：`deepseek-flash`
 - Endpoint：`https://api.deepseek.com`
 - API Key：在 [DeepSeek 平台](https://platform.deepseek.com/) 注册后获取
-- 默认模型：选 **DeepSeek V4 Flash**
+- 默认模型：`deepseek-flash`
 
-**② DeepSeek V4 Pro**（更聪明 · 推荐用于正文，稍贵）
+> 📌 名字虽然叫 `deepseek-flash`，用的其实是 **v4.1-flash** 模型。
 
-- Endpoint：同上
-- API Key：同一个 Key 即可
-- 默认模型：选 **DeepSeek V4 Pro**
+**② Embedding 模型**（记忆召回 · 硅基流动）
 
-**③ Embedding 模型**（用于记忆召回 · 硅基流动）
-
+- 名称：随意，如 `siliconflow-embedding`
 - Endpoint：`https://api.siliconflow.cn/v1`
 - API Key：在[硅基流动](https://cloud.siliconflow.cn/)注册后获取
 - 默认模型：`Qwen/Qwen3-Embedding-8B`
 
-每个创建后点「**连接测试**」确认通过。配完 API 列表应有 **3 个**。
+每个创建后点「**连接测试**」确认通过。配完 API 列表应有 **2 个**。
 
 > 也支持任何 OpenAI 兼容的 API（OpenAI 官方、Kimi、智谱、本地 Ollama 等），上述只是推荐组合。
 
-### 2. 绑定 Agent 模型（必须）
+### 2. 绑定模型（必须）
 
-**设置页 → 🤖 Agent 配置**：
+**① Agent 模型**：**设置页 → 🤖 Agent 配置**，把各 Agent 的「API 池选择」都选 **deepseek-flash**（默认全部用同一个池）。
 
-- **记忆召回** Agent → 选择上面创建的 **Embedding** 模型
-- **其余所有 Agent** → 选择 **DeepSeek V4 Flash**
+> 💡 只想给正文换更强的模型时，单独改 `正文生成` 那个 Agent 即可。
 
-> 💡 **正文推荐 V4 Pro**：把 `story`（叙事）Agent 换成 Pro，文笔更好。Pro 比 Flash 贵，所以只给正文用，其他全用 Flash 性价比最高。
+**② 记忆召回**：**设置页 → 🧠 记忆 & 缓存**，召回模式选「Embedding 语义召回」，再在「**Embedding 源**」里选择上面创建的 Embedding。
+
+> 📌 记忆召回已不再在 Agent 配置里绑定，挪到了「记忆 & 缓存」的「Embedding 源」。
+
+### 3. 更新内容包（建议）
+
+公开仓库只带**演示级占位内容**；完整的世界书、Agent 提示词、预设与目录通过**内容包**下发。
+
+**设置页 → 💾 存档数据 → 内容包 → 点「检查更新」**，有新版时再点「**更新到 x.y.z**」。
+
+### 4. 按需调整正文预设（可选）
+
+**设置页 → 🤖 Agent 配置 → 正文生成 → 预设管理**：用开关启用 / 停用条目，或点条目上的铅笔（编辑）按钮自行修改提示词，以适配自己的配置。
 
 ---
 
