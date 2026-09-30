@@ -941,6 +941,7 @@ export class AgentOrchestrator {
               timeoutMs: reranker.timeoutMs ?? reranker.timeout,
               bodyOverrides: reranker.bodyOverrides ?? {},
               bodyOmitPaths: reranker.bodyOmitPaths ?? [],
+              headerOverrides: reranker.headerOverrides ?? {},
               revision: reranker.revision,
             } satisfies RerankerApiSource,
             query,

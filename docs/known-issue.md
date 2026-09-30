@@ -10,12 +10,12 @@
 根因两端：
 
 1. **主动技能的 modifiers / buffs / automata 根本没被收集进战斗**
-   （`src/sillytavern/combat-v2-types.ts:characterToCombatParticipant`）：participant 的 `modifiers` 只收
+   （`src/core/combat/participant.ts:characterToCombatParticipant`）：participant 的 `modifiers` 只收
    **已装备物品**；`automata` 只收「已装备物品 + **被动**技能」；主动技能仅摘了
    `skillPower/relevantAttribute/damageType` 进 `activeSkills`（只喂伤害公式）。
    故主动技能声明的 `<modifiers>` / `<buffs>` / `<automaton>` 全部落空。
 2. **即便接通，`附加效果` / `资源` modifier 的编译方向也是反的**
-   （`src/sillytavern/combat-v3/automata/compile.ts`）：`ApplyStatus` / `SpendResource` 的 `targetId`
+   （`src/core/combat/automata/compile.ts`）：`ApplyStatus` / `SpendResource` 的 `targetId`
    一律写死 `seed.owner`（施法者自己），且 `资源` 订阅 `round.open`（每回合无条件）。
    对**装备**（owner = 穿戴者）语义正确；对**主动攻击技能**应是「命中目标时对其施加」，
    直接接通会变成「自己每回合掉 400MP / 自己中灼烧」——比现在更糟。
@@ -31,8 +31,8 @@
 状态：**第 1 条仍存；第 2 条已修**（2026-09-05 修复 F08 可恢复收益，见下方 📌 注记；原裁定见
 2026-08-19 Fable 审查记档，同轮的三条已修见 `docs/CHANGELOG.md`「地图 v1.2」条目）
 
-两条都出在按期结算（`src/sillytavern/map-dynamics.ts` 的 `settleTileFacts` +
-`src/sillytavern/state-manager.ts` 的 `syncMapFactsSettlement`），方向一致 —— **丢的一律是玩家该拿的钱，
+两条都出在按期结算（`src/core/map/map-dynamics.ts` 的 `settleTileFacts` +
+`src/core/state/state-manager.ts` 的 `syncMapFactsSettlement`），方向一致 —— **丢的一律是玩家该拿的钱，
 不会凭空多给**，且都不产生数据损坏：
 
 1. **周期性降档摧毁的玩家产业，摧毁前已到期的收益期数不入账**（`map-dynamics.ts:settleTileFacts`）——
@@ -57,7 +57,7 @@
 > 与事实态**同一次 profile 落库**（窗口推进与记账同生共死，写失败两者都不落、下次从旧窗口重算）；
 > 钱由 `settlePendingMapIncome()` 以「给钱 + 标记 applied 同一 IDB 事务」原子消费 ——
 > 崩在任意一点都回到「未给钱 + 未标记」，下次推进自动重放；丢确认后重放读到 applied 即跳过，
-> 无重复支付。验证：`src/sillytavern/state-manager.map-income.test.ts` 10 条（写失败重放恰好一次
+> 无重复支付。验证：`tests/core/state/state-manager.map-income.test.ts` 10 条（写失败重放恰好一次
 > / 丢确认重放不重付 / 重复 id / 畸形金额 / 快照回退两刻 / 主建筑 / 零收益 / 分段推进一致性）。
 > 🔴 **历史已丢的收益不回溯补偿**（无可靠证据可核算），修复只保未来结算。
 > 遗留（如实记录）：`gameTime` 先于结算落库的既有跨度依旧 —— 结算**落库本身**失败时，

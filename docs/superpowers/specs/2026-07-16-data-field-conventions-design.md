@@ -17,7 +17,7 @@
 | 铁律 2 | **名字解析唯一入口**         | StateManager 提供 `resolveCharacter(name)` / 集合内按 name 查找的统一辅助，全引擎只此一处做名字→记录查找。解析失败必须进 `errors[]` 上浮，禁止静默 no-op                               |
 | 铁律 3 | **字段分工**                 | AI 只填叙事字段（name/description/effects/rarity/…），Code 补账务字段（saveId/时间戳/数量合并/枚举归一化）。**AI 永远不产 id**                                                         |
 | 铁律 4 | **每类数据唯一真源（SSOT）** | 每类数据只有一个家（见第 13 章 SSOT 总表）。发现双轨即为 bug                                                                                                                           |
-| 铁律 5 | **枚举值统一中文、集中定义** | slot/type/rarity/quest.status/statusEffect.category 等枚举在 `src/sillytavern/field-enums.ts`（新建）一处定义，写入时统一做归一化校验                                                  |
+| 铁律 5 | **枚举值统一中文、集中定义** | slot/type/rarity/quest.status/statusEffect.category 等枚举在 `src/core/content/field-enums.ts`（新建）一处定义，写入时统一做归一化校验                                                 |
 
 > 📌 **2026-09-14 战斗 Agent 控制边界补记**：`combat_host` / `combat_enemy`、battle/session/
 > decisionWindow、authorizedActor 与 allowedCommandKinds 都是 Code 协调器的调用上下文，不是
@@ -47,7 +47,7 @@
 | `chats`                                                                 | ⚰️ v3 遗留   | id                 | —                                               | 标记废弃，迁移批次中删除 → ✅ **已删**（M1 / Dexie v9 的 `chats: null`，复核 2026-08-18）                                  |
 
 > **§1.1 补登（复核 2026-08-18）**：本节自称「新表必须先在此登记身份」，但上表停在 Dexie v12（音频），
-> 此后 v13-v22 新增的 13 张表从未登记。以下按同一表格式补登，**口径全部现读 `src/sillytavern/database.ts`**
+> 此后 v13-v22 新增的 13 张表从未登记。以下按同一表格式补登，**口径全部现读 `src/core/persistence/database.ts`**
 > （`DB_VERSION = 22`；schema 自 v13 起改走 `withSchema(基线, 增量)` 的 delta 写法，v1-v12 原样冻结）。
 > 补登不改上表的历史裁决，只是把缺席的行补齐。
 >
@@ -103,7 +103,7 @@
 导入时**重新生成 saveId** 及所有内部 UUID，防撞车。整库备份（`exportAllData`）另存，两者并存。
 
 > **§1.3 复核（2026-08-18）—— 与「存档互传」实装对账（2026-08-15 交付）**：
-> 单存档导出/导入已实装，落在 `src/sillytavern/session-backup.ts`
+> 单存档导出/导入已实装，落在 `src/core/persistence/session-backup.ts`
 > （`exportSessionSave` / `checkSessionSaveDependencies` / `importSessionSave`）。
 > 「重发全部 id」与「两者并存」两条**照本节执行**（不重发 id 的败法是第二次导入静默覆盖第一次），
 > 但**顶层形状与本节草案不同**，以代码为准：

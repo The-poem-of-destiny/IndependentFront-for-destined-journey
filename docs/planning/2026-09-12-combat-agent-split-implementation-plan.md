@@ -8,7 +8,7 @@
 > 📌 **2026-09-15 方案定案**：双角色隔离方案已确认优于旧单主持人方案，
 > `combatAgentSplitEnabled` 设置、设置页切换按钮与 Coordinator 旧分支全部退役。本文后续凡提到
 > “开关 / 关闭模式 / 兼容路径”的段落只保留首版决策历史，不再描述现行行为；现行行为始终是
-> `combat_v3` 主持人 + `combat_enemy` 敌方决策两个隔离会话，共享唯一 Kernel。
+> `combat` 主持人 + `combat_enemy` 敌方决策两个隔离会话，共享唯一 Kernel。
 >
 > 配套计划：[叙事导演子 Agent](2026-09-12-narrative-director-implementation-plan.md)。
 > 推荐先完成本计划，验证双角色运行后再接叙事导演；战斗运行期间叙事导演不参与。
@@ -23,7 +23,7 @@
 
 | 逻辑角色             | 持久 Agent id            | 显示名     | 说明                                                               |
 | -------------------- | ------------------------ | ---------- | ------------------------------------------------------------------ |
-| `combat_host`        | **`combat_v3`，保留**    | 战斗主持人 | 逻辑角色名不再注册成第二个配置 id，避免旧绑定/用户 prompt 无谓迁移 |
+| `combat_host`        | **`combat`，保留**       | 战斗主持人 | 逻辑角色名不再注册成第二个配置 id，避免旧绑定/用户 prompt 无谓迁移 |
 | `combat_enemy`       | **`combat_enemy`，新增** | 敌方决策   | 一场战斗一个敌方阵营决策会话，不为每个敌人分别开 Agent             |
 | Coordinator / Kernel | 无模型角色               | 引擎内部   | 时序、骰子、合法性、事实和最终落库的唯一权威                       |
 
@@ -44,7 +44,7 @@
 
 | 当前入口                                                     | 已核对的行为                                            | 切割要求                                               |
 | ------------------------------------------------------------ | ------------------------------------------------------- | ------------------------------------------------------ |
-| `combat-v3/coordinator.ts`：`runCombatV3`                    | 一份 `CombatSessionHandle` 保存 messages/client/summary | 改为角色分离的会话容器，仍共用一个 Kernel              |
+| `combat/coordinator.ts`：`runCombatV3`                       | 一份 `CombatSessionHandle` 保存 messages/client/summary | 改为角色分离的会话容器，仍共用一个 Kernel              |
 | `routePlayerIntent`、`routeEnemyCommand`、`routeHostCommand` | 玩家文本与敌方回合进入共用配置/对话路径                 | 先按 RequiredInput 判权，再选角色会话和工具面          |
 | `openCombatScene`、`narrateSettlement`、`narrateCombatEnd`   | 开场、结算演绎和结束总结共用会话                        | 三者归主持人；敌方只接收按权限过滤的战斗事实           |
 | `projection-agent.ts`：`projectToAgent`                      | 一份投影包含所有单位的精确状态                          | 增加明确角色/阵营投影，不拿全量投影当敌方输入          |
@@ -52,9 +52,9 @@
 | `toolCallToCommandSync`、`commandsFromResult`                | 可按 actorName 翻译；未知工具/空命令有 pass 兜底        | 先做调用级授权；未知/越权不能偷偷消耗槽位              |
 | `nextPendingCommand`                                         | 同批多命令按消费时点处理 revision                       | 保留合法同批语义，同时拒绝跨决策窗口的陈旧命令         |
 | `kernel.ts`                                                  | Command 驱动；commandId 幂等，唯一状态闭包              | 不增第二状态真源，不让模型提供 commandId/revision/骰子 |
-| `agent-tools.ts`：`AGENT_TOOL_MAP`                           | `combat_v3` 拥有控制与查询工具                          | 静态角色白名单之外，还需逐调用动态授权                 |
+| `agent-tools.ts`：`AGENT_TOOL_MAP`                           | `combat` 拥有控制与查询工具                             | 静态角色白名单之外，还需逐调用动态授权                 |
 
-表中 `combat-v3/` 均指 `src/sillytavern/combat-v3/`。实施前必读：
+表中 `combat/` 均指 `src/core/combat/`。实施前必读：
 
 - [战斗 V3 真源](../reference/combat-system-architecture-v3.md)、
   [会话改造设计](2026-08-09-combat-agent-session-revamp-design.md)。
@@ -63,7 +63,7 @@
   [字段审计](../superpowers/specs/2026-07-16-entity-field-audit.md)。
 - [Agent 提示词指引](../reference/agent_system_prompt_guide.md)、
   [模板指引](../reference/agent_template_guide.md)、[RPM 限流设计](2026-08-20-api-rpm-limiter-design.md)。
-- `src/sillytavern/AGENTS.md`、`src/ui/AGENTS.md`；写 UI 前另读 `docs/design.md`。
+- `src/core/AGENTS.md`、`src/ui/AGENTS.md`；写 UI 前另读 `docs/design.md`。
 
 旧会话设计的“单共享模型会话”将在实施时以带日期补注被本方案取代；“单一战斗状态与规则裁决”
 继续有效。不能现在就把现行架构标成双 Agent 已上线，也不把历史敌方专属 prompt 注释当现状真源。
@@ -136,7 +136,7 @@
 动态 HP/MP/SP/槽位/效果一律来自 Kernel 当前快照，静态技能/装备按参战时的合法定义及受控供给
 更新来源组装。不能从未结算回数据库的角色记录取动态状态，造成“面板已受伤、查询仍满血”。
 
-建议新增 `combat-v3/agent-visibility.ts`，纯函数负责字段白名单与可见事实累积规则：
+建议新增 `combat/agent-visibility.ts`，纯函数负责字段白名单与可见事实累积规则：
 首次只建立参战可观察信息；每次成功提交后从 facts 增量登记已展示的技能名/效果；未知不是没有。
 没有可靠公开标记的字段默认不暴露，不从 narrative 文本反向猜出完整技能数据库记录。
 需要从 UI 已公开字段构造白名单时逐项核对 `projection-ui.ts`，不能直接把 UI 对象整包发给敌方。
@@ -168,7 +168,7 @@
 📌 **2026-09-15 更正**：首版试运行开关及单会话回退路线已退役，设置页不再展示该按钮，
 旧 localStorage 中残留的同名键会在加载 / 再持久化时清除。所有战斗直接执行本计划的隔离保证。
 
-`combat_v3` 原 id/model 绑定保留，显示名明确为主持人；用户自定义 prompt/template 不覆写。
+`combat` 原 id/model 绑定保留，显示名明确为主持人；用户自定义 prompt/template 不覆写。
 运行时附加不可省略的角色契约与工具门禁，prompt 中旧的“控制所有人”文字不能扩大实际权限；
 设置页提示自定义配置需要复核，可提供显式恢复默认，不自动清空用户内容。
 
@@ -226,15 +226,15 @@ Coordinator 暂停原因同步回写至对应 Agent 调用的持久化 `error` �
 
 ## 6. 分阶段执行任务
 
-| 任务              | 工作与主要落点                                                                                            | 依赖   | 完成判据                                                          |
-| ----------------- | --------------------------------------------------------------------------------------------------------- | ------ | ----------------------------------------------------------------- |
-| B0 基线与契约     | 复核 V3、会话设计、特殊裁决夹具；锁定角色/可见性/失败语义，补日期注记                                     | 无     | 旧行为与本次更正逐项列明，EffectChoice 等范围外能力不混入承诺     |
-| B1 权限与投影     | 新增 `combat-v3/agent-visibility.ts`、`agent-permissions.ts` 及测试；调整 `projection-agent.ts`、查询适配 | B0     | 对方私有输入/背包/技能不可跨所有工具泄露；动态字段来自最新 Kernel |
-| B2 会话拆分       | 新增 `combat-v3/agent-session.ts` 或等价私有模块；从 coordinator 抽离会话初始化/角色历史/端点             | B0、B1 | 两份历史/client，惰性敌方初始化，共用唯一 Kernel；旧 opts 兼容    |
-| B3 决策与事实路由 | coordinator 玩家/敌方分流、授权 command 队列、纯事实叙事、summary 归属；`agent-tools.ts`                  | B1、B2 | actor/窗口校验、同批多命令、裁决/召唤边界、未知工具拒绝均通过     |
-| B4 配置与 UI 适配 | AgentSection、`game-pipeline.ts`、战斗面板                                                                | B2、B3 | 双角色固定生效，角色端点正确，暂停重试/取消可用，自定义配置不覆写 |
-| B5 内容与集成回归 | 公开/私有默认、模板和指纹；coordinator/projection/kernel/replay 与端到端夹具                              | B3、B4 | 双角色唯一模式回归，正式 pack 开场/决策/总结接通                  |
-| B6 真实验收与收口 | gates、真实战斗、失败注入、usage 对照；同步设计/导航/CHANGELOG                                            | B0–B5  | §7 证据齐全，未通过项有闭环；默认启用与否按证据单独决定           |
+| 任务              | 工作与主要落点                                                                                         | 依赖   | 完成判据                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------ | ------ | ----------------------------------------------------------------- |
+| B0 基线与契约     | 复核 V3、会话设计、特殊裁决夹具；锁定角色/可见性/失败语义，补日期注记                                  | 无     | 旧行为与本次更正逐项列明，EffectChoice 等范围外能力不混入承诺     |
+| B1 权限与投影     | 新增 `combat/agent-visibility.ts`、`agent-permissions.ts` 及测试；调整 `projection-agent.ts`、查询适配 | B0     | 对方私有输入/背包/技能不可跨所有工具泄露；动态字段来自最新 Kernel |
+| B2 会话拆分       | 新增 `combat/agent-session.ts` 或等价私有模块；从 coordinator 抽离会话初始化/角色历史/端点             | B0、B1 | 两份历史/client，惰性敌方初始化，共用唯一 Kernel；旧 opts 兼容    |
+| B3 决策与事实路由 | coordinator 玩家/敌方分流、授权 command 队列、纯事实叙事、summary 归属；`agent-tools.ts`               | B1、B2 | actor/窗口校验、同批多命令、裁决/召唤边界、未知工具拒绝均通过     |
+| B4 配置与 UI 适配 | AgentSection、`game-pipeline.ts`、战斗面板                                                             | B2、B3 | 双角色固定生效，角色端点正确，暂停重试/取消可用，自定义配置不覆写 |
+| B5 内容与集成回归 | 公开/私有默认、模板和指纹；coordinator/projection/kernel/replay 与端到端夹具                           | B3、B4 | 双角色唯一模式回归，正式 pack 开场/决策/总结接通                  |
+| B6 真实验收与收口 | gates、真实战斗、失败注入、usage 对照；同步设计/导航/CHANGELOG                                         | B0–B5  | §7 证据齐全，未通过项有闭环；默认启用与否按证据单独决定           |
 
 推进清单：
 
@@ -290,7 +290,7 @@ B1 可与配置草稿并行；B2/B3 对 coordinator 的修改串行整合，避�
 ## 8. 回退、文档与验收记录
 
 📌 **2026-09-15 更正**：旧路径与试运行开关已删除，不在进行中的战斗混换会话，也不再提供
-下一场切回单主持人的入口。不删除新增敌方设置，不改已有 `combat_v3` 持久 id，不把删存档作为
+下一场切回单主持人的入口。不删除新增敌方设置，不改已有 `combat` 持久 id，不把删存档作为
 修复或迁移手段；旧设置键由幂等迁移清理。
 
 实施时同步战斗 V3 真源与会话改造文档的日期更正，明确“共享 Kernel、隔离模型会话”；

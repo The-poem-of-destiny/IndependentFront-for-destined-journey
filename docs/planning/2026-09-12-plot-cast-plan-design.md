@@ -80,11 +80,11 @@ pre_check ──castPlan──▶ Code（parsePlotCastPlan）
 
 | 层     | 文件                                                      | 改动                                                                                                                            |
 | ------ | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 领域   | `src/sillytavern/plot-threads.ts`                         | `PlotCastPlanEntry` 类型 + `parsePlotCastPlan` / `projectPlotCastPlan` / `findCastPlanEntry` / `formatPlotCastPlanLines` 纯函数 |
-| 解析   | `src/sillytavern/plot-engine.ts`                          | `PreCheckResult.castPlan` + 归一化接线                                                                                          |
-| 上下文 | `src/sillytavern/types.ts`                                | `AgentContext.plotCastPlan?`                                                                                                    |
-| 注入   | `src/sillytavern/placeholder-registry.ts`                 | `{{PLOT_CAST_PLAN}}` resolver（dispatcher）+ 默认模板                                                                           |
-| 组装   | `src/sillytavern/prompt-session-assembler.ts`             | `PLOT_CAST_PLAN` 进 ephemeral 正则                                                                                              |
+| 领域   | `src/core/plot/plot-threads.ts`                           | `PlotCastPlanEntry` 类型 + `parsePlotCastPlan` / `projectPlotCastPlan` / `findCastPlanEntry` / `formatPlotCastPlanLines` 纯函数 |
+| 解析   | `src/core/plot/plot-engine.ts`                            | `PreCheckResult.castPlan` + 归一化接线                                                                                          |
+| 上下文 | `src/core/types/types.ts`                                 | `AgentContext.plotCastPlan?`                                                                                                    |
+| 注入   | `src/core/prompts/placeholder-registry.ts`                | `{{PLOT_CAST_PLAN}}` resolver（dispatcher）+ 默认模板                                                                           |
+| 组装   | `src/core/prompts/prompt-session-assembler.ts`            | `PLOT_CAST_PLAN` 进 ephemeral 正则                                                                                              |
 | 编排   | `src/ui/lib/game-pipeline.ts`                             | `handlePlotPreCheck` 落 `currentContext.plotCastPlan` + story 导演块 + `buildCharGenPlotInjection` 扩展                         |
 | 配置面 | `src/ui/components/settings/agent/placeholder-catalog.ts` | 徽章目录 `PLOT_CAST_PLAN`（request_dispatcher）                                                                                 |
 | 内容   | 私有仓 `agent-config.json`                                | pre_check 输出契约/工作流；dispatcher 复述规则；char_gen 命名约束优先级；dispatcher 模板加占位符                                |

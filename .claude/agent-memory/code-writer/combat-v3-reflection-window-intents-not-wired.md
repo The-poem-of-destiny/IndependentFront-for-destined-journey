@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-战斗 v3 M4（2026-08-01）做机制层时确认的真实缺口：`src/sillytavern/combat-v3/phases/attack.ts` 的 `finalizeAttack` 里，`damage.after` 与 `unit.beforeDown` 窗口的 `evaluateWindow(...)` 返回值**完全被丢弃**——反射（case-24/x1）与 death.threshold（case-07/x2）的 intent 目前根本没进 pendingChanges。
+战斗 v3 M4（2026-08-01）做机制层时确认的真实缺口：`src/core/combat/phases/attack.ts` 的 `finalizeAttack` 里，`damage.after` 与 `unit.beforeDown` 窗口的 `evaluateWindow(...)` 返回值**完全被丢弃**——反射（case-24/x1）与 death.threshold（case-07/x2）的 intent 目前根本没进 pendingChanges。
 
 **Why:** `applyIntents` 只在 `intents.test.ts` / `automata/reflection.test.ts` 单测里被调用，**没有接线进 attack.ts**（reflection.test.ts 传的是手工 `ctx2 = { ...ctx, reflectDepth }`，不是内核路径）。反伤命中骰（R8 attackHit 通道）也没在 damage.after 消费。
 

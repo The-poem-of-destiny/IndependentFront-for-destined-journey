@@ -2,10 +2,10 @@
 
 > ⚠️ **标签已过时（2026-08-18 标注）**：Phase 8 早已交付（根 `AGENTS.md` 进度表 ✅）。
 > 本文的**Agent 清单（11 个）与提示装配描述已被现状取代** —— 现在是 **13 个 Agent**
-> （多出 `combat_v3` 与 `image_prompt`），提示装配走 `placeholder-registry.ts` 的占位符注册表
+> （多出 `combat` 与 `image_prompt`），提示装配走 `placeholder-registry.ts` 的占位符注册表
 > 与预设系统，不是本文描述的那套。
 > **现行入口**：[`docs/reference/agent_system_prompt_guide.md`](../../reference/agent_system_prompt_guide.md)
-> 与 [`src/sillytavern/AGENTS.md`](../../../src/sillytavern/AGENTS.md)。
+> 与 [`src/core/AGENTS.md`](../../../src/core/AGENTS.md)。
 > 本文保留为**设计决策记录**（每个 Agent「应看到什么/不应看到什么」的判断依据仍然有参考价值）。
 
 > 基于 `docs/archive/planning/task_plan.md` Phase 8 章节
@@ -504,7 +504,7 @@ SillyTavern AI Response Preset 兼容格式：
 
 ### Step 1: 世界书加载引擎
 
-**新建**: `src/sillytavern/worldbook-loader.ts`
+**新建**: `src/core/content/worldbook-loader.ts`
 
 - 从 `data/worldbooks/` 加载所有世界书
 - 按 `worldBookIds` 过滤
@@ -514,7 +514,7 @@ SillyTavern AI Response Preset 兼容格式：
 
 ### Step 2: 关键词匹配引擎（精简版）
 
-**重构**: `src/sillytavern/lorebook-engine.ts`
+**重构**: `src/core/content/worldbook-loader.ts`
 
 - 保留 `key` / `keysecondary` / `selectiveLogic` 匹配
 - 砍掉递归扫描（不再需要）
@@ -523,7 +523,7 @@ SillyTavern AI Response Preset 兼容格式：
 
 ### Step 3: 预设加载器
 
-**新建**: `src/sillytavern/preset-loader.ts`
+**新建**: `src/core/prompts/preset-loader.ts`
 
 - 从 `data/presets/` 加载预设 JSON
 - 格式化为 Agent prompt 的「预设」部分
@@ -531,7 +531,7 @@ SillyTavern AI Response Preset 兼容格式：
 
 ### Step 4: Prompt 装配器（四部分拼接）
 
-**重构**: `src/sillytavern/agent-templates.ts`
+**重构**: `src/core/prompts/agent-templates.ts`
 
 - `buildAgentMessages()` 改为四部分拼接：预设 + 世界书 + 变量区 + 正文
 - 集成 `worldbook-loader` + `preset-loader`

@@ -36,9 +36,9 @@
 
 当前没有 RPM 字段或限流模块：
 
-- `ApiEndpoint` 只有地址、密钥、模型、超时和 thinking 开关（`src/sillytavern/types.ts`）。
-- `AgentOrchestrator` 会并行执行同 stage 的 Agent（`src/sillytavern/agent-orchestrator.ts`）。
-- `AgentClient.postCompletions()` 直接请求 `/api/chat/completions`（`src/sillytavern/agent-client.ts`）。
+- `ApiEndpoint` 只有地址、密钥、模型、超时和 thinking 开关（`src/core/types/types.ts`）。
+- `AgentOrchestrator` 会并行执行同 stage 的 Agent（`src/core/agents/agent-orchestrator.ts`）。
+- `AgentClient.postCompletions()` 直接请求 `/api/chat/completions`（`src/core/agents/agent-client.ts`）。
 - BFF `forward()` 只透传请求与响应，不做计数或排队（`server/routes/proxy.ts`）。
 
 v1 必须覆盖以下生产发送点：
@@ -80,7 +80,7 @@ BFF 看得到目标地址与 Authorization，但设置和玩家提示都在浏�
 
 ### D2：一个深模块拥有身份、计数、排队、计时和通知快照
 
-新建 `src/sillytavern/api-rpm-limiter.ts`，对调用方只暴露三件事：
+新建 `src/core/api/api-rpm-limiter.ts`，对调用方只暴露三件事：
 
 ```ts
 scheduleApiRequest<T>(

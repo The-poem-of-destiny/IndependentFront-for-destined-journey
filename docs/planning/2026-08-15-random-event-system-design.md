@@ -62,7 +62,7 @@
 
 ### 3.1 事件定义（内容侧，纯数据）
 
-新建分册 `src/sillytavern/types-random-events.ts`（不 import `types.ts`，先例 `types-map.ts:1-26`）：
+新建分册 `src/core/types/types-random-events.ts`（不 import `types.ts`，先例 `types-map.ts:1-26`）：
 
 ```ts
 /** 一条随机事件定义。全部叙事字段中文自由文本，引擎零解释。 */
@@ -181,7 +181,7 @@ randomEvents?: PackRandomEventsSection;
 
 ## 4. 调度器（Code 端，纯函数核）
 
-新模块 `src/sillytavern/random-event-scheduler.ts`（纯函数，**零中文字面量**——全部文案来自定义数据；随图/随包零改码的同款结构闸门）+ 运行时单例 `random-event-runtime.ts`（`installRandomEventDefs` / `getRandomEventDefs`，先例 `map-runtime.ts`）。
+新模块 `src/core/random-events/random-event-scheduler.ts`（纯函数，**零中文字面量**——全部文案来自定义数据；随图/随包零改码的同款结构闸门）+ 运行时单例 `random-event-runtime.ts`（`installRandomEventDefs` / `getRandomEventDefs`，先例 `map-runtime.ts`）。
 
 ### 4.1 MTTH 掷骰（逐天走）
 

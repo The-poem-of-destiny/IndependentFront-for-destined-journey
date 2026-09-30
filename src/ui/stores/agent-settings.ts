@@ -27,6 +27,8 @@
  *    形状是 `AgentDefaultEntry` —— 两者刻意同形，别把 UI 状态塞进去。
  */
 
+import type { LlmDefaultParameters } from '@engine/types/types-api';
+
 /** 一个 Agent 的全部可调项 —— 与 `AgentDefaultEntry` 同形（后者是磁盘上的项目默认值） */
 export interface AgentSettingsEntry {
   model: string;
@@ -241,6 +243,38 @@ export function getAgentSettings(
         readDefault<string>(layer, agentId, 'tailPrompt'),
       ),
     ),
+  };
+}
+
+/**
+ * 一个 Agent 的**有效采样/长度参数** —— 优先级：
+ *   **Agent 显式覆写 > 源级默认（API 池 `defaultParameters`）> 内容包/占位默认层 > 硬兜底**。
+ *
+ * 存在的理由（「参数跟随模型」）：换一个模型 = 换一个 API 池，池上配一次采样参数即可，
+ * 不必逐个 Agent 重设。Agent 那份因此**降级为可选的覆写** —— 只有用户在 Agent 设置里
+ * 显式改过的字段才压过池默认（判据同 `getAgentSettings` 的覆写层，`undefined` = 未覆写）。
+ *
+ * 🔴 池默认**压过内容包默认层**是刻意的：`agent-config.json` 给**每个** Agent 都写了
+ *    temperature=0.7 等值，若池默认排在默认层之下，它**永远轮不到生效**（用户配了却
+ *    毫无变化，且无报错）。用户对设备本地池的显式配置优先于内容出厂默认。
+ * 🔴 只含真正的采样/长度五参。重试次数（客户端行为）、历史层数、末尾指令（角色行为）
+ *    不在此列 —— 它们跟人不跟模型。
+ */
+export function resolveAgentLlmParams(
+  bag: SettingsBag,
+  agentId: string,
+  defaultsLayer?: AgentDefaultsLayer,
+  poolDefaults?: LlmDefaultParameters,
+): { temperature: number; topP: number; freqPen: number; presPen: number; maxTokens: number } {
+  const cfg = getAgentSettings(bag, agentId, defaultsLayer);
+  const override = (field: keyof AgentSettingsEntry): number | undefined =>
+    readOverride<number>(bag, agentId, field);
+  return {
+    temperature: override('temperature') ?? poolDefaults?.temperature ?? cfg.temperature,
+    topP: override('topP') ?? poolDefaults?.topP ?? cfg.topP,
+    freqPen: override('freqPen') ?? poolDefaults?.frequencyPenalty ?? cfg.freqPen,
+    presPen: override('presPen') ?? poolDefaults?.presencePenalty ?? cfg.presPen,
+    maxTokens: override('maxTokens') ?? poolDefaults?.maxTokens ?? cfg.maxTokens,
   };
 }
 

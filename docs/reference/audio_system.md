@@ -695,14 +695,14 @@ AI 标记那条**不再是「无从验起」** —— prompt 侧接线后它已�
 
 | 文件                                              | 用例数 | 覆盖范围                                                                                                                      |
 | ------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `src/core/audio/audio-channels.test.ts`           | 69     | 队列推进矩阵、shuffle、淡入淡出、object URL 回收、**加载世代号作废矩阵**、时长广播、`pruneTracks`、声池抢占/并发上限/三道门禁 |
-| `src/core/audio/audio-manager.test.ts`            | 54     | 曲库注册表、master gain、解锁与 pending 兑现、`playByTag` 命中/多命中/fallback、状态广播                                      |
-| `src/core/audio/audio-names.test.ts`              | 40     | 归一化四步、扩展名边界、`findByName` 稳定性、`isNameTaken`、`uniqueAudioName` 换号                                            |
-| `src/ui/lib/audio-folder.test.ts`                 | 27     | 能力探测、句柄持久化、权限归一化、扫描过滤/排序/单文件容错、`resolveFile` NotFound                                            |
-| `src/ui/lib/audio-singleton.test.ts`              | 26     | 惰性单例、无 Web Audio 时的静默桩、`setBlobResolver`、首次手势解锁监听与自摘                                                  |
-| `src/ui/stores/audio-store.test.ts`               | 40     | 库加载、上传编号与配额中止、CRUD 拒绝路径、**批量删除/批量加入的分项计数**、文件夹对账与部分失败汇总、按名播放                |
-| `src/ui/components/settings/AudioSection.test.ts` | 35     | 设置页三段式交互（拆分后仍从壳层挂载整棵子树）、拖拽排序、曲库多选与批量动作                                                  |
-| `src/ui/components/game/MiniPlayer.test.ts`       | 12     | 迷你播放器交互与轮询配对                                                                                                      |
+| `tests/core/audio/audio-channels.test.ts`           | 69     | 队列推进矩阵、shuffle、淡入淡出、object URL 回收、**加载世代号作废矩阵**、时长广播、`pruneTracks`、声池抢占/并发上限/三道门禁 |
+| `tests/core/audio/audio-manager.test.ts`            | 54     | 曲库注册表、master gain、解锁与 pending 兑现、`playByTag` 命中/多命中/fallback、状态广播                                      |
+| `tests/core/audio/audio-names.test.ts`              | 40     | 归一化四步、扩展名边界、`findByName` 稳定性、`isNameTaken`、`uniqueAudioName` 换号                                            |
+| `tests/ui/lib/audio-folder.test.ts`                 | 27     | 能力探测、句柄持久化、权限归一化、扫描过滤/排序/单文件容错、`resolveFile` NotFound                                            |
+| `tests/ui/lib/audio-singleton.test.ts`              | 26     | 惰性单例、无 Web Audio 时的静默桩、`setBlobResolver`、首次手势解锁监听与自摘                                                  |
+| `tests/ui/stores/audio-store.test.ts`               | 40     | 库加载、上传编号与配额中止、CRUD 拒绝路径、**批量删除/批量加入的分项计数**、文件夹对账与部分失败汇总、按名播放                |
+| `tests/ui/components/settings/AudioSection.test.ts` | 35     | 设置页三段式交互（拆分后仍从壳层挂载整棵子树）、拖拽排序、曲库多选与批量动作                                                  |
+| `tests/ui/components/game/MiniPlayer.test.ts`       | 12     | 迷你播放器交互与轮询配对                                                                                                      |
 
 ### 为什么引擎层必须有注入缝
 
@@ -722,7 +722,7 @@ vitest 的 `environment: 'node'` 里**没有** `AudioContext`、`Audio`、`URL.c
 | `src/core/types/types-audio.ts`               | 注入 seam 接口 + 两声道与 Manager 的 state/options 形状（由 `types.ts` 再导出）                                                                                                    |
 | `src/core/audio/audio-manager.ts`             | `AudioManager` 门面：曲库注册表 / master gain / 解锁 / `playByTag`                                                                                                                 |
 | `src/core/audio/audio-names.ts`               | 名称归一化 / `findByName` / `isNameTaken` / `uniqueAudioName` / 扩展名→MIME 表                                                                                                     |
-| `src/core/audio/audio-fakes.ts`               | 共享测试替身（伪 AudioContext / AudioElement）                                                                                                                                     |
+| `tests/core/audio/audio-fakes.ts`               | 共享测试替身（伪 AudioContext / AudioElement）                                                                                                                                     |
 | `src/core/types/types.ts`                     | `AudioSourceKind` / `AudioTrackKind` / `AudioTrack` / `AudioBlobRecord` / `AudioHandleRecord` / `AudioPlaylist` / `AudioRepeatMode` / `AudioPlaybackState`                         |
 | `src/core/persistence/database.ts`            | 音频四表（v11 引入前三张、v12 追加 `audioHandles`；库现为 `DB_VERSION = 22`）+ 音频 CRUD（事务保证元数据/字节原子）                                                                |
 | `src/ui/lib/audio-singleton.ts`               | 惰性单例 / 浏览器工厂 / 静默桩 / `setBlobResolver` / 首次手势解锁监听                                                                                                              |

@@ -109,7 +109,7 @@ app **永远不解析 CK3 文本格式** —— 那是创作格式，不是运�
 1. **随图而变的数据全在包里，引擎零地图字面量。** 地形词汇与系数、费率、气候/天气词汇表、
    国家/中层/颜色、绑定表、比例尺 —— 全部是 pack 字段（§4 `travelRules`/`climates`/…）。
    规则**默认表由编译脚本持有**（工具链的一部分，与地图同仓同步演化）；引擎只有类型、算法
-   与兜底值（未知系数 1.0）。**结构闸门**钉死这条（§10）：`src/sillytavern/map-*.ts` 禁止
+   与兜底值（未知系数 1.0）。**结构闸门**钉死这条（§10）：`src/core/map/map-*.ts` 禁止
    出现任何中文字面量 —— 给新地形调系数，改的是 mapdata 侧的规则文件，重编译即可。
 2. **存档不钉包版本，投影自愈。** 全装置只有一个现行包。`worldFlags.map` 记 `packVersion`
    戳；加载或提交时发现与现行包不符 → 清 `lastTileId`/`journey`/`weatherStamp`，按当前
@@ -161,10 +161,10 @@ interface MapTile {
 要点：
 
 - **两套地形词汇并存，不强行统一**：地块地形用 sample 的 19 值（本 pack 的 `terrains`），
-  既有 `TerrainType`（[types.ts:3624](../../src/sillytavern/types.ts)，12 值，含「城市/飞艇」这类非地形值）
+  既有 `TerrainType`（[types.ts:3624](../../src/core/types/types.ts)，12 值，含「城市/飞艇」这类非地形值）
   只属于旧语义图的**边**，两者语境不同。v1 只在旅行代价表里做一张单向映射，不动旧类型。
 - **不新增 Dexie 表**。每存档可变状态全部进 `SaveProfile.worldFlags.map`
-  （worldFlags 见 [types.ts:2757](../../src/sillytavern/types.ts)，已在 FullBackup 内）：
+  （worldFlags 见 [types.ts:2757](../../src/core/types/types.ts)，已在 FullBackup 内）：
 
 ```ts
 worldFlags.map = {
@@ -195,15 +195,15 @@ worldFlags.map = {
 
 接线点（全部是既有缝，不开新写路径）：
 
-| 缝                                                                                                      | 动作                                                                                                                                                                                          |
-| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [state-manager.ts:1142](../../src/sillytavern/state-manager.ts) `applySetLocation`                      | 落位后同一事务内解析 tile、更新 `worldFlags.map.lastTileId`（解析失败保持原值）                                                                                                               |
-| [state-manager.ts:1539](../../src/sillytavern/state-manager.ts) `applyTimeAdvance`                      | 跨天时按 `weatherStamp` 判断是否重断言天气（§7）                                                                                                                                              |
-| [game-pipeline.ts:801](../../src/ui/lib/game-pipeline.ts) `buildStatData`                               | 补传 `weather`（**既有漂移修复**：`stat-projection.ts:193` 早就会写 `stats.世界.天气`，只是没人供值）                                                                                         |
-| [agent-templates.ts:180](../../src/sillytavern/agent-templates.ts) `buildCapabilityInput`               | 补传 `weather`（同上第二处漂移：`ejs-capabilities.ts:304` 的 `world.天气` 永远空串）                                                                                                          |
-| [placeholder-registry.ts:209](../../src/sillytavern/placeholder-registry.ts) + `placeholder-catalog.ts` | 新增 `{{MAP_CONTEXT}}`（**两处都要动**，目录文件头有红字）                                                                                                                                    |
-| EJS 能力面                                                                                              | `$map` 只读 namespace（currentTile / neighbors(含方位·地形·通行性·异主标注) / ownerOf / weatherNow / journey 摘要），供世界书 EJS 与脚本沙盒查询 —— story 的 MAP_CONTEXT 世界书条目就从它渲染 |
-| 提交后胶水（`agent-orchestrator` 提交流程内）                                                           | 读 `variables.sys.旅行目的地`：有值且落位成功 → 设/更新 `worldFlags.map.journey`（含 `findPath` 计划路线与到达估算）；清空或到达 → 清旗。落位失败 = 不设旗，无害（§8.2）                      |
+| 缝                                                                                                       | 动作                                                                                                                                                                                          |
+| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [state-manager.ts:1142](../../src/core/state/state-manager.ts) `applySetLocation`                        | 落位后同一事务内解析 tile、更新 `worldFlags.map.lastTileId`（解析失败保持原值）                                                                                                               |
+| [state-manager.ts:1539](../../src/core/state/state-manager.ts) `applyTimeAdvance`                        | 跨天时按 `weatherStamp` 判断是否重断言天气（§7）                                                                                                                                              |
+| [game-pipeline.ts:801](../../src/ui/lib/game-pipeline.ts) `buildStatData`                                | 补传 `weather`（**既有漂移修复**：`stat-projection.ts:193` 早就会写 `stats.世界.天气`，只是没人供值）                                                                                         |
+| [agent-templates.ts:180](../../src/core/prompts/agent-templates.ts) `buildCapabilityInput`               | 补传 `weather`（同上第二处漂移：`ejs-capabilities.ts:304` 的 `world.天气` 永远空串）                                                                                                          |
+| [placeholder-registry.ts:209](../../src/core/prompts/placeholder-registry.ts) + `placeholder-catalog.ts` | 新增 `{{MAP_CONTEXT}}`（**两处都要动**，目录文件头有红字）                                                                                                                                    |
+| EJS 能力面                                                                                               | `$map` 只读 namespace（currentTile / neighbors(含方位·地形·通行性·异主标注) / ownerOf / weatherNow / journey 摘要），供世界书 EJS 与脚本沙盒查询 —— story 的 MAP_CONTEXT 世界书条目就从它渲染 |
+| 提交后胶水（`agent-orchestrator` 提交流程内）                                                            | 读 `variables.sys.旅行目的地`：有值且落位成功 → 设/更新 `worldFlags.map.journey`（含 `findPath` 计划路线与到达估算）；清空或到达 → 清旗。落位失败 = 不设旗，无害（§8.2）                      |
 
 ## 6. 路径规划
 
@@ -234,7 +234,7 @@ days      = ceil(Σcost / rate)
 - 地形系数与费率在 **pack `travelRules`**（裁定 §12-14 修订 §12-11：规则默认表由编译脚本
   持有、随图出包 —— 换图加地形零改码；前代 ADR-105「规则在一个存档内稳定」的诉求由包版本
   承担）；未知地形系数引擎回退 1.0（宁可漏不可猜，先例 `image-world-tags`）。
-- 既有 `TravelResult`（[types.ts:3638](../../src/sillytavern/types.ts)，声明至今零使用）退役，
+- 既有 `TravelResult`（[types.ts:3638](../../src/core/types/types.ts)，声明至今零使用）退役，
   新类型 `MapRoute = { tilePath: number[]; days: number; crossings: string[] }`
   （crossings = 途经的中层/国家名与水段，给回执与 UI 用），不再双轨。
 
@@ -411,7 +411,7 @@ story 叙事移动
     海岸邻接（登离船只发生在有邻接的岸线）；`via` 顺序保持、`avoid` 生效；路径对称；
     `weatherAt` 同参幂等；`coerceMapPack` 对任意坏输入不抛。
   - 表测试：边类型系数表、天气加权表、`resolveTileByLocation` 的落位契约五条（§8.2）逐条三态。
-  - **结构闸门**（§3.4）：`src/sillytavern/map-*.ts` 禁止中文字面量（先例
+  - **结构闸门**（§3.4）：`src/core/map/map-*.ts` 禁止中文字面量（先例
     `start-catalog-mechanics.test.ts` 的导出名黑名单闸门）—— 地图词汇只许活在 pack 里。
   - **换包自愈**：同一存档热换 fixture pack（`packVersion` 变）→ 派生态清空、按位置路径
     重落位、不抛不崩（§3.4）。

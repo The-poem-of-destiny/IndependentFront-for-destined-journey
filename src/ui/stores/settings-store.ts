@@ -67,6 +67,10 @@ export interface ApiEntry {
   timeoutMs?: number;
   bodyOverrides?: import('@engine/types/types-api').JsonObject;
   bodyOmitPaths?: string[];
+  /** 源级自定义请求头（BFF 经 `X-Custom-Headers` 并入上游） */
+  headerOverrides?: import('@engine/types/types-api').HeaderOverrides;
+  /** 源级默认采样参数（Agent 覆写优先于它） */
+  defaultParameters?: import('@engine/types/types-api').LlmDefaultParameters;
   revision?: number;
   anthropicVersion?: string;
   anthropicBeta?: string[];

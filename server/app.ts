@@ -108,6 +108,8 @@ export function buildHonoApp(options: BffAppOptions = {}): Hono {
         'x-api-key',
         'anthropic-version',
         'anthropic-beta',
+        // 源级自定义请求头载荷（前端 → BFF；BFF 解析后并入上游，保护名单见 proxy.ts）
+        'X-Custom-Headers',
       ],
       exposeHeaders: ['Content-Type'],
     }),

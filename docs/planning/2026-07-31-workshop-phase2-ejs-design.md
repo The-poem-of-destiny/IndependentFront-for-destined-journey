@@ -146,7 +146,7 @@ tokenize(content)  →  buildFnBody(tokens)  →  new Function(...沙盒参数, 
 
 ### D4 — 契约轴①：`stats` 只读面（stat-projection.ts）
 
-新纯函数模块 `src/sillytavern/stat-projection.ts`：
+新纯函数模块 `src/core/character/stat-projection.ts`：
 
 ```ts
 buildStatData(input: {
@@ -290,18 +290,18 @@ ejsCtx: { stats: ctx.statData, vars: sys 草稿, history: ctx.history }
 
 新增/改动模块清单：
 
-| 模块                                      | 动作                                                                           |
-| ----------------------------------------- | ------------------------------------------------------------------------------ |
-| `src/sillytavern/ejs-runtime.ts`          | 重写执行层为整片编译（D2）+ 沙盒参数遮蔽（D3）+ 两轴/别名注入（D4/D5）         |
-| `src/sillytavern/ejs-lodash-shim.ts`      | 🆕 19+1 方法 shim                                                              |
-| `src/sillytavern/stat-projection.ts`      | 🆕 `buildStatData` 投影                                                        |
-| `src/sillytavern/worldbook-loader.ts`     | 🆕 `renderWorldBookEntries` + `hasDynamic`；`formatWorldBookEntries` 不动      |
-| `src/sillytavern/placeholder-registry.ts` | `LORE_BOOK` 改调 `renderWorldBookEntries`，支持 `section=` 参数                |
-| `src/sillytavern/agent-templates.ts`      | `buildFallbackMessages` 同步改调                                               |
-| `src/sillytavern/types.ts`                | `AgentContext.statData?`；`AgentConfig.ejsVarsCommit?`（默认仅 story 置 true） |
-| `src/sillytavern/ejs-vars-diff.ts`        | 🆕 深 diff（回合开始克隆 vs 最终草稿）→ set/del VarsPatch 纯函数 + 体积护栏    |
-| `src/sillytavern/state-manager.ts`        | `commitChatState` payload 加可选 EJS 差量；应用顺序钉死「EJS 差量 → AI 补丁」  |
-| `src/ui/lib/game-pipeline.ts`             | ctx 注入 `statData`；story pass 草稿暂存 → diff → 结算提交                     |
+| 模块                                       | 动作                                                                           |
+| ------------------------------------------ | ------------------------------------------------------------------------------ |
+| `src/core/ejs/ejs-runtime.ts`              | 重写执行层为整片编译（D2）+ 沙盒参数遮蔽（D3）+ 两轴/别名注入（D4/D5）         |
+| `src/core/ejs/ejs-lodash-shim.ts`          | 🆕 19+1 方法 shim                                                              |
+| `src/core/character/stat-projection.ts`    | 🆕 `buildStatData` 投影                                                        |
+| `src/core/content/worldbook-loader.ts`     | 🆕 `renderWorldBookEntries` + `hasDynamic`；`formatWorldBookEntries` 不动      |
+| `src/core/prompts/placeholder-registry.ts` | `LORE_BOOK` 改调 `renderWorldBookEntries`，支持 `section=` 参数                |
+| `src/core/prompts/agent-templates.ts`      | `buildFallbackMessages` 同步改调                                               |
+| `src/core/types/types.ts`                  | `AgentContext.statData?`；`AgentConfig.ejsVarsCommit?`（默认仅 story 置 true） |
+| `src/core/ejs/ejs-vars-diff.ts`            | 🆕 深 diff（回合开始克隆 vs 最终草稿）→ set/del VarsPatch 纯函数 + 体积护栏    |
+| `src/core/state/state-manager.ts`          | `commitChatState` payload 加可选 EJS 差量；应用顺序钉死「EJS 差量 → AI 补丁」  |
+| `src/ui/lib/game-pipeline.ts`              | ctx 注入 `statData`；story pass 草稿暂存 → diff → 结算提交                     |
 
 ---
 

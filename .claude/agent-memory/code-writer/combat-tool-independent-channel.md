@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-> 🪦 **本记忆已过时（2026-08-01 M5-PR2）**：`executeCombatToolCall` / `CombatToolContext` / Group E 已随 v2 战斗运行时**真正退役删除**。v2 combat 工具由 v3 内核 + `['combat_v3']` 工具集接管。见 [[combat-v3-m5-pr2-v2-retired]]。以下为历史背景，仅供参考。
+> 🪦 **本记忆已过时（2026-08-01 M5-PR2）**：`executeCombatToolCall` / `CombatToolContext` / Group E 已随 v2 战斗运行时**真正退役删除**。v2 combat 工具由 v3 内核 + `['combat']` 工具集接管。见 [[combat-v3-m5-pr2-v2-retired]]。以下为历史背景，仅供参考。
 
 combat agent 的 13 个 combat/status 工具走**独立执行通道** `executeCombatToolCall(ctx: CombatToolContext)`，不污染现有 `ToolExecutionContext`（只有 {characters,variables,saveId}，缺 bus/combatants/战斗实例）。
 

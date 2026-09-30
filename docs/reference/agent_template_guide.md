@@ -127,8 +127,8 @@ prompt 的拼装顺序与注入内容**。首轮 / 重基线仍由 `buildAgentMe
 | `{{ITEM_REQUEST}}`    | craft-gen-chain / char-gen-agent                            | item_gen                 | 从上游输出 XML 提取                                                                             |
 | `{{CHAR_GEN_RESULT}}` | char-gen-agent                                              | item_gen                 | `ctx.agentOutputs`                                                                              |
 | `{{CRAFT_RESULT}}`    | craft-gen-chain                                             | item_gen                 | `ctx.agentOutputs`                                                                              |
-| `{{COMBAT_BRIEF}}`    | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 / combat_enemy | 开局消息渲染的 `localParams`；开启分离时按角色建立隔离消息                                      |
-| `{{COMBAT_ROSTER}}`   | game-pipeline.handleCombatTriggerV3 → combat-v3/coordinator | combat_v3 / combat_enemy | 同上（从 `<combat_trigger>` 的 allies/enemies 组装「我方/敌方」名单，敌方后续只读投影另行裁剪） |
+| `{{COMBAT_BRIEF}}`    | game-pipeline.handleCombatTriggerV3 → combat/coordinator | combat / combat_enemy | 开局消息渲染的 `localParams`；开启分离时按角色建立隔离消息                                      |
+| `{{COMBAT_ROSTER}}`   | game-pipeline.handleCombatTriggerV3 → combat/coordinator | combat / combat_enemy | 同上（从 `<combat_trigger>` 的 allies/enemies 组装「我方/敌方」名单，敌方后续只读投影另行裁剪） |
 
 **重要**: 链占位符不出现在 `PLACEHOLDER_REGISTRY` 的正常解析路径中——registry 只返回空串 fallback。实际值由 `resolveTemplate()` 的 `localParams` 参数接管（优先级高于 registry）。
 
@@ -414,7 +414,7 @@ ST 预设中 COT（思维链）条目大量使用 EJS 条件模板来控制不�
 ### 测试
 
 ```bash
-npx vitest run src/core/prompts/preset-loader.test.ts  # 48 tests，覆盖所有占位符类型
+npx vitest run tests/core/prompts/preset-loader.test.ts  # 48 tests，覆盖所有占位符类型
 ```
 
 ---

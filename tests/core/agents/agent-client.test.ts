@@ -226,6 +226,47 @@ describe('AgentClient', () => {
       expect(body).not.toHaveProperty('reasoning_effort');
     });
 
+    it('🆕 源级默认采样参数：请求未给值时兜底，请求值优先（侧链/战斗也吃到）', async () => {
+      const mockFn = mockFetch({
+        choices: [{ message: { content: 'ok' } }],
+        usage: { total_tokens: 10 },
+      });
+      globalThis.fetch = mockFn;
+      client = new AgentClient({
+        endpoint: makeEndpoint({
+          defaultParameters: {
+            temperature: 0.3,
+            topP: 0.8,
+            frequencyPenalty: 0.5,
+            presencePenalty: -0.2,
+            maxTokens: 2048,
+          },
+        }),
+        agentId: 'story',
+        saveId: 'save_test',
+        timeout: 5000,
+        maxRetries: 0,
+      });
+
+      await client.chat({ messages: [{ role: 'user', content: 'x' }] });
+      const body = JSON.parse(mockFn.mock.calls[0][1].body);
+      expect(body.temperature).toBe(0.3);
+      expect(body.top_p).toBe(0.8);
+      expect(body.frequency_penalty).toBe(0.5);
+      expect(body.presence_penalty).toBe(-0.2);
+      expect(body.max_tokens).toBe(2048);
+
+      mockFn.mockClear();
+      await client.chat({
+        messages: [{ role: 'user', content: 'x' }],
+        temperature: 1.1,
+        maxTokens: 99,
+      });
+      const overridden = JSON.parse(mockFn.mock.calls[0][1].body);
+      expect(overridden.temperature).toBe(1.1);
+      expect(overridden.max_tokens).toBe(99);
+    });
+
     it('API 源参数覆盖 Agent 同名参数，并在覆盖后省略字段', async () => {
       client = new AgentClient({
         endpoint: makeEndpoint({

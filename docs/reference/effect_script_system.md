@@ -11,7 +11,7 @@
 | 场景                                              | 效果机制                                                                                     |
 | ------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | 战斗**外**（装备/卸下、状态到期、读档接线、制作） | 本文的 `scripts` + `$` API（`script-executor.ts` + `subscription-manager.ts` + `emitChain`） |
-| 战斗**内**（v3 内核主持的整场战斗）               | **EffectAutomaton DSL**（`src/core/combat-v3/automata/`，18 窗口声明 + 8 大类 intent）       |
+| 战斗**内**（v3 内核主持的整场战斗）               | **EffectAutomaton DSL**（`src/core/combat/automata/`，18 窗口声明 + 8 大类 intent）       |
 
 ADR-20 的原文是「声明式优先，复杂动态逻辑走脚本沙盒」；**战斗内那半边已在 v3 收紧成
 「任意 JS 一律废止」** —— 战斗要的是可回放、可仲裁、可静态校验的效果声明，而任意 JS 三条都给不了。
@@ -159,7 +159,7 @@ bus.emit({ type: 'status_effect', data: { ... } })
 **🪦 三条已失效的行（原表所载）**：
 
 - `combat-resolver` / `combat_action` —— **`combat-resolver.ts` 已被 M5 删除**，`$combat` API 与
-  8 步伤害管线随 v2 运行时一起退役。现在战斗流程由 `combat-v3/` 内核主持，它**不发 GameEvent**，
+  8 步伤害管线随 v2 运行时一起退役。现在战斗流程由 `combat/` 内核主持，它**不发 GameEvent**，
   走自己的 `DomainEvent` + 双投影。`game-event.ts:355` 还留着 `createCombatEvent()` 这个 helper，
   但**生产侧零调用**（只有 `game-event.test.ts` 在用）—— 别按它推断「战斗会发事件到 EventBus」。
 - `craft-resolver` / `craft_action` —— `craft-resolver.ts` 仍在服役，但它**不 emit 任何 GameEvent**

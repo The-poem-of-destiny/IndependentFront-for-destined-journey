@@ -34,19 +34,19 @@ Code 决定本轮能否推进细化，AI 决定具体行动与伏笔。节点随
 
 以下是本次从磁盘核对的实施依据。
 
-| 位置                                                                    | 已有行为                                                                 | 实施影响                                                                                             |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `src/sillytavern/types.ts`：`SaveProfile`                               | `worldFlags` 与 `variables` 是并列字段                                   | 设计 §5.1 的 `saveProfiles.variables.worldFlags` 应更正为 `SaveProfile.worldFlags`，不能创建嵌套副本 |
-| `src/sillytavern/plot-engine.ts`：`parsePreCheckOutput`、`preCheckPlot` | 解析后只处理大纲；`triggeredEvents` 为空即返回                           | 细化必须独立处理，不能挂在触发事件非空分支内                                                         |
-| `src/ui/lib/game-pipeline.ts`：`handlePlotPreCheck`                     | 同步生成 Story 导演块，异步写大纲事件                                    | 先接受细化声明并更新本轮上下文，再让 Story/post 使用；不得依赖异步 pre 落库顺序                      |
-| 同文件：`persistPlotPostCheck`                                          | 大纲结算完成后生成关联记忆                                               | 细化结算不走 `eventToMemory`，不冒充大纲事件                                                         |
-| 同文件：`executeRun`                                                    | 成功后排空剧情任务，再 `advanceTurn()`；失败不推进回合                   | 细化状态应在成功收口、快照之前提交；不把失败尝试算作冷却回合                                         |
-| `src/sillytavern/state-manager.ts`                                      | profile 写入已有 per-save FIFO；`advanceTurn()` 后创建快照               | 新写入口复用锁；锁内重读 profile，避免覆盖并行变量/地图写入，不嵌套同锁                              |
-| `src/sillytavern/agent-templates.ts`：`buildPlotContextBlock`           | pre/post 的 `PLOT_EVENTS` 被替换为富上下文                               | baseline 可在该块附加细化快照，保留既有模板入口                                                      |
-| `src/sillytavern/prompt-state-projection.ts`                            | `plot` 仅有 active/pending 的 `{title,status}`；变为 null 不发清空 delta | 必须扩投影；新增节点视图清空时也必须发送明确空值，避免模型保留旧节点                                 |
-| `src/sillytavern/prompt-session-assembler.ts`                           | `PLOT_EVENTS` 是 projection-backed；`AGENT.*` 每轮注入                   | 持久节点走 plot，闸门和同轮声明走 turn context，不能塞进静态 system                                  |
-| `src/ui/components/game/PlotPanel.vue`                                  | `visibility` 与临时 `spoilerMode/peeked` 分离                            | 节点 status 不足以判断是否剧透，必须补独立揭示契约                                                   |
-| `src/sillytavern/time-system.ts`                                        | 已有 `parseMonthTime`、`compareMonthTime`、`toEpochMinutes`、`diffDays`  | 复用游戏历法，不用宿主 `Date` 解析游戏月份                                                           |
+| 位置                                                                  | 已有行为                                                                 | 实施影响                                                                                             |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `src/core/types/types.ts`：`SaveProfile`                              | `worldFlags` 与 `variables` 是并列字段                                   | 设计 §5.1 的 `saveProfiles.variables.worldFlags` 应更正为 `SaveProfile.worldFlags`，不能创建嵌套副本 |
+| `src/core/plot/plot-engine.ts`：`parsePreCheckOutput`、`preCheckPlot` | 解析后只处理大纲；`triggeredEvents` 为空即返回                           | 细化必须独立处理，不能挂在触发事件非空分支内                                                         |
+| `src/ui/lib/game-pipeline.ts`：`handlePlotPreCheck`                   | 同步生成 Story 导演块，异步写大纲事件                                    | 先接受细化声明并更新本轮上下文，再让 Story/post 使用；不得依赖异步 pre 落库顺序                      |
+| 同文件：`persistPlotPostCheck`                                        | 大纲结算完成后生成关联记忆                                               | 细化结算不走 `eventToMemory`，不冒充大纲事件                                                         |
+| 同文件：`executeRun`                                                  | 成功后排空剧情任务，再 `advanceTurn()`；失败不推进回合                   | 细化状态应在成功收口、快照之前提交；不把失败尝试算作冷却回合                                         |
+| `src/core/state/state-manager.ts`                                     | profile 写入已有 per-save FIFO；`advanceTurn()` 后创建快照               | 新写入口复用锁；锁内重读 profile，避免覆盖并行变量/地图写入，不嵌套同锁                              |
+| `src/core/prompts/agent-templates.ts`：`buildPlotContextBlock`        | pre/post 的 `PLOT_EVENTS` 被替换为富上下文                               | baseline 可在该块附加细化快照，保留既有模板入口                                                      |
+| `src/core/prompts/prompt-state-projection.ts`                         | `plot` 仅有 active/pending 的 `{title,status}`；变为 null 不发清空 delta | 必须扩投影；新增节点视图清空时也必须发送明确空值，避免模型保留旧节点                                 |
+| `src/core/prompts/prompt-session-assembler.ts`                        | `PLOT_EVENTS` 是 projection-backed；`AGENT.*` 每轮注入                   | 持久节点走 plot，闸门和同轮声明走 turn context，不能塞进静态 system                                  |
+| `src/ui/components/game/PlotPanel.vue`                                | `visibility` 与临时 `spoilerMode/peeked` 分离                            | 节点 status 不足以判断是否剧透，必须补独立揭示契约                                                   |
+| `src/core/time/time-system.ts`                                        | 已有 `parseMonthTime`、`compareMonthTime`、`toEpochMinutes`、`diffDays`  | 复用游戏历法，不用宿主 `Date` 解析游戏月份                                                           |
 
 设计 §7 的“记忆自然承接”按 §10 解释为：正文继续进入既有记忆流程，结构化伏笔连续性由
 节点快照承担；不为细化节点额外创建记忆记录。
@@ -194,7 +194,7 @@ post 失败而整个回合仍被编排器判定 completed 时，建议只保存 
 
 ### T1：实现节点领域逻辑与纯节奏判据
 
-**拟新增**：`src/sillytavern/plot-threads.ts`、同名测试。
+**拟新增**：`src/core/plot/plot-threads.ts`、同名测试。
 **扩展**：`save-profile.ts`、必要的集中类型/枚举定义。
 
 1. 定义节点/状态袋/声明/结算/闸门结果类型，按名查找与图边推导只有一个实现。
@@ -339,9 +339,9 @@ Delta 设计的普通回合 miss 预算，不新增摘要 Agent 或自动删除�
 建议命令（实施对应文件存在后运行）：
 
 ```bash
-npm run test:run -- src/sillytavern/plot-threads.test.ts src/sillytavern/plot-engine.test.ts src/sillytavern/state-manager.plot-threads.test.ts
-npm run test:run -- src/ui/lib/game-pipeline.test.ts src/sillytavern/agent-templates.test.ts src/sillytavern/placeholder-registry.test.ts src/sillytavern/prompt-state-projection.test.ts src/sillytavern/prompt-session-assembler.test.ts
-npm run test:run -- src/sillytavern/session-backup.test.ts src/sillytavern/database.test.ts
+npm run test:run -- tests/core/plot/plot-threads.test.ts tests/core/plot/plot-engine.test.ts tests/core/state/state-manager.plot-threads-restore.test.ts
+npm run test:run -- tests/ui/lib/game-pipeline.test.ts tests/core/prompts/agent-templates.test.ts tests/core/prompts/placeholder-registry.test.ts tests/core/prompts/prompt-state-projection.test.ts tests/core/prompts/prompt-session-assembler.test.ts
+npm run test:run -- tests/core/persistence/session-backup.test.ts tests/core/persistence/database.test.ts
 npm run gates
 ```
 
@@ -370,7 +370,7 @@ npm run gates
 | 项目              | 状态 | 实际记录                                                                                                                                                                                                                                                                                                                                                    |
 | ----------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | T0 契约收口       | ✅   | 设计文档追加 §11（2026-09-09 收口裁定：存储形状/节奏判据/AI 输出契约/侧链实体化/持久化时机）；§5.1 存储路径已更正                                                                                                                                                                                                                                           |
-| T1 领域逻辑       | ✅   | `src/sillytavern/plot-threads.ts` + 测试 28 条全绿（固定输入确定性/冷却边界 t+3 关 t+4 开/跨年窗口/空白期/reducer 语义/去重边/前向引用/快照闭包/surface 防剧透）                                                                                                                                                                                            |
+| T1 领域逻辑       | ✅   | `src/core/plot/plot-threads.ts` + 测试 28 条全绿（固定输入确定性/冷却边界 t+3 关 t+4 开/跨年窗口/空白期/reducer 语义/去重边/前向引用/快照闭包/surface 防剧透）                                                                                                                                                                                              |
 | T2 管线与持久化   | ✅   | `plot-engine.ts` 解析扩展（parseThreadDeclarations/Updates/RevealedNames + countAcceptableTriggers）；`save-profile.commitPlotThreadTurn`（锁内重读窄写+幂等，4 条测试）；game-pipeline 闸门/工作集/导演块/成功收口/char_gen 时点分流注入（buildCharGenProjectionA/B）                                                                                      |
 | T3 上下文与 Delta | ✅   | plot scope 并入节点快照 + 显式清空（set null）；PLOT_THREAD_TURN / PLOT_THREAD_SURFACE 两个 ephemeral resolver + 模板注册 + placeholder-catalog；buildPlotContextBlock 富块；6 条 projection/assembler 测试（wire 前缀稳定、delta 只发变化）                                                                                                                |
 | T4 内容交付       | ✅   | 公开占位 `public/data/defaults/agent-config.json`（pre/post systemPrompt + 3 模板，U+FFFD=0 / ctrl=0 / JSON 可解析）；私有内容仓 `agent-config.json` 同步 + **pack 2.7.0 构建成功**（agentDefaults.agents 13 个，含新契约）；`agent流程测试/要求.md` 追加主线细化测试要求；story 预设 `AGENT.PLOT_PRE_CHECK` ✓（预设短路无碍）。⚠ 真实 LLM 回合验证留待真机 |

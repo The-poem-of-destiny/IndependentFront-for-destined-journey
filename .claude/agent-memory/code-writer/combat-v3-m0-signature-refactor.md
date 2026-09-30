@@ -7,7 +7,7 @@ metadata:
 
 战斗 v3 M0 地基的「v2 纯函数签名改造」于 2026-08-01 完成。把 v2 战斗纯函数里内部自产的骰值改为调用方显式传入，铁律是 v2 行为零变化。
 
-**Why:** 这是差分测试（contract test）的地基——v3 内核（combat-v3/）必须能用同输入复现 v2 纯函数结果。v2 用 Math.random() 内部伪造第二颗骰（M-5）、意图对抗攻守共用一颗骰（C5）、士气骰恒 10（M-4），这些都让 replay 不可能。M0 只改签名铺路，真正双骰由 M1 内核从 DiceTape 分通道取。
+**Why:** 这是差分测试（contract test）的地基——v3 内核（combat/）必须能用同输入复现 v2 纯函数结果。v2 用 Math.random() 内部伪造第二颗骰（M-5）、意图对抗攻守共用一颗骰（C5）、士气骰恒 10（M-4），这些都让 replay 不可能。M0 只改签名铺路，真正双骰由 M1 内核从 DiceTape 分通道取。
 
 **How to apply:**
 - `performAttackCheck`（combat-damage.ts）：`AttackCheckInput.d20Roll: number` → `rolls: [number, number?]`。优势取 max、劣势取 min、同层级用 rolls[0]；rolls[1] 缺省退化为单骰。两处 Math.random() 已删。
@@ -17,4 +17,4 @@ metadata:
 - `AppSettings.combatEngineVersion: 'v2' | 'v3'`（types.ts）+ DEFAULT_SETTINGS 默认 'v2'。分支点唯一（game-pipeline.handleCombatTrigger），M5 才翻 v3。
 - 测试调整：combat-damage.test.ts 的 6 个 performAttackCheck 用例字段名改 rolls（同层级传 [n]，优劣势传 [n,n]）；combat-integration-scenario.test.ts:269 同改；combat-morale-pipeline.test.ts 6 处省略实参的调用补传 10。所有断言未改（容差断言 >= / <= 在传同值后仍成立）。
 
-**边界：** 本任务**绝对不碰** src/sillytavern/combat-v3/（另一个 agent 并行做 DiceTape/replay/types）和 src/ui/（M0 不动前端）。no-nondeterminism.test.ts 的 node:fs 报错是另一个 agent 的，不归本任务。
+**边界：** 本任务**绝对不碰** src/core/combat/（另一个 agent 并行做 DiceTape/replay/types）和 src/ui/（M0 不动前端）。no-nondeterminism.test.ts 的 node:fs 报错是另一个 agent 的，不归本任务。

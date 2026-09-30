@@ -66,7 +66,7 @@ value:{money:n}, metadata:{delta:true}}`（`money` 已在 UPDATE_CHAR 两张白�
 - 子 agent 全部 **Opus / medium effort**；不许再生 subagent。
 - 改中文 JSON/文档后必跑编码三判据（U+FFFD 0 / ctrl 0 / JSON 可解析）。
 - 改过的文件跑 `npx prettier --write <files>`（只 write 自己改过的）。
-- 引擎 `map-*.ts` 零中文字面量（闸门自动纳管）；`src/sillytavern/**` 禁 import 前端。
+- 引擎 `map-*.ts` 零中文字面量（闸门自动纳管）；`src/core/**` 禁 import 前端。
 - 报告 ≤15 行：改动文件单行摘要 + 验证命令与结果 + 阻塞项；不贴代码。
 
 ## 实际执行情况（2026-08-18 回填）

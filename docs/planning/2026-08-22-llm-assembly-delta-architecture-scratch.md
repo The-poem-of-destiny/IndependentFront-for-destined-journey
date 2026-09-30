@@ -56,7 +56,7 @@
 
 ### 1.3 非目标
 
-- 不接入 `combat_v3`。
+- 不接入 `combat`。
 - 不接入 `chatWithTools`，也不改变 `char_gen` / `item_gen` / `craft_gen` 的工具会话。
 - 不改 `image_prompt`、剧情大纲等侧链的上下文策略。
 - 不顺带修复 `historySlice`、缩减动态投影或新增全量 prompt 诊断平台。
@@ -410,7 +410,7 @@ v1 只新增两个配置面：
 | story chatStream             | delta session，成功 complete 后推进 | 目标路径                        |
 | memory_recall embedding      | 原路径                              | 没有聊天 prompt                 |
 | toolsEnabled / chatWithTools | 原路径                              | 已有独立增长会话，语义不同      |
-| combat_v3                    | 原路径                              | 战斗状态和工具会话独立          |
+| combat                       | 原路径                              | 战斗状态和工具会话独立          |
 | char/item/craft/image 等侧链 | 原路径                              | v1 不承担参考轮次与并发语义     |
 | 手动 regenerateAgent         | 无状态完整请求，并使旧 session 失效 | 防止替代回复混入正式 transcript |
 
@@ -460,11 +460,11 @@ v1 只新增两个配置面：
 
 ## 13. 现状代码索引
 
-- `src/sillytavern/agent-templates.ts`：现有完整 prompt 渲染入口。
-- `src/sillytavern/agent-client.ts`：wire message 规范化、chat/chatStream 与 usage 解析。
-- `src/sillytavern/agent-orchestrator.ts`：主 DAG 调用与成功/失败完成点。
-- `src/sillytavern/types.ts`：AgentConfig、ApiEndpoint、AgentContext、AgentResult、默认 DAG。
-- `src/sillytavern/placeholder-registry.ts`：占位符内容与 per-Agent 历史口径。
-- `src/sillytavern/worldbook-loader.ts`：世界书 static/dynamic 分区与 EJS 渲染。
+- `src/core/prompts/agent-templates.ts`：现有完整 prompt 渲染入口。
+- `src/core/agents/agent-client.ts`：wire message 规范化、chat/chatStream 与 usage 解析。
+- `src/core/agents/agent-orchestrator.ts`：主 DAG 调用与成功/失败完成点。
+- `src/core/types/types.ts`：AgentConfig、ApiEndpoint、AgentContext、AgentResult、默认 DAG。
+- `src/core/prompts/placeholder-registry.ts`：占位符内容与 per-Agent 历史口径。
+- `src/core/content/worldbook-loader.ts`：世界书 static/dynamic 分区与 EJS 渲染。
 - `src/ui/lib/game-pipeline.ts`：每回合 AgentContext 组装、存档生命周期和调试日志。
 - `docs/superpowers/specs/2026-07-16-data-field-conventions-design.md`：名字寻址与 StatePatch 契约。

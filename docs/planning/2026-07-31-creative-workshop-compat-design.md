@@ -103,7 +103,7 @@ this.version(14).stores({
 
 ### D6 — 新分区 `创意工坊`，一律归类 ★需求铁律
 
-`WorldBookPartition`（[types.ts:22](../../src/sillytavern/types.ts:22)，现 15 个成员）追加：
+`WorldBookPartition`（[types.ts:22](../../src/core/types/types.ts:22)，现 15 个成员）追加：
 
 ```ts
   | 'creative_workshop'; // 创意工坊 — 社区二创内容
@@ -128,7 +128,7 @@ WorkshopProject（1） ──→ worldBooks 行（1）
 
 ### D8 — uid 必须在分区内重新分配 ★否则数据损坏
 
-[worldbook-loader.ts:190](../../src/sillytavern/worldbook-loader.ts:190) 的 `filterBooksByEnabledEntries()` 以 **partition 为键**建 uid 允许表：
+[worldbook-loader.ts:190](../../src/core/content/worldbook-loader.ts:190) 的 `filterBooksByEnabledEntries()` 以 **partition 为键**建 uid 允许表：
 
 ```ts
 const allowedUids = enabledByPartition.get(book.partition);
@@ -343,7 +343,7 @@ GET /api/files/*                                   # 载荷 / 封面（worker �
 照素材系统「纯函数出计划 / 执行器只落库」的分层：
 
 ```
-src/sillytavern/
+src/core/
 ├── workshop-types.ts          纯类型 + 常量
 ├── workshop-manifest.ts       ★纯函数：上游 JSON → 内部形状；容忍字段增删
 ├── workshop-install-plan.ts   ★纯同步：planInstall(payload, registry) → InstallPlan

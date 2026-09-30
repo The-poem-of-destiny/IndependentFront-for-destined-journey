@@ -40,16 +40,16 @@
 | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------------------------ |
 | `src/ui/components/settings/ApiSection.vue`                                    | 一张表单处理 chat、embedding、image；组件内拼连接测试请求                              | 表单按用途、协议变化，测试调用复用生产适配器     |
 | `src/ui/stores/settings-store.ts`、`api-key-migration.ts`                      | `ApiEntry`、`StoredApiEntry`、`ApiEndpoint` 多次转换；localStorage 元数据与 Dexie 合并 | 统一类型及校验，防止新字段保存后被旧转换逻辑丢弃 |
-| `src/sillytavern/types.ts`                                                     | `provider: string` 混合承载供应商与用途                                                | 分离 `kind` 与 `protocol`                        |
-| `src/sillytavern/agent-client.ts`                                              | 非流式、SSE、工具往返均按 OAI 消息形状处理                                             | 独立协议编码、解码及原生会话保留                 |
+| `src/core/types/types.ts`                                                      | `provider: string` 混合承载供应商与用途                                                | 分离 `kind` 与 `protocol`                        |
+| `src/core/agents/agent-client.ts`                                              | 非流式、SSE、工具往返均按 OAI 消息形状处理                                             | 独立协议编码、解码及原生会话保留                 |
 | `server/routes/chat.ts`、`models.ts`、`embeddings.ts`                          | 固定 OAI 路径                                                                          | 增加原生协议路由及 Reranker 路由                 |
 | `server/routes/proxy.ts`                                                       | 只转发 Bearer 与 `api-key` 等既有请求头                                                | 支持 Gemini、Claude 的认证及版本头               |
 | `src/ui/components/settings/agent/AgentParamsCard.vue`                         | 所有 API 池条目都能进入 Agent 选择器                                                   | 按用途过滤，运行时也校验类型                     |
 | `src/ui/components/settings/image/ImageRenderCard.vue`、`scene-image-seams.ts` | NovelAI 从通用池读取 `imageNovelai.endpointId`                                         | 改为查询图像连接存储                             |
-| `src/sillytavern/agent-orchestrator.ts`                                        | `memory_recall` 根据模型名含 `embedding` 或运行时 `apiType` 切分支                     | 使用显式召回模式与类型化绑定                     |
+| `src/core/agents/agent-orchestrator.ts`                                        | `memory_recall` 根据模型名含 `embedding` 或运行时 `apiType` 切分支                     | 使用显式召回模式与类型化绑定                     |
 | `src/ui/lib/game-pipeline.ts`、`MemorySection.vue`                             | 写入向量使用 `embeddingEndpointId`，界面没有该字段的选择器                             | 统一查询与写入端点，补齐配置入口                 |
-| `src/sillytavern/memory-store.ts`                                              | 已有向量空间指纹、余弦召回、重要度兜底；没有 Reranker 调用                             | 保留向量隔离，增加候选重排步骤                   |
-| `prompt-session-assembler.ts`、`combat-v3/agent-session.ts`、`coordinator.ts`  | Delta 与战斗会话保存消息；战斗有工具往返重建                                           | 避免重建时丢失 Gemini/Claude 原生块及签名        |
+| `src/core/memory/memory-store.ts`                                              | 已有向量空间指纹、余弦召回、重要度兜底；没有 Reranker 调用                             | 保留向量隔离，增加候选重排步骤                   |
+| `prompt-session-assembler.ts`、`combat/agent-session.ts`、`coordinator.ts`     | Delta 与战斗会话保存消息；战斗有工具往返重建                                           | 避免重建时丢失 Gemini/Claude 原生块及签名        |
 
 另外，当前 `AgentClient.buildRequestBody()` 固定补入采样参数、输出上限和 `user_id`；参数自定义必须覆盖真正发出的请求，而非只增加一个未接线的 JSON 编辑框。
 

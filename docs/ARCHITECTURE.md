@@ -2,7 +2,12 @@
 
 > **状态**：现行架构总览，2026-08-18 重写，取代 2026-06 版 —— 旧版归档于 `docs/archive/ARCHITECTURE-2026-06.md`。
 >
-> **维护约定**：结构变更时本文与两份分册（`src/sillytavern/AGENTS.md`、`src/ui/AGENTS.md`）**同步更新**。
+> **📌 2026-09-30 路径同步**：引擎目录 `src/sillytavern/` → `src/core/`（按职责分子目录，如
+> `types/` `state/` `persistence/` `agents/` `combat/`），战斗 `combat-v3/` → `combat/`，
+> 战斗主持人 Agent `combat_v3` → `combat`；测试迁 `tests/core/` 与 `tests/ui/`。
+> 本文其余历史数值（文件/表/用例计数）未随这次搬迁复核，仅供参考。
+>
+> **维护约定**：结构变更时本文与两份分册（`src/core/AGENTS.md`、`src/ui/AGENTS.md`）**同步更新**。
 > 本文只写「层与层之间的形状」，任何一层内部的模块清单/踩坑记录都归分册，不在这里重复。
 
 ---
@@ -18,19 +23,19 @@
 2. 本文 —— 结构鸟瞰，建立坐标系。
 3. 动哪层代码就读哪份分册：
 
-| 分册                                                        | 覆盖范围                                                            |
-| ----------------------------------------------------------- | ------------------------------------------------------------------- |
-| [`src/sillytavern/AGENTS.md`](../src/sillytavern/AGENTS.md) | 引擎层全部模块：类型/数据库/Agent 编排/战斗/制作/效果/图像生成…     |
-| [`src/ui/AGENTS.md`](../src/ui/AGENTS.md)                   | 前端层：composables / lib / stores / components / 设置页 / 预设系统 |
+| 分册                                          | 覆盖范围                                                            |
+| --------------------------------------------- | ------------------------------------------------------------------- |
+| [`src/core/AGENTS.md`](../src/core/AGENTS.md) | 引擎层全部模块：类型/数据库/Agent 编排/战斗/制作/效果/图像生成…     |
+| [`src/ui/AGENTS.md`](../src/ui/AGENTS.md)     | 前端层：composables / lib / stores / components / 设置页 / 预设系统 |
 
 **各系统的 living design**（改哪个系统读哪份，路径均相对仓库根）：
 
 ```
 docs/reference/
 ├── effect_script_system.md              # 词条效果 & 脚本沙盒（引擎必读）
-├── combat-system-architecture-v3.md     # 战斗系统 v3（唯一 Kernel；combat_v3 主持人
+├── combat-system-architecture-v3.md     # 战斗系统 v3（唯一 Kernel；combat 主持人
 │                                        #   + combat_enemy 敌方决策固定使用双隔离会话；契约在
-│                                        #   agent-config.json + agent-tools.ts + combat-v3/agent-*.ts）
+│                                        #   agent-config.json + agent-tools.ts + combat/agent-*.ts）
 ├── agent_system_prompt_guide.md         # Agent System Prompt 配置流程
 ├── audio_system.md                      # 音频系统 v1.0
 ├── worldbook-ejs-regex-authoring-guide.md  # 世界书 EJS + 输出美化正则（作者入口）
@@ -72,10 +77,11 @@ docs/design.md                                     # 前端 UI 设计规范（�
 └───────────────────────────────┬──────────────────────────────────────┘
                                 │ 单向依赖（前端 → 引擎，见 §三）
 ┌───────────────────────────────▼──────────────────────────────────────┐
-│ ② 引擎 —— 框架无关 TypeScript        src/sillytavern/ （168 非测试 .ts）│
-│   types.ts（唯一类型来源）· database.ts · agent-orchestrator.ts       │
-│   state-manager.ts（唯一写入口）· state-write-queue.ts                │
-│   combat-v3/（内核+DSL+主持流程）· image-providers/                    │
+│ ② 引擎 —— 框架无关 TypeScript        src/core/（~170 非测试 .ts）      │
+│   types/types.ts（唯一类型来源）· persistence/database.ts              │
+│   agents/agent-orchestrator.ts · state/state-manager.ts（唯一写入口）  │
+│   state/state-write-queue.ts · prompts/ · content/ · ejs/              │
+│   combat/（内核+DSL+主持流程）· image/providers/ · api/                │
 │   零 Vue / 零 Pinia / 零 DOM —— headless 可跑                          │
 └──────────┬────────────────────────────────────────┬──────────────────┘
            │ fetch 同源 /api/*                       │ Dexie
@@ -104,12 +110,12 @@ API 配置由 `stores/api-source-store.ts` 水合 Dexie 中的类型化通用源
 `settings-store.ts` 只保留绑定 ID、召回模式和非敏感参数。设置页的 Agent 选择器只暴露 LLM，
 记忆页显式绑定 Embedding/Reranker，图像页单独管理 NovelAI/ComfyUI 连接面。
 
-### ② 引擎（`src/sillytavern/`）
+### ② 引擎（`src/core/`）
 
-框架无关的纯 TypeScript。主要子目录有 `combat-v3/`、`image-providers/` 与 `api/`。
+框架无关的纯 TypeScript。主要子目录有 `combat/`、`image/providers/` 与 `api/`。
 `api/` 按 OpenAI Chat、Gemini、Claude Messages 分开原生编解码，并为 Embedding/Reranker 提供
 受保护的 OpenAI 兼容请求入口；`AgentClient` 只负责业务重试、取消、RPM 与工具调度。
-**类型唯一真源是 `types.ts`**，大型联合类型拆 `types-*.ts`（API 联合在 `types-api.ts`）。
+**类型唯一真源是 `types/types.ts`**，大型联合类型拆 `types-*.ts`（API 联合在 `types-api.ts`）。
 
 ### ③ Hono BFF（`server/`）
 
@@ -149,7 +155,7 @@ API 配置由 `stores/api-source-store.ts` 水合 Dexie 中的类型化通用源
 
 ### 3.1 分层方向只有一个：前端 → 引擎
 
-`src/sillytavern/**` **禁止** import `../ui/*` / `@ui/*` / `vue` / `pinia`，**type-only 也算**。
+`src/core/**` **禁止** import `../ui/*` / `@ui/*` / `vue` / `pinia`，**type-only 也算**。
 
 这条契约**破坏时不报错** —— 反向 import 编译得过、测试全绿，代价是引擎从此拖着
 Vue + Pinia + Dexie 整条前端链，headless 跑批与引擎单测都得把整个 store 拉起来，
@@ -201,8 +207,8 @@ Vue + Pinia + Dexie 整条前端链，headless 跑批与引擎单测都得把整
 | `tests/build-placeholder-hashes.test.ts`                                               | 占位基线 hash 清单与实际占位集一致                      |
 | `tests/knip-ratchet.test.ts`                                                           | 死代码棘轮：只许变少不许变多                            |
 | `tests/server-app.test.ts`                                                             | BFF 路由前缀单源 + Origin 守卫                          |
-| `src/sillytavern/map-literals-gate.test.ts`                                            | 引擎地图模块零中文字面量（换图零改码）                  |
-| `src/sillytavern/random-event-literals-gate.test.ts`                                   | 同上，随机事件侧                                        |
+| `tests/core/map/map-literals-gate.test.ts`                                             | 引擎地图模块零中文字面量（换图零改码）                  |
+| `tests/core/random-events/random-event-literals-gate.test.ts`                          | 同上，随机事件侧                                        |
 | `tests/agent-tools-prompt-contract.test.ts` / `memory-summary-prompt-contract.test.ts` | 提示词与工具契约一致                                    |
 
 ---
@@ -257,7 +263,7 @@ embedding / tools / 战斗 / 侧链 / regenerate 走原路径。设计见
 
 **两条旁路**：
 
-- **战斗 v3 是持久会话旁路**：`<combat_trigger>` 命中后进 `combat-v3/` 的
+- **战斗 v3 是持久会话旁路**：`<combat_trigger>` 命中后进 `combat/` 的
   Kernel + DiceTape + EffectIntent + DSL 主持流程（coordinator 持会话、玩家意图文本经
   AI 解析成 Command），战斗期间不走上面这条主管线；结束后以结算摘要回注。
 - **EJS 求值发生在提示装配期**（ADR-30，非运行期）：`stats` 只读面 + `vars` 共写叙事变量空间，
@@ -299,16 +305,16 @@ embedding / tools / 战斗 / 侧链 / regenerate 走原路径。设计见
 **行数热点**（超过 1800 行的文件，改动前先看分册对应章节）：
 
 ```
-4167  src/sillytavern/types.ts
-2664  src/sillytavern/state-manager.ts
+4167  src/core/types/types.ts
+2664  src/core/state/state-manager.ts
 2487  src/ui/lib/game-pipeline.ts
 2391  src/ui/stores/asset-store.ts
-2318  src/sillytavern/database.ts
+2318  src/core/persistence/database.ts
 2234  src/ui/stores/create-store.ts
-2226  src/sillytavern/combat-v3/coordinator.ts
+2226  src/core/combat/coordinator.ts
 1863  src/ui/components/game/MapPoliticalTab.vue
 1844  src/ui/lib/workshop-client.ts
-1816  src/sillytavern/combat-v3/types.ts
+1816  src/core/combat/types.ts
 ```
 
 > 📌 `types-*.ts` 拆分约定**只半施行**：新系统（audio / content / image / map / random-events）

@@ -186,7 +186,7 @@ Production practice is dual-encoding (VP9-alpha WebM + HEVC-alpha MP4, two `<sou
 whoever makes the art.
 
 **D8: `.webm` stays audio.** It is already claimed by `AUDIO_MIME_BY_EXTENSION`
-([audio-names.ts:41](../../src/sillytavern/audio-names.ts)); reassigning it is a regression, and disambiguating
+([audio-names.ts:41](../../src/core/audio/audio-names.ts)); reassigning it is a regression, and disambiguating
 (header sniffing, or "only `.webm` with an explicit type token is an asset") buys VP9-alpha compression for a type
 that does not render in v1. **Animated WebP** is the v1 answer for alpha animation. Revisit when the VN stage makes
 animated standees real — the door is a one-line routing tiebreak.
@@ -199,9 +199,9 @@ animated standees real — the door is a one-line routing tiebreak.
 
 **The asset key is the raw `name` string. Matching is `===`. No normalization — no trim, no casefold, no NFKC.**
 
-This aligns with [state-manager.ts:1391](../../src/sillytavern/state-manager.ts)'s `findByName`, which is also raw
+This aligns with [state-manager.ts:1391](../../src/core/state/state-manager.ts)'s `findByName`, which is also raw
 `===`, and deliberately **diverges** from
-[audio-names.ts:62](../../src/sillytavern/audio-names.ts)'s `normalizeAudioName` (trim → strip extension → collapse
+[audio-names.ts:62](../../src/core/audio/audio-names.ts)'s `normalizeAudioName` (trim → strip extension → collapse
 whitespace → casefold). Audio keeps its own normalization for its own lookups; assets do not adopt it.
 
 Rationale: if the AI emits `苏婉 ` with a trailing space, that is a prompt/lorebook defect to fix at the source.
@@ -405,7 +405,7 @@ once. Real quota savings, but refcount-on-delete leaks blobs the first time a co
 ### 4.5 Backup, teardown, quota (D13)
 
 - **Assets are excluded from `FullBackup`.** Stronger than consistency with audio: `FullBackup` is a **JSON** object
-  of 13 arrays ([database.ts:349](../../src/sillytavern/database.ts)). Blobs cannot enter JSON without base64 —
+  of 13 arrays ([database.ts:349](../../src/core/persistence/database.ts)). Blobs cannot enter JSON without base64 —
   strictly dominated per §4.2 — and every asset would be deserialized on the main thread. **The zip export is the
   migration path, and it is better than a backup field would be.**
 - **「清除全部数据」 must destroy `assetMeta` + `assetBlobs`**, matching audio.
@@ -561,7 +561,7 @@ Engine layer rules, per project convention: pure — 无 I/O、无 Dexie、无 V
 `src/ui/`.
 
 ```
-src/sillytavern/                    ← pure, node-importable
+src/core/                    ← pure, node-importable
   types.ts              ★ DATA-MODEL TYPES ONLY, under an
                         `// Asset System (Dexie v13)` banner:
                         AssetType / AssetCategory / ASSET_TYPES /
@@ -705,7 +705,7 @@ The store then does something dumb and obvious: iterate the plan, write rows.
 ### 6.2 One extension table
 
 `ASSET_MIME_BY_EXTENSION` lives in the engine as the single source and is **reverse-imported** by UI code —
-exactly the discipline [audio-names.ts:28-31](../../src/sillytavern/audio-names.ts) documents for
+exactly the discipline [audio-names.ts:28-31](../../src/core/audio/audio-names.ts) documents for
 `AUDIO_MIME_BY_EXTENSION` ("引擎层禁止 import `src/ui/`，所以只能反向共享"). Two extension tables in two layers is
 how routing silently drifts.
 
@@ -834,18 +834,18 @@ injected clock for `createdAt`.
 
 ## 10. Deliverables
 
-| #   | Item                                                                                                                                                                                                                                            |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | 5 engine modules + `*.test.ts` each                                                                                                                                                                                                             |
-| 2   | Dexie v13 (`assetMeta`, `assetBlobs`) + readers/writers. **No teardown work needed** — `clearAllData()` ([database.ts:343](../../src/sillytavern/database.ts)) calls `db.delete()` on the whole database, so new tables are destroyed for free. |
-| 3   | `fflate` dependency; `src/ui/lib/asset-zip.ts` incl. streaming size caps, UTF-8-flag handling, and per-entry hashing (D18)                                                                                                                      |
-| 4   | `src/ui/lib/asset-url.ts` (LRU)                                                                                                                                                                                                                 |
-| 5   | `src/ui/stores/asset-store.ts`                                                                                                                                                                                                                  |
-| 6   | `AssetSection.vue` + 4 subcomponents, **built against `docs/design.md`** (§7); nav entry between 音频 and 存档数据                                                                                                                              |
-| 7   | Import button surfaced in 音频 as well, calling the same action                                                                                                                                                                                 |
-| 8   | 存档数据 copy stating both backup omissions (D13)                                                                                                                                                                                               |
-| 9   | `navigator.storage.persist()` request on first import                                                                                                                                                                                           |
-| 10  | Doc updates: `CLAUDE.md` (architecture + progress + settings-section count 11→12), this file                                                                                                                                                    |
+| #   | Item                                                                                                                                                                                                                                                 |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 5 engine modules + `*.test.ts` each                                                                                                                                                                                                                  |
+| 2   | Dexie v13 (`assetMeta`, `assetBlobs`) + readers/writers. **No teardown work needed** — `clearAllData()` ([database.ts:343](../../src/core/persistence/database.ts)) calls `db.delete()` on the whole database, so new tables are destroyed for free. |
+| 3   | `fflate` dependency; `src/ui/lib/asset-zip.ts` incl. streaming size caps, UTF-8-flag handling, and per-entry hashing (D18)                                                                                                                           |
+| 4   | `src/ui/lib/asset-url.ts` (LRU)                                                                                                                                                                                                                      |
+| 5   | `src/ui/stores/asset-store.ts`                                                                                                                                                                                                                       |
+| 6   | `AssetSection.vue` + 4 subcomponents, **built against `docs/design.md`** (§7); nav entry between 音频 and 存档数据                                                                                                                                   |
+| 7   | Import button surfaced in 音频 as well, calling the same action                                                                                                                                                                                      |
+| 8   | 存档数据 copy stating both backup omissions (D13)                                                                                                                                                                                                    |
+| 9   | `navigator.storage.persist()` request on first import                                                                                                                                                                                                |
+| 10  | Doc updates: `CLAUDE.md` (architecture + progress + settings-section count 11→12), this file                                                                                                                                                         |
 
 ---
 
@@ -996,11 +996,11 @@ rows are untouched.
 
 ### 15.4 Pre-existing test failures (not asset-related — do not mistake for regressions)
 
-- `src/ui/stores/game-store.test.ts` › 「loadSave 应并行回读最新大纲与事件树」 — **flaky (~50%)**. Root cause
+- `tests/ui/stores/game-store.test.ts` › 「loadSave 应并行回读最新大纲与事件树」 — **flaky (~50%)**. Root cause
   found: `savePlotOutline` unconditionally sets `updatedAt = Date.now()`, clobbering the test's deliberate
   `Date.now() - 1000`; when both rows land in the same millisecond, `sortBy('updatedAt')` ties and order is
   arbitrary.
-- `src/ui/components/create/SelectableCard.test.ts` › 「稀有度边框色正确」 — **stable failure**, predates this
+- `tests/ui/components/create/SelectableCard.test.ts` › 「稀有度边框色正确」 — **stable failure**, predates this
   work; asserts an `rgb()` value but receives a CSS variable under jsdom.
 
 Both are tracked separately and neither is caused by this work. The suite baseline is therefore

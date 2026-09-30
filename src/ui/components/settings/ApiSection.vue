@@ -23,6 +23,7 @@ import { requestEmbedding } from '@engine/api/embedding';
 import { requestRerank } from '@engine/api/reranker';
 import { fetchLlmModels } from '@engine/api/transport';
 import { parseApiSource } from '@engine/api/source-config';
+import { normalizeHeaderOverrides } from '@engine/api/header-overrides';
 import type { ApiEndpoint } from '@engine/types/types';
 import type { ApiSource, ApiSourceKind, LlmProtocol } from '@engine/types/types-api';
 
@@ -37,6 +38,8 @@ onMounted(async () => {
 });
 
 const showAddApi = ref(false);
+/** API Key 是否明文显示（默认遮蔽；编辑已有连接时字段里装的是掩码，不会泄真 key）。 */
+const showKey = ref(false);
 const apiForm = reactive({
   name: '',
   baseUrl: '',
@@ -47,6 +50,15 @@ const apiForm = reactive({
   timeoutMs: '60000',
   bodyOverrides: '{}',
   bodyOmitPaths: '',
+  /** 🆕 源级默认采样参数（「参数跟随模型」，仅 LLM）；空串 = 不设该键。
+   *  默认值：temperature 1 / topP 1 / 频率·存在惩罚 0（留空即表示不设置，回落内容包默认层）。 */
+  defaultTemperature: '1',
+  defaultTopP: '1',
+  defaultFrequencyPenalty: '0',
+  defaultPresencePenalty: '0',
+  defaultMaxTokens: '',
+  /** 🆕 源级自定义请求头（JSON 对象） */
+  headerOverrides: '{}',
   anthropicVersion: '2023-06-01',
   anthropicBeta: '',
   /** 🆕 2026-08-22 Delta 会话（T4）：上下文窗口 token 上限（表单用 string，保存时归一化） */
@@ -223,6 +235,8 @@ function draftSource(): ApiSource {
       .split('\n')
       .map((path) => path.trim())
       .filter(Boolean),
+    headerOverrides: parseHeaderOverridesOrThrow(),
+    defaultParameters: buildDefaultParameters(),
     contextWindowTokens: normalizeContextWindowTokens(apiForm.contextWindowTokens),
     anthropicVersion: apiForm.anthropicVersion,
     anthropicBeta: apiForm.anthropicBeta
@@ -230,6 +244,54 @@ function draftSource(): ApiSource {
       .map((value) => value.trim())
       .filter(Boolean),
   });
+}
+
+/**
+ * 空串 / 非有限数 → `undefined`（不设该键）；其余原样。
+ * 与 `normalizeContextWindowTokens` 同口径：坏输入不写库、不报错，回退「未配置」。
+ */
+function normalizeOptionalNumber(raw: string): number | undefined {
+  if (raw.trim() === '') return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** 源级默认采样参数（仅 LLM 有意义）：五个键全部空 = `undefined`。 */
+function buildDefaultParameters(): Record<string, number> | undefined {
+  const out: Record<string, number> = {};
+  const t = normalizeOptionalNumber(apiForm.defaultTemperature);
+  if (t !== undefined) out.temperature = t;
+  const p = normalizeOptionalNumber(apiForm.defaultTopP);
+  if (p !== undefined) out.topP = p;
+  const f = normalizeOptionalNumber(apiForm.defaultFrequencyPenalty);
+  if (f !== undefined) out.frequencyPenalty = f;
+  const pr = normalizeOptionalNumber(apiForm.defaultPresencePenalty);
+  if (pr !== undefined) out.presencePenalty = pr;
+  const m = normalizeOptionalNumber(apiForm.defaultMaxTokens);
+  if (m !== undefined) out.maxTokens = m;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** 自定义请求头 JSON → 校验后的对象（非法 JSON / 受保护头名 / CRLF 一律抛，由保存/测试的 catch 转 toast）。 */
+function parseHeaderOverridesOrThrow(): Record<string, string> {
+  const raw = apiForm.headerOverrides.trim();
+  if (raw === '') return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('自定义请求头不是合法 JSON');
+  }
+  return normalizeHeaderOverrides(parsed);
+}
+
+/** 拉取模型列表用的宽松版：JSON 坏了也照拉（列表本就不依赖它），不阻断。 */
+function parseHeaderOverridesLenient(): Record<string, string> {
+  try {
+    return parseHeaderOverridesOrThrow();
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -252,6 +314,7 @@ function draftEndpointForModelList(): ApiEndpoint {
     timeout: Number(apiForm.timeoutMs) || 60_000,
     kind: 'llm',
     protocol: apiForm.protocol as LlmProtocol,
+    headerOverrides: parseHeaderOverridesLenient(),
     anthropicVersion: apiForm.anthropicVersion || undefined,
     anthropicBeta: apiForm.anthropicBeta
       .split(',')
@@ -309,6 +372,7 @@ async function fetchModelList(opts: { fromConnectionTest?: boolean; silentFail?:
         baseUrl: apiForm.baseUrl,
         apiKey: rk,
         label: apiForm.name || apiForm.baseUrl,
+        headerOverrides: parseHeaderOverridesLenient(),
       });
       models = result.models;
       error = result.error ?? '';
@@ -358,11 +422,18 @@ function openAddApi() {
   apiForm.timeoutMs = '60000';
   apiForm.bodyOverrides = '{}';
   apiForm.bodyOmitPaths = '';
+  apiForm.defaultTemperature = '1';
+  apiForm.defaultTopP = '1';
+  apiForm.defaultFrequencyPenalty = '0';
+  apiForm.defaultPresencePenalty = '0';
+  apiForm.defaultMaxTokens = '';
+  apiForm.headerOverrides = '{}';
   apiForm.anthropicVersion = '2023-06-01';
   apiForm.anthropicBeta = '';
   apiForm.contextWindowTokens = '';
   apiForm._realKey = '';
   apiForm._masked = false;
+  showKey.value = false;
   apiModels.value = [];
   showAddApi.value = true;
 }
@@ -374,9 +445,12 @@ async function openEditApi(ep: ApiEntry) {
   apiForm.name = hydrated.name;
   apiForm.baseUrl = hydrated.baseUrl;
   const key = hydrated.apiKey || '';
-  apiForm.apiKey = key;
+  // 🔴 编辑态字段里装的是**掩码**（如 `sk-***abcd`），真 key 只在 `_realKey` 里。
+  //    此前这里直接塞真 key + `:type` 判成 text —— 弹窗一开就明文暴露，截屏/录屏/旁人一眼可见。
+  apiForm.apiKey = key ? maskKey(key) : '';
   apiForm._realKey = key;
   apiForm._masked = key ? true : false;
+  showKey.value = false;
   apiForm.model = hydrated.model;
   apiForm.kind = source?.kind ?? hydrated.kind ?? 'llm';
   apiForm.protocol = source?.protocol ?? hydrated.protocol ?? 'openai-chat';
@@ -387,6 +461,22 @@ async function openEditApi(ep: ApiEntry) {
     2,
   );
   apiForm.bodyOmitPaths = (source?.bodyOmitPaths ?? hydrated.bodyOmitPaths ?? []).join('\n');
+  // 🆕 源级默认采样参数：只在 LLM 源上有意义；缺失 = 空串（不设该键）。
+  const defaultParams = source?.kind === 'llm' ? source.defaultParameters : undefined;
+  apiForm.defaultTemperature =
+    defaultParams?.temperature != null ? String(defaultParams.temperature) : '1';
+  apiForm.defaultTopP = defaultParams?.topP != null ? String(defaultParams.topP) : '1';
+  apiForm.defaultFrequencyPenalty =
+    defaultParams?.frequencyPenalty != null ? String(defaultParams.frequencyPenalty) : '0';
+  apiForm.defaultPresencePenalty =
+    defaultParams?.presencePenalty != null ? String(defaultParams.presencePenalty) : '0';
+  apiForm.defaultMaxTokens =
+    defaultParams?.maxTokens != null ? String(defaultParams.maxTokens) : '';
+  apiForm.headerOverrides = JSON.stringify(
+    source?.headerOverrides ?? hydrated.headerOverrides ?? {},
+    null,
+    2,
+  );
   apiForm.anthropicVersion =
     source?.kind === 'llm' ? (source.anthropicVersion ?? '2023-06-01') : '';
   apiForm.anthropicBeta = source?.kind === 'llm' ? (source.anthropicBeta ?? []).join(', ') : '';
@@ -560,7 +650,7 @@ async function deleteApi(id: string) {
     <AppModal
       :open="showAddApi"
       :title="editingApiId ? '编辑 API' : '添加 API'"
-      size="md"
+      size="lg"
       @update:open="showAddApi = $event"
     >
       <div class="api-form">
@@ -603,19 +693,23 @@ async function deleteApi(id: string) {
             <input
               v-model="apiForm.apiKey"
               class="form-input"
-              :type="
-                editingApiId &&
-                apiForm._masked &&
-                (!apiForm._realKey ||
-                  (apiForm.apiKey.length > 10 && apiForm.apiKey.includes('***')))
-                  ? 'password'
-                  : apiForm.apiKey.length > 10 && !apiForm.apiKey.includes('***')
-                    ? 'text'
-                    : 'password'
-              "
+              :type="showKey ? 'text' : 'password'"
+              autocomplete="off"
               placeholder="API Key（按服务商提供，不一定是 sk- 开头）"
               @input="onApiKeyInput"
-            /><AppButton
+            /><button
+              type="button"
+              class="key-toggle"
+              :aria-label="showKey ? '隐藏密钥' : '显示密钥'"
+              :title="showKey ? '隐藏密钥' : '显示密钥'"
+              @click="showKey = !showKey"
+            >
+              <i
+                class="fa-solid"
+                :class="showKey ? 'fa-eye-slash' : 'fa-eye'"
+                aria-hidden="true"
+              /></button
+            ><AppButton
               variant="secondary"
               size="sm"
               :disabled="apiFormFetchingModels"
@@ -663,6 +757,81 @@ async function deleteApi(id: string) {
             编辑已有 API 时密钥默认隐藏。点击测试连接验证密钥并获取模型列表。
           </p></label
         >
+        <!-- 🆕 源级默认采样参数（「参数跟随模型」）：配一次，所有绑定此池的 Agent 皆生效；
+             Agent 设置里**显式改过**的字段仍优先。留空 = 不设置该键（回落到内容包默认）。 -->
+        <div v-if="isLlmEntry" class="default-params">
+          <p class="default-params-title">默认采样参数（跟随此 API 池）</p>
+          <div
+            class="form-grid"
+            style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px"
+          >
+            <label class="form-label"
+              >Temperature
+              <input
+                v-model="apiForm.defaultTemperature"
+                class="form-input"
+                type="number"
+                step="0.1"
+                min="0"
+                max="2"
+                placeholder="(不设置)"
+              />
+            </label>
+            <label class="form-label"
+              >Top P
+              <input
+                v-model="apiForm.defaultTopP"
+                class="form-input"
+                type="number"
+                step="0.05"
+                min="0"
+                max="1"
+                placeholder="(不设置)"
+              />
+            </label>
+            <label class="form-label"
+              >Frequency Penalty
+              <input
+                v-model="apiForm.defaultFrequencyPenalty"
+                class="form-input"
+                type="number"
+                step="0.1"
+                min="-2"
+                max="2"
+                placeholder="(不设置)"
+              />
+            </label>
+            <label class="form-label"
+              >Presence Penalty
+              <input
+                v-model="apiForm.defaultPresencePenalty"
+                class="form-input"
+                type="number"
+                step="0.1"
+                min="-2"
+                max="2"
+                placeholder="(不设置)"
+              />
+            </label>
+            <label class="form-label"
+              >Max Tokens
+              <input
+                v-model="apiForm.defaultMaxTokens"
+                class="form-input"
+                type="number"
+                min="100"
+                max="384000"
+                step="100"
+                placeholder="(不设置)"
+              />
+            </label>
+          </div>
+          <p class="form-hint">
+            换模型（= 换 API 池）不必再逐个 Agent 重设采样参数。默认为 temperature 1 / Top P 1 /
+            惩罚 0；清空某一格 = 不设置该键（回落内容包默认层）。Agent
+            设置里显式覆写过的字段优先于这里。
+          </p>
+        </div>
         <!-- 高级设置（可折叠） -->
         <div class="advanced-section">
           <button class="advanced-toggle" type="button" @click="showAdvancedApi = !showAdvancedApi">
@@ -717,6 +886,20 @@ async function deleteApi(id: string) {
                 spellcheck="false"
                 placeholder="/frequency_penalty"
               ></textarea>
+            </label>
+            <label class="form-label form-label-stacked">
+              自定义请求头（JSON）
+              <textarea
+                v-model="apiForm.headerOverrides"
+                class="form-input api-json"
+                rows="4"
+                spellcheck="false"
+                placeholder='{"x-opencode-session": "790766510"}'
+              ></textarea>
+              <span class="form-hint">
+                转发给上游网关的自定义请求头（非标准 OpenAI 兼容端点常需要，如会话头 / 租户头）。
+                鉴权、Content-Type 与代理控制头受保护，填了会被拒绝。
+              </span>
             </label>
             <template v-if="apiForm.protocol === 'anthropic-messages'">
               <label class="form-label form-label-stacked"
@@ -969,5 +1152,34 @@ async function deleteApi(id: string) {
 /* 同一张表单里紧接着上一格的 form-label */
 .form-label-stacked {
   margin-top: var(--theme-spacing-sm);
+}
+/* API Key 显示 / 隐藏按钮（与输入框同高，不抢焦点） */
+.key-toggle {
+  flex: 0 0 auto;
+  width: 36px;
+  min-height: 36px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: var(--theme-surface-muted);
+  color: var(--theme-text-secondary);
+  cursor: pointer;
+  transition: color var(--theme-transition-fast);
+}
+.key-toggle:hover {
+  color: var(--theme-text-primary);
+}
+/* 源级默认采样参数分组（「参数跟随模型」） */
+.default-params {
+  margin-top: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: color-mix(in srgb, var(--theme-primary) 4%, transparent);
+}
+.default-params-title {
+  margin: 0 0 var(--theme-spacing-xs);
+  color: var(--theme-text-secondary);
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 </style>

@@ -146,9 +146,9 @@ docs/
 │   │                                   #    §四/§五/§八/§九（效果系统 / Buff 状态 / 8 步伤害管线 /
 │   │                                   #    核心数值）这些纯计算公式仍被 v3 引用，作公式参考
 │   │                                   #    🔴 v2 的 combat-agent-api.md 已归档到 archive/reference/；
-│   │                                   #      现行 combat_v3 契约散在三处：`agent-config.json`
-│   │                                   #      （`combat_v3` 条目）+ `src/sillytavern/agent-tools.ts`
-│   │                                   #      （AGENT_TOOL_MAP）+ `combat-v3/projection-agent.ts`
+│   │                                   #      现行 combat 契约散在三处：`agent-config.json`
+│   │                                   #      （`combat` 条目）+ `src/core/agents/agent-tools.ts`
+│   │                                   #      （AGENT_TOOL_MAP）+ `src/core/combat/projection-agent.ts`
 │   ├── agent_system_prompt_guide.md    # 🆕 Agent System Prompt 配置流程（架构/步骤/踩坑/检查清单）
 │   ├── agent_template_guide.md         # Agent 占位符模板系统修改指南（改占位符/解析链路先查这份）
 │   ├── debug-loop-handbook.md          # 🆕 游玩→导出→分析→修复 调试循环操作手册（每次发现 bug 必读）
@@ -241,6 +241,10 @@ docs/
 │                                       # ✅ 内容包自动更新 v1（2026-09-26 已实施，端到端已验证；UI 走查待做）：
 │                                       # release-only 公开仓 poem-dist + AES-GCM 加密 blob + BFF 代理拉取
 │                                       # 威胁模型仅「不明文/防扫描」（密钥内嵌=混淆非保密）；只覆盖 JSON 包
+├── planning/2026-09-30-api-source-defaults-and-headers-design.md
+│                                       # ✅ API 池默认采样参数 + 自定义请求头（2026-09-30 已实施，真机待验证）：
+│                                       # 参数跟随模型（Agent 覆写 > 池默认 > 内容包默认层 > 兜底）+ headerOverrides
+│                                       # 经 X-Custom-Headers 交 BFF、受保护头名两层各验一次
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
@@ -476,8 +480,8 @@ node tools/build-release.mjs --pack dist/fated-poem-pack-<X.Y.Z>.json
 - **必须写测试** — 每个新模块必须配套 `*.test.ts`。测试框架 **Vitest**，DB 测试用 **fake-indexeddb**。`npm test` 必须全部通过。代码审查前先跑测试。
 - **Prompt vs Code 边界 (ADR-11)**：确定性逻辑（战斗/制作/数值/骰池/状态结算）归 Code；创造性逻辑（叙事/角色/记忆/剧情判断）归 Prompt。
 - **$ API 语义级抽象 (ADR-19)**：AI 调 `$combat.attack()`声明意图，Code 内部执行公式。不暴露`modifyHp()` 等 CRUD 原语给 AI。
-- **声明式优先 (ADR-20)**：效果系统先用 VarsPatch + StatusEffect 声明式格式。复杂动态逻辑通过 `script-executor.ts` 脚本沙盒实现（`$event.on/off` 持久订阅、`$call` 跨对象引用、`init/cleanup` 生命周期）。**战斗内走 EffectAutomaton DSL**（v3 废止任意 JS，见 `combat-v3/automata/`）。🔴 那个「沙盒」自 2026-08-10 起是**真隔离**（QuickJS wasm realm，见 `script-backend.ts`），此前是 `new Function` + 形参遮蔽 —— 只是纵深防御，不是边界。
-- **分层方向只有一个：前端 → 引擎**（2026-08-17 收口）。`src/sillytavern/**` 里**禁止** import `../ui/*` / `@ui/*` / `vue` / `pinia`，**type-only 也算**。引擎要用前端的东西只有两条路：把它搬进引擎（先例：`media-hash.ts`、`types.ts` 的 `CreatePreset`），或开一条**注入缝**由前端往里装（现有四条：`engine-settings.ts` / `map-runtime.ts` / `random-event-runtime.ts` / `content-registry-runtime.ts`）。这条契约破坏时不报错 —— 反向 import 编译得过、测试全绿，代价是引擎从此拖着 Vue + Pinia + Dexie 整条前端链，headless 跑批与引擎单测都得把整个 store 拉起来。两道机器闸门钉死：`eslint.config.js` 的 `no-restricted-imports`（静态边）+ `tests/layering-gate.test.ts`（源码扫描，管动态 import / 字符串路径 / `import.meta.glob`；`?raw` 源码读取不算依赖边）。
+- **声明式优先 (ADR-20)**：效果系统先用 VarsPatch + StatusEffect 声明式格式。复杂动态逻辑通过 `script-executor.ts` 脚本沙盒实现（`$event.on/off` 持久订阅、`$call` 跨对象引用、`init/cleanup` 生命周期）。**战斗内走 EffectAutomaton DSL**（v3 废止任意 JS，见 `src/core/combat/automata/`）。🔴 那个「沙盒」自 2026-08-10 起是**真隔离**（QuickJS wasm realm，见 `script-backend.ts`），此前是 `new Function` + 形参遮蔽 —— 只是纵深防御，不是边界。
+- **分层方向只有一个：前端 → 引擎**（2026-08-17 收口）。`src/core/**` 里**禁止** import `../ui/*` / `@ui/*` / `vue` / `pinia`，**type-only 也算**。引擎要用前端的东西只有两条路：把它搬进引擎（先例：`media-hash.ts`、`types.ts` 的 `CreatePreset`），或开一条**注入缝**由前端往里装（现有四条：`engine-settings.ts` / `map-runtime.ts` / `random-event-runtime.ts` / `content-registry-runtime.ts`）。这条契约破坏时不报错 —— 反向 import 编译得过、测试全绿，代价是引擎从此拖着 Vue + Pinia + Dexie 整条前端链，headless 跑批与引擎单测都得把整个 store 拉起来。两道机器闸门钉死：`eslint.config.js` 的 `no-restricted-imports`（静态边）+ `tests/layering-gate.test.ts`（源码扫描，管动态 import / 字符串路径 / `import.meta.glob`；`?raw` 源码读取不算依赖边）。
 - **StateManager 为唯一写入入口 (ADR-21)**：所有状态变更通过 `commitChatState()`，替代分散的 `saveChat()`。
   - 📌 **受控例外 (P1-09)**：SaveProfile 的纯 UI 辅助字段（`focusQuest` 焦点任务选择、`news[].read` 已读标记）允许由 UI 触发写入，但必须走 `persistFocusQuest()` / `persistNewsRead()` 这两个命名写入口（非裸 `db.put`、也不再是 UI 自己拼一份整档交出去）并带 try/catch（失败不致命，记日志即可）。🔴 **2026-08-17 起这两个入口串进 `withSaveWriteLock`（per-saveId 写队列）并在锁内重读一份新鲜 profile、只改那一个字段**：提交级缓存把 `commitChatState` 的写窗口拉成「整次提交一拍」，不进队列的 UI 写会被出口那次整档 flush 盖掉，而拿着 UI 手里那份陈旧整档进锁写回去又会反过来抹掉提交结果 —— 两件事缺一条都不算修好。AI 产生的 SaveProfile 变更仍必须走 `vars_update` 语义 op，不在此例外内。
 - **世界书实现理念 (ADR-28)**：世界书是给**纯文本 AI** 的协议——骰子池/action_info 文本面板/`{{roll}}` 文本注入都是因为没有 Code 层才用的文本手段。我们有 Code 纯函数 + 工具调用 + script 沙盒，**中间结构不必照抄**；目标：输入→流程→**结果**模仿世界书，中间实现用工程手段。script 是"让世界书自由文本效果代码化"的**妥协桥梁**，不是追求完美复现每个机制的借口。
@@ -503,7 +507,7 @@ node tools/build-release.mjs --pack dist/fated-poem-pack-<X.Y.Z>.json
 
 ## 事件驱动架构 / v4 子系统分流 / $ API（已迁入引擎分册）
 
-「事件驱动架构（Phase 4.5-8 实现）」「v4 三层子系统分流 (ADR-24/25/26)」「9 个 $ API Namespace」三节为引擎层内容，2026-08-13 原文迁入 [`src/sillytavern/AGENTS.md`](src/sillytavern/AGENTS.md)。改引擎代码前按下方「架构地图」一节的规则读分册。
+「事件驱动架构（Phase 4.5-8 实现）」「v4 三层子系统分流 (ADR-24/25/26)」「9 个 $ API Namespace」三节为引擎层内容，2026-08-13 原文迁入 [`src/core/AGENTS.md`](src/core/AGENTS.md)。改引擎代码前按下方「架构地图」一节的规则读分册。
 
 ## Phase 完成通知
 
@@ -544,7 +548,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 战斗 v2        | 战斗系统架构 v2（管道+中间件+6大类+19event+独立面板）                                                                                                                | ✅ 已退役（M5 删）                                                                                    |
 | 战斗 v3        | 代码内核主持流程（Kernel+DiceTape+EffectIntent+DSL）                                                                                                                 | ✅ M5完成 全量合入                                                                                    |
 | 战斗会话       | 战斗 Agent 会话模式改造（持久会话+工具分流+结算演绎+前端 v3）                                                                                                        | ✅ 7397 tests 全绿，待真机（2026-08-09）                                                              |
-| 战斗主持人     | combat_v3 定位纠偏：敌方专属决策器 → 战斗主持人/DM（玩家意图文本→AI解析→Command）+ 双 bug 修复（结算叙事崩 / SLOT_EXHAUSTED 熔断闪退）                               | ✅ 7675 tests 全绿（2026-08-12）                                                                      |
+| 战斗主持人     | combat 定位纠偏（原 combat_v3）：敌方专属决策器 → 战斗主持人/DM（玩家意图文本→AI解析→Command）+ 双 bug 修复（结算叙事崩 / SLOT_EXHAUSTED 熔断闪退）                  | ✅ 7675 tests 全绿（2026-08-12）                                                                      |
 | 战斗真机 debug | 8 项真机 bug 修复（攻击卡 UUID / 火球术伤害 / stats 键中英 / 骰池续骰中断 / 逃跑语义 / 敌方熔断闪退 / 终局 AI 总结）                                                 | ✅ 7704 tests 全绿（2026-08-12）                                                                      |
 | 工坊 P0        | 世界书迁出 localStorage → Dexie v14（+ 进 FullBackup）                                                                                                               | ✅                                                                                                    |
 | 工坊 P0b       | 美化规则迁出 localStorage → Dexie v15                                                                                                                                | ✅                                                                                                    |
@@ -579,10 +583,10 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 
 两份最大的架构地图已从本文件拆出，各自放到它所描述的代码目录里。**内容一字未改，只是换了位置**：
 
-| 分册                     | 覆盖范围                                                                                  | 位置                                                     |
-| ------------------------ | ----------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| 引擎层架构（已实现部分） | `src/sillytavern/**` —— 类型/数据库/Agent 编排/战斗/制作/效果系统/图像生成等全部引擎模块  | [`src/sillytavern/AGENTS.md`](src/sillytavern/AGENTS.md) |
-| 前端架构 (Phase 7)       | `src/ui/**` —— composables / lib 桥接层 / stores / components / 设置页 14 分区 / 预设系统 | [`src/ui/AGENTS.md`](src/ui/AGENTS.md)                   |
+| 分册                     | 覆盖范围                                                                                  | 位置                                       |
+| ------------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------------ |
+| 引擎层架构（已实现部分） | `src/core/**` —— 类型/数据库/Agent 编排/战斗/制作/效果系统/图像生成等全部引擎模块         | [`src/core/AGENTS.md`](src/core/AGENTS.md) |
+| 前端架构 (Phase 7)       | `src/ui/**` —— composables / lib 桥接层 / stores / components / 设置页 14 分区 / 预设系统 | [`src/ui/AGENTS.md`](src/ui/AGENTS.md)     |
 
 拆分理由：这两份地图加起来约 4.4 万字，占本文件六成，但**只在改对应目录的代码时才用得上**；
 留在根文件里会让每一次会话（哪怕只改文档）都付它们的上下文成本。
@@ -590,7 +594,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 ### 🔴 各工具怎么读
 
 - **Codex / Cursor / Windsurf 等只读根 `AGENTS.md` 的工具**：本文件**不再包含**这两份地图。
-  动 `src/sillytavern/` 或 `src/ui/` 下任何文件之前，**必须先手动读取对应的分册**（路径见上表）。
+  动 `src/core/` 或 `src/ui/` 下任何文件之前，**必须先手动读取对应的分册**（路径见上表）。
   漏读的症状不是报错，是照着不存在的约定改代码 —— 那两份地图里全是「这么写不报错但是错的」这类硬约束。
 - **Claude Code**：分册同目录各有一个 `CLAUDE.md` 薄壳（`@AGENTS.md` 导入），
   会在读写该目录下的文件时自动加载，无需手动读取。
@@ -599,4 +603,4 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 
 ## 内容许可
 
-本仓库包含创意内容（世界观设定、角色卡、Lore），受 `《命定之诗》内容二创与素材使用授权协议.md` 约束。代码部分（`src/sillytavern/` 目录下）源自 `tavernlike` skill，使用 **MIT** 许可。两者不可混淆 — 对引擎的修改遵循 MIT；对世界观内容的复用或再分发须遵守独立授权协议。
+本仓库包含创意内容（世界观设定、角色卡、Lore），受 `《命定之诗》内容二创与素材使用授权协议.md` 约束。代码部分（`src/core/` 目录下）源自 `tavernlike` skill，使用 **MIT** 许可。两者不可混淆 — 对引擎的修改遵循 MIT；对世界观内容的复用或再分发须遵守独立授权协议。

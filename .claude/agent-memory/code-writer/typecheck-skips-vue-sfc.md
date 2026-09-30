@@ -33,7 +33,7 @@ SettingsPage.vue」已被修掉 —— 现在**任何输出都是你弄坏的**�
 
 **额外守护:** 源码级测试用 Vite 的 `?raw` 读 SFC 文本，正则抠出所有
 `await import('@engine/…')` 的解构名逐个对照模块真实导出
-（见 `src/ui/components/settings/SettingsPage.engine-imports.test.ts`）。
+（见 `tests/ui/components/settings/SettingsPage.engine-imports.test.ts`）。
 **别在 `src/**` 下 `import 'fs'`** —— 仓库没装 `@types/node`，会让 typecheck 报 TS2307；
 `?raw` 的类型由 `src/env.d.ts` 引的 `vite/client` 提供，直接就是 string。
 

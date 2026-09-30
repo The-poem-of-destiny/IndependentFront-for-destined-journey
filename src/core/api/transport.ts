@@ -1,5 +1,6 @@
 import type { ApiEndpoint } from '../types/types';
 import type { JsonObject, LlmProtocol } from '../types/types-api';
+import { buildCustomHeadersValue } from './header-overrides';
 
 export interface LlmTransportRequest {
   endpoint: ApiEndpoint;
@@ -42,6 +43,10 @@ export function buildLlmTransportHeaders(
       headers['anthropic-beta'] = endpoint.anthropicBeta.join(',');
     }
   }
+  // 源级自定义请求头（「参数跟随模型」的头那一半）：打成单个载荷头交给 BFF，
+  // BFF 解析后再并入上游请求（受保护头名两边各拒一次）。
+  const customHeaders = buildCustomHeadersValue(endpoint.headerOverrides);
+  if (customHeaders) headers['X-Custom-Headers'] = customHeaders;
   return headers;
 }
 

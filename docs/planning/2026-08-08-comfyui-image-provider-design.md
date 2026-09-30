@@ -19,12 +19,12 @@
 
 ## 1. 现状（v1 的 NAI 耦合点，实测清单）
 
-| 层     | 文件                                         | 耦合                                                                                     |
-| ------ | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| BFF    | `server/routes/image.ts`                     | 路径 `/ai/generate-image` 写死；SSRF 名单**放行 localhost**（ollama 先例）→ ComfyUI 可达 |
-| 传输   | `src/ui/lib/image-client.ts`                 | `generateNaiImage` / zip 解包 / 401·402·429 分类                                         |
-| 请求体 | `src/sillytavern/image-providers/novelai.ts` | V4.5 三重冗余（input / v4_prompt / characterPrompts）                                    |
-| 接线   | `src/ui/lib/scene-image-seams.ts`            | 无条件调 `buildNaiRequest`                                                               |
+| 层     | 文件                                  | 耦合                                                                                     |
+| ------ | ------------------------------------- | ---------------------------------------------------------------------------------------- |
+| BFF    | `server/routes/image.ts`              | 路径 `/ai/generate-image` 写死；SSRF 名单**放行 localhost**（ollama 先例）→ ComfyUI 可达 |
+| 传输   | `src/ui/lib/image-client.ts`          | `generateNaiImage` / zip 解包 / 401·402·429 分类                                         |
+| 请求体 | `src/core/image/providers/novelai.ts` | V4.5 三重冗余（input / v4_prompt / characterPrompts）                                    |
+| 接线   | `src/ui/lib/scene-image-seams.ts`     | 无条件调 `buildNaiRequest`                                                               |
 
 **danbooru 比 NovelAI 埋得更深**: `normalizeTagString`、`rating:*`、`NAI_QUALITY_SUFFIXES`、
 构图词、`image-world-tags.ts`（时段/天气→标签）、九槽外貌的 `renderAppearanceDanbooru`、

@@ -15,6 +15,6 @@ metadata:
 
 **How to apply:** 做工坊 P2 接线（renderWorldBookEntries / 装配挂点）时，别把 D10 的「回退率 ≤5%」当硬门槛直接卡——先按上面这张单子归因。要真降回退率，得决定是否在 EJS 求值**之前**插一道宏预剥离（至少 `{{roll}}`），那是对 D1 的修订，需要主人拍板。
 
-**闸门已落地**：这 8 条 uid（343/353/357/358/417/421/477/505）已钉进 `src/sillytavern/worldbook-ejs-corpus.test.ts` 的 `KNOWN_FALLBACK_UIDS` 白名单，断言是**集合相等**（多一条红、少一条也红）。改 EJS 运行时或语料后测试红，先来这份清单归因，别直接改断言。
+**闸门已落地**：这 8 条 uid（343/353/357/358/417/421/477/505）已钉进 `tests/core/ejs/worldbook-ejs-corpus.test.ts` 的 `KNOWN_FALLBACK_UIDS` 白名单，断言是**集合相等**（多一条红、少一条也红）。改 EJS 运行时或语料后测试红，先来这份清单归因，别直接改断言。
 
 相关：[[known-flaky-tests]]（既有失败基线的同类判断方法）

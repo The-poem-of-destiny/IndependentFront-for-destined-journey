@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-战斗中 v3 M4 第二部分（2026-08-01）已完成并全绿（5240 tests / typecheck 0）。工作区 `src/sillytavern/combat-v3/`。
+战斗中 v3 M4 第二部分（2026-08-01）已完成并全绿（5240 tests / typecheck 0）。工作区 `src/core/combat/`。
 
 **① 窗口接线层**：`phases/attack.ts` `finalizeAttack` 的 ⑨ `damage.after` 现在不再丢弃 `evaluateWindow` 结果 —— `applyAfterWindow` 把守方（`raw.owner === defender.id` 门控）的反射 `ScheduleIntent` 排进同一原子提交（`out.changes.hpChanges` + `DamageReflected` 事件），R8 命中骰从 `attackHit` 通道 draw；非反射 intent（Heal/SpendResource 等）经 `applyIntents` 并入。`windows.ts` `resolveNumber` 升级为 `parseExpression → evaluate → fallback`（错误隔离），`makeWindowRuntimeCtx` 支持 `damage` 覆盖。
 

@@ -115,6 +115,7 @@ describe('api-source-store Vue proxy boundaries', () => {
       timeoutMs: 60_000,
       bodyOverrides: { reasoning: { effort: 'high' } },
       bodyOmitPaths: [],
+      headerOverrides: {},
     });
 
     expect(state.settings.apiPool).toHaveLength(1);

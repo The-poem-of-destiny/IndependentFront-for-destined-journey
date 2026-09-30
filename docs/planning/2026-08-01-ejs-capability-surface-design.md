@@ -6,7 +6,7 @@
 > **定位**：本文件是 EJS 能力面的设计与实施记录。上游（SillyTavern + 酒馆助手 + MVU）的 API 只以**兼容别名层**形式承接存量内容，不是设计约束。
 >
 > **前置阅读**：`docs/planning/2026-07-31-workshop-phase2-ejs-design.md`（D1-D10 契约）、
-> `docs/reviews/2026-08-01-repository-review.md`（SEC-02）、`src/sillytavern/AGENTS.md`「事件驱动架构」（2026-08-13 自根 `AGENTS.md` 迁入）。
+> `docs/reviews/2026-08-01-repository-review.md`（SEC-02）、`src/core/AGENTS.md`「事件驱动架构」（2026-08-13 自根 `AGENTS.md` 迁入）。
 
 ---
 
@@ -544,7 +544,7 @@ guest 内的原型污染污染的是 guest，pass 结束即弃。
 ```
 scripts/scramble-worldbook-ejs.mjs   真实世界书 → 结构副本（正文换填充串、代码区一致混淆）
 tests/fixtures/ejs-scrambled-corpus.json   109 条目 + 38 片段 / 660 KB / 已提交
-src/sillytavern/ejs-scrambled-corpus.test.ts   CI 闸门，零人工
+tests/core/ejs/ejs-scrambled-corpus.test.ts   CI 闸门，零人工
 ```
 
 **混淆三条规则**（详见脚本头注释）：正文整体换填充串（不做字符置换——置换保留字频，可被频率分析还原）；

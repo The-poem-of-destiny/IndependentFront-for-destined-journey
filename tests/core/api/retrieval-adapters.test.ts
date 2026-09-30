@@ -17,6 +17,7 @@ const common = {
   timeoutMs: 1000,
   bodyOverrides: {},
   bodyOmitPaths: [],
+  headerOverrides: {},
 };
 
 describe('retrieval adapters', () => {

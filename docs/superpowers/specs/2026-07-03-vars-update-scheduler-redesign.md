@@ -11,7 +11,7 @@
 > ⚠️ 另有一条**未按本文实施**：文中的「`item_update` 独立 Agent」一节没有做 ——
 > `<item_update_request>` 标记确实存在，但**没有专属 Agent**，处理并进了 `vars_update`。
 >
-> **现行描述在** [`src/sillytavern/AGENTS.md`](../../../src/sillytavern/AGENTS.md)。本文保留为设计记录。
+> **现行描述在** [`src/core/AGENTS.md`](../../../src/core/AGENTS.md)。本文保留为设计记录。
 
 > 日期：2026-07-03
 > 状态：设计阶段

@@ -45,6 +45,8 @@ export interface EmbeddingEndpoint {
   name?: string;
   bodyOverrides?: JsonObject;
   bodyOmitPaths?: string[];
+  /** 源级自定义请求头（透传给上游；受保护头名由 header-overrides 层拒绝）。 */
+  headerOverrides?: Record<string, string>;
   revision?: number;
 }
 
@@ -304,6 +306,7 @@ export async function computeEmbeddingWithMeta(
         timeoutMs: 60_000,
         bodyOverrides: endpoint.bodyOverrides ?? {},
         bodyOmitPaths: endpoint.bodyOmitPaths ?? [],
+        headerOverrides: endpoint.headerOverrides ?? {},
         revision: endpoint.revision,
       },
       text,

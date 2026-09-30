@@ -1,6 +1,7 @@
 import { scheduleApiRequest } from './api-rpm-limiter';
 import type { JsonObject, RerankerApiSource } from '../types/types-api';
 import { applyBodyParameters } from './body-parameters';
+import { buildCustomHeadersValue } from './header-overrides';
 import { asObject } from './adapter-utils';
 
 export interface RerankScore {
@@ -74,6 +75,7 @@ export async function requestRerank(
 ): Promise<RerankScore[]> {
   const body = buildRerankerBody(source, query, documents, topN);
   const baseUrl = source.baseUrl.replace(/\/+$/u, '');
+  const customHeaders = buildCustomHeadersValue(source.headerOverrides);
   const response = await scheduleApiRequest(
     { baseUrl, apiKey: source.apiKey, label: source.name },
     signal,
@@ -84,6 +86,7 @@ export async function requestRerank(
           'Content-Type': 'application/json',
           'X-Target-Base-URL': baseUrl,
           Authorization: `Bearer ${source.apiKey}`,
+          ...(customHeaders ? { 'X-Custom-Headers': customHeaders } : {}),
         },
         body: JSON.stringify(body),
         signal,

@@ -15,7 +15,7 @@
 
 | 任务 | 提交                                                               | 实际做法                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 与计划偏差                                                                                                                                                                                                                                                                                                                                        |
 | ---- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T0   | `19535c9` test(prompt): pin baseline wire-message contract         | 新增 `src/sillytavern/fixtures/prompt-session/prompt-session-fixture.ts`（两虚构角色 + 一物品 + 一技能 + 一条动态世界书 + 三组消息），钉 `buildAgentMessagesAsync` 首轮只产一条 system 消息、AgentClient 补「继续」非空 user 触发、动态世界书每 assembly pass 只求值一次。**纯测试提交，不改生产行为**                                                                                                                                                                                                                                                                 | 额外加了「fixture 自身契约」测试：断言 fixture 的全部命名导出都被消费，否则 `scripts/knip-ratchet.mjs` 会把它们当新增死导出挂红 —— 计划 §4 未提这一步                                                                                                                                                                                             |
+| T0   | `19535c9` test(prompt): pin baseline wire-message contract         | 新增 `tests/core/fixtures/prompt-session/prompt-session-fixture.ts`（两虚构角色 + 一物品 + 一技能 + 一条动态世界书 + 三组消息），钉 `buildAgentMessagesAsync` 首轮只产一条 system 消息、AgentClient 补「继续」非空 user 触发、动态世界书每 assembly pass 只求值一次。**纯测试提交，不改生产行为**                                                                                                                                                                                                                                                                      | 额外加了「fixture 自身契约」测试：断言 fixture 的全部命名导出都被消费，否则 `scripts/knip-ratchet.mjs` 会把它们当新增死导出挂红 —— 计划 §4 未提这一步                                                                                                                                                                                             |
 | T1   | `9d88d9a` feat(prompt): add read-only state projection diff        | 新增 `prompt-state-projection.ts` + 测试：封闭 scope 联合（14 个）、`set/upsert/remove` + `rebase` 控制信号、按逻辑名字归一化 + 规范化内容深比较、固定排序字节稳定、NARRATIVE append cursor                                                                                                                                                                                                                                                                                                                                                                            | **无偏差**。计划的「三函数 interface」原样落地                                                                                                                                                                                                                                                                                                    |
 | T2   | `613f6a9` feat(prompt): add per-save per-agent prompt sessions     | 新增 `prompt-session-assembler.ts`（prepare/complete/invalidate 三入口 + `(saveId, agentId)` 内存态），`ensureUserMessage` 从 AgentClient 私有方法提为模块级导出纯函数，`AgentResult` 增 `promptTokens`，provider 不返回 `usage.prompt_tokens` 时保持 undefined                                                                                                                                                                                                                                                                                                        | 计划 §6 之外的**额外导出**：`agent-templates.ts` 的 `buildEjsPassContext` / `reportEjsFallback` 提为导出 —— assembler 每轮用同一个 EJS pass 单独求值动态世界书（投影的 `lore_dynamic`），并走与 `buildAgentMessagesAsync` 同一条回退诊断出口                                                                                                      |
 | T3   | `2d4027d` feat(prompt): wire main DAG chat/chatStream              | `callAgent` 非 embedding / 非 tools / 非 skipSession 时先 `preparePromptSession`；非流式成功 complete、最终 error/abort invalidate；流式只在 `onComplete` complete、`onError` + promise reject invalidate；provider retry 复用同一 prepared messages；`result.requestMessages` 记录实际 wire messages；`regenerateAgent` 先 `invalidatePromptSession(handle)` 再走现有无状态完整请求（`skipSession`）；`AgentResult` 增 `promptSessionRevision` / `promptRebased` / `promptRebaseReason` 三个诊断字段                                                                  | 计划 §11 建议的第 4 个提交「wire main DAG **and minimal settings**」实际拆成两个：`2d4027d` 只做核心接线（orchestrator + 诊断字段），**此时 `ApiEndpoint.contextWindowTokens` / `AgentConfig.tailPrompt` 尚未接线**（prepare 调用未传这两个字段），配置面留到 T4 的 `e116051` 才补传                                                              |
@@ -38,7 +38,7 @@ format:check / lint / knip:ratchet / test:run）；全量 **355 文件 9169 test
 
 - 设计真源状态改为「已实施（2026-08-23），真机运营验收待执行」，§7.2 加 rebase 控制信号实施注记。
 - `docs/ARCHITECTURE.md` 增 prompt-session-assembler 模块 seam。
-- `src/sillytavern/AGENTS.md` 架构图增两行条目。
+- `src/core/AGENTS.md` 架构图增两行条目。
 - `docs/reference/agent_system_prompt_guide.md` / `agent_template_guide.md` 各增 delta 会话说明。
 - `docs/CHANGELOG.md` 追加实施记录。
 
@@ -108,9 +108,9 @@ T1–T4 按顺序集成。这样每次提交都有一个可测试 interface，�
 
 ### 文件
 
-- 新增 `src/sillytavern/fixtures/prompt-session/` 下的匿名三回合 fixture。
-- 扩充 `src/sillytavern/agent-templates.test.ts`。
-- 扩充 `src/sillytavern/agent-client.test.ts`。
+- 新增 `tests/core/fixtures/prompt-session/` 下的匿名三回合 fixture。
+- 扩充 `tests/core/prompts/agent-templates.test.ts`。
+- 扩充 `tests/core/agents/agent-client.test.ts`。
 
 ### 工作
 
@@ -123,7 +123,7 @@ T1–T4 按顺序集成。这样每次提交都有一个可测试 interface，�
 ### 验收
 
 ```bash
-npm run test:run -- src/sillytavern/agent-templates.test.ts src/sillytavern/agent-client.test.ts
+npm run test:run -- tests/core/prompts/agent-templates.test.ts tests/core/agents/agent-client.test.ts
 ```
 
 此任务不改生产行为。若现状测试与代码不一致，先修测试假设，不在 T0 修产品。
@@ -136,9 +136,9 @@ npm run test:run -- src/sillytavern/agent-templates.test.ts src/sillytavern/agen
 
 ### 文件
 
-- 新增 `src/sillytavern/prompt-state-projection.ts`。
-- 新增 `src/sillytavern/prompt-state-projection.test.ts`。
-- 必要时在 `src/sillytavern/types.ts` 增加对外需要的最小类型；内部类型留在新 module。
+- 新增 `src/core/prompts/prompt-state-projection.ts`。
+- 新增 `tests/core/prompts/prompt-state-projection.test.ts`。
+- 必要时在 `src/core/types/types.ts` 增加对外需要的最小类型；内部类型留在新 module。
 
 ### interface
 
@@ -173,7 +173,7 @@ renderPromptDelta(revision, ops): string;
 ### 验收
 
 ```bash
-npm run test:run -- src/sillytavern/prompt-state-projection.test.ts
+npm run test:run -- tests/core/prompts/prompt-state-projection.test.ts
 npm run typecheck
 ```
 
@@ -186,11 +186,11 @@ npm run typecheck
 
 ### 文件
 
-- 新增 `src/sillytavern/prompt-session-assembler.ts`。
-- 新增 `src/sillytavern/prompt-session-assembler.test.ts`。
-- 小改 `src/sillytavern/agent-client.ts`：把“补非空 user 消息”提成可复用、幂等的纯函数。
-- 修改 `src/sillytavern/types.ts`：为 `AgentResult` 增加可选 `promptTokens`。
-- 扩充 `src/sillytavern/agent-client.test.ts`。
+- 新增 `src/core/prompts/prompt-session-assembler.ts`。
+- 新增 `tests/core/prompts/prompt-session-assembler.test.ts`。
+- 小改 `src/core/agents/agent-client.ts`：把“补非空 user 消息”提成可复用、幂等的纯函数。
+- 修改 `src/core/types/types.ts`：为 `AgentResult` 增加可选 `promptTokens`。
+- 扩充 `tests/core/agents/agent-client.test.ts`。
 
 ### interface
 
@@ -231,7 +231,7 @@ npm run typecheck
 ### 验收
 
 ```bash
-npm run test:run -- src/sillytavern/prompt-session-assembler.test.ts src/sillytavern/agent-client.test.ts
+npm run test:run -- tests/core/prompts/prompt-session-assembler.test.ts tests/core/agents/agent-client.test.ts
 npm run typecheck
 ```
 
@@ -243,9 +243,9 @@ npm run typecheck
 
 ### 文件
 
-- 修改 `src/sillytavern/agent-orchestrator.ts`。
-- 必要时修改 `src/sillytavern/agent-templates.ts`，仅提取可复用的完整 renderer 结果。
-- 扩充 `src/sillytavern/agent-orchestrator.test.ts` 或现有最接近的管线测试。
+- 修改 `src/core/agents/agent-orchestrator.ts`。
+- 必要时修改 `src/core/prompts/agent-templates.ts`，仅提取可复用的完整 renderer 结果。
+- 扩充 `tests/core/agents/agent-orchestrator.test.ts` 或现有最接近的管线测试。
 
 ### 工作
 
@@ -270,7 +270,7 @@ npm run typecheck
 ### 验收
 
 ```bash
-npm run test:run -- src/sillytavern/agent-orchestrator.test.ts src/sillytavern/prompt-session-assembler.test.ts
+npm run test:run -- tests/core/agents/agent-orchestrator.test.ts tests/core/prompts/prompt-session-assembler.test.ts
 npm run typecheck
 ```
 
@@ -285,7 +285,7 @@ npm run typecheck
 
 ### 文件
 
-- 修改 `src/sillytavern/types.ts`。
+- 修改 `src/core/types/types.ts`。
 - 修改 `src/ui/stores/agent-settings.ts` 及其现有测试。
 - 修改 `src/ui/stores/settings-store.ts` 的 `ApiEntry` 和现有持久化测试。
 - 修改 `src/ui/stores/api-key-migration.ts` 的 ApiEntry/ApiEndpoint 映射和现有测试，保留非密钥字段。
@@ -315,8 +315,8 @@ ApiEndpoint.contextWindowTokens?: number;
 ### 验收
 
 ```bash
-npm run test:run -- src/ui/stores/agent-settings.test.ts
-npm run test:run -- src/ui/stores/settings-store.test.ts src/ui/stores/api-key-migration.test.ts
+npm run test:run -- tests/ui/stores/agent-settings.test.ts
+npm run test:run -- tests/ui/stores/settings-store.test.ts tests/ui/stores/api-key-migration.test.ts
 npm run typecheck
 npm run typecheck:vue
 ```
@@ -332,7 +332,7 @@ npm run typecheck:vue
 - 本设计状态改为“已实施（日期）+ 真机状态”。
 - 本计划状态改为“已完成”，逐项记录实际偏差；无偏差也写明。
 - `docs/ARCHITECTURE.md` 增加 prompt-session-assembler 的 module seam。
-- `src/sillytavern/AGENTS.md` 增加对应现行架构说明。
+- `src/core/AGENTS.md` 增加对应现行架构说明。
 - `docs/reference/agent_system_prompt_guide.md` 说明首轮模板与后续 delta 的关系。
 - `docs/reference/agent_template_guide.md` 说明 template 只控制首轮完整 prompt。
 - `docs/CHANGELOG.md` 追加实施记录。

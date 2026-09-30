@@ -173,13 +173,13 @@
 目标：建立图像生成子系统的全部类型定义与常量，后续 7 个纯函数模块都从这里取类型。
 
 要读：docs/planning/2026-08-04-image-generation-design.md 的 §4（类型定义，逐字照抄它给的
-      接口与注释）与 §6.2（画质后缀表）。另外读 src/sillytavern/marker-protocol.ts 里
+      接口与注释）与 §6.2（画质后缀表）。另外读 src/core/story/marker-protocol.ts 里
       DetectedMarker 联合的现有形状，SceneImageMarker 要能加进去。
 
 产出：
-- src/sillytavern/types-image.ts —— §4 的全部类型。**注释一并照抄**，那些 🔴 标记记录的是
+- src/core/types/types-image.ts —— §4 的全部类型。**注释一并照抄**，那些 🔴 标记记录的是
   踩过的坑，不是装饰。
-- src/sillytavern/image-defaults.ts —— 画质后缀（按 §6.2 那张表，默认取 V4.5 Full 那一行）、
+- src/core/image/image-defaults.ts —— 画质后缀（按 §6.2 那张表，默认取 V4.5 Full 那一行）、
   固定构图词、基础负向、限额默认值（每消息 2 / 每小时 20）。
 - 把 SceneImageMarker 加进 marker-protocol.ts 的 DetectedMarker 联合（**只加联合成员，
   MARKER_SPECS 那一行不是本任务的事**，另有人做）。
@@ -231,7 +231,7 @@
 目标：让 <scene_image> 成为引擎认识的标记。
 
 要读：设计文档 §3（标记协议）、§3.1（MARKER_SPECS 增量）、§3.2（sanitizeCaption 规格）、
-      §3.4（漏写闭合标签的兜底）。src/sillytavern/marker-protocol.ts 现有的
+      §3.4（漏写闭合标签的兜底）。src/core/story/marker-protocol.ts 现有的
       MARKER_SPECS 与 scanPlayAudioMarkers（后者是三种写法兜底的先例）。
 
 产出：MARKER_SPECS 加 scene_image 一行 + sanitizeCaption 纯函数 + marker-protocol.test.ts 增量。
@@ -245,7 +245,7 @@
 - 🔴 绝不因为 title 畸形就拒绝整个标记 —— 那会把一次装饰性失误升级成一张画不出来的图。
   title 含引号 / 超长 / 缺省，一律只收敛不拒绝。
 
-验证：npm test -- --run src/sillytavern/marker-protocol.test.ts
+验证：npm test -- --run tests/core/story/marker-protocol.test.ts
 ```
 
 #### T4 — `image-prompt.ts`（阶段 B2，**承重模块**）
@@ -257,7 +257,7 @@
 要读：设计文档 §5.2 全节（签名、拼接顺序、全部不变式）、§3.2b（normalizeTagString 规格）、
       §6.2 的多角色官方规则那张表。
 
-产出：src/sillytavern/image-prompt.ts（composePrompt + normalizeTagString）+ image-prompt.test.ts。
+产出：src/core/image/image-prompt.ts（composePrompt + normalizeTagString）+ image-prompt.test.ts。
 
 🔴 不变式（每一条都要有对应测试）：
 - 角色预设**绝不拼进 base**，分别进 characters[]；角色的 negative 进**该角色的槽**，
@@ -272,7 +272,7 @@
   换行与 <br> → ", "；折叠连续逗号与空白。
 - 本函数**不产随机、不读时钟、不做任何 I/O**。worldTags 是调用方算好传进来的字符串。
 
-验证：npm test -- --run src/sillytavern/image-prompt.test.ts
+验证：npm test -- --run tests/core/image/image-prompt.test.ts
 ```
 
 #### T5 — `image-quota.ts`（阶段 B3）
@@ -282,7 +282,7 @@
 
 要读：设计文档 §5.3 全节（含那张三层表与不变式）、D21–D24。
 
-产出：src/sillytavern/image-quota.ts（checkQuota）+ image-quota.test.ts。
+产出：src/core/image/image-quota.ts（checkQuota）+ image-quota.test.ts。
 
 🔴 不变式：
 - 三层互相独立，任一不满足即拒：L1 每消息上限（默认 2）· L2 滚动一小时窗（默认 20）
@@ -294,7 +294,7 @@
 - 返回的 message 是**可读中文**，会直接出现在按钮 tooltip 上，不是错误码。
 - **手动永不被判成不可用**，最多是「要确认」——为这条单独写测试。
 
-验证：npm test -- --run src/sillytavern/image-quota.test.ts
+验证：npm test -- --run tests/core/image/image-quota.test.ts
 ```
 
 #### T6 — `image-providers/novelai.ts`（阶段 B4）
@@ -305,7 +305,7 @@
 要读：设计文档 §5.4（签名与不变式）、§6.1（**真实录制的请求体全文**，照它写）、
       §6.2（ucPreset 按模型各自编号的警告）。
 
-产出：src/sillytavern/image-providers/novelai.ts（buildNaiRequest + parseNaiZip）
+产出：src/core/image/providers/novelai.ts（buildNaiRequest + parseNaiZip）
       + novelai.test.ts。
 
 🔴 三重冗余是本任务的全部要害：
@@ -325,7 +325,7 @@
 - parseNaiZip：content-type 不含 zip → bad-response；zip 解出 0 张图 → bad-response。
   解 zip 用仓库已有的 fflate。
 
-验证：npm test -- --run src/sillytavern/image-providers/novelai.test.ts
+验证：npm test -- --run tests/core/image/providers/novelai.test.ts
       zip 测试如果手头没有真 NAI 响应样本，就用 fflate 自己压一个当 fixture，
       并在报告里说明这一点。
 ```
@@ -338,7 +338,7 @@
 
 要读：设计文档 §8.5（侧链规格）、§4 里 ImagePromptRequest 与 ImagePromptOutput 的定义。
 
-产出：src/sillytavern/image-prompt-agent.ts，导出 buildImagePromptInput 与
+产出：src/core/image/image-prompt-agent.ts，导出 buildImagePromptInput 与
       parseImagePromptOutput 两个纯函数（中间那次 callAgent 留空/留接口给 T14）
       + image-prompt-agent.test.ts。
 
@@ -352,7 +352,7 @@
   先按 §3.2b 的规格自己实现一份并在报告里说明，由主会话决定合并）。
 - buildImagePromptInput 要带上地点与所属消息正文，且正文**已剥掉全部标记**。
 
-验证：npm test -- --run src/sillytavern/image-prompt-agent.test.ts
+验证：npm test -- --run tests/core/image/image-prompt-agent.test.ts
 ```
 
 #### T8 — `image-world-tags.ts`（阶段 B6，D39）
@@ -361,10 +361,10 @@
 目标：把引擎知道的「时段 + 天气」变成 danbooru 标签，让夜里的戏不被画成白天。
 
 要读：设计文档 D39 与 §5.2 里 ComposeOptions.worldTags 的注释。
-      src/sillytavern/time-system.ts 的 getTimeOfDay() / isDaytime()（已存在，直接用）。
-      src/sillytavern/stat-projection.ts 里 world['天气'] 的形状（自由文本 string）。
+      src/core/time/time-system.ts 的 getTimeOfDay() / isDaytime()（已存在，直接用）。
+      src/core/character/stat-projection.ts 里 world['天气'] 的形状（自由文本 string）。
 
-产出：src/sillytavern/image-world-tags.ts（buildWorldTags 纯函数）+ image-world-tags.test.ts。
+产出：src/core/image/image-world-tags.ts（buildWorldTags 纯函数）+ image-world-tags.test.ts。
 
 🔴 关键点：
 - 🔴 **映射不中的值一律不贡献标签，返回空串。绝不猜。** 天气是自由文本，猜错比留空糟得多
@@ -373,7 +373,7 @@
 - 纯函数：时间从参数进，不读时钟、不做 I/O。
 - 天气映射表放小、放明确，只收常见中文天气词；宁可漏不可错。
 
-验证：npm test -- --run src/sillytavern/image-world-tags.test.ts
+验证：npm test -- --run tests/core/image/image-world-tags.test.ts
 ```
 
 #### T9 — `image-anlas.ts`（阶段 B7，D43）
@@ -385,14 +385,14 @@
 要读：设计文档 D43 与 §11.2、§6 里关于 Opus 订阅免费档的那两段
       （常规尺寸 + 单张不消耗点数；模板的 1216×832 / 23 步 / n_samples:1 在免费档内）。
 
-产出：src/sillytavern/image-anlas.ts（estimateAnlasCost 纯函数）+ image-anlas.test.ts。
+产出：src/core/image/image-anlas.ts（estimateAnlasCost 纯函数）+ image-anlas.test.ts。
 
 🔴 关键点：
 - **这条规则会变，所以测试就是它的文档** —— 边界值逐个钉死，每个断言写清依据。
 - 规则常量集中在一处，将来 NAI 改规则时只动那一处。
 - 措辞是**估算**不是保证（UI 层会写「按当前订阅规则估算」）。
 
-验证：npm test -- --run src/sillytavern/image-anlas.test.ts
+验证：npm test -- --run tests/core/image/image-anlas.test.ts
 ```
 
 ### 波 3
@@ -403,10 +403,10 @@
 目标：把一条消息正文切成「文本段 / 图片段」序列，供渲染层使用。
 
 要读：设计文档 §5.1 全节（不变式）、§10.1（分段在美化之前）。
-      src/sillytavern/marker-protocol.ts 的 scanByTag（T3 刚把 scene_image 注册进去）。
+      src/core/story/marker-protocol.ts 的 scanByTag（T3 刚把 scene_image 注册进去）。
       src/ui/lib/beautifier.ts 的 appendText（相邻文本段合并的做法照它）。
 
-产出：src/sillytavern/image-segments.ts（splitSceneImageSegments）+ image-segments.test.ts。
+产出：src/core/image/image-segments.ts（splitSceneImageSegments）+ image-segments.test.ts。
 
 🔴 不变式：
 - 🔴 **不许自己写第二个解析器** —— 调 scanByTag(text, 'scene_image') 拿 position 与
@@ -417,7 +417,7 @@
 - 输入无标记时返回 [{kind:'text', text}]（**不是空数组**，调用方不必特判）；
   输入空串返回 []。
 
-验证：npm test -- --run src/sillytavern/image-segments.test.ts
+验证：npm test -- --run tests/core/image/image-segments.test.ts
 ```
 
 #### T11 — Dexie v17 + 两个 store（阶段 D）
@@ -427,7 +427,7 @@
 
 要读：设计文档 §7 全节（Dexie v17 / 删存档连带删 / FullBackup / 回滚 / 用量与清理）、
       §4 的 SceneImageRecord 与 ImagePreset、§8 的 generate() 流程图。
-      src/sillytavern/database.ts 的 v16 schema、withSchema 用法、删存档那个事务
+      src/core/persistence/database.ts 的 v16 schema、withSchema 用法、删存档那个事务
       （约 :1083）、FullBackup 的表清单。
 
 产出：
@@ -449,7 +449,7 @@
 - 重画**追加 take 不覆盖**；同一锚点下 pinned 至多一条。
 - anchorKind 'marker' 与 'message-end' 的 occurrence **各自独立计数**。
 
-验证：npm test -- --run src/ui/stores/scene-image-store.test.ts src/ui/stores/image-preset-store.test.ts
+验证：npm test -- --run tests/ui/stores/scene-image-store.test.ts tests/ui/stores/image-preset-store.test.ts
 ```
 
 #### T12 — BFF 路由 + 网络客户端（阶段 E）
@@ -476,7 +476,7 @@
 - 错误分类照 §12.2 那张表逐条实现，文案就用表里的中文原文。
   detail 只进 console 与记录，**不进 UI**。
 
-验证：npm run typecheck && npm test -- --run src/ui/lib/image-client.test.ts
+验证：npm run typecheck && npm test -- --run tests/ui/lib/image-client.test.ts
 ```
 
 ### 波 4
@@ -519,7 +519,7 @@
 要读：设计文档 §8.5（侧链规格）、D28 / D31 / D32 / **D55**、§11.3 里
       「image_prompt 不进 AGENT_LIST」那一节。
       data/defaults/agent-config.json 现有 12 个 agent 的条目形状。
-      src/sillytavern/char-gen-agent.ts —— 侧链编排的先例，照它的形状写。
+      src/core/agents/char-gen-agent.ts —— 侧链编排的先例，照它的形状写。
 
 产出：
 - agent-config.json 加第 13 个 agent `image_prompt`
@@ -532,7 +532,7 @@
   那是延后的独立任务（N），因为提示词好不好要看真机出的图才谈得上调。
 - 🔴 **image_prompt 不进 src/ui/components/settings/agent/agent-list.ts 的 AGENT_LIST**
   （D53）—— 它渲染在第 13 分区里（T15 做），同一份配置不开两个入口。
-  先例：combat_v3 也在 agent-config.json 里但不在 AGENT_LIST。
+  先例：combat 也在 agent-config.json 里但不在 AGENT_LIST。
 - 类型是**普通补全，非 Agentic**（不需要工具调用）。
 - 默认挂便宜快模型；世界书默认关。
 - 产出缓存进记录，重试/重画不再跑侧链（除非用户改过 editedScenePrompt）。

@@ -5,7 +5,7 @@
 > **指令正文在 `AGENTS.md`**（工具中立，所有 AI 编码工具共用）。本文件是薄壳，只承载 Claude Code 专属内容：skills/workflows 用法（猫娘人格已上移至 `AGENTS.md` 文首 `## 人格遵循`，2026-08-13）。下方的 `@AGENTS.md` 会把正文（项目概览/约定/必读清单/命令/进度）原样导入进来。
 >
 > **两份架构地图已拆成分册**，各自放在它描述的代码目录里，只在改那里的代码时才加载：
-> [`src/sillytavern/AGENTS.md`](src/sillytavern/AGENTS.md)（引擎层）与 [`src/ui/AGENTS.md`](src/ui/AGENTS.md)（前端层）。
+> [`src/core/AGENTS.md`](src/core/AGENTS.md)（引擎层）与 [`src/ui/AGENTS.md`](src/ui/AGENTS.md)（前端层）。
 > 两处同目录都有 `CLAUDE.md` 薄壳自动导入，Claude Code 无需手动读取；只读根 `AGENTS.md` 的工具必须手动读分册。
 >
 > **改架构/约定只改 `AGENTS.md`（含分册）一处**，不要在两个文件里重复。
@@ -29,7 +29,7 @@
 # 审计多个文件: "用 audit-code 审计 tier-constants.ts,types.ts"
 
 # 多维度代码审查
-# 用法: "/workflow multi-dimension-review -- 'src/sillytavern/types.ts'"
+# 用法: "/workflow multi-dimension-review -- 'src/core/types/types.ts'"
 
 # 并行代码生成
 # 用法: "/workflow parallel-codegen"

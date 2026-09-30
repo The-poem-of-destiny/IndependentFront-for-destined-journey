@@ -42,6 +42,11 @@ function toProjection(source: ApiSource): ApiEntry {
     // while the settings projection is deliberately JSON-shaped, so use the shared detach seam.
     bodyOverrides: detach(source.bodyOverrides),
     bodyOmitPaths: [...source.bodyOmitPaths],
+    headerOverrides: detach(source.headerOverrides),
+    defaultParameters:
+      source.kind === 'llm' && source.defaultParameters
+        ? detach(source.defaultParameters)
+        : undefined,
     revision: source.revision,
     contextWindowTokens: source.kind === 'llm' ? source.contextWindowTokens : undefined,
     anthropicVersion: source.kind === 'llm' ? source.anthropicVersion : undefined,

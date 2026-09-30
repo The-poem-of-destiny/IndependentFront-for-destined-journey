@@ -272,17 +272,17 @@ StatusOverview “编辑人设”
 
 ## 8. 实施文件图
 
-| 文件                                                      | 最小改动                                             |
-| --------------------------------------------------------- | ---------------------------------------------------- |
-| `src/sillytavern/state-manager.ts`                        | 新增类型与 `updatePlayerPersona()` 命名写入口。      |
-| `src/sillytavern/state-manager.persona.test.ts`           | 锁内重读、窄改、无事件、无变化与异常主角回归。       |
-| `src/ui/stores/game-store.ts`                             | 新增 action、生成态守卫、按 id 接入权威返回值。      |
-| `src/ui/stores/game-store.persona.test.ts`                | 生成/战斗守卫、成功接入与无活跃存档回归。            |
-| `src/ui/components/game/PlayerPersonaEditorModal.vue`     | 三字段草稿、脏关闭、保存态、可访问错误与响应式布局。 |
-| `src/ui/components/game/PlayerPersonaEditorModal.test.ts` | 初始化、清空、未改禁用、脏关闭、失败保草稿和生成态。 |
-| `src/ui/components/game/StatusOverview.vue`               | 添加文字入口并编排 modal / toast。                   |
-| `src/ui/components/game/StatusOverview.persona.test.ts`   | 入口归属、禁用态、成功/失败文案与第三人称字段透传。  |
-| `src/sillytavern/prompt-state-projection.test.ts`         | 三字段变化产生最小 Delta，未变化不产 Delta。         |
+| 文件                                                        | 最小改动                                             |
+| ----------------------------------------------------------- | ---------------------------------------------------- |
+| `src/core/state/state-manager.ts`                           | 新增类型与 `updatePlayerPersona()` 命名写入口。      |
+| `tests/core/state/state-manager.persona.test.ts`            | 锁内重读、窄改、无事件、无变化与异常主角回归。       |
+| `src/ui/stores/game-store.ts`                               | 新增 action、生成态守卫、按 id 接入权威返回值。      |
+| `tests/ui/stores/game-store.persona.test.ts`                | 生成/战斗守卫、成功接入与无活跃存档回归。            |
+| `src/ui/components/game/PlayerPersonaEditorModal.vue`       | 三字段草稿、脏关闭、保存态、可访问错误与响应式布局。 |
+| `tests/ui/components/game/PlayerPersonaEditorModal.test.ts` | 初始化、清空、未改禁用、脏关闭、失败保草稿和生成态。 |
+| `src/ui/components/game/StatusOverview.vue`                 | 添加文字入口并编排 modal / toast。                   |
+| `tests/ui/components/game/StatusOverview.persona.test.ts`   | 入口归属、禁用态、成功/失败文案与第三人称字段透传。  |
+| `tests/core/prompts/prompt-state-projection.test.ts`        | 三字段变化产生最小 Delta，未变化不产 Delta。         |
 
 不修改 `CharacterListPanel`、`CharacterViewerModal`、数据库版本、内容包或图像外貌模块。
 

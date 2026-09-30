@@ -9,6 +9,35 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-09-30 API 池默认采样参数 + 自定义请求头（参数跟随模型）｜已实施，真机待验证
+
+起因（两条真机/群反馈）：①「LLM 参数能不能跟随模型走？否则每次换模型都要把每个 Agent 手动重设一遍」；
+② 用 opencode go 的 OpenAI 兼容端点报 `HTTP 400 MissingSessionID`，需在请求里附带 `x-opencode-session`
+头，而当时的 API 配置只支持请求体覆盖、完全没有请求头面。
+
+- **源级默认采样参数（1A）**：API 源新增 `defaultParameters`（temperature / topP / frequencyPenalty /
+  presencePenalty / maxTokens）。有效优先级 **Agent 显式覆写 > 池默认 > 内容包默认层 > 硬兜底**，
+  由新入口 `agent-settings.resolveAgentLlmParams` 统一解析，接在 `game-pipeline.buildAgentConfigs`
+  与 `create-store` 大纲生成两处；`AgentClient.buildRequestBody` 再把池默认作为**请求缺值兜底**，
+  于是侧链（char_gen/item_gen/craft_gen）与战斗这些直接 `chatWithTools({messages})`、不读 Agent
+  覆写的调用点也能吃到池默认。🔴 池默认**刻意压过内容包默认层** —— `agent-config.json` 给每个 Agent
+  都写了 0.7/65536，若排在默认层之下它永远轮不到生效。重试次数 / 历史层数 / 末尾指令**不跟随模型**
+  （它们是角色行为），仍只住 Agent 设置。
+- **源级自定义请求头（2A）**：`ApiSourceBase.headerOverrides`（name → value）。引擎侧
+  `header-overrides.ts` 立**受保护头名**（鉴权 / Content-Type / 传输控制 / `X-Target-*` / `X-Model-ID`）
+  与 CR/LF 注入防线；`transport` 打成 `X-Custom-Headers`（percent-encoded JSON）交给 BFF，
+  `server/routes/proxy.ts` **再验一次**后并入上游请求，`server/app.ts` 的 CORS `allowHeaders` 同步放行。
+  请求体侧早已有 `bodyOverrides`，本次补齐请求头这一半。
+- **UI（ApiSection）**：新增「默认采样参数」分组（仅 LLM 源）与「自定义请求头（JSON）」高级项；
+  默认采样参数预填 **temperature 1 / Top P 1 / 惩罚 0**（清空某一格 = 不设置该键）；添加与编辑共用同一弹窗，
+  故 LLM 源的编辑里同样可改（截图多为 Embedding，采样参数对 embedding 不适用、刻意隐藏）；
+  添加/编辑弹窗 `size` 由 `md` 提到 `lg`；🔴 编辑已有连接时输入框装的是**掩码**、真 key 只留在
+  `_realKey`，明文显示改为显式 `showKey` 开关（此前 `:type` 判成 text，弹窗一开就明文暴露密钥）。
+- 新增测试：`header-overrides` 校验/编码、`source-config` 解析、`transport` 载荷、`agent-client`
+  兜底与请求值优先、`agent-settings.resolveAgentLlmParams` 优先级、BFF 自定义头透传（含受保护头名/
+  CRLF/坏载荷）、`ApiSection` 源码契约。
+- 验证：`npm run gates` 八道全绿（410 文件 / 9603 通过 / 8 跳过）；Knip 保持 135 项无新增。
+
 ### 2026-09-30 战斗目录与 Agent 命名收口
 
 - 将现役内核、阶段、骰带、效果 DSL、协调器和全部战斗测试及夹具统一迁入 `src/core/combat/` / `tests/core/combat/`，同步导入、mock、源码扫描和前端投影路径。

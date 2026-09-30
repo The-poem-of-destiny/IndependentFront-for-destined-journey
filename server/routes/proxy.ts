@@ -32,6 +32,58 @@ const SSRF_BLOCKLIST = new Set([
 ]);
 
 /**
+ * 自定义请求头的**服务端**验单（安全边界：不 import 前端代码，前端自证作废）。
+ *
+ * 前端把源级 `headerOverrides` 打成 `X-Custom-Headers`（percent-encoded JSON）发进来；
+ * 这里解析后并入上游请求。**任何受保护头名一律丢弃** —— 鉴权头由各协议的 key 生成、
+ * `X-Target-*` 是 BFF 路由控制头，允许自定义等于开了一条注入通道。
+ * （引擎侧 `src/core/api/header-overrides.ts` 是同一份口径的用户面；两处都要改。）
+ */
+const PROTECTED_REQUEST_HEADERS = new Set([
+  'authorization',
+  'api-key',
+  'x-api-key',
+  'x-goog-api-key',
+  'anthropic-version',
+  'anthropic-beta',
+  'content-type',
+  'content-length',
+  'host',
+  'accept',
+  'accept-encoding',
+  'connection',
+  'transfer-encoding',
+  'x-target-base-url',
+  'x-model-id',
+  'x-llm-stream',
+  'x-custom-headers',
+]);
+
+const HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f]/;
+
+/** 解析 `X-Custom-Headers` 载荷；任何非法/受保护项**静默丢弃**（不阻断请求）。 */
+function collectCustomHeaders(raw: string | undefined): Record<string, string> {
+  if (!raw) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decodeURIComponent(raw));
+  } catch {
+    return {};
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const output: Record<string, string> = {};
+  for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof value !== 'string') continue;
+    if (!HEADER_NAME_PATTERN.test(name)) continue;
+    if (PROTECTED_REQUEST_HEADERS.has(name.toLowerCase())) continue;
+    if (CONTROL_CHAR_PATTERN.test(value)) continue;
+    output[name] = value;
+  }
+  return output;
+}
+
+/**
  * 🔒 F11：把 URL.hostname 归一化成黑名单可比的权威形式。
  *
  * Node 的 URL.hostname 对 IPv6 字面量**带方括号**返回（`[fd00:ec2::254]`），而
@@ -123,6 +175,8 @@ export async function forward(c: Context, suffix: string): Promise<Response> {
   if (anthropicVersion) headers['anthropic-version'] = anthropicVersion;
   const anthropicBeta = c.req.header('anthropic-beta');
   if (anthropicBeta) headers['anthropic-beta'] = anthropicBeta;
+  // 源级自定义请求头：受保护头名已在 collectCustomHeaders 内剔除，不会覆盖上面的鉴权/控制头。
+  Object.assign(headers, collectCustomHeaders(c.req.header('X-Custom-Headers')));
 
   let upstream: Response;
   try {

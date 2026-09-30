@@ -23,7 +23,7 @@
 战斗 v3 (M5) 完成后，item_gen 生成的装备携带两类战斗效果字段：
 
 - **`modifiers`**（`effect-types.ts` `Modifier` 6 大类判别联合）—— 命中+5、附加流血等
-- **`automata`**（`combat-v3/types.ts` `EffectAutomatonDecl[]`）—— DSL 自由效果（订阅窗口 + 触发表达式 + intents）
+- **`automata`**（`combat/types.ts` `EffectAutomatonDecl[]`）—— DSL 自由效果（订阅窗口 + 触发表达式 + intents）
 
 但前端 `ItemsPanel.vue` 详情面板只展示了**效果词条（`effects`）/ 描述 / 脚本**，玩家看不到装备到底带什么战斗效果。backlog 项明确建议：**v3 编译时产出人类可读效果描述，前端只渲染；automaton 是 DSL 内部表示不裸展示。**
 
@@ -77,7 +77,7 @@
 ## 3. 架构
 
 ```
-src/sillytavern/                   ← 引擎侧纯函数（新增）
+src/core/                   ← 引擎侧纯函数（新增）
 ├── describe-modifier.ts           ← describeModifier(m): string[]
 ├── describe-automaton.ts          ← describeAutomaton(a): string[]
 
@@ -143,7 +143,7 @@ src/ui/components/game/            ← 前端（改造）
 | `SpawnOrDespawnIntent` | `召唤/移除{unit}`                                                    |
 | `RequestChoiceIntent`  | `要求选择`                                                           |
 
-> 📌 注：`EffectIntent` 判别联合实测为 **13 类**（`combat-v3/types.ts:1607`），
+> 📌 注：`EffectIntent` 判别联合实测为 **13 类**（`combat/types.ts:1607`），
 > backlog 文案的「8 大类」是早期口径，实现以代码为准。其余 `kind`（如
 > `RoundOpened`/`DamageApplied`）是 `DomainEvent` 战斗事件，非 automaton intent，不在翻译范围内。
 

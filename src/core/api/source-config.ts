@@ -4,7 +4,9 @@ import type {
   ApiSourceKind,
   JsonObject,
   JsonValue,
+  LlmDefaultParameters,
 } from '../types/types-api';
+import { normalizeHeaderOverrides } from './header-overrides';
 
 const DEFAULT_API_TIMEOUT_MS = 60_000;
 
@@ -98,6 +100,35 @@ function normalizeApiBaseUrl(raw: string): string {
   return trimmed;
 }
 
+const LLM_DEFAULT_PARAMETER_KEYS = [
+  'temperature',
+  'topP',
+  'frequencyPenalty',
+  'presencePenalty',
+  'maxTokens',
+] as const;
+
+/**
+ * 解析源级默认采样参数（`LlmDefaultParameters`）：只认五个已知键、只接受有限数字。
+ * 空对象 / 全空 → `undefined`（不落库、不代表「已配置」）。未知键忽略（前向兼容）。
+ */
+function parseLlmDefaultParameters(value: unknown): LlmDefaultParameters | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value)) {
+    throw new ApiSourceValidationError('defaultParameters must be a JSON object');
+  }
+  const output: LlmDefaultParameters = {};
+  for (const key of LLM_DEFAULT_PARAMETER_KEYS) {
+    const raw = value[key];
+    if (raw === undefined || raw === null) continue;
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+      throw new ApiSourceValidationError(`defaultParameters.${key} must be a finite number`);
+    }
+    output[key] = raw;
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+}
+
 /** Strict parser for the new schema. Legacy defaults belong in the migration module. */
 export function parseApiSource(input: unknown): ApiSource {
   if (!isRecord(input)) throw new ApiSourceValidationError('API source must be an object');
@@ -134,6 +165,7 @@ export function parseApiSource(input: unknown): ApiSource {
     timeoutMs: timeoutMs as number,
     bodyOverrides: cloneJsonObject(input.bodyOverrides ?? {}),
     bodyOmitPaths: omitRaw.map((path) => path.trim()).filter(Boolean),
+    headerOverrides: normalizeHeaderOverrides(input.headerOverrides ?? {}),
     revision: optionalPositiveInteger(input.revision, 'revision'),
   };
 
@@ -150,6 +182,7 @@ export function parseApiSource(input: unknown): ApiSource {
         input.contextWindowTokens,
         'contextWindowTokens',
       ),
+      defaultParameters: parseLlmDefaultParameters(input.defaultParameters),
       anthropicVersion:
         typeof input.anthropicVersion === 'string' && input.anthropicVersion.trim()
           ? input.anthropicVersion.trim()

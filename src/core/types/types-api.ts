@@ -17,6 +17,31 @@ export type LlmProtocol = 'openai-chat' | 'gemini' | 'anthropic-messages';
 export type RetrievalProtocol = 'openai-embeddings' | 'openai-rerank';
 export type ApiProtocol = LlmProtocol | RetrievalProtocol;
 
+/**
+ * 源级自定义请求头（name → value）。
+ *
+ * 「参数跟随模型」请求头那一半：非标准 OpenAI 兼容网关常要求附带会话/租户头
+ * （如 opencode 的 `x-opencode-session`）。受保护头名（鉴权 / 内容类型 / 传输控制 /
+ * 本 BFF 自身的 `X-Target-*` 控制头）由解析层拒绝，前端组装时经 `X-Custom-Headers`
+ * 载荷交给 BFF，BFF 侧再验一次。
+ */
+export type HeaderOverrides = Record<string, string>;
+
+/**
+ * 源级 LLM 默认采样 / 生成长度参数（「参数跟随模型」）。
+ *
+ * 生效优先级：**Agent 显式覆写 > 本默认 > 内容包默认层 > 硬兜底**。
+ * 它让「换模型不必逐个 Agent 重设」成立 —— 一个模型（= 一个 API 池）配一次即可。
+ * 只含真正的采样/长度旋钮；重试次数、历史层数、末尾指令是角色行为，不在此列。
+ */
+export interface LlmDefaultParameters {
+  temperature?: number;
+  topP?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  maxTokens?: number;
+}
+
 export interface ApiSourceBase {
   id: string;
   name: string;
@@ -30,6 +55,8 @@ export interface ApiSourceBase {
   bodyOverrides: JsonObject;
   /** Optional fields removed after overrides, expressed as JSON Pointers. */
   bodyOmitPaths: string[];
+  /** User-defined request headers forwarded to the provider (protected names rejected). */
+  headerOverrides: HeaderOverrides;
   /** Incremented by the persistence layer whenever connection semantics change. */
   revision?: number;
 }
@@ -38,6 +65,8 @@ export interface LlmApiSource extends ApiSourceBase {
   kind: 'llm';
   protocol: LlmProtocol;
   contextWindowTokens?: number;
+  /** 源级默认采样参数；Agent 覆写优先于它（见 `LlmDefaultParameters`）。 */
+  defaultParameters?: LlmDefaultParameters;
   /** Claude Messages wire version; ignored by other protocols. */
   anthropicVersion?: string;
   /** Explicitly enabled Claude beta headers; arbitrary headers are not supported. */

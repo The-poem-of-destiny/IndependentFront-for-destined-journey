@@ -293,13 +293,13 @@ src/ui/components/create/
 
 ## 六、引擎层支撑文件
 
-| 文件                                         | 内容                                                                                                                                          |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/sillytavern/start-catalog.ts`           | 75 行入口：整份 re-export 机制半边 + 属性名 / 品质码表 / 品质色 / 品质基础 DC / `DESTINY_CORE_WORLDBOOK_MAP`                                  |
-| `src/sillytavern/start-catalog-mechanics.ts` | 324 行机制半边：schema/类型 + 难度档位/性别枚举/限定覆盖表 + `parseCatalogData` / `lookupCost` / `flattenLocationTree` / `classifyBackground` |
-| `public/data/content/catalog.json`           | 七个池的**内容**（内容注册表 `catalog` 面，内容包可整份替换）                                                                                 |
-| `src/sillytavern/database.ts`                | Dexie（现行 `DB_VERSION = 22`）；`createPresets` 表自 v7 起存在，随 FullBackup 进出                                                           |
-| `src/sillytavern/types.ts`                   | `CreatePreset`（捏人预设**落库形状**，2026-08-17 分层收口时从 create-store 迁来，create-store 侧 re-export 同名）                             |
+| 文件                                          | 内容                                                                                                                                          |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/core/content/start-catalog.ts`           | 75 行入口：整份 re-export 机制半边 + 属性名 / 品质码表 / 品质色 / 品质基础 DC / `DESTINY_CORE_WORLDBOOK_MAP`                                  |
+| `src/core/content/start-catalog-mechanics.ts` | 324 行机制半边：schema/类型 + 难度档位/性别枚举/限定覆盖表 + `parseCatalogData` / `lookupCost` / `flattenLocationTree` / `classifyBackground` |
+| `public/data/content/catalog.json`            | 七个池的**内容**（内容注册表 `catalog` 面，内容包可整份替换）                                                                                 |
+| `src/core/persistence/database.ts`            | Dexie（现行 `DB_VERSION = 22`）；`createPresets` 表自 v7 起存在，随 FullBackup 进出                                                           |
+| `src/core/types/types.ts`                     | `CreatePreset`（捏人预设**落库形状**，2026-08-17 分层收口时从 create-store 迁来，create-store 侧 re-export 同名）                             |
 
 > 🪦 `start-catalog-data.ts`（8704 行）**已删**，内容搬进上表第三行那份 JSON。
 > `start-catalog-mechanics.test.ts` 有一条结构闸门（导出名黑名单）盯着「别往机制文件里加具体条目」。

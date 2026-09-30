@@ -350,6 +350,10 @@ export interface ApiEndpoint {
   protocol?: import('./types-api').ApiProtocol;
   bodyOverrides?: import('./types-api').JsonObject;
   bodyOmitPaths?: string[];
+  /** 源级自定义请求头（「参数跟随模型」的头那一半）；受保护头名在解析层被拒。 */
+  headerOverrides?: import('./types-api').HeaderOverrides;
+  /** 源级默认采样参数；Agent 覆写优先于它。 */
+  defaultParameters?: import('./types-api').LlmDefaultParameters;
   anthropicVersion?: string;
   anthropicBeta?: string[];
   revision?: number;

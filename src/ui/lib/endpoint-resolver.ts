@@ -25,6 +25,7 @@
  *    来源判定在调用侧（`hasExplicitAgentModel`），本解析器仍只认「有效绑定」这一个维度。
  */
 import type { ApiEndpoint } from '@engine/types/types';
+import type { LlmDefaultParameters } from '@engine/types/types-api';
 import { detach } from '../stores/db-write';
 
 /** 端点解析结果 —— 判别联合。「池空」与「绑定失效」是两种失败，调用方按需分档。 */
@@ -76,6 +77,29 @@ export function resolveAgentEndpoint(input: ResolveEndpointInput): EndpointResol
     : { status: 'stale-binding', requestedId: boundPoolId };
 }
 
+const LLM_DEFAULT_PARAMETER_KEYS = [
+  'temperature',
+  'topP',
+  'frequencyPenalty',
+  'presencePenalty',
+  'maxTokens',
+] as const;
+
+/**
+ * localStorage / settings 投影里的 `defaultParameters` 是用户可编辑的 —— 只接受有限数字的
+ * 五个已知键，其余（坏类型 / 非有限数 / 未知键）一律丢弃，全空返回 `undefined`。
+ */
+function coerceDefaultParameters(value: unknown): LlmDefaultParameters | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const output: LlmDefaultParameters = {};
+  for (const key of LLM_DEFAULT_PARAMETER_KEYS) {
+    const raw = row[key];
+    if (typeof raw === 'number' && Number.isFinite(raw)) output[key] = raw;
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+}
+
 export function buildApiEndpoints(apiPool: readonly unknown[]): ApiEndpoint[] {
   // 前后端 model 结构不同:
   //   localStorage: ApiEntry    { model: string, models: string[], apiType: string }
@@ -108,6 +132,10 @@ export function buildApiEndpoints(apiPool: readonly unknown[]): ApiEndpoint[] {
         protocol: entry.protocol ?? 'openai-chat',
         bodyOverrides: entry.bodyOverrides ?? {},
         bodyOmitPaths: entry.bodyOmitPaths ?? [],
+        headerOverrides: entry.headerOverrides ?? {},
+        // 🆕 源级默认采样参数（「参数跟随模型」）：只认有限数字的五个已知键，
+        //    坏形状一律 undefined（不猜），与 contextWindowTokens 同一口径。
+        defaultParameters: coerceDefaultParameters(entry.defaultParameters),
         revision: entry.revision,
         anthropicVersion: entry.anthropicVersion,
         anthropicBeta: entry.anthropicBeta,

@@ -1,6 +1,7 @@
 import { scheduleApiRequest } from './api-rpm-limiter';
 import type { EmbeddingApiSource, JsonObject } from '../types/types-api';
 import { applyBodyParameters } from './body-parameters';
+import { buildCustomHeadersValue } from './header-overrides';
 import { asObject, finiteNumber } from './adapter-utils';
 
 export interface EmbeddingResult {
@@ -52,6 +53,7 @@ export async function requestEmbedding(
 ): Promise<EmbeddingResult> {
   const body = buildEmbeddingBody(source, input);
   const baseUrl = source.baseUrl.replace(/\/+$/u, '');
+  const customHeaders = buildCustomHeadersValue(source.headerOverrides);
   const response = await scheduleApiRequest(
     { baseUrl, apiKey: source.apiKey, label: source.name },
     signal,
@@ -62,6 +64,7 @@ export async function requestEmbedding(
           'Content-Type': 'application/json',
           'X-Target-Base-URL': baseUrl,
           Authorization: `Bearer ${source.apiKey}`,
+          ...(customHeaders ? { 'X-Custom-Headers': customHeaders } : {}),
         },
         body: JSON.stringify(body),
         signal,

@@ -2,7 +2,7 @@
 
 > 数据对齐: 原版捏人页 `custom_start_index.html` + CDN `baseInfo.json` / `skills.json`
 > 前端: Vue 3 + Pinia + Vite
-> 引擎数据: `src/sillytavern/start-catalog.ts`（已完成）
+> 引擎数据: `src/core/content/start-catalog.ts`（已完成）
 >
 > 🔵 **2026-08-18 复核**：本文是 2026-06 的**设计文档**，设计意图与取舍论述仍然有效，
 > 但若干实现事实已经移动。全文按「保留原文 + 就地加 🔵 复核注 / 🪦 墓碑注」的方式更新，
@@ -352,7 +352,7 @@ export const useCreateStore = defineStore('create', () => {
 
 > 🔵 2026-08-18 复核：`createPresets` 表确实是 v7 引入的、至今在位（现行 `DB_VERSION = 22`），
 > 且随 `FullBackup` 进出。落库形状 `CreatePreset` 已于 2026-08-17 分层收口时从
-> `create-store.ts` 迁进 `src/sillytavern/types.ts`（create-store 侧 re-export 同名）。
+> `create-store.ts` 迁进 `src/core/types/types.ts`（create-store 侧 re-export 同名）。
 
 ---
 

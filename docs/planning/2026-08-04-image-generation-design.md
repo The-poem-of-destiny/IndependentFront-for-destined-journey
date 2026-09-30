@@ -141,7 +141,7 @@ img2img / 局部重绘 / 放大 · 候选多选 · 角色画像入槽位（`writ
 | **D50** | 🔴 图像生成放设置页哪儿                   | **自己的顶层分区** `🖼 图像生成`（第 13 分区），**整个功能都在里面** —— 含 `image_prompt` 的 Agent 配置     | 试过「作为一个类目住进 Agent 分区」，**推翻了**：那条路要往 Agent 子导航里塞两个不是 LLM Agent 的条目，代价是角标判据要按条目类型分流（否则永久红叉）、`AgentSection` 要按类目分流渲染 —— 为了「看起来像 agent」去改一个本来只服务 LLM Agent 的导航。而**它本来就不是一个 agent**：它是一个含**两次不同调用**（LLM 出标签、NAI 出图）的子系统，其中只有一次是 agent。分区归分区，agent 归 agent |
 | **D51** | 分区里怎么分块                            | **三张卡**：提示词生成（Agent 配置）· 出图（NAI + 限额 + 用量）· 视觉预设                                  | 光 NAI 参数就十几个，一张卡装不下还读不动。前两张正好对应两个花钱的地方（LLM token / Anlas），与 D32「两处花钱、闸门在最前面」同一套心智模型；第三张是内容不是配置，本就该分开                                                                                                                                                                                                                  |
 | **D52** | 🔴 渲染位置 ≠ 存储位置                    | `image_prompt` 的配置**仍住 `agents` 袋子**（`agent-settings.ts` 唯一读写口）；NAI 参数住 `UiSettings`     | 这条从「类目」方案里**原样保留**，因为它跟导航长什么样无关。归属看的是「这份配置在描述什么」：`image_prompt` 是个 LLM Agent，它的模型/温度/世界书就该跟别的 agent 存一处。在图像分区里渲染它，**渲染的是同一份存储**，不是复制一份（D28 的第二真相来源）                                                                                                                                        |
-| **D53** | `image_prompt` 还进不进 Agent 子导航      | **不进** `AGENT_LIST`                                                                                      | 同一份配置开两个入口，用户要猜哪个是权威的（其实都一样，但没人信）。先例现成：`combat_v3` 在 `agent-config.json` 里跑，也从来没进过子导航 —— `agent-list.ts:9` 说得很清楚，那张表是**设置页的展示元数据**，不是「有哪些 agent」的真源                                                                                                                                                           |
+| **D53** | `image_prompt` 还进不进 Agent 子导航      | **不进** `AGENT_LIST`                                                                                      | 同一份配置开两个入口，用户要猜哪个是权威的（其实都一样，但没人信）。先例现成：`combat` 在 `agent-config.json` 里跑，也从来没进过子导航 —— `agent-list.ts:9` 说得很清楚，那张表是**设置页的展示元数据**，不是「有哪些 agent」的真源                                                                                                                                                              |
 | **D54** | 🔴 复用 Agent 配置界面的代价              | 把 `AgentSection` 的**草稿 + 动作壳**抽成 `AgentConfigPanel.vue`，两处共用                                 | 两张卡本身是 `agentId` 单 prop 驱动、直接可复用；但 `AgentPromptCard` 的两个草稿是 `defineModel`，**由父组件持有** —— 连同「保存 / 恢复默认 / 存为项目默认」三个动作，以及 AGENTS.md 记着的那个坑（草稿载入必须 `watch(..., { immediate: true })`，否则文本框空着渲染、一保存就把空串写进用户提示词）。不抽壳就要把这套东西连同那个坑**再实现一遍**                                             |
 | **D55** | 🔴 `image_prompt` 的 systemPrompt 何时写  | **推迟**。G 阶段先落一份**临时最小版**（覆盖 §8.5 的四点 + `TODO` 标注），正式撰写作为**最后一个独立任务** | 侧链的**管道**（XML 抽取、调用、缓存、限额排序）与**提示词内容**是两件可以分开验证的事：管道对不对，用一份糊弄的提示词就能测出来（抽不抽得到三个标签、失败会不会正确降级）；而提示词好不好，要等到能真机看图才谈得上调。先把管道钉死，提示词留到有反馈回路的时候写 —— 否则就是在没有观测手段的情况下调一个纯经验的东西。**临时版必须带 `TODO`**，否则它会以"反正能跑"的姿态活到上线             |
 
@@ -242,7 +242,7 @@ AI 漏写闭合标签是常事。`scanPlayAudioMarkers` 已有先例（认自闭
 
 ---
 
-## 4. 类型定义（`src/sillytavern/types-image.ts`）
+## 4. 类型定义（`src/core/types/types-image.ts`）
 
 先例：`types-audio.ts`（大型联合拆分文件；数据模型类型仍可留 `types.ts`，本子系统全部集中在此）。
 
@@ -1211,7 +1211,7 @@ imageMaxPerHour: number; // 20
 
 同一份配置开两个入口，用户就要猜哪个是权威的（其实是同一份存储，但没人信）。所以它**不进 `AGENT_LIST`**。
 
-先例现成：`agent-config.json` 里有 **12** 个 agent，`AGENT_LIST` 只有 **11** 条 —— `combat_v3` 在引擎里跑，从来没进过子导航。`agent-list.ts:9` 的注释把这件事写得很清楚：那张表是**设置页的展示元数据**，不是「有哪些 agent」的真源。
+先例现成：`agent-config.json` 里有 **12** 个 agent，`AGENT_LIST` 只有 **11** 条 —— `combat` 在引擎里跑，从来没进过子导航。`agent-list.ts:9` 的注释把这件事写得很清楚：那张表是**设置页的展示元数据**，不是「有哪些 agent」的真源。
 
 > 💡 于是这次**一个字都不用动 `agent-list.ts` 与 `SettingsPage.vue` 的子导航** —— 类目方案要改的那两处（分组渲染、角标分流）现在都不需要了。这是推翻它之后省下的东西。
 
@@ -1268,7 +1268,7 @@ AgentSection      持有那两个草稿 + 三个动作（保存 / 恢复默认 /
 ## 13. 文件落位
 
 ```
-src/sillytavern/
+src/core/
 ├── types-image.ts              ← §4 全部类型
 ├── image-segments.ts           ← ★splitSceneImageSegments（§5.1）
 ├── image-prompt.ts             ← ★承重：composePrompt（§5.2）

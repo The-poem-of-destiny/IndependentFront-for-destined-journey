@@ -709,15 +709,22 @@ export class AgentClient {
     if (protocol !== 'openai-chat' && protocol !== 'gemini' && protocol !== 'anthropic-messages') {
       throw new Error(`Endpoint ${this.endpoint.name || this.endpoint.id} is not an LLM source`);
     }
+    // 源级默认采样参数（「参数跟随模型」）：请求未显式给值时兜底。
+    //
+    // 🔴 优先级 = 请求值 > 源默认 > 提供方默认。主 DAG（orchestrator）传的是
+    //    buildAgentConfigs 解析出的「Agent 覆写 ?? 源默认 ?? 内容包默认」，
+    //    故请求值已在源头吸收源默认；而**侧链 / 战斗**这些直接 `chatWithTools({ messages })`
+    //    的调用点什么都不传 —— 兜底在这里让它们也能吃到源默认，不必逐个改调用点。
+    const poolDefaults = this.endpoint.defaultParameters ?? {};
     return buildLlmRequest({
       protocol,
       model: request.model || this.endpoint.defaultModel,
       messages: ensureUserMessage(request.messages),
-      temperature: request.temperature,
-      maxTokens: request.maxTokens,
-      topP: request.topP,
-      frequencyPenalty: request.frequencyPenalty,
-      presencePenalty: request.presencePenalty,
+      temperature: request.temperature ?? poolDefaults.temperature,
+      maxTokens: request.maxTokens ?? poolDefaults.maxTokens,
+      topP: request.topP ?? poolDefaults.topP,
+      frequencyPenalty: request.frequencyPenalty ?? poolDefaults.frequencyPenalty,
+      presencePenalty: request.presencePenalty ?? poolDefaults.presencePenalty,
       stop: request.stop,
       tools: request.tools,
       toolChoice: request.tool_choice,

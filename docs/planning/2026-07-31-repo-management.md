@@ -166,13 +166,13 @@ jobs:
 
 多人 + 多 agent 并行时，可预期的合并冲突磁铁及对策：
 
-| 热点文件                   | 对策                                                                     |
-| -------------------------- | ------------------------------------------------------------------------ |
-| `AGENTS.md` / `CLAUDE.md`  | §1 真源化 + §3 历史迁出，指令文件低频改动                                |
-| `src/sillytavern/types.ts` | 新增大类型强制走 `types-*.ts` 分册；同 PR 内只 append 不重排             |
-| `agent-config.json`        | 🔶 **本轮不拆**（见决策点⑧），中期再评估拆为 `agent-config/<agent>.json` |
-| `docs/CHANGELOG.md`        | append-only 按日期，新条目永远加在自己日期段                             |
-| `package-lock.json`        | 依赖变更单独 PR，不与功能混提                                            |
+| 热点文件                  | 对策                                                                     |
+| ------------------------- | ------------------------------------------------------------------------ |
+| `AGENTS.md` / `CLAUDE.md` | §1 真源化 + §3 历史迁出，指令文件低频改动                                |
+| `src/core/types/types.ts` | 新增大类型强制走 `types-*.ts` 分册；同 PR 内只 append 不重排             |
+| `agent-config.json`       | 🔶 **本轮不拆**（见决策点⑧），中期再评估拆为 `agent-config/<agent>.json` |
+| `docs/CHANGELOG.md`       | append-only 按日期，新条目永远加在自己日期段                             |
+| `package-lock.json`       | 依赖变更单独 PR，不与功能混提                                            |
 
 - ✅ 已建 `.github/CODEOWNERS`：给热点文件挂 owner，PR 触碰时自动请求 review。
 

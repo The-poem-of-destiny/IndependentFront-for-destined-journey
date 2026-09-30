@@ -64,7 +64,7 @@ ChatFlow 对话流支持三种消息来源，从用户视角看全部出现在�
 > `this.emitSystemMessage(xxxToEvent(output))`），本文档第 2 节以下的视觉契约不必动。
 >
 > 🔴 **战斗那一行的口径也变了**：v2 的「战斗窗口关闭 → 发一张 combat 卡」这条路径随 M5
-> 一起退役。战斗现在由 **combat-v3 持久会话**（战斗主持人 / DM 模式，2026-08-12）主持，
+> 一起退役。战斗现在由 **combat 持久会话**（战斗主持人 / DM 模式，2026-08-12）主持，
 > 终局走的是**结算确认框**：玩家在面板里过一遍数值与可编辑摘要，确认后由
 > `emitMessage('【战斗摘要】…', 'assistant')` 注入正文（`game-pipeline.ts` ~L2164-2176），
 > **不是**一条 `role: 'system'` 的 combat 卡。`CombatSystemCard` 的视觉契约（第 6 节）仍然有效，

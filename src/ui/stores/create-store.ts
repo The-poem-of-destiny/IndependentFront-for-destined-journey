@@ -68,7 +68,7 @@ import { getBranding } from '../branding-defaults';
 import { loadWorldBooksWithFallback } from '@engine/content/builtin-worldbooks';
 import { useWorldBookStore } from './worldbook-store';
 import { useWorkshopStore } from './workshop-store';
-import { getAgentSettings } from './agent-settings';
+import { getAgentSettings, resolveAgentLlmParams } from './agent-settings';
 // 🆕 F10（2026-09-04）：plot_outline 端点解析与 game-pipeline 走同一个 fail-closed 解析器
 import { buildApiEndpoints, resolveAgentEndpoint } from '../lib/endpoint-resolver';
 import { filterBooksByEnabledEntries } from '@engine/content/worldbook-loader';
@@ -1383,17 +1383,19 @@ export const useCreateStore = defineStore('create', () => {
       });
       // Q-18: 默认值不再在这里重述一遍（此前 0.7 / 16384 / 1.0 三处字面量与
       // 设置页、game-pipeline 的拷贝靠人眼保持一致）
-      // D44 修正 1：合默认层 —— 用户没覆写数值时取默认层（pack > 占位）给的值。
-      const plotAgentCfg = getAgentSettings(
+      // D44 修正 1 + 源级默认：合默认层 + API 池 defaultParameters ——
+      // 优先级 Agent 覆写 ?? 池默认 ?? 默认层（pack > 占位）?? 硬兜底。
+      const plotLlmParams = resolveAgentLlmParams(
         settings,
         'plot_outline',
         settingsStore.projectAgentDefaults?.agents ?? {},
+        endpoint.defaultParameters,
       );
       const llmParams = {
         model: endpoint.defaultModel,
-        temperature: plotAgentCfg.temperature,
-        maxTokens: plotAgentCfg.maxTokens,
-        topP: plotAgentCfg.topP,
+        temperature: plotLlmParams.temperature,
+        maxTokens: plotLlmParams.maxTokens,
+        topP: plotLlmParams.topP,
       };
 
       let best: { parsed: ParsedOutlineOutput; raw: string } | null = null;

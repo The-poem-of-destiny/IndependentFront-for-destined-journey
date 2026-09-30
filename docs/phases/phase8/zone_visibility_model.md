@@ -3,8 +3,8 @@
 > 📌 **部分仍是现行约定，部分已过时（2026-08-18 标注）**：
 >
 > - ✅ **8 Zone 数据模型与 FULL/NARRATIVE/SUMMARY/KEYS/NONE 五级可见性仍活着**，
->   实现在 `src/sillytavern/context-visibility.ts`（`VISIBILITY_MATRIX` 现覆盖 13 个 Agent 里的 11 个 ——
->   `combat_v3` 与 `image_prompt` 未登记，走 `DEFAULT_VISIBILITY` 全 NONE）。
+>   实现在 `src/core/prompts/context-visibility.ts`（`VISIBILITY_MATRIX` 现覆盖 13 个 Agent 里的 11 个 ——
+>   `combat` 与 `image_prompt` 未登记，走 `DEFAULT_VISIBILITY` 全 NONE）。
 > - ❌ **下方「注入格式」一节已过时**：其中描述的 `buildZoneSection` / `wrapZoneSection` 已被 Q-04 删除。
 >   现行注入面是 `placeholder-registry.ts` 的 `{{CHARACTER_STATE}}`，走 `buildZoneContext` +
 >   `filterZoneContent`（这两个函数仍在 `context-visibility.ts` 里）。

@@ -21,6 +21,7 @@ import {
   migrateLegacyAgentOverrides,
   patchAgentSettings,
   resetAgentSettings,
+  resolveAgentLlmParams,
   updateAgentWorldBookIds,
   type AgentDefaultsLayer,
 } from '../../../src/ui/stores/agent-settings';
@@ -546,5 +547,47 @@ describe('hasExplicitAgentModel — 悬空绑定的来源判定', () => {
     expect(hasExplicitAgentModel({ agents: { item_gen: { temperature: 0.5 } } }, 'item_gen')).toBe(
       false,
     );
+  });
+});
+
+describe('resolveAgentLlmParams — 参数跟随模型（Agent 覆写 > 池默认 > 默认层 > 兜底）', () => {
+  const defaultsLayer: AgentDefaultsLayer = {
+    story: { temperature: 0.7, topP: 1, freqPen: 0, presPen: 0, maxTokens: 65536 },
+  };
+
+  it('无覆写、无池默认 → 取默认层', () => {
+    expect(resolveAgentLlmParams(bag(), 'story', defaultsLayer)).toMatchObject({
+      temperature: 0.7,
+      maxTokens: 65536,
+    });
+  });
+
+  it('池默认压过内容包默认层（否则换模型参数永远轮不到生效）', () => {
+    expect(
+      resolveAgentLlmParams(bag(), 'story', defaultsLayer, { temperature: 0.2, maxTokens: 8192 }),
+    ).toMatchObject({ temperature: 0.2, maxTokens: 8192 });
+  });
+
+  it('Agent 显式覆写压过池默认，且只覆写的字段生效', () => {
+    const b = { agents: { story: { temperature: 1.4 } } };
+    expect(
+      resolveAgentLlmParams(b, 'story', defaultsLayer, { temperature: 0.2, maxTokens: 8192 }),
+    ).toMatchObject({ temperature: 1.4, maxTokens: 8192 });
+  });
+
+  it('两层都缺 → 硬兜底', () => {
+    expect(resolveAgentLlmParams(bag(), 'new_agent')).toMatchObject({
+      temperature: AGENT_SETTINGS_DEFAULTS.temperature,
+      maxTokens: AGENT_SETTINGS_DEFAULTS.maxTokens,
+    });
+  });
+
+  it('池默认的 frequencyPenalty / presencePenalty 映射到 freqPen / presPen', () => {
+    expect(
+      resolveAgentLlmParams(bag(), 'story', defaultsLayer, {
+        frequencyPenalty: 0.4,
+        presencePenalty: -0.6,
+      }),
+    ).toMatchObject({ freqPen: 0.4, presPen: -0.6 });
   });
 });

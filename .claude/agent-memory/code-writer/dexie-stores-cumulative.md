@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-`src/sillytavern/database.ts` 的 v12 版本块上方写着「注意: Dexie 要求每版重述完整 schema，
+`src/core/persistence/database.ts` 的 v12 版本块上方写着「注意: Dexie 要求每版重述完整 schema，
 漏写任一表即为删表（静默毁数据）」。**这句话对 Dexie 4 不成立。**
 
 **Why:** Dexie 4.4.3 的 `Version.prototype.stores()` 逐版 `extend(storesSpec, version._cfg.storesSource)`

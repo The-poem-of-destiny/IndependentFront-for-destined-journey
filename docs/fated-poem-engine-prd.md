@@ -9,16 +9,16 @@
 > 但本文回答「**做成什么样**」的那部分（表格、计数、阶段编号、技术选型、Out of Scope / Post-MVP 清单）
 > 已被两个月的实现甩开，**不要照本文的数字改代码或写文档**。主要偏差：
 >
-> | 本文写的                            | 2026-08-18 现状                                                                                                     |
-> | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-> | Agent 管线 6 阶段（Stage 0→5）      | **4 层并行 DAG**（`DEFAULT_AGENT_PIPELINE`，2026-08-16 并行化重排；含 `agentWaitFor` 逐 Agent 依赖，避免同层连坐）  |
-> | IndexedDB 10 表                     | **约 30 表，`DB_VERSION = 22`**（`src/sillytavern/database.ts`）                                                    |
-> | 2121 tests                          | **342 个 `*.test.ts`、8600+ 用例**                                                                                  |
-> | Agent 名单按本文正文枚举            | **13 个 Agent**（`public/data/defaults/agent-config.json`，含 `request_dispatcher` / `combat_v3` / `image_prompt`） |
-> | EJS 沙盒 = `new Function()` 隔离    | **QuickJS wasm realm 真隔离**（`ejs-quickjs-backend.ts` / `script-quickjs-backend.ts` / `script-backend.ts`）       |
-> | 前端端口 `localhost:5174`           | **5173**（`vite.config.ts`，`npm run dev` 固定端口）                                                                |
-> | Out of Scope：function calling      | **已交付**（Phase 8.5 Agentic Agent，`agent-tools.ts`）                                                             |
-> | Post-MVP：创意工坊社区化 / 流式 SSE | **均已交付**（工坊 P1-P4 含社交面；`chatStream` 流式正文）                                                          |
+> | 本文写的                            | 2026-08-18 现状                                                                                                    |
+> | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+> | Agent 管线 6 阶段（Stage 0→5）      | **4 层并行 DAG**（`DEFAULT_AGENT_PIPELINE`，2026-08-16 并行化重排；含 `agentWaitFor` 逐 Agent 依赖，避免同层连坐） |
+> | IndexedDB 10 表                     | **约 30 表，`DB_VERSION = 22`**（`src/core/persistence/database.ts`）                                              |
+> | 2121 tests                          | **342 个 `*.test.ts`、8600+ 用例**                                                                                 |
+> | Agent 名单按本文正文枚举            | **13 个 Agent**（`public/data/defaults/agent-config.json`，含 `request_dispatcher` / `combat` / `image_prompt`）   |
+> | EJS 沙盒 = `new Function()` 隔离    | **QuickJS wasm realm 真隔离**（`ejs-quickjs-backend.ts` / `script-quickjs-backend.ts` / `script-backend.ts`）      |
+> | 前端端口 `localhost:5174`           | **5173**（`vite.config.ts`，`npm run dev` 固定端口）                                                               |
+> | Out of Scope：function calling      | **已交付**（Phase 8.5 Agentic Agent，`agent-tools.ts`）                                                            |
+> | Post-MVP：创意工坊社区化 / 流式 SSE | **均已交付**（工坊 P1-P4 含社交面；`chatStream` 流式正文）                                                         |
 >
 > 另有本文成文后才有的大块系统（战斗 v2 已退役、v3 战斗主持人内核、地图 v1、随机事件 v1、图像生成 v1/v2、
 > 内容分离、远程素材 v1 等），本文完全没有覆盖。

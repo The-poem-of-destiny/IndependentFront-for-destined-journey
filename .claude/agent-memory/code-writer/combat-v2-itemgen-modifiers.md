@@ -19,8 +19,8 @@ item_gen 的 modifier 解析链路已接入（M4 任务 5.5b，2026-07-29 完成
 - 两个 type-only 循环依赖安全：types.ts ↔ effect-types.ts 双向 import type。
 
 落点文件：
-- src/sillytavern/types.ts — ItemGenOutput + CharGenOutput + InventoryItem 加 modifiers?/buffs?/divinity?
-- src/sillytavern/char-gen-agent.ts — parseModifiersXML + validateAndCollectCombatEffects + 三个 parse 函数接入 + assembleCharacterState 透传
-- src/sillytavern/craft-gen-chain.ts — buildCraftPatches 把 modifiers 写进 add_item patch value
+- src/core/types/types.ts — ItemGenOutput + CharGenOutput + InventoryItem 加 modifiers?/buffs?/divinity?
+- src/core/agents/char-gen-agent.ts — parseModifiersXML + validateAndCollectCombatEffects + 三个 parse 函数接入 + assembleCharacterState 透传
+- src/core/crafting/craft-gen-chain.ts — buildCraftPatches 把 modifiers 写进 add_item patch value
 
 关联 [[combat-v2-progress]]。

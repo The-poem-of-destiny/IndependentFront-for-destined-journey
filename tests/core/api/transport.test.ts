@@ -45,6 +45,18 @@ describe('LLM transport', () => {
     });
   });
 
+  it('源级自定义请求头打成 X-Custom-Headers 载荷（无自定义头时不出该头）', () => {
+    expect(buildLlmTransportHeaders(endpoint(), false)).not.toHaveProperty('X-Custom-Headers');
+
+    const headers = buildLlmTransportHeaders(
+      endpoint({ headerOverrides: { 'x-opencode-session': '790766510' } }),
+      false,
+    );
+    expect(decodeURIComponent(headers['X-Custom-Headers'])).toBe(
+      '{"x-opencode-session":"790766510"}',
+    );
+  });
+
   it('follows provider pagination without treating the model cache as an allow-list', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

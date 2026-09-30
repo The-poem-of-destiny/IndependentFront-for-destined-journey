@@ -115,6 +115,10 @@ src/core/                    ← 核心引擎
   ├── api/                           ← [API 配置重构 / 2026-09-16] 协议无关配置与 provider adapter
   │   ├── source-config.ts          ← 新 schema 严格解析；不推断旧用途/协议，不改写旧行
   │   ├── body-parameters.ts        ← 源参数优先的不可变深合并 / JSON Pointer 省略 / 保护字段 / 实际预算
+  │   ├── header-overrides.ts       ← [2026-09-30] 源级自定义请求头（「参数跟随模型」的头那一半）：
+  │   │                                受保护头名（鉴权/内容类型/传输控制/`X-Target-*`）+ CRLF 注入防线 +
+  │   │                                `X-Custom-Headers`（percent-encoded JSON）载荷编码。
+  │   │                                BFF `server/routes/proxy.ts` 有一份独立同名单，两层各验一次
   │   ├── llm-adapter.ts            ← 三种 LLM 协议统一入口、规范化响应/usage/工具调用及原生续接类型
   │   ├── openai-chat.ts            ← Chat Completions 普通/SSE/工具调用编解码
   │   ├── gemini.ts                 ← generateContent/SSE + functionCall/Response + thoughtSignature 保真
@@ -194,7 +198,7 @@ src/core/                    ← 核心引擎
 │                                     + Code 接管升级（resolveLevelUps）+ 登神长阶放宽版（resolveAscensionFlyup）
 │                                     + 战斗经验系数按档（EXPERIENCE_COEFFICIENTS normal/easy）
 │                                     + 旧档归一化（applyExpFloor 幂等只提升）。char-gen / resource-calc /
-│                                     tier-constants / combat-v3 coordinator 的等级经验逻辑统一委托此处
+│                                     tier-constants / combat/coordinator 的等级经验逻辑统一委托此处
 │
   ├── state/save-profile.ts               ← [Phase 4.6] 存档级 FP 元货币（M5: +variables 变量唯一真源）
   │                                      [2026-09-09] +`worldFlags.plotThreads` 袋的读/写（getPlotThreadFlags /
@@ -434,13 +438,13 @@ src/core/                    ← 核心引擎
   │   │                              `d20Rolls[0] ?? 10` → **生产每一次制作检定都是 d20=10**，
   │   │                              连带大失败不可达（判据要 length===1，而 length 是 0）、
   │   │                              优/劣势整条死规则（要 length>=2）。与 Q-01 同形状，
-  │   │                              但 Q-01 只覆盖了 combat-v3 的 coordinator。
+  │   │                              但 Q-01 只覆盖了 combat/coordinator。
   │   │                              check 的骰带按**请求指纹**存 ToolExecutionContext.craftDice，
   │   │                              同参数的 settle 取走 —— AI 只见结果不碰骰值，且刷检定无效。
   │   │                              🔴 骰数由优/劣势决定（齐平 1 颗 / 优劣势 2 颗），
   │   │                                 **不能**一律掷 2 颗，那会把大失败判据换个姿势再打掉一次
   │   └── crafting/craft-projection.ts     ← [Q-21] 结算结果 → `<action_info>` 竖线表 + 一句话摘要
-  │                                  照 combat-v3 projection-agent/projection-ui 的先例；
+  │                                  照 combat/projection-agent、projection-ui 的先例；
   │                                  这一层不允许出现计算（ADR-28：面板是给纯文本 AI 的遗留手段）
   ├── combat/morale-system.ts / affection-system.ts
   ├── content/start-catalog.ts              ← [Q-30] 捏人目录入口（re-export 机制 + 属性名/品质码表/品质色/品质基础 DC）
@@ -693,7 +697,7 @@ Layer 4  语义级 工具面          AI 调工具: craft_check / craft_settle /
   ↑       (AI 可见)             = agent-tools.ts 的 27 个 tool 定义（function calling），
   │                              工具 handler 内部才去调 Layer 3。**AI 手里没有 `$` 对象**
 Layer 3  流程级 Resolver        引擎内部: CraftResolver（`$craft`，craft-resolver.ts）
-  ↑       (AI 不可见)           🪦 CombatResolver 随 v2 运行时删除；战斗流程改由 combat-v3
+  ↑       (AI 不可见)           🪦 CombatResolver 随 v2 运行时删除；战斗流程改由 combat
   │                              内核主持（openCombat → kernel/reducer/phases），不再有 resolver
 Layer 2  计算级 纯函数          $dice.d20() / $resource.getHpPercent() / $char.getTier()
   ↑       (AI 可读，不可写)      —— 这一层的 `$` 是**模块级导出对象**，见下节

@@ -100,7 +100,11 @@ import { useWorldBookStore } from '../stores/worldbook-store';
 import { useUIStore } from '../stores/ui-store';
 import type { CombatCommand } from '@engine/combat';
 import { rollDice } from '@engine/utils/dice';
-import { getAgentSettings, hasExplicitAgentModel } from '../stores/agent-settings';
+import {
+  getAgentSettings,
+  hasExplicitAgentModel,
+  resolveAgentLlmParams,
+} from '../stores/agent-settings';
 import type { EmbeddingRequestTrace } from '@engine/memory/memory-store';
 // 🆕 F10（2026-09-04）：Agent API 池绑定的 fail-closed 解析（pool id → ApiEndpoint 唯一纯实现）
 import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
@@ -1022,17 +1026,26 @@ export class GamePipeline {
       //    tail 标签，也不改变 baseline signature 的其余项。
       const resolvedTailPrompt: string | undefined = agentCfg.tailPrompt || undefined;
 
+      // 🆕 源级默认采样参数（「参数跟随模型」）：Agent 覆写 > 池默认 > 内容包默认层 > 硬兜底。
+      //    endpoint 可能 undefined（空池），此时退化成原有解析。
+      const llmParams = resolveAgentLlmParams(
+        s,
+        agentId,
+        agentDefaults,
+        endpoint?.defaultParameters,
+      );
+
       return {
         agentId,
         enabled: true,
         apiEndpointId: endpoint?.id ?? '',
         model,
-        // D44 修正 3：数值从 agentCfg 读（已合覆写 ?? 默认 ?? AGENT_SETTINGS_DEFAULTS）。
-        temperature: agentCfg.temperature,
-        maxTokens: agentCfg.maxTokens,
-        topP: agentCfg.topP,
-        frequencyPenalty: agentCfg.freqPen,
-        presencePenalty: agentCfg.presPen,
+        // D44 修正 3 + 源级默认：数值经 resolveAgentLlmParams（覆写 ?? 池默认 ?? 默认层 ?? 兜底）。
+        temperature: llmParams.temperature,
+        maxTokens: llmParams.maxTokens,
+        topP: llmParams.topP,
+        frequencyPenalty: llmParams.freqPen,
+        presencePenalty: llmParams.presPen,
         retryOnFail: true,
         // 🆕 2026-08-16: 失败自动重试次数（AgentClient 循环上限；外部取消永不重试）。
         // 解析值经 覆写 ?? 默认层 ?? AGENT_SETTINGS_DEFAULTS(3)。

@@ -64,7 +64,7 @@
 
 ### 2.2 已有权威保证
 
-`src/sillytavern/state-manager.ts` 的 `restoreSnapshot()` 已在 per-save 写锁和单个 Dexie 事务中完成
+`src/core/state/state-manager.ts` 的 `restoreSnapshot()` 已在 per-save 写锁和单个 Dexie 事务中完成
 角色、档案、剧情事件、消息、记忆、未来快照与存档游标的恢复。失败会回滚事务并返回
 `StateCommitResult.success === false`。
 
@@ -182,7 +182,7 @@ T3 文档同步、全量 gates、人工 smoke test
 ### 文件
 
 - `src/ui/stores/game-store.ts`
-- `src/ui/stores/game-store.test.ts`
+- `tests/ui/stores/game-store.test.ts`
 
 ### 工作
 
@@ -197,7 +197,7 @@ T3 文档同步、全量 gates、人工 smoke test
 ### 验收
 
 ```bash
-npm run test:run -- src/ui/stores/game-store.test.ts
+npm run test:run -- tests/ui/stores/game-store.test.ts
 npm run typecheck
 ```
 
@@ -209,7 +209,7 @@ T0 是本地 red 阶段，不得单独提交、发布或交接；完成 T1 并�
 ### 文件
 
 - `src/ui/stores/game-store.ts`
-- `src/ui/stores/game-store.test.ts`
+- `tests/ui/stores/game-store.test.ts`
 
 ### 工作
 
@@ -241,7 +241,7 @@ T0 是本地 red 阶段，不得单独提交、发布或交接；完成 T1 并�
 ### 验收
 
 ```bash
-npm run test:run -- src/ui/stores/game-store.test.ts
+npm run test:run -- tests/ui/stores/game-store.test.ts
 npm run typecheck
 ```
 
@@ -250,11 +250,11 @@ npm run typecheck
 ### 文件
 
 - `src/ui/components/game/ChatFlow.vue`
-- `src/ui/components/game/ChatFlow.test.ts`
+- `tests/ui/components/game/ChatFlow.test.ts`
 - `src/ui/components/game/SnapshotPanel.vue`
-- 新增 `src/ui/components/game/SnapshotPanel.test.ts`
+- 新增 `tests/ui/components/game/SnapshotPanel.test.ts`
 - `src/ui/components/game/combat/CombatPanel.vue`
-- `src/ui/components/game/combat/CombatPanel.test.ts`
+- `tests/ui/components/game/combat/CombatPanel.test.ts`
 
 ### 工作
 
@@ -276,7 +276,7 @@ npm run typecheck
 ### 验收
 
 ```bash
-npm run test:run -- src/ui/components/game/ChatFlow.test.ts src/ui/components/game/SnapshotPanel.test.ts src/ui/components/game/combat/CombatPanel.test.ts
+npm run test:run -- tests/ui/components/game/ChatFlow.test.ts tests/ui/components/game/SnapshotPanel.test.ts tests/ui/components/game/combat/CombatPanel.test.ts
 npm run typecheck:vue
 ```
 
@@ -296,7 +296,7 @@ npm run typecheck:vue
 
 ```bash
 npx prettier --write <本次实际修改的文件>
-npm run test:run -- src/ui/stores/game-store.test.ts src/ui/components/game/ChatFlow.test.ts src/ui/components/game/SnapshotPanel.test.ts src/ui/components/game/combat/CombatPanel.test.ts
+npm run test:run -- tests/ui/stores/game-store.test.ts tests/ui/components/game/ChatFlow.test.ts tests/ui/components/game/SnapshotPanel.test.ts tests/ui/components/game/combat/CombatPanel.test.ts
 npm run gates
 ```
 

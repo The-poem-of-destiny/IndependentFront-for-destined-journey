@@ -4,12 +4,15 @@
  */
 
 import { scheduleApiRequest } from './api-rpm-limiter';
+import { buildCustomHeadersValue } from './header-overrides';
 
 export interface ApiCallTarget {
   baseUrl: string;
   apiKey: string;
   model?: string;
   label?: string;
+  /** 源级自定义请求头（模型列表 / 连接测试也要带上，否则非标准网关拉不到列表）。 */
+  headerOverrides?: Record<string, string>;
 }
 
 const COMMON_MODELS_BY_HOST: { match: string; models: string[] }[] = [
@@ -46,12 +49,18 @@ async function tryFetchModels(
   baseUrl: string,
   headers: Record<string, string>,
 ): Promise<string[]> {
+  const customHeaders = buildCustomHeadersValue(target.headerOverrides);
   const res = await scheduleApiRequest(
     { baseUrl, apiKey: target.apiKey, label: target.label || baseUrl },
     undefined,
     () =>
       fetch('/api/models', {
-        headers: { Accept: 'application/json', 'X-Target-Base-URL': baseUrl, ...headers },
+        headers: {
+          Accept: 'application/json',
+          'X-Target-Base-URL': baseUrl,
+          ...(customHeaders ? { 'X-Custom-Headers': customHeaders } : {}),
+          ...headers,
+        },
       }),
   );
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -124,6 +133,7 @@ export async function testConnection(
     return { ok: false, error: '请填写 URL 和 Key' };
   }
   try {
+    const customHeaders = buildCustomHeadersValue(target.headerOverrides);
     const res = await scheduleApiRequest(
       { baseUrl, apiKey: key, label: target.label || baseUrl },
       undefined,
@@ -135,6 +145,7 @@ export async function testConnection(
             Accept: 'application/json',
             'X-Target-Base-URL': baseUrl,
             Authorization: `Bearer ${key}`,
+            ...(customHeaders ? { 'X-Custom-Headers': customHeaders } : {}),
           },
           body: JSON.stringify({
             model,

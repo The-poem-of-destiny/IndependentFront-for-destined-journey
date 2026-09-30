@@ -79,7 +79,7 @@ Layer 1  原语级  状态读写           StateManager.commitChatState() / $val
 
 > 📌 **复核 2026-08-18（分层仍在，载体已换）**：Layer 4 现在 AI 那一侧只有 OpenAI function calling 的
 > 工具名，够不到 `$` 对象（脚本沙盒那份除外）；Layer 3 的 `CombatResolver` 随战斗 v2 编排层于 M5 删除，
-> 战斗流程改由 combat-v3 内核主持，制作仍走 `CraftResolver`。「AI 声明意图、Code 执行公式」这条
+> 战斗流程改由 combat 内核主持，制作仍走 `CraftResolver`。「AI 声明意图、Code 执行公式」这条
 > 语义分层（ADR-19）不变。
 
 ### 3.3 Marker Protocol（标记协议）
@@ -155,7 +155,7 @@ craft_gen / char_gen / item_gen 通过 OpenAI function calling 调用真实 Code
 
 - **TypeScript**：零编译错误（tsc / vue-tsc / tools 三道类型网）
 - **测试**：8820 tests（342 个测试文件，2026-08-18 实测），全部通过
-- **引擎模块**：168 个 TypeScript 文件（`src/sillytavern/`，不含测试）
+- **引擎模块**：168 个 TypeScript 文件（`src/core/`，不含测试）
 - **前端组件**：124+ Vue 组件（`src/ui/components/`）+ 10 套主题
 
 ---
@@ -239,7 +239,7 @@ npm run gates        # 一键跑齐 CI 的全部闸门（类型 / 格式 / lint 
 | 文档                                                                                         | 说明                                            |
 | -------------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | [AGENTS.md](../AGENTS.md) / [CLAUDE.md](../CLAUDE.md)                                        | 项目工作指导（指令正文 + Claude Code 薄壳）     |
-| [src/sillytavern/AGENTS.md](../src/sillytavern/AGENTS.md)                                    | 引擎层架构地图（分册）                          |
+| [src/core/AGENTS.md](../src/core/AGENTS.md)                                                  | 引擎层架构地图（分册）                          |
 | [src/ui/AGENTS.md](../src/ui/AGENTS.md)                                                      | 前端层架构地图（分册）                          |
 | [PRD](./fated-poem-engine-prd.md)                                                            | 产品需求文档                                    |
 | [ARCHITECTURE.md](./ARCHITECTURE.md)                                                         | 完整软件+世界观架构（软件部分已过期，见文件头） |
