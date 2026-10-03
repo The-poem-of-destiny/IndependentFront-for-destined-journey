@@ -17,9 +17,7 @@
  * 扩面理由：D4 把背包等列为挂起项，实际后果是真机语料 17 处读全部走守卫默认分支
  *（「当作未持有」）——对创作者是**沉默的错误**，不是降级。
  *
- * **仍然不含**：任务列表 / 关系列表（走 `quest` / `char` 命名空间，不塞进 stats）、
- * 物品与技能的 `effects` / `scripts` / `modifiers` / `automata`（引擎内部效果编译输入，
- * 形状随战斗 v3 演进；暴露出去等于把内部结构变成对创作者的长期承诺）。
+ * **仍然不含**：任务列表 / 关系列表（走 `quest` / `char` 命名空间，不塞进 stats）。
  */
 
 import type { CharacterState } from '../types/types';
@@ -46,8 +44,8 @@ export interface StatProjectionInput {
 /**
  * 背包投影。
  *
- * 只投**叙事与判断需要的字段**，刻意不投 `effects` / `scripts` / `modifiers` / `automata`：
- * 那些是引擎内部的效果编译输入，形状随战斗 v3 演进，暴露出去等于把内部结构变成对创作者的承诺。
+ * 只投**叙事与判断需要的字段**，刻意不投 `effects`：
+ * 那是引擎内部的效果数据，暴露出去等于把内部结构变成对创作者的承诺。
  * 创作者要判断「有没有这把武器」「够不够数量」「装没装备」，这几个字段就够。
  */
 function projectInventory(chars: CharacterState['inventory'] | undefined): any[] {

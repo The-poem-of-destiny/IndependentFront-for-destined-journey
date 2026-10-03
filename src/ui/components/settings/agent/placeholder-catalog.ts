@@ -112,9 +112,18 @@ export const ALL_PLACEHOLDER_META: readonly PlaceholderBadge[] = [
     category: 'Agent通信',
   },
   { key: 'CRAFT_REQUEST', color: '#9e9e9e', desc: '<craft_request> 标记', category: '链调用' },
-  { key: 'CHAR_DETECT', color: '#9e9e9e', desc: '<char_detect> 检测标记', category: '链调用' },
-  { key: 'ITEM_REQUEST', color: '#9e9e9e', desc: '<item_requests> 物品请求', category: '链调用' },
-  { key: 'CHAR_GEN_RESULT', color: '#9e9e9e', desc: 'char_gen NPC生成结果', category: '链调用' },
+  {
+    key: 'CHAR_DETECT',
+    color: '#9e9e9e',
+    desc: '<char_detect> 检测标记（legacy）',
+    category: '链调用',
+  },
+  {
+    key: 'ENTITY_REQUEST',
+    color: '#9e9e9e',
+    desc: 'entity_gen 生成需求（角色描述 / <entity_requests> XML）',
+    category: '链调用',
+  },
   { key: 'CRAFT_RESULT', color: '#9e9e9e', desc: 'craft_gen 制作结果', category: '链调用' },
   {
     key: 'COMBAT_BRIEF',
@@ -148,11 +157,10 @@ const COMMON_KEYS: readonly string[] = [
 
 /** 侧链专属：只有被那条链唤起的 Agent 才拿得到这些标记 */
 const CHAIN_ONLY: Record<string, readonly string[]> = {
-  craft_gen: ['CRAFT_REQUEST', 'ITEM_REQUEST', 'CRAFT_RESULT'],
-  char_gen: ['CHAR_DETECT', 'CHAR_GEN_RESULT'],
-  item_gen: ['ITEM_REQUEST', 'CHAR_GEN_RESULT', 'CRAFT_RESULT'],
+  craft_gen: ['CRAFT_REQUEST', 'CRAFT_RESULT'],
+  // 🔴 2026-10-02 硬改名：char_gen + item_gen 合并为 entity_gen。
+  entity_gen: ['ENTITY_REQUEST', 'CHAR_DETECT', 'CRAFT_RESULT'],
   combat: ['COMBAT_BRIEF', 'COMBAT_ROSTER'],
-  combat_enemy: ['COMBAT_BRIEF', 'COMBAT_ROSTER'],
 };
 
 /**

@@ -145,15 +145,15 @@ describe('getPlaceholdersForAgent — DAG 偏序', () => {
 });
 
 describe('getPlaceholdersForAgent — 侧链专属', () => {
-  it('craft_gen 拿到制作链的三个标记', () => {
+  it('craft_gen 拿到制作链的标记', () => {
     const k = keysFor('craft_gen');
-    expect(k).toEqual(expect.arrayContaining(['CRAFT_REQUEST', 'ITEM_REQUEST', 'CRAFT_RESULT']));
-    expect(k).not.toContain('CHAR_DETECT');
+    expect(k).toEqual(expect.arrayContaining(['CRAFT_REQUEST', 'CRAFT_RESULT']));
+    expect(k).not.toContain('ENTITY_REQUEST');
   });
 
-  it('char_gen 拿到角色链的两个', () => {
-    const k = keysFor('char_gen');
-    expect(k).toEqual(expect.arrayContaining(['CHAR_DETECT', 'CHAR_GEN_RESULT']));
+  it('entity_gen 拿到实体生成链的标记（2026-10-02：char_gen + item_gen 合并）', () => {
+    const k = keysFor('entity_gen');
+    expect(k).toEqual(expect.arrayContaining(['ENTITY_REQUEST', 'CRAFT_RESULT']));
     expect(k).not.toContain('CRAFT_REQUEST');
   });
 
@@ -169,8 +169,7 @@ describe('getPlaceholdersForAgent — 侧链专属', () => {
     for (const chain of [
       'CRAFT_REQUEST',
       'CHAR_DETECT',
-      'ITEM_REQUEST',
-      'CHAR_GEN_RESULT',
+      'ENTITY_REQUEST',
       'CRAFT_RESULT',
       'COMBAT_BRIEF',
       'COMBAT_ROSTER',

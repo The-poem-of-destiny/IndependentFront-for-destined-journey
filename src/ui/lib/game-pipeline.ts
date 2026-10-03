@@ -21,10 +21,11 @@ import type {
   AgentPreset,
   CombatTriggerMarker,
   CombatSummaryResult,
+  CombatType,
   RecentCombatInfo,
   WorldBook,
   CraftGenRequestMarker,
-  CharGenRequestMarker,
+  EntityGenRequestMarker,
   PlayAudioMarker,
   MemoryRecord,
   WorkshopProject,
@@ -85,7 +86,8 @@ import { countAcceptableTriggers } from '@engine/plot/plot-engine';
 import { invalidatePromptSession } from '@engine/prompts/prompt-session-assembler';
 import { resolveSceneWeather } from './scene-image-seams';
 // 🆕 重铸（2026-08-24）：单条目重铸的引擎侧类型（RewriteTarget = 要重写的技能/装备/物品三选一）
-import type { RewriteTarget } from '@engine/agents/item-gen-chain';
+// 🔴 2026-10-02：item_gen 已并入 entity_gen。
+import type { RewriteTarget } from '@engine/agents/entity-gen-agent';
 
 /** 一个游戏日的分钟数（口径同 `state-manager` 的 `MINUTES_PER_GAME_DAY`，那份未导出） */
 const MINUTES_PER_GAME_DAY = 1440;
@@ -98,8 +100,25 @@ import type { useSettingsStore } from '../stores/settings-store';
 import { useAudioStore } from '../stores/audio-store';
 import { useWorldBookStore } from '../stores/worldbook-store';
 import { useUIStore } from '../stores/ui-store';
-import type { CombatCommand } from '@engine/combat';
-import { rollDice } from '@engine/utils/dice';
+import { createCombatState } from '@engine/combat/sandbox/state';
+import {
+  getCombatSandbox,
+  saveCombatSandbox,
+  deleteCombatSandbox,
+} from '@engine/combat/sandbox/persistence';
+import { loadCombatProtocolText } from '@engine/combat/sandbox/protocol';
+import { runCombatSandbox } from '@engine/combat/sandbox/runner';
+import type { CombatSandboxClient } from '@engine/combat/sandbox/runner';
+import {
+  buildCombatSettlementPatches,
+  computeCombatExpRewards,
+} from '@engine/combat/sandbox/settlement';
+import type {
+  CombatantInput,
+  CombatSandboxMessage,
+  CombatSide,
+  CombatState,
+} from '@engine/combat/sandbox/types';
 import {
   getAgentSettings,
   hasExplicitAgentModel,
@@ -157,14 +176,27 @@ export class EndpointBindingError extends Error {
  * 端点失效不能拖垮整轮叙事 —— 装配置时跳过（不装配端点），真被调用时由
  * `getEndpointForAgent` 再判一次并按既有 optional 策略跳过。
  */
-const SIDE_CHAIN_AGENT_IDS = new Set([
-  'craft_gen',
-  'char_gen',
-  'item_gen',
-  'image_prompt',
-  'combat',
-  'combat_enemy',
-]);
+const SIDE_CHAIN_AGENT_IDS = new Set(['craft_gen', 'entity_gen', 'image_prompt', 'combat']);
+
+/** 沙盒战斗会话袋（C2）—— 主持中的权威状态 + 续战 transcript + 运行时句柄 */
+interface CombatSandboxSession {
+  state: CombatState;
+  transcript: CombatSandboxMessage[];
+  protocolText: string;
+  /** agent-config 的 combat.systemPrompt（主持流程骨架）；缺席用 runner 内置流程 */
+  systemPrompt?: string;
+  client: CombatSandboxClient;
+  combatRunId: string | null;
+  allyNames: Set<string>;
+  enemyNames: Set<string>;
+  preSnapshotId: string | null;
+  /** 等待玩家输入时的 resolver（submitPlayerIntent 消费） */
+  resolveIntent: ((text: string | null) => void) | null;
+  aborted: boolean;
+  lastOutput: string;
+  /** 开局输入（仅 start 路径有；续战路径 undefined = 先等玩家） */
+  openingInput?: string;
+}
 
 interface DebugEntryInput {
   invocationId: string;
@@ -260,8 +292,7 @@ const AGENT_LABELS: Record<string, string> = {
   plot_pre_check: '剧情预检',
   plot_post_check: '剧情复检',
   craft_gen: '制作生成',
-  char_gen: '角色生成',
-  item_gen: '物品生成',
+  entity_gen: '实体生成',
   plot_outline: '剧情大纲',
 };
 
@@ -377,8 +408,6 @@ export class GamePipeline {
    * 不新增任何持久化字段；累计诊断在 `game.ejsVarsRejections`。
    */
   private ejsRejectToasted = new Set<string>();
-  /** Q-01: v3 战斗真实骰源（drawDice）的 outputId 计数器，区分每次续杯 */
-  private _diceDrawSeq = 0;
   /**
    * T16（设计 2026-08-09 §3.5）：最近一次 combat_trigger marker 的存档副本。
    *
@@ -396,6 +425,12 @@ export class GamePipeline {
    * 自带 hp=0/死亡状态可判。放弃的战斗不记录（没发生过）。
    */
   private _recentCombat: RecentCombatInfo | null = null;
+  /**
+   * 🆕 在办沙盒战斗会话（Phase 2 / C2）。非 null = 一场沙盒战斗主持中。
+   * 存权威 `CombatState` + 会话 transcript + 工具绑定；玩家输入经 coordinator
+   * `submitPlayerIntent` 唤起下一轮 exchange。终局/放弃/离页清空。
+   */
+  private _combatSandbox: CombatSandboxSession | null = null;
   /**
    * 🧵 主线细化层（2026-09-09）：本轮闸门结果（pre 开始前求值一次）与同轮临时工作集。
    * 工作集 = pre 接受的声明 + post 暂存结算/揭示；**成功回合收口**才由 commitPlotThreadTurn
@@ -558,15 +593,6 @@ export class GamePipeline {
       // configs/worldBooks/presets 才能拿到完整 systemPrompt + 世界书上下文，
       // 把这三个值挂实例传给事件回调（回调通过闭包捕获 run() 局部变量）。
       this.chainData = { agentConfigs, worldBooks, presets, agentDefaults };
-
-      // Q-07：战斗外效果系统接线 —— 对当前存档已装备物品执行 init + 注册
-      // （幂等；存档切换时由 unwireEffectSystem 拆除后重建）
-      try {
-        const { wireEffectSystem } = await import('@engine/effects/effect-wiring');
-        if (this.ownsActiveSave) wireEffectSystem(this.saveId, this.game.characters);
-      } catch (err) {
-        console.warn('[GamePipeline] 效果系统接线失败（不阻塞本轮）:', err);
-      }
 
       // 3. 创建编排器
       const options: OrchestratorOptions = {
@@ -897,17 +923,13 @@ export class GamePipeline {
       'plot_pre_check',
       'plot_post_check', // Phase 10g: quest 委托管线需要
       'craft_gen', // 侧链: 制作生成，需完整 systemPrompt (真机 fix 2026-07-18)
-      'char_gen', // 侧链: 角色生成，需完整 systemPrompt
-      'item_gen', // 侧链: 物品生成，需完整 systemPrompt + {{ITEM_REQUEST}} 占位符
+      'entity_gen', // 侧链: 实体生成（角色/技能/装备/道具/状态/登神），需完整 systemPrompt + {{ENTITY_REQUEST}}
       // 侧链: 情景插画的中文 → danbooru 转换（图像生成 D28）。不进主 DAG、也不进设置页
       // Agent 子导航（D53）—— 但它的 systemPrompt/世界书/采样参数照旧从这里装配。
       'image_prompt',
-      // 侧链: 战斗决策（combat-v3 Coordinator 在战斗会话中按 RequiredInput.PlayerCommand
-      // 唤起，不走主 DAG）。systemPrompt/模型/温度/世界书照旧从这里装配 —— coordinator
-      // 按 agentId === 'combat' 从 ctx.configs 读（见 combat/coordinator.ts 的
-      // combatSystemPrompt），设置页 Agent 子导航可编辑。
+      // 侧链: 战斗主持（单一沙盒 DM）。systemPrompt/模型/温度/世界书照旧从这里装配，
+      // 设置页 Agent 子导航可编辑。
       'combat',
-      'combat_enemy',
     ];
 
     // 复用 buildEndpoints() 的映射结果（ApiEntry.model → ApiEndpoint.defaultModel）
@@ -1006,9 +1028,9 @@ export class GamePipeline {
         this.game.activeSave?.metadata?.enabledWorldBookEntries?.some((entry: string) =>
           entry.startsWith('system_core:'),
         ) ?? false;
-      // Selected core lore is authoritative save data. Story and char_gen both
+      // Selected core lore is authoritative save data. Story and entity_gen both
       // need the source entry; the other agents keep their configured partitions.
-      const isCoreLoreAgent = agentId === 'story' || agentId === 'char_gen';
+      const isCoreLoreAgent = agentId === 'story' || agentId === 'entity_gen';
       const coreBookIds = isCoreLoreAgent
         ? [...(selectedSystemCore ? ['system_core'] : []), ...systemCoreWorkshopBookIds]
         : [];
@@ -1071,7 +1093,7 @@ export class GamePipeline {
         // story 默认持权 —— 与设计「默认仅 story 持权」一致。否则一次网络抖动就让整条
         // EJS→vars 提交链静默哑火（EJS 照跑、写照丢，无任何征兆）。显式 false 仍然生效。
         ejsVarsCommit: (defaults.ejsVarsCommit as boolean | undefined) ?? isStory,
-        toolsEnabled: ['craft_gen', 'char_gen', 'item_gen'].includes(agentId),
+        toolsEnabled: ['craft_gen', 'entity_gen'].includes(agentId),
         maxToolCallRounds: 10,
         // 🆕 流式 + abort 信号
         streamCallbacks,
@@ -1402,16 +1424,6 @@ export class GamePipeline {
     }
     console.warn(`[GamePipeline] 侧链 Agent "${agentId}" 解析不到端点（API 池为空），跳过`);
     return undefined;
-  }
-
-  /** 敌方未独立绑定时继承本场已解析的主持人端点；独立绑定则沿用 fail-closed 解析。 */
-  private getCombatEnemyEndpoint(hostEndpoint: ApiEndpoint): ApiEndpoint | undefined {
-    const configuredPoolId = getAgentSettings(
-      this.settings.settings,
-      'combat_enemy',
-      this.chainData?.agentDefaults ?? {},
-    ).model.trim();
-    return configuredPoolId ? this.getEndpointForAgent('combat_enemy') : hostEndpoint;
   }
 
   private nextDebugInvocation(agentId: string, runId = this.activeRunId ?? 'detached') {
@@ -1927,11 +1939,8 @@ export class GamePipeline {
       onCraftGenRequest: async (markers, _varsOutput, ctx) => {
         await this.handleCraftGen(markers, ctx, runActivityId);
       },
-      onCharGenRequest: async (markers, _varsOutput, ctx) => {
-        await this.handleCharGen(markers, ctx, runActivityId);
-      },
-      onItemGenRequest: async (markers, _varsOutput, ctx) => {
-        await this.handleItemGen(markers, ctx, runActivityId);
+      onEntityGenRequest: async (markers, _varsOutput, ctx) => {
+        await this.handleEntityGen(markers, ctx, runActivityId);
       },
     };
   }
@@ -2139,7 +2148,7 @@ export class GamePipeline {
    * 注入的是**请求描述**（进 char_gen prompt 的 CHAR_DETECT 槽），motive 本体一律
    * **不进角色档案**。
    */
-  private buildCharGenPlotInjection(marker: CharGenRequestMarker): string | undefined {
+  private buildCharGenPlotInjection(marker: EntityGenRequestMarker): string | undefined {
     const name = marker.attributes?.characterName;
     if (!name) return undefined;
     const parts: string[] = [];
@@ -2447,21 +2456,11 @@ export class GamePipeline {
   }
 
   /**
-   * T2（2026-08-10）：战斗 Agent 模板系统上下文 —— 战斗 Agent 的模板只挂这三类分区书
-   * （世界观设定/种族特性/核心数值），与请求调度器的可见面同口径。过滤在 pipeline 侧
-   * 完成（coordinator 不碰原始列表，缺省时首轮模板的 {{LORE_BOOK_STATIC}} 渲染为空）。
-   */
-  private static readonly COMBAT_WORLD_BOOK_PARTITIONS: ReadonlySet<string> = new Set([
-    'world_setting',
-    'race',
-    'system_core',
-  ]);
-
-  /** 🆕 combat_trigger 检出 → **只弹就绪面板**（F2，2026-08-10）。
-   *  就绪内容 = marker 快照（参战方/战斗类型/环境/起因），由 combat_ready 事件
+   * 🆕 combat_trigger 检出 → **只弹就绪面板**（F2，2026-08-10）。
+   *  就绪内容 = marker 快照（参战方/战斗类型/环境/起因），经 `setCombatReady`
    *  投进 store（combatReady 置位 → isInCombat=true → CombatPanel 显示就绪分支）。
    *  玩家点「开始战斗」→ store.startCombat → 占位句柄的 start → startCombatSession 真开打。
-   *  返回 null（orchestrator 不消费返回值；就绪期不 enterCombat / 不 runCombat）。 */
+   *  返回 null（orchestrator 不消费返回值；就绪期不 enterCombat / 不主持对战）。 */
   private async handleCombatTrigger(
     marker: CombatTriggerMarker,
     storyOutput: string,
@@ -2483,8 +2482,7 @@ export class GamePipeline {
         .filter(Boolean);
       return names.length > 0 ? names : undefined;
     };
-    this.game.applyCombatEvent({
-      type: 'combat_ready',
+    this.game.setCombatReady({
       combatType: marker.combatType,
       environment: marker.environment,
       allies: splitNames(marker.allies),
@@ -2505,9 +2503,13 @@ export class GamePipeline {
     return null;
   }
 
-  /** 🆕 M2 v3 分支（F2）：就绪面板点「开始」后的真开打 —— 原 handleCombatTrigger
-   *  主体（enterCombat → participants → pre-combat 快照 → setCombatCoordinator →
-   *  runCombat → 摘要回注）。marker 取自已存档的 _lastCombatMarker。 */
+  /**
+   * 🆕 沙盒战斗（Phase 2 / C2）：就绪面板点「开始」后的真开打。
+   *
+   * 建 CombatState（参战角色 → origin:'save' 单位）→ 注入战斗协议正文 → 单一 DM Agent
+   * 依协议主持（工具维护唯一权威状态），我方单位轮次停下等玩家；终局写回 + 摘要回注。
+   * 刷新续战见 resumeCombatSandbox。
+   */
   private async startCombatSession(storyOutput: string): Promise<CombatSummaryResult | null> {
     const marker = this._lastCombatMarker;
     if (!marker) {
@@ -2521,84 +2523,31 @@ export class GamePipeline {
       this.game.exitCombat();
       return null;
     }
-    const enemyEndpoint = this.getCombatEnemyEndpoint(endpoint);
-    if (!enemyEndpoint) {
-      console.error('[GamePipeline] combat_enemy 跳过: 显式绑定的 API endpoint 已失效');
+    if (!this.game.characters.some((c) => c.type === 'player')) {
       this.game.exitCombat();
       return null;
     }
-    // 战斗从「就绪」页由玩家另行启动，此时触发它的剧情回合已经在 run() finally 中
-    // 结束，activeRunId 也已清空。若继续无参调用 getClientFactory()，包装器会把请求
-    // 归到不存在的 `detached` turn，addAgentLogEntry 随即静默丢弃整场战斗日志。
-    // 因此真开战后单独建立一条 activity/debug 共用账本；主持人和敌方的多次请求都
-    // 用同一 runId，以 agentId + invocation ordinal 区分，暂停重试期间保持 running。
+
     let combatRunId: string | null = null;
     let combatRunOutcome: 'completed' | 'failed' | 'cancelled' = 'failed';
     let combatRunMessage: string | undefined;
     try {
-      const context = this.currentContext ?? this.buildContext('');
       this.game.enterCombat();
 
-      const { runCombat } = await import('@engine/combat');
-      const { characterToCombatParticipant } = await import('@engine/combat/participant');
-
-      // 组装 bundle：参战角色 → CombatParticipant。
-      // 🔴 2026-08-08 阵营修复：调度器在 combat_trigger 上声明 allies/enemies 名单，
-      //    按名分阵营——否则所有非 player 角色都被当 enemy（契约的妲丽安会被敌方
-      //    Agent 控制）。名单缺省时回退到旧行为（player=ally，其余=enemy）。
-      // 🔴 2026-08-10 名单收敛（真机 debug）：声明了名单时，**只把名单内的角色拉进
-      //    战斗**（外加 player 本体）。此前所有 hp>0 角色全拉 + sideOf 把名单外非
-      //    player 一律判 enemy——我方旁观 NPC（客栈掌柜奥斯瓦尔德，不在
-      //    allies/enemies 名单）会被当敌方拉进 participants，战斗面板出现多余单位
-      //    并让敌方 Agent 替它决策。名单缺省（无名单声明）时保持旧行为全拉。
-      const playerC = this.game.characters.find((c) => c.type === 'player');
-      const allyNames = new Set(
-        (marker.allies ?? '')
-          .split(/[,，]/)
-          .map((s) => s.trim())
-          .filter(Boolean),
-      );
-      const enemyNames = new Set(
-        (marker.enemies ?? '')
-          .split(/[,，]/)
-          .map((s) => s.trim())
-          .filter(Boolean),
-      );
-      const sideOf = (c: CharacterState): 'ally' | 'enemy' => {
-        if (allyNames.size > 0 || enemyNames.size > 0) {
-          // 调度器给了名单 → 名单内命中按阵营，未命中的：玩家归 ally，其余归 enemy
-          // （未命中的非玩家已被下方 filter 排除，此分支实际只兜 player）
-          if (allyNames.has(c.name)) return 'ally';
-          if (enemyNames.has(c.name)) return 'enemy';
-          return c.type === 'player' ? 'ally' : 'enemy';
-        }
-        // 无名单 → 旧行为
-        return c.type === 'player' ? 'ally' : 'enemy';
-      };
-      const hasListedSides = allyNames.size > 0 || enemyNames.size > 0;
-      // F3：名单声明时只拉名单内角色 + player 本体；名单外的旁观者（无论 npc 还是
-      // monster）不进战斗、不占行动序列。名单缺省 → 旧行为：所有存活角色全拉。
-      const inRoster = (c: CharacterState): boolean =>
-        c.type === 'player' || allyNames.has(c.name) || enemyNames.has(c.name);
-      const participants = this.game.characters
-        .filter((c) => {
-          if (c.hp <= 0) return false;
-          if (!hasListedSides) return true;
-          return inRoster(c);
-        })
-        .map((c) => characterToCombatParticipant(c, sideOf(c)));
-      const fpSnapshot = this.game.fp ?? 0;
-      const bundle = {
-        combatId: `v3-${Date.now()}-${this.saveId}`,
-        combatType: (marker.combatType ?? '标准') as '标准',
-        participants,
-        rulesetRevision: 'v3-2026-07-31',
-        resourceSnapshots: { FP: fpSnapshot },
-      };
-      if (participants.length === 0 || !playerC) {
+      const roster = GamePipeline.combatRosterFromMarker(marker, this.game.characters);
+      if (!roster) {
         this.game.exitCombat();
         return null;
       }
+
+      const state = createCombatState({
+        combatants: roster.combatants,
+        meta: {
+          combatType: (marker.combatType ?? '标准') as CombatType,
+          environment: marker.environment ?? '',
+        },
+      });
+      const protocolText = await loadCombatProtocolText().catch(() => '');
 
       const sourceMessageId = [...this.game.messages]
         .reverse()
@@ -2612,225 +2561,32 @@ export class GamePipeline {
       });
       this.game.updateAgentStatus('combat', combatRunId);
 
-      // T16 §3.5：_lastCombatMarker 已由就绪版 handleCombatTrigger 存档
-      //（重开战斗 restart 回调与二次开始都复用它），这里不再重复赋值。
+      const client = this.getClientFactory(combatRunId)(
+        'combat',
+        endpoint,
+        this.saveId,
+      ) as CombatSandboxClient;
 
-      // T2（2026-08-10）：模板系统上下文 —— 从 marker 组装战斗指令（战斗类型｜环境｜
-      // 正文），过滤出战斗 Agent 可见的世界书（world_setting + race + system_core）。
-      // 全部只进 coordinator 的 deps（可选字段），缺省时首轮模板渲染退化为空占位/现状。
-      const combatBrief =
-        [
-          `战斗类型: ${marker.combatType ?? '标准'}`,
-          `环境: ${marker.environment ?? ''}`,
-          marker.bodyText ?? '',
-        ].join('｜') || '（无战斗指令）';
-      // T4（2026-08-10）：参战方名单 —— 从 marker 的 allies/enemies 组装，注入模板 <参战方> 区。
-      // 只有声明了名单才给（调度器明确说了谁在场上，AI 才能确认敌我）；未声明时留空，
-      // coordinator 给「（无参战方名单）」占位说明（与 combatBrief 同口径）。
-      const combatRoster = hasListedSides
-        ? `我方: ${marker.allies ?? ''}；敌方: ${marker.enemies ?? ''}`
-        : '';
-      const combatWorldBooks = (this.chainData?.worldBooks ?? []).filter((book) =>
-        GamePipeline.COMBAT_WORLD_BOOK_PARTITIONS.has(book.partition),
-      );
-
-      // 前端 Command 桥：pending resolver，store.submitCombatCommand → coordinator.submit → resolve
-      let pendingResolve: ((c: CombatCommand) => void) | null = null;
-      const waitForCommand = () =>
-        new Promise<CombatCommand>((resolve) => (pendingResolve = resolve));
-
-      // 🎭 主持人/DM 模式（2026-08-12）：玩家**意图文本**桥。与 Command 桥并存——
-      //   coordinator 玩家分支优先走意图（waitForPlayerIntent → routePlayerIntent →
-      //   主持人会话解析），Command 桥留给测试/直捣兜底。两个 pending resolver
-      //   互斥使用：某轮要么等意图、要么等 Command，不会同时挂起。
-      let pendingIntentResolve: ((text: string | null) => void) | null = null;
-      const waitForPlayerIntent = () =>
-        new Promise<string | null>((resolve) => (pendingIntentResolve = resolve));
-
-      let pendingAgentResumeResolve: ((action: 'retry' | 'exit') => void) | null = null;
-      const waitForAgentResume = () =>
-        new Promise<'retry' | 'exit'>((resolve) => (pendingAgentResumeResolve = resolve));
-
-      // ── 🔴 T16 时序修复（玩家首决策永久挂起的根因）────────────────────────────
-      // 此前 setCombatCoordinator 在 `await runCombat(...)` **之后**才执行，而
-      // coordinator 的 waitForCommand（玩家单位轮次）依赖 store 经
-      // combatCoordinator.submit 喂入 pendingResolve —— 战斗一开局玩家就永远等不到
-      // 自己的回合（pendingResolve 有值但没人能 resolve）。必须把句柄挂到 store 的
-      // **开战之前**：战斗进行中 submit/abandon 才可用。clearAgentStatus/exitCombat/
-      // 摘要回注仍保留在 runCombat 完成之后（闭包引用关系不变）。
-      // F2：就绪期占位句柄（只有 start）在这里被替换成完整句柄 —— submit/abandon/
-      // waitForCommand/restart 从此刻起可用；start 不再需要（就绪面板已关）。
-      // ────────────────────────────────────────────────────────────────────────────
-
-      // ② pre-combat 快照（设计 §3.5）：openCombat 之前留档开战前状态（角色/对话/变量），
-      //    供「重开战斗」restoreSnapshot 回到开战前。totalTurns 取当前回合数（照
-      //    advanceTurn 先例：save.metadata.totalTurns = 已完成回合数 = 当前回合）。
-      let preSnapshotId: string | null = null;
-      try {
-        const turn = this.game.activeSave?.metadata?.totalTurns ?? 0;
-        // 照 advanceTurn 的先例直接 createStateManager(...) 调（getStateManager 是窄化包装）
-        const snap = await createStateManager(this.saveId).createSnapshot('pre-combat', turn);
-        preSnapshotId = snap.id;
-      } catch (err) {
-        console.warn('[GamePipeline] pre-combat 快照失败（重开战斗不可用，不阻塞开战）:', err);
-      }
-
-      // 暴露 coordinator 句柄给 store（前端提交/放弃/重开）。🔴 必须在 runCombat 之前。
-      this.game.setCombatCoordinator({
-        submit: async (cmd: CombatCommand) => {
-          if (pendingResolve) {
-            const r = pendingResolve;
-            pendingResolve = null;
-            r(cmd);
-          }
-        },
-        // 🎭 主持人/DM 模式（2026-08-12）：玩家提交**意图文本** → resolve 意图等待。
-        //   coordinator 收到后走 routePlayerIntent（主持人会话解析玩家意图 → Command）。
-        submitPlayerIntent: async (text: string) => {
-          if (pendingIntentResolve) {
-            const r = pendingIntentResolve;
-            pendingIntentResolve = null;
-            r(text);
-          }
-        },
-        resumeAgent: (action: 'retry' | 'exit') => {
-          if (pendingAgentResumeResolve) {
-            const resolve = pendingAgentResumeResolve;
-            pendingAgentResumeResolve = null;
-            resolve(action);
-          }
-        },
-        abandon: () => {
-          if (pendingResolve) {
-            const r = pendingResolve;
-            pendingResolve = null;
-            r({
-              commandId: 'abandon',
-              expectedRevision: 0,
-              kind: 'PassAttack',
-              actorId: '',
-              cost: 'attack',
-              payload: {},
-            } as CombatCommand);
-          }
-          if (pendingIntentResolve) {
-            const resolve = pendingIntentResolve;
-            pendingIntentResolve = null;
-            resolve(null);
-          }
-          if (pendingAgentResumeResolve) {
-            const resolve = pendingAgentResumeResolve;
-            pendingAgentResumeResolve = null;
-            resolve('exit');
-          }
-        },
-        waitForCommand,
-        // §3.5 重开战斗：store.restartCombat 恢复 pre-combat 快照后调它重新走本函数。
-        //    F2：重开走**就绪流程**（先弹就绪面板，玩家点「开始」才再开打），不再直接开打。
-        preSnapshotId,
-        restart: async () => {
-          if (this._lastCombatMarker) {
-            await this.handleCombatTrigger(this._lastCombatMarker, '');
-          }
-        },
+      await this.beginCombatSandboxSession({
+        marker,
+        state,
+        transcript: [],
+        protocolText,
+        client,
+        combatRunId,
+        openingInput: GamePipeline.buildCombatOpeningInput(marker, storyOutput, roster.rosterText),
       });
 
-      const result = await runCombat({
-        saveId: this.saveId,
-        bundle,
-        deps: {
-          clientFactory: this.getClientFactory(combatRunId),
-          endpoint,
-          enemyEndpoint,
-          stateManager: this.getStateManager(),
-          characters: this.game.characters,
-          // 🆕 经验档位（简单/普通模式，2026-08-24）：战斗胜利经验按存档模式分档
-          experienceMode: this.game.experienceMode,
-          variables: context.variables,
-          context,
-          // 2026-08-09 §2.7: 战斗 Agent 的 systemPrompt 从 agent-config 读（此前恒 undefined，
-          // routeEnemyCommand 回退硬编码 125 字）。照 char_gen/craft_gen 从 chainData 取 configs 的先例。
-          configs: this.chainData?.agentConfigs,
-          // T2（2026-08-10）：Phase 10 模板系统上下文（全部可选，coordinator 缺省兜底）——
-          // combatBrief（marker 组装）/ combatRoster（marker 名单组装）/ 过滤后的世界书 /
-          // 本轮玩家输入 / 触发战斗的正文 / 最近对话历史。首轮 user 消息（情境快照）的数据源。
-          worldBooks: combatWorldBooks,
-          combatBrief,
-          combatRoster,
-          userInput: context.userInput,
-          storyOutput,
-          history: context.history,
-          submitCommand: async () => {}, // 等待态由 awaiting_player_input 事件驱动 store
-          waitForCommand,
-          // 🎭 主持人/DM 模式（2026-08-12）：玩家意图文本桥（生产主路径）。
-          //   coordinator 玩家分支据此走 routePlayerIntent（主持人解析玩家意图）。
-          submitPlayerIntent: async () => {},
-          waitForPlayerIntent,
-          waitForAgentResume,
-          abandon: () => {},
-          // 真实随机源（Q-01）：唯一注入点，委托 dice.ts 的 rollDice（内核禁 Math.random）。
-          // 每次续杯调用会换一批新骰（BeginOutput 后再取，outputId 用计数器区分）。
-          drawDice: () => ({
-            outputId: `draw-${++this._diceDrawSeq}`,
-            dice: rollDice(60, 20),
-          }),
-        },
-        onCombatEvent: (evt) => this.game.applyCombatEvent(evt),
-      });
-
-      combatRunOutcome = result.aborted ? 'cancelled' : 'completed';
-      if (result.aborted) combatRunMessage = '战斗已放弃。';
-      // 🔴 2026-08-13 真机 debug：战斗终局的 commitChatState 只写 Dexie，而本条链路
-      //（store.startCombat → coordinator.start → startCombatSession）不经过 run() 的
-      // finally —— store 从不回读，HUD 一直是开战前的血量/经验（满血假象）。
-      // 终局落库后回读一次（含 COR-02 存档切走守卫）。
-      if (this.ownsActiveSave) await this.game.refreshFromDb(this.saveId);
-      // 同一真机 debug：记录「最近已结算战斗」供下一轮 dispatcher 上下文（{{RECENT_COMBAT}}）
-      // —— 没有它 dispatcher 不知道正文里的战斗描写是已结算战斗的战后延续，会再发
-      // combat_trigger 把打完的战斗重演一遍。内存级（与 _lastCombatMarker 同口径）；
-      // 放弃的战斗（aborted，未落库）不算已结算，不记录。
-      if (!result.aborted) {
-        this._recentCombat = {
-          allies: [...allyNames],
-          enemies: [...enemyNames],
-          outcome: result.outcome,
-          endedAtTurn: this.game.activeSave?.metadata?.totalTurns ?? 0,
-        };
+      const summary = await this.driveCombatSandbox();
+      if (summary) {
+        combatRunOutcome = 'completed';
+        return summary;
       }
-      // 🆕 结算确认框（2026-08-13 需求 D）：终局数值已落库，摘要注入前弹确认面板——
-      // 上半数值卡（经验/FP/掉落/回合/胜负，顺带解决"结算不可见"），下半可编辑摘要
-      // textarea（防 AI 乱写，玩家可改）。玩家「注入正文」→ emitMessage(编辑后文本)；
-      // 「放弃注入」→ 只收面板（数值不回滚，落库不可逆）。exitCombat 移到确认之后——
-      // 确认期间 isInCombat 靠 store 的 combatSummaryReview 维持。
-      // 放弃的战斗（aborted）不弹确认也不注入（"战斗被放弃"是内部文本，进正文是噪音）。
-      if (!result.aborted && result.narrativeSummary && this.ownsActiveSave) {
-        const finalText = await this.game.awaitCombatSummaryReview({
-          outcome: result.outcome,
-          totalExp: result.totalExp,
-          totalFp: result.totalFp,
-          loot: (result.loot as CombatSummaryResult['loot']) ?? [],
-          rounds: result.rounds,
-          summaryText: result.narrativeSummary,
-        });
-        if (finalText && finalText.trim()) {
-          this.emitMessage(`【战斗摘要】${finalText}`, 'assistant');
-        }
-      }
-      this.game.exitCombat(); // 确认收尾后关面板（终局已由 onCombatEvent 置 activeCombat）
-      const summary: CombatSummaryResult = {
-        narrativeSummary: result.narrativeSummary,
-        patches: result.patches,
-        totalExp: result.totalExp,
-        totalFp: result.totalFp,
-        loot: (result.loot as CombatSummaryResult['loot']) ?? [],
-        rounds: result.rounds,
-        outcome: result.outcome,
-      };
-      return summary;
+      combatRunOutcome = 'cancelled';
+      combatRunMessage = '战斗已放弃。';
+      return null;
     } catch (err) {
       if (isAbortError(err)) {
-        // 战斗被取消：照样 exitCombat（不能把玩家留在一个不再推进的战斗面板里），
-        // 但不报错状态。内核状态本来就只在终局才落库，中途取消零写入。
         combatRunOutcome = 'cancelled';
         combatRunMessage = '战斗已取消。';
         this.game.exitCombat();
@@ -2843,10 +2599,11 @@ export class GamePipeline {
       console.error('[GamePipeline] combat 失败:', err);
       return null;
     } finally {
+      this._combatSandbox = null;
       if (combatRunId) {
         this.game.finishAgentActivityRun(combatRunId, combatRunOutcome, combatRunMessage);
         this.game.finishAgentLogTurn(combatRunId, combatRunOutcome);
-        const debugPrefix = `${combatRunId}\u0000`;
+        const debugPrefix = combatRunId + String.fromCharCode(0);
         for (const key of this.debugInvocationCounts.keys()) {
           if (key.startsWith(debugPrefix)) this.debugInvocationCounts.delete(key);
         }
@@ -2855,6 +2612,379 @@ export class GamePipeline {
         }
       }
     }
+  }
+
+  /**
+   * 🆕 刷新续战（C4）：读回本存档未终局的沙盒战斗并恢复面板。
+   * 返回是否恢复了战斗；true 时调用方应跳过开场 Prompt。
+   */
+  async resumeCombatSandbox(): Promise<boolean> {
+    if (this._combatSandbox) return false;
+    const stored = await getCombatSandbox(this.saveId).catch(() => undefined);
+    if (!stored || stored.state.meta.phase === 'ended' || stored.transcript.length === 0) {
+      return false;
+    }
+    const playerC = this.game.characters.find((c) => c.type === 'player');
+    if (!playerC) return false;
+    const endpoint = this.getEndpointForAgent('combat');
+    if (!endpoint) return false;
+
+    this.game.enterCombat();
+    const combatRunId = this.game.startAgentActivityRun(undefined, true);
+    this.game.startAgentLogTurn({
+      id: combatRunId,
+      saveId: this.saveId,
+      turn: this.game.activeSave?.metadata?.totalTurns ?? 0,
+    });
+    this.game.updateAgentStatus('combat', combatRunId);
+
+    const client = this.getClientFactory(combatRunId)(
+      'combat',
+      endpoint,
+      this.saveId,
+    ) as CombatSandboxClient;
+
+    // 刷新后内存 marker 已丢：从读回的权威状态重建，供 restart 回调重新走 handleCombatTrigger
+    const marker = this._lastCombatMarker ?? GamePipeline.markerFromCombatState(stored.state);
+    this._lastCombatMarker = marker;
+
+    await this.beginCombatSandboxSession({
+      marker,
+      state: stored.state,
+      transcript: stored.transcript,
+      protocolText: await loadCombatProtocolText().catch(() => ''),
+      client,
+      combatRunId,
+      openingInput: undefined,
+      resume: true,
+      preSnapshotId: stored.preSnapshotId ?? null,
+    });
+
+    void this.driveCombatSandbox()
+      .then(
+        (summary) => {
+          this.game.finishAgentActivityRun(
+            combatRunId,
+            summary ? 'completed' : 'cancelled',
+            summary ? undefined : '战斗已放弃。',
+          );
+          this.game.finishAgentLogTurn(combatRunId, summary ? 'completed' : 'cancelled');
+        },
+        (err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          this.game.finishAgentActivityRun(combatRunId, 'failed', message);
+          this.game.finishAgentLogTurn(combatRunId, 'failed');
+          console.error('[GamePipeline] combat 续战失败:', err);
+        },
+      )
+      .finally(() => {
+        this._combatSandbox = null;
+      });
+    return true;
+  }
+
+  /** 开一段沙盒会话：建会话袋 + 投影开局事件 + 持久化 + 挂 coordinator 句柄 */
+  private async beginCombatSandboxSession(input: {
+    marker: CombatTriggerMarker | null;
+    state: CombatState;
+    transcript: CombatSandboxMessage[];
+    protocolText: string;
+    client: CombatSandboxClient;
+    combatRunId: string | null;
+    openingInput?: string;
+    resume?: boolean;
+    /** 刷新续战：开战前快照 id 由持久化行读回，不再新打（否则重开会退回战斗中途） */
+    preSnapshotId?: string | null;
+  }): Promise<void> {
+    const allyNames = GamePipeline.parseCombatNames(input.marker?.allies);
+    const enemyNames = GamePipeline.parseCombatNames(input.marker?.enemies);
+
+    let preSnapshotId: string | null = input.preSnapshotId ?? null;
+    if (preSnapshotId === null && !input.resume) {
+      try {
+        const turn = this.game.activeSave?.metadata?.totalTurns ?? 0;
+        const snap = await createStateManager(this.saveId).createSnapshot('pre-combat', turn);
+        preSnapshotId = snap.id;
+      } catch (err) {
+        console.warn('[GamePipeline] pre-combat 快照失败（重开战斗不可用，不阻塞开战）:', err);
+      }
+    }
+
+    this._combatSandbox = {
+      state: input.state,
+      transcript: input.transcript,
+      protocolText: input.protocolText,
+      systemPrompt: this.getCombatSystemPrompt(),
+      client: input.client,
+      combatRunId: input.combatRunId,
+      allyNames,
+      enemyNames,
+      preSnapshotId,
+      resolveIntent: null,
+      aborted: false,
+      lastOutput: '',
+      openingInput: input.openingInput,
+    };
+
+    // C6：数据源 = 权威 CombatState —— 直接推进 store 供响应式渲染，不再投影事件。
+    this.game.setCombatState(input.state);
+
+    this.game.setCombatCoordinator({
+      submitPlayerIntent: async (text: string) => {
+        const session = this._combatSandbox;
+        if (session?.resolveIntent) {
+          const resolve = session.resolveIntent;
+          session.resolveIntent = null;
+          resolve(text);
+        }
+      },
+      abandon: () => this.abortCombatSandbox(),
+      preSnapshotId,
+      restart: async () => {
+        if (this._lastCombatMarker) await this.handleCombatTrigger(this._lastCombatMarker, '');
+      },
+    });
+
+    await saveCombatSandbox({
+      saveId: this.saveId,
+      updatedAt: Date.now(),
+      state: input.state,
+      transcript: input.transcript,
+      preSnapshotId,
+    }).catch((err) => console.warn('[GamePipeline] 战斗沙盒持久化失败（不阻塞开战）:', err));
+  }
+
+  /** 跑沙盒会话：开场 → 等玩家 → 续战 …直到终局 / 放弃 */
+  private async driveCombatSandbox(): Promise<CombatSummaryResult | null> {
+    const session = this._combatSandbox;
+    if (!session) return null;
+
+    let playerInput: string | undefined = session.openingInput;
+
+    for (;;) {
+      if (playerInput !== undefined) {
+        const result = await runCombatSandbox({
+          state: session.state,
+          client: session.client,
+          protocolText: session.protocolText,
+          systemPrompt: session.systemPrompt,
+          transcript: session.transcript,
+          playerInput,
+          saveCharacters: this.game.characters,
+          signal: this.abortController?.signal,
+        });
+        session.state = result.state;
+        session.transcript = result.transcript;
+        session.lastOutput = result.output;
+        if (result.error) throw new Error(result.error);
+
+        // C6：权威状态推进 store（响应式渲染）+ AI 本轮正文追加到中栏对话流。
+        this.game.setCombatState(session.state);
+        this.game.appendCombatFlow(result.output, session.state.meta.round);
+
+        await saveCombatSandbox({
+          saveId: this.saveId,
+          updatedAt: Date.now(),
+          state: session.state,
+          transcript: session.transcript,
+          preSnapshotId: session.preSnapshotId,
+        }).catch((err) => console.warn('[GamePipeline] 战斗沙盒持久化失败:', err));
+
+        if (result.ended) return await this.finalizeCombatSandbox(session);
+      }
+
+      const input = await this.waitForCombatIntent();
+      if (session.aborted || input === null) {
+        await deleteCombatSandbox(this.saveId).catch(() => undefined);
+        return null;
+      }
+      playerInput = input;
+    }
+  }
+
+  /** 终局：写回补丁一次提交（ADR-21）+ 终局事件 + 摘要确认 */
+  private async finalizeCombatSandbox(session: CombatSandboxSession): Promise<CombatSummaryResult> {
+    const state = session.state;
+    const outcome = state.meta.outcome ?? 'draw';
+    // FP 按上下文给：仅当 AI 在终局写入 meta.fpReward 才结算（缺席/0 = 不给 FP，不产 patch）
+    const fpDelta =
+      typeof state.meta.fpReward === 'number' && Number.isFinite(state.meta.fpReward)
+        ? Math.round(state.meta.fpReward)
+        : 0;
+    const rewards = computeCombatExpRewards(state, this.game.experienceMode);
+    const patches = buildCombatSettlementPatches(state, this.game.characters, {
+      expByUnit: rewards.expByUnit,
+      fpDelta,
+    });
+
+    const sm = this.getStateManager();
+    if (sm && patches.length > 0) {
+      try {
+        await sm.commitDomainCommand(patches);
+      } catch (err) {
+        console.error('[GamePipeline] 战斗结算落库失败:', err);
+      }
+    }
+
+    // C6 结算态：投结算面板并挂起等玩家裁决（继续 = 携输入续写下一回合 / 重开 = null）
+    const reviewPromise = this.ownsActiveSave
+      ? this.game.awaitCombatSettlement({
+          outcome,
+          totalExp: rewards.totalExp,
+          totalFp: fpDelta,
+          loot: [],
+          rounds: state.meta.round,
+          summaryText: session.lastOutput,
+        })
+      : Promise.resolve(null);
+
+    if (this.ownsActiveSave) await this.game.refreshFromDb(this.saveId);
+
+    const stateUnits = Object.values(state.units);
+    this._recentCombat = {
+      allies:
+        session.allyNames.size > 0
+          ? [...session.allyNames]
+          : stateUnits.filter((u) => u.side === 'ally').map((u) => u.name),
+      enemies:
+        session.enemyNames.size > 0
+          ? [...session.enemyNames]
+          : stateUnits.filter((u) => u.side === 'enemy').map((u) => u.name),
+      outcome,
+      endedAtTurn: this.game.activeSave?.metadata?.totalTurns ?? 0,
+    };
+
+    await deleteCombatSandbox(this.saveId).catch(() => undefined);
+
+    // 玩家裁决：non-null = 「接下来做什么」输入 → 先注入战斗摘要，再把该输入交给
+    // GamePage 续写下一回合正文（store.combatContinue → watch → pipeline.run）。
+    const nextAction = await reviewPromise;
+    if (this.ownsActiveSave && session.lastOutput.trim()) {
+      this.emitMessage('【战斗摘要】' + session.lastOutput, 'assistant');
+    }
+    // 🔴 exitCombat 会清 combatContinue —— 必须**先收面板再请求续写**，否则请求刚挂上就被清掉，
+    //    GamePage 的 watcher 来不及消费（症状：点了「继续」却没有下一回合）。
+    this.game.exitCombat();
+    if (this.ownsActiveSave && nextAction && nextAction.trim()) {
+      this.game.requestCombatContinue(nextAction.trim());
+    }
+
+    return {
+      narrativeSummary: session.lastOutput,
+      patches,
+      totalExp: rewards.totalExp,
+      totalFp: fpDelta,
+      loot: [],
+      rounds: state.meta.round,
+      outcome,
+    };
+  }
+
+  private abortCombatSandbox(): void {
+    const session = this._combatSandbox;
+    if (!session) return;
+    session.aborted = true;
+    const resolve = session.resolveIntent;
+    if (resolve) {
+      session.resolveIntent = null;
+      resolve(null);
+    }
+  }
+
+  private waitForCombatIntent(): Promise<string | null> {
+    return new Promise((resolve) => {
+      const session = this._combatSandbox;
+      if (!session) {
+        resolve(null);
+        return;
+      }
+      session.resolveIntent = resolve;
+    });
+  }
+
+  private getCombatSystemPrompt(): string | undefined {
+    return this.chainData?.agentConfigs.find((c) => c.agentId === 'combat')?.systemPrompt;
+  }
+
+  private static parseCombatNames(raw: string | undefined): Set<string> {
+    return new Set(
+      (raw ?? '')
+        .split(/[,，]/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
+  }
+
+  /** 从权威 CombatState 反推 combat_trigger marker（刷新续战后丢失内存 marker 的兜底） */
+  private static markerFromCombatState(state: CombatState): CombatTriggerMarker {
+    const units = Object.values(state.units);
+    const names = (side: CombatSide): string =>
+      units
+        .filter((u) => u.side === side)
+        .map((u) => u.name)
+        .join('，');
+    return {
+      type: 'combat_trigger',
+      rawContent: '',
+      position: 0,
+      combatType: state.meta.combatType,
+      environment: state.meta.environment,
+      allies: names('ally') || undefined,
+      enemies: names('enemy') || undefined,
+    };
+  }
+
+  private static buildCombatOpeningInput(
+    marker: CombatTriggerMarker,
+    storyOutput: string,
+    rosterText: string,
+  ): string {
+    const lines = [
+      '战斗类型: ' + (marker.combatType ?? '标准'),
+      marker.environment ? '环境: ' + marker.environment : '',
+      rosterText ? '参战方: ' + rosterText : '',
+      marker.bodyText ?? '',
+      storyOutput.trim(),
+    ].filter((line) => line.trim().length > 0);
+    return lines.length > 0 ? lines.join(String.fromCharCode(10)) : '战斗开始。';
+  }
+
+  private static combatRosterFromMarker(
+    marker: CombatTriggerMarker,
+    characters: CharacterState[],
+  ): { combatants: CombatantInput[]; rosterText: string } | null {
+    const allyNames = GamePipeline.parseCombatNames(marker.allies);
+    const enemyNames = GamePipeline.parseCombatNames(marker.enemies);
+    const hasListedSides = allyNames.size > 0 || enemyNames.size > 0;
+
+    const sideOf = (c: CharacterState): CombatSide => {
+      if (hasListedSides) {
+        if (allyNames.has(c.name)) return 'ally';
+        if (enemyNames.has(c.name)) return 'enemy';
+        return c.type === 'player' ? 'ally' : 'enemy';
+      }
+      return c.type === 'player' ? 'ally' : 'enemy';
+    };
+    const inRoster = (c: CharacterState): boolean =>
+      c.type === 'player' || allyNames.has(c.name) || enemyNames.has(c.name);
+
+    const roster = characters.filter((c) => {
+      if (c.hp <= 0) return false;
+      if (!hasListedSides) return true;
+      return inRoster(c);
+    });
+    if (roster.length === 0) return null;
+
+    const combatants: CombatantInput[] = roster.map((c, index) => ({
+      character: c,
+      side: sideOf(c),
+      pos: index + 1,
+      facing: sideOf(c) === 'ally' ? 'right' : 'left',
+    }));
+    const rosterText = hasListedSides
+      ? '我方: ' + (marker.allies ?? '') + '；敌方: ' + (marker.enemies ?? '')
+      : '';
+    return { combatants, rosterText };
   }
 
   /** 处理制作生成链 */
@@ -2907,57 +3037,73 @@ export class GamePipeline {
     }
   }
 
-  /** 处理角色生成链 */
-  private async handleCharGen(
-    markers: CharGenRequestMarker[],
+  /**
+   * 处理 entity_gen 侧链 —— 按 `entityType` 分流：
+   * - `character`：每个 marker 单独一次调用（各自带主线投影；产全后落 add_character）
+   * - 其余（skill/equipment/item/status/ascension）：打包批量调用（一次产多条）
+   */
+  private async handleEntityGen(
+    markers: EntityGenRequestMarker[],
     ctx: AgentContext,
     runActivityId?: string,
   ) {
-    const endpoint = this.getEndpointForAgent('char_gen');
+    if (markers.length === 0) return;
+    const characterMarkers = markers.filter((m) => m.attributes.entityType === 'character');
+    const otherMarkers = markers.filter((m) => m.attributes.entityType !== 'character');
+    if (characterMarkers.length > 0) {
+      await this.handleCharacterGen(characterMarkers, ctx, runActivityId);
+    }
+    if (otherMarkers.length > 0) {
+      await this.handleBatchEntityGen(otherMarkers, ctx, runActivityId);
+    }
+  }
+
+  /** 角色生成（逐个 marker，落 add_character + 系统卡片） */
+  private async handleCharacterGen(
+    markers: EntityGenRequestMarker[],
+    ctx: AgentContext,
+    runActivityId?: string,
+  ) {
+    const endpoint = this.getEndpointForAgent('entity_gen');
     if (!endpoint) {
-      console.warn('[GamePipeline] char_gen 跳过: 未配置 API endpoint');
+      console.warn('[GamePipeline] entity_gen 跳过: 未配置 API endpoint');
       return;
     }
 
-    const { runCharGenChain } = await import('@engine/agents/char-gen-agent');
+    const { runEntityGenChain } = await import('@engine/agents/entity-gen-agent');
     const clientFactory = this.getClientFactory(runActivityId);
     const stateManager = this.getStateManager();
 
     // 真机修(2026-07-17): try/catch 进循环 — 单 NPC 链失败(如输出截断)不再连锁抛弃后续请求
     for (const marker of markers) {
       try {
-        this.updateAgentActivityStatus('char_gen', runActivityId);
-        const charGenRequest = {
-          saveId: this.saveId,
-          marker,
-          context: ctx,
-          endpoint,
-          // 真机修: 完整 systemPrompt/世界书/预设注入（此前 undefined → stub 裸奔）
-          configs: this.chainData?.agentConfigs,
-          worldBooks: this.chainData?.worldBooks,
-          presets: this.chainData?.presets,
-          // 🧵 时点分流投影（命中 involvedNpcs 才注入；未命中不加戏）
-          plotThreadInjection: this.buildCharGenPlotInjection(marker),
-        } as any;
-        const result = await runCharGenChain(charGenRequest, {
-          clientFactory,
-          stateManager,
-        });
-        this.clearAgentActivityStatus('char_gen', undefined, runActivityId);
+        this.updateAgentActivityStatus('entity_gen', runActivityId);
+        const result = await runEntityGenChain(
+          {
+            saveId: this.saveId,
+            marker,
+            context: ctx,
+            endpoint,
+            // 真机修: 完整 systemPrompt/世界书/预设注入（此前 undefined → stub 裸奔）
+            configs: this.chainData?.agentConfigs,
+            worldBooks: this.chainData?.worldBooks,
+            presets: this.chainData?.presets,
+            // 🧵 时点分流投影（命中 involvedNpcs 才注入；未命中不加戏）
+            plotThreadInjection: this.buildCharGenPlotInjection(marker),
+          },
+          { clientFactory, stateManager },
+        );
+        this.clearAgentActivityStatus('entity_gen', undefined, runActivityId);
         if (result.character && !this.ownsActiveSave) {
           // 🔴 COR-02：存档已切走 —— 这个 NPC 属于上一个存档，既不进内存角色表也不进聊天流。
-          // 侧链**不响应 abort**（`getClientFactory` 包出来的客户端只转发入参 signal，
-          // 而 `run()` 的 abortController 只交给了 story），所以离开游戏页之后它照样会跑完
-          // 并走到这里 —— 闸门是这条路上唯一拦得住的东西。
-          console.warn('[GamePipeline] 存档已切换，丢弃孤儿 char_gen 结果', {
+          // 侧链**不响应 abort**，所以离开游戏页之后它照样会跑完并走到这里 —— 闸门是唯一拦得住的东西。
+          console.warn('[GamePipeline] 存档已切换，丢弃孤儿 entity_gen 结果', {
             pipelineSaveId: this.saveId,
             activeSaveId: this.game.activeSaveId,
             characterName: result.character.name,
           });
         } else if (result.character) {
-          // 添加新角色到 store
           this.game.characters.push(result.character);
-          // 添加系统通知（非 assistant 叙事气泡）
           this.emitSystemMessage({
             type: 'char_gen',
             characterName: result.character.name,
@@ -2969,15 +3115,13 @@ export class GamePipeline {
         }
       } catch (err) {
         if (isAbortError(err)) {
-          // 取消不是失败：清干净状态并**跳出整个循环** —— 剩下的标记只会各自再被
-          // 掐一次，徒增日志噪声（信号已经拉了，重试没有意义）
-          this.clearAgentActivityStatus('char_gen', undefined, runActivityId);
-          console.log('[GamePipeline] char_gen 链已取消（离开游戏页 / 停止生成）');
+          this.clearAgentActivityStatus('entity_gen', undefined, runActivityId);
+          console.log('[GamePipeline] entity_gen 角色链已取消（离开游戏页 / 停止生成）');
           break;
         }
-        this.clearAgentActivityStatus('char_gen', String(err), runActivityId);
+        this.clearAgentActivityStatus('entity_gen', String(err), runActivityId);
         console.error(
-          `[GamePipeline] char_gen 链失败 (${marker.attributes?.characterName ?? '未知角色'})，继续处理剩余请求:`,
+          `[GamePipeline] entity_gen 角色链失败 (${marker.attributes?.characterName ?? '未知角色'})，继续处理剩余请求:`,
           err,
         );
       }
@@ -2985,70 +3129,60 @@ export class GamePipeline {
   }
 
   /**
-   * 🔴 2026-08-02 批量 item_gen 的单批上限。
-   *
-   * 一次打包过多请求会让 item_gen 单次调用耗时暴涨（9 个请求 ≈ 240s+，见
-   * fated-poem-debug-2743e219），且 AI 思考过重（7817 字 reasoning）容易撞超时。
-   * 超上限时按此值分批，每批仍是一次调用（相对逐条 N 次已大幅缩减）。
-   * 5 个/批 ≈ 2 批，总耗时 ≈ 2 × 单批时间，比 9 个挤一批更稳。
+   * 🔴 2026-08-02 批量生成的单批上限（原 item_gen，现 entity_gen）。
+   * 一次打包过多请求会让单次调用耗时暴涨（9 个请求 ≈ 240s+），且 AI 思考过重容易撞超时。
    */
-  private static readonly ITEM_GEN_BATCH_SIZE = 5;
+  private static readonly ENTITY_GEN_BATCH_SIZE = 5;
 
-  /** 处理独立物品生成链 (request_dispatcher 的 <item_gen_request>) */
-  private async handleItemGen(
-    markers: import('@engine/types/types').ItemGenRequestMarker[],
+  /** 物品/技能/状态/登神批量生成（request_dispatcher 的 <entity_gen_request type≠character>） */
+  private async handleBatchEntityGen(
+    markers: EntityGenRequestMarker[],
     ctx: AgentContext,
     runActivityId?: string,
   ) {
     if (markers.length === 0) return;
-    const endpoint = this.getEndpointForAgent('item_gen');
+    const endpoint = this.getEndpointForAgent('entity_gen');
     if (!endpoint) {
-      console.warn('[GamePipeline] item_gen 跳过: 未配置 API endpoint');
+      console.warn('[GamePipeline] entity_gen 跳过: 未配置 API endpoint');
       return;
     }
 
-    const { runItemGenChain } = await import('@engine/agents/item-gen-chain');
+    const { runEntityGenChain } = await import('@engine/agents/entity-gen-agent');
     const clientFactory = this.getClientFactory(runActivityId);
     const stateManager = this.getStateManager();
     const storyOutput = ctx.agentOutputs?.get('story') ?? '';
 
-    // 🔴 2026-08-02 批量生成: 此前对每个 marker 串行调 item_gen（N 请求 = N 次调用，
-    // 每个 40-60s，开局 5 技能 4 装备 1 消耗品 = 6-10 分钟）。现在把 markers 打包成
-    // 一次调用（模板契约「N 个 <request> = N 个输出条目」），调用次数 N → ceil(N/5)。
-    //
-    // 容错策略: 每批失败不阻断主流程（try/catch 包住）；失败批不落库，下一回合
-    // request_dispatcher 会重新识别未落库的请求。
-    const size = GamePipeline.ITEM_GEN_BATCH_SIZE;
+    // 把 markers 打包成一次调用（模板契约「N 个 <request> = N 个输出条目」），
+    // 调用次数 N → ceil(N/5)。容错：每批失败不阻断主流程，失败批不落库，下回合重试。
+    const size = GamePipeline.ENTITY_GEN_BATCH_SIZE;
     for (let start = 0; start < markers.length; start += size) {
       const batch = markers.slice(start, start + size);
-      this.updateAgentActivityStatus('item_gen', runActivityId);
+      this.updateAgentActivityStatus('entity_gen', runActivityId);
       try {
-        const request = {
-          saveId: this.saveId,
-          markers: batch,
-          storyOutput,
-          context: ctx,
-          endpoint,
-          // 真机修: 完整 systemPrompt/世界书注入
-          configs: this.chainData?.agentConfigs,
-          worldBooks: this.chainData?.worldBooks,
-          presets: this.chainData?.presets,
-        };
-        await runItemGenChain(request, {
-          clientFactory,
-          stateManager,
-        });
-        this.clearAgentActivityStatus('item_gen', undefined, runActivityId);
-        // 物品数据已由 stateManager 落库；run() finally 的 refreshFromDb() 会把
-        // 最新 characters（含新物品/装备）回读进 Pinia，前端面板随之刷新。
+        await runEntityGenChain(
+          {
+            saveId: this.saveId,
+            markers: batch,
+            storyOutput,
+            context: ctx,
+            endpoint,
+            // 真机修: 完整 systemPrompt/世界书注入
+            configs: this.chainData?.agentConfigs,
+            worldBooks: this.chainData?.worldBooks,
+            presets: this.chainData?.presets,
+          },
+          { clientFactory, stateManager },
+        );
+        this.clearAgentActivityStatus('entity_gen', undefined, runActivityId);
+        // 数据已由 stateManager 落库；run() finally 的 refreshFromDb() 会回读进 Pinia。
       } catch (err) {
         if (isAbortError(err)) {
-          this.clearAgentActivityStatus('item_gen', undefined, runActivityId);
-          console.log('[GamePipeline] item_gen 链已取消（离开游戏页 / 停止生成）');
+          this.clearAgentActivityStatus('entity_gen', undefined, runActivityId);
+          console.log('[GamePipeline] entity_gen 批量链已取消（离开游戏页 / 停止生成）');
           break;
         }
-        this.clearAgentActivityStatus('item_gen', String(err), runActivityId);
-        console.error('[GamePipeline] item_gen 批量链失败（本批不落库，下回合重试）:', err);
+        this.clearAgentActivityStatus('entity_gen', String(err), runActivityId);
+        console.error('[GamePipeline] entity_gen 批量链失败（本批不落库，下回合重试）:', err);
       }
     }
   }
@@ -3157,16 +3291,16 @@ export class GamePipeline {
     target: RewriteTarget,
     userDescription = '',
   ): Promise<{ ok: boolean; reason?: string }> {
-    const endpoint = this.getEndpointForAgent('item_gen');
-    if (!endpoint) return { ok: false, reason: '未配置 item_gen 的 API endpoint' };
+    const endpoint = this.getEndpointForAgent('entity_gen');
+    if (!endpoint) return { ok: false, reason: '未配置 entity_gen 的 API endpoint' };
 
     const activityRunId = this.activeRunId ?? this.game.startAgentActivityRun(undefined, true);
-    this.game.updateAgentStatus('item_gen', activityRunId);
+    this.game.updateAgentStatus('entity_gen', activityRunId);
     let activityError: string | undefined;
 
     try {
       const chain = await this.ensureChainData();
-      const { rewriteLoadoutItem: runRewrite } = await import('@engine/agents/item-gen-chain');
+      const { rewriteLoadoutItem: runRewrite } = await import('@engine/agents/entity-gen-agent');
       const result = await runRewrite(
         {
           saveId: this.saveId,
@@ -3188,10 +3322,10 @@ export class GamePipeline {
       return { ok: result.ok, reason: result.reason };
     } catch (err) {
       activityError = err instanceof Error ? err.message : String(err);
-      console.error('[GamePipeline] item_gen 重铸失败:', err);
+      console.error('[GamePipeline] entity_gen 重铸失败:', err);
       return { ok: false, reason: activityError };
     } finally {
-      this.game.clearAgentStatus('item_gen', activityError, activityRunId);
+      this.game.clearAgentStatus('entity_gen', activityError, activityRunId);
     }
   }
 }

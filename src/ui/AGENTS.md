@@ -545,9 +545,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   ├── AgentPromptCard.vue   ← systemPrompt + 上下文模板 + 占位符徽章 + 预览（非 story）
 │   │   │   │                            占位符插入改用**模板 ref**，不再全局 querySelectorAll
 │   │   │   ├── PresetManager.vue     ← 预设子系统 + 两个弹窗（story）；单根，弹窗在根卡内层
-│   │   │   ├── agent-list.ts         ← 13 个 Agent 的展示元数据 + getDefaultTemplateForAgent
-│   │   │   │                            （combat 主持人 + combat_enemy 敌方决策均为战斗侧链；
-│   │   │   │                              设置页 combat 卡含默认关闭的双角色会话开关）
+│   │   │   ├── agent-list.ts         ← 11 个 Agent 的展示元数据 + getDefaultTemplateForAgent
+│   │   │   │                            （combat 为单一 DM 协议沙盒侧链；`image_prompt` 按 D53 刻意
+│   │   │   │                              不入本表，故设置页 Agent 子导航少它一项）
 │   │   │   ├── placeholder-catalog.ts← 23 项占位符 + 按 Agent 过滤（DAG 偏序 + 侧链归属）
 │   │   │   ├── agent-defaults.ts     ← buildAgentDefaultEntry（纯装配；patch 副作用留调用方）
 │   │   │   └── agent-chrome.css      ← ★跨组件共用：.prompt-editor / .template-preview-panel
@@ -873,8 +873,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── DebugPanel.vue           ← 调试面板（`activeModal === 'debug'` 且 `developerMode`）：
 │   │   │                               Agent 请求/响应 + EJS 后端状态 + 引擎设置 + **随机事件区块**
 │   │   │                               战斗从就绪页延后启动时由 `game-pipeline` 建独立 Debug Turn；
-│   │   │                               `combat` / `combat_enemy` 共账本分条记录，禁止回落 `detached`
-│   │   │                               Coordinator 批次校验暂停要回写对应调用 `error`
+│   │   │                               单一 `combat` 沙盒 DM 侧链分条记录，禁止回落 `detached`
+│   │   │                               （v3 的 Coordinator 批次校验暂停已随内核删除）
 │   │   ├── random-event-debug.ts    ← [随机事件 v1] 上者随机事件区块的展示层判定（纯函数，不 mount 可测）
 │   │   │                               🔴 **不装任何判据的第二实现**：硬门槛走 `evaluateEventCondition`、
 │   │   │                                  权重走 `computeEventWeight`、上下文走
@@ -934,7 +934,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                  他只看到画面里少了个人。措辞说**「出图时的方言」不是「当前方言」**：
 │   │   │                                  告警是那一次装配留下的，把历史事实说成现状会让排查走错方向。
 │   │   │                                  不做 toast（每张图都会响）、不阻断（AI 新造 NPC 无预设仍要画场景）
-│   │   └── (战斗面板见 combat/ 子组件，docs/reference/combat-system-architecture.md)
+│   │   ├── combat/                  ← [战斗去代码化 · C6] 直接吃沙盒 `CombatState`（唯一数据源），
+│   │   │                               组件内零写死单位名/技能名/数值（展示映射集中在 `combat-view.ts`）：
+│   │   │                               `CombatPanel.vue` 三态外壳（就绪/战斗/结算，右上角常驻「↺ 重开战斗」）；
+│   │   │                               `CombatReadyPanel.vue`（类型/环境 chip + 敌我名单 + 跳过/开始）；
+│   │   │                               `CombatUnitCard.vue` 左右单位卡 + `CombatMessageFlow.vue` 中栏对话流
+│   │   │                               （叙事 + `<action_info>` 等宽面板）；`CombatPositionAxis.vue` 坐标轴站位；
+│   │   │                               `CombatActionPlanner.vue` 行动规划区；`CombatSettlementPanel.vue` 结算
+│   │   │                               （回合/经验/命运点 + 战利品 + 状态结算 + 「接下来做什么」输入 +
+│   │   │                               [继续]/[重开战斗]）。
+│   │   │                               🔴 已删投影桥 `/ utils`：`combat/sandbox/projection.ts`、`ui-contract.ts`、
+│   │   │                                  `ui-events.ts`、`combat/index.ts` —— 前端不再走 v3 `CombatEvent`；
+│   │   │                                  旧 `CombatActionBar/ActionCard/Header` 组件一并删除。
+│   │   │                                  现行战斗真源 = `src/core/combat/sandbox/` +
+│   │   │                                  `docs/planning/2026-10-02-combat-decode-entitygen-plan.md`
 │   └── workshop/                    ← 扩展管理 + [工坊 P1] 创意工坊子页面
 │       ├── ExtensionManagementPage.vue
 │       │                               ← 首页/设置/游戏侧栏统一入口；原版扩展暂为明确占位，
@@ -976,7 +989,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | 分区           | 内容                                                                                                                                                                                                                                                      |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 🔌 API 配置    | LLM / Embedding / Reranker 分类源 CRUD、三种 LLM 协议、请求体覆盖/省略、连接测试、分页模型列表、跨连接 RPM                                                                                                                                                |
-| 🤖 Agent 配置  | 13 个汉化 Agent、模型选择、世界书开关、System Prompt 编辑；战斗固定使用主持人与敌方决策双角色会话                                                                                                                                                         |
+| 🤖 Agent 配置  | 11 个汉化 Agent、模型选择、世界书开关、System Prompt 编辑；战斗为单一 `combat` DM 协议沙盒侧链                                                                                                                                                            |
 | 📚 世界书      | **早已不是占位**：书列表 + 导入/新建/删除/恢复（`WorldBookSection.vue`，约 368 行）+ 条目编辑器（`WorldBookEditor.vue`，约 909 行：条目 CRUD / 关键词 / 插入位置与深度 / 触发策略 / EJS 正文）。数据在 Dexie（工坊 P0 起 `settings.worldBooks` 已不存在） |
 | 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                                                                                                                                                                                                 |
 | 🧠 记忆 & 缓存 | 显式 LLM/Embedding 召回模式、Embedding 与可选 Reranker 绑定、候选数/最终召回数、压缩阈值/快照上限/缓存策略                                                                                                                                                |

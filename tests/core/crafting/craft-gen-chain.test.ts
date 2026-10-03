@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildCraftPatches } from '../../../src/core/crafting/craft-gen-chain';
 import type { CraftGenOutput } from '../../../src/core/crafting/craft-gen-chain';
-import type { ItemGenOutput } from '../../../src/core/types/types';
+import type { EntityGenOutput } from '../../../src/core/types/types';
 
 // ========== Factory Helpers ==========
 
@@ -73,7 +73,7 @@ describe('buildCraftPatches', () => {
   });
 
   it('② item_gen equipment 与产物同名 → 不重复 add_item（同名恰好 1 条），单 add_item 带 equippedSlot（M3）', () => {
-    const itemOutput: ItemGenOutput = {
+    const itemOutput: EntityGenOutput = {
       skills: [],
       equipment: [
         {
@@ -102,7 +102,7 @@ describe('buildCraftPatches', () => {
   });
 
   it('③ item_gen 产出异名装备/散件 → 产物 + 装备 + 散件各自 add_item', () => {
-    const itemOutput: ItemGenOutput = {
+    const itemOutput: EntityGenOutput = {
       skills: [],
       equipment: [
         {
@@ -131,8 +131,8 @@ describe('buildCraftPatches', () => {
     expect((scrap!.value as any).quantity).toBe(3);
   });
 
-  it('④ item_gen 装备带 automata（S3 DSL 自由效果）→ add_item 透传 automata', () => {
-    const itemOutput: ItemGenOutput = {
+  it('④ entity_gen 装备带 protocolText/tags（两层协议字段）→ add_item 透传', () => {
+    const itemOutput: EntityGenOutput = {
       skills: [],
       equipment: [
         {
@@ -141,19 +141,9 @@ describe('buildCraftPatches', () => {
           description: '剑身残留嗜血意志',
           stats: { 攻击力: 60 },
           quality: '传说',
-          automata: [
-            {
-              id: '嗜血之刃.噬血',
-              name: '噬血',
-              source: '嗜血之刃',
-              owner: '<unitId>',
-              subscribe: 'damage.after',
-              trigger: 'ctx.damage.final > 0',
-              priority: 0,
-              divinity: 0,
-              intents: [{ kind: 'Heal', targetId: '<owner>', amount: 'ctx.damage.final * 0.1' }],
-            },
-          ],
+          effects: { 噬血: '造成伤害后回复等量生命' },
+          protocolText: '剑身残留嗜血意志\n<effect name="噬血">造成伤害后回复等量生命</effect>',
+          tags: ['传奇', '吸血'],
         },
       ],
       inventory: [],
@@ -162,8 +152,9 @@ describe('buildCraftPatches', () => {
     const patches = buildCraftPatches(makeCraftOutput(), itemOutput, '理查德');
     const addItem = ops(patches, 'add_item').find((p) => (p.value as any).name === '嗜血之刃');
     expect(addItem).toBeTruthy();
-    expect((addItem!.value as any).automata).toHaveLength(1);
-    expect((addItem!.value as any).automata[0]).toMatchObject({ subscribe: 'damage.after' });
+    expect((addItem!.value as any).protocolText).toContain('噬血');
+    expect((addItem!.value as any).tags).toEqual(['传奇', '吸血']);
+    expect((addItem!.value as any).effects).toEqual({ 噬血: '造成伤害后回复等量生命' });
   });
 
   it('制作失败 (success=false) 且无 item_gen 输出 → 空 patches，不产出任何物品（S4d 语义：失败无失败品时为空）', () => {
@@ -176,7 +167,7 @@ describe('buildCraftPatches', () => {
   });
 
   it('🆕 S4d 制作失败 (success=false) 但 item_gen 产出失败品 → 只落失败品 add_item，不结算 EXP/FP 也不 auto-equip', () => {
-    const itemOutput: ItemGenOutput = {
+    const itemOutput: EntityGenOutput = {
       skills: [],
       equipment: [
         {
@@ -185,7 +176,6 @@ describe('buildCraftPatches', () => {
           slot: '武器',
           stats: { atk: 1 },
           quality: '普通',
-          modifiers: [],
         },
       ],
       inventory: [],
@@ -208,7 +198,7 @@ describe('buildCraftPatches', () => {
   });
 
   it('🆕 S4d 制作失败 (success=false) 但 item_gen 产出库存型失败品 → 只落 add_item（材料类）', () => {
-    const itemOutput: ItemGenOutput = {
+    const itemOutput: EntityGenOutput = {
       skills: [],
       equipment: [],
       inventory: [
@@ -235,7 +225,7 @@ describe('buildCraftPatches', () => {
   });
 
   it('成功 (success=true) + item_gen 失败品同名 → 产物正常 auto-equip（回归）', () => {
-    const itemOutput: ItemGenOutput = {
+    const itemOutput: EntityGenOutput = {
       skills: [],
       equipment: [
         {

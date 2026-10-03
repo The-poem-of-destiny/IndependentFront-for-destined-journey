@@ -132,8 +132,8 @@ describe('② 体量轴：占位内容阈值（§6 / D32）', () => {
   const wbDir = join(REPO_ROOT, 'public', 'data', 'worldbooks');
   const bookFiles = existsSync(wbDir) ? readdirSync(wbDir).filter((f) => f.endsWith('.json')) : [];
 
-  it('15 本占位世界书', () => {
-    expect(bookFiles).toHaveLength(15);
+  it('16 本占位世界书', () => {
+    expect(bookFiles).toHaveLength(16);
   });
 
   it('单本 ≤10 条 / 全集 ≤150 条', () => {
@@ -181,8 +181,11 @@ describe('② 体量轴：占位 agent-config 规格（§6 / D32）', () => {
     >;
   };
 
-  it('14 个 agent id 齐', () => {
-    expect(Object.keys(agentConfig.agents)).toHaveLength(14);
+  it('12 个 agent id 齐（2026-10-02：char_gen + item_gen 合并为 entity_gen，14 → 13；C5a 移除 combat_enemy，13 → 12）', () => {
+    expect(Object.keys(agentConfig.agents)).toHaveLength(12);
+    expect(Object.keys(agentConfig.agents)).toContain('entity_gen');
+    expect(Object.keys(agentConfig.agents)).not.toContain('char_gen');
+    expect(Object.keys(agentConfig.agents)).not.toContain('item_gen');
   });
 
   it('各 agent systemPrompt 非空（image_prompt 除外 —— 它那份归方言，C5）', () => {

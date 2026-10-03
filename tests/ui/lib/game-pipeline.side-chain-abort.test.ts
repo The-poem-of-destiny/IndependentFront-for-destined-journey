@@ -44,13 +44,13 @@ vi.mock('@engine/agents/agent-client', () => ({
   },
 }));
 
-/** char_gen 链的产出：抛什么由用例设置 */
+/** entity_gen 链的产出：抛什么由用例设置 */
 const charGenThrows = { current: null as unknown };
 
-vi.mock('@engine/agents/char-gen-agent', () => ({
-  runCharGenChain: vi.fn(async () => {
+vi.mock('@engine/agents/entity-gen-agent', () => ({
+  runEntityGenChain: vi.fn(async () => {
     if (charGenThrows.current) throw charGenThrows.current;
-    return { character: null, narrativeSummary: '' };
+    return { character: null, narrativeSummary: '', patches: [], itemOutput: null };
   }),
 }));
 
@@ -167,9 +167,9 @@ describe('侧链取消接线', () => {
 
 describe('取消不是失败', () => {
   const markers = [
-    { attributes: { characterName: '甲' } },
-    { attributes: { characterName: '乙' } },
-    { attributes: { characterName: '丙' } },
+    { attributes: { entityType: 'character', characterName: '甲' } },
+    { attributes: { entityType: 'character', characterName: '乙' } },
+    { attributes: { entityType: 'character', characterName: '丙' } },
   ] as any;
 
   it('🔴 侧链被取消 → 清干净状态（不留红），且**跳出整个循环**不再逐个重试', async () => {
@@ -177,11 +177,11 @@ describe('取消不是失败', () => {
     (pipeline as any).abortController = new AbortController();
     charGenThrows.current = Object.assign(new Error('Aborted'), { name: 'AbortError' });
 
-    await (pipeline as any).handleCharGen(markers, {} as any);
+    await (pipeline as any).handleCharacterGen(markers, {} as any);
 
     // 清状态时不带 error 参数 = UI 上不留失败态
-    expect(game.clearAgentStatus).toHaveBeenCalledWith('char_gen');
-    expect(game.clearAgentStatus).not.toHaveBeenCalledWith('char_gen', expect.anything());
+    expect(game.clearAgentStatus).toHaveBeenCalledWith('entity_gen');
+    expect(game.clearAgentStatus).not.toHaveBeenCalledWith('entity_gen', expect.anything());
     // 三个标记只试了第一个就跳出（信号已经拉了，后两个只会各自再被掐一次）
     expect(game.updateAgentStatus).toHaveBeenCalledTimes(1);
   });
@@ -191,10 +191,10 @@ describe('取消不是失败', () => {
     (pipeline as any).abortController = new AbortController();
     charGenThrows.current = new Error('模型抽风');
 
-    await (pipeline as any).handleCharGen(markers, {} as any);
+    await (pipeline as any).handleCharacterGen(markers, {} as any);
 
     expect(game.clearAgentStatus).toHaveBeenCalledWith(
-      'char_gen',
+      'entity_gen',
       expect.stringContaining('模型抽风'),
     );
     // 单个 NPC 失败不连锁抛弃后续请求（2026-07-17 真机修的那条语义）

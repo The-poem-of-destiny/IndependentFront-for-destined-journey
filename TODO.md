@@ -7,12 +7,25 @@
 
 ## 待办
 
-- [ ] **战斗 V3 双角色 Agent 正式内容与真机验收** —— 公开仓已于 2026-09-14 落地
-      `combat` 主持人 + `combat_enemy` 敌方决策的隔离会话、动态权限、可见性裁剪、失败暂停与
-      失败恢复，并于 2026-09-15 退役旧单主持人路径、将双角色方案设为唯一模式；待私有内容仓可用后
-      同步正式 `combat_enemy` 配置并发布 pack，覆盖单敌/多敌、
-      玩家复杂意图、失败重试/退出、终局与取消重开，记录两角色 usage、延迟及脱敏 wire evidence。
-      现行计划见 `docs/planning/2026-09-12-combat-agent-split-implementation-plan.md`。
+- [ ] **战斗协议沙盒 真机验收** —— v3 内核与双角色（`combat` + `combat_enemy`）已随 Phase 2
+      「战斗去代码化」整体删除，现役为**单一 DM 协议沙盒**（`src/core/combat/sandbox/`：AI 读 v1.4.2
+      协议自算结算，Code 只做只读计算 + 终局写回 + Dexie v27 持久化/刷新续战），C6 新前端已直接吃
+      `CombatState`。待私有内容仓的 `combat_extra` 世界书随 pack 发布后，用真实 LLM 覆盖：单敌/多敌、
+      玩家复杂意图、失败重试/退出、终局结算与「继续」续写、取消/重开、刷新续战，记录 usage、延迟及
+      脱敏 wire evidence。
+
+  - **未决点**：① 命运点数（FP）的**获取规则依赖其它世界书条目**，结算 `fpDelta` 暂恒 0；
+    ② 结算面板的「战利品」暂恒空（沙盒尚未产出战利品清单）；③ 战斗内召唤走 `combat_add_unit`
+    由 DM 直接建临时单位，**不走 entity_gen**（与生成链未打通）。
+  - 设计全文见 `docs/planning/2026-10-02-combat-decode-entitygen-plan.md` §5。
+
+- [ ] **daily_check 日常检定 Agent（Phase 3）** —— 独立 Agent、**Stage 0 无条件运行**
+      （不受 `plotSettings.mode === 'off'` 影响），只做**周期性/条件型效果结算**（状态到期、条件触发、
+      环境、upkeep），**不做社交/属性检定**（v1.4.2《品质效果限定》明文「检定只存在于战斗与生产中」）。
+      输入在场实体（CHARACTER_STATE / ACTIVE_EFFECTS / INVENTORY / GAME_TIME / MAP_CONTEXT + 时间差），
+      输出周期/条件结算的 StatePatch（走 `commitChatState`），取代 `applyTimeAdvance` 中随脚本退役而
+      空掉的状态按期结算逻辑。设计见 `docs/planning/2026-10-02-combat-decode-entitygen-plan.md` §6。
+      🔴 **暂缓，主人裁定后再做。**
 
 - [ ] **LLM 组装层 Delta 会话 v1 —— 生产运营验收（下个对话说「继续 delta 生产验收」接上）**
       🔴 引擎代码已合入 master（PR #118 delta session + #119 vars_update 字段规范），内容仓 pack 已发

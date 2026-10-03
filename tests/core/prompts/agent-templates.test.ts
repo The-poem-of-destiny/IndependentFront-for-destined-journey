@@ -110,11 +110,11 @@ describe('AGENT_TEMPLATES', () => {
     'memory_summary',
     'plot_post_check',
     'plot_outline',
-    'char_gen',
+    'entity_gen', // 2026-10-02：char_gen + item_gen 合并
   ];
 
   // v3 兼容别名 + systemPrompt 迁移到 agent-config.json 的 agent（短模板，仅保留接口兼容）
-  const stubAgents = ['plot_check', 'plot_correct', 'craft_gen', 'item_gen'];
+  const stubAgents = ['plot_check', 'plot_correct', 'craft_gen'];
 
   for (const agentId of fullAgents) {
     describe(`${agentId}`, () => {
@@ -134,8 +134,8 @@ describe('AGENT_TEMPLATES', () => {
     });
   }
 
-  // Phase 10: Agents with externalized prompts (craft_gen, char_gen, item_gen) have empty fixedExamples
-  const emptyExamplesAgents = ['craft_gen', 'char_gen', 'item_gen'] as const;
+  // Phase 10: Agents with externalized prompts (craft_gen, entity_gen) have empty fixedExamples
+  const emptyExamplesAgents = ['craft_gen', 'entity_gen'] as const;
   for (const agentId of emptyExamplesAgents) {
     it(`${agentId} 的 fixedExamples 可为空 (提示词在 agent-config.json)`, () => {
       expect(AGENT_TEMPLATES[agentId].fixedExamples).toBe('');
@@ -313,26 +313,15 @@ describe('buildAgentMessages — Phase 10 localParams', () => {
     expect(messages![0].content).toContain('forge a blade');
   });
 
-  it('char_gen 模板解析 {{CHAR_DETECT}} from localParams', () => {
+  it('entity_gen 模板解析 {{ENTITY_REQUEST}} from localParams', () => {
     const ctx = makeContext();
-    const cfg = makeCfg('char_gen', { systemPrompt: 'Char Gen AI' });
-    const messages = buildAgentMessages('char_gen', ctx, [cfg], [], undefined, {
-      CHAR_DETECT: '<char_detect characterName="NPC">a mysterious figure</char_detect>',
+    const cfg = makeCfg('entity_gen', { systemPrompt: 'Entity Gen AI' });
+    const messages = buildAgentMessages('entity_gen', ctx, [cfg], [], undefined, {
+      ENTITY_REQUEST:
+        '<entity_gen_request type="character" characterName="NPC">a mysterious figure</entity_gen_request>',
     });
     expect(messages).not.toBeNull();
     expect(messages![0].content).toContain('a mysterious figure');
-  });
-
-  it('item_gen 模板解析 {{ITEM_REQUEST}} + {{CHAR_GEN_RESULT}} from localParams', () => {
-    const ctx = makeContext();
-    const cfg = makeCfg('item_gen', { systemPrompt: 'Item Gen AI' });
-    const messages = buildAgentMessages('item_gen', ctx, [cfg], [], undefined, {
-      ITEM_REQUEST: '<request type="equipment" slot="武器">a sharp sword</request>',
-      CHAR_GEN_RESULT: '<char_result><name>Test</name></char_result>',
-    });
-    expect(messages).not.toBeNull();
-    expect(messages![0].content).toContain('a sharp sword');
-    expect(messages![0].content).toContain('char_result');
   });
 
   it('链占位符未传 localParams 时保持空 (不回退到错误值)', () => {
@@ -642,8 +631,7 @@ describe('buildAgentMessages — return format (Phase 10 single system msg)', ()
     'plot_post_check',
     'plot_outline',
     'craft_gen',
-    'char_gen',
-    'item_gen',
+    'entity_gen',
   ];
 
   for (const agentId of agentsWithTemplates) {
@@ -662,13 +650,12 @@ describe('buildAgentMessages — return format (Phase 10 single system msg)', ()
 
 // ========== Template Quality Checks (Phase 10: relaxed for externalized prompts) ==========
 
-// Phase 10: craft_gen/char_gen/item_gen have prompts in agent-config.json, not here
+// Phase 10: craft_gen/entity_gen have prompts in agent-config.json, not here
 const EXTERNALIZED_IDS = new Set([
   'plot_check',
   'plot_correct',
-  'item_gen',
   'craft_gen',
-  'char_gen',
+  'entity_gen',
   'combat',
   // 图像生成 G 阶段: 提示词在 agent-config.json（临时最小版 + TODO，D55）
   'image_prompt',
@@ -721,8 +708,7 @@ describe('默认历史层数 defaultHistoryLayers', () => {
     expect(defaultHistoryLayers('memory_recall')).toBe(3);
     expect(defaultHistoryLayers('request_dispatcher')).toBe(1);
     expect(defaultHistoryLayers('request_dispatcher')).toBe(1);
-    expect(defaultHistoryLayers('char_gen')).toBe(1);
-    expect(defaultHistoryLayers('item_gen')).toBe(1);
+    expect(defaultHistoryLayers('entity_gen')).toBe(1);
   });
   it('未知 agent 回退中等值', () => {
     expect(defaultHistoryLayers('unknown')).toBeGreaterThanOrEqual(1);
@@ -735,7 +721,7 @@ describe('默认截断字数 defaultHistorySlice', () => {
     expect(defaultHistorySlice('memory_summary')).toBe(1500);
     expect(defaultHistorySlice('request_dispatcher')).toBe(800);
     expect(defaultHistorySlice('request_dispatcher')).toBe(800);
-    expect(defaultHistorySlice('char_gen')).toBe(800);
+    expect(defaultHistorySlice('entity_gen')).toBe(800);
   });
 });
 

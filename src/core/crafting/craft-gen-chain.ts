@@ -24,7 +24,7 @@ import type {
   ApiEndpoint,
   CraftRequestMarker,
   CraftGenRequestMarker,
-  ItemGenOutput,
+  EntityGenOutput,
   StatePatch,
   QualityLevel,
   CraftRating,
@@ -35,6 +35,8 @@ import { buildAgentMessagesAsync } from '../prompts/agent-templates';
 import { getToolsForAgent, executeToolCall } from '../agents/agent-tools';
 import { normalizeSlot, normalizeItemType } from '../content/field-enums';
 import type { ToolExecutionContext } from '../types/types';
+// 🔴 2026-10-02 硬改名：制作产物数值由 entity_gen 统一生成（原 item_gen 已退役）。
+import { callEntityGenForCraft } from '../agents/entity-gen-agent';
 // Q-05：XML / JSON 解析的唯一工具面（参数顺序一律 (source, tag)）
 import { tagInner, tagBlock, parseAttrsStr } from '../agents/agent-xml';
 import { extractJsonPayload } from '../utils/model-json';
@@ -155,7 +157,7 @@ export interface CraftGenChainResult {
   narrative: string;
   patches: StatePatch[];
   craftOutput: CraftGenOutput;
-  itemOutput: ItemGenOutput | null;
+  itemOutput: EntityGenOutput | null;
 }
 
 // ========== Public API ==========
@@ -276,14 +278,14 @@ export async function callItemGenForCraft(
   craftOutput: CraftGenOutput,
   request: CraftGenRequest,
   deps: CraftGenDeps,
-): Promise<ItemGenOutput> {
-  // 如果没有 item_requests，跳过 item_gen
+): Promise<EntityGenOutput> {
+  const EMPTY: EntityGenOutput = { skills: [], equipment: [], inventory: [], statuses: [] };
+  // 如果没有 item_requests，跳过 entity_gen
   if (!craftOutput.itemRequests || craftOutput.itemRequests.length === 0) {
-    return { skills: [], equipment: [], inventory: [] };
+    return EMPTY;
   }
 
-  // 将 craft_output 格式化为 item_gen 可理解的 XML 片段
-  // 对标 char_gen 传给 item_gen 的 <skill_requests>/<equipment_requests>/<item_requests>
+  // 将 craft_output 格式化为 entity_gen 可理解的 XML 片段
   const itemRequestsXML = craftOutput.itemRequests
     .map((req) => {
       const slotAttr = req.slot ? ` slot="${req.slot}"` : '';
@@ -302,18 +304,8 @@ export async function callItemGenForCraft(
     `</craft_output>`,
   ].join('\n');
 
-  // Phase 10: Build localParams from craft_gen's output for item_gen template resolution
-  const craftItemLocalParams: Record<string, string> = {};
-  // Extract <item_requests> from craftDataXML if present
-  const craftItemReqMatch = craftDataXML.match(/<item_requests>([\s\S]*?)<\/item_requests>/);
-  if (craftItemReqMatch) {
-    craftItemLocalParams.ITEM_REQUEST = craftItemReqMatch[1].trim();
-  }
-  // Pass craft result
-  craftItemLocalParams.CRAFT_RESULT = craftDataXML;
-
   try {
-    // 构建 item_gen 上下文 — 对标 char_gen→item_gen: agentOutputs['char_gen'] 传角色数据
+    // 构建 entity_gen 上下文 — craft 结果经 CRAFT_REQUEST/CRAFT_RESULT 注入
     const contextWithCraftData: AgentContext = {
       ...request.context,
       agentOutputs: new Map([
@@ -322,56 +314,26 @@ export async function callItemGenForCraft(
       ]),
     };
 
-    // 真机修(2026-07-17): configs/worldBooks/presets 透传
-    const messages = await buildAgentMessagesAsync(
-      'item_gen',
-      contextWithCraftData,
-      request.configs,
-      request.worldBooks,
-      request.presets,
-      craftItemLocalParams,
-    );
-    if (!messages) {
-      // item_gen 模板找不到时，返回空，不阻塞主流程
-      return { skills: [], equipment: [], inventory: [] };
-    }
-
-    const client = deps.clientFactory('item_gen', request.endpoint, request.saveId);
-
-    // Agentic 路径
-    if (client.chatWithTools) {
-      const tools = getToolsForAgent('item_gen');
-      const toolContext: ToolExecutionContext = {
-        characters: request.context.characters ?? [],
-        variables: request.context.variables ?? {},
+    return await callEntityGenForCraft(
+      itemRequestsXML,
+      craftDataXML,
+      {
+        context: contextWithCraftData,
+        endpoint: request.endpoint,
         saveId: request.saveId,
-      };
-
-      const result = await client.chatWithTools(
-        { messages, tools, tool_choice: tools.length > 0 ? 'auto' : 'none' },
-        async (name: string, args: Record<string, any>) => {
-          return executeToolCall(name, args, toolContext);
-        },
-        // maxRounds=10 对齐独立 item_gen 链：equipment 类工具序列 5 轮会触顶
-        { maxRounds: 10 },
-      );
-
-      if (result.output) {
-        return parseItemGenOutput(result.output);
-      }
-    }
-
-    // Fallback: 普通 chat
-    const result = await client.chat(messages);
-    if (result.output) {
-      return parseItemGenOutput(result.output);
-    }
+        storyOutput: request.storyOutput,
+        configs: request.configs,
+        worldBooks: request.worldBooks,
+        presets: request.presets,
+      },
+      { clientFactory: deps.clientFactory },
+    );
   } catch (err) {
-    // item_gen 失败不阻塞主流程 — 和 char_gen→item_gen 一致的容错策略
-    console.warn('item_gen for craft 调用失败，制品将无详细数值:', err);
+    // entity_gen 失败不阻塞主流程（与旧 item_gen 链一致的容错策略）
+    console.warn('entity_gen for craft 调用失败，制品将无详细数值:', err);
   }
 
-  return { skills: [], equipment: [], inventory: [] };
+  return EMPTY;
 }
 
 /**
@@ -432,7 +394,7 @@ export function parseCraftResultXML(xml: string): CraftGenOutput {
  */
 export function buildCraftPatches(
   craftOutput: CraftGenOutput,
-  itemOutput: ItemGenOutput | null,
+  itemOutput: EntityGenOutput | null,
   characterId: string,
 ): StatePatch[] {
   const patches: StatePatch[] = [];
@@ -482,12 +444,12 @@ export function buildCraftPatches(
           stats: equip.stats, // M3: stats 归位 value（#7）
           durability: equip.durability, // M3: durability 归位 value（#7）
           maxDurability: equip.durability,
-          // 战斗 v2 (M4 5.5b): modifiers/buffs/divinity 写进 patch value（战斗管线 collect_mods 消费）
-          ...(equip.modifiers ? { modifiers: equip.modifiers } : {}),
-          ...(equip.buffs ? { buffs: equip.buffs } : {}),
-          ...(equip.divinity !== undefined ? { divinity: equip.divinity } : {}),
-          // 🆕 战斗 v3 (S3 2026-08-01): <automaton> DSL 自由效果透传
-          ...(equip.automata && equip.automata.length > 0 ? { automata: equip.automata } : {}),
+          // entity_gen (2026-10-02): 两层协议字段（效果文本 + 标签原文）
+          ...(equip.effects && Object.keys(equip.effects).length > 0
+            ? { effects: equip.effects }
+            : {}),
+          ...(equip.protocolText ? { protocolText: equip.protocolText } : {}),
+          ...(equip.tags?.length ? { tags: equip.tags } : {}),
         },
       });
     }
@@ -503,12 +465,9 @@ export function buildCraftPatches(
           quantity: inv.quantity,
           type: normalizeItemType(inv.type) ?? inv.type, // M3: type 归一化（#38）
           rarity: inv.rarity,
-          // 战斗 v2 (M4 5.5b): modifiers/buffs/divinity 写进 patch value
-          ...(inv.modifiers ? { modifiers: inv.modifiers } : {}),
-          ...(inv.buffs ? { buffs: inv.buffs } : {}),
-          ...(inv.divinity !== undefined ? { divinity: inv.divinity } : {}),
-          // 🆕 战斗 v3 (S3 2026-08-01): <automaton> DSL 自由效果透传
-          ...(inv.automata && inv.automata.length > 0 ? { automata: inv.automata } : {}),
+          ...(inv.effects && Object.keys(inv.effects).length > 0 ? { effects: inv.effects } : {}),
+          ...(inv.protocolText ? { protocolText: inv.protocolText } : {}),
+          ...(inv.tags?.length ? { tags: inv.tags } : {}),
         },
       });
     }
@@ -566,7 +525,7 @@ export async function runCraftGenChain(
   // S4d（2026-08-01 失败品链路）：成功/失败都发 item_gen——
   //   craft_gen prompt 要求失败时也输出 <item_requests>（失败品/残料，type="inventory" 材料类），
   //   item_gen 为失败品写数值（品质普通/低值），buildCraftPatches 落库但不 auto-equip、不结算 EXP/FP。
-  let itemOutput: ItemGenOutput | null = null;
+  let itemOutput: EntityGenOutput | null = null;
   if (craftOutput.itemRequests.length > 0) {
     itemOutput = await callItemGenForCraft(craftOutput, request, deps);
   }
@@ -683,18 +642,6 @@ function parseCraftParams(xml: string): CraftGenOutput['craftParams'] {
   };
 }
 
-// XML / JSON 解析工具统一在 agent-xml.ts 与 model-json.ts（Q-05）——
-// 本文件曾自带一套镜像 helper，其中 extractTag 与 char-gen-agent 的同名函数**语义相反**：
-// 这边 (tag, text) 返回含标签整块，那边 (xml, tag) 返回标签内文。签名同为 (string, string)，
-// 连定义带调用一起复制过去编译照过，运行时把整块 XML 当字段值写进档案。
-
-// ========== Lazy Import for parseItemGenOutput ==========
-
-/**
- * 懒加载 char-gen-agent 的 parseItemGenOutput。
- * 避免循环依赖 — craft-gen-chain 不直接 import char-gen-agent。
- */
-async function parseItemGenOutput(raw: string): Promise<ItemGenOutput> {
-  const { parseItemGenOutput } = await import('../agents/char-gen-agent');
-  return parseItemGenOutput(raw);
-}
+// XML / JSON 解析工具统一在 agent-xml.ts 与 model-json.ts（Q-05）。
+// 🔴 2026-10-02：item_gen 已并入 entity_gen，产物解析统一走 `entity-gen-parse.ts`
+//   （`parseEntityGenOutput`），本文件不再有反向懒 import。

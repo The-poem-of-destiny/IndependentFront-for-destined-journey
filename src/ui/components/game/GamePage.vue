@@ -6,7 +6,6 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useAudioStore } from '../../stores/audio-store';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
-import { unwireEffectSystem } from '@engine/effects/effect-wiring';
 import { GamePipeline, waitForGameSaveIdle } from '../../lib/game-pipeline';
 import { buildSceneImageSeams, resolveSceneWeather } from '../../lib/scene-image-seams';
 import { useApiSourceStore } from '../../stores/api-source-store';
@@ -200,11 +199,18 @@ onMounted(async () => {
         .init()
         .then(() => (ownsPage() ? pipeline?.primeSceneAudio() : undefined))
         .catch((err) => console.warn('[GamePage] 音频初始化失败（不影响游戏）:', err));
-      // 首次加载 → 自动发送开场 Prompt
+      // 🆕 C4：刷新续战 —— 本存档有未终局的沙盒战斗时恢复面板，跳过开场 Prompt。
       loadingSave.value = false;
-      if (!game.hasOpeningPromptConsumed && game.openingPrompt) {
+      const resumedCombat = await pipeline.resumeCombatSandbox().catch((err) => {
+        console.warn('[GamePage] 战斗续战恢复失败（当作无在办战斗）:', err);
+        return false;
+      });
+      if (!ownsPage()) return;
+      if (!resumedCombat && !game.hasOpeningPromptConsumed && game.openingPrompt) {
         console.log('[GamePage] sending opening prompt...');
         await pipeline.sendOpeningPrompt(handleStoryChunk);
+      } else if (resumedCombat) {
+        console.log('[GamePage] resumed in-progress combat sandbox');
       } else {
         console.log(
           '[GamePage] NOT sending opening prompt. consumed:',
@@ -317,7 +323,6 @@ onBeforeUnmount(() => {
   // 会把为 A 生成的正文追加进 B 并以 saveId:B 落库，永久留在 B 的历史里。
   // （漏网写入还有第二道闸：GamePipeline 内的 emitMessage 存档归属检查。）
   pipeline?.dispose();
-  if (requestedSaveId) unwireEffectSystem(requestedSaveId);
   // 🆕 T4（设计 §8.1 / §9）：离开游戏页 = 存档切换/销毁的既有清理点。本 pipeline 是
   //    per-save 实例，invalidatePromptSessions 只清自己的 saveId 的全部 prompt session
   //    （切档/删档都发生在离开游戏页之后，而 session 是模块级内存态，不清会一直驻留）。
@@ -327,11 +332,11 @@ onBeforeUnmount(() => {
   // 🖼 离开游戏页：中止在飞的出图、清掉排队的（§8.2）。排队中的一个字节都没花，
   //    删掉即可；在飞的那条会落 failed/aborted，因为上游照样计费。
   sceneImages.abortAll();
-  // ⚔️ 结算确认框挂起时离开页面（2026-08-13 需求 D）：裁决不可能发生了，
-  //    exitCombat 收掉挂起的 await（resolve(null)）并清确认态——否则 pipeline 的
-  //    await 永久悬挂。战斗进行中/就绪态**不清**：切设置页再回来战斗还能接着打
-  //    （CombatPanel 重新挂载后 activeCombat 还在，这是现状下能工作的场景）。
-  if (game.combatSummaryReview) game.exitCombat();
+  // ⚔️ 结算面板挂起时离开页面：裁决不可能发生了，exitCombat 收掉挂起的 await
+  //    （resolve(null)）并清结算态——否则 pipeline 的 await 永久悬挂。
+  //    战斗进行中/就绪态**不清**：切设置页再回来战斗还能接着打
+  //    （CombatPanel 重新挂载后 combatState 还在，这是现状下能工作的场景）。
+  if (game.combatSettlement) game.exitCombat();
 });
 
 async function handleSend(content: string) {
@@ -350,8 +355,18 @@ async function handleRetry(messageId: string) {
 
 function handleStop() {
   pipeline?.abort();
-  cancelStreamingPreview();
 }
+
+// ⚔️ C6 结算「继续」：pipeline 终局落定后把玩家输入推进 store，这里消费它并作为
+//    下一回合的玩家输入续写正文（走与输入框同一条 handleSend 缝，不开第二条写路径）。
+watch(
+  () => game.combatContinue,
+  (text) => {
+    if (!text) return;
+    game.clearCombatContinue();
+    void handleSend(text);
+  },
+);
 
 function handleToolClick(id: string) {
   // 迷你播放器是浮动卡片，不走 activeModal（§6.2），必须先于 showModal 拦下

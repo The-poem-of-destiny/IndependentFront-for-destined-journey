@@ -9,6 +9,165 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-10-03 新战斗前端 C6：直接吃沙盒 `CombatState`，删投影桥｜已实施，真机待验证
+
+战斗面板从「吃 v3 `CombatView`/`CombatEvent` 投影」改为**直接吃沙盒权威 `CombatState`**（唯一数据源），
+并替掉 C2 兼容投影桥。
+
+- **数据源**：`game-store` 暴露响应式 `combatState`（pipeline 每个 exchange 后 `setCombatState`）；
+  组件遍历 `state.units` 按 `side` 分阵营，技能/装备/状态/五维/槽位全部从单位数据读 ——
+  组件内零写死单位名/技能名/数值（集中映射在 `combat-view.ts`）。
+- **三态**：就绪（`combatReady`：类型/环境 chip + 敌我名单 + 起因 + 跳过/开始）、
+  战斗中（顶部当前行动单位资源条 + 坐标轴站位 + 中栏对话流（叙事 + `<action_info>` 等宽面板）+
+  左右单位卡 + 行动规划区；右上角常驻「↺ 重开战斗」）、结算（`combatSettlement`：回合/经验/命运点 +
+  战利品 + 状态结算 + 「接下来做什么」输入 + [继续]/[重开战斗]）。
+- **接线**：新组件 `combat/CombatPanel.vue` + `CombatUnitCard.vue` / `CombatMessageFlow.vue` /
+  `CombatPositionAxis.vue` / `CombatActionPlanner.vue` / `CombatReadyPanel.vue` /
+  `CombatSettlementPanel.vue` / `combat-view.ts`（纯展示投影 + AI 输出解析）。
+- **删投影桥**：`combat/sandbox/projection.ts`、`combat/ui-contract.ts`、`combat/ui-events.ts`、
+  `combat/index.ts` 删除（前端不再走 `CombatEvent`）；store 删 `activeCombat`/`applyCombatEvent`/
+  `submitCombatCommand`/`combatSummaryReview` 等 v3 残留。
+- **结算「继续」**：点继续 = 落定结算并把「接下来做什么」输入当下一回合玩家输入续写正文
+  （store `combatContinue` → GamePage watch → `pipeline.run`，与输入框同一条缝）。
+- **重开 / 续战**：重开走现有 `preSnapshotId`/`restart`（结算态重开先 `resolve(null)` 放行 pipeline）；
+  刷新续战照 `resumeCombatSandbox`。
+- 验证：typecheck / vue / tools / build / format / lint / knip / test 8 道闸门全绿；
+  `knip-baseline` 154 → 151 条；`test:run` 354 文件 / 8692（8684 通过 / 8 跳过）。
+
+### 2026-10-02 战斗去代码化收尾：砍 v3 内核 + 删结构化效果字段（Phase 2 / C5a-C5b）｜已实施，真机待验证
+
+把 v3 战斗内核与「结构化效果」残留整体清出仓库，战斗模块只剩协议沙盒 + 纯计算库 + UI 桥。
+
+- **C5a 砍 v3 内核**：删 `combat/` 的 `kernel/reducer/state/dice-tape/windows/intents/rule-keys/
+adjudication/agent-permissions/agent-visibility/projection-ui/projection-agent/coordinator/client/
+participant/player-input/summon-pool/types.ts` 与 `automata/`（6 文件）及其全部战斗测试；
+  `combat/index.ts` 收窄为只 re-export `ui-contract` 的三个 UI 类型。保留 `combat-damage.ts`/
+  `combat-turn.ts`（sandbox 工具在用）与 `sandbox/**`。
+- **C5b 删结构化效果字段**：`Skill`/`InventoryItem`/`StatusEffect`/`CombatParticipant` 与
+  AI 输出镜像（`CharGenOutput`/`ItemGenOutput`）的 `modifiers`/`buffs`/`divinity`/`automata` 全删；
+  `state-manager` 的 add_item/add_skill 落库透传同步去掉。
+- **文件删除**：`combat/types.ts`、`combat/describe-modifier.ts`、`combat/describe-automaton.ts`、
+  `combat/combat-intention.ts`、`combat/morale-system.ts`（后二者零引用）。`CombatCommand` 及
+  UI 桥最小类型搬到 `combat/ui-contract.ts`（`CombatPhase`/`TerminalReason` 内联）。
+- **craft-request**：`collectCraftBonuses` 的「生产检定 modifier」采集随实体字段删除而移除
+  （entity_gen 已不产 modifier，路径穷尽；`CraftActionRequest.toolBonus/skillBonus` 回落 resolver 缺省 0）。
+- **UI 同步**：`item-view.ts` 删 `entryCombatLines`/`entryRawCombatJson`；`ItemDetailBody.vue` 删
+  「战斗修正」区块与「查看原始数据」折叠；`ItemsPanel.vue`/`CharacterListPanel.vue` 的重铸目标透传
+  去掉 modifiers/buffs/divinity/automata；`stat-projection` 与前端注释同步。
+- **未决点**：`effects/effect-types.ts`（Modifier 6 大类 + `resolveDivinityConflict`）在 C5b 后
+  已无生产引用（仅其单测引用），按任务「craft 仍用则保留」的口径保留在库中待裁量。
+- 验证：typecheck / vue / tools / build / format / lint / knip / test 8 道闸门全绿；
+  `knip-baseline` 242 → 154 条；`test:run` 359 文件 / 8722（8714 通过 / 8 跳过），C5b 删 11 个
+  失效用例（modifier/automaton 透传与战斗修正渲染）。
+
+### 2026-10-02 game-pipeline 切沙盒后端 + 投影兼容 + 写回/持久化接线（Phase 2 / C1-C4）｜已实施，真机待验证
+
+把 game-pipeline 的战斗路径从 v3 内核切到 `combat/sandbox`（**v3 文件一个未删**），并接通
+终局写回、EXP 账务、刷新续战与前端兼容投影。
+
+- **C1 prompt**：`combat.systemPrompt`（公开占位 + 私有内容仓两份）换成单一 DM 沙盒主持**流程骨架**
+  （战前资源推演 → 循环回合/行动/站位/状态/战意 → 终局 `combat_set_meta`），细则交给注入的协议正文；
+  `template` 保留原有占位符。沙盒 runner 新增 `systemPrompt` 入参 —— 该流程由 game-pipeline 从
+  `chainData.agentConfigs` 的 combat 条目取。
+- **C2 切换 + 投影**：`game-pipeline.startCombatSession` 改走 `createCombatState` + `runCombatSandbox`
+  单一 DM 会话（我方单位轮次 `combat_yield_to_player` 停下等玩家，`submitCombatIntent` 回注续战）。
+  新增 `combat/sandbox/projection.ts`：`CombatState → 现有 CombatEvent`（combat_started / initiative /
+  round_started / units_snapshot / narrative / awaiting_player_input），让现有 `CombatPanel` /
+  `game-store` 继续可用（C6 换新前端）。`pendingOptions` 投影成叙事选项行喂给现有输入 UI。
+- **C3 终局写回**：终局 `buildCombatSettlementPatches`（hp/mp/sp + 状态差量）+ `computeCombatExpRewards`
+  （被击杀敌方 `level × 经验系数` 平分给存活存档单位，镜像 v3 `buildExpRewardPatches`）合并**一次**
+  `commitDomainCommand`（ADR-21）；`combat_ended`/`settlement` 事件顺序避开 `isInCombat` 闪断；
+  结算结果回填 `_recentCombat`（`{{RECENT_COMBAT}}`）。
+- **C4 持久化**：每 exchange 与终局把 `CombatState` + transcript 落 Dexie v27 `combatSandboxes`
+  （`withSaveWriteLock`）；`GamePage` 挂载时 `resumeCombatSandbox()` 读回未终局战斗并恢复面板、跳过开场 Prompt。
+- **工具面**：沙盒新增 `get_character` / `get_inventory` 只读查询（绑存档角色），凑齐 C1 流程里点名的工具；
+  `AGENT_TOOL_MAP['combat']` 仍是 v3 内核静态面（未动），提示词契约闸门改以
+  `COMBAT_SANDBOX_TOOL_DEFINITIONS` 为 combat 的真源、并认「# 全程工具」小节。
+- **边界**：v3 内核（kernel/reducer/coordinator/automata）与其单测未删；`combat_enemy` agent 配置保留；
+  前端组件未大改（靠投影兼容）。未决点：FP 结算无来源（`fpDelta` 恒 0）、刷新续战不携带 pre-combat
+  快照（restart 在刷新后不可用）、真实 LLM 主持待真机。
+- 验证：8 道闸门（typecheck/vue/tools/build/format/lint/knip/test）全绿；408 文件 / 9349 通过 / 8 跳过。
+
+### 2026-10-02 战斗沙盒后端核心（Phase 2 第一步）｜已实施，真机待验证
+
+战斗重写 Phase 2 的**新增协议驱动沙盒后端**（本步只做加法，v3 内核原样不动）。新增
+`src/core/combat/sandbox/`：AI 读 v1.4.2 战斗协议自算结算，Code 持权威 `CombatState` 并提供
+骰子/计算工具与终局白名单写回。
+
+- **状态层**（`types.ts`/`state.ts`）：`CombatState = { meta, units }`，单位按**名字**索引
+  （铁律1）；`createCombatState` 从存档角色建 `origin:'save'` 单位、按 tier-constants 补齐
+  max 资源；`applyOps` 等为纯函数，负数/超上限**只 warn 照写不抛**。
+- **终局写回**（`settlement.ts`）：`buildCombatSettlementPatches` 只写 `origin:'save'` 单位的
+  `set_hp/set_mp/set_sp` + 状态差量；`temp` 单位与战斗专用字段丢弃；EXP/FP 留 `extras` 参数位。
+- **协议装载**（`protocol.ts`）：`loadCombatProtocolText` 从世界书 `combat_extra` **点名取协议条目
+  正文**，不看 `enabled`、不走 EJS 激活（ST 的 `$('#chat .mes')` 判断本引擎跑不了）。
+- **工具面**（`tools.ts`）：13 个工具——`combat_add/update/remove_unit`、`combat_add/remove_status`、
+  `combat_set_meta`、`combat_yield_to_player`、`roll_d20/d100/dice`（Code 真掷）、`calc`（安全算术，
+  不 eval）、`calc_damage`（包 8 步管线）、`calc_initiative`（包先攻公式）。
+  `ToolExecutionContext` 加可选 `combatState?`（旧工具零影响）。
+- **编排**（`runner.ts`）：`runCombatSandbox` 单 exchange（系统提示 = 协议 + **一条连贯战斗流程** +
+  参战表单 + 当前状态；玩家输入 user 回注续战）；终局判据 = `meta.phase==='ended'`，此时才产写回补丁。
+- **持久化**：Dexie **v27 `combatSandboxes`**（每存档一行，存 CombatState + transcript）；
+  rebuildable 缓存，不进 FullBackup / 单存档导出，删档级联删。DB_VERSION 26 → 27。
+- **边界**：v3 内核（kernel/reducer/coordinator/automata/game-pipeline 战斗路径）与
+  `combat-damage/combat-intention/combat-turn/morale-system` 一个字节未动。
+- 验证：8 道闸门全绿；新增 `tests/core/combat/sandbox/` 6 文件 / 61 用例；`npm run test:run`
+  407 文件 / 9335 通过 / 8 跳过。未决点：终局触发（phase='ended'）、协议来源（世界书 `combat_extra`）
+  与前端渲染接线留待后续步骤。
+
+### 2026-10-02 entity_gen 合并 + 实体两层化（Phase 1d）｜已实施，真机待验证
+
+战斗去代码化第二步。把 `char_gen`（角色）+ `item_gen`（技能/装备/道具）**硬改名**合并为通用
+`entity_gen`，实体产出改为**纯协议文本**（不再产 `modifiers/buffs/automata/divinity/scripts`）。
+
+- **请求契约**：`<char_gen_request>` + `<item_gen_request>` 合并为单标签
+  `<entity_gen_request type="character|skill|equipment|item|status|ascension">`；`MARKER_SPECS`
+  只动一张表，编排器单回调 `onEntityGenRequest`（含角色即记 pendingCharGen，战斗分支语义不变）。
+- **输出契约**：统一根 `<entity_result>`，按需分块 `<character>` / `<skills>` / `<equipment>` /
+  `<inventory>` / `<statuses>` / `<ascension>`；解析器（新 `entity-gen-parse.ts`，从 char-gen-agent 抽出）
+  填充两层字段 `protocolText`（条目原样内文）+ `tags`（`<tag>` 与 `[...]`），**忽略并剥离**
+  `<modifiers>/<buff>/<automaton>/<script>/<divinity>`。
+- **编排**：新 `entity-gen-agent.ts` 以 `entityType` 分派；角色单 `add_character`、物品/技能复数
+  `add_skill`/`add_item`、状态 `add_status_effect`、登神 `update_character.value.ascension`；
+  重铸路径与战斗召唤入口（`runEntityGenForCombat`）保留。`craft_gen` 制作产物链改调 entity_gen。
+- **清理**：删 `char-gen-agent.ts` / `item-gen-chain.ts` 与全部旧 agentId 注册（orchestrator knownAgents /
+  game-pipeline 回调与名单 / placeholder-registry 默认模板与占位符 / agent-list / agent-activity /
+  placeholder-catalog / 指纹表）；`AGENT_TOOL_MAP` 删 char_gen/item_gen、加 entity_gen（工具并集）。
+- **提示词**：占位 `public/data/defaults/agent-config.json` 删 char_gen/item_gen、新增 entity_gen
+  （systemPrompt + template，worldBookEnabled=true，注入生成规则世界书 `combat_extra`）；
+  `request_dispatcher` 占位提示词同步为 `<entity_gen_request type="...">`。占位 agent 数 14 → 13。
+- **临时窗口**（预期代价）：战斗 v3 失去结构化效果来源（技能/装备不再产 modifiers/buffs/automata），
+  在 Phase 2 战斗重写落地前短暂无效 —— 实验分支可接受，不发版。
+- 验证：`typecheck` / `typecheck:vue` / `typecheck:tools` / `lint` / `knip:ratchet` / `build` 全绿；
+  `npm run test:run` 401 文件 / 9274 通过 / 8 跳过。`placeholder-hashes.json` 与 agent-config 编码门通过。
+  🔴 `agent-defaults-fingerprints.json` 已删 char_gen/item_gen 两行；entity_gen 指纹待私有内容仓更新后由
+  `tools/build-agent-fingerprints.mjs` 重新生成（当前私有内容侧尚无 entity_gen）。
+
+### 2026-10-02 战斗去代码化前置：v1.4.2 额外世界书 + 退役战斗外 JS 脚本（Phase A / 1b / 1c）｜已实施
+
+战斗重写的两条前置线：内容侧新增 v1.4.2「战斗/数值相关额外世界书」，代码侧删掉**战斗外 JS
+脚本执行链**与实体 `scripts` 字段。C1-C6 与 1d（entity_gen）另有条目，本条只补缺失的 A/1b/1c。
+
+- **Phase A 内容线（私有内容仓）**：新增第 16 本世界书 `combat_extra`「战斗/数值相关额外世界书」，
+  收录 v1.4.2 的 8 条 entry（战斗生产规则 / 状态规则 / 核心数值表 / 技能装备道具生成规则 /
+  品质效果限定 / 战斗协议 / 战斗协议概览 / 战前资源推演）。三条战斗条目原有的 ST 专属
+  `$('#chat .mes')` jQuery + EJS 激活壳已剥离，改由 Code 在战斗/生成会话内按需注入协议正文
+  （本引擎跑不了 ST 的 DOM 判断）。**不替换**旧 `extra_setting` 条目：旧 uid 435/438/444/447
+  原样保留、保持关闭，防回档风险。
+- **Phase 1b 砍战斗外 JS 脚本**：删除 `src/core/scripting/*`（`script-executor` /
+  `script-quickjs-backend` / `script-registry` / `script-backend`）与效果接线模块
+  （`effects/effect-wiring` / `subscription-manager` / `status-api` / `effect-runtime` /
+  `game-event`）及其全部测试；`state-manager` 中随脚本退役而空掉的状态按需结算接线同步移除。
+- **Phase 1c 清实体 `scripts` 字段**：实体（`Skill` / `InventoryItem` / `StatusEffect`）与其
+  解析、`onApply` / `onTick` / `onRemove` / `onTrigger` 生命周期钩子、`get_script_reference`
+  工具一并退役；实体改为两层文本形态（`protocolText` + `tags`，由 1d 的 entity_gen 统一产出）。
+- **影响面**：世界书 EJS 求值（ADR-30）与工坊正则**不受影响**——与 `$` API 是两条独立契约；
+  战斗内效果此前已不走脚本。「让世界书自由文本效果代码化」的妥协桥梁（ADR-28 的 script 一半）
+  自此成为历史。
+- 验证：`typecheck` / `typecheck:vue` / `typecheck:tools` / `build` / `format:check` / `lint` /
+  `knip:ratchet` / `test:run` 8 道闸门全绿。`agent-config.json` 与 `placeholder-hashes.json`
+  编码门通过。
+
 ### 2026-09-30 API 池默认采样参数 + 自定义请求头（参数跟随模型）｜已实施，真机待验证
 
 起因（两条真机/群反馈）：①「LLM 参数能不能跟随模型走？否则每次换模型都要把每个 Agent 手动重设一遍」；

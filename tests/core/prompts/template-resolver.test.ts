@@ -312,7 +312,7 @@ describe('resolveTemplate — basic resolution', () => {
     const resolver = vi.fn().mockReturnValue('ok');
     registerPlaceholder('TEST', resolver);
 
-    resolveTemplate('{{TEST}}', 'char_gen', makeCtx(), makeConfig({ agentId: 'char_gen' }));
+    resolveTemplate('{{TEST}}', 'entity_gen', makeCtx(), makeConfig({ agentId: 'entity_gen' }));
     expect(resolver).toHaveBeenCalledTimes(1);
   });
 

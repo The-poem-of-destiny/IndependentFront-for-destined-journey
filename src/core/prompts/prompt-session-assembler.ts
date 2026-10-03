@@ -147,7 +147,7 @@ export interface PreparePromptSessionInput {
   worldBooks?: WorldBook[];
   /** 预设（story 用，参与签名与首轮渲染）。 */
   presets?: AgentPreset[];
-  /** 链参数（CRAFT_REQUEST / CHAR_DETECT / ITEM_REQUEST 等），进 turn_context。 */
+  /** 链参数（CRAFT_REQUEST / ENTITY_REQUEST 等），进 turn_context。 */
   localParams?: Record<string, string>;
   /** 该 Agent 实际使用的 endpoint id（签名材料，静态）。 */
   endpointId?: string;
@@ -416,7 +416,7 @@ const APPEND_CURSOR_PLACEHOLDERS: ReadonlySet<string> = new Set(['NARRATIVE']);
  * `AGENT.*` 用正则前缀匹配；其余是精确名单。
  */
 const EPHEMERAL_PLACEHOLDER_RE =
-  /^(?:USER_INPUT|RANDOM_EVENTS|RECENT_COMBAT|AGENT\.[A-Z_]+|CHAR_GEN_RESULT|CRAFT_RESULT|CRAFT_REQUEST|CHAR_DETECT|ITEM_REQUEST|IMAGE_REQUEST|COMBAT_BRIEF|COMBAT_ROSTER|PLOT_THREAD_TURN|PLOT_THREAD_SURFACE|PLOT_CAST_PLAN)$/;
+  /^(?:USER_INPUT|RANDOM_EVENTS|RECENT_COMBAT|AGENT\.[A-Z_]+|ENTITY_REQUEST|CRAFT_RESULT|CRAFT_REQUEST|CHAR_DETECT|IMAGE_REQUEST|COMBAT_BRIEF|COMBAT_ROSTER|PLOT_THREAD_TURN|PLOT_THREAD_SURFACE|PLOT_CAST_PLAN)$/;
 
 /** 占位符分类（未注册的 → 'unknown'，按现有规则原样保留在 baseline）。 */
 function classifyPlaceholder(name: string): PlaceholderCategory {

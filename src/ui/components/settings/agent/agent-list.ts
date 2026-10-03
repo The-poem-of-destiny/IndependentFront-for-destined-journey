@@ -1,5 +1,5 @@
 /**
- * 12 个 Agent 的清单（Q-25 第 9 步）。
+ * 11 个 Agent 的清单（Q-25 第 9 步）。
  *
  * 为什么单独一个文件：它有**两个**消费者，且分居两侧 ——
  *   · 设置页壳层的 Agent 子导航（`.sub-nav`，它是三栏布局里 `.settings-content` 的
@@ -51,12 +51,6 @@ export const AGENT_LIST: readonly AgentListEntry[] = [
     stage: 1,
   },
   {
-    id: 'combat_enemy',
-    name: '敌方决策',
-    desc: '只为当前获准的敌方单位选择行动，不接触玩家私密战斗数据',
-    stage: 1,
-  },
-  {
     id: 'request_dispatcher',
     name: '请求调度',
     desc: '分析正文，判断新-vs-已有角色/物品/制作，输出 XML 标签调度下游 Agent',
@@ -65,11 +59,15 @@ export const AGENT_LIST: readonly AgentListEntry[] = [
   {
     id: 'vars_update',
     name: '变量更新',
-    desc: '根据调度器标签更新角色状态、物品状态、环境效果，必要时编写状态效果脚本',
+    desc: '根据调度器标签更新角色状态、物品状态、环境效果',
     stage: 3,
   },
-  { id: 'char_gen', name: '角色生成', desc: '生成新 NPC 的五维属性、背景和登神长阶', stage: 3 },
-  { id: 'item_gen', name: '物品生成', desc: '为 NPC 生成装备、技能和道具', stage: 3 },
+  {
+    id: 'entity_gen',
+    name: '实体生成',
+    desc: '生成新角色/技能/装备/道具/状态/登神（原 char_gen + item_gen 合并）',
+    stage: 3,
+  },
   { id: 'memory_summary', name: '记忆总结', desc: '生成本轮记忆摘要并计算 Embedding', stage: 4 },
   { id: 'plot_post_check', name: '剧情修正', desc: '正文后检查世界线变动，修正剧情大纲', stage: 5 },
   { id: 'plot_outline', name: '大纲生成', desc: '主线/支线模式下生成剧情大纲和事件树', stage: 5 },

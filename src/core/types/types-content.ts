@@ -101,7 +101,7 @@ export interface EngineVersionGate {
 
 // ── 各分节：absent = 本包对该域无话可说（别动）；[] = 刻意清空；rows = 替换 ──
 
-/** 世界书分节（§4：WorldBook[]，15 本，builtIn:true，真实分区名，真实 uid 空间） */
+/** 世界书分节（§4：WorldBook[]，16 本，builtIn:true，真实分区名，真实 uid 空间） */
 export type PackWorldBooksSection = readonly WorldBook[];
 
 /**

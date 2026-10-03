@@ -268,9 +268,11 @@ describe('占位内容 · 美化规则', () => {
 });
 
 describe('占位内容 · agent-config', () => {
-  // §6 规格：占位版固定 14 个 agent id（2026-09-14 实测；与真实内容侧同名集由私有仓 CI 守）
-  it('agent id 恰好 14 个，一个不多一个不少', () => {
-    expect(Object.keys(agentConfigRaw.agents)).toHaveLength(14);
+  // §6 规格：占位版固定 12 个 agent id（2026-10-02：char_gen + item_gen 合并为 entity_gen，14 → 13；
+  // C5a 移除 combat_enemy，13 → 12；与真实内容侧同名集由私有仓 CI 守）
+  it('agent id 恰好 12 个，一个不多一个不少', () => {
+    expect(Object.keys(agentConfigRaw.agents)).toHaveLength(12);
+    expect(Object.keys(agentConfigRaw.agents)).toContain('entity_gen');
   });
 
   it('每个 agent 的 systemPrompt 与 template 都非空（image_prompt 除外 —— 它的那份归方言）', () => {
@@ -320,20 +322,28 @@ describe('占位内容 · agent-config', () => {
   it('引擎协议在占位版里保真：各 agent 的关键输出标签一个不少', () => {
     const CONTRACT: Record<string, string[]> = {
       craft_gen: ['<craft_result>', '<item_requests>', '<narrative>', '<craft_params>', '<affix>'],
-      char_gen: [
-        '<char_result>',
+      // 🔴 2026-10-02 硬改名：char_gen + item_gen 合并为 entity_gen（统一 <entity_result>）。
+      entity_gen: [
+        '<entity_result>',
+        '<character>',
         '<attributes',
-        '<skill_requests>',
-        '<equipment_requests>',
-        '<item_requests>',
+        '<skills>',
+        '<skill name=',
+        '<equipment>',
+        '<equip slot=',
+        '<inventory>',
+        '<item name=',
+        '<statuses>',
+        '<status name=',
         '<ascension',
+        '<effect name=',
+        '<tag>',
       ],
-      item_gen: ['<item_result>', '<skills>', '<equipment>', '<inventory>', '<modifiers>'],
       vars_update: ['<json>', '<status_effects>', '"consume"', '"upsert"', '"affections"'],
       request_dispatcher: [
-        '<char_gen_request',
+        '<entity_gen_request type="character"',
         '<char_update_request',
-        '<item_gen_request',
+        '<entity_gen_request type="equipment"',
         '<item_update_request',
         '<craft_gen_request',
         '<combat_trigger',
@@ -345,8 +355,15 @@ describe('占位内容 · agent-config', () => {
       memory_recall: ['"memories"', '"relevance"'],
       // 🔴 image_prompt 不在这张表里：它的提示词住在方言 JSON（C5），三个输出标签由
       //    上面 imageDialects 那条用例逐条钉（两条方言各钉一遍 —— 换方言不换协议）
-      combat: ['declare_attack', 'declare_action', 'pass_slot', '直接用 assistant 正文写'],
-      combat_enemy: ['declare_attack', 'declare_action', 'pass_slot', '不写玩家可见叙事'],
+      // 🔴 2026-10-02 战斗重写（Phase 2 / C1）：combat 改单一沙盒 DM 主持，契约片段
+      //    换成新流程骨架的关键节点。
+      combat: [
+        '<战斗协议>',
+        '# 战斗流程',
+        'combat_set_meta',
+        'combat_yield_to_player',
+        '{战斗结算}',
+      ],
     };
     for (const [id, tokens] of Object.entries(CONTRACT)) {
       const prompt = agentConfigRaw.agents[id].systemPrompt as string;

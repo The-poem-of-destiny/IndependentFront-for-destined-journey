@@ -25,6 +25,7 @@ const BUILTIN_IDS = [
   'extra_setting',
   'cot',
   'dlc',
+  'combat_extra',
 ];
 
 /** 运行时从 /data/worldbooks/ 加载所有内置世界书 */

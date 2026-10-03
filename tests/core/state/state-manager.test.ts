@@ -5,11 +5,7 @@
  *       快照打/恢复 (M5 §11.2), 事件管理, 批量提交, 部分成功
  */
 
-import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
-import {
-  installProductionScriptBackend,
-  resetScriptBackend,
-} from '../../../src/core/scripting/script-backend';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type {
   CharacterState,
   SaveSlot,
@@ -20,17 +16,6 @@ import type {
 } from '../../../src/core/types/types';
 import { createDefaultCharacterState } from '../../../src/core/types/types';
 import { createDefaultTime } from '../../../src/core/time/time-system';
-
-// 本文件有两组用例真的会执行效果脚本（`onRemove` 到期链、Q-07 效果反应轮）。
-// 脚本自 SEC-02 收口起跑在 QuickJS 隔离里，没装隔离就是 fail-closed（一行不跑）——
-// 那两条断言会从「补丁落地了」退化成「什么都没发生」。装不上就当场炸，别静默变绿。
-beforeAll(async () => {
-  expect(await installProductionScriptBackend()).toBe(true);
-});
-
-afterAll(() => {
-  resetScriptBackend();
-});
 
 // Hoisted mock — replaces ./database for all consumers
 vi.mock('../../../src/core/persistence/database', () => ({
@@ -107,11 +92,6 @@ vi.mock('../../../src/core/state/save-profile', () => ({
 
 import { StateManager, createStateManager } from '../../../src/core/state/state-manager';
 import { setEngineSettingsProvider } from '../../../src/core/runtime/engine-settings';
-import {
-  wireEffectSystem,
-  clearAllEffectWirings,
-  peekEffectWiring,
-} from '../../../src/core/effects/effect-wiring';
 import * as db from '../../../src/core/persistence/database';
 import * as saveProfile from '../../../src/core/state/save-profile';
 
@@ -1193,48 +1173,9 @@ describe('StateManager', () => {
   });
 
   // ===================================================================
-  // 7.5 Q-02: applyTimeAdvance 到期效果 patches 自提交 + onRemove 脚本落地
+  // 7.5 Q-02: applyTimeAdvance 到期效果 patches 自提交
   // ===================================================================
   describe('Q-02 applyTimeAdvance — 到期效果 patches 落地（不再被调用点丢弃）', () => {
-    it('带 onRemove 的效果到期后，owner 的 hp 真的变了（$resource.modifyHp 落库）', async () => {
-      // 角色：中毒减益「剧毒」，到期触发 onRemove → $resource.modifyHp('hero', -30) 回掉 30 HP
-      const char = buildMockCharacter({
-        id: 'char-hero',
-        name: 'Hero',
-        type: 'player',
-        hp: 80,
-        maxHp: 100,
-        statusEffects: [
-          {
-            name: '剧毒',
-            description: '烈性毒素',
-            stacks: 1,
-            remainingTime: 1,
-            timeUnit: '小时' as const,
-            category: '减益' as const,
-            source: '毒蛇',
-            effects: {},
-            scripts: {
-              remove: `$resource.modifyHp('Hero', -30);`,
-            },
-            onRemove: 'remove',
-          },
-        ],
-      });
-      vi.mocked(db.getCharacters).mockResolvedValue([char]);
-
-      const sm = new StateManager({ saveId: 'save-001' });
-      // 推进 60 分钟 → 剧毒 remainingTime 1小时 → 扣到 0 → 到期执行 onRemove
-      const patches = await sm.applyTimeAdvance(60);
-
-      // 关键断言：onRemove 脚本的 modifyHp 已落地（旧代码把 patches 丢在调用点）
-      expect(char.hp).toBe(50); // 80 - 30
-      // 效果已从角色身上移除
-      expect(char.statusEffects.find((e) => e.name === '剧毒')).toBeUndefined();
-      // 返回值带 remove_status_effect patch
-      expect(patches.some((p) => p.op === 'remove_status_effect')).toBe(true);
-    });
-
     it('applyTimeAdvance 自提交 — 到期的 remove_status_effect 会经过 commitChatState（events 可见）', async () => {
       const char = buildMockCharacter({
         id: 'char-hero2',
@@ -1806,101 +1747,6 @@ describe('StateManager', () => {
       expect(result.eventsGenerated[0].type).toBe('item_use');
     });
 
-    // 🆕 S1（2026-08-01 词条效果链路）：add_item 补收 modifiers/buffs/divinity 落库保留
-    it('add_item 带 modifiers/buffs/divinity → 落库保留（词条效果链路）', async () => {
-      const char = buildMockCharacter({
-        id: 'uuid-1',
-        name: '理查德',
-        type: 'player',
-        saveId: 's1',
-        inventory: [],
-      });
-      await db.saveCharacter(char);
-
-      const sm = new StateManager({ saveId: 's1' });
-      const result = await sm.commitChatState([
-        {
-          op: 'add_item',
-          target: 'characters.理查德',
-          value: {
-            name: '锻火铁锤',
-            description: '锤身残留锻火余温',
-            modifiers: [
-              { category: '检定', source: '锻火铁锤', checkType: '生产', bonus: 5 },
-              { category: '固伤', source: '锻火铁锤', amount: 8 },
-            ],
-            buffs: [
-              {
-                name: '灼热',
-                description: '锤击灼伤',
-                category: '减益',
-                stacks: 1,
-                remainingTime: 3,
-                timeUnit: '回合',
-                source: '[减益]-[自己]',
-                effects: { defense: -0.1 },
-              },
-            ],
-            divinity: 2,
-          },
-        },
-      ]);
-
-      expect(result.success).toBe(true);
-      expect(result.errors).toHaveLength(0);
-      expect(char.inventory).toHaveLength(1);
-      const item = char.inventory[0];
-      expect(item.modifiers).toHaveLength(2);
-      expect(item.modifiers![0]).toMatchObject({ category: '检定', checkType: '生产', bonus: 5 });
-      expect(item.buffs).toHaveLength(1);
-      expect(item.buffs![0].name).toBe('灼热');
-      expect(item.divinity).toBe(2);
-    });
-
-    // 🆕 S3（2026-08-01 战斗 v3）：add_item 带 automata → 落库保留（AI 产自由效果 DSL）
-    it('add_item 带 automata → 落库保留（S3 DSL 自由效果链路）', async () => {
-      const char = buildMockCharacter({
-        id: 'uuid-1',
-        name: '理查德',
-        type: 'player',
-        saveId: 's1',
-        inventory: [],
-      });
-      await db.saveCharacter(char);
-
-      const sm = new StateManager({ saveId: 's1' });
-      const result = await sm.commitChatState([
-        {
-          op: 'add_item',
-          target: 'characters.理查德',
-          value: {
-            name: '嗜血之刃',
-            description: '剑身残留嗜血意志',
-            automata: [
-              {
-                id: '嗜血之刃.噬血',
-                name: '噬血',
-                source: '嗜血之刃',
-                owner: '<unitId>',
-                subscribe: 'damage.after',
-                trigger: 'ctx.damage.final > 0',
-                priority: 0,
-                divinity: 0,
-                intents: [{ kind: 'Heal', targetId: '<owner>', amount: 'ctx.damage.final * 0.1' }],
-              },
-            ],
-          },
-        },
-      ]);
-
-      expect(result.success).toBe(true);
-      expect(result.errors).toHaveLength(0);
-      expect(char.inventory).toHaveLength(1);
-      const item = char.inventory[0];
-      expect(item.automata).toHaveLength(1);
-      expect(item.automata![0]).toMatchObject({ subscribe: 'damage.after' });
-    });
-
     it('add_item 缺 name → 进 errors[]', async () => {
       const char = buildMockCharacter({
         id: 'uuid-1',
@@ -2470,7 +2316,7 @@ describe('StateManager', () => {
   // 9. equipment — M2 equippedSlot 单真源 (#10 #23 #24, 规范 §3)
   // ===================================================================
   describe('commitChatState — equip / unequip (equippedSlot 单真源)', () => {
-    it('equip: 设 inventory 物品的 equippedSlot，effects/scripts/rarity 原地未动（零搬运）', async () => {
+    it('equip: 设 inventory 物品的 equippedSlot，effects/rarity 原地未动（零搬运）', async () => {
       const char = buildMockCharacter({
         id: 'uuid-1',
         name: '理查德',
@@ -2483,7 +2329,6 @@ describe('StateManager', () => {
             type: '装备',
             rarity: '优良',
             effects: { 锋利: '攻击时附加 1 点伤害' },
-            scripts: { onHit: 'return 1;' },
           },
         ],
       });
@@ -2499,7 +2344,6 @@ describe('StateManager', () => {
       expect(char.inventory[0].equippedSlot).toBe('武器'); // 穿=状态位
       expect(char.inventory[0].rarity).toBe('优良'); // 字段原地未动
       expect(char.inventory[0].effects).toEqual({ 锋利: '攻击时附加 1 点伤害' });
-      expect(char.inventory[0].scripts).toEqual({ onHit: 'return 1;' });
       expect(result.eventsGenerated[0].type).toBe('item_use');
     });
 
@@ -2728,57 +2572,6 @@ describe('StateManager', () => {
       expect(char.skills[0].name).toBe('斩击');
       expect(char.skills[0].id).toBeUndefined(); // 不为新技能写 id（铁律1）
       expect(result.eventsGenerated[0].type).toBe('skill_use');
-    });
-
-    it('🔴 回归: add_skill 透传 modifiers/automata（item_gen 合法产出的战斗声明不丢）', async () => {
-      const char = buildMockCharacter({
-        id: 'uuid-1',
-        name: '奥利雅思',
-        type: 'player',
-        saveId: 's1',
-        skills: [],
-      });
-      await db.saveCharacter(char);
-
-      const sm = new StateManager({ saveId: 's1' });
-      const result = await sm.commitChatState([
-        {
-          op: 'add_skill',
-          target: 'characters.奥利雅思',
-          value: {
-            name: '高等材料学',
-            description: '材料学知识',
-            type: 'passive',
-            effects: { 材料辨识: '进行[生产制作]时DC-4' },
-            // item_gen rawResponse 合法产出（fated-poem-debug-e91825e1）
-            modifiers: [
-              {
-                category: '检定',
-                source: '高等材料学',
-                checkType: '生产',
-                bonus: 4,
-                divinity: 0,
-              } as any,
-            ],
-            automata: [
-              {
-                id: 'a1',
-                trigger: { window: 'on_attack' },
-                effect: { intent: 'damage', value: 5 },
-              },
-            ],
-          },
-        },
-      ]);
-
-      expect(result.success).toBe(true);
-      expect(char.skills).toHaveLength(1);
-      const skill = char.skills[0] as any;
-      // 2026-08-02 断点: 此前只收 8 字段，modifiers 落库即丢 → 生产检定加值不生效
-      expect(skill.modifiers).toHaveLength(1);
-      expect(skill.modifiers[0].checkType).toBe('生产');
-      expect(skill.modifiers[0].bonus).toBe(4);
-      expect(skill.automata).toHaveLength(1);
     });
 
     it('🔴 回归 (2026-08-12): add_skill 透传 skillPower/relevantAttribute/damageType（0694453 漏收 → 开局技能战斗兜底 0）', async () => {
@@ -4393,85 +4186,6 @@ describe('StateManager', () => {
       const sm = createStateManager('save-001');
       expect(sm).toBeInstanceOf(StateManager);
       expect((sm as any).saveId).toBe('save-001');
-    });
-  });
-
-  // ===================================================================
-  // 23. Q-07 —— commit 产生的事件真的会触发已装备物品的 $event.on 订阅
-  // ===================================================================
-  describe('commitChatState — 效果反应轮（Q-07）', () => {
-    beforeEach(() => {
-      clearAllEffectWirings();
-    });
-
-    it('订阅脚本的 modifyHp 会作为第二轮补丁真正落到角色身上', async () => {
-      // 主角戴一件「有人上状态就回血」的护符
-      const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
-      char.inventory = [
-        {
-          name: '共感护符',
-          quantity: 1,
-          equippedSlot: '饰品',
-          scripts: {
-            init: `$event.on('status_effect', 'onStatus');`,
-            onStatus: `$resource.modifyHp('Test Hero', 12);`,
-          },
-        },
-      ];
-      vi.mocked(db.getCharacters).mockResolvedValue([char]);
-      wireEffectSystem('save-001', [char]);
-
-      const sm = new StateManager({ saveId: 'save-001' });
-      await sm.commitChatState([
-        {
-          op: 'add_status_effect',
-          target: 'characters.Test Hero',
-          value: { name: '专注', category: '增益', stacks: 1 },
-        },
-      ]);
-
-      // 加状态本身不改 hp；50 → 62 只可能来自订阅脚本那一轮
-      expect(char.hp).toBe(62);
-    });
-
-    it('没接线的存档不受影响（也不会凭空建出 EventBus）', async () => {
-      const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
-      vi.mocked(db.getCharacters).mockResolvedValue([char]);
-
-      const sm = new StateManager({ saveId: 'save-unwired' });
-      const result = await sm.commitChatState([
-        { op: 'set_hp', target: 'characters.Test Hero', value: 55 },
-      ]);
-
-      expect(result.success).toBe(true);
-      expect(char.hp).toBe(55);
-      expect(peekEffectWiring('save-unwired')).toBeUndefined();
-    });
-
-    it('互相触发的两条脚本被深度上限拦住，不会打成事件风暴', async () => {
-      // 两件装备互喂：A 收到 status_effect 就 modifyHp，modifyHp 又产生新事件……
-      const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 9999 });
-      char.inventory = [
-        {
-          name: '永动机甲',
-          quantity: 1,
-          equippedSlot: '身体',
-          scripts: {
-            // delta_hp 自己也产生 character_action 事件 → 又触发本脚本 → 无限自喂
-            init: `$event.on('character_action', 'loop');`,
-            loop: `$resource.modifyHp('Test Hero', 1);`,
-          },
-        },
-      ];
-      vi.mocked(db.getCharacters).mockResolvedValue([char]);
-      wireEffectSystem('save-001', [char]);
-
-      const sm = new StateManager({ saveId: 'save-001' });
-      await sm.commitChatState([{ op: 'delta_hp', target: 'characters.Test Hero', amount: 1 }]);
-
-      // 首轮 +1，之后最多 3 轮反应各 +1 —— 关键是它会停下来
-      expect(char.hp).toBeGreaterThan(50);
-      expect(char.hp).toBeLessThanOrEqual(55);
     });
   });
 

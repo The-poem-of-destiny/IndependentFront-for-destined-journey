@@ -129,17 +129,8 @@ export const VISIBILITY_MATRIX: Record<string, ZoneVisibilityMatrix> = {
     outline: 'NONE',
     variable: 'KEYS',
   },
-  char_gen: {
-    memory: 'NONE',
-    npc: 'KEYS',
-    world: 'FULL',
-    quest: 'NONE',
-    craft: 'NONE',
-    combat: 'NONE',
-    outline: 'NONE',
-    variable: 'SUMMARY',
-  },
-  item_gen: {
+  // 🔴 2026-10-02 硬改名：char_gen + item_gen 合并为 entity_gen（角色/技能/装备/道具/状态/登神）。
+  entity_gen: {
     memory: 'NONE',
     npc: 'KEYS',
     world: 'FULL',
@@ -215,7 +206,7 @@ export function buildZoneContext(ctx: AgentContext): Record<ZoneId, VariableZone
 
   // --- npc zone ---
   // 🔴 2026-09-11：npc zone 现在带**全量**角色（含 present=false），由各格式化级别自己取舍：
-  //    · KEYS / FULL = 名册面（dispatcher/char_gen/vars_update/plot 判「新 vs 已有」、按名寻址）
+  //    · KEYS / FULL = 名册面（dispatcher/entity_gen/vars_update/plot 判「新 vs 已有」、按名寻址）
   //      —— 必须看得见离场者，否则回来的老角色会被当成新人重生成。KEYS 表带 Present 列。
   //    · NARRATIVE / SUMMARY = 场景面（story/plot_post 演当前戏）
   //      —— 仍按 present 过滤（2026-08-08 在场判定断链修复的语义，迁到这里）。
@@ -472,7 +463,6 @@ function formatCharacterNarrative(char: CharacterState): string {
         : '';
       lines.push(`    [${eq.equippedSlot}] ${eq.name}${desc}${effs}`);
       // 不显示 eq.stats (数值设计)
-      // 不显示 eq.scripts (JS 代码)
     }
   }
 
@@ -490,7 +480,6 @@ function formatCharacterNarrative(char: CharacterState): string {
       lines.push(`    [${typeLabel}] ${sk.name} — ${sk.description || ''}${effs}`);
       // 不显示 sk.cost (SP消耗:15)
       // 不显示 sk.cooldown (冷却:3回合)
-      // 不显示 sk.scripts (JS 代码)
     }
   }
 
@@ -511,7 +500,6 @@ function formatCharacterNarrative(char: CharacterState): string {
     lines.push('  背包:');
     lines.push(...items);
     // 不显示 item.data.stats (数值效果)
-    // 不显示 item.scripts (JS 代码)
   }
 
   // 登神长阶 — 仅 enabled + 要素/权能/法则名称列表
@@ -524,7 +512,6 @@ function formatCharacterNarrative(char: CharacterState): string {
     if (elementNames.length) lines.push(`    要素: ${elementNames.join(', ')}`);
     if (authorityNames.length) lines.push(`    权能: ${authorityNames.join(', ')}`);
     if (lawNames.length) lines.push(`    法则: ${lawNames.join(', ')}`);
-    // 不展开 elements/authority/law 内部的 scripts
   }
 
   // 关系 — 仅在场角色

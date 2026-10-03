@@ -11,7 +11,7 @@
  * ```jsonc
  * {
  *   "version": "1.0.0",              // 占位集版本戳（D42：戳前进才重播种）
- *   "byBook": { "world_setting": "…" },       // 15 本占位世界书逐本 hash
+ *   "byBook": { "world_setting": "…" },       // 16 本占位世界书逐本 hash
  *   "byPreset": { "placeholder-story-v1": "…" },
  *   "byBeautifierRule": { "demo-dialogue": "…" },
  *   "bySection": { "content/catalog": "…" }   // 其余占位件逐文件 hash

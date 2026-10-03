@@ -9,11 +9,9 @@ const AGENT_ACTIVITY_LABELS: Record<string, string> = {
   memory_summary: '封存本回合记忆',
   plot_post_check: '校准未来走向',
   craft_gen: '处理制作请求',
-  char_gen: '塑造新登场角色',
-  item_gen: '准备新物品',
+  entity_gen: '塑造新角色与物品',
   image_prompt: '构思场景画面',
   combat: '推演战局',
-  combat_enemy: '筹划敌方行动',
   plot_outline: '编织剧情大纲',
 };
 
@@ -32,16 +30,18 @@ const TOOL_ACTIVITY_LABELS: Record<string, string> = {
   random_appearance: '勾勒人物外貌',
   roll_attributes: '生成角色属性',
   get_character: '查看角色状态',
-  get_unit_detail: '查看参战者状态',
   get_inventory: '查看随身物品',
   get_script_reference: '查阅世界规则',
-  get_combat_state: '观察当前战局',
-  declare_attack: '决定攻击方式',
-  declare_action: '决定战斗行动',
-  pass_slot: '保留当前行动',
-  flee: '判断撤离时机',
-  end_turn: '结束当前行动',
-  submit_adjudication: '裁定战斗结果',
+  combat_add_unit: '召入战斗单位',
+  combat_update_unit: '调整单位状态',
+  combat_remove_unit: '移出战斗单位',
+  combat_add_status: '施加状态效果',
+  combat_remove_status: '移除状态效果',
+  combat_set_meta: '更新战局记录',
+  combat_yield_to_player: '把主持权交给玩家',
+  calc: '进行推演计算',
+  calc_damage: '推演伤害结算',
+  calc_initiative: '推演先攻顺序',
 };
 
 function recordOf(value: unknown): Record<string, unknown> | undefined {
@@ -101,19 +101,18 @@ export function presentToolActivity(
         if (name) detail = `名字：${name}`;
         break;
       }
-      case 'get_character':
-      case 'get_unit_detail': {
+      case 'get_character': {
         detail = textOf(output?.name);
         break;
       }
-      case 'declare_attack': {
-        const actor = textOf(input?.actorName);
-        const target = textOf(input?.targetName);
-        detail = actor && target ? `${actor} → ${target}` : (actor ?? target);
+      case 'combat_add_unit':
+      case 'combat_update_unit':
+      case 'combat_remove_unit': {
+        detail = textOf(input?.name);
         break;
       }
-      case 'declare_action': {
-        detail = textOf(input?.actionType);
+      case 'combat_yield_to_player': {
+        detail = textOf(input?.unit);
         break;
       }
     }

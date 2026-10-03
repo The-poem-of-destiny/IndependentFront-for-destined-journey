@@ -51,6 +51,8 @@ import { hashWorldBook } from '../content/content-source';
 import { applyExpFloor } from '../character/exp-table';
 // type-only：Dexie 表行形状复用 assembler 的快照类型（运行时不构成依赖边）
 import type { PersistedPromptSession } from '../prompts/prompt-session-assembler';
+// type-only：战斗沙盒在办战斗行（v27）—— sandbox/types.ts 是纯类型册，运行时不成环
+import type { CombatSandboxRecord } from '../combat/sandbox/types';
 
 /** 捏人预设记录 (DB 存储格式) */
 export interface CreatePresetRecord {
@@ -107,7 +109,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-export const DB_VERSION = 26;
+export const DB_VERSION = 27;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -275,6 +277,11 @@ class AppDatabase extends Dexie {
   //   每 (saveId, agentId) 一行；rebuildable 的缓存，**不进 FullBackup / 单存档导出**；
   //   删存档级联删、快照回退/切档由 `invalidatePromptSession` 显式删。
   promptSessions!: Table<PersistedPromptSession>;
+
+  // v27 (2026-10-02，战斗重写 Phase 2): 协议驱动战斗沙盒的在办战斗。
+  //   每存档至多一场（主键 saveId），存权威 CombatState + 会话 transcript，供刷新后续战。
+  //   **rebuildable 的在办战斗缓存，不进 FullBackup / 单存档导出**；删存档级联删。
+  combatSandboxes!: Table<CombatSandboxRecord>;
 
   constructor() {
     super(DB_NAME);
@@ -689,6 +696,14 @@ class AppDatabase extends Dexie {
      * `saveId` 单独建索引供 deleteSaveSlot / invalidate(saveId) 整批删。
      */
     this.version(26).stores({ promptSessions: 'key, saveId' });
+
+    /**
+     * v27 (2026-10-02，战斗重写 Phase 2): 协议驱动战斗沙盒的在办战斗表。
+     *
+     * 每存档至多一场战斗 → 主键就是 `saveId`；`updatedAt` 索引供将来清理陈旧行。
+     * **rebuildable 缓存**：不进 FullBackup / 单存档导出，删存档级联删。
+     */
+    this.version(27).stores({ combatSandboxes: 'saveId, updatedAt' });
   }
 }
 
@@ -1820,6 +1835,7 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       db.characterAppearances,
       db.debugTurns,
       db.promptSessions,
+      db.combatSandboxes,
     ],
     async () => {
       // v22 拆表：元数据与载荷各有 saveId 索引，两张表各删各的（载荷表不必先查 id）
@@ -1844,11 +1860,11 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       await db.debugTurns.where('saveId').equals(id).delete();
       // v26：Delta 会话是 rebuildable 缓存，但存档都没了没有理由留着
       await db.promptSessions.where('saveId').equals(id).delete();
+      // v27：在办战斗同 promptSessions —— rebuildable，随存档一起走
+      await db.combatSandboxes.where('saveId').equals(id).delete();
       await db.saves.delete(id);
     },
   );
-  const { unwireEffectSystem } = await import('../effects/effect-wiring');
-  unwireEffectSystem(id);
 }
 
 // --- 角色外貌会话副本 (v19, D56) ---

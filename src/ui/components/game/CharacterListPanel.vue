@@ -11,7 +11,7 @@ import BuffChip from '../shared/BuffChip.vue';
 import ItemDetailBody from './ItemDetailBody.vue';
 import { type PanelEntry } from '../../lib/item-view';
 // 🆕 重铸（2026-08-24）：单条目重铸 —— NPC 的装备/技能/背包条目都能重写
-import type { RewriteTarget } from '@engine/agents/item-gen-chain';
+import type { RewriteTarget } from '@engine/agents/entity-gen-agent';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -132,7 +132,7 @@ function isRewriting(kind: 'equipment' | 'skills' | 'bag', name: string): boolea
   return rewriteOf.value?.kind === kind && rewriteOf.value.name === name;
 }
 
-/** 从当前 NPC 的存档数据里找条目并转成 RewriteTarget（喂给 item_gen 当 <重铸目标>） */
+/** 从当前 NPC 的存档数据里找条目并转成 RewriteTarget（喂给 entity_gen 当 <重铸目标>） */
 function buildNpcRewriteTarget(
   kind: 'equipment' | 'skills' | 'bag',
   name: string,
@@ -151,11 +151,6 @@ function buildNpcRewriteTarget(
         ...(sk.cost ? { cost: sk.cost } : {}),
         ...(sk.cooldown !== undefined ? { cooldown: sk.cooldown } : {}),
         ...(sk.effects ? { effects: sk.effects } : {}),
-        ...(sk.scripts ? { scripts: sk.scripts } : {}),
-        ...(sk.modifiers?.length ? { modifiers: sk.modifiers } : {}),
-        ...(sk.buffs?.length ? { buffs: sk.buffs } : {}),
-        ...(sk.divinity !== undefined ? { divinity: sk.divinity } : {}),
-        ...(sk.automata?.length ? { automata: sk.automata } : {}),
         ...(sk.skillPower !== undefined ? { skillPower: sk.skillPower } : {}),
         ...(sk.relevantAttribute ? { relevantAttribute: sk.relevantAttribute } : {}),
         ...(sk.damageType ? { damageType: sk.damageType } : {}),
@@ -175,11 +170,6 @@ function buildNpcRewriteTarget(
         ...(inv.durability !== undefined ? { durability: inv.durability } : {}),
         ...(inv.rarity ? { quality: inv.rarity } : {}),
         ...(inv.effects ? { effects: inv.effects } : {}),
-        ...(inv.scripts ? { scripts: inv.scripts } : {}),
-        ...(inv.modifiers?.length ? { modifiers: inv.modifiers } : {}),
-        ...(inv.buffs?.length ? { buffs: inv.buffs } : {}),
-        ...(inv.divinity !== undefined ? { divinity: inv.divinity } : {}),
-        ...(inv.automata?.length ? { automata: inv.automata } : {}),
       },
     };
   }
@@ -192,11 +182,6 @@ function buildNpcRewriteTarget(
       type: inv.type ?? '物品',
       ...(inv.rarity ? { rarity: inv.rarity } : {}),
       ...(inv.effects ? { effects: inv.effects } : {}),
-      ...(inv.scripts ? { scripts: inv.scripts } : {}),
-      ...(inv.modifiers?.length ? { modifiers: inv.modifiers } : {}),
-      ...(inv.buffs?.length ? { buffs: inv.buffs } : {}),
-      ...(inv.divinity !== undefined ? { divinity: inv.divinity } : {}),
-      ...(inv.automata?.length ? { automata: inv.automata } : {}),
     },
   };
 }
@@ -565,7 +550,7 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
             </div>
           </template>
 
-          <!-- 技能（同上，共用 ItemDetailBody —— 品质/战斗修正/效果归一化与主角一致） -->
+          <!-- 技能（同上，共用 ItemDetailBody —— 品质/效果归一化与主角一致） -->
           <template v-if="detailTab === 'skills'">
             <div v-if="selSkills.length === 0" class="empty-tab">暂无技能</div>
             <div v-for="sk in skillEntries" :key="sk.row.name" class="skill-card">

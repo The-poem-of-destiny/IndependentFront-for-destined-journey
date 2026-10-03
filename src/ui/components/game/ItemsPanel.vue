@@ -7,7 +7,7 @@ import { qualityVar } from '../../lib/quality-colors';
 import { qualityOf, qualityRank, facetOf, listExtra, type PanelEntry } from '../../lib/item-view';
 import ItemDetailBody from './ItemDetailBody.vue';
 // 🆕 重铸（2026-08-24）：单条目重铸 —— 把当前条目的完整数据喂给 item_gen 重写
-import type { RewriteTarget } from '@engine/agents/item-gen-chain';
+import type { RewriteTarget } from '@engine/agents/entity-gen-agent';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -141,9 +141,8 @@ watch([selectedIdx, activeCategory], () => {
 });
 
 /**
- * 把当前选中的条目转成引擎的 RewriteTarget（喂给 item_gen 当 <重铸目标> 的「当前完整数据」）。
- * 关键字段（effects/scripts/modifiers/buffs/divinity/automata/skillPower…）逐项透传，
- * 让 AI 能看到这条现状 —— 否则它无从知道「哪里不对」。
+ * 把当前选中的条目转成引擎的 RewriteTarget（喂给 entity_gen 当 <重铸目标> 的「当前完整数据」）。
+ * 关键字段（effects/skillPower…）逐项透传，让 AI 能看到这条现状 —— 否则它无从知道「哪里不对」。
  */
 function buildRewriteTarget(entry: PanelEntry): RewriteTarget {
   const row = entry.row as any;
@@ -157,11 +156,6 @@ function buildRewriteTarget(entry: PanelEntry): RewriteTarget {
         ...(row.cost ? { cost: row.cost } : {}),
         ...(row.cooldown !== undefined ? { cooldown: row.cooldown } : {}),
         ...(row.effects ? { effects: row.effects } : {}),
-        ...(row.scripts ? { scripts: row.scripts } : {}),
-        ...(row.modifiers?.length ? { modifiers: row.modifiers } : {}),
-        ...(row.buffs?.length ? { buffs: row.buffs } : {}),
-        ...(row.divinity !== undefined ? { divinity: row.divinity } : {}),
-        ...(row.automata?.length ? { automata: row.automata } : {}),
         ...(row.skillPower !== undefined ? { skillPower: row.skillPower } : {}),
         ...(row.relevantAttribute ? { relevantAttribute: row.relevantAttribute } : {}),
         ...(row.damageType ? { damageType: row.damageType } : {}),
@@ -179,11 +173,6 @@ function buildRewriteTarget(entry: PanelEntry): RewriteTarget {
         ...(row.durability !== undefined ? { durability: row.durability } : {}),
         ...(row.rarity ? { quality: row.rarity } : {}),
         ...(row.effects ? { effects: row.effects } : {}),
-        ...(row.scripts ? { scripts: row.scripts } : {}),
-        ...(row.modifiers?.length ? { modifiers: row.modifiers } : {}),
-        ...(row.buffs?.length ? { buffs: row.buffs } : {}),
-        ...(row.divinity !== undefined ? { divinity: row.divinity } : {}),
-        ...(row.automata?.length ? { automata: row.automata } : {}),
       },
     };
   }
@@ -196,11 +185,6 @@ function buildRewriteTarget(entry: PanelEntry): RewriteTarget {
       type: row.type ?? '物品',
       ...(row.rarity ? { rarity: row.rarity } : {}),
       ...(row.effects ? { effects: row.effects } : {}),
-      ...(row.scripts ? { scripts: row.scripts } : {}),
-      ...(row.modifiers?.length ? { modifiers: row.modifiers } : {}),
-      ...(row.buffs?.length ? { buffs: row.buffs } : {}),
-      ...(row.divinity !== undefined ? { divinity: row.divinity } : {}),
-      ...(row.automata?.length ? { automata: row.automata } : {}),
     },
   };
 }

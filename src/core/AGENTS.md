@@ -168,8 +168,10 @@ src/core/                    ← 核心引擎
   │         标签的标签名里（形如 `</□有物品>`，模型看到的是坏标签）。**既有问题，
   │         图像 v1 未修**，已另开任务；改这个文件时别顺手把它们当成自己弄坏的
   ├── agents/agent-tools.ts                ← [Phase 8.5] Agentic 工具注册表（**现役工具定义**）+ AGENT_TOOL_MAP
-  │      白名单 6 桶：craft_gen(9) / char_gen(12) / item_gen(3) /
-  │      vars_update(3) / combat(11) / combat_enemy(9)
+  │      白名单 4 桶：craft_gen(9) / entity_gen(12) / vars_update(2) / combat(15)（2026-10-03 实测）
+  │      🪦 `combat_enemy` 桶随 v3 内核退役删除 —— 现役是单一 `combat` DM 沙盒
+  │      🔴 combat 桶的真源是 `combat/sandbox/tools.ts` 的 COMBAT_SANDBOX_TOOL_DEFINITIONS：
+  │         `getToolsForAgent('combat')` 直接从沙盒定义取，不走 ALL_TOOL_DEFINITIONS
   ├── agents/agent-xml.ts                  ← [Q-05] AI 输出 XML 解析的**唯一**工具面：`tagInner`（取内文，trim）/
   │                                    `tagBlock`（取含标签整块），参数顺序永远 `(source, tag)`
   │      🔴 不再有叫 `extractTag` 的东西 —— 曾有两个同名反义实现（一个取 `match[1]`、一个取
@@ -182,8 +184,8 @@ src/core/                    ← 核心引擎
   │                                    行动选项；流式与完成后共用这一条缝（流式期多剥一组控制标签）
   ├── agents/agent-orchestrator.ts         ← [Phase 3+8.5] DAG 编排引擎（阶段串行+同阶段并行/M3 翻译层按名寻址零id单patch）
   │   ├── callAgenticAgent(): toolsEnabled=true → chatWithTools() 多轮循环
-  │   └── Marker 回调: onCraftRequest/onCombatTrigger/onCharGenRequest/onPlayAudio
-  │       🔴 [并行化 2026-08-16] 侧链（char_gen/item_gen/craft_gen）启动**不 await**，
+  │   └── Marker 回调: onCraftRequest/onCombatTrigger/onEntityGenRequest/onPlayAudio
+  │       🔴 [并行化 2026-08-16] 侧链（entity_gen/craft_gen）启动**不 await**，
   │          与 vars_update LLM 并行；收尾三点：vars_update 提交前的回合级 barrier /
   │          combat 分支显式等 charGenPromise / run() 末尾与失败路径统一 await。
   │          per-agent 依赖：`PipelineStage.agentWaitFor[agentId]`（缺省回退 stage.waitFor），
@@ -198,12 +200,14 @@ src/core/                    ← 核心引擎
 │                                     + Code 接管升级（resolveLevelUps）+ 登神长阶放宽版（resolveAscensionFlyup）
 │                                     + 战斗经验系数按档（EXPERIENCE_COEFFICIENTS normal/easy）
 │                                     + 旧档归一化（applyExpFloor 幂等只提升）。char-gen / resource-calc /
-│                                     tier-constants / combat/coordinator 的等级经验逻辑统一委托此处
+│                                     tier-constants / combat/sandbox/settlement 的等级经验逻辑统一委托此处
 │
   ├── state/save-profile.ts               ← [Phase 4.6] 存档级 FP 元货币（M5: +variables 变量唯一真源）
   │                                      [2026-09-09] +`worldFlags.plotThreads` 袋的读/写（getPlotThreadFlags /
   │                                    setPlotThreadFlagsInPlace + commitPlotThreadTurn 成功回合收口写入口）
-  ├── effects/effect-parser.ts / effect-runtime.ts
+  ├── effects/effect-parser.ts / buff-registry.ts / effect-types.ts
+  │      🪦 [2026-10-03] 同目录 `effect-runtime.ts` / `game-event.ts` / `effect-wiring.ts` /
+  │         `subscription-manager.ts` / `status-api.ts` 已随脚本系统退役删除（详见下方 game-event 条）
   ├── ejs/ejs-backend.ts                ← [能力面 T1] EjsBackend 接口 + LegacyBackend + 生产切换入口
   ├── ejs/ejs-quickjs-backend.ts        ← [能力面 T7] ★ QuickJS(wasm,主线程) 隔离后端 —— SEC-02 的边界
   │                                    实测：构造器逃逸/死循环/ReDoS/OOM 四条全部堵住
@@ -216,7 +220,10 @@ src/core/                    ← 核心引擎
   ├── ejs/ejs-lodash-shim.ts            ← [工坊 P2] `_` 纯读边 17 方法 + chain（不含任何写方法）
   ├── character/stat-projection.ts            ← [工坊 P2] buildStatData：主角资源/等级/五维/命运点数/世界.时间（只读快照）
   ├── ejs/ejs-vars-diff.ts              ← [工坊 P2] 草稿深 diff → {replace,remove} 喂 applyVarsPatch；256KB 护栏
-  ├── effects/game-event.ts                 ← [Phase 4.5] EventBus 按存档隔离（+ emitChain 链式管道 ADR-29）
+  ├── 🪦 [2026-10-03] `effects/game-event.ts`（EventBus 按存档隔离 + emitChain 链式管道 ADR-29）/
+  │      `effect-wiring.ts` / `subscription-manager.ts` / `status-api.ts` / `effect-runtime.ts`
+  │      随战斗外 JS 脚本链整体删除 —— EventBus + 双 facade 效果系统整链成为历史，别再按图找
+  │      现役替代：声明式 VarsPatch / StatusEffect 经 dispatcher 管线落地，战斗走 combat/sandbox/
   ├── state/state-write-queue.ts          ← 🆕 [并行化 2026-08-16] 写入串行队列地基：withSaveWriteLock
   │                                    （per-saveId FIFO）+ withGlobalWriteLock（记忆 id 分配+落库）。
   │                                    🔴 锁粒度 = RMW 区段，锁内**禁止**调用任何会再入队列的函数
@@ -379,57 +386,44 @@ src/core/                    ← 核心引擎
   │     `tests/layering-gate.test.ts`（源码扫描，专治动态 import / 字符串路径 / import.meta.glob）。
   │     `?raw` 源码读取不算依赖边（供值链路测试要它）。要在引擎里用前端的东西：搬进引擎，或开一条新缝
   │
-  ├── combat/                             ← 统一战斗模块（现役内核与基础规则）
-  │   ├── combat-intention.ts / combat-damage.ts / combat-turn.ts / morale-system.ts
-  │   │                                    ← 意图、伤害、先攻与士气计算；旧编排与兼容层已删除
-  │   ├── participant.ts / client.ts / ui-events.ts ← 角色转换、Agent 客户端与 UI 事件契约
-  │   ├── kernel.ts / reducer.ts / state.ts     ← 状态机 + 原子提交 + 5 不变量
-  │   ├── dice-tape.ts                          ← 分通道骰带（32/10/7/6/5）
-  │   ├── coordinator.ts                        ← 战斗循环 + RequiredInput 路由
-  │   ├── windows.ts / intents.ts               ← 18 窗口求值 + EffectIntent 解释执行
-  │   ├── adjudication.ts / rule-keys.ts        ← BoundedAdjudication + 4 RuleKey
-  │   ├── automata/                             ← DSL parser/interpreter/compile/builtins/reflection
-  │   │                                            + index-active.ts（ActiveEffectIndex：按窗口取订阅者）
-  │   ├── phases/                               ← 7 个 phase handler：round / initiative / unit-turn /
-  │   │                                            action / attack / terminal + outcome.ts（统一返回形状，
-  │   │                                            reducer 据此把 changes 累加进单一 PendingChangeSet，
-  │   │                                            末尾一次 applyPending 原子提交 —— 不变量④）
-  │   ├── player-input.ts                       ← [战斗主持人] 玩家自由文本 → `CombatCommand` 的**确定性**
-  │   │                                            解析（关键词 + 名字匹配，零 I/O 零随机）。四步拼装能直接
-  │   │                                            定 Command 时走结构化路径，只有自由文本过这里
-  │   │      🔴 解析不出意图**明确拒绝**（`ok:false` + 人话 reason），绝不静默 fallback 成 PassAttack
-  │   │         —— 那会吞掉玩家的决定（v2 runner「查询工具静默变 pass」在玩家侧的镜像）
-  │   │      🔴 名字按「文本中首次出现、同位置取长名」匹配（否则「骷髅兵」误配「骷髅兵队长」）
-  │   ├── summon-pool.ts                        ← [M3.5] 预生成召唤物池：**目前是空池 + 幂等查找 + key 归一化**
-  │   │                                            （key = `种族-层级-定位`），未命中走实时 char_gen。
-  │   │                                            池内容要靠离线脚本填，不在 plan 范围内
-  │   ├── types.ts                              ← v3 内部类型（1816 行；DiceChannel/CombatState/EffectIntent/
-  │   │                                            WindowKey/DomainEvent 等全在这里）
-  │   │   测试共享构造位于 tests/core/combat/test-utils.ts（最小 2 单位 bundle + 命令）
-  │   ├── projection-ui.ts / projection-agent.ts← 双投影（UI 事件 + Agent 文本面板）
-  │   │   tests/core/combat/                ← 独立 contract harness；replay.ts / fixtures/ /
-  │   │                                            contract/ 用例与 milestones.ts 均在测试目录
-  │   └── index.ts                              ← 唯一公共出口（openCombat / runCombat / parsePlayerInput
-  │                                                + 少数公共类型）；reducer/tape/windows/automata 全 internal
-  ├── effects/effect-types.ts               ← [战斗 v2 M2] Modifier 6 大类（固伤/百分比/资源/检定/附加效果/特殊机制）+
-  │                                    登神 divinity 仲裁。与 StatusEffect（落库实例）/ EffectDefinition
-  │                                    （Agent 声明）是三样东西，别混
+  ├── combat/                             ← 战斗模块（协议沙盒 + 计算库）
+  │   ├── combat-damage.ts / combat-turn.ts
+  │   │                                    ← 纯计算库：8 步伤害管线 / 先攻计算（sandbox/tools.ts 在用）
+  │   └── 🪦 v3 内核（kernel/reducer/state/dice-tape/windows/intents/coordinator/phases/automata/
+  │      adjudication/rule-keys/player-input/summon-pool/participant/client/projection-*/types.ts）
+  │      及其全部测试已于 C5a 删除；`combat-intention.ts` / `morale-system.ts` /
+  │      `combat-item-validator.ts` / `describe-modifier.ts` / `describe-automaton.ts` 随 C5b 删除。
+  │      🪦 UI 桥（`ui-contract.ts` 的 CombatView/CombatUnitView/CombatCommand、`ui-events.ts` 的
+  │      CombatEvent、`combat/index.ts` barrel）随 **C6** 删除 —— 前端改直接吃沙盒 `CombatState`
+  │      （`src/ui/components/game/combat/combat-view.ts`），不再走事件投影。
+  ├── combat/sandbox/                       ← 🆕 [战斗重写 Phase 2，2026-10-02] 协议驱动战斗沙盒后端
+  │   │                                        （game-pipeline 战斗路径自 C2 起切到这里）
+  │   ├── types.ts                          ← 权威 CombatState（meta + 按名字索引的 units）；工具 op 类型；
+  │   │                                    Dexie `combatSandboxes` 行类型。逻辑键=名字（铁律1），AI 永不产 id
+  │   ├── state.ts                          ← createCombatState（从存档角色建 origin:'save' 单位 + 按 tier
+  │   │                                    补齐 max 资源）+ 纯函数 applyOps/setMeta/状态增删 + 轻量不变量校验
+  │   │                                    （负/超上限 **warn 照写不抛**）
+  │   ├── settlement.ts                     ← buildCombatSettlementPatches：终局把 origin:'save' 单位的
+  │   │                                    hp/mp/sp + 状态差量转 StatePatch（temp 单位与战斗字段丢弃；
+  │   │                                    exp/fp 由调用方经 extras 传入）+ computeCombatExpRewards
+  │   │                                    （ally_win 经验：击杀敌方 level×系数 平分给存活存档单位）
+  │   ├── protocol.ts                       ← loadCombatProtocolText：从世界书 combat_extra 取协议条目正文
+  │   │                                    （点名取文，**不看 enabled、不走 EJS 激活**）+ 纯拼装函数
+  │   ├── tools.ts                          ← 15 个工具（7 状态维护 + 3 骰 + calc/calc_damage/calc_initiative
+  │   │                                    + get_character/get_inventory 只读查询）
+  │   │                                    + createCombatToolBinding（绑定一个 CombatState，就地更新）
+  │   ├── runner.ts                         ← runCombatSandbox 单 exchange（系统提示=协议+流程（可注入
+  │   │                                    agent-config 的 combat.systemPrompt）+参战表单+当前状态；玩家输入
+  │   │                                    user 回注续战；continuationMessages 整段续接）/ runCombatSandboxLoop
+  │   └── persistence.ts                    ← Dexie v27 `combatSandboxes`（每存档一行，存 CombatState +
+  │                                            transcript）；rebuildable 缓存，不进 FullBackup，删档级联删
+  ├── effects/effect-types.ts               ← [战斗 v2 M2] Modifier 6 大类 + 登神 divinity 仲裁。
+  │                                    🔴 C5b 后已无生产引用（craft-request 的 modifier 采集随实体字段删除而移除），
+  │                                    目前仅其单测引用；保留待裁量
   ├── effects/buff-registry.ts              ← [战斗 v2 M2] buff 去重/生命周期/结算时机的**纯函数集**（不持状态不落 DB）。
   │                                    buff id = 有 sourceKey 时 `sourceKey.name`、否则裸 name（铁律：AI 永不产 id）
-  ├── effects/status-api.ts                 ← [战斗 v2 M2] 把沙盒收集的 `$status.apply/remove` 意图经 BuffRegistry
-  │                                    转成 StatePatch，仍交 `commitChatState` 落库（ADR-21）
-  ├── scripting/script-registry.ts            ← [战斗 v2 M1] 声明式脚本注册 facade（物品/技能自带的静态清单，装备即注册
-  │                                    整份、卸下即全注销）。与 SubscriptionManager（动态 `$event.on`）各走各的
-  │                                    注册表（chainHandlers vs handlers），**不是第三套效果系统**
-  ├── combat/combat-item-validator.ts      ← [战斗 v2 M4] item_gen 产出的 modifier/buff 契约**纯校验**（空 reasons = 合规）
-  │      🔴 **`COMBAT_WINDOW_KEYS_LIVE`(12) / `COMBAT_WINDOW_KEYS_RESERVED`(6) / `COMBAT_WINDOW_KEYS`(18) 住在这里，
-  │         由 `combat/automata/compile.ts` 共享，基础规则与内核同属 combat。
-  │         下文「18 窗口只有 12 个真接了求值器」那条讲的就是这两张表；接上求值器 = 把 key 从
-  │         RESERVED 挪进 LIVE。判据是「`phases/` 或 `reducer.ts` 里有 `runWindow(...)` 调用点」，
-  │         **不是「架构文档列了它」**
-  ├── combat/describe-modifier.ts / describe-automaton.ts
-  │                                  ← Modifier / EffectAutomatonDecl → 人类可读中文摘要（纯函数，
-  │                                    前端物品详情弹窗用；18 窗口的中文名表在 describe-automaton）
+  │                                    🔴 [2026-10-03] 与 effect-types / effect-parser 同状：脚本系统退役后
+  │                                       生产零引用、仅其单测引用，如实保留待裁量（不是现役链路）
   ├── crafting/craft-quality.ts / craft-dc.ts / craft-resolver.ts
   │   ├── crafting/craft-request.ts        ← [Q-21] 装配唯一口 buildCraftRequest(角色, 工具参数, 骰带)
   │   │                              🔴 **纯函数、无随机** —— 骰子由工具边界掷好传进来
@@ -444,9 +438,8 @@ src/core/                    ← 核心引擎
   │   │                              🔴 骰数由优/劣势决定（齐平 1 颗 / 优劣势 2 颗），
   │   │                                 **不能**一律掷 2 颗，那会把大失败判据换个姿势再打掉一次
   │   └── crafting/craft-projection.ts     ← [Q-21] 结算结果 → `<action_info>` 竖线表 + 一句话摘要
-  │                                  照 combat/projection-agent、projection-ui 的先例；
   │                                  这一层不允许出现计算（ADR-28：面板是给纯文本 AI 的遗留手段）
-  ├── combat/morale-system.ts / affection-system.ts
+  ├── character/affection-system.ts          ← 好感度系统
   ├── content/start-catalog.ts              ← [Q-30] 捏人目录入口（re-export 机制 + 属性名/品质码表/品质色/品质基础 DC）
   │   └── content/start-catalog-mechanics.ts ← [D24] 机制半边：schema/类型 + 难度档位/性别枚举/限定覆盖表
   │                                     + 纯函数（parseCatalogData 容错解析 / lookupCost 查表 /
@@ -464,38 +457,26 @@ src/core/                    ← 核心引擎
   │                                       句子里是对的，归一化会把它改坏
   │                                    🔴 title 畸形（含引号/超长/缺省）**只收敛不拒绝**：为一次装饰性
   │                                       失误否掉整个标记，等于把它升级成一张画不出来的图
-  ├── agents/char-gen-agent.ts             ← [Phase 6e] 角色生成编排（M3 单patch落库/正式字段直写/零id）
+  ├── agents/entity-gen-agent.ts          ← [2026-10-02 / Phase 1d] 通用实体生成编排（char_gen + item_gen 硬改名合并）。
+  │      `entityType` 分派：character（单 `add_character`，技能/装备/道具/登神内嵌）/ skill·equipment·item
+  │      （复数 `add_skill`/`add_item`）/ status（`add_status_effect`）/ ascension（`update_character`）。
+  │      重铸 `rewriteLoadoutItem`、战斗召唤 `runEntityGenForCombat` 同址。装备单 `add_item` 带 `equippedSlot`。
+  ├── agents/entity-gen-parse.ts          ← [2026-10-02 / Phase 1d] entity_gen 的统一 XML/JSON 解析层
+  │      （`parseEntityGenOutput` + `parseStatusesXML` + `parseStatusEffectsXML` 从 char-gen-agent 抽出）。
+  │      🔴 实体两层字段 `protocolText`（条目原样内文）+ `tags`（`<tag>`/`[...]`）；
+  │         不解析 `<modifiers>/<buff>/<automaton>/<script>/<divinity>`（写了也忽略并剥离）。
   ├── crafting/craft-gen-chain.ts            ← [Phase 9b] 制作生成编排（M3 零id/type归一化/单patch）
-  ├── agents/item-gen-chain.ts             ← [Phase 9c] 独立物品/技能生成编排（上游是 dispatcher 的 `<item_gen_request>`）
-  │                                    🔴 装备落库**两步同 id**：`add_item`（进背包）+ `equip_item`（搬进装备栏）
-  │                                    —— applyEquipItem 按 itemId 从背包移除，两步 id 不同就静默丢件
   │
-  ├── scripting/script-executor.ts            ← [Phase 7e+8] 脚本沙盒（$event.on/off / $call / @parent / init·cleanup）
-  │      🔴 **求值跑在 QuickJS 隔离里，不再是 `new Function`**（2026-08-10 / SEC-02 收口）。
-  │         `buildSandbox()` 仍是 $ API 名单的**唯一真源** —— guest 面由后端从它推导，
-  │         加 `$foo` 不必动后端；宿主闭包一行没改，所以 `_parentScripts` 盖章 /
-  │         `$call` 合并 / handle 编号全在宿主侧原样发生（这是兼容性的来源）
-  │      🔴 **测试必须 `await installProductionScriptBackend()`**（`beforeAll`）。默认后端是
-  │         fail-closed：不装就是**脚本一行不跑**，而「断言收集到 0 条效果」那类用例会照常变绿。
-  │         已装的四个文件：script-executor / script-quickjs-backend / subscription-manager /
-  │         effect-wiring / state-manager（后者有两组用例真的会执行 onRemove 与反应轮脚本）
-  ├── scripting/script-backend.ts             ← [SEC-02] 脚本后端接缝：ScriptBackend 接口 + FailClosed + 单例 +
-  │                                    installProductionScriptBackend()（预热真 wasm 才算成功）
-  │      🔴 与 `ejs-backend.ts` **刻意不同：没有 Legacy**。脚本执行面就是 SEC-02 本身，
-  │         留一个可安装的 `new Function` 实现等于把刚拆掉的枪放回抽屉。`setScriptBackend`
-  │         同理不导出 —— 公开的「换掉当前后端」入口会把 fail-closed 默认值变成建议
-  ├── scripting/script-quickjs-backend.ts     ← [SEC-02] ★脚本的 QuickJS(wasm) 隔离后端。**一次脚本一个
-  │                                    runtime+context**（脚本之间零泄漏 + `$call` 重入无干扰），
-  │                                    墙钟 50ms、内存 32MB
-  │      实测：构造器逃逸只拿到 guest 全局（宿主哨兵不可见）/ fetch·indexedDB·process 全不可达 /
-  │      `while(true)` 53ms 被中断且不毒化后端 / 每次执行约 0.47ms
-  │      🔴 宿主全局仍**显式遮蔽成 `undefined`**（不是让它 ReferenceError）—— 保真旧实现的
-  │         形参遮蔽，`if (window)` 这种防御性写法（AI 爱写）不能因此整个脚本中断。
-  │         但 `Function` / `globalThis` / `eval` **刻意不遮蔽**：在 realm 里它们够不到宿主，
-  │         留着反而更兼容
-  ├── effects/subscription-manager.ts       ← [Phase 7e+8] 持久订阅管理器（递归保护≤10 + 僵尸兜底）
-  ├── effects/effect-wiring.ts              ← [Q-07] 战斗外效果接线（存档加载 wireEffectSystem / 装备卸下 wire-unwireObject）
-  │                                    EventBus 按存档实例化 + ScriptRegistry/SubscriptionManager 双 facade
+  │  🪦 [2026-10-03 / Phase 1b·1c] **战斗外 JS 脚本链整体删除**（`scripting/` 现只剩空目录）：
+  │     `scripting/script-executor.ts`（`$` 沙盒名单 `buildSandbox()`）/ `script-registry.ts` /
+  │     `script-backend.ts`（SEC-02 接缝 + installProductionScriptBackend）/ `script-quickjs-backend.ts`
+  │     （QuickJS wasm 隔离后端），以及 `effects/subscription-manager.ts`（持久订阅 + 递归保护）/
+  │     `effects/effect-wiring.ts`（战斗外效果接线）/ `effects/status-api.ts` / `effects/effect-runtime.ts` /
+  │     `effects/game-event.ts`（EventBus + emitChain）全部删除。
+  │     🔴 AI 可编程脚本面（实体 `scripts` 池 / `$event` / `$call` / `@parent` / init·cleanup）随之消失，
+  │        实体 `scripts` 字段同步清出；效果回归「声明式 VarsPatch / StatusEffect + dispatcher 管线」。
+  │     ✅ **世界书 EJS（ADR-30）与工坊正则不受影响**，EJS 沙盒仍在 `ejs/`。
+  │     设计全文：docs/planning/2026-10-02-combat-decode-entitygen-plan.md
   │
   ├── audio/audio-channels.ts             ← [Audio] MusicChannel 音序器 + SfxChannel 声池（加载世代号竞态保护）
   ├── audio/audio-manager.ts              ← [Audio] 音轨库注册表 + 主音量 + 手势解锁 + playByTag AI 钩子
@@ -612,7 +593,7 @@ src/core/                    ← 核心引擎
   │                                       而他们每张扣约 17 点。牌价与档位无关，档位只决定免不免
   ├── image/image-prompt-agent.ts         ← [图像 v1] image_prompt 侧链：装配 → callAgent → 抽取，
   │                                    **两端是纯函数，中间那次调用是唯一 I/O**（客户端从 deps 交进来，
-  │                                    形状照 char-gen-agent 的 CharGenClient）
+  │                                    形状照 entity-gen-agent 的 EntityGenClient）
   │                                    🔴 抽不到 <image_prompt> 就是**明确失败**，不猜、不用启发式兜一个
   │                                       —— 兜出来的是一张没人要的图，且失败被掩盖
   │                                    模型爱在答案前写一段废话，抽取要能越过它（先例 story-rescue.ts）
@@ -672,14 +653,16 @@ src/core/                    ← 核心引擎
   │     （`variables.ts` 最后一个活着的导出 `formatVariablesForPrompt` 的唯一消费方
   │      是 Q-04 删掉的 prompt-assembler）。顺带拆掉「两个同名 `applyVarsPatch`
   │      契约互斥」那个 auto-import 陷阱：留下的那份改名 `var-resolver.applyPathOps`，
-  │      入参形状提进 `types.ts` 的 `VarPathOps`；`VarsPatch` 保留，它是效果系统
-  │      （`effect-runtime.executeVarsPatch`）的声明式载荷，两者用途不同别再混。
+  │      入参形状提进 `types.ts` 的 `VarPathOps`；`VarsPatch` 保留，它是声明式变量补丁的载荷，
+  │      现由 `var-resolver.applyPathOps` 应用（🪦 `effect-runtime.executeVarsPatch` 随脚本系统
+  │      于 2026-10-03 删除），与 `applyPathOps` 的入参形状不同别再混。
   ├── api/api-tools.ts
   │   🪦 `api-router.ts` 已删（BFF 同源后端重构 Phase A+B）。路由改住 `server/routes/`
   │      （**7 个文件**：chat / models / image / embeddings / proxy / status / **content**），
   │      入口是 `server/app.ts`，引擎目录里不再有路由层，别按图找那个文件。
   │
-  └── (战斗 v2 纯计算规则见 docs/reference/combat-system-architecture.md；v3 内核见 docs/reference/combat-system-architecture-v3.md)
+  └── (🪦 战斗 v2/v3 架构文档均已退役：纯计算公式可参考 docs/reference/combat-system-architecture.md
+       的 §四/§五/§八/§九；现役战斗真源 = `combat/sandbox/` + docs/planning/2026-10-02-combat-decode-entitygen-plan.md)
 ````
 
 > 🪦 这里曾指着一行 `src/vanilla/sillytavern-store.ts`（"框架无关响应式 Store"）——该目录早已不存在，Store 由 Pinia 接管。Q-15 清仓时删掉，别按图找那个文件。
@@ -690,15 +673,20 @@ src/core/                    ← 核心引擎
 
 ## 事件驱动架构（Phase 4.5-8 实现）
 
+> 🪦 **[2026-10-03] 本节大半已退役。** Layer 5（Script Sandbox）随战斗外 JS 脚本链整体删除，
+> 其上的 EventBus / ScriptRegistry / SubscriptionManager 双 facade 机制亦已删除；下方 Layer 5 与
+> 「关键架构决策」表中 EventBus / Script 执行 / 持久订阅 / EffectRuntime 四行仅存历史。
+> 仍有效的是：Layer 4 的 tools 面（ADR-19 语义级）、Layer 2/1 的模块级 `$` 对象与 StateManager 唯一写入口。
+
 ```
 Layer 5  脚本级 Script Sandbox  AI 写脚本: $event.on/off(持久订阅) / $call(跨对象引用)
-  ↑       (AI 可编程)            init/cleanup 生命周期 + @parent 继承链
+  ↑       (AI 可编程)            🪦 [2026-10-03] 已删除 —— 脚本沙盒不复存在
 Layer 4  语义级 工具面          AI 调工具: craft_check / craft_settle / declare_attack …
   ↑       (AI 可见)             = agent-tools.ts 的 27 个 tool 定义（function calling），
   │                              工具 handler 内部才去调 Layer 3。**AI 手里没有 `$` 对象**
 Layer 3  流程级 Resolver        引擎内部: CraftResolver（`$craft`，craft-resolver.ts）
-  ↑       (AI 不可见)           🪦 CombatResolver 随 v2 运行时删除；战斗流程改由 combat
-  │                              内核主持（openCombat → kernel/reducer/phases），不再有 resolver
+  ↑       (AI 不可见)           🪦 CombatResolver 随 v2 运行时删除；v3 内核（openCombat →
+  │                              kernel/reducer/phases）亦随 C5a/C5b 删除，现役战斗 = combat/sandbox/ 协议沙盒
 Layer 2  计算级 纯函数          $dice.d20() / $resource.getHpPercent() / $char.getTier()
   ↑       (AI 可读，不可写)      —— 这一层的 `$` 是**模块级导出对象**，见下节
 Layer 1  原语级 状态读写        StateManager.commitChatState() / $validate.effectValue()
@@ -706,10 +694,13 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 ```
 
 🔴 **Layer 4 的名字变了但层还在**：v2 时代它真的是「AI 调 `$combat.attack()`」；现在 AI 那一侧
-只有 OpenAI function calling 的工具名，`$` 对象一个都够不到（脚本沙盒那份除外，见下节）。
+只有 OpenAI function calling 的工具名，`$` 对象一个都够不到（🪦 曾有的「脚本沙盒那份」已随脚本系统删除）。
 把这层理解成「AI 声明意图的语义面」仍然对（ADR-19），只是载体从 `$` API 换成了 tools。
 
 ### 关键架构决策
+
+> 🪦 [2026-10-03] 表中 EventBus 实例化 / Script 执行 / 持久订阅管理 / EffectRuntime 时序 / EventBus 引入时机
+> 五行所描述的机制已随脚本系统整体删除，仅存历史；Agentic 模式与 System Prompt 管理两行仍有效。
 
 | 决策                         | 选择                                | 理由                                                                                                                                                                                                                                                                                          |
 | ---------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -718,23 +709,21 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 | 持久订阅管理                 | subscription-manager.ts             | 递归保护(≤10) + 僵尸兜底(unregisterAll)                                                                                                                                                                                                                                                       |
 | EffectRuntime 时序           | 管线完成后批量执行                  | 保持 DAG 原子性                                                                                                                                                                                                                                                                               |
 | EventBus 引入时机            | Phase 7e+8（已完成）                | 与 Script 系统同步上线                                                                                                                                                                                                                                                                        |
-| Agentic 模式                 | OpenAI function calling (Phase 8.5) | craft_gen/char_gen/item_gen 通过 tools 调用真实 Code 函数，禁止 AI 编造数值                                                                                                                                                                                                                   |
+| Agentic 模式                 | OpenAI function calling (Phase 8.5) | craft_gen/entity_gen 通过 tools 调用真实 Code 函数，禁止 AI 编造数值                                                                                                                                                                                                                          |
 | craft_request 时序           | 延迟型 (对齐 combat_trigger)        | Stage 1 暂存 → Stage 2 统一执行，避免阻塞叙事                                                                                                                                                                                                                                                 |
 | System Prompt 管理 (Phase 9) | agent-config.json 唯一来源          | 所有 Agent 的完整 systemPrompt 存在 agent-config.json；agent-templates.ts 只留 stub + 动态上下文函数。🔴 **story 例外**：预设短路，行为真源是预设条目——细节见架构图里 agent-config.json 那条                                                                                                  |
 
 ### 效果系统统一框架（战斗+制作共用，ADR-29）
 
-战斗 v2 (M1-M5) 已验证一套**统一 subscribeChain 链式管道**机制，制作系统直接复用，不发明第二套。完整设计见 `docs/planning/unified-effect-system-framework.md`。
-
-> 📌 **v3 演进**：战斗内已由 v3 内核接管（`combat/`），效果走 **EffectAutomaton DSL**（18 窗口声明 / **12 个已接求值器** + 8 大类 intent + 封闭表达式文法），不再走 emitChain/script-executor。**本框架仍是制作系统与战斗外的效果基座**（ADR-29 继续适用）。
-
-- **统一机制**：`EventBus.emitChain(type, params, ctx)` 链式参数管道——`(priority, order, 注册序)` 稳定排序、`ctx.combatants`+`subscription.owner` 在场过滤、错误隔离、递归保护
-- **两个注册 facade**（互不干扰）：`ScriptRegistry`（声明式，物品装备/卸下）+ `SubscriptionManager`（动态，AI script 运行时 `$event.on`）
-- **modifier 不是第二套系统**：物品 `modifiers[]` 在装备时由 ScriptRegistry 注册成"push handler"，走同一条 emitChain
-- **核心模式：纯函数兜底 + AI subscribeChain 覆盖**：Code 算基础 → emitChain 传 AI → AI handler 改 outcome → AI 不响应走兜底
-- **✅ P1-11 已接线（Q-07, 2026-08-03）**：战斗外效果系统已由 `effect-wiring.ts` 接进生产——`wireEffectSystem(saveId, characters)` 在存档加载时对已装备物品/技能执行 `executeInit` + `$event.on` 订阅注册，装备/卸下经 `state-manager` 的 equip/unequip handler 调 `wireObject`/`unwireObject`。`getEventBus(saveId)` 按存档实例化，`ScriptRegistry` + `SubscriptionManager` 双 facade 随存档生命周期。
-- **✅ emit 源与效果回收也已接线（Q-07 第二半, 2026-08-03）**：`commitChatState` 每次提交后，把本次 patch 产生的 `GameEvent` 经 `publishToEffectSystem(saveId, events)` 发到存档 EventBus；`SubscriptionManager` 新增 `setEffectSink`，触发脚本产出的 `hpChanges`/`statChanges`/status 意图不再被丢弃（此前 `handleEvent` 执行完脚本直接扔掉，注释写着「由 state-manager 统一 apply」却没有那个调用方——与 Q-02 同形状的缺陷）。收上来的效果经 `convertScriptEffects` 转成 StatePatch，再走一轮 `commitChatState`（ADR-21 唯一写入口，**没有开第二条写路径**）。反应轮有深度上限 `MAX_EVENT_REACTION_DEPTH = 3`，防止「A 触发 B、B 触发 A」打成事件风暴。没接过线的存档零开销（`peekEffectWiring` 不凭空建 EventBus）。
-- **⚠️ 战斗内 18 窗口里只有 12 个真的接了求值器**：`initiative.before` / `initiative.after` / `turn.close` / `morale.before` / `morale.after` / `settlement.before` 在 `combat/phases/` 里没有任何求值器。它们现在编译期就以 `WINDOW_NOT_WIRED` 掉落（`COMBAT_WINDOW_KEYS_RESERVED`），不再静默入索引；接上求值器时把 key 挪进 `COMBAT_WINDOW_KEYS_LIVE` 即可。🔴 **这三张表（LIVE 12 / RESERVED 6 / 合集 18）住在 `combat-item-validator.ts`，由同目录的 `automata/compile.ts` 共享**。判据是「`phases/` 或 `reducer.ts` 里有 `runWindow(...)` 调用点」，不是「架构文档列了它」。窗口求值统一走 `runWindow(out.events, ...)`——它保证 `EffectRejected` 诊断必进事件流，忽略返回值是可见的 TODO 而非隐藏的丢弃。
+> 🪦 **[2026-10-03] 本节已整体退役。** 战斗 v2 的「统一 subscribeChain 链式管道」其 Code 侧机制
+> （`EventBus.emitChain` / `ScriptRegistry` + `SubscriptionManager` 双 facade / `effect-wiring` /
+> `subscription-manager` / `game-event` / `effect-runtime`）随**战斗外 JS 脚本链**（Phase 1b·1c）与
+> **v3 战斗内核**（Phase 2）一并删除，历史正文不再逐条保留。
+>
+> 现役替代：战斗 = `src/core/combat/sandbox/`（单一 DM 协议沙盒，AI 读 v1.4.2 协议自算、Code 只持
+> 权威 `CombatState` + 只读计算工具 + 终局白名单写回）；战斗外效果 = 声明式 `VarsPatch` / `StatusEffect`
+> 经 dispatcher 管线落地（ADR-20/21）。设计与裁定全文见
+> `docs/planning/2026-10-02-combat-decode-entitygen-plan.md`。
 
 ## v4 三层子系统分流 (ADR-24/25/26)
 
@@ -742,51 +731,33 @@ Layer 1  原语级 状态读写        StateManager.commitChatState() / $validat
 SubSystem-Craft  制作  → 🚩 延迟型: Story 输出 <craft_request>，Stage1 暂存 → Stage2 执行 craft_gen Agent
                           → AI 调 tools (get_inventory→craft_check→craft_settle) → 真实 DC+骰值+评级+结算 (Code)
                           → 创意效果 (AI) → 结果注入正文 + StatePatch 提交
-SubSystem-Combat 战斗  → Stage1后检测 <combat_trigger> → 暂存 → Stage2 request_dispatcher 完成 char_gen 后唤起
-                          → 独立战斗窗口: **v3 内核主持流程**（openCombat → kernel/reducer/phases，
-                            骰值全出 DiceTape）；共用唯一 Kernel，但模型侧固定为
-                            combat **主持人** + combat_enemy **敌方决策**两个隔离持久会话，
-                            动态权限按 phase/actor 收窄，敌方只读面隐藏玩家私有资源与输入
-                          → 主持人终局叙事回注正文 + 批量StatePatch
-SubSystem-CharGen 角色 → Stage2 request_dispatcher 异步检测新NPC → char_gen Agent 调 tools → 输出 <char_result> XML
-                          → 调 item_gen Agent (仅1次, ADR-26) → 下回合可用
+SubSystem-Combat 战斗  → Stage1后检测 <combat_trigger> → 暂存 → Stage2 request_dispatcher 完成 entity_gen 角色生成后唤起
+                          → 独立战斗窗口: **协议驱动沙盒**（`combat/sandbox/`：单一 combat DM 读 v1.4.2 协议自算，
+                             Code 只提供只读计算工具 + 终局写回）；战斗状态归 AI 会话内存并落 Dexie `combatSandboxes`
+                          → 主持人终局叙事回注正文 + 批量 StatePatch
+SubSystem-EntityGen 实体 → Stage2 request_dispatcher 检测到 <entity_gen_request> → entity_gen Agent 调 tools
+                          → 输出 <entity_result> XML（角色/技能/装备/道具/状态/登神，一次产全）→ 下回合可用
+                          🔴 2026-10-02 硬改名：原 char_gen + item_gen 两链合并（不再有 ADR-26 的二次调用）
 ```
 
-🪦 上表 Combat 一行原写作「Code循环 + AI摘要」，那是 v2 combat-runner 的形状。v3 起循环在
-`combat/coordinator.ts`，AI 不再只写摘要而是**主持流程**（ADR-19 的意图声明面从 `$combat.attack()`
-换成了 `declare_attack` 等工具）。战斗内效果不走 emitChain/script-executor，走 **EffectAutomaton DSL**。
+🪦 上表 Combat 一行原写作「Code循环 + AI摘要」（v2 combat-runner），后来经历过 v3 内核（kernel/reducer/
+phases/automata，AI 用 `declare_attack` 等工具主持）—— v3 内核已随 C5a/C5b 整体删除，现行是
+`combat/sandbox/` 的**协议驱动沙盒**（单 DM 读协议自算，Code 只做计算与终局写回）。
 
-### AI 能碰到的 `$` 面 = 脚本沙盒那一份
+### AI 能碰到的 `$` 面 = 脚本沙盒那一份（🪦 已退役）
 
-**唯一面向 AI 的 `$` API 是 `script-executor.ts` 的 `ScriptSandbox`**（`buildSandbox()` 是这份名单的
-唯一真源 —— guest 面由 QuickJS 后端从它推导，加 `$foo` 不必动后端）。AI 写在物品/技能/buff 的
-`scripts` 池里的那段代码，看得见的就是下面这些，**没有别的**：
-
-| Namespace   | 方法                                                                                         | 语义                                                                      |
-| ----------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `$dice`     | `d20()` / `d100()` / `roll(公式)`                                                            | 骰池（`roll` 只认 `NdM±K`，认不出返 0）                                   |
-| `$resource` | 读 `getHp/getMaxHp/getMp/getMaxMp/getSp/getMaxSp/getHpPercent`；写 `modifyHp` / `modifyStat` | 读走 `readHooks`（**未注入时一律返 0**）；写只进收集器                    |
-| `$char`     | `getAttr(id, 五维英文键)` / `getTier(id)` / `isPresent(id)`                                  | 只读（未注入返 0 / 0 / false）                                            |
-| `$status`   | `add` / `apply` / `remove` / `setStacks` / `getStacks` / `has` / `query`                     | `apply` 走 BuffRegistry 去重（同源刷新+增层），`add` 是直接加、**不去重** |
-| `$event`    | `on(事件, scriptKey)→handle` / `off(handle 或事件)` / `emit(事件, data)`                     | 持久订阅由引擎在脚本执行后注册进 EventBus                                 |
-| `$call`     | `$call(ref)`（函数不是 namespace）                                                           | 跨对象脚本引用（`@parent` 继承链），子脚本的效果合并回本次收集器          |
-
-外加四个上下文变量：`owner` / `target` / `event` / `self`（`self.stacks` / `remainingTime` / `name` / `scripts`）。
-
-🔴 **沙盒里的写全是「收集意图」不是「改状态」**：`modifyHp` / `$status.*` / `$event.emit` 只往
-`ScriptEffects` 里 push，落库仍由调用方转成 StatePatch 走 `commitChatState`（ADR-21）。
-🔴 `$call` 有递归深度上限 `MAX_CALL_DEPTH`（旧实现靠爆栈兜底）。
-
-**退役的**：`$combat` 随 v2 运行时被 M5 删除（战斗内效果改走 `combat/automata/` 的
-EffectAutomaton DSL —— 声明式窗口订阅 + 封闭表达式文法，v3 不接受任意 JS）；`$craft` / `$var` /
-`$time` / `$validate` / `$location` / `$affection` / `$effect` / `$chargen` **从来就不在沙盒里** ——
-它们是各模块的**模块级导出对象**（`craft-resolver.ts` / `var-resolver.ts` / `time-system.ts` /
-`validate.ts` / `location-db.ts` / `affection-system.ts` / `effect-parser.ts` / `char-gen-agent.ts`），
-只有引擎 TS 代码 import 得到；AI 那一侧对应的是 agent-tools 的工具名（如 `craft_check` / `craft_settle`）。
-注意 `$char` 有**两个不相干的同名对象**：沙盒里那个（三个只读方法）和 `char-query.ts` 导出的那个
-（引擎侧查询集）—— 名字撞车，边界不同，别互相照抄方法名。
+> 🪦 **[2026-10-03] 本节已退役。** `script-executor.ts` 的 `ScriptSandbox`（`$dice` / `$resource` /
+> `$char` / `$status` / `$event` / `$call` 与 `owner`/`target`/`event`/`self` 上下文变量）随**战斗外
+> JS 脚本链**（Phase 1b·1c）整体删除，实体 `scripts` 池同步清出 —— **AI 可编程的 `$` 面已不存在**。
+>
+> ✅ **世界书 EJS（ADR-30）不受影响**：`ejs/` 的 QuickJS 沙盒与 `stats`/`vars` 两轴注入照常工作，
+> 与本次脚本退役无关。创作者规范见 `docs/reference/worldbook-ejs-regex-authoring-guide.md`。
+>
+> 引擎侧的 `$craft` / `$var` / `$time` / `$validate` / `$location` / `$affection` 等**模块级导出对象**
+> 与 `char-query.ts` 的 `$char` 不受影响（它们从来不在脚本沙盒里，只供引擎 TS import；AI 那一侧对应
+> 的是 agent-tools 的工具名）。
 
 ### 2026-09-05 可靠性契约补注
 
-- `reconcileEffectWiring(saveId, characters)` 以权威角色集合增删/替换订阅；提交后对账，离页/切档/删档拆线，覆盖上述早期仅 equip/unequip 的说明。
+- 🪦 [2026-10-03] `reconcileEffectWiring(saveId, characters)`（战斗外效果接线对账）随 `effect-wiring.ts` 删除，此条作废。
 - `StateManager.commitAiPatches` 为明确的 best-effort AI 接口，`commitChatState` 保留兼容；`commitDomainCommand` 在同一 save lock 与 Dexie 事务内整批提交，失败抛出且不发布事件。制作、战斗、物品生成/重铸使用后者。领域命令的 `delta_variable profile.fp` 调用既有 FP 账务函数，不写入故事变量。

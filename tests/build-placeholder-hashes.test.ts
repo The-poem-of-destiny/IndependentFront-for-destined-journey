@@ -110,10 +110,10 @@ describe('与引擎侧 hash 算法一致（D20 四态基线的前提）', () => 
     expect(hashWorldBook(sampleBook)).toBe(engineHashBook(sampleBook));
   });
 
-  it('15 本真实占位书逐本与引擎侧一致', () => {
+  it('16 本真实占位书逐本与引擎侧一致', () => {
     const dir = join(PLACEHOLDER_DIR, 'worldbooks');
     const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
-    expect(files.length).toBe(15);
+    expect(files.length).toBe(16);
     for (const f of files) {
       const book = JSON.parse(readFileSync(join(dir, f), 'utf8')) as WorldBook;
       expect(hashWorldBook(book)).toBe(engineHashBook(book));
@@ -362,10 +362,10 @@ describe('已提交的 placeholder-hashes.json', () => {
     expect(committed.version).toBe(PLACEHOLDER_VERSION);
   });
 
-  it('15 本齐、uid 全在 900001+ 保留段（D43①）、总条目 ≤150', () => {
+  it('16 本齐、uid 全在 900001+ 保留段（D43①）、总条目 ≤150', () => {
     const dir = join(PLACEHOLDER_DIR, 'worldbooks');
     const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
-    expect(files).toHaveLength(15);
+    expect(files).toHaveLength(16);
 
     let total = 0;
     for (const f of files) {

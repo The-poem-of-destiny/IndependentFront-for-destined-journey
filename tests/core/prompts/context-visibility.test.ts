@@ -60,7 +60,6 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
         cost: { type: 'SP', amount: 15 },
         cooldown: 3,
         effects: { 破甲: '无视目标30%防御力' },
-        scripts: { execute: '$dice.roll("2d6"); $resource.modifyHp(target, -dmg);' },
       },
     ],
     inventory: [
@@ -72,7 +71,6 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
         equippedSlot: '武器',
         stats: { 攻击力: 15 },
         effects: { 锋刃: '攻击时附带轻微出血效果' },
-        scripts: { onHit: '$resource.modifyHp(target, -5);' },
       },
       {
         id: 'inv_001',
@@ -82,7 +80,6 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
         type: 'consumable',
         rarity: '普通',
         effects: { 治疗: '饮用后恢复少量生命值' },
-        scripts: { use: '$resource.modifyHp(owner, 20);' },
       },
     ],
     statusEffects: [
@@ -97,10 +94,6 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
         source: '锻造事故',
         effects: {},
         effectDescriptions: { 灼痛: '每10分钟受到1点伤害' },
-        scripts: { tick: '$resource.modifyHp(owner, -1);' },
-        onApply: 'init',
-        onTick: 'tick',
-        onRemove: 'cleanup',
       },
     ],
     money: 50,
@@ -192,8 +185,7 @@ describe('Visibility Matrix', () => {
       'plot_post_check',
       'plot_outline',
       'craft_gen',
-      'char_gen',
-      'item_gen',
+      'entity_gen', // 2026-10-02：char_gen + item_gen 合并
       'plot_check',
       'plot_correct', // v3 stubs
     ];
@@ -498,8 +490,6 @@ describe('filterZoneContent — KEYS', () => {
     expect(result).not.toContain('力量12');
     // Should NOT contain equipment
     expect(result).not.toContain('铁剑');
-    // Should NOT contain scripts
-    expect(result).not.toContain('$resource');
   });
 });
 
@@ -519,8 +509,6 @@ describe('filterZoneContent — NARRATIVE', () => {
     expect(result).toContain('锋刃');
     // Stats numeric should be stripped (equipment.stats 不渲染)
     expect(result).not.toContain('+15攻击');
-    // Scripts should be stripped
-    expect(result).not.toContain('$resource');
   });
 
   it('strips skill cost/cooldown but keeps effects', () => {
@@ -536,8 +524,6 @@ describe('filterZoneContent — NARRATIVE', () => {
     // Cost/cooldown should be stripped (resource line has SP, so check for cost-related patterns)
     expect(result).not.toContain('SP消耗');
     expect(result).not.toContain('冷却');
-    // Scripts should be stripped
-    expect(result).not.toContain('$dice');
   });
 
   it('strips inventory stats but keeps effects and description', () => {
@@ -547,21 +533,14 @@ describe('filterZoneContent — NARRATIVE', () => {
     expect(result).toContain('治疗药水');
     expect(result).toContain('散发草药香气');
     expect(result).toContain('治疗');
-    // Scripts should be stripped
-    expect(result).not.toContain('$resource.modifyHp(owner');
   });
 
-  it('strips statusEffect scripts/onApply/onTick/onRemove but keeps effectDescriptions', () => {
+  it('keeps statusEffect effectDescriptions', () => {
     const content = { characters: [makeCharacter()] };
     const result = filterZoneContent('npc', content, 'NARRATIVE', 'story', ctx);
     expect(result).not.toBeNull();
     expect(result).toContain('轻微烧伤');
     expect(result).toContain('灼痛');
-    // Scripts and hooks should be stripped
-    expect(result).not.toContain('onApply');
-    expect(result).not.toContain('onTick');
-    expect(result).not.toContain('onRemove');
-    expect(result).not.toContain('$resource.modifyHp(owner, -1)');
   });
 
   it('ascension shows only enabled state and category names', () => {
@@ -637,7 +616,7 @@ describe('filterZoneContent — NARRATIVE', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('Integration: story Agent NARRATIVE output', () => {
-  it('produces narrative-formatted character data without scripts or numeric stats', () => {
+  it('produces narrative-formatted character data without numeric stats', () => {
     const ctx = makeAgentContext({
       characters: [
         makeCharacter({
@@ -654,7 +633,6 @@ describe('Integration: story Agent NARRATIVE output', () => {
               equippedSlot: '武器',
               stats: { 攻击力: 25, 暴击率: 5 },
               effects: { 锋刃: '攻击时附带轻微出血' },
-              scripts: { onCrit: '$resource.modifyHp(target, -30);' },
             },
           ],
         }),
@@ -676,10 +654,6 @@ describe('Integration: story Agent NARRATIVE output', () => {
     // 装备数值 —— 不要（stats 字典不渲染）
     expect(result).not.toContain('+15攻击');
     expect(result).not.toContain('stats');
-
-    // 脚本 —— 不要
-    expect(result).not.toContain('$resource');
-    expect(result).not.toContain('onCrit');
 
     // 提示注记
     expect(result).toContain('自然语言描述');

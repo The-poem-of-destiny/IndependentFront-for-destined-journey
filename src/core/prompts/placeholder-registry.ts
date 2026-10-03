@@ -750,7 +750,7 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
   SKILL_STATE: (ctx, _config, _params) => {
     const lines: string[] = [];
 
-    // ① 落库技能（item_gen 已生成的 / 已有角色的技能）
+    // ① 落库技能（entity_gen 已生成的 / 已有角色的技能）
     for (const char of ctx.characters ?? []) {
       const skills = char.skills ?? [];
       if (skills.length === 0) continue;
@@ -768,8 +768,8 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     }
 
     // ② 开局初始技能声明（openingPrompt 的自然语言「角色名已经掌握这些本领」段）。
-    //    主角 skills 落库为空（交给 item_gen 生成），request_dispatcher 必须从这份
-    //    声明里识别初始技能并逐条发 `<item_gen_request itemType="skill">`；旧分隔标题仍兼容。
+    //    主角 skills 落库为空（交给 entity_gen 生成），request_dispatcher 必须从这份
+    //    声明里识别初始技能并逐条发 `<entity_gen_request type="skill">`；旧分隔标题仍兼容。
     const opening = ctx.openingPrompt ?? '';
     if (opening) {
       const seg = extractOpeningSkillDeclaration(opening);
@@ -1010,7 +1010,7 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
    *
    * 只有 revealed+active 节点的 name/gist/involvedNpcs/thread ——
    * 无 motive、无连线意向（foreshadows/payoffs）、无 hidden/dormant/终态节点。
-   * 供 dispatcher 撰写贴合主线的 `<char_gen_request>`；也是 §3.4 场景 B 的投影来源。
+   * 供 dispatcher 撰写贴合主线的 `<entity_gen_request type="character">`；也是 §3.4 场景 B 的投影来源。
    * 空 → 空串零 token。
    */
   PLOT_THREAD_SURFACE: (ctx, _config, _params) => {
@@ -1028,7 +1028,7 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
   /**
    * 🧵 {{PLOT_CAST_PLAN}} — 本轮角色计划（pre 产出，同轮 ephemeral；设计 2026-09-12）。
    *
-   * 只给 dispatcher：正文里真出现的计划角色，`<char_gen_request>` 须沿用其 `ref` 并
+   * 只给 dispatcher：正文里真出现的计划角色，`<entity_gen_request type="character">` 须沿用其 `ref` 并
    * 完整复述 role/behavior/surface/nameConstraint。**secret 永不出现在此块**。
    * 空计划 / 无 pre（旧档）→ 空串零 token。
    */
@@ -1091,20 +1091,14 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
   IMAGE_REQUEST: (_ctx, _config, _params) => '',
   CRAFT_REQUEST: (_ctx, _config, _params) => '',
   CHAR_DETECT: (_ctx, _config, _params) => '',
-  ITEM_REQUEST: (_ctx, _config, _params) => '',
+  /** {{ENTITY_REQUEST}} — entity_gen 调用方经 localParams 注入的生成需求（角色描述 / <entity_requests> XML） */
+  ENTITY_REQUEST: (_ctx, _config, _params) => '',
 
   /** {{COMBAT_BRIEF}} — 战斗指令：战斗类型/环境/参战方与起因（来自 request_dispatcher 的 <combat_trigger>） */
   COMBAT_BRIEF: (_ctx, _config, _params) => '',
 
   /** {{COMBAT_ROSTER}} — 参战单位清单（我方/敌方名单，由 game-pipeline 从 <combat_trigger> 的 allies/enemies 组装） */
   COMBAT_ROSTER: (_ctx, _config, _params) => '',
-
-  /** {{CHAR_GEN_RESULT}} — char_gen 输出 (从 agentOutputs 读取) */
-  CHAR_GEN_RESULT: (ctx, _config, _params) => {
-    const v = ctx.agentOutputs?.get('char_gen');
-    if (!v) return '';
-    return typeof v === 'string' ? v : JSON.stringify(v);
-  },
 
   /** {{CRAFT_RESULT}} — craft_gen 输出 (从 agentOutputs 读取) */
   CRAFT_RESULT: (ctx, _config, _params) => {
@@ -1130,9 +1124,9 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   plot_pre_check:
     '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你判断剧情触发所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<剧情事件库>\n{{PLOT_EVENTS}}\n</剧情事件库>\n<!-- 引擎注入的剧情全景数据，内含三个子区块：<剧情大纲>(标题/版本/当前章节/章节进度/正文节选)、\n     <剧情事件列表>(全部活跃与待触发事件的标题+描述+状态+触发条件——含尚未向玩家揭示的 hidden 事件，\n     防剧透只在 UI 层，你必须全量审视)、<当前状态>(时间/位置/主角层级一行摘要)。\n     这是你触发判断的唯一事件来源——triggeredEvents 的 title 必须与 <剧情事件列表> 逐字一致。\n     区块为空或缺大纲时（如支线模式初期）以现有内容为准，保守判断，不编造事件。-->\n\n{{PLOT_THREAD_TURN}}\n<!-- 🧵 主线细化层（引擎阶段）：<plot_thread_gate> 表明本轮是否放行主线细化（随机+冷却+窗口距离，\n     由引擎判定，你只需要在 allowed=true 时产出 threadDeclarations，绝不用本块做闸门判据）。-->\n\n<记忆召回>\n{{AGENT.MEMORY_RECALL}}\n</记忆召回>\n<!-- 上游记忆召回 Agent 给出的相关历史记忆。用于核对触发条件中的历史前提\n     （如「与铁匠建立信任之后」）。为空表示本轮无相关记忆——缺证据时按条件未满足处理。-->\n\n<最近对话>\n{{NARRATIVE:layers=3}}\n</最近对话>\n<!-- 🔴 每轮变化。最近 3 轮正文与玩家输入。评估证据强度时它是第二优先级——\n     低于本轮 <用户输入> 的明确行动，高于 <记忆召回> 中的旧线索。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 🔴 每轮变化。本轮玩家的行动宣言——触发判断的首要证据来源。-->',
   request_dispatcher:
-    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你完成变量调度所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力文化、地理信息等。\n     判断角色种族和势力归属时参考此处。——稳定数据，优先查阅。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 当前存档中所有已有角色的列表（ID/Name/Race/Type/Tier/Location）。\n     这是你判断\"新角色 vs 已有角色\"的唯一依据——\n     角色名不在此表中 → 新角色 → <char_gen_request>；\n     角色名在此表中 → 已有角色 → <char_update_request>。-->\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n<!-- 所有角色背包中的物品、装备、材料清单。\n     这是你判断\"新物品 vs 已有物品\"的唯一依据——\n     物品名不在背包中 → 新物品 → <item_gen_request>；\n     物品名在背包中 → 已有物品 → <item_update_request>。-->\n\n<已有技能>\n{{SKILL_STATE}}\n</已有技能>\n<!-- 🔴 2026-08-02 新增: 所有角色的技能清单（含开局初始技能声明）。\n     这是你判断\"新技能 vs 已有技能\"的唯一依据——\n     技能名不在下表中 → 新技能 → <item_gen_request itemType="skill">（逐条单独发）；\n     技能名已在表中 → 已有技能，不重复生成。\n     开局初始技能声明标了「尚未落库，需生成」→ 逐条发 <item_gen_request itemType="skill">\n     让 item_gen 生成 stats/modifiers/automata。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n{{RECENT_COMBAT}}\n<!-- 最近一场已结算战斗的事实块（<recent_combat>，自带外壳）。战斗刚打完的那几轮它\n     会出现——正文里的战斗痕迹（尸体/焦痕/伤口）属于已结算战斗的战后延续，不要重发\n     <combat_trigger> 重演。缺席 = 没有已结算战斗记录，此区块零 token。-->\n\n\n{{PLOT_THREAD_SURFACE}}\n<!-- 🧵 主线细化层：已向玩家呈现的主线节点名称/简述/涉及人物（表层投影）。\n     其中的人物若在本轮正文里首次实质出场（已有名字但没有角色），发 <char_gen_request> 时\n     人物描述可与此处事件自然贴合；不在此列的主线信息不要打探/渲染。-->\n\n{{PLOT_CAST_PLAN}}\n<!-- 🧵 本轮角色计划（pre 产出、同轮临时）：本轮计划出场/推进的角色。\n     正文里真出现的计划角色，发 <char_gen_request> 时必须沿用其引用键（ref），\n     并完整复述身份/行为要求与命名约束，不得改写或省略。\n     仅本轮有效：命中才用，不得凭计划凭空造人；计划里的角色若未在正文出现，忽略。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n<!-- 🔴 高频变化：本回合 Story Agent 生成的叙事正文。\n     仔细阅读全文，从中提取所有变量变化、新角色/物品出现、制作场景。——这是你的核心输入。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 本轮用户的原始输入。开局轮此处是自然叙述式开场提示词，含初始装备与技能的原名、描述及必要机制信息。\n     正文里改写过的装备/技能若与此处声明对应，按此处的原名与原描述发 request，\n     不要用正文改写名——否则 item_gen 会丢数值重掷。-->',
+    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你完成变量调度所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力文化、地理信息等。\n     判断角色种族和势力归属时参考此处。——稳定数据，优先查阅。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 当前存档中所有已有角色的列表（ID/Name/Race/Type/Tier/Location）。\n     这是你判断\"新角色 vs 已有角色\"的唯一依据——\n     角色名不在此表中 → 新角色 → <entity_gen_request type=\"character\">；\n     角色名在此表中 → 已有角色 → <char_update_request>。-->\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n<!-- 所有角色背包中的物品、装备、材料清单。\n     这是你判断\"新物品 vs 已有物品\"的唯一依据——\n     物品名不在背包中 → 新物品 → <entity_gen_request type=\"equipment\">（装备）或 type=\"item\"（道具）；\n     物品名在背包中 → 已有物品 → <item_update_request>。-->\n\n<已有技能>\n{{SKILL_STATE}}\n</已有技能>\n<!-- 🔴 2026-08-02 新增: 所有角色的技能清单（含开局初始技能声明）。\n     这是你判断\"新技能 vs 已有技能\"的唯一依据——\n     技能名不在下表中 → 新技能 → <entity_gen_request type="skill">（逐条单独发）；\n     技能名已在表中 → 已有技能，不重复生成。\n     开局初始技能声明标了「尚未落库，需生成」→ 逐条发 <entity_gen_request type="skill">\n     让 entity_gen 生成完整条目。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n{{RECENT_COMBAT}}\n<!-- 最近一场已结算战斗的事实块（<recent_combat>，自带外壳）。战斗刚打完的那几轮它\n     会出现——正文里的战斗痕迹（尸体/焦痕/伤口）属于已结算战斗的战后延续，不要重发\n     <combat_trigger> 重演。缺席 = 没有已结算战斗记录，此区块零 token。-->\n\n\n{{PLOT_THREAD_SURFACE}}\n<!-- 🧵 主线细化层：已向玩家呈现的主线节点名称/简述/涉及人物（表层投影）。\n     其中的人物若在本轮正文里首次实质出场（已有名字但没有角色），发 <entity_gen_request type="character"> 时\n     人物描述可与此处事件自然贴合；不在此列的主线信息不要打探/渲染。-->\n\n{{PLOT_CAST_PLAN}}\n<!-- 🧵 本轮角色计划（pre 产出、同轮临时）：本轮计划出场/推进的角色。\n     正文里真出现的计划角色，发 <entity_gen_request type="character"> 时必须沿用其引用键（ref），\n     并完整复述身份/行为要求与命名约束，不得改写或省略。\n     仅本轮有效：命中才用，不得凭计划凭空造人；计划里的角色若未在正文出现，忽略。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n<!-- 🔴 高频变化：本回合 Story Agent 生成的叙事正文。\n     仔细阅读全文，从中提取所有变量变化、新角色/物品出现、制作场景。——这是你的核心输入。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 本轮用户的原始输入。开局轮此处是自然叙述式开场提示词，含初始装备与技能的原名、描述及必要机制信息。\n     正文里改写过的装备/技能若与此处声明对应，按此处的原名与原描述发 request，\n     不要用正文改写名——否则 entity_gen 会丢数值重掷。-->',
   vars_update:
-    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你更新角色/物品状态的完整上下文数据。       -->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。         -->\n<!-- ⚠️ 需要写脚本时调用 get_script_reference 工具。     -->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n\n<调度器输出>\n{{AGENT.REQUEST_DISPATCHER}}\n</调度器输出>\n<!-- request_dispatcher 的完整输出，包含 <char_update_request> 和 <item_update_request> 标签。\n     逐条读取每个标签，这是你需要处理的变更清单。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n\n<最近对话>\n{{NARRATIVE:layers=1}}\n</最近对话>',
+    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你更新角色/物品状态的完整上下文数据。       -->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。         -->\n<!-- ⚠️ 脚本系统已退役，不再支持脚本。     -->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n\n<调度器输出>\n{{AGENT.REQUEST_DISPATCHER}}\n</调度器输出>\n<!-- request_dispatcher 的完整输出，包含 <char_update_request> 和 <item_update_request> 标签。\n     逐条读取每个标签，这是你需要处理的变更清单。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n\n<最近对话>\n{{NARRATIVE:layers=1}}\n</最近对话>',
   memory_summary: '{{SYS_PROMPT}}\n{{AGENT.STORY}}\n{{NARRATIVE:layers=4}}',
   // Phase 10 结构化（2026-07-20）: 同 plot_pre_check，{{PLOT_EVENTS}} 由 localParams 覆盖为富上下文块。
   plot_post_check:
@@ -1142,10 +1136,9 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   // Phase 10 结构化模板：XML 分区 + 注释 + 缓存优化排序（稳定在上，动态在下）
   craft_gen:
     '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你完成制作任务所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力关系、地理信息、行业规范等。\n     制作产物的外观描述、材质选择、工艺风格应与当前世界观保持一致。\n     例如：尚武的山地文化锻造偏向实用粗犷，而重仪礼的学院文化炼金精于优雅调配。\n     区块为空时以通用奇幻设定为准，不凭空发明势力名/地名。-->\n\n<制作者状态>\n{{CHARACTER_STATE}}\n</制作者状态>\n<!-- 制作者及场景中其他角色的完整状态：基础属性(力量/智力/敏捷/精神)、当前HP/MP/SP、\n     等级与层级、已装备物品、已习得技能。制作准备阶段优先查阅此处获取核心属性值和层级信息，\n     以判断是否满足目标品质的层级封顶。若数据不足以完成检定，再调用 get_character 补充。-->\n\n<可用材料>\n{{INVENTORY}}\n</可用材料>\n<!-- 所有角色背包中的物品清单(材料/消耗品/装备等)。先查阅此处确认可用材料的种类和数量，\n     判断材料是否满足品质继承规则(至少2种同品质投入物)。若数据不完整再调用 get_inventory 补充。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n<本次制作需求>\n{{CRAFT_REQUEST}}\n</本次制作需求>\n<!-- 从正文 <craft_request> 标记中提取的制作需求。包含用户期望制作的物品、目标品质、行业类型、\n     预期效果描述等。这是你执行制作的核心依据——仔细阅读用户的需求，作为产物设计的起点。-->\n\n<当前剧情>\n{{NARRATIVE:layers=1}}\n</当前剧情>\n<!-- 最近的对话历史。帮助你理解制作发生的场景和上下文——在铁匠铺锻造与在篝火边修理，\n     叙事描写方式截然不同。制作叙事应与当前剧情场景自然衔接。-->',
-  char_gen:
-    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你生成角色所需的完整上下文数据。      -->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。    -->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖种族特性、血脉能力、势力关系、地理信息等。\n     角色外观、种族、文化背景、命名风格应与世界观保持一致。\n     例如：沙漠地带常见深色发肤的血统，而北方雪原多见浅色发瞳。\n     区块为空时以通用奇幻设定为准，不凭空发明势力名/地名/种族名。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 场景中所有已有角色的状态快照。第一步先查阅此处——检查是否存在同名角色，\n     若同名已有角色存在则直接复用其数据，不调用随机工具。\n     同时判断新角色与已有角色之间是否存在潜在的血缘、势力或社交关系。\n     若列表不完整需要查重，再调用 get_character 补充。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n<当前剧情场景>\n{{NARRATIVE:layers=1}}\n</当前剧情场景>\n<!-- 最近的对话历史。帮助你理解角色出场时的场景氛围——在酒馆偶遇、战场上对峙、\n     还是森林中邂逅，角色的外貌/装备/性格设定应贴合出场情境。-->\n\n<新角色描述>\n{{CHAR_DETECT}}\n</新角色描述>\n<!-- 从正文 <char_detect> 标记中提取的新角色描述，包含角色名、类型(npc/enemy/ally)、\n     外貌特征、行为表现、可能的背景线索。这是你生成角色的核心依据——\n     正文已明确的特征不要用随机工具覆盖，只用工具填充未提及的部分。-->',
-  item_gen:
-    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你生成物品/技能/装备所需的完整上下文。  -->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。    -->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力文化、地理信息等。\n     装备名和技能名应符合对应的文化和审美风格，品质描述统一使用7级体系。-->\n\n<可用物品库>\n{{INVENTORY}}\n</可用物品库>\n<!-- 所有角色背包中已有的物品、装备、材料清单。生成新物品时注意不与已有物品重复，\n     同时确保新装备的强度不会碾压已有装备，保持数值合理递增。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n<角色生成结果>\n{{CHAR_GEN_RESULT}}\n</角色生成结果>\n<!-- char_gen 输出的完整角色数据，包含 <skill_requests>/<equipment_requests>/<item_requests>\n     以及 <ascension> 登神长阶块（如有）。每个 <request> 中含需求描述和理由——\n     仔细阅读每一个 request，理解需求背后的角色定位，再开始编写。\n     若需要补充查询角色详细属性，调用 get_character。-->\n\n<制作结果>\n{{CRAFT_RESULT}}\n</制作结果>\n<!-- craft_gen 输出的制作结果，包含 <item_requests>。\n     仅在制作品质链中触发——为制作产物编写具体数值。未触发制作时此区块为空。-->\n\n<物品需求>\n{{ITEM_REQUEST}}\n</物品需求>\n<!-- 从 <item_requests> 中提取的具体需求列表。每个 <request> 对应一个需要编写的条目。\n     request 中的自然语言描述是唯一的需求来源——不要自行增减条目或改变需求方向。\n     注意区分来源：char_gen 的角色物品 vs craft_gen 的制作产物。-->\n\n<重铸目标>\n{{REWRITE_TARGET}}\n</重铸目标>\n<!-- 非空时进入重铸模式：这是要重写的那一个条目的当前完整数据。\n     只为它输出对应条目，并在条目上加 replace=\"<目标条目名>\" 属性声明替换。\n     不生成其他任何条目；空 = 普通新增模式。-->\n\n<重铸原因>\n{{REWRITE_REASON}}\n</重铸原因>\n<!-- 玩家对现状问题的描述（可能含 debug 线索，如「火球术伤害不对，应该 400 能量伤害却只有 200 物理伤害」）。\n     严格据此修正。空 = 无特殊说明。-->',
+  // entity_gen（2026-10-02 合并 char_gen + item_gen）：按 type 产角色/技能/装备/道具/状态/登神。
+  entity_gen:
+    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你生成实体所需的完整上下文数据。      -->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。    -->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖种族特性、血脉能力、势力关系、地理信息、\n     以及《技能装备道具生成规则》《核心数值表》《品质效果限定》《状态规则》等生成规则。\n     角色外观/命名/技能装备数值必须严格遵循这些条目。\n     区块为空时以通用奇幻设定为准，不凭空发明势力名/地名/种族名。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 所有已有角色的状态快照。生成角色前先查重：同名已有角色直接复用，不调用随机工具。\n     生成物品/技能时用它确认归属者的属性与已有装备，避免重复或数值碾压。-->\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n<!-- 所有角色背包中的物品、装备、材料清单。生成新条目时注意不与已有条目重名，\n     品质与强度保持合理递增。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n<当前剧情场景>\n{{NARRATIVE:layers=1}}\n</当前剧情场景>\n<!-- 最近的对话历史。帮助你理解实体出场/获得的场景氛围——外貌、装备、性格应贴合情境。-->\n\n<制作结果>\n{{CRAFT_RESULT}}\n</制作结果>\n<!-- craft_gen 输出的制作结果，包含 <item_requests>。仅制作链触发时非空。\n     为制作产物编写具体数值。空 = 非制作链。-->\n\n<重铸目标>\n{{REWRITE_TARGET}}\n</重铸目标>\n<!-- 非空时进入重铸模式：这是要重写的那一个条目的当前完整数据。\n     只为它输出对应条目，并在条目上加 replace=\"<目标条目名>\" 属性声明替换。\n     不生成其他任何条目；空 = 普通新增模式。-->\n\n<重铸原因>\n{{REWRITE_REASON}}\n</重铸原因>\n<!-- 玩家对现状问题的描述（可能含 debug 线索）。严格据此修正。空 = 无特殊说明。-->\n\n<生成需求>\n{{ENTITY_REQUEST}}\n</生成需求>\n<!-- 上游（request_dispatcher / 制作链 / 战斗召唤）给出的实体生成需求。\n     character 类型：含指定名称/种族/层级/类型/势力 + 场景描述；\n     物品类型：含 <entity_requests>（逐条 type/描述/归属者）。\n     自然语言描述是唯一的需求来源——不要自行增减条目或改变需求方向。\n     正文已明确的特征不要用随机工具覆盖，只用工具填充未提及的部分。-->',
   // 图像生成 G 阶段（D28）: image_prompt 侧链。由 scene-image-store 的 runPromptAgent 缝唤起，
   // 不走主 DAG。刻意短 —— 挂便宜快模型，机械转换不需要整套世界观（世界书默认关，§8.5）。
   image_prompt:

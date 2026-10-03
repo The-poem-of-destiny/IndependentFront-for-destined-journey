@@ -48,7 +48,6 @@ function makeNpc() {
         equippedSlot: '武器',
         stats: { 攻击力: 25 },
         description: '精铁锻造的长剑',
-        modifiers: [{ category: '固伤', source: '精铁剑', amount: 10 }],
       },
       { name: '草药', quantity: 2, type: '材料', rarity: '普通', description: '野外采的草药' },
     ],
@@ -130,7 +129,7 @@ describe('CharacterListPanel — 重铸', () => {
     expect(target.kind).toBe('equipment');
     expect(target.entry.name).toBe('精铁剑');
     expect(target.entry.slot).toBe('武器');
-    expect(target.entry.modifiers).toHaveLength(1);
+    expect(target.entry.stats).toEqual({ 攻击力: 25 });
   });
 
   it('技能条目重铸：target 是 skill', async () => {
@@ -185,32 +184,12 @@ describe('CharacterListPanel — 重铸', () => {
   });
 });
 
-describe('CharacterListPanel — 查看脚本升级（modifiers/automata）', () => {
-  it('装备带 modifiers → 查看原始数据 同时展示 modifiers JSON 与 scripts', async () => {
-    const wrapper = mountPanel();
-    await flushPromises();
-
-    const tabs = wrapper.findAll('.tab-row button');
-    await tabs.find((b) => b.text().startsWith('装备'))!.trigger('click');
-    await flushPromises();
-
-    await wrapper.find('.script-toggle').trigger('click');
-    await flushPromises();
-
-    const body = wrapper.find('.script-body');
-    expect(body.exists()).toBe(true);
-    expect(body.text()).toContain('modifiers / automata');
-    expect(body.text()).toContain('固伤');
-    expect(body.text()).toContain('"source": "精铁剑"');
-  });
-});
-
 /**
  * ★ 2026-09-12：NPC 角色面板的装备/技能/背包改用与玩家背包面板共用的 ItemDetailBody ——
- * 此前技能卡**完全没有品质显示**、没有「战斗修正」、effects 未归一化。这条钉住一致性。
+ * 此前技能卡**完全没有品质显示**、effects 未归一化。这条钉住一致性。
  */
 describe('CharacterListPanel — 与主角同款渲染', () => {
-  it('技能卡显示品质 + 战斗修正 + 效果归一化', async () => {
+  it('技能卡显示品质 + 效果归一化', async () => {
     mockGame.npcs = [
       {
         ...makeNpc(),
@@ -223,7 +202,6 @@ describe('CharacterListPanel — 与主角同款渲染', () => {
             rarity: '史诗',
             cost: { type: 'MP', amount: 10 },
             effects: ['灼烧:每回合造成伤害'],
-            modifiers: [{ category: '固伤', source: '火球术', amount: 30 }],
           },
         ],
       },
@@ -236,7 +214,6 @@ describe('CharacterListPanel — 与主角同款渲染', () => {
     await flushPromises();
 
     expect(wrapper.find('.d-quality').text()).toBe('史诗');
-    expect(wrapper.text()).toContain('战斗修正');
     const fxNames = wrapper.findAll('.fx-name').map((n) => n.text());
     expect(fxNames).toContain('灼烧');
   });

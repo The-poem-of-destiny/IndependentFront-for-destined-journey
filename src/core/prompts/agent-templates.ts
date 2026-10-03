@@ -67,8 +67,7 @@ export function defaultHistoryLayers(agentId: string): number {
     // 后置抽取型: 原本不看历史, 8.6 默认给 1 轮上轮辅助上文, 可配 0 关闭
     case 'request_dispatcher':
     case 'vars_update':
-    case 'char_gen':
-    case 'item_gen':
+    case 'entity_gen':
     case 'craft_gen':
       return 1;
     default:
@@ -92,8 +91,7 @@ export function defaultHistorySlice(agentId: string): number {
     // 后置型历史是辅助上文, 不必太长
     case 'request_dispatcher':
     case 'vars_update':
-    case 'char_gen':
-    case 'item_gen':
+    case 'entity_gen':
     case 'craft_gen':
       return 800;
     default:
@@ -486,7 +484,7 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
   // ---- vars_update: 变量更新（合并原 char_update + item_update，可选 Agentic）----
   vars_update: {
     fixedSystem:
-      '角色/物品状态更新系统。根据请求调度器的标签更新角色状态和物品状态，必要时调用工具编写状态效果脚本。完整提示词见 agent-config.json 和模板系统。',
+      '角色/物品状态更新系统。根据请求调度器的标签更新角色状态和物品状态。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples:
       '{"characters": {"replace": [{"name": "莱恩", "path": "hp", "value": 88}]}, "items": {"consume": [{"owner": "莱恩", "target": "治疗药水", "quantity": 1}]}}',
   },
@@ -517,28 +515,19 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
 
   // ---- craft_gen: 制作效果生成 (Phase 6e, Phase 9b 重写) ----
   // 完整提示词已迁移到 agent-config.json 的 systemPrompt 字段
-  // 输出格式: <craft_result> XML（含 <item_requests> 派发 item_gen）
+  // 输出格式: <craft_result> XML（含 <item_requests>，由 entity_gen 细化数值）
   craft_gen: {
     fixedSystem:
       '制作系统。通过 tools 调用获取真实数据生成制作结果，输出 <craft_result> XML。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples: '',
   },
 
-  // ---- char_gen: 角色生成 (Phase 6e) ----
+  // ---- entity_gen: 实体生成（2026-10-02 合并 char_gen + item_gen） ----
   // 完整提示词已迁移到 agent-config.json 的 systemPrompt 字段
-  // 输出格式: <char_result> XML（含 <skill_requests>/<equipment_requests>/<item_requests>）
-  char_gen: {
+  // 输出格式: <entity_result> XML（按 type 产 character/skill/equipment/item/status/ascension）
+  entity_gen: {
     fixedSystem:
-      '角色生成系统。通过 tools 调用获取真实随机值生成角色，输出 <char_result> XML。完整提示词见 agent-config.json 和模板系统。',
-    fixedExamples: '',
-  },
-
-  // ---- item_gen: 物品生成 (Phase 9) ----
-  // 完整提示词已迁移到 agent-config.json 的 systemPrompt 字段
-  // 输出格式: <item_result> XML
-  item_gen: {
-    fixedSystem:
-      '物品生成系统。基于 char_gen 输出通过 tools 生成技能/装备/道具，输出 <item_result> XML。完整提示词见 agent-config.json 和模板系统。',
+      '实体生成系统。把上游需求落成角色/技能/装备/道具/状态/登神，通过 tools 获取真实随机值，输出 <entity_result> XML。完整提示词见 agent-config.json 和模板系统。',
     fixedExamples: '',
   },
 
@@ -591,7 +580,7 @@ export function buildPlotContextBlock(agentId: string, ctx: AgentContext): strin
   const state = formatStateSummary(ctx);
   if (state) parts.push(`<当前状态>\n${state}\n</当前状态>`);
   // 🧵 主线细化层（2026-09-09）：事件线富块只进 pre/post（PLOT_AGENT_IDS 的消费方）。
-  //    含未揭示节点（防剧透只在 UI/dispatcher 面）；**不进 Story / dispatcher / char_gen**。
+  //    含未揭示节点（防剧透只在 UI/dispatcher 面）；**不进 Story / dispatcher / entity_gen**。
   const threads = formatPlotThreadsBlock(ctx);
   if (threads) parts.push(threads);
   return parts.join('\n\n');

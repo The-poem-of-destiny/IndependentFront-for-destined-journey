@@ -60,18 +60,18 @@ describe('AgentUpdateCenter —— 渲染门控（覆写差异）', () => {
   });
 
   it('覆写层有条目 → 渲染并列出', () => {
-    mockSettings.agents.char_gen = { systemPrompt: '用户改的' };
+    mockSettings.agents.entity_gen = { systemPrompt: '用户改的' };
     const w = mountCenter();
     expect(w.find('.update-center').exists()).toBe(true);
-    expect(w.find('.update-row-name').text()).toBe('角色生成');
+    expect(w.find('.update-row-name').text()).toBe('实体生成');
     expect(w.find('.update-row-fields').text()).toContain('提示词');
     // 只列 1 条时不显示「全部清除覆写」
     expect(w.findAll('.update-all')).toHaveLength(0);
   });
 
   it('多条覆写 → 渲染「全部清除覆写」', () => {
-    mockSettings.agents.char_gen = { systemPrompt: 'A' };
-    mockSettings.agents.item_gen = { systemPrompt: 'B' };
+    mockSettings.agents.entity_gen = { systemPrompt: 'A' };
+    mockSettings.agents.plot_outline = { systemPrompt: 'B' };
     mockSettings.agents.vars_update = { temperature: 0.5 };
     const w = mountCenter();
     expect(w.findAll('.update-row')).toHaveLength(3);
@@ -79,7 +79,7 @@ describe('AgentUpdateCenter —— 渲染门控（覆写差异）', () => {
   });
 
   it('覆写字段标签中文化（temperature → Temperature 等）', () => {
-    mockSettings.agents.char_gen = {
+    mockSettings.agents.entity_gen = {
       temperature: 0.5,
       worldBookEnabled: true,
       maxTokens: 8192,
@@ -94,26 +94,26 @@ describe('AgentUpdateCenter —— 渲染门控（覆写差异）', () => {
 
 describe('AgentUpdateCenter —— 清除覆写动作', () => {
   it('per-agent「清除覆写」→ 清掉该 agent 除 model 外的覆写 + toast', async () => {
-    mockSettings.agents.char_gen = {
+    mockSettings.agents.entity_gen = {
       systemPrompt: '用户改的',
       model: 'deepseek-chat', // model 应保留
       temperature: 1.5,
     };
-    mockSettings.agents.item_gen = { systemPrompt: 'B' };
+    mockSettings.agents.plot_outline = { systemPrompt: 'B' };
 
     const w = mountCenter();
     await w.findAllComponents(AppButton)[0].vm.$emit('click');
 
-    // char_gen 的非 model 字段清光，model 保留
-    expect(mockSettings.agents.char_gen).toEqual({ model: 'deepseek-chat' });
-    // item_gen 没被动
-    expect(mockSettings.agents.item_gen.systemPrompt).toBe('B');
+    // entity_gen 的非 model 字段清光，model 保留
+    expect(mockSettings.agents.entity_gen).toEqual({ model: 'deepseek-chat' });
+    // plot_outline 没被动
+    expect(mockSettings.agents.plot_outline.systemPrompt).toBe('B');
     expect(mockToast).toHaveBeenCalledTimes(1);
   });
 
   it('🔴 清除后该条从列表消失（reactive 重算）', async () => {
-    mockSettings.agents.char_gen = { systemPrompt: 'A' };
-    mockSettings.agents.item_gen = { systemPrompt: 'B' };
+    mockSettings.agents.entity_gen = { systemPrompt: 'A' };
+    mockSettings.agents.plot_outline = { systemPrompt: 'B' };
 
     const w = mountCenter();
     expect(w.findAll('.update-row')).toHaveLength(2);
@@ -124,8 +124,8 @@ describe('AgentUpdateCenter —— 清除覆写动作', () => {
   });
 
   it('「全部清除覆写」→ 清所有（边遍历边改 reactive 源不跳条）+ 单 toast', async () => {
-    mockSettings.agents.char_gen = { systemPrompt: 'A', model: 'm1' };
-    mockSettings.agents.item_gen = { systemPrompt: 'B', model: 'm2' };
+    mockSettings.agents.entity_gen = { systemPrompt: 'A', model: 'm1' };
+    mockSettings.agents.plot_outline = { systemPrompt: 'B', model: 'm2' };
     mockSettings.agents.vars_update = { systemPrompt: 'C', model: 'm3' };
 
     const w = mountCenter();
@@ -134,8 +134,8 @@ describe('AgentUpdateCenter —— 清除覆写动作', () => {
     await clearAllBtn.vm.$emit('click');
 
     // 全部清成只剩 model
-    expect(mockSettings.agents.char_gen).toEqual({ model: 'm1' });
-    expect(mockSettings.agents.item_gen).toEqual({ model: 'm2' });
+    expect(mockSettings.agents.entity_gen).toEqual({ model: 'm1' });
+    expect(mockSettings.agents.plot_outline).toEqual({ model: 'm2' });
     expect(mockSettings.agents.vars_update).toEqual({ model: 'm3' });
     // 全部清除后列表清空
     expect(w.findAll('.update-row')).toHaveLength(0);
@@ -145,9 +145,9 @@ describe('AgentUpdateCenter —— 清除覆写动作', () => {
 
   it('清除后解析值回默认层（applyProjectDefaultToAgent 清覆写，默认层接管）', async () => {
     mockStore.projectAgentDefaults = {
-      agents: { char_gen: { systemPrompt: '默认提示词', temperature: 0.4 } },
+      agents: { entity_gen: { systemPrompt: '默认提示词', temperature: 0.4 } },
     };
-    mockSettings.agents.char_gen = {
+    mockSettings.agents.entity_gen = {
       systemPrompt: '用户改的',
       model: 'ep-user',
       temperature: 1.5,
@@ -157,7 +157,11 @@ describe('AgentUpdateCenter —— 清除覆写动作', () => {
     await w.findAllComponents(AppButton)[0].vm.$emit('click');
 
     // 清后 model 保留、其余走默认层
-    const got = getAgentSettings(mockSettings, 'char_gen', mockStore.projectAgentDefaults!.agents);
+    const got = getAgentSettings(
+      mockSettings,
+      'entity_gen',
+      mockStore.projectAgentDefaults!.agents,
+    );
     expect(got.model).toBe('ep-user'); // 保留
     expect(got.systemPrompt).toBe('默认提示词'); // 默认层接管
     expect(got.temperature).toBe(0.4); // 默认层接管

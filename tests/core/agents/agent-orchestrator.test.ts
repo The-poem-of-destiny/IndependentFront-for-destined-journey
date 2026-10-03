@@ -1028,19 +1028,18 @@ describe('AgentOrchestrator — 事件回调', () => {
 // ========== Phase 6e: Marker Protocol 回调 ==========
 
 describe('AgentOrchestrator — Phase 6e Marker 回调', () => {
-  it('新 Agent ID (craft_gen, char_gen, item_gen, combat_summary) 应被 validatePipeline 接受', async () => {
+  it('新 Agent ID (craft_gen, entity_gen, combat_summary) 应被 validatePipeline 接受', async () => {
     globalThis.fetch = mockFetch('ok');
     const orch = new AgentOrchestrator({
       pipeline: {
         timeout: 30000,
         retryOnFail: false,
-        stages: [{ agents: ['craft_gen', 'char_gen', 'item_gen', 'combat_summary'], waitFor: [] }],
+        stages: [{ agents: ['craft_gen', 'entity_gen', 'combat_summary'], waitFor: [] }],
       },
       context: makeContext(),
       agentConfigs: [
         makeAgentConfig({ agentId: 'craft_gen' }),
-        makeAgentConfig({ agentId: 'char_gen' }),
-        makeAgentConfig({ agentId: 'item_gen' }),
+        makeAgentConfig({ agentId: 'entity_gen' }),
         makeAgentConfig({ agentId: 'combat_summary' }),
       ],
       endpoints: [makeEndpoint()],
@@ -1476,7 +1475,7 @@ describe('AgentOrchestrator — 侧链旁路化（barrier / combat 等待 / 末�
             choices: [
               {
                 message: {
-                  content: `<json>${UNIFIED_JSON}</json><char_gen_request characterName="新角色">铁匠</char_gen_request>`,
+                  content: `<json>${UNIFIED_JSON}</json><entity_gen_request type="character" characterName="新角色">铁匠</entity_gen_request>`,
                 },
               },
             ],
@@ -1487,7 +1486,7 @@ describe('AgentOrchestrator — 侧链旁路化（barrier / combat 等待 / 末�
       );
 
     let resolveSideChain!: () => void;
-    const onCharGenRequest = vi.fn(() => {
+    const onEntityGenRequest = vi.fn(() => {
       return new Promise<void>((resolve) => (resolveSideChain = resolve));
     });
 
@@ -1503,7 +1502,7 @@ describe('AgentOrchestrator — 侧链旁路化（barrier / combat 等待 / 末�
         endpoints: [makeEndpoint()],
         saveId: 'test',
       },
-      { onCharGenRequest },
+      { onEntityGenRequest },
     );
 
     commitChatStateMock.mockClear();
@@ -1511,7 +1510,7 @@ describe('AgentOrchestrator — 侧链旁路化（barrier / combat 等待 / 末�
     // 让微任务跑几拍：dispatcher 的 <json> 提交（第 1 次 commit）应已发生，
     // vars_update 的提交必须被 barrier 挡住（侧链未完成）
     await new Promise((r) => setTimeout(r, 20));
-    expect(onCharGenRequest).toHaveBeenCalledTimes(1);
+    expect(onEntityGenRequest).toHaveBeenCalledTimes(1);
     expect(commitChatStateMock.mock.calls.length).toBe(1);
 
     // 侧链完成 → barrier 放行 → vars_update 提交（第 2 次 commit）
@@ -1543,7 +1542,7 @@ describe('AgentOrchestrator — 侧链旁路化（barrier / combat 等待 / 末�
             choices: [
               {
                 message: {
-                  content: `<json>${UNIFIED_JSON}</json><char_gen_request characterName="新角色">铁匠</char_gen_request><combat_trigger combatType="死斗">Boss 战</combat_trigger>`,
+                  content: `<json>${UNIFIED_JSON}</json><entity_gen_request type="character" characterName="新角色">铁匠</entity_gen_request><combat_trigger combatType="死斗">Boss 战</combat_trigger>`,
                 },
               },
             ],
@@ -1556,11 +1555,11 @@ describe('AgentOrchestrator — 侧链旁路化（barrier / combat 等待 / 末�
     let combatSawSideChainDone = false;
     let sideChainDone = false;
     let resolveSideChain!: () => void;
-    const onCharGenRequest = vi.fn(() => {
+    const onEntityGenRequest = vi.fn(() => {
       return new Promise<void>((resolve) => (resolveSideChain = resolve));
     });
     const onCombatTrigger = vi.fn(async () => {
-      // combat 分支必须先等 char_gen（参战方新角色先生成）
+      // combat 分支必须先等 entity_gen 角色生成（参战方新角色先生成）
       combatSawSideChainDone = sideChainDone;
       return null;
     });
@@ -1577,7 +1576,7 @@ describe('AgentOrchestrator — 侧链旁路化（barrier / combat 等待 / 末�
         endpoints: [makeEndpoint()],
         saveId: 'test',
       },
-      { onCharGenRequest, onCombatTrigger },
+      { onEntityGenRequest, onCombatTrigger },
     );
 
     const runPromise = orch.run();
@@ -1614,7 +1613,7 @@ describe('AgentOrchestrator — 侧链旁路化（barrier / combat 等待 / 末�
             choices: [
               {
                 message: {
-                  content: `<json>${UNIFIED_JSON}</json><char_gen_request characterName="新角色">铁匠</char_gen_request>`,
+                  content: `<json>${UNIFIED_JSON}</json><entity_gen_request type="character" characterName="新角色">铁匠</entity_gen_request>`,
                 },
               },
             ],
@@ -1625,7 +1624,7 @@ describe('AgentOrchestrator — 侧链旁路化（barrier / combat 等待 / 末�
       );
 
     let resolveSideChain!: () => void;
-    const onCharGenRequest = vi.fn(() => {
+    const onEntityGenRequest = vi.fn(() => {
       return new Promise<void>((resolve) => (resolveSideChain = resolve));
     });
 
@@ -1647,12 +1646,12 @@ describe('AgentOrchestrator — 侧链旁路化（barrier / combat 等待 / 末�
         endpoints: [makeEndpoint()],
         saveId: 'test',
       },
-      { onCharGenRequest },
+      { onEntityGenRequest },
     );
 
     const runPromise = orch.run();
     await new Promise((r) => setTimeout(r, 10));
-    expect(onCharGenRequest).toHaveBeenCalledTimes(1);
+    expect(onEntityGenRequest).toHaveBeenCalledTimes(1);
     // 侧链未完成 → run() 必须挂起（末尾 await）
     let runSettled = false;
     void runPromise.then(() => (runSettled = true));

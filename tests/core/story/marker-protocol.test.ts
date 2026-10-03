@@ -371,8 +371,8 @@ describe('MARKER_TAGS', () => {
     expect(MARKER_TAGS).toContain('char_detect');
   });
 
-  it('长度应为 11 (Phase 10 的 5 种 request + play_audio + scene_image + event_trigger)', () => {
-    expect(MARKER_TAGS).toHaveLength(11);
+  it('长度应为 10 (Phase 10 的 4 种 request + play_audio + scene_image + event_trigger)', () => {
+    expect(MARKER_TAGS).toHaveLength(10);
     expect(MARKER_TAGS).toContain('play_audio');
     expect(MARKER_TAGS).toContain('scene_image');
     expect(MARKER_TAGS).toContain('event_trigger');
@@ -386,16 +386,15 @@ describe('MARKER_TAG_SET', () => {
     expect(MARKER_TAG_SET.has('craft_request')).toBe(true);
     expect(MARKER_TAG_SET.has('combat_trigger')).toBe(true);
     expect(MARKER_TAG_SET.has('char_detect')).toBe(true);
-    // Phase 10 新增
-    expect(MARKER_TAG_SET.has('char_gen_request')).toBe(true);
+    // Phase 10 新增（2026-10-02：char_gen_request + item_gen_request → entity_gen_request）
+    expect(MARKER_TAG_SET.has('entity_gen_request')).toBe(true);
     expect(MARKER_TAG_SET.has('char_update_request')).toBe(true);
-    expect(MARKER_TAG_SET.has('item_gen_request')).toBe(true);
     expect(MARKER_TAG_SET.has('item_update_request')).toBe(true);
     expect(MARKER_TAG_SET.has('craft_gen_request')).toBe(true);
   });
 
-  it('大小应为 11 (Phase 10 的 5 种 request + play_audio + scene_image + event_trigger)', () => {
-    expect(MARKER_TAG_SET.size).toBe(11);
+  it('大小应为 10 (Phase 10 的 4 种 request + play_audio + scene_image + event_trigger)', () => {
+    expect(MARKER_TAG_SET.size).toBe(10);
     expect(MARKER_TAG_SET.has('play_audio')).toBe(true);
     expect(MARKER_TAG_SET.has('scene_image')).toBe(true);
     expect(MARKER_TAG_SET.has('event_trigger')).toBe(true);

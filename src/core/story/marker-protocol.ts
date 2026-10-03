@@ -33,9 +33,8 @@ import type {
   CraftRequestMarker,
   CombatTriggerMarker,
   CharDetectMarker,
-  CharGenRequestMarker,
+  EntityGenRequestMarker,
   CharUpdateRequestMarker,
-  ItemGenRequestMarker,
   ItemUpdateRequestMarker,
   CraftGenRequestMarker,
   PlayAudioMarker,
@@ -176,10 +175,16 @@ const MARKER_SPECS: { [K in BlockMarkerType]: MarkerSpec<MarkerOf<K>> } = {
     }),
   },
   // Phase 10 新增: request_dispatcher 调度器 request 标签（专有字段收在 attributes 下）
-  char_gen_request: {
+  // 🔴 2026-10-02 硬改名: char_gen_request + item_gen_request 合并为 entity_gen_request，
+  //    XML 属性 `type` 区分实体类型（character/skill/equipment/item/status/ascension）。
+  entity_gen_request: {
     emptyBody: '',
     fields: (a) => ({
       attributes: {
+        // 认不出的类型回落 'item'（最保守的生成类型，不会误造角色）
+        entityType: (a['type'] as EntityGenRequestMarker['attributes']['entityType']) || 'item',
+        owner: a['owner'],
+        source: a['source'],
         characterName: a['characterName'],
         race: a['race'],
         tier: a['tier'],
@@ -191,16 +196,6 @@ const MARKER_SPECS: { [K in BlockMarkerType]: MarkerSpec<MarkerOf<K>> } = {
   char_update_request: {
     emptyBody: '',
     fields: (a) => ({ attributes: { target: a['target'] || '' } }),
-  },
-  item_gen_request: {
-    emptyBody: '',
-    fields: (a) => ({
-      attributes: {
-        itemType: a['itemType'] || '',
-        source: a['source'],
-        owner: a['owner'],
-      },
-    }),
   },
   item_update_request: {
     emptyBody: '',
@@ -436,19 +431,17 @@ export function scanCharDetects(text: string): CharDetectMarker[] {
 
 // ========== Phase 10: vars_update 调度器标签扫描 ==========
 
-/** 扫描文本中的 `<char_gen_request>` 标记 */
-export function scanCharGenRequests(text: string): CharGenRequestMarker[] {
-  return scanByTag(text, 'char_gen_request');
+/**
+ * 扫描文本中的 `<entity_gen_request>` 标记（2026-10-02 硬改名）。
+ * `type` 属性区分实体类型；认不出类型的回落 `'item'`。
+ */
+export function scanEntityGenRequests(text: string): EntityGenRequestMarker[] {
+  return scanByTag(text, 'entity_gen_request');
 }
 
 /** 扫描文本中的 `<char_update_request>` 标记 */
 export function scanCharUpdateRequests(text: string): CharUpdateRequestMarker[] {
   return scanByTag(text, 'char_update_request');
-}
-
-/** 扫描文本中的 `<item_gen_request>` 标记 */
-export function scanItemGenRequests(text: string): ItemGenRequestMarker[] {
-  return scanByTag(text, 'item_gen_request');
 }
 
 /** 扫描文本中的 `<item_update_request>` 标记 */

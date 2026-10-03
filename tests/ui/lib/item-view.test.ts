@@ -10,8 +10,6 @@ import {
   typeLabel,
   detailExtra,
   entryEffects,
-  entryCombatLines,
-  entryRawCombatJson,
   type PanelEntry,
 } from '../../../src/ui/lib/item-view';
 
@@ -78,7 +76,7 @@ describe('typeLabel / detailExtra', () => {
   });
 });
 
-describe('entryEffects / 战斗', () => {
+describe('entryEffects', () => {
   it('效果三种形态都归一化（数组不再吐数字键）', () => {
     expect(entryEffects(item({ effects: { 灼烧: '每回合伤害' } }))).toEqual({ 灼烧: '每回合伤害' });
     expect(entryEffects(item({ effects: ['灼烧:每回合伤害', '减速:移速下降'] }))).toEqual({
@@ -90,13 +88,5 @@ describe('entryEffects / 战斗', () => {
       减速: '移速下降',
     });
     expect(entryEffects(item())).toEqual({});
-  });
-  it('无 modifiers/automata → 无战斗修正行；原始 JSON 为空', () => {
-    expect(entryCombatLines(item())).toEqual([]);
-    expect(entryRawCombatJson(item())).toBe('');
-  });
-  it('有 modifiers → 原始 JSON 非空', () => {
-    const row = item({ modifiers: [{ kind: 'flat', value: 10 }] });
-    expect(entryRawCombatJson(row)).toContain('flat');
   });
 });

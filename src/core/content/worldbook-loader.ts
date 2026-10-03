@@ -21,7 +21,7 @@ import {
 // ========== 加载 ==========
 
 // 🪦 D28（波 1 T2）: `WORLD_BOOK_FILES` + `loadWorldBooks(ids)` 已删。
-// 15 本内置世界书清单的唯一真源是 `builtin-worldbooks.ts` 的 `BUILTIN_IDS`，
+// 16 本内置世界书清单的唯一真源是 `builtin-worldbooks.ts` 的 `BUILTIN_IDS`，
 // 加载入口是同文件的 `loadBuiltInWorldBooks()`。此前这里重复一份清单 + 一个无人调
 // 的 `loadWorldBooks(ids)` fetch 包装——两份清单漂移过（见设计 D28）。
 // `loadWorldBooksSync` 与 `getEntriesForAgent` 等纯函数保留。

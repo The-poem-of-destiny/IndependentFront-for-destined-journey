@@ -22,15 +22,12 @@ import {
   saveCharacter,
 } from '../../../src/core/persistence/database';
 
-describe('战斗双角色定案后的工具面', () => {
-  it('彻底移除旧 write_summary 工具，终局改走主持人正文调用', () => {
-    expect(getToolDefinition('write_summary')).toBeUndefined();
-    expect(getToolsForAgent('combat').map((tool) => tool.function.name)).not.toContain(
-      'write_summary',
-    );
-    expect(getToolsForAgent('combat_enemy').map((tool) => tool.function.name)).not.toContain(
-      'write_summary',
-    );
+describe('战斗沙盒工具面', () => {
+  it('getToolsForAgent(combat) 下发沙盒工具，不再有 v3 命令类工具', () => {
+    const names = getToolsForAgent('combat').map((tool) => tool.function.name);
+    expect(names).toContain('combat_set_meta');
+    expect(names).toContain('combat_yield_to_player');
+    expect(names).not.toContain('declare_attack');
   });
 });
 
@@ -147,71 +144,6 @@ describe('复用工具回归保护', () => {
     expect(equipment[1]).toMatchObject({ name: '皮甲', slot: '身体' });
   });
 
-  it('get_unit_detail 返回五维+技能+装备的聚合形状（combat session revamp §2.2）', async () => {
-    const char = makeCharacter({
-      id: 'uuid_unit',
-      name: '敌方首领',
-      attributes: { str: 16, dex: 12, con: 14, int: 8, spi: 10 },
-      skills: [
-        {
-          name: '裂地斩',
-          type: 'active',
-          description: '以巨力砸向地面。',
-          cost: { type: 'MP', amount: 8 },
-          cooldown: 0,
-          maxCooldown: 2,
-          effects: { 眩晕: '命中附加眩晕' },
-          skillPower: 50,
-          relevantAttribute: 'str',
-        },
-        { name: '钢铁皮肤', description: '硬化表皮。', type: 'passive' },
-      ],
-      inventory: [
-        {
-          name: '巨剑',
-          quantity: 1,
-          equippedSlot: '武器',
-          rarity: '史诗',
-          effects: { 锋利: '伤害+8' },
-        },
-        { name: '重甲', quantity: 1, equippedSlot: '身体', rarity: '稀有' },
-        { name: '治疗药水', quantity: 2, type: '消耗品' }, // 躺背包 → 不出现在 equipment
-      ],
-    });
-
-    const r = await executeToolCall(
-      'get_unit_detail',
-      { characterId: '敌方首领' },
-      makeCtx([char]),
-    );
-
-    expect(r.found).toBe(true);
-    // 五维
-    expect(r.attributes).toEqual({ str: 16, dex: 12, con: 14, int: 8, spi: 10 });
-    // 技能
-    const skills = r.skills as Array<{ name: string; type: string }>;
-    expect(skills.map((s) => s.name)).toEqual(['裂地斩', '钢铁皮肤']);
-    expect(skills[0]).toMatchObject({
-      type: 'active',
-      cost: { type: 'MP', amount: 8 },
-      skillPower: 50,
-    });
-    // 装备（只含已装备，躺背包不出现）
-    const equipment = r.equipment as Array<{ name: string; slot: string }>;
-    expect(equipment.map((e) => e.name)).toEqual(['巨剑', '重甲']);
-    expect(equipment[0]).toMatchObject({ slot: '武器', rarity: '史诗' });
-  });
-
-  it('get_unit_detail 未命中返回 found:false', async () => {
-    const r = await executeToolCall(
-      'get_unit_detail',
-      { characterId: '不存在的单位' },
-      makeCtx([]),
-    );
-    expect(r.found).toBe(false);
-    expect(r.characterId).toBe('不存在的单位');
-  });
-
   it('get_inventory 接受中文材料类型并按角色名寻址', async () => {
     const char = makeCharacter({
       id: 'uuid_inventory',
@@ -266,80 +198,7 @@ describe('复用工具回归保护', () => {
     await expect(executeToolCall('call_item_gen', {}, makeCtx())).rejects.toThrow(
       '未注册或不在本 Agent 白名单',
     );
-    await expect(executeToolCall('call_item_gen', {}, makeCtx())).rejects.toThrow('skill_requests');
-  });
-
-  // 🆕 S2b（2026-08-01 制造反向链路）：craft_check 收集装备「生产检定」modifier → toolBonus
-  it('craft_check 装备生产检定 modifier → toolBonus 计入固定加值', async () => {
-    const char = makeCharacter({
-      name: '匠人',
-      tier: 3,
-      attributes: { str: 12, dex: 10, con: 10, int: 10, spi: 10 },
-      inventory: [
-        {
-          name: '锻火铁锤',
-          description: '',
-          quantity: 1,
-          equippedSlot: '武器',
-          modifiers: [
-            { category: '检定', source: '锻火铁锤', checkType: '生产', bonus: 5 },
-            { category: '检定', source: '锻火铁锤', checkType: '命中', bonus: 9 }, // 命中不走制造
-          ],
-        },
-        // 躺背包的生产检定 modifier 不应计入（只有已装备）
-        {
-          name: '闲置模具',
-          description: '',
-          quantity: 1,
-          modifiers: [{ category: '检定', source: '闲置模具', checkType: '生产', bonus: 99 }],
-        },
-      ],
-    });
-    const ctx = makeCtx([char]);
-    const r = await executeToolCall(
-      'craft_check',
-      { characterId: 'char_1', industry: '锻造', productName: '铁剑', materials: [] },
-      ctx,
-    );
-    // coreAttr(12) + toolBonus(5, 生产检定) + d20 = 17 + d20；命中+9 不进制造
-    expect(r.fixedBonus).toBe(17);
-    // 只进加值、不减免 DC（S2c）：普通品质产能减免 1 → finalDC 5（未被 toolBonus 再减）
-    expect(r.finalDC).toBe(5);
-  });
-
-  // 🆕 S4a（2026-08-01）：技能「生产检定」modifier → skillBonus 计入固定加值（收 S2-2）
-  it('craft_check 技能生产检定 modifier → skillBonus 计入固定加值', async () => {
-    const char = makeCharacter({
-      name: '匠人学徒',
-      tier: 3,
-      attributes: { str: 12, dex: 10, con: 10, int: 10, spi: 10 },
-      inventory: [],
-      skills: [
-        {
-          name: '锻造辅助',
-          description: '深谙火候与锻打手法。',
-          type: 'passive',
-          modifiers: [
-            { category: '检定', source: '锻造辅助', checkType: '生产', bonus: 3 },
-            { category: '检定', source: '锻造辅助', checkType: '命中', bonus: 9 }, // 命中不走制造
-          ],
-        },
-        {
-          name: '战斗本能',
-          description: '',
-          type: 'passive',
-          modifiers: [{ category: '检定', source: '战斗本能', checkType: '命中', bonus: 99 }],
-        },
-      ],
-    });
-    const ctx = makeCtx([char]);
-    const r = await executeToolCall(
-      'craft_check',
-      { characterId: 'char_1', industry: '锻造', productName: '铁剑', materials: [] },
-      ctx,
-    );
-    // coreAttr(12) + skillBonus(3, 生产检定) + d20 = 15 + d20；命中不加
-    expect(r.fixedBonus).toBe(15);
+    await expect(executeToolCall('call_item_gen', {}, makeCtx())).rejects.toThrow('entity_result');
   });
 
   it('craft_settle 将按名解析的制作者写成 StatePatch 角色名并真实扣除材料', async () => {
@@ -534,17 +393,6 @@ describe('craft 骰带 — 真骰子 + check/settle 同源', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('executeToolCall — 失败形态只有一种', () => {
-  it('get_script_reference 未知分类 throw，异常消息里带可用清单', async () => {
-    await expect(
-      executeToolCall('get_script_reference', { query: '不存在的分类' }, makeCtx()),
-    ).rejects.toThrow(/未知分类.*可用/s);
-  });
-
-  it('get_script_reference 合法分类仍是正常结果', async () => {
-    const r = await executeToolCall('get_script_reference', { query: 'all' }, makeCtx());
-    expect(typeof r.reference).toBe('string');
-  });
-
   it('craft_get_production_bonus 表外品质 throw（旧实现返回裸 null，模型无从判断）', async () => {
     await expect(
       executeToolCall('craft_get_production_bonus', { quality: '不存在的品质' }, makeCtx()),
@@ -580,7 +428,7 @@ describe('random_name 工具描述的品牌面（D26）', () => {
 
   it('getToolsForAgent 出口同样套上品牌面（两个读取口不许漂移）', () => {
     installContentRegistry({ ...getContentRegistry(), branding: { appTitle: '某某作品' } });
-    const tools = getToolsForAgent('char_gen');
+    const tools = getToolsForAgent('entity_gen');
     const def = tools.find((t) => t.function.name === 'random_name');
     expect(def).toBeDefined();
     expect(def!.function.description).toContain('《某某作品》');
@@ -721,7 +569,9 @@ describe('random_name_seed 工具', () => {
     expect(String(r.hint)).toContain('random_name');
   });
 
-  it('random_name_seed 在 char_gen 工具白名单里', () => {
-    expect(getToolsForAgent('char_gen').map((t) => t.function.name)).toContain('random_name_seed');
+  it('random_name_seed 在 entity_gen 工具白名单里', () => {
+    expect(getToolsForAgent('entity_gen').map((t) => t.function.name)).toContain(
+      'random_name_seed',
+    );
   });
 });

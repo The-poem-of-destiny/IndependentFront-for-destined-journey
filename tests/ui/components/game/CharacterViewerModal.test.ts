@@ -333,10 +333,10 @@ describe('CharacterViewerModal — 页签', () => {
 
   /**
    * ★ 2026-09-12：技能页改用与玩家背包面板共用的 ItemDetailBody ——
-   * 此前 NPC 技能卡**完全没有品质显示**、没有「战斗修正」，且 effects 未归一化
+   * 此前 NPC 技能卡**完全没有品质显示**，且 effects 未归一化
    * （数组形态会吐数字键）。这条钉住「和主角显示一致」。
    */
-  it('★ 技能页与主角同款渲染：品质 + 战斗修正 + 效果归一化', async () => {
+  it('★ 技能页与主角同款渲染：品质 + 效果归一化', async () => {
     await open('技能', {
       skills: [
         {
@@ -351,7 +351,6 @@ describe('CharacterViewerModal — 页签', () => {
       ],
     } as never);
     expect(document.querySelector('.d-quality')?.textContent).toBe('史诗');
-    expect(document.querySelector('.viewer')?.textContent).toContain('战斗修正');
     const fxNames = [...document.querySelectorAll('.fx-name')].map((n) => n.textContent);
     expect(fxNames).toContain('灼烧');
   });

@@ -1,275 +1,203 @@
 <script setup lang="ts">
 /**
- * CombatUnitCard.vue — 战斗单位紧凑卡片（M5 前端战斗面板 P1 子组件 · v3 数据源）
+ * CombatUnitCard.vue — 战斗单位卡（C6 · 数据源 = 沙盒 `CombatUnit`）
  *
- * 渲染单个参战单位（v3 CombatUnitView）的紧凑卡片，用于 CombatPanel 的敌我展示区
- * （敌方在上、我方在下）。展示：品质色点 + 名字 + tier + HP/MP/SP 资源条
- * + buff chips + 战意 + 低血/死亡/当前行动者/无法行动 状态标记。
+ * 渲染单个参战单位：名字（品质色点 + 着色）+ T/等级 + 位置 + HP/MP/SP + 五维 +
+ * 攻击/动作槽 + 状态 + 技能 / 装备列表（全部从单位数据读，组件不写死任何单位/技能/数值）。
  *
- * 详情展开（设计 §3.3）：五维 + 技能列表 + Lv —— v3 CombatUnitView 不含五维/等级
- * （外层零额外拉取），从本地 characters 数据按单位 id（= 角色名，铁律 ①）反查，
- * 查不到（怪物/临时单位）显示占位文案。
- *
- * 设计规范遵循 docs/design.md：
- * - 禁侧边条，品质用色点 + 名字着色（§5.3）
- * - 选中态环绕光晕用 box-shadow（§4.2）
- * - 间距用 --theme-spacing-* 变量（§3）
- * - 名字用 var(--theme-font-title)（§2 衬线叙事）
- * - HP 闪烁动画配合 prefers-reduced-motion（§6.3）
+ * 设计规范遵循 docs/design.md：品质用色点 + 名字着色（§5.3，禁侧边条）、
+ * 间距用 --theme-spacing-*、非当前行动者降低存在感、`prefers-reduced-motion`。
  */
-
-import { computed, ref } from 'vue';
-import { MORALE_STATE_LABELS, type CharacterState, type StatusEffect } from '@engine/types/types';
-import { useGameStore } from '../../../stores/game-store';
+import { computed } from 'vue';
+import type { CombatUnit } from '@engine/combat/sandbox/types';
 import { qualityLabelForTier, qualityVar } from '../../../lib/quality-colors';
-import type { CombatUnit } from './combat-projection';
+import {
+  COMBAT_ATTRIBUTE_LABELS,
+  COMBAT_FACING_LABELS,
+  moraleLabel,
+  resourcePercent,
+  slotStatesOf,
+  statusViewsOf,
+} from './combat-view';
 import ResourceBar from '../../shared/ResourceBar.vue';
 import BuffChip from '../../shared/BuffChip.vue';
 
 const props = withDefaults(
   defineProps<{
-    /** v3 参战单位数据（CombatUnitView，经 CombatView.units 索引推导） */
     unit: CombatUnit;
-    /** 是否为当前行动者（高亮环绕光晕） */
-    isCurrentTurn?: boolean;
+    /** 当前行动者（环绕光晕） */
+    isCurrent?: boolean;
+    /** 高亮为可选目标 / 落点 */
+    isTarget?: boolean;
   }>(),
-  { isCurrentTurn: false },
+  { isCurrent: false, isTarget: false },
 );
 
-const game = useGameStore();
-
-// Q-11: tier(1-7) → 中文品质名（世界书 T1-T7 = 普通~唯一）走唯一入口，
-// 此前本文件自带一张带 0 号占位的平行表。
-const tierToQuality = qualityLabelForTier;
-
-// ── 详情展开（设计 §3.3）──
-const expanded = ref(false);
-
-/** 五维中文标签（与 StatusOverview / CharacterListPanel 同口径） */
-const ATTR_ROWS: ReadonlyArray<{ key: keyof CharacterState['attributes']; label: string }> = [
-  { key: 'str', label: '力量' },
-  { key: 'dex', label: '敏捷' },
-  { key: 'con', label: '体质' },
-  { key: 'int', label: '智力' },
-  { key: 'spi', label: '精神' },
-];
-
-/** 详情数据：本地 characters 按单位 id（= 角色名）反查；只在展开时才查 */
-const detail = computed<CharacterState | null>(() => {
-  if (!expanded.value) return null;
-  return game.characters.find((c) => c.id === props.unit.id) ?? null;
-});
-
-// ── 派生状态 ──
-
-const qualityName = computed(() => tierToQuality(props.unit.tier));
+const qualityName = computed(() => qualityLabelForTier(props.unit.tier));
 const qualityColor = computed(() => qualityVar(qualityName.value));
 
-/** 战意中文标签（MORALE_STATE_LABELS 是唯一入口） */
-const moraleLabel = computed(() => MORALE_STATE_LABELS[props.unit.morale] ?? props.unit.morale);
-
-/** HP 百分比（0-100），maxHp<=0 时返回 0 */
-const hpPercent = computed(() => {
-  const { hp, maxHp } = props.unit;
-  if (maxHp <= 0) return 0;
-  return Math.min(100, Math.max(0, (hp / maxHp) * 100));
-});
-
-/** 是否死亡（hp <= 0） */
-const isDead = computed(() => props.unit.hp <= 0);
-
-/** 是否低血（HP < 30% 且 hp > 0） */
-const isLowHp = computed(() => !isDead.value && hpPercent.value > 0 && hpPercent.value < 30);
-
-/** 是否无法行动（非死亡但 canAct=false，如眩晕/冰冻） */
+const isDead = computed(() => !props.unit.alive || props.unit.hp <= 0);
+const isLowHp = computed(
+  () => !isDead.value && resourcePercent(props.unit.hp, props.unit.maxHp) < 30,
+);
 const isIncapacitated = computed(() => !isDead.value && !props.unit.canAct);
 
-// ── BuffChip 类型映射 ──
-// StatusEffect.category: '增益'|'减益'|'特殊' → BuffChip type: 'buff'|'debuff'|'special'
-type BuffChipType = 'buff' | 'debuff' | 'special';
-const CATEGORY_TO_CHIP: Record<StatusEffect['category'], BuffChipType> = {
-  增益: 'buff',
-  减益: 'debuff',
-  特殊: 'special',
-};
+const statusViews = computed(() => statusViewsOf(props.unit));
+const slotStates = computed(() => slotStatesOf(props.unit));
+const facingLabel = computed(() => COMBAT_FACING_LABELS[props.unit.facing] ?? '');
+const morale = computed(() => moraleLabel(props.unit));
 
-/** 格式化状态效果列表为 BuffChip 所需的 props */
-const buffChips = computed(() =>
-  (props.unit.statusEffects ?? []).map((fx) => ({
-    type: CATEGORY_TO_CHIP[fx.category] ?? 'special',
-    name: fx.name,
-    stacks: fx.stacks,
-    // 战斗中 timeUnit='回合' 时显示剩余回合数；否则不追加回合标注
-    remainRounds: fx.timeUnit === '回合' && fx.remainingTime != null ? fx.remainingTime : null,
-  })),
+/** 只有真实存在的资源条才渲染（max>0），避免敌人满屏 0/0 */
+const resourceRows = computed(() =>
+  [
+    { label: 'HP', current: props.unit.hp, max: props.unit.maxHp, color: 'var(--theme-hp)' },
+    { label: 'MP', current: props.unit.mp, max: props.unit.maxMp, color: 'var(--theme-mp)' },
+    { label: 'SP', current: props.unit.sp, max: props.unit.maxSp, color: 'var(--theme-sp)' },
+  ].filter((row) => row.max > 0 || row.current > 0),
 );
+
+const skills = computed(() => props.unit.skills ?? []);
+const equipment = computed(() => props.unit.equipment ?? []);
 </script>
 
 <template>
-  <div
+  <article
     class="combat-unit-card"
     :class="{
-      'is-current-turn': isCurrentTurn,
+      'is-current': isCurrent,
+      'is-target': isTarget,
       'is-dead': isDead,
       'is-incapacitated': isIncapacitated,
     }"
-    :aria-current="isCurrentTurn ? 'step' : undefined"
   >
-    <!-- ── 名字行 ── -->
-    <div class="unit-header">
-      <div class="unit-name-row">
-        <span class="quality-dot" :style="{ background: qualityColor }" aria-hidden="true" />
-        <span class="unit-name" :style="{ color: qualityColor }">{{ unit.name }}</span>
-        <!-- v3 CombatUnitView 无 level（外层零额外拉取，设计 §3.3）；Lv 进详情展开 -->
-        <span class="unit-tier-level">T{{ unit.tier }}</span>
-      </div>
+    <header class="cu-top">
+      <span class="quality-dot" :style="{ background: qualityColor }" aria-hidden="true" />
+      <span class="cu-name" :style="{ color: qualityColor }">{{ unit.name }}</span>
+      <span class="cu-sub">{{ unit.race }} · T{{ unit.tier }} / Lv.{{ unit.level }}</span>
+      <span v-if="unit.cluster" class="cu-cluster">
+        {{ unit.cluster.alive }}/{{ unit.cluster.total }}
+      </span>
+      <span class="cu-pos">位置 {{ unit.pos }}</span>
+    </header>
 
-      <!-- 右侧状态标记 -->
-      <div class="unit-marks">
-        <span v-if="unit.morale !== 'steady'" class="mark mark-morale">
-          战意 {{ moraleLabel }}
-        </span>
-        <span v-if="isLowHp" class="mark mark-low-hp">⚠ 低血</span>
-        <span v-if="isDead" class="mark mark-dead">已倒下</span>
-        <span v-else-if="isIncapacitated" class="mark mark-incapacitated">无法行动</span>
-        <button
-          class="detail-toggle"
-          type="button"
-          :aria-expanded="expanded"
-          @click="expanded = !expanded"
-        >
-          {{ expanded ? '收起' : '详情' }}
-        </button>
-      </div>
-    </div>
-
-    <!-- ── HP / MP / SP 资源条 ── -->
-    <div class="unit-resources" :class="{ 'hp-flashing': isLowHp }">
+    <div class="cu-bars">
       <ResourceBar
-        label="HP"
-        :current="unit.hp"
-        :max="unit.maxHp"
-        color="var(--theme-hp)"
-        show-values
-      />
-      <ResourceBar
-        label="MP"
-        :current="unit.mp"
-        :max="unit.maxMp"
-        color="var(--theme-mp)"
-        show-values
-      />
-      <ResourceBar
-        label="SP"
-        :current="unit.sp"
-        :max="unit.maxSp"
-        color="var(--theme-sp)"
+        v-for="row in resourceRows"
+        :key="row.label"
+        :label="row.label"
+        :current="row.current"
+        :max="row.max"
+        :color="row.color"
         show-values
       />
     </div>
 
-    <!-- ── Buff chips（每个 buff 和它的剩余回合小标成组渲染） ── -->
-    <div v-if="buffChips.length > 0" class="unit-buffs">
-      <span v-for="(chip, idx) in buffChips" :key="idx" class="buff-group">
-        <BuffChip :type="chip.type" :name="chip.name" :stacks="chip.stacks" />
-        <!-- 剩余回合小标（仅战斗型、有剩余时间时显示，不侵入 BuffChip 通用组件） -->
-        <span v-if="chip.remainRounds !== null" class="buff-remain">
-          剩{{ chip.remainRounds }}回合
-        </span>
+    <div class="cu-attrs">
+      <span v-for="attr in COMBAT_ATTRIBUTE_LABELS" :key="attr.key" class="cu-attr">
+        {{ attr.short }} <b>{{ unit.attributes[attr.key] }}</b>
       </span>
     </div>
 
-    <!-- ── 详情展开（设计 §3.3：五维 + 技能列表 + Lv，本地 characters 数据） ── -->
-    <div v-if="expanded" class="unit-detail">
-      <template v-if="detail">
-        <div class="detail-row">
-          <span class="detail-label">Lv.{{ detail.level }}</span>
-          <span class="detail-value">{{ detail.race }}</span>
-        </div>
-        <div class="detail-row">
-          <span v-for="a in ATTR_ROWS" :key="a.key" class="attr-item">
-            <span class="attr-label">{{ a.label }}</span>
-            <span class="attr-value">{{ detail.attributes[a.key] }}</span>
-          </span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">技能</span>
-          <span v-if="!detail.skills?.length" class="detail-empty">无</span>
-          <span v-else class="skill-chips">
-            <span v-for="sk in detail.skills" :key="sk.name" class="skill-chip">{{ sk.name }}</span>
-          </span>
-        </div>
-      </template>
-      <div v-else class="detail-empty">暂无角色数据（怪物/临时单位）</div>
+    <div class="cu-status">
+      <div class="cu-slots">
+        <span v-for="slot in slotStates" :key="slot.label" class="cu-slot">
+          <i class="cu-dot" :class="{ on: slot.remaining > 0 }" />
+          {{ slot.label }}<template v-if="slot.remaining > 1"> ×{{ slot.remaining }}</template>
+        </span>
+      </div>
+      <span v-if="unit.morale !== 'steady'" class="cu-morale">战意 {{ morale }}</span>
+      <span v-if="isLowHp" class="cu-flag is-warn">⚠ 低血</span>
+      <span v-if="isDead" class="cu-flag is-dead">已倒下</span>
+      <span v-else-if="isIncapacitated" class="cu-flag">无法行动</span>
+      <span v-if="facingLabel" class="cu-facing">{{ facingLabel }}</span>
     </div>
-  </div>
+
+    <div v-if="statusViews.length" class="cu-buffs">
+      <span v-for="(chip, i) in statusViews" :key="i" class="cu-buff-group">
+        <BuffChip :type="chip.type" :name="chip.name" :stacks="chip.stacks" />
+        <span v-if="chip.remainRounds !== null" class="cu-remain"
+          >剩{{ chip.remainRounds }}回合</span
+        >
+      </span>
+    </div>
+
+    <ul v-if="skills.length || equipment.length" class="cu-loadout">
+      <li v-for="skill in skills" :key="'s-' + skill.name" class="cu-item">
+        <span class="cu-item-name">{{ skill.name }}</span>
+        <span v-if="skill.type" class="cu-item-tag">{{ skill.type }}</span>
+        <span v-if="skill.cost" class="cu-item-num">{{ skill.cost }}</span>
+        <span v-if="skill.skillPower !== undefined" class="cu-item-num"
+          >威力 <b>{{ skill.skillPower }}</b></span
+        >
+        <span v-if="skill.description" class="cu-item-eff">{{ skill.description }}</span>
+        <span v-if="skill.tags?.length" class="cu-item-tags">
+          <span v-for="tag in skill.tags" :key="tag" class="tag">{{ tag }}</span>
+        </span>
+      </li>
+      <li v-for="eq in equipment" :key="'e-' + eq.name" class="cu-item">
+        <span
+          class="cu-item-name"
+          :style="{ color: eq.rarity ? qualityVar(eq.rarity) : undefined }"
+        >
+          {{ eq.name }}
+        </span>
+        <span v-if="eq.slot" class="cu-item-tag">{{ eq.slot }}</span>
+        <span v-if="eq.description" class="cu-item-eff">{{ eq.description }}</span>
+        <span v-if="eq.tags?.length" class="cu-item-tags">
+          <span v-for="tag in eq.tags" :key="tag" class="tag">{{ tag }}</span>
+        </span>
+      </li>
+    </ul>
+  </article>
 </template>
 
 <style scoped>
 .combat-unit-card {
-  position: relative;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--theme-primary) 3%, transparent),
-      transparent 42%
-    ),
-    var(--theme-card-bg);
+  display: flex;
+  flex-direction: column;
+  background: var(--theme-card-bg);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-sm);
-  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--theme-text-primary) 5%, transparent);
+  border-radius: var(--theme-radius-md);
+  overflow: hidden;
+  box-shadow: var(--paper-stack);
   transition:
-    background var(--theme-transition-fast),
     border-color var(--theme-transition-fast),
-    box-shadow 0.15s ease,
+    box-shadow var(--theme-transition-fast),
     opacity 0.2s ease;
 }
-
-/* 当前行动者：环绕光晕（design §4.2 选中态） */
-.combat-unit-card.is-current-turn {
-  background: color-mix(in srgb, var(--theme-primary) 7%, var(--theme-card-bg));
+.combat-unit-card.is-current {
   border-color: var(--theme-primary);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--theme-primary) 45%, transparent),
-    0 0 14px color-mix(in srgb, var(--theme-primary) 18%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-primary) 45%, transparent);
 }
-
-/* 无法行动（非死亡）：降低存在感 */
+.combat-unit-card.is-target {
+  border-color: var(--theme-warning);
+  background: color-mix(in srgb, var(--theme-warning) 8%, var(--theme-card-bg));
+}
 .combat-unit-card.is-incapacitated {
-  opacity: 0.6;
+  opacity: 0.65;
 }
-
-/* 死亡态：半透明 + 删除线由名字承担 */
 .combat-unit-card.is-dead {
   opacity: 0.5;
 }
-
-/* ── 名字行 ── */
-.unit-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--theme-spacing-sm);
-  margin-bottom: var(--theme-spacing-xs);
+.is-dead .cu-name {
+  text-decoration: line-through;
 }
 
-.unit-name-row {
+.cu-top {
   display: flex;
   align-items: center;
   gap: var(--theme-spacing-sm);
-  min-width: 0; /* 允许名字截断 */
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  background: var(--theme-surface-muted);
+  min-width: 0;
 }
-
 .quality-dot {
-  flex-shrink: 0;
+  flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  display: inline-block;
 }
-
-.unit-name {
+.cu-name {
   font-family: var(--theme-font-title);
   font-weight: 600;
   font-size: 0.875rem;
@@ -277,208 +205,168 @@ const buffChips = computed(() =>
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-/* 死亡态：名字加删除线 */
-.is-dead .unit-name {
-  text-decoration: line-through;
-}
-
-.unit-tier-level {
-  flex-shrink: 0;
-  font-size: 0.72rem;
+.cu-sub {
+  font-size: 0.6875rem;
   color: var(--theme-text-muted);
-  font-weight: 500;
-  letter-spacing: 0.02em;
-}
-
-/* ── 右侧状态标记 ── */
-.unit-marks {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
-.mark {
-  font-size: 0.7rem;
-  font-weight: 600;
   white-space: nowrap;
-  padding: 1px 6px;
-  border-radius: var(--theme-radius-full);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-
-.mark-low-hp {
-  color: var(--theme-error);
-  background: color-mix(in srgb, var(--theme-error) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--theme-error) 30%, transparent);
-}
-
-.mark-dead {
-  color: var(--theme-error);
-  background: color-mix(in srgb, var(--theme-error) 16%, transparent);
-  border: 1px solid var(--theme-error);
-}
-
-.mark-incapacitated {
+.cu-cluster {
+  font-size: 0.6875rem;
   color: var(--theme-warning);
-  background: color-mix(in srgb, var(--theme-warning) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--theme-warning) 30%, transparent);
-}
-
-/* 战意标记（非 steady 才显示，v3 CombatUnitView.morale） */
-.mark-morale {
-  color: var(--theme-text-secondary, var(--theme-text-muted));
-  background: color-mix(in srgb, var(--theme-text-muted) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--theme-text-muted) 25%, transparent);
-}
-
-/* 详情展开开关（触摸目标 ≥ 36px） */
-.detail-toggle {
-  min-height: 36px;
-  padding: 0 var(--theme-spacing-sm);
-  font-size: 0.7rem;
-  font-weight: 600;
-  font-family: var(--theme-font-body);
-  color: var(--theme-primary);
-  background: color-mix(in srgb, var(--theme-primary) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 35%, transparent);
   border-radius: var(--theme-radius-full);
-  cursor: pointer;
-  transition:
-    background var(--theme-transition-fast),
-    border-color var(--theme-transition-fast),
-    color var(--theme-transition-fast);
+  padding: 0 6px;
+}
+.cu-pos {
+  margin-left: auto;
+  flex: none;
+  font-size: 0.6875rem;
+  color: var(--theme-primary);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-full);
+  padding: 1px 8px;
 }
 
-.detail-toggle:hover {
-  background: color-mix(in srgb, var(--theme-primary) 14%, transparent);
-  border-color: var(--theme-primary);
-}
-
-.detail-toggle:focus-visible {
-  outline: 2px solid var(--theme-primary);
-  outline-offset: 2px;
-}
-
-/* ── 详情展开区（设计 §3.3：五维 + 技能 + Lv）── */
-.unit-detail {
-  margin-top: var(--theme-spacing-sm);
-  padding-top: var(--theme-spacing-sm);
-  border-top: 1px solid var(--theme-card-border);
+.cu-bars {
   display: flex;
   flex-direction: column;
-  gap: var(--theme-spacing-xs);
+  gap: calc(var(--theme-spacing-xs) / 2);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
 }
 
-.detail-row {
+.cu-attrs {
   display: flex;
-  align-items: baseline;
   flex-wrap: wrap;
-  gap: var(--theme-spacing-xs) var(--theme-spacing-sm);
-  font-size: 0.75rem;
-}
-
-.detail-label {
-  flex-shrink: 0;
-  color: var(--theme-text-muted);
-  font-weight: 600;
-}
-
-.detail-value {
-  color: var(--theme-text-secondary, var(--theme-text-muted));
-}
-
-.attr-item {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
-}
-
-.attr-label {
+  gap: var(--theme-spacing-sm);
+  padding: 0 var(--theme-spacing-md) var(--theme-spacing-sm);
+  font-size: 0.6875rem;
   color: var(--theme-text-muted);
 }
-
-.attr-value {
+.cu-attr b {
   color: var(--theme-text-primary);
   font-weight: 600;
 }
 
-.skill-chips {
-  display: inline-flex;
+.cu-status {
+  display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: var(--theme-spacing-xs);
-}
-
-.skill-chip {
-  padding: 1px 8px;
-  font-size: 0.7rem;
-  color: var(--theme-text-secondary, var(--theme-text-muted));
-  background: var(--theme-surface-muted);
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-full);
-}
-
-.detail-empty {
+  gap: var(--theme-spacing-sm);
+  padding: 0 var(--theme-spacing-md) var(--theme-spacing-sm);
+  font-size: 0.6875rem;
   color: var(--theme-text-muted);
-  font-style: italic;
-  font-size: 0.72rem;
 }
-
-/* ── 资源条区 ── */
-.unit-resources {
+.cu-slots {
   display: flex;
-  flex-direction: column;
-  gap: calc(var(--theme-spacing-xs) / 2);
+  gap: var(--theme-spacing-sm);
 }
-
-/* 低血时 HP 条闪烁动画 */
-.hp-flashing > :deep(.resource-bar:first-child .res-fill) {
-  animation: hp-flash 1s ease-in-out infinite;
-}
-
-@keyframes hp-flash {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
-
-/* ── Buff chips 区 ── */
-.unit-buffs {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--theme-spacing-xs);
-  margin-top: var(--theme-spacing-xs);
-}
-
-/* BuffChip + 剩余回合小标 成组紧挨（不换行） */
-.buff-group {
+.cu-slot {
   display: inline-flex;
   align-items: center;
-  gap: calc(var(--theme-spacing-xs) / 2);
+  gap: 3px;
+}
+.cu-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--theme-text-muted);
+}
+.cu-dot.on {
+  background: var(--theme-primary);
+  border-color: var(--theme-primary);
+}
+.cu-morale {
+  color: var(--theme-warning);
+}
+.cu-flag {
+  color: var(--theme-warning);
+}
+.cu-flag.is-warn {
+  color: var(--theme-error);
+}
+.cu-flag.is-dead {
+  color: var(--theme-error);
+}
+.cu-facing {
+  margin-left: auto;
+}
+
+.cu-buffs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--theme-spacing-xs);
+  padding: 0 var(--theme-spacing-md) var(--theme-spacing-sm);
+}
+.cu-buff-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   white-space: nowrap;
 }
-
-/* 剩余回合小标（独立于 BuffChip，不侵入通用组件） */
-.buff-remain {
-  font-size: 0.65rem;
+.cu-remain {
+  font-size: 0.625rem;
   color: var(--theme-text-muted);
-  font-weight: 500;
 }
 
-/* ── prefers-reduced-motion：禁用闪烁动画（design §6.3） ── */
+.cu-loadout {
+  margin: 0;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  border-top: 1px solid var(--theme-card-border);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-xs);
+}
+.cu-item {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--theme-spacing-xs);
+  font-size: 0.75rem;
+}
+.cu-item-name {
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+.cu-item-tag {
+  font-size: 0.625rem;
+  color: var(--theme-text-muted);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  padding: 0 4px;
+}
+.cu-item-num {
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+}
+.cu-item-num b {
+  color: var(--theme-primary);
+}
+.cu-item-eff {
+  flex-basis: 100%;
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+  line-height: 1.5;
+}
+.cu-item-tags {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--theme-spacing-xs);
+}
+.tag {
+  font-size: 0.625rem;
+  color: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 25%, transparent);
+  border-radius: var(--theme-radius-sm);
+  padding: 0 5px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .combat-unit-card {
-    transition: none;
-  }
-  .hp-flashing > :deep(.resource-bar:first-child .res-fill) {
-    animation: none;
-  }
-  .detail-toggle {
     transition: none;
   }
 }

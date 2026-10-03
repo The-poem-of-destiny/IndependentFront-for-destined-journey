@@ -45,6 +45,9 @@ vi.mock('../../../../src/ui/lib/game-pipeline', () => ({
     invalidatePromptSessions = invalidatePromptSessionsSpy;
     primeSceneAudio(): void {}
     async sendOpeningPrompt(): Promise<void> {}
+    async resumeCombatSandbox(): Promise<boolean> {
+      return false;
+    }
     async runImagePromptAgent(): Promise<unknown> {
       return { scenePrompt: '', sceneNegative: '', desc: '' };
     }

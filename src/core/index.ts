@@ -16,7 +16,7 @@ export * from './types/types';
 export * from './persistence/database';
 export * from './story/marker-protocol';
 export * from './story/story-output';
-export * from './agents/char-gen-agent';
+export * from './agents/entity-gen-agent';
 export * from './agents/agent-tools';
 export * from './agents/random-tables';
 export * from './story/beautifier';

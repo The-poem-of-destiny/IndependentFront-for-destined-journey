@@ -21,8 +21,7 @@ import type {
   CombatTriggerMarker,
   CombatSummaryResult,
   PlayAudioMarker,
-  CharGenRequestMarker,
-  ItemGenRequestMarker,
+  EntityGenRequestMarker,
   ItemUpdateRequestMarker,
   CraftGenRequestMarker,
   EventTriggerMarker,
@@ -176,16 +175,15 @@ export interface OrchestratorEvents {
 
   // ===== Phase 10: request_dispatcher 调度器回调 =====
 
-  /** Stage 2: request_dispatcher 输出中的 <char_gen_request> → char_gen→item_gen 链 */
-  onCharGenRequest?: (
-    markers: CharGenRequestMarker[],
-    varsOutput: string,
-    context: AgentContext,
-  ) => Promise<void>;
-
-  /** Stage 2: request_dispatcher 输出中的 <item_gen_request> → item_gen 独立调用 */
-  onItemGenRequest?: (
-    markers: ItemGenRequestMarker[],
+  /**
+   * Stage 2: request_dispatcher 输出中的 `<entity_gen_request>` → entity_gen 调用。
+   *
+   * 🔴 2026-10-02 硬改名：原 `onCharGenRequest`（角色）与 `onItemGenRequest`
+   * （技能/装备/道具）合并为单回调，`marker.attributes.entityType` 区分。
+   * 调用方自行分流角色（逐个）与物品（批量）。
+   */
+  onEntityGenRequest?: (
+    markers: EntityGenRequestMarker[],
     varsOutput: string,
     context: AgentContext,
   ) => Promise<void>;
@@ -1069,8 +1067,7 @@ export class AgentOrchestrator {
       'plot_check',
       'plot_correct',
       'craft_gen',
-      'char_gen',
-      'item_gen',
+      'entity_gen',
       'combat_summary',
     ]) {
       knownAgents.add(id);
@@ -1295,11 +1292,9 @@ export class AgentOrchestrator {
       }
 
       // Step C: 新格式 request 标签 → 并行回调
-      const charGenMarkers = markers.filter(
-        (m): m is CharGenRequestMarker => m.type === 'char_gen_request',
-      );
-      const itemGenMarkers = markers.filter(
-        (m): m is ItemGenRequestMarker => m.type === 'item_gen_request',
+      // 🔴 2026-10-02 硬改名：char_gen_request + item_gen_request 合并为 entity_gen_request。
+      const entityGenMarkers = markers.filter(
+        (m): m is EntityGenRequestMarker => m.type === 'entity_gen_request',
       );
       const itemUpdateMarkers = markers.filter(
         (m): m is ItemUpdateRequestMarker => m.type === 'item_update_request',
@@ -1309,14 +1304,15 @@ export class AgentOrchestrator {
       );
 
       const promises: Promise<void>[] = [];
-      let charGenPromise: Promise<void> | null = null;
+      let entityGenPromise: Promise<void> | null = null;
 
-      if (charGenMarkers.length > 0 && this.events.onCharGenRequest) {
-        charGenPromise = this.events.onCharGenRequest(charGenMarkers, varsOutput, this.context);
-        promises.push(charGenPromise);
-      }
-      if (itemGenMarkers.length > 0 && this.events.onItemGenRequest) {
-        promises.push(this.events.onItemGenRequest(itemGenMarkers, varsOutput, this.context));
+      if (entityGenMarkers.length > 0 && this.events.onEntityGenRequest) {
+        entityGenPromise = this.events.onEntityGenRequest(
+          entityGenMarkers,
+          varsOutput,
+          this.context,
+        );
+        promises.push(entityGenPromise);
       }
       if (itemUpdateMarkers.length > 0 && this.events.onItemUpdateRequest) {
         promises.push(this.events.onItemUpdateRequest(itemUpdateMarkers, varsOutput, this.context));
@@ -1328,10 +1324,17 @@ export class AgentOrchestrator {
       // 🔴 并行化改造（2026-08-16）：侧链**不 await** —— LLM 调用（无副作用）
       // 与 vars_update / plot_post_check 的 LLM 并行；落库经 state-write-queue
       // 串行（state-manager 收编）。收尾点：vars_update barrier（下方）、
-      // combat 分支（只等 char_gen）、run() 末尾与失败/abort 路径。
+      // combat 分支（只等角色生成）、run() 末尾与失败/abort 路径。
       if (promises.length > 0) {
         this.pendingSideChains.push(...promises);
-        if (charGenPromise) this.pendingCharGen = charGenPromise;
+        // combat 分支必须等「角色生成」那条侧链（参战方新角色先生成，原串行语义）。
+        // 单回调里角色与物品同批 —— 只要这批含角色 marker 就记下整条 promise（等它即等角色）。
+        if (
+          entityGenPromise &&
+          entityGenMarkers.some((m) => m.attributes.entityType === 'character')
+        ) {
+          this.pendingCharGen = entityGenPromise;
+        }
       }
 
       // Step D: 旧格式 craft/combat（向后兼容）
@@ -1406,7 +1409,7 @@ export class AgentOrchestrator {
       // Step B: 提取 <status_effects> 块 → 解析效果定义 → apply
       const seMatch = varsOutput.match(/<status_effects>([\s\S]*?)<\/status_effects>/);
       if (seMatch) {
-        const { parseStatusEffectsXML } = await import('./char-gen-agent');
+        const { parseStatusEffectsXML } = await import('./entity-gen-parse');
         const patches = this.buildPatches('vars_update:status_effects', () =>
           parseStatusEffectsXML(seMatch[1].trim()).map((e) => ({
             op: 'add_status_effect' as const,

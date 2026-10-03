@@ -327,17 +327,9 @@ function normalizePersonaText(value: string): string {
 
 // ========== StateManager ==========
 
-/**
- * Q-07：一次 commit 里「事件 → 订阅脚本 → 补丁 → 又是事件」这条链的最大轮数。
- * 3 轮足够表达「装备回血 → 触发满血 buff → 触发第三件装备」这类连锁，再多就是脚本互相触发。
- */
-const MAX_EVENT_REACTION_DEPTH = 3;
-
 export class StateManager {
   private saveId: string;
   private events: GameEvent[] = [];
-  /** Q-07：事件反应轮的当前深度（见 reactToEvents） */
-  private reactionDepth = 0;
   /**
    * 当前提交作用域缓存（见 `CommitScope`）。非 null 仅在 `commitChatState` 的锁段内成立。
    * 嵌套提交（`reactToEvents` / `applyTimeAdvance` 尾部自提交）一律发生在锁**外**，
@@ -400,7 +392,7 @@ export class StateManager {
   /** All required changes succeed together; rejection publishes no events or effects. */
   async commitDomainCommand(patches: StatePatch[]): Promise<void> {
     if (!patches.length) return;
-    const newEvents = await withSaveWriteLock(this.saveId, async () => {
+    await withSaveWriteLock(this.saveId, async () => {
       const db = getDatabase();
       const events = await db.transaction(
         'rw',
@@ -434,21 +426,8 @@ export class StateManager {
         },
       );
       this.events.push(...events);
-      await this.reconcileCommittedEffects();
       return events;
     });
-    await this.reactToEvents(newEvents);
-  }
-
-  private async reconcileCommittedEffects(): Promise<void> {
-    try {
-      const { peekEffectWiring, reconcileEffectWiring } = await import('../effects/effect-wiring');
-      if (!peekEffectWiring(this.saveId)) return;
-      const characters = await getCharacters(this.saveId);
-      if (peekEffectWiring(this.saveId)) reconcileEffectWiring(this.saveId, characters);
-    } catch (error) {
-      console.warn('[StateManager] Committed state could not refresh effect subscriptions:', error);
-    }
   }
 
   /** Compatibility entry point; AI batches retain valid patches when another is rejected. */
@@ -554,17 +533,11 @@ export class StateManager {
           // 存档更新失败不阻塞
         }
 
-        await this.reconcileCommittedEffects();
         return { results, errors, newEvents };
       } finally {
         this.commitScope = outerScope;
       }
     });
-
-    // Q-07：把本次产生的 GameEvent 发到存档 EventBus，触发已装备物品/技能的 $event.on 订阅，
-    // 并把订阅脚本产出的效果转成补丁再提交一轮。此前这些事件只进 this.events（一个只被读取
-    // 用于展示的数组），从未 publish —— 于是整条 emitChain 层永远空转。
-    await this.reactToEvents(applied.newEvents);
 
     return {
       success: applied.errors.length === 0,
@@ -572,44 +545,6 @@ export class StateManager {
       eventsGenerated: [...this.events],
       errors: applied.errors,
     };
-  }
-
-  /**
-   * Q-07：事件 → 效果订阅 → 补丁 的反应轮。
-   *
-   * 反应产生的补丁自己也会产生事件，所以有深度上限：超过就停下并告警，
-   * 而不是让「A 触发 B、B 触发 A」把一次 commit 拖成事件风暴。
-   */
-  private async reactToEvents(events: GameEvent[]): Promise<void> {
-    if (events.length === 0) return;
-
-    const { peekEffectWiring, publishToEffectSystem } = await import('../effects/effect-wiring');
-    // 本存档没接线（没有带 scripts 的装备/技能）→ 零开销返回，不凭空建 EventBus
-    if (!peekEffectWiring(this.saveId)) return;
-
-    if (this.reactionDepth >= MAX_EVENT_REACTION_DEPTH) {
-      console.warn(
-        `[StateManager] 效果反应递归超限 (${MAX_EVENT_REACTION_DEPTH})，本轮 ${events.length} 个事件不再触发订阅`,
-      );
-      return;
-    }
-
-    this.reactionDepth++;
-    try {
-      const effects = await publishToEffectSystem(this.saveId, events);
-      const patches = await convertScriptEffects(this.saveId, effects);
-      if (patches.length > 0) {
-        await this.commitChatState(patches);
-      }
-    } catch (err) {
-      // 效果反应失败不能回滚已提交的正文状态 —— 记录即可
-      console.error(
-        '[StateManager] 效果反应失败:',
-        err instanceof Error ? err.message : String(err),
-      );
-    } finally {
-      this.reactionDepth--;
-    }
   }
 
   /** 获取已生成的事件列表 */
@@ -1249,11 +1184,6 @@ export class StateManager {
         source: value.source ?? '',
         effects: value.effects ?? {},
         effectDescriptions: value.effectDescriptions,
-        scripts: value.scripts,
-        onApply: value.onApply,
-        onTick: value.onTick,
-        onRemove: value.onRemove,
-        onTrigger: value.onTrigger,
       };
       if (effect.maxStacks && effect.maxStacks > 0) {
         effect.stacks = Math.min(effect.stacks, effect.maxStacks);
@@ -1284,7 +1214,7 @@ export class StateManager {
    * add_item — M2 按名寻址 + 同名合并 (#5)
    *
    * value = { name(必), quantity?=1, type?, rarity?, description?, stats?,
-   *           effects?, scripts?, equippedSlot?, durability?, maxDurability?, data? }
+   *           effects?, equippedSlot?, durability?, maxDurability?, data? }
    * 同名合并: 只累加 quantity，既有字段不覆盖（改字段走 update_item）。
    * 归一化（铁律5）: type→normalizeItemType / rarity→normalizeRarity / equippedSlot→normalizeSlot
    * （equippedSlot 无法识别 → null，不 throw，物品视作躺背包）。
@@ -1316,15 +1246,6 @@ export class StateManager {
         maxDurability: value.maxDurability,
         data: value.data,
         effects: value.effects,
-        scripts: value.scripts,
-        // 🆕 词条效果链路修复（S1，见 2026-08-01-item-gen-combat-link-plan.md）：
-        //     craft_gen→item_gen 产物 + item_gen 独立链都在 patch.value 写 modifiers/buffs/divinity，
-        //     此前落库只收 9 字段把这三个丢了 → 装备词条效果战斗/制造都不生效。现补齐。
-        modifiers: value.modifiers,
-        buffs: value.buffs,
-        divinity: value.divinity,
-        // 🆕 战斗 v3 (S3 2026-08-01): <automaton> DSL 自由效果落库保留（compileEffectProgram 编译进 activeEffects）
-        automata: value.automata,
       });
     }
     await this.persistCharacter(char);
@@ -1550,18 +1471,10 @@ export class StateManager {
         maxCooldown: value.maxCooldown,
         level: value.level,
         effects: value.effects,
-        scripts: value.scripts,
         // 🆕 2026-09-11: 技能品质（item_gen `<skill quality>` → rarity）。白名单此前漏收本字段，
         //   开局初始技能经 item_gen 独立链 add_skill 落库即丢 → UI 一律显示「史诗」。
         //   归一化口径同 applyAddItem（normalizeRarity）。
         rarity: value.rarity !== undefined ? normalizeRarity(value.rarity) : undefined,
-        // 🔴 2026-08-02 修: 补战斗声明透传 —— 此前只收 8 字段丢 modifiers/buffs/divinity/automata，
-        //   item_gen 合法产出的技能 modifiers（如高等材料学 checkType:"生产" bonus:4）落库即丢，
-        //   生产检定加值不生效。与 applyAddItem（S1/S3 已补）对齐。
-        modifiers: value.modifiers,
-        buffs: value.buffs,
-        divinity: value.divinity,
-        automata: value.automata,
         // 🆕 skillPower 链路修复 (2026-08-04 漏网 2026-08-12): 主体威力三字段透传。
         //   0694453 只补了 char_gen 链路的 assembleCharacterState，本入口（request_dispatcher →
         //   item_gen 独立链的 add_skill patch 同样带这三字段）的新技能白名单漏收 →
@@ -2832,9 +2745,9 @@ export class StateManager {
 
       const { settled, currentDay } = settledOut;
 
-      // emit 形状照 `applyTimeAdvance` 末尾那条（真 push 进 this.events，不是只构造），
-      // 再走一次 `reactToEvents` —— 效果系统的 `$event.on('random_event')` 订阅者要吃得到
-      // （§5.2 步 5）。没接过线的存档在 `reactToEvents` 里零开销返回。
+      // emit 形状照 `applyTimeAdvance` 末尾那条（真 push 进 this.events，不是只构造）。
+      // 事件系统只记「触发过」这一事实（铁则 5）；脚本订阅链已随脚本系统退役。
+      // （§5.2 步 5）
       const event = this.createEvent('random_event', {
         op: 'set_variable',
         target: `worldFlags.randomEvents.fired.${settled.triggered.name}`,
@@ -2846,7 +2759,6 @@ export class StateManager {
         },
       });
       this.events.push(event);
-      await this.reactToEvents([event]);
     } catch (err) {
       // 事件系统只记「触发过」这一事实（铁则 5）；记不上不该让这一回合的正文崩掉
       console.warn('[StateManager] 随机事件触发结算失败（不影响正文）:', err);
@@ -2982,16 +2894,6 @@ export class StateManager {
 
         // 过期移除 — M2 按名删除（#22，旧数据带 id 也按 name 过滤，不受影响）
         for (const fx of expired) {
-          // 执行 onRemove 脚本
-          if (fx.onRemove && fx.scripts) {
-            const { executeScript } = await import('../scripting/script-executor');
-            const result = executeScript(fx.scripts[fx.onRemove]!, {
-              owner: char.id,
-              self: { stacks: fx.stacks, remainingTime: 0, name: fx.name },
-            });
-            patches.push(...(await convertScriptEffects(this.saveId, result)));
-          }
-
           char.statusEffects = char.statusEffects.filter((e) => e.name !== fx.name);
 
           patches.push({
@@ -3012,7 +2914,7 @@ export class StateManager {
 
         // 时长扣减/移除的持久化走 saveCharacter（statusEffects 数组被 update_character 白名单
         // 禁止直写，防 AI 假字段污染；此处引擎内存内已 mutate，一条直写即可）。Q-02 修复的
-        // 是 patches 里的脚本效果（remove/hp/stat）曾被调用点丢弃 —— 它们现在走末尾自提交。
+        // 是 patches 里的效果（remove/hp/stat）曾被调用点丢弃 —— 它们现在走末尾自提交。
         if (changed) {
           await saveCharacter(char);
         }
@@ -3029,7 +2931,7 @@ export class StateManager {
     });
 
     // Q-02 修复：自提交 —— 之前返回值在唯一调用点（agent-orchestrator.ts:854）被丢弃，
-    // 到期效果的 remove/hp/stat 与 onRemove 脚本全部蒸发。这里在方法内提交，符合 ADR-21
+    // 到期效果的 remove/hp/stat 全部蒸发。这里在方法内提交，符合 ADR-21
     // 唯一写入口约定，调用点无需自己 commit。
     if (patches.length > 0) {
       await this.commitChatState(patches);
@@ -3574,61 +3476,6 @@ function planJourneyFlags(
   if (route !== null) journey.plannedPath = route.tilePath;
 
   return { ...flags, journey };
-}
-
-import type { ScriptEffects } from '../scripting/script-executor';
-
-async function convertScriptEffects(saveId: string, se: ScriptEffects): Promise<StatePatch[]> {
-  const patches: StatePatch[] = [];
-  // 名字解析唯一入口（铁律1：逻辑键=名字，charId 一律先换名）。
-  // 脚本按名调用（modifyHp('Hero', -30)）是最常见路径，直接透传；id 形态才查库。
-  const resolveName = async (charId: string): Promise<string> => {
-    const chars = await getCharacters(saveId);
-    const byName = chars.find((c) => c.name === charId);
-    if (byName) return byName.name;
-    if (charId === '主角' || charId === '玩家') {
-      const player = chars.find((c) => c.type === 'player');
-      if (player) return player.name;
-    }
-    return charId;
-  };
-  // M2: add_status_effect 不再要求 id → Partial<StatusEffect> 直接透传（handler 内按 name 寻址+补缺省）
-  for (const a of se.adds)
-    patches.push({
-      op: 'add_status_effect',
-      target: `characters.${await resolveName(a.charId)}`,
-      value: a.effect,
-    });
-  // M2: effectId 字符串按 name 解释（remove handler 的裸字符串过渡形态）
-  for (const r of se.removes)
-    patches.push({
-      op: 'remove_status_effect',
-      target: `characters.${await resolveName(r.charId)}`,
-      value: r.effectId,
-    });
-  // M2: 逻辑键=name（铁律1）— stackSets 的 effectId 按 name 解释（脚本层 $status.setStacks 过渡形态，M3 收敛）
-  for (const s of se.stackSets)
-    patches.push({
-      op: 'set_variable',
-      target: `characters.${await resolveName(s.charId)}.statusEffects`,
-      value: { name: s.effectId, stacks: s.stacks },
-    });
-  // Q-02 修复：hpChanges 走 delta_hp（角色资源真源），不再用 delta_variable 写错 variables 树
-  for (const h of se.hpChanges)
-    patches.push({
-      op: 'delta_hp',
-      target: `characters.${await resolveName(h.charId)}`,
-      amount: h.amount,
-    } as unknown as StatePatch);
-  // Q-02 修复：statChanges 走 update_character + metadata.delta（按名寻址，五维加法）
-  for (const st of se.statChanges)
-    patches.push({
-      op: 'update_character',
-      target: `characters.${await resolveName(st.charId)}`,
-      value: { attributes: { [st.stat]: st.amount } },
-      metadata: { delta: true },
-    } as unknown as StatePatch);
-  return patches;
 }
 
 // ═══════════════════════════════════════════════════════════

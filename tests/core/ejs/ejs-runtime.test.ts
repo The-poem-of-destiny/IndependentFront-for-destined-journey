@@ -881,9 +881,9 @@ describe('沙盒注入面', () => {
     }
   });
 
-  // 🔴 回归锚（P1-2）：遮蔽名单必须与 script-executor.ts 的 SANDBOX_SHADOW_GLOBALS 同口径（设计 D3）。
+  // 🔴 回归锚（P1-2）：EJS 沙盒的补充遮蔽名单（设计 D3）。
   // Function 是最直接的构造器逃逸写法，定时器/长连接则会让「条目跑完还在后台跑」。
-  it('与 script-executor 对齐的补充名单同样被遮蔽', () => {
+  it('补充遮蔽名单（Function / 定时器 / 长连接）同样被遮蔽', () => {
     for (const name of ['Function', 'setTimeout', 'setInterval', 'WebSocket', 'sessionStorage']) {
       expect(render(`<%= typeof ${name} %>`)).toBe('undefined');
     }

@@ -39,10 +39,10 @@ describe('resolveAgentSelection', () => {
     expect(entry?.desc).toBeTruthy();
   });
 
-  it('双角色使用稳定配置 id 与明确显示名', () => {
+  it('战斗仅保留主持人一个配置 id（C5a 移除 combat_enemy）', () => {
     expect(AGENT_LIST.find((a) => a.id === 'combat')?.name).toBe('战斗主持人');
-    expect(AGENT_LIST.find((a) => a.id === 'combat_enemy')?.name).toBe('敌方决策');
-    expect(resolveAgentSelection('combat_enemy')).toBe('combat_enemy');
+    expect(AGENT_LIST.some((a) => a.id === 'combat_enemy')).toBe(false);
+    expect(resolveAgentSelection('combat_enemy')).toBeNull();
   });
 
   it('空值一律 null，不抛', () => {

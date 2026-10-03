@@ -10,11 +10,6 @@
 import { RARITY_LEVELS, type Rarity } from '../content/field-enums';
 
 import type { GameTime } from '../time/time-system';
-// type-only 循环安全：effect-types 反向 import 本文件的 AttributeName/DivinityLevel/DamageType 也是 type-only
-import type { Modifier } from '../effects/effect-types';
-// type-only 循环安全：combat/types.ts 反向 import 本文件的 CombatParticipant/StatusEffect 也是 type-only
-// EffectAutomaton 定义在 combat/types.ts（v3 内核 DSL），这里只做类型引用不引入运行时
-import type { EffectAutomaton } from '../combat/types';
 // type-only 单向边：types-image.ts **不 import 本文件**（图像子系统的类型全部自持），
 // 所以这条边不成环。只为把 SceneImageMarker 接进 DetectedMarker 联合。
 import type { SceneImageMarker } from './types-image';
@@ -57,6 +52,7 @@ export type WorldBookPartition =
   | 'extra_setting' // 额外设定 — 数值表/战斗/制作/旅行/状态
   | 'cot' // COT — Chain-of-Thought 推理模板
   | 'dlc' // DLC — 可开关扩展内容
+  | 'combat_extra' // 战斗/数值相关额外世界书 — 战斗/数值/生成叙事约定
   | 'creative_workshop'; // 创意工坊 — 社区二创内容
 
 export interface WorldBookEntry {
@@ -945,28 +941,20 @@ export interface Skill {
   level?: number;
   /** 🆕 效果词条: 词条名→中文描述 (AI写, 前端展示) */
   effects?: Record<string, string>;
-  /** 🆕 脚本注册表: 脚本名→可执行代码 (AI写, 引擎执行) */
-  scripts?: Record<string, string>;
-  /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier，来自 item_gen `<modifiers>` 子元素）。
-   *  S4 (2026-08-01): 落库补收——技能「生产检定」modifier 在此落库，craft_check/craft_settle 的 skillBonus 位消费（S2-2 闭环） */
-  modifiers?: Modifier[];
-  /** 🆕 战斗 v2 (M4 5.5b): 该技能附带的 buff 定义 */
-  buffs?: StatusEffect[];
-  /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（神位级技能才填，缺省=0） */
-  divinity?: DivinityLevel;
-  /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（EffectAutomaton[]，来自 item_gen `<automaton>` JSON） */
-  automata?: EffectAutomaton[];
-  /** 🆕 skillPower 链路修复 (2026-08-04): 主体技能威力。item_gen 按 Tier→威力区间表填，战斗 v3 的
-   *  ability.skillPower 消费（进 calcInitialDamage 公式「属性×10×层级系数 + 技能威力 + 武器攻击力」）。
-   *  被动/纯辅助技能可 undefined；战斗结算缺省=0。
-   *  与 modifiers(附加效果)/automata(自由效果) 的边界：skillPower = 走结算管线的主体伤害基数
-   *  （参与命中/防御/抗性/暴击）；modifiers/automata 里加 fixedDamage = 结算后追加固伤（不参与防御）。 */
+  /** 🆕 skillPower 链路修复 (2026-08-04): 主体技能威力。item_gen 按 Tier→威力区间表填，
+   *  战斗结算进 calcInitialDamage 公式「属性×10×层级系数 + 技能威力 + 武器攻击力」。
+   *  被动/纯辅助技能可 undefined；战斗结算缺省=0。 */
   skillPower?: number;
   /** 🆕 skillPower 链路修复: 关联属性（公式"属性×10×系数"取哪一维）。主动攻击技能由 item_gen 定型：
    *  法术/能量类=int、物理类=str、敏捷类=dex。 */
   relevantAttribute?: 'str' | 'dex' | 'con' | 'int' | 'spi';
   /** 🆕 skillPower 链路修复: 主体威力的伤害类型（结算通道）。法术=能量、物理=物理、精神攻击=精神。 */
   damageType?: DamageType;
+  /** 🆕 entity_gen (2026-10-02): 协议文本 —— 条目 XML 的原样内文（零丢失，AI 依协议文本结算）。
+   *  与 description 的分工：description 是剥掉标签的纯文本（给人看），protocolText 是原始条目文本（给 AI 读） */
+  protocolText?: string;
+  /** 🆕 entity_gen (2026-10-02): 标签原文集合（`<tag>` 子元素 + AI 直写的 `[...]`），只存文本不建强类型 */
+  tags?: string[];
 }
 
 /** 背包物品 */
@@ -989,18 +977,10 @@ export interface InventoryItem {
   data?: Record<string, any>;
   /** 🆕 效果词条: 词条名→中文描述 (AI写, 前端展示) */
   effects?: Record<string, string>;
-  /** 🆕 脚本注册表: 脚本名→可执行代码 (AI写, 引擎执行) */
-  scripts?: Record<string, string>;
-  /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier，来自 item_gen <modifiers> 子元素）。
-   *  装备进入战斗时由 collect_mods event 收集，注入 8 步伤害管线（架构 §4.1） */
-  modifiers?: Modifier[];
-  /** 🆕 战斗 v2 (M4 5.5b): 该物品/装备附带的 buff 定义（由附加效果类 modifier 转 buff 或 AI 直接声明） */
-  buffs?: StatusEffect[];
-  /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备，缺省=0；§6.2 决策 d，冲突仲裁见 resolveDivinityConflict） */
-  divinity?: DivinityLevel;
-  /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（EffectAutomaton[]，来自 item_gen `<automaton>` JSON）。
-   *   compileEffectProgram 编译进 activeEffects（走 18 窗口 + trigger 表达式 + intents 解释执行） */
-  automata?: EffectAutomaton[];
+  /** 🆕 entity_gen (2026-10-02): 协议文本 —— 条目 XML 的原样内文（零丢失） */
+  protocolText?: string;
+  /** 🆕 entity_gen (2026-10-02): 标签原文集合（`<tag>` + `[...]`），只存文本 */
+  tags?: string[];
 }
 
 /** 状态效果 */
@@ -1026,23 +1006,15 @@ export interface StatusEffect {
   effects: Record<string, number>; // 效果数值化 (保留, 简单数值效果)
   /** 🆕 效果词条: 词条名→中文描述 (AI写, 前端展示) */
   effectDescriptions?: Record<string, string>;
-  /** 🆕 脚本注册表: 脚本名→可执行代码 (AI写, 引擎执行) */
-  scripts?: Record<string, string>;
-  /** 🆕 施加时执行的脚本引用 */
-  onApply?: string;
-  /** 🆕 每回合/时间单位执行的脚本引用 */
-  onTick?: string;
-  /** 🆕 移除时执行的脚本引用 */
-  onRemove?: string;
-  /** 🆕 条件触发时执行的脚本引用 */
-  onTrigger?: string;
   /** 🆕 M2: buff id 前缀 —— 施加该 buff 的物品/技能名（"幽怨之剑"）。
    *  buff id = sourceKey ? `${sourceKey}.${name}` : name。与 source 展示串正交（source 承载"[分类]-[施加者];[解除方式]"） */
   sourceKey?: string;
   /** 🆕 M2: 生命周期类型（对齐 [状态规则] 4 种）。缺省=按 timeUnit 推导（'回合'→战斗型；remainingTime=null→持续型） */
   lifecycle?: '战斗' | '持续' | '触发' | '条件';
-  /** 🆕 M2: 登神等级（大部分 buff 无；缺省=普通 0）。神位级 buff 才带 */
-  divinity?: DivinityLevel;
+  /** 🆕 entity_gen (2026-10-02): 协议文本 —— 条目 XML 的原样内文（零丢失） */
+  protocolText?: string;
+  /** 🆕 entity_gen (2026-10-02): 标签原文集合（`<tag>` + `[...]`），只存文本 */
+  tags?: string[];
 }
 
 // ===== 登神长阶 (Ascension) 子类型 =====
@@ -1054,8 +1026,6 @@ export interface ElementDetail {
   effects: string[]; // 被动效果列表
   /** 🆕 Phase 9: 词条名→中文描述 (AI 编写, 前端展示, 与 Skill.effects 对齐) */
   effectDescriptions?: Record<string, string>;
-  /** 🆕 Phase 9: 脚本注册表: lifecycle→JS code (AI 编写, 引擎执行, 与 Skill.scripts 对齐) */
-  scripts?: Record<string, string>;
 }
 
 /** 权能 (Lv.17-20, 3要素→1权能) */
@@ -1066,8 +1036,6 @@ export interface AuthorityDetail {
   costDescription: string; // 消耗描述 (如 '25% 最大MP+SP+攻击+动作')
   /** 🆕 Phase 9: 词条名→中文描述 */
   effectDescriptions?: Record<string, string>;
-  /** 🆕 Phase 9: 脚本注册表 */
-  scripts?: Record<string, string>;
 }
 
 /** 法则 (Lv.21-24) */
@@ -1078,8 +1046,6 @@ export interface LawDetail {
   costDescription: string;
   /** 🆕 Phase 9: 词条名→中文描述 */
   effectDescriptions?: Record<string, string>;
-  /** 🆕 Phase 9: 脚本注册表 */
-  scripts?: Record<string, string>;
 }
 
 /** 统一角色状态 — NPC/主角/怪物/召唤物 共用 */
@@ -1607,6 +1573,13 @@ export interface ToolExecutionContext {
   craftDice?: Record<string, CraftDiceTape>;
   /** Defer settlement until the craft chain can commit its product in the same command. */
   stageCraftSettlement?: (patches: StatePatch[]) => void;
+  /**
+   * 🆕 2026-10-02（战斗重写 Phase 2）：战斗沙盒工具的运行时权威状态。
+   *
+   * 由 `runCombatSandbox` 的 toolExecutor 绑定、就地维护；非战斗工具不读它，旧工具零影响。
+   * 类型指向沙盒分册（type-only），不把沙盒类型搬进本文件。
+   */
+  combatState?: import('../combat/sandbox/types').CombatState;
 }
 
 /** Agent 定义 */
@@ -2583,12 +2556,6 @@ export interface CombatParticipant {
   speedModifiers: number[];
   /** 固定先攻修正 (多来源取最高) */
   fixedInitiativeBonus: number;
-  /** 🆕 战斗 v3 修复：装备/技能的战斗修正声明（item_gen 产出，compileEffectProgram 编译进 activeEffects）。
-   *    v2 时代由 combat-resolver 消费；M5 退役 v2 后此链路曾断裂，现由 v3 内核接管。 */
-  modifiers?: Modifier[];
-  /** 🆕 战斗 v3 (S3 2026-08-01): 参与者的自由效果 DSL automaton（item_gen 产出 `<automaton>`，
-   *   characterToCombatParticipant 从已装备物品/技能收集，createCombatState 编译进 activeEffects） */
-  automata?: EffectAutomaton[];
   /** 当前回合可用资源 */
   attacksRemaining: number;
   actionsRemaining: number;
@@ -2604,8 +2571,7 @@ export interface CombatParticipant {
   morale?: MoraleState;
   /** 🆕 skillPower 链路修复 (2026-08-04): 主动技能战斗快照。characterToCombatParticipant 从
    *  char.skills 摘取主动技能的最小战斗集，createCombatState 透传进 CombatUnitState.activeSkills，
-   *  供 handleAttack 在声明 declare_attack(skillName) 时按名查 skillPower/relevantAttribute/damageType。
-   *  被动技能的 modifiers/automata 仍走现有 modifiers/automata 通道，不在这里。 */
+   *  供 handleAttack 在声明 declare_attack(skillName) 时按名查 skillPower/relevantAttribute/damageType。 */
   activeSkills?: ReadonlyArray<{
     name: string;
     skillPower: number;
@@ -3337,9 +3303,8 @@ export type MarkerType =
   | 'craft_request'
   | 'combat_trigger'
   | 'char_detect' // 旧（保留向后兼容）
-  | 'char_gen_request'
+  | 'entity_gen_request' // 实体生成调度（2026-10-02 硬改名：char_gen_request + item_gen_request 合并）
   | 'char_update_request' // 角色调度
-  | 'item_gen_request'
   | 'item_update_request' // 物品调度
   | 'craft_gen_request' // 制作调度（统一 _request 后缀）
   | 'play_audio' // 场景配乐（Story 直接输出，非阻塞）
@@ -3468,9 +3433,8 @@ export type DetectedMarker =
   | CraftRequestMarker
   | CombatTriggerMarker
   | CharDetectMarker // 旧（保留）
-  | CharGenRequestMarker
+  | EntityGenRequestMarker
   | CharUpdateRequestMarker
-  | ItemGenRequestMarker
   | ItemUpdateRequestMarker
   | CraftGenRequestMarker
   | PlayAudioMarker
@@ -3485,13 +3449,26 @@ export type DetectedMarker =
   // `event_trigger` 一行是同一次改动的两半。
   | EventTriggerMarker;
 
+/** 实体生成类型（`<entity_gen_request type="...">` 的取值） */
+export type EntityGenType = 'character' | 'skill' | 'equipment' | 'item' | 'status' | 'ascension';
+
 /**
- * <char_gen_request> 标记 — request_dispatcher 检测到新角色时输出。
- * 触发 char_gen → item_gen 链，为新角色生成完整状态。
+ * <entity_gen_request> 标记 — request_dispatcher 检测到新实体（角色/技能/装备/道具/状态/登神）时输出。
+ *
+ * 🔴 2026-10-02 硬改名：原 `<char_gen_request>`（triggerName=character）与
+ * `<item_gen_request>`（triggerName=skill/equipment/item/status/ascension）合并为单标签，
+ * `type` 属性区分实体类型。触发 `entity_gen` 一次生成。
  */
-export interface CharGenRequestMarker extends DetectedMarkerBase {
-  type: 'char_gen_request';
+export interface EntityGenRequestMarker extends DetectedMarkerBase {
+  type: 'entity_gen_request';
   attributes: {
+    /** 实体类型（XML 属性名就是 `type`，此处字段名 entityType 避免与 marker 判别字段冲突） */
+    entityType: EntityGenType;
+    /** skill/equipment/item/status/ascension 的归属角色名（铁律1 按名寻址） */
+    owner?: string;
+    /** 来源: craft | loot | gift | story */
+    source?: string;
+    /** character 专用：指定名字（可能为空，空则 AI 自取名） */
     characterName?: string;
     race?: string;
     tier?: string;
@@ -3509,20 +3486,6 @@ export interface CharUpdateRequestMarker extends DetectedMarkerBase {
   type: 'char_update_request';
   attributes: {
     target: string; // 必填：角色 ID
-  };
-  bodyText: string;
-}
-
-/**
- * <item_gen_request> 标记 — request_dispatcher 检测到新物品/技能时输出。
- * 触发独立 item_gen 调用。
- */
-export interface ItemGenRequestMarker extends DetectedMarkerBase {
-  type: 'item_gen_request';
-  attributes: {
-    itemType: string; // equipment | skill | consumable | material | ascension
-    source?: string; // craft | loot | gift | story
-    owner?: string; // 归属角色 ID
   };
   bodyText: string;
 }
@@ -3599,8 +3562,6 @@ export interface CraftAgentOutput {
     damageType?: string;
     /** 🆕 施加状态效果的名称引用 */
     appliesStatus?: string;
-    /** 🆕 词条脚本注册表: 脚本名→可执行代码（支持 $event.on/off, $call, @parent 等） */
-    scripts?: Record<string, string>;
   }>;
   /** 效果声明列表 (可被 effect-parser 解析) */
   effectDeclarations: string[];
@@ -3693,10 +3654,13 @@ export interface CharGenOutput {
     path: string;
     description: string;
     /** 要素 (Lv.13-16, 1-3个) — 使用 ElementDetail 统一类型 */
-    elements: Array<Pick<ElementDetail, 'name' | 'description' | 'effects'>>;
+    elements: Array<Pick<ElementDetail, 'name' | 'description' | 'effects' | 'effectDescriptions'>>;
     /** 权能 (Lv.17-20, 1个) — 使用 AuthorityDetail 统一类型 */
     authorities: Array<
-      Pick<AuthorityDetail, 'name' | 'description' | 'effects' | 'costDescription'>
+      Pick<
+        AuthorityDetail,
+        'name' | 'description' | 'effects' | 'costDescription' | 'effectDescriptions'
+      >
     >;
     /** 法则 (Lv.21-24, 1-2个) */
     laws: Array<{
@@ -3719,21 +3683,16 @@ export interface CharGenOutput {
     cost?: { type: 'HP' | 'MP' | 'SP'; amount: number };
     cooldown?: number;
     effects?: Record<string, string>;
-    scripts?: Record<string, string>;
     /** 🆕 2026-09-11: 技能品质（对齐 ItemGenOutput.skills.quality） */
     quality?: string;
-    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
-    modifiers?: Modifier[];
-    /** 🆕 战斗 v2 (M4 5.5b): 该技能附带的 buff 定义 */
-    buffs?: StatusEffect[];
-    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8 */
-    divinity?: DivinityLevel;
-    /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton */
-    automata?: EffectAutomaton[];
     /** 🆕 skillPower 链路修复 (2026-08-04): 主体技能威力（同 ItemGenOutput.skills.skillPower） */
     skillPower?: number;
     relevantAttribute?: 'str' | 'dex' | 'con' | 'int' | 'spi';
     damageType?: DamageType;
+    /** 🆕 entity_gen (2026-10-02): 协议文本（条目原样内文） */
+    protocolText?: string;
+    /** 🆕 entity_gen (2026-10-02): 标签原文集合 */
+    tags?: string[];
   }>;
   /** 🆕 char_gen 自身生成的装备 */
   equipment: Array<{
@@ -3744,17 +3703,10 @@ export interface CharGenOutput {
     durability?: number;
     quality?: string;
     effects?: Record<string, string>;
-    /** 🆕 Q-13: 脚本 <script name="...">code</script>。此前只有 ItemGenOutput 声明了它，
-     *  assembleCharacterState 靠 `(e as any).scripts` 读，类型上看不出这条通路存在 */
-    scripts?: Record<string, string>;
-    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
-    modifiers?: Modifier[];
-    /** 🆕 战斗 v2 (M4 5.5b): 该装备附带的 buff 定义 */
-    buffs?: StatusEffect[];
-    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备） */
-    divinity?: DivinityLevel;
-    /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton */
-    automata?: EffectAutomaton[];
+    /** 🆕 entity_gen (2026-10-02): 协议文本（条目原样内文） */
+    protocolText?: string;
+    /** 🆕 entity_gen (2026-10-02): 标签原文集合 */
+    tags?: string[];
   }>;
   /** 🆕 char_gen 自身生成的背包物品 */
   inventory: Array<{
@@ -3763,17 +3715,12 @@ export interface CharGenOutput {
     quantity: number;
     type: string;
     rarity?: string;
-    /** 🆕 Q-13: 词条效果 / 脚本。同上——此前只由 `(inv as any)` 读，类型上是隐形的 */
+    /** 🆕 Q-13: 词条效果。此前只由 `(inv as any)` 读，类型上是隐形的 */
     effects?: Record<string, string>;
-    scripts?: Record<string, string>;
-    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
-    modifiers?: Modifier[];
-    /** 🆕 战斗 v2 (M4 5.5b): 该物品附带的 buff 定义 */
-    buffs?: StatusEffect[];
-    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备） */
-    divinity?: DivinityLevel;
-    /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton */
-    automata?: EffectAutomaton[];
+    /** 🆕 entity_gen (2026-10-02): 协议文本（条目原样内文） */
+    protocolText?: string;
+    /** 🆕 entity_gen (2026-10-02): 标签原文集合 */
+    tags?: string[];
   }>;
   /** 🆕 真机 fix(2026-07-18): char_gen 原始 XML 输出，供 item_gen 提取 <item_requests>/<skill_requests>/<equipment_requests> */
   rawXml?: string;
@@ -3797,16 +3744,6 @@ export interface ItemGenOutput {
     quality?: string;
     /** 🆕 Phase 8.5: 词条效果 <effect name="...">...</effect> */
     effects?: Record<string, string>;
-    /** 🆕 Phase 8.5: 脚本 <script name="init|cast|tick|cleanup">code</script> */
-    scripts?: Record<string, string>;
-    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明，来自 <modifiers> 子元素（6 大类，对齐 effect-types.ts Modifier 联合） */
-    modifiers?: Modifier[];
-    /** 🆕 战斗 v2 (M4 5.5b): 该元素附带的 buff 定义（由附加效果类 modifier 转换或 AI 直接声明） */
-    buffs?: StatusEffect[];
-    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（神位级技能才填，缺省=0） */
-    divinity?: DivinityLevel;
-    /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（来自 item_gen `<automaton>` JSON） */
-    automata?: EffectAutomaton[];
     /** 🆕 skillPower 链路修复 (2026-08-04): 主体技能威力（item_gen `<skill power="...">`）。
      *  战斗 v3 的 ability.skillPower 消费，进 calcInitialDamage 公式。被动/辅助可 undefined。 */
     skillPower?: number;
@@ -3816,6 +3753,10 @@ export interface ItemGenOutput {
     damageType?: DamageType;
     /** 🆕 重铸 (2026-08-24): 声明「把 replace 指定的已知条目替换成本条目」（item_gen `<skill replace="...">`） */
     replace?: string;
+    /** 🆕 entity_gen (2026-10-02): 协议文本（条目 XML 原样内文，零丢失） */
+    protocolText?: string;
+    /** 🆕 entity_gen (2026-10-02): 标签原文集合（`<tag>` + `[...]`） */
+    tags?: string[];
   }>;
   /** 装备列表 */
   equipment: Array<{
@@ -3831,18 +3772,12 @@ export interface ItemGenOutput {
     quality?: string;
     /** 🆕 真机 fix(2026-07-18): 词条效果 <effect name="...">...</effect> */
     effects?: Record<string, string>;
-    /** 🆕 真机 fix(2026-07-18): 脚本 <script name="...">code</script> */
-    scripts?: Record<string, string>;
-    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明，来自 <modifiers> 子元素（6 大类，对齐 effect-types.ts Modifier 联合） */
-    modifiers?: Modifier[];
-    /** 🆕 战斗 v2 (M4 5.5b): 该元素附带的 buff 定义（由附加效果类 modifier 转换或 AI 直接声明） */
-    buffs?: StatusEffect[];
-    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备，缺省=0；§6.2 决策 d） */
-    divinity?: DivinityLevel;
-    /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（来自 item_gen `<automaton>` JSON） */
-    automata?: EffectAutomaton[];
     /** 🆕 重铸 (2026-08-24): 声明「把 replace 指定的已知条目替换成本条目」（item_gen `<equip replace="...">`） */
     replace?: string;
+    /** 🆕 entity_gen (2026-10-02): 协议文本（条目 XML 原样内文，零丢失） */
+    protocolText?: string;
+    /** 🆕 entity_gen (2026-10-02): 标签原文集合（`<tag>` + `[...]`） */
+    tags?: string[];
   }>;
   /** 背包物品列表 */
   inventory: Array<{
@@ -3854,30 +3789,65 @@ export interface ItemGenOutput {
     rarity?: string;
     /** 🆕 真机 fix(2026-07-18): 词条效果 <effect name="...">...</effect> */
     effects?: Record<string, string>;
-    /** 🆕 真机 fix(2026-07-18): 脚本 <script name="...">code</script> */
-    scripts?: Record<string, string>;
-    /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明，来自 <modifiers> 子元素（6 大类，对齐 effect-types.ts Modifier 联合） */
-    modifiers?: Modifier[];
-    /** 🆕 战斗 v2 (M4 5.5b): 该元素附带的 buff 定义（由附加效果类 modifier 转换或 AI 直接声明） */
-    buffs?: StatusEffect[];
-    /** 🆕 战斗 v2 (M4 5.5b): 登神等级 0-8（挂整件装备，缺省=0；§6.2 决策 d） */
-    divinity?: DivinityLevel;
-    /** 🆕 战斗 v3 (S3 2026-08-01): AI 产的自由效果 DSL automaton（来自 item_gen `<automaton>` JSON） */
-    automata?: EffectAutomaton[];
     /** 🆕 重铸 (2026-08-24): 声明「把 replace 指定的已知条目替换成本条目」（item_gen `<item replace="...">`） */
     replace?: string;
+    /** 🆕 entity_gen (2026-10-02): 协议文本（条目 XML 原样内文，零丢失） */
+    protocolText?: string;
+    /** 🆕 entity_gen (2026-10-02): 标签原文集合（`<tag>` + `[...]`） */
+    tags?: string[];
   }>;
-  /** 🆕 Phase 9: 登神要素 (含 scripts + effectDescriptions) */
-  elements?: Array<
-    Pick<ElementDetail, 'name' | 'description' | 'effects' | 'effectDescriptions' | 'scripts'>
-  >;
-  /** 🆕 Phase 9: 权能 (含 scripts + effectDescriptions) */
+  /** 🆕 Phase 9: 登神要素 (含 effectDescriptions) */
+  elements?: Array<Pick<ElementDetail, 'name' | 'description' | 'effects' | 'effectDescriptions'>>;
+  /** 🆕 Phase 9: 权能 (含 effectDescriptions) */
   authorities?: Array<
     Pick<
       AuthorityDetail,
-      'name' | 'description' | 'effects' | 'costDescription' | 'effectDescriptions' | 'scripts'
+      'name' | 'description' | 'effects' | 'costDescription' | 'effectDescriptions'
     >
   >;
+}
+
+/** 状态效果产出（entity_gen `<status>` 子元素）—— 与落库 StatusEffect 形状对齐 */
+export interface EntityStatusOutput {
+  /** 归属角色名（按名寻址，铁律1） */
+  owner: string;
+  name: string;
+  category: '增益' | '减益' | '特殊';
+  description: string;
+  stacks: number;
+  maxStacks: number;
+  remainingTime: number;
+  timeUnit: '回合' | '分钟' | '小时';
+  effects?: Record<string, string>;
+  effectDescriptions?: Record<string, string>;
+  /** 🆕 entity_gen: 协议文本（原样内文） */
+  protocolText?: string;
+  /** 🆕 entity_gen: 标签原文集合 */
+  tags?: string[];
+}
+
+/**
+ * entity_gen 的统一输出（`<entity_result>` 解析结果）。
+ *
+ * 按需分块：character 与 skills/equipment/inventory/statuses/ascension 各自可选。
+ * `character` 存在时，其自带的技能/装备/道具/登神内嵌在 CharGenOutput 里（一次调用产全）。
+ * 独立生成（skill/equipment/item/status/ascension）时只有对应块非空。
+ */
+export interface EntityGenOutput {
+  /** 角色块（`<character>`）—— 完整角色数据 */
+  character?: CharGenOutput;
+  /** 顶层技能块（独立生成） */
+  skills: ItemGenOutput['skills'];
+  /** 顶层装备块（独立生成） */
+  equipment: ItemGenOutput['equipment'];
+  /** 顶层背包块（独立生成） */
+  inventory: ItemGenOutput['inventory'];
+  /** 状态块（独立生成 / 角色内嵌；缺省 = 无） */
+  statuses?: EntityStatusOutput[];
+  /** 顶层登神块（独立生成；要素/权能的 effectDescriptions 走 elements/authorities） */
+  ascension?: CharGenOutput['ascension'];
+  elements?: ItemGenOutput['elements'];
+  authorities?: ItemGenOutput['authorities'];
 }
 
 /** Char Gen 链的最终结果 — char_gen → item_gen → 完整 CharacterState + Patches */

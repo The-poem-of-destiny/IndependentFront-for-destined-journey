@@ -443,6 +443,13 @@ uid 永不回收（占位保留段 900001+，D43）；升级 diff 从安装计�
 - agent 可见性：pack 与占位同 15 id ⇒ 既有 `agents.*.worldBookIds` 命名继续成立；未来新 id
   须含 grant 步骤（工坊 `grantWorkshopBookToAgents` 先例）。
 
+> 📌 **2026-10-02 更正**：占位/真实世界书现为 **16** 本 —— 新增分区 `combat_extra`
+> （世界书 id `combat_extra`，名称「战斗/数值相关额外世界书」）。占位书 uid 用保留段
+> **901501–901504**（4 条），真实书 uid 段 600–607（8 条）；`BUILTIN_IDS` 已追加该 id，
+> 占位基线清单（`placeholder-hashes.json`）已重生成。本节其余「15 本」是 2026-08-05 当时的存量口径。
+> 按上一条 bullet「新 id 须含 grant 步骤」，该本**尚未**写入任何 `agents.*.worldBookIds`，
+> 故装包/占位后暂不被 Agent 注入。
+
 ### 5.4 agents 层（D44，v1.2 大修版）
 
 **分层真源**：`projectAgentDefaults`（运行时解析 = pack `agentDefaults` > 占位文件）作为

@@ -19,15 +19,16 @@ describe('Agent 默认提示词广告的工具 ⊆ 工具白名单', () => {
     agents: Record<string, { systemPrompt?: string }>;
   };
 
-  /** 从提示词「可用工具」小节抠工具名列表。
+  /** 从提示词「可用工具 / 全程工具」小节抠工具名列表。
    *  只抠**小节本身**（到下个空行/标题为止）：工具名是下划线 snake_case
-   * （`roll_d20` / `get_character`），但正文里也会出现 `item_gen`（下游 Agent 名）、
-   * `cost_type`（字段名）这类同形状的词 —— 截断到小节结尾就能排除它们。
-   *  `(?<!<)` 排除 `<skill_requests>` 这类 XML 标签。 */
+   *  （`roll_d20` / `get_character`），但正文里也会出现 `item_gen`（下游 Agent 名）、
+   *  `cost_type`（字段名）这类同形状的词 —— 截断到小节结尾就能排除它们。
+   *  `(?<!<)` 排除 `<skill_requests>` 这类 XML 标签。
+   *  `combat` 沙盒主持流程用「# 全程工具」措辞，故两个标题都认。 */
   function advertisedTools(prompt: string): string[] {
-    const start = prompt.indexOf('可用工具');
-    if (start < 0) return [];
-    const rest = prompt.slice(start);
+    const idx = Math.max(prompt.indexOf('可用工具'), prompt.indexOf('全程工具'));
+    if (idx < 0) return [];
+    const rest = prompt.slice(idx);
     const endMatch = rest.match(/\n\s*\n|\n#/);
     const section = endMatch ? rest.slice(0, endMatch.index) : rest;
     const names = new Set<string>();
@@ -35,6 +36,12 @@ describe('Agent 默认提示词广告的工具 ⊆ 工具白名单', () => {
       names.add(m[0]);
     }
     return [...names];
+  }
+
+  /** 该 Agent 广告的真实工具面 = `AGENT_TOOL_MAP` 白名单（战斗沙盒的
+   *  COMBAT_SANDBOX_TOOL_DEFINITIONS 已收口回这张表）。 */
+  function whitelistFor(agentId: string): string[] {
+    return AGENT_TOOL_MAP[agentId] ?? [];
   }
 
   /**
@@ -79,16 +86,16 @@ describe('Agent 默认提示词广告的工具 ⊆ 工具白名单', () => {
   });
 
   for (const agentId of TOOL_ADVERTISING_AGENTS) {
-    it(`${agentId}: 提示词列出的工具必须都在 AGENT_TOOL_MAP 白名单内`, () => {
+    it(`${agentId}: 提示词列出的工具必须都在工具白名单内`, () => {
       const prompt = cfg.agents[agentId]?.systemPrompt ?? '';
       expect(prompt.length, `「${agentId}」的 systemPrompt 为空`).toBeGreaterThan(0);
       // 措辞漂移必须在这里变红，而不是静默少生成一条用例
       expect(
-        prompt,
-        `「${agentId}」有工具白名单，但提示词里找不到「可用工具」小节 —— ` +
+        prompt.includes('可用工具') || prompt.includes('全程工具'),
+        `「${agentId}」有工具白名单，但提示词里找不到「可用工具 / 全程工具」小节 —— ` +
           `要么小节标题被改了措辞（请同步本闸门的提取逻辑），要么工具广告被误删`,
-      ).toContain('可用工具');
-      const whitelist = AGENT_TOOL_MAP[agentId] ?? [];
+      ).toBe(true);
+      const whitelist = whitelistFor(agentId);
       const advertised = advertisedTools(prompt);
       expect(advertised.length).toBeGreaterThan(0);
       for (const name of advertised) {

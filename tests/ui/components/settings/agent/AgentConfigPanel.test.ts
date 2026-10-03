@@ -75,9 +75,9 @@ function mountPanel(agentId: string) {
 
 describe('AgentConfigPanel —— 草稿载入（immediate watch 看门人）', () => {
   it('🔴 挂载那一刻草稿就已经载好 —— 用户自定义值直接出现在提示词卡上', () => {
-    mockSettings.agents.char_gen = { systemPrompt: '用户自定义提示词', template: '用户模板' };
+    mockSettings.agents.entity_gen = { systemPrompt: '用户自定义提示词', template: '用户模板' };
 
-    const w = mountPanel('char_gen');
+    const w = mountPanel('entity_gen');
     const card = w.findComponent(AgentPromptCard);
 
     // 少了 immediate 时这两条都会是空串 —— 那正是"保存设置写空串"的前一秒
@@ -87,28 +87,28 @@ describe('AgentConfigPanel —— 草稿载入（immediate watch 看门人）', 
 
   it('没有用户值时落项目默认（agent-config.json）', () => {
     mockStore.projectAgentDefaults = {
-      agents: { char_gen: { systemPrompt: '项目默认提示词', template: '项目默认模板' } },
+      agents: { entity_gen: { systemPrompt: '项目默认提示词', template: '项目默认模板' } },
     };
 
-    const card = mountPanel('char_gen').findComponent(AgentPromptCard);
+    const card = mountPanel('entity_gen').findComponent(AgentPromptCard);
     expect(card.props('prompt')).toBe('项目默认提示词');
     expect(card.props('template')).toBe('项目默认模板');
   });
 
   it('项目默认也没有时落引擎内置模板（三级回退的最后一级）', () => {
-    const card = mountPanel('char_gen').findComponent(AgentPromptCard);
-    expect(card.props('prompt')).toBe('[引擎模板:char_gen]');
+    const card = mountPanel('entity_gen').findComponent(AgentPromptCard);
+    expect(card.props('prompt')).toBe('[引擎模板:entity_gen]');
   });
 
   it('切 Agent 时草稿跟着换（watch 的 source 确实是 props.agentId）', async () => {
-    mockSettings.agents.char_gen = { systemPrompt: '角色生成的提示词' };
-    mockSettings.agents.item_gen = { systemPrompt: '物品生成的提示词' };
+    mockSettings.agents.entity_gen = { systemPrompt: '实体生成的提示词' };
+    mockSettings.agents.vars_update = { systemPrompt: '状态更新的提示词' };
 
-    const w = mountPanel('char_gen');
-    expect(w.findComponent(AgentPromptCard).props('prompt')).toBe('角色生成的提示词');
+    const w = mountPanel('entity_gen');
+    expect(w.findComponent(AgentPromptCard).props('prompt')).toBe('实体生成的提示词');
 
-    await w.setProps({ agentId: 'item_gen' });
-    expect(w.findComponent(AgentPromptCard).props('prompt')).toBe('物品生成的提示词');
+    await w.setProps({ agentId: 'vars_update' });
+    expect(w.findComponent(AgentPromptCard).props('prompt')).toBe('状态更新的提示词');
   });
 });
 
@@ -120,7 +120,7 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
   });
 
   it('非 story 走提示词卡，不渲染预设面板', () => {
-    const w = mountPanel('char_gen');
+    const w = mountPanel('entity_gen');
     expect(w.findComponent(AgentPromptCard).exists()).toBe(true);
     expect(w.findComponent(PresetManager).exists()).toBe(false);
   });
@@ -157,15 +157,15 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
   });
 
   it('动作栏两个按钮（恢复默认 / 保存设置）—— 占位态无「保存为默认」（D14）', () => {
-    expect(mountPanel('char_gen').findAllComponents(AppButton)).toHaveLength(2);
+    expect(mountPanel('entity_gen').findAllComponents(AppButton)).toHaveLength(2);
   });
 
   it('🔴「保存设置」提交的是载好的草稿，不是空串（草稿 ≠ 默认 → 写覆写）', async () => {
     // 草稿 ≠ 默认时，diff-write 会把草稿写进覆写层
     mockStore.projectAgentDefaults = {
-      agents: { char_gen: { systemPrompt: '项目默认提示词', template: '项目默认模板' } },
+      agents: { entity_gen: { systemPrompt: '项目默认提示词', template: '项目默认模板' } },
     };
-    const w = mountPanel('char_gen');
+    const w = mountPanel('entity_gen');
     // 载好的草稿来自默认层（= '项目默认提示词'）。改成用户编辑版，让 diff-write 真的写
     const card = w.findComponent(AgentPromptCard);
     await card.vm.$emit('update:prompt', '用户改过的提示词');
@@ -174,25 +174,25 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     await w.findAllComponents(AppButton)[1].vm.$emit('click');
 
     // 覆写层现在有用户版
-    expect(mockSettings.agents.char_gen.systemPrompt).toBe('用户改过的提示词');
-    expect(mockSettings.agents.char_gen.template).toBe('用户改过的模板');
-    expect(mockSettings.agentDirty.char_gen).toBe(true);
+    expect(mockSettings.agents.entity_gen.systemPrompt).toBe('用户改过的提示词');
+    expect(mockSettings.agents.entity_gen.template).toBe('用户改过的模板');
+    expect(mockSettings.agentDirty.entity_gen).toBe(true);
   });
 
   it('🔴 D44 修正 4：草稿 === 解析默认 → 不写覆写（diff-write 删键，默认层接管）', async () => {
     mockStore.projectAgentDefaults = {
-      agents: { char_gen: { systemPrompt: '项目默认提示词', template: '项目默认模板' } },
+      agents: { entity_gen: { systemPrompt: '项目默认提示词', template: '项目默认模板' } },
     };
-    const w = mountPanel('char_gen');
+    const w = mountPanel('entity_gen');
     // 草稿载好 = 默认层的值（没改过）。点「保存设置」→ diff 相等 → 不写覆写键
     await w.findAllComponents(AppButton)[1].vm.$emit('click');
 
     // 🔴 覆写层**整条都不存在** —— 不只是键不存在，连空壳条目也不能留。
-    //    （此前 patchAgentSettings 的 ensure 会在覆写层建 `{ char_gen: {} }` 空壳，
+    //    （此前 patchAgentSettings 的 ensure 会在覆写层建 `{ entity_gen: {} }` 空壳，
     //    那是「用户没改任何东西却冒出脏数据」。）
-    expect('char_gen' in mockSettings.agents).toBe(false);
-    expect(mockSettings.agents.char_gen).toBeUndefined();
-    expect(mockSettings.agentDirty.char_gen).toBe(true);
+    expect('entity_gen' in mockSettings.agents).toBe(false);
+    expect(mockSettings.agents.entity_gen).toBeUndefined();
+    expect(mockSettings.agentDirty.entity_gen).toBe(true);
   });
 
   it('story 的「保存设置」不写 systemPrompt（正文走预设子系统）', async () => {
@@ -206,15 +206,15 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
 
 describe('AgentSection —— 分区壳', () => {
   it('🔴 单根 <section class="section centered">（.centered 只够得到根节点）', () => {
-    const w = mount(AgentSection, { props: { agentId: 'char_gen' }, shallow: true });
+    const w = mount(AgentSection, { props: { agentId: 'entity_gen' }, shallow: true });
     expect(w.element.tagName).toBe('SECTION');
     expect(w.classes()).toContain('section');
     expect(w.classes()).toContain('centered');
   });
 
   it('页头显示 Agent 中文名，配置面按同一个 agentId 渲染', () => {
-    const w = mount(AgentSection, { props: { agentId: 'char_gen' }, shallow: true });
-    expect(w.find('.agent-detail-head h3').text()).toBe('角色生成');
-    expect(w.findComponent(AgentConfigPanel).props('agentId')).toBe('char_gen');
+    const w = mount(AgentSection, { props: { agentId: 'entity_gen' }, shallow: true });
+    expect(w.find('.agent-detail-head h3').text()).toBe('实体生成');
+    expect(w.findComponent(AgentConfigPanel).props('agentId')).toBe('entity_gen');
   });
 });

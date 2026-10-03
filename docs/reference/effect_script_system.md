@@ -1,5 +1,14 @@
 # 词条效果 & 脚本系统 (Phase 7e+8)
 
+> 🔴 **战斗外 JS 脚本系统已整体删除（2026-10-02，Phase 1b/1c）**：本文描述的 Layer 2/3/4
+> （`EffectRuntime` / `EventBus` / `ScriptExecutor`）与其接线模块
+> （`effects/effect-wiring` / `subscription-manager` / `status-api` / `effect-runtime` /
+> `game-event`）以及整个 `src/core/scripting/*`（`script-executor` / `script-quickjs-backend` /
+> `script-registry` / `script-backend`）**已清出仓库**；实体 `scripts` 字段、
+> `onApply/onTick/onRemove/onTrigger` 生命周期钩子与 `get_script_reference` 工具同步退役。
+> **世界书 EJS 求值（ADR-30）与工坊正则不受影响**——那是两条独立契约，与本文的 `$` API 面互不相通。
+> 本文正文不再反映现状，仅作设计历史留存。
+
 > 引擎参考文档。描述效果系统的四层架构：声明式词条(EffectParser) → 执行运行时(EffectRuntime) → 事件总线(EventBus) → AI 可编程脚本(ScriptExecutor)
 
 ---

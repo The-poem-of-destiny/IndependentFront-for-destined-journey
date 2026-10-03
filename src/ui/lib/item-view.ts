@@ -2,9 +2,9 @@
  * item-view.ts — 物品 / 技能条目的**展示层纯逻辑**（唯一真源）
  *
  * 背景（2026-09-12）：玩家背包面板（`ItemsPanel.vue`）与 NPC 查看器
- * （`CharacterViewerModal.vue`）此前各写一套渲染，NPC 那套缺品质/战斗修正/效果归一化，
+ * （`CharacterViewerModal.vue`）此前各写一套渲染，NPC 那套缺品质/效果归一化，
  * 显示不一致。数据结构上主角与 NPC 完全等价（都是 `InventoryItem[]` / `Skill[]`），
- * 故把「品质判定 / 分类 / 详情字段 / 效果与战斗修正」等纯逻辑收在这里，两个视图共用。
+ * 故把「品质判定 / 分类 / 详情字段 / 效果」等纯逻辑收在这里，两个视图共用。
  *
  * 🔴 纯函数：无 I/O、无 store、无副作用。品质推断走引擎 ADR-11 的
  *    `inferQualityFromStats`（Q-11 起是全仓唯一一份，别再内联第二张阈值表）。
@@ -13,8 +13,6 @@
 import type { InventoryItem, QualityLevel, Skill } from '@engine/types/types';
 import { QUALITY_RANK } from '@engine/types/types';
 import { inferQualityFromStats } from '@engine/crafting/quality-inference';
-import { describeModifiers } from '@engine/combat/describe-modifier';
-import { describeAutomata } from '@engine/combat/describe-automaton';
 import { normalizeEffects } from './item-effects';
 
 /** 面板/查看器的分类（技能与物品是两种形状，故用判别联合而非取交集） */
@@ -74,18 +72,4 @@ export function detailExtra(entry: PanelEntry, category: ItemCategory): string {
 /** 效果词条：三种历史形态（对象 / 名字:描述分号串 / 数组）统一归一化 */
 export function entryEffects(entry: PanelEntry): Record<string, string> {
   return normalizeEffects(entry.row.effects);
-}
-
-/** 战斗修正中文摘要（modifiers + automata） */
-export function entryCombatLines(entry: PanelEntry): string[] {
-  return [...describeModifiers(entry.row.modifiers), ...describeAutomata(entry.row.automata)];
-}
-
-/** 原始战斗数据折叠（modifiers / automata JSON） */
-export function entryRawCombatJson(entry: PanelEntry): string {
-  const row = entry.row;
-  const parts: string[] = [];
-  if (row.modifiers?.length) parts.push(JSON.stringify(row.modifiers, null, 2));
-  if (row.automata?.length) parts.push(JSON.stringify(row.automata, null, 2));
-  return parts.join('\n\n');
 }

@@ -748,7 +748,7 @@ describe('CHARACTER_STATE', () => {
       'memory_recall',
       'request_dispatcher',
       'request_dispatcher',
-      'char_gen',
+      'entity_gen',
       'craft_gen',
     ];
     for (const id of agentIds) {
@@ -1306,7 +1306,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
 // ========== Chain Placeholders (localParams) ==========
 
 describe('Chain communication placeholders', () => {
-  // Chain placeholders (CRAFT_REQUEST, CHAR_DETECT, ITEM_REQUEST) return empty
+  // Chain placeholders (CRAFT_REQUEST, CHAR_DETECT, ENTITY_REQUEST) return empty
   // string from the registry. They are injected at resolution time via
   // template-resolver's resolveTemplate() using the localParams parameter.
   it('CRAFT_REQUEST returns empty (injected via resolveTemplate localParams)', () => {
@@ -1328,8 +1328,8 @@ describe('Chain communication placeholders', () => {
     expect(result).toBe('');
   });
 
-  it('ITEM_REQUEST returns empty (injected via resolveTemplate localParams)', () => {
-    const result = PLACEHOLDER_REGISTRY['ITEM_REQUEST'](mockCtx(), mockConfig());
+  it('ENTITY_REQUEST returns empty (injected via resolveTemplate localParams)', () => {
+    const result = PLACEHOLDER_REGISTRY['ENTITY_REQUEST'](mockCtx(), mockConfig());
     expect(result).toBe('');
   });
 
@@ -1392,15 +1392,11 @@ describe('Chain communication placeholders', () => {
     expect(result).toContain('结果: 我方撤退');
   });
 
-  it('CHAR_GEN_RESULT reads from agentOutputs', () => {
+  it('ENTITY_REQUEST always returns empty from registry', () => {
+    // localParams are injected by resolveTemplate(), not the registry.
     const ctx = mockCtx();
-    ctx.agentOutputs.set('char_gen', '<char_result><name>NPC</name></char_result>');
-    const result = PLACEHOLDER_REGISTRY['CHAR_GEN_RESULT'](ctx, mockConfig());
-    expect(result).toContain('char_result');
-  });
-
-  it('CHAR_GEN_RESULT returns empty when not present', () => {
-    const result = PLACEHOLDER_REGISTRY['CHAR_GEN_RESULT'](mockCtx(), mockConfig());
+    (ctx as any)._localParams = { ENTITY_REQUEST: '<entity_requests>需求</entity_requests>' };
+    const result = PLACEHOLDER_REGISTRY['ENTITY_REQUEST'](ctx, mockConfig());
     expect(result).toBe('');
   });
 
@@ -1512,22 +1508,15 @@ describe('getDefaultTemplate', () => {
     expect(tmpl).toContain('{{LORE_BOOK_DYNAMIC}}');
   });
 
-  it('returns non-empty template for char_gen', () => {
-    const tmpl = getDefaultTemplate('char_gen');
+  it('returns non-empty template for entity_gen（2026-10-02 合并 char_gen + item_gen）', () => {
+    const tmpl = getDefaultTemplate('entity_gen');
     expect(tmpl).toContain('{{SYS_PROMPT}}');
-    expect(tmpl).toContain('{{CHAR_DETECT}}');
+    expect(tmpl).toContain('{{ENTITY_REQUEST}}');
+    expect(tmpl).toContain('{{CRAFT_RESULT}}');
     expect(tmpl).toContain('{{CHARACTER_STATE}}');
+    expect(tmpl).toContain('{{INVENTORY}}');
     expect(tmpl).toContain('{{LORE_BOOK_STATIC}}');
     expect(tmpl).toContain('{{LORE_BOOK_DYNAMIC}}');
-  });
-
-  it('returns non-empty template for item_gen', () => {
-    const tmpl = getDefaultTemplate('item_gen');
-    expect(tmpl).toContain('{{SYS_PROMPT}}');
-    expect(tmpl).toContain('{{ITEM_REQUEST}}');
-    expect(tmpl).toContain('{{CHAR_GEN_RESULT}}');
-    expect(tmpl).toContain('{{CRAFT_RESULT}}');
-    expect(tmpl).toContain('{{INVENTORY}}');
   });
 
   it('returns empty string for unknown agent', () => {

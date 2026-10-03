@@ -1,5 +1,12 @@
 # 战斗系统架构（Combat System Architecture）v3
 
+> 🔴 **已退役（2026-10-03）**：本文描述的 v3 战斗内核（Kernel / Reducer / Phases / DiceTape /
+> EffectAutomaton DSL / Coordinator / 主机-敌方双会话）**已随 Phase 2「战斗去代码化」整体删除**，
+> 其 32 个文件与全部战斗测试一并清出仓库。现役战斗是**单一 DM 协议沙盒**：AI 读 v1.4.2 战斗协议
+> 自算结算，Code 只持权威 `CombatState` + 提供只读计算工具 + 终局白名单写回（`src/core/combat/sandbox/`）。
+> **本文正文不再反映现状，仅作 v3 设计历史留存**；现行真源见
+> `docs/planning/2026-10-02-combat-decode-entitygen-plan.md`（§5 Phase 2）与 `src/core/combat/sandbox/`。
+
 > 📌 **2026-09-30 目录与命名收口**：现役战斗统一位于 `src/core/combat/`，测试与夹具位于 `tests/core/combat/`。主持人 Agent 为 `combat`，敌方决策仍为 `combat_enemy`。旧版运行时契约、事件分支与 `combatEngineVersion` 已删除；运行入口为 `runCombat`，前端唯一战斗视图为 `activeCombat`。本文保留 v3 架构名称用于追溯。
 
 > 📌 **文档定位**：战斗 v3 的**正式架构真源**。取代 [`docs/archive/planning/2026-07-30-combat-kernel-v3-proposal.md`](../archive/planning/2026-07-30-combat-kernel-v3-proposal.md) 的骨架级提案，整合压测 + 补丁 RFC（`2026-07-31-combat-v3-real-sample-stress-test-rfc.md`，已移入私有内容仓 `fated_poem_independent_assets/docs/planning/`，公开仓侧不可见）§5/§6 全部补丁、[架构交接地图](../archive/planning/2026-07-31-combat-v3-architecture-handoff.md) §3/§4 边界结论，以及 2026-07-31 主人拍板的 D1–D6 决策。

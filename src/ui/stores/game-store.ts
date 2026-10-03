@@ -15,7 +15,7 @@ import type {
   DebugTurnRecord,
 } from '@engine/types/types';
 export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types/types';
-import type { CombatView, CombatCommand } from '@engine/combat';
+import type { CombatOutcome, CombatState } from '@engine/combat/sandbox/types';
 import {
   getSave,
   getSaves,
@@ -39,16 +39,14 @@ import {
   type PlayerPersonaDraft,
   type PlayerPersonaUpdateResult,
 } from '@engine/state/state-manager';
-import { wireEffectSystem, unwireEffectSystem } from '@engine/effects/effect-wiring';
 import { getExperienceMode } from '@engine/state/save-profile';
 import { invalidatePromptSession } from '@engine/prompts/prompt-session-assembler';
 import { allocateAttributePoint } from '@engine/character/attribute-allocation';
 import type { AllocatableAttr } from '@engine/character/attribute-allocation';
 import { detach } from './db-write';
-import type { CombatEvent } from '@engine/combat/ui-events';
 import { agentActivityLabel, presentToolActivity } from '../lib/agent-activity';
 // 🆕 重铸（2026-08-24）：单条目重铸的类型 + 注入缝（实现由 GamePage 挂 GamePipeline.rewriteLoadoutItem）
-import type { RewriteTarget } from '@engine/agents/item-gen-chain';
+import type { RewriteTarget } from '@engine/agents/entity-gen-agent';
 
 /** 重铸实现注入缝 —— GamePipeline 装配好 endpoint/chainData/stateManager 后由 GamePage 挂进来 */
 export type RewriteLoadoutImpl = (
@@ -73,16 +71,26 @@ export function setRewriteLoadoutImpl(impl: RewriteLoadoutImpl): void {
   rewriteLoadoutImpl = impl;
 }
 
-/** 战斗消息流条目（CombatMessageFlow 渲染） */
-export interface CombatLogEntry {
+/**
+ * 战斗中栏消息流条目（CombatMessageFlow 渲染）。
+ *
+ * C6：数据源改为沙盒 `CombatState` 的逐 exchange 输出 —— pipeline 每个 exchange 后把
+ * AI 本轮正文追加进来，组件按 `round` 插入回合分隔并解析出等宽面板。
+ */
+export interface CombatFlowEntry {
   id: string;
-  kind: 'round_divider' | 'narrative' | 'action';
-  round?: number;
-  /** narrative 文本 */
-  text?: string;
-  /** action: 工具返回结果（内核动作投影） */
-  result?: Record<string, any>;
-  toolName?: string;
+  round: number;
+  text: string;
+}
+
+/** 结算态载荷（驱动结算面板；`summaryText` 为终局 AI 叙事） */
+export interface CombatSettlementPayload {
+  outcome: CombatOutcome;
+  totalExp: number;
+  totalFp: number;
+  loot: CombatSummaryResult['loot'];
+  rounds: number;
+  summaryText: string;
 }
 
 export const useGameStore = defineStore('game', () => {
@@ -114,8 +122,13 @@ export const useGameStore = defineStore('game', () => {
   const plotOutline = ref<PlotOutline | null>(null);
 
   // === 战斗 & 制作 ===
-  /** Current combat view projected from kernel events. */
-  const activeCombat = ref<CombatView | null>(null);
+  /**
+   * 🆕 C6：战斗数据源 = 沙盒权威 `CombatState`（唯一真源）。
+   *
+   * game-pipeline 每个 exchange 后把最新状态推进来（响应式），前端全部从它渲染 ——
+   * 不再吃 v3 `CombatView`/`CombatEvent` 投影。
+   */
+  const combatState = ref<CombatState | null>(null);
 
   // 🆕 F2（2026-08-10）：就绪态 —— combat_trigger 检出后、玩家点「开始战斗」前的
   //   面板数据（marker 快照）。非 null = 就绪面板显示中（覆盖层锁 UI，战斗还没开）。
@@ -129,180 +142,99 @@ export const useGameStore = defineStore('game', () => {
     brief?: string;
   } | null>(null);
 
-  // 🆕 结算确认态（2026-08-13 需求 D）：战斗终局落库后、摘要注入正文前的确认面板。
-  //   非 null = 结算确认面板显示中（数值卡 + 可编辑摘要 textarea）。isInCombat 认它
-  //   —— settlement 已把 phase 置 SettlementCommitted（isInCombat 第三判据本会翻
-  //   false 关面板），确认面板需要面板继续开着，所以它必须进 isInCombat。
-  const combatSummaryReview = ref<{
-    outcome: 'ally_win' | 'enemy_win' | 'draw' | 'fled';
-    totalExp: number;
-    totalFp: number;
-    loot: CombatSummaryResult['loot'];
-    rounds: number;
-    summaryText: string;
-  } | null>(null);
-  /** awaitCombatSummaryReview 挂起的 resolver（confirm/discard/exitCombat 消费） */
-  let summaryReviewResolve: ((text: string | null) => void) | null = null;
+  // 🆕 结算态（C6）：战斗终局落库后、玩家裁决（继续/重开）前的结算面板。
+  //   非 null = 结算面板显示中；isInCombat 认它 —— 面板需要继续开着。
+  const combatSettlement = ref<CombatSettlementPayload | null>(null);
+  /** awaitCombatSettlement 挂起的 resolver（continue/discard/exitCombat 消费） */
+  let settlementResolve: ((text: string | null) => void) | null = null;
+
+  /** 中栏对话流（逐 exchange 追加 AI 本轮正文） */
+  const combatFlow = ref<CombatFlowEntry[]>([]);
+
+  /** 结算「继续」喂给 GamePage 的下一回合玩家输入（消费后清空） */
+  const combatContinue = ref<string | null>(null);
 
   const isInCombat = computed(
     () =>
-      combatReady.value !== null ||
-      combatSummaryReview.value !== null ||
-      (activeCombat.value !== null && activeCombat.value.phase !== 'SettlementCommitted'),
+      combatReady.value !== null || combatSettlement.value !== null || combatState.value !== null,
   );
 
-  // === M5 战斗面板状态 ===
-  /** 战斗消息流条目（叙事 + 动作结果卡片 + 回合分隔） */
-  const combatLog = ref<CombatLogEntry[]>([]);
-  /** 当前等玩家输入的我方单位（null = 不在等输入）；v3 扩展 requiredInputKind 供四态 UI 分流 */
-  const combatAwaitingInput = ref<{
-    unit: string;
-    unitId: string;
-    round: number;
-    requiredInputKind?: string;
-  } | null>(null);
-  const combatAgentPause = ref<{
-    role: 'combat_host' | 'combat_enemy';
-    message: string;
-    unit: string;
-    unitId: string;
-    round: number;
-  } | null>(null);
-  /** 当前行动者 characterId（turn_started 事件更新，单位卡片高亮用） */
-  const combatCurrentUnitId = ref<string | null>(null);
-  /** 🆕 v3：Coordinator 句柄（submitCommand / abandon / 重开），供前端 Command 路由与放弃（C4）
-   *  T16 §3.5：+preSnapshotId（pre-combat 快照，重开战斗 restoreSnapshot 用）与
+  /** 等待玩家输入的单位名（`meta.pendingPlayerUnit` 指向存活单位才有值） */
+  const combatPendingUnit = computed<string | null>(() => {
+    const state = combatState.value;
+    if (!state) return null;
+    const name = state.meta.pendingPlayerUnit;
+    if (!name) return null;
+    return state.units[name]?.alive ? name : null;
+  });
+
+  /** 🆕 v3 遗留句柄 → C6：Coordinator 句柄（submitPlayerIntent / abandon / 重开）
+   *  +preSnapshotId（pre-combat 快照，重开战斗 restoreSnapshot 用）与
    *  +restart（重开战斗回调 —— pipeline 持有 combat marker，重触发归它）。
-   *  F2：+start（就绪期占位句柄只带它 —— 玩家点「开始战斗」→ store.startCombat 调它）。 */
+   *  +start（就绪期占位句柄只带它 —— 玩家点「开始战斗」→ store.startCombat 调它）。 */
   const combatCoordinator = ref<{
-    submit?: (cmd: CombatCommand) => Promise<void>;
-    /** 🎭 主持人/DM 模式（2026-08-12）：提交玩家意图文本 → 主持人解析 → Command */
+    /** 🎭 主持人/DM 模式：提交玩家意图文本 → 主持人解析 → 工具声明 */
     submitPlayerIntent?: (text: string) => Promise<void>;
-    resumeAgent?: (action: 'retry' | 'exit') => void;
     abandon?: () => void;
-    waitForCommand?: () => Promise<CombatCommand>;
     preSnapshotId?: string | null;
     restart?: () => Promise<void>;
     start?: () => Promise<void>;
   } | null>(null);
 
-  /** 战斗开始：清空面板状态（战斗视图由 combat_started 事件填入，清空就绪态） */
+  /** 战斗开始：清空面板状态（数据随后由 setCombatState 填入，清空就绪/结算态） */
   function enterCombat() {
-    combatLog.value = [];
-    combatAwaitingInput.value = null;
-    combatAgentPause.value = null;
-    combatCurrentUnitId.value = null;
-    activeCombat.value = null;
+    combatState.value = null;
+    combatFlow.value = [];
+    combatContinue.value = null;
     combatReady.value = null;
+    combatSettlement.value = null;
   }
 
-  /** 应用 runner 事件流 → 更新面板状态（combat_started / action_resolved / 回合事件 / awaiting） */
-  function applyCombatEvent(evt: CombatEvent) {
-    const id = crypto.randomUUID();
-    switch (evt.type) {
-      // ── v3 扩展变体（投影 A 输出，M2）──
-      // 🆕 F2：就绪面板事件（combat_trigger 检出后 pipeline 直接构造，先于
-      //   combat_started 到达）——置 combatReady（isInCombat 据此弹就绪面板）。
-      //   战斗还没开，不动 activeCombat / combatLog。
-      case 'combat_ready':
-        combatReady.value = {
-          combatType: evt.combatType,
-          environment: evt.environment,
-          allies: evt.allies ? [...evt.allies] : undefined,
-          enemies: evt.enemies ? [...evt.enemies] : undefined,
-          bodyText: evt.bodyText,
-          brief: evt.brief,
-        };
-        break;
-      case 'combat_started':
-        activeCombat.value = {
-          revision: 0,
-          phase: 'CombatOpen',
-          round: evt.round,
-          combatId: evt.combatId,
-          initiativeOrder: evt.unitNames,
-          currentTurnIndex: 0,
-          // 单位数据由紧随开局事件的 units_snapshot 填入。
-          units: {},
-          resourceSnapshots: { FP: 0 },
-        };
-        combatLog.value.push({ id, kind: 'round_divider', round: evt.round });
-        break;
-      // 🆕 T13（设计 2026-08-09 §3.1）：开局单位字典整体快照 → 填充 activeCombat.units
-      case 'units_snapshot':
-        if (activeCombat.value) {
-          activeCombat.value = { ...activeCombat.value, units: { ...evt.units } };
+  /** 就绪态置位/清除（pipeline 检出 combat_trigger 后调用） */
+  function setCombatReady(
+    payload: {
+      combatType?: string;
+      environment?: string;
+      allies?: string[];
+      enemies?: string[];
+      bodyText?: string;
+      brief?: string;
+    } | null,
+  ) {
+    combatReady.value = payload
+      ? {
+          combatType: payload.combatType,
+          environment: payload.environment,
+          allies: payload.allies ? [...payload.allies] : undefined,
+          enemies: payload.enemies ? [...payload.enemies] : undefined,
+          bodyText: payload.bodyText,
+          brief: payload.brief,
         }
-        break;
-      case 'round_started':
-        combatLog.value.push({ id, kind: 'round_divider', round: evt.round });
-        if (activeCombat.value) {
-          activeCombat.value = { ...activeCombat.value, phase: 'RoundOpen', round: evt.round };
-        }
-        break;
-      case 'turn_started':
-        combatCurrentUnitId.value = evt.unitId;
-        break;
-      case 'turn_ended':
-        if (combatCurrentUnitId.value === evt.unitId) combatCurrentUnitId.value = null;
-        break;
-      case 'initiative':
-        if (activeCombat.value) {
-          activeCombat.value = { ...activeCombat.value, initiativeOrder: evt.order };
-        }
-        break;
-      case 'action':
-        combatLog.value.push({ id, kind: 'action', result: evt.result, toolName: evt.toolName });
-        break;
-      case 'narrative':
-        if (evt.text)
-          combatLog.value.push({ id, kind: 'narrative', text: evt.text, round: evt.round });
-        break;
-      // 🆕 2026-08-12（Bug 2 修复）：玩家侧命令被内核 rejection 的友好提示。
-      // 典型：攻击槽/动作槽已耗尽仍再点 → SLOT_EXHAUSTED。此前 coordinator 熔断
-      // abandon 整场（页面闪退根因）；现在只推一条提示行，随后 coordinator 重新 emit
-      // awaiting_player_input 亮「等待输入」，玩家可换动作或点「结束回合」。
-      case 'rejection_notice':
-        combatLog.value.push({
-          id,
-          kind: 'narrative',
-          text: `⚠️ ${evt.message}`,
-          round: undefined,
-        });
-        break;
-      case 'awaiting_player_input':
-        combatAwaitingInput.value = {
-          unit: evt.unit,
-          unitId: evt.unitId,
-          round: evt.round,
-          requiredInputKind: 'PlayerCommand',
-        };
-        break;
-      case 'agent_paused':
-        combatAgentPause.value = {
-          role: evt.role,
-          message: evt.message,
-          unit: evt.unit,
-          unitId: evt.unitId,
-          round: evt.round,
-        };
-        recordCombatAgentPauseError(evt.role, evt.message);
-        combatAwaitingInput.value = null;
-        break;
-      case 'agent_resumed':
-        if (combatAgentPause.value?.role === evt.role) combatAgentPause.value = null;
-        break;
-      case 'combat_ended':
-        if (activeCombat.value) {
-          activeCombat.value = { ...activeCombat.value, phase: 'Terminal' };
-        }
-        break;
-      case 'settlement':
-        if (activeCombat.value) {
-          activeCombat.value = { ...activeCombat.value, phase: 'SettlementCommitted' };
-        }
-        break;
-    }
+      : null;
+  }
+
+  /** 推进会战权威状态（pipeline 每个 exchange 后调用；`CombatState` 即唯一数据源） */
+  function setCombatState(state: CombatState | null) {
+    combatState.value = state;
+  }
+
+  /** 追加一轮 AI 正文到中栏对话流（同回合多段按序累积） */
+  function appendCombatFlow(text: string, round: number) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    combatFlow.value.push({
+      id: `combat-flow-${crypto.randomUUID()}`,
+      round: Number.isFinite(round) ? round : 0,
+      text: trimmed,
+    });
+  }
+
+  /** 结算「继续」——把玩家输入交给 GamePage 续写下一回合正文（消费后清空） */
+  function requestCombatContinue(text: string) {
+    combatContinue.value = text;
+  }
+  function clearCombatContinue() {
+    combatContinue.value = null;
   }
 
   /** v3：controller 挂 Coordinator 句柄（game-pipeline 在 coordinator 启动时挂） */
@@ -310,58 +242,27 @@ export const useGameStore = defineStore('game', () => {
     combatCoordinator.value = handle as never;
   }
 
-  /** v3：玩家提交一条 CombatCommand（自动补 commandId + expectedRevision）→ 转 Coordinator */
-  async function submitCombatCommand(partial: Partial<CombatCommand>): Promise<void> {
-    const coordinator = combatCoordinator.value;
-    if (!coordinator?.submit) return;
-    const rev = activeCombat.value?.revision ?? 0;
-    const cmd = {
-      commandId: partial.commandId ?? `ui-${crypto.randomUUID()}`,
-      expectedRevision: partial.expectedRevision ?? rev,
-      actorId: partial.actorId ?? '',
-      cost: partial.cost ?? 'none',
-      kind: partial.kind ?? 'PassAttack',
-      payload: partial.payload ?? ({} as Record<string, unknown>),
-    } as CombatCommand;
-    await coordinator.submit(cmd);
-  }
-
-  /** 🎭 主持人/DM 模式（2026-08-12）：玩家提交**意图文本**（拼装格式化文本 / 自由对话）
-   *  → 转 Coordinator → 主持人会话解析 → Command。生产路径替代 submitCombatCommand：
-   *  UI 不再直接产 Command 喂内核，玩家输入一律过主持人理解意图（ADM 模式）。
-   *  老 Command 直连路径保留（submitCombatCommand），供测试/快速直捣兜底。
-   */
+  /** 🎭 主持人/DM 模式：玩家提交**意图文本**（拼装格式化文本 / 自由对话）→ 主持人会话
+   *  解析 → 工具声明。UI 不再直接产 Command 喂内核，玩家输入一律过主持人理解意图。 */
   async function submitCombatIntent(text: string): Promise<void> {
     const coordinator = combatCoordinator.value;
-    if (!coordinator?.submitPlayerIntent) {
-      // 无意图桥（旧 coordinator / 测试）→ 静默忽略（与 submitCombatCommand 无 Coordinator 同口径）
-      return;
-    }
+    if (!coordinator?.submitPlayerIntent) return;
     await coordinator.submitPlayerIntent(text);
   }
 
-  function resumeCombatAgent(action: 'retry' | 'exit') {
-    const coordinator = combatCoordinator.value;
-    if (action === 'retry') combatAgentPause.value = null;
-    coordinator?.resumeAgent?.(action);
-    if (action === 'exit') abandonCombat();
-  }
-
-  /** v3：放弃战斗（C4）——句柄 abandon → 丢弃 session → exitCombat */
+  /** 放弃战斗：丢弃 session → 面板关闭（不走结算落库）。跳过战斗也走它。 */
   function abandonCombat() {
-    activeCombat.value = null;
-    combatLog.value = [];
-    combatAwaitingInput.value = null;
-    combatAgentPause.value = null;
-    combatCurrentUnitId.value = null;
+    combatState.value = null;
+    combatFlow.value = [];
+    combatContinue.value = null;
     combatReady.value = null;
+    if (settlementResolve) resolveSettlement(null);
+    else combatSettlement.value = null;
     const c = combatCoordinator.value;
     if (c?.abandon) c.abandon();
   }
 
-  /** v3：跳过战斗（设计 2026-08-09 §3.5）——abandonCombat 的包装。
-   *  战斗被放弃后：session 丢弃、FP 不落库（coordinator abandon 路径）、面板关闭
-   *  （activeCombat=null → isInCombat=false）。确认弹窗文案由组件负责。 */
+  /** 跳过战斗：abandonCombat 的包装（不获得经验，面板关闭）。确认弹窗文案由组件负责。 */
   function skipCombat() {
     abandonCombat();
   }
@@ -418,57 +319,48 @@ export const useGameStore = defineStore('game', () => {
     return result;
   }
 
-  /** 🆕 结算确认（2026-08-13 需求 D）：pipeline 战斗终局调用 —— 投结算确认面板并
-   *  挂起等玩家裁决。返回 Promise：resolve(编辑后的摘要文本) = 注入正文；
-   *  resolve(null) = 放弃注入（结算数值已落库不可逆，只是叙事不进正文）。
-   *  面板期间 isInCombat 保持 true（combatSummaryReview 进了 isInCombat 判据）。 */
-  function awaitCombatSummaryReview(payload: {
-    outcome: CombatSummaryResult['outcome'];
-    totalExp: number;
-    totalFp: number;
-    loot: CombatSummaryResult['loot'];
-    rounds: number;
-    summaryText: string;
-  }): Promise<string | null> {
-    combatSummaryReview.value = { ...payload, loot: [...payload.loot] };
-    return new Promise((resolve) => {
-      summaryReviewResolve = resolve;
-    });
-  }
-
-  /** 玩家点「注入正文」—— text 为（可能编辑过的）摘要文本 */
-  function confirmCombatSummary(text: string) {
-    combatSummaryReview.value = null;
-    const r = summaryReviewResolve;
-    summaryReviewResolve = null;
+  /** 消费挂起的结算 resolver（continue / discard / abandon / exit 共用） */
+  function resolveSettlement(text: string | null) {
+    const r = settlementResolve;
+    settlementResolve = null;
+    combatSettlement.value = null;
     r?.(text);
   }
 
-  /** 玩家点「放弃注入」—— resolve(null)，pipeline 只收面板不写正文 */
-  function discardCombatSummary() {
-    combatSummaryReview.value = null;
-    const r = summaryReviewResolve;
-    summaryReviewResolve = null;
-    r?.(null);
+  /** 🆕 C6 结算态：pipeline 战斗终局调用 —— 投结算面板并挂起等玩家裁决。
+   *  返回 Promise：resolve(「接下来做什么」输入文本) = 落定结算并续写下一回合正文；
+   *  resolve(null) = 重开 / 放弃（数值已落库不可逆，只是不续写）。
+   *  面板期间 isInCombat 保持 true（combatSettlement 进了 isInCombat 判据）。 */
+  function awaitCombatSettlement(payload: CombatSettlementPayload): Promise<string | null> {
+    combatSettlement.value = { ...payload, loot: [...payload.loot] };
+    return new Promise((resolve) => {
+      settlementResolve = resolve;
+    });
   }
 
-  /** 战斗结束：清空面板（activeCombat=null → isInCombat=false） */
+  /** 玩家点「继续」—— 落定结算并携该输入续写下一回合正文 */
+  function continueCombatSettlement(text: string) {
+    combatState.value = null;
+    resolveSettlement(text);
+  }
+
+  /** 放弃结算（重开战斗前 / 其它不需要续写的收尾）—— resolve(null) */
+  function discardCombatSettlement() {
+    combatState.value = null;
+    resolveSettlement(null);
+  }
+
+  /** 战斗结束：清空面板（combatState=null → isInCombat=false） */
   function exitCombat() {
-    combatLog.value = [];
-    combatAwaitingInput.value = null;
-    combatAgentPause.value = null;
-    combatCurrentUnitId.value = null;
+    combatState.value = null;
+    combatFlow.value = [];
+    combatContinue.value = null;
     combatCoordinator.value = null;
-    activeCombat.value = null;
     combatReady.value = null;
-    // 结算确认挂起时被 exitCombat（离开页面 / 停止生成 / 战斗失败路径）——
+    // 结算挂起时被 exitCombat（离开页面 / 停止生成 / 战斗失败路径）——
     // 必须 resolve(null)，否则 pipeline 的 await 永久悬挂。
-    if (summaryReviewResolve) {
-      const r = summaryReviewResolve;
-      summaryReviewResolve = null;
-      combatSummaryReview.value = null;
-      r(null);
-    }
+    if (settlementResolve) resolveSettlement(null);
+    else combatSettlement.value = null;
   }
 
   // === 元数据 ===
@@ -671,30 +563,6 @@ export const useGameStore = defineStore('game', () => {
 
   async function flushAgentLogWrites(): Promise<void> {
     await debugLogWriteQueue;
-  }
-
-  /**
-   * Provider 请求可能已成功，但 Coordinator 在工具批次校验阶段仍会暂停。
-   * 把这层失败回写到最近一次对应 Agent 调用，否则导出日志会错误显示 error=null。
-   */
-  function recordCombatAgentPauseError(
-    role: 'combat_host' | 'combat_enemy',
-    message: string,
-  ): void {
-    const turn = [...agentLogHistory.value]
-      .reverse()
-      .find((candidate) => candidate.status === 'running');
-    if (!turn) return;
-    const agentId = role === 'combat_enemy' ? 'combat_enemy' : 'combat';
-    const entry = [...turn.entries].reverse().find((candidate) => candidate.agentId === agentId);
-    if (!entry) return;
-    const coordinatorError = `战斗协调器：${message}`;
-    if (!entry.error) {
-      entry.error = coordinatorError;
-    } else if (!entry.error.includes(message)) {
-      entry.error = `${entry.error}；${coordinatorError}`;
-    }
-    queueDebugTurnWrite(turn);
   }
 
   function startAgentLogTurn(input: {
@@ -1118,7 +986,6 @@ export const useGameStore = defineStore('game', () => {
     messages.value = projection.messages;
     agentLogHistory.value = debugTurns;
     turnCounter = projection.turn;
-    wireEffectSystem(saveId, projection.characters);
     return true;
   }
 
@@ -1217,12 +1084,10 @@ export const useGameStore = defineStore('game', () => {
     ejsFallbacks.value = [];
     ejsUiLog.value = [];
     exitCombat();
-    combatSummaryReview.value = null;
     turnCounter = 0;
   }
 
   function clearActive() {
-    if (activeSaveId.value) unwireEffectSystem(activeSaveId.value);
     invalidatePendingLoads();
     clearSessionRuntime();
     agentLogHistory.value = [];
@@ -1245,7 +1110,6 @@ export const useGameStore = defineStore('game', () => {
       authorityRestored = true;
 
       invalidatePromptSession(saveId);
-      unwireEffectSystem(saveId);
 
       if (activeSaveId.value !== saveId) {
         return {
@@ -1274,7 +1138,6 @@ export const useGameStore = defineStore('game', () => {
       plotOutline.value = projection.outline;
       messages.value = projection.messages;
       turnCounter = projection.turn;
-      wireEffectSystem(saveId, projection.characters);
 
       return { status: 'restored', continuation: 'same-save' };
     } catch (err) {
@@ -1287,11 +1150,6 @@ export const useGameStore = defineStore('game', () => {
       }
 
       console.error('[game-store] 时间线恢复后的投影重载失败:', err);
-      try {
-        unwireEffectSystem(saveId);
-      } catch (cleanupError) {
-        console.error('[game-store] 清理失败的效果接线时出错:', cleanupError);
-      }
       if (activeSaveId.value === saveId) clearActive();
       return {
         status: 'projection-failed',
@@ -1534,27 +1392,28 @@ export const useGameStore = defineStore('game', () => {
     activePlotEvents,
     plotOutline,
     isInCombat,
-    combatLog,
-    combatAwaitingInput,
-    combatAgentPause,
-    combatCurrentUnitId,
-    activeCombat,
+    combatState,
     combatReady,
-    combatSummaryReview,
+    combatSettlement,
+    combatFlow,
+    combatContinue,
+    combatPendingUnit,
     combatCoordinator,
     enterCombat,
-    applyCombatEvent,
+    setCombatReady,
+    setCombatState,
+    appendCombatFlow,
+    requestCombatContinue,
+    clearCombatContinue,
     setCombatCoordinator,
-    submitCombatCommand,
     submitCombatIntent,
-    resumeCombatAgent,
     abandonCombat,
     skipCombat,
     startCombat,
     restartCombat,
-    awaitCombatSummaryReview,
-    confirmCombatSummary,
-    discardCombatSummary,
+    awaitCombatSettlement,
+    continueCombatSettlement,
+    discardCombatSettlement,
     exitCombat,
     saveProfile,
     fp,

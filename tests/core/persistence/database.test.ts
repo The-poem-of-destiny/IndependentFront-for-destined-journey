@@ -1133,7 +1133,8 @@ describe('exportAllData / importAllData', () => {
     // v22：快照拆表（snapshots 只留元数据 + snapshotPayloads 存整档载荷，两者都进备份）。
     // v23：API 凭据级 RPM 策略表。
     // v24：debugTurns（v24 后新增）；v25：imageApiConnections；v26：promptSessions（均不进 FullBackup）。
-    expect(backup.version).toBe(26);
+    // v27：战斗沙盒在办战斗 combatSandboxes（2026-10-02 / Phase 2；rebuildable 缓存，不进 FullBackup）。
+    expect(backup.version).toBe(27);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     // SEC-01：settings 死表与 apiEndpoints 都可能含明文 Key，只留在本机，不进普通备份。
@@ -2937,8 +2938,8 @@ describe('Asset CRUD (v13)', () => {
     await initializeDatabase();
     const db = getDatabase();
     // v20=D18 contentPacks; v21=地图字节; v22=快照拆表; v23=API RPM; v24=调试历史
-    // v25=独立出图连接; v26=Delta 会话持久化
-    expect(db.verno).toBe(26);
+    // v25=独立出图连接; v26=Delta 会话持久化; v27=战斗沙盒在办战斗
+    expect(db.verno).toBe(27);
 
     // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
     //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）
@@ -2964,6 +2965,7 @@ describe('Asset CRUD (v13)', () => {
       'debugTurns',
       'imageApiConnections',
       'promptSessions',
+      'combatSandboxes',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 
@@ -2991,6 +2993,8 @@ describe('Asset CRUD (v13)', () => {
     expect(await db.apiRateLimitPolicies.count()).toBe(0);
     // v26：Delta 会话持久化表随升版就位且为空
     expect(await db.promptSessions.count()).toBe(0);
+    // v27：战斗沙盒在办战斗表随升版就位且为空
+    expect(await db.combatSandboxes.count()).toBe(0);
     expect(
       ((await db.snapshots.get('sn1')) as unknown as Record<string, unknown>).characters,
     ).toBeUndefined();

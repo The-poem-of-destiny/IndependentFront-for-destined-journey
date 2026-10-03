@@ -158,7 +158,6 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
           二连斩: '对目标造成两次斩击伤害',
           SP消耗: '消耗 15 点体力',
         },
-        scripts: {},
       },
       {
         id: crypto.randomUUID(),
@@ -171,7 +170,6 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
         effects: {
           常驻防御: '防御力永久提升 5%',
         },
-        scripts: {},
       },
     ],
     inventory: [
@@ -190,7 +188,6 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
           锐利: '攻击力 +24',
           力量加持: '力量 +3',
         },
-        scripts: {},
       },
       {
         id: crypto.randomUUID(),
@@ -206,7 +203,6 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
           坚韧: '防御 +18',
           体质增幅: '体质 +1',
         },
-        scripts: {},
       },
       {
         id: crypto.randomUUID(),
@@ -222,7 +218,6 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
           智慧启迪: '智力 +1',
           精神凝聚: '精神 +1',
         },
-        scripts: {},
       },
       {
         id: crypto.randomUUID(),
@@ -235,7 +230,6 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
         effects: {
           治愈: '恢复 50 点生命值',
         },
-        scripts: {},
       },
       {
         id: crypto.randomUUID(),
@@ -248,7 +242,6 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
         effects: {
           净化: '解除轻微中毒状态',
         },
-        scripts: {},
       },
     ],
     statusEffects: [
@@ -346,10 +339,6 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
             暗精灵淬毒: '命中时有30%几率附加中毒状态，每回合失去10点生命值，持续3回合',
             敏捷之刃: '敏捷 +2',
           },
-          scripts: {
-            poison_hit:
-              'if($dice.d100()<=30){$status.add(target,{name:"暗精灵剧毒",category:"减益",description:"每回合失去10点生命值",stacks:1,remainingTime:3,timeUnit:"回合",source:"淬毒匕首",effects:{hp_per_turn:-10},scripts:{tick:"$resource.modifyHp(owner,-10)"},onTick:"tick"})}',
-          },
         },
       ],
     }),
@@ -394,10 +383,6 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
             火焰爆裂: '对目标造成巨额火焰伤害',
             灼烧余烬: '40%几率附加灼烧状态，每回合失去5%生命值，持续3回合',
             MP消耗: '消耗 30 点法力',
-          },
-          scripts: {
-            burn_check:
-              'if($dice.d100()<=40){$status.add(target,{name:"灼烧",category:"减益",description:"每回合失去5%生命值",stacks:1,maxStacks:3,remainingTime:3,timeUnit:"回合",source:"火球术",effects:{},scripts:{tick:"$resource.modifyHp(owner,-floor($resource.maxHp(owner)*0.05))"},onTick:"tick"})}',
           },
         },
       ],

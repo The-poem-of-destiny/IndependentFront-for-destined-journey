@@ -10,7 +10,7 @@
  *
  * 放在这里而不是 `craft-resolver.ts`：那是结算数学 + `$craft` 门面。把
  * 「AI 说了什么」翻译成「引擎认的请求」是**翻译层**的活，与结算无关；
- * 而且这一层要认识 `CharacterState` 与 `Modifier`，结算层不必。
+ * 而且这一层要认识 `CharacterState`，结算层不必。
  *
  * ## 骰子是显式输入（对齐 combat-v3 铁律 1）
  *
@@ -41,7 +41,6 @@ import type {
   CraftToolArgs,
   QualityLevel,
 } from '../types/types';
-import type { Modifier, CheckModifier } from '../effects/effect-types';
 import { determineAdvantage } from './craft-dc';
 
 /**
@@ -83,35 +82,6 @@ export function getCraftCoreAttribute(char: CharacterState, industry?: string): 
 }
 
 /**
- * 🆕 制造反向链路 S2+S4（2026-08-01，见 2026-08-01-item-gen-combat-link-plan.md §3 S2b）：
- * 从角色收集「生产检定」modifier → 检定加值。
- *
- * 世界书依据：
- *  - 《品质效果限定》检定类含「生产检定修正」（稀+[2-4]/史+[5-7]/传+[8-10]/神+[11-15]）
- *  - 《生产制作协议》检定加值 = 属性[A] + 技能[B] + 道具[C] + 身份[D] → 进 fixedBonus
- *
- * - toolBonus（道具 C 位）：只统计 equippedSlot 非空的物品（躺背包不算正在使用）
- * - skillBonus（技能 B 位）：技能「生产检定」modifier（S4 补 Skill 落库 modifiers 字段后收 S2-2）
- */
-export function collectCraftBonuses(char: CharacterState): {
-  toolBonus: number;
-  skillBonus: number;
-} {
-  const isCraftCheck = (m: Modifier): m is CheckModifier =>
-    m.category === '检定' && m.checkType === '生产';
-  const toolBonus = char.inventory
-    .filter((i) => i.equippedSlot)
-    .flatMap((i) => i.modifiers ?? [])
-    .filter(isCraftCheck)
-    .reduce((sum, m) => sum + m.bonus, 0);
-  const skillBonus = (char.skills ?? [])
-    .flatMap((s) => s.modifiers ?? [])
-    .filter(isCraftCheck)
-    .reduce((sum, m) => sum + m.bonus, 0);
-  return { toolBonus, skillBonus };
-}
-
-/**
  * 装配一次制作请求 —— 全仓**唯一**的 `CraftActionRequest` 装配处。
  *
  * 兜底默认值、「名字即逻辑键」铁律、bonus 收集从此只有这一份。
@@ -147,7 +117,6 @@ export function buildCraftRequest(
     d20Rolls: [...dice.d20Rolls],
     d20MaterialSave: dice.d20MaterialSave,
     d20QualityUpgrade: dice.d20QualityUpgrade,
-    ...collectCraftBonuses(character),
   };
 }
 

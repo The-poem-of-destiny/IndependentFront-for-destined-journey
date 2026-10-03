@@ -157,7 +157,7 @@ describe('buildStatData — 完整映射', () => {
     expect(buildStatData({ characters: [player] })['主角']['状态效果'][0]['剩余时间']).toBeNull();
   });
 
-  it('T3：不投效果编译输入（effects/scripts/modifiers/automata 不是对创作者的承诺）', () => {
+  it('T3：不投效果编译输入（effects/modifiers/automata 不是对创作者的承诺）', () => {
     const player = makePlayer({
       inventory: [
         {
@@ -165,14 +165,13 @@ describe('buildStatData — 完整映射', () => {
           name: '魔剑',
           quantity: 1,
           effects: { 攻击: '+5' },
-          scripts: { init: 'x' },
           modifiers: [{ k: 'v' }],
           automata: [{ a: 1 }],
         } as never,
       ],
     });
     const item = buildStatData({ characters: [player] })['主角']['背包'][0];
-    for (const forbidden of ['effects', 'scripts', 'modifiers', 'automata', 'id']) {
+    for (const forbidden of ['effects', 'modifiers', 'automata', 'id']) {
       expect(item).not.toHaveProperty(forbidden);
     }
   });

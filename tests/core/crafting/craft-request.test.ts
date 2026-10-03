@@ -11,7 +11,6 @@ import { describe, it, expect } from 'vitest';
 import type { CharacterState, CraftDiceTape } from '../../../src/core/types/types';
 import {
   buildCraftRequest,
-  collectCraftBonuses,
   craftCheckDiceCount,
   craftRequestFingerprint,
   getCraftCoreAttribute,
@@ -74,47 +73,6 @@ describe('getCraftCoreAttribute', () => {
   it('行业缺省/表外 → 取五维最大（沿用工具层原口径）', () => {
     expect(getCraftCoreAttribute(char)).toBe(14);
     expect(getCraftCoreAttribute(char, '不存在的行业')).toBe(14);
-  });
-});
-
-// ========== collectCraftBonuses ==========
-
-describe('collectCraftBonuses', () => {
-  it('只收已装备物品与技能上的「生产」检定 modifier', () => {
-    const char = makeCharacter({
-      inventory: [
-        {
-          name: '锻火铁锤',
-          description: '',
-          quantity: 1,
-          equippedSlot: '武器',
-          modifiers: [
-            { category: '检定', source: '锻火铁锤', checkType: '生产', bonus: 5 },
-            { category: '检定', source: '锻火铁锤', checkType: '命中', bonus: 9 },
-          ],
-        },
-        {
-          name: '闲置模具',
-          description: '',
-          quantity: 1,
-          modifiers: [{ category: '检定', source: '闲置模具', checkType: '生产', bonus: 99 }],
-        },
-      ],
-      skills: [
-        {
-          name: '锻造辅助',
-          description: '',
-          type: 'passive',
-          modifiers: [{ category: '检定', source: '锻造辅助', checkType: '生产', bonus: 3 }],
-        },
-      ],
-    } as Partial<CharacterState>);
-
-    expect(collectCraftBonuses(char)).toEqual({ toolBonus: 5, skillBonus: 3 });
-  });
-
-  it('无 modifier 时两项都是 0（不是 undefined）', () => {
-    expect(collectCraftBonuses(makeCharacter())).toEqual({ toolBonus: 0, skillBonus: 0 });
   });
 });
 

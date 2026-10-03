@@ -38,6 +38,7 @@ import {
   randomAppearanceSummary,
 } from './random-tables';
 import { getContentRegistry } from '../content/content-registry-runtime';
+import { COMBAT_SANDBOX_TOOL_DEFINITIONS } from '../combat/sandbox/tools';
 
 // ═══════════════════════════════════════════════════════════
 // Group A0: 品牌面注入（D26）
@@ -399,24 +400,6 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
-      name: 'get_unit_detail',
-      description:
-        '查询当前战斗单位详情：五维属性（attributes，str/dex/con/int/spi）+ 技能列表（skills）+ 已装备物品（equipment，含槽位）一把抓。战斗决策时优先用它拿当前单位的完整面板数据（技能列表开局已注入，中途技能不变可只查一次）。',
-      parameters: {
-        type: 'object',
-        properties: {
-          characterId: {
-            type: 'string',
-            description: '单位/角色名（兼容旧 UUID）',
-          },
-        },
-        required: ['characterId'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'get_inventory',
       description:
         '查询角色背包中的所有物品。返回物品名称、数量、类型、品质、效果词条。craft_gen 必须调用此工具获取材料清单，禁止凭空编造材料。',
@@ -431,160 +414,6 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
           },
         },
         required: ['characterId'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_script_reference',
-      description:
-        '查询脚本沙盒中可用的 $ API 签名、变量路径约定、生命周期hook 列表。当需要编写 skill/equipment/item/element/authority 的 scripts 时调用此工具获取正确的 API 文档。返回 Markdown 格式的参考文本。',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: {
-            type: 'string',
-            description:
-              '查询分类 — "all"=全部参考, "events"=事件系统($event.on/off/emit), "resources"=资源操作($resource), "status"=状态效果($status), "dice"=骰子($dice), "paths"=变量路径+跨对象引用($call/@语法)',
-            enum: ['all', 'events', 'resources', 'status', 'dice', 'paths'],
-          },
-        },
-      },
-    },
-  },
-
-  // ── Combat V3 工具集（M2 新增，对应 AGENT_TOOL_MAP['combat']）──
-  //   v3 工具集只有 6 个（§4.4），一次工具调用 = 一个 Command = 一个槽位或一次 pass。
-  //   v2 的 19 个 combat 工具（AGENT_TOOL_MAP['combat']）已随 M5 真正退役删除。
-  {
-    type: 'function',
-    function: {
-      name: 'declare_attack',
-      description:
-        '（v3）声明一次攻击/技能攻击。为当前行动单位填入目标、技能名、意图层级。骰值与伤害由内核真实计算，你只负责战术决策——禁止传骰值。',
-      parameters: {
-        type: 'object',
-        properties: {
-          actorName: { type: 'string', description: '攻击方角色名（当前行动单位）' },
-          targetName: { type: 'string', description: '目标角色名' },
-          skillName: { type: 'string', description: '使用的技能名（可选，缺省为普通攻击）' },
-          intentionLevel: {
-            type: 'string',
-            description: '意图层级：非致死/常规/战术/机能/核心/抹杀/概念/处决',
-          },
-          costs: {
-            type: 'object',
-            properties: {
-              mp: { type: 'integer', description: '本次攻击消耗的 MP（可选）' },
-              sp: { type: 'integer', description: '本次攻击消耗的 SP（可选）' },
-            },
-          },
-        },
-        required: ['actorName', 'targetName', 'intentionLevel'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'declare_action',
-      description: '（v3）执行一个战术动作：道具 / 移动 / 专注 / 防御 / 格挡。占据动作槽。',
-      parameters: {
-        type: 'object',
-        properties: {
-          actorName: { type: 'string', description: '执行者角色名' },
-          actionType: {
-            type: 'string',
-            enum: ['道具', '移动', '专注', '防御', '格挡'],
-            description: '动作类型',
-          },
-          payload: {
-            type: 'object',
-            description: '动作载荷（如道具名 / 移动目标）',
-          },
-        },
-        required: ['actorName', 'actionType'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'pass_slot',
-      description: '（v3）显式放弃当前行动单位的某个行动槽（1 攻击 或 1 动作）。放弃仍消费槽位。',
-      parameters: {
-        type: 'object',
-        properties: {
-          actorName: { type: 'string', description: '角色名' },
-          slot: {
-            type: 'string',
-            enum: ['attack', 'action'],
-            description: '放弃的槽位：attack=攻击槽 / action=动作槽',
-          },
-        },
-        required: ['actorName', 'slot'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'flee',
-      description: '（v3）当前行动单位尝试逃跑。消耗攻击+动作双槽，做逃跑检定。',
-      parameters: {
-        type: 'object',
-        properties: {
-          actorName: { type: 'string', description: '逃跑者角色名' },
-        },
-        required: ['actorName'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'end_turn',
-      description:
-        '（v3）当前行动单位结束本回合：放弃全部剩余行动槽（攻击+动作），立即推进到下一位。',
-      parameters: {
-        type: 'object',
-        properties: {
-          actorName: { type: 'string', description: '结束回合的角色名（当前行动单位）' },
-        },
-        required: ['actorName'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'submit_adjudication',
-      description:
-        '（v3）提出有界裁决：当标准动作无法表达一个创意效果时，用此工具申请法则级裁决。M2 先定义 schema，执行暂不支持。',
-      parameters: {
-        type: 'object',
-        properties: {
-          effectDescription: { type: 'string', description: '期望达成的效果描述' },
-          divinity: { type: 'integer', minimum: 0, maximum: 8, description: '登神强度' },
-          verifiableBounds: { type: 'object', description: '可验证的数值边界' },
-          requestedRuleOverride: { type: 'string', description: '请求覆盖的 RuleKey（可选）' },
-          reason: { type: 'string', description: '裁决理由' },
-        },
-        required: ['effectDescription', 'divinity', 'verifiableBounds', 'reason'],
-      },
-    },
-  },
-  // ── Combat Query (只读查询, M4 任务 5.3 新建) ──
-  {
-    type: 'function',
-    function: {
-      name: 'get_combat_state',
-      description:
-        '查询当前战斗快照（回合/行动轴/各方 HP）。底层映射 $combat.getState。只读查询，不改状态。',
-      parameters: {
-        type: 'object',
-        properties: {},
       },
     },
   },
@@ -606,7 +435,11 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'get_character',
     'get_inventory',
   ],
-  char_gen: [
+  // 🔴 2026-10-02 硬改名：char_gen + item_gen 合并为 entity_gen（工具并集，
+  //   运行时按 entityType 收窄 —— 角色用随机表/roll_attributes，物品用 get_character/get_inventory）。
+  //   提示词里写明「按需调用」，多做一次查询无害；未实现「按 type 收窄白名单」是刻意的：
+  //   同一次调用可能既产角色又产其装备（战斗召唤），静态分桶会误伤。
+  entity_gen: [
     'roll_d20',
     'roll_d100',
     'roll_dice',
@@ -620,38 +453,27 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'get_character',
     'get_inventory',
   ],
-  item_gen: ['get_script_reference', 'get_character', 'get_inventory'],
-  vars_update: ['get_script_reference', 'get_character', 'get_inventory'],
-  // Combat Agent V3（M2 新增，对应 v3 内核）— 见 docs/reference/combat-system-architecture-v3.md §4.4
-  //   v3 工具集 6+4 个（6 个战斗工具 + 4 个只读查询；get_hp_percent 已删除，面板自带 HP%；
-  //   get_unit_detail 为 combat session revamp §2.2 新增，五维+技能+装备一把抓）。
-  //   v2 的 ['combat'] 已随 M5 真正退役删除。
+  vars_update: ['get_character', 'get_inventory'],
+  // Combat Agent（Phase 2 战斗重写）— 真源是 `combat/sandbox/tools.ts` 的
+  //   COMBAT_SANDBOX_TOOL_DEFINITIONS（单一 DM 依协议主持，工具就地维护 CombatState）。
+  //   这里列的是同一批沙盒工具名；`getToolsForAgent('combat')` 直接从沙盒定义取，
+  //   不走 ALL_TOOL_DEFINITIONS（避免与通用 get_character/get_inventory/roll_* 同名冲突）。
   combat: [
-    // 战斗控制（一次工具调用 = 一个 Command）
-    'declare_attack',
-    'declare_action',
-    'pass_slot',
-    'flee',
-    'end_turn',
-    'submit_adjudication',
-    // 只读查询（复用现有）
+    'combat_add_unit',
+    'combat_update_unit',
+    'combat_remove_unit',
+    'combat_add_status',
+    'combat_remove_status',
+    'combat_set_meta',
+    'combat_yield_to_player',
     'get_character',
     'get_inventory',
-    'get_combat_state',
-    'get_unit_detail',
-  ],
-  // Combat Enemy：仅当前获准敌方单位的决策与受策略裁剪的只读查询。
-  // 动态决策上下文还会在 coordinator 逐调用收窄，静态白名单不是授权边界。
-  combat_enemy: [
-    'declare_attack',
-    'declare_action',
-    'pass_slot',
-    'flee',
-    'end_turn',
-    'get_character',
-    'get_inventory',
-    'get_combat_state',
-    'get_unit_detail',
+    'roll_d20',
+    'roll_d100',
+    'roll_dice',
+    'calc',
+    'calc_damage',
+    'calc_initiative',
   ],
 };
 
@@ -664,7 +486,10 @@ export function getToolsForAgent(agentId: string): ToolDefinition[] {
   const allowed = AGENT_TOOL_MAP[agentId];
   if (!allowed) return [];
   const allowedSet = new Set(allowed);
-  return ALL_TOOL_DEFINITIONS.filter((t) => allowedSet.has(t.function.name)).map(withBranding);
+  // 战斗沙盒工具的真源在 combat/sandbox/tools.ts（不走 ALL_TOOL_DEFINITIONS，
+  // 避免与通用 get_character / get_inventory / roll_* 同名定义冲突）。
+  const pool = agentId === 'combat' ? COMBAT_SANDBOX_TOOL_DEFINITIONS : ALL_TOOL_DEFINITIONS;
+  return pool.filter((t) => allowedSet.has(t.function.name)).map(withBranding);
 }
 
 /** 根据工具名获取单个工具定义 */
@@ -685,8 +510,8 @@ export function getToolDefinition(functionName: string): ToolDefinition | undefi
  * 回喂给模型。执行器自己再造一种 `return { error }` 的话，同一个分发口里「参数不合法」
  * 就有两种长相，prompt 侧没法统一教模型如何应对。
  *
- * 注意区分：**查询未命中不是失败**。`get_unit_detail` 对不存在的角色返回
- * `{ found: false, message }` 是这个工具的正常回答，不在上面这条规则内。
+ * 注意区分：**查询未命中不是失败**。`get_character` 对不存在的角色返回
+ * `{ found: false, characterId }` 是这个工具的正常回答，不在上面这条规则内。
  *
  * @param functionName 工具名（如 'roll_d20', 'craft_check'）
  * @param args AI 传入的参数对象
@@ -881,7 +706,7 @@ export async function executeToolCall(
           location: char.location,
           occupation: char.occupation,
           identity: char.identity,
-          // 🆕 combat session revamp §2.2: 技能列表（declare_attack 的 skillName 来源）
+          // 技能列表（战斗沙盒 calc_damage / 决策读取）
           skills: (char.skills ?? []).map((s) => ({
             name: s.name,
             type: s.type,
@@ -916,47 +741,6 @@ export async function executeToolCall(
         })),
       };
     }
-    // 🆕 combat session revamp §2.2: 当前单位详情一把抓（五维+技能+装备聚合）。
-    //   与 get_character 的区别：这是战斗单位详情（attributes/skills/equipment 聚合），
-    //   后者是通用角色查询。skills/equipment 形状与 get_character（T3）保持一致。
-    case 'get_unit_detail': {
-      const char = findCharacter(args.characterId, context);
-      if (!char) return { found: false, characterId: args.characterId };
-      return {
-        found: true,
-        id: char.id,
-        name: char.name,
-        race: char.race,
-        type: char.type,
-        tier: char.tier,
-        tierName: char.tierName,
-        level: char.level,
-        // 五维（战斗内"最终"属性值投影自角色 attributes）
-        attributes: char.attributes,
-        // 技能列表（declare_attack 的 skillName 来源）
-        skills: (char.skills ?? []).map((s) => ({
-          name: s.name,
-          type: s.type,
-          description: s.description,
-          cost: s.cost,
-          cooldown: s.cooldown,
-          maxCooldown: s.maxCooldown,
-          effects: s.effects ?? {},
-          skillPower: s.skillPower,
-          relevantAttribute: s.relevantAttribute,
-        })),
-        // 已装备物品（inventory 中 equippedSlot 非空）
-        equipment: (char.inventory ?? [])
-          .filter((i) => i.equippedSlot)
-          .map((i) => ({
-            name: i.name,
-            slot: i.equippedSlot,
-            rarity: i.rarity ?? '普通',
-            effects: i.effects ?? {},
-            description: i.description ?? '',
-          })),
-      };
-    }
     case 'get_inventory': {
       const char = findCharacter(args.characterId, context);
       if (!char) throw new Error(`未找到角色: ${args.characterId}`);
@@ -984,85 +768,6 @@ export async function executeToolCall(
       };
     }
 
-    // ── Script Reference (Phase 9) ──
-    case 'get_script_reference': {
-      const query = args.query ?? 'all';
-
-      const SCRIPT_REF = {
-        events: `## 事件系统 (持久订阅)
-$event.on(eventType, scriptKey) → handle  // 订阅事件，返回句柄。scriptKey 必须是字符串 key（当前对象 scripts 池中的键名），不能传内联函数
-$event.off(handleOrType)                 // 取消订阅，传入 handle 字符串或 eventType
-
-⚠️ 事件类型是自定义字符串，不存在预定义的系统事件。
-  你可以使用 'combat_round_start' | 'combat_round_end' | 'hp_below_50' | 'skill_cast' | 'on_hit' | 'on_kill' 等作为示例参考，但这些都是你**自己定义和 emit 的**，不是系统自带的。
-❌ 不存在 $event.getTargets()，不要编造。
-❌ $event.on(eventType, function() {...}) — 第二个参数必须传字符串 key，不能传内联代码。
-生命周期约定: init=装备/获得时执行一次 | cast=主动使用时执行 | tick=每回合/时间单位执行 | cleanup=移除/卸下时执行`,
-        resources: `## 资源操作
-$resource.modifyHp(charId, amount)       // amount: 正数=恢复, 负数=伤害
-$resource.modifyStat(charId, stat, amount) // stat: 'str'|'dex'|'con'|'int'|'spi'
-$resource.getHp(charId) → number
-$resource.getMaxHp(charId) → number
-
-⚠️ 沙盒行为说明:
-- $resource.getHp / getMaxHp 在脚本执行时**始终返回 0**（stub），不能用于条件判断。如需 HP 阈值逻辑，改用事件 payload 传值给脚本。
-- $resource.modifyHp / modifyStat 正常工作，是产生 Side Effect 的主要方式。
-- ❌ 不存在 $resource.getTargets() / getEnemies() 等查询函数。`,
-        status: `## 状态效果
-$status.add(charId, { name, description, category, stacks, maxStacks, remainingTime, timeUnit, effects, effectDescriptions, scripts })
-$status.remove(charId, effectId)
-$status.setStacks(charId, effectId, stacks)
-$status.getStacks(charId, effectId) → number
-timeUnit: '回合' | '分钟' | '小时'
-category: '增益' | '减益' | '特殊'
-
-⚠️ 沙盒行为说明:
-- $status.getStacks 在脚本执行时**始终返回 0**（stub），不能用于条件判断。改用 self.stacks 读取自身层数（self 是自身状态快照，真实值）。
-- $status.add 的第一个参数必须是 charId 字符串（owner 或 target），不是地点名如 '战场'。
-- $status.remove 的第二个参数是 effectId（效果名的小写蛇形，如 'burn_seal'），不是分类名。`,
-        dice: `## 骰子系统 (脚本内可用)
-$dice.d20() → number
-$dice.d100() → number
-$dice.roll(formula) → number  // formula: '2d6+3', '4d8' 等
-
-⚠️ 沙盒行为说明:
-- $dice 函数每次调用生成**新鲜随机数**（不是游戏状态快照），可用于概率型条件判断（如随机触发效果）。
-- 骰值结果用于传给 $resource.modifyHp / $status.add 的参数，决定实际数值。`,
-        paths: `## 变量路径命名空间约定
-sys.<path>     — 引擎管理变量 (如 sys.世界.地点.城市)
-char.<角色>.<path> — 按角色分组 (如 char.player.hp；玩家固定用 player，见 namespace-normalizer 映射)
-user.<path>    — 玩家变量 (如 user.settings.language)
-world.<path>   — 世界设定 (如 world.历史.纪元)
-temp.<path>    — 会话临时 (不持久化)
-
-## 跨对象脚本引用 ($call)
-@parent.<scriptKey>        — 引用父级对象的脚本
-@skill.<技能名>.<scriptKey> — 引用指定技能的脚本
-@item.<物品名>.<scriptKey>  — 引用指定物品的脚本
-@status.<效果名>.<scriptKey> — 引用指定状态效果的脚本
-@ascension.<要素名>.<scriptKey> — 引用登神要素的脚本
-
-⚠️ 沙盒行为说明:
-- 变量读写只能用于写入 Side Effect 参数，不能用于读取状态做条件分支。
-- 脚本中 owner 和 target 是纯 string（charId），不是对象引用。owner.tier / target.hp 会报错。
-- self 对象是自身状态快照，可读：self.stacks / self.remainingTime / self.name。`,
-      };
-
-      if (query === 'all') {
-        const allParts = Object.entries(SCRIPT_REF)
-          .map(([_key, text]) => text)
-          .join('\n\n');
-        return { query: 'all', reference: allParts };
-      }
-      if (SCRIPT_REF[query as keyof typeof SCRIPT_REF]) {
-        return { query, reference: SCRIPT_REF[query as keyof typeof SCRIPT_REF] };
-      }
-      // Q-14: 参数不合法一律 throw（此处旧实现返回 { query, error } —— 同一个执行器里
-      // 「参数不合法」有两种长相，模型侧无法统一教。可用分类清单原样保留在异常消息里，
-      // chatWithTools 会把它包成 {"error": …} 的 tool 消息，模型照样能读能重试。
-      throw new Error(`未知分类 "${query}"，可用: ${Object.keys(SCRIPT_REF).join(', ')}`);
-    }
-
     default:
       // 🔴 2026-08-08 真机：旧版 char_gen 提示词把 `call_item_gen` 列为可用工具，
       // 但白名单（AGENT_TOOL_MAP）没有它 —— 模型一调就报「未知工具」，随即放弃
@@ -1070,7 +775,7 @@ temp.<path>    — 会话临时 (不持久化)
       // 告诉模型别调它、以及正确的替代做法，而不是一句冷冰冰的「未知工具」。
       throw new Error(
         `工具 ${functionName} 未注册或不在本 Agent 白名单，不可调用。请只使用提示词「可用工具」列出的工具；` +
-          `如需生成技能/装备/物品，把需求写进 <skill_requests>/<equipment_requests>/<item_requests> XML 区块，由引擎自动派发。`,
+          `如需生成角色/技能/装备/道具/状态/登神，直接输出 <entity_result> XML（一个 Agent 独立完成，不再有下游生成 Agent）。`,
       );
   }
 }
