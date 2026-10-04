@@ -38,7 +38,6 @@ import './styles/utilities.css';
 
 // 主题系统
 import './themes/variables.css';
-import './themes/parchment.css';
 import './themes/obsidian.css';
 import './themes/crimson.css';
 import './themes/indigo.css';
@@ -48,7 +47,9 @@ import './themes/misty-lilac.css';
 import './themes/forest.css';
 import './themes/ocean.css';
 import './styles/integrated-game-surfaces.css';
-// 🔴 ivory 刻意排在 integrated-game-surfaces.css **之后**（其余九个主题仍在它之前）。
+// Atlas owns its printed surfaces after the shared integration baseline.
+import './themes/parchment.css';
+// 🔴 ivory 刻意排在 integrated-game-surfaces.css **之后**。
 //    那份表的文件头写明「deliberately load after the individual theme sheets」，
 //    它给 ivory 的是一整套材质：全屏丝绸底盘贴图 + 近乎透明的面板（烟罗叠雾）。
 //    ivory 的织锦浮雕原型要求一块**不透明连续布面**，两者互斥且特异度相同 ——
