@@ -2844,6 +2844,10 @@ export class GamePipeline {
         await deleteCombatSandbox(this.saveId).catch(() => undefined);
         return null;
       }
+      if (session.aborted) {
+        await deleteCombatSandbox(this.saveId).catch(() => undefined);
+        return null;
+      }
       // 没有待发输入 → 决定「当前行动单位」
       if (playerInput === undefined) {
         const actor = GamePipeline.pickCombatActor(session.state, resolvedThisRound);
@@ -3077,7 +3081,7 @@ export class GamePipeline {
     this.game.setCombatBusy(false);
     return new Promise((resolve) => {
       const session = this._combatSandbox;
-      if (!session) {
+      if (!session || session.aborted) {
         resolve(null);
         return;
       }

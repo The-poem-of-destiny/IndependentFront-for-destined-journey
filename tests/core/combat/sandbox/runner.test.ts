@@ -67,7 +67,8 @@ describe('系统提示组装', () => {
   it('buildCombatFlowText 含关键流程节点', () => {
     const flow = buildCombatFlowText();
     expect(flow).toContain('combat_set_meta');
-    expect(flow).toContain('结束本轮输出');
+    expect(flow).toContain('combat_write_summary');
+    expect(flow).toContain('结束本条输出');
     expect(flow).toContain('禁止自己编造骰值');
   });
 

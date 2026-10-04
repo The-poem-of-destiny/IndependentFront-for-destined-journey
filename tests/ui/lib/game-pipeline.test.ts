@@ -101,7 +101,12 @@ vi.mock('@engine/state/state-manager', () => ({
 }));
 
 // 🆕 Phase 2 / C2：game-pipeline 改走沙盒后端 —— 动态 import 的沙盒模块整体替换为可编排 fake。
-vi.mock('@engine/combat/sandbox/runner', () => ({ runCombatSandbox: runCombatSandboxMock }));
+vi.mock('@engine/combat/sandbox/runner', () => ({
+  runCombatSandbox: runCombatSandboxMock,
+  // 管线还会引用这两个（续战补指派 / 空 transcript 重建开场）；缺了会让模块导入报错
+  assignPlayerTurn: vi.fn(),
+  buildCombatRosterText: vi.fn(() => '参战名单'),
+}));
 vi.mock('@engine/combat/sandbox/protocol', () => ({
   loadCombatProtocolText: loadCombatProtocolMock,
 }));
@@ -191,6 +196,16 @@ function makeGameStore(overrides: Record<string, any> = {}) {
     setCombatReady: vi.fn(),
     setCombatState: vi.fn(),
     appendCombatFlow: vi.fn(),
+    combatFlow: [],
+    // 逐单位回合循环 + agent 式对话流（思考/工具/流式）用到的 store 方法
+    clearCombatStream: vi.fn(),
+    appendCombatStream: vi.fn(),
+    finalizeCombatStream: vi.fn(),
+    appendCombatTool: vi.fn(),
+    beginCombatReasoning: vi.fn(),
+    appendCombatReasoning: vi.fn(),
+    finalizeCombatReasoning: vi.fn(),
+    setCombatBusy: vi.fn(),
     awaitCombatSettlement: vi.fn(async () => null),
     requestCombatContinue: vi.fn(),
     clearCombatContinue: vi.fn(),
