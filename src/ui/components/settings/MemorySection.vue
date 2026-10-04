@@ -114,15 +114,6 @@ onMounted(() => void apiSources.initialize());
             <option value="dense">密集（每轮都留）</option>
           </select></label
         >
-        <label class="form-label"
-          >缓存策略
-          <p class="form-hint">影响 API 调用的 Prompt 缓存利用率</p>
-          <select v-model="s.memoryCacheStrategy" class="form-input">
-            <option value="aggressive">激进 — 尽可能缓存，高命中率</option>
-            <option value="balanced">平衡 — 兼顾缓存命中与资源消耗</option>
-            <option value="conservative">保守 — 最小缓存，适合低内存设备</option>
-          </select></label
-        >
       </div></AppCard
     >
   </section>
