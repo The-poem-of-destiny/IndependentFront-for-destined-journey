@@ -1,7 +1,8 @@
 /*
  * Final material-integration pass for the seven themes under review.
  *
- * These rules deliberately load after the individual theme sheets. The
+ * These rules load after most individual theme sheets; Atlas and Ivory own
+ * their final surfaces in sheets loaded after this shared baseline. The
  * generated plates provide the material world; live components provide only
  * structure, legibility, and interaction. They must never become a second
  * layer of generic application cards above the plate.
@@ -255,199 +256,6 @@
   .game-page-layout
   :is(.options-popup, .thought-bubble, .buff-pop, .cascader-dropdown) {
   border-radius: 2px;
-}
-
-/* --------------------------------------------------------------------- */
-/* Wayfarer's Atlas: vellum is the surface; brass is the structure.       */
-/* --------------------------------------------------------------------- */
-
-:root[data-theme='parchment'] {
-  --parchment-chassis: url('../assets/themes/parchment/wayfarer-chassis-16x9-v4.webp');
-}
-
-:root[data-theme='parchment'] body .game-page-layout {
-  background-color: #d9bc82;
-  background-image: var(--parchment-chassis);
-  background-position: center;
-  background-size: 100vw auto;
-  background-repeat: no-repeat;
-  box-shadow: inset 0 0 0 3px rgba(64, 38, 14, 0.86);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .top-bar {
-  color: #33200f;
-  background:
-    linear-gradient(180deg, rgba(224, 184, 103, 0.68), rgba(123, 78, 30, 0.36)),
-    rgba(151, 103, 49, 0.28);
-  border: 0;
-  border-bottom: 3px double rgba(74, 45, 18, 0.92);
-  box-shadow:
-    inset 0 -1px 0 rgba(225, 186, 106, 0.72),
-    0 2px 5px rgba(47, 28, 10, 0.28);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .side-toolbar {
-  background: rgba(92, 58, 24, 0.16);
-  border: 0;
-  border-right: 3px double rgba(68, 40, 15, 0.94);
-  box-shadow: inset -1px 0 0 rgba(226, 184, 100, 0.62);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .scene-panel {
-  background: rgba(239, 220, 184, 0.07);
-  border: 0;
-  border-right: 3px double rgba(65, 38, 14, 0.92);
-  box-shadow: inset -1px 0 0 rgba(221, 181, 98, 0.56);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .status-hud {
-  background: rgba(239, 220, 184, 0.08);
-  border: 0;
-  border-left: 3px double rgba(65, 38, 14, 0.92);
-  box-shadow: inset 1px 0 0 rgba(221, 181, 98, 0.56);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .input-bar {
-  padding: 7px 12px;
-  background: rgba(91, 56, 22, 0.1);
-  border: 0;
-  border-top: 3px double rgba(65, 38, 14, 0.94);
-  box-shadow: inset 0 1px 0 rgba(227, 188, 108, 0.66);
-}
-
-:root[data-theme='parchment'] body .game-page-layout :is(.scene-top, .section-header, .tab-bar) {
-  border-color: rgba(78, 47, 19, 0.66);
-  background-color: rgba(230, 205, 158, 0.12);
-  box-shadow: inset 0 -1px 0 rgba(255, 241, 204, 0.36);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .status-glass > .section,
-:root[data-theme='parchment'] body .game-page-layout .status-overview > .section {
-  border-color: rgba(79, 48, 19, 0.56);
-  background: transparent;
-}
-
-:root[data-theme='parchment']
-  body
-  .game-page-layout
-  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action) {
-  color: #3d2814;
-  background:
-    linear-gradient(180deg, rgba(233, 197, 125, 0.32), rgba(119, 76, 31, 0.12)),
-    rgba(184, 137, 68, 0.12);
-  border: 1px solid rgba(66, 39, 14, 0.72);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 226, 165, 0.62),
-    inset 0 -1px 2px rgba(60, 35, 13, 0.28);
-}
-
-:root[data-theme='parchment']
-  body
-  .game-page-layout
-  :is(.tool-btn, .collapse-toggle, .top-btn, .input-btn, .scene-title-action):hover {
-  color: #24170c;
-  background:
-    linear-gradient(180deg, rgba(245, 213, 147, 0.5), rgba(130, 81, 30, 0.18)),
-    rgba(184, 137, 68, 0.2);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 235, 191, 0.74),
-    0 2px 5px rgba(59, 34, 11, 0.18);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .tab-bar {
-  border-top: 1px solid rgba(92, 58, 24, 0.42);
-  border-bottom: 1px solid rgba(72, 42, 15, 0.68);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .tab-item {
-  color: #624a31;
-  background: rgba(222, 195, 147, 0.08);
-  border-color: rgba(89, 55, 22, 0.42);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .tab-item:hover {
-  color: #302010;
-  background: rgba(204, 164, 96, 0.18);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .tab-active {
-  color: #28190c;
-  background: rgba(215, 177, 108, 0.22);
-  box-shadow: inset 0 0 0 1px rgba(245, 217, 160, 0.42);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .tab-active::after {
-  background: #6f461d;
-  box-shadow: 0 -1px 0 rgba(235, 197, 122, 0.78);
-}
-
-:root[data-theme='parchment']
-  body
-  .game-page-layout
-  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row) {
-  background: transparent;
-  border-color: rgba(93, 62, 30, 0.28);
-}
-
-:root[data-theme='parchment']
-  body
-  .game-page-layout
-  :is(.quest-item, .scene-npc-item, .news-item, .system-notif, .item-entry, .item-row):hover {
-  background: rgba(176, 128, 60, 0.1);
-  border-color: rgba(89, 54, 21, 0.48);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .bubble-narrative-full {
-  background: rgba(247, 230, 197, 0.08);
-  border: 0;
-  box-shadow: none;
-}
-
-:root[data-theme='parchment'] body .game-page-layout .bubble-player,
-:root[data-theme='parchment'] body .game-page-layout .dialogue-card {
-  background-image: var(--parchment-ledger-patina);
-  background-color: rgba(241, 221, 182, 0.78);
-  border: 1px solid rgba(85, 50, 18, 0.54);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 244, 214, 0.62),
-    0 4px 12px rgba(54, 31, 10, 0.14);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .input-field {
-  color: #332315;
-  background-image: var(--parchment-ledger-patina);
-  background-color: rgba(241, 221, 182, 0.54);
-  border: 1px solid rgba(65, 38, 14, 0.72);
-  box-shadow:
-    inset 0 2px 5px rgba(63, 39, 15, 0.18),
-    inset 0 0 0 1px rgba(255, 239, 198, 0.36);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .portrait-slot {
-  padding: 7px;
-  border: 2px double rgba(79, 48, 19, 0.78);
-  background-image: var(--parchment-ledger-patina);
-  background-color: rgba(222, 194, 145, 0.35);
-  box-shadow:
-    inset 0 0 0 2px rgba(241, 213, 155, 0.34),
-    0 5px 12px rgba(52, 31, 11, 0.18);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .portrait-slot .avatar-shape-square {
-  color: #4c351c;
-  background-color: rgba(229, 204, 157, 0.2);
-  background-image:
-    linear-gradient(rgba(239, 219, 181, 0.3), rgba(239, 219, 181, 0.3)), var(--parchment-azimuth);
-  background-position: center;
-  background-size: cover;
-  border-radius: 1px;
-  box-shadow: inset 0 0 12px rgba(77, 48, 18, 0.15);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .kv-item {
-  background: rgba(180, 137, 76, 0.15);
-  border: 1px solid rgba(89, 56, 24, 0.28);
-  box-shadow: inset 0 1px 0 rgba(250, 225, 176, 0.34);
 }
 
 /* --------------------------------------------------------------------- */
@@ -1750,17 +1558,6 @@
   box-shadow: none;
 }
 
-:root[data-theme='parchment'] body .game-page-layout .item-detail {
-  background: rgba(233, 207, 158, 0.13);
-  border-color: rgba(86, 52, 20, 0.32);
-  box-shadow: inset 0 1px 0 rgba(255, 239, 198, 0.28);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .det-chip {
-  background: rgba(128, 82, 33, 0.09);
-  border-color: rgba(89, 55, 22, 0.3);
-}
-
 :root[data-theme='forest'] body .game-page-layout .item-detail {
   background: rgba(239, 244, 235, 0.14);
   border-color: rgba(88, 118, 94, 0.27);
@@ -1830,13 +1627,6 @@
 }
 
 /* Floating wells use the same material instead of a generic elevated card. */
-:root[data-theme='parchment']
-  body
-  :is(.options-popup, .thought-bubble, .buff-pop, .cascader-dropdown) {
-  background-image: var(--parchment-ledger-patina);
-  background-color: rgba(239, 218, 178, 0.96);
-  border: 2px double rgba(77, 46, 17, 0.7);
-}
 
 :root[data-theme='forest']
   body
@@ -1989,92 +1779,6 @@
   .game-page-layout
   :is(.game-body, .chat-flow, .chat-messages) {
   border-radius: 0;
-}
-
-/* Wayfarer's Atlas: one live brass frame around each vellum ledger. */
-:root[data-theme='parchment'] body .game-page-layout {
-  background: #2d1e0f;
-  box-shadow: inset 0 0 0 2px #4b3419;
-}
-
-:root[data-theme='parchment'] body .game-page-layout .game-body {
-  margin: 0;
-  padding: 0;
-  gap: 0;
-  background: #2d1e0f;
-}
-
-:root[data-theme='parchment'] body .game-page-layout .top-bar {
-  margin: 0;
-  border: 0;
-  border-bottom: 3px double #4b3419;
-  border-radius: 0;
-  background: linear-gradient(180deg, rgba(229, 195, 122, 0.9), rgba(122, 79, 30, 0.92)), #8d642f;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 235, 181, 0.78),
-    inset 0 -1px 0 rgba(48, 28, 9, 0.74),
-    0 2px 5px rgba(43, 25, 8, 0.34);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .side-toolbar,
-:root[data-theme='parchment'] body .game-page-layout .scene-panel,
-:root[data-theme='parchment'] body .game-page-layout .status-hud {
-  margin: 0;
-  border-radius: 0;
-  background:
-    linear-gradient(rgba(241, 222, 187, 0.18), rgba(220, 191, 139, 0.08)),
-    var(--parchment-ledger-patina) center / cover no-repeat,
-    #ead7b8;
-  box-shadow:
-    inset 0 0 0 1px rgba(220, 181, 108, 0.72),
-    inset 0 0 0 3px rgba(73, 45, 17, 0.82),
-    inset 0 0 18px rgba(63, 39, 14, 0.2);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .side-toolbar {
-  border: 0;
-  border-right: 3px double #4b3419;
-}
-
-:root[data-theme='parchment'] body .game-page-layout .scene-panel {
-  border: 0;
-  border-right: 3px double #4b3419;
-}
-
-:root[data-theme='parchment'] body .game-page-layout .status-hud {
-  border: 0;
-  border-left: 3px double #4b3419;
-}
-
-:root[data-theme='parchment'] body .game-page-layout .chat-flow {
-  border: 0;
-  background:
-    linear-gradient(rgba(244, 224, 186, 0.25), rgba(226, 193, 137, 0.18)),
-    var(--parchment-azimuth) center / cover no-repeat,
-    var(--parchment-ledger-patina) center / cover no-repeat,
-    #e8d0a5;
-  box-shadow:
-    inset 3px 0 0 #4b3419,
-    inset -3px 0 0 #4b3419,
-    inset 0 0 0 5px rgba(190, 143, 67, 0.5),
-    inset 0 0 28px rgba(71, 43, 14, 0.18);
-}
-
-:root[data-theme='parchment'] body .game-page-layout .chat-messages {
-  background: transparent;
-}
-
-:root[data-theme='parchment'] body .game-page-layout .input-bar {
-  margin: 0 8px 7px;
-  padding: 7px;
-  border: 3px double #4b3419;
-  border-radius: 2px;
-  background:
-    linear-gradient(rgba(237, 215, 175, 0.76), rgba(209, 173, 111, 0.72)),
-    var(--parchment-ledger-patina) center / cover no-repeat;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 239, 198, 0.68),
-    0 -2px 5px rgba(66, 40, 14, 0.24);
 }
 
 /* Jade Conservatory: a quiet herbarium cabinet of paper, jade rails, and brass clips. */
