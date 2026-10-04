@@ -91,6 +91,9 @@ beforeEach(() => {
     combatState: null,
     combatSettlement: null,
     combatFlow: [],
+    combatStream: '',
+    combatReasoning: '',
+    combatBusy: false,
     combatContinue: null,
     combatPendingUnit: null,
     startCombat,
@@ -173,33 +176,59 @@ describe('CombatPanel 战斗中', () => {
     expect(wrapper.find('.resbar').exists()).toBe(true);
   });
 
-  it('等待玩家 → 渲染行动规划区；不等待 → 显示「敌方行动中…」', async () => {
+  it('主持人空闲（combatBusy=false）→ 渲染行动规划区；忙碌 → 显示「敌方行动中…」', async () => {
     mockGame.combatState = makeState({ pendingPlayerUnit: '理查德' });
     mockGame.combatPendingUnit = '理查德';
+    mockGame.combatBusy = false;
     const wrapper = await mountPanel();
     expect(wrapper.find('.combat-planner').exists()).toBe(true);
 
-    mockGame.combatState = makeState();
+    mockGame.combatBusy = true;
     mockGame.combatPendingUnit = null;
     await nextTick();
     expect(wrapper.find('.combat-planner').exists()).toBe(false);
     expect(wrapper.find('.combat-waiting').exists()).toBe(true);
   });
 
-  it('点技能卡 → 输入框填入意图；确定 → submitCombatIntent', async () => {
+  it('行动者锁定当前角色；选技能（攻击）→ 提交 → submitCombatIntent 携带技能名', async () => {
     mockGame.combatState = makeState({ pendingPlayerUnit: '理查德' });
     mockGame.combatPendingUnit = '理查德';
+    mockGame.combatBusy = false;
     const wrapper = await mountPanel();
 
-    const skillCard = wrapper.findAll('.skillrow .acard')[0];
+    // 行动者锁定到 pendingPlayerUnit，没有可自由选择的 <select>
+    expect(wrapper.find('.sel-line').text()).toContain('理查德');
+
+    const skillCard = wrapper
+      .findAll('.pickrow .cardrow .acard')
+      .find((c) => c.text().includes('碎裂锤击'))!;
     await skillCard.trigger('click');
-    const input = wrapper.find('.planner-input').element as HTMLTextAreaElement;
-    expect(input.value).toContain('碎裂锤击');
+    // 选中的卡带 is-picked 高亮
+    expect(skillCard.classes()).toContain('is-picked');
 
     const send = wrapper.find('.planner-send');
     await send.trigger('click');
     expect(submitCombatIntent).toHaveBeenCalledTimes(1);
     expect(submitCombatIntent.mock.calls[0][0]).toContain('碎裂锤击');
+  });
+
+  it('攻击 + 动作可一起提交（一条意图同时含技能与特殊动作）', async () => {
+    mockGame.combatState = makeState({ pendingPlayerUnit: '理查德' });
+    mockGame.combatPendingUnit = '理查德';
+    mockGame.combatBusy = false;
+    const wrapper = await mountPanel();
+
+    const cards = wrapper.findAll('.pickrow .cardrow .acard');
+    const skill = cards.find((c) => c.text().includes('碎裂锤击'))!;
+    const move = cards.find((c) => c.text().includes('移动'))!;
+    await skill.trigger('click');
+    await move.trigger('click');
+
+    await wrapper.find('.planner-send').trigger('click');
+    expect(submitCombatIntent).toHaveBeenCalledTimes(1);
+    const text = submitCombatIntent.mock.calls[0][0];
+    expect(text).toContain('碎裂锤击');
+    expect(text).toContain('移动');
   });
 
   it('右上角「↺ 重开战斗」→ 确认弹窗 → restartCombat', async () => {
@@ -230,6 +259,43 @@ describe('CombatPanel 战斗中', () => {
     await nextTick();
     expect(toast).toHaveBeenCalledWith('时间线已恢复，但界面重载失败，请重新进入存档', 'error');
     expect(navigate).toHaveBeenCalledWith('home');
+  });
+});
+
+describe('CombatPanel 收起 / 返回', () => {
+  it('点「收起」→ overlay 消失、出现「返回战斗」；点返回 → overlay 复现', async () => {
+    mockGame.combatState = makeState();
+    const wrapper = await mountPanel();
+    expect(wrapper.find('.combat-overlay').exists()).toBe(true);
+
+    await wrapper.find('.combat-minimize').trigger('click');
+    await nextTick();
+    expect(wrapper.find('.combat-overlay').exists()).toBe(false);
+    expect(wrapper.find('.combat-reopen').exists()).toBe(true);
+
+    await wrapper.find('.combat-reopen').trigger('click');
+    await nextTick();
+    expect(wrapper.find('.combat-overlay').exists()).toBe(true);
+  });
+
+  it('Esc 收起（无弹窗时）；收起态再按 Esc 不报错', async () => {
+    mockGame.combatState = makeState();
+    const wrapper = await mountPanel();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await nextTick();
+    expect(wrapper.find('.combat-overlay').exists()).toBe(false);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await nextTick();
+    expect(wrapper.find('.combat-overlay').exists()).toBe(false);
+  });
+
+  it('收起只隐藏 overlay，不调用任何战斗状态动作（exitCombat 等）', async () => {
+    mockGame.combatState = makeState();
+    const wrapper = await mountPanel();
+    await wrapper.find('.combat-minimize').trigger('click');
+    await nextTick();
+    expect(exitCombat).not.toHaveBeenCalled();
+    expect(restartCombat).not.toHaveBeenCalled();
   });
 });
 

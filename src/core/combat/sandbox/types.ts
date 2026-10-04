@@ -152,9 +152,14 @@ export interface CombatMeta {
   actionOrder: string[];
   phase: CombatPhase;
   regions: string[];
-  /** 等待玩家输入的单位名（combat_yield_to_player 写入） */
+  /** 当前轮到、等待玩家输入的单位名（由 Code 的 `assignPlayerTurn` 指派；非 AI 工具写入） */
   pendingPlayerUnit?: string;
-  /** 给玩家的行动选项（叙事选项，非强制） */
+  /**
+   * 当前正在结算的单位名（AI 用 `combat_set_meta` 推进：结算完写下一个该行动的单位；
+   * 缺省/无效 → Code 按 `actionOrder` 顺延回退）。Code 据此决定下一条 exchange 只结算谁。
+   */
+  activeUnit?: string;
+  /** 给玩家的行动选项（叙事选项，非强制；旧字段，当前无写入方） */
   pendingOptions?: string[];
   /** 终局结果 */
   outcome?: CombatOutcome;
@@ -162,6 +167,8 @@ export interface CombatMeta {
   fpReward?: number;
   /** 主持备注（自由文本，仅存沙盒） */
   notes?: string;
+  /** 终局战报（DM 用 `combat_write_summary` 写的一段自然语言，回注给主叙事 AI） */
+  summary?: string;
 }
 
 /** 权威战斗状态（单一真源） */

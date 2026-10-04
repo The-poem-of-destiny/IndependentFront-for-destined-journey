@@ -12,10 +12,10 @@
  * 🔴 全部单位/技能/数值从 `CombatState` 读取（遍历 units、按 side 分阵营），组件不写死
  *    任何具体单位名/技能名/数值；集中映射见 combat-view.ts。
  */
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useGameStore } from '../../../stores/game-store';
 import { useUIStore } from '../../../stores/ui-store';
-import { currentActor, isAwaitingPlayer, orderedUnits } from './combat-view';
+import { currentActor, orderedUnits } from './combat-view';
 import CombatUnitCard from './CombatUnitCard.vue';
 import CombatMessageFlow from './CombatMessageFlow.vue';
 import CombatPositionAxis from './CombatPositionAxis.vue';
@@ -33,8 +33,11 @@ const state = computed(() => game.combatState);
 const allies = computed(() => orderedUnits(state.value, 'ally'));
 const enemies = computed(() => orderedUnits(state.value, 'enemy'));
 const actor = computed(() => currentActor(state.value));
-const awaiting = computed(() => isAwaitingPlayer(state.value));
-const isThinking = computed(() => !!state.value && !awaiting.value);
+// 🔴 输入框的判据 = 主持人是否空闲（`combatBusy`）—— 主持人忙 → 转圈/流式正文；空闲 → 轮到玩家。
+//    不认数据态的 `meta.pendingPlayerUnit`（会与真实交接时序脱节，症状是「DM 说轮到你了、
+//    UI 却写敌方行动中、输入框不出来」）。
+const awaiting = computed(() => !!state.value && !game.combatBusy);
+const isThinking = computed(() => !!state.value && game.combatBusy);
 
 const resourceRows = computed(() => {
   const unit = actor.value;
@@ -51,6 +54,28 @@ const regionText = computed(() => (state.value?.meta.regions ?? []).join(' · ')
 // ── 确认弹窗（跳过 / 重开）──
 const skipOpen = ref(false);
 const restartOpen = ref(false);
+
+// ── 收起 / 返回战斗 ──
+// 战斗面板是 Teleport 到 body 的全屏 overlay，此前**没有任何收起入口**，Esc 又被 GamePage
+// 的战斗分支挡掉 —— 玩家被困在战斗里，连 debug 都打不开。这里给一个纯 UI 的最小化：
+// 只隐藏 overlay，**不动任何战斗权威状态**（isInCombat 仍为真，沙盒照常挂在 game-store 上）。
+const collapsed = ref(false);
+
+function minimize() {
+  collapsed.value = true;
+}
+function restore() {
+  collapsed.value = false;
+}
+
+/** Esc = 收起（弹窗打开时 AppModal 在 capture 阶段 stopImmediatePropagation，不会误收面板）。 */
+function onKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return;
+  if (skipOpen.value || restartOpen.value) return;
+  if (game.isInCombat && !collapsed.value) minimize();
+}
+onMounted(() => window.addEventListener('keydown', onKeydown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 
 function confirmStart() {
   void game.startCombat();
@@ -86,7 +111,7 @@ function continueSettlement(text: string) {
 <template>
   <Teleport to="body">
     <Transition name="combat-overlay">
-      <div v-if="game.isInCombat" class="combat-overlay">
+      <div v-if="game.isInCombat && !collapsed" class="combat-overlay">
         <div class="combat-panel" :class="{ 'is-ready': game.combatReady }">
           <!-- ═══ ① 就绪态 ═══ -->
           <CombatReadyPanel
@@ -161,6 +186,7 @@ function continueSettlement(text: string) {
                 class="combat-flow"
                 :state="state"
                 :flow="game.combatFlow"
+                :stream="game.combatStream"
                 :is-thinking="isThinking"
               />
 
@@ -181,6 +207,26 @@ function continueSettlement(text: string) {
         </div>
       </div>
     </Transition>
+
+    <!-- 收起 / 返回战斗（overlay 之外，任何三态都可用） -->
+    <button
+      v-if="game.isInCombat && !collapsed"
+      class="combat-minimize"
+      type="button"
+      title="收起战斗面板（Esc），可查看设置 / 调试等其他界面"
+      @click="minimize"
+    >
+      ⌄ 收起
+    </button>
+    <button
+      v-else-if="game.isInCombat"
+      class="combat-reopen"
+      type="button"
+      title="返回战斗面板"
+      @click="restore"
+    >
+      ⚔ 返回战斗
+    </button>
 
     <!-- 跳过战斗确认 -->
     <AppModal :open="skipOpen" title="跳过战斗" size="sm" @update:open="skipOpen = $event">
@@ -314,6 +360,54 @@ function continueSettlement(text: string) {
 }
 .restart-btn:hover {
   background: color-mix(in srgb, var(--theme-error) 18%, transparent);
+}
+
+/* ── 收起 / 返回战斗（overlay 之外的固定控制）── */
+.combat-minimize {
+  position: fixed;
+  top: 6px;
+  right: 10px;
+  z-index: 1001;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  padding: 5px 12px;
+  border-radius: var(--theme-radius-full);
+  border: 1px solid var(--theme-card-border);
+  background: color-mix(in srgb, var(--theme-window-bg) 72%, transparent);
+  color: var(--theme-text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    color var(--theme-transition-fast),
+    background var(--theme-transition-fast);
+}
+.combat-minimize:hover {
+  color: var(--theme-text-primary);
+  background: color-mix(in srgb, var(--theme-window-bg) 92%, transparent);
+}
+.combat-reopen {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1001;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  padding: 8px 16px;
+  border-radius: var(--theme-radius-full);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 45%, var(--theme-card-border));
+  background: color-mix(in srgb, var(--theme-primary) 14%, var(--theme-content-bg));
+  color: var(--theme-primary);
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: var(--theme-shadow-lg);
+  transition: background var(--theme-transition-fast);
+}
+.combat-reopen:hover {
+  background: color-mix(in srgb, var(--theme-primary) 24%, var(--theme-content-bg));
 }
 
 /* ── 顶部资源条 ── */

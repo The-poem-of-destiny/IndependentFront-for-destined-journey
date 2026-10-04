@@ -7,6 +7,9 @@ import type { CharacterState, StatePatch, StatusEffect } from '../../../../src/c
 import {
   buildCombatSettlementPatches,
   computeCombatExpRewards,
+  deriveCombatOutcome,
+  isCombatOutcome,
+  normalizeCombatOutcome,
 } from '../../../../src/core/combat/sandbox/settlement';
 import {
   applyOps,
@@ -137,7 +140,7 @@ describe('computeCombatExpRewards', () => {
     expect(rewards.expByUnit).toEqual({ 艾莉丝: 15, 贝拉: 15 });
   });
 
-  it('非 ally_win / 无击杀 不发经验', () => {
+  it('非 ally_win 不发经验', () => {
     const state = createCombatState({
       combatants: [
         { character: makeChar('艾莉丝'), side: 'ally' },
@@ -148,9 +151,93 @@ describe('computeCombatExpRewards', () => {
     state.units['哥布林'].alive = false;
     expect(computeCombatExpRewards(state, 'normal')).toEqual({ expByUnit: {}, totalExp: 0 });
 
-    state.meta.outcome = 'ally_win';
-    state.units['哥布林'].alive = true;
-    state.units['哥布林'].hp = 5;
+    state.meta.outcome = 'draw';
     expect(computeCombatExpRewards(state, 'normal')).toEqual({ expByUnit: {}, totalExp: 0 });
+  });
+
+  it('判胜但无阵亡记录（AI 没写回状态）→ 按全歼兜底', () => {
+    const state = createCombatState({
+      combatants: [
+        { character: makeChar('艾莉丝'), side: 'ally' },
+        { name: '哥布林', side: 'enemy', tier: 1, level: 3, hp: 50, maxHp: 50 },
+      ],
+    });
+    state.meta.outcome = 'ally_win';
+    // 敌人仍活着（DM 只在正文里宣布全歼）→ 兜底计入
+    const rewards = computeCombatExpRewards(state, 'normal');
+    expect(rewards.totalExp).toBe(30);
+    expect(rewards.expByUnit).toEqual({ 艾莉丝: 30 });
+  });
+
+  it('集群衰减：单体 × (1 + (同类数量-1) × 0.2)', () => {
+    const state = createCombatState({
+      combatants: [
+        { character: makeChar('艾莉丝'), side: 'ally' },
+        { name: '食腐兽群', side: 'enemy', tier: 1, level: 3, cluster: { alive: 5, total: 5 } },
+      ],
+    });
+    state.meta.outcome = 'ally_win';
+    state.units['食腐兽群'].alive = false;
+    state.units['食腐兽群'].hp = 0;
+    // 单体 3 × tier1 系数 10 = 30；N=5 → 30 × (1 + 4 × 0.2) = 54
+    expect(computeCombatExpRewards(state, 'normal').totalExp).toBe(54);
+  });
+});
+
+describe('deriveCombatOutcome / isCombatOutcome（AI 中文结果归一化）', () => {
+  it('isCombatOutcome 只认四值枚举', () => {
+    expect(isCombatOutcome('ally_win')).toBe(true);
+    expect(isCombatOutcome('fled')).toBe(true);
+    expect(isCombatOutcome('胜利（我方全歼敌军）')).toBe(false);
+    expect(isCombatOutcome(undefined)).toBe(false);
+  });
+
+  function battle(): ReturnType<typeof createCombatState> {
+    return createCombatState({
+      combatants: [
+        { character: makeChar('艾莉丝'), side: 'ally' },
+        { name: '哥布林', side: 'enemy', tier: 1, level: 3, hp: 50, maxHp: 50 },
+      ],
+    });
+  }
+
+  it('全歼敌方 → ally_win', () => {
+    const state = battle();
+    state.units['哥布林'].alive = false;
+    state.units['哥布林'].hp = 0;
+    expect(deriveCombatOutcome(state)).toBe('ally_win');
+  });
+
+  it('我方全灭 → enemy_win', () => {
+    const state = battle();
+    state.units['艾莉丝'].alive = false;
+    state.units['艾莉丝'].hp = 0;
+    expect(deriveCombatOutcome(state)).toBe('enemy_win');
+  });
+
+  it('双方都还有人 → draw', () => {
+    expect(deriveCombatOutcome(battle())).toBe('draw');
+  });
+});
+
+describe('normalizeCombatOutcome（AI 结果自由文本 → 枚举）', () => {
+  it('枚举原样通过', () => {
+    expect(normalizeCombatOutcome('ally_win')).toBe('ally_win');
+    expect(normalizeCombatOutcome('fled')).toBe('fled');
+  });
+
+  it('中文/英文同义词归一化', () => {
+    expect(normalizeCombatOutcome('胜利（我方全歼敌军）')).toBe('ally_win');
+    expect(normalizeCombatOutcome('victory')).toBe('ally_win');
+    expect(normalizeCombatOutcome('战败')).toBe('enemy_win');
+    expect(normalizeCombatOutcome('defeat')).toBe('enemy_win');
+    expect(normalizeCombatOutcome('成功撤退')).toBe('fled');
+    expect(normalizeCombatOutcome('平局')).toBe('draw');
+  });
+
+  it('认不出 → null（交给 deriveCombatOutcome 兜底）', () => {
+    expect(normalizeCombatOutcome('???')).toBeNull();
+    expect(normalizeCombatOutcome(undefined)).toBeNull();
+    expect(normalizeCombatOutcome(123 as unknown as string)).toBeNull();
   });
 });

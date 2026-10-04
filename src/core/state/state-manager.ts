@@ -1211,6 +1211,51 @@ export class StateManager {
   }
 
   /**
+   * update_status_effect — daily_check（Phase 3）按名改既有状态。
+   *
+   * value = { name(必), remainingTime?, stacks? }：
+   *   · `remainingTime`：数值=剩余量（timeUnit 口径，**取代**旧值，不是取 max —— daily_check 是
+   *     在结算推进后的新值）；`null`=改为永久；缺省不动。
+   *   · `stacks`：正数才生效，有 `maxStacks` 则封顶；缺省不动。
+   *   · 只改这两个字段，别的（描述/来源/层数上限）不动 —— 那属于 add/update_character。
+   *
+   * 🔴 **找不到该状态名 → warn 忽略、不抛**（照地图落位「按名寻址失败不否决」口径）：
+   *    AI 报的一条倒计时可能对应已被同回合 remove 掉的状态，硬抛会连坐整批补丁。
+   */
+  private async applyUpdateStatusEffect(patch: StatePatch): Promise<GameEvent> {
+    const char = await this.resolveCharTarget(patch.target);
+
+    const value = patch.value as { name?: string; remainingTime?: number | null; stacks?: number };
+    const name = value?.name;
+    if (!name) throw new Error('update_status_effect 需要 value.name');
+
+    const existing = findByName(char.statusEffects, name);
+    if (!existing) {
+      console.warn(
+        `[StateManager] update_status_effect 找不到状态 "${name}"（${char.name}），忽略该条`,
+      );
+      return this.createEvent('status_effect', patch);
+    }
+
+    if (value.remainingTime !== undefined) {
+      // null=永久；数值=取代（负数钳到 0，由 daily_check 决定何时改发 remove）
+      existing.remainingTime =
+        value.remainingTime === null ? null : Math.max(0, value.remainingTime);
+      // F07 余量随脚本退役一并作废：时间口径全交 AI，不再维护 carryMinutes
+      existing.carryMinutes = undefined;
+    }
+    if (typeof value.stacks === 'number' && value.stacks > 0) {
+      existing.stacks = value.stacks;
+      if (existing.maxStacks && existing.maxStacks > 0) {
+        existing.stacks = Math.min(existing.stacks, existing.maxStacks);
+      }
+    }
+    await this.persistCharacter(char);
+
+    return this.createEvent('status_effect', patch);
+  }
+
+  /**
    * add_item — M2 按名寻址 + 同名合并 (#5)
    *
    * value = { name(必), quantity?=1, type?, rarity?, description?, stats?,
@@ -2820,21 +2865,22 @@ export class StateManager {
   // ═══════════════════════════════════════════════════════════
 
   /**
-   * 推进全局游戏时间，并自动结算所有角色的状态效果 remainingTime。
+   * 推进全局游戏时间（天气 / 随机事件 / 地块结算三个钩子随之触发）。
+   *
+   * 🔴 **2026-10-03（Phase 3）起不再结算状态效果**：remainingTime 扣减与到期移除整段
+   * 交给 `daily_check` Agent（在 dispatcher 之后的新 stage 里产 `update_status_effect` /
+   * `remove_status_effect` 补丁）。Code 只推时钟，不做任何角色状态写。
    *
    * @param minutes - 推进的分钟数
-   * @returns 生成的 StatePatch[] (remove_status_effect + time update)
+   * @returns 恒为空数组（保留返回形状供调用方兼容；状态补丁已不在此处产生）
    */
   async applyTimeAdvance(minutes: number): Promise<StatePatch[]> {
     const patches: StatePatch[] = [];
     if (minutes <= 0) return patches;
 
     // 1. 更新 SaveProfile.gameTime
-    const { getCharacters } = await import('../persistence/database');
-
-    // 🔴 并行化改造：时间推进的全部 DB 工作（gameTime / 天气 / 随机事件 / 角色
-    // 状态效果）是一段连续读-改-写区段，整段互斥；末尾的自提交 commitChatState
-    // 刻意在锁外 —— 嵌套提交要重新排队拿锁，在锁内即自死锁（铁律②）。
+    // 🔴 并行化改造：时间推进的全部 DB 工作（gameTime / 天气 / 随机事件 / 地块结算）是
+    // 一段连续读-改-写区段，整段互斥。状态计时已交 daily_check，本方法不再写角色。
     await withSaveWriteLock(this.saveId, async () => {
       const profile = await getProfile(this.saveId);
       // 地图 v1.2（§4）：结算区间是**半开区间** `(prevDay, nextDay]`，所以推进**之前**
@@ -2858,67 +2904,9 @@ export class StateManager {
       //     锁外自提交失败才丢账，借据机制消灭的是那个失败窗口）。
       await this.syncMapFactsSettlement(profile, prevDay);
 
-      // 2. 遍历所有角色, 扣减 StatusEffect.remainingTime
-      const characters = await getCharacters(this.saveId);
-
-      for (const char of characters) {
-        let changed = false;
-        const expired: StatusEffect[] = [];
-
-        for (const fx of char.statusEffects) {
-          // 永久效果跳过
-          if (fx.remainingTime === null) continue;
-
-          // 战斗回合效果跳过 (由 combat 系统管理)
-          if (fx.timeUnit === '回合') continue;
-
-          // 按时间单位扣减
-          if (fx.timeUnit === '小时') {
-            // F07 分区不变式：小时型效果把「不足整小时」的分钟余量累进 carryMinutes，
-            // 满 60 分钟才扣 1 个 remainingTime。旧的 Math.floor(minutes/60) 会在
-            // 每次 30 分钟推进时把 0.5 小时地板吞掉，导致两段 30 分钟永远凑不成 1 小时。
-            const carryFrom = fx.carryMinutes ?? 0;
-            const totalMinutes = carryFrom + minutes;
-            const wholeHours = Math.floor(totalMinutes / 60);
-            fx.carryMinutes = totalMinutes % 60;
-            fx.remainingTime -= wholeHours;
-          } else {
-            fx.remainingTime -= minutes;
-          }
-          changed = true;
-
-          if (fx.remainingTime <= 0) {
-            expired.push(fx);
-          }
-        }
-
-        // 过期移除 — M2 按名删除（#22，旧数据带 id 也按 name 过滤，不受影响）
-        for (const fx of expired) {
-          char.statusEffects = char.statusEffects.filter((e) => e.name !== fx.name);
-
-          patches.push({
-            op: 'remove_status_effect',
-            target: `characters.${char.name}`,
-            value: { name: fx.name },
-          });
-
-          // Q-02 修复：createEvent 只构造不落库，改 push 进 events（旧代码假 emit）
-          this.events.push(
-            this.createEvent('status_effect', {
-              op: 'remove_status_effect',
-              target: `characters.${char.name}`,
-              value: { name: fx.name },
-            }),
-          );
-        }
-
-        // 时长扣减/移除的持久化走 saveCharacter（statusEffects 数组被 update_character 白名单
-        // 禁止直写，防 AI 假字段污染；此处引擎内存内已 mutate，一条直写即可）。Q-02 修复的
-        // 是 patches 里的效果（remove/hp/stat）曾被调用点丢弃 —— 它们现在走末尾自提交。
-        if (changed) {
-          await saveCharacter(char);
-        }
-      }
+      // 2. 状态计时全权交 daily_check（Phase 3）：本方法**不再**遍历角色扣减
+      //    remainingTime / 移除到期效果 —— 那由后续 daily_check stage 产
+      //    update_status_effect / remove_status_effect 补丁落地（时间是它读 {{DELTA_TIME}}）。
 
       // 3. emit time_advanced（Q-02：改成真 push，旧代码 createEvent 不落库）
       this.events.push(
@@ -2930,15 +2918,7 @@ export class StateManager {
       );
     });
 
-    // Q-02 修复：自提交 —— 之前返回值在唯一调用点（agent-orchestrator.ts:854）被丢弃，
-    // 到期效果的 remove/hp/stat 全部蒸发。这里在方法内提交，符合 ADR-21
-    // 唯一写入口约定，调用点无需自己 commit。
-    if (patches.length > 0) {
-      await this.commitChatState(patches);
-    }
-
-    // F08 收益重放：收益从「锁外补丁」改为「持久借据的原子入账」，与上面的正文自提交
-    // **互不连坐** —— 正文补丁失败不影响收益入账，收益入账失败也不回滚已提交的正文。
+    // F08 收益重放：收益从「锁外补丁」改为「持久借据的原子入账」，与正文提交**互不连坐**。
     await this.settlePendingMapIncome();
 
     return patches;
@@ -3539,6 +3519,7 @@ const PATCH_HANDLERS: Record<
   delta_sp: (sm, p) => sm['applyDeltaResource'](p),
   // 状态效果
   add_status_effect: (sm, p) => sm['applyAddStatusEffect'](p),
+  update_status_effect: (sm, p) => sm['applyUpdateStatusEffect'](p),
   remove_status_effect: (sm, p) => sm['applyRemoveStatusEffect'](p),
   // 物品
   add_item: (sm, p) => sm['applyAddItem'](p),

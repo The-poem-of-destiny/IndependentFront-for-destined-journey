@@ -656,6 +656,8 @@ const EXTERNALIZED_IDS = new Set([
   'plot_correct',
   'craft_gen',
   'entity_gen',
+  // 2026-10-03 Phase 3: daily_check 提示词在 agent-config.json（本地仅留接口兼容 stub）
+  'daily_check',
   'combat',
   // 图像生成 G 阶段: 提示词在 agent-config.json（临时最小版 + TODO，D55）
   'image_prompt',

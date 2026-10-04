@@ -51,6 +51,8 @@ import {
   buildQuestPatches,
   buildVarsUpdatePatches,
 } from '../variables/vars-update-translator';
+// daily_check（Phase 3）：周期/条件结算的 AI JSON → StatePatch 纯映射
+import { buildDailyCheckPatches } from '../variables/daily-check-translator';
 // T3: LLM 组装层 Delta 会话深模块（独占 (saveId, agentId) 会话状态；orchestrator 只跨小 interface）
 import {
   completePromptSession,
@@ -429,7 +431,13 @@ export class AgentOrchestrator {
 
     // 并行化改造：per-agent 依赖过滤 —— 依赖失败（或从未产出）的 agent 不跑，
     // 但**不连坐**同 stage 其他依赖满足的 agent（旧实现整 stage 一起跳过）。
-    const runnable = agentsToRun.filter((agentId) => this.depsOk(stage, agentId));
+    const runnable = agentsToRun.filter((agentId) => {
+      // daily_check（Phase 3）：战斗会话活跃时暂停 —— 战斗中的周期由战斗回合处理，
+      // 脱战日常才结算（照随机事件注入 §13-2 先例）。跳过后其 stage 无产出，
+      // processStageMarkers 的 daily_check 分支读到空输出自然 no-op。
+      if (agentId === 'daily_check' && this.context.combatActive) return false;
+      return this.depsOk(stage, agentId);
+    });
 
     if (runnable.length === 0) return;
 
@@ -1060,6 +1068,7 @@ export class AgentOrchestrator {
       'plot_pre_check',
       'story',
       'request_dispatcher',
+      'daily_check',
       'vars_update',
       'memory_summary',
       'plot_post_check',
@@ -1283,6 +1292,9 @@ export class AgentOrchestrator {
 
         if (deltaTime !== undefined) {
           await this.advanceTime(deltaTime, 'request_dispatcher');
+          // daily_check（Phase 3）：把本轮推进的分钟写进 ctx，供 {{DELTA_TIME}} 在
+          // 紧随其后的 daily_check stage 读取（时间推进在 buildContext 之后，故不能在那里供值）。
+          this.context.deltaTimeMinutes = deltaTime;
         }
 
         // 🗺 提交后胶水（地图 v1 §8.2 / 裁定 §12-8）：dispatcher 刚把 `sys.旅行目的地` 落库、
@@ -1376,6 +1388,20 @@ export class AgentOrchestrator {
         for (const marker of combatMarkers) {
           await this.events.onCombatTrigger(marker, dispatcherStoryOutput);
         }
+      }
+    }
+
+    // Stage 2.5 (daily_check): 周期/条件结算 → StatePatch。
+    // 时间推进已在上一 stage（dispatcher）完成，本 stage 只把 AI 的结算结果落库。
+    if (this.isDailyCheckStage(stageIndex)) {
+      const output = this.getAgentOutputText('daily_check');
+      if (!output) return;
+
+      const jsonMatch = output.match(/<json>([\s\S]*?)<\/json>/);
+      const parsed = jsonMatch ? this.parseStageJson(jsonMatch[1], 'daily_check') : null;
+      if (parsed) {
+        const patches = this.buildPatches('daily_check', () => buildDailyCheckPatches(parsed));
+        await this.commitPatches(patches, 'daily_check');
       }
     }
 
@@ -1581,6 +1607,12 @@ export class AgentOrchestrator {
   private isVarsUpdateStage(stageIndex: number): boolean {
     const stage = this.pipeline.stages[stageIndex];
     return stage?.agents.includes('vars_update') ?? false;
+  }
+
+  /** 判断当前 stage 是否包含 daily_check agent（日常检定，Phase 3） */
+  private isDailyCheckStage(stageIndex: number): boolean {
+    const stage = this.pipeline.stages[stageIndex];
+    return stage?.agents.includes('daily_check') ?? false;
   }
 
   /** 从 context.agentOutputs 获取指定 Agent 的文本输出 */

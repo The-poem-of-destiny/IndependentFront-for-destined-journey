@@ -172,10 +172,24 @@ const ASCENSION_META = [
 ];
 
 function toEntry(d: ElementDetail | AuthorityDetail | LawDetail): AscensionEntry {
+  // 词条名→描述（Phase 9）：优先渲染成「名称：描述」，比 effects 里的裸描述串更可读；
+  // effects 是旧形状（纯字符串数组），effectDescriptions 缺省时回退到它。
+  const described =
+    d.effectDescriptions && typeof d.effectDescriptions === 'object'
+      ? Object.entries(d.effectDescriptions)
+          .filter(
+            ([k, v]) =>
+              typeof k === 'string' && k.trim() !== '' && typeof v === 'string' && v.trim() !== '',
+          )
+          .map(([k, v]) => `${k}：${v}`)
+      : [];
+  const rawEffects = Array.isArray(d.effects)
+    ? d.effects.filter((e): e is string => typeof e === 'string' && e.trim() !== '')
+    : [];
   return {
     name: textLoose(d.name),
     description: textLoose(d.description),
-    effects: Array.isArray(d.effects) ? d.effects.filter((e) => typeof e === 'string') : [],
+    effects: described.length > 0 ? described : rawEffects,
     cost: 'costDescription' in d ? textLoose(d.costDescription) : '',
   };
 }

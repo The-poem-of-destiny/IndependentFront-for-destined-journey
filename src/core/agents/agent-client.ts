@@ -89,6 +89,26 @@ export interface ChatWithToolsOptions {
   /** 最大工具调用轮数，默认 5 */
   maxRounds?: number;
   signal?: AbortSignal;
+  /**
+   * 🆕 流式增量文本回调（战斗等「边想边说」场景用）。
+   *
+   * 传了它 → 每一轮工具循环改用 `chatStream` 发送并**实时转发正文增量**（只转发 delta，
+   * 不转发收尾快照）；没传 → 走原来的非流式 `chat`。工具调用轮通常不产出可见正文，
+   * 最后一轮（无 tool_calls）的正文会逐字流出来。
+   */
+  onTextDelta?: (delta: string) => void;
+  /**
+   * 🆕 思维链增量回调（`reasoning_content` delta）—— 仅在传了 `onTextDelta`（走流式）时有效。
+   * 工具循环的每一轮都会转发该轮的思维链增量，供「思考」折叠块实时显示。
+   */
+  onReasoning?: (delta: string) => void;
+  /**
+   * 🆕 每轮工具循环开始前的边界回调（1-based 轮号）。
+   *
+   * 思维链与工具调用应当**交替**呈现：第 N 轮的思维链 → 第 N 轮的工具调用 → 第 N+1 轮……
+   * 上层用它在每轮开头切一段新的「思考」块（结束上一段）。
+   */
+  onRoundStart?: (round: number) => void;
 }
 
 // ========== Streaming Types ==========
@@ -255,6 +275,8 @@ export class AgentClient {
     const providerRounds: AgentProviderRound[] = [];
 
     for (let round = 0; round < maxRounds; round++) {
+      // 每轮开头报边界：上层据此结束上一段思维链、开一段新的（思考/工具交替）
+      options.onRoundStart?.(round + 1);
       const roundRequest: ChatRequest = {
         ...request,
         messages: conversation,
@@ -262,7 +284,14 @@ export class AgentClient {
         tool_choice: request.tool_choice,
       };
 
-      const innerResult = await this.chat(roundRequest, options.signal);
+      const innerResult = options.onTextDelta
+        ? await this.chatRoundStreaming(
+            roundRequest,
+            options.onTextDelta,
+            options.signal,
+            options.onReasoning,
+          )
+        : await this.chat(roundRequest, options.signal);
       totalTokens += innerResult.tokensUsed;
       totalCacheHitTokens += innerResult.cacheHitTokens ?? 0;
       totalCacheMissTokens += innerResult.cacheMissTokens ?? 0;
@@ -389,6 +418,53 @@ export class AgentClient {
       toolCalls: toolCallHistory,
       providerRounds,
     };
+  }
+
+  /**
+   * 工具循环里的「单轮流式」——用 `chatStream` 发一轮并把正文增量实时回调出去，
+   * 完成后归一成与 `chat()` 同形状的 `AgentResult`（含 `_toolCalls` / `_nativeAssistant`），
+   * 供上层工具循环无差别消费。只转发 `isComplete === false` 的增量；收尾那记
+   * `onChunk(full, true)` 是整段快照，转发会重复。
+   */
+  private chatRoundStreaming(
+    request: ChatRequest,
+    onTextDelta: (delta: string) => void,
+    signal?: AbortSignal,
+    onReasoning?: (delta: string) => void,
+  ): Promise<InternalAgentResult> {
+    return new Promise<InternalAgentResult>((resolve, reject) => {
+      void this.chatStream(
+        request,
+        {
+          onChunk: (text, isComplete) => {
+            if (!isComplete && text) onTextDelta(text);
+          },
+          onReasoning: onReasoning ? (text) => onReasoning(text) : undefined,
+          onComplete: (r) => {
+            resolve({
+              agentId: this.agentId,
+              output: r.fullText,
+              rawResponse: r.fullText,
+              reasoning: r.reasoning,
+              tokensUsed: r.tokensUsed,
+              cacheHit: r.cacheHit,
+              cacheHitTokens: r.cacheHitTokens,
+              cacheMissTokens: r.cacheMissTokens,
+              completionTokens: r.completionTokens,
+              duration: r.duration,
+              _nativeAssistant: r.nativeAssistant,
+              _toolCalls: r.toolCalls.map((t) => ({
+                id: t.id,
+                type: 'function',
+                function: { name: t.name, arguments: JSON.stringify(t.arguments) },
+              })),
+            } as InternalAgentResult);
+          },
+          onError: (e) => reject(new Error(e)),
+        },
+        signal,
+      );
+    });
   }
 
   /**

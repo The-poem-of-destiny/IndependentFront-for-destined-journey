@@ -70,7 +70,7 @@ describe('COMBAT_SANDBOX_TOOL_DEFINITIONS', () => {
         'combat_remove_unit',
         'combat_set_meta',
         'combat_update_unit',
-        'combat_yield_to_player',
+        'combat_write_summary',
         'get_character',
         'get_inventory',
         'roll_d20',
@@ -147,18 +147,6 @@ describe('executeCombatTool — 状态维护', () => {
     expect(state.meta.outcome).toBe('ally_win');
     expect(state.meta.round).toBe(3);
     expect(state.meta.fpReward).toBe(5);
-  });
-
-  it('combat_yield_to_player 写入等待玩家', async () => {
-    const state = makeState();
-    const result = await executeCombatTool(
-      'combat_yield_to_player',
-      { unit: '艾莉丝', prompt: '轮到你行动', options: ['攻击', '防御'] },
-      state,
-    );
-    expect(result.waitingForPlayer).toBe(true);
-    expect(state.meta.pendingPlayerUnit).toBe('艾莉丝');
-    expect(state.meta.pendingOptions).toEqual(['攻击', '防御']);
   });
 });
 

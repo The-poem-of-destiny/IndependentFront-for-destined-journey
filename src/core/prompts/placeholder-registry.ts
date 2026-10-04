@@ -847,6 +847,28 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
   },
 
   /**
+   * {{DELTA_TIME}} — 本轮推进的游戏时间（分钟），daily_check 判断「过了多久」的依据。
+   *
+   * 🔴 供值在 orchestrator（`applyTimeAdvance` 之后写 `ctx.deltaTimeMinutes`），本 resolver
+   *    不读时钟、不读 delta_time 产出方。缺省 / 非正数 = 本回合没推进，渲染成一句明确的
+   *    「未推进」而**不是空串** —— 空串会让 AI 以为没有时间信息，而它其实需要知道「没变」。
+   */
+  DELTA_TIME: (ctx, _config, _params) => {
+    const m = ctx.deltaTimeMinutes;
+    if (typeof m !== 'number' || !Number.isFinite(m) || m <= 0) {
+      return '本回合时间未推进（0 分钟）';
+    }
+    const days = Math.floor(m / 1440);
+    const hours = Math.floor((m % 1440) / 60);
+    const mins = m % 60;
+    const human: string[] = [];
+    if (days > 0) human.push(`${days} 天`);
+    if (hours > 0) human.push(`${hours} 小时`);
+    if (mins > 0) human.push(`${mins} 分钟`);
+    return human.length > 0 ? `${m} 分钟（约合 ${human.join(' ')}）` : `${m} 分钟`;
+  },
+
+  /**
    * {{MAP_CONTEXT}} — 地块地图的本地事实块（地图 v1 §8.1）：当前地块 + 严格一跳邻接 +
    * 天气（含季节）+ 在途摘要 + 至多一条不连通提示，包在 `<map_context>` 里。
    *
@@ -1123,6 +1145,11 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   // （<剧情大纲>+<剧情事件列表>+<当前状态>，见 agent-templates.ts buildPlotContextBlock）。
   plot_pre_check:
     '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你判断剧情触发所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<剧情事件库>\n{{PLOT_EVENTS}}\n</剧情事件库>\n<!-- 引擎注入的剧情全景数据，内含三个子区块：<剧情大纲>(标题/版本/当前章节/章节进度/正文节选)、\n     <剧情事件列表>(全部活跃与待触发事件的标题+描述+状态+触发条件——含尚未向玩家揭示的 hidden 事件，\n     防剧透只在 UI 层，你必须全量审视)、<当前状态>(时间/位置/主角层级一行摘要)。\n     这是你触发判断的唯一事件来源——triggeredEvents 的 title 必须与 <剧情事件列表> 逐字一致。\n     区块为空或缺大纲时（如支线模式初期）以现有内容为准，保守判断，不编造事件。-->\n\n{{PLOT_THREAD_TURN}}\n<!-- 🧵 主线细化层（引擎阶段）：<plot_thread_gate> 表明本轮是否放行主线细化（随机+冷却+窗口距离，\n     由引擎判定，你只需要在 allowed=true 时产出 threadDeclarations，绝不用本块做闸门判据）。-->\n\n<记忆召回>\n{{AGENT.MEMORY_RECALL}}\n</记忆召回>\n<!-- 上游记忆召回 Agent 给出的相关历史记忆。用于核对触发条件中的历史前提\n     （如「与铁匠建立信任之后」）。为空表示本轮无相关记忆——缺证据时按条件未满足处理。-->\n\n<最近对话>\n{{NARRATIVE:layers=3}}\n</最近对话>\n<!-- 🔴 每轮变化。最近 3 轮正文与玩家输入。评估证据强度时它是第二优先级——\n     低于本轮 <用户输入> 的明确行动，高于 <记忆召回> 中的旧线索。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 🔴 每轮变化。本轮玩家的行动宣言——触发判断的首要证据来源。-->',
+  // daily_check（Phase 3）：周期/条件结算。排在 dispatcher（时间推进）之后、vars_update 之前，
+  // 只结算「词条/状态带来的变化」（状态倒计时/到期/周期效果/条件触发/环境/upkeep），
+  // 不推时钟、不做社交/属性检定。输出 <json>（characterUpdates/statusAdds/statusUpdates/statusRemovals）。
+  daily_check:
+    '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你结算周期/条件效果所需的完整上下文数据。-->\n<!-- 时间推进已由引擎完成，你只处理「过了 {{DELTA_TIME}} 之后，哪些状态/词条该发生变化」。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 世界书条目，含《状态规则》《品质效果限定》等生成/结算规则。-->\n\n<角色状态>\n{{CHARACTER_STATE}}\n</角色状态>\n<!-- 在场角色快照（层级/资源/五维/位置）。改 hp/mp/sp 或上限时以这里的当前值为基准。-->\n\n<活动状态效果>\n{{ACTIVE_EFFECTS}}\n</活动状态效果>\n<!-- 所有角色的状态效果及其剩余时间/层数。你要按本轮推进的时间更新 remainingTime、到期则移除。-->\n\n<已有技能>\n{{SKILL_STATE}}\n</已有技能>\n<!-- 所有角色的技能清单（含开局初始技能声明）。用于判断正文里施放的技能应产生哪些资源/状态变化。-->\n\n<物品背包>\n{{INVENTORY}}\n</物品背包>\n<!-- 背包/装备清单。用于结算消耗品、持续增益来源、upkeep 等。-->\n\n<当前时间>\n{{GAME_TIME}}\n</当前时间>\n<!-- 推进之后的游戏时间（时钟已由引擎推进，你不要再改）。-->\n\n<本轮时间推进>\n{{DELTA_TIME}}\n</本轮时间推进>\n<!-- 本轮流逝的时长。状态倒计时据此扣减；为 0 表示本回合时间未推进。-->\n\n<地图与地块>\n{{MAP_CONTEXT}}\n</地图与地块>\n<!-- 当前地块与邻接（环境类结算参考）。没装地图包时整块为空。-->\n\n<最近对话>\n{{NARRATIVE:layers=2}}\n</最近对话>\n<!-- 最近 2 轮正文与玩家输入，用于判断条件触发是否已发生。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 🔴 每轮变化。本轮玩家的行动宣言。-->',
   request_dispatcher:
     '{{SYS_PROMPT}}\n\n<!-- ────────────────────────────────────────────── -->\n<!-- 以下各区块是你完成变量调度所需的完整上下文数据。-->\n<!-- 请先仔细阅读各区块内容，再按工作流程逐步执行。-->\n<!-- ────────────────────────────────────────────── -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 当前场景激活的世界书条目。涵盖世界观设定、种族特性、势力文化、地理信息等。\n     判断角色种族和势力归属时参考此处。——稳定数据，优先查阅。-->\n\n<已有角色>\n{{CHARACTER_STATE}}\n</已有角色>\n<!-- 当前存档中所有已有角色的列表（ID/Name/Race/Type/Tier/Location）。\n     这是你判断\"新角色 vs 已有角色\"的唯一依据——\n     角色名不在此表中 → 新角色 → <entity_gen_request type=\"character\">；\n     角色名在此表中 → 已有角色 → <char_update_request>。-->\n\n<已有物品>\n{{INVENTORY}}\n</已有物品>\n<!-- 所有角色背包中的物品、装备、材料清单。\n     这是你判断\"新物品 vs 已有物品\"的唯一依据——\n     物品名不在背包中 → 新物品 → <entity_gen_request type=\"equipment\">（装备）或 type=\"item\"（道具）；\n     物品名在背包中 → 已有物品 → <item_update_request>。-->\n\n<已有技能>\n{{SKILL_STATE}}\n</已有技能>\n<!-- 🔴 2026-08-02 新增: 所有角色的技能清单（含开局初始技能声明）。\n     这是你判断\"新技能 vs 已有技能\"的唯一依据——\n     技能名不在下表中 → 新技能 → <entity_gen_request type="skill">（逐条单独发）；\n     技能名已在表中 → 已有技能，不重复生成。\n     开局初始技能声明标了「尚未落库，需生成」→ 逐条发 <entity_gen_request type="skill">\n     让 entity_gen 生成完整条目。-->\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n<!-- 世界书中含 EJS/宏的动态条目（状态面板等），可能每回合变化。 -->\n\n{{RECENT_COMBAT}}\n<!-- 最近一场已结算战斗的事实块（<recent_combat>，自带外壳）。战斗刚打完的那几轮它\n     会出现——正文里的战斗痕迹（尸体/焦痕/伤口）属于已结算战斗的战后延续，不要重发\n     <combat_trigger> 重演。缺席 = 没有已结算战斗记录，此区块零 token。-->\n\n\n{{PLOT_THREAD_SURFACE}}\n<!-- 🧵 主线细化层：已向玩家呈现的主线节点名称/简述/涉及人物（表层投影）。\n     其中的人物若在本轮正文里首次实质出场（已有名字但没有角色），发 <entity_gen_request type="character"> 时\n     人物描述可与此处事件自然贴合；不在此列的主线信息不要打探/渲染。-->\n\n{{PLOT_CAST_PLAN}}\n<!-- 🧵 本轮角色计划（pre 产出、同轮临时）：本轮计划出场/推进的角色。\n     正文里真出现的计划角色，发 <entity_gen_request type="character"> 时必须沿用其引用键（ref），\n     并完整复述身份/行为要求与命名约束，不得改写或省略。\n     仅本轮有效：命中才用，不得凭计划凭空造人；计划里的角色若未在正文出现，忽略。-->\n\n<正文内容>\n{{AGENT.STORY}}\n</正文内容>\n<!-- 🔴 高频变化：本回合 Story Agent 生成的叙事正文。\n     仔细阅读全文，从中提取所有变量变化、新角色/物品出现、制作场景。——这是你的核心输入。-->\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n<!-- 本轮用户的原始输入。开局轮此处是自然叙述式开场提示词，含初始装备与技能的原名、描述及必要机制信息。\n     正文里改写过的装备/技能若与此处声明对应，按此处的原名与原描述发 request，\n     不要用正文改写名——否则 entity_gen 会丢数值重掷。-->',
   vars_update:

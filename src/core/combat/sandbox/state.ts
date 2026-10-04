@@ -243,6 +243,7 @@ export function createCombatState(bundle: CombatBundle): CombatState {
       phase: meta.phase ?? 'active',
       regions: meta.regions ?? [],
       pendingPlayerUnit: meta.pendingPlayerUnit,
+      activeUnit: meta.activeUnit,
       pendingOptions: meta.pendingOptions,
       outcome: meta.outcome,
       notes: meta.notes,

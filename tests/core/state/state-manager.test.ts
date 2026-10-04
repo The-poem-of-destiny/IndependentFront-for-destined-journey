@@ -1173,10 +1173,10 @@ describe('StateManager', () => {
   });
 
   // ===================================================================
-  // 7.5 Q-02: applyTimeAdvance 到期效果 patches 自提交
+  // Phase 3: applyTimeAdvance 不再结算状态（计时全权交 daily_check）
   // ===================================================================
-  describe('Q-02 applyTimeAdvance — 到期效果 patches 落地（不再被调用点丢弃）', () => {
-    it('applyTimeAdvance 自提交 — 到期的 remove_status_effect 会经过 commitChatState（events 可见）', async () => {
+  describe('Phase 3 applyTimeAdvance — 状态计时已移交 daily_check', () => {
+    it('推进时间不产生补丁、不改动角色状态（Code 不再管计时）', async () => {
       const char = buildMockCharacter({
         id: 'char-hero2',
         name: 'Hero2',
@@ -1199,143 +1199,139 @@ describe('StateManager', () => {
       vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
-      await sm.applyTimeAdvance(60);
+      const patches = await sm.applyTimeAdvance(60);
 
-      // 自提交后 events 里应有 remove_status_effect（旧代码 createEvent 不 push，events 为空）
-      const events = sm.getEvents();
-      expect(events.some((e) => e.type === 'status_effect')).toBe(true);
+      // 计时交 daily_check：applyTimeAdvance 不产任何补丁、不扣减/移除状态
+      expect(patches).toHaveLength(0);
+      expect(char.statusEffects).toHaveLength(1);
+      expect(char.statusEffects[0]?.remainingTime).toBe(1);
+      expect(sm.getEvents().some((e) => e.type === 'status_effect')).toBe(false);
     });
   });
 
   // ===================================================================
-  // F07: 小时型效果的分区不变式 — 60 分钟 / 30+30 / 10×6 必须同一次到期
-  //      旧实现 Math.floor(minutes/60) 每次吞掉余量 → 两段 30 分钟凑不成 1 小时
+  // Phase 3: update_status_effect — daily_check 回写状态计时
   // ===================================================================
-  describe('F07 applyTimeAdvance — 小时型效果分区不变式（carryMinutes 累积）', () => {
-    function buildHourEffect(overrides: Partial<StatusEffect> = {}): StatusEffect {
+  describe('update_status_effect — daily_check 回写状态计时', () => {
+    function buildEffect(overrides: Partial<StatusEffect> = {}): StatusEffect {
       return {
         name: '时缚',
         description: '测试用',
         category: '减益' as const,
         stacks: 1,
-        remainingTime: 1,
-        timeUnit: '小时' as const,
+        remainingTime: 100,
+        timeUnit: '分钟' as const,
         source: 'test',
         effects: {},
         ...overrides,
       };
     }
 
-    function makeChar(id: string, name: string, fx: StatusEffect[]): CharacterState {
+    it('按名更新 remainingTime 与 stacks', async () => {
       const char = buildMockCharacter({
-        id,
-        name,
+        id: 'us-1',
+        name: 'HeroU',
         type: 'player',
-        hp: 100,
-        maxHp: 100,
-        statusEffects: fx,
+        statusEffects: [buildEffect({ name: '中毒', remainingTime: 100, stacks: 1 })],
       });
       vi.mocked(db.getCharacters).mockResolvedValue([char]);
-      return char;
-    }
 
-    it('60 分钟一次推进 → 到期移除', async () => {
-      const sm = new StateManager({ saveId: 'f07-a' });
-      const char = makeChar('f07-a', 'HeroA', [buildHourEffect({ remainingTime: 1 })]);
-      const patches = await sm.applyTimeAdvance(60);
-      expect(patches.some((p) => p.op === 'remove_status_effect')).toBe(true);
-      expect(char.statusEffects).toHaveLength(0);
-    });
-
-    it('30 + 30 两次推进 → 同样到期（旧实现第二次吞掉 0.5 小时永不到期）', async () => {
-      const sm = new StateManager({ saveId: 'f07-b' });
-      const char = makeChar('f07-b', 'HeroB', [buildHourEffect({ remainingTime: 1 })]);
-      const p1 = await sm.applyTimeAdvance(30);
-      expect(p1.some((p) => p.op === 'remove_status_effect')).toBe(false);
-      expect(char.statusEffects[0]?.carryMinutes).toBe(30);
-      const p2 = await sm.applyTimeAdvance(30);
-      expect(p2.some((p) => p.op === 'remove_status_effect')).toBe(true);
-      expect(char.statusEffects).toHaveLength(0);
-    });
-
-    it('10 × 6 推进 → 同样到期（0.5 小时余量逐次累积）', async () => {
-      const sm = new StateManager({ saveId: 'f07-c' });
-      const char = makeChar('f07-c', 'HeroC', [buildHourEffect({ remainingTime: 1 })]);
-      for (let i = 0; i < 5; i++) {
-        const p = await sm.applyTimeAdvance(10);
-        expect(p.some((q) => q.op === 'remove_status_effect')).toBe(false);
-      }
-      expect(char.statusEffects[0]?.carryMinutes).toBe(50);
-      const last = await sm.applyTimeAdvance(10);
-      expect(last.some((q) => q.op === 'remove_status_effect')).toBe(true);
-      expect(char.statusEffects).toHaveLength(0);
-    });
-
-    it('两小时效果 45+45+30 → 中间 75/30/0 分钟（分区不变式的中间态）', async () => {
-      const sm = new StateManager({ saveId: 'f07-d' });
-      const char = makeChar('f07-d', 'HeroD', [buildHourEffect({ remainingTime: 2 })]);
-      await sm.applyTimeAdvance(45); // carry=45，未满整小时，remainingTime 仍 2，剩 2h*60-45 = 75 分钟
-      expect(char.statusEffects[0]?.remainingTime).toBe(2);
-      expect(char.statusEffects[0]?.carryMinutes).toBe(45);
-      expect(
-        (char.statusEffects[0]?.remainingTime ?? 0) * 60 -
-          (char.statusEffects[0]?.carryMinutes ?? 0),
-      ).toBe(75);
-      await sm.applyTimeAdvance(45); // carry 45→90 → 扣 1h → remainingTime 1、carry 30，剩 60-30 = 30 分钟
-      expect(char.statusEffects[0]?.remainingTime).toBe(1);
-      expect(char.statusEffects[0]?.carryMinutes).toBe(30);
-      expect(
-        (char.statusEffects[0]?.remainingTime ?? 0) * 60 -
-          (char.statusEffects[0]?.carryMinutes ?? 0),
-      ).toBe(30);
-      await sm.applyTimeAdvance(30); // carry 30→60 → 扣 1h → remainingTime 0 → 到期
-      expect(char.statusEffects).toHaveLength(0);
-    });
-
-    it('旧存档缺省 carryMinutes（undefined）按 0 处理，迁移不凭空延长', async () => {
-      const sm = new StateManager({ saveId: 'f07-e' });
-      // 手工构造无 carryMinutes 字段的旧数据
-      const char = { ...makeChar('f07-e', 'HeroE', [buildHourEffect({ remainingTime: 1 })]) };
-      const legacy = char.statusEffects[0];
-      delete legacy.carryMinutes;
-      const p = await sm.applyTimeAdvance(30);
-      expect(p.some((q) => q.op === 'remove_status_effect')).toBe(false);
-      expect(char.statusEffects[0]?.carryMinutes).toBe(30);
-    });
-
-    it('分钟型效果不受影响（直接减分钟，无进位）', async () => {
-      const sm = new StateManager({ saveId: 'f07-f' });
-      const char = makeChar('f07-f', 'HeroF', [
-        { ...buildHourEffect({ remainingTime: 90 }), timeUnit: '分钟' as const },
-      ]);
-      await sm.applyTimeAdvance(30);
-      expect(char.statusEffects[0]?.remainingTime).toBe(60);
-      expect(char.statusEffects[0]?.carryMinutes).toBeUndefined();
-    });
-
-    it('刷新（同源施放更长）时 carryMinutes 归零，不继承旧窗口余量', async () => {
-      const sm = new StateManager({ saveId: 'f07-g' });
-      const char = makeChar('f07-g', 'HeroG', []);
-      // 第一次：1 小时效果，先推进 30 分钟累积 carry
+      const sm = new StateManager({ saveId: 'us-1' });
       await sm.commitChatState([
         {
-          op: 'add_status_effect',
-          target: 'characters.HeroG',
-          value: buildHourEffect({ remainingTime: 1 }),
+          op: 'update_status_effect',
+          target: 'characters.HeroU',
+          value: { name: '中毒', remainingTime: 30, stacks: 3 },
         },
       ]);
-      await sm.applyTimeAdvance(30);
-      expect(char.statusEffects[0]?.carryMinutes).toBe(30);
-      // 同源再次施放 2 小时 → remainingTime 拉长到 2，carryMinutes 归零
+
+      expect(char.statusEffects[0]?.remainingTime).toBe(30);
+      expect(char.statusEffects[0]?.stacks).toBe(3);
+    });
+
+    it('remainingTime: null 转为永久', async () => {
+      const char = buildMockCharacter({
+        id: 'us-2',
+        name: 'HeroU',
+        type: 'player',
+        statusEffects: [buildEffect({ name: '祝福', remainingTime: 100 })],
+      });
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+      const sm = new StateManager({ saveId: 'us-2' });
       await sm.commitChatState([
         {
-          op: 'add_status_effect',
-          target: 'characters.HeroG',
-          value: buildHourEffect({ remainingTime: 2 }),
+          op: 'update_status_effect',
+          target: 'characters.HeroU',
+          value: { name: '祝福', remainingTime: null },
         },
       ]);
-      expect(char.statusEffects[0]?.remainingTime).toBe(2);
-      expect(char.statusEffects[0]?.carryMinutes).toBeUndefined();
+
+      expect(char.statusEffects[0]?.remainingTime).toBeNull();
+    });
+
+    it('stacks 被 maxStacks 封顶', async () => {
+      const char = buildMockCharacter({
+        id: 'us-3',
+        name: 'HeroU',
+        type: 'player',
+        statusEffects: [buildEffect({ name: '中毒', maxStacks: 5 })],
+      });
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+      const sm = new StateManager({ saveId: 'us-3' });
+      await sm.commitChatState([
+        {
+          op: 'update_status_effect',
+          target: 'characters.HeroU',
+          value: { name: '中毒', stacks: 99 },
+        },
+      ]);
+
+      expect(char.statusEffects[0]?.stacks).toBe(5);
+    });
+
+    it('状态名不存在 → 忽略、不抛、不改任何状态', async () => {
+      const char = buildMockCharacter({
+        id: 'us-4',
+        name: 'HeroU',
+        type: 'player',
+        statusEffects: [buildEffect({ name: '中毒' })],
+      });
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const sm = new StateManager({ saveId: 'us-4' });
+      const result = await sm.commitChatState([
+        {
+          op: 'update_status_effect',
+          target: 'characters.HeroU',
+          value: { name: '不存在', remainingTime: 10 },
+        },
+      ]);
+
+      expect(result.success).toBe(true);
+      expect(char.statusEffects).toHaveLength(1);
+      expect(char.statusEffects[0]?.remainingTime).toBe(100);
+      warn.mockRestore();
+    });
+
+    it('缺 value.name → 该条失败（errors 非空），既有状态不受影响', async () => {
+      const char = buildMockCharacter({
+        id: 'us-5',
+        name: 'HeroU',
+        type: 'player',
+        statusEffects: [buildEffect({ name: '中毒', remainingTime: 100 })],
+      });
+      vi.mocked(db.getCharacters).mockResolvedValue([char]);
+
+      const sm = new StateManager({ saveId: 'us-5' });
+      const result = await sm.commitChatState([
+        { op: 'update_status_effect', target: 'characters.HeroU', value: {} },
+      ]);
+
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(char.statusEffects[0]?.remainingTime).toBe(100);
     });
   });
 

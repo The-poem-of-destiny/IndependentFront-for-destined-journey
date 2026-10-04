@@ -458,6 +458,41 @@ describe('settings-store', () => {
     legacyStore.$dispose();
   });
 
+  it('出厂预设来源 = 内嵌 story ∪ provider presets.json（逐 id 播种，对齐装包态）', async () => {
+    // 抽干启动链遗留任务，避免它们的 loadAgentProjectDefaults 与本次 spy 抢跑
+    await drainMacrotasks(6);
+    const db = getDatabase();
+    await db.presets.clear();
+
+    const { useContentStore } = await import('../../../src/ui/stores/content-store');
+    const cs = useContentStore();
+    const presetOf = (id: string, name: string) => ({
+      id,
+      name,
+      settings: {},
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    vi.spyOn(cs, 'loadProjectDefaults').mockResolvedValue({
+      version: 1,
+      agents: {
+        story: { presetId: 'story-preset', preset: presetOf('story-preset', '故事预设') },
+      },
+    } as never);
+    vi.spyOn(cs, 'resolveProjectPresets').mockResolvedValue([
+      presetOf('extra-preset', '额外默认'),
+      // 与内嵌 story 同 id 的一条：去重后不得覆盖内嵌版
+      presetOf('story-preset', '重复'),
+    ] as never);
+
+    await store.loadAgentProjectDefaults();
+
+    const rows = await db.presets.toArray();
+    expect(rows.map((p) => p.id).sort()).toEqual(['extra-preset', 'story-preset']);
+    expect(rows.find((p) => p.id === 'story-preset')?.name).toBe('故事预设');
+    expect(store.settings.activePresetId).toBe('story-preset');
+  });
+
   it('已销毁的 store 不得再把自己的快照写回 localStorage', async () => {
     // 先把**其它**用例遗留的启动任务抽干 —— 它们经 beautifier-store 的
     // `useSettingsStore()` 会写到「当时活跃」的那个 store 上，与本条要测的东西无关。

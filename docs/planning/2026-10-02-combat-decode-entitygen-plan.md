@@ -126,17 +126,57 @@ add_status_effect/remove_status_effect`，复用 `commitDomainCommand` 与纯函
 
 ## 6. 代码线 D：Phase 3 — 日常检定 Agent（daily_check）
 
-**已决裁定**：独立 Agent、Stage 0 **无条件运行**（不受 `plotSettings.mode==='off'` 影响）；
-只做**周期性/条件型效果结算**（状态到期、条件触发、环境、upkeep），**不做社交/属性检定**
-（v1.4.2《品质效果限定》明文「检定只存在于战斗与生产中」）。
+> 📌 **2026-10-03 细化（与主人讨论后定稿）**：本节原写「Stage 0 插点」，讨论后**改判为
+> **dispatcher（Stage 2）之后、vars_update（Stage 3）之前的新 stage** —— 因为 `delta_time`
+> 由 dispatcher 产出、`applyTimeAdvance` 也在 Stage 2 的标记处理里调用，插在它之后才天然
+> 满足「时间推进之后再结算」。Stage 0 的措辞与「Code 仍管计时」的默认一并作废。
+
+**已决裁定**
+
+1. **独立 Agent、每回合无条件运行**（只要进了调用流程，不受 `plotSettings.mode==='off'` 影响，
+   也不做「零候选就跳过」的省 token 优化 —— 主人明确要无条件）；**战斗会话活跃时暂停**
+   （`ctx.combatActive`，照随机事件注入先例）。
+2. **只结算「词条/状态带来的变化」**（状态倒计时、到期、周期效果、条件触发、环境、upkeep），
+   **不做社交/属性检定**（v1.4.2《品质效果限定》明文「检定只存在于战斗与生产中」）；
+   **不推进游戏时钟**（时钟仍由 Code 按 dispatcher 的 `delta_time` 推进）。
+3. **Code 不再管状态计时**：`applyTimeAdvance` 内那段 remainingTime 扣减 + 到期移除
+   （`state-manager.ts` 循环）**整段删除**，倒计时/到期/周期效果**全权交给 AI**。
+   `StatusEffect.carryMinutes`（F07 补整小时余量）随之退役。
+
+**输出契约（`<json>` → StatePatch[]，纯翻译层 `daily-check-translator.ts`）**
+
+- `characterUpdates` → `update_character`（hp/mp/sp + 上限、五维等；白名单已覆盖 `hp/maxHp/…`
+  且自带 `[0, max]` 钳制，**不新增资源 op**）
+- `statusAdds` → `add_status_effect`（📌 2026-10-03 Option A：**日常（非战斗）物品/技能使用**
+  产生的新状态；同名按 handler 既有叠层规则处理）
+- `statusUpdates` → **新增 op `update_status_effect`**（`value.name` 定位，可改
+  `remainingTime`（null=永久）/ `stacks`；找不到该名字 **warn 忽略不抛**）
+- `statusRemovals` → `remove_status_effect`（到期/被净化）
+
+🔴 **Option A 边界（2026-10-03 与主人裁定）**：daily_check 只结算物品/技能的**效果**
+（资源/状态），**不碰物品消耗/背包扣减** —— 后者仍归 `request_dispatcher → vars_update`，
+否则同一瓶药会被扣两次。entity_gen 提示词另加「强度自检」（数值/机制落世界书区间，
+偏强可接受、过弱必重写）。
 
 **步骤**
 
-- D1. 新 Agent + Stage 0 插点（`types.ts` 管线 + orchestrator 白名单 + placeholder + UI 名单）。
-- D2. 输入在场实体（CHARACTER_STATE/ACTIVE_EFFECTS/INVENTORY/GAME_TIME/MAP_CONTEXT + 时间差）；
-  输出周期/条件结算的 StatePatch（走 `commitChatState`）。
-- D3. 取代 `applyTimeAdvance` 中随脚本退役而空掉的状态按期结算逻辑。
-- D4. 提示词 + 测试 + gates。
+- D1. `types.ts`：`DEFAULT_AGENT_PIPELINE` 在 Stage 2 与 Stage 3 之间插入
+  `{ agents: ['daily_check'], waitFor: ['story', 'request_dispatcher'] }`；
+  `validatePipeline` 内置名册加 `daily_check`；`StatePatchOp` 加 `update_status_effect`。
+- D2. `state-manager.ts`：新增 `applyUpdateStatusEffect` + 注册进 `PATCH_HANDLERS`
+  （`Record<StatePatchOp,…>`，漏接即编译错误）；删除 `applyTimeAdvance` 的状态计时循环与
+  附带的自提交（逻辑上不再产 `remove_status_effect` 补丁）；`carryMinutes` 退役。
+- D3. 纯翻译层 `daily-check-translator.ts`（仿 `vars-update-translator.ts`：无 I/O、只 import 类型）
+  - orchestrator 处理分支（解析 `<json>` → `buildDailyCheckPatches` → `commitPatches`）。
+- D4. `{{DELTA_TIME}}` 占位符 + `daily_check` 默认模板；orchestrator 在 `advanceTime` 之后把
+  本次推进的分钟写进 `ctx`（供 resolver 读）；`context-visibility` 加 `daily_check` 条目
+  （world/npc FULL、variable KEYS，供《状态规则》《品质效果限定》等生成规则）。
+- D5. UI/前端：`agent-list.ts`、`game-pipeline.buildAgentConfigs` 名单；
+  战斗暂停（编排器按 `ctx.combatActive` 跳过该 agent）。
+- D6. 提示词 + 测试 + `npm run gates` 全绿。
+- D7. **资产（内容仓）**：私有内容仓 `data/defaults/agent-config.json` 加 `daily_check` 条目
+  （systemPrompt + 世界书绑定《状态规则》《品质效果限定》等生成规则）；公开仓
+  `public/data/defaults/agent-config.json` 占位同步。
 
 ## 7. 裁定记录（与主人确认）
 

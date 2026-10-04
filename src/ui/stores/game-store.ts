@@ -16,6 +16,7 @@ import type {
 } from '@engine/types/types';
 export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types/types';
 import type { CombatOutcome, CombatState } from '@engine/combat/sandbox/types';
+import { cloneCombatState } from '@engine/combat/sandbox/state';
 import {
   getSave,
   getSaves,
@@ -81,6 +82,18 @@ export interface CombatFlowEntry {
   id: string;
   round: number;
   text: string;
+  /**
+   * 对话角色：
+   * - `assistant` 主持人的叙事/面板；`user` 玩家下令；
+   * - `system` Code 自动注入的回合指令（如「现在轮到 X，自行结算」）；
+   * - `tool` 一次工具调用（一行：工具名 + 参数）；
+   * - `reasoning` 思维链折叠块（`text` 为思维链，`durationMs` 为耗时）。
+   */
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'reasoning';
+  /** `role==='tool'` 时：工具名与参数摘要 */
+  tool?: { name: string; args: string };
+  /** `role==='reasoning'` 时：思考耗时（毫秒） */
+  durationMs?: number;
 }
 
 /** 结算态载荷（驱动结算面板；`summaryText` 为终局 AI 叙事） */
@@ -148,8 +161,24 @@ export const useGameStore = defineStore('game', () => {
   /** awaitCombatSettlement 挂起的 resolver（continue/discard/exitCombat 消费） */
   let settlementResolve: ((text: string | null) => void) | null = null;
 
-  /** 中栏对话流（逐 exchange 追加 AI 本轮正文） */
+  /** 中栏对话流（逐 exchange 追加 AI 本轮正文 + 玩家提交的意图） */
   const combatFlow = ref<CombatFlowEntry[]>([]);
+
+  /** 流式预览：当前 exchange 正在逐字输出的正文（未定稿）；定稿后清空并入 combatFlow */
+  const combatStream = ref('');
+
+  /** 当前 exchange 的思维链条目 id（交换开头占位 → 流式填字 → 定稿补耗时；空则移除） */
+  let combatReasoningId: string | null = null;
+  let combatReasoningStartedAt = 0;
+
+  /**
+   * 主持人是否正在跑一次 exchange（「忙碌」）—— 类似 agent 的「响应中」。
+   *
+   * 🔴 输入框（行动规划区）的判据 = `combatState && !combatBusy`：主持人忙 → 转圈/流式正文；
+   *    主持人空闲 → 轮到玩家。不再用 `meta.pendingPlayerUnit` 当判据（数据态，会因续战/时序
+   *    与「管线此刻在不在等输入」脱节，表现为「DM 说轮到你了、UI 却写敌方行动中」）。
+   */
+  const combatBusy = ref(false);
 
   /** 结算「继续」喂给 GamePage 的下一回合玩家输入（消费后清空） */
   const combatContinue = ref<string | null>(null);
@@ -185,9 +214,18 @@ export const useGameStore = defineStore('game', () => {
   function enterCombat() {
     combatState.value = null;
     combatFlow.value = [];
+    combatStream.value = '';
+    combatReasoningId = null;
+    combatReasoningStartedAt = 0;
+    combatBusy.value = false;
     combatContinue.value = null;
     combatReady.value = null;
     combatSettlement.value = null;
+  }
+
+  /** 管线开跑一次 exchange 时置 true、挂起 `waitForCombatIntent()` 时置 false */
+  function setCombatBusy(value: boolean) {
+    combatBusy.value = value;
   }
 
   /** 就绪态置位/清除（pipeline 检出 combat_trigger 后调用） */
@@ -213,20 +251,108 @@ export const useGameStore = defineStore('game', () => {
       : null;
   }
 
-  /** 推进会战权威状态（pipeline 每个 exchange 后调用；`CombatState` 即唯一数据源） */
+  /**
+   * 推进会战权威状态（pipeline 每个 exchange 后调用；`CombatState` 即唯一数据源）。
+   *
+   * 🔴 必须**深拷贝**再赋：管线里的 `session.state` 是同**一个对象就地改**，若把同一引用
+   *    重新赋给 ref，Vue 的 `ref` 不会触发更新（`hasChanged` 判同一引用）→ 坐标轴 / 单位卡
+   *    / 血条全不刷新，只有整页刷新后才对。深拷贝让引用必变，响应式才生效。
+   */
   function setCombatState(state: CombatState | null) {
-    combatState.value = state;
+    combatState.value = state ? cloneCombatState(state) : null;
   }
 
-  /** 追加一轮 AI 正文到中栏对话流（同回合多段按序累积） */
-  function appendCombatFlow(text: string, round: number) {
+  /** 追加一条对话到中栏流（默认 assistant） */
+  function appendCombatFlow(
+    text: string,
+    round: number,
+    role: CombatFlowEntry['role'] = 'assistant',
+  ) {
     const trimmed = text.trim();
     if (!trimmed) return;
     combatFlow.value.push({
       id: `combat-flow-${crypto.randomUUID()}`,
       round: Number.isFinite(round) ? round : 0,
       text: trimmed,
+      role,
     });
+  }
+
+  /** 一次工具调用 → 一行 flow（工具名 + 参数摘要） */
+  function appendCombatTool(name: string, args: Record<string, unknown>) {
+    let summary: string;
+    try {
+      summary = JSON.stringify(args);
+    } catch {
+      summary = String(args);
+    }
+    if (summary.length > 300) summary = summary.slice(0, 300) + '…';
+    combatFlow.value.push({
+      id: `combat-flow-${crypto.randomUUID()}`,
+      round: combatState.value?.meta.round ?? 0,
+      text: name,
+      role: 'tool',
+      tool: { name, args: summary },
+    });
+  }
+
+  /**
+   * 思维链占位：在**每条 exchange 开头**先插入一条空的 `reasoning` 条目，
+   * 让「思考 → 工具调用 → 正文」按真实顺序排列（否则思维链会被追加到最后，看起来
+   * 像"工具调用藏在思维链里"）。没有思维链时定稿会把它移除。
+   */
+  function beginCombatReasoning(round: number) {
+    // 先收尾上一段（把耗时补上、空块移除），再开新的一段 —— 思维链按「工具循环的轮」切块
+    finalizeCombatReasoning();
+    const id = `combat-flow-${crypto.randomUUID()}`;
+    combatFlow.value.push({
+      id,
+      round: Number.isFinite(round) ? round : 0,
+      text: '',
+      role: 'reasoning',
+      durationMs: 0,
+    });
+    combatReasoningId = id;
+    combatReasoningStartedAt = Date.now();
+  }
+
+  /** 思维链增量（流式填进占位条目） */
+  function appendCombatReasoning(delta: string) {
+    if (!delta || !combatReasoningId) return;
+    const entry = combatFlow.value.find((e) => e.id === combatReasoningId);
+    if (entry) entry.text += delta;
+  }
+
+  /** 思维链定稿：补耗时；空则移除占位条目 */
+  function finalizeCombatReasoning() {
+    const id = combatReasoningId;
+    combatReasoningId = null;
+    const durationMs = combatReasoningStartedAt ? Date.now() - combatReasoningStartedAt : 0;
+    combatReasoningStartedAt = 0;
+    if (!id) return;
+    const idx = combatFlow.value.findIndex((e) => e.id === id);
+    if (idx < 0) return;
+    const entry = combatFlow.value[idx];
+    const text = entry.text.trim();
+    if (!text) {
+      combatFlow.value.splice(idx, 1);
+      return;
+    }
+    entry.text = text;
+    entry.durationMs = durationMs;
+  }
+
+  /** 追加流式增量（战斗「边想边说」——预览区逐字显示，未定稿） */
+  function appendCombatStream(delta: string) {
+    if (delta) combatStream.value += delta;
+  }
+  function clearCombatStream() {
+    combatStream.value = '';
+  }
+  /** 一轮正文定稿：清流式预览 + 落成一条 flow 记录（避免与流式预览重复） */
+  function finalizeCombatStream(text: string, round: number) {
+    combatStream.value = '';
+    appendCombatFlow(text, round);
   }
 
   /** 结算「继续」——把玩家输入交给 GamePage 续写下一回合正文（消费后清空） */
@@ -245,15 +371,30 @@ export const useGameStore = defineStore('game', () => {
   /** 🎭 主持人/DM 模式：玩家提交**意图文本**（拼装格式化文本 / 自由对话）→ 主持人会话
    *  解析 → 工具声明。UI 不再直接产 Command 喂内核，玩家输入一律过主持人理解意图。 */
   async function submitCombatIntent(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    // 先把玩家输入作为一条 user 消息落进对话流（agent 式：正文里看得到自己说了什么），
+    // 再交给主持人会话解析。避免「提交了却像没传过去」。
+    appendCombatFlow(trimmed, combatState.value?.meta.round ?? 0, 'user');
+    combatStream.value = '';
+    combatBusy.value = true;
     const coordinator = combatCoordinator.value;
-    if (!coordinator?.submitPlayerIntent) return;
-    await coordinator.submitPlayerIntent(text);
+    if (!coordinator?.submitPlayerIntent) {
+      console.warn('[game-store] 提交战斗意图时无主持人句柄（管线未就绪？），该输入未送达');
+      combatBusy.value = false;
+      return;
+    }
+    await coordinator.submitPlayerIntent(trimmed);
   }
 
   /** 放弃战斗：丢弃 session → 面板关闭（不走结算落库）。跳过战斗也走它。 */
   function abandonCombat() {
     combatState.value = null;
     combatFlow.value = [];
+    combatStream.value = '';
+    combatReasoningId = null;
+    combatReasoningStartedAt = 0;
+    combatBusy.value = false;
     combatContinue.value = null;
     combatReady.value = null;
     if (settlementResolve) resolveSettlement(null);
@@ -354,6 +495,10 @@ export const useGameStore = defineStore('game', () => {
   function exitCombat() {
     combatState.value = null;
     combatFlow.value = [];
+    combatStream.value = '';
+    combatReasoningId = null;
+    combatReasoningStartedAt = 0;
+    combatBusy.value = false;
     combatContinue.value = null;
     combatCoordinator.value = null;
     combatReady.value = null;
@@ -1396,6 +1541,8 @@ export const useGameStore = defineStore('game', () => {
     combatReady,
     combatSettlement,
     combatFlow,
+    combatStream,
+    combatBusy,
     combatContinue,
     combatPendingUnit,
     combatCoordinator,
@@ -1403,6 +1550,14 @@ export const useGameStore = defineStore('game', () => {
     setCombatReady,
     setCombatState,
     appendCombatFlow,
+    appendCombatStream,
+    clearCombatStream,
+    finalizeCombatStream,
+    appendCombatTool,
+    beginCombatReasoning,
+    appendCombatReasoning,
+    finalizeCombatReasoning,
+    setCombatBusy,
     requestCombatContinue,
     clearCombatContinue,
     setCombatCoordinator,

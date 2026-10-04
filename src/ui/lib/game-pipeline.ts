@@ -29,7 +29,6 @@ import type {
   PlayAudioMarker,
   MemoryRecord,
   WorkshopProject,
-  CharacterState,
   ChatMessage,
   SystemEvent,
   DebugAgentEntry,
@@ -107,17 +106,29 @@ import {
   deleteCombatSandbox,
 } from '@engine/combat/sandbox/persistence';
 import { loadCombatProtocolText } from '@engine/combat/sandbox/protocol';
-import { runCombatSandbox } from '@engine/combat/sandbox/runner';
+import {
+  buildCombatRosterFromMarker,
+  parseCombatRoster,
+  rosterNames,
+} from '@engine/combat/sandbox/roster';
+import {
+  assignPlayerTurn,
+  buildCombatRosterText,
+  runCombatSandbox,
+} from '@engine/combat/sandbox/runner';
 import type { CombatSandboxClient } from '@engine/combat/sandbox/runner';
 import {
   buildCombatSettlementPatches,
   computeCombatExpRewards,
+  deriveCombatOutcome,
+  normalizeCombatOutcome,
 } from '@engine/combat/sandbox/settlement';
 import type {
-  CombatantInput,
+  CombatOutcome,
   CombatSandboxMessage,
   CombatSide,
   CombatState,
+  CombatUnit,
 } from '@engine/combat/sandbox/types';
 import {
   getAgentSettings,
@@ -918,6 +929,7 @@ export class GamePipeline {
       'memory_recall',
       'story',
       'request_dispatcher',
+      'daily_check', // Phase 3: 日常检定（周期/条件结算），主 DAG 新 stage
       'vars_update',
       'memory_summary',
       'plot_pre_check',
@@ -2534,7 +2546,7 @@ export class GamePipeline {
     try {
       this.game.enterCombat();
 
-      const roster = GamePipeline.combatRosterFromMarker(marker, this.game.characters);
+      const roster = buildCombatRosterFromMarker(marker, this.game.characters);
       if (!roster) {
         this.game.exitCombat();
         return null;
@@ -2547,6 +2559,9 @@ export class GamePipeline {
           environment: marker.environment ?? '',
         },
       });
+      // 🔴 行动顺序由 Code 在开战时掷好并**独占**（DM 不再掷先攻/写 actionOrder）：
+      //    此前 DM 掷出的顺序与 Code 的默认顺序打架，弱模型会卡在两者之间空转。
+      GamePipeline.rollCombatOrder(state);
       const protocolText = await loadCombatProtocolText().catch(() => '');
 
       const sourceMessageId = [...this.game.messages]
@@ -2620,14 +2635,28 @@ export class GamePipeline {
    */
   async resumeCombatSandbox(): Promise<boolean> {
     if (this._combatSandbox) return false;
-    const stored = await getCombatSandbox(this.saveId).catch(() => undefined);
-    if (!stored || stored.state.meta.phase === 'ended' || stored.transcript.length === 0) {
+    const stored = await getCombatSandbox(this.saveId).catch((err) => {
+      console.warn('[combat-resume] 读取在办战斗失败:', err);
+      return undefined;
+    });
+    if (!stored) {
+      console.info('[combat-resume] 无在办战斗行，跳过续战');
+      return false;
+    }
+    if (stored.state.meta.phase === 'ended') {
+      console.info('[combat-resume] 战斗已终局，跳过续战');
       return false;
     }
     const playerC = this.game.characters.find((c) => c.type === 'player');
-    if (!playerC) return false;
+    if (!playerC) {
+      console.warn('[combat-resume] 存档无玩家角色，跳过续战');
+      return false;
+    }
     const endpoint = this.getEndpointForAgent('combat');
-    if (!endpoint) return false;
+    if (!endpoint) {
+      console.warn('[combat-resume] 无 combat 端点，跳过续战');
+      return false;
+    }
 
     this.game.enterCombat();
     const combatRunId = this.game.startAgentActivityRun(undefined, true);
@@ -2648,6 +2677,13 @@ export class GamePipeline {
     const marker = this._lastCombatMarker ?? GamePipeline.markerFromCombatState(stored.state);
     this._lastCombatMarker = marker;
 
+    // 🔴 空 transcript = 刷新正好落在「已写入战行、开场 exchange 还没跑完」的空窗里。
+    //    此时不能当作无战斗（那会丢掉整场战斗）：用权威状态重建开场输入，重跑一次开场。
+    const openingInput =
+      stored.transcript.length === 0
+        ? GamePipeline.buildCombatOpeningInput(marker, '', buildCombatRosterText(stored.state))
+        : undefined;
+
     await this.beginCombatSandboxSession({
       marker,
       state: stored.state,
@@ -2655,10 +2691,26 @@ export class GamePipeline {
       protocolText: await loadCombatProtocolText().catch(() => ''),
       client,
       combatRunId,
-      openingInput: undefined,
+      openingInput,
       resume: true,
       preSnapshotId: stored.preSnapshotId ?? null,
     });
+
+    // 中栏历史：`combatFlow` 是内存态、随刷新丢失。从 transcript 重建 user / assistant 正文，
+    // 免得续战后中间一片「战斗即将开始…」空着（回合号用当前值近似即可）。
+    if (this.game.combatFlow.length === 0) {
+      for (const m of stored.transcript) {
+        if ((m.role !== 'user' && m.role !== 'assistant') || typeof m.content !== 'string') {
+          continue;
+        }
+        if (!m.content.trim()) continue;
+        this.game.appendCombatFlow(
+          m.content,
+          stored.state.meta.round,
+          m.role === 'user' ? 'user' : 'assistant',
+        );
+      }
+    }
 
     void this.driveCombatSandbox()
       .then(
@@ -2680,6 +2732,9 @@ export class GamePipeline {
       .finally(() => {
         this._combatSandbox = null;
       });
+    console.info(
+      `[combat-resume] 已恢复战斗（round ${stored.state.meta.round}，transcript ${stored.transcript.length} 条，${openingInput ? '重跑开场' : '续战'}）`,
+    );
     return true;
   }
 
@@ -2696,8 +2751,8 @@ export class GamePipeline {
     /** 刷新续战：开战前快照 id 由持久化行读回，不再新打（否则重开会退回战斗中途） */
     preSnapshotId?: string | null;
   }): Promise<void> {
-    const allyNames = GamePipeline.parseCombatNames(input.marker?.allies);
-    const enemyNames = GamePipeline.parseCombatNames(input.marker?.enemies);
+    const allyNames = rosterNames(parseCombatRoster(input.marker?.allies));
+    const enemyNames = rosterNames(parseCombatRoster(input.marker?.enemies));
 
     let preSnapshotId: string | null = input.preSnapshotId ?? null;
     if (preSnapshotId === null && !input.resume) {
@@ -2726,8 +2781,15 @@ export class GamePipeline {
       openingInput: input.openingInput,
     };
 
+    // 🔴 刷新续战：内存里的「轮到谁」指派已随页面丢失，而重读回的 state 未必带 pendingPlayerUnit
+    //    —— 结果是管线其实在 `waitForCombatIntent()` 等玩家，前端却因 `awaiting=false` 显示成
+    //    「思考中…」占位、行动规划区不出现。这里补一次指派，让输入入口正常出现。
+    if (input.resume) assignPlayerTurn(input.state);
+
     // C6：数据源 = 权威 CombatState —— 直接推进 store 供响应式渲染，不再投影事件。
+    // 先置「忙碌」，避免续战/开战瞬间输入框闪一下（真正的等待由 waitForCombatIntent 置空闲）。
     this.game.setCombatState(input.state);
+    this.game.setCombatBusy(true);
 
     this.game.setCombatCoordinator({
       submitPlayerIntent: async (text: string) => {
@@ -2754,58 +2816,172 @@ export class GamePipeline {
     }).catch((err) => console.warn('[GamePipeline] 战斗沙盒持久化失败（不阻塞开战）:', err));
   }
 
-  /** 跑沙盒会话：开场 → 等玩家 → 续战 …直到终局 / 放弃 */
+  /**
+   * 跑沙盒会话：开场 → **逐单位循环**（一条 exchange 只结算一个单位）。
+   *
+   * 🔴 回合边界由 Code 数，不再交给 AI 自己判断停/继续：
+   *    - 当前行动单位是**我方** → 停下，把该单位交给输入框；玩家提交后只跑这一条；
+   *    - 是**敌方/中立** → Code 发一条 system 指令「现在轮到 X，自行结算」；
+   *    - AI 用 `combat_set_meta.activeUnit` 推进下一个该行动的单位（缺省则 Code 按
+   *      `actionOrder` 顺延回退）；一轮全部结算完 → `round++`、重置槽位。
+   */
   private async driveCombatSandbox(): Promise<CombatSummaryResult | null> {
     const session = this._combatSandbox;
     if (!session) return null;
 
+    // 开场（仅整场一次）：openingInput 非空则由 Code 直接开跑。
     let playerInput: string | undefined = session.openingInput;
+    let inputRole: 'user' | 'system' = 'user';
+    // 本回合已结算的单位（Code 回退用；AI 写 activeUnit 可覆盖/重排）
+    const resolvedThisRound = new Set<string>();
+    // 安全上限：极端情况（无存活我方 / AI 死循环）下防止自动轮转跑飞
+    let guard = 0;
 
     for (;;) {
-      if (playerInput !== undefined) {
-        const result = await runCombatSandbox({
-          state: session.state,
-          client: session.client,
-          protocolText: session.protocolText,
-          systemPrompt: session.systemPrompt,
-          transcript: session.transcript,
-          playerInput,
-          saveCharacters: this.game.characters,
-          signal: this.abortController?.signal,
-        });
-        session.state = result.state;
-        session.transcript = result.transcript;
-        session.lastOutput = result.output;
-        if (result.error) throw new Error(result.error);
-
-        // C6：权威状态推进 store（响应式渲染）+ AI 本轮正文追加到中栏对话流。
-        this.game.setCombatState(session.state);
-        this.game.appendCombatFlow(result.output, session.state.meta.round);
-
-        await saveCombatSandbox({
-          saveId: this.saveId,
-          updatedAt: Date.now(),
-          state: session.state,
-          transcript: session.transcript,
-          preSnapshotId: session.preSnapshotId,
-        }).catch((err) => console.warn('[GamePipeline] 战斗沙盒持久化失败:', err));
-
-        if (result.ended) return await this.finalizeCombatSandbox(session);
-      }
-
-      const input = await this.waitForCombatIntent();
-      if (session.aborted || input === null) {
+      guard += 1;
+      if (guard > 80) {
+        console.warn('[GamePipeline] 战斗逐单位循环超过上限，按放弃处理');
         await deleteCombatSandbox(this.saveId).catch(() => undefined);
         return null;
       }
-      playerInput = input;
+      // 没有待发输入 → 决定「当前行动单位」
+      if (playerInput === undefined) {
+        const actor = GamePipeline.pickCombatActor(session.state, resolvedThisRound);
+        if (!actor) {
+          // 本回合所有单位都结算过 → 进入下一回合
+          GamePipeline.advanceCombatRound(session.state);
+          resolvedThisRound.clear();
+          this.game.setCombatState(session.state);
+          await this.persistCombatSandbox(session);
+          continue;
+        }
+        // 清掉上一条 AI 的推进值，避免残留
+        session.state.meta.activeUnit = undefined;
+        resolvedThisRound.add(actor.name);
+
+        if (actor.side === 'ally') {
+          // 我方（含玩家）→ 停下等玩家；UI 锁定到该单位
+          session.state.meta.pendingPlayerUnit = actor.name;
+          this.game.setCombatState(session.state);
+          this.game.setCombatBusy(false);
+          const input = await this.waitForCombatIntent();
+          if (session.aborted || input === null) {
+            await deleteCombatSandbox(this.saveId).catch(() => undefined);
+            return null;
+          }
+          playerInput = `我方「${actor.name}」本回合的行动：${input}`;
+          inputRole = 'user';
+        } else {
+          // 敌方 / 中立 → Code 发 system 指令，DM 自行结算
+          playerInput = `现在轮到「${actor.name}」行动。请只结算它的本回合[攻击]/[动作]与相关状态，写回状态后结束本条输出，不要替其它单位行动。`;
+          inputRole = 'system';
+          this.game.appendCombatFlow(playerInput, session.state.meta.round, 'system');
+        }
+      }
+
+      // 跑一条 exchange（只结算当前这一个单位）
+      this.game.clearCombatStream();
+      this.game.setCombatBusy(true);
+      const result = await runCombatSandbox({
+        state: session.state,
+        client: session.client,
+        protocolText: session.protocolText,
+        systemPrompt: session.systemPrompt,
+        transcript: session.transcript,
+        playerInput,
+        playerInputRole: inputRole,
+        saveCharacters: this.game.characters,
+        signal: this.abortController?.signal,
+        // 战斗「边想边说」：正文逐字流到中栏；思维链与工具调用各成一条流记录
+        onTextDelta: (delta) => this.game.appendCombatStream(delta),
+        onReasoningDelta: (delta) => this.game.appendCombatReasoning(delta),
+        // 每轮工具循环开头切一段新「思考」块 → 呈现为「思考 / 工具 / 思考 / 工具」交替
+        onRoundStart: () => this.game.beginCombatReasoning(session.state.meta.round),
+        onToolCall: (name, args) => this.game.appendCombatTool(name, args),
+      });
+      session.state = result.state;
+      session.transcript = result.transcript;
+      session.lastOutput = result.output;
+      if (result.error) {
+        this.game.clearCombatStream();
+        throw new Error(result.error);
+      }
+
+      this.game.setCombatState(session.state);
+      this.game.finalizeCombatStream(result.output, session.state.meta.round);
+      this.game.finalizeCombatReasoning();
+
+      await this.persistCombatSandbox(session);
+
+      if (result.ended) return await this.finalizeCombatSandbox(session);
+
+      playerInput = undefined;
     }
+  }
+
+  /** 本回合当前该谁行动：AI 写的 activeUnit 优先，否则按 actionOrder 顺延（跳过已死/已结算/无槽位） */
+  private static pickCombatActor(state: CombatState, resolved: Set<string>): CombatUnit | null {
+    const override = state.meta.activeUnit;
+    if (override && state.units[override]?.alive) return state.units[override];
+    for (const name of state.meta.actionOrder ?? []) {
+      const u = state.units[name];
+      if (!u || !u.alive || resolved.has(name)) continue;
+      const slots = u.slots ?? { attack: 0, action: 0 };
+      if (slots.attack > 0 || slots.action > 0) return u;
+    }
+    return null;
+  }
+
+  /**
+   * 开战时由 Code 掷定行动顺序（`敏捷 + d20`，降序）并写进 `meta.actionOrder`。
+   * 🔴 目的：让行动顺序只有一个权威来源，避免 DM 自己掷一套、与 Code 的默认顺序打架。
+   */
+  private static rollCombatOrder(state: CombatState): void {
+    const scored = Object.values(state.units).map((u) => ({
+      name: u.name,
+      total: Math.floor(u.attributes.dex) + (1 + Math.floor(Math.random() * 20)),
+    }));
+    scored.sort((a, b) => b.total - a.total);
+    state.meta.actionOrder = scored.map((s) => s.name);
+  }
+
+  /** 一轮走完：`round++`、全体槽位重置、清 activeUnit */
+  private static advanceCombatRound(state: CombatState): void {
+    state.meta.round = (state.meta.round ?? 0) + 1;
+    for (const u of Object.values(state.units)) {
+      u.slots = { attack: 1, action: 1 };
+    }
+    state.meta.activeUnit = undefined;
+  }
+
+  /** 持久化当前战斗沙盒（失败不阻塞） */
+  private async persistCombatSandbox(session: CombatSandboxSession): Promise<void> {
+    await saveCombatSandbox({
+      saveId: this.saveId,
+      updatedAt: Date.now(),
+      state: session.state,
+      transcript: session.transcript,
+      preSnapshotId: session.preSnapshotId,
+    }).catch((err) => console.warn('[GamePipeline] 战斗沙盒持久化失败:', err));
   }
 
   /** 终局：写回补丁一次提交（ADR-21）+ 终局事件 + 摘要确认 */
   private async finalizeCombatSandbox(session: CombatSandboxSession): Promise<CombatSummaryResult> {
     const state = session.state;
-    const outcome = state.meta.outcome ?? 'draw';
+    // 🔴 胜负结果归一化：`combat_set_meta.outcome` 常被写成自由文本（「胜利（我方全歼敌军）」
+    //    甚至英文明 `victory`），而 `computeCombatExpRewards` / 结算面板都只认枚举。
+    //    先按语义关键词把自由文本认成枚举；实在认不出的才按场上存活推导，并写回状态供下游读取。
+    const rawOutcome = state.meta.outcome;
+    const outcome: CombatOutcome = normalizeCombatOutcome(rawOutcome) ?? deriveCombatOutcome(state);
+    state.meta.outcome = outcome;
+    if (
+      outcome === 'ally_win' &&
+      Object.values(state.units).some((u) => u.side === 'enemy' && u.alive && u.hp > 0)
+    ) {
+      console.warn(
+        '[GamePipeline] 战斗判胜但状态里仍有存活敌方 —— DM 疑似漏写击杀（只叙述未 combat_update_unit）；经验按全歼兜底',
+      );
+    }
     // FP 按上下文给：仅当 AI 在终局写入 meta.fpReward 才结算（缺席/0 = 不给 FP，不产 patch）
     const fpDelta =
       typeof state.meta.fpReward === 'number' && Number.isFinite(state.meta.fpReward)
@@ -2859,8 +3035,11 @@ export class GamePipeline {
     // 玩家裁决：non-null = 「接下来做什么」输入 → 先注入战斗摘要，再把该输入交给
     // GamePage 续写下一回合正文（store.combatContinue → watch → pipeline.run）。
     const nextAction = await reviewPromise;
-    if (this.ownsActiveSave && session.lastOutput.trim()) {
-      this.emitMessage('【战斗摘要】' + session.lastOutput, 'assistant');
+    // 🔴 DM 在终局用 `combat_write_summary` 显式写下一段**自然语言**战报（存 `meta.summary`）；
+    //    优先用它回注给主叙事 AI，缺席才退回它最后那条输出。不做数据化改写。
+    const summaryText = (state.meta.summary ?? '').trim() || session.lastOutput.trim();
+    if (this.ownsActiveSave && summaryText) {
+      this.emitMessage('【战斗摘要】' + summaryText, 'assistant');
     }
     // 🔴 exitCombat 会清 combatContinue —— 必须**先收面板再请求续写**，否则请求刚挂上就被清掉，
     //    GamePage 的 watcher 来不及消费（症状：点了「继续」却没有下一回合）。
@@ -2870,7 +3049,7 @@ export class GamePipeline {
     }
 
     return {
-      narrativeSummary: session.lastOutput,
+      narrativeSummary: summaryText,
       patches,
       totalExp: rewards.totalExp,
       totalFp: fpDelta,
@@ -2892,6 +3071,10 @@ export class GamePipeline {
   }
 
   private waitForCombatIntent(): Promise<string | null> {
+    // 挂起等玩家 = 主持人空闲（`combatBusy=false`）→ UI 显示输入框。
+    // 🔴 输入框的出现与否只认这个「忙碌」信号，不认 `meta.pendingPlayerUnit`（数据态，
+    //    续战/时序都可能对不上，表现为「DM 说轮到你了、UI 却写敌方行动中」）。
+    this.game.setCombatBusy(false);
     return new Promise((resolve) => {
       const session = this._combatSandbox;
       if (!session) {
@@ -2906,22 +3089,17 @@ export class GamePipeline {
     return this.chainData?.agentConfigs.find((c) => c.agentId === 'combat')?.systemPrompt;
   }
 
-  private static parseCombatNames(raw: string | undefined): Set<string> {
-    return new Set(
-      (raw ?? '')
-        .split(/[,，]/)
-        .map((s) => s.trim())
-        .filter(Boolean),
-    );
-  }
-
   /** 从权威 CombatState 反推 combat_trigger marker（刷新续战后丢失内存 marker 的兜底） */
   private static markerFromCombatState(state: CombatState): CombatTriggerMarker {
     const units = Object.values(state.units);
+    // 🔴 集群单位要带 `×N` 还原，否则重开战斗（restoreTimeline → handleCombatTrigger →
+    //    buildCombatRosterFromMarker 按 marker 重建）会把 N 只塌成 1 只。
+    const label = (u: CombatState['units'][string]): string =>
+      u.cluster && u.cluster.total > 1 ? `${u.name}×${u.cluster.total}` : u.name;
     const names = (side: CombatSide): string =>
       units
         .filter((u) => u.side === side)
-        .map((u) => u.name)
+        .map(label)
         .join('，');
     return {
       type: 'combat_trigger',
@@ -2947,44 +3125,6 @@ export class GamePipeline {
       storyOutput.trim(),
     ].filter((line) => line.trim().length > 0);
     return lines.length > 0 ? lines.join(String.fromCharCode(10)) : '战斗开始。';
-  }
-
-  private static combatRosterFromMarker(
-    marker: CombatTriggerMarker,
-    characters: CharacterState[],
-  ): { combatants: CombatantInput[]; rosterText: string } | null {
-    const allyNames = GamePipeline.parseCombatNames(marker.allies);
-    const enemyNames = GamePipeline.parseCombatNames(marker.enemies);
-    const hasListedSides = allyNames.size > 0 || enemyNames.size > 0;
-
-    const sideOf = (c: CharacterState): CombatSide => {
-      if (hasListedSides) {
-        if (allyNames.has(c.name)) return 'ally';
-        if (enemyNames.has(c.name)) return 'enemy';
-        return c.type === 'player' ? 'ally' : 'enemy';
-      }
-      return c.type === 'player' ? 'ally' : 'enemy';
-    };
-    const inRoster = (c: CharacterState): boolean =>
-      c.type === 'player' || allyNames.has(c.name) || enemyNames.has(c.name);
-
-    const roster = characters.filter((c) => {
-      if (c.hp <= 0) return false;
-      if (!hasListedSides) return true;
-      return inRoster(c);
-    });
-    if (roster.length === 0) return null;
-
-    const combatants: CombatantInput[] = roster.map((c, index) => ({
-      character: c,
-      side: sideOf(c),
-      pos: index + 1,
-      facing: sideOf(c) === 'ally' ? 'right' : 'left',
-    }));
-    const rosterText = hasListedSides
-      ? '我方: ' + (marker.allies ?? '') + '；敌方: ' + (marker.enemies ?? '')
-      : '';
-    return { combatants, rosterText };
   }
 
   /** 处理制作生成链 */

@@ -1704,7 +1704,7 @@ export const useCreateStore = defineStore('create', () => {
   //   → {{CHARACTER_STATE}} system prompt 占位符自动格式化注入
   // - 装备 / 技能 / 物品 / 背景 / 性格身材身世 → 下游 Agent 需要处理
   //   → 组装为自然语言，作为开场 user 消息注入，走 story→request_dispatcher→vars_update 链路
-  // - 命定核心由已启用的 system_core 世界书条目单独注入；开场 user 消息不替它规定人格或显现方式
+  // - 命定核心：既由已启用的 system_core 世界书条目注入，也在开场消息里补一段可读连接（防首轮意识不到）
 
   function buildOpeningPrompt(): string {
     const charName = name.value.trim() || '未命名';
@@ -1826,10 +1826,33 @@ export const useCreateStore = defineStore('create', () => {
       );
     }
 
+    // 命定核心：让**首轮正文**意识到主角灵魂里寄宿着什么。
+    // 🔴 核心条目本体（可能含 EJS）由世界书在装配期求值注入；这里再补一段**可读的连接**，
+    //    防的是「世界书里有、开场正文却把它当背景设定、意识不到这是主角的核心」。
+    //    含 EJS 的条目在此剥掉求值段只留可读正文；`<user>` 替换为主角名；截断防开场过重。
+    const coreEntry = selectedSystemCoreEntry.value;
+    const workshopCore = selectedWorkshopCore.value;
+    const coreName = coreEntry?.name || workshopCore?.name || '';
+    if (coreName) {
+      lines.push('');
+      lines.push(`${charName}的灵魂中寄宿着命定核心「${coreName}」。`);
+      const rawCore = coreEntry?.content ?? workshopCore?.description ?? '';
+      const readable = rawCore
+        .replace(/<%[\s\S]*?%>/g, '')
+        .replace(/<user>/g, charName)
+        .trim();
+      if (readable) {
+        const excerpt = readable.length > 2000 ? `${readable.slice(0, 2000)}……` : readable;
+        lines.push(excerpt);
+      }
+      lines.push(
+        '这是主角力量的根源与设定依据；首轮叙事应当意识到它的存在，并让它在剧情中自然显露痕迹（不必立刻显形或解释）。',
+      );
+    }
+
     // 收尾：约束首轮叙事流程 —— 先以开局背景为舞台重新演绎（既定事实不变），再自然续写。
     // 🔴 这一句同时是 `{{SKILL_STATE}}` 从开场消息里截取初始技能声明的结束边界
     //    （placeholder-registry 的 isNaturalOpeningSkillEnd），改措辞要同步改那里。
-    // 命定核心不在这里点名或规定演出，完全服从单独注入的世界书条目。
     lines.push('');
     lines.push(
       `以上是${charName}的角色设定与开局剧情。首轮叙事请以「开局剧情」描写的时间地点为舞台：先将这段开场以你的笔触重新演绎（可扩写细节与氛围，不可改变既定事实），再自然续写后续发展。`,

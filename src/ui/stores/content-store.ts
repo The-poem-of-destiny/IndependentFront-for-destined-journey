@@ -757,6 +757,31 @@ export const useContentStore = defineStore('content', () => {
   }
 
   /**
+   * 项目默认**预设**（D20：与 pack 的 `presets` 分节同口径）。
+   *
+   * 🔴 为什么需要它：`data/defaults/presets.json` 原本**只**被 `tools/build-pack.mjs`
+   *    读进 pack 的 `presets` 分节，运行期引擎**不 fetch 它** —— 于是无 pack 的 overlay
+   *    开发态拿不到「story 内嵌预设之外的额外默认预设」，与装包态不一致。本函数把
+   *    provider 这一侧也接上：pack 已装 → `pack.presets`；否则 fetch 该文件。
+   *
+   * 🔴 公开仓**没有**这个文件（404 是常态、不是错误）—— 故这里**刻意不** reportContentFetch：
+   *    报了会把占位态误切成 `contentStatus='error'`（reportContentFetch 对 placeholder 首败
+   *    即置 error）。缺席一律当「没有额外预设」，只回 `[]`。
+   */
+  async function resolveProjectPresets(): Promise<ChatPreset[]> {
+    const pack = getActivePackPayload();
+    if (pack?.presets) return [...pack.presets];
+    try {
+      const res = await fetch('/data/defaults/presets.json');
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? (data as ChatPreset[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * 显式绕过 pack 叠加层，读原始盘上文件（D16）。
    *
    * 🔴 **AgentConfigPanel.vue 的读-改-写回路径专用**（`saveAsDefault` 流程）。
@@ -1487,6 +1512,7 @@ export const useContentStore = defineStore('content', () => {
     reportContentFetch,
     loadProjectDefaults,
     loadRawProjectDefaults,
+    resolveProjectPresets,
     hydratePackState,
     installPack,
     upgradePack,

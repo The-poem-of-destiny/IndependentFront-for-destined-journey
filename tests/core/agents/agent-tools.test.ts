@@ -26,7 +26,7 @@ describe('战斗沙盒工具面', () => {
   it('getToolsForAgent(combat) 下发沙盒工具，不再有 v3 命令类工具', () => {
     const names = getToolsForAgent('combat').map((tool) => tool.function.name);
     expect(names).toContain('combat_set_meta');
-    expect(names).toContain('combat_yield_to_player');
+    expect(names).not.toContain('combat_yield_to_player');
     expect(names).not.toContain('declare_attack');
   });
 });

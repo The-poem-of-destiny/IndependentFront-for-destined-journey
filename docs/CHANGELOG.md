@@ -9,6 +9,343 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-10-03 战斗终局回注自然语言战报｜已实施
+
+主叙事 AI 不知道战斗发生了什么。修法：**DM 在终局显式调用新工具 `combat_write_summary`**，
+用一段自然语言复述整场战斗（谁和谁交手、过程与结果、我方状况）；Code 存进 `meta.summary`，
+终局时包成 `【战斗摘要】` 消息回注（缺席才退回它最后那条输出）。**不做数据化改写**。
+（曾试过 Code 拼结构化头「结果/回合/经验」，按主人意见撤掉 —— 要的是叙事不是数据。）
+
+- 新工具 `combat_write_summary { summary }`（`tools.ts`）；战斗工具 14 → **15**（测试已同步）。
+- 公开仓 `buildCombatFlowText` + 私有仓 `agents.combat.systemPrompt` 的终局步骤改为「调 `combat_write_summary`」。
+
+### 2026-10-03 修复：战斗中面板不刷新（同引用重赋不触发响应式）｜已实施
+
+真机：战斗里**坐标轴、我方/敌方单位卡、血条全不更新**，只有整页刷新后才对。
+
+- 根因：管线里的 `session.state` 是**同一个对象就地改**（工具 `Object.assign`），每个 exchange 后
+  `setCombatState(session.state)` 赋的是**同一个引用** —— Vue 的 `ref` 对「同一引用重赋」**不触发**
+  （`hasChanged` 判 `Object.is`），于是所有从 `combatState` 派生的 computed 全缓存不刷新。
+  （已用最小脚本实测复现：改 `raw.hp` 后 `r.value = raw`，computed 仍是旧值。）
+- 修法：`setCombatState` 改为**深拷贝再赋**（`cloneCombatState`）—— 引用必变，响应式生效。
+- 验证：仅 tsc / vue-tsc（按主人要求暂不跑测试套件）+ 最小响应式脚本实测。
+
+### 2026-10-03 战斗流：思维链与工具调用按「工具循环轮」交替｜已实施
+
+此前把一整条 exchange 的思维链压成**一块**、工具全堆在它后面 → 看起来是「一大块思考 + 一堆工具」，
+而不是模型真实的 `思考 → 工具 → 思考 → 工具`。
+
+- `chatWithTools` 每轮循环开头回调 `onRoundStart(round)`；`runner` → store 的
+  `beginCombatReasoning`（先收尾上一段、再开新段）据此**按轮切思维链块**。
+- 结果：中栏呈现为 `[思考 Ns] → [工具行] → [思考 Ns] → [工具行] → … → 正文`，与真实推理节奏一致。
+- 验证：仅 tsc / vue-tsc / tools（按主人要求暂不跑测试套件）。
+
+### 2026-10-03 修复：DM 深陷「行动顺序」空转（8.8 万字思维链）+ 回合数归属｜已实施
+
+真机 debug：DM 第 1 回合突然写出 **88621 字思维链、耗时 137 秒**，内容是**反复纠结用哪套行动顺序**
+—— 它自己掷先攻得 `索尔希艾拉24/蕈人16/理查德25/真菌兽20`（数字与它写的序列就不自洽），
+而 Code 又已按名册排了 `actionOrder`、推进了 `activeUnit`。两套顺序打架 → 弱模型原地死循环。
+
+- **行动顺序改由 Code 独占**：`startCombatSession` 里新增 `rollCombatOrder`（`敏捷 + d20` 降序）
+  写好 `meta.actionOrder`；DM **不再掷先攻、不写 actionOrder、不改 round**。
+- `buildCombatRosterText` 顶部直接列出「行动顺序（Code 已定序，勿改）：A → B → …」，
+  DM 一眼看到唯一权威顺序。
+- 公开仓 `buildCombatFlowText` + 私有仓 `agents.combat.systemPrompt` 同步：删掉「掷先攻写行动轴」，
+  改为「行动顺序与回合数由 Code 维护，你不要碰」；战前资源由 Code 填好，DM 只确认。
+- 验证：仅 tsc / vue-tsc（按主人要求暂不跑测试套件）。
+
+### 2026-10-03 战斗流三修：粘性滚动 / 思维链顺序 / 默认折叠｜已实施
+
+- **粘性滚动**：`CombatMessageFlow` 加 `atBottom` 判定 —— 只有玩家**本来就在底部**时才自动跟到底；
+  往上翻看历史时出字不再把他强拉回底部（此前每一段 delta 都强制滚底，导致什么都看不了）。
+- **思维链顺序**：思维链此前是 exchange **结束后**才追加，于是排在工具调用**之后**，看起来像
+  「工具调用藏在思维链里、看不到」。改为**每条 exchange 开头先插入一条空的 `reasoning` 占位**
+  （`beginCombatReasoning`），流式填字，顺序变成 **思考 → 工具调用 → 正文**；无思维链时定稿移除该空块。
+- **默认折叠**：思维链 `<details>` 默认折叠（此前实时块 `open`）；展开才看思维链正文。
+- 验证：仅 tsc / vue-tsc / tools（按主人要求暂不跑测试套件）。
+
+### 2026-10-03 战斗回合循环重构 + system/工具/思维链 UI｜已实施
+
+真机：DM 在**一条 exchange 里把整轮全跑完**，甚至替玩家角色（`type:player`）擅自出手、消耗其槽位
+——「AI 分不清何时停/继续」。修法是**把回合边界从 AI 手里收回到 Code**：
+
+- **逐单位循环**（`game-pipeline.driveCombatSandbox` 重写）：一条 exchange 只结算**一个**单位。
+  Code 决定当前 actor（`meta.activeUnit` 优先，否则按 `actionOrder` 顺延、跳过已死/已结算/无槽位）：
+  - actor 是**我方（含玩家）** → 停下、把该单位交给输入框；玩家提交只跑这一条；
+  - actor 是**敌方/中立** → Code 发一条 **system** 指令「现在轮到 X，自行结算」，DM 自理。
+  - **AI 推进**：DM 用 `combat_set_meta.activeUnit` 写下一个该行动的单位；一轮走完 → `round++`、重置槽位。
+  - 越界不管（AI 擅动别的单位不回滚）；加 80 步安全上限防跑飞。
+- **system 气泡**：`CombatFlowEntry.role` 扩为 `user|assistant|system|tool|reasoning`；
+  `CombatMessageFlow` 给 system（Code 回合指令）画带左边线的系统条。
+- **工具调用一行**：`runner.onToolCall` → 每条工具调用落一行等宽（`⚙ 工具名 参数`，参数省略）。
+- **思维链折叠块**：`agent-client.chatWithTools` 透出 `onReasoning`（复用已有的 `reasoningDelta`）；
+  `runner.onReasoningDelta` → store `combatReasoning` 流式缓冲 → 定稿成原生 `<details>「思考 N.Ns」`
+  可折叠块（opencode 风格）。
+- **「继续」按钮**：规划区新增，纯发 `继续`（DM 莫名停下时玩家推它一把）。
+- 私有内容仓 `agents.combat.systemPrompt` 同步改为 per-unit 流程（不再自己 `round++`、不再跑整轮）。
+- 验证：仅 tsc / vue-tsc / tools（按主人要求暂不跑测试套件）。
+
+### 2026-10-03 战斗 UI 三修：对话流时间线 / 集群续航 / 行动规划区｜已实施
+
+- **对话流时间线错乱**：此前把 user 消息与主持人正文写成**两个 `v-for`**，导致所有 user 消息
+  被堆到流顶部、正文全在下面（看起来像「自己发的消息没出现 / 等 AI 说完才冒出来」）。
+  改回**单一循环按时间顺序**渲染（user 气泡 / 正文按出现次序交替）。
+- **集群重开塌成单个**：重开战斗走 `restoreTimeline → handleCombatTrigger → marker 反推`，
+  而 `markerFromCombatState` 只写名字、**不带 `×N`** → 集群被重建为 1 只。
+  修：反推时集群单位写成 `名字×N`，`buildCombatRosterFromMarker` 据此重建集群。
+- **行动规划区改造**（`CombatActionPlanner`）：
+  - **行动者锁定当前轮到的角色**（`meta.pendingPlayerUnit`）——去掉可自由全选的下拉；
+  - **攻击（普攻/技能）与动作（战术动作）各选一、可同时选定、一次提交**，
+    拼成 `我方「X」：攻击用「A」，动作用「B」（面向…）`；卡片可点选/反选高亮。
+  - **布局收口**：卡片排成**单行横向滚动**（不再 4 列换行堆高）、描述 `line-clamp: 2`，
+    并给规划区 `max-height: 44vh + overflow-y:auto` —— 不再把上面的「我方/敌方/中栏」挤没。
+- 验证：仅 tsc / vue-tsc（按主人要求暂不跑测试套件）。
+
+### 2026-10-03 修复：刷新续战在「开场空窗」内失败导致不跳战斗界面｜已实施
+
+真机：在战斗里刷新后重新进入，战斗面板不再出现。
+
+- 根因（高度怀疑）：开战瞬间 `beginCombatSandboxSession` 先写一条 **`transcript=[]`** 的
+  在办战斗行，紧接着才跑开场 exchange 再写第二条。**刷新正好落在这个空窗内时**，
+  `resumeCombatSandbox` 因 `stored.transcript.length === 0` 直接 `return false` → 整场战斗被丢。
+- 修法：空 transcript 不再当作「无战斗」——用权威状态重建开场输入（
+  `buildCombatOpeningInput(marker, '', buildCombatRosterText(state))`）**重跑一次开场**。
+- 同时给 `resumeCombatSandbox` 每条早退分支加 `[combat-resume]` 诊断日志（无行 / 已终局 /
+  无玩家 / 无端点 / 恢复成功），便于下次一眼定位。
+- 验证：仅跑 tsc / vue-tsc（按主人要求暂不跑测试套件）。
+
+### 2026-10-03 战斗中栏改为 agent 对话流（输入框判据 + 用户消息）｜已实施
+
+真机反馈两点：① 「思考中…」占位误导（DM 明明写「轮到你」却不见输入框）；② 玩家提交的意图
+**根本不进对话流**，像「没传过去」。
+
+- **输入框判据换成 `combatBusy`（主持人是否在跑一次 exchange）**：`awaiting = combatState && !combatBusy`。
+  管线在每次 exchange 前置忙、`waitForCombatIntent()` 置闲 → 「主持人忙 = 转圈/流式正文」、
+  「主持人空闲 = 轮到玩家」。彻底不再用 `meta.pendingPlayerUnit`（数据态，时序易脱节）。
+  `CombatActionPlanner` 内部不再自行判「是否轮到玩家」（去掉 `isAwaitingPlayer` 锁）。
+- **玩家输入进对话流**：`CombatFlowEntry` 加 `role: 'user' | 'assistant'`；`submitCombatIntent`
+  先落一条 user 消息再交给主持人；`CombatMessageFlow` 把 user 条目渲染成右侧气泡。
+  续战时从 transcript 重建历史时也带 role。
+- 验证：`tests/core/combat` + `tests/ui/components/game/combat` 共 114 用例全绿；
+  tsc / vue-tsc / tools / eslint / prettier 全绿。
+
+### 2026-10-03 战斗结算经验修复 + 集群聚合｜已实施
+
+真机 debug（`fated-poem-debug-c484e490-*.json`）暴露两处：
+
+**① 结算 EXP 为 0。** DM 用 `combat_set_meta` 写的 `outcome` 是自由中文
+（`"胜利（我方全歼敌军）"`），而 `computeCombatExpRewards` 只认枚举 `ally_win` → 整条经验归零
+（本该 `Lv3 × T1系数 10 = 30`）。FP 其实正常（`fpReward:1` → `fpHistory +1`）。
+
+- `settlement.ts` 新增 `normalizeCombatOutcome`：AI 写自由文本（「胜利（我方全歼敌军）」、英文
+  `victory`、`战败`、`撤退`…）时按语义关键词**认成枚举**；认不出才 `deriveCombatOutcome` 按场上
+  存活推导（全歼敌→`ally_win` / 我方全灭→`enemy_win` / 否则 `draw`）。`finalizeCombatSandbox`
+  归一化写回，exp / 结算面板标题 / 胜负样式一起恢复。
+- `computeCombatExpRewards` 补世界书 `[经验值获取]` 的**集群衰减**：`单体 × (1+(N-1)×0.2)`；
+  并加**状态漏写兜底** —— 判胜却没有任何阵亡记录时（弱模型只在正文宣布全歼、不发
+  `combat_update_unit`，实测状态里敌人还活着 → 之前判成平局、经验归零），改按全部敌方计入。
+- 说明：`resource-calc.expFromMonster`（`Tier×25×(1+0.1Lv)`）与世界书不符，是旧公式，未采用。
+- **从源头加强约束**（弱模型只叙述、不写状态是本轮反复出现的病根）：公开仓内置流程
+  `buildCombatFlowText` 与私有仓 `agents.combat.systemPrompt` 同步加硬性「状态写回」小节 ——
+  每次伤害/资源/状态变化必须**同一次输出内**用工具写回，**只叙述不发工具=该变化未发生**，
+  死亡必须写 `alive=false`；终局先写回全体最终 HP/MP/SP/存活再置 `phase='ended'`；输出前自检。
+- `finalizeCombatSandbox` 加诊断日志：判胜但状态仍有存活敌方时 warn（提示 DM 疑似漏写击杀）。
+
+**② 集群从未成形。** 协议要求 ≥3 同类聚合，但 dispatcher 把「群」写成**一个** NPC 名字、Code 也
+一个角色一个单位 → `群噬本能（需同类≥3）` 永不满足。
+
+- 新增引擎纯函数 `combat/sandbox/roster.ts`：marker 名单支持 **`名字×N` 计数**（`× * x X` 都吃、
+  同名累加）；同一名字人数 ≥3 → 聚合成**一个集群单位**（资源 = 个体上限 ×N、`cluster.alive/total=N`）。
+- `game-pipeline.startCombatSession` 改用 `buildCombatRosterFromMarker`；`buildCombatRosterText`
+  给 DM 显示「集群 N/N」；结算跳过集群编队（聚合资源不写回单只存档角色）。
+- 私有内容仓 `agent-config.json` 的 request_dispatcher 提示词：教它对群体敌人写 `名字×N`。
+- 验证：`tests/core/combat` 7 文件 86 用例全绿（含新增 roster/集群衰减/胜负推导）。
+
+### 2026-10-03 修复：战斗输入框不出现（DM 说「轮到你了」、UI 却写「敌方行动中…」）｜已实施
+
+真机：刷新续战 / 接力回合后，DM 正文已写明「轮到你了，请描述意图」，但面板底部是「敌方行动中…」、
+**没有行动规划区（输入框）**。
+
+**根因**：前端一直拿**数据态** `meta.pendingPlayerUnit` 当「该轮到玩家了」的判据
+（`combat-view.isAwaitingPlayer`）。这个字段与「管线此刻到底在不在等玩家输入」是两件事：
+续战、回放、回合交接时序都可能让它对不上 —— 对不上的表现正是这个 bug。
+
+**修法（改成与真实交接同源的信号）**：
+
+- `game-store` 新增 `combatAwaitingIntent`：**由管线在真正挂起 `waitForCombatIntent()` 时置 true**，
+  玩家提交 / 放弃 / 开战 / 退出时置 false。
+- `CombatPanel.awaiting` 改读 `game.combatAwaitingIntent`（不再读 `meta.pendingPlayerUnit`）。
+  于是「管线在等输入」⇔「输入框出现」恒等，与 `pendingPlayerUnit` 的状态无关。
+- `game-pipeline.beginCombatSandboxSession` 续战时仍补一次 `assignPlayerTurn(state)`
+  （仅供规划区**选中正确行动者**；不参与输入框是否出现的判定），并从 `transcript` 的 assistant
+  正文重建中栏历史（`combatFlow` 是内存态、刷新即丢）。
+- 验证：tsc / vue-tsc 全绿；`tests/core/combat`、`tests/ui/components/game/combat`、
+  `tests/ui/stores/game-store.test.ts` 共 154 用例全绿。
+
+### 2026-10-03 战斗改为流式出字（边想边说）｜已实施
+
+真机反馈：战斗里啥也看不见、只能干等。改为**正文逐字流出**到中栏。
+
+- `agent-client.chatWithTools` 新增 `onTextDelta` 选项：传了就**每一轮工具循环改用 `chatStream`**
+  发送并实时转发正文增量（只转发 delta，不转发收尾整段快照）；没传保持原非流式 `chat`。
+  新增 `chatRoundStreaming()`（单轮流式 → 归一成 `InternalAgentResult`）。
+- `combat/sandbox/runner` 透传 `onTextDelta`；`game-pipeline.driveCombatSandbox` 把它接到
+  `game.appendCombatStream`，exchange 结束用 `finalizeCombatStream` 定稿（清预览 → 落 flow，避免重复）。
+- `game-store` 新增 `combatStream` 预览 + `appendCombatStream`/`clearCombatStream`/`finalizeCombatStream`。
+- `CombatMessageFlow` 渲染流式预览（与定稿同一套块解析），并随之自动滚动。
+
+### 2026-10-03 删除冗余工具 `combat_yield_to_player`：玩家回合交接交给输入框｜已实施
+
+设计复盘后的结论：**玩家回合的交接本来就是输入框** —— 管线每轮 exchange 结束必然
+`waitForCombatIntent()`，玩家提交即续战。`combat_yield_to_player` 工具唯一多做的是给
+`meta.pendingPlayerUnit` 赋值（UI 显示「轮到谁」），而这点信息 Code 直接算得出来，不必让模型
+调工具、更不必让弱工具调用模型「记得调」——它没调时就出现「无输入框 + 那段 XML 被当正文渲染
+
+- 管线死等」三连。
+
+* **删除** `combat_yield_to_player`：工具定义 + 处理器（`combat/sandbox/tools.ts`）、combat 白名单
+  （`agent-tools.ts`）、内置流程第 4 步措辞、战场活动文案（`agent-activity.ts`）、
+  公开仓与私有仓 `agent-config.json` 的 combat systemPrompt、相关测试与契约片段。
+* **Code 侧接手**：`runner.ts` 新增 `assignPlayerTurn(state)` —— 每轮 exchange 结束时，未终局且尚无
+  指派、且有存活我方 → 把 `meta.pendingPlayerUnit` 指派为第一个存活我方（前端行动规划区据此显示）。
+  顺带删掉上一版为容错该工具而加的正文 XML 解析兜底。
+* `driveCombatSandbox` 的防死等保护保留（DM 连续不交出主持权时按放弃处理）。
+* 验证：8 道闸门全绿；`test:run` 355 文件 / 8713（8705 通过 / 8 跳过）。
+
+### 2026-10-03 修复：战斗面板可收起/返回 + 主持权交接兜底（弱工具调用模型）｜已实施
+
+真机两个问题：
+
+**① 战斗面板出不去**：它是 Teleport 到 body 的**全屏 overlay**，且**没有任何收起入口**，
+`GamePage` 的 Esc 捕获又在 `isInCombat` 时直接 return —— 玩家被困在战斗里，连 debug 都打不开。
+
+- `CombatPanel.vue` 加**纯 UI 的收起**：右上角「⌄ 收起」+ 收起后右下角「⚔ 返回战斗」，
+  三态（就绪/战斗中/结算）通用；**Esc 也可收起**（弹窗打开时 AppModal 在 capture 阶段
+  `stopImmediatePropagation`，不会误收）。收起**只隐藏 overlay，不动任何战斗权威状态**。
+
+**② 没有输入框 + 一段 `<combat_yield_to_player>` 原始 XML + 一直「思考中」**：
+根因不是「工具没传给模型」（`runner.ts` 确实把全部含 `combat_yield_to_player` 的工具传了），
+而是**弱工具调用模型（deepseek-flash）把该工具写成了正文 XML 而没有 function call** ——
+工具没执行 → `meta.pendingPlayerUnit` 没设 → 行动规划区不出现、管线死等，且那段 XML 被当叙事渲染。
+
+- `runner.ts` 新增 `resolvePlayerHandoff(state, output)`：每轮 exchange 结束时收口 ——
+  ① 认出正文里的 `<combat_yield_to_player>` 块 → 解析 `unit/prompt/options` 写回 `pendingPlayerUnit`
+  并**从展示文本剥掉**；② 若既没调工具也没写块且未终局 → 兜底把主持权交给第一个存活我方；
+  ③ 已终局则不动。保证玩家永远拿得到输入入口。
+- `game-pipeline.driveCombatSandbox` 加防死等：DM 连续不交出主持权（且无存活我方可兜底）时，
+  催若干轮后按放弃处理，不把玩家永久挂起。
+- 新增 3 条 `resolvePlayerHandoff` 回归测试 + 3 条 CombatPanel 收起测试。
+- 验证：8 道闸门全绿；`test:run` 355 文件 / 8714（8706 通过 / 8 跳过）。
+
+> 参考：战斗面板设计原型在 `tmp/combat-preview/combat-v{2,3,4}.html`（v4 已含底部行动规划区
+> 与右上角 `—` 收起）；本前端的规划区结构已对齐 v4，此前不出现纯粹因为 `awaiting` 为假。
+
+### 2026-10-03 修复：CharacterListPanel 登神页签把要素渲染成一坨 JSON｜已实施
+
+真机截图：角色详情面板的「登神」页签把 `elements` 对象逐条 `JSON.stringify` 成原始数据
+（`0:{"name":"血魔之躯",...}`）。根因是该面板仍按 **Phase 9 之前的 Record 形状**渲染
+（`v-for="(v,k)"` + `{{ (v as any).description || JSON.stringify(v) }}`），而数据早已是
+**对象数组**、且 `description` 常为空串 → 整条落进 `JSON.stringify` 分支。
+
+- `CharacterListPanel.vue` 的登神页签改用与 `CharacterViewerModal` **同源**的
+  `buildAscensionTracks()` / `hasAnyAscension()`（唯一判定处），按 名称 / 描述 / 词条 / 消耗 +
+  神位/神国 正常渲染；新增对应少量样式。
+- `character-viewer.ts` 的 `toEntry()` 补上 `effectDescriptions`（Phase 9 的「词条名→描述」）
+  的优先渲染（`名称：描述`），无该字段时回退到 `effects` 裸串。
+- 新增两条回归测试（effectDescriptions 渲染 + 无该字段的回退）。
+- 验证：8 道闸门全绿；`test:run` 355 文件 / 8708（8700 通过 / 8 跳过）。
+
+### 2026-10-03 三处真机修复：daily_check 模板登记 / T4+ 登神内容 / 开场命定核心｜已实施
+
+- **`daily_check` 报 "No template found for agent" 且调用不了**：`agent-templates.ts` 的
+  `AGENT_TEMPLATES` 漏登记 `daily_check` → `getAgentTemplate` 返回 undefined → 编排器直接
+  报错不调用。补上接口兼容 stub（完整提示词仍来自 agent-config.json），并把
+  `daily_check` 归入 `agent-templates.test.ts` 的 `EXTERNALIZED_IDS`。
+- **角色生成到 T4+ 不产配套要素/权能**：`entity_gen` 提示词原先只在显式 `<ascension>`/
+  `type=ascension` 时产出登神内容。改为**生成角色且 tier ≥ 4（Lv.13+）时自动产出配套登神**：
+  T4 要素、T5 追加权能、T6 追加法则、T7 追加神位/神国；tier < 4 保持 `enabled="false"`
+  （私有仓 + 公开占位同步）。
+- **开场白缺命定核心、开局 AI 意识不到**：`buildOpeningPrompt` 现在在开场 user 消息里补一段
+  **命定核心可读连接**（核心名 + 剥掉 EJS、替换 `<user>` 后的正文节选），核心本体仍由世界书
+  通道注入 —— 两者互补，防首轮正文把核心当普通背景设定。对应测试改为断言新行为。
+- 验证：8 道闸门全绿；`test:run` 355 文件 / 8706（8698 通过 / 8 跳过）；两边
+  `agent-config.json` 编码 U+FFFD 0 / ctrl 0 / 可解析。
+
+### 2026-10-03 剧情模块节奏与信息透露（大纲 + pre_check 提示词）｜已实施
+
+针对「AI 把宏观事件写成微观节奏」与「NPC 集体当谜语人」两个真机痛点，改提示词（纯内容，
+引擎不动 —— 并发态势结构本就支持、细化层闸门已不节流）。
+
+- **大纲（plot_outline）**：
+  - 新增「**节奏与因果时距**」节：因果就近（相关方按能力尽快行动，setup→后果时间相邻）、
+    延迟要有戏（可见的情报搜集/博弈/阻力，不能集体沉默数月）、态势可并发（同一时段多条并行，
+    活跃主线控制在 1~3 条、其余 dormant）。**不是固定节拍/剧本**。
+  - 自检评分**删掉「⚠️ 降权：强因果链」**（它在明文奖励松散无因果），改为奖励「因果就近与
+    紧迫感 + 并发态势调度」；保留「降权：固定节拍 / 必经关卡」。
+  - 工作流程第 5 步去掉「强制按月依次铺开」；子态势 desc 不再强绑「一个月」跨度。
+- **细化层（plot_pre_check）**：
+  - 第 0 步**拆成「推剧情 / 给信息」两层**：`suitableForPlot` 只管大节拍；「给信息」几乎常开，
+    日常/亲密戏也至少给一条极轻、不点破的呼应或表面信号。
+  - 新增「信息底线」（有活跃节点就漏一条表面信息，允许 `revealLevel=partial`）与
+    「**NPC 不是谜语人**」（悬念来自信息不全/误传/谎言/立场冲突，不是拒绝开口）。
+  - 核心原则 4 补「表面信息要主动给」；主线细化加节奏（优先推进/回收、能半揭就半揭）；
+    relevantBackground 允许写可被玩家察觉的表面线索/动向；工作流程与输出前自检各补一条。
+- 公开占位版 `agent-config.json` 同步以上要旨（通用措辞）。
+- 验证：8 道闸门全绿；`test:run` 355 文件 / 8706（8698 通过 / 8 跳过）；两边
+  `agent-config.json` 编码 U+FFFD 0 / ctrl 0 / 可解析。
+
+### 2026-10-03 预设来源对齐 pack：无内容包时也读 `/data/defaults/presets.json`｜已实施
+
+修一个开发期不一致：`data/defaults/presets.json` 原本**只**被 `tools/build-pack.mjs`
+读进 pack 的 `presets` 分节，运行期引擎不 fetch 它 —— 于是**卸载内容包后走 overlay**，
+「story 内嵌预设之外的额外默认预设」进不来，预设只剩内嵌的那一个（与装包态不一致）。
+
+- `content-store` 新增 `resolveProjectPresets()`：pack 已装 → `pack.presets`；否则
+  fetch `/data/defaults/presets.json`。**公开仓没有这个文件（404 是常态）**，故刻意不
+  `reportContentFetch`（否则会把占位态误切成 `contentStatus='error'`），缺席一律回 `[]`。
+- `settings-store.loadAgentProjectDefaults` 的播种改为：出厂预设 = agent-config 内嵌
+  story 预设 ∪ provider 预设，**逐 id** 播种（库里没有 → 补；有同 id → 只同步 name，
+  保留用户 prompts 编辑）。旧逻辑「DB 非空即整批不播种」连带把内嵌 story 预设也挡在外面。
+- 于是无 pack 的 overlay 开发态与装包态拿到同一组默认预设；公开仓占位态行为不变（仍 1 条）。
+- 验证：8 道闸门全绿；`test:run` 355 文件 / 8704（8696 通过 / 8 跳过）；新增
+  `resolveProjectPresets` 单测 + settings-store 播种集成测试。
+
+### 2026-10-03 日常检定 Agent `daily_check`（Phase 3）｜已实施，真机待验证
+
+战斗去代码化计划（`docs/planning/2026-10-02-combat-decode-entitygen-plan.md` §6）的代码线 D。
+把「时间流逝导致的状态结算」从 Code 确定性逻辑翻转为 **AI 依状态/词条描述结算、Code 只做计算与落库**。
+
+- **Code 不再管状态计时**：`applyTimeAdvance` 删掉了「遍历角色扣减 `remainingTime` / 到期移除」
+  的整段逻辑（现只推时钟 + 天气/随机事件/地块结算三个钩子，恒返回空补丁）；
+  `StatusEffect.carryMinutes`（F07 分区余量）随之退役。**计时全权交 `daily_check`**。
+- **新 Agent `daily_check`**：独立成 pipeline stage，插在 **dispatcher（时间推进）之后、
+  vars_update 之前**（本回合新施加的状态不被同回合立刻扣计时）；每回合无条件运行，
+  **战斗会话活跃时暂停**（`ctx.combatActive`，照随机事件注入先例）。只做周期/条件结算
+  （状态倒计时/到期/DoT-HoT/upkeep/条件触发），**不做社交/属性检定**，**不推时钟**。
+- **新 op `update_status_effect`**：按名改既有状态的 `remainingTime`（null=永久）/ `stacks`，
+  找不到名字 warn 忽略不抛；资源与上限仍走既有 `update_character`（白名单已含 `hp/maxHp/…`
+  且自带 `[0, max]` 钳制）。`PATCH_HANDLERS` 是 `Record<StatePatchOp,…>`，漏接即编译错误。
+- **纯翻译层 `daily-check-translator.ts`**（仿 `vars-update-translator`）：`<json>` 的
+  `characterUpdates` / `statusAdds` / `statusUpdates` / `statusRemovals` → `StatePatch[]`；整组
+  认不出当没写、单条认不出只丢那一条。
+- 📌 **2026-10-03 追加（Option A / 日常物品·技能使用）**：
+  - daily_check 扩展为也结算**正文里日常（非战斗）物品/技能的使用效果**（治疗/增益/减益/召唤等）：
+    资源变化走 `characterUpdates`、**新增状态走 `statusAdds`（复用 `add_status_effect`）**、
+    解除走 `statusRemovals`。**物品消耗/背包扣减仍归 `request_dispatcher → vars_update`**（Option A，
+    避免同一瓶药被扣两次），daily_check 绝不输出物品移除。
+  - daily_check 默认模板补 `{{SKILL_STATE}}` 数据块（判断正文施放的技能应产生哪些变化）；
+    该占位符直接读 `ctx.characters[].skills`，不受 zone 门控。
+  - `entity_gen` 提示词（私有仓 + 公开占位）新增「**强度自检**」节：数值/机制必须落在世界书
+    对应品质/Tier 区间内；主动技能要能正常出伤/吸伤/施放、触发条件泛用合理；**偏强可接受、
+    过弱（无法正常发挥作用的词条）一律重写**。
+- **新占位符 `{{DELTA_TIME}}`**：orchestrator 在 `advanceTime` 之后写 `ctx.deltaTimeMinutes`
+  供 resolver 读；归入 Delta 会话的 ephemeral（每轮 turn_context）。
+- **内容资产**：私有内容仓与公开占位 `agent-config.json` 均加 `daily_check` 条目
+  （worldBookIds 绑 `world_setting` + `combat_extra`，吃《状态规则》《品质效果限定》等生成规则）。
+- 验证：8 道闸门全绿；`test:run` 355 文件 / 8700（8692 通过 / 8 跳过）；
+  新增 `daily-check-translator.test.ts` + `update_status_effect` 单测；受影响的
+  `applyTimeAdvance` F07 测试按新架构改为「Code 不动状态」+ op 单测。
+
 ### 2026-10-03 新战斗前端 C6：直接吃沙盒 `CombatState`，删投影桥｜已实施，真机待验证
 
 战斗面板从「吃 v3 `CombatView`/`CombatEvent` 投影」改为**直接吃沙盒权威 `CombatState`**（唯一数据源），

@@ -59,6 +59,18 @@ export const VISIBILITY_MATRIX: Record<string, ZoneVisibilityMatrix> = {
     outline: 'FULL',
     variable: 'KEYS',
   },
+  // daily_check（Phase 3）：周期/条件结算需要完整角色状态 + 生成规则世界书（《状态规则》
+  // 《品质效果限定》等）；剧情大纲与任务与它无关。
+  daily_check: {
+    memory: 'SUMMARY',
+    npc: 'FULL',
+    world: 'FULL',
+    quest: 'NONE',
+    craft: 'NONE',
+    combat: 'NONE',
+    outline: 'NONE',
+    variable: 'KEYS',
+  },
   story: {
     memory: 'SUMMARY',
     npc: 'NARRATIVE',

@@ -181,9 +181,10 @@ describe('② 体量轴：占位 agent-config 规格（§6 / D32）', () => {
     >;
   };
 
-  it('12 个 agent id 齐（2026-10-02：char_gen + item_gen 合并为 entity_gen，14 → 13；C5a 移除 combat_enemy，13 → 12）', () => {
-    expect(Object.keys(agentConfig.agents)).toHaveLength(12);
+  it('13 个 agent id 齐（2026-10-02：char_gen + item_gen 合并为 entity_gen，14 → 13；C5a 移除 combat_enemy，13 → 12；2026-10-03 Phase 3 新增 daily_check，12 → 13）', () => {
+    expect(Object.keys(agentConfig.agents)).toHaveLength(13);
     expect(Object.keys(agentConfig.agents)).toContain('entity_gen');
+    expect(Object.keys(agentConfig.agents)).toContain('daily_check');
     expect(Object.keys(agentConfig.agents)).not.toContain('char_gen');
     expect(Object.keys(agentConfig.agents)).not.toContain('item_gen');
   });

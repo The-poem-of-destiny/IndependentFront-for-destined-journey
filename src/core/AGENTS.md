@@ -190,6 +190,10 @@ src/core/                    ← 核心引擎
   │          combat 分支显式等 charGenPromise / run() 末尾与失败路径统一 await。
   │          per-agent 依赖：`PipelineStage.agentWaitFor[agentId]`（缺省回退 stage.waitFor），
   │          依赖失败的 agent 只跳过自己、不连坐同 stage 其他 agent
+  │       🆕 [Phase 3 / 2026-10-03] `daily_check` 独立成 stage，插在 Stage 2（dispatcher，产
+  │          `delta_time` 并调 `applyTimeAdvance`）**之后**、Stage 3（vars_update）**之前**；
+  │          `advanceTime` 之后把本轮分钟写进 `ctx.deltaTimeMinutes`（供 `{{DELTA_TIME}}`）；
+  │          战斗会话活跃（`ctx.combatActive`）时在 `executeStage` 跳过该 agent
   ├── story/story-rescue.ts               ← Story 正文救援（正文吞思维链 / 思维链泄漏正文 AI 缺陷兜底）
   ├── agents/random-tables.ts              ← [Phase 8.5] NPC 生成随机表
   │
@@ -234,6 +238,12 @@ src/core/                    ← 核心引擎
   │                                    advanceTurn / createSnapshot / restoreSnapshot /
   │                                    commitPlotThreadTurn（2026-09-09 主线细化收口）
   ├── state/state-manager.ts              ← 唯一状态写入入口（M2按名寻址 M4名字唯一化 M5变量迁profile+快照重建）
+  │      🆕 [Phase 3 / 2026-10-03] **状态计时全权交 `daily_check`**：`applyTimeAdvance` 删掉了
+  │         遍历角色扣减 `remainingTime` / 到期移除的整段逻辑（现恒返回空补丁，只推时钟 +
+  │         天气/随机事件/地块结算三个钩子）；`StatusEffect.carryMinutes`（F07）随之退役。
+  │         新增 op `update_status_effect`（按名改既有状态的 `remainingTime`（null=永久）/`stacks`，
+  │         找不到名字 warn 忽略不抛）；资源与上限仍走既有 `update_character`（白名单含
+  │         `hp/maxHp/mp/maxMp/sp/maxSp` 且自带 `[0, max]` 钳制，故未新增资源 op）
   │      🗃 **提交级缓存 `CommitScope`**（2026-08-17，本文件已 2664 行）：读收到入口、写收到出口 ——
   │         一次 `commitChatState` 至多 1 读 1 写 profile + 1 读 1 次 `bulkPut` characters。
   │         此前每个补丁各跑一趟完整读-改-写（10 个变量补丁 = 20 次 `getProfile` + 10 次 `updateProfile`）
@@ -258,6 +268,11 @@ src/core/                    ← 核心引擎
   ├── variables/vars-update-translator.ts     ← [Q-19] AI JSON → `StatePatch[]` 的**纯翻译层**（无 I/O，import 只有类型）。
   │                                    从 `agent-orchestrator.processStageMarkers`（那时 1327 行）里剥出来的
   │                                    纯映射；不违反 ADR-21 —— `commitChatState` 仍是唯一写入口
+  ├── variables/daily-check-translator.ts     ← 🆕 [Phase 3 / 2026-10-03] daily_check 的 AI JSON → `StatePatch[]`
+  │                                    纯翻译层（同款：无 I/O、只 import 类型）：`characterUpdates` →
+  │                                    `update_character`（hp/mp/sp+上限，白名单已覆盖且自带钳制）、
+  │                                    `statusUpdates` → `update_status_effect`、`statusRemovals` →
+  │                                    `remove_status_effect`。整组认不出当没写、单条认不出只丢那一条
   ├── utils/dice.ts / memory-store.ts / memory-summarizer.ts / plot-outline.ts / plot-engine.ts / location-db.ts
   ├── plot/plot-threads.ts               ← 🆕 [主线细化层 ADR-35 / 2026-09-09] 事件线纯领域逻辑：
   │                                    PlotThreadNode/Flags + 节奏闸门 evaluatePlotThreadGate
@@ -404,9 +419,14 @@ src/core/                    ← 核心引擎
   │   │                                    补齐 max 资源）+ 纯函数 applyOps/setMeta/状态增删 + 轻量不变量校验
   │   │                                    （负/超上限 **warn 照写不抛**）
   │   ├── settlement.ts                     ← buildCombatSettlementPatches：终局把 origin:'save' 单位的
-  │   │                                    hp/mp/sp + 状态差量转 StatePatch（temp 单位与战斗字段丢弃；
-  │   │                                    exp/fp 由调用方经 extras 传入）+ computeCombatExpRewards
-  │   │                                    （ally_win 经验：击杀敌方 level×系数 平分给存活存档单位）
+  │   │                                    hp/mp/sp + 状态差量转 StatePatch（temp 单位、**集群编队**与战斗字段
+  │   │                                    丢弃；exp/fp 由调用方经 extras 传入）+ computeCombatExpRewards
+  │   │                                    （胜利经验：击杀敌方 Lv×层级系数 × 集群衰减 (1+(N-1)×0.2)
+  │   │                                    平分给存活存档单位）+ deriveCombatOutcome/isCombatOutcome
+  │   │                                    （AI 写中文 outcome 时由 Code 按场上存活推导胜负）
+  │   ├── roster.ts                         ← 🆕 marker 名单 → 参战单位：解析 `名字×N` 计数语法，
+  │   │                                    同一名字人数 ≥3 时聚合成**集群单位**（资源=个体上限×N、
+  │   │                                    `cluster.alive/total=N`）；buildCombatRosterFromMarker 纯函数
   │   ├── protocol.ts                       ← loadCombatProtocolText：从世界书 combat_extra 取协议条目正文
   │   │                                    （点名取文，**不看 enabled、不走 EJS 激活**）+ 纯拼装函数
   │   ├── tools.ts                          ← 15 个工具（7 状态维护 + 3 骰 + calc/calc_damage/calc_initiative

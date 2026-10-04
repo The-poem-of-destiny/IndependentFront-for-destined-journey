@@ -5,6 +5,7 @@ const AGENT_ACTIVITY_LABELS: Record<string, string> = {
   plot_pre_check: '推演剧情脉络',
   story: '书写此刻',
   request_dispatcher: '辨认后续事件',
+  daily_check: '结算时序流转',
   vars_update: '更新世界状态',
   memory_summary: '封存本回合记忆',
   plot_post_check: '校准未来走向',
@@ -38,7 +39,6 @@ const TOOL_ACTIVITY_LABELS: Record<string, string> = {
   combat_add_status: '施加状态效果',
   combat_remove_status: '移除状态效果',
   combat_set_meta: '更新战局记录',
-  combat_yield_to_player: '把主持权交给玩家',
   calc: '进行推演计算',
   calc_damage: '推演伤害结算',
   calc_initiative: '推演先攻顺序',
@@ -109,10 +109,6 @@ export function presentToolActivity(
       case 'combat_update_unit':
       case 'combat_remove_unit': {
         detail = textOf(input?.name);
-        break;
-      }
-      case 'combat_yield_to_player': {
-        detail = textOf(input?.unit);
         break;
       }
     }

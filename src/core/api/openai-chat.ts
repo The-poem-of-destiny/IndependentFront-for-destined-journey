@@ -13,7 +13,18 @@ function cacheReadTokens(usage: JsonObject): number | undefined {
 export function buildOpenAiBody(input: LlmBuildInput): JsonObject {
   const body: JsonObject = {
     model: input.model,
-    messages: input.messages.map(({ native: _native, ...message }) => message) as never,
+    messages: input.messages.map(({ native, ...message }) => {
+      const out: Record<string, unknown> = { ...message };
+      // 🔴 回传 provider 原生 assistant 消息时，必须把 `reasoning_content` 一起带上
+      //    （DeepSeek 思考模式硬要求；此前把 native 整个剥掉 → 400）。
+      if (native && native.protocol === 'openai-chat' && native.value) {
+        const value = native.value as Record<string, unknown>;
+        if (typeof value.reasoning_content === 'string' && value.reasoning_content) {
+          out.reasoning_content = value.reasoning_content;
+        }
+      }
+      return out;
+    }) as never,
     temperature: input.temperature ?? 0.7,
     max_tokens: input.maxTokens ?? 65_536,
     top_p: input.topP ?? 1,
@@ -141,6 +152,9 @@ export class OpenAiStreamAccumulator implements LlmStreamAccumulator {
   snapshot() {
     const toolCalls = [...this.calls.values()];
     const content: JsonObject = { role: 'assistant', content: this.fullText || null };
+    // 🔴 DeepSeek 思考模式要求把本轮 assistant 的 reasoning_content 原样回传，
+    //    否则下一轮请求报 400「reasoning_content must be passed back」。
+    if (this.reasoning) content.reasoning_content = this.reasoning;
     if (toolCalls.length) {
       content.tool_calls = toolCalls.map((call) => ({
         id: call.id,

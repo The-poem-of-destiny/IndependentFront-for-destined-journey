@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { createDefaultCharacterState } from '../../../../src/core/types/types';
 import {
   assembleCombatSystemPrompt,
+  assignPlayerTurn,
   buildCombatFlowText,
   buildCombatRosterText,
   runCombatSandbox,
@@ -40,11 +41,33 @@ function mockClient(
   return client;
 }
 
+describe('assignPlayerTurn — Code 侧指派玩家回合（取代 combat_yield_to_player 工具）', () => {
+  it('未终局 → 指派第一个存活我方为当前行动单位', () => {
+    const state = makeState();
+    assignPlayerTurn(state);
+    expect(state.meta.pendingPlayerUnit).toBe('艾莉丝');
+  });
+
+  it('已有指派 → 不覆盖', () => {
+    const state = makeState();
+    state.meta.pendingPlayerUnit = '别人';
+    assignPlayerTurn(state);
+    expect(state.meta.pendingPlayerUnit).toBe('别人');
+  });
+
+  it('已终局 → 不指派', () => {
+    const state = makeState();
+    state.meta.phase = 'ended';
+    assignPlayerTurn(state);
+    expect(state.meta.pendingPlayerUnit).toBeUndefined();
+  });
+});
+
 describe('系统提示组装', () => {
   it('buildCombatFlowText 含关键流程节点', () => {
     const flow = buildCombatFlowText();
     expect(flow).toContain('combat_set_meta');
-    expect(flow).toContain('combat_yield_to_player');
+    expect(flow).toContain('结束本轮输出');
     expect(flow).toContain('禁止自己编造骰值');
   });
 
@@ -105,12 +128,9 @@ describe('runCombatSandbox', () => {
     expect(result.patches.some((p) => p.op === 'set_hp' && p.value === 150)).toBe(true);
   });
 
-  it('yield 后 awaitingPlayer 为真、未终局不产补丁', async () => {
+  it('未终局 → 自动把玩家回合指派给存活我方、不产补丁', async () => {
     const state = makeState();
-    const client = mockClient(async (_call, executor) => {
-      await executor('combat_yield_to_player', { unit: '艾莉丝', prompt: '轮到你' });
-      return { output: '轮到你行动。' };
-    });
+    const client = mockClient(async () => ({ output: '轮到你行动。' }));
     const result = await runCombatSandbox({ state, client });
     expect(result.ended).toBe(false);
     expect(result.awaitingPlayer).toBe(true);
@@ -120,10 +140,7 @@ describe('runCombatSandbox', () => {
 
   it('续战：传入 transcript + playerInput，system 不重复插入', async () => {
     const state = makeState();
-    const first = mockClient(async (_call, executor) => {
-      await executor('combat_yield_to_player', { unit: '艾莉丝', prompt: '轮到你' });
-      return { output: '等待你。' };
-    });
+    const first = mockClient(async () => ({ output: '等待你。' }));
     const r1 = await runCombatSandbox({ state, client: first });
 
     const second = mockClient(async (_call, executor) => {
@@ -202,7 +219,6 @@ describe('runCombatSandboxLoop', () => {
     const client = mockClient(async (_call, executor) => {
       call += 1;
       if (call === 1) {
-        await executor('combat_yield_to_player', { unit: '艾莉丝', prompt: '轮到你' });
         return { output: '第一轮。' };
       }
       await executor('combat_set_meta', { patch: { phase: 'ended', outcome: 'ally_win' } });

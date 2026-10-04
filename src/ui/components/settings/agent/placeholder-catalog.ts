@@ -48,6 +48,12 @@ export const ALL_PLACEHOLDER_META: readonly PlaceholderBadge[] = [
   { key: 'INVENTORY', color: '#ff9800', desc: '背包 — 角色物品列表', category: '角色' },
   { key: 'GAME_TIME', color: '#4caf50', desc: '世界状态 — 时间/位置/天气', category: '世界' },
   {
+    key: 'DELTA_TIME',
+    color: '#4caf50',
+    desc: '本轮时间推进 — 距上一结算流逝的时长（仅 daily_check，为 0 表示本回合未推进）',
+    category: '世界',
+  },
+  {
     key: 'MAP_CONTEXT',
     color: '#4caf50',
     desc: '地图上下文 — 当前地块/一跳邻接/天气/在途（未装地图包时为空）',
@@ -182,6 +188,8 @@ const AGENT_SCOPED: Record<string, readonly string[]> = {
   story: ['RANDOM_EVENTS'],
   plot_pre_check: ['PLOT_THREAD_TURN'],
   plot_post_check: ['PLOT_THREAD_TURN'],
+  // daily_check（Phase 3）：{{DELTA_TIME}} 是它判断「过了多久」的依据；地图给环境类结算。
+  daily_check: ['DELTA_TIME', 'MAP_CONTEXT'],
 };
 
 /**

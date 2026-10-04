@@ -231,8 +231,8 @@ describe('resolvePlotTree', () => {
 // ========== DEFAULT_AGENT_PIPELINE ==========
 
 describe('DEFAULT_AGENT_PIPELINE', () => {
-  it('应有 4 个阶段（2026-08-16 并行化重排：6 层 → 4 层）', () => {
-    expect(DEFAULT_AGENT_PIPELINE.stages).toHaveLength(4);
+  it('应有 5 个阶段（2026-08-16 并行化重排：6 层 → 4 层；2026-10-03 Phase 3 插入 daily_check：4 → 5）', () => {
+    expect(DEFAULT_AGENT_PIPELINE.stages).toHaveLength(5);
   });
 
   it('第一阶段 (memory_recall + plot_pre_check) 并行，无依赖', () => {
@@ -256,8 +256,16 @@ describe('DEFAULT_AGENT_PIPELINE', () => {
     expect(s.waitFor).toEqual(['story']);
   });
 
-  it('第四阶段 (vars_update + plot_post_check) 并行，per-agent 独立依赖互不连坐', () => {
+  it('第三点五阶段 (daily_check) 在 dispatcher 之后、vars_update 之前', () => {
     const s = DEFAULT_AGENT_PIPELINE.stages[3];
+    expect(s.agents).toEqual(['daily_check']);
+    // 排在 dispatcher 之后（时间推进已发生）、且早于 vars_update（新状态不被同回合扣计时）
+    expect(s.waitFor).toContain('story');
+    expect(s.waitFor).toContain('request_dispatcher');
+  });
+
+  it('第四阶段 (vars_update + plot_post_check) 并行，per-agent 独立依赖互不连坐', () => {
+    const s = DEFAULT_AGENT_PIPELINE.stages[4];
     expect(s.agents).toContain('vars_update');
     expect(s.agents).toContain('plot_post_check');
     // 并集 waitFor 覆盖两边的依赖（validatePipeline 的「已产出」检查按它走）

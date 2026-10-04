@@ -465,7 +465,6 @@ export const AGENT_TOOL_MAP: Record<string, string[]> = {
     'combat_add_status',
     'combat_remove_status',
     'combat_set_meta',
-    'combat_yield_to_player',
     'get_character',
     'get_inventory',
     'roll_d20',

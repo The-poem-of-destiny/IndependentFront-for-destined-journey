@@ -57,6 +57,12 @@ export const AGENT_LIST: readonly AgentListEntry[] = [
     stage: 2,
   },
   {
+    id: 'daily_check',
+    name: '日常检定',
+    desc: '结算状态倒计时/到期/周期与条件效果（不做社交/属性检定）',
+    stage: 2,
+  },
+  {
     id: 'vars_update',
     name: '变量更新',
     desc: '根据调度器标签更新角色状态、物品状态、环境效果',

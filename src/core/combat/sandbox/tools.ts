@@ -274,25 +274,18 @@ export const COMBAT_SANDBOX_TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
-      name: 'combat_yield_to_player',
+      name: 'combat_write_summary',
       description:
-        '把主持权交给玩家：标记当前等待玩家输入的单位（可选给出行动选项）。调用后你应结束本回合，等待玩家回复。',
+        '🔴 终局时调用一次：用**一段自然语言**复述这整场战斗（谁和谁交手、过程与结果、我方现在的状况），供主叙事 AI 接着往下写。像讲故事一样，**不要罗列数值或面板**。',
       parameters: {
         type: 'object',
         properties: {
-          unit: { type: 'string', description: '等待玩家输入的单位名' },
-          prompt: { type: 'string', description: '给玩家的一句话提示' },
-          options: {
-            type: 'array',
-            items: { type: 'string' },
-            description: '可选行动选项（叙事，非强制）',
-          },
+          summary: { type: 'string', description: '整场战斗的自然语言简述（一段话）' },
         },
-        required: ['unit', 'prompt'],
+        required: ['summary'],
       },
     },
   },
-
   // ── 只读查询 ──
   {
     type: 'function',
@@ -619,21 +612,12 @@ export async function executeCombatTool(
       Object.assign(state, setCombatMeta(state, args.patch));
       return { ok: true, meta: state.meta as unknown as Record<string, unknown> };
     }
-    case 'combat_yield_to_player': {
-      const key = requireUnit(state, args.unit);
-      if (!args.prompt) throw new Error('combat_yield_to_player: 缺少 prompt');
-      state.meta.pendingPlayerUnit = key;
-      state.meta.pendingOptions = Array.isArray(args.options)
-        ? args.options.map((o: unknown) => String(o))
-        : undefined;
-      return {
-        waitingForPlayer: true,
-        unit: key,
-        prompt: String(args.prompt),
-        options: state.meta.pendingOptions,
-      };
+    case 'combat_write_summary': {
+      const summary = typeof args.summary === 'string' ? args.summary.trim() : '';
+      if (!summary) throw new Error('combat_write_summary: 缺少 summary');
+      Object.assign(state, setCombatMeta(state, { summary }));
+      return { ok: true };
     }
-
     case 'roll_d20': {
       const result = d20(args.modifier ?? 0, args.advantage, args.disadvantage);
       return args.reason ? { ...result, reason: args.reason } : { ...result };

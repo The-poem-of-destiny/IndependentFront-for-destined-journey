@@ -523,6 +523,11 @@ export const DEFAULT_AGENT_PIPELINE: Pipeline = {
     { agents: ['story'], waitFor: ['memory_recall', 'plot_pre_check'] },
     // Stage 2: 请求调度 + 记忆摘要（并行 —— 两者都只依赖 story，互不依赖）
     { agents: ['request_dispatcher', 'memory_summary'], waitFor: ['story'] },
+    // Stage 2.5: 日常检定 daily_check（Phase 3）—— 周期/条件结算。
+    //   🔴 必须排在 dispatcher **之后**：delta_time 由 dispatcher 产出、applyTimeAdvance 也在
+    //      它这一 stage 的标记处理里调用，插在之后才满足「时间推进之后再结算」。
+    //   🔴 排在 vars_update **之前**：本回合新施加的状态不被同回合立刻扣计时。
+    { agents: ['daily_check'], waitFor: ['story', 'request_dispatcher'] },
     // Stage 3: 变量更新 + 剧情复检（并行 —— 各自独立依赖，互不连坐：
     //          vars_update 不需要 memory_summary，plot_post_check 不需要 dispatcher）
     {
@@ -1685,6 +1690,15 @@ export interface AgentContext {
   /** 存档级游戏时间（供 memory_summary 等 Agent 注入时间上下文） */
   gameTime?: GameTime;
 
+  /**
+   * 🆕 daily_check（Phase 3）：**本轮**推进的游戏时间（分钟）。
+   *
+   * 🔴 由 orchestrator 在 `applyTimeAdvance` 之后写进 ctx（dispatcher 产出的 `delta_time`）——
+   * 不是 game-pipeline 在 buildContext 供值，因为那个时点时间还没推进。`{{DELTA_TIME}}`
+   * 与 daily_check 据此判断「过了多久、该结算什么」。缺省 / 非正数 = 本回合时间未推进。
+   */
+  deltaTimeMinutes?: number;
+
   // --- 地图 v1（§8.1 读侧）: `{{MAP_CONTEXT}}` 的两格可变输入 ---
   /**
    * 地图派生态（`SaveProfile.worldFlags.map`，由 game-pipeline 经 `getMapFlags()` 取出）。
@@ -2088,6 +2102,7 @@ export type StatePatchOp =
   | 'remove_character' // 删除角色（按名）— 死亡/离场清理 (规范 §2)
   | 'rename_character' // 角色改名 — 逻辑键=名字，改名需专用 op 迁移键 (规范 §2)
   | 'add_status_effect'
+  | 'update_status_effect' // daily_check（Phase 3）: 按名改既有状态的 remainingTime / stacks
   | 'remove_status_effect'
   | 'add_item'
   | 'remove_item'

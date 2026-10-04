@@ -199,6 +199,43 @@ describe('content-store — Pinia store 行为', () => {
     expect(c.contentStatus).toBe('placeholder');
     fetchSpy.mockRestore();
   });
+
+  it('resolveProjectPresets 成功返回 /data/defaults/presets.json 的数组', async () => {
+    const presets = [{ id: 'p1', name: '预设一', settings: {}, createdAt: 1, updatedAt: 1 }];
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify(presets), { status: 200 }));
+    const c = useContentStore();
+    const result = await c.resolveProjectPresets();
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe('p1');
+    fetchSpy.mockRestore();
+  });
+
+  it('resolveProjectPresets 404 → []（不上报、不把占位态切成 error —— 公开仓没有这个文件）', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('not found', { status: 404 }));
+    const c = useContentStore();
+    const result = await c.resolveProjectPresets();
+    expect(result).toEqual([]);
+    expect(c.fetchReports).toHaveLength(0);
+    expect(c.contentStatus).toBe('placeholder');
+    fetchSpy.mockRestore();
+  });
+
+  it('resolveProjectPresets 网络异常 / 非数组 → []（永不抛）', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'));
+    const c = useContentStore();
+    expect(await c.resolveProjectPresets()).toEqual([]);
+    fetchSpy.mockRestore();
+
+    const fetchSpy2 = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ not: 'array' }), { status: 200 }));
+    expect(await c.resolveProjectPresets()).toEqual([]);
+    fetchSpy2.mockRestore();
+  });
 });
 
 describe('content-store — 引擎层上报钩子（§5.5 census 注入缝）', () => {

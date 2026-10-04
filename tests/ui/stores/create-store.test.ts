@@ -1135,7 +1135,7 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).not.toContain('身无分文');
   });
 
-  it('选中 system_core 世界书条目时开场消息保持沉默，交由世界书通道注入', () => {
+  it('选中 system_core 世界书条目时，开场消息带上命定核心（让首轮意识到它）', () => {
     // 新的 UI 起源印记选择走 selectedSystemCoreEntry（system_core 世界书条目）
     store.systemCoreEntries = [
       {
@@ -1153,12 +1153,12 @@ describe('buildOpeningPrompt', () => {
     ];
     store.selectSystemCoreEntry(413);
     const prompt = store.buildOpeningPrompt();
-    // 条目名与全文都由世界书通道注入
-    // （buildEnabledWorldBookEntries → SaveSlot.metadata.enabledWorldBookEntries → worldbook-loader）。
-    // 开场 user 消息不再用通用话术覆盖不同核心的人格与出场方式。
-    expect(prompt).not.toContain('占位印记');
-    expect(prompt).not.toContain('寄宿于灵魂深处的占位设定');
-    expect(prompt).not.toContain('起源印记');
+    // 🔴 2026-10-03：核心条目本体仍由世界书通道注入
+    //    （buildEnabledWorldBookEntries → SaveSlot.metadata.enabledWorldBookEntries → worldbook-loader），
+    //    但开场消息**另加一段可读连接**，否则首轮正文会把核心当普通背景设定、意识不到它是主角的核心。
+    expect(prompt).toContain('命定核心');
+    expect(prompt).toContain('占位印记');
+    expect(prompt).toContain('寄宿于灵魂深处的占位设定');
   });
 });
 

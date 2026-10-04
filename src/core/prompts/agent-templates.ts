@@ -543,6 +543,15 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     fixedExamples: '',
   },
 
+  // ---- daily_check: 日常检定（Phase 3） ----
+  // 完整提示词在 agent-config.json 的 systemPrompt 字段。
+  // 输出格式: <json>（characterUpdates / statusAdds / statusUpdates / statusRemovals）
+  daily_check: {
+    fixedSystem:
+      '日常检定系统。结算时间流逝带来的状态倒计时/到期/周期效果，以及日常物品与技能使用的效果，输出 <json>（characterUpdates/statusAdds/statusUpdates/statusRemovals）。完整提示词见 agent-config.json 和模板系统。',
+    fixedExamples: '',
+  },
+
   // ---- v3 兼容别名: plot_check / plot_correct ----
   plot_check: {
     fixedSystem: '剧情规划系统。完整提示词见 agent-config.json 和模板系统。',

@@ -744,40 +744,59 @@ export const useSettingsStore = defineStore('settings', () => {
     // 用户真正改过的值指纹不匹配、原样保留。迁移幂等：第二次启动已无命中键。
     migrateLegacyAgentOverrides(settings.value);
 
-    // 预设播种（与 agent 覆写层无关，仍走这一支）：DB 空 → seed 出厂预设；
-    // DB 有同 id → 同步出厂 name（保留用户 prompts 编辑）
+    // 预设播种（与 agent 覆写层无关，仍走这一支）。
     //
     // 🔴 内容-引擎分离波 1 / D22：预设只写 Dexie，不再碰 `settings.presets` 镜像。
     //    （此前这里还同步写镜像 —— 镜像删除后那段是死代码。）响应式视图由
     //    usePresets composable 提供，本处 seed 之后下次 loadPresets 自然读到。
     // 🔴 D44：agent 数值/提示词/世界书不再 boot 播种进覆写层 —— 读侧
-    //    （getAgentSettings）经 projectAgentDefaults 合默认层。本循环现在**只**负责
-    //    story 的预设落 Dexie（其余 agent 没有嵌入式预设，entry.preset 为 null）。
+    //    （getAgentSettings）经 projectAgentDefaults 合默认层。
+    //
+    // 🔴 2026-10-03 对齐 pack（预设来源）：出厂预设 = agent-config 里内嵌的 story 预设
+    //    ∪ provider 的 `/data/defaults/presets.json`（pack 已装时即 `pack.presets`）。
+    //    于是**无 pack 的 overlay 开发态与装包态拿到同一组默认预设** —— 此前 presets.json
+    //    只是 pack 的输入，overlay 下那份额外默认预设根本进不来（症状：卸载后预设只剩一个）。
+    //    播种规则逐 id：库里没有 → 补；有同 id → 只把 name 同步成出厂版（保留用户 prompts 编辑）。
     const pd = projectAgentDefaults.value?.agents;
     if (!pd) return;
-    for (const [, entry] of Object.entries(pd)) {
+
+    const factoryPresets: PresetItem[] = [];
+    for (const entry of Object.values(pd)) {
       if (entry.preset && entry.presetId) {
-        try {
-          const { getPresets, savePreset } = await import('@engine/persistence/database');
-          const existing = await getPresets();
-          const embedded = JSON.parse(JSON.stringify(entry.preset)) as PresetItem;
-          if (!existing || existing.length === 0) {
-            await savePreset(embedded);
-          } else {
-            // M5.1: 出厂预设改名同步 —— id 匹配时把 DB 预设 name 更新为出厂版
-            // （prompts/settings 保留用户编辑；仅 name 跟随 agent-config.json）
-            const dbMatch = existing.find((p) => p.id === embedded.id);
-            if (dbMatch && dbMatch.name !== embedded.name) {
-              await savePreset({ ...dbMatch, name: embedded.name });
-            }
-          }
-        } catch {
-          /* IndexedDB 不可用时静默跳过 */
-        }
-        if (!settings.value.activePresetId) {
-          settings.value.activePresetId = entry.presetId;
+        factoryPresets.push(JSON.parse(JSON.stringify(entry.preset)) as PresetItem);
+      }
+    }
+    try {
+      const providerPresets = (await useContentStore().resolveProjectPresets()) as PresetItem[];
+      for (const p of providerPresets) {
+        if (p && p.id && !factoryPresets.some((f) => f.id === p.id)) {
+          factoryPresets.push(JSON.parse(JSON.stringify(p)) as PresetItem);
         }
       }
+    } catch {
+      /* provider 不可用时只用内嵌 story 预设 */
+    }
+
+    if (factoryPresets.length > 0) {
+      try {
+        const { getPresets, savePresets } = await import('@engine/persistence/database');
+        const existing = await getPresets();
+        const byId = new Map(existing.map((p) => [p.id, p] as const));
+        const toWrite: PresetItem[] = [];
+        for (const fp of factoryPresets) {
+          const dbMatch = byId.get(fp.id);
+          if (!dbMatch) toWrite.push(fp);
+          else if (dbMatch.name !== fp.name) toWrite.push({ ...dbMatch, name: fp.name });
+        }
+        if (toWrite.length > 0) await savePresets(toWrite);
+      } catch {
+        /* IndexedDB 不可用时静默跳过 */
+      }
+    }
+
+    const storyPresetId = pd.story?.presetId;
+    if (storyPresetId && !settings.value.activePresetId) {
+      settings.value.activePresetId = storyPresetId;
     }
   }
 

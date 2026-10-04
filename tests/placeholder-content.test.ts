@@ -268,11 +268,13 @@ describe('占位内容 · 美化规则', () => {
 });
 
 describe('占位内容 · agent-config', () => {
-  // §6 规格：占位版固定 12 个 agent id（2026-10-02：char_gen + item_gen 合并为 entity_gen，14 → 13；
-  // C5a 移除 combat_enemy，13 → 12；与真实内容侧同名集由私有仓 CI 守）
-  it('agent id 恰好 12 个，一个不多一个不少', () => {
-    expect(Object.keys(agentConfigRaw.agents)).toHaveLength(12);
+  // §6 规格：占位版固定 13 个 agent id（2026-10-02：char_gen + item_gen 合并为 entity_gen，14 → 13；
+  // C5a 移除 combat_enemy，13 → 12；2026-10-03 Phase 3 新增 daily_check，12 → 13；
+  // 与真实内容侧同名集由私有仓 CI 守）
+  it('agent id 恰好 13 个，一个不多一个不少', () => {
+    expect(Object.keys(agentConfigRaw.agents)).toHaveLength(13);
     expect(Object.keys(agentConfigRaw.agents)).toContain('entity_gen');
+    expect(Object.keys(agentConfigRaw.agents)).toContain('daily_check');
   });
 
   it('每个 agent 的 systemPrompt 与 template 都非空（image_prompt 除外 —— 它的那份归方言）', () => {
@@ -340,6 +342,14 @@ describe('占位内容 · agent-config', () => {
         '<tag>',
       ],
       vars_update: ['<json>', '<status_effects>', '"consume"', '"upsert"', '"affections"'],
+      // 🔴 2026-10-03 Phase 3：daily_check 的输出契约（三个数组名是翻译层逐字匹配的键）
+      daily_check: [
+        '<json>',
+        '"characterUpdates"',
+        '"statusAdds"',
+        '"statusUpdates"',
+        '"statusRemovals"',
+      ],
       request_dispatcher: [
         '<entity_gen_request type="character"',
         '<char_update_request',
@@ -357,13 +367,7 @@ describe('占位内容 · agent-config', () => {
       //    上面 imageDialects 那条用例逐条钉（两条方言各钉一遍 —— 换方言不换协议）
       // 🔴 2026-10-02 战斗重写（Phase 2 / C1）：combat 改单一沙盒 DM 主持，契约片段
       //    换成新流程骨架的关键节点。
-      combat: [
-        '<战斗协议>',
-        '# 战斗流程',
-        'combat_set_meta',
-        'combat_yield_to_player',
-        '{战斗结算}',
-      ],
+      combat: ['<战斗协议>', '# 战斗流程', 'combat_set_meta', '{战斗结算}'],
     };
     for (const [id, tokens] of Object.entries(CONTRACT)) {
       const prompt = agentConfigRaw.agents[id].systemPrompt as string;

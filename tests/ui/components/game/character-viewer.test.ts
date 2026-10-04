@@ -220,6 +220,48 @@ describe('buildAscensionTracks', () => {
     expect(hasAnyAscension(tracks)).toBe(true);
   });
 
+  it('effectDescriptions（词条名→描述）优先渲染成「名称：描述」，不落成一坨 JSON', () => {
+    const tracks = buildAscensionTracks(
+      char({
+        ascension: {
+          enabled: true,
+          elements: [
+            {
+              name: '血魔之躯',
+              description: '',
+              effects: ['一段旧的裸描述'],
+              effectDescriptions: { 血肉再生: '每回合恢复3%最大HP', 异质抗性: '免疫失血衰减' },
+            },
+          ],
+          authority: [],
+          law: [],
+          deityPosition: '',
+          divineKingdom: { name: '', description: '' },
+        },
+      }),
+    );
+    expect(tracks[0].entries[0].effects).toEqual([
+      '血肉再生：每回合恢复3%最大HP',
+      '异质抗性：免疫失血衰减',
+    ]);
+  });
+
+  it('无 effectDescriptions 时回退到 effects 裸串', () => {
+    const tracks = buildAscensionTracks(
+      char({
+        ascension: {
+          enabled: true,
+          elements: [{ name: '空间', description: '', effects: ['位移'] }],
+          authority: [],
+          law: [],
+          deityPosition: '',
+          divineKingdom: { name: '', description: '' },
+        },
+      }),
+    );
+    expect(tracks[0].entries[0].effects).toEqual(['位移']);
+  });
+
   /**
    * ★ Phase 9 把这三个字段从 Record 改成了 Array。存量存档里可能还是旧形状，
    * 而 `.map` 对 Record 不成立 —— 不摊平的话整个弹窗白屏，不是少一行。

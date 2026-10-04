@@ -12,6 +12,9 @@ import ItemDetailBody from './ItemDetailBody.vue';
 import { type PanelEntry } from '../../lib/item-view';
 // 🆕 重铸（2026-08-24）：单条目重铸 —— NPC 的装备/技能/背包条目都能重写
 import type { RewriteTarget } from '@engine/agents/entity-gen-agent';
+// 登神三档的渲染与 CharacterViewerModal 共用同一条判定入口（别各写一套 —— 一处跟了新形状、
+// 另一处没跟，症状就是本面板把要素对象 `JSON.stringify` 成一坨原始数据）
+import { buildAscensionTracks, hasAnyAscension } from './character-viewer';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -29,6 +32,12 @@ const affections = computed(() => game.saveProfile?.affections || {});
 const contracts = computed(() => game.saveProfile?.contracts || []);
 
 const selected = computed(() => npcs.value[selectedIdx.value] || null);
+
+// 登神长阶：与 CharacterViewerModal 共用 buildAscensionTracks（唯一判定处）
+const selectedAscensionTracks = computed(() =>
+  selected.value ? buildAscensionTracks(selected.value) : [],
+);
+const ascensionUnlocked = computed(() => hasAnyAscension(selectedAscensionTracks.value));
 
 watch(
   () => npcs.value.length,
@@ -602,34 +611,36 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
             </div>
           </template>
 
-          <!-- 登神 -->
+          <!-- 登神（渲染逻辑与 CharacterViewerModal 共用 buildAscensionTracks） -->
           <template v-if="detailTab === 'ascension'">
             <div v-if="!selected.ascension?.enabled" class="empty-tab">该角色未开启登神长阶</div>
             <template v-else>
-              <div v-if="Object.keys(selected.ascension.elements || {}).length" class="asc-section">
-                <div class="d-label">要素</div>
-                <div v-for="(v, k) in selected.ascension.elements" :key="k" class="asc-item">
-                  {{ k }}: {{ (v as any).description || JSON.stringify(v) }}
+              <div v-for="track in selectedAscensionTracks" :key="track.key" class="asc-section">
+                <div class="d-label">
+                  {{ track.label }} {{ track.entries.length }}/{{ track.cap }}
+                </div>
+                <div v-if="!track.entries.length" class="asc-empty">{{ track.unlockLevel }} 起</div>
+                <div v-for="entry in track.entries" :key="entry.name" class="asc-item">
+                  <div class="asc-item-name">{{ entry.name }}</div>
+                  <p v-if="entry.description" class="asc-item-desc">{{ entry.description }}</p>
+                  <ul v-if="entry.effects.length" class="asc-item-effects">
+                    <li v-for="(fx, i) in entry.effects" :key="i">{{ fx }}</li>
+                  </ul>
+                  <div v-if="entry.cost" class="asc-item-cost">消耗 · {{ entry.cost }}</div>
                 </div>
               </div>
               <div
-                v-if="Object.keys(selected.ascension.authority || {}).length"
+                v-if="selected.ascension.deityPosition || selected.ascension.divineKingdom?.name"
                 class="asc-section"
               >
-                <div class="d-label">权能</div>
-                <div v-for="(v, k) in selected.ascension.authority" :key="k" class="asc-item">
-                  {{ k }}: {{ (v as any).description || JSON.stringify(v) }}
+                <div v-if="selected.ascension.deityPosition">
+                  <span class="d-label">神位</span> {{ selected.ascension.deityPosition }}
+                </div>
+                <div v-if="selected.ascension.divineKingdom?.name">
+                  <span class="d-label">神国</span> {{ selected.ascension.divineKingdom.name }}
                 </div>
               </div>
-              <div v-if="Object.keys(selected.ascension.law || {}).length" class="asc-section">
-                <div class="d-label">法则</div>
-                <div v-for="(v, k) in selected.ascension.law" :key="k" class="asc-item">
-                  {{ k }}: {{ (v as any).description || JSON.stringify(v) }}
-                </div>
-              </div>
-              <div v-if="selected.ascension.deityPosition">
-                <span class="d-label">神位</span> {{ selected.ascension.deityPosition }}
-              </div>
+              <div v-if="!ascensionUnlocked" class="empty-tab">尚未踏上长阶</div>
             </template>
           </template>
 
@@ -1167,6 +1178,31 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
 .asc-item {
   font-size: 0.75rem;
   color: var(--theme-text-primary);
+  padding: 4px 0;
+}
+.asc-item-name {
+  font-weight: 600;
+  color: var(--theme-primary, #c9a24b);
+}
+.asc-item-desc {
+  margin: 2px 0 0;
+  color: var(--theme-text-primary);
+  line-height: 1.5;
+}
+.asc-item-effects {
+  margin: 4px 0 0;
+  padding-left: 1.1em;
+  color: var(--theme-text-muted);
+  line-height: 1.5;
+}
+.asc-item-cost {
+  margin-top: 3px;
+  color: var(--theme-text-muted);
+  font-size: 0.7rem;
+}
+.asc-empty {
+  font-size: 0.7rem;
+  color: var(--theme-text-muted);
   padding: 2px 0;
 }
 
