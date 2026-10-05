@@ -23,6 +23,18 @@ export function buildOpenAiBody(input: LlmBuildInput): JsonObject {
           out.reasoning_content = value.reasoning_content;
         }
       }
+      // DeepSeek beta 前缀续写：仅 assistant 消息可带 `prefix: true`；其
+      // `reasoning_content` 作为思维链前缀一并透传（由侧链构造，非 provider 回传）。
+      if (message.role === 'assistant') {
+        if (message.prefix === true) out.prefix = true;
+        if (
+          typeof message.reasoning_content === 'string' &&
+          message.reasoning_content &&
+          out.reasoning_content === undefined
+        ) {
+          out.reasoning_content = message.reasoning_content;
+        }
+      }
       return out;
     }) as never,
     temperature: input.temperature ?? 0.7,

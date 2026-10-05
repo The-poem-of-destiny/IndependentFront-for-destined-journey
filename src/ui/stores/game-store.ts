@@ -72,6 +72,18 @@ export function setRewriteLoadoutImpl(impl: RewriteLoadoutImpl): void {
   rewriteLoadoutImpl = impl;
 }
 
+/** 正文润色实现注入缝 —— GamePipeline 装配好 endpoint/chainData 后由 GamePage 挂进来 */
+export type RewriteProseImpl = (
+  bodyText: string,
+) => Promise<{ ok: boolean; text?: string; reason?: string }>;
+
+let rewriteProseImpl: RewriteProseImpl | null = null;
+
+/** 由 GamePage 在创建 GamePipeline 后调用，把引擎实现挂进 store（照 setRewriteLoadoutImpl） */
+export function setRewriteProseImpl(impl: RewriteProseImpl): void {
+  rewriteProseImpl = impl;
+}
+
 /**
  * 战斗中栏消息流条目（CombatMessageFlow 渲染）。
  *
@@ -1460,6 +1472,38 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
+   * 就地覆盖一条消息的正文并落库（正文润色的写回口）。
+   *
+   * 🔴 只改 `content`，id/role/turn/timestamp 一律不动 —— 它是同一条消息的改写，
+   *    不是新消息。原文可由既有快照/时间线回退找回（每回合自动打快照）。
+   */
+  async function replaceMessageContent(messageId: string, content: string): Promise<void> {
+    const index = messages.value.findIndex((m) => m.id === messageId);
+    if (index < 0) return;
+    const next: ChatMessage = { ...messages.value[index], content };
+    messages.value.splice(index, 1, next);
+    await persistMessage(next);
+  }
+
+  /**
+   * 正文润色（手动）：把一条 assistant 消息的正文交给「正文润色」侧链改写，成功后就地覆盖。
+   *
+   * 🔴 实现走注入缝（GamePipeline.rewriteProseText），store 不直接碰引擎装配 ——
+   *    与 rewriteLoadoutItem 同一条纪律。
+   */
+  async function rewriteProse(messageId: string): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    if (!rewriteProseImpl) return { ok: false, reason: '游戏管线未就绪' };
+    const msg = messages.value.find((m) => m.id === messageId);
+    if (!msg || msg.role !== 'assistant') return { ok: false, reason: '只能润色正文消息' };
+    if (!msg.content.trim()) return { ok: false, reason: '这条消息没有可改写的正文' };
+    const result = await rewriteProseImpl(msg.content);
+    if (!result.ok || !result.text) return { ok: false, reason: result.reason ?? '润色失败' };
+    await replaceMessageContent(messageId, result.text);
+    return { ok: true };
+  }
+
+  /**
    * 手动落位：把玩家的位置路径改成某个地块名（势力地图「设为当前位置」唯一写入口）。
    *
    * 🔴 **只提交一条 `set_location`，绝不自己写 `worldFlags.map`**：地块是位置路径的
@@ -1636,6 +1680,8 @@ export const useGameStore = defineStore('game', () => {
     removeCharacter,
     setPlayerLocation,
     rewriteLoadoutItem,
+    replaceMessageContent,
+    rewriteProse,
     devArmRandomEvent,
   };
 });

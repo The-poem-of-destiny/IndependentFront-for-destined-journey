@@ -74,4 +74,21 @@ describe('DebugPanel · Agent 历史', () => {
     expect(wrapper.text()).toContain('Delta revision 2');
     expect(wrapper.text()).toContain('Provider 往返 (1)');
   });
+
+  it('🔴 前缀续写：assistant 消息的 prefix 标记与 reasoning_content 注入内容可见', () => {
+    const game = useGameStore();
+    const e = entry('run-p', 'prose_rewrite', 0);
+    e.messages = [
+      { role: 'system', content: '重写规范' },
+      { role: 'user', content: '原始正文' },
+      { role: 'assistant', content: null, prefix: true, reasoning_content: '思维链前缀种子XYZ' },
+    ];
+    game.agentLogHistory.push(turn('run-p', 1, [e]));
+
+    const wrapper = mount(DebugPanel);
+
+    expect(wrapper.text()).toContain('prefix 续写');
+    expect(wrapper.text()).toContain('思维链前缀注入 (reasoning_content)');
+    expect(wrapper.text()).toContain('思维链前缀种子XYZ');
+  });
 });

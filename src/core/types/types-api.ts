@@ -112,6 +112,17 @@ export interface LlmMessage {
   tool_call_id?: string;
   name?: string;
   native?: NativeLlmContent;
+  /**
+   * DeepSeek beta **前缀续写**：把最后一条 assistant 消息标记为「前缀」，模型从
+   * `content` 之后接着写。仅 openai-chat 协议透传（`prefix: true`）。
+   */
+  prefix?: boolean;
+  /**
+   * DeepSeek 思考模式的前缀/回传字段。作为 assistant 消息的思维链前缀交给模型
+   * （配合 `prefix: true` 引导思维链），或原样回传上一轮 assistant 的思维链。
+   * 仅 openai-chat 协议透传（`reasoning_content`）。
+   */
+  reasoning_content?: string;
 }
 
 export interface NormalizedToolCall {

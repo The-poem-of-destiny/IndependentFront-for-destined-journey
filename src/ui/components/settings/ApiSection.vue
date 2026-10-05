@@ -411,6 +411,22 @@ async function fetchModelList(opts: { fromConnectionTest?: boolean; silentFail?:
   }
   apiFormFetchingModels.value = false;
 }
+/**
+ * 一键预填「DeepSeek beta 前缀续写」源 —— 「正文润色」agent 专用。
+ *
+ * 🔴 只填 baseUrl / 模型 / 名称三样（都是非密钥），**API Key 仍由用户填写**：
+ *    `https://api.deepseek.com/beta` 是前缀续写的必要端点。
+ * 🔴 思考模式与推理强度**不在这里配**（那会把 DeepSeek 专属旋钮塞回通用 API 表单）——
+ *    「正文润色」侧链在调用时自行附加 thinking 与推理强度（见 prose-rewrite-agent）。
+ */
+function applyDeepSeekPrefixPreset() {
+  apiForm.kind = 'llm';
+  apiForm.protocol = 'openai-chat';
+  if (!apiForm.name.trim()) apiForm.name = 'DeepSeek 前缀续写 (beta)';
+  apiForm.baseUrl = 'https://api.deepseek.com/beta';
+  if (!apiForm.model.trim()) apiForm.model = 'deepseek-flash';
+  ui.toast('已填入 DeepSeek beta 模板，请填写 API Key', 'success');
+}
 function openAddApi() {
   editingApiId.value = null;
   apiForm.name = '';
@@ -681,7 +697,17 @@ async function deleteApi(id: string) {
             </option>
           </select>
           <p class="form-hint">协议必须与上游真实接口一致，不会按模型名或域名自动猜测。</p></label
-        ><label class="form-label"
+        >
+        <div class="form-label">
+          <AppButton variant="secondary" size="sm" @click="applyDeepSeekPrefixPreset"
+            >填入 DeepSeek 前缀续写模板</AppButton
+          >
+          <p class="form-hint">
+            用于「正文润色」：填入 DeepSeek 的 /beta 端点。API Key 请自行填写（思考模式由该 Agent
+            自行开启，无需在此配置）。
+          </p>
+        </div>
+        <label class="form-label"
           >主链接<input
             v-model="apiForm.baseUrl"
             class="form-input"

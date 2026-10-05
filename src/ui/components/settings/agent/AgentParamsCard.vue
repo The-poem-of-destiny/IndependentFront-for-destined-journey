@@ -52,6 +52,26 @@ const defaultsLayer = computed<AgentDefaultsLayer>(() => {
 const agentCfg = computed(() => getAgentSettings(s, props.agentId, defaultsLayer.value));
 
 /**
+ * `tailPrompt` 对**正文润色侧链**是另一层含义：它不是 Delta 会话的末尾指令，
+ * 而是 assistant 前缀的 `reasoning_content`（思维链种子）—— 存储字段复用、语义不同，
+ * 故这里的文案按 agent 分叉，免得主人以为要填「每轮末尾指令」。
+ */
+const isProseRewrite = computed(() => props.agentId === 'prose_rewrite');
+const tailFieldLabel = computed(() =>
+  isProseRewrite.value ? '思维链前缀种子 (tailPrompt)' : '末尾指令 (tailPrompt)',
+);
+const tailFieldHint = computed(() =>
+  isProseRewrite.value
+    ? '作为 assistant 前缀的 reasoning_content：模型从这里接着往下想。仅「正文润色」侧链使用；留空 = 用引擎默认种子。'
+    : 'Delta 会话：每轮最新的 user 消息末尾都会追加这段指令。留空 = 不注入（缺省）。',
+);
+const tailFieldPlaceholder = computed(() =>
+  isProseRewrite.value
+    ? '例如：思考过程：\n\n1. 分析系统要求以及用户输入：'
+    : '例如：请用简体中文作答，并保持第二人称叙事。',
+);
+
+/**
  * 某字段是不是「已被用户覆写」—— 用于「默认 / 已覆写」徽标。
  * 覆写层（s.agents[agentId]）里有该键 = 已覆写；否则走默认层。
  */
@@ -306,17 +326,15 @@ void ref;
     <!-- 🆕 2026-08-22 Delta 会话（T4）：单一 tailPrompt —— 每轮最新 user 消息末尾的指令。
          与上面的数值旋钮分开成段（它是文本指令，不是采样参数）；留空 = 删键 = 不注入。 -->
     <label class="form-label tail-prompt-field">
-      末尾指令 (tailPrompt)
+      {{ tailFieldLabel }}
       <span class="source-badge" :class="{ overridden: isOverridden('tailPrompt') }">{{
         isOverridden('tailPrompt') ? '已覆写' : '默认'
       }}</span>
-      <p class="form-hint">
-        Delta 会话：每轮最新的 user 消息末尾都会追加这段指令。留空 = 不注入（缺省）。
-      </p>
+      <p class="form-hint">{{ tailFieldHint }}</p>
       <textarea
         class="form-input form-textarea"
         :value="agentCfg.tailPrompt ?? ''"
-        placeholder="例如：请用简体中文作答，并保持第二人称叙事。"
+        :placeholder="tailFieldPlaceholder"
         rows="3"
         @input="onTailPromptInput($event)"
       />

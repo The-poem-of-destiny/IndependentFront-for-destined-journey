@@ -9,6 +9,56 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-10-04 战斗敌方难度校准 + 随机性别不再默认男｜已实施（prompt 需重装内容包生效）
+
+真机反馈两点：打架时敌方战力与主角不匹配（AI 不会判断难度）；随机生成的角色清一色男性。
+
+- **随机性别**：`random_name` / `random_appearance` 工具在未指定 `gender` 时**随机抽**（此前
+  硬默认 `'男'`）—— AI 不写性别时不再永远是男名/男貌。私有内容仓 `entity_gen` 提示词同步补
+  「正文未明确时性别随机、男女均衡，别默认男」。
+- **战斗难度**：敌方 `tier` 与 `名字×N` 数量由 `request_dispatcher` 的「战斗判断」决定；该段补
+  **敌方强度校准**（同层级 1v1 均势 / 低主角一层约 4-5 只集群才棘手 / 高一层慎用），同步发出的
+  `<entity_gen_request tier="...">` 照此校准。
+- 影响：公开仓引擎改动（工具默认性别）；战斗难度为**私有内容仓 prompt 改动**（需重新构建/安装内容包生效）。
+
+### 2026-10-04 修复：正文流程里 AI 的 `fp.delta` 改不动命运点数｜已实施
+
+真机：在正文回合里通过 `fp.delta` 改 FP，状态总览（`StatusOverview` 读 `saveProfile.fp`）纹丝不动。
+
+- 根因：AI 补丁路径 `commitChatState` → `commitAiPatches` 对 `delta_variable profile.fp`
+  **没有特判**，落到 `applyDeltaVariable` 被当成 `variables` 里的路径，写进
+  `SaveProfile.variables.profile.fp` —— 提交「成功」但真源没动。只有 `commitDomainCommand`
+  （combat / craft_gen 走那条）有 `profile.fp` 特判。
+- 修法：`commitAiPatches` 补同口径特判 → `addFP` / `spendFP`（与 domain 路径一致）；
+  加回归测试断言「AI 路径改真源、不落 variables 伪路径」。
+- 影响面：仅 `vars_update` 的 `fp.delta`（正文流程）。combat / craft 的 FP 一直走 domain 路径，不受影响。
+
+### 2026-10-04 正文润色 AI（DeepSeek beta 前缀续写，第 14 个 agent）｜已实施，待真机
+
+新增一个「正文润色」侧链：在**最新一条正文**上右键「润色正文」，把该段正文交给 DeepSeek beta
+的前缀续写重写，成功后就地覆盖并落库（原文可由既有快照回退）。
+
+- 引擎：`story/prose-rewrite-agent.ts` —— 装配 `system + user(正文) + assistant(空前缀
+`prefix:true` + 思维链种子)`；调用强制 `thinking.enabled` + `reasoning_effort=max`（`extraBody`）；
+  抽不到正文 = 明确失败，绝不拿空串覆盖原文。本层不含任何世界观/小说内容。
+- API 层：`LlmMessage` 新增 `prefix` / `reasoning_content`，openai-chat 请求体透传；
+  `ChatRequest.extraBody` 浅并进源级 `bodyOverrides`（受保护根字段仍拒）。
+- 第 14 个 agent `prose_rewrite`：`agent-config.json`（通用占位提示词 —— **真实文风规范由私有
+  内容仓下发**）/ `agent-templates` / `placeholder-registry` / `agent-activity` / `agent-list` /
+  `game-pipeline`（侧链集）。守卫测试 13 → 14（`placeholder-content` / `no-world-content`）。
+- UI：ChatFlow 右键「润色正文」（仅最新一条正文）；API 池「填入 DeepSeek 前缀续写模板」一键预填
+  `https://api.deepseek.com/beta` + `deepseek-flash`（**API Key 由用户填，不入库**）；
+  `game-store` 注入缝 `setRewriteProseImpl` + `rewriteProse` / `replaceMessageContent`。
+- 内容可配：真实文风规范经私有内容包下发为该 Agent 的 `systemPrompt`；参考脚本那段 assistant
+  思维链前缀种子复用既有 `tailPrompt` 字段下发（**不新增 schema**），引擎侧只留通用兜底。
+- 调试可见：`DebugAgentEntry.messages` 保留 `prefix` / `reasoning_content`（此前只投影
+  `{role, content}` 会把这两格丢掉），DebugPanel 请求区显示「prefix 续写」徽标 + 注入的
+  思维链前缀内容。
+- 🔴 跨仓契约：**私有内容仓已同步**（`data/defaults/agent-config.json` 新增同名 `prose_rewrite`，
+  参考脚本的「改写指令 + `<小说片段>` + `<ProseStyle>`」组合为 systemPrompt、前缀种子进 `tailPrompt`；
+  编码门 U+FFFD/控制字符均 0）。私有仓改动尚未提交。
+- 验证：`npm run gates` 八道闸门全绿（8738 passed / 357 files）。
+
 ### 2026-10-03 战斗终局回注自然语言战报｜已实施
 
 主叙事 AI 不知道战斗发生了什么。修法：**DM 在终局显式调用新工具 `combat_write_summary`**，

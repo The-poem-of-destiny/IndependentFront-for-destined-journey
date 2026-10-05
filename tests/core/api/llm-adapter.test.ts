@@ -31,6 +31,26 @@ describe('LLM protocol adapters', () => {
     expect(built.outputBudget).toBe(32);
   });
 
+  it('🔴 DeepSeek beta 前缀续写：assistant 的 prefix / reasoning_content 透传到请求体', () => {
+    const built = buildLlmRequest({
+      ...base,
+      protocol: 'openai-chat',
+      messages: [
+        { role: 'system', content: 'rewrite this' },
+        { role: 'user', content: '原始正文' },
+        { role: 'assistant', content: '', prefix: true, reasoning_content: '思考：' },
+      ],
+    });
+    const messages = built.body.messages as Array<Record<string, unknown>>;
+    expect(messages[2]).toMatchObject({
+      role: 'assistant',
+      prefix: true,
+      reasoning_content: '思考：',
+    });
+    // 非 assistant 消息不带 prefix（防误加）
+    expect(messages[1]).not.toHaveProperty('prefix');
+  });
+
   it('reads OpenAI cached prompt tokens from the official response field', () => {
     const response = parseLlmResponse('openai-chat', {
       choices: [{ message: { content: 'cached' }, finish_reason: 'stop' }],

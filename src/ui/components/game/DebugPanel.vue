@@ -507,7 +507,12 @@ function formatJson(value: unknown): string {
               <h5>请求</h5>
               <div v-for="(m, i) in entry.messages" :key="i" class="debug-msg">
                 <span class="debug-role">{{ m.role }}</span>
+                <span v-if="m.prefix" class="debug-prefix-badge">prefix 续写</span>
                 <pre>{{ m.content ?? '' }}</pre>
+                <template v-if="m.reasoning_content">
+                  <h6 class="debug-reasoning-h">思维链前缀注入 (reasoning_content)</h6>
+                  <pre class="debug-reasoning-pre">{{ m.reasoning_content }}</pre>
+                </template>
               </div>
               <div v-if="entry.messages.length === 0" class="debug-empty-sub">
                 消息未捕获（流式模式下请求由编排器内部构造）
@@ -771,6 +776,16 @@ function formatJson(value: unknown): string {
   text-transform: uppercase;
   color: var(--theme-primary);
   margin-bottom: 2px;
+}
+.debug-prefix-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  border-radius: 3px;
+  color: #b06ab3;
+  border: 1px solid currentColor;
 }
 .debug-reasoning-h {
   font-size: 0.625rem;

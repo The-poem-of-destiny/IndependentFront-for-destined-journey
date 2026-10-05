@@ -111,6 +111,7 @@ const gameStore = {
 vi.mock('../../../../src/ui/stores/game-store', () => ({
   useGameStore: vi.fn(() => gameStore),
   setRewriteLoadoutImpl: vi.fn(),
+  setRewriteProseImpl: vi.fn(),
 }));
 
 vi.mock('../../../../src/ui/stores/ui-store', () => ({

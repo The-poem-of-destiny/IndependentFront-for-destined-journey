@@ -71,6 +71,7 @@ vi.mock('../../../../src/ui/stores/game-store', () => ({
     openingPrompt: null as string | null,
   })),
   setRewriteLoadoutImpl: vi.fn(),
+  setRewriteProseImpl: vi.fn(),
 }));
 
 vi.mock('../../../../src/ui/stores/ui-store', () => ({

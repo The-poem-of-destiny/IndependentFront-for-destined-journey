@@ -78,3 +78,16 @@ it('serializes competing actions so a material is consumed only once', async () 
   ]);
   expect((await getProfile('atomic')).fp).toBe(before + 3);
 });
+
+it('AI 补丁路径（commitChatState）的 fp.delta 也改真源 SaveProfile.fp，不落 variables 伪路径', async () => {
+  const manager = createStateManager('atomic');
+  const before = (await getProfile('atomic')).fp;
+  const result = await manager.commitChatState([
+    { op: 'delta_variable', target: 'profile.fp', amount: 7 },
+  ]);
+  expect(result.success).toBe(true);
+  const after = await getProfile('atomic');
+  expect(after.fp).toBe(before + 7);
+  // 回归：旧行为会把它写进 `SaveProfile.variables.profile.fp`（显示端纹丝不动）
+  expect((after.variables as Record<string, unknown> | undefined)?.profile).toBeUndefined();
+});

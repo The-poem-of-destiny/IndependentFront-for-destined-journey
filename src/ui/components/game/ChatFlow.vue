@@ -182,6 +182,7 @@ const ctxMenu = ref<{
   role: ChatMessage['role'];
   canRollback: boolean;
   canImage: boolean;
+  canRewrite: boolean;
 } | null>(null);
 
 /** 最新一条 assistant 消息（「回退本轮」仅对它生效） */
@@ -240,14 +241,21 @@ function rollbackLabel(msg: ChatMessage): string {
   return msg.role === 'user' ? '回退到这条输入' : '回退本轮';
 }
 
-function menuFor(msg: ChatMessage): { canRollback: boolean; canImage: boolean } {
+function menuFor(msg: ChatMessage): {
+  canRollback: boolean;
+  canImage: boolean;
+  canRewrite: boolean;
+} {
   // user 消息：只有最新一条能回退；「为这一段配图」是给正文的，user 上不出现
   if (msg.role === 'user') {
-    return { canRollback: latestUserMsg.value?.id === msg.id, canImage: false };
+    return { canRollback: latestUserMsg.value?.id === msg.id, canImage: false, canRewrite: false };
   }
+  const isLatest = latestAssistantMsg.value?.id === msg.id;
   return {
-    canRollback: latestAssistantMsg.value?.id === msg.id,
+    canRollback: isLatest,
     canImage: s.imageGenMode !== 'off',
+    // 正文润色只对**最新一条**正文开放（改写的是「当前这一幕」，不是历史消息）
+    canRewrite: isLatest && msg.content.trim().length > 0,
   };
 }
 
@@ -255,7 +263,7 @@ function menuFor(msg: ChatMessage): { canRollback: boolean; canImage: boolean } 
 function canOpenMenu(msg: ChatMessage): boolean {
   if (game.isInCombat || props.isGenerating) return false;
   const can = menuFor(msg);
-  return can.canRollback || can.canImage;
+  return can.canRollback || can.canImage || can.canRewrite;
 }
 
 /** 悬停提示照着实际能做的事写 —— 写「回退本轮」却点不动是最没必要的一种困惑 */
@@ -265,6 +273,7 @@ function ctxHint(msg: ChatMessage): string {
   const items: string[] = [];
   if (can.canRollback) items.push(rollbackLabel(msg));
   if (can.canImage) items.push('为这一段配图');
+  if (can.canRewrite) items.push('润色正文');
   items.push('复制');
   return `右键：${items.join(' / ')}`;
 }
@@ -303,6 +312,30 @@ async function ctxCopy() {
     await navigator.clipboard.writeText(msg.content);
   } catch (e) {
     console.warn('[ChatFlow] 复制失败:', e);
+  }
+}
+
+// ===== 「润色正文」（DeepSeek beta 前缀续写侧链，手动触发）=====
+/**
+ * 把最新一条正文交给「正文润色」侧链改写，成功后就地覆盖。
+ *
+ * 🔴 依赖玩家在设置里给 `prose_rewrite` 绑定一个 **baseUrl 带 `/beta` 的 DeepSeek 源**；
+ *    没绑定/绑定失效时侧链直接返回失败，这里只负责把原因显示出来。
+ * 🔴 活动账本由 GamePipeline 维护（agent-activity 里有「润色这一段正文」文案），
+ *    生成期间 ChatFlow 的思考指示会自动显示出来。
+ */
+async function ctxRewriteProse() {
+  const msgId = ctxMenu.value?.msgId;
+  closeCtxMenu();
+  if (!msgId) return;
+  // 🔴 立刻给一次反馈：侧链要等 API 回来才有结果，中途毫无提示会让玩家以为功能坏了。
+  ui.toast('正在润色正文…', 'info');
+  try {
+    const result = await game.rewriteProse(msgId);
+    if (result.ok) ui.toast('正文已润色', 'success');
+    else ui.toast(result.reason ?? '润色失败', 'warning');
+  } catch (e) {
+    ui.toast(`润色失败：${e instanceof Error ? e.message : String(e)}`, 'error');
   }
 }
 
@@ -556,6 +589,9 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
         </button>
         <button v-if="ctxMenu.canImage" class="ctx-item" @click.stop="ctxSceneImage">
           <i class="fa-solid fa-image" /> 为这一段配图
+        </button>
+        <button v-if="ctxMenu.canRewrite" class="ctx-item" @click.stop="ctxRewriteProse">
+          <i class="fa-solid fa-wand-magic-sparkles" /> 润色正文
         </button>
         <button class="ctx-item" @click.stop="ctxCopy"><i class="fa-solid fa-copy" /> 复制</button>
       </div>

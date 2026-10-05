@@ -1,5 +1,5 @@
 {
-  "$comment": "占位内容（内容-引擎分离 §6 / D27 / D32 / D44）。🔴 agent id 必须与真实内容侧完全相同的 13 个，一个不多一个不少（守门测试直接断言这份清单）。各 systemPrompt 是 300-800 字的通用奇幻版本：**输出契约与工具调用约定一字未改**——标签名、出现次数、字段名、枚举值、工具名都是引擎协议（下游有解析器逐字匹配），只有叙事风格与举例换成了通用奇幻。story 例外：它的行为真源是预设（见 presetId/preset），systemPrompt 里放的是「一个预设都没有」时的回退正文，来自同目录的 story-preset.json。占位预设 id 固定为 placeholder-story-v1，与任何真实内容包的预设 id 都不同（D20 四态基线靠这条区分「未动过的占位」与「用户自己的预设」）。model / 温度 / 历史层数等旋钮与真实内容侧逐值一致（那是性能与编排配置，不是内容）；model 一律留空串，等用户在 API 池里选。🔴 worldBookIds 只列 data/placeholder/worldbooks/ 里真实存在的书——真实文件的 story 那份还挂着 6 个早已不存在的 id（character_detail / fated_core / narrative_guide / region_detail / world_overview / race_detail），照抄过来只会让公开仓一开局就带着悬空引用。",
+  "$comment": "占位内容（内容-引擎分离 §6 / D27 / D32 / D44）。🔴 agent id 必须与真实内容侧完全相同的 14 个，一个不多一个不少（守门测试直接断言这份清单）。各 systemPrompt 是 300-800 字的通用奇幻版本：**输出契约与工具调用约定一字未改**——标签名、出现次数、字段名、枚举值、工具名都是引擎协议（下游有解析器逐字匹配），只有叙事风格与举例换成了通用奇幻。story 例外：它的行为真源是预设（见 presetId/preset），systemPrompt 里放的是「一个预设都没有」时的回退正文，来自同目录的 story-preset.json。占位预设 id 固定为 placeholder-story-v1，与任何真实内容包的预设 id 都不同（D20 四态基线靠这条区分「未动过的占位」与「用户自己的预设」）。model / 温度 / 历史层数等旋钮与真实内容侧逐值一致（那是性能与编排配置，不是内容）；model 一律留空串，等用户在 API 池里选。🔴 worldBookIds 只列 data/placeholder/worldbooks/ 里真实存在的书——真实文件的 story 那份还挂着 6 个早已不存在的 id（character_detail / fated_core / narrative_guide / region_detail / world_overview / race_detail），照抄过来只会让公开仓一开局就带着悬空引用。",
   "version": 1,
   "agents": {
     "story": {
@@ -361,6 +361,23 @@
       "historyLayers": 0,
       "historySlice": 800,
       "template": "{{SYS_PROMPT}}\n\n<!-- image_prompt 侧链由情景插画队列唤起，不走主 DAG（设计 §8.5 / D28）。 -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 世界书对本 Agent 默认关闭。开了才有内容——地点/服饰的设定能提升画面保真度，代价是 token。-->\n\n<本次插画需求>\n{{IMAGE_REQUEST}}\n</本次插画需求>\n<!-- 引擎装配：story 写的那句中文 + 出场角色名 + 当前地点 + 分级 + 所属消息正文。\n     这是你转换的唯一输入——不要从别处推断画面内容，也不要复述这段文字。-->"
+    },
+    "prose_rewrite": {
+      "worldBookEnabled": false,
+      "worldBookIds": [],
+      "model": "",
+      "systemPrompt": "你负责把一段已经写好的小说正文，按系统给定的文风规范重新改写一遍。\n\n工作流程（在思维链里诚实执行）：\n1. 先通读用户给出的正文，逐段理解它真正想表达的内容、使用了哪些比喻与修辞、哪些是有实在信息的部分；遇到专有名词一律保留。\n2. 去掉不必要的环境堆砌、过度比喻与重复修饰。\n3. 忽略原文的文风，按系统给定的文风规范重写；但保留原文的格式化内容（括号、HTML、代码块等）与全部专有名词与信息。\n\n输出要求：只输出改写后的正文本身。不要解释、不要开场白、不要 Markdown 代码块、不要任何 XML/HTML 标签（除非原文本身就有）。",
+      "presetId": "",
+      "preset": null,
+      "temperature": 0.7,
+      "topP": 1,
+      "freqPen": 0,
+      "presPen": 0,
+      "maxTokens": 65536,
+      "maxRetries": 3,
+      "historyLayers": 0,
+      "historySlice": 800,
+      "template": "{{SYS_PROMPT}}"
     }
   }
 }

@@ -12,6 +12,7 @@ const AGENT_ACTIVITY_LABELS: Record<string, string> = {
   craft_gen: '处理制作请求',
   entity_gen: '塑造新角色与物品',
   image_prompt: '构思场景画面',
+  prose_rewrite: '润色这一段正文',
   combat: '推演战局',
   plot_outline: '编织剧情大纲',
 };

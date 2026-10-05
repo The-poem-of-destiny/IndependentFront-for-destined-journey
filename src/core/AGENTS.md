@@ -182,6 +182,12 @@ src/core/                    ← 核心引擎
   │                                    传 `normalize` 回调 —— 形态上就长不出「两个分支两套兜底」
   ├── story/story-output.ts               ← Story 信封投影：`<maintext>`/`<options>` 等结构化外壳 → 玩家可见正文 +
   │                                    行动选项；流式与完成后共用这一条缝（流式期多剥一组控制标签）
+  ├── story/prose-rewrite-agent.ts         ← 🆕 [2026-10-04] 正文润色侧链（DeepSeek beta 前缀续写，手动触发）：
+  │                                    buildProseRewriteMessages（system + user 正文 + assistant 空前缀 `prefix:true`）/
+  │                                    extractProseRewriteOutput（剥代码围栏）/ callProseRewriteAgent；
+  │                                    调用时强制 `thinking.enabled` + `reasoning_effort=max`（extraBody），
+  │                                    提示词由内容包经 `prose_rewrite.systemPrompt` 下发（引擎侧仅通用兜底）。
+  │                                    🔴 依赖 baseUrl 带 `/beta` 的 DeepSeek 源；不走主 DAG，由 ChatFlow 右键唤起
   ├── agents/agent-orchestrator.ts         ← [Phase 3+8.5] DAG 编排引擎（阶段串行+同阶段并行/M3 翻译层按名寻址零id单patch）
   │   ├── callAgenticAgent(): toolsEnabled=true → chatWithTools() 多轮循环
   │   └── Marker 回调: onCraftRequest/onCombatTrigger/onEntityGenRequest/onPlayAudio

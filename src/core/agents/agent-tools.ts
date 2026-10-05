@@ -636,7 +636,9 @@ export async function executeToolCall(
     // ── NPC Generation ──
     case 'random_name': {
       const race = args.race ?? '人类';
-      const gender = args.gender ?? '男';
+      // 🔴 未指定性别时**随机**抽（而非默认男）——否则 AI 不写 gender 时永远男名，
+      //    世界会清一色男性（真机反馈）。调用方应把返回的 gender 透传给后续外貌/输出。
+      const gender: '男' | '女' = args.gender || (Math.random() < 0.5 ? '男' : '女');
       // 防重名（2026-08-15）：把存档已有角色名喂给抽样器。比较「·」前的给定名——
       // 已有「奥斯瓦尔德·狼牙」时不再抽出第二个「奥斯瓦尔德」（真机撞名教训）。
       const avoid = context.characters.map((c) => c.name).filter(Boolean);
@@ -672,7 +674,8 @@ export async function executeToolCall(
     }
     case 'random_appearance': {
       const race = args.race ?? '人类';
-      const gender = args.gender ?? '男';
+      // 同 random_name：未指定性别时随机抽，别默认男。
+      const gender: '男' | '女' = args.gender || (Math.random() < 0.5 ? '男' : '女');
       return randomAppearanceSummary(race, gender);
     }
     case 'roll_attributes': {

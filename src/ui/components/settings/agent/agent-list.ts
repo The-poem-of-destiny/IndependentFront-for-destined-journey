@@ -1,5 +1,5 @@
 /**
- * 11 个 Agent 的清单（Q-25 第 9 步）。
+ * 13 个 Agent 的清单（Q-25 第 9 步）。
  *
  * 为什么单独一个文件：它有**两个**消费者，且分居两侧 ——
  *   · 设置页壳层的 Agent 子导航（`.sub-nav`，它是三栏布局里 `.settings-content` 的
@@ -48,6 +48,12 @@ export const AGENT_LIST: readonly AgentListEntry[] = [
     id: 'combat',
     name: '战斗主持人',
     desc: '理解玩家意图，并负责战斗开场、结算与终局叙事',
+    stage: 1,
+  },
+  {
+    id: 'prose_rewrite',
+    name: '正文润色',
+    desc: '把最新一段正文按文风规范重写（DeepSeek beta 前缀续写，手动触发）',
     stage: 1,
   },
   {

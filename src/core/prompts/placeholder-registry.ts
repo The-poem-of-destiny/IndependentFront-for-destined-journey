@@ -1170,6 +1170,9 @@ const DEFAULT_TEMPLATES: Record<string, string> = {
   // 不走主 DAG。刻意短 —— 挂便宜快模型，机械转换不需要整套世界观（世界书默认关，§8.5）。
   image_prompt:
     '{{SYS_PROMPT}}\n\n<!-- image_prompt 侧链由情景插画队列唤起，不走主 DAG（设计 §8.5 / D28）。 -->\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n<!-- 世界书对本 Agent 默认关闭。开了才有内容——地点/服饰的设定能提升画面保真度，代价是 token。-->\n\n<本次插画需求>\n{{IMAGE_REQUEST}}\n</本次插画需求>\n<!-- 引擎装配：story 写的那句中文 + 出场角色名 + 当前地点 + 分级 + 所属消息正文。\n     这是你转换的唯一输入——不要从别处推断画面内容，也不要复述这段文字。-->',
+  // 正文润色侧链（手动触发）：由 ChatFlow 右键「润色正文」唤起，不走主 DAG。
+  // 待改写正文作为 user 消息单独传入（不放这里），模型以 assistant 前缀续写。
+  prose_rewrite: '{{SYS_PROMPT}}',
   // Retired plot aliases retain their minimal templates.
   plot_check: '{{SYS_PROMPT}}\n{{LORE_BOOK}}\n{{CHARACTER_STATE}}\n{{USER_INPUT}}',
   plot_correct: '{{SYS_PROMPT}}\n{{LORE_BOOK}}\n{{CHARACTER_STATE}}\n{{USER_INPUT}}',

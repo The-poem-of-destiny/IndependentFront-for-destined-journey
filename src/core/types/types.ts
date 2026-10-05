@@ -1971,7 +1971,19 @@ export interface DebugAgentEntry {
   endpointName: string;
   baseUrl: string;
   model: string;
-  messages: Array<{ role: string; content: string | null }>;
+  /**
+   * 请求消息（原样投影）。
+   *
+   * 🔴 前缀续写（DeepSeek beta）的两格必须保住：`reasoning_content` 是注入的思维链
+   *    种子、`prefix` 标记这是待续写的 assistant 消息 —— 调试面板要能看到「到底往
+   *    prefix 里塞了什么」，只留 `{role, content}` 会把这两格悄悄丢掉。
+   */
+  messages: Array<{
+    role: string;
+    content: string | null;
+    reasoning_content?: string;
+    prefix?: boolean;
+  }>;
   rawResponse: string;
   reasoning?: string;
   toolCalls?: AgentResult['toolCalls'];

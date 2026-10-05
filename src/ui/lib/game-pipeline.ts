@@ -187,7 +187,13 @@ export class EndpointBindingError extends Error {
  * 端点失效不能拖垮整轮叙事 —— 装配置时跳过（不装配端点），真被调用时由
  * `getEndpointForAgent` 再判一次并按既有 optional 策略跳过。
  */
-const SIDE_CHAIN_AGENT_IDS = new Set(['craft_gen', 'entity_gen', 'image_prompt', 'combat']);
+const SIDE_CHAIN_AGENT_IDS = new Set([
+  'craft_gen',
+  'entity_gen',
+  'image_prompt',
+  'prose_rewrite',
+  'combat',
+]);
 
 /** 沙盒战斗会话袋（C2）—— 主持中的权威状态 + 续战 transcript + 运行时句柄 */
 interface CombatSandboxSession {
@@ -219,7 +225,12 @@ interface DebugEntryInput {
   endpointName?: string;
   baseUrl?: string;
   model?: string;
-  messages?: Array<{ role: string; content: string | null }>;
+  messages?: Array<{
+    role: string;
+    content: string | null;
+    reasoning_content?: string;
+    prefix?: boolean;
+  }>;
   result?: Partial<AgentResult>;
   startedAt: number;
   completedAt?: number;
@@ -238,10 +249,25 @@ function buildDebugEntry(input: DebugEntryInput): DebugAgentEntry {
     endpointName: input.endpointName ?? input.endpoint?.name ?? '',
     baseUrl: input.baseUrl ?? input.endpoint?.baseUrl ?? '',
     model: input.model ?? input.endpoint?.defaultModel ?? '',
-    messages: (input.messages ?? result?.requestMessages ?? []).map((message) => ({
-      role: message.role,
-      content: message.content,
-    })),
+    messages: (input.messages ?? result?.requestMessages ?? []).map((message) => {
+      const source = message as {
+        role: string;
+        content: string | null;
+        reasoning_content?: unknown;
+        prefix?: unknown;
+      };
+      const projected: DebugAgentEntry['messages'][number] = {
+        role: source.role,
+        content: source.content,
+      };
+      // 前缀续写（DeepSeek beta）：把注入的思维链种子与 prefix 标记带进调试记录，
+      // 否则「到底往 prefix 里塞了什么」在调试面板里完全看不见。
+      if (typeof source.reasoning_content === 'string') {
+        projected.reasoning_content = source.reasoning_content;
+      }
+      if (source.prefix === true) projected.prefix = true;
+      return projected;
+    }),
     rawResponse: result?.rawResponse ?? '',
     reasoning: result?.reasoning,
     toolCalls: result?.toolCalls,
@@ -305,6 +331,7 @@ const AGENT_LABELS: Record<string, string> = {
   craft_gen: '制作生成',
   entity_gen: '实体生成',
   plot_outline: '剧情大纲',
+  prose_rewrite: '正文润色',
 };
 
 /**
@@ -939,6 +966,9 @@ export class GamePipeline {
       // 侧链: 情景插画的中文 → danbooru 转换（图像生成 D28）。不进主 DAG、也不进设置页
       // Agent 子导航（D53）—— 但它的 systemPrompt/世界书/采样参数照旧从这里装配。
       'image_prompt',
+      // 侧链: 正文润色（手动触发，DeepSeek beta 前缀续写）。不进主 DAG —— 由玩家在
+      // 最新一条正文上右键触发；systemPrompt 由内容包下发，模型默认走 DeepSeek beta。
+      'prose_rewrite',
       // 侧链: 战斗主持（单一沙盒 DM）。systemPrompt/模型/温度/世界书照旧从这里装配，
       // 设置页 Agent 子导航可编辑。
       'combat',
@@ -3470,6 +3500,74 @@ export class GamePipeline {
       return { ok: false, reason: activityError };
     } finally {
       this.game.clearAgentStatus('entity_gen', activityError, activityRunId);
+    }
+  }
+
+  /**
+   * 正文润色（手动触发，DeepSeek beta 前缀续写）。
+   *
+   * 玩家在最新一条正文上右键「润色正文」→ store 把这条正文交进来 → 侧链返回改写结果
+   * → store 就地覆盖并落库。
+   *
+   * 🔴 手动触发不经过 run()，照 image_prompt / 重铸的手动档先例：`ensureChainData()`
+   *    惰性装配 configs（含 agent-config 的 systemPrompt）+ 独立活动账本。
+   * 🔴 该 Agent 依赖 **DeepSeek beta 端点**（`baseUrl` 带 `/beta`）与前缀续写能力；
+   *    调用时强制 `thinking.enabled` + `reasoning_effort=max`（见侧链的 EXTRA_BODY）。
+   */
+  async rewriteProseText(
+    bodyText: string,
+    signal?: AbortSignal,
+  ): Promise<{ ok: boolean; text?: string; reason?: string }> {
+    const trimmed = bodyText.trim();
+    if (!trimmed) return { ok: false, reason: '没有可改写的正文' };
+
+    const endpoint = this.getEndpointForAgent('prose_rewrite');
+    if (!endpoint) return { ok: false, reason: '未配置「正文润色」的 API 池（需 DeepSeek beta）' };
+
+    // 🔴 手动触发不经过 run()：开一个独立活动 run，并**为它建一条调试回合**。
+    //    缺这条回合时，getClientFactory 记录下来的条目会因「找不到同 id 的回合」
+    //    被 `addAgentLogEntry` 丢弃（game-store.ts），症状就是「点了润色但调试里没有」。
+    const standalone = !this.activeRunId;
+    const activityRunId = this.activeRunId ?? this.game.startAgentActivityRun(undefined, true);
+    if (standalone) {
+      this.game.startAgentLogTurn({
+        id: activityRunId,
+        saveId: this.saveId,
+        turn: (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1,
+        startedAt: Date.now(),
+      });
+    }
+    this.game.updateAgentStatus('prose_rewrite', activityRunId);
+    let activityError: string | undefined;
+
+    try {
+      const chain = await this.ensureChainData();
+      const { callProseRewriteAgent } = await import('@engine/story/prose-rewrite-agent');
+      const config = chain.agentConfigs.find((c) => c.agentId === 'prose_rewrite');
+      const result = await callProseRewriteAgent(
+        {
+          saveId: this.saveId,
+          bodyText: trimmed,
+          endpoint,
+          config,
+          ...(signal ? { signal } : {}),
+        },
+        { clientFactory: this.getClientFactory(activityRunId) },
+      );
+      if (!result.ok) {
+        activityError = result.error;
+        return { ok: false, reason: result.error };
+      }
+      return { ok: true, text: result.text };
+    } catch (err) {
+      activityError = err instanceof Error ? err.message : String(err);
+      console.error('[GamePipeline] prose_rewrite 侧链失败:', err);
+      return { ok: false, reason: activityError };
+    } finally {
+      this.game.clearAgentStatus('prose_rewrite', activityError, activityRunId);
+      if (standalone) {
+        this.game.finishAgentLogTurn(activityRunId, activityError ? 'failed' : 'completed');
+      }
     }
   }
 }

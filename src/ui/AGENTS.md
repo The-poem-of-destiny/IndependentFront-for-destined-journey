@@ -229,7 +229,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      `skippedUserOwned`。少了这条，装一次包就能把玩家配的立绘悄悄换掉
 │   │                                   🔴 **只镜像自己那一半**：删除候选**仅限带 `remote` 戳的行**。
 │   │                                      少了这道过滤，「同步」会变成「把素材库删到只剩声明里那几张」
-│   ├── agent-activity.ts            ← 13 个 Agent 的**中文活动文案**（「书写此刻」「辨认后续事件」…）
+│   ├── agent-activity.ts            ← 14 个 Agent 的**中文活动文案**（「书写此刻」「辨认后续事件」…）
 │   │                                   + AgentToolActivity 的展示层投影；TurnActivityLedger 消费
 │   ├── chat-depth.ts                ← ST 兼容的消息深度（zero-based，从末尾倒数）。
 │   │                                   🔴 只有 user/assistant 占槽位 —— 应用自造的 system 事件**不占**，
@@ -545,9 +545,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   ├── AgentPromptCard.vue   ← systemPrompt + 上下文模板 + 占位符徽章 + 预览（非 story）
 │   │   │   │                            占位符插入改用**模板 ref**，不再全局 querySelectorAll
 │   │   │   ├── PresetManager.vue     ← 预设子系统 + 两个弹窗（story）；单根，弹窗在根卡内层
-│   │   │   ├── agent-list.ts         ← 11 个 Agent 的展示元数据 + getDefaultTemplateForAgent
+│   │   │   ├── agent-list.ts         ← 13 个 Agent 的展示元数据 + getDefaultTemplateForAgent
 │   │   │   │                            （combat 为单一 DM 协议沙盒侧链；`image_prompt` 按 D53 刻意
-│   │   │   │                              不入本表，故设置页 Agent 子导航少它一项）
+│   │   │   │                              不入本表，故设置页 Agent 子导航少它一项；
+│   │   │   │                              `prose_rewrite` 是正文润色侧链，手动触发）
 │   │   │   ├── placeholder-catalog.ts← 23 项占位符 + 按 Agent 过滤（DAG 偏序 + 侧链归属）
 │   │   │   ├── agent-defaults.ts     ← buildAgentDefaultEntry（纯装配；patch 副作用留调用方）
 │   │   │   └── agent-chrome.css      ← ★跨组件共用：.prompt-editor / .template-preview-panel

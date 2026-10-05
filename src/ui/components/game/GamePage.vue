@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
-import { useGameStore, setRewriteLoadoutImpl } from '../../stores/game-store';
+import { useGameStore, setRewriteLoadoutImpl, setRewriteProseImpl } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAudioStore } from '../../stores/audio-store';
@@ -190,6 +190,13 @@ onMounted(async () => {
       setRewriteLoadoutImpl((characterId, target, userDescription) =>
         pipeline
           ? pipeline.rewriteLoadoutItem(characterId, target, userDescription)
+          : Promise.resolve({ ok: false, reason: '游戏管线还没就绪，稍后再试' }),
+      );
+      // 🖋 正文润色（2026-10-04）：把最新一段正文交给 DeepSeek beta 前缀续写侧链改写。
+      //    实现由 GamePipeline 装配 endpoint/chainData；store 与组件不直接碰引擎。
+      setRewriteProseImpl((bodyText) =>
+        pipeline
+          ? pipeline.rewriteProseText(bodyText)
           : Promise.resolve({ ok: false, reason: '游戏管线还没就绪，稍后再试' }),
       );
       // 🎵 曲库必须在这里装 —— 此前只有设置页音频分区和迷你播放器会 init()，

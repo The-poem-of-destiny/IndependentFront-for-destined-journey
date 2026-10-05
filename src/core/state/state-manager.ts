@@ -499,6 +499,23 @@ export class StateManager {
         const newEvents: GameEvent[] = [];
         for (const patch of patches) {
           try {
+            // 🔴 命运点数(FP) 的真源是 `SaveProfile.fp`（**不是**变量路径、也不在角色身上）：
+            //    `delta_variable profile.fp` 必须走既有 FP 账务（addFP/spendFP），否则会被
+            //    `applyDeltaVariable` 当成 `variables.profile.fp` 写进伪路径 —— AI 的
+            //    `fp.delta` 看起来「提交成功」，真源却纹丝不动（与 commitDomainCommand 同口径）。
+            if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
+              this.validatePatch(patch);
+              const amount = patch.amount!;
+              if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
+              const profile = await this.readProfile();
+              if (amount >= 0) await addFP(profile, amount, '行动结算');
+              else await spendFP(profile, -amount, '行动结算');
+              const event = this.createEvent('variable_change', patch);
+              results.push({ patch, success: true, event });
+              this.events.push(event);
+              newEvents.push(event);
+              continue;
+            }
             const result = await this.applyPatch(patch);
             results.push(result);
             if (result.event) {

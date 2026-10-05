@@ -552,6 +552,15 @@ export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
     fixedExamples: '',
   },
 
+  // ---- prose_rewrite: 正文润色侧链（手动触发，DeepSeek beta 前缀续写） ----
+  // 完整提示词在 agent-config.json 的 systemPrompt 字段（真实文风规范由内容包下发）。
+  // 行为：把最新一段正文按文风规范重写；装配/抽取在 story/prose-rewrite-agent.ts。
+  prose_rewrite: {
+    fixedSystem:
+      '正文润色系统。把一段已经写好的正文，按系统给定的文风规范重新改写一遍，只输出改写后的正文本身。完整提示词见 agent-config.json 和模板系统。',
+    fixedExamples: '',
+  },
+
   // ---- v3 兼容别名: plot_check / plot_correct ----
   plot_check: {
     fixedSystem: '剧情规划系统。完整提示词见 agent-config.json 和模板系统。',

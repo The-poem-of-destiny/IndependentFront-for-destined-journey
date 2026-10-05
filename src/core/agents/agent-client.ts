@@ -12,7 +12,7 @@
 
 import type { AgentProviderRound, ApiEndpoint, AgentResult, ToolDefinition } from '../types/types';
 import { scheduleApiRequest } from '../api/api-rpm-limiter';
-import type { LlmMessage, NativeLlmContent } from '../types/types-api';
+import type { LlmMessage, JsonObject, NativeLlmContent } from '../types/types-api';
 import { buildLlmRequest, createLlmStreamAccumulator, parseLlmResponse } from '../api/llm-adapter';
 import { postLlmRequest } from '../api/transport';
 
@@ -75,6 +75,14 @@ export interface ChatRequest {
   tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
   /** 🆕 DeepSeek 思考模式 */
   reasoning?: boolean;
+  /**
+   * 🆕 本次调用附加的请求体字段（浅层并入源级 `bodyOverrides`，后者被本字段覆盖）。
+   *
+   * 用于「正文润色」侧链强制 `thinking.enabled` + `reasoning_effort`：这些是
+   * DeepSeek beta 前缀续写的行为开关，不该要求每个用户手改 API 源。
+   * 受保护根字段（model/messages/stream/tools…）仍由 `body-parameters` 拒绝。
+   */
+  extraBody?: JsonObject;
 }
 
 export interface AgentClientOptions {
@@ -806,7 +814,7 @@ export class AgentClient {
       toolChoice: request.tool_choice,
       stream,
       userId: this.userId,
-      bodyOverrides: this.endpoint.bodyOverrides ?? {},
+      bodyOverrides: { ...(this.endpoint.bodyOverrides ?? {}), ...(request.extraBody ?? {}) },
       bodyOmitPaths: this.endpoint.bodyOmitPaths ?? [],
     }).body as Record<string, any>;
   }

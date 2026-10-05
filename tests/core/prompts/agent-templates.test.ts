@@ -661,6 +661,8 @@ const EXTERNALIZED_IDS = new Set([
   'combat',
   // 图像生成 G 阶段: 提示词在 agent-config.json（临时最小版 + TODO，D55）
   'image_prompt',
+  // 2026-10-04: prose_rewrite 的提示词在 agent-config.json（内容包下发真实文风规范）
+  'prose_rewrite',
 ]);
 const activeTemplates = Object.entries(AGENT_TEMPLATES).filter(([id]) => !EXTERNALIZED_IDS.has(id));
 
