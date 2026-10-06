@@ -9,6 +9,70 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-10-05 修复：改 API 采样参数即报「raw.trim is not a function」
+
+`ApiSection.vue` 的五个默认采样参数格（temperature / topP / 频率与存在惩罚 / maxTokens）与
+「上下文窗口 token 上限」都是 `<input type="number" v-model>`，而 Vue 3 的 `v-model` 在
+`type="number"` 上会**把绑定值隐式转成 number**（等价 `.number`）。保存时走的
+`normalizeOptionalNumber` / `normalizeContextWindowTokens` 却按 `string` 处理、开口就是
+`raw.trim()` → 一改那格即抛 `TypeError: raw.trim is not a function`，被 `saveApi` 的 catch
+转成「API 配置无效」toast。（初始值是字符串，所以不改不报——症状只在「动手改」那一刻出现。）
+两个归一化函数改为接受 `string | number`，数字分支直接判有限性 / 正整性。
+
+- 涉及文件：`src/ui/components/settings/ApiSection.vue`
+
+### 2026-10-05 游戏页自动存档（本轮快照吸收手动改动）｜已实施，待真机
+
+问题：`turn` 快照在「一轮跑完」那一刻拍；之后的手动改动（正文润色 / 重铸 / 其它编辑）只落活表、**不进快照** —— 回档到本轮就丢了。
+
+- **机制**：游戏页挂 `useAutosave`，监听活表（消息/角色/存档档案/剧情事件）任意改动，静默 **5 秒**（节流）后调用引擎 `amendCurrentTurnSnapshot`，把当前状态**覆写进本轮那张 `turn` 快照**（只覆盖载荷 + `preview`，`id/createdAt/turn/reason` 一律不变）。下一轮拍出新快照后，上一轮那张自然冻结。
+  → 存档结构：`… 37 38 autosave_39`（39 被持续覆写）→ 跑完 40 轮后 `… 37 38 39(冻结) autosave_40`。
+- **引擎**：`StateManager.amendCurrentTurnSnapshot()`（目标 = 最新一张 `reason==='turn'` 快照，无则 no-op；整段进 `withSaveWriteLock`）；`database.getLatestTurnSnapshotMeta`（只认 `turn`，不碰 `pre-combat`）。
+- **UI**：`composables/useAutosave.ts`（deep watch + 节流 + 卸载清定时器）；`game-store.runAutosave` + `setAutosaveImpl` 注入缝；GamePage 装配；SnapshotPanel 给最新那张标「自动存档」。
+- 只在「游戏页 + 非生成中 + 非战斗中」写（`runAutosave` 自判）。
+- 涉及文件：`state-manager.ts` · `persistence/database.ts` · `composables/useAutosave.ts` · `stores/game-store.ts` · `lib/game-pipeline.ts` · `components/game/GamePage.vue` · `components/game/SnapshotPanel.vue`
+- 验证：`npm run gates` 八道闸门全绿。
+
+### 2026-10-05 Delta 增长重基线阈值 1.2 → 1.4｜已实施
+
+`REBASE_GROWTH_RATIO`（累积 wire transcript 字符长度 / 当轮纯 prompt 层的比值）由 **1.2 上调为 1.4**：更晚才重基线，delta 会话攒得更久、少些冷基线（代价是重基线那一下 prompt 更大）。判据逻辑不变 —— 仍是**不依赖 provider token 的相对增长比**（`transcript_growth`），`contextWindowTokens` 的绝对溢出保险照旧可选（默认关）。
+
+- 涉及文件：`prompt-session-assembler.ts`（常量 + 注释）；测试注释同步。
+- 验证：`npm run gates` 八道闸门全绿。
+
+### 2026-10-05 剧情预检联动：角色名册 + 新角色目标层级｜已实施，待真机
+
+两处 agent 联动补强：pre_check 没法复用已有角色（次次堆新人）、战斗/冲突事件没有「该多大格局」的尺度。
+
+- **pre_check 拿到全量角色名册**：`plot_pre_check` 模板注入 `{{CHARACTER_STATE}}`，可见性矩阵 `npc: FULL → KEYS`（那张表此前一直是**空转**的——矩阵标 FULL 但模板从不渲染）。于是 pre 能看到存档全部角色（名字/种族/类型/生命层级/位置/在场），可「先查名册 → 能复用就复用、没有才新开」。此前它只能从记忆/近期对话里偶发看到 NPC。
+- **新角色可带大致生命层级**：`PlotCastPlanEntry`（本轮角色计划，**同轮 ephemeral、不落库**）新增可选 `tier`；pre 对新开角色规定与事件格局相称的层级（如国战该出 T5-T6，村斗都是低层），经 story 导演块 + dispatcher 的 `{{PLOT_CAST_PLAN}}` 下传，dispatcher 据此填 `entity_gen_request tier=`（该通道早已支持）。复用已有角色不填 tier（层级既定）。
+- **dispatcher 校准改为「pre 给了就用 pre 的」**：原「敌方强度校准」只看**相对主角层级**；现在 `<plot_cast_plan>` 若有目标层级即以它为准（绝对尺度），相对校准只在缺席时兜底。这才解决「T1 主角撞国战会被压成村斗」的错位。
+- 私有内容仓同步：`plot_pre_check` 模板 + systemPrompt、`request_dispatcher` systemPrompt。
+- 涉及文件：`plot-threads.ts` · `context-visibility.ts` · `placeholder-registry.ts`（默认模板）；内容侧 `data/defaults/agent-config.json`
+- 验证：`npm run gates` 八道闸门全绿。
+
+### 2026-10-05 正文 AI 预填充（DeepSeek beta 前缀续写）｜已实施，待真机
+
+story 预设**末尾那条「启用且 `role=assistant`」的条目 = 预填充素材**：开启预填充后，它不再并进
+system 提示词，而是被抽出来追加到消息**最末尾**、标 `prefix: true`，模型从它接着续写
+（DeepSeek `/beta` 前缀续写）。
+
+- 引擎：`preset-loader.findTailAssistantEntry`（末尾**启用**条目是 assistant 才算）+ `getPresetPrefill`
+  （读预设 `settings.prefill = { enabled, field }`；`field` = `content`（正文前缀，模型从条目文字
+  后面接着写）或 `reasoning_content`（思维链种子、content 留空））；`assemblePresetContent` **把
+  assistant 条目不并进 system**（否则同一段文字在 system 与末尾出现两次）；`agent-orchestrator`
+  在 story + `openai-chat` 协议时，先 `ensureUserMessage` 再追加该条目为末尾 assistant 前缀
+  —— 保证前缀**永远是最后一条**，且不在 tools 路径。追加在请求装配层，**不进 Delta wire transcript**。
+- UI：预设管理**查看器**里，当末尾启用条目是 assistant 时**才出现**「预填充（前缀续写）」开关；
+  打开后出现「填充位置」选择（正文前缀 / 思维链种子）+ DeepSeek Beta 提醒。开关是**预设级**
+  `settings.prefill`，内容来自条目本身（**不再有独立种子字段**）。
+- 🔴 只做提醒、不做端点校验：endpoint 是否真的是 DeepSeek `/beta` 由玩家在 API 源里配。
+- 私有内容仓：预填充测试预设需把预填充内容做成一条 **`role=assistant` 的条目**（本喵喵先前放的
+  `settings.prefill.seed` 字段已不再被读取，需换成条目）。
+- 涉及文件：`preset-loader.ts` · `agent-orchestrator.ts` · `PresetManager.vue`（+ 测试：`preset-loader.test.ts` /
+  `agent-orchestrator.test.ts` / `PresetManager.prefill.test.ts`）
+- 验证：`npm run gates` 八道闸门全绿。
+
 ### 2026-10-04 战斗敌方难度校准 + 随机性别不再默认男｜已实施（prompt 需重装内容包生效）
 
 真机反馈两点：打架时敌方战力与主角不匹配（AI 不会判断难度）；随机生成的角色清一色男性。

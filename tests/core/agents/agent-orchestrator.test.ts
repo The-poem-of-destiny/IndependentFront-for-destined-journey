@@ -2907,3 +2907,149 @@ describe('AgentOrchestrator — Delta 会话接线（T3）', () => {
     expect(r2.promptRebased).toBe(false);
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 正文 AI 预填充（DeepSeek beta 前缀续写，story 预设 settings.prefill）
+// ═══════════════════════════════════════════════════════════
+
+describe('AgentOrchestrator — 正文预填充（settings.prefill）', () => {
+  function okFetch() {
+    return vi.fn().mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content: 'ok' } }],
+          usage: { total_tokens: 10 },
+        }),
+        text: async () => '',
+      }),
+    );
+  }
+
+  type Wire = {
+    role: string;
+    content: string | null;
+    prefix?: unknown;
+    reasoning_content?: unknown;
+  };
+
+  /**
+   * 🆕 预填充素材 = 预设末尾那条「启用且 role=assistant」的条目；`settings.prefill.enabled`
+   * 控制是否启用，`field` 决定进 content 还是 reasoning_content。
+   */
+  function makePrefillPreset(content: string, opts: { enabled?: boolean; field?: string } = {}) {
+    const { enabled = true, field } = opts;
+    return {
+      id: 'pf',
+      name: 'PF',
+      fixedSystem: 'SYSTEM',
+      fixedExamples: '',
+      settings: {
+        prompts: [
+          {
+            name: 'main',
+            content: 'SYS {{NARRATIVE}}',
+            role: 'system',
+            enabled: true,
+            injection_order: 0,
+          },
+          { name: 'prefill', content, role: 'assistant', enabled: true, injection_order: 10 },
+        ],
+        prefill: { enabled, ...(field ? { field } : {}) },
+      },
+    } as unknown as import('../../../src/core/types/types').AgentPreset;
+  }
+
+  function buildOrch(
+    preset: import('../../../src/core/types/types').AgentPreset,
+    endpoint = makeEndpoint(),
+  ) {
+    return new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['story']),
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'story', presetId: 'pf' })],
+      endpoints: [endpoint],
+      presets: [preset],
+      saveId: `save_prefill_${Math.random().toString(36).slice(2)}`,
+    });
+  }
+
+  it('默认 field=content：末尾追加 assistant 前缀（content=条目文字），且不进 system', async () => {
+    globalThis.fetch = okFetch();
+    const orch = buildOrch(makePrefillPreset('元指令模式开始：'));
+
+    await orch.run();
+    const wire = (orch.getResults().get('story')!.requestMessages ?? []) as Wire[];
+
+    const last = wire[wire.length - 1]!;
+    expect(last.role).toBe('assistant');
+    expect(last.content).toBe('元指令模式开始：');
+    expect(last.prefix).toBe(true);
+    expect(last.reasoning_content).toBeUndefined();
+    // 前缀之前必须是 user（不能落在 system 之后 / 中间）
+    expect(wire[wire.length - 2]?.role).toBe('user');
+    // 预填充素材**不并进 system**（否则同一段文字出现两次）
+    const sys = wire.find((m) => m.role === 'system')!;
+    expect(sys.content ?? '').not.toContain('元指令模式开始：');
+  });
+
+  it('field=reasoning_content：content 留空、条目文字进 reasoning_content', async () => {
+    globalThis.fetch = okFetch();
+    const orch = buildOrch(makePrefillPreset('思考过程：', { field: 'reasoning_content' }));
+
+    await orch.run();
+    const wire = (orch.getResults().get('story')!.requestMessages ?? []) as Wire[];
+    const last = wire[wire.length - 1]!;
+    expect(last.role).toBe('assistant');
+    expect(last.content).toBe('');
+    expect(last.prefix).toBe(true);
+    expect(last.reasoning_content).toBe('思考过程：');
+  });
+
+  it('未开启 / 条目内容空白：不追加前缀', async () => {
+    globalThis.fetch = okFetch();
+    const offOrch = buildOrch(makePrefillPreset('思考过程：', { enabled: false }));
+    await offOrch.run();
+    const offWire = (offOrch.getResults().get('story')!.requestMessages ?? []) as Wire[];
+    expect(offWire.every((m) => m.role !== 'assistant')).toBe(true);
+
+    globalThis.fetch = okFetch();
+    const blankOrch = buildOrch(makePrefillPreset('   \n '));
+    await blankOrch.run();
+    const blankWire = (blankOrch.getResults().get('story')!.requestMessages ?? []) as Wire[];
+    expect(blankWire.every((m) => m.role !== 'assistant')).toBe(true);
+  });
+
+  it('非 openai-chat 协议端点：不追加前缀', async () => {
+    globalThis.fetch = okFetch();
+    const orch = buildOrch(
+      makePrefillPreset('元指令模式开始：'),
+      makeEndpoint({ protocol: 'gemini' }),
+    );
+
+    await orch.run();
+    const wire = (orch.getResults().get('story')!.requestMessages ?? []) as Wire[];
+    expect(wire.every((m) => m.role !== 'assistant')).toBe(true);
+  });
+
+  it('第二轮 delta：前缀随本轮 user 一起追加，每轮都以 assistant 前缀收尾', async () => {
+    globalThis.fetch = okFetch();
+    const orch = buildOrch(makePrefillPreset('元指令模式开始：'));
+
+    await orch.run();
+    const first = (orch.getResults().get('story')!.requestMessages ?? []) as Wire[];
+    await orch.run();
+    const second = (orch.getResults().get('story')!.requestMessages ?? []) as Wire[];
+
+    expect(second.length).toBeGreaterThan(first.length);
+    for (const wire of [first, second]) {
+      expect(wire[wire.length - 1]).toMatchObject({
+        role: 'assistant',
+        content: '元指令模式开始：',
+        prefix: true,
+      });
+    }
+  });
+});

@@ -876,6 +876,20 @@ export class GamePipeline {
     invalidatePromptSession(this.saveId);
   }
 
+  /**
+   * 🆕 自动存档（2026-10-05）：把当前活表状态覆写进「本轮那张 turn 快照」。
+   *
+   * 由 `useAutosave` 定时触发（活表变动后静默数秒）。引擎侧 `amendCurrentTurnSnapshot`
+   * 会自锁并与提交串行。失败只记日志 —— 它是锦上添花的持久化，不该打断任何操作。
+   */
+  async autosaveCurrentTurn(): Promise<void> {
+    try {
+      await createStateManager(this.saveId).amendCurrentTurnSnapshot();
+    } catch (err) {
+      console.warn('[GamePipeline] 自动存档失败（不影响游玩）:', err);
+    }
+  }
+
   private updateAgentActivityStatus(agentId: string, runActivityId?: string): void {
     if (runActivityId === undefined) {
       this.game.updateAgentStatus(agentId);

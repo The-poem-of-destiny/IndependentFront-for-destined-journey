@@ -24,6 +24,14 @@ const reasonLabel: Record<string, string> = {
 
 const currentSnapshotId = computed(() => game.activeSave?.activeSnapshotId ?? null);
 
+/**
+ * 🆕 最新一张回合档的 id —— 它就是「自动存档」那张：会被持续覆写、吸收手动改动，
+ * 直到下一轮拍出新快照后冻结。列表已按 turn 倒序，第一条 reason==='turn' 即最新。
+ */
+const latestTurnSnapshotId = computed(
+  () => snapshots.value.find((s) => s.reason === 'turn')?.id ?? null,
+);
+
 async function fetchSnapshots() {
   if (!game.activeSaveId) {
     snapshots.value = [];
@@ -119,7 +127,11 @@ watch(
         <div class="snapshot-card" :class="{ current: currentSnapshotId === snap.id }">
           <div class="snap-header">
             <span class="snap-turn">第 {{ snap.turn }} 回合</span>
-            <span class="snap-reason">{{ reasonLabel[snap.reason] ?? snap.reason }}</span>
+            <span class="snap-reason">{{
+              snap.id === latestTurnSnapshotId
+                ? '自动存档'
+                : (reasonLabel[snap.reason] ?? snap.reason)
+            }}</span>
             <span v-if="currentSnapshotId === snap.id" class="snap-current">当前</span>
           </div>
           <div class="snap-meta">

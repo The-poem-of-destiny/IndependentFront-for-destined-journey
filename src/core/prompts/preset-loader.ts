@@ -180,6 +180,63 @@ export function getPreset(id: string, presets: AgentPreset[]): AgentPreset | und
   return presets.find((p) => p.id === id);
 }
 
+/** 预设末尾的 assistant 条目（预填充素材）：最后一条**启用**条目且 `role==='assistant'`。 */
+export interface TailAssistantEntry {
+  content: string;
+}
+
+/** 取预设末尾那条「启用且 role=assistant」的条目；没有则 `null`（预填充开关此时不显示）。 */
+export function findTailAssistantEntry(
+  preset: AgentPreset | undefined | null,
+): TailAssistantEntry | null {
+  const prompts = (preset as { settings?: { prompts?: unknown } } | undefined | null)?.settings
+    ?.prompts;
+  if (!Array.isArray(prompts)) return null;
+  const enabled = [
+    ...(prompts as Array<{
+      enabled?: unknown;
+      role?: unknown;
+      content?: unknown;
+      injection_order?: number;
+    }>),
+  ]
+    // 🔴 只认「对象」：`prompts` 是第三方可编辑的 ST JSON，可能混进 null/数字。直接读
+    //    `.enabled` 会 throw —— 而本函数在 UI 的 computed 里，渲染期一炸就是白屏。
+    .filter((p) => p !== null && typeof p === 'object' && p.enabled !== false)
+    .sort((a, b) => (a.injection_order ?? 0) - (b.injection_order ?? 0));
+  const tail = enabled[enabled.length - 1];
+  if (!tail || tail.role !== 'assistant') return null;
+  return { content: typeof tail.content === 'string' ? tail.content : '' };
+}
+
+/**
+ * 正文 AI 预填充（DeepSeek beta 前缀续写）的生效配置。
+ *
+ * 🔴 内容取自**预设末尾那条 assistant 条目**（不再有独立种子字段）—— 开关与内容都跟着
+ *    预设走。`field` 决定这段文字进 `content`（正文前缀，模型从它后面接着写）还是
+ *    `reasoning_content`（思维链种子，`content` 留空）。
+ * 🔴 生效条件 = `settings.prefill.enabled === true` **且**末尾 assistant 条目非空白；
+ *    任一不满足返回 `null`（不启用）。容错：`settings` 是 ST 原始 JSON，字段缺失/类型错
+ *    一律返回 `null`，绝不抛。
+ */
+export interface PresetPrefill {
+  field: 'content' | 'reasoning_content';
+  content: string;
+}
+
+/** 读取 story 预设的预填充配置（见 {@link PresetPrefill}）。 */
+export function getPresetPrefill(preset: AgentPreset | undefined | null): PresetPrefill | null {
+  const raw = (preset as { settings?: { prefill?: unknown } } | undefined | null)?.settings
+    ?.prefill;
+  if (!raw || typeof raw !== 'object') return null;
+  if ((raw as { enabled?: unknown }).enabled !== true) return null;
+  const tail = findTailAssistantEntry(preset);
+  if (!tail || !tail.content.trim()) return null;
+  const field =
+    (raw as { field?: unknown }).field === 'reasoning_content' ? 'reasoning_content' : 'content';
+  return { field, content: tail.content };
+}
+
 /**
  * Phase 10: Assemble preset content from prompts[] entries.
  *
@@ -201,9 +258,12 @@ export function assemblePresetContent(
     return [preset.fixedSystem, preset.fixedExamples].filter(Boolean).join('\n\n');
   }
 
-  // Sort by injection_order, filter enabled
+  // Sort by injection_order, filter enabled.
+  // 🔴 `role === 'assistant'` 的条目**不并进 system 正文** —— 它是「预填充」素材，由
+  //    `getPresetPrefill` / orchestrator 抽出来追加到**消息末尾**（prefix 续写）；并进来会
+  //    让同一段文字既在 system 又在末尾出现两次。开关在预设级（`settings.prefill`）。
   const sorted = [...prompts]
-    .filter((p: any) => p.enabled !== false)
+    .filter((p: any) => p.enabled !== false && p.role !== 'assistant')
     .sort((a: any, b: any) => (a.injection_order ?? 0) - (b.injection_order ?? 0));
 
   // 快速检查：是否有任何条目需要预处理

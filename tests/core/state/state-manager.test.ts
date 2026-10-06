@@ -36,6 +36,7 @@ vi.mock('../../../src/core/persistence/database', () => ({
   getSnapshots: vi.fn(),
   getSnapshot: vi.fn(),
   getLatestSnapshot: vi.fn(),
+  getLatestTurnSnapshotMeta: vi.fn(),
   saveSnapshot: vi.fn(),
   trimSnapshots: vi.fn(),
   getSettings: vi.fn(),
@@ -3049,6 +3050,52 @@ describe('StateManager', () => {
       setEngineSettingsProvider(undefined);
       await sm.createSnapshot('turn', 3);
       expect(vi.mocked(db.trimSnapshots)).toHaveBeenLastCalledWith('save-001', 30, 'tiered');
+    });
+
+    it('🆕 amendCurrentTurnSnapshot: 覆写最新 turn 快照载荷，id/createdAt/turn 一律不变', async () => {
+      const createdAt = 111;
+      vi.mocked(db.getLatestTurnSnapshotMeta).mockResolvedValue({
+        id: 'snap-5',
+        saveId: 'save-001',
+        createdAt,
+        reason: 'turn',
+        turn: 5,
+      });
+      const chars = [{ id: 'c1', hp: 1 }];
+      const profile = { saveId: 'save-001', fp: 9 };
+      const events = [{ id: 'pe-1' }];
+      const msgs = [{ id: 'm-1', role: 'assistant', content: '改后正文' }];
+      vi.mocked(db.getCharacters).mockResolvedValue(chars as any);
+      vi.mocked(saveProfile.getProfile).mockResolvedValue(profile as any);
+      vi.mocked(db.getPlotEvents).mockResolvedValue(events as any);
+      vi.mocked(db.getMessages).mockResolvedValue(msgs as any);
+      vi.mocked(db.saveSnapshot).mockClear();
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      await sm.amendCurrentTurnSnapshot();
+
+      expect(vi.mocked(db.saveSnapshot)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(db.saveSnapshot)).toHaveBeenCalledWith({
+        id: 'snap-5',
+        saveId: 'save-001',
+        createdAt,
+        reason: 'turn',
+        turn: 5,
+        characters: chars,
+        saveProfile: profile,
+        plotEvents: events,
+        messages: msgs,
+      });
+    });
+
+    it('🆕 amendCurrentTurnSnapshot: 没有 turn 快照时 no-op（不写库）', async () => {
+      vi.mocked(db.getLatestTurnSnapshotMeta).mockResolvedValue(undefined);
+      vi.mocked(db.saveSnapshot).mockClear();
+
+      const sm = new StateManager({ saveId: 'save-001' });
+      await sm.amendCurrentTurnSnapshot();
+
+      expect(vi.mocked(db.saveSnapshot)).not.toHaveBeenCalled();
     });
 
     it('commitChatState 不再自动产生快照（杀 #28 patchCount%N 即建即抛）', async () => {

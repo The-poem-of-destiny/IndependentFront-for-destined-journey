@@ -228,6 +228,10 @@ describe('getAgentZoneVisibility', () => {
       expect(level).toBe('NONE');
     }
   });
+
+  it('plot_pre_check 名册级为 KEYS（2026-10-05：pre 要名册判断「复用已有 vs 新开」）', () => {
+    expect(getAgentZoneVisibility('plot_pre_check').npc).toBe('KEYS');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════

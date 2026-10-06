@@ -89,12 +89,17 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   🔴 一律走 lib/asset-url.ts 的引用计数 LRU，**不写第二个**。
 │   │                                      每个使用面自己记账：少还是泄漏，多还花的是**别人**那一份
 │   │                                      （那份 LRU 只按 id 计数，不记是谁欠的）
-│   └── useManualSceneImage.ts       ← [图像 v1] 玩家主动要图那条路（发起 → 被限额拦下 → 弹一次确认 →
-│                                       带确认重发）。手动有**两个入口**（正文按钮 + 消息右键），
-│                                       D24「手动永不被判成不可用」两处都得守 —— 各写一遍的下场是
-│                                       一处补了确认、另一处仍把人拦死在 toast 上
-│                                       🔴 请求形状里**没有** source / quotaConfirmed 字段，所以
-│                                          「顺手给自动档开个绕过口」在这一层是类型错误，不是代码审查
+│   ├── useManualSceneImage.ts       ← [图像 v1] 玩家主动要图那条路（发起 → 被限额拦下 → 弹一次确认 →
+│   │                                   带确认重发）。手动有**两个入口**（正文按钮 + 消息右键），
+│   │                                   D24「手动永不被判成不可用」两处都得守 —— 各写一遍的下场是
+│   │                                   一处补了确认、另一处仍把人拦死在 toast 上
+│   │                                   🔴 请求形状里**没有** source / quotaConfirmed 字段，所以
+│   │                                      「顺手给自动档开个绕过口」在这一层是类型错误，不是代码审查
+│   └── useAutosave.ts               ← 🆕 [自动存档 2026-10-05] 游戏页监活表（消息/角色/档案/事件）
+│                                       改动，静默 5s（节流）后调 `game.runAutosave()` 把当前状态
+│                                       覆写进「本轮 turn 快照」—— 手动润色/重铸不再因回档丢失。
+│                                       卸载即清定时器。🔴 生成中/战斗中不写（runAutosave 自判）；
+│                                       只挂 GamePage（快照面板给最新那张标「自动存档」）
 │
 ├── lib/                             ← 前端侧的**非组件模块**（纯逻辑 / 唯一 I/O 面 / 注入缝装配）
 │                                       🔴 **别把它读成「前端↔引擎的桥接层」** —— 那是意图不是现状：
@@ -545,6 +550,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   ├── AgentPromptCard.vue   ← systemPrompt + 上下文模板 + 占位符徽章 + 预览（非 story）
 │   │   │   │                            占位符插入改用**模板 ref**，不再全局 querySelectorAll
 │   │   │   ├── PresetManager.vue     ← 预设子系统 + 两个弹窗（story）；单根，弹窗在根卡内层
+│   │   │                             🆕 2026-10-05：末条启用条目是 assistant 时，查看器出现「预填充
+│   │   │                               （前缀续写）」开关 +「填充位置」（content / reasoning_content）
+│   │   │                               选择，写预设 `settings.prefill`（判据复用引擎 `findTailAssistantEntry`）；
+│   │   │                               另补「编辑预设」入口（此前 preset 级编辑无按钮可达）。
 │   │   │   ├── agent-list.ts         ← 13 个 Agent 的展示元数据 + getDefaultTemplateForAgent
 │   │   │   │                            （combat 为单一 DM 协议沙盒侧链；`image_prompt` 按 D53 刻意
 │   │   │   │                              不入本表，故设置页 Agent 子导航少它一项；

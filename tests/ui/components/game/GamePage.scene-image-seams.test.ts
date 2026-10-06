@@ -131,6 +131,7 @@ vi.mock('../../../../src/ui/stores/game-store', () => ({
   })),
   setRewriteLoadoutImpl: vi.fn(),
   setRewriteProseImpl: vi.fn(),
+  setAutosaveImpl: vi.fn(),
 }));
 
 vi.mock('../../../../src/ui/stores/ui-store', () => ({

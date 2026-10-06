@@ -261,6 +261,15 @@ export interface PlotCastPlanEntry {
   surface: string;
   /** 命名约束（可选；仅名字是线索时） */
   nameConstraint?: PlotCastNameConstraint;
+  /**
+   * 🆕 目标生命层级（可选；**仅新角色有意义**，复用已有角色时留空）。
+   *
+   * 自由文本（如 `T5` / `第五层级` / `比主角高一层`），由 pre 按事件格局规定大致实力，
+   * 经 story 导演块与 dispatcher 的 `{{PLOT_CAST_PLAN}}` 下传；dispatcher 据此发
+   * `entity_gen_request tier=`。引擎**不解释、不校验**这串文本（照 map/random 的中文裁决
+   * 归内容层的口径），只负责搬运。
+   */
+  tier?: string;
   /** 幕后真相/动机 —— 永不下发 */
   secret: string;
 }
@@ -273,6 +282,8 @@ export interface PlotCastPlanSurfaceEntry {
   behavior: string;
   surface: string;
   nameConstraint?: PlotCastNameConstraint;
+  /** 目标生命层级（仅新角色；透传给 dispatcher 的 entity_gen_request tier=） */
+  tier?: string;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -827,6 +838,7 @@ export function parsePlotCastPlan(value: unknown): PlotCastPlanEntry[] {
       behavior: typeof o.behavior === 'string' ? o.behavior : '',
       surface: typeof o.surface === 'string' ? o.surface : '',
       nameConstraint: normalizeCastNameConstraint(o.nameConstraint),
+      tier: hasName(o.tier) ? o.tier.trim() : undefined,
       secret: typeof o.secret === 'string' ? o.secret : '',
     });
   }
@@ -846,6 +858,7 @@ export function projectPlotCastPlan(
     };
     if (e.nodeRef) surface.nodeRef = e.nodeRef;
     if (e.nameConstraint) surface.nameConstraint = { ...e.nameConstraint };
+    if (e.tier) surface.tier = e.tier;
     return surface;
   });
 }
@@ -872,6 +885,7 @@ export function formatPlotCastPlanLines(entries: ReadonlyArray<PlotCastPlanSurfa
         `行为要求：${e.behavior || '（未定）'}`,
       ];
       if (e.surface) parts.push(`外在信息：${e.surface}`);
+      if (e.tier) parts.push(`目标层级：${e.tier}`);
       if (e.nameConstraint) {
         parts.push(
           e.nameConstraint.mode === 'full'

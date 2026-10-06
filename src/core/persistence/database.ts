@@ -1669,6 +1669,20 @@ export async function getLatestSnapshot(saveId: string): Promise<SnapshotMeta | 
 }
 
 /**
+ * 最新一张 `reason === 'turn'` 的快照**元数据**（自动存档 amend 的目标）。
+ *
+ * 🔴 只认 `turn`：`pre-combat` 快照是战斗重开的锚点，覆写它会把重开点弄坏；`manual` 目前
+ *    无生产调用点。判据按 `createdAt` 取最新，与 `getLatestSnapshot` 同口径，不碰载荷表。
+ */
+export async function getLatestTurnSnapshotMeta(saveId: string): Promise<SnapshotMeta | undefined> {
+  const snapshots = await getDatabase().snapshots.where('saveId').equals(saveId).toArray();
+  const turns = snapshots
+    .filter((s) => s.reason === 'turn')
+    .sort((a, b) => a.createdAt - b.createdAt);
+  return turns[turns.length - 1];
+}
+
+/**
  * 落库一份整快照 —— 拆成两行，**同一个事务**里写。
  *
  * 半份快照（有元数据没载荷）在恢复时是硬失败，所以这一对必须原子。

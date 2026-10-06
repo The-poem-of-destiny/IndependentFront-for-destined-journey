@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
-import { useGameStore, setRewriteLoadoutImpl, setRewriteProseImpl } from '../../stores/game-store';
+import {
+  useGameStore,
+  setRewriteLoadoutImpl,
+  setRewriteProseImpl,
+  setAutosaveImpl,
+} from '../../stores/game-store';
+import { useAutosave } from '../../composables/useAutosave';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAudioStore } from '../../stores/audio-store';
@@ -46,6 +52,10 @@ const imagePresets = useImagePresetStore();
 /** 角色外貌的会话副本（D56）—— 基线在 imagePresets，这一份随存档走 */
 const charAppearance = useCharacterAppearanceStore();
 const s = settings.settings;
+
+// 🆕 自动存档（2026-10-05）：活表（消息/角色/档案/事件）一有改动，静默数秒后把当前状态
+//    覆写进「本轮那张快照」—— 手动润色 / 重铸等不再因回档而丢。卸载即停定时器。
+useAutosave();
 
 let pipeline: GamePipeline | null = null;
 let disposed = false;
@@ -198,6 +208,10 @@ onMounted(async () => {
         pipeline
           ? pipeline.rewriteProseText(bodyText)
           : Promise.resolve({ ok: false, reason: '游戏管线还没就绪，稍后再试' }),
+      );
+      // 🆕 自动存档（2026-10-05）：把当前活表状态覆写进「本轮快照」的实现（useAutosave 定时调）。
+      setAutosaveImpl(() =>
+        pipeline ? pipeline.autosaveCurrentTurn() : Promise.resolve(undefined),
       );
       // 🎵 曲库必须在这里装 —— 此前只有设置页音频分区和迷你播放器会 init()，
       // 没打开过它们的会话曲库是空的，选曲永远命中不了任何东西。

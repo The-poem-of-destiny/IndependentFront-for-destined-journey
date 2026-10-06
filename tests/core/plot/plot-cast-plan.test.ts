@@ -129,3 +129,34 @@ describe('parsePreCheckOutput.castPlan', () => {
     expect(r?.castPlan[0].ref).toBe('奥古斯都家的使者');
   });
 });
+
+describe('castPlan 目标层级（tier，2026-10-05）', () => {
+  it('parse：tier 非空字符串 trim 后保留；空/非字符串 → undefined', () => {
+    expect(parsePlotCastPlan([entry({ tier: ' T5 ' })])[0].tier).toBe('T5');
+    expect(parsePlotCastPlan([entry({ tier: '第五层级' })])[0].tier).toBe('第五层级');
+    expect(parsePlotCastPlan([entry({ tier: '   ' })])[0].tier).toBeUndefined();
+    expect(parsePlotCastPlan([entry({ tier: 5 })])[0].tier).toBeUndefined();
+    expect(parsePlotCastPlan([entry()])[0].tier).toBeUndefined();
+  });
+
+  it('project：tier 随安全面下发（仍无 secret）', () => {
+    const [surface] = projectPlotCastPlan(parsePlotCastPlan([entry({ tier: 'T5' })]));
+    expect(surface.tier).toBe('T5');
+    expect(surface).not.toHaveProperty('secret');
+  });
+
+  it('format：有 tier 时渲染「目标层级」行；无 tier 时不出现', () => {
+    const withTier = formatPlotCastPlanLines(
+      projectPlotCastPlan(parsePlotCastPlan([entry({ tier: 'T5' })])),
+    );
+    expect(withTier).toContain('目标层级：T5');
+    const withoutTier = formatPlotCastPlanLines(projectPlotCastPlan(parsePlotCastPlan([entry()])));
+    expect(withoutTier).not.toContain('目标层级');
+  });
+
+  it('{{PLOT_CAST_PLAN}} resolver：层级进下发文本、secret 不进', () => {
+    const out = callResolver({ plotCastPlan: parsePlotCastPlan([entry({ tier: 'T5' })]) });
+    expect(out).toContain('目标层级：T5');
+    expect(out).not.toContain('幕后主使');
+  });
+});

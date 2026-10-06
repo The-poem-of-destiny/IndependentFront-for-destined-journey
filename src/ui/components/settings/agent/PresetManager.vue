@@ -38,7 +38,7 @@ import {
   movePresetEntry,
   duplicatePresetEntry,
 } from '../../../lib/preset-entries';
-import { preprocessPresetForPreview } from '@engine/prompts/preset-loader';
+import { preprocessPresetForPreview, findTailAssistantEntry } from '@engine/prompts/preset-loader';
 import type { ChatPreset } from '@engine/types/types';
 
 const props = defineProps<{ agentId: string }>();
@@ -238,6 +238,51 @@ const presetForm = reactive({
 });
 const editingPresetId = ref<string | null>(null);
 
+/**
+ * 预设末尾那条「启用且 role=assistant」的条目 —— 它是**预填充素材**。
+ * 没有它就不显示预填充开关（开关只在有意义时出现）。
+ */
+const tailAssistantEntry = computed(() =>
+  activePreset.value ? findTailAssistantEntry(activePreset.value as any) : null,
+);
+
+/** 预填充开关是否打开（真源 `settings.prefill.enabled`；末尾必须是 assistant 条目）。 */
+const prefillEnabled = computed(
+  () =>
+    tailAssistantEntry.value !== null &&
+    (activePreset.value?.settings as { prefill?: { enabled?: unknown } } | undefined)?.prefill
+      ?.enabled === true,
+);
+
+/** 填充位置：`content`（正文前缀）/ `reasoning_content`（思维链种子，content 留空）。 */
+const prefillField = computed(() => {
+  const st = activePreset.value?.settings as { prefill?: { field?: unknown } } | undefined;
+  return st?.prefill?.field === 'reasoning_content' ? 'reasoning_content' : 'content';
+});
+
+/** 写 `settings.prefill`（只并这两个字段，其余 ST settings 原样保留）。 */
+async function patchPrefill(patch: { enabled?: boolean; field?: string }): Promise<void> {
+  const p = activePreset.value;
+  if (!p) return;
+  const st = (p.settings ?? {}) as Record<string, any>;
+  const prev = (st.prefill ?? {}) as Record<string, unknown>;
+  await persistPreset({
+    ...p,
+    settings: { ...st, prefill: { ...prev, ...patch } },
+    updatedAt: Date.now(),
+  });
+}
+async function togglePrefill() {
+  await patchPrefill({ enabled: !prefillEnabled.value });
+}
+async function onPrefillFieldChange(e: Event) {
+  const value = (e.target as HTMLSelectElement).value;
+  await patchPrefill({
+    enabled: true,
+    field: value === 'reasoning_content' ? 'reasoning_content' : 'content',
+  });
+}
+
 async function loadPresets() {
   try {
     await loadPresetsFromDexie();
@@ -272,6 +317,29 @@ function openNewPreset() {
   presetForm.topP = '1';
   presetForm.freqPen = '0';
   presetForm.presPen = '0';
+  showPresetEditor.value = true;
+}
+
+/**
+ * 打开「编辑预设」弹窗（选中预设）—— 此前没有任何按钮调它，整条编辑分支是死的。
+ *
+ * 🔴 `settings` 是 ST 原始 JSON，采样字段同名有新旧两套（`temp_openai` vs `temperature`），
+ *    读取时都兜一层；写回时仍按旧行为写 `*_openai` 那套。
+ */
+function openEditPreset() {
+  const p = presetById(s.activePresetId);
+  if (!p) return;
+  const st = (p.settings ?? {}) as Record<string, any>;
+  editingPresetId.value = p.id;
+  presetForm.name = p.name || '';
+  presetForm.description = p.description || '';
+  const prompts = Array.isArray(st.prompts) ? st.prompts : [];
+  presetForm.mainPrompt = prompts[0]?.content || '';
+  presetForm.temperature = String(st.temp_openai ?? st.temperature ?? '0.8');
+  presetForm.maxTokens = String(st.openai_max_tokens ?? '4096');
+  presetForm.topP = String(st.top_p_openai ?? st.top_p ?? '1');
+  presetForm.freqPen = String(st.freq_pen_openai ?? st.frequency_penalty ?? '0');
+  presetForm.presPen = String(st.pres_pen_openai ?? st.presence_penalty ?? '0');
   showPresetEditor.value = true;
 }
 async function savePreset() {
@@ -412,12 +480,21 @@ void reactive;
     <div v-if="activePreset" class="preset-viewer">
       <div class="preset-viewer-header">
         <div class="preset-viewer-title">
-          <h5>{{ activePreset.name }}</h5>
+          <h5>
+            {{ activePreset.name }}
+            <span
+              v-if="prefillEnabled"
+              class="prefill-badge"
+              title="已启用前缀续写（预填充）：仅 DeepSeek beta 端点支持"
+              >预填充</span
+            >
+          </h5>
           <span v-if="activePreset.description" class="text-xs text-muted">{{
             activePreset.description
           }}</span>
         </div>
         <div class="preset-viewer-actions">
+          <AppButton variant="ghost" size="sm" @click="openEditPreset">编辑</AppButton>
           <AppButton variant="ghost" size="sm" @click="exportPresetDynamic(activePreset!)"
             >导出</AppButton
           >
@@ -509,6 +586,37 @@ void reactive;
         <p v-if="activePrompts.length === 0" class="text-muted text-sm" style="padding: 12px 16px">
           此预设没有条目
         </p>
+      </div>
+
+      <!-- 🆕 预填充（DeepSeek beta 前缀续写）：仅当**末尾启用条目是 assistant** 时出现。
+           打开后那条条目不再并进 system，而是移到消息末尾作为 assistant 前缀（prefix 续写）。 -->
+      <div v-if="tailAssistantEntry" class="prefill-block">
+        <div class="prefill-head">
+          <div class="prefill-heading">
+            <span class="prefill-title">预填充（前缀续写）</span>
+            <span class="prefill-subtitle">把末尾 assistant 条目移到消息末尾作为前缀</span>
+          </div>
+          <label class="prefill-switch" @click.stop.prevent="togglePrefill">
+            <input type="checkbox" class="toggle-input" :checked="prefillEnabled" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <template v-if="prefillEnabled">
+          <p class="prefill-warning">
+            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true" />
+            <span>
+              仅支持 DeepSeek Beta 端点：该 Agent 绑定的 API 源 base_url 需为
+              <code>https://api.deepseek.com/beta</code>（并在源参数中自行开启 thinking）。
+            </span>
+          </p>
+          <label class="prefill-field">
+            <span class="prefill-field-label">填充位置</span>
+            <select class="form-input" :value="prefillField" @change="onPrefillFieldChange">
+              <option value="content">正文前缀（模型从条目文字后面接着写）</option>
+              <option value="reasoning_content">思维链种子（content 留空）</option>
+            </select>
+          </label>
+        </template>
       </div>
     </div>
 
@@ -899,5 +1007,82 @@ void reactive;
   display: flex;
   gap: var(--theme-spacing-sm);
   flex-wrap: wrap;
+}
+/* 🆕 预填充（DeepSeek beta 前缀续写）展示与编辑 */
+.prefill-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  vertical-align: middle;
+  color: var(--theme-primary);
+  border: 1px solid var(--theme-primary);
+  border-radius: var(--theme-radius-sm);
+}
+.prefill-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-md);
+  border-top: 1px solid var(--theme-card-border);
+}
+.prefill-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--theme-spacing-md);
+}
+.prefill-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.prefill-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+.prefill-subtitle {
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+}
+/* 🔴 开关的隐藏 checkbox 用 position:relative 关在本容器里；配合 label 的
+   @click.stop.prevent（不让 checkbox 被聚焦），避免浏览器把页面滚到别处。 */
+.prefill-switch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.prefill-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--theme-spacing-sm);
+  margin: 0;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--theme-warning);
+  background: color-mix(in srgb, var(--theme-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 30%, transparent);
+  border-radius: var(--theme-radius-sm);
+}
+.prefill-warning > i {
+  margin-top: 2px;
+}
+.prefill-warning code {
+  color: inherit;
+}
+.prefill-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.prefill-field-label {
+  font-size: 0.75rem;
+  color: var(--theme-text-secondary);
 }
 </style>

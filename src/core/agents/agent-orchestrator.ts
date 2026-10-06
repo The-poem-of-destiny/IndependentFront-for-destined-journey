@@ -28,9 +28,10 @@ import type {
   ToolExecutionContext,
 } from '../types/types';
 import type { SceneImageMarker } from '../types/types-image';
-import { AgentClient } from './agent-client';
+import { AgentClient, ensureUserMessage } from './agent-client';
 import type { ChatRequest } from './agent-client';
 import { buildAgentMessagesAsync } from '../prompts/agent-templates';
+import { getPreset, getPresetPrefill } from '../prompts/preset-loader';
 import { scanMarkers } from '../story/marker-protocol';
 import {
   recallMemories,
@@ -620,6 +621,41 @@ export class AgentOrchestrator {
           duration: 0,
           error: `No template found for agent "${config.agentId}"`,
         };
+      }
+    }
+
+    // 🆕 正文 AI 预填充（DeepSeek beta 前缀续写）：story 预设 `settings.prefill` 开启时，
+    //    在 wire 消息末尾追加一条 `content: ''` 的 assistant 前缀，种子放进 `reasoning_content`，
+    //    模型从该前缀接着续写（DeepSeek `/beta` 的 `prefix: true`）。
+    //
+    // 🔴 只对 **story** 生效（`config.presetId` 是它的预设真源）；本函数天然无 tools
+    //    （agentic 走 `callAgenticAgent`），满足「不得注入 tool call」。
+    // 🔴 只走 openai-chat 协议 —— `prefix` / `reasoning_content` 只在那条编解码里透传，
+    //    误配到 gemini/anthropic 源时会变成一条含义不明的空 assistant 消息。
+    // 🔴 只做**提醒**、不做端点校验 —— endpoint 是否真的是 DeepSeek `/beta` 由玩家在 API
+    //    源里配，引擎在这里拦会把「配置没配好」变成「游戏不能玩」。UI 侧有提醒文案。
+    // 🔴 追加前先 `ensureUserMessage` 补齐 user：无状态路径（regenerate）可能只有 system，
+    //    否则 `buildRequestBody` 会在前缀**之后**补 user，把 assistant 前缀顶到中间。
+    //    补完后 `buildRequestBody` 里的 `ensureUserMessage` 命中 hasUser，幂等返回。
+    if (
+      config.agentId === 'story' &&
+      config.presetId &&
+      (endpoint.protocol ?? 'openai-chat') === 'openai-chat'
+    ) {
+      const preset = getPreset(config.presetId, this.presets);
+      const prefill = getPresetPrefill(preset);
+      if (prefill) {
+        // 内容 = 预设末尾那条 assistant 条目；`field` 决定进 content 还是 reasoning_content。
+        const prefillMessage =
+          prefill.field === 'reasoning_content'
+            ? {
+                role: 'assistant' as const,
+                content: '',
+                prefix: true as const,
+                reasoning_content: prefill.content,
+              }
+            : { role: 'assistant' as const, content: prefill.content, prefix: true as const };
+        messages = [...ensureUserMessage(messages), prefillMessage];
       }
     }
 

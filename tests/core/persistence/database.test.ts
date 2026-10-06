@@ -38,6 +38,7 @@ import {
   getSnapshots,
   getSnapshot,
   getLatestSnapshot,
+  getLatestTurnSnapshotMeta,
   saveSnapshot,
   deleteSnapshotsAfter,
   trimSnapshots,
@@ -651,6 +652,20 @@ describe('Snapshots CRUD', () => {
   it('getLatestSnapshot 无快照时返回 undefined', async () => {
     const latest = await getLatestSnapshot('save_empty');
     expect(latest).toBeUndefined();
+  });
+
+  it('🆕 getLatestTurnSnapshotMeta 只认 reason=turn 的最近一张（忽略 pre-combat）', async () => {
+    await saveSnapshot(makeSnapshot({ id: 't1', reason: 'turn', turn: 1, createdAt: 1000 }));
+    await saveSnapshot(makeSnapshot({ id: 't2', reason: 'turn', turn: 2, createdAt: 2000 }));
+    await saveSnapshot(makeSnapshot({ id: 'pc', reason: 'pre-combat', turn: 3, createdAt: 3000 }));
+
+    const latest = await getLatestTurnSnapshotMeta('save_test');
+    expect(latest?.id).toBe('t2');
+  });
+
+  it('🆕 getLatestTurnSnapshotMeta 无 turn 快照时返回 undefined', async () => {
+    await saveSnapshot(makeSnapshot({ id: 'pc', reason: 'pre-combat', createdAt: 1000 }));
+    expect(await getLatestTurnSnapshotMeta('save_turn_empty')).toBeUndefined();
   });
 
   it('trimSnapshots 应按 createdAt 删除超出上限的旧快照（保留最新 N 个）', async () => {

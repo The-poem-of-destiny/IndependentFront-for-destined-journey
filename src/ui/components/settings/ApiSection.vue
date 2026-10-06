@@ -250,7 +250,11 @@ function draftSource(): ApiSource {
  * 空串 / 非有限数 → `undefined`（不设该键）；其余原样。
  * 与 `normalizeContextWindowTokens` 同口径：坏输入不写库、不报错，回退「未配置」。
  */
-function normalizeOptionalNumber(raw: string): number | undefined {
+function normalizeOptionalNumber(raw: string | number): number | undefined {
+  // 🔴 `v-model` 绑在 `<input type="number">` 上时 Vue 会把值隐式转成 number（等价 `.number`），
+  //    所以这里必须同时吃 string 与 number —— 只按 string 处理会在用户一改那格时抛
+  //    `raw.trim is not a function`（初始值是字符串，所以不改不报）。
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : undefined;
   if (raw.trim() === '') return undefined;
   const n = Number(raw);
   return Number.isFinite(n) ? n : undefined;
@@ -508,7 +512,9 @@ async function openEditApi(ep: ApiEntry) {
  * 🆕 2026-08-22 Delta 会话（T4）：contextWindowTokens 只接受正整数；空值 = 不判断。
  * 非正整数 / 非数字一律归一化为 undefined（不做主动预算判断，不写坏值进库）。
  */
-function normalizeContextWindowTokens(raw: string): number | undefined {
+function normalizeContextWindowTokens(raw: string | number): number | undefined {
+  // 🔴 同 `normalizeOptionalNumber`：`<input type="number">` 的 v-model 会给到 number。
+  if (typeof raw === 'number') return Number.isSafeInteger(raw) && raw > 0 ? raw : undefined;
   if (raw.trim() === '') return undefined;
   const n = Number(raw);
   return Number.isSafeInteger(n) && n > 0 ? n : undefined;

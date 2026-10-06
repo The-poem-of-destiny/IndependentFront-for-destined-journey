@@ -6,6 +6,8 @@ import { describe, it, expect } from 'vitest';
 import {
   loadPresetsSync,
   getPreset,
+  getPresetPrefill,
+  findTailAssistantEntry,
   buildPresetSection,
   assemblePresetContent,
   parseSetvars,
@@ -55,6 +57,77 @@ describe('getPreset', () => {
   it('returns undefined for unknown ID', () => {
     const presets = [makePreset({ id: 'creative' })];
     expect(getPreset('nonexistent', presets)).toBeUndefined();
+  });
+});
+
+describe('findTailAssistantEntry / getPresetPrefill', () => {
+  const sys = (order: number) => ({
+    role: 'system',
+    content: 'sys',
+    enabled: true,
+    injection_order: order,
+  });
+  const asst = (order: number, content = '思考过程：') => ({
+    role: 'assistant',
+    content,
+    enabled: true,
+    injection_order: order,
+  });
+  function preset(prompts: any[], prefill?: unknown): AgentPreset {
+    const p = makePreset();
+    (p as any).settings = { prompts, ...(prefill === undefined ? {} : { prefill }) };
+    return p;
+  }
+
+  it('末尾启用条目是 assistant → 返回它', () => {
+    expect(findTailAssistantEntry(preset([sys(10), asst(20)]))).toEqual({
+      content: '思考过程：',
+    });
+  });
+
+  it('末尾不是 assistant / 末尾 assistant 未启用 / 无条目 → null', () => {
+    expect(findTailAssistantEntry(preset([asst(10), sys(20)]))).toBeNull();
+    expect(findTailAssistantEntry(preset([sys(10), { ...asst(20), enabled: false }]))).toBeNull();
+    expect(findTailAssistantEntry(makePreset())).toBeNull();
+    expect(findTailAssistantEntry(null)).toBeNull();
+  });
+
+  it('未开开关 / prefill 缺失类型错 → null', () => {
+    expect(getPresetPrefill(preset([sys(10), asst(20)]))).toBeNull();
+    expect(getPresetPrefill(preset([sys(10), asst(20)], { enabled: false }))).toBeNull();
+    expect(getPresetPrefill(preset([sys(10), asst(20)], 'yes'))).toBeNull();
+    expect(getPresetPrefill(undefined)).toBeNull();
+  });
+
+  it('开启 → {field, content}；field 默认 content，可设 reasoning_content', () => {
+    expect(getPresetPrefill(preset([sys(10), asst(20, '前缀文字')], { enabled: true }))).toEqual({
+      field: 'content',
+      content: '前缀文字',
+    });
+    expect(
+      getPresetPrefill(
+        preset([sys(10), asst(20, '种子')], { enabled: true, field: 'reasoning_content' }),
+      ),
+    ).toEqual({ field: 'reasoning_content', content: '种子' });
+  });
+
+  it('末尾 assistant 内容空白 → null', () => {
+    expect(getPresetPrefill(preset([sys(10), asst(20, '  \n ')], { enabled: true }))).toBeNull();
+  });
+});
+
+describe('assemblePresetContent — assistant 条目不并进 system', () => {
+  it('启用且 role=assistant 的条目被排除（它由预填充抽到消息末尾）', () => {
+    const p = makePreset({ fixedSystem: '', fixedExamples: '' });
+    (p as any).settings = {
+      prompts: [
+        { role: 'system', content: '系统甲 {{USER_INPUT}}', enabled: true, injection_order: 10 },
+        { role: 'assistant', content: '这是预填充素材', enabled: true, injection_order: 20 },
+      ],
+    };
+    const out = assemblePresetContent(p);
+    expect(out).toContain('系统甲');
+    expect(out).not.toContain('这是预填充素材');
   });
 });
 

@@ -85,6 +85,20 @@ export function setRewriteProseImpl(impl: RewriteProseImpl): void {
 }
 
 /**
+ * 🆕 自动存档实现注入缝（2026-10-05）—— GamePipeline 装配好后由 GamePage 挂进来。
+ *
+ * 语义：把当前活表状态覆写进「本轮那张 turn 快照」（引擎 `amendCurrentTurnSnapshot`）。
+ */
+export type AutosaveImpl = () => Promise<void>;
+
+let autosaveImpl: AutosaveImpl | null = null;
+
+/** 由 GamePage 在创建 GamePipeline 后调用（照 setRewriteLoadoutImpl）。 */
+export function setAutosaveImpl(impl: AutosaveImpl): void {
+  autosaveImpl = impl;
+}
+
+/**
  * 战斗中栏消息流条目（CombatMessageFlow 渲染）。
  *
  * C6：数据源改为沙盒 `CombatState` 的逐 exchange 输出 —— pipeline 每个 exchange 后把
@@ -1504,6 +1518,25 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
+   * 🆕 自动存档（2026-10-05）：把当前活表状态覆写进「本轮那张 turn 快照」。
+   *
+   * 🔴 实现走注入缝（GamePage 挂 `GamePipeline.autosaveCurrentTurn`）；生成中 / 战斗中
+   *    不写（活表正被管线改，等静默了再写）。失败只记日志，不影响游玩。
+   * 🔴 由 `useAutosave` 的定时器调用 —— 它监听活表改动，所以「任何手动操作」都无需
+   *    逐个 hook 就会在静默数秒后被吸进本轮快照。
+   */
+  async function runAutosave(): Promise<void> {
+    if (!activeSaveId.value) return;
+    if (isGenerating.value || isInCombat.value) return;
+    if (!autosaveImpl) return;
+    try {
+      await autosaveImpl();
+    } catch (err) {
+      console.warn('[game-store] 自动存档失败（不影响游玩）:', err);
+    }
+  }
+
+  /**
    * 手动落位：把玩家的位置路径改成某个地块名（势力地图「设为当前位置」唯一写入口）。
    *
    * 🔴 **只提交一条 `set_location`，绝不自己写 `worldFlags.map`**：地块是位置路径的
@@ -1682,6 +1715,7 @@ export const useGameStore = defineStore('game', () => {
     rewriteLoadoutItem,
     replaceMessageContent,
     rewriteProse,
+    runAutosave,
     devArmRandomEvent,
   };
 });

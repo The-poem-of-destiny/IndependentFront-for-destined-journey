@@ -461,7 +461,7 @@ describe('prompt-session-assembler', () => {
 
   it('增长重基线：累积 transcript 比当轮纯 prompt 层长出阈值时重基线（不依赖 provider token）', async () => {
     const p1 = await preparePromptSession(input());
-    // 一个远超纯 prompt 层 1.2 倍的 assistant 响应（无 promptTokens，故与 token 预算无关）
+    // 一个远超纯 prompt 层 1.4 倍的 assistant 响应（无 promptTokens，故与 token 预算无关）
     completePromptSession(p1.handle!, { rawResponse: 'x'.repeat(20000) });
 
     const p2 = await preparePromptSession(input());

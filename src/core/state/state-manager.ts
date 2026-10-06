@@ -39,6 +39,7 @@ import {
   getSave,
   saveSaveSlot,
   getSnapshot,
+  getLatestTurnSnapshotMeta,
   saveSnapshot,
   trimSnapshots,
   deleteMessagesAfterTurn,
@@ -2298,6 +2299,41 @@ export class StateManager {
       await trimSnapshots(this.saveId, maxSnapshotsPerSave, snapshotRetentionMode);
 
       return snapshot;
+    });
+  }
+
+  /**
+   * 🆕 自动存档（2026-10-05）：把**当前活表状态**覆写进「本轮那张 turn 快照」。
+   *
+   * 动机：`turn` 快照是在一轮跑完那一刻拍的；之后玩家做的手动改动（正文润色 / 重铸 /
+   * 其它手动编辑）只落在活表，**不进快照** —— 回档到本轮就把它们丢了。本方法把这些
+   * 改动吸进**本轮**快照，使「本轮快照」始终 = 本轮结束 + 之后的全部手动改动；
+   * 下一轮 `advanceTurn` 拍出新快照后，本轮这张自然冻结不再被覆写。
+   *
+   * 🔴 只覆写**载荷 + preview**（`saveSnapshot` 会按新载荷重算 preview）；`id / createdAt /
+   *    turn / reason` 一律不动 —— 保持它在时间轴上的身份与排序。
+   * 🔴 目标 = 最新一张 `reason==='turn'` 的快照；找不到（刚恢复完还没拍）→ no-op。
+   * 🔴 整段进 `withSaveWriteLock`，与提交 / 其它快照操作串行（避免读到写一半的状态）。
+   */
+  async amendCurrentTurnSnapshot(): Promise<void> {
+    await withSaveWriteLock(this.saveId, async () => {
+      const meta = await getLatestTurnSnapshotMeta(this.saveId);
+      if (!meta) return;
+      const characters = await getCharacters(this.saveId);
+      const profile = await getProfile(this.saveId);
+      const plotEvents = await getPlotEvents(this.saveId);
+      const messages = await getMessages(this.saveId);
+      await saveSnapshot({
+        id: meta.id,
+        saveId: this.saveId,
+        createdAt: meta.createdAt,
+        reason: meta.reason,
+        turn: meta.turn,
+        characters,
+        saveProfile: profile,
+        plotEvents,
+        messages,
+      });
     });
   }
 

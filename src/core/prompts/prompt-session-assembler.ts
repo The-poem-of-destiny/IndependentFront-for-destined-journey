@@ -75,18 +75,21 @@ export const PROMPT_SESSION_PROTOCOL_VERSION = 'delta-v1';
  * 增量重基线阈值（2026-09-26 修正，问题 1）。
  *
  * 判据：累积的 wire transcript 字符长度 相对「当轮从零全量渲染的纯 prompt 层」超过该比例
- * （>1.2，即多出 20%）时重基线。
+ * （>1.4，即多出 40%）时重基线。
  *
  * 为什么不沿用 token 绝对公式（`lastPromptTokens + growth + outputBudget >= contextWindowTokens`）：
  * 该公式把 `outputBudget`（默认 `maxTokens=65536`）也预留进阈值，于是 `contextWindowTokens=128000`
  * 时实际 prompt 上限只有约 62k —— 开局正文本身就超过 128k 的存档会**每回合都判预算不足**，
  * delta 永远累积不起来、形同虚设。改用**相对增长比**后，重基线只反映「累积的 delta 已经比
- * 重新全量渲染还长 20%」，与实际上下文窗口大小解耦，也不再依赖 provider 返回 prompt token
+ * 重新全量渲染还长 40%」，与实际上下文窗口大小解耦，也不再依赖 provider 返回 prompt token
  * （story 流式拿不到 usage 的缺口一并消失）。
+ *
+ * 📌 2026-10-05：阈值由 1.2 上调到 **1.4**（主人裁定）—— 更晚才重基线，让 delta 会话攒得更久、
+ * 少些冷基线（代价是重基线那一下的 prompt 更大）。
  *
  * `contextWindowTokens` 的 token 预算判据仍保留为**可选的绝对溢出保险**（清空即停用）。
  */
-const REBASE_GROWTH_RATIO = 1.2;
+const REBASE_GROWTH_RATIO = 1.4;
 
 /** 一次装配 pass 预渲染的产物（EJS pass + 动态世界书文本）；供预算判断与 delta/baseline 共用。 */
 interface RenderPass {

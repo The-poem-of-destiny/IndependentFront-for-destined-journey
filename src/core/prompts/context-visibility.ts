@@ -51,7 +51,10 @@ export const VISIBILITY_MATRIX: Record<string, ZoneVisibilityMatrix> = {
   },
   plot_pre_check: {
     memory: 'SUMMARY',
-    npc: 'FULL',
+    // 🔴 2026-10-05：原为 FULL（模板从未渲染 {{CHARACTER_STATE}}，这一格一直是空转的）。
+    //    现在模板真的注入了名册，改用 KEYS（名字/种族/类型/层级/位置/在场表）——
+    //    pre 需要它来「复用已有角色 vs 计划新角色」，KEYS 表正够，且不含数值/技能/背包。
+    npc: 'KEYS',
     world: 'FULL',
     quest: 'FULL',
     craft: 'NONE',

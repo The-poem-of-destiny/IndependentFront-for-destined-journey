@@ -134,8 +134,8 @@ src/core/                    ← 核心引擎
   │      `context_delta + turn_context + tailPrompt` 增量；保存原生 assistant 续接块。
   │      baselineSignature 含协议/端点修订/参数签名；重基线判据 = 投影 rebase 信号 →
   │      token 保险（可选 `contextWindowTokens`；`lastPromptTokens >= 窗口` 时自动忽略）→
-  │      **增长比**（累积 transcript / 当轮纯 prompt 层 > 1.2，`transcript_growth`，
-  │      不依赖 provider token，故 story 流式同样生效）。
+  │      **增长比**（累积 transcript / 当轮纯 prompt 层 > 1.4，`transcript_growth`，
+  │      不依赖 provider token，故 story 流式同样生效；📌 2026-10-05 由 1.2 上调为 1.4）。
   │      🆕 2026-09-26（问题 2）：经注入缝 `PromptSessionStore` 持久化会话（默认不装 = 纯内存，
   │      引擎单测零改动）；刷新后签名一致即续用；invalidate 同时删持久化行（回退整体失效，不 fork）。
   │      embedding / tools / combat / 侧链 / regenerate 走原路径（handle===null 或 skipSession）。
@@ -188,6 +188,12 @@ src/core/                    ← 核心引擎
   │                                    调用时强制 `thinking.enabled` + `reasoning_effort=max`（extraBody），
   │                                    提示词由内容包经 `prose_rewrite.systemPrompt` 下发（引擎侧仅通用兜底）。
   │                                    🔴 依赖 baseUrl 带 `/beta` 的 DeepSeek 源；不走主 DAG，由 ChatFlow 右键唤起
+  │                                    🆕 2026-10-05: 同一套前缀续写能力**打通到正文 AI（story）** ——
+  │                                      story 预设**末尾启用且 role=assistant 的条目** = 预填充素材；
+  │                                      `settings.prefill.enabled` 开启时，`agent-orchestrator` 在
+  │                                      story + openai-chat 下先 `ensureUserMessage` 再把它追加为末尾
+  │                                      assistant 前缀（`field` 决定进 content 还是 reasoning_content）。
+  │                                      **不进 Delta wire transcript**；只提醒不校验端点
   ├── agents/agent-orchestrator.ts         ← [Phase 3+8.5] DAG 编排引擎（阶段串行+同阶段并行/M3 翻译层按名寻址零id单patch）
   │   ├── callAgenticAgent(): toolsEnabled=true → chatWithTools() 多轮循环
   │   └── Marker 回调: onCraftRequest/onCombatTrigger/onEntityGenRequest/onPlayAudio
@@ -265,6 +271,10 @@ src/core/                    ← 核心引擎
   │         ②**锁内重读一份新鲜 profile、只改那一个字段**（拿 UI 手里那份陈旧整档进锁写回去，
   │         照样把提交刚落的 fp/任务/变量抹回旧值）。锁解决交错，解决不了陈旧 —— 缺一条都不算修好。
   │         缓存之前每个补丁各自重读一次库，UI 的写被顺带吸收了 —— 那是**巧合**不是设计
+  │      🆕 [自动存档 2026-10-05] `amendCurrentTurnSnapshot()`：把当前活表状态**覆写进最新一张
+  │         `reason==='turn'` 的快照**（只换载荷 + preview，`id/createdAt/turn` 不变）—— 让本轮
+  │         快照吸收「跑完之后的手动改动」（润色/重铸等），下一轮拍新快照后自然冻结。
+  │         目标查询走 `database.getLatestTurnSnapshotMeta`（只认 turn，不碰 pre-combat）
   ├── character/attribute-allocation.ts       ← 自由属性点分配的引擎侧唯一入口（校验上限查 `getTierConfig`，
   │                                    落库走 `commitChatState`）。🔴 补丁只写 attributes + freeAttrPoints，
   │                                    **绝不碰 level/tier** —— 那两个字段的差值正是自动加点钩子的判据
@@ -292,6 +302,9 @@ src/core/                    ← 核心引擎
   │                                    🔴 禁 Math.random/时钟/DB（快照回退可复现，同 ejs-rng）；禁中文字面量
   │                                    于判据（状态标签是显示面不是判据；措辞在 placeholder 与 UI 层）
   │                                    写入口见 save-profile.commitPlotThreadTurn（锁内重读窄写+幂等）
+  │                                    🆕 2026-10-05: castPlan 条目 +可选 `tier`（**新角色**的大致生命层级，
+  │                                      ephemeral；经 story 导演块 + dispatcher `{{PLOT_CAST_PLAN}}` 下传，
+  │                                      dispatcher 据此填 entity_gen_request tier= —— AI 定的「事件阵容尺度」）
   ├── index.ts                      ← barrel（Q-04/Q-12 清仓后只 re-export 活着的模块）
   │
   │  ── 提示装配 / 上下文 ──
@@ -302,12 +315,18 @@ src/core/                    ← 核心引擎
   ├── prompts/template-resolver.ts          ← [Phase 10a] 模板解析：localParams（链上覆盖）→ 注册表 → 认不出的原样留着
   ├── prompts/preset-loader.ts              ← [Phase 8+10] ST 预设加载 + 占位符宏预处理（setvar/getvar/random/roll/注释）；
   │                                    EJS `<%…%>` **原样保留**交给 ejs-runtime
+  │                                    🆕 2026-10-05: +`findTailAssistantEntry`（末尾启用条目是 assistant）
+  │                                      + `getPresetPrefill`（读 `settings.prefill = {enabled, field}`，
+  │                                      内容取自该 assistant 条目）；`assemblePresetContent` **把
+  │                                      assistant 条目不并进 system**（它是预填充素材、要去消息末尾）
   ├── content/worldbook-loader.ts           ← [Phase 8] 世界书加载/激活/排序/渲染（constant + keyword 双层激活），
   │                                    条目正文经 `executeEjsEntry` 求值（ADR-30）
   ├── content/builtin-worldbooks.ts         ← [Phase 8] 内置世界书运行期 fetch 预加载（刻意不用 `import.meta.glob` eager
   │                                    —— 那会把旧数据打进构建产物，且 HMR 变全页刷新）
   ├── prompts/context-visibility.ts         ← [Phase 8] Agent × Zone 可见性矩阵（**设计时决策，不是运行时配置**）+
   │                                    buildZoneContext / filterZoneContent（FULL/NARRATIVE/SUMMARY/KEYS/NONE 五级）
+  │                                    🔴 2026-10-05: `plot_pre_check.npc` FULL→KEYS —— 它的模板首次真渲染
+  │                                    `{{CHARACTER_STATE}}`（此格此前是空转的），拿到名册做「复用/新开」判断
   ├── story/beautifier.ts                 ← [Phase 7e+10i] 输出美化正则管道（纯函数，编译失败静默跳过不阻断）。
   │                                    执行边界在 UI 那个网络可用的 opaque iframe，不在本层
   │

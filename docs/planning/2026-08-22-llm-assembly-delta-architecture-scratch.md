@@ -18,6 +18,8 @@
 >    「累积 wire transcript 字符长度 / 当轮从零全量渲染的纯 prompt 层 > 1.2」时重基线
 >    （`transcript_growth`），与实际上下文窗口解耦、也不再依赖 provider 返回 prompt token
 >    （story 流式因此同样生效）。`contextWindowTokens` 的 token 判据保留为可选绝对保险，清空即停用。
+>    📌 **2026-10-05**：该比值由 1.2 **上调为 1.4**（主人裁定）—— 更晚才重基线，delta 会话攒得更久、
+>    少些冷基线（代价是重基线那一下 prompt 更大）。
 > 2. **会话持久化**（§5.2 / §12 反向裁定）：`(saveId, agentId)` 会话写入 Dexie v26
 >    `promptSessions`，**刷新页面后**可续用上一轮 wire transcript，省掉一次冷基线。该表是
 >    rebuildable 缓存，不进 FullBackup / 单存档导出；签名不符自动冷建，快照回退/切档/删档
@@ -383,7 +385,8 @@ prompt token、字段未配置或扩展参数无法可靠解读，则不做不�
 
 > 📌 2026-09-26 更正（问题 1）：上面的 token 绝对公式**降级为可选保险**，主判据改为
 > **增长比**：当累积 wire transcript 的字符长度超过「当轮从零全量渲染的纯 prompt 层」
-> 的 `REBASE_GROWTH_RATIO`（当前 1.2）倍时重基线，`rebaseReason='transcript_growth'`。
+> 的 `REBASE_GROWTH_RATIO`（2026-09-26 为 1.2；📌 **2026-10-05 上调为 1.4**）倍时重基线，
+> `rebaseReason='transcript_growth'`。
 > 纯 prompt 层复用同一 `ejsPass` 调 `buildAgentMessages`（不二次求值世界书），故这是**本地
 > 字符长度比**、不依赖 provider token，story 流式路径同样生效。触发顺序仍是：
 > 投影 rebase 信号 → token 保险（若配置）→ 增长比。token 保险的阈值按旧公式
