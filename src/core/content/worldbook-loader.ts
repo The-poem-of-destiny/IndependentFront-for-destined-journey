@@ -151,8 +151,8 @@ function matchSingleKeyword(text: string, keyword: string): boolean {
  * - `enabledEntries` 格式: `"partition:uid"`（如 `"system_core:413"`）
  * - partition 在 enabledEntries 中有记录的 → 只保留 uid 命中条目，其余移除
  * - 内置 system_core/character 的命中条目 → 存档选择覆盖出厂 enabled=false
- * - partition 不在 enabledEntries 中的 → 整本原样通过（走 keyword 激活）
- * - enabledEntries 为空 → 所有书原样通过
+ * - 内置 character 始终按存档白名单过滤；未记录角色即未选择，不沿用全局默认启用
+ * - 其它书的 partition 不在 enabledEntries 中 → 整本原样通过
  * - 非原始 entry（缺少 `:` 或无有效 uid）→ 静默跳过
  *
  * 纯函数，不修改入参。
@@ -161,11 +161,9 @@ export function filterBooksByEnabledEntries(
   books: WorldBook[],
   enabledEntries: string[],
 ): WorldBook[] {
-  if (!enabledEntries || enabledEntries.length === 0) return books;
-
   // Build lookup: partition → Set<uid>
   const enabledByPartition = new Map<string, Set<number>>();
-  for (const entry of enabledEntries) {
+  for (const entry of enabledEntries ?? []) {
     const colonIdx = entry.indexOf(':');
     if (colonIdx <= 0 || colonIdx >= entry.length - 1) continue;
     const partition = entry.slice(0, colonIdx);
@@ -179,17 +177,11 @@ export function filterBooksByEnabledEntries(
     set.add(uid);
   }
 
-  // If no valid entries could be parsed, the user intended filtering but
-  // nothing matched → apply the filter (which will remove all entries for
-  // partitions that appear in enabledEntries). If enabledEntries was non-empty
-  // but none had valid partition:uid form, we can't tell which partition was
-  // meant, so we pass books through unchanged.
-  // For safety: always apply when we have valid parsed data.
-  if (enabledByPartition.size === 0) return books;
-
   return books.map((book) => {
-    const allowedUids = enabledByPartition.get(book.partition);
-    if (!allowedUids) return book; // partition 未在存档中收录 → 整本原样通过
+    const allowedUids =
+      enabledByPartition.get(book.partition) ??
+      (book.builtIn === true && book.partition === 'character' ? new Set<number>() : undefined);
+    if (!allowedUids) return book;
     const isBuiltInSaveSelection =
       book.builtIn === true && (book.partition === 'system_core' || book.partition === 'character');
     return {

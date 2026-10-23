@@ -234,6 +234,74 @@ describe('formatWorldBookEntries', () => {
 // ========== filterBooksByEnabledEntries ==========
 
 describe('filterBooksByEnabledEntries', () => {
+  it.each([{ selected: [] }, { selected: ['system_core:407'] }])(
+    '未选择内置角色时，所有 Agent 都排除默认启用的人物档案（$selected）',
+    ({ selected }) => {
+      const audiences = ['story', 'char_gen', 'vars_update'];
+      const books = [
+        makeBook({
+          id: 'character',
+          partition: 'character',
+          builtIn: true,
+          entries: [322, 585, 334].map((uid) =>
+            makeEntry({
+              uid,
+              content: `未选择的人物档案 ${uid}`,
+              extra: { lore: { audiences, required: true } },
+            }),
+          ),
+        }),
+        makeBook({
+          id: 'race',
+          partition: 'race',
+          builtIn: true,
+          entries: [makeEntry({ uid: 20, extra: { lore: { audiences } } })],
+        }),
+      ];
+      const original = JSON.stringify(books);
+      const filtered = filterBooksByEnabledEntries(books, selected);
+
+      expect(filtered[0].entries).toEqual([]);
+      for (const agentId of audiences) {
+        expect(getEntriesForAgent(agentId, filtered).map((entry) => entry.uid)).toEqual([20]);
+      }
+      expect(JSON.stringify(books)).toBe(original);
+    },
+  );
+
+  it('明确选择的内置角色覆盖默认停用，未选择的默认启用角色仍被排除', () => {
+    const audiences = ['story', 'char_gen', 'vars_update'];
+    const book = makeBook({
+      id: 'character',
+      partition: 'character',
+      builtIn: true,
+      entries: [
+        makeEntry({ uid: 301, enabled: false, extra: { lore: { audiences } } }),
+        makeEntry({ uid: 322, extra: { lore: { audiences } } }),
+      ],
+    });
+    const filtered = filterBooksByEnabledEntries([book], ['character:301']);
+
+    for (const agentId of audiences) {
+      expect(getEntriesForAgent(agentId, filtered).map((entry) => entry.uid)).toEqual([301]);
+    }
+    expect(book.entries.map((entry) => entry.enabled)).toEqual([false, true]);
+  });
+
+  it('未记录角色选择不改变用户角色书及其它分区的默认过滤语义', () => {
+    const books = [
+      makeBook({
+        id: 'user-characters',
+        partition: 'character',
+        builtIn: false,
+        entries: [makeEntry({ uid: 301 })],
+      }),
+      makeBook({ partition: 'creative_workshop', entries: [makeEntry({ uid: 900 })] }),
+    ];
+
+    expect(filterBooksByEnabledEntries(books, [])).toEqual(books);
+  });
+
   it('returns all books unchanged when enabledEntries is empty', () => {
     const books = [
       makeBook({

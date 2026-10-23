@@ -47,6 +47,7 @@ import type {
   AgentContext,
   ChatMessage,
   InventoryItem,
+  WorldBook,
 } from '../../../src/core/types/types';
 
 // ═══════════════════════════════════════════════════════════
@@ -358,6 +359,43 @@ describe('prompt-session-assembler', () => {
   });
 
   // ── 签名 vs 状态 ──
+
+  it('过滤未选择的内置角色后重建旧会话，清除原先注入的人物档案', async () => {
+    const characterBook: WorldBook = {
+      ...fixtureWorldBook,
+      id: 'character',
+      partition: 'character',
+      builtIn: true,
+      entries: [
+        {
+          ...fixtureWorldBook.entries[0],
+          content: '未选择的角色档案',
+          extra: { lore: { audiences: ['vars_update'] } },
+        },
+      ],
+    };
+    const cfg = makeCfg('vars_update', {
+      template: '{{SYS_PROMPT}}\n{{LORE_BOOK_STATIC}}\n{{USER_INPUT}}',
+    });
+    const sessionInput = input({
+      agentId: 'vars_update',
+      configs: [cfg],
+      worldBooks: [characterBook],
+    });
+    const previous = await preparePromptSession(sessionInput);
+    expect(wireText(previous.messages)).toContain('未选择的角色档案');
+    completePromptSession(previous.handle!, { rawResponse: '旧会话响应' });
+
+    const current = await preparePromptSession({
+      ...sessionInput,
+      worldBooks: worldbookLoader.filterBooksByEnabledEntries([characterBook], ['system_core:407']),
+    });
+
+    expect(current.rebased).toBe(true);
+    expect(current.rebaseReason).toBe('signature_changed');
+    expect(wireText(current.messages)).not.toContain('未选择的角色档案');
+    expect(wireText(current.messages)).not.toContain('旧会话响应');
+  });
 
   it('静态签名变化重基线；单纯状态变化不重基线（走 delta）', async () => {
     // ① 单纯状态变化（HP 70）→ 不重基线，delta 里只产 resource set
