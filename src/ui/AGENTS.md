@@ -10,10 +10,13 @@
 >
 > 🔴 写任何前端 UI 代码前仍必须先看 `docs/design.md`（排版/间距/组件/装饰/动画规范），那条规则在根 `AGENTS.md`。
 
-## 条目级内容路由
+## Story v2 / 内容路由速览
 
-- Agent 设置只读展示世界书范围；世界书编辑器写入逐条目 `extra.lore.audiences`，自建书旧授权只迁移到未声明条目。
-- 内容安装与存档导入共用显式父子来源映射，不转换记忆或存档模式。
+- `lib/game-pipeline.ts` 仅在新模式构建独立 `lore_select` 配置；正式回合 pending/accepted/failed 与重试来源统一，取消/锁内提交有同源守卫；原回合归档草稿自动重试。旧模式不运行选择器。
+- Story v2 设置 N>0，摘要语义/来源诊断保留未知；DebugPanel 显示分类预算、实际输出预留、移除项和逐条资料原因，不把估算当 provider usage。
+- Agent 设置移除世界书清单，编辑器声明 audiences；`stores/worldbook-store.ts` 仅迁移无声明用户书，显式空范围不覆盖，失败可重试。
+- `StoryMemoryV2Panel`、开发者设置及调试面板保留旧模式界面；关闭开关退出测试档但不撤销永久标记。
+- `stores/content-store.ts` 将拆分父启用 token 展开为作者声明的子 token，与普通/测试档同用；验收边界见 [交付说明](../../docs/reference/story-v2-routing-delivery.md)。
 
 ## 前端架构 (Phase 7)
 

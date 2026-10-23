@@ -1,5 +1,17 @@
 # 《命定之诗》游戏数据字段规范（数据字典）
 
+## Story v2 与路由字段补充（2026-10-06 修复同步）
+
+- `WorldBook.lore`：`audiences: string[]`、可选 `section: fixed|region|turn`、`namespace/category`。`WorldBookEntry.extra.lore` 可覆盖 audiences/section，含稳定 `key`、`summary/aliases/category`、`required`、`dependsOn: string[]` 与声明式 `activation`（locations/characters/keywords/excludeKeywords）。显式空 audiences 不授权，依赖不授权。位置命中为**包含**判定（路径任一层级包含声明字串即命中，2026-10-10 裁定放宽，原为逐字相等；代码实现状态见交付说明）。
+- 拆分来源 `extra.lore.source`：`parentKey`、`legacyUid`、非负 `part`；仅用于作者追溯与启用引用扩展，不推断记忆来源。内容包 `loreRoutingVersion: 1` 开启严格路由校验，旧包缺席使用作者历史声明映射。
+- 测试档永久 `metadata.storyContextV2` 标记。消息 `storyTurnStatus?: pending|accepted|failed`、`storyTurnKey?` 和 `diagnostic?` 约束正式正文；`storyGameTime?` 保存原回合游戏时间事实，备份保留。旧无标记消息兼容，但 pending/failed/诊断不构成摘要来源。
+- `StoryMemorySource` 共用 `sourceTurnKey`、完整有序 `sourceMessageIds` 及可选 `sourceFingerprint`。指纹仅有序角色/正文，不含物理 ID；旧 v2 缺指纹视为来源未知而非自动可信。生成、读取和锁内事务均复核；备份只重映射引用，指纹值不改。
+- Dexie v27 `storyTurnSummaries` 保存全部有效摘要片段，可选 `characters/locations/topics: string[]` 与 `gameTimeRange: {start: GameTime|null,end: GameTime|null}`；缺失语义字段保持未知。v28 `storyArchives` 保存双层归档、覆盖片段及 `coveredSources`、`coveredSegmentFingerprints`，覆盖替换/缺失可保留 `invalidatedReason` 诊断，不猜测新覆盖映射。
+- v29 `storyArchiveRetries` 保存原判断回合来源、`rawOutput`、归档草稿、覆盖来源/片段修订及可选原摘要草稿 `summaries`；重试绑定原回合，不用当前轮证据替代。成功删除，来源失效清理，覆盖替换失效保留。三张表随删档、回退、整库/单档备份处理，引用重映射含嵌套草稿；不从内容包转换历史记忆。
+- `StoryLoreSelectionDiagnostics.decisions` 定位逐条选择/排除理由；原候选、依赖拒绝、区域路径/快照键保留。`StoryContextV2Diagnostics.budgetCategories` 分固定、总览、区域、摘要、原文、本轮资料、召回、事实/指引及输出预留；`budgetRemovals` 定位移除项及理由，保留五区字符数与 `outputReservedTokens`。这些是粗估/实际请求预留及调试信息，不是 provider usage。
+
+完整消费边界见 [Story v2 交付说明](../../reference/story-v2-routing-delivery.md)。
+
 > 版本: v1.0 草案 · 2026-07-16
 > 定位: **理想态标准**。代码向本规范靠拢，不是本规范迁就代码。
 > 背景: 2026-07-16 全量盘点发现 52 项字段/契约不一致（见附录 B），四大病根:

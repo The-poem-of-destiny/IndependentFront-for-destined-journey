@@ -8,10 +8,14 @@
 > 动 `src/core/` 下任何文件之前，请连同本文件一起读。
 > Claude Code 通过同目录的 `CLAUDE.md` 自动导入本文件，无需手动读取。
 
-## 条目级内容路由
+## Story v2 / 内容路由速览
 
-- `content/lore-routing.ts` 统一条目读取权限与依赖闭包；Agent 世界书清单已退役，未声明范围不注入。
-- `content/lore-protocol.ts` 校验显式路由修订；`content/content-pack-plan.ts` 按作者来源映射展开拆分条目的启用引用。
+- `content/lore-routing.ts`：双模式唯一 audiences 权限、停用/排除与依赖闭包共同判据（含 EJS 间接读取）、旧作者默认映射与诊断；Agent 世界书清单已退役。
+- `memory/story-memory-source.ts`：生成/读取/锁内提交共用完整来源与正文指纹；v29 `storyArchiveRetries` 绑定原判断回合自动恢复，不以后一轮证据替代。旧缺指纹记录失效可补建，语义未知不伪造。
+- `content/lore-selection.ts`：无正文目录、独立选择调用、区域快照键、依赖闭包；`content/lore-protocol.ts` 验证显式路由修订。
+- `content/lore-activation.ts`：仅 Story v2 的声明式组合读取门；`content/lore-definitions.ts`：独立 ST 定义环境与开局冻结结果；`persistence/create-journey.ts` 在建档事务内按主角地点与实际档案时间解析，随存档原子保存。契约见 [求值与读取门](../../docs/reference/lore-evaluation-and-read-gates.md)。
+- `prompts/story-context-v2.ts`：五区消息、EJS 前可选依赖组裁剪、每轮一次渲染；`agents/agent-orchestrator.ts` 按实际请求输出预留执行最终超限停止。
+- `content/content-pack-plan.ts`：显式父子来源映射只更新启用引用，不转换记忆与模式标记。细节和验收边界见 [交付说明](../../docs/reference/story-v2-routing-delivery.md)。
 
 ## 架构（已实现部分）
 
@@ -112,6 +116,15 @@ src/core/                    ← 核心引擎
   │              一行，主键 `key`、`saveId` 索引；**rebuildable 缓存**，不进 FullBackup /
   │              单存档导出，删存档级联删、快照回退/切档由 `invalidatePromptSession` 删。
   │              装了它刷新页面后续用上一轮 wire transcript（签名不符自动冷建）
+  │   └── v27+: storyTurnSummaries（Story 上下文 v2 每回合摘要片段，2026-10-04）—— 只有测试档写；
+  │              随存档隔离：删档级联、进 FullBackup 与单存档导出（导入时来源消息 id 随消息重映射，
+  │              来源不在备份里的片段丢弃，正文指纹值不变）；快照恢复按正式来源/正文修订清理孤儿片段
+  │   └── v28+: storyArchives（Story 上下文 v2 阶段归档：概括 + 详细记录 + 覆盖片段 id）—— 生命周期同 v27；
+  │              🔴 第 2 区长期总览**不另存**，就是有效归档的年表；归档与本回合摘要经
+  │              `commitStoryTurnMemory` 同一事务写入，回退由 `pruneOrphanStoryContextRecords` 一并清理
+  │              v27/v28 两张表的行可选带 `embedding` + `embeddingMeta`（召回用，原子成对，不建索引、不升版）
+  │   └── v29+: storyArchiveRetries（原判断回合的归档/摘要草稿与覆盖修订）—— 自动重放成功删除；
+  │              来源失效清理、覆盖替换失效诊断，生命周期随删档/回退/整库与单档备份，补建不抢写草稿
   │
   ├── persistence/session-backup.ts             ← 单存档导出/导入：每存档表整取（清单同 deleteSaveSlot，字节不随行）+ 内容依赖清单（世界书 token / 工坊项目 / 内容包 / story 预设，导入前只读体检）+ 导入**一律重发 id**（不重发 = 第二次导入静默覆盖第一次），全局表一行不改
   │
@@ -194,6 +207,10 @@ src/core/                    ← 核心引擎
   │          per-agent 依赖：`PipelineStage.agentWaitFor[agentId]`（缺省回退 stage.waitFor），
   │          依赖失败的 agent 只跳过自己、不连坐同 stage 其他 agent
   ├── story/story-rescue.ts               ← Story 正文救援（正文吞思维链 / 思维链泄漏正文 AI 缺陷兜底）
+  ├── story/story-context-mode.ts         ← 🆕 [Story 上下文 v2 / P0] 测试档标记 `metadata.storyContextV2` +
+  │                                    存档准入 `decideStoryContextAdmission`（测试档只在新模式、普通档只在旧模式，
+  │                                    无降级分支）+ 正文窗口 N 校验（只收正整数）。纯函数，措辞在 UI
+  │                                    `lib/story-context-admission.ts`。计划：docs/planning/2026-09-30-story-context-*.md
   ├── agents/random-tables.ts              ← [Phase 8.5] NPC 生成随机表
   │
   ├── content/field-enums.ts                ← [M1] 中文枚举集中定义 + 归一化（铁律5）
@@ -257,6 +274,27 @@ src/core/                    ← 核心引擎
   │                                    从 `agent-orchestrator.processStageMarkers`（那时 1327 行）里剥出来的
   │                                    纯映射；不违反 ADR-21 —— `commitChatState` 仍是唯一写入口
   ├── utils/dice.ts / memory-store.ts / memory-summarizer.ts / plot-outline.ts / plot-engine.ts / location-db.ts
+  ├── memory/memory-context.ts            ← 🆕 [Story 上下文 v2 / P0] 第 4 区纯函数：完整回合分组（系统卡片不占名额、
+  │                                    无 Story 正文的回合不算）+ 最近 N 回合原文 + 窗口外**全部**未归档摘要片段
+  │                                    + 缺摘要回合（以原文顶上并标注）。片段只在来源消息 id 仍属当前分支时有效
+  │                                    + 有效归档 / 未结事件派生（`resolveActiveStoryArchives` / `collectOpenStoryEvents`）
+  ├── memory/story-turn-summary.ts        ← 🆕 [Story 上下文 v2 / P4·P5] 每回合总结契约：memory_summary 在新模式回合里
+  │                                    **先做归档判断、再写摘要**（Q13），systemPrompt / 模板 + 解析器同源。🔴 旧契约
+  │                                    （agent-config.json + memory-summarizer）一个字不动，新格式绝不交给旧处理器
+  ├── memory/story-archive.ts             ← 🆕 [Story 上下文 v2 / P5] 归档判断的代码把关（事件名 / 本回合正文**逐字**依据 /
+  │                                    覆盖范围）+ 第 2 区年表与 `{{STORY_OPEN_EVENTS}}` 清单的渲染。被拦下的判断不生效。
+  │                                    依据比对是**放宽**的：去标点空白后子串命中，或字二元覆盖率 ≥ 0.6
+  ├── memory/story-archive-detail.ts      ← 🆕 [Story 上下文 v2 / P5] 依据事件各回合**原文**重写详细记录的提示词 / 消息 / 解析器；
+  │                                    管线在写锁外逐归档调用（memory_summary 的端点与模型），失败保留简要版本（`detailSource`）
+  ├── memory/story-recall.ts              ← 🆕 [Story 上下文 v2 / P5] 新模式召回：候选（有效归档 A1… + 窗口外有效片段 S1…）、
+  │                                    查询文本、LLM 契约（只回编号，代码校验）与解析器、展开（摘要 / 档案 / 来源原文，
+  │                                    整回合或片段两种粒度，原文总量上限）。编排器在 v2 回合把 `memory_recall` 换成它
+  │                                    （`callStoryRecall`，不走 Delta、失败不报错）；Embedding 走 memory-store 的
+  │                                    `recallByEmbedding` 通用向量核（旧 `recallMemories` 也改由它实现，行为不变）
+  ├── prompts/story-context-v2.ts         ← 🆕 [Story 上下文 v2 / P3 第一版] 分区消息组装：按预设五区占位填内容，
+  │                                    第 4 区保留真实 user/assistant；第 4 区原文之前全进前导 system、之后连同
+  │                                    本轮输入进末尾一条 user（Claude/Gemini 不许会话中途 system）。
+  │                                    编排器在 `OrchestratorOptions.storyContext` 给了时调用，**不走 Delta**
   ├── plot/plot-threads.ts               ← 🆕 [主线细化层 ADR-35 / 2026-09-09] 事件线纯领域逻辑：
   │                                    PlotThreadNode/Flags + 节奏闸门 evaluatePlotThreadGate
   │                                    （main-only、4 回合冷却、窗口距离概率带、createEjsRng 专用 salt
@@ -277,6 +315,10 @@ src/core/                    ← 核心引擎
   │                                    地图 `{{MAP_CONTEXT}}` 与 `{{RANDOM_EVENTS}}` 的**中文措辞都在这里**
   │                                    （数据面是纯函数模块，措辞在 resolver —— 那两个子系统零中文字面量的原因）
   ├── prompts/template-resolver.ts          ← [Phase 10a] 模板解析：localParams（链上覆盖）→ 注册表 → 认不出的原样留着
+  ├── prompts/story-zone-placeholders.ts    ← 🆕 [Story 上下文 v2 / P0] Story 预设五区占位条目（identifier
+  │                                    `story_zone_1…5`）：补齐 / 去重 / 1→5 相对顺序修正 + 分段结构。
+  │                                    🔴 `assemblePresetContent` 与预览**跳过**占位 —— 旧模式展开为空、提示词字节不变；
+  │                                       占位只在 UI 读取视图补齐，不在读取时写回（会让内容包预设基线误判为用户改过）
   ├── prompts/preset-loader.ts              ← [Phase 8+10] ST 预设加载 + 占位符宏预处理（setvar/getvar/random/roll/注释）；
   │                                    EJS `<%…%>` **原样保留**交给 ejs-runtime
   ├── content/worldbook-loader.ts           ← [Phase 8] 世界书加载/激活/排序/渲染（constant + keyword 双层激活），
