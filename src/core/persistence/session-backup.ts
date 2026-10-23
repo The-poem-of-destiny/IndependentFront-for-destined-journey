@@ -34,6 +34,10 @@ import type { ContentPackRecord } from './database';
 // 一边补齐到 6 位、另一边截断到 6 位，撞号了也不会有任何报错）。
 import { allocateMemoryIds } from '../memory/memory-summarizer';
 import { WORKSHOP_PARTITION } from '../workshop/workshop-types';
+import {
+  deriveSplitEntryTokenRewrites,
+  expandSplitEntryTokens,
+} from '../content/content-pack-plan';
 import type {
   SaveSlot,
   SaveProfile,
@@ -524,11 +528,12 @@ export async function checkSessionSaveDependencies(
   // 工坊条目按**身份**比对：本机 uid 与导出机几乎必然不同（见 SessionEntryRef）
   const provenance = buildWorkshopProvenanceIndex(books);
 
+  const splitRewrites = new Set(Object.keys(deriveSplitEntryTokenRewrites(books)));
   const missingEntries = (deps.worldBookEntries ?? []).filter((e) => {
     const identity = entryIdentityKey(e);
     // 带身份 → 裸 token 相等**既不充分也不必要**，只认身份
     if (identity !== null) return !provenance.has(identity);
-    return !available.has(e.token);
+    return !available.has(e.token) && !splitRewrites.has(e.token);
   });
 
   const installedPacks = new Map(packs.map((p) => [p.packId, p]));
@@ -771,10 +776,9 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
     ? { ...rawSave.metadata }
     : { characterName: '', userName: '', gameStartTime: '', totalTurns: 0 };
   if (Array.isArray(nextMetadata.enabledWorldBookEntries)) {
-    nextMetadata.enabledWorldBookEntries = remapWorkshopTokens(
-      nextMetadata.enabledWorldBookEntries,
-      manifestRefs,
-      provenance,
+    nextMetadata.enabledWorldBookEntries = expandSplitEntryTokens(
+      localBooks,
+      remapWorkshopTokens(nextMetadata.enabledWorldBookEntries, manifestRefs, provenance),
     );
   }
 

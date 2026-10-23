@@ -92,7 +92,6 @@ function makeCfg(agentId: string, overrides: Partial<AgentConfig> = {}): AgentCo
     timeout: 0,
     userId: '',
     promptTemplate: { fixedSystem: '', fixedExamples: '' },
-    worldBookIds: [],
     ...overrides,
   };
 }
@@ -222,7 +221,7 @@ describe('buildAgentMessages', () => {
       userInput: '探索古墓',
       agentOutputs: new Map([['story', '正文']]),
     });
-    const cfg = makeCfg('story', { worldBookIds: ['wb_test'] });
+    const cfg = makeCfg('story');
     const entry: WorldBookEntry = {
       uid: 1,
       name: '北境古墓',
@@ -233,6 +232,7 @@ describe('buildAgentMessages', () => {
       selectiveLogic: 0,
       order: 0,
       position: 1,
+      extra: { lore: { audiences: ['story'] } },
     };
     const wb: WorldBook = {
       id: 'wb_test',
@@ -464,7 +464,6 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
     const cfg = makeCfg('story', {
       presetId: 'saved-default-template-preset',
       template: getDefaultTemplate('story'),
-      worldBookIds: ['system_core'],
     });
     const presets: AgentPreset[] = [
       {
@@ -491,6 +490,7 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
             selectiveLogic: 0,
             order: 0,
             position: 0,
+            extra: { lore: { audiences: ['story'] } },
           },
         ],
       },
@@ -829,6 +829,7 @@ describe('buildAgentMessages × EJS pass 上下文 (ADR-30 D4/D5)', () => {
           selectiveLogic: 0,
           order: 1,
           position: 0,
+          extra: { lore: { audiences: ['story', 'request_dispatcher'] } },
         },
       ],
     };
@@ -836,7 +837,7 @@ describe('buildAgentMessages × EJS pass 上下文 (ADR-30 D4/D5)', () => {
 
   it('ctx.statData 注入 → EJS 读得到 stats 面', () => {
     const ctx = makeContext({ statData: { 主角: { 生命值: 66 } } });
-    const cfg = makeCfg('story', { worldBookIds: ['wb_ejs'] });
+    const cfg = makeCfg('story');
     const msgs = buildAgentMessages('story', ctx, [cfg], [makeEjsWorldBook()]);
     expect(msgs![0].content).toContain('HP=66');
   });
@@ -851,12 +852,12 @@ describe('buildAgentMessages × EJS pass 上下文 (ADR-30 D4/D5)', () => {
     const wb = makeEjsWorldBook();
 
     // 无权 Agent：求值照跑，但不登记草稿
-    const noRight = makeCfg('request_dispatcher', { worldBookIds: ['wb_ejs'] });
+    const noRight = makeCfg('request_dispatcher');
     buildAgentMessages('request_dispatcher', ctx, [noRight], [wb]);
     expect(drafts.size).toBe(0);
 
     // 持权 Agent：登记 { base, draft }，draft 带上 EJS 的写
-    const withRight = makeCfg('story', { worldBookIds: ['wb_ejs'], ejsVarsCommit: true });
+    const withRight = makeCfg('story', { ejsVarsCommit: true });
     buildAgentMessages('story', ctx, [withRight], [wb]);
     expect([...drafts.keys()]).toEqual(['story']);
     expect(drafts.get('story')!.base.计数).toBe(5);
@@ -871,14 +872,14 @@ describe('buildAgentMessages × EJS pass 上下文 (ADR-30 D4/D5)', () => {
       variables: { sys },
       ejsVarsDrafts: drafts,
     });
-    const cfg = makeCfg('story', { worldBookIds: ['wb_ejs'], ejsVarsCommit: true });
+    const cfg = makeCfg('story', { ejsVarsCommit: true });
     buildAgentMessages('story', ctx, [cfg], [makeEjsWorldBook()]);
     expect(sys.计数).toBe(5);
   });
 
   it('无 ejsVarsDrafts 容器（老调用方）→ 持权 Agent 也不炸', () => {
     const ctx = makeContext({ statData: {}, variables: { sys: {} } });
-    const cfg = makeCfg('story', { worldBookIds: ['wb_ejs'], ejsVarsCommit: true });
+    const cfg = makeCfg('story', { ejsVarsCommit: true });
     expect(() => buildAgentMessages('story', ctx, [cfg], [makeEjsWorldBook()])).not.toThrow();
   });
 
@@ -928,13 +929,14 @@ describe('buildAgentMessages × 能力面接线', () => {
           selectiveLogic: 0,
           order: 1,
           position: 0,
+          extra: { lore: { audiences: ['story'] } },
         },
       ],
     };
   }
 
   const render = (content: string, ctx: AgentContext): string => {
-    const cfg = makeCfg('story', { worldBookIds: ['wb_cap'] });
+    const cfg = makeCfg('story');
     return buildAgentMessages('story', ctx, [cfg], [bookWith(content)])![0].content;
   };
 
@@ -974,7 +976,7 @@ describe('buildAgentMessages × 能力面接线', () => {
 
   it('lore.get：读得到**该 Agent 可见**的条目', () => {
     const ctx = makeContext();
-    const cfg = makeCfg('story', { worldBookIds: ['wb_cap', 'wb_other'] });
+    const cfg = makeCfg('story');
     const other: WorldBook = {
       id: 'wb_other',
       name: '另一本',
@@ -990,6 +992,7 @@ describe('buildAgentMessages × 能力面接线', () => {
           selectiveLogic: 0,
           order: 2,
           position: 0,
+          extra: { lore: { audiences: ['story'] } },
         },
       ],
     };
@@ -1004,8 +1007,8 @@ describe('buildAgentMessages × 能力面接线', () => {
 
   it('🔒 lore.get 读不到该 Agent **看不见**的书 —— EJS 不能成为绕过 Phase 8 分区的旁路', () => {
     const ctx = makeContext();
-    // story 只挂 wb_cap；密书没进它的 worldBookIds
-    const cfg = makeCfg('story', { worldBookIds: ['wb_cap'] });
+    // story 只读得到 wb_cap；密书的读取范围不含 story
+    const cfg = makeCfg('story');
     const secret: WorldBook = {
       id: 'wb_secret',
       name: '密书',
@@ -1021,6 +1024,7 @@ describe('buildAgentMessages × 能力面接线', () => {
           selectiveLogic: 0,
           order: 2,
           position: 0,
+          extra: { lore: { audiences: ['char_gen'] } },
         },
       ],
     };
@@ -1130,7 +1134,7 @@ describe('buildAgentMessages × 能力面接线', () => {
     const drafts = new Map<string, { base: Record<string, any>; draft: Record<string, any> }>();
     const ctx = makeContext({ variables: { sys: {} }, ejsVarsDrafts: drafts });
     // 持权 Agent：这份 draft 就是回合结算真的要 diff 落库的那一份
-    const cfg = makeCfg('story', { worldBookIds: ['wb_cap'], ejsVarsCommit: true });
+    const cfg = makeCfg('story', { ejsVarsCommit: true });
     const msgs = buildAgentMessages(
       'story',
       ctx,
@@ -1166,6 +1170,7 @@ describe('buildAgentMessages × EJS 回退诊断出口', () => {
           selectiveLogic: 0,
           order: 1,
           position: 0,
+          extra: { lore: { audiences: ['story'] } },
         },
       ],
     };
@@ -1174,7 +1179,7 @@ describe('buildAgentMessages × EJS 回退诊断出口', () => {
   it('条目求值失败 → ejsFallback 收到 uid / 书名 / 错因', () => {
     const seen: Array<{ agentId: string; entries: Array<{ uid: number; bookName?: string }> }> = [];
     const ctx = makeContext({ ejsFallback: (info) => seen.push(info) });
-    const cfg = makeCfg('story', { worldBookIds: ['wb_broken'] });
+    const cfg = makeCfg('story');
 
     const msgs = buildAgentMessages('story', ctx, [cfg], [brokenBook()]);
 
@@ -1189,7 +1194,7 @@ describe('buildAgentMessages × EJS 回退诊断出口', () => {
   it('条目正常 → 不打扰（出口零调用）', () => {
     const seen: unknown[] = [];
     const ctx = makeContext({ ejsFallback: () => seen.push(1) });
-    const cfg = makeCfg('story', { worldBookIds: ['wb_ok'] });
+    const cfg = makeCfg('story');
     const ok: WorldBook = {
       id: 'wb_ok',
       name: '好书',
@@ -1205,6 +1210,7 @@ describe('buildAgentMessages × EJS 回退诊断出口', () => {
           selectiveLogic: 0,
           order: 1,
           position: 0,
+          extra: { lore: { audiences: ['story'] } },
         },
       ],
     };
@@ -1218,7 +1224,7 @@ describe('buildAgentMessages × EJS 回退诊断出口', () => {
         throw new Error('诊断挂了');
       },
     });
-    const cfg = makeCfg('story', { worldBookIds: ['wb_broken'] });
+    const cfg = makeCfg('story');
     expect(() => buildAgentMessages('story', ctx, [cfg], [brokenBook()])).not.toThrow();
   });
 });
@@ -1247,7 +1253,7 @@ describe('buildAgentMessagesAsync — 首轮只产一条 system 消息（Delta T
       history: transcriptHistory(),
       characters: fixtureCharacters,
     });
-    const cfg = makeCfg('story', { worldBookIds: [fixtureWorldBook.id] });
+    const cfg = makeCfg('story');
     const messages = await buildAgentMessagesAsync('story', ctx, [cfg], [fixtureWorldBook]);
     expect(messages).not.toBeNull();
     expect(messages).toHaveLength(1);
@@ -1283,10 +1289,7 @@ describe('buildAgentMessagesAsync — 动态世界书每个 assembly pass 只求
       variables: { sys: { 旅店灯盏: 0 } },
       ejsVarsDrafts: drafts,
     });
-    const cfg = makeCfg('story', {
-      worldBookIds: [fixtureWorldBook.id],
-      ejsVarsCommit: true,
-    });
+    const cfg = makeCfg('story', { ejsVarsCommit: true });
     const messages = await buildAgentMessagesAsync('story', ctx, [cfg], [fixtureWorldBook]);
     expect(messages).not.toBeNull();
     // 恰好一次：0 → 1（若求值两次 draft 会变 2）
@@ -1304,10 +1307,7 @@ describe('buildAgentMessagesAsync — 动态世界书每个 assembly pass 只求
       variables: { sys: { 旅店灯盏: 0 } },
       ejsVarsDrafts: drafts,
     });
-    const cfg = makeCfg('story', {
-      worldBookIds: [fixtureWorldBook.id],
-      ejsVarsCommit: true,
-    });
+    const cfg = makeCfg('story', { ejsVarsCommit: true });
     const messages = await buildAgentMessagesAsync('story', ctx, [cfg], [fixtureWorldBook]);
     expect(messages).not.toBeNull();
     expect(messages![0].content).toContain('雨夜旅店的檐下挂着1盏灯');

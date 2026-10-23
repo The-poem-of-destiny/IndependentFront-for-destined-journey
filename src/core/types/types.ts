@@ -81,7 +81,54 @@ export interface WorldBookEntry {
       sourceComment: string; // 上游 comment（= 本引擎的 name）
       sourceHash: string; // 安装时正文哈希 —— 供 D15 精确判定是否被改过
     };
+    /** 条目路由元数据（内容计划 §3.1）：读取范围、Story 放置、激活规则与稳定身份 */
+    lore?: LoreEntryMeta;
   };
+}
+
+/**
+ * Story 新模式里条目的放置（内容计划 §3.1 / Story 计划 §3.1.1）：
+ * `fixed` 常驻顶部（第 1 区）/ `region` 当前地理区域的背景（第 3 区）/ `turn` 本轮按规则成为候选（第 5 区）。
+ * 只控制 Story 分区，**不代替**其他 Agent 的读取范围；旧模式不读它。
+ */
+export type LoreSection = 'fixed' | 'region' | 'turn';
+
+/** Declarative relevance and hard exclusions. */
+export interface LoreActivation {
+  /** A location path segment contains a declared name. */
+  locations?: string[];
+  characters?: string[];
+  keywords?: string[];
+  excludeKeywords?: string[];
+}
+
+/** 条目级路由元数据。`audiences`/`section` 逐条目声明；书级同名声明仅旧包兼容。 */
+export interface LoreEntryMeta {
+  /** 稳定条目键（带来源命名空间，如 `fated:faction/北城`）；缺席时引擎派生 `书id#uid` */
+  key?: string;
+  /** 允许读取的 Agent ID；**唯一的读取范围来源**（Agent 设置不再有世界书清单） */
+  audiences?: string[];
+  section?: LoreSection;
+  /** 激活即必选（选择 Agent 无权删除） */
+  required?: boolean;
+  /** 给选择 Agent 看的检索摘要（不替代注入正文） */
+  summary?: string;
+  aliases?: string[];
+  category?: string;
+  /** 依赖的条目键（最小背景）；依赖**不授予**读取权限 */
+  dependsOn?: string[];
+  activation?: LoreActivation;
+  /** 稳定渲染顺序与候选预算的优先级（越大越先） */
+  priority?: number;
+  /** 拆分来源：父条目键、在父条目中的序号、原生产 uid */
+  source?: { parentKey?: string; part?: number; legacyUid?: number };
+}
+
+/** 书级组织元数据：只承载分类与命名空间；读取范围 / Story 放置逐条目声明。 */
+export interface LoreBookMeta {
+  category?: string;
+  /** 条目键命名空间（派生键用）；缺席时用书 id */
+  namespace?: string;
 }
 
 export interface WorldBook {
@@ -91,6 +138,8 @@ export interface WorldBook {
   description?: string;
   entries: WorldBookEntry[];
   builtIn?: boolean; // Phase 8: 项目内置世界书，禁止删除
+  /** 书级组织元数据（内容计划 §3.1）：分类与命名空间；读取范围/放置逐条目声明 */
+  lore?: LoreBookMeta;
   /**
    * 最后写入时间（v14 索引字段）。
    *
@@ -420,7 +469,7 @@ export interface AgentConfig {
     fixedSystem: string; // 前固定部分（缓存命中关键）
     fixedExamples: string; // Few-shot 示例
   };
-  worldBookIds: string[]; // Phase 8: 该 Agent 挂载的世界书 ID 列表
+  // 🪦 `worldBookIds` 已退役（内容计划 §7.2）：读取范围只来自条目路由元数据（lore-routing.ts）
   presetId?: string; // Phase 8: 该 Agent 使用的预设 ID
   /** 🆕 Agentic: 启用 OpenAI function calling（工具调用），默认 false */
   toolsEnabled?: boolean;

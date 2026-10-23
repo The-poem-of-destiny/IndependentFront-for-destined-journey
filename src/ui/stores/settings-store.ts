@@ -38,7 +38,12 @@ import {
 } from '@engine/image/image-defaults';
 import { FALLBACK_IMAGE_DIALECT } from '@engine/image/image-dialect';
 import { detach } from './db-write';
-import { migrateLegacyAgentOverrides } from './agent-settings';
+import {
+  LEGACY_AGENT_WORLDBOOK_STASH_KEY,
+  migrateLegacyAgentOverrides,
+  retireAgentWorldBookOverrides,
+  type LegacyAgentWorldBookStash,
+} from './agent-settings';
 import { migrateLegacyAgentMaps } from './agent-settings-migration';
 import { migrateImageSettings, normalizeImageSettings } from './image-settings-migration';
 import type { UiSettings } from './settings-types';
@@ -94,8 +99,8 @@ export interface PresetItem {
 // ===== Phase 8: Agent 项目默认配置 =====
 
 export interface AgentDefaultEntry {
-  worldBookEnabled: boolean;
-  worldBookIds: string[];
+  // 🪦 `worldBookEnabled` / `worldBookIds` 已退役（内容计划 §7.2）：旧内容包里若还有，
+  //    只被 game-pipeline 读来推「书 → 可读 Agent」兼容映射，不再是 Agent 默认配置的一部分。
   model: string;
   systemPrompt: string;
   presetId: string;
@@ -743,6 +748,24 @@ export const useSettingsStore = defineStore('settings', () => {
     // 从 data/defaults/agent-config.json 生成）的覆写键删除 → 默认层接管。
     // 用户真正改过的值指纹不匹配、原样保留。迁移幂等：第二次启动已无命中键。
     migrateLegacyAgentOverrides(settings.value);
+
+    // 内容计划 §7.2：Agent 世界书配置退役。指纹迁移已删掉等于旧默认的值，剩下的
+    // （玩家真改过的）移进暂存，只用于把玩家自建书的读取范围迁成条目级声明（worldbook-store
+    // 完成后清掉暂存；失败则下次启动重试）。运行时路由从此不读这两键。
+    // 暂存键刻意不在 UiSettings 上声明（应用代码不该读它），经宽袋子访问
+    const legacyBag = settings.value as unknown as Record<string, unknown>;
+    retireAgentWorldBookOverrides(legacyBag);
+    if (legacyBag[LEGACY_AGENT_WORLDBOOK_STASH_KEY]) {
+      void import('./worldbook-store')
+        .then(async ({ useWorldBookStore }) => {
+          const stash = legacyBag[LEGACY_AGENT_WORLDBOOK_STASH_KEY] as LegacyAgentWorldBookStash;
+          const ok = await useWorldBookStore().adoptLegacyAgentWorldBooks(stash);
+          if (ok) delete legacyBag[LEGACY_AGENT_WORLDBOOK_STASH_KEY];
+        })
+        .catch((err) => {
+          console.warn('[settings-store] 自建世界书读取范围迁移失败（下次启动重试）:', err);
+        });
+    }
 
     // 预设播种（与 agent 覆写层无关，仍走这一支）：DB 空 → seed 出厂预设；
     // DB 有同 id → 同步出厂 name（保留用户 prompts 编辑）

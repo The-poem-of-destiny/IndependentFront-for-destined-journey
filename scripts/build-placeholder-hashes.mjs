@@ -70,7 +70,7 @@ export const DEFAULT_OUTPUT_FILE = 'src/core/content/placeholder-hashes.json';
  * 「hash 仍等于占位基线」的书重播种。每次构建都变的戳 = 每次发版都重播种一遍。
  * 只有真的改了占位内容时才手工推进这个常量（或用 `--version` 覆盖）。
  */
-export const PLACEHOLDER_VERSION = '1.0.0';
+export const PLACEHOLDER_VERSION = '1.1.0';
 
 // ═══════════════════════════════════════════════════════════
 // hash 工具（引擎侧同名函数的等价复刻，见文件头「一致性」一节）

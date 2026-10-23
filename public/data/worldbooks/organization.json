@@ -14,7 +14,12 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 100,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": ["story", "char_gen", "plot_post_check", "plot_outline", "lore_select"]
+        }
+      }
     },
     {
       "uid": 900802,
@@ -26,7 +31,12 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 110,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": ["story", "char_gen", "plot_post_check", "plot_outline", "lore_select"]
+        }
+      }
     }
   ],
   "builtIn": true

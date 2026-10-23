@@ -3,12 +3,13 @@
  *
  * 职责:
  * - 从 data/worldbooks/ 加载世界书 JSON 文件
- * - 按 AgentConfig.worldBookIds 过滤 Agent 可见的世界书
+ * - 按条目路由元数据（lore.audiences）过滤 Agent 可见的条目（判据在 lore-routing.ts）
  * - constant/keyword 双层激活
  * - 按 order 排序 + 格式化输出
  */
 
-import type { WorldBook, WorldBookEntry, AgentConfig } from '../types/types';
+import type { WorldBook, WorldBookEntry } from '../types/types';
+import { resolveLoreDependenciesForAgent } from './lore-routing';
 import { executeEjsEntry, type EjsEvalContext } from '../ejs/ejs-runtime';
 import {
   clearEjsBackendCache,
@@ -36,33 +37,34 @@ export function loadWorldBooksSync(
   return ids.filter((id) => preloaded[id]).map((id) => preloaded[id]);
 }
 
+/** Bounded relevance text shared by direct and indirect lore reads. */
+export function loreRecentText(
+  ctx: Pick<import('../types/types').AgentContext, 'history' | 'userInput'>,
+): string {
+  const recent = ctx.history.filter((m) => m.role === 'user' || m.role === 'assistant').slice(-6);
+  return [ctx.userInput, ...recent.map((m) => m.content)].join('\n');
+}
+
 // ========== 过滤 ==========
 
 /**
- * 获取指定 Agent 可见的世界书条目
+ * 获取指定 Agent 可见的世界书条目。
+ *
+ * 可见性**只**看条目自己的读取范围（`lore-routing.isLoreEntryVisibleTo`：条目
+ * `extra.lore.audiences`）。Agent 设置不再有世界书清单（内容计划 §7.2）；旧包兼容映射已移除，
+ * 未声明读取范围的条目不注入。
+ *
  * @param agentId Agent ID
- * @param configs 所有 Agent 配置
- * @param books 已加载的世界书列表
+ * @param books 已加载（并已补过兼容映射）的世界书列表
  */
 export function getEntriesForAgent(
   agentId: string,
-  configs: AgentConfig[],
-  books: WorldBook[],
+  books: readonly WorldBook[],
+  recentText = '',
 ): WorldBookEntry[] {
-  const config = configs.find((c) => c.agentId === agentId);
-  if (!config || !config.worldBookIds?.length) return [];
-
-  const allowedIds = new Set(config.worldBookIds);
-  const entries: WorldBookEntry[] = [];
-
-  for (const book of books) {
-    if (!allowedIds.has(book.id)) continue;
-    for (const entry of book.entries) {
-      entries.push(entry);
-    }
-  }
-
-  return entries;
+  return resolveLoreDependenciesForAgent(agentId, books, recentText).entries.map(
+    (routed) => routed.entry,
+  );
 }
 
 /**

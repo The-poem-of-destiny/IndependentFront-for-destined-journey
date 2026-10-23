@@ -52,9 +52,7 @@ import { diffInstallPlan } from '@engine/workshop/workshop-diff';
 import type { WorkshopUpdateDiff } from '@engine/workshop/workshop-diff';
 import {
   WORKSHOP_PARTITION,
-  grantWorkshopBookToAgents,
   normalizeWorkshopNotes,
-  revokeWorkshopBookFromAgents,
   workshopBookId,
   workshopRuleId,
 } from '@engine/workshop/workshop-types';
@@ -69,7 +67,6 @@ import { fetchInstallInput, fetchProject } from '../lib/workshop-client';
 import type { WorkshopBundle, WorkshopFailure } from '../lib/workshop-client';
 import { useBeautifierStore } from './beautifier-store';
 import { useSettingsStore } from './settings-store';
-import { updateAgentWorldBookIds } from './agent-settings';
 import { useWorldBookStore } from './worldbook-store';
 import { detach } from './db-write';
 
@@ -364,38 +361,10 @@ export const useWorkshopStore = defineStore('workshop', () => {
       updatedAt: now,
     };
     await putProject(row);
-    grantBookToAllAgents(meta.id);
+    // 🪦 装书后「授权给全部 Agent」那一步已删（内容计划 §7.2）：工坊书的读取范围由
+    //    工坊书自己的条目级 `extra.lore.audiences` 声明给出，不再写 Agent 设置。
 
     return { project: row, plan };
-  }
-
-  /**
-   * 把本项目的书挂进**所有** Agent 的可见清单。
-   *
-   * ★ 没有这一步，「装了 + 存档里勾了启用」的工坊内容**一个 Agent 都读不到** ——
-   * Agent 只看 `worldBookIds` 点过名的书，而工坊书带的是新 id。用户看到的是
-   * 「装了等于没装」。
-   *
-   * 只动名单，不动 `agentWorldbookEnabled`（见 `grantWorkshopBookToAgents` 注释）。
-   * 幂等：重装/更新重复调用不会把 id 塞两遍。
-   */
-  function grantBookToAllAgents(projectId: string): void {
-    const settingsStore = useSettingsStore();
-    // Q-18：per-Agent 设置合并成 `agents` 之后，这里投影出一张
-    // `Record<agentId, string[]>` 交给纯函数，再写回条目 —— 工坊那两个纯函数
-    // 与它们的测试一个字都不用改。
-    // 🔴 D44 修正 2：必须传默认层（projectAgentDefaults.agents），否则覆写层为空时
-    //    解析名册是空的、工坊装书授权给零个 agent（用户看到「装了等于没装」）。
-    const defaultsLayer = (settingsStore.projectAgentDefaults?.agents ?? {}) as Record<
-      string,
-      Partial<import('./agent-settings').AgentSettingsEntry>
-    >;
-    updateAgentWorldBookIds(
-      settingsStore.settings,
-      (current) => grantWorkshopBookToAgents(current, workshopBookId(projectId)),
-      defaultsLayer,
-    );
-    settingsStore.saveNow();
   }
 
   /**
@@ -488,19 +457,7 @@ export const useWorkshopStore = defineStore('workshop', () => {
     await replaceProjectRules(projectId, []);
     await getDatabase().workshopProjects.delete(projectId);
     projects.value = projects.value.filter((p) => p.id !== projectId);
-    // 与 grantBookToAllAgents 成对：不收回的话 Agent 清单里会积一串指向已删书的死 id
-    // 🔴 D44 修正 2：传默认层，让 revoke 也覆盖到没覆写条目的 agent（与 grant 对称）。
-    const settingsStore = useSettingsStore();
-    const defaultsLayer = (settingsStore.projectAgentDefaults?.agents ?? {}) as Record<
-      string,
-      Partial<import('./agent-settings').AgentSettingsEntry>
-    >;
-    updateAgentWorldBookIds(
-      settingsStore.settings,
-      (current) => revokeWorkshopBookFromAgents(current, workshopBookId(projectId)),
-      defaultsLayer,
-    );
-    settingsStore.saveNow();
+    // 世界书读取范围由内容声明决定（工坊书 = 工坊默认范围），卸载不再需要收回 Agent 清单
     return true;
   }
 

@@ -93,6 +93,43 @@ describe('worldbook-store', () => {
     vi.restoreAllMocks();
   });
 
+  it('adopts only undeclared user books; built-ins, workshop and explicit empty scopes stay unchanged', async () => {
+    const store = useWorldBookStore();
+    await store.init();
+    const user = makeBook('user', 1);
+    const explicit = {
+      ...makeBook('explicit', 1),
+      entries: [{ ...makeEntry(1), extra: { lore: { audiences: [] } } }],
+    };
+    const builtin = makeBook('builtin', 1, true);
+    const workshop = { ...makeBook('workshop', 1), partition: 'creative_workshop' as const };
+    await store.upsertBooks([user, explicit, builtin, workshop]);
+    const stash = {
+      story: { worldBookEnabled: true, worldBookIds: ['user', 'explicit', 'builtin', 'workshop'] },
+      char_gen: { worldBookEnabled: true, worldBookIds: ['user'] },
+    };
+    expect(await store.adoptLegacyAgentWorldBooks(stash)).toBe(true);
+    await store.hydrate();
+    expect(store.getBook('user')?.entries[0].extra?.lore?.audiences).toEqual(['story', 'char_gen']);
+    expect(store.getBook('explicit')?.entries[0].extra?.lore?.audiences).toEqual([]);
+    expect(store.getBook('builtin')?.entries[0].extra).toBeUndefined();
+    expect(store.getBook('workshop')?.entries[0].extra).toBeUndefined();
+  });
+
+  it('failed adoption retains old data and can be retried', async () => {
+    const store = useWorldBookStore();
+    await store.init();
+    await store.upsertBook(makeBook('user', 1));
+    const stash = { story: { worldBookEnabled: true, worldBookIds: ['user'] } };
+    const spy = vi
+      .spyOn(getDatabase().worldBooks, 'bulkPut')
+      .mockRejectedValueOnce(new Error('disk'));
+    expect(await store.adoptLegacyAgentWorldBooks(stash)).toBe(false);
+    expect(store.getBook('user')?.entries[0].extra).toBeUndefined();
+    spy.mockRestore();
+    expect(await store.adoptLegacyAgentWorldBooks(stash)).toBe(true);
+  });
+
   // ── CRUD 往返 ─────────────────────────────────────────
   it('upsertBook / deleteBook 往返: 先落库再更新 ref', async () => {
     const store = useWorldBookStore();

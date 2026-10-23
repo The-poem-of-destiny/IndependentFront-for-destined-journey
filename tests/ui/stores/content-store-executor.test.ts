@@ -87,8 +87,6 @@ function makePack(version = '1.0.0'): ContentPack {
       agents: {
         story: {
           model: 'story-model',
-          worldBookEnabled: true,
-          worldBookIds: ['system_core'],
           systemPrompt: 'pack-story-prompt',
           template: '',
           temperature: 0.7,
@@ -99,8 +97,6 @@ function makePack(version = '1.0.0'): ContentPack {
         },
         narrator: {
           model: 'narrator-model',
-          worldBookEnabled: true,
-          worldBookIds: ['world_setting'],
           systemPrompt: 'pack-narrator-prompt',
           template: '',
           temperature: 0.7,

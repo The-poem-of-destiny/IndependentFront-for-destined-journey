@@ -19,6 +19,7 @@ import type { WorldBook, WorldBookEntry } from '@engine/types/types';
 import { migrateWorldBooksToDexie, type WorldBookMigrationOutcome } from './worldbook-migration';
 import { useSettingsStore } from './settings-store';
 import { detach, stamped } from './db-write';
+import { legacyStashBookAudiences, type LegacyAgentWorldBookStash } from './agent-settings';
 
 /** 落库前统一盖 updatedAt 戳 + 深拷贝（切断 Vue Proxy —— 理由见 db-write，Q-16） */
 function toRow(book: WorldBook): WorldBook {
@@ -136,6 +137,46 @@ export const useWorldBookStore = defineStore('worldbook', () => {
   }
 
   /**
+   * Agent 世界书配置退役后的一次性迁移（内容计划 §7.2）：把**玩家自建书**（非内置、
+   * 非工坊）曾被哪些 Agent 读取，写成那本书的书级读取范围声明。
+   *
+   * 内置书与工坊书的范围来自内容声明 / 兼容映射，不受旧设置影响，这里不碰。已有声明的书
+   * 不覆盖。返回 true = 迁移完成（调用方据此清掉暂存）；任何一步失败返回 false，下次再来。
+   */
+  async function adoptLegacyAgentWorldBooks(stash: LegacyAgentWorldBookStash): Promise<boolean> {
+    try {
+      await init();
+      const byBook = legacyStashBookAudiences(stash);
+      const adopted = books.value
+        .filter(
+          (book) =>
+            book.builtIn !== true &&
+            book.partition !== 'creative_workshop' &&
+            byBook[book.id] !== undefined,
+        )
+        .map((book) => ({
+          ...book,
+          entries: book.entries.map((entry) =>
+            entry.extra?.lore?.audiences !== undefined
+              ? entry
+              : {
+                  ...entry,
+                  extra: {
+                    ...(entry.extra ?? {}),
+                    lore: { ...(entry.extra?.lore ?? {}), audiences: [...byBook[book.id]] },
+                  },
+                },
+          ),
+        }));
+      if (adopted.length > 0) await upsertBooks(adopted);
+      return true;
+    } catch (err) {
+      console.warn('[worldbook-store] 自建书读取范围迁移失败:', err);
+      return false;
+    }
+  }
+
+  /**
    * 恢复默认：清空整表，从**默认真源**重新加载（§5.6 / D21）。
    *
    * 🔴 内容-引擎分离波 1：默认真源 = 已装 content pack 的 payload > 占位文件
@@ -173,6 +214,7 @@ export const useWorldBookStore = defineStore('worldbook', () => {
     upsertEntry,
     deleteEntry,
     getBook,
+    adoptLegacyAgentWorldBooks,
     resetToDefaults,
   };
 });

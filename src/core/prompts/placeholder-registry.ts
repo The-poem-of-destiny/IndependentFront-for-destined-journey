@@ -30,6 +30,7 @@ import type {
 } from '../types/types';
 import {
   getEntriesForAgent,
+  loreRecentText,
   filterActiveEntries,
   renderWorldBookEntries,
 } from '../content/worldbook-loader';
@@ -202,7 +203,7 @@ function resolveLoreBookSection(
 ): string {
   if (_worldBooks.length === 0 || _configs.length === 0) return '';
   const agentId = config.agentId || '';
-  const entries = getEntriesForAgent(agentId, _configs, _worldBooks);
+  const entries = getEntriesForAgent(agentId, _worldBooks, loreRecentText(ctx));
   if (entries.length === 0) return '';
   const activeEntries = filterActiveEntries(entries);
 

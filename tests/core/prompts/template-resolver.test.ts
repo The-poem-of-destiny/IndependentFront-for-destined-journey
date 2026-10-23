@@ -85,7 +85,6 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     timeout: 60000,
     userId: 'test-user',
     promptTemplate: { fixedSystem: '', fixedExamples: '' },
-    worldBookIds: [],
     ...overrides,
   };
 }

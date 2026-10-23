@@ -3,9 +3,9 @@
  * 世界书分区 —— 列表 / 导入 / 新建 / 删除 / 单本恢复 / 全部恢复 + 条目编辑器
  * （Q-25 从 SettingsPage.vue 抽出）
  *
- * 📌 Agent 配置里那份"这个 Agent 能看哪几本"的勾选列表**不在这里** —— 它是
- *    per-Agent 设置，仍住在 SettingsPage 的 Agent 分区。两处都读同一个
- *    worldbook-store，那是 Phase 0 定的唯一入口，不是重复。
+ * 📌 Agent 配置里的世界书勾选列表已退役（内容计划 §7.2）：读取范围是**书 / 条目自己的
+ *    声明**（`lore.audiences`）。玩家自建书在编辑器顶部的「读取范围」里改，
+ *    新建与导入时默认只给正文 Agent。
  */
 import { ref } from 'vue';
 import AppCard from '../shared/AppCard.vue';
@@ -15,6 +15,9 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useWorldBookStore } from '../../stores/worldbook-store';
 import type { WorldBook } from '@engine/types/types';
+
+/** 新建 / 导入的自建书默认读取范围（只给正文；玩家可在编辑器里加） */
+const DEFAULT_USER_BOOK_AUDIENCES = ['story'] as const;
 
 const cfg = useSettingsStore();
 const s = cfg.settings;
@@ -78,11 +81,15 @@ async function importWorldBook() {
     if (!f) return;
     try {
       const raw = JSON.parse(await f.text());
+      const declared = Array.isArray(raw?.lore?.audiences)
+        ? (raw.lore.audiences as unknown[]).filter((id): id is string => typeof id === 'string')
+        : undefined;
       const book: WorldBook = {
         id: f.name.replace(/\.json$/i, ''),
         name: raw.name || f.name.replace(/\.json$/i, ''),
         partition: 'world_setting',
         description: raw.description || '',
+        // 读取范围逐条目写入：条目自带声明就用它，否则用文件书级声明（旧格式）或默认只给正文
         entries: Array.isArray(raw.entries)
           ? raw.entries.map((e: any) => ({
               uid: e.uid || Date.now(),
@@ -95,6 +102,16 @@ async function importWorldBook() {
               selectiveLogic: e.selectiveLogic ?? 0,
               order: e.order ?? 100,
               position: e.position ?? 0,
+              extra: {
+                lore: {
+                  ...(e?.extra?.lore ?? {}),
+                  audiences: Array.isArray(e?.extra?.lore?.audiences)
+                    ? e.extra.lore.audiences.filter(
+                        (id: unknown): id is string => typeof id === 'string',
+                      )
+                    : (declared ?? [...DEFAULT_USER_BOOK_AUDIENCES]),
+                },
+              },
             }))
           : [],
       };

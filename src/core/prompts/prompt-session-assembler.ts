@@ -48,6 +48,7 @@ import {
 } from './agent-templates';
 import {
   getEntriesForAgent,
+  loreRecentText,
   filterActiveEntries,
   prerenderWorldBookEntries,
 } from '../content/worldbook-loader';
@@ -434,10 +435,10 @@ function classifyPlaceholder(name: string): PlaceholderCategory {
 /** 本 Agent 可见世界书的静态面（id / enabled / order / 条目原文）—— 签名材料。 */
 function serializeVisibleWorldBooks(
   agentId: string,
-  configs: AgentConfig[],
   worldBooks: WorldBook[],
+  ctx: AgentContext,
 ): string {
-  const entries = getEntriesForAgent(agentId, configs, worldBooks);
+  const entries = getEntriesForAgent(agentId, worldBooks, loreRecentText(ctx));
   return entries
     .map((e) =>
       JSON.stringify({
@@ -481,7 +482,7 @@ function computeBaselineSignature(input: PreparePromptSessionInput): string {
     endpointSignature ?? '',
     systemSource,
     template,
-    serializeVisibleWorldBooks(agentId, configs ?? [], worldBooks ?? []),
+    serializeVisibleWorldBooks(agentId, worldBooks ?? [], input.ctx),
     String(historyLayers),
     normalizeTail(tailPrompt),
   ].join('\u0000');
@@ -506,7 +507,9 @@ async function renderDynamicLore(
   const ejsPass = buildEjsPassContext(agentId, ctx, config, configs, worldBooks);
   let dynamicLore = '';
   if (configs && worldBooks) {
-    const activeEntries = filterActiveEntries(getEntriesForAgent(agentId, configs, worldBooks));
+    const activeEntries = filterActiveEntries(
+      getEntriesForAgent(agentId, worldBooks, loreRecentText(ctx)),
+    );
     const rendered = await prerenderWorldBookEntries(activeEntries, ejsPass);
     ejsPass.loreRender = {
       agentId,

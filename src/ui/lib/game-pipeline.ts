@@ -27,7 +27,6 @@ import type {
   CharGenRequestMarker,
   PlayAudioMarker,
   MemoryRecord,
-  WorkshopProject,
   CharacterState,
   ChatMessage,
   SystemEvent,
@@ -96,6 +95,7 @@ import type { EjsVarsDiff } from '@engine/ejs/ejs-vars-diff';
 import type { useGameStore } from '../stores/game-store';
 import type { useSettingsStore } from '../stores/settings-store';
 import { useAudioStore } from '../stores/audio-store';
+import { collectLoreRoutingIssues } from '@engine/content/lore-routing';
 import { useWorldBookStore } from '../stores/worldbook-store';
 import { useUIStore } from '../stores/ui-store';
 import type { CombatCommand } from '@engine/combat';
@@ -224,31 +224,9 @@ export function extractStoryOptions(raw: string): { content: string; options: st
   return projectStoryOutput(raw);
 }
 
-/** Resolve selected workshop books that explicitly declare system-core semantics. */
-export function collectSelectedSystemCoreWorkshopBookIds(
-  worldBooks: WorldBook[],
-  projects: WorkshopProject[],
-): string[] {
-  const coreProjectIds = new Set(
-    projects
-      .filter((project) => project.tags?.some((tag) => tag.trim().toLowerCase() === 'system/core'))
-      .map((project) => project.id),
-  );
-  if (coreProjectIds.size === 0) return [];
-
-  return worldBooks
-    .filter(
-      (book) =>
-        book.partition === 'creative_workshop' &&
-        book.entries.some(
-          (entry) =>
-            entry.enabled &&
-            Boolean(entry.extra?.workshop?.projectId) &&
-            coreProjectIds.has(entry.extra!.workshop!.projectId),
-        ),
-    )
-    .map((book) => book.id);
-}
+// 🪦 `collectSelectedSystemCoreWorkshopBookIds` 已删（内容计划 §7.2）：它给 story / char_gen 额外挂
+//    带 `system/core` 标签的工坊书；Agent 世界书清单退役后读取范围改由工坊书自己的条目级
+//    `extra.lore.audiences` 声明，不再需要按项目标签补挂。
 
 /** 各 Agent 的中文标签（供调试日志 / DebugPanel 显示） */
 const AGENT_LABELS: Record<string, string> = {
@@ -545,14 +523,9 @@ export class GamePipeline {
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets();
       const worldBooks = await this.loadActiveWorldBooks();
-      const systemCoreWorkshopBookIds = await this.loadSystemCoreWorkshopBookIds(worldBooks);
 
       // 2.6 构建 Agent 配置（用已加载的 agentDefaults 替代 projectAgentDefaults）
-      const agentConfigs = this.buildAgentConfigs(
-        agentDefaults,
-        onStoryChunk,
-        systemCoreWorkshopBookIds,
-      );
+      const agentConfigs = this.buildAgentConfigs(agentDefaults, onStoryChunk);
 
       // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
       // configs/worldBooks/presets 才能拿到完整 systemPrompt + 世界书上下文，
@@ -883,7 +856,6 @@ export class GamePipeline {
   private buildAgentConfigs(
     agentDefaults: Record<string, Record<string, unknown>>,
     onStoryChunk?: StoryChunkCallback,
-    systemCoreWorkshopBookIds: string[] = [],
   ): AgentConfig[] {
     const s = this.settings.settings;
 
@@ -1000,22 +972,8 @@ export class GamePipeline {
         agentId === 'story' && s.activePresetId
           ? s.activePresetId
           : (defaults.presetId as string | undefined) || undefined;
-      const worldBookEnabled = agentCfg.worldBookEnabled;
-      const configuredWorldBookIds = worldBookEnabled ? agentCfg.worldBookIds : [];
-      const selectedSystemCore =
-        this.game.activeSave?.metadata?.enabledWorldBookEntries?.some((entry: string) =>
-          entry.startsWith('system_core:'),
-        ) ?? false;
-      // Selected core lore is authoritative save data. Story and char_gen both
-      // need the source entry; the other agents keep their configured partitions.
-      const isCoreLoreAgent = agentId === 'story' || agentId === 'char_gen';
-      const coreBookIds = isCoreLoreAgent
-        ? [...(selectedSystemCore ? ['system_core'] : []), ...systemCoreWorkshopBookIds]
-        : [];
-      const worldBookIds =
-        worldBookEnabled && coreBookIds.length > 0
-          ? [...new Set([...configuredWorldBookIds, ...coreBookIds])]
-          : configuredWorldBookIds;
+      // 世界书读取范围不在 Agent 配置里（内容计划 §7.2）：条目路由元数据决定谁能读，
+      // 见 loadActiveWorldBooks 与 @engine/content/lore-routing。
 
       // systemPrompt/template 统一读 agentCfg（已合覆写 ?? 默认）。空串 → undefined
       // （AgentConfig 里 undefined = 不发该字段，与原 `defaults.X || undefined` 行为一致）。
@@ -1057,7 +1015,6 @@ export class GamePipeline {
           fixedExamples: '',
         },
         presetId,
-        worldBookIds,
         // 🔴 D44 修正 3：precedence 统一为 覆写 ?? 默认（经 getAgentSettings）。
         //    此前这里是 `defaults.systemPrompt || agentCfg.systemPrompt`（默认优先、
         //    覆写被无视）—— 用户在设置页改的提示词进不了运行时。现在 agentCfg 已合
@@ -1296,11 +1253,6 @@ export class GamePipeline {
         // 语义相关的 historyLayers/historySlice —— 不塌成默认）。
         agentDefaults[agentId] = {
           model: e.model,
-          worldBookEnabled:
-            typeof e.worldBookEnabled === 'boolean' ? e.worldBookEnabled : undefined,
-          worldBookIds: Array.isArray(e.worldBookIds)
-            ? [...(e.worldBookIds as string[])]
-            : undefined,
           systemPrompt: typeof e.systemPrompt === 'string' ? e.systemPrompt : undefined,
           template: typeof e.template === 'string' ? e.template : undefined,
           temperature: typeof e.temperature === 'number' ? e.temperature : undefined,
@@ -1330,7 +1282,12 @@ export class GamePipeline {
     return { presets, agentDefaults };
   }
 
-  /** 加载启用世界书：统一数据源（store 优先 + 文件兜底），与 plot_outline 共用 */
+  /**
+   * 加载启用世界书：统一数据源（store 优先 + 文件兜底），与 plot_outline 共用。
+   *
+   * 读取范围由条目路由元数据决定（内容计划 §3.2）；没有声明读取范围的条目不注入，
+   * 并记一条可定位的诊断。
+   */
   private async loadActiveWorldBooks(): Promise<WorldBook[]> {
     try {
       // 统一数据源：worldbook-store 优先（Dexie，含用户在 WorldBookEditor 的 enabled 修改
@@ -1339,24 +1296,16 @@ export class GamePipeline {
       const wb = useWorldBookStore();
       await wb.init();
       const all = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
+      const unrouted = collectLoreRoutingIssues(all).filter((i) => i.kind === 'no-audiences');
+      if (unrouted.length > 0) {
+        console.warn(
+          `[GamePipeline] ${unrouted.length} 个世界书条目没有读取范围，不会注入任何 Agent:`,
+          unrouted.slice(0, 20).map((i) => `${i.bookName}/${i.entryName}`),
+        );
+      }
       const enabledEntries = this.game.activeSave?.metadata?.enabledWorldBookEntries ?? [];
       return filterBooksByEnabledEntries(all, enabledEntries);
     } catch {
-      return [];
-    }
-  }
-
-  /** Match selected workshop entries to project-level `system/core` tags. */
-  private async loadSystemCoreWorkshopBookIds(worldBooks: WorldBook[]): Promise<string[]> {
-    if (!worldBooks.some((book) => book.partition === 'creative_workshop' && book.entries.length)) {
-      return [];
-    }
-    try {
-      const { getDatabase } = await import('@engine/persistence/database');
-      const projects = await getDatabase().workshopProjects.toArray();
-      return collectSelectedSystemCoreWorkshopBookIds(worldBooks, projects);
-    } catch (err) {
-      console.warn('[GamePipeline] 工坊 system/core 标签读取失败（不阻塞本轮）:', err);
       return [];
     }
   }
@@ -3134,12 +3083,7 @@ export class GamePipeline {
     if (this.chainData) return this.chainData;
     const { presets, agentDefaults } = await this.loadPresets();
     const worldBooks = await this.loadActiveWorldBooks();
-    const systemCoreWorkshopBookIds = await this.loadSystemCoreWorkshopBookIds(worldBooks);
-    const agentConfigs = this.buildAgentConfigs(
-      agentDefaults,
-      undefined,
-      systemCoreWorkshopBookIds,
-    );
+    const agentConfigs = this.buildAgentConfigs(agentDefaults);
     this.chainData = { agentConfigs, worldBooks, presets, agentDefaults };
     return this.chainData;
   }

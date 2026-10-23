@@ -181,8 +181,8 @@ describe('② 体量轴：占位 agent-config 规格（§6 / D32）', () => {
     >;
   };
 
-  it('14 个 agent id 齐', () => {
-    expect(Object.keys(agentConfig.agents)).toHaveLength(14);
+  it('15 个 agent id 齐（包括资料选择器）', () => {
+    expect(Object.keys(agentConfig.agents)).toHaveLength(15);
   });
 
   it('各 agent systemPrompt 非空（image_prompt 除外 —— 它那份归方言，C5）', () => {

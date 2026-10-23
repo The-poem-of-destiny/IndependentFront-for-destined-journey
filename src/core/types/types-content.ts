@@ -53,8 +53,6 @@ import type { PackRandomEventsSection } from './types-random-events';
  */
 export interface AgentProjectDefaults {
   model: string;
-  worldBookEnabled: boolean;
-  worldBookIds: string[];
   systemPrompt: string;
   template: string;
   temperature: number;
@@ -292,6 +290,8 @@ export interface ContentPack {
   packVersion: string;
   /** 与 `__ENGINE_VERSION__` 比对；不满足 → 拒绝（D26/D40） */
   minEngineVersion?: string;
+  /** Explicit routing revision; absent legacy packs use author-supplied compatibility mapping. */
+  loreRoutingVersion?: 1;
   /** 人类可读名 */
   name?: string;
   description?: string;
@@ -458,6 +458,8 @@ export function emptySectionPlan<T = unknown>(): PackSectionPlan<T> {
 export interface PackSaveUidMigration {
   /** `partition:oldUid` → `partition:newUid` 的重写映射（按名配对的幸存者） */
   rewrite: Readonly<Record<string, number>>;
+  /** Explicit author-declared parent -> children mapping; does not touch save mode or memory. */
+  expandedRewrite?: Readonly<Record<string, readonly number[]>>;
   /** 标记 `needs_selection` 的单选钉选分区（裸删会触发内容通胀，D43） */
   needsSelectionPartitions: WorldBookPartition[];
 }

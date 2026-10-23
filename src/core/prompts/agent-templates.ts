@@ -31,9 +31,11 @@ import {
 } from '../plot/plot-threads';
 import {
   getEntriesForAgent,
+  loreRecentText,
   filterActiveEntries,
   prerenderWorldBookEntries,
 } from '../content/worldbook-loader';
+import { isLoreEntryVisibleTo } from '../content/lore-routing';
 import { getPreset, assemblePresetContent } from './preset-loader';
 import { resolveTemplateWithGlobals } from './template-resolver';
 import type { EjsCapabilityInput } from '../ejs/ejs-capabilities';
@@ -200,16 +202,16 @@ function buildCapabilityInput(
    * 只有 `lore.get/list` 用得上 —— 真机语料里绝大多数条目一次都不调。
    * 急切构建等于给每一次提示装配平白加一遍全量条目扫描（内置书 600+ 条目）。
    */
-  let loreIndex: { visible: WorldBookEntry[]; bookOf: Map<number, string> } | null = null;
+  let loreIndex: { visible: WorldBookEntry[]; bookOf: Map<WorldBookEntry, WorldBook> } | null =
+    null;
   const getLoreIndex = () => {
     if (loreIndex) return loreIndex;
-    const visible =
-      configs && worldBooks
-        ? filterActiveEntries(getEntriesForAgent(agentId, configs, worldBooks))
-        : [];
-    const bookOf = new Map<number, string>();
+    const visible = worldBooks
+      ? filterActiveEntries(getEntriesForAgent(agentId, worldBooks, loreRecentText(ctx)))
+      : [];
+    const bookOf = new Map<WorldBookEntry, WorldBook>();
     for (const book of worldBooks ?? []) {
-      for (const e of book.entries ?? []) bookOf.set(e.uid, book.name);
+      for (const e of book.entries ?? []) bookOf.set(e, book);
     }
     loreIndex = { visible, bookOf };
     return loreIndex;
@@ -259,7 +261,11 @@ function buildCapabilityInput(
      * `$map` 是本地一跳的地块级 —— 316 块地全塞进 Mermaid 会撑爆它自带的 ≤30 边限流。
      */
     localSeed: { [RUNTIME_GEO_LOCAL_VAR]: buildRuntimeGeoData(getLocationNodes(), playerLocation) },
-    charLoreBook: config?.worldBookIds?.[0] ?? '',
+    // 第一本有该 Agent 可读条目的书（世界书清单退役前取的是清单第一项）
+    charLoreBook:
+      (worldBooks ?? []).find((book) =>
+        (book.entries ?? []).some((e) => isLoreEntryVisibleTo(agentId, book, e)),
+      )?.id ?? '',
     projectId: 'builtin',
     engineVersion: undefined,
     lore: {
@@ -267,14 +273,14 @@ function buildCapabilityInput(
         const { visible, bookOf } = getLoreIndex();
         const name = String(entryName ?? '');
         const hit = visible.find(
-          (e) => e.name === name && (bookName === undefined || bookOf.get(e.uid) === bookName),
+          (e) => e.name === name && (bookName === undefined || bookOf.get(e)?.name === bookName),
         );
         return hit ? (hit.content ?? '') : null;
       },
       list: (bookName) => {
         const { visible, bookOf } = getLoreIndex();
         return visible
-          .filter((e) => bookOf.get(e.uid) === String(bookName ?? ''))
+          .filter((e) => bookOf.get(e)?.name === String(bookName ?? ''))
           .map((e) => e.name ?? '');
       },
     },
@@ -835,8 +841,10 @@ export async function buildAgentMessagesAsync(
   const config = configs?.find((c) => c.agentId === agentId);
   const ejsPass = buildEjsPassContext(agentId, ctx, config, configs, worldBooks);
 
-  if (configs && worldBooks) {
-    const activeEntries = filterActiveEntries(getEntriesForAgent(agentId, configs, worldBooks));
+  if (worldBooks) {
+    const activeEntries = filterActiveEntries(
+      getEntriesForAgent(agentId, worldBooks, loreRecentText(ctx)),
+    );
     const rendered = await prerenderWorldBookEntries(activeEntries, ejsPass);
     ejsPass.loreRender = {
       agentId,

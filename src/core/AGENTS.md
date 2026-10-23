@@ -8,6 +8,11 @@
 > 动 `src/core/` 下任何文件之前，请连同本文件一起读。
 > Claude Code 通过同目录的 `CLAUDE.md` 自动导入本文件，无需手动读取。
 
+## 条目级内容路由
+
+- `content/lore-routing.ts` 统一条目读取权限与依赖闭包；Agent 世界书清单已退役，未声明范围不注入。
+- `content/lore-protocol.ts` 校验显式路由修订；`content/content-pack-plan.ts` 按作者来源映射展开拆分条目的启用引用。
+
 ## 架构（已实现部分）
 
 实现自 2026-09-30 起按职责归入子目录；根目录仅保留 `index.ts` 和指令文件。

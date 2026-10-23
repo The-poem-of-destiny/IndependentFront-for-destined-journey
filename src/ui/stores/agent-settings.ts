@@ -12,12 +12,11 @@
  * （`getAgentSettings`）处合并，写入路径只写用户真正改过的 diff。
  *
  * ── 四条修正（v1.2）──────────────────────────────────────────────────
- * 1. **resolve 覆盖全部 12 键**：`getAgentSettings` 加 `defaultsLayer` 参数，
- *    `model/worldBookEnabled/worldBookIds/systemPrompt/template/数值五参/
- *    historyLayers/historySlice` 全部走 `覆写 ?? 默认 ?? AGENT_SETTINGS_DEFAULTS`。
- *    🔴 不给默认层 = 全体 agent 静默失去世界书（删播种后世界书唯一来源就是默认层）。
- * 2. **名册迭代改源**：`listConfiguredAgents` / `updateAgentWorldBookIds` 迭代
- *    **解析名册**（默认层键 ∪ 覆写层键），覆写层为空时工坊装书仍能授权给全名册。
+ * 1. **resolve 覆盖全部键**：`getAgentSettings` 加 `defaultsLayer` 参数，
+ *    `model/systemPrompt/template/数值五参/historyLayers/historySlice` 全部走
+ *    `覆写 ?? 默认 ?? AGENT_SETTINGS_DEFAULTS`。
+ *    （世界书两键已于 2026-10 随 Agent 世界书配置一起退役，见 `retireAgentWorldBookOverrides`）
+ * 2. **名册迭代改源**：`listConfiguredAgents` 迭代**解析名册**（默认层键 ∪ 覆写层键）。
  * 3. **precedence 统一 = 覆写 ?? 默认** + 一次性指纹迁移（`migrateLegacyAgentOverrides`）。
  * 4. **覆写制造面全列改造**：`applyProjectDefaultToAgent` / `resetAgentSettings`
  *    语义改「清该 agent 覆写层」，解析值自动回默认层。
@@ -32,8 +31,9 @@ import type { LlmDefaultParameters } from '@engine/types/types-api';
 /** 一个 Agent 的全部可调项 —— 与 `AgentDefaultEntry` 同形（后者是磁盘上的项目默认值） */
 export interface AgentSettingsEntry {
   model: string;
-  worldBookEnabled: boolean;
-  worldBookIds: string[];
+  // 🪦 `worldBookEnabled` / `worldBookIds` 已退役（内容计划 §7.2）：世界书读取范围由条目
+  //    路由元数据决定（@engine/content/lore-routing），Agent 设置里不再有世界书清单。
+  //    覆写层里的残留由 `retireAgentWorldBookOverrides` 一次性移走。
   systemPrompt: string;
   template: string;
   temperature: number;
@@ -152,17 +152,15 @@ function normalizeTailPrompt(v: string | undefined): string | undefined {
 /**
  * 取一个 Agent 的完整设置 —— **唯一读取咽喉**（D44 修正 1）。
  *
- * 12 键全部走 `覆写层 ?? 默认层 ?? 兜底`：
+ * 全部键走 `覆写层 ?? 默认层 ?? 兜底`：
  *   · 数值五参（temperature/topP/freqPen/presPen/maxTokens）兜底 `AGENT_SETTINGS_DEFAULTS`
  *   · 字符串（model/systemPrompt/template）兜底 `''`
- *   · 布尔（worldBookEnabled）兜底 `false`
- *   · 数组（worldBookIds）兜底 `[]`（永远返回副本）
  *   · historyLayers/historySlice **无兜底**：两层都没该键 → `undefined`
  *     （编码「按 agent 类别走引擎默认」，合默认会静默盖掉那条语义）
  *
  * 🔴 不传 `defaultsLayer` 时退回**纯覆写层 + 兜底** —— 与 v1.1 行为一致，给测试与
  *    旧调用方一个安全退化。但生产路径（game-pipeline / 设置页）**必须**传默认层，
- *    否则删播种后世界书/model/数值全静默丢失。
+ *    否则删播种后提示词/model/数值全静默丢失。
  *
  * `defaultsLayer` 的来源：`content-store` 解析出的 pack > 占位 agentDefaults
  * （settings-store 经 `projectAgentDefaults` 暴露）。调用方取 `layer[agentId]` 传入。
@@ -175,17 +173,6 @@ export function getAgentSettings(
   const layer = defaultsLayer;
   return {
     model: resolve(readOverride(bag, agentId, 'model'), readDefault(layer, agentId, 'model')) ?? '',
-    worldBookEnabled:
-      resolve(
-        readOverride<boolean>(bag, agentId, 'worldBookEnabled'),
-        readDefault<boolean>(layer, agentId, 'worldBookEnabled'),
-      ) ?? false,
-    worldBookIds: [
-      ...(resolve(
-        readOverride<string[]>(bag, agentId, 'worldBookIds'),
-        readDefault<string[]>(layer, agentId, 'worldBookIds'),
-      ) ?? []),
-    ],
     systemPrompt:
       resolve(
         readOverride<string>(bag, agentId, 'systemPrompt'),
@@ -375,41 +362,73 @@ export function listConfiguredAgents(
   return [...new Set([...defaultKeys, ...overrideKeys])];
 }
 
+// ═══════════════════════════════════════════════════════════════
+// Agent 世界书配置退役（内容计划 §7.2，2026-10）
+// ═══════════════════════════════════════════════════════════════
+
+/** 覆写层里残留的旧世界书配置，按 Agent 收拢（只用于把**用户自建书**的读取范围迁成条目级声明） */
+export type LegacyAgentWorldBookStash = Record<
+  string,
+  { worldBookEnabled?: boolean; worldBookIds?: string[] }
+>;
+
+/** 暂存旧世界书配置的设置键（不在 `UiSettings` 上声明：应用代码不该读它） */
+export const LEGACY_AGENT_WORLDBOOK_STASH_KEY = 'legacyAgentWorldBookOverrides';
+
 /**
- * 把「所有 Agent 的世界书清单」当成一张 `Record<agentId, string[]>` 来整体改写。
+ * 一次性移走覆写层里的 `worldBookEnabled` / `worldBookIds`（内容计划 §7.2 / C02 / C16）。
  *
- * 工坊装/卸要给**每个** Agent 的清单加/删同一个 bookId，那两个纯函数
- * （`grantWorkshopBookToAgents` / `revokeWorkshopBookFromAgents`）本来就是按
- * 「一张 map 进、一张 map 出」写的。合并之后 map 不再存在，但**没必要**把它们改成
- * 认 `agents` —— 那会把工坊的纯函数绑死在设置的存储形状上。于是投影这一步收在这里：
- * 读出来一张 map、交给调用方变换、再写回条目。
+ * 这两键从此**不参与运行时路由**。移走的值收进 `LEGACY_AGENT_WORLDBOOK_STASH_KEY` 暂存：
+ * 唯一用途是让 worldbook-store 把**玩家自建书**（非内置、非工坊）曾经被哪些 Agent 读取，
+ * 一次性写成那些书**条目级**的读取范围声明（玩家可在世界书编辑器里看到并修改）——
+ * 内置书与工坊书的范围来自内容声明，不受旧设置影响。
  *
- * 🔴 D44 修正 2：投影名册必须是**解析名册**（默认层 ∪ 覆写层），否则覆写层为空时
- *    工坊装书授权给零个 agent。调用方（workshop-store）必须传默认层。
+ * 幂等：第二次运行时覆写层里已没有这两键，暂存不变。空掉的覆写条目一并删除。
+ * 只搬不改其他字段（model / 提示词 / 数值一个不碰）。
  *
- * 只动 `worldBookIds`，其余字段一个不碰（`worldBookEnabled` 尤其不能顺手开 ——
- * 见 `grantWorkshopBookToAgents` 的注释）。
+ * @returns 本次移走了哪些 Agent 的旧配置（空 = 没有可移的）
  */
-export function updateAgentWorldBookIds(
-  bag: SettingsBag,
-  transform: (current: Record<string, string[]>) => Record<string, string[]>,
-  defaultsLayer?: AgentDefaultsLayer,
-): void {
-  const roster = listConfiguredAgents(bag, defaultsLayer);
-  const current: Record<string, string[]> = {};
-  for (const agentId of roster) {
-    const override = readOverride<string[]>(bag, agentId, 'worldBookIds');
-    if (override !== undefined) {
-      current[agentId] = Array.isArray(override) ? [...override] : [];
-    } else {
-      const def = readDefault<string[]>(defaultsLayer, agentId, 'worldBookIds');
-      current[agentId] = Array.isArray(def) ? [...def] : [];
+export function retireAgentWorldBookOverrides(bag: SettingsBag): string[] {
+  if (!isPlainObject(bag.agents)) return [];
+  const agents = bag.agents as Record<string, unknown>;
+  const stash: LegacyAgentWorldBookStash = isPlainObject(bag[LEGACY_AGENT_WORLDBOOK_STASH_KEY])
+    ? (bag[LEGACY_AGENT_WORLDBOOK_STASH_KEY] as LegacyAgentWorldBookStash)
+    : {};
+  const retired: string[] = [];
+  for (const [agentId, raw] of Object.entries(agents)) {
+    if (!isPlainObject(raw)) continue;
+    if (!('worldBookEnabled' in raw) && !('worldBookIds' in raw)) continue;
+    const entry: { worldBookEnabled?: boolean; worldBookIds?: string[] } = {};
+    if (typeof raw.worldBookEnabled === 'boolean') entry.worldBookEnabled = raw.worldBookEnabled;
+    if (Array.isArray(raw.worldBookIds)) {
+      entry.worldBookIds = raw.worldBookIds.filter((id): id is string => typeof id === 'string');
+    }
+    stash[agentId] = { ...(stash[agentId] ?? {}), ...entry };
+    delete raw.worldBookEnabled;
+    delete raw.worldBookIds;
+    if (Object.keys(raw).length === 0) delete agents[agentId];
+    retired.push(agentId);
+  }
+  if (retired.length > 0) bag[LEGACY_AGENT_WORLDBOOK_STASH_KEY] = stash;
+  return retired;
+}
+
+/**
+ * 由暂存的旧配置推出「玩家自建书 → 可读 Agent」：只认当年开着世界书开关的 Agent。
+ * 纯函数；不认识的书 id 原样返回（由调用方只挑自建书使用）。
+ */
+export function legacyStashBookAudiences(
+  stash: LegacyAgentWorldBookStash | undefined,
+): Record<string, string[]> {
+  const byBook: Record<string, string[]> = {};
+  for (const [agentId, entry] of Object.entries(stash ?? {})) {
+    if (entry?.worldBookEnabled === false) continue;
+    for (const bookId of entry?.worldBookIds ?? []) {
+      const list = (byBook[bookId] ??= []);
+      if (!list.includes(agentId)) list.push(agentId);
     }
   }
-  const next = transform(current);
-  for (const [agentId, ids] of Object.entries(next)) {
-    patchAgentSettings(bag, agentId, { worldBookIds: [...ids] });
-  }
+  return byBook;
 }
 
 // ═══════════════════════════════════════════════════════════════

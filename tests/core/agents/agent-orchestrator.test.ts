@@ -114,7 +114,6 @@ function makeAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     timeout: 30000,
     userId: 'fp|test|story',
     promptTemplate: { fixedSystem: '', fixedExamples: '' },
-    worldBookIds: [],
     ...overrides,
   };
 }

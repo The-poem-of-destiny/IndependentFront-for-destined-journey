@@ -1084,13 +1084,19 @@ export const useContentStore = defineStore('content', () => {
     if (!migration) return;
     const db = getDatabase();
     const saves = await db.saves.toArray();
-    const { rewrite, needsSelectionPartitions } = migration;
+    const { rewrite, expandedRewrite, needsSelectionPartitions } = migration;
     let changed = false;
     for (const save of saves) {
       const entries = save.metadata?.enabledWorldBookEntries;
       if (!entries || entries.length === 0) continue;
       let mutated = false;
-      const next = [...entries];
+      const next = entries.flatMap((key) => {
+        const children = expandedRewrite?.[key];
+        if (!children) return [key];
+        mutated = true;
+        const partition = key.slice(0, key.indexOf(':'));
+        return children.map((uid) => `${partition}:${uid}`);
+      });
       for (let i = 0; i < next.length; i++) {
         const oldKey = next[i];
         const newUid = rewrite[oldKey];
@@ -1104,7 +1110,10 @@ export const useContentStore = defineStore('content', () => {
       // rewrite 只含配对成功者；某分区在 needsSelectionPartitions 里且该存档含该分区
       // 的键但没被 rewrite → 需重选。裸删这些键 = 分区「整本原样通过」= 内容通胀。
       const needsSelection = (needsSelectionPartitions ?? []).some((p) =>
-        entries.some((e) => e.startsWith(`${p}:`) && rewrite[e] === undefined),
+        entries.some(
+          (e) =>
+            e.startsWith(`${p}:`) && rewrite[e] === undefined && expandedRewrite?.[e] === undefined,
+        ),
       );
       if (needsSelection) {
         mutated = true;
@@ -1112,7 +1121,7 @@ export const useContentStore = defineStore('content', () => {
       if (mutated) {
         save.metadata = writePackSelectionMetadata(
           save.metadata,
-          { enabledWorldBookEntries: next },
+          { enabledWorldBookEntries: [...new Set(next)] },
           needsSelection,
         );
         await db.saves.put(save);

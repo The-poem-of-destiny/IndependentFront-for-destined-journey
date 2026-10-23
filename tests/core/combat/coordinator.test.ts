@@ -599,7 +599,6 @@ describe('敌方 system prompt 来源（双角色会话：configs 优先）', ()
       timeout: 0,
       userId: '',
       promptTemplate: { fixedSystem: '', fixedExamples: '' },
-      worldBookIds: [],
       systemPrompt,
     }) as AgentConfig;
 
@@ -1904,7 +1903,6 @@ describe('战斗终局 AI 总结（终局后专门调 AI 写总结叙事）', ()
       timeout: 0,
       userId: '',
       promptTemplate: { fixedSystem: '', fixedExamples: '' },
-      worldBookIds: [],
       systemPrompt,
     }) as AgentConfig;
 
@@ -2175,7 +2173,6 @@ describe('T2：首轮 user = combat.template 模板渲染结果（情境快照�
       timeout: 60000,
       userId: 'u',
       promptTemplate: { fixedSystem: '', fixedExamples: '' },
-      worldBookIds: ['wb_core'],
       systemPrompt: '战斗系统提示词',
       template: FIVE_ZONE_TEMPLATE,
       ...over,
@@ -2199,6 +2196,7 @@ describe('T2：首轮 user = combat.template 模板渲染结果（情境快照�
             selectiveLogic: 0,
             order: 1,
             position: 1,
+            extra: { lore: { audiences: ['combat_enemy'] } },
           },
         ],
       },
@@ -2293,7 +2291,7 @@ describe('T2：首轮 user = combat.template 模板渲染结果（情境快照�
     expect(firstUser).toContain('战斗类型: 死斗｜环境: 竞技场｜决一死战');
     // COMBAT_ROSTER 注入（参战方名单）
     expect(firstUser).toContain('我方: 理查德；敌方: 冠军');
-    // LORE_BOOK_STATIC：按 config.worldBookIds 过滤后的世界书条目正文
+    // LORE_BOOK_STATIC：按 lore.audiences 过滤后的世界书条目正文
     expect(firstUser).toContain('战意规则：士气低于 0 溃逃。');
     expect(firstUser).not.toContain('我要挑战竞技场冠军');
     expect(firstUser).not.toContain('理查德推开了竞技场的大门');
@@ -3142,7 +3140,6 @@ describe('F5：开局先调 AI 构建战斗场景（氛围描写 + 信息获取�
       timeout: 0,
       userId: '',
       promptTemplate: { fixedSystem: '', fixedExamples: '' },
-      worldBookIds: [],
       systemPrompt,
     }) as AgentConfig;
 

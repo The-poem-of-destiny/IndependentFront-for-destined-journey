@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  collectSelectedSystemCoreWorkshopBookIds,
   EndpointBindingError,
   extractStoryOptions,
   GamePipeline,
   withImagePromptSystem,
 } from '../../../src/ui/lib/game-pipeline';
-import type { AgentConfig, ApiEndpoint } from '@engine/types/types';
+import type { AgentConfig, ApiEndpoint, WorldBook } from '@engine/types/types';
+import { getEntriesForAgent } from '@engine/content/worldbook-loader';
 import { patchAgentSettings } from '../../../src/ui/stores/agent-settings';
 import type { AgentResult } from '@engine/types/types';
 
@@ -126,6 +126,25 @@ const { invalidatePromptSessionSpy } = vi.hoisted(() => ({
 
 vi.mock('@engine/prompts/prompt-session-assembler', () => ({
   invalidatePromptSession: invalidatePromptSessionSpy,
+}));
+
+// 世界书数据源：loadActiveWorldBooks 读 worldbook-store + 文件兜底。默认空库（与此前
+// 「无 activePinia → catch 返回 []」等价），兜底原样返回 store 里的书（不发 fetch）。
+const { worldBookStoreState } = vi.hoisted(() => ({
+  worldBookStoreState: { books: [] as unknown[] },
+}));
+
+vi.mock('../../../src/ui/stores/worldbook-store', () => ({
+  useWorldBookStore: () => ({
+    init: async () => undefined,
+    get books() {
+      return worldBookStoreState.books;
+    },
+  }),
+}));
+
+vi.mock('@engine/content/builtin-worldbooks', () => ({
+  loadWorldBooksWithFallback: vi.fn(async (books: unknown[]) => books),
 }));
 
 import { preCheckPlot, postCheckPlot } from '@engine/plot/plot-engine';
@@ -363,51 +382,79 @@ describe('sendOpeningPrompt', () => {
   });
 });
 
-describe('buildAgentConfigs — selected system core visibility', () => {
+describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () => {
+  const entry = (uid: number, enabled = true) => ({
+    uid,
+    name: `条目${uid}`,
+    content: `正文${uid}`,
+    enabled,
+    key: [],
+    keysecondary: [],
+    selectiveLogic: 0,
+    order: 0,
+    position: 0,
+    extra: { lore: { audiences: ['story', 'char_gen'] } },
+  });
+
+  beforeEach(() => {
+    worldBookStoreState.books = [];
+  });
+
   it.each([408, 413, 999])(
-    'adds system_core to char_gen for any selected system-core entry (uid %s)',
-    (uid) => {
-      const pipeline = makePipeline({
-        activeSave: {
-          metadata: { enabledWorldBookEntries: [`system_core:${uid}`] },
+    '存档选中的内置命定核心条目 → story 与 char_gen 读得到，request_dispatcher 读不到（uid %s）',
+    async (uid) => {
+      worldBookStoreState.books = [
+        {
+          id: 'system_core',
+          name: '命定核心',
+          partition: 'system_core',
+          builtIn: true,
+          entries: [entry(uid, false)],
         },
-      });
-      const settings = (pipeline as any).settings.settings;
-      patchAgentSettings(settings, 'char_gen', {
-        worldBookEnabled: true,
-        worldBookIds: ['world_setting', 'race', 'character'],
-      });
-      patchAgentSettings(settings, 'story', {
-        worldBookEnabled: true,
-        worldBookIds: ['world_setting'],
+      ];
+      const pipeline = makePipeline({
+        activeSave: { metadata: { enabledWorldBookEntries: [`system_core:${uid}`] } },
       });
 
-      const configs = (pipeline as any).buildAgentConfigs({ char_gen: {} });
-      const charGen = configs.find((config: any) => config.agentId === 'char_gen');
-      const story = configs.find((config: any) => config.agentId === 'story');
+      const books: WorldBook[] = await (pipeline as any).loadActiveWorldBooks();
+      const uidsFor = (agentId: string) =>
+        getEntriesForAgent(agentId, books)
+          .filter((e) => e.enabled)
+          .map((e) => e.uid);
 
-      expect(charGen.worldBookIds).toContain('system_core');
-      expect(story.worldBookIds).toContain('system_core');
+      expect(uidsFor('story')).toEqual([uid]);
+      expect(uidsFor('char_gen')).toEqual([uid]);
+      expect(uidsFor('request_dispatcher')).toEqual([]);
     },
   );
 
-  it('grants selected system/core workshop books to story and char_gen only', () => {
+  it('旧模式（开关关闭）消费新版包：读取范围逐条目生效，不需要书级声明', async () => {
+    worldBookStoreState.books = [
+      {
+        id: 'new_pack',
+        name: '新版包书',
+        partition: 'world_setting',
+        entries: [
+          { ...entry(1), extra: { lore: { audiences: ['story'] } } },
+          { ...entry(2), extra: { lore: { audiences: ['char_gen'] } } },
+        ],
+      },
+    ];
     const pipeline = makePipeline();
-    const settings = (pipeline as any).settings.settings;
-    for (const agentId of ['story', 'char_gen', 'request_dispatcher']) {
-      patchAgentSettings(settings, agentId, {
-        worldBookEnabled: true,
-        worldBookIds: ['world_setting'],
-      });
-    }
+    const books: WorldBook[] = await (pipeline as any).loadActiveWorldBooks();
+    const uidsFor = (agentId: string) =>
+      getEntriesForAgent(agentId, books)
+        .filter((e) => e.enabled)
+        .map((e) => e.uid);
+    expect(uidsFor('story')).toEqual([1]);
+    expect(uidsFor('char_gen')).toEqual([2]);
+    expect(uidsFor('lore_select')).toEqual([]);
+  });
 
-    const configs = (pipeline as any).buildAgentConfigs({}, undefined, ['workshop:core-project']);
-    const byId = (agentId: string) =>
-      configs.find((config: any) => config.agentId === agentId).worldBookIds;
-
-    expect(byId('story')).toContain('workshop:core-project');
-    expect(byId('char_gen')).toContain('workshop:core-project');
-    expect(byId('request_dispatcher')).not.toContain('workshop:core-project');
+  it('buildAgentConfigs 不再带世界书清单', () => {
+    const pipeline = makePipeline();
+    const configs = (pipeline as any).buildAgentConfigs({});
+    for (const config of configs) expect(config).not.toHaveProperty('worldBookIds');
   });
 });
 
@@ -506,49 +553,6 @@ describe('buildAgentConfigs / buildEndpoints —— Delta 会话两个配置面�
 
     expect(invalidatePromptSessionSpy).toHaveBeenCalledTimes(1);
     expect(invalidatePromptSessionSpy).toHaveBeenCalledWith('save-T4');
-  });
-});
-
-describe('collectSelectedSystemCoreWorkshopBookIds', () => {
-  it('returns only selected, enabled workshop books whose project has the system/core tag', () => {
-    const entry = (projectId: string, uid: number, enabled = true) => ({
-      uid,
-      name: projectId,
-      content: projectId,
-      enabled,
-      key: [],
-      keysecondary: [],
-      selectiveLogic: 0,
-      order: 0,
-      position: 0,
-      extra: { workshop: { projectId } },
-    });
-    const books = [
-      {
-        id: 'workshop:core-project',
-        partition: 'creative_workshop',
-        entries: [entry('core-project', 100)],
-      },
-      {
-        id: 'workshop:regular-project',
-        partition: 'creative_workshop',
-        entries: [entry('regular-project', 101)],
-      },
-      {
-        id: 'workshop:disabled-core',
-        partition: 'creative_workshop',
-        entries: [entry('disabled-core', 102, false)],
-      },
-    ] as any;
-    const projects = [
-      { id: 'core-project', tags: ['System/Core'] },
-      { id: 'regular-project', tags: ['character'] },
-      { id: 'disabled-core', tags: ['system/core'] },
-    ] as any;
-
-    expect(collectSelectedSystemCoreWorkshopBookIds(books, projects)).toEqual([
-      'workshop:core-project',
-    ]);
   });
 });
 
@@ -1435,7 +1439,6 @@ describe('withImagePromptSystem', () => {
       timeout: 120000,
       userId: 'fp|save|image_prompt',
       promptTemplate: { fixedSystem: '', fixedExamples: '' },
-      worldBookIds: ['book_a'],
       systemPrompt: '老的那份',
       ...over,
     };
@@ -1454,7 +1457,6 @@ describe('withImagePromptSystem', () => {
     expect(image?.topP).toBe(0.9);
     expect(image?.frequencyPenalty).toBe(0.1);
     expect(image?.presencePenalty).toBe(0.2);
-    expect(image?.worldBookIds).toEqual(['book_a']);
     // 别人的 config 一个字节不动
     expect(out.find((c) => c.agentId === 'story')?.systemPrompt).toBe('story 的');
     // 原数组不被就地改写（调用方还拿着 chainData 那一份）

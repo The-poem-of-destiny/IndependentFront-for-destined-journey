@@ -44,6 +44,94 @@ import {
 } from '../../../src/core/persistence/session-backup';
 import type { SessionBackup } from '../../../src/core/persistence/session-backup';
 import { preCheckPlot } from '../../../src/core/plot/plot-engine';
+import {
+  filterBooksByEnabledEntries,
+  getEntriesForAgent,
+} from '../../../src/core/content/worldbook-loader';
+import { planSaveUidMigration } from '../../../src/core/content/content-pack-plan';
+
+describe('A09：拆分装包后导入旧档', () => {
+  beforeEach(async () => {
+    await initializeDatabase();
+    await clearAllData();
+  });
+  it('显式来源展开父 token，保留历史', async () => {
+    await seedSave();
+    const db = getDatabase();
+    const backup = await exportSessionSave(SAVE_ID);
+    backup.dependencies.packs = [];
+    backup.dependencies.worldBookEntries = [{ token: 'character:42' }];
+    backup.save.metadata.enabledWorldBookEntries = ['character:42'];
+    const part = (uid: number, index: number) => ({
+      ...makeEntry(uid, `part-${index}`),
+      extra: {
+        lore: {
+          audiences: ['story'],
+          key: `part-${index}`,
+          source: { parentKey: 'character#42', legacyUid: 42, part: index },
+        },
+      },
+    });
+    const split = makeWorldBook({
+      id: 'character',
+      partition: 'character',
+      builtIn: true,
+      entries: [part(102, 1), part(101, 0)],
+    });
+    await db.worldBooks.put(split);
+    expect(planSaveUidMigration([split], [], ['character:42'], []).expandedRewrite).toEqual({
+      'character:42': [101, 102],
+    });
+    expect((await checkSessionSaveDependencies(backup)).missingEntries).toEqual([]);
+    const original = JSON.stringify(backup);
+    const { saveId } = await importSessionSave(backup);
+    const save = (await db.saves.get(saveId))!;
+    expect(save.metadata.enabledWorldBookEntries).toEqual(['character:101', 'character:102']);
+    const messages = await db.messages.where('saveId').equals(saveId).toArray();
+    expect(messages.map((m) => m.content).sort()).toEqual(
+      backup.messages.map((m) => m.content).sort(),
+    );
+    const books = filterBooksByEnabledEntries([split], save.metadata.enabledWorldBookEntries!);
+    expect(
+      getEntriesForAgent('story', books)
+        .map((e) => e.uid)
+        .sort(),
+    ).toEqual([101, 102]);
+    expect(JSON.stringify(backup)).toBe(original);
+  });
+  it('已有效父/子 token 不误展开，缺来源不按显示名猜测', async () => {
+    await seedSave();
+    const db = getDatabase();
+    const backup = await exportSessionSave(SAVE_ID);
+    backup.dependencies.packs = [];
+    backup.dependencies.worldBookEntries = [{ token: 'character:42' }, { token: 'character:999' }];
+    backup.save.metadata.enabledWorldBookEntries = [
+      'character:42',
+      'character:101',
+      'character:999',
+    ];
+    const installed = makeWorldBook({
+      partition: 'character',
+      entries: [
+        makeEntry(42, 'Parent'),
+        {
+          ...makeEntry(101, 'Parent'),
+          extra: { lore: { source: { parentKey: 'character#42', legacyUid: 42, part: 0 } } },
+        },
+        makeEntry(102, 'Parent'),
+      ],
+    });
+    await db.worldBooks.put(installed);
+    expect((await checkSessionSaveDependencies(backup)).missingEntries.map((r) => r.token)).toEqual(
+      ['character:999'],
+    );
+    expect(planSaveUidMigration([installed], [], [], []).expandedRewrite).toBeUndefined();
+    const { saveId } = await importSessionSave(backup);
+    expect((await db.saves.get(saveId))!.metadata.enabledWorldBookEntries).toEqual(
+      backup.save.metadata.enabledWorldBookEntries,
+    );
+  });
+});
 
 // ========== Helpers ==========
 

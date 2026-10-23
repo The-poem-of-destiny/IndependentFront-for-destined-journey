@@ -155,7 +155,6 @@ function mockConfig(): AgentConfig {
     apiEndpointId: 'ep1',
     model: 'test-model',
     enabled: true,
-    worldBookIds: [],
     temperature: 0.7,
     maxTokens: 4096,
     topP: 1,

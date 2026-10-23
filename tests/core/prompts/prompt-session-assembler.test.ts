@@ -134,7 +134,6 @@ function makeCfg(agentId: string, overrides: Partial<AgentConfig> = {}): AgentCo
     timeout: 60000,
     userId: '',
     promptTemplate: { fixedSystem: '', fixedExamples: '' },
-    worldBookIds: [fixtureWorldBook.id],
     systemPrompt: '你是请求调度器。负责判断新老角色物品。',
     template: '{{SYS_PROMPT}}\n{{INVENTORY}}\n{{NARRATIVE}}\n{{USER_INPUT}}\n{{AGENT.STORY}}',
     ...overrides,

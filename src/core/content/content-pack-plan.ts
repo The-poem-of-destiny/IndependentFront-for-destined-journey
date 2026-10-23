@@ -398,6 +398,47 @@ function planOpaqueSection<T>(packPayload: T): PackSectionPlan<T> {
 // 存档 uid 迁移（D43 三段式）
 // ═══════════════════════════════════════════════════════════
 
+/** Explicit split provenance only; an installed token always keeps its current identity. */
+export function deriveSplitEntryTokenRewrites(
+  books: readonly WorldBook[],
+): Record<string, number[]> {
+  const available = new Set(
+    books.flatMap((book) => book.entries.map((entry) => `${book.partition}:${entry.uid}`)),
+  );
+  const expanded: Record<string, number[]> = {};
+  for (const book of books) {
+    const entries = [...book.entries].sort(
+      (a, b) => (a.extra?.lore?.source?.part ?? a.order) - (b.extra?.lore?.source?.part ?? b.order),
+    );
+    for (const entry of entries) {
+      const source = entry.extra?.lore?.source;
+      if (!source?.parentKey || !Number.isSafeInteger(source.legacyUid)) continue;
+      const token = `${book.partition}:${source.legacyUid}`;
+      if (available.has(token)) continue;
+      const list = (expanded[token] ??= []);
+      if (!list.includes(entry.uid)) list.push(entry.uid);
+    }
+  }
+  return expanded;
+}
+
+/** Import-time expansion shares the planner's explicit source mapping, never display names. */
+export function expandSplitEntryTokens(
+  books: readonly WorldBook[],
+  tokens: readonly string[],
+): string[] {
+  const rewrites = new Map(Object.entries(deriveSplitEntryTokenRewrites(books)));
+  return [
+    ...new Set(
+      tokens.flatMap((token) => {
+        const children = rewrites.get(token);
+        const partition = token.slice(0, token.lastIndexOf(':'));
+        return children ? children.map((uid) => `${partition}:${uid}`) : [token];
+      }),
+    ),
+  ];
+}
+
 /**
  * 产存档 uid 迁移步骤（D43 三段式）。
  *
@@ -425,6 +466,7 @@ export function planSaveUidMigration(
   notes: WorkshopNote[],
 ): PackSaveUidMigration {
   const rewrite: Record<string, number> = {};
+  const expandedRewrite = deriveSplitEntryTokenRewrites(packBooks);
   const needsSelectionSet = new Set<WorldBookPartition>();
   const sideEffectPartitions = new Set<string>();
 
@@ -506,7 +548,11 @@ export function planSaveUidMigration(
     needsSelectionSet.has(p),
   );
 
-  return { rewrite, needsSelectionPartitions };
+  return {
+    rewrite,
+    needsSelectionPartitions,
+    ...(Object.keys(expandedRewrite).length ? { expandedRewrite } : {}),
+  };
 }
 
 /**

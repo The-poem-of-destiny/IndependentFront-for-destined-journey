@@ -27,6 +27,9 @@
  */
 import type { AgentSettingsEntry } from './agent-settings';
 
+/** 已退役、但旧 map 里可能还有的字段（迁移照搬，退役函数再移走） */
+type RetiredAgentSettingsField = 'worldBookEnabled' | 'worldBookIds';
+
 /**
  * 旧键名 → `AgentSettingsEntry` 字段名。
  *
@@ -37,8 +40,11 @@ import type { AgentSettingsEntry } from './agent-settings';
  *
  * `agentPromptEdited` 同理不在这里 —— 它压根不是 per-Agent 的，是个全局布尔。
  */
-export const LEGACY_AGENT_MAPS: ReadonlyArray<readonly [string, keyof AgentSettingsEntry]> = [
+export const LEGACY_AGENT_MAPS: ReadonlyArray<
+  readonly [string, keyof AgentSettingsEntry | RetiredAgentSettingsField]
+> = [
   ['agentModels', 'model'],
+  // 世界书两张旧 map 照旧折进 `agents`，随后由 `retireAgentWorldBookOverrides` 移进暂存
   ['agentWorldbookEnabled', 'worldBookEnabled'],
   ['agentWorldbookIds', 'worldBookIds'],
   ['agentPrompts', 'systemPrompt'],
