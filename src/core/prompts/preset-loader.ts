@@ -47,15 +47,13 @@ export interface SetvarMap {
  * 并剥离所有 {{setvar}} 标签。
  */
 export function parseSetvars(content: string): { variables: SetvarMap; stripped: string } {
-  const variables: SetvarMap = {};
+  const variables: SetvarMap = Object.create(null);
   const stripped = content.replace(
     /\{\{setvar::([^:}]+)::([^}]*)\}\}/g,
     (_match, name: string, value: string) => {
       const key = name.trim();
-      // 有值的 setvar 写入变量表，后者覆盖；空值只是声明，不写入
-      if (value.length > 0) {
-        variables[key] = value;
-      }
+      // Empty assignment is a value and clears an earlier definition.
+      variables[key] = value;
       return '';
     },
   );
@@ -69,7 +67,7 @@ export function parseSetvars(content: string): { variables: SetvarMap; stripped:
 export function resolveGetvars(content: string, vars: SetvarMap): string {
   return content.replace(/\{\{getvar::([^}:]+)(?:::)?\}\}/g, (_match, name: string) => {
     const key = name.trim();
-    return vars[key] ?? '';
+    return Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : '';
   });
 }
 

@@ -35,7 +35,8 @@ import {
   filterActiveEntries,
   prerenderWorldBookEntries,
 } from '../content/worldbook-loader';
-import { isLoreEntryVisibleTo } from '../content/lore-routing';
+import { isLoreEntryVisibleTo, loreEntryKey } from '../content/lore-routing';
+import { buildLoreDefinitions } from '../content/lore-definitions';
 import { getPreset, assemblePresetContent } from './preset-loader';
 import { resolveTemplateWithGlobals } from './template-resolver';
 import type { EjsCapabilityInput } from '../ejs/ejs-capabilities';
@@ -277,6 +278,8 @@ function buildCapabilityInput(
         const hit = visible.find(
           (e) => e.name === name && (bookName === undefined || bookOf.get(e)?.name === bookName),
         );
+        if (hit && ctx.loreReadContext && hit.extra?.lore?.evaluation === 'onCreate')
+          return ctx.fixedLore?.[loreEntryKey(bookOf.get(hit)!, hit)]?.text ?? null;
         return hit ? (hit.content ?? '') : null;
       },
       list: (bookName) => {
@@ -315,6 +318,9 @@ export function buildEjsPassContext(
   return {
     stats: deepCloneVars(ctx.statData ?? {}),
     vars: draft,
+    stDefinitions: worldBooks?.length
+      ? buildLoreDefinitions(agentId, worldBooks, loreRecentText(ctx), ctx.loreReadContext).values
+      : {},
     historyText: buildEjsHistoryText(agentId, ctx, config),
     // 🔴 少了这一行，§3.5-§3.12 的八个 namespace 在生产里全取默认空值：
     // `char.all()` 空数组、`quest.has()` 恒 false、`lore.get()` 恒 null、`ui.notify` 无出口。
@@ -848,6 +854,13 @@ export async function buildAgentMessagesAsync(
       getEntriesForAgent(agentId, worldBooks, loreRecentText(ctx), ctx.loreReadContext),
     );
     const rendered = await prerenderWorldBookEntries(activeEntries, ejsPass);
+    ejsPass.stDefinitions = buildLoreDefinitions(
+      agentId,
+      worldBooks,
+      loreRecentText(ctx),
+      ctx.loreReadContext,
+      rendered.entryTexts,
+    ).values;
     ejsPass.loreRender = {
       agentId,
       staticText: rendered.staticText,

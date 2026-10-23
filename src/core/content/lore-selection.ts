@@ -90,6 +90,7 @@ export async function selectStoryLore(
     const activation = meta?.activation;
     const locationMatch = locationPathMatches(regionPath, activation?.locations);
     const match =
+      !!activation?.readWhen ||
       !activation ||
       (!activation.locations?.length &&
         !activation.characters?.length &&

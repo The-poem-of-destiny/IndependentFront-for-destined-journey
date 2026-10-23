@@ -44,13 +44,9 @@ import type {
 } from '../types/types';
 import { prerenderWorldBookEntries } from '../content/worldbook-loader';
 import { buildEjsPassContext, getAgentTemplate, reportEjsFallback } from './agent-templates';
-import {
-  getPreset,
-  preprocessEntry,
-  preprocessPresetEntryContents,
-  parseSetvars,
-} from './preset-loader';
+import { getPreset, preprocessEntry, preprocessPresetEntryContents } from './preset-loader';
 import { createLoreReadContext } from '../content/lore-activation';
+import { buildLoreDefinitions, missingLoreDefinitions } from '../content/lore-definitions';
 import { resolveTemplateWithGlobals } from './template-resolver';
 import {
   ensureStoryZonePlaceholders,
@@ -175,6 +171,13 @@ export async function buildStoryContextV2Messages(
     { ...ctx, agentConfig: config },
     input.selectLore,
   );
+  for (const r of [...selection.zones[1], ...selection.zones[3], ...selection.zones[5]]) {
+    if (
+      r.entry.extra?.lore?.evaluation === 'onCreate' &&
+      !Object.prototype.hasOwnProperty.call(ctx.fixedLore ?? {}, r.key)
+    )
+      throw new Error(`Missing opening lore snapshot: ${r.key}`);
+  }
   // Blank lore memo while estimating non-lore blocks: no entry body may execute before pruning.
   ejsPass.loreRender = {
     agentId: STORY_AGENT_ID,
@@ -260,7 +263,17 @@ export async function buildStoryContextV2Messages(
     const keys = () => new Set([...selection.mandatoryKeys, ...groups.flat()]);
     const estimate = () =>
       nonLoreChars() +
-      all.filter((r) => keys().has(r.key)).reduce((sum, r) => sum + r.entry.content.length + 2, 0);
+      all
+        .filter((r) => keys().has(r.key))
+        .reduce(
+          (sum, r) =>
+            sum +
+            (r.entry.extra?.lore?.evaluation === 'onCreate'
+              ? ctx.fixedLore![r.key].text.length
+              : r.entry.content.length) +
+            2,
+          0,
+        );
     // Drop whole optional roots with their dependency closure; shared/mandatory dependencies survive.
     while (groups.length && estimate() > input.budgetChars) groups.pop();
     if (estimate() > input.budgetChars && tplCtx.agentOutputs.get('memory_recall')) {
@@ -303,7 +316,10 @@ export async function buildStoryContextV2Messages(
   input.onLore?.(selection.diagnostics);
   const activeRouted = [...selection.zones[1], ...selection.zones[3], ...selection.zones[5]];
   const activeEntries = activeRouted.map((r) => r.entry);
-  const rendered = await prerenderWorldBookEntries(activeEntries, ejsPass);
+  const rendered = await prerenderWorldBookEntries(
+    activeEntries.filter((entry) => entry.extra?.lore?.evaluation !== 'onCreate'),
+    ejsPass,
+  );
   ejsPass.loreRender = {
     agentId: STORY_AGENT_ID,
     staticText: rendered.staticText,
@@ -312,14 +328,24 @@ export async function buildStoryContextV2Messages(
   };
   if (rendered.fallbackEntries.length)
     reportEjsFallback(STORY_AGENT_ID, ctx, rendered.fallbackEntries, worldBooks);
-  const values: Record<string, string> = {};
-  for (const body of rendered.entryTexts.values())
-    Object.assign(values, parseSetvars(body).variables);
+  const definitions = buildLoreDefinitions(
+    STORY_AGENT_ID,
+    worldBooks,
+    ctx.loreReadContext!.recentText,
+    ctx.loreReadContext,
+    rendered.entryTexts,
+  );
+  const missingDefinitions: Record<string, string[]> = {};
   const loreTextByEntry = new Map(
-    activeRouted.map(
-      ({ entry }) =>
-        [entry, preprocessEntry(rendered.entryTexts.get(entry) ?? '', values)] as const,
-    ),
+    activeRouted.map((routed) => {
+      const entry = routed.entry;
+      if (entry.extra?.lore?.evaluation === 'onCreate')
+        return [entry, ctx.fixedLore![routed.key].text] as const;
+      const text = rendered.entryTexts.get(entry) ?? '';
+      const missing = missingLoreDefinitions(text, definitions.values);
+      if (missing.length) missingDefinitions[routed.key] = missing;
+      return [entry, preprocessEntry(text, definitions.values)] as const;
+    }),
   );
   const zoneLore = (zone: 1 | 3 | 5) =>
     selection.zones[zone]
@@ -439,6 +465,7 @@ export async function buildStoryContextV2Messages(
       ...(input.outputReservedTokens !== undefined
         ? { outputReservedTokens: input.outputReservedTokens }
         : {}),
+      loreDefinitions: { deferredKeys: definitions.deferredKeys, missing: missingDefinitions },
       budgetCategories,
       budgetRemovals,
       budgetDroppedLoreKeys,

@@ -1,6 +1,7 @@
 /** Install-time validation for explicitly revisioned routing packs. Legacy-pack compatibility mapping was removed. */
 import type { WorldBook } from '../types/types';
 import { collectLoreRoutingIssues, loreEntryKey } from './lore-routing';
+import { validLoreReadWhen, validLoreDefinitions } from './lore-protocol-conditions';
 const AGENTS = [
   'story',
   'lore_select',
@@ -43,6 +44,8 @@ export function validateLoreProtocol(books: unknown): string[] {
           'dependsOn',
           'required',
           'source',
+          'definitions',
+          'evaluation',
         ]
       : ['audiences', 'section', 'category', 'namespace'];
     for (const key of Object.keys(value))
@@ -68,11 +71,26 @@ export function validateLoreProtocol(books: unknown): string[] {
       errors.push(`${scope}: invalid dependsOn`);
     if (value.required !== undefined && typeof value.required !== 'boolean')
       errors.push(`${scope}: invalid required`);
+    if (value.definitions !== undefined && !validLoreDefinitions(value.definitions))
+      errors.push(`${scope}: invalid definitions (literal ST values only)`);
+    if (
+      value.evaluation !== undefined &&
+      (typeof value.evaluation !== 'string' || !['perTurn', 'onCreate'].includes(value.evaluation))
+    )
+      errors.push(`${scope}: invalid evaluation`);
+    if (
+      value.evaluation === 'onCreate' &&
+      (value.section !== 'fixed' ||
+        (object(value.activation) && value.activation.readWhen !== undefined))
+    )
+      errors.push(`${scope}: onCreate requires fixed section without readWhen`);
     if (value.activation !== undefined) {
       if (!object(value.activation)) errors.push(`${scope}: invalid activation`);
       else
         for (const [key, val] of Object.entries(value.activation)) {
-          if (
+          if (key === 'readWhen') {
+            if (!validLoreReadWhen(val)) errors.push(`${scope}: invalid activation.readWhen`);
+          } else if (
             !['locations', 'characters', 'keywords', 'excludeKeywords'].includes(key) ||
             !strings(val)
           )
@@ -107,6 +125,13 @@ export function validateLoreProtocol(books: unknown): string[] {
       if (uids.has(Number(e.uid))) errors.push(`${b.id}: duplicate uid ${e.uid}`);
       uids.add(Number(e.uid));
       meta(object(e.extra) ? e.extra.lore : undefined, `${b.id}#${e.uid}`, true);
+      if (
+        object(e.extra) &&
+        object(e.extra.lore) &&
+        e.extra.lore.evaluation === 'onCreate' &&
+        (typeof e.content !== 'string' || /<%|\{\{random/.test(e.content))
+      )
+        errors.push(`${b.id}#${e.uid}: onCreate requires literal/ST content`);
     }
   }
   if (errors.length) return errors;

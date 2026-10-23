@@ -25,6 +25,7 @@ import type {
   AgentContext,
   AgentConfig,
   WorldBook,
+  WorldBookEntry,
   PlaceholderResolver,
   RecentCombatInfo,
 } from '../types/types';
@@ -35,6 +36,7 @@ import {
   renderWorldBookEntries,
 } from '../content/worldbook-loader';
 import { parseSetvars, resolveGetvars, resolveRandoms } from './preset-loader';
+import { buildLoreDefinitions } from '../content/lore-definitions';
 import { buildZoneContext, filterZoneContent, getAgentZoneVisibility } from './context-visibility';
 import { defaultHistoryLayers } from './agent-templates';
 import { parseStoryTurnSummaryOutput } from '../memory/story-turn-summary';
@@ -186,9 +188,8 @@ function extractOpeningSkillDeclaration(opening: string): string {
  * - 两者都没有 → 静态区 + 动态区顺序连拼（默认行为，普通用户无感）
  * - `limit=N` → 三种写法通用，对最终文本截断
  *
- * 宏链（parseSetvars → resolveGetvars → resolveRandoms）位置**不动**，仍在 EJS 之后，
- * 对**本次返回的那段文本**独立跑。⚠️ 拆开两区时两区各自成一次宏作用域——
- * 静态区定义的 `{{setvar}}` 不再对动态区的 `{{getvar}}` 可见，这是拆分的固有代价。
+ * 宏解析仍在 EJS 之后，但静态 / 动态占位符共享本 pass 的定义环境；
+ * 字面定义的供值不依赖正文分段，条件定义只从已求值正文收集。
  *
  * 🔴 **pass 级 memo（幂等保障）**：拆分写法让本函数在同一 pass 被调多次，
  * 而 EJS 条目不保证幂等（计数器式 `setMessageVar` 在语料里合法）——重复求值 = 写翻倍落库。
@@ -220,6 +221,7 @@ function resolveLoreBookSection(
   const memo = ctx.ejsPass?.loreRender;
   let staticText: string;
   let dynamicText: string;
+  let renderedTexts: ReadonlyMap<WorldBookEntry, string> | undefined;
   if (memo && memo.agentId === agentId) {
     // 本 pass 已求值过 —— 直接复用，绝不二次执行 EJS（回退告警也已在首次打过）
     staticText = memo.staticText;
@@ -232,6 +234,15 @@ function resolveLoreBookSection(
     // 当前后端不是 `LegacyBackend`（= 生产的 QuickJS / fail-closed）时它**不在宿主 realm 求值**，
     // 按 D8 原文注入并记回退。故这里不会成为绕过隔离的后门；测试默认 Legacy 后端下行为不变。
     const rendered = renderWorldBookEntries(activeEntries, ejsCtx);
+    renderedTexts = rendered.entryTexts;
+    if (ctx.ejsPass)
+      ctx.ejsPass.stDefinitions = buildLoreDefinitions(
+        agentId,
+        _worldBooks,
+        loreRecentText(ctx),
+        ctx.loreReadContext,
+        rendered.entryTexts,
+      ).values;
     staticText = rendered.staticText;
     dynamicText = rendered.dynamicText;
     if (ctx.ejsPass) {
@@ -270,10 +281,17 @@ function resolveLoreBookSection(
   else if (section === 'dynamic') formatted = dynamicText;
   else formatted = [staticText, dynamicText].filter(Boolean).join('\n\n');
 
-  // 真机修(2026-07-18): 原 ST 角色卡世界书正文自带 {{setvar/getvar/random}} 宏（MVU 机制遗留）
-  // → 注入前收集 setvar 变量表并剥离定义、替换 getvar 引用、解析 random——
-  //   世界书内自洽的 setvar/getvar 对仍正常工作，孤立宏不再作为噪音喂给 AI（实测 story 系统消息含 25+36 处残留）
-  const { variables: wbVars, stripped } = parseSetvars(formatted);
+  // One definition scope for both static and dynamic placeholders in this pass.
+  const wbVars =
+    ctx.ejsPass?.stDefinitions ??
+    buildLoreDefinitions(
+      agentId,
+      _worldBooks,
+      loreRecentText(ctx),
+      ctx.loreReadContext,
+      renderedTexts,
+    ).values;
+  const { stripped } = parseSetvars(formatted);
   formatted = resolveRandoms(resolveGetvars(stripped, wbVars));
   if (params?.limit) {
     const limit = parseInt(params.limit, 10);

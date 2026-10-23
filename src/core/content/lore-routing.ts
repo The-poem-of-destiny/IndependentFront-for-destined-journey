@@ -11,6 +11,7 @@
  * 纯函数、无 I/O；不修改入参。
  */
 import type { LoreSection, LoreReadContext, WorldBook, WorldBookEntry } from '../types/types';
+import { passesLoreReadWhen } from './lore-activation';
 
 type BookLike = Pick<WorldBook, 'id' | 'lore'> & Partial<Pick<WorldBook, 'name' | 'partition'>>;
 type EntryLike = Pick<WorldBookEntry, 'uid'> & Partial<Pick<WorldBookEntry, 'extra' | 'name'>>;
@@ -94,6 +95,7 @@ export function resolveLoreDependenciesForAgent(
       )
     )
       return 'excluded';
+    if (!passesLoreReadWhen(r.entry.extra?.lore?.activation, readContext)) return 'activation-miss';
     return undefined;
   };
   const closures = new Map<string, readonly RoutedLoreEntry[]>();

@@ -1905,8 +1905,15 @@ export const useCreateStore = defineStore('create', () => {
           ...(confirmed ? { confirmed: true } : {}),
         } as PlotOutline)
       : undefined;
+    let openingWorldBooks: WorldBook[] = [];
+    if (save.metadata.storyContextV2) {
+      const wb = useWorldBookStore();
+      await wb.init();
+      openingWorldBooks = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
+    }
     const input = {
       character: charState,
+      worldBooks: openingWorldBooks,
       save,
       era: era.value,
       experienceMode: experienceMode.value === 'easy' ? ('easy' as const) : ('normal' as const),

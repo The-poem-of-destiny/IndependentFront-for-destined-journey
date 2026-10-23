@@ -93,6 +93,21 @@ export interface WorldBookEntry {
  */
 export type LoreSection = 'fixed' | 'region' | 'turn';
 
+/** Annual dates use the engine calendar (12 months of 30 days). */
+export interface LoreAnnualWindow {
+  start: { month: number; day: number };
+  end: { month: number; day: number };
+  beforeDays: number;
+  afterDays: number;
+}
+
+/** Conditions within a branch are AND; branches are OR. No scripts or recursive expressions. */
+export interface LoreReadBranch {
+  locations?: string[];
+  keywords?: string[];
+  annualWindow?: LoreAnnualWindow;
+}
+
 /** Explicit v2 read policy; absent in legacy assemblies. */
 export interface LoreReadContext {
   location: string;
@@ -107,7 +122,15 @@ export interface LoreActivation {
   characters?: string[];
   keywords?: string[];
   excludeKeywords?: string[];
+  readWhen?: { any: LoreReadBranch[] };
 }
+
+export interface FixedLoreRecord {
+  text: string;
+  sourceHash: string;
+  definitionSources: Record<string, string>;
+}
+export type FixedLoreSnapshot = Record<string, FixedLoreRecord>;
 
 /** 条目级路由元数据。`audiences`/`section` 逐条目声明；书级同名声明仅旧包兼容。 */
 export interface LoreEntryMeta {
@@ -125,6 +148,10 @@ export interface LoreEntryMeta {
   /** 依赖的条目键（最小背景）；依赖**不授予**读取权限 */
   dependsOn?: string[];
   activation?: LoreActivation;
+  /** Literal definition projection for mixed EJS entries; never executes an unselected body. */
+  definitions?: Record<string, string>;
+  /** Placement and evaluation lifetime are independent; onCreate is valid only for fixed. */
+  evaluation?: 'perTurn' | 'onCreate';
   /** 稳定渲染顺序与候选预算的优先级（越大越先） */
   priority?: number;
   /** 拆分来源：父条目键、在父条目中的序号、原生产 uid */
@@ -1588,6 +1615,8 @@ export interface SaveSlot {
      *    判定一律走 `story/story-context-mode.ts` 的 `isStoryContextV2Save`。
      */
     storyContextV2?: StoryContextV2SaveMarker;
+    /** Opening-only lore results; travels with the save, outside rollbackable variables. */
+    fixedLore?: FixedLoreSnapshot;
   };
 }
 
@@ -1924,6 +1953,8 @@ export interface AgentContext {
   loreReadContext?: LoreReadContext;
   /** 世界书检索使用的历史消息数；缺省 6，0 表示仅使用当前输入。 */
   loreHistoryMessages?: number;
+  /** Immutable opening results from SaveSlot metadata; never recomputed during assembly. */
+  fixedLore?: FixedLoreSnapshot;
 
   // --- Phase 10: Plot mode ---
   /** 剧情模式配置（用于 orchestrator 决定是否跳过 plot_* agent） */
@@ -2104,6 +2135,7 @@ export interface AgentContext {
     stats: Record<string, any>;
     vars: Record<string, any>;
     historyText: string;
+    stDefinitions?: Readonly<Record<string, string>>;
     /**
      * 宿主能力面输入（能力面 §3.5-§3.12：chat/char/world/quest/lore/local/ui/engine）。
      *
@@ -2289,6 +2321,7 @@ export interface StoryContextBudgetRemoval extends StoryContextBudgetItem {
 /** 分区组装诊断（`buildStoryContextV2Messages` 产出，计划 §12.3）。 */
 export interface StoryContextV2Diagnostics {
   windowTurns: number;
+  loreDefinitions?: { deferredKeys: string[]; missing: Record<string, string[]> };
   /** 进入第 2 区长期总览的有效归档 id（历史年表顺序） */
   archiveIds: string[];
   /** 进入第 4 区原文的回合 key */

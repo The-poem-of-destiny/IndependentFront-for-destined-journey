@@ -52,6 +52,7 @@ import {
   filterActiveEntries,
   prerenderWorldBookEntries,
 } from '../content/worldbook-loader';
+import { buildLoreDefinitions } from '../content/lore-definitions';
 import { getPreset, assemblePresetContent } from './preset-loader';
 import { getDefaultTemplate } from './placeholder-registry';
 import { findNextPlaceholder, resolveTemplateWithGlobals } from './template-resolver';
@@ -511,6 +512,13 @@ async function renderDynamicLore(
       getEntriesForAgent(agentId, worldBooks, loreRecentText(ctx)),
     );
     const rendered = await prerenderWorldBookEntries(activeEntries, ejsPass);
+    ejsPass.stDefinitions = buildLoreDefinitions(
+      agentId,
+      worldBooks,
+      loreRecentText(ctx),
+      ctx.loreReadContext,
+      rendered.entryTexts,
+    ).values;
     ejsPass.loreRender = {
       agentId,
       staticText: rendered.staticText,

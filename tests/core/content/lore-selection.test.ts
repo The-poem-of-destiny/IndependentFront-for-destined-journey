@@ -46,7 +46,7 @@ function context(input = '交易'): AgentContext {
 describe('Story lore selection', () => {
   afterEach(resetMapRuntime);
 
-  it('current place ancestry supplies region; same province keeps identical region bytes', async () => {
+  it('current place ancestry supplies region and read gates; same province keeps identical region bytes', async () => {
     installMapPack({
       ...EMPTY_MAP_PACK,
       countries: [
@@ -74,6 +74,14 @@ describe('Story lore selection', () => {
     const b = book([
       ['vale', { section: 'region', activation: { locations: ['Vale'] } }],
       ['ridge', { section: 'region', activation: { locations: ['Ridge'] } }],
+      [
+        'gated',
+        {
+          section: 'turn',
+          required: true,
+          activation: { readWhen: { any: [{ locations: ['Vale'] }] } },
+        },
+      ],
     ]);
     const ctx = context('讨论 Ridge');
     ctx.characters[0].location = 'Realm-TownA-Inn';
@@ -81,6 +89,7 @@ describe('Story lore selection', () => {
     const first = await selectStoryLore([b], ctx, selector);
     expect(ctx.characters[0].location).toBe('Realm-TownA-Inn');
     expect(first.zones[3].map((r) => r.key)).toEqual(['vale']);
+    expect(first.zones[5].map((r) => r.key)).toContain('gated');
     ctx.characters[0].location = 'Realm-TownB-Gate';
     const same = await selectStoryLore([b], ctx, selector);
     expect(same.diagnostics.regionSnapshotKey).toBe(first.diagnostics.regionSnapshotKey);
@@ -88,6 +97,7 @@ describe('Story lore selection', () => {
     ctx.characters[0].location = 'Realm-TownC';
     const moved = await selectStoryLore([b], ctx, selector);
     expect(moved.zones[3].map((r) => r.key)).toEqual(['ridge']);
+    expect(moved.zones[5].map((r) => r.key)).not.toContain('gated');
     expect(moved.diagnostics.regionSnapshotKey).not.toBe(first.diagnostics.regionSnapshotKey);
     installMapPack({ ...EMPTY_MAP_PACK });
     expect((await selectStoryLore([b], ctx, selector)).zones[3]).toEqual([]);
@@ -97,7 +107,7 @@ describe('Story lore selection', () => {
     [12, 10, true],
     [0, 0, false],
   ])(
-    'history limit %s drives keyword selection and selector history together',
+    'history limit %s drives keyword gates and selector history together',
     async (limit, size, hit) => {
       const ctx = context('current input');
       ctx.loreHistoryMessages = limit;
@@ -110,6 +120,14 @@ describe('Story lore selection', () => {
       ctx.history.push({ id: 'system', role: 'system', content: 'system secret', timestamp: 10 });
       const b = book([
         ['candidate', { section: 'turn', activation: { keywords: ['old harbor'] } }],
+        [
+          'gated',
+          {
+            section: 'turn',
+            required: true,
+            activation: { readWhen: { any: [{ keywords: ['old harbor'] }] } },
+          },
+        ],
       ]);
       const selector = vi.fn<LoreSelector>(async () => JSON.stringify({ keep: ['C1'], extra: [] }));
       const result = await selectStoryLore([b], ctx, selector);
@@ -118,7 +136,7 @@ describe('Story lore selection', () => {
       expect(payload.recent).toHaveLength(size);
       expect(payload.recent).not.toContain('system secret');
       expect(result.diagnostics.candidateKeys).toEqual(hit ? ['candidate'] : []);
-      expect(result.zones[5].map((r) => r.key)).toEqual(hit ? ['candidate'] : []);
+      expect(result.zones[5].map((r) => r.key)).toEqual(hit ? ['candidate', 'gated'] : []);
       expect(createLoreReadContext(ctx).recentText.includes('old harbor')).toBe(hit);
       expect(loreRecentText(ctx)).toContain('current input');
     },
