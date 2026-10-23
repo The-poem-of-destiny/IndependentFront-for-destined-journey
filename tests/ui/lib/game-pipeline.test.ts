@@ -6,9 +6,11 @@ import {
   withImagePromptSystem,
 } from '../../../src/ui/lib/game-pipeline';
 import type { AgentConfig, ApiEndpoint, WorldBook } from '@engine/types/types';
-import { getEntriesForAgent } from '@engine/content/worldbook-loader';
 import { patchAgentSettings } from '../../../src/ui/stores/agent-settings';
 import type { AgentResult } from '@engine/types/types';
+import { getEntriesForAgent } from '@engine/content/worldbook-loader';
+import { collectCompleteStoryTurns } from '@engine/memory/memory-context';
+import { storyTurnSource } from '@engine/memory/story-memory-source';
 
 vi.mock('@engine/plot/plot-engine', () => ({
   preCheckPlot: vi.fn(async () => ({
@@ -52,6 +54,13 @@ vi.mock('@engine/persistence/database', () => ({
   savePlotEvents: vi.fn(async () => {}),
   saveMemory: vi.fn(async () => {}),
   getPresets: vi.fn(async () => []),
+  getStoryTurnSummaries: vi.fn(async () => []),
+  getStoryArchives: vi.fn(async () => []),
+  commitStoryTurnMemory: vi.fn(async () => true),
+  getStoryArchiveRetries: vi.fn(async () => []),
+  queueStoryArchiveRetries: vi.fn(async () => true),
+  commitStoryArchiveRetry: vi.fn(async () => true),
+  getSaveProfile: vi.fn(async () => undefined),
 }));
 
 // 工坊 P2 (D5): EJS 差量落库走 createStateManager(...).commitChatState —— 拦下来验载荷
@@ -97,6 +106,14 @@ vi.mock('@engine/combat/index', () => ({
 vi.mock('@engine/image/image-prompt-agent', () => ({
   callImagePromptAgent: callImagePromptAgentMock,
 }));
+
+// Story v2 落库前向量化：只替换发请求的那一步，其余（向量核 / 拼接规则）用真实实现
+const computeEmbeddingWithMetaMock = vi.hoisted(() => vi.fn());
+vi.mock('@engine/memory/memory-store', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('@engine/memory/memory-store')>();
+  computeEmbeddingWithMetaMock.mockImplementation(orig.computeEmbeddingWithMeta);
+  return { ...orig, computeEmbeddingWithMeta: computeEmbeddingWithMetaMock };
+});
 
 vi.mock('@engine/memory/memory-summarizer', () => ({
   summarizeAndSave: summarizeAndSaveMock,
@@ -172,6 +189,11 @@ function makeGameStore(overrides: Record<string, any> = {}) {
       turn: 1,
     })),
     addSystemMessage: vi.fn(),
+    setStoryTurnStatus: vi.fn(async (_source, _status, _key, isCurrent, onCommitStart) => {
+      if (!isCurrent()) return false;
+      onCommitStart?.();
+      return true;
+    }),
     setPendingOptions: vi.fn(),
     clearAgentLog: vi.fn(),
     startAgentLogTurn: vi.fn(),
@@ -677,6 +699,15 @@ describe('extractStoryOptions', () => {
 });
 
 describe('buildContext — plotSettings (步5)', () => {
+  it('captures the current worldbook history setting for each turn', () => {
+    const pipeline = makePipeline({}, { loreHistoryMessages: 12 });
+    const first = (pipeline as any).buildContext('first');
+    expect(first.loreHistoryMessages).toBe(12);
+    (pipeline as any).settings.settings.loreHistoryMessages = 0;
+    expect((pipeline as any).buildContext('next').loreHistoryMessages).toBe(0);
+    expect(first.loreHistoryMessages).toBe(12);
+  });
+
   it('当前输入只进入 userInput，不混入既有历史', () => {
     const pipeline = makePipeline({
       messages: [
@@ -799,7 +830,11 @@ describe('handleAgentResult — story 正文投影', () => {
     await (pipeline as any).handleAgentResult(makeResult('story', raw));
 
     expect(setPendingOptions).toHaveBeenCalledWith(['前进', '等待']);
-    expect(addMessage).toHaveBeenCalledWith('夜色渐深。', 'assistant');
+    expect(addMessage).toHaveBeenCalledWith(
+      '夜色渐深。',
+      'assistant',
+      expect.objectContaining({ storyTurnStatus: 'pending' }),
+    );
   });
 
   it('rejects a nonblank envelope with no player-visible narrative', async () => {
@@ -852,7 +887,11 @@ describe('COR-02：存档归属闸', () => {
 
     await (pipeline as any).handleAgentResult(makeResult('story', '<maintext>正文</maintext>'));
 
-    expect(addMessage).toHaveBeenCalledWith('正文', 'assistant');
+    expect(addMessage).toHaveBeenCalledWith(
+      '正文',
+      'assistant',
+      expect.objectContaining({ storyTurnStatus: 'pending' }),
+    );
     expect((pipeline as any).lastStoryMessage).toMatchObject({ id: 'm1' });
   });
 
@@ -2082,6 +2121,7 @@ describe('T16 combat 玩家输入桥时序 + pre-combat 快照', () => {
     expect(gameStore.addMessage).toHaveBeenCalledWith(
       '【战斗摘要】玩家改过的战斗总结',
       'assistant',
+      { diagnostic: true },
     );
     // B：最近已结算战斗被记录（{{RECENT_COMBAT}} 数据源），含名单与回合数
     expect((pipeline as any).buildContext('输入').recentCombat).toEqual({
@@ -2729,4 +2769,489 @@ it('Stop then same-save remount cannot start a run before old cleanup drains', a
   gate.resolve();
   await Promise.all([running, next]);
   expect(admittedBeforeCleanup).toBe(0);
+});
+
+// ═══════════════════════════════════════════════════════════
+// Story 上下文新模式（v2）：模式准入与每回合摘要落库（计划 §10.2 / §11.3）
+// ═══════════════════════════════════════════════════════════
+
+describe('Story 上下文新模式（v2）', () => {
+  const v2Save = {
+    id: 'save-test',
+    metadata: { totalTurns: 1, storyContextV2: { schema: 1, markedAt: 1 } },
+  };
+
+  function v2Messages() {
+    return [
+      { id: 'u1', role: 'user', content: '推门', timestamp: 1, turn: 1 },
+      { id: 'sys1', role: 'system', content: '卡片', timestamp: 2, turn: 1 },
+      { id: 'a1', role: 'assistant', content: '门开了。', timestamp: 3, turn: 1 },
+    ];
+  }
+
+  it('测试档 + 开关关闭：run() 在任何写入之前拒绝并提示', async () => {
+    toastSpy.mockClear();
+    const gameStore = makeGameStore({ activeSave: v2Save });
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore({ storyContextV2Enabled: false }),
+      saveId: 'save-test',
+    });
+    expect(await pipeline.run('继续')).toBe(false);
+    expect(gameStore.addMessage).not.toHaveBeenCalled();
+    expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('测试存档'), 'warning', 6000);
+  });
+
+  it('memory_summary 输出只解析成草稿，不交给旧 summarizeAndSave；接纳后按回合消息 id 落库', async () => {
+    summarizeAndSaveMock.mockClear();
+    const db = await import('@engine/persistence/database');
+    vi.mocked(db.commitStoryTurnMemory).mockClear();
+    const gameStore = makeGameStore({ activeSave: v2Save, messages: v2Messages() });
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore({ storyContextV2Enabled: true }),
+      saveId: 'save-test',
+    }) as any;
+    pipeline.runMode = 'v2';
+    pipeline.lastStoryMessage = { id: 'a1', turn: 1, content: '门开了。' };
+
+    await pipeline.handleAgentResult(
+      makeResult(
+        'memory_summary',
+        '<json>{"segments":[{"event":"进城","content":"推门进了酒馆。"}]}</json>',
+      ),
+    );
+    expect(summarizeAndSaveMock).not.toHaveBeenCalled();
+
+    await pipeline.commitStoryTurnSummary();
+    expect(db.commitStoryTurnMemory).toHaveBeenCalledWith(
+      'save-test',
+      'u1',
+      [
+        expect.objectContaining({
+          saveId: 'save-test',
+          sourceTurnKey: 'u1',
+          sourceMessageIds: ['u1', 'a1'],
+          order: 0,
+          content: '推门进了酒馆。',
+          eventName: '进城',
+          sourceFingerprint: expect.stringMatching(/^story-source-v1:/),
+        }),
+      ],
+      [],
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+  });
+
+  it('归档判断：本轮开始的未结事件 + 正文逐字依据 → 归档覆盖该事件全部片段（Q13 / T46 / T57）', async () => {
+    const db = await import('@engine/persistence/database');
+    vi.mocked(db.commitStoryTurnMemory).mockClear();
+    const earlier = {
+      id: 'seg-old',
+      sourceTurnKey: 'u0',
+      sourceMessageIds: ['u0', 'a0'],
+      order: 0,
+      content: '接下送信委托',
+      eventName: '送信',
+      saveId: 'save-test',
+      createdAt: 1,
+    };
+    vi.mocked(db.getStoryTurnSummaries).mockResolvedValueOnce([earlier] as any);
+    const history = [
+      { id: 'u0', role: 'user', content: '接委托', timestamp: 0, turn: 0 },
+      { id: 'a0', role: 'assistant', content: '你接下了送信的委托。', timestamp: 0, turn: 0 },
+    ];
+    const gameStore = makeGameStore({
+      activeSave: v2Save,
+      messages: [
+        ...history,
+        { id: 'u1', role: 'user', content: '交信', timestamp: 1, turn: 1 },
+        {
+          id: 'a1',
+          role: 'assistant',
+          content: '老人接过信，连声道谢。委托就此完成。',
+          timestamp: 2,
+          turn: 1,
+        },
+      ],
+    });
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore({ storyContextV2Enabled: true }),
+      saveId: 'save-test',
+    }) as any;
+    pipeline.runMode = 'v2';
+    Object.assign(earlier, storyTurnSource(collectCompleteStoryTurns(history as any)[0]));
+    const context: any = { history };
+    await pipeline.prepareStoryContextV2({}, context);
+    expect(context.storyOpenEvents).toContain('【送信】');
+    expect(context.storyOpenEvents).toContain('接下送信委托');
+
+    pipeline.lastStoryMessage = { id: 'a1', turn: 1, content: '' };
+    await pipeline.handleAgentResult(
+      makeResult(
+        'memory_summary',
+        JSON.stringify({
+          archives: [
+            {
+              event: '送信',
+              outcome: 'completed',
+              evidence: '委托就此完成。',
+              overview: '把信送到了老人手里',
+              detail: { promises: '' },
+            },
+            { event: '虚构事件', outcome: 'failed', evidence: '不存在', overview: 'x' },
+          ],
+          segments: [{ event: '送信', content: '把信交给老人。' }],
+        }),
+      ),
+    );
+    await pipeline.commitStoryTurnSummary();
+
+    const [, turnKey, summaries, archives] = vi.mocked(db.commitStoryTurnMemory).mock
+      .calls[0] as any[];
+    expect(turnKey).toBe('u1');
+    expect(archives).toHaveLength(1);
+    expect(archives[0]).toMatchObject({
+      eventName: '送信',
+      outcome: 'completed',
+      sourceTurnKey: 'u1',
+      sourceMessageIds: ['u1', 'a1'],
+    });
+    expect(archives[0].coveredSegmentIds).toEqual(['seg-old', summaries[0].id]);
+    // 没有正文依据的判断被拦下并提示
+    expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('虚构事件'), 'warning', 6000);
+  });
+
+  it('归档的详细记录按事件原文重写；失败时保留简要版本并标注来源（D29）', async () => {
+    const db = await import('@engine/persistence/database');
+    const messages = [
+      { id: 'u0', role: 'user', content: '接委托', timestamp: 0, turn: 0 },
+      {
+        id: 'a0',
+        role: 'assistant',
+        content: '老人托你送信，报酬三十银币。',
+        timestamp: 0,
+        turn: 0,
+      },
+      { id: 'u1', role: 'user', content: '交信', timestamp: 1, turn: 1 },
+      {
+        id: 'a1',
+        role: 'assistant',
+        content: '收信人收下了信。委托就此完成。',
+        timestamp: 2,
+        turn: 1,
+      },
+    ];
+    const archiveDecision = {
+      archives: [
+        {
+          event: '送信',
+          outcome: 'completed',
+          evidence: '委托就此完成',
+          overview: '把信送到了',
+          detail: { cause: '摘要版起因' },
+        },
+      ],
+      segments: [{ event: '送信', content: '交了信。' }],
+    };
+    const earlier = {
+      id: 'seg-old',
+      sourceTurnKey: 'u0',
+      sourceMessageIds: ['u0', 'a0'],
+      order: 0,
+      content: '接下送信委托',
+      eventName: '送信',
+      saveId: 'save-test',
+      createdAt: 1,
+    };
+
+    Object.assign(earlier, storyTurnSource(collectCompleteStoryTurns(messages as any)[0]));
+    async function runWith(chatImpl: (req: any) => Promise<any>) {
+      vi.mocked(db.commitStoryTurnMemory).mockClear();
+      vi.mocked(db.getStoryTurnSummaries).mockResolvedValueOnce([earlier] as any);
+      const pipeline = new GamePipeline({
+        gameStore: makeGameStore({ activeSave: v2Save, messages }),
+        settingsStore: makeSettingsStore({ storyContextV2Enabled: true }),
+        saveId: 'save-test',
+      }) as any;
+      pipeline.runMode = 'v2';
+      await pipeline.prepareStoryContextV2({}, { history: messages.slice(0, 2) });
+      pipeline.getEndpointForAgent = () => ({ id: 'ep', defaultModel: 'm' });
+      const chat = vi.fn(chatImpl);
+      pipeline.getClientFactory = () => () => ({ chat });
+      pipeline.lastStoryMessage = { id: 'a1', turn: 1, content: '' };
+      await pipeline.handleAgentResult(
+        makeResult('memory_summary', JSON.stringify(archiveDecision)),
+      );
+      await pipeline.commitStoryTurnSummary();
+      const archives = (vi.mocked(db.commitStoryTurnMemory).mock.calls[0] as any[])[3];
+      return { chat, archive: archives[0] };
+    }
+
+    const ok = await runWith(async () => ({
+      rawResponse: '{"cause":"老人托付","promises":"报酬三十银币"}',
+    }));
+    const sent = ok.chat.mock.calls[0][0].messages[1].content as string;
+    expect(sent).toContain('老人托你送信，报酬三十银币。');
+    expect(sent).toContain('收信人收下了信。委托就此完成。');
+    expect(ok.archive.detailSource).toBe('source-text');
+    expect(ok.archive.detail.promises).toBe('报酬三十银币');
+
+    const failed = await runWith(async () => ({ rawResponse: '', error: 'timeout' }));
+    expect(failed.archive.detailSource).toBe('summary');
+    expect(failed.archive.detail.cause).toBe('摘要版起因');
+  });
+
+  it('结局依据不在本回合正文里：不归档，事件保持未结', async () => {
+    const db = await import('@engine/persistence/database');
+    vi.mocked(db.commitStoryTurnMemory).mockClear();
+    const pipeline = new GamePipeline({
+      gameStore: makeGameStore({ activeSave: v2Save, messages: v2Messages() }),
+      settingsStore: makeSettingsStore({ storyContextV2Enabled: true }),
+      saveId: 'save-test',
+    }) as any;
+    pipeline.runMode = 'v2';
+    pipeline.lastStoryMessage = { id: 'a1', turn: 1, content: '门开了。' };
+    await pipeline.handleAgentResult(
+      makeResult(
+        'memory_summary',
+        JSON.stringify({
+          archives: [
+            { event: '进城', outcome: 'completed', evidence: '城门在身后关上', overview: '进了城' },
+          ],
+          segments: [{ event: '进城', content: '推门。' }],
+        }),
+      ),
+    );
+    await pipeline.commitStoryTurnSummary();
+    const call = vi.mocked(db.commitStoryTurnMemory).mock.calls[0] as any[];
+    expect(call[2]).toHaveLength(1);
+    expect(call[3]).toEqual([]);
+  });
+
+  it('摘要没解析出来：不写空记录，明确提示', async () => {
+    toastSpy.mockClear();
+    const db = await import('@engine/persistence/database');
+    vi.mocked(db.commitStoryTurnMemory).mockClear();
+    const pipeline = new GamePipeline({
+      gameStore: makeGameStore({ activeSave: v2Save, messages: v2Messages() }),
+      settingsStore: makeSettingsStore({ storyContextV2Enabled: true }),
+      saveId: 'save-test',
+    }) as any;
+    pipeline.runMode = 'v2';
+    pipeline.lastStoryMessage = { id: 'a1', turn: 1, content: '门开了。' };
+
+    await pipeline.handleAgentResult(makeResult('memory_summary', '格式不对'));
+    await pipeline.commitStoryTurnSummary();
+    expect(db.commitStoryTurnMemory).not.toHaveBeenCalled();
+    expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('摘要'), 'warning', 6000);
+  });
+
+  it('正文窗口 N 非法（历史层数 0）时明确报错，不组装', async () => {
+    toastSpy.mockClear();
+    const pipeline = new GamePipeline({
+      gameStore: makeGameStore({ activeSave: v2Save }),
+      settingsStore: makeSettingsStore({
+        storyContextV2Enabled: true,
+        agents: { story: { historyLayers: 0 } },
+      }),
+      saveId: 'save-test',
+    }) as any;
+    expect(await pipeline.prepareStoryContextV2({})).toBeNull();
+    expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('正整数'), 'error', 6000);
+  });
+
+  it('召回设置：原文粒度取开发者设置；召回失败提示一次、不阻断', async () => {
+    toastSpy.mockClear();
+    const pipeline = new GamePipeline({
+      gameStore: makeGameStore({ activeSave: v2Save }),
+      settingsStore: makeSettingsStore({
+        storyContextV2Enabled: true,
+        storyRecallRawMode: 'snippet',
+      }),
+      saveId: 'save-test',
+    }) as any;
+    const prepared = await pipeline.prepareStoryContextV2({}, { history: [] });
+    expect(prepared.recall.rawMode).toBe('snippet');
+
+    prepared.recall.onRecall({ mode: 'llm', status: 'ok', notices: [], candidateCount: 2 });
+    expect(toastSpy).not.toHaveBeenCalled();
+    prepared.recall.onRecall({
+      mode: 'llm',
+      status: 'failed',
+      error: '召回输出无法解析',
+      notices: [],
+      candidateCount: 2,
+    });
+    expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('记忆召回'), 'warning', 6000);
+  });
+
+  it('配置了 Embedding 源：摘要片段落库前带上向量；单条失败只让那一条不带向量', async () => {
+    const db = await import('@engine/persistence/database');
+    vi.mocked(db.commitStoryTurnMemory).mockClear();
+    computeEmbeddingWithMetaMock.mockReset();
+    const meta = {
+      spaceId: 'emb:test',
+      model: 'emb-model',
+      dimensions: 2,
+      preprocessingVersion: 'fmt-v1',
+      contentRevision: 'r',
+    };
+    computeEmbeddingWithMetaMock
+      .mockResolvedValueOnce({ embedding: [0.6, 0.8], meta })
+      .mockRejectedValueOnce(new Error('embedding down'));
+    const pipeline = new GamePipeline({
+      gameStore: makeGameStore({ activeSave: v2Save, messages: v2Messages() }),
+      settingsStore: makeSettingsStore({
+        storyContextV2Enabled: true,
+        embeddingSourceId: 'emb-1',
+        apiPool: [
+          {
+            id: 'emb-1',
+            name: 'Emb',
+            kind: 'embedding',
+            baseUrl: 'https://emb.test/v1',
+            apiKey: 'k',
+            model: 'emb-model',
+          },
+        ],
+      }),
+      saveId: 'save-test',
+    }) as any;
+    pipeline.runMode = 'v2';
+    pipeline.lastStoryMessage = { id: 'a1', turn: 1, content: '门开了。' };
+    await pipeline.handleAgentResult(
+      makeResult(
+        'memory_summary',
+        '<json>{"segments":[{"event":"进城","content":"推门进了酒馆。"},{"event":"","content":"闲聊。"}]}</json>',
+      ),
+    );
+    await pipeline.commitStoryTurnSummary();
+
+    expect(computeEmbeddingWithMetaMock).toHaveBeenCalledTimes(2);
+    expect(computeEmbeddingWithMetaMock.mock.calls[0][0]).toBe(
+      '[进城] 推门进了酒馆。\n时间：未知 — 未知',
+    );
+    const summaries = (vi.mocked(db.commitStoryTurnMemory).mock.calls[0] as any[])[2];
+    expect(summaries[0]).toMatchObject({ embedding: [0.6, 0.8], embeddingMeta: meta });
+    expect(summaries[1].embedding).toBeUndefined();
+    expect(summaries[1].embeddingMeta).toBeUndefined();
+  });
+
+  it('摘要补建：只补缺摘要的回合（按时间先后、至多两个），保留该回合已有归档，失败提示', async () => {
+    toastSpy.mockClear();
+    const db = await import('@engine/persistence/database');
+    vi.mocked(db.commitStoryTurnMemory).mockClear();
+    const messages = [
+      { id: 'u1', role: 'user', content: '找铁匠', timestamp: 1, turn: 1 },
+      { id: 'a1', role: 'assistant', content: '铁匠答应三天交剑。', timestamp: 2, turn: 1 },
+      { id: 'u2', role: 'user', content: '去酒馆', timestamp: 3, turn: 2 },
+      { id: 'a2', role: 'assistant', content: '酒馆很吵。', timestamp: 4, turn: 2 },
+      { id: 'u3', role: 'user', content: '出城', timestamp: 5, turn: 3 },
+      { id: 'a3', role: 'assistant', content: '城外下雨。', timestamp: 6, turn: 3 },
+      { id: 'u4', role: 'user', content: '赶路', timestamp: 7, turn: 4 },
+      { id: 'a4', role: 'assistant', content: '天黑了。', timestamp: 8, turn: 4 },
+    ];
+    const seg4 = {
+      id: 's4',
+      saveId: 'save-test',
+      sourceTurnKey: 'u4',
+      sourceMessageIds: ['u4', 'a4'],
+      order: 0,
+      content: '赶路',
+      createdAt: 1,
+    };
+    const archiveOnU2 = {
+      id: 'ar',
+      saveId: 'save-test',
+      eventName: '旧事',
+      outcome: 'completed',
+      sourceTurnKey: 'u2',
+      sourceMessageIds: ['u2', 'a2'],
+      coveredSegmentIds: [],
+    };
+    vi.mocked(db.getStoryTurnSummaries).mockResolvedValueOnce([seg4] as any);
+    vi.mocked(db.getStoryArchives).mockResolvedValueOnce([archiveOnU2] as any);
+    const pipeline = new GamePipeline({
+      gameStore: makeGameStore({ activeSave: v2Save, messages }),
+      settingsStore: makeSettingsStore({ storyContextV2Enabled: true }),
+      saveId: 'save-test',
+    }) as any;
+    pipeline.runMode = 'v2';
+    pipeline.getEndpointForAgent = () => ({ id: 'ep', defaultModel: 'm' });
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        rawResponse:
+          '<json>{"archives":[{"event":"x"}],"segments":[{"event":"订剑","content":"铁匠答应三天交剑"}]}</json>',
+      })
+      .mockResolvedValueOnce({ rawResponse: '', error: 'timeout' });
+    pipeline.getClientFactory = () => () => ({ chat });
+
+    await pipeline.backfillMissingStorySummaries();
+
+    expect(chat).toHaveBeenCalledTimes(2); // u1、u2（u3 留给之后的回合）
+    expect(chat.mock.calls[0][0].messages[1].content).toContain('铁匠答应三天交剑。');
+    expect(db.commitStoryTurnMemory).toHaveBeenCalledTimes(1);
+    const [, turnKey, records, archives] = vi.mocked(db.commitStoryTurnMemory).mock
+      .calls[0] as any[];
+    expect(turnKey).toBe('u1');
+    expect(records).toEqual([
+      expect.objectContaining({ sourceMessageIds: ['u1', 'a1'], eventName: '订剑' }),
+    ]);
+    expect(archives).toEqual([]);
+    expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('没能补上'), 'warning', 6000);
+  });
+
+  it('分区诊断进本回合调试记录；超出端点上下文窗口时提示各区用量', async () => {
+    toastSpy.mockClear();
+    const gameStore = makeGameStore({ activeSave: v2Save });
+    gameStore.recordStoryContextDebug = vi.fn();
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore({ storyContextV2Enabled: true }),
+      saveId: 'save-test',
+    }) as any;
+    pipeline.activeRunId = 'turn-1';
+    pipeline.getEndpointForAgent = () => ({ id: 'ep', contextWindowTokens: 100 });
+    const prepared = await pipeline.prepareStoryContextV2({}, { history: [] });
+    prepared.onAssembled({
+      windowTurns: 6,
+      archiveIds: [],
+      windowTurnKeys: [],
+      summarySegmentIds: [],
+      missingSummaryTurnKeys: [],
+      zoneChars: { 1: 100, 2: 0, 3: 0, 4: 200, 5: 30 },
+      totalChars: 300,
+    });
+    expect(gameStore.recordStoryContextDebug).toHaveBeenCalledWith('turn-1', {
+      assembly: expect.objectContaining({
+        estimatedTokens: 200,
+        contextWindowTokens: 100,
+        overBudget: true,
+      }),
+    });
+    expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('第4区 200 字'), 'warning', 6000);
+  });
+
+  it('没配置 Embedding 源：不发向量请求，记录不带向量', async () => {
+    const db = await import('@engine/persistence/database');
+    vi.mocked(db.commitStoryTurnMemory).mockClear();
+    computeEmbeddingWithMetaMock.mockClear();
+    const pipeline = new GamePipeline({
+      gameStore: makeGameStore({ activeSave: v2Save, messages: v2Messages() }),
+      settingsStore: makeSettingsStore({ storyContextV2Enabled: true }),
+      saveId: 'save-test',
+    }) as any;
+    pipeline.runMode = 'v2';
+    pipeline.lastStoryMessage = { id: 'a1', turn: 1, content: '门开了。' };
+    await pipeline.handleAgentResult(
+      makeResult('memory_summary', '<json>{"segments":[{"event":"","content":"推门。"}]}</json>'),
+    );
+    await pipeline.commitStoryTurnSummary();
+    expect(computeEmbeddingWithMetaMock).not.toHaveBeenCalled();
+    const summaries = (vi.mocked(db.commitStoryTurnMemory).mock.calls[0] as any[])[2];
+    expect(summaries[0].embedding).toBeUndefined();
+  });
 });

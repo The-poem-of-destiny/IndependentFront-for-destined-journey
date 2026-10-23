@@ -507,6 +507,33 @@ export function splitLocationSegments(locationPath: string): string[] {
     .reverse();
 }
 
+/** Read-only ancestry for a named place. Never infer a province from a country anchor. */
+export function resolveLocationHierarchy(index: MapIndex, locationPath: string): string[] {
+  const path = splitLocationSegments(locationPath);
+  for (let i = 0; i < path.length; i++) {
+    const tileId = findTileByName(index, path[i]);
+    if (tileId === null) continue;
+    const midTier = midTierOfTile(index, tileId);
+    const country = countryOfTile(index, tileId);
+    // The deepest named place owns its ancestry; stale enclosing domains must not survive.
+    const enclosing: string[] = [];
+    let countryAdded = false;
+    for (const name of path.slice(i + 1)) {
+      const domain = findDomainByName(index, name);
+      if (domain?.kind === 'midTier' && midTier) continue;
+      if (domain?.kind === 'country' && country) {
+        if (!countryAdded) enclosing.push(country.name);
+        countryAdded = true;
+      } else enclosing.push(name);
+    }
+    if (country && !countryAdded) enclosing.unshift(country.name);
+    return [
+      ...new Set([...path.slice(0, i + 1), ...(midTier ? [midTier.name] : []), ...enclosing]),
+    ];
+  }
+  return path;
+}
+
 /**
  * 位置路径 → 地块（**落位**）。契约五条（§8.2 / 裁定 §12-2）逐条落在下面:
  *

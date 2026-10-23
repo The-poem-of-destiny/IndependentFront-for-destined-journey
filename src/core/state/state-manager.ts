@@ -166,6 +166,7 @@ export type PlayerPersonaUpdateResult =
 
 /** commitChatState 的可选载荷（工坊 P2 / ADR-30 D5） */
 export interface CommitChatStateOptions {
+  isCurrent?: () => boolean;
   /**
    * EJS `vars` 草稿差量，**有序**。
    *
@@ -177,6 +178,14 @@ export interface CommitChatStateOptions {
    * 是哪个 Agent，能把拒绝点名报给用户。
    */
   ejsVarsDiffs?: EjsVarsDiff[];
+}
+
+function assertCurrentTurn(isCurrent?: () => boolean): void {
+  if (isCurrent && !isCurrent()) {
+    const error = new Error('回合已取消或切换');
+    error.name = 'AbortError';
+    throw error;
+  }
 }
 
 /** 单个 Patch 的应用结果 */
@@ -491,6 +500,7 @@ export class StateManager {
     // `reactToEvents` 刻意放在锁外：它内部的嵌套 commitChatState 需要重新排队
     // 拿锁，留在锁内即同 saveId 自等死锁（state-write-queue 铁律②）。
     const applied = await withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(options?.isCurrent);
       const results: PatchApplicationResult[] = [];
       const errors: string[] = [];
 
@@ -2279,11 +2289,16 @@ export class StateManager {
    * @param reason 触发原因: turn=每轮一拍 / manual=手动 / pre-combat=战斗前
    * @param turn   对话回合游标（恢复时截断 messages 用）
    */
-  async createSnapshot(reason: Snapshot['reason'], turn: number): Promise<Snapshot> {
+  async createSnapshot(
+    reason: Snapshot['reason'],
+    turn: number,
+    isCurrent?: () => boolean,
+  ): Promise<Snapshot> {
     // 🔴 并行化改造：快照 = 读全表 + 写快照行 + 改 activeSnapshotId + trim 的整段
     // RMW 区段，整段互斥（与提交 / advanceTurn 交错会留下「快照与状态不一致」）。
     // 内部只调裸 DB 函数，无嵌套入队（铁律②）。
     return withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(isCurrent);
       const characters = await getCharacters(this.saveId);
       const profile = await getProfile(this.saveId);
       const plotEvents = await getPlotEvents(this.saveId);
@@ -2333,13 +2348,14 @@ export class StateManager {
    * totalTurns 语义 = 已完成的对话回合数（每轮管线恰 +1，不再随每次 commit 虚高），
    * 随后打一张 reason='turn' 的回合快照（turn = 新回合数，恢复时按此截断消息）。
    */
-  async advanceTurn(): Promise<void> {
+  async advanceTurn(isCurrent?: () => boolean): Promise<void> {
     let newTotalTurns = 1;
     // 🔴 并行化改造：totalTurns 读-改-写是一段 RMW 区段，整段互斥（与 commitChatState
     // 尾部的 saveSaveSlot 争同一条 save 记录，交错会互相覆盖 totalTurns）。
     // createSnapshot 自带锁（它也被战斗 pre-combat 直接调用），必须在锁外调用，
     // 否则同 saveId 嵌套自等死锁（state-write-queue 铁律②）。
     await withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(isCurrent);
       const save = await getSave(this.saveId);
       if (save) {
         newTotalTurns = (save.metadata.totalTurns ?? 0) + 1;
@@ -2347,7 +2363,7 @@ export class StateManager {
         await saveSaveSlot(save);
       }
     });
-    await this.createSnapshot('turn', newTotalTurns);
+    await this.createSnapshot('turn', newTotalTurns, isCurrent);
   }
 
   /**
@@ -2924,7 +2940,7 @@ export class StateManager {
    * @param minutes - 推进的分钟数
    * @returns 生成的 StatePatch[] (remove_status_effect + time update)
    */
-  async applyTimeAdvance(minutes: number): Promise<StatePatch[]> {
+  async applyTimeAdvance(minutes: number, isCurrent?: () => boolean): Promise<StatePatch[]> {
     const patches: StatePatch[] = [];
     if (minutes <= 0) return patches;
 
@@ -2935,6 +2951,7 @@ export class StateManager {
     // 状态效果）是一段连续读-改-写区段，整段互斥；末尾的自提交 commitChatState
     // 刻意在锁外 —— 嵌套提交要重新排队拿锁，在锁内即自死锁（铁律②）。
     await withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(isCurrent);
       const profile = await getProfile(this.saveId);
       // 地图 v1.2（§4）：结算区间是**半开区间** `(prevDay, nextDay]`，所以推进**之前**
       // 就得把起点记下来 —— 推进完再算就永远拿到同一天，一次跨 90 天的前进会静默结算 0 期
@@ -3043,11 +3060,12 @@ export class StateManager {
     // 到期效果的 remove/hp/stat 与 onRemove 脚本全部蒸发。这里在方法内提交，符合 ADR-21
     // 唯一写入口约定，调用点无需自己 commit。
     if (patches.length > 0) {
-      await this.commitChatState(patches);
+      await this.commitChatState(patches, { isCurrent });
     }
 
     // F08 收益重放：收益从「锁外补丁」改为「持久借据的原子入账」，与上面的正文自提交
     // **互不连坐** —— 正文补丁失败不影响收益入账，收益入账失败也不回滚已提交的正文。
+    assertCurrentTurn(isCurrent);
     await this.settlePendingMapIncome();
 
     return patches;

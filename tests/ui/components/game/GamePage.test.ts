@@ -80,6 +80,13 @@ vi.mock('../../../../src/ui/stores/ui-store', () => ({
   })),
 }));
 
+// Story 上下文模式准入会在 loadSave 之前读存档行；这里给一个同步就绪的普通存档，
+// 免得 fake-indexeddb 的宏任务让 flushPromises 等不到 loadSave。
+vi.mock('@engine/persistence/database', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@engine/persistence/database')>()),
+  getSave: vi.fn(async () => undefined),
+}));
+
 describe('GamePage', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -136,6 +143,41 @@ describe('GamePage', () => {
     mount(GamePage);
     await flushPromises();
     expect(mockLoadSave).toHaveBeenCalledWith('test-save-123');
+  });
+
+  it('新模式关闭时拒绝测试档：在 loadSave 之前退回首页并提示（T35）', async () => {
+    const { useUIStore } = await import('../../../../src/ui/stores/ui-store');
+    const { useGameStore } = await import('../../../../src/ui/stores/game-store');
+    const { getSave } = await import('@engine/persistence/database');
+    const mockLoadSave = vi.fn(async () => true);
+    (useGameStore as any).mockReturnValue({
+      messages: [],
+      isGenerating: false,
+      loadSave: mockLoadSave,
+      invalidatePendingLoads: vi.fn(),
+      pendingOptions: [] as string[],
+      hasOpeningPromptConsumed: true,
+      openingPrompt: null,
+    });
+    const navigate = vi.fn();
+    const toast = vi.fn();
+    (useUIStore as any).mockReturnValue({
+      activeSaveId: 'v2-save',
+      currentView: 'game',
+      navigate,
+      toast,
+    });
+    vi.mocked(getSave).mockResolvedValueOnce({
+      id: 'v2-save',
+      metadata: { storyContextV2: { schema: 1, markedAt: 1 } },
+    } as any);
+    useSettingsStore().settings.storyContextV2Enabled = false;
+
+    mount(GamePage);
+    await flushPromises();
+    expect(mockLoadSave).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith('home');
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining('测试存档'), 'warning', 6000);
   });
 
   it('keeps the toolbar debug modal separate from the keyboard debug drawer', async () => {

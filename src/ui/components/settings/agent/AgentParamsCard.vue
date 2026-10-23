@@ -14,7 +14,8 @@
  *    model 的有效值走「覆写 ?? 默认」。每张卡上的「默认 / 已覆写」徽标告诉用户这个
  *    值是默认层给的还是用户改过——「已覆写」意味着覆写层有条目、清掉即回默认。
  */
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import { normalizeStoryWindowTurns } from '@engine/story/story-context-mode';
 import AppCard from '../../shared/AppCard.vue';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { useWorldBookStore } from '../../../stores/worldbook-store';
@@ -69,12 +70,21 @@ function setAgentField(patch: Partial<AgentSettingsEntry>) {
   s.agentDirty[props.agentId] = true;
 }
 
-/** 历史注入层数：空串 = **删键**（把「按 Agent 类别走引擎默认」那条语义还回去） */
+const isStoryV2 = computed(() => props.agentId === 'story' && s.storyContextV2Enabled === true);
+const historyLayersError = ref('');
+
+/** 留空恢复默认；只有 Story v2 要求正文窗口为正整数。 */
 function onHistoryLayersInput(ev: Event) {
   const v = (ev.target as HTMLInputElement).value;
+  if (isStoryV2.value && v !== '' && normalizeStoryWindowTurns(Number(v)) === null) {
+    historyLayersError.value = 'Story v2 正文窗口 N 必须是正整数，不能为 0。';
+    return;
+  }
+  historyLayersError.value = '';
   setAgentField({ historyLayers: v === '' ? undefined : Number(v) });
 }
 function onHistorySliceInput(ev: Event) {
+  if (isStoryV2.value) return;
   const v = (ev.target as HTMLInputElement).value;
   setAgentField({ historySlice: v === '' ? undefined : Number(v) });
 }
@@ -263,19 +273,27 @@ const readableBooks = computed(() =>
           isOverridden('historyLayers') ? '已覆写' : '默认'
         }}</span>
         <p class="form-hint">
-          注入最近 N 轮「玩家+AI」对话历史（0=不注入；留空=按 Agent 类别默认）。后置型 Agent 默认 1
-          轮辅助上文，长正文型默认 6 轮
+          {{
+            isStoryV2
+              ? 'Story v2 正文窗口 N：保留最近 N 个完整回合原文。只接受正整数；留空恢复默认 6 回合。窗口外由摘要承接，不截断原文。'
+              : '注入最近 N 轮「玩家+AI」对话历史（0=不注入；留空=按 Agent 类别默认）。后置型 Agent 默认 1 轮辅助上文，长正文型默认 6 轮'
+          }}
         </p>
         <input
           type="number"
-          min="0"
           max="20"
           step="1"
           :value="agentCfg.historyLayers ?? ''"
+          :min="isStoryV2 ? 1 : 0"
+          :aria-invalid="isStoryV2 && !!historyLayersError"
+          aria-label="历史注入层数"
           placeholder="(默认)"
           class="form-input"
           @input="onHistoryLayersInput($event)"
         />
+        <p v-if="isStoryV2 && historyLayersError" class="api-warn" role="alert">
+          {{ historyLayersError }}
+        </p>
       </label>
       <label class="form-label"
         >历史截断字数
@@ -283,7 +301,11 @@ const readableBooks = computed(() =>
           isOverridden('historySlice') ? '已覆写' : '默认'
         }}</span>
         <p class="form-hint">
-          每条历史正文保留前多少字（留空=按 Agent 类别默认，长正文型默认 1500，后置型默认 800）
+          {{
+            isStoryV2
+              ? 'Story v2 保留完整回合原文，此旧模式截断设置不生效；已保存的旧值保留，关闭 v2 后恢复使用。'
+              : '每条历史正文保留前多少字（留空=按 Agent 类别默认，长正文型默认 1500，后置型默认 800）'
+          }}
         </p>
         <input
           type="number"
@@ -291,6 +313,8 @@ const readableBooks = computed(() =>
           max="8000"
           step="100"
           :value="agentCfg.historySlice ?? ''"
+          :disabled="isStoryV2"
+          aria-label="历史截断字数"
           placeholder="(默认)"
           class="form-input"
           @input="onHistorySliceInput($event)"

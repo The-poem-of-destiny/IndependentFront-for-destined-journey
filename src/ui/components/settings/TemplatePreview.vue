@@ -63,6 +63,12 @@ const PLACEHOLDER_META: Record<string, PlaceholderMeta> = {
     color: 'var(--color-success, var(--theme-success))',
     category: 'world',
   },
+  LORE_CATALOG: {
+    label:
+      '资料选择上下文 — 仅 lore_select / Story v2 专用装配；当前情境与目录元数据，不含条目正文',
+    color: 'var(--color-success, var(--theme-success))',
+    category: 'world',
+  },
   GAME_TIME: {
     label: '世界状态 — 时间/位置/天气/纪元',
     color: 'var(--color-success, var(--theme-success))',

@@ -7,13 +7,23 @@
  * 组件只负责拿返回值去 `usePresets().upsertPreset()`。
  *
  * 🔴 排序真源是 `injection_order`，不是数组下标：引擎侧 `assemblePresetContent`
- *    （preset-loader.ts:205-207）按 `(a.injection_order ?? 0) - (b.injection_order ?? 0)`
- *    排序后再拼接。所以本模块**所有**操作都先按 `injection_order` 取标准顺序，
- *    改完再按数组位置统一重编号（步长 10），让「数组顺序 = 生效顺序」在每次改动后成立。
+ *    按 `(a.injection_order ?? 0) - (b.injection_order ?? 0)` 排序后再拼接。所以本模块
+ *    **所有**操作都先按 `injection_order` 取标准顺序，改完再按数组位置统一重编号（步长 10），
+ *    让「数组顺序 = 生效顺序」在每次改动后成立。
+ *
+ * 🔴 五区占位条目（`story_zone_1…5`，见 `@engine/prompts/story-zone-placeholders`）：
+ *    标准顺序里**总是**补齐这 5 条（读取视图，不落库）；用户第一次改动预设时随那次改动一起落库。
+ *    占位条目不可删除、不可复制、不可编辑或停用；可以上下移动，但两条占位之间不能互换
+ *    （相对顺序恒为 1→5）。被拒绝的操作一律返回原引用，调用方据此不落库。
  *
  * 🔴 纯函数、无 I/O、无 Pinia：可直接单测（见 preset-entries.test.ts）。
  */
 import type { ChatPreset } from '@engine/types/types';
+import {
+  ensureStoryZonePlaceholders,
+  isStoryZonePlaceholder,
+  storyZoneOf,
+} from '@engine/prompts/story-zone-placeholders';
 
 /** `ChatPreset.settings.prompts` 里单条目的形状（SillyTavern 兼容，字段全可选）。 */
 export interface PresetPromptEntry {
@@ -34,11 +44,17 @@ function rawPrompts(preset: ChatPreset): PresetPromptEntry[] {
   return Array.isArray(prompts) ? (prompts as PresetPromptEntry[]) : [];
 }
 
-/** 按 `injection_order`（缺省 0）稳定排序，得到与引擎一致的「生效顺序」。 */
+/**
+ * 「生效顺序」：按 `injection_order`（缺省 0）稳定排序，并补齐 / 修正五区占位条目。
+ * 下标口径与 PresetManager 渲染的列表一致。
+ */
 export function canonicalPresetEntries(preset: ChatPreset): PresetPromptEntry[] {
-  return [...rawPrompts(preset)].sort(
-    (a, b) => (a.injection_order ?? 0) - (b.injection_order ?? 0),
-  );
+  return ensureStoryZonePlaceholders(rawPrompts(preset)).entries;
+}
+
+/** 是否为五区占位条目（UI 用来锁住删除 / 复制 / 编辑 / 开关）。 */
+export function isZonePlaceholderEntry(entry: PresetPromptEntry | undefined): boolean {
+  return isStoryZonePlaceholder(entry);
 }
 
 /** 按数组位置重编号（步长 10），返回新预设（深克隆 + 盖 updatedAt）。 */
@@ -80,7 +96,7 @@ export function appendPresetEntry(preset: ChatPreset, entry: PresetPromptEntry):
   return withEntries(preset, [...canonicalPresetEntries(preset), entry]);
 }
 
-/** 按生效顺序的下标改一条（浅合并 patch），越界返回原引用。 */
+/** 按生效顺序的下标改一条（浅合并 patch），越界或占位条目返回原引用。 */
 export function updatePresetEntry(
   preset: ChatPreset,
   index: number,
@@ -88,21 +104,25 @@ export function updatePresetEntry(
 ): ChatPreset {
   const entries = canonicalPresetEntries(preset);
   if (index < 0 || index >= entries.length) return preset;
-  entries[index] = { ...entries[index], ...patch };
+  if (isStoryZonePlaceholder(entries[index])) return preset;
+  // identifier 是条目身份：patch 不许改它，更不许把普通条目改成占位
+  const { identifier: _ignored, ...rest } = patch;
+  entries[index] = { ...entries[index], ...rest };
   return withEntries(preset, entries);
 }
 
-/** 按生效顺序的下标删一条，越界返回原引用。 */
+/** 按生效顺序的下标删一条，越界或占位条目返回原引用。 */
 export function removePresetEntry(preset: ChatPreset, index: number): ChatPreset {
   const entries = canonicalPresetEntries(preset);
   if (index < 0 || index >= entries.length) return preset;
+  if (isStoryZonePlaceholder(entries[index])) return preset;
   entries.splice(index, 1);
   return withEntries(preset, entries);
 }
 
 /**
  * 复制一条到它的**正下方**（index + 1）。副本内容/名称/角色/启用态照抄，
- * 只换一个新 `identifier`（同 identifier 会让 Vue key 撞车）。越界返回原引用。
+ * 只换一个新 `identifier`（同 identifier 会让 Vue key 撞车）。越界或占位条目返回原引用。
  */
 export function duplicatePresetEntry(
   preset: ChatPreset,
@@ -111,12 +131,16 @@ export function duplicatePresetEntry(
 ): ChatPreset {
   const entries = canonicalPresetEntries(preset);
   if (index < 0 || index >= entries.length) return preset;
+  if (isStoryZonePlaceholder(entries[index])) return preset;
   const copy: PresetPromptEntry = { ...entries[index], identifier: `custom_${makeId()}` };
   entries.splice(index + 1, 0, copy);
   return withEntries(preset, entries);
 }
 
-/** 按生效顺序的下标上/下移一位（delta = ±1），越界返回原引用。 */
+/**
+ * 按生效顺序的下标上/下移一位（delta = ±1），越界返回原引用。
+ * 移动后占位条目的相对顺序不再是 1→5（例如两条占位相邻互换）时，同样返回原引用。
+ */
 export function movePresetEntry(preset: ChatPreset, index: number, delta: number): ChatPreset {
   const entries = canonicalPresetEntries(preset);
   const target = index + delta;
@@ -125,5 +149,9 @@ export function movePresetEntry(preset: ChatPreset, index: number, delta: number
   }
   const [moved] = entries.splice(index, 1);
   entries.splice(target, 0, moved);
+  const zones = entries
+    .map((entry) => storyZoneOf(entry))
+    .filter((zone): zone is NonNullable<typeof zone> => zone !== null);
+  if (zones.some((zone, i) => i > 0 && zone < zones[i - 1])) return preset;
   return withEntries(preset, entries);
 }

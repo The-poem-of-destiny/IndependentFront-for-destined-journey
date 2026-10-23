@@ -14,7 +14,7 @@ import type { SaveSlot, StoryContextV2SaveMarker } from '../types/types';
 /** 一个回合（及其后置任务）运行时固定使用的 Story 模式。 */
 type StoryContextMode = 'legacy' | 'v2';
 
-type StoryContextRejection =
+export type StoryContextRejection =
   /** 测试档，但新模式开关关闭 */
   | 'v2-save-requires-v2-mode'
   /** 普通存档，但新模式开关开启（不自动升级为测试档） */

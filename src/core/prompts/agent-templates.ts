@@ -207,7 +207,9 @@ function buildCapabilityInput(
   const getLoreIndex = () => {
     if (loreIndex) return loreIndex;
     const visible = worldBooks
-      ? filterActiveEntries(getEntriesForAgent(agentId, worldBooks, loreRecentText(ctx)))
+      ? filterActiveEntries(
+          getEntriesForAgent(agentId, worldBooks, loreRecentText(ctx), ctx.loreReadContext),
+        )
       : [];
     const bookOf = new Map<WorldBookEntry, WorldBook>();
     for (const book of worldBooks ?? []) {
@@ -843,7 +845,7 @@ export async function buildAgentMessagesAsync(
 
   if (worldBooks) {
     const activeEntries = filterActiveEntries(
-      getEntriesForAgent(agentId, worldBooks, loreRecentText(ctx)),
+      getEntriesForAgent(agentId, worldBooks, loreRecentText(ctx), ctx.loreReadContext),
     );
     const rendered = await prerenderWorldBookEntries(activeEntries, ejsPass);
     ejsPass.loreRender = {

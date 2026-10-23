@@ -9,6 +9,11 @@ import { getRandomEventPack } from '@engine/random-events/random-event-runtime';
 import { buildRandomEventRollContext } from '@engine/random-events/random-event-snapshot';
 import { getRandomEventFlags, getPlotThreadFlags } from '@engine/state/save-profile';
 import { toEpochMinutes } from '@engine/time/time-system';
+import type {
+  StoryLoreSelectionDiagnostics,
+  StoryRecallReport,
+  StoryContextBudgetCategory,
+} from '@engine/types/types';
 import {
   buildRandomEventDebugRows,
   formatDailyProbability,
@@ -34,6 +39,61 @@ const selectedTurn = computed(() => {
   );
 });
 const displayedAgentLog = computed(() => selectedTurn.value?.entries ?? []);
+
+/** 所选回合的 Story 新模式诊断（旧模式回合缺席 → 整段不出） */
+const storyContextDebug = computed(() => selectedTurn.value?.storyContext ?? null);
+
+function formatZoneChars(zoneChars: Record<1 | 2 | 3 | 4 | 5, number>): string {
+  return ([1, 2, 3, 4, 5] as const).map((zone) => `${zone}区 ${zoneChars[zone]}`).join(' · ');
+}
+
+const BUDGET_LABELS: Record<StoryContextBudgetCategory, string> = {
+  fixed: '固定规则与模板',
+  longTerm: '长期总览',
+  region: '区域资料',
+  summary: '常驻摘要',
+  rawHistory: '历史原文（含缺摘要兜底）',
+  turnLore: '本轮世界资料',
+  recall: '记忆召回',
+  currentFactsAndDirections: '当前事实、输入与剧情指引',
+  outputReserve: '实际输出预留',
+};
+
+function loreDecisionReason(reason: string): string {
+  const labels: Record<string, string> = {
+    fixed: '固定资料常驻',
+    'region-match': '命中当前区域',
+    required: '本轮必选资料',
+    'limited-supplement': '选择器有限补充',
+    'selector-selected': '选择器选中',
+    'deterministic-candidate': '选择器回退，保留确定性候选',
+    dependency: '选中条目的依赖背景',
+    'selector-not-selected': '选择器未选中',
+    'activation-miss': '未命中本轮激活条件',
+    disabled: '条目已禁用',
+    'not-readable': 'Story 无读取权限',
+    'hard-exclusion': '命中硬排除条件',
+    missing: '条目不存在',
+    'duplicate-key': '条目定位键重复',
+    cycle: '循环依赖',
+    'budget-pruned': 'EJS 前输入预算不足，按可选依赖组移除',
+  };
+  if (reason.startsWith('dependency-'))
+    return `依赖不可用：${labels[reason.slice(11)] ?? '未注明原因'}`;
+  return labels[reason] ?? '未注明原因';
+}
+
+function loreStatusLabel(lore: StoryLoreSelectionDiagnostics): string {
+  if (lore.status === 'ok') return '已筛选';
+  if (lore.status === 'skipped') return '无候选，未调用';
+  return `已回退：${lore.fallbackReason ?? '未注明原因'}`;
+}
+
+function recallStatusLabel(recall: StoryRecallReport): string {
+  if (recall.status === 'ok') return '成功';
+  if (recall.status === 'empty') return '无候选，未调用';
+  return '失败，本回合无召回';
+}
 watch(
   () => game.agentLogHistory[game.agentLogHistory.length - 1]?.id,
   (id) => {
@@ -454,6 +514,155 @@ function formatJson(value: unknown): string {
       </template>
     </div>
 
+    <!-- Story 上下文新模式（v2）：所选回合的分区 / 召回 / 资料选择 / 补建诊断 -->
+    <div v-if="storyContextDebug" class="debug-section">
+      <h4>Story 分区（新模式 · 第 {{ selectedTurn?.turn }} 回合）</h4>
+      <pre
+        v-if="storyContextDebug.assembly"
+        :class="{ 'debug-warn': storyContextDebug.assembly.overBudget }"
+      >
+正文窗口 N = {{ storyContextDebug.assembly.windowTurns }} · 窗口内回合 {{
+          storyContextDebug.assembly.windowTurnKeys.length
+        }}
+各区字数: {{ formatZoneChars(storyContextDebug.assembly.zoneChars) }}
+整轮约 {{ storyContextDebug.assembly.estimatedTokens }} token（粗估）{{
+          storyContextDebug.assembly.contextWindowTokens
+            ? ` / 窗口 ${storyContextDebug.assembly.contextWindowTokens}`
+            : ' / 未配置上下文窗口'
+        }}{{ storyContextDebug.assembly.overBudget ? ' ⚠ 超出' : '' }}
+长期总览归档 {{ storyContextDebug.assembly.archiveIds.length }} 条 · 常驻摘要片段 {{
+          storyContextDebug.assembly.summarySegmentIds.length
+        }} 条
+缺摘要回合: {{ storyContextDebug.assembly.missingSummaryTurnKeys.join('、') || '无' }}
+实际输出预留: {{
+          storyContextDebug.assembly.outputReservedTokens ?? '未记录（旧诊断）'
+        }} token（请求参数预留，非 provider usage）</pre>
+      <template v-if="storyContextDebug.assembly?.budgetCategories">
+        <p class="debug-budget-hint">
+          输入 token 均为字符数 / 1.5 的粗估，不是 provider
+          计数。分类含结构标签与分隔符；输出项为实际请求预留，字符数不适用。
+        </p>
+        <table class="debug-budget-table" aria-label="Story 完整预算分类">
+          <thead>
+            <tr>
+              <th>分类</th>
+              <th>字符数</th>
+              <th>粗估 token / 预留</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(label, category) in BUDGET_LABELS" :key="category">
+              <th>{{ label }}（{{ category }}）</th>
+              <td>
+                {{
+                  category === 'outputReserve'
+                    ? '—'
+                    : storyContextDebug.assembly.budgetCategories[category].chars
+                }}
+              </td>
+              <td>
+                {{
+                  category === 'outputReserve'
+                    ? (storyContextDebug.assembly.outputReservedTokens ?? '未记录')
+                    : storyContextDebug.assembly.budgetCategories[category].estimatedTokens
+                }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
+      <template v-if="storyContextDebug.assembly?.budgetRemovals?.length">
+        <h5 class="debug-sub-h">预算移除（逐项定位）</h5>
+        <p class="debug-budget-hint">
+          资料在 EJS 前按模板原文估算；不是实际渲染后 token。原文与常驻摘要不裁剪。
+        </p>
+        <ul class="debug-decision-list" aria-label="预算移除原因">
+          <li
+            v-for="item in storyContextDebug.assembly.budgetRemovals"
+            :key="`${item.category}:${item.key}`"
+          >
+            {{ item.key }} · {{ BUDGET_LABELS[item.category] }} · {{ item.chars }} 字符 / 约
+            {{ item.estimatedTokens }} token：{{ item.reason }}
+          </li>
+        </ul>
+      </template>
+      <p v-else-if="storyContextDebug.assembly?.budgetRemovals">预算移除：无</p>
+      <template v-if="storyContextDebug.lore">
+        <h5 class="debug-sub-h">资料选择（{{ loreStatusLabel(storyContextDebug.lore) }}）</h5>
+        <pre>
+当前区域: {{ storyContextDebug.lore.regionPath.join(' / ') || '—' }}（快照 {{
+            storyContextDebug.lore.regionSnapshotKey || '—'
+          }}）
+固定 {{ storyContextDebug.lore.fixedKeys.length }} · 区域 {{
+            storyContextDebug.lore.regionKeys.length
+          }} · 必选 {{ storyContextDebug.lore.requiredKeys.length }} · 候选 {{
+            storyContextDebug.lore.candidateKeys.length
+          }}
+选中: {{ storyContextDebug.lore.selectedKeys.join('、') || '无' }}
+补充: {{ storyContextDebug.lore.supplementKeys.join('、') || '无' }}
+依赖展开: {{ storyContextDebug.lore.dependencyKeys.join('、') || '无'
+          }}{{
+            storyContextDebug.lore.blockedDependencyKeys.length
+              ? `\n依赖不可读（已拦下）: ${storyContextDebug.lore.blockedDependencyKeys.join('、')}`
+              : ''
+          }}{{
+            storyContextDebug.lore.rejectedRefs.length
+              ? `\n越界引用（未生效）: ${storyContextDebug.lore.rejectedRefs.join('、')}`
+              : ''
+          }}{{
+            storyContextDebug.lore.reason ? `\n理由: ${storyContextDebug.lore.reason}` : ''
+          }}</pre>
+        <ul
+          v-if="storyContextDebug.lore.decisions?.length"
+          class="debug-decision-list"
+          aria-label="资料逐条选择与排除原因"
+        >
+          <li
+            v-for="decision in storyContextDebug.lore.decisions"
+            :key="`${decision.key}:${decision.reason}`"
+          >
+            {{ decision.key }} · {{ decision.outcome === 'selected' ? '选中' : '排除'
+            }}{{ decision.zone ? ` · 第 ${decision.zone} 区` : '' }}：{{
+              loreDecisionReason(decision.reason)
+            }}
+          </li>
+        </ul>
+      </template>
+      <template v-if="storyContextDebug.recall">
+        <h5 class="debug-sub-h">记忆召回（{{ recallStatusLabel(storyContextDebug.recall) }}）</h5>
+        <pre>
+模式 {{ storyContextDebug.recall.mode }} · 候选 {{ storyContextDebug.recall.candidateCount
+          }}{{
+            storyContextDebug.recall.expansion
+              ? ` · 选中 ${storyContextDebug.recall.expansion.selectedRefs.join('、') || '无'} · 原文 ${storyContextDebug.recall.expansion.rawMode} ${storyContextDebug.recall.expansion.rawChars} 字 / 召回块 ${storyContextDebug.recall.expansion.chars} 字`
+              : ''
+          }}{{ storyContextDebug.recall.error ? `\n失败: ${storyContextDebug.recall.error}` : ''
+          }}{{
+            storyContextDebug.recall.notices.length
+              ? `\n降级: ${storyContextDebug.recall.notices.join('；')}`
+              : ''
+          }}</pre>
+      </template>
+      <ul
+        v-if="storyContextDebug.recall?.expansion?.paragraphRanges?.length"
+        class="debug-decision-list"
+        aria-label="召回原文段落定位"
+      >
+        <li
+          v-for="(range, index) in storyContextDebug.recall.expansion.paragraphRanges"
+          :key="index"
+        >
+          {{ range.ref }} · {{ range.turnKey }} · 段落 {{ range.start + 1 }}–{{ range.end + 1 }}：{{
+            range.omitted ? '预算省略（未展示）' : '已展示原文'
+          }}
+        </li>
+      </ul>
+      <pre v-if="storyContextDebug.backfill">
+摘要补建: 成功 {{ storyContextDebug.backfill.turnKeys.length }} · 失败 {{
+          storyContextDebug.backfill.failedTurnKeys.length
+        }}</pre>
+    </div>
+
     <!-- Agent 调用日志 -->
     <div class="debug-section">
       <div class="debug-agent-title-row">
@@ -545,6 +754,29 @@ function formatJson(value: unknown): string {
 </template>
 
 <style scoped>
+.debug-budget-hint {
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
+}
+.debug-budget-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+.debug-budget-table th,
+.debug-budget-table td {
+  text-align: left;
+  padding: var(--theme-spacing-sm);
+  border-bottom: 1px solid var(--theme-card-border);
+}
+.debug-decision-list {
+  padding-left: var(--theme-spacing-lg);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.debug-decision-list li {
+  margin-bottom: var(--theme-spacing-xs);
+}
 .debug-panel {
   display: flex;
   flex-direction: column;

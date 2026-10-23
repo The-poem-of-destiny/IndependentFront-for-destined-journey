@@ -120,3 +120,46 @@ describe('AgentParamsCard 只读权限范围', () => {
     expect(wrapper.get('.worldbook-scope-list').text()).not.toContain('Story only');
   });
 });
+
+describe('A03 Story v2 正文窗口设置', () => {
+  it.each(['0', '-1', '1.5'])('输入 %s 拒绝保存且给出可解释错误', async (value) => {
+    state.config.settings.agents.story = { historyLayers: 6 };
+    const wrapper = card();
+    const input = wrapper.get('input[aria-label="历史注入层数"]');
+    expect(input.attributes('min')).toBe('1');
+    await input.setValue(value);
+    expect(state.config.settings.agents.story.historyLayers).toBe(6);
+    expect(state.config.settings.agentDirty.story).toBeUndefined();
+    expect(wrapper.get('[role="alert"]').text()).toContain('必须是正整数');
+    expect(input.attributes('aria-invalid')).toBe('true');
+  });
+
+  it('正整数保存；留空删覆写恢复默认；旧截断值保留但禁用且不能写入', async () => {
+    state.config.settings.agents.story = { historyLayers: 6, historySlice: 800 };
+    const wrapper = card();
+    const input = wrapper.get('input[aria-label="历史注入层数"]');
+    await input.setValue('3');
+    expect(state.config.settings.agents.story.historyLayers).toBe(3);
+    await input.setValue('');
+    expect(state.config.settings.agents.story).not.toHaveProperty('historyLayers');
+    const slice = wrapper.get('input[aria-label="历史截断字数"]');
+    expect(slice.attributes('disabled')).toBeDefined();
+    await slice.setValue('1200');
+    expect(state.config.settings.agents.story.historySlice).toBe(800);
+    expect(wrapper.text()).toContain('此旧模式截断设置不生效');
+  });
+
+  it.each(['legacy-story', 'char_gen'])('%s 仍允许 0 且可调整历史截断', async (kind) => {
+    if (kind === 'legacy-story') state.config.settings.storyContextV2Enabled = false;
+    const id = kind === 'legacy-story' ? 'story' : kind;
+    const wrapper = card(id);
+    const input = wrapper.get('input[aria-label="历史注入层数"]');
+    expect(input.attributes('min')).toBe('0');
+    await input.setValue('0');
+    expect(state.config.settings.agents[id].historyLayers).toBe(0);
+    const slice = wrapper.get('input[aria-label="历史截断字数"]');
+    expect(slice.attributes('disabled')).toBeUndefined();
+    await slice.setValue('1200');
+    expect(state.config.settings.agents[id].historySlice).toBe(1200);
+  });
+});

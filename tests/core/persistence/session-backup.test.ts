@@ -52,6 +52,7 @@ import {
   getEntriesForAgent,
 } from '../../../src/core/content/worldbook-loader';
 import { planSaveUidMigration } from '../../../src/core/content/content-pack-plan';
+import { selectStoryLore } from '../../../src/core/content/lore-selection';
 import {
   storyTurnSource,
   storySegmentFingerprint,
@@ -113,6 +114,17 @@ describe('A09：拆分装包后导入旧档', () => {
         .map((e) => e.uid)
         .sort(),
     ).toEqual([101, 102]);
+    const selected = await selectStoryLore(books, {
+      userInput: '',
+      characters: [],
+      history: messages,
+      worldBooks: [],
+      variables: {},
+      memories: [],
+      plotEvents: [],
+      agentOutputs: new Map(),
+    });
+    expect(selected.zones[1].map((r) => r.entry.uid).sort()).toEqual([101, 102]);
     expect(JSON.stringify(backup)).toBe(original);
   });
   it('已有效父/子 token 不误展开，缺来源不按显示名猜测', async () => {

@@ -10,6 +10,8 @@ import type {
   Pipeline,
 } from '../../../src/core/types/types';
 import { deleteMemory, saveMemory } from '../../../src/core/persistence/database';
+import { storyTurnSource } from '../../../src/core/memory/story-memory-source';
+import { collectCompleteStoryTurns } from '../../../src/core/memory/memory-context';
 // T3: Delta 会话 module 的测试可观测入口（reset 保证每用例从干净 session 开始，
 // 不污染现有用例；activePromptSessionCount 断言「不创建 session」类排除路径）
 import {
@@ -2905,5 +2907,405 @@ describe('AgentOrchestrator — Delta 会话接线（T3）', () => {
     const r2 = orch.getResults().get('story')!;
     expect(r2.promptSessionRevision).toBe(2);
     expect(r2.promptRebased).toBe(false);
+  });
+});
+
+// ========== Story 上下文新模式（v2）==========
+
+describe('AgentOrchestrator — Story 上下文新模式（v2）', () => {
+  it('selector uses its independent endpoint/model, exposes only catalogues and records actual wire messages', async () => {
+    const fetchMock = mockFetch('{"keep":[],"extra":[]}');
+    globalThis.fetch = fetchMock;
+    const onAgentComplete = vi.fn();
+    const onLore = vi.fn();
+    const orch = new AgentOrchestrator(
+      {
+        pipeline: makeSimplePipeline(['story']),
+        context: makeContext(),
+        agentConfigs: [
+          makeAgentConfig({ agentId: 'story' }),
+          makeAgentConfig({
+            agentId: 'lore_select',
+            apiEndpointId: 'selector_ep',
+            model: 'selector-model',
+            systemPrompt: 'custom selector instruction',
+            template: 'catalog={{LORE_CATALOG}}',
+          }),
+        ],
+        endpoints: [
+          makeEndpoint(),
+          makeEndpoint({ id: 'selector_ep', defaultModel: 'selector-model' }),
+        ],
+        saveId: 'selector-save',
+        worldBooks: [
+          {
+            id: 'sample',
+            name: 'sample',
+            partition: 'world_setting',
+            entries: [
+              {
+                uid: 1,
+                name: 'candidate',
+                content: 'secret lore body',
+                enabled: true,
+                order: 1,
+                position: 0,
+                key: [],
+                keysecondary: [],
+                selectiveLogic: 0,
+                extra: {
+                  lore: { audiences: ['story', 'lore_select'], key: 'candidate', section: 'turn' },
+                },
+              },
+            ],
+          },
+        ],
+        storyContext: { windowTurns: 1, segments: [], archives: [], onLore },
+      },
+      { onAgentComplete },
+    );
+    expect((await orch.run()).status).toBe('completed');
+    const recorded = onAgentComplete.mock.calls
+      .map((call) => call[0])
+      .find((result) => result.agentId === 'lore_select');
+    expect(recorded.requestMessages[0].content).toContain('custom selector instruction');
+    expect(recorded.requestMessages[1].content).toContain('catalog=');
+    expect(JSON.stringify(recorded.requestMessages)).not.toContain('secret lore body');
+    expect(onLore).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'ok', selectedKeys: [] }),
+    );
+    expect(
+      orch
+        .getResults()
+        .get('story')
+        ?.requestMessages?.map((m) => m.content)
+        .join('\n'),
+    ).not.toContain('secret lore body');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(activePromptSessionCount()).toBe(0);
+  });
+
+  it('context overflow including effective output reserve stops the Story network request', async () => {
+    globalThis.fetch = mockFetch('must not send');
+    const onAssembled = vi.fn();
+    const orch = new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['story']),
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'story', maxTokens: 100 })],
+      endpoints: [makeEndpoint({ contextWindowTokens: 100, bodyOverrides: { max_tokens: 1000 } })],
+      saveId: 'overflow',
+      storyContext: { windowTurns: 1, segments: [], archives: [], onAssembled },
+    });
+    expect((await orch.run()).status).toBe('failed');
+    expect(orch.getResults().get('story')?.error).toContain('上下文超限');
+    expect(onAssembled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outputReservedTokens: 1000,
+        budgetCategories: expect.objectContaining({
+          outputReserve: { chars: 0, estimatedTokens: 1000 },
+        }),
+      }),
+    );
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+  it('给了 storyContext 时 Story 走分区组装器、不建 Delta 会话，诊断经回调回传', async () => {
+    globalThis.fetch = mockFetch('新模式正文');
+    const onAssembled = vi.fn();
+    const orch = new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['story']),
+      context: makeContext({
+        userInput: '推门进去',
+        history: [
+          { id: 'u1', role: 'user', content: '走进酒馆', timestamp: 1 },
+          { id: 'a1', role: 'assistant', content: '酒馆里人声鼎沸。', timestamp: 2 },
+        ],
+      }),
+      agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_v2',
+      storyContext: {
+        windowTurns: 4,
+        segments: [],
+        archives: [],
+        onAssembled,
+      },
+    });
+
+    const run = await orch.run();
+    expect(run.status).toBe('completed');
+    const story = orch.getResults().get('story')!;
+    expect(story.error).toBeUndefined();
+    expect(activePromptSessionCount()).toBe(0);
+
+    const roles = (story.requestMessages ?? []).map((m) => m.role);
+    // 前导 system → 窗口内 user/assistant → 末尾 user（本轮输入）
+    expect(roles.slice(-3)).toEqual(['user', 'assistant', 'user']);
+    expect(roles.lastIndexOf('system')).toBeLessThan(roles.indexOf('user'));
+    const sent = story.requestMessages!;
+    expect(sent[sent.length - 1].content).toContain('推门进去');
+    expect(onAssembled).toHaveBeenCalledWith(expect.objectContaining({ windowTurnKeys: ['u1'] }));
+  });
+
+  describe('新模式召回（memory_recall 在 v2 回合）', () => {
+    const history = [
+      { id: 'u1', role: 'user' as const, content: '借匕首', timestamp: 1 },
+      {
+        id: 'a1',
+        role: 'assistant' as const,
+        content: '铁匠把匕首借给你，说好三天后归还。',
+        timestamp: 2,
+      },
+      { id: 'u2', role: 'user' as const, content: '赶路', timestamp: 3 },
+      { id: 'a2', role: 'assistant' as const, content: '你走进森林。', timestamp: 4 },
+    ];
+    const segment = {
+      id: 'seg1',
+      saveId: 'save_v2',
+      ...storyTurnSource(collectCompleteStoryTurns(history)[0]),
+      order: 0,
+      content: '答应三天后归还匕首',
+      eventName: '借匕首',
+      createdAt: 1,
+    };
+    const recallPipeline: Pipeline = {
+      timeout: 30000,
+      retryOnFail: false,
+      requiredAgents: ['story'],
+      stages: [
+        { agents: ['memory_recall'], waitFor: [] },
+        { agents: ['story'], waitFor: ['memory_recall'] },
+      ],
+    };
+    function chatResponse(content: string) {
+      const cached = content ? 1 : 0;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          choices: [{ message: { content } }],
+          usage: {
+            total_tokens: 5,
+            prompt_tokens: 3,
+            completion_tokens: 2,
+            prompt_tokens_details: { cached_tokens: cached },
+            prompt_cache_miss_tokens: 3 - cached,
+          },
+        }),
+        text: async () => JSON.stringify({ choices: [{ message: { content } }] }),
+      };
+    }
+    async function runRecall(opts: {
+      responses: Array<string | Error>;
+      segments?: (typeof segment)[];
+      mode?: 'llm' | 'embedding';
+      userInput?: string;
+      signal?: AbortSignal;
+    }) {
+      const fetchMock = vi.fn();
+      for (const r of opts.responses) {
+        if (r instanceof Error) fetchMock.mockRejectedValueOnce(r);
+        else fetchMock.mockResolvedValueOnce(chatResponse(r));
+      }
+      globalThis.fetch = fetchMock;
+      const onRecall = vi.fn();
+      const { STORY_RECALL_SYSTEM_PROMPT, STORY_RECALL_TEMPLATE } =
+        await import('../../../src/core/memory/story-recall');
+      const orch = new AgentOrchestrator({
+        pipeline: recallPipeline,
+        context: makeContext({ userInput: opts.userInput ?? '继续', history }),
+        agentConfigs: [
+          makeAgentConfig({
+            agentId: 'memory_recall',
+            systemPrompt: STORY_RECALL_SYSTEM_PROMPT,
+            template: STORY_RECALL_TEMPLATE,
+            abortSignal: opts.signal,
+            maxRetries: 0,
+          }),
+          makeAgentConfig({ agentId: 'story' }),
+        ],
+        endpoints: [makeEndpoint()],
+        saveId: 'save_v2',
+        memoryRetrieval: { mode: opts.mode ?? 'llm', candidateCount: 20, resultCount: 5 },
+        storyContext: {
+          windowTurns: 1,
+          segments: opts.segments ?? [segment],
+          archives: [],
+          recall: { rawMode: 'turn', onRecall },
+        },
+      });
+      const run = await orch.run();
+      return { run, orch, onRecall, fetchMock };
+    }
+
+    it('LLM 模式：按编号挑候选，展开成摘要 + 原文，进前置资料与 Story 第 5 区', async () => {
+      const { run, orch, onRecall, fetchMock } = await runRecall({
+        responses: ['<json>{"memories":[{"id":"S1","reason":"归还期限"}]}</json>', '正文'],
+      });
+      expect(run.status).toBe('completed');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const recall = orch.getResults().get('memory_recall')!;
+      expect(recall.error).toBeUndefined();
+      const recallPrompt = (recall.requestMessages ?? []).map((m) => m.content).join('\n');
+      expect(recallPrompt).toContain('[S1] 第1回合【借匕首】答应三天后归还匕首');
+      expect(recall.output).toContain(
+        '〔第1回合〕原文：\n玩家：借匕首\n正文：铁匠把匕首借给你，说好三天后归还。',
+      );
+
+      const story = orch.getResults().get('story')!;
+      const lastUser = story.requestMessages![story.requestMessages!.length - 1].content;
+      expect(lastUser).toContain('<相关回忆>');
+      expect(lastUser).toContain('说好三天后归还');
+      expect(onRecall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'llm',
+          status: 'ok',
+          candidateCount: 1,
+          expansion: expect.objectContaining({ selectedRefs: ['S1'], rawTurnKeys: ['u1'] }),
+        }),
+      );
+      expect(activePromptSessionCount()).toBe(0);
+    });
+
+    it('格式重试仍失败且无查询匹配 → Story 照常生成，保留失败诊断', async () => {
+      const { run, orch, onRecall, fetchMock } = await runRecall({
+        responses: ['我觉得都不相关', '仍然不是JSON', '正文'],
+      });
+      expect(run.status).toBe('completed');
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      const recall = orch.getResults().get('memory_recall')!;
+      expect(recall.error).toBeUndefined();
+      expect(recall.output).toBe('');
+      expect(onRecall).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'failed', error: '召回输出无法解析' }),
+      );
+      const story = orch.getResults().get('story')!;
+      expect(story.requestMessages!.map((m) => m.content).join('\n')).not.toContain('<相关回忆>');
+    });
+
+    it('空响应重试成功，累计两次请求用量并保留首次空响应诊断', async () => {
+      const { run, orch, onRecall, fetchMock } = await runRecall({
+        responses: ['', '{"memories":[{"id":"S1"}]}', '正文'],
+      });
+      expect(run.status).toBe('completed');
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      const recall = orch.getResults().get('memory_recall')!;
+      expect(recall.output).toContain('三天后归还匕首');
+      expect(recall.tokensUsed).toBe(10);
+      expect(recall.promptTokens).toBe(6);
+      expect(recall.completionTokens).toBe(4);
+      expect(recall.cacheHitTokens).toBe(1);
+      expect(recall.cacheMissTokens).toBe(5);
+      expect(recall.cacheHit).toBe(true);
+      expect(recall.providerRounds).toHaveLength(2);
+      expect(recall.providerRounds![0].error).toBe('召回返回空响应');
+      expect(recall.requestMessages![recall.requestMessages!.length - 1].content).toContain(
+        '上次没有返回有效的召回编号',
+      );
+      expect(onRecall).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'ok', notices: [expect.stringContaining('空响应')] }),
+      );
+    });
+
+    it('两次格式失败后仅补取与当前问题匹配的记忆，失败原因保留在降级诊断', async () => {
+      const { run, orch, onRecall, fetchMock } = await runRecall({
+        responses: ['', 'invalid', '正文'],
+        userInput: '匕首的归还期限是什么？',
+      });
+      expect(run.status).toBe('completed');
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(orch.getResults().get('memory_recall')!.output).toContain('三天后归还匕首');
+      expect(
+        orch
+          .getResults()
+          .get('story')!
+          .requestMessages!.map((m) => m.content)
+          .join('\n'),
+      ).toContain('三天后归还匕首');
+      expect(onRecall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'ok',
+          notices: expect.arrayContaining([expect.stringContaining('按当前问题相关性补取 1 条')]),
+        }),
+      );
+    });
+
+    it('合法空数组不重试、不触发补取', async () => {
+      const { run, orch, onRecall, fetchMock } = await runRecall({
+        responses: ['{"memories":[]}', '正文'],
+        userInput: '匕首期限',
+      });
+      expect(run.status).toBe('completed');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(orch.getResults().get('memory_recall')!.output).toBe('');
+      expect(onRecall).toHaveBeenCalledWith(expect.objectContaining({ status: 'ok', notices: [] }));
+    });
+
+    it('网络失败沿用客户端重试设置，并通过查询补取保留明确的合同问题', async () => {
+      const { run, orch, onRecall, fetchMock } = await runRecall({
+        responses: [new Error('network unavailable'), '正文'],
+        userInput: '核对归还匕首的期限',
+      });
+      expect(run.status).toBe('completed');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(orch.getResults().get('memory_recall')!.output).toContain('三天后归还匕首');
+      expect(onRecall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          notices: expect.arrayContaining([expect.stringContaining('network unavailable')]),
+        }),
+      );
+    });
+
+    it('没有候选 → 不发召回请求', async () => {
+      const { run, onRecall, fetchMock } = await runRecall({ responses: ['正文'], segments: [] });
+      expect(run.status).toBe('completed');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(onRecall).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'empty', candidateCount: 0 }),
+      );
+    });
+
+    it('Embedding 模式未绑定源 → 按时间先后兜底并记降级说明，不调 LLM', async () => {
+      const { run, orch, onRecall, fetchMock } = await runRecall({
+        responses: ['正文'],
+        mode: 'embedding',
+      });
+      expect(run.status).toBe('completed');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(orch.getResults().get('memory_recall')!.output).toContain('【回合摘要】第1回合');
+      expect(onRecall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: 'embedding',
+          status: 'ok',
+          notices: ['Embedding 召回绑定源无效，已按时间先后兜底'],
+        }),
+      );
+    });
+  });
+
+  it('v2 管线：召回先跑，剧情前置检查显式等召回，Story 等两者', async () => {
+    const { STORY_CONTEXT_V2_PIPELINE } = await import('../../../src/core/types/types');
+    expect(STORY_CONTEXT_V2_PIPELINE.stages.slice(0, 3)).toEqual([
+      { agents: ['memory_recall'], waitFor: [] },
+      { agents: ['plot_pre_check'], waitFor: ['memory_recall'] },
+      { agents: ['story'], waitFor: ['memory_recall', 'plot_pre_check'] },
+    ]);
+  });
+
+  it('组装失败（N 非法）时 Story 报错，不回落旧组装', async () => {
+    globalThis.fetch = mockFetch('不该被请求');
+    const orch = new AgentOrchestrator({
+      pipeline: makeSimplePipeline(['story']),
+      context: makeContext(),
+      agentConfigs: [makeAgentConfig({ agentId: 'story' })],
+      endpoints: [makeEndpoint()],
+      saveId: 'save_v2',
+      storyContext: { windowTurns: 0, segments: [], archives: [] },
+    });
+
+    const run = await orch.run();
+    expect(run.status).toBe('failed');
+    expect(orch.getResults().get('story')!.error).toContain('Story 上下文新模式组装失败');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });

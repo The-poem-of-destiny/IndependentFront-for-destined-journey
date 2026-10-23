@@ -43,6 +43,7 @@ import type { AgentContext } from '@engine/types/types';
 import { createDefaultTime, formatGameTime, GAME_EPOCH_YEAR } from '@engine/time/time-system';
 import { normalizeRarity } from '@engine/content/field-enums';
 import { useSettingsStore } from './settings-store';
+import { createStoryContextV2Marker } from '@engine/story/story-context-mode';
 import {
   type CatalogItem,
   type CatalogData,
@@ -1887,6 +1888,11 @@ export const useCreateStore = defineStore('create', () => {
         openingPrompt: openingPrompt, // 🆕
         openingPromptConsumed: false, // 🆕
         plotSettings: JSON.parse(JSON.stringify(plotSettings.value)), // §5.2: 本档剧情配置随档落库（含雷点）
+        // Story 上下文新模式：建档即永久打标（计划 §11.3），必须早于任何一次生成或记忆写入。
+        // 开关只决定**新建**的档是哪种；之后关开关不会、也不能清掉这个标记。
+        ...(useSettingsStore().settings?.storyContextV2Enabled === true
+          ? { storyContextV2: createStoryContextV2Marker(Date.now()) }
+          : {}),
       } as any,
     };
 

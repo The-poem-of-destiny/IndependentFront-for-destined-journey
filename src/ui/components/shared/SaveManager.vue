@@ -6,6 +6,11 @@ import { useGameStore } from '../../stores/game-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
 import { buildSessionImportWarnings } from '../../lib/session-import-messages';
+import {
+  decideStoryContextAdmission,
+  isStoryContextV2Save,
+} from '@engine/story/story-context-mode';
+import { storyContextRejectionMessage } from '../../lib/story-context-admission';
 import { findLatestSave } from '../home/latest-save';
 import AppButton from './AppButton.vue';
 import AppModal from './AppModal.vue';
@@ -133,6 +138,15 @@ function newGame() {
 }
 
 function loadGame(saveId: string) {
+  // 前门提示：模式不匹配时留在存档窗口里说明原因（游戏页载入时还会再判一次，那里是权威闸门）
+  const admission = decideStoryContextAdmission(
+    game.saves.find((save) => save.id === saveId),
+    cfg.settings.storyContextV2Enabled === true,
+  );
+  if (!admission.ok) {
+    ui.toast(storyContextRejectionMessage(admission.reason), 'warning', 6000);
+    return;
+  }
   close();
   ui.navigate('game', saveId);
 }
@@ -386,12 +400,20 @@ function formatTime(timestamp: number) {
                 type="button"
                 class="save-select"
                 :aria-pressed="selectedSaveId === save.id"
-                :aria-label="`选择存档：${save.name || '未命名存档'}`"
+                :aria-label="`选择存档：${save.name || '未命名存档'}${isStoryContextV2Save(save) ? '（测试方案）' : ''}`"
                 @click.stop="selectedSaveId = save.id"
               >
                 <span class="save-avatar">{{ (save.metadata?.characterName || '?')[0] }}</span>
                 <span class="save-info">
-                  <span class="save-name">{{ save.name || '未命名存档' }}</span>
+                  <span class="save-name">
+                    {{ save.name || '未命名存档' }}
+                    <span
+                      v-if="isStoryContextV2Save(save)"
+                      class="save-badge"
+                      title="Story 上下文与记忆新模式的测试存档，只能在新模式开启时使用"
+                      >测试方案</span
+                    >
+                  </span>
                   <span class="save-meta text-muted">
                     {{ save.metadata?.characterName || '未知角色' }} · 第
                     {{ save.metadata?.totalTurns ?? 0 }} 回合
@@ -712,6 +734,20 @@ function formatTime(timestamp: number) {
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--theme-text-primary);
+}
+/* 测试方案徽章：强调徽章通用配方（design.md §1） */
+.save-badge {
+  display: inline-block;
+  margin-left: var(--theme-spacing-xs);
+  padding: 0 var(--theme-spacing-xs);
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 36%, var(--theme-card-border));
+  border-radius: var(--theme-radius-sm);
+  color: var(--theme-warning);
+  background: color-mix(in srgb, var(--theme-warning) 12%, transparent);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.5;
+  vertical-align: middle;
 }
 .save-meta {
   font-size: 0.72rem;

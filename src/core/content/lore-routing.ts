@@ -10,7 +10,7 @@
  *    依赖关系不授予额外读取权限（§3.2）。
  * 纯函数、无 I/O；不修改入参。
  */
-import type { WorldBook, WorldBookEntry } from '../types/types';
+import type { LoreSection, LoreReadContext, WorldBook, WorldBookEntry } from '../types/types';
 
 type BookLike = Pick<WorldBook, 'id' | 'lore'> & Partial<Pick<WorldBook, 'name' | 'partition'>>;
 type EntryLike = Pick<WorldBookEntry, 'uid'> & Partial<Pick<WorldBookEntry, 'extra' | 'name'>>;
@@ -25,6 +25,11 @@ export function loreEntryKey(book: BookLike, entry: EntryLike): string {
 /** 条目的读取范围：只认条目自己的 `extra.lore.audiences`；没有 = 谁也不能读。 */
 function loreEntryAudiences(_book: BookLike, entry: EntryLike): readonly string[] {
   return entry.extra?.lore?.audiences ?? [];
+}
+
+/** 条目在 Story 新模式里的放置：只认条目自己的声明；没有 = 未声明（消费端默认固定区）。 */
+export function loreEntrySection(_book: BookLike, entry: EntryLike): LoreSection | undefined {
+  return entry.extra?.lore?.section;
 }
 
 /** 唯一的可见性判据。 */
@@ -60,6 +65,7 @@ export function resolveLoreDependenciesForAgent(
   agentId: string,
   books: readonly WorldBook[],
   recentText = '',
+  readContext?: LoreReadContext,
 ): {
   entries: RoutedLoreEntry[];
   closures: ReadonlyMap<string, readonly RoutedLoreEntry[]>;
@@ -84,7 +90,7 @@ export function resolveLoreDependenciesForAgent(
     if (!isLoreEntryVisibleTo(agentId, r.book, r.entry)) return 'not-readable';
     if (
       (r.entry.extra?.lore?.activation?.excludeKeywords ?? []).some(
-        (word) => word !== '' && recentText.includes(word),
+        (word) => word !== '' && (readContext?.recentText ?? recentText).includes(word),
       )
     )
       return 'excluded';

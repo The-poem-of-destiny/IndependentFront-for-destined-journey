@@ -147,6 +147,8 @@ export type UiSettings = {
   worldBookDirty: boolean;
   /** 允许编辑内置世界书（默认只读保护） */
   allowEditBuiltInBooks: boolean;
+  /** 世界书激活和资料选择共用的历史消息数；0 表示只看当前输入。 */
+  loreHistoryMessages: number;
 
   // ═══ 剧情系统（新档默认值，捏人页初始化时读入）═══
   /** `'off' | 'side' | 'main'`，但历史数据可能是别的字符串，故不收窄 */
@@ -212,6 +214,17 @@ export type UiSettings = {
   homeBackdrop: boolean;
   /** 解锁调试入口与原始 Agent 诊断；默认关闭，不影响玩家可见的语义活动账本 */
   developerMode: boolean;
+  /**
+   * 「Story 上下文与记忆新模式」实验开关；默认关闭，**独立于** developerMode。
+   * 开启：只能使用带 `metadata.storyContextV2` 标记的测试档；关闭：只能使用普通存档。
+   * 判据统一走 `@engine/story/story-context-mode` 的 `decideStoryContextAdmission`。
+   */
+  storyContextV2Enabled: boolean;
+  /**
+   * 新模式召回的原文读取粒度（计划 D32，两种方案都实现、靠测试比较）：
+   * `turn` = 整回合玩家输入与正文；`snippet` = 与本轮最相关的段落加前后文。只影响测试档。
+   */
+  storyRecallRawMode: 'turn' | 'snippet';
 
   // ═══ 消息 & 系统事件可见性 ═══
   systemEventsVisible: boolean;

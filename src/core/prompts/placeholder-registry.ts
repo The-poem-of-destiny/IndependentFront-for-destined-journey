@@ -37,6 +37,7 @@ import {
 import { parseSetvars, resolveGetvars, resolveRandoms } from './preset-loader';
 import { buildZoneContext, filterZoneContent, getAgentZoneVisibility } from './context-visibility';
 import { defaultHistoryLayers } from './agent-templates';
+import { parseStoryTurnSummaryOutput } from '../memory/story-turn-summary';
 import { formatGameTime, getSeason, toGameDay, type GameTime } from '../time/time-system';
 import { buildMapSnapshot, developmentLevelName } from '../map/map-context';
 import type {
@@ -203,7 +204,12 @@ function resolveLoreBookSection(
 ): string {
   if (_worldBooks.length === 0 || _configs.length === 0) return '';
   const agentId = config.agentId || '';
-  const entries = getEntriesForAgent(agentId, _worldBooks, loreRecentText(ctx));
+  const entries = getEntriesForAgent(
+    agentId,
+    _worldBooks,
+    loreRecentText(ctx),
+    ctx.loreReadContext,
+  );
   if (entries.length === 0) return '';
   const activeEntries = filterActiveEntries(entries);
 
@@ -1077,7 +1083,19 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
   'AGENT.MEMORY_SUMMARY': (ctx, _config, _params) => {
     const v = ctx.agentOutputs?.get('memory_summary');
     if (!v) return '';
-    return typeof v === 'string' ? v : JSON.stringify(v);
+    const raw = typeof v === 'string' ? v : JSON.stringify(v);
+    // 新模式只投影给文本消费者；agentOutputs/rawResponse 保留原结构供正式解析。
+    if (ctx.storyOpenEvents !== undefined) {
+      const draft = parseStoryTurnSummaryOutput(raw);
+      return (
+        draft?.segments
+          .map((segment) =>
+            segment.eventName ? `【${segment.eventName}】${segment.content}` : segment.content,
+          )
+          .join('\n\n') ?? ''
+      );
+    }
+    return raw;
   },
 
   /** {{AGENT.REQUEST_DISPATCHER}} — request_dispatcher 调度器输出 */
@@ -1086,6 +1104,20 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     if (!v) return '';
     return typeof v === 'string' ? v : JSON.stringify(v);
   },
+
+  /**
+   * {{STORY_OPEN_EVENTS}} — Story 上下文新模式（v2）：本轮开始时的未结事件清单，
+   * 供每回合总结先做归档判断。文本由管线经 `ctx.storyOpenEvents` 供值（渲染在
+   * memory/story-archive.ts）；旧模式缺席 = 空串。
+   */
+  STORY_OPEN_EVENTS: (ctx, _config, _params) => ctx.storyOpenEvents ?? '',
+
+  /**
+   * {{STORY_RECALL_CANDIDATES}} — Story 上下文新模式（v2）：本轮可召回的记忆候选清单
+   * （事件档案 A1… + 回合摘要 S1…），供召回 Agent 按编号挑选。文本由管线经
+   * `ctx.storyRecallCandidates` 供值（渲染在 memory/story-recall.ts）；旧模式缺席 = 空串。
+   */
+  STORY_RECALL_CANDIDATES: (ctx, _config, _params) => ctx.storyRecallCandidates ?? '',
 
   // ---- Chain Communication Placeholders (5) (localParams injected) ----
   // 图像生成 G 阶段: `image_prompt` 侧链的输入块，由 callImagePromptAgent 经 localParams 注入

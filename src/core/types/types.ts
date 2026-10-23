@@ -93,7 +93,14 @@ export interface WorldBookEntry {
  */
 export type LoreSection = 'fixed' | 'region' | 'turn';
 
-/** Declarative relevance and hard exclusions. */
+/** Explicit v2 read policy; absent in legacy assemblies. */
+export interface LoreReadContext {
+  location: string;
+  recentText: string;
+  gameTime?: GameTime;
+}
+
+/** Relevance is OR; readWhen is a separate, non-bypassable Story v2 read gate. */
 export interface LoreActivation {
   /** A location path segment contains a declared name. */
   locations?: string[];
@@ -578,6 +585,35 @@ export const DEFAULT_AGENT_PIPELINE: Pipeline = {
     { agents: ['request_dispatcher', 'memory_summary'], waitFor: ['story'] },
     // Stage 3: 变量更新 + 剧情复检（并行 —— 各自独立依赖，互不连坐：
     //          vars_update 不需要 memory_summary，plot_post_check 不需要 dispatcher）
+    {
+      agents: ['vars_update', 'plot_post_check'],
+      waitFor: ['story', 'request_dispatcher', 'memory_summary'],
+      agentWaitFor: {
+        vars_update: ['story', 'request_dispatcher'],
+        plot_post_check: ['story', 'memory_summary'],
+      },
+    },
+  ],
+};
+
+/**
+ * Story 上下文新模式（v2）测试档使用的管线（计划 §2.4 / §10）。
+ *
+ * 与 DEFAULT 的差别在前两层：`memory_recall` 单独先跑（v2 回合里它读的是每回合摘要与
+ * 阶段归档，编排器按 `storyContext.recall` 走新模式召回，结果展开成正文），剧情前置检查
+ * **显式等它**再跑 —— 前置检查模板读 `{{AGENT.MEMORY_RECALL}}`，并行时读到的永远是空
+ * （计划 §10 第 5 步）。新模式召回失败不报错（输出空串），不会连坐前置检查与 Story。
+ * 摘要仍由 memory_summary 在 Stage 2 产出（v2 回合里它换用每回合摘要契约）。
+ */
+export const STORY_CONTEXT_V2_PIPELINE: Pipeline = {
+  timeout: 120000,
+  retryOnFail: true,
+  requiredAgents: ['story'],
+  stages: [
+    { agents: ['memory_recall'], waitFor: [] },
+    { agents: ['plot_pre_check'], waitFor: ['memory_recall'] },
+    { agents: ['story'], waitFor: ['memory_recall', 'plot_pre_check'] },
+    { agents: ['request_dispatcher', 'memory_summary'], waitFor: ['story'] },
     {
       agents: ['vars_update', 'plot_post_check'],
       waitFor: ['story', 'request_dispatcher', 'memory_summary'],
@@ -1884,6 +1920,10 @@ export interface AgentContext {
   /** 用户任务列表 (Phase 10g) */
   quests?: Record<string, Quest>;
   agentOutputs: Map<string, any>; // 上游 Agent 的输出
+  /** Present only while assembling Story v2, including its indirect EJS reads. */
+  loreReadContext?: LoreReadContext;
+  /** 世界书检索使用的历史消息数；缺省 6，0 表示仅使用当前输入。 */
+  loreHistoryMessages?: number;
 
   // --- Phase 10: Plot mode ---
   /** 剧情模式配置（用于 orchestrator 决定是否跳过 plot_* agent） */
@@ -1961,6 +2001,16 @@ export interface AgentContext {
    * 🔴 缺席 / 空数组 = 池空 → 整段不出（零 token）。
    */
   randomEventOffer?: RandomEventOfferEntry[];
+  /**
+   * Story 上下文新模式（v2）：本轮开始时仍未结束的事件及其摘要（已渲染文本），
+   * 供总结 Agent 先做归档判断（`{{STORY_OPEN_EVENTS}}`）。旧模式缺席 = 渲染为空。
+   */
+  storyOpenEvents?: string;
+  /**
+   * Story 上下文新模式（v2）：本轮可召回的记忆候选清单（已渲染文本，带 A1 / S1 编号），
+   * 供召回 Agent 挑选（`{{STORY_RECALL_CANDIDATES}}`）。旧模式缺席 = 渲染为空。
+   */
+  storyRecallCandidates?: string;
   /**
    * 随机事件总开关的当前值（`engine-settings.randomEventsEnabled`）。
    *
@@ -2207,6 +2257,140 @@ export interface DebugTurnRecord {
   startedAt: number;
   completedAt?: number;
   entries: DebugAgentEntry[];
+  /** Story 上下文新模式（v2）本回合的分区 / 召回 / 资料选择诊断；旧模式回合缺席 */
+  storyContext?: StoryContextDebugRecord;
+}
+
+// ========== Story 上下文新模式（v2）诊断 ==========
+
+export type StoryContextBudgetCategory =
+  | 'fixed'
+  | 'longTerm'
+  | 'region'
+  | 'summary'
+  | 'rawHistory'
+  | 'turnLore'
+  | 'recall'
+  | 'currentFactsAndDirections'
+  | 'outputReserve';
+
+/** 字符 / 1.5 的输入粗估，不是 provider token；outputReserve 为实际请求预留而非 usage。 */
+export interface StoryContextBudgetItem {
+  chars: number;
+  estimatedTokens: number;
+}
+
+export interface StoryContextBudgetRemoval extends StoryContextBudgetItem {
+  key: string;
+  category: StoryContextBudgetCategory;
+  reason: string;
+}
+
+/** 分区组装诊断（`buildStoryContextV2Messages` 产出，计划 §12.3）。 */
+export interface StoryContextV2Diagnostics {
+  windowTurns: number;
+  /** 进入第 2 区长期总览的有效归档 id（历史年表顺序） */
+  archiveIds: string[];
+  /** 进入第 4 区原文的回合 key */
+  windowTurnKeys: string[];
+  /** 进入第 4 区的摘要片段 id */
+  summarySegmentIds: string[];
+  /** 窗口外缺少有效摘要、以原文顶上的回合 key */
+  missingSummaryTurnKeys: string[];
+  /** 各区注入字符数（粗略用量；不是 provider token） */
+  zoneChars: Record<1 | 2 | 3 | 4 | 5, number>;
+  /** 本轮全部消息的字符数（含普通预设条目与本轮输入） */
+  totalChars: number;
+  /** Actual output reserve after provider body overrides/omissions (not provider usage). */
+  outputReservedTokens?: number;
+  budgetDroppedLoreKeys?: string[];
+  budgetDroppedRecall?: boolean;
+  /** 最终消息完整分类（含模板指令、标签与分隔符），不含凭据或正文。 */
+  budgetCategories?: Record<StoryContextBudgetCategory, StoryContextBudgetItem>;
+  /** EJS 前按依赖组移除的每项；字符数来自模板原文，不冒充渲染后 provider 用量。 */
+  budgetRemovals?: StoryContextBudgetRemoval[];
+  /** 第 1 / 3 / 5 区实际注入的世界书条目（稳定条目键）；资料选择接入前只有第 1 区 */
+  loreKeysByZone?: Partial<Record<1 | 3 | 5, string[]>>;
+}
+
+/** 召回展开诊断（`expandStoryRecall`）。 */
+export interface StoryRecallExpansionDiagnostics {
+  rawMode: 'turn' | 'snippet';
+  selectedRefs: string[];
+  /** 贴了原文（整回合或片段）的回合 key */
+  rawTurnKeys: string[];
+  /** 原文在第 4 区窗口内、未重复贴出的回合 key */
+  inWindowTurnKeys: string[];
+  /** 因原文总量上限省略的回合 key */
+  omittedTurnKeys: string[];
+  /** 实际输出 / 预算省略的原文段落范围（0-based，按真实来源段落定位）。 */
+  paragraphRanges?: Array<{
+    ref: string;
+    turnKey: string;
+    start: number;
+    end: number;
+    omitted: boolean;
+  }>;
+  /** 已贴原文的字数（不含摘要与档案） */
+  rawChars: number;
+  /** 召回块总字数 */
+  chars: number;
+}
+
+/** 一次新模式召回的回报（管线据此提示与记日志；不含向量与凭据）。 */
+export interface StoryRecallReport {
+  mode: 'llm' | 'embedding';
+  /** `empty` = 没有候选，未发请求；`failed` = 本轮无召回（不阻断 Story） */
+  status: 'ok' | 'empty' | 'failed';
+  error?: string;
+  /** 非致命的降级说明（未绑定 Embedding 源 / 查询向量失败 / 重排失败 / 无效编号） */
+  notices: string[];
+  candidateCount: number;
+  expansion?: StoryRecallExpansionDiagnostics;
+}
+
+/** 资料选择（lore_select）诊断：必选 / 候选 / 选中 / 补充与回退原因。 */
+export interface StoryLoreSelectionDiagnostics {
+  /** Stable keys and deterministic reason codes only; never entry bodies or credentials. */
+  decisions?: Array<{
+    key: string;
+    reason: string;
+    outcome: 'selected' | 'excluded';
+    zone?: 1 | 3 | 5;
+  }>;
+  status: 'ok' | 'skipped' | 'fallback';
+  /** 回退原因（调用失败 / 输出认不出 / 未配置端点） */
+  fallbackReason?: string;
+  fixedKeys: string[];
+  regionKeys: string[];
+  requiredKeys: string[];
+  candidateKeys: string[];
+  selectedKeys: string[];
+  supplementKeys: string[];
+  budgetDroppedKeys?: string[];
+  /** 模型给出、但不在允许范围内的引用（不生效） */
+  rejectedRefs: string[];
+  /** 依赖展开进来的条目，以及因读取范围被拒的依赖 */
+  dependencyKeys: string[];
+  blockedDependencyKeys: string[];
+  /** 当前区域（位置路径）与第 3 区快照键 */
+  regionPath: string[];
+  regionSnapshotKey: string;
+  reason?: string;
+}
+
+/** 调试面板「Story 分区」一回合的全部诊断。 */
+export interface StoryContextDebugRecord {
+  assembly?: StoryContextV2Diagnostics & {
+    /** 粗估 token（字符数 / 1.5，不是 provider 计数）与端点上下文窗口（未配置则缺席） */
+    estimatedTokens: number;
+    contextWindowTokens?: number;
+    overBudget: boolean;
+  };
+  recall?: StoryRecallReport;
+  lore?: StoryLoreSelectionDiagnostics;
+  /** 本回合结束后补建的缺失摘要（回合 key）与补建失败的回合 */
+  backfill?: { turnKeys: string[]; failedTurnKeys: string[] };
 }
 
 /** 玩家可见的单次 Agent 工具活动；只保留语义化文案，不携带原始参数或响应。 */
@@ -4488,40 +4672,4 @@ export interface AssetMetaRecord {
 export interface AssetBlobRecord {
   id: string; // === AssetMetaRecord.id
   blob: Blob;
-}
-
-/** 召回展开诊断（`expandStoryRecall`）。 */
-export interface StoryRecallExpansionDiagnostics {
-  rawMode: 'turn' | 'snippet';
-  selectedRefs: string[];
-  /** 贴了原文（整回合或片段）的回合 key */
-  rawTurnKeys: string[];
-  /** 原文在第 4 区窗口内、未重复贴出的回合 key */
-  inWindowTurnKeys: string[];
-  /** 因原文总量上限省略的回合 key */
-  omittedTurnKeys: string[];
-  /** 实际输出 / 预算省略的原文段落范围（0-based，按真实来源段落定位）。 */
-  paragraphRanges?: Array<{
-    ref: string;
-    turnKey: string;
-    start: number;
-    end: number;
-    omitted: boolean;
-  }>;
-  /** 已贴原文的字数（不含摘要与档案） */
-  rawChars: number;
-  /** 召回块总字数 */
-  chars: number;
-}
-
-/** 一次新模式召回的回报（管线据此提示与记日志；不含向量与凭据）。 */
-export interface StoryRecallReport {
-  mode: 'llm' | 'embedding';
-  /** `empty` = 没有候选，未发请求；`failed` = 本轮无召回（不阻断 Story） */
-  status: 'ok' | 'empty' | 'failed';
-  error?: string;
-  /** 非致命的降级说明（未绑定 Embedding 源 / 查询向量失败 / 重排失败 / 无效编号） */
-  notices: string[];
-  candidateCount: number;
-  expansion?: StoryRecallExpansionDiagnostics;
 }

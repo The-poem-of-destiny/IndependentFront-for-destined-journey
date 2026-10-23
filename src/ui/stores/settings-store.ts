@@ -37,6 +37,7 @@ import {
   DEFAULT_IMAGE_MODEL,
 } from '@engine/image/image-defaults';
 import { FALLBACK_IMAGE_DIALECT } from '@engine/image/image-dialect';
+import { DEFAULT_LORE_HISTORY_MESSAGES } from '@engine/content/lore-activation';
 import { detach } from './db-write';
 import {
   LEGACY_AGENT_WORLDBOOK_STASH_KEY,
@@ -249,6 +250,7 @@ function getDefaults(): UiSettings {
     activeWorldBookId: null,
     worldBookDirty: false,
     allowEditBuiltInBooks: false, // 允许编辑内置世界书（默认只读保护）
+    loreHistoryMessages: DEFAULT_LORE_HISTORY_MESSAGES,
 
     // 剧情系统（新档默认值 — 捏人页初始化时读入，字段形状对齐 create-store / types.ts PlotSettings）
     plotMode: 'off',
@@ -294,6 +296,10 @@ function getDefaults(): UiSettings {
     // 开发者模式 —— 默认关闭。只控制诊断入口与原始技术细节；玩家可见的回合活动账本
     // 始终保留游戏语言，不随这个开关消失或变成控制台。
     developerMode: false,
+    // Story 上下文与记忆新模式（实验）—— 默认关闭；仅开发者模式不会连带开启它
+    storyContextV2Enabled: false,
+    // 新模式召回的原文粒度（D32）：默认整回合，开发者卡片里切换比较
+    storyRecallRawMode: 'turn',
 
     // 消息 & 系统事件可见性
     systemEventsVisible: true,

@@ -14,6 +14,7 @@
  */
 
 import type { AgentPreset } from '../types/types';
+import { isStoryZonePlaceholder } from './story-zone-placeholders';
 
 // 🪦 D28（波 1 T2）: `PRESET_BASE = '/data/presets/'` 常量已删（死路径，见文件尾注释）。
 
@@ -156,6 +157,24 @@ export function preprocessEntry(
   return result;
 }
 
+/**
+ * 逐条预处理一组预设条目，返回与输入**等长**的正文数组（Story 上下文 v2 分段装配用）。
+ *
+ * 与 `assemblePresetContent` 同一口径：setvar 变量表跨**全部**传入条目收集（后者覆盖），
+ * 再逐条替换 / 剥离；没有任何 ST 宏时原文照用。不追加默认上下文块、不拼接 ——
+ * 分段与分区位置由调用方决定。
+ */
+export function preprocessPresetEntryContents(
+  entries: ReadonlyArray<{ content?: unknown }>,
+  opts?: { characterName?: string; userName?: string },
+): string[] {
+  const raws = entries.map((e) => (typeof e.content === 'string' ? e.content : ''));
+  if (!raws.some((raw) => hasSTMacros(raw))) return raws;
+  const vars: SetvarMap = {};
+  for (const raw of raws) Object.assign(vars, parseSetvars(raw).variables);
+  return raws.map((raw) => (raw.trim() ? preprocessEntry(raw, vars, opts) : ''));
+}
+
 /** 检查内容是否包含任何需要预处理的 ST 宏 */
 export function hasSTMacros(content: string): boolean {
   return /\{\{(?:setvar::|getvar::|random::|\/\/|roll\s|char\}\}|user\}\})/.test(content);
@@ -196,8 +215,19 @@ export function assemblePresetContent(
   defaultContextBlock?: string,
   opts?: { characterName?: string; userName?: string },
 ): string {
-  const prompts = (preset as any).settings?.prompts;
-  if (!prompts || !Array.isArray(prompts)) {
+  const rawPrompts = (preset as any).settings?.prompts;
+  if (!rawPrompts || !Array.isArray(rawPrompts)) {
+    return [preset.fixedSystem, preset.fixedExamples].filter(Boolean).join('\n\n');
+  }
+  // 五区占位条目在本路径（旧模式装配）一律展开为空（D27）：不进拼接，也不留空行。
+  const prompts = rawPrompts.filter((p: any) => !isStoryZonePlaceholder(p));
+  // 只剩占位的老式预设（`fixedSystem` 形）：占位是 UI 读取视图补上的，不该把它从
+  // fixedSystem 路径切到「空条目 + 默认上下文块」。
+  if (
+    prompts.length === 0 &&
+    rawPrompts.length > 0 &&
+    (preset.fixedSystem || preset.fixedExamples)
+  ) {
     return [preset.fixedSystem, preset.fixedExamples].filter(Boolean).join('\n\n');
   }
 
@@ -288,7 +318,7 @@ export function preprocessPresetForPreview(
   if (!prompts || !Array.isArray(prompts)) return '';
 
   const sorted = [...prompts]
-    .filter((p: any) => p.enabled !== false)
+    .filter((p: any) => p.enabled !== false && !isStoryZonePlaceholder(p))
     .sort((a: any, b: any) => (a.injection_order ?? 0) - (b.injection_order ?? 0));
 
   // Pass 1: 收集所有 setvar → 变量表 (后者覆盖)

@@ -37,14 +37,6 @@ export function loadWorldBooksSync(
   return ids.filter((id) => preloaded[id]).map((id) => preloaded[id]);
 }
 
-/** Bounded relevance text shared by direct and indirect lore reads. */
-export function loreRecentText(
-  ctx: Pick<import('../types/types').AgentContext, 'history' | 'userInput'>,
-): string {
-  const recent = ctx.history.filter((m) => m.role === 'user' || m.role === 'assistant').slice(-6);
-  return [ctx.userInput, ...recent.map((m) => m.content)].join('\n');
-}
-
 // ========== 过滤 ==========
 
 /**
@@ -61,11 +53,14 @@ export function getEntriesForAgent(
   agentId: string,
   books: readonly WorldBook[],
   recentText = '',
+  readContext?: import('../types/types').LoreReadContext,
 ): WorldBookEntry[] {
-  return resolveLoreDependenciesForAgent(agentId, books, recentText).entries.map(
+  return resolveLoreDependenciesForAgent(agentId, books, recentText, readContext).entries.map(
     (routed) => routed.entry,
   );
 }
+
+export { loreRecentText } from './lore-activation';
 
 /**
  * 过滤应激活的条目。
@@ -306,10 +301,20 @@ function assembleResult(
   };
 }
 
+function entryTextMap(
+  entries: WorldBookEntry[],
+  dynamicParts: string[],
+): Map<WorldBookEntry, string> {
+  const texts = new Map<WorldBookEntry, string>();
+  let index = 0;
+  for (const entry of [...entries].sort((a, b) => a.order - b.order))
+    texts.set(entry, hasDynamic(entry.content) ? dynamicParts[index++] : entry.content);
+  return texts;
+}
 export function renderWorldBookEntries(
   entries: WorldBookEntry[],
   ejsCtx: EjsEvalContext,
-): WorldBookRenderResult {
+): WorldBookRenderResult & { entryTexts: Map<WorldBookEntry, string> } {
   const { staticParts, slots } = partitionEntries(entries);
   const dynamicParts: string[] = [];
   const fallbackEntries: Array<{ uid: number; error: string }> = [];
@@ -363,7 +368,10 @@ export function renderWorldBookEntries(
     }
   }
 
-  return assembleResult(staticParts, dynamicParts, fallbackEntries);
+  return {
+    ...assembleResult(staticParts, dynamicParts, fallbackEntries),
+    entryTexts: entryTextMap(entries, dynamicParts),
+  };
 }
 
 /**
@@ -382,7 +390,7 @@ export function renderWorldBookEntries(
 export async function prerenderWorldBookEntries(
   entries: WorldBookEntry[],
   ejsCtx: EjsEvalContext,
-): Promise<WorldBookRenderResult> {
+): Promise<WorldBookRenderResult & { entryTexts: Map<WorldBookEntry, string> }> {
   // 分区与同步版共用（见 partitionEntries）；本函数只多一件事：动态区整批交给后端
   const { staticParts, slots: dynamicSlots } = partitionEntries(entries);
   const fallbackEntries: Array<{ uid: number; error: string }> = [];
@@ -426,5 +434,8 @@ export async function prerenderWorldBookEntries(
     }
   }
 
-  return assembleResult(staticParts, dynamicParts, fallbackEntries);
+  return {
+    ...assembleResult(staticParts, dynamicParts, fallbackEntries),
+    entryTexts: entryTextMap(entries, dynamicParts),
+  };
 }
