@@ -3,9 +3,14 @@ import { ref, computed } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { deleteMemory } from '@engine/persistence/database';
 import type { MemoryRecord } from '@engine/types/types';
+import { isStoryContextV2Save } from '@engine/story/story-context-mode';
 import AppButton from '../shared/AppButton.vue';
+import StoryMemoryV2Panel from './StoryMemoryV2Panel.vue';
 
 const game = useGameStore();
+
+/** 测试档（Story 上下文新模式）用新的三层记忆展示；普通存档保留旧记忆卡片墙（计划 §12.2） */
+const isV2Save = computed(() => isStoryContextV2Save(game.activeSave));
 
 // ===== 列表态 =====
 const searchQuery = ref('');
@@ -129,8 +134,10 @@ async function removeSelected() {
 
 <template>
   <div class="memory-panel">
+    <StoryMemoryV2Panel v-if="isV2Save" />
+
     <!-- ========== 详情视图 ========== -->
-    <div v-if="selected" class="memory-detail">
+    <div v-else-if="selected" class="memory-detail">
       <div class="detail-toolbar">
         <button class="back-btn" aria-label="返回列表" @click="backToList">← 返回</button>
         <span class="detail-title">记忆详情</span>

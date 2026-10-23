@@ -29,6 +29,9 @@ import type {
   WorldBook,
   WorkshopProject,
   ChatPreset,
+  StoryArchiveRecord,
+  StoryTurnSummaryRecord,
+  StoryArchiveRetryRecord,
 } from '../../../src/core/types/types';
 import type {
   SceneImageRecord,
@@ -49,19 +52,31 @@ import {
   getEntriesForAgent,
 } from '../../../src/core/content/worldbook-loader';
 import { planSaveUidMigration } from '../../../src/core/content/content-pack-plan';
+import {
+  storyTurnSource,
+  storySegmentFingerprint,
+  storyMemorySourceMatches,
+} from '../../../src/core/memory/story-memory-source';
+import {
+  collectCompleteStoryTurns,
+  resolveValidStorySegments,
+  resolveActiveStoryArchives,
+  findStoryTurnsMissingSummary,
+} from '../../../src/core/memory/memory-context';
 
 describe('A09：拆分装包后导入旧档', () => {
   beforeEach(async () => {
     await initializeDatabase();
     await clearAllData();
   });
-  it('显式来源展开父 token，保留历史', async () => {
+  it.each([false, true])('显式来源展开父 token，保留历史和永久测试标记（v2=%s）', async (v2) => {
     await seedSave();
     const db = getDatabase();
     const backup = await exportSessionSave(SAVE_ID);
     backup.dependencies.packs = [];
     backup.dependencies.worldBookEntries = [{ token: 'character:42' }];
     backup.save.metadata.enabledWorldBookEntries = ['character:42'];
+    if (v2) backup.save.metadata.storyContextV2 = { schema: 1, markedAt: 1 };
     const part = (uid: number, index: number) => ({
       ...makeEntry(uid, `part-${index}`),
       extra: {
@@ -87,6 +102,7 @@ describe('A09：拆分装包后导入旧档', () => {
     const { saveId } = await importSessionSave(backup);
     const save = (await db.saves.get(saveId))!;
     expect(save.metadata.enabledWorldBookEntries).toEqual(['character:101', 'character:102']);
+    expect(save.metadata.storyContextV2).toEqual(backup.save.metadata.storyContextV2);
     const messages = await db.messages.where('saveId').equals(saveId).toArray();
     expect(messages.map((m) => m.content).sort()).toEqual(
       backup.messages.map((m) => m.content).sort(),
@@ -130,6 +146,333 @@ describe('A09：拆分装包后导入旧档', () => {
     expect((await db.saves.get(saveId))!.metadata.enabledWorldBookEntries).toEqual(
       backup.save.metadata.enabledWorldBookEntries,
     );
+  });
+});
+
+describe('Story memory source and archive retry backup lifecycle', () => {
+  beforeEach(async () => {
+    await initializeDatabase();
+    await clearAllData();
+  });
+
+  async function memoryBackup() {
+    await seedSave();
+    const backup = await exportSessionSave(SAVE_ID);
+    backup.save.metadata.storyContextV2 = { schema: 1, markedAt: 1 };
+    for (const [index, message] of backup.messages.entries()) {
+      message.timestamp = index + 1;
+      message.storyTurnStatus = 'accepted';
+      if (message.role === 'assistant') message.storyTurnKey = MSG_A;
+      message.storyGameTime = {
+        era: '测试',
+        year: 1,
+        month: 1,
+        day: 1,
+        weekday: 1,
+        hour: 0,
+        minute: 0,
+      };
+    }
+    for (const payload of backup.snapshotPayloads) {
+      payload.messages = payload.messages?.map((message) => ({
+        ...message,
+        storyTurnStatus: 'accepted',
+        ...(message.role === 'assistant' ? { storyTurnKey: MSG_A } : {}),
+      }));
+    }
+    const source = storyTurnSource(collectCompleteStoryTurns(backup.messages)[0]);
+    const summary: StoryTurnSummaryRecord = {
+      ...source,
+      id: 'segment-old',
+      saveId: SAVE_ID,
+      order: 0,
+      content: '合成事件摘要',
+      eventName: '合成事件',
+      createdAt: 1,
+    };
+    const pending: StoryTurnSummaryRecord = {
+      ...summary,
+      id: 'pending-old',
+      order: 1,
+      content: '尚未提交的摘要',
+    };
+    const archive: StoryArchiveRecord = {
+      ...source,
+      id: 'archive-old',
+      saveId: SAVE_ID,
+      eventName: '合成事件',
+      outcome: 'completed',
+      evidence: '雨水',
+      overview: '合成概括',
+      detail: { cause: '', process: '', ending: '', promises: '', impact: '' },
+      detailSource: 'summary',
+      sequence: 0,
+      createdAt: 1,
+      coveredSegmentIds: [summary.id],
+      coveredSources: [source],
+      coveredSegmentFingerprints: { [summary.id]: storySegmentFingerprint(summary) },
+    };
+    const draft = {
+      ...archive,
+      id: 'draft-old',
+      coveredSegmentIds: [summary.id, pending.id],
+      coveredSegmentFingerprints: {
+        ...archive.coveredSegmentFingerprints,
+        [pending.id]: storySegmentFingerprint(pending),
+      },
+    };
+    const retry: StoryArchiveRetryRecord = {
+      ...source,
+      id: 'retry-old',
+      saveId: SAVE_ID,
+      rawOutput: '合成原始判断',
+      archives: [draft],
+      summaries: [pending],
+      coveredSegmentIds: draft.coveredSegmentIds,
+      coveredSources: [source],
+      coveredSegmentFingerprints: draft.coveredSegmentFingerprints,
+      createdAt: 1,
+    };
+    backup.storyTurnSummaries = [summary];
+    backup.storyArchives = [archive];
+    backup.storyArchiveRetries = [retry];
+    return { backup, summary, pending, archive, retry };
+  }
+
+  it('重复导入重映射顶层/嵌套来源与覆盖键，保留所有指纹及未提交摘要，不串档', async () => {
+    const { backup, summary, pending, archive, retry } = await memoryBackup();
+    const input = JSON.stringify(backup);
+    const exports: SessionBackup[] = [];
+    for (let i = 0; i < 2; i++) {
+      const { saveId } = await importSessionSave(backup);
+      const imported = await exportSessionSave(saveId);
+      exports.push(imported);
+      const nextSummary = imported.storyTurnSummaries![0];
+      const nextArchive = imported.storyArchives![0];
+      const nextRetry = imported.storyArchiveRetries![0];
+      const nextPending = nextRetry.summaries![0];
+      const nextDraft = nextRetry.archives[0];
+      const turns = collectCompleteStoryTurns(
+        imported.messages.sort((a, b) => a.timestamp - b.timestamp || (a.role === 'user' ? -1 : 1)),
+      );
+      for (const row of [
+        nextSummary,
+        nextPending,
+        nextArchive,
+        nextRetry,
+        nextDraft,
+        ...nextRetry.coveredSources,
+        ...nextArchive.coveredSources!,
+      ]) {
+        expect(storyMemorySourceMatches(row, turns[0])).toBe(true);
+        expect(row.sourceFingerprint).toBe(summary.sourceFingerprint);
+        expect(row.sourceMessageIds).not.toContain(MSG_A);
+      }
+      for (const row of [nextSummary, nextPending, nextArchive, nextRetry, nextDraft])
+        expect(row.saveId).toBe(saveId);
+      expect(nextSummary.id).not.toBe(summary.id);
+      expect(nextPending.id).not.toBe(pending.id);
+      expect(nextArchive.id).not.toBe(archive.id);
+      expect(nextRetry.id).not.toBe(retry.id);
+      expect(nextDraft.id).not.toBe(retry.archives[0].id);
+      expect(nextArchive.coveredSegmentIds).toEqual([nextSummary.id]);
+      expect(nextArchive.coveredSegmentFingerprints).toEqual({
+        [nextSummary.id]: storySegmentFingerprint(summary),
+      });
+      const expected = {
+        [nextSummary.id]: storySegmentFingerprint(summary),
+        [nextPending.id]: storySegmentFingerprint(pending),
+      };
+      expect(nextRetry.coveredSegmentFingerprints).toEqual(expected);
+      expect(nextDraft.coveredSegmentFingerprints).toEqual(expected);
+      expect(nextDraft.coveredSegmentIds).toEqual([nextSummary.id, nextPending.id]);
+      expect(nextRetry.rawOutput).toBe(retry.rawOutput);
+      const user = imported.messages.find((m) => m.role === 'user')!;
+      const assistant = imported.messages.find((m) => m.role === 'assistant')!;
+      expect(assistant.storyTurnKey).toBe(user.id);
+      expect(assistant.storyTurnStatus).toBe('accepted');
+      expect(assistant.storyGameTime).toEqual(backup.messages[1].storyGameTime);
+      expect(user.storyTurnKey).toBeUndefined();
+      const snapshotMessages = imported.snapshotPayloads[0].messages!;
+      expect(snapshotMessages.find((m) => m.role === 'assistant')!.storyTurnKey).toBe(user.id);
+      expect(nextSummary.characters).toBeUndefined();
+      expect(
+        resolveActiveStoryArchives(
+          imported.messages,
+          imported.storyArchives!,
+          imported.storyTurnSummaries!,
+        ),
+      ).toHaveLength(1);
+    }
+    expect(exports[0].storyTurnSummaries![0].id).not.toBe(exports[1].storyTurnSummaries![0].id);
+    expect(exports[0].storyArchiveRetries![0].summaries![0].id).not.toBe(
+      exports[1].storyArchiveRetries![0].summaries![0].id,
+    );
+    expect(JSON.stringify(backup)).toBe(input);
+    await deleteSaveSlot(exports[0].save.id);
+    expect(
+      await getDatabase().storyArchiveRetries.where('saveId').equals(exports[0].save.id).count(),
+    ).toBe(0);
+    expect(
+      await getDatabase().storyArchiveRetries.where('saveId').equals(exports[1].save.id).count(),
+    ).toBe(1);
+  });
+
+  it('旧 v2 缺指纹和语义字段保持未知，不能凭重映射后的 IDs 信任，仍出现补建缺口', async () => {
+    const { backup } = await memoryBackup();
+    delete backup.storyTurnSummaries![0].sourceFingerprint;
+    delete backup.storyArchives![0].sourceFingerprint;
+    delete backup.storyArchives![0].coveredSources;
+    delete backup.storyArchives![0].coveredSegmentFingerprints;
+    backup.storyArchiveRetries = undefined;
+    const { saveId } = await importSessionSave(backup);
+    const imported = await exportSessionSave(saveId);
+    const segment = imported.storyTurnSummaries![0];
+    const archive = imported.storyArchives![0];
+    expect(segment.sourceFingerprint).toBeUndefined();
+    expect(segment.characters).toBeUndefined();
+    expect(segment.locations).toBeUndefined();
+    expect(segment.topics).toBeUndefined();
+    expect(segment.gameTimeRange).toBeUndefined();
+    expect(archive.coveredSources).toBeUndefined();
+    expect(archive.coveredSegmentFingerprints).toBeUndefined();
+    imported.messages.sort((a, b) => a.timestamp - b.timestamp || (a.role === 'user' ? -1 : 1));
+    expect(
+      resolveValidStorySegments(collectCompleteStoryTurns(imported.messages), [segment]),
+    ).toEqual([]);
+    expect(findStoryTurnsMissingSummary(imported.messages, [segment])).toHaveLength(1);
+    expect(resolveActiveStoryArchives(imported.messages, [archive], [segment])).toEqual([]);
+  });
+
+  it('仅存在于快照的来源不是当前分支；孤儿丢弃，缺覆盖的归档/重试保留失效诊断', async () => {
+    const { backup, summary } = await memoryBackup();
+    const ghost = { ...backup.messages[1], id: 'snapshot-only' };
+    backup.snapshotPayloads[0].messages!.push(ghost);
+    backup.storyTurnSummaries!.push({
+      ...summary,
+      id: 'ghost-summary',
+      sourceTurnKey: ghost.id,
+      sourceMessageIds: [ghost.id],
+    });
+    backup.storyArchives![0].coveredSources!.push({
+      sourceTurnKey: ghost.id,
+      sourceMessageIds: [ghost.id],
+      sourceFingerprint: 'not-trusted',
+    });
+    backup.storyArchiveRetries![0].coveredSegmentIds.push('ghost-summary');
+    backup.storyArchiveRetries!.push({
+      ...backup.storyArchiveRetries![0],
+      id: 'orphan-retry',
+      sourceTurnKey: ghost.id,
+      sourceMessageIds: [ghost.id],
+    });
+    const { saveId } = await importSessionSave(backup);
+    const imported = await exportSessionSave(saveId);
+    expect(imported.storyTurnSummaries).toHaveLength(1);
+    expect(imported.storyArchives![0].invalidatedReason).toBe('coverage-missing');
+    expect(imported.storyArchives![0].coveredSources).toHaveLength(1);
+    expect(imported.storyArchiveRetries).toHaveLength(1);
+    expect(imported.storyArchiveRetries![0].invalidatedReason).toBe('coverage-missing');
+  });
+
+  it('opening 自引用随 ID 重发，pending/failed/diagnostic 隔离且语义字段原样保留', async () => {
+    const { backup } = await memoryBackup();
+    const opening: ChatMessage = {
+      id: 'opening',
+      role: 'assistant',
+      content: '合成开场正文',
+      timestamp: 0,
+      saveId: SAVE_ID,
+      storyTurnStatus: 'accepted',
+      storyTurnKey: 'opening',
+    };
+    backup.messages.unshift(opening);
+    const source = storyTurnSource(collectCompleteStoryTurns(backup.messages)[0]);
+    backup.storyTurnSummaries!.push({
+      ...source,
+      id: 'opening-summary',
+      saveId: SAVE_ID,
+      order: 0,
+      content: '开场摘要',
+      createdAt: 0,
+    });
+    const time = backup.messages[2].timestamp + 1;
+    for (const [index, status] of (['pending', 'failed'] as const).entries()) {
+      backup.messages.push(
+        {
+          id: `${status}-user`,
+          role: 'user',
+          content: `${status} input`,
+          timestamp: time + index * 2,
+          saveId: SAVE_ID,
+          storyTurnStatus: status,
+        },
+        {
+          id: `${status}-assistant`,
+          role: 'assistant',
+          content: `${status} output`,
+          timestamp: time + index * 2 + 1,
+          saveId: SAVE_ID,
+          storyTurnStatus: status,
+          storyTurnKey: `${status}-user`,
+        },
+      );
+    }
+    backup.messages.push(
+      {
+        id: 'diagnostic',
+        role: 'assistant',
+        content: 'diagnostic output',
+        timestamp: time + 10,
+        saveId: SAVE_ID,
+        diagnostic: true,
+        storyTurnStatus: 'accepted',
+        storyTurnKey: MSG_A,
+      },
+      {
+        id: 'unknown-owner',
+        role: 'assistant',
+        content: 'unmatched output',
+        timestamp: time + 11,
+        saveId: SAVE_ID,
+        storyTurnStatus: 'accepted',
+        storyTurnKey: 'absent-source',
+      },
+    );
+    const seenKeys: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const { saveId } = await importSessionSave(backup);
+      const imported = await exportSessionSave(saveId);
+      const messages = imported.messages.sort((a, b) => a.timestamp - b.timestamp);
+      const turns = collectCompleteStoryTurns(messages);
+      expect(turns).toHaveLength(2);
+      const nextOpening = messages.find((m) => m.content === opening.content)!;
+      expect(nextOpening.storyTurnKey).toBe(nextOpening.id);
+      seenKeys.push(nextOpening.storyTurnKey!);
+      expect(resolveValidStorySegments(turns, imported.storyTurnSummaries!)).toHaveLength(2);
+      for (const status of ['pending', 'failed']) {
+        const user = messages.find((m) => m.content === `${status} input`)!;
+        const assistant = messages.find((m) => m.content === `${status} output`)!;
+        expect(user.storyTurnStatus).toBe(status);
+        expect(assistant.storyTurnStatus).toBe(status);
+        expect(assistant.storyTurnKey).toBe(user.id);
+      }
+      expect(messages.find((m) => m.content === 'diagnostic output')!.diagnostic).toBe(true);
+      expect(messages.find((m) => m.content === 'unmatched output')!.storyTurnKey).toBe(
+        'absent-source',
+      );
+    }
+    expect(seenKeys[0]).not.toBe(seenKeys[1]);
+  });
+
+  it('retry 字段三态兼容：旧档缺席接受，在但不是数组拒绝', async () => {
+    const { backup } = await memoryBackup();
+    delete backup.storyArchiveRetries;
+    const { saveId } = await importSessionSave(backup);
+    expect(await getDatabase().storyArchiveRetries.where('saveId').equals(saveId).count()).toBe(0);
+    await expect(
+      importSessionSave({ ...backup, storyArchiveRetries: {} } as unknown as SessionBackup),
+    ).rejects.toThrow('storyArchiveRetries');
   });
 });
 

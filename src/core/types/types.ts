@@ -804,6 +804,14 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   timestamp: number;
+  /** Story 正式回合状态；缺席兼容历史消息，pending/failed 不进入正文窗口或摘要补建。 */
+  storyTurnStatus?: 'pending' | 'accepted' | 'failed';
+  /** 正式正文绑定的玩家输入 id；重试的旧尝试不得并入相邻回合。 */
+  storyTurnKey?: string;
+  /** 系统诊断或侧链文本，不是 Story 正文。 */
+  diagnostic?: boolean;
+  /** 原回合的游戏时间事实；补建不得使用补建时的当前时间替代。 */
+  storyGameTime?: GameTime;
   /** 🆕 Phase 10h: 消息所属存档 ID（持久化到 messages 表时设置） */
   saveId?: string;
   /** 🆕 Phase 10h: 消息轮次编号（持久化到 messages 表时设置） */
@@ -1536,7 +1544,143 @@ export interface SaveSlot {
     openingPrompt?: string;
     /** Phase 10h: 开场 Prompt 是否已发送给 AI */
     openingPromptConsumed?: boolean;
+    /**
+     * Story 上下文与记忆新模式（v2）的**永久**测试档标记。
+     *
+     * 🔴 只由代码在建档时写入（`createStoryContextV2Marker`），切换开关、重置配置、
+     *    快照回退与导入导出都不得清除。缺席 = 普通存档，只能在旧模式下使用。
+     *    判定一律走 `story/story-context-mode.ts` 的 `isStoryContextV2Save`。
+     */
+    storyContextV2?: StoryContextV2SaveMarker;
   };
+}
+
+/**
+ * Story 上下文新模式（v2）的**每回合短期摘要片段**（Dexie v27 `storyTurnSummaries`）。
+ *
+ * 一回合可按事件分成多段（计划 D28 / §8.3），每段是归档覆盖的最小单元。
+ * 只有测试档会写这张表；旧模式记忆仍在 `memories`，两边互不读取。
+ *
+ * 🔴 来源绑定以**消息 id** 为准（计划 §7.3）：`sourceTurnKey` 是回合的玩家输入消息 id
+ *    （开场无输入时取首条 Story 正文 id），`sourceMessageIds` 是该回合全部正式消息 id。
+ *    重生成后正文消息换了 id，旧片段自然失效，不靠 turn 序号或时间戳判断。
+ */
+/** Story 记忆来源契约。指纹仅含有序角色/正文；备份重发消息 id 时原样保留。 */
+export interface StoryMemorySource {
+  sourceTurnKey: string;
+  sourceMessageIds: string[];
+  /** 旧 v2 缺席时不能证明正文未修订，读取失效并可补建，不自动回填。 */
+  sourceFingerprint?: string;
+}
+
+export interface StoryMemoryGameTimeRange {
+  start: GameTime | null;
+  end: GameTime | null;
+}
+
+export interface StoryTurnSummaryRecord extends StoryMemorySource {
+  id: string;
+  saveId: string;
+  sourceTurnKey: string;
+  sourceMessageIds: string[];
+  /** 同一回合内的片段顺序 */
+  order: number;
+  content: string;
+  /** 片段所属事件名（可空：闲聊不强制归类） */
+  eventName?: string;
+  /** 模型提取的叙事实体名；旧行缺席保留未知，不以空数组伪造。 */
+  characters?: string[];
+  locations?: string[];
+  topics?: string[];
+  /** 代码读取原回合事实，不能拿补建时的当前时间代替。 */
+  gameTimeRange?: StoryMemoryGameTimeRange;
+  createdAt: number;
+  /**
+   * 召回用向量（可选，与 `embeddingMeta` 原子成对）：配置了 Embedding 源时在落库前计算，
+   * 失败或未配置 = 两者都缺席，召回按兜底排序处理。规则同 `MemoryRecord`（F09）。
+   */
+  embedding?: number[];
+  embeddingMeta?: EmbeddingMetadata;
+}
+
+/** 事件结束的三种方式（计划 D09 / Q03）：成功完成、放弃、失败都触发归档。 */
+export type StoryArchiveOutcome = 'completed' | 'abandoned' | 'failed';
+
+/** 事件详细记录（计划 D29）：供后续召回读取详情；约定与数字照原文。 */
+export interface StoryArchiveDetail {
+  cause: string;
+  process: string;
+  ending: string;
+  promises: string;
+  impact: string;
+}
+
+/**
+ * Story 上下文新模式（v2）的**阶段归档记录**（Dexie v28 `storyArchives`）。
+ *
+ * 一条记录 = 一个已结束事件的双层产物：`overview`（纳入第 2 区长期总览的概括）+
+ * `detail`（事件详细记录）。第 2 区总览不另存一份：它就是当前分支上全部有效归档按
+ * `createdAt` / `sequence` 排成的年表，所以「归档节点」= 这串记录本身（计划 Q12 的取舍）。
+ *
+ * 🔴 有效性由来源派生：`sourceMessageIds`（作出归档判断的那个回合的消息）全部仍在当前
+ *    分支才有效。回退到归档之前 → 记录被清理 / 失效 → 第 2 区自然退回上一节点，
+ *    它覆盖的摘要片段自动恢复未归档语义（计划 D23 / §11.4），不需要单独的回退逻辑。
+ */
+export interface StoryArchiveRecord extends StoryMemorySource {
+  id: string;
+  saveId: string;
+  eventName: string;
+  outcome: StoryArchiveOutcome;
+  /** 本回合正文中的结局依据（逐字摘录，代码校验确实出现在正文里） */
+  evidence: string;
+  /** 第 2 区概括记录 */
+  overview: string;
+  detail: StoryArchiveDetail;
+  /**
+   * 详细记录的来源：`source-text` = 依据事件各回合的玩家输入与正文原文生成（计划 D29）；
+   * `summary` = 原文生成失败时回落到总结 Agent 依据摘要写的版本（界面上标明）。
+   */
+  detailSource: 'source-text' | 'summary';
+  /** 被本次归档完整承接的摘要片段 id（退出第 4 区常驻范围，原记录保留可检索） */
+  coveredSegmentIds: string[];
+  /** 所有被覆盖回合的来源快照，不能只验证结局回合。 */
+  coveredSources?: StoryMemorySource[];
+  /** 摘要语义指纹，键随备份片段 id 重映射，值保持不变。 */
+  coveredSegmentFingerprints?: Record<string, string>;
+  /** 跨回合摘要替换不猜测新片段映射；保留归档行及原因供诊断。 */
+  invalidatedReason?: 'summary-replaced' | 'coverage-missing';
+  /** 作出归档判断的回合（`StoryTurn.key`）与其全部消息 id */
+  sourceTurnKey: string;
+  sourceMessageIds: string[];
+  /** 同一回合内多条归档的先后 */
+  sequence: number;
+  createdAt: number;
+  /** 召回用向量（可选，与 `embeddingMeta` 原子成对；按最终详细记录计算） */
+  embedding?: number[];
+  embeddingMeta?: EmbeddingMetadata;
+}
+
+/** R01：绑定原判断回合的待重试草稿。成功删除；覆盖替换保留失效诊断。 */
+export interface StoryArchiveRetryRecord extends StoryMemorySource {
+  id: string;
+  saveId: string;
+  rawOutput: string;
+  /** 已通过判断校验的原归档草稿（详情失败也可保留 summary 版本）。 */
+  archives: StoryArchiveRecord[];
+  /** 整次提交失败时，保留尚未落库的原摘要 id 与正文，以便原子重放。 */
+  summaries?: StoryTurnSummaryRecord[];
+  coveredSegmentIds: string[];
+  coveredSources: StoryMemorySource[];
+  coveredSegmentFingerprints: Record<string, string>;
+  invalidatedReason?: 'summary-replaced' | 'coverage-missing';
+  createdAt: number;
+}
+
+/** `SaveSlot.metadata.storyContextV2` 的形状；`schema` 只增不改，旧标记永远有效。 */
+export interface StoryContextV2SaveMarker {
+  schema: 1;
+  /** 首次打标的真实时间戳（诊断用，不参与任何判定） */
+  markedAt: number;
 }
 
 /**
@@ -4344,4 +4488,40 @@ export interface AssetMetaRecord {
 export interface AssetBlobRecord {
   id: string; // === AssetMetaRecord.id
   blob: Blob;
+}
+
+/** 召回展开诊断（`expandStoryRecall`）。 */
+export interface StoryRecallExpansionDiagnostics {
+  rawMode: 'turn' | 'snippet';
+  selectedRefs: string[];
+  /** 贴了原文（整回合或片段）的回合 key */
+  rawTurnKeys: string[];
+  /** 原文在第 4 区窗口内、未重复贴出的回合 key */
+  inWindowTurnKeys: string[];
+  /** 因原文总量上限省略的回合 key */
+  omittedTurnKeys: string[];
+  /** 实际输出 / 预算省略的原文段落范围（0-based，按真实来源段落定位）。 */
+  paragraphRanges?: Array<{
+    ref: string;
+    turnKey: string;
+    start: number;
+    end: number;
+    omitted: boolean;
+  }>;
+  /** 已贴原文的字数（不含摘要与档案） */
+  rawChars: number;
+  /** 召回块总字数 */
+  chars: number;
+}
+
+/** 一次新模式召回的回报（管线据此提示与记日志；不含向量与凭据）。 */
+export interface StoryRecallReport {
+  mode: 'llm' | 'embedding';
+  /** `empty` = 没有候选，未发请求；`failed` = 本轮无召回（不阻断 Story） */
+  status: 'ok' | 'empty' | 'failed';
+  error?: string;
+  /** 非致命的降级说明（未绑定 Embedding 源 / 查询向量失败 / 重排失败 / 无效编号） */
+  notices: string[];
+  candidateCount: number;
+  expansion?: StoryRecallExpansionDiagnostics;
 }

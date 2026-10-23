@@ -32,6 +32,7 @@ import {
   deleteCharacter,
   saveMemory,
   deleteMemoriesAfter,
+  pruneOrphanStoryContextRecords,
   deleteSnapshotsAfter,
   getPlotEvents,
   savePlotEvents,
@@ -2392,6 +2393,10 @@ export class StateManager {
             db.snapshots,
             // v22 拆表：④.c 的 deleteSnapshotsAfter 要连载荷行一起删，表清单必须带上它
             db.snapshotPayloads,
+            // v27/v28：④.d 按恢复后的消息集合清理 Story v2 摘要与阶段归档
+            db.storyTurnSummaries,
+            db.storyArchives,
+            db.storyArchiveRetries,
           ],
           async () => {
             // ② characters 整体覆写: 全删 → 写入快照副本
@@ -2429,6 +2434,12 @@ export class StateManager {
             //     出现多条、后续回退 filter(turn<=target) 取错。恢复点之后创建的快照
             //     全是该时间线之后的产物，删除安全。
             await deleteSnapshotsAfter(this.saveId, snapshot.createdAt);
+
+            // ④.d 🆕 Story v2 摘要与阶段归档：来源消息不在恢复后分支里的记录删掉（计划 §11.4）。
+            //     判据是**消息 id**，不是时间戳 —— 同回合重生成的正文时间相近而 id 不同。
+            //     归档一删，第 2 区退回上一有效节点、被覆盖的摘要恢复未归档语义（D23）。
+            //     普通存档这两张表没有行，这一步是空操作。
+            await pruneOrphanStoryContextRecords(this.saveId);
 
             // ⑤ activeSnapshotId 指向 + totalTurns 对齐快照 turn（防重发后 turn 编号错位）
             const save = await getSave(this.saveId);

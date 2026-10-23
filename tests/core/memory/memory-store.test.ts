@@ -38,6 +38,7 @@ const {
   computeEmbedding,
   computeEmbeddingWithMeta,
   cosineSimilarity,
+  recallByEmbedding,
   recallMemories,
   getRoundCount,
   checkCompressionNeeded,
@@ -380,6 +381,59 @@ describe('computeEmbedding', () => {
 // ═══════════════════════════════════════════════════════════════
 // 3. recallMemories — mock getMemories + computeEmbedding (fetch)
 // ═══════════════════════════════════════════════════════════════
+
+describe('recallByEmbedding（不关心数据来源的向量核，Story v2 召回复用）', () => {
+  it('同空间向量按余弦排序，其余按调用方的兜底口径补位', async () => {
+    const near = [1, 0, 0];
+    const far = [0, 1, 0];
+    const items = [
+      { item: 'far', embedding: far, embeddingMeta: metaFor(far) },
+      { item: 'none-old' },
+      { item: 'near', embedding: near, embeddingMeta: metaFor(near) },
+      { item: 'none-new' },
+    ];
+    mockFetchResolved([1, 0, 0]);
+    const diagnostics: RecallDiagnostics[] = [];
+
+    const result = await recallByEmbedding(
+      items,
+      'query',
+      3,
+      makeEndpoint(),
+      (pool) => [...pool].reverse(),
+      undefined,
+      undefined,
+      (d) => diagnostics.push(d),
+    );
+
+    expect(result.map((r) => [r.item, r.source])).toEqual([
+      ['near', 'cosine'],
+      ['far', 'cosine'],
+      ['none-new', 'fallback'],
+    ]);
+    expect(diagnostics[0]).toMatchObject({ total: 4, compatible: 2, missing: 2 });
+  });
+
+  it('查询向量失败 → 整体按兜底口径排序并记诊断', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('network down'));
+    const diagnostics: RecallDiagnostics[] = [];
+
+    const result = await recallByEmbedding(
+      [{ item: 'a' }, { item: 'b' }],
+      'query',
+      5,
+      makeEndpoint(),
+      (pool) => [...pool].reverse(),
+      undefined,
+      undefined,
+      (d) => diagnostics.push(d),
+    );
+
+    expect(result.map((r) => r.item)).toEqual(['b', 'a']);
+    expect(result.every((r) => r.score === 0 && r.source === 'fallback')).toBe(true);
+    expect(diagnostics[0].queryError).toBeTruthy();
+  });
+});
 
 describe('recallMemories', () => {
   it('should return empty array when there are no memories', async () => {

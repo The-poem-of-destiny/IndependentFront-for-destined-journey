@@ -51,6 +51,10 @@ import type {
   PlotOutline,
   WorldBook,
   WorkshopProject,
+  StoryTurnSummaryRecord,
+  StoryArchiveRecord,
+  StoryArchiveRetryRecord,
+  StoryMemorySource,
 } from '../types/types';
 import type { SceneImageRecord, CharacterSessionAppearance } from '../types/types-image';
 
@@ -142,6 +146,12 @@ export interface SessionBackup {
   /** 🔴 只有元数据（= 配方），字节永不随行 */
   sceneImages: SceneImageRecord[];
   characterAppearances: CharacterSessionAppearance[];
+  /** v27 Story 上下文 v2 每回合摘要（只有测试档有行；旧备份缺字段 = 没有） */
+  storyTurnSummaries?: StoryTurnSummaryRecord[];
+  /** v28 Story 上下文 v2 阶段归档（同上） */
+  storyArchives?: StoryArchiveRecord[];
+  /** v29 failed archive detail drafts, still bound to the original source turn. */
+  storyArchiveRetries?: StoryArchiveRetryRecord[];
   dependencies: SessionDependencies;
 }
 
@@ -414,6 +424,9 @@ export async function exportSessionSave(
     plotOutlines,
     sceneImages,
     characterAppearances,
+    storyTurnSummaries,
+    storyArchives,
+    storyArchiveRetries,
     books,
     projects,
     packs,
@@ -429,6 +442,9 @@ export async function exportSessionSave(
     db.plotOutlines.where('saveId').equals(saveId).toArray(),
     db.sceneImages.where('saveId').equals(saveId).toArray(),
     db.characterAppearances.where('saveId').equals(saveId).toArray(),
+    db.storyTurnSummaries.where('saveId').equals(saveId).toArray(),
+    db.storyArchives.where('saveId').equals(saveId).toArray(),
+    db.storyArchiveRetries.where('saveId').equals(saveId).toArray(),
     db.worldBooks.toArray(),
     db.workshopProjects.toArray(),
     db.contentPacks.toArray(),
@@ -494,6 +510,9 @@ export async function exportSessionSave(
       row.status === 'done' ? { ...row, blobDropped: true } : row,
     ),
     characterAppearances: structuredClone(characterAppearances),
+    storyTurnSummaries: structuredClone(storyTurnSummaries),
+    storyArchives: structuredClone(storyArchives),
+    storyArchiveRetries: structuredClone(storyArchiveRetries),
     dependencies,
   };
 }
@@ -676,6 +695,9 @@ function validateSessionBackupOrThrow(backup: unknown): Record<string, unknown> 
     'plotOutlines',
     'sceneImages',
     'characterAppearances',
+    'storyTurnSummaries',
+    'storyArchives',
+    'storyArchiveRetries',
   ];
   for (const f of arrayFields) {
     const v = rec[f];
@@ -716,6 +738,9 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
   const plotOutlines = readArray<PlotOutline>(rec, 'plotOutlines');
   const sceneImages = readArray<SceneImageRecord>(rec, 'sceneImages');
   const characterAppearances = readArray<CharacterSessionAppearance>(rec, 'characterAppearances');
+  const storyTurnSummaries = readArray<StoryTurnSummaryRecord>(rec, 'storyTurnSummaries');
+  const storyArchives = readArray<StoryArchiveRecord>(rec, 'storyArchives');
+  const storyArchiveRetries = readArray<StoryArchiveRetryRecord>(rec, 'storyArchiveRetries');
 
   const newSaveId = crypto.randomUUID();
   const charIds = new IdMap();
@@ -728,6 +753,9 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
   // 顺序有讲究：先把顶层真行注册进映射，之后嵌套副本里查不到的才是真悬空引用
   for (const c of characters) charIds.get(c.id);
   for (const m of messages) msgIds.get(m.id);
+  for (const payload of snapshotPayloads) {
+    for (const message of payload.messages ?? []) msgIds.get(message.id);
+  }
   for (const s of snapshots) snapIds.get(s.id);
   for (const e of plotEvents) plotIds.get(e.id);
   for (const o of plotOutlines) outlineIds.get(o.id);
@@ -742,6 +770,10 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
     ...m,
     id: msgIds.get(m.id),
     ...(m.saveId !== undefined ? { saveId: newSaveId } : {}),
+    // Ownership is a physical message reference too; absent legacy fields stay absent.
+    ...(m.storyTurnKey !== undefined
+      ? { storyTurnKey: msgIds.peek(m.storyTurnKey) ?? m.storyTurnKey }
+      : {}),
   });
   const remapPlotEvent = (e: PlotEvent): PlotEvent => {
     const next: PlotEvent = {
@@ -836,6 +868,123 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
     messageId: msgIds.get(img.messageId),
   }));
 
+  // Story v2 摘要与阶段归档：来源绑定的是**消息 id**，必须与消息走同一张映射（计划 §11.5 / T24）。
+  // 来源消息不在本备份里的记录整条丢弃 —— 惰性发号会造出一条指向虚空、却仍「有效」的记录。
+  const currentMessageIds = new Set(messages.map((message) => message.id));
+  const remapStorySource = (row: StoryMemorySource): StoryMemorySource | null => {
+    if (
+      !currentMessageIds.has(row.sourceTurnKey) ||
+      !Array.isArray(row.sourceMessageIds) ||
+      row.sourceMessageIds.some((id) => !currentMessageIds.has(id))
+    )
+      return null;
+    const turnKey = msgIds.peek(row.sourceTurnKey);
+    const sourceIds = Array.isArray(row.sourceMessageIds)
+      ? row.sourceMessageIds.map((id) => msgIds.peek(id))
+      : [];
+    if (!turnKey || sourceIds.length === 0 || sourceIds.some((id) => id === undefined)) {
+      return null;
+    }
+    // Fingerprints are ordered role/content hashes, independent of ids. Legacy absence remains unknown.
+    return { ...row, sourceTurnKey: turnKey, sourceMessageIds: sourceIds as string[] };
+  };
+  // 片段 id 也重发：归档的 coveredSegmentIds 指着它们，用同一张表改写
+  const segmentIds = new Map<string, string>();
+  const remapSummary = (row: StoryTurnSummaryRecord): StoryTurnSummaryRecord[] => {
+    const source = remapStorySource(row);
+    if (!source) return [];
+    const id = segmentIds.get(row.id) ?? crypto.randomUUID();
+    segmentIds.set(row.id, id);
+    return [{ ...row, ...source, id, saveId: newSaveId }];
+  };
+  const nextStoryTurnSummaries = storyTurnSummaries.flatMap(remapSummary);
+  // Register not-yet-committed retry summaries before remapping archive coverage.
+  const retrySummaries = new Map(
+    storyArchiveRetries.map((row) => [row, row.summaries?.flatMap(remapSummary)] as const),
+  );
+  const archiveIds = new IdMap();
+  const remapCoverage = (
+    row: Pick<
+      StoryArchiveRecord,
+      'coveredSegmentIds' | 'coveredSources' | 'coveredSegmentFingerprints' | 'invalidatedReason'
+    >,
+  ) => {
+    let missing = false;
+    const coveredSegmentIds = (row.coveredSegmentIds ?? []).flatMap((oldId) => {
+      const id = segmentIds.get(oldId);
+      if (!id) {
+        missing = true;
+        return [];
+      }
+      return [id];
+    });
+    const coveredSources = row.coveredSources?.flatMap((oldSource) => {
+      const source = remapStorySource(oldSource);
+      if (!source) {
+        missing = true;
+        return [];
+      }
+      return [source];
+    });
+    const coveredSegmentFingerprints =
+      row.coveredSegmentFingerprints === undefined
+        ? undefined
+        : Object.fromEntries(
+            Object.entries(row.coveredSegmentFingerprints).flatMap(([oldId, fingerprint]) => {
+              const id = segmentIds.get(oldId);
+              if (!id) {
+                missing = true;
+                return [];
+              }
+              return [[id, fingerprint]];
+            }),
+          );
+    return {
+      coveredSegmentIds,
+      ...(coveredSources !== undefined ? { coveredSources } : {}),
+      ...(coveredSegmentFingerprints !== undefined ? { coveredSegmentFingerprints } : {}),
+      ...(missing ? { invalidatedReason: 'coverage-missing' as const } : {}),
+    };
+  };
+  const remapArchive = (row: StoryArchiveRecord): StoryArchiveRecord | null => {
+    const source = remapStorySource(row);
+    if (!source) return null;
+    return {
+      ...row,
+      ...source,
+      ...remapCoverage(row),
+      id: archiveIds.get(row.id),
+      saveId: newSaveId,
+    };
+  };
+  const nextStoryArchives = storyArchives.flatMap((row) => {
+    const archive = remapArchive(row);
+    return archive ? [archive] : [];
+  });
+  const nextStoryArchiveRetries: StoryArchiveRetryRecord[] = storyArchiveRetries.flatMap((row) => {
+    const source = remapStorySource(row);
+    if (!source) return [];
+    const archives = row.archives.flatMap((oldArchive) => {
+      const archive = remapArchive(oldArchive);
+      return archive ? [archive] : [];
+    });
+    const summaries = retrySummaries.get(row);
+    return [
+      {
+        ...row,
+        ...source,
+        ...remapCoverage(row),
+        archives,
+        ...(summaries !== undefined ? { summaries } : {}),
+        ...(archives.length !== row.archives.length || summaries?.length !== row.summaries?.length
+          ? { invalidatedReason: 'coverage-missing' as const }
+          : {}),
+        id: crypto.randomUUID(),
+        saveId: newSaveId,
+      },
+    ];
+  });
+
   const nextAppearances: CharacterSessionAppearance[] = characterAppearances.map((row) => ({
     ...row,
     key: characterAppearanceKey(newSaveId, row.name),
@@ -856,6 +1005,9 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       db.plotOutlines,
       db.sceneImages,
       db.characterAppearances,
+      db.storyTurnSummaries,
+      db.storyArchives,
+      db.storyArchiveRetries,
     ],
     async () => {
       // 槽位：取现有最大 +1（slot 不是唯一索引，这里只求「不和别人挤同一格」）
@@ -892,6 +1044,12 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       if (nextPlotOutlines.length > 0) await db.plotOutlines.bulkPut(nextPlotOutlines);
       if (nextSceneImages.length > 0) await db.sceneImages.bulkPut(nextSceneImages);
       if (nextAppearances.length > 0) await db.characterAppearances.bulkPut(nextAppearances);
+      if (nextStoryTurnSummaries.length > 0) {
+        await db.storyTurnSummaries.bulkPut(nextStoryTurnSummaries);
+      }
+      if (nextStoryArchives.length > 0) await db.storyArchives.bulkPut(nextStoryArchives);
+      if (nextStoryArchiveRetries.length > 0)
+        await db.storyArchiveRetries.bulkPut(nextStoryArchiveRetries);
     },
   );
 

@@ -449,8 +449,55 @@ export async function recallMemories(
   onRecall?: RecallObserver,
 ): Promise<RecalledMemory[]> {
   const allMemories = await getMemories(saveId);
+  const recalled = await recallByEmbedding(
+    allMemories.map((memory) => ({
+      item: memory,
+      embedding: memory.embedding,
+      embeddingMeta: memory.embeddingMeta,
+    })),
+    query,
+    topK,
+    endpoint,
+    rankByImportanceRecency,
+    signal,
+    onEmbeddingRequest,
+    onRecall,
+  );
+  return recalled.map((r) => ({ memory: r.item, score: r.score, source: r.source }));
+}
+
+/** 一条参与向量召回的候选：任意载荷 + 它落库时存的向量与元数据。 */
+export interface VectorRecallItem<T> {
+  item: T;
+  embedding?: unknown;
+  embeddingMeta?: EmbeddingMetadata;
+}
+
+export interface VectorRecalled<T> {
+  item: T;
+  score: number;
+  source: 'cosine' | 'fallback';
+}
+
+/**
+ * 不关心数据来源的向量召回核（F09 规则全在这里；旧记忆与 Story v2 的摘要 / 归档共用）。
+ *
+ * 流程与不变量同 {@link recallMemories} 的文件头说明：查询向量一次、只给同空间的向量算余弦、
+ * 槽位不足由 `fallbackOrder` 排好的其余候选补齐（score 恒 0）、查询失败整体兜底并记诊断、
+ * 一条坏数据只跳过自己。`fallbackOrder` 是调用方的兜底口径（旧记忆 = 重要度 + 时间）。
+ */
+export async function recallByEmbedding<T>(
+  items: readonly VectorRecallItem<T>[],
+  query: string,
+  topK: number,
+  endpoint: EmbeddingEndpoint,
+  fallbackOrder: (items: T[]) => T[],
+  signal?: AbortSignal,
+  onEmbeddingRequest?: EmbeddingRequestObserver,
+  onRecall?: RecallObserver,
+): Promise<VectorRecalled<T>[]> {
   const diag: RecallDiagnostics = {
-    total: allMemories.length,
+    total: items.length,
     compatible: 0,
     missing: 0,
     incompatible: 0,
@@ -465,7 +512,7 @@ export async function recallMemories(
     }
   };
 
-  if (allMemories.length === 0) {
+  if (items.length === 0) {
     reportDiag();
     return [];
   }
@@ -486,40 +533,43 @@ export async function recallMemories(
   } catch (error) {
     diag.queryError = error instanceof Error ? error.message : String(error);
     reportDiag();
-    // 兜底：按重要性 + 时间排序，score=0（不伪装成余弦分）
-    return rankByImportanceRecency(allMemories)
+    // 兜底：按调用方口径排序，score=0（不伪装成余弦分）
+    return fallbackOrder(items.map((entry) => entry.item))
       .slice(0, topK)
-      .map((memory) => ({ memory, score: 0, source: 'fallback' as const }));
+      .map((item) => ({ item, score: 0, source: 'fallback' as const }));
   }
 
   // 分区：只有 compatible 参与余弦排名
-  const compatible: Array<{ memory: MemoryRecord; score: number }> = [];
-  const fallbackPool: MemoryRecord[] = [];
+  const compatible: Array<{ item: T; score: number }> = [];
+  const fallbackPool: T[] = [];
 
-  for (const memory of allMemories) {
+  for (const entry of items) {
     const cls = classifyStoredVector(
-      memory.embedding,
-      memory.embeddingMeta,
+      entry.embedding,
+      entry.embeddingMeta,
       queryResult.meta.spaceId,
       queryResult.embedding.length,
     );
     switch (cls.kind) {
       case 'compatible': {
-        const stored = memory.embedding as number[];
-        compatible.push({ memory, score: cosineSimilarity(queryResult.embedding, stored) });
+        const stored = entry.embedding as number[];
+        compatible.push({
+          item: entry.item,
+          score: cosineSimilarity(queryResult.embedding, stored),
+        });
         break;
       }
       case 'missing':
         diag.missing++;
-        fallbackPool.push(memory);
+        fallbackPool.push(entry.item);
         break;
       case 'incompatible':
         diag.incompatible++;
-        fallbackPool.push(memory);
+        fallbackPool.push(entry.item);
         break;
       case 'invalid':
         diag.invalid++;
-        fallbackPool.push(memory);
+        fallbackPool.push(entry.item);
         break;
     }
   }
@@ -527,15 +577,15 @@ export async function recallMemories(
   compatible.sort((a, b) => b.score - a.score);
   diag.compatible = compatible.length;
 
-  const result: RecalledMemory[] = compatible
+  const result: VectorRecalled<T>[] = compatible
     .slice(0, topK)
-    .map((item) => ({ memory: item.memory, score: item.score, source: 'cosine' as const }));
+    .map((entry) => ({ item: entry.item, score: entry.score, source: 'cosine' as const }));
 
-  // 兼容不足的槽位由 importance/recency 兜底补齐（不冒充余弦分）
-  const fallback = rankByImportanceRecency(fallbackPool);
-  for (const memory of fallback) {
+  // 兼容不足的槽位由调用方的兜底口径补齐（不冒充余弦分）
+  const fallback = fallbackOrder(fallbackPool);
+  for (const item of fallback) {
     if (result.length >= topK) break;
-    result.push({ memory, score: 0, source: 'fallback' as const });
+    result.push({ item, score: 0, source: 'fallback' as const });
   }
   diag.fallbackUsed = result.some((r) => r.source === 'fallback');
 
