@@ -32,6 +32,35 @@ Story v2 / 条目级 lore 之上。真正的成本不在 14 个文本冲突，�
 - 计划与决策记录：`docs/planning/2026-10-24-exp-combat-to-master-merge-plan.md`
 - 验证：`npm run gates` 八道闸门全绿（380 文件 / 9115 用例通过，8 skipped）
 
+#### 内容仓同步：`Independend-Frontend-Assets`（同一轮顺带完成）
+
+引擎的名册换了、DB 加了表之后，**真实内容仓必须跟着对齐** —— 否则占位内容能跑、装了真实包反而坏。
+
+- **不能 `git merge`**：内容仓的 `main` 与 `exp/2026-10-02-Combat-experiments` **没有共同祖先**
+  （远端历史被重写过，两条线的根提交信息相同但 SHA 不同），merge 会让 68 个文件全部 add/add 冲突。
+  改走**补丁移植**：以 `origin/main` 为基线，只把原分支那 4 个文件的改动叠上去。
+- **名册对齐 15 个**（与引擎仓逐字一致）：`entity_gen` 取代 `char_gen` + `item_gen`、删 `combat_enemy`、
+  保留开发者的 `lore_select`、加 `daily_check` / `prose_rewrite`；顺带删掉已退役的 `worldBookEnabled` / `worldBookIds`。
+- **`combat_extra` 的 uid 撞号（不修会静默串资料）**：原用 600–607，与 `dlc` / `extra_setting` / `faction`
+  的既有 uid 重复 → 改用 **901501–901508**，补 `audiences: [entity_gen, daily_check]` 与 `section: turn`。
+- **`audiences` 重映射 436 条**（`char_gen` / `item_gen` → `entity_gen`、删 `combat_enemy`），
+  `data/routing/lore-routing.json` 追加 8 条 `combat_extra` 声明并保持原键序；
+  `tools/lore-routing.mjs` 的 `AGENT_IDS` 同步成 15 个（这是打包闸门，不同步会直接报
+  `Missing or invalid audiences`）。
+- **story 预设两边正交，都保住**：开发者的 77 条（含 `story_zone_1…5` 五区占位）+ 原分支末尾那条
+  `role=assistant` 预填充条目 = 78 条；`presets.json` 另追加「预填充测试版」。
+- **4 条同名提示词真的撞了**，取开发者版本（配套五区上下文）：`基调(DS)` / `文风(日轻)` /
+  `正文cot` / `尾部+思维链`；原分支其它 7 个 agent 的提示词迭代（combat per-unit / dispatcher / plot 系列等）全部保留。
+- 涉及文件（内容仓）：`data/defaults/agent-config.json` · `data/defaults/presets.json` ·
+  `data/worldbooks/*.json` · `data/worldbooks/combat_extra.json` · `data/routing/lore-routing.json` ·
+  `tools/lore-routing.mjs` · `tools/build-pack.mjs` · `tests/worldbook-repo-sync.test.mjs` ·
+  `tests/worldbook-zone-plan.test.mjs`
+- 验证（内容仓）：`node --test tests/*.test.mjs` → **58/58 通过**；
+  `node tools/build-pack.mjs --engine-version 1.0.0` → **16 本世界书 / 550 条 / 15 agent / 3 预设**，
+  包内 `audiences` 旧名残留为 0。
+- 备注：`worldbook-zone-engine.test.mjs` 写死了引擎仓目录名 `IndependentFront-for-destined-journey`，
+  本机用目录联接指向 `fated_poem_independent` 才能跑（本机环境处理，未进仓库）。
+
 ### 内置角色选择为空时排除默认人物档案（2026-10-23）
 
 - 内置 `character` 世界书始终按存档 `enabledWorldBookEntries` 白名单过滤；没有 `character:uid` 即不选择任何内置角色，不再沿用全局默认启用状态。统一覆盖建档、开局预览、正文、角色生成与状态更新的加载入口，无需新增字段或改写存档。
