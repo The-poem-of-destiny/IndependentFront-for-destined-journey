@@ -41,7 +41,7 @@ src/core/                    ← 核心引擎
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
   ├── persistence/create-journey.ts             ← 新旅程唯一原子落库入口（角色/存档/档案/大纲/事件同一事务）
-  ├── persistence/database.ts                   ← Dexie/IndexedDB v25
+  ├── persistence/database.ts                   ← Dexie/IndexedDB v30
   │       🔴 `DB_VERSION` 常量必须等于最后一个 `this.version(n)`。它只出现在
   │          `FullBackup.version` 上、导入侧不拿它做判断，所以**对不上不会有任何报错**，
   │          只是每份导出的备份都盖了过期的戳。它曾经落后两版（v18/v19 忘了改），
@@ -125,6 +125,10 @@ src/core/                    ← 核心引擎
   │              v27/v28 两张表的行可选带 `embedding` + `embeddingMeta`（召回用，原子成对，不建索引、不升版）
   │   └── v29+: storyArchiveRetries（原判断回合的归档/摘要草稿与覆盖修订）—— 自动重放成功删除；
   │              来源失效清理、覆盖替换失效诊断，生命周期随删档/回退/整库与单档备份，补建不抢写草稿
+  │   └── v30+: combatSandboxes（协议沙盒的在办战斗，2026-10-02 / Phase 2）—— 每存档至多一场，主键 `saveId`、
+  │              `updatedAt` 索引；存权威 `CombatState` + 会话 transcript，供刷新续战。
+  │              🔴 **rebuildable 缓存，与上面三张 story 表口径相反**：不进 FullBackup / 单存档导出，
+  │                 删存档级联删。合并前它是原分支的 v27，与 Story v2 的 v27/v28/v29 撞号，顺延到 v30
   │
   ├── persistence/session-backup.ts             ← 单存档导出/导入：每存档表整取（清单同 deleteSaveSlot，字节不随行）+ 内容依赖清单（世界书 token / 工坊项目 / 内容包 / story 预设，导入前只读体检）+ 导入**一律重发 id**（不重发 = 第二次导入静默覆盖第一次），全局表一行不改
   │
@@ -507,7 +511,7 @@ src/core/                    ← 核心引擎
   │   ├── runner.ts                         ← runCombatSandbox 单 exchange（系统提示=协议+流程（可注入
   │   │                                    agent-config 的 combat.systemPrompt）+参战表单+当前状态；玩家输入
   │   │                                    user 回注续战；continuationMessages 整段续接）/ runCombatSandboxLoop
-  │   └── persistence.ts                    ← Dexie v27 `combatSandboxes`（每存档一行，存 CombatState +
+  │   └── persistence.ts                    ← Dexie v30 `combatSandboxes`（每存档一行，存 CombatState +
   │                                            transcript）；rebuildable 缓存，不进 FullBackup，删档级联删
   ├── effects/effect-types.ts               ← [战斗 v2 M2] Modifier 6 大类 + 登神 divinity 仲裁。
   │                                    🔴 C5b 后已无生产引用（craft-request 的 modifier 采集随实体字段删除而移除），

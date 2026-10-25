@@ -243,6 +243,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   🔴 **只镜像自己那一半**：删除候选**仅限带 `remote` 戳的行**。
 │   │                                      少了这道过滤，「同步」会变成「把素材库删到只剩声明里那几张」
 │   ├── agent-activity.ts            ← 14 个 Agent 的**中文活动文案**（「书写此刻」「辨认后续事件」…）
+│   │                                   ⚠️ 名册现在是 15 个：`lore_select` **尚无条目**（加它时漏的，
+│   │                                      Record 缺键不报错，只会让该 agent 的活动行落到兜底文案）
 │   │                                   + AgentToolActivity 的展示层投影；TurnActivityLedger 消费
 │   ├── chat-depth.ts                ← ST 兼容的消息深度（zero-based，从末尾倒数）。
 │   │                                   🔴 只有 user/assistant 占槽位 —— 应用自造的 system 事件**不占**，
@@ -562,7 +564,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               （前缀续写）」开关 +「填充位置」（content / reasoning_content）
 │   │   │                               选择，写预设 `settings.prefill`（判据复用引擎 `findTailAssistantEntry`）；
 │   │   │                               另补「编辑预设」入口（此前 preset 级编辑无按钮可达）。
-│   │   │   ├── agent-list.ts         ← 13 个 Agent 的展示元数据 + getDefaultTemplateForAgent
+│   │   │   ├── agent-list.ts         ← 9 个 Agent 的展示元数据 + getDefaultTemplateForAgent
+│   │   │   │                            （story 走 PresetManager、image_prompt 走 ImagePromptCard（D53）、
+│   │   │   │                              plot_* / memory_summary 走各自分区，故不在这张表里）
 │   │   │   │                            （combat 为单一 DM 协议沙盒侧链；`image_prompt` 按 D53 刻意
 │   │   │   │                              不入本表，故设置页 Agent 子导航少它一项；
 │   │   │   │                              `prose_rewrite` 是正文润色侧链，手动触发）
@@ -1007,7 +1011,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | 分区           | 内容                                                                                                                                                                                                                                                      |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 🔌 API 配置    | LLM / Embedding / Reranker 分类源 CRUD、三种 LLM 协议、请求体覆盖/省略、连接测试、分页模型列表、跨连接 RPM                                                                                                                                                |
-| 🤖 Agent 配置  | 11 个汉化 Agent、模型选择、世界书开关、System Prompt 编辑；战斗为单一 `combat` DM 协议沙盒侧链                                                                                                                                                            |
+| 🤖 Agent 配置  | 11 个汉化 Agent、模型选择、世界书读取范围（只读，范围由条目 `extra.lore.audiences` 决定）、System Prompt 编辑；战斗为单一 `combat` DM 协议沙盒侧链                                                                                                        |
 | 📚 世界书      | **早已不是占位**：书列表 + 导入/新建/删除/恢复（`WorldBookSection.vue`，约 368 行）+ 条目编辑器（`WorldBookEditor.vue`，约 909 行：条目 CRUD / 关键词 / 插入位置与深度 / 触发策略 / EJS 正文）。数据在 Dexie（工坊 P0 起 `settings.worldBooks` 已不存在） |
 | 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                                                                                                                                                                                                 |
 | 🧠 记忆 & 缓存 | 显式 LLM/Embedding 召回模式、Embedding 与可选 Reranker 绑定、候选数/最终召回数、压缩阈值/快照上限/缓存策略                                                                                                                                                |
