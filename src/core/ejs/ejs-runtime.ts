@@ -53,6 +53,8 @@ export interface EjsEvalContext {
   vars: Record<string, any>;
   /** 近层聊天正文拼接串（`matchChatMessages` 的检索面） */
   historyText: string;
+  /** Read-only ST definitions, never merged into the writable vars draft. */
+  stDefinitions?: Readonly<Record<string, string>>;
   /**
    * 引擎侧能力面的输入（`chat`/`char`/`world`/`quest`/`lore`/`local`/`ui`/`engine`）。
    * 缺省 → 那些 namespace 仍然存在但全部返回安全默认值（设计 P3：能力永不抛）。
@@ -572,8 +574,14 @@ function buildSandboxArgs(ctx: EjsEvalContext, sourceKey: string): any[] {
     return hasStatDataPrefix(raw) ? stripStatDataPrefix(raw) : raw;
   };
 
-  const getvar = (key: string, opts?: EjsReadOptions): any =>
-    readPath(ctx, splitPath(normalizeVarKey(key)), opts?.defaults);
+  const getvar = (key: string, opts?: EjsReadOptions): any => {
+    const name = normalizeVarKey(key);
+    const value = readPath(ctx, splitPath(name));
+    if (value !== undefined) return value;
+    return Object.prototype.hasOwnProperty.call(ctx.stDefinitions ?? {}, name)
+      ? ctx.stDefinitions![name]
+      : opts?.defaults;
+  };
 
   const setvar = (key: string, value: any): void =>
     writePath(ctx, splitPath(normalizeVarKey(key)), value);

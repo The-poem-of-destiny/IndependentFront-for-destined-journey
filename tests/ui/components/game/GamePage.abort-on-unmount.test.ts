@@ -119,6 +119,13 @@ vi.mock('../../../../src/ui/stores/ui-store', () => ({
   useUIStore: vi.fn(() => ({ activeSaveId: 'save_A', currentView: 'game', navigate: vi.fn() })),
 }));
 
+// Story 上下文模式准入会在 loadSave 之前读存档行；这里给一个同步就绪的普通存档，
+// 免得 fake-indexeddb 的宏任务让 flushPromises 等不到 loadSave。
+vi.mock('@engine/persistence/database', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@engine/persistence/database')>()),
+  getSave: vi.fn(async () => undefined),
+}));
+
 const STUBS = {
   TopBar: true,
   SideToolbar: true,

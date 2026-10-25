@@ -631,8 +631,6 @@ describe('planPackInstall (T1 skeleton)', () => {
         agents: {
           story: {
             model: 'm',
-            worldBookEnabled: true,
-            worldBookIds: [],
             systemPrompt: '',
             template: '',
             temperature: 0.7,
@@ -643,8 +641,6 @@ describe('planPackInstall (T1 skeleton)', () => {
           },
           vars_update: {
             model: 'm',
-            worldBookEnabled: false,
-            worldBookIds: [],
             systemPrompt: '',
             template: '',
             temperature: 0.7,

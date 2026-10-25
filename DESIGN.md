@@ -176,7 +176,7 @@ Flexibility: selected references are visual truth; responsive frame ownership re
 
 | Theme                         | Mode  | Structural palette                               | Primary accent          |
 | ----------------------------- | ----- | ------------------------------------------------ | ----------------------- |
-| Wayfarer's Atlas / 远行者舆图 | Light | parchment `#e5d8c2` · folio `#f1e7d5`            | old brass `#8d642f`     |
+| Wayfarer's Atlas / 远行者舆图 | Light | warm ivory `#e9e6dd` · folio `#f5f2e9`           | brass `#755924`         |
 | Moonwhite Brocade / 月白云锦  | Light | moonwhite `#e9e6df` · silk `#f5f3ed`             | woven gold `#887142`    |
 | Jade Conservatory / 翡翠温室  | Light | sage glass `#dce5d7` · botanical paper `#edf2e9` | verdigris `#4c755f`     |
 | Aurora Frostglass / 极光霜晶  | Light | frost `#e6ebf2` · crystal `#f1f4f8`              | aurora violet `#725b9b` |
@@ -189,7 +189,7 @@ Flexibility: selected references are visual truth; responsive frame ownership re
 
 | Theme                         | Decision                                      | Reference                                                                                           |
 | ----------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Wayfarer's Atlas / 远行者舆图 | Full theme: brass navigator's instrument      | `artifacts/theme-looks/wayfarers-atlas/look-4.png`                                                  |
+| Wayfarer's Atlas / 远行者舆图 | Printed atlas checkpoint; refinement deferred | `artifacts/atlas-refinement-2026-10-03/after-game-wide.jpg`                                         |
 | Moonwhite Brocade / 月白云锦  | Minimal moonwhite brocade relief              | `artifacts/theme-looks/moonwhite-brocade/look-4.png`                                                |
 | Jade Conservatory / 翡翠温室  | Full theme: jade-framed herbarium cabinet     | `artifacts/theme-looks/jade-conservatory/prototype-4-herbarium-archive.png`                         |
 | Aurora Frostglass / 极光霜晶  | Full theme: boreal aurora wash                | `artifacts/theme-looks/aurora-frostglass/look-2.png`                                                |
@@ -200,6 +200,10 @@ Flexibility: selected references are visual truth; responsive frame ownership re
 
 The detailed visual contracts and rejection criteria are recorded in
 `docs/planning/2026-08-08-selected-theme-directions.md`.
+
+**2026-10-03 — Atlas implementation checkpoint (further refinement deferred).** The current implementation uses warm ivory flat folios, a dark-green ink header, fine cartographic lines, restrained brass active-tab rules, and a small drawn compass confined to the portrait. Full-screen compass imagery and bevelled gold frames are absent from this version. Fonts remain user-controlled. The owner initially chose the printed-atlas direction, subsequently found the result too plain, and requested committing the current implementation to revisit later. This records the implementation being saved, not final visual acceptance. The earlier **brass navigator's instrument** reference, `artifacts/theme-looks/wayfarers-atlas/look-4.png`, remains design history; subsequent generated concepts have not been implemented.
+
+The Atlas palette and reference rows above describe this checkpoint. Local screenshot evidence is in `artifacts/atlas-refinement-2026-10-03/`: `after-game-wide.jpg`, `after-inventory-wide.jpg`, and `after-characters-wide.jpg`. Shared layout contracts persist, including the application's 900px minimum width; phone responsiveness has not been verified.
 
 For Jade Conservatory, the center narrative surface is a bound parchment folio with jade edge rails and four antique-brass barrel hinges, one near each corner. Tabs and primary controls are polished-jade plaques with stable geometry across inactive, hover, focus, and active states. The left tool rail uses a quiet live-color backing behind independently framed parchment buttons; it never repeats or stretches a button plaque raster. The rail stays at half its former desktop width, keeps every icon and text label visible by using a slimmer frame, and has no expand/collapse control. Smaller viewports retain this text-safe minimum width. The composer retains its outer notebook border and parchment field without stretching decorative artwork behind the input. A flat paper-only treatment, open jewelry-like binding rings, repeated hinges down the full rails, and stretched panel rasters are explicitly rejected.
 

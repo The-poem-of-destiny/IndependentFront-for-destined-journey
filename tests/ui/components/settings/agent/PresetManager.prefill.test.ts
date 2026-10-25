@@ -21,7 +21,9 @@ describe('PresetManager —— 预填充（末尾 assistant 条目）', () => {
   it('开关 / 填充位置写进预设 settings.prefill', () => {
     expect(source).toContain('function patchPrefill');
     expect(source).toContain('{ ...prev, ...patch }');
-    expect(source).toContain('@change="togglePrefill"');
+    // 开关是包着输入的 `<label>` 点击切换（`@click.stop.prevent`），不是原生 checkbox 的 `@change`，
+    // 断言按真实写法守：关键是这一格确实绑到 togglePrefill、且会去写 settings.prefill。
+    expect(source).toContain('@click.stop.prevent="togglePrefill"');
     expect(source).toContain('@change="onPrefillFieldChange"');
   });
 

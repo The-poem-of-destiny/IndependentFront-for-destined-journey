@@ -14,7 +14,19 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 100,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": [
+            "story",
+            "entity_gen",
+            "plot_post_check",
+            "plot_outline",
+            "combat",
+            "lore_select"
+          ]
+        }
+      }
     },
     {
       "uid": 900902,
@@ -26,7 +38,19 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 110,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": [
+            "story",
+            "entity_gen",
+            "plot_post_check",
+            "plot_outline",
+            "combat",
+            "lore_select"
+          ]
+        }
+      }
     },
     {
       "uid": 900903,
@@ -38,7 +62,19 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 120,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": [
+            "story",
+            "entity_gen",
+            "plot_post_check",
+            "plot_outline",
+            "combat",
+            "lore_select"
+          ]
+        }
+      }
     }
   ],
   "builtIn": true

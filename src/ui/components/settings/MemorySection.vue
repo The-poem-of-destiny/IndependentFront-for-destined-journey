@@ -2,8 +2,8 @@
 /**
  * 记忆 & 缓存分区 —— 五个直接绑到 settings 的输入框（Q-25 从 SettingsPage.vue 抽出）
  *
- * 一行自有 CSS 都没有: 整段只用共用外壳（form-grid / form-label / form-input /
- * form-hint），见 settings-chrome.css。
+ * 表单只用共用外壳（form-grid / form-label / form-input / form-hint），见 settings-chrome.css；
+ * 自有 CSS 只有新模式说明卡的间距。
  */
 import { onMounted } from 'vue';
 import AppCard from '../shared/AppCard.vue';
@@ -23,6 +23,13 @@ onMounted(() => void apiSources.initialize());
       控制 Embedding 召回、记忆压缩和缓存策略。Embedding 端点请在「API
       配置」中添加（推荐硅基流动）。
     </p>
+    <AppCard v-if="s.storyContextV2Enabled" padding="md" class="v2-memory-note">
+      <p class="form-hint" role="note">
+        已开启「Story 上下文与记忆新模式」。测试存档的记忆按回合摘要与事件归档管理：
+        召回模式、Embedding / Reranker 源、候选数与召回数照常生效；压缩阈值不适用于测试存档。
+        正文窗口沿用正文 Agent 的「历史层数」，召回原文粒度在 设置 → 开发者模式 中切换。
+      </p>
+    </AppCard>
     <AppCard padding="md"
       ><div class="form-grid">
         <label class="form-label"
@@ -114,15 +121,6 @@ onMounted(() => void apiSources.initialize());
             <option value="dense">密集（每轮都留）</option>
           </select></label
         >
-        <label class="form-label"
-          >缓存策略
-          <p class="form-hint">影响 API 调用的 Prompt 缓存利用率</p>
-          <select v-model="s.memoryCacheStrategy" class="form-input">
-            <option value="aggressive">激进 — 尽可能缓存，高命中率</option>
-            <option value="balanced">平衡 — 兼顾缓存命中与资源消耗</option>
-            <option value="conservative">保守 — 最小缓存，适合低内存设备</option>
-          </select></label
-        >
       </div></AppCard
     >
   </section>
@@ -130,3 +128,13 @@ onMounted(() => void apiSources.initialize());
 
 <!-- 共用外壳（.section>h3 / .section-desc / .form-* / .toggle-*）：唯一一份在 settings-chrome.css -->
 <style scoped src="./settings-chrome.css"></style>
+
+<style scoped>
+.v2-memory-note {
+  margin-bottom: var(--theme-spacing-md);
+}
+
+.v2-memory-note .form-hint {
+  margin: 0;
+}
+</style>

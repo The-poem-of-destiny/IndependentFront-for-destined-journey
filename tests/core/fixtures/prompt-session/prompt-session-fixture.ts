@@ -131,6 +131,7 @@ export const fixtureWorldBookEntry: WorldBookEntry = {
   selectiveLogic: 0,
   order: 0,
   position: 0,
+  extra: { lore: { audiences: ['story', 'request_dispatcher'] } },
 };
 
 /** 承载上面那条动态条目的虚构世界书 */
@@ -138,6 +139,7 @@ export const fixtureWorldBook: WorldBook = {
   id: 'fixture-worldbook-rainy-inn',
   name: '虚构地理手册',
   partition: 'world_setting',
+  // 读取范围来自内容声明（世界书路由）：本夹具被 story 与 request_dispatcher 两组用例读取
   entries: [fixtureWorldBookEntry],
 };
 

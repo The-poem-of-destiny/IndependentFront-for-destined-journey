@@ -34,8 +34,6 @@ const ui = useUIStore();
 /** 覆写层里存在的字段名 → 中文展示标签 */
 const FIELD_LABELS: Partial<Record<keyof AgentSettingsEntry, string>> = {
   model: 'API 池',
-  worldBookEnabled: '世界书开关',
-  worldBookIds: '世界书清单',
   systemPrompt: '提示词',
   template: '上下文模板',
   temperature: 'Temperature',

@@ -339,9 +339,9 @@ describe('parseSetvars', () => {
     expect(variables['key with spaces']).toContain('indented value');
   });
 
-  it('empty value setvars are NOT collected (declaration only)', () => {
-    const { variables, stripped } = parseSetvars('{{setvar::empty::}}');
-    expect(variables).toEqual({});
+  it('empty value setvars are collected and clear an earlier value', () => {
+    const { variables, stripped } = parseSetvars('{{setvar::empty::old}}{{setvar::empty::}}');
+    expect(variables).toEqual({ empty: '' });
     expect(stripped).toBe('');
   });
 

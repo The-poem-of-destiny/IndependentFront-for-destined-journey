@@ -81,13 +81,13 @@ describe('AgentUpdateCenter —— 渲染门控（覆写差异）', () => {
   it('覆写字段标签中文化（temperature → Temperature 等）', () => {
     mockSettings.agents.entity_gen = {
       temperature: 0.5,
-      worldBookEnabled: true,
+      topP: 0.9,
       maxTokens: 8192,
     };
     const w = mountCenter();
     const fields = w.find('.update-row-fields').text();
     expect(fields).toContain('Temperature');
-    expect(fields).toContain('世界书开关');
+    expect(fields).toContain('Top P');
     expect(fields).toContain('Max Tokens');
   });
 });

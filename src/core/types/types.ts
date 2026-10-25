@@ -77,7 +77,88 @@ export interface WorldBookEntry {
       sourceComment: string; // 上游 comment（= 本引擎的 name）
       sourceHash: string; // 安装时正文哈希 —— 供 D15 精确判定是否被改过
     };
+    /** 条目路由元数据（内容计划 §3.1）：读取范围、Story 放置、激活规则与稳定身份 */
+    lore?: LoreEntryMeta;
   };
+}
+
+/**
+ * Story 新模式里条目的放置（内容计划 §3.1 / Story 计划 §3.1.1）：
+ * `fixed` 常驻顶部（第 1 区）/ `region` 当前地理区域的背景（第 3 区）/ `turn` 本轮按规则成为候选（第 5 区）。
+ * 只控制 Story 分区，**不代替**其他 Agent 的读取范围；旧模式不读它。
+ */
+export type LoreSection = 'fixed' | 'region' | 'turn';
+
+/** Annual dates use the engine calendar (12 months of 30 days). */
+export interface LoreAnnualWindow {
+  start: { month: number; day: number };
+  end: { month: number; day: number };
+  beforeDays: number;
+  afterDays: number;
+}
+
+/** Conditions within a branch are AND; branches are OR. No scripts or recursive expressions. */
+export interface LoreReadBranch {
+  locations?: string[];
+  keywords?: string[];
+  annualWindow?: LoreAnnualWindow;
+}
+
+/** Explicit v2 read policy; absent in legacy assemblies. */
+export interface LoreReadContext {
+  location: string;
+  recentText: string;
+  gameTime?: GameTime;
+}
+
+/** Relevance is OR; readWhen is a separate, non-bypassable Story v2 read gate. */
+export interface LoreActivation {
+  /** A location path segment contains a declared name. */
+  locations?: string[];
+  characters?: string[];
+  keywords?: string[];
+  excludeKeywords?: string[];
+  readWhen?: { any: LoreReadBranch[] };
+}
+
+export interface FixedLoreRecord {
+  text: string;
+  sourceHash: string;
+  definitionSources: Record<string, string>;
+}
+export type FixedLoreSnapshot = Record<string, FixedLoreRecord>;
+
+/** 条目级路由元数据。`audiences`/`section` 逐条目声明；书级同名声明仅旧包兼容。 */
+export interface LoreEntryMeta {
+  /** 稳定条目键（带来源命名空间，如 `fated:faction/北城`）；缺席时引擎派生 `书id#uid` */
+  key?: string;
+  /** 允许读取的 Agent ID；**唯一的读取范围来源**（Agent 设置不再有世界书清单） */
+  audiences?: string[];
+  section?: LoreSection;
+  /** 激活即必选（选择 Agent 无权删除） */
+  required?: boolean;
+  /** 给选择 Agent 看的检索摘要（不替代注入正文） */
+  summary?: string;
+  aliases?: string[];
+  category?: string;
+  /** 依赖的条目键（最小背景）；依赖**不授予**读取权限 */
+  dependsOn?: string[];
+  activation?: LoreActivation;
+  /** Literal definition projection for mixed EJS entries; never executes an unselected body. */
+  definitions?: Record<string, string>;
+  /** Placement and evaluation lifetime are independent; onCreate is valid only for fixed. */
+  evaluation?: 'perTurn' | 'onCreate';
+  /** 稳定渲染顺序与候选预算的优先级（越大越先） */
+  priority?: number;
+  /** 拆分来源：父条目键、在父条目中的序号、原生产 uid */
+  source?: { parentKey?: string; part?: number; legacyUid?: number };
+}
+
+/** 书级组织元数据：只承载分类与命名空间；读取范围 / Story 放置逐条目声明。 */
+export interface LoreBookMeta {
+  category?: string;
+  /** 条目键命名空间（派生键用）；缺席时用书 id */
+  namespace?: string;
 }
 
 export interface WorldBook {
@@ -87,6 +168,8 @@ export interface WorldBook {
   description?: string;
   entries: WorldBookEntry[];
   builtIn?: boolean; // Phase 8: 项目内置世界书，禁止删除
+  /** 书级组织元数据（内容计划 §3.1）：分类与命名空间；读取范围/放置逐条目声明 */
+  lore?: LoreBookMeta;
   /**
    * 最后写入时间（v14 索引字段）。
    *
@@ -416,7 +499,7 @@ export interface AgentConfig {
     fixedSystem: string; // 前固定部分（缓存命中关键）
     fixedExamples: string; // Few-shot 示例
   };
-  worldBookIds: string[]; // Phase 8: 该 Agent 挂载的世界书 ID 列表
+  // 🪦 `worldBookIds` 已退役（内容计划 §7.2）：读取范围只来自条目路由元数据（lore-routing.ts）
   presetId?: string; // Phase 8: 该 Agent 使用的预设 ID
   /** 🆕 Agentic: 启用 OpenAI function calling（工具调用），默认 false */
   toolsEnabled?: boolean;
@@ -530,6 +613,35 @@ export const DEFAULT_AGENT_PIPELINE: Pipeline = {
     { agents: ['daily_check'], waitFor: ['story', 'request_dispatcher'] },
     // Stage 3: 变量更新 + 剧情复检（并行 —— 各自独立依赖，互不连坐：
     //          vars_update 不需要 memory_summary，plot_post_check 不需要 dispatcher）
+    {
+      agents: ['vars_update', 'plot_post_check'],
+      waitFor: ['story', 'request_dispatcher', 'memory_summary'],
+      agentWaitFor: {
+        vars_update: ['story', 'request_dispatcher'],
+        plot_post_check: ['story', 'memory_summary'],
+      },
+    },
+  ],
+};
+
+/**
+ * Story 上下文新模式（v2）测试档使用的管线（计划 §2.4 / §10）。
+ *
+ * 与 DEFAULT 的差别在前两层：`memory_recall` 单独先跑（v2 回合里它读的是每回合摘要与
+ * 阶段归档，编排器按 `storyContext.recall` 走新模式召回，结果展开成正文），剧情前置检查
+ * **显式等它**再跑 —— 前置检查模板读 `{{AGENT.MEMORY_RECALL}}`，并行时读到的永远是空
+ * （计划 §10 第 5 步）。新模式召回失败不报错（输出空串），不会连坐前置检查与 Story。
+ * 摘要仍由 memory_summary 在 Stage 2 产出（v2 回合里它换用每回合摘要契约）。
+ */
+export const STORY_CONTEXT_V2_PIPELINE: Pipeline = {
+  timeout: 120000,
+  retryOnFail: true,
+  requiredAgents: ['story'],
+  stages: [
+    { agents: ['memory_recall'], waitFor: [] },
+    { agents: ['plot_pre_check'], waitFor: ['memory_recall'] },
+    { agents: ['story'], waitFor: ['memory_recall', 'plot_pre_check'] },
+    { agents: ['request_dispatcher', 'memory_summary'], waitFor: ['story'] },
     {
       agents: ['vars_update', 'plot_post_check'],
       waitFor: ['story', 'request_dispatcher', 'memory_summary'],
@@ -756,6 +868,14 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
   timestamp: number;
+  /** Story 正式回合状态；缺席兼容历史消息，pending/failed 不进入正文窗口或摘要补建。 */
+  storyTurnStatus?: 'pending' | 'accepted' | 'failed';
+  /** 正式正文绑定的玩家输入 id；重试的旧尝试不得并入相邻回合。 */
+  storyTurnKey?: string;
+  /** 系统诊断或侧链文本，不是 Story 正文。 */
+  diagnostic?: boolean;
+  /** 原回合的游戏时间事实；补建不得使用补建时的当前时间替代。 */
+  storyGameTime?: GameTime;
   /** 🆕 Phase 10h: 消息所属存档 ID（持久化到 messages 表时设置） */
   saveId?: string;
   /** 🆕 Phase 10h: 消息轮次编号（持久化到 messages 表时设置） */
@@ -1458,7 +1578,145 @@ export interface SaveSlot {
     openingPrompt?: string;
     /** Phase 10h: 开场 Prompt 是否已发送给 AI */
     openingPromptConsumed?: boolean;
+    /**
+     * Story 上下文与记忆新模式（v2）的**永久**测试档标记。
+     *
+     * 🔴 只由代码在建档时写入（`createStoryContextV2Marker`），切换开关、重置配置、
+     *    快照回退与导入导出都不得清除。缺席 = 普通存档，只能在旧模式下使用。
+     *    判定一律走 `story/story-context-mode.ts` 的 `isStoryContextV2Save`。
+     */
+    storyContextV2?: StoryContextV2SaveMarker;
+    /** Opening-only lore results; travels with the save, outside rollbackable variables. */
+    fixedLore?: FixedLoreSnapshot;
   };
+}
+
+/**
+ * Story 上下文新模式（v2）的**每回合短期摘要片段**（Dexie v27 `storyTurnSummaries`）。
+ *
+ * 一回合可按事件分成多段（计划 D28 / §8.3），每段是归档覆盖的最小单元。
+ * 只有测试档会写这张表；旧模式记忆仍在 `memories`，两边互不读取。
+ *
+ * 🔴 来源绑定以**消息 id** 为准（计划 §7.3）：`sourceTurnKey` 是回合的玩家输入消息 id
+ *    （开场无输入时取首条 Story 正文 id），`sourceMessageIds` 是该回合全部正式消息 id。
+ *    重生成后正文消息换了 id，旧片段自然失效，不靠 turn 序号或时间戳判断。
+ */
+/** Story 记忆来源契约。指纹仅含有序角色/正文；备份重发消息 id 时原样保留。 */
+export interface StoryMemorySource {
+  sourceTurnKey: string;
+  sourceMessageIds: string[];
+  /** 旧 v2 缺席时不能证明正文未修订，读取失效并可补建，不自动回填。 */
+  sourceFingerprint?: string;
+}
+
+export interface StoryMemoryGameTimeRange {
+  start: GameTime | null;
+  end: GameTime | null;
+}
+
+export interface StoryTurnSummaryRecord extends StoryMemorySource {
+  id: string;
+  saveId: string;
+  sourceTurnKey: string;
+  sourceMessageIds: string[];
+  /** 同一回合内的片段顺序 */
+  order: number;
+  content: string;
+  /** 片段所属事件名（可空：闲聊不强制归类） */
+  eventName?: string;
+  /** 模型提取的叙事实体名；旧行缺席保留未知，不以空数组伪造。 */
+  characters?: string[];
+  locations?: string[];
+  topics?: string[];
+  /** 代码读取原回合事实，不能拿补建时的当前时间代替。 */
+  gameTimeRange?: StoryMemoryGameTimeRange;
+  createdAt: number;
+  /**
+   * 召回用向量（可选，与 `embeddingMeta` 原子成对）：配置了 Embedding 源时在落库前计算，
+   * 失败或未配置 = 两者都缺席，召回按兜底排序处理。规则同 `MemoryRecord`（F09）。
+   */
+  embedding?: number[];
+  embeddingMeta?: EmbeddingMetadata;
+}
+
+/** 事件结束的三种方式（计划 D09 / Q03）：成功完成、放弃、失败都触发归档。 */
+export type StoryArchiveOutcome = 'completed' | 'abandoned' | 'failed';
+
+/** 事件详细记录（计划 D29）：供后续召回读取详情；约定与数字照原文。 */
+export interface StoryArchiveDetail {
+  cause: string;
+  process: string;
+  ending: string;
+  promises: string;
+  impact: string;
+}
+
+/**
+ * Story 上下文新模式（v2）的**阶段归档记录**（Dexie v28 `storyArchives`）。
+ *
+ * 一条记录 = 一个已结束事件的双层产物：`overview`（纳入第 2 区长期总览的概括）+
+ * `detail`（事件详细记录）。第 2 区总览不另存一份：它就是当前分支上全部有效归档按
+ * `createdAt` / `sequence` 排成的年表，所以「归档节点」= 这串记录本身（计划 Q12 的取舍）。
+ *
+ * 🔴 有效性由来源派生：`sourceMessageIds`（作出归档判断的那个回合的消息）全部仍在当前
+ *    分支才有效。回退到归档之前 → 记录被清理 / 失效 → 第 2 区自然退回上一节点，
+ *    它覆盖的摘要片段自动恢复未归档语义（计划 D23 / §11.4），不需要单独的回退逻辑。
+ */
+export interface StoryArchiveRecord extends StoryMemorySource {
+  id: string;
+  saveId: string;
+  eventName: string;
+  outcome: StoryArchiveOutcome;
+  /** 本回合正文中的结局依据（逐字摘录，代码校验确实出现在正文里） */
+  evidence: string;
+  /** 第 2 区概括记录 */
+  overview: string;
+  detail: StoryArchiveDetail;
+  /**
+   * 详细记录的来源：`source-text` = 依据事件各回合的玩家输入与正文原文生成（计划 D29）；
+   * `summary` = 原文生成失败时回落到总结 Agent 依据摘要写的版本（界面上标明）。
+   */
+  detailSource: 'source-text' | 'summary';
+  /** 被本次归档完整承接的摘要片段 id（退出第 4 区常驻范围，原记录保留可检索） */
+  coveredSegmentIds: string[];
+  /** 所有被覆盖回合的来源快照，不能只验证结局回合。 */
+  coveredSources?: StoryMemorySource[];
+  /** 摘要语义指纹，键随备份片段 id 重映射，值保持不变。 */
+  coveredSegmentFingerprints?: Record<string, string>;
+  /** 跨回合摘要替换不猜测新片段映射；保留归档行及原因供诊断。 */
+  invalidatedReason?: 'summary-replaced' | 'coverage-missing';
+  /** 作出归档判断的回合（`StoryTurn.key`）与其全部消息 id */
+  sourceTurnKey: string;
+  sourceMessageIds: string[];
+  /** 同一回合内多条归档的先后 */
+  sequence: number;
+  createdAt: number;
+  /** 召回用向量（可选，与 `embeddingMeta` 原子成对；按最终详细记录计算） */
+  embedding?: number[];
+  embeddingMeta?: EmbeddingMetadata;
+}
+
+/** R01：绑定原判断回合的待重试草稿。成功删除；覆盖替换保留失效诊断。 */
+export interface StoryArchiveRetryRecord extends StoryMemorySource {
+  id: string;
+  saveId: string;
+  rawOutput: string;
+  /** 已通过判断校验的原归档草稿（详情失败也可保留 summary 版本）。 */
+  archives: StoryArchiveRecord[];
+  /** 整次提交失败时，保留尚未落库的原摘要 id 与正文，以便原子重放。 */
+  summaries?: StoryTurnSummaryRecord[];
+  coveredSegmentIds: string[];
+  coveredSources: StoryMemorySource[];
+  coveredSegmentFingerprints: Record<string, string>;
+  invalidatedReason?: 'summary-replaced' | 'coverage-missing';
+  createdAt: number;
+}
+
+/** `SaveSlot.metadata.storyContextV2` 的形状；`schema` 只增不改，旧标记永远有效。 */
+export interface StoryContextV2SaveMarker {
+  schema: 1;
+  /** 首次打标的真实时间戳（诊断用，不参与任何判定） */
+  markedAt: number;
 }
 
 /**
@@ -1669,6 +1927,12 @@ export interface AgentContext {
   /** 用户任务列表 (Phase 10g) */
   quests?: Record<string, Quest>;
   agentOutputs: Map<string, any>; // 上游 Agent 的输出
+  /** Present only while assembling Story v2, including its indirect EJS reads. */
+  loreReadContext?: LoreReadContext;
+  /** 世界书检索使用的历史消息数；缺省 6，0 表示仅使用当前输入。 */
+  loreHistoryMessages?: number;
+  /** Immutable opening results from SaveSlot metadata; never recomputed during assembly. */
+  fixedLore?: FixedLoreSnapshot;
 
   // --- Phase 10: Plot mode ---
   /** 剧情模式配置（用于 orchestrator 决定是否跳过 plot_* agent） */
@@ -1755,6 +2019,16 @@ export interface AgentContext {
    * 🔴 缺席 / 空数组 = 池空 → 整段不出（零 token）。
    */
   randomEventOffer?: RandomEventOfferEntry[];
+  /**
+   * Story 上下文新模式（v2）：本轮开始时仍未结束的事件及其摘要（已渲染文本），
+   * 供总结 Agent 先做归档判断（`{{STORY_OPEN_EVENTS}}`）。旧模式缺席 = 渲染为空。
+   */
+  storyOpenEvents?: string;
+  /**
+   * Story 上下文新模式（v2）：本轮可召回的记忆候选清单（已渲染文本，带 A1 / S1 编号），
+   * 供召回 Agent 挑选（`{{STORY_RECALL_CANDIDATES}}`）。旧模式缺席 = 渲染为空。
+   */
+  storyRecallCandidates?: string;
   /**
    * 随机事件总开关的当前值（`engine-settings.randomEventsEnabled`）。
    *
@@ -1848,6 +2122,7 @@ export interface AgentContext {
     stats: Record<string, any>;
     vars: Record<string, any>;
     historyText: string;
+    stDefinitions?: Readonly<Record<string, string>>;
     /**
      * 宿主能力面输入（能力面 §3.5-§3.12：chat/char/world/quest/lore/local/ui/engine）。
      *
@@ -2013,6 +2288,141 @@ export interface DebugTurnRecord {
   startedAt: number;
   completedAt?: number;
   entries: DebugAgentEntry[];
+  /** Story 上下文新模式（v2）本回合的分区 / 召回 / 资料选择诊断；旧模式回合缺席 */
+  storyContext?: StoryContextDebugRecord;
+}
+
+// ========== Story 上下文新模式（v2）诊断 ==========
+
+export type StoryContextBudgetCategory =
+  | 'fixed'
+  | 'longTerm'
+  | 'region'
+  | 'summary'
+  | 'rawHistory'
+  | 'turnLore'
+  | 'recall'
+  | 'currentFactsAndDirections'
+  | 'outputReserve';
+
+/** 字符 / 1.5 的输入粗估，不是 provider token；outputReserve 为实际请求预留而非 usage。 */
+export interface StoryContextBudgetItem {
+  chars: number;
+  estimatedTokens: number;
+}
+
+export interface StoryContextBudgetRemoval extends StoryContextBudgetItem {
+  key: string;
+  category: StoryContextBudgetCategory;
+  reason: string;
+}
+
+/** 分区组装诊断（`buildStoryContextV2Messages` 产出，计划 §12.3）。 */
+export interface StoryContextV2Diagnostics {
+  windowTurns: number;
+  loreDefinitions?: { deferredKeys: string[]; missing: Record<string, string[]> };
+  /** 进入第 2 区长期总览的有效归档 id（历史年表顺序） */
+  archiveIds: string[];
+  /** 进入第 4 区原文的回合 key */
+  windowTurnKeys: string[];
+  /** 进入第 4 区的摘要片段 id */
+  summarySegmentIds: string[];
+  /** 窗口外缺少有效摘要、以原文顶上的回合 key */
+  missingSummaryTurnKeys: string[];
+  /** 各区注入字符数（粗略用量；不是 provider token） */
+  zoneChars: Record<1 | 2 | 3 | 4 | 5, number>;
+  /** 本轮全部消息的字符数（含普通预设条目与本轮输入） */
+  totalChars: number;
+  /** Actual output reserve after provider body overrides/omissions (not provider usage). */
+  outputReservedTokens?: number;
+  budgetDroppedLoreKeys?: string[];
+  budgetDroppedRecall?: boolean;
+  /** 最终消息完整分类（含模板指令、标签与分隔符），不含凭据或正文。 */
+  budgetCategories?: Record<StoryContextBudgetCategory, StoryContextBudgetItem>;
+  /** EJS 前按依赖组移除的每项；字符数来自模板原文，不冒充渲染后 provider 用量。 */
+  budgetRemovals?: StoryContextBudgetRemoval[];
+  /** 第 1 / 3 / 5 区实际注入的世界书条目（稳定条目键）；资料选择接入前只有第 1 区 */
+  loreKeysByZone?: Partial<Record<1 | 3 | 5, string[]>>;
+}
+
+/** 召回展开诊断（`expandStoryRecall`）。 */
+export interface StoryRecallExpansionDiagnostics {
+  rawMode: 'turn' | 'snippet';
+  selectedRefs: string[];
+  /** 贴了原文（整回合或片段）的回合 key */
+  rawTurnKeys: string[];
+  /** 原文在第 4 区窗口内、未重复贴出的回合 key */
+  inWindowTurnKeys: string[];
+  /** 因原文总量上限省略的回合 key */
+  omittedTurnKeys: string[];
+  /** 实际输出 / 预算省略的原文段落范围（0-based，按真实来源段落定位）。 */
+  paragraphRanges?: Array<{
+    ref: string;
+    turnKey: string;
+    start: number;
+    end: number;
+    omitted: boolean;
+  }>;
+  /** 已贴原文的字数（不含摘要与档案） */
+  rawChars: number;
+  /** 召回块总字数 */
+  chars: number;
+}
+
+/** 一次新模式召回的回报（管线据此提示与记日志；不含向量与凭据）。 */
+export interface StoryRecallReport {
+  mode: 'llm' | 'embedding';
+  /** `empty` = 没有候选，未发请求；`failed` = 本轮无召回（不阻断 Story） */
+  status: 'ok' | 'empty' | 'failed';
+  error?: string;
+  /** 非致命的降级说明（未绑定 Embedding 源 / 查询向量失败 / 重排失败 / 无效编号） */
+  notices: string[];
+  candidateCount: number;
+  expansion?: StoryRecallExpansionDiagnostics;
+}
+
+/** 资料选择（lore_select）诊断：必选 / 候选 / 选中 / 补充与回退原因。 */
+export interface StoryLoreSelectionDiagnostics {
+  /** Stable keys and deterministic reason codes only; never entry bodies or credentials. */
+  decisions?: Array<{
+    key: string;
+    reason: string;
+    outcome: 'selected' | 'excluded';
+    zone?: 1 | 3 | 5;
+  }>;
+  status: 'ok' | 'skipped' | 'fallback';
+  /** 回退原因（调用失败 / 输出认不出 / 未配置端点） */
+  fallbackReason?: string;
+  fixedKeys: string[];
+  regionKeys: string[];
+  requiredKeys: string[];
+  candidateKeys: string[];
+  selectedKeys: string[];
+  supplementKeys: string[];
+  budgetDroppedKeys?: string[];
+  /** 模型给出、但不在允许范围内的引用（不生效） */
+  rejectedRefs: string[];
+  /** 依赖展开进来的条目，以及因读取范围被拒的依赖 */
+  dependencyKeys: string[];
+  blockedDependencyKeys: string[];
+  /** 当前区域（位置路径）与第 3 区快照键 */
+  regionPath: string[];
+  regionSnapshotKey: string;
+  reason?: string;
+}
+
+/** 调试面板「Story 分区」一回合的全部诊断。 */
+export interface StoryContextDebugRecord {
+  assembly?: StoryContextV2Diagnostics & {
+    /** 粗估 token（字符数 / 1.5，不是 provider 计数）与端点上下文窗口（未配置则缺席） */
+    estimatedTokens: number;
+    contextWindowTokens?: number;
+    overBudget: boolean;
+  };
+  recall?: StoryRecallReport;
+  lore?: StoryLoreSelectionDiagnostics;
+  /** 本回合结束后补建的缺失摘要（回合 key）与补建失败的回合 */
+  backfill?: { turnKeys: string[]; failedTurnKeys: string[] };
 }
 
 /** 玩家可见的单次 Agent 工具活动；只保留语义化文案，不携带原始参数或响应。 */

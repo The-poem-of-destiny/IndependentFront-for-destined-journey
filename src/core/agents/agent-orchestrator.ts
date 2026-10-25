@@ -26,6 +26,9 @@ import type {
   CraftGenRequestMarker,
   EventTriggerMarker,
   ToolExecutionContext,
+  StoryArchiveRecord,
+  StoryContextV2Diagnostics,
+  StoryRecallReport,
 } from '../types/types';
 import type { SceneImageMarker } from '../types/types-image';
 import { AgentClient, ensureUserMessage } from './agent-client';
@@ -34,11 +37,25 @@ import { buildAgentMessagesAsync } from '../prompts/agent-templates';
 import { getPreset, getPresetPrefill } from '../prompts/preset-loader';
 import { scanMarkers } from '../story/marker-protocol';
 import {
+  recallByEmbedding,
   recallMemories,
   recallMemoriesLocally,
+  type EmbeddingEndpoint,
   type EmbeddingRequestTrace,
   type RecallDiagnostics,
 } from '../memory/memory-store';
+import {
+  buildStoryRecallCandidates,
+  buildStoryRecallQuery,
+  expandStoryRecall,
+  parseStoryRecallSelection,
+  rankStoryRecallFallback,
+  selectStoryRecallQueryFallback,
+  renderStoryRecallCandidates,
+  type StoryRecallCandidate,
+  type StoryRecallRawMode,
+  type StoryRecallSegment,
+} from '../memory/story-recall';
 import { applyRerank, requestRerank } from '../api/reranker';
 import type { RerankerApiSource } from '../types/types-api';
 import { buildLlmRequest } from '../api/llm-adapter';
@@ -61,6 +78,7 @@ import {
   preparePromptSession,
   type PromptSessionHandle,
 } from '../prompts/prompt-session-assembler';
+import { buildStoryContextV2Messages } from '../prompts/story-context-v2';
 
 // ========== Types ==========
 
@@ -72,6 +90,8 @@ export interface OrchestratorOptions {
   agentConfigs: AgentConfig[];
   endpoints: ApiEndpoint[];
   saveId: string;
+  /** 回合取消/存档归属检查；等待异步任务后不得继续启动提交。 */
+  isCurrent?: () => boolean;
   /** Phase 8: 预加载的世界书 */
   worldBooks?: WorldBook[];
   /** Phase 8: 预加载的预设列表 */
@@ -86,6 +106,28 @@ export interface OrchestratorOptions {
     rerankerEndpoint?: ApiEndpoint;
     candidateCount: number;
     resultCount: number;
+  };
+  /**
+   * Story 上下文新模式（v2）。给了 = 本轮 Story 用分区组装器（`story-context-v2.ts`），
+   * **不走** Delta 会话；缺席 = 旧模式，Story 照旧走 Delta / 无状态完整渲染。
+   * 模式由管线在回合开始时按「存档标记 × 开关」确定一次，编排器只照做。
+   */
+  storyContext?: {
+    windowTurns: number;
+    segments: readonly StoryRecallSegment[];
+    archives: readonly StoryArchiveRecord[];
+    /** 每次组装后回传诊断（各区用量、窗口、缺摘要回合），供调试面板 / 提示用 */
+    onAssembled?: (diagnostics: StoryContextV2Diagnostics) => void;
+    onLore?: (diagnostics: import('../types/types').StoryLoreSelectionDiagnostics) => void;
+    /**
+     * 新模式召回（`memory_recall` 在 v2 回合里的行为，计划 §9）。LLM / Embedding 仍由
+     * `memoryRetrieval.mode` 决定；结果展开成正文作为 `memory_recall` 的输出（字符串）。
+     * 🔴 召回失败**不报错**：输出空串、经 `onRecall` 回报，不连坐前置检查与 Story。
+     */
+    recall?: {
+      rawMode: StoryRecallRawMode;
+      onRecall?: (report: StoryRecallReport) => void;
+    };
   };
 }
 
@@ -209,6 +251,20 @@ export interface OrchestratorEvents {
   onToolCall?: (agentId: string, toolName: string, args: any, result: any) => void;
 }
 
+/** Embedding 源 → 召回核的端点入参（旧记忆召回与 v2 召回共用同一份映射）。 */
+function toEmbeddingEndpoint(endpoint: ApiEndpoint): EmbeddingEndpoint {
+  return {
+    id: endpoint.id,
+    baseUrl: endpoint.baseUrl,
+    apiKey: endpoint.apiKey,
+    defaultModel: endpoint.defaultModel,
+    name: endpoint.name,
+    bodyOverrides: endpoint.bodyOverrides,
+    bodyOmitPaths: endpoint.bodyOmitPaths,
+    revision: endpoint.revision,
+  };
+}
+
 // ========== AgentOrchestrator ==========
 
 export class AgentOrchestrator {
@@ -220,6 +276,7 @@ export class AgentOrchestrator {
   private events: OrchestratorEvents;
   private onlyAgents?: Set<string>;
   private memoryRetrieval?: OrchestratorOptions['memoryRetrieval'];
+  private storyContext?: OrchestratorOptions['storyContext'];
 
   private results: Map<string, AgentResult> = new Map();
   private completedStages: string[] = [];
@@ -255,6 +312,18 @@ export class AgentOrchestrator {
    * saveId 切换后 module 侧可能已清 session，此时 handle 失效（sessionId 不匹配）→ invalidate no-op。
    */
   private sessionHandles = new Map<string, PromptSessionHandle>();
+  private isCurrent: () => boolean;
+
+  private get cancelled(): boolean {
+    return (
+      !this.isCurrent() ||
+      [...this.agentConfigs.values()].some((config) => config.abortSignal?.aborted)
+    );
+  }
+
+  private assertCurrent(): void {
+    if (this.cancelled) throw new DOMException('Turn cancelled', 'AbortError');
+  }
 
   constructor(options: OrchestratorOptions, events: OrchestratorEvents = {}) {
     this.pipeline = options.pipeline;
@@ -265,6 +334,8 @@ export class AgentOrchestrator {
     this.presets = options.presets ?? [];
     this.runId = crypto.randomUUID();
     this.memoryRetrieval = options.memoryRetrieval;
+    this.storyContext = options.storyContext;
+    this.isCurrent = options.isCurrent ?? (() => true);
 
     // Build lookup maps
     this.agentConfigs = new Map();
@@ -323,6 +394,7 @@ export class AgentOrchestrator {
 
     // 逐阶段执行
     for (let i = 0; i < this.pipeline.stages.length; i++) {
+      if (this.cancelled) break;
       const stage = this.pipeline.stages[i];
       this.currentStage = `stage_${i}`;
 
@@ -336,6 +408,7 @@ export class AgentOrchestrator {
 
       try {
         await this.executeStage(stage, i);
+        this.assertCurrent();
         this.completedStages.push(`stage_${i}`);
 
         // 工坊 P2 (D5): EJS vars 差量在本 stage 的标记处理（= AI 补丁提交）之前落库。
@@ -346,6 +419,7 @@ export class AgentOrchestrator {
           console.warn('[Orchestrator] EJS vars 差量提交失败（不阻塞管线）:', err);
         }
 
+        this.assertCurrent();
         this.events.onStageComplete?.(i);
 
         // Phase 6e: 处理标记 (craft_request / combat_trigger / char_detect)
@@ -359,7 +433,7 @@ export class AgentOrchestrator {
           this.pendingSideChains = [];
         }
         // Stage failure — if retry is off, stop pipeline
-        if (!this.pipeline.retryOnFail) {
+        if (this.cancelled || !this.pipeline.retryOnFail) {
           this.status = 'failed';
           return this.buildRun(startTime);
         }
@@ -378,10 +452,12 @@ export class AgentOrchestrator {
 
     // 🎲 每回合胶水（随机事件 v1 §4.3）：本轮全部落库动作已经跑完，这时候的上下文
     // 才是下一回合注入块要依据的那份。自带 try/catch，永远不影响 run 的状态判定。
-    await this.syncRandomEventsForTurn();
+    if (!this.cancelled) await this.syncRandomEventsForTurn();
 
     this.status =
-      this.completedStages.length > 0 && this.requiredAgentsSucceeded() ? 'completed' : 'failed';
+      !this.cancelled && this.completedStages.length > 0 && this.requiredAgentsSucceeded()
+        ? 'completed'
+        : 'failed';
     return this.buildRun(startTime);
   }
 
@@ -515,6 +591,10 @@ export class AgentOrchestrator {
     config: AgentConfig,
     options?: { skipSession?: boolean },
   ): Promise<AgentResult> {
+    // Story 上下文新模式（v2）：召回读每回合摘要与阶段归档，结果展开成正文（计划 §9）
+    if (config.agentId === 'memory_recall' && this.storyContext) {
+      return this.callStoryRecall(config);
+    }
     if (config.agentId === 'memory_recall' && this.memoryRetrieval?.mode === 'embedding') {
       const endpoint = this.memoryRetrieval.embeddingEndpoint;
       if (!endpoint) {
@@ -554,7 +634,135 @@ export class AgentOrchestrator {
     let promptRebased: boolean | undefined;
     let promptRebaseReason: string | undefined;
 
-    if (!options?.skipSession) {
+    // Story 上下文新模式（v2）：分区组装器每轮从当前状态完整组装，**不**进 Delta 会话
+    // （计划 §10.3）。regenerate 同样走这里 —— 新模式没有可续用的旧 transcript。
+    if (config.agentId === 'story' && this.storyContext) {
+      try {
+        const reservedOutput =
+          buildLlmRequest({
+            protocol:
+              endpoint.protocol === 'gemini' || endpoint.protocol === 'anthropic-messages'
+                ? endpoint.protocol
+                : 'openai-chat',
+            model: config.model || endpoint.defaultModel,
+            messages: [],
+            maxTokens: config.maxTokens,
+            stream: false,
+            userId: 'budget',
+            bodyOverrides: endpoint.bodyOverrides,
+            bodyOmitPaths: endpoint.bodyOmitPaths,
+          }).outputBudget ?? 0;
+        const assembled = await buildStoryContextV2Messages({
+          outputReservedTokens: reservedOutput,
+          budgetChars: endpoint.contextWindowTokens
+            ? Math.max(0, endpoint.contextWindowTokens - reservedOutput) * 1.5
+            : undefined,
+          ctx: this.context,
+          configs: configsArr,
+          worldBooks: this.worldBooks,
+          presets: this.presets,
+          windowTurns: this.storyContext.windowTurns,
+          segments: this.storyContext.segments,
+          archives: this.storyContext.archives,
+          onLore: this.storyContext.onLore,
+          selectLore: async (selectionMessages) => {
+            const selector = this.agentConfigs.get('lore_select');
+            const selectorEndpoint = selector && this.endpoints.get(selector.apiEndpointId);
+            if (!selector || !selectorEndpoint) throw new Error('lore_select endpoint unavailable');
+            if (config.abortSignal?.aborted) throw new Error('cancelled');
+            this.events.onAgentStart?.('lore_select', selector);
+            const selectionClient = new AgentClient({
+              endpoint: selectorEndpoint,
+              agentId: 'lore_select',
+              saveId: this.saveId,
+              timeout: selector.timeout || selectorEndpoint.timeout,
+              maxRetries: selector.maxRetries ?? 0,
+            });
+            const wireMessages = selectionMessages.map((m) =>
+              m.role === 'system'
+                ? { ...m, content: [m.content, selector.systemPrompt].filter(Boolean).join('\n\n') }
+                : {
+                    ...m,
+                    content: selector.template?.includes('{{LORE_CATALOG}}')
+                      ? selector.template.split('{{LORE_CATALOG}}').join(m.content)
+                      : [selector.template, m.content].filter(Boolean).join('\n\n'),
+                  },
+            );
+            const selectionResult = await selectionClient.chat(
+              {
+                messages: wireMessages,
+                model: selector.model || selectorEndpoint.defaultModel,
+                temperature: selector.temperature,
+                maxTokens: selector.maxTokens,
+                topP: selector.topP,
+                frequencyPenalty: selector.frequencyPenalty,
+                presencePenalty: selector.presencePenalty,
+              },
+              config.abortSignal,
+            );
+            selectionResult.agentId = 'lore_select';
+            selectionResult.requestMessages = wireMessages;
+            await this.events.onAgentComplete?.(selectionResult);
+            if (config.abortSignal?.aborted) throw new Error('cancelled');
+            if (selectionResult.error) throw new Error(selectionResult.error);
+            return selectionResult.rawResponse;
+          },
+        });
+        messages = assembled.messages;
+        const outputReserve =
+          buildLlmRequest({
+            protocol:
+              endpoint.protocol === 'gemini' || endpoint.protocol === 'anthropic-messages'
+                ? endpoint.protocol
+                : 'openai-chat',
+            model: config.model || endpoint.defaultModel,
+            messages,
+            maxTokens: config.maxTokens,
+            stream: false,
+            userId: 'budget',
+            bodyOverrides: endpoint.bodyOverrides,
+            bodyOmitPaths: endpoint.bodyOmitPaths,
+          }).outputBudget ?? 0;
+        assembled.diagnostics.outputReservedTokens = outputReserve;
+        if (assembled.diagnostics.budgetCategories) {
+          assembled.diagnostics.budgetCategories.outputReserve = {
+            chars: 0,
+            estimatedTokens: outputReserve,
+          };
+        }
+        try {
+          this.storyContext.onAssembled?.(assembled.diagnostics);
+        } catch (err) {
+          console.warn('[Orchestrator] Story v2 诊断回调失败（不影响本轮）:', err);
+        }
+        if (
+          endpoint.contextWindowTokens &&
+          Math.ceil(assembled.diagnostics.totalChars / 1.5) + outputReserve >
+            endpoint.contextWindowTokens
+        ) {
+          throw new Error(
+            `上下文超限（含输出预留 ${outputReserve} tokens），分区字符数: ${JSON.stringify(assembled.diagnostics.zoneChars)}`,
+          );
+        }
+      } catch (err) {
+        // 组装失败（如 N 非法）按新模式自身的失败处理：本轮 Story 报错，不回落旧组装（T40）
+        return {
+          agentId: config.agentId,
+          output: null,
+          rawResponse: '',
+          tokensUsed: 0,
+          cacheHit: false,
+          duration: 0,
+          error: `Story 上下文新模式组装失败: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+
+    // 新模式下每回合总结也不进 Delta：它每轮读的是当前的未结事件与本回合正文，
+    // 是一次独立判断，续用上几轮的 transcript 只会让旧回合的正文混进归档判断。
+    const v2StatelessSummary = config.agentId === 'memory_summary' && !!this.storyContext;
+
+    if (!messages && !options?.skipSession && !v2StatelessSummary) {
       const prepared = await preparePromptSession({
         saveId: this.saveId,
         agentId: config.agentId,
@@ -937,16 +1145,7 @@ export class AgentOrchestrator {
         this.saveId,
         query,
         candidateCount,
-        {
-          id: endpoint.id,
-          baseUrl: endpoint.baseUrl,
-          apiKey: endpoint.apiKey,
-          defaultModel: endpoint.defaultModel,
-          name: endpoint.name,
-          bodyOverrides: endpoint.bodyOverrides,
-          bodyOmitPaths: endpoint.bodyOmitPaths,
-          revision: endpoint.revision,
-        },
+        toEmbeddingEndpoint(endpoint),
         config.abortSignal,
         (trace) => {
           embeddingTrace = trace;
@@ -956,46 +1155,13 @@ export class AgentOrchestrator {
         },
       );
 
-      let selected = recalled.slice(0, topK);
-      let rerankFallback: string | undefined;
-      const reranker = this.memoryRetrieval?.rerankerEndpoint;
-      if (reranker && recalled.length > 0) {
-        try {
-          const documents: string[] = [];
-          let remainingCharacters = 100_000;
-          for (const item of recalled) {
-            if (remainingCharacters <= 0) break;
-            const document = item.memory.content.slice(0, remainingCharacters);
-            if (!document) break;
-            documents.push(document);
-            remainingCharacters -= document.length;
-          }
-          const scores = await requestRerank(
-            {
-              id: reranker.id,
-              name: reranker.name,
-              kind: 'reranker',
-              protocol: 'openai-rerank',
-              baseUrl: reranker.baseUrl,
-              apiKey: reranker.apiKey,
-              defaultModel: reranker.defaultModel,
-              models: reranker.models,
-              timeoutMs: reranker.timeoutMs ?? reranker.timeout,
-              bodyOverrides: reranker.bodyOverrides ?? {},
-              bodyOmitPaths: reranker.bodyOmitPaths ?? [],
-              headerOverrides: reranker.headerOverrides ?? {},
-              revision: reranker.revision,
-            } satisfies RerankerApiSource,
-            query,
-            documents,
-            topK,
-            config.abortSignal,
-          );
-          selected = applyRerank(recalled, scores, topK);
-        } catch (error) {
-          rerankFallback = error instanceof Error ? error.message : String(error);
-        }
-      }
+      const { selected, rerankFallback } = await this.rerankRecalled(
+        recalled,
+        (item) => item.memory.content,
+        query,
+        topK,
+        config.abortSignal,
+      );
 
       // 格式化为与 LLM 路径兼容的输出结构
       const memories = selected.map((r) => ({
@@ -1056,6 +1222,357 @@ export class AgentOrchestrator {
         error: `Embedding 召回失败: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+  }
+
+  /**
+   * 可选重排（旧记忆召回与 v2 召回共用）。未配置重排源 / 没有候选 → 原顺序取前 topK；
+   * 重排失败 → 同样回落原顺序，并把原因交回调用方记诊断。
+   */
+  private async rerankRecalled<T>(
+    recalled: T[],
+    documentOf: (item: T) => string,
+    query: string,
+    topK: number,
+    signal?: AbortSignal,
+  ): Promise<{ selected: T[]; rerankFallback?: string }> {
+    const selected = recalled.slice(0, topK);
+    const reranker = this.memoryRetrieval?.rerankerEndpoint;
+    if (!reranker || recalled.length === 0) return { selected };
+    try {
+      const documents: string[] = [];
+      let remainingCharacters = 100_000;
+      for (const item of recalled) {
+        if (remainingCharacters <= 0) break;
+        const document = documentOf(item).slice(0, remainingCharacters);
+        if (!document) break;
+        documents.push(document);
+        remainingCharacters -= document.length;
+      }
+      const scores = await requestRerank(
+        {
+          id: reranker.id,
+          name: reranker.name,
+          kind: 'reranker',
+          protocol: 'openai-rerank',
+          baseUrl: reranker.baseUrl,
+          apiKey: reranker.apiKey,
+          defaultModel: reranker.defaultModel,
+          models: reranker.models,
+          timeoutMs: reranker.timeoutMs ?? reranker.timeout,
+          bodyOverrides: reranker.bodyOverrides ?? {},
+          bodyOmitPaths: reranker.bodyOmitPaths ?? [],
+          headerOverrides: reranker.headerOverrides ?? {},
+          revision: reranker.revision,
+        } satisfies RerankerApiSource,
+        query,
+        documents,
+        topK,
+        signal,
+      );
+      return { selected: applyRerank(recalled, scores, topK) };
+    } catch (error) {
+      return { selected, rerankFallback: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  // ========== Internal: Story 上下文 v2 召回 ==========
+
+  /**
+   * 新模式召回（计划 §9）：先定位（LLM 按编号挑 / Embedding 按向量排），再把选中的记忆
+   * 展开成摘要、事件详细记录与来源原文，作为 `memory_recall` 的输出交给前置检查与 Story。
+   *
+   * 🔴 不进 Delta 会话：候选清单每轮按当前分支重建，续用旧 transcript 会混进失效的编号。
+   * 🔴 LLM 失败后按查询有限补取；仍无相关候选时返回空串，诊断经 `onRecall` 回报。
+   */
+  private async callStoryRecall(config: AgentConfig): Promise<AgentResult> {
+    const startTime = Date.now();
+    const story = this.storyContext!;
+    const mode = this.memoryRetrieval?.mode ?? 'llm';
+    const topK = Math.max(1, this.memoryRetrieval?.resultCount ?? 20);
+    const history = this.context.history ?? [];
+    const candidates = buildStoryRecallCandidates({
+      messages: history,
+      windowTurns: story.windowTurns,
+      segments: story.segments,
+      archives: story.archives,
+    });
+    const notices: string[] = [];
+    const report = (r: Pick<StoryRecallReport, 'status' | 'error' | 'expansion'>) => {
+      try {
+        story.recall?.onRecall?.({ mode, candidateCount: candidates.length, notices, ...r });
+      } catch (err) {
+        console.warn('[Orchestrator] Story v2 召回回报失败（不影响本轮）:', err);
+      }
+    };
+    const emptyResult = (extra: Partial<AgentResult> = {}): AgentResult => ({
+      tokensUsed: 0,
+      rawResponse: '',
+      ...extra,
+      agentId: config.agentId,
+      output: '',
+      cacheHit: extra.cacheHit ?? false,
+      duration: Date.now() - startTime,
+    });
+
+    if (candidates.length === 0) {
+      report({ status: 'empty' });
+      return emptyResult();
+    }
+
+    const query = buildStoryRecallQuery({
+      userInput: this.context.userInput ?? '',
+      messages: history,
+      segments: story.segments,
+    });
+    let picked: StoryRecallCandidate[];
+    let result: Partial<AgentResult>;
+    try {
+      const outcome =
+        mode === 'embedding'
+          ? await this.pickStoryRecallByEmbedding(candidates, query, topK, config, notices)
+          : await this.pickStoryRecallByLlm(candidates, topK, config, notices);
+      if ('error' in outcome) {
+        if (config.abortSignal?.aborted || mode !== 'llm') {
+          report({ status: 'failed', error: outcome.error });
+          return emptyResult(outcome.result);
+        }
+        picked = selectStoryRecallQueryFallback(candidates, query, topK);
+        if (!picked.length) {
+          report({ status: 'failed', error: outcome.error });
+          return emptyResult(outcome.result);
+        }
+        notices.push(`${outcome.error}；已按当前问题相关性补取 ${picked.length} 条记忆（最多3条）`);
+        result = outcome.result ?? {};
+      } else {
+        picked = outcome.picked;
+        result = outcome.result;
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      report({ status: 'failed', error });
+      return emptyResult();
+    }
+
+    const expansion = expandStoryRecall({
+      selected: picked,
+      messages: history,
+      windowTurns: story.windowTurns,
+      segments: story.segments,
+      rawMode: story.recall?.rawMode ?? 'turn',
+      probe: query,
+    });
+    report({ status: 'ok', expansion: expansion.diagnostics });
+    return {
+      tokensUsed: 0,
+      rawResponse: '',
+      ...result,
+      agentId: config.agentId,
+      output: expansion.text,
+      cacheHit: result.cacheHit ?? false,
+      duration: Date.now() - startTime,
+    };
+  }
+
+  /** v2 召回 · LLM：覆盖后的 memory_recall 提示词读编号清单，返回编号（代码校验）。 */
+  private async pickStoryRecallByLlm(
+    candidates: StoryRecallCandidate[],
+    topK: number,
+    config: AgentConfig,
+    notices: string[],
+  ): Promise<
+    | { picked: StoryRecallCandidate[]; result: Partial<AgentResult> }
+    | { error: string; result?: Partial<AgentResult> }
+  > {
+    const endpoint = this.endpoints.get(config.apiEndpointId);
+    if (!endpoint) return { error: `Endpoint "${config.apiEndpointId}" not found` };
+    this.context.storyRecallCandidates = renderStoryRecallCandidates(candidates);
+    const messages = await buildAgentMessagesAsync(
+      config.agentId,
+      this.context,
+      Array.from(this.agentConfigs.values()),
+      this.worldBooks,
+      this.presets,
+      undefined,
+    );
+    if (!messages) return { error: `No template found for agent "${config.agentId}"` };
+    const client = new AgentClient({
+      endpoint,
+      agentId: config.agentId,
+      saveId: this.saveId,
+      timeout: config.timeout || endpoint.timeout,
+      maxRetries: config.maxRetries ?? (config.retryOnFail ? 1 : 0),
+    });
+    const attempts: AgentResult[] = [];
+    let failure = '';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const requestMessages =
+        attempt === 0
+          ? messages
+          : [
+              ...messages,
+              {
+                role: 'user' as const,
+                content:
+                  '上次没有返回有效的召回编号。只返回 <json>{"memories":[{"id":"候选编号"}]}</json>；无需召回时返回 <json>{"memories":[]}</json>。',
+              },
+            ];
+      const response = await client.chat(
+        {
+          messages: requestMessages,
+          model: config.model || endpoint.defaultModel,
+          temperature: config.temperature,
+          maxTokens: config.maxTokens,
+          topP: config.topP,
+          frequencyPenalty: config.frequencyPenalty,
+          presencePenalty: config.presencePenalty,
+        },
+        config.abortSignal,
+      );
+      response.requestMessages = requestMessages;
+      const selection = response.error
+        ? null
+        : parseStoryRecallSelection(response.rawResponse || '', candidates, topK);
+      failure =
+        response.error ??
+        (selection ? '' : response.rawResponse.trim() ? '召回输出无法解析' : '召回返回空响应');
+      attempts.push({ ...response, error: failure || undefined });
+      // Both provider responses count, including the response that failed format validation.
+      const sum = (
+        field: 'cacheHitTokens' | 'cacheMissTokens' | 'completionTokens' | 'promptTokens',
+      ) =>
+        attempts.some((r) => r[field] !== undefined)
+          ? attempts.reduce((n, r) => n + (r[field] ?? 0), 0)
+          : undefined;
+      const { error: _error, ...rest } = response;
+      const result: Partial<AgentResult> = {
+        ...rest,
+        tokensUsed: attempts.reduce((n, r) => n + r.tokensUsed, 0),
+        cacheHit: attempts.some((r) => r.cacheHit),
+        reasoning:
+          attempts
+            .map((r) => r.reasoning)
+            .filter(Boolean)
+            .join('\n\n') || undefined,
+        cacheHitTokens: sum('cacheHitTokens'),
+        cacheMissTokens: sum('cacheMissTokens'),
+        promptTokens: sum('promptTokens'),
+        completionTokens: sum('completionTokens'),
+        providerRounds: attempts.map((r, i) => ({
+          round: i + 1,
+          tokensUsed: r.tokensUsed,
+          cacheHit: r.cacheHit,
+          cacheHitTokens: r.cacheHitTokens,
+          cacheMissTokens: r.cacheMissTokens,
+          promptTokens: r.promptTokens,
+          completionTokens: r.completionTokens,
+          duration: r.duration,
+          error: r.error,
+          finishReason: r.finishReason,
+        })),
+      };
+      if (selection) {
+        if (selection.unknownRefs.length > 0)
+          notices.push(`忽略了清单外的编号：${selection.unknownRefs.join('、')}`);
+        const byRef = new Map(candidates.map((c) => [c.ref, c]));
+        return {
+          picked: selection.refs.flatMap((ref) => {
+            const candidate = byRef.get(ref);
+            return candidate ? [candidate] : [];
+          }),
+          result,
+        };
+      }
+      // Network failures already use AgentClient's configured retries; cancellation never retries.
+      if (response.error || config.abortSignal?.aborted || attempt === 1)
+        return { error: failure, result };
+      notices.push(`${failure}，进行一次格式重试`);
+    }
+    return { error: failure };
+  }
+
+  /** v2 召回 · Embedding：复用旧召回的向量核与重排；没有向量的候选按时间先后兜底。 */
+  private async pickStoryRecallByEmbedding(
+    candidates: StoryRecallCandidate[],
+    query: string,
+    topK: number,
+    config: AgentConfig,
+    notices: string[],
+  ): Promise<{ picked: StoryRecallCandidate[]; result: Partial<AgentResult> }> {
+    const requestMessages: AgentResult['requestMessages'] = [{ role: 'user', content: query }];
+    const endpoint = this.memoryRetrieval?.embeddingEndpoint;
+    if (!endpoint) {
+      notices.push('Embedding 召回绑定源无效，已按时间先后兜底');
+      return {
+        picked: rankStoryRecallFallback(candidates).slice(0, topK),
+        result: { requestMessages },
+      };
+    }
+    const candidateCount = Math.min(
+      100,
+      Math.max(topK, this.memoryRetrieval?.candidateCount ?? 20),
+    );
+    let trace: EmbeddingRequestTrace | undefined;
+    let diagnostics: RecallDiagnostics | undefined;
+    const recalled = await recallByEmbedding(
+      candidates.map((c) => ({ item: c, embedding: c.embedding, embeddingMeta: c.embeddingMeta })),
+      query,
+      candidateCount,
+      toEmbeddingEndpoint(endpoint),
+      rankStoryRecallFallback,
+      config.abortSignal,
+      (t) => {
+        trace = t;
+      },
+      (d) => {
+        diagnostics = d;
+      },
+    );
+    if (diagnostics?.queryError) {
+      notices.push(`查询向量生成失败，已按时间先后兜底：${diagnostics.queryError}`);
+    } else if (diagnostics) {
+      const unusable = diagnostics.missing + diagnostics.incompatible + diagnostics.invalid;
+      if (unusable > 0) notices.push(`${unusable} 条候选没有可比向量，按时间先后补位`);
+    }
+    const { selected, rerankFallback } = await this.rerankRecalled(
+      recalled,
+      (r) => r.item.text,
+      query,
+      topK,
+      config.abortSignal,
+    );
+    if (rerankFallback) notices.push(`重排失败，沿用向量排序：${rerankFallback}`);
+    const output = {
+      memories: selected.map((r) => ({
+        id: r.item.ref,
+        relevance: Math.round(r.score * 100) / 100,
+        source: r.source,
+      })),
+    };
+    return {
+      picked: selected.map((r) => r.item),
+      result: {
+        rawResponse: JSON.stringify(output),
+        requestMessages,
+        tokensUsed: trace?.totalTokens ?? 0,
+        cacheMissTokens: trace?.promptTokens,
+        promptTokens: trace?.promptTokens,
+        completionTokens: 0,
+        providerRounds: trace
+          ? [
+              {
+                round: 1,
+                tokensUsed: trace.totalTokens ?? 0,
+                cacheHit: false,
+                cacheMissTokens: trace.promptTokens,
+                promptTokens: trace.promptTokens,
+                completionTokens: 0,
+                duration: trace.completedAt - trace.startedAt,
+                error: trace.error,
+              },
+            ]
+          : undefined,
+      },
+    };
   }
 
   private async callMemoryRecallLocalFallback(
@@ -1202,9 +1719,17 @@ export class AgentOrchestrator {
 
   /** 完成处理属于阶段提交的一部分；失败时不得让下游消费未提交的结果。 */
   private async publishAgentCompletion(result: AgentResult): Promise<boolean> {
-    this.context.agentOutputs!.set(result.agentId, result.output);
     try {
+      this.assertCurrent();
+      // v2 JSON 保留 raw；占位符只在读取时投影，不覆盖解析来源。
+      this.context.agentOutputs!.set(
+        result.agentId,
+        this.storyContext && result.agentId === 'memory_summary'
+          ? result.rawResponse
+          : result.output,
+      );
       await this.events.onAgentComplete?.(result);
+      this.assertCurrent();
       return true;
     } catch (error) {
       const message = `Agent completion handler failed: ${
@@ -1228,6 +1753,7 @@ export class AgentOrchestrator {
    * 延迟理由: 制作可能依赖 char_gen 生成的 NPC（如铁匠），且统一在 Stage 2 执行可并行 batched。
    */
   private async processStageMarkers(stageIndex: number): Promise<void> {
+    this.assertCurrent();
     // Phase 10: Chain agents that need localParams (craft_gen, char_gen, item_gen)
     // receive them via the chain orchestrators (craft-gen-chain.ts, char-gen-agent.ts).
     // The orchestrator callbacks pass localParams directly to buildAgentMessages().
@@ -1542,12 +2068,15 @@ export class AgentOrchestrator {
     source: string,
   ): Promise<void> {
     if (patches.length === 0) return;
+    this.assertCurrent();
     try {
       const { createStateManager } = await import('../state/state-manager');
+      this.assertCurrent();
       const sm = createStateManager(this.saveId);
-      const r = await sm.commitChatState(patches);
+      const r = await sm.commitChatState(patches, { isCurrent: () => !this.cancelled });
       this.reportCommitResult(r, patches.length, source);
     } catch (err) {
+      if (this.cancelled) throw err;
       console.error(`[Orchestrator] ${source} 状态提交抛异常:`, err);
       this.events.onStateCommitError?.(source, [String(err)]);
     }
@@ -1598,10 +2127,13 @@ export class AgentOrchestrator {
 
   /** 时间推进 —— 独立成一条回执：旧实现与解析共用 catch，推进抛错会被印成「解析失败」 */
   private async advanceTime(deltaMinutes: number, source: string): Promise<void> {
+    this.assertCurrent();
     try {
       const { createStateManager } = await import('../state/state-manager');
-      await createStateManager(this.saveId).applyTimeAdvance(deltaMinutes);
+      this.assertCurrent();
+      await createStateManager(this.saveId).applyTimeAdvance(deltaMinutes, () => !this.cancelled);
     } catch (err) {
+      if (this.cancelled) throw err;
       console.error(`[Orchestrator] ${source} 时间推进失败:`, err);
       this.events.onStateCommitError?.(`${source}:delta_time`, [String(err)]);
     }

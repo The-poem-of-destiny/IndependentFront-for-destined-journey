@@ -26,6 +26,7 @@ vi.mock('../../../src/core/persistence/database', () => ({
   deleteCharacter: vi.fn(),
   saveMemory: vi.fn(),
   deleteMemoriesAfter: vi.fn(),
+  pruneOrphanStoryContextRecords: vi.fn(async () => 0),
   deleteSnapshotsAfter: vi.fn(),
   getMemories: vi.fn(),
   getPlotEvents: vi.fn(),

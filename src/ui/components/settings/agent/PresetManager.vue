@@ -37,6 +37,7 @@ import {
   removePresetEntry,
   movePresetEntry,
   duplicatePresetEntry,
+  isZonePlaceholderEntry,
 } from '../../../lib/preset-entries';
 import { preprocessPresetForPreview, findTailAssistantEntry } from '@engine/prompts/preset-loader';
 import type { ChatPreset } from '@engine/types/types';
@@ -514,11 +515,23 @@ void reactive;
           v-for="(sp, idx) in activePrompts"
           :key="sp.identifier || idx"
           class="subprompt-item"
-          :class="{ 'subprompt-disabled': sp.enabled === false }"
+          :class="{
+            'subprompt-disabled': sp.enabled === false,
+            'subprompt-zone': isZonePlaceholderEntry(sp),
+          }"
         >
           <div class="subprompt-header" @click="toggleEntry(s.activePresetId, Number(idx))">
             <div class="subprompt-info">
+              <!-- 五区占位条目恒启用、不可停用：用锁标代替开关 -->
+              <span
+                v-if="isZonePlaceholderEntry(sp)"
+                class="subprompt-zone-lock"
+                title="上下文分区占位条目，不可删除或停用"
+              >
+                <i class="fa-solid fa-lock" aria-hidden="true"></i>
+              </span>
               <label
+                v-else
                 class="subprompt-toggle"
                 @click.stop.prevent="togglePresetEntryEnabled(s.activePresetId, Number(idx))"
               >
@@ -526,7 +539,10 @@ void reactive;
                 <span class="toggle-slider toggle-sm"></span>
               </label>
               <span class="subprompt-name">{{ sp.name || `条目 #${Number(idx) + 1}` }}</span>
-              <span class="subprompt-role text-xs text-muted">{{ sp.role || 'system' }}</span>
+              <span v-if="isZonePlaceholderEntry(sp)" class="subprompt-zone-badge">分区占位</span>
+              <span v-else class="subprompt-role text-xs text-muted">{{
+                sp.role || 'system'
+              }}</span>
             </div>
             <div class="subprompt-meta">
               <button
@@ -545,30 +561,32 @@ void reactive;
               >
                 ↓
               </button>
-              <button
-                class="subprompt-edit-btn"
-                title="编辑此条目"
-                @click.stop="openEntryEditor(s.activePresetId, Number(idx))"
-              >
-                ✎
-              </button>
-              <button
-                class="subprompt-edit-btn"
-                title="复制到下方"
-                @click.stop="duplicateEntry(Number(idx))"
-              >
-                ⧉
-              </button>
-              <button
-                class="subprompt-edit-btn subprompt-delete-btn"
-                title="删除此条目"
-                @click.stop="openDeleteEntry(Number(idx))"
-              >
-                🗑
-              </button>
-              <span class="subprompt-chars text-xs text-muted"
-                >{{ (sp.content || '').length }} 字</span
-              >
+              <template v-if="!isZonePlaceholderEntry(sp)">
+                <button
+                  class="subprompt-edit-btn"
+                  title="编辑此条目"
+                  @click.stop="openEntryEditor(s.activePresetId, Number(idx))"
+                >
+                  ✎
+                </button>
+                <button
+                  class="subprompt-edit-btn"
+                  title="复制到下方"
+                  @click.stop="duplicateEntry(Number(idx))"
+                >
+                  ⧉
+                </button>
+                <button
+                  class="subprompt-edit-btn subprompt-delete-btn"
+                  title="删除此条目"
+                  @click.stop="openDeleteEntry(Number(idx))"
+                >
+                  🗑
+                </button>
+                <span class="subprompt-chars text-xs text-muted"
+                  >{{ (sp.content || '').length }} 字</span
+                >
+              </template>
               <span
                 class="subprompt-chevron"
                 :class="{
@@ -579,8 +597,15 @@ void reactive;
             </div>
           </div>
           <div v-if="expandedEntries.has(`${s.activePresetId}:${idx}`)" class="subprompt-content">
-            {{ (sp.content || '(空)').slice(0, 300)
-            }}{{ (sp.content || '').length > 300 ? '...' : '' }}
+            <template v-if="isZonePlaceholderEntry(sp)">
+              开启「Story 上下文与记忆新模式」时，引擎在这个位置填入该分区组装好的消息；
+              关闭时这一条为空，不产生任何内容。五个分区的先后顺序固定为 1→5，
+              可以在它们之间插入普通条目。
+            </template>
+            <template v-else>
+              {{ (sp.content || '(空)').slice(0, 300)
+              }}{{ (sp.content || '').length > 300 ? '...' : '' }}
+            </template>
           </div>
         </div>
         <p v-if="activePrompts.length === 0" class="text-muted text-sm" style="padding: 12px 16px">
@@ -895,6 +920,28 @@ void reactive;
 }
 .subprompt-disabled {
   opacity: 0.45;
+}
+/* 五区占位条目：强调徽章配方（design.md §1），与普通条目一眼可分 */
+.subprompt-zone {
+  background: color-mix(in srgb, var(--theme-primary) 5%, var(--theme-card-bg));
+}
+.subprompt-zone-lock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  color: var(--theme-primary);
+  font-size: 0.6875rem;
+}
+.subprompt-zone-badge {
+  flex-shrink: 0;
+  padding: 0 var(--theme-spacing-xs);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+  border-radius: var(--theme-radius-sm);
+  color: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  font-size: 0.6875rem;
+  line-height: 1.5;
 }
 .subprompt-header {
   display: flex;

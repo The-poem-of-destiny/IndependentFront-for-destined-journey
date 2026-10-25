@@ -3,12 +3,13 @@
  *
  * 职责:
  * - 从 data/worldbooks/ 加载世界书 JSON 文件
- * - 按 AgentConfig.worldBookIds 过滤 Agent 可见的世界书
+ * - 按条目路由元数据（lore.audiences）过滤 Agent 可见的条目（判据在 lore-routing.ts）
  * - constant/keyword 双层激活
  * - 按 order 排序 + 格式化输出
  */
 
-import type { WorldBook, WorldBookEntry, AgentConfig } from '../types/types';
+import type { WorldBook, WorldBookEntry } from '../types/types';
+import { resolveLoreDependenciesForAgent } from './lore-routing';
 import { executeEjsEntry, type EjsEvalContext } from '../ejs/ejs-runtime';
 import {
   clearEjsBackendCache,
@@ -39,31 +40,27 @@ export function loadWorldBooksSync(
 // ========== 过滤 ==========
 
 /**
- * 获取指定 Agent 可见的世界书条目
+ * 获取指定 Agent 可见的世界书条目。
+ *
+ * 可见性**只**看条目自己的读取范围（`lore-routing.isLoreEntryVisibleTo`：条目
+ * `extra.lore.audiences`）。Agent 设置不再有世界书清单（内容计划 §7.2）；旧包兼容映射已移除，
+ * 未声明读取范围的条目不注入。
+ *
  * @param agentId Agent ID
- * @param configs 所有 Agent 配置
- * @param books 已加载的世界书列表
+ * @param books 已加载（并已补过兼容映射）的世界书列表
  */
 export function getEntriesForAgent(
   agentId: string,
-  configs: AgentConfig[],
-  books: WorldBook[],
+  books: readonly WorldBook[],
+  recentText = '',
+  readContext?: import('../types/types').LoreReadContext,
 ): WorldBookEntry[] {
-  const config = configs.find((c) => c.agentId === agentId);
-  if (!config || !config.worldBookIds?.length) return [];
-
-  const allowedIds = new Set(config.worldBookIds);
-  const entries: WorldBookEntry[] = [];
-
-  for (const book of books) {
-    if (!allowedIds.has(book.id)) continue;
-    for (const entry of book.entries) {
-      entries.push(entry);
-    }
-  }
-
-  return entries;
+  return resolveLoreDependenciesForAgent(agentId, books, recentText, readContext).entries.map(
+    (routed) => routed.entry,
+  );
 }
+
+export { loreRecentText } from './lore-activation';
 
 /**
  * 过滤应激活的条目。
@@ -149,8 +146,8 @@ function matchSingleKeyword(text: string, keyword: string): boolean {
  * - `enabledEntries` 格式: `"partition:uid"`（如 `"system_core:413"`）
  * - partition 在 enabledEntries 中有记录的 → 只保留 uid 命中条目，其余移除
  * - 内置 system_core/character 的命中条目 → 存档选择覆盖出厂 enabled=false
- * - partition 不在 enabledEntries 中的 → 整本原样通过（走 keyword 激活）
- * - enabledEntries 为空 → 所有书原样通过
+ * - 内置 character 始终按存档白名单过滤；未记录角色即未选择，不沿用全局默认启用
+ * - 其它书的 partition 不在 enabledEntries 中 → 整本原样通过
  * - 非原始 entry（缺少 `:` 或无有效 uid）→ 静默跳过
  *
  * 纯函数，不修改入参。
@@ -159,11 +156,9 @@ export function filterBooksByEnabledEntries(
   books: WorldBook[],
   enabledEntries: string[],
 ): WorldBook[] {
-  if (!enabledEntries || enabledEntries.length === 0) return books;
-
   // Build lookup: partition → Set<uid>
   const enabledByPartition = new Map<string, Set<number>>();
-  for (const entry of enabledEntries) {
+  for (const entry of enabledEntries ?? []) {
     const colonIdx = entry.indexOf(':');
     if (colonIdx <= 0 || colonIdx >= entry.length - 1) continue;
     const partition = entry.slice(0, colonIdx);
@@ -177,17 +172,11 @@ export function filterBooksByEnabledEntries(
     set.add(uid);
   }
 
-  // If no valid entries could be parsed, the user intended filtering but
-  // nothing matched → apply the filter (which will remove all entries for
-  // partitions that appear in enabledEntries). If enabledEntries was non-empty
-  // but none had valid partition:uid form, we can't tell which partition was
-  // meant, so we pass books through unchanged.
-  // For safety: always apply when we have valid parsed data.
-  if (enabledByPartition.size === 0) return books;
-
   return books.map((book) => {
-    const allowedUids = enabledByPartition.get(book.partition);
-    if (!allowedUids) return book; // partition 未在存档中收录 → 整本原样通过
+    const allowedUids =
+      enabledByPartition.get(book.partition) ??
+      (book.builtIn === true && book.partition === 'character' ? new Set<number>() : undefined);
+    if (!allowedUids) return book;
     const isBuiltInSaveSelection =
       book.builtIn === true && (book.partition === 'system_core' || book.partition === 'character');
     return {
@@ -312,10 +301,20 @@ function assembleResult(
   };
 }
 
+function entryTextMap(
+  entries: WorldBookEntry[],
+  dynamicParts: string[],
+): Map<WorldBookEntry, string> {
+  const texts = new Map<WorldBookEntry, string>();
+  let index = 0;
+  for (const entry of [...entries].sort((a, b) => a.order - b.order))
+    texts.set(entry, hasDynamic(entry.content) ? dynamicParts[index++] : entry.content);
+  return texts;
+}
 export function renderWorldBookEntries(
   entries: WorldBookEntry[],
   ejsCtx: EjsEvalContext,
-): WorldBookRenderResult {
+): WorldBookRenderResult & { entryTexts: Map<WorldBookEntry, string> } {
   const { staticParts, slots } = partitionEntries(entries);
   const dynamicParts: string[] = [];
   const fallbackEntries: Array<{ uid: number; error: string }> = [];
@@ -369,7 +368,10 @@ export function renderWorldBookEntries(
     }
   }
 
-  return assembleResult(staticParts, dynamicParts, fallbackEntries);
+  return {
+    ...assembleResult(staticParts, dynamicParts, fallbackEntries),
+    entryTexts: entryTextMap(entries, dynamicParts),
+  };
 }
 
 /**
@@ -388,7 +390,7 @@ export function renderWorldBookEntries(
 export async function prerenderWorldBookEntries(
   entries: WorldBookEntry[],
   ejsCtx: EjsEvalContext,
-): Promise<WorldBookRenderResult> {
+): Promise<WorldBookRenderResult & { entryTexts: Map<WorldBookEntry, string> }> {
   // 分区与同步版共用（见 partitionEntries）；本函数只多一件事：动态区整批交给后端
   const { staticParts, slots: dynamicSlots } = partitionEntries(entries);
   const fallbackEntries: Array<{ uid: number; error: string }> = [];
@@ -432,5 +434,8 @@ export async function prerenderWorldBookEntries(
     }
   }
 
-  return assembleResult(staticParts, dynamicParts, fallbackEntries);
+  return {
+    ...assembleResult(staticParts, dynamicParts, fallbackEntries),
+    entryTexts: entryTextMap(entries, dynamicParts),
+  };
 }

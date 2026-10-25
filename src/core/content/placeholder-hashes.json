@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "byBook": {
     "adventure_area": "0e2af3cda9a5b4e6",
     "character": "59ae613f96065225",
@@ -38,7 +38,7 @@
     "content/name-pools": "3e3e93642df2e4ef",
     "content/random-events": "bb263e1d9f733963",
     "content/remote-assets": "741638a580c5630d",
-    "defaults/agent-config": "267fb33783a383d0",
+    "defaults/agent-config": "90bf92b2a644aa3e",
     "defaults/audio-manifest": "741638a580c5630d",
     "defaults/beautifier-rules": "109fb75675ff60ed",
     "defaults/map-marker-presets": "741638a580c5630d",

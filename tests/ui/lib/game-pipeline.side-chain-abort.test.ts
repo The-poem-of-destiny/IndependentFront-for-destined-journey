@@ -75,6 +75,11 @@ function makePipeline() {
     clearAllAgentStatus: vi.fn(),
     clearAgentLog: vi.fn(),
     addMessage: vi.fn((content: string, role: string) => ({ id: 'm1', role, content, turn: 1 })),
+    setStoryTurnStatus: vi.fn(async () => true),
+    startAgentActivityRun: vi.fn(() => 'activity-first'),
+    startAgentLogTurn: vi.fn(),
+    finishAgentActivityRun: vi.fn(),
+    finishAgentLogTurn: vi.fn(),
     setPendingOptions: vi.fn(),
     refreshFromDb: vi.fn(async () => {}),
   } as any;
@@ -206,7 +211,11 @@ describe('run() 的收尾不许踩到下一轮（runSeq 守卫）', () => {
   it('🔴 上一轮的 finally 不清 isGenerating、也不抹掉新一轮的 abortController', async () => {
     const { pipeline, game } = makePipeline();
 
-    // 第一轮开跑（世界书/预设都没接，管线会很快失败 —— 这里只关心 finally 干了什么）
+    // 在真实 await 边界注入失败，避免靠过期 store 桩缺方法触发 finally。
+    const loadPlotData = vi.fn(async () => {
+      throw new Error('controlled plot load failure');
+    });
+    (pipeline as any).loadPlotData = loadPlotData;
     const first = pipeline.run('第一轮');
     // 模拟「abort() 解锁输入 → 玩家立刻发下一轮」：新一轮抢过了 runSeq 与控制器
     (pipeline as any).runSeq = 99;
@@ -214,7 +223,9 @@ describe('run() 的收尾不许踩到下一轮（runSeq 守卫）', () => {
     (pipeline as any).abortController = roundTwo;
     game.isGenerating = true;
 
-    await first;
+    expect(await first).toBe(false);
+    expect(loadPlotData).toHaveBeenCalledOnce();
+    expect(game.setStoryTurnStatus).toHaveBeenCalled();
 
     // 修复前：这两条都会被上一轮的 finally 踩掉 —— 输入框在新一轮飞行中解锁，
     // 且「停止生成」变成静默 no-op（abort() 里的 `?.` 会吃掉 null）

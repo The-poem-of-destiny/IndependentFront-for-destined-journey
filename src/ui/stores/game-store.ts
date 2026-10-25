@@ -773,6 +773,21 @@ export const useGameStore = defineStore('game', () => {
     queueDebugTurnWrite(turn);
   }
 
+  /**
+   * Story 上下文新模式（v2）的单回合诊断（分区 / 召回 / 资料选择 / 摘要补建）——
+   * 按块合并进该回合的调试记录，随 debugTurns 一起落库与导出。找不到回合时静默忽略
+   * （与 addAgentLogEntry 同口径：脱离回合的诊断没有可挂的地方）。
+   */
+  function recordStoryContextDebug(
+    turnId: string,
+    patch: Partial<NonNullable<DebugTurnRecord['storyContext']>>,
+  ): void {
+    const turn = agentLogHistory.value.find((candidate) => candidate.id === turnId);
+    if (!turn) return;
+    turn.storyContext = { ...(turn.storyContext ?? {}), ...patch };
+    queueDebugTurnWrite(turn);
+  }
+
   function finishAgentLogTurn(id: string, status: DebugTurnRecord['status']): void {
     const turn = agentLogHistory.value.find((candidate) => candidate.id === id);
     if (!turn || turn.status !== 'running') return;
@@ -1068,7 +1083,8 @@ export const useGameStore = defineStore('game', () => {
 
   /** 持久化单条消息到 IndexedDB */
   async function persistMessage(msg: ChatMessage) {
-    if (!activeSaveId.value) {
+    const saveId = msg.saveId;
+    if (!saveId) {
       // 规范 §10: 消息 saveId 必填；无活跃存档时拒绝写入，避免产生永不召回的孤儿消息 (#13)
       console.error(
         '[game-store] persistMessage 拒绝: activeSaveId 为空，消息未持久化:',
@@ -1077,7 +1093,11 @@ export const useGameStore = defineStore('game', () => {
       return;
     }
     try {
-      await saveMessage({ ...msg, saveId: activeSaveId.value });
+      const snapshot = { ...msg, saveId };
+      await withSaveWriteLock(saveId, async () => {
+        if (!(await getSave(saveId))) return;
+        await saveMessage(snapshot);
+      });
     } catch (err) {
       console.error('[game-store] 消息持久化失败:', err);
     }
@@ -1104,7 +1124,14 @@ export const useGameStore = defineStore('game', () => {
    * 生成 D2），所以刚产出这条 assistant 消息的那一方必须拿得到它的 `id` 与 `turn`。
    * 从 `messages` 末尾去捞是个会随时被别的写入者破坏的假设。
    */
-  function addMessage(content: string, role: 'user' | 'assistant'): ChatMessage {
+  function addMessage(
+    content: string,
+    role: 'user' | 'assistant',
+    markers: Pick<
+      ChatMessage,
+      'storyTurnStatus' | 'storyTurnKey' | 'diagnostic' | 'storyGameTime'
+    > = {},
+  ): ChatMessage {
     const msg: ChatMessage = {
       id: crypto.randomUUID(),
       role,
@@ -1112,12 +1139,67 @@ export const useGameStore = defineStore('game', () => {
       timestamp: Date.now(),
       saveId: activeSaveId.value ?? undefined,
       turn: role === 'user' ? ++turnCounter : turnCounter,
+      ...markers,
     };
+    if (msg.storyTurnStatus && (role === 'user' || !msg.storyTurnKey)) msg.storyTurnKey = msg.id;
     messages.value.push(msg);
     // 异步持久化（不阻塞 UI）。`void` 是显式的「发射后不管」——
     // persistMessage 自己 try/catch 到底，不会拒绝。
     void persistMessage(msg);
     return msg;
+  }
+
+  /** 来源完整匹配后更新正式状态；排队期间取消/替换/切档不能迟到接纳或复活消息。 */
+  async function setStoryTurnStatus(
+    source: readonly ChatMessage[],
+    status: NonNullable<ChatMessage['storyTurnStatus']>,
+    turnKey: string,
+    isCurrent: () => boolean,
+    onCommitStart?: () => void,
+  ): Promise<boolean> {
+    const saveId = source[0]?.saveId;
+    if (!saveId || source.length === 0) return false;
+    const snapshot: ChatMessage[] = JSON.parse(JSON.stringify(source));
+    return withSaveWriteLock(saveId, async () => {
+      const db = getDatabase();
+      return db.transaction('rw', db.saves, db.messages, async () => {
+        if (!isCurrent() || activeSaveId.value !== saveId || !(await db.saves.get(saveId)))
+          return false;
+        const rows = await db.messages.bulkGet(snapshot.map((m) => m.id));
+        if (
+          rows.some(
+            (row, i) =>
+              !row ||
+              row.saveId !== saveId ||
+              row.role !== snapshot[i].role ||
+              row.content !== snapshot[i].content,
+          )
+        )
+          return false;
+        if (!isCurrent()) return false;
+        // 这是实际正式接纳提交边界，不是网络完成或排队开始。
+        onCommitStart?.();
+        await db.messages.bulkPut(
+          rows.map((row, i) => ({
+            ...row!,
+            storyTurnStatus: status,
+            storyTurnKey: turnKey,
+            ...(snapshot[i].storyGameTime ? { storyGameTime: snapshot[i].storyGameTime } : {}),
+          })),
+        );
+        if (activeSaveId.value === saveId) {
+          for (const original of snapshot) {
+            const message = messages.value.find((m) => m.id === original.id);
+            if (message && message.content === original.content) {
+              message.storyTurnStatus = status;
+              message.storyTurnKey = turnKey;
+              if (original.storyGameTime) message.storyGameTime = { ...original.storyGameTime };
+            }
+          }
+        }
+        return true;
+      });
+    });
   }
 
   function addSystemMessage(systemEvent: import('@engine/types/types').SystemEvent): void {
@@ -1660,6 +1742,7 @@ export const useGameStore = defineStore('game', () => {
     closeModal,
     hydratePreview,
     addMessage,
+    setStoryTurnStatus,
     addSystemMessage,
     loadSaves,
     loadSave,
@@ -1693,6 +1776,7 @@ export const useGameStore = defineStore('game', () => {
     agentLogHistory,
     startAgentLogTurn,
     addAgentLogEntry,
+    recordStoryContextDebug,
     finishAgentLogTurn,
     flushAgentLogWrites,
     clearAgentLog,

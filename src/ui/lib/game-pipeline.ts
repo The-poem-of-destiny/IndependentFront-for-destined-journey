@@ -12,7 +12,7 @@ import { AgentOrchestrator } from '@engine/agents/agent-orchestrator';
 // Q-05：从模型输出抢救 JSON 的唯一入口（裸 / 围栏 / <json> / 前后夹带解说四种形态）
 import { extractJsonPayload } from '@engine/utils/model-json';
 import type { OrchestratorOptions, OrchestratorEvents } from '@engine/agents/agent-orchestrator';
-import { DEFAULT_AGENT_PIPELINE } from '@engine/types/types';
+import { DEFAULT_AGENT_PIPELINE, STORY_CONTEXT_V2_PIPELINE } from '@engine/types/types';
 import type {
   AgentContext,
   AgentConfig,
@@ -28,7 +28,8 @@ import type {
   EntityGenRequestMarker,
   PlayAudioMarker,
   MemoryRecord,
-  WorkshopProject,
+  StoryTurnSummaryRecord,
+  StoryArchiveRecord,
   ChatMessage,
   SystemEvent,
   DebugAgentEntry,
@@ -84,6 +85,13 @@ import { countAcceptableTriggers } from '@engine/plot/plot-engine';
 // 🆕 Delta 会话（T4）：存档切换/销毁时清理该存档的 prompt session（string 入参 = 清整个 saveId）
 import { invalidatePromptSession } from '@engine/prompts/prompt-session-assembler';
 import { resolveSceneWeather } from './scene-image-seams';
+import {
+  storyTurnSource,
+  storyMemorySourceMatches,
+  storyMemorySourcesMatch,
+  storyTurnGameTimeRange,
+} from '@engine/memory/story-memory-source';
+import type { StoryArchiveRetryRecord } from '@engine/types/types';
 // 🆕 重铸（2026-08-24）：单条目重铸的引擎侧类型（RewriteTarget = 要重写的技能/装备/物品三选一）
 // 🔴 2026-10-02：item_gen 已并入 entity_gen。
 import type { RewriteTarget } from '@engine/agents/entity-gen-agent';
@@ -130,6 +138,53 @@ import type {
   CombatState,
   CombatUnit,
 } from '@engine/combat/sandbox/types';
+import {
+  assessStoryContextBudget,
+  decideStoryContextAdmission,
+  normalizeStoryWindowTurns,
+} from '@engine/story/story-context-mode';
+import { collectLoreRoutingIssues } from '@engine/content/lore-routing';
+import {
+  STORY_TURN_SUMMARY_SYSTEM_PROMPT,
+  STORY_TURN_SUMMARY_TEMPLATE,
+  buildStoryTurnBackfillMessages,
+  parseStoryTurnSummaryOutput,
+  type ParsedStoryTurnSummary,
+} from '@engine/memory/story-turn-summary';
+import {
+  collectCompleteStoryTurns,
+  collectOpenStoryEvents,
+  findStoryTurnsMissingSummary,
+  type OpenStoryEvent,
+} from '@engine/memory/memory-context';
+import { buildStoryArchiveRecords, renderOpenEventsForSummary } from '@engine/memory/story-archive';
+import {
+  buildStoryArchiveDetailMessages,
+  collectArchiveSourceTurns,
+  parseStoryArchiveDetail,
+} from '@engine/memory/story-archive-detail';
+import {
+  STORY_RECALL_SYSTEM_PROMPT,
+  STORY_RECALL_TEMPLATE,
+  storyArchiveEmbeddingText,
+  storySegmentEmbeddingText,
+} from '@engine/memory/story-recall';
+import type {
+  StoryContextDebugRecord,
+  StoryContextV2Diagnostics,
+  StoryRecallReport,
+} from '@engine/types/types';
+import { defaultHistoryLayers } from '@engine/prompts/agent-templates';
+import {
+  storyContextArchiveRejectedMessage,
+  storyContextBackfillFailedMessage,
+  storyContextMissingSummaryMessage,
+  storyContextOverBudgetMessage,
+  storyContextRecallFailedMessage,
+  storyContextRejectionMessage,
+  storyContextSummaryFailedMessage,
+  storyContextWindowInvalidMessage,
+} from './story-context-admission';
 import {
   getAgentSettings,
   hasExplicitAgentModel,
@@ -293,31 +348,9 @@ export function extractStoryOptions(raw: string): { content: string; options: st
   return projectStoryOutput(raw);
 }
 
-/** Resolve selected workshop books that explicitly declare system-core semantics. */
-export function collectSelectedSystemCoreWorkshopBookIds(
-  worldBooks: WorldBook[],
-  projects: WorkshopProject[],
-): string[] {
-  const coreProjectIds = new Set(
-    projects
-      .filter((project) => project.tags?.some((tag) => tag.trim().toLowerCase() === 'system/core'))
-      .map((project) => project.id),
-  );
-  if (coreProjectIds.size === 0) return [];
-
-  return worldBooks
-    .filter(
-      (book) =>
-        book.partition === 'creative_workshop' &&
-        book.entries.some(
-          (entry) =>
-            entry.enabled &&
-            Boolean(entry.extra?.workshop?.projectId) &&
-            coreProjectIds.has(entry.extra!.workshop!.projectId),
-        ),
-    )
-    .map((book) => book.id);
-}
+// 🪦 `collectSelectedSystemCoreWorkshopBookIds` 已删（内容计划 §7.2）：它给 story / char_gen 额外挂
+//    带 `system/core` 标签的工坊书；Agent 世界书清单退役后读取范围改由工坊书自己的条目级
+//    `extra.lore.audiences` 声明，不再需要按项目标签补挂。
 
 /** 各 Agent 的中文标签（供调试日志 / DebugPanel 显示） */
 const AGENT_LABELS: Record<string, string> = {
@@ -398,6 +431,10 @@ export class GamePipeline {
   private saveId: string;
   private orch: AgentOrchestrator | null = null;
   private abortController: AbortController | null = null;
+  /** 正式接纳的锁内写入已开始；此后不再假装能撤销整个回合。 */
+  private finalTurnCommitStarted = false;
+  private currentStoryTurnKey: string | undefined;
+  private currentTurnMessages: ChatMessage[] = [];
   /** 当前 run 的所有权标识；abort 后直到 finally 收尾前都保持，防止旧 run 清掉新 run。 */
   private activeRunId: string | null = null;
   /** Reject overlapping runs until cancellation, background writes and refresh have drained. */
@@ -438,6 +475,19 @@ export class GamePipeline {
    * 的标记挂上去。
    */
   private lastStoryMessage: { id: string; turn: number; content: string } | null = null;
+  /**
+   * 本轮固定的 Story 模式（计划 §2.4）：`run()` 开跑前按「存档标记 × 开关」判定一次，
+   * 本轮及其后置任务全程只读这个值 —— 中途切开关不影响已经开跑的这一轮。
+   */
+  private runMode: 'legacy' | 'v2' = 'legacy';
+  /**
+   * v2 本轮的每回合摘要**草稿**（memory_summary 产出后解析）。只有回合被正式接纳
+   * （编排器 status=completed）后才落库；失败 / 取消的回合直接丢弃（计划 §10.2）。
+   * `null` = 本轮摘要没产出或解析失败。
+   */
+  private v2SummaryDraft: ParsedStoryTurnSummary | null = null;
+  /** v2 本轮开始时的未结事件（归档判断的对照表与覆盖范围来源） */
+  private v2OpenEvents: OpenStoryEvent[] = [];
   /**
    * 工坊 P2 (D5) 体积护栏: 已经因超限被拒过的来源 Agent。
    *
@@ -507,9 +557,38 @@ export class GamePipeline {
   //    现在引擎经 `engine-settings` 注入缝直接读 settings-store（真源只剩一处），
   //    provider 在 main.ts 启动时注册。
 
+  /**
+   * Story 上下文模式准入（计划 §2.4 / §11.3）：每一轮在**任何**消息落库与 LLM 请求之前判定。
+   *
+   * 模式在回合开始时由「存档标记 × 开关」确定，本轮及其后置任务都按这一次的结论走；
+   * 回合中途切换开关不影响已经开跑的这一轮。
+   *
+   * 🔴 新模式的回合编排（P3–P5）未接入前，测试档一律阻断而**不**回落旧管线（T40）。
+   */
+  private admitStoryContextMode(): 'legacy' | 'v2' | null {
+    const admission = decideStoryContextAdmission(
+      this.game.activeSave,
+      this.settings.settings.storyContextV2Enabled === true,
+    );
+    if (admission.ok) return admission.mode;
+    this.notify(storyContextRejectionMessage(admission.reason), 'warning');
+    return null;
+  }
+
+  /** toast 失败不改变任何结论（单测里常常没有可用的 UI store） */
+  private notify(message: string, level: 'warning' | 'error'): void {
+    try {
+      useUIStore().toast(message, level, 6000);
+    } catch {
+      /* ignore */
+    }
+  }
+
   /** 发送开场 Prompt（首次加载存档时调用），作为首条用户消息注入管线 */
   async sendOpeningPrompt(onStoryChunk?: StoryChunkCallback): Promise<void> {
     if (!this.ownsActiveSave) return;
+    // 🔴 必须早于 markOpeningPromptConsumed：被拒的一轮不许烧掉开场认领
+    if (!this.admitStoryContextMode()) return;
     const release = this.acquireSaveWork();
     if (!release) return;
     try {
@@ -552,9 +631,13 @@ export class GamePipeline {
     isUserMessage = true,
     sourceMessageId?: string,
   ): Promise<boolean> {
+    const mode = this.admitStoryContextMode();
+    if (!mode) return false;
     const release = this.acquireSaveWork();
     if (!release) return false;
     try {
+      // 本轮模式在此固定（同一实例一次只跑一轮：executeRun 对 abortController 有重入守卫）
+      if (!this.abortController) this.runMode = mode;
       return await this.executeRun(userInput, onStoryChunk, isUserMessage, sourceMessageId);
     } finally {
       release();
@@ -578,6 +661,9 @@ export class GamePipeline {
     const mySeq = ++this.runSeq;
     const controller = new AbortController();
     this.abortController = controller;
+    this.finalTurnCommitStarted = false;
+    this.currentStoryTurnKey = undefined;
+    this.currentTurnMessages = [];
     this.game.isGenerating = true;
     let activityRunId: string | null = null;
     let activityOutcome: 'completed' | 'failed' | 'cancelled' = 'failed';
@@ -591,10 +677,40 @@ export class GamePipeline {
           [...this.game.messages].reverse().find((message) => message.role === 'user')?.id);
       const context = this.buildContext(userInput, existingSourceMessageId);
 
-      // 添加用户消息（非用户消息仅注入 context 不渲染）
-      const boundSourceMessageId = isUserMessage
-        ? (this.emitMessage(userInput, 'user')?.id ?? undefined)
-        : existingSourceMessageId;
+      // 重试只保留原输入作来源，旧失败正文不与新尝试或相邻回合合并。
+      if (existingSourceMessageId) {
+        const sourceIndex = this.game.messages.findIndex((m) => m.id === existingSourceMessageId);
+        if (sourceIndex < 0) return false;
+        const user = this.game.messages[sourceIndex];
+        const oldAttempt: ChatMessage[] = [];
+        for (let i = sourceIndex + 1; i < this.game.messages.length; i++) {
+          const message = this.game.messages[i];
+          if (message.role === 'user') break;
+          if (message.role === 'assistant' && !message.diagnostic) oldAttempt.push(message);
+        }
+        if (oldAttempt.length > 0)
+          await this.game.setStoryTurnStatus(oldAttempt, 'failed', user.id, () =>
+            this.isRunCurrent(controller),
+          );
+        if (
+          !(await this.game.setStoryTurnStatus([user], 'pending', user.id, () =>
+            this.isRunCurrent(controller),
+          ))
+        )
+          return false;
+        this.currentStoryTurnKey = user.id;
+        this.currentTurnMessages.push({ ...user });
+      }
+      // 新消息先 pending，只有正式接纳才能进入窗口/补建。
+      const userMessage = isUserMessage
+        ? this.emitMessage(userInput, 'user', {
+            storyTurnStatus: 'pending',
+            ...(context.gameTime ? { storyGameTime: { ...context.gameTime } } : {}),
+          })
+        : undefined;
+      const boundSourceMessageId = userMessage?.id ?? existingSourceMessageId;
+      this.currentStoryTurnKey = boundSourceMessageId;
+      if (userMessage) this.currentTurnMessages.push({ ...userMessage });
       activityRunId = this.game.startAgentActivityRun(boundSourceMessageId);
       this.activeRunId = activityRunId;
       this.game.startAgentLogTurn({
@@ -618,27 +734,55 @@ export class GamePipeline {
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets();
       const worldBooks = await this.loadActiveWorldBooks();
-      const systemCoreWorkshopBookIds = await this.loadSystemCoreWorkshopBookIds(worldBooks);
 
       // 2.6 构建 Agent 配置（用已加载的 agentDefaults 替代 projectAgentDefaults）
-      const agentConfigs = this.buildAgentConfigs(
-        agentDefaults,
-        onStoryChunk,
-        systemCoreWorkshopBookIds,
-      );
+      const agentConfigs = this.buildAgentConfigs(agentDefaults, onStoryChunk);
 
       // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
       // configs/worldBooks/presets 才能拿到完整 systemPrompt + 世界书上下文，
       // 把这三个值挂实例传给事件回调（回调通过闭包捕获 run() 局部变量）。
       this.chainData = { agentConfigs, worldBooks, presets, agentDefaults };
 
+      // 2.7 Story 上下文新模式（v2）：分区组装输入 + memory_summary 换用每回合摘要契约
+      this.v2SummaryDraft = null;
+      this.v2OpenEvents = [];
+      let storyContext: OrchestratorOptions['storyContext'];
+      if (this.runMode === 'v2') {
+        const prepared = await this.prepareStoryContextV2(agentDefaults, context);
+        if (!prepared) return false;
+        storyContext = prepared;
+        const summaryIndex = agentConfigs.findIndex((c) => c.agentId === 'memory_summary');
+        if (summaryIndex >= 0) {
+          // 🔴 只换提示词与模板，端点 / 模型 / 采样参数照用户设置（克隆整条，见 withImagePromptSystem）。
+          //    旧模式的 memory_summary 契约一个字不动 —— 新格式绝不交给旧处理器（计划 §11.2）。
+          agentConfigs[summaryIndex] = {
+            ...agentConfigs[summaryIndex],
+            systemPrompt: STORY_TURN_SUMMARY_SYSTEM_PROMPT,
+            template: STORY_TURN_SUMMARY_TEMPLATE,
+            promptTemplate: { fixedSystem: STORY_TURN_SUMMARY_SYSTEM_PROMPT, fixedExamples: '' },
+          };
+        }
+        // 召回同理：LLM 模式读编号候选清单（Embedding 模式不用提示词，换了也无害）
+        const recallIndex = agentConfigs.findIndex((c) => c.agentId === 'memory_recall');
+        if (recallIndex >= 0) {
+          agentConfigs[recallIndex] = {
+            ...agentConfigs[recallIndex],
+            systemPrompt: STORY_RECALL_SYSTEM_PROMPT,
+            template: STORY_RECALL_TEMPLATE,
+            promptTemplate: { fixedSystem: STORY_RECALL_SYSTEM_PROMPT, fixedExamples: '' },
+          };
+        }
+      }
+
       // 3. 创建编排器
       const options: OrchestratorOptions = {
-        pipeline: DEFAULT_AGENT_PIPELINE,
+        pipeline: this.runMode === 'v2' ? STORY_CONTEXT_V2_PIPELINE : DEFAULT_AGENT_PIPELINE,
+        ...(storyContext ? { storyContext } : {}),
         context,
         agentConfigs,
         endpoints,
         saveId: this.saveId,
+        isCurrent: () => this.isRunCurrent(controller),
         presets,
         worldBooks,
         memoryRetrieval: {
@@ -663,13 +807,13 @@ export class GamePipeline {
       // 还把半成品状态存进快照。status='failed'（管线校验失败、必需阶段失败、或 abort
       // 让 story fetch 抛 AbortError）时跳过 —— 玩家输入已入消息流但回合不推进，可安全重发。
       // refreshFromDb 仍会把已部分落库的 patch 回读，不丢已生成的正文。
-      if (orchResult.status !== 'completed') {
+      if (orchResult.status !== 'completed' || !this.isRunCurrent(controller)) {
         console.warn(
           '[GamePipeline] 管线未完成 (status=' + orchResult.status + ')，跳过回合推进/快照',
         );
         if (controller.signal.aborted) {
           activityOutcome = 'cancelled';
-          activityMessage = '本回合已停下，可以再次尝试。';
+          activityMessage = '本回合已停下，已写入的状态不会自动撤销；可回退或再次尝试。';
         } else {
           activityOutcome = 'failed';
           activityMessage = '世界的回应在此中断，可以再次尝试。';
@@ -683,6 +827,28 @@ export class GamePipeline {
         this.pendingPlotTasks = [];
       }
 
+      if (!this.isRunCurrent(controller)) throw new DOMException('Turn cancelled', 'AbortError');
+      const { getSaveProfile } = await import('@engine/persistence/database');
+      const endTime = (await getSaveProfile(this.saveId))?.gameTime;
+      if (endTime)
+        for (const message of this.currentTurnMessages) {
+          if (message.role === 'assistant') message.storyGameTime = { ...endTime };
+        }
+      if (
+        !this.lastStoryMessage ||
+        !this.currentStoryTurnKey ||
+        !(await this.game.setStoryTurnStatus(
+          this.currentTurnMessages,
+          'accepted',
+          this.currentStoryTurnKey,
+          () => this.isRunCurrent(controller),
+          () => {
+            this.finalTurnCommitStarted = true;
+          },
+        ))
+      )
+        throw new DOMException('Turn no longer current', 'AbortError');
+
       // 4.6 🧵 主线细化层收口：成功回合在 advanceTurn **之前**提交（幂等；
       //     失败只警示不阻塞本轮 —— 退出通道是既有诊断日志，不追加自动 LLM 重试）。
       try {
@@ -694,9 +860,17 @@ export class GamePipeline {
       // 5. 回合推进（M5 每轮一拍）: totalTurns +1 + 打 reason='turn' 快照。
       //    放在 finally 的 refreshFromDb 之前，Pinia 能立即读到新 totalTurns/activeSnapshotId。
       try {
-        await createStateManager(this.saveId).advanceTurn();
+        await createStateManager(this.saveId).advanceTurn(() => this.isRunCurrent(controller));
       } catch (err) {
-        console.warn('[GamePipeline] advanceTurn 失败（不阻塞本轮）:', err);
+        console.error('[GamePipeline] advanceTurn 失败（已提交副作用不会自动撤销）:', err);
+        throw err;
+      }
+
+      // 正式接纳及推进之后才保存摘要；网络仍在锁外，失败由补建/归档草稿重试承接。
+      if (this.runMode === 'v2') {
+        await this.retryStoryArchives();
+        await this.commitStoryTurnSummary();
+        await this.backfillMissingStorySummaries();
       }
 
       activityOutcome = 'completed';
@@ -706,7 +880,7 @@ export class GamePipeline {
       if ((err as Error)?.name === 'AbortError') {
         console.log('[GamePipeline] 管线已中止');
         activityOutcome = 'cancelled';
-        activityMessage = '本回合已停下，可以再次尝试。';
+        activityMessage = '本回合已停下，已写入的状态不会自动撤销；可回退或再次尝试。';
         return false;
       }
       // 🔴 F10：显式端点绑定失效 = fail-stop。此时**任何 provider 都尚未收到请求**，
@@ -724,9 +898,23 @@ export class GamePipeline {
       }
       console.error('[GamePipeline] 管线运行失败:', err);
       activityOutcome = 'failed';
-      activityMessage = '世界的回应在此中断，可以检查设置后再次尝试。';
+      activityMessage = '世界的回应在此中断，已写入的状态不会自动撤销；可回退后再次尝试。';
       return false;
     } finally {
+      if (
+        activityOutcome !== 'completed' &&
+        this.currentStoryTurnKey &&
+        this.currentTurnMessages.length > 0
+      ) {
+        await this.game
+          .setStoryTurnStatus(
+            this.currentTurnMessages,
+            'failed',
+            this.currentStoryTurnKey,
+            () => this.ownsActiveSave,
+          )
+          .catch((err) => console.warn('[GamePipeline] 失败尝试标记未保存:', err));
+      }
       // 🔴 并行化改造（2026-08-16）：后台任务（memory_summary embedding 落库 /
       // 剧情落库）不响应 abort，会在管线早退后悬空继续跑。回读之前统一收尾
       // （allSettled：postCheckPlot 等任务自带 try/catch，不拒绝也要兜底），
@@ -768,6 +956,7 @@ export class GamePipeline {
       if (this.runSeq === mySeq) {
         if (this.ownsActiveSave) this.game.isGenerating = false;
         this.abortController = null;
+        this.finalTurnCommitStarted = false;
       }
     }
   }
@@ -856,9 +1045,18 @@ export class GamePipeline {
   }
 
   /** 中止当前管线运行 */
-  abort(): void {
+  abort(): boolean {
+    if (this.finalTurnCommitStarted && !this.disposed) {
+      this.notify('本回合已开始保存，正在完成提交；已写入的状态不会自动撤销。', 'warning');
+      return false;
+    }
     if (this.activeRunId) this.game.markAgentActivityStopping(this.activeRunId);
     this.abortController?.abort();
+    return true;
+  }
+
+  private isRunCurrent(controller = this.abortController): boolean {
+    return this.ownsActiveSave && !controller?.signal.aborted;
   }
 
   /**
@@ -924,7 +1122,14 @@ export class GamePipeline {
    * 正文写入的唯一出口 —— 存档已切走就丢弃（COR-02）。
    * 返回 null 表示「这条没写进去」，调用方需要 message.id 时必须处理。
    */
-  private emitMessage(content: string, role: 'user' | 'assistant'): ChatMessage | null {
+  private emitMessage(
+    content: string,
+    role: 'user' | 'assistant',
+    markers: Pick<
+      ChatMessage,
+      'storyTurnStatus' | 'storyTurnKey' | 'diagnostic' | 'storyGameTime'
+    > = role === 'assistant' ? { diagnostic: true } : {},
+  ): ChatMessage | null {
     if (!this.ownsActiveSave) {
       console.warn('[GamePipeline] 存档已切换，丢弃孤儿消息', {
         pipelineSaveId: this.saveId,
@@ -933,7 +1138,11 @@ export class GamePipeline {
       });
       return null;
     }
-    return this.game.addMessage(content, role);
+    // 空 markers 就按两参调用：与 HEAD 侧既有的调用形状一致（addMessage 的第三参默认 `{}`，
+    // 行为等价），从而让"正文消息不带任何标记"这件事在调用面上一眼可辨。
+    return Object.keys(markers).length > 0
+      ? this.game.addMessage(content, role, markers)
+      : this.game.addMessage(content, role);
   }
 
   /**
@@ -961,12 +1170,12 @@ export class GamePipeline {
   private buildAgentConfigs(
     agentDefaults: Record<string, Record<string, unknown>>,
     onStoryChunk?: StoryChunkCallback,
-    systemCoreWorkshopBookIds: string[] = [],
   ): AgentConfig[] {
     const s = this.settings.settings;
 
     // 需要参与管线的所有 Agent（不包括 plot_pre_check/plot_post_check — 剧情模式 off 时会自动禁用）
     const agentIds = [
+      ...(this.runMode === 'v2' ? ['lore_select'] : []),
       'memory_recall',
       'story',
       'request_dispatcher',
@@ -1009,7 +1218,7 @@ export class GamePipeline {
       const poolId = getAgentSettings(s, agentId, agentDefaults).model;
       const resolution = resolveAgentEndpoint({ boundPoolId: poolId, apiPool });
       if (resolution.status === 'resolved') return resolution.endpoint;
-      if (SIDE_CHAIN_AGENT_IDS.has(agentId)) {
+      if (SIDE_CHAIN_AGENT_IDS.has(agentId) || agentId === 'lore_select') {
         console.warn(
           resolution.status === 'stale-binding'
             ? `[GamePipeline] 侧链 Agent "${agentId}" 显式绑定的 API 池已不存在（原 id: ${resolution.requestedId}），本轮不装配端点（fail-closed，不会换 provider）`
@@ -1069,7 +1278,7 @@ export class GamePipeline {
       const defaults = agentDefaults[agentId] ?? {};
       // 🔴 D44 修正 1/3：经 getAgentSettings 统一 resolve（覆写 ?? 默认），不再分别
       //    `defaults.X || agentCfg.X`（那是默认优先、覆写被无视）与 `agentCfg.X`（裸取覆写）。
-      //    agentCfg 现在已合默认层，下面 systemPrompt/template/worldBookIds/数值全部读它。
+      //    agentCfg 现在已合默认层，下面 systemPrompt/template/数值全部读它。
       const agentCfg = getAgentSettings(s, agentId, agentDefaults);
       // 真机修(2026-07-17): story 预设尊重设置页选中项（s.activePresetId）——
       // 此前硬绑 agent-config.json 出厂 presetId，用户导入/另存的预设（新 id）在设置页编辑得再对，
@@ -1078,22 +1287,8 @@ export class GamePipeline {
         agentId === 'story' && s.activePresetId
           ? s.activePresetId
           : (defaults.presetId as string | undefined) || undefined;
-      const worldBookEnabled = agentCfg.worldBookEnabled;
-      const configuredWorldBookIds = worldBookEnabled ? agentCfg.worldBookIds : [];
-      const selectedSystemCore =
-        this.game.activeSave?.metadata?.enabledWorldBookEntries?.some((entry: string) =>
-          entry.startsWith('system_core:'),
-        ) ?? false;
-      // Selected core lore is authoritative save data. Story and entity_gen both
-      // need the source entry; the other agents keep their configured partitions.
-      const isCoreLoreAgent = agentId === 'story' || agentId === 'entity_gen';
-      const coreBookIds = isCoreLoreAgent
-        ? [...(selectedSystemCore ? ['system_core'] : []), ...systemCoreWorkshopBookIds]
-        : [];
-      const worldBookIds =
-        worldBookEnabled && coreBookIds.length > 0
-          ? [...new Set([...configuredWorldBookIds, ...coreBookIds])]
-          : configuredWorldBookIds;
+      // 世界书读取范围不在 Agent 配置里（内容计划 §7.2）：条目路由元数据决定谁能读，
+      // 见 loadActiveWorldBooks 与 @engine/content/lore-routing。
 
       // systemPrompt/template 统一读 agentCfg（已合覆写 ?? 默认）。空串 → undefined
       // （AgentConfig 里 undefined = 不发该字段，与原 `defaults.X || undefined` 行为一致）。
@@ -1135,7 +1330,6 @@ export class GamePipeline {
           fixedExamples: '',
         },
         presetId,
-        worldBookIds,
         // 🔴 D44 修正 3：precedence 统一为 覆写 ?? 默认（经 getAgentSettings）。
         //    此前这里是 `defaults.systemPrompt || agentCfg.systemPrompt`（默认优先、
         //    覆写被无视）—— 用户在设置页改的提示词进不了运行时。现在 agentCfg 已合
@@ -1196,8 +1390,23 @@ export class GamePipeline {
 
   private buildContext(userInput: string, excludeMessageId?: string): AgentContext {
     // 构建历史消息（只取 user/assistant，不含 system）
+    // 重试必须排除整个来源回合，而非只拿掉 user 留下失败 assistant。
+    const retryStart = excludeMessageId
+      ? this.game.messages.findIndex((m) => m.id === excludeMessageId)
+      : -1;
+    let retryEnd = retryStart + 1;
+    if (retryStart >= 0) {
+      while (retryEnd < this.game.messages.length && this.game.messages[retryEnd].role !== 'user')
+        retryEnd++;
+    }
     const history = this.game.messages
-      .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.id !== excludeMessageId)
+      .filter(
+        (m, i) =>
+          (m.role === 'user' || m.role === 'assistant') &&
+          !m.diagnostic &&
+          (!m.storyTurnStatus || m.storyTurnStatus === 'accepted') &&
+          !(retryStart >= 0 && i >= retryStart && i < retryEnd),
+      )
       .map((m) => ({ ...m }));
 
     // 步5: 读存档级剧情配置（捏人页 startJourney 落 metadata.plotSettings）；老存档无字段 → off 兜底
@@ -1207,9 +1416,11 @@ export class GamePipeline {
     return {
       userInput,
       history,
+      loreHistoryMessages: this.settings.settings.loreHistoryMessages,
       worldBooks: [],
       characters: this.game.characters,
       variables: this.game.saveProfile?.variables ?? {}, // M5 §12: 变量唯一真源 SaveProfile.variables（M6 收官接线）
+      fixedLore: this.game.activeSave?.metadata.fixedLore,
       plotEvents: this.game.activePlotEvents,
       memories: this.game.recentMemories,
       quests: this.game.saveProfile?.quests,
@@ -1374,11 +1585,6 @@ export class GamePipeline {
         // 语义相关的 historyLayers/historySlice —— 不塌成默认）。
         agentDefaults[agentId] = {
           model: e.model,
-          worldBookEnabled:
-            typeof e.worldBookEnabled === 'boolean' ? e.worldBookEnabled : undefined,
-          worldBookIds: Array.isArray(e.worldBookIds)
-            ? [...(e.worldBookIds as string[])]
-            : undefined,
           systemPrompt: typeof e.systemPrompt === 'string' ? e.systemPrompt : undefined,
           template: typeof e.template === 'string' ? e.template : undefined,
           temperature: typeof e.temperature === 'number' ? e.temperature : undefined,
@@ -1408,7 +1614,12 @@ export class GamePipeline {
     return { presets, agentDefaults };
   }
 
-  /** 加载启用世界书：统一数据源（store 优先 + 文件兜底），与 plot_outline 共用 */
+  /**
+   * 加载启用世界书：统一数据源（store 优先 + 文件兜底），与 plot_outline 共用。
+   *
+   * 读取范围由条目路由元数据决定（内容计划 §3.2）；没有声明读取范围的条目不注入，
+   * 并记一条可定位的诊断。
+   */
   private async loadActiveWorldBooks(): Promise<WorldBook[]> {
     try {
       // 统一数据源：worldbook-store 优先（Dexie，含用户在 WorldBookEditor 的 enabled 修改
@@ -1417,24 +1628,16 @@ export class GamePipeline {
       const wb = useWorldBookStore();
       await wb.init();
       const all = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
+      const unrouted = collectLoreRoutingIssues(all).filter((i) => i.kind === 'no-audiences');
+      if (unrouted.length > 0) {
+        console.warn(
+          `[GamePipeline] ${unrouted.length} 个世界书条目没有读取范围，不会注入任何 Agent:`,
+          unrouted.slice(0, 20).map((i) => `${i.bookName}/${i.entryName}`),
+        );
+      }
       const enabledEntries = this.game.activeSave?.metadata?.enabledWorldBookEntries ?? [];
       return filterBooksByEnabledEntries(all, enabledEntries);
     } catch {
-      return [];
-    }
-  }
-
-  /** Match selected workshop entries to project-level `system/core` tags. */
-  private async loadSystemCoreWorkshopBookIds(worldBooks: WorldBook[]): Promise<string[]> {
-    if (!worldBooks.some((book) => book.partition === 'creative_workshop' && book.entries.length)) {
-      return [];
-    }
-    try {
-      const { getDatabase } = await import('@engine/persistence/database');
-      const projects = await getDatabase().workshopProjects.toArray();
-      return collectSelectedSystemCoreWorkshopBookIds(worldBooks, projects);
-    } catch (err) {
-      console.warn('[GamePipeline] 工坊 system/core 标签读取失败（不阻塞本轮）:', err);
       return [];
     }
   }
@@ -1685,6 +1888,7 @@ export class GamePipeline {
     try {
       const result = await createStateManager(this.saveId).commitChatState([], {
         ejsVarsDiffs: diffs,
+        isCurrent: () => this.isRunCurrent(),
       });
       if (result.errors.length > 0) {
         console.warn('[GamePipeline] EJS 变量差量落库报错:', result.errors);
@@ -1728,7 +1932,9 @@ export class GamePipeline {
       ? {
           commitDomainCommand: (patches: StatePatch[]) => sm.commitDomainCommand(patches),
           commitChatState: async (patches: any[]) => {
-            const result = await sm.commitAiPatches(patches);
+            const result = await sm.commitAiPatches(patches, {
+              isCurrent: () => this.isRunCurrent(),
+            });
             if (result.errors.length > 0) {
               console.error(
                 `[GamePipeline] 状态提交失败 ${result.errors.length}/${patches.length} 条:`,
@@ -2010,13 +2216,23 @@ export class GamePipeline {
         if (!content) throw new Error('story produced no player-visible narrative');
         // 🖼 记下这条消息 —— 情景插画按 (saveId, messageId, occurrence) 反查挂回正文（D2）。
         // 从 messages 末尾去捞是个会被别的写入者破坏的假设，所以让 addMessage 交回来。
-        const message = this.emitMessage(content, 'assistant');
+        if (!this.isRunCurrent()) break;
+        const message = this.emitMessage(content, 'assistant', {
+          storyTurnStatus: 'pending',
+          storyTurnKey: this.currentStoryTurnKey,
+          ...(this.currentContext?.gameTime
+            ? { storyGameTime: { ...this.currentContext.gameTime } }
+            : {}),
+        });
         // null = 存档已切走，这条正文没写进去（COR-02）。此时**不能**记
         // lastStoryMessage —— 它是情景插画反查锚点，指向一条不存在的消息只会
         // 让后续开火挂到空处。
         // 🔴 `setPendingOptions` 也必须留在闸门**之后**：孤儿回合的行动选项照样会铺进
         // 新存档的输入区（2026-08-10 审查逮到，初版把它写在了闸门之前）。
         if (!message) break;
+        this.currentStoryTurnKey ??= message.id;
+        message.storyTurnKey = this.currentStoryTurnKey;
+        this.currentTurnMessages.push({ ...message });
         this.game.setPendingOptions(options);
         this.lastStoryMessage = {
           id: message.id,
@@ -2026,6 +2242,12 @@ export class GamePipeline {
         break;
       }
       case 'memory_summary': {
+        // Story v2：输出是每回合摘要契约，只解析成草稿，等回合被正式接纳后再落库；
+        // **绝不**交给旧的 summarizeAndSave（那会给测试档写进旧格式 MemoryRecord）。
+        if (this.runMode === 'v2') {
+          this.v2SummaryDraft = parseStoryTurnSummaryOutput(result.rawResponse || '');
+          break;
+        }
         // 🔴 并行化改造（方案③，2026-08-16）：embedding 落库挪进 pendingPlotTasks
         // 后台队列（run() 末尾统一 await）—— plot_post_check 消费的是
         // `context.agentOutputs` 里的**文本输出**，不依赖 embedding 结果；
@@ -2363,7 +2585,8 @@ export class GamePipeline {
       const terminal = outcome.eventsUpdated.filter(
         (e) => e.status === 'completed' || e.status === 'failed',
       );
-      if (terminal.length > 0) {
+      // Story v2 测试档不写旧格式记忆：事件结束后的归档由新模式的阶段归档负责（P5）
+      if (terminal.length > 0 && this.runMode !== 'v2') {
         const { saveMemory } = await import('@engine/persistence/database');
         const { generateMemoryId } = await import('@engine/memory/memory-summarizer');
         // 🔴 并行化改造：「分配 id + 落库」必须与 memory_summary 的落库互斥（同全局
@@ -2394,6 +2617,451 @@ export class GamePipeline {
     } catch (err) {
       console.warn('[GamePipeline] plot_post_check 落库失败（不阻塞本轮）:', err);
     }
+  }
+
+  /**
+   * Story v2：准备本轮分区组装的输入（正文窗口 N + 已有的每回合摘要）。
+   *
+   * N 暂时复用 Story 的「历史注入层数」（计划 Q09 待定；一个可见设置、一个真源），
+   * 未设置时取引擎对 story 的默认层数。非正整数（含 0）→ 明确报错并放弃本轮，
+   * 不静默换成别的值（D05）。
+   */
+  private async prepareStoryContextV2(
+    agentDefaults: Record<string, Record<string, unknown>>,
+    context?: AgentContext,
+  ): Promise<NonNullable<OrchestratorOptions['storyContext']> | null> {
+    const configured = getAgentSettings(
+      this.settings.settings,
+      'story',
+      agentDefaults,
+    ).historyLayers;
+    const windowTurns = normalizeStoryWindowTurns(configured ?? defaultHistoryLayers('story'));
+    if (windowTurns === null) {
+      this.notify(storyContextWindowInvalidMessage(configured), 'error');
+      return null;
+    }
+
+    let segments: StoryTurnSummaryRecord[] = [];
+    let archives: StoryArchiveRecord[] = [];
+    try {
+      const { getStoryTurnSummaries, getStoryArchives } =
+        await import('@engine/persistence/database');
+      [segments, archives] = await Promise.all([
+        getStoryTurnSummaries(this.saveId),
+        getStoryArchives(this.saveId),
+      ]);
+    } catch (err) {
+      // 读不到记忆不让本轮失败：窗口外回合全部按「缺摘要」以原文顶上，并有明确提示
+      console.warn('[GamePipeline] Story v2 记忆读取失败（本轮以原文代替）:', err);
+    }
+
+    // 本轮开始时的未结事件：总结 Agent 先据此做归档判断（Q13），提交时代码按它绑定覆盖范围
+    this.v2OpenEvents = collectOpenStoryEvents(context?.history ?? [], segments, archives);
+    if (context) context.storyOpenEvents = renderOpenEventsForSummary(this.v2OpenEvents);
+
+    return {
+      windowTurns,
+      segments,
+      archives,
+      onLore: (lore) => this.recordStoryContextDebug({ lore }),
+      onAssembled: (diagnostics: StoryContextV2Diagnostics) => {
+        // 实际发出的消息已随 requestMessages 进调试面板；分区用量进「Story 分区」诊断
+        const budget = assessStoryContextBudget(
+          diagnostics,
+          this.getEndpointForAgent('story')?.contextWindowTokens,
+        );
+        this.recordStoryContextDebug({ assembly: { ...diagnostics, ...budget } });
+        console.info('[GamePipeline] Story v2 组装:', diagnostics);
+        if (diagnostics.missingSummaryTurnKeys.length > 0) {
+          this.notify(
+            storyContextMissingSummaryMessage(diagnostics.missingSummaryTurnKeys.length),
+            'warning',
+          );
+        }
+        if (budget.overBudget) {
+          this.notify(storyContextOverBudgetMessage(diagnostics, budget), 'warning');
+        }
+      },
+      recall: {
+        rawMode: this.settings.settings.storyRecallRawMode ?? 'turn',
+        onRecall: (report: StoryRecallReport) => {
+          // 召回块本身随 memory_recall / story 的 requestMessages 进调试面板；这里补一行诊断
+          this.recordStoryContextDebug({ recall: report });
+          console.info('[GamePipeline] Story v2 召回:', report);
+          if (report.notices.length > 0) {
+            console.warn('[GamePipeline] Story v2 召回降级:', report.notices.join('；'));
+          }
+          if (report.status === 'failed') {
+            console.warn('[GamePipeline] Story v2 召回失败（本回合无召回）:', report.error);
+            this.notify(storyContextRecallFailedMessage(), 'warning');
+          }
+        },
+      },
+    };
+  }
+
+  /** Story v2 诊断进本回合调试记录（调试面板「Story 分区」）；无活动回合时丢弃 */
+  private recordStoryContextDebug(patch: Partial<StoryContextDebugRecord>): void {
+    const turnId = this.activeRunId;
+    if (!turnId) return;
+    try {
+      this.game.recordStoryContextDebug(turnId, patch);
+    } catch (err) {
+      console.warn('[GamePipeline] Story v2 诊断记录失败（不影响本轮）:', err);
+    }
+  }
+
+  /**
+   * Story v2：回合被正式接纳后，把本轮总结草稿（归档判断 + 摘要）落库（计划 §8.2 / §10.2）。
+   *
+   * 来源回合按当前消息集合重新分组定位（与第 4 区同一个 `collectCompleteStoryTurns`），
+   * 绑定该回合的全部消息 id；同一回合再写一次是整体替换，不叠加。
+   * 归档判断经 `buildStoryArchiveRecords` 把关（事件名、正文逐字依据、覆盖范围），
+   * 与摘要在同一个事务里生效；被拦下的判断不生效，事件保持未归档并提示。
+   * 摘要没产出 / 解析失败 → 两样都不写，明确提示：之后的回合会以原文代替这一回合。
+   */
+  private async commitStoryTurnSummary(): Promise<void> {
+    const storyMessageId = this.lastStoryMessage?.id;
+    if (!storyMessageId || !this.ownsActiveSave) return;
+    const turn = collectCompleteStoryTurns(this.game.messages).find((t) =>
+      t.storyMessages.some((m) => m.id === storyMessageId),
+    );
+    if (!turn) return;
+    const draft = this.v2SummaryDraft;
+    if (!draft) {
+      this.notify(storyContextSummaryFailedMessage(), 'warning');
+      return;
+    }
+    const createdAt = Date.now();
+    const source = storyTurnSource(turn);
+    const records: StoryTurnSummaryRecord[] = draft.segments.map((segment, order) => ({
+      id: crypto.randomUUID(),
+      saveId: this.saveId,
+      ...source,
+      gameTimeRange: storyTurnGameTimeRange(turn),
+      ...(segment.characters ? { characters: segment.characters } : {}),
+      ...(segment.locations ? { locations: segment.locations } : {}),
+      ...(segment.topics ? { topics: segment.topics } : {}),
+      order,
+      content: segment.content,
+      ...(segment.eventName ? { eventName: segment.eventName } : {}),
+      createdAt,
+    }));
+    const { records: archives, rejected } = buildStoryArchiveRecords({
+      saveId: this.saveId,
+      turn,
+      decisions: draft.archives,
+      openEvents: this.v2OpenEvents,
+      turnSegments: records,
+      now: createdAt,
+      makeId: () => crypto.randomUUID(),
+    });
+    if (rejected.length > 0) {
+      console.warn('[GamePipeline] Story v2 归档判断被拦下:', rejected);
+      this.notify(storyContextArchiveRejectedMessage(rejected.map((r) => r.eventName)), 'warning');
+    }
+    // 详细记录改用事件原文重写（D29）：LLM 调用在写锁外，失败保留简要版本并标注来源
+    if (archives.length > 0) await this.rewriteArchiveDetailsFromSource(archives, records);
+    // 召回用向量：按最终文本在落库前计算（与记录原子成对；失败 = 不带向量落库）
+    await this.embedStoryMemoryRecords(records, archives);
+    // 完整来源 ID + 正文指纹复核，不把只剩 user 的回合或同 ID 修订误当作原来源。
+    const isCurrent = () => {
+      const turns = collectCompleteStoryTurns(this.game.messages);
+      return (
+        this.isRunCurrent() &&
+        turns.some((current) => storyMemorySourceMatches(source, current)) &&
+        archives.every((archive) => storyMemorySourcesMatch(archive.coveredSources, turns))
+      );
+    };
+    if (!isCurrent()) return;
+    const makeRetry = (pending: StoryArchiveRecord[]): StoryArchiveRetryRecord => ({
+      id: crypto.randomUUID(),
+      saveId: this.saveId,
+      ...source,
+      rawOutput: String(this.currentContext?.agentOutputs.get('memory_summary') ?? ''),
+      summaries: records,
+      archives: pending,
+      coveredSegmentIds: [...new Set(pending.flatMap((archive) => archive.coveredSegmentIds))],
+      coveredSources: [
+        ...new Map(
+          pending
+            .flatMap((archive) => archive.coveredSources ?? [])
+            .map((covered) => [covered.sourceTurnKey, covered]),
+        ).values(),
+      ],
+      coveredSegmentFingerprints: Object.assign(
+        {},
+        ...pending.map((archive) => archive.coveredSegmentFingerprints),
+      ),
+      createdAt,
+    });
+    try {
+      const { commitStoryTurnMemory } = await import('@engine/persistence/database');
+      const pendingDetails = archives.filter((archive) => archive.detailSource !== 'source-text');
+      const committed = await commitStoryTurnMemory(this.saveId, turn.key, records, archives, {
+        isCurrent,
+        retries: pendingDetails.length > 0 ? [makeRetry(pendingDetails)] : [],
+      });
+      if (committed && archives.length > 0) {
+        console.info(
+          '[GamePipeline] Story v2 事件归档:',
+          archives.map((a) => `${a.eventName}(${a.outcome})`).join('、'),
+        );
+      }
+    } catch (err) {
+      console.error('[GamePipeline] Story v2 摘要 / 归档落库失败:', err);
+      // 保存原判断+原摘要草稿，不依赖下一轮正文重述结局证据。
+      if (archives.length > 0 && isCurrent()) {
+        try {
+          const { queueStoryArchiveRetries } = await import('@engine/persistence/database');
+          await queueStoryArchiveRetries(this.saveId, [makeRetry(archives)], { isCurrent });
+        } catch (retryError) {
+          console.error('[GamePipeline] 原回合归档重试草稿保存失败:', retryError);
+          this.notify('归档及其重试草稿未能保存，请保留本回合并检查存储后再试。', 'warning');
+        }
+      }
+      this.notify(storyContextSummaryFailedMessage(), 'warning');
+    }
+  }
+
+  /**
+   * Story v2：针对性补建缺摘要的较早回合（计划 Q10 / P4）。
+   *
+   * 本回合落库之后再查一次缺口（本回合自己的摘要没生成也算在内）：按时间先后，
+   * 每回合至多补 `STORY_BACKFILL_PER_TURN` 个，复用记忆总结 Agent 的端点与模型。
+   * 只写摘要不做归档判断（`buildStoryTurnBackfillMessages` 的说明）；旧覆盖关系由持久化层保留失效诊断。
+   * 补不上 → 明确提示，那个回合继续以原文顶上，下一回合再试。只补测试档，不碰旧档历史。
+   */
+  private async backfillMissingStorySummaries(): Promise<void> {
+    if (!this.isRunCurrent()) return;
+    const endpoint = this.getEndpointForAgent('memory_summary');
+    if (!endpoint) return;
+    let segments: StoryTurnSummaryRecord[];
+    let archives: StoryArchiveRecord[];
+    let retries: StoryArchiveRetryRecord[];
+    try {
+      const { getStoryTurnSummaries, getStoryArchives, getStoryArchiveRetries } =
+        await import('@engine/persistence/database');
+      [segments, archives, retries] = await Promise.all([
+        getStoryTurnSummaries(this.saveId),
+        getStoryArchives(this.saveId),
+        getStoryArchiveRetries(this.saveId),
+      ]);
+    } catch (err) {
+      console.warn('[GamePipeline] Story v2 补建前读取记忆失败（跳过补建）:', err);
+      return;
+    }
+    const pendingSourceKeys = new Set(
+      retries
+        .filter((retry) => !retry.invalidatedReason && retry.summaries?.length)
+        .map((retry) => retry.sourceTurnKey),
+    );
+    const missing = findStoryTurnsMissingSummary(this.game.messages, segments)
+      .filter((turn) => !pendingSourceKeys.has(turn.key))
+      .slice(0, GamePipeline.STORY_BACKFILL_PER_TURN);
+    if (missing.length === 0) return;
+
+    const cfg = this.chainData?.agentConfigs.find((c) => c.agentId === 'memory_summary');
+    const client = this.getClientFactory()('memory_summary', endpoint, this.saveId);
+    const openEvents = renderOpenEventsForSummary(
+      collectOpenStoryEvents(this.game.messages, segments, archives),
+    );
+    const done: string[] = [];
+    const failed: string[] = [];
+    for (const turn of missing) {
+      if (!this.isRunCurrent()) return;
+      const source = storyTurnSource(turn);
+      const isCurrent = () =>
+        this.isRunCurrent() &&
+        collectCompleteStoryTurns(this.game.messages).some((current) =>
+          storyMemorySourceMatches(source, current),
+        );
+      try {
+        const result = await client.chat(
+          {
+            messages: buildStoryTurnBackfillMessages({
+              userInput: turn.userMessage?.content ?? '',
+              storyText: turn.storyMessages.map((m) => m.content).join('\n\n'),
+              openEvents,
+            }),
+            model: cfg?.model || endpoint.defaultModel,
+            temperature: cfg?.temperature,
+            maxTokens: cfg?.maxTokens,
+          },
+          this.abortController?.signal,
+        );
+        const parsed = result?.error
+          ? null
+          : parseStoryTurnSummaryOutput(result?.rawResponse ?? '');
+        if (!parsed) {
+          failed.push(turn.key);
+          continue;
+        }
+        const createdAt = Date.now();
+        const records: StoryTurnSummaryRecord[] = parsed.segments.map((segment, order) => ({
+          id: crypto.randomUUID(),
+          saveId: this.saveId,
+          ...source,
+          gameTimeRange: storyTurnGameTimeRange(turn),
+          ...(segment.characters ? { characters: segment.characters } : {}),
+          ...(segment.locations ? { locations: segment.locations } : {}),
+          ...(segment.topics ? { topics: segment.topics } : {}),
+          order,
+          content: segment.content,
+          ...(segment.eventName ? { eventName: segment.eventName } : {}),
+          createdAt,
+        }));
+        await this.embedStoryMemoryRecords(records, []);
+        // 迟到守卫：等待期间切档 / 回退掉了这个回合，就不再写回
+        if (!isCurrent()) continue;
+        const { commitStoryTurnMemory } = await import('@engine/persistence/database');
+        // 按回合整体替换摘要，不猜测新片段与旧归档之间的覆盖映射
+        const committed = await commitStoryTurnMemory(
+          this.saveId,
+          turn.key,
+          records,
+          [], // 新片段 id 不猜测旧归档覆盖映射；持久化层保留失效归档诊断。
+          { isCurrent },
+        );
+        if (committed) done.push(turn.key);
+      } catch (err) {
+        console.warn('[GamePipeline] Story v2 摘要补建失败:', err);
+        failed.push(turn.key);
+      }
+    }
+    this.recordStoryContextDebug({ backfill: { turnKeys: done, failedTurnKeys: failed } });
+    if (done.length > 0) console.info('[GamePipeline] Story v2 已补建摘要的回合:', done);
+    if (failed.length > 0) this.notify(storyContextBackfillFailedMessage(failed.length), 'warning');
+  }
+
+  /** R01：有界自动重试原判断草稿。失败不阻断后续正文，轮换选择避免坏草稿长期饿死其他项。 */
+  private async retryStoryArchives(): Promise<void> {
+    if (this.runMode !== 'v2' || !this.isRunCurrent()) return;
+    try {
+      const { getStoryArchiveRetries, getStoryTurnSummaries, commitStoryArchiveRetry } =
+        await import('@engine/persistence/database');
+      const retries = (await getStoryArchiveRetries(this.saveId)).filter(
+        (retry) => !retry.invalidatedReason,
+      );
+      if (retries.length === 0) return;
+      const segments = await getStoryTurnSummaries(this.saveId);
+      const offset = (this.game.activeSave?.metadata?.totalTurns ?? 0) % retries.length;
+      const batch = [...retries.slice(offset), ...retries.slice(0, offset)].slice(
+        0,
+        GamePipeline.STORY_BACKFILL_PER_TURN,
+      );
+      for (const retry of batch) {
+        const isCurrent = () => {
+          const turns = collectCompleteStoryTurns(this.game.messages);
+          return (
+            this.isRunCurrent() && storyMemorySourcesMatch([retry, ...retry.coveredSources], turns)
+          );
+        };
+        if (!isCurrent()) continue;
+        const archives: StoryArchiveRecord[] = JSON.parse(JSON.stringify(retry.archives));
+        await this.rewriteArchiveDetailsFromSource(archives, retry.summaries ?? [], segments);
+        if (archives.some((archive) => archive.detailSource !== 'source-text')) continue;
+        await this.embedStoryMemoryRecords([], archives);
+        if (!isCurrent()) continue;
+        if (await commitStoryArchiveRetry(this.saveId, retry.id, archives, { isCurrent })) {
+          console.info('[GamePipeline] 已补回原判断回合归档:', retry.sourceTurnKey);
+        }
+      }
+    } catch (err) {
+      console.warn('[GamePipeline] 原回合归档重试未完成，草稿保留待后续回合:', err);
+    }
+  }
+
+  /** 每回合结束后至多补建的缺摘要回合数（控制额外调用；剩下的留给之后的回合） */
+  private static readonly STORY_BACKFILL_PER_TURN = 2;
+
+  /**
+   * Story v2：按事件原文重写归档的详细记录（计划 D29 / §8.2 第 3 步）。
+   *
+   * 每个通过把关的归档调用一次记忆总结 Agent 的端点与模型（不新增 Agent 配置，Q04），
+   * 输入是该事件涉及的每个回合的玩家输入与正文原文。成功 → `detailSource = 'source-text'`；
+   * 端点缺失、调用失败或输出认不出 → 保留总结 Agent 的简要版本（`summary`），不阻塞归档。
+   * 就地改写传入的记录。
+   */
+  private async rewriteArchiveDetailsFromSource(
+    archives: StoryArchiveRecord[],
+    turnSegments: readonly StoryTurnSummaryRecord[],
+    previousSegments = this.v2OpenEvents.flatMap((event) => event.segments),
+  ): Promise<void> {
+    const endpoint = this.getEndpointForAgent('memory_summary');
+    if (!endpoint) return;
+    const cfg = this.chainData?.agentConfigs.find((c) => c.agentId === 'memory_summary');
+    const client = this.getClientFactory()('memory_summary', endpoint, this.saveId);
+    const turns = collectCompleteStoryTurns(this.game.messages);
+    const segments = [...previousSegments, ...turnSegments];
+    for (const archive of archives) {
+      try {
+        const result = await client.chat(
+          {
+            messages: buildStoryArchiveDetailMessages({
+              archive,
+              turns: collectArchiveSourceTurns(turns, archive, segments),
+            }),
+            model: cfg?.model || endpoint.defaultModel,
+            temperature: cfg?.temperature,
+            maxTokens: cfg?.maxTokens,
+          },
+          this.abortController?.signal,
+        );
+        const detail = result?.error ? null : parseStoryArchiveDetail(result?.rawResponse ?? '');
+        if (detail) {
+          archive.detail = detail;
+          archive.detailSource = 'source-text';
+        } else {
+          console.warn(
+            `[GamePipeline] 归档「${archive.eventName}」详细记录原文生成失败，保留简要版本:`,
+            result?.error ?? '输出无法解析',
+          );
+        }
+      } catch (err) {
+        console.warn(`[GamePipeline] 归档「${archive.eventName}」详细记录原文生成失败:`, err);
+      }
+    }
+  }
+
+  /**
+   * Story v2：给本回合的摘要片段与归档计算召回用向量（计划 §9.1 沿用既有 Embedding 机制）。
+   *
+   * 与旧记忆同一口径：配置了 Embedding 源就算，没配置就不算；单条失败只让那一条不带向量
+   * （向量与元数据原子成对，`computeEmbeddingWithMeta` 已做入径校验），不阻塞落库。
+   * 不对已有记录补算（计划：不自动全库重嵌入）。就地改写传入的记录。
+   *
+   * @returns 是否真的发出过请求（调用方据此决定要不要做迟到守卫）
+   */
+  private async embedStoryMemoryRecords(
+    segments: StoryTurnSummaryRecord[],
+    archives: StoryArchiveRecord[],
+  ): Promise<boolean> {
+    const endpoint = this.buildEmbeddingEndpoint();
+    if (!endpoint || segments.length + archives.length === 0) return false;
+    const { computeEmbeddingWithMeta } = await import('@engine/memory/memory-store');
+    const jobs: Array<{ text: string; target: StoryTurnSummaryRecord | StoryArchiveRecord }> = [
+      ...segments.map((s) => ({ text: storySegmentEmbeddingText(s), target: s })),
+      ...archives.map((a) => ({ text: storyArchiveEmbeddingText(a), target: a })),
+    ];
+    for (const job of jobs) {
+      try {
+        const { embedding, meta } = await computeEmbeddingWithMeta(
+          job.text,
+          endpoint,
+          undefined,
+          this.abortController?.signal,
+          (trace: EmbeddingRequestTrace) => this.recordEmbeddingRequest(trace, endpoint),
+        );
+        job.target.embedding = embedding;
+        job.target.embeddingMeta = meta;
+      } catch (err) {
+        delete job.target.embedding;
+        delete job.target.embeddingMeta;
+        console.warn('[GamePipeline] Story v2 记忆向量化失败（不带向量落库）:', err);
+      }
+    }
+    return true;
   }
 
   /** 解析 memory_summary 输出并持久化到 IndexedDB
@@ -3087,7 +3755,10 @@ export class GamePipeline {
     //    优先用它回注给主叙事 AI，缺席才退回它最后那条输出。不做数据化改写。
     const summaryText = (state.meta.summary ?? '').trim() || session.lastOutput.trim();
     if (this.ownsActiveSave && summaryText) {
-      this.emitMessage('【战斗摘要】' + summaryText, 'assistant');
+      // 🔴 显式传空 markers：C6 的战斗摘要是**正文的一部分**（玩家读完再决定接下来做什么），
+      //    不是调试消息。emitMessage 的默认值给 assistant 加 `diagnostic: true`（master 侧的
+      //    旧语义），这里必须覆盖，否则摘要会被当作诊断内容落库。
+      this.emitMessage('【战斗摘要】' + summaryText, 'assistant', {});
     }
     // 🔴 exitCombat 会清 combatContinue —— 必须**先收面板再请求续写**，否则请求刚挂上就被清掉，
     //    GamePage 的 watcher 来不及消费（症状：点了「继续」却没有下一回合）。
@@ -3456,12 +4127,7 @@ export class GamePipeline {
     if (this.chainData) return this.chainData;
     const { presets, agentDefaults } = await this.loadPresets();
     const worldBooks = await this.loadActiveWorldBooks();
-    const systemCoreWorkshopBookIds = await this.loadSystemCoreWorkshopBookIds(worldBooks);
-    const agentConfigs = this.buildAgentConfigs(
-      agentDefaults,
-      undefined,
-      systemCoreWorkshopBookIds,
-    );
+    const agentConfigs = this.buildAgentConfigs(agentDefaults);
     this.chainData = { agentConfigs, worldBooks, presets, agentDefaults };
     return this.chainData;
   }

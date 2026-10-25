@@ -8,6 +8,13 @@
 
 import Dexie, { Table } from 'dexie';
 import { withSaveWriteLock } from '../state/state-write-queue';
+import { collectCompleteStoryTurns } from '../memory/memory-context';
+import {
+  storyMemorySourcesMatch,
+  storySegmentFingerprint,
+  storyArchiveCoverageMatches,
+} from '../memory/story-memory-source';
+import { isStoryContextV2Save } from '../story/story-context-mode';
 import type {
   Lorebook,
   ChatPreset,
@@ -37,6 +44,10 @@ import type {
   RegexStorageRecord,
   CreatePreset,
   DebugTurnRecord,
+  StoryTurnSummaryRecord,
+  StoryArchiveRecord,
+  StoryArchiveRetryRecord,
+  StoryMemorySource,
 } from '../types/types';
 import type {
   SceneImageRecord,
@@ -109,7 +120,8 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-export const DB_VERSION = 27;
+// v30 = 战斗沙盒 combatSandboxes（本分支），在 master 的 v29 之后顺延。
+export const DB_VERSION = 30;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -278,7 +290,17 @@ class AppDatabase extends Dexie {
   //   删存档级联删、快照回退/切档由 `invalidatePromptSession` 显式删。
   promptSessions!: Table<PersistedPromptSession>;
 
-  // v27 (2026-10-02，战斗重写 Phase 2): 协议驱动战斗沙盒的在办战斗。
+  // v27 (2026-10-04，Story 上下文 v2 / P4): 测试档的每回合短期摘要片段。
+  //   只有带 `metadata.storyContextV2` 的存档会写；旧模式记忆仍在 `memories`，两边互不读取。
+  //   随存档隔离：删存档级联删、进 FullBackup 与单存档导出（导入时来源消息 id 一并重映射）。
+  storyTurnSummaries!: Table<StoryTurnSummaryRecord>;
+
+  // v28 (2026-10-04，Story 上下文 v2 / P5): 测试档的阶段归档记录（事件详细记录 + 第 2 区概括）。
+  //   与 storyTurnSummaries 同一套生命周期（随存档隔离、进两种备份、回退按来源消息清理）。
+  storyArchives!: Table<StoryArchiveRecord>;
+  storyArchiveRetries!: Table<StoryArchiveRetryRecord>;
+
+  // v30 (2026-10-02，战斗重写 Phase 2): 协议驱动战斗沙盒的在办战斗。
   //   每存档至多一场（主键 saveId），存权威 CombatState + 会话 transcript，供刷新后续战。
   //   **rebuildable 的在办战斗缓存，不进 FullBackup / 单存档导出**；删存档级联删。
   combatSandboxes!: Table<CombatSandboxRecord>;
@@ -698,12 +720,29 @@ class AppDatabase extends Dexie {
     this.version(26).stores({ promptSessions: 'key, saveId' });
 
     /**
-     * v27 (2026-10-02，战斗重写 Phase 2): 协议驱动战斗沙盒的在办战斗表。
+     * v27 (2026-10-04): Story 上下文 v2 的每回合短期摘要片段。
+     * `saveId` 索引供按存档整取 / 级联删；来源回合的查找在内存里做（一档至多几千条）。
+     * 普通存档永远不写这张表，所以升版不需要任何数据迁移。
+     */
+    this.version(27).stores({ storyTurnSummaries: 'id, saveId' });
+
+    /**
+     * v28 (2026-10-04): Story 上下文 v2 的阶段归档记录。第 2 区长期总览不另存 ——
+     * 它就是当前分支上有效归档的有序列表（见 StoryArchiveRecord）。同样只有测试档会写。
+     */
+    this.version(28).stores({ storyArchives: 'id, saveId' });
+    this.version(29).stores({ storyArchiveRetries: 'id, saveId' });
+
+    /**
+     * v30 (2026-10-02，战斗重写 Phase 2): 协议驱动战斗沙盒的在办战斗表。
      *
      * 每存档至多一场战斗 → 主键就是 `saveId`；`updatedAt` 索引供将来清理陈旧行。
      * **rebuildable 缓存**：不进 FullBackup / 单存档导出，删存档级联删。
+     *
+     * 编号说明：本表在原分支上是 v27，与 master 的 Story v2（v27/v28/v29）撞号，
+     * 合并时顺延到 v30 —— 旧库 v26 直接升上来即可，v30 只做加表。
      */
-    this.version(27).stores({ combatSandboxes: 'saveId, updatedAt' });
+    this.version(30).stores({ combatSandboxes: 'saveId, updatedAt' });
   }
 }
 
@@ -801,6 +840,11 @@ export interface FullBackup {
   // 而存档的其余部分完好，于是症状看起来像「AI 忘了她换过装」而不是「备份没收这张表」。
   // 纯文本 patch，体积与 imagePresets 同量级。
   characterAppearances: CharacterSessionAppearance[];
+  // v27 Story 上下文 v2 每回合摘要（只有测试档有行）。旧备份缺字段 → 导入时整表不动。
+  storyTurnSummaries?: StoryTurnSummaryRecord[];
+  // v28 Story 上下文 v2 阶段归档（只有测试档有行）。同上：旧备份缺字段时导入后为空。
+  storyArchives?: StoryArchiveRecord[];
+  storyArchiveRetries?: StoryArchiveRetryRecord[];
 
   // 🔴 **contentPacks 不在这个列表里，也不会被加进来**（D18 / §5.7）：
   //    payload 进备份 = 每份日常备份都是可自由转发的完整内容包 + 体积翻倍。
@@ -832,6 +876,9 @@ export async function exportAllData(): Promise<FullBackup> {
     sceneImages,
     imagePresets,
     characterAppearances,
+    storyTurnSummaries,
+    storyArchives,
+    storyArchiveRetries,
   ] = await Promise.all([
     db.lorebooks.toArray(),
     db.presets.toArray(),
@@ -853,6 +900,9 @@ export async function exportAllData(): Promise<FullBackup> {
     db.sceneImages.toArray(),
     db.imagePresets.toArray(),
     db.characterAppearances.toArray(),
+    db.storyTurnSummaries.toArray(),
+    db.storyArchives.toArray(),
+    db.storyArchiveRetries.toArray(),
   ]);
   return {
     version: DB_VERSION,
@@ -877,6 +927,9 @@ export async function exportAllData(): Promise<FullBackup> {
     sceneImages,
     imagePresets,
     characterAppearances,
+    storyTurnSummaries,
+    storyArchives,
+    storyArchiveRetries,
   };
 }
 
@@ -939,6 +992,9 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'sceneImages',
     'imagePresets',
     'characterAppearances',
+    'storyTurnSummaries',
+    'storyArchives',
+    'storyArchiveRetries',
   ];
   for (const f of arrayFields) {
     const v = backup[f];
@@ -1150,6 +1206,29 @@ async function doImportAllData(
       }
     }
   });
+
+  // v27 Story v2 每回合摘要：与 memories 同口径 —— saves 表总是整体替换，所以这张
+  // 每存档表也总是先清空（旧备份缺字段时留着它只会剩下指向已删存档的孤儿行）。
+  await db.transaction(
+    'rw',
+    db.storyTurnSummaries,
+    db.storyArchives,
+    db.storyArchiveRetries,
+    async () => {
+      await db.storyTurnSummaries.clear();
+      await db.storyArchives.clear();
+      await db.storyArchiveRetries.clear();
+      if (Array.isArray(backup.storyTurnSummaries)) {
+        await db.storyTurnSummaries.bulkPut(backup.storyTurnSummaries);
+      }
+      if (Array.isArray(backup.storyArchives)) {
+        await db.storyArchives.bulkPut(backup.storyArchives);
+      }
+      if (Array.isArray(backup.storyArchiveRetries)) {
+        await db.storyArchiveRetries.bulkPut(backup.storyArchiveRetries);
+      }
+    },
+  );
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1424,6 +1503,291 @@ export async function getRecentMemories(saveId: string, limit: number): Promise<
     .reverse()
     .sortBy('createdAt')
     .then((arr) => arr.slice(0, limit));
+}
+
+// --- Story 上下文 v2：每回合短期摘要片段 (v27) ---
+
+export async function getStoryTurnSummaries(saveId: string): Promise<StoryTurnSummaryRecord[]> {
+  return getDatabase().storyTurnSummaries.where('saveId').equals(saveId).toArray();
+}
+
+export async function getStoryArchives(saveId: string): Promise<StoryArchiveRecord[]> {
+  return getDatabase().storyArchives.where('saveId').equals(saveId).toArray();
+}
+
+/** Checked after queue acquisition and just before transaction commit. */
+export interface StoryMemoryCommitOptions {
+  isCurrent?: () => boolean;
+  retries?: readonly StoryArchiveRetryRecord[];
+}
+
+class StoryMemoryCommitCancelled extends Error {}
+
+function checkStoryMemoryCurrent(options: Pick<StoryMemoryCommitOptions, 'isCurrent'>): void {
+  if (options.isCurrent && !options.isCurrent()) throw new StoryMemoryCommitCancelled();
+}
+
+async function readStoryMemoryBranch(saveId: string, sources: readonly StoryMemorySource[]) {
+  const db = getDatabase();
+  const save = await db.saves.get(saveId);
+  if (!save || !isStoryContextV2Save(save)) return null;
+  const turns = collectCompleteStoryTurns(await getMessages(saveId));
+  return storyMemorySourcesMatch(sources, turns) ? turns : null;
+}
+
+/** Replacement never guesses a semantic mapping to different new fragments. */
+async function invalidateStoryCoverage(saveId: string, removed: readonly string[]): Promise<void> {
+  if (!removed.length) return;
+  const ids = new Set(removed);
+  const db = getDatabase();
+  for (const table of [db.storyArchives, db.storyArchiveRetries] as const) {
+    await (table as Table<StoryArchiveRecord | StoryArchiveRetryRecord>)
+      .where('saveId')
+      .equals(saveId)
+      .filter((row) => row.coveredSegmentIds.some((id) => ids.has(id)))
+      .modify({ invalidatedReason: 'summary-replaced' });
+  }
+}
+
+/** False means cancelled/stale; previous rows stay intact. No LLM calls inside lock. */
+export async function commitStoryTurnMemory(
+  saveId: string,
+  sourceTurnKey: string,
+  summaries: readonly StoryTurnSummaryRecord[],
+  archives: readonly StoryArchiveRecord[],
+  options: StoryMemoryCommitOptions = {},
+): Promise<boolean> {
+  const retries = options.retries ?? [];
+  const records = [...summaries, ...archives, ...retries];
+  if (records.some((r) => r.saveId !== saveId || r.sourceTurnKey !== sourceTurnKey)) {
+    throw new Error('commitStoryTurnMemory: 记录的 saveId / sourceTurnKey 与参数不一致');
+  }
+  return withSaveWriteLock(saveId, async () => {
+    const db = getDatabase();
+    try {
+      return await db.transaction(
+        'rw',
+        [db.saves, db.messages, db.storyTurnSummaries, db.storyArchives, db.storyArchiveRetries],
+        async () => {
+          checkStoryMemoryCurrent(options);
+          if (!records.length) return false;
+          const turns = await readStoryMemoryBranch(saveId, records);
+          if (!turns) return false;
+          const existing = await getStoryTurnSummaries(saveId);
+          const final = [
+            ...existing.filter((s) => s.sourceTurnKey !== sourceTurnKey),
+            ...summaries,
+          ];
+          if (
+            [...archives, ...retries].some(
+              (a) =>
+                !storyMemorySourcesMatch(a.coveredSources, turns) ||
+                !storyArchiveCoverageMatches(a, final),
+            )
+          )
+            return false;
+          const removed = existing
+            .filter(
+              (s) =>
+                s.sourceTurnKey === sourceTurnKey &&
+                !summaries.some(
+                  (next) =>
+                    next.id === s.id &&
+                    storySegmentFingerprint(next) === storySegmentFingerprint(s),
+                ),
+            )
+            .map((s) => s.id);
+          checkStoryMemoryCurrent(options);
+          await invalidateStoryCoverage(saveId, removed);
+          await db.storyTurnSummaries.bulkDelete(
+            existing.filter((s) => s.sourceTurnKey === sourceTurnKey).map((s) => s.id),
+          );
+          for (const table of [db.storyArchives, db.storyArchiveRetries] as const) {
+            await (table as Table<StoryArchiveRecord | StoryArchiveRetryRecord>)
+              .where('saveId')
+              .equals(saveId)
+              .filter((r) => r.sourceTurnKey === sourceTurnKey && !r.invalidatedReason)
+              .delete();
+          }
+          if (summaries.length) await db.storyTurnSummaries.bulkPut([...summaries]);
+          if (archives.length) await db.storyArchives.bulkPut([...archives]);
+          if (retries.length) await db.storyArchiveRetries.bulkPut([...retries]);
+          checkStoryMemoryCurrent(options);
+          return true;
+        },
+      );
+    } catch (error) {
+      if (error instanceof StoryMemoryCommitCancelled) return false;
+      throw error;
+    }
+  });
+}
+
+export async function getStoryArchiveRetries(saveId: string): Promise<StoryArchiveRetryRecord[]> {
+  return getDatabase().storyArchiveRetries.where('saveId').equals(saveId).toArray();
+}
+
+/** Save failed original drafts separately if their atomic archive write failed. */
+export async function queueStoryArchiveRetries(
+  saveId: string,
+  retries: readonly StoryArchiveRetryRecord[],
+  options: Pick<StoryMemoryCommitOptions, 'isCurrent'> = {},
+): Promise<boolean> {
+  if (
+    retries.some(
+      (r) =>
+        r.saveId !== saveId ||
+        r.archives.some((a) => a.saveId !== saveId || a.sourceTurnKey !== r.sourceTurnKey),
+    )
+  ) {
+    throw new Error('queueStoryArchiveRetries: 来源存档不一致');
+  }
+  return withSaveWriteLock(saveId, async () => {
+    const db = getDatabase();
+    try {
+      return await db.transaction(
+        'rw',
+        [db.saves, db.messages, db.storyTurnSummaries, db.storyArchiveRetries],
+        async () => {
+          checkStoryMemoryCurrent(options);
+          const turns = await readStoryMemoryBranch(saveId, retries);
+          if (!turns) return false;
+          const existing = await getStoryTurnSummaries(saveId);
+          for (const retry of retries) {
+            const draft = retry.summaries ?? [];
+            if (
+              draft.some((s) => s.saveId !== saveId || s.sourceTurnKey !== retry.sourceTurnKey) ||
+              !storyMemorySourcesMatch(
+                [...draft, ...retry.archives, ...retry.coveredSources],
+                turns,
+              ) ||
+              !storyArchiveCoverageMatches(retry, [...existing, ...draft])
+            )
+              return false;
+          }
+          await db.storyArchiveRetries.bulkPut([...retries]);
+          checkStoryMemoryCurrent(options);
+          return true;
+        },
+      );
+    } catch (error) {
+      if (error instanceof StoryMemoryCommitCancelled) return false;
+      throw error;
+    }
+  });
+}
+
+/** Complete an original-turn retry without replacing newer turns or their decisions. */
+export async function commitStoryArchiveRetry(
+  saveId: string,
+  retryId: string,
+  archives: readonly StoryArchiveRecord[],
+  options: Pick<StoryMemoryCommitOptions, 'isCurrent'> = {},
+): Promise<boolean> {
+  return withSaveWriteLock(saveId, async () => {
+    const db = getDatabase();
+    try {
+      return await db.transaction(
+        'rw',
+        [db.saves, db.messages, db.storyTurnSummaries, db.storyArchives, db.storyArchiveRetries],
+        async () => {
+          checkStoryMemoryCurrent(options);
+          const retry = await db.storyArchiveRetries.get(retryId);
+          if (!retry || retry.saveId !== saveId || retry.invalidatedReason) return false;
+          if (archives.some((a) => a.saveId !== saveId || a.sourceTurnKey !== retry.sourceTurnKey))
+            throw new Error('commitStoryArchiveRetry: 来源不一致');
+          const turns = await readStoryMemoryBranch(saveId, [retry, ...archives]);
+          if (!turns || !storyMemorySourcesMatch(retry.coveredSources, turns)) return false;
+          const existing = await getStoryTurnSummaries(saveId);
+          const current = existing.filter((s) => s.sourceTurnKey === retry.sourceTurnKey);
+          const draft = retry.summaries ?? [];
+          // Existing replacements must not be overwritten by an old retry.
+          if (
+            current.length &&
+            draft.length &&
+            (current.length !== draft.length ||
+              current.some(
+                (s) =>
+                  !draft.some(
+                    (d) =>
+                      d.id === s.id && storySegmentFingerprint(d) === storySegmentFingerprint(s),
+                  ),
+              ))
+          )
+            return false;
+          const missing = draft.filter((d) => !existing.some((s) => s.id === d.id));
+          const final = [...existing, ...missing];
+          if (
+            !storyMemorySourcesMatch(draft, turns) ||
+            !storyArchiveCoverageMatches(retry, final) ||
+            archives.some(
+              (a) =>
+                !storyMemorySourcesMatch(a.coveredSources, turns) ||
+                !storyArchiveCoverageMatches(a, final),
+            ) ||
+            archives.length !== retry.archives.length ||
+            archives.some(
+              (a) =>
+                !retry.archives.some(
+                  (d) =>
+                    d.id === a.id &&
+                    d.eventName === a.eventName &&
+                    d.outcome === a.outcome &&
+                    d.evidence === a.evidence &&
+                    JSON.stringify(d.coveredSegmentIds) === JSON.stringify(a.coveredSegmentIds),
+                ),
+            )
+          )
+            return false;
+          checkStoryMemoryCurrent(options);
+          if (missing.length) await db.storyTurnSummaries.bulkPut(missing);
+          if (archives.length) await db.storyArchives.bulkPut([...archives]);
+          await db.storyArchiveRetries.delete(retryId);
+          checkStoryMemoryCurrent(options);
+          return true;
+        },
+      );
+    } catch (error) {
+      if (error instanceof StoryMemoryCommitCancelled) return false;
+      throw error;
+    }
+  });
+}
+
+/** Caller holds save lock/transaction including messages and all three Story tables. */
+export async function pruneOrphanStoryContextRecords(saveId: string): Promise<number> {
+  const db = getDatabase();
+  const turns = collectCompleteStoryTurns(await getMessages(saveId));
+  const summaries = await getStoryTurnSummaries(saveId);
+  const orphanIds = summaries.filter((r) => !storyMemorySourcesMatch([r], turns)).map((r) => r.id);
+  await db.storyTurnSummaries.bulkDelete(orphanIds);
+  const valid = summaries.filter((r) => !orphanIds.includes(r.id));
+  let removed = orphanIds.length;
+  for (const table of [db.storyArchives, db.storyArchiveRetries] as const) {
+    const rows = await table.where('saveId').equals(saveId).toArray();
+    for (const row of rows) {
+      if (
+        !storyMemorySourcesMatch([row], turns) ||
+        !storyMemorySourcesMatch(row.coveredSources, turns)
+      ) {
+        await table.delete(row.id);
+        removed++;
+      } else if (!row.invalidatedReason) {
+        const draft =
+          'summaries' in row
+            ? (row.summaries ?? []).filter(
+                (s) =>
+                  storyMemorySourcesMatch([s], turns) &&
+                  !valid.some((v) => v.sourceTurnKey === s.sourceTurnKey && v.id !== s.id),
+              )
+            : [];
+        if (!storyArchiveCoverageMatches(row, [...valid, ...draft])) {
+          await table.update(row.id, { invalidatedReason: 'coverage-missing' });
+        }
+      }
+    }
+  }
+  return removed;
 }
 
 // --- Plot Events ---
@@ -1849,6 +2213,9 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       db.characterAppearances,
       db.debugTurns,
       db.promptSessions,
+      db.storyTurnSummaries,
+      db.storyArchives,
+      db.storyArchiveRetries,
       db.combatSandboxes,
     ],
     async () => {
@@ -1874,7 +2241,11 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       await db.debugTurns.where('saveId').equals(id).delete();
       // v26：Delta 会话是 rebuildable 缓存，但存档都没了没有理由留着
       await db.promptSessions.where('saveId').equals(id).delete();
-      // v27：在办战斗同 promptSessions —— rebuildable，随存档一起走
+      // v27–v29：Story v2 每回合摘要 / 阶段归档 / 归档重试随存档走
+      await db.storyTurnSummaries.where('saveId').equals(id).delete();
+      await db.storyArchives.where('saveId').equals(id).delete();
+      await db.storyArchiveRetries.where('saveId').equals(id).delete();
+      // v30：在办战斗同 promptSessions —— rebuildable，随存档一起走
       await db.combatSandboxes.where('saveId').equals(id).delete();
       await db.saves.delete(id);
     },

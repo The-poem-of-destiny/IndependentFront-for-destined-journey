@@ -42,7 +42,6 @@ function makeCfg(overrides: Partial<AgentConfig> = {}): AgentConfig {
     timeout: 60000,
     userId: '',
     promptTemplate: { fixedSystem: '', fixedExamples: '' },
-    worldBookIds: [fixtureWorldBook.id],
     systemPrompt: '你是请求调度器。',
     template: '{{SYS_PROMPT}}\n{{USER_INPUT}}',
     ...overrides,

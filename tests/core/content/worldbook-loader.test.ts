@@ -21,7 +21,7 @@ import {
   FailClosedBackend,
   clearEjsBackendCache,
 } from '../../../src/core/ejs/ejs-backend';
-import type { WorldBook, WorldBookEntry, AgentConfig } from '../../../src/core/types/types';
+import type { WorldBook, WorldBookEntry } from '../../../src/core/types/types';
 import type { EjsEvalContext } from '../../../src/core/ejs/ejs-runtime';
 
 // ========== Helpers ==========
@@ -51,26 +51,6 @@ function makeBook(overrides: Partial<WorldBook> = {}): WorldBook {
   };
 }
 
-function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
-  return {
-    agentId: 'story',
-    enabled: true,
-    apiEndpointId: 'ep_1',
-    model: 'test-model',
-    temperature: 0.7,
-    maxTokens: 2048,
-    topP: 1.0,
-    frequencyPenalty: 0,
-    presencePenalty: 0,
-    retryOnFail: true,
-    timeout: 30000,
-    userId: 'fp|test|story',
-    promptTemplate: { fixedSystem: '', fixedExamples: '' },
-    worldBookIds: [],
-    ...overrides,
-  };
-}
-
 // ========== loadWorldBooksSync ==========
 
 describe('loadWorldBooksSync', () => {
@@ -95,34 +75,72 @@ describe('loadWorldBooksSync', () => {
 // ========== getEntriesForAgent ==========
 
 describe('getEntriesForAgent', () => {
-  it('returns entries from allowed world books', () => {
-    const configs = [makeConfig({ agentId: 'story', worldBookIds: ['world_setting'] })];
+  it('returns entries from books whose audiences include the agent', () => {
     const books = [
       makeBook({
         id: 'world_setting',
-        entries: [makeEntry({ uid: 1, content: '世界主设定' })],
+        entries: [
+          makeEntry({ uid: 1, content: '世界主设定', extra: { lore: { audiences: ['story'] } } }),
+        ],
       }),
       makeBook({
         id: 'adventure_area',
-        entries: [makeEntry({ uid: 2, content: '白曜城' })],
+        entries: [
+          makeEntry({ uid: 2, content: '白曜城', extra: { lore: { audiences: ['char_gen'] } } }),
+        ],
       }),
     ];
 
-    const entries = getEntriesForAgent('story', configs, books);
+    const entries = getEntriesForAgent('story', books);
     expect(entries).toHaveLength(1);
     expect(entries[0].content).toBe('世界主设定');
   });
 
-  it('returns empty for unknown agent', () => {
-    const entries = getEntriesForAgent('unknown', [], []);
+  it('returns empty for no books', () => {
+    const entries = getEntriesForAgent('unknown', []);
     expect(entries).toHaveLength(0);
   });
 
-  it('returns empty when agent has no world books', () => {
-    const configs = [makeConfig({ agentId: 'story', worldBookIds: [] })];
+  it('书没有声明读取范围 → 谁也读不到', () => {
     const books = [makeBook({ entries: [makeEntry()] })];
-    const entries = getEntriesForAgent('story', configs, books);
+    const entries = getEntriesForAgent('story', books);
     expect(entries).toHaveLength(0);
+  });
+
+  it('条目读取范围不含该 Agent → 空', () => {
+    const books = [
+      makeBook({ entries: [makeEntry({ extra: { lore: { audiences: ['char_gen'] } } })] }),
+    ];
+    expect(getEntriesForAgent('story', books)).toHaveLength(0);
+  });
+
+  it('条目级 audiences 各自生效', () => {
+    const books = [
+      makeBook({
+        entries: [
+          makeEntry({ uid: 1, content: '条目声明', extra: { lore: { audiences: ['story'] } } }),
+          makeEntry({
+            uid: 2,
+            content: '只给 char_gen',
+            extra: { lore: { audiences: ['char_gen'] } },
+          }),
+          makeEntry({ uid: 3, content: '显式空', extra: { lore: { audiences: [] } } }),
+        ],
+      }),
+      makeBook({
+        id: 'adventure_area',
+        entries: [
+          makeEntry({
+            uid: 4,
+            content: '书无声明、条目给 story',
+            extra: { lore: { audiences: ['story'] } },
+          }),
+        ],
+      }),
+    ];
+
+    expect(getEntriesForAgent('story', books).map((e) => e.uid)).toEqual([1, 4]);
+    expect(getEntriesForAgent('char_gen', books).map((e) => e.uid)).toEqual([2]);
   });
 });
 
@@ -216,6 +234,74 @@ describe('formatWorldBookEntries', () => {
 // ========== filterBooksByEnabledEntries ==========
 
 describe('filterBooksByEnabledEntries', () => {
+  it.each([{ selected: [] }, { selected: ['system_core:407'] }])(
+    '未选择内置角色时，所有 Agent 都排除默认启用的人物档案（$selected）',
+    ({ selected }) => {
+      const audiences = ['story', 'char_gen', 'vars_update'];
+      const books = [
+        makeBook({
+          id: 'character',
+          partition: 'character',
+          builtIn: true,
+          entries: [322, 585, 334].map((uid) =>
+            makeEntry({
+              uid,
+              content: `未选择的人物档案 ${uid}`,
+              extra: { lore: { audiences, required: true } },
+            }),
+          ),
+        }),
+        makeBook({
+          id: 'race',
+          partition: 'race',
+          builtIn: true,
+          entries: [makeEntry({ uid: 20, extra: { lore: { audiences } } })],
+        }),
+      ];
+      const original = JSON.stringify(books);
+      const filtered = filterBooksByEnabledEntries(books, selected);
+
+      expect(filtered[0].entries).toEqual([]);
+      for (const agentId of audiences) {
+        expect(getEntriesForAgent(agentId, filtered).map((entry) => entry.uid)).toEqual([20]);
+      }
+      expect(JSON.stringify(books)).toBe(original);
+    },
+  );
+
+  it('明确选择的内置角色覆盖默认停用，未选择的默认启用角色仍被排除', () => {
+    const audiences = ['story', 'char_gen', 'vars_update'];
+    const book = makeBook({
+      id: 'character',
+      partition: 'character',
+      builtIn: true,
+      entries: [
+        makeEntry({ uid: 301, enabled: false, extra: { lore: { audiences } } }),
+        makeEntry({ uid: 322, extra: { lore: { audiences } } }),
+      ],
+    });
+    const filtered = filterBooksByEnabledEntries([book], ['character:301']);
+
+    for (const agentId of audiences) {
+      expect(getEntriesForAgent(agentId, filtered).map((entry) => entry.uid)).toEqual([301]);
+    }
+    expect(book.entries.map((entry) => entry.enabled)).toEqual([false, true]);
+  });
+
+  it('未记录角色选择不改变用户角色书及其它分区的默认过滤语义', () => {
+    const books = [
+      makeBook({
+        id: 'user-characters',
+        partition: 'character',
+        builtIn: false,
+        entries: [makeEntry({ uid: 301 })],
+      }),
+      makeBook({ partition: 'creative_workshop', entries: [makeEntry({ uid: 900 })] }),
+    ];
+
+    expect(filterBooksByEnabledEntries(books, [])).toEqual(books);
+  });
+
   it('returns all books unchanged when enabledEntries is empty', () => {
     const books = [
       makeBook({
@@ -265,15 +351,19 @@ describe('filterBooksByEnabledEntries', () => {
             name: '命定系统-妲丽安核心',
             content: '妲丽安世界书正文',
             enabled: false,
+            extra: { lore: { audiences: ['story'] } },
           }),
-          makeEntry({ uid: 414, name: '命定系统-小夜莺核心', enabled: false }),
+          makeEntry({
+            uid: 414,
+            name: '命定系统-小夜莺核心',
+            enabled: false,
+            extra: { lore: { audiences: ['story'] } },
+          }),
         ],
       }),
     ];
-    const configs = [makeConfig({ worldBookIds: ['system_core'] })];
-
     const filtered = filterBooksByEnabledEntries(books, ['system_core:413']);
-    const active = filterActiveEntries(getEntriesForAgent('story', configs, filtered));
+    const active = filterActiveEntries(getEntriesForAgent('story', filtered));
 
     expect(active.map((entry) => entry.uid)).toEqual([413]);
     expect(active[0].content).toBe('妲丽安世界书正文');

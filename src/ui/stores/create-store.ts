@@ -43,6 +43,7 @@ import type { AgentContext } from '@engine/types/types';
 import { createDefaultTime, formatGameTime, GAME_EPOCH_YEAR } from '@engine/time/time-system';
 import { normalizeRarity } from '@engine/content/field-enums';
 import { useSettingsStore } from './settings-store';
+import { createStoryContextV2Marker } from '@engine/story/story-context-mode';
 import {
   type CatalogItem,
   type CatalogData,
@@ -1094,22 +1095,20 @@ export const useCreateStore = defineStore('create', () => {
     }
   }
 
-  /** 加载剧情大纲 Agent 可见的世界书（统一数据源：store 优先 + 文件兜底；worldBookIds + 捏人勾选过滤） */
-  async function loadPlotOutlineWorldBooks(agentConfigs: AgentConfig[]): Promise<WorldBook[]> {
+  /**
+   * 加载剧情大纲 Agent 可用的世界书（统一数据源：store 优先 + 文件兜底；捏人勾选过滤）。
+   * 读取范围由条目路由元数据决定（`getEntriesForAgent`），旧包按它自己的默认配置补映射。
+   */
+  async function loadPlotOutlineWorldBooks(): Promise<WorldBook[]> {
     try {
       // 统一数据源：读 worldbook-store（Dexie，含用户在 WorldBookEditor 的 enabled 修改），
       // 不再绕过 store 读原始文件
       const wb = useWorldBookStore();
       await wb.init();
       const all = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
-      const cfg = agentConfigs.find((c) => c.agentId === 'plot_outline');
-      let filtered = all;
-      if (cfg && cfg.worldBookIds?.length) {
-        filtered = all.filter((wb) => cfg.worldBookIds!.includes(wb.id));
-      }
       // 对齐游戏页面：只注入用户在捏人页勾选的角色 + 命定核心
       const enabledEntries = buildEnabledWorldBookEntries();
-      return filterBooksByEnabledEntries(filtered, enabledEntries);
+      return filterBooksByEnabledEntries(all, enabledEntries);
     } catch {
       return [];
     }
@@ -1328,7 +1327,7 @@ export const useCreateStore = defineStore('create', () => {
       //    而应用此时对外报告的是「已隔离」。异步版先预渲染再灌 memo，EJS 只在后端里跑。
       const { buildAgentMessagesAsync } = await import('@engine/prompts/agent-templates');
       const agentConfigs = await loadOutlineAgentConfigs();
-      const worldBooks = await loadPlotOutlineWorldBooks(agentConfigs);
+      const worldBooks = await loadPlotOutlineWorldBooks();
 
       // 构建 AgentContext
       // 🆕 大纲必须看到主角开局状态：把开场背景 + 初始装备/技能/物品补进角色 background
@@ -1912,6 +1911,11 @@ export const useCreateStore = defineStore('create', () => {
         openingPrompt: openingPrompt, // 🆕
         openingPromptConsumed: false, // 🆕
         plotSettings: JSON.parse(JSON.stringify(plotSettings.value)), // §5.2: 本档剧情配置随档落库（含雷点）
+        // Story 上下文新模式：建档即永久打标（计划 §11.3），必须早于任何一次生成或记忆写入。
+        // 开关只决定**新建**的档是哪种；之后关开关不会、也不能清掉这个标记。
+        ...(useSettingsStore().settings?.storyContextV2Enabled === true
+          ? { storyContextV2: createStoryContextV2Marker(Date.now()) }
+          : {}),
       } as any,
     };
 
@@ -1924,8 +1928,15 @@ export const useCreateStore = defineStore('create', () => {
           ...(confirmed ? { confirmed: true } : {}),
         } as PlotOutline)
       : undefined;
+    let openingWorldBooks: WorldBook[] = [];
+    if (save.metadata.storyContextV2) {
+      const wb = useWorldBookStore();
+      await wb.init();
+      openingWorldBooks = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
+    }
     const input = {
       character: charState,
+      worldBooks: openingWorldBooks,
       save,
       era: era.value,
       experienceMode: experienceMode.value === 'easy' ? ('easy' as const) : ('normal' as const),

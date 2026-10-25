@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Agent 的三张设置卡：API 池选择 / LLM 参数 / 世界书配置（Q-25 第 9 步）。
+ * Agent 的三张设置卡：API 池选择 / LLM 参数 / 世界书读取范围（只读）（Q-25 第 9 步）。
  *
  * 三张卡合成一个组件而不是三个，是因为它们**共用同一对读写口** ——
  * `agentCfg`（合上默认层的当前设置）与 `setAgentField`（改一项并置脏位）。
@@ -10,11 +10,12 @@
  *    （WorldBookSection）自己不调 init，同样靠壳层那一次；搬进来会让那个分区
  *    在没进过 Agent 分区时列表为空。
  *
- * 🔴 D44 修正 1/4：`getAgentSettings` 现在合**默认层**（pack > 占位），数值/世界书/
+ * 🔴 D44 修正 1/4：`getAgentSettings` 现在合**默认层**（pack > 占位），数值/提示词/
  *    model 的有效值走「覆写 ?? 默认」。每张卡上的「默认 / 已覆写」徽标告诉用户这个
  *    值是默认层给的还是用户改过——「已覆写」意味着覆写层有条目、清掉即回默认。
  */
 import { computed, ref } from 'vue';
+import { normalizeStoryWindowTurns } from '@engine/story/story-context-mode';
 import AppCard from '../../shared/AppCard.vue';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { useWorldBookStore } from '../../../stores/worldbook-store';
@@ -24,6 +25,7 @@ import {
   type AgentDefaultsLayer,
   type AgentSettingsEntry,
 } from '../../../stores/agent-settings';
+import { isLoreEntryVisibleTo } from '@engine/content/lore-routing';
 
 const props = defineProps<{ agentId: string }>();
 
@@ -88,12 +90,21 @@ function setAgentField(patch: Partial<AgentSettingsEntry>) {
   s.agentDirty[props.agentId] = true;
 }
 
-/** 历史注入层数：空串 = **删键**（把「按 Agent 类别走引擎默认」那条语义还回去） */
+const isStoryV2 = computed(() => props.agentId === 'story' && s.storyContextV2Enabled === true);
+const historyLayersError = ref('');
+
+/** 留空恢复默认；只有 Story v2 要求正文窗口为正整数。 */
 function onHistoryLayersInput(ev: Event) {
   const v = (ev.target as HTMLInputElement).value;
+  if (isStoryV2.value && v !== '' && normalizeStoryWindowTurns(Number(v)) === null) {
+    historyLayersError.value = 'Story v2 正文窗口 N 必须是正整数，不能为 0。';
+    return;
+  }
+  historyLayersError.value = '';
   setAgentField({ historyLayers: v === '' ? undefined : Number(v) });
 }
 function onHistorySliceInput(ev: Event) {
+  if (isStoryV2.value) return;
   const v = (ev.target as HTMLInputElement).value;
   setAgentField({ historySlice: v === '' ? undefined : Number(v) });
 }
@@ -109,24 +120,18 @@ function onTailPromptInput(ev: Event) {
 }
 
 /**
- * 勾选/取消一本世界书。
- *
- * 🔴 这里刻意**重新调** `getAgentSettings` 而不是读上面的 `agentCfg`：
- *    前者每次返回**新数组**（agent-settings.ts 里 `[...ids]`），所以就地
- *    `splice`/`push` 是安全的；改成读 computed 会在 patch 之前就地改掉
- *    Vue 认为still干净的缓存值。搬迁时原样保留，别"顺手简化"。
+ * 该 Agent 能读到的世界书（只读）—— 读取范围由**条目自己的** `extra.lore.audiences` 决定
+ * （内容计划 §3.2 / §7.2），这里**不提供**逐 Agent 的书清单、开关或范围编辑。
  */
-function toggleAgentWorldBook(bookId: string) {
-  const ids = getAgentSettings(s, props.agentId, defaultsLayer.value).worldBookIds; // 已是副本
-  const idx = ids.indexOf(bookId);
-  if (idx >= 0) ids.splice(idx, 1);
-  else ids.push(bookId);
-  patchAgentSettings(s, props.agentId, { worldBookIds: ids });
-  s.agentDirty[props.agentId] = true;
-}
-
-// 模板里 v-for 要用到；ref 只是为了让 eslint 认得（实际由 wb.books 驱动）
-void ref;
+const readableBooks = computed(() =>
+  wb.books
+    .map((book) => ({
+      book,
+      count: book.entries.filter((e) => e.enabled && isLoreEntryVisibleTo(props.agentId, book, e))
+        .length,
+    }))
+    .filter((row) => row.count > 0),
+);
 </script>
 
 <template>
@@ -288,19 +293,27 @@ void ref;
           isOverridden('historyLayers') ? '已覆写' : '默认'
         }}</span>
         <p class="form-hint">
-          注入最近 N 轮「玩家+AI」对话历史（0=不注入；留空=按 Agent 类别默认）。后置型 Agent 默认 1
-          轮辅助上文，长正文型默认 6 轮
+          {{
+            isStoryV2
+              ? 'Story v2 正文窗口 N：保留最近 N 个完整回合原文。只接受正整数；留空恢复默认 6 回合。窗口外由摘要承接，不截断原文。'
+              : '注入最近 N 轮「玩家+AI」对话历史（0=不注入；留空=按 Agent 类别默认）。后置型 Agent 默认 1 轮辅助上文，长正文型默认 6 轮'
+          }}
         </p>
         <input
           type="number"
-          min="0"
           max="20"
           step="1"
           :value="agentCfg.historyLayers ?? ''"
+          :min="isStoryV2 ? 1 : 0"
+          :aria-invalid="isStoryV2 && !!historyLayersError"
+          aria-label="历史注入层数"
           placeholder="(默认)"
           class="form-input"
           @input="onHistoryLayersInput($event)"
         />
+        <p v-if="isStoryV2 && historyLayersError" class="api-warn" role="alert">
+          {{ historyLayersError }}
+        </p>
       </label>
       <label class="form-label"
         >历史截断字数
@@ -308,7 +321,11 @@ void ref;
           isOverridden('historySlice') ? '已覆写' : '默认'
         }}</span>
         <p class="form-hint">
-          每条历史正文保留前多少字（留空=按 Agent 类别默认，长正文型默认 1500，后置型默认 800）
+          {{
+            isStoryV2
+              ? 'Story v2 保留完整回合原文，此旧模式截断设置不生效；已保存的旧值保留，关闭 v2 后恢复使用。'
+              : '每条历史正文保留前多少字（留空=按 Agent 类别默认，长正文型默认 1500，后置型默认 800）'
+          }}
         </p>
         <input
           type="number"
@@ -316,6 +333,8 @@ void ref;
           max="8000"
           step="100"
           :value="agentCfg.historySlice ?? ''"
+          :disabled="isStoryV2"
+          aria-label="历史截断字数"
           placeholder="(默认)"
           class="form-input"
           @input="onHistorySliceInput($event)"
@@ -341,49 +360,21 @@ void ref;
     </label>
   </AppCard>
 
-  <!-- 世界书配置 (Phase 8) -->
+  <!-- 世界书读取范围（只读；由内容声明决定，内容计划 §7.2） -->
   <AppCard padding="md" class="detail-card">
-    <h4>
-      世界书配置
-      <span class="source-badge" :class="{ overridden: isOverridden('worldBookEnabled') }">{{
-        isOverridden('worldBookEnabled') ? '已覆写' : '默认'
-      }}</span>
-    </h4>
-    <p class="form-hint">启用该 Agent 的世界书上下文注入。选择要关联的世界书。</p>
-    <div class="key-row key-row-stacked">
-      <label class="toggle-label">
-        <span class="text-sm text-secondary">启用世界书</span>
-        <input
-          type="checkbox"
-          class="toggle-input"
-          :checked="agentCfg.worldBookEnabled"
-          @change="
-            setAgentField({
-              worldBookEnabled: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
-    <div class="worldbook-select-list">
-      <template v-if="wb.books.length === 0">
-        <p class="text-muted text-sm" style="padding: 20px; text-align: center">
-          暂未导入世界书。请先在「世界书」导航中导入。
-        </p>
-      </template>
-      <label v-for="book in wb.books" :key="book.id" class="worldbook-checkbox">
-        <input
-          type="checkbox"
-          :checked="agentCfg.worldBookIds.includes(book.id)"
-          :aria-label="`关联世界书: ${book.name}`"
-          @change="toggleAgentWorldBook(book.id)"
-        />
-        <i class="fa-solid fa-book" aria-hidden="true" style="font-size: 13px; opacity: 0.5"></i>
-        <span class="wb-check-label">{{ book.name }}</span>
-        <span class="text-xs text-muted">{{ book.entries?.length || 0 }} 条目</span>
-      </label>
-    </div>
+    <h4>世界书读取范围</h4>
+    <p class="form-hint">
+      这个 Agent 能读哪些世界书条目由内容包与世界书自身的读取范围决定，不在这里设置。
+      自建世界书的读取范围可在「世界书」分区的编辑器里调整。
+    </p>
+    <ul v-if="readableBooks.length > 0" class="worldbook-scope-list">
+      <li v-for="row in readableBooks" :key="row.book.id">
+        <i class="fa-solid fa-book" aria-hidden="true"></i>
+        <span class="wb-scope-label">{{ row.book.name }}</span>
+        <span class="text-xs text-muted">{{ row.count }} 条</span>
+      </li>
+    </ul>
+    <p v-else class="text-muted text-sm">当前没有这个 Agent 可读的世界书条目。</p>
   </AppCard>
 </template>
 
@@ -393,43 +384,30 @@ void ref;
 <style scoped src="../settings-chrome.css"></style>
 
 <style scoped>
-.worldbook-select-list {
+.worldbook-scope-list {
+  list-style: none;
+  margin: var(--theme-spacing-sm) 0 0;
+  padding: var(--theme-spacing-sm);
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-md);
-  min-height: 60px;
-  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.worldbook-checkbox {
+.worldbook-scope-list li {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  min-height: 44px;
-  transition: background 0.15s;
+  padding: 8px 12px;
 }
-.worldbook-checkbox:hover {
-  background: var(--theme-tab-hover-bg);
+.worldbook-scope-list i {
+  font-size: 13px;
+  opacity: 0.5;
 }
-.worldbook-checkbox input[type='checkbox'] {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  margin: 0;
-  accent-color: var(--theme-primary);
-}
-.wb-check-label {
+.wb-scope-label {
   flex: 1;
   font-size: 14px;
   font-weight: 500;
-}
-/* 竖直堆叠的 key-row（上面还有一行同类控件时留一跳） */
-.key-row-stacked {
-  margin-bottom: var(--theme-spacing-sm);
 }
 /* 🆕 tailPrompt 文本域：与数值网格之间留一跳呼吸（它跟在 form-grid 后面） */
 .tail-prompt-field {

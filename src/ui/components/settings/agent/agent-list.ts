@@ -37,6 +37,12 @@ export const AGENT_LIST: readonly AgentListEntry[] = [
     stage: 0,
   },
   { id: 'plot_pre_check', name: '剧情预检', desc: '正文前检查需要触发的剧情事件和背景', stage: 0 },
+  {
+    id: 'lore_select',
+    name: '资料选择',
+    desc: '仅 Story 新模式使用，筛选本轮资料并有限补充；独立配置 API 池',
+    stage: 1,
+  },
   { id: 'story', name: '正文生成', desc: '核心叙事 Agent，生成游戏正文内容', stage: 1 },
   {
     id: 'craft_gen',

@@ -491,6 +491,12 @@ globalThis.engine = __ejsData.engine;`,
       handle.dispose?.();
     };
 
+    bridge('__b_st', (name) => {
+      const key = String(name ?? '');
+      return Object.prototype.hasOwnProperty.call(ctx.stDefinitions ?? {}, key)
+        ? ctx.stDefinitions![key]
+        : null;
+    });
     bridge('__b_chat_at', (i, role) =>
       capsRef.current.chat.at(Number(i), role as string | undefined),
     );
@@ -1049,7 +1055,13 @@ const GUEST_FACADE = `
 
   globalThis.getMessageVar = function (p, o) { return readPath(splitPath(stripStat(p)), o && o.defaults); };
   globalThis.setMessageVar = function (p, v) { writePath(splitPath(stripStat(p)), v); };
-  globalThis.getvar = function (k, o) { return readPath(splitPath(varKey(k)), o && o.defaults); };
+  globalThis.getvar = function (k, o) {
+    var name = varKey(k);
+    var value = readPath(splitPath(name));
+    if (value !== undefined) return value;
+    var st = P(__b_st(name));
+    return st === null ? (o && o.defaults) : st;
+  };
   globalThis.setvar = function (k, v) { writePath(splitPath(varKey(k)), v); };
   globalThis.getLocalVar = function (k, o) {
     var v = globalThis.local.get(String(k), undefined);

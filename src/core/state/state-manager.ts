@@ -32,6 +32,7 @@ import {
   deleteCharacter,
   saveMemory,
   deleteMemoriesAfter,
+  pruneOrphanStoryContextRecords,
   deleteSnapshotsAfter,
   getPlotEvents,
   savePlotEvents,
@@ -166,6 +167,7 @@ export type PlayerPersonaUpdateResult =
 
 /** commitChatState 的可选载荷（工坊 P2 / ADR-30 D5） */
 export interface CommitChatStateOptions {
+  isCurrent?: () => boolean;
   /**
    * EJS `vars` 草稿差量，**有序**。
    *
@@ -177,6 +179,14 @@ export interface CommitChatStateOptions {
    * 是哪个 Agent，能把拒绝点名报给用户。
    */
   ejsVarsDiffs?: EjsVarsDiff[];
+}
+
+function assertCurrentTurn(isCurrent?: () => boolean): void {
+  if (isCurrent && !isCurrent()) {
+    const error = new Error('回合已取消或切换');
+    error.name = 'AbortError';
+    throw error;
+  }
 }
 
 /** 单个 Patch 的应用结果 */
@@ -470,6 +480,7 @@ export class StateManager {
     // `reactToEvents` 刻意放在锁外：它内部的嵌套 commitChatState 需要重新排队
     // 拿锁，留在锁内即同 saveId 自等死锁（state-write-queue 铁律②）。
     const applied = await withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(options?.isCurrent);
       const results: PatchApplicationResult[] = [];
       const errors: string[] = [];
 
@@ -2254,11 +2265,16 @@ export class StateManager {
    * @param reason 触发原因: turn=每轮一拍 / manual=手动 / pre-combat=战斗前
    * @param turn   对话回合游标（恢复时截断 messages 用）
    */
-  async createSnapshot(reason: Snapshot['reason'], turn: number): Promise<Snapshot> {
+  async createSnapshot(
+    reason: Snapshot['reason'],
+    turn: number,
+    isCurrent?: () => boolean,
+  ): Promise<Snapshot> {
     // 🔴 并行化改造：快照 = 读全表 + 写快照行 + 改 activeSnapshotId + trim 的整段
     // RMW 区段，整段互斥（与提交 / advanceTurn 交错会留下「快照与状态不一致」）。
     // 内部只调裸 DB 函数，无嵌套入队（铁律②）。
     return withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(isCurrent);
       const characters = await getCharacters(this.saveId);
       const profile = await getProfile(this.saveId);
       const plotEvents = await getPlotEvents(this.saveId);
@@ -2343,13 +2359,14 @@ export class StateManager {
    * totalTurns 语义 = 已完成的对话回合数（每轮管线恰 +1，不再随每次 commit 虚高），
    * 随后打一张 reason='turn' 的回合快照（turn = 新回合数，恢复时按此截断消息）。
    */
-  async advanceTurn(): Promise<void> {
+  async advanceTurn(isCurrent?: () => boolean): Promise<void> {
     let newTotalTurns = 1;
     // 🔴 并行化改造：totalTurns 读-改-写是一段 RMW 区段，整段互斥（与 commitChatState
     // 尾部的 saveSaveSlot 争同一条 save 记录，交错会互相覆盖 totalTurns）。
     // createSnapshot 自带锁（它也被战斗 pre-combat 直接调用），必须在锁外调用，
     // 否则同 saveId 嵌套自等死锁（state-write-queue 铁律②）。
     await withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(isCurrent);
       const save = await getSave(this.saveId);
       if (save) {
         newTotalTurns = (save.metadata.totalTurns ?? 0) + 1;
@@ -2357,7 +2374,7 @@ export class StateManager {
         await saveSaveSlot(save);
       }
     });
-    await this.createSnapshot('turn', newTotalTurns);
+    await this.createSnapshot('turn', newTotalTurns, isCurrent);
   }
 
   /**
@@ -2403,6 +2420,10 @@ export class StateManager {
             db.snapshots,
             // v22 拆表：④.c 的 deleteSnapshotsAfter 要连载荷行一起删，表清单必须带上它
             db.snapshotPayloads,
+            // v27/v28：④.d 按恢复后的消息集合清理 Story v2 摘要与阶段归档
+            db.storyTurnSummaries,
+            db.storyArchives,
+            db.storyArchiveRetries,
           ],
           async () => {
             // ② characters 整体覆写: 全删 → 写入快照副本
@@ -2440,6 +2461,12 @@ export class StateManager {
             //     出现多条、后续回退 filter(turn<=target) 取错。恢复点之后创建的快照
             //     全是该时间线之后的产物，删除安全。
             await deleteSnapshotsAfter(this.saveId, snapshot.createdAt);
+
+            // ④.d 🆕 Story v2 摘要与阶段归档：来源消息不在恢复后分支里的记录删掉（计划 §11.4）。
+            //     判据是**消息 id**，不是时间戳 —— 同回合重生成的正文时间相近而 id 不同。
+            //     归档一删，第 2 区退回上一有效节点、被覆盖的摘要恢复未归档语义（D23）。
+            //     普通存档这两张表没有行，这一步是空操作。
+            await pruneOrphanStoryContextRecords(this.saveId);
 
             // ⑤ activeSnapshotId 指向 + totalTurns 对齐快照 turn（防重发后 turn 编号错位）
             const save = await getSave(this.saveId);
@@ -2927,7 +2954,7 @@ export class StateManager {
    * @param minutes - 推进的分钟数
    * @returns 恒为空数组（保留返回形状供调用方兼容；状态补丁已不在此处产生）
    */
-  async applyTimeAdvance(minutes: number): Promise<StatePatch[]> {
+  async applyTimeAdvance(minutes: number, isCurrent?: () => boolean): Promise<StatePatch[]> {
     const patches: StatePatch[] = [];
     if (minutes <= 0) return patches;
 
@@ -2935,6 +2962,7 @@ export class StateManager {
     // 🔴 并行化改造：时间推进的全部 DB 工作（gameTime / 天气 / 随机事件 / 地块结算）是
     // 一段连续读-改-写区段，整段互斥。状态计时已交 daily_check，本方法不再写角色。
     await withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(isCurrent);
       const profile = await getProfile(this.saveId);
       // 地图 v1.2（§4）：结算区间是**半开区间** `(prevDay, nextDay]`，所以推进**之前**
       // 就得把起点记下来 —— 推进完再算就永远拿到同一天，一次跨 90 天的前进会静默结算 0 期
@@ -2971,7 +2999,17 @@ export class StateManager {
       );
     });
 
-    // F08 收益重放：收益从「锁外补丁」改为「持久借据的原子入账」，与正文提交**互不连坐**。
+    // Q-02 修复（合并后保留）：本方法若产补丁，必须在方法内自提交 —— 唯一调用点曾丢弃返回值，
+    // 到期效果的 remove/hp/stat 与 onRemove 脚本会全部蒸发；且必须带 `isCurrent` 守卫
+    // （陈旧回合不得落库）。Phase 3 之后状态计时全权交 daily_check，本方法恒返回空数组，
+    // 所以这段自提交在当前架构里是**空转的防御分支**，留着是为了不让「将来重新产补丁」踩回原坑。
+    if (patches.length > 0) {
+      await this.commitChatState(patches, { isCurrent });
+    }
+
+    // F08 收益重放：收益从「锁外补丁」改为「持久借据的原子入账」，与上面的正文自提交
+    // **互不连坐** —— 正文补丁失败不影响收益入账，收益入账失败也不回滚已提交的正文。
+    assertCurrentTurn(isCurrent);
     await this.settlePendingMapIncome();
 
     return patches;

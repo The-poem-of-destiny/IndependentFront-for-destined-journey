@@ -32,6 +32,26 @@ import {
 } from '../../../src/core/content/content-source';
 import type { WorldBook, WorldBookEntry, WorkshopNote } from '../../../src/core/types/types';
 
+it('explicit split source expands ordinary and test-save content references without memory conversion', () => {
+  const packBook = book({
+    entries: [
+      entry({
+        uid: 101,
+        extra: { lore: { key: 'part-a', source: { parentKey: 'parent', legacyUid: 42, part: 0 } } },
+      }),
+      entry({
+        uid: 102,
+        extra: { lore: { key: 'part-b', source: { parentKey: 'parent', legacyUid: 42, part: 1 } } },
+      }),
+    ],
+  });
+  const notes: WorkshopNote[] = [];
+  expect(planSaveUidMigration([packBook], [], ['world_setting:42'], notes).expandedRewrite).toEqual(
+    { 'world_setting:42': [101, 102] },
+  );
+  expect(notes).toEqual([]);
+});
+
 // ── fixtures ──
 
 function minimalPack(): ContentPack {

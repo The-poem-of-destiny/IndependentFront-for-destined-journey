@@ -46,7 +46,6 @@ function mockConfig(overrides?: Partial<AgentConfig>): AgentConfig {
     apiEndpointId: 'ep1',
     model: 'test-model',
     enabled: true,
-    worldBookIds: [],
     temperature: 0.7,
     maxTokens: 4096,
     topP: 1,
@@ -864,11 +863,12 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
             selectiveLogic: 0,
             order: 1,
             position: 0,
+            extra: { lore: { audiences: ['story'] } },
           },
         ],
       },
     ];
-    const configs = [mockConfig({ agentId: 'story', worldBookIds: ['wb1'] })];
+    const configs = [mockConfig({ agentId: 'story' })];
     setPlaceholderGlobals(worldBooks, configs);
 
     const ctx = mockCtx({ userInput: '白曜城' });
@@ -893,6 +893,7 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
             selectiveLogic: 0,
             order: 1,
             position: 0,
+            extra: { lore: { audiences: ['story'] } },
           },
           {
             uid: 2,
@@ -904,11 +905,12 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
             selectiveLogic: 0,
             order: 2,
             position: 0,
+            extra: { lore: { audiences: ['story'] } },
           },
         ],
       },
     ];
-    const configs = [mockConfig({ agentId: 'story', worldBookIds: ['wb1'] })];
+    const configs = [mockConfig({ agentId: 'story' })];
     setPlaceholderGlobals(worldBooks, configs);
 
     const result = PLACEHOLDER_REGISTRY['LORE_BOOK'](mockCtx(), mockConfig({ agentId: 'story' }), {
@@ -936,11 +938,12 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
             selectiveLogic: 0,
             order: 1,
             position: 0,
+            extra: { lore: { audiences: ['story'] } },
           },
         ],
       },
     ];
-    const configs = [mockConfig({ agentId: 'story', worldBookIds: ['wb1'] })];
+    const configs = [mockConfig({ agentId: 'story' })];
     setPlaceholderGlobals(worldBooks, configs);
     resetPlaceholderGlobals();
 
@@ -970,6 +973,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
             selectiveLogic: 0,
             order: 1,
             position: 0,
+            extra: { lore: { audiences: ['story'] } },
           },
           {
             uid: 20,
@@ -981,6 +985,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
             selectiveLogic: 0,
             order: 2,
             position: 0,
+            extra: { lore: { audiences: ['story'] } },
           },
           {
             uid: 30,
@@ -992,6 +997,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
             selectiveLogic: 0,
             order: 3,
             position: 0,
+            extra: { lore: { audiences: ['story'] } },
           },
         ],
       },
@@ -1002,9 +1008,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
 
   beforeEach(() => {
     resetPlaceholderGlobals();
-    setPlaceholderGlobals(makeEjsBook(), [
-      mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] }),
-    ]);
+    setPlaceholderGlobals(makeEjsBook(), [mockConfig({ agentId: 'story' })]);
   });
 
   function ctxWithPass(): AgentContext {
@@ -1068,11 +1072,12 @@ describe('LORE_BOOK EJS 分层与求值', () => {
               selectiveLogic: 0,
               order: 1,
               position: 0,
+              extra: { lore: { audiences: ['story'] } },
             },
           ],
         },
       ],
-      [mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] })],
+      [mockConfig({ agentId: 'story' })],
     );
     const draft: Record<string, any> = {};
     const ctx = mockCtx({ ejsPass: { stats: {}, vars: draft, historyText: '' } });
@@ -1108,6 +1113,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
               selectiveLogic: 0,
               order: 1,
               position: 0,
+              extra: { lore: { audiences: ['story'] } },
             },
             {
               uid: 51,
@@ -1119,6 +1125,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
               selectiveLogic: 0,
               order: 2,
               position: 0,
+              extra: { lore: { audiences: ['story'] } },
             },
           ],
         },
@@ -1126,9 +1133,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
     }
 
     beforeEach(() => {
-      setPlaceholderGlobals(makeCounterBook(), [
-        mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] }),
-      ]);
+      setPlaceholderGlobals(makeCounterBook(), [mockConfig({ agentId: 'story' })]);
     });
 
     it('模板含 section=static + section=dynamic 各一次 → 计数器只加一次', () => {
@@ -1235,6 +1240,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
                 selectiveLogic: 0,
                 order: 1,
                 position: 0,
+                extra: { lore: { audiences: ['story'] } },
               },
               {
                 uid: 61,
@@ -1246,11 +1252,12 @@ describe('LORE_BOOK EJS 分层与求值', () => {
                 selectiveLogic: 0,
                 order: 2,
                 position: 0,
+                extra: { lore: { audiences: ['story'] } },
               },
             ],
           },
         ],
-        [mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] })],
+        [mockConfig({ agentId: 'story' })],
       );
       const draft: Record<string, any> = {};
       const ctx = mockCtx({ ejsPass: { stats: {}, vars: draft, historyText: '' } });
@@ -1284,11 +1291,12 @@ describe('LORE_BOOK EJS 分层与求值', () => {
                 selectiveLogic: 0,
                 order: 1,
                 position: 0,
+                extra: { lore: { audiences: ['story'] } },
               },
             ],
           },
         ],
-        [mockConfig({ agentId: 'story', worldBookIds: ['wb_ejs'] })],
+        [mockConfig({ agentId: 'story' })],
       );
       const draft: Record<string, any> = {};
       const ctx = mockCtx({ ejsPass: { stats: {}, vars: draft, historyText: '' } });

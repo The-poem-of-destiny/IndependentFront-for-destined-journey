@@ -21,6 +21,9 @@ import {
 import { setContentRegistry, getContentRegistry } from '../src/ui/stores/content-store';
 import { coerceMapPack, isEmptyMapPack } from '../src/core/map/map-pack';
 import { normalizePackRemoteAssets } from '../src/core/assets/remote-asset-catalogue';
+import type { WorldBook } from '../src/core/types/types';
+import { validateLoreProtocol } from '../src/core/content/lore-protocol';
+import { collectLoreRoutingIssues } from '../src/core/content/lore-routing';
 
 /**
  * 占位内容集能不能被现有解析器吃下（内容-引擎分离 §6 / T16）。
@@ -268,15 +271,18 @@ describe('占位内容 · 美化规则', () => {
 });
 
 describe('占位内容 · agent-config', () => {
-  // §6 规格：占位版固定 14 个 agent id（2026-10-02：char_gen + item_gen 合并为 entity_gen，14 → 13；
-  // C5a 移除 combat_enemy，13 → 12；2026-10-03 Phase 3 新增 daily_check，12 → 13；
-  // 2026-10-04 新增 prose_rewrite（正文润色侧链），13 → 14；
+  // §6 规格：占位版固定 15 个 agent id（2026-10-02 char_gen + item_gen → entity_gen、C5a 移除
+  // combat_enemy、Phase 3 加 daily_check、10-04 加 prose_rewrite、10-23 加 lore_select；
   // 与真实内容侧同名集由私有仓 CI 守）
-  it('agent id 恰好 14 个，一个不多一个不少', () => {
-    expect(Object.keys(agentConfigRaw.agents)).toHaveLength(14);
-    expect(Object.keys(agentConfigRaw.agents)).toContain('entity_gen');
-    expect(Object.keys(agentConfigRaw.agents)).toContain('daily_check');
-    expect(Object.keys(agentConfigRaw.agents)).toContain('prose_rewrite');
+  // 🔴 逐条点名，不只数数量：合并前后两边各有 14/15 条**不同**的清单，只断言长度会假绿。
+  it('agent id 恰好 15 个，一个不多一个不少', () => {
+    expect(Object.keys(agentConfigRaw.agents)).toHaveLength(15);
+    for (const id of ['entity_gen', 'lore_select', 'daily_check', 'prose_rewrite']) {
+      expect(agentConfigRaw.agents).toHaveProperty(id);
+    }
+    for (const gone of ['char_gen', 'item_gen', 'combat_enemy']) {
+      expect(agentConfigRaw.agents).not.toHaveProperty(gone);
+    }
   });
 
   it('每个 agent 的 systemPrompt 与 template 都非空（image_prompt 除外 —— 它的那份归方言）', () => {
@@ -298,18 +304,30 @@ describe('占位内容 · agent-config', () => {
     }
   });
 
-  it('worldBookIds 全部指向真实存在的占位世界书（悬空引用不报错，只是静默少注入一本）', () => {
-    const books = new Set(
-      readdirSync(join(REPO_ROOT, 'public', 'data', 'worldbooks'))
-        .filter((f) => f.endsWith('.json'))
-        .map((f) => f.slice(0, -'.json'.length)),
-    );
-    expect(books.size).toBeGreaterThan(0);
+  it('所有默认 Agent 均不再携带退役的世界书授权字段', () => {
     for (const [id, agent] of Object.entries(agentConfigRaw.agents)) {
-      for (const bookId of (agent.worldBookIds ?? []) as string[]) {
-        expect(books.has(bookId), `${id} 引用了不存在的世界书「${bookId}」`).toBe(true);
+      expect(agent, id).not.toHaveProperty('worldBookIds');
+      expect(agent, id).not.toHaveProperty('worldBookEnabled');
+    }
+  });
+
+  it('实际全部默认世界书显式声明 audiences，且通过公共路由校验', () => {
+    const folder = join(REPO_ROOT, 'public', 'data', 'worldbooks');
+    const books = readdirSync(folder)
+      .filter((file) => file.endsWith('.json'))
+      .map((file) => readJson(join(folder, file)) as WorldBook);
+    // 15 本内置书 + combat_extra（战斗沙盒协议 / 生成的叙事约定，2026-10-02 新增）
+    expect(books).toHaveLength(16);
+    for (const book of books) {
+      // 显式 [] 是合法的默认关闭；不能把它误判为缺声明。
+      expect(book.lore, book.id).toBeUndefined();
+      for (const entry of book.entries) {
+        // 显式 [] 是合法的默认关闭；不能把它误判为缺声明。
+        expect(Array.isArray(entry.extra?.lore?.audiences), `${book.id}#${entry.uid}`).toBe(true);
       }
     }
+    expect(validateLoreProtocol(books)).toEqual([]);
+    expect(collectLoreRoutingIssues(books, Object.keys(agentConfigRaw.agents))).toEqual([]);
   });
 
   it('story 挂占位预设：presetId 固定且以 placeholder- 前缀开头（D20 四态基线靠它区分）', () => {

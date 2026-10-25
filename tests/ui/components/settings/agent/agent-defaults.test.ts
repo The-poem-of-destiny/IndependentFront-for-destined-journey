@@ -15,8 +15,6 @@ import type { PresetItem } from '../../../../../src/ui/stores/settings-store';
 function settings(over: Partial<AgentSettingsEntry> = {}): AgentSettingsEntry {
   return {
     model: 'ep1',
-    worldBookEnabled: true,
-    worldBookIds: ['world_setting'],
     systemPrompt: '袋子里存着的旧提示词',
     template: '袋子里存着的旧模板',
     temperature: 1.2,
@@ -54,7 +52,7 @@ describe('buildAgentDefaultEntry — 非 story', () => {
     expect(e.preset).toBeNull();
   });
 
-  it('数值旋钮与世界书原样带过去', () => {
+  it('数值旋钮原样带过去；世界书读取范围不再随 Agent 默认保存', () => {
     const e = buildAgentDefaultEntry({
       agentId: 'char_gen',
       settings: settings(),
@@ -66,8 +64,9 @@ describe('buildAgentDefaultEntry — 非 story', () => {
     expect(e.temperature).toBe(1.2);
     expect(e.maxTokens).toBe(8192);
     expect(e.historyLayers).toBe(3);
-    expect(e.worldBookIds).toEqual(['world_setting']);
     expect(e.model).toBe('ep1');
+    expect(e).not.toHaveProperty('worldBookIds');
+    expect(e).not.toHaveProperty('worldBookEnabled');
   });
 
   it('草稿为空 → 存空串（而不是把袋子里的旧值漏出去）', () => {

@@ -5,11 +5,10 @@
  * `SettingsPage.vue` 的 script 里，于是想验「vars_update 到底该看见几个占位符」
  * 得先挂起整个设置页。搬成纯模块之后是一行 import 一行断言。
  *
- * 🔴 **这不是占位符的真源** —— 真源是引擎的 `placeholder-registry.ts`（谁在装配期
- *    真的被替换）。本表是**设置页的展示元数据**：颜色、中文说明、分类、以及
- *    「给哪个 Agent 显示」。两边会漂：引擎加了一个占位符而这里没加，UI 上就点不出来
- *    （但手打进模板仍然有效）；反过来这里多写一个，UI 会给出一个装配期不认的键。
- *    加占位符时两处都要动。
+ * 本表不是占位符的真源，只维护设置页展示元数据：颜色、中文说明、分类及 Agent 范围。
+ * 通用占位符由引擎 `placeholder-registry.ts` 注册；`LORE_CATALOG` 则由
+ * `agent-orchestrator.ts` 的 Story v2 资料选择器专用路径替换，不是通用 resolver。
+ * 新增展示项时须确认对应装配路径确实支持该键，并同步预览说明。
  */
 
 export interface PlaceholderBadge {
@@ -40,6 +39,12 @@ export const ALL_PLACEHOLDER_META: readonly PlaceholderBadge[] = [
     key: 'LORE_BOOK_DYNAMIC',
     color: '#4caf50',
     desc: '世界书动态区 — 含 EJS，装配时求值',
+    category: '世界',
+  },
+  {
+    key: 'LORE_CATALOG',
+    color: '#4caf50',
+    desc: '资料选择上下文 — 仅 lore_select / Story v2 专用装配；当前情境与目录元数据，不含条目正文',
     category: '世界',
   },
   { key: 'NARRATIVE', color: '#ab47bc', desc: '对话历史 — 最近 N 轮消息', category: '叙事' },
@@ -184,6 +189,7 @@ const CHAIN_ONLY: Record<string, readonly string[]> = {
  *    命中后会就地预解析）—— 所以这个按钮对 story 是真的有用，与 MAP_CONTEXT 的情况不同。
  */
 const AGENT_SCOPED: Record<string, readonly string[]> = {
+  lore_select: ['LORE_CATALOG'],
   request_dispatcher: ['MAP_CONTEXT', 'PLOT_THREAD_SURFACE', 'PLOT_CAST_PLAN'],
   story: ['RANDOM_EVENTS'],
   plot_pre_check: ['PLOT_THREAD_TURN'],

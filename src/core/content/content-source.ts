@@ -24,6 +24,7 @@
  * 设计: docs/planning/2026-08-05-content-engine-separation-design.md §4 / §5.1 / §5.2 / D8 / D17 / D19 / D20
  */
 
+import { validateLoreProtocol } from './lore-protocol';
 import { isMediaHashAvailable, hashMediaBytes } from '../assets/media-hash';
 import type {
   ContentPack,
@@ -253,6 +254,17 @@ export function validatePackOrThrow(pack: unknown): PackValidationNote[] {
         `formatVersion 必须是 ${CURRENT_PACK_FORMAT_VERSION}，实际是 ${JSON.stringify(pack.formatVersion)}`,
       ),
     );
+  }
+
+  if (pack.loreRoutingVersion !== undefined) {
+    if (pack.loreRoutingVersion !== 1)
+      notes.push(makeError('bad-lore-routing-version', '不支持的 loreRoutingVersion'));
+    else if (pack.worldBooks !== undefined)
+      notes.push(
+        ...validateLoreProtocol(pack.worldBooks).map((message) =>
+          makeError('bad-lore-routing', message),
+        ),
+      );
   }
 
   // packId / packVersion

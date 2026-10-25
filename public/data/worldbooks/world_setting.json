@@ -14,7 +14,23 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 100,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": [
+            "story",
+            "craft_gen",
+            "entity_gen",
+            "memory_summary",
+            "plot_post_check",
+            "plot_outline",
+            "request_dispatcher",
+            "vars_update",
+            "combat",
+            "lore_select"
+          ]
+        }
+      }
     },
     {
       "uid": 900002,
@@ -26,7 +42,23 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 110,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": [
+            "story",
+            "craft_gen",
+            "entity_gen",
+            "memory_summary",
+            "plot_post_check",
+            "plot_outline",
+            "request_dispatcher",
+            "vars_update",
+            "combat",
+            "lore_select"
+          ]
+        }
+      }
     },
     {
       "uid": 900003,
@@ -38,7 +70,23 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 120,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": [
+            "story",
+            "craft_gen",
+            "entity_gen",
+            "memory_summary",
+            "plot_post_check",
+            "plot_outline",
+            "request_dispatcher",
+            "vars_update",
+            "combat",
+            "lore_select"
+          ]
+        }
+      }
     },
     {
       "uid": 900004,
@@ -50,7 +98,23 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 130,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": [
+            "story",
+            "craft_gen",
+            "entity_gen",
+            "memory_summary",
+            "plot_post_check",
+            "plot_outline",
+            "request_dispatcher",
+            "vars_update",
+            "combat",
+            "lore_select"
+          ]
+        }
+      }
     }
   ],
   "builtIn": true

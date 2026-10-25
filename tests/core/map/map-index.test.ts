@@ -31,6 +31,7 @@ import {
   normalizeMapName,
   resolveDomainAnchor,
   resolveTileByLocation,
+  resolveLocationHierarchy,
   splitLocationSegments,
   type MapCompass,
   type MapDomainKind,
@@ -195,6 +196,52 @@ function neighborsOf(idx: MapIndex, tileId: number): [number, number][] {
 function domainRef(kind: MapDomainKind, id: string): MapDomainRef {
   return { kind, id };
 }
+
+describe('resolveLocationHierarchy', () => {
+  it('adds the named place ancestry without mutating the supplied path', () => {
+    expect(resolveLocationHierarchy(index(), 'Continent-Alpha Town-Inn')).toEqual([
+      'Inn',
+      'Alpha Town',
+      'North Vale',
+      'Northland',
+      'Continent',
+    ]);
+    expect(resolveLocationHierarchy(index(), 'Southmark-South Reach-Alpha')).toEqual([
+      'Alpha',
+      'North Vale',
+      'Northland',
+    ]);
+    expect(resolveLocationHierarchy(index(), 'Continent-Northland-Duchy-Alpha')).toEqual([
+      'Alpha',
+      'North Vale',
+      'Duchy',
+      'Northland',
+      'Continent',
+    ]);
+  });
+
+  it('never uses a country anchor or an unknown name to invent a province', () => {
+    expect(resolveLocationHierarchy(index(), 'Northland-Unknown')).toEqual([
+      'Unknown',
+      'Northland',
+    ]);
+    expect(resolveLocationHierarchy(index(), 'North Vale')).toEqual(['North Vale']);
+    expect(resolveLocationHierarchy(buildMapIndex(EMPTY_MAP_PACK), 'Continent-Alpha')).toEqual([
+      'Alpha',
+      'Continent',
+    ]);
+  });
+
+  it('uses id zero and the mid-tier country fallback, and reads a replaced map', () => {
+    expect(resolveLocationHierarchy(index(), 'Zulu')).toContain('North Vale');
+    expect(resolveLocationHierarchy(index(), 'Lima')).toContain('Southmark');
+    const changed = buildMapIndex({
+      ...FIXTURE,
+      tiles: FIXTURE.tiles.map((t) => (t.id === 1 ? { ...t, midTierId: 'north-b' } : t)),
+    });
+    expect(resolveLocationHierarchy(changed, 'Alpha')).toContain('North Ridge');
+  });
+});
 
 // ═══════════════════════════════════════════════════════════
 // buildMapIndex —— 索引形状

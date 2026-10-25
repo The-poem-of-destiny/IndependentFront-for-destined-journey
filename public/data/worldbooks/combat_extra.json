@@ -14,7 +14,12 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 130,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": ["entity_gen", "daily_check"]
+        }
+      }
     },
     {
       "uid": 901502,
@@ -26,7 +31,12 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 140,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": ["entity_gen", "daily_check"]
+        }
+      }
     },
     {
       "uid": 901503,
@@ -38,7 +48,12 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 150,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": ["entity_gen", "daily_check"]
+        }
+      }
     },
     {
       "uid": 901504,
@@ -50,7 +65,12 @@
       "keysecondary": [],
       "selectiveLogic": 0,
       "order": 160,
-      "position": 0
+      "position": 0,
+      "extra": {
+        "lore": {
+          "audiences": ["entity_gen", "daily_check"]
+        }
+      }
     }
   ],
   "builtIn": true

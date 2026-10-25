@@ -37,8 +37,14 @@ import {
   DEFAULT_IMAGE_MODEL,
 } from '@engine/image/image-defaults';
 import { FALLBACK_IMAGE_DIALECT } from '@engine/image/image-dialect';
+import { DEFAULT_LORE_HISTORY_MESSAGES } from '@engine/content/lore-activation';
 import { detach } from './db-write';
-import { migrateLegacyAgentOverrides } from './agent-settings';
+import {
+  LEGACY_AGENT_WORLDBOOK_STASH_KEY,
+  migrateLegacyAgentOverrides,
+  retireAgentWorldBookOverrides,
+  type LegacyAgentWorldBookStash,
+} from './agent-settings';
 import { migrateLegacyAgentMaps } from './agent-settings-migration';
 import { migrateImageSettings, normalizeImageSettings } from './image-settings-migration';
 import type { UiSettings } from './settings-types';
@@ -94,8 +100,8 @@ export interface PresetItem {
 // ===== Phase 8: Agent 项目默认配置 =====
 
 export interface AgentDefaultEntry {
-  worldBookEnabled: boolean;
-  worldBookIds: string[];
+  // 🪦 `worldBookEnabled` / `worldBookIds` 已退役（内容计划 §7.2）：旧内容包里若还有，
+  //    只被 game-pipeline 读来推「书 → 可读 Agent」兼容映射，不再是 Agent 默认配置的一部分。
   model: string;
   systemPrompt: string;
   presetId: string;
@@ -244,6 +250,7 @@ function getDefaults(): UiSettings {
     activeWorldBookId: null,
     worldBookDirty: false,
     allowEditBuiltInBooks: false, // 允许编辑内置世界书（默认只读保护）
+    loreHistoryMessages: DEFAULT_LORE_HISTORY_MESSAGES,
 
     // 剧情系统（新档默认值 — 捏人页初始化时读入，字段形状对齐 create-store / types.ts PlotSettings）
     plotMode: 'off',
@@ -289,6 +296,10 @@ function getDefaults(): UiSettings {
     // 开发者模式 —— 默认关闭。只控制诊断入口与原始技术细节；玩家可见的回合活动账本
     // 始终保留游戏语言，不随这个开关消失或变成控制台。
     developerMode: false,
+    // Story 上下文与记忆新模式（实验）—— 默认关闭；仅开发者模式不会连带开启它
+    storyContextV2Enabled: false,
+    // 新模式召回的原文粒度（D32）：默认整回合，开发者卡片里切换比较
+    storyRecallRawMode: 'turn',
 
     // 消息 & 系统事件可见性
     systemEventsVisible: true,
@@ -744,7 +755,26 @@ export const useSettingsStore = defineStore('settings', () => {
     // 用户真正改过的值指纹不匹配、原样保留。迁移幂等：第二次启动已无命中键。
     migrateLegacyAgentOverrides(settings.value);
 
-    // 预设播种（与 agent 覆写层无关，仍走这一支）。
+    // 内容计划 §7.2：Agent 世界书配置退役。指纹迁移已删掉等于旧默认的值，剩下的
+    // （玩家真改过的）移进暂存，只用于把玩家自建书的读取范围迁成条目级声明（worldbook-store
+    // 完成后清掉暂存；失败则下次启动重试）。运行时路由从此不读这两键。
+    // 暂存键刻意不在 UiSettings 上声明（应用代码不该读它），经宽袋子访问
+    const legacyBag = settings.value as unknown as Record<string, unknown>;
+    retireAgentWorldBookOverrides(legacyBag);
+    if (legacyBag[LEGACY_AGENT_WORLDBOOK_STASH_KEY]) {
+      void import('./worldbook-store')
+        .then(async ({ useWorldBookStore }) => {
+          const stash = legacyBag[LEGACY_AGENT_WORLDBOOK_STASH_KEY] as LegacyAgentWorldBookStash;
+          const ok = await useWorldBookStore().adoptLegacyAgentWorldBooks(stash);
+          if (ok) delete legacyBag[LEGACY_AGENT_WORLDBOOK_STASH_KEY];
+        })
+        .catch((err) => {
+          console.warn('[settings-store] 自建世界书读取范围迁移失败（下次启动重试）:', err);
+        });
+    }
+
+    // 预设播种（与 agent 覆写层无关，仍走这一支）：DB 空 → seed 出厂预设；
+    // DB 有同 id → 同步出厂 name（保留用户 prompts 编辑）
     //
     // 🔴 内容-引擎分离波 1 / D22：预设只写 Dexie，不再碰 `settings.presets` 镜像。
     //    （此前这里还同步写镜像 —— 镜像删除后那段是死代码。）响应式视图由

@@ -3,7 +3,8 @@
  *
  * 四组性质（每组都对应一条 D44 修正）：
  *   1. **修正 1：resolve 覆盖全部 12 键**（getAgentSettings 合默认层）—— 覆写 ?? 默认 ?? 兜底
- *   2. **修正 2：名册迭代改源** —— listConfiguredAgents/updateAgentWorldBookIds 用解析名册
+ *   2. **修正 2：名册迭代改源** —— listConfiguredAgents 用解析名册
+ *      （世界书两键已退役：retireAgentWorldBookOverrides / legacyStashBookAudiences）
  *   3. **修正 3：指纹迁移** —— migrateLegacyAgentOverrides 命中删除、未命中保留
  *   4. **修正 4：覆写制造面** —— resetAgentSettings/applyProjectDefaultToAgent 清覆写层
  *
@@ -22,7 +23,9 @@ import {
   patchAgentSettings,
   resetAgentSettings,
   resolveAgentLlmParams,
-  updateAgentWorldBookIds,
+  retireAgentWorldBookOverrides,
+  legacyStashBookAudiences,
+  LEGACY_AGENT_WORLDBOOK_STASH_KEY,
   type AgentDefaultsLayer,
 } from '../../../src/ui/stores/agent-settings';
 
@@ -82,16 +85,12 @@ describe('getAgentSettings —— 修正 1（合默认层）', () => {
     expect(got.maxTokens).toBe(AGENT_SETTINGS_DEFAULTS.maxTokens);
     expect(got.model).toBe('');
     expect(got.systemPrompt).toBe('');
-    expect(got.worldBookEnabled).toBe(false);
-    expect(got.worldBookIds).toEqual([]);
   });
 
   it('🔴 空覆写层 + 默认层 → 全部 12 键走默认层', () => {
     const layer: AgentDefaultsLayer = {
       story: {
         model: 'ep-default',
-        worldBookEnabled: true,
-        worldBookIds: ['world_setting', 'character'],
         systemPrompt: '默认提示词',
         template: '默认模板',
         temperature: 0.4,
@@ -105,8 +104,6 @@ describe('getAgentSettings —— 修正 1（合默认层）', () => {
     };
     const got = getAgentSettings(bag(), 'story', layer);
     expect(got.model).toBe('ep-default');
-    expect(got.worldBookEnabled).toBe(true);
-    expect(got.worldBookIds).toEqual(['world_setting', 'character']);
     expect(got.systemPrompt).toBe('默认提示词');
     expect(got.template).toBe('默认模板');
     expect(got.temperature).toBe(0.4);
@@ -129,14 +126,17 @@ describe('getAgentSettings —— 修正 1（合默认层）', () => {
     expect(got.systemPrompt).toBe('默认'); // 覆写层没给 → 默认层
   });
 
-  it('🔴 看门人：空覆写层 + 默认层 → story worldBookIds 非空（D44 修正 1 管线测试）', () => {
-    // 删 boot 播种后世界书唯一来源就是默认层 —— 不给默认层 = 全体 agent 静默失去世界书
-    const layer: AgentDefaultsLayer = {
-      story: { worldBookEnabled: true, worldBookIds: ['fated_core', 'character'] },
+  it('🔴 世界书两键已退役：覆写层或旧默认层里残留也不出现在解析结果里', () => {
+    // 读取范围只来自内容声明（lore.audiences），Agent 设置不再携带世界书清单
+    const b: Record<string, any> = {
+      agents: { story: { worldBookEnabled: true, worldBookIds: ['a'] } },
     };
-    const got = getAgentSettings(bag(), 'story', layer);
-    expect(got.worldBookEnabled).toBe(true);
-    expect(got.worldBookIds).toEqual(['fated_core', 'character']);
+    const layer = {
+      story: { worldBookEnabled: true, worldBookIds: ['fated_core'] },
+    } as unknown as AgentDefaultsLayer;
+    const got = getAgentSettings(b, 'story', layer);
+    expect(got).not.toHaveProperty('worldBookEnabled');
+    expect(got).not.toHaveProperty('worldBookIds');
   });
 
   it('🔴 historyLayers / historySlice 两层都没给 → undefined（不合默认）', () => {
@@ -149,12 +149,6 @@ describe('getAgentSettings —— 修正 1（合默认层）', () => {
     const b: Record<string, any> = { agents: { story: { historyLayers: 2 } } };
     const layer: AgentDefaultsLayer = { story: { historyLayers: 6 } };
     expect(getAgentSettings(b, 'story', layer).historyLayers).toBe(2);
-  });
-
-  it('worldBookIds 返回副本，改它不影响袋子', () => {
-    const b: Record<string, any> = { agents: { story: { worldBookIds: ['a'] } } };
-    getAgentSettings(b, 'story').worldBookIds.push('b');
-    expect(b.agents.story.worldBookIds).toEqual(['a']);
   });
 
   it('每个 agentId 各自独立', () => {
@@ -363,66 +357,130 @@ describe('listConfiguredAgents —— 修正 2（解析名册）', () => {
   });
 });
 
-describe('updateAgentWorldBookIds —— 修正 2（解析名册投影）', () => {
-  it('投影出覆写层 agent 的清单交给变换，再写回条目', () => {
+// ═══════════════════════════════════════════════════════════════
+// Agent 世界书配置退役（内容计划 §7.2）
+// ═══════════════════════════════════════════════════════════════
+
+describe('retireAgentWorldBookOverrides —— 覆写层世界书两键移入暂存', () => {
+  it('🔴 两键搬进暂存，其余字段一个不碰', () => {
     const b: Record<string, any> = {
       agents: {
-        story: { worldBookIds: ['a'], temperature: 1.5 },
-        char_gen: { worldBookIds: [] },
+        story: { worldBookEnabled: true, worldBookIds: ['my_book'], temperature: 1.5 },
       },
     };
-    updateAgentWorldBookIds(b, (current) => {
-      expect(current).toEqual({ story: ['a'], char_gen: [] });
-      return Object.fromEntries(Object.entries(current).map(([k, v]) => [k, [...v, 'ws_1']]));
+    const retired = retireAgentWorldBookOverrides(b);
+    expect(retired).toEqual(['story']);
+    expect(b.agents.story).toEqual({ temperature: 1.5 });
+    expect(b[LEGACY_AGENT_WORLDBOOK_STASH_KEY]).toEqual({
+      story: { worldBookEnabled: true, worldBookIds: ['my_book'] },
     });
-    expect(b.agents.story.worldBookIds).toEqual(['a', 'ws_1']);
-    expect(b.agents.char_gen.worldBookIds).toEqual(['ws_1']);
-    // 🔴 只动 worldBookIds，其余字段一个不碰
-    expect(b.agents.story.temperature).toBe(1.5);
   });
 
-  it('🔴 传默认层：覆写层空的 agent 也进投影（工坊 grant 达全名册的看门人）', () => {
-    const layer: AgentDefaultsLayer = {
-      story: { worldBookIds: ['world_setting'] },
-      char_gen: { worldBookIds: ['world_setting'] },
-      item_gen: { worldBookIds: [] },
-    };
-    const b: Record<string, any> = {}; // 覆写层完全空
-    let seen: Record<string, string[]> = {};
-    updateAgentWorldBookIds(
-      b,
-      (current) => {
-        seen = current;
-        // grant ws_1 给全部
-        return Object.fromEntries(Object.entries(current).map(([k, v]) => [k, [...v, 'ws_1']]));
+  it('搬空的覆写条目整条删除（不留空壳）', () => {
+    const b: Record<string, any> = {
+      agents: {
+        char_gen: { worldBookEnabled: false, worldBookIds: [] },
+        item_gen: { model: 'pool-x' },
       },
-      layer,
-    );
-    // 三个 agent 全进投影（含覆写层没的 item_gen）
-    expect(Object.keys(seen).sort()).toEqual(['char_gen', 'item_gen', 'story']);
-    expect(seen.story).toEqual(['world_setting']); // 默认层给的清单
-    expect(seen.item_gen).toEqual([]); // 默认层空
-    // grant 写回：全部 agent 都拿到 ws_1
-    expect(b.agents.story.worldBookIds).toEqual(['world_setting', 'ws_1']);
-    expect(b.agents.char_gen.worldBookIds).toEqual(['world_setting', 'ws_1']);
-    expect(b.agents.item_gen.worldBookIds).toEqual(['ws_1']);
-  });
-
-  it('没有 worldBookIds 的覆写条目投影成空数组', () => {
-    const b: Record<string, any> = { agents: { story: { model: 'ep' } } };
-    updateAgentWorldBookIds(b, (current) => {
-      expect(current).toEqual({ story: [] });
-      return current;
+    };
+    expect(retireAgentWorldBookOverrides(b)).toEqual(['char_gen']);
+    expect('char_gen' in b.agents).toBe(false);
+    expect(b.agents.item_gen).toEqual({ model: 'pool-x' });
+    expect(b[LEGACY_AGENT_WORLDBOOK_STASH_KEY]).toEqual({
+      char_gen: { worldBookEnabled: false, worldBookIds: [] },
     });
   });
 
-  it('不传默认层 + 一个 agent 都没配过 → 变换收到空对象，不建结构', () => {
-    const b: Record<string, any> = {};
-    updateAgentWorldBookIds(b, (current) => {
-      expect(current).toEqual({});
-      return current;
+  it('只有一键时只搬那一键；非字符串 id 被滤掉', () => {
+    const b: Record<string, any> = {
+      agents: { story: { worldBookIds: ['a', 42, 'b'] }, vars_update: { worldBookEnabled: true } },
+    };
+    retireAgentWorldBookOverrides(b);
+    expect(b[LEGACY_AGENT_WORLDBOOK_STASH_KEY]).toEqual({
+      story: { worldBookIds: ['a', 'b'] },
+      vars_update: { worldBookEnabled: true },
     });
-    expect(b.agents).toBeUndefined();
+  });
+
+  it('幂等：第二次运行无可移项，暂存不变', () => {
+    const b: Record<string, any> = {
+      agents: { story: { worldBookEnabled: true, worldBookIds: ['a'], model: 'ep' } },
+    };
+    retireAgentWorldBookOverrides(b);
+    const stashAfterFirst = structuredClone(b[LEGACY_AGENT_WORLDBOOK_STASH_KEY]);
+    expect(retireAgentWorldBookOverrides(b)).toEqual([]);
+    expect(b[LEGACY_AGENT_WORLDBOOK_STASH_KEY]).toEqual(stashAfterFirst);
+    expect(b.agents.story).toEqual({ model: 'ep' });
+  });
+
+  it('并入已有暂存：别的 Agent 保留，同一 Agent 按键覆盖', () => {
+    const b: Record<string, any> = {
+      [LEGACY_AGENT_WORLDBOOK_STASH_KEY]: {
+        char_gen: { worldBookEnabled: true, worldBookIds: ['old'] },
+        story: { worldBookEnabled: true, worldBookIds: ['old_story'] },
+      },
+      agents: { story: { worldBookIds: ['new_story'] } },
+    };
+    expect(retireAgentWorldBookOverrides(b)).toEqual(['story']);
+    expect(b[LEGACY_AGENT_WORLDBOOK_STASH_KEY]).toEqual({
+      char_gen: { worldBookEnabled: true, worldBookIds: ['old'] },
+      story: { worldBookEnabled: true, worldBookIds: ['new_story'] },
+    });
+  });
+
+  it('没有覆写层 / 覆写层里没有两键 → 返回空、不建暂存', () => {
+    const empty = bag();
+    expect(retireAgentWorldBookOverrides(empty)).toEqual([]);
+    expect(LEGACY_AGENT_WORLDBOOK_STASH_KEY in empty).toBe(false);
+
+    const b: Record<string, any> = { agents: { story: { temperature: 0.3 } } };
+    expect(retireAgentWorldBookOverrides(b)).toEqual([]);
+    expect(LEGACY_AGENT_WORLDBOOK_STASH_KEY in b).toBe(false);
+    expect(b.agents.story).toEqual({ temperature: 0.3 });
+  });
+});
+
+describe('legacyStashBookAudiences —— 暂存 → 书级读取范围', () => {
+  it('按书收拢 Agent，去重', () => {
+    expect(
+      legacyStashBookAudiences({
+        story: { worldBookEnabled: true, worldBookIds: ['a', 'b', 'a'] },
+        char_gen: { worldBookEnabled: true, worldBookIds: ['b'] },
+      }),
+    ).toEqual({ a: ['story'], b: ['story', 'char_gen'] });
+  });
+
+  it('🔴 跳过当年关着世界书开关的 Agent（他们本来就读不到）', () => {
+    expect(
+      legacyStashBookAudiences({
+        story: { worldBookEnabled: false, worldBookIds: ['a'] },
+        char_gen: { worldBookEnabled: true, worldBookIds: ['a'] },
+      }),
+    ).toEqual({ a: ['char_gen'] });
+  });
+
+  it('开关缺席（只暂存了清单）按开着算', () => {
+    expect(legacyStashBookAudiences({ story: { worldBookIds: ['a'] } })).toEqual({
+      a: ['story'],
+    });
+  });
+
+  it('undefined / 空暂存 → 空映射', () => {
+    expect(legacyStashBookAudiences(undefined)).toEqual({});
+    expect(legacyStashBookAudiences({})).toEqual({});
+  });
+
+  it('与 retireAgentWorldBookOverrides 串起来用', () => {
+    const b: Record<string, any> = {
+      agents: {
+        story: { worldBookEnabled: true, worldBookIds: ['my_book'] },
+        vars_update: { worldBookEnabled: false, worldBookIds: ['my_book'] },
+      },
+    };
+    retireAgentWorldBookOverrides(b);
+    expect(legacyStashBookAudiences(b[LEGACY_AGENT_WORLDBOOK_STASH_KEY])).toEqual({
+      my_book: ['story'],
+    });
   });
 });
 

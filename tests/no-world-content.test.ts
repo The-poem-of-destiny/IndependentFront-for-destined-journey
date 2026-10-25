@@ -8,7 +8,7 @@
  *    词表是 floor 不是 ceiling（数值 lore 抓不到，D6）；专名本身已随公开卡片公开，
  *    词表入公开仓不构成新泄露。
  * ② **体量轴**：`public/data/worldbooks/*.json` 单本 ≤10 条 / 全集 ≤150 条、
- *    `reference/` 目录不存在、13 agent id 齐 + 各 systemPrompt 非空 +
+ *    `reference/` 目录不存在、15 agent id 齐 + 各 systemPrompt 非空 +
  *    `agents.story.preset.settings.prompts[]` 非空。
  *
  * 🔴 守门测试自身在白名单里（它必须能提到专名才能断言）；占位 agent-config 的
@@ -181,13 +181,16 @@ describe('② 体量轴：占位 agent-config 规格（§6 / D32）', () => {
     >;
   };
 
-  it('14 个 agent id 齐（2026-10-02：char_gen + item_gen 合并为 entity_gen，14 → 13；C5a 移除 combat_enemy，13 → 12；2026-10-03 Phase 3 新增 daily_check，12 → 13；2026-10-04 新增 prose_rewrite，13 → 14）', () => {
-    expect(Object.keys(agentConfig.agents)).toHaveLength(14);
-    expect(Object.keys(agentConfig.agents)).toContain('entity_gen');
-    expect(Object.keys(agentConfig.agents)).toContain('daily_check');
-    expect(Object.keys(agentConfig.agents)).toContain('prose_rewrite');
-    expect(Object.keys(agentConfig.agents)).not.toContain('char_gen');
-    expect(Object.keys(agentConfig.agents)).not.toContain('item_gen');
+  // 🔴 数量相同 ≠ 成员相同：合并前两边都是 15/14 条不同的清单，所以这条用例除了数量，
+  //    必须逐条点名（数量断言单独存在时，换掉一条 agent 也照样绿）。
+  it('15 个 agent id 齐（entity_gen 取代 char_gen + item_gen；含资料选择器 / daily_check / prose_rewrite；combat_enemy 已随 v3 内核退役）', () => {
+    expect(Object.keys(agentConfig.agents)).toHaveLength(15);
+    for (const id of ['entity_gen', 'lore_select', 'daily_check', 'prose_rewrite']) {
+      expect(Object.keys(agentConfig.agents)).toContain(id);
+    }
+    for (const gone of ['char_gen', 'item_gen', 'combat_enemy']) {
+      expect(Object.keys(agentConfig.agents)).not.toContain(gone);
+    }
   });
 
   it('各 agent systemPrompt 非空（image_prompt 除外 —— 它那份归方言，C5）', () => {

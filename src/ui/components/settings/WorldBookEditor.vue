@@ -40,6 +40,36 @@
       >
     </div>
 
+    <!-- 读取范围（内容计划 §3.2）：自建书在这里声明哪些 Agent 能读；内容包的书由内容声明 -->
+    <fieldset class="audience-panel">
+      <legend>读取范围</legend>
+      <template v-if="audienceEditable">
+        <p class="audience-hint">
+          勾选能读取本书的 Agent（写入每个条目的读取范围）。没有勾选任何 Agent 时，本书不会注入。
+        </p>
+        <div class="audience-grid">
+          <label v-for="agent in AUDIENCE_AGENTS" :key="agent.id" class="audience-option">
+            <input
+              type="checkbox"
+              :checked="bookAudiences.includes(agent.id)"
+              :aria-label="`允许${agent.name}读取本书`"
+              @change="toggleAudience(agent.id)"
+            />
+            <span>{{ agent.name }}</span>
+          </label>
+        </div>
+      </template>
+      <p v-else class="audience-hint">
+        {{
+          bookAudiences.length > 0
+            ? `由内容声明：${bookAudiences.map(agentDisplayName).join('、')}`
+            : scopeDeclared
+              ? '由内容声明：不注入任何 Agent'
+              : '未声明读取范围（不会注入任何 Agent）'
+        }}
+      </p>
+    </fieldset>
+
     <!-- 空状态（全站唯一一套 `.empty-tab`，见 styles/utilities.css） -->
     <div v-if="sortedEntries.length === 0" class="empty-tab">
       <i class="fa-solid fa-book-open empty-tab-icon" aria-hidden="true"></i>
@@ -191,6 +221,25 @@
           </label>
         </div>
 
+        <fieldset class="audience-panel">
+          <legend>本条目的读取范围</legend>
+          <p class="audience-hint">
+            勾选能读取本条目的 Agent。没有勾选任何 Agent 时，本条目不会注入。
+          </p>
+          <div class="audience-grid">
+            <label v-for="agent in AUDIENCE_AGENTS" :key="agent.id" class="audience-option">
+              <input
+                type="checkbox"
+                :checked="editForm.audiences.includes(agent.id)"
+                :disabled="readonly"
+                :aria-label="`允许${agent.name}读取本条`"
+                @change="toggleEditAudience(agent.id)"
+              />
+              <span>{{ agent.name }}</span>
+            </label>
+          </div>
+        </fieldset>
+
         <label class="form-label" for="edit-content">内容 (Markdown)</label>
         <textarea
           id="edit-content"
@@ -215,6 +264,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import type { WorldBook, WorldBookEntry } from '@engine/types/types';
+import { AGENT_LIST, agentDisplayName } from './agent/agent-list';
+
+/** 可勾选的读取方（战斗与出图侧链不读玩家自建书，不列） */
+const AUDIENCE_AGENTS = AGENT_LIST.filter(
+  (a) => a.id !== 'combat' && a.id !== 'combat_enemy' && a.id !== 'memory_recall',
+);
 
 const editNameInput = ref<HTMLInputElement | null>(null);
 
@@ -240,6 +295,7 @@ const editForm = ref({
   selectiveLogic: 0 as number,
   order: 100,
   content: '',
+  audiences: [] as string[],
 });
 
 // ===== Computed =====
@@ -248,7 +304,43 @@ const sortedEntries = computed(() => {
   return [...entries.value].sort((a, b) => a.order - b.order);
 });
 
+/** 本书条目读取范围的并集；面板对全体条目统一写入条目级 `extra.lore.audiences` */
+const bookAudiences = computed(() => {
+  const set = new Set<string>();
+  for (const entry of props.book.entries) {
+    for (const id of entry.extra?.lore?.audiences ?? []) set.add(id);
+  }
+  return [...set];
+});
+const scopeDeclared = computed(() =>
+  props.book.entries.some((entry) => entry.extra?.lore?.audiences !== undefined),
+);
+/** 只有玩家自建书可在这里改：内置书与工坊书的范围来自内容声明 */
+const audienceEditable = computed(
+  () =>
+    !props.readonly && props.book.builtIn !== true && props.book.partition !== 'creative_workshop',
+);
+
+function toggleAudience(agentId: string) {
+  const next = bookAudiences.value.includes(agentId)
+    ? bookAudiences.value.filter((id) => id !== agentId)
+    : [...bookAudiences.value, agentId];
+  // 面板是「本书」口径：统一写进每个条目的条目级读取范围（不再有书级 audiences 字段）。
+  entries.value = entries.value.map((entry) => ({
+    ...entry,
+    extra: { ...(entry.extra ?? {}), lore: { ...(entry.extra?.lore ?? {}), audiences: [...next] } },
+  }));
+  saveBook();
+}
+
 // ===== Methods =====
+
+function toggleEditAudience(agentId: string) {
+  const list = editForm.value.audiences;
+  editForm.value.audiences = list.includes(agentId)
+    ? list.filter((id) => id !== agentId)
+    : [...list, agentId];
+}
 
 function markDirty() {
   // automatic save via watch
@@ -286,6 +378,9 @@ function addEntry() {
     selectiveLogic: 0,
     order: entries.value.length > 0 ? Math.max(...entries.value.map((e) => e.order)) + 10 : 100,
     position: 0,
+    extra: {
+      lore: { audiences: bookAudiences.value.length > 0 ? [...bookAudiences.value] : ['story'] },
+    },
   };
   entries.value.push(newEntry);
   saveBook();
@@ -301,6 +396,8 @@ async function editEntry(idx: number) {
     selectiveLogic: entry.selectiveLogic,
     order: entry.order,
     content: entry.content,
+    // 未声明时以本书当前范围起手，保存后即为该条目的显式声明
+    audiences: entry.extra?.lore?.audiences ?? [...bookAudiences.value],
   };
   await nextTick();
   editNameInput.value?.focus();
@@ -321,6 +418,10 @@ function saveEdit() {
     entry.selectiveLogic = editForm.value.selectiveLogic as 0 | 1 | 2 | 3;
     entry.order = editForm.value.order;
     entry.content = editForm.value.content;
+    entry.extra = {
+      ...(entry.extra ?? {}),
+      lore: { ...(entry.extra?.lore ?? {}), audiences: [...editForm.value.audiences] },
+    };
     saveBook();
   }
   editingIndex.value = null;
@@ -378,6 +479,42 @@ watch(
 </script>
 
 <style scoped>
+.audience-panel {
+  margin: 0 0 var(--theme-spacing-md);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md) var(--theme-spacing-md);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+}
+.audience-panel legend {
+  padding: 0 var(--theme-spacing-xs);
+  color: var(--theme-text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.audience-hint {
+  margin: 0 0 var(--theme-spacing-sm);
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
+}
+.audience-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: var(--theme-spacing-xs) var(--theme-spacing-md);
+}
+.audience-option {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-xs);
+  min-height: 44px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.audience-option input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--theme-primary);
+}
 /* ═══════════════════════════════════════
    世界书条目编辑器
    使用主题变量，支持所有主题

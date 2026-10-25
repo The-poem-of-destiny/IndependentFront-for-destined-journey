@@ -1,9 +1,51 @@
 <script setup lang="ts">
 /** 开发者模式分区 —— 单一开关 + 清晰的诊断边界。 */
+import { computed, ref, watch } from 'vue';
 import AppCard from '../shared/AppCard.vue';
 import { useSettingsStore } from '../../stores/settings-store';
+import { useGameStore } from '../../stores/game-store';
+import { useUIStore } from '../../stores/ui-store';
+import { decideStoryContextAdmission } from '@engine/story/story-context-mode';
 
 const s = useSettingsStore().settings;
+const game = useGameStore();
+const ui = useUIStore();
+
+function updateLoreHistoryMessages(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const count = input.valueAsNumber;
+  if (!Number.isSafeInteger(count) || count < 0) {
+    if (event.type === 'input') return;
+    input.value = String(s.loreHistoryMessages);
+    ui.toast('检索历史消息数必须是 0 或正整数', 'warning');
+    return;
+  }
+  s.loreHistoryMessages = count;
+}
+
+/**
+ * 回合进行中不许切换 Story 模式（T39）：一个回合在开跑时就固定了模式，
+ * 这里把开关锁住，免得玩家以为切换对正在生成的这一轮生效。
+ */
+const storyModeLocked = computed(() => game.isGenerating);
+
+/**
+ * 切换模式后，当前打开的存档若不再被准入（关掉开关时的测试档 / 打开开关时的普通档），
+ * 立即退出它（计划 P6）：清掉会话投影，并把「游戏页」从返回历史里拿掉 ——
+ * 否则点返回会回到一个这个模式下不能继续的存档。游戏页重新挂载时的准入检查仍是兜底。
+ */
+const exitedSaveName = ref('');
+watch(
+  () => s.storyContextV2Enabled,
+  (enabled) => {
+    const save = game.activeSave;
+    if (!save || decideStoryContextAdmission(save, enabled === true).ok) return;
+    exitedSaveName.value = save.name ?? '';
+    game.clearActive();
+    ui.activeSaveId = null;
+    ui.viewHistory = ui.viewHistory.filter((view) => view !== 'game');
+  },
+);
 </script>
 
 <template>
@@ -43,6 +85,103 @@ const s = useSettingsStore().settings;
           <span class="toggle-slider"></span>
         </label>
       </div>
+    </AppCard>
+
+    <AppCard
+      padding="md"
+      class="developer-mode-card"
+      :class="{ 'is-enabled': s.storyContextV2Enabled }"
+    >
+      <div class="developer-toggle-row story-mode-header">
+        <div class="developer-copy">
+          <div class="developer-title-row">
+            <h4>Story 上下文与记忆新模式</h4>
+            <span class="developer-state" :class="{ 'is-enabled': s.storyContextV2Enabled }">
+              <i
+                :class="s.storyContextV2Enabled ? 'fa-solid fa-flask' : 'fa-solid fa-lock'"
+                aria-hidden="true"
+              ></i>
+              {{ s.storyContextV2Enabled ? '已开启' : '已关闭' }}
+            </span>
+          </div>
+          <p id="story-context-v2-help" class="card-desc">
+            独立实验功能。开启后，新建存档会永久标记为「测试方案」，使用新的上下文与记忆流程。
+          </p>
+        </div>
+
+        <label class="toggle-label developer-toggle">
+          <input
+            v-model="s.storyContextV2Enabled"
+            type="checkbox"
+            role="switch"
+            class="toggle-input"
+            aria-label="Story 上下文与记忆新模式"
+            aria-describedby="story-context-v2-help"
+            :disabled="storyModeLocked"
+          />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <p class="story-mode-boundary">测试存档仅在开启时可用，普通存档仅在关闭时可用。</p>
+
+      <div v-if="s.storyContextV2Enabled" class="story-settings">
+        <label class="form-label story-field">
+          <span>召回原文粒度</span>
+          <select
+            v-model="s.storyRecallRawMode"
+            class="form-input"
+            aria-describedby="story-recall-raw-help"
+          >
+            <option value="turn">整回合</option>
+            <option value="snippet">相关片段加前后文</option>
+          </select>
+          <span id="story-recall-raw-help" class="form-hint">
+            整回合保留完整输入与正文；片段只取相关段落及前后各一段。
+          </span>
+        </label>
+        <label class="form-label story-field">
+          <span>世界书检索历史消息数</span>
+          <input
+            :value="s.loreHistoryMessages"
+            type="number"
+            min="0"
+            step="1"
+            class="form-input"
+            aria-label="世界书检索历史消息数"
+            aria-describedby="lore-history-help"
+            @input="updateLoreHistoryMessages"
+            @change="updateLoreHistoryMessages"
+          />
+          <span id="lore-history-help" class="form-hint">
+            默认 6 条玩家 / AI 消息，0 仅看当前输入。修改后下一轮生效。
+          </span>
+        </label>
+      </div>
+
+      <details class="story-details">
+        <summary>模式说明与上下文规则</summary>
+        <div class="story-details-copy">
+          <p>
+            正文窗口仍由正文 Agent
+            的「历史层数」控制。世界书关键词激活与资料选择共用检索历史消息数；调大可参考更多历史，也会增加资料选择的输入。
+          </p>
+          <p>
+            记忆总结使用内置提示词，每回合先判断事件是否结束并归档，再写短期摘要；归档进入长期记忆总览。召回沿用「设置
+            → 记忆」的 LLM / Embedding 模式，读取摘要、事件档案与原文。
+          </p>
+          <p>
+            固定资料进入第 1 区；区域背景按当前地理路径匹配，进入第 3 区；本轮资料由独立的
+            lore_select Agent 筛选与有限补充后进入第 5
+            区。关闭模式后普通存档沿用旧流程，内容包更新不会随开关回退。
+          </p>
+        </div>
+      </details>
+      <p v-if="storyModeLocked" class="story-mode-status" role="status">
+        正在生成，本回合结束后才能切换模式。
+      </p>
+      <p v-if="exitedSaveName" class="story-mode-status" role="status">
+        已退出存档「{{ exitedSaveName }}」：它不能在当前模式下继续，请从存档列表重新选择。
+      </p>
     </AppCard>
 
     <AppCard padding="md">
@@ -114,6 +253,78 @@ const s = useSettingsStore().settings;
 }
 
 .developer-copy .card-desc {
+  margin: 0;
+}
+
+.story-mode-boundary,
+.story-mode-status {
+  margin: var(--theme-spacing-sm) 0 0;
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.story-mode-header {
+  align-items: flex-start;
+}
+
+.story-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--theme-spacing-xl);
+  margin-top: var(--theme-spacing-lg);
+  padding-top: var(--theme-spacing-lg);
+  border-top: 1px solid var(--theme-card-border);
+}
+
+.story-field {
+  min-width: 0;
+  gap: var(--theme-spacing-sm);
+}
+
+.story-field .form-input {
+  box-sizing: border-box;
+  min-height: 2.5rem;
+}
+
+.story-field .form-hint {
+  margin: 0;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.story-details {
+  margin-top: var(--theme-spacing-lg);
+  padding-top: var(--theme-spacing-md);
+  border-top: 1px solid var(--theme-card-border);
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.65;
+}
+
+.story-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--theme-text-secondary);
+}
+
+.story-details summary:hover {
+  color: var(--theme-primary);
+}
+
+.story-details summary:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: var(--theme-spacing-xs);
+  border-radius: var(--theme-radius-sm);
+}
+
+.story-details-copy {
+  display: grid;
+  gap: var(--theme-spacing-sm);
+  margin-top: var(--theme-spacing-md);
+}
+
+.story-details-copy p {
   margin: 0;
 }
 
@@ -212,6 +423,11 @@ const s = useSettingsStore().settings;
 @media (max-width: 640px) {
   .developer-toggle-row {
     align-items: flex-start;
+  }
+
+  .story-settings {
+    grid-template-columns: 1fr;
+    gap: var(--theme-spacing-lg);
   }
 }
 

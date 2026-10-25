@@ -30,15 +30,43 @@ describe('ALL_PLACEHOLDER_META', () => {
     }
   });
 
-  it('🔴 每一项在引擎注册表里都真的有 resolver（「加占位符两处都要动」的那条闸门）', () => {
-    // 反方向刻意不测：引擎有、目录没有是**可接受**的状态（SKILL_STATE / QUEST_STATE 就是——
-    // 手打进模板仍然有效，只是面板上点不出来）。反过来才是缺陷：目录多写一个键，
-    // UI 会给出一个装配期不认的占位符，而它渲染出来永远是空串。
-    for (const p of ALL_PLACEHOLDER_META) {
+  it('除资料选择器专用键外，每一项都有通用 resolver', () => {
+    // LORE_CATALOG 由 orchestrator 专用路径替换；其他展示项必须有通用 resolver。
+    // 反向允许引擎已注册、UI 尚未展示的键。
+    for (const p of ALL_PLACEHOLDER_META.filter((p) => p.key !== 'LORE_CATALOG')) {
       expect(typeof PLACEHOLDER_REGISTRY[p.key], `引擎注册表缺 ${p.key}`).toBe('function');
     }
   });
 
+  it('LORE_CATALOG 明确为专用上下文而非条目正文或通用 resolver', () => {
+    const meta = ALL_PLACEHOLDER_META.find((p) => p.key === 'LORE_CATALOG');
+    expect(meta?.desc).toContain('lore_select / Story v2 专用装配');
+    expect(meta?.desc).toContain('当前情境与目录元数据');
+    expect(meta?.desc).toContain('不含条目正文');
+    expect(PLACEHOLDER_REGISTRY.LORE_CATALOG).toBeUndefined();
+  });
+
+  it('LORE_CATALOG 按 Agent 定向，仅给 lore_select 显示按钮', () => {
+    expect(keysFor('lore_select')).toContain('LORE_CATALOG');
+    expect(keysFor('lore_select')).toHaveLength(13);
+    for (const agentId of [
+      'story',
+      'request_dispatcher',
+      'vars_update',
+      'memory_recall',
+      'memory_summary',
+      'plot_pre_check',
+      'plot_post_check',
+      'craft_gen',
+      'char_gen',
+      'item_gen',
+      'combat',
+      'combat_enemy',
+      '未来的新_agent',
+    ]) {
+      expect(keysFor(agentId), agentId).not.toContain('LORE_CATALOG');
+    }
+  });
   it('同一 category 用同一个颜色（配色是按分类给的，不是随机取的）', () => {
     const byCategory = new Map<string, Set<string>>();
     for (const p of ALL_PLACEHOLDER_META) {

@@ -41,6 +41,9 @@ import MiniPlayer from './MiniPlayer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
 import GameMenu from './GameMenu.vue';
 import { hasOpenDialog } from '../../lib/modal-focus';
+import { getSave } from '@engine/persistence/database';
+import { decideStoryContextAdmission } from '@engine/story/story-context-mode';
+import { storyContextRejectionMessage } from '../../lib/story-context-admission';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -101,6 +104,19 @@ onMounted(async () => {
       console.log('[GamePage] loading save...');
       await waitForGameSaveIdle(requestedSaveId);
       if (!ownsPage()) return;
+      // Story 上下文模式准入（计划 §11.3）：先读存档行判定，再走 loadSave ——
+      // loadSave 会做进度归一化写回，被拒的存档不该有任何一次写入。
+      // 设置页关掉新模式后返回游戏页也会走到这里：测试档在此被退回首页。
+      const admission = decideStoryContextAdmission(
+        await getSave(requestedSaveId),
+        s.storyContextV2Enabled === true,
+      );
+      if (!ownsPage()) return;
+      if (!admission.ok) {
+        ui.toast(storyContextRejectionMessage(admission.reason), 'warning', 6000);
+        ui.navigate('home');
+        return;
+      }
       if (!(await game.loadSave(requestedSaveId)) || !ownsPage()) return;
       // API endpoint construction is synchronous, so hydrate/migrate its secrets before creating it.
       await settings.initApiSecrets();
@@ -375,7 +391,7 @@ async function handleRetry(messageId: string) {
 }
 
 function handleStop() {
-  pipeline?.abort();
+  if (pipeline?.abort()) cancelStreamingPreview();
 }
 
 // ⚔️ C6 结算「继续」：pipeline 终局落定后把玩家输入推进 store，这里消费它并作为
