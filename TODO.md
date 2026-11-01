@@ -7,6 +7,8 @@
 
 ## 待办
 
+- [ ] **Characters v1 与提示词集成** —— 对齐正式提示词／预设与角色系统 v1 的结构化更新、初始经历和重要度规则。参考 `docs/reference/character-system.md`。
+
 - [ ] 实验性上下文方案的总结系统还需要微调一些，现在太详细了
 
 - [ ] **战斗协议沙盒 真机验收** —— v3 内核与双角色（`combat` + `combat_enemy`）已随 Phase 2
