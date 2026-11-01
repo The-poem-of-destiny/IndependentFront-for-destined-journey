@@ -167,6 +167,8 @@ const CHARACTER_BASE_EXCLUDED: ReadonlySet<string> = new Set([
   'inventory',
   'statusEffects',
   'customFields',
+  'definition',
+  'introducedBy',
 ]);
 
 /** 资源 scope 的字段（与 CharacterState 资源区一一对应） */

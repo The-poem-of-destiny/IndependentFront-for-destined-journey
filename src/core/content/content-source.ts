@@ -312,7 +312,7 @@ export function validatePackOrThrow(pack: unknown): PackValidationNote[] {
   }
 
   // 数组型分节的统一形状校验
-  const arraySectionNames = ['mapMarkers', 'locations'] as const;
+  const arraySectionNames = ['mapMarkers', 'locations', 'characters'] as const;
   for (const name of arraySectionNames) {
     const v = pack[name];
     if (v !== undefined && !Array.isArray(v)) {

@@ -1263,6 +1263,12 @@ export interface CharacterState {
   outfit?: string;
   /** 🆕 心里话（从 customFields.thoughts 升正式字段，好感度系统的叙事侧数据） */
   thoughts?: string;
+  /** 原生定义的存档副本；初始资料不随游玩反写内容库。 */
+  definition?: import('./types-character').CharacterDefinition;
+  aliases?: string[];
+  goals?: string;
+  /** 初登场回合；只用于约束生成的过去，不交由模型填写。 */
+  introducedBy?: string;
 
   // ===== 扩展字段 =====
   customFields: Record<string, any>;
@@ -1538,6 +1544,7 @@ export interface SnapshotPayload {
   saveId: string;
   /** 角色状态深拷贝 */
   characters: CharacterState[];
+  characterChronicle?: import('./types-character').CharacterChronicleEntry[];
   /** 存档档案深拷贝（任务/时间/好感/变量随行） */
   saveProfile: SaveProfile;
   /** 剧情事件深拷贝（🆕 回退时覆写恢复；可选=兼容旧快照，恢复时空数组兜底） */
@@ -1574,6 +1581,8 @@ export interface SaveSlot {
     totalTurns: number;
     /** Phase 10h: 存档级启用的世界书条目 ID (如 'system_core:408', 'character:313') */
     enabledWorldBookEntries?: string[];
+    /** 建档时冻结所选原生角色；旧存档缺席时从仍启用的旧资料兼容读取。 */
+    characterDefinitions?: import('./types-character').CharacterDefinition[];
     /** Phase 10h: 创角时的开场提示词文本 */
     openingPrompt?: string;
     /** Phase 10h: 开场 Prompt 是否已发送给 AI */
@@ -1761,6 +1770,7 @@ export interface CreatePreset {
   /** Phase 10h: 世界书驱动字段 */
   systemCoreEntryUid?: number | null;
   enabledCharacterEntryUids?: number[];
+  enabledCharacterDefinitionIds?: string[];
   /** 角色补充信息 */
   personality?: string;
   physics?: string;
@@ -1921,6 +1931,8 @@ export interface AgentContext {
   history: ChatMessage[];
   worldBooks: WorldBookEntry[]; // Phase 8: 本 Agent 可见的世界书条目
   characters: CharacterState[];
+  characterDefinitions?: import('./types-character').CharacterDefinition[];
+  characterChronicle?: import('./types-character').CharacterChronicleEntry[];
   variables: Record<string, any>;
   plotEvents: PlotEvent[];
   memories: MemoryRecord[];

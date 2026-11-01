@@ -47,6 +47,10 @@ vi.mock('../../../src/core/persistence/database', () => ({
   deleteMessagesBySaveId: vi.fn(),
   // 🔒 P1-06: restoreSnapshot 用 db.transaction 包原子事务；测试不验原子性，回调直接执行
   getDatabase: () => ({
+    characterChronicle: {
+      where: () => ({ equals: () => ({ toArray: async () => [], delete: async () => 0 }) }),
+      bulkPut: async () => {},
+    },
     transaction: async (_mode: string, _tables: any, cb: () => any) => cb(),
   }),
 }));
@@ -3086,6 +3090,7 @@ describe('StateManager', () => {
         saveProfile: profile,
         plotEvents: events,
         messages: msgs,
+        characterChronicle: [],
       });
     });
 

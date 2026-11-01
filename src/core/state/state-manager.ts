@@ -65,6 +65,15 @@ import { getEngineSettings } from '../runtime/engine-settings';
 // 并行化改造（docs/planning/2026-08-16-pipeline-parallelism.md）：一切 Dexie 写入
 // 经 per-saveId FIFO 队列串行 —— 锁粒度 = 读-改-写区段，锁内禁止再入队列（铁律②）。
 import { withSaveWriteLock } from './state-write-queue';
+import type { CharacterDefinition, CharacterNarrativeUpdate } from '../types/types-character';
+import type { StoryMemorySource } from '../types/types';
+import {
+  attachCharacterDefinition,
+  matchCharacterDefinition,
+} from '../character/character-definitions';
+import { authorChronicle, turnChronicle } from '../character/character-chronicle';
+import { collectCompleteStoryTurns } from '../memory/memory-context';
+import { storyMemorySourceMatches, storyTurnGameTimeRange } from '../memory/story-memory-source';
 // Q-19：这三个模块此前在 14 处 handler 里各 `await import` 一次。它们都不 import
 // 本模块（已核实无环），动态化没有换来任何解耦，只是让每个 handler 多一次 await
 // 和一行噪音，还遮蔽了 1471 行那处同名解构。script-executor 仍留动态 —— 它是
@@ -353,6 +362,119 @@ export class StateManager {
   }
 
   // ========== 主入口 ==========
+
+  /** Freeze legacy author definitions once, without replacing established save state. */
+  async initializeCharacterDefinitions(
+    definitions: CharacterDefinition[],
+    isCurrent?: () => boolean,
+  ): Promise<void> {
+    await withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(isCurrent);
+      const db = getDatabase();
+      await db.transaction(
+        'rw',
+        [db.saves, db.characters, db.messages, db.characterChronicle],
+        async () => {
+          const save = await getSave(this.saveId);
+          if (!save) return;
+          if (save.metadata.characterDefinitions === undefined && definitions.length > 0) {
+            save.metadata.characterDefinitions = structuredClone(definitions);
+            await saveSaveSlot(save);
+          }
+          const accepted = new Set(
+            collectCompleteStoryTurns(await getMessages(this.saveId)).map((t) => t.key),
+          );
+          for (const character of await getCharacters(this.saveId)) {
+            if (character.introducedBy && !accepted.has(character.introducedBy)) continue;
+            const definition =
+              character.definition ??
+              matchCharacterDefinition(save.metadata.characterDefinitions ?? [], character.name);
+            if (!definition) continue;
+            const next = character.definition
+              ? character
+              : attachCharacterDefinition(character, definition);
+            if (!character.definition) await saveCharacter(next);
+            const entries = authorChronicle(next);
+            if (entries.length) await db.characterChronicle.bulkPut(entries);
+          }
+        },
+      );
+    });
+  }
+
+  /** Same-turn narrator updates; each character's profile and chronicle commit atomically. */
+  async commitCharacterUpdates(
+    updates: CharacterNarrativeUpdate[],
+    source: StoryMemorySource,
+    isCurrent?: () => boolean,
+  ): Promise<string[]> {
+    return withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(isCurrent);
+      const db = getDatabase();
+      const warnings: string[] = [];
+      for (const update of updates) {
+        try {
+          await db.transaction(
+            'rw',
+            [db.saves, db.characters, db.messages, db.characterChronicle],
+            async () => {
+              assertCurrentTurn(isCurrent);
+              const turn = collectCompleteStoryTurns(await getMessages(this.saveId)).find(
+                (t) => t.key === source.sourceTurnKey,
+              );
+              if (!turn || !storyMemorySourceMatches(source, turn))
+                throw new Error('来源回合已失效');
+              const character = await this.resolveCharacter(update.name);
+              const old = await db.characterChronicle
+                .where('[saveId+characterId]')
+                .equals([this.saveId, character.id])
+                .toArray();
+              const sourceRows = old.filter(
+                (e) => e.source.kind === 'turn' && e.source.sourceTurnKey === source.sourceTurnKey,
+              );
+              // Replaying a committed response is a no-op, including profile changes.
+              if (
+                sourceRows.length &&
+                sourceRows.every(
+                  (e) =>
+                    e.source.kind === 'turn' &&
+                    e.source.sourceFingerprint === source.sourceFingerprint,
+                )
+              )
+                return;
+              const chronicle = update.chronicle.filter((entry) => {
+                if (entry.time.kind !== 'past' || character.introducedBy === source.sourceTurnKey)
+                  return true;
+                warnings.push(`角色「${character.name}」已存在，未补写其过去。`);
+                return false;
+              });
+              const next = { ...character, ...structuredClone(update.profile_changes) };
+              await saveCharacter(next);
+              if (sourceRows.length)
+                await db.characterChronicle.bulkDelete(sourceRows.map((e) => e.id));
+              const entries = turnChronicle({
+                character,
+                update: { ...update, chronicle },
+                source,
+                gameTime: storyTurnGameTimeRange(turn).end,
+                sourceText: turn.storyMessages.map((m) => m.content).join('\n\n'),
+                createdAt: Date.now(),
+              });
+              const initial = authorChronicle(next).filter((e) => !old.some((o) => o.id === e.id));
+              if (initial.length || entries.length)
+                await db.characterChronicle.bulkPut([...initial, ...entries]);
+            },
+          );
+        } catch (error) {
+          if (isCurrent && !isCurrent()) throw error;
+          warnings.push(
+            `角色「${update.name}」更新未保存：${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+      return warnings;
+    });
+  }
 
   /**
    * 玩家主动修订叙事人设。
@@ -793,6 +915,9 @@ export class StateManager {
     // ① 名字精确匹配
     const byName = chars.find((c) => c.name === key);
     if (byName) return byName;
+    const aliases = chars.filter((c) => c.aliases?.includes(key));
+    if (aliases.length === 1) return aliases[0];
+    if (aliases.length > 1) throw new Error(`角色别名不唯一: ${key}`);
 
     // ② 主角别名
     if (key === '主角' || key === '玩家') {
@@ -2294,6 +2419,10 @@ export class StateManager {
         reason,
         turn,
         characters,
+        characterChronicle: await getDatabase()
+          .characterChronicle.where('saveId')
+          .equals(this.saveId)
+          .toArray(),
         saveProfile: profile,
         plotEvents,
         messages,
@@ -2346,6 +2475,10 @@ export class StateManager {
         reason: meta.reason,
         turn: meta.turn,
         characters,
+        characterChronicle: await getDatabase()
+          .characterChronicle.where('saveId')
+          .equals(this.saveId)
+          .toArray(),
         saveProfile: profile,
         plotEvents,
         messages,
@@ -2412,6 +2545,7 @@ export class StateManager {
           'rw',
           [
             db.characters,
+            db.characterChronicle,
             db.saveProfiles,
             db.plotEvents,
             db.messages,
@@ -2433,6 +2567,9 @@ export class StateManager {
               await deleteCharacter(c.id);
             }
             await saveCharacters(structuredClone(snapshot.characters));
+            await db.characterChronicle.where('saveId').equals(this.saveId).delete();
+            if (snapshot.characterChronicle?.length)
+              await db.characterChronicle.bulkPut(structuredClone(snapshot.characterChronicle));
 
             // ③ saveProfile 覆写（变量/任务/时间/好感随行回滚）
             await updateProfile(structuredClone(snapshot.saveProfile));

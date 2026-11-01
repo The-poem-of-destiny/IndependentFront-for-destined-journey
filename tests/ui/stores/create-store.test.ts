@@ -1173,6 +1173,35 @@ describe('预设系统', () => {
     store.level = 5;
   });
 
+  it('旧预设已转换的人物勾选映射到原生角色，并可正常取消', () => {
+    store.characterDefinitions = [
+      {
+        id: 'guide',
+        name: '向导',
+        profile: {},
+        assets: [],
+        past: [],
+        legacyEntry: { bookId: 'b', uid: 42, token: 'character:42' },
+      },
+    ];
+    store.applyPresetData({
+      ...store.getCurrentPresetData(),
+      id: 'p',
+      name: '旧预设',
+      createdAt: 1,
+      updatedAt: 1,
+      enabledCharacterEntryUids: [42],
+      enabledCharacterDefinitionIds: undefined,
+    });
+    expect([...store.enabledCharacterDefinitionIds]).toEqual(['guide']);
+    expect(store.enabledCharacterEntryUids.size).toBe(0);
+    store.toggleCharacterDefinition('guide');
+    expect(store.getCurrentPresetData().enabledCharacterDefinitionIds).toEqual([]);
+    expect(store.buildEnabledWorldBookEntries()).not.toContain('character:42');
+    store.resetAll();
+    expect(store.characterDefinitions).toEqual([]);
+  });
+
   it('getCurrentPresetData → applyPresetData 往返一致', () => {
     const data = store.getCurrentPresetData();
     expect(data.character.name).toBe('预设测试');

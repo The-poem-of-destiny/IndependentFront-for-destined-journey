@@ -413,6 +413,10 @@ export const useCreateStore = defineStore('create', () => {
 
   /** character 世界书条目列表（可启用角色） */
   const characterEntries = ref<WorldBookEntry[]>([]);
+  const characterDefinitions = ref<import('@engine/types/types-character').CharacterDefinition[]>(
+    [],
+  );
+  const enabledCharacterDefinitionIds = ref<Set<string>>(new Set());
 
   /** 选中的命定核心 entry uid */
   const selectedSystemCoreEntryUid = ref<number | null>(null);
@@ -498,12 +502,25 @@ export const useCreateStore = defineStore('create', () => {
       const wb = useWorldBookStore();
       await wb.init();
       const books = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
+      const { ensureContentRegistryLoaded } = await import('./content-store');
+      await ensureContentRegistryLoaded();
+      const { availableCharacterDefinitions } =
+        await import('@engine/character/character-definitions');
+      characterDefinitions.value = availableCharacterDefinitions(books);
+      migrateCharacterSelections();
       systemCoreEntries.value = books
         .filter((b) => b.partition === 'system_core')
         .flatMap((b) => b.entries);
       characterEntries.value = books
         .filter((b) => b.partition === 'character')
-        .flatMap((b) => b.entries);
+        .flatMap((b) =>
+          b.entries.filter(
+            (e) =>
+              !characterDefinitions.value.some(
+                (d) => d.legacyEntry?.bookId === b.id && d.legacyEntry.uid === e.uid,
+              ),
+          ),
+        );
       // P1-5: 工坊项目走自己的项目级列表（未安装的不出现）
       const ws = useWorkshopStore();
       await ws.init();
@@ -512,6 +529,7 @@ export const useCreateStore = defineStore('create', () => {
       // fetch 不可用时静默跳过，保持空数组
       systemCoreEntries.value = [];
       characterEntries.value = [];
+      characterDefinitions.value = [];
       workshopOptions.value = [];
     }
   }
@@ -523,6 +541,26 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   /** toggle 勾选角色 */
+  function migrateCharacterSelections() {
+    const legacy = new Set(enabledCharacterEntryUids.value);
+    const native = new Set(enabledCharacterDefinitionIds.value);
+    for (const definition of characterDefinitions.value) {
+      if (definition.legacyEntry && legacy.delete(definition.legacyEntry.uid)) {
+        native.add(definition.id);
+      }
+    }
+    enabledCharacterEntryUids.value = legacy;
+    enabledCharacterDefinitionIds.value = native;
+  }
+
+  function toggleCharacterDefinition(id: string) {
+    const next = new Set(enabledCharacterDefinitionIds.value);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    enabledCharacterDefinitionIds.value = next;
+  }
+
+  /** toggle 勾选旧资料条目 */
   function toggleCharacterEntry(uid: number) {
     const next = new Set(enabledCharacterEntryUids.value);
     if (next.has(uid)) {
@@ -1908,6 +1946,11 @@ export const useCreateStore = defineStore('create', () => {
         gameStartTime: new Date().toISOString(),
         totalTurns: 0,
         enabledWorldBookEntries: buildEnabledWorldBookEntries(), // 🆕
+        characterDefinitions: JSON.parse(
+          JSON.stringify(
+            characterDefinitions.value.filter((d) => enabledCharacterDefinitionIds.value.has(d.id)),
+          ),
+        ),
         openingPrompt: openingPrompt, // 🆕
         openingPromptConsumed: false, // 🆕
         plotSettings: JSON.parse(JSON.stringify(plotSettings.value)), // §5.2: 本档剧情配置随档落库（含雷点）
@@ -2055,6 +2098,7 @@ export const useCreateStore = defineStore('create', () => {
       plotSettings: plotSettings.value,
       systemCoreEntryUid: selectedSystemCoreEntryUid.value,
       enabledCharacterEntryUids: [...enabledCharacterEntryUids.value],
+      enabledCharacterDefinitionIds: [...enabledCharacterDefinitionIds.value],
       personality: personality.value,
       physics: physics.value,
       backstory: backstory.value,
@@ -2095,6 +2139,8 @@ export const useCreateStore = defineStore('create', () => {
     if (data.enabledCharacterEntryUids) {
       enabledCharacterEntryUids.value = new Set(data.enabledCharacterEntryUids);
     }
+    enabledCharacterDefinitionIds.value = new Set(data.enabledCharacterDefinitionIds ?? []);
+    migrateCharacterSelections();
     personality.value = data.personality || '';
     physics.value = data.physics || '';
     backstory.value = data.backstory || '';
@@ -2189,9 +2235,11 @@ export const useCreateStore = defineStore('create', () => {
     selectedSystemCoreEntryUid.value = null;
     selectedWorkshopCoreProjectId.value = null;
     enabledCharacterEntryUids.value = new Set();
+    enabledCharacterDefinitionIds.value = new Set();
     enabledWorkshopProjectIds.value = new Set();
     systemCoreEntries.value = [];
     characterEntries.value = [];
+    characterDefinitions.value = [];
     workshopOptions.value = [];
   }
 
@@ -2276,6 +2324,9 @@ export const useCreateStore = defineStore('create', () => {
     // Phase 10h: 世界书驱动
     systemCoreEntries,
     characterEntries,
+    characterDefinitions,
+    enabledCharacterDefinitionIds,
+    toggleCharacterDefinition,
     selectedSystemCoreEntryUid,
     selectedWorkshopCoreProjectId,
     selectedWorkshopCore,

@@ -12,6 +12,8 @@
 
 ## Story v2 / 内容路由速览
 
+- 原生角色：`stores/content-store.ts` 载入 `characters` 分节；`create-store.ts` 选择并冻结作者定义；`lib/game-pipeline.ts` 暂存主叙事更新，在回合接纳后经 `StateManager` 提交。`CharacterViewerModal.vue` 内嵌 `CharacterChronicleTab.vue`，支持重要筛选、搜索、排序和来源详情；协议与边界见 [角色系统](../../docs/reference/character-system.md)。
+
 - `lib/game-pipeline.ts` 仅在新模式构建独立 `lore_select` 配置；正式回合 pending/accepted/failed 与重试来源统一，取消/锁内提交有同源守卫；原回合归档草稿自动重试。旧模式不运行选择器。
 - Story v2 设置 N>0，摘要语义/来源诊断保留未知；DebugPanel 显示分类预算、实际输出预留、移除项和逐条资料原因，不把估算当 provider usage。
 - Agent 设置移除世界书清单，编辑器声明 audiences；`stores/worldbook-store.ts` 仅迁移无声明用户书，显式空范围不覆盖，失败可重试。

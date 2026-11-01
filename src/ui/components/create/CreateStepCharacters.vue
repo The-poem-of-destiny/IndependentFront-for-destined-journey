@@ -19,9 +19,33 @@ function summary(content: string, maxLen = 160): string {
     <h2 class="step-title">启用角色</h2>
     <p class="step-desc">勾选你希望在此存档中出现的角色。未勾选的角色不会在叙事中被激活。</p>
 
-    <div v-if="store.characterEntries.length === 0" class="chars-loading">正在加载角色列表…</div>
+    <div
+      v-if="store.characterEntries.length + store.characterDefinitions.length === 0"
+      class="chars-loading"
+    >
+      尚无可选角色
+    </div>
 
     <div v-else class="chars-grid">
+      <label
+        v-for="definition in store.characterDefinitions"
+        :key="definition.id"
+        class="char-card"
+        :class="{ checked: store.enabledCharacterDefinitionIds.has(definition.id) }"
+      >
+        <input
+          type="checkbox"
+          class="char-checkbox"
+          :checked="store.enabledCharacterDefinitionIds.has(definition.id)"
+          @change="store.toggleCharacterDefinition(definition.id)"
+        />
+        <div class="char-info">
+          <div class="char-name">{{ definition.name }}</div>
+          <div class="char-summary">
+            {{ summary(definition.profile.background || definition.lore || '初始档案') }}
+          </div>
+        </div>
+      </label>
       <label
         v-for="entry in store.characterEntries"
         :key="entry.uid"
@@ -42,7 +66,8 @@ function summary(content: string, maxLen = 160): string {
     </div>
 
     <div class="chars-count">
-      已选择 {{ store.enabledCharacterEntryUids.size }} / {{ store.characterEntries.length }} 个角色
+      已选择 {{ store.enabledCharacterEntryUids.size + store.enabledCharacterDefinitionIds.size }} /
+      {{ store.characterEntries.length + store.characterDefinitions.length }} 个角色
     </div>
   </section>
 </template>

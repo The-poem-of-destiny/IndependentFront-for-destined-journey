@@ -23,6 +23,7 @@ import type {
   WorldBookEntry,
 } from '../types/types';
 import type { GameTime } from '../time/time-system';
+import { CHARACTER_UPDATE_PROTOCOL, buildCharacterContext } from '../character/character-chronicle';
 import { MONTH_NAMES, toGameDay, fromEpochMinutes } from '../time/time-system';
 import {
   buildPlotThreadSnapshot,
@@ -794,7 +795,7 @@ export function buildAgentMessages(
     if (plotBlock) allLocalParams['PLOT_EVENTS'] = plotBlock;
   }
 
-  const resolved = resolveTemplateWithGlobals(
+  let resolved = resolveTemplateWithGlobals(
     template,
     agentId,
     tplCtx,
@@ -803,6 +804,11 @@ export function buildAgentMessages(
     cfgs,
     allLocalParams,
   );
+  if (agentId === 'story' && ctx.characterDefinitions !== undefined) {
+    resolved = [resolved, CHARACTER_UPDATE_PROTOCOL, buildCharacterContext(ctx)]
+      .filter(Boolean)
+      .join('\n\n');
+  }
 
   // 🎲 随机事件 v1: 存量预设的兜底追加（**只给 story**）。
   //

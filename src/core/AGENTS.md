@@ -10,6 +10,8 @@
 
 ## Story v2 / 内容路由速览
 
+- 原生角色：`types/types-character.ts` 定义内容、经历与主叙事更新；`character/character-definitions.ts` 只读兼容旧资料及素材；`character/character-updates.ts` 校验更新块；`character/character-chronicle.ts` 构造经历和重要上下文。`StateManager` 持有写锁与来源核验；Dexie v31、快照及两种备份携带经历。契约见 [角色系统](../../docs/reference/character-system.md)。
+
 - `content/lore-routing.ts`：双模式唯一 audiences 权限、停用/排除与依赖闭包共同判据（含 EJS 间接读取）、旧作者默认映射与诊断；Agent 世界书清单已退役。
 - `memory/story-memory-source.ts`：生成/读取/锁内提交共用完整来源与正文指纹；v29 `storyArchiveRetries` 绑定原判断回合自动恢复，不以后一轮证据替代。旧缺指纹记录失效可补建，语义未知不伪造。
 - `content/lore-selection.ts`：无正文目录、独立选择调用、区域快照键、依赖闭包；`content/lore-protocol.ts` 验证显式路由修订。

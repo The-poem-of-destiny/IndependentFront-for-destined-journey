@@ -49,6 +49,10 @@ vi.mock('@engine/plot/plot-engine', () => ({
 }));
 
 vi.mock('@engine/persistence/database', () => ({
+  getCharacters: vi.fn(async () => []),
+  getDatabase: () => ({
+    characterChronicle: { where: () => ({ equals: () => ({ toArray: async () => [] }) }) },
+  }),
   getLatestPlotOutline: vi.fn(async () => undefined),
   getPlotEvents: vi.fn(async () => []),
   savePlotOutline: vi.fn(async () => {}),
@@ -102,6 +106,8 @@ const {
 
 vi.mock('@engine/state/state-manager', () => ({
   createStateManager: vi.fn(() => ({
+    initializeCharacterDefinitions: vi.fn(async () => {}),
+    commitCharacterUpdates: vi.fn(async () => []),
     commitChatState: commitSpy,
     advanceTurn: advanceTurnSpy,
     createSnapshot: createSnapshotSpy,

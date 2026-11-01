@@ -15,7 +15,7 @@
 | `state/`         | 状态提交、存档写队列与 SaveProfile                                          |
 | `persistence/`   | IndexedDB、单存档备份与新旅程创建                                           |
 | `types/`         | 唯一类型来源 `types.ts` 及 `types-*.ts` 分册                                |
-| `character/`     | 角色查询、外貌、血脉、属性分配、资源、经验、层级与校验                      |
+| `character/`     | 原生角色定义、编年史、叙事更新解析，以及角色查询、外貌、血脉、属性与校验    |
 | `combat/`        | 统一战斗内核、会话协调、阶段、EffectAutomaton DSL、基础规则、内容校验与投影 |
 | `crafting/`      | 制作请求、侧链、DC、品质推导与结算                                          |
 | `effects/`       | 事件、状态效果、订阅与效果接线                                              |

@@ -121,7 +121,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 升版时这两处一起改。
  */
 // v30 = 战斗沙盒 combatSandboxes（本分支），在 master 的 v29 之后顺延。
-export const DB_VERSION = 30;
+export const DB_VERSION = 31;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -197,6 +197,7 @@ class AppDatabase extends Dexie {
   memories!: Table<MemoryRecord>;
   plotEvents!: Table<PlotEvent>;
   characters!: Table<CharacterState>;
+  characterChronicle!: Table<import('../types/types-character').CharacterChronicleEntry>;
   /**
    * 🔴 v22 起这张表**只存元数据**（`SnapshotMeta`）。整档载荷（characters / saveProfile /
    *    plotEvents / messages）搬去了 `snapshotPayloads`，因为列快照与淘汰旧快照这两个
@@ -743,6 +744,7 @@ class AppDatabase extends Dexie {
      * 合并时顺延到 v30 —— 旧库 v26 直接升上来即可，v30 只做加表。
      */
     this.version(30).stores({ combatSandboxes: 'saveId, updatedAt' });
+    this.version(31).stores({ characterChronicle: 'id, saveId, [saveId+characterId]' });
   }
 }
 
@@ -786,6 +788,7 @@ export async function clearAllData(): Promise<void> {
 // ========== Full Backup (v4) ==========
 
 export interface FullBackup {
+  characterChronicle?: import('../types/types-character').CharacterChronicleEntry[];
   version: number;
   exportedAt: number;
   lorebooks: Lorebook[];
@@ -856,6 +859,7 @@ export interface FullBackup {
 export async function exportAllData(): Promise<FullBackup> {
   const db = getDatabase();
   const [
+    characterChronicle,
     lorebooks,
     presets,
     memories,
@@ -880,6 +884,7 @@ export async function exportAllData(): Promise<FullBackup> {
     storyArchives,
     storyArchiveRetries,
   ] = await Promise.all([
+    db.characterChronicle.toArray(),
     db.lorebooks.toArray(),
     db.presets.toArray(),
     db.memories.toArray(),
@@ -906,6 +911,7 @@ export async function exportAllData(): Promise<FullBackup> {
   ]);
   return {
     version: DB_VERSION,
+    characterChronicle,
     exportedAt: Date.now(),
     lorebooks,
     presets,
@@ -992,6 +998,7 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'sceneImages',
     'imagePresets',
     'characterAppearances',
+    'characterChronicle',
     'storyTurnSummaries',
     'storyArchives',
     'storyArchiveRetries',
@@ -1198,6 +1205,11 @@ async function doImportAllData(
   //
   // 🔴 它与 `sceneImages` 一样是**每存档**数据，所以必须与存档一起往返：漏掉它的症状
   //    不是报错，而是导入后每个角色的本档变化静默退回基线（看起来像 AI 失忆）。
+  await db.transaction('rw', db.characterChronicle, async () => {
+    await db.characterChronicle.clear();
+    if (backup.characterChronicle?.length)
+      await db.characterChronicle.bulkPut(backup.characterChronicle);
+  });
   await db.transaction('rw', db.characterAppearances, async () => {
     if (backup.characterAppearances !== undefined) {
       await db.characterAppearances.clear();
@@ -1947,6 +1959,7 @@ function splitSnapshot(row: Snapshot | SnapshotMeta): {
   };
   if (fat.plotEvents !== undefined) payload.plotEvents = fat.plotEvents;
   if (fat.messages !== undefined) payload.messages = fat.messages;
+  if (fat.characterChronicle !== undefined) payload.characterChronicle = fat.characterChronicle;
 
   // preview 优先用行上已有的（导入侧要保真），缺席才从载荷现算（v22 迁移的回填路径）
   const preview = row.preview ?? buildSnapshotPreview(payload);
@@ -1963,6 +1976,8 @@ function joinSnapshot(meta: SnapshotMeta, payload: SnapshotPayload): Snapshot {
   };
   if (payload.plotEvents !== undefined) snapshot.plotEvents = payload.plotEvents;
   if (payload.messages !== undefined) snapshot.messages = payload.messages;
+  if (payload.characterChronicle !== undefined)
+    snapshot.characterChronicle = payload.characterChronicle;
   return snapshot;
 }
 
@@ -2211,6 +2226,7 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       db.sceneImages,
       db.sceneImageBlobs,
       db.characterAppearances,
+      db.characterChronicle,
       db.debugTurns,
       db.promptSessions,
       db.storyTurnSummaries,
@@ -2238,6 +2254,7 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       await db.sceneImages.where('saveId').equals(id).delete();
       // v19 (D56): 会话外貌随存档走 —— 与 imagePresets（全局基线）刻意相反
       await db.characterAppearances.where('saveId').equals(id).delete();
+      await db.characterChronicle.where('saveId').equals(id).delete();
       await db.debugTurns.where('saveId').equals(id).delete();
       // v26：Delta 会话是 rebuildable 缓存，但存档都没了没有理由留着
       await db.promptSessions.where('saveId').equals(id).delete();

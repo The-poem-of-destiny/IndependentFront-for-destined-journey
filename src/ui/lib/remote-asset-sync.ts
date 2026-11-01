@@ -42,6 +42,7 @@ import {
 } from '@engine/assets/asset-types';
 import type { AssetMetaRecord, WorldBook } from '@engine/types/types';
 import { hashMediaBlob } from './media-hash';
+import { readCharacterDefinitions } from '@engine/character/character-definitions';
 
 // ═══════════════════════════════════════════════════════════
 // 常量
@@ -119,9 +120,18 @@ const EXTENSION_BY_MIME: Readonly<Record<string, string>> = (() => {
 export function collectDesiredRemoteAssets(
   books: readonly WorldBook[],
   packRows: unknown,
+  characterDefinitions?: unknown,
 ): RemoteAssetDecl[] {
   return dedupeRemoteAssetDecls(
-    [...collectWorldBookRemoteAssets(books), ...normalizePackRemoteAssets(packRows)]
+    [
+      ...readCharacterDefinitions(characterDefinitions).flatMap((d) =>
+        d.assets.flatMap((a) =>
+          a.url ? [{ name: d.name, type: a.type, variant: a.variant, url: a.url }] : [],
+        ),
+      ),
+      ...collectWorldBookRemoteAssets(books),
+      ...normalizePackRemoteAssets(packRows),
+    ]
       // 🔴 地址闸在**去重之前**：一条指向 127.0.0.1 的声明若先占住了槽位，同一个位上
       //    那条合法的 pack 声明会被「先来先得」挡掉，症状是「装了包却少一张图」。
       //    过不了闸的声明**静默丢弃**（与波 1 里认不出的行同一种处置）。

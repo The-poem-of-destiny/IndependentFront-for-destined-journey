@@ -77,6 +77,8 @@ export interface AssetImageSource {
 }
 
 export interface UseAssetImageOptions {
+  /** 显式角色素材关联优先，查不到时沿用旧名字解析。 */
+  assetId?: MaybeRefOrGetter<string | undefined>;
   /** 注入缝；缺省即 asset-store 单例（只在缺省时才会去碰 Pinia） */
   source?: AssetImageSource;
   /**
@@ -175,6 +177,8 @@ export function useAssetImage(
 
   /** 命中的 asset id；查不到 null。**同步**，不含任何 I/O */
   const resolvedId = computed<string | null>(() => {
+    const explicit = toValue(options.assetId);
+    if (explicit && source.assets.some((asset) => asset.id === explicit)) return explicit;
     const raw = toValue(name);
     // 空名字不是错误，是「这个位没人」—— 静默给 null，不抛也不打日志（§3 的静默口径）
     if (raw === null || raw === undefined || raw === '') return null;

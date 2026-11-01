@@ -18,7 +18,16 @@ const TRAILING_FENCE = /\n?\s*```\s*$/;
 const MAIN_TEXT_OPEN = /<maintext\b[^>]*>/gi;
 const MAIN_TEXT_CLOSE = /<\/maintext\s*>/i;
 const STREAM_MAIN_TEXT_OPEN = /(?:^|\r?\n)[ \t]*<maintext\b[^>]*>/gi;
-const CONTROL_TAGS = ['options', 'option', 'sum', 'vars', 'thinking', 'think', 'summary'];
+const CONTROL_TAGS = [
+  'options',
+  'option',
+  'sum',
+  'vars',
+  'thinking',
+  'think',
+  'summary',
+  'character_updates',
+];
 const STREAM_CONTROL_TAGS = ['maintext', 'play_audio', 'event_trigger', ...CONTROL_TAGS];
 
 /**

@@ -2209,7 +2209,11 @@ export const useAssetStore = defineStore('asset', () => {
       await content.ensureContentRegistryLoaded();
       await init();
 
-      const decls = collectDesiredRemoteAssets(wb.books, content.getContentRegistry().remoteAssets);
+      const decls = collectDesiredRemoteAssets(
+        wb.books,
+        content.getContentRegistry().remoteAssets,
+        content.getContentRegistry().characters,
+      );
 
       // 墓碑收拢**在算清单之后、跑同步之前**: 拿的是本次真正生效的声明集，
       // 于是「作者撤掉了这条声明」这件事一发生，对应的墓碑当场作废（下次他再声明

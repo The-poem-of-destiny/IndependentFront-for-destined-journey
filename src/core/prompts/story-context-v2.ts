@@ -63,6 +63,7 @@ import {
   type StoryTurnSummarySegment,
 } from '../memory/memory-context';
 import { renderLongTermOverview } from '../memory/story-archive';
+import { CHARACTER_UPDATE_PROTOCOL, buildCharacterContext } from '../character/character-chronicle';
 
 import { selectStoryLore, type LoreSelector } from '../content/lore-selection';
 
@@ -363,6 +364,7 @@ export async function buildStoryContextV2Messages(
     3: zoneLore(3) ? wrapBlock('区域资料', zoneLore(3)) : '',
     4: renderZone4History(zone4.history),
     5: [
+      ctx.characterDefinitions !== undefined ? buildCharacterContext(ctx) : '',
       zoneLore(5) ? wrapBlock('本轮世界资料', zoneLore(5)) : '',
       ...zone5Blocks.map(({ text }) => text),
     ]
@@ -406,6 +408,7 @@ export async function buildStoryContextV2Messages(
     conversation.push({ role: 'assistant', content: turnStoryText(turn) });
   }
 
+  if (ctx.characterDefinitions !== undefined) leadingSystem.push(CHARACTER_UPDATE_PROTOCOL);
   const tail = config.tailPrompt?.trim();
   const finalUser = [
     ...tailParts,

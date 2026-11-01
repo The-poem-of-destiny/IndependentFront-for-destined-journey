@@ -431,6 +431,8 @@ function formatCharacterNarrative(char: CharacterState): string {
   if (identityStr) lines.push(identityStr);
   if (backgroundStr) lines.push(backgroundStr);
   if (personalityStr) lines.push(personalityStr);
+  if (char.goals) lines.push(`  当前目标: ${char.goals}`);
+  if (char.aliases?.length) lines.push(`  别名: ${char.aliases.join('、')}`);
 
   // 五维
   const attr = char.attributes;

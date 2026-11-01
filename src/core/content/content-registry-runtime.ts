@@ -51,6 +51,7 @@
  *    它还会变成真实运行时依赖。content-store 侧 re-export 同一个名字，UI 消费方不受影响。
  */
 export interface ContentRegistry {
+  characters?: unknown;
   /** 捏人目录池（D24） */
   catalog: unknown;
   /** 地点节点（D25①） */

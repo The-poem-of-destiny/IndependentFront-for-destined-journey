@@ -282,6 +282,8 @@ type PackRemoteAssetsSection = readonly RemoteAssetPackEntry[];
  *    逐书基线一律从 `payload` 现算（per-item），两者不许混用（D18 hash 分工）。
  */
 export interface ContentPack {
+  /** 原生角色初始资料；游玩变化不写回此分节。 */
+  characters?: import('./types-character').CharacterDefinition[];
   /** 🔴 必读必校验（§4）。不满足 → 拒绝 + 报消息 */
   formatVersion: PackFormatVersion;
   /** 包身份（如 `fated-poem-official`），跨版本稳定 */
@@ -492,6 +494,7 @@ export interface PackInstallPlan {
      * 判定已经在 `coerceRandomEventPack` 里做过一次了 —— planner 再做一遍就是两处口径。
      */
     randomEvents?: PackSectionPlan<PackRandomEventsSection>;
+    characters?: PackSectionPlan<import('./types-character').CharacterDefinition[]>;
   };
   agentDefaults?: {
     /** 默认层键集合（D44：解析名册 = 默认层键 ∪ 覆写层键） */

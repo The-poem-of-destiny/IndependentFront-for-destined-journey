@@ -20,21 +20,27 @@ import { storyTurnSource } from '@engine/memory/story-memory-source';
 import { withSaveWriteLock } from '@engine/state/state-write-queue';
 import { resetPromptSessionsForTest } from '@engine/prompts/prompt-session-assembler';
 import type { ChatMessage, SaveSlot } from '@engine/types/types';
+import { createDefaultCharacterState } from '@engine/types/types';
 
 const { advance, toast } = vi.hoisted(() => ({ advance: vi.fn(async () => {}), toast: vi.fn() }));
-vi.mock('@engine/state/state-manager', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@engine/state/state-manager')>()),
-  createStateManager: () => ({
-    advanceTurn: advance,
-    syncRandomEventsForTurn: async () => {},
-    commitChatState: async () => ({
-      success: true,
-      patchesApplied: 0,
-      eventsGenerated: [],
-      errors: [],
-    }),
-  }),
-}));
+vi.mock('@engine/state/state-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@engine/state/state-manager')>();
+  return {
+    ...actual,
+    createStateManager: (id: string) => {
+      const manager = actual.createStateManager(id);
+      manager.advanceTurn = advance;
+      manager.syncRandomEventsForTurn = async () => {};
+      manager.commitChatState = async () => ({
+        success: true,
+        patchesApplied: 0,
+        eventsGenerated: [],
+        errors: [],
+      });
+      return manager;
+    },
+  };
+});
 vi.mock('../../../src/ui/stores/ui-store', () => ({ useUIStore: () => ({ toast }) }));
 
 const saveId = 'pipeline-boundaries';
@@ -125,7 +131,7 @@ async function fixture(messages: ChatMessage[] = []) {
 function result(agentId: string, rawResponse: string) {
   return { agentId, output: rawResponse, rawResponse, tokensUsed: 0, cacheHit: false, duration: 0 };
 }
-function network(story = 'The story was produced.') {
+function network(story = 'The story was produced.', characterUpdates = '') {
   return vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (
     this: any,
     _request,
@@ -134,7 +140,7 @@ function network(story = 'The story was produced.') {
     if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
     const raw =
       this.agentId === 'story'
-        ? `<maintext>${story}</maintext>`
+        ? `<maintext>${story}</maintext>${characterUpdates}`
         : this.agentId === 'memory_summary'
           ? JSON.stringify({ segments: [{ content: story }] })
           : '{}';
@@ -166,6 +172,49 @@ afterEach(async () => {
 });
 
 describe('A05/A06: actual pipeline, orchestrator and message persistence', () => {
+  it('commits narrator character updates after acceptance, never after a stopped response', async () => {
+    const { game, pipeline } = await fixture();
+    const db = getDatabase();
+    await db.characters.put(createDefaultCharacterState({ id: 'guide', saveId, name: '向导' }));
+    const updates = `<character_updates>${JSON.stringify({
+      characters: [
+        {
+          name: '向导',
+          profile_changes: { goals: '前往渡口' },
+          chronicle: [
+            {
+              title: '同行之约',
+              summary: '答应一同前往渡口。',
+              time: { kind: 'this_turn' },
+              importance: 8,
+            },
+          ],
+        },
+      ],
+    })}</character_updates>`;
+    const chat = network('向导同意出发。', updates);
+    const stop = vi.spyOn(game, 'setPendingOptions').mockImplementation(() => {
+      if (game.messages.some((m) => m.role === 'assistant')) pipeline.abort();
+    });
+    expect(await pipeline.run('邀请向导同行')).toBe(false);
+    expect(await db.characterChronicle.count()).toBe(0);
+    expect((await db.characters.get('guide'))?.goals).toBeUndefined();
+    stop.mockRestore();
+    expect(await pipeline.run('再次邀请向导同行')).toBe(true);
+    const rows = await db.characterChronicle.toArray();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ characterId: 'guide', importance: 8, origin: 'experience' });
+    expect((await db.characters.get('guide'))?.goals).toBe('前往渡口');
+    expect(
+      game.messages
+        .filter((m) => m.role === 'assistant')
+        .every((m) => !m.content.includes('character_updates')),
+    ).toBe(true);
+    const callsBefore = chat.mock.calls.length;
+    await pipeline.run('询问向导的打算');
+    expect((pipeline as any).currentContext.characterChronicle).toHaveLength(1);
+    expect(chat.mock.calls.length - callsBefore).toBe(4);
+  });
   it('stopping immediately after Story append rejects completion and advance; attempts never enter backfill', async () => {
     const { game, pipeline } = await fixture();
     network();

@@ -57,6 +57,7 @@ import type {
   StoryMemorySource,
 } from '../types/types';
 import type { SceneImageRecord, CharacterSessionAppearance } from '../types/types-image';
+import type { CharacterChronicleEntry } from '../types/types-character';
 
 // ═══════════════════════════════════════════════════════════
 // 类型
@@ -132,6 +133,7 @@ export interface SessionBackup {
   save: SaveSlot;
   profile: SaveProfile | null;
   characters: CharacterState[];
+  characterChronicle?: CharacterChronicleEntry[];
   messages: ChatMessage[];
   /**
    * v22 拆表后是**元数据行**；整档载荷在下面的 `snapshotPayloads`。
@@ -415,6 +417,7 @@ export async function exportSessionSave(
   // 表清单与 deleteSaveSlot 同源，唯独不含 sceneImageBlobs（字节永不随行）
   const [
     profile,
+    characterChronicle,
     characters,
     messages,
     snapshots,
@@ -432,6 +435,7 @@ export async function exportSessionSave(
     packs,
   ] = await Promise.all([
     db.saveProfiles.get(saveId),
+    db.characterChronicle.where('saveId').equals(saveId).toArray(),
     db.characters.where('saveId').equals(saveId).toArray(),
     db.messages.where('saveId').equals(saveId).toArray(),
     db.snapshots.where('saveId').equals(saveId).toArray(),
@@ -496,6 +500,7 @@ export async function exportSessionSave(
     save: structuredClone(save),
     profile: profile ? structuredClone(profile) : null,
     characters: structuredClone(characters),
+    characterChronicle: structuredClone(characterChronicle),
     messages: structuredClone(messages),
     snapshots: structuredClone(snapshots),
     snapshotPayloads: structuredClone(snapshotPayloads),
@@ -695,6 +700,7 @@ function validateSessionBackupOrThrow(backup: unknown): Record<string, unknown> 
     'plotOutlines',
     'sceneImages',
     'characterAppearances',
+    'characterChronicle',
     'storyTurnSummaries',
     'storyArchives',
     'storyArchiveRetries',
@@ -738,6 +744,7 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
   const plotOutlines = readArray<PlotOutline>(rec, 'plotOutlines');
   const sceneImages = readArray<SceneImageRecord>(rec, 'sceneImages');
   const characterAppearances = readArray<CharacterSessionAppearance>(rec, 'characterAppearances');
+  const characterChronicle = readArray<CharacterChronicleEntry>(rec, 'characterChronicle');
   const storyTurnSummaries = readArray<StoryTurnSummaryRecord>(rec, 'storyTurnSummaries');
   const storyArchives = readArray<StoryArchiveRecord>(rec, 'storyArchives');
   const storyArchiveRetries = readArray<StoryArchiveRetryRecord>(rec, 'storyArchiveRetries');
@@ -754,6 +761,7 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
   for (const c of characters) charIds.get(c.id);
   for (const m of messages) msgIds.get(m.id);
   for (const payload of snapshotPayloads) {
+    for (const character of payload.characters ?? []) charIds.get(character.id);
     for (const message of payload.messages ?? []) msgIds.get(message.id);
   }
   for (const s of snapshots) snapIds.get(s.id);
@@ -765,6 +773,7 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
     ...c,
     id: charIds.get(c.id),
     saveId: newSaveId,
+    ...(c.introducedBy ? { introducedBy: msgIds.peek(c.introducedBy) } : {}),
   });
   const remapMessage = (m: ChatMessage): ChatMessage => ({
     ...m,
@@ -847,11 +856,63 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
   //
   // 🔴 载荷行的 id **跟着它那条元数据行的新 id 走**（`snapIds` 是同一张映射表）：
   //    各发各的号就等于把一对拆散，恢复时会报「载荷行不存在」。
+  const remapChronicle = (
+    entries: CharacterChronicleEntry[],
+    allowedChars: Set<string>,
+    allowedMessages: Set<string>,
+  ): CharacterChronicleEntry[] =>
+    entries.flatMap((entry) => {
+      if (!allowedChars.has(entry.characterId)) return [];
+      const characterId = charIds.peek(entry.characterId)!;
+      if (entry.source.kind === 'definition')
+        return [
+          {
+            ...entry,
+            saveId: newSaveId,
+            characterId,
+            id: `author:${characterId}:${entry.source.definitionId}:${entry.order}`,
+          },
+        ];
+      const source = entry.source;
+      if (
+        !allowedMessages.has(source.sourceTurnKey) ||
+        !source.sourceMessageIds.every((id) => allowedMessages.has(id))
+      )
+        return [];
+      const sourceTurnKey = msgIds.peek(source.sourceTurnKey)!;
+      return [
+        {
+          ...entry,
+          saveId: newSaveId,
+          characterId,
+          id: `turn:${characterId}:${sourceTurnKey}:${entry.order}`,
+          source: {
+            ...source,
+            sourceTurnKey,
+            sourceMessageIds: source.sourceMessageIds.map((id) => msgIds.peek(id)!),
+          },
+        },
+      ];
+    });
+  const nextCharacterChronicle = remapChronicle(
+    characterChronicle,
+    new Set(characters.map((c) => c.id)),
+    new Set(messages.map((m) => m.id)),
+  );
   const nextSnapshotPayloads: SnapshotPayload[] = snapshotPayloads.map((p) => ({
     ...p,
     id: snapIds.get(p.id),
     saveId: newSaveId,
     characters: Array.isArray(p.characters) ? p.characters.map(remapCharacter) : [],
+    ...(p.characterChronicle
+      ? {
+          characterChronicle: remapChronicle(
+            p.characterChronicle,
+            new Set(p.characters.map((c) => c.id)),
+            new Set((p.messages ?? []).map((m) => m.id)),
+          ),
+        }
+      : {}),
     saveProfile: asRecord(p.saveProfile) ? remapProfile(p.saveProfile) : p.saveProfile,
     ...(p.plotEvents !== undefined
       ? { plotEvents: Array.isArray(p.plotEvents) ? p.plotEvents.map(remapPlotEvent) : [] }
@@ -1005,6 +1066,7 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       db.plotOutlines,
       db.sceneImages,
       db.characterAppearances,
+      db.characterChronicle,
       db.storyTurnSummaries,
       db.storyArchives,
       db.storyArchiveRetries,
@@ -1036,6 +1098,8 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       await db.saves.put(nextSave);
       if (nextProfile) await db.saveProfiles.put(nextProfile);
       if (nextCharacters.length > 0) await db.characters.bulkPut(nextCharacters);
+      if (nextCharacterChronicle.length > 0)
+        await db.characterChronicle.bulkPut(nextCharacterChronicle);
       if (nextMessages.length > 0) await db.messages.bulkPut(nextMessages);
       if (nextSnapshots.length > 0) await db.snapshots.bulkPut(nextSnapshots);
       if (nextSnapshotPayloads.length > 0) await db.snapshotPayloads.bulkPut(nextSnapshotPayloads);

@@ -11,6 +11,8 @@
 
 ## 提交前文档检查（必读）
 
+原生角色与编年史的现行契约见 [`docs/reference/character-system.md`](docs/reference/character-system.md)：主叙事同次输出、按存档保存、重要度筛选，入口在现行 `src/core/character/`、`src/core/persistence/` 与角色查看器。
+
 **🔴 主人/用户说「提交」= 默认授权直接合并到 GitHub（squash merge，免 review），不要再问「要不要 review」。需要 review 时主人会明说。**
 
 **每次 push 之前必须先检查是否有文档需要更新，包括但不限于:**
