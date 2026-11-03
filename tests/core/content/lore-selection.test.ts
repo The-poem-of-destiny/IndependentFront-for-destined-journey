@@ -103,7 +103,7 @@ describe('Story lore selection', () => {
     expect((await selectStoryLore([b], ctx, selector)).zones[3]).toEqual([]);
   });
   it.each([
-    [undefined, 6, false],
+    [undefined, 2, false],
     [12, 10, true],
     [0, 0, false],
   ])(

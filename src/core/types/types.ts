@@ -1929,7 +1929,7 @@ export interface AgentContext {
   agentOutputs: Map<string, any>; // 上游 Agent 的输出
   /** Present only while assembling Story v2, including its indirect EJS reads. */
   loreReadContext?: LoreReadContext;
-  /** 世界书检索使用的历史消息数；缺省 6，0 表示仅使用当前输入。 */
+  /** 世界书检索使用的历史消息数；缺省 2，0 表示仅使用当前输入。 */
   loreHistoryMessages?: number;
   /** Immutable opening results from SaveSlot metadata; never recomputed during assembly. */
   fixedLore?: FixedLoreSnapshot;
