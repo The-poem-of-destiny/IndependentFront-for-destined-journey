@@ -27,6 +27,9 @@ const game = vi.hoisted(() => ({
   agentActivityRuns: [] as AgentActivityRun[],
   currentAgentActivityRun: null as AgentActivityRun | null,
   clearPendingInput: vi.fn(),
+  rewriteProse: vi.fn<() => Promise<{ ok: boolean; reason?: string; warning?: string }>>(
+    async () => ({ ok: true }),
+  ),
   rollbackOneTurn: vi.fn<() => Promise<TimelineRestoreResult>>(async () => ({
     status: 'restored',
     continuation: 'same-save',
@@ -48,6 +51,10 @@ vi.mock('../../../../src/ui/stores/image-preset-store', () => ({
 
 function userMsg(id: string, content: string): ChatMessage {
   return { id, role: 'user', content, timestamp: 0 };
+}
+
+function assistantMsg(id: string, content: string): ChatMessage {
+  return { id, role: 'assistant', content, timestamp: 0 };
 }
 
 describe('ChatFlow 右键菜单 — user 消息', () => {
@@ -295,5 +302,62 @@ describe('ChatFlow 思考中指示', () => {
       props: { messages: [userMsg('u1', '继续')], isGenerating: false },
     });
     expect(wrapper.find('.thinking-indicator').exists()).toBe(false);
+  });
+});
+
+describe('ChatFlow 右键「润色正文」', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    game.agentActivityRuns = [];
+    game.rewriteProse.mockResolvedValue({ ok: true });
+    useSettingsStore().settings.imageGenMode = 'off';
+  });
+
+  /** 最新一条正文右键 → 点「润色正文」（走完整 UI 路径，不直接调 store） */
+  async function rewriteFromLatestNarrative(): Promise<void> {
+    const wrapper = mount(ChatFlow, {
+      global: { stubs: { teleport: true, BeautifiedNarrative: true } },
+      props: { messages: [assistantMsg('a1', '原始正文。')] },
+    });
+    await wrapper.get('.bubble-row-narrative').trigger('contextmenu');
+    const button = wrapper
+      .findAll('.ctx-menu .ctx-item')
+      .find((b) => b.text().includes('润色正文'));
+    expect(button).toBeTruthy();
+    await button!.trigger('click');
+    await flushPromises();
+  }
+
+  it('成功但端点只回了 warning（base_url 不含 /beta）→ 成功提示之外再补一条警告', async () => {
+    game.rewriteProse.mockResolvedValueOnce({
+      ok: true,
+      warning:
+        '当前 API 源的 base_url 不含 /beta：DeepSeek 可能不接受前缀续写，本次仍按常规请求发送。',
+    });
+
+    await rewriteFromLatestNarrative();
+
+    expect(game.rewriteProse).toHaveBeenCalledWith('a1');
+    expect(ui.toast).toHaveBeenCalledWith('正文已润色', 'success');
+    expect(ui.toast).toHaveBeenCalledWith(
+      '当前 API 源的 base_url 不含 /beta：DeepSeek 可能不接受前缀续写，本次仍按常规请求发送。',
+      'warning',
+    );
+  });
+
+  it('协议不是 openai-chat 被硬拦 → 只显示原因，不提示成功', async () => {
+    game.rewriteProse.mockResolvedValueOnce({
+      ok: false,
+      reason: '「正文润色」需要 openai-chat 协议的 DeepSeek /beta 端点（当前 API 源协议为 gemini）',
+    });
+
+    await rewriteFromLatestNarrative();
+
+    expect(ui.toast).toHaveBeenCalledWith(
+      '「正文润色」需要 openai-chat 协议的 DeepSeek /beta 端点（当前 API 源协议为 gemini）',
+      'warning',
+    );
+    expect(ui.toast).not.toHaveBeenCalledWith('正文已润色', 'success');
   });
 });

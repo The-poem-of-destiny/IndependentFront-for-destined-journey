@@ -14,9 +14,11 @@ import {
   PROSE_REWRITE_AGENT_ID,
   PROSE_REWRITE_EXTRA_BODY,
   PROSE_REWRITE_FALLBACK_PROMPT,
+  PROSE_REWRITE_NON_BETA_WARNING,
   PROSE_REWRITE_PREFIX_SEED,
   buildProseRewriteMessages,
   callProseRewriteAgent,
+  checkProseRewriteEndpoint,
   extractProseRewriteOutput,
 } from '../../../src/core/story/prose-rewrite-agent';
 import type {
@@ -55,6 +57,53 @@ describe('buildProseRewriteMessages', () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════
+// checkProseRewriteEndpoint（端点识别）
+// ═══════════════════════════════════════════════════════════
+
+describe('checkProseRewriteEndpoint', () => {
+  it('openai-chat + /beta → 放行，没有 warning', () => {
+    expect(
+      checkProseRewriteEndpoint({
+        baseUrl: 'https://api.deepseek.com/beta',
+        protocol: 'openai-chat',
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it('protocol 缺席按 openai-chat 处理（旧端点行没有这格）', () => {
+    expect(checkProseRewriteEndpoint({ baseUrl: 'https://api.deepseek.com/beta' })).toEqual({
+      ok: true,
+    });
+  });
+
+  it('🔴 非 openai-chat 协议 → 硬拦，原因点名协议与 /beta 端点', () => {
+    for (const protocol of ['gemini', 'anthropic-messages'] as const) {
+      const verdict = checkProseRewriteEndpoint({
+        baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+        protocol,
+      });
+      expect(verdict.ok).toBe(false);
+      if (verdict.ok) continue;
+      expect(verdict.error).toContain('openai-chat');
+      expect(verdict.error).toContain(protocol);
+    }
+  });
+
+  it('openai-chat 但 base_url 不含 /beta → 只警告（反代可挂任意子路径，不当作能力判据）', () => {
+    const verdict = checkProseRewriteEndpoint({
+      baseUrl: 'https://api.deepseek.com/v1',
+      protocol: 'openai-chat',
+    });
+    expect(verdict).toEqual({ ok: true, warning: PROSE_REWRITE_NON_BETA_WARNING });
+  });
+
+  it('/beta 判定大小写与尾斜杠无关', () => {
+    for (const baseUrl of ['https://API.DeepSeek.com/BETA', 'https://relay.example/beta/']) {
+      expect(checkProseRewriteEndpoint({ baseUrl, protocol: 'openai-chat' })).toEqual({ ok: true });
+    }
+  });
+});
 // ═══════════════════════════════════════════════════════════
 // extractProseRewriteOutput
 // ═══════════════════════════════════════════════════════════
@@ -159,6 +208,45 @@ describe('callProseRewriteAgent', () => {
     expect(seen[0].request.model).toBe('deepseek-flash');
     expect(seen[0].request.temperature).toBe(0.8);
     expect(seen[0].request.maxTokens).toBe(4096);
+  });
+
+  it('🔴 协议不是 openai-chat → 拦下不发，一次网络都不打', async () => {
+    let called = false;
+    const { deps } = client(async () => {
+      called = true;
+      return { output: 'x', rawResponse: '' };
+    });
+    const result = await callProseRewriteAgent(
+      {
+        ...baseReq(),
+        endpoint: { ...endpoint(), protocol: 'gemini' } as ApiEndpoint,
+      },
+      deps,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('openai-chat');
+    // 硬拦的意义就在这里：绝不能让 prefix/reasoning_content 被静默丢掉再发出去
+    expect(called).toBe(false);
+  });
+
+  it('openai-chat 但 base_url 不带 /beta → 照常调用，warning 随结果返回', async () => {
+    const { deps, seen } = client(async () => ({ output: '改写后的正文。', rawResponse: '' }));
+    const result = await callProseRewriteAgent(
+      {
+        ...baseReq(),
+        endpoint: { ...endpoint(), baseUrl: 'https://api.deepseek.com/v1' } as ApiEndpoint,
+      },
+      deps,
+    );
+    expect(result).toEqual({
+      ok: true,
+      text: '改写后的正文。',
+      warning: PROSE_REWRITE_NON_BETA_WARNING,
+    });
+    // 只警告不拦：请求照发，前缀依旧在
+    expect(seen).toHaveLength(1);
+    expect(seen[0].request.messages[2]).toMatchObject({ role: 'assistant', prefix: true });
   });
 
   it('🔴 强制开思维链 + reasoning_effort=max（extraBody 原样带出）', async () => {

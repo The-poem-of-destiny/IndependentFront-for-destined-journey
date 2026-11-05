@@ -4191,13 +4191,15 @@ export class GamePipeline {
    *
    * 🔴 手动触发不经过 run()，照 image_prompt / 重铸的手动档先例：`ensureChainData()`
    *    惰性装配 configs（含 agent-config 的 systemPrompt）+ 独立活动账本。
+   * 🔴 端点识别在侧链里做（`checkProseRewriteEndpoint`）：**非 openai-chat 协议硬拦不发**，
+   *    `baseUrl` 不带 `/beta` 只回 warning（反代可挂任意子路径，不当作能力判据）。
    * 🔴 该 Agent 依赖 **DeepSeek beta 端点**（`baseUrl` 带 `/beta`）与前缀续写能力；
    *    调用时强制 `thinking.enabled` + `reasoning_effort=max`（见侧链的 EXTRA_BODY）。
    */
   async rewriteProseText(
     bodyText: string,
     signal?: AbortSignal,
-  ): Promise<{ ok: boolean; text?: string; reason?: string }> {
+  ): Promise<{ ok: boolean; text?: string; reason?: string; warning?: string }> {
     const trimmed = bodyText.trim();
     if (!trimmed) return { ok: false, reason: '没有可改写的正文' };
 
@@ -4238,7 +4240,11 @@ export class GamePipeline {
         activityError = result.error;
         return { ok: false, reason: result.error };
       }
-      return { ok: true, text: result.text };
+      return {
+        ok: true,
+        text: result.text,
+        ...(result.warning ? { warning: result.warning } : {}),
+      };
     } catch (err) {
       activityError = err instanceof Error ? err.message : String(err);
       console.error('[GamePipeline] prose_rewrite 侧链失败:', err);

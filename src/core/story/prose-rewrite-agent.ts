@@ -35,6 +35,43 @@ export const PROSE_REWRITE_EXTRA_BODY: JsonObject = {
   reasoning_effort: 'max',
 };
 
+/** `base_url` 不含 `/beta` 时的提示语（只提醒，不拦 —— 见 `checkProseRewriteEndpoint`）。 */
+export const PROSE_REWRITE_NON_BETA_WARNING =
+  '当前 API 源的 base_url 不含 /beta：DeepSeek 可能不接受前缀续写，本次仍按常规请求发送。';
+
+/**
+ * 端点的能力判定结果。`ok:false` = **拦下不发**；`ok:true` + `warning` = 照常发送但提示。
+ */
+export type ProseRewriteEndpointVerdict =
+  { ok: true; warning?: string } | { ok: false; error: string };
+
+/**
+ * 「正文润色」的端点识别 —— 只认**协议**与 `base_url` 形态，**不维护 provider / 模型能力表**。
+ *
+ * 🔴 硬拦：协议必须是 `openai-chat`。`prefix` / `reasoning_content` 只在 `openai-chat.ts`
+ *    的编解码里透传，绑到 gemini / anthropic 源时这两个字段会被静默丢掉 —— 最后那条变成
+ *    一条 `content: ''` 的空 assistant 轮次，语义不明，结果是模型乱写或上游 400。
+ *    「配错了还硬发」没有任何可解释的成功路径，所以在发请求之前失败，把原因原样给玩家。
+ *
+ * 🔴 只警告：`base_url` 不含 `/beta`。**这不是能力判据** —— 反代可以挂在任意子路径上，
+ *    所以不拦（对齐 `agent-orchestrator` 预填充那侧的「只提醒、不做端点校验」口径）。
+ */
+export function checkProseRewriteEndpoint(
+  endpoint: Pick<ApiEndpoint, 'baseUrl' | 'protocol'>,
+): ProseRewriteEndpointVerdict {
+  const protocol = endpoint.protocol ?? 'openai-chat';
+  if (protocol !== 'openai-chat') {
+    return {
+      ok: false,
+      error:
+        `「正文润色」需要 openai-chat 协议的 DeepSeek /beta 端点（当前 API 源协议为 ${protocol}）——` +
+        '前缀续写的 prefix / reasoning_content 只在该协议上透传，请到 设置 → API 重新绑定源。',
+    };
+  }
+  const hasBetaPath = endpoint.baseUrl.trim().toLowerCase().includes('/beta');
+  return hasBetaPath ? { ok: true } : { ok: true, warning: PROSE_REWRITE_NON_BETA_WARNING };
+}
+
 /** 兜底提示词：agent-config 缺 systemPrompt 时用（通用、无世界观/小说内容）。 */
 export const PROSE_REWRITE_FALLBACK_PROMPT = [
   '你是一名中文文风编辑。你的任务是改写用户给出的一段小说正文，使其文风更凝练、节奏更好。',
@@ -120,7 +157,8 @@ export interface ProseRewriteAgentDeps {
   clientFactory: (agentId: string, endpoint: ApiEndpoint, saveId: string) => ProseRewriteClient;
 }
 
-export type ProseRewriteResult = { ok: true; text: string } | { ok: false; error: string };
+export type ProseRewriteResult =
+  { ok: true; text: string; warning?: string } | { ok: false; error: string };
 
 /**
  * 侧链的那一次调用：装消息 → `chat`（带前缀续写 + 思考模式）→ 抽正文。
@@ -132,6 +170,10 @@ export async function callProseRewriteAgent(
   req: ProseRewriteChainRequest,
   deps: ProseRewriteAgentDeps,
 ): Promise<ProseRewriteResult> {
+  // 端点识别先于一切网络动作：协议不对就在这里失败（见 checkProseRewriteEndpoint）。
+  const verdict = checkProseRewriteEndpoint(req.endpoint);
+  if (!verdict.ok) return { ok: false, error: verdict.error };
+
   const bodyText = req.bodyText.trim();
   if (!bodyText) return { ok: false, error: '没有可改写的正文' };
 
@@ -167,7 +209,7 @@ export async function callProseRewriteAgent(
 
     const text = extractProseRewriteOutput(result.output ?? result.rawResponse ?? '');
     if (!text) return { ok: false, error: '模型没有产出可用的正文' };
-    return { ok: true, text };
+    return verdict.warning ? { ok: true, text, warning: verdict.warning } : { ok: true, text };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

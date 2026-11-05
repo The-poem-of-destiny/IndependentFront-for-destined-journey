@@ -75,7 +75,7 @@ export function setRewriteLoadoutImpl(impl: RewriteLoadoutImpl): void {
 /** 正文润色实现注入缝 —— GamePipeline 装配好 endpoint/chainData 后由 GamePage 挂进来 */
 export type RewriteProseImpl = (
   bodyText: string,
-) => Promise<{ ok: boolean; text?: string; reason?: string }>;
+) => Promise<{ ok: boolean; text?: string; reason?: string; warning?: string }>;
 
 let rewriteProseImpl: RewriteProseImpl | null = null;
 
@@ -1587,7 +1587,9 @@ export const useGameStore = defineStore('game', () => {
    * 🔴 实现走注入缝（GamePipeline.rewriteProseText），store 不直接碰引擎装配 ——
    *    与 rewriteLoadoutItem 同一条纪律。
    */
-  async function rewriteProse(messageId: string): Promise<{ ok: boolean; reason?: string }> {
+  async function rewriteProse(
+    messageId: string,
+  ): Promise<{ ok: boolean; reason?: string; warning?: string }> {
     if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
     if (!rewriteProseImpl) return { ok: false, reason: '游戏管线未就绪' };
     const msg = messages.value.find((m) => m.id === messageId);
@@ -1596,7 +1598,7 @@ export const useGameStore = defineStore('game', () => {
     const result = await rewriteProseImpl(msg.content);
     if (!result.ok || !result.text) return { ok: false, reason: result.reason ?? '润色失败' };
     await replaceMessageContent(messageId, result.text);
-    return { ok: true };
+    return { ok: true, ...(result.warning ? { warning: result.warning } : {}) };
   }
 
   /**
