@@ -213,20 +213,44 @@ describe('Story v2 read gates', () => {
     expect((await selectStoryLore([b], ctx)).zones[5]).toEqual([]);
   });
 
-  it('uses only current input and the last six conversational messages', async () => {
-    const ctx = context();
-    ctx.characters[0].location = 'outside';
-    ctx.history = Array.from({ length: 7 }, (_, i) => ({
-      id: String(i),
-      role: 'assistant' as const,
-      content: i === 0 ? 'festival' : 'neutral',
-      timestamp: i,
-    }));
-    const b = book([['festival', festival, 'celebration']]);
-    expect((await selectStoryLore([b], ctx)).zones[5]).toEqual([]);
-    ctx.history[1].content = 'festival';
-    expect((await selectStoryLore([b], ctx)).zones[5]).toHaveLength(1);
-  });
+  it.each([
+    { limit: undefined, count: 2 },
+    { limit: 0, count: 0 },
+    { limit: 1, count: 1 },
+    { limit: 2, count: 2 },
+    { limit: 6, count: 6 },
+    { limit: 12, count: 12 },
+  ])(
+    'uses current input and the last $count conversational messages when history limit is $limit',
+    async ({ limit, count }) => {
+      const ctx = context();
+      ctx.characters[0].location = 'outside';
+      ctx.loreHistoryMessages = limit;
+      const messages = Array.from({ length: count + 1 }, (_, i) => ({
+        id: String(i),
+        role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+        content: i === 0 ? 'festival' : 'neutral',
+        timestamp: i,
+      }));
+      ctx.history = [
+        { id: 'system-before', role: 'system', content: 'festival', timestamp: -1 },
+        ...messages,
+        { id: 'system-after', role: 'system', content: 'festival', timestamp: count + 1 },
+      ];
+      const b = book([['festival', festival, 'celebration']]);
+      expect((await selectStoryLore([b], ctx)).zones[5]).toEqual([]);
+
+      ctx.userInput = 'festival';
+      expect((await selectStoryLore([b], ctx)).zones[5]).toHaveLength(1);
+      ctx.userInput = '';
+      expect((await selectStoryLore([b], ctx)).zones[5]).toEqual([]);
+
+      if (count > 0) {
+        messages[1].content = 'festival';
+        expect((await selectStoryLore([b], ctx)).zones[5]).toHaveLength(1);
+      }
+    },
+  );
 
   it('activated required lore survives empty selection and budget pruning', async () => {
     const result = await assemble(
