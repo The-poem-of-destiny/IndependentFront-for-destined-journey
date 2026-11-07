@@ -30,6 +30,7 @@ import type { PackUpgradeDiff } from '@engine/content/content-pack-plan';
 import {
   checkPackUpdate,
   downloadLatestPack,
+  isPackUpdateAvailable,
   type PackUpdateInfo,
 } from '../../lib/content-pack-updater';
 
@@ -88,7 +89,17 @@ const packError = ref<string | null>(null);
 const packInstalling = ref(false);
 
 /** 在线更新仅下载密文；授权校验和运行时解密由 content-store 处理。 */
-const packUpdate = ref<PackUpdateInfo | null>(null);
+const checkedPackUpdate = ref<PackUpdateInfo | null>(null);
+const packUpdate = computed(() => {
+  const info = checkedPackUpdate.value;
+  return info
+    ? {
+        ...info,
+        updateAvailable:
+          info.available && isPackUpdateAvailable(info.packVersion, activePackVersion.value),
+      }
+    : null;
+});
 const packCheckingUpdate = ref(false);
 
 async function checkForPackUpdate() {
@@ -99,7 +110,7 @@ async function checkForPackUpdate() {
       ui.toast(result.message, 'error');
       return;
     }
-    packUpdate.value = result.info;
+    checkedPackUpdate.value = result.info;
     if (!result.info.available) ui.toast('发布源暂无内容包', 'info');
     else if (result.info.updateAvailable)
       ui.toast(`发现新版本 ${result.info.packVersion}`, 'success');
