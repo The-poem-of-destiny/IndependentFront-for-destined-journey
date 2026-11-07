@@ -1949,6 +1949,7 @@ describe('contentPacks 表 (v20 / D18)', () => {
       packId: 'pack_test_rt',
       packVersion: '1.0.0',
       installedAt: 1_700_000_000_000,
+      source: 'local-file' as const,
       payload: {
         formatVersion: 1,
         packId: 'pack_test_rt',
@@ -2026,6 +2027,7 @@ describe('reconcilePackState (D18 / §5.7)', () => {
       packId: 'pack_recon',
       packVersion: '1.0.0',
       installedAt: 1_700_000_000_000,
+      source: 'local-file' as const,
       payload: {
         formatVersion: 1,
         packId: 'pack_recon',
@@ -2104,6 +2106,7 @@ describe('reconcilePackState (D18 / §5.7)', () => {
       packId: 'pack_preset',
       packVersion: '1.0.0',
       installedAt: 1_700_000_000_000,
+      source: 'local-file' as const,
       payload: {
         formatVersion: 1,
         packId: 'pack_preset',

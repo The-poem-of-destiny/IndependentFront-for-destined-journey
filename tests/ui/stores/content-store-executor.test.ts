@@ -207,7 +207,7 @@ describe('content-store 执行器 —— 1. 安装（含冲突确认路径）', 
     expect(books.every((b) => b.builtIn === true)).toBe(true);
     // 存档重写 + agent 写 contentPacks（不写 settings.agents 是另一测）
     const rec = await getDatabase().contentPacks.get('fated-poem-official');
-    expect(rec?.payload.packVersion).toBe('1.0.0');
+    expect(rec?.payload?.packVersion).toBe('1.0.0');
     // 预设已落库
     const presets = await getDatabase().presets.toArray();
     expect(presets.map((p) => p.id)).toContain('pack-story-preset');

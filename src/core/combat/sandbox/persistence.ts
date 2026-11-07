@@ -10,6 +10,7 @@
  */
 
 import { getDatabase } from '../../persistence/database';
+import { isProtectedContentInstalled, getPackRuntimeRevision } from '../../content/pack-runtime';
 import { withSaveWriteLock } from '../../state/state-write-queue';
 import type { CombatSandboxRecord } from './types';
 
@@ -20,15 +21,22 @@ function detach<T>(value: T): T {
 
 /** 读取某存档的在办战斗（无则 undefined） */
 export async function getCombatSandbox(saveId: string): Promise<CombatSandboxRecord | undefined> {
+  if (isProtectedContentInstalled()) return undefined;
+  const revision = getPackRuntimeRevision();
   return withSaveWriteLock(saveId, async () => {
+    if (isProtectedContentInstalled() || revision !== getPackRuntimeRevision()) return undefined;
     const row = await getDatabase().combatSandboxes.get(saveId);
+    if (isProtectedContentInstalled() || revision !== getPackRuntimeRevision()) return undefined;
     return row ? detach(row) : undefined;
   });
 }
 
 /** 写入/覆盖某存档的在办战斗 */
 export async function saveCombatSandbox(record: CombatSandboxRecord): Promise<void> {
+  if (isProtectedContentInstalled()) return;
+  const revision = getPackRuntimeRevision();
   await withSaveWriteLock(record.saveId, async () => {
+    if (isProtectedContentInstalled() || revision !== getPackRuntimeRevision()) return;
     await getDatabase().combatSandboxes.put(detach(record));
   });
 }

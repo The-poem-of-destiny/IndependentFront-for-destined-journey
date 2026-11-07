@@ -20,6 +20,13 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+vi.mock('../../../src/ui/stores/content-store', () => ({
+  useContentStore: () => ({
+    ensurePackLeaseActive: async () => true,
+    leaseMessage: '',
+    loadProjectDefaults: async () => ({ version: 1, agents: {} }),
+  }),
+}));
 /** 侧链真正收到的取消信号 —— 替身的唯一产出 */
 const seen: {
   chat: Array<AbortSignal | undefined>;
@@ -217,6 +224,7 @@ describe('run() 的收尾不许踩到下一轮（runSeq 守卫）', () => {
     });
     (pipeline as any).loadPlotData = loadPlotData;
     const first = pipeline.run('第一轮');
+    await vi.waitFor(() => expect(loadPlotData).toHaveBeenCalledOnce());
     // 模拟「abort() 解锁输入 → 玩家立刻发下一轮」：新一轮抢过了 runSeq 与控制器
     (pipeline as any).runSeq = 99;
     const roundTwo = new AbortController();

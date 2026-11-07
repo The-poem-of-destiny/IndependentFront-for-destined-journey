@@ -1,5 +1,11 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, onScopeDispose } from 'vue';
+import {
+  getActivePackPayload,
+  getPackRuntimeRevision,
+  isProtectedContentInstalled,
+  subscribePackRuntime,
+} from '@engine/content/pack-runtime';
 import type {
   SaveSlot,
   CharacterState,
@@ -712,12 +718,25 @@ export const useGameStore = defineStore('game', () => {
 
   /** 最近 10 回合的 Agent 调试历史；当前回合永远是最后一条。 */
   const agentLogHistory = ref<DebugTurnRecord[]>([]);
+  let debugPackPayload = getActivePackPayload();
+  onScopeDispose(
+    subscribePackRuntime(() => {
+      const next = getActivePackPayload();
+      if (next !== debugPackPayload) {
+        debugPackPayload = next;
+        agentLogHistory.value = [];
+        ejsUiLog.value = [];
+      }
+    }),
+  );
   const agentLog = computed(
     () => agentLogHistory.value[agentLogHistory.value.length - 1]?.entries ?? [],
   );
   let debugLogWriteQueue: Promise<void> = Promise.resolve();
 
   function queueDebugTurnWrite(turn: DebugTurnRecord): void {
+    if (isProtectedContentInstalled()) return;
+    const revision = getPackRuntimeRevision();
     let snapshot: DebugTurnRecord;
     try {
       // Pinia 把嵌套对象包成 Proxy，structuredClone 会直接抛 DataCloneError。
@@ -728,7 +747,10 @@ export const useGameStore = defineStore('game', () => {
       return;
     }
     debugLogWriteQueue = debugLogWriteQueue
-      .then(() => saveDebugTurn(snapshot))
+      .then(() => {
+        if (revision === getPackRuntimeRevision() && !isProtectedContentInstalled())
+          return saveDebugTurn(snapshot);
+      })
       .catch((error) => console.error('[game-store] 调试历史持久化失败:', error));
   }
 
@@ -1237,7 +1259,7 @@ export const useGameStore = defineStore('game', () => {
     plotOutline.value = projection.outline;
     saveProfile.value = projection.profile;
     messages.value = projection.messages;
-    agentLogHistory.value = debugTurns;
+    agentLogHistory.value = isProtectedContentInstalled() ? [] : debugTurns;
     turnCounter = projection.turn;
     return true;
   }

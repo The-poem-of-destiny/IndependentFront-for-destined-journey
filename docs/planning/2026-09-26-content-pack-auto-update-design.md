@@ -1,5 +1,7 @@
 # 内容包自动更新 v1 设计（Release-only 加密分发）
 
+> 2026-11-07 更新：本文仅保留历史方案。免登录下载、公开内嵌密钥及 BFF 解密通道已由 Discord 授权密文分发替代，当前配置与边界以 [Discord 客户端说明](../reference/discord-content-pack-client.md) 为准。
+>
 > **状态：✅ 已实施（2026-09-26），端到端链路已验证。** 发布仓
 > `The-poem-of-destiny/poem-dist` 已创建（release-only 公开仓）。当前最新 release =
 > `v2.8.0`（14 个 agent，含 `combat_enemy`），引擎 `server/content-pack-release.ts`

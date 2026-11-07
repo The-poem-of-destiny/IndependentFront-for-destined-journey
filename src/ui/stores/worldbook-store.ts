@@ -8,12 +8,25 @@
  *    settings-store 的 deep watch 会把整个设置对象序列化进 localStorage，
  *    写回去等于把刚搬出来的 ~0.85 MB 又塞回配额里，迁移白做。
  *
- * 写入约定：一律**先 await 落库再更新 ref**。ref 是库的投影，不是第二真相来源；
- * 落库失败时 ref 保持旧值，UI 不会显示一条实际不存在的书。
+ * 写入约定：玩家/本地书先 await 落库再更新 ref；授权包只更新可撤销内存 overlay。
+ * 落库失败时磁盘投影保持旧值，锁定后受保护 id 不能绕过 overlay 写回正文。
  */
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
-import { getDatabase } from '@engine/persistence/database';
+import { computed, onScopeDispose, ref, shallowRef } from 'vue';
+import {
+  getDatabase,
+  migrateLegacyContentPacks,
+  purgeProtectedPackPlaintext,
+} from '@engine/persistence/database';
+import {
+  getActivePackPayload,
+  isProtectedPackBookId,
+  getRuntimePackBooks,
+  isProtectedContentInstalled,
+  overlayRows,
+  setRuntimePackBooks,
+  subscribePackRuntime,
+} from '@engine/content/pack-runtime';
 import { loadBuiltInWorldBooks } from '@engine/content/builtin-worldbooks';
 import type { WorldBook, WorldBookEntry } from '@engine/types/types';
 import { migrateWorldBooksToDexie, type WorldBookMigrationOutcome } from './worldbook-migration';
@@ -28,7 +41,20 @@ function toRow(book: WorldBook): WorldBook {
 
 export const useWorldBookStore = defineStore('worldbook', () => {
   /** 全部世界书（内置 / 导入 / 工坊）—— Dexie 的响应式投影 */
-  const books = ref<WorldBook[]>([]);
+  const diskBooks = ref<WorldBook[]>([]);
+  const packOverlayBooks = shallowRef(getRuntimePackBooks());
+  const books = computed(() => overlayRows(diskBooks.value, packOverlayBooks.value));
+  onScopeDispose(
+    subscribePackRuntime(() => {
+      packOverlayBooks.value = getRuntimePackBooks();
+    }),
+  );
+  function setPackOverlayBooks(rows: WorldBook[]): void {
+    setRuntimePackBooks(rows);
+  }
+  function protectedBook(id: string): boolean {
+    return isProtectedPackBookId(id);
+  }
   /** init() 是否已完成（含失败收场）——消费端可据此显示加载态 */
   const ready = ref(false);
   /** 上次迁移结果，仅供调试/测试断言 */
@@ -63,7 +89,9 @@ export const useWorldBookStore = defineStore('worldbook', () => {
   /** 从 Dexie 读全表填 ref */
   async function hydrate(): Promise<void> {
     try {
-      books.value = await getDatabase().worldBooks.toArray();
+      await migrateLegacyContentPacks();
+      await purgeProtectedPackPlaintext();
+      diskBooks.value = await getDatabase().worldBooks.toArray();
     } catch {
       // IndexedDB 不可用 → 留空数组，消费端有 loadWorldBooksWithFallback 兜底
     }
@@ -77,11 +105,11 @@ export const useWorldBookStore = defineStore('worldbook', () => {
   async function mergeBuiltIns(): Promise<void> {
     try {
       const builtIn = await loadBuiltInWorldBooks();
-      const existingIds = new Set(books.value.map((b) => b.id));
+      const existingIds = new Set(diskBooks.value.map((b) => b.id));
       const missing = builtIn.filter((b) => !existingIds.has(b.id)).map(toRow);
       if (missing.length === 0) return;
       await getDatabase().worldBooks.bulkPut(missing);
-      books.value = [...books.value, ...missing];
+      diskBooks.value = [...diskBooks.value, ...missing];
     } catch {
       // fetch / IndexedDB 不可用时静默跳过（与迁移前行为一致）
     }
@@ -92,27 +120,32 @@ export const useWorldBookStore = defineStore('worldbook', () => {
   /** 新增或整本覆盖 */
   async function upsertBook(book: WorldBook): Promise<void> {
     const row = toRow(book);
+    if (protectedBook(book.id)) {
+      setPackOverlayBooks(overlayRows(packOverlayBooks.value, [row]));
+      return;
+    }
     await getDatabase().worldBooks.put(row);
-    const idx = books.value.findIndex((b) => b.id === row.id);
-    if (idx >= 0) books.value[idx] = row;
-    else books.value.push(row);
+    const idx = diskBooks.value.findIndex((b) => b.id === row.id);
+    if (idx >= 0) diskBooks.value[idx] = row;
+    else diskBooks.value.push(row);
   }
 
   /** 批量新增或覆盖（导入 / 工坊安装用） */
   async function upsertBooks(list: WorldBook[]): Promise<void> {
-    if (list.length === 0) return;
-    const rows = list.map(toRow);
+    for (const book of list.filter((row) => protectedBook(row.id))) await upsertBook(book);
+    const rows = list.filter((row) => !protectedBook(row.id)).map(toRow);
+    if (rows.length === 0) return;
     await getDatabase().worldBooks.bulkPut(rows);
-    for (const row of rows) {
-      const idx = books.value.findIndex((b) => b.id === row.id);
-      if (idx >= 0) books.value[idx] = row;
-      else books.value.push(row);
-    }
+    diskBooks.value = overlayRows(diskBooks.value, rows);
   }
 
   async function deleteBook(id: string): Promise<void> {
+    if (protectedBook(id)) {
+      setPackOverlayBooks(packOverlayBooks.value.filter((book) => book.id !== id));
+      return;
+    }
     await getDatabase().worldBooks.delete(id);
-    books.value = books.value.filter((b) => b.id !== id);
+    diskBooks.value = diskBooks.value.filter((b) => b.id !== id);
   }
 
   /** 新增或覆盖条目（按 uid 匹配）。书不存在 → 抛，调用方自己决定怎么报 */
@@ -187,14 +220,16 @@ export const useWorldBookStore = defineStore('worldbook', () => {
     try {
       // 先 await 确保 pack 已装载到模块缓存（boot 顺序：loadProjectDefaults → 这里）
       const { loadAllDefaultBooks } = await import('./content-store');
-      const builtIn = await loadAllDefaultBooks();
+      const protectedPack = isProtectedContentInstalled() && !!getActivePackPayload();
+      if (protectedPack) setPackOverlayBooks((await loadAllDefaultBooks()).map(toRow));
+      const builtIn = protectedPack ? await loadBuiltInWorldBooks() : await loadAllDefaultBooks();
       const rows = builtIn.map(toRow);
       const db = getDatabase();
       await db.transaction('rw', db.worldBooks, async () => {
         await db.worldBooks.clear();
         if (rows.length > 0) await db.worldBooks.bulkPut(rows);
       });
-      books.value = rows;
+      diskBooks.value = rows;
       useSettingsStore().settings.activeWorldBookId = null;
     } catch {
       return; // fetch / IndexedDB 不可用时静默跳过
@@ -203,6 +238,7 @@ export const useWorldBookStore = defineStore('worldbook', () => {
 
   return {
     books,
+    setPackOverlayBooks,
     ready,
     lastMigration,
     init,

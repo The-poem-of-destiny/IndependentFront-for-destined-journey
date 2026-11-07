@@ -21,6 +21,12 @@
 import { defineStore } from 'pinia';
 import { ref, watch, onScopeDispose } from 'vue';
 import {
+  getActivePackPayload,
+  getPackRuntimeRevision,
+  isProtectedContentInstalled,
+  subscribePackRuntime,
+} from '@engine/content/pack-runtime';
+import {
   deleteApiEndpoint,
   getApiEndpoints,
   getApiRpmPolicies,
@@ -729,6 +735,16 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const projectAgentDefaults = ref<AgentProjectDefaults>({ version: 1, agents: {} });
 
+  let runtimePayload = getActivePackPayload();
+  onScopeDispose(
+    subscribePackRuntime(() => {
+      const next = getActivePackPayload();
+      if (next !== runtimePayload) {
+        runtimePayload = next;
+        projectAgentDefaults.value = { version: 1, agents: {} };
+      }
+    }),
+  );
   /** 从 data/defaults/agent-config.json 加载项目默认配置 */
   async function loadAgentProjectDefaults() {
     // 内容-引擎分离（波 1 T2 / D16）：经 ContentProvider 收口。
@@ -736,10 +752,12 @@ export const useSettingsStore = defineStore('settings', () => {
     //    有机会在 fetch 落地前灌注。本波（T2）ready 立即 resolve，等价于直接 fetch。
     //    装载失败上报 contentStatus（不阻塞启动），这里照旧走空骨架兜底。
     const { useContentStore } = await import('./content-store');
+    const runtimeRevision = getPackRuntimeRevision();
     const config = (await useContentStore().loadProjectDefaults()) as {
       version?: number;
       agents?: Record<string, AgentDefaultEntry>;
     };
+    if (runtimeRevision !== getPackRuntimeRevision()) return;
     try {
       if (config && config.agents) {
         projectAgentDefaults.value = config as AgentProjectDefaults;
@@ -787,6 +805,8 @@ export const useSettingsStore = defineStore('settings', () => {
     //    于是**无 pack 的 overlay 开发态与装包态拿到同一组默认预设** —— 此前 presets.json
     //    只是 pack 的输入，overlay 下那份额外默认预设根本进不来（症状：卸载后预设只剩一个）。
     //    播种规则逐 id：库里没有 → 补；有同 id → 只把 name 同步成出厂版（保留用户 prompts 编辑）。
+    // Protected factory presets are supplied by the memory overlay, never boot-seeded to disk.
+    if (isProtectedContentInstalled()) return;
     const pd = projectAgentDefaults.value?.agents;
     if (!pd) return;
 
@@ -807,6 +827,7 @@ export const useSettingsStore = defineStore('settings', () => {
       /* provider 不可用时只用内嵌 story 预设 */
     }
 
+    if (runtimeRevision !== getPackRuntimeRevision() || isProtectedContentInstalled()) return;
     if (factoryPresets.length > 0) {
       try {
         const { getPresets, savePresets } = await import('@engine/persistence/database');

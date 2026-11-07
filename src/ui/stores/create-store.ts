@@ -15,7 +15,12 @@
  */
 
 import { defineStore } from 'pinia';
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onScopeDispose } from 'vue';
+import {
+  getActivePackPayload,
+  getPackRuntimeRevision,
+  subscribePackRuntime,
+} from '@engine/content/pack-runtime';
 import type {
   CharacterState,
   CreatePreset,
@@ -904,6 +909,17 @@ export const useCreateStore = defineStore('create', () => {
     model: string;
     timestamp: number;
   } | null>(null);
+  let outlinePackPayload = getActivePackPayload();
+  onScopeDispose(
+    subscribePackRuntime(() => {
+      const next = getActivePackPayload();
+      if (next !== outlinePackPayload) {
+        outlinePackPayload = next;
+        abortPlotGeneration();
+        lastPlotGenerationMeta.value = null;
+      }
+    }),
+  );
   /** 会话内大纲历史（最多 5 版，重新生成/修改时旧版入栈，可回退） */
   const outlineHistory = ref<PlotOutline[]>([]);
   const chaptersHistory = ref<ParsedOutlineOutput['chapters'][]>([]);
@@ -1298,6 +1314,13 @@ export const useCreateStore = defineStore('create', () => {
   /** 核心生成循环: 通过模板系统 buildAgentMessagesAsync 构建上下文，selfCritique.score < 6 时重试（最多 2 次调用） */
   async function runOutlineGeneration(initialUserMessage: string): Promise<boolean> {
     plotGenerationError.value = null;
+    const { useContentStore } = await import('./content-store');
+    const content = useContentStore();
+    if (!(await content.ensurePackLeaseActive())) {
+      plotGenerationError.value = content.leaseMessage;
+      return false;
+    }
+    const packRevision = getPackRuntimeRevision();
     await useSettingsStore().initApiSecrets();
     // 🔴 F10：端点解析失败时区分「还没配」与「绑定了但已失效」——
     //    前者让人去配置，后者是设置页里那个池被删了，指引到 Agent 配置重选。
@@ -1410,7 +1433,10 @@ export const useCreateStore = defineStore('create', () => {
           messages.push({ role: 'user', content: userMessage });
         }
 
+        if (packRevision !== getPackRuntimeRevision() || !(await content.ensurePackLeaseActive()))
+          return false;
         const result = await streamOutlineChat(client, { ...llmParams, messages }, attempt + 1);
+        if (packRevision !== getPackRuntimeRevision()) return false;
         if (result.cancelled) {
           plotGenerationError.value = '大纲生成已取消';
           plotStreamStats.value = null;

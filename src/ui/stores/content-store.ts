@@ -39,7 +39,43 @@
  */
 
 import { defineStore, getActivePinia } from 'pinia';
-import { ref } from 'vue';
+import { computed, onScopeDispose, ref, watch } from 'vue';
+import {
+  getActivePackPayload,
+  getRuntimePackBooks,
+  getRuntimePackPresets,
+  installRuntimePack,
+  setRuntimePackBooks,
+  setRuntimePackPresets,
+  overlayRows,
+} from '@engine/content/pack-runtime';
+import type {
+  PackLeaseState,
+  ProtectedPackDownload,
+  PackKeyLease,
+  PackRenewal,
+} from '@engine/types/types-pack-auth';
+import {
+  authenticatedPackRequest,
+  discordAuthRevision,
+  discordKeyLease,
+  discordSession,
+  effectivePackNow,
+  initializeDiscordAuthClient,
+  savePackKeyLease,
+  PackApiError,
+} from '../lib/discord-auth-client';
+import {
+  decryptContentPackAtRuntime,
+  PackCryptoError,
+  validateEncryptedEnvelope,
+  verifyEnvelopeBinding,
+} from '../lib/pack-crypto';
+import {
+  createPackLeaseScheduler,
+  isPackAccessDenied,
+  isPackLeaseNearExpiry,
+} from '../lib/pack-lease-scheduler';
 import { detach } from './db-write';
 import type { ContentStatus } from '@engine/types/types-content';
 // 占位基线清单：随引擎打包的静态资源（设计 §6），**不是**内容树的一部分。
@@ -87,6 +123,8 @@ import {
 } from '@engine/content/content-pack-plan';
 import {
   getDatabase,
+  migrateLegacyContentPacks,
+  purgeProtectedPackPlaintext,
   exportAllData,
   importAllData,
   savePresets,
@@ -243,19 +281,24 @@ function getActivePackRecord(): ContentPackRecord | null {
   return activePackRecord;
 }
 
-/** 当前已装的 pack payload（未装返回 undefined） */
-function getActivePackPayload(): ContentPack | undefined {
-  return activePackRecord?.payload;
-}
-
 /** 整份替换模块级 pack 缓存（装包/卸载执行器 + boot hydrate 用） */
-export function setActivePackRecord(record: ContentPackRecord | null): void {
+export function setActivePackRecord(
+  record: ContentPackRecord | null,
+  decrypted?: ContentPack,
+): void {
   activePackRecord = record;
+  const protectedPack = !!record?.encryptedEnvelope || record?.source === 'legacy-locked';
+  installRuntimePack(protectedPack ? decrypted : record?.payload, protectedPack, {
+    bookIds: record?.ownedBookIds,
+    presetIds: record?.ownedPresetIds,
+  });
   // 同步 pack 美化规则 provider（D20：pack 规则走 provider 内存层）。
   // 传 null = 占位态，beautifier-store 回落占位文件。
   // 🔴 不写 `?? []`：pack 未声明 beautifierRules 分节（absent）应回落占位文件
   //    （D20 三态：absent = 无话可说），只有显式 [] 才是刻意清空。
-  setPackRulesProvider(record ? () => record.payload.beautifierRules?.rules : null);
+  setPackRulesProvider(
+    getActivePackPayload() ? () => getActivePackPayload()?.beautifierRules?.rules : null,
+  );
   // 🔴 provider 挂载/替换后必须让 beautifier-store 重算 presetRules（2026-08-07 真机
   //    竞态：App.vue 的 beautifier.init() 先于 boot 的 hydratePackState，init 时 provider
   //    未挂 → 回落占位 5 条，之后没人再刷新 → 装包后美化一直是占位规则）。
@@ -662,6 +705,287 @@ export const useContentStore = defineStore('content', () => {
    */
   const fetchReports = ref<ContentFetchReport[]>([]);
 
+  const leaseState = ref<PackLeaseState>('LOCAL');
+  const leaseError = ref<string | null>(null);
+  const boundUserId = ref<string | null>(null);
+  const leaseExpiresAt = ref<number | null>(null);
+  const protectedPack = ref(false);
+  let generation = 0;
+  let disposed = false;
+  let renewPromise: Promise<void> | null = null;
+  const leaseMessage = computed(
+    () =>
+      ({
+        LOCAL: '本地内容，无需 Discord 授权',
+        ACTIVE_UNLOCKED: '授权有效，自动续期已启用',
+        RENEWING: '正在自动复验并续期',
+        LOCKED_NOT_LOGGED_IN: '请登录绑定的 Discord 账号',
+        LOCKED_ACCOUNT_MISMATCH: '当前账号与内容包绑定账号不同',
+        LOCKED_EXPIRED: '授权已到期或租约缺失，联网后重新验证',
+        LOCKED_REVOKED: 'Discord 社区资格未通过，内容已锁定',
+        LOCKED_CORRUPT: '内容包校验失败，请重新获取',
+        LOCKED_LEGACY: '旧明文内容包已清理，请登录后重新获取',
+      })[leaseState.value],
+  );
+  const scheduler = createPackLeaseScheduler({
+    lease: () => {
+      const e = activePackRecord?.encryptedEnvelope;
+      return e
+        ? {
+            issuedAt: e.issuedAt,
+            expiresAt: Math.min(e.expiresAt, discordSession.value?.expiresAt ?? e.expiresAt),
+            verifiedAt: discordSession.value?.verifiedAt ?? 0,
+          }
+        : null;
+    },
+    now: effectivePackNow,
+    canRenew: () =>
+      !!activePackRecord?.encryptedEnvelope &&
+      !!discordSession.value?.access.eligible &&
+      discordSession.value.user.id === activePackRecord.boundUserId &&
+      discordSession.value.expiresAt > effectivePackNow() &&
+      !execBusy &&
+      !disposed,
+    renew: renewAndUnlock,
+    lock: () => lockActivePack(),
+  });
+  onScopeDispose(() => {
+    disposed = true;
+    generation++;
+    scheduler.stop();
+  });
+  watch(
+    discordAuthRevision,
+    () => {
+      generation++;
+      if (!activePackRecord?.encryptedEnvelope) return;
+      lockActivePack();
+      // Let an obsolete in-flight operation settle before restoring the same account.
+      void (renewPromise ?? Promise.resolve())
+        .catch(() => {})
+        .then(() => {
+          if (!disposed) return scheduler.trigger(true);
+        })
+        .catch(() => {});
+    },
+    { flush: 'sync' },
+  );
+  watch(
+    discordKeyLease,
+    (keyLease) => {
+      if (!activePackRecord?.encryptedEnvelope) return;
+      if (!keyLease) {
+        generation++;
+        lockActivePack();
+        return;
+      }
+      if (keyLease.expiresAt === activePackRecord.expiresAt) return;
+      const epoch = generation,
+        revision = discordAuthRevision.value,
+        packId = activePackRecord.packId;
+      // A different tab may have renewed the shared ciphertext header. Adopt it without a renew loop.
+      void (async () => {
+        const row = await getDatabase().contentPacks.get(packId);
+        assertCurrent(epoch, revision);
+        if (
+          !row?.encryptedEnvelope ||
+          discordKeyLease.value !== keyLease ||
+          activePackRecord?.expiresAt === keyLease.expiresAt
+        )
+          return;
+        const pack = await decryptContentPackAtRuntime(
+          row.encryptedEnvelope,
+          keyLease,
+          discordSession.value,
+          effectivePackNow(),
+        );
+        assertCurrent(epoch, revision);
+        activateProtected(row, pack);
+      })().catch(() => {
+        if (epoch === generation) lockActivePack();
+      });
+    },
+    { flush: 'sync' },
+  );
+
+  function syncPackMetadata(row: ContentPackRecord | null): void {
+    activePackId.value = row?.packId ?? null;
+    activePackVersion.value = row?.packVersion ?? null;
+    protectedPack.value = !!row?.encryptedEnvelope || row?.source === 'legacy-locked';
+    boundUserId.value = row?.boundUserId ?? null;
+    leaseExpiresAt.value = row?.expiresAt ?? null;
+  }
+  function currentLockReason(): PackLeaseState {
+    if (activePackRecord?.source === 'legacy-locked') return 'LOCKED_LEGACY';
+    const session = discordSession.value;
+    if (!session || session.expiresAt <= effectivePackNow()) return 'LOCKED_NOT_LOGGED_IN';
+    if (session.user.id !== activePackRecord?.boundUserId) return 'LOCKED_ACCOUNT_MISMATCH';
+    if (!session.access.eligible) return 'LOCKED_REVOKED';
+    return 'LOCKED_EXPIRED';
+  }
+  function lockActivePack(reason: PackLeaseState = currentLockReason()): void {
+    const row = activePackRecord;
+    if (!row || (!row.encryptedEnvelope && row.source !== 'legacy-locked')) return;
+    if (leaseState.value === reason && !getActivePackPayload()) return;
+    setActivePackRecord(row);
+    seedPlaceholderRegistry();
+    leaseState.value = reason;
+    contentStatus.value = 'placeholder';
+    void reloadContentRegistryPlaceholders();
+    void refreshRuntimeConsumers();
+  }
+  async function refreshRuntimeConsumers(): Promise<void> {
+    try {
+      const beaut = await useBeautStore();
+      await beaut.refreshPresetRules();
+      const settings = await useSettingsStoreLazy();
+      await settings.loadAgentProjectDefaults();
+    } catch (error) {
+      console.warn('[content-pack] 刷新运行时内容失败:', error);
+    }
+  }
+  function activateProtected(row: ContentPackRecord, pack: ContentPack): void {
+    if (
+      getActivePackPayload() &&
+      activePackRecord?.encryptedEnvelope?.ciphertextB64 === row.encryptedEnvelope?.ciphertextB64 &&
+      activePackRecord?.boundUserId === row.boundUserId
+    ) {
+      activePackRecord = row;
+      syncPackMetadata(row);
+      leaseState.value = 'ACTIVE_UNLOCKED';
+      leaseError.value = null;
+      scheduler.start();
+      return;
+    }
+    setActivePackRecord(row, pack);
+    syncPackMetadata(row);
+    seedPlaceholderRegistry();
+    setContentRegistry({ ...getContentRegistry(), ...packRegistryFaces(pack) });
+    leaseState.value = 'ACTIVE_UNLOCKED';
+    leaseError.value = null;
+    contentStatus.value = 'pack';
+    scheduler.start();
+    // Do not await provider consumers inside hydrate: they themselves await hydrate.
+    void refreshRuntimeConsumers();
+    void reloadContentRegistryPlaceholders();
+  }
+  function assertCurrent(epoch: number, revision: number): void {
+    if (disposed || epoch !== generation || revision !== discordAuthRevision.value)
+      throw new PackApiError(409, 'OPERATION_SUPERSEDED', '账号或内容状态已变化，请重试');
+  }
+  function renewAndUnlock(): Promise<void> {
+    if (renewPromise) return renewPromise;
+    const row = activePackRecord;
+    if (!row?.encryptedEnvelope) return Promise.resolve();
+    const epoch = generation,
+      revision = discordAuthRevision.value;
+    const oldPayload = getActivePackPayload();
+    renewPromise = (async () => {
+      try {
+        const session = discordSession.value;
+        if (!session || session.user.id !== row.boundUserId || !session.access.eligible)
+          throw new PackCryptoError('LEASE_REQUIRED', leaseMessage.value);
+        if (oldPayload) leaseState.value = 'RENEWING';
+        const result = await authenticatedPackRequest('renew', {
+          packId: row.packId,
+          packVersion: row.packVersion,
+        });
+        assertCurrent(epoch, revision);
+        const renewal = result.renewal as PackRenewal | undefined;
+        if (
+          !renewal ||
+          renewal.packId !== row.packId ||
+          renewal.packVersion !== row.packVersion ||
+          renewal.boundUserId !== row.boundUserId
+        )
+          throw new PackCryptoError('INVALID_ENVELOPE', '续期响应与已安装内容包不匹配');
+        // Select only lease header fields: a renewal must never replace the encrypted body.
+        const envelope = {
+          ...row.encryptedEnvelope!,
+          issuedAt: renewal.issuedAt,
+          expiresAt: renewal.expiresAt,
+          wrapNonceB64: renewal.wrapNonceB64,
+          wrappedDekB64: renewal.wrappedDekB64,
+        };
+        const keyLease = result.keyLease as PackKeyLease;
+        const pack = await decryptContentPackAtRuntime(
+          envelope,
+          keyLease,
+          discordSession.value,
+          effectivePackNow(),
+        );
+        assertCurrent(epoch, revision);
+        const updated: ContentPackRecord = {
+          ...row,
+          encryptedEnvelope: envelope,
+          expiresAt: envelope.expiresAt,
+        };
+        await getDatabase().transaction('rw', getDatabase().contentPacks, async () => {
+          assertCurrent(epoch, revision);
+          await getDatabase().contentPacks.put(updated);
+        });
+        assertCurrent(epoch, revision);
+        savePackKeyLease(keyLease);
+        if (oldPayload && getActivePackPayload() === oldPayload) {
+          // A header-only renewal must preserve in-memory edits and running chains.
+          activePackRecord = updated;
+          syncPackMetadata(updated);
+          leaseState.value = 'ACTIVE_UNLOCKED';
+          leaseError.value = null;
+        } else activateProtected(updated, pack);
+      } catch (error) {
+        if (epoch !== generation || revision !== discordAuthRevision.value || disposed) throw error;
+        leaseError.value = error instanceof Error ? error.message : String(error);
+        if (isPackAccessDenied(error)) lockActivePack();
+        else if (
+          error instanceof PackCryptoError &&
+          ['INVALID_ENVELOPE', 'DECRYPT_FAILED'].includes(error.code)
+        )
+          lockActivePack('LOCKED_CORRUPT');
+        else if (
+          oldPayload &&
+          row.encryptedEnvelope!.expiresAt > effectivePackNow() &&
+          discordSession.value &&
+          discordSession.value.expiresAt > effectivePackNow()
+        )
+          leaseState.value = 'ACTIVE_UNLOCKED';
+        else lockActivePack();
+        throw error;
+      }
+    })().finally(() => {
+      renewPromise = null;
+    });
+    return renewPromise;
+  }
+  async function renewPackLease(): Promise<void> {
+    await hydratePackState();
+    await scheduler.trigger(true);
+  }
+  async function ensurePackLeaseActive(): Promise<boolean> {
+    await hydratePackState();
+    if (!protectedPack.value) return true;
+    const row = activePackRecord;
+    try {
+      if (!row?.encryptedEnvelope || !getActivePackPayload()) return false;
+      verifyEnvelopeBinding(
+        row.encryptedEnvelope,
+        discordKeyLease.value,
+        discordSession.value,
+        effectivePackNow(),
+      );
+      const schedule = {
+        ...row.encryptedEnvelope,
+        verifiedAt: discordSession.value?.verifiedAt ?? 0,
+      };
+      if (isPackLeaseNearExpiry(schedule, effectivePackNow()))
+        void scheduler.trigger().catch(() => {});
+      return true;
+    } catch {
+      lockActivePack();
+      void scheduler.trigger().catch(() => {});
+      return false;
+    }
+  }
   /**
    * 上报一次内容 fetch 的结果（§5.5）。
    *
@@ -819,34 +1143,69 @@ export const useContentStore = defineStore('content', () => {
   async function hydratePackState(): Promise<void> {
     if (hydratePromise) return hydratePromise;
     hydratePromise = (async () => {
+      initializeDiscordAuthClient();
       try {
+        await migrateLegacyContentPacks();
+        await purgeProtectedPackPlaintext();
         const records = await getDatabase().contentPacks.toArray();
-        const active = records.find((r) => r.packId === r.payload?.packId && r.packId) ?? null;
-        // 💡 单 pack 场景：取最后一条（主 pack）。多 pack 共存留待后续波次扩展。
-        const activeRecord = records.length > 0 ? records[records.length - 1] : active;
-        setActivePackRecord(activeRecord);
-        if (activeRecord) {
-          activePackId.value = activeRecord.packId;
-          activePackVersion.value = activeRecord.packVersion;
-          if (contentStatus.value === 'placeholder') contentStatus.value = 'pack';
-        } else {
-          activePackId.value = null;
-          activePackVersion.value = null;
-          if (contentStatus.value === 'pack') contentStatus.value = 'placeholder';
+        records.sort((a, b) => a.installedAt - b.installedAt);
+        const row = records[records.length - 1] ?? null;
+        const epoch = generation,
+          revision = discordAuthRevision.value;
+        setActivePackRecord(row);
+        syncPackMetadata(row);
+        if (!row) return;
+        if (row.source === 'legacy-locked') {
+          lockActivePack('LOCKED_LEGACY');
+          return;
         }
-        // 🔴 竞态修复（2026-08-07 真机）：provider 此刻才挂载，而 App.vue 的
-        //    beautifier.init() 已先跑过（回落占位 5 条）——这里重算 presetRules，
-        //    pack 规则才能生效。无 pack 时（provider=null）重算是无害空转。
+        if (!row.encryptedEnvelope) {
+          leaseState.value = 'LOCAL';
+          contentStatus.value = 'pack';
+          try {
+            await (await useBeautStore()).refreshPresetRules();
+          } catch {
+            /* optional consumer */
+          }
+          return;
+        }
+        scheduler.start();
         try {
-          const { useBeautifierStore } = await import('./beautifier-store');
-          await useBeautifierStore().refreshPresetRules();
-        } catch (err) {
-          // Pinia 未就绪时静默；消费端各自兜底。但留痕便于诊断 ——
-          // beautifier-store 侧另有 watch contentStatus 收敛保险（2026-08-08）。
-          console.warn('[content-store] hydratePackState 重算 presetRules 失败:', err);
+          const pack = await decryptContentPackAtRuntime(
+            row.encryptedEnvelope,
+            discordKeyLease.value,
+            discordSession.value,
+            effectivePackNow(),
+          );
+          assertCurrent(epoch, revision);
+          activateProtected(row, pack);
+          scheduler.check();
+        } catch (error) {
+          if (epoch !== generation || revision !== discordAuthRevision.value) return;
+          lockActivePack(
+            error instanceof PackCryptoError &&
+              ['INVALID_ENVELOPE', 'DECRYPT_FAILED'].includes(error.code)
+              ? 'LOCKED_CORRUPT'
+              : currentLockReason(),
+          );
+          if (
+            leaseState.value !== 'LOCKED_CORRUPT' &&
+            discordSession.value?.access.eligible &&
+            discordSession.value.user.id === row.boundUserId
+          ) {
+            try {
+              await scheduler.trigger();
+            } catch {
+              /* Locked state and retry policy are already applied. */
+            }
+          }
         }
-      } catch {
-        // Dexie 不可用 → 缓存保持现状，不阻断（boot 兜底）
+      } catch (error) {
+        leaseError.value = error instanceof Error ? error.message : String(error);
+        // Failure is closed: no stale payload may survive a failed boot reconciliation.
+        setActivePackRecord(null);
+        seedPlaceholderRegistry();
+        contentStatus.value = 'placeholder';
       }
     })();
     return hydratePromise;
@@ -866,7 +1225,12 @@ export const useContentStore = defineStore('content', () => {
       const entries = s.metadata?.enabledWorldBookEntries;
       if (entries) enabled.push(...entries);
     }
-    return { worldBooks, presets, beautifierRules, enabledWorldBookEntries: enabled };
+    return {
+      worldBooks: overlayRows(worldBooks, getRuntimePackBooks()),
+      presets: overlayRows(presets, getRuntimePackPresets()),
+      beautifierRules,
+      enabledWorldBookEntries: enabled,
+    };
   }
 
   /**
@@ -922,6 +1286,15 @@ export const useContentStore = defineStore('content', () => {
     const beaut = await useBeautStore();
     const settings = await useSettingsStoreLazy();
 
+    // Retire protected ownership before the local writer runs, or a concurrent purge
+    // can mistake the new local rows for resurrected protected plaintext.
+    if (activePackRecord?.encryptedEnvelope || activePackRecord?.source === 'legacy-locked') {
+      const previous = activePackRecord;
+      generation++;
+      scheduler.stop();
+      setActivePackRecord(null);
+      await getDatabase().contentPacks.delete(previous.packId);
+    }
     // a. worldBooks 分节（upsertBooks / 删 id / 冲突确认覆盖）
     const wbPlan = plan.sections.worldBooks;
     if (wbPlan) {
@@ -1007,6 +1380,7 @@ export const useContentStore = defineStore('content', () => {
       packVersion: pack.packVersion,
       installedAt: Date.now(),
       payload: pack,
+      source: 'local-file',
       sectionHashes: pack.sectionHashes,
       notes,
     } satisfies ContentPackRecord);
@@ -1025,6 +1399,10 @@ export const useContentStore = defineStore('content', () => {
     // 一个「看着装了、其实少了字段」的缓存。
     const row = await getDatabase().contentPacks.get(pack.packId);
     setActivePackRecord(row ?? null);
+    syncPackMetadata(row ?? null);
+    leaseState.value = 'LOCAL';
+    scheduler.stop();
+    savePackKeyLease(null);
     activePackId.value = pack.packId;
     activePackVersion.value = pack.packVersion;
     contentStatus.value = 'pack';
@@ -1105,7 +1483,10 @@ export const useContentStore = defineStore('content', () => {
   }
 
   /** 存档 uid 迁移执行（D43）—— 装包正向：rewrite 重写 + needsSelectionPartitions 标记 */
-  async function applySaveUidMigration(migration: PackSaveUidMigration | undefined): Promise<void> {
+  async function applySaveUidMigration(
+    migration: PackSaveUidMigration | undefined,
+    refresh = true,
+  ): Promise<void> {
     if (!migration) return;
     const db = getDatabase();
     const saves = await db.saves.toArray();
@@ -1153,7 +1534,7 @@ export const useContentStore = defineStore('content', () => {
         changed = true;
       }
     }
-    if (changed) {
+    if (changed && refresh) {
       // 触发存档 UI 重读（loadSaves）；失败静默（装包路径的存档刷新不是硬依赖）
       try {
         const { useGameStore } = await import('./game-store');
@@ -1168,6 +1549,154 @@ export const useContentStore = defineStore('content', () => {
   // 一次性装包守卫：仅同一时刻允许一个装/卸进行（执行器自身可控；并发由调用方串行）
   let execBusy = false;
 
+  async function installProtectedPack(
+    download: ProtectedPackDownload,
+    opts: { confirmConflicts?: boolean } = {},
+  ): Promise<PackInstallOutcome> {
+    const { envelope, keyLease } = download;
+    validateEncryptedEnvelope(envelope);
+    if (execBusy)
+      return {
+        ok: false,
+        status: 'busy',
+        packId: envelope.packId,
+        packVersion: envelope.packVersion,
+      };
+    execBusy = true;
+    const epoch = ++generation,
+      revision = discordAuthRevision.value;
+    try {
+      const pack = await decryptContentPackAtRuntime(
+        envelope,
+        keyLease,
+        discordSession.value,
+        effectivePackNow(),
+      );
+      assertCurrent(epoch, revision);
+      const previous = activePackRecord;
+      const baseline = getActivePackPayload() ? buildPackBaseline(getActivePackPayload()!) : {};
+      await loadPlaceholderHashes();
+      const current = await buildCurrentLibrary();
+      const plan = planPackInstall(
+        pack,
+        current,
+        baseline,
+        placeholderHashesToBaseline(getPlaceholderHashes()),
+      );
+      if (hasAnyConflict(plan) && !opts.confirmConflicts)
+        return {
+          ok: false,
+          status: 'needs_confirmation',
+          packId: pack.packId,
+          packVersion: pack.packVersion,
+          plan,
+        };
+      assertCurrent(epoch, revision);
+      const embedded = Object.values(pack.agentDefaults?.agents ?? {}).flatMap((agent) =>
+        agent.preset ? [agent.preset.id] : [],
+      );
+      const ownedBookIds = [
+        ...new Set([
+          ...(previous?.ownedBookIds ?? previous?.payload?.worldBooks?.map((b) => b.id) ?? []),
+          ...(pack.worldBooks ?? []).map((b) => b.id),
+        ]),
+      ];
+      const ownedPresetIds = [
+        ...new Set([
+          ...(previous?.ownedPresetIds ?? previous?.payload?.presets?.map((p) => p.id) ?? []),
+          ...(pack.presets ?? []).map((p) => p.id),
+          ...embedded,
+        ]),
+      ];
+      const row: ContentPackRecord = {
+        packId: pack.packId,
+        packVersion: pack.packVersion,
+        installedAt: Date.now(),
+        source: 'discord',
+        encryptedEnvelope: detach(envelope),
+        boundUserId: envelope.boundUserId,
+        expiresAt: envelope.expiresAt,
+        ownedBookIds,
+        ownedPresetIds,
+      };
+      const db = getDatabase();
+      await db.transaction(
+        'rw',
+        [
+          db.contentPacks,
+          db.worldBooks,
+          db.presets,
+          db.saves,
+          db.promptSessions,
+          db.debugTurns,
+          db.combatSandboxes,
+        ],
+        async () => {
+          assertCurrent(epoch, revision);
+          for (const id of ownedBookIds) {
+            const book = await db.worldBooks.get(id);
+            if (book && book.builtIn !== false && book.partition !== 'creative_workshop')
+              await db.worldBooks.delete(id);
+          }
+          await db.presets.bulkDelete(ownedPresetIds);
+          await db.promptSessions.clear();
+          await db.debugTurns.clear();
+          await db.combatSandboxes.clear();
+          await applySaveUidMigration(plan.saveUidMigration, false);
+          if (previous && previous.packId !== row.packId)
+            await db.contentPacks.delete(previous.packId);
+          await db.contentPacks.put(row);
+          assertCurrent(epoch, revision);
+        },
+      );
+      assertCurrent(epoch, revision);
+      savePackKeyLease(keyLease);
+      activateProtected(row, pack);
+      await (await useWbStore()).hydrate();
+      const { loadPresets } = await import('../composables/usePresets');
+      await loadPresets();
+      assertCurrent(epoch, revision);
+      await switchActivePresetToPack(pack, await useSettingsStoreLazy());
+      return {
+        ok: true,
+        status: 'installed',
+        packId: pack.packId,
+        packVersion: pack.packVersion,
+        plan,
+        notes: collectNotes(plan),
+      };
+    } finally {
+      execBusy = false;
+    }
+  }
+
+  async function uninstallProtectedPack(): Promise<PackUninstallOutcome> {
+    const row = activePackRecord;
+    if (!row) return { ok: false, status: 'no_pack' };
+    if (execBusy) return { ok: false, status: 'busy' };
+    execBusy = true;
+    generation++;
+    scheduler.stop();
+    // Unmount synchronously, before the first disk await or any late renewal response.
+    lockActivePack();
+    try {
+      await purgeProtectedPackPlaintext();
+      await getDatabase().contentPacks.delete(row.packId);
+      savePackKeyLease(null);
+      setActivePackRecord(null);
+      syncPackMetadata(null);
+      leaseState.value = 'LOCAL';
+      leaseError.value = null;
+      seedPlaceholderRegistry();
+      await reloadContentRegistryPlaceholders();
+      contentStatus.value = 'placeholder';
+      await refreshRuntimeConsumers();
+      await (await useWbStore()).hydrate();
+      return { ok: true, status: 'uninstalled', notes: [] };
+    } finally {
+      execBusy = false;
+    }
+  }
   /**
    * 安装内容包（D19 / §5.2 安装流）。
    *
@@ -1215,7 +1744,10 @@ export const useContentStore = defineStore('content', () => {
       // 升级的 diff 展示由 upgradePack 单独提供（UI 层按 packId 分流）；installPack 本身
       // 只负责「装这一版」—— 旧基线用于四态规则判「现 hash = 基线 → updated 静默覆盖」。
       const existing = await getDatabase().contentPacks.get(pack.packId);
-      const packBaseline = existing ? buildPackBaseline(existing.payload) : {};
+      const oldPayload = existing?.encryptedEnvelope
+        ? getActivePackPayload(existing.packId)
+        : existing?.payload;
+      const packBaseline = oldPayload ? buildPackBaseline(oldPayload) : {};
       // 🔴 先装载占位基线（D20：占位 hash 清单是四态规则的操作数；T15 产出前文件 404 → 空基线，
       //    首安装覆盖占位书会退化为 conflicted —— D42 面占位清单落地后自动补上。）
       await loadPlaceholderHashes();
@@ -1236,6 +1768,11 @@ export const useContentStore = defineStore('content', () => {
       }
 
       const snapshot = await exportAllData();
+      const previousRecord = activePackRecord;
+      const previousPayload = getActivePackPayload();
+      const previousBooks = getRuntimePackBooks(),
+        previousPresets = getRuntimePackPresets();
+      const previousAuthRevision = discordAuthRevision.value;
       try {
         const notes = await applyInstall(
           pack,
@@ -1262,7 +1799,40 @@ export const useContentStore = defineStore('content', () => {
           pack.packVersion,
           err,
         );
+        if (previousRecord?.encryptedEnvelope || previousRecord?.source === 'legacy-locked') {
+          const db = getDatabase();
+          await db.transaction('rw', db.contentPacks, async () => {
+            await db.contentPacks.delete(pack.packId);
+            if (existing && existing.packId !== previousRecord.packId)
+              await db.contentPacks.put(existing);
+            await db.contentPacks.put(previousRecord);
+          });
+        }
         await rollbackTo(snapshot);
+        if (previousRecord?.encryptedEnvelope) {
+          setActivePackRecord(previousRecord);
+          syncPackMetadata(previousRecord);
+          if (previousAuthRevision === discordAuthRevision.value && previousPayload) {
+            try {
+              verifyEnvelopeBinding(
+                previousRecord.encryptedEnvelope,
+                discordKeyLease.value,
+                discordSession.value,
+                effectivePackNow(),
+              );
+              activateProtected(previousRecord, previousPayload);
+              setRuntimePackBooks(previousBooks);
+              setRuntimePackPresets(previousPresets);
+            } catch {
+              lockActivePack();
+            }
+          } else lockActivePack();
+        } else {
+          setActivePackRecord(previousRecord);
+          syncPackMetadata(previousRecord);
+          leaseState.value = previousRecord?.source === 'legacy-locked' ? 'LOCKED_LEGACY' : 'LOCAL';
+        }
+        await (await useWbStore()).hydrate();
         throw err;
       }
     } finally {
@@ -1301,11 +1871,15 @@ export const useContentStore = defineStore('content', () => {
       return installPack(pack, opts);
     }
     try {
-      const packBaseline = buildPackBaseline(existing.payload);
+      const oldPayload = existing.encryptedEnvelope
+        ? getActivePackPayload(existing.packId)
+        : existing.payload;
+      if (!oldPayload) return installPack(pack, opts);
+      const packBaseline = buildPackBaseline(oldPayload);
       await loadPlaceholderHashes();
       const placeholderBaseline = placeholderHashesToBaseline(getPlaceholderHashes());
       const current = await buildCurrentLibrary();
-      const oldPlan = planPackInstall(existing.payload, current, packBaseline, placeholderBaseline);
+      const oldPlan = planPackInstall(oldPayload, current, packBaseline, placeholderBaseline);
       const newPlan = planPackInstall(pack, current, packBaseline, placeholderBaseline);
       const upgradeDiff = diffPackUpgrade(oldPlan, newPlan);
 
@@ -1351,7 +1925,10 @@ export const useContentStore = defineStore('content', () => {
     if (execBusy) {
       return { ok: false, status: 'busy' };
     }
+    if (active.encryptedEnvelope || active.source === 'legacy-locked')
+      return uninstallProtectedPack();
     const installedPack = active.payload;
+    if (!installedPack) return { ok: false, status: 'no_pack' };
     execBusy = true;
     try {
       const packBaseline = buildPackBaseline(installedPack);
@@ -1523,6 +2100,15 @@ export const useContentStore = defineStore('content', () => {
     loadRawProjectDefaults,
     resolveProjectPresets,
     hydratePackState,
+    leaseState,
+    leaseMessage,
+    leaseError,
+    boundUserId,
+    leaseExpiresAt,
+    protectedPack,
+    installProtectedPack,
+    renewPackLease,
+    ensurePackLeaseActive,
     installPack,
     upgradePack,
     uninstallPack,

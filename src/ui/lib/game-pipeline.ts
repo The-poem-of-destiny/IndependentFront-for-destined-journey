@@ -48,6 +48,8 @@ import type { StreamCallbacks } from '@engine/agents/agent-client';
 import { createStateManager } from '@engine/state/state-manager';
 import { projectStoryOutput, projectStreamingStory } from '@engine/story/story-output';
 import { loadWorldBooksWithFallback } from '@engine/content/builtin-worldbooks';
+import { getActivePackPayload, subscribePackRuntime } from '@engine/content/pack-runtime';
+import { useContentStore } from '../stores/content-store';
 import { filterBooksByEnabledEntries } from '@engine/content/worldbook-loader';
 import { buildStatData } from '@engine/character/stat-projection';
 import { buildPassSeed } from '@engine/ejs/ejs-rng';
@@ -545,10 +547,29 @@ export class GamePipeline {
     return [...(this.game.ejsUiLog ?? [])];
   }
 
+  private stopPackRuntime: () => void;
+  private async admitPackLease(): Promise<boolean> {
+    const content = useContentStore();
+    if (await content.ensurePackLeaseActive()) return true;
+    this.notify(content.leaseMessage, 'warning');
+    return false;
+  }
   constructor(deps: GamePipelineDeps) {
     this.game = deps.gameStore;
     this.settings = deps.settingsStore;
     this.saveId = deps.saveId;
+    let payload = getActivePackPayload();
+    this.stopPackRuntime = subscribePackRuntime(() => {
+      this.chainData = null;
+      this.invalidatePromptSessions();
+      const next = getActivePackPayload();
+      if (next !== payload) {
+        payload = next;
+        this.abortController?.abort();
+        this._combatSandbox = null;
+        this.game.exitCombat();
+      }
+    });
   }
 
   // 🪦 Q-06：`syncSnapshotSettings` 已删。它把 settings-store 的两个字段每轮抄进
@@ -587,6 +608,7 @@ export class GamePipeline {
   /** 发送开场 Prompt（首次加载存档时调用），作为首条用户消息注入管线 */
   async sendOpeningPrompt(onStoryChunk?: StoryChunkCallback): Promise<void> {
     if (!this.ownsActiveSave) return;
+    if (!(await this.admitPackLease())) return;
     // 🔴 必须早于 markOpeningPromptConsumed：被拒的一轮不许烧掉开场认领
     if (!this.admitStoryContextMode()) return;
     const release = this.acquireSaveWork();
@@ -670,6 +692,7 @@ export class GamePipeline {
     let activityMessage: string | undefined;
 
     try {
+      if (!(await this.admitPackLease()) || !this.isRunCurrent(controller)) return false;
       // 1. 先快照既有历史；当前输入只走 userInput，避免同时出现在 NARRATIVE 与 USER_INPUT。
       const existingSourceMessageId = isUserMessage
         ? undefined
@@ -1040,6 +1063,8 @@ export class GamePipeline {
 
   dispose(): void {
     this.disposed = true;
+    this.stopPackRuntime();
+    this.chainData = null;
     this.abort();
     this.invalidatePromptSessions();
   }
@@ -3538,6 +3563,7 @@ export class GamePipeline {
    *      `actionOrder` 顺延回退）；一轮全部结算完 → `round++`、重置槽位。
    */
   private async driveCombatSandbox(): Promise<CombatSummaryResult | null> {
+    if (!(await this.admitPackLease())) return null;
     const session = this._combatSandbox;
     if (!session) return null;
 
@@ -4124,6 +4150,7 @@ export class GamePipeline {
     presets: AgentPreset[];
     agentDefaults: Record<string, Record<string, unknown>>;
   }> {
+    if (!(await this.admitPackLease())) throw new Error('内容包授权不可用');
     if (this.chainData) return this.chainData;
     const { presets, agentDefaults } = await this.loadPresets();
     const worldBooks = await this.loadActiveWorldBooks();

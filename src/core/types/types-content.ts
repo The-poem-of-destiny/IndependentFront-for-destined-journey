@@ -52,6 +52,9 @@ import type { PackRandomEventsSection } from './types-random-events';
  * 合并默认值会把那条语义静默覆盖掉（见 agent-settings.ts 同名字段注释）。
  */
 export interface AgentProjectDefaults {
+  /** Embedded factory presets are runtime defaults, not user settings. */
+  preset?: ChatPreset;
+  presetId?: string;
   model: string;
   systemPrompt: string;
   template: string;

@@ -1,50 +1,60 @@
 import { Hono } from 'hono';
-import { loadLatestManifest, loadLatestPack } from '../content-pack-release';
+import { bodyLimit } from 'hono/body-limit';
+import { resolvePackServerUrl } from '../content-pack-release';
 
+/** Local BFF only forwards opaque sessions/ciphertext; no Discord secret or pack key is held here. */
 const app = new Hono();
-
-/**
- * 内容包自动更新 v1 —— BFF 侧的两条只读路由。
- *
- * 前端不直接打 GitHub（Release 资产下载会 302 到 `release-assets.githubusercontent.com`，
- * 那一跳**不带 CORS 头**，浏览器 fetch 必被拦；实测 2026-09-26），所以拉取与解密
- * 全在服务端完成，前端只读本地 BFF 的同源明文。
- *
- * 🔴 本路由**不接受任何 URL / 仓库参数** —— 发布仓坐标与密钥全在 `content-pack-release.ts`
- *    里解析，从根上杜绝 SSRF。
- */
-
-/** GET /latest —— 查最新版本清单。无发布版本返回 available:false（不是错误）。 */
-app.get('/latest', async (c) => {
+app.use('*', async (c, next) => {
+  c.header('Cache-Control', 'no-store');
+  await next();
+});
+app.use('*', bodyLimit({ maxSize: 4096 }));
+app.get('/config', (c) => {
   try {
-    const latest = await loadLatestManifest();
-    if (!latest) return c.json({ ok: true, available: false });
-    return c.json({
-      ok: true,
-      available: true,
-      tag: latest.tag,
-      ...latest.manifest,
-    });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    console.error('[content-pack] 查询最新版本失败:', message);
-    return c.json({ ok: false, error: message }, 502);
+    return c.json({ ok: true, serverUrl: resolvePackServerUrl() });
+  } catch {
+    return c.json({ ok: false, error: '中心服地址配置无效' }, 503);
   }
 });
-
-/** GET /blob —— 拉取最新内容包并解密，直接回明文 pack JSON。 */
-app.get('/blob', async (c) => {
-  try {
-    const result = await loadLatestPack();
-    if (!result) return c.json({ error: '当前没有可用的内容包发布' }, 404);
-    c.header('X-Pack-Version', result.manifest.packVersion);
-    c.header('Cache-Control', 'no-store');
-    return c.json(result.pack as Record<string, unknown>);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    console.error('[content-pack] 拉取内容包失败:', message);
-    return c.json({ error: message }, 502);
-  }
-});
-
+const routes = [
+  ['GET', '/latest', '/api/v1/pack/latest'],
+  ['GET', '/blob', '/api/v1/pack/blob'],
+  ['POST', '/renew', '/api/v1/pack/renew'],
+  ['POST', '/verify', '/api/v1/auth/discord/verify'],
+  ['POST', '/logout', '/api/v1/auth/discord/logout'],
+] as const;
+for (const [method, path, upstream] of routes) {
+  app.on(method, path, async (c) => {
+    const authorization = c.req.header('Authorization');
+    if (!authorization || !/^Bearer [\w.-]+$/i.test(authorization) || authorization.length > 16400)
+      return c.json({ ok: false, code: 'AUTH_REQUIRED', error: '请先登录 Discord' }, 401);
+    try {
+      const base = resolvePackServerUrl();
+      if (!base)
+        return c.json(
+          { ok: false, code: 'PACK_SERVER_NOT_CONFIGURED', error: '尚未配置 POEM_PACK_SERVER_URL' },
+          503,
+        );
+      const response = await fetch(`${base}${upstream}`, {
+        method,
+        headers: { Authorization: authorization, 'Content-Type': 'application/json' },
+        ...(method === 'POST' ? { body: await c.req.text() } : {}),
+        signal: AbortSignal.timeout(30000),
+        redirect: 'error',
+      });
+      const headers = new Headers({
+        'Content-Type': response.headers.get('Content-Type') || 'application/json',
+        'Cache-Control': 'no-store',
+      });
+      const retryAfter = response.headers.get('Retry-After');
+      if (retryAfter) headers.set('Retry-After', retryAfter);
+      return new Response(response.body, { status: response.status, headers });
+    } catch {
+      return c.json(
+        { ok: false, code: 'PACK_SERVER_UNAVAILABLE', error: '内容中心服暂时无法连接，请稍后重试' },
+        502,
+      );
+    }
+  });
+}
 export { app as contentPackRoutes };

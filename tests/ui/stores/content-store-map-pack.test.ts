@@ -138,6 +138,7 @@ async function seedPackRecord(pack: ContentPack): Promise<void> {
     packVersion: pack.packVersion,
     installedAt: Date.now(),
     payload: pack,
+    source: 'local-file',
   });
 }
 

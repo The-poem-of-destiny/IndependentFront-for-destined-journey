@@ -13,6 +13,18 @@ import { getEntriesForAgent } from '@engine/content/worldbook-loader';
 import { collectCompleteStoryTurns } from '@engine/memory/memory-context';
 import { storyTurnSource } from '@engine/memory/story-memory-source';
 
+import { installRuntimePack } from '../../../src/core/content/pack-runtime';
+const leaseGuard = vi.hoisted(() => vi.fn(async () => true));
+vi.mock('../../../src/ui/stores/content-store', () => ({
+  useContentStore: () => ({
+    ensurePackLeaseActive: leaseGuard,
+    leaseMessage: '授权不可用',
+    loadProjectDefaults: async () => ({ version: 1, agents: {} }),
+  }),
+}));
+beforeEach(() => {
+  leaseGuard.mockResolvedValue(true);
+});
 vi.mock('@engine/plot/plot-engine', () => ({
   preCheckPlot: vi.fn(async () => ({
     triggeredEvents: [{ title: '触发的事件' }],
@@ -356,6 +368,7 @@ describe('sendOpeningPrompt', () => {
       throw new Error('early failure with pending work');
     });
     const running = pipeline.run('first');
+    await vi.waitFor(() => expect((pipeline as any).buildContext).toHaveBeenCalledOnce());
     pipeline.abort();
     const locked = game.isGenerating;
     const overlapping = pipeline.run('second');
@@ -2799,7 +2812,7 @@ describe('independent review ownership repros', () => {
       saveId: 'save-test',
     });
     const task = pipeline.sendOpeningPrompt();
-    expect(game.markOpeningPromptConsumed).toHaveBeenCalled();
+    await vi.waitFor(() => expect(game.markOpeningPromptConsumed).toHaveBeenCalled());
     pipeline.dispose();
     gate.resolve(true);
     await task;
@@ -3317,5 +3330,40 @@ describe('Story 上下文新模式（v2）', () => {
     expect(computeEmbeddingWithMetaMock).not.toHaveBeenCalled();
     const summaries = (vi.mocked(db.commitStoryTurnMemory).mock.calls[0] as any[])[2];
     expect(summaries[0].embedding).toBeUndefined();
+  });
+});
+
+describe('Discord pack run admission', () => {
+  it('does not consume the opening claim or persist a user message when locked', async () => {
+    leaseGuard.mockResolvedValue(false);
+    const game = makeGameStore({ openingPrompt: 'OPENING' });
+    const pipeline = new GamePipeline({
+      gameStore: game,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    await pipeline.sendOpeningPrompt();
+    expect(game.markOpeningPromptConsumed).not.toHaveBeenCalled();
+    expect(await pipeline.run('blocked')).toBe(false);
+    expect(game.addMessage).not.toHaveBeenCalled();
+    pipeline.dispose();
+  });
+  it('aborts pending work and clears prompt/side-chain caches synchronously on locking', () => {
+    installRuntimePack({ formatVersion: 1, packId: 'fixture', packVersion: '1.0.0' }, true);
+    const game = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore: game,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    }) as any;
+    const controller = new AbortController();
+    pipeline.abortController = controller;
+    pipeline.chainData = { worldBooks: [{ entries: [{ content: 'private' }] }] };
+    installRuntimePack(undefined, true);
+    expect(controller.signal.aborted).toBe(true);
+    expect(pipeline.chainData).toBeNull();
+    expect(game.exitCombat).toHaveBeenCalled();
+    pipeline.dispose();
+    installRuntimePack(undefined, false);
   });
 });

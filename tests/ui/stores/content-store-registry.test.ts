@@ -274,6 +274,7 @@ describe('ensureContentRegistryLoaded —— pack 优先（D20 三态）', () =>
       packVersion: pack.packVersion,
       installedAt: Date.now(),
       payload: pack,
+      source: 'local-file',
     });
   }
 

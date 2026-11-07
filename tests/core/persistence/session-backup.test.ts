@@ -568,6 +568,7 @@ function makePackRecord(overrides: Partial<ContentPackRecord> = {}): ContentPack
     packId: 'test-pack',
     packVersion: '1.0.0',
     installedAt: Date.now(),
+    source: 'local-file',
     payload: {
       formatVersion: 1,
       packId: 'test-pack',

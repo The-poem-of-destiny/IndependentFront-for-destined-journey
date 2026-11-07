@@ -30,6 +30,12 @@ import {
   DB_VERSION,
 } from './database';
 import type { ContentPackRecord } from './database';
+import {
+  getActivePackPayload,
+  getRuntimePackBooks,
+  getRuntimePackPresets,
+  overlayRows,
+} from '../content/pack-runtime';
 // 记忆编号分配器与 generateMemoryId() **共用同一个实现**（两处各写一份就是漂移的来路：
 // 一边补齐到 6 位、另一边截断到 6 位，撞号了也不会有任何报错）。
 import { allocateMemoryIds } from '../memory/memory-summarizer';
@@ -304,6 +310,7 @@ function entryIdentityKey(ref: SessionEntryRef): string | null {
  * 判不出关系就**不进清单**：宁可少报一条「未安装内容包」，也不要让收件人对着一串
  * 与这份存档毫无关系的包名发愁。真缺内容时世界书条目那一段照样会报。
  */
+// Protected pack payloads are read only from the current in-memory runtime, never from backup data.
 function selectReferencedPacks(
   packs: ContentPackRecord[],
   books: WorldBook[],
@@ -315,9 +322,10 @@ function selectReferencedPacks(
 
   const out: SessionDependencies['packs'] = [];
   for (const pack of packs) {
+    const payload = pack.encryptedEnvelope ? getActivePackPayload(pack.packId) : pack.payload;
     let referenced = false;
 
-    for (const packBook of pack.payload?.worldBooks ?? []) {
+    for (const packBook of payload?.worldBooks ?? []) {
       // 本机安装的那本优先（用户可能改过条目）；没装则退回 payload 里的定义
       const book = booksById.get(packBook.id) ?? packBook;
       if ((book.entries ?? []).some((e) => enabledTokens.has(`${book.partition}:${e.uid}`))) {
@@ -327,7 +335,7 @@ function selectReferencedPacks(
     }
 
     if (!referenced && mapPackStamp) {
-      const hash = (pack.payload?.mapPack as { contentHash?: unknown } | undefined)?.contentHash;
+      const hash = (payload?.mapPack as { contentHash?: unknown } | undefined)?.contentHash;
       if (typeof hash === 'string' && hash !== '' && hash === mapPackStamp) referenced = true;
     }
 
@@ -335,7 +343,7 @@ function selectReferencedPacks(
     out.push({
       packId: pack.packId,
       packVersion: pack.packVersion,
-      ...(pack.payload?.name ? { name: pack.payload.name } : {}),
+      ...(payload?.name ? { name: payload.name } : {}),
     });
   }
   return out;
@@ -445,7 +453,7 @@ export async function exportSessionSave(
     db.storyTurnSummaries.where('saveId').equals(saveId).toArray(),
     db.storyArchives.where('saveId').equals(saveId).toArray(),
     db.storyArchiveRetries.where('saveId').equals(saveId).toArray(),
-    db.worldBooks.toArray(),
+    db.worldBooks.toArray().then((rows) => overlayRows(rows, getRuntimePackBooks())),
     db.workshopProjects.toArray(),
     db.contentPacks.toArray(),
   ]);
@@ -537,7 +545,11 @@ export async function checkSessionSaveDependencies(
     workshopProjects: [],
   };
 
-  const [books, packs] = await Promise.all([db.worldBooks.toArray(), db.contentPacks.toArray()]);
+  const [diskBooks, packs] = await Promise.all([
+    db.worldBooks.toArray(),
+    db.contentPacks.toArray(),
+  ]);
+  const books = overlayRows(diskBooks, getRuntimePackBooks());
 
   // 收件人库里现有的 token 全集（非工坊条目按它比对）
   const available = new Set<string>();
@@ -555,7 +567,15 @@ export async function checkSessionSaveDependencies(
     return !available.has(e.token) && !splitRewrites.has(e.token);
   });
 
-  const installedPacks = new Map(packs.map((p) => [p.packId, p]));
+  const installedPacks = new Map(
+    packs
+      .filter(
+        (pack) =>
+          pack.source !== 'legacy-locked' &&
+          (!pack.encryptedEnvelope || getActivePackPayload(pack.packId)),
+      )
+      .map((p) => [p.packId, p]),
+  );
   const packMismatches: SessionImportCheck['packMismatches'] = [];
   for (const want of deps.packs ?? []) {
     const installed = installedPacks.get(want.packId);
@@ -578,7 +598,9 @@ export async function checkSessionSaveDependencies(
 
   let missingStoryPreset: SessionImportCheck['missingStoryPreset'];
   if (deps.storyPreset) {
-    const hit = await db.presets.get(deps.storyPreset.id);
+    const hit =
+      getRuntimePackPresets().find((preset) => preset.id === deps.storyPreset!.id) ??
+      (await db.presets.get(deps.storyPreset.id));
     if (!hit) missingStoryPreset = { ...deps.storyPreset };
   }
 
@@ -798,7 +820,7 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
 
   // 工坊 token 跨机重定向要读全局 worldBooks —— 只读，且刻意放在写事务**之外**
   // （下面那个 'rw' 事务的表清单里没有 worldBooks，进去读会直接抛）。
-  const localBooks = await db.worldBooks.toArray();
+  const localBooks = overlayRows(await db.worldBooks.toArray(), getRuntimePackBooks());
   const provenance = buildWorkshopProvenanceIndex(localBooks);
   const manifestRefs = Array.isArray(backup?.dependencies?.worldBookEntries)
     ? backup.dependencies.worldBookEntries

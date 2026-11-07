@@ -145,7 +145,6 @@ describe('worldbook-store', () => {
     expect(store.books[0].entries).toHaveLength(4);
 
     // 重新 hydrate 拿回同样的东西
-    store.books = [];
     await store.hydrate();
     expect(store.books).toHaveLength(1);
     expect(store.books[0].entries).toHaveLength(4);
