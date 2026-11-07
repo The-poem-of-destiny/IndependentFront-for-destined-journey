@@ -31,7 +31,7 @@ function makeOption(over: Partial<WorkshopEnableOption> = {}): WorkshopEnableOpt
     authorName: '作者A',
     version: '1.2.0',
     tags: ['角色', '命定核心'],
-    entryUids: [105, 106],
+    entryUids: ['workshop.p1:creative_workshop/first', 'workshop.p1:creative_workshop/second'],
     ...over,
   };
 }
@@ -39,16 +39,16 @@ function makeOption(over: Partial<WorkshopEnableOption> = {}): WorkshopEnableOpt
 beforeEach(() => {
   mockCreate = reactive({
     systemCoreEntries: [
-      { uid: 413, name: '剑之魂', content: '一柄剑的低语。' },
-      { uid: 414, name: '书之灵', content: '无尽书库的守门人。' },
+      { uid: 'fated:system_core/sword', name: '剑之魂', content: '一柄剑的低语。' },
+      { uid: 'fated:system_core/book', name: '书之灵', content: '无尽书库的守门人。' },
     ],
-    selectedSystemCoreEntryUid: null as number | null,
+    selectedSystemCoreEntryUid: null as string | null,
     get selectedSystemCoreEntry() {
       return (
         this.systemCoreEntries.find((e: any) => e.uid === this.selectedSystemCoreEntryUid) ?? null
       );
     },
-    selectSystemCoreEntry(uid: number | null) {
+    selectSystemCoreEntry(uid: string | null) {
       mockCreate.selectedSystemCoreEntryUid = uid;
       if (uid !== null) mockCreate.selectedWorkshopCoreProjectId = null;
     },
@@ -75,8 +75,8 @@ beforeEach(() => {
     },
 
     // CreateStepCharacters 需要的最小面
-    characterEntries: [{ uid: 313, name: '莉娜', content: '旅店老板。' }],
-    enabledCharacterEntryUids: new Set<number>(),
+    characterEntries: [{ uid: 'fated:character/lina', name: '莉娜', content: '旅店老板。' }],
+    enabledCharacterEntryUids: new Set<string>(),
     toggleCharacterEntry: vi.fn(),
   });
 });
@@ -126,7 +126,7 @@ describe('CreateStepDestinyCore — 工坊项目与命定核心同屏', () => {
   it('命定核心单选照旧可用（没被工坊区挤坏）', async () => {
     const wrapper = mount(CreateStepDestinyCore);
     await wrapper.findAll('.core-row-body')[1].trigger('click');
-    expect(mockCreate.selectedSystemCoreEntryUid).toBe(414);
+    expect(mockCreate.selectedSystemCoreEntryUid).toBe('fated:system_core/book');
     expect(wrapper.find('.selected-detail').text()).toContain('书之灵');
   });
 
@@ -158,8 +158,8 @@ describe('CreateStepDestinyCore — 工坊项目与命定核心同屏', () => {
     ];
     const wrapper = mount(CreateStepDestinyCore);
 
-    mockCreate.selectSystemCoreEntry(413);
-    expect(mockCreate.selectedSystemCoreEntryUid).toBe(413);
+    mockCreate.selectSystemCoreEntry('fated:system_core/sword');
+    expect(mockCreate.selectedSystemCoreEntryUid).toBe('fated:system_core/sword');
 
     const row = wrapper.findAll('.core-row-workshop .core-row-body')[0];
     await row.trigger('click');

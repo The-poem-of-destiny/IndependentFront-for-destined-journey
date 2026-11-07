@@ -420,7 +420,7 @@ export const useCreateStore = defineStore('create', () => {
   const characterEntries = ref<WorldBookEntry[]>([]);
 
   /** 选中的命定核心 entry uid */
-  const selectedSystemCoreEntryUid = ref<number | null>(null);
+  const selectedSystemCoreEntryUid = ref<string | null>(null);
 
   /** 选中的命定核心条目 */
   const selectedSystemCoreEntry = computed<WorldBookEntry | null>(() => {
@@ -429,13 +429,13 @@ export const useCreateStore = defineStore('create', () => {
   });
 
   /** 勾选的 character entry uids */
-  const enabledCharacterEntryUids = ref<Set<number>>(new Set());
+  const enabledCharacterEntryUids = ref<Set<string>>(new Set());
 
   // ── P1-5: 第三条轴 —— 启用的工坊项目（项目级多选，D10/D12）──────────
   //
   // 刻意**不**挤命定核心那个单选槽: 一个工坊项目是 N 条条目，塞不进单个 uid 的
   // `selectedSystemCoreEntryUid`。这里存项目 id，落库时才展开成
-  // `creative_workshop:<uid>` —— 与 system_core / character 同一套机制，无特判。
+  // 工坊条目的全局 UID —— 与 system_core / character 同一套机制。
 
   /** 已装工坊项目（含各自条目 uid），由 {@link loadWorldBookEntries} 填充 */
   const workshopOptions = ref<WorkshopEnableOption[]>([]);
@@ -522,13 +522,13 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   /** 单选命定核心（传 null 取消选择）。选中即清掉工坊核心 —— 互斥 */
-  function selectSystemCoreEntry(uid: number | null) {
+  function selectSystemCoreEntry(uid: string | null) {
     selectedSystemCoreEntryUid.value = uid;
     if (uid !== null) selectedWorkshopCoreProjectId.value = null;
   }
 
   /** toggle 勾选角色 */
-  function toggleCharacterEntry(uid: number) {
+  function toggleCharacterEntry(uid: string) {
     const next = new Set(enabledCharacterEntryUids.value);
     if (next.has(uid)) {
       next.delete(uid);
@@ -538,24 +538,23 @@ export const useCreateStore = defineStore('create', () => {
     enabledCharacterEntryUids.value = next;
   }
 
-  /** 构建存档用的世界书条目 ID 列表（partition:uid 格式） */
+  /** 构建存档用的完整命名空间世界书条目 UID 列表。 */
   function buildEnabledWorldBookEntries(): string[] {
     const ids: string[] = [];
 
-    // 命定核心 → system_core:uid
+    // 命定核心与角色直接存全局 UID
     if (selectedSystemCoreEntryUid.value !== null) {
-      ids.push(`system_core:${selectedSystemCoreEntryUid.value}`);
+      ids.push(selectedSystemCoreEntryUid.value);
     }
 
-    // 启用角色 → character:uid
     for (const uid of enabledCharacterEntryUids.value) {
-      ids.push(`character:${uid}`);
+      ids.push(uid);
     }
 
-    // P1-5: 启用的工坊项目 → 展开成该项目全部条目的 creative_workshop:uid（D12）。
+    // P1-5: 启用的工坊项目 → 展开成该项目全部条目的完整工坊 UID（D12）。
     // 走同一个纯函数，与建档后的每存档面板共用一套展开语义。
     //
-    // 工坊命定核心与附加项目在**存储上没有区别**（都是 creative_workshop:uid），
+    // 工坊命定核心与附加项目在**存储上没有区别**（都是完整工坊 UID），
     // 区别只在捏人页的选择语义（单选/必选 vs 多选/可选）。所以这里合流即可，
     // 下游 filterBooksByEnabledEntries 不需要知道哪个是核心。
     const projectIds = new Set(enabledWorkshopProjectIds.value);

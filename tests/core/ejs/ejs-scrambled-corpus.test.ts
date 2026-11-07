@@ -78,6 +78,9 @@ const RAW_FIXTURE = import.meta.glob('../../fixtures/ejs-scrambled-corpus.json',
 }) as Record<string, string>;
 
 const FIXTURE: Fixture = JSON.parse(Object.values(RAW_FIXTURE)[0]);
+// 语料历史 ID 与白名单保持原样；仅在送入引擎时投影为命名空间身份。
+const uidOf = (id: string) => `fixture:world_setting/${id.replace(/[^a-z0-9_-]/g, '_')}`;
+const fixtureIdByUid = new Map(FIXTURE.entries.map((entry) => [uidOf(entry.id), entry.id]));
 
 // ========== 求值上下文 ==========
 
@@ -353,10 +356,15 @@ describe('混淆语料 × 引擎 —— 回归闸门', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('异步预渲染 × 混淆语料', () => {
+  it('身份投影不碰语料正文且全局唯一', () => {
+    expect(fixtureIdByUid.size).toBe(FIXTURE.entries.length);
+    for (const uid of fixtureIdByUid.keys())
+      expect(uid).toMatch(/^fixture:world_setting\/[a-z0-9_-]+$/);
+  });
   /** 把整份语料当一个装配 pass 交给后端 */
   async function runPass() {
     const entries = FIXTURE.entries.map(
-      (e, i) => ({ uid: i + 1, content: e.content, order: i }) as unknown as WorldBookEntry,
+      (e, i) => ({ uid: uidOf(e.id), content: e.content, order: i }) as unknown as WorldBookEntry,
     );
     return prerenderWorldBookEntries(entries, makeCtx());
   }
@@ -364,9 +372,9 @@ describe('异步预渲染 × 混淆语料', () => {
   it('await 条目在异步路径下不再回退（T1 的全部意义）', async () => {
     const asyncIds = new Set(
       FIXTURE.entries
-        .map((e, i) => ({ i: i + 1, isAsync: e.features.includes('await') }))
+        .map((e) => ({ uid: uidOf(e.id), isAsync: e.features.includes('await') }))
         .filter((x) => x.isAsync)
-        .map((x) => x.i),
+        .map((x) => x.uid),
     );
     expect(asyncIds.size, '语料应含 await 条目').toBeGreaterThan(0);
 
@@ -389,7 +397,7 @@ describe('异步预渲染 × 混淆语料', () => {
 
   it('静态区与同步路径逐字节一致（分层逻辑没有第二套）', async () => {
     const entries = FIXTURE.entries.map(
-      (e, i) => ({ uid: i + 1, content: e.content, order: i }) as unknown as WorldBookEntry,
+      (e, i) => ({ uid: uidOf(e.id), content: e.content, order: i }) as unknown as WorldBookEntry,
     );
     const asyncResult = await prerenderWorldBookEntries(entries, makeCtx());
     const syncResult = renderWorldBookEntries(entries, makeCtx());
@@ -431,13 +439,13 @@ describe('异步预渲染 × QuickJS 后端', () => {
   /** wasm 装载 + 109 条目一趟 pass —— 比 Legacy 慢一个量级，给宽裕的超时 */
   const SLOW = 120_000;
 
-  /** 送进装配的条目：uid = 下标 + 1（与 `FIXTURE.entries` 一一对应） */
+  /** 送进装配的条目使用稳定 UID；语料正文与历史基线不重置。 */
   function passEntries(): WorldBookEntry[] {
     return FIXTURE.entries.map(
-      (e, i) => ({ uid: i + 1, content: e.content, order: i }) as unknown as WorldBookEntry,
+      (e, i) => ({ uid: uidOf(e.id), content: e.content, order: i }) as unknown as WorldBookEntry,
     );
   }
-  const idOf = (uid: number) => FIXTURE.entries[uid - 1]?.id ?? `uid=${uid}`;
+  const idOf = (uid: string) => fixtureIdByUid.get(uid) ?? `uid=${uid}`;
 
   beforeAll(() => {
     clearEjsBackendCache();

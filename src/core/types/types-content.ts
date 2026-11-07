@@ -451,7 +451,7 @@ export function emptySectionPlan<T = unknown>(): PackSectionPlan<T> {
 /**
  * 存档 uid 迁移步骤（D43）。
  *
- * 占位书与真实书同分区不同 uid 空间（占位 uid ∈ 900001+ 保留段，D43）→ 占位期建的
+ * 占位书与真实书同分区不同 UID 命名空间（placeholder: 与 fated:，D43）→ 占位期建的
  * 存档在装包后核心分区会被静默滤成零条。迁移优先**按名配对**（D43 v1.2 裁定，工坊先例）：
  * 配对产出 old→new 重写映射；配不上的单选钉选分区（`system_core`/`character`）键标记
  * `needs_selection`，UI 强制重选后写新键；多选分区的失配键允许清除 + note。
@@ -459,10 +459,10 @@ export function emptySectionPlan<T = unknown>(): PackSectionPlan<T> {
  * 本波只立类型骨架（T1）；迁移执行逻辑在后续波次实现。
  */
 export interface PackSaveUidMigration {
-  /** `partition:oldUid` → `partition:newUid` 的重写映射（按名配对的幸存者） */
-  rewrite: Readonly<Record<string, number>>;
+  /** 占位 UID → 真实 UID 的重写映射（按分区与名称配对）。 */
+  rewrite: Readonly<Record<string, string>>;
   /** Explicit author-declared parent -> children mapping; does not touch save mode or memory. */
-  expandedRewrite?: Readonly<Record<string, readonly number[]>>;
+  expandedRewrite?: Readonly<Record<string, readonly string[]>>;
   /** 标记 `needs_selection` 的单选钉选分区（裸删会触发内容通胀，D43） */
   needsSelectionPartitions: WorldBookPartition[];
 }

@@ -159,7 +159,7 @@ export const useWorldBookStore = defineStore('worldbook', () => {
     await upsertBook({ ...book, entries });
   }
 
-  async function deleteEntry(bookId: string, uid: number): Promise<void> {
+  async function deleteEntry(bookId: string, uid: string): Promise<void> {
     const book = books.value.find((b) => b.id === bookId);
     if (!book) throw new Error(`世界书不存在: ${bookId}`);
     await upsertBook({ ...book, entries: book.entries.filter((e) => e.uid !== uid) });

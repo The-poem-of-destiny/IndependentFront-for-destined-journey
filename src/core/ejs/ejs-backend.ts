@@ -38,14 +38,14 @@ import type { QuickJsBackend } from './ejs-quickjs-backend';
 /** 送进后端的一个条目 */
 export interface EjsPassEntry {
   /** 条目 uid（回退告警与诊断用） */
-  uid: number;
+  uid: string;
   /** 条目正文 */
   content: string;
 }
 
 /** 单条目求值结果 */
 export interface EjsEntryOutcome {
-  uid: number;
+  uid: string;
   /** 成功 = 渲染串；失败 = 原文（调用方直接用，无需再判） */
   text: string;
   ok: boolean;

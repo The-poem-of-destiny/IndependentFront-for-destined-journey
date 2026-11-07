@@ -55,11 +55,15 @@ describe('DebugPanel · 世界书 EJS 区块', () => {
   it('条目回退：书名 / uid / 次数 / 错因四样都得在', () => {
     const game = useGameStore();
     game.recordEjsFallback('story', [
-      { uid: 417, bookName: '系统核心', error: 'SyntaxError: unexpected token' },
+      {
+        uid: 'fated:system_core/core',
+        bookName: '系统核心',
+        error: 'SyntaxError: unexpected token',
+      },
     ]);
     const text = mountPanel().text();
     expect(text).toContain('系统核心');
-    expect(text).toContain('417');
+    expect(text).toContain('fated:system_core/core');
     expect(text).toContain('SyntaxError: unexpected token');
     expect(text).toContain('story');
   });

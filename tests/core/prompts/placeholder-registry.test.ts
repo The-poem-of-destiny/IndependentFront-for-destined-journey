@@ -854,7 +854,7 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
         partition: 'world_setting',
         entries: [
           {
-            uid: 1,
+            uid: 'fixture:world_setting/white_city',
             name: '白曜城',
             content: '白曜城是北方重镇。',
             enabled: true,
@@ -884,7 +884,7 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
         partition: 'world_setting',
         entries: [
           {
-            uid: 1,
+            uid: 'fixture:world_setting/entry_a',
             name: '条目A',
             content: 'AAA',
             enabled: true,
@@ -896,7 +896,7 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
             extra: { lore: { audiences: ['story'] } },
           },
           {
-            uid: 2,
+            uid: 'fixture:world_setting/entry_b',
             name: '条目B',
             content: 'BBB',
             enabled: true,
@@ -929,7 +929,7 @@ describe('LORE_BOOK with setPlaceholderGlobals', () => {
         partition: 'world_setting',
         entries: [
           {
-            uid: 1,
+            uid: 'fixture:world_setting/entry',
             name: 'e1',
             content: 'content',
             enabled: true,
@@ -964,7 +964,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
         partition: 'world_setting',
         entries: [
           {
-            uid: 10,
+            uid: 'fixture:world_setting/static',
             name: '静态条目',
             content: '白曜城是北方重镇。',
             enabled: true,
@@ -976,7 +976,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
             extra: { lore: { audiences: ['story'] } },
           },
           {
-            uid: 20,
+            uid: 'fixture:world_setting/dynamic',
             name: '动态条目',
             content: '主角生命值：<%= stats.主角.生命值 %>',
             enabled: true,
@@ -988,7 +988,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
             extra: { lore: { audiences: ['story'] } },
           },
           {
-            uid: 30,
+            uid: 'fixture:world_setting/broken',
             name: '坏条目',
             content: '坏块：<% if ( %>',
             enabled: true,
@@ -1063,7 +1063,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
           partition: 'world_setting',
           entries: [
             {
-              uid: 40,
+              uid: 'fixture:world_setting/write_var',
               name: '写变量',
               content: '<% setMessageVar("事件.冰之歌", 1) %>已记录',
               enabled: true,
@@ -1104,7 +1104,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
           partition: 'world_setting',
           entries: [
             {
-              uid: 50,
+              uid: 'fixture:world_setting/static',
               name: '静态条目',
               content: '白曜城是北方重镇。',
               enabled: true,
@@ -1116,7 +1116,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
               extra: { lore: { audiences: ['story'] } },
             },
             {
-              uid: 51,
+              uid: 'fixture:world_setting/counter',
               name: '计数条目',
               content: '<% setMessageVar("计数", (getMessageVar("计数") ?? 0) + 1) %>次数已记',
               enabled: true,
@@ -1231,7 +1231,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
             partition: 'world_setting',
             entries: [
               {
-                uid: 60,
+                uid: 'fixture:world_setting/static',
                 name: '静态条目',
                 content: '白曜城是北方重镇。',
                 enabled: true,
@@ -1243,7 +1243,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
                 extra: { lore: { audiences: ['story'] } },
               },
               {
-                uid: 61,
+                uid: 'fixture:world_setting/counter',
                 name: '计数条目',
                 content: '<% setMessageVar("计数", (getMessageVar("计数") ?? 0) + 1) %>次数已记',
                 enabled: true,
@@ -1282,7 +1282,7 @@ describe('LORE_BOOK EJS 分层与求值', () => {
             partition: 'world_setting',
             entries: [
               {
-                uid: 62,
+                uid: 'fixture:world_setting/counter',
                 name: '计数条目',
                 content: '<% setMessageVar("计数", (getMessageVar("计数") ?? 0) + 1) %>次数已记',
                 enabled: true,

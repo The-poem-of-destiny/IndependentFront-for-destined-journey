@@ -6,9 +6,9 @@ import WorkshopEnableList from '../shared/WorkshopEnableList.vue';
 const store = useCreateStore();
 
 /** 展开/折叠的条目 uid */
-const expandedUid = ref<number | null>(null);
+const expandedUid = ref<string | null>(null);
 
-function toggleExpand(uid: number) {
+function toggleExpand(uid: string) {
   expandedUid.value = expandedUid.value === uid ? null : uid;
 }
 

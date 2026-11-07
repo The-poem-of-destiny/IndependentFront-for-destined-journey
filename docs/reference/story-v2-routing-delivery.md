@@ -4,6 +4,15 @@
 
 主体交付包括独立 `lore_select`、跨仓生成端与代表样例；本轮按用户裁定修复 A01–A14，归档失败采用绑定原判断回合的自动重试，补摘要语义字段，第一版激活协议正式收敛。不提交、推送或发布；真实 LLM、浏览器实机、全量语料逐条语义复核及两种召回原文粒度的真实效果/费用比较继续暂缓。实现与自动化验证不等于这些效果验收完成；修复后实测见[验收记录](../planning/2026-10-04-story-v2-content-routing-acceptance-progress.md)第 10 节。
 
+## 命名空间 UID（2026-11-08 破坏性切换）
+
+- 唯一身份是 `entry.uid`：`<namespace>:<partition>/<slug>`，显式拆分子条目可追加 `/part_slug`。官方 `fated:`、占位 `placeholder:`、工坊 `workshop.<projectId>:` 与本地/ST 导入 `user:` 分离；校验分区一致与全局唯一，拒绝数字 UID 和 `extra.lore.key`。
+- 侧车键、`dependsOn`、存档 `enabledWorldBookEntries`、美化 `worldBookEntryUids`、EJS 追踪/诊断与冻结来源均直接使用完整 UID，不再拼接 `bookId#uid` / `partition:uid`。EJS 正文 `lore.get/has/list` 仍按显示名读取或列出显示名，不按 UID 改写现有正文。
+- 工坊 UID 由项目 ID 和名称 stem / 摘要确定性生成，不使用全局游标、数字号段或备份跨机数字 remap；改动安装顺序不改变身份。外部 ST `sourceUid` 可以是数字，仅用于来源记录。本地新建和单本 ST 导入在目标分区生成新的 `user:` UID。
+- 拆分来源使用 `{ parentUid, part }`，父 UID 启用集合在安装、备份体检与导入时按 part 有序展开、去重，重复安装幂等；不改存档模式或记忆。受保护包优先读取内存运行时 overlay，而非磁盘同 ID 的旧条目；导入过程不回写明文世界书。
+- 私有内容以 `content/worldbooks/<bookId>/entries/<slug>/` 为维护入口；源文件和兼容 JSON 一致生成，正文原样读取。仅测试通过一次性审计识别不可变历史场景，生产路径没有旧数字兼容。旧引擎、旧数字包和旧数字存档不属于此次兼容范围。
+- 当前自动化结果：临时真实包 7 项契约通过；内容全量 79 / 84 通过、5 项既有失败；引擎带真实包全量 9223 / 9228 通过、2 项既有失败、3 跳过。三种类型检查、构建、格式、ESLint、Knip 棘轮通过。未覆盖原私有 `dist/`，临时包的版本号不是正式发布或最低引擎版本裁定，实机/真实模型仍未验收；详见 [CHANGELOG](../CHANGELOG.md)。
+
 ## 消费契约
 
 - 读取权限只由**条目自身** `extra.lore.audiences` 决定（逐条目声明；书级 `lore.audiences` 与旧包兼容映射均已移除）；显式 `[]` 是不授权。依赖、EJS `lore.get/list`、旧模板及 Delta 均不能扩大权限。无声明条目/第三方资料不注入，并给出可定位诊断。
@@ -44,8 +53,8 @@ Dexie v29 `storyArchiveRetries` 保存通过判断的原回合归档草稿、完
 
 私有内容仓新增：
 
-1. `data/routing/lore-routing.json`：按 `bookId#uid` 定位作者声明，不改正文。
-2. `tools/lore-routing.mjs`：构建时合并元数据，支持显式 `parts`；子条目使用永久 UID/键，正文拼接必须逐字还原父正文，拒绝自动拆分 EJS。
+1. `data/routing/lore-routing.json`：直接以完整 `entry.uid` 定位作者声明，不改正文；作者入口为 `content/worldbooks/<bookId>/entries/<slug>/entry.json` 的 `extra.lore`。
+2. `tools/lore-routing.mjs`：构建时合并元数据，支持显式 `parts`；子条目使用永久 `<parentUid>/<part_slug>`，不再维护第二个 `key`。正文拼接必须逐字还原父正文，拒绝自动拆分 EJS。
 3. `tools/apply-lore-routing.mjs`：卡导入后刷新 overlay 源文件的非拆分元数据。拆分父正文仍保持原始形态，拆分结果通过构建包消费；不要把生成子条目反写成原始卡。
 4. `tools/normalize-story-presets.ts`：复用引擎五区规则刷新作者预设，不改普通指令正文。相邻两仓目录约定见私有 README。
 5. `tools/build-pack.mjs`：构建包与 `dist/lore-split-report.json`。父启用 token 依据显式来源映射展开为子 token，普通档与测试档相同；安装和“先装拆分新版内容、后导入旧档”均复用同一映射。只替换可证明的父来源 token，不按书名猜测、不扩大权限，不转换记忆与测试标记。
@@ -57,6 +66,6 @@ Dexie v29 `storyArchiveRetries` 保存通过判断的原回合归档草稿、完
 
 沿用 handoff 第 6 节：N 复用正文历史层数，缺省 6；普通预设条目在第 4 区原文之前为前导 system、之后归末尾 user；分区负责的旧占位符在新模式为空。召回复用现有 LLM/Embedding 选择，两种原文粒度保留可切换；不做第 2/5 区全局去重。关闭实验模式退出测试档且永久标记不撤销。
 
-本轮修复后完整 `npm run gates` 通过：427 个测试文件、9837 项通过、8 项跳过；Knip 135 条既有基线无新增。新生成实际内容包跨仓契约 6 项通过，作者路由 3 项通过，两仓修改文本编码/JSON 与私有密钥扫描通过。结果不沿用修复前统计。
+以下是此前 A01–A14 修复时的历史验收记录，不是本轮 UID 切换后的全量结果（本轮见上方 UID 节与 CHANGELOG）：完整 `npm run gates` 通过，427 个测试文件、9837 项通过、8 项跳过；Knip 135 条既有基线无新增。实际内容包跨仓契约 6 项通过，作者路由 3 项通过，两仓修改文本编码/JSON 与私有密钥扫描通过。
 
 剩余产品验收：真实模型输出质量与消耗比较、浏览器交互、全量资料语义复核。具名并发回归不代表穷尽全部 UI 交错；已有侧链/剧情/领域提交不提供跨管线原子回退。R01 只重放已通过判断的有效草稿，不将未得到有效输出的网络/解析失败伪造成归档决策。执行记录见[验收记录第 10 节](../planning/2026-10-04-story-v2-content-routing-acceptance-progress.md#10-本轮授权修复与修复后验证)与 [CHANGELOG](../CHANGELOG.md)。

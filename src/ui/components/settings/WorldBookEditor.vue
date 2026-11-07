@@ -264,6 +264,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import type { WorldBook, WorldBookEntry } from '@engine/types/types';
+import { createUserWorldBookUid } from '@engine/content/worldbook-uid';
 import { AGENT_LIST, agentDisplayName } from './agent/agent-list';
 
 /** 可勾选的读取方（战斗与出图侧链不读玩家自建书，不列） */
@@ -369,7 +370,7 @@ function disableAllEntries() {
 
 function addEntry() {
   const newEntry: WorldBookEntry = {
-    uid: Date.now(),
+    uid: createUserWorldBookUid(props.book.partition, '新条目'),
     name: '新条目',
     content: '',
     enabled: true,

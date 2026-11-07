@@ -367,11 +367,11 @@ describe('SaveSlot metadata (Phase 10h)', () => {
         userName: 'player',
         gameStartTime: '2026-01-01',
         totalTurns: 0,
-        enabledWorldBookEntries: ['system_core:408', 'character:313'],
+        enabledWorldBookEntries: ['fated:system_core/core', 'fated:character/profile'],
       },
     };
     expect(slot.metadata.enabledWorldBookEntries).toHaveLength(2);
-    expect(slot.metadata.enabledWorldBookEntries![0]).toBe('system_core:408');
+    expect(slot.metadata.enabledWorldBookEntries![0]).toBe('fated:system_core/core');
   });
 
   it('metadata.openingPrompt 和 openingPromptConsumed 应为可选项', () => {

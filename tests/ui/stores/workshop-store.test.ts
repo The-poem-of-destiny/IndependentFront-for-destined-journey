@@ -5,9 +5,8 @@
  * workshop-install-plan.test.ts 的活），而是**落库这件事本身**:
  *
  * 1. 三处都写到了（`worldBooks` / `beautifierRules` / `workshopProjects`）
- * 2. **uid 游标只增不减** —— 装 A → 卸 A → 装 B，B 的号段不许与 A 重叠（D8）。
- *    这条是全文件最重要的断言: 回收号段会让旧存档的 `enabledWorldBookEntries`
- *    指向另一个项目的条目，是**静默**的内容错位，测不出来就发现不了。
+ * 2. **UID 按项目隔离且重装稳定** —— 装 A → 卸 A → 装 B，不得让旧存档指向另一个项目。
+ *    安装顺序、本机设置和其他存档都不参与身份生成。
  * 3. 冲突时**一行都不写**（D15），确认后才覆盖
  * 4. **丢弃必须 loud** —— 客户端侧 notes 与计划侧 notes 都要落进 droppedNotes
  * 5. 网络失败 → `broken`，不抛穿
@@ -21,6 +20,11 @@ import { getDatabase } from '@engine/persistence/database';
 import type { WorkshopProject } from '@engine/types/types';
 import { normalizeWorkshopNotes } from '@engine/workshop/workshop-types';
 
+import { worldBookUidStem } from '@engine/content/worldbook-uid';
+import { hashWorkshopContent } from '@engine/workshop/workshop-install-plan';
+
+const uid = (projectId: string, name = '甲') =>
+  `workshop.${projectId.toLowerCase()}:creative_workshop/${worldBookUidStem(name)}_${hashWorkshopContent(name)}`;
 // 内置世界书 / 预设美化规则都靠 fetch 读静态文件，node 下不可用 —— 直接替身，
 // 免得每次 init 都去撞一次注定失败的 fetch。
 vi.mock('@engine/content/builtin-worldbooks', () => ({
@@ -42,7 +46,7 @@ import {
 
 /** 测试用社区源（D41：真实地址已改运行时配置，默认 unset） */
 const WORKSHOP_API_BASE = 'https://workshop.test';
-import { useWorkshopStore, WORKSHOP_UID_CURSOR_KEY } from '../../../src/ui/stores/workshop-store';
+import { useWorkshopStore } from '../../../src/ui/stores/workshop-store';
 import { useWorldBookStore } from '../../../src/ui/stores/worldbook-store';
 import { useBeautifierStore } from '../../../src/ui/stores/beautifier-store';
 import { useSettingsStore } from '../../../src/ui/stores/settings-store';
@@ -260,7 +264,7 @@ describe('workshop-store', () => {
   });
 
   // ── 安装：三处落库 ────────────────────────────────────
-  it('安装把三处都写进 Dexie，uidRange 与项目字段正确', async () => {
+  it('安装把三处都写进 Dexie，命名空间 UID 与项目字段正确', async () => {
     publish('P1', {
       entries: [
         ['条目甲', '甲的正文'],
@@ -280,8 +284,8 @@ describe('workshop-store', () => {
     expect(book!.builtIn).toBe(false);
     expect(book!.name).toBe('项目P1');
     expect(book!.entries.map((e) => e.name)).toEqual(['条目甲', '条目乙']);
-    // uid 是分区级重新发的号（上游从 0 起编，这里首装恰好也是 0/1）
-    expect(book!.entries.map((e) => e.uid)).toEqual([0, 1]);
+    // 上游数字编号仅作溯源；运行时身份由项目和名称确定。
+    expect(book!.entries.map((e) => e.uid)).toEqual([uid('P1', '条目甲'), uid('P1', '条目乙')]);
     // D14 溯源
     expect(book!.entries[0].extra?.workshop?.projectId).toBe('P1');
     expect(typeof book!.entries[0].extra?.workshop?.sourceHash).toBe('string');
@@ -297,7 +301,7 @@ describe('workshop-store', () => {
     const row = (await dbRow('P1'))!;
     expect(row.installState).toBe('installed');
     expect(row.installedVersion).toBe('1.0.0');
-    expect(row.uidRange).toEqual({ start: 0, end: 2 });
+    expect(row).not.toHaveProperty('uidRange');
     expect(row.installedAt).toBeGreaterThan(0);
     expect(row.fetchedAt).toBeGreaterThan(0);
     expect(row.tags).toEqual(['命定核心']);
@@ -306,7 +310,7 @@ describe('workshop-store', () => {
 
     // ref 是库的投影
     expect(store.projects).toHaveLength(1);
-    expect(store.nextUid).toBe(2);
+    expect(store.projects[0].id).toBe('P1');
   });
 
   it('droppedNotes 同时含客户端侧 notes 与计划侧 notes（丢弃必须 loud）', async () => {
@@ -331,8 +335,8 @@ describe('workshop-store', () => {
     expect(await dbRuleIds('P2')).toEqual([]);
   });
 
-  // ── 卸载 + 游标不回退（D8 核心）────────────────────────
-  it('卸载清三处，且 uid 游标不回收：装 A → 卸 A → 装 B，号段不重叠', async () => {
+  // ── 卸载与项目身份隔离 ────────────────────────────────
+  it('卸载清三处，旧存档不会命中另一项目的同名条目；重装恢复原 UID', async () => {
     publish('A', {
       entries: [
         ['甲', 'a1'],
@@ -343,86 +347,81 @@ describe('workshop-store', () => {
     });
     publish('B', {
       entries: [
-        ['丁', 'b1'],
-        ['戊', 'b2'],
+        ['甲', 'b1'],
+        ['乙', 'b2'],
       ],
     });
-
     const store = await freshStore();
     await store.install('A');
-    const rangeA = (await dbRow('A'))!.uidRange;
-    expect(rangeA).toEqual({ start: 0, end: 3 });
-
+    const idsA = (await dbBookEntries('A')).map((e) => e.uid);
+    await seedSave(0, idsA);
     expect(await store.uninstall('A')).toBe(true);
-    // 三处都清了
     expect(await dbRow('A')).toBeUndefined();
     expect(await getDatabase().worldBooks.get('workshop:A')).toBeUndefined();
     expect(await dbRuleIds('A')).toEqual([]);
     expect(store.projects).toHaveLength(0);
-    // 🔴 游标一个字节都没退
-    expect(useSettingsStore().settings[WORKSHOP_UID_CURSOR_KEY]).toBe(3);
-    expect(store.nextUid).toBe(3);
-
     await store.install('B');
-    const rangeB = (await dbRow('B'))!.uidRange;
-    expect(rangeB).toEqual({ start: 3, end: 5 });
-    // 与 A 的号段无任何交集 —— 旧存档里残留的 creative_workshop:0..2 不会命中 B
-    expect(rangeB.start).toBeGreaterThanOrEqual(rangeA.end);
-    expect((await dbBookEntries('B')).map((e) => e.uid)).toEqual([3, 4]);
+    const idsB = (await dbBookEntries('B')).map((e) => e.uid);
+    expect(idsB).toEqual([uid('B', '甲'), uid('B', '乙')]);
+    expect(idsB.every((id) => !idsA.includes(id))).toBe(true);
+    expect((await getDatabase().saves.get('save-0'))!.metadata.enabledWorldBookEntries).toEqual(
+      idsA,
+    );
+    await store.install('A');
+    expect((await dbBookEntries('A')).map((e) => e.uid)).toEqual(idsA);
   });
 
-  it('游标丢失（localStorage 被清）时由已装内容兜底，不与在装项目撞号', async () => {
+  it('清空本机设置后重新初始化，已装和新装项目 UID 均保持确定性', async () => {
     publish('A', {
       entries: [
         ['甲', 'a1'],
         ['乙', 'a2'],
       ],
     });
-    publish('C', { entries: [['丙', 'c1']] });
-
+    publish('C', { entries: [['甲', 'c1']] });
     const store = await freshStore();
     await store.install('A');
-
-    // 灾难：settings 那一半没了（清 localStorage / 从不含它的 FullBackup 恢复）
+    const idsA = (await dbBookEntries('A')).map((e) => e.uid);
     lsBacking.clear();
     const revived = await freshStore();
-    expect(revived.nextUid).toBe(2); // 由 uidRange + 书里的实际 uid 抬起来
-
+    expect((await dbBookEntries('A')).map((e) => e.uid)).toEqual(idsA);
     await revived.install('C');
-    expect((await dbRow('C'))!.uidRange).toEqual({ start: 2, end: 3 });
+    expect((await dbBookEntries('C')).map((e) => e.uid)).toEqual([uid('C')]);
+    expect(idsA).not.toContain(uid('C'));
   });
 
-  // ── 存档引用地板（D8 最后一条缝）──────────────────────
-  it('★ 存档引用过的号不会被复用：卸载 + 游标丢失后，新项目仍绕开老存档引用的 uid', async () => {
-    // 复现完整灾难链：装 A（uid 100–101）→ 存档启用 creative_workshop:105 →
-    // 卸 A → 恢复不含 localStorage 的 FullBackup（游标丢失）→ 装 B
-    await seedSave(0, ['system_core:408', 'creative_workshop:105']);
+  // ── 存档引用不参与身份生成 ──────────────────────────────
+  it('卸载和设置丢失后，旧存档的 UID 不会被新项目复用', async () => {
+    const old = uid('A', '丁');
+    const saved = ['fated:system_core/core', old];
+    await seedSave(0, saved);
     publish('B', { entries: [['丁', 'b1']] });
-
-    lsBacking.clear(); // 游标那一半没了
+    lsBacking.clear();
     const store = await freshStore();
-    expect(store.nextUid).toBe(106); // 地板由存档引用抬起来
-
     await store.install('B');
-    const range = (await dbRow('B'))!.uidRange;
-    expect(range.start).toBeGreaterThan(105);
-    expect(range).toEqual({ start: 106, end: 107 });
+    expect((await dbBookEntries('B')).map((e) => e.uid)).toEqual([uid('B', '丁')]);
+    expect(uid('B', '丁')).not.toBe(old);
+    expect((await getDatabase().saves.get('save-0'))!.metadata.enabledWorldBookEntries).toEqual(
+      saved,
+    );
   });
 
-  it('存档地板取全局最大（多存档）', async () => {
-    await seedSave(0, ['creative_workshop:12']);
-    await seedSave(1, ['creative_workshop:77', 'creative_workshop:3']);
-    await seedSave(2, ['character:313']);
+  it('多个存档的其他项目引用不影响新装 UID，也不会被改写', async () => {
+    const selections = [[uid('A')], [uid('B'), uid('C')], ['fated:character/person']];
+    for (const [slot, entries] of selections.entries()) await seedSave(slot, entries);
     publish('M', { entries: [['甲', 'x']] });
-
     const store = await freshStore();
-    expect(store.nextUid).toBe(78);
     await store.install('M');
-    expect((await dbRow('M'))!.uidRange).toEqual({ start: 78, end: 79 });
+    expect((await dbBookEntries('M')).map((e) => e.uid)).toEqual([uid('M')]);
+    for (const [slot, entries] of selections.entries()) {
+      expect(
+        (await getDatabase().saves.get(`save-${slot}`))!.metadata.enabledWorldBookEntries,
+      ).toEqual(entries);
+    }
   });
 
-  it('存档里的畸形引用一律忽略，不抛', async () => {
-    await seedSave(0, [
+  it('存档里的畸形和旧数字引用不参与身份生成，不抛或静默改写', async () => {
+    const entries = [
       'creative_workshop:abc',
       'creative_workshop:',
       'creative_workshop',
@@ -431,17 +430,19 @@ describe('workshop-store', () => {
       42,
       null,
       'creative_workshop:9',
-    ]);
+    ];
+    await seedSave(0, entries);
     publish('D', { entries: [['甲', 'x']] });
-
     const store = await freshStore();
-    expect(store.nextUid).toBe(10); // 只有那条合法的 9 起作用
     await store.install('D');
-    expect((await dbRow('D'))!.uidRange).toEqual({ start: 10, end: 11 });
+    expect((await dbBookEntries('D')).map((e) => e.uid)).toEqual([uid('D')]);
+    expect((await getDatabase().saves.get('save-0'))!.metadata.enabledWorldBookEntries).toEqual(
+      entries,
+    );
   });
 
-  it('无存档 / 存档无工坊条目 / metadata 缺字段 → 与没有这条兜底时一致', async () => {
-    await seedSave(0, ['system_core:408']);
+  it('存档无工坊条目或 metadata 缺字段时仍使用相同确定性 UID', async () => {
+    await seedSave(0, ['fated:system_core/core']);
     await getDatabase().saves.put({
       id: 'save-9',
       name: '老存档',
@@ -455,20 +456,19 @@ describe('workshop-store', () => {
     publish('S', { entries: [['甲', 'x']] });
 
     const store = await freshStore();
-    expect(store.nextUid).toBe(0);
     await store.install('S');
-    expect((await dbRow('S'))!.uidRange).toEqual({ start: 0, end: 1 });
+    expect((await dbBookEntries('S')).map((e) => e.uid)).toEqual([uid('S')]);
   });
 
-  it('会话中途新建的存档也算进地板（commit 前重扫）', async () => {
+  it('会话中途出现的存档引用与随后安装的同一项目 UID 完全一致', async () => {
     publish('T', { entries: [['甲', 'x']] });
     const store = await freshStore();
-    expect(store.nextUid).toBe(0);
-
-    // init 之后才出现的存档引用
-    await seedSave(0, ['creative_workshop:50']);
+    await seedSave(0, [uid('T')]);
     await store.install('T');
-    expect((await dbRow('T'))!.uidRange).toEqual({ start: 51, end: 52 });
+    const saved = (await getDatabase().saves.get('save-0'))!;
+    expect((await dbBookEntries('T')).map((e) => e.uid)).toEqual(
+      saved.metadata.enabledWorldBookEntries,
+    );
   });
 
   it('卸载未安装的项目返回 false，什么都不动', async () => {
@@ -477,7 +477,7 @@ describe('workshop-store', () => {
   });
 
   // ── 更新 ──────────────────────────────────────────────
-  it('无冲突更新直接覆盖：存活条目 uid 不变，新增领新号，移除的删掉', async () => {
+  it('无冲突更新直接覆盖：存活 UID 不变，新增独立身份，移除的删掉', async () => {
     publish('U', {
       entries: [
         ['甲', 'v1 甲'],
@@ -486,7 +486,7 @@ describe('workshop-store', () => {
     });
     const store = await freshStore();
     await store.install('U');
-    expect((await dbBookEntries('U')).map((e) => e.uid)).toEqual([0, 1]);
+    expect((await dbBookEntries('U')).map((e) => e.uid)).toEqual([uid('U', '甲'), uid('U', '乙')]);
 
     // 上游发新版：甲改了正文、乙被移除、丙是新增
     clearWorkshopCache();
@@ -503,9 +503,9 @@ describe('workshop-store', () => {
 
     const entries = await dbBookEntries('U');
     expect(entries.map((e) => e.name)).toEqual(['甲', '丙']);
-    expect(entries[0].uid).toBe(0); // 存活条目 uid 不变 → 存档启用轴无需重写
+    expect(entries[0].uid).toBe(uid('U', '甲')); // 存活 UID 不变 → 存档启用轴无需重写
     expect(entries[0].content).toBe('v2 甲');
-    expect(entries[1].uid).toBe(2); // 新增领新号，绝不复用乙的 1
+    expect(entries[1].uid).toBe(uid('U', '丙')); // 不复用已移除的乙的身份
 
     const row = (await dbRow('U'))!;
     expect(row.installedVersion).toBe('2.0.0');
@@ -534,7 +534,7 @@ describe('workshop-store', () => {
     expect(outcome.status).toBe('needs_confirmation');
     if (outcome.status !== 'needs_confirmation') throw new Error('unreachable');
     expect(outcome.conflicts).toHaveLength(1);
-    expect(outcome.conflicts[0]).toMatchObject({ uid: 0, name: '甲' });
+    expect(outcome.conflicts[0]).toMatchObject({ uid: uid('K'), name: '甲' });
 
     // ★ 一行都没写
     expect((await dbBookEntries('K'))[0].content).toBe('我自己改的');
@@ -544,7 +544,7 @@ describe('workshop-store', () => {
     const confirmed = await store.confirmInstall(outcome.prepared);
     expect(confirmed.status).toBe('installed');
     expect((await dbBookEntries('K'))[0].content).toBe('上游新正文');
-    expect((await dbBookEntries('K'))[0].uid).toBe(0);
+    expect((await dbBookEntries('K'))[0].uid).toBe(uid('K'));
     expect((await dbRow('K'))!.installedVersion).toBe('2.0.0');
   });
 
@@ -563,7 +563,7 @@ describe('workshop-store', () => {
   });
 
   // ── 幂等 ──────────────────────────────────────────────
-  it('重复安装同一版本：不产生重复行、重复规则，也不多发 uid', async () => {
+  it('重复安装同一版本：不产生重复行、重复规则，UID 保持一致', async () => {
     publish('I', {
       entries: [
         ['甲', 'x'],
@@ -582,8 +582,7 @@ describe('workshop-store', () => {
     expect(await getDatabase().workshopProjects.count()).toBe(1);
     expect(await getDatabase().worldBooks.count()).toBe(1);
     expect(await getDatabase().beautifierRules.count()).toBe(1);
-    expect((await dbBookEntries('I')).map((e) => e.uid)).toEqual([0, 1]);
-    expect(store.nextUid).toBe(2);
+    expect((await dbBookEntries('I')).map((e) => e.uid)).toEqual([uid('I', '甲'), uid('I', '乙')]);
     // 「第一次装进来是什么时候」不被重装重置
     expect(secondRow.installedAt).toBe(firstRow.installedAt);
     expect(store.projects).toHaveLength(1);

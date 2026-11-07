@@ -121,6 +121,7 @@ import {
   type PackUninstallPlan,
   type PackUpgradeDiff,
 } from '@engine/content/content-pack-plan';
+import { uidPartition } from '@engine/content/worldbook-uid';
 import {
   getDatabase,
   migrateLegacyContentPacks,
@@ -1500,15 +1501,13 @@ export const useContentStore = defineStore('content', () => {
         const children = expandedRewrite?.[key];
         if (!children) return [key];
         mutated = true;
-        const partition = key.slice(0, key.indexOf(':'));
-        return children.map((uid) => `${partition}:${uid}`);
+        return [...children];
       });
       for (let i = 0; i < next.length; i++) {
         const oldKey = next[i];
         const newUid = rewrite[oldKey];
         if (newUid !== undefined) {
-          const partition = oldKey.slice(0, oldKey.indexOf(':'));
-          next[i] = `${partition}:${newUid}`;
+          next[i] = newUid;
           mutated = true;
         }
       }
@@ -1518,7 +1517,10 @@ export const useContentStore = defineStore('content', () => {
       const needsSelection = (needsSelectionPartitions ?? []).some((p) =>
         entries.some(
           (e) =>
-            e.startsWith(`${p}:`) && rewrite[e] === undefined && expandedRewrite?.[e] === undefined,
+            uidPartition(e) === p &&
+            e.startsWith('placeholder:') &&
+            rewrite[e] === undefined &&
+            expandedRewrite?.[e] === undefined,
         ),
       );
       if (needsSelection) {
@@ -2026,23 +2028,13 @@ export const useContentStore = defineStore('content', () => {
 
   /** 卸载的反向存档迁移（D43 反向语义）：把真实 uid 键按名配对回占位 uid / needs_selection */
   async function applySaveMigrationReverse(): Promise<void> {
-    // 占位书（装包后仍存在）是反向配对的对照物；占位书 uid 在 900001+ 保留段。
-    // 卸载把 pack 书换成占位书后，真实 uid 键失配 → planner 的迁移逻辑在 re-install
-    // 一次占位时产生 rewrite。这里用 planSaveUidMigration 的镜像：把 pack 书当「旧」、
-    // 当前（占位）书当「新」。由于占位书不可枚举（placeholder-hashes 未产出），
-    // 本波对反向往迁做保守处理：命中去重条目配对已由 planPackUninstall 覆盖，
-    // 这里只重跑一次占位 installedPack 的 buildCurrentLibrary 并标记 needs_selection 兜底。
-    // —— 完整反向 uid 配对留待占位 hash 清单（T15）落地后补真值。
+    // 卸载后官方 UID 将失配；保留引用并标记重选，不把用户或工坊 UID 当作包条目。
     const db = getDatabase();
     const saves = await db.saves.toArray();
     for (const save of saves) {
       const entries = save.metadata?.enabledWorldBookEntries;
       if (!entries) continue;
-      // 检查是否仍含 pack 拥有的真实 uid（< 900001）——有则这些键在卸载后失配
-      const stillHasPackUid = entries.some((e) => {
-        const uid = parseInt(e.slice(e.indexOf(':') + 1), 10);
-        return Number.isFinite(uid) && uid < 900001;
-      });
+      const stillHasPackUid = entries.some((uid) => uid.startsWith('fated:'));
       if (stillHasPackUid) {
         save.metadata = writePackSelectionMetadata(save.metadata, {}, true);
         await db.saves.put(save);

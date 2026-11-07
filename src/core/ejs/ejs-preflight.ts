@@ -346,8 +346,8 @@ export function preflightEntry(content: string): PreflightReport {
 
 /** 批量预检 —— 工坊「装前检视」用。返回按条目分组的报告 */
 export function preflightEntries(
-  entries: Array<{ uid: number; name?: string; content: string }>,
-): Array<{ uid: number; name: string; report: PreflightReport }> {
+  entries: Array<{ uid: string; name?: string; content: string }>,
+): Array<{ uid: string; name: string; report: PreflightReport }> {
   return entries.map((e) => ({
     uid: e.uid,
     name: e.name ?? `#${e.uid}`,

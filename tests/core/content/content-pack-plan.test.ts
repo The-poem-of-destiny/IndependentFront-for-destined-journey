@@ -26,29 +26,28 @@ import {
   SINGLE_SELECT_PINNED_PARTITIONS,
 } from '../../../src/core/content/content-pack-plan';
 import type { CurrentLibrary } from '../../../src/core/content/content-pack-plan';
-import {
-  hashWorldBook,
-  PLACEHOLDER_UID_RESERVED_BASE,
-} from '../../../src/core/content/content-source';
+import { hashWorldBook } from '../../../src/core/content/content-source';
 import type { WorldBook, WorldBookEntry, WorkshopNote } from '../../../src/core/types/types';
 
 it('explicit split source expands ordinary and test-save content references without memory conversion', () => {
   const packBook = book({
     entries: [
       entry({
-        uid: 101,
-        extra: { lore: { key: 'part-a', source: { parentKey: 'parent', legacyUid: 42, part: 0 } } },
+        uid: 'fated:world_setting/parent/a',
+        extra: { lore: { source: { parentUid: 'fated:world_setting/parent', part: 0 } } },
       }),
       entry({
-        uid: 102,
-        extra: { lore: { key: 'part-b', source: { parentKey: 'parent', legacyUid: 42, part: 1 } } },
+        uid: 'fated:world_setting/parent/b',
+        extra: { lore: { source: { parentUid: 'fated:world_setting/parent', part: 1 } } },
       }),
     ],
   });
   const notes: WorkshopNote[] = [];
-  expect(planSaveUidMigration([packBook], [], ['world_setting:42'], notes).expandedRewrite).toEqual(
-    { 'world_setting:42': [101, 102] },
-  );
+  expect(
+    planSaveUidMigration([packBook], [], ['fated:world_setting/parent'], notes).expandedRewrite,
+  ).toEqual({
+    'fated:world_setting/parent': ['fated:world_setting/parent/a', 'fated:world_setting/parent/b'],
+  });
   expect(notes).toEqual([]);
 });
 
@@ -61,7 +60,7 @@ function minimalPack(): ContentPack {
 /** 造一条最小合法 WorldBookEntry */
 function entry(overrides: Partial<WorldBookEntry> = {}): WorldBookEntry {
   return {
-    uid: 1,
+    uid: 'fated:world_setting/overview',
     name: '条目',
     content: '内容',
     enabled: true,
@@ -86,10 +85,10 @@ function book(overrides: Partial<WorldBook> = {}): WorldBook {
   };
 }
 
-/** 占位书：uid 在保留段（900001+） */
+/** 占位书：使用独立的 placeholder 命名空间。 */
 function placeholderBook(overrides: Partial<WorldBook> = {}): WorldBook {
   return book({
-    entries: [entry({ uid: PLACEHOLDER_UID_RESERVED_BASE, name: '占位条目' })],
+    entries: [entry({ uid: 'placeholder:world_setting/overview', name: '占位条目' })],
     ...overrides,
   });
 }
@@ -151,7 +150,7 @@ describe('planPackInstall — 编辑后冲突（D20 四态）', () => {
     const editedPlaceholder = placeholderBook({
       id: 'b1',
       name: '书一',
-      entries: [entry({ uid: PLACEHOLDER_UID_RESERVED_BASE, content: '用户编辑过的内容' })],
+      entries: [entry({ uid: 'placeholder:world_setting/overview', content: '用户编辑过的内容' })],
     });
     const placeholderBaseline: PackBaseline = {
       byBook: { b1: hashWorldBook(pristinePlaceholder) },
@@ -216,26 +215,26 @@ describe('planPackInstall — 编辑后冲突（D20 四态）', () => {
 
 describe('planSaveUidMigration — D43 三段式', () => {
   it('占位书条目名 ↔ pack 书条目名配对成功 → rewrite 产 old→new 映射', () => {
-    // 当前库里有一本占位书，条目名「命定核心」，uid=900001
+    // 当前库里有一本占位书，按分区和条目名配对。
     const placeholderBk = placeholderBook({
       id: 'system_core',
       partition: 'system_core',
-      entries: [entry({ uid: PLACEHOLDER_UID_RESERVED_BASE, name: '命定核心' })],
+      entries: [entry({ uid: 'placeholder:system_core/core', name: '命定核心' })],
     });
-    // pack 的同分区书里，同名的条目 uid=413（真实 uid）
+    // 同名正式条目使用独立的命名空间 UID。
     const packBk = book({
       id: 'system_core',
       partition: 'system_core',
-      entries: [entry({ uid: 413, name: '命定核心' })],
+      entries: [entry({ uid: 'fated:system_core/core', name: '命定核心' })],
     });
-    // 存档里钉了 system_core:900001（占位期建档的单选）
-    const enabledEntries = [`system_core:${PLACEHOLDER_UID_RESERVED_BASE}`];
+    // 占位期建档的单选启用项。
+    const enabledEntries = ['placeholder:system_core/core'];
 
     const notes: WorkshopNote[] = [];
     const migration = planSaveUidMigration([packBk], [placeholderBk], enabledEntries, notes);
 
-    // 按名配对成功 → rewrite 产 system_core:900001 → 413
-    expect(migration.rewrite[`system_core:${PLACEHOLDER_UID_RESERVED_BASE}`]).toBe(413);
+    // 按名配对成功后，映射直接保存完整 UID。
+    expect(migration.rewrite['placeholder:system_core/core']).toBe('fated:system_core/core');
     expect(migration.needsSelectionPartitions).toEqual([]);
   });
 
@@ -244,14 +243,14 @@ describe('planSaveUidMigration — D43 三段式', () => {
     const placeholderBk = placeholderBook({
       id: 'system_core',
       partition: 'system_core',
-      entries: [entry({ uid: PLACEHOLDER_UID_RESERVED_BASE, name: '旧核心' })],
+      entries: [entry({ uid: 'placeholder:system_core/old', name: '旧核心' })],
     });
     const packBk = book({
       id: 'system_core',
       partition: 'system_core',
-      entries: [entry({ uid: 413, name: '新核心' })],
+      entries: [entry({ uid: 'fated:system_core/new', name: '新核心' })],
     });
-    const enabledEntries = [`system_core:${PLACEHOLDER_UID_RESERVED_BASE}`];
+    const enabledEntries = ['placeholder:system_core/old'];
 
     const notes: WorkshopNote[] = [];
     const migration = planSaveUidMigration([packBk], [placeholderBk], enabledEntries, notes);
@@ -267,14 +266,14 @@ describe('planSaveUidMigration — D43 三段式', () => {
     const placeholderBk = placeholderBook({
       id: 'character',
       partition: 'character',
-      entries: [entry({ uid: PLACEHOLDER_UID_RESERVED_BASE + 1, name: '旧角色' })],
+      entries: [entry({ uid: 'placeholder:character/old', name: '旧角色' })],
     });
     const packBk = book({
       id: 'character',
       partition: 'character',
-      entries: [entry({ uid: 100, name: '新角色' })],
+      entries: [entry({ uid: 'fated:character/new', name: '新角色' })],
     });
-    const enabledEntries = [`character:${PLACEHOLDER_UID_RESERVED_BASE + 1}`];
+    const enabledEntries = ['placeholder:character/old'];
 
     const migration = planSaveUidMigration([packBk], [placeholderBk], enabledEntries, []);
 
@@ -286,14 +285,14 @@ describe('planSaveUidMigration — D43 三段式', () => {
     const placeholderBk = placeholderBook({
       id: 'world_setting',
       partition: 'world_setting',
-      entries: [entry({ uid: PLACEHOLDER_UID_RESERVED_BASE, name: '旧设定' })],
+      entries: [entry({ uid: 'placeholder:world_setting/old', name: '旧设定' })],
     });
     const packBk = book({
       id: 'world_setting',
       partition: 'world_setting',
-      entries: [entry({ uid: 10, name: '新设定' })],
+      entries: [entry({ uid: 'fated:world_setting/new', name: '新设定' })],
     });
-    const enabledEntries = [`world_setting:${PLACEHOLDER_UID_RESERVED_BASE}`];
+    const enabledEntries = ['placeholder:world_setting/old'];
 
     const notes: WorkshopNote[] = [];
     const migration = planSaveUidMigration([packBk], [placeholderBk], enabledEntries, notes);
@@ -304,14 +303,14 @@ describe('planSaveUidMigration — D43 三段式', () => {
     expect(notes.some((n) => n.kind === 'sideEffect')).toBe(true);
   });
 
-  it('真实 uid（< 保留段）的 enabledEntries 不被迁移', () => {
-    // 存档里有真实 uid 的启用项（如 system_core:413），不该被 planner 动
+  it('正式命名空间的 enabledEntries 不被迁移', () => {
+    // 已是正式 UID 的启用项不该被占位配对修改。
     const packBk = book({
       id: 'system_core',
       partition: 'system_core',
-      entries: [entry({ uid: 413, name: '核心' })],
+      entries: [entry({ uid: 'fated:system_core/core', name: '核心' })],
     });
-    const enabledEntries = ['system_core:413'];
+    const enabledEntries = ['fated:system_core/core'];
 
     const migration = planSaveUidMigration([packBk], [], enabledEntries, []);
 
@@ -330,7 +329,7 @@ describe('planSaveUidMigration — D43 三段式', () => {
     const migration = planSaveUidMigration(
       [book()],
       [placeholderBook()],
-      ['no-colon', ':', 'x:'],
+      ['no-colon', ':', 'x:', 'system_core:413'],
       [],
     );
     expect(migration.rewrite).toEqual({});
@@ -343,17 +342,17 @@ describe('planPackInstall — saveUidMigration 接线（端到端）', () => {
     const placeholderBk = placeholderBook({
       id: 'system_core',
       partition: 'system_core',
-      entries: [entry({ uid: PLACEHOLDER_UID_RESERVED_BASE, name: '命定核心' })],
+      entries: [entry({ uid: 'placeholder:system_core/core', name: '命定核心' })],
     });
     const packBk = book({
       id: 'system_core',
       partition: 'system_core',
-      entries: [entry({ uid: 413, name: '命定核心' })],
+      entries: [entry({ uid: 'fated:system_core/core', name: '命定核心' })],
     });
     const pack: ContentPack = { ...minimalPack(), worldBooks: [packBk] };
     const current: CurrentLibrary = {
       worldBooks: [placeholderBk],
-      enabledWorldBookEntries: [`system_core:${PLACEHOLDER_UID_RESERVED_BASE}`],
+      enabledWorldBookEntries: ['placeholder:system_core/core'],
     };
     // 占位基线命中 → updated（不冲突）
     const placeholderBaseline: PackBaseline = {
@@ -363,8 +362,8 @@ describe('planPackInstall — saveUidMigration 接线（端到端）', () => {
     const plan = planPackInstall(pack, current, {}, placeholderBaseline);
 
     expect(plan.sections.worldBooks?.updated).toHaveLength(1);
-    expect(plan.saveUidMigration?.rewrite[`system_core:${PLACEHOLDER_UID_RESERVED_BASE}`]).toBe(
-      413,
+    expect(plan.saveUidMigration?.rewrite['placeholder:system_core/core']).toBe(
+      'fated:system_core/core',
     );
     expect(plan.saveUidMigration?.needsSelectionPartitions).toEqual([]);
   });
@@ -373,17 +372,17 @@ describe('planPackInstall — saveUidMigration 接线（端到端）', () => {
     const placeholderBk = placeholderBook({
       id: 'system_core',
       partition: 'system_core',
-      entries: [entry({ uid: PLACEHOLDER_UID_RESERVED_BASE, name: '旧核心' })],
+      entries: [entry({ uid: 'placeholder:system_core/old', name: '旧核心' })],
     });
     const packBk = book({
       id: 'system_core',
       partition: 'system_core',
-      entries: [entry({ uid: 413, name: '新核心' })],
+      entries: [entry({ uid: 'fated:system_core/new', name: '新核心' })],
     });
     const pack: ContentPack = { ...minimalPack(), worldBooks: [packBk] };
     const current: CurrentLibrary = {
       worldBooks: [placeholderBk],
-      enabledWorldBookEntries: [`system_core:${PLACEHOLDER_UID_RESERVED_BASE}`],
+      enabledWorldBookEntries: ['placeholder:system_core/old'],
     };
 
     const plan = planPackInstall(pack, current, {}, {});

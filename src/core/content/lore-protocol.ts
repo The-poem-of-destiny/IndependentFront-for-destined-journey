@@ -2,6 +2,7 @@
 import type { WorldBook } from '../types/types';
 import { collectLoreRoutingIssues, loreEntryKey } from './lore-routing';
 import { validLoreReadWhen, validLoreDefinitions } from './lore-protocol-conditions';
+import { isWorldBookUid, uidPartition } from './worldbook-uid';
 /** 合并后的真实 agent 名册（必须与 public/data/defaults/agent-config.json 的 agents 键一致）。 */
 const AGENTS = [
   'story',
@@ -35,7 +36,6 @@ export function validateLoreProtocol(books: unknown): string[] {
     }
     const fields = entry
       ? [
-          'key',
           'audiences',
           'section',
           'summary',
@@ -47,6 +47,7 @@ export function validateLoreProtocol(books: unknown): string[] {
           'source',
           'definitions',
           'evaluation',
+          'priority',
         ]
       : ['audiences', 'section', 'category', 'namespace'];
     for (const key of Object.keys(value))
@@ -63,7 +64,7 @@ export function validateLoreProtocol(books: unknown): string[] {
       errors.push(`${scope}: invalid audiences`);
     if (value.section !== undefined && !['fixed', 'region', 'turn'].includes(String(value.section)))
       errors.push(`${scope}: invalid section`);
-    for (const field of ['key', 'summary', 'namespace', 'category'])
+    for (const field of ['summary', 'namespace', 'category'])
       if (value[field] !== undefined && typeof value[field] !== 'string')
         errors.push(`${scope}: invalid ${field}`);
     if (value.aliases !== undefined && !strings(value.aliases))
@@ -72,6 +73,11 @@ export function validateLoreProtocol(books: unknown): string[] {
       errors.push(`${scope}: invalid dependsOn`);
     if (value.required !== undefined && typeof value.required !== 'boolean')
       errors.push(`${scope}: invalid required`);
+    if (
+      value.priority !== undefined &&
+      (typeof value.priority !== 'number' || !Number.isFinite(value.priority))
+    )
+      errors.push(`${scope}: invalid priority`);
     if (value.definitions !== undefined && !validLoreDefinitions(value.definitions))
       errors.push(`${scope}: invalid definitions (literal ST values only)`);
     if (
@@ -102,29 +108,28 @@ export function validateLoreProtocol(books: unknown): string[] {
       const s = value.source;
       if (
         !object(s) ||
-        typeof s.parentKey !== 'string' ||
-        !s.parentKey.trim() ||
-        !Number.isInteger(s.legacyUid) ||
+        !isWorldBookUid(s.parentUid) ||
+        Object.keys(s).some((key) => !['parentUid', 'part'].includes(key)) ||
         !Number.isInteger(s.part) ||
         Number(s.part) < 0
       )
         errors.push(`${scope}: invalid split source`);
     }
   };
+  const uids = new Set<string>();
   for (const b of books) {
     if (!object(b) || !Array.isArray(b.entries)) {
       errors.push('invalid worldBook');
       continue;
     }
     meta(b.lore, String(b.id), false);
-    const uids = new Set<number>();
     for (const e of b.entries) {
-      if (!object(e) || !Number.isInteger(e.uid)) {
+      if (!object(e) || !isWorldBookUid(e.uid) || uidPartition(e.uid) !== b.partition) {
         errors.push(`${b.id}: invalid entry uid`);
         continue;
       }
-      if (uids.has(Number(e.uid))) errors.push(`${b.id}: duplicate uid ${e.uid}`);
-      uids.add(Number(e.uid));
+      if (uids.has(e.uid)) errors.push(`${b.id}: duplicate uid ${e.uid}`);
+      uids.add(e.uid);
       meta(object(e.extra) ? e.extra.lore : undefined, `${b.id}#${e.uid}`, true);
       if (
         object(e.extra) &&

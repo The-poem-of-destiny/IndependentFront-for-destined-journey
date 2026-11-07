@@ -150,7 +150,6 @@ function makeProject(over: Partial<WorkshopProject> = {}): WorkshopProject {
     installedVersion: '1.1.0',
     installedAt: 1_700_000_000_000,
     fetchedAt: 1_700_000_000_000,
-    uidRange: { start: 0, end: 3 },
     droppedNotes: [],
     updatedAt: 1_700_000_000_000,
     ...over,
@@ -163,11 +162,18 @@ function makePlan(conflicts: InstallConflict[] = [], isUpdate = conflicts.length
     projectName: '维拉的旅途',
     bookId: 'workshop:p1',
     partition: 'creative_workshop',
-    entries: [{ uid: 0 }, { uid: 1 }] as InstallPlan['entries'],
+    entries: ['first', 'second'].map((slug) => ({
+      uid: `workshop.p1:creative_workshop/${slug}`,
+      name: slug,
+      content: '',
+      enabled: true,
+      key: [],
+      keysecondary: [],
+      selectiveLogic: 0,
+      order: 100,
+      position: 0,
+    })),
     rules: [{ id: 'workshop-rule:p1:a' }] as InstallPlan['rules'],
-    uidRange: { start: 0, end: 2 },
-    allocatedUidRange: { start: 0, end: 2 },
-    nextUid: 2,
     retiredUids: [],
     conflicts,
     droppedNotes: [],
@@ -186,7 +192,7 @@ function makePrepared(conflicts: InstallConflict[] = [], isUpdate = conflicts.le
 }
 
 const CONFLICT: InstallConflict = {
-  uid: 7,
+  uid: 'workshop.p1:creative_workshop/prologue',
   name: '维拉·序章',
   sourceHash: 'aaa',
   currentHash: 'bbb',
@@ -312,7 +318,7 @@ describe('WorkshopPage', () => {
     let release: (v: unknown) => void = () => {};
     h.fns.prepareInstall.mockResolvedValue({
       ok: true,
-      prepared: makePrepared([{ uid: 5, name: '被改过的条目' } as InstallConflict]),
+      prepared: makePrepared([{ ...CONFLICT, name: '被改过的条目' }]),
     });
     h.fns.commitInstall.mockImplementation(
       () =>

@@ -13,13 +13,13 @@ import { exportSessionSave, importSessionSave } from '../../../src/core/persiste
 import { createDefaultCharacterState } from '../../../src/core/types/types';
 import type { SaveSlot, WorldBook, WorldBookEntry } from '../../../src/core/types/types';
 
-function entry(uid: number, content: string, enabled = false): WorldBookEntry {
+function entry(uid: string, content: string, enabled = false): WorldBookEntry {
   return {
     uid,
     content,
     name: `entry-${uid}`,
     enabled,
-    order: uid,
+    order: 0,
     position: 0,
     key: [],
     keysecondary: [],
@@ -47,13 +47,12 @@ function input() {
       gameStartTime: 'start',
       totalTurns: 0,
       storyContextV2: { schema: 1, markedAt: 1 },
-      enabledWorldBookEntries: ['system_core:2'],
+      enabledWorldBookEntries: ['fated:system_core/selected'],
     },
   };
-  const revival = entry(433, '{{getvar::revival}}', true);
+  const revival = entry('fated:extra_setting/revival', '{{getvar::revival}}', true);
   revival.extra!.lore = {
     audiences: ['story'],
-    key: 'rules:revival',
     section: 'fixed',
     evaluation: 'onCreate',
   };
@@ -64,7 +63,10 @@ function input() {
       name: 'cores',
       partition: 'system_core',
       builtIn: true,
-      entries: [entry(1, '{{setvar::revival::OTHER}}'), entry(2, '{{setvar::revival::SELECTED}}')],
+      entries: [
+        entry('fated:system_core/other', '{{setvar::revival::OTHER}}'),
+        entry('fated:system_core/selected', '{{setvar::revival::SELECTED}}'),
+      ],
     },
   ];
   return {
@@ -91,7 +93,7 @@ describe('opening lore persistence', () => {
       '<% if (true) { %>{{setvar::revival::SELECTED}}<% } %>';
     await createJourney(value);
     const saved = (await getDatabase().saves.get('save'))!;
-    expect(saved.metadata.fixedLore?.['rules:revival']).toBeUndefined();
+    expect(saved.metadata.fixedLore?.['fated:extra_setting/revival']).toBeUndefined();
     expect(await getDatabase().characters.count()).toBe(1);
   });
 
@@ -100,8 +102,10 @@ describe('opening lore persistence', () => {
     const original = JSON.stringify(value);
     await createJourney(value);
     const saved = (await getDatabase().saves.get('save'))!;
-    expect(saved.metadata.fixedLore?.['rules:revival'].text).toBe('SELECTED');
-    expect(saved.metadata.fixedLore?.['rules:revival'].definitionSources.revival).toBe('cores#2');
+    expect(saved.metadata.fixedLore?.['fated:extra_setting/revival'].text).toBe('SELECTED');
+    expect(
+      saved.metadata.fixedLore?.['fated:extra_setting/revival'].definitionSources.revival,
+    ).toBe('fated:system_core/selected');
     expect(JSON.stringify(value)).toBe(original);
     expect((await getDatabase().saveProfiles.get('save'))?.variables).toEqual({});
   });
@@ -136,9 +140,9 @@ describe('opening lore persistence', () => {
       await db.saveProfiles.put(profile);
       if (readable) {
         await createJourney(value);
-        expect((await db.saves.get('save'))?.metadata.fixedLore?.['rules:revival'].text).toBe(
-          'SELECTED',
-        );
+        expect(
+          (await db.saves.get('save'))?.metadata.fixedLore?.['fated:extra_setting/revival'].text,
+        ).toBe('SELECTED');
         expect((await db.saveProfiles.get('save'))?.gameTime).toEqual(profile.gameTime);
       } else {
         await expect(createJourney(value)).rejects.toThrow('missing definitions');
@@ -228,6 +232,6 @@ describe('opening lore persistence', () => {
     const imported = await importSessionSave(JSON.parse(JSON.stringify(backup)));
     expect(imported.saveId).not.toBe('save');
     expect((await getDatabase().saves.get(imported.saveId))?.metadata.fixedLore).toEqual(original);
-    expect(original?.['rules:revival'].text).toBe('SELECTED');
+    expect(original?.['fated:extra_setting/revival'].text).toBe('SELECTED');
   });
 });

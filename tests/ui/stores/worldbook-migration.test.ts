@@ -20,16 +20,16 @@ import {
 
 // ===== 夹具 =====
 
-function makeEntry(uid: number, name = `条目${uid}`): WorldBookEntry {
+function makeEntry(index: number, name = `条目${index}`): WorldBookEntry {
   return {
-    uid,
+    uid: `fixture:world_setting/entry_${index}`,
     name,
-    content: `正文 ${uid}`,
+    content: `正文 ${index}`,
     enabled: true,
     key: [],
     keysecondary: [],
     selectiveLogic: 0,
-    order: uid,
+    order: index,
     position: 0,
   };
 }

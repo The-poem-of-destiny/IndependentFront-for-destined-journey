@@ -12,17 +12,7 @@
  *    `beautifier-store`，本模块**只**直写 `workshopProjects` 一张自己的表。
  *    伸手进别人的表就是第二个写入口，Phase 0/0b 的验收会当场作废。
  *
- * 2. **uid 游标只增不减（D8）**。卸载**绝不**回收号段 —— 回收会让旧存档里残留的
- *    `enabledWorldBookEntries`（`"creative_workshop:5"` 格式）指向新项目的条目，
- *    是静默的内容错位。浪费几个整数远比错启用一段陌生内容便宜。
- *    游标持久化在 `settings.workshopUidCursor`（一个整数，与「书别写回 settings」
- *    的禁令无关），并在每次启动用 {@link cursorFloor} 抬到「**曾被任何存档引用过**
- *    的号之上」—— 三个来源: 在装项目的 `uidRange`、工坊分区各书的实际 uid、
- *    以及**所有存档的 `enabledWorldBookEntries`**。第三个来源是关键: 前两个只覆盖
- *    「当前装着的号」，而风险恰恰经由**已卸载**项目留在存档里的陈旧引用兑现
- *    （装 A 用 105 → 卸 A → 恢复不含 localStorage 的 FullBackup → 游标丢失 →
- *    B 拿到 105 → 老存档静默启用 B 的无关条目）。从存档取地板等于直接堵死那条路，
- *    且不需要新增存储、不需要动 FullBackup。
+ * 2. **UID 由项目 ID 与条目名确定性生成**。跨机一致，不维护游标与数字号段。
  *
  * 3. **丢弃必须 loud**。`WorkshopBundle.notes`（客户端侧处置，如「载荷缺失，取自
  *    详情预览」）与 `InstallPlan.droppedNotes`（计划侧处置）**并进同一个数组**落进
@@ -44,14 +34,13 @@
  * 第二套 uid 分配与第二套冲突判定。
  */
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { ref } from 'vue';
 import { getDatabase } from '@engine/persistence/database';
 import type { BeautifierRule, WorkshopProject } from '@engine/types/types';
 import { planInstall } from '@engine/workshop/workshop-install-plan';
 import { diffInstallPlan } from '@engine/workshop/workshop-diff';
 import type { WorkshopUpdateDiff } from '@engine/workshop/workshop-diff';
 import {
-  WORKSHOP_PARTITION,
   normalizeWorkshopNotes,
   workshopBookId,
   workshopRuleId,
@@ -66,23 +55,12 @@ import type {
 import { fetchInstallInput, fetchProject } from '../lib/workshop-client';
 import type { WorkshopBundle, WorkshopFailure } from '../lib/workshop-client';
 import { useBeautifierStore } from './beautifier-store';
-import { useSettingsStore } from './settings-store';
 import { useWorldBookStore } from './worldbook-store';
 import { detach } from './db-write';
 
 // ═══════════════════════════════════════════════════════════
 // 常量与对外形状
 // ═══════════════════════════════════════════════════════════
-
-/**
- * 分区级 uid 分配游标在 `settings` 里的键名（D8）。
- *
- * 住在 settings 而非 Dexie，是因为它必须**比任何一行工坊数据活得久**: 卸载会删掉
- * 项目行与书行，而游标恰恰在那时最不能退。放进 `workshopProjects` 表就得为它造一行
- * 哨兵，那行会漏进列表、漏进 FullBackup、漏进每一次 `toArray()`。
- * 体积是一个整数，与「书别写回 settings」那条禁令（~0.85 MB）不是一回事。
- */
-export const WORKSHOP_UID_CURSOR_KEY = 'workshopUidCursor';
 
 /**
  * 内容来自哪一侧。
@@ -95,14 +73,13 @@ export type WorkshopSourceKind = WorkshopBundle['entriesSource'];
 /**
  * 「算好了、还没写」的中间态 —— 两段式提交的载体。
  *
- * 保留 `input` 而非只保留 `plan`，是为了 `commitInstall` 能**重算**: prepare 与
- * commit 之间用户可能装了别的项目，游标已经走了；拿旧计划写行会发出重号。
+ * 保留 `input` 以便提交时重算当前已装条目的正文冲突与变更。
  */
 export interface WorkshopPrepared {
   projectId: string;
   /** 喂给 `planInstall()` 的原始输入（详情 + 载荷合成，或本地文件解析结果） */
   input: WorkshopInstallInput;
-  /** prepare 时算出的计划 —— 供 UI 预览；提交时会以当时的游标重算 */
+  /** prepare 时算出的预览计划；提交时基于当前条目重算。 */
   plan: InstallPlan;
   /** 客户端侧处置记录（`WorkshopBundle.notes` / 本地导入溯源），必须并进 droppedNotes */
   sourceNotes: string[];
@@ -148,9 +125,7 @@ export const useWorkshopStore = defineStore('workshop', () => {
   /**
    * 启动流程，幂等（并发调用共用同一个 Promise）。
    *
-   * 先 `worldbook-store.init()` / `beautifier-store.init()` 再自己 hydrate:
-   * 那两个 store 的 init 里跑着 localStorage → Dexie 的一次性迁移，而本 store 的
-   * 游标兜底要读它们迁完之后的内容。顺序颠倒会让 floor 算在半迁移状态上。
+   * 先初始化世界书与美化规则，再读取项目元数据。
    */
   async function init(): Promise<void> {
     if (!initPromise) initPromise = doInit();
@@ -161,10 +136,6 @@ export const useWorkshopStore = defineStore('workshop', () => {
     await useWorldBookStore().init();
     await useBeautifierStore().init();
     await hydrate();
-    await refreshSavesFloor();
-    // 灾难兜底：游标若落在「曾被引用过的号」之内（localStorage 被清 / 从不含它的
-    // FullBackup 恢复），抬上去
-    bumpCursor(cursorFloor());
     ready.value = true;
   }
 
@@ -177,87 +148,10 @@ export const useWorkshopStore = defineStore('workshop', () => {
     }
   }
 
-  // ── uid 分配游标（D8）─────────────────────────────────
-
-  /** 读持久化游标；脏值一律当 0（由 floor 兜底，不把 NaN 传染给每个 uid） */
-  function readCursor(): number {
-    const raw: unknown = useSettingsStore().settings[WORKSHOP_UID_CURSOR_KEY];
-    const n = typeof raw === 'number' ? raw : Number(raw);
-    return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
-  }
-
-  /** 游标**只增不减** —— 这是 D8 在代码里的唯一体现处，别加第二个写点 */
-  function bumpCursor(value: number): void {
-    if (!Number.isFinite(value)) return;
-    const next = Math.trunc(value);
-    if (next <= readCursor()) return;
-    const settingsStore = useSettingsStore();
-    settingsStore.settings[WORKSHOP_UID_CURSOR_KEY] = next;
-    settingsStore.saveNow();
-  }
-
-  /**
-   * 存档引用过的最大工坊 uid + 1 —— 异步算一次，缓存进 ref 供同步的
-   * {@link cursorFloor} 取用（`nextUid` 是 computed，不能 await）。
-   *
-   * 只读 `saves` 表（≤10 行），不写。畸形条目一律跳过，绝不抛 ——
-   * 一条脏数据不该让整个工坊装不上东西。
-   */
-  const savesUidFloor = ref(0);
-
-  async function refreshSavesFloor(): Promise<number> {
-    const prefix = `${WORKSHOP_PARTITION}:`;
-    let floor = 0;
-    try {
-      for (const save of await getDatabase().saves.toArray()) {
-        const refs = save?.metadata?.enabledWorldBookEntries;
-        if (!Array.isArray(refs)) continue;
-        for (const token of refs) {
-          if (typeof token !== 'string' || !token.startsWith(prefix)) continue;
-          const uid = Number(token.slice(prefix.length));
-          // `creative_workshop:abc` / `creative_workshop:` → NaN，跳过
-          if (!Number.isFinite(uid)) continue;
-          floor = Math.max(floor, Math.trunc(uid) + 1);
-        }
-      }
-    } catch {
-      // IndexedDB 不可用 → 保持上次的值，不把地板降下去
-      return savesUidFloor.value;
-    }
-    // 地板同样只增不减：本次没读到不代表以前没引用过
-    savesUidFloor.value = Math.max(savesUidFloor.value, floor);
-    return savesUidFloor.value;
-  }
-
-  /**
-   * 「曾被引用过的号之上」的下界 —— 仅在持久化游标丢失时才起作用。
-   *
-   * 三个来源（见文件头纪律 2）: 项目行记的 `uidRange.end`、工坊分区里各书条目的
-   * 实际 uid、以及**存档引用过的 uid**。前两个只覆盖「当前装着的」，第三个覆盖
-   * 「卸载后仍被老存档引用着的」—— 少了它，D8 要防的静默内容错位仍有一条窄路可走。
-   */
-  function cursorFloor(): number {
-    let floor = savesUidFloor.value;
-    for (const project of projects.value) {
-      const end = project.uidRange?.end;
-      if (typeof end === 'number' && Number.isFinite(end)) floor = Math.max(floor, Math.trunc(end));
-    }
-    for (const book of useWorldBookStore().books) {
-      if (book.partition !== WORKSHOP_PARTITION) continue;
-      for (const entry of book.entries) {
-        if (Number.isFinite(entry.uid)) floor = Math.max(floor, Math.trunc(entry.uid) + 1);
-      }
-    }
-    return floor;
-  }
-
-  /** 下一个可发的 uid（分区级共享） */
-  const nextUid = computed(() => Math.max(readCursor(), cursorFloor()));
-
-  /** 组装 `planInstall` 的第二参数：当前游标 + 本项目已装条目（按名匹配用，D15） */
+  /** 本项目已装条目（按名称检测更新冲突）。 */
   function buildRegistry(projectId: string): InstallRegistry {
     const book = useWorldBookStore().getBook(workshopBookId(projectId));
-    return { nextUid: nextUid.value, existingEntries: book?.entries ?? [] };
+    return { existingEntries: book?.entries ?? [] };
   }
 
   // ── 读 ──────────────────────────────────────────────────
@@ -306,23 +200,17 @@ export const useWorkshopStore = defineStore('workshop', () => {
    * 把计划写进三处。**唯一**的写入路径 —— 安装、更新、本地导入都走它。
    *
    * 顺序刻意如此:
-   * 1. **游标先走**。多发几个号是无害的浪费；重发号是数据损坏。中途失败宁可留下
-   *    一段没人用的空洞。
-   * 2. 世界书（经 worldbook-store）
-   * 3. 美化规则（经 beautifier-store；先删本项目上游已移除的，再整批覆盖）
-   * 4. 项目行 —— 最后写，它是「装成了」的证据
+   * 1. 世界书（经 worldbook-store）
+   * 2. 美化规则（经 beautifier-store；先删本项目上游已移除的，再整批覆盖）
+   * 3. 项目行 —— 最后写，它是「装成了」的证据
    */
   async function commitInstall(
     prepared: WorkshopPrepared,
   ): Promise<{ project: WorkshopProject; plan: InstallPlan }> {
-    // 以**当下**的游标重算：prepare 之后可能已经有别的项目领过号；
-    // 存档地板也重扫一次（会话中途可能新建了存档 / 改了启用轴）
-    await refreshSavesFloor();
+    // prepare 后条目可能被编辑过，提交前基于当前条目重算。
     const plan = planInstall(prepared.input, buildRegistry(prepared.projectId));
     const meta = prepared.input.project;
     const now = Date.now();
-
-    bumpCursor(plan.nextUid);
 
     await useWorldBookStore().upsertBook({
       id: plan.bookId,
@@ -352,7 +240,6 @@ export const useWorkshopStore = defineStore('workshop', () => {
       // 重装/更新不重置「第一次装进来是什么时候」
       installedAt: previous?.installedAt ?? now,
       fetchedAt: now,
-      uidRange: plan.uidRange,
       // ★ 两侧处置记录并进同一个数组 —— 少任何一侧，UI 的处置计数就少报。
       //   `sourceNotes` 是裸串（客户端侧溯源，如「取自详情预览」），经 normalize
       //   落成 kind: 'dropped'；plan 侧本就带 kind。新写入一律结构化，老行仍是
@@ -446,8 +333,7 @@ export const useWorkshopStore = defineStore('workshop', () => {
   /**
    * 卸载：删书 + 删规则 + 删项目行。
    *
-   * 🔴 **绝不回收 uid 号段（D8）** —— 本函数一个字节都不碰游标。回收会让旧存档的
-   * `enabledWorldBookEntries` 指向下一个项目的条目，是静默的内容错位。
+   * UID 内含项目身份，残留存档引用不会误命中其他项目。
    */
   async function uninstall(projectId: string): Promise<boolean> {
     if (!isInstalled(projectId) && !useWorldBookStore().getBook(workshopBookId(projectId))) {
@@ -483,7 +369,7 @@ export const useWorkshopStore = defineStore('workshop', () => {
     const hasUpdate = meta.version !== previous.installedVersion;
     const row: WorkshopProject = {
       ...previous,
-      // 上游侧字段跟随刷新；本地状态（installedVersion / uidRange / installedAt）不动
+      // 上游侧字段跟随刷新；本地安装版本与时间不动
       name: meta.name,
       description: meta.description,
       version: meta.version,
@@ -520,7 +406,6 @@ export const useWorkshopStore = defineStore('workshop', () => {
   return {
     projects,
     ready,
-    nextUid,
     previewUpdate,
     init,
     hydrate,

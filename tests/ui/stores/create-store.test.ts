@@ -31,6 +31,17 @@ import { NEUTRAL_BRANDING } from '../../../src/ui/branding-defaults';
 // ═══════════════════════════════════════════════════════════
 
 const FIXTURE_ERA = '占位纪元';
+const FIXTURE_CORE_UID = 'fated:system_core/core';
+const FIXTURE_CHARACTER_UID = 'fated:character/lina';
+const FIXTURE_WORKSHOP_UIDS = [
+  'workshop.p1:creative_workshop/first',
+  'workshop.p1:creative_workshop/second',
+  'workshop.p1:creative_workshop/third',
+];
+const FIXTURE_WORKSHOP_SYSTEM_UIDS = [
+  'workshop.sys1:creative_workshop/first',
+  'workshop.sys1:creative_workshop/second',
+];
 
 function mkEquip(id: string, type: string, cost: number): CatalogItem {
   return {
@@ -914,7 +925,7 @@ describe('stepValid 步骤验证', () => {
   it('Step 2: 未选命定核心时无效', () => {
     expect(store.stepValid[2]).toBe(false);
     // 新的世界书驱动 API：selectedSystemCoreEntryUid 控制 step 2 验证
-    store.selectSystemCoreEntry(1001);
+    store.selectSystemCoreEntry(FIXTURE_CORE_UID);
     expect(store.stepValid[2]).toBe(true);
   });
 
@@ -1139,7 +1150,7 @@ describe('buildOpeningPrompt', () => {
     // 新的 UI 起源印记选择走 selectedSystemCoreEntry（system_core 世界书条目）
     store.systemCoreEntries = [
       {
-        uid: 413,
+        uid: FIXTURE_CORE_UID,
         name: '占位印记',
         content: '寄宿于灵魂深处的占位设定，影响叙事风格。',
         enabled: true,
@@ -1151,7 +1162,7 @@ describe('buildOpeningPrompt', () => {
         position: 0,
       } as any,
     ];
-    store.selectSystemCoreEntry(413);
+    store.selectSystemCoreEntry(FIXTURE_CORE_UID);
     const prompt = store.buildOpeningPrompt();
     // 🔴 2026-10-03：核心条目本体仍由世界书通道注入
     //    （buildEnabledWorldBookEntries → SaveSlot.metadata.enabledWorldBookEntries → worldbook-loader），
@@ -2195,7 +2206,7 @@ describe('buildEnabledWorldBookEntries 三条启用轴', () => {
         authorName: '作者A',
         version: '1.2.0',
         tags: ['角色'],
-        entryUids: [105, 106, 107],
+        entryUids: [...FIXTURE_WORKSHOP_UIDS],
       },
       {
         projectId: 'p2',
@@ -2225,7 +2236,7 @@ describe('buildEnabledWorldBookEntries 三条启用轴', () => {
         authorName: '作者C',
         version: '2.0',
         tags: ['系统'],
-        entryUids: [201, 202],
+        entryUids: [...FIXTURE_WORKSHOP_SYSTEM_UIDS],
       },
     ];
   }
@@ -2246,23 +2257,22 @@ describe('buildEnabledWorldBookEntries 三条启用轴', () => {
 
   it('★ 内置核心与工坊核心互斥 —— 命定核心只有一枚', () => {
     seedWorkshopSystem();
-    store.selectSystemCoreEntry(413);
+    store.selectSystemCoreEntry(FIXTURE_CORE_UID);
     store.selectWorkshopCore('sys1');
     expect(store.selectedSystemCoreEntryUid).toBeNull();
 
-    store.selectSystemCoreEntry(413);
+    store.selectSystemCoreEntry(FIXTURE_CORE_UID);
     expect(store.selectedWorkshopCoreProjectId).toBeNull();
     expect(store.stepValid[2]).toBe(true);
   });
 
-  it('工坊核心照常展开成 creative_workshop:<uid>，与附加项目同一套存储', () => {
+  it('工坊核心直接展开为完整 UID，与附加项目同一套存储', () => {
     seedWorkshopSystem();
     store.selectWorkshopCore('sys1');
     const ids = store.buildEnabledWorldBookEntries();
-    expect(ids).toContain('creative_workshop:201');
-    expect(ids).toContain('creative_workshop:202');
-    // 没选内置核心时不该冒出 system_core: 串
-    expect(ids.some((i) => i.startsWith('system_core:'))).toBe(false);
+    expect(ids).toEqual(FIXTURE_WORKSHOP_SYSTEM_UIDS);
+    // 没选内置核心时不该冒出 fated:system_core/ 条目。
+    expect(ids.some((i) => i.startsWith('fated:system_core/'))).toBe(false);
   });
 
   it('工坊核心与附加项目可以并存，互不覆盖', () => {
@@ -2270,8 +2280,8 @@ describe('buildEnabledWorldBookEntries 三条启用轴', () => {
     store.selectWorkshopCore('sys1');
     store.toggleWorkshopProject('p1');
     const ids = store.buildEnabledWorldBookEntries();
-    for (const uid of [201, 202, 105, 106, 107]) {
-      expect(ids).toContain(`creative_workshop:${uid}`);
+    for (const uid of [...FIXTURE_WORKSHOP_SYSTEM_UIDS, ...FIXTURE_WORKSHOP_UIDS]) {
+      expect(ids).toContain(uid);
     }
   });
 
@@ -2283,13 +2293,9 @@ describe('buildEnabledWorldBookEntries 三条启用轴', () => {
     expect(store.buildEnabledWorldBookEntries()).toEqual([]);
   });
 
-  it('勾一个项目 → 输出该项目全部条目的 creative_workshop:<uid>', () => {
+  it('勾一个项目 → 输出该项目全部条目的完整 UID', () => {
     store.toggleWorkshopProject('p1');
-    expect(store.buildEnabledWorldBookEntries()).toEqual([
-      'creative_workshop:105',
-      'creative_workshop:106',
-      'creative_workshop:107',
-    ]);
+    expect(store.buildEnabledWorldBookEntries()).toEqual(FIXTURE_WORKSHOP_UIDS);
   });
 
   it('取消 → 该项目的串全部移除', () => {
@@ -2299,17 +2305,17 @@ describe('buildEnabledWorldBookEntries 三条启用轴', () => {
   });
 
   it('★ 与 system_core / character 两轴互不干扰', () => {
-    store.selectSystemCoreEntry(413);
-    store.toggleCharacterEntry(313);
+    store.selectSystemCoreEntry(FIXTURE_CORE_UID);
+    store.toggleCharacterEntry(FIXTURE_CHARACTER_UID);
     store.toggleWorkshopProject('p1');
     const ids = store.buildEnabledWorldBookEntries();
-    expect(ids).toContain('system_core:413');
-    expect(ids).toContain('character:313');
-    expect(ids.filter((i) => i.startsWith('creative_workshop:'))).toHaveLength(3);
+    expect(ids).toContain(FIXTURE_CORE_UID);
+    expect(ids).toContain(FIXTURE_CHARACTER_UID);
+    expect(ids.filter((i) => i.startsWith('workshop.p1:creative_workshop/'))).toHaveLength(3);
 
     // 取消工坊后另两轴原样还在
     store.toggleWorkshopProject('p1');
-    expect(store.buildEnabledWorldBookEntries()).toEqual(['system_core:413', 'character:313']);
+    expect(store.buildEnabledWorldBookEntries()).toEqual([FIXTURE_CORE_UID, FIXTURE_CHARACTER_UID]);
   });
 
   it('未安装的项目不在列表里，也就勾不上（勾不存在的 id 不产出任何串）', () => {

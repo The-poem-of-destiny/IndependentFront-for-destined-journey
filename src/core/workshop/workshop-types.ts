@@ -337,27 +337,15 @@ export interface WorkshopInstallInput extends WorkshopPayload {
 // 安装计划（D8/D14/D15）
 // ═══════════════════════════════════════════════════════════
 
-/**
- * 分区级 uid 分配器的状态 + 本项目当前已装条目。
- *
- * `nextUid` 是**整个 `creative_workshop` 分区共享**的游标，全局单调递增（D8）。
- * 多本书共用一个分区，而 `filterBooksByEnabledEntries()` 以 partition 为键建
- * uid 允许表 —— 跨项目撞号会让 `creative_workshop:5` 同时命中所有工坊书的 uid=5。
- * 上游每个项目 uid 都从 0 起编（实测），撞号是必然，故必须重新发号。
- *
- * **卸载不回收号段**：回收会让旧存档的 `enabledWorldBookEntries` 指向新项目的
- * 条目 —— 静默的内容错位，比浪费号段严重得多。
- */
+/** 本项目当前已装条目；UID 由项目 ID 与条目名确定性生成，不使用全局游标。 */
 export interface InstallRegistry {
-  /** 分区级分配游标，下一个可发的 uid */
-  nextUid: number;
   /** 本项目当前已装的条目（更新时按名匹配用）；首装省略或传空数组 */
   existingEntries?: WorldBookEntry[];
 }
 
 /** 更新时检出的「用户改过的条目会被覆盖」记录（D15） */
 export interface InstallConflict {
-  uid: number;
+  uid: string;
   /** 条目名（= 上游 comment） */
   name: string;
   /** 安装时记录的正文哈希 */
@@ -382,17 +370,8 @@ export interface InstallPlan {
   entries: WorldBookEntry[];
   /** 由上游正则映射来的美化规则（D16） */
   rules: BeautifierRuleDraft[];
-  /**
-   * 覆盖 `entries` 全部 uid 的闭开区间 `[start, end)`。
-   * 零条目时退化为 `{ start: nextUid, end: nextUid }`（空区间）。
-   */
-  uidRange: { start: number; end: number };
-  /** 本次操作**新发**的号段 `[start, end)`；纯更新且无新增条目时为空区间 */
-  allocatedUidRange: { start: number; end: number };
-  /** 更新后的分区级游标 —— store 必须把它写回分配器 */
-  nextUid: number;
-  /** 上游已移除、就此退休的 uid（不回收，D8）；存档里的残留引用惰性失效 */
-  retiredUids: number[];
+  /** 上游已移除的 UID；存档里的残留引用惰性失效。 */
+  retiredUids: string[];
   /** 用户改过、将被本次更新覆盖的条目（D15）—— 非空时 store 须先弹警告 */
   conflicts: InstallConflict[];
   /**

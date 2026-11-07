@@ -8,7 +8,7 @@ const wrappers: VueWrapper[] = [];
 afterEach(() => wrappers.splice(0).forEach((wrapper) => wrapper.unmount()));
 function book(patch: Partial<WorldBook> = {}): WorldBook {
   const entry: WorldBookEntry = {
-    uid: 1,
+    uid: 'user:world_setting/agreement_abc',
     name: '约定',
     content: '原始正文',
     enabled: true,
@@ -17,7 +17,7 @@ function book(patch: Partial<WorldBook> = {}): WorldBook {
     selectiveLogic: 0,
     order: 1,
     position: 0,
-    extra: { lore: { audiences: ['char_gen'], key: 'user#1' } },
+    extra: { lore: { audiences: ['char_gen'], summary: '保留的摘要' } },
   };
   return {
     id: 'user',
@@ -44,7 +44,8 @@ describe('WorldBookEditor 读取范围权限（长期回归）', () => {
     const out = wrapper.emitted('update')![0][0] as WorldBook;
     expect(out.lore).toEqual({ category: '设定' });
     expect(out.entries[0].extra?.lore?.audiences).toEqual(['char_gen', 'lore_select']);
-    expect(out.entries[0].extra?.lore?.key).toBe('user#1');
+    expect(out.entries[0].extra?.lore?.summary).toBe('保留的摘要');
+    expect(out.entries[0].uid).toBe(source.entries[0].uid);
     expect(out.entries[0].content).toBe('原始正文');
     expect(source).toEqual(before);
   });
@@ -73,7 +74,7 @@ describe('WorldBookEditor 读取范围权限（长期回归）', () => {
       book({
         entries: [
           {
-            uid: 1,
+            uid: 'user:world_setting/agreement_abc',
             name: '约定',
             content: 'x',
             enabled: true,
@@ -121,15 +122,15 @@ describe('WorldBookEditor 读取范围权限（长期回归）', () => {
   });
 
   it('条目编辑弹窗可单独调整该条目的声明范围，不影响其他条目', async () => {
-    const entryOf = (uid: number, name: string, audiences: string[]): WorldBookEntry => ({
-      uid,
+    const entryOf = (index: number, name: string, audiences: string[]): WorldBookEntry => ({
+      uid: `user:world_setting/entry_${index}`,
       name,
-      content: `正文${uid}`,
+      content: `正文${index}`,
       enabled: true,
       key: [],
       keysecondary: [],
       selectiveLogic: 0,
-      order: uid,
+      order: index,
       position: 0,
       extra: { lore: { audiences } },
     });

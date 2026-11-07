@@ -144,7 +144,7 @@ export const useBeautifierStore = defineStore('beautifier', () => {
    */
   async function refreshPresetRules(
     activeWorldBookIds: Set<string> = new Set(),
-    activeEntryUids: Set<number> = new Set(),
+    activeEntryUids: Set<string> = new Set(),
     activeCharacterNames: Set<string> = new Set(),
     // 🔴 供测试/装包流程显式注入 pack 规则；生产路径不传，由 provider 惰性读（§5.6 恢复默认）
     packRulesOverride?: readonly BeautifierRule[],

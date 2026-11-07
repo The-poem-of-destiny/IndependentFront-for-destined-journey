@@ -43,7 +43,7 @@ export function useBeautify() {
     const { activeWorldBookIds, activeEntryUids } = collectActiveSignalsFromEntries(enabledEntries);
 
     // Workshop rule bindings use `workshop:<projectId>`, while the save stores
-    // `creative_workshop:<entryUid>`. Resolve that project-level seam here so an
+    // namespaced entry UIDs. Resolve that project-level seam here so an
     // installed rule only runs in saves where its whole project is enabled.
     const workshopOptions = buildWorkshopEnableOptions(workshop.projects, worldbooks.books);
     const activeWorkshopProjectIds = selectedWorkshopProjectIds(workshopOptions, enabledEntries);

@@ -20,7 +20,7 @@ export function makePrivatePack(): ContentPack {
         builtIn: true,
         entries: [
           {
-            uid: 1,
+            uid: 'fated:system_core/core',
             name: 'Core',
             content: PRIVATE_TEXT,
             enabled: true,

@@ -88,9 +88,9 @@ export function resetPlaceholderGlobals(): void {
 
 /**
  * uid → 所属世界书名（仅用于 EJS 回退告警的可读性）。
- * uid 在跨书场景可能重复，取首个命中即可——这是日志文案不是寻址。
+ * UID 全局唯一，查找所属世界书用于诊断。
  */
-function bookNameOfUid(uid: number): string {
+function bookNameOfUid(uid: string): string {
   for (const book of _worldBooks) {
     if (book.entries?.some((e) => e.uid === uid)) return book.name || book.id;
   }

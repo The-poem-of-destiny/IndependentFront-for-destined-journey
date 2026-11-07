@@ -446,7 +446,7 @@ describe('sendOpeningPrompt', () => {
 });
 
 describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () => {
-  const entry = (uid: number, enabled = true) => ({
+  const entry = (uid: string, enabled = true) => ({
     uid,
     name: `条目${uid}`,
     content: `正文${uid}`,
@@ -463,7 +463,7 @@ describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () 
     worldBookStoreState.books = [];
   });
 
-  it.each([408, 413, 999])(
+  it.each(['fated:system_core/core', 'placeholder:system_core/default', 'user:system_core/custom'])(
     '存档选中的内置命定核心条目 → story 与 entity_gen 读得到，request_dispatcher 读不到（uid %s）',
     async (uid) => {
       worldBookStoreState.books = [
@@ -476,7 +476,7 @@ describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () 
         },
       ];
       const pipeline = makePipeline({
-        activeSave: { metadata: { enabledWorldBookEntries: [`system_core:${uid}`] } },
+        activeSave: { metadata: { enabledWorldBookEntries: [uid] } },
       });
 
       const books: WorldBook[] = await (pipeline as any).loadActiveWorldBooks();
@@ -497,8 +497,11 @@ describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () 
         name: '新版包书',
         partition: 'world_setting',
         entries: [
-          { ...entry(1), extra: { lore: { audiences: ['story'] } } },
-          { ...entry(2), extra: { lore: { audiences: ['entity_gen'] } } },
+          { ...entry('fated:world_setting/story'), extra: { lore: { audiences: ['story'] } } },
+          {
+            ...entry('fated:world_setting/entity'),
+            extra: { lore: { audiences: ['entity_gen'] } },
+          },
         ],
       },
     ];
@@ -508,8 +511,8 @@ describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () 
       getEntriesForAgent(agentId, books)
         .filter((e) => e.enabled)
         .map((e) => e.uid);
-    expect(uidsFor('story')).toEqual([1]);
-    expect(uidsFor('entity_gen')).toEqual([2]);
+    expect(uidsFor('story')).toEqual(['fated:world_setting/story']);
+    expect(uidsFor('entity_gen')).toEqual(['fated:world_setting/entity']);
     expect(uidsFor('lore_select')).toEqual([]);
   });
 

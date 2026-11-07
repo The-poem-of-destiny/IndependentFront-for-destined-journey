@@ -611,12 +611,15 @@ describe('fetchInstallInput', () => {
     expect(calls).toHaveLength(2);
 
     // 直接喂 planInstall：这是本模块存在的目的
-    const plan = planInstall(input, { nextUid: 7 });
+    const plan = planInstall(input, {});
     expect(plan.projectId).toBe(PROJECT_ID);
     expect(plan.partition).toBe('creative_workshop');
-    expect(plan.entries.map((e) => e.uid)).toEqual([7, 8]);
+    expect(
+      plan.entries.every((e) => e.uid.startsWith(`workshop.${PROJECT_ID}:creative_workshop/`)),
+    ).toBe(true);
+    expect(new Set(plan.entries.map((e) => e.uid)).size).toBe(2);
     expect(plan.entries[0].extra?.workshop?.projectName).toBe('测试扩展包');
-    expect(plan.nextUid).toBe(9);
+    expect(plan).not.toHaveProperty('nextUid');
     expect(plan.rules).toHaveLength(1);
     expect(plan.rules[0].name).toBe('状态栏美化');
   });

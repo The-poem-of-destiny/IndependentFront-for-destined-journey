@@ -369,6 +369,7 @@ describe('prompt-session-assembler', () => {
       entries: [
         {
           ...fixtureWorldBook.entries[0],
+          uid: 'fixture:character/profile',
           content: '未选择的角色档案',
           extra: { lore: { audiences: ['vars_update'] } },
         },
@@ -388,7 +389,10 @@ describe('prompt-session-assembler', () => {
 
     const current = await preparePromptSession({
       ...sessionInput,
-      worldBooks: worldbookLoader.filterBooksByEnabledEntries([characterBook], ['system_core:407']),
+      worldBooks: worldbookLoader.filterBooksByEnabledEntries(
+        [characterBook],
+        ['fated:system_core/core'],
+      ),
     });
 
     expect(current.rebased).toBe(true);

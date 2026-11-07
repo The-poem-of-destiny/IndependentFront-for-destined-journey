@@ -61,12 +61,12 @@ function tryRender(content: string, ctx: EjsEvalContext = makeCtx()) {
   }
 }
 
-function makeEntry(uid: number, content: string, order = 0): WorldBookEntry {
+function makeEntry(index: number, content: string, order = 0): WorldBookEntry {
   return {
-    uid,
+    uid: `fixture:world_setting/synthetic_${index}`,
     key: [],
     keysecondary: [],
-    comment: `synthetic-${uid}`,
+    comment: `synthetic-${index}`,
     content,
     constant: true,
     selective: false,
@@ -246,7 +246,7 @@ describe('D 组 · 契约不变式', () => {
   it('条目失败 → 原文注入，不中断其余条目', () => {
     const entries = [makeEntry(1, '<% 不存在() %>', 0), makeEntry(2, '<%= "好的" %>', 1)];
     const result = renderWorldBookEntries(entries, makeCtx());
-    expect(result.fallbackEntries.map((f) => f.uid)).toEqual([1]);
+    expect(result.fallbackEntries.map((f) => f.uid)).toEqual(['fixture:world_setting/synthetic_1']);
     expect(result.dynamicText).toContain('<% 不存在() %>');
     expect(result.dynamicText).toContain('好的');
   });

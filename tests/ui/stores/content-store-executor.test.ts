@@ -5,7 +5,7 @@
  *   1. 装（含冲突确认路径）—— 空库 + pack → 全部 added；编辑过 → conflicted → 确认后覆盖
  *   2. 升 —— upgradePack 产 added/updated/removed diff
  *   3. 卸（快照回滚路径）—— 卸载后 pack 书被占位书替换；编辑过的书需确认
- *   4. 占位建档 → 装包 → 存档存活（D43 回归，验收 #14c）—— 占位 uid(900001+) → 装包 → enabledWorldBookEntries 按名配对重写
+ *   4. 占位建档 → 装包 → 存档存活（D43 回归，验收 #14c）—— 占位命名空间 UID → 装包 → enabledWorldBookEntries 按名配对重写
  *   5. 装包后 boot 时序断言 —— loadProjectDefaults 返回 pack agentDefaults（D44 默认层）
  *   6. D42 重播种 —— 动过的书不被覆盖
  *
@@ -30,7 +30,7 @@ import type { ContentPack } from '@engine/types/types-content';
 // ── 夹具 ──
 
 /** 造一条世界书条目 */
-function entry(uid: number, name: string, content = `content-${name}`): WorldBookEntry {
+function entry(uid: string, name: string, content = `content-${name}`): WorldBookEntry {
   return {
     uid,
     name,
@@ -44,7 +44,7 @@ function entry(uid: number, name: string, content = `content-${name}`): WorldBoo
   };
 }
 
-/** 造一本书（default state：占位 = 保留段 uid，分隔由调用方控制） */
+/** 造一本书（占位与正式条目由各自命名空间区分） */
 function book(
   id: string,
   partition: WorldBookPartition,
@@ -60,18 +60,18 @@ function book(
   };
 }
 
-/** 占位书的保留段条目（D43：uid ∈ [900001, …)） */
+/** 占位书条目（D43：placeholder 命名空间） */
 const PLACEHOLDER_SYSTEM_CORE: WorldBook = book('system_core', 'system_core', [
-  entry(900001, '核心A', '占位A'),
-  entry(900002, '核心B', '占位B'),
+  entry('placeholder:system_core/core_a', '核心A', '占位A'),
+  entry('placeholder:system_core/core_b', '核心B', '占位B'),
 ]);
 
 /** 占位 world_setting 书（多选分区，装包/卸载都会涉及） */
 const PLACEHOLDER_WORLD: WorldBook = book('world_setting', 'world_setting', [
-  entry(900003, '背景常识', '占位背景'),
+  entry('placeholder:world_setting/background', '背景常识', '占位背景'),
 ]);
 
-/** 装包用的真实内容包（与占位书共用 id，真实 uid 空间 < 900001） */
+/** 装包用的真实内容包（与占位书共用书 id，条目使用 fated 命名空间） */
 function makePack(version = '1.0.0'): ContentPack {
   return {
     formatVersion: 1,
@@ -79,8 +79,13 @@ function makePack(version = '1.0.0'): ContentPack {
     packVersion: version,
     name: '测试内容包',
     worldBooks: [
-      book('system_core', 'system_core', [entry(1, '核心A', '真实A'), entry(2, '核心B', '真实B')]),
-      book('world_setting', 'world_setting', [entry(3, '背景常识', '真实背景')]),
+      book('system_core', 'system_core', [
+        entry('fated:system_core/core_a', '核心A', '真实A'),
+        entry('fated:system_core/core_b', '核心B', '真实B'),
+      ]),
+      book('world_setting', 'world_setting', [
+        entry('fated:world_setting/background', '背景常识', '真实背景'),
+      ]),
     ],
     agentDefaults: {
       version: 1,
@@ -157,7 +162,7 @@ function installContentFetchMock(opts: { version?: string; extraBooks?: WorldBoo
   return { manifest, restore: () => spy.mockRestore() };
 }
 
-/** 预置占位库（占位期的初始状态：同 id 同分区同 builtIn，uid 保留段） */
+/** 预置占位库（占位期的初始状态：同 id 同分区同 builtIn，placeholder UID） */
 async function seedPlaceholderLibrary(): Promise<void> {
   const db = getDatabase();
   await db.worldBooks.bulkPut([PLACEHOLDER_SYSTEM_CORE, PLACEHOLDER_WORLD]);
@@ -222,14 +227,20 @@ describe('content-store 执行器 —— 1. 安装（含冲突确认路径）', 
     expect(outcome.plan?.sections.worldBooks?.conflicted).toHaveLength(0);
     // 库里现在是 pack 内容
     const sc = await getDatabase().worldBooks.get('system_core');
-    expect(sc?.entries.map((e) => e.uid)).toEqual([1, 2]);
+    expect(sc?.entries.map((e) => e.uid)).toEqual([
+      'fated:system_core/core_a',
+      'fated:system_core/core_b',
+    ]);
   });
 
   it('编辑过的 book（hash ≠ 占位基线）→ 首次装包变 conflicted → 未确认时 needs_confirmation → 确认后覆盖', async () => {
     await seedPlaceholderLibrary();
     // 人为编辑占位书（改正文，hash 变化）
     const db = getDatabase();
-    const edited = { ...PLACEHOLDER_SYSTEM_CORE, entries: [entry(900001, '核心A', '改了')] };
+    const edited = {
+      ...PLACEHOLDER_SYSTEM_CORE,
+      entries: [entry('placeholder:system_core/core_a', '核心A', '改了')],
+    };
     await db.worldBooks.put(edited);
 
     const c = useContentStore();
@@ -243,7 +254,10 @@ describe('content-store 执行器 —— 1. 安装（含冲突确认路径）', 
     const second = await c.installPack(makePack(), { confirmConflicts: true });
     expect(second.ok).toBe(true);
     const sc = await db.worldBooks.get('system_core');
-    expect(sc?.entries.map((e) => e.uid)).toEqual([1, 2]);
+    expect(sc?.entries.map((e) => e.uid)).toEqual([
+      'fated:system_core/core_a',
+      'fated:system_core/core_b',
+    ]);
   });
 
   it('pack 经 Vue reactive 代理（packPending 场景）→ 确认重入装包成功，不 DataCloneError（2026-08-07 真机回归）', async () => {
@@ -252,7 +266,7 @@ describe('content-store 执行器 —— 1. 安装（含冲突确认路径）', 
     const db = getDatabase();
     await db.worldBooks.put({
       ...PLACEHOLDER_SYSTEM_CORE,
-      entries: [entry(900001, '核心A', '改了')],
+      entries: [entry('placeholder:system_core/core_a', '核心A', '改了')],
     });
 
     const c = useContentStore();
@@ -292,10 +306,10 @@ describe('content-store 执行器 —— 2. 升级 diff', () => {
       ...makePack('2.0.0'),
       worldBooks: [
         book('system_core', 'system_core', [
-          entry(1, '核心A', 'v2'),
-          entry(99, '新增条目', 'v2新增'),
+          entry('fated:system_core/core_a', '核心A', 'v2'),
+          entry('fated:system_core/new', '新增条目', 'v2新增'),
         ]),
-        book('new_faction', 'faction', [entry(5, '新势力', 'v2')]),
+        book('new_faction', 'faction', [entry('fated:faction/new', '新势力', 'v2')]),
       ],
     };
     const pending = await c.upgradePack(v2);
@@ -338,9 +352,12 @@ describe('content-store 执行器 —— 3. 卸载（快照回滚）', () => {
     expect(outcome.status).toBe('uninstalled');
     expect(c.contentStatus).toBe('placeholder');
     expect(c.activePackId).toBeNull();
-    // 占位书（保留段 uid）回来了
+    // 占位书（placeholder UID）回来了
     const sc = await getDatabase().worldBooks.get('system_core');
-    expect(sc?.entries.map((e) => e.uid)).toEqual([900001, 900002]);
+    expect(sc?.entries.map((e) => e.uid)).toEqual([
+      'placeholder:system_core/core_a',
+      'placeholder:system_core/core_b',
+    ]);
     // contentPacks 已删
     expect(await getDatabase().contentPacks.count()).toBe(0);
   });
@@ -350,7 +367,9 @@ describe('content-store 执行器 —— 3. 卸载（快照回滚）', () => {
     await c.installPack(makePack());
     // 编辑 pack 书（hash ≠ 装包基线）
     const db = getDatabase();
-    await db.worldBooks.put(book('system_core', 'system_core', [entry(1, '核心A', '用户改了')]));
+    await db.worldBooks.put(
+      book('system_core', 'system_core', [entry('fated:system_core/core_a', '核心A', '用户改了')]),
+    );
 
     const first = await c.uninstallPack();
     expect(first.ok).toBe(false);
@@ -408,7 +427,7 @@ describe('content-store 执行器 —— 4. 占位建档 → 装包 → 存档�
     vi.restoreAllMocks();
   });
 
-  it('存档 enabledWorldBookEntries 的占位 uid(900001+) 按名配对重写为真实 uid', async () => {
+  it('存档 enabledWorldBookEntries 的占位 UID 按名配对重写为正式完整 UID', async () => {
     // 占位期建档：单选钉选分区（system_core）写了占位 uid
     const db = getDatabase();
     await db.saves.put({
@@ -423,20 +442,82 @@ describe('content-store 执行器 —— 4. 占位建档 → 装包 → 存档�
         userName: '玩家',
         gameStartTime: '1',
         totalTurns: 0,
-        enabledWorldBookEntries: ['system_core:900001'], // 占位「核心A」
+        enabledWorldBookEntries: ['placeholder:system_core/core_a'], // 占位「核心A」
       },
     });
 
     const c = useContentStore();
     await c.installPack(makePack());
 
-    // 装包后：占位键按名配对 → 真实 uid（核心A → 1）
+    // 装包后：占位键按名配对 → 正式完整 UID
     const save = await db.saves.get('save1');
     const smeta = save?.metadata as Record<string, unknown> | undefined;
-    expect(save?.metadata?.enabledWorldBookEntries).toContain('system_core:1');
-    expect(save?.metadata?.enabledWorldBookEntries).not.toContain('system_core:900001');
+    expect(save?.metadata?.enabledWorldBookEntries).toContain('fated:system_core/core_a');
+    expect(save?.metadata?.enabledWorldBookEntries).not.toContain('placeholder:system_core/core_a');
     // 单选分区无配不上的键 → 不标 needs_selection
     expect(smeta?.needsPackWorldBookSelection).toBeUndefined();
+  });
+
+  it('拆分父 UID 按分片顺序展开、去重且重复装包幂等；同分区正式 UID 不误标重选', async () => {
+    const parent = 'fated:system_core/split';
+    const first = `${parent}/first`;
+    const second = `${parent}/second`;
+    const pack = makePack();
+    pack.worldBooks![0].entries.push(
+      {
+        ...entry(second, '分片二'),
+        extra: { lore: { audiences: ['story'], source: { parentUid: parent, part: 2 } } },
+      },
+      {
+        ...entry(first, '分片一'),
+        extra: { lore: { audiences: ['story'], source: { parentUid: parent, part: 1 } } },
+      },
+    );
+    const db = getDatabase();
+    for (const [id, enabledWorldBookEntries] of [
+      ['split', [parent, first, parent, 'placeholder:system_core/core_a']],
+      ['official', ['fated:system_core/core_b']],
+      ['missing', ['placeholder:system_core/missing']],
+    ] as const) {
+      await db.saves.put({
+        id,
+        name: id,
+        slot: 0,
+        createdAt: 1,
+        updatedAt: 2,
+        activeSnapshotId: null,
+        metadata: {
+          characterName: '主角',
+          userName: '玩家',
+          gameStartTime: '1',
+          totalTurns: 0,
+          enabledWorldBookEntries: [...enabledWorldBookEntries],
+        },
+      });
+    }
+    const c = useContentStore();
+    for (let install = 0; install < 2; install++) {
+      expect((await c.installPack(pack)).ok).toBe(true);
+      const split = await db.saves.get('split');
+      expect(split?.metadata?.enabledWorldBookEntries).toEqual([
+        first,
+        second,
+        'fated:system_core/core_a',
+      ]);
+      expect(
+        (split?.metadata as Record<string, unknown>).needsPackWorldBookSelection,
+      ).toBeUndefined();
+      const official = await db.saves.get('official');
+      expect(official?.metadata?.enabledWorldBookEntries).toEqual(['fated:system_core/core_b']);
+      expect(
+        (official?.metadata as Record<string, unknown>).needsPackWorldBookSelection,
+      ).toBeUndefined();
+      const missing = await db.saves.get('missing');
+      expect(missing?.metadata?.enabledWorldBookEntries).toEqual([
+        'placeholder:system_core/missing',
+      ]);
+      expect((missing?.metadata as Record<string, unknown>).needsPackWorldBookSelection).toBe(true);
+    }
   });
 
   it('占位 uid 配不上 pack 条目 → 单选钉选分区标 needs_selection（不裸删，防内容通胀）', async () => {
@@ -453,16 +534,16 @@ describe('content-store 执行器 —— 4. 占位建档 → 装包 → 存档�
         userName: '玩家',
         gameStartTime: '1',
         totalTurns: 0,
-        enabledWorldBookEntries: ['system_core:999999'], // 占位里不存在的条目名 → 配不上
+        enabledWorldBookEntries: ['placeholder:system_core/missing'], // 占位里不存在的条目名 → 配不上
       },
     });
-    // 占位书里没有 uid 999999 → 名字查不到 → 无法配对 → needs_selection
+    // 占位书里没有该 UID → 名字查不到 → 无法配对 → needs_selection
     const c = useContentStore();
     await c.installPack(makePack());
     const save = await db.saves.get('save1');
     const smeta = save?.metadata as Record<string, unknown> | undefined;
     // 键保留原样（不裸删），标 needs_selection
-    expect(save?.metadata?.enabledWorldBookEntries).toContain('system_core:999999');
+    expect(save?.metadata?.enabledWorldBookEntries).toContain('placeholder:system_core/missing');
     expect(smeta?.needsPackWorldBookSelection).toBe(true);
   });
 });
@@ -541,7 +622,7 @@ describe('content-store 执行器 —— 6. D42 重播种', () => {
     await db.worldBooks.put({
       ...PLACEHOLDER_WORLD,
       id: 'world_setting',
-      entries: [entry(900003, '背景常识', '用户自己改过的内容')],
+      entries: [entry('placeholder:world_setting/background', '背景常识', '用户自己改过的内容')],
     });
 
     const c = useContentStore();

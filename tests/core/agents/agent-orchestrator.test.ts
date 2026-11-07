@@ -3089,7 +3089,7 @@ describe('AgentOrchestrator — Story 上下文新模式（v2）', () => {
             partition: 'world_setting',
             entries: [
               {
-                uid: 1,
+                uid: 'fated:world_setting/candidate',
                 name: 'candidate',
                 content: 'secret lore body',
                 enabled: true,
@@ -3099,7 +3099,7 @@ describe('AgentOrchestrator — Story 上下文新模式（v2）', () => {
                 keysecondary: [],
                 selectiveLogic: 0,
                 extra: {
-                  lore: { audiences: ['story', 'lore_select'], key: 'candidate', section: 'turn' },
+                  lore: { audiences: ['story', 'lore_select'], section: 'turn' },
                 },
               },
             ],

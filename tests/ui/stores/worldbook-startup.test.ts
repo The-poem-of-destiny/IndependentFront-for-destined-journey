@@ -63,16 +63,16 @@ vi.stubGlobal('localStorage', {
   key: (i: number) => [...lsBacking.keys()][i] ?? null,
 });
 
-function makeEntry(uid: number, name = `条目${uid}`): WorldBookEntry {
+function makeEntry(index: number, partition = 'world_setting'): WorldBookEntry {
   return {
-    uid,
-    name,
-    content: `正文 ${uid}`,
+    uid: `placeholder:${partition}/entry_${index}`,
+    name: `条目${index}`,
+    content: `正文 ${index}`,
     enabled: true,
     key: [],
     keysecondary: [],
     selectiveLogic: 0,
-    order: uid,
+    order: index,
     position: 0,
   };
 }
@@ -86,7 +86,7 @@ function makeBook(
     id,
     name: `《${id}》`,
     partition,
-    entries: Array.from({ length: entryCount }, (_, i) => makeEntry(i + 1)),
+    entries: Array.from({ length: entryCount }, (_, i) => makeEntry(i + 1, partition)),
     builtIn: true,
   };
 }

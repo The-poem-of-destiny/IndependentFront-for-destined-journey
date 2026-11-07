@@ -130,7 +130,7 @@ describe('collectDesiredRemoteAssets —— 两个来源合流后去重', () => 
       name: '测试书',
       entries: [
         {
-          uid: 1,
+          uid: 'user:character/su_wan',
           enabled: true,
           content: [
             '<%# char-info-ejs-builder:start %>',

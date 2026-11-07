@@ -861,7 +861,7 @@ export const useGameStore = defineStore('game', () => {
   const ejsFallbacks = ref<
     Array<{
       agentId: string;
-      uid: number;
+      uid: string;
       bookName?: string;
       error: string;
       count: number;
@@ -872,7 +872,7 @@ export const useGameStore = defineStore('game', () => {
   /** 记一次 EJS 条目回退（同 agent+uid 累加计数） */
   function recordEjsFallback(
     agentId: string,
-    entries: Array<{ uid: number; bookName?: string; error: string }>,
+    entries: Array<{ uid: string; bookName?: string; error: string }>,
   ) {
     for (const e of entries) {
       const hit = ejsFallbacks.value.find((r) => r.agentId === agentId && r.uid === e.uid);

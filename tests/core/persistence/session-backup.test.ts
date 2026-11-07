@@ -65,6 +65,17 @@ import {
   findStoryTurnsMissingSummary,
 } from '../../../src/core/memory/memory-context';
 
+import { worldBookUidStem } from '../../../src/core/content/worldbook-uid';
+import { hashWorkshopContent } from '../../../src/core/workshop/workshop-install-plan';
+import { installRuntimePack } from '../../../src/core/content/pack-runtime';
+
+const CORE_UID = 'fated:system_core/destiny_core';
+const DLC_UID = 'fated:dlc/hidden_dungeon';
+const PARENT_UID = 'fated:character/parent';
+const CHILD_UIDS = [`${PARENT_UID}/first`, `${PARENT_UID}/second`];
+const MISSING_CHARACTER_UID = 'fated:character/missing';
+const workshopUid = (projectId = 'proj_uuid_1', name = '二创条目') =>
+  `workshop.${projectId}:creative_workshop/${worldBookUidStem(name)}_${hashWorkshopContent(name)}`;
 describe('A09：拆分装包后导入旧档', () => {
   beforeEach(async () => {
     await initializeDatabase();
@@ -75,16 +86,15 @@ describe('A09：拆分装包后导入旧档', () => {
     const db = getDatabase();
     const backup = await exportSessionSave(SAVE_ID);
     backup.dependencies.packs = [];
-    backup.dependencies.worldBookEntries = [{ token: 'character:42' }];
-    backup.save.metadata.enabledWorldBookEntries = ['character:42'];
+    backup.dependencies.worldBookEntries = [{ token: PARENT_UID }];
+    backup.save.metadata.enabledWorldBookEntries = [PARENT_UID];
     if (v2) backup.save.metadata.storyContextV2 = { schema: 1, markedAt: 1 };
-    const part = (uid: number, index: number) => ({
+    const part = (uid: string, index: number) => ({
       ...makeEntry(uid, `part-${index}`),
       extra: {
         lore: {
           audiences: ['story'],
-          key: `part-${index}`,
-          source: { parentKey: 'character#42', legacyUid: 42, part: index },
+          source: { parentUid: PARENT_UID, part: index },
         },
       },
     });
@@ -92,17 +102,17 @@ describe('A09：拆分装包后导入旧档', () => {
       id: 'character',
       partition: 'character',
       builtIn: true,
-      entries: [part(102, 1), part(101, 0)],
+      entries: [part(CHILD_UIDS[1], 1), part(CHILD_UIDS[0], 0)],
     });
     await db.worldBooks.put(split);
-    expect(planSaveUidMigration([split], [], ['character:42'], []).expandedRewrite).toEqual({
-      'character:42': [101, 102],
+    expect(planSaveUidMigration([split], [], [PARENT_UID], []).expandedRewrite).toEqual({
+      [PARENT_UID]: CHILD_UIDS,
     });
     expect((await checkSessionSaveDependencies(backup)).missingEntries).toEqual([]);
     const original = JSON.stringify(backup);
     const { saveId } = await importSessionSave(backup);
     const save = (await db.saves.get(saveId))!;
-    expect(save.metadata.enabledWorldBookEntries).toEqual(['character:101', 'character:102']);
+    expect(save.metadata.enabledWorldBookEntries).toEqual(CHILD_UIDS);
     expect(save.metadata.storyContextV2).toEqual(backup.save.metadata.storyContextV2);
     const messages = await db.messages.where('saveId').equals(saveId).toArray();
     expect(messages.map((m) => m.content).sort()).toEqual(
@@ -113,7 +123,7 @@ describe('A09：拆分装包后导入旧档', () => {
       getEntriesForAgent('story', books)
         .map((e) => e.uid)
         .sort(),
-    ).toEqual([101, 102]);
+    ).toEqual(CHILD_UIDS);
     const selected = await selectStoryLore(books, {
       userInput: '',
       characters: [],
@@ -124,7 +134,7 @@ describe('A09：拆分装包后导入旧档', () => {
       plotEvents: [],
       agentOutputs: new Map(),
     });
-    expect(selected.zones[1].map((r) => r.entry.uid).sort()).toEqual([101, 102]);
+    expect(selected.zones[1].map((r) => r.entry.uid).sort()).toEqual(CHILD_UIDS);
     expect(JSON.stringify(backup)).toBe(original);
   });
   it('已有效父/子 token 不误展开，缺来源不按显示名猜测', async () => {
@@ -132,32 +142,86 @@ describe('A09：拆分装包后导入旧档', () => {
     const db = getDatabase();
     const backup = await exportSessionSave(SAVE_ID);
     backup.dependencies.packs = [];
-    backup.dependencies.worldBookEntries = [{ token: 'character:42' }, { token: 'character:999' }];
+    backup.dependencies.worldBookEntries = [
+      { token: PARENT_UID },
+      { token: MISSING_CHARACTER_UID },
+    ];
     backup.save.metadata.enabledWorldBookEntries = [
-      'character:42',
-      'character:101',
-      'character:999',
+      PARENT_UID,
+      CHILD_UIDS[0],
+      MISSING_CHARACTER_UID,
     ];
     const installed = makeWorldBook({
       partition: 'character',
       entries: [
-        makeEntry(42, 'Parent'),
+        makeEntry(PARENT_UID, 'Parent'),
         {
-          ...makeEntry(101, 'Parent'),
-          extra: { lore: { source: { parentKey: 'character#42', legacyUid: 42, part: 0 } } },
+          ...makeEntry(CHILD_UIDS[0], 'Parent'),
+          extra: { lore: { source: { parentUid: PARENT_UID, part: 0 } } },
         },
-        makeEntry(102, 'Parent'),
+        makeEntry(CHILD_UIDS[1], 'Parent'),
       ],
     });
     await db.worldBooks.put(installed);
     expect((await checkSessionSaveDependencies(backup)).missingEntries.map((r) => r.token)).toEqual(
-      ['character:999'],
+      [MISSING_CHARACTER_UID],
     );
     expect(planSaveUidMigration([installed], [], [], []).expandedRewrite).toBeUndefined();
     const { saveId } = await importSessionSave(backup);
     expect((await db.saves.get(saveId))!.metadata.enabledWorldBookEntries).toEqual(
       backup.save.metadata.enabledWorldBookEntries,
     );
+  });
+
+  it('受保护 runtime overlay 的拆分 UID 可体检和导入，冻结记录、快照与磁盘占位书不变', async () => {
+    await seedSave();
+    const db = getDatabase();
+    const stale = makeWorldBook({
+      id: 'character',
+      partition: 'character',
+      entries: [makeEntry(PARENT_UID, '磁盘占位父条目')],
+    });
+    await db.worldBooks.put(stale);
+    const save = (await db.saves.get(SAVE_ID))!;
+    save.metadata.enabledWorldBookEntries = [PARENT_UID, CHILD_UIDS[0]];
+    save.metadata.fixedLore = {
+      [CHILD_UIDS[0]]: {
+        text: '开局冻结正文',
+        sourceHash: 'opening-hash',
+        definitionSources: { opening: 'fated:system_core/source' },
+      },
+    };
+    await db.saves.put(save);
+    const split = makeWorldBook({
+      id: 'character',
+      partition: 'character',
+      entries: CHILD_UIDS.map((uid, part) => ({
+        ...makeEntry(uid, `part-${part}`),
+        extra: { lore: { audiences: ['story'], source: { parentUid: PARENT_UID, part } } },
+      })).reverse(),
+    });
+    installRuntimePack({ ...makePackRecord().payload!, worldBooks: [split] }, true);
+    try {
+      const backup = await exportSessionSave(SAVE_ID);
+      expect((await checkSessionSaveDependencies(backup)).missingEntries).toEqual([]);
+      const original = JSON.stringify(backup);
+      const { saveId } = await importSessionSave(backup);
+      const imported = (await db.saves.get(saveId))!;
+      expect(imported.metadata.enabledWorldBookEntries).toEqual(CHILD_UIDS);
+      expect(imported.metadata.fixedLore).toEqual(save.metadata.fixedLore);
+      const reexported = await exportSessionSave(saveId);
+      expect(reexported.messages.map((message) => message.content).sort()).toEqual(
+        backup.messages.map((message) => message.content).sort(),
+      );
+      expect(reexported.snapshots).toHaveLength(backup.snapshots.length);
+      expect(reexported.snapshotPayloads[0].messages?.map((message) => message.content)).toEqual(
+        backup.snapshotPayloads[0].messages?.map((message) => message.content),
+      );
+      expect(await db.worldBooks.toArray()).toEqual([stale]);
+      expect(JSON.stringify(backup)).toBe(original);
+    } finally {
+      installRuntimePack(undefined, false);
+    }
   });
 });
 
@@ -512,9 +576,9 @@ function makeWorldBook(overrides: Partial<WorldBook> = {}): WorldBook {
   };
 }
 
-/** 世界书条目夹具；`workshop` 传了就写进 `extra.workshop`（跨机身份的来源） */
+/** 世界书条目夹具；workshop 仅保留上游溯源，身份直接使用稳定 UID。 */
 function makeEntry(
-  uid: number,
+  uid: string,
   name: string,
   workshop?: { projectId: string; projectName: string; sourceUid: string | number },
 ): WorldBook['entries'][number] {
@@ -553,14 +617,13 @@ function makeWorkshopProject(overrides: Partial<WorkshopProject> = {}): Workshop
     installedVersion: '1.5.0',
     installedAt: Date.now(),
     fetchedAt: Date.now(),
-    uidRange: { start: 900000, end: 900999 },
     updatedAt: Date.now(),
     ...overrides,
   };
 }
 
 /**
- * 内容包夹具 —— 默认**拥有 `book_core`**，而存档启用了 `system_core:100`，
+ * 内容包夹具 —— 默认**拥有 `book_core`**，而存档启用了 `fated:system_core/destiny_core`，
  * 于是它是「这份存档真的用到的包」（Finding 4 的判据①）。
  */
 function makePackRecord(overrides: Partial<ContentPackRecord> = {}): ContentPackRecord {
@@ -579,7 +642,7 @@ function makePackRecord(overrides: Partial<ContentPackRecord> = {}): ContentPack
           id: 'book_core',
           name: '核心设定',
           partition: 'system_core',
-          entries: [makeEntry(100, '命定核心')],
+          entries: [makeEntry(CORE_UID, '命定核心')],
         }),
       ],
     } as ContentPackRecord['payload'],
@@ -725,7 +788,7 @@ async function seedSave(): Promise<void> {
       userName: '玩家',
       gameStartTime: '001-01-01',
       totalTurns: 2,
-      enabledWorldBookEntries: ['system_core:100', 'creative_workshop:900001', 'dlc:777'],
+      enabledWorldBookEntries: [CORE_UID, workshopUid(), DLC_UID],
     },
   };
 
@@ -787,14 +850,14 @@ async function seedContent(): Promise<void> {
       id: 'book_core',
       name: '核心设定',
       partition: 'system_core',
-      entries: [makeEntry(100, '命定核心')],
+      entries: [makeEntry(CORE_UID, '命定核心')],
     }),
     makeWorldBook({
       id: 'book_workshop',
       name: '测试工坊项目',
       partition: 'creative_workshop',
       entries: [
-        makeEntry(900001, '二创条目', {
+        makeEntry(workshopUid(), '二创条目', {
           projectId: 'proj_uuid_1',
           projectName: '测试工坊项目',
           sourceUid: 1,
@@ -805,7 +868,7 @@ async function seedContent(): Promise<void> {
       id: 'book_dlc',
       name: '扩展内容',
       partition: 'dlc',
-      entries: [makeEntry(777, '隐藏副本')],
+      entries: [makeEntry(DLC_UID, '隐藏副本')],
     }),
   ]);
   await db.workshopProjects.put(makeWorkshopProject());
@@ -892,7 +955,7 @@ describe('exportSessionSave', () => {
   it('依赖清单：世界书条目带书名/条目名注释，解析不出的 token 照样进清单', async () => {
     await seedSave();
     await seedContent();
-    // 把 dlc:777 那本删掉 —— 导出方自己都缺的条目不该被藏起来
+    // 把 DLC 那本删掉 —— 导出方自己都缺的条目不该被藏起来
     await getDatabase().worldBooks.delete('book_dlc');
 
     const backup = await exportSessionSave(SAVE_ID);
@@ -900,11 +963,11 @@ describe('exportSessionSave', () => {
 
     expect(entries).toHaveLength(3);
     expect(entries[0]).toEqual({
-      token: 'system_core:100',
+      token: CORE_UID,
       bookName: '核心设定',
       entryTitle: '命定核心',
     });
-    expect(entries[2]).toEqual({ token: 'dlc:777' });
+    expect(entries[2]).toEqual({ token: DLC_UID });
   });
 
   it('依赖清单：工坊项目走条目溯源，版本取 installedVersion', async () => {
@@ -917,7 +980,7 @@ describe('exportSessionSave', () => {
     ]);
   });
 
-  it('依赖清单：条目无溯源时回退 uidRange 匹配', async () => {
+  it('依赖清单：条目无溯源时仍从 UID 的工坊命名空间识别项目', async () => {
     await seedSave();
     await seedContent();
     const db = getDatabase();
@@ -956,7 +1019,7 @@ describe('exportSessionSave', () => {
             makeWorldBook({
               id: 'book_other',
               partition: 'dlc',
-              entries: [makeEntry(555, '没启用的条目')],
+              entries: [makeEntry('fated:dlc/unused', '没启用的条目')],
             }),
           ],
         } as ContentPackRecord['payload'],
@@ -1391,7 +1454,7 @@ describe('checkSessionSaveDependencies', () => {
     const check = await checkSessionSaveDependencies(backup);
     expect(check.ok).toBe(false);
     expect(check.missingEntries).toEqual([
-      { token: 'dlc:777', bookName: '扩展内容', entryTitle: '隐藏副本' },
+      { token: DLC_UID, bookName: '扩展内容', entryTitle: '隐藏副本' },
     ]);
   });
 
@@ -1459,104 +1522,104 @@ describe('checkSessionSaveDependencies', () => {
   });
 });
 
-// ========== 工坊条目跨机身份（Finding 1/2）==========
-//
-// 工坊 uid 由**本机分区级单调游标**发号，同一个项目在另一台机器上按不同安装顺序
-// 拿到的 uid 完全不同。裸 token 比对的两种败法都不报错：假通过（uid 撞上别的项目）
-// 与假缺失（同项目不同号）。这一组把两种都钉住。
-
-describe('工坊条目按身份而非 uid 比对', () => {
-  /** 把收件人库里的工坊书换成「同一项目、不同本机 uid」 */
-  async function reinstallWorkshopAt(uid: number, projectId = 'proj_uuid_1'): Promise<void> {
+// ========== 工坊条目跨机稳定 UID（Finding 1/2）==========
+// 项目命名空间隔离同名条目；导入直接复用 UID，不再携带或重映射本机编号。
+describe('工坊条目以全局 UID 比对', () => {
+  async function reinstallWorkshop(
+    projectId = 'proj_uuid_1',
+    sourceUid: string | number = 1,
+    name = '二创条目',
+  ): Promise<void> {
     await getDatabase().worldBooks.put(
       makeWorldBook({
         id: 'book_workshop',
         name: '测试工坊项目',
         partition: 'creative_workshop',
         entries: [
-          makeEntry(uid, '二创条目', { projectId, projectName: '测试工坊项目', sourceUid: 1 }),
+          makeEntry(workshopUid(projectId, name), name, {
+            projectId,
+            projectName: '测试工坊项目',
+            sourceUid,
+          }),
         ],
       }),
     );
   }
 
-  it('导出清单给工坊条目带上跨机身份（项目 id + 上游 uid）', async () => {
+  it('导出清单只带全局 UID 和显示注释，不复制旧跨机映射字段', async () => {
     await seedSave();
     await seedContent();
-
     const backup = await exportSessionSave(SAVE_ID);
-    const workshopRef = backup.dependencies.worldBookEntries.find((e) =>
-      e.token.startsWith('creative_workshop:'),
-    )!;
-    expect(workshopRef.workshopProjectId).toBe('proj_uuid_1');
-    expect(workshopRef.workshopSourceUid).toBe(1);
-    // 非工坊条目不带身份（那些 uid 是内容仓固定编号，本来就跨机稳定）
-    const coreRef = backup.dependencies.worldBookEntries.find(
-      (e) => e.token === 'system_core:100',
-    )!;
-    expect(coreRef.workshopProjectId).toBeUndefined();
+    expect(backup.dependencies.worldBookEntries.find((e) => e.token === workshopUid())).toEqual({
+      token: workshopUid(),
+      bookName: '测试工坊项目',
+      entryTitle: '二创条目',
+    });
+    expect(backup.dependencies.worldBookEntries.find((e) => e.token === CORE_UID)).toEqual({
+      token: CORE_UID,
+      bookName: '核心设定',
+      entryTitle: '命定核心',
+    });
   });
 
-  it('(a) 同项目、收件人本机 uid 不同 → 不报缺失，且导入时 token 被改写成本机 uid', async () => {
+  it('同项目跨机重装且上游编号改变，UID 不变；导入不重写选择或备份', async () => {
     await seedSave();
     await seedContent();
     const backup = await exportSessionSave(SAVE_ID);
-
-    // 收件人那边这个项目装在 900500（安装顺序不同），而备份里写的是 900001
-    await reinstallWorkshopAt(900500);
-
-    const check = await checkSessionSaveDependencies(backup);
-    expect(check.missingEntries).toEqual([]);
-    expect(check.ok).toBe(true);
-
+    const original = JSON.stringify(backup);
+    // 收件人先装其他项目，再重装目标项目；上游编号仅是溯源。
+    await getDatabase().worldBooks.put(
+      makeWorldBook({
+        id: 'other-workshop',
+        partition: 'creative_workshop',
+        entries: [makeEntry(workshopUid('proj_other'), '二创条目')],
+      }),
+    );
+    await reinstallWorkshop('proj_uuid_1', 500);
+    expect(await checkSessionSaveDependencies(backup)).toEqual({
+      ok: true,
+      missingEntries: [],
+      packMismatches: [],
+    });
     const { saveId } = await importSessionSave(backup);
-    const tokens = (await getDatabase().saves.get(saveId))!.metadata.enabledWorldBookEntries!;
-    expect(tokens).toContain('creative_workshop:900500');
-    expect(tokens).not.toContain('creative_workshop:900001');
-    // 非工坊 token 一个字节不动
-    expect(tokens).toContain('system_core:100');
-    expect(tokens).toContain('dlc:777');
+    expect((await getDatabase().saves.get(saveId))!.metadata.enabledWorldBookEntries).toEqual(
+      backup.save.metadata.enabledWorldBookEntries,
+    );
+    expect(JSON.stringify(backup)).toBe(original);
   });
 
-  it('(b) 同一个 uid 被**另一个项目**占着 → 照报缺失（裸 token 比对会在这里假通过）', async () => {
+  it('其他项目的同名、同上游编号条目不会冒充缺失的项目身份', async () => {
     await seedSave();
     await seedContent();
     const backup = await exportSessionSave(SAVE_ID);
-
-    await reinstallWorkshopAt(900001, 'proj_uuid_OTHER');
-
+    await reinstallWorkshop('proj_uuid_other');
     const check = await checkSessionSaveDependencies(backup);
     expect(check.ok).toBe(false);
-    expect(check.missingEntries.map((e) => e.token)).toEqual(['creative_workshop:900001']);
-
-    // 导入不去硬凑：认不出身份就原样留着，绝不指向别的项目的条目
+    expect(check.missingEntries.map((e) => e.token)).toEqual([workshopUid()]);
     const { saveId } = await importSessionSave(backup);
     const tokens = (await getDatabase().saves.get(saveId))!.metadata.enabledWorldBookEntries!;
-    expect(tokens).toContain('creative_workshop:900001');
+    expect(tokens).toContain(workshopUid());
+    expect(tokens).not.toContain(workshopUid('proj_uuid_other'));
   });
 
-  it('(c) 清单项没有身份（老备份 / 手工条目）→ 退回裸 token 比对', async () => {
+  it('缺少上游溯源仍按完整 UID 比对，不用显示名或项目去猜另一个身份', async () => {
     await seedSave();
     await seedContent();
-    // 导出**之前**抹掉溯源 → 清单里这一条不带身份
     const db = getDatabase();
     const book = (await db.worldBooks.get('book_workshop'))!;
     book.entries[0].extra = undefined;
     await db.worldBooks.put(book);
-
     const backup = await exportSessionSave(SAVE_ID);
-    expect(backup.dependencies.worldBookEntries.every((e) => !e.workshopProjectId)).toBe(true);
-
-    // token 还在 → 齐全
+    expect(backup.dependencies.workshopProjects.map((p) => p.id)).toEqual(['proj_uuid_1']);
     expect((await checkSessionSaveDependencies(backup)).ok).toBe(true);
-
-    // token 换个号 → 报缺失（没有身份可依，只能按号比）
-    await reinstallWorkshopAt(900500);
-    const book2 = (await db.worldBooks.get('book_workshop'))!;
-    book2.entries[0].extra = undefined;
-    await db.worldBooks.put(book2);
+    // 同一项目的不同 UID 不可替代原条目，即使显示名随后被改成相同。
+    await reinstallWorkshop('proj_uuid_1', 1, '另一个条目');
+    const replacement = (await db.worldBooks.get('book_workshop'))!;
+    replacement.entries[0].name = '二创条目';
+    replacement.entries[0].extra = undefined;
+    await db.worldBooks.put(replacement);
     const check = await checkSessionSaveDependencies(backup);
-    expect(check.missingEntries.map((e) => e.token)).toEqual(['creative_workshop:900001']);
+    expect(check.missingEntries.map((e) => e.token)).toEqual([workshopUid()]);
   });
 });
 

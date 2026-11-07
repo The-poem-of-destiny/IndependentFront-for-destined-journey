@@ -15,6 +15,7 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useWorldBookStore } from '../../stores/worldbook-store';
 import type { WorldBook } from '@engine/types/types';
+import { importUserWorldBookEntries } from '@engine/content/worldbook-import';
 
 /** 新建 / 导入的自建书默认读取范围（只给正文；玩家可在编辑器里加） */
 const DEFAULT_USER_BOOK_AUDIENCES = ['story'] as const;
@@ -90,30 +91,14 @@ async function importWorldBook() {
         partition: 'world_setting',
         description: raw.description || '',
         // 读取范围逐条目写入：条目自带声明就用它，否则用文件书级声明（旧格式）或默认只给正文
-        entries: Array.isArray(raw.entries)
-          ? raw.entries.map((e: any) => ({
-              uid: e.uid || Date.now(),
-              name: e.name || e.comment || '',
-              content: e.content || '',
-              enabled: e.enabled !== false,
-              constant: e.constant || false,
-              key: e.key || [],
-              keysecondary: e.keysecondary || [],
-              selectiveLogic: e.selectiveLogic ?? 0,
-              order: e.order ?? 100,
-              position: e.position ?? 0,
-              extra: {
-                lore: {
-                  ...(e?.extra?.lore ?? {}),
-                  audiences: Array.isArray(e?.extra?.lore?.audiences)
-                    ? e.extra.lore.audiences.filter(
-                        (id: unknown): id is string => typeof id === 'string',
-                      )
-                    : (declared ?? [...DEFAULT_USER_BOOK_AUDIENCES]),
-                },
-              },
-            }))
-          : [],
+        entries:
+          raw.entries && typeof raw.entries === 'object'
+            ? importUserWorldBookEntries(
+                raw.entries,
+                'world_setting',
+                declared ?? DEFAULT_USER_BOOK_AUDIENCES,
+              )
+            : [],
       };
       await wb.upsertBook(book);
       ui.toast(`已导入 "${book.name}" (${book.entries.length} 条目)`, 'success');

@@ -7,20 +7,8 @@
  * 断言：没有 IndexedDB、没有 fetch、没有 Vue。store 拿到计划之后只做一件蠢事：
  * 照单写行。
  *
- * 三条不可动摇的规则:
- *
- * 1. **uid 必须在分区内重新发号（D8）**。`filterBooksByEnabledEntries()` 以
- *    **partition 为键**建 uid 允许表，而工坊是「多本书共用一个分区」的第一例；
- *    上游每个项目 uid 都从 0 起编（实测），照搬必然撞号，`creative_workshop:5`
- *    会同时命中所有工坊书里的 uid=5 —— 静默的内容错位。
- *
- * 2. **卸载不回收号段（D8）**。回收会让旧存档里残留的 `enabledWorldBookEntries`
- *    指向新项目的条目。浪费几个整数远比错启用一段陌生内容便宜。本模块的体现是：
- *    `nextUid` 只增不减，`retiredUids` 只是记录，绝不回填分配器。
- *
- * 3. **更新按名匹配（D15，铁律 1）**。新旧条目按 `name`（= 上游 `comment`）配对；
- *    存活条目 **uid 保持不变** → 存档的 `enabledWorldBookEntries` 无需重写。
- *    这正是「逻辑键 = 名字，uid 只是引擎内寻址句柄」的直接后果。
+ * UID 由项目 ID 与条目名确定性生成，同项目跨机一致，不依赖安装顺序或数字号段。
+ * 更新仍按名称检测正文冲突；存活条目保持相同 UID。
  *
  * 冲突判定用 `sourceHash`（D14/D15）: 安装时记下正文哈希，更新时比对当前正文。
  * 它的**唯一**用途是让警告精确（只在用户真编辑过时出现），而不是无条件恐吓。
@@ -42,6 +30,7 @@ import type {
   WorkshopSourceEntry,
 } from './workshop-types';
 import { WORKSHOP_PARTITION, workshopBookId, workshopNote } from './workshop-types';
+import { isWorldBookUid, worldBookUidStem } from '../content/worldbook-uid';
 
 /**
  * 正文哈希 —— 只为「这段文本被人改过吗」这一个问题服务（D15）。
@@ -64,6 +53,14 @@ export function hashWorkshopContent(content: string): string {
   // 长度进哈希：截断/追加空白这类「同字符集」编辑也能被区分
   h2 = Math.imul(h2 ^ content.length, 0xc2b2ae35) >>> 0;
   return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
+}
+
+/** A readable ASCII stem plus a name digest also separates normalized-title collisions. */
+function workshopEntryUid(projectId: string, name: string): string {
+  const stem = worldBookUidStem(name);
+  const uid = `workshop.${projectId.toLowerCase()}:creative_workshop/${stem}_${hashWorkshopContent(name)}`;
+  if (!isWorldBookUid(uid)) throw new Error(`Invalid workshop project ID: ${projectId}`);
+  return uid;
 }
 
 /**
@@ -102,7 +99,7 @@ function uniquifyNames(
  * 出一次安装/更新的完整计划 —— **纯同步、无副作用**。
  *
  * @param payload 规范化后的载荷（`parsePayload` 的产物）+ 项目元数据
- * @param registry 分区级 uid 分配游标 + 本项目当前已装条目（首装省略 `existingEntries`）
+ * @param registry 本项目当前已装条目（首装省略 `existingEntries`）
  *
  * 首装与更新走的是同一条路径：`existingEntries` 为空时按名匹配自然全部落到
  * 「新增」分支。没有 `if (isInstall) ... else ...`，也就没有两条会各自腐烂的代码路径。
@@ -121,21 +118,16 @@ export function planInstall(payload: WorkshopInstallInput, registry: InstallRegi
     if (!existingByName.has(entry.name)) existingByName.set(entry.name, entry);
   }
 
-  // 分配器游标必须是非负整数；上游传了脏值时从 0 起，而不是把 NaN 传染给每个 uid
-  let nextUid = Number.isFinite(registry.nextUid) ? Math.max(0, Math.trunc(registry.nextUid)) : 0;
-  const allocatedStart = nextUid;
-
   const conflicts: InstallConflict[] = [];
   const matchedNames = new Set<string>();
   const entries: WorldBookEntry[] = [];
 
   for (const { entry: source, name } of uniquifyNames(payload.worldbookEntries, droppedNotes)) {
     const existing = existingByName.get(name);
-    let uid: number;
+    const uid = workshopEntryUid(project.id, name);
 
     if (existing) {
       // D15: 存活条目 uid 保持不变 → 存档的 enabledWorldBookEntries 无需重写
-      uid = existing.uid;
       matchedNames.add(name);
 
       const recordedHash = existing.extra?.workshop?.sourceHash;
@@ -148,8 +140,6 @@ export function planInstall(payload: WorkshopInstallInput, registry: InstallRegi
       }
       // 没有 recordedHash 说明这条不是本流程装的（手工造的/更早版本装的）——
       // 无从判断是否被改过，不谎报冲突，静默覆盖。
-    } else {
-      uid = nextUid++;
     }
 
     entries.push({
@@ -175,7 +165,7 @@ export function planInstall(payload: WorkshopInstallInput, registry: InstallRegi
     });
   }
 
-  // 上游移除的条目：uid 退休，**不回收**（D8）。存档里的残留引用惰性失效。
+  // 上游移除的条目：保留失效引用，不会指向其他项目。
   const retiredUids = existingEntries
     .filter((entry) => !matchedNames.has(entry.name))
     .map((entry) => entry.uid);
@@ -184,7 +174,7 @@ export function planInstall(payload: WorkshopInstallInput, registry: InstallRegi
     droppedNotes.push(
       workshopNote(
         'dropped',
-        `${retiredUids.length} 条已装条目在上游新版本中已移除，将被删除（uid ${retiredUids.join(', ')} 就此退休，不再复用）`,
+        `${retiredUids.length} 条已装条目在上游新版本中已移除，将被删除（uid ${retiredUids.join(', ')}）`,
       ),
     );
   }
@@ -195,12 +185,6 @@ export function planInstall(payload: WorkshopInstallInput, registry: InstallRegi
   });
   droppedNotes.push(...regexResult.droppedNotes);
 
-  const uids = entries.map((entry) => entry.uid);
-  const uidRange =
-    uids.length > 0
-      ? { start: Math.min(...uids), end: Math.max(...uids) + 1 }
-      : { start: nextUid, end: nextUid };
-
   return {
     projectId: project.id,
     projectName: project.name,
@@ -208,9 +192,6 @@ export function planInstall(payload: WorkshopInstallInput, registry: InstallRegi
     partition: WORKSHOP_PARTITION,
     entries,
     rules: regexResult.rules,
-    uidRange,
-    allocatedUidRange: { start: allocatedStart, end: nextUid },
-    nextUid,
     retiredUids,
     conflicts,
     droppedNotes,

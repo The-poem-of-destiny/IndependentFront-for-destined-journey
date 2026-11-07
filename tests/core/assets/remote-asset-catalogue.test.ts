@@ -87,7 +87,7 @@ function noisyEntry(...blocks: string[]): string {
 
 function makeEntry(overrides: Partial<WorldBookEntry> = {}): WorldBookEntry {
   return {
-    uid: 1,
+    uid: 'fated:character/default',
     name: '条目',
     content: '',
     enabled: true,
@@ -391,8 +391,8 @@ describe('collectWorldBookRemoteAssets', () => {
 
   it('多本书 flatMap，按书序 → 条目序', () => {
     const books = [
-      makeBook([makeEntry({ uid: 1, content: content甲 })], 'b1'),
-      makeBook([makeEntry({ uid: 2, content: content乙 })], 'b2'),
+      makeBook([makeEntry({ uid: 'fated:character/alpha', content: content甲 })], 'b1'),
+      makeBook([makeEntry({ uid: 'fated:character/beta', content: content乙 })], 'b2'),
     ];
     expect(collectWorldBookRemoteAssets(books).map((d) => d.name)).toEqual([
       '测试角色甲',
@@ -403,15 +403,15 @@ describe('collectWorldBookRemoteAssets', () => {
   it('🔴 enabled === false 的条目一条都不扫（关掉的条目凭什么替它下图）', () => {
     const books = [
       makeBook([
-        makeEntry({ uid: 1, content: content甲, enabled: false }),
-        makeEntry({ uid: 2, content: content乙, enabled: true }),
+        makeEntry({ uid: 'fated:character/alpha', content: content甲, enabled: false }),
+        makeEntry({ uid: 'fated:character/beta', content: content乙, enabled: true }),
       ]),
     ];
     expect(collectWorldBookRemoteAssets(books).map((d) => d.name)).toEqual(['测试角色乙']);
   });
 
   it('缺 enabled 字段的历史行按「开着」处理（判据是 !== false，不是 === true）', () => {
-    const entry = makeEntry({ uid: 1, content: content甲 });
+    const entry = makeEntry({ uid: 'fated:character/alpha', content: content甲 });
     delete (entry as Partial<WorldBookEntry>).enabled;
     expect(collectWorldBookRemoteAssets([makeBook([entry])])).toHaveLength(1);
   });
