@@ -6,11 +6,11 @@
  * 展示，避免首页再维护一份内容会漂移的弹窗。
  */
 import AppCard from '../shared/AppCard.vue';
-import { VERSION } from '@engine/index';
 import { useBranding } from '../../branding-defaults';
 
 // 品牌面（D26）：分区标题与页脚署名随内容包走，未装包时是中性默认值
 const { branding } = useBranding();
+const engineVersion = typeof __ENGINE_VERSION__ !== 'undefined' ? __ENGINE_VERSION__ : '未知';
 </script>
 
 <template>
@@ -20,26 +20,15 @@ const { branding } = useBranding();
       <AppCard padding="md"
         ><h4>制作人员</h4>
         <div class="about-table">
-          <div class="about-row"><span>项目开发</span><span>Richard</span></div>
-          <div class="about-row"><span>AI 开发协作</span><span>Claude Code</span></div>
           <div class="about-row">
-            <span>世界观设定</span><span>{{ branding.credits }}</span>
+            <span>项目开发</span><span>Richardoooo、December-17th、Hilo114</span>
           </div>
         </div></AppCard
       ><AppCard padding="md"
         ><h4>项目信息</h4>
         <div class="about-table">
           <div class="about-row">
-            <span>项目名称</span><span>{{ branding.shortName }}</span>
-          </div>
-          <div class="about-row">
-            <span>引擎版本</span><span>{{ VERSION }}</span>
-          </div>
-          <div class="about-row">
-            <span>项目类型</span><span>{{ branding.about }}</span>
-          </div>
-          <div class="about-row">
-            <span>纪元</span><span>{{ branding.era }}</span>
+            <span>引擎版本</span><span>{{ engineVersion }}</span>
           </div>
         </div></AppCard
       ><AppCard padding="md"
@@ -51,20 +40,6 @@ const { branding } = useBranding();
           <div class="about-row"><span>开发语言</span><span>TypeScript</span></div>
         </div></AppCard
       >
-      <AppCard
-        v-if="branding.worldSummary.title || branding.worldSummary.lines.length"
-        padding="md"
-        class="about-world"
-      >
-        <h4>{{ branding.worldSummary.title || '世界概览' }}</h4>
-        <p
-          v-for="(line, index) in branding.worldSummary.lines"
-          :key="index"
-          class="world-summary-line"
-        >
-          {{ line }}
-        </p>
-      </AppCard>
     </div>
     <!--
       🔴 字体与图标署名 —— **不是可选装饰，是许可义务**（2026-08-05 自托管起）。
@@ -149,18 +124,6 @@ const { branding } = useBranding();
 }
 .about-row span:last-child {
   text-align: right;
-}
-.about-world {
-  grid-column: 1 / -1;
-}
-.world-summary-line {
-  margin: 0;
-  color: var(--theme-text-secondary);
-  font-size: 0.85rem;
-  line-height: 1.7;
-}
-.world-summary-line + .world-summary-line {
-  margin-top: var(--theme-spacing-xs);
 }
 .about-footer {
   margin-top: var(--theme-spacing-lg);
