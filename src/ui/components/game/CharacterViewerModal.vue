@@ -67,7 +67,10 @@ const open = computed(() => props.name !== null);
  * （血量打完架还是满的，那种缺陷没人会怀疑到弹窗上）。
  */
 const char = computed<CharacterState | null>(
-  () => (game.characters ?? []).find((c) => c.name === props.name) ?? null,
+  () =>
+    ((game.generationMode === 'direct' ? game.displayCharacters : game.characters) ?? []).find(
+      (c) => c.name === props.name,
+    ) ?? null,
 );
 
 // ═══ 页签 ═══

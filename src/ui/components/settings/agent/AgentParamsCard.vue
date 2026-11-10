@@ -65,7 +65,9 @@ const tailFieldLabel = computed(() =>
 const tailFieldHint = computed(() =>
   isProseRewrite.value
     ? '作为 assistant 前缀的 reasoning_content：模型从这里接着往下想。仅「正文润色」侧链使用；留空 = 用引擎默认种子。'
-    : 'Delta 会话：每轮最新的 user 消息末尾都会追加这段指令。留空 = 不注入（缺省）。',
+    : props.agentId === 'direct_main'
+      ? '每次直出请求末尾追加的风格指令；不覆盖必需输出协议。'
+      : 'Delta 会话：每轮最新的 user 消息末尾都会追加这段指令。留空 = 不注入（缺省）。',
 );
 const tailFieldPlaceholder = computed(() =>
   isProseRewrite.value
@@ -90,7 +92,11 @@ function setAgentField(patch: Partial<AgentSettingsEntry>) {
   s.agentDirty[props.agentId] = true;
 }
 
-const isStoryV2 = computed(() => props.agentId === 'story' && s.storyContextV2Enabled === true);
+const isStoryV2 = computed(
+  () =>
+    (props.agentId === 'story' || props.agentId === 'direct_main') &&
+    s.storyContextV2Enabled === true,
+);
 const historyLayersError = ref('');
 
 /** 留空恢复默认；只有 Story v2 要求正文窗口为正整数。 */
@@ -267,7 +273,10 @@ const readableBooks = computed(() =>
           "
         />
       </label>
-      <label class="form-label"
+      <p v-if="agentId === 'direct_main'" class="form-hint">
+        直出主生成不自动重试；失败后可手动重试一次新的生成。
+      </p>
+      <label v-else class="form-label"
         >失败重试次数
         <span class="source-badge" :class="{ overridden: isOverridden('maxRetries') }">{{
           isOverridden('maxRetries') ? '已覆写' : '默认'

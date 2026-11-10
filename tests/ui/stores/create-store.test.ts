@@ -197,7 +197,9 @@ function makeStore() {
   // 🔴 必须在 `useCreateStore()` **之前**灌：store 构造时同步读一次注册表
   //    （常态下 boot 已灌好，这里模拟的就是那个状态）。
   seedFixtureRegistry();
-  return useCreateStore();
+  const store = useCreateStore();
+  store.generationMode = 'agent';
+  return store;
 }
 
 const TEST_ATTRIBUTES = ['力量', '敏捷', '体质', '智力', '精神'];
@@ -1537,6 +1539,7 @@ function setupPlotStore() {
     systemPrompt: '你是剧情大纲生成 Agent',
   });
   const store = useCreateStore();
+  store.generationMode = 'agent';
   store.plotMode = 'main';
   store.name = '艾琳';
   allocateBasePoints(store);
@@ -1949,6 +1952,7 @@ describe('startJourney 剧情落库', () => {
   it('off 模式无大纲: 不落库大纲与事件', async () => {
     setActivePinia(createPinia());
     const store = useCreateStore();
+    store.generationMode = 'agent';
     store.name = '测试';
     allocateBasePoints(store);
     const saveId = await store.startJourney();
@@ -1960,6 +1964,7 @@ describe('startJourney 剧情落库', () => {
   it('开局兑换的命运点应写入存档级 SaveProfile.fp（修 FP 丢失 bug）', async () => {
     setActivePinia(createPinia());
     const store = useCreateStore();
+    store.generationMode = 'agent';
     store.name = '测试';
     store.experienceMode = 'easy';
     store.destinyPoints = 100;
@@ -1978,6 +1983,7 @@ describe('startJourney 剧情落库', () => {
   it('未兑换命运点时仍应创建 SaveProfile 并保存所选经验档位', async () => {
     setActivePinia(createPinia());
     const store = useCreateStore();
+    store.generationMode = 'agent';
     store.name = '测试';
     store.experienceMode = 'easy';
     // destinyPoints 默认 0
@@ -2361,5 +2367,23 @@ describe('buildEnabledWorldBookEntries 三条启用轴', () => {
     store.resetAll();
     expect(store.enabledWorkshopProjectIds.size).toBe(0);
     expect(store.workshopOptions).toEqual([]);
+  });
+});
+
+describe('save generation mode', () => {
+  it('requires an explicit choice before creation and resets for the next save', async () => {
+    const store = makeStore();
+    store.generationMode = '';
+    allocateBasePoints(store);
+    expect(store.stepValid[1]).toBe(false);
+    await expect(store.startJourney()).rejects.toThrow('生成模式');
+    store.generationMode = 'direct';
+    const id = await store.startJourney();
+    const { getSave } = await import('@engine/persistence/database');
+    expect((await getSave(id))?.metadata.generationMode).toBe('direct');
+    store.generationMode = 'agent';
+    expect((await getSave(id))?.metadata.generationMode).toBe('direct');
+    store.resetAll();
+    expect(store.generationMode).toBe('');
   });
 });

@@ -15,7 +15,7 @@ import source from '@ui/components/settings/agent/PresetManager.vue?raw';
 describe('PresetManager —— 预填充（末尾 assistant 条目）', () => {
   it('开关是否出现复用引擎 findTailAssistantEntry（不另写判据）', () => {
     expect(source).toContain('findTailAssistantEntry');
-    expect(source).toMatch(/v-if="tailAssistantEntry"/);
+    expect(source).toMatch(/v-if="agentId !== 'direct_main' && tailAssistantEntry"/);
   });
 
   it('开关 / 填充位置写进预设 settings.prefill', () => {

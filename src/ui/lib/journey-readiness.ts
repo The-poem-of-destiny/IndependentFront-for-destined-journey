@@ -13,6 +13,7 @@ export function checkJourneyReadiness(
   settings: { apiPool?: readonly unknown[]; agents?: unknown },
   defaults: AgentDefaultsLayer,
   plotMode: string,
+  generationMode: 'agent' | 'direct' | '' = 'agent',
 ): ReadinessIssue[] {
   const rawPool = settings.apiPool ?? [];
   const apiPool = buildApiEndpoints(rawPool);
@@ -31,7 +32,10 @@ export function checkJourneyReadiness(
     ];
   }
   const issues: ReadinessIssue[] = [];
-  const agentIds = DEFAULT_AGENT_PIPELINE.stages.flatMap((stage) => stage.agents);
+  const agentIds =
+    generationMode === 'direct'
+      ? ['memory_recall', 'direct_main', 'memory_summary']
+      : DEFAULT_AGENT_PIPELINE.stages.flatMap((stage) => stage.agents);
   for (const id of agentIds) {
     const resolution = resolveAgentEndpoint({
       boundPoolId: getAgentSettings(settings, id, defaults).model,
@@ -48,7 +52,8 @@ export function checkJourneyReadiness(
     if (plotMode === 'off' && id.startsWith('plot_')) continue;
     if (resolution.status !== 'resolved') continue;
     const endpoint = resolution.endpoint;
-    const blocking = DEFAULT_AGENT_PIPELINE.requiredAgents?.includes(id) ?? false;
+    const blocking =
+      id === 'direct_main' || (DEFAULT_AGENT_PIPELINE.requiredAgents?.includes(id) ?? false);
     let problem = '';
     try {
       const url = new URL(endpoint.baseUrl);

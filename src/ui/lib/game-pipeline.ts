@@ -9,6 +9,17 @@ import type { StatePatch } from '@engine/types/types';
  * 通过 onStoryChunk 将累计的玩家可见投影实时推送到前端 UI。
  */
 import { AgentOrchestrator } from '@engine/agents/agent-orchestrator';
+import { resolveGenerationMode, type GenerationMode } from '@engine/story/generation-mode';
+import { buildDirectPatches } from '@engine/agents/direct-output';
+import type { DirectTurnDraft } from '@engine/agents/direct-output';
+import {
+  buildDirectCombat,
+  projectDirectCombatCharacters,
+  readDirectCombat,
+} from '@engine/combat/direct-combat';
+import { createDirectPreset, DIRECT_PRESET_ID } from '@engine/prompts/direct-prompt';
+import { initializeDirectSettings } from './direct-settings';
+import { scanEventTriggers, scanPlayAudioMarkers } from '@engine/story/marker-protocol';
 // Q-05：从模型输出抢救 JSON 的唯一入口（裸 / 围栏 / <json> / 前后夹带解说四种形态）
 import { extractJsonPayload } from '@engine/utils/model-json';
 import type { OrchestratorOptions, OrchestratorEvents } from '@engine/agents/agent-orchestrator';
@@ -488,6 +499,8 @@ export class GamePipeline {
    * 本轮及其后置任务全程只读这个值 —— 中途切开关不影响已经开跑的这一轮。
    */
   private runMode: 'legacy' | 'v2' = 'legacy';
+  private generationMode: GenerationMode = 'agent';
+  private directCommitted = false;
   /**
    * v2 本轮的每回合摘要**草稿**（memory_summary 产出后解析）。只有回合被正式接纳
    * （编排器 status=completed）后才落库；失败 / 取消的回合直接丢弃（计划 §10.2）。
@@ -584,6 +597,135 @@ export class GamePipeline {
   }
 
   /** toast 失败不改变任何结论（单测里常常没有可用的 UI store） */
+  private async acceptDirectTurn(
+    draft: DirectTurnDraft,
+    context: AgentContext,
+    controller: AbortController,
+  ): Promise<void> {
+    if (!this.isRunCurrent(controller)) throw new DOMException('Turn cancelled', 'AbortError');
+    if (context.plotSettings?.mode === 'off' && Object.keys(draft.updates.plot).length)
+      throw new Error('剧情关闭时 direct plot 必须为空');
+    const message = this.emitMessage(draft.content, 'assistant', {
+      storyTurnStatus: 'pending',
+      storyTurnKey: this.currentStoryTurnKey,
+      ...(context.gameTime ? { storyGameTime: { ...context.gameTime } } : {}),
+    });
+    if (!message) throw new DOMException('Turn cancelled', 'AbortError');
+    this.currentStoryTurnKey ??= message.id;
+    this.currentTurnMessages.push({ ...message });
+    this.lastStoryMessage = { id: message.id, turn: message.turn ?? 0, content: message.content };
+    const { getCharacters } = await import('@engine/persistence/database');
+    const built = buildDirectPatches(draft, {
+      characters: await getCharacters(this.saveId),
+      definitions: context.characterDefinitions ?? [],
+      sourceTurnKey: this.currentStoryTurnKey,
+    });
+    const combat = buildDirectCombat(
+      draft.updates.combat,
+      readDirectCombat(this.game.saveProfile),
+      built.characters,
+      built.patches,
+      this.currentStoryTurnKey,
+    );
+    const manager = createStateManager(this.saveId, {
+      onMaintenanceWarning: (warning) => this.notify(warning, 'warning'),
+    });
+    const outcome = await manager.commitDirectTurn({
+      patches: [...built.patches, ...combat.patches],
+      messages: this.currentTurnMessages,
+      turnKey: this.currentStoryTurnKey,
+      combat: combat.record,
+      eventTrigger: scanEventTriggers(draft.raw)[0]?.name,
+      isCurrent: () => this.isRunCurrent(controller),
+      onCommitStart: () => {
+        this.finalTurnCommitStarted = true;
+      },
+    });
+    this.directCommitted = true;
+    for (const m of this.currentTurnMessages) {
+      m.storyTurnStatus = 'accepted';
+      const shown = this.game.messages.find((row) => row.id === m.id);
+      if (shown) shown.storyTurnStatus = 'accepted';
+    }
+    this.game.setPendingOptions(draft.options);
+    if (outcome === 'already-accepted') return;
+    const auxiliary = async (label: string, task: () => Promise<unknown>) => {
+      try {
+        await task();
+      } catch (error) {
+        this.notify(
+          `本楼已接纳，${label}未完成：${error instanceof Error ? error.message : String(error)}`,
+          'warning',
+        );
+      }
+    };
+    await auxiliary('时间推进', () =>
+      manager.applyTimeAdvance(draft.updates.time.delta_time, () => this.isRunCurrent(controller)),
+    );
+    await auxiliary('旅程更新', () => manager.syncMapJourney());
+    const plotResult = (agentId: string, data: Record<string, unknown>): AgentResult => ({
+      agentId,
+      output: data,
+      rawResponse: JSON.stringify(data),
+      tokensUsed: 0,
+      cacheHit: false,
+      duration: 0,
+    });
+    if (draft.updates.plot.pre) {
+      this.handlePlotPreCheck(plotResult('plot_pre_check', draft.updates.plot.pre));
+      await Promise.all(this.pendingPlotTasks);
+      this.pendingPlotTasks = [];
+    }
+    if (draft.updates.plot.post)
+      await auxiliary('剧情保存', () =>
+        this.persistPlotPostCheck(plotResult('plot_post_check', draft.updates.plot.post!)),
+      );
+    await auxiliary('角色经历保存', async () => {
+      const { getSaveProfile } = await import('@engine/persistence/database');
+      const endTime = (await getSaveProfile(this.saveId))?.gameTime;
+      for (const m of this.currentTurnMessages)
+        if (m.role === 'assistant' && endTime) m.storyGameTime = { ...endTime };
+      if (
+        !(await this.game.setStoryTurnStatus(
+          this.currentTurnMessages,
+          'accepted',
+          this.currentStoryTurnKey!,
+          () => this.isRunCurrent(controller),
+        ))
+      )
+        throw new Error('来源消息已改变');
+      const turn = collectCompleteStoryTurns(this.game.messages).find(
+        (row) => row.key === this.currentStoryTurnKey,
+      );
+      if (!turn) throw new Error('找不到已接纳的来源回合');
+      const warnings = await manager.commitCharacterUpdates(
+        draft.characterUpdates,
+        storyTurnSource(turn),
+        () => this.isRunCurrent(controller),
+      );
+      for (const warning of warnings) this.notify(warning, 'warning');
+      await manager.initializeCharacterDefinitions(context.characterDefinitions ?? [], () =>
+        this.isRunCurrent(controller),
+      );
+    });
+    await auxiliary('剧情收尾', () => this.commitPlotThreadTurnIfAny());
+    await auxiliary('随机事件收尾', () => manager.syncRandomEventsForTurn());
+    await auxiliary('回合快照', () => manager.advanceTurn(() => this.isRunCurrent(controller)));
+    await this.game.refreshFromDb(this.saveId);
+    this.pendingAudioMarker = scanPlayAudioMarkers(draft.raw).slice(-1)[0] ?? null;
+    const fresh = this.buildContext(context.userInput, this.currentStoryTurnKey);
+    fresh.agentOutputs = context.agentOutputs;
+    fresh.characterDefinitions = context.characterDefinitions;
+    this.currentContext = fresh;
+    await auxiliary('记忆摘要', () => this.orch!.summarizeDirectTurn(fresh));
+    if (this.runMode === 'v2') {
+      await auxiliary('记忆归档重试', () => this.retryStoryArchives());
+      await auxiliary('摘要保存', () => this.commitStoryTurnSummary());
+      await auxiliary('历史摘要补建', () => this.backfillMissingStorySummaries());
+    }
+  }
+
+  /** toast 失败不改变任何结论（单测里常常没有可用的 UI store） */
   private notify(message: string, level: 'warning' | 'error'): void {
     try {
       useUIStore().toast(message, level, 6000);
@@ -645,7 +787,10 @@ export class GamePipeline {
     if (!release) return false;
     try {
       // 本轮模式在此固定（同一实例一次只跑一轮：executeRun 对 abortController 有重入守卫）
-      if (!this.abortController) this.runMode = mode;
+      if (!this.abortController) {
+        this.runMode = mode;
+        this.generationMode = resolveGenerationMode(this.game.activeSave);
+      }
       return await this.executeRun(userInput, onStoryChunk, isUserMessage, sourceMessageId);
     } finally {
       release();
@@ -670,6 +815,7 @@ export class GamePipeline {
     const controller = new AbortController();
     this.abortController = controller;
     this.finalTurnCommitStarted = false;
+    this.directCommitted = false;
     this.currentStoryTurnKey = undefined;
     this.currentTurnMessages = [];
     this.game.isGenerating = true;
@@ -690,6 +836,10 @@ export class GamePipeline {
         const sourceIndex = this.game.messages.findIndex((m) => m.id === existingSourceMessageId);
         if (sourceIndex < 0) return false;
         const user = this.game.messages[sourceIndex];
+        if (this.generationMode === 'direct' && user.storyTurnStatus === 'accepted') {
+          this.notify('这楼已经接纳，请先回退到生成前再重新生成。', 'warning');
+          return false;
+        }
         const oldAttempt: ChatMessage[] = [];
         for (let i = sourceIndex + 1; i < this.game.messages.length; i++) {
           const message = this.game.messages[i];
@@ -752,6 +902,11 @@ export class GamePipeline {
       );
       const { getCharacters, getDatabase } = await import('@engine/persistence/database');
       context.characters = await getCharacters(this.saveId);
+      if (this.generationMode === 'direct')
+        context.characters = projectDirectCombatCharacters(
+          context.characters,
+          readDirectCombat(this.game.saveProfile),
+        );
       const sourceTurns = collectCompleteStoryTurns(context.history);
       context.characterChronicle = (
         await getDatabase().characterChronicle.where('saveId').equals(this.saveId).toArray()
@@ -765,7 +920,11 @@ export class GamePipeline {
       const characterBooks = withoutCharacterLore(worldBooks, context.characterDefinitions);
 
       // 2.6 构建 Agent 配置（用已加载的 agentDefaults 替代 projectAgentDefaults）
-      const agentConfigs = this.buildAgentConfigs(agentDefaults, onStoryChunk);
+      const agentConfigs = this.buildAgentConfigs(
+        agentDefaults,
+        onStoryChunk,
+        this.generationMode === 'direct',
+      );
 
       // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
       // configs/worldBooks/presets 才能拿到完整 systemPrompt + 世界书上下文，
@@ -827,6 +986,13 @@ export class GamePipeline {
       };
       const events = this.buildEventHandlers(activityRunId);
       this.orch = new AgentOrchestrator(options, events);
+
+      if (this.generationMode === 'direct') {
+        const draft = await this.orch.runDirect(readDirectCombat(this.game.saveProfile));
+        await this.acceptDirectTurn(draft, context, controller);
+        activityOutcome = 'completed';
+        return true;
+      }
 
       // 4. 运行管线
       const orchResult = await this.orch.run();
@@ -967,11 +1133,14 @@ export class GamePipeline {
         return false;
       }
       console.error('[GamePipeline] 管线运行失败:', err);
+      if (this.generationMode === 'direct')
+        this.notify(`直出未完成：${err instanceof Error ? err.message : String(err)}`, 'error');
       activityOutcome = 'failed';
       activityMessage = '世界的回应在此中断，已写入的状态不会自动撤销；可回退后再次尝试。';
       return false;
     } finally {
       if (
+        !this.directCommitted &&
         activityOutcome !== 'completed' &&
         this.currentStoryTurnKey &&
         this.currentTurnMessages.length > 0
@@ -1240,32 +1409,36 @@ export class GamePipeline {
   private buildAgentConfigs(
     agentDefaults: Record<string, Record<string, unknown>>,
     onStoryChunk?: StoryChunkCallback,
+    direct = false,
   ): AgentConfig[] {
     const s = this.settings.settings;
 
     // 需要参与管线的所有 Agent（不包括 plot_pre_check/plot_post_check — 剧情模式 off 时会自动禁用）
-    const agentIds = [
-      ...(this.runMode === 'v2' ? ['lore_select'] : []),
-      'memory_recall',
-      'story',
-      'request_dispatcher',
-      'daily_check', // Phase 3: 日常检定（周期/条件结算），主 DAG 新 stage
-      'vars_update',
-      'memory_summary',
-      'plot_pre_check',
-      'plot_post_check', // Phase 10g: quest 委托管线需要
-      'craft_gen', // 侧链: 制作生成，需完整 systemPrompt (真机 fix 2026-07-18)
-      'entity_gen', // 侧链: 实体生成（角色/技能/装备/道具/状态/登神），需完整 systemPrompt + {{ENTITY_REQUEST}}
-      // 侧链: 情景插画的中文 → danbooru 转换（图像生成 D28）。不进主 DAG、也不进设置页
-      // Agent 子导航（D53）—— 但它的 systemPrompt/世界书/采样参数照旧从这里装配。
-      'image_prompt',
-      // 侧链: 正文润色（手动触发，DeepSeek beta 前缀续写）。不进主 DAG —— 由玩家在
-      // 最新一条正文上右键触发；systemPrompt 由内容包下发，模型默认走 DeepSeek beta。
-      'prose_rewrite',
-      // 侧链: 战斗主持（单一沙盒 DM）。systemPrompt/模型/温度/世界书照旧从这里装配，
-      // 设置页 Agent 子导航可编辑。
-      'combat',
-    ];
+    if (direct) initializeDirectSettings(s, agentDefaults);
+    const agentIds = direct
+      ? ['memory_recall', 'direct_main', 'memory_summary']
+      : [
+          ...(this.runMode === 'v2' ? ['lore_select'] : []),
+          'memory_recall',
+          'story',
+          'request_dispatcher',
+          'daily_check', // Phase 3: 日常检定（周期/条件结算），主 DAG 新 stage
+          'vars_update',
+          'memory_summary',
+          'plot_pre_check',
+          'plot_post_check', // Phase 10g: quest 委托管线需要
+          'craft_gen', // 侧链: 制作生成，需完整 systemPrompt (真机 fix 2026-07-18)
+          'entity_gen', // 侧链: 实体生成（角色/技能/装备/道具/状态/登神），需完整 systemPrompt + {{ENTITY_REQUEST}}
+          // 侧链: 情景插画的中文 → danbooru 转换（图像生成 D28）。不进主 DAG、也不进设置页
+          // Agent 子导航（D53）—— 但它的 systemPrompt/世界书/采样参数照旧从这里装配。
+          'image_prompt',
+          // 侧链: 正文润色（手动触发，DeepSeek beta 前缀续写）。不进主 DAG —— 由玩家在
+          // 最新一条正文上右键触发；systemPrompt 由内容包下发，模型默认走 DeepSeek beta。
+          'prose_rewrite',
+          // 侧链: 战斗主持（单一沙盒 DM）。systemPrompt/模型/温度/世界书照旧从这里装配，
+          // 设置页 Agent 子导航可编辑。
+          'combat',
+        ];
 
     // 复用 buildEndpoints() 的映射结果（ApiEntry.model → ApiEndpoint.defaultModel）
     const apiPool = this.buildEndpoints();
@@ -1305,7 +1478,7 @@ export class GamePipeline {
     };
 
     return agentIds.map((agentId) => {
-      const isStory = agentId === 'story';
+      const isStory = agentId === 'story' || agentId === 'direct_main';
       const signal = this.abortController?.signal;
       const endpoint = getEndpoint(agentId);
       const model = endpoint?.defaultModel || '';
@@ -1354,9 +1527,11 @@ export class GamePipeline {
       // 此前硬绑 agent-config.json 出厂 presetId，用户导入/另存的预设（新 id）在设置页编辑得再对，
       // 运行时也永远用旧的那份（"我保存了第二人称但 agent 没拿到"根因）。
       const presetId: string | undefined =
-        agentId === 'story' && s.activePresetId
-          ? s.activePresetId
-          : (defaults.presetId as string | undefined) || undefined;
+        agentId === 'direct_main'
+          ? s.directPresetId || DIRECT_PRESET_ID
+          : agentId === 'story' && s.activePresetId
+            ? s.activePresetId
+            : (defaults.presetId as string | undefined) || undefined;
       // 世界书读取范围不在 Agent 配置里（内容计划 §7.2）：条目路由元数据决定谁能读，
       // 见 loadActiveWorldBooks 与 @engine/content/lore-routing。
 
@@ -1392,7 +1567,10 @@ export class GamePipeline {
         retryOnFail: true,
         // 🆕 2026-08-16: 失败自动重试次数（AgentClient 循环上限；外部取消永不重试）。
         // 解析值经 覆写 ?? 默认层 ?? AGENT_SETTINGS_DEFAULTS(3)。
-        maxRetries: agentCfg.maxRetries,
+        maxRetries: agentId === 'direct_main' ? 0 : agentCfg.maxRetries,
+        ...(agentId === 'direct_main'
+          ? { historyLayers: agentCfg.historyLayers, historySlice: agentCfg.historySlice }
+          : {}),
         timeout: 120000,
         userId: `fp|${this.saveId}|${agentId}`,
         promptTemplate: {
@@ -1412,7 +1590,10 @@ export class GamePipeline {
         // 代码级兜底：agent-config.json 没加载上（fetch 失败/离线）或该 agent 未声明本字段时，
         // story 默认持权 —— 与设计「默认仅 story 持权」一致。否则一次网络抖动就让整条
         // EJS→vars 提交链静默哑火（EJS 照跑、写照丢，无任何征兆）。显式 false 仍然生效。
-        ejsVarsCommit: (defaults.ejsVarsCommit as boolean | undefined) ?? isStory,
+        ejsVarsCommit:
+          agentId === 'direct_main'
+            ? false
+            : ((defaults.ejsVarsCommit as boolean | undefined) ?? isStory),
         toolsEnabled: ['craft_gen', 'entity_gen'].includes(agentId),
         maxToolCallRounds: 10,
         // 🆕 流式 + abort 信号
@@ -1488,7 +1669,8 @@ export class GamePipeline {
       history,
       loreHistoryMessages: this.settings.settings.loreHistoryMessages,
       worldBooks: [],
-      characters: this.game.characters,
+      characters:
+        this.generationMode === 'direct' ? this.game.displayCharacters : this.game.characters,
       variables: this.game.saveProfile?.variables ?? {}, // M5 §12: 变量唯一真源 SaveProfile.variables（M6 收官接线）
       fixedLore: this.game.activeSave?.metadata.fixedLore,
       plotEvents: this.game.activePlotEvents,
@@ -1529,7 +1711,8 @@ export class GamePipeline {
       // 工坊 P2 (ADR-30 D4/D9): stats 只读投影每回合构建一次，同回合多 Agent 装配复用
       //（各 pass 在 buildAgentMessages 内再克隆一份，杜绝跨 pass 写泄漏）
       statData: buildStatData({
-        characters: this.game.characters,
+        characters:
+          this.generationMode === 'direct' ? this.game.displayCharacters : this.game.characters,
         gameTime: this.game.saveProfile?.gameTime,
         fp: this.game.saveProfile?.fp,
         turn: history.length,
@@ -1681,6 +1864,8 @@ export class GamePipeline {
       );
     }
 
+    if (!presets.some((preset) => preset.id === DIRECT_PRESET_ID))
+      presets.push(createDirectPreset());
     return { presets, agentDefaults };
   }
 
@@ -2690,6 +2875,7 @@ export class GamePipeline {
         );
       }
     } catch (err) {
+      if (this.generationMode === 'direct') throw err;
       console.warn('[GamePipeline] plot_post_check 落库失败（不阻塞本轮）:', err);
     }
   }
@@ -2707,7 +2893,7 @@ export class GamePipeline {
   ): Promise<NonNullable<OrchestratorOptions['storyContext']> | null> {
     const configured = getAgentSettings(
       this.settings.settings,
-      'story',
+      this.generationMode === 'direct' ? 'direct_main' : 'story',
       agentDefaults,
     ).historyLayers;
     const windowTurns = normalizeStoryWindowTurns(configured ?? defaultHistoryLayers('story'));

@@ -22,6 +22,7 @@ import type {
   WorldBook,
   WorldBookEntry,
 } from '../types/types';
+import { DIRECT_STYLE } from './direct-prompt';
 import type { GameTime } from '../time/time-system';
 import { CHARACTER_UPDATE_PROTOCOL, buildCharacterContext } from '../character/character-chronicle';
 import { MONTH_NAMES, toGameDay, fromEpochMinutes } from '../time/time-system';
@@ -58,6 +59,7 @@ import { getLocationNodes } from '../map/location-db';
  */
 export function defaultHistoryLayers(agentId: string): number {
   switch (agentId) {
+    case 'direct_main':
     case 'story':
       return 6; // 正文 AI, 主上下文, 注入较多轮
     case 'memory_summary':
@@ -465,6 +467,7 @@ function formatPlotSettingsContext(ctx: AgentContext): string {
 //    不再存在这样的 Agent。留着的后果是：改提示词的人改了闭包里的句子却毫无效果。
 
 export const AGENT_TEMPLATES: Record<string, AgentPromptTemplate> = {
+  direct_main: { fixedSystem: DIRECT_STYLE, fixedExamples: '' },
   // ---- memory_recall: 记忆召回 ----
   memory_recall: {
     fixedSystem:
@@ -725,7 +728,7 @@ export function buildAgentMessages(
   // 替换后拿到的是渲染结果，池空时它是空串，与「预设根本没写这个占位符」长得一模一样）
   let presetRendersRandomEvents = false;
 
-  if (agentId === 'story' && presets && config?.presetId) {
+  if ((agentId === 'story' || agentId === 'direct_main') && presets && config?.presetId) {
     // Story Agent: assemble from preset
     const preset = getPreset(config.presetId, presets);
     if (preset) {
@@ -775,7 +778,11 @@ export function buildAgentMessages(
   // story + 规范预设（已预解析内部占位符）+ 未自定义 template → 简化为 {{SYS_PROMPT}}，
   // 避免默认 template 追加的 {{LORE_BOOK}} 等与预设内部占位符重复渲染同一段数据。
   // 无预设 / 预设无占位符 / 自定义 template 场景仍走完整 template 兜底。
-  if (agentId === 'story' && storyPresetHasPlaceholders && usesBuiltinDefaultTemplate) {
+  if (
+    (agentId === 'story' || agentId === 'direct_main') &&
+    storyPresetHasPlaceholders &&
+    usesBuiltinDefaultTemplate
+  ) {
     template = '{{SYS_PROMPT}}';
   }
 
@@ -804,7 +811,10 @@ export function buildAgentMessages(
     cfgs,
     allLocalParams,
   );
-  if (agentId === 'story' && ctx.characterDefinitions !== undefined) {
+  if (
+    (agentId === 'story' || agentId === 'direct_main') &&
+    ctx.characterDefinitions !== undefined
+  ) {
     resolved = [resolved, CHARACTER_UPDATE_PROTOCOL, buildCharacterContext(ctx)]
       .filter(Boolean)
       .join('\n\n');
@@ -822,7 +832,11 @@ export function buildAgentMessages(
   //    渲染结果去比字符串，池空时两种情形长得一样，池非空时又会因为一处措辞改动静默失效。
   // 🔴 块自带 `<random_events>` 外壳且**空池返回空串**（三条空串出口见 resolver），
   //    所以追加是零成本的 —— 有内容才多一段，没内容一个 token 都不多。
-  if (agentId === 'story' && !presetRendersRandomEvents && !RANDOM_EVENTS_TOKEN_RE.test(template)) {
+  if (
+    (agentId === 'story' || agentId === 'direct_main') &&
+    !presetRendersRandomEvents &&
+    !RANDOM_EVENTS_TOKEN_RE.test(template)
+  ) {
     const block = PLACEHOLDER_REGISTRY['RANDOM_EVENTS'](
       tplCtx,
       config ?? ({ agentId } as AgentConfig),

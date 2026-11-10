@@ -261,7 +261,7 @@ function menuFor(msg: ChatMessage): {
 
 /** 这条消息上右键有没有事可做（也决定要不要把美化框里的右键转发上来） */
 function canOpenMenu(msg: ChatMessage): boolean {
-  if (game.isInCombat || props.isGenerating) return false;
+  if (game.isAgentCombat || props.isGenerating) return false;
   const can = menuFor(msg);
   return can.canRollback || can.canImage || can.canRewrite;
 }
@@ -476,6 +476,7 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
         >
           <div class="bubble bubble-narrative-full">
             <BeautifiedNarrative
+              :action-panels="game.generationMode === 'direct'"
               class="narrative-body"
               :text="msg.content"
               :depth="messageDepth(msg.id)"
@@ -555,6 +556,7 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
       <div v-if="isGenerating && streamingText" class="bubble-row bubble-row-narrative">
         <div class="bubble bubble-narrative-full">
           <BeautifiedNarrative
+            :action-panels="game.generationMode === 'direct'"
             class="narrative-body streaming-content"
             :text="streamingText"
             streaming
@@ -581,7 +583,7 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
         <button
           v-if="ctxMenu.canRollback"
           class="ctx-item"
-          :disabled="game.isInCombat"
+          :disabled="game.isAgentCombat"
           @click.stop="ctxRollback"
         >
           <i class="fa-solid fa-rotate-left" />

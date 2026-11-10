@@ -53,7 +53,12 @@ export async function createJourney(input: {
                   ),
                   input.save.metadata.enabledWorldBookEntries ?? [],
                 ),
-                { characterName: input.character.name, userName: input.save.metadata.userName },
+                {
+                  characterName: input.character.name,
+                  userName: input.save.metadata.userName,
+                  agentId:
+                    input.save.metadata.generationMode === 'direct' ? 'direct_main' : 'story',
+                },
                 {
                   location: input.character.location,
                   gameTime: profile.gameTime,

@@ -10,6 +10,8 @@
 
 ## Story v2 / 内容路由速览
 
+- 直出：`agents/direct-main.ts` 负责单次主请求，`agents/direct-output.ts` 校验原生写回，`combat/direct-combat.ts` 保存跨楼战斗。`AgentOrchestrator.runDirect` 复用记忆而不进入 Agent DAG；`StateManager.commitDirectTurn` 原子接纳核心状态和消息。
+
 - 原生角色：`types/types-character.ts` 定义内容、经历与主叙事更新；`character/character-definitions.ts` 只读兼容旧资料及素材；`character/character-updates.ts` 校验更新块；`character/character-chronicle.ts` 构造经历和重要上下文。`StateManager` 持有写锁与来源核验；Dexie v31、快照及两种备份携带经历。契约见 [角色系统](../../docs/reference/character-system.md)。
 
 - `content/lore-routing.ts`：双模式唯一 audiences 权限、停用/排除与依赖闭包共同判据（含 EJS 间接读取）、旧作者默认映射与诊断；Agent 世界书清单已退役。

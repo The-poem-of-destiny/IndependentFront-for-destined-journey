@@ -543,7 +543,7 @@ describe('GamePage — 菜单 Esc 分层', () => {
       plotOutline: null,
       activeCombat: null,
       activeModal: null,
-      isInCombat: false,
+      isAgentCombat: false,
       sidebarCollapsed: false,
       rightPanelMode: 'status',
       fullscreenStatus: false,
@@ -663,7 +663,7 @@ describe('GamePage — 菜单 Esc 分层', () => {
   });
 
   it('战斗中不抢 Esc（战斗覆盖层在屏上）', async () => {
-    const wrapper = page({ isInCombat: true });
+    const wrapper = page({ isAgentCombat: true });
     await flushPromises();
 
     pressEsc();

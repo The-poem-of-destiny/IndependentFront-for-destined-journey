@@ -652,6 +652,7 @@ describe('buildAgentMessages — return format (Phase 10 single system msg)', ()
 
 // Phase 10: craft_gen/entity_gen have prompts in agent-config.json, not here
 const EXTERNALIZED_IDS = new Set([
+  'direct_main', // Native direct protocol and preset are assembled separately.
   'plot_check',
   'plot_correct',
   'craft_gen',

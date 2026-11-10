@@ -8,6 +8,7 @@ import { ATTRIBUTE_NAMES } from '@engine/content/start-catalog';
 import { qualityLabelFromRarity } from '../../lib/quality-colors';
 import AvatarPanel from '../shared/AvatarPanel.vue';
 import QualityBadge from '../shared/QualityBadge.vue';
+import { GENERATION_MODE_LABELS } from '@engine/story/generation-mode';
 
 const store = useCreateStore();
 
@@ -23,6 +24,11 @@ const { url: portraitUrl, isVideo: portraitIsVideo } = useAssetImage(
 <template>
   <section class="step-confirm">
     <h2 class="step-title">确认角色</h2>
+    <p>
+      生成模式：{{
+        store.generationMode ? GENERATION_MODE_LABELS[store.generationMode] : '尚未选择'
+      }}。创建后不可更改。
+    </p>
 
     <div class="confirm-card">
       <!-- 头像 + 基本信息 -->

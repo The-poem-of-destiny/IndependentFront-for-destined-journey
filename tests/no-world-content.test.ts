@@ -183,9 +183,9 @@ describe('② 体量轴：占位 agent-config 规格（§6 / D32）', () => {
 
   // 🔴 数量相同 ≠ 成员相同：合并前两边都是 15/14 条不同的清单，所以这条用例除了数量，
   //    必须逐条点名（数量断言单独存在时，换掉一条 agent 也照样绿）。
-  it('15 个 agent id 齐（entity_gen 取代 char_gen + item_gen；含资料选择器 / daily_check / prose_rewrite；combat_enemy 已随 v3 内核退役）', () => {
-    expect(Object.keys(agentConfig.agents)).toHaveLength(15);
-    for (const id of ['entity_gen', 'lore_select', 'daily_check', 'prose_rewrite']) {
+  it('16 个 agent id 齐（entity_gen 取代 char_gen + item_gen；含资料选择器 / daily_check / prose_rewrite；combat_enemy 已随 v3 内核退役）', () => {
+    expect(Object.keys(agentConfig.agents)).toHaveLength(16);
+    for (const id of ['entity_gen', 'lore_select', 'daily_check', 'prose_rewrite', 'direct_main']) {
       expect(Object.keys(agentConfig.agents)).toContain(id);
     }
     for (const gone of ['char_gen', 'item_gen', 'combat_enemy']) {

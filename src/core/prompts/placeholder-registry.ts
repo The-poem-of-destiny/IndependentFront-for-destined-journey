@@ -21,6 +21,7 @@
  *   角色状态实际由 CHARACTER_STATE / INVENTORY / SKILL_STATE 各自的内联实现产出）
  */
 
+import { DIRECT_TEMPLATE } from './direct-prompt';
 import type {
   AgentContext,
   AgentConfig,
@@ -1186,6 +1187,7 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
 // ═══════════════════════════════════════════════════════════
 
 const DEFAULT_TEMPLATES: Record<string, string> = {
+  direct_main: DIRECT_TEMPLATE,
   // 随机事件 v1 (§5.1)：`{{RANDOM_EVENTS}}` 排在动态区之后、对话历史之前 —— 它每回合都可能
   // 变（池子会增删），放前面会把前缀缓存打碎；块自带 `<random_events>` 外壳，别再包中文标签。
   story:

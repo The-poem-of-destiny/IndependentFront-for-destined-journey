@@ -17,7 +17,7 @@
       "position": 0,
       "extra": {
         "lore": {
-          "audiences": ["story", "plot_post_check", "plot_outline", "lore_select"]
+          "audiences": ["story", "plot_post_check", "plot_outline", "lore_select", "direct_main"]
         }
       }
     },
@@ -34,7 +34,7 @@
       "position": 0,
       "extra": {
         "lore": {
-          "audiences": ["story", "plot_post_check", "plot_outline", "lore_select"]
+          "audiences": ["story", "plot_post_check", "plot_outline", "lore_select", "direct_main"]
         }
       }
     }

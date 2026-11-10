@@ -67,8 +67,6 @@ import { CHARACTER_UPDATE_PROTOCOL, buildCharacterContext } from '../character/c
 
 import { selectStoryLore, type LoreSelector } from '../content/lore-selection';
 
-const STORY_AGENT_ID = 'story';
-
 /** 普通条目里归分区负责的旧占位符：新模式下渲染为空（见文件头）。 */
 const ZONE_OWNED_PLACEHOLDERS = [
   'NARRATIVE',
@@ -97,6 +95,8 @@ const ZONE5_BLOCKS: ReadonlyArray<{ tag: string | null; placeholder: string }> =
 type StoryContextV2Message = { role: 'system' | 'user' | 'assistant'; content: string };
 
 export interface StoryContextV2Input {
+  agentId?: 'story' | 'direct_main';
+  loreSelectionMode?: 'model' | 'local';
   /** 本轮上下文：`history` 为本轮之前的正式消息，`userInput` 为本轮玩家输入 */
   ctx: AgentContext;
   configs: AgentConfig[];
@@ -158,19 +158,21 @@ export async function buildStoryContextV2Messages(
   input: StoryContextV2Input,
 ): Promise<StoryContextV2Result> {
   const { configs, worldBooks, presets } = input;
+  const agentId = input.agentId ?? 'story';
   const ctx: AgentContext = { ...input.ctx, loreReadContext: createLoreReadContext(input.ctx) };
   const config =
-    configs.find((c) => c.agentId === STORY_AGENT_ID) ??
+    configs.find((c) => c.agentId === agentId) ??
     ({
-      agentId: STORY_AGENT_ID,
+      agentId: agentId,
     } as AgentConfig);
 
   // ① 同一份 EJS pass：世界书正文本轮只预渲染一次，第 1 区与第 5 区从 memo 挑段
-  const ejsPass = buildEjsPassContext(STORY_AGENT_ID, ctx, config, configs, worldBooks);
+  const ejsPass = buildEjsPassContext(agentId, ctx, config, configs, worldBooks);
   const selection = await selectStoryLore(
     worldBooks,
     { ...ctx, agentConfig: config },
     input.selectLore,
+    { agentId, mode: input.loreSelectionMode },
   );
   for (const r of [...selection.zones[1], ...selection.zones[3], ...selection.zones[5]]) {
     if (
@@ -181,7 +183,7 @@ export async function buildStoryContextV2Messages(
   }
   // Blank lore memo while estimating non-lore blocks: no entry body may execute before pruning.
   ejsPass.loreRender = {
-    agentId: STORY_AGENT_ID,
+    agentId: agentId,
     staticText: '',
     dynamicText: '',
     fallbackEntries: [],
@@ -195,13 +197,13 @@ export async function buildStoryContextV2Messages(
 
   const blankZoneOwned = Object.fromEntries(ZONE_OWNED_PLACEHOLDERS.map((name) => [name, '']));
   const renderEntryText = (text: string) =>
-    resolveTemplateWithGlobals(text, STORY_AGENT_ID, tplCtx, config, worldBooks, configs, {
+    resolveTemplateWithGlobals(text, agentId, tplCtx, config, worldBooks, configs, {
       ...blankZoneOwned,
     }).trim();
   const renderPlaceholder = (name: string) =>
     resolveTemplateWithGlobals(
       `{{${name}}}`,
-      STORY_AGENT_ID,
+      agentId,
       tplCtx,
       config,
       worldBooks,
@@ -225,10 +227,7 @@ export async function buildStoryContextV2Messages(
   const fallbackPrefix = hasNormalText
     ? ''
     : config.systemPrompt ||
-      [
-        getAgentTemplate(STORY_AGENT_ID)?.fixedSystem,
-        getAgentTemplate(STORY_AGENT_ID)?.fixedExamples,
-      ]
+      [getAgentTemplate(agentId)?.fixedSystem, getAgentTemplate(agentId)?.fixedExamples]
         .filter(Boolean)
         .join('\n\n');
 
@@ -322,15 +321,15 @@ export async function buildStoryContextV2Messages(
     ejsPass,
   );
   ejsPass.loreRender = {
-    agentId: STORY_AGENT_ID,
+    agentId: agentId,
     staticText: rendered.staticText,
     dynamicText: rendered.dynamicText,
     fallbackEntries: rendered.fallbackEntries,
   };
   if (rendered.fallbackEntries.length)
-    reportEjsFallback(STORY_AGENT_ID, ctx, rendered.fallbackEntries, worldBooks);
+    reportEjsFallback(agentId, ctx, rendered.fallbackEntries, worldBooks);
   const definitions = buildLoreDefinitions(
-    STORY_AGENT_ID,
+    agentId,
     worldBooks,
     ctx.loreReadContext!.recentText,
     ctx.loreReadContext,

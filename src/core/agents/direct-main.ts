@@ -1,0 +1,201 @@
+import type {
+  AgentConfig,
+  AgentContext,
+  AgentPreset,
+  AgentResult,
+  ApiEndpoint,
+  WorldBook,
+} from '../types/types';
+import { AgentClient, ensureUserMessage } from './agent-client';
+import type { ChatRequest } from './agent-client';
+import { buildAgentMessagesAsync } from '../prompts/agent-templates';
+import { buildStoryContextV2Messages, type StoryContextV2Input } from '../prompts/story-context-v2';
+import { selectStoryLore } from '../content/lore-selection';
+import { DIRECT_PROTOCOL } from '../prompts/direct-prompt';
+import { resolveTemplateWithGlobals } from '../prompts/template-resolver';
+import { buildLlmRequest } from '../api/llm-adapter';
+import { parseDirectOutput, type DirectTurnDraft } from './direct-output';
+import type { DirectCombatRecord } from '../combat/direct-combat';
+
+export interface DirectDie {
+  index: number;
+  sides: number;
+  value: number;
+}
+
+export function rollDirectDice(): DirectDie[] {
+  const dice: DirectDie[] = [];
+  for (const sides of [4, 6, 8, 10, 12, 20, 100]) {
+    const count = sides === 20 ? 60 : 20;
+    for (let i = 0; i < count; i++) {
+      const limit = Math.floor(0x100000000 / sides) * sides;
+      let n: number;
+      do {
+        n = crypto.getRandomValues(new Uint32Array(1))[0];
+      } while (n >= limit);
+      dice.push({ index: dice.length, sides, value: (n % sides) + 1 });
+    }
+  }
+  return dice;
+}
+
+export interface DirectGenerationInput {
+  config: AgentConfig;
+  endpoint: ApiEndpoint;
+  context: AgentContext;
+  configs: AgentConfig[];
+  worldBooks: WorldBook[];
+  presets: AgentPreset[];
+  combat: DirectCombatRecord | null;
+  storyContext?: Pick<StoryContextV2Input, 'windowTurns' | 'segments' | 'archives' | 'onLore'> & {
+    onAssembled?: (diagnostics: import('../types/types').StoryContextV2Diagnostics) => void;
+  };
+  dice?: DirectDie[];
+}
+
+export async function generateDirectTurn(
+  input: DirectGenerationInput,
+  client: AgentClient,
+): Promise<{ draft: DirectTurnDraft; result: AgentResult }> {
+  const { config, endpoint, configs, context, presets } = input;
+  const dice = input.dice ?? rollDirectDice();
+  let messages: ChatRequest['messages'];
+  if (input.storyContext) {
+    const assembled = await buildStoryContextV2Messages({
+      ...input.storyContext,
+      ctx: context,
+      configs,
+      worldBooks: input.worldBooks,
+      presets,
+      agentId: 'direct_main',
+      loreSelectionMode: 'local',
+    });
+    input.storyContext.onAssembled?.(assembled.diagnostics);
+    messages = assembled.messages;
+  } else {
+    const selection = await selectStoryLore(input.worldBooks, context, undefined, {
+      agentId: 'direct_main',
+      mode: 'local',
+    });
+    const selected = new Set(
+      [...selection.zones[1], ...selection.zones[3], ...selection.zones[5]].map((r) => r.entry),
+    );
+    const books = input.worldBooks.map((book) => ({
+      ...book,
+      entries: book.entries.filter((entry) => selected.has(entry)),
+    }));
+    const history = resolveTemplateWithGlobals(
+      `{{NARRATIVE:layers=${config.historyLayers ?? 6}}}`,
+      'direct_main',
+      context,
+      config,
+      books,
+      configs,
+      {},
+    );
+    const built = await buildAgentMessagesAsync('direct_main', context, configs, books, presets, {
+      NARRATIVE: history,
+    });
+    if (!built) throw new Error('直出提示词未配置');
+    messages = built as ChatRequest['messages'];
+  }
+  const relevant = context.characters.filter(
+    (c) =>
+      c.type === 'player' ||
+      c.present ||
+      context.userInput.includes(c.name) ||
+      input.combat?.state.units[c.name],
+  );
+  const state = {
+    characters: relevant.map(
+      ({ id: _id, saveId: _saveId, definition: _definition, introducedBy: _introducedBy, ...c }) =>
+        c,
+    ),
+    existingNames: context.characters.map((c) => c.name),
+    variables: context.variables,
+    gameTime: context.gameTime,
+    quests: context.quests,
+    mapFlags: context.mapFlags,
+    mapFacts: context.mapFacts,
+    weather: context.weather,
+    fp: context.statData?.['命运点数'],
+    affections: context.affections,
+    openingPrompt: context.openingPrompt === context.userInput ? undefined : context.openingPrompt,
+    combat: input.combat?.state ?? null,
+    plotSettings: context.plotSettings,
+    plot: { outline: context.plotOutline, events: context.plotEvents },
+  };
+  messages = ensureUserMessage([
+    { role: 'system', content: DIRECT_PROTOCOL },
+    ...messages,
+    {
+      role: 'user',
+      content: `<direct_state>\n${JSON.stringify(state)}\n</direct_state>\n<dice_pool>\n${JSON.stringify(dice)}\n</dice_pool>${config.tailPrompt ? `\n${config.tailPrompt}` : ''}`,
+    },
+  ]);
+  const request: ChatRequest = {
+    messages,
+    model: config.model || endpoint.defaultModel,
+    temperature: config.temperature,
+    maxTokens: config.maxTokens,
+    topP: config.topP,
+    frequencyPenalty: config.frequencyPenalty,
+    presencePenalty: config.presencePenalty,
+  };
+  const budget =
+    buildLlmRequest({
+      protocol:
+        endpoint.protocol === 'gemini' || endpoint.protocol === 'anthropic-messages'
+          ? endpoint.protocol
+          : 'openai-chat',
+      ...request,
+      model: request.model!,
+      stream: false,
+      userId: config.userId ?? 'direct',
+      bodyOverrides: endpoint.bodyOverrides,
+      bodyOmitPaths: endpoint.bodyOmitPaths,
+    }).outputBudget ?? 0;
+  const estimatedInput = Math.ceil(
+    messages.reduce((sum, m) => sum + String(m.content ?? '').length, 0) / 1.5,
+  );
+  if (endpoint.contextWindowTokens && estimatedInput + budget > endpoint.contextWindowTokens)
+    throw new Error(
+      `直出上下文估算 ${estimatedInput} + 输出预留 ${budget} 超出模型窗口 ${endpoint.contextWindowTokens}，请缩短历史或调整输出预留`,
+    );
+  let result: AgentResult;
+  if (config.streamCallbacks) {
+    result = await new Promise<AgentResult>((resolve, reject) => {
+      void client
+        .chatStream(
+          request,
+          {
+            onChunk: config.streamCallbacks!.onChunk,
+            onComplete: (stream) =>
+              resolve({
+                agentId: 'direct_main',
+                output: stream.fullText,
+                rawResponse: stream.fullText,
+                reasoning: stream.reasoning,
+                tokensUsed: stream.tokensUsed,
+                cacheHit: stream.cacheHit,
+                cacheHitTokens: stream.cacheHitTokens,
+                cacheMissTokens: stream.cacheMissTokens,
+                completionTokens: stream.completionTokens,
+                duration: stream.duration,
+              }),
+            onError: (error) => {
+              config.streamCallbacks!.onError(error);
+              reject(new Error(error));
+            },
+          },
+          config.abortSignal,
+        )
+        .catch(reject);
+    });
+  } else result = await client.chat(request, config.abortSignal);
+  result.agentId = 'direct_main';
+  result.requestMessages = messages;
+  if (result.error) throw new Error(result.error);
+  const draft = parseDirectOutput(result.rawResponse, dice.length);
+  return { draft, result };
+}

@@ -51,13 +51,14 @@ export function missingLoreDefinitions(content: string, definitions: SetvarMap):
 /** Opening results are facts, not a rebuildable prompt cache. Failure aborts creation. */
 export function createFixedLoreSnapshot(
   books: readonly WorldBook[],
-  opts?: { characterName?: string; userName?: string },
+  opts?: { characterName?: string; userName?: string; agentId?: 'story' | 'direct_main' },
   readContext: LoreReadContext = { location: '', recentText: '' },
 ): FixedLoreSnapshot {
-  const definitions = buildLoreDefinitions('story', books, readContext.recentText, readContext);
+  const agentId = opts?.agentId ?? 'story';
+  const definitions = buildLoreDefinitions(agentId, books, readContext.recentText, readContext);
   const snapshot: FixedLoreSnapshot = Object.create(null);
   for (const r of resolveLoreDependenciesForAgent(
-    'story',
+    agentId,
     books,
     readContext.recentText,
     readContext,

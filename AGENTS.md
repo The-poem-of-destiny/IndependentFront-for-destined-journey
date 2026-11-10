@@ -13,6 +13,8 @@
 
 原生角色与编年史的现行契约见 [`docs/reference/character-system.md`](docs/reference/character-system.md)：主叙事同次输出、按存档保存、重要度筛选，入口在现行 `src/core/character/`、`src/core/persistence/` 与角色查看器。
 
+- 直出模式：[`docs/reference/direct-generation.md`](docs/reference/direct-generation.md)。建档显式选择并固定模式，独立主生成复用原有记忆；入口为 `src/core/agents/direct-main.ts` 与 `src/core/combat/direct-combat.ts`。
+
 **🔴 主人/用户说「提交」= 默认授权直接合并到 GitHub（squash merge，免 review），不要再问「要不要 review」。需要 review 时主人会明说。**
 
 **每次 push 之前必须先检查是否有文档需要更新，包括但不限于:**

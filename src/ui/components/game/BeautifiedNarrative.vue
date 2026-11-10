@@ -12,6 +12,7 @@ import { useBeautify } from '../../composables/useBeautify';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import BeautifierFrame from './BeautifierFrame.vue';
 import SceneImageSegment from './SceneImageSegment.vue';
+import { parseCombatNarrative, type CombatFlowBlock } from './combat/combat-view';
 
 const props = withDefaults(
   defineProps<{
@@ -19,6 +20,7 @@ const props = withDefaults(
     rules?: BeautifierRule[];
     force?: boolean;
     streaming?: boolean;
+    actionPanels?: boolean;
     forwardContextMenu?: boolean;
     depth?: number;
     /**
@@ -54,6 +56,7 @@ const props = withDefaults(
     rules: undefined,
     force: false,
     streaming: false,
+    actionPanels: false,
     forwardContextMenu: false,
     depth: 0,
     messageId: undefined,
@@ -108,6 +111,7 @@ function beautify(text: string): BeautifierSegment[] {
 }
 
 type RenderPart =
+  | Extract<CombatFlowBlock, { kind: 'panel' }>
   | { kind: 'prose'; segments: BeautifierSegment[] }
   | { kind: 'image'; occurrence: number; marker: SceneImageMarker };
 
@@ -121,7 +125,18 @@ const parts = computed<RenderPart[]>(() => {
     }
     const text = trimAroundImages(segment.text);
     if (text === '') continue;
-    out.push({ kind: 'prose', segments: beautify(text) });
+    if (!props.actionPanels) {
+      out.push({ kind: 'prose', segments: beautify(text) });
+      continue;
+    }
+    for (const piece of text.split(/(<action_info>[\s\S]*?<\/action_info>)/gi)) {
+      if (/^<action_info>/i.test(piece)) {
+        for (const block of parseCombatNarrative(piece))
+          out.push(
+            block.kind === 'panel' ? block : { kind: 'prose', segments: beautify(block.text) },
+          );
+      } else if (piece) out.push({ kind: 'prose', segments: beautify(piece) });
+    }
   }
   return out;
 });
@@ -190,6 +205,12 @@ function paragraphs(text: string): string[] {
 <template>
   <div class="beautified-narrative">
     <template v-for="(part, partIndex) in parts" :key="partIndex">
+      <div v-if="part.kind === 'panel'" class="action-panel">
+        <strong>{{ part.title || '行动详情' }}</strong>
+        <div v-for="(row, rowIndex) in part.rows" :key="rowIndex">
+          <span>{{ row.label }}</span> {{ row.value }}
+        </div>
+      </div>
       <!-- 正文标记切出来的图片段（anchorKind: 'marker'） -->
       <SceneImageSegment
         v-if="part.kind === 'image' && messageId !== undefined"
@@ -248,6 +269,22 @@ function paragraphs(text: string): string[] {
 </template>
 
 <style scoped>
+.action-panel {
+  margin: 1em 0;
+  padding: 1em;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: var(--theme-bg-secondary);
+  font-family: monospace;
+  white-space: pre-wrap;
+}
+.action-panel strong {
+  display: block;
+  margin-bottom: 0.5em;
+}
+.action-panel span {
+  color: var(--theme-text-muted);
+}
 .beautified-narrative {
   min-width: 0;
 }

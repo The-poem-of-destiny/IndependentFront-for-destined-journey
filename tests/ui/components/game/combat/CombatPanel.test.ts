@@ -86,7 +86,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   restartCombat.mockResolvedValue({ status: 'restored', continuation: 'same-save' });
   mockGame = reactive({
-    isInCombat: true,
+    isAgentCombat: true,
     combatReady: null,
     combatState: null,
     combatSettlement: null,

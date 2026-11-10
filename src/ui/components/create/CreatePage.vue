@@ -11,6 +11,8 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useContentStore } from '../../stores/content-store';
 import { checkJourneyReadiness } from '../../lib/journey-readiness';
 import PresetModal from './PresetModal.vue';
+import FormSelect from '../shared/form/FormSelect.vue';
+import { initializeDirectSettings } from '../../lib/direct-settings';
 
 const store = useCreateStore();
 const ui = useUIStore();
@@ -21,10 +23,16 @@ const checkError = ref('');
 const creationError = ref('');
 const accepted = ref(false);
 const issues = computed(() =>
-  checkJourneyReadiness(settings.settings, settings.projectAgentDefaults.agents, store.plotMode),
+  checkJourneyReadiness(
+    settings.settings,
+    settings.projectAgentDefaults.agents,
+    store.plotMode,
+    store.generationMode,
+  ),
 );
 const blocked = computed(
   () =>
+    !store.generationMode ||
     checking.value ||
     !!checkError.value ||
     store.contentStatus !== 'ready' ||
@@ -43,6 +51,7 @@ async function checkReadiness() {
       settings.loadAgentProjectDefaults(),
       store.loadWorldBookEntries(),
     ]);
+    initializeDirectSettings(settings.settings, settings.projectAgentDefaults.agents);
   } catch {
     checkError.value = '配置未能加载，请重新检查；若仍失败，请打开 API 设置。';
   } finally {
@@ -125,6 +134,20 @@ onMounted(() => {
       <section v-if="!ready" class="readiness" aria-labelledby="readiness-title">
         <h1 id="readiness-title">启程前的准备</h1>
         <p>先确认内容与对话模型，再开始创建角色。</p>
+        <h3 class="section-label">本存档的生成模式</h3>
+        <FormSelect
+          v-model="store.generationMode"
+          label="生成模式（创建后不可更改）"
+          placeholder="请选择生成模式"
+          :options="[
+            { label: 'Agent 模式', value: 'agent' },
+            { label: '直出（无缓存优化）', value: 'direct' },
+          ]"
+        />
+        <p class="form-hint">
+          Agent 模式由多个 AI 分工处理。直出由主 AI
+          在一次回复中完成叙事、战斗、制作与状态变化，接近角色卡体验。两种模式都保留独立记忆调用。
+        </p>
         <ContentStatusBanner />
         <p v-if="checking" role="status">正在检查本机配置…</p>
         <template v-else>

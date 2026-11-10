@@ -206,6 +206,30 @@ async function runCharacterGen(
     ...(playerLocation ? { location: playerLocation } : {}),
     present: true,
   });
+  bindGeneratedCharacter(character, request);
+
+  const patches: StatePatch[] = [
+    {
+      op: 'add_character',
+      target: `characters.${character.name}`,
+      value: character,
+      metadata: { source: 'entity_gen', kind: 'character' },
+    },
+  ];
+
+  if (deps.stateManager) await deps.stateManager.commitDomainCommand(patches);
+
+  const charData = output.character;
+  const narrativeSummary = `新角色「${charData.name}」已生成: ${charData.race} ${charData.occupation.join('/')}, T${charData.tier} Lv.${charData.level}, ${charData.background.slice(0, 100)}`;
+
+  return { character, patches, narrativeSummary, itemOutput: output };
+}
+
+/** Bind save-local narrative identity without issuing a generation request. */
+export function bindGeneratedCharacter(
+  character: CharacterState,
+  request: Pick<EntityGenRequest, 'narrativeCharacter' | 'characterDefinition' | 'introducedBy'>,
+): void {
   const established = request.narrativeCharacter;
   if (established) {
     character.name = established.name;
@@ -229,22 +253,6 @@ async function runCharacterGen(
       past: [],
     };
   }
-
-  const patches: StatePatch[] = [
-    {
-      op: 'add_character',
-      target: `characters.${character.name}`,
-      value: character,
-      metadata: { source: 'entity_gen', kind: 'character' },
-    },
-  ];
-
-  if (deps.stateManager) await deps.stateManager.commitDomainCommand(patches);
-
-  const charData = output.character;
-  const narrativeSummary = `新角色「${charData.name}」已生成: ${charData.race} ${charData.occupation.join('/')}, T${charData.tier} Lv.${charData.level}, ${charData.background.slice(0, 100)}`;
-
-  return { character, patches, narrativeSummary, itemOutput: output };
 }
 
 /** 角色请求描述：指定信息行 + 主线投影 + bodyText */

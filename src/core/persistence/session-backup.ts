@@ -799,6 +799,19 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
   const remapProfile = (p: SaveProfile): SaveProfile => ({
     ...p,
     saveId: newSaveId,
+    worldFlags: {
+      ...p.worldFlags,
+      ...(p.worldFlags?.directCombat
+        ? {
+            directCombat: {
+              ...p.worldFlags.directCombat,
+              sourceTurnKey:
+                msgIds.peek(p.worldFlags.directCombat.sourceTurnKey) ??
+                p.worldFlags.directCombat.sourceTurnKey,
+            },
+          }
+        : {}),
+    },
     // 命运契约指着角色行；affections 的键是**名字**（铁律 1），刻意不动
     contracts: Array.isArray(p.contracts)
       ? p.contracts.map((c) => ({ ...c, targetId: charIds.peek(c.targetId) ?? c.targetId }))

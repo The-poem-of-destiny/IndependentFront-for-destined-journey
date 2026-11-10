@@ -1579,6 +1579,8 @@ export interface SaveSlot {
     userName: string;
     gameStartTime: string;
     totalTurns: number;
+    /** 建档时明确选择，存档生命周期内固定；旧档缺席按 Agent 运行。 */
+    generationMode?: 'agent' | 'direct';
     /** Phase 10h: 存档级启用的世界书条目 ID (如 'system_core:408', 'character:313') */
     enabledWorldBookEntries?: string[];
     /** 建档时冻结所选原生角色；旧存档缺席时从仍启用的旧资料兼容读取。 */

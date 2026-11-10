@@ -27,6 +27,7 @@ const CONTROL_TAGS = [
   'think',
   'summary',
   'character_updates',
+  'direct_updates',
 ];
 const STREAM_CONTROL_TAGS = ['maintext', 'play_audio', 'event_trigger', ...CONTROL_TAGS];
 

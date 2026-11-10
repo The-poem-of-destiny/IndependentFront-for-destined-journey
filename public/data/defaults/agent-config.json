@@ -1,7 +1,20 @@
 {
-  "$comment": "占位内容（内容-引擎分离 §6 / D27 / D32 / D44）。🔴 agent id 必须与真实内容侧完全相同的 14 个，一个不多一个不少（守门测试直接断言这份清单）。各 systemPrompt 是 300-800 字的通用奇幻版本：**输出契约与工具调用约定一字未改**——标签名、出现次数、字段名、枚举值、工具名都是引擎协议（下游有解析器逐字匹配），只有叙事风格与举例换成了通用奇幻。story 例外：它的行为真源是预设（见 presetId/preset），systemPrompt 里放的是「一个预设都没有」时的回退正文，来自同目录的 story-preset.json。占位预设 id 固定为 placeholder-story-v1，与任何真实内容包的预设 id 都不同（D20 四态基线靠这条区分「未动过的占位」与「用户自己的预设」）。model / 温度 / 历史层数等旋钮与真实内容侧逐值一致（那是性能与编排配置，不是内容）；model 一律留空串，等用户在 API 池里选。🔴 worldBookIds 只列 data/placeholder/worldbooks/ 里真实存在的书——真实文件的 story 那份还挂着 6 个早已不存在的 id（character_detail / fated_core / narrative_guide / region_detail / world_overview / race_detail），照抄过来只会让公开仓一开局就带着悬空引用。",
+  "$comment": "占位内容（内容-引擎分离 §6 / D27 / D32 / D44）。🔴 agent id 与公开引擎清单保持一致（守门测试直接断言）。direct_main 为直出新增槽，旧内容包未声明时使用引擎内置预设与配置回退。各 systemPrompt 是 300-800 字的通用奇幻版本：**输出契约与工具调用约定一字未改**——标签名、出现次数、字段名、枚举值、工具名都是引擎协议（下游有解析器逐字匹配），只有叙事风格与举例换成了通用奇幻。story 例外：它的行为真源是预设（见 presetId/preset），systemPrompt 里放的是「一个预设都没有」时的回退正文，来自同目录的 story-preset.json。占位预设 id 固定为 placeholder-story-v1，与任何真实内容包的预设 id 都不同（D20 四态基线靠这条区分「未动过的占位」与「用户自己的预设」）。model / 温度 / 历史层数等旋钮与真实内容侧逐值一致（那是性能与编排配置，不是内容）；model 一律留空串，等用户在 API 池里选。🔴 worldBookIds 只列 data/placeholder/worldbooks/ 里真实存在的书——真实文件的 story 那份还挂着 6 个早已不存在的 id（character_detail / fated_core / narrative_guide / region_detail / world_overview / race_detail），照抄过来只会让公开仓一开局就带着悬空引用。",
   "version": 1,
   "agents": {
+    "direct_main": {
+      "name": "直出（无缓存优化）",
+      "model": "",
+      "systemPrompt": "使用引擎内置直出预设，在同次回复中完成叙事与原生状态输出。记忆另行处理。",
+      "template": "",
+      "temperature": 0.7,
+      "topP": 1,
+      "freqPen": 0,
+      "presPen": 0,
+      "maxTokens": 65536,
+      "maxRetries": 0,
+      "historyLayers": 6
+    },
     "lore_select": {
       "name": "资料选择",
       "model": "",

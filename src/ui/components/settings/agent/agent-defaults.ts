@@ -48,7 +48,7 @@ export function buildAgentDefaultEntry(input: AgentDefaultInput): AgentDefaultEn
     preset: null,
   };
 
-  if (agentId === 'story') {
+  if (agentId === 'story' || agentId === 'direct_main') {
     base.presetId = activePresetId || '';
     if (activePresetId && activePreset) {
       base.preset = JSON.parse(JSON.stringify(activePreset)) as PresetItem;

@@ -512,3 +512,75 @@ describe('R01: durable original-turn archive draft, not next-turn evidence', () 
     );
   });
 });
+
+describe('direct pipeline preserves memory and isolates non-memory generation', () => {
+  async function directFixture() {
+    const { game, pipeline } = await fixture();
+    game.activeSave!.metadata.generationMode = 'direct';
+    await saveSaveSlot(JSON.parse(JSON.stringify(game.activeSave!)));
+    const { createDirectPreset } = await import('@engine/prompts/direct-prompt');
+    const preset = createDirectPreset();
+    const p = pipeline as any;
+    p.loadPresets = async () => ({ presets: [preset], agentDefaults: {} });
+    // Exercise the production direct configuration path rather than the Agent fixture shim.
+    delete p.buildAgentConfigs;
+    await getDatabase().characters.put(
+      createDefaultCharacterState({
+        id: 'player',
+        saveId,
+        name: '旅人',
+        type: 'player',
+        hp: 80,
+        maxHp: 100,
+      }),
+    );
+    return { game, pipeline };
+  }
+  function directNetwork(valid = true) {
+    return vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (this: any) {
+      const raw =
+        this.agentId === 'direct_main'
+          ? `<maintext>旅人继续前行。</maintext><character_updates>{"characters":[]}</character_updates>${valid ? '<direct_updates>{"version":1,"world":{},"time":{"delta_time":0},"entities":[],"state":{"characters":{"delta":[{"name":"旅人","path":"hp","amount":-10}]}},"effects":[],"plot":{},"combat":null,"diceUsed":[]}</direct_updates>' : ''}`
+          : this.agentId === 'memory_summary'
+            ? JSON.stringify({ segments: [{ content: '旅人继续前行。' }] })
+            : '{}';
+      return result(this.agentId, raw);
+    });
+  }
+  it('accepts one main call, keeps Story v2 summaries, blocks replay and never enters side chains', async () => {
+    const { game, pipeline } = await directFixture();
+    const chat = directNetwork();
+    expect(await pipeline.run('前进')).toBe(true);
+    const agents = chat.mock.contexts.map((client: any) => client.agentId);
+    expect(agents.filter((id) => !id.startsWith('memory_'))).toEqual(['direct_main']);
+    expect(agents).toContain('memory_summary');
+    expect((await getDatabase().characters.get('player'))?.hp).toBe(70);
+    expect(await getStoryTurnSummaries(saveId)).toHaveLength(1);
+    const user = game.messages.find((m) => m.role === 'user')!;
+    expect(user.storyTurnStatus).toBe('accepted');
+    const calls = chat.mock.calls.length;
+    expect(await pipeline.run('前进', undefined, false, user.id)).toBe(false);
+    expect(chat).toHaveBeenCalledTimes(calls);
+    expect((await getDatabase().characters.get('player'))?.hp).toBe(70);
+  });
+  it('does not silently repair malformed main output or change game state', async () => {
+    const { game, pipeline } = await directFixture();
+    const chat = directNetwork(false);
+    expect(await pipeline.run('前进')).toBe(false);
+    expect(chat.mock.contexts.map((client: any) => client.agentId)).toEqual(['direct_main']);
+    expect((await getDatabase().characters.get('player'))?.hp).toBe(80);
+    expect(game.messages.some((m) => m.storyTurnStatus === 'accepted')).toBe(false);
+  });
+  it('keeps accepted state accepted if auxiliary snapshot creation fails', async () => {
+    const { game, pipeline } = await directFixture();
+    directNetwork();
+    advance.mockRejectedValueOnce(new Error('snapshot unavailable'));
+    expect(await pipeline.run('前进')).toBe(true);
+    expect(
+      game.messages
+        .filter((m) => m.role !== 'system')
+        .every((m) => m.storyTurnStatus === 'accepted'),
+    ).toBe(true);
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining('本楼已接纳'), 'warning', 6000);
+  });
+});

@@ -31,6 +31,12 @@ export interface AgentListEntry {
 
 export const AGENT_LIST: readonly AgentListEntry[] = [
   {
+    id: 'direct_main',
+    name: '直出主生成',
+    desc: '直出存档使用：一次完成叙事与演算，记忆仍独立调用；存档模式在创建时选择',
+    stage: 1,
+  },
+  {
     id: 'memory_recall',
     name: '记忆召回',
     desc: '根据用户输入从记忆库中 Embedding 召回相关记忆',

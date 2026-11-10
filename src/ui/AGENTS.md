@@ -12,6 +12,8 @@
 
 ## Story v2 / 内容路由速览
 
+- 直出：`CreatePage.vue` 准备页明确选择存档模式，`create-store.ts` 必填校验并持久化；`game-store.ts` 从存档解析模式与战斗投影，`lib/game-pipeline.ts` 独立直出分支复用原有记忆。`lib/direct-settings.ts` 初始化独立模型配置，设置页不提供档内模式切换。
+
 - 原生角色：`stores/content-store.ts` 载入 `characters` 分节；`create-store.ts` 选择并冻结作者定义；`lib/game-pipeline.ts` 暂存主叙事更新，在回合接纳后经 `StateManager` 提交。`CharacterViewerModal.vue` 内嵌 `CharacterChronicleTab.vue`，支持重要筛选、搜索、排序和来源详情；协议与边界见 [角色系统](../../docs/reference/character-system.md)。
 
 - `lib/game-pipeline.ts` 仅在新模式构建独立 `lore_select` 配置；正式回合 pending/accepted/failed 与重试来源统一，取消/锁内提交有同源守卫；原回合归档草稿自动重试。旧模式不运行选择器。

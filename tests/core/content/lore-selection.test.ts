@@ -591,3 +591,31 @@ describe('Story lore selection', () => {
     });
   });
 });
+
+it('direct local selection never calls a selector or inherits another agent permission', async () => {
+  const books = [
+    book([
+      [
+        'direct-rule',
+        { audiences: ['direct_main'], section: 'turn', activation: { keywords: ['制作'] } },
+      ],
+      ['combat-only', { audiences: ['combat'], section: 'fixed' }],
+      [
+        'direct-blocked',
+        { audiences: ['direct_main'], section: 'fixed', dependsOn: ['combat-only'] },
+      ],
+    ]),
+  ];
+  const selector = vi.fn();
+  const selected = await selectStoryLore(books, context('制作'), selector, {
+    agentId: 'direct_main',
+    mode: 'local',
+  });
+  expect(selector).not.toHaveBeenCalled();
+  expect(
+    Object.values(selected.zones)
+      .flat()
+      .map((row) => row.key),
+  ).toEqual(['direct-rule']);
+  expect(selected.diagnostics.blockedDependencyKeys).toContain('combat-only');
+});

@@ -15,6 +15,7 @@
  */
 
 import { defineStore } from 'pinia';
+import { requireGenerationMode } from '@engine/story/generation-mode';
 import { ref, computed, watch } from 'vue';
 import type {
   CharacterState,
@@ -110,6 +111,7 @@ const TIER_NAMES = ['普通', '中坚', '精英', '史诗', '传说', '神话', 
 // ===== Store =====
 
 export const useCreateStore = defineStore('create', () => {
+  const generationMode = ref<'' | 'agent' | 'direct'>('');
   // ═══════════════════════════════════════════════════════
   // 步骤控制
   // ═══════════════════════════════════════════════════════
@@ -117,7 +119,11 @@ export const useCreateStore = defineStore('create', () => {
 
   const stepValid = computed<Record<number, boolean>>(() => ({
     0: difficulty.value !== null,
-    1: name.value.trim().length > 0 && race.value !== '' && attributesFullyAllocated.value,
+    1:
+      generationMode.value !== '' &&
+      name.value.trim().length > 0 &&
+      race.value !== '' &&
+      attributesFullyAllocated.value,
     // 命定核心：内置条目**或**工坊系统项目，二者择一即可放行。
     // 只认前者时，选了工坊核心的用户会卡死在这一步（按钮永远不亮，且没有任何提示）。
     2: selectedSystemCoreEntryUid.value !== null || selectedWorkshopCoreProjectId.value !== null,
@@ -125,7 +131,7 @@ export const useCreateStore = defineStore('create', () => {
     4: true, // 装备选择
     5: true, // 背景故事
     6: true, // 剧情规划
-    7: attributesFullyAllocated.value, // 确认提交前再次守住预设晚加载等绕过路径
+    7: generationMode.value !== '' && attributesFullyAllocated.value, // 确认提交前再次守住预设晚加载等绕过路径
   }));
 
   function nextStep() {
@@ -1916,6 +1922,10 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   async function persistJourney(): Promise<string> {
+    if (generationMode.value !== 'agent' && generationMode.value !== 'direct') {
+      currentStep.value = 1;
+    }
+    requireGenerationMode(generationMode.value);
     // 最终持久化边界必须重验；角色预设可以在任一步加载，不能只依赖曾经通过过 Step 1。
     if (!attributesFullyAllocated.value) {
       currentStep.value = 1;
@@ -1941,6 +1951,7 @@ export const useCreateStore = defineStore('create', () => {
       updatedAt: Date.now(),
       activeSnapshotId: null,
       metadata: {
+        generationMode: generationMode.value,
         characterName: charState.name,
         userName: '玩家',
         gameStartTime: new Date().toISOString(),
@@ -2199,6 +2210,7 @@ export const useCreateStore = defineStore('create', () => {
     gender.value = '男';
     customGender.value = '';
     age.value = 18;
+    generationMode.value = '';
     race.value = '人类';
     customRace.value = '';
     identity.value = '非贵族平民';
@@ -2244,6 +2256,7 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   return {
+    generationMode,
     // 内容加载门（D16/D24）
     contentStatus,
     initContent,
