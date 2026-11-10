@@ -700,6 +700,13 @@ function formatJson(value: unknown): string {
           <span class="debug-agent-label">{{ entry.label }}</span>
           <span class="debug-agent-model">{{ entry.model || '无模型' }}</span>
           <span v-if="entry.error" class="debug-agent-err">{{ entry.error }}</span>
+          <span v-else-if="entry.providerUsage" class="debug-agent-ok">
+            缓存读取 {{ entry.providerUsage.cacheReadTokens ?? '渠道未提供' }} / 写入
+            {{ entry.providerUsage.cacheWriteTokens ?? '渠道未提供' }} / 普通输入
+            {{ entry.providerUsage.cacheMissTokens ?? '渠道未提供' }} / 总输入
+            {{ entry.providerUsage.inputTokens ?? '渠道未提供' }} / 输出
+            {{ entry.providerUsage.outputTokens ?? '渠道未提供' }} · {{ entry.duration }}ms
+          </span>
           <span v-else class="debug-agent-ok"
             >命中 {{ entry.cacheHitTokens ?? 0 }} / 未命中 {{ entry.cacheMissTokens ?? 0 }} / 输出
             {{ entry.completionTokens ?? 0 }} · {{ entry.duration }}ms</span

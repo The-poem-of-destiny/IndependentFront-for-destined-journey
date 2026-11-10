@@ -815,7 +815,11 @@ export function buildAgentMessages(
     (agentId === 'story' || agentId === 'direct_main') &&
     ctx.characterDefinitions !== undefined
   ) {
-    resolved = [resolved, CHARACTER_UPDATE_PROTOCOL, buildCharacterContext(ctx)]
+    resolved = [
+      resolved,
+      CHARACTER_UPDATE_PROTOCOL,
+      localParams?.CHARACTER_CONTEXT ?? buildCharacterContext(ctx),
+    ]
       .filter(Boolean)
       .join('\n\n');
   }
@@ -837,11 +841,9 @@ export function buildAgentMessages(
     !presetRendersRandomEvents &&
     !RANDOM_EVENTS_TOKEN_RE.test(template)
   ) {
-    const block = PLACEHOLDER_REGISTRY['RANDOM_EVENTS'](
-      tplCtx,
-      config ?? ({ agentId } as AgentConfig),
-      {},
-    );
+    const block =
+      localParams?.RANDOM_EVENTS ??
+      PLACEHOLDER_REGISTRY['RANDOM_EVENTS'](tplCtx, config ?? ({ agentId } as AgentConfig), {});
     if (block.trim().length > 0) return [{ role: 'system', content: `${resolved}\n${block}` }];
   }
 
@@ -870,6 +872,7 @@ export async function buildAgentMessagesAsync(
   worldBooks?: WorldBook[],
   presets?: AgentPreset[],
   localParams?: Record<string, string>,
+  onRendered?: (context: AgentContext) => void,
 ): Promise<Array<{ role: string; content: string }> | null> {
   if (!getAgentTemplate(agentId)) return null;
 
@@ -903,6 +906,7 @@ export async function buildAgentMessagesAsync(
     }
   }
 
+  onRendered?.({ ...ctx, ejsPass });
   return buildAgentMessages(
     agentId,
     { ...ctx, ejsPass },

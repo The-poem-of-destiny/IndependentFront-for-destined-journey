@@ -229,7 +229,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 升版时这两处一起改。
  */
 // v30 = 战斗沙盒 combatSandboxes（本分支），在 master 的 v29 之后顺延。
-export const DB_VERSION = 31;
+export const DB_VERSION = 32;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -853,6 +853,9 @@ class AppDatabase extends Dexie {
      */
     this.version(30).stores({ combatSandboxes: 'saveId, updatedAt' });
     this.version(31).stores({ characterChronicle: 'id, saveId, [saveId+characterId]' });
+    // New immutable generation mode: existing future-version gates keep older apps from
+    // importing direct_cached saves and silently running them as Agent. No data rewrite.
+    this.version(32).stores({});
   }
 }
 

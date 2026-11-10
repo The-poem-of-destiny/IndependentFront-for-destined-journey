@@ -1,3 +1,6 @@
+import type { ChatMessage } from '../types/types';
+import { acceptDirectContext, invalidateDirectContext } from '../prompts/direct-context-session';
+import type { DirectCachePolicy } from '../types/types-api';
 /**
  * Agent 编排引擎 — DAG 依赖调度 + 并行/串行混合执行
  *
@@ -375,7 +378,19 @@ export class AgentOrchestrator {
   // ========== Run ==========
 
   /** Direct generation shares memory implementations, never enters the Agent DAG. */
-  async runDirect(combat: DirectCombatRecord | null): Promise<DirectTurnDraft> {
+  private directCache?: Awaited<ReturnType<typeof generateDirectTurn>>['cache'];
+
+  async acceptDirectCache(acceptedMessages: ChatMessage[]): Promise<void> {
+    if (!this.directCache) return;
+    const { ticket, ...result } = this.directCache;
+    this.directCache = undefined;
+    await acceptDirectContext(ticket, { ...result, acceptedMessages });
+  }
+
+  async runDirect(
+    combat: DirectCombatRecord | null,
+    cachePolicy?: DirectCachePolicy,
+  ): Promise<DirectTurnDraft> {
     this.assertCurrent();
     this.context.zones ??= buildZoneContext(this.context);
     this.events.onStageStart?.(0, ['memory_recall']);
@@ -392,7 +407,7 @@ export class AgentOrchestrator {
     this.events.onStageStart?.(1, ['direct_main']);
     this.events.onAgentStart?.('direct_main', directConfig);
     try {
-      const { draft, result } = await generateDirectTurn(
+      const { draft, result, cache } = await generateDirectTurn(
         {
           config: directConfig,
           endpoint,
@@ -403,6 +418,7 @@ export class AgentOrchestrator {
           worldBooks: this.worldBooks,
           presets: this.presets,
           combat,
+          cache: cachePolicy ? { saveId: this.saveId, policy: cachePolicy } : undefined,
           storyContext: this.storyContext,
         },
         new AgentClient({
@@ -414,12 +430,14 @@ export class AgentOrchestrator {
         }),
       );
       this.assertCurrent();
+      this.directCache = cache;
       this.results.set('direct_main', result);
       this.context.agentOutputs.set('story', draft.content);
       await this.events.onAgentComplete?.(result);
       this.events.onStageComplete?.(1);
       return draft;
     } catch (error) {
+      if (cachePolicy) invalidateDirectContext(this.saveId);
       this.events.onAgentError?.(
         'direct_main',
         error instanceof Error ? error.message : String(error),

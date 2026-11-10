@@ -1,3 +1,7 @@
+import {
+  acceptDirectContext,
+  invalidateDirectContext,
+} from '../../../src/core/prompts/direct-context-session';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentClient } from '../../../src/core/agents/agent-client';
 import {
@@ -157,3 +161,34 @@ describe('direct generation through the real client and stream parser', () => {
     },
   );
 });
+
+it.each([false, true])(
+  'cached direct reuses the accepted wire prefix with legacy/v2=%s',
+  async (v2) => {
+    invalidateDirectContext('cached-wire');
+    const { input, client } = setup(v2);
+    input.cache = { saveId: 'cached-wire', policy: 'prefix' };
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => streamResponse(true));
+    const first = await generateDirectTurn(input, client);
+    expect(first.cache).toBeDefined();
+    await acceptDirectContext(first.cache!.ticket, { ...first.cache!, acceptedMessages: [] });
+    input.context.userInput = '离开铁匠铺';
+    input.context.variables = { 地点: '街道' };
+    const second = await generateDirectTurn(input, client);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(second.result.promptRebased).toBe(false);
+    expect(second.result.requestMessages!.slice(0, first.result.requestMessages!.length)).toEqual(
+      first.result.requestMessages,
+    );
+    expect(
+      second.result.requestMessages![second.result.requestMessages!.length - 1]!.content,
+    ).toContain('街道');
+    expect(
+      second.result.requestMessages![second.result.requestMessages!.length - 1]!.content,
+    ).toContain('离开铁匠铺');
+    expect(second.result.providerUsage).toBeDefined();
+    invalidateDirectContext('cached-wire');
+  },
+);

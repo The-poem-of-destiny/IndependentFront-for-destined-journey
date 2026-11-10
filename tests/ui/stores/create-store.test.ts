@@ -2377,19 +2377,22 @@ describe('buildEnabledWorldBookEntries 三条启用轴', () => {
 });
 
 describe('save generation mode', () => {
-  it('requires an explicit choice before creation and resets for the next save', async () => {
-    const store = makeStore();
-    store.generationMode = '';
-    allocateBasePoints(store);
-    expect(store.stepValid[1]).toBe(false);
-    await expect(store.startJourney()).rejects.toThrow('生成模式');
-    store.generationMode = 'direct';
-    const id = await store.startJourney();
-    const { getSave } = await import('@engine/persistence/database');
-    expect((await getSave(id))?.metadata.generationMode).toBe('direct');
-    store.generationMode = 'agent';
-    expect((await getSave(id))?.metadata.generationMode).toBe('direct');
-    store.resetAll();
-    expect(store.generationMode).toBe('');
-  });
+  it.each(['direct', 'direct_cached'] as const)(
+    'requires an explicit %s choice before creation and resets for the next save',
+    async (mode) => {
+      const store = makeStore();
+      store.generationMode = '';
+      allocateBasePoints(store);
+      expect(store.stepValid[1]).toBe(false);
+      await expect(store.startJourney()).rejects.toThrow('生成模式');
+      store.generationMode = mode;
+      const id = await store.startJourney();
+      const { getSave } = await import('@engine/persistence/database');
+      expect((await getSave(id))?.metadata.generationMode).toBe(mode);
+      store.generationMode = 'agent';
+      expect((await getSave(id))?.metadata.generationMode).toBe(mode);
+      store.resetAll();
+      expect(store.generationMode).toBe('');
+    },
+  );
 });

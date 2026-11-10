@@ -15,12 +15,15 @@ import {
 } from './anthropic-messages';
 import { applyBodyParameters } from './body-parameters';
 import { buildGeminiBody, GeminiStreamAccumulator, parseGeminiResponse } from './gemini';
+import { applyPromptCaching } from './prompt-caching';
 import { buildOpenAiBody, OpenAiStreamAccumulator, parseOpenAiResponse } from './openai-chat';
 
 type LlmToolChoice =
   'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
 
 export interface LlmBuildInput {
+  cachePolicy?: import('../types/types-api').DirectCachePolicy;
+  cacheKey?: string;
   protocol: LlmProtocol;
   model: string;
   messages: LlmMessage[];
@@ -52,6 +55,7 @@ export function buildLlmRequest(input: LlmBuildInput): BuiltLlmRequest {
       : input.protocol === 'gemini'
         ? buildGeminiBody(input)
         : buildAnthropicBody(input);
+  applyPromptCaching(baseBody, input);
   return applyBodyParameters({
     protocol: input.protocol,
     baseBody,

@@ -1,3 +1,4 @@
+import { invalidateDirectContext } from './direct-context-session';
 /**
  * prompt-session-assembler.ts — LLM 组装层 Delta 会话深模块（T2）
  *
@@ -935,6 +936,7 @@ export function completePromptSession(
  */
 export function invalidatePromptSession(handleOrSaveId: PromptSessionHandle | string): void {
   if (typeof handleOrSaveId === 'string') {
+    invalidateDirectContext(handleOrSaveId);
     for (const key of sessions.keys()) {
       const session = sessions.get(key);
       if (session && session.saveId === handleOrSaveId) sessions.delete(key);

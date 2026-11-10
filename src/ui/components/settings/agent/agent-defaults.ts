@@ -1,3 +1,4 @@
+import { isDirectSettingsProfile } from '../../../lib/direct-settings';
 /**
  * 「保存为项目默认」的纯装配部分（Q-25 第 9 步）。
  *
@@ -48,7 +49,7 @@ export function buildAgentDefaultEntry(input: AgentDefaultInput): AgentDefaultEn
     preset: null,
   };
 
-  if (agentId === 'story' || agentId === 'direct_main') {
+  if (agentId === 'story' || isDirectSettingsProfile(agentId)) {
     base.presetId = activePresetId || '';
     if (activePresetId && activePreset) {
       base.preset = JSON.parse(JSON.stringify(activePreset)) as PresetItem;

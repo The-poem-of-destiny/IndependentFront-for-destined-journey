@@ -13,6 +13,7 @@
 ## Story v2 / 内容路由速览
 
 - 直出：`CreatePage.vue` 准备页明确选择存档模式，`create-store.ts` 必填校验并持久化；`game-store.ts` 从存档解析模式与战斗投影，`lib/game-pipeline.ts` 独立直出分支复用原有记忆。`lib/direct-settings.ts` 初始化独立模型配置，设置页不提供档内模式切换。
+- 缓存直出：建档第三项 `direct_cached`，配置页单列缓存主生成的连接、参数、预设与渠道策略；运行时仍是 `direct_main`。`DebugPanel` 区分缓存读取、写入、普通输入与总输入，缺字段保持未知。详见 [缓存直出](../../docs/reference/direct-generation-cache.md)。
 
 - 原生角色：`stores/content-store.ts` 载入 `characters` 分节；`create-store.ts` 选择并冻结作者定义；`lib/game-pipeline.ts` 暂存主叙事更新，在回合接纳后经 `StateManager` 提交。`CharacterViewerModal.vue` 内嵌 `CharacterChronicleTab.vue`，支持重要筛选、搜索、排序和来源详情；协议与边界见 [角色系统](../../docs/reference/character-system.md)。
 

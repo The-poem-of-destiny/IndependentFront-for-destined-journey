@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { initializeDirectSettings } from '../../../src/ui/lib/direct-settings';
+import {
+  initializeDirectSettings,
+  initializeCachedDirectSettings,
+} from '../../../src/ui/lib/direct-settings';
 import { checkJourneyReadiness } from '../../../src/ui/lib/journey-readiness';
 import type { UiSettings } from '../../../src/ui/stores/settings-types';
 
@@ -44,4 +47,28 @@ describe('direct settings', () => {
       expect.objectContaining({ blocking: true }),
     );
   });
+});
+
+it('keeps the cached profile and preset independent after initialization', () => {
+  const settings = {
+    agents: { direct_main: { model: 'ep', temperature: 0.6 } },
+    directInitialized: true,
+    directPresetId: 'custom-direct',
+    apiPool: [{ id: 'ep', model: 'test', baseUrl: 'http://localhost:1234/v1', apiType: 'chat' }],
+  } as unknown as UiSettings;
+  initializeCachedDirectSettings(settings, {});
+  expect(settings.agents.direct_cached).toMatchObject({
+    model: 'ep',
+    temperature: 0.6,
+    maxRetries: 0,
+  });
+  settings.agents.direct_cached.model = 'cached-ep';
+  settings.directCachedPresetId = 'cached-preset';
+  initializeCachedDirectSettings(settings, {});
+  expect(settings.agents.direct_main.model).toBe('ep');
+  expect(settings.directPresetId).toBe('custom-direct');
+  expect(settings.directCachedPresetId).toBe('cached-preset');
+  expect(checkJourneyReadiness(settings, {}, 'off', 'direct_cached')).toContainEqual(
+    expect.objectContaining({ blocking: true }),
+  );
 });

@@ -1,3 +1,4 @@
+import { isDirectMode } from '@engine/story/generation-mode';
 /**
  * 捏人页 Store — 角色创建状态管理
  *
@@ -116,7 +117,7 @@ const TIER_NAMES = ['普通', '中坚', '精英', '史诗', '传说', '神话', 
 // ===== Store =====
 
 export const useCreateStore = defineStore('create', () => {
-  const generationMode = ref<'' | 'agent' | 'direct'>('');
+  const generationMode = ref<'' | import('@engine/story/generation-mode').GenerationMode>('');
   // ═══════════════════════════════════════════════════════
   // 步骤控制
   // ═══════════════════════════════════════════════════════
@@ -1947,7 +1948,7 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   async function persistJourney(): Promise<string> {
-    if (generationMode.value !== 'agent' && generationMode.value !== 'direct') {
+    if (generationMode.value !== 'agent' && !isDirectMode(generationMode.value)) {
       currentStep.value = 1;
     }
     requireGenerationMode(generationMode.value);
