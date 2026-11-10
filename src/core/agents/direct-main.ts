@@ -1,3 +1,15 @@
+import {
+  buildDirectCharacterSections,
+  buildLegacyDirectCacheFrame,
+} from '../prompts/direct-context-frame';
+import {
+  DIRECT_CACHE_PROTOCOL,
+  prepareDirectContext,
+  serializeDirectContext,
+  type DirectContextFrame,
+  type DirectCacheTicket,
+} from '../prompts/direct-context-session';
+import type { DirectCachePolicy, NativeLlmContent } from '../types/types-api';
 import type {
   AgentConfig,
   AgentContext,
@@ -51,15 +63,21 @@ export interface DirectGenerationInput {
     onAssembled?: (diagnostics: import('../types/types').StoryContextV2Diagnostics) => void;
   };
   dice?: DirectDie[];
+  cache?: { saveId: string; policy: DirectCachePolicy };
 }
 
 export async function generateDirectTurn(
   input: DirectGenerationInput,
   client: AgentClient,
-): Promise<{ draft: DirectTurnDraft; result: AgentResult }> {
+): Promise<{
+  draft: DirectTurnDraft;
+  result: AgentResult;
+  cache?: { ticket: DirectCacheTicket; rawResponse: string; nativeAssistant?: NativeLlmContent };
+}> {
   const { config, endpoint, configs, context, presets } = input;
   const dice = input.dice ?? rollDirectDice();
   let messages: ChatRequest['messages'];
+  let frame: DirectContextFrame | undefined;
   if (input.storyContext) {
     const assembled = await buildStoryContextV2Messages({
       ...input.storyContext,
@@ -69,9 +87,11 @@ export async function generateDirectTurn(
       presets,
       agentId: 'direct_main',
       loreSelectionMode: 'local',
+      cacheLayout: !!input.cache,
     });
     input.storyContext.onAssembled?.(assembled.diagnostics);
     messages = assembled.messages;
+    frame = assembled.cacheFrame;
   } else {
     const selection = await selectStoryLore(input.worldBooks, context, undefined, {
       agentId: 'direct_main',
@@ -93,11 +113,21 @@ export async function generateDirectTurn(
       configs,
       {},
     );
-    const built = await buildAgentMessagesAsync('direct_main', context, configs, books, presets, {
-      NARRATIVE: history,
-    });
-    if (!built) throw new Error('直出提示词未配置');
-    messages = built as ChatRequest['messages'];
+    if (input.cache) {
+      frame = await buildLegacyDirectCacheFrame(
+        input,
+        books,
+        history,
+        new Set(selection.zones[1].map((r) => r.entry)),
+      );
+      messages = [...frame.prefix, ...frame.history];
+    } else {
+      const built = await buildAgentMessagesAsync('direct_main', context, configs, books, presets, {
+        NARRATIVE: history,
+      });
+      if (!built) throw new Error('直出提示词未配置');
+      messages = built as ChatRequest['messages'];
+    }
   }
   const relevant = context.characters.filter(
     (c) =>
@@ -155,6 +185,64 @@ export async function generateDirectTurn(
       bodyOverrides: endpoint.bodyOverrides,
       bodyOmitPaths: endpoint.bodyOmitPaths,
     }).outputBudget ?? 0;
+  let ticket: DirectCacheTicket | undefined;
+  if (input.cache && frame) {
+    const { characters: _characters, combat, ...rest } = state;
+    frame.prefix = [
+      { role: 'system', content: DIRECT_PROTOCOL + '\n' + DIRECT_CACHE_PROTOCOL },
+      ...frame.prefix,
+    ];
+    frame.sections = {
+      ...frame.sections,
+      ...rest,
+      combat,
+      ...buildDirectCharacterSections(relevant),
+    };
+    const endpointSignature = {
+      id: endpoint.id,
+      protocol: endpoint.protocol,
+      baseUrl: endpoint.baseUrl,
+      revision: endpoint.revision,
+      bodyOverrides: endpoint.bodyOverrides,
+      bodyOmitPaths: endpoint.bodyOmitPaths,
+      defaultParameters: endpoint.defaultParameters,
+      contextWindowTokens: endpoint.contextWindowTokens,
+    };
+    ticket = await prepareDirectContext({
+      saveId: input.cache.saveId,
+      signature: serializeDirectContext({
+        endpoint: endpointSignature,
+        model: request.model,
+        preset: presets.find((p) => p.id === config.presetId),
+        config: {
+          systemPrompt: config.systemPrompt,
+          template: config.template,
+          tailPrompt: config.tailPrompt,
+          historyLayers: config.historyLayers,
+          historySlice: config.historySlice,
+          temperature: config.temperature,
+          topP: config.topP,
+          maxTokens: config.maxTokens,
+          frequencyPenalty: config.frequencyPenalty,
+          presencePenalty: config.presencePenalty,
+        },
+        books: input.worldBooks,
+        contextMode: input.storyContext ? 'v2' : 'legacy',
+        windowTurns: input.storyContext?.windowTurns,
+        policy: input.cache.policy,
+      }),
+      frame,
+      history: context.history,
+      turn: `<turn_context>\n${serializeDirectContext({ playerInput: context.userInput, recall: context.agentOutputs.get('memory_recall') ?? '', dice_pool: dice.map(({ sides, value }) => [sides, value]), tailPrompt: config.tailPrompt ?? '' })}\n</turn_context>`,
+      outputBudget: budget,
+      contextWindowTokens: endpoint.contextWindowTokens,
+      signal: config.abortSignal,
+    });
+    messages = ticket.messages;
+    request.messages = messages;
+    request.cachePolicy = input.cache.policy;
+    request.cacheKey = `direct-cache-v1:${input.cache.saveId}`;
+  }
   const estimatedInput = Math.ceil(
     messages.reduce((sum, m) => sum + String(m.content ?? '').length, 0) / 1.5,
   );
@@ -163,6 +251,7 @@ export async function generateDirectTurn(
       `直出上下文估算 ${estimatedInput} + 输出预留 ${budget} 超出模型窗口 ${endpoint.contextWindowTokens}，请缩短历史或调整输出预留`,
     );
   let result: AgentResult;
+  let nativeAssistant: NativeLlmContent | undefined;
   if (config.streamCallbacks) {
     result = await new Promise<AgentResult>((resolve, reject) => {
       void client
@@ -170,7 +259,8 @@ export async function generateDirectTurn(
           request,
           {
             onChunk: config.streamCallbacks!.onChunk,
-            onComplete: (stream) =>
+            onComplete: (stream) => {
+              nativeAssistant = stream.nativeAssistant;
               resolve({
                 agentId: 'direct_main',
                 output: stream.fullText,
@@ -182,7 +272,17 @@ export async function generateDirectTurn(
                 cacheMissTokens: stream.cacheMissTokens,
                 completionTokens: stream.completionTokens,
                 duration: stream.duration,
-              }),
+                ...(input.cache
+                  ? {
+                      providerUsage: stream.usage,
+                      promptTokens: stream.usage?.inputTokens,
+                      tokensUsed: stream.usage?.totalTokens ?? stream.tokensUsed,
+                      cacheHitTokens: stream.usage?.cacheReadTokens,
+                      cacheMissTokens: stream.usage?.cacheMissTokens,
+                    }
+                  : {}),
+              });
+            },
             onError: (error) => {
               config.streamCallbacks!.onError(error);
               reject(new Error(error));
@@ -193,9 +293,20 @@ export async function generateDirectTurn(
         .catch(reject);
     });
   } else result = await client.chat(request, config.abortSignal);
+  nativeAssistant ??= (result as AgentResult & { _nativeAssistant?: NativeLlmContent })
+    ._nativeAssistant;
+  if (ticket) {
+    result.promptSessionRevision = ticket.revision;
+    result.promptRebased = !!ticket.rebaseReason;
+    result.promptRebaseReason = ticket.rebaseReason;
+  }
   result.agentId = 'direct_main';
   result.requestMessages = messages;
   if (result.error) throw new Error(result.error);
   const draft = parseDirectOutput(result.rawResponse, dice.length);
-  return { draft, result };
+  return {
+    draft,
+    result,
+    ...(ticket ? { cache: { ticket, rawResponse: result.rawResponse, nativeAssistant } } : {}),
+  };
 }

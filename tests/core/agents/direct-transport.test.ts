@@ -1,12 +1,24 @@
+import {
+  acceptDirectContext,
+  invalidateDirectContext,
+} from '../../../src/core/prompts/direct-context-session';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentClient } from '../../../src/core/agents/agent-client';
 import {
   generateDirectTurn,
   type DirectGenerationInput,
 } from '../../../src/core/agents/direct-main';
-import { createDirectPreset } from '../../../src/core/prompts/direct-prompt';
+import {
+  createDirectPreset,
+  createCachedDirectPreset,
+} from '../../../src/core/prompts/direct-prompt';
 import { projectStreamingStory } from '../../../src/core/story/story-output';
-import type { AgentConfig, ApiEndpoint } from '../../../src/core/types/types';
+import {
+  createDefaultCharacterState,
+  type AgentConfig,
+  type ApiEndpoint,
+  type WorldBookEntry,
+} from '../../../src/core/types/types';
 
 const raw =
   '<maintext>铁匠收好短剑。</maintext><character_updates>{"characters":[]}</character_updates><direct_updates>{"version":1,"world":{},"time":{"delta_time":0},"entities":[],"state":{},"effects":[],"plot":{},"combat":null,"diceUsed":[]}</direct_updates>';
@@ -157,3 +169,127 @@ describe('direct generation through the real client and stream parser', () => {
     },
   );
 });
+
+it.each([false, true])(
+  'cached direct reuses the accepted wire prefix with legacy/v2=%s',
+  async (v2) => {
+    invalidateDirectContext('cached-wire');
+    const { input, client } = setup(v2);
+    input.cache = { saveId: 'cached-wire', policy: 'prefix' };
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => streamResponse(true));
+    const first = await generateDirectTurn(input, client);
+    expect(first.cache).toBeDefined();
+    await acceptDirectContext(first.cache!.ticket, { ...first.cache!, acceptedMessages: [] });
+    input.context.userInput = '离开铁匠铺';
+    input.context.variables = { 地点: '街道' };
+    const second = await generateDirectTurn(input, client);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(second.result.promptRebased).toBe(false);
+    expect(second.result.requestMessages!.slice(0, first.result.requestMessages!.length)).toEqual(
+      first.result.requestMessages,
+    );
+    expect(
+      second.result.requestMessages![second.result.requestMessages!.length - 1]!.content,
+    ).toContain('街道');
+    expect(
+      second.result.requestMessages![second.result.requestMessages!.length - 1]!.content,
+    ).toContain('离开铁匠铺');
+    expect(second.result.providerUsage).toBeDefined();
+    invalidateDirectContext('cached-wire');
+  },
+);
+
+it.each([false, true])(
+  'cached layout keeps regional, recalled and opted-in data current (v2=%s)',
+  async (v2) => {
+    const saveId = `cached-layout-${v2}`;
+    invalidateDirectContext(saveId);
+    const { input, client } = setup(v2);
+    const preset = createCachedDirectPreset();
+    preset.settings.prompts.push({
+      content: '作者本轮输入 {{USER_INPUT}}',
+      directCachePlacement: 'turn',
+      injection_order: 100,
+    });
+    input.presets = [preset];
+    input.config.presetId = preset.id;
+    input.cache = { saveId, policy: 'prefix' };
+    const entry = (
+      name: string,
+      content: string,
+      section: 'fixed' | 'region' | 'turn',
+      location?: string,
+    ): WorldBookEntry => ({
+      uid: `cached-layout:world_setting/${name}`,
+      name,
+      content,
+      enabled: true,
+      key: [],
+      keysecondary: [],
+      selectiveLogic: 0,
+      order: 1,
+      position: 0,
+      extra: {
+        lore: {
+          audiences: ['direct_main'],
+          section,
+          ...(location ? { activation: { locations: [location] } } : {}),
+        },
+      },
+    });
+    input.worldBooks = [
+      {
+        id: 'cached-layout',
+        name: '规则',
+        partition: 'world_setting',
+        entries: [
+          entry('rules', '固定规则'.repeat(2000), 'fixed'),
+          entry('inside', '城内规则', 'region', '城内'),
+          entry('outside', '城外规则', 'region', '城外'),
+          entry('dynamic', '当前变量<%= getMessageVar("tick") %>', 'turn'),
+        ],
+      },
+    ];
+    input.context.characters = [
+      createDefaultCharacterState({
+        name: '旅人',
+        type: 'player',
+        location: '城内',
+        inventory: [{ name: '铁', quantity: 2 }],
+      }),
+    ];
+    input.context.variables = { 地点: '城内', sys: { tick: 1 } };
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => streamResponse(true));
+    try {
+      const first = await generateDirectTurn(input, client);
+      const prompt = first.cache!.ticket.messages.map((m) => m.content).join('\n');
+      expect(prompt.match(/铁匠已收到材料/g)).toHaveLength(1);
+      expect(prompt).toContain('当前变量1');
+      expect(prompt).toContain('作者本轮输入 查看短剑');
+      await acceptDirectContext(first.cache!.ticket, { ...first.cache!, acceptedMessages: [] });
+      input.context.characters[0].location = '城外';
+      input.context.variables = { 地点: '城外', sys: { tick: 2 } };
+      input.context.userInput = '向城外走去';
+      input.context.agentOutputs.set('memory_recall', '新的召回');
+      const second = await generateDirectTurn(input, client);
+      const messages = second.cache!.ticket.messages;
+      expect(second.cache!.ticket.rebaseReason).toBeUndefined();
+      expect(messages.slice(0, first.cache!.ticket.messages.length)).toEqual(
+        first.cache!.ticket.messages,
+      );
+      const tail = messages[messages.length - 1].content!;
+      expect(tail).toContain('当前变量2');
+      expect(tail).toContain('城外规则');
+      expect(tail).not.toContain('城内规则');
+      expect(tail.match(/新的召回/g)).toHaveLength(1);
+      expect(tail).toContain('作者本轮输入 向城外走去');
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      invalidateDirectContext(saveId);
+    }
+  },
+);

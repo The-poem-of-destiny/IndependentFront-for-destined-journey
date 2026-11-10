@@ -1,3 +1,4 @@
+import { isDirectMode } from '@engine/story/generation-mode';
 import { DEFAULT_AGENT_PIPELINE } from '@engine/types/types';
 import { getAgentSettings, type AgentDefaultsLayer } from '../stores/agent-settings';
 import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
@@ -13,7 +14,7 @@ export function checkJourneyReadiness(
   settings: { apiPool?: readonly unknown[]; agents?: unknown },
   defaults: AgentDefaultsLayer,
   plotMode: string,
-  generationMode: 'agent' | 'direct' | '' = 'agent',
+  generationMode: import('@engine/story/generation-mode').GenerationMode | '' = 'agent',
 ): ReadinessIssue[] {
   const rawPool = settings.apiPool ?? [];
   const apiPool = buildApiEndpoints(rawPool);
@@ -32,13 +33,16 @@ export function checkJourneyReadiness(
     ];
   }
   const issues: ReadinessIssue[] = [];
-  const agentIds =
-    generationMode === 'direct'
-      ? ['memory_recall', 'direct_main', 'memory_summary']
-      : DEFAULT_AGENT_PIPELINE.stages.flatMap((stage) => stage.agents);
+  const agentIds = isDirectMode(generationMode)
+    ? ['memory_recall', 'direct_main', 'memory_summary']
+    : DEFAULT_AGENT_PIPELINE.stages.flatMap((stage) => stage.agents);
   for (const id of agentIds) {
     const resolution = resolveAgentEndpoint({
-      boundPoolId: getAgentSettings(settings, id, defaults).model,
+      boundPoolId: getAgentSettings(
+        settings,
+        id === 'direct_main' && generationMode === 'direct_cached' ? 'direct_cached' : id,
+        defaults,
+      ).model,
       apiPool,
     });
     if (resolution.status === 'stale-binding') {

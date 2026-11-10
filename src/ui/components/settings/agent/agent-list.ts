@@ -36,6 +36,13 @@ export const AGENT_LIST: readonly AgentListEntry[] = [
     desc: '直出存档使用：一次完成叙事与演算，记忆仍独立调用；存档模式在创建时选择',
     stage: 1,
   },
+
+  {
+    id: 'direct_cached',
+    name: '直出主生成（缓存优化）',
+    desc: '直出存档使用：一次完成叙事与演算，记忆仍独立调用；存档模式在创建时选择',
+    stage: 1,
+  },
   {
     id: 'memory_recall',
     name: '记忆召回',

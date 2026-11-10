@@ -14,6 +14,7 @@ export interface JsonObject {
 
 export type ApiSourceKind = 'llm' | 'embedding' | 'reranker';
 export type LlmProtocol = 'openai-chat' | 'gemini' | 'anthropic-messages';
+export type DirectCachePolicy = 'prefix' | 'anthropic' | 'openai';
 export type RetrievalProtocol = 'openai-embeddings' | 'openai-rerank';
 export type ApiProtocol = LlmProtocol | RetrievalProtocol;
 

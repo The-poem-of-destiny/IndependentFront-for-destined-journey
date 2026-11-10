@@ -1,3 +1,5 @@
+import { invalidateDirectContext } from '@engine/prompts/direct-context-session';
+import { isDirectMode } from '@engine/story/generation-mode';
 import type { StatePatch } from '@engine/types/types';
 /**
  * GamePipeline — 前端 ↔ AgentOrchestrator 桥接层
@@ -17,8 +19,13 @@ import {
   projectDirectCombatCharacters,
   readDirectCombat,
 } from '@engine/combat/direct-combat';
-import { createDirectPreset, DIRECT_PRESET_ID } from '@engine/prompts/direct-prompt';
-import { initializeDirectSettings } from './direct-settings';
+import {
+  createDirectPreset,
+  createCachedDirectPreset,
+  DIRECT_CACHED_PRESET_ID,
+  DIRECT_PRESET_ID,
+} from '@engine/prompts/direct-prompt';
+import { initializeDirectSettings, initializeCachedDirectSettings } from './direct-settings';
 import { scanEventTriggers, scanPlayAudioMarkers } from '@engine/story/marker-protocol';
 // Q-05：从模型输出抢救 JSON 的唯一入口（裸 / 围栏 / <json> / 前后夹带解说四种形态）
 import { extractJsonPayload } from '@engine/utils/model-json';
@@ -347,6 +354,7 @@ function buildDebugEntry(input: DebugEntryInput): DebugAgentEntry {
     reasoning: result?.reasoning,
     toolCalls: result?.toolCalls,
     providerRounds: result?.providerRounds,
+    providerUsage: result?.providerUsage,
     promptSessionRevision: result?.promptSessionRevision,
     promptRebased: result?.promptRebased,
     promptRebaseReason: result?.promptRebaseReason,
@@ -669,7 +677,11 @@ export class GamePipeline {
       if (shown) shown.storyTurnStatus = 'accepted';
     }
     this.game.setPendingOptions(draft.options);
-    if (outcome === 'already-accepted') return;
+    if (outcome === 'already-accepted') {
+      if (this.generationMode === 'direct_cached') invalidateDirectContext(this.saveId);
+      return;
+    }
+    await this.orch?.acceptDirectCache(this.currentTurnMessages);
     const auxiliary = async (label: string, task: () => Promise<unknown>) => {
       try {
         await task();
@@ -859,7 +871,7 @@ export class GamePipeline {
         const sourceIndex = this.game.messages.findIndex((m) => m.id === existingSourceMessageId);
         if (sourceIndex < 0) return false;
         const user = this.game.messages[sourceIndex];
-        if (this.generationMode === 'direct' && user.storyTurnStatus === 'accepted') {
+        if (isDirectMode(this.generationMode) && user.storyTurnStatus === 'accepted') {
           this.notify('这楼已经接纳，请先回退到生成前再重新生成。', 'warning');
           return false;
         }
@@ -925,7 +937,7 @@ export class GamePipeline {
       );
       const { getCharacters, getDatabase } = await import('@engine/persistence/database');
       context.characters = await getCharacters(this.saveId);
-      if (this.generationMode === 'direct')
+      if (isDirectMode(this.generationMode))
         context.characters = projectDirectCombatCharacters(
           context.characters,
           readDirectCombat(this.game.saveProfile),
@@ -946,7 +958,7 @@ export class GamePipeline {
       const agentConfigs = this.buildAgentConfigs(
         agentDefaults,
         onStoryChunk,
-        this.generationMode === 'direct',
+        isDirectMode(this.generationMode),
       );
 
       // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
@@ -1010,8 +1022,13 @@ export class GamePipeline {
       const events = this.buildEventHandlers(activityRunId);
       this.orch = new AgentOrchestrator(options, events);
 
-      if (this.generationMode === 'direct') {
-        const draft = await this.orch.runDirect(readDirectCombat(this.game.saveProfile));
+      if (isDirectMode(this.generationMode)) {
+        const draft = await this.orch.runDirect(
+          readDirectCombat(this.game.saveProfile),
+          this.generationMode === 'direct_cached'
+            ? (this.settings.settings.directCacheProvider ?? 'prefix')
+            : undefined,
+        );
         await this.acceptDirectTurn(draft, context, controller);
         activityOutcome = 'completed';
         return true;
@@ -1156,12 +1173,14 @@ export class GamePipeline {
         return false;
       }
       console.error('[GamePipeline] 管线运行失败:', err);
-      if (this.generationMode === 'direct')
+      if (isDirectMode(this.generationMode))
         this.notify(`直出未完成：${err instanceof Error ? err.message : String(err)}`, 'error');
       activityOutcome = 'failed';
       activityMessage = '世界的回应在此中断，已写入的状态不会自动撤销；可回退后再次尝试。';
       return false;
     } finally {
+      if (this.generationMode === 'direct_cached' && !this.directCommitted)
+        invalidateDirectContext(this.saveId);
       if (
         !this.directCommitted &&
         activityOutcome !== 'completed' &&
@@ -1440,6 +1459,7 @@ export class GamePipeline {
 
     // 需要参与管线的所有 Agent（不包括 plot_pre_check/plot_post_check — 剧情模式 off 时会自动禁用）
     if (direct) initializeDirectSettings(s, agentDefaults);
+    if (this.generationMode === 'direct_cached') initializeCachedDirectSettings(s, agentDefaults);
     const agentIds = direct
       ? ['memory_recall', 'direct_main', 'memory_summary']
       : [
@@ -1483,7 +1503,11 @@ export class GamePipeline {
     //   D44 修正 1 保留：传默认层（agentDefaults）——model 也是 12 键之一，删 boot 播种后
     //   用户没覆写时唯一来源就是默认层。agentDefaults 在本方法参数里、闭包可直接用。
     const getEndpoint = (agentId: string): ApiEndpoint | undefined => {
-      const poolId = getAgentSettings(s, agentId, agentDefaults).model;
+      const profileId =
+        agentId === 'direct_main' && this.generationMode === 'direct_cached'
+          ? 'direct_cached'
+          : agentId;
+      const poolId = getAgentSettings(s, profileId, agentDefaults).model;
       const resolution = resolveAgentEndpoint({ boundPoolId: poolId, apiPool });
       if (resolution.status === 'resolved') return resolution.endpoint;
       if (SIDE_CHAIN_AGENT_IDS.has(agentId) || agentId === 'lore_select') {
@@ -1547,13 +1571,19 @@ export class GamePipeline {
       // 🔴 D44 修正 1/3：经 getAgentSettings 统一 resolve（覆写 ?? 默认），不再分别
       //    `defaults.X || agentCfg.X`（那是默认优先、覆写被无视）与 `agentCfg.X`（裸取覆写）。
       //    agentCfg 现在已合默认层，下面 systemPrompt/template/数值全部读它。
-      const agentCfg = getAgentSettings(s, agentId, agentDefaults);
+      const settingsId =
+        agentId === 'direct_main' && this.generationMode === 'direct_cached'
+          ? 'direct_cached'
+          : agentId;
+      const agentCfg = getAgentSettings(s, settingsId, agentDefaults);
       // 真机修(2026-07-17): story 预设尊重设置页选中项（s.activePresetId）——
       // 此前硬绑 agent-config.json 出厂 presetId，用户导入/另存的预设（新 id）在设置页编辑得再对，
       // 运行时也永远用旧的那份（"我保存了第二人称但 agent 没拿到"根因）。
       const presetId: string | undefined =
         agentId === 'direct_main'
-          ? s.directPresetId || DIRECT_PRESET_ID
+          ? this.generationMode === 'direct_cached'
+            ? s.directCachedPresetId || DIRECT_CACHED_PRESET_ID
+            : s.directPresetId || DIRECT_PRESET_ID
           : agentId === 'story' && s.activePresetId
             ? s.activePresetId
             : (defaults.presetId as string | undefined) || undefined;
@@ -1573,7 +1603,7 @@ export class GamePipeline {
       //    endpoint 可能 undefined（空池），此时退化成原有解析。
       const llmParams = resolveAgentLlmParams(
         s,
-        agentId,
+        settingsId,
         agentDefaults,
         endpoint?.defaultParameters,
       );
@@ -1694,8 +1724,9 @@ export class GamePipeline {
       history,
       loreHistoryMessages: this.settings.settings.loreHistoryMessages,
       worldBooks: [],
-      characters:
-        this.generationMode === 'direct' ? this.game.displayCharacters : this.game.characters,
+      characters: isDirectMode(this.generationMode)
+        ? this.game.displayCharacters
+        : this.game.characters,
       variables: this.game.saveProfile?.variables ?? {}, // M5 §12: 变量唯一真源 SaveProfile.variables（M6 收官接线）
       fixedLore: this.game.activeSave?.metadata.fixedLore,
       plotEvents: this.game.activePlotEvents,
@@ -1736,8 +1767,9 @@ export class GamePipeline {
       // 工坊 P2 (ADR-30 D4/D9): stats 只读投影每回合构建一次，同回合多 Agent 装配复用
       //（各 pass 在 buildAgentMessages 内再克隆一份，杜绝跨 pass 写泄漏）
       statData: buildStatData({
-        characters:
-          this.generationMode === 'direct' ? this.game.displayCharacters : this.game.characters,
+        characters: isDirectMode(this.generationMode)
+          ? this.game.displayCharacters
+          : this.game.characters,
         gameTime: this.game.saveProfile?.gameTime,
         fp: this.game.saveProfile?.fp,
         turn: history.length,
@@ -1891,6 +1923,8 @@ export class GamePipeline {
 
     if (!presets.some((preset) => preset.id === DIRECT_PRESET_ID))
       presets.push(createDirectPreset());
+    if (!presets.some((preset) => preset.id === DIRECT_CACHED_PRESET_ID))
+      presets.push(createCachedDirectPreset());
     return { presets, agentDefaults };
   }
 
@@ -2900,7 +2934,7 @@ export class GamePipeline {
         );
       }
     } catch (err) {
-      if (this.generationMode === 'direct') throw err;
+      if (isDirectMode(this.generationMode)) throw err;
       console.warn('[GamePipeline] plot_post_check 落库失败（不阻塞本轮）:', err);
     }
   }
@@ -2918,7 +2952,11 @@ export class GamePipeline {
   ): Promise<NonNullable<OrchestratorOptions['storyContext']> | null> {
     const configured = getAgentSettings(
       this.settings.settings,
-      this.generationMode === 'direct' ? 'direct_main' : 'story',
+      this.generationMode === 'direct_cached'
+        ? 'direct_cached'
+        : this.generationMode === 'direct'
+          ? 'direct_main'
+          : 'story',
       agentDefaults,
     ).historyLayers;
     const windowTurns = normalizeStoryWindowTurns(configured ?? defaultHistoryLayers('story'));

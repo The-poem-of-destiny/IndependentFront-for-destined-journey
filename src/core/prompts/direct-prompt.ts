@@ -9,6 +9,7 @@ import {
 import { TIER_CONFIGS } from '../character/tier-constants';
 
 export const DIRECT_PRESET_ID = 'direct-generation-v1';
+export const DIRECT_CACHED_PRESET_ID = 'direct-generation-cache-v1';
 export const DIRECT_STYLE =
   '你是文字角色扮演的主叙事者。在同一次回复中完成场景推进、人物塑造、规则裁定和状态更新。尊重玩家的行动意图，不替玩家决定下一步、不替玩家说话。正文以自然语言呈现感官、情绪和行动后果，规则计算放在简洁的行动或物品面板。战斗停在下一处需要玩家选择的位置。延续原有角色的声音、关系和世界事实。';
 export const DIRECT_TEMPLATE =
@@ -69,5 +70,14 @@ export function createDirectPreset(): AgentPreset & ChatPreset {
     },
     createdAt: 0,
     updatedAt: 0,
+  };
+}
+
+export function createCachedDirectPreset(): AgentPreset & ChatPreset {
+  return {
+    ...createDirectPreset(),
+    id: DIRECT_CACHED_PRESET_ID,
+    name: '直出 · 缓存优化',
+    description: '单次主生成，独立记忆，旧原文在缓存会话重建时折叠。',
   };
 }

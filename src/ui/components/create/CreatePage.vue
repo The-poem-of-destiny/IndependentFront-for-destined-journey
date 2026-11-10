@@ -12,7 +12,7 @@ import { useContentStore } from '../../stores/content-store';
 import { checkJourneyReadiness } from '../../lib/journey-readiness';
 import PresetModal from './PresetModal.vue';
 import FormSelect from '../shared/form/FormSelect.vue';
-import { initializeDirectSettings } from '../../lib/direct-settings';
+import { initializeCachedDirectSettings } from '../../lib/direct-settings';
 
 const store = useCreateStore();
 const ui = useUIStore();
@@ -51,7 +51,7 @@ async function checkReadiness() {
       settings.loadAgentProjectDefaults(),
       store.loadWorldBookEntries(),
     ]);
-    initializeDirectSettings(settings.settings, settings.projectAgentDefaults.agents);
+    initializeCachedDirectSettings(settings.settings, settings.projectAgentDefaults.agents);
   } catch {
     checkError.value = '配置未能加载，请重新检查；若仍失败，请打开 API 设置。';
   } finally {
@@ -142,11 +142,12 @@ onMounted(() => {
           :options="[
             { label: 'Agent 模式', value: 'agent' },
             { label: '直出（无缓存优化）', value: 'direct' },
+            { label: '直出（缓存优化）', value: 'direct_cached' },
           ]"
         />
         <p class="form-hint">
           Agent 模式由多个 AI 分工处理。直出由主 AI
-          在一次回复中完成叙事、战斗、制作与状态变化，接近角色卡体验。两种模式都保留独立记忆调用。
+          在一次回复中完成叙事、战斗、制作与状态变化，接近角色卡体验。所有模式都保留独立记忆调用。缓存优化版暂留旧原文，重建时按记忆窗口折叠；实际命中与费用取决于渠道。
         </p>
         <ContentStatusBanner />
         <p v-if="checking" role="status">正在检查本机配置…</p>

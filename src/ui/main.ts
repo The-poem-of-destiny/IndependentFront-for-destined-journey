@@ -1,3 +1,5 @@
+import { installDirectCacheStore } from '@engine/prompts/direct-context-session';
+import { createDirectCacheStore } from '@engine/prompts/direct-context-store';
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import App from './App.vue';
@@ -100,6 +102,7 @@ setEngineSettingsProvider(() => {
 // 不进 FullBackup / 单存档导出；回退/切档/删档由 `invalidatePromptSession` 与
 // `deleteSaveSlot` 清理（引擎侧 `prompt-session-store.ts` / database v26）。
 installPromptSessionStore(createDexiePromptSessionStore());
+installDirectCacheStore(createDirectCacheStore());
 
 // 首次手势解锁监听 —— 必须在**应用启动时**就装，不能等到音频用起来才装。
 //

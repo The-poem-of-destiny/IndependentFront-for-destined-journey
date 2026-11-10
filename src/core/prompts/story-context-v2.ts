@@ -95,6 +95,7 @@ const ZONE5_BLOCKS: ReadonlyArray<{ tag: string | null; placeholder: string }> =
 type StoryContextV2Message = { role: 'system' | 'user' | 'assistant'; content: string };
 
 export interface StoryContextV2Input {
+  cacheLayout?: boolean;
   agentId?: 'story' | 'direct_main';
   loreSelectionMode?: 'model' | 'local';
   /** 本轮上下文：`history` 为本轮之前的正式消息，`userInput` 为本轮玩家输入 */
@@ -116,6 +117,7 @@ export interface StoryContextV2Input {
 }
 
 export interface StoryContextV2Result {
+  cacheFrame?: import('./direct-context-session').DirectContextFrame;
   messages: StoryContextV2Message[];
   diagnostics: StoryContextV2Diagnostics;
 }
@@ -373,6 +375,22 @@ export async function buildStoryContextV2Messages(
 
   // ④ 遍历分段：第 4 区原文之前进前导 system，之后进末尾 user
   const leadingSystem: string[] = fallbackPrefix ? [fallbackPrefix] : [];
+  const cachePrefix: string[] = [...leadingSystem];
+  const cacheHistory: string[] = [];
+  const cacheSections: Record<string, unknown> = {
+    regionLore: zoneText[3],
+    turnLore: zoneLore(5),
+    characterContext: ctx.characterDefinitions !== undefined ? buildCharacterContext(ctx) : '',
+    ...Object.fromEntries(
+      zone5Blocks
+        .filter(
+          (block) =>
+            !['AGENT.MEMORY_RECALL', 'CHARACTER_STATE', 'GAME_TIME'].includes(block.placeholder),
+        )
+        .map((block) => [block.placeholder, block.text]),
+    ),
+  };
+  const authoredTurn: string[] = [];
   const tailParts: string[] = [];
   let passedZone4 = false;
   for (const segment of segmentPresetByStoryZones(entries)) {
@@ -384,10 +402,33 @@ export async function buildStoryContextV2Messages(
           .join('\n'),
       );
       if (text) (passedZone4 ? tailParts : leadingSystem).push(text);
+      if (input.cacheLayout) {
+        const fixedEntries = segment.entries.filter((e) => e.directCachePlacement !== 'turn');
+        const fixed =
+          fixedEntries.length === segment.entries.length
+            ? text
+            : renderEntryText(fixedEntries.map((e) => processedByEntry.get(e) ?? '').join('\n'));
+        if (fixed) (passedZone4 ? authoredTurn : cachePrefix).push(fixed);
+        for (const entry of segment.entries.filter((e) => e.directCachePlacement === 'turn')) {
+          const current = resolveTemplateWithGlobals(
+            processedByEntry.get(entry) ?? '',
+            agentId,
+            tplCtx,
+            config,
+            worldBooks,
+            configs,
+            {},
+          ).trim();
+          if (current) authoredTurn.push(current);
+        }
+      }
       continue;
     }
     if (segment.zone === 4) {
-      if (zoneText[4]) leadingSystem.push(zoneText[4]);
+      if (zoneText[4]) {
+        leadingSystem.push(zoneText[4]);
+        cacheHistory.push(zoneText[4]);
+      }
       passedZone4 = true;
       continue;
     }
@@ -396,6 +437,8 @@ export async function buildStoryContextV2Messages(
         ? wrapBlock('本轮参考资料', zoneText[5])
         : zoneText[segment.zone];
     if (text) (passedZone4 ? tailParts : leadingSystem).push(text);
+    if (text && !passedZone4 && segment.zone !== 3 && segment.zone !== 5)
+      (segment.zone === 2 ? cacheHistory : cachePrefix).push(text);
   }
 
   // ⑤ 第 4 区原文：严格 user / assistant 交替（回合内多条正文合并为一条）
@@ -408,6 +451,7 @@ export async function buildStoryContextV2Messages(
   }
 
   if (ctx.characterDefinitions !== undefined) leadingSystem.push(CHARACTER_UPDATE_PROTOCOL);
+  if (ctx.characterDefinitions !== undefined) cachePrefix.push(CHARACTER_UPDATE_PROTOCOL);
   const tail = config.tailPrompt?.trim();
   const finalUser = [
     ...tailParts,
@@ -463,6 +507,21 @@ export async function buildStoryContextV2Messages(
 
   return {
     messages,
+    ...(input.cacheLayout
+      ? {
+          cacheFrame: {
+            prefix: cachePrefix.map((content) => ({ role: 'system' as const, content })),
+            history: [
+              ...cacheHistory.map((content) => ({ role: 'system' as const, content })),
+              ...conversation,
+            ],
+            sections: {
+              ...cacheSections,
+              ...(authoredTurn.length ? { authoredTurn: authoredTurn.join('\n\n') } : {}),
+            },
+          },
+        }
+      : {}),
     diagnostics: {
       ...(input.outputReservedTokens !== undefined
         ? { outputReservedTokens: input.outputReservedTokens }

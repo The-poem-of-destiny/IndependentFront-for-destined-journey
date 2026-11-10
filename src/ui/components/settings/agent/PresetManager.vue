@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isDirectSettingsProfile } from '../../../lib/direct-settings';
+
 /**
  * 预设管理（正文 Agent 专用，Q-25 第 9 步）。
  *
@@ -43,6 +45,8 @@ import { preprocessPresetForPreview, findTailAssistantEntry } from '@engine/prom
 import {
   createDirectPreset,
   DIRECT_PRESET_ID,
+  DIRECT_CACHED_PRESET_ID,
+  createCachedDirectPreset,
   DIRECT_PROTOCOL,
   DIRECT_TEMPLATE,
 } from '@engine/prompts/direct-prompt';
@@ -55,9 +59,14 @@ const s = cfg.settings;
 const ui = useUIStore();
 const selectedPresetId = computed({
   get: () =>
-    props.agentId === 'direct_main' ? (s.directPresetId ?? DIRECT_PRESET_ID) : s.activePresetId,
+    isDirectSettingsProfile(props.agentId)
+      ? props.agentId === 'direct_cached'
+        ? (s.directCachedPresetId ?? DIRECT_CACHED_PRESET_ID)
+        : (s.directPresetId ?? DIRECT_PRESET_ID)
+      : s.activePresetId,
   set: (id: string) => {
-    if (props.agentId === 'direct_main') s.directPresetId = id;
+    if (props.agentId === 'direct_cached') s.directCachedPresetId = id;
+    else if (props.agentId === 'direct_main') s.directPresetId = id;
     else s.activePresetId = id;
   },
 });
@@ -75,7 +84,7 @@ const resolvedPresetTemplate = computed(() => {
 
 // Get the context template for Story agent (from injected entries or default block)
 function getStoryContextTemplate(): string {
-  if (props.agentId === 'direct_main') return DIRECT_PROTOCOL + '\n' + DIRECT_TEMPLATE;
+  if (isDirectSettingsProfile(props.agentId)) return DIRECT_PROTOCOL + '\n' + DIRECT_TEMPLATE;
   const preset = activePreset.value;
   if (!preset?.settings?.prompts) return '';
   const dynamicEntry = preset.settings.prompts.find(
@@ -304,6 +313,11 @@ async function onPrefillFieldChange(e: Event) {
 async function loadPresets() {
   try {
     await loadPresetsFromDexie();
+    if (
+      props.agentId === 'direct_cached' &&
+      !presets.value.some((p) => p.id === DIRECT_CACHED_PRESET_ID)
+    )
+      await upsertPreset(createCachedDirectPreset());
     if (!presets.value.some((p) => p.id === DIRECT_PRESET_ID))
       await upsertPreset(createDirectPreset());
     // 确保自动选中：如果还没选中且有可用预设，优先项目默认
@@ -476,7 +490,11 @@ void reactive;
 
 <template>
   <!-- 预设系统（正文 Agent 专用）— 仿酒馆 ST 左侧面板布局 -->
-  <AppCard v-if="agentId === 'story' || agentId === 'direct_main'" padding="md" class="detail-card">
+  <AppCard
+    v-if="agentId === 'story' || isDirectSettingsProfile(agentId)"
+    padding="md"
+    class="detail-card"
+  >
     <h4>预设管理（酒馆 ST 兼容）</h4>
     <p class="form-hint">
       仿 SillyTavern AI Response Configuration 面板布局。支持导入 SillyTavern 预设 JSON。
@@ -634,7 +652,7 @@ void reactive;
 
       <!-- 🆕 预填充（DeepSeek beta 前缀续写）：仅当**末尾启用条目是 assistant** 时出现。
            打开后那条条目不再并进 system，而是移到消息末尾作为 assistant 前缀（prefix 续写）。 -->
-      <div v-if="agentId !== 'direct_main' && tailAssistantEntry" class="prefill-block">
+      <div v-if="!isDirectSettingsProfile(agentId) && tailAssistantEntry" class="prefill-block">
         <div class="prefill-head">
           <div class="prefill-heading">
             <span class="prefill-title">预填充（前缀续写）</span>

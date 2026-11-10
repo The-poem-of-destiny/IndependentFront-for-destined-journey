@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isDirectMode } from '@engine/story/generation-mode';
+
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import InputBar from './InputBar.vue';
 import type { AgentActivityRun, ChatMessage, SystemEvent } from '@engine/types/types';
@@ -480,7 +482,7 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
         >
           <div class="bubble bubble-narrative-full">
             <BeautifiedNarrative
-              :action-panels="game.generationMode === 'direct'"
+              :action-panels="isDirectMode(game.generationMode)"
               class="narrative-body"
               :text="msg.content"
               :depth="messageDepth(msg.id)"
@@ -560,7 +562,7 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
       <div v-if="isGenerating && streamingText" class="bubble-row bubble-row-narrative">
         <div class="bubble bubble-narrative-full">
           <BeautifiedNarrative
-            :action-panels="game.generationMode === 'direct'"
+            :action-panels="isDirectMode(game.generationMode)"
             class="narrative-body streaming-content"
             :text="streamingText"
             streaming

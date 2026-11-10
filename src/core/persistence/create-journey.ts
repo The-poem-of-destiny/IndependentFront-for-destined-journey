@@ -1,3 +1,4 @@
+import { isDirectMode } from '../story/generation-mode';
 import {
   getDatabase,
   saveCharacter,
@@ -56,8 +57,9 @@ export async function createJourney(input: {
                 {
                   characterName: input.character.name,
                   userName: input.save.metadata.userName,
-                  agentId:
-                    input.save.metadata.generationMode === 'direct' ? 'direct_main' : 'story',
+                  agentId: isDirectMode(input.save.metadata.generationMode)
+                    ? 'direct_main'
+                    : 'story',
                 },
                 {
                   location: input.character.location,

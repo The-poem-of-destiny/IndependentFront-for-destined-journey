@@ -1,3 +1,4 @@
+import { isDirectMode } from '@engine/story/generation-mode';
 import { resolveGenerationMode } from '@engine/story/generation-mode';
 import { projectDirectCombatCharacters, readDirectCombat } from '@engine/combat/direct-combat';
 import { defineStore } from 'pinia';
@@ -157,7 +158,7 @@ export const useGameStore = defineStore('game', () => {
   const characters = ref<CharacterState[]>([]);
   const generationMode = computed(() => resolveGenerationMode(activeSave.value));
   const directCombat = computed(() =>
-    generationMode.value === 'direct' ? readDirectCombat(saveProfile.value) : null,
+    isDirectMode(generationMode.value) ? readDirectCombat(saveProfile.value) : null,
   );
   const displayCharacters = computed(() =>
     projectDirectCombatCharacters(characters.value, directCombat.value),

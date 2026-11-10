@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isDirectSettingsProfile } from '../../../lib/direct-settings';
+
 /**
  * 一个 Agent 的完整配置面（参数卡 + 提示词卡 + 动作栏）。
  *
@@ -44,8 +46,13 @@ import {
   resetAgentSettings,
   type AgentDefaultsLayer,
 } from '../../../stores/agent-settings';
-import { initializeDirectSettings } from '../../../lib/direct-settings';
-import { createDirectPreset, DIRECT_PRESET_ID } from '@engine/prompts/direct-prompt';
+import { initializeCachedDirectSettings } from '../../../lib/direct-settings';
+import {
+  createDirectPreset,
+  createCachedDirectPreset,
+  DIRECT_CACHED_PRESET_ID,
+  DIRECT_PRESET_ID,
+} from '@engine/prompts/direct-prompt';
 import { useGameStore } from '../../../stores/game-store';
 import { GENERATION_MODE_LABELS } from '@engine/story/generation-mode';
 import { getAgentTemplate } from '@engine/prompts/agent-templates';
@@ -111,8 +118,10 @@ const activePreset = computed(
     presetList.value.find(
       (p) =>
         p.id ===
-        (props.agentId === 'direct_main'
-          ? (s.directPresetId ?? DIRECT_PRESET_ID)
+        (isDirectSettingsProfile(props.agentId)
+          ? props.agentId === 'direct_cached'
+            ? (s.directCachedPresetId ?? DIRECT_CACHED_PRESET_ID)
+            : (s.directPresetId ?? DIRECT_PRESET_ID)
           : s.activePresetId),
     ) ?? null,
 );
@@ -156,8 +165,8 @@ watch(() => props.agentId, loadDrafts, { immediate: true });
 watch(
   () => [props.agentId, defaultsLayer.value, s.apiPool],
   () => {
-    if (props.agentId === 'direct_main' && Object.keys(defaultsLayer.value).length)
-      initializeDirectSettings(s, defaultsLayer.value);
+    if (isDirectSettingsProfile(props.agentId) && Object.keys(defaultsLayer.value).length)
+      initializeCachedDirectSettings(s, defaultsLayer.value);
   },
   { immediate: true, deep: true },
 );
@@ -167,7 +176,7 @@ function saveAgentSettings() {
   // 🔴 D44 修正 4：diff 写入 —— 草稿与解析默认相等时**删键**（不是写进覆写层），
   //    让默认层接管。这样「保存设置」不会把展示中的默认值固化成覆写，pack 后续
   //    版本仍能透过覆写层够到这个 agent。
-  if (props.agentId !== 'story' && props.agentId !== 'direct_main') {
+  if (props.agentId !== 'story' && !isDirectSettingsProfile(props.agentId)) {
     const resolved = getAgentSettings(s, props.agentId, defaultsLayer.value);
     const promptPatch: { systemPrompt: string | undefined } = {
       systemPrompt:
@@ -197,7 +206,7 @@ async function saveAsDefault() {
   // 🔴 非 story 分支的这次 patch **不能省**：「保存为项目默认」除了写
   //    agent-config.json，也把草稿落进本地设置。只搬装配、漏掉这行，
   //    刷新之后用户的编辑就没了。装配那半是纯的，见 agent-defaults.ts。
-  if (agentId !== 'story' && agentId !== 'direct_main') {
+  if (agentId !== 'story' && !isDirectSettingsProfile(agentId)) {
     patchAgentSettings(s, agentId, {
       systemPrompt: agentPromptDraft.value,
       template: agentTemplateDraft.value,
@@ -209,7 +218,12 @@ async function saveAsDefault() {
     settings: getAgentSettings(s, agentId, defaultsLayer.value),
     promptDraft: agentPromptDraft.value,
     templateDraft: agentTemplateDraft.value,
-    activePresetId: (props.agentId === 'direct_main' ? s.directPresetId : s.activePresetId) || '',
+    activePresetId:
+      (props.agentId === 'direct_cached'
+        ? s.directCachedPresetId
+        : props.agentId === 'direct_main'
+          ? s.directPresetId
+          : s.activePresetId) || '',
     // ChatPreset 与 PresetItem 结构同形（id/name/description?/settings/createdAt/updatedAt）；
     // buildAgentDefaultEntry 内部用 JSON 深拷贝，此处对齐前端历史类型签名。
     activePreset: activePreset.value as unknown as PresetItem | null,
@@ -236,9 +250,16 @@ async function saveAsDefault() {
 
 async function restoreAgentDefaults() {
   const id = props.agentId;
-  if (id === 'direct_main') {
+  if (isDirectSettingsProfile(id)) {
     applyProjectDefaultToAgent(s, id);
-    s.directPresetId = DIRECT_PRESET_ID;
+    if (id === 'direct_cached') {
+      s.directCachedInitialized = false;
+      initializeCachedDirectSettings(s, defaultsLayer.value);
+    }
+    if (id === 'direct_cached') s.directCachedPresetId = DIRECT_CACHED_PRESET_ID;
+    else s.directPresetId = DIRECT_PRESET_ID;
+    if (id === 'direct_cached' && !presetList.value.some((p) => p.id === DIRECT_CACHED_PRESET_ID))
+      await upsertPreset(createCachedDirectPreset());
     if (!presetList.value.some((p) => p.id === DIRECT_PRESET_ID))
       await upsertPreset(createDirectPreset());
     s.agentDirty[id] = false;
@@ -272,6 +293,7 @@ async function restoreAgentDefaults() {
       // 非 story：一键清覆写层（解析值回默认层，保留 model）。
       // 与「覆写差异面板」（AgentUpdateCenter）用同一个 helper —— 两处行为天然一致。
       applyProjectDefaultToAgent(s, id);
+
       agentPromptDraft.value = pd.systemPrompt || '';
       agentTemplateDraft.value = pd.template || '';
     }
@@ -302,7 +324,10 @@ async function restoreAgentDefaults() {
 
   <!-- story 走预设面板，其余 Agent 走 systemPrompt + 上下文模板（原 v-if/v-else 一对）；
        hidePrompt 时两者都不出（提示词的真源在别处，见 props 上的注释） -->
-  <PresetManager v-if="agentId === 'story' || agentId === 'direct_main'" :agent-id="agentId" />
+  <PresetManager
+    v-if="agentId === 'story' || isDirectSettingsProfile(agentId)"
+    :agent-id="agentId"
+  />
   <AgentPromptCard
     v-else-if="!hidePrompt"
     v-model:prompt="agentPromptDraft"

@@ -6,7 +6,7 @@ import {
   type AgentSettingsEntry,
 } from '../stores/agent-settings';
 import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
-import { DIRECT_PRESET_ID } from '@engine/prompts/direct-prompt';
+import { DIRECT_PRESET_ID, DIRECT_CACHED_PRESET_ID } from '@engine/prompts/direct-prompt';
 import type { UiSettings } from '../stores/settings-types';
 
 /** One-time snapshot of the story connection and effective parameters, never its prompt. */
@@ -28,4 +28,26 @@ export function initializeDirectSettings(settings: UiSettings, defaults: AgentDe
   });
   settings.directPresetId ||= DIRECT_PRESET_ID;
   settings.directInitialized = true;
+}
+
+/** Settings profile only: execution and lore identity remain direct_main. */
+export function initializeCachedDirectSettings(
+  settings: UiSettings,
+  defaults: AgentDefaultsLayer,
+): void {
+  initializeDirectSettings(settings, defaults);
+  if (settings.directCachedInitialized || !settings.directInitialized) return;
+  const current = getAgentSettings(settings, 'direct_main', defaults);
+  patchAgentSettings(settings, 'direct_cached', {
+    ...current,
+    ...settings.agents.direct_cached,
+    maxRetries: 0,
+  });
+  settings.directCachedPresetId ||= DIRECT_CACHED_PRESET_ID;
+  settings.directCacheProvider ??= 'prefix';
+  settings.directCachedInitialized = true;
+}
+
+export function isDirectSettingsProfile(id: string): boolean {
+  return id === 'direct_main' || id === 'direct_cached';
 }

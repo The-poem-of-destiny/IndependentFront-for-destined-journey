@@ -1577,7 +1577,7 @@ export interface SaveSlot {
     gameStartTime: string;
     totalTurns: number;
     /** 建档时明确选择，存档生命周期内固定；旧档缺席按 Agent 运行。 */
-    generationMode?: 'agent' | 'direct';
+    generationMode?: 'agent' | 'direct' | 'direct_cached';
     /** 存档级启用的全局 UID（如 fated:system_core/dalian）。 */
     enabledWorldBookEntries?: string[];
     /** 建档时冻结所选原生角色；旧存档缺席时从仍启用的旧资料兼容读取。 */
@@ -2189,6 +2189,7 @@ export interface AgentContext {
 
 /** 单个 Agent 的运行结果 */
 export interface AgentResult {
+  providerUsage?: import('./types-api').NormalizedLlmUsage;
   agentId: string;
   output: any; // 解析后的输出
   rawResponse: string;
@@ -2274,6 +2275,7 @@ export interface DebugAgentEntry {
   reasoning?: string;
   toolCalls?: AgentResult['toolCalls'];
   providerRounds?: AgentProviderRound[];
+  providerUsage?: import('./types-api').NormalizedLlmUsage;
   promptSessionRevision?: number;
   promptRebased?: boolean;
   promptRebaseReason?: string;

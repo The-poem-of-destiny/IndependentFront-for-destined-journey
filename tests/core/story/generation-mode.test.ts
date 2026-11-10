@@ -7,10 +7,11 @@ import type { SaveSlot } from '../../../src/core/types/types';
 
 describe('save generation mode', () => {
   it('keeps untagged saves on Agent and resolves tagged saves independently', () => {
-    const save = (mode?: 'agent' | 'direct') =>
+    const save = (mode?: 'agent' | 'direct' | 'direct_cached') =>
       ({ metadata: { generationMode: mode } }) as SaveSlot;
     expect(resolveGenerationMode(save())).toBe('agent');
     expect(resolveGenerationMode(save('direct'))).toBe('direct');
+    expect(resolveGenerationMode(save('direct_cached'))).toBe('direct_cached');
     expect(resolveGenerationMode(save('agent'))).toBe('agent');
   });
 
@@ -19,5 +20,6 @@ describe('save generation mode', () => {
       expect(() => requireGenerationMode(value)).toThrow();
     expect(() => requireGenerationMode('agent')).not.toThrow();
     expect(() => requireGenerationMode('direct')).not.toThrow();
+    expect(() => requireGenerationMode('direct_cached')).not.toThrow();
   });
 });

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isDirectMode } from '@engine/story/generation-mode';
+
 /**
  * CharacterViewerModal — 非玩家角色的**通栏档案**（左画像 + 右信息面，含编年史）。
  *
@@ -68,7 +70,7 @@ const open = computed(() => props.name !== null);
  */
 const char = computed<CharacterState | null>(
   () =>
-    ((game.generationMode === 'direct' ? game.displayCharacters : game.characters) ?? []).find(
+    ((isDirectMode(game.generationMode) ? game.displayCharacters : game.characters) ?? []).find(
       (c) => c.name === props.name,
     ) ?? null,
 );

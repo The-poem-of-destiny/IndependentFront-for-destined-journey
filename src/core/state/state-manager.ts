@@ -1,3 +1,4 @@
+import { isDirectMode } from '../story/generation-mode';
 /**
  * StateManager — 唯一状态写入入口 (ADR-21)
  *
@@ -546,7 +547,7 @@ export class StateManager {
         async () => {
           assertCurrentTurn(input.isCurrent);
           const save = await getSave(this.saveId);
-          if (save?.metadata.generationMode !== 'direct')
+          if (!isDirectMode(save?.metadata.generationMode))
             throw new Error('直出提交只能用于直出存档');
           if (
             !source.length ||

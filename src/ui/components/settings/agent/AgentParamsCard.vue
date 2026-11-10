@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isDirectSettingsProfile } from '../../../lib/direct-settings';
+
 /**
  * Agent 的三张设置卡：API 池选择 / LLM 参数 / 世界书读取范围（只读）（Q-25 第 9 步）。
  *
@@ -32,6 +34,12 @@ const props = defineProps<{ agentId: string }>();
 const cfg = useSettingsStore();
 const s = cfg.settings;
 const wb = useWorldBookStore();
+const cacheProvider = computed({
+  get: () => s.directCacheProvider ?? 'prefix',
+  set: (value) => {
+    s.directCacheProvider = value;
+  },
+});
 
 /** 配过 API 池没有 —— 一行派生，与子导航那处各算各的（不穿成 prop） */
 const llmEndpoints = computed(() =>
@@ -65,7 +73,7 @@ const tailFieldLabel = computed(() =>
 const tailFieldHint = computed(() =>
   isProseRewrite.value
     ? '作为 assistant 前缀的 reasoning_content：模型从这里接着往下想。仅「正文润色」侧链使用；留空 = 用引擎默认种子。'
-    : props.agentId === 'direct_main'
+    : isDirectSettingsProfile(props.agentId)
       ? '每次直出请求末尾追加的风格指令；不覆盖必需输出协议。'
       : 'Delta 会话：每轮最新的 user 消息末尾都会追加这段指令。留空 = 不注入（缺省）。',
 );
@@ -94,7 +102,7 @@ function setAgentField(patch: Partial<AgentSettingsEntry>) {
 
 const isStoryV2 = computed(
   () =>
-    (props.agentId === 'story' || props.agentId === 'direct_main') &&
+    (props.agentId === 'story' || isDirectSettingsProfile(props.agentId)) &&
     s.storyContextV2Enabled === true,
 );
 const historyLayersError = ref('');
@@ -133,8 +141,15 @@ const readableBooks = computed(() =>
   wb.books
     .map((book) => ({
       book,
-      count: book.entries.filter((e) => e.enabled && isLoreEntryVisibleTo(props.agentId, book, e))
-        .length,
+      count: book.entries.filter(
+        (e) =>
+          e.enabled &&
+          isLoreEntryVisibleTo(
+            props.agentId === 'direct_cached' ? 'direct_main' : props.agentId,
+            book,
+            e,
+          ),
+      ).length,
     }))
     .filter((row) => row.count > 0),
 );
@@ -273,7 +288,19 @@ const readableBooks = computed(() =>
           "
         />
       </label>
-      <p v-if="agentId === 'direct_main'" class="form-hint">
+      <label v-if="agentId === 'direct_cached'" class="form-label">
+        渠道缓存支持
+        <select v-model="cacheProvider" class="form-select">
+          <option value="prefix">通用稳定前缀（不附加渠道参数）</option>
+          <option value="anthropic">Claude Messages 原生缓存</option>
+          <option value="openai">OpenAI 显式缓存断点（需渠道支持）</option>
+        </select>
+        <span class="form-hint"
+          >只选择渠道明确支持的方式。旧原文最多暂留一个 8
+          楼会话，重建时折叠；缓存命中和费用以渠道返回为准。此处不会切换存档模式。</span
+        >
+      </label>
+      <p v-if="isDirectSettingsProfile(agentId)" class="form-hint">
         直出主生成不自动重试；失败后可手动重试一次新的生成。
       </p>
       <label v-else class="form-label"

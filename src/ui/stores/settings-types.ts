@@ -138,6 +138,9 @@ export type UiSettings = {
   activePresetId: string;
   directPresetId?: string;
   directInitialized?: boolean;
+  directCachedPresetId?: string;
+  directCachedInitialized?: boolean;
+  directCacheProvider?: import('@engine/types/types-api').DirectCachePolicy;
 
   // ═══ 内容-引擎分离波 1 / D42：占位内容版本戳 ═══
   // 占位集随引擎打包；戳前进时 content-store 对「hash 仍等于占位基线」的书重播种（D42）。
