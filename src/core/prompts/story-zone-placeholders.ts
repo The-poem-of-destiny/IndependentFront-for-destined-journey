@@ -41,6 +41,8 @@ export interface PresetEntryLike {
   role?: unknown;
   enabled?: unknown;
   injection_order?: unknown;
+  /** Author opt-in: cached direct mode renders this entry as current-turn data. */
+  directCachePlacement?: 'turn';
 }
 
 /** 补齐/排序时的重编号步长，与 UI 侧 `preset-entries.ts` 的 10/20/30… 一致。 */

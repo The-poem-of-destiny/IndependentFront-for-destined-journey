@@ -761,8 +761,14 @@ describe.each(['direct', 'direct_cached'] as const)(
       expect(game.player!.hp).toBe(60);
       expect((await getDatabase().characters.get('player'))!.hp).toBe(80);
       expect(await pipeline.run('结束战斗')).toBe(true);
-      expect(contexts[1].characters[0].inventory).toMatchObject([{ name: '短剑' }]);
-      expect(contexts[2].characters[0].hp).toBe(60);
+      expect(
+        mode === 'direct_cached'
+          ? contexts[1]['character/旅人/inventory']
+          : contexts[1].characters[0].inventory,
+      ).toMatchObject([{ name: '短剑' }]);
+      expect(
+        mode === 'direct_cached' ? contexts[2].resources[0].hp : contexts[2].characters[0].hp,
+      ).toBe(60);
       expect(game.isInCombat).toBe(false);
       expect((await getDatabase().characters.get('player'))!.hp).toBe(40);
       expect(await getStoryTurnSummaries(saveId)).toHaveLength(3);

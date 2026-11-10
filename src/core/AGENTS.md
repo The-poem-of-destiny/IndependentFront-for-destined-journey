@@ -11,7 +11,7 @@
 ## Story v2 / 内容路由速览
 
 - 直出：`agents/direct-main.ts` 负责单次主请求，`agents/direct-output.ts` 校验原生写回，`combat/direct-combat.ts` 保存跨楼战斗。`AgentOrchestrator.runDirect` 复用记忆而不进入 Agent DAG；`StateManager.commitDirectTurn` 原子接纳核心状态和消息。
-- 缓存直出：`prompts/direct-context-session.ts` 管理独立的已接纳 transcript，`direct-context-frame.ts` 组装旧记忆布局，`direct-context-store.ts` 复用可丢弃缓存表与权限门；`api/prompt-caching.ts` 只为显式调用者附加渠道参数。Dexie v32 无数据重写，阻止旧版误导入新模式。契约见 [缓存直出](../../docs/reference/direct-generation-cache.md)。
+- 缓存直出：`prompts/direct-context-session.ts` 管理独立的已接纳 transcript，`direct-context-frame.ts` 组装旧记忆布局与按角色拆分的绝对状态，`direct-context-store.ts` 复用可丢弃缓存表与权限门；`api/prompt-caching.ts` 只为显式调用者附加渠道参数。区域/本轮资料可替换，预设条目以 `directCachePlacement: "turn"` 显式选择动态位置。Dexie v32 无数据重写，阻止旧版误导入新模式。契约见 [缓存直出](../../docs/reference/direct-generation-cache.md)。
 
 - 原生角色：`types/types-character.ts` 定义内容、经历与主叙事更新；`character/character-definitions.ts` 只读兼容旧资料及素材；`character/character-updates.ts` 校验更新块；`character/character-chronicle.ts` 构造经历和重要上下文。`StateManager` 持有写锁与来源核验；Dexie v31、快照及两种备份携带经历。契约见 [角色系统](../../docs/reference/character-system.md)。
 

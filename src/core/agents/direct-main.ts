@@ -1,4 +1,7 @@
-import { buildLegacyDirectCacheFrame } from '../prompts/direct-context-frame';
+import {
+  buildDirectCharacterSections,
+  buildLegacyDirectCacheFrame,
+} from '../prompts/direct-context-frame';
 import {
   DIRECT_CACHE_PROTOCOL,
   prepareDirectContext,
@@ -75,7 +78,6 @@ export async function generateDirectTurn(
   const dice = input.dice ?? rollDirectDice();
   let messages: ChatRequest['messages'];
   let frame: DirectContextFrame | undefined;
-  let loreKeys: string[] = [];
   if (input.storyContext) {
     const assembled = await buildStoryContextV2Messages({
       ...input.storyContext,
@@ -90,15 +92,11 @@ export async function generateDirectTurn(
     input.storyContext.onAssembled?.(assembled.diagnostics);
     messages = assembled.messages;
     frame = assembled.cacheFrame;
-    loreKeys = Object.values(assembled.diagnostics.loreKeysByZone ?? {}).flat();
   } else {
     const selection = await selectStoryLore(input.worldBooks, context, undefined, {
       agentId: 'direct_main',
       mode: 'local',
     });
-    loreKeys = [...selection.zones[1], ...selection.zones[3], ...selection.zones[5]].map(
-      (r) => r.key,
-    );
     const selected = new Set(
       [...selection.zones[1], ...selection.zones[3], ...selection.zones[5]].map((r) => r.entry),
     );
@@ -116,7 +114,12 @@ export async function generateDirectTurn(
       {},
     );
     if (input.cache) {
-      frame = await buildLegacyDirectCacheFrame(input, books, history);
+      frame = await buildLegacyDirectCacheFrame(
+        input,
+        books,
+        history,
+        new Set(selection.zones[1].map((r) => r.entry)),
+      );
       messages = [...frame.prefix, ...frame.history];
     } else {
       const built = await buildAgentMessagesAsync('direct_main', context, configs, books, presets, {
@@ -184,7 +187,7 @@ export async function generateDirectTurn(
     }).outputBudget ?? 0;
   let ticket: DirectCacheTicket | undefined;
   if (input.cache && frame) {
-    const { characters, combat, ...rest } = state;
+    const { characters: _characters, combat, ...rest } = state;
     frame.prefix = [
       { role: 'system', content: DIRECT_PROTOCOL + '\n' + DIRECT_CACHE_PROTOCOL },
       ...frame.prefix,
@@ -193,16 +196,7 @@ export async function generateDirectTurn(
       ...frame.sections,
       ...rest,
       combat,
-      characters,
-      resources: characters.map(({ name, hp, mp, sp, maxHp, maxMp, maxSp }) => ({
-        name,
-        hp,
-        mp,
-        sp,
-        maxHp,
-        maxMp,
-        maxSp,
-      })),
+      ...buildDirectCharacterSections(relevant),
     };
     const endpointSignature = {
       id: endpoint.id,
@@ -233,7 +227,6 @@ export async function generateDirectTurn(
           presencePenalty: config.presencePenalty,
         },
         books: input.worldBooks,
-        loreKeys,
         contextMode: input.storyContext ? 'v2' : 'legacy',
         windowTurns: input.storyContext?.windowTurns,
         policy: input.cache.policy,

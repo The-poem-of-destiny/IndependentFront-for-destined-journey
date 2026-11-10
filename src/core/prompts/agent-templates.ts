@@ -872,18 +872,20 @@ export async function buildAgentMessagesAsync(
   worldBooks?: WorldBook[],
   presets?: AgentPreset[],
   localParams?: Record<string, string>,
-  onRendered?: (context: AgentContext) => void,
+  onRendered?: (context: AgentContext, entryTexts: ReadonlyMap<WorldBookEntry, string>) => void,
 ): Promise<Array<{ role: string; content: string }> | null> {
   if (!getAgentTemplate(agentId)) return null;
 
   const config = configs?.find((c) => c.agentId === agentId);
   const ejsPass = buildEjsPassContext(agentId, ctx, config, configs, worldBooks);
+  let entryTexts: ReadonlyMap<WorldBookEntry, string> = new Map();
 
   if (worldBooks) {
     const activeEntries = filterActiveEntries(
       getEntriesForAgent(agentId, worldBooks, loreRecentText(ctx), ctx.loreReadContext),
     );
     const rendered = await prerenderWorldBookEntries(activeEntries, ejsPass);
+    entryTexts = rendered.entryTexts;
     ejsPass.stDefinitions = buildLoreDefinitions(
       agentId,
       worldBooks,
@@ -906,7 +908,7 @@ export async function buildAgentMessagesAsync(
     }
   }
 
-  onRendered?.({ ...ctx, ejsPass });
+  onRendered?.({ ...ctx, ejsPass }, entryTexts);
   return buildAgentMessages(
     agentId,
     { ...ctx, ejsPass },

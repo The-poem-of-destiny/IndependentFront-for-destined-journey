@@ -377,6 +377,20 @@ export async function buildStoryContextV2Messages(
   const leadingSystem: string[] = fallbackPrefix ? [fallbackPrefix] : [];
   const cachePrefix: string[] = [...leadingSystem];
   const cacheHistory: string[] = [];
+  const cacheSections: Record<string, unknown> = {
+    regionLore: zoneText[3],
+    turnLore: zoneLore(5),
+    characterContext: ctx.characterDefinitions !== undefined ? buildCharacterContext(ctx) : '',
+    ...Object.fromEntries(
+      zone5Blocks
+        .filter(
+          (block) =>
+            !['AGENT.MEMORY_RECALL', 'CHARACTER_STATE', 'GAME_TIME'].includes(block.placeholder),
+        )
+        .map((block) => [block.placeholder, block.text]),
+    ),
+  };
+  const authoredTurn: string[] = [];
   const tailParts: string[] = [];
   let passedZone4 = false;
   for (const segment of segmentPresetByStoryZones(entries)) {
@@ -387,9 +401,26 @@ export async function buildStoryContextV2Messages(
           .filter((t) => t.trim() !== '')
           .join('\n'),
       );
-      if (text) {
-        (passedZone4 ? tailParts : leadingSystem).push(text);
-        if (!passedZone4) cachePrefix.push(text);
+      if (text) (passedZone4 ? tailParts : leadingSystem).push(text);
+      if (input.cacheLayout) {
+        const fixedEntries = segment.entries.filter((e) => e.directCachePlacement !== 'turn');
+        const fixed =
+          fixedEntries.length === segment.entries.length
+            ? text
+            : renderEntryText(fixedEntries.map((e) => processedByEntry.get(e) ?? '').join('\n'));
+        if (fixed) (passedZone4 ? authoredTurn : cachePrefix).push(fixed);
+        for (const entry of segment.entries.filter((e) => e.directCachePlacement === 'turn')) {
+          const current = resolveTemplateWithGlobals(
+            processedByEntry.get(entry) ?? '',
+            agentId,
+            tplCtx,
+            config,
+            worldBooks,
+            configs,
+            {},
+          ).trim();
+          if (current) authoredTurn.push(current);
+        }
       }
       continue;
     }
@@ -406,7 +437,8 @@ export async function buildStoryContextV2Messages(
         ? wrapBlock('本轮参考资料', zoneText[5])
         : zoneText[segment.zone];
     if (text) (passedZone4 ? tailParts : leadingSystem).push(text);
-    if (text && !passedZone4) (segment.zone === 2 ? cacheHistory : cachePrefix).push(text);
+    if (text && !passedZone4 && segment.zone !== 3 && segment.zone !== 5)
+      (segment.zone === 2 ? cacheHistory : cachePrefix).push(text);
   }
 
   // ⑤ 第 4 区原文：严格 user / assistant 交替（回合内多条正文合并为一条）
@@ -483,7 +515,10 @@ export async function buildStoryContextV2Messages(
               ...cacheHistory.map((content) => ({ role: 'system' as const, content })),
               ...conversation,
             ],
-            sections: { references: tailParts.join('\n\n') },
+            sections: {
+              ...cacheSections,
+              ...(authoredTurn.length ? { authoredTurn: authoredTurn.join('\n\n') } : {}),
+            },
           },
         }
       : {}),
