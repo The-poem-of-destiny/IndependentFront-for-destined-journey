@@ -21,22 +21,23 @@ import { validateLoreProtocol } from '../../../src/core/content/lore-protocol';
 import { LegacyBackend } from '../../../src/core/ejs/ejs-backend';
 import { createQuickJsBackend } from '../../../src/core/ejs/ejs-quickjs-backend';
 
+const uid = (slug: string) => `fixture:world_setting/${slug}`;
 function book(items: Array<[string, LoreEntryMeta, string]>): WorldBook {
   return {
     id: 'test',
     name: 'test',
     partition: 'world_setting',
-    entries: items.map(([key, lore, content], uid) => ({
-      uid,
+    entries: items.map(([key, lore, content], index) => ({
+      uid: uid(key),
       name: key,
       content,
       enabled: true,
-      order: uid,
+      order: index,
       position: 0,
       key: [],
       keysecondary: [],
       selectiveLogic: 0,
-      extra: { lore: { audiences: ['story', 'lore_select'], key, ...lore } },
+      extra: { lore: { audiences: ['story', 'lore_select'], ...lore } },
     })),
   };
 }
@@ -104,8 +105,8 @@ describe('Story v2 read gates', () => {
     ctx.gameTime = { ...ctx.gameTime!, month, day };
     const books = [book([['festival', festival, 'celebration']])];
     const result = await selectStoryLore(books, ctx, emptySelector);
-    expect(result.mandatoryKeys.includes('festival')).toBe(active);
-    expect(result.zones[5].map((r) => r.key)).toEqual(active ? ['festival'] : []);
+    expect(result.mandatoryKeys.includes(uid('festival'))).toBe(active);
+    expect(result.zones[5].map((r) => r.key)).toEqual(active ? [uid('festival')] : []);
     expect(getEntriesForAgent('story', books)).toHaveLength(1); // Legacy is unchanged.
   });
 
@@ -172,7 +173,7 @@ describe('Story v2 read gates', () => {
     const b = book([
       ['index', { section: 'region', activation: { locations: ['realm'] } }, 'festival'],
       ['festival', festival, 'secret celebration'],
-      ['dependent', { section: 'fixed', dependsOn: ['festival'] }, 'must be blocked'],
+      ['dependent', { section: 'fixed', dependsOn: [uid('festival')] }, 'must be blocked'],
       [
         'reader',
         { section: 'fixed' },
@@ -207,25 +208,49 @@ describe('Story v2 read gates', () => {
     b.entries[1].enabled = false;
     const ctx = context('festival stop');
     ctx.gameTime = undefined;
-    expect((await selectStoryLore([b], ctx)).zones[5].map((r) => r.key)).toEqual(['allowed']);
+    expect((await selectStoryLore([b], ctx)).zones[5].map((r) => r.key)).toEqual([uid('allowed')]);
     ctx.userInput = '';
     expect((await selectStoryLore([b], ctx)).zones[5]).toEqual([]);
   });
 
-  it('uses only current input and the last six conversational messages', async () => {
-    const ctx = context();
-    ctx.characters[0].location = 'outside';
-    ctx.history = Array.from({ length: 7 }, (_, i) => ({
-      id: String(i),
-      role: 'assistant' as const,
-      content: i === 0 ? 'festival' : 'neutral',
-      timestamp: i,
-    }));
-    const b = book([['festival', festival, 'celebration']]);
-    expect((await selectStoryLore([b], ctx)).zones[5]).toEqual([]);
-    ctx.history[1].content = 'festival';
-    expect((await selectStoryLore([b], ctx)).zones[5]).toHaveLength(1);
-  });
+  it.each([
+    { limit: undefined, count: 2 },
+    { limit: 0, count: 0 },
+    { limit: 1, count: 1 },
+    { limit: 2, count: 2 },
+    { limit: 6, count: 6 },
+    { limit: 12, count: 12 },
+  ])(
+    'uses current input and the last $count conversational messages when history limit is $limit',
+    async ({ limit, count }) => {
+      const ctx = context();
+      ctx.characters[0].location = 'outside';
+      ctx.loreHistoryMessages = limit;
+      const messages = Array.from({ length: count + 1 }, (_, i) => ({
+        id: String(i),
+        role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+        content: i === 0 ? 'festival' : 'neutral',
+        timestamp: i,
+      }));
+      ctx.history = [
+        { id: 'system-before', role: 'system', content: 'festival', timestamp: -1 },
+        ...messages,
+        { id: 'system-after', role: 'system', content: 'festival', timestamp: count + 1 },
+      ];
+      const b = book([['festival', festival, 'celebration']]);
+      expect((await selectStoryLore([b], ctx)).zones[5]).toEqual([]);
+
+      ctx.userInput = 'festival';
+      expect((await selectStoryLore([b], ctx)).zones[5]).toHaveLength(1);
+      ctx.userInput = '';
+      expect((await selectStoryLore([b], ctx)).zones[5]).toEqual([]);
+
+      if (count > 0) {
+        messages[1].content = 'festival';
+        expect((await selectStoryLore([b], ctx)).zones[5]).toHaveLength(1);
+      }
+    },
+  );
 
   it('activated required lore survives empty selection and budget pruning', async () => {
     const result = await assemble(
@@ -246,7 +271,7 @@ describe('ST definitions and evaluation lifetime', () => {
     ]);
     const result = await assemble([b]);
     const text = result.messages.map((m) => m.content).join('');
-    expect(result.diagnostics.loreKeysByZone?.[1]).toEqual(['rule']);
+    expect(result.diagnostics.loreKeysByZone?.[1]).toEqual([uid('rule')]);
     expect(text).toContain('rule=working');
     expect(text).not.toContain('SOURCE_BODY');
     const pruned = await assemble([b], context(), 1);
@@ -260,7 +285,7 @@ describe('ST definitions and evaluation lifetime', () => {
     const first = await assemble([b], ctx);
     ctx.variables.sys.turn = 2;
     const second = await assemble([b], ctx);
-    expect(first.diagnostics.loreKeysByZone?.[1]).toEqual(['rule']);
+    expect(first.diagnostics.loreKeysByZone?.[1]).toEqual([uid('rule')]);
     expect(first.messages.map((m) => m.content).join('')).toContain('1');
     expect(second.messages.map((m) => m.content).join('')).toContain('2');
   });
@@ -274,7 +299,7 @@ describe('ST definitions and evaluation lifetime', () => {
     ]);
     b.entries[2].enabled = false;
     expect(buildLoreDefinitions('story', [b]).values.x).toBe('');
-    expect(buildLoreDefinitions('story', [b]).sources.x).toBe('last');
+    expect(buildLoreDefinitions('story', [b]).sources.x).toBe(uid('last'));
   });
 
   it('does not execute or extract conditional definitions from unselected EJS; accepts literal projections', async () => {
@@ -290,8 +315,8 @@ describe('ST definitions and evaluation lifetime', () => {
     const result = await assemble([b]);
     expect(result.messages.map((m) => m.content).join('')).toContain('projected|');
     expect(result.diagnostics.loreDefinitions).toEqual({
-      deferredKeys: ['conditional'],
-      missing: { rule: ['missing'] },
+      deferredKeys: [uid('conditional')],
+      missing: { [uid('rule')]: ['missing'] },
     });
   });
 
@@ -313,7 +338,7 @@ describe('ST definitions and evaluation lifetime', () => {
       const result = await backend.runPass(
         [
           {
-            uid: 1,
+            uid: uid('definition_bridge'),
             content:
               '<%= getvar("priority") %>|<%= getvar("runtime") %>|<%= getvar("x") %>|<%= getvar("empty", { defaults: "BAD" }) %>|<%= getvar("literal.key") %>|<%= getvar("absent", { defaults: "fallback" }) %><% setvar("x", "changed") %>|<%= getvar("x") %>',
           },
@@ -365,7 +390,7 @@ describe('ST definitions and evaluation lifetime', () => {
       ctx.characters[0].location = location;
       ctx.gameTime = { ...ctx.gameTime!, month, day };
       const freeze = () => createFixedLoreSnapshot([b], undefined, createLoreReadContext(ctx));
-      if (readable) expect(freeze().revival.text).toBe('OPENING');
+      if (readable) expect(freeze()[uid('revival')].text).toBe('OPENING');
       else expect(freeze).toThrow('missing definitions');
     },
   );
@@ -380,16 +405,20 @@ describe('ST definitions and evaluation lifetime', () => {
 
   it('applies the opening read context to the complete dependency closure', () => {
     const b = book([
-      ['revival', { section: 'fixed', evaluation: 'onCreate', dependsOn: ['gated'] }, 'OPENING'],
+      [
+        'revival',
+        { section: 'fixed', evaluation: 'onCreate', dependsOn: [uid('gated')] },
+        'OPENING',
+      ],
       ['gated', festival, 'dependency'],
     ]);
     const ctx = context();
     ctx.gameTime = { ...ctx.gameTime!, month: 5, day: 1 };
     expect(createFixedLoreSnapshot([b], undefined, createLoreReadContext(ctx))).toEqual({});
     ctx.userInput = 'festival';
-    expect(createFixedLoreSnapshot([b], undefined, createLoreReadContext(ctx)).revival.text).toBe(
-      'OPENING',
-    );
+    expect(
+      createFixedLoreSnapshot([b], undefined, createLoreReadContext(ctx))[uid('revival')].text,
+    ).toBe('OPENING');
   });
 
   it.each([
@@ -405,14 +434,14 @@ describe('ST definitions and evaluation lifetime', () => {
     const ctx = context();
     for (let turn = 0; turn < 2; turn++) {
       const result = await assemble([b], ctx);
-      expect(result.diagnostics.loreKeysByZone?.[1]).toEqual(['revival']);
+      expect(result.diagnostics.loreKeysByZone?.[1]).toEqual([uid('revival')]);
       expect(result.messages.map((m) => m.content).join('')).toContain('REVIVAL=ORIGINAL');
     }
     b.entries[1].enabled = false;
     b.entries[2].enabled = true;
     const changed = await assemble([b], ctx);
     const text = changed.messages.map((m) => m.content).join('');
-    expect(changed.diagnostics.loreKeysByZone?.[1]).toEqual(['revival']);
+    expect(changed.diagnostics.loreKeysByZone?.[1]).toEqual([uid('revival')]);
     expect(text).toContain('REVIVAL=CHANGED');
     expect(text).not.toContain('REVIVAL=ORIGINAL');
     expect(ctx.fixedLore).toBeUndefined();
@@ -432,7 +461,7 @@ describe('ST definitions and evaluation lifetime', () => {
       'indirect=ORIGINAL',
     );
     b.entries[0].enabled = false;
-    expect((await assemble([b], ctx)).diagnostics.loreKeysByZone?.[1]).toEqual(['reader']);
+    expect((await assemble([b], ctx)).diagnostics.loreKeysByZone?.[1]).toEqual([uid('reader')]);
   });
 
   it('never freezes missing/empty definitions or silently initializes during assembly', async () => {

@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { shallowMount } from '@vue/test-utils';
 import AboutSection from '../../../../src/ui/components/settings/AboutSection.vue';
 
-vi.mock('@engine/index', () => ({ VERSION: '9.8.7' }));
 vi.mock('../../../../src/ui/branding-defaults', async () => {
   const { ref } = await import('vue');
   return {
@@ -23,7 +22,7 @@ vi.mock('../../../../src/ui/branding-defaults', async () => {
 });
 
 describe('AboutSection', () => {
-  it('统一展示制作人员、项目、技术、世界概览与许可证信息', () => {
+  it('展示制作人员、项目、技术与许可证信息，不展示世界概览', () => {
     const wrapper = shallowMount(AboutSection, {
       global: {
         stubs: {
@@ -35,16 +34,24 @@ describe('AboutSection', () => {
 
     expect(text).toContain('关于测试项目');
     expect(text).toContain('制作人员');
-    expect(text).toContain('Richard');
-    expect(text).toContain('Claude Code');
-    expect(text).toContain('测试世界观作者');
+    for (const contributor of ['Richardoooo', 'December-17th', 'Hilo114']) {
+      expect(text).toContain(contributor);
+    }
+    expect(text).not.toContain('AI 开发协作');
+    expect(text).not.toContain('世界观设定');
+    expect(text).not.toContain('测试世界观作者');
     expect(text).toContain('项目信息');
-    expect(text).toContain('9.8.7');
+    expect(text).toContain('1.0.0');
+    expect(text).not.toContain('项目名称');
+    expect(text).not.toContain('项目类型');
+    expect(text).not.toContain('纪元');
     expect(text).toContain('测试项目说明');
     expect(text).toContain('技术信息');
-    expect(text).toContain('测试世界');
-    expect(text).toContain('第一行概览');
-    expect(text).toContain('第二行概览');
+    expect(text).toContain('Vue 3 + Pinia');
+    expect(text).toContain('Dexie.js (IndexedDB)');
+    expect(text).not.toContain('测试世界');
+    expect(text).not.toContain('第一行概览');
+    expect(text).not.toContain('第二行概览');
     expect(text).toContain('Font Awesome Free 6.7.2');
     expect(text).toContain('测试版权信息');
   });

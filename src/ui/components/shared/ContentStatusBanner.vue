@@ -60,6 +60,14 @@ const visible = computed(() => {
 
 /** 横幅正文（按四态 + §5.8 检测分支） */
 const message = computed(() => {
+  if (content.protectedPack) {
+    const expiry = content.leaseExpiresAt
+      ? ` · 有效期至 ${new Date(content.leaseExpiresAt).toLocaleString()}`
+      : '';
+    return `${content.leaseMessage}${expiry}`;
+  }
+  if (content.contentStatus === 'pack')
+    return `本地内容包 ${content.activePackVersion ?? ''} 已安装`;
   const st = content.contentStatus;
   if (st === 'error') {
     return content.lastFetchError
@@ -75,6 +83,7 @@ const message = computed(() => {
 
 /** 横幅级别（决定配色） */
 const level = computed<'info' | 'warn' | 'error'>(() => {
+  if (content.protectedPack) return content.leaseState.startsWith('LOCKED_') ? 'warn' : 'info';
   const st = content.contentStatus;
   if (st === 'error') return 'error';
   if (detectedLegacyContent.value) return 'warn';
@@ -173,7 +182,14 @@ async function uninstallPack() {
     <span class="content-banner-text">{{ message }}</span>
     <span class="content-banner-actions">
       <AppButton
-        v-if="content.contentStatus === 'placeholder'"
+        v-if="content.protectedPack"
+        variant="secondary"
+        size="sm"
+        @click="ui.navigate('settings')"
+        >管理 Discord 授权</AppButton
+      >
+      <AppButton
+        v-else-if="content.contentStatus === 'placeholder'"
         variant="secondary"
         size="sm"
         :loading="busy"

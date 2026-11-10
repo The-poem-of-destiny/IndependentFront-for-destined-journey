@@ -155,7 +155,6 @@ function makeWorkshopProject(overrides: Partial<WorkshopProject> = {}): Workshop
     installedVersion: '1.0.0',
     installedAt: Date.now(),
     fetchedAt: Date.now(),
-    uidRange: { start: 900000, end: 900999 },
     updatedAt: Date.now(),
     ...overrides,
   };
@@ -1892,7 +1891,7 @@ describe('exportAllData / importAllData', () => {
       builtIn: false,
       entries: [
         {
-          uid: 900001,
+          uid: 'workshop.proj_1:creative_workshop/entry',
           name: '工坊条目',
           content: '正文',
           enabled: true,
@@ -1927,7 +1926,8 @@ describe('exportAllData / importAllData', () => {
     expect(book!.entries[0].extra?.workshop?.sourceHash).toBe('deadbeef');
     const proj = await db2.workshopProjects.get('proj_1');
     expect(proj).toBeDefined();
-    expect(proj!.uidRange).toEqual({ start: 900000, end: 900999 });
+    expect(book!.entries[0].uid).toBe('workshop.proj_1:creative_workshop/entry');
+    expect(proj).not.toHaveProperty('uidRange');
   });
 });
 
@@ -1949,6 +1949,7 @@ describe('contentPacks 表 (v20 / D18)', () => {
       packId: 'pack_test_rt',
       packVersion: '1.0.0',
       installedAt: 1_700_000_000_000,
+      source: 'local-file' as const,
       payload: {
         formatVersion: 1,
         packId: 'pack_test_rt',
@@ -2003,10 +2004,10 @@ describe('reconcilePackState (D18 / §5.7)', () => {
     return {
       id,
       name: id,
-      partition: 'lorebook' as any,
+      partition: 'world_setting',
       entries: [
         {
-          uid: 1,
+          uid: `fated:world_setting/${id}`,
           name: '条目',
           content,
           enabled: true,
@@ -2026,6 +2027,7 @@ describe('reconcilePackState (D18 / §5.7)', () => {
       packId: 'pack_recon',
       packVersion: '1.0.0',
       installedAt: 1_700_000_000_000,
+      source: 'local-file' as const,
       payload: {
         formatVersion: 1,
         packId: 'pack_recon',
@@ -2104,6 +2106,7 @@ describe('reconcilePackState (D18 / §5.7)', () => {
       packId: 'pack_preset',
       packVersion: '1.0.0',
       installedAt: 1_700_000_000_000,
+      source: 'local-file' as const,
       payload: {
         formatVersion: 1,
         packId: 'pack_preset',

@@ -19,13 +19,13 @@ describe('DeveloperSection worldbook history setting', () => {
   });
   afterEach(() => settings.$dispose());
 
-  it('defaults to six messages, persists edits and restores them after reload', async () => {
+  it('defaults to two messages, persists edits and restores them after reload', async () => {
     const wrapper = mount(DeveloperSection);
     const storyCard = wrapper.get('.developer-mode-card.is-enabled');
     expect(storyCard.find('select[aria-describedby="story-recall-raw-help"]').exists()).toBe(true);
     expect(storyCard.find('input[aria-label="世界书检索历史消息数"]').exists()).toBe(true);
     const input = wrapper.get<HTMLInputElement>('input[aria-label="世界书检索历史消息数"]');
-    expect(input.element.value).toBe('6');
+    expect(input.element.value).toBe('2');
     await input.setValue('12');
     await nextTick();
     expect(settings.settings.loreHistoryMessages).toBe(12);
@@ -35,7 +35,7 @@ describe('DeveloperSection worldbook history setting', () => {
     settings = useSettingsStore();
     expect(settings.settings.loreHistoryMessages).toBe(12);
     settings.resetAll();
-    expect(settings.settings.loreHistoryMessages).toBe(6);
+    expect(settings.settings.loreHistoryMessages).toBe(2);
   });
 
   it('accepts zero and rejects negative, fractional and empty values', async () => {

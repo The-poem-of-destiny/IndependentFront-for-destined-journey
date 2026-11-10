@@ -1,7 +1,13 @@
 import { resolveGenerationMode } from '@engine/story/generation-mode';
 import { projectDirectCombatCharacters, readDirectCombat } from '@engine/combat/direct-combat';
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, onScopeDispose } from 'vue';
+import {
+  getActivePackPayload,
+  getPackRuntimeRevision,
+  isProtectedContentInstalled,
+  subscribePackRuntime,
+} from '@engine/content/pack-runtime';
 import type {
   SaveSlot,
   CharacterState,
@@ -77,7 +83,7 @@ export function setRewriteLoadoutImpl(impl: RewriteLoadoutImpl): void {
 /** 正文润色实现注入缝 —— GamePipeline 装配好 endpoint/chainData 后由 GamePage 挂进来 */
 export type RewriteProseImpl = (
   bodyText: string,
-) => Promise<{ ok: boolean; text?: string; reason?: string }>;
+) => Promise<{ ok: boolean; text?: string; reason?: string; warning?: string }>;
 
 let rewriteProseImpl: RewriteProseImpl | null = null;
 
@@ -729,12 +735,25 @@ export const useGameStore = defineStore('game', () => {
 
   /** 最近 10 回合的 Agent 调试历史；当前回合永远是最后一条。 */
   const agentLogHistory = ref<DebugTurnRecord[]>([]);
+  let debugPackPayload = getActivePackPayload();
+  onScopeDispose(
+    subscribePackRuntime(() => {
+      const next = getActivePackPayload();
+      if (next !== debugPackPayload) {
+        debugPackPayload = next;
+        agentLogHistory.value = [];
+        ejsUiLog.value = [];
+      }
+    }),
+  );
   const agentLog = computed(
     () => agentLogHistory.value[agentLogHistory.value.length - 1]?.entries ?? [],
   );
   let debugLogWriteQueue: Promise<void> = Promise.resolve();
 
   function queueDebugTurnWrite(turn: DebugTurnRecord): void {
+    if (isProtectedContentInstalled()) return;
+    const revision = getPackRuntimeRevision();
     let snapshot: DebugTurnRecord;
     try {
       // Pinia 把嵌套对象包成 Proxy，structuredClone 会直接抛 DataCloneError。
@@ -745,7 +764,10 @@ export const useGameStore = defineStore('game', () => {
       return;
     }
     debugLogWriteQueue = debugLogWriteQueue
-      .then(() => saveDebugTurn(snapshot))
+      .then(() => {
+        if (revision === getPackRuntimeRevision() && !isProtectedContentInstalled())
+          return saveDebugTurn(snapshot);
+      })
       .catch((error) => console.error('[game-store] 调试历史持久化失败:', error));
   }
 
@@ -856,7 +878,7 @@ export const useGameStore = defineStore('game', () => {
   const ejsFallbacks = ref<
     Array<{
       agentId: string;
-      uid: number;
+      uid: string;
       bookName?: string;
       error: string;
       count: number;
@@ -867,7 +889,7 @@ export const useGameStore = defineStore('game', () => {
   /** 记一次 EJS 条目回退（同 agent+uid 累加计数） */
   function recordEjsFallback(
     agentId: string,
-    entries: Array<{ uid: number; bookName?: string; error: string }>,
+    entries: Array<{ uid: string; bookName?: string; error: string }>,
   ) {
     for (const e of entries) {
       const hit = ejsFallbacks.value.find((r) => r.agentId === agentId && r.uid === e.uid);
@@ -1254,7 +1276,7 @@ export const useGameStore = defineStore('game', () => {
     plotOutline.value = projection.outline;
     saveProfile.value = projection.profile;
     messages.value = projection.messages;
-    agentLogHistory.value = debugTurns;
+    agentLogHistory.value = isProtectedContentInstalled() ? [] : debugTurns;
     turnCounter = projection.turn;
     return true;
   }
@@ -1604,7 +1626,9 @@ export const useGameStore = defineStore('game', () => {
    * 🔴 实现走注入缝（GamePipeline.rewriteProseText），store 不直接碰引擎装配 ——
    *    与 rewriteLoadoutItem 同一条纪律。
    */
-  async function rewriteProse(messageId: string): Promise<{ ok: boolean; reason?: string }> {
+  async function rewriteProse(
+    messageId: string,
+  ): Promise<{ ok: boolean; reason?: string; warning?: string }> {
     if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
     if (!rewriteProseImpl) return { ok: false, reason: '游戏管线未就绪' };
     const msg = messages.value.find((m) => m.id === messageId);
@@ -1613,7 +1637,7 @@ export const useGameStore = defineStore('game', () => {
     const result = await rewriteProseImpl(msg.content);
     if (!result.ok || !result.text) return { ok: false, reason: result.reason ?? '润色失败' };
     await replaceMessageContent(messageId, result.text);
-    return { ok: true };
+    return { ok: true, ...(result.warning ? { warning: result.warning } : {}) };
   }
 
   /**

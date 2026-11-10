@@ -58,22 +58,30 @@ function goBack() {
 
       <section class="extension-section" aria-labelledby="community-extension-title">
         <h3 id="community-extension-title" class="extension-section-title">社区扩展管理</h3>
-        <article class="extension-card">
+        <article
+          class="extension-card extension-card-locked"
+          aria-disabled="true"
+          data-testid="workshop-entry"
+        >
           <div class="extension-icon extension-icon-community" aria-hidden="true">
             <i class="fa-solid fa-puzzle-piece"></i>
           </div>
           <div class="extension-copy">
             <div class="extension-name-row">
               <h4>创意工坊</h4>
-              <span class="extension-badge extension-badge-ready">可用</span>
+              <span class="extension-badge">暂未开放</span>
             </div>
             <p>前往创意工坊浏览、安装、更新、卸载与投稿社区项目。</p>
             <span class="extension-meta">{{ installedSummary }}</span>
           </div>
-          <AppButton variant="primary" size="sm" @click="ui.navigate('workshop')">
+          <AppButton variant="secondary" size="sm" disabled>
             进入创意工坊
             <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
           </AppButton>
+          <div class="extension-entry-mask" data-testid="workshop-entry-mask">
+            <i class="fa-solid fa-lock" aria-hidden="true"></i>
+            <span>创意工坊暂未开放</span>
+          </div>
         </article>
 
         <CommunityExtensionSettings />
@@ -164,8 +172,41 @@ function goBack() {
   box-shadow: var(--theme-shadow-sm);
 }
 
+.extension-card-locked {
+  position: relative;
+  overflow: hidden;
+}
+
 .extension-card-placeholder {
   background: color-mix(in srgb, var(--theme-card-bg) 92%, var(--theme-text-muted));
+}
+
+/*
+ * 工坊入口暂停开放：蒙版覆盖整张卡片，既保留原入口的说明，也明确告诉玩家
+ * 为什么点不进去。真正阻止键盘/鼠标操作的是底层按钮的 disabled 与已移除的导航绑定，
+ * 蒙版只负责呈现；不要只靠 pointer-events 当权限边界。
+ */
+.extension-entry-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--theme-spacing-sm);
+  background: color-mix(in srgb, var(--theme-window-bg) 58%, transparent);
+  backdrop-filter: blur(2px);
+  color: var(--theme-text-secondary);
+  cursor: not-allowed;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+.extension-entry-mask i {
+  color: var(--theme-text-muted);
+  font-size: 0.9375rem;
 }
 
 .extension-icon {
@@ -220,12 +261,6 @@ function goBack() {
   color: var(--theme-warning);
   font-size: 0.6875rem;
   font-weight: 600;
-}
-
-.extension-badge-ready {
-  border-color: color-mix(in srgb, var(--theme-success) 30%, transparent);
-  background: color-mix(in srgb, var(--theme-success) 12%, transparent);
-  color: var(--theme-success);
 }
 
 .extension-meta {

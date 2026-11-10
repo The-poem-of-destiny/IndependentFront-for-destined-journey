@@ -16,7 +16,12 @@
  *    设置对象序列化进 localStorage，写回去等于把刚搬出来的容量又塞回配额里。
  */
 import { defineStore } from 'pinia';
-import { ref, watch } from 'vue';
+import { ref, watch, onScopeDispose } from 'vue';
+import {
+  getActivePackPayload,
+  getPackRuntimeRevision,
+  subscribePackRuntime,
+} from '@engine/content/pack-runtime';
 import { getDatabase } from '@engine/persistence/database';
 import { loadPresetRules, mergeRules, normalizeRuleRuntime } from '@engine/story/beautifier';
 import { getPackRules } from '@engine/content/content-source';
@@ -46,6 +51,16 @@ export const useBeautifierStore = defineStore('beautifier', () => {
   const userRules = ref<BeautifierRule[]>([]);
   /** 内置预设规则 —— 纯内存派生缓存，**不持久化** */
   const presetRules = ref<BeautifierRule[]>([]);
+  let rulesPayload = getActivePackPayload();
+  onScopeDispose(
+    subscribePackRuntime(() => {
+      const next = getActivePackPayload();
+      if (next !== rulesPayload) {
+        rulesPayload = next;
+        presetRules.value = [];
+      }
+    }),
+  );
   /** init() 是否已完成（含失败收场） */
   const ready = ref(false);
   /** 上次迁移结果，仅供调试/测试断言 */
@@ -129,11 +144,12 @@ export const useBeautifierStore = defineStore('beautifier', () => {
    */
   async function refreshPresetRules(
     activeWorldBookIds: Set<string> = new Set(),
-    activeEntryUids: Set<number> = new Set(),
+    activeEntryUids: Set<string> = new Set(),
     activeCharacterNames: Set<string> = new Set(),
     // 🔴 供测试/装包流程显式注入 pack 规则；生产路径不传，由 provider 惰性读（§5.6 恢复默认）
     packRulesOverride?: readonly BeautifierRule[],
   ): Promise<void> {
+    const revision = getPackRuntimeRevision();
     try {
       // provider 内存层优先（D20）：pack 规则 > 占位文件。packRulesOverride 显式传入时
       // 优先用它（装包瞬间 provider 注册与重算谁先谁都互斥，显式传最稳）。
@@ -146,6 +162,7 @@ export const useBeautifierStore = defineStore('beautifier', () => {
         packRules !== undefined && packRules.length >= 0
           ? (packRules as BeautifierRule[]).map((r) => normalizeRuleRuntime(r as any))
           : ((await loadPresetRules()) as BeautifierRule[]);
+      if (revision !== getPackRuntimeRevision()) return;
       // 覆盖列表语义迁移：认得出出厂默认值才能做，所以挂在预设加载之后。
       // 内部有标志位，重复调用是空转。
       const settingsStore = useSettingsStore();

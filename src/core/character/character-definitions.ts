@@ -95,7 +95,7 @@ export function legacyCharacterDefinitions(books: readonly WorldBook[]): Charact
         lore,
         past: [],
         assets: declarations.map(({ type, variant, url }) => ({ type, variant, url })),
-        legacyEntry: { bookId: book.id, uid: entry.uid, token: `${book.partition}:${entry.uid}` },
+        legacyEntry: { bookId: book.id, uid: entry.uid, token: entry.uid },
       });
     }
   }

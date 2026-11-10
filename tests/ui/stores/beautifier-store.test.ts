@@ -209,14 +209,14 @@ describe('beautifier-store', () => {
       makeRule('auto', {
         isBuiltin: true,
         enabled: false,
-        autoEnable: { worldBookEntryUids: [413] },
+        autoEnable: { worldBookEntryUids: ['fated:system_core/core'] },
       }),
     ];
     const store = useBeautifierStore();
     await store.init();
     expect(store.presetRules[0].enabled).toBe(false);
 
-    await store.refreshPresetRules(new Set(), new Set([413]), new Set());
+    await store.refreshPresetRules(new Set(), new Set(['fated:system_core/core']), new Set());
     expect(store.presetRules[0].enabled).toBe(true);
     expect(store.presetRules[0].locked).toBe(true);
     // locked 是算出来的，仍然不许落进任何存储

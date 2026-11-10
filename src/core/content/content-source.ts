@@ -25,6 +25,7 @@
  */
 
 import { validateLoreProtocol } from './lore-protocol';
+import { isWorldBookUid, uidPartition } from './worldbook-uid';
 import { isMediaHashAvailable, hashMediaBytes } from '../assets/media-hash';
 import type {
   ContentPack,
@@ -47,15 +48,6 @@ export const CURRENT_PACK_FORMAT_VERSION: PackFormatVersion = 1;
 
 /** 工坊分区名（D8: pack 校验器拒绝此分区的世界书） */
 const CREATIVE_WORKSHOP_PARTITION = 'creative_workshop';
-
-/**
- * 占位世界书 uid 保留段下界（D43）。
- *
- * 占位书 uid ∈ `[900001, ...)`，与真实语料 uid 空间（max ≈ 509）物理隔离。
- * pack 的真实世界书**不该**用这个段——校验器对落在保留段的 pack 书记 warning，
- * 不阻止安装（真实包理论上不会踩，但留个提示位防构建器 bug）。
- */
-export const PLACEHOLDER_UID_RESERVED_BASE = 900001;
 
 // ═══════════════════════════════════════════════════════════
 // 内容态上报钩子（D16 / §5.5 census —— 引擎层 fetch 的 provider 出口）
@@ -190,7 +182,7 @@ export function hashContentDeterministic(content: string): string {
  */
 export function hashWorldBook(book: WorldBook): string {
   // 条目按 uid 稳定排序后拼，避免条目重排导致 hash 漂移
-  const entries = [...book.entries].sort((a, b) => a.uid - b.uid);
+  const entries = [...book.entries].sort((a, b) => a.uid.localeCompare(b.uid));
   const payload = entries
     .map(
       (e) =>
@@ -449,6 +441,7 @@ function validateWorldBooksSection(section: unknown): PackValidationNote[] {
     notes.push(makeError('bad-worldbooks-section', 'worldBooks 分节必须是数组'));
     return notes;
   }
+  const uids = new Set<string>();
   for (let i = 0; i < section.length; i++) {
     const book = section[i];
     if (!isPlainObject(book)) {
@@ -480,28 +473,42 @@ function validateWorldBooksSection(section: unknown): PackValidationNote[] {
     } else {
       for (let j = 0; j < book.entries.length; j++) {
         const e = book.entries[j];
-        if (!isPlainObject(e) || typeof e.uid !== 'number' || typeof e.name !== 'string') {
+        if (
+          !isPlainObject(e) ||
+          !isWorldBookUid(e.uid) ||
+          uidPartition(e.uid) !== book.partition ||
+          typeof e.name !== 'string'
+        ) {
           notes.push(
             makeError(
               'bad-worldbook-entry',
-              `worldBooks[${i}].entries[${j}] 必须含 uid(number) 与 name(string)`,
+              `worldBooks[${i}].entries[${j}] 必须含匹配分区的命名空间 uid 与 name(string)`,
             ),
           );
         }
+        if (isPlainObject(e) && isWorldBookUid(e.uid)) {
+          if (uids.has(e.uid))
+            notes.push(makeError('bad-worldbook-entry', `重复世界书 UID：${e.uid}`));
+          uids.add(e.uid);
+          if (
+            isPlainObject(e.extra) &&
+            isPlainObject(e.extra.lore) &&
+            Object.prototype.hasOwnProperty.call(e.extra.lore, 'key')
+          )
+            notes.push(
+              makeError('bad-worldbook-entry', `${e.uid}: extra.lore.key 已移除，请直接使用 uid`),
+            );
+        }
       }
     }
-    // 占位 uid 保留段警告（D43）：真实包的书不该踩 900001+
+    // 占位命名空间仅供内置演示书；真实包使用它时给出警告。
     if (Array.isArray(book.entries)) {
       for (const e of book.entries) {
-        if (
-          isPlainObject(e) &&
-          typeof e.uid === 'number' &&
-          e.uid >= PLACEHOLDER_UID_RESERVED_BASE
-        ) {
+        if (isPlainObject(e) && typeof e.uid === 'string' && e.uid.startsWith('placeholder:')) {
           notes.push({
             level: 'warning',
             code: 'placeholder-uid-range',
-            text: `worldBooks[${i}]（id=${String(book.id)}）含 uid=${e.uid}，落在占位保留段 ${PLACEHOLDER_UID_RESERVED_BASE}+（D43），真实包通常不该用此段`,
+            text: `worldBooks[${i}]（id=${String(book.id)}）含占位 UID=${e.uid}，真实包通常不应使用 placeholder: 命名空间`,
           });
           break; // 每本书最多记一条
         }
@@ -583,6 +590,18 @@ function validateBeautifierRulesSection(section: unknown): PackValidationNote[] 
   }
   if (!Array.isArray((section as { rules?: unknown }).rules)) {
     notes.push(makeError('bad-beautifier-section', 'beautifierRules.rules 必须是数组'));
+  } else {
+    for (const rule of section.rules as unknown[]) {
+      if (!isPlainObject(rule) || !isPlainObject(rule.autoEnable)) continue;
+      const uids = rule.autoEnable.worldBookEntryUids;
+      if (uids !== undefined && (!Array.isArray(uids) || !uids.every(isWorldBookUid)))
+        notes.push(
+          makeError(
+            'bad-beautifier-section',
+            `美化规则 ${String(rule.id)} 的 worldBookEntryUids 必须是命名空间 UID 数组`,
+          ),
+        );
+    }
   }
   return notes;
 }

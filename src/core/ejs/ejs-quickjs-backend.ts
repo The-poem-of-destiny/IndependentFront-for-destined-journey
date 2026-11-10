@@ -694,7 +694,10 @@ globalThis.engine = __ejsData.engine;`,
 })().catch(function (e) {
   globalThis.__ejsErr = String((e && (e.name + ': ' + e.message)) || e); globalThis.__ejsState = 2;
 });`;
-      const result = context.evalCode(wrapped, `entry-${entry.uid}.js`);
+      const result = context.evalCode(
+        wrapped,
+        `entry-${entry.uid.replace(/[^a-zA-Z0-9_-]/g, '_')}.js`,
+      );
       if (result.error) {
         const detail = context.dump(result.error) as { name?: string; message?: string };
         result.error.dispose?.();

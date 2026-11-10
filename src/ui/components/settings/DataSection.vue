@@ -6,13 +6,17 @@
  *    所以效果反而更准（每次点进来都是新数），代价是切走再切回会多问一次
  *    `navigator.storage.estimate()` —— 那是个便宜的浏览器查询。
  */
-import { ref, shallowRef, computed, onMounted } from 'vue';
+import { ref, shallowRef, computed, onMounted, watch } from 'vue';
+import { discordAuthRevision } from '../../lib/discord-auth-client';
 import type { SceneImageUsage } from '@engine/types/types-image';
 import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import FormSelect from '../shared/form/FormSelect.vue';
 import PackInstallConfirmModal from './PackInstallConfirmModal.vue';
+import DiscordPackAccess from './DiscordPackAccess.vue';
+import { useContentStore } from '../../stores/content-store';
+import type { ProtectedPackDownload } from '@engine/types/types-pack-auth';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useGameStore } from '../../stores/game-store';
@@ -26,6 +30,7 @@ import type { PackUpgradeDiff } from '@engine/content/content-pack-plan';
 import {
   checkPackUpdate,
   downloadLatestPack,
+  isPackUpdateAvailable,
   type PackUpdateInfo,
 } from '../../lib/content-pack-updater';
 
@@ -34,10 +39,11 @@ const ui = useUIStore();
 const game = useGameStore();
 
 /** 内容态（内容包是否已装） */
-const activeContent = ref<{ packId: string | null; packVersion: string | null }>({
-  packId: null,
-  packVersion: null,
-});
+const content = useContentStore();
+const activeContent = computed(() => ({
+  packId: content.activePackId,
+  packVersion: content.activePackVersion,
+}));
 const hasActivePack = computed(() => activeContent.value.packId !== null);
 const activePackVersion = computed(() => activeContent.value.packVersion);
 
@@ -50,7 +56,6 @@ onMounted(async () => {
   const { useContentStore } = await import('../../stores/content-store');
   const c = useContentStore();
   await c.hydratePackState();
-  activeContent.value = { packId: c.activePackId, packVersion: c.activePackVersion };
 });
 
 // ═══════════ 内容包导入（波 1 T7 / D19 / §5.2）═══════════
@@ -68,16 +73,33 @@ const packPlan = ref<PackInstallPlan | null>(null);
 //    取回 Proxy，savePreset 落库 IDB 结构化克隆拒绝 Proxy → DataCloneError
 //    （2026-08-07 真机根因；savePreset 侧已加 detach 双保险）。
 const packPending = shallowRef<unknown | null>(null); // 待确认的原始 pack JSON
+const onlinePending = shallowRef<ProtectedPackDownload | null>(null);
+watch(
+  discordAuthRevision,
+  () => {
+    if (onlinePending.value) {
+      onlinePending.value = null;
+      packPlan.value = null;
+    }
+  },
+  { flush: 'sync' },
+);
 const packDiff = ref<PackUpgradeDiff | null>(null);
 const packError = ref<string | null>(null);
 const packInstalling = ref(false);
 
-/**
- * 内容包自动更新 v1（2026-09-26）：向 BFF 查发布源最新版，下载后走**既有**的
- * 安装/升级两阶段流程（`runInstall`）。加解密与 GitHub 拉取都在服务端，
- * 前端只读本地 BFF 的明文。
- */
-const packUpdate = ref<PackUpdateInfo | null>(null);
+/** 在线更新仅下载密文；授权校验和运行时解密由 content-store 处理。 */
+const checkedPackUpdate = ref<PackUpdateInfo | null>(null);
+const packUpdate = computed(() => {
+  const info = checkedPackUpdate.value;
+  return info
+    ? {
+        ...info,
+        updateAvailable:
+          info.available && isPackUpdateAvailable(info.packVersion, activePackVersion.value),
+      }
+    : null;
+});
 const packCheckingUpdate = ref(false);
 
 async function checkForPackUpdate() {
@@ -88,7 +110,7 @@ async function checkForPackUpdate() {
       ui.toast(result.message, 'error');
       return;
     }
-    packUpdate.value = result.info;
+    checkedPackUpdate.value = result.info;
     if (!result.info.available) ui.toast('发布源暂无内容包', 'info');
     else if (result.info.updateAvailable)
       ui.toast(`发现新版本 ${result.info.packVersion}`, 'success');
@@ -108,7 +130,17 @@ async function applyPackUpdate() {
       ui.toast(result.message, 'error');
       return;
     }
-    await runInstall(result.pack);
+    const outcome = await content.installProtectedPack(result.download);
+    if (outcome.status === 'needs_confirmation') {
+      packPlan.value = outcome.plan ?? null;
+      onlinePending.value = result.download;
+      packPending.value = null;
+    } else if (outcome.ok) {
+      await afterPackApplied(outcome.notes ?? []);
+      ui.toast('授权内容包已安装，自动续期已启用', 'success');
+    } else ui.toast('内容包操作正在进行，请稍后重试', 'error');
+  } catch (error) {
+    ui.toast(error instanceof Error ? error.message : '获取内容包失败', 'error');
   } finally {
     packInstalling.value = false;
   }
@@ -136,6 +168,7 @@ async function pickPackFile() {
 /** 执行安装（第一段：无冲突直接装；有冲突弹确认）。已装同 packId → 走升级路径（显示 diff） */
 async function runInstall(raw: unknown) {
   packError.value = null;
+  onlinePending.value = null;
   packDiff.value = null;
   packInstalling.value = true;
   try {
@@ -212,8 +245,10 @@ async function runUpgradeRaw(
 
 /** 用户在确认 Modal 点「确认」→ 以 confirmConflicts 重入 */
 async function confirmPackInstall() {
-  if (!packPending.value) return;
+  if (!packPending.value && !onlinePending.value) return;
+  const online = onlinePending.value;
   const raw = packPending.value;
+  onlinePending.value = null;
   const wasUpgrade = activeContent.value.packId === ((raw as { packId?: string })?.packId ?? '');
   packPending.value = null;
   packPlan.value = null;
@@ -222,9 +257,11 @@ async function confirmPackInstall() {
   try {
     const { useContentStore } = await import('../../stores/content-store');
     const c = useContentStore();
-    const outcome = await (wasUpgrade
-      ? c.upgradePack(raw, { confirmConflicts: true })
-      : c.installPack(raw, { confirmConflicts: true }));
+    const outcome = online
+      ? await c.installProtectedPack(online, { confirmConflicts: true })
+      : await (wasUpgrade
+          ? c.upgradePack(raw, { confirmConflicts: true })
+          : c.installPack(raw, { confirmConflicts: true }));
     if (!outcome.ok) {
       ui.toast('内容包安装失败', 'error');
       return;
@@ -248,7 +285,6 @@ async function afterPackApplied(notes: unknown[]): Promise<void> {
   const { useContentStore } = await import('../../stores/content-store');
   const c = useContentStore();
   await c.hydratePackState();
-  activeContent.value = { packId: c.activePackId, packVersion: c.activePackVersion };
 }
 
 /** 卸载（带确认；编辑过的书需二次确认） */
@@ -612,6 +648,7 @@ async function clearAll() {
         ></AppCard
       ><AppCard padding="md" class="pack-card"
         ><h4>内容包</h4>
+        <DiscordPackAccess />
         <p class="text-muted text-sm">
           导入内容包以加载完整的世界书、Agent 提示词、预设与目录数据。<template
             v-if="activePackVersion"
@@ -766,6 +803,7 @@ async function clearAll() {
             packPlan = null;
             packError = null;
             packPending = null;
+            onlinePending = null;
           }
         }
       "
@@ -774,6 +812,7 @@ async function clearAll() {
         packPlan = null;
         packError = null;
         packPending = null;
+        onlinePending = null;
       "
     />
   </section>

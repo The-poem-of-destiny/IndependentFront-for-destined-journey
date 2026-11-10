@@ -113,12 +113,15 @@ describe('LegacyBackend.runPass', () => {
   it('逐条目渲染，顺序与入参一致', async () => {
     const out = await backend.runPass(
       [
-        { uid: 7, content: '甲' },
-        { uid: 3, content: '<%= 1 + 1 %>' },
+        { uid: 'fated:world_setting/seven', content: '甲' },
+        { uid: 'fated:world_setting/three', content: '<%= 1 + 1 %>' },
       ],
       ctx(),
     );
-    expect(out.map((o) => o.uid)).toEqual([7, 3]);
+    expect(out.map((o) => o.uid)).toEqual([
+      'fated:world_setting/seven',
+      'fated:world_setting/three',
+    ]);
     expect(out.map((o) => o.text)).toEqual(['甲', '2']);
     expect(out.every((o) => o.ok)).toBe(true);
   });
@@ -126,8 +129,8 @@ describe('LegacyBackend.runPass', () => {
   it('单条目失败 → 原文注入 + 带错因，其余条目照跑（D8）', async () => {
     const out = await backend.runPass(
       [
-        { uid: 1, content: '<% 不存在的符号() %>' },
-        { uid: 2, content: '好的' },
+        { uid: 'fated:world_setting/broken', content: '<% 不存在的符号() %>' },
+        { uid: 'fated:world_setting/good', content: '好的' },
       ],
       ctx(),
     );
@@ -141,8 +144,8 @@ describe('LegacyBackend.runPass', () => {
     const c = ctx();
     const out = await backend.runPass(
       [
-        { uid: 1, content: '<% vars.计数 = 7 %>' },
-        { uid: 2, content: '<%= vars.计数 %>' },
+        { uid: 'fated:world_setting/write', content: '<% vars.计数 = 7 %>' },
+        { uid: 'fated:world_setting/read', content: '<%= vars.计数 %>' },
       ],
       c,
     );
@@ -152,12 +155,18 @@ describe('LegacyBackend.runPass', () => {
 
   it('失败条目的半途写整体回滚（D8）', async () => {
     const c = ctx();
-    await backend.runPass([{ uid: 1, content: '<% vars.脏 = 1; 不存在() %>' }], c);
+    await backend.runPass(
+      [{ uid: 'fated:world_setting/rollback', content: '<% vars.脏 = 1; 不存在() %>' }],
+      c,
+    );
     expect(c.vars.脏).toBeUndefined();
   });
 
   it('async 条目照跑 —— 这正是接缝存在的理由之一', async () => {
-    const out = await backend.runPass([{ uid: 1, content: '<%= await 41 + 1 %>' }], ctx());
+    const out = await backend.runPass(
+      [{ uid: 'fated:world_setting/async', content: '<%= await 41 + 1 %>' }],
+      ctx(),
+    );
     expect(out[0]).toMatchObject({ ok: true, text: '42' });
   });
 });
@@ -171,8 +180,8 @@ describe('FailClosedBackend', () => {
     const b = new FailClosedBackend('测试原因');
     const out = await b.runPass(
       [
-        { uid: 1, content: '<%= 1 + 1 %>' },
-        { uid: 2, content: '纯文本' },
+        { uid: 'fated:world_setting/dynamic', content: '<%= 1 + 1 %>' },
+        { uid: 'fated:world_setting/static', content: '纯文本' },
       ],
       ctx(),
     );
@@ -183,7 +192,10 @@ describe('FailClosedBackend', () => {
 
   it('一行 EJS 都不执行 —— 草稿一个字节都不动', async () => {
     const c = ctx();
-    await new FailClosedBackend('x').runPass([{ uid: 1, content: '<% vars.写了 = 1 %>' }], c);
+    await new FailClosedBackend('x').runPass(
+      [{ uid: 'fated:world_setting/write', content: '<% vars.写了 = 1 %>' }],
+      c,
+    );
     expect(c.vars).toEqual({});
   });
 });
@@ -197,7 +209,10 @@ describe('installProductionEjsBackend', () => {
     // 🔴 光看 name / interruptible 是不够的：那两样在 wasm 根本没装起来时也照样对。
     // 真跑一趟才能证明 `true` 的含义是「隔离在服役」而不是「JS 模块 import 成功了」。
     const c = ctx();
-    const out = await getEjsBackend().runPass([{ uid: 1, content: '<%= 40 + 2 %>' }], c);
+    const out = await getEjsBackend().runPass(
+      [{ uid: 'fated:world_setting/production', content: '<%= 40 + 2 %>' }],
+      c,
+    );
     expect(out[0]).toMatchObject({ ok: true, text: '42' });
   }, 30000);
 
@@ -222,7 +237,10 @@ describe('installProductionEjsBackend', () => {
       expect(getEjsBackend().name).not.toContain('legacy');
       // 而且真的一行 EJS 都不跑
       const c = ctx();
-      const out = await getEjsBackend().runPass([{ uid: 1, content: '<% vars.写了 = 1 %>' }], c);
+      const out = await getEjsBackend().runPass(
+        [{ uid: 'fated:world_setting/write', content: '<% vars.写了 = 1 %>' }],
+        c,
+      );
       expect(out[0]).toMatchObject({ ok: false, text: '<% vars.写了 = 1 %>' });
       expect(c.vars).toEqual({});
       // 失败必须留痕（console.error，不是 warn —— 这是安全相关状态）
@@ -260,7 +278,10 @@ describe('installProductionEjsBackend', () => {
       expect(getEjsBackend().name).not.toContain('quickjs');
       // 而且真的一行 EJS 都不跑
       const c = ctx();
-      const out = await getEjsBackend().runPass([{ uid: 1, content: '<% vars.写了 = 1 %>' }], c);
+      const out = await getEjsBackend().runPass(
+        [{ uid: 'fated:world_setting/write', content: '<% vars.写了 = 1 %>' }],
+        c,
+      );
       expect(out[0]).toMatchObject({ ok: false, text: '<% vars.写了 = 1 %>' });
       expect(c.vars).toEqual({});
       // 半成品后端必须被放掉，不能留一个悬着的 wasm 实例

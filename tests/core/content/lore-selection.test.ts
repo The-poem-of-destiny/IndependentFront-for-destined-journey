@@ -9,13 +9,16 @@ import { buildAgentMessagesAsync } from '../../../src/core/prompts/agent-templat
 import { getEntriesForAgent } from '../../../src/core/content/worldbook-loader';
 import { createLoreReadContext, loreRecentText } from '../../../src/core/content/lore-activation';
 
+// 中文显示名使用确定的 ASCII 测试 slug，英文 slug 保持可读。
+const uid = (slug: string) =>
+  `fixture:world_setting/${/^[a-z0-9_-]+$/.test(slug) ? slug : `u_${Buffer.from(slug).toString('hex')}`}`;
 function book(items: Array<[string, LoreEntryMeta, string?]>): WorldBook {
   return {
     id: 'test',
     name: '合成资料',
     partition: 'world_setting',
     entries: items.map(([key, lore, content], i) => ({
-      uid: i,
+      uid: uid(key),
       name: key,
       content: content ?? `正文:${key}`,
       enabled: true,
@@ -24,7 +27,7 @@ function book(items: Array<[string, LoreEntryMeta, string?]>): WorldBook {
       key: [],
       keysecondary: [],
       selectiveLogic: 0,
-      extra: { lore: { audiences: ['story', 'lore_select'], key, ...lore } },
+      extra: { lore: { audiences: ['story', 'lore_select'], ...lore } },
     })),
   };
 }
@@ -88,22 +91,22 @@ describe('Story lore selection', () => {
     const selector = async () => '{"keep":[],"extra":[]}';
     const first = await selectStoryLore([b], ctx, selector);
     expect(ctx.characters[0].location).toBe('Realm-TownA-Inn');
-    expect(first.zones[3].map((r) => r.key)).toEqual(['vale']);
-    expect(first.zones[5].map((r) => r.key)).toContain('gated');
+    expect(first.zones[3].map((r) => r.key)).toEqual([uid('vale')]);
+    expect(first.zones[5].map((r) => r.key)).toContain(uid('gated'));
     ctx.characters[0].location = 'Realm-TownB-Gate';
     const same = await selectStoryLore([b], ctx, selector);
     expect(same.diagnostics.regionSnapshotKey).toBe(first.diagnostics.regionSnapshotKey);
     expect(same.zones[3]).toEqual(first.zones[3]);
     ctx.characters[0].location = 'Realm-TownC';
     const moved = await selectStoryLore([b], ctx, selector);
-    expect(moved.zones[3].map((r) => r.key)).toEqual(['ridge']);
-    expect(moved.zones[5].map((r) => r.key)).not.toContain('gated');
+    expect(moved.zones[3].map((r) => r.key)).toEqual([uid('ridge')]);
+    expect(moved.zones[5].map((r) => r.key)).not.toContain(uid('gated'));
     expect(moved.diagnostics.regionSnapshotKey).not.toBe(first.diagnostics.regionSnapshotKey);
     installMapPack({ ...EMPTY_MAP_PACK });
     expect((await selectStoryLore([b], ctx, selector)).zones[3]).toEqual([]);
   });
   it.each([
-    [undefined, 6, false],
+    [undefined, 2, false],
     [12, 10, true],
     [0, 0, false],
   ])(
@@ -135,8 +138,8 @@ describe('Story lore selection', () => {
 
       expect(payload.recent).toHaveLength(size);
       expect(payload.recent).not.toContain('system secret');
-      expect(result.diagnostics.candidateKeys).toEqual(hit ? ['candidate'] : []);
-      expect(result.zones[5].map((r) => r.key)).toEqual(hit ? ['candidate', 'gated'] : []);
+      expect(result.diagnostics.candidateKeys).toEqual(hit ? [uid('candidate')] : []);
+      expect(result.zones[5].map((r) => r.key)).toEqual(hit ? ['candidate', 'gated'].map(uid) : []);
       expect(createLoreReadContext(ctx).recentText.includes('old harbor')).toBe(hit);
       expect(loreRecentText(ctx)).toContain('current input');
     },
@@ -149,7 +152,7 @@ describe('Story lore selection', () => {
       [book([['current', { section: 'turn', activation: { keywords: ['old harbor'] } }]])],
       ctx,
     );
-    expect(result.diagnostics.candidateKeys).toEqual(['current']);
+    expect(result.diagnostics.candidateKeys).toEqual([uid('current')]);
   });
 
   it.each([
@@ -173,9 +176,9 @@ describe('Story lore selection', () => {
       const ctx = context('neutral');
       ctx.characters[0].location = location;
       const result = await selectStoryLore(books, ctx);
-      expect(result.zones[3].map((r) => r.key)).toEqual(hits ? ['region'] : []);
-      expect(result.diagnostics.candidateKeys).toEqual(hits ? ['turn'] : []);
-      expect(result.zones[5].map((r) => r.key)).toEqual(hits ? ['turn'] : []);
+      expect(result.zones[3].map((r) => r.key)).toEqual(hits ? [uid('region')] : []);
+      expect(result.diagnostics.candidateKeys).toEqual(hits ? [uid('turn')] : []);
+      expect(result.zones[5].map((r) => r.key)).toEqual(hits ? [uid('turn')] : []);
       const repeated = await selectStoryLore(books, ctx);
       expect(repeated.diagnostics.regionSnapshotKey).toBe(result.diagnostics.regionSnapshotKey);
     },
@@ -188,15 +191,15 @@ describe('Story lore selection', () => {
       ['unreadable', { section: 'region', activation, audiences: ['char_gen'] }],
       ['disabled', { section: 'region', activation }],
       ['excluded', { section: 'region', activation: { ...activation, excludeKeywords: ['stop'] } }],
-      ['root', { section: 'turn', activation, dependsOn: ['unreadable'] }],
+      ['root', { section: 'turn', activation, dependsOn: [uid('unreadable')] }],
     ]);
     b.entries[2].enabled = false;
     const ctx = context('stop');
     ctx.characters[0].location = 'realm central province-city';
     const result = await selectStoryLore([b], ctx);
-    expect(result.zones[3].map((r) => r.key)).toEqual(['allowed']);
+    expect(result.zones[3].map((r) => r.key)).toEqual([uid('allowed')]);
     expect(result.zones[5]).toEqual([]);
-    expect(result.diagnostics.blockedDependencyKeys).toContain('unreadable');
+    expect(result.diagnostics.blockedDependencyKeys).toContain(uid('unreadable'));
   });
 
   it('budget drops optional dependency groups and recall before EJS but preserves mandatory lore and conversation', async () => {
@@ -206,7 +209,7 @@ describe('Story lore selection', () => {
         ['dependency', { section: 'turn', activation: { keywords: ['other'] } }, 'd'.repeat(500)],
         [
           'optional',
-          { section: 'turn', dependsOn: ['dependency'] },
+          { section: 'turn', dependsOn: [uid('dependency')] },
           '<% throw new Error("budget body must never execute"); %>' + 'x'.repeat(1000),
         ],
       ]),
@@ -233,7 +236,7 @@ describe('Story lore selection', () => {
     expect(text).toContain('original story');
     expect(text).not.toContain('budget body');
     expect(text).not.toContain('相关回忆');
-    expect(result.diagnostics.budgetDroppedLoreKeys).toEqual(['dependency', 'optional']);
+    expect(result.diagnostics.budgetDroppedLoreKeys).toEqual(['dependency', 'optional'].map(uid));
     expect(result.diagnostics.budgetDroppedRecall).toBe(true);
     expect(ctx.agentOutputs.get('memory_recall')).toHaveLength(2000);
   });
@@ -246,12 +249,14 @@ describe('Story lore selection', () => {
     ];
     const first = await selectStoryLore(books, context());
     const discussed = await selectStoryLore(books, context('远城'));
-    expect(first.zones[3].map((r) => r.key)).toEqual(['city']);
+    expect(first.zones[3].map((r) => r.key)).toEqual([uid('city')]);
     expect(discussed.diagnostics.regionSnapshotKey).toBe(first.diagnostics.regionSnapshotKey);
-    expect(discussed.zones[5].map((r) => r.key)).toContain('remote');
+    expect(discussed.zones[5].map((r) => r.key)).toContain(uid('remote'));
     const moved = context();
     moved.characters[0].location = '国-远城';
-    expect((await selectStoryLore(books, moved)).zones[3].map((r) => r.key)).toEqual(['remote']);
+    expect((await selectStoryLore(books, moved)).zones[3].map((r) => r.key)).toEqual([
+      uid('remote'),
+    ]);
     books[0].entries[0].content = '修订';
     expect((await selectStoryLore(books, context())).diagnostics.regionSnapshotKey).not.toBe(
       first.diagnostics.regionSnapshotKey,
@@ -261,7 +266,7 @@ describe('Story lore selection', () => {
     const books = [
       book([
         ['base', { section: 'fixed' }],
-        ['must', { section: 'turn', required: true, dependsOn: ['base'] }],
+        ['must', { section: 'turn', required: true, dependsOn: [uid('base')] }],
         ['candidate', { section: 'turn' }, 'SECRET BODY'],
         ['private', { section: 'turn', audiences: ['story'] }],
         ['blocked', { section: 'turn', activation: { excludeKeywords: ['交易'] } }],
@@ -276,8 +281,8 @@ describe('Story lore selection', () => {
       return '{"keep":[],"extra":["E1","C1","E99"],"reason":"test"}';
     });
     const result = await selectStoryLore(books, context(), selector);
-    expect(result.zones[5].map((r) => r.key)).toEqual(['must', 'private', 'extra']);
-    expect(result.zones[1].map((r) => r.key)).toEqual(['base']);
+    expect(result.zones[5].map((r) => r.key)).toEqual(['must', 'private', 'extra'].map(uid));
+    expect(result.zones[1].map((r) => r.key)).toEqual([uid('base')]);
     expect(result.diagnostics.rejectedRefs).toEqual(['C1', 'E99']);
     expect(selector).toHaveBeenCalledTimes(1);
   });
@@ -285,7 +290,7 @@ describe('Story lore selection', () => {
     const books = [
       book([
         ['candidate', { section: 'turn' }],
-        ['root', { section: 'turn', required: true, dependsOn: ['disabled'] }],
+        ['root', { section: 'turn', required: true, dependsOn: [uid('disabled')] }],
         ['disabled', { section: 'fixed' }],
       ]),
     ];
@@ -299,8 +304,8 @@ describe('Story lore selection', () => {
     ]) {
       const result = await selectStoryLore(books, context(), selector);
       expect(result.diagnostics.status).toBe('fallback');
-      expect(result.zones[5].map((r) => r.key)).toEqual(['candidate']);
-      expect(result.diagnostics.blockedDependencyKeys).toEqual(['disabled']);
+      expect(result.zones[5].map((r) => r.key)).toEqual([uid('candidate')]);
+      expect(result.diagnostics.blockedDependencyKeys).toEqual([uid('disabled')]);
     }
   });
   it('ranks relevant supplement metadata before the eighty-entry cap without reading bodies', async () => {
@@ -351,8 +356,8 @@ describe('Story lore selection', () => {
     const result = await selectStoryLore([b], ctx, selector);
     await selectStoryLore([b], ctx, selector);
     expect(calls[1]).toEqual(calls[0]);
-    expect(result.diagnostics.supplementKeys).toEqual(['当前资料']);
-    expect(result.zones[5].map((r) => r.key)).toEqual(['当前资料']);
+    expect(result.diagnostics.supplementKeys).toEqual([uid('当前资料')]);
+    expect(result.zones[5].map((r) => r.key)).toEqual([uid('当前资料')]);
   });
 
   it('uses current input, location and bounded recent messages to rank supplements, preserving tie order', async () => {
@@ -406,10 +411,10 @@ describe('Story lore selection', () => {
     const keys = Array.from({ length: 16 }, (_, i) => `extra-${i + 1}`);
     const books = [
       book([
-        ['a', { section: 'fixed', dependsOn: ['b'] }],
-        ['b', { section: 'fixed', dependsOn: ['a'] }],
+        ['a', { section: 'fixed', dependsOn: [uid('b')] }],
+        ['b', { section: 'fixed', dependsOn: [uid('a')] }],
         ['unreadable', { section: 'fixed', audiences: ['char_gen'] }],
-        ['root', { section: 'fixed', dependsOn: ['unreadable'] }],
+        ['root', { section: 'fixed', dependsOn: [uid('unreadable')] }],
         ...keys.map(
           (key) =>
             [key, { section: 'turn', activation: { keywords: ['other'] } }] as [
@@ -427,10 +432,10 @@ describe('Story lore selection', () => {
       });
     });
     expect(result.zones[1]).toEqual([]);
-    expect(result.zones[5].map((r) => r.key)).toEqual(keys.slice(0, 15));
-    expect(result.diagnostics.supplementKeys).toEqual(keys.slice(0, 15));
+    expect(result.zones[5].map((r) => r.key)).toEqual(keys.slice(0, 15).map(uid));
+    expect(result.diagnostics.supplementKeys).toEqual(keys.slice(0, 15).map(uid));
     expect(result.diagnostics.rejectedRefs).toEqual(['E99', 'C1']);
-    expect(result.diagnostics.blockedDependencyKeys).toContain('unreadable');
+    expect(result.diagnostics.blockedDependencyKeys).toContain(uid('unreadable'));
   });
 
   it.each([0, 14, 15, 16])('retains up to fifteen of %i supplement roots', async (count) => {
@@ -452,8 +457,8 @@ describe('Story lore selection', () => {
         extra: Array.from({ length: count }, (_, i) => `E${i + 1}`),
       }),
     );
-    expect(result.diagnostics.supplementKeys).toEqual(keys.slice(0, Math.min(count, 15)));
-    expect(result.zones[5].map((r) => r.key)).toEqual(keys.slice(0, Math.min(count, 15)));
+    expect(result.diagnostics.supplementKeys).toEqual(keys.slice(0, Math.min(count, 15)).map(uid));
+    expect(result.zones[5].map((r) => r.key)).toEqual(keys.slice(0, Math.min(count, 15)).map(uid));
   });
   it.each(['disabled', 'missing', 'audience', 'exclude', 'cycle'])(
     '实际双模式 EJS get/list/has 不得间接注入被 %s 拒绝的根',
@@ -464,14 +469,14 @@ describe('Story lore selection', () => {
           { section: 'turn', required: true },
           '<%= lore.get("root") %>|<%= lore.has("root") %>|<%= JSON.stringify(lore.list("合成资料")) %>',
         ],
-        ['root', { section: 'turn', dependsOn: ['dep'] }, 'ROOT_SHOULD_BE_BLOCKED'],
+        ['root', { section: 'turn', dependsOn: [uid('dep')] }, 'ROOT_SHOULD_BE_BLOCKED'],
         ['dep', { section: 'turn' }, 'DEPENDENCY_SHOULD_BE_BLOCKED'],
       ]);
       if (mode === 'disabled') b.entries[2].enabled = false;
       if (mode === 'missing') b.entries.pop();
       if (mode === 'audience') b.entries[2].extra!.lore!.audiences = ['char_gen'];
       if (mode === 'exclude') b.entries[2].extra!.lore!.activation = { excludeKeywords: ['stop'] };
-      if (mode === 'cycle') b.entries[2].extra!.lore!.dependsOn = ['root'];
+      if (mode === 'cycle') b.entries[2].extra!.lore!.dependsOn = [uid('root')];
       const ctx = context('stop');
       const selector = vi.fn(async (messages) => {
         expect(JSON.stringify(messages)).not.toContain('ROOT_SHOULD_BE_BLOCKED');
@@ -482,7 +487,7 @@ describe('Story lore selection', () => {
         Object.values(selected.zones)
           .flat()
           .map((r) => r.key),
-      ).toEqual(['reader']);
+      ).toEqual([uid('reader')]);
       expect(selected.diagnostics.blockedDependencyKeys.length).toBeGreaterThan(0);
       expect(getEntriesForAgent('story', [b], 'stop').map((e) => e.name)).toEqual(['reader']);
       // 无合法候选无需网络；读取有效性并不以 selector 成功为前提。
@@ -534,7 +539,7 @@ describe('Story lore selection', () => {
           ['fixed', { section: 'fixed' }],
           ['city', { section: 'region', activation: { locations: ['城'] } }],
           ['denied', { audiences: ['char_gen'] }],
-          ['root', { dependsOn: ['denied'] }],
+          ['root', { dependsOn: [uid('denied')] }],
           ['excluded', { activation: { excludeKeywords: ['交易'] } }],
           ['candidate', { section: 'turn' }],
           ['supplement', { section: 'turn', activation: { keywords: ['other'] } }],
@@ -545,18 +550,18 @@ describe('Story lore selection', () => {
     );
     expect(result.diagnostics.decisions).toEqual(
       expect.arrayContaining([
-        { key: 'fixed', reason: 'fixed', outcome: 'selected', zone: 1 },
-        { key: 'city', reason: 'region-match', outcome: 'selected', zone: 3 },
-        { key: 'denied', reason: 'not-readable', outcome: 'excluded' },
-        { key: 'root', reason: 'dependency-not-readable', outcome: 'excluded' },
-        { key: 'excluded', reason: 'hard-exclusion', outcome: 'excluded' },
-        { key: 'candidate', reason: 'selector-not-selected', outcome: 'excluded' },
-        { key: 'supplement', reason: 'limited-supplement', outcome: 'selected', zone: 5 },
+        { key: uid('fixed'), reason: 'fixed', outcome: 'selected', zone: 1 },
+        { key: uid('city'), reason: 'region-match', outcome: 'selected', zone: 3 },
+        { key: uid('denied'), reason: 'not-readable', outcome: 'excluded' },
+        { key: uid('root'), reason: 'dependency-not-readable', outcome: 'excluded' },
+        { key: uid('excluded'), reason: 'hard-exclusion', outcome: 'excluded' },
+        { key: uid('candidate'), reason: 'selector-not-selected', outcome: 'excluded' },
+        { key: uid('supplement'), reason: 'limited-supplement', outcome: 'selected', zone: 5 },
       ]),
     );
     expect(JSON.stringify(result.diagnostics.decisions)).not.toContain('正文:');
   });
-  it('selected EJS is evaluated once; omitted EJS never runs, regardless of uid collisions', async () => {
+  it('selected namespaced EJS is evaluated once; omitted EJS never runs', async () => {
     const books = [
       book([
         ['fixed', { section: 'fixed' }],
@@ -585,9 +590,9 @@ describe('Story lore selection', () => {
     expect(text).toContain('value:1');
     expect(text).not.toContain('must not run');
     expect(result.diagnostics.loreKeysByZone).toEqual({
-      1: ['fixed'],
-      3: ['local'],
-      5: ['dynamic'],
+      1: [uid('fixed')],
+      3: [uid('local')],
+      5: [uid('dynamic')],
     });
   });
 });
@@ -602,7 +607,7 @@ it('direct local selection never calls a selector or inherits another agent perm
       ['combat-only', { audiences: ['combat'], section: 'fixed' }],
       [
         'direct-blocked',
-        { audiences: ['direct_main'], section: 'fixed', dependsOn: ['combat-only'] },
+        { audiences: ['direct_main'], section: 'fixed', dependsOn: [uid('combat-only')] },
       ],
     ]),
   ];
@@ -616,6 +621,6 @@ it('direct local selection never calls a selector or inherits another agent perm
     Object.values(selected.zones)
       .flat()
       .map((row) => row.key),
-  ).toEqual(['direct-rule']);
-  expect(selected.diagnostics.blockedDependencyKeys).toContain('combat-only');
+  ).toEqual([uid('direct-rule')]);
+  expect(selected.diagnostics.blockedDependencyKeys).toContain(uid('combat-only'));
 });

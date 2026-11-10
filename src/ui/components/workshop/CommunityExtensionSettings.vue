@@ -3,7 +3,7 @@
  * 已安装社区扩展的启用设置 —— 扩展管理页独占的控制面。
  *
  * 启用状态仍按存档保存到 metadata.enabledWorldBookEntries；本组件只把“项目”展开成
- * creative_workshop:<uid>，不新增全局开关或第二份状态。
+ * 工坊条目的全局 UID，不新增全局开关或第二份状态。
  */
 import { computed, onMounted, ref } from 'vue';
 import type { SaveSlot, WorldBook } from '@engine/types/types';

@@ -142,8 +142,8 @@ describe('不可复现的随机（§7）', () => {
 describe('批量与汇总', () => {
   it('preflightEntries 按条目分组', () => {
     const reports = preflightEntries([
-      { uid: 1, name: '好条目', content: '<%= 1 %>' },
-      { uid: 2, name: '坏条目', content: '<% if ( %>' },
+      { uid: 'fated:world_setting/good', name: '好条目', content: '<%= 1 %>' },
+      { uid: 'fated:world_setting/broken', name: '坏条目', content: '<% if ( %>' },
     ]);
     expect(reports).toHaveLength(2);
     expect(reports[0].report.hasBlocking).toBe(false);
@@ -152,9 +152,9 @@ describe('批量与汇总', () => {
 
   it('summarizePreflight 出一句话', () => {
     const reports = preflightEntries([
-      { uid: 1, content: '<% if ( %>' },
-      { uid: 2, content: '<% 未知符号x() %>' },
-      { uid: 3, content: '<% Math.random() %>' },
+      { uid: 'fated:world_setting/syntax', content: '<% if ( %>' },
+      { uid: 'fated:world_setting/unknown', content: '<% 未知符号x() %>' },
+      { uid: 'fated:world_setting/random', content: '<% Math.random() %>' },
     ]);
     const s = summarizePreflight(reports);
     expect(s.errors).toBeGreaterThan(0);
@@ -164,9 +164,11 @@ describe('批量与汇总', () => {
   });
 
   it('全干净时给出正面结论', () => {
-    expect(summarizePreflight(preflightEntries([{ uid: 1, content: '<%= 1 %>' }])).text).toBe(
-      '未发现问题',
-    );
+    expect(
+      summarizePreflight(
+        preflightEntries([{ uid: 'fated:world_setting/good', content: '<%= 1 %>' }]),
+      ).text,
+    ).toBe('未发现问题');
   });
 });
 

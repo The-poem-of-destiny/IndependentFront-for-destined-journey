@@ -71,7 +71,7 @@ const sampleBook: WorldBook = {
   partition: 'world_setting',
   entries: [
     {
-      uid: 900002,
+      uid: 'placeholder:world_setting/second',
       name: '第二条',
       content: '后写的条目',
       enabled: true,
@@ -82,7 +82,7 @@ const sampleBook: WorldBook = {
       position: 0,
     },
     {
-      uid: 900001,
+      uid: 'placeholder:world_setting/first',
       name: '第一条',
       content: '先写的条目',
       enabled: false,
@@ -362,12 +362,13 @@ describe('已提交的 placeholder-hashes.json', () => {
     expect(committed.version).toBe(PLACEHOLDER_VERSION);
   });
 
-  it('16 本齐、uid 全在 900001+ 保留段（D43①）、总条目 ≤150', () => {
+  it('16 本齐、UID 均为分区匹配的占位命名空间且全局唯一、总条目 ≤150', () => {
     const dir = join(PLACEHOLDER_DIR, 'worldbooks');
     const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
     expect(files).toHaveLength(16);
 
     let total = 0;
+    const uids = new Set<string>();
     for (const f of files) {
       const book = JSON.parse(readFileSync(join(dir, f), 'utf8')) as WorldBook;
       expect(book.builtIn).toBe(true);
@@ -375,7 +376,9 @@ describe('已提交的 placeholder-hashes.json', () => {
       expect(book.entries.length).toBeLessThanOrEqual(5);
       total += book.entries.length;
       for (const e of book.entries) {
-        expect(e.uid).toBeGreaterThanOrEqual(900001);
+        expect(e.uid).toMatch(new RegExp(`^placeholder:${book.partition}/[a-z0-9_-]+$`));
+        expect(uids.has(e.uid)).toBe(false);
+        uids.add(e.uid);
       }
     }
     expect(total).toBeLessThanOrEqual(150);

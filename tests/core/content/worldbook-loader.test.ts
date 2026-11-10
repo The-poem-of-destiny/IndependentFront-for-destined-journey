@@ -26,9 +26,10 @@ import type { EjsEvalContext } from '../../../src/core/ejs/ejs-runtime';
 
 // ========== Helpers ==========
 
+const uid = (slug: string, partition = 'world_setting') => `fated:${partition}/${slug}`;
 function makeEntry(overrides: Partial<WorldBookEntry> = {}): WorldBookEntry {
   return {
-    uid: 1,
+    uid: uid('one'),
     name: '测试条目',
     content: '测试内容',
     enabled: true,
@@ -80,13 +81,21 @@ describe('getEntriesForAgent', () => {
       makeBook({
         id: 'world_setting',
         entries: [
-          makeEntry({ uid: 1, content: '世界主设定', extra: { lore: { audiences: ['story'] } } }),
+          makeEntry({
+            uid: uid('one'),
+            content: '世界主设定',
+            extra: { lore: { audiences: ['story'] } },
+          }),
         ],
       }),
       makeBook({
         id: 'adventure_area',
         entries: [
-          makeEntry({ uid: 2, content: '白曜城', extra: { lore: { audiences: ['char_gen'] } } }),
+          makeEntry({
+            uid: uid('two'),
+            content: '白曜城',
+            extra: { lore: { audiences: ['char_gen'] } },
+          }),
         ],
       }),
     ];
@@ -118,20 +127,24 @@ describe('getEntriesForAgent', () => {
     const books = [
       makeBook({
         entries: [
-          makeEntry({ uid: 1, content: '条目声明', extra: { lore: { audiences: ['story'] } } }),
           makeEntry({
-            uid: 2,
+            uid: uid('one'),
+            content: '条目声明',
+            extra: { lore: { audiences: ['story'] } },
+          }),
+          makeEntry({
+            uid: uid('two'),
             content: '只给 char_gen',
             extra: { lore: { audiences: ['char_gen'] } },
           }),
-          makeEntry({ uid: 3, content: '显式空', extra: { lore: { audiences: [] } } }),
+          makeEntry({ uid: uid('three'), content: '显式空', extra: { lore: { audiences: [] } } }),
         ],
       }),
       makeBook({
         id: 'adventure_area',
         entries: [
           makeEntry({
-            uid: 4,
+            uid: uid('four'),
             content: '书无声明、条目给 story',
             extra: { lore: { audiences: ['story'] } },
           }),
@@ -139,8 +152,8 @@ describe('getEntriesForAgent', () => {
       }),
     ];
 
-    expect(getEntriesForAgent('story', books).map((e) => e.uid)).toEqual([1, 4]);
-    expect(getEntriesForAgent('char_gen', books).map((e) => e.uid)).toEqual([2]);
+    expect(getEntriesForAgent('story', books).map((e) => e.uid)).toEqual([uid('one'), uid('four')]);
+    expect(getEntriesForAgent('char_gen', books).map((e) => e.uid)).toEqual([uid('two')]);
   });
 });
 
@@ -148,26 +161,26 @@ describe('getEntriesForAgent', () => {
 
 describe('filterActiveEntries', () => {
   it('returns enabled entries', () => {
-    const entries = [makeEntry({ uid: 1, enabled: true })];
+    const entries = [makeEntry({ uid: uid('one'), enabled: true })];
     const result = filterActiveEntries(entries);
     expect(result).toHaveLength(1);
   });
 
   it('filters out disabled entries (enabled 绝对优先)', () => {
-    const entries = [makeEntry({ uid: 1, enabled: false })];
+    const entries = [makeEntry({ uid: uid('one'), enabled: false })];
     const result = filterActiveEntries(entries);
     expect(result).toHaveLength(0);
   });
 
   it('mix: 只保留 enabled 的条目', () => {
     const entries = [
-      makeEntry({ uid: 1, enabled: true }),
-      makeEntry({ uid: 2, enabled: false }),
-      makeEntry({ uid: 3, enabled: true }),
+      makeEntry({ uid: uid('one'), enabled: true }),
+      makeEntry({ uid: uid('two'), enabled: false }),
+      makeEntry({ uid: uid('three'), enabled: true }),
     ];
     const result = filterActiveEntries(entries);
     expect(result).toHaveLength(2);
-    expect(result.map((e) => e.uid)).toEqual([1, 3]);
+    expect(result.map((e) => e.uid)).toEqual([uid('one'), uid('three')]);
   });
 });
 
@@ -222,9 +235,9 @@ describe('formatWorldBookEntries', () => {
 
   it('sorts by order and joins content', () => {
     const entries = [
-      makeEntry({ uid: 1, content: '第三条', order: 300 }),
-      makeEntry({ uid: 2, content: '第一条', order: 100 }),
-      makeEntry({ uid: 3, content: '第二条', order: 200 }),
+      makeEntry({ uid: uid('three'), content: '第三条', order: 300 }),
+      makeEntry({ uid: uid('one'), content: '第一条', order: 100 }),
+      makeEntry({ uid: uid('two'), content: '第二条', order: 200 }),
     ];
     const result = formatWorldBookEntries(entries);
     expect(result).toBe('第一条\n\n第二条\n\n第三条');
@@ -234,7 +247,7 @@ describe('formatWorldBookEntries', () => {
 // ========== filterBooksByEnabledEntries ==========
 
 describe('filterBooksByEnabledEntries', () => {
-  it.each([{ selected: [] }, { selected: ['system_core:407'] }])(
+  it.each([{ selected: [] }, { selected: [uid('core', 'system_core')] }])(
     '未选择内置角色时，所有 Agent 都排除默认启用的人物档案（$selected）',
     ({ selected }) => {
       const audiences = ['story', 'char_gen', 'vars_update'];
@@ -243,10 +256,10 @@ describe('filterBooksByEnabledEntries', () => {
           id: 'character',
           partition: 'character',
           builtIn: true,
-          entries: [322, 585, 334].map((uid) =>
+          entries: ['guide', 'mage', 'merchant'].map((slug) =>
             makeEntry({
-              uid,
-              content: `未选择的人物档案 ${uid}`,
+              uid: uid(slug, 'character'),
+              content: `未选择的人物档案 ${slug}`,
               extra: { lore: { audiences, required: true } },
             }),
           ),
@@ -255,7 +268,7 @@ describe('filterBooksByEnabledEntries', () => {
           id: 'race',
           partition: 'race',
           builtIn: true,
-          entries: [makeEntry({ uid: 20, extra: { lore: { audiences } } })],
+          entries: [makeEntry({ uid: uid('human', 'race'), extra: { lore: { audiences } } })],
         }),
       ];
       const original = JSON.stringify(books);
@@ -263,7 +276,9 @@ describe('filterBooksByEnabledEntries', () => {
 
       expect(filtered[0].entries).toEqual([]);
       for (const agentId of audiences) {
-        expect(getEntriesForAgent(agentId, filtered).map((entry) => entry.uid)).toEqual([20]);
+        expect(getEntriesForAgent(agentId, filtered).map((entry) => entry.uid)).toEqual([
+          uid('human', 'race'),
+        ]);
       }
       expect(JSON.stringify(books)).toBe(original);
     },
@@ -276,14 +291,20 @@ describe('filterBooksByEnabledEntries', () => {
       partition: 'character',
       builtIn: true,
       entries: [
-        makeEntry({ uid: 301, enabled: false, extra: { lore: { audiences } } }),
-        makeEntry({ uid: 322, extra: { lore: { audiences } } }),
+        makeEntry({
+          uid: uid('selected', 'character'),
+          enabled: false,
+          extra: { lore: { audiences } },
+        }),
+        makeEntry({ uid: uid('unselected', 'character'), extra: { lore: { audiences } } }),
       ],
     });
-    const filtered = filterBooksByEnabledEntries([book], ['character:301']);
+    const filtered = filterBooksByEnabledEntries([book], [uid('selected', 'character')]);
 
     for (const agentId of audiences) {
-      expect(getEntriesForAgent(agentId, filtered).map((entry) => entry.uid)).toEqual([301]);
+      expect(getEntriesForAgent(agentId, filtered).map((entry) => entry.uid)).toEqual([
+        uid('selected', 'character'),
+      ]);
     }
     expect(book.entries.map((entry) => entry.enabled)).toEqual([false, true]);
   });
@@ -294,9 +315,12 @@ describe('filterBooksByEnabledEntries', () => {
         id: 'user-characters',
         partition: 'character',
         builtIn: false,
-        entries: [makeEntry({ uid: 301 })],
+        entries: [makeEntry({ uid: 'user:character/custom_abc' })],
       }),
-      makeBook({ partition: 'creative_workshop', entries: [makeEntry({ uid: 900 })] }),
+      makeBook({
+        partition: 'creative_workshop',
+        entries: [makeEntry({ uid: 'workshop.test:creative_workshop/rule' })],
+      }),
     ];
 
     expect(filterBooksByEnabledEntries(books, [])).toEqual(books);
@@ -307,7 +331,10 @@ describe('filterBooksByEnabledEntries', () => {
       makeBook({
         id: 'system_core',
         partition: 'system_core',
-        entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 })],
+        entries: [
+          makeEntry({ uid: uid('dalian', 'system_core') }),
+          makeEntry({ uid: uid('nightingale', 'system_core') }),
+        ],
       }),
     ];
     const result = filterBooksByEnabledEntries(books, []);
@@ -316,7 +343,12 @@ describe('filterBooksByEnabledEntries', () => {
   });
 
   it('returns all books unchanged when enabledEntries is undefined/empty array', () => {
-    const books = [makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 1 })] })];
+    const books = [
+      makeBook({
+        partition: 'system_core',
+        entries: [makeEntry({ uid: uid('core', 'system_core') })],
+      }),
+    ];
     expect(filterBooksByEnabledEntries(books, []).length).toBe(1);
   });
 
@@ -326,16 +358,16 @@ describe('filterBooksByEnabledEntries', () => {
         id: 'system_core',
         partition: 'system_core',
         entries: [
-          makeEntry({ uid: 413, content: '命运之轮' }),
-          makeEntry({ uid: 414, content: '星辰指引' }),
-          makeEntry({ uid: 415, content: '暗影低语' }),
+          makeEntry({ uid: uid('dalian', 'system_core'), content: '命运之轮' }),
+          makeEntry({ uid: uid('nightingale', 'system_core'), content: '星辰指引' }),
+          makeEntry({ uid: uid('shadow', 'system_core'), content: '暗影低语' }),
         ],
       }),
     ];
-    const result = filterBooksByEnabledEntries(books, ['system_core:413']);
+    const result = filterBooksByEnabledEntries(books, [uid('dalian', 'system_core')]);
     expect(result).toHaveLength(1);
     expect(result[0].entries).toHaveLength(1);
-    expect(result[0].entries[0].uid).toBe(413);
+    expect(result[0].entries[0].uid).toBe(uid('dalian', 'system_core'));
     expect(result[0].entries[0].content).toBe('命运之轮');
   });
 
@@ -347,14 +379,14 @@ describe('filterBooksByEnabledEntries', () => {
         builtIn: true,
         entries: [
           makeEntry({
-            uid: 413,
+            uid: uid('dalian', 'system_core'),
             name: '命定系统-妲丽安核心',
             content: '妲丽安世界书正文',
             enabled: false,
             extra: { lore: { audiences: ['story'] } },
           }),
           makeEntry({
-            uid: 414,
+            uid: uid('nightingale', 'system_core'),
             name: '命定系统-小夜莺核心',
             enabled: false,
             extra: { lore: { audiences: ['story'] } },
@@ -362,10 +394,10 @@ describe('filterBooksByEnabledEntries', () => {
         ],
       }),
     ];
-    const filtered = filterBooksByEnabledEntries(books, ['system_core:413']);
+    const filtered = filterBooksByEnabledEntries(books, [uid('dalian', 'system_core')]);
     const active = filterActiveEntries(getEntriesForAgent('story', filtered));
 
-    expect(active.map((entry) => entry.uid)).toEqual([413]);
+    expect(active.map((entry) => entry.uid)).toEqual([uid('dalian', 'system_core')]);
     expect(active[0].content).toBe('妲丽安世界书正文');
   });
 
@@ -375,11 +407,11 @@ describe('filterBooksByEnabledEntries', () => {
         id: 'workshop:test',
         partition: 'creative_workshop',
         builtIn: false,
-        entries: [makeEntry({ uid: 900, enabled: false })],
+        entries: [makeEntry({ uid: 'workshop.test:creative_workshop/rule', enabled: false })],
       }),
     ];
 
-    const filtered = filterBooksByEnabledEntries(books, ['creative_workshop:900']);
+    const filtered = filterBooksByEnabledEntries(books, ['workshop.test:creative_workshop/rule']);
 
     expect(filtered[0].entries).toHaveLength(1);
     expect(filtered[0].entries[0].enabled).toBe(false);
@@ -387,14 +419,18 @@ describe('filterBooksByEnabledEntries', () => {
 
   it('passes through books whose partition is not in enabledEntries', () => {
     const books = [
-      makeBook({ id: 'system_core', partition: 'system_core', entries: [makeEntry({ uid: 413 })] }),
+      makeBook({
+        id: 'system_core',
+        partition: 'system_core',
+        entries: [makeEntry({ uid: uid('dalian', 'system_core') })],
+      }),
       makeBook({
         id: 'race',
         partition: 'race',
-        entries: [makeEntry({ uid: 1 }), makeEntry({ uid: 2 })],
+        entries: [makeEntry({ uid: uid('human', 'race') }), makeEntry({ uid: uid('elf', 'race') })],
       }),
     ];
-    const result = filterBooksByEnabledEntries(books, ['system_core:413']);
+    const result = filterBooksByEnabledEntries(books, [uid('dalian', 'system_core')]);
     expect(result).toHaveLength(2);
     // system_core: filtered
     expect(result[0].entries).toHaveLength(1);
@@ -406,23 +442,36 @@ describe('filterBooksByEnabledEntries', () => {
     const books = [
       makeBook({
         partition: 'system_core',
-        entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 })],
+        entries: [
+          makeEntry({ uid: uid('dalian', 'system_core') }),
+          makeEntry({ uid: uid('nightingale', 'system_core') }),
+        ],
       }),
       makeBook({
         partition: 'character',
-        entries: [makeEntry({ uid: 301 }), makeEntry({ uid: 302 })],
+        entries: [
+          makeEntry({ uid: uid('selected', 'character') }),
+          makeEntry({ uid: uid('other', 'character') }),
+        ],
       }),
     ];
-    const result = filterBooksByEnabledEntries(books, ['system_core:413', 'character:301']);
-    expect(result[0].entries.map((e) => e.uid)).toEqual([413]);
-    expect(result[1].entries.map((e) => e.uid)).toEqual([301]);
+    const result = filterBooksByEnabledEntries(books, [
+      uid('dalian', 'system_core'),
+      uid('selected', 'character'),
+    ]);
+    expect(result[0].entries.map((e) => e.uid)).toEqual([uid('dalian', 'system_core')]);
+    expect(result[1].entries.map((e) => e.uid)).toEqual([uid('selected', 'character')]);
   });
 
   it('removes all entries for a partition when no uid matches', () => {
     const books = [
-      makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 413 })], name: '核心' }),
+      makeBook({
+        partition: 'system_core',
+        entries: [makeEntry({ uid: uid('dalian', 'system_core') })],
+        name: '核心',
+      }),
     ];
-    const result = filterBooksByEnabledEntries(books, ['system_core:999']);
+    const result = filterBooksByEnabledEntries(books, [uid('missing', 'system_core')]);
     expect(result[0].entries).toHaveLength(0);
   });
 
@@ -430,35 +479,54 @@ describe('filterBooksByEnabledEntries', () => {
     const books = [
       makeBook({
         partition: 'system_core',
-        entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 }), makeEntry({ uid: 415 })],
+        entries: [
+          makeEntry({ uid: uid('dalian', 'system_core') }),
+          makeEntry({ uid: uid('nightingale', 'system_core') }),
+          makeEntry({ uid: uid('shadow', 'system_core') }),
+        ],
       }),
     ];
-    const result = filterBooksByEnabledEntries(books, ['system_core:413', 'system_core:415']);
+    const result = filterBooksByEnabledEntries(books, [
+      uid('dalian', 'system_core'),
+      uid('shadow', 'system_core'),
+    ]);
     expect(result[0].entries).toHaveLength(2);
-    expect(result[0].entries.map((e) => e.uid).sort()).toEqual([413, 415]);
+    expect(result[0].entries.map((e) => e.uid).sort()).toEqual([
+      uid('dalian', 'system_core'),
+      uid('shadow', 'system_core'),
+    ]);
   });
 
   it('skips malformed enabledEntry values', () => {
-    const books = [makeBook({ partition: 'system_core', entries: [makeEntry({ uid: 413 })] })];
-    // mixed: one valid pair with non-matching uid, others malformed
+    const books = [
+      makeBook({
+        partition: 'system_core',
+        entries: [makeEntry({ uid: uid('dalian', 'system_core') })],
+      }),
+    ];
+    // 完整但不存在的 UID 触发过滤；旧数字 token 与畸形输入不参与解析。
     const result = filterBooksByEnabledEntries(books, [
+      uid('missing', 'system_core'),
       'system_core:999',
       'system_core:abc',
       '',
       ':',
     ]);
-    expect(result[0].entries).toHaveLength(0); // only system_core:999 parsed, uid 999 doesn't match 413
+    expect(result[0].entries).toHaveLength(0); // 仅合法命名空间 UID 参与匹配。
   });
 
   it('does not mutate input books', () => {
     const books = [
       makeBook({
         partition: 'system_core',
-        entries: [makeEntry({ uid: 413 }), makeEntry({ uid: 414 })],
+        entries: [
+          makeEntry({ uid: uid('dalian', 'system_core') }),
+          makeEntry({ uid: uid('nightingale', 'system_core') }),
+        ],
       }),
     ];
     const originalLength = books[0].entries.length;
-    filterBooksByEnabledEntries(books, ['system_core:413']);
+    filterBooksByEnabledEntries(books, [uid('dalian', 'system_core')]);
     expect(books[0].entries).toHaveLength(originalLength);
   });
 });
@@ -489,7 +557,10 @@ describe('renderWorldBookEntries — 分层与保序', () => {
   beforeEach(() => clearEjsCompileCache());
 
   it('无动态特征的条目全部落静态区，动态区为空', () => {
-    const entries = [makeEntry({ uid: 1, content: 'A' }), makeEntry({ uid: 2, content: 'B' })];
+    const entries = [
+      makeEntry({ uid: uid('one'), content: 'A' }),
+      makeEntry({ uid: uid('two'), content: 'B' }),
+    ];
     const r = renderWorldBookEntries(entries, makeCtx());
     expect(r.staticText).toBe('A\n\nB');
     expect(r.dynamicText).toBe('');
@@ -498,11 +569,11 @@ describe('renderWorldBookEntries — 分层与保序', () => {
 
   it('两区内部各自按 order 排序，同 order 保持入参顺序', () => {
     const entries = [
-      makeEntry({ uid: 1, content: '静C', order: 300 }),
-      makeEntry({ uid: 2, content: '动<%= 2 %>', order: 200 }),
-      makeEntry({ uid: 3, content: '静A', order: 100 }),
-      makeEntry({ uid: 4, content: '动<%= 1 %>', order: 100 }),
-      makeEntry({ uid: 5, content: '静B', order: 100 }), // 与「静A」同 order → 稳定排序
+      makeEntry({ uid: uid('one'), content: '静C', order: 300 }),
+      makeEntry({ uid: uid('two'), content: '动<%= 2 %>', order: 200 }),
+      makeEntry({ uid: uid('three'), content: '静A', order: 100 }),
+      makeEntry({ uid: uid('four'), content: '动<%= 1 %>', order: 100 }),
+      makeEntry({ uid: uid('five'), content: '静B', order: 100 }), // 与「静A」同 order → 稳定排序
     ];
     const r = renderWorldBookEntries(entries, makeCtx());
     expect(r.staticText).toBe('静A\n\n静B\n\n静C');
@@ -511,8 +582,8 @@ describe('renderWorldBookEntries — 分层与保序', () => {
 
   it('只含 {{random}}/{{getvar}} 无 `<%` 的条目：进动态区但不求值，原文透传', () => {
     const entries = [
-      makeEntry({ uid: 1, content: '{{random: 甲, 乙}}', order: 10 }),
-      makeEntry({ uid: 2, content: '{{getvar::foo}}', order: 20 }),
+      makeEntry({ uid: uid('one'), content: '{{random: 甲, 乙}}', order: 10 }),
+      makeEntry({ uid: uid('two'), content: '{{getvar::foo}}', order: 20 }),
     ];
     const r = renderWorldBookEntries(entries, makeCtx());
     expect(r.staticText).toBe('');
@@ -522,9 +593,9 @@ describe('renderWorldBookEntries — 分层与保序', () => {
 
   it('EJS 条目相对顺序不变 → vars 写→读链按序可见', () => {
     const entries = [
-      makeEntry({ uid: 1, content: '静态占位', order: 50 }),
-      makeEntry({ uid: 2, content: '<% setvar("n", 7) %>写', order: 100 }),
-      makeEntry({ uid: 3, content: '读<%= getvar("n") %>', order: 200 }),
+      makeEntry({ uid: uid('one'), content: '静态占位', order: 50 }),
+      makeEntry({ uid: uid('two'), content: '<% setvar("n", 7) %>写', order: 100 }),
+      makeEntry({ uid: uid('three'), content: '读<%= getvar("n") %>', order: 200 }),
     ];
     const vars: Record<string, any> = {};
     const r = renderWorldBookEntries(entries, makeCtx({ vars }));
@@ -534,26 +605,30 @@ describe('renderWorldBookEntries — 分层与保序', () => {
 
   it('编译失败 → 原文注入 + 记入 fallbackEntries，其余条目照常', () => {
     const entries = [
-      makeEntry({ uid: 1, content: '好<%= 1 + 1 %>', order: 10 }),
-      makeEntry({ uid: 2, content: '坏<% if ( %>', order: 20 }),
-      makeEntry({ uid: 3, content: '好<%= 3 %>', order: 30 }),
+      makeEntry({ uid: uid('one'), content: '好<%= 1 + 1 %>', order: 10 }),
+      makeEntry({ uid: uid('two'), content: '坏<% if ( %>', order: 20 }),
+      makeEntry({ uid: uid('three'), content: '好<%= 3 %>', order: 30 }),
     ];
     const r = renderWorldBookEntries(entries, makeCtx());
     expect(r.dynamicText).toBe('好2\n\n坏<% if ( %>\n\n好3');
     expect(r.fallbackEntries).toHaveLength(1);
-    expect(r.fallbackEntries[0].uid).toBe(2);
+    expect(r.fallbackEntries[0].uid).toBe(uid('two'));
     expect(r.fallbackEntries[0].error).toMatch(/SyntaxError/);
   });
 
   it('执行失败 → 原文注入且该条目对 vars 的半途写入整体回滚', () => {
     const entries = [
-      makeEntry({ uid: 1, content: '<% setvar("keep", 1) %>ok', order: 10 }),
-      makeEntry({ uid: 2, content: '<% setvar("gone", 1); undefinedSymbol(); %>never', order: 20 }),
+      makeEntry({ uid: uid('one'), content: '<% setvar("keep", 1) %>ok', order: 10 }),
+      makeEntry({
+        uid: uid('two'),
+        content: '<% setvar("gone", 1); undefinedSymbol(); %>never',
+        order: 20,
+      }),
     ];
     const vars: Record<string, any> = {};
     const r = renderWorldBookEntries(entries, makeCtx({ vars }));
     expect(r.fallbackEntries).toHaveLength(1);
-    expect(r.fallbackEntries[0].uid).toBe(2);
+    expect(r.fallbackEntries[0].uid).toBe(uid('two'));
     expect(r.dynamicText).toContain('<% setvar("gone", 1); undefinedSymbol(); %>never');
     expect(vars.keep).toBe(1);
     expect(vars.gone).toBeUndefined();
@@ -561,9 +636,9 @@ describe('renderWorldBookEntries — 分层与保序', () => {
 
   it('回退条目仍留在动态区原位（不被挪到末尾）', () => {
     const entries = [
-      makeEntry({ uid: 1, content: '<%= "甲" %>', order: 10 }),
-      makeEntry({ uid: 2, content: '<% if ( %>', order: 20 }),
-      makeEntry({ uid: 3, content: '<%= "丙" %>', order: 30 }),
+      makeEntry({ uid: uid('one'), content: '<%= "甲" %>', order: 10 }),
+      makeEntry({ uid: uid('two'), content: '<% if ( %>', order: 20 }),
+      makeEntry({ uid: uid('three'), content: '<%= "丙" %>', order: 30 }),
     ];
     const r = renderWorldBookEntries(entries, makeCtx());
     expect(r.dynamicText.split('\n\n')).toEqual(['甲', '<% if ( %>', '丙']);
@@ -578,18 +653,18 @@ describe('renderWorldBookEntries — 分层与保序', () => {
 
   it('不修改入参数组顺序', () => {
     const entries = [
-      makeEntry({ uid: 1, content: 'B', order: 200 }),
-      makeEntry({ uid: 2, content: 'A', order: 100 }),
+      makeEntry({ uid: uid('one'), content: 'B', order: 200 }),
+      makeEntry({ uid: uid('two'), content: 'A', order: 100 }),
     ];
     renderWorldBookEntries(entries, makeCtx());
-    expect(entries.map((e) => e.uid)).toEqual([1, 2]);
+    expect(entries.map((e) => e.uid)).toEqual([uid('one'), uid('two')]);
   });
 
   it('编译缓存：同一正文重复出现只编译一次（清缓存后结果不变）', () => {
     const same = '<%= getvar("k") %>';
     const entries = [
-      makeEntry({ uid: 1, content: same, order: 10 }),
-      makeEntry({ uid: 2, content: same, order: 20 }),
+      makeEntry({ uid: uid('one'), content: same, order: 10 }),
+      makeEntry({ uid: uid('two'), content: same, order: 20 }),
     ];
     const first = renderWorldBookEntries(entries, makeCtx({ vars: { k: 'x' } }));
     expect(first.dynamicText).toBe('x\n\nx');
@@ -612,28 +687,28 @@ describe('renderWorldBookEntries — 同步路径的 fail-closed 闸门（F3）'
   it('后端不是 Legacy 时同步路径不在宿主 realm 求值 → 原文注入 + 记回退', () => {
     setEjsBackend(new FailClosedBackend('隔离后端装载失败: 模拟'));
     const entries = [
-      makeEntry({ uid: 1, content: '静态', order: 10 }),
-      makeEntry({ uid: 2, content: '<%= 1 + 1 %>', order: 20 }),
+      makeEntry({ uid: uid('one'), content: '静态', order: 10 }),
+      makeEntry({ uid: uid('two'), content: '<%= 1 + 1 %>', order: 20 }),
     ];
     const r = renderWorldBookEntries(entries, makeCtx());
     expect(r.staticText).toBe('静态');
     // 未求值 → 原文（不是 "2"）
     expect(r.dynamicText).toBe('<%= 1 + 1 %>');
     expect(r.fallbackEntries).toHaveLength(1);
-    expect(r.fallbackEntries[0].uid).toBe(2);
+    expect(r.fallbackEntries[0].uid).toBe(uid('two'));
     expect(r.fallbackEntries[0].error).toContain('未求值');
   });
 
   it('闸门只挡 EJS —— 只含 {{random}}/{{getvar}} 的条目照旧原文透传、不记回退', () => {
     setEjsBackend(new FailClosedBackend('x'));
-    const entries = [makeEntry({ uid: 1, content: '{{getvar::foo}}', order: 10 })];
+    const entries = [makeEntry({ uid: uid('one'), content: '{{getvar::foo}}', order: 10 })];
     const r = renderWorldBookEntries(entries, makeCtx());
     expect(r.dynamicText).toBe('{{getvar::foo}}');
     expect(r.fallbackEntries).toEqual([]);
   });
 
   it('默认 Legacy 后端（测试基线）下行为不变，照常求值', () => {
-    const entries = [makeEntry({ uid: 1, content: '<%= 1 + 1 %>', order: 10 })];
+    const entries = [makeEntry({ uid: uid('one'), content: '<%= 1 + 1 %>', order: 10 })];
     expect(renderWorldBookEntries(entries, makeCtx()).dynamicText).toBe('2');
   });
 });
@@ -645,36 +720,35 @@ describe('prerenderWorldBookEntries — 结果按下标回填（F4 回归）', (
   });
   afterEach(() => resetEjsBackend());
 
-  it('🔴 两本书的动态条目 uid 撞号时，各自渲染各自的正文、各出现一次', async () => {
-    // 真机场景：内置书 uid 1–509，用户导入书 ST 导出是每本 0..N-1 →
-    // 跨书撞号是常态。按 uid 建 Map 会让一条注入两次、另一条被静默吞掉。
+  it('重复 UID 的非法输入仍逐下标渲染，各自正文各出现一次', async () => {
+    // 协议入口禁止全局重复；底层渲染器面对未校验的非法输入也不能吞正文。
     const entries = [
-      makeEntry({ uid: 7, content: '甲书<%= 1 + 1 %>', order: 10 }),
-      makeEntry({ uid: 7, content: '乙书<%= 20 + 2 %>', order: 20 }),
+      makeEntry({ uid: uid('duplicate'), content: '甲书<%= 1 + 1 %>', order: 10 }),
+      makeEntry({ uid: uid('duplicate'), content: '乙书<%= 20 + 2 %>', order: 20 }),
     ];
     const r = await prerenderWorldBookEntries(entries, makeCtx());
     expect(r.dynamicText.split('\n\n')).toEqual(['甲书2', '乙书22']);
     expect(r.fallbackEntries).toEqual([]);
   });
 
-  it('撞号 + 其中一条失败：只有失败那条回退，另一条正常渲染', async () => {
+  it('非法重复 UID + 其中一条失败：只有失败那条回退，另一条正常渲染', async () => {
     const entries = [
-      makeEntry({ uid: 3, content: '好<%= "甲" %>', order: 10 }),
-      makeEntry({ uid: 3, content: '坏<% if ( %>', order: 20 }),
-      makeEntry({ uid: 3, content: '好<%= "丙" %>', order: 30 }),
+      makeEntry({ uid: uid('duplicate'), content: '好<%= "甲" %>', order: 10 }),
+      makeEntry({ uid: uid('duplicate'), content: '坏<% if ( %>', order: 20 }),
+      makeEntry({ uid: uid('duplicate'), content: '好<%= "丙" %>', order: 30 }),
     ];
     const r = await prerenderWorldBookEntries(entries, makeCtx());
     expect(r.dynamicText.split('\n\n')).toEqual(['好甲', '坏<% if ( %>', '好丙']);
     expect(r.fallbackEntries).toHaveLength(1);
-    expect(r.fallbackEntries[0].uid).toBe(3);
+    expect(r.fallbackEntries[0].uid).toBe(uid('duplicate'));
     expect(r.fallbackEntries[0].error).toMatch(/SyntaxError/);
   });
 
-  it('撞号条目夹着不需求值的宏条目时，下标仍不错位', async () => {
+  it('非法重复 UID 条目夹着不需求值的宏条目时，下标仍不错位', async () => {
     const entries = [
-      makeEntry({ uid: 5, content: '<%= "一" %>', order: 10 }),
-      makeEntry({ uid: 5, content: '{{getvar::foo}}', order: 20 }), // 不进后端
-      makeEntry({ uid: 5, content: '<%= "二" %>', order: 30 }),
+      makeEntry({ uid: uid('duplicate'), content: '<%= "一" %>', order: 10 }),
+      makeEntry({ uid: uid('duplicate'), content: '{{getvar::foo}}', order: 20 }), // 不进后端
+      makeEntry({ uid: uid('duplicate'), content: '<%= "二" %>', order: 30 }),
     ];
     const r = await prerenderWorldBookEntries(entries, makeCtx());
     expect(r.dynamicText.split('\n\n')).toEqual(['一', '{{getvar::foo}}', '二']);
@@ -691,8 +765,8 @@ describe('prerenderWorldBookEntries — 结果按下标回填（F4 回归）', (
       dispose() {},
     });
     const entries = [
-      makeEntry({ uid: 9, content: '<%= 1 %>', order: 10 }),
-      makeEntry({ uid: 9, content: '<%= 2 %>', order: 20 }),
+      makeEntry({ uid: uid('one'), content: '<%= 1 %>', order: 10 }),
+      makeEntry({ uid: uid('two'), content: '<%= 2 %>', order: 20 }),
     ];
     const r = await prerenderWorldBookEntries(entries, makeCtx());
     expect(r.dynamicText.split('\n\n')).toEqual(['已渲染', '<%= 2 %>']);

@@ -37,7 +37,7 @@ beforeEach(() => {
       name: '旅途一',
       slot: 0,
       updatedAt: 200,
-      metadata: { characterName: '维拉', enabledWorldBookEntries: ['system_core:1'] },
+      metadata: { characterName: '维拉', enabledWorldBookEntries: ['fated:system_core/core'] },
     },
   ];
   h.workshop.projects = [
@@ -54,7 +54,10 @@ beforeEach(() => {
     {
       id: 'workshop:p1',
       partition: 'creative_workshop',
-      entries: [{ uid: 10 }, { uid: 11 }],
+      entries: [
+        { uid: 'workshop.p1:creative_workshop/first' },
+        { uid: 'workshop.p1:creative_workshop/second' },
+      ],
     },
   ];
 });
@@ -77,9 +80,9 @@ describe('CommunityExtensionSettings', () => {
     await flushPromises();
 
     expect(h.game.setSaveEnabledWorldBookEntries).toHaveBeenCalledWith('save-1', [
-      'system_core:1',
-      'creative_workshop:10',
-      'creative_workshop:11',
+      'fated:system_core/core',
+      'workshop.p1:creative_workshop/first',
+      'workshop.p1:creative_workshop/second',
     ]);
   });
 

@@ -320,7 +320,8 @@ async function ctxCopy() {
  * 把最新一条正文交给「正文润色」侧链改写，成功后就地覆盖。
  *
  * 🔴 依赖玩家在设置里给 `prose_rewrite` 绑定一个 **baseUrl 带 `/beta` 的 DeepSeek 源**；
- *    没绑定/绑定失效时侧链直接返回失败，这里只负责把原因显示出来。
+ *    没绑定 / 绑定失效 / 协议不是 openai-chat 时侧链直接返回失败（端点识别在侧链里做），
+ *    这里只负责把原因显示出来；`/beta` 缺失只回 warning，成功后再补一条提示。
  * 🔴 活动账本由 GamePipeline 维护（agent-activity 里有「润色这一段正文」文案），
  *    生成期间 ChatFlow 的思考指示会自动显示出来。
  */
@@ -332,8 +333,11 @@ async function ctxRewriteProse() {
   ui.toast('正在润色正文…', 'info');
   try {
     const result = await game.rewriteProse(msgId);
-    if (result.ok) ui.toast('正文已润色', 'success');
-    else ui.toast(result.reason ?? '润色失败', 'warning');
+    if (result.ok) {
+      ui.toast('正文已润色', 'success');
+      // 端点识别只回了 warning（如 base_url 不含 /beta）→ 照常提示，但让玩家知道可能被上游拒
+      if (result.warning) ui.toast(result.warning, 'warning');
+    } else ui.toast(result.reason ?? '润色失败', 'warning');
   } catch (e) {
     ui.toast(`润色失败：${e instanceof Error ? e.message : String(e)}`, 'error');
   }

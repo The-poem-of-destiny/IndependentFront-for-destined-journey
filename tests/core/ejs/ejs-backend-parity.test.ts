@@ -39,7 +39,7 @@ const makeCtx = (over: Partial<EjsEvalContext> = {}): EjsEvalContext => ({
 
 /** 同一批条目在两个后端各跑一次；返回 {文本, 是否成功, 末态草稿} 两份，供逐字段比对 */
 async function bothBackends(
-  entries: Array<{ uid: number; content: string }>,
+  entries: Array<{ uid: string; content: string }>,
   over: Partial<EjsEvalContext> = {},
 ) {
   const lc = makeCtx(over);
@@ -58,7 +58,7 @@ async function bothBackends(
 
 /** 单条目对齐断言：文本、成败、草稿末态三样都必须一致 */
 async function expectSame(content: string, over: Partial<EjsEvalContext> = {}) {
-  const r = await bothBackends([{ uid: 1, content }], over);
+  const r = await bothBackends([{ uid: 'fated:world_setting/sample', content }], over);
   expect(r.quickjsOk, `成败不一致: ${content.slice(0, 60)}`).toEqual(r.legacyOk);
   expect(r.quickjsText, `文本不一致: ${content.slice(0, 60)}`).toEqual(r.legacyText);
   expect(r.quickjsVars, `草稿末态不一致: ${content.slice(0, 60)}`).toEqual(r.legacyVars);
@@ -102,9 +102,9 @@ describe('回归：评审揪出的四条后端分叉', () => {
   it(
     'rng 逐条目播种：同正文条目的结果与它在 pass 中的位置无关（曾经 QuickJS 整 pass 一条序列）',
     async () => {
-      const target = { uid: 2, content: '<%= rng.roll("1d100") %>' };
+      const target = { uid: 'fated:world_setting/target', content: '<%= rng.roll("1d100") %>' };
       const withPrefix = await bothBackends([
-        { uid: 1, content: '<%= rng.roll("1d20") %>' },
+        { uid: 'fated:world_setting/prefix', content: '<%= rng.roll("1d20") %>' },
         target,
       ]);
       const alone = await bothBackends([target]);
@@ -180,8 +180,11 @@ describe('回归：__proto__ 段两后端一致（DEFECT B）', () => {
     '__proto__ 写不进 guest 原型，不跨条目污染',
     async () => {
       const r = await bothBackends([
-        { uid: 1, content: '<% setvar("__proto__.POLL", "POLLUTED") %>' },
-        { uid: 2, content: '<%= ({}).POLL === "POLLUTED" ? "脏" : "净" %>' },
+        { uid: 'fated:world_setting/write', content: '<% setvar("__proto__.POLL", "POLLUTED") %>' },
+        {
+          uid: 'fated:world_setting/read',
+          content: '<%= ({}).POLL === "POLLUTED" ? "脏" : "净" %>',
+        },
       ]);
       expect(r.quickjsText).toEqual(r.legacyText);
       // 曾经 QuickJS 下 __proto__.POLL 落到 guest realm 的 Object.prototype → 第二条读到 "脏"
@@ -195,8 +198,8 @@ describe('回归：__proto__ 段两后端一致（DEFECT B）', () => {
     '__proto__ 整次写被拒后，同名普通键的后续写仍保留（末态草稿一致）',
     async () => {
       const r = await bothBackends([
-        { uid: 1, content: '<% setvar("__proto__.桶", {}) %>' },
-        { uid: 2, content: '<% setvar("桶.键", 42) %>' },
+        { uid: 'fated:world_setting/write', content: '<% setvar("__proto__.桶", {}) %>' },
+        { uid: 'fated:world_setting/read', content: '<% setvar("桶.键", 42) %>' },
       ]);
       expect(r.quickjsText).toEqual(r.legacyText);
       // Legacy：第一条整次拒绝、第二条正常建 桶.键；曾经 QuickJS 第一条写进原型，
@@ -230,8 +233,8 @@ describe('渲染语义对齐', () => {
     'vars 草稿：写、读、跨条目可见',
     async () => {
       const r = await bothBackends([
-        { uid: 1, content: '<% vars.队伍 = { 人数: 3 } %>' },
-        { uid: 2, content: '<%= vars.队伍.人数 %>' },
+        { uid: 'fated:world_setting/write', content: '<% vars.队伍 = { 人数: 3 } %>' },
+        { uid: 'fated:world_setting/read', content: '<%= vars.队伍.人数 %>' },
       ]);
       expect(r.quickjsText).toEqual(r.legacyText);
       expect(r.quickjsVars).toEqual(r.legacyVars);
@@ -271,8 +274,14 @@ describe('渲染语义对齐', () => {
     '🔴 跨条目 stats 隔离：一条目写只读轴，不漏给后面的条目（两后端同答案）',
     async () => {
       const entries = [
-        { uid: 1, content: '<% stats.主角.背包 = ["剑"]; stats.主角.背包.push("污染") %>写完了' },
-        { uid: 2, content: '<%= JSON.stringify(stats.主角.背包 ?? null) %>' },
+        {
+          uid: 'fated:world_setting/write',
+          content: '<% stats.主角.背包 = ["剑"]; stats.主角.背包.push("污染") %>写完了',
+        },
+        {
+          uid: 'fated:world_setting/read',
+          content: '<%= JSON.stringify(stats.主角.背包 ?? null) %>',
+        },
       ];
       const r = await bothBackends(entries);
 
@@ -288,8 +297,11 @@ describe('渲染语义对齐', () => {
     '🔴 更糟的变体：写完 stats 再抛错 —— 条目被回滚，但它对只读轴的写也不许活下来',
     async () => {
       const entries = [
-        { uid: 1, content: '<% stats.主角.等级 = 999; throw new Error("boom") %>' },
-        { uid: 2, content: '<%= stats.主角.等级 %>' },
+        {
+          uid: 'fated:world_setting/write',
+          content: '<% stats.主角.等级 = 999; throw new Error("boom") %>',
+        },
+        { uid: 'fated:world_setting/read', content: '<%= stats.主角.等级 %>' },
       ];
       const r = await bothBackends(entries);
 
@@ -382,7 +394,7 @@ describe('回归：编组层丢语义导致的后端分叉', () => {
         lore: { get: (n: string) => (n === '设计' ? '设计正文' : null), list: () => ['设计'] },
       } as never;
       const entries = Array.from({ length: 10 }, (_, i) => ({
-        uid: i + 1,
+        uid: `fated:world_setting/sample_${i}`,
         content: '<%= lore.get("设计") %>',
       }));
       const r = await bothBackends(entries, { capabilities });
@@ -551,7 +563,9 @@ describe('真实语料片段两后端一致', () => {
         .slice(0, 12);
       expect(sample.length, '语料应抽得到样本').toBeGreaterThan(5);
 
-      const r = await bothBackends(sample.map((e, i) => ({ uid: i + 1, content: e.content })));
+      const r = await bothBackends(
+        sample.map((e, i) => ({ uid: `fated:world_setting/sample_${i}`, content: e.content })),
+      );
       const mismatches: string[] = [];
       for (let i = 0; i < sample.length; i++) {
         if (r.quickjsText[i] !== r.legacyText[i]) {
@@ -579,8 +593,14 @@ describe('真实语料片段两后端一致', () => {
         }
         const lc = makeCtx();
         const qc = makeCtx();
-        const [l] = await legacy.runPass([{ uid: 1, content: f.code }], lc);
-        const [q] = await quickjs.runPass([{ uid: 1, content: f.code }], qc);
+        const [l] = await legacy.runPass(
+          [{ uid: 'fated:world_setting/case', content: f.code }],
+          lc,
+        );
+        const [q] = await quickjs.runPass(
+          [{ uid: 'fated:world_setting/case', content: f.code }],
+          qc,
+        );
         if (l.text !== q.text || l.ok !== q.ok) {
           mismatches.push(`${f.from}(${f.feature}): legacy ok=${l.ok} / quickjs ok=${q.ok}`);
         }

@@ -10,6 +10,7 @@
 
 import type { WorldBook, WorldBookEntry } from '../types/types';
 import { resolveLoreDependenciesForAgent } from './lore-routing';
+import { uidPartition } from './worldbook-uid';
 import { executeEjsEntry, type EjsEvalContext } from '../ejs/ejs-runtime';
 import {
   clearEjsBackendCache,
@@ -143,7 +144,7 @@ function matchSingleKeyword(text: string, keyword: string): boolean {
  * 按存档级 enabledWorldBookEntries 精确过滤世界书条目。
  *
  * 规则:
- * - `enabledEntries` 格式: `"partition:uid"`（如 `"system_core:413"`）
+ * - `enabledEntries` 直接存全局 UID（如 `fated:system_core/dalian`）
  * - partition 在 enabledEntries 中有记录的 → 只保留 uid 命中条目，其余移除
  * - 内置 system_core/character 的命中条目 → 存档选择覆盖出厂 enabled=false
  * - 内置 character 始终按存档白名单过滤；未记录角色即未选择，不沿用全局默认启用
@@ -157,25 +158,19 @@ export function filterBooksByEnabledEntries(
   enabledEntries: string[],
 ): WorldBook[] {
   // Build lookup: partition → Set<uid>
-  const enabledByPartition = new Map<string, Set<number>>();
-  for (const entry of enabledEntries ?? []) {
-    const colonIdx = entry.indexOf(':');
-    if (colonIdx <= 0 || colonIdx >= entry.length - 1) continue;
-    const partition = entry.slice(0, colonIdx);
-    const uid = parseInt(entry.slice(colonIdx + 1), 10);
-    if (isNaN(uid)) continue;
-    let set = enabledByPartition.get(partition);
-    if (!set) {
-      set = new Set<number>();
-      enabledByPartition.set(partition, set);
-    }
+  const enabledByPartition = new Map<string, Set<string>>();
+  for (const uid of enabledEntries ?? []) {
+    const partition = uidPartition(uid);
+    if (!partition) continue;
+    const set = enabledByPartition.get(partition) ?? new Set<string>();
+    enabledByPartition.set(partition, set);
     set.add(uid);
   }
 
   return books.map((book) => {
     const allowedUids =
       enabledByPartition.get(book.partition) ??
-      (book.builtIn === true && book.partition === 'character' ? new Set<number>() : undefined);
+      (book.builtIn === true && book.partition === 'character' ? new Set<string>() : undefined);
     if (!allowedUids) return book;
     const isBuiltInSaveSelection =
       book.builtIn === true && (book.partition === 'system_core' || book.partition === 'character');
@@ -226,7 +221,7 @@ export interface WorldBookRenderResult {
   /** 动态区：含动态特征的条目按 order 拼接（EJS 已求值 / 失败者原文） */
   dynamicText: string;
   /** 编译或执行失败、已回退原文注入的条目（设计 D8） */
-  fallbackEntries: Array<{ uid: number; error: string }>;
+  fallbackEntries: Array<{ uid: string; error: string }>;
 }
 
 // 🪦 Q-10：本模块曾自带一份 `ejsCompileCache` / `getCompiled` / `clearEjsCompileCache`，
@@ -259,7 +254,7 @@ export function clearEjsCompileCache(): void {
  */
 /** 动态区的一格：`needsEval` 为 false 表示只含宏、不进 EJS（原文透传给下游宏剥离） */
 interface DynamicSlot {
-  uid: number;
+  uid: string;
   content: string;
   needsEval: boolean;
 }
@@ -292,7 +287,7 @@ function partitionEntries(entries: WorldBookEntry[]): {
 function assembleResult(
   staticParts: string[],
   dynamicParts: string[],
-  fallbackEntries: Array<{ uid: number; error: string }>,
+  fallbackEntries: Array<{ uid: string; error: string }>,
 ): WorldBookRenderResult {
   return {
     staticText: staticParts.join('\n\n'),
@@ -317,7 +312,7 @@ export function renderWorldBookEntries(
 ): WorldBookRenderResult & { entryTexts: Map<WorldBookEntry, string> } {
   const { staticParts, slots } = partitionEntries(entries);
   const dynamicParts: string[] = [];
-  const fallbackEntries: Array<{ uid: number; error: string }> = [];
+  const fallbackEntries: Array<{ uid: string; error: string }> = [];
 
   // 🔴 同步路径的 fail-closed 闸门（2026-08-01 修 F3）
   //
@@ -393,7 +388,7 @@ export async function prerenderWorldBookEntries(
 ): Promise<WorldBookRenderResult & { entryTexts: Map<WorldBookEntry, string> }> {
   // 分区与同步版共用（见 partitionEntries）；本函数只多一件事：动态区整批交给后端
   const { staticParts, slots: dynamicSlots } = partitionEntries(entries);
-  const fallbackEntries: Array<{ uid: number; error: string }> = [];
+  const fallbackEntries: Array<{ uid: string; error: string }> = [];
 
   const toEval: EjsPassEntry[] = dynamicSlots
     .filter((s) => s.needsEval)

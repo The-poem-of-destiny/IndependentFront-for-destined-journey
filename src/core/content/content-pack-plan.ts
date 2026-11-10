@@ -12,7 +12,7 @@
  *
  * 🔴 **两个文件互相 import，是一条真实的运行时环**（如实记录，别照旧注释理解成单向）：
  * 本文件取 content-source.ts 的 hash / 校验工具（`hashWorldBook` /
- * `hashContentDeterministic` / `validatePackOrThrow` / `PLACEHOLDER_UID_RESERVED_BASE`），
+ * `hashContentDeterministic` / `validatePackOrThrow`），
  * 而 content-source.ts 又 import 本文件的 `planPackInstall` 做委托转发（那边:575）。
  * 目前无害**只因为两侧的使用点全在函数体内**——ESM 环下模块初始化期取到的是 undefined，
  * 所以**任一侧都不许在模块顶层（含字段初始值 / 顶层常量表达式）使用对方的导出**。
@@ -26,12 +26,8 @@
  * 设计: docs/planning/2026-08-05-content-engine-separation-design.md §4 / §5.1 / §5.2 / D8 / D18 / D19 / D20 / D43
  */
 
-import {
-  hashContentDeterministic,
-  hashWorldBook,
-  validatePackOrThrow,
-  PLACEHOLDER_UID_RESERVED_BASE,
-} from './content-source';
+import { hashContentDeterministic, hashWorldBook, validatePackOrThrow } from './content-source';
+import { uidPartition } from './worldbook-uid';
 import { emptySectionPlan } from '../types/types-content';
 import type {
   ContentPack,
@@ -72,7 +68,7 @@ export interface CurrentLibrary {
   mapMarkers?: readonly MapMarker[];
   locations?: readonly LocationNode[];
   bloodlines?: readonly Bloodline[];
-  /** 存档级 uid 允许清单（`"partition:uid"`），D43 迁移信号源 */
+  /** 存档级完整命名空间 UID 允许清单，D43 迁移信号源。 */
   enabledWorldBookEntries?: readonly string[];
 }
 
@@ -402,19 +398,17 @@ function planOpaqueSection<T>(packPayload: T): PackSectionPlan<T> {
 /** Explicit split provenance only; an installed token always keeps its current identity. */
 export function deriveSplitEntryTokenRewrites(
   books: readonly WorldBook[],
-): Record<string, number[]> {
-  const available = new Set(
-    books.flatMap((book) => book.entries.map((entry) => `${book.partition}:${entry.uid}`)),
-  );
-  const expanded: Record<string, number[]> = {};
+): Record<string, string[]> {
+  const available = new Set(books.flatMap((book) => book.entries.map((entry) => entry.uid)));
+  const expanded: Record<string, string[]> = {};
   for (const book of books) {
     const entries = [...book.entries].sort(
       (a, b) => (a.extra?.lore?.source?.part ?? a.order) - (b.extra?.lore?.source?.part ?? b.order),
     );
     for (const entry of entries) {
       const source = entry.extra?.lore?.source;
-      if (!source?.parentKey || !Number.isSafeInteger(source.legacyUid)) continue;
-      const token = `${book.partition}:${source.legacyUid}`;
+      if (!source?.parentUid) continue;
+      const token = source.parentUid;
       if (available.has(token)) continue;
       const list = (expanded[token] ??= []);
       if (!list.includes(entry.uid)) list.push(entry.uid);
@@ -433,32 +427,15 @@ export function expandSplitEntryTokens(
     ...new Set(
       tokens.flatMap((token) => {
         const children = rewrites.get(token);
-        const partition = token.slice(0, token.lastIndexOf(':'));
-        return children ? children.map((uid) => `${partition}:${uid}`) : [token];
+        return children ?? [token];
       }),
     ),
   ];
 }
 
 /**
- * 产存档 uid 迁移步骤（D43 三段式）。
- *
- * 占位书与真实书同分区不同 uid 空间（占位 uid ∈ 900001+ 保留段）→ 占位期建的存档
- * 在装包后核心分区会被静默滤成零条。三段式处置:
- *
- * 1. **保留段隔离**: 占位书 uid ∈ `[PLACEHOLDER_UID_RESERVED_BASE, ...)`，与真实语料
- *    uid 空间物理隔离（本函数据此识别存档里的占位 uid）。
- * 2. **按名配对**（D43 v1.2，工坊先例 `workshop-install-plan.ts`）: 对每个分区，把
- *    占位书条目名 ↔ pack 书条目名配对，产 `partition:oldUid → partition:newUid` 重写映射。
- * 3. **配不上的键分两类**:
- *    - **单选钉选分区**（system_core / character）失配 → 标记 `needsSelectionPartitions`
- *      （裸删 = 该分区「整本原样通过」= 内容通胀，D43）
- *    - **多选分区**失配 → 允许清除 + `WorkshopNote sideEffect`
- *
- * @param packBooks pack 的世界书分节（真实 uid 空间）
- * @param currentBooks 当前库里的世界书（含占位书，uid 在保留段）
- * @param enabledEntries 存档级 uid 允许清单（`"partition:uid"`）
- * @param notes 处置记录出口（sideEffect note 写进这里）
+ * 占位启用引用按分区与名称配对到真实 UID；不兼容历史数字 token。
+ * 单选钉选分区失配必须重选，其余失配给出清除提示。
  */
 export function planSaveUidMigration(
   packBooks: readonly WorldBook[],
@@ -466,85 +443,37 @@ export function planSaveUidMigration(
   enabledEntries: readonly string[],
   notes: WorkshopNote[],
 ): PackSaveUidMigration {
-  const rewrite: Record<string, number> = {};
+  const rewrite: Record<string, string> = {};
   const expandedRewrite = deriveSplitEntryTokenRewrites(packBooks);
   const needsSelectionSet = new Set<WorldBookPartition>();
   const sideEffectPartitions = new Set<string>();
-
-  // pack 书按 partition → name → uid 索引（真实 uid 空间）
-  const packByNameByPartition = new Map<string, Map<string, number>>();
+  const packByNameByPartition = new Map<string, Map<string, string>>();
   for (const book of packBooks) {
-    let byName = packByNameByPartition.get(book.partition);
-    if (!byName) {
-      byName = new Map<string, number>();
-      packByNameByPartition.set(book.partition, byName);
-    }
+    const byName = packByNameByPartition.get(book.partition) ?? new Map<string, string>();
+    packByNameByPartition.set(book.partition, byName);
     for (const entry of book.entries) {
       if (!byName.has(entry.name)) byName.set(entry.name, entry.uid);
     }
   }
-
-  // 当前占位书按 partition → name → uid 索引（占位 uid 空间，900001+）
-  const placeholderByNameByPartition = new Map<string, Map<string, number>>();
-  for (const book of currentBooks) {
-    let byName = placeholderByNameByPartition.get(book.partition);
-    if (!byName) {
-      byName = new Map<string, number>();
-      placeholderByNameByPartition.set(book.partition, byName);
-    }
-    for (const entry of book.entries) {
-      if (entry.uid >= PLACEHOLDER_UID_RESERVED_BASE) {
-        if (!byName.has(entry.name)) byName.set(entry.name, entry.uid);
-      }
-    }
-  }
-
-  // 遍历存档里的 enabledEntries，逐条判定
-  for (const entry of enabledEntries) {
-    const colonIdx = entry.indexOf(':');
-    if (colonIdx <= 0 || colonIdx >= entry.length - 1) continue;
-    const partition = entry.slice(0, colonIdx) as WorldBookPartition;
-    const oldUid = parseInt(entry.slice(colonIdx + 1), 10);
-    if (!Number.isFinite(oldUid)) continue;
-
-    // 只迁移占位保留段的 uid（真实 uid 空间不动）
-    if (oldUid < PLACEHOLDER_UID_RESERVED_BASE) continue;
-
-    // 查占位书里这条 uid 对应的条目名
-    const placeholderByName = placeholderByNameByPartition.get(partition);
-    if (!placeholderByName) {
-      // 该分区没有占位书条目 → 无法按名配对
-      handleUnmatchedPartition(partition, entry, notes, needsSelectionSet, sideEffectPartitions);
-      continue;
-    }
-    let entryName: string | undefined;
-    for (const [name, uid] of placeholderByName) {
-      if (uid === oldUid) {
-        entryName = name;
-        break;
-      }
-    }
-    if (entryName === undefined) {
-      handleUnmatchedPartition(partition, entry, notes, needsSelectionSet, sideEffectPartitions);
-      continue;
-    }
-
-    // 按名配对到 pack 书
-    const packByName = packByNameByPartition.get(partition);
-    const newUid = packByName?.get(entryName);
+  const placeholders = new Map(
+    currentBooks.flatMap((book) =>
+      book.entries
+        .filter((entry) => entry.uid.startsWith('placeholder:'))
+        .map((entry) => [entry.uid, entry.name] as const),
+    ),
+  );
+  for (const uid of enabledEntries) {
+    if (!uid.startsWith('placeholder:')) continue;
+    const partition = uidPartition(uid) as WorldBookPartition | undefined;
+    if (!partition) continue;
+    const name = placeholders.get(uid);
+    const newUid = name === undefined ? undefined : packByNameByPartition.get(partition)?.get(name);
     if (newUid === undefined) {
-      // 名字配不上（pack 没有这个条目名）
-      handleUnmatchedPartition(partition, entry, notes, needsSelectionSet, sideEffectPartitions);
-      continue;
+      handleUnmatchedPartition(partition, uid, notes, needsSelectionSet, sideEffectPartitions);
+    } else if (newUid !== uid) {
+      rewrite[uid] = newUid;
     }
-
-    // 配对成功 → 产 old→new 重写映射
-    if (newUid !== oldUid) {
-      rewrite[entry] = newUid;
-    }
-    // newUid === oldUid 时无需重写（理论上不会发生——占位与真实不同 uid 空间）
   }
-
   const needsSelectionPartitions = SINGLE_SELECT_PINNED_PARTITIONS.filter((p) =>
     needsSelectionSet.has(p),
   );

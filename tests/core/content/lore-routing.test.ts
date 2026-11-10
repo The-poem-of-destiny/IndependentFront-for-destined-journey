@@ -7,13 +7,14 @@ import {
 } from '../../../src/core/content/lore-routing';
 import { getEntriesForAgent } from '../../../src/core/content/worldbook-loader';
 
+const uid = (slug: string) => `fated:world_setting/${slug}`;
 const book = (): WorldBook => ({
   id: 'test',
   name: '合成书',
   partition: 'world_setting',
   entries: [
     {
-      uid: 1,
+      uid: uid('one'),
       name: 'one',
       content: '合成资料',
       enabled: true,
@@ -38,21 +39,21 @@ describe('lore routing', () => {
 
     const b = book();
     b.entries.push(
-      { ...b.entries[0], uid: 2, extra: { lore: { audiences: ['char_gen'] } } },
-      { ...b.entries[0], uid: 3, extra: { lore: { audiences: [] } } },
+      { ...b.entries[0], uid: uid('two'), extra: { lore: { audiences: ['char_gen'] } } },
+      { ...b.entries[0], uid: uid('three'), extra: { lore: { audiences: [] } } },
     );
-    expect(getEntriesForAgent('story', [b]).map((e) => e.uid)).toEqual([1]);
-    expect(getEntriesForAgent('char_gen', [b]).map((e) => e.uid)).toEqual([2]);
+    expect(getEntriesForAgent('story', [b]).map((e) => e.uid)).toEqual([uid('one')]);
+    expect(getEntriesForAgent('char_gen', [b]).map((e) => e.uid)).toEqual([uid('two')]);
   });
 
-  it('diagnoses duplicate keys, missing/unreadable dependencies and unknown agents', () => {
+  it('diagnoses duplicate UIDs, missing/unreadable dependencies and unknown agents', () => {
     const b = book();
     b.entries[0].extra = {
-      lore: { key: 'one', audiences: ['story', 'invalid'], dependsOn: ['two', 'missing'] },
+      lore: { audiences: ['story', 'invalid'], dependsOn: [uid('two'), uid('missing')] },
     };
     b.entries.push(
-      { ...b.entries[0], uid: 2, extra: { lore: { key: 'two', audiences: ['char_gen'] } } },
-      { ...b.entries[0], uid: 3 },
+      { ...b.entries[0], uid: uid('two'), extra: { lore: { audiences: ['char_gen'] } } },
+      { ...b.entries[0] },
     );
     const kinds = collectLoreRoutingIssues([b], ['story', 'char_gen']).map((i) => i.kind);
     expect(kinds).toContain('unknown-agent');
@@ -65,34 +66,29 @@ describe('lore routing', () => {
     '公共读取拒绝 %s 依赖的根和传递依赖，保留确定性诊断',
     (reason) => {
       const b = book();
-      const make = (uid: number, key: string, dependsOn: string[] = []) => ({
+      const make = (name: string, dependsOn: string[] = []) => ({
         ...b.entries[0],
-        uid,
-        name: key,
-        extra: { lore: { audiences: ['story'], key, dependsOn } },
+        uid: uid(name),
+        name,
+        extra: { lore: { audiences: ['story'], dependsOn: dependsOn.map(uid) } },
       });
-      b.entries = [
-        make(1, 'root', ['dep']),
-        make(2, 'ancestor', ['root']),
-        make(3, 'dep'),
-        make(4, 'good'),
-      ];
+      b.entries = [make('root', ['dep']), make('ancestor', ['root']), make('dep'), make('good')];
       if (reason === 'disabled') b.entries[2].enabled = false;
       if (reason === 'missing') b.entries.splice(2, 1);
       if (reason === 'not-readable') b.entries[2].extra!.lore!.audiences = ['char_gen'];
       if (reason === 'excluded')
         b.entries[2].extra!.lore!.activation = { excludeKeywords: ['stop'] };
-      if (reason === 'cycle') b.entries[2].extra!.lore!.dependsOn = ['root'];
-      if (reason === 'duplicate-key') b.entries.push(make(5, 'dep'));
+      if (reason === 'cycle') b.entries[2].extra!.lore!.dependsOn = [uid('root')];
+      if (reason === 'duplicate-key') b.entries.push(make('dep'));
       const input = JSON.stringify(b);
       const result = resolveLoreDependenciesForAgent('story', [b], 'stop');
-      expect(result.entries.map((r) => r.key)).toEqual(['good']);
+      expect(result.entries.map((r) => r.key)).toEqual([uid('good')]);
       expect(result.rejectedRoots).toContainEqual({
-        key: 'root',
-        dependencyKey: reason === 'cycle' ? 'root' : 'dep',
+        key: uid('root'),
+        dependencyKey: uid(reason === 'cycle' ? 'root' : 'dep'),
         reason,
       });
-      expect(result.rejectedRoots.some((r) => r.key === 'ancestor')).toBe(true);
+      expect(result.rejectedRoots.some((r) => r.key === uid('ancestor'))).toBe(true);
       expect(getEntriesForAgent('story', [b], 'stop').map((e) => e.name)).toEqual(['good']);
       expect(JSON.stringify(b)).toBe(input);
       expect(resolveLoreDependenciesForAgent('story', [b], 'stop')).toEqual(result);
@@ -102,13 +98,15 @@ describe('lore routing', () => {
   it('有效跨书依赖闭包去重但不扩大权限，修复依赖后根重新可读', () => {
     const root = book(),
       dep = book();
+    root.entries[0].uid = uid('root');
     root.entries[0].extra = {
-      lore: { audiences: ['story'], key: 'root', dependsOn: ['dep', 'dep'] },
+      lore: { audiences: ['story'], dependsOn: [uid('dep'), uid('dep')] },
     };
     dep.id = 'dep-book';
-    dep.entries[0].extra = { lore: { audiences: ['story'], key: 'dep' } };
+    dep.entries[0].uid = uid('dep');
+    dep.entries[0].extra = { lore: { audiences: ['story'] } };
     const result = resolveLoreDependenciesForAgent('story', [root, dep]);
-    expect(result.closures.get('root')?.map((r) => r.key)).toEqual(['dep', 'root']);
+    expect(result.closures.get(uid('root'))?.map((r) => r.key)).toEqual([uid('dep'), uid('root')]);
     expect(result.blockedDependencyKeys).toEqual([]);
     dep.entries[0].enabled = false;
     expect(getEntriesForAgent('story', [root, dep])).toEqual([]);

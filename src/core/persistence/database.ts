@@ -57,6 +57,15 @@ import type {
   ImagePreset,
 } from '../types/types-image';
 import type { ContentPack } from '../types/types-content';
+import type { EncryptedPackEnvelope } from '../types/types-pack-auth';
+import {
+  getActivePackPayload,
+  getPackRuntimeRevision,
+  isProtectedPackPresetId,
+  getRuntimePackPresets,
+  isProtectedContentInstalled,
+  overlayRows,
+} from '../content/pack-runtime';
 import type { ImageApiConnection } from '../types/types-api';
 import { hashWorldBook } from '../content/content-source';
 import { applyExpFloor } from '../character/exp-table';
@@ -91,12 +100,111 @@ export interface ContentPackRecord {
   packVersion: string;
   /** 安装时间戳（epoch ms）；本次 put 的时间，非 payload.exportedAt */
   installedAt: number;
-  /** 整包内容（ContentPack 原样入库） */
-  payload: ContentPack;
+  /** Only explicitly imported local files retain a plaintext payload. */
+  payload?: ContentPack;
+  source?: 'local-file' | 'discord' | 'legacy-locked';
+  encryptedEnvelope?: EncryptedPackEnvelope;
+  boundUserId?: string;
+  expiresAt?: number;
+  /** ID-only ownership metadata permits scrubbing old backups even while locked; no content text. */
+  ownedBookIds?: string[];
+  ownedPresetIds?: string[];
   /** = `payload.sectionHashes`（D40 升级 diff 展示与快速比对用；逐书基线从 payload 现算） */
   sectionHashes?: Readonly<Record<string, string>>;
   /** 安装处置记录（WorkshopNote[]，由执行器在安装时产出） */
   notes?: unknown[];
+}
+
+let legacyPackMigration: Promise<void> | null = null;
+
+/** User-approved cutover: unlabelled historical packs are locked, never assumed to be offline imports. */
+export function migrateLegacyContentPacks(): Promise<void> {
+  if (legacyPackMigration) return legacyPackMigration;
+  const db = getDatabase();
+  legacyPackMigration = db
+    .transaction(
+      'rw',
+      [
+        db.contentPacks,
+        db.worldBooks,
+        db.presets,
+        db.promptSessions,
+        db.debugTurns,
+        db.combatSandboxes,
+      ],
+      async () => {
+        const records = await db.contentPacks.toArray();
+        for (const row of records) {
+          if (row.source || row.encryptedEnvelope || !row.payload) continue;
+          const ownedBookIds = (row.payload.worldBooks ?? []).map((book) => book.id);
+          const embedded = Object.values(row.payload.agentDefaults?.agents ?? {}).flatMap(
+            (entry) => (entry.preset ? [entry.preset.id] : []),
+          );
+          const ownedPresetIds = [
+            ...new Set([...(row.payload.presets ?? []).map((preset) => preset.id), ...embedded]),
+          ];
+          for (const id of ownedBookIds) {
+            const book = await db.worldBooks.get(id);
+            if (book && book.builtIn !== false && book.partition !== 'creative_workshop')
+              await db.worldBooks.delete(id);
+          }
+          await db.presets.bulkDelete(ownedPresetIds);
+          await db.contentPacks.put({
+            packId: row.packId,
+            packVersion: row.packVersion,
+            installedAt: row.installedAt,
+            source: 'legacy-locked',
+            ownedBookIds,
+            ownedPresetIds,
+          });
+          await db.promptSessions.clear();
+          await db.debugTurns.clear();
+          await db.combatSandboxes.clear();
+        }
+      },
+    )
+    .finally(() => {
+      legacyPackMigration = null;
+    });
+  return legacyPackMigration;
+}
+
+/** Remove pack-owned plaintext resurrected by old full backups, including when no lease is available. */
+export async function purgeProtectedPackPlaintext(): Promise<void> {
+  const db = getDatabase();
+  await db.transaction(
+    'rw',
+    [
+      db.contentPacks,
+      db.worldBooks,
+      db.presets,
+      db.promptSessions,
+      db.debugTurns,
+      db.combatSandboxes,
+    ],
+    async () => {
+      const records = await db.contentPacks.toArray();
+      let protectedPack = false;
+      for (const row of records) {
+        if (!row.encryptedEnvelope && row.source !== 'legacy-locked') continue;
+        protectedPack = true;
+        const runtime = getActivePackPayload(row.packId);
+        for (const id of row.ownedBookIds ?? runtime?.worldBooks?.map((book) => book.id) ?? []) {
+          const book = await db.worldBooks.get(id);
+          if (book && book.builtIn !== false && book.partition !== 'creative_workshop')
+            await db.worldBooks.delete(id);
+        }
+        await db.presets.bulkDelete(
+          row.ownedPresetIds ?? runtime?.presets?.map((preset) => preset.id) ?? [],
+        );
+      }
+      if (protectedPack) {
+        await db.promptSessions.clear();
+        await db.debugTurns.clear();
+        await db.combatSandboxes.clear();
+      }
+    },
+  );
 }
 
 /** 地图字节缓存行（v21）：`url` 主键，同一图源天然去重 */
@@ -857,6 +965,8 @@ export interface FullBackup {
 }
 
 export async function exportAllData(): Promise<FullBackup> {
+  await migrateLegacyContentPacks();
+  await purgeProtectedPackPlaintext();
   const db = getDatabase();
   const [
     characterChronicle,
@@ -1037,6 +1147,7 @@ export async function importAllData(backup: FullBackup): Promise<ReconcileResult
   // 失配（旧备份清了表 / 手编备份删了字段）。对账只读 + 报告，不自动改任何一边；
   // 唯一的写动作是 `activePresetId` 悬空时从 payload 重导 story 预设（D18 明确分支）。
   // 🔴 reconcile 自身绝不再调 importAllData（会递归），也不读 backup（只看现状 vs payload）。
+  await purgeProtectedPackPlaintext();
   return reconcilePackState();
 }
 
@@ -1323,7 +1434,8 @@ export async function reconcilePackState(): Promise<ReconcileResult> {
   for (const b of allBooks) booksById.set(b.id, b);
 
   for (const pack of packs) {
-    const packBooks = pack.payload.worldBooks;
+    if (pack.encryptedEnvelope || pack.source === 'legacy-locked') continue;
+    const packBooks = pack.payload?.worldBooks;
     if (!packBooks || packBooks.length === 0) continue;
     for (const packBook of packBooks) {
       const current = booksById.get(packBook.id);
@@ -1353,7 +1465,8 @@ export async function reconcilePackState(): Promise<ReconcileResult> {
   const presetIds = new Set(allPresets.map((p) => p.id));
 
   for (const pack of packs) {
-    const packPresets = pack.payload.presets;
+    if (pack.encryptedEnvelope || pack.source === 'legacy-locked') continue;
+    const packPresets = pack.payload?.presets;
     if (!packPresets || packPresets.length === 0) continue;
     for (const packPreset of packPresets) {
       if (!presetIds.has(packPreset.id)) {
@@ -1381,7 +1494,8 @@ export async function reconcilePackState(): Promise<ReconcileResult> {
     //    二选路径，不在这里自动全量重放——那等于「恢复时静默把所有 pack 预设塞回去」，
     //    违反 D18「不自动做任何一边」）。
     for (const pack of packs) {
-      const packPresets = pack.payload.presets;
+      if (pack.encryptedEnvelope || pack.source === 'legacy-locked') continue;
+      const packPresets = pack.payload?.presets;
       if (packPresets && packPresets.length > 0) {
         const seed = packPresets[0];
         await db.presets.put({ ...seed });
@@ -1410,10 +1524,11 @@ export async function deleteLorebook(id: string): Promise<void> {
 }
 
 export async function getPresets(): Promise<ChatPreset[]> {
-  return getDatabase().presets.toArray();
+  return overlayRows(await getDatabase().presets.toArray(), getRuntimePackPresets());
 }
 
 export async function savePreset(preset: ChatPreset): Promise<string> {
+  if (isProtectedPackPresetId(preset.id)) throw new Error('受保护预设只能在当前会话内编辑');
   // 🔴 落库前切断 Vue Proxy（Q-16 / db-write.ts 同款纪律）：装包链路上 preset 可能
   //    经过 Vue 响应式（ref 深代理），IDB 结构化克隆拒绝 Proxy → DataCloneError。
   //    （2026-08-07 真机：导入内容包报「#<Object> could not be cloned」——
@@ -1427,6 +1542,7 @@ export async function savePreset(preset: ChatPreset): Promise<string> {
  * 逐条 `savePreset` 是 N 次 IDB 往返，bulkPut 一次；detach 纪律与 savePreset 完全一致。
  */
 export async function savePresets(presets: ChatPreset[]): Promise<void> {
+  presets = presets.filter((row) => !isProtectedPackPresetId(row.id));
   if (presets.length === 0) return;
   await getDatabase().presets.bulkPut(
     presets.map((p) => JSON.parse(JSON.stringify(p)) as ChatPreset),
@@ -2515,7 +2631,10 @@ export async function getDebugTurns(saveId: string): Promise<DebugTurnRecord[]> 
 
 /** 保存一回合的最新快照，并在同一事务内淘汰该存档最旧的超额记录。 */
 export async function saveDebugTurn(record: DebugTurnRecord): Promise<void> {
+  if (isProtectedContentInstalled()) return;
+  const runtimeRevision = getPackRuntimeRevision();
   await withSaveWriteLock(record.saveId, async () => {
+    if (isProtectedContentInstalled() || runtimeRevision !== getPackRuntimeRevision()) return;
     const db = getDatabase();
     await db.transaction('rw', db.debugTurns, async () => {
       await db.debugTurns.put(record);

@@ -342,9 +342,4 @@ export type UiSettings = {
   embeddingEndpointId?: string | null;
   /** 覆盖 embedding 端点的默认模型。缺省同上：无人写入 */
   embeddingModel?: string;
-  /**
-   * 工坊安装时的 uid 发号游标（单调递增，卸载不回收）。
-   * 由 `workshop-store` 按常量键读写，不进 `getDefaults()` —— 全新用户没有它。
-   */
-  workshopUidCursor?: number;
 };

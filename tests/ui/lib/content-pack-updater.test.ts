@@ -1,4 +1,14 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearDiscordSession, saveDiscordSession } from '../../../src/ui/lib/discord-auth-client';
+import { encryptPrivatePack, makeDiscordSession } from '../../helpers/pack-auth-fixture';
+beforeEach(() => {
+  saveDiscordSession(makeDiscordSession());
+});
+afterEach(() => {
+  clearDiscordSession();
+  vi.unstubAllGlobals();
+});
 import {
   checkPackUpdate,
   downloadLatestPack,
@@ -10,7 +20,7 @@ function jsonRes(body: unknown, status = 200, headers?: Record<string, string>) 
   return {
     ok: status >= 200 && status < 300,
     status,
-    json: async () => body,
+    json: async () => ({ serverTime: Date.now(), ...(body as object) }),
     headers: { get: (name: string) => headers?.[name] ?? null },
   };
 }
@@ -79,12 +89,11 @@ describe('checkPackUpdate', () => {
 });
 
 describe('downloadLatestPack', () => {
-  it('成功 → 回明文 pack + 版本头', async () => {
-    const pack = { formatVersion: 1, packId: 'x', packVersion: '2.0.0' };
-    const fetchImpl: PackUpdaterFetch = async () =>
-      jsonRes(pack, 200, { 'X-Pack-Version': '2.0.0' });
+  it('成功返回绑定账号的密文和租约，不返回明文 pack', async () => {
+    const download = encryptPrivatePack();
+    const fetchImpl: PackUpdaterFetch = async () => jsonRes({ ok: true, ...download });
     const r = await downloadLatestPack(fetchImpl);
-    expect(r).toEqual({ status: 'ok', pack, packVersion: '2.0.0' });
+    expect(r).toEqual({ status: 'ok', download, packVersion: '1.0.0' });
   });
 
   it('404 → error 带消息', async () => {

@@ -42,17 +42,21 @@ describe('ExtensionManagementPage', () => {
     expect(wrapper.get('.extension-card-placeholder button').attributes('disabled')).toBeDefined();
   });
 
-  it('展示已安装工坊项目数并进入创意工坊子页面', async () => {
+  it('用蒙版封锁创意工坊入口，展示已安装数量但不允许进入', async () => {
     const wrapper = mount(ExtensionManagementPage, { global });
 
     expect(wrapper.text()).toContain('已安装 2 项');
+    expect(wrapper.get('[data-testid="workshop-entry"]').attributes('aria-disabled')).toBe('true');
+    expect(wrapper.get('[data-testid="workshop-entry-mask"]').text()).toContain('创意工坊暂未开放');
+
     const enter = wrapper
       .findAll('button')
       .find((button) => button.text().includes('进入创意工坊'));
     expect(enter).toBeTruthy();
+    expect(enter!.attributes('disabled')).toBeDefined();
     await enter!.trigger('click');
 
-    expect(h.ui.navigate).toHaveBeenCalledWith('workshop');
+    expect(h.ui.navigate).not.toHaveBeenCalled();
   });
 
   it('返回动作交给多层页面历史', async () => {

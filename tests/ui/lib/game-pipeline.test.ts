@@ -13,6 +13,18 @@ import { getEntriesForAgent } from '@engine/content/worldbook-loader';
 import { collectCompleteStoryTurns } from '@engine/memory/memory-context';
 import { storyTurnSource } from '@engine/memory/story-memory-source';
 
+import { installRuntimePack } from '../../../src/core/content/pack-runtime';
+const leaseGuard = vi.hoisted(() => vi.fn(async () => true));
+vi.mock('../../../src/ui/stores/content-store', () => ({
+  useContentStore: () => ({
+    ensurePackLeaseActive: leaseGuard,
+    leaseMessage: '授权不可用',
+    loadProjectDefaults: async () => ({ version: 1, agents: {} }),
+  }),
+}));
+beforeEach(() => {
+  leaseGuard.mockResolvedValue(true);
+});
 vi.mock('@engine/plot/plot-engine', () => ({
   preCheckPlot: vi.fn(async () => ({
     triggeredEvents: [{ title: '触发的事件' }],
@@ -362,6 +374,7 @@ describe('sendOpeningPrompt', () => {
       throw new Error('early failure with pending work');
     });
     const running = pipeline.run('first');
+    await vi.waitFor(() => expect((pipeline as any).buildContext).toHaveBeenCalledOnce());
     pipeline.abort();
     const locked = game.isGenerating;
     const overlapping = pipeline.run('second');
@@ -439,7 +452,7 @@ describe('sendOpeningPrompt', () => {
 });
 
 describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () => {
-  const entry = (uid: number, enabled = true) => ({
+  const entry = (uid: string, enabled = true) => ({
     uid,
     name: `条目${uid}`,
     content: `正文${uid}`,
@@ -456,7 +469,7 @@ describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () 
     worldBookStoreState.books = [];
   });
 
-  it.each([408, 413, 999])(
+  it.each(['fated:system_core/core', 'placeholder:system_core/default', 'user:system_core/custom'])(
     '存档选中的内置命定核心条目 → story 与 entity_gen 读得到，request_dispatcher 读不到（uid %s）',
     async (uid) => {
       worldBookStoreState.books = [
@@ -469,7 +482,7 @@ describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () 
         },
       ];
       const pipeline = makePipeline({
-        activeSave: { metadata: { enabledWorldBookEntries: [`system_core:${uid}`] } },
+        activeSave: { metadata: { enabledWorldBookEntries: [uid] } },
       });
 
       const books: WorldBook[] = await (pipeline as any).loadActiveWorldBooks();
@@ -490,8 +503,11 @@ describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () 
         name: '新版包书',
         partition: 'world_setting',
         entries: [
-          { ...entry(1), extra: { lore: { audiences: ['story'] } } },
-          { ...entry(2), extra: { lore: { audiences: ['entity_gen'] } } },
+          { ...entry('fated:world_setting/story'), extra: { lore: { audiences: ['story'] } } },
+          {
+            ...entry('fated:world_setting/entity'),
+            extra: { lore: { audiences: ['entity_gen'] } },
+          },
         ],
       },
     ];
@@ -501,8 +517,8 @@ describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () 
       getEntriesForAgent(agentId, books)
         .filter((e) => e.enabled)
         .map((e) => e.uid);
-    expect(uidsFor('story')).toEqual([1]);
-    expect(uidsFor('entity_gen')).toEqual([2]);
+    expect(uidsFor('story')).toEqual(['fated:world_setting/story']);
+    expect(uidsFor('entity_gen')).toEqual(['fated:world_setting/entity']);
     expect(uidsFor('lore_select')).toEqual([]);
   });
 
@@ -2805,7 +2821,7 @@ describe('independent review ownership repros', () => {
       saveId: 'save-test',
     });
     const task = pipeline.sendOpeningPrompt();
-    expect(game.markOpeningPromptConsumed).toHaveBeenCalled();
+    await vi.waitFor(() => expect(game.markOpeningPromptConsumed).toHaveBeenCalled());
     pipeline.dispose();
     gate.resolve(true);
     await task;
@@ -3323,5 +3339,40 @@ describe('Story 上下文新模式（v2）', () => {
     expect(computeEmbeddingWithMetaMock).not.toHaveBeenCalled();
     const summaries = (vi.mocked(db.commitStoryTurnMemory).mock.calls[0] as any[])[2];
     expect(summaries[0].embedding).toBeUndefined();
+  });
+});
+
+describe('Discord pack run admission', () => {
+  it('does not consume the opening claim or persist a user message when locked', async () => {
+    leaseGuard.mockResolvedValue(false);
+    const game = makeGameStore({ openingPrompt: 'OPENING' });
+    const pipeline = new GamePipeline({
+      gameStore: game,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    await pipeline.sendOpeningPrompt();
+    expect(game.markOpeningPromptConsumed).not.toHaveBeenCalled();
+    expect(await pipeline.run('blocked')).toBe(false);
+    expect(game.addMessage).not.toHaveBeenCalled();
+    pipeline.dispose();
+  });
+  it('aborts pending work and clears prompt/side-chain caches synchronously on locking', () => {
+    installRuntimePack({ formatVersion: 1, packId: 'fixture', packVersion: '1.0.0' }, true);
+    const game = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore: game,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    }) as any;
+    const controller = new AbortController();
+    pipeline.abortController = controller;
+    pipeline.chainData = { worldBooks: [{ entries: [{ content: 'private' }] }] };
+    installRuntimePack(undefined, true);
+    expect(controller.signal.aborted).toBe(true);
+    expect(pipeline.chainData).toBeNull();
+    expect(game.exitCombat).toHaveBeenCalled();
+    pipeline.dispose();
+    installRuntimePack(undefined, false);
   });
 });

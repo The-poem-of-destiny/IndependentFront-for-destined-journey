@@ -66,6 +66,8 @@ import type { StreamCallbacks } from '@engine/agents/agent-client';
 import { createStateManager } from '@engine/state/state-manager';
 import { projectStoryOutput, projectStreamingStory } from '@engine/story/story-output';
 import { loadWorldBooksWithFallback } from '@engine/content/builtin-worldbooks';
+import { getActivePackPayload, subscribePackRuntime } from '@engine/content/pack-runtime';
+import { useContentStore } from '../stores/content-store';
 import { filterBooksByEnabledEntries } from '@engine/content/worldbook-loader';
 import { buildStatData } from '@engine/character/stat-projection';
 import { buildPassSeed } from '@engine/ejs/ejs-rng';
@@ -566,10 +568,29 @@ export class GamePipeline {
     return [...(this.game.ejsUiLog ?? [])];
   }
 
+  private stopPackRuntime: () => void;
+  private async admitPackLease(): Promise<boolean> {
+    const content = useContentStore();
+    if (await content.ensurePackLeaseActive()) return true;
+    this.notify(content.leaseMessage, 'warning');
+    return false;
+  }
   constructor(deps: GamePipelineDeps) {
     this.game = deps.gameStore;
     this.settings = deps.settingsStore;
     this.saveId = deps.saveId;
+    let payload = getActivePackPayload();
+    this.stopPackRuntime = subscribePackRuntime(() => {
+      this.chainData = null;
+      this.invalidatePromptSessions();
+      const next = getActivePackPayload();
+      if (next !== payload) {
+        payload = next;
+        this.abortController?.abort();
+        this._combatSandbox = null;
+        this.game.exitCombat();
+      }
+    });
   }
 
   // 🪦 Q-06：`syncSnapshotSettings` 已删。它把 settings-store 的两个字段每轮抄进
@@ -737,6 +758,7 @@ export class GamePipeline {
   /** 发送开场 Prompt（首次加载存档时调用），作为首条用户消息注入管线 */
   async sendOpeningPrompt(onStoryChunk?: StoryChunkCallback): Promise<void> {
     if (!this.ownsActiveSave) return;
+    if (!(await this.admitPackLease())) return;
     // 🔴 必须早于 markOpeningPromptConsumed：被拒的一轮不许烧掉开场认领
     if (!this.admitStoryContextMode()) return;
     const release = this.acquireSaveWork();
@@ -824,6 +846,7 @@ export class GamePipeline {
     let activityMessage: string | undefined;
 
     try {
+      if (!(await this.admitPackLease()) || !this.isRunCurrent(controller)) return false;
       // 1. 先快照既有历史；当前输入只走 userInput，避免同时出现在 NARRATIVE 与 USER_INPUT。
       const existingSourceMessageId = isUserMessage
         ? undefined
@@ -1279,6 +1302,8 @@ export class GamePipeline {
 
   dispose(): void {
     this.disposed = true;
+    this.stopPackRuntime();
+    this.chainData = null;
     this.abort();
     this.invalidatePromptSessions();
   }
@@ -3799,6 +3824,7 @@ export class GamePipeline {
    *      `actionOrder` 顺延回退）；一轮全部结算完 → `round++`、重置槽位。
    */
   private async driveCombatSandbox(): Promise<CombatSummaryResult | null> {
+    if (!(await this.admitPackLease())) return null;
     const session = this._combatSandbox;
     if (!session) return null;
 
@@ -4393,6 +4419,7 @@ export class GamePipeline {
     presets: AgentPreset[];
     agentDefaults: Record<string, Record<string, unknown>>;
   }> {
+    if (!(await this.admitPackLease())) throw new Error('内容包授权不可用');
     if (this.chainData) return this.chainData;
     const { presets, agentDefaults } = await this.loadPresets();
     const worldBooks = await this.loadActiveWorldBooks();
@@ -4460,13 +4487,15 @@ export class GamePipeline {
    *
    * 🔴 手动触发不经过 run()，照 image_prompt / 重铸的手动档先例：`ensureChainData()`
    *    惰性装配 configs（含 agent-config 的 systemPrompt）+ 独立活动账本。
+   * 🔴 端点识别在侧链里做（`checkProseRewriteEndpoint`）：**非 openai-chat 协议硬拦不发**，
+   *    `baseUrl` 不带 `/beta` 只回 warning（反代可挂任意子路径，不当作能力判据）。
    * 🔴 该 Agent 依赖 **DeepSeek beta 端点**（`baseUrl` 带 `/beta`）与前缀续写能力；
    *    调用时强制 `thinking.enabled` + `reasoning_effort=max`（见侧链的 EXTRA_BODY）。
    */
   async rewriteProseText(
     bodyText: string,
     signal?: AbortSignal,
-  ): Promise<{ ok: boolean; text?: string; reason?: string }> {
+  ): Promise<{ ok: boolean; text?: string; reason?: string; warning?: string }> {
     const trimmed = bodyText.trim();
     if (!trimmed) return { ok: false, reason: '没有可改写的正文' };
 
@@ -4507,7 +4536,11 @@ export class GamePipeline {
         activityError = result.error;
         return { ok: false, reason: result.error };
       }
-      return { ok: true, text: result.text };
+      return {
+        ok: true,
+        text: result.text,
+        ...(result.warning ? { warning: result.warning } : {}),
+      };
     } catch (err) {
       activityError = err instanceof Error ? err.message : String(err);
       console.error('[GamePipeline] prose_rewrite 侧链失败:', err);

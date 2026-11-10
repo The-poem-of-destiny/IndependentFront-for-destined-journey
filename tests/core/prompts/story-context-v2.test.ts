@@ -334,7 +334,7 @@ describe('A14 完整预算分类与逐项预算移除', () => {
     partition: 'world_setting',
     entries: [
       {
-        uid: 1,
+        uid: 'fixture:world_setting/fixed',
         name: '固定',
         content: '固定世界规则',
         enabled: true,
@@ -343,10 +343,10 @@ describe('A14 完整预算分类与逐项预算移除', () => {
         selectiveLogic: 0,
         order: 1,
         position: 0,
-        extra: { lore: { audiences: ['story', 'lore_select'], key: 'fixed', section: 'fixed' } },
+        extra: { lore: { audiences: ['story', 'lore_select'], section: 'fixed' } },
       },
       {
-        uid: 2,
+        uid: 'fixture:world_setting/region',
         name: '区域',
         content: '北城区域资料',
         enabled: true,
@@ -358,14 +358,13 @@ describe('A14 完整预算分类与逐项预算移除', () => {
         extra: {
           lore: {
             audiences: ['story', 'lore_select'],
-            key: 'region',
             section: 'region',
             activation: { locations: ['北城'] },
           },
         },
       },
       {
-        uid: 3,
+        uid: 'fixture:world_setting/optional',
         name: '本轮',
         content: '可选世界资料'.repeat(100),
         enabled: true,
@@ -374,7 +373,7 @@ describe('A14 完整预算分类与逐项预算移除', () => {
         selectiveLogic: 0,
         order: 3,
         position: 0,
-        extra: { lore: { audiences: ['story', 'lore_select'], key: 'optional', section: 'turn' } },
+        extra: { lore: { audiences: ['story', 'lore_select'], section: 'turn' } },
       },
     ],
   });
@@ -462,12 +461,12 @@ describe('A14 完整预算分类与逐项预算移除', () => {
   it('预算逐项记录可选条目键/估算及原因，保留不可裁剪的原文与摘要', async () => {
     const result = await budgetFixture(0);
     const d = result.diagnostics;
-    expect(d.budgetDroppedLoreKeys).toEqual(['optional']);
+    expect(d.budgetDroppedLoreKeys).toEqual(['fixture:world_setting/optional']);
     expect(d.budgetDroppedRecall).toBe(true);
     expect(d.budgetRemovals).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          key: 'optional',
+          key: 'fixture:world_setting/optional',
           category: 'turnLore',
           chars: loreBook().entries[2].content.length,
           reason: expect.stringContaining('依赖组移除'),

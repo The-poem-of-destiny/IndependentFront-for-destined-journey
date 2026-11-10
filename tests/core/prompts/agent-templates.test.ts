@@ -223,7 +223,7 @@ describe('buildAgentMessages', () => {
     });
     const cfg = makeCfg('story');
     const entry: WorldBookEntry = {
-      uid: 1,
+      uid: 'fixture:world_setting/tomb',
       name: '北境古墓',
       content: '**北境古墓**: 位于诺斯加德北部的古老墓穴，传说埋藏着远古帝王的宝藏。',
       enabled: true,
@@ -470,7 +470,7 @@ describe('buildAgentMessages — SYS_PROMPT assembly', () => {
         partition: 'system_core',
         entries: [
           {
-            uid: 413,
+            uid: 'fixture:system_core/dalian',
             name: '妲丽安',
             content: '妲丽安掌管九十万六百六十六册幻书。',
             enabled: true,
@@ -810,7 +810,7 @@ describe('buildAgentMessages × EJS pass 上下文 (ADR-30 D4/D5)', () => {
       partition: 'world_setting',
       entries: [
         {
-          uid: 1,
+          uid: 'fixture:world_setting/dynamic',
           name: '动态条目',
           content:
             '<% setMessageVar("计数", (getMessageVar("计数") ?? 0) + 1) %>HP=<%= stats.主角.生命值 %>',
@@ -911,7 +911,7 @@ describe('buildAgentMessages × 能力面接线', () => {
       partition: 'world_setting',
       entries: [
         {
-          uid: 1,
+          uid: 'fixture:world_setting/capability',
           name: '能力条目',
           content,
           enabled: true,
@@ -974,7 +974,7 @@ describe('buildAgentMessages × 能力面接线', () => {
       partition: 'world_setting',
       entries: [
         {
-          uid: 9,
+          uid: 'fixture:world_setting/target',
           name: '被引条目',
           content: '被引正文',
           enabled: true,
@@ -1006,7 +1006,7 @@ describe('buildAgentMessages × 能力面接线', () => {
       partition: 'world_setting',
       entries: [
         {
-          uid: 99,
+          uid: 'fixture:world_setting/secret',
           name: '机密条目',
           content: '机密正文',
           enabled: true,
@@ -1152,7 +1152,7 @@ describe('buildAgentMessages × EJS 回退诊断出口', () => {
       partition: 'world_setting',
       entries: [
         {
-          uid: 42,
+          uid: 'fixture:world_setting/broken',
           name: '坏条目',
           content: '<% 不存在的符号() %>',
           enabled: true,
@@ -1168,7 +1168,7 @@ describe('buildAgentMessages × EJS 回退诊断出口', () => {
   }
 
   it('条目求值失败 → ejsFallback 收到 uid / 书名 / 错因', () => {
-    const seen: Array<{ agentId: string; entries: Array<{ uid: number; bookName?: string }> }> = [];
+    const seen: Array<{ agentId: string; entries: Array<{ uid: string; bookName?: string }> }> = [];
     const ctx = makeContext({ ejsFallback: (info) => seen.push(info) });
     const cfg = makeCfg('story');
 
@@ -1179,7 +1179,10 @@ describe('buildAgentMessages × EJS 回退诊断出口', () => {
     // 而且诊断确实送出去了
     expect(seen).toHaveLength(1);
     expect(seen[0].agentId).toBe('story');
-    expect(seen[0].entries[0]).toMatchObject({ uid: 42, bookName: '坏书' });
+    expect(seen[0].entries[0]).toMatchObject({
+      uid: 'fixture:world_setting/broken',
+      bookName: '坏书',
+    });
   });
 
   it('条目正常 → 不打扰（出口零调用）', () => {
@@ -1192,7 +1195,7 @@ describe('buildAgentMessages × EJS 回退诊断出口', () => {
       partition: 'world_setting',
       entries: [
         {
-          uid: 1,
+          uid: 'fixture:world_setting/good',
           name: '好条目',
           content: '<%= 1 + 1 %>',
           enabled: true,

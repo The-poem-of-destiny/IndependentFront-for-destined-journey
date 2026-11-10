@@ -40,16 +40,16 @@ vi.stubGlobal('localStorage', {
   key: (i: number) => [...lsBacking.keys()][i] ?? null,
 });
 
-function makeEntry(uid: number, name = `条目${uid}`): WorldBookEntry {
+function makeEntry(index: number, name = `条目${index}`): WorldBookEntry {
   return {
-    uid,
+    uid: `fixture:world_setting/entry_${index}`,
     name,
-    content: `正文 ${uid}`,
+    content: `正文 ${index}`,
     enabled: true,
     key: [],
     keysecondary: [],
     selectiveLogic: 0,
-    order: uid,
+    order: index,
     position: 0,
   };
 }
@@ -145,7 +145,6 @@ describe('worldbook-store', () => {
     expect(store.books[0].entries).toHaveLength(4);
 
     // 重新 hydrate 拿回同样的东西
-    store.books = [];
     await store.hydrate();
     expect(store.books).toHaveLength(1);
     expect(store.books[0].entries).toHaveLength(4);
@@ -169,13 +168,17 @@ describe('worldbook-store', () => {
     // 覆盖同 uid
     await store.upsertEntry('dlc', { ...makeEntry(9), content: '改过的正文' });
     expect(store.getBook('dlc')!.entries).toHaveLength(3);
-    expect(store.getBook('dlc')!.entries.find((e) => e.uid === 9)!.content).toBe('改过的正文');
+    expect(
+      store.getBook('dlc')!.entries.find((e) => e.uid === 'fixture:world_setting/entry_9')!.content,
+    ).toBe('改过的正文');
 
     // 落库了，不只是改了 ref
     const row = await getDatabase().worldBooks.get('dlc');
-    expect(row!.entries.find((e) => e.uid === 9)!.content).toBe('改过的正文');
+    expect(row!.entries.find((e) => e.uid === 'fixture:world_setting/entry_9')!.content).toBe(
+      '改过的正文',
+    );
 
-    await store.deleteEntry('dlc', 9);
+    await store.deleteEntry('dlc', 'fixture:world_setting/entry_9');
     expect(store.getBook('dlc')!.entries).toHaveLength(2);
     expect((await getDatabase().worldBooks.get('dlc'))!.entries).toHaveLength(2);
 

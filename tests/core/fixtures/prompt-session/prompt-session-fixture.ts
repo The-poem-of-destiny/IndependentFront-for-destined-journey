@@ -119,8 +119,8 @@ export const fixtureSkill: Skill = {
 
 /** 雨夜旅店 —— 虚构动态世界书条目（含 `<%` EJS，命中 hasDynamic） */
 export const fixtureWorldBookEntry: WorldBookEntry = {
-  // uid 故意取 9001 —— 远离真实 uid 区间，防止撞号（见文件头匿名纪律）
-  uid: 9001,
+  // 虚构内容使用独立命名空间，避免与真实条目冲突（见文件头匿名纪律）。
+  uid: 'fixture:world_setting/rainy_inn',
   name: '雨夜旅店',
   content:
     '<% setMessageVar("旅店灯盏", (getMessageVar("旅店灯盏") ?? 0) + 1) %>' +

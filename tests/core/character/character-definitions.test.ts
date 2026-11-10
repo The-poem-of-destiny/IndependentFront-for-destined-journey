@@ -46,13 +46,13 @@ describe('native character definitions', () => {
       partition: 'character',
       entries: [
         {
-          uid: 1,
+          uid: 'fated:character/guide',
           enabled: true,
           content: `来自河谷的向导。<%# char-info-ejs-builder:start:v3 %><% const profile = {"characterName":"向导","avatarUrl":"https://example.com/guide.png"}; throw new Error('must not execute'); %><%# char-info-ejs-builder:end %>`,
         },
-        { uid: 2, enabled: true, content: '<% dynamicProfile() %>' },
+        { uid: 'fated:character/dynamic', enabled: true, content: '<% dynamicProfile() %>' },
         {
-          uid: 3,
+          uid: 'fated:character/secret',
           enabled: true,
           content: `<% if (revealed) { %>秘密身世<% } %><%# char-info-ejs-builder:start %><% const profile = {"characterName":"秘密角色","avatarUrl":"https://example.com/secret.png"}; %><%# char-info-ejs-builder:end %>`,
         },
@@ -62,7 +62,15 @@ describe('native character definitions', () => {
     expect(definitions).toHaveLength(1);
     expect(definitions[0].assets[0].url).toBe('https://example.com/guide.png');
     expect(definitions[0].lore).toBe('来自河谷的向导。');
-    expect(withoutCharacterLore([book], definitions)[0].entries.map((e) => e.uid)).toEqual([2, 3]);
+    expect(definitions[0].legacyEntry).toEqual({
+      bookId: 'characters',
+      uid: 'fated:character/guide',
+      token: 'fated:character/guide',
+    });
+    expect(withoutCharacterLore([book], definitions)[0].entries.map((e) => e.uid)).toEqual([
+      'fated:character/dynamic',
+      'fated:character/secret',
+    ]);
     expect(book.entries).toHaveLength(3);
   });
 });

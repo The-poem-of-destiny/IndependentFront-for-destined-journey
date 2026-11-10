@@ -60,14 +60,14 @@ describe('useBeautify rule resolution', () => {
 
   it('auto-enables a preset bound to the active save entry', () => {
     stores.game.activeSave = {
-      metadata: { enabledWorldBookEntries: ['system_core:413'] },
+      metadata: { enabledWorldBookEntries: ['fated:system_core/core'] },
     };
     stores.beautifier.presetRules = [
       rule({
         id: 'preset',
         enabled: false,
         isBuiltin: true,
-        autoEnable: { worldBookEntryUids: [413] },
+        autoEnable: { worldBookEntryUids: ['fated:system_core/core'] },
       }),
     ];
 
@@ -106,16 +106,21 @@ describe('useBeautify rule resolution', () => {
       {
         id: 'workshop:p1',
         partition: 'creative_workshop',
-        entries: [{ uid: 900 }, { uid: 901 }],
+        entries: [
+          { uid: 'workshop.p1:creative_workshop/first' },
+          { uid: 'workshop.p1:creative_workshop/second' },
+        ],
       },
     ];
     stores.game.activeSave = {
-      metadata: { enabledWorldBookEntries: ['creative_workshop:900'] },
+      metadata: { enabledWorldBookEntries: ['workshop.p1:creative_workshop/first'] },
     };
 
     expect(useBeautify().getBeautifierRules()[0].enabled).toBe(false);
 
-    stores.game.activeSave.metadata.enabledWorldBookEntries.push('creative_workshop:901');
+    stores.game.activeSave.metadata.enabledWorldBookEntries.push(
+      'workshop.p1:creative_workshop/second',
+    );
     expect(useBeautify().getBeautifierRules()[0].enabled).toBe(true);
   });
 

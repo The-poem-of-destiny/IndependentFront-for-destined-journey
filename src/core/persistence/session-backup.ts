@@ -8,7 +8,7 @@
  *    唯一权威判据）。全局库（worldBooks / presets / imagePresets / contentPacks /
  *    audio* / asset*）一行都不进，导入侧也一行都不改。
  * 2. **带一份内容依赖清单** —— 存档本身不含世界书正文，但它**指着**世界书条目
- *    （`metadata.enabledWorldBookEntries` 里的 `${partition}:${uid}` 串）。收件人库里
+ *    （`metadata.enabledWorldBookEntries` 里的全局 UID）。收件人库里
  *    没有那些条目时，存档能导进去、跑起来却少了半个世界，而且**没有任何报错**。
  *    清单让「缺什么」在导入**之前**就说得出来（`checkSessionSaveDependencies`）。
  * 3. **导入必重发 id** —— 同一个文件导两次得到两个互不相干的存档，且永不撞上库里已有的行。
@@ -30,6 +30,12 @@ import {
   DB_VERSION,
 } from './database';
 import type { ContentPackRecord } from './database';
+import {
+  getActivePackPayload,
+  getRuntimePackBooks,
+  getRuntimePackPresets,
+  overlayRows,
+} from '../content/pack-runtime';
 // 记忆编号分配器与 generateMemoryId() **共用同一个实现**（两处各写一份就是漂移的来路：
 // 一边补齐到 6 位、另一边截断到 6 位，撞号了也不会有任何报错）。
 import { allocateMemoryIds } from '../memory/memory-summarizer';
@@ -38,6 +44,7 @@ import {
   deriveSplitEntryTokenRewrites,
   expandSplitEntryTokens,
 } from '../content/content-pack-plan';
+import { uidPartition } from '../content/worldbook-uid';
 import type {
   SaveSlot,
   SaveProfile,
@@ -65,28 +72,13 @@ import type { CharacterChronicleEntry } from '../types/types-character';
 
 /**
  * 一条「本存档启用了这个世界书条目」的引用。
- *
- * 🔴 **`token` 只在同一台机器上是稳定标识**。工坊条目的 uid 由**本机分区级单调游标**
- *    发号（`workshop-install-plan.planInstall` / `InstallRegistry.nextUid`），同一个项目
- *    在另一台机器上按不同的安装顺序会拿到完全不同的 uid。于是拿裸 token 跨机比对有两种
- *    败法，且**两种都不报错**：
- *    - **假通过**：收件人那边 `creative_workshop:5` 确实存在，但它属于**另一个项目** ——
- *      体检说「内容齐全」，存档实际启用了一批风马牛不相及的条目。
- *    - **假缺失**：同一个项目装着，只是本机 uid 不同 —— 体检报「缺 N 条」，用户被吓退。
- *
- *    所以工坊条目额外带上**跨机稳定的身份**（项目 id + 上游原始 uid，来自条目的
- *    `extra.workshop`，D14），体检与导入都按身份比对、按身份重定向。
- *    非工坊分区的 uid 是内容仓/内置书自带的固定编号，仍按 token 比对。
+ * 全局 UID 跨机稳定，含工坊项目身份；无需依据本机发号重映射。
  */
 interface SessionEntryRef {
-  /** `${partition}:${uid}` —— 导出机本地的串；工坊条目跨机不可移植，见上 */
+  /** 全局命名空间 UID。 */
   token: string;
   bookName?: string;
   entryTitle?: string;
-  /** 工坊条目才有：跨机稳定的项目身份（`WorldBookEntry.extra.workshop.projectId`） */
-  workshopProjectId?: string;
-  /** 工坊条目才有：上游原始 uid（同上 `.sourceUid`），项目内稳定 */
-  workshopSourceUid?: string | number;
 }
 
 /**
@@ -105,7 +97,7 @@ interface SessionDependencies {
    */
   packs: Array<{ packId: string; packVersion: string; name?: string }>;
   /**
-   * 本存档启用的世界书条目 token（`${partition}:${uid}`），带导出侧解析出的书名/条目名。
+   * 本存档启用的全局 UID，带导出侧解析出的书名/条目名。
    *
    * 🔴 解析不出来的 token **照样进清单**（只是没有注释）—— 导出方自己都缺的条目，
    *    收件人更可能缺，把它藏起来只会让体检结果偏乐观。
@@ -160,7 +152,7 @@ export interface SessionBackup {
 /** 导入前体检结果 —— 只读，永不因内容缺失而抛错 */
 export interface SessionImportCheck {
   ok: boolean;
-  /** 原样透传清单项（含工坊身份字段），措辞层只用得到 token / bookName / entryTitle */
+  /** 原样透传清单项，措辞层使用 token / bookName / entryTitle。 */
   missingEntries: SessionEntryRef[];
   packMismatches: Array<{
     packId: string;
@@ -173,9 +165,6 @@ export interface SessionImportCheck {
 }
 
 const SESSION_BACKUP_KIND = 'fated-poem-session-save';
-
-/** `creative_workshop:` —— 工坊条目 token 前缀（与 workshop-enable.ts 同源，值来自 WORKSHOP_PARTITION） */
-const WORKSHOP_TOKEN_PREFIX = `${WORKSHOP_PARTITION}:`;
 
 // ═══════════════════════════════════════════════════════════
 // 结构判定
@@ -232,7 +221,7 @@ export function isFullBackupFile(data: unknown): boolean {
 // 导出
 // ═══════════════════════════════════════════════════════════
 
-/** 世界书条目 token → 注释（书名 / 条目名）。先到先得：uid 段按项目分配，实际不重叠 */
+/** 全局 UID → 书名 / 条目名。 */
 function buildEntryAnnotations(
   books: WorldBook[],
 ): Map<string, { bookName: string; entryTitle: string; entry: WorldBook['entries'][number] }> {
@@ -242,57 +231,12 @@ function buildEntryAnnotations(
   >();
   for (const book of books) {
     for (const entry of book.entries ?? []) {
-      const token = `${book.partition}:${entry.uid}`;
+      const token = entry.uid;
       if (index.has(token)) continue;
       index.set(token, { bookName: book.name, entryTitle: entry.name, entry });
     }
   }
   return index;
-}
-
-/**
- * 工坊身份键 —— JSON.stringify([projectId, sourceUid])。
- *
- * `sourceUid` 在类型上是 `string | number`（上游自由填），统一 `String()` 后入键。
- *
- * 🔴 **不用分隔符拼串**：projectId 是 uuid、sourceUid 是自由串，随便挑一个可见字符
- *    当分隔符，迟早会有两对不同的 (项目, uid) 拼出同一个键 —— 而症状是体检假通过。
- *    `JSON.stringify` 会把值里的引号自己转义掉，天然没有这个歧义。
- */
-function workshopIdentityKey(projectId: string, sourceUid: string | number): string {
-  return JSON.stringify([projectId, String(sourceUid)]);
-}
-
-/**
- * 收件人库里的「工坊身份 → 本机 uid」索引。
- *
- * 只扫 `creative_workshop` 分区：别的分区没有 `extra.workshop`，扫了也只是空转。
- * 同一身份重复出现（理论上不该有）取先到的那条 —— 与 `buildEntryAnnotations` 同口径。
- */
-function buildWorkshopProvenanceIndex(books: WorldBook[]): Map<string, number> {
-  const index = new Map<string, number>();
-  for (const book of books) {
-    if (book.partition !== WORKSHOP_PARTITION) continue;
-    for (const entry of book.entries ?? []) {
-      const w = entry.extra?.workshop;
-      if (!w?.projectId || w.sourceUid === undefined || w.sourceUid === null) continue;
-      const key = workshopIdentityKey(w.projectId, w.sourceUid);
-      if (!index.has(key)) index.set(key, entry.uid);
-    }
-  }
-  return index;
-}
-
-/** 清单项带没带跨机身份 —— 带了就按身份比对，没带（非工坊 / 老备份）退回裸 token */
-function entryIdentityKey(ref: SessionEntryRef): string | null {
-  if (
-    !ref.workshopProjectId ||
-    ref.workshopSourceUid === undefined ||
-    ref.workshopSourceUid === null
-  ) {
-    return null;
-  }
-  return workshopIdentityKey(ref.workshopProjectId, ref.workshopSourceUid);
 }
 
 /**
@@ -306,6 +250,7 @@ function entryIdentityKey(ref: SessionEntryRef): string | null {
  * 判不出关系就**不进清单**：宁可少报一条「未安装内容包」，也不要让收件人对着一串
  * 与这份存档毫无关系的包名发愁。真缺内容时世界书条目那一段照样会报。
  */
+// Protected pack payloads are read only from the current in-memory runtime, never from backup data.
 function selectReferencedPacks(
   packs: ContentPackRecord[],
   books: WorldBook[],
@@ -317,19 +262,20 @@ function selectReferencedPacks(
 
   const out: SessionDependencies['packs'] = [];
   for (const pack of packs) {
+    const payload = pack.encryptedEnvelope ? getActivePackPayload(pack.packId) : pack.payload;
     let referenced = false;
 
-    for (const packBook of pack.payload?.worldBooks ?? []) {
+    for (const packBook of payload?.worldBooks ?? []) {
       // 本机安装的那本优先（用户可能改过条目）；没装则退回 payload 里的定义
       const book = booksById.get(packBook.id) ?? packBook;
-      if ((book.entries ?? []).some((e) => enabledTokens.has(`${book.partition}:${e.uid}`))) {
+      if ((book.entries ?? []).some((e) => enabledTokens.has(e.uid))) {
         referenced = true;
         break;
       }
     }
 
     if (!referenced && mapPackStamp) {
-      const hash = (pack.payload?.mapPack as { contentHash?: unknown } | undefined)?.contentHash;
+      const hash = (payload?.mapPack as { contentHash?: unknown } | undefined)?.contentHash;
       if (typeof hash === 'string' && hash !== '' && hash === mapPackStamp) referenced = true;
     }
 
@@ -337,20 +283,13 @@ function selectReferencedPacks(
     out.push({
       packId: pack.packId,
       packVersion: pack.packVersion,
-      ...(pack.payload?.name ? { name: pack.payload.name } : {}),
+      ...(payload?.name ? { name: payload.name } : {}),
     });
   }
   return out;
 }
 
-/**
- * 工坊 token → 项目。两条解析路径：
- * ① 条目自带溯源（`extra.workshop.projectId`，D14）—— 首选，精确
- * ② uid 落在某项目的 `uidRange` 内 —— 兜底（老条目没有溯源字段）
- *
- * 两条都不中就**不产出**：编不出 projectId 的「项目」进了清单，
- * 收件人那边只会得到一条永远匹配不上的缺失提示。
- */
+/** 工坊 UID 内含项目 ID，缺少条目时仍可报告项目依赖。 */
 function resolveWorkshopProjects(
   tokens: string[],
   entryIndex: ReturnType<typeof buildEntryAnnotations>,
@@ -363,26 +302,9 @@ function resolveWorkshopProjects(
   const seen = new Set<string>();
 
   for (const token of tokens) {
-    if (!token.startsWith(WORKSHOP_TOKEN_PREFIX)) continue;
-
-    let projectId: string | undefined;
-    let projectName: string | undefined;
-
-    const annotation = entryIndex.get(token);
-    const provenance = annotation?.entry.extra?.workshop;
-    if (provenance?.projectId) {
-      projectId = provenance.projectId;
-      projectName = provenance.projectName;
-    } else {
-      const uid = Number(token.slice(WORKSHOP_TOKEN_PREFIX.length));
-      if (Number.isFinite(uid)) {
-        const hit = projects.find((p) => uid >= p.uidRange?.start && uid <= p.uidRange?.end);
-        if (hit) {
-          projectId = hit.id;
-          projectName = hit.name;
-        }
-      }
-    }
+    if (uidPartition(token) !== WORKSHOP_PARTITION || !token.startsWith('workshop.')) continue;
+    const projectId = token.slice('workshop.'.length, token.indexOf(':'));
+    const projectName = entryIndex.get(token)?.entry.extra?.workshop?.projectName;
 
     if (!projectId || seen.has(projectId)) continue;
     seen.add(projectId);
@@ -449,7 +371,7 @@ export async function exportSessionSave(
     db.storyTurnSummaries.where('saveId').equals(saveId).toArray(),
     db.storyArchives.where('saveId').equals(saveId).toArray(),
     db.storyArchiveRetries.where('saveId').equals(saveId).toArray(),
-    db.worldBooks.toArray(),
+    db.worldBooks.toArray().then((rows) => overlayRows(rows, getRuntimePackBooks())),
     db.workshopProjects.toArray(),
     db.contentPacks.toArray(),
   ]);
@@ -481,12 +403,6 @@ export async function exportSessionSave(
         bookName: hit.bookName,
         entryTitle: hit.entryTitle,
       };
-      // 工坊条目额外带上跨机稳定身份 —— 收件人那边 uid 几乎必然不同（见 SessionEntryRef）
-      const w = hit.entry.extra?.workshop;
-      if (w?.projectId && w.sourceUid !== undefined && w.sourceUid !== null) {
-        ref.workshopProjectId = w.projectId;
-        ref.workshopSourceUid = w.sourceUid;
-      }
       return ref;
     }),
     workshopProjects: resolveWorkshopProjects(tokens, entryIndex, projects),
@@ -542,25 +458,32 @@ export async function checkSessionSaveDependencies(
     workshopProjects: [],
   };
 
-  const [books, packs] = await Promise.all([db.worldBooks.toArray(), db.contentPacks.toArray()]);
+  const [diskBooks, packs] = await Promise.all([
+    db.worldBooks.toArray(),
+    db.contentPacks.toArray(),
+  ]);
+  const books = overlayRows(diskBooks, getRuntimePackBooks());
 
-  // 收件人库里现有的 token 全集（非工坊条目按它比对）
+  // 所有来源共享同一套全局 UID。
   const available = new Set<string>();
   for (const book of books) {
-    for (const entry of book.entries ?? []) available.add(`${book.partition}:${entry.uid}`);
+    for (const entry of book.entries ?? []) available.add(entry.uid);
   }
-  // 工坊条目按**身份**比对：本机 uid 与导出机几乎必然不同（见 SessionEntryRef）
-  const provenance = buildWorkshopProvenanceIndex(books);
 
   const splitRewrites = new Set(Object.keys(deriveSplitEntryTokenRewrites(books)));
   const missingEntries = (deps.worldBookEntries ?? []).filter((e) => {
-    const identity = entryIdentityKey(e);
-    // 带身份 → 裸 token 相等**既不充分也不必要**，只认身份
-    if (identity !== null) return !provenance.has(identity);
     return !available.has(e.token) && !splitRewrites.has(e.token);
   });
 
-  const installedPacks = new Map(packs.map((p) => [p.packId, p]));
+  const installedPacks = new Map(
+    packs
+      .filter(
+        (pack) =>
+          pack.source !== 'legacy-locked' &&
+          (!pack.encryptedEnvelope || getActivePackPayload(pack.packId)),
+      )
+      .map((p) => [p.packId, p]),
+  );
   const packMismatches: SessionImportCheck['packMismatches'] = [];
   for (const want of deps.packs ?? []) {
     const installed = installedPacks.get(want.packId);
@@ -583,7 +506,9 @@ export async function checkSessionSaveDependencies(
 
   let missingStoryPreset: SessionImportCheck['missingStoryPreset'];
   if (deps.storyPreset) {
-    const hit = await db.presets.get(deps.storyPreset.id);
+    const hit =
+      getRuntimePackPresets().find((preset) => preset.id === deps.storyPreset!.id) ??
+      (await db.presets.get(deps.storyPreset.id));
     if (!hit) missingStoryPreset = { ...deps.storyPreset };
   }
 
@@ -634,34 +559,6 @@ class IdMap {
 function remapSoftRefs(ids: string[] | undefined, map: IdMap): string[] | undefined {
   if (!Array.isArray(ids)) return ids;
   return ids.map((id) => map.peek(id) ?? id);
-}
-
-/**
- * 存档启用的工坊 token → **收件人本机的** uid（Finding 1/2）。
- *
- * 不重定向的话，导进来的存档指着导出机的 uid：那些 uid 在本机要么不存在（内容静默少一半），
- * 要么属于**另一个项目**（静默启用一批风马牛不相及的条目）。两种都不会报错。
- *
- * 认不出身份、或本机确实没装这个项目 → **原样留着**：无害（匹配不到任何条目），
- * 且与「告警之后仍允许强行导入」那条路径一致 —— 用户装上项目之后重新启用即可。
- */
-function remapWorkshopTokens(
-  tokens: string[],
-  refs: SessionEntryRef[],
-  provenance: Map<string, number>,
-): string[] {
-  const byToken = new Map<string, SessionEntryRef>();
-  for (const ref of refs) {
-    if (ref && typeof ref.token === 'string' && !byToken.has(ref.token))
-      byToken.set(ref.token, ref);
-  }
-  return tokens.map((token) => {
-    const ref = byToken.get(token);
-    const identity = ref ? entryIdentityKey(ref) : null;
-    if (identity === null) return token;
-    const localUid = provenance.get(identity);
-    return localUid === undefined ? token : `${WORKSHOP_PARTITION}:${localUid}`;
-  });
 }
 
 function readArray<T>(source: Record<string, unknown>, field: string): T[] {
@@ -818,13 +715,8 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       : p.contracts,
   });
 
-  // 工坊 token 跨机重定向要读全局 worldBooks —— 只读，且刻意放在写事务**之外**
-  // （下面那个 'rw' 事务的表清单里没有 worldBooks，进去读会直接抛）。
-  const localBooks = await db.worldBooks.toArray();
-  const provenance = buildWorkshopProvenanceIndex(localBooks);
-  const manifestRefs = Array.isArray(backup?.dependencies?.worldBookEntries)
-    ? backup.dependencies.worldBookEntries
-    : [];
+  // 只读当前世界书（含授权内存层），仅展开作者声明的拆分引用。
+  const localBooks = overlayRows(await db.worldBooks.toArray(), getRuntimePackBooks());
 
   const nextMetadata: SaveSlot['metadata'] = asRecord(rawSave.metadata)
     ? { ...rawSave.metadata }
@@ -832,7 +724,7 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
   if (Array.isArray(nextMetadata.enabledWorldBookEntries)) {
     nextMetadata.enabledWorldBookEntries = expandSplitEntryTokens(
       localBooks,
-      remapWorkshopTokens(nextMetadata.enabledWorldBookEntries, manifestRefs, provenance),
+      nextMetadata.enabledWorldBookEntries,
     );
   }
 

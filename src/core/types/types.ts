@@ -56,7 +56,7 @@ export type WorldBookPartition =
   | 'creative_workshop'; // 创意工坊 — 社区二创内容
 
 export interface WorldBookEntry {
-  uid: number; // 唯一标识（来自原版世界书 UID）
+  uid: string; // 全局唯一命名空间标识：namespace:partition/slug
   name: string; // 条目名称（对应 ST 的 comment）
   content: string; // 注入正文
   enabled: boolean; // 开关（false 时该条目对所有 agent 都不注入）
@@ -130,8 +130,6 @@ export type FixedLoreSnapshot = Record<string, FixedLoreRecord>;
 
 /** 条目级路由元数据。`audiences`/`section` 逐条目声明；书级同名声明仅旧包兼容。 */
 export interface LoreEntryMeta {
-  /** 稳定条目键（带来源命名空间，如 `fated:faction/北城`）；缺席时引擎派生 `书id#uid` */
-  key?: string;
   /** 允许读取的 Agent ID；**唯一的读取范围来源**（Agent 设置不再有世界书清单） */
   audiences?: string[];
   section?: LoreSection;
@@ -150,8 +148,8 @@ export interface LoreEntryMeta {
   evaluation?: 'perTurn' | 'onCreate';
   /** 稳定渲染顺序与候选预算的优先级（越大越先） */
   priority?: number;
-  /** 拆分来源：父条目键、在父条目中的序号、原生产 uid */
-  source?: { parentKey?: string; part?: number; legacyUid?: number };
+  /** 显式拆分来源：父条目 UID 与分片序号。 */
+  source?: { parentUid: string; part: number };
 }
 
 /** 书级组织元数据：只承载分类与命名空间；读取范围 / Story 放置逐条目声明。 */
@@ -238,7 +236,6 @@ export interface WorkshopProject {
   installedVersion: string;
   installedAt: number;
   fetchedAt: number; // 上次拉取上游元数据时间（TTL 判定）
-  uidRange: { start: number; end: number };
   /**
    * 安装时的处置记录，供 UI 提示。
    *
@@ -969,8 +966,8 @@ export interface BeautifierRule {
   autoEnable?: {
     /** 世界书 ID 集合（如 ['system_core']） */
     worldBookIds?: string[];
-    /** 具体条目 UID（如 [413] 妲丽安核心） */
-    worldBookEntryUids?: number[];
+    /** 具体条目的全局命名空间 UID。 */
+    worldBookEntryUids?: string[];
     /** 角色名集合（如 ['妲丽安']） */
     characterNames?: string[];
   };
@@ -1581,7 +1578,7 @@ export interface SaveSlot {
     totalTurns: number;
     /** 建档时明确选择，存档生命周期内固定；旧档缺席按 Agent 运行。 */
     generationMode?: 'agent' | 'direct';
-    /** Phase 10h: 存档级启用的世界书条目 ID (如 'system_core:408', 'character:313') */
+    /** 存档级启用的全局 UID（如 fated:system_core/dalian）。 */
     enabledWorldBookEntries?: string[];
     /** 建档时冻结所选原生角色；旧存档缺席时从仍启用的旧资料兼容读取。 */
     characterDefinitions?: import('./types-character').CharacterDefinition[];
@@ -1770,8 +1767,8 @@ export interface CreatePreset {
   destinyCoreId: string | null;
   plotSettings: PlotSettings | null;
   /** Phase 10h: 世界书驱动字段 */
-  systemCoreEntryUid?: number | null;
-  enabledCharacterEntryUids?: number[];
+  systemCoreEntryUid?: string | null;
+  enabledCharacterEntryUids?: string[];
   enabledCharacterDefinitionIds?: string[];
   /** 角色补充信息 */
   personality?: string;
@@ -1943,7 +1940,7 @@ export interface AgentContext {
   agentOutputs: Map<string, any>; // 上游 Agent 的输出
   /** Present only while assembling Story v2, including its indirect EJS reads. */
   loreReadContext?: LoreReadContext;
-  /** 世界书检索使用的历史消息数；缺省 6，0 表示仅使用当前输入。 */
+  /** 世界书检索使用的历史消息数；缺省 2，0 表示仅使用当前输入。 */
   loreHistoryMessages?: number;
   /** Immutable opening results from SaveSlot metadata; never recomputed during assembly. */
   fixedLore?: FixedLoreSnapshot;
@@ -2115,7 +2112,7 @@ export interface AgentContext {
    */
   ejsFallback?: (info: {
     agentId: string;
-    entries: Array<{ uid: number; bookName?: string; error: string }>;
+    entries: Array<{ uid: string; bookName?: string; error: string }>;
   }) => void;
   /**
    * 轴②`vars` 草稿暂存 —— **仅持 `ejsVarsCommit` 权的 Agent** 的 pass 会写入本表（keyed by agentId）。
@@ -2160,7 +2157,7 @@ export interface AgentContext {
       agentId: string;
       staticText: string;
       dynamicText: string;
-      fallbackEntries: Array<{ uid: number; error: string }>;
+      fallbackEntries: Array<{ uid: string; error: string }>;
     };
   };
 

@@ -7,7 +7,7 @@
 
 /** 参与世界书 hash 的条目字段（`WorldBookEntry` 的结构子集） */
 export interface HashableEntry {
-  uid: number;
+  uid: string;
   name: string;
   content: string;
   enabled: boolean;

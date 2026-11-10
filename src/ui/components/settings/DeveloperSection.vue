@@ -153,7 +153,7 @@ watch(
             @change="updateLoreHistoryMessages"
           />
           <span id="lore-history-help" class="form-hint">
-            默认 6 条玩家 / AI 消息，0 仅看当前输入。修改后下一轮生效。
+            默认 2 条玩家 / AI 消息，0 仅看当前输入。修改后下一轮生效。
           </span>
         </label>
       </div>

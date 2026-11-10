@@ -8,11 +8,11 @@ const books = () => [
     partition: 'world_setting',
     entries: [
       {
-        uid: 1,
+        uid: 'fated:world_setting/a',
         name: 'a',
         content: 'synthetic',
         enabled: true,
-        extra: { lore: { key: 'a', section: 'turn', audiences: ['story'] } },
+        extra: { lore: { section: 'turn', audiences: ['story'] } },
       },
     ],
   },
@@ -30,8 +30,8 @@ it('revisioned install validates disabled entries, malformed declarations and cy
     'sample: audiences must be declared per entry, not on the book',
   );
   b[0].entries[0].enabled = false;
-  Object.assign(b[0].entries[0].extra.lore, { dependsOn: ['a'] });
-  expect(validateLoreProtocol(b)).toContain('a: dependency cycle');
+  Object.assign(b[0].entries[0].extra.lore, { dependsOn: ['fated:world_setting/a'] });
+  expect(validateLoreProtocol(b)).toContain('fated:world_setting/a: dependency cycle');
   const errors = validatePackOrThrow({
     formatVersion: 1,
     packId: 'sample',

@@ -12,7 +12,7 @@ import {
 
 function entry(overrides: Partial<WorldBookEntry> & { name: string }): WorldBookEntry {
   return {
-    uid: 1,
+    uid: 'fated:combat_extra/protocol',
     content: '',
     enabled: true,
     key: [],

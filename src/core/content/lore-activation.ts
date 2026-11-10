@@ -8,7 +8,7 @@ import { resolveLocationHierarchy, splitLocationSegments } from '../map/map-inde
 import { getMapIndex } from '../map/map-runtime';
 import { toEpochMinutes } from '../time/time-system';
 
-export const DEFAULT_LORE_HISTORY_MESSAGES = 6;
+export const DEFAULT_LORE_HISTORY_MESSAGES = 2;
 
 export function getLoreRecentMessages(ctx: Pick<AgentContext, 'history' | 'loreHistoryMessages'>) {
   const count = ctx.loreHistoryMessages ?? DEFAULT_LORE_HISTORY_MESSAGES;

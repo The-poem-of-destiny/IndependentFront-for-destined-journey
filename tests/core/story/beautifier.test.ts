@@ -35,18 +35,26 @@ function rule(over: Partial<BeautifierRule>): BeautifierRule {
 // ========== collectActiveSignalsFromEntries ==========
 
 describe('collectActiveSignalsFromEntries', () => {
-  it('解析 partition:uid 到 worldBookIds + entryUids', () => {
-    const r = collectActiveSignalsFromEntries(['system_core:413', 'dlc:100']);
-    expect(r.activeEntryUids.has(413)).toBe(true);
-    expect(r.activeEntryUids.has(100)).toBe(true);
+  it('完整 UID 提取分区，保留命名空间以避免跨来源碰撞', () => {
+    const r = collectActiveSignalsFromEntries([
+      'fated:system_core/dalian',
+      'workshop.demo:creative_workshop/rule',
+    ]);
+    expect(r.activeEntryUids.has('fated:system_core/dalian')).toBe(true);
+    expect(r.activeEntryUids.has('workshop.demo:creative_workshop/rule')).toBe(true);
+    expect(r.activeEntryUids.has('placeholder:system_core/dalian')).toBe(false);
     expect(r.activeWorldBookIds.has('system_core')).toBe(true);
-    expect(r.activeWorldBookIds.has('dlc')).toBe(true);
+    expect(r.activeWorldBookIds.has('creative_workshop')).toBe(true);
   });
 
-  it('无冒号的条目被忽略', () => {
-    const r = collectActiveSignalsFromEntries(['invalid', 'system_core:413']);
+  it('非法与旧数字 token 被忽略', () => {
+    const r = collectActiveSignalsFromEntries([
+      'invalid',
+      'system_core:413',
+      'fated:system_core/dalian',
+    ]);
     expect(r.activeEntryUids.size).toBe(1);
-    expect(r.activeEntryUids.has(413)).toBe(true);
+    expect(r.activeEntryUids.has('fated:system_core/dalian')).toBe(true);
   });
 
   it('空数组 → 空集合', () => {
@@ -60,15 +68,25 @@ describe('collectActiveSignalsFromEntries', () => {
 
 describe('resolveAutoEnable — worldBookEntryUids 维度', () => {
   it('命中 uid → enabled + locked', () => {
-    const r = rule({ autoEnable: { worldBookEntryUids: [413] } });
-    const [out] = resolveAutoEnable([r], new Set(), new Set([413]), new Set());
+    const r = rule({ autoEnable: { worldBookEntryUids: ['fated:system_core/dalian'] } });
+    const [out] = resolveAutoEnable(
+      [r],
+      new Set(),
+      new Set(['fated:system_core/dalian']),
+      new Set(),
+    );
     expect(out.enabled).toBe(true);
     expect(out.locked).toBe(true);
   });
 
   it('未命中 → 保持 disabled', () => {
-    const r = rule({ autoEnable: { worldBookEntryUids: [413] } });
-    const [out] = resolveAutoEnable([r], new Set(), new Set([999]), new Set());
+    const r = rule({ autoEnable: { worldBookEntryUids: ['fated:system_core/dalian'] } });
+    const [out] = resolveAutoEnable(
+      [r],
+      new Set(),
+      new Set(['placeholder:system_core/dalian']),
+      new Set(),
+    );
     expect(out.enabled).toBe(false);
   });
 });
@@ -105,12 +123,24 @@ describe('resolveAutoEnable — worldBookIds 维度', () => {
 describe('resolveAutoEnable — 三维 OR 匹配', () => {
   it('规则同时绑 uid + 角色名，任一命中即激活', () => {
     // 与真实 dalian 规则同构：worldBookEntryUids + characterNames 都有
-    const r = rule({ autoEnable: { worldBookEntryUids: [413], characterNames: ['妲丽安'] } });
+    const r = rule({
+      autoEnable: { worldBookEntryUids: ['fated:system_core/dalian'], characterNames: ['妲丽安'] },
+    });
     // 只命中角色名（uid 未命中）也激活
-    const [byName] = resolveAutoEnable([r], new Set(), new Set([999]), new Set(['妲丽安']));
+    const [byName] = resolveAutoEnable(
+      [r],
+      new Set(),
+      new Set(['fated:system_core/other']),
+      new Set(['妲丽安']),
+    );
     expect(byName.enabled).toBe(true);
     // 只命中 uid（角色不在场）也激活
-    const [byUid] = resolveAutoEnable([r], new Set(), new Set([413]), new Set(['艾莉亚']));
+    const [byUid] = resolveAutoEnable(
+      [r],
+      new Set(),
+      new Set(['fated:system_core/dalian']),
+      new Set(['艾莉亚']),
+    );
     expect(byUid.enabled).toBe(true);
   });
 
@@ -143,9 +173,16 @@ describe('mergeRules — 手动翻转内置默认状态', () => {
     const preset = rule({
       id: 'auto',
       enabled: false,
-      autoEnable: { worldBookEntryUids: [413] },
+      autoEnable: { worldBookEntryUids: ['fated:system_core/dalian'] },
     });
-    const [merged] = mergeRules([preset], [], ['auto'], new Set(), new Set([413]), new Set());
+    const [merged] = mergeRules(
+      [preset],
+      [],
+      ['auto'],
+      new Set(),
+      new Set(['fated:system_core/dalian']),
+      new Set(),
+    );
 
     expect(merged).toMatchObject({ enabled: true, locked: true });
   });

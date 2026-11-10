@@ -1,0 +1,273 @@
+# 前端 UI 设计与交互逻辑审查报告（2026-11-08）
+
+- **审查范围：** 首页（`HomePage`）、全局导航与状态（`ui-store` / `SaveManager` / `ContentStatusBanner`）、设置页 14 个分区（`SettingsPage`）、八步角色创建流程（`CreatePage`）、扩展管理与创意工坊（`ExtensionManagementPage` / `WorkshopPage`）、游戏主界面与各弹窗面板（`GamePage` / `GameMenu` / `ScenePanel` / `StatusOverview` / `ItemsPanel` 等）
+- **审查目标：** 识别信息架构层级错位、入口冗余或缺失、跨页面状态断层、控件约束不一致以及误导用户心智模型的 UI 逻辑问题
+
+---
+
+## 问题总览
+
+| 编号   | 模块                | 问题简述                                                                                            | 严重度 |
+| ------ | ------------------- | --------------------------------------------------------------------------------------------------- | ------ |
+| UIL-01 | 首页 / 设置         | 「关于」同时作为首页一级入口与设置页二级子分区，层级关系自相矛盾                                    | 中     |
+| UIL-02 | 首页 / 设置         | 设置页左侧 Tab 导航栏混入跨页跳转的「扩展管理」，同栏交互行为不一致且拉长返回路径                   | 中     |
+| UIL-03 | 首页 / 存档管理     | 首页「继续 / 新建存档」二合一，有存档后首页缺失一级「新建存档」入口                                 | 中     |
+| UIL-04 | 首页 / 扩展管理     | 「扩展管理」占据首页一级主按钮，但页面内三分之二区域为「规划中 / 暂未开放」占位卡片                 | 低     |
+| UIL-05 | 角色创建 / 导航     | `CreatePage` 左上角「← 首页」硬编码 `navigate('home')`，把创建页压入返回栈并丢失游戏页来路          | 高     |
+| UIL-06 | 横幅 / 设置导航     | 多处「去设置」调用 `navigate('settings')` 未定位目标分区；已在设置页内调用 `openSettings` 无反应    | 高     |
+| UIL-07 | 设置 / 存档数据     | 「存档管理」与「存档数据」命名雷同；全局设置分区内混入单存档设置（从首页进入时处于禁用死胡同）      | 中     |
+| UIL-08 | 内容包 / 角色创建   | 内容包管理深藏在「设置 → 存档数据」底部；`CreatePage` 缺内容时错误引导玩家去已锁定的「创意工坊」    | 高     |
+| UIL-09 | 设置 / 开发者模式   | 影响存档准入的「Story 新模式」与检索参数放在「开发者模式」；开启后记忆分区未禁用已失效的压缩阈值    | 中     |
+| UIL-10 | 设置 / 角色创建     | 「设置 → 剧情系统」与「捏人 → 剧情规划」的难度枚举、章节/事件数范围（0 vs 1）及年份上限不一致       | 高     |
+| UIL-11 | 角色创建            | 顶部步骤条 `CreateSteps` 可无条件跳步，第 8 步与提交逻辑仅校验属性点，可绕过难度/姓名/种族/核心     | 高     |
+| UIL-12 | 角色创建 / 预设     | 命定核心迁入世界书后旧字段 `destinyCore` 恒为空，导致确认页不显示核心、背景条件永不解锁、预设丢项   | 高     |
+| UIL-13 | 角色创建（Step 1）  | 下一步禁用时无缺失项提示；必须清零的基础/额外点数以绿色显示「剩余 X」，与可留存的转生点数语义相反   | 中     |
+| UIL-14 | 角色创建（Step 6）  | 剧情模式设为「关闭（`off`）」时，下方仍渲染「大纲预览」与「生成剧情大纲 / 导入大纲」操作区          | 中     |
+| UIL-15 | 角色创建（Step 7）  | 确认页未展示自定义起始地点名称（显示为「起始: 自定义」）；难度页残留不存在的「购买伙伴」描述        | 低     |
+| UIL-16 | 游戏页（左栏）      | `ScenePanel` 常驻无功能的「万象」页签，向玩家直接展示开发期占位说明                                 | 低     |
+| UIL-17 | 游戏页（左栏）      | 在场 NPC 行点击可打开角色查看器弹窗，但样式仍为 `cursor: help`（问号光标），误导玩家不可点击        | 低     |
+| UIL-18 | 游戏页（右栏/弹窗） | 右栏「持有物」与弹窗 `ItemsPanel` 对「背包」分类定义不一致；持有物未满 7 项时右栏无打开背包面板入口 | 中     |
+| UIL-19 | 存档管理弹窗        | 游戏内打开 `SaveManager` 时未标记「当前游玩中」的存档，选中当前存档仍显示「进入游戏」               | 低     |
+| UIL-20 | 设置 / 全局与单档态 | 设置页多处混入单存档/剧透/仅新档内容；且从游戏返回首页不清空 `activeSaveId`，导致首页设置暗改旧存档 | 高     |
+
+---
+
+## 一、导航与入口层级错位（信息架构）
+
+### UIL-01：「关于」页面的跨层级双入口
+
+- **涉及文件：** `src/ui/components/home/HomePage.vue:230-238`、`src/ui/components/settings/SettingsPage.vue:63`、`src/ui/components/settings/AboutSection.vue`
+- **现象：**
+  - 首页底部操作区将「关于」与「退出」并排放置，点击执行 `ui.openSettings('about')`。
+  - 进入「设置」后，左侧导航栏最下方同样有「关于」分区，两者渲染同一个 `SettingsPage` + `AboutSection`。
+- **设计逻辑问题：**
+  1. **兄弟关系与父子关系冲突：** 在首页上，「设置」与「关于」是同级按钮；但点击「关于」后，用户直接进入顶栏标为「系统设置」、左侧列出 14 个系统配置项的设置页内部，「关于」又变成了「设置」的子分区。
+  2. **上下文跳跃：** 用户在首页点击「关于」时预期看到轻量的版本/制作组信息弹窗，实际却切入完整的系统配置界面。
+- **建议方向：** 移除首页底部的「关于」按钮（首页页脚已常驻版本号与纪元名），统一收归「设置 → 关于」；或让首页「关于」以独立轻量 `AppModal` 呈现。
+
+### UIL-02：「扩展管理」混入设置页左侧 Tab 导航栏
+
+- **涉及文件：** `src/ui/components/settings/SettingsPage.vue:164-174`、`src/ui/components/home/HomePage.vue:209-219`、`src/ui/components/game/GameMenu.vue:41-46`
+- **现象：**
+  - 「扩展管理」在首页与游戏菜单中都是与「设置」平级的一级入口。
+  - 但在 `SettingsPage.vue` 左侧导航栏末尾（分隔线下方）又放置了一个「扩展管理」按钮，点击执行 `ui.navigate('extensions')`。
+- **设计逻辑问题：**
+  1. **同栏异构行为：** 设置页左侧导航栏前 14 项均为切换右侧面板（页内 Tab），唯独最后一项会卸载整个设置页、跳转到另一张独立页面。
+  2. **返回栈绕路：** 从「首页 → 设置 → 扩展管理」进入后，点击扩展管理左上角「← 返回」会退回「设置」而非「首页」，形成多层嵌套返回。
+- **建议方向：** 从 `SettingsPage.vue` 左侧导航栏移除「扩展管理」外跳按钮，保持其与「设置」的平级关系。
+
+### UIL-03：首页「继续 / 新建存档」二合一导致有存档后缺失一级「新建存档」入口
+
+- **涉及文件：** `src/ui/components/home/HomePage.vue:188-198`、`src/ui/components/shared/SaveManager.vue:199`
+- **现象：**
+  - 首页主按钮文案为 `{{ latestSave ? '✦ 继 续' : '✦ 新 建 存 档' }}`。
+  - 一旦本地存在至少一个存档，首页上的「新建存档」按钮即消失；玩家若想开新周目，必须先点击「存档管理」，再在弹窗右上角点击小号幽灵按钮「新建存档」。
+- **设计逻辑问题：** 多周目角色扮演游戏中，「继续上次存档」与「开启新周目」均为核心主流程；将「新建存档」降级隐藏到二级弹窗的次要操作位，增加了高频操作路径深度。
+- **建议方向：** 有存档时保留「继续」作为主按钮，同时在首页显式提供「新建存档」或在按钮区合理并列。
+
+### UIL-04：「扩展管理」占据首页一级主按钮，但页面核心区域多为未开放占位
+
+- **涉及文件：** `src/ui/components/workshop/ExtensionManagementPage.vue:35-77`、`src/ui/components/home/HomePage.vue:209-219`
+- **现象：**
+  - 首页主操作列将「扩展管理」与「存档管理」「设置」并列为大尺寸主按钮。
+  - 点入 `ExtensionManagementPage.vue` 后，上半部分「原版扩展管理」标为「规划中 / 暂未开放（禁用）」，下半部分「创意工坊」覆盖着锁头蒙版「创意工坊暂未开放」，仅最底部的「已安装扩展启用」可交互（且未安装社区扩展时同样为空态）。
+- **设计逻辑问题：** 一级导航给予用户高预期，但落地页主体功能尚未开放，造成明显的点击落空感。
+
+### UIL-05：`CreatePage` 返回按钮硬编码 `navigate('home')` 污染历史栈
+
+- **涉及文件：** `src/ui/components/create/CreatePage.vue:100-107`、`src/ui/stores/ui-store.ts:44-51, 74-78`
+- **现象：**
+  - `CreatePage.vue` 左上角按钮写死为 `@click="ui.navigate('home')"`（文案为 `← 首页`），而非调用 `ui.back('home')`。
+- **设计逻辑问题：**
+  1. **污染 `viewHistory`：** `ui.navigate('home')` 会把当前视图 `'create'` 压入 `viewHistory`。随后用户在首页打开「设置」并点击设置页左上角「← 返回」（调用 `ui.back('home')`）时，从栈顶弹出的不是 `'home'`，而是刚才退出的 `'create'`（角色创建页）。
+  2. **丢失游戏内来路：** 当玩家在游戏进行中通过「菜单 → 存档管理 → 新建存档」进入 `CreatePage` 后想取消返回时，点击左上角只能强制跳回首页，无法回到刚才正在游玩的游戏页。
+- **建议方向：** 将 `CreatePage.vue` 左上角返回改为 `ui.back('home')`，文案统一为 `← 返回`。
+
+### UIL-06：多处「去设置」未定位目标分区，且已在设置页时点击无反应
+
+- **涉及文件：**
+  - `src/ui/components/shared/ContentStatusBanner.vue:122, 188`
+  - `src/ui/components/game/SceneImageSegment.vue:453`
+  - `src/ui/components/settings/SettingsPage.vue:46`
+  - `src/ui/stores/ui-store.ts:54-63`
+- **现象：**
+  1. `ContentStatusBanner.vue` 在导入冲突引导（「前往『设置 → 存档数据 → 导入内容包』完成确认」）及「管理 Discord 授权」按钮上调用的都是 `ui.navigate('settings')`，而非 `ui.openSettings('data')`。
+  2. `SceneImageSegment.vue:453` 在插画缺预设时点击「去设置」调用 `ui.navigate('settings')`，而非 `ui.openSettings('image')`。
+  3. `SettingsPage.vue` 仅在组件初始化时执行一次 `const activeSection = ref<Section>(ui.consumeSettingsSectionRequest() ?? 'api')`，未监听 `ui.requestedSettingsSection`。
+- **设计逻辑问题：**
+  - 用户从首页或游戏页点击上述按钮进入设置页时，总是落在默认的「API 配置」分区，需要自行寻找对应的「存档数据」或「图像生成」分区。
+  - 更严重的是，`SettingsPage.vue` 顶部自身也挂载了 `ContentStatusBanner`（且全局挂载了 `ApiRateLimitWaitPopup`）。当用户**已经处于设置页**（例如正在查看其他分区）并点击横幅上的「管理 Discord 授权」或限流弹窗的「打开 API 设置」时，由于当前视图已是 `'settings'`，组件不会重新挂载，`activeSection` 完全不会切换，表现为**按钮点击毫无反应**，且未消费的 `requestedSettingsSection` 会残留在 store 中影响下一次进入设置页。
+- **建议方向：**
+  - 将各处带明确意图跳转设置页的调用统一改为 `ui.openSettings('data')` / `ui.openSettings('image')`。
+  - 在 `SettingsPage.vue` 中监听 `ui.requestedSettingsSection`，在已挂载状态下立即消费并切换 `activeSection`。
+
+---
+
+## 二、设置页与全局/单档状态边界混淆
+
+### UIL-07：「存档管理」与「设置 → 存档数据」命名雷同且单档/全局职责混放
+
+- **涉及文件：** `src/ui/components/shared/SaveManager.vue`、`src/ui/components/settings/DataSection.vue:397-468`
+- **现象：**
+  - 应用内同时存在弹窗「存档管理」（`SaveManager`）与设置分区「存档数据 / 存档数据管理」（`DataSection`）。
+  - `DataSection` 中除了整库备份导出/导入、浏览器存储用量、清除所有数据、内容包管理等**全局操作**外，还混入了**「经验档位（普通/简单）」**与**「本存档插画」**两张依赖 `ui.activeSaveId` 的**单存档卡片**。
+  - 同时，`SaveManager` 的「导入存档」同时支持单档备份（`SessionBackup`）与整库备份（`FullBackup`），而 `DataSection` 的「导入数据」仅接受整库备份。
+- **设计逻辑问题：**
+  1. **从首页进入设置时的死胡同：** 用户从首页打开「设置 → 存档数据」时，由于尚未载入任何存档（`ui.activeSaveId === null`），「经验档位」与「本存档插画」两张卡片处于禁用状态，提示“未载入存档 —— 进入游戏后可在此切换”。在全局系统设置中放置依赖单存档上下文的设置项，破坏了全局设置的自洽性。
+  2. **心智负担：** 用户难以从「存档管理」与「存档数据管理」的名称区分「单个存档槽位操作」与「全库数据/内容包维护」。
+- **建议方向：**
+  - 将 `DataSection` 重命名为「数据与内容包」或「全局数据」，明确其全库/应用级定位。
+  - 将单存档的「经验档位」移入 `SaveManager` 的单档详情面板或游戏内面板，或在无活跃存档时提供存档选择下拉框（与 `CommunityExtensionSettings.vue` 的「配置存档」选择器一致）。
+
+### UIL-08：内容包管理深藏在「存档数据」底部，且 `CreatePage` 空态文案指错入口
+
+- **涉及文件：** `src/ui/components/settings/DataSection.vue:474-537`、`src/ui/components/create/CreatePage.vue:168-174`
+- **现象：**
+  - 内容包（Content Pack）的本地导入、在线更新检查、卸载以及 Discord 授权登录全部放在「设置 → 存档数据」分区最底部的卡片中。
+  - 而在 `CreatePage.vue:172` 中，当目录内容为空（`store.contentStatus === 'empty'`）时，界面提示：**「未能读取到起始装备、背景与出生地等内容。可在『创意工坊』安装内容包后重试。」**
+- **设计逻辑问题：**
+  1. **概念混淆与死胡同引导：** 「内容包（Content Pack）」与「创意工坊社区扩展（Workshop Project）」是两套完全不同的机制，且当前创意工坊入口在 `ExtensionManagementPage` 中处于锁定关闭状态。玩家按提示去找「创意工坊」既进不去，也装不了内容包。
+  2. **核心基座入口过深：** 内容包决定整个游戏的角色目录、世界书、默认提示词与品牌面，属于首次启动的核心前置步骤，却被归在「存档数据」最末。
+- **建议方向：**
+  - 修正 `CreatePage.vue` 空态文案，指向顶部横幅或设置页内容包卡片（并附直接跳转按钮）。
+  - 考虑将「内容包」提升为设置页独立分区或与顶部导航联动。
+
+### UIL-09：「Story 上下文与记忆新模式」放在「开发者模式」，且与「记忆 & 缓存」状态脱节
+
+- **涉及文件：** `src/ui/components/settings/DeveloperSection.vue:99-192`、`src/ui/components/settings/MemorySection.vue:25-32, 88-98`
+- **现象：**
+  - 「Story 上下文与记忆新模式」（`storyContextV2Enabled`）及其子项「召回原文粒度」「世界书检索历史消息数」被放在「设置 → 开发者模式」分区。
+  - 开启或关闭该开关会直接决定普通存档与「测试方案」存档能否进入游戏（不匹配的存档在 `SaveManager` 中会被拦截）。
+  - 在「设置 → 记忆 & 缓存」分区中，顶部卡片提示「压缩阈值不适用于测试存档；召回原文粒度在 设置 → 开发者模式 中切换」，但下方的「压缩阈值（轮）」输入框依然保持可用状态。
+- **设计逻辑问题：**
+  1. **功能归属错位：** 玩家在 `SaveManager` 遇到存档模式不匹配提示时，很难想到要去「开发者模式」里切换存档兼容模式；记忆与世界书检索粒度也与「记忆 & 缓存」分区割裂。
+  2. **失效控件未禁用：** 当新模式开启且明确说明「压缩阈值不适用于测试存档」时，继续允许用户编辑「压缩阈值」会产生“改了能生效”的错觉。
+
+### UIL-10：「设置 → 剧情系统」与「捏人 → 剧情规划」的参数范围与枚举不一致
+
+- **涉及文件：** `src/ui/components/settings/PlotSection.vue:46-55, 113-175`、`src/ui/components/create/CreateStepPlot.vue:144-166, 179-243`、`src/ui/stores/create-store.ts:960-986`
+- **现象：**
+  `PlotSection.vue` 声明「此处为『新档默认值』——每个存档可在捏人页『剧情规划』步骤单独调整」，但两处表单存在三处硬冲突：
+  1. **难度层级选项缺失：** 设置页 `plotDifficultyOptions` 提供 `adaptive` 及 `T1`～`T7` 共 **8 个选项**；而捏人页 `DIFFICULTY_OPTIONS` 仅有 `自适应`、`T2`、`T3`、`T4`、`T7` 共 **5 个按钮**（缺失 `T1 普通`、`T5 传说`、`T6 神话`）。若用户在设置页将默认难度设为 T1/T5/T6，进入捏人页后 **5 个难度按钮全部处于未选中状态**。
+  2. **章节数与每章事件数无法选回 `0`（AI 自行判断）：** 设置页允许 `min="0" max="20"`（默认值为 `0`，提示 `0 = AI 自行判断`）；而捏人页 `FormStepper` 写死为 `:min="1" :max="20"`。捏人页初始显示从设置读入的 `0`，但用户一旦点击 `+` 调到 `1`，就**再也无法调回 `0`**，且捏人页缺失了 `0 = AI 自行判断` 的说明。
+  3. **主线持续年份上限不一致：** 设置页允许 `min="1" max="50"`，捏人页 `FormStepper` 限制 `:min="1" :max="20"`。
+  4. **修改新档默认值在同会话内不同步：** `initPlotDefaultsFromSettings()` 仅在 `create-store` 首次创建时执行一次；若用户先进过捏人页，再去设置页修改剧情默认值，返回捏人页或重置捏人页时不会重新读取新的默认值。
+
+### UIL-20：设置页混入四类「单存档 / 剧透 / 仅新档生效」内容，且返回首页未清空 `activeSaveId`
+
+- **涉及文件：**
+  - `src/ui/components/settings/DataSection.vue:352-468, 599-646`
+  - `src/ui/components/settings/PlotSection.vue:68-248`
+  - `src/ui/components/settings/image/ImagePresetList.vue:87, 109, 317-368`
+  - `src/ui/components/settings/BeautifierSection.vue:52-74`
+  - `src/ui/components/game/GameMenu.vue:78-80`
+  - `src/ui/stores/ui-store.ts:44-51`
+- **现象：**
+  当前「系统设置」同时从**首页**与**游戏内菜单**进入，但内部有 4 个分区混入了与“全局系统设置”性质不符的内容：
+  1. **「存档数据」（`DataSection`）中的「经验档位」与「本存档插画」：**
+     这两项完全绑定单存档（`ui.activeSaveId`）。刚打开应用从首页进设置时，因无活跃存档只能显示禁用态提示；理应只在游戏内或单存档详情中展示。
+  2. **「剧情系统」（`PlotSection`）中的「剧情大纲预览」与「新档默认参数」：**
+     - 底部的「剧情大纲预览」卡片展示的是内容包内置的五年主线剧透示例（`branding.plotTemplate`），既不反映任何存档的实际大纲，也不随上方参数变化，放在系统设置中易被误认为当前存档大纲或造成无意剧透。
+     - 上半部分「剧情偏向 / 剧情模式 & 参数」仅作为**新建存档时捏人页 Step 6 的初始默认值**（且与捏人页 Step 6 表单完全重复），对已创建的存档完全无效；而同页下方的「随机事件」却是**全局实时对所有存档生效**。两类作用时机完全不同的配置混在同一页，无论从首页还是从游戏内进入都会产生误解。
+  3. **「图像生成」（`ImagePresetList`）中的「本存档外貌变化」：**
+     顶部状态条、角色的「本档已变」角标与重置按钮均依赖 `ui.activeSaveId`，从首页未载入存档进入时只能显示提示文字「当前没有进行中的存档，所以看不到『本存档的外貌变化』」。
+  4. **「输出美化」（`BeautifierSection`）中的「自动管理」分组：**
+     读取 `game.activeSave` 的 `enabledWorldBookEntries` 计算锁定规则；无活跃存档时该分组恒为空。
+  5. **返回首页未清理 `activeSaveId` 导致首页设置暗改旧存档：**
+     当玩家进入某个存档游玩后，点击 `GameMenu → 返回首页`（`ui.navigate('home')`），`GamePage` 虽然卸载，但 **`ui.activeSaveId` 与 `game.activeSaveId` 并未被重置为 `null`**。此时玩家虽然身处**首页**，但从首页点击「设置」进入上述分区时，设置页仍把刚才已退出的那个存档当作“当前活跃存档”，允许在首页直接修改该存档的经验档位、清理该存档插画或重置该存档角色外貌，且界面上**没有任何地方显示当前操作的是哪一个存档的名字**。
+- **建议方向：**
+  - **离开游戏回首页时重置活跃存档态：** 在返回首页时清空 `ui.activeSaveId` 与 `game.clearActive()`，确保首页真正处于“无活跃存档”的干净全局态。
+  - **从首页进入设置时隐藏纯单存档控件：** 当无活跃存档（`!ui.activeSaveId`）时，隐藏「经验档位」「本存档插画」「本存档外貌变化」等纯单存档操作块（或将「经验档位」收归游戏内 / `SaveManager` 单档详情）；并在有活跃存档（从游戏内进入设置）时显式标出当前存档名称。
+  - **剥离「剧情大纲预览」与重复的新档剧情表单：** 移除系统设置中的静态「剧情大纲预览」剧透卡；将仅对新档生效的剧情参数收归角色创建页（`CreateStepPlot`），「设置 → 剧情系统」仅保留真正全局实时生效的「随机事件」等系统级开关，或在游戏内进入时明确隐藏/折叠仅新档生效的默认项。
+
+---
+
+## 三、角色创建流程（`CreatePage`）的状态与交互逻辑
+
+### UIL-11：顶部步骤条 `CreateSteps` 无条件跳步，可绕过必选步骤直接创建残缺存档
+
+- **涉及文件：** `src/ui/components/create/CreateSteps.vue:30-45`、`src/ui/components/create/CreatePage.vue:62-65`、`src/ui/stores/create-store.ts:123-132, 1906-1910`
+- **现象：**
+  - 底部 `CreateFooter` 的「下一步 →」受 `stepValid[currentStep]` 约束（第 1 步必选难度、第 2 步必填姓名/种族/分完属性点、第 3 步必选命定核心）。
+  - 但顶部步骤条 `CreateSteps.vue` 的 8 个步骤按钮始终可点击，`handleStepSelect` 直接执行 `store.currentStep = step`，不做任何前置步骤校验。
+  - 同时，第 8 步（确认提交）的 `stepValid[7]` 与 `persistJourney()` **仅检查了 `attributesFullyAllocated.value`**，未检查 `stepValid[0]`（难度）、`stepValid[1]`（姓名与种族）、`stepValid[2]`（命定核心）。
+- **设计逻辑问题：**
+  玩家可以跳过难度选择（Step 0）、不填角色名与种族（Step 1）、不选命定核心（Step 2），只要分完属性点（或加载半截预设）后直接点击顶部步骤条的「八 · 确认提交」，底部「✦ 开始命运之旅 ✦」按钮即处于可点击状态，从而创建出未选难度、姓名为空、种族为空、无命定核心的异常存档。
+- **建议方向：**
+  - `stepValid[7]` 与 `persistJourney()` 应聚合校验 `stepValid[0] && stepValid[1] && stepValid[2]`（并在提交拦截时跳转至第一个未通过的步骤并给出 toast 提示）。
+  - `CreateSteps` 限制跳往尚未解锁的后续步骤，或在未完成必选步骤时给出明确视觉区分。
+
+### UIL-12：旧 `destinyCore` 字段未清理，导致确认页缺失核心、背景限定永不解锁、预设丢失工坊项
+
+- **涉及文件：**
+  - `src/ui/stores/create-store.ts:404-411, 524-527, 822, 2079-2082, 2118-2120`
+  - `src/ui/components/create/CreateStepConfirm.vue:47-49`
+  - `src/ui/components/create/CreateStepBackground.vue:71`
+- **现象：**
+  Phase 10h 将「命定核心」从旧目录字段 `destinyCore` 迁移到了世界书条目 `selectedSystemCoreEntry`（内置核心）与 `selectedWorkshopCore`（工坊系统核心），`CreateStepDestinyCore.vue` 只读写后两者，**`store.destinyCore` 永远为 `null`**。但下游三处仍在读取旧字段或漏存新字段：
+  1. **确认页（`CreateStepConfirm.vue:47`）：** 判断 `v-if="store.destinyCore"` 展示「命定之灵」，因 `store.destinyCore` 恒为 `null`，玩家在 Step 2 必选的命定核心在最终确认卡上**永远不显示**。
+  2. **背景限定条件（`CreateStepBackground.vue:71` & `create-store.ts:822`）：** 传入 `:destiny-core-name="store.destinyCore?.name ?? ''"`，导致带有 `requiredDestinyCore` 限定条件的背景故事**永远无法解锁**。
+  3. **角色预设（`create-store.ts:2079-2082, 2118-2120`）：** `getCurrentPresetData` 与 `applyPresetData` 仍在读写废弃的 `destinyCoreId`，且漏掉了 `selectedWorkshopCoreProjectId` 与 `enabledWorkshopProjectIds`，导致保存预设后丢失工坊命定核心与工坊扩展勾选。
+
+### UIL-13：Step 1 基础信息页缺乏下一步阻塞提示，且未分配点数配色误导
+
+- **涉及文件：** `src/ui/components/create/CreateStepBasic.vue:190-204, 480-484`
+- **现象：**
+  - Step 1 要求同时满足「输入角色名 + 选择种族 + 基础点数剩余为 0 + 额外点数剩余为 0」，底部「下一步 →」才会解锁。
+  - 当按钮处于禁用态时，页面没有任何文字说明当前还差哪一项未完成。
+  - 在属性表底部，`剩余 {{ store.remainingBP }}` 与 `剩余 {{ store.remainingAP }}` 使用了绿色（`color: var(--theme-success)`）高亮。
+- **设计逻辑问题：**
+  - 页面顶部的「转生点数」允许保留剩余点数带入游戏，而右栏的「基础点数」与「额外点数」则**必须全部分配完毕（剩余为 0）**才能进入下一步。将必须清零的「剩余 X」染成代表“正常/通过”的绿色，会让玩家误以为点数可以留存，进而困惑为什么填了名字和种族却点不了「下一步」。
+  - 此外，当玩家选择「种族：自定义」但未填写「自定义种族」输入框时，`race.value !== ''` 依然为真，校验直接放行。
+
+### UIL-14：Step 6 剧情规划在模式设为「关闭」时仍显示大纲生成与预览区
+
+- **涉及文件：** `src/ui/components/create/CreateStepPlot.vue:170-390`
+- **现象：**
+  当玩家将剧情模式设为「关闭（`off`）」时，上方的参数表单隐藏，但下方的「大纲预览」区块、「生成剧情大纲 / 导入大纲」按钮以及「此操作将调用 AI，可能需要等待较长时间」警告仍然完整渲染且可点击（同 `2026-08-12-ui-review.md` §UI-11 遗留项）。而在 `persistJourney` 中，`plotMode === 'off'` 时大纲不会被确认生成事件树，界面展示与实际落库逻辑矛盾。
+
+### UIL-15：Step 7 确认页自定义起始地点展示错误 & Step 0 文案残留
+
+- **涉及文件：** `src/ui/components/create/CreateStepConfirm.vue:45`、`src/ui/components/create/CreateStepDifficulty.vue:15`
+- **现象：**
+  1. `CreateStepConfirm.vue` 对自定义种族和自定义身份做了三元判断（`store.race === '自定义' ? store.customRace || '自定义' : store.race`），但第 45 行起始地点直接写了 `起始: {{ store.startLocation }}`。当玩家选择自定义起始地点并输入名称后，确认页始终只显示 `起始: 自定义`。
+  2. `CreateStepDifficulty.vue:15` 描述写有「转生点数用于购买属性、装备、技能、道具和伙伴」，但当前创建流程中并不存在花费转生点数购买伙伴的机制（Step 3「启用角色」为免费勾选世界书角色）。
+
+---
+
+## 四、游戏主界面（`GamePage`）与弹窗面板交互逻辑
+
+### UIL-16：左栏 `ScenePanel` 常驻无功能的「万象」占位页签
+
+- **涉及文件：** `src/ui/components/game/ScenePanel.vue:97-102, 333-341`
+- **现象：**
+  游戏主界面左侧场景栏常驻 4 个页签：`角色`、`任务`、`世界`、`万象`。点击 `万象` 固定显示：
+  > 万象未启，此页尚空…
+  > 此处日后收纳资产等条目 —— 需要具体信息、却独立于世界之外的记载。
+- **设计逻辑问题：** 在高频使用的主游戏界面侧栏常驻一个完全没有数据源与交互逻辑的未来规划页签，既挤占窄侧栏的页签横向空间，也向玩家暴露了开发期备注。
+
+### UIL-17：左栏在场 NPC 行可点击打开详情，但光标样式为 `cursor: help`
+
+- **涉及文件：** `src/ui/components/game/ScenePanel.vue:244-255, 515-529`
+- **现象：**
+  `ScenePanel.vue` 的在场 NPC 列表项是一个绑定了 `@click="viewingName = char.name"` 的 `<button>`，点击会打开 `CharacterViewerModal` 查看完整角色档案；同时悬停会弹出心声气泡。但 CSS `.scene-npc-item` 保留了旧注释与 `cursor: help`。
+- **设计逻辑问题：** 鼠标移上去显示问号光标（`?`），向玩家传递“仅用于悬停查看提示、不可点击”的错误视觉信号，掩盖了点击查看角色详情的主交互。
+
+### UIL-18：右栏「持有物」与弹窗 `ItemsPanel` 的「背包」分类不一致，且未超 6 项时缺失打开面板入口
+
+- **涉及文件：** `src/ui/components/game/StatusOverview.vue:200-230, 296-298, 558-568`、`src/ui/components/game/ItemsPanel.vue:21-48`
+- **现象：**
+  1. **同名页签口径不同：**
+     - 右栏 `StatusOverview` 的「持有物」分为 4 个页签：`装备`、`背包`（未穿戴且非消耗品）、`消耗品`、`技能`。
+     - 弹窗 `ItemsPanel` 分为 3 个页签：`背包`（包含**所有** `inventory` 物品，含已穿戴装备与消耗品）、`装备`、`技能`。
+     - 同一个「背包」名称，在右栏不含已装备物品和消耗品，在弹窗内却包含全部物品。
+  2. **右栏缺失常驻的面板打开入口：**
+     - 左栏 `ScenePanel` 的「任务」「角色」标题行右侧均有常驻的 `›` 按钮，随时可打开对应完整弹窗。
+     - 而右栏 `StatusOverview` 的「持有物」区块没有标题行打开按钮，底部「查看全部」按钮仅在当前页签条目数超过 6 条（`v-if="holdOverflow"`）时才渲染。当条目数不超过 6 条时，玩家若想丢弃物品或重铸装备，无法从右栏「持有物」直接进入 `ItemsPanel`，只能横跨整个屏幕去点最左侧工具栏的「背包」图标。
+
+### UIL-19：游戏内打开 `SaveManager` 未标识当前游玩存档，且操作按钮重复
+
+- **涉及文件：** `src/ui/components/shared/SaveManager.vue:25-33, 214-273, 368-381`
+- **现象：**
+  1. 从游戏内菜单打开「存档管理」弹窗时，左侧存档列表仅高亮“当前选中预览”的存档（`selectedSaveId`），没有标记“当前正在游玩”的存档（`ui.activeSaveId`）。一旦玩家点击其他存档查看详情，就看不出哪一个是正在运行的存档；且选中当前正在游玩的存档时，右侧主按钮仍显示「进入游戏」（点击后关闭弹窗但无实际切换）。
+  2. 左侧列表每一行悬浮显示「重命名 / 导出 / 删除」三个图标按钮，右侧详情面板底部又重复排列了「重命名存档 / 导出存档 / 删除存档」三个大按钮；同时顶部状态提示 `saveManagerHint` 中保留了永远不会被触发的 `export` 与 `delete` 分支文案。

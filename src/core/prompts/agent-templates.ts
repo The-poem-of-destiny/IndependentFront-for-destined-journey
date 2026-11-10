@@ -345,11 +345,11 @@ export function buildEjsPassContext(
 export function reportEjsFallback(
   agentId: string,
   ctx: AgentContext,
-  entries: Array<{ uid: number; error: string }>,
+  entries: Array<{ uid: string; error: string }>,
   worldBooks: WorldBook[] | undefined,
 ): void {
   if (!ctx.ejsFallback || entries.length === 0) return;
-  const bookOf = new Map<number, string>();
+  const bookOf = new Map<string, string>();
   for (const book of worldBooks ?? []) {
     for (const e of book.entries ?? []) bookOf.set(e.uid, book.name);
   }

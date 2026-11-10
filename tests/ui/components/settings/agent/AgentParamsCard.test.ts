@@ -36,16 +36,16 @@ beforeEach(() => {
   state.wb = reactive({ books: [] });
 });
 afterEach(() => wrappers.splice(0).forEach((wrapper) => wrapper.unmount()));
-function entry(uid: number, audiences?: string[], enabled = true): WorldBookEntry {
+function entry(index: number, audiences?: string[], enabled = true): WorldBookEntry {
   return {
-    uid,
-    name: `条目${uid}`,
+    uid: `user:world_setting/entry_${index}`,
+    name: `条目${index}`,
     content: '正文',
     enabled,
     key: [],
     keysecondary: [],
     selectiveLogic: 0,
-    order: uid,
+    order: index,
     position: 0,
     ...(audiences ? { extra: { lore: { audiences } } } : {}),
   };

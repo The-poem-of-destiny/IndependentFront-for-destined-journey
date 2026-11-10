@@ -665,7 +665,7 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     } as never);
     await store.flushAgentLogWrites();
     store.recordEjsVarsRejection('story', '旧差量', 10);
-    store.recordEjsFallback('story', [{ uid: 1, error: '旧错误' }]);
+    store.recordEjsFallback('story', [{ uid: 'fated:world_setting/old', error: '旧错误' }]);
     store.recordEjsUiLog('旧日志');
     store.setCombatCoordinator({ abandon: () => {} });
     store.sidebarCollapsed = true;
@@ -1160,6 +1160,22 @@ describe('Agent 调试历史', () => {
  * 「游玩 → 导出 → 分析」，所以它们必须**留在内存里到导出那一刻**，不能随轮清空。
  */
 describe('EJS 诊断累计', () => {
+  it('完整命名空间和拆分 UID 分别累计，不按同名尾段合并', () => {
+    const game = useGameStore();
+    const ids = [
+      'fated:world_setting/same',
+      'user:world_setting/same',
+      'fated:world_setting/same/part',
+    ];
+    game.recordEjsFallback(
+      'story',
+      ids.map((uid) => ({ uid, error: 'first' })),
+    );
+    game.recordEjsFallback('story', [{ uid: ids[0], error: 'again' }]);
+    expect(game.ejsFallbacks.map(({ uid, count }) => ({ uid, count }))).toEqual(
+      ids.map((uid, index) => ({ uid, count: index === 0 ? 2 : 1 })),
+    );
+  });
   beforeEach(() => {
     setActivePinia(createPinia());
   });
@@ -1167,23 +1183,25 @@ describe('EJS 诊断累计', () => {
   it('回退：同 agent+uid 累加计数，不同条目各占一行', () => {
     const game = useGameStore();
     game.recordEjsFallback('story', [
-      { uid: 101, bookName: '主世界观', error: 'SyntaxError: x' },
-      { uid: 102, bookName: '数值', error: 'ReferenceError: y' },
+      { uid: 'fated:world_setting/world', bookName: '主世界观', error: 'SyntaxError: x' },
+      { uid: 'fated:system_core/stats', bookName: '数值', error: 'ReferenceError: y' },
     ]);
-    game.recordEjsFallback('story', [{ uid: 101, bookName: '主世界观', error: 'SyntaxError: z' }]);
+    game.recordEjsFallback('story', [
+      { uid: 'fated:world_setting/world', bookName: '主世界观', error: 'SyntaxError: z' },
+    ]);
 
     expect(game.ejsFallbacks).toHaveLength(2);
-    const first = game.ejsFallbacks.find((f) => f.uid === 101)!;
+    const first = game.ejsFallbacks.find((f) => f.uid === 'fated:world_setting/world')!;
     expect(first.count).toBe(2);
     // 留最近一次错因 —— 同条目换个错更值得看
     expect(first.error).toBe('SyntaxError: z');
-    expect(game.ejsFallbacks.find((f) => f.uid === 102)!.count).toBe(1);
+    expect(game.ejsFallbacks.find((f) => f.uid === 'fated:system_core/stats')!.count).toBe(1);
   });
 
   it('回退：不同 Agent 的同一条目分开记（可见性分区不同，失败原因可能不同）', () => {
     const game = useGameStore();
-    game.recordEjsFallback('story', [{ uid: 7, error: 'e1' }]);
-    game.recordEjsFallback('vars_update', [{ uid: 7, error: 'e2' }]);
+    game.recordEjsFallback('story', [{ uid: 'fated:world_setting/shared', error: 'e1' }]);
+    game.recordEjsFallback('vars_update', [{ uid: 'fated:world_setting/shared', error: 'e2' }]);
     expect(game.ejsFallbacks).toHaveLength(2);
   });
 
@@ -1198,7 +1216,7 @@ describe('EJS 诊断累计', () => {
 
   it('三样都是整局累计 —— 不随轮清空（clearAgentLog 不碰它们）', () => {
     const game = useGameStore();
-    game.recordEjsFallback('story', [{ uid: 1, error: 'e' }]);
+    game.recordEjsFallback('story', [{ uid: 'fated:world_setting/entry', error: 'e' }]);
     game.recordEjsVarsRejection('story', '正文', 999);
     game.recordEjsUiLog('hello');
 

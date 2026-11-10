@@ -35,9 +35,11 @@ describe('buildSessionImportWarnings', () => {
 
   it('书名缺席归到「未知世界书」，条目名缺席退回 token', () => {
     const lines = buildSessionImportWarnings(
-      check({ missingEntries: [{ token: 'creative_workshop:900001' }] }),
+      check({ missingEntries: [{ token: 'workshop.p1:creative_workshop/entry' }] }),
     );
-    expect(lines).toEqual(['世界书『未知世界书』缺少 1 个条目：creative_workshop:900001']);
+    expect(lines).toEqual([
+      '世界书『未知世界书』缺少 1 个条目：workshop.p1:creative_workshop/entry',
+    ]);
   });
 
   it('标题最多列 5 个，超出用「等 N 条」收尾', () => {

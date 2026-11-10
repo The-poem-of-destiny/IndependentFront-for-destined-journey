@@ -4,8 +4,8 @@
  * 设计: docs/planning/2026-07-31-creative-workshop-compat-design.md D10/D12
  *
  * 工坊条目与其它条目**一视同仁**: 启用信息就是存档 `metadata.enabledWorldBookEntries`
- * 里的 `creative_workshop:<uid>` 串，与 `system_core:413` 无异。本模块**不**引入第二
- * 套启用存储、**不**给工坊分区加缺省反转、**不**碰 `filterBooksByEnabledEntries`。
+ * 里的全局命名空间 UID。本模块不引入第二套启用存储。
+ * 不给工坊分区加缺省反转，也不改变 `filterBooksByEnabledEntries`。
  *
  * 存在的理由只有一个: UI 粒度是**项目**，存储粒度是**条目**（D12）。把「项目 ↔ 一组
  * uid 串」这层展开/回读做成纯函数，捏人页（建档前）与每存档面板（建档后）就能共用
@@ -16,8 +16,7 @@
 import type { WorkshopProject, WorldBook } from '@engine/types/types';
 import { WORKSHOP_PARTITION, workshopBookId } from '@engine/workshop/workshop-types';
 
-/** `creative_workshop:` —— 存档 token 的前缀 */
-const TOKEN_PREFIX = `${WORKSHOP_PARTITION}:`;
+import { uidPartition } from '@engine/content/worldbook-uid';
 
 /**
  * 一个可勾选的工坊项目 —— 项目元数据 + 它展开成的那组 uid。
@@ -33,7 +32,7 @@ export interface WorkshopEnableOption {
   version: string;
   tags: string[];
   /** 该项目全部条目的 uid（升序、去重）。空数组 = 项目装着但没有世界书条目（可能只带正则） */
-  entryUids: number[];
+  entryUids: string[];
 }
 
 /**
@@ -58,9 +57,9 @@ export function buildWorkshopEnableOptions(
   for (const project of projects) {
     if (!project || typeof project.id !== 'string' || !project.id) continue;
     const book = bookById.get(workshopBookId(project.id));
-    const uids = new Set<number>();
+    const uids = new Set<string>();
     for (const entry of book?.entries ?? []) {
-      if (Number.isFinite(entry?.uid)) uids.add(Math.trunc(entry.uid));
+      if (uidPartition(entry.uid) === WORKSHOP_PARTITION) uids.add(entry.uid);
     }
     options.push({
       projectId: project.id,
@@ -69,7 +68,7 @@ export function buildWorkshopEnableOptions(
       authorName: project.authorName || '',
       version: project.installedVersion || project.version || '',
       tags: Array.isArray(project.tags) ? [...project.tags] : [],
-      entryUids: [...uids].sort((a, b) => a - b),
+      entryUids: [...uids].sort((a, b) => a.localeCompare(b)),
     });
   }
   return options;
@@ -77,18 +76,7 @@ export function buildWorkshopEnableOptions(
 
 /** 一个项目展开成的存档 token（D12: 勾一个项目 = 写入其**全部**条目） */
 export function workshopTokensFor(option: WorkshopEnableOption): string[] {
-  return option.entryUids.map((uid) => `${TOKEN_PREFIX}${uid}`);
-}
-
-/** 从 token 数组里挑出工坊分区的那些 uid */
-function workshopUidsIn(tokens: readonly string[]): Set<number> {
-  const uids = new Set<number>();
-  for (const token of tokens) {
-    if (typeof token !== 'string' || !token.startsWith(TOKEN_PREFIX)) continue;
-    const uid = Number(token.slice(TOKEN_PREFIX.length));
-    if (Number.isFinite(uid)) uids.add(Math.trunc(uid));
-  }
-  return uids;
+  return [...option.entryUids];
 }
 
 /**
@@ -102,7 +90,7 @@ export function isWorkshopProjectEnabled(
   tokens: readonly string[],
 ): boolean {
   if (option.entryUids.length === 0) return false;
-  const present = workshopUidsIn(tokens);
+  const present = new Set(tokens);
   return option.entryUids.every((uid) => present.has(uid));
 }
 
@@ -117,12 +105,12 @@ export function selectedWorkshopProjectIds(
 /**
  * 把一份「勾了哪些项目」写回 token 数组。
  *
- * 语义刻意粗暴: **先清掉所有 `creative_workshop:` token**，再按勾选重铺。
+ * 先清掉 creative_workshop 分区的 UID，再按勾选重铺。
  * - 取消勾选 → 该项目的串一条不剩（否则半残留会让下次回读显示成还勾着）。
  * - 已卸载项目留下的陈旧串一并清掉 —— 它指向的条目已经不存在，留着只会让
  *   「面板显示没勾任何项目、实际却过滤着整个分区」这种鬼状态永久化。
  *
- * 非工坊 token（`system_core:` / `character:`）**原样按序保留** —— 三条轴互不干扰
+ * 非工坊分区的 UID 原样按序保留 —— 三条轴互不干扰
  * 是这个函数最重要的性质。
  */
 export function applyWorkshopSelection(
@@ -132,7 +120,7 @@ export function applyWorkshopSelection(
 ): string[] {
   const enabled =
     enabledProjectIds instanceof Set ? enabledProjectIds : new Set(enabledProjectIds as string[]);
-  const kept = tokens.filter((t) => typeof t === 'string' && !t.startsWith(TOKEN_PREFIX));
+  const kept = tokens.filter((t) => uidPartition(t) !== WORKSHOP_PARTITION);
   const added: string[] = [];
   const seen = new Set<string>();
   for (const option of options) {

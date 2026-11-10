@@ -12,6 +12,7 @@
 
 import type { BeautifierRule } from '../types/types';
 import { reportContentFetch } from '../content/content-source';
+import { uidPartition } from '../content/worldbook-uid';
 
 // ========== Helpers ==========
 
@@ -161,29 +162,25 @@ export function resetPresetRulesCache(): void {
 // ========== Auto-Enable Resolution ==========
 
 /**
- * 从存档的 enabledWorldBookEntries（格式 'system_core:413'）提取 autoEnable 信号。
+ * 从存档的 enabledWorldBookEntries（全局 UID）提取 autoEnable 信号。
  *
  * 这是 autoEnable 的正确信号源 —— 命定核心/启用角色是**存档级**选择
  * （存于 save.metadata.enabledWorldBookEntries），不等于 worldBooks 条目的 enabled
  * （后者是「是否注入 prompt」的开关，核心书里几乎全 enabled，用它会让所有绑核心的规则恒亮）。
  *
- * @param enabledEntries 存档启用的条目 ID 列表（partition:uid）
+ * @param enabledEntries 存档启用的全局 UID 列表
  */
 export function collectActiveSignalsFromEntries(enabledEntries: string[]): {
   activeWorldBookIds: Set<string>;
-  activeEntryUids: Set<number>;
+  activeEntryUids: Set<string>;
 } {
   const activeWorldBookIds = new Set<string>();
-  const activeEntryUids = new Set<number>();
-  for (const id of enabledEntries) {
-    const i = id.indexOf(':');
-    if (i < 0) continue;
-    const partition = id.slice(0, i);
-    const uid = Number(id.slice(i + 1));
-    if (!Number.isNaN(uid)) {
-      activeEntryUids.add(uid);
-      activeWorldBookIds.add(partition);
-    }
+  const activeEntryUids = new Set<string>();
+  for (const uid of enabledEntries) {
+    const partition = uidPartition(uid);
+    if (!partition) continue;
+    activeEntryUids.add(uid);
+    activeWorldBookIds.add(partition);
   }
   return { activeWorldBookIds, activeEntryUids };
 }
@@ -208,7 +205,7 @@ export function collectActiveSignalsFromEntries(enabledEntries: string[]): {
 export function resolveAutoEnable(
   rules: BeautifierRule[],
   activeWorldBookIds: Set<string>,
-  activeWorldBookEntryUids: Set<number>,
+  activeWorldBookEntryUids: Set<string>,
   activeCharacterNames: Set<string>,
 ): BeautifierRule[] {
   return rules.map((rule) => {
@@ -278,7 +275,7 @@ export function mergeRules(
   userRules: BeautifierRule[],
   builtinDisabled: string[],
   activeWorldBookIds: Set<string>,
-  activeWorldBookEntryUids: Set<number>,
+  activeWorldBookEntryUids: Set<string>,
   activeCharacterNames: Set<string>,
 ): BeautifierRule[] {
   // Step 1: 解析 auto-enable

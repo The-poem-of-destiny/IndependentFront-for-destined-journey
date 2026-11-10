@@ -36,7 +36,7 @@ const backend = createQuickJsBackend();
 const SLOW = 30_000;
 
 async function render(content: string, ctx: EjsEvalContext = makeCtx()) {
-  const [outcome] = await backend.runPass([{ uid: 1, content }], ctx);
+  const [outcome] = await backend.runPass([{ uid: 'fated:world_setting/sample', content }], ctx);
   return outcome;
 }
 
@@ -72,8 +72,8 @@ describe('QuickJS 后端 · 基础', () => {
       const ctx = makeCtx();
       const outcomes = await backend.runPass(
         [
-          { uid: 1, content: '<% vars.计数 = 7 %>' },
-          { uid: 2, content: '<%= vars.计数 %>' },
+          { uid: 'fated:world_setting/write', content: '<% vars.计数 = 7 %>' },
+          { uid: 'fated:world_setting/read', content: '<%= vars.计数 %>' },
         ],
         ctx,
       );
@@ -89,8 +89,8 @@ describe('QuickJS 后端 · 基础', () => {
     async () => {
       const outcomes = await backend.runPass(
         [
-          { uid: 1, content: '<% 不存在的符号() %>' },
-          { uid: 2, content: '<%= "好的" %>' },
+          { uid: 'fated:world_setting/broken', content: '<% 不存在的符号() %>' },
+          { uid: 'fated:world_setting/good', content: '<%= "好的" %>' },
         ],
         makeCtx(),
       );
@@ -140,7 +140,15 @@ describe('QuickJS 后端 · 安全属性（SEC-02）', () => {
         'null',
       );
       // 写进去的东西落在项目私有 local 命名空间，不是宿主 Storage
-      await backend.runPass([{ uid: 1, content: '<% localStorage.setItem("k", "v") %>' }], ctx);
+      await backend.runPass(
+        [
+          {
+            uid: 'workshop.p1:creative_workshop/storage',
+            content: '<% localStorage.setItem("k", "v") %>',
+          },
+        ],
+        ctx,
+      );
       expect(ctx.vars._local?.p1?.k).toBe('v');
     },
     SLOW,
@@ -179,7 +187,10 @@ describe('QuickJS 后端 · 安全属性（SEC-02）', () => {
     async () => {
       const tiny = createQuickJsBackend({ budget: { passTimeoutMs: 1, entryTimeoutMs: 1 } });
       const outcomes = await tiny.runPass(
-        Array.from({ length: 5 }, (_, i) => ({ uid: i + 1, content: '<% while (true) {} %>' })),
+        Array.from({ length: 5 }, (_, i) => ({
+          uid: `fated:world_setting/timeout_${i}`,
+          content: '<% while (true) {} %>',
+        })),
         makeCtx(),
       );
       expect(outcomes).toHaveLength(5);
@@ -213,8 +224,11 @@ describe('QuickJS 后端 · interrupt 覆盖面', () => {
       const started = Date.now();
       const outcomes = await tiny.runPass(
         [
-          { uid: 1, content: '<% vars.toJSON = function () { while (true) {} } %>' },
-          { uid: 2, content: '之后的正常条目' },
+          {
+            uid: 'fated:world_setting/to_json',
+            content: '<% vars.toJSON = function () { while (true) {} } %>',
+          },
+          { uid: 'fated:world_setting/good', content: '之后的正常条目' },
         ],
         ctx,
       );
@@ -250,10 +264,13 @@ function makeFakeModule(
     pendingJobs?: () => unknown;
   } = {},
 ) {
-  const stats = { pumpCalls: 0, runtimeDisposed: 0, contextDisposed: 0 };
+  const stats = { pumpCalls: 0, runtimeDisposed: 0, contextDisposed: 0, filenames: [] as string[] };
   const handle = () => ({ dispose: () => {} });
   const context = {
-    evalCode: () => ({ value: handle() }),
+    evalCode: (_code: string, filename?: string) => {
+      if (filename) stats.filenames.push(filename);
+      return { value: handle() };
+    },
     unwrapResult: (r: { value?: unknown }) => r.value,
     dump: () => '0',
     newFunction: () => handle(),
@@ -293,6 +310,17 @@ function makeFakeModule(
 }
 
 describe('QuickJS 后端 · runPass 永不抛（契约）', () => {
+  it('命名空间与拆分 UID 仅在 guest 文件名中转义，诊断保留完整身份', async () => {
+    const fake = makeFakeModule({ pendingJobs: () => ({ value: 0, dispose: () => {} }) });
+    const b = createQuickJsBackend({ loadModule: fake.loadModule });
+    const uid = 'workshop.demo:creative_workshop/parent/fragment';
+    const outcomes = await b.runPass([{ uid, content: '<%= 1 %>' }], makeCtx());
+    expect(fake.stats.filenames).toContain(
+      'entry-workshop_demo_creative_workshop_parent_fragment.js',
+    );
+    expect(outcomes[0].uid).toBe(uid);
+    expect(outcomes[0].error).toContain('未落定');
+  });
   it('newRuntime 抛 → 整 pass 回退原文，不抛穿', async () => {
     const fake = makeFakeModule({
       onNewRuntime: () => {
@@ -302,8 +330,8 @@ describe('QuickJS 后端 · runPass 永不抛（契约）', () => {
     const b = createQuickJsBackend({ loadModule: fake.loadModule });
     const outcomes = await b.runPass(
       [
-        { uid: 1, content: '<%= 1 + 1 %>' },
-        { uid: 2, content: '文本' },
+        { uid: 'fated:world_setting/dynamic', content: '<%= 1 + 1 %>' },
+        { uid: 'fated:world_setting/static', content: '文本' },
       ],
       makeCtx(),
     );
@@ -319,7 +347,10 @@ describe('QuickJS 后端 · runPass 永不抛（契约）', () => {
       },
     });
     const b = createQuickJsBackend({ loadModule: fake.loadModule });
-    const outcomes = await b.runPass([{ uid: 1, content: '<%= 1 %>' }], makeCtx());
+    const outcomes = await b.runPass(
+      [{ uid: 'fated:world_setting/context', content: '<%= 1 %>' }],
+      makeCtx(),
+    );
     expect(outcomes[0]).toMatchObject({ ok: false, text: '<%= 1 %>' });
     expect(outcomes[0].error).toContain('上下文创建失败');
     expect(fake.stats.runtimeDisposed).toBe(1);
@@ -335,7 +366,10 @@ describe('QuickJS 后端 · executePendingJobs 返回的是 DisposableResult 不
       budget: { entryTimeoutMs: 5000, passTimeoutMs: 10_000 },
     });
     const started = Date.now();
-    const outcomes = await b.runPass([{ uid: 1, content: '<% 1 %>' }], makeCtx());
+    const outcomes = await b.runPass(
+      [{ uid: 'fated:world_setting/pump', content: '<% 1 %>' }],
+      makeCtx(),
+    );
     expect(outcomes[0].ok).toBe(false); // dump 恒 '0' → 永远未落定
     expect(outcomes[0].error).toContain('未落定');
     // pump 循环一轮 + drainJobs 一轮 = 2；曾经是 1 + MAX_DRAIN_ROUNDS(64)
@@ -360,7 +394,7 @@ describe('QuickJS 后端 · executePendingJobs 返回的是 DisposableResult 不
       loadModule: fake.loadModule,
       budget: { entryTimeoutMs: 5000, passTimeoutMs: 10_000 },
     });
-    await b.runPass([{ uid: 1, content: '<% 1 %>' }], makeCtx());
+    await b.runPass([{ uid: 'fated:world_setting/pump', content: '<% 1 %>' }], makeCtx());
     expect(fake.stats.pumpCalls).toBe(2);
     // 每一次返回的失败结果都必须被释放，一个都不能漏
     expect(errorDisposed).toBe(fake.stats.pumpCalls);
@@ -433,7 +467,10 @@ describe('QuickJS 后端 · 能力面', () => {
     'local 写回宿主草稿（唯一的持久写口之一）',
     async () => {
       const ctx = makeCtx({ capabilities: { projectId: 'p1' } });
-      await backend.runPass([{ uid: 1, content: '<% local.set("k", "v") %>' }], ctx);
+      await backend.runPass(
+        [{ uid: 'workshop.p1:creative_workshop/storage', content: '<% local.set("k", "v") %>' }],
+        ctx,
+      );
       // guest 侧 local 经桥接直接写宿主 caps，故宿主 vars 立即可见
       expect(ctx.vars._local?.p1?.k).toBe('v');
     },
@@ -467,8 +504,11 @@ describe('QuickJS 后端 · stats 逐条目重建的加固', () => {
       const out = await backend.runPass(
         [
           // 非严格模式下赋值静默失败；defineProperty 会抛，两种写法都不该改成功
-          { uid: 1, content: '<% globalThis.__ejsStatsJson = \'{"主角":{"等级":999}}\' %>改过了' },
-          { uid: 2, content: '<%= stats.主角.等级 %>' },
+          {
+            uid: 'fated:world_setting/write',
+            content: '<% globalThis.__ejsStatsJson = \'{"主角":{"等级":999}}\' %>改过了',
+          },
+          { uid: 'fated:world_setting/read', content: '<%= stats.主角.等级 %>' },
         ],
         ctx,
       );
@@ -484,11 +524,11 @@ describe('QuickJS 后端 · stats 逐条目重建的加固', () => {
       const out = await backend.runPass(
         [
           {
-            uid: 1,
+            uid: 'fated:world_setting/write',
             content:
               '<% Object.defineProperty(globalThis, "stats", { value: { 主角: { 等级: 999 } }, writable: false, configurable: false }) %>钉死',
           },
-          { uid: 2, content: '<%= stats.主角.等级 %>' },
+          { uid: 'fated:world_setting/read', content: '<%= stats.主角.等级 %>' },
         ],
         ctx,
       );

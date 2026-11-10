@@ -55,6 +55,29 @@ describeIf('pack-install 契约（POEM_PACK_FILE 已设）', () => {
     expect(notes.filter((n) => n.level === 'error')).toEqual([]);
   });
 
+  it('真实包统一使用全局命名空间 UID，不残留第二身份字段', () => {
+    const pack = loadPack();
+    const entries = (pack.worldBooks ?? []).flatMap((book) =>
+      book.entries.map((entry) => ({ book, entry })),
+    );
+    expect(entries.length).toBeGreaterThan(0);
+    const uids = entries.map(({ entry }) => entry.uid);
+    expect(new Set(uids).size).toBe(uids.length);
+    for (const { book, entry } of entries) {
+      expect(entry.uid).toMatch(
+        new RegExp(`^fated:${book.partition}/[a-z0-9_-]+(?:/[a-z0-9_-]+)?$`),
+      );
+      expect(entry.extra?.lore).not.toHaveProperty('key');
+      for (const dependency of entry.extra?.lore?.dependsOn ?? []) {
+        expect(uids).toContain(dependency);
+      }
+    }
+    for (const rule of pack.beautifierRules?.rules ?? []) {
+      for (const uid of rule.autoEnable?.worldBookEntryUids ?? []) {
+        expect(uids).toContain(uid);
+      }
+    }
+  });
   it('新鲜播种引擎上装包 → 0 冲突', () => {
     const pack = loadPack();
     const current = freshLibrary();

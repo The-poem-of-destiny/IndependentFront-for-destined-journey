@@ -23,7 +23,6 @@ import {
   resolveSection,
   planPackInstall,
   CURRENT_PACK_FORMAT_VERSION,
-  PLACEHOLDER_UID_RESERVED_BASE,
 } from '../../../src/core/content/content-source';
 import type { WorldBook } from '../../../src/core/types/types';
 
@@ -38,7 +37,7 @@ function minimalPack(): ContentPack {
   };
 }
 
-/** 一本合法的占位世界书（uid 在真实段，非 creative_workshop 分区） */
+/** 一本合法的正式世界书（非 creative_workshop 分区） */
 function makeBook(overrides: Partial<WorldBook> = {}): WorldBook {
   return {
     id: 'world_overview',
@@ -47,7 +46,7 @@ function makeBook(overrides: Partial<WorldBook> = {}): WorldBook {
     builtIn: true,
     entries: [
       {
-        uid: 1,
+        uid: 'fated:world_setting/overview',
         name: '世界设定',
         content: '通用奇幻世界。',
         enabled: true,
@@ -277,7 +276,7 @@ describe('validatePackOrThrow', () => {
       partition: 'creative_workshop',
       entries: [
         {
-          uid: 1,
+          uid: 'workshop.test:creative_workshop/rule',
           name: 'x',
           content: 'c',
           enabled: true,
@@ -299,11 +298,11 @@ describe('validatePackOrThrow', () => {
     expect(hasCode(errorNotes(notes), 'workshop-partition-rejected')).toBe(false);
   });
 
-  // ── 占位 uid 保留段警告（D43）──
+  // ── 占位命名空间警告（D43）──
 
-  it(`uid >= ${PLACEHOLDER_UID_RESERVED_BASE} → placeholder-uid-range (warning, 不阻断)`, () => {
+  it('placeholder: UID → placeholder-uid-range (warning, 不阻断)', () => {
     const book = makeBook();
-    book.entries[0].uid = PLACEHOLDER_UID_RESERVED_BASE;
+    book.entries[0].uid = 'placeholder:world_setting/overview';
     const notes = validatePackOrThrow({ ...minimalPack(), worldBooks: [book] });
     const warning = notes.find((n) => n.code === 'placeholder-uid-range');
     expect(warning).toBeDefined();
@@ -312,9 +311,9 @@ describe('validatePackOrThrow', () => {
     expect(errorNotes(notes).some((n) => n.code === 'placeholder-uid-range')).toBe(false);
   });
 
-  it('uid 在真实段（< 保留段）不触发 placeholder-uid-range', () => {
+  it('正式命名空间不触发 placeholder-uid-range', () => {
     const book = makeBook();
-    book.entries[0].uid = 500;
+    book.entries[0].uid = 'fated:world_setting/overview';
     const notes = validatePackOrThrow({ ...minimalPack(), worldBooks: [book] });
     expect(notes.some((n) => n.code === 'placeholder-uid-range')).toBe(false);
   });
@@ -482,7 +481,7 @@ describe('hashWorldBook', () => {
       partition: 'world_setting',
       entries: [
         {
-          uid: 1,
+          uid: 'fated:world_setting/a',
           name: 'a',
           content: 'ca',
           enabled: true,
@@ -493,7 +492,7 @@ describe('hashWorldBook', () => {
           position: 0,
         },
         {
-          uid: 2,
+          uid: 'fated:world_setting/b',
           name: 'b',
           content: 'cb',
           enabled: true,

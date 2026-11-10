@@ -12,6 +12,7 @@
 
 import type { WorldBook, WorldBookEntry } from '../../types/types';
 
+import { getRuntimePackBooks } from '../../content/pack-runtime';
 /** `combat_extra` 世界书 id */
 export const COMBAT_EXTRA_BOOK_ID = 'combat_extra';
 
@@ -55,6 +56,8 @@ export interface CombatProtocolLoaderDeps {
 
 /** 缺省装载：先查本机 Dexie（含 pack/用户编辑），再回落占位文件 fetch */
 async function defaultGetWorldBook(id: string): Promise<WorldBook | undefined> {
+  const runtimeBook = getRuntimePackBooks().find((book) => book.id === id);
+  if (runtimeBook) return runtimeBook;
   try {
     const { getDatabase } = await import('../../persistence/database');
     const row = await getDatabase().worldBooks.get(id);

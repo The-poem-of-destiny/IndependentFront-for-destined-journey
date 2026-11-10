@@ -16,6 +16,7 @@
  */
 
 import { getDatabase } from '../persistence/database';
+import { isProtectedContentInstalled, getPackRuntimeRevision } from '../content/pack-runtime';
 import { withSaveWriteLock } from '../state/state-write-queue';
 import { promptSessionKey } from './prompt-session-assembler';
 import type { PromptSessionStore } from './prompt-session-assembler';
@@ -30,13 +31,20 @@ export function createDexiePromptSessionStore(): PromptSessionStore {
   const db = () => getDatabase();
   return {
     load(saveId, agentId) {
+      if (isProtectedContentInstalled()) return Promise.resolve(null);
+      const revision = getPackRuntimeRevision();
       return withSaveWriteLock(saveId, async () => {
+        if (isProtectedContentInstalled() || revision !== getPackRuntimeRevision()) return null;
         const row = await db().promptSessions.get(promptSessionKey(saveId, agentId));
+        if (isProtectedContentInstalled() || revision !== getPackRuntimeRevision()) return null;
         return row ? detach(row) : null;
       });
     },
     save(record) {
+      if (isProtectedContentInstalled()) return Promise.resolve();
+      const revision = getPackRuntimeRevision();
       return withSaveWriteLock(record.saveId, async () => {
+        if (isProtectedContentInstalled() || revision !== getPackRuntimeRevision()) return;
         await db().promptSessions.put(detach(record));
       });
     },

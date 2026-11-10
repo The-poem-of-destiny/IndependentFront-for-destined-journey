@@ -16,11 +16,9 @@ import { passesLoreReadWhen } from './lore-activation';
 type BookLike = Pick<WorldBook, 'id' | 'lore'> & Partial<Pick<WorldBook, 'name' | 'partition'>>;
 type EntryLike = Pick<WorldBookEntry, 'uid'> & Partial<Pick<WorldBookEntry, 'extra' | 'name'>>;
 
-/** 稳定条目键：声明了就用声明的，否则派生 `命名空间#uid`（uid 只在单本书内唯一）。 */
-export function loreEntryKey(book: BookLike, entry: EntryLike): string {
-  const declared = entry.extra?.lore?.key;
-  if (typeof declared === 'string' && declared.trim() !== '') return declared.trim();
-  return `${book.lore?.namespace ?? book.id}#${entry.uid}`;
+/** 唯一条目身份：路由、依赖与存档直接使用 entry.uid。 */
+export function loreEntryKey(_book: BookLike, entry: EntryLike): string {
+  return entry.uid;
 }
 
 /** 条目的读取范围：只认条目自己的 `extra.lore.audiences`；没有 = 谁也不能读。 */
@@ -165,7 +163,7 @@ export interface LoreRoutingIssue {
   kind: LoreRoutingIssueKind;
   bookId: string;
   bookName: string;
-  entryUid: number;
+  entryUid: string;
   entryName: string;
   key: string;
   detail?: string;

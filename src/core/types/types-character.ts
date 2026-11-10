@@ -40,7 +40,7 @@ export interface CharacterDefinition {
   lore?: string;
   assets: CharacterAssetRef[];
   past: CharacterPastEntry[];
-  legacyEntry?: { bookId: string; uid: number; token: string };
+  legacyEntry?: { bookId: string; uid: string; token: string };
 }
 
 export interface CharacterChronicleDraft extends Omit<CharacterPastEntry, 'time'> {
