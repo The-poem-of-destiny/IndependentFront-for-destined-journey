@@ -583,4 +583,140 @@ describe('direct pipeline preserves memory and isolates non-memory generation', 
     ).toBe(true);
     expect(toast).toHaveBeenCalledWith(expect.stringContaining('本楼已接纳'), 'warning', 6000);
   });
+
+  it('keeps legacy recall and summary persistence outside the single main request', async () => {
+    const { game, pipeline } = await directFixture();
+    delete game.activeSave!.metadata.storyContextV2;
+    await saveSaveSlot(JSON.parse(JSON.stringify(game.activeSave!)));
+    (pipeline as any).settings.settings.storyContextV2Enabled = false;
+    await game.refreshFromDb(saveId);
+    const summary = '旅人把铁交给铁匠，双方约定日落后回来取剑。'.repeat(15);
+    const chat = directNetwork();
+    const mainReply = chat.getMockImplementation()!;
+    chat.mockImplementation(async function (this: any, ...args) {
+      if (this.agentId === 'memory_recall') return result(this.agentId, '铁匠已经收到材料');
+      if (this.agentId === 'memory_summary')
+        return result(
+          this.agentId,
+          JSON.stringify({
+            content: summary,
+            hiddenLine: '铁匠准备按约交付',
+            keywords: ['铁匠'],
+            importance: 5,
+          }),
+        );
+      expect(JSON.stringify(args[0].messages)).toContain('铁匠已经收到材料');
+      return mainReply.apply(this, args);
+    });
+    expect(await pipeline.run('继续制作')).toBe(true);
+    expect(chat.mock.contexts.map((client: any) => client.agentId)).toEqual([
+      'memory_recall',
+      'direct_main',
+      'memory_summary',
+    ]);
+    expect(await getDatabase().memories.where('saveId').equals(saveId).toArray()).toMatchObject([
+      { content: summary },
+    ]);
+    expect(await getStoryTurnSummaries(saveId)).toHaveLength(0);
+  });
+
+  it('carries crafted inventory and active combat into later turns, then settles combat once', async () => {
+    const { game, pipeline } = await directFixture();
+    await getDatabase().characters.update('player', { inventory: [{ name: '铁', quantity: 2 }] });
+    await game.refreshFromDb(saveId);
+    let mainCalls = 0;
+    const contexts: any[] = [];
+    const chat = vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (
+      this: any,
+      request,
+    ) {
+      if (this.agentId !== 'direct_main')
+        return result(
+          this.agentId,
+          JSON.stringify({ segments: [{ content: '旅人打造短剑，随后应对袭击。' }] }),
+        );
+      const stateText = request.messages
+        .map((m) => String(m.content))
+        .join('\n')
+        .match(/<direct_state>\s*([\s\S]*?)\s*<\/direct_state>/)![1];
+      contexts.push(JSON.parse(stateText));
+      mainCalls++;
+      const craft = mainCalls === 1;
+      const data = {
+        version: 1,
+        world: {},
+        time: { delta_time: 0 },
+        effects: [],
+        plot: {},
+        diceUsed: [],
+        entities: craft
+          ? [
+              {
+                kind: 'loadout',
+                owner: '旅人',
+                output: {
+                  skills: [],
+                  equipment: [],
+                  inventory: [
+                    {
+                      name: '短剑',
+                      description: '刚打造的短剑',
+                      quantity: 1,
+                      type: '装备',
+                      protocolText: '锋利的剑刃',
+                    },
+                  ],
+                  statuses: [],
+                },
+              },
+            ]
+          : [],
+        state: craft ? { items: { consume: [{ owner: '旅人', target: '铁', quantity: 2 }] } } : {},
+        combat: craft
+          ? null
+          : {
+              meta: {
+                round: mainCalls - 1,
+                combatType: '标准',
+                environment: '街道',
+                phase: mainCalls === 2 ? 'active' : 'ended',
+                ...(mainCalls === 3 ? { outcome: 'ally_win' } : {}),
+              },
+              units: [
+                {
+                  name: '旅人',
+                  origin: 'save',
+                  side: 'ally',
+                  hp: mainCalls === 2 ? 60 : 40,
+                  mp: game.player!.mp,
+                  sp: game.player!.sp,
+                  statusEffects: [],
+                },
+              ],
+            },
+      };
+      return result(
+        this.agentId,
+        `<maintext>旅人打造短剑，随后应对袭击。</maintext><character_updates>{"characters":[]}</character_updates><direct_updates>${JSON.stringify(data)}</direct_updates>`,
+      );
+    });
+    expect(await pipeline.run('制作短剑')).toBe(true);
+    expect(game.player!.inventory).toMatchObject([{ name: '短剑', quantity: 1 }]);
+    expect(await pipeline.run('迎击敌人')).toBe(true);
+    expect(game.isInCombat).toBe(true);
+    expect(game.isAgentCombat).toBe(false);
+    expect(game.player!.hp).toBe(60);
+    expect((await getDatabase().characters.get('player'))!.hp).toBe(80);
+    expect(await pipeline.run('结束战斗')).toBe(true);
+    expect(contexts[1].characters[0].inventory).toMatchObject([{ name: '短剑' }]);
+    expect(contexts[2].characters[0].hp).toBe(60);
+    expect(game.isInCombat).toBe(false);
+    expect((await getDatabase().characters.get('player'))!.hp).toBe(40);
+    expect(await getStoryTurnSummaries(saveId)).toHaveLength(3);
+    expect(
+      chat.mock.contexts
+        .filter((client: any) => !client.agentId.startsWith('memory_'))
+        .map((client: any) => client.agentId),
+    ).toEqual(['direct_main', 'direct_main', 'direct_main']);
+  });
 });
