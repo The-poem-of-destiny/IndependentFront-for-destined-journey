@@ -46,6 +46,7 @@
       <template v-if="audienceEditable">
         <p class="audience-hint">
           勾选能读取本书的 Agent（写入每个条目的读取范围）。没有勾选任何 Agent 时，本书不会注入。
+          普通直出与缓存优化共用「直出主生成」读取范围。
         </p>
         <div class="audience-grid">
           <label v-for="agent in AUDIENCE_AGENTS" :key="agent.id" class="audience-option">
@@ -225,6 +226,7 @@
           <legend>本条目的读取范围</legend>
           <p class="audience-hint">
             勾选能读取本条目的 Agent。没有勾选任何 Agent 时，本条目不会注入。
+            普通直出与缓存优化共用「直出主生成」读取范围。
           </p>
           <div class="audience-grid">
             <label v-for="agent in AUDIENCE_AGENTS" :key="agent.id" class="audience-option">
@@ -265,11 +267,16 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import type { WorldBook, WorldBookEntry } from '@engine/types/types';
 import { createUserWorldBookUid } from '@engine/content/worldbook-uid';
+import { loreEntryAudiences } from '@engine/content/lore-routing';
 import { AGENT_LIST, agentDisplayName } from './agent/agent-list';
 
 /** 可勾选的读取方（战斗与出图侧链不读玩家自建书，不列） */
 const AUDIENCE_AGENTS = AGENT_LIST.filter(
-  (a) => a.id !== 'combat' && a.id !== 'combat_enemy' && a.id !== 'memory_recall',
+  (a) =>
+    a.id !== 'combat' &&
+    a.id !== 'combat_enemy' &&
+    a.id !== 'memory_recall' &&
+    a.id !== 'direct_cached',
 );
 
 const editNameInput = ref<HTMLInputElement | null>(null);
@@ -305,16 +312,16 @@ const sortedEntries = computed(() => {
   return [...entries.value].sort((a, b) => a.order - b.order);
 });
 
-/** 本书条目读取范围的并集；面板对全体条目统一写入条目级 `extra.lore.audiences` */
+/** 使用当前编辑副本计算并集，连续勾选不依赖父组件保存后的 props 回流。 */
 const bookAudiences = computed(() => {
   const set = new Set<string>();
-  for (const entry of props.book.entries) {
-    for (const id of entry.extra?.lore?.audiences ?? []) set.add(id);
+  for (const entry of entries.value) {
+    for (const id of loreEntryAudiences(props.book, entry)) set.add(id);
   }
   return [...set];
 });
 const scopeDeclared = computed(() =>
-  props.book.entries.some((entry) => entry.extra?.lore?.audiences !== undefined),
+  entries.value.some((entry) => entry.extra?.lore?.audiences !== undefined),
 );
 /** 只有玩家自建书可在这里改：内置书与工坊书的范围来自内容声明 */
 const audienceEditable = computed(
@@ -398,7 +405,10 @@ async function editEntry(idx: number) {
     order: entry.order,
     content: entry.content,
     // 未声明时以本书当前范围起手，保存后即为该条目的显式声明
-    audiences: entry.extra?.lore?.audiences ?? [...bookAudiences.value],
+    audiences:
+      entry.extra?.lore?.audiences !== undefined
+        ? [...loreEntryAudiences(props.book, entry)]
+        : [...bookAudiences.value],
   };
   await nextTick();
   editNameInput.value?.focus();

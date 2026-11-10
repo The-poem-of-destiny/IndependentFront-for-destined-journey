@@ -29,6 +29,34 @@ const book = (): WorldBook => ({
 });
 
 describe('lore routing', () => {
+  it('旧缓存直出声明只归入共享主生成身份，不扩大其他 Agent 或空范围权限', () => {
+    const b = book();
+    b.entries[0].extra = {
+      lore: { audiences: ['direct_cached'], dependsOn: [uid('dependency')] },
+    };
+    b.entries.push(
+      {
+        ...b.entries[0],
+        uid: uid('dependency'),
+        extra: { lore: { audiences: ['direct_main', 'direct_cached'] } },
+      },
+      { ...b.entries[0], uid: uid('closed'), extra: { lore: { audiences: [] } } },
+      { ...b.entries[0], uid: uid('story'), extra: { lore: { audiences: ['story'] } } },
+      { ...b.entries[0], uid: uid('character'), extra: { lore: { audiences: ['char_gen'] } } },
+    );
+    const before = structuredClone(b);
+    expect(getEntriesForAgent('direct_main', [b]).map((entry) => entry.uid)).toEqual([
+      uid('one'),
+      uid('dependency'),
+    ]);
+    expect(getEntriesForAgent('story', [b]).map((entry) => entry.uid)).toEqual([uid('story')]);
+    expect(getEntriesForAgent('char_gen', [b]).map((entry) => entry.uid)).toEqual([
+      uid('character'),
+    ]);
+    expect(collectLoreRoutingIssues([b], ['direct_main', 'story', 'char_gen'])).toEqual([]);
+    expect(b).toEqual(before);
+  });
+
   it('读取范围只认条目声明：未声明即关闭，显式空列表也各自生效', () => {
     const undeclared: WorldBook = {
       ...book(),

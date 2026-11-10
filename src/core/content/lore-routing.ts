@@ -22,8 +22,12 @@ export function loreEntryKey(_book: BookLike, entry: EntryLike): string {
 }
 
 /** 条目的读取范围：只认条目自己的 `extra.lore.audiences`；没有 = 谁也不能读。 */
-function loreEntryAudiences(_book: BookLike, entry: EntryLike): readonly string[] {
-  return entry.extra?.lore?.audiences ?? [];
+export function loreEntryAudiences(_book: BookLike, entry: EntryLike): readonly string[] {
+  const audiences = entry.extra?.lore?.audiences ?? [];
+  // 旧编辑器误把缓存配置档列为读取方；两种直出始终共用 direct_main 身份。
+  return audiences.includes('direct_cached')
+    ? [...new Set(audiences.map((id) => (id === 'direct_cached' ? 'direct_main' : id)))]
+    : audiences;
 }
 
 /** 条目在 Story 新模式里的放置：只认条目自己的声明；没有 = 未声明（消费端默认固定区）。 */
