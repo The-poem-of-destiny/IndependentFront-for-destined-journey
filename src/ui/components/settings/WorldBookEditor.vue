@@ -305,16 +305,16 @@ const sortedEntries = computed(() => {
   return [...entries.value].sort((a, b) => a.order - b.order);
 });
 
-/** 本书条目读取范围的并集；面板对全体条目统一写入条目级 `extra.lore.audiences` */
+/** 使用当前编辑副本计算并集，连续勾选不依赖父组件保存后的 props 回流。 */
 const bookAudiences = computed(() => {
   const set = new Set<string>();
-  for (const entry of props.book.entries) {
+  for (const entry of entries.value) {
     for (const id of entry.extra?.lore?.audiences ?? []) set.add(id);
   }
   return [...set];
 });
 const scopeDeclared = computed(() =>
-  props.book.entries.some((entry) => entry.extra?.lore?.audiences !== undefined),
+  entries.value.some((entry) => entry.extra?.lore?.audiences !== undefined),
 );
 /** 只有玩家自建书可在这里改：内置书与工坊书的范围来自内容声明 */
 const audienceEditable = computed(

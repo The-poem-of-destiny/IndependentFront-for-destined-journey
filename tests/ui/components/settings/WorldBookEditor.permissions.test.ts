@@ -36,6 +36,52 @@ function editor(source = book(), readonly = false) {
 }
 
 describe('WorldBookEditor 读取范围权限（长期回归）', () => {
+  it('同次打开连续多选和取消时以当前条目为准，重新打开保留全部选择', async () => {
+    const source = book();
+    source.entries.push({
+      ...structuredClone(source.entries[0]),
+      uid: 'user:world_setting/second',
+    });
+    const before = structuredClone(source);
+    const wrapper = editor(source);
+    const audience = (name: string) => wrapper.get(`input[aria-label="允许${name}读取本书"]`);
+
+    // 父组件保存后不回传新 props，模拟实际 WorldBookSection 的行为。
+    await audience('资料选择').setValue(true);
+    await audience('正文生成').setValue(true);
+    await audience('大纲生成').setValue(true);
+    await audience('资料选择').setValue(false);
+    await audience('实体生成').setValue(true);
+
+    const updates = wrapper.emitted('update')!;
+    const saved = JSON.parse(JSON.stringify(updates[updates.length - 1][0])) as WorldBook;
+    for (const entry of saved.entries) {
+      expect(entry.extra?.lore?.audiences).toEqual([
+        'char_gen',
+        'story',
+        'plot_outline',
+        'entity_gen',
+      ]);
+      expect(entry.extra?.lore?.summary).toBe('保留的摘要');
+      expect(entry.content).toBe('原始正文');
+    }
+    for (const name of ['正文生成', '大纲生成', '实体生成']) {
+      expect((audience(name).element as HTMLInputElement).checked).toBe(true);
+    }
+    expect((audience('资料选择').element as HTMLInputElement).checked).toBe(false);
+    expect(source).toEqual(before);
+
+    const reopened = editor(saved);
+    for (const name of ['正文生成', '大纲生成', '实体生成']) {
+      expect(
+        (reopened.get(`input[aria-label="允许${name}读取本书"]`).element as HTMLInputElement)
+          .checked,
+      ).toBe(true);
+    }
+    await audience('正文生成').setValue(false);
+    expect(saved.entries[0].extra?.lore?.audiences).toContain('story');
+  });
+
   it('修改读取范围写入每个条目，保留其他元数据与正文，不修改传入对象', async () => {
     const source = book();
     const before = structuredClone(source);
@@ -93,23 +139,14 @@ describe('WorldBookEditor 读取范围权限（长期回归）', () => {
     expect(out.entries[0].extra?.lore?.audiences).toEqual([]);
   });
 
-  it('同书权限回流立即更新勾选且保留本地条目编辑', async () => {
+  it('同书保存回流保留当前权限与条目编辑，切换书时重置', async () => {
     const source = book();
     const wrapper = editor(source);
     await wrapper.get('input[aria-label="启用 约定"]').setValue(false);
-    const updated = wrapper.emitted('update')![0][0] as WorldBook;
-    await wrapper.setProps({
-      book: {
-        ...updated,
-        entries: updated.entries.map((entry) => ({
-          ...entry,
-          extra: {
-            ...(entry.extra ?? {}),
-            lore: { ...(entry.extra?.lore ?? {}), audiences: ['lore_select'] },
-          },
-        })),
-      },
-    });
+    await wrapper.get('input[aria-label="允许资料选择读取本书"]').setValue(true);
+    const updates = wrapper.emitted('update')!;
+    const updated = updates[updates.length - 1][0] as WorldBook;
+    await wrapper.setProps({ book: JSON.parse(JSON.stringify(updated)) as WorldBook });
     expect(
       (wrapper.get('input[aria-label="允许资料选择读取本书"]').element as HTMLInputElement).checked,
     ).toBe(true);
@@ -118,6 +155,13 @@ describe('WorldBookEditor 读取范围权限（长期回归）', () => {
     ).toBe(false);
     expect((wrapper.get('input[aria-label="启用 约定"]').element as HTMLInputElement).checked).toBe(
       false,
+    );
+    await wrapper.setProps({ book: book({ id: 'other' }) });
+    expect(
+      (wrapper.get('input[aria-label="允许资料选择读取本书"]').element as HTMLInputElement).checked,
+    ).toBe(false);
+    expect((wrapper.get('input[aria-label="启用 约定"]').element as HTMLInputElement).checked).toBe(
+      true,
     );
   });
 
@@ -145,5 +189,19 @@ describe('WorldBookEditor 读取范围权限（长期回归）', () => {
     const out = wrapper.emitted('update')![0][0] as WorldBook;
     expect(out.entries[0].extra?.lore?.audiences).toEqual(['story', 'lore_select']);
     expect(out.entries[1].extra?.lore?.audiences).toEqual(['char_gen']);
+    expect(
+      (wrapper.get('input[aria-label="允许资料选择读取本书"]').element as HTMLInputElement).checked,
+    ).toBe(true);
+    await wrapper.get('input[aria-label="允许大纲生成读取本书"]').setValue(true);
+    const updates = wrapper.emitted('update')!;
+    const latest = updates[updates.length - 1][0] as WorldBook;
+    for (const entry of latest.entries) {
+      expect(entry.extra?.lore?.audiences).toEqual([
+        'story',
+        'lore_select',
+        'char_gen',
+        'plot_outline',
+      ]);
+    }
   });
 });
