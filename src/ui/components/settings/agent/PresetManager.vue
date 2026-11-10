@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isDirectSettingsProfile } from '../../../lib/direct-settings';
+import { isDirectSettingsProfile, resolveDirectPresetId } from '../../../lib/direct-settings';
 
 /**
  * 预设管理（正文 Agent 专用，Q-25 第 9 步）。
@@ -60,9 +60,7 @@ const ui = useUIStore();
 const selectedPresetId = computed({
   get: () =>
     isDirectSettingsProfile(props.agentId)
-      ? props.agentId === 'direct_cached'
-        ? (s.directCachedPresetId ?? DIRECT_CACHED_PRESET_ID)
-        : (s.directPresetId ?? DIRECT_PRESET_ID)
+      ? resolveDirectPresetId(s, props.agentId, cfg.projectAgentDefaults?.agents ?? {})
       : s.activePresetId,
   set: (id: string) => {
     if (props.agentId === 'direct_cached') s.directCachedPresetId = id;

@@ -25,7 +25,11 @@ import {
   DIRECT_CACHED_PRESET_ID,
   DIRECT_PRESET_ID,
 } from '@engine/prompts/direct-prompt';
-import { initializeDirectSettings, initializeCachedDirectSettings } from './direct-settings';
+import {
+  initializeDirectSettings,
+  initializeCachedDirectSettings,
+  resolveDirectPresetId,
+} from './direct-settings';
 import { scanEventTriggers, scanPlayAudioMarkers } from '@engine/story/marker-protocol';
 // Q-05：从模型输出抢救 JSON 的唯一入口（裸 / 围栏 / <json> / 前后夹带解说四种形态）
 import { extractJsonPayload } from '@engine/utils/model-json';
@@ -1581,9 +1585,11 @@ export class GamePipeline {
       // 运行时也永远用旧的那份（"我保存了第二人称但 agent 没拿到"根因）。
       const presetId: string | undefined =
         agentId === 'direct_main'
-          ? this.generationMode === 'direct_cached'
-            ? s.directCachedPresetId || DIRECT_CACHED_PRESET_ID
-            : s.directPresetId || DIRECT_PRESET_ID
+          ? resolveDirectPresetId(
+              s,
+              this.generationMode === 'direct_cached' ? 'direct_cached' : 'direct_main',
+              agentDefaults,
+            )
           : agentId === 'story' && s.activePresetId
             ? s.activePresetId
             : (defaults.presetId as string | undefined) || undefined;

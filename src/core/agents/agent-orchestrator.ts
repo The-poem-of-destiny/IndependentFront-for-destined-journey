@@ -400,6 +400,7 @@ export class AgentOrchestrator {
     await this.events.onAgentComplete?.(recall);
     this.assertCurrent();
     this.events.onStageComplete?.(0);
+    if (recall.error) throw new Error(recall.error);
     const config = this.agentConfigs.get('direct_main');
     const endpoint = config && this.endpoints.get(config.apiEndpointId);
     if (!config || !endpoint) throw new Error('直出主生成端点未配置');

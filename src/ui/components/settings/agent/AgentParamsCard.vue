@@ -288,9 +288,9 @@ const readableBooks = computed(() =>
           "
         />
       </label>
-      <label v-if="agentId === 'direct_cached'" class="form-label">
+      <label v-if="agentId === 'direct_cached'" class="form-label cache-provider-field">
         渠道缓存支持
-        <select v-model="cacheProvider" class="form-select">
+        <select v-model="cacheProvider" class="form-input">
           <option value="prefix">通用稳定前缀（不附加渠道参数）</option>
           <option value="anthropic">Claude Messages 原生缓存</option>
           <option value="openai">OpenAI 显式缓存断点（需渠道支持）</option>
@@ -420,6 +420,10 @@ const readableBooks = computed(() =>
 <style scoped src="../settings-chrome.css"></style>
 
 <style scoped>
+.cache-provider-field {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
 .worldbook-scope-list {
   list-style: none;
   margin: var(--theme-spacing-sm) 0 0;

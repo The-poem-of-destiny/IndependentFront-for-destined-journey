@@ -2,11 +2,43 @@ import { describe, expect, it } from 'vitest';
 import {
   initializeDirectSettings,
   initializeCachedDirectSettings,
+  resolveDirectPresetId,
 } from '../../../src/ui/lib/direct-settings';
 import { checkJourneyReadiness } from '../../../src/ui/lib/journey-readiness';
 import type { UiSettings } from '../../../src/ui/stores/settings-types';
 
 describe('direct settings', () => {
+  it.each([false, true])(
+    'initializes project presets while preserving explicit selections (%s)',
+    (selected) => {
+      const settings = {
+        agents: {},
+        apiPool: [
+          { id: 'ep', model: 'test', baseUrl: 'http://localhost:1234/v1', apiType: 'chat' },
+        ],
+        ...(selected ? { directPresetId: 'user-direct', directCachedPresetId: 'user-cached' } : {}),
+      } as unknown as UiSettings;
+      const defaults = {
+        story: { model: 'ep' },
+        direct_main: { model: 'ep', presetId: 'author-direct' },
+        direct_cached: { model: 'ep', presetId: 'author-cached' },
+      };
+      initializeCachedDirectSettings(settings, defaults);
+      expect(settings.directPresetId).toBe(selected ? 'user-direct' : undefined);
+      expect(settings.directCachedPresetId).toBe(selected ? 'user-cached' : undefined);
+      expect(resolveDirectPresetId(settings, 'direct_main', defaults)).toBe(
+        selected ? 'user-direct' : 'author-direct',
+      );
+      expect(resolveDirectPresetId(settings, 'direct_cached', defaults)).toBe(
+        selected ? 'user-cached' : 'author-cached',
+      );
+      defaults.direct_cached.presetId = 'updated-cached';
+      expect(resolveDirectPresetId(settings, 'direct_cached', defaults)).toBe(
+        selected ? 'user-cached' : 'updated-cached',
+      );
+    },
+  );
+
   it('snapshots the effective story connection and parameters once without copying the story prompt', () => {
     const settings = {
       agents: { story: { model: 'ep', temperature: 0.8, systemPrompt: 'delegate everything' } },
@@ -31,7 +63,8 @@ describe('direct settings', () => {
       maxRetries: 0,
     });
     expect(settings.agents.direct_main?.systemPrompt).toBeUndefined();
-    expect(settings.directPresetId).toBe('direct-generation-v1');
+    expect(settings.directPresetId).toBeUndefined();
+    expect(resolveDirectPresetId(settings, 'direct_main', {})).toBe('direct-generation-v1');
     settings.agents.story.temperature = 0.1;
     initializeDirectSettings(settings, {});
     expect(settings.agents.direct_main?.temperature).toBe(0.8);

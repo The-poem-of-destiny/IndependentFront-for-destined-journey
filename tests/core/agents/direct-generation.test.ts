@@ -6,6 +6,7 @@ import {
 } from '../../../src/core/agents/direct-output';
 import { generateDirectTurn, rollDirectDice } from '../../../src/core/agents/direct-main';
 import { AgentClient } from '../../../src/core/agents/agent-client';
+import { AgentOrchestrator } from '../../../src/core/agents/agent-orchestrator';
 import {
   buildDirectCombat,
   projectDirectCombatCharacters,
@@ -24,8 +25,10 @@ import {
 import { getProfile } from '../../../src/core/state/save-profile';
 import {
   createDefaultCharacterState,
+  DEFAULT_AGENT_PIPELINE,
   type AgentContext,
   type AgentConfig,
+  type ApiEndpoint,
   type SaveSlot,
   type ChatMessage,
   type StatePatch,
@@ -452,6 +455,118 @@ describe('single non-memory request', () => {
       true,
     );
   });
+});
+
+describe('direct memory admission', () => {
+  function orchestrator(v2 = false) {
+    const endpoint: ApiEndpoint = {
+      id: 'recall-gate',
+      name: 'Test',
+      provider: 'openai',
+      baseUrl: 'https://invalid.example/v1',
+      apiKey: '',
+      defaultModel: 'test',
+      models: ['test'],
+      timeout: 1000,
+    };
+    const agentConfigs: AgentConfig[] = ['memory_recall', 'direct_main'].map((agentId) => ({
+      agentId,
+      enabled: true,
+      apiEndpointId: endpoint.id,
+      promptTemplate: { fixedSystem: '', fixedExamples: '' },
+      model: 'test',
+      maxTokens: 1000,
+      temperature: 0.7,
+      topP: 1,
+      frequencyPenalty: 0,
+      presencePenalty: 0,
+      retryOnFail: false,
+      timeout: 1000,
+      userId: 'test',
+    }));
+    const context: AgentContext = {
+      userInput: '继续',
+      characters: [player()],
+      variables: {},
+      history: [],
+      worldBooks: [],
+      memories: [],
+      plotEvents: [],
+      agentOutputs: new Map(),
+    };
+    const onAgentComplete = vi.fn();
+    const onAgentStart = vi.fn();
+    const instance = new AgentOrchestrator(
+      {
+        pipeline: DEFAULT_AGENT_PIPELINE,
+        context,
+        saveId,
+        endpoints: [endpoint],
+        agentConfigs,
+        ...(v2 ? { storyContext: { windowTurns: 2, segments: [], archives: [] } } : {}),
+      },
+      { onAgentComplete, onAgentStart },
+    );
+    return { instance, context, onAgentComplete, onAgentStart };
+  }
+
+  it.each([undefined, 'prefix'] as const)(
+    'blocks main generation after legacy recall fails (cache=%s)',
+    async (cachePolicy) => {
+      const { instance, context, onAgentComplete, onAgentStart } = orchestrator();
+      const chat = vi
+        .spyOn(AgentClient.prototype, 'chat')
+        .mockResolvedValue({
+          agentId: 'direct_main',
+          output: response(),
+          rawResponse: response(),
+          tokensUsed: 0,
+          cacheHit: false,
+          duration: 1,
+        })
+        .mockResolvedValueOnce({
+          agentId: 'memory_recall',
+          output: null,
+          rawResponse: '',
+          tokensUsed: 0,
+          cacheHit: false,
+          duration: 1,
+          error: 'HTTP 503',
+        });
+      await expect(instance.runDirect(null, cachePolicy)).rejects.toThrow('HTTP 503');
+      expect(chat).toHaveBeenCalledTimes(1);
+      expect(onAgentComplete).toHaveBeenCalledWith(
+        expect.objectContaining({ agentId: 'memory_recall', error: 'HTTP 503' }),
+      );
+      expect(onAgentStart.mock.calls.map(([agentId]) => agentId)).toEqual(['memory_recall']);
+      expect(context.agentOutputs.has('story')).toBe(false);
+    },
+  );
+
+  it.each([undefined, 'prefix'] as const)(
+    'keeps the v2 empty recall result non-blocking (cache=%s)',
+    async (cachePolicy) => {
+      const { instance, context, onAgentComplete } = orchestrator(true);
+      const chat = vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
+        agentId: 'direct_main',
+        output: response(),
+        rawResponse: response(),
+        tokensUsed: 0,
+        cacheHit: false,
+        duration: 1,
+      });
+      await expect(instance.runDirect(null, cachePolicy)).resolves.toMatchObject({
+        content: '你把材料交给铁匠。',
+      });
+      expect(onAgentComplete.mock.calls[0][0]).toMatchObject({
+        agentId: 'memory_recall',
+        output: '',
+      });
+      expect(onAgentComplete.mock.calls[0][0].error).toBeUndefined();
+      expect(chat).toHaveBeenCalledTimes(1);
+      expect(context.agentOutputs.get('story')).toBe('你把材料交给铁匠。');
+    },
+  );
 });
 
 it('persists active combat in snapshots and remaps its source when importing a direct save', async () => {

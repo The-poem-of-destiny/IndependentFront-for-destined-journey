@@ -145,9 +145,17 @@ onMounted(() => {
             { label: '直出（缓存优化）', value: 'direct_cached' },
           ]"
         />
+        <ul class="mode-guidance">
+          <li><strong>Agent 模式：</strong>多个 AI 分工、多次调用，适合单价较低的模型。</li>
+          <li><strong>直出（无缓存优化）：</strong>一次主调用，适合按请求次数计费的渠道。</li>
+          <li>
+            <strong>直出（缓存优化）：</strong>一次主调用，适合较强的模型，以及按 Token
+            计费且支持缓存的渠道；实际命中与费用取决于渠道。
+          </li>
+        </ul>
         <p class="form-hint">
-          Agent 模式由多个 AI 分工处理。直出由主 AI
-          在一次回复中完成叙事、战斗、制作与状态变化，接近角色卡体验。所有模式都保留独立记忆调用。缓存优化版暂留旧原文，重建时按记忆窗口折叠；实际命中与费用取决于渠道。
+          两种直出都由主 AI 在一次回复中完成叙事、战斗、制作与状态变化，接近角色卡体验。
+          所有模式都保留独立记忆调用，因此整楼可能不止一次请求。
         </p>
         <ContentStatusBanner />
         <p v-if="checking" role="status">正在检查本机配置…</p>
@@ -233,6 +241,14 @@ onMounted(() => {
   font-family: var(--theme-font-title);
   font-size: 1.125rem;
   margin-top: 0;
+}
+.mode-guidance {
+  padding-left: var(--theme-spacing-xl);
+  margin-block: var(--theme-spacing-md);
+  font-size: 0.875rem;
+}
+.mode-guidance li + li {
+  margin-top: var(--theme-spacing-sm);
 }
 .readiness-issues {
   padding-left: var(--theme-spacing-xl);

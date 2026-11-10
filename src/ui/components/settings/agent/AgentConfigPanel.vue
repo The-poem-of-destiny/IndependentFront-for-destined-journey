@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isDirectSettingsProfile } from '../../../lib/direct-settings';
+import { isDirectSettingsProfile, resolveDirectPresetId } from '../../../lib/direct-settings';
 
 /**
  * 一个 Agent 的完整配置面（参数卡 + 提示词卡 + 动作栏）。
@@ -119,9 +119,7 @@ const activePreset = computed(
       (p) =>
         p.id ===
         (isDirectSettingsProfile(props.agentId)
-          ? props.agentId === 'direct_cached'
-            ? (s.directCachedPresetId ?? DIRECT_CACHED_PRESET_ID)
-            : (s.directPresetId ?? DIRECT_PRESET_ID)
+          ? resolveDirectPresetId(s, props.agentId, defaultsLayer.value)
           : s.activePresetId),
     ) ?? null,
 );
@@ -219,11 +217,9 @@ async function saveAsDefault() {
     promptDraft: agentPromptDraft.value,
     templateDraft: agentTemplateDraft.value,
     activePresetId:
-      (props.agentId === 'direct_cached'
-        ? s.directCachedPresetId
-        : props.agentId === 'direct_main'
-          ? s.directPresetId
-          : s.activePresetId) || '',
+      (isDirectSettingsProfile(agentId)
+        ? resolveDirectPresetId(s, agentId, defaultsLayer.value)
+        : s.activePresetId) || '',
     // ChatPreset 与 PresetItem 结构同形（id/name/description?/settings/createdAt/updatedAt）；
     // buildAgentDefaultEntry 内部用 JSON 深拷贝，此处对齐前端历史类型签名。
     activePreset: activePreset.value as unknown as PresetItem | null,
@@ -252,16 +248,19 @@ async function restoreAgentDefaults() {
   const id = props.agentId;
   if (isDirectSettingsProfile(id)) {
     applyProjectDefaultToAgent(s, id);
+    const presetId = resolveDirectPresetId({}, id, defaultsLayer.value);
+    if (id === 'direct_cached') delete s.directCachedPresetId;
+    else delete s.directPresetId;
     if (id === 'direct_cached') {
       s.directCachedInitialized = false;
       initializeCachedDirectSettings(s, defaultsLayer.value);
     }
-    if (id === 'direct_cached') s.directCachedPresetId = DIRECT_CACHED_PRESET_ID;
-    else s.directPresetId = DIRECT_PRESET_ID;
-    if (id === 'direct_cached' && !presetList.value.some((p) => p.id === DIRECT_CACHED_PRESET_ID))
-      await upsertPreset(createCachedDirectPreset());
-    if (!presetList.value.some((p) => p.id === DIRECT_PRESET_ID))
-      await upsertPreset(createDirectPreset());
+    const preset = cfg.projectAgentDefaults?.agents?.[id]?.preset;
+    if (!presetList.value.some((p) => p.id === presetId)) {
+      if (preset) await upsertPreset(preset as any);
+      else if (presetId === DIRECT_CACHED_PRESET_ID) await upsertPreset(createCachedDirectPreset());
+      else if (presetId === DIRECT_PRESET_ID) await upsertPreset(createDirectPreset());
+    }
     s.agentDirty[id] = false;
     ui.toast('已恢复直出默认', 'info');
     return;
