@@ -686,6 +686,11 @@ export class GamePipeline {
       return;
     }
     await this.orch?.acceptDirectCache(this.currentTurnMessages);
+    // 🔴 核心提交成功 = 本楼已接纳。之后的回合收尾（时间推进 / 角色经历 / 回合计数与快照）
+    // 必须跑完，**不再**看取消信号或「是否仍是当前存档」：delta_time 是时间推进的唯一来源，
+    // 角色更新、totalTurns 与回合快照也没有任何后续重放路径，半途放弃就永久丢失
+    // （回退一楼会跳两楼）。这些写入全部按 this.saveId 寻址、经 per-save 写锁串行，
+    // 切走存档也不会写错档。取消只在核心提交之前、或收尾完成之后生效。
     const auxiliary = async (label: string, task: () => Promise<unknown>) => {
       try {
         await task();
@@ -696,9 +701,7 @@ export class GamePipeline {
         );
       }
     };
-    await auxiliary('时间推进', () =>
-      manager.applyTimeAdvance(draft.updates.time.delta_time, () => this.isRunCurrent(controller)),
-    );
+    await auxiliary('时间推进', () => manager.applyTimeAdvance(draft.updates.time.delta_time));
     await auxiliary('旅程更新', () => manager.syncMapJourney());
     const plotResult = (agentId: string, data: Record<string, unknown>): AgentResult => ({
       agentId,
@@ -718,36 +721,38 @@ export class GamePipeline {
         this.persistPlotPostCheck(plotResult('plot_post_check', draft.updates.plot.post!)),
       );
     await auxiliary('角色经历保存', async () => {
-      const { getSaveProfile } = await import('@engine/persistence/database');
+      const { getSaveProfile, getMessages } = await import('@engine/persistence/database');
       const endTime = (await getSaveProfile(this.saveId))?.gameTime;
       for (const m of this.currentTurnMessages)
         if (m.role === 'assistant' && endTime) m.storyGameTime = { ...endTime };
+      // store 自己仍会拒绝写非活跃存档：存档已切走时只放弃结束时间回写，经历照常提交
       if (
         !(await this.game.setStoryTurnStatus(
           this.currentTurnMessages,
           'accepted',
           this.currentStoryTurnKey!,
-          () => this.isRunCurrent(controller),
-        ))
+          () => true,
+        )) &&
+        this.ownsActiveSave
       )
         throw new Error('来源消息已改变');
-      const turn = collectCompleteStoryTurns(this.game.messages).find(
+      // 来源回合按库内消息解析（不读 store 投影），切档后仍指向本存档
+      const turn = collectCompleteStoryTurns(await getMessages(this.saveId)).find(
         (row) => row.key === this.currentStoryTurnKey,
       );
       if (!turn) throw new Error('找不到已接纳的来源回合');
       const warnings = await manager.commitCharacterUpdates(
         draft.characterUpdates,
         storyTurnSource(turn),
-        () => this.isRunCurrent(controller),
       );
       for (const warning of warnings) this.notify(warning, 'warning');
-      await manager.initializeCharacterDefinitions(context.characterDefinitions ?? [], () =>
-        this.isRunCurrent(controller),
-      );
+      await manager.initializeCharacterDefinitions(context.characterDefinitions ?? []);
     });
     await auxiliary('剧情收尾', () => this.commitPlotThreadTurnIfAny());
     await auxiliary('随机事件收尾', () => manager.syncRandomEventsForTurn());
-    await auxiliary('回合快照', () => manager.advanceTurn(() => this.isRunCurrent(controller)));
+    await auxiliary('回合快照', () => manager.advanceTurn());
+    // 收尾已完成；此后的记忆摘要是可选的尽力而为，取消/切档在这里才生效
+    if (!this.isRunCurrent(controller)) return;
     await this.game.refreshFromDb(this.saveId);
     this.pendingAudioMarker = scanPlayAudioMarkers(draft.raw).slice(-1)[0] ?? null;
     const fresh = this.buildContext(context.userInput, this.currentStoryTurnKey);

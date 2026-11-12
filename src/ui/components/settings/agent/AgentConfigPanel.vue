@@ -252,6 +252,8 @@ async function restoreAgentDefaults() {
     if (id === 'direct_cached') delete s.directCachedPresetId;
     else delete s.directPresetId;
     if (id === 'direct_cached') {
+      // 渠道策略也属缓存直出配置：清掉后由初始化与读取侧的 ?? 'prefix' 回到默认
+      delete s.directCacheProvider;
       s.directCachedInitialized = false;
       initializeCachedDirectSettings(s, defaultsLayer.value);
     }

@@ -5,7 +5,11 @@ import {
 } from '../../../src/core/prompts/direct-context-frame';
 import { createCachedDirectPreset, DIRECT_TEMPLATE } from '../../../src/core/prompts/direct-prompt';
 import type { DirectGenerationInput } from '../../../src/core/agents/direct-main';
-import { createDefaultCharacterState } from '../../../src/core/types/types';
+import {
+  createDefaultCharacterState,
+  type WorldBook,
+  type WorldBookEntry,
+} from '../../../src/core/types/types';
 import {
   prepareDirectContext,
   acceptDirectContext,
@@ -72,6 +76,72 @@ describe('legacy cached direct layout', () => {
       expect(second.prefix).not.toEqual(first.prefix);
     },
   );
+
+  it('resolves session-static ST macros into a stable prefix instead of the authored layout', async () => {
+    const input = fixture();
+    const preset = createCachedDirectPreset();
+    preset.settings.prompts = [
+      {
+        content:
+          '{{setvar::tone::克制}}{{// 作者注释}}你扮演 {{char}}，与 {{user}} 同行。语气 {{getvar::tone}}。{{roll 1d20}}',
+        injection_order: 1,
+      },
+    ];
+    input.presets = [preset];
+    const first = await buildLegacyDirectCacheFrame(input, [], '旧楼正文');
+    input.context.userInput = '离开铁匠铺';
+    input.context.agentOutputs.set('memory_recall', '已取走短剑');
+    const next = await buildLegacyDirectCacheFrame(input, [], '新楼正文');
+    expect(next.prefix).toEqual(first.prefix);
+    const text = JSON.stringify(first.prefix);
+    expect(text).toContain('语气 克制');
+    expect(text).not.toContain('进入铁匠铺');
+    expect(text).not.toContain('旧楼正文');
+    expect(next.history).toEqual([{ role: 'system', content: '新楼正文' }]);
+  });
+
+  it.each([
+    ['random', '语气 {{random::冷静,急切,嘲讽,悲伤,欢快,疑惑}}'],
+    ['EJS', '语气 <%= "固定" %>'],
+  ])('keeps the authored layout for genuinely dynamic %s presets', async (_kind, content) => {
+    const input = fixture();
+    const preset = createCachedDirectPreset();
+    preset.settings.prompts = [{ content, injection_order: 1 }];
+    input.presets = [preset];
+    const frame = await buildLegacyDirectCacheFrame(input, [], '原始历史');
+    expect(frame.history).toEqual([]);
+    expect(JSON.stringify(frame.prefix)).toContain('原始历史');
+  });
+
+  it('keeps fixed lore with random macros out of the cached prefix', async () => {
+    const input = fixture();
+    const entry = (name: string, content: string): WorldBookEntry => ({
+      uid: `frame-lore:world_setting/${name}`,
+      name,
+      content,
+      enabled: true,
+      key: [],
+      keysecondary: [],
+      selectiveLogic: 0,
+      order: 1,
+      position: 0,
+      extra: { lore: { audiences: ['direct_main'], section: 'fixed' } },
+    });
+    const stable = entry('stable', '固定法则');
+    const rolled = entry('rolled', '今日天象 {{random::晴,雨,雪,雾,风,雷,霜,冰}}');
+    const books: WorldBook[] = [
+      { id: 'frame-lore', name: '规则', partition: 'world_setting', entries: [stable, rolled] },
+    ] as WorldBook[];
+    const fixed = new Set([stable, rolled]);
+    const first = await buildLegacyDirectCacheFrame(input, books, '历史', fixed);
+    expect(JSON.stringify(first.prefix)).toContain('固定法则');
+    expect(JSON.stringify(first.prefix)).not.toContain('今日天象');
+    expect(first.sections.currentLore).toMatch(/今日天象 [晴雨雪雾风雷霜冰]/);
+    for (let i = 0; i < 5; i++) {
+      const next = await buildLegacyDirectCacheFrame(input, books, '历史', fixed);
+      expect(next.prefix).toEqual(first.prefix);
+    }
+  });
 
   it('moves only opted-in entries, preserving shared ST definitions and current data', async () => {
     const input = fixture();

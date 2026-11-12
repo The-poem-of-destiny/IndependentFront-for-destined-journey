@@ -13,6 +13,24 @@ import {
 } from './preset-loader';
 import { isStoryZonePlaceholder, type PresetEntryLike } from './story-zone-placeholders';
 
+const RANDOM_MACRO_RE = /\{\{random::/;
+
+/**
+ * 预设原文是否含**逐轮变化**的宏，需要保留作者原位（authored layout）。
+ *
+ * 会话期内恒定的宏不算：`{{user}}`/`{{char}}`/`{{USER_NAME}}`/`{{CHARACTER_NAME}}`、
+ * `{{setvar}}`/`{{getvar}}`、`{{//注释}}`，以及 `preprocessEntry` 一律剥离的小写宏
+ * （`{{roll ...}}` 与未知 ST 宏）—— 它们的展开结果每轮相同，静态解析进前缀即可。
+ * 逐轮变化的：EJS、`{{random::}}`（每次装配重掷）、大写系统占位符（输入/历史/状态等）。
+ */
+function hasDynamicMacros(text: string): boolean {
+  return (
+    text.includes('<%') ||
+    RANDOM_MACRO_RE.test(text) ||
+    /\{\{(?!(?:USER_NAME|CHARACTER_NAME)\}\})[A-Z]/.test(text)
+  );
+}
+
 /** Each group is an absolute value; changing HP never resends profiles or inventory. */
 export function buildDirectCharacterSections(
   characters: readonly CharacterState[],
@@ -77,16 +95,27 @@ export async function buildLegacyDirectCacheFrame(
       ? { ...preset, settings: { ...presetSettings, prompts: fixedPrompts } }
       : preset;
   const presets = input.presets.map((p) => (p === preset ? fixedPreset! : p));
-  const authored = Array.isArray(fixedPrompts)
-    ? fixedPrompts
-        .filter((p) => p.enabled !== false && p.directCachePlacement !== 'turn')
-        .map((p) => p.content)
+  // 判据取**预处理前**的原文：预处理会把 {{random}} 掷成定值、{{user}} 改写成 {{USER_NAME}}，
+  // 掷完的文本看不出它每轮会变。助手条目与五区占位不进前缀，不参与判定。
+  const authored = Array.isArray(prompts)
+    ? prompts
+        .filter(
+          (p) =>
+            p.enabled !== false &&
+            p.directCachePlacement !== 'turn' &&
+            p.role !== 'assistant' &&
+            !isStoryZonePlaceholder(p),
+        )
+        .map((p) => (typeof p.content === 'string' ? p.content : ''))
         .join('\n')
     : [preset?.fixedSystem, preset?.fixedExamples, input.config.systemPrompt].join('\n');
   const template = input.config.template?.replace(/\r\n/g, '\n').trim();
   // Authored macros and custom layouts retain their original positions. Their rendered
   // prefix participates in the signature, so changing input safely rebuilds the session.
-  const authoredLayout = !!((template && template !== DIRECT_TEMPLATE) || /\{\{|<%/.test(authored));
+  const authoredLayout = !!(
+    (template && template !== DIRECT_TEMPLATE) ||
+    hasDynamicMacros(authored)
+  );
   const moving = [
     'NARRATIVE',
     'USER_INPUT',
@@ -136,10 +165,14 @@ export async function buildLegacyDirectCacheFrame(
   const fixed: string[] = [];
   const current: string[] = [];
   for (const [entry, text] of renderedEntries) {
-    const content = resolveRandoms(
-      resolveGetvars(parseSetvars(text).stripped, rendered.ejsPass?.stDefinitions ?? {}),
+    const expanded = resolveGetvars(
+      parseSetvars(text).stripped,
+      rendered.ejsPass?.stDefinitions ?? {},
     );
-    (fixedEntries.has(entry) ? fixed : current).push(content);
+    // 含 {{random}} 的固定条目每轮掷出不同文本，留在前缀会让会话签名逐轮变化、缓存永不预热；
+    // 与 ADR-30「含 random 的条目沉到动态尾部」同口径，改走本轮资料。
+    const rerolls = RANDOM_MACRO_RE.test(expanded);
+    (fixedEntries.has(entry) && !rerolls ? fixed : current).push(resolveRandoms(expanded));
   }
   return {
     prefix: [

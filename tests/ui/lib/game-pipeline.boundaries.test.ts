@@ -624,6 +624,55 @@ describe.each(['direct', 'direct_cached'] as const)(
       expect(toast).toHaveBeenCalledWith(expect.stringContaining('本楼已接纳'), 'warning', 6000);
     });
 
+    it('finishes turn bookkeeping when the run is cancelled right after the core commit', async () => {
+      const { game, pipeline } = await directFixture();
+      const db = getDatabase();
+      await db.characters.put(createDefaultCharacterState({ id: 'guide', saveId, name: '向导' }));
+      const { getProfile } = await import('@engine/state/save-profile');
+      const before = { ...(await getProfile(saveId)).gameTime };
+      const updates = JSON.stringify({
+        characters: [
+          {
+            name: '向导',
+            profile_changes: { goals: '前往渡口' },
+            chronicle: [
+              {
+                title: '同行之约',
+                summary: '答应一同前往渡口。',
+                time: { kind: 'this_turn' },
+                importance: 8,
+              },
+            ],
+          },
+        ],
+      });
+      const chat = vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (
+        this: any,
+      ) {
+        return result(
+          this.agentId,
+          this.agentId === 'direct_main'
+            ? `<maintext>向导同意出发。</maintext><character_updates>${updates}</character_updates><direct_updates>{"version":1,"world":{},"time":{"delta_time":90},"entities":[],"state":{},"effects":[],"plot":{},"combat":null,"diceUsed":[]}</direct_updates>`
+            : JSON.stringify({ segments: [{ content: '向导同意出发。' }] }),
+        );
+      });
+      // 核心提交刚返回（setPendingOptions 紧随其后）就离开游戏页：dispose 绕过提交中的停止保护
+      vi.spyOn(game, 'setPendingOptions').mockImplementation(() => {
+        if (game.messages.some((m) => m.storyTurnStatus === 'accepted')) pipeline.dispose();
+      });
+      expect(await pipeline.run('邀请向导同行')).toBe(true);
+      expect(advance).toHaveBeenCalledOnce();
+      const after = (await db.saveProfiles.get(saveId))!.gameTime;
+      expect(after).not.toEqual(before);
+      expect(after.hour * 60 + after.minute - (before.hour * 60 + before.minute)).toBe(90);
+      expect((await db.characters.get('guide'))?.goals).toBe('前往渡口');
+      expect(
+        (await db.characterChronicle.toArray()).filter((e) => e.characterId === 'guide'),
+      ).toHaveLength(1);
+      // 收尾完成后取消才生效：可选的记忆摘要不再发起
+      expect(chat.mock.contexts.map((client: any) => client.agentId)).toEqual(['direct_main']);
+    });
+
     it('keeps legacy recall and summary persistence outside the single main request', async () => {
       const { game, pipeline } = await directFixture();
       delete game.activeSave!.metadata.storyContextV2;

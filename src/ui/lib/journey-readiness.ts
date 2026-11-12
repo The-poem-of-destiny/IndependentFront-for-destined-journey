@@ -37,17 +37,16 @@ export function checkJourneyReadiness(
     ? ['memory_recall', 'direct_main', 'memory_summary']
     : DEFAULT_AGENT_PIPELINE.stages.flatMap((stage) => stage.agents);
   for (const id of agentIds) {
+    // 缓存直出仍执行 direct_main，但连接配置读 direct_cached；提示要指向实际检查的配置
+    const profileId =
+      id === 'direct_main' && generationMode === 'direct_cached' ? 'direct_cached' : id;
     const resolution = resolveAgentEndpoint({
-      boundPoolId: getAgentSettings(
-        settings,
-        id === 'direct_main' && generationMode === 'direct_cached' ? 'direct_cached' : id,
-        defaults,
-      ).model,
+      boundPoolId: getAgentSettings(settings, profileId, defaults).model,
       apiPool,
     });
     if (resolution.status === 'stale-binding') {
       issues.push({
-        message: `${id} 绑定的 API 已不存在，请重新选择。`,
+        message: `${profileId} 绑定的 API 已不存在，请重新选择。`,
         section: 'agent',
         blocking: true,
       });
@@ -73,7 +72,7 @@ export function checkJourneyReadiness(
     ) {
       problem = '需要选择对话 API';
     }
-    if (problem) issues.push({ message: `${id}：${problem}。`, section: 'api', blocking });
+    if (problem) issues.push({ message: `${profileId}：${problem}。`, section: 'api', blocking });
   }
   return issues;
 }

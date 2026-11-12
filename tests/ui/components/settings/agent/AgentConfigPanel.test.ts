@@ -136,6 +136,13 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     expect(mockPresets.value).toContainEqual(preset);
   });
 
+  it('🔴 缓存直出「恢复成最新」同时清掉渠道策略（回到默认 prefix）', async () => {
+    mockSettings.directCacheProvider = 'anthropic';
+    const w = mountPanel('direct_cached');
+    await w.findAllComponents(AppButton)[0].vm.$emit('click');
+    expect(mockSettings.directCacheProvider ?? 'prefix').toBe('prefix');
+  });
+
   it('story 走预设面板，不渲染提示词卡', () => {
     const w = mountPanel('story');
     expect(w.findComponent(PresetManager).exists()).toBe(true);
