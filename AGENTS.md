@@ -9,6 +9,16 @@
 
 > **本文件是指令正文的唯一真源**，工具中立。猫娘人格见文首 `## 人格遵循`（2026-08-13 起上移至此，不再存于 `CLAUDE.md`）；Claude Code 专属内容（skills/workflows 用法）在 `CLAUDE.md`。Claude Code 通过 `CLAUDE.md` 的 `@AGENTS.md` import 本文件；Codex 等其他工具直接读本文件即可。
 
+## 语言约定（2026-11-12 立）
+
+**所有 AI 编码工具在本仓工作时一律使用简体中文**，包括但不限于：
+
+- 会话中对主人的全部回复（Claude Code / Codex 等会话输出）
+- 代码注释与测试描述
+- 提交信息、PR 标题与正文、issue 与评论等 GitHub 消息
+
+英文仅用于代码标识符、API 字段名、命令行输出引用等技术原文本身。
+
 ## 提交前文档检查（必读）
 
 原生角色与编年史的现行契约见 [`docs/reference/character-system.md`](docs/reference/character-system.md)：主叙事同次输出、按存档保存、重要度筛选，入口在现行 `src/core/character/`、`src/core/persistence/` 与角色查看器。
