@@ -1,4 +1,7 @@
 <script setup lang="ts" generic="T extends string | number | boolean">
+import { useId } from 'vue';
+
+const selectId = useId();
 const props = defineProps<{
   modelValue: T;
   label?: string;
@@ -22,10 +25,16 @@ function onChange(e: Event) {
 
 <template>
   <div class="form-field">
-    <label v-if="label || $slots.label" class="form-label">
+    <label v-if="label || $slots.label" :for="selectId" class="form-label">
       {{ label }}<slot name="label" />
     </label>
-    <select class="form-select" :value="String(modelValue)" :disabled="disabled" @change="onChange">
+    <select
+      :id="selectId"
+      class="form-select"
+      :value="String(modelValue)"
+      :disabled="disabled"
+      @change="onChange"
+    >
       <option v-if="placeholder" value="" disabled>{{ placeholder }}</option>
       <option
         v-for="opt in options"

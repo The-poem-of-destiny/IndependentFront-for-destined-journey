@@ -15,6 +15,7 @@ import { scheduleApiRequest } from '../api/api-rpm-limiter';
 import type { LlmMessage, JsonObject, NativeLlmContent } from '../types/types-api';
 import { buildLlmRequest, createLlmStreamAccumulator, parseLlmResponse } from '../api/llm-adapter';
 import { postLlmRequest } from '../api/transport';
+import { directCacheUsage } from '../api/prompt-caching';
 
 /** 内部扩展 — 包含原始 tool_calls 数据 */
 type InternalAgentResult = AgentResult & {
@@ -61,6 +62,8 @@ export function ensureUserMessage(messages: ChatRequest['messages']): ChatReques
 // ========== Types ==========
 
 export interface ChatRequest {
+  cachePolicy?: import('../types/types-api').DirectCachePolicy;
+  cacheKey?: string;
   model?: string;
   messages: LlmMessage[];
   temperature?: number;
@@ -150,6 +153,7 @@ export interface StreamCallbacks {
     duration: number;
     /** 仅供会话组装层续传 provider 原生签名，不进入普通结果或调试导出。 */
     nativeAssistant?: NativeLlmContent;
+    usage?: import('../types/types-api').NormalizedLlmUsage;
   }) => void;
   /** 流式传输中的错误 */
   onError: (error: string) => void;
@@ -649,6 +653,7 @@ export class AgentClient {
             completionTokens: outputTokens,
             duration: Date.now() - startTime,
             nativeAssistant: snapshot.nativeAssistant,
+            ...(request.cachePolicy ? { usage: directCacheUsage(protocol, snapshot.usage) } : {}),
           });
         }
       };
@@ -803,6 +808,8 @@ export class AgentClient {
     return buildLlmRequest({
       protocol,
       model: request.model || this.endpoint.defaultModel,
+      cachePolicy: request.cachePolicy,
+      cacheKey: request.cacheKey,
       messages: ensureUserMessage(request.messages),
       temperature: request.temperature ?? poolDefaults.temperature,
       maxTokens: request.maxTokens ?? poolDefaults.maxTokens,
@@ -895,6 +902,7 @@ export class AgentClient {
         throw new Error(`Endpoint ${this.endpoint.name || this.endpoint.id} is not an LLM source`);
       }
       const normalized = parseLlmResponse(protocol, raw);
+      if (request.cachePolicy) normalized.usage = directCacheUsage(protocol, normalized.usage);
       const rawResponse = normalized.text;
       const reasoningContent = normalized.reasoning;
       const finishReason = normalized.finishReason;
@@ -931,6 +939,7 @@ export class AgentClient {
         duration: 0,
         _toolCalls: toolCalls,
         _nativeAssistant: normalized.nativeAssistant,
+        ...(request.cachePolicy ? { providerUsage: normalized.usage } : {}),
       };
     } catch (e) {
       // 真机修(2026-07-21): 非流式路径原先只有 try/finally 无 catch，浏览器原生

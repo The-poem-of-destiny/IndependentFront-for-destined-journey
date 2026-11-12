@@ -238,10 +238,12 @@ onMounted(async () => {
         .catch((err) => console.warn('[GamePage] 音频初始化失败（不影响游戏）:', err));
       // 🆕 C4：刷新续战 —— 本存档有未终局的沙盒战斗时恢复面板，跳过开场 Prompt。
       loadingSave.value = false;
-      const resumedCombat = await pipeline.resumeCombatSandbox().catch((err) => {
-        console.warn('[GamePage] 战斗续战恢复失败（当作无在办战斗）:', err);
-        return false;
-      });
+      const resumedCombat =
+        game.generationMode === 'agent' &&
+        (await pipeline.resumeCombatSandbox().catch((err) => {
+          console.warn('[GamePage] 战斗续战恢复失败（当作无在办战斗）:', err);
+          return false;
+        }));
       if (!ownsPage()) return;
       if (!resumedCombat && !game.hasOpeningPromptConsumed && game.openingPrompt) {
         console.log('[GamePage] sending opening prompt...');
@@ -315,7 +317,7 @@ function onEscapeCapture(e: KeyboardEvent) {
   if (e.key !== 'Escape') return;
   if (menuOpen.value) return; // 菜单开着：交给 AppModal 自己关，Esc 的开关两半走两条路
   if (hasOpenDialog() || game.activeModal !== null) return;
-  if (game.isInCombat || showMiniPlayer.value || chatFlowRef.value?.ctxMenuOpen) return;
+  if (game.isAgentCombat || showMiniPlayer.value || chatFlowRef.value?.ctxMenuOpen) return;
   menuOpen.value = true;
 }
 

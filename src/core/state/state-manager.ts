@@ -1,3 +1,4 @@
+import { isDirectMode } from '../story/generation-mode';
 /**
  * StateManager — 唯一状态写入入口 (ADR-21)
  *
@@ -65,6 +66,15 @@ import { getEngineSettings } from '../runtime/engine-settings';
 // 并行化改造（docs/planning/2026-08-16-pipeline-parallelism.md）：一切 Dexie 写入
 // 经 per-saveId FIFO 队列串行 —— 锁粒度 = 读-改-写区段，锁内禁止再入队列（铁律②）。
 import { withSaveWriteLock } from './state-write-queue';
+import type { CharacterDefinition, CharacterNarrativeUpdate } from '../types/types-character';
+import type { StoryMemorySource } from '../types/types';
+import {
+  attachCharacterDefinition,
+  matchCharacterDefinition,
+} from '../character/character-definitions';
+import { authorChronicle, turnChronicle } from '../character/character-chronicle';
+import { collectCompleteStoryTurns } from '../memory/memory-context';
+import { storyMemorySourceMatches, storyTurnGameTimeRange } from '../memory/story-memory-source';
 // Q-19：这三个模块此前在 14 处 handler 里各 `await import` 一次。它们都不 import
 // 本模块（已核实无环），动态化没有换来任何解耦，只是让每个 handler 多一次 await
 // 和一行噪音，还遮蔽了 1471 行那处同名解构。script-executor 仍留动态 —— 它是
@@ -153,6 +163,7 @@ import {
 
 export interface StateManagerConfig {
   saveId: string;
+  onMaintenanceWarning?: (message: string) => void;
 }
 
 /** 玩家在游玩中主动修订的叙事人设；只开放三个玩家可写正式字段。 */
@@ -340,6 +351,7 @@ function normalizePersonaText(value: string): string {
 
 export class StateManager {
   private saveId: string;
+  private onMaintenanceWarning?: (message: string) => void;
   private events: GameEvent[] = [];
   /**
    * 当前提交作用域缓存（见 `CommitScope`）。非 null 仅在 `commitChatState` 的锁段内成立。
@@ -350,9 +362,123 @@ export class StateManager {
 
   constructor(config: StateManagerConfig) {
     this.saveId = config.saveId;
+    this.onMaintenanceWarning = config.onMaintenanceWarning;
   }
 
   // ========== 主入口 ==========
+
+  /** Freeze legacy author definitions once, without replacing established save state. */
+  async initializeCharacterDefinitions(
+    definitions: CharacterDefinition[],
+    isCurrent?: () => boolean,
+  ): Promise<void> {
+    await withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(isCurrent);
+      const db = getDatabase();
+      await db.transaction(
+        'rw',
+        [db.saves, db.characters, db.messages, db.characterChronicle],
+        async () => {
+          const save = await getSave(this.saveId);
+          if (!save) return;
+          if (save.metadata.characterDefinitions === undefined && definitions.length > 0) {
+            save.metadata.characterDefinitions = structuredClone(definitions);
+            await saveSaveSlot(save);
+          }
+          const accepted = new Set(
+            collectCompleteStoryTurns(await getMessages(this.saveId)).map((t) => t.key),
+          );
+          for (const character of await getCharacters(this.saveId)) {
+            if (character.introducedBy && !accepted.has(character.introducedBy)) continue;
+            const definition =
+              character.definition ??
+              matchCharacterDefinition(save.metadata.characterDefinitions ?? [], character.name);
+            if (!definition) continue;
+            const next = character.definition
+              ? character
+              : attachCharacterDefinition(character, definition);
+            if (!character.definition) await saveCharacter(next);
+            const entries = authorChronicle(next);
+            if (entries.length) await db.characterChronicle.bulkPut(entries);
+          }
+        },
+      );
+    });
+  }
+
+  /** Same-turn narrator updates; each character's profile and chronicle commit atomically. */
+  async commitCharacterUpdates(
+    updates: CharacterNarrativeUpdate[],
+    source: StoryMemorySource,
+    isCurrent?: () => boolean,
+  ): Promise<string[]> {
+    return withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(isCurrent);
+      const db = getDatabase();
+      const warnings: string[] = [];
+      for (const update of updates) {
+        try {
+          await db.transaction(
+            'rw',
+            [db.saves, db.characters, db.messages, db.characterChronicle],
+            async () => {
+              assertCurrentTurn(isCurrent);
+              const turn = collectCompleteStoryTurns(await getMessages(this.saveId)).find(
+                (t) => t.key === source.sourceTurnKey,
+              );
+              if (!turn || !storyMemorySourceMatches(source, turn))
+                throw new Error('来源回合已失效');
+              const character = await this.resolveCharacter(update.name);
+              const old = await db.characterChronicle
+                .where('[saveId+characterId]')
+                .equals([this.saveId, character.id])
+                .toArray();
+              const sourceRows = old.filter(
+                (e) => e.source.kind === 'turn' && e.source.sourceTurnKey === source.sourceTurnKey,
+              );
+              // Replaying a committed response is a no-op, including profile changes.
+              if (
+                sourceRows.length &&
+                sourceRows.every(
+                  (e) =>
+                    e.source.kind === 'turn' &&
+                    e.source.sourceFingerprint === source.sourceFingerprint,
+                )
+              )
+                return;
+              const chronicle = update.chronicle.filter((entry) => {
+                if (entry.time.kind !== 'past' || character.introducedBy === source.sourceTurnKey)
+                  return true;
+                warnings.push(`角色「${character.name}」已存在，未补写其过去。`);
+                return false;
+              });
+              const next = { ...character, ...structuredClone(update.profile_changes) };
+              await saveCharacter(next);
+              if (sourceRows.length)
+                await db.characterChronicle.bulkDelete(sourceRows.map((e) => e.id));
+              const entries = turnChronicle({
+                character,
+                update: { ...update, chronicle },
+                source,
+                gameTime: storyTurnGameTimeRange(turn).end,
+                sourceText: turn.storyMessages.map((m) => m.content).join('\n\n'),
+                createdAt: Date.now(),
+              });
+              const initial = authorChronicle(next).filter((e) => !old.some((o) => o.id === e.id));
+              if (initial.length || entries.length)
+                await db.characterChronicle.bulkPut([...initial, ...entries]);
+            },
+          );
+        } catch (error) {
+          if (isCurrent && !isCurrent()) throw error;
+          warnings.push(
+            `角色「${update.name}」更新未保存：${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+      return warnings;
+    });
+  }
 
   /**
    * 玩家主动修订叙事人设。
@@ -398,6 +524,109 @@ export class StateManager {
       console.error('[StateManager] 玩家人设保存失败:', error);
       return { ok: false, error: '人设保存失败，请重试' };
     }
+  }
+
+  /** All required changes succeed together; rejection publishes no events or effects. */
+  async commitDirectTurn(input: {
+    patches: StatePatch[];
+    messages: readonly import('../types/types').ChatMessage[];
+    turnKey: string;
+    combat: import('../combat/direct-combat').DirectCombatRecord | null;
+    eventTrigger?: string;
+    isCurrent: () => boolean;
+    onCommitStart?: () => void;
+  }): Promise<'committed' | 'already-accepted'> {
+    const source = JSON.parse(
+      JSON.stringify(input.messages),
+    ) as import('../types/types').ChatMessage[];
+    return withSaveWriteLock(this.saveId, async () => {
+      const db = getDatabase();
+      const result = await db.transaction(
+        'rw',
+        [db.characters, db.saveProfiles, db.saves, db.memories, db.plotEvents, db.messages],
+        async () => {
+          assertCurrentTurn(input.isCurrent);
+          const save = await getSave(this.saveId);
+          if (!isDirectMode(save?.metadata.generationMode))
+            throw new Error('直出提交只能用于直出存档');
+          if (
+            !source.length ||
+            source[0].id !== input.turnKey ||
+            !source.some((m) => m.role === 'assistant')
+          )
+            throw new Error('直出来源消息不完整');
+          const stored = await db.messages.bulkGet(source.map((m) => m.id));
+          if (
+            stored.some(
+              (row, i) =>
+                !row ||
+                row.saveId !== this.saveId ||
+                row.role !== source[i].role ||
+                row.content !== source[i].content ||
+                row.storyTurnKey !== input.turnKey,
+            )
+          )
+            throw new Error('直出来源回合已改变');
+          if (stored.every((row) => row!.storyTurnStatus === 'accepted'))
+            return { status: 'already-accepted' as const, events: [] };
+          if (stored.some((row) => row!.storyTurnStatus !== 'pending'))
+            throw new Error('直出来源回合不可接纳');
+          const scope = createCommitScope();
+          this.commitScope = scope;
+          try {
+            const events: GameEvent[] = [];
+            const profile = await this.readProfile();
+            if (!profile) throw new Error('存档档案不存在');
+            if (input.eventTrigger && getEngineSettings().randomEventsEnabled) {
+              const settled = settleRandomEventTrigger(
+                getRandomEventFlags(profile),
+                input.eventTrigger,
+                this.gameDayOf(profile),
+              );
+              if (settled) setRandomEventFlagsInPlace(profile, settled.flags);
+            }
+            profile.worldFlags.directCombat = input.combat;
+            await this.persistProfile(profile);
+            for (const patch of input.patches) {
+              if (patch.op === 'remove_item' || patch.op === 'transfer_item') {
+                const character = await this.resolveCharTarget(patch.target);
+                const value = patch.value as { name: string; quantity?: number };
+                const item = character.inventory.find((row) => row.name === value.name);
+                if (!item || (value.quantity !== undefined && item.quantity < value.quantity))
+                  throw new Error(`物品「${value.name}」数量不足`);
+              }
+              if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
+                this.validatePatch(patch);
+                const amount = patch.amount!;
+                if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
+                if (amount >= 0) await addFP(profile, amount, '行动结算');
+                else await spendFP(profile, -amount, '行动结算');
+                events.push(this.createEvent('variable_change', patch));
+              } else {
+                const applied = await this.applyPatch(patch);
+                if (applied.event) events.push(applied.event);
+              }
+            }
+            assertCurrentTurn(input.isCurrent);
+            input.onCommitStart?.();
+            await this.flushCommitScope(scope);
+            await db.messages.bulkPut(
+              stored.map((row) => ({
+                ...row!,
+                storyTurnStatus: 'accepted' as const,
+                storyTurnKey: input.turnKey,
+              })),
+            );
+            await saveSaveSlot(save);
+            return { status: 'committed' as const, events };
+          } finally {
+            this.commitScope = null;
+          }
+        },
+      );
+      this.events.push(...result.events);
+      return result.status;
+    });
   }
 
   /** All required changes succeed together; rejection publishes no events or effects. */
@@ -505,6 +734,9 @@ export class StateManager {
             const msg = err instanceof Error ? err.message : String(err);
             errors.push(`EJS vars 差量应用失败: ${msg}`);
             console.warn('[StateManager] EJS vars 差量应用失败（不阻塞 AI 补丁）:', err);
+            this.onMaintenanceWarning?.(
+              `[StateManager] EJS vars 差量应用失败（不阻塞 AI 补丁）: ${String(err)}`,
+            );
           }
         }
 
@@ -793,6 +1025,9 @@ export class StateManager {
     // ① 名字精确匹配
     const byName = chars.find((c) => c.name === key);
     if (byName) return byName;
+    const aliases = chars.filter((c) => c.aliases?.includes(key));
+    if (aliases.length === 1) return aliases[0];
+    if (aliases.length > 1) throw new Error(`角色别名不唯一: ${key}`);
 
     // ② 主角别名
     if (key === '主角' || key === '玩家') {
@@ -1213,6 +1448,8 @@ export class StateManager {
         source: value.source ?? '',
         effects: value.effects ?? {},
         effectDescriptions: value.effectDescriptions,
+        protocolText: value.protocolText,
+        tags: value.tags,
       };
       if (effect.maxStacks && effect.maxStacks > 0) {
         effect.stacks = Math.min(effect.stacks, effect.maxStacks);
@@ -1318,6 +1555,8 @@ export class StateManager {
         stats: value.stats,
         durability: value.durability,
         maxDurability: value.maxDurability,
+        protocolText: value.protocolText,
+        tags: value.tags,
         data: value.data,
         effects: value.effects,
       });
@@ -1542,6 +1781,8 @@ export class StateManager {
         type: value.type ?? 'active',
         cost: value.cost,
         cooldown: value.cooldown,
+        protocolText: value.protocolText,
+        tags: value.tags,
         maxCooldown: value.maxCooldown,
         level: value.level,
         effects: value.effects,
@@ -2159,6 +2400,9 @@ export class StateManager {
     } catch (err) {
       // 位置路径与地块投影都已落库；编年史少一条不该让正文提交失败
       console.warn('[StateManager] 地块首访记档失败（位置已落库，不影响正文）:', err);
+      this.onMaintenanceWarning?.(
+        `[StateManager] 地块首访记档失败（位置已落库，不影响正文）: ${String(err)}`,
+      );
     }
   }
 
@@ -2237,6 +2481,9 @@ export class StateManager {
     } catch (err) {
       // 时间已经推进、正文状态已经落库；结算算不出来只是这一次没有到期与入账
       console.warn('[StateManager] 地块按期结算失败（时间已推进，不影响正文）:', err);
+      this.onMaintenanceWarning?.(
+        `[StateManager] 地块按期结算失败（时间已推进，不影响正文）: ${String(err)}`,
+      );
     }
   }
 
@@ -2294,6 +2541,10 @@ export class StateManager {
         reason,
         turn,
         characters,
+        characterChronicle: await getDatabase()
+          .characterChronicle.where('saveId')
+          .equals(this.saveId)
+          .toArray(),
         saveProfile: profile,
         plotEvents,
         messages,
@@ -2346,6 +2597,10 @@ export class StateManager {
         reason: meta.reason,
         turn: meta.turn,
         characters,
+        characterChronicle: await getDatabase()
+          .characterChronicle.where('saveId')
+          .equals(this.saveId)
+          .toArray(),
         saveProfile: profile,
         plotEvents,
         messages,
@@ -2412,6 +2667,7 @@ export class StateManager {
           'rw',
           [
             db.characters,
+            db.characterChronicle,
             db.saveProfiles,
             db.plotEvents,
             db.messages,
@@ -2433,6 +2689,9 @@ export class StateManager {
               await deleteCharacter(c.id);
             }
             await saveCharacters(structuredClone(snapshot.characters));
+            await db.characterChronicle.where('saveId').equals(this.saveId).delete();
+            if (snapshot.characterChronicle?.length)
+              await db.characterChronicle.bulkPut(structuredClone(snapshot.characterChronicle));
 
             // ③ saveProfile 覆写（变量/任务/时间/好感随行回滚）
             await updateProfile(structuredClone(snapshot.saveProfile));
@@ -2564,6 +2823,9 @@ export class StateManager {
     } catch (err) {
       // 位置路径已经落库了（真源没丢），投影失败只让棋子暂时不动
       console.warn('[StateManager] 地图落位失败（位置路径已落库，不影响正文）:', err);
+      this.onMaintenanceWarning?.(
+        `[StateManager] 地图落位失败（位置路径已落库，不影响正文）: ${String(err)}`,
+      );
     }
   }
 
@@ -2610,6 +2872,9 @@ export class StateManager {
       await updateMapFlags(profile, asserted.flags);
     } catch (err) {
       console.warn('[StateManager] 天气断言失败（时间已推进，不影响正文）:', err);
+      this.onMaintenanceWarning?.(
+        `[StateManager] 天气断言失败（时间已推进，不影响正文）: ${String(err)}`,
+      );
     }
   }
 
@@ -2648,6 +2913,9 @@ export class StateManager {
       });
     } catch (err) {
       console.warn('[StateManager] 在途旗同步失败（不影响正文与已落库状态）:', err);
+      this.onMaintenanceWarning?.(
+        `[StateManager] 在途旗同步失败（不影响正文与已落库状态）: ${String(err)}`,
+      );
     }
   }
 
@@ -2723,6 +2991,9 @@ export class StateManager {
     } catch (err) {
       // 时间已经推进、正文状态已经落库；候选池算不出来只是这一回合没有新事件
       console.warn('[StateManager] 随机事件调度失败（时间已推进，不影响正文）:', err);
+      this.onMaintenanceWarning?.(
+        `[StateManager] 随机事件调度失败（时间已推进，不影响正文）: ${String(err)}`,
+      );
     }
   }
 
@@ -2748,6 +3019,9 @@ export class StateManager {
       await updateRandomEventFlags(profile, { ...flags, lastRollDay: currentDay });
     } catch (err) {
       console.warn('[StateManager] 随机事件跳日盖戳失败（不影响正文与已落库状态）:', err);
+      this.onMaintenanceWarning?.(
+        `[StateManager] 随机事件跳日盖戳失败（不影响正文与已落库状态）: ${String(err)}`,
+      );
     }
   }
 
@@ -2792,6 +3066,9 @@ export class StateManager {
     } catch (err) {
       // 位置路径与地块投影都已落库；首访没入池只是少一次遭遇
       console.warn('[StateManager] 随机事件首访入池失败（位置已落库，不影响正文）:', err);
+      this.onMaintenanceWarning?.(
+        `[StateManager] 随机事件首访入池失败（位置已落库，不影响正文）: ${String(err)}`,
+      );
     }
   }
 
@@ -2827,6 +3104,9 @@ export class StateManager {
       });
     } catch (err) {
       console.warn('[StateManager] 随机事件保洁失败（不影响正文与已落库状态）:', err);
+      this.onMaintenanceWarning?.(
+        `[StateManager] 随机事件保洁失败（不影响正文与已落库状态）: ${String(err)}`,
+      );
     }
   }
 
@@ -2887,6 +3167,9 @@ export class StateManager {
     } catch (err) {
       // 事件系统只记「触发过」这一事实（铁则 5）；记不上不该让这一回合的正文崩掉
       console.warn('[StateManager] 随机事件触发结算失败（不影响正文）:', err);
+      this.onMaintenanceWarning?.(
+        `[StateManager] 随机事件触发结算失败（不影响正文）: ${String(err)}`,
+      );
     }
   }
 
@@ -2936,6 +3219,9 @@ export class StateManager {
       return { ok: true };
     } catch (err) {
       console.warn('[StateManager] 随机事件调试入池失败（不影响正文与已落库状态）:', err);
+      this.onMaintenanceWarning?.(
+        `[StateManager] 随机事件调试入池失败（不影响正文与已落库状态）: ${String(err)}`,
+      );
       return { ok: false, error: '调试入池失败（详见控制台）' };
     }
   }
@@ -3095,6 +3381,9 @@ export class StateManager {
     } catch (err) {
       // 事务级回滚：钱没给、标记没写，借据原样保留 —— 正是「可恢复」的落点
       console.warn('[StateManager] 地图收益入账失败（借据保留，下次结算自动重放）:', err);
+      this.onMaintenanceWarning?.(
+        `[StateManager] 地图收益入账失败（借据保留，下次结算自动重放）: ${String(err)}`,
+      );
       return { credited: 0, failed: pendingCount, rolledBack: true };
     }
     return { credited, failed: pendingCount - credited, rolledBack: false };

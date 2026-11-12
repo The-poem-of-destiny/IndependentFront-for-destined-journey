@@ -1,3 +1,4 @@
+import { isDirectMode } from '@engine/story/generation-mode';
 import { DEFAULT_AGENT_PIPELINE } from '@engine/types/types';
 import { getAgentSettings, type AgentDefaultsLayer } from '../stores/agent-settings';
 import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
@@ -13,6 +14,7 @@ export function checkJourneyReadiness(
   settings: { apiPool?: readonly unknown[]; agents?: unknown },
   defaults: AgentDefaultsLayer,
   plotMode: string,
+  generationMode: import('@engine/story/generation-mode').GenerationMode | '' = 'agent',
 ): ReadinessIssue[] {
   const rawPool = settings.apiPool ?? [];
   const apiPool = buildApiEndpoints(rawPool);
@@ -31,15 +33,20 @@ export function checkJourneyReadiness(
     ];
   }
   const issues: ReadinessIssue[] = [];
-  const agentIds = DEFAULT_AGENT_PIPELINE.stages.flatMap((stage) => stage.agents);
+  const agentIds = isDirectMode(generationMode)
+    ? ['memory_recall', 'direct_main', 'memory_summary']
+    : DEFAULT_AGENT_PIPELINE.stages.flatMap((stage) => stage.agents);
   for (const id of agentIds) {
+    // 缓存直出仍执行 direct_main，但连接配置读 direct_cached；提示要指向实际检查的配置
+    const profileId =
+      id === 'direct_main' && generationMode === 'direct_cached' ? 'direct_cached' : id;
     const resolution = resolveAgentEndpoint({
-      boundPoolId: getAgentSettings(settings, id, defaults).model,
+      boundPoolId: getAgentSettings(settings, profileId, defaults).model,
       apiPool,
     });
     if (resolution.status === 'stale-binding') {
       issues.push({
-        message: `${id} 绑定的 API 已不存在，请重新选择。`,
+        message: `${profileId} 绑定的 API 已不存在，请重新选择。`,
         section: 'agent',
         blocking: true,
       });
@@ -48,7 +55,8 @@ export function checkJourneyReadiness(
     if (plotMode === 'off' && id.startsWith('plot_')) continue;
     if (resolution.status !== 'resolved') continue;
     const endpoint = resolution.endpoint;
-    const blocking = DEFAULT_AGENT_PIPELINE.requiredAgents?.includes(id) ?? false;
+    const blocking =
+      id === 'direct_main' || (DEFAULT_AGENT_PIPELINE.requiredAgents?.includes(id) ?? false);
     let problem = '';
     try {
       const url = new URL(endpoint.baseUrl);
@@ -64,7 +72,7 @@ export function checkJourneyReadiness(
     ) {
       problem = '需要选择对话 API';
     }
-    if (problem) issues.push({ message: `${id}：${problem}。`, section: 'api', blocking });
+    if (problem) issues.push({ message: `${profileId}：${problem}。`, section: 'api', blocking });
   }
   return issues;
 }

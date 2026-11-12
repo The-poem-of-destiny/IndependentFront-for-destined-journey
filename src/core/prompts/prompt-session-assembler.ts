@@ -1,3 +1,4 @@
+import { invalidateDirectContext } from './direct-context-session';
 /**
  * prompt-session-assembler.ts — LLM 组装层 Delta 会话深模块（T2）
  *
@@ -40,6 +41,8 @@ import type {
   WorldBook,
 } from '../types/types';
 import type { NativeLlmContent } from '../types/types-api';
+import { buildCharacterContext } from '../character/character-chronicle';
+import { stripCharacterUpdates, stripNativeCharacterUpdates } from '../character/character-updates';
 import {
   buildAgentMessages,
   buildEjsPassContext,
@@ -481,6 +484,9 @@ function computeBaselineSignature(input: PreparePromptSessionInput): string {
 
   return [
     PROMPT_SESSION_PROTOCOL_VERSION,
+    agentId === 'story' && input.ctx.characterDefinitions !== undefined
+      ? 'character-system-v1'
+      : '',
     endpointId ?? '',
     model ?? '',
     endpointSignature ?? '',
@@ -588,9 +594,11 @@ function renderTurnContext(
       extractPlaceholderNames(template).filter((n) => classifyPlaceholder(n) === 'ephemeral'),
     ),
   ];
-  if (ephemeralNames.length === 0) return '';
+  const characters =
+    agentId === 'story' && ctx.characterDefinitions !== undefined ? buildCharacterContext(ctx) : '';
+  if (ephemeralNames.length === 0) return characters;
   const miniTemplate = ephemeralNames.map((n) => `{{${n}}}`).join('\n');
-  return resolveTemplateWithGlobals(
+  const resolved = resolveTemplateWithGlobals(
     miniTemplate,
     agentId,
     ctx,
@@ -599,6 +607,7 @@ function renderTurnContext(
     configs ?? [],
     localParams ?? {},
   );
+  return [resolved, characters].filter(Boolean).join('\n\n');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -891,8 +900,14 @@ export function completePromptSession(
   // 提交：把本轮 user delta + assistant 写进已提交 transcript。
   if (session.pendingUserMessage) session.transcript.push(session.pendingUserMessage);
   session.transcript.push({
-    ...toWireMessage('assistant', result.rawResponse),
-    native: result.nativeAssistant,
+    ...toWireMessage(
+      'assistant',
+      handle.agentId === 'story' ? stripCharacterUpdates(result.rawResponse) : result.rawResponse,
+    ),
+    native:
+      handle.agentId === 'story'
+        ? stripNativeCharacterUpdates(result.nativeAssistant)
+        : result.nativeAssistant,
   });
 
   session.projection = session.pendingProjection ?? session.projection;
@@ -921,6 +936,7 @@ export function completePromptSession(
  */
 export function invalidatePromptSession(handleOrSaveId: PromptSessionHandle | string): void {
   if (typeof handleOrSaveId === 'string') {
+    invalidateDirectContext(handleOrSaveId);
     for (const key of sessions.keys()) {
       const session = sessions.get(key);
       if (session && session.saveId === handleOrSaveId) sessions.delete(key);

@@ -154,6 +154,10 @@ function noteTitle(kind: 'dropped' | 'degraded' | 'sideEffect'): string {
     </div>
 
     <!-- 世界书变化 -->
+    <div v-if="plan?.sections.characters">
+      <h4 class="pk-sec-title">原生角色资料</h4>
+      <p>更新可选角色库。已有存档继续使用建档时保存的人物资料。</p>
+    </div>
     <div v-if="wbRows.length">
       <h4 class="pk-sec-title">世界书（{{ wbRows.length }} 项变化）</h4>
       <ul class="pk-change-list">

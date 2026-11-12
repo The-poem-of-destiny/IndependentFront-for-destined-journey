@@ -9,7 +9,22 @@
 
 > **本文件是指令正文的唯一真源**，工具中立。猫娘人格见文首 `## 人格遵循`（2026-08-13 起上移至此，不再存于 `CLAUDE.md`）；Claude Code 专属内容（skills/workflows 用法）在 `CLAUDE.md`。Claude Code 通过 `CLAUDE.md` 的 `@AGENTS.md` import 本文件；Codex 等其他工具直接读本文件即可。
 
+## 语言约定（2026-11-12 立）
+
+**所有 AI 编码工具在本仓工作时一律使用简体中文**，包括但不限于：
+
+- 会话中对主人的全部回复（Claude Code / Codex 等会话输出）
+- 代码注释与测试描述
+- 提交信息、PR 标题与正文、issue 与评论等 GitHub 消息
+
+英文仅用于代码标识符、API 字段名、命令行输出引用等技术原文本身。
+
 ## 提交前文档检查（必读）
+
+原生角色与编年史的现行契约见 [`docs/reference/character-system.md`](docs/reference/character-system.md)：主叙事同次输出、按存档保存、重要度筛选，入口在现行 `src/core/character/`、`src/core/persistence/` 与角色查看器。
+
+- 直出模式：[`docs/reference/direct-generation.md`](docs/reference/direct-generation.md)。建档显式选择并固定模式，独立主生成复用原有记忆；入口为 `src/core/agents/direct-main.ts` 与 `src/core/combat/direct-combat.ts`。
+- 缓存直出：[`docs/reference/direct-generation-cache.md`](docs/reference/direct-generation-cache.md)。`direct_cached` 配置独立，仍执行 `direct_main`；缓存只在状态接纳后提交，保留既有记忆，Dexie v32 拦截旧 app 误读。
 
 **🔴 主人/用户说「提交」= 默认授权直接合并到 GitHub（squash merge，免 review），不要再问「要不要 review」。需要 review 时主人会明说。**
 
@@ -139,6 +154,7 @@ docs/
 │   └── phase8/                  # Phase 8 Agent 上下文可见性
 │       └── phase8_plan.md       # Agent 可见性模型 + 世界书分区 + 预设系统
 ├── reference/                   # 参考文档
+│   ├── direct-generation-cache.md     # 缓存直出：固定存档模式、Delta 接纳与重建、渠道策略和诊断
 │   ├── effect_script_system.md         # 词条效果 & 脚本系统架构 —— **已退役（2026-10-02，Phase 1b/1c）**：
 │   │                                   #    战斗外 JS 脚本链（`scripting/*` + Layer 2/3/4 接线）整体删除，
 │   │                                   #    仅作设计历史；世界书 EJS（ADR-30）与工坊正则不受影响

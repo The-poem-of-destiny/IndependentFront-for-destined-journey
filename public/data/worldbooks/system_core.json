@@ -23,7 +23,8 @@
             "plot_post_check",
             "plot_outline",
             "combat",
-            "lore_select"
+            "lore_select",
+            "direct_main"
           ]
         }
       }
@@ -47,7 +48,8 @@
             "plot_post_check",
             "plot_outline",
             "combat",
-            "lore_select"
+            "lore_select",
+            "direct_main"
           ]
         }
       }
@@ -71,7 +73,8 @@
             "plot_post_check",
             "plot_outline",
             "combat",
-            "lore_select"
+            "lore_select",
+            "direct_main"
           ]
         }
       }

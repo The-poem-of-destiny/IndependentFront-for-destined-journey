@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { isDirectMode } from '@engine/story/generation-mode';
+
 /**
- * CharacterViewerModal — 非玩家角色的**通栏档案**（左画像 + 右信息面，6 个页签）。
+ * CharacterViewerModal — 非玩家角色的**通栏档案**（左画像 + 右信息面，含编年史）。
  *
  * 从哪来: 场景栏「在场」列表点一位角色。分工是**按角色归属**而不是按内容 ——
  * 右侧状态栏（StatusOverview）是**玩家自己的**面，本弹窗是**别人的**面。
@@ -13,7 +15,7 @@
  * 首字母兜底反而更诚实。所以这一位宁可空着。
  *
  * 名字**严格 `===`**（D2）: 角色从 `game.characters` 里按名字取（M4 起名字唯一），
- * 素材也按同一个名字解析。传进来的名字带一个尾随空格就会静默什么都查不到 ——
+ * 素材优先用角色定义的显式关联，缺席时按同一个名字解析。传进来的名字带一个尾随空格就会静默什么都查不到 ——
  * 那是上游要修的缺陷，本层不做归一化。
  *
  * 判定一律在 `character-viewer.ts`（纯函数，不 mount 可测），本文件只负责呈现。
@@ -43,6 +45,8 @@ import {
 } from './character-viewer';
 // 装备/技能/背包详情与玩家背包面板**共用**同一份渲染（数据结构等价，避免显示分叉）
 import ItemDetailBody from './ItemDetailBody.vue';
+import CharacterChronicleTab from './CharacterChronicleTab.vue';
+import { characterAssetRows } from '@engine/character/character-definitions';
 
 /** 见文件头那条铁律 —— 这一位**没有**第三档兜底 */
 const VIEWER_PORTRAIT_CHAIN: readonly AssetType[] = ['立绘bg', '立绘'];
@@ -65,13 +69,17 @@ const open = computed(() => props.name !== null);
  * （血量打完架还是满的，那种缺陷没人会怀疑到弹窗上）。
  */
 const char = computed<CharacterState | null>(
-  () => (game.characters ?? []).find((c) => c.name === props.name) ?? null,
+  () =>
+    ((isDirectMode(game.generationMode) ? game.displayCharacters : game.characters) ?? []).find(
+      (c) => c.name === props.name,
+    ) ?? null,
 );
 
 // ═══ 页签 ═══
-type ViewerTab = 'profile' | 'status' | 'equipment' | 'skills' | 'bag' | 'album';
+type ViewerTab = 'profile' | 'chronicle' | 'status' | 'equipment' | 'skills' | 'bag' | 'album';
 const TABS: { key: ViewerTab; label: string }[] = [
   { key: 'profile', label: '档案' },
+  { key: 'chronicle', label: '编年史' },
   { key: 'status', label: '状态' },
   { key: 'equipment', label: '装备' },
   { key: 'skills', label: '技能' },
@@ -116,6 +124,13 @@ const {
 } = useAssetImage(
   () => props.name,
   () => VIEWER_PORTRAIT_CHAIN,
+  {
+    assetId: () => {
+      const rows = characterAssetRows(char.value?.definition, assetStore.assets ?? []);
+      return VIEWER_PORTRAIT_CHAIN.flatMap((type) => rows.filter((row) => row.type === type))[0]
+        ?.id;
+    },
+  },
 );
 
 const subtitle = computed(() => (char.value ? buildSubtitleSegments(char.value) : []));
@@ -181,7 +196,17 @@ function stacksText(fx: StatusEffect): string {
 
 // ═══ 相册 ═══
 const albumGroups = computed(() =>
-  props.name ? buildAlbumGroups(assetStore.assets ?? [], props.name) : [],
+  props.name
+    ? buildAlbumGroups(
+        [
+          ...(assetStore.assets ?? []).filter((a) => a.name === props.name),
+          ...characterAssetRows(char.value?.definition, assetStore.assets ?? [])
+            .filter((a) => a.name !== props.name)
+            .map((a) => ({ ...a, name: props.name! })),
+        ],
+        props.name,
+      )
+    : [],
 );
 const albumCount = computed(() =>
   albumGroups.value.reduce((sum, group) => sum + group.tiles.length, 0),
@@ -361,6 +386,11 @@ function toggleTile(tile: AlbumTile) {
           </template>
 
           <!-- ─────── 状态 ─────── -->
+          <CharacterChronicleTab
+            v-else-if="activeTab === 'chronicle'"
+            :key="char.id"
+            :character="char"
+          />
           <template v-else-if="activeTab === 'status'">
             <section class="vw-sec">
               <h3 class="vw-sec-title">资源</h3>

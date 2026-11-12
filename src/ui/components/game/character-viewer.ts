@@ -126,6 +126,8 @@ export interface ProfileField {
  */
 export function buildProfileFields(char: CharacterState): ProfileField[] {
   const raw: ProfileField[] = [
+    { label: '当前目标', text: textLoose(char.goals) },
+    { label: '别名', text: joinLoose(char.aliases) },
     { label: '性格', text: textLoose(char.personality) },
     { label: '喜爱', text: textLoose(char.customFields?.likes) },
     { label: '外貌', text: textLoose(char.appearance) },

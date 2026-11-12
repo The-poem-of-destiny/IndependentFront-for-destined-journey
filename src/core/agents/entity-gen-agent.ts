@@ -49,6 +49,9 @@ import { parseEntityGenOutput } from './entity-gen-parse';
 
 /** 角色生成请求（原 CharGenRequest） */
 export interface EntityGenRequest {
+  narrativeCharacter?: import('../types/types-character').CharacterNarrativeUpdate;
+  characterDefinition?: import('../types/types-character').CharacterDefinition;
+  introducedBy?: string;
   saveId: string;
   /** 新流程：request_dispatcher 输出的 entity_gen_request marker */
   marker?: EntityGenRequestMarker;
@@ -203,6 +206,7 @@ async function runCharacterGen(
     ...(playerLocation ? { location: playerLocation } : {}),
     present: true,
   });
+  bindGeneratedCharacter(character, request);
 
   const patches: StatePatch[] = [
     {
@@ -219,6 +223,36 @@ async function runCharacterGen(
   const narrativeSummary = `新角色「${charData.name}」已生成: ${charData.race} ${charData.occupation.join('/')}, T${charData.tier} Lv.${charData.level}, ${charData.background.slice(0, 100)}`;
 
   return { character, patches, narrativeSummary, itemOutput: output };
+}
+
+/** Bind save-local narrative identity without issuing a generation request. */
+export function bindGeneratedCharacter(
+  character: CharacterState,
+  request: Pick<EntityGenRequest, 'narrativeCharacter' | 'characterDefinition' | 'introducedBy'>,
+): void {
+  const established = request.narrativeCharacter;
+  if (established) {
+    character.name = established.name;
+    Object.assign(character, structuredClone(established.profile_changes));
+  }
+  if (request.introducedBy) character.introducedBy = request.introducedBy;
+  if (request.characterDefinition) {
+    character.name = request.characterDefinition.name;
+    character.definition = structuredClone(request.characterDefinition);
+    Object.assign(
+      character,
+      structuredClone(request.characterDefinition.profile),
+      established?.profile_changes ?? {},
+    );
+  } else if (established) {
+    character.definition = {
+      id: `generated:${character.id}`,
+      name: character.name,
+      profile: structuredClone(established.profile_changes),
+      assets: [],
+      past: [],
+    };
+  }
 }
 
 /** 角色请求描述：指定信息行 + 主线投影 + bodyText */
@@ -242,7 +276,27 @@ function buildCharacterLocalParams(
 
   const injection = request.plotThreadInjection ?? '';
   const bodyText = marker.bodyText ?? marker.rawContent ?? '';
-  const requestContent = [attrLines, injection, bodyText].filter(Boolean).join('\n');
+  const fixedCharacter =
+    request.narrativeCharacter || request.characterDefinition
+      ? `以下是已经确定的人物资料，请沿用真名、身份和过去，只补全机械数据，不重新编造身世：\n${JSON.stringify(
+          {
+            name: request.characterDefinition?.name ?? request.narrativeCharacter?.name,
+            profile: {
+              ...request.characterDefinition?.profile,
+              ...request.narrativeCharacter?.profile_changes,
+            },
+            lore: request.characterDefinition?.lore,
+            past: [
+              ...(request.characterDefinition?.past ?? []),
+              ...(request.narrativeCharacter?.chronicle.filter((e) => e.time.kind === 'past') ??
+                []),
+            ],
+          },
+        )}`
+      : '';
+  const requestContent = [attrLines, injection, bodyText, fixedCharacter]
+    .filter(Boolean)
+    .join('\n');
 
   return {
     ENTITY_REQUEST: requestContent,

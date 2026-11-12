@@ -452,6 +452,7 @@ export const CONTENT_REGISTRY_SOURCES: ReadonlyArray<{
   { face: 'mapPack', url: '/data/content/map-pack.json' },
   { face: 'randomEvents', url: '/data/content/random-events.json' },
   { face: 'remoteAssets', url: '/data/content/remote-assets.json' },
+  { face: 'characters', url: '/data/content/characters.json' },
   { face: 'markers', url: '/data/defaults/map-marker-presets.json' },
 ];
 
@@ -567,6 +568,7 @@ function packRegistryFaces(
   if (pack.randomEvents !== undefined) out.randomEvents = pack.randomEvents;
   // 远程素材分节是**裸数组**（没有 `.data` / `{ dialects }` 那层壳），故整节走
   if (pack.remoteAssets !== undefined) out.remoteAssets = pack.remoteAssets;
+  if (pack.characters !== undefined) out.characters = pack.characters;
   return out;
 }
 
@@ -1366,6 +1368,7 @@ export const useContentStore = defineStore('content', () => {
       imageDialects: resolveSection(packFaces.imageDialects, reg.imageDialects),
       mapPack: resolveSection(packFaces.mapPack, reg.mapPack),
       randomEvents: resolveSection(packFaces.randomEvents, reg.randomEvents),
+      characters: resolveSection(packFaces.characters, reg.characters),
       remoteAssets: resolveSection(packFaces.remoteAssets, reg.remoteAssets),
     });
 

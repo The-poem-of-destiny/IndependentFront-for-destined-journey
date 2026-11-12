@@ -99,6 +99,46 @@ function makeDeps(output: string, stateManager?: EntityGenDeps['stateManager']):
 
 // ========== parseEntityGenOutput ==========
 
+it('entity_gen preserves narrator identity and past while filling mechanics', async () => {
+  const chat = vi.fn(
+    makeClient(
+      '<entity_result><character><name>另一个名字</name><race>人类</race><level>4</level><background>不一致的过去</background></character></entity_result>',
+    ).chatWithTools,
+  );
+  const result = await runEntityGenChain(
+    {
+      saveId: 's1',
+      marker: makeMarker({ attributes: { entityType: 'character', characterName: '向导' } }),
+      context: makeContext(),
+      endpoint: makeEndpoint(),
+      introducedBy: 'turn1',
+      narrativeCharacter: {
+        name: '向导',
+        profile_changes: { background: '来自河谷', goals: '寻找旧友' },
+        chronicle: [
+          {
+            title: '离乡',
+            summary: '离开河谷。',
+            importance: 8,
+            time: { kind: 'past', label: '数年前' },
+          },
+        ],
+      },
+    },
+    { clientFactory: () => ({ chatWithTools: chat }) },
+  );
+  expect(chat).toHaveBeenCalledTimes(1);
+  expect(JSON.stringify(chat.mock.calls[0])).toContain('数年前');
+  expect(result.character).toMatchObject({
+    name: '向导',
+    background: '来自河谷',
+    goals: '寻找旧友',
+    level: 4,
+    introducedBy: 'turn1',
+  });
+  expect(result.character?.definition?.name).toBe('向导');
+});
+
 describe('parseEntityGenOutput', () => {
   it('解析 <entity_result> 角色块（内嵌技能/装备/道具/登神）', () => {
     const raw = `<entity_result>

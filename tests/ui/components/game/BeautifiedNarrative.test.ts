@@ -249,3 +249,17 @@ describe('BeautifiedNarrative', () => {
     expect(wrapper.find('.dialogue-card').text()).toContain('欢迎');
   });
 });
+
+it('renders direct action panels safely without changing the default Agent renderer', () => {
+  const text =
+    '挥剑。<action_info>| 掷骰 | 12 |\n| 结果 | <script>bad()</script> |</action_info>敌人后退。';
+  const wrapper = mountNarrative(text, { actionPanels: true });
+  expect(wrapper.find('.action-panel').text()).toContain('掷骰');
+  expect(wrapper.find('.action-panel').text()).toContain('12');
+  expect(wrapper.find('script').exists()).toBe(false);
+  expect(wrapper.text()).toContain('敌人后退');
+  wrapper.unmount();
+  const legacy = mountNarrative(text);
+  expect(legacy.find('.action-panel').exists()).toBe(false);
+  legacy.unmount();
+});

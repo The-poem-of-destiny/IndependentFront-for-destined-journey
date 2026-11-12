@@ -1,3 +1,6 @@
+import { isDirectMode } from '@engine/story/generation-mode';
+import { resolveGenerationMode } from '@engine/story/generation-mode';
+import { projectDirectCombatCharacters, readDirectCombat } from '@engine/combat/direct-combat';
 import { defineStore } from 'pinia';
 import { ref, computed, onScopeDispose } from 'vue';
 import {
@@ -153,10 +156,19 @@ export const useGameStore = defineStore('game', () => {
 
   // === 角色 ===
   const characters = ref<CharacterState[]>([]);
-  const player = computed(
-    () => characters.value.find((c: CharacterState) => c.type === 'player') || null,
+  const generationMode = computed(() => resolveGenerationMode(activeSave.value));
+  const directCombat = computed(() =>
+    isDirectMode(generationMode.value) ? readDirectCombat(saveProfile.value) : null,
   );
-  const npcs = computed(() => characters.value.filter((c: CharacterState) => c.type === 'npc'));
+  const displayCharacters = computed(() =>
+    projectDirectCombatCharacters(characters.value, directCombat.value),
+  );
+  const player = computed(
+    () => displayCharacters.value.find((c: CharacterState) => c.type === 'player') || null,
+  );
+  const npcs = computed(() =>
+    displayCharacters.value.filter((c: CharacterState) => c.type === 'npc'),
+  );
 
   // === 对话 ===
   const messages = ref<ChatMessage[]>([]);
@@ -215,9 +227,15 @@ export const useGameStore = defineStore('game', () => {
   /** 结算「继续」喂给 GamePage 的下一回合玩家输入（消费后清空） */
   const combatContinue = ref<string | null>(null);
 
-  const isInCombat = computed(
+  const isAgentCombat = computed(
     () =>
       combatReady.value !== null || combatSettlement.value !== null || combatState.value !== null,
+  );
+
+  const isInCombat = computed(
+    () =>
+      isAgentCombat.value ||
+      Boolean(directCombat.value && directCombat.value.state.meta.phase !== 'ended'),
   );
 
   /** 等待玩家输入的单位名（`meta.pendingPlayerUnit` 指向存活单位才有值） */
@@ -1373,7 +1391,7 @@ export const useGameStore = defineStore('game', () => {
     const saveId = activeSaveId.value;
     if (!saveId) return { status: 'rejected', error: '无活跃存档' };
     if (isGenerating.value) return { status: 'rejected', error: '生成进行中，无法恢复' };
-    if (isInCombat.value) return { status: 'rejected', error: '战斗进行中，无法恢复' };
+    if (isAgentCombat.value) return { status: 'rejected', error: '战斗进行中，无法恢复' };
 
     isGenerating.value = true;
     let authorityRestored = false;
@@ -1502,7 +1520,7 @@ export const useGameStore = defineStore('game', () => {
   async function rollbackOneTurn(): Promise<TimelineRestoreResult> {
     if (!activeSaveId.value) return { status: 'rejected', error: '无活跃存档' };
     if (isGenerating.value) return { status: 'rejected', error: '生成进行中，无法回退' };
-    if (isInCombat.value) return { status: 'rejected', error: '战斗进行中，无法回退' };
+    if (isAgentCombat.value) return { status: 'rejected', error: '战斗进行中，无法回退' };
 
     // 当前回合 = 最新一条 user 消息（删除前先捕获其输入）
     const userMsgs = messages.value.filter((m) => m.role === 'user');
@@ -1633,7 +1651,7 @@ export const useGameStore = defineStore('game', () => {
    */
   async function runAutosave(): Promise<void> {
     if (!activeSaveId.value) return;
-    if (isGenerating.value || isInCombat.value) return;
+    if (isGenerating.value || isAgentCombat.value) return;
     if (!autosaveImpl) return;
     try {
       await autosaveImpl();
@@ -1720,6 +1738,10 @@ export const useGameStore = defineStore('game', () => {
     activePlotEvents,
     plotOutline,
     isInCombat,
+    isAgentCombat,
+    generationMode,
+    directCombat,
+    displayCharacters,
     combatState,
     combatReady,
     combatSettlement,

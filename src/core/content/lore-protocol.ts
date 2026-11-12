@@ -5,6 +5,7 @@ import { validLoreReadWhen, validLoreDefinitions } from './lore-protocol-conditi
 import { isWorldBookUid, uidPartition } from './worldbook-uid';
 /** 合并后的真实 agent 名册（必须与 public/data/defaults/agent-config.json 的 agents 键一致）。 */
 const AGENTS = [
+  'direct_main',
   'story',
   'lore_select',
   'memory_recall',

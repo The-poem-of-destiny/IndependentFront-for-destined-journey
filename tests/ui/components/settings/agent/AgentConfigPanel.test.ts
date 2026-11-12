@@ -18,7 +18,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { reactive } from 'vue';
+import { reactive, ref } from 'vue';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 
@@ -41,6 +41,14 @@ const mockStore = {
 };
 vi.mock('../../../../../src/ui/stores/settings-store', () => ({
   useSettingsStore: () => mockStore,
+}));
+
+const mockPresets = ref<any[]>([]);
+const upsertPreset = vi.fn(async (preset: any) => {
+  mockPresets.value.push(preset);
+});
+vi.mock('../../../../../src/ui/composables/usePresets', () => ({
+  usePresets: () => ({ presets: mockPresets, upsertPreset }),
 }));
 
 import AgentConfigPanel from '../../../../../src/ui/components/settings/agent/AgentConfigPanel.vue';
@@ -66,6 +74,7 @@ beforeEach(() => {
   setActivePinia(createPinia());
   resetSettings();
   mockStore.projectAgentDefaults = null;
+  mockPresets.value = [];
 });
 
 /** shallow：三张卡各自的内部实现不在本测试的射程内，只看接线 */
@@ -113,6 +122,27 @@ describe('AgentConfigPanel —— 草稿载入（immediate watch 看门人）', 
 });
 
 describe('AgentConfigPanel —— 分叉与动作栏', () => {
+  it.each([
+    ['direct_main', 'directPresetId'],
+    ['direct_cached', 'directCachedPresetId'],
+  ])('restores the %s project preset without pinning a user selection', async (agentId, field) => {
+    const preset = { id: `${agentId}-project`, name: 'Project preset', settings: {} };
+    mockStore.projectAgentDefaults = { agents: { [agentId]: { presetId: preset.id, preset } } };
+    mockSettings[field] = 'user-preset';
+    const w = mountPanel(agentId);
+    await w.findAllComponents(AppButton)[0].vm.$emit('click');
+    expect(mockSettings[field]).toBeUndefined();
+    expect(upsertPreset).toHaveBeenCalledWith(preset);
+    expect(mockPresets.value).toContainEqual(preset);
+  });
+
+  it('🔴 缓存直出「恢复成最新」同时清掉渠道策略（回到默认 prefix）', async () => {
+    mockSettings.directCacheProvider = 'anthropic';
+    const w = mountPanel('direct_cached');
+    await w.findAllComponents(AppButton)[0].vm.$emit('click');
+    expect(mockSettings.directCacheProvider ?? 'prefix').toBe('prefix');
+  });
+
   it('story 走预设面板，不渲染提示词卡', () => {
     const w = mountPanel('story');
     expect(w.findComponent(PresetManager).exists()).toBe(true);

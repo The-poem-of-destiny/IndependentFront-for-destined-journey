@@ -1,3 +1,4 @@
+import { isDirectMode } from '@engine/story/generation-mode';
 /**
  * 捏人页 Store — 角色创建状态管理
  *
@@ -15,6 +16,7 @@
  */
 
 import { defineStore } from 'pinia';
+import { requireGenerationMode } from '@engine/story/generation-mode';
 import { ref, computed, watch, onScopeDispose } from 'vue';
 import {
   getActivePackPayload,
@@ -115,6 +117,7 @@ const TIER_NAMES = ['普通', '中坚', '精英', '史诗', '传说', '神话', 
 // ===== Store =====
 
 export const useCreateStore = defineStore('create', () => {
+  const generationMode = ref<'' | import('@engine/story/generation-mode').GenerationMode>('');
   // ═══════════════════════════════════════════════════════
   // 步骤控制
   // ═══════════════════════════════════════════════════════
@@ -122,7 +125,11 @@ export const useCreateStore = defineStore('create', () => {
 
   const stepValid = computed<Record<number, boolean>>(() => ({
     0: difficulty.value !== null,
-    1: name.value.trim().length > 0 && race.value !== '' && attributesFullyAllocated.value,
+    1:
+      generationMode.value !== '' &&
+      name.value.trim().length > 0 &&
+      race.value !== '' &&
+      attributesFullyAllocated.value,
     // 命定核心：内置条目**或**工坊系统项目，二者择一即可放行。
     // 只认前者时，选了工坊核心的用户会卡死在这一步（按钮永远不亮，且没有任何提示）。
     2: selectedSystemCoreEntryUid.value !== null || selectedWorkshopCoreProjectId.value !== null,
@@ -130,7 +137,7 @@ export const useCreateStore = defineStore('create', () => {
     4: true, // 装备选择
     5: true, // 背景故事
     6: true, // 剧情规划
-    7: attributesFullyAllocated.value, // 确认提交前再次守住预设晚加载等绕过路径
+    7: generationMode.value !== '' && attributesFullyAllocated.value, // 确认提交前再次守住预设晚加载等绕过路径
   }));
 
   function nextStep() {
@@ -418,6 +425,10 @@ export const useCreateStore = defineStore('create', () => {
 
   /** character 世界书条目列表（可启用角色） */
   const characterEntries = ref<WorldBookEntry[]>([]);
+  const characterDefinitions = ref<import('@engine/types/types-character').CharacterDefinition[]>(
+    [],
+  );
+  const enabledCharacterDefinitionIds = ref<Set<string>>(new Set());
 
   /** 选中的命定核心 entry uid */
   const selectedSystemCoreEntryUid = ref<string | null>(null);
@@ -503,12 +514,25 @@ export const useCreateStore = defineStore('create', () => {
       const wb = useWorldBookStore();
       await wb.init();
       const books = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
+      const { ensureContentRegistryLoaded } = await import('./content-store');
+      await ensureContentRegistryLoaded();
+      const { availableCharacterDefinitions } =
+        await import('@engine/character/character-definitions');
+      characterDefinitions.value = availableCharacterDefinitions(books);
+      migrateCharacterSelections();
       systemCoreEntries.value = books
         .filter((b) => b.partition === 'system_core')
         .flatMap((b) => b.entries);
       characterEntries.value = books
         .filter((b) => b.partition === 'character')
-        .flatMap((b) => b.entries);
+        .flatMap((b) =>
+          b.entries.filter(
+            (e) =>
+              !characterDefinitions.value.some(
+                (d) => d.legacyEntry?.bookId === b.id && d.legacyEntry.uid === e.uid,
+              ),
+          ),
+        );
       // P1-5: 工坊项目走自己的项目级列表（未安装的不出现）
       const ws = useWorkshopStore();
       await ws.init();
@@ -517,6 +541,7 @@ export const useCreateStore = defineStore('create', () => {
       // fetch 不可用时静默跳过，保持空数组
       systemCoreEntries.value = [];
       characterEntries.value = [];
+      characterDefinitions.value = [];
       workshopOptions.value = [];
     }
   }
@@ -528,6 +553,26 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   /** toggle 勾选角色 */
+  function migrateCharacterSelections() {
+    const legacy = new Set(enabledCharacterEntryUids.value);
+    const native = new Set(enabledCharacterDefinitionIds.value);
+    for (const definition of characterDefinitions.value) {
+      if (definition.legacyEntry && legacy.delete(definition.legacyEntry.uid)) {
+        native.add(definition.id);
+      }
+    }
+    enabledCharacterEntryUids.value = legacy;
+    enabledCharacterDefinitionIds.value = native;
+  }
+
+  function toggleCharacterDefinition(id: string) {
+    const next = new Set(enabledCharacterDefinitionIds.value);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    enabledCharacterDefinitionIds.value = next;
+  }
+
+  /** toggle 勾选旧资料条目 */
   function toggleCharacterEntry(uid: string) {
     const next = new Set(enabledCharacterEntryUids.value);
     if (next.has(uid)) {
@@ -1903,6 +1948,10 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   async function persistJourney(): Promise<string> {
+    if (generationMode.value !== 'agent' && !isDirectMode(generationMode.value)) {
+      currentStep.value = 1;
+    }
+    requireGenerationMode(generationMode.value);
     // 最终持久化边界必须重验；角色预设可以在任一步加载，不能只依赖曾经通过过 Step 1。
     if (!attributesFullyAllocated.value) {
       currentStep.value = 1;
@@ -1928,11 +1977,17 @@ export const useCreateStore = defineStore('create', () => {
       updatedAt: Date.now(),
       activeSnapshotId: null,
       metadata: {
+        generationMode: generationMode.value,
         characterName: charState.name,
         userName: '玩家',
         gameStartTime: new Date().toISOString(),
         totalTurns: 0,
         enabledWorldBookEntries: buildEnabledWorldBookEntries(), // 🆕
+        characterDefinitions: JSON.parse(
+          JSON.stringify(
+            characterDefinitions.value.filter((d) => enabledCharacterDefinitionIds.value.has(d.id)),
+          ),
+        ),
         openingPrompt: openingPrompt, // 🆕
         openingPromptConsumed: false, // 🆕
         plotSettings: JSON.parse(JSON.stringify(plotSettings.value)), // §5.2: 本档剧情配置随档落库（含雷点）
@@ -2080,6 +2135,7 @@ export const useCreateStore = defineStore('create', () => {
       plotSettings: plotSettings.value,
       systemCoreEntryUid: selectedSystemCoreEntryUid.value,
       enabledCharacterEntryUids: [...enabledCharacterEntryUids.value],
+      enabledCharacterDefinitionIds: [...enabledCharacterDefinitionIds.value],
       personality: personality.value,
       physics: physics.value,
       backstory: backstory.value,
@@ -2120,6 +2176,8 @@ export const useCreateStore = defineStore('create', () => {
     if (data.enabledCharacterEntryUids) {
       enabledCharacterEntryUids.value = new Set(data.enabledCharacterEntryUids);
     }
+    enabledCharacterDefinitionIds.value = new Set(data.enabledCharacterDefinitionIds ?? []);
+    migrateCharacterSelections();
     personality.value = data.personality || '';
     physics.value = data.physics || '';
     backstory.value = data.backstory || '';
@@ -2178,6 +2236,7 @@ export const useCreateStore = defineStore('create', () => {
     gender.value = '男';
     customGender.value = '';
     age.value = 18;
+    generationMode.value = '';
     race.value = '人类';
     customRace.value = '';
     identity.value = '非贵族平民';
@@ -2214,13 +2273,16 @@ export const useCreateStore = defineStore('create', () => {
     selectedSystemCoreEntryUid.value = null;
     selectedWorkshopCoreProjectId.value = null;
     enabledCharacterEntryUids.value = new Set();
+    enabledCharacterDefinitionIds.value = new Set();
     enabledWorkshopProjectIds.value = new Set();
     systemCoreEntries.value = [];
     characterEntries.value = [];
+    characterDefinitions.value = [];
     workshopOptions.value = [];
   }
 
   return {
+    generationMode,
     // 内容加载门（D16/D24）
     contentStatus,
     initContent,
@@ -2301,6 +2363,9 @@ export const useCreateStore = defineStore('create', () => {
     // Phase 10h: 世界书驱动
     systemCoreEntries,
     characterEntries,
+    characterDefinitions,
+    enabledCharacterDefinitionIds,
+    toggleCharacterDefinition,
     selectedSystemCoreEntryUid,
     selectedWorkshopCoreProjectId,
     selectedWorkshopCore,

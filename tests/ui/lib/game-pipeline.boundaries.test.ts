@@ -20,21 +20,27 @@ import { storyTurnSource } from '@engine/memory/story-memory-source';
 import { withSaveWriteLock } from '@engine/state/state-write-queue';
 import { resetPromptSessionsForTest } from '@engine/prompts/prompt-session-assembler';
 import type { ChatMessage, SaveSlot } from '@engine/types/types';
+import { createDefaultCharacterState } from '@engine/types/types';
 
 const { advance, toast } = vi.hoisted(() => ({ advance: vi.fn(async () => {}), toast: vi.fn() }));
-vi.mock('@engine/state/state-manager', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@engine/state/state-manager')>()),
-  createStateManager: () => ({
-    advanceTurn: advance,
-    syncRandomEventsForTurn: async () => {},
-    commitChatState: async () => ({
-      success: true,
-      patchesApplied: 0,
-      eventsGenerated: [],
-      errors: [],
-    }),
-  }),
-}));
+vi.mock('@engine/state/state-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@engine/state/state-manager')>();
+  return {
+    ...actual,
+    createStateManager: (id: string) => {
+      const manager = actual.createStateManager(id);
+      manager.advanceTurn = advance;
+      manager.syncRandomEventsForTurn = async () => {};
+      manager.commitChatState = async () => ({
+        success: true,
+        patchesApplied: 0,
+        eventsGenerated: [],
+        errors: [],
+      });
+      return manager;
+    },
+  };
+});
 vi.mock('../../../src/ui/stores/ui-store', () => ({ useUIStore: () => ({ toast }) }));
 
 const saveId = 'pipeline-boundaries';
@@ -125,7 +131,7 @@ async function fixture(messages: ChatMessage[] = []) {
 function result(agentId: string, rawResponse: string) {
   return { agentId, output: rawResponse, rawResponse, tokensUsed: 0, cacheHit: false, duration: 0 };
 }
-function network(story = 'The story was produced.') {
+function network(story = 'The story was produced.', characterUpdates = '') {
   return vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (
     this: any,
     _request,
@@ -134,7 +140,7 @@ function network(story = 'The story was produced.') {
     if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
     const raw =
       this.agentId === 'story'
-        ? `<maintext>${story}</maintext>`
+        ? `<maintext>${story}</maintext>${characterUpdates}`
         : this.agentId === 'memory_summary'
           ? JSON.stringify({ segments: [{ content: story }] })
           : '{}';
@@ -166,6 +172,49 @@ afterEach(async () => {
 });
 
 describe('A05/A06: actual pipeline, orchestrator and message persistence', () => {
+  it('commits narrator character updates after acceptance, never after a stopped response', async () => {
+    const { game, pipeline } = await fixture();
+    const db = getDatabase();
+    await db.characters.put(createDefaultCharacterState({ id: 'guide', saveId, name: '向导' }));
+    const updates = `<character_updates>${JSON.stringify({
+      characters: [
+        {
+          name: '向导',
+          profile_changes: { goals: '前往渡口' },
+          chronicle: [
+            {
+              title: '同行之约',
+              summary: '答应一同前往渡口。',
+              time: { kind: 'this_turn' },
+              importance: 8,
+            },
+          ],
+        },
+      ],
+    })}</character_updates>`;
+    const chat = network('向导同意出发。', updates);
+    const stop = vi.spyOn(game, 'setPendingOptions').mockImplementation(() => {
+      if (game.messages.some((m) => m.role === 'assistant')) pipeline.abort();
+    });
+    expect(await pipeline.run('邀请向导同行')).toBe(false);
+    expect(await db.characterChronicle.count()).toBe(0);
+    expect((await db.characters.get('guide'))?.goals).toBeUndefined();
+    stop.mockRestore();
+    expect(await pipeline.run('再次邀请向导同行')).toBe(true);
+    const rows = await db.characterChronicle.toArray();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ characterId: 'guide', importance: 8, origin: 'experience' });
+    expect((await db.characters.get('guide'))?.goals).toBe('前往渡口');
+    expect(
+      game.messages
+        .filter((m) => m.role === 'assistant')
+        .every((m) => !m.content.includes('character_updates')),
+    ).toBe(true);
+    const callsBefore = chat.mock.calls.length;
+    await pipeline.run('询问向导的打算');
+    expect((pipeline as any).currentContext.characterChronicle).toHaveLength(1);
+    expect(chat.mock.calls.length - callsBefore).toBe(4);
+  });
   it('stopping immediately after Story append rejects completion and advance; attempts never enter backfill', async () => {
     const { game, pipeline } = await fixture();
     network();
@@ -463,3 +512,320 @@ describe('R01: durable original-turn archive draft, not next-turn evidence', () 
     );
   });
 });
+
+describe.each(['direct', 'direct_cached'] as const)(
+  '%s pipeline preserves memory and isolates non-memory generation',
+  (mode) => {
+    async function directFixture() {
+      const { game, pipeline } = await fixture();
+      game.activeSave!.metadata.generationMode = mode;
+      await saveSaveSlot(JSON.parse(JSON.stringify(game.activeSave!)));
+      const { createDirectPreset, createCachedDirectPreset } =
+        await import('@engine/prompts/direct-prompt');
+      const preset = mode === 'direct_cached' ? createCachedDirectPreset() : createDirectPreset();
+      const p = pipeline as any;
+      p.loadPresets = async () => ({ presets: [preset], agentDefaults: {} });
+      // Exercise the production direct configuration path rather than the Agent fixture shim.
+      delete p.buildAgentConfigs;
+      await getDatabase().characters.put(
+        createDefaultCharacterState({
+          id: 'player',
+          saveId,
+          name: '旅人',
+          type: 'player',
+          hp: 80,
+          maxHp: 100,
+        }),
+      );
+      return { game, pipeline };
+    }
+    function directNetwork(valid = true) {
+      return vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (this: any) {
+        const raw =
+          this.agentId === 'direct_main'
+            ? `<maintext>旅人继续前行。</maintext><character_updates>{"characters":[]}</character_updates>${valid ? '<direct_updates>{"version":1,"world":{},"time":{"delta_time":0},"entities":[],"state":{"characters":{"delta":[{"name":"旅人","path":"hp","amount":-10}]}},"effects":[],"plot":{},"combat":null,"diceUsed":[]}</direct_updates>' : ''}`
+            : this.agentId === 'memory_summary'
+              ? JSON.stringify({ segments: [{ content: '旅人继续前行。' }] })
+              : '{}';
+        return result(this.agentId, raw);
+      });
+    }
+    it('uses the selected mode model and memory window independently', async () => {
+      const { pipeline } = await directFixture();
+      const p = pipeline as any;
+      const cachedEndpoint = { ...endpoint, id: 'cached-ep', defaultModel: 'cached-model' };
+      p.buildEndpoints = () => [endpoint, cachedEndpoint];
+      Object.assign(p.settings.settings, {
+        directInitialized: true,
+        directCachedInitialized: true,
+        agents: {
+          direct_main: { model: 'ep', historyLayers: 2 },
+          direct_cached: { model: 'cached-ep', historyLayers: 4 },
+        },
+      });
+      const chat = directNetwork();
+      expect(await pipeline.run('前进')).toBe(true);
+      const index = chat.mock.contexts.findIndex((client: any) => client.agentId === 'direct_main');
+      expect(chat.mock.calls[index][0].model).toBe(
+        mode === 'direct_cached' ? 'cached-model' : 'test',
+      );
+      const context = await p.prepareStoryContextV2({});
+      expect(context.windowTurns).toBe(mode === 'direct_cached' ? 4 : 2);
+    });
+    it('continues from accepted history and current resources on the next turn', async () => {
+      const { pipeline } = await directFixture();
+      const chat = directNetwork();
+      expect(await pipeline.run('前进')).toBe(true);
+      expect(await pipeline.run('继续前进')).toBe(true);
+      const mainCalls = chat.mock.calls.filter(
+        (_, index) => (chat.mock.contexts[index] as any).agentId === 'direct_main',
+      );
+      expect(mainCalls).toHaveLength(2);
+      const first = mainCalls[0][0].messages;
+      const second = mainCalls[1][0].messages;
+      if (mode === 'direct_cached') expect(second.slice(0, first.length)).toEqual(first);
+      expect(JSON.stringify(second)).toContain('旅人继续前行');
+      expect((await getDatabase().characters.get('player'))?.hp).toBe(60);
+    });
+    it('accepts one main call, keeps Story v2 summaries, blocks replay and never enters side chains', async () => {
+      const { game, pipeline } = await directFixture();
+      const chat = directNetwork();
+      expect(await pipeline.run('前进')).toBe(true);
+      const agents = chat.mock.contexts.map((client: any) => client.agentId);
+      expect(agents.filter((id) => !id.startsWith('memory_'))).toEqual(['direct_main']);
+      expect(agents).toContain('memory_summary');
+      expect((await getDatabase().characters.get('player'))?.hp).toBe(70);
+      expect(await getStoryTurnSummaries(saveId)).toHaveLength(1);
+      const user = game.messages.find((m) => m.role === 'user')!;
+      expect(user.storyTurnStatus).toBe('accepted');
+      const calls = chat.mock.calls.length;
+      expect(await pipeline.run('前进', undefined, false, user.id)).toBe(false);
+      expect(chat).toHaveBeenCalledTimes(calls);
+      expect((await getDatabase().characters.get('player'))?.hp).toBe(70);
+    });
+    it('does not silently repair malformed main output or change game state', async () => {
+      const { game, pipeline } = await directFixture();
+      const chat = directNetwork(false);
+      expect(await pipeline.run('前进')).toBe(false);
+      expect(chat.mock.contexts.map((client: any) => client.agentId)).toEqual(['direct_main']);
+      expect((await getDatabase().characters.get('player'))?.hp).toBe(80);
+      expect(game.messages.some((m) => m.storyTurnStatus === 'accepted')).toBe(false);
+    });
+    it('keeps accepted state accepted if auxiliary snapshot creation fails', async () => {
+      const { game, pipeline } = await directFixture();
+      directNetwork();
+      advance.mockRejectedValueOnce(new Error('snapshot unavailable'));
+      expect(await pipeline.run('前进')).toBe(true);
+      expect(
+        game.messages
+          .filter((m) => m.role !== 'system')
+          .every((m) => m.storyTurnStatus === 'accepted'),
+      ).toBe(true);
+      expect(toast).toHaveBeenCalledWith(expect.stringContaining('本楼已接纳'), 'warning', 6000);
+    });
+
+    it('finishes turn bookkeeping when the run is cancelled right after the core commit', async () => {
+      const { game, pipeline } = await directFixture();
+      const db = getDatabase();
+      await db.characters.put(createDefaultCharacterState({ id: 'guide', saveId, name: '向导' }));
+      const { getProfile } = await import('@engine/state/save-profile');
+      const before = { ...(await getProfile(saveId)).gameTime };
+      const updates = JSON.stringify({
+        characters: [
+          {
+            name: '向导',
+            profile_changes: { goals: '前往渡口' },
+            chronicle: [
+              {
+                title: '同行之约',
+                summary: '答应一同前往渡口。',
+                time: { kind: 'this_turn' },
+                importance: 8,
+              },
+            ],
+          },
+        ],
+      });
+      const chat = vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (
+        this: any,
+      ) {
+        return result(
+          this.agentId,
+          this.agentId === 'direct_main'
+            ? `<maintext>向导同意出发。</maintext><character_updates>${updates}</character_updates><direct_updates>{"version":1,"world":{},"time":{"delta_time":90},"entities":[],"state":{},"effects":[],"plot":{},"combat":null,"diceUsed":[]}</direct_updates>`
+            : JSON.stringify({ segments: [{ content: '向导同意出发。' }] }),
+        );
+      });
+      // 核心提交刚返回（setPendingOptions 紧随其后）就离开游戏页：dispose 绕过提交中的停止保护
+      vi.spyOn(game, 'setPendingOptions').mockImplementation(() => {
+        if (game.messages.some((m) => m.storyTurnStatus === 'accepted')) pipeline.dispose();
+      });
+      expect(await pipeline.run('邀请向导同行')).toBe(true);
+      expect(advance).toHaveBeenCalledOnce();
+      const after = (await db.saveProfiles.get(saveId))!.gameTime;
+      expect(after).not.toEqual(before);
+      expect(after.hour * 60 + after.minute - (before.hour * 60 + before.minute)).toBe(90);
+      expect((await db.characters.get('guide'))?.goals).toBe('前往渡口');
+      expect(
+        (await db.characterChronicle.toArray()).filter((e) => e.characterId === 'guide'),
+      ).toHaveLength(1);
+      // 收尾完成后取消才生效：可选的记忆摘要不再发起
+      expect(chat.mock.contexts.map((client: any) => client.agentId)).toEqual(['direct_main']);
+    });
+
+    it('keeps legacy recall and summary persistence outside the single main request', async () => {
+      const { game, pipeline } = await directFixture();
+      delete game.activeSave!.metadata.storyContextV2;
+      await saveSaveSlot(JSON.parse(JSON.stringify(game.activeSave!)));
+      (pipeline as any).settings.settings.storyContextV2Enabled = false;
+      await game.refreshFromDb(saveId);
+      const summary = '旅人把铁交给铁匠，双方约定日落后回来取剑。'.repeat(15);
+      const chat = directNetwork();
+      const mainReply = chat.getMockImplementation()!;
+      chat.mockImplementation(async function (this: any, ...args) {
+        if (this.agentId === 'memory_recall') return result(this.agentId, '铁匠已经收到材料');
+        if (this.agentId === 'memory_summary')
+          return result(
+            this.agentId,
+            JSON.stringify({
+              content: summary,
+              hiddenLine: '铁匠准备按约交付',
+              keywords: ['铁匠'],
+              importance: 5,
+            }),
+          );
+        expect(JSON.stringify(args[0].messages)).toContain('铁匠已经收到材料');
+        return mainReply.apply(this, args);
+      });
+      expect(await pipeline.run('继续制作')).toBe(true);
+      expect(chat.mock.contexts.map((client: any) => client.agentId)).toEqual([
+        'memory_recall',
+        'direct_main',
+        'memory_summary',
+      ]);
+      expect(await getDatabase().memories.where('saveId').equals(saveId).toArray()).toMatchObject([
+        { content: summary },
+      ]);
+      expect(await getStoryTurnSummaries(saveId)).toHaveLength(0);
+    });
+
+    it('carries crafted inventory and active combat into later turns, then settles combat once', async () => {
+      const { game, pipeline } = await directFixture();
+      await getDatabase().characters.update('player', { inventory: [{ name: '铁', quantity: 2 }] });
+      await game.refreshFromDb(saveId);
+      let mainCalls = 0;
+      const contexts: any[] = [];
+      const chat = vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (
+        this: any,
+        request,
+      ) {
+        if (this.agentId !== 'direct_main')
+          return result(
+            this.agentId,
+            JSON.stringify({ segments: [{ content: '旅人打造短剑，随后应对袭击。' }] }),
+          );
+        const wire = request.messages.map((m) => String(m.content)).join('\n');
+        if (mode === 'direct') {
+          contexts.push(
+            JSON.parse(wire.match(/<direct_state>\s*([\s\S]*?)\s*<\/direct_state>/)![1]),
+          );
+        } else {
+          const state: Record<string, unknown> = {};
+          for (const match of wire.matchAll(
+            /<direct_context>\s*([\s\S]*?)\s*<\/direct_context>/g,
+          )) {
+            const change = JSON.parse(match[1]);
+            Object.assign(state, change.set);
+            for (const key of change.remove) delete state[key];
+          }
+          contexts.push(state);
+        }
+        mainCalls++;
+        const craft = mainCalls === 1;
+        const data = {
+          version: 1,
+          world: {},
+          time: { delta_time: 0 },
+          effects: [],
+          plot: {},
+          diceUsed: [],
+          entities: craft
+            ? [
+                {
+                  kind: 'loadout',
+                  owner: '旅人',
+                  output: {
+                    skills: [],
+                    equipment: [],
+                    inventory: [
+                      {
+                        name: '短剑',
+                        description: '刚打造的短剑',
+                        quantity: 1,
+                        type: '装备',
+                        protocolText: '锋利的剑刃',
+                      },
+                    ],
+                    statuses: [],
+                  },
+                },
+              ]
+            : [],
+          state: craft
+            ? { items: { consume: [{ owner: '旅人', target: '铁', quantity: 2 }] } }
+            : {},
+          combat: craft
+            ? null
+            : {
+                meta: {
+                  round: mainCalls - 1,
+                  combatType: '标准',
+                  environment: '街道',
+                  phase: mainCalls === 2 ? 'active' : 'ended',
+                  ...(mainCalls === 3 ? { outcome: 'ally_win' } : {}),
+                },
+                units: [
+                  {
+                    name: '旅人',
+                    origin: 'save',
+                    side: 'ally',
+                    hp: mainCalls === 2 ? 60 : 40,
+                    mp: game.player!.mp,
+                    sp: game.player!.sp,
+                    statusEffects: [],
+                  },
+                ],
+              },
+        };
+        return result(
+          this.agentId,
+          `<maintext>旅人打造短剑，随后应对袭击。</maintext><character_updates>{"characters":[]}</character_updates><direct_updates>${JSON.stringify(data)}</direct_updates>`,
+        );
+      });
+      expect(await pipeline.run('制作短剑')).toBe(true);
+      expect(game.player!.inventory).toMatchObject([{ name: '短剑', quantity: 1 }]);
+      expect(await pipeline.run('迎击敌人')).toBe(true);
+      expect(game.isInCombat).toBe(true);
+      expect(game.isAgentCombat).toBe(false);
+      expect(game.player!.hp).toBe(60);
+      expect((await getDatabase().characters.get('player'))!.hp).toBe(80);
+      expect(await pipeline.run('结束战斗')).toBe(true);
+      expect(
+        mode === 'direct_cached'
+          ? contexts[1]['character/旅人/inventory']
+          : contexts[1].characters[0].inventory,
+      ).toMatchObject([{ name: '短剑' }]);
+      expect(
+        mode === 'direct_cached' ? contexts[2].resources[0].hp : contexts[2].characters[0].hp,
+      ).toBe(60);
+      expect(game.isInCombat).toBe(false);
+      expect((await getDatabase().characters.get('player'))!.hp).toBe(40);
+      expect(await getStoryTurnSummaries(saveId)).toHaveLength(3);
+      expect(
+        chat.mock.contexts
+          .filter((client: any) => !client.agentId.startsWith('memory_'))
+          .map((client: any) => client.agentId),
+      ).toEqual(['direct_main', 'direct_main', 'direct_main']);
+    });
+  },
+);

@@ -69,6 +69,7 @@ export async function selectStoryLore(
   books: readonly WorldBook[],
   ctx: AgentContext,
   selector?: LoreSelector,
+  options: { agentId?: 'story' | 'direct_main'; mode?: 'model' | 'local' } = {},
 ): Promise<StoryLoreSelection> {
   const readContext = createLoreReadContext(ctx);
   const location = readContext.location;
@@ -76,7 +77,12 @@ export async function selectStoryLore(
   const present = ctx.characters.filter((c) => c.present === true).map((c) => c.name);
   const recent = getLoreRecentMessages(ctx);
   const text = readContext.recentText;
-  const validity = resolveLoreDependenciesForAgent('story', books, text, readContext);
+  const validity = resolveLoreDependenciesForAgent(
+    options.agentId ?? 'story',
+    books,
+    text,
+    readContext,
+  );
   const allowed = validity.entries;
   const fixed: RoutedLoreEntry[] = [],
     region: RoutedLoreEntry[] = [],
@@ -134,7 +140,7 @@ export async function selectStoryLore(
     regionSnapshotKey: '',
   };
   let selected = candidates;
-  if (catalog.length || supplement.length) {
+  if (options.mode !== 'local' && (catalog.length || supplement.length)) {
     try {
       if (!selector) throw new Error('lore_select endpoint unavailable');
       const rows = [...refs].map(([ref, r]) => ({

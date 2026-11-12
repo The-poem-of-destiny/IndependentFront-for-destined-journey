@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isDirectSettingsProfile, resolveDirectPresetId } from '../../../lib/direct-settings';
+
 /**
  * 预设管理（正文 Agent 专用，Q-25 第 9 步）。
  *
@@ -40,6 +42,14 @@ import {
   isZonePlaceholderEntry,
 } from '../../../lib/preset-entries';
 import { preprocessPresetForPreview, findTailAssistantEntry } from '@engine/prompts/preset-loader';
+import {
+  createDirectPreset,
+  DIRECT_PRESET_ID,
+  DIRECT_CACHED_PRESET_ID,
+  createCachedDirectPreset,
+  DIRECT_PROTOCOL,
+  DIRECT_TEMPLATE,
+} from '@engine/prompts/direct-prompt';
 import type { ChatPreset } from '@engine/types/types';
 
 const props = defineProps<{ agentId: string }>();
@@ -47,6 +57,17 @@ const props = defineProps<{ agentId: string }>();
 const cfg = useSettingsStore();
 const s = cfg.settings;
 const ui = useUIStore();
+const selectedPresetId = computed({
+  get: () =>
+    isDirectSettingsProfile(props.agentId)
+      ? resolveDirectPresetId(s, props.agentId, cfg.projectAgentDefaults?.agents ?? {})
+      : s.activePresetId,
+  set: (id: string) => {
+    if (props.agentId === 'direct_cached') s.directCachedPresetId = id;
+    else if (props.agentId === 'direct_main') s.directPresetId = id;
+    else s.activePresetId = id;
+  },
+});
 const { presets, loadPresets: loadPresetsFromDexie, upsertPreset, removePreset } = usePresets();
 
 const showStoryPreview = ref(false);
@@ -61,6 +82,7 @@ const resolvedPresetTemplate = computed(() => {
 
 // Get the context template for Story agent (from injected entries or default block)
 function getStoryContextTemplate(): string {
+  if (isDirectSettingsProfile(props.agentId)) return DIRECT_PROTOCOL + '\n' + DIRECT_TEMPLATE;
   const preset = activePreset.value;
   if (!preset?.settings?.prompts) return '';
   const dynamicEntry = preset.settings.prompts.find(
@@ -90,7 +112,9 @@ function getStoryContextTemplate(): string {
  *    它是对 store 的一行派生（与 `hasApi` 同类），穿 prop 只是为了少一次 store 读取，
  *    却换来一条真正的组件间契约。
  */
-const activePreset = computed(() => presets.value.find((p) => p.id === s.activePresetId) || null);
+const activePreset = computed(
+  () => presets.value.find((p) => p.id === selectedPresetId.value) || null,
+);
 
 /** 🔴 条目列表按**生效顺序**（injection_order）渲染 —— 引擎 `assemblePresetContent` 就是这么排的。
  *  模板里的 `idx` 一律是这个顺序下的下标，增删改序的 helper 也按同一口径取条目。 */
@@ -152,7 +176,7 @@ function openEntryEditor(presetId: string, idx: number) {
 
 /** 新增条目（追加到生效顺序末尾）—— 复用编辑弹窗，落库走 append。 */
 function openNewEntry() {
-  const p = presetById(s.activePresetId);
+  const p = presetById(selectedPresetId.value);
   if (!p) return;
   editingEntryPresetId.value = p.id;
   editingEntryIdx.value = -1;
@@ -177,14 +201,14 @@ async function saveEntry() {
     ? appendPresetEntry(p, makeCustomPresetEntry(patch))
     : updatePresetEntry(p, editingEntryIdx.value, patch);
   await persistPreset(next);
-  s.activePresetId = next.id;
+  selectedPresetId.value = next.id;
   showEntryEditor.value = false;
   ui.toast(isNewEntry.value ? '条目已新增' : '条目已保存', 'success');
 }
 
 /** 上/下移一位（delta = ±1）；越界（顶部上移 / 底部下移）helper 返回原引用，不落库。 */
 async function moveEntry(idx: number, delta: number) {
-  const p = presetById(s.activePresetId);
+  const p = presetById(selectedPresetId.value);
   if (!p) return;
   const next = movePresetEntry(p, idx, delta);
   if (next === p) return;
@@ -194,7 +218,7 @@ async function moveEntry(idx: number, delta: number) {
 
 /** 复制一条到它的正下方 — 副本进数组后立刻落库。 */
 async function duplicateEntry(idx: number) {
-  const p = presetById(s.activePresetId);
+  const p = presetById(selectedPresetId.value);
   if (!p) return;
   const next = duplicatePresetEntry(p, idx);
   if (next === p) return;
@@ -209,7 +233,7 @@ const pendingDeleteIdx = ref(-1);
 const pendingDeleteName = ref('');
 
 function openDeleteEntry(idx: number) {
-  const p = presetById(s.activePresetId);
+  const p = presetById(selectedPresetId.value);
   if (!p) return;
   const entry = canonicalPresetEntries(p)[idx];
   if (!entry) return;
@@ -219,7 +243,7 @@ function openDeleteEntry(idx: number) {
 }
 
 async function confirmDeleteEntry() {
-  const p = presetById(s.activePresetId);
+  const p = presetById(selectedPresetId.value);
   if (!p) return;
   await persistPreset(removePresetEntry(p, pendingDeleteIdx.value));
   expandedEntries.value.clear();
@@ -287,11 +311,18 @@ async function onPrefillFieldChange(e: Event) {
 async function loadPresets() {
   try {
     await loadPresetsFromDexie();
+    if (
+      props.agentId === 'direct_cached' &&
+      !presets.value.some((p) => p.id === DIRECT_CACHED_PRESET_ID)
+    )
+      await upsertPreset(createCachedDirectPreset());
+    if (!presets.value.some((p) => p.id === DIRECT_PRESET_ID))
+      await upsertPreset(createDirectPreset());
     // 确保自动选中：如果还没选中且有可用预设，优先项目默认
-    if (!s.activePresetId && presets.value.length > 0) {
-      const pd = cfg.projectAgentDefaults?.agents?.story;
+    if (!selectedPresetId.value && presets.value.length > 0) {
+      const pd = cfg.projectAgentDefaults?.agents?.[props.agentId];
       if (pd?.presetId && presets.value.find((p) => p.id === pd.presetId)) {
-        s.activePresetId = pd.presetId;
+        selectedPresetId.value = pd.presetId;
       }
     }
   } catch {
@@ -299,7 +330,7 @@ async function loadPresets() {
   }
 }
 function selectPreset(id: string) {
-  s.activePresetId = id;
+  selectedPresetId.value = id;
   const p = presets.value.find((x) => x.id === id);
   if (p) {
     // 🔴 这里原本还有两行：`agentPromptDraft.value = ...` 与 `s.agentPromptEdited = true`。
@@ -328,7 +359,7 @@ function openNewPreset() {
  *    读取时都兜一层；写回时仍按旧行为写 `*_openai` 那套。
  */
 function openEditPreset() {
-  const p = presetById(s.activePresetId);
+  const p = presetById(selectedPresetId.value);
   if (!p) return;
   const st = (p.settings ?? {}) as Record<string, any>;
   editingPresetId.value = p.id;
@@ -400,7 +431,7 @@ async function savePreset() {
 async function deletePreset(id: string) {
   try {
     await removePreset(id);
-    if (s.activePresetId === id) s.activePresetId = '';
+    if (selectedPresetId.value === id) selectedPresetId.value = '';
     ui.toast('预设已删除', 'info');
   } catch {
     // 删除失败（DB 写不进去）：列表下次加载还会看到这条，用户可以重试
@@ -457,7 +488,11 @@ void reactive;
 
 <template>
   <!-- 预设系统（正文 Agent 专用）— 仿酒馆 ST 左侧面板布局 -->
-  <AppCard v-if="agentId === 'story'" padding="md" class="detail-card">
+  <AppCard
+    v-if="agentId === 'story' || isDirectSettingsProfile(agentId)"
+    padding="md"
+    class="detail-card"
+  >
     <h4>预设管理（酒馆 ST 兼容）</h4>
     <p class="form-hint">
       仿 SillyTavern AI Response Configuration 面板布局。支持导入 SillyTavern 预设 JSON。
@@ -467,7 +502,7 @@ void reactive;
     <div class="preset-selector-bar">
       <select
         class="form-input preset-select"
-        :value="s.activePresetId"
+        :value="selectedPresetId"
         @change="selectPreset(($event.target as HTMLSelectElement).value)"
       >
         <option value="">— 选择预设 —</option>
@@ -499,7 +534,7 @@ void reactive;
           <AppButton variant="ghost" size="sm" @click="exportPresetDynamic(activePreset!)"
             >导出</AppButton
           >
-          <AppButton variant="ghost" size="sm" @click="deletePreset(s.activePresetId)"
+          <AppButton variant="ghost" size="sm" @click="deletePreset(selectedPresetId)"
             >删除</AppButton
           >
         </div>
@@ -520,7 +555,7 @@ void reactive;
             'subprompt-zone': isZonePlaceholderEntry(sp),
           }"
         >
-          <div class="subprompt-header" @click="toggleEntry(s.activePresetId, Number(idx))">
+          <div class="subprompt-header" @click="toggleEntry(selectedPresetId, Number(idx))">
             <div class="subprompt-info">
               <!-- 五区占位条目恒启用、不可停用：用锁标代替开关 -->
               <span
@@ -533,7 +568,7 @@ void reactive;
               <label
                 v-else
                 class="subprompt-toggle"
-                @click.stop.prevent="togglePresetEntryEnabled(s.activePresetId, Number(idx))"
+                @click.stop.prevent="togglePresetEntryEnabled(selectedPresetId, Number(idx))"
               >
                 <input type="checkbox" :checked="sp.enabled !== false" class="toggle-input" />
                 <span class="toggle-slider toggle-sm"></span>
@@ -565,7 +600,7 @@ void reactive;
                 <button
                   class="subprompt-edit-btn"
                   title="编辑此条目"
-                  @click.stop="openEntryEditor(s.activePresetId, Number(idx))"
+                  @click.stop="openEntryEditor(selectedPresetId, Number(idx))"
                 >
                   ✎
                 </button>
@@ -590,13 +625,13 @@ void reactive;
               <span
                 class="subprompt-chevron"
                 :class="{
-                  'chevron-open': expandedEntries.has(`${s.activePresetId}:${idx}`),
+                  'chevron-open': expandedEntries.has(`${selectedPresetId}:${idx}`),
                 }"
                 >▸</span
               >
             </div>
           </div>
-          <div v-if="expandedEntries.has(`${s.activePresetId}:${idx}`)" class="subprompt-content">
+          <div v-if="expandedEntries.has(`${selectedPresetId}:${idx}`)" class="subprompt-content">
             <template v-if="isZonePlaceholderEntry(sp)">
               开启「Story 上下文与记忆新模式」时，引擎在这个位置填入该分区组装好的消息；
               关闭时这一条为空，不产生任何内容。五个分区的先后顺序固定为 1→5，
@@ -615,7 +650,7 @@ void reactive;
 
       <!-- 🆕 预填充（DeepSeek beta 前缀续写）：仅当**末尾启用条目是 assistant** 时出现。
            打开后那条条目不再并进 system，而是移到消息末尾作为 assistant 前缀（prefix 续写）。 -->
-      <div v-if="tailAssistantEntry" class="prefill-block">
+      <div v-if="!isDirectSettingsProfile(agentId) && tailAssistantEntry" class="prefill-block">
         <div class="prefill-head">
           <div class="prefill-heading">
             <span class="prefill-title">预填充（前缀续写）</span>
@@ -679,7 +714,7 @@ void reactive;
         以下为运行时
         <code>动态注入</code> 条目或默认上下文块的内容。占位符最终会被替换。
       </p>
-      <TemplatePreview :template="getStoryContextTemplate()" agent-id="story" />
+      <TemplatePreview :template="getStoryContextTemplate()" :agent-id="agentId" />
     </div>
 
     <div
@@ -697,7 +732,7 @@ void reactive;
         以下为预设完整内容：<code>setvar/getvar</code> 已展开为实际值，<code>random/char/user</code>
         及系统占位符保留为彩色 badge。
       </p>
-      <TemplatePreview :template="resolvedPresetTemplate" agent-id="story" />
+      <TemplatePreview :template="resolvedPresetTemplate" :agent-id="agentId" />
     </div>
 
     <AppModal

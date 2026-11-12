@@ -1,3 +1,4 @@
+import { isDirectMode } from '../story/generation-mode';
 import {
   getDatabase,
   saveCharacter,
@@ -9,6 +10,12 @@ import { getProfile, addFP, updateProfile } from '../state/save-profile';
 import type { CharacterState, SaveSlot, PlotOutline, PlotEvent, WorldBook } from '../types/types';
 import { filterBooksByEnabledEntries } from '../content/worldbook-loader';
 import { createFixedLoreSnapshot } from '../content/lore-definitions';
+import {
+  attachCharacterDefinition,
+  matchCharacterDefinition,
+  withoutCharacterLore,
+} from '../character/character-definitions';
+import { authorChronicle } from '../character/character-chronicle';
 
 /** Publish a complete new journey, or leave no records behind on failure. */
 export async function createJourney(input: {
@@ -24,7 +31,14 @@ export async function createJourney(input: {
   const db = getDatabase();
   await db.transaction(
     'rw',
-    [db.characters, db.saves, db.saveProfiles, db.plotOutlines, db.plotEvents],
+    [
+      db.characters,
+      db.saves,
+      db.saveProfiles,
+      db.plotOutlines,
+      db.plotEvents,
+      db.characterChronicle,
+    ],
     async () => {
       const profile = await getProfile(input.save.id, input.era);
       const save: SaveSlot = input.save.metadata.storyContextV2
@@ -34,10 +48,19 @@ export async function createJourney(input: {
               ...input.save.metadata,
               fixedLore: createFixedLoreSnapshot(
                 filterBooksByEnabledEntries(
-                  input.worldBooks ?? [],
+                  withoutCharacterLore(
+                    input.worldBooks ?? [],
+                    input.save.metadata.characterDefinitions ?? [],
+                  ),
                   input.save.metadata.enabledWorldBookEntries ?? [],
                 ),
-                { characterName: input.character.name, userName: input.save.metadata.userName },
+                {
+                  characterName: input.character.name,
+                  userName: input.save.metadata.userName,
+                  agentId: isDirectMode(input.save.metadata.generationMode)
+                    ? 'direct_main'
+                    : 'story',
+                },
                 {
                   location: input.character.location,
                   gameTime: profile.gameTime,
@@ -47,7 +70,16 @@ export async function createJourney(input: {
             },
           }
         : input.save;
-      await saveCharacter(input.character);
+      const definition = matchCharacterDefinition(
+        input.save.metadata.characterDefinitions ?? [],
+        input.character.name,
+      );
+      const character = definition
+        ? attachCharacterDefinition(input.character, definition)
+        : input.character;
+      await saveCharacter(character);
+      const past = authorChronicle(character);
+      if (past.length) await db.characterChronicle.bulkPut(past);
       await saveSaveSlot(save);
       profile.experienceMode = input.experienceMode;
       if (input.destinyPoints > 0) {

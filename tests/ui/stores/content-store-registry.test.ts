@@ -123,6 +123,7 @@ describe('ensureContentRegistryLoaded —— URL 约定', () => {
       'bloodlines',
       'branding',
       'catalog',
+      'characters',
       'imageDialects',
       'locations',
       'mapPack',
@@ -222,6 +223,7 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
       'bloodlines',
       'branding',
       'catalog',
+      'characters',
       'imageDialects',
       'locations',
       'mapPack',
@@ -267,6 +269,18 @@ function isRegistryUrl(u: string): boolean {
 }
 
 describe('ensureContentRegistryLoaded —— pack 优先（D20 三态）', () => {
+  it('native characters load from the content directory and an installed pack can explicitly clear them', async () => {
+    const characters = [
+      { id: 'guide', name: '向导', profile: { background: '来自河谷' }, assets: [], past: [] },
+    ];
+    installFetchMock({ '/data/content/characters.json': characters });
+    await ensureContentRegistryLoaded();
+    expect(getContentRegistry().characters).toEqual(characters);
+    const pack = { ...makeRegistryPack(), characters: [] };
+    const outcome = await useContentStore().installPack(pack);
+    expect(outcome.status).toBe('installed');
+    expect(getContentRegistry().characters).toEqual([]);
+  });
   /** 把 pack 写进 Dexie：加载器内部 hydrate 会把它捞进模块缓存（与 boot 真实路径同形） */
   async function installPackRecord(pack: ContentPack): Promise<void> {
     await getDatabase().contentPacks.put({

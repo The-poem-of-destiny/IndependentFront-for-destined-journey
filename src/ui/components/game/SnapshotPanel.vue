@@ -70,7 +70,7 @@ function timeText(ts: number): string {
 }
 
 async function restore(snap: SnapshotMeta) {
-  if (game.isInCombat) {
+  if (game.isAgentCombat) {
     errorMsg.value = '战斗进行中，无法恢复';
     return;
   }
@@ -117,7 +117,7 @@ watch(
       <span class="panel-title">快照列表 ({{ snapshots.length }})</span>
       <span class="panel-hint">最近 5 回合每轮留档，更早的按阶梯稀疏保留</span>
     </div>
-    <div v-if="game.isInCombat" class="combat-warn">⚠ 战斗进行中，恢复已禁用</div>
+    <div v-if="game.isAgentCombat" class="combat-warn">⚠ 战斗进行中，恢复已禁用</div>
 
     <div v-if="snapshots.length > 0" class="snapshot-list">
       <div v-for="snap in snapshots" :key="snap.id" class="snap-row">
@@ -143,7 +143,7 @@ watch(
             <AppButton
               variant="secondary"
               size="sm"
-              :disabled="game.isInCombat || currentSnapshotId === snap.id || restoring"
+              :disabled="game.isAgentCombat || currentSnapshotId === snap.id || restoring"
               @click="restore(snap)"
             >
               恢复到此

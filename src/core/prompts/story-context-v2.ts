@@ -63,10 +63,9 @@ import {
   type StoryTurnSummarySegment,
 } from '../memory/memory-context';
 import { renderLongTermOverview } from '../memory/story-archive';
+import { CHARACTER_UPDATE_PROTOCOL, buildCharacterContext } from '../character/character-chronicle';
 
 import { selectStoryLore, type LoreSelector } from '../content/lore-selection';
-
-const STORY_AGENT_ID = 'story';
 
 /** 普通条目里归分区负责的旧占位符：新模式下渲染为空（见文件头）。 */
 const ZONE_OWNED_PLACEHOLDERS = [
@@ -96,6 +95,9 @@ const ZONE5_BLOCKS: ReadonlyArray<{ tag: string | null; placeholder: string }> =
 type StoryContextV2Message = { role: 'system' | 'user' | 'assistant'; content: string };
 
 export interface StoryContextV2Input {
+  cacheLayout?: boolean;
+  agentId?: 'story' | 'direct_main';
+  loreSelectionMode?: 'model' | 'local';
   /** 本轮上下文：`history` 为本轮之前的正式消息，`userInput` 为本轮玩家输入 */
   ctx: AgentContext;
   configs: AgentConfig[];
@@ -115,6 +117,7 @@ export interface StoryContextV2Input {
 }
 
 export interface StoryContextV2Result {
+  cacheFrame?: import('./direct-context-session').DirectContextFrame;
   messages: StoryContextV2Message[];
   diagnostics: StoryContextV2Diagnostics;
 }
@@ -157,19 +160,21 @@ export async function buildStoryContextV2Messages(
   input: StoryContextV2Input,
 ): Promise<StoryContextV2Result> {
   const { configs, worldBooks, presets } = input;
+  const agentId = input.agentId ?? 'story';
   const ctx: AgentContext = { ...input.ctx, loreReadContext: createLoreReadContext(input.ctx) };
   const config =
-    configs.find((c) => c.agentId === STORY_AGENT_ID) ??
+    configs.find((c) => c.agentId === agentId) ??
     ({
-      agentId: STORY_AGENT_ID,
+      agentId: agentId,
     } as AgentConfig);
 
   // ① 同一份 EJS pass：世界书正文本轮只预渲染一次，第 1 区与第 5 区从 memo 挑段
-  const ejsPass = buildEjsPassContext(STORY_AGENT_ID, ctx, config, configs, worldBooks);
+  const ejsPass = buildEjsPassContext(agentId, ctx, config, configs, worldBooks);
   const selection = await selectStoryLore(
     worldBooks,
     { ...ctx, agentConfig: config },
     input.selectLore,
+    { agentId, mode: input.loreSelectionMode },
   );
   for (const r of [...selection.zones[1], ...selection.zones[3], ...selection.zones[5]]) {
     if (
@@ -180,7 +185,7 @@ export async function buildStoryContextV2Messages(
   }
   // Blank lore memo while estimating non-lore blocks: no entry body may execute before pruning.
   ejsPass.loreRender = {
-    agentId: STORY_AGENT_ID,
+    agentId: agentId,
     staticText: '',
     dynamicText: '',
     fallbackEntries: [],
@@ -194,13 +199,13 @@ export async function buildStoryContextV2Messages(
 
   const blankZoneOwned = Object.fromEntries(ZONE_OWNED_PLACEHOLDERS.map((name) => [name, '']));
   const renderEntryText = (text: string) =>
-    resolveTemplateWithGlobals(text, STORY_AGENT_ID, tplCtx, config, worldBooks, configs, {
+    resolveTemplateWithGlobals(text, agentId, tplCtx, config, worldBooks, configs, {
       ...blankZoneOwned,
     }).trim();
   const renderPlaceholder = (name: string) =>
     resolveTemplateWithGlobals(
       `{{${name}}}`,
-      STORY_AGENT_ID,
+      agentId,
       tplCtx,
       config,
       worldBooks,
@@ -224,10 +229,7 @@ export async function buildStoryContextV2Messages(
   const fallbackPrefix = hasNormalText
     ? ''
     : config.systemPrompt ||
-      [
-        getAgentTemplate(STORY_AGENT_ID)?.fixedSystem,
-        getAgentTemplate(STORY_AGENT_ID)?.fixedExamples,
-      ]
+      [getAgentTemplate(agentId)?.fixedSystem, getAgentTemplate(agentId)?.fixedExamples]
         .filter(Boolean)
         .join('\n\n');
 
@@ -321,15 +323,15 @@ export async function buildStoryContextV2Messages(
     ejsPass,
   );
   ejsPass.loreRender = {
-    agentId: STORY_AGENT_ID,
+    agentId: agentId,
     staticText: rendered.staticText,
     dynamicText: rendered.dynamicText,
     fallbackEntries: rendered.fallbackEntries,
   };
   if (rendered.fallbackEntries.length)
-    reportEjsFallback(STORY_AGENT_ID, ctx, rendered.fallbackEntries, worldBooks);
+    reportEjsFallback(agentId, ctx, rendered.fallbackEntries, worldBooks);
   const definitions = buildLoreDefinitions(
-    STORY_AGENT_ID,
+    agentId,
     worldBooks,
     ctx.loreReadContext!.recentText,
     ctx.loreReadContext,
@@ -363,6 +365,7 @@ export async function buildStoryContextV2Messages(
     3: zoneLore(3) ? wrapBlock('区域资料', zoneLore(3)) : '',
     4: renderZone4History(zone4.history),
     5: [
+      ctx.characterDefinitions !== undefined ? buildCharacterContext(ctx) : '',
       zoneLore(5) ? wrapBlock('本轮世界资料', zoneLore(5)) : '',
       ...zone5Blocks.map(({ text }) => text),
     ]
@@ -372,6 +375,22 @@ export async function buildStoryContextV2Messages(
 
   // ④ 遍历分段：第 4 区原文之前进前导 system，之后进末尾 user
   const leadingSystem: string[] = fallbackPrefix ? [fallbackPrefix] : [];
+  const cachePrefix: string[] = [...leadingSystem];
+  const cacheHistory: string[] = [];
+  const cacheSections: Record<string, unknown> = {
+    regionLore: zoneText[3],
+    turnLore: zoneLore(5),
+    characterContext: ctx.characterDefinitions !== undefined ? buildCharacterContext(ctx) : '',
+    ...Object.fromEntries(
+      zone5Blocks
+        .filter(
+          (block) =>
+            !['AGENT.MEMORY_RECALL', 'CHARACTER_STATE', 'GAME_TIME'].includes(block.placeholder),
+        )
+        .map((block) => [block.placeholder, block.text]),
+    ),
+  };
+  const authoredTurn: string[] = [];
   const tailParts: string[] = [];
   let passedZone4 = false;
   for (const segment of segmentPresetByStoryZones(entries)) {
@@ -383,10 +402,33 @@ export async function buildStoryContextV2Messages(
           .join('\n'),
       );
       if (text) (passedZone4 ? tailParts : leadingSystem).push(text);
+      if (input.cacheLayout) {
+        const fixedEntries = segment.entries.filter((e) => e.directCachePlacement !== 'turn');
+        const fixed =
+          fixedEntries.length === segment.entries.length
+            ? text
+            : renderEntryText(fixedEntries.map((e) => processedByEntry.get(e) ?? '').join('\n'));
+        if (fixed) (passedZone4 ? authoredTurn : cachePrefix).push(fixed);
+        for (const entry of segment.entries.filter((e) => e.directCachePlacement === 'turn')) {
+          const current = resolveTemplateWithGlobals(
+            processedByEntry.get(entry) ?? '',
+            agentId,
+            tplCtx,
+            config,
+            worldBooks,
+            configs,
+            {},
+          ).trim();
+          if (current) authoredTurn.push(current);
+        }
+      }
       continue;
     }
     if (segment.zone === 4) {
-      if (zoneText[4]) leadingSystem.push(zoneText[4]);
+      if (zoneText[4]) {
+        leadingSystem.push(zoneText[4]);
+        cacheHistory.push(zoneText[4]);
+      }
       passedZone4 = true;
       continue;
     }
@@ -395,6 +437,8 @@ export async function buildStoryContextV2Messages(
         ? wrapBlock('本轮参考资料', zoneText[5])
         : zoneText[segment.zone];
     if (text) (passedZone4 ? tailParts : leadingSystem).push(text);
+    if (text && !passedZone4 && segment.zone !== 3 && segment.zone !== 5)
+      (segment.zone === 2 ? cacheHistory : cachePrefix).push(text);
   }
 
   // ⑤ 第 4 区原文：严格 user / assistant 交替（回合内多条正文合并为一条）
@@ -406,6 +450,8 @@ export async function buildStoryContextV2Messages(
     conversation.push({ role: 'assistant', content: turnStoryText(turn) });
   }
 
+  if (ctx.characterDefinitions !== undefined) leadingSystem.push(CHARACTER_UPDATE_PROTOCOL);
+  if (ctx.characterDefinitions !== undefined) cachePrefix.push(CHARACTER_UPDATE_PROTOCOL);
   const tail = config.tailPrompt?.trim();
   const finalUser = [
     ...tailParts,
@@ -461,6 +507,21 @@ export async function buildStoryContextV2Messages(
 
   return {
     messages,
+    ...(input.cacheLayout
+      ? {
+          cacheFrame: {
+            prefix: cachePrefix.map((content) => ({ role: 'system' as const, content })),
+            history: [
+              ...cacheHistory.map((content) => ({ role: 'system' as const, content })),
+              ...conversation,
+            ],
+            sections: {
+              ...cacheSections,
+              ...(authoredTurn.length ? { authoredTurn: authoredTurn.join('\n\n') } : {}),
+            },
+          },
+        }
+      : {}),
     diagnostics: {
       ...(input.outputReservedTokens !== undefined
         ? { outputReservedTokens: input.outputReservedTokens }

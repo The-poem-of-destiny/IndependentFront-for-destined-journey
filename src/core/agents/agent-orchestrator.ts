@@ -1,3 +1,6 @@
+import type { ChatMessage } from '../types/types';
+import { acceptDirectContext, invalidateDirectContext } from '../prompts/direct-context-session';
+import type { DirectCachePolicy } from '../types/types-api';
 /**
  * Agent 编排引擎 — DAG 依赖调度 + 并行/串行混合执行
  *
@@ -32,6 +35,9 @@ import type {
 } from '../types/types';
 import type { SceneImageMarker } from '../types/types-image';
 import { AgentClient, ensureUserMessage } from './agent-client';
+import { generateDirectTurn } from './direct-main';
+import type { DirectTurnDraft } from './direct-output';
+import type { DirectCombatRecord } from '../combat/direct-combat';
 import type { ChatRequest } from './agent-client';
 import { buildAgentMessagesAsync } from '../prompts/agent-templates';
 import { getPreset, getPresetPrefill } from '../prompts/preset-loader';
@@ -370,6 +376,89 @@ export class AgentOrchestrator {
   }
 
   // ========== Run ==========
+
+  /** Direct generation shares memory implementations, never enters the Agent DAG. */
+  private directCache?: Awaited<ReturnType<typeof generateDirectTurn>>['cache'];
+
+  async acceptDirectCache(acceptedMessages: ChatMessage[]): Promise<void> {
+    if (!this.directCache) return;
+    const { ticket, ...result } = this.directCache;
+    this.directCache = undefined;
+    await acceptDirectContext(ticket, { ...result, acceptedMessages });
+  }
+
+  async runDirect(
+    combat: DirectCombatRecord | null,
+    cachePolicy?: DirectCachePolicy,
+  ): Promise<DirectTurnDraft> {
+    this.assertCurrent();
+    this.context.zones ??= buildZoneContext(this.context);
+    this.events.onStageStart?.(0, ['memory_recall']);
+    const recall = await this.executeAgent('memory_recall');
+    this.results.set('memory_recall', recall);
+    if (!recall.error) this.context.agentOutputs.set('memory_recall', recall.output);
+    await this.events.onAgentComplete?.(recall);
+    this.assertCurrent();
+    this.events.onStageComplete?.(0);
+    if (recall.error) throw new Error(recall.error);
+    const config = this.agentConfigs.get('direct_main');
+    const endpoint = config && this.endpoints.get(config.apiEndpointId);
+    if (!config || !endpoint) throw new Error('直出主生成端点未配置');
+    const directConfig = { ...config, toolsEnabled: false, maxRetries: 0, retryOnFail: false };
+    this.events.onStageStart?.(1, ['direct_main']);
+    this.events.onAgentStart?.('direct_main', directConfig);
+    try {
+      const { draft, result, cache } = await generateDirectTurn(
+        {
+          config: directConfig,
+          endpoint,
+          context: this.context,
+          configs: [...this.agentConfigs.values()].map((c) =>
+            c.agentId === 'direct_main' ? directConfig : c,
+          ),
+          worldBooks: this.worldBooks,
+          presets: this.presets,
+          combat,
+          cache: cachePolicy ? { saveId: this.saveId, policy: cachePolicy } : undefined,
+          storyContext: this.storyContext,
+        },
+        new AgentClient({
+          endpoint,
+          agentId: 'direct_main',
+          saveId: this.saveId,
+          timeout: config.timeout || endpoint.timeout,
+          maxRetries: 0,
+        }),
+      );
+      this.assertCurrent();
+      this.directCache = cache;
+      this.results.set('direct_main', result);
+      this.context.agentOutputs.set('story', draft.content);
+      await this.events.onAgentComplete?.(result);
+      this.events.onStageComplete?.(1);
+      return draft;
+    } catch (error) {
+      if (cachePolicy) invalidateDirectContext(this.saveId);
+      this.events.onAgentError?.(
+        'direct_main',
+        error instanceof Error ? error.message : String(error),
+      );
+      throw error;
+    }
+  }
+
+  /** Called only after direct state/message acceptance; summary retries stay unchanged. */
+  async summarizeDirectTurn(context: AgentContext): Promise<void> {
+    this.assertCurrent();
+    this.context = { ...context, agentOutputs: this.context.agentOutputs };
+    this.context.zones = buildZoneContext(this.context);
+    this.events.onStageStart?.(2, ['memory_summary']);
+    const result = await this.executeAgent('memory_summary');
+    this.results.set('memory_summary', result);
+    await this.events.onAgentComplete?.(result);
+    this.events.onStageComplete?.(2);
+    if (result.error) throw new Error(result.error);
+  }
 
   /** 执行完整管线 */
   async run(): Promise<OrchestratorRun> {

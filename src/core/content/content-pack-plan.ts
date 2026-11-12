@@ -194,6 +194,7 @@ export function planPackInstall(
     // planner 再做一遍就是两处口径，而不一致时先出错的那一处永远没人手工验。
     sections.randomEvents = planOpaqueSection(pack.randomEvents);
   }
+  if (pack.characters !== undefined) sections.characters = planOpaqueSection(pack.characters);
 
   // ── agentDefaults / branding 名册/键集（透传，无四态）──
   const agentDefaults: PackInstallPlan['agentDefaults'] | undefined = pack.agentDefaults

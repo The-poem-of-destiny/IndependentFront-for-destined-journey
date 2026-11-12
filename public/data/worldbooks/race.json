@@ -25,7 +25,8 @@
             "request_dispatcher",
             "vars_update",
             "combat",
-            "lore_select"
+            "lore_select",
+            "direct_main"
           ]
         }
       }
@@ -51,7 +52,8 @@
             "request_dispatcher",
             "vars_update",
             "combat",
-            "lore_select"
+            "lore_select",
+            "direct_main"
           ]
         }
       }
@@ -77,7 +79,8 @@
             "request_dispatcher",
             "vars_update",
             "combat",
-            "lore_select"
+            "lore_select",
+            "direct_main"
           ]
         }
       }

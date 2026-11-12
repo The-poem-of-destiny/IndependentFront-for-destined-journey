@@ -61,6 +61,10 @@ vi.mock('@engine/plot/plot-engine', () => ({
 }));
 
 vi.mock('@engine/persistence/database', () => ({
+  getCharacters: vi.fn(async () => []),
+  getDatabase: () => ({
+    characterChronicle: { where: () => ({ equals: () => ({ toArray: async () => [] }) }) },
+  }),
   getLatestPlotOutline: vi.fn(async () => undefined),
   getPlotEvents: vi.fn(async () => []),
   savePlotOutline: vi.fn(async () => {}),
@@ -114,6 +118,8 @@ const {
 
 vi.mock('@engine/state/state-manager', () => ({
   createStateManager: vi.fn(() => ({
+    initializeCharacterDefinitions: vi.fn(async () => {}),
+    commitCharacterUpdates: vi.fn(async () => []),
     commitChatState: commitSpy,
     advanceTurn: advanceTurnSpy,
     createSnapshot: createSnapshotSpy,
@@ -300,6 +306,36 @@ function makePipeline(
 function makeResult(agentId: string, rawResponse: string): AgentResult {
   return { agentId, output: rawResponse, rawResponse, tokensUsed: 0, cacheHit: false, duration: 0 };
 }
+
+describe('direct preset defaults', () => {
+  it.each(['direct', 'direct_cached'])(
+    'uses the %s project preset after settings initialization',
+    (mode) => {
+      const pipeline = makePipeline(
+        {},
+        {
+          directInitialized: true,
+          directCachedInitialized: true,
+          apiPool: [
+            { id: 'ep', model: 'test', baseUrl: 'http://localhost:1234/v1', apiType: 'chat' },
+          ],
+        },
+      );
+      (pipeline as any).generationMode = mode;
+      const configs = (pipeline as any).buildAgentConfigs(
+        {
+          direct_main: { presetId: 'author-direct' },
+          direct_cached: { presetId: 'author-cached' },
+        },
+        undefined,
+        true,
+      ) as AgentConfig[];
+      expect(configs.find((config) => config.agentId === 'direct_main')?.presetId).toBe(
+        mode === 'direct_cached' ? 'author-cached' : 'author-direct',
+      );
+    },
+  );
+});
 
 describe('侧链 Agent 调试调用身份', () => {
   it('同名调用有独立序号，战斗主持人与敌方也按 agentId 分开记录', async () => {

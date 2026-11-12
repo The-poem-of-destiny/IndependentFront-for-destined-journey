@@ -271,13 +271,13 @@ describe('占位内容 · 美化规则', () => {
 });
 
 describe('占位内容 · agent-config', () => {
-  // §6 规格：占位版固定 15 个 agent id（2026-10-02 char_gen + item_gen → entity_gen、C5a 移除
-  // combat_enemy、Phase 3 加 daily_check、10-04 加 prose_rewrite、10-23 加 lore_select；
+  // §6 规格：占位版固定 16 个 agent id（2026-10-02 char_gen + item_gen → entity_gen、C5a 移除
+  // combat_enemy、Phase 3 加 daily_check、10-04 加 prose_rewrite、10-23 加 lore_select、11-09 加 direct_main；
   // 与真实内容侧同名集由私有仓 CI 守）
   // 🔴 逐条点名，不只数数量：合并前后两边各有 14/15 条**不同**的清单，只断言长度会假绿。
-  it('agent id 恰好 15 个，一个不多一个不少', () => {
-    expect(Object.keys(agentConfigRaw.agents)).toHaveLength(15);
-    for (const id of ['entity_gen', 'lore_select', 'daily_check', 'prose_rewrite']) {
+  it('agent id 恰好 16 个，一个不多一个不少', () => {
+    expect(Object.keys(agentConfigRaw.agents)).toHaveLength(16);
+    for (const id of ['entity_gen', 'lore_select', 'daily_check', 'prose_rewrite', 'direct_main']) {
       expect(agentConfigRaw.agents).toHaveProperty(id);
     }
     for (const gone of ['char_gen', 'item_gen', 'combat_enemy']) {
@@ -298,7 +298,7 @@ describe('占位内容 · agent-config', () => {
         );
       }
       // story 的可调面是预设，template 天然为空串（agent-defaults.ts 的约定）
-      if (id !== 'story') {
+      if (id !== 'story' && id !== 'direct_main') {
         expect((agent.template as string).trim().length, `${id}.template`).toBeGreaterThan(0);
       }
     }

@@ -40,6 +40,39 @@ describe('journey readiness', () => {
       ),
     ).toEqual([]);
   });
+  it('names the cached profile when a cached direct save has a stale binding', () => {
+    const issues = checkJourneyReadiness(
+      {
+        apiPool: [endpoint],
+        agents: { direct_main: { model: 'chat' }, direct_cached: { model: 'deleted' } },
+      },
+      {},
+      'off',
+      'direct_cached',
+    );
+    expect(issues).toEqual([
+      expect.objectContaining({
+        blocking: true,
+        section: 'agent',
+        message: expect.stringContaining('direct_cached'),
+      }),
+    ]);
+    expect(issues[0].message).not.toContain('direct_main');
+  });
+  it('names the cached profile when the cached binding has no model', () => {
+    const issues = checkJourneyReadiness(
+      {
+        apiPool: [endpoint, { ...endpoint, id: 'cached', model: '' }],
+        agents: { direct_main: { model: 'chat' }, direct_cached: { model: 'cached' } },
+      },
+      {},
+      'off',
+      'direct_cached',
+    );
+    expect(issues).toEqual([
+      expect.objectContaining({ blocking: true, message: 'direct_cached：尚未选择模型。' }),
+    ]);
+  });
   it('keeps optional helpers nonblocking when their model is empty', () => {
     const issues = checkJourneyReadiness(
       {

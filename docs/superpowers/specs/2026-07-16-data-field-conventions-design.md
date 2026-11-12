@@ -1,5 +1,23 @@
 # 《命定之诗》游戏数据字段规范（数据字典）
 
+## 原生角色与编年史字段补充（2026-10-31）
+
+完整契约见 [原生角色与编年史](../../reference/character-system.md)，类型唯一来源为 `src/core/types/types-character.ts`。
+
+| 实体／字段                                   | 所属与填写者                             | 规则                                                                                                                |
+| -------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `CharacterDefinition`                        | 作者内容；`characters` 分节              | 作者提供稳定 `id/name/profile/assets/past`，可选自然语言 `lore`；素材只存关联，过去保留时间精度                     |
+| `SaveSlot.metadata.characterDefinitions`     | 代码建档冻结                             | 深拷贝所选定义；后续内容更新不覆盖本档                                                                              |
+| `CharacterState.definition/introducedBy`     | 代码；存档私有                           | 初始定义副本、创建回合键；来源重映射随单存档导入，模型不填                                                          |
+| `CharacterState.aliases/goals`               | 作者／主叙事                             | 字符串数组／字符串；当前叙事状态，按角色名字经 StateManager 更新                                                    |
+| `CharacterChronicleEntry`                    | Dexie v31 `characterChronicle`；存档私有 | 代码生成 `id/saveId/characterId/source/order/createdAt`；模型给出 `title/summary/importance/impact/location/people` |
+| `time`                                       | 模型粗略过去／代码本轮游戏时间           | `past + label` 或 `game + GameTime                                                                                  | null`；不拿写入时间冒充发生时间 |
+| `origin/source/sourceText`                   | 代码绑定                                 | 作者／生成过去／游玩经历；绑定定义或完整回合来源与指纹，保留来源片段                                                |
+| `SnapshotPayload.characterChronicle`         | 代码                                     | 与当前角色档案一起快照／恢复；旧快照缺席视为空                                                                      |
+| `CreatePreset.enabledCharacterDefinitionIds` | 玩家选择                                 | 原生定义 ID 列表；已识别旧条目选择映射到新定义                                                                      |
+
+名字仍是模型寻址键；新增别名匹配必须唯一，ID 由代码维护。经历通过独立的 `StateManager.commitCharacterUpdates` 受限入口提交，不增加任意历史改写 StatePatch。已保存条目全部可见，没有 `visibility/discovered` 字段。重要度为 0–10 整数，低于 7 不自动注入。
+
 ## Story v2 与路由字段补充（2026-10-06 修复同步）
 
 - `WorldBook.lore`：`audiences: string[]`、可选 `section: fixed|region|turn`、`namespace/category`。`WorldBookEntry.extra.lore` 可覆盖 audiences/section，含稳定 `key`、`summary/aliases/category`、`required`、`dependsOn: string[]` 与声明式 `activation`（locations/characters/keywords/excludeKeywords）。显式空 audiences 不授权，依赖不授权。位置命中为**包含**判定（路径任一层级包含声明字串即命中，2026-10-10 裁定放宽，原为逐字相等；代码实现状态见交付说明）。

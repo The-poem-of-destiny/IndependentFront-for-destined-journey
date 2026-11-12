@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { GENERATION_MODE_LABELS, resolveGenerationMode } from '@engine/story/generation-mode';
 import { computed, ref, shallowRef, watch } from 'vue';
 import type { FullBackup } from '@engine/persistence/database';
 import type { SessionBackup } from '@engine/persistence/session-backup';
@@ -407,6 +408,9 @@ function formatTime(timestamp: number) {
                 <span class="save-info">
                   <span class="save-name">
                     {{ save.name || '未命名存档' }}
+                    <span class="save-badge" title="创建时确定，存档内不可切换">{{
+                      GENERATION_MODE_LABELS[resolveGenerationMode(save)]
+                    }}</span>
                     <span
                       v-if="isStoryContextV2Save(save)"
                       class="save-badge"

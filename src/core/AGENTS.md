@@ -10,6 +10,11 @@
 
 ## Story v2 / 内容路由速览
 
+- 直出：`agents/direct-main.ts` 负责单次主请求，`agents/direct-output.ts` 校验原生写回，`combat/direct-combat.ts` 保存跨楼战斗。`AgentOrchestrator.runDirect` 复用记忆而不进入 Agent DAG；`StateManager.commitDirectTurn` 原子接纳核心状态和消息。
+- 缓存直出：`prompts/direct-context-session.ts` 管理独立的已接纳 transcript，`direct-context-frame.ts` 组装旧记忆布局与按角色拆分的绝对状态，`direct-context-store.ts` 复用可丢弃缓存表与权限门；`api/prompt-caching.ts` 只为显式调用者附加渠道参数。区域/本轮资料可替换，预设条目以 `directCachePlacement: "turn"` 显式选择动态位置。Dexie v32 无数据重写，阻止旧版误导入新模式。契约见 [缓存直出](../../docs/reference/direct-generation-cache.md)。
+
+- 原生角色：`types/types-character.ts` 定义内容、经历与主叙事更新；`character/character-definitions.ts` 只读兼容旧资料及素材；`character/character-updates.ts` 校验更新块；`character/character-chronicle.ts` 构造经历和重要上下文。`StateManager` 持有写锁与来源核验；Dexie v31、快照及两种备份携带经历。契约见 [角色系统](../../docs/reference/character-system.md)。
+
 - `content/lore-routing.ts`：双模式唯一 audiences 权限、停用/排除与依赖闭包共同判据（含 EJS 间接读取）、旧作者默认映射与诊断；Agent 世界书清单已退役。
 - `memory/story-memory-source.ts`：生成/读取/锁内提交共用完整来源与正文指纹；v29 `storyArchiveRetries` 绑定原判断回合自动恢复，不以后一轮证据替代。旧缺指纹记录失效可补建，语义未知不伪造。
 - `content/lore-selection.ts`：无正文目录、独立选择调用、区域快照键、依赖闭包；`content/lore-protocol.ts` 验证显式路由修订。

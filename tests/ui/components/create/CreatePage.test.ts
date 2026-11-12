@@ -47,6 +47,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   create = reactive({
     currentStep: 0,
+    generationMode: 'agent',
     contentStatus: 'ready',
     stepValid: Array(8).fill(true),
     initContent: vi.fn(),
@@ -70,6 +71,7 @@ describe('first journey readiness', () => {
     settings.settings.apiPool = [
       { id: 'chat', baseUrl: 'http://localhost:1234/v1', model: 'local', apiType: 'chat' },
     ];
+    create.generationMode = '';
     create.currentStep = 7;
     create.startJourney
       .mockRejectedValueOnce(new Error('disk failure'))
@@ -79,6 +81,9 @@ describe('first journey readiness', () => {
     const start = wrapper
       .findAllComponents({ name: 'AppButton' })
       .find((button) => button.text() === '开始创建角色')!;
+    expect(start.props('disabled')).toBe(true);
+    wrapper.findComponent({ name: 'FormSelect' }).vm.$emit('update:modelValue', 'direct');
+    await flushPromises();
     expect(start.props('disabled')).toBe(false);
     start.vm.$emit('click');
     await flushPromises();

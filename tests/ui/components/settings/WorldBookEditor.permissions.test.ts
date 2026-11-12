@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import WorldBookEditor from '../../../../src/ui/components/settings/WorldBookEditor.vue';
 import type { WorldBook, WorldBookEntry } from '@engine/types/types';
+import { getEntriesForAgent } from '@engine/content/worldbook-loader';
 
 const wrappers: VueWrapper[] = [];
 afterEach(() => wrappers.splice(0).forEach((wrapper) => wrapper.unmount()));
@@ -36,6 +37,49 @@ function editor(source = book(), readonly = false) {
 }
 
 describe('WorldBookEditor 读取范围权限（长期回归）', () => {
+  it('直出读取范围只使用实际执行身份，所选条目能被主生成读取', async () => {
+    const source = book();
+    source.entries[0].extra!.lore!.audiences = [];
+    const wrapper = editor(source);
+    const choices = wrapper.findAll('input[aria-label^="允许直出主生成"]');
+    for (const choice of choices) {
+      await choice.setValue(true);
+      const updates = wrapper.emitted('update')!;
+      const saved = updates[updates.length - 1][0] as WorldBook;
+      expect(getEntriesForAgent('direct_main', [saved]).map((entry) => entry.uid)).toEqual([
+        source.entries[0].uid,
+      ]);
+      await choice.setValue(false);
+    }
+    expect(choices).toHaveLength(1);
+  });
+
+  it.each(['本书', '本条'] as const)('%s 可显示并撤销此前保存的缓存直出读取范围', async (scope) => {
+    const source = book();
+    source.entries[0].extra!.lore!.audiences = ['direct_cached'];
+    const wrapper = editor(source);
+    if (scope === '本条') await wrapper.get('button[aria-label="编辑 约定"]').trigger('click');
+    expect(wrapper.find('input[aria-label*="缓存优化"]').exists()).toBe(false);
+    const choice = wrapper.get(`input[aria-label="允许直出主生成读取${scope}"]`);
+    expect((choice.element as HTMLInputElement).checked).toBe(true);
+    await choice.setValue(false);
+    if (scope === '本条') await wrapper.get('button.btn-primary').trigger('click');
+    const updates = wrapper.emitted('update')!;
+    const saved = updates[updates.length - 1][0] as WorldBook;
+    expect(saved.entries[0].extra?.lore?.audiences).toEqual([]);
+    expect(getEntriesForAgent('direct_main', [saved])).toEqual([]);
+    expect(getEntriesForAgent('story', [saved])).toEqual([]);
+    expect(source.entries[0].extra?.lore?.audiences).toEqual(['direct_cached']);
+    if (scope === '本条') {
+      await wrapper.get('button[aria-label="编辑 约定"]').trigger('click');
+      await wrapper.get(`input[aria-label="允许直出主生成读取${scope}"]`).setValue(true);
+      await wrapper.get('button.btn-primary').trigger('click');
+    } else await choice.setValue(true);
+    const latest = updates[updates.length - 1][0] as WorldBook;
+    expect(latest.entries[0].extra?.lore?.audiences).toEqual(['direct_main']);
+    expect(getEntriesForAgent('direct_main', [latest])).toHaveLength(1);
+  });
+
   it('同次打开连续多选和取消时以当前条目为准，重新打开保留全部选择', async () => {
     const source = book();
     source.entries.push({

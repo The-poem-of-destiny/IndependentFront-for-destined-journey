@@ -1,5 +1,5 @@
 {
-  "version": "1.2.0",
+  "version": "1.3.0",
   "byBook": {
     "adventure_area": "0e2af3cda9a5b4e6",
     "character": "68c970016408f2a3",
@@ -32,13 +32,14 @@
     "content/bloodlines": "67c8aac6000fc8de",
     "content/branding": "0151ddec23899b30",
     "content/catalog": "4446cad8324e9b60",
+    "content/characters": "741638a580c5630d",
     "content/image-dialects": "5507786297ecde48",
     "content/locations": "319a3dc5cef8e61f",
     "content/map-pack": "91db60a489f7ad4c",
     "content/name-pools": "3e3e93642df2e4ef",
     "content/random-events": "bb263e1d9f733963",
     "content/remote-assets": "741638a580c5630d",
-    "defaults/agent-config": "d974663708990b41",
+    "defaults/agent-config": "0644ddde26df2d41",
     "defaults/audio-manifest": "741638a580c5630d",
     "defaults/beautifier-rules": "109fb75675ff60ed",
     "defaults/map-marker-presets": "741638a580c5630d",

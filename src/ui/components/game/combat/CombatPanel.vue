@@ -72,7 +72,7 @@ function restore() {
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return;
   if (skipOpen.value || restartOpen.value) return;
-  if (game.isInCombat && !collapsed.value) minimize();
+  if (game.isAgentCombat && !collapsed.value) minimize();
 }
 onMounted(() => window.addEventListener('keydown', onKeydown));
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
@@ -111,7 +111,7 @@ function continueSettlement(text: string) {
 <template>
   <Teleport to="body">
     <Transition name="combat-overlay">
-      <div v-if="game.isInCombat && !collapsed" class="combat-overlay">
+      <div v-if="game.isAgentCombat && !collapsed" class="combat-overlay">
         <div class="combat-panel" :class="{ 'is-ready': game.combatReady }">
           <!-- ═══ ① 就绪态 ═══ -->
           <CombatReadyPanel
@@ -210,7 +210,7 @@ function continueSettlement(text: string) {
 
     <!-- 收起 / 返回战斗（overlay 之外，任何三态都可用） -->
     <button
-      v-if="game.isInCombat && !collapsed"
+      v-if="game.isAgentCombat && !collapsed"
       class="combat-minimize"
       type="button"
       title="收起战斗面板（Esc），可查看设置 / 调试等其他界面"
@@ -219,7 +219,7 @@ function continueSettlement(text: string) {
       ⌄ 收起
     </button>
     <button
-      v-else-if="game.isInCombat"
+      v-else-if="game.isAgentCombat"
       class="combat-reopen"
       type="button"
       title="返回战斗面板"
