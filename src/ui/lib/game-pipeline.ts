@@ -2539,7 +2539,11 @@ export class GamePipeline {
         const characterUpdates = parseCharacterUpdates(result.rawResponse || '');
         this.pendingCharacterUpdates = characterUpdates.updates;
         for (const warning of characterUpdates.warnings) this.notify(warning, 'warning');
-        if (!characterUpdates.present)
+        // 无原生角色定义的存档（自定义预设/旧内容包）缺该区块是常态，不该每轮打扰
+        if (
+          !characterUpdates.present &&
+          (this.currentContext?.characterDefinitions?.length ?? 0) > 0
+        )
           this.notify('本轮未提供角色更新区块，编年史未更新。', 'warning');
         // rawResponse 直接就是 AI 返回的字符串正文（流式模式下也是完整文本）
         const { content, options } = extractStoryOptions(result.rawResponse || '');
