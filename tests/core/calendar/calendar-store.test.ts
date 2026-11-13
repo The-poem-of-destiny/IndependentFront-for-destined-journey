@@ -15,7 +15,8 @@ import {
   getSaveCalendar,
   persistCalendarEntry,
   persistCalendarMode,
-  persistCalendarVisibility,
+  persistCalendarHidden,
+  persistCalendarLocalRegionOnly,
   remapSaveCalendar,
   removeCalendarEntry,
 } from '../../../src/core/calendar/calendar-store';
@@ -57,7 +58,7 @@ describe('每存档日历的存储', () => {
 
   it('切换模式不丢数据；条目可新增、更新、删除', async () => {
     await persistCalendarEntry('s1', { id: 'a', title: ' 约定 ', start: { month: 4, day: 4 } });
-    await persistCalendarVisibility('s1', { hiddenKeys: ['birthday:x'] });
+    await persistCalendarHidden('s1', { key: 'birthday:x' }, true);
     await persistCalendarMode('s1', 'immersive');
     await persistCalendarMode('s1', 'normal');
     let calendar = await getSaveCalendar('s1');
@@ -90,33 +91,53 @@ describe('每存档日历的存储', () => {
   });
 
   it('不合法的条目被拒绝，不写库', async () => {
-    expect(() =>
-      persistCalendarEntry('s1', { id: 'a', title: '  ', start: { month: 4, day: 4 } }),
-    ).toThrow();
-    expect(() =>
-      persistCalendarEntry('s1', { id: 'a', title: 'x', start: { month: 2, day: 31 } }),
-    ).toThrow();
+    const bad = [
+      { id: 'a', title: '  ', start: { month: 4, day: 4 } },
+      { id: 'a', title: 'x', start: { month: 2, day: 31 } },
+      { id: 'a', title: 'x', start: { month: 4, day: 4 }, end: { month: 13, day: 1 } },
+      // 给了年份却不是整数：必须拒绝，不能悄悄当成每年重复
+      { id: 'a', title: 'x', start: { month: 4, day: 4 }, year: '' as unknown as number },
+      { id: 'a', title: 'x', start: { month: 4, day: 4 }, year: 490.5 },
+    ];
+    for (const entry of bad) expect(() => persistCalendarEntry('s1', entry)).toThrow();
     expect(await getDatabase().saveCalendars.count()).toBe(0);
   });
 
-  it('显示选择只改传进来的项，并做归一化', async () => {
-    await persistCalendarVisibility('s1', {
-      hiddenKinds: ['birthday', 'user' as never],
-      hiddenRegions: ['帝国', '帝国', ''],
-    });
-    await persistCalendarVisibility('s1', { localRegionOnly: true });
+  it('显示选择逐项增减：隐藏、恢复、重复隐藏不产生重复项，非法目标被忽略', async () => {
+    await persistCalendarHidden('s1', { kind: 'birthday' }, true);
+    await persistCalendarHidden('s1', { kind: 'user' as never }, true);
+    await persistCalendarHidden('s1', { region: '东岸' }, true);
+    await persistCalendarHidden('s1', { region: '东岸' }, true);
+    await persistCalendarHidden('s1', { region: '' }, true);
+    await persistCalendarHidden('s1', { key: 'k1' }, true);
+    await persistCalendarHidden('s1', { key: 'k2' }, true);
+    await persistCalendarHidden('s1', { key: 'k1' }, false);
+    await persistCalendarLocalRegionOnly('s1', true);
     expect(await getSaveCalendar('s1')).toMatchObject({
       hiddenKinds: ['birthday'],
-      hiddenRegions: ['帝国'],
+      hiddenRegions: ['东岸'],
+      hiddenKeys: ['k2'],
       localRegionOnly: true,
     });
+  });
+
+  it('连续两次隐藏不同的项互不覆盖（界面拿着旧列表连点两下的情形）', async () => {
+    await Promise.all([
+      persistCalendarHidden('s1', { key: 'a' }, true),
+      persistCalendarHidden('s1', { key: 'b' }, true),
+      persistCalendarHidden('s1', { region: '东岸' }, true),
+      persistCalendarHidden('s1', { region: '西岸' }, true),
+    ]);
+    const calendar = await getSaveCalendar('s1');
+    expect([...calendar.hiddenKeys].sort()).toEqual(['a', 'b']);
+    expect([...calendar.hiddenRegions].sort()).toEqual(['东岸', '西岸']);
   });
 
   it('并发写入串行化，互不覆盖', async () => {
     await Promise.all([
       persistCalendarEntry('s1', { id: 'a', title: '甲', start: { month: 1, day: 1 } }),
       persistCalendarEntry('s1', { id: 'b', title: '乙', start: { month: 1, day: 2 } }),
-      persistCalendarVisibility('s1', { hiddenKinds: ['festival'] }),
+      persistCalendarHidden('s1', { kind: 'festival' }, true),
     ]);
     const calendar = await getSaveCalendar('s1');
     expect(calendar.entries.map((e) => e.id).sort()).toEqual(['a', 'b']);
@@ -169,9 +190,8 @@ describe('日历随存档的生命周期', () => {
   it('单存档导出再导入：条目保留，隐藏的生日键随角色 id 重映射', async () => {
     await saveCharacter(createDefaultCharacterState({ id: 'npc-1', saveId: 's1', name: '向导' }));
     await persistCalendarEntry('s1', { id: 'a', title: '甲', start: { month: 1, day: 1 } });
-    await persistCalendarVisibility('s1', {
-      hiddenKeys: ['birthday:npc-1', 'birthday:gone', 'fated:faction/x#harvest'],
-    });
+    for (const key of ['birthday:npc-1', 'birthday:gone', 'fated:faction/x#kites'])
+      await persistCalendarHidden('s1', { key }, true);
     await persistCalendarMode('s1', 'immersive');
 
     const exported = await exportSessionSave('s1');
@@ -185,9 +205,21 @@ describe('日历随存档的生命周期', () => {
     expect(calendar.mode).toBe('immersive');
     expect(calendar.entries.map((e) => e.title)).toEqual(['甲']);
     expect(newChar.id).not.toBe('npc-1');
-    expect(calendar.hiddenKeys).toEqual([`birthday:${newChar.id}`, 'fated:faction/x#harvest']);
+    expect(calendar.hiddenKeys).toEqual([`birthday:${newChar.id}`, 'fated:faction/x#kites']);
     // 原存档不受影响
     expect((await getSaveCalendar('s1')).hiddenKeys).toContain('birthday:npc-1');
+  });
+
+  it('导入不带日历的旧整库备份后，已不存在的存档不留孤儿日历行', async () => {
+    await saveSaveSlot(makeSave('gone'));
+    await persistCalendarEntry('gone', { id: 'x', title: '孤儿', start: { month: 1, day: 1 } });
+    await persistCalendarEntry('s1', { id: 'a', title: '甲', start: { month: 1, day: 1 } });
+    const legacy = await exportAllData();
+    delete legacy.saveCalendars;
+    legacy.saves = legacy.saves.filter((save) => save.id !== 'gone');
+    await importAllData(legacy);
+    const ids = (await getDatabase().saveCalendars.toCollection().primaryKeys()) as string[];
+    expect(ids).toEqual(['s1']);
   });
 
   it('没有日历行的旧单存档备份照常导入，得到默认日历', async () => {

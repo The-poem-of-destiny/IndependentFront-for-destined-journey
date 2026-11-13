@@ -890,6 +890,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 日历不进任何提示词；沉浸模式下节庆与生日**不计算**，
 │   │   │                                  连「显示选择」入口都不渲染（界面本身不该透露它们存在）
 │   │   │                               🔴 不展示世界书条目正文，只用 `keyDates` 上的名称与 `summary`
+│   │   │                               🔴 store 的 `calendar` 在读到本存档那一行之前是 `null`，面板据此显示读取中 / 失败态。
+│   │   │                                  别拿默认行顶替：默认是普通模式，沉浸模式的存档会在加载中露出节庆与生日
 │   │   ├── QuestsPanel.vue / PlotPanel.vue / MemoryPanel.vue / SnapshotPanel.vue / MiniPlayer.vue
 │   │   │                               🔴 SnapshotPanel 自**快照拆表 v22**（2026-08-17）起只读
 │   │   │                                  `SnapshotMeta.preview`（玩家台词 / 游戏时间），**不再拉整份

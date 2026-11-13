@@ -904,7 +904,7 @@ export async function clearAllData(): Promise<void> {
 
 export interface FullBackup {
   characterChronicle?: import('../types/types-character').CharacterChronicleEntry[];
-  /** v33 起；旧备份缺席 = 不动本机现有日历 */
+  /** v33 起；旧备份缺席 = 保留本机仍有对应存档的日历行 */
   saveCalendars?: import('../types/types-calendar').SaveCalendar[];
   version: number;
   exportedAt: number;
@@ -1334,12 +1334,18 @@ async function doImportAllData(
     if (backup.characterChronicle?.length)
       await db.characterChronicle.bulkPut(backup.characterChronicle);
   });
-  // v33 日历：三态语义同上 —— 字段缺席（旧备份）不动本机，给了就整表替换。
-  await db.transaction('rw', db.saveCalendars, async () => {
+  // v33 日历：字段缺席（旧备份）保留本机的行，给了就整表替换。
+  await db.transaction('rw', db.saveCalendars, db.saves, async () => {
     if (backup.saveCalendars !== undefined) {
       await db.saveCalendars.clear();
       if (Array.isArray(backup.saveCalendars)) await db.saveCalendars.bulkPut(backup.saveCalendars);
     }
+    // 存档表已被整表替换：不属于任何现存存档的日历行是孤儿（旧备份不带日历时尤其会留下），清掉。
+    const saveIds = new Set((await db.saves.toCollection().primaryKeys()) as string[]);
+    const orphans = ((await db.saveCalendars.toCollection().primaryKeys()) as string[]).filter(
+      (id) => !saveIds.has(id),
+    );
+    if (orphans.length > 0) await db.saveCalendars.bulkDelete(orphans);
   });
   await db.transaction('rw', db.characterAppearances, async () => {
     if (backup.characterAppearances !== undefined) {

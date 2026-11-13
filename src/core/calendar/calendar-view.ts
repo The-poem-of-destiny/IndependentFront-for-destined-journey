@@ -89,9 +89,13 @@ export function buildMonthView(
   return { year, month, days, undated };
 }
 
-/** 只到季节或完全没有日期的项：不属于任何月份，单独列出。 */
-export function listUndatedItems(items: readonly CalendarItem[]): CalendarItem[] {
-  return items.filter((item) => item.when.precision === 'season' || item.when.precision === 'none');
+/** 只到季节或完全没有日期的项：不属于任何月份，单独列出。只列在 `year` 这一年举办的。 */
+export function listUndatedItems(items: readonly CalendarItem[], year: number): CalendarItem[] {
+  return items.filter(
+    (item) =>
+      (item.when.precision === 'season' || item.when.precision === 'none') &&
+      keyDateOccursInYear(item, year),
+  );
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   formatItemDate,
   formatItemRepeat,
   groupFestivalsByRegion,
+  hiddenByRegions,
   itemTitle,
   newEntryDraft,
 } from '../../../../src/ui/components/game/calendar-panel';
@@ -58,19 +59,47 @@ describe('calendar-panel 展示层', () => {
 
   it('节庆按地区分组，通行各地的排最前', () => {
     const groups = groupFestivalsByRegion([
-      item({ key: 'a', regions: ['北境联盟'] }),
+      item({ key: 'a', regions: ['东岸'] }),
       item({ key: 'b' }),
-      item({ key: 'c', regions: ['中央帝国', '南方省'] }),
-      item({ key: 'd', regions: ['北境联盟'] }),
+      item({ key: 'c', regions: ['西岸', '西岸南部'] }),
+      item({ key: 'd', regions: ['东岸'] }),
     ]);
     expect(groups[0].region).toBe('');
     expect(groups.map((g) => [g.region, g.items.map((i) => i.key)])).toEqual(
       expect.arrayContaining([
         ['', ['b']],
-        ['北境联盟', ['a', 'd']],
-        ['中央帝国', ['c']],
+        ['东岸', ['a', 'd']],
+        ['西岸', ['c']],
       ]),
     );
+  });
+
+  it('草稿里的非法数字一律不产出条目', () => {
+    const valid = { ...newEntryDraft({ year: 488, month: 4, day: 4 }), title: '出发' };
+    const reject = (patch: object) => entryFromDraft({ ...valid, ...patch }, () => 'new');
+    expect(reject({})).not.toBeNull();
+    for (const patch of [
+      { startDay: 31 },
+      { startDay: 0 },
+      { startDay: 1.5 },
+      { startDay: '' },
+      { startMonth: 13 },
+      { multiDay: true, endDay: 31 },
+      { multiDay: true, endMonth: 0 },
+      { yearly: false, year: '' },
+      { yearly: false, year: 490.5 },
+    ])
+      expect(reject(patch), JSON.stringify(patch)).toBeNull();
+    // 不持续多天 / 每年重复时，对应的输入不参与校验
+    expect(reject({ multiDay: false, endDay: 99 })).not.toBeNull();
+    expect(reject({ yearly: true, year: '' })).not.toBeNull();
+  });
+
+  it('多地区的项：所列地区全部隐藏才算被地区层隐藏', () => {
+    const hidden = new Set(['西岸']);
+    expect(hiddenByRegions({ regions: ['西岸'] }, hidden)).toBe(true);
+    expect(hiddenByRegions({ regions: ['西岸', '东岸'] }, hidden)).toBe(false);
+    expect(hiddenByRegions({}, hidden)).toBe(false);
   });
 
   it('草稿与条目互转', () => {

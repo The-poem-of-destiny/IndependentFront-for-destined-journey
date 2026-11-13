@@ -51,6 +51,15 @@ export interface RegionGroup {
   items: CalendarItem[];
 }
 
+/** 一项是否已被「地区」这一层整体隐藏：它所列的地区全部被隐藏才算（与引擎的显示规则同口径）。 */
+export function hiddenByRegions(
+  item: Pick<CalendarItem, 'regions'>,
+  hiddenRegions: ReadonlySet<string>,
+): boolean {
+  const regions = item.regions ?? [];
+  return regions.length > 0 && regions.every((region) => hiddenRegions.has(region));
+}
+
 /** 筛选抽屉里节庆按地区分组；有多个地区的节庆归到第一个地区名下。全大陆的排最前。 */
 export function groupFestivalsByRegion(festivals: readonly CalendarItem[]): RegionGroup[] {
   const groups = new Map<string, CalendarItem[]>();
@@ -107,13 +116,24 @@ export function draftFromEntry(entry: CalendarUserEntry, fallbackYear: number): 
   };
 }
 
-/** 草稿 → 可落库的条目；标题为空返回 null（保存按钮据此禁用）。 */
+const inRange = (value: unknown, min: number, max: number) =>
+  Number.isInteger(value) && Number(value) >= min && Number(value) <= max;
+
+/**
+ * 草稿 → 可落库的条目；不合法返回 null（保存按钮据此禁用）。
+ * 数字框的 min / max 拦不住手打的值，清空后的值也不是数字，所以这里逐项校验：
+ * 标题非空、月 1–12、日 1–30、指定年份时必须是整数。
+ */
 export function entryFromDraft(
   draft: EntryDraft,
   newId: () => string,
 ): Omit<CalendarUserEntry, 'createdAt'> | null {
   const title = draft.title.trim();
   if (!title) return null;
+  if (!inRange(draft.startMonth, 1, 12) || !inRange(draft.startDay, 1, 30)) return null;
+  if (draft.multiDay && (!inRange(draft.endMonth, 1, 12) || !inRange(draft.endDay, 1, 30)))
+    return null;
+  if (!draft.yearly && !Number.isInteger(draft.year)) return null;
   const note = draft.note.trim();
   return {
     id: draft.id ?? newId(),

@@ -13,7 +13,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useWorldBookStore } from '../../stores/worldbook-store';
 import { useCalendarStore } from '../../stores/calendar-store';
 import AppButton from '../shared/AppButton.vue';
-import { defaultSaveCalendar } from '@engine/calendar/calendar-store';
+import { defaultSaveCalendar, type CalendarHiddenTarget } from '@engine/calendar/calendar-store';
 import { deriveBirthdayItems, deriveFestivalItems } from '@engine/calendar/calendar-sources';
 import {
   buildCalendarItems,
@@ -33,6 +33,7 @@ import {
   formatItemDate,
   formatItemRepeat,
   groupFestivalsByRegion,
+  hiddenByRegions,
   itemTitle,
   newEntryDraft,
   type EntryDraft,
@@ -52,20 +53,21 @@ const today = computed(() => {
   const t = game.gameTime;
   return t ? { year: t.year, month: t.month, day: t.day } : null;
 });
+/** 本存档的日历行是否已经读到。没读到之前不知道是哪种模式，一律不显示任何自动来源。 */
+const ready = computed(() => !!store.calendar && store.calendar.saveId === saveId.value);
+const loadFailed = computed(() => !ready.value && store.failedSaveId === saveId.value);
 const calendar = computed(() =>
-  store.calendar && store.calendar.saveId === saveId.value
-    ? store.calendar
-    : defaultSaveCalendar(saveId.value ?? ''),
+  ready.value && store.calendar ? store.calendar : defaultSaveCalendar(saveId.value ?? ''),
 );
-const immersive = computed(() => calendar.value.mode === 'immersive');
+// 🔴 未就绪时按沉浸处理：默认行是普通模式，直接用它会在读取完成前（或读取失败后）
+//    把沉浸模式存档的节庆与生日露出来。
+const immersive = computed(() => !ready.value || calendar.value.mode === 'immersive');
 
-watch(
-  saveId,
-  (id) => {
-    if (id) void store.load(id).catch(() => ui.toast('日历读取失败', 'error'));
-  },
-  { immediate: true },
-);
+function reload() {
+  const id = saveId.value;
+  if (id) void store.load(id).catch(() => ui.toast('日历读取失败', 'error'));
+}
+watch(saveId, reload, { immediate: true });
 
 // ── 来源 ──
 /** 本存档启用的世界书条目上的关键日期。沉浸模式下不计算（界面本身也不该透露它们存在）。 */
@@ -104,7 +106,7 @@ const selectedCell = computed(() =>
 const upcoming = computed(() =>
   today.value ? listUpcoming(items.value, today.value, UPCOMING_DAYS) : [],
 );
-const undated = computed(() => listUndatedItems(items.value));
+const undated = computed(() => listUndatedItems(items.value, viewYear.value));
 const monthTitle = computed(
   () => `${game.gameTime?.era ?? ''}${viewYear.value}年 · ${viewMonth.value}月`,
 );
@@ -141,13 +143,16 @@ function daysAwayLabel(days: number) {
 }
 
 // ── 写入 ──
-async function run(action: (id: string) => Promise<void>, failure: string) {
+/** @returns 是否成功。未就绪时不写：那时界面上的状态不是这份存档的真实状态。 */
+async function run(action: (id: string) => Promise<void>, failure: string): Promise<boolean> {
   const id = saveId.value;
-  if (!id) return;
+  if (!id || !ready.value) return false;
   try {
     await action(id);
+    return true;
   } catch {
     ui.toast(failure, 'error');
+    return false;
   }
 }
 
@@ -177,8 +182,8 @@ function startEdit(item: CalendarItem) {
 async function saveDraft() {
   const entry = draftEntry.value;
   if (!entry) return;
-  await run((id) => store.saveEntry(id, entry), '保存失败');
-  draft.value = null;
+  // 只有真的存进去了才收起编辑器：失败时保留草稿，别让玩家重打一遍
+  if (await run((id) => store.saveEntry(id, entry), '保存失败')) draft.value = null;
 }
 function removeEntry(item: CalendarItem) {
   if (!window.confirm(`删除「${item.title}」？`)) return;
@@ -192,24 +197,16 @@ const hiddenKeys = computed(() => new Set(calendar.value.hiddenKeys));
 const hiddenRegions = computed(() => new Set(calendar.value.hiddenRegions));
 const kindHidden = (kind: CalendarAutoKind) => calendar.value.hiddenKinds.includes(kind);
 
-function toggleIn(list: readonly string[], value: string): string[] {
-  return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+/** 隐藏或恢复一项。只发增量，由引擎在写锁内对着最新的行应用 —— 连点两下不会互相覆盖。 */
+function setHidden(target: CalendarHiddenTarget, hidden: boolean) {
+  void run((id) => store.setHidden(id, target, hidden), '保存失败');
 }
-function toggleKind(kind: CalendarAutoKind) {
-  const hiddenKinds = toggleIn(calendar.value.hiddenKinds, kind) as CalendarAutoKind[];
-  void run((id) => store.setVisibility(id, { hiddenKinds }), '保存失败');
-}
-function toggleRegion(region: string) {
-  const next = toggleIn(calendar.value.hiddenRegions, region);
-  void run((id) => store.setVisibility(id, { hiddenRegions: next }), '保存失败');
-}
-function toggleKey(key: string) {
-  const next = toggleIn(calendar.value.hiddenKeys, key);
-  void run((id) => store.setVisibility(id, { hiddenKeys: next }), '保存失败');
-}
+const toggleKind = (kind: CalendarAutoKind) => setHidden({ kind }, !kindHidden(kind));
+const toggleRegion = (region: string) => setHidden({ region }, !hiddenRegions.value.has(region));
+const toggleKey = (key: string) => setHidden({ key }, !hiddenKeys.value.has(key));
 function toggleLocalOnly() {
-  const localRegionOnly = !calendar.value.localRegionOnly;
-  void run((id) => store.setVisibility(id, { localRegionOnly }), '保存失败');
+  const next = !calendar.value.localRegionOnly;
+  void run((id) => store.setLocalRegionOnly(id, next), '保存失败');
 }
 </script>
 
@@ -232,8 +229,9 @@ function toggleLocalOnly() {
         <div class="cal-mode" role="group" aria-label="日历模式">
           <button
             class="cal-mode-btn"
-            :class="{ active: !immersive }"
-            :aria-pressed="!immersive"
+            :class="{ active: ready && !immersive }"
+            :aria-pressed="ready && !immersive"
+            :disabled="!ready"
             data-mode="normal"
             @click="setMode('normal')"
           >
@@ -241,8 +239,9 @@ function toggleLocalOnly() {
           </button>
           <button
             class="cal-mode-btn"
-            :class="{ active: immersive }"
-            :aria-pressed="immersive"
+            :class="{ active: ready && immersive }"
+            :aria-pressed="ready && immersive"
+            :disabled="!ready"
             data-mode="immersive"
             @click="setMode('immersive')"
           >
@@ -259,12 +258,18 @@ function toggleLocalOnly() {
         >
           显示选择
         </AppButton>
-        <AppButton variant="primary" size="sm" data-action="add" @click="startAdd">
+        <AppButton
+          variant="primary"
+          size="sm"
+          :disabled="!ready"
+          data-action="add"
+          @click="startAdd"
+        >
           记一个日子
         </AppButton>
       </div>
     </header>
-    <p class="cal-mode-hint">
+    <p v-if="ready" class="cal-mode-hint">
       {{
         immersive
           ? '沉浸模式：日历上只有你自己记下的日子。切换模式不会删除任何内容。'
@@ -272,7 +277,19 @@ function toggleLocalOnly() {
       }}
     </p>
 
-    <div class="cal-body">
+    <div v-if="!ready" class="cal-empty" data-section="loading" role="status">
+      <template v-if="loadFailed">
+        日历读取失败
+        <div class="cal-actions center">
+          <AppButton variant="secondary" size="sm" data-action="retry" @click="reload">
+            重试
+          </AppButton>
+        </div>
+      </template>
+      <template v-else>正在读取日历…</template>
+    </div>
+
+    <div v-else class="cal-body">
       <!-- ═══ 左：月视图 ═══ -->
       <section class="cal-month" aria-label="月视图">
         <div class="cal-weekdays" aria-hidden="true">
@@ -461,9 +478,7 @@ function toggleLocalOnly() {
               <input
                 type="checkbox"
                 :checked="!hiddenKeys.has(item.key)"
-                :disabled="
-                  kindHidden('festival') || (!!group.region && hiddenRegions.has(group.region))
-                "
+                :disabled="kindHidden('festival') || hiddenByRegions(item, hiddenRegions)"
                 :data-key="item.key"
                 @change="toggleKey(item.key)"
               />
@@ -673,7 +688,7 @@ function toggleLocalOnly() {
   background: var(--theme-surface-muted);
 }
 .cal-mode-btn {
-  min-height: 32px;
+  min-height: 36px;
   white-space: nowrap;
   padding: 0 var(--theme-spacing-md);
   border: none;
@@ -686,7 +701,11 @@ function toggleLocalOnly() {
     background var(--theme-transition-fast),
     color var(--theme-transition-fast);
 }
-.cal-mode-btn:hover {
+.cal-mode-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.cal-mode-btn:hover:not(:disabled) {
   background: var(--theme-tab-hover-bg);
   color: var(--theme-text-primary);
 }
@@ -929,6 +948,10 @@ function toggleLocalOnly() {
   line-height: 1.6;
   color: var(--theme-text-secondary);
 }
+.cal-actions.center {
+  justify-content: center;
+  margin-top: var(--theme-spacing-sm);
+}
 .cal-actions {
   display: flex;
   justify-content: flex-end;
@@ -999,7 +1022,7 @@ textarea.cal-input {
   display: flex;
   align-items: center;
   gap: var(--theme-spacing-sm);
-  min-height: 32px;
+  min-height: 36px;
   font-size: 0.8125rem;
   color: var(--theme-text-primary);
   cursor: pointer;

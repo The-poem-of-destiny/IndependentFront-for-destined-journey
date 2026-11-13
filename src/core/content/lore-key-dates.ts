@@ -70,6 +70,15 @@ function whenError(when: unknown, monthly: boolean): string | null {
   }
 }
 
+/** 节期天数。非日精度的项没有确定长度，按一年（360 天）封顶。 */
+function spanLength(when: LoreKeyDateWhen, monthly: boolean): number {
+  if (when.precision !== 'day') return 360;
+  const end = when.end ?? when.start;
+  if (monthly) return ((end.day - when.start.day + DAYS_PER_MONTH) % DAYS_PER_MONTH) + 1;
+  const index = (md: LoreKeyDateMonthDay) => ((md.month ?? 1) - 1) * DAYS_PER_MONTH + md.day;
+  return ((index(end) - index(when.start) + 360) % 360) + 1;
+}
+
 /** 单项的全部问题；空数组 = 合法。项内未知字段不算错（R8）。 */
 function keyDateItemErrors(item: unknown): string[] {
   if (!isObject(item)) return ['must be an object'];
@@ -90,11 +99,13 @@ function keyDateItemErrors(item: unknown): string[] {
   for (const field of ['approximate', 'major', 'public'])
     if (item[field] !== undefined && typeof item[field] !== 'boolean')
       errors.push(`invalid ${field}`);
+  // 日程的「第几天」不能超出节期长度；日期本身不合法时上面已报错，这里只按一年封顶
+  const span = when === null ? spanLength(item.when as LoreKeyDateWhen, monthly) : 360;
   if (
     item.highlights !== undefined &&
     !(
       Array.isArray(item.highlights) &&
-      item.highlights.every((h) => isObject(h) && isInt(h.day, 1, 360) && isText(h.title))
+      item.highlights.every((h) => isObject(h) && isInt(h.day, 1, span) && isText(h.title))
     )
   )
     errors.push('invalid highlights');

@@ -53,13 +53,15 @@ function coerceCalendarUserEntry(value: unknown): CalendarUserEntry | null {
   if (!title || !start) return null;
   const end = value.end === undefined ? undefined : coerceMonthDay(value.end);
   if (end === null) return null;
+  // 给了年份却不是整数：整条判无效。悄悄丢掉会把「仅某一年」变成「每年重复」
+  if (value.year !== undefined && !Number.isInteger(value.year)) return null;
   const note = typeof value.note === 'string' ? value.note.trim() : '';
   return {
     id: value.id,
     title,
     start,
     ...(end && (end.month !== start.month || end.day !== start.day) ? { end } : {}),
-    ...(Number.isInteger(value.year) ? { year: value.year as number } : {}),
+    ...(value.year !== undefined ? { year: value.year as number } : {}),
     ...(note ? { note } : {}),
     createdAt: typeof value.createdAt === 'number' ? value.createdAt : 0,
   };
@@ -135,19 +137,44 @@ export function removeCalendarEntry(saveId: string, entryId: string): Promise<Sa
   });
 }
 
-/** 显示选择的局部更新：只改传进来的那几项。 */
-export function persistCalendarVisibility(
+export type CalendarHiddenTarget =
+  { kind: CalendarAutoKind } | { region: string } | { key: string };
+
+function withMember<T>(list: readonly T[], value: T, present: boolean): T[] {
+  const rest = list.filter((v) => v !== value);
+  return present ? [...rest, value] : rest;
+}
+
+/**
+ * 隐藏或恢复**一项**（类别 / 地区 / 单项）。
+ *
+ * 刻意是增量而不是「整份列表替换」：界面手里那份列表可能是旧的，连点两下时
+ * 第二次的整份替换会把第一次的改动盖掉。增量在锁内对着刚读出来的行应用，不会丢。
+ */
+export function persistCalendarHidden(
   saveId: string,
-  patch: Partial<
-    Pick<SaveCalendar, 'hiddenKinds' | 'hiddenRegions' | 'hiddenKeys' | 'localRegionOnly'>
-  >,
+  target: CalendarHiddenTarget,
+  hidden: boolean,
 ): Promise<SaveCalendar> {
   return mutate(saveId, (calendar) => {
-    const merged = coerceSaveCalendar(saveId, { ...calendar, ...patch });
-    calendar.hiddenKinds = merged.hiddenKinds;
-    calendar.hiddenRegions = merged.hiddenRegions;
-    calendar.hiddenKeys = merged.hiddenKeys;
-    calendar.localRegionOnly = merged.localRegionOnly;
+    if ('kind' in target) {
+      if (!AUTO_KINDS.includes(target.kind)) return;
+      calendar.hiddenKinds = withMember(calendar.hiddenKinds, target.kind, hidden);
+    } else if ('region' in target) {
+      if (target.region)
+        calendar.hiddenRegions = withMember(calendar.hiddenRegions, target.region, hidden);
+    } else if (target.key) {
+      calendar.hiddenKeys = withMember(calendar.hiddenKeys, target.key, hidden);
+    }
+  });
+}
+
+export function persistCalendarLocalRegionOnly(
+  saveId: string,
+  localRegionOnly: boolean,
+): Promise<SaveCalendar> {
+  return mutate(saveId, (calendar) => {
+    calendar.localRegionOnly = localRegionOnly === true;
   });
 }
 

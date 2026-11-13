@@ -62,7 +62,7 @@ interface CalendarItem {
   kind: 'user' | 'festival' | 'birthday';
   title: string;
   note?: string;
-  /** 地区标签（如「北境联盟」）；缺省 = 全大陆通行 */
+  /** 地区标签（如「东岸」）；缺省 = 全大陆通行 */
   region?: string;
   start: { month: number; day: number };
   /** 缺省 = 单日；跨年窗口（12 月 → 1 月）合法 */
@@ -89,16 +89,15 @@ interface CalendarItem {
 {
   "monthNames": ["（十二个具名月）"],
   "festivals": [
-    { "id": "new-year", "name": "新年", "month": 1, "day": 1, "note": "岁首" },
-    { "id": "founding-day", "name": "建国节", "month": 5, "day": 27, "region": "中央帝国" },
+    { "id": "opening", "name": "开年会", "month": 1, "day": 1 },
+    { "id": "west-day", "name": "西岸节", "month": 7, "day": 16, "region": "西岸" },
     {
-      "id": "grand-expo",
-      "name": "博览会",
-      "month": 12,
-      "day": 19,
-      "endDay": 21,
-      "region": "雾港",
-      "everyYears": 4,
+      "id": "every-five-years",
+      "name": "五年会",
+      "month": 11,
+      "day": 11,
+      "endDay": 13,
+      "everyYears": 5,
       "anchorYear": 488
     }
   ]
@@ -215,6 +214,13 @@ interface SaveCalendar {
 - 页头不显示具名月（内容侧尚无结构化月名），显示「纪元 + 年 · N 月」与季节。
 - 窄屏（≤ 760px）叠成一栏，日期格只留类别色点，不是「以近期列表为主视图」。
 - 删除玩家条目用浏览器原生确认框（与快照面板同款）。
+
+独立审查后的修正（2026-11-13）：
+
+- 显示选择的写入口是增量的 `persistCalendarHidden(saveId, 目标, 是否隐藏)` 与 `persistCalendarLocalRegionOnly`，不是整份列表替换（§7 表里的 `persistCalendarVisibility` 已不存在）。
+- 界面侧 store 在读到本存档的日历行之前是 `null`；面板此时显示读取中 / 读取失败，不渲染月视图，也不计算节庆与生日。这是 D3 在加载阶段的延伸。
+- 导入整库备份后，不属于任何现存存档的日历行会被清理（D26 的补充）。
+- 无具体日期的项只在举办年份列出。
 
 浏览器走查（2026-11-13，内置浏览器，占位内容 + 测试存档 + 手工写入的示例关键日期与生日）：两个入口都能打开；月格 30 天且星期落位正确；多日节庆连成一段；给定生日的角色显示「满 N 岁」，兜底生日的角色不出现；新增条目落库；类别隐藏与恢复生效；切到沉浸模式后自动项与「显示选择」入口消失，切回后恢复；375px 下无横向溢出；Esc 关闭；控制台无报错。未走查：真实内容包、真实游玩回合后的旧档回填、其余九个主题。
 

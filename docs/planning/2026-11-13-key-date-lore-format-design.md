@@ -17,25 +17,25 @@
 
 ### 2.1 格式必须覆盖的能力
 
-| #   | 能力                                               | 普查中的情形（去专名）                             |
-| --- | -------------------------------------------------- | -------------------------------------------------- |
-| F1  | 单日与连续多日，可跨月跨年                         | 几乎全部                                           |
-| F2  | 只精确到月 / 到季节 / 完全不定                     | 只写了「某月」「每年春季」或没写日期的节庆         |
-| F3  | 日期只是大约                                       | 正文写明日期无法预测、由观测决定的节庆；季节性现象 |
-| F4  | 多年一度                                           | 三年一度的选拔、四年一度的博览会                   |
-| F5  | 按月重复                                           | 每月举行的庆典                                     |
-| F6  | 地区：通行全大陆 / 一个势力 / 势力内多个更细的地点 | 全大陆通行的固定节庆；只在沿海或某公国举行的节庆   |
-| F7  | 一句话简介（区别于给模型读的正文）                 | 自由文本里括号内的说明；正文不能直接给玩家看       |
-| F8  | 别名                                               | 同一节庆在不同条目里的两种叫法                     |
-| F9  | 类别与标签                                         | 纪念日、宗教、赛事、集市、选拔考试；法定节日、休工 |
-| F10 | 重要程度                                           | 最高法定节日；全大陆通行的节庆                     |
-| F11 | 时刻说明                                           | 「一夜」「从日落到翌日日出」                       |
-| F12 | 节庆内的日程                                       | 第一天的开幕仪式、第三天的竞赛、最后一天的烟火     |
-| F13 | 一条条目承载多个日期                               | 一条势力文化条目里列了五个节庆                     |
-| F14 | 不公开的日期                                       | 隐秘派系的祭典                                     |
-| F15 | 仅发生一次的日期                                   | 现有节庆里没有；剧情节点会用到，顺手留出           |
+| #   | 能力                                               |
+| --- | -------------------------------------------------- |
+| F1  | 单日与连续多日，可跨月跨年                         |
+| F2  | 只精确到月 / 到季节 / 完全不定                     |
+| F3  | 日期只是大约                                       |
+| F4  | 多年一度                                           |
+| F5  | 按月重复                                           |
+| F6  | 地区：通行全大陆 / 一个势力 / 势力内多个更细的地点 |
+| F7  | 一句话简介（区别于给模型读的正文）                 |
+| F8  | 别名                                               |
+| F9  | 类别与标签                                         |
+| F10 | 重要程度                                           |
+| F11 | 时刻或时长说明                                     |
+| F12 | 节庆内的日程                                       |
+| F13 | 一条条目承载多个日期                               |
+| F14 | 不公开的日期                                       |
+| F15 | 仅发生一次的日期（现有内容里没有，为剧情节点预留） |
 
-明确**不建模**的：月相（「满月之夜」当固定日期处理）、相对日期（「某节前一周」直接写算好的日期）、一年多次且无日期（写进简介）、历史事件的起始年份（不引入纪元前年份）。
+明确**不建模**的：月相（按固定日期处理）、相对日期（直接写算好的日期）、一年多次且无日期（写进简介）、历史事件的起始年份（不引入纪元前年份）。
 
 ## 3. 格式
 
@@ -58,11 +58,11 @@ interface LoreKeyDate {
 
   /** 给玩家看的一句话（F7）。纯文本，不执行 EJS，建议 ≤ 60 字 */
   summary?: string;
-  /** 时刻或时长的补充说明（F11），如「从日落到翌日日出」 */
+  /** 时刻或时长的补充说明（F11），如「一整夜」 */
   timeNote?: string;
   /** 类别（F9），内容自定的短词，如「节庆」「纪念日」「赛事」 */
   category?: string;
-  tags?: string[]; // F9，如「法定节日」「休工」
+  tags?: string[]; // F9，如「休息日」
   /** 重要节日（F10），用于日历上的突出显示 */
   major?: boolean;
   /** 节庆内日程（F12）。`day` 是节庆的第几天，从 1 起 */
@@ -91,7 +91,7 @@ type KeyDateRepeat =
 - **R2　`end` 早于 `start` 表示跨年**（如 12/29–1/2），与 `annualWindow` 口径一致。
 - **R3　多年一度必须给 `anchorYear`**：`(年份 − anchorYear) % interval === 0` 的那些年举办。没有它无法判定哪一年有。
 - **R4　`repeat.unit` 为 `month` 时**，`when` 只能是 `precision: 'none'`，或 `precision: 'day'` 且 `start.month` / `end.month` 被忽略（只看日）。
-- **R5　整月都是节庆**（「考试月」这类）写成 `precision: 'day'` 的 1 日至 30 日；`precision: 'month'` 只表示「这个月里的某一天，哪天不知道」。两者含义不同。
+- **R5　整月都是节庆**的写成 `precision: 'day'` 的 1 日至 30 日；`precision: 'month'` 只表示「这个月里的某一天，哪天不知道」。两者含义不同。
 - **R6　`regions` 沿用 `activation.locations` 的匹配**：位置路径任一段包含所列名字即命中。多个名字是「或」。
 - **R7　`id` 在条目内唯一、定下后不改。** 玩家的显示选择按 `<条目 uid>#<id>` 记忆，改 `id` 等于换了一个节日。
 - **R8　读取侧容错，永不抛。** 坏的一项整项跳过并告警，不连累同条目的其他日期；`LoreKeyDate` 内部的未知字段保留不报错。
@@ -119,25 +119,25 @@ type KeyDateRepeat =
 
 ## 4. 示例
 
-以下名称均为虚构。
+以下名称、日期与描述均为虚构，只用来演示格式。
 
-**一条独立节庆条目**（`readWhen` 部分保持原样）：
+**一条独立条目带一个关键日期**（`readWhen` 部分保持原样）：
 
 ```json
 "extra": {
   "lore": {
     "keyDates": [
       {
-        "id": "harvest-festival",
-        "name": "丰收祭",
-        "when": { "precision": "day", "start": { "month": 9, "day": 8 }, "end": { "month": 9, "day": 14 } },
-        "regions": ["河谷公国"],
+        "id": "kite-fair",
+        "name": "风筝会",
+        "when": { "precision": "day", "start": { "month": 8, "day": 3 }, "end": { "month": 8, "day": 6 } },
+        "regions": ["东岸"],
         "category": "节庆",
-        "summary": "河谷的丰收庆典，新酒开桶，各地酿酒师同台竞赛。",
-        "timeNote": "七天七夜",
+        "summary": "给玩家看的一句话简介。",
+        "timeNote": "四天",
         "highlights": [
-          { "day": 1, "title": "开幕礼" },
-          { "day": 3, "title": "酿酒竞赛" }
+          { "day": 1, "title": "开场" },
+          { "day": 4, "title": "闭幕" }
         ]
       }
     ]
@@ -145,26 +145,23 @@ type KeyDateRepeat =
 }
 ```
 
-**一条文化条目承载多个日期**（节选）：
+**一条条目承载多个日期**：
 
 ```json
 "keyDates": [
   {
-    "id": "founding-day",
-    "name": "建国节",
-    "when": { "precision": "day", "start": { "month": 5, "day": 27 } },
-    "regions": ["中央帝国"],
+    "id": "west-day",
+    "name": "西岸节",
+    "when": { "precision": "day", "start": { "month": 7, "day": 16 } },
+    "regions": ["西岸"],
     "category": "纪念日",
-    "major": true,
-    "summary": "建国纪念日，首都阅兵，各地设宴。"
+    "major": true
   },
   {
-    "id": "exam-month",
-    "name": "考试月",
-    "when": { "precision": "day", "start": { "month": 6, "day": 1 }, "end": { "month": 6, "day": 30 } },
-    "regions": ["中央帝国"],
-    "category": "选拔",
-    "summary": "官员选拔考试，每年一次。"
+    "id": "whole-month",
+    "name": "整月节",
+    "when": { "precision": "day", "start": { "month": 2, "day": 1 }, "end": { "month": 2, "day": 30 } },
+    "regions": ["西岸"]
   }
 ]
 ```
@@ -172,29 +169,23 @@ type KeyDateRepeat =
 **其余几种形态：**
 
 ```json
-{ "id": "grand-expo", "name": "博览会",
-  "when": { "precision": "day", "start": { "month": 12, "day": 19 }, "end": { "month": 12, "day": 21 } },
-  "repeat": { "unit": "year", "interval": 4, "anchorYear": 488 },
-  "regions": ["雾港"], "category": "集市" }
+{ "id": "every-five-years", "name": "五年会",
+  "when": { "precision": "day", "start": { "month": 11, "day": 11 }, "end": { "month": 11, "day": 13 } },
+  "repeat": { "unit": "year", "interval": 5, "anchorYear": 488 } }
 
-{ "id": "first-frost-night", "name": "初霜夜",
-  "when": { "precision": "day", "start": { "month": 10, "day": 18 } },
-  "approximate": true, "regions": ["林地公国"], "timeNote": "一夜",
-  "summary": "第一场重霜降下的那一夜，确切日期由观测后通报。" }
+{ "id": "approximate-day", "name": "大约节",
+  "when": { "precision": "day", "start": { "month": 4, "day": 22 } },
+  "approximate": true, "timeNote": "一夜" }
 
-{ "id": "masquerade", "name": "假面祭",
-  "when": { "precision": "month", "month": 5 },
-  "regions": ["海岛王国"], "timeNote": "七天七夜" }
+{ "id": "month-only", "name": "某月节", "when": { "precision": "month", "month": 7 } }
 
-{ "id": "graduation", "name": "毕业典礼",
-  "when": { "precision": "season", "season": "spring" }, "regions": ["学院城"] }
+{ "id": "season-only", "name": "某季节", "when": { "precision": "season", "season": "spring" } }
 
-{ "id": "monthly-rite", "name": "月度庆典",
-  "when": { "precision": "none" }, "repeat": { "unit": "month" }, "regions": ["矿镇"] }
+{ "id": "monthly-undated", "name": "月会",
+  "when": { "precision": "none" }, "repeat": { "unit": "month" } }
 
-{ "id": "year-end-day", "name": "岁末日",
-  "when": { "precision": "day", "start": { "month": 12, "day": 30 } },
-  "major": true, "summary": "一年的最后一天。" }
+{ "id": "last-day", "name": "年末日",
+  "when": { "precision": "day", "start": { "month": 12, "day": 30 } } }
 ```
 
 ## 5. 日历如何消费
@@ -211,7 +202,7 @@ type KeyDateRepeat =
 
 ## 6. 内容转换前要裁定的内容问题
 
-普查发现了八处原文本身不清楚或与 30 天历法冲突的地方（如写在 31 日的节庆、多年一度但没写起算年、自称在另一节庆期间但日期不重叠）。清单涉及真实内容，不在公开仓；转换前需逐条裁定。
+普查发现了若干处原文本身不清楚或与 30 天历法冲突的地方。清单涉及真实内容，不在公开仓；转换前需逐条裁定。
 
 ## 7. 实施顺序（本文之后）
 
