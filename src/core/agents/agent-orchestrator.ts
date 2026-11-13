@@ -1,5 +1,5 @@
 import type { ChatMessage } from '../types/types';
-import { acceptDirectContext, invalidateDirectContext } from '../prompts/direct-context-session';
+import { acceptDirectContext, discardDirectContext } from '../prompts/direct-context-session';
 import type { DirectCachePolicy } from '../types/types-api';
 /**
  * Agent 编排引擎 — DAG 依赖调度 + 并行/串行混合执行
@@ -387,6 +387,13 @@ export class AgentOrchestrator {
     await acceptDirectContext(ticket, { ...result, acceptedMessages });
   }
 
+  /** 本次尝试未接纳（提交前失败或取消）：只丢弃它，保留上一份已接纳的缓存会话。 */
+  discardDirectCache(): void {
+    if (!this.directCache) return;
+    discardDirectContext(this.directCache.ticket);
+    this.directCache = undefined;
+  }
+
   async runDirect(
     combat: DirectCombatRecord | null,
     cachePolicy?: DirectCachePolicy,
@@ -430,15 +437,17 @@ export class AgentOrchestrator {
           maxRetries: 0,
         }),
       );
-      this.assertCurrent();
       this.directCache = cache;
+      this.assertCurrent();
       this.results.set('direct_main', result);
       this.context.agentOutputs.set('story', draft.content);
       await this.events.onAgentComplete?.(result);
       this.events.onStageComplete?.(1);
       return draft;
     } catch (error) {
-      if (cachePolicy) invalidateDirectContext(this.saveId);
+      // generateDirectTurn 已自行处置本次票据（拒绝/取消丢弃，传输失败整体失效）；
+      // 这里只兜住「生成成功但随后被取消」那一张。
+      this.discardDirectCache();
       this.events.onAgentError?.(
         'direct_main',
         error instanceof Error ? error.message : String(error),

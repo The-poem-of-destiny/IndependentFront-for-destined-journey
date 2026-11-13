@@ -1188,8 +1188,13 @@ export class GamePipeline {
       activityMessage = '世界的回应在此中断，已写入的状态不会自动撤销；可回退后再次尝试。';
       return false;
     } finally {
-      if (this.generationMode === 'direct_cached' && !this.directCommitted)
-        invalidateDirectContext(this.saveId);
+      if (this.generationMode === 'direct_cached' && !this.directCommitted) {
+        // 核心提交已开始却未确认接纳：状态可能已落库而缓存缺这一楼，只能整体失效。
+        // 提交前失败（输出被拒、校验不过、取消）不改存档，失败楼也不进历史，
+        // 上一份已接纳会话仍与历史一致 —— 只丢弃本次尝试，重试与下一楼继续复用前缀。
+        if (this.finalTurnCommitStarted) invalidateDirectContext(this.saveId);
+        else this.orch?.discardDirectCache();
+      }
       if (
         !this.directCommitted &&
         activityOutcome !== 'completed' &&

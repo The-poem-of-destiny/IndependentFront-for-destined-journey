@@ -539,11 +539,12 @@ describe.each(['direct', 'direct_cached'] as const)(
       );
       return { game, pipeline };
     }
-    function directNetwork(valid = true) {
+    function directNetwork(valid: boolean | (() => boolean) = true) {
       return vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (this: any) {
+        const ok = typeof valid === 'function' ? valid() : valid;
         const raw =
           this.agentId === 'direct_main'
-            ? `<maintext>旅人继续前行。</maintext><character_updates>{"characters":[]}</character_updates>${valid ? '<direct_updates>{"version":1,"world":{},"time":{"delta_time":0},"entities":[],"state":{"characters":{"delta":[{"name":"旅人","path":"hp","amount":-10}]}},"effects":[],"plot":{},"combat":null,"diceUsed":[]}</direct_updates>' : ''}`
+            ? `<maintext>旅人继续前行。</maintext><character_updates>{"characters":[]}</character_updates>${ok ? '<direct_updates>{"version":1,"world":{},"time":{"delta_time":0},"entities":[],"state":{"characters":{"delta":[{"name":"旅人","path":"hp","amount":-10}]}},"effects":[],"plot":{},"combat":null,"diceUsed":[]}</direct_updates>' : ''}`
             : this.agentId === 'memory_summary'
               ? JSON.stringify({ segments: [{ content: '旅人继续前行。' }] })
               : '{}';
@@ -587,6 +588,31 @@ describe.each(['direct', 'direct_cached'] as const)(
       expect(JSON.stringify(second)).toContain('旅人继续前行');
       expect((await getDatabase().characters.get('player'))?.hp).toBe(60);
     });
+    it.runIf(mode === 'direct_cached')(
+      'retries a rejected attempt on the accepted cached prefix instead of rebuilding',
+      async () => {
+        const { game, pipeline } = await directFixture();
+        let valid = true;
+        const chat = directNetwork(() => valid);
+        expect(await pipeline.run('前进')).toBe(true);
+        valid = false;
+        expect(await pipeline.run('继续前进')).toBe(false);
+        const failed = game.messages.find((m) => m.role === 'user' && m.content === '继续前进')!;
+        expect(failed.storyTurnStatus).toBe('failed');
+        valid = true;
+        expect(await pipeline.run('继续前进', undefined, false, failed.id)).toBe(true);
+        const mainCalls = chat.mock.calls.filter(
+          (_, index) => (chat.mock.contexts[index] as any).agentId === 'direct_main',
+        );
+        expect(mainCalls).toHaveLength(3);
+        const first = mainCalls[0][0].messages;
+        const retry = mainCalls[2][0].messages;
+        expect(retry.slice(0, first.length)).toEqual(first);
+        expect(retry[first.length]).toMatchObject({ role: 'assistant' });
+        expect(retry[first.length].content).toContain('<direct_updates>');
+        expect((await getDatabase().characters.get('player'))?.hp).toBe(60);
+      },
+    );
     it('accepts one main call, keeps Story v2 summaries, blocks replay and never enters side chains', async () => {
       const { game, pipeline } = await directFixture();
       const chat = directNetwork();

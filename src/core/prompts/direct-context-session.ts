@@ -202,6 +202,14 @@ export async function acceptDirectContext(
   }
 }
 
+/**
+ * 丢弃一次未接纳的尝试：模型输出被拒绝、取消或提交前校验失败时，存档未变，
+ * 上一份已接纳的会话仍与历史一致，下一次尝试继续复用其前缀。已接纳或已丢弃的票据为空操作。
+ */
+export function discardDirectContext(ticket: DirectCacheTicket): void {
+  pending.delete(ticket);
+}
+
 export function invalidateDirectContext(saveId: string): void {
   generations.delete(saveId);
   sessions.delete(saveId);

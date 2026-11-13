@@ -98,9 +98,9 @@ function setup(v2: boolean) {
   };
 }
 
-function streamResponse(complete: boolean) {
+function streamResponse(complete: boolean, text = raw) {
   const events =
-    [raw.slice(0, 11), raw.slice(11, 70), raw.slice(70)]
+    [text.slice(0, 11), text.slice(11, 70), text.slice(70)]
       .map(
         (content) =>
           `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: null }] })}\n\n`,
@@ -200,6 +200,42 @@ it.each([false, true])(
     invalidateDirectContext('cached-wire');
   },
 );
+
+it.each([
+  ['rejected output', false],
+  ['provider failure', true],
+] as const)('a %s attempt rebuilds the cached session on retry: %s', async (_, rebuilds) => {
+  const saveId = 'cached-failure';
+  invalidateDirectContext(saveId);
+  const { input, client } = setup(false);
+  input.cache = { saveId, policy: 'prefix' };
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => streamResponse(true));
+  try {
+    const first = await generateDirectTurn(input, client);
+    await acceptDirectContext(first.cache!.ticket, { ...first.cache!, acceptedMessages: [] });
+    fetch.mockImplementationOnce(async () =>
+      rebuilds
+        ? new Response('Unavailable', { status: 503 })
+        : streamResponse(true, '<maintext>缺少更新块的回复。</maintext>'),
+    );
+    input.context.userInput = '失败的尝试';
+    await expect(generateDirectTurn(input, client)).rejects.toThrow();
+    input.context.userInput = '再试一次';
+    const retry = await generateDirectTurn(input, client);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(retry.cache!.ticket.rebaseReason).toBe(rebuilds ? 'missing_session' : undefined);
+    if (!rebuilds)
+      expect(retry.result.requestMessages!.slice(0, first.result.requestMessages!.length)).toEqual(
+        first.result.requestMessages,
+      );
+    const prompt = JSON.stringify(retry.result.requestMessages);
+    expect(prompt).not.toContain('失败的尝试');
+    expect(prompt).not.toContain('缺少更新块');
+    expect(prompt).toContain('再试一次');
+  } finally {
+    invalidateDirectContext(saveId);
+  }
+});
 
 it.each([false, true])(
   'cached layout keeps regional, recalled and opted-in data current (v2=%s)',
