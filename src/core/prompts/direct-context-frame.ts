@@ -74,7 +74,7 @@ export function buildDirectCharacterSections(
 /**
  * 记忆库按条分区（`memory/记忆编号`）：新增记忆只追加一个键，删除走 `remove`，编辑只替换那一条。
  * 整块一个键时，每楼新增一条记忆都会重发全库，长存档每一两楼就因 `transcript_growth` 重建。
- * 编号是零填充流水号，规范化序列化按键排序后仍是时间顺序。
+ * 规范化序列化按键的字典序排列，与原先按 Dexie 主键读出的顺序一致（6 位零填充流水号内即时间顺序）。
  */
 export function buildDirectMemorySections(
   memories: readonly MemoryRecord[],

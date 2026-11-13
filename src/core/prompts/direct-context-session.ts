@@ -78,7 +78,7 @@ function size(messages: LlmMessage[]): number {
   );
 }
 
-export const DIRECT_CACHE_PROTOCOL = `上下文采用直出缓存会话。direct_context 是本轮权威输入：set 中的每个顶层字段整块替换旧值，remove 明确删除旧字段；禁止把替换解释成数值增减或追加物品。未变化的字段沿用最近值。character/角色名/profile、skills、inventory、statusEffects 分别是该角色的档案、技能、库存和状态效果；资源单列在 resources，按 name 对应角色。空数组表示已清空，remove 后该分区不再有效。memory/记忆编号 各为一条长期记忆，所有仍有效的 memory/ 分区合起来就是完整记忆库：新记忆只出现在当轮 set，未再出现的旧记忆依然有效，被 remove 的记忆已删除。currentLore、regionLore、turnLore 及 authoredTurn 只以最新分区为准，被替换或移除的旧条目不再是本轮激活规则。旧 assistant 中的状态声明只属于历史，不再执行或重复领奖。turn_context.dice_pool 的每项为 [骰面数,骰值]，数组下标就是 diceUsed.index。每轮只使用最新 turn_context 的玩家输入、骰池与召回，不使用旧轮骰池。战斗与资源以本轮 app 状态为准。`;
+export const DIRECT_CACHE_PROTOCOL = `上下文采用直出缓存会话。direct_context 是本轮权威输入：set 中的每个顶层字段整块替换旧值，remove 明确删除旧字段；禁止把替换解释成数值增减或追加物品。未变化的字段沿用最近值。character/角色名/profile、skills、inventory、statusEffects 分别是该角色的档案、技能、库存和状态效果；资源单列在 resources，按 name 对应角色。空数组表示已清空，remove 后该分区不再有效。若出现 memory/记忆编号 分区，每个分区是一条长期记忆，所有仍有效的 memory/ 分区合起来就是完整记忆库：新记忆只出现在当轮 set，未再出现的旧记忆依然有效，被 remove 的记忆已删除。currentLore、regionLore、turnLore 及 authoredTurn 只以最新分区为准，被替换或移除的旧条目不再是本轮激活规则。旧 assistant 中的状态声明只属于历史，不再执行或重复领奖。turn_context.dice_pool 的每项为 [骰面数,骰值]，数组下标就是 diceUsed.index。每轮只使用最新 turn_context 的玩家输入、骰池与召回，不使用旧轮骰池。战斗与资源以本轮 app 状态为准。`;
 
 export async function prepareDirectContext(input: {
   saveId: string;

@@ -290,7 +290,8 @@ it('legacy memory growth appends one memory per turn instead of rebuilding the s
     const first = await generateDirectTurn(input, client);
     expect(JSON.stringify(first.cache!.ticket.messages)).toContain('memory/MEM000020');
     await acceptDirectContext(first.cache!.ticket, { ...first.cache!, acceptedMessages: [] });
-    // 旧的整块记忆库在这个规模下第 3 楼就会因 transcript_growth 重建
+    // 整块重发记忆库时，这个规模下每楼增量约 8.5k 字、第 3 楼触发 transcript_growth：
+    // 下面的「不重建」与「增量 < 5000」两条断言各自都会拦住
     for (let turn = 2; turn <= 5; turn++) {
       input.context.memories = [...input.context.memories!, memory(19 + turn)];
       input.context.userInput = `第${turn}楼`;
