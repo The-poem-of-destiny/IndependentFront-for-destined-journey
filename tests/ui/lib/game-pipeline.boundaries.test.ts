@@ -18,6 +18,7 @@ import {
 } from '@engine/memory/memory-context';
 import { storyTurnSource } from '@engine/memory/story-memory-source';
 import { withSaveWriteLock } from '@engine/state/state-write-queue';
+import { StateManager } from '@engine/state/state-manager';
 import { resetPromptSessionsForTest } from '@engine/prompts/prompt-session-assembler';
 import type { ChatMessage, SaveSlot } from '@engine/types/types';
 import { createDefaultCharacterState } from '@engine/types/types';
@@ -610,6 +611,37 @@ describe.each(['direct', 'direct_cached'] as const)(
         expect(retry.slice(0, first.length)).toEqual(first);
         expect(retry[first.length]).toMatchObject({ role: 'assistant' });
         expect(retry[first.length].content).toContain('<direct_updates>');
+        expect((await getDatabase().characters.get('player'))?.hp).toBe(60);
+      },
+    );
+    it.runIf(mode === 'direct_cached').each([
+      ['before', false],
+      ['after', true],
+    ] as const)(
+      'a commit failure %s the core commit started rebuilds the cached session: %s',
+      async (_, started) => {
+        const { game, pipeline } = await directFixture();
+        const chat = directNetwork();
+        expect(await pipeline.run('前进')).toBe(true);
+        vi.spyOn(StateManager.prototype, 'commitDirectTurn').mockImplementationOnce(
+          async (input) => {
+            if (started) input.onCommitStart?.();
+            throw new Error('写入失败');
+          },
+        );
+        expect(await pipeline.run('继续前进')).toBe(false);
+        const failed = game.messages.find((m) => m.role === 'user' && m.content === '继续前进')!;
+        expect(await pipeline.run('继续前进', undefined, false, failed.id)).toBe(true);
+        const mainCalls = chat.mock.calls.filter(
+          (_, index) => (chat.mock.contexts[index] as any).agentId === 'direct_main',
+        );
+        expect(mainCalls).toHaveLength(3);
+        const retry = mainCalls[2][0].messages;
+        // 复用会话时上一楼原始回复（含控制块）原样留在 transcript；冷建只带正文
+        const reusesAcceptedRaw = retry.some(
+          (m: any) => m.role === 'assistant' && String(m.content).includes('<direct_updates>'),
+        );
+        expect(reusesAcceptedRaw).toBe(!started);
         expect((await getDatabase().characters.get('player'))?.hp).toBe(60);
       },
     );

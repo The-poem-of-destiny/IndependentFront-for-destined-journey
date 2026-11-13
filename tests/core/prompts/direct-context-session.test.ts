@@ -101,6 +101,31 @@ describe('accepted direct context', () => {
     expect(retry.messages[retry.messages.length - 1]?.content).toContain('retry');
   });
 
+  it('cold-rebuilds after two consecutive rejected attempts and resets on acceptance', async () => {
+    const first = await prepareDirectContext(input());
+    await acceptDirectContext(first, { rawResponse: 'accepted', acceptedMessages: [message()] });
+    const next = { ...input(), history: [message()] };
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const rejected = await prepareDirectContext({ ...next, turn: `rejected ${attempt}` });
+      expect(rejected.rebaseReason).toBeUndefined();
+      discardDirectContext(rejected);
+    }
+    const rebuilt = await prepareDirectContext({ ...next, turn: 'third try' });
+    expect(rebuilt.rebaseReason).toBe('repeated_rejection');
+    expect(rebuilt.revision).toBe(1);
+    await acceptDirectContext(rebuilt, {
+      rawResponse: 'recovered',
+      acceptedMessages: [{ ...message(), id: 'a2' }],
+    });
+    const after = await prepareDirectContext({
+      ...next,
+      history: [message(), { ...message(), id: 'a2' }],
+      turn: 'after recovery',
+    });
+    expect(after.rebaseReason).toBeUndefined();
+    expect(after.revision).toBe(2);
+  });
+
   it.each(['history', 'configuration', 'budget'] as const)(
     'rebuilds on %s changes using the fresh memory baseline',
     async (change) => {

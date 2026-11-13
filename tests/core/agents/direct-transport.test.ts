@@ -202,9 +202,10 @@ it.each([false, true])(
 );
 
 it.each([
-  ['rejected output', false],
-  ['provider failure', true],
-] as const)('a %s attempt rebuilds the cached session on retry: %s', async (_, rebuilds) => {
+  ['rejected output', 'keeps', false],
+  ['cancelled', 'keeps', false],
+  ['provider failure', 'drops', true],
+] as const)('a %s attempt %s the accepted cached session', async (failure, _, rebuilds) => {
   const saveId = 'cached-failure';
   invalidateDirectContext(saveId);
   const { input, client } = setup(false);
@@ -213,13 +214,20 @@ it.each([
   try {
     const first = await generateDirectTurn(input, client);
     await acceptDirectContext(first.cache!.ticket, { ...first.cache!, acceptedMessages: [] });
-    fetch.mockImplementationOnce(async () =>
-      rebuilds
+    const controller = new AbortController();
+    if (failure === 'cancelled') input.config.abortSignal = controller.signal;
+    fetch.mockImplementationOnce(async () => {
+      if (failure === 'cancelled') {
+        controller.abort();
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      }
+      return failure === 'provider failure'
         ? new Response('Unavailable', { status: 503 })
-        : streamResponse(true, '<maintext>缺少更新块的回复。</maintext>'),
-    );
+        : streamResponse(true, '<maintext>缺少更新块的回复。</maintext>');
+    });
     input.context.userInput = '失败的尝试';
     await expect(generateDirectTurn(input, client)).rejects.toThrow();
+    input.config.abortSignal = undefined;
     input.context.userInput = '再试一次';
     const retry = await generateDirectTurn(input, client);
     expect(fetch).toHaveBeenCalledTimes(3);
