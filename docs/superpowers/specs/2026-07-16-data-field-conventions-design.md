@@ -1,5 +1,11 @@
 # 《命定之诗》游戏数据字段规范（数据字典）
 
+## 日历字段补充（2026-11-13）
+
+- 新表 `saveCalendars`（Dexie v33）：**存档私有**，主键 `saveId`，每存档至多一行；形状 `SaveCalendar { mode, entries, hiddenKinds, hiddenRegions, hiddenKeys, localRegionOnly, updatedAt }`。玩家经界面写入，AI 不读不写。不进快照载荷；进整库备份与单存档导出；删档级联。
+- `WorldBookEntry.extra.lore.keyDates?: LoreKeyDate[]`：作者内容，关键日期（节庆等）。只供日历，不进提示词。格式见 `docs/planning/2026-11-13-key-date-lore-format-design.md`。
+- 日历项的稳定键：`user:<条目 id>` / `<世界书条目 uid>#<关键日期 id>` / `birthday:<characterId>`。
+
 ## 角色年龄字段补充（2026-11-13）
 
 - `CharacterState.ageAnchor?: { startAge, month, day }`：开局时刻的周岁与生日，年龄的唯一真源；当前年龄由 `ageAt(ageAnchor, gameTime)` 推导，不落库，也不保存出生年。账务字段（铁律 3）：仅 Code 经 `ensureCharacterAge` 写入，不进 `update_character` 白名单。

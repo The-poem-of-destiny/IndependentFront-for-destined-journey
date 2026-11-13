@@ -36,6 +36,7 @@ import MemoryPanel from './MemoryPanel.vue';
 import SnapshotPanel from './SnapshotPanel.vue';
 import CgGalleryPanel from './CgGalleryPanel.vue';
 import MapPanel from './MapPanel.vue';
+import CalendarPanel from './CalendarPanel.vue';
 import DebugPanel from './DebugPanel.vue';
 import MiniPlayer from './MiniPlayer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
@@ -541,6 +542,16 @@ function onModalOpenChange(v: boolean) {
       @update:open="onModalOpenChange"
     >
       <MapPanel />
+    </AppModal>
+    <AppModal
+      title="日历"
+      :open="game.activeModal === 'calendar'"
+      size="xxl"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <CalendarPanel />
     </AppModal>
     <AppModal
       title="调试 & 导出"

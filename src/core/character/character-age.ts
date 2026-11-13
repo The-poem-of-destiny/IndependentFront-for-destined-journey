@@ -106,6 +106,29 @@ export function ageAt(anchor: CharacterAgeAnchor, now: Now): number {
   return Math.max(0, anchor.startAge + birthdaysSinceStart(anchor, now));
 }
 
+/**
+ * 角色在某一年的生日当天满几岁。**不钳制**：结果 ≤ 0 表示那一年角色尚未出生（0 = 出生当天）。
+ * 日历用它决定某年的生日要不要显示、显示几岁。
+ */
+export function ageTurningInYear(anchor: CharacterAgeAnchor, year: number): number {
+  return (
+    anchor.startAge + birthdaysSinceStart(anchor, { year, month: anchor.month, day: anchor.day })
+  );
+}
+
+/**
+ * 生日是给定的还是兜底的。锚点本身不记这件事，但线索原件仍留在角色记录上：
+ * 作者定义或实例自带线索里任一能解析出生日，即为给定；否则生日是兜底的 1 月 1 日。
+ */
+export function hasGivenBirthday(
+  character: Pick<CharacterState, 'definition' | 'customFields'>,
+): boolean {
+  return (
+    parseAgeHint(character.definition).birthday !== undefined ||
+    parseAgeHint(character.customFields).birthday !== undefined
+  );
+}
+
 /** 已知角色在 `now` 这一刻的年龄，反推开局时的年龄。 */
 function startAgeFrom(ageNow: number, birthday: Birthday, now: Now): number {
   return ageNow - birthdaysSinceStart(birthday, now);

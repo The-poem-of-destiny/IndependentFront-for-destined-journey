@@ -267,6 +267,12 @@ docs/
 │                                       # ✅ API 池默认采样参数 + 自定义请求头（2026-09-30 已实施，真机待验证）：
 │                                       # 参数跟随模型（Agent 覆写 > 池默认 > 内容包默认层 > 兜底）+ headerOverrides
 │                                       # 经 X-Custom-Headers 交 BFF、受保护头名两层各验一次
+├── planning/2026-11-13-key-date-lore-format-design.md
+│                                       # 🆕 世界书「关键日期」格式（`extra.lore.keyDates`）← 改节庆/日期元数据必读
+│                                       # 引擎侧已实施；内容仓尚未转换。每月 30 天；不进提示词
+├── planning/2026-11-13-calendar-system-v1-design.md
+│                                       # 🆕 日历系统 v1（✅ 已实施，界面已浏览器走查，待真机游玩验证）
+│                                       # 按存档隔离、完全本地；沉浸 / 普通两种模式；Dexie v33 `saveCalendars`
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 

@@ -744,6 +744,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               `game.activeModal` 是**单选位**，十个取值：items / characters /
 │   │   │                               quests / plot / memory / snapshots / gallery / workshop / map /
 │   │   │                               debug（最后一个还要 `s.developerMode`）
+│   │   │                               📌 2026-11-13：新增第十一个取值 `calendar`（日历 v1），
+│   │   │                                  侧栏工具相应多一项；场景栏日期行也打开它
 │   │   │                               🔴 不占这个位的两类东西别顺手塞进来：迷你播放器是**浮动卡片**
 │   │   │                                  （§6.2，必须先于 showModal 拦下），CharacterViewerModal 是
 │   │   │                                  **场景栏自己的一层**
@@ -881,6 +883,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                  三元组解析，而索引对同一个位只认一个胜出行。不去重就是
 │   │   │                                  两格标题与图都一样、界面上无从区分
 │   │   ├── portrait-messages.ts     ← [Q-25] 画像导入路径的文案层（纯函数，零副作用，不 mount 可测）
+│   │   ├── CalendarPanel.vue        ← 🆕 [日历 v1 / 2026-11-13] 按存档的本地日历（`activeModal === 'calendar'`）：
+│   │   │                               月视图（固定 30 格）/ 当日详情 / 未来 30 天 / 条目增删改 / 显示选择 / 模式切换。
+│   │   │                               来源与视图计算全在 `@engine/calendar/*`，措辞与草稿转换在 `calendar-panel.ts`，
+│   │   │                               读写经 `stores/calendar-store.ts`（真源 Dexie `saveCalendars`）。
+│   │   │                               🔴 日历不进任何提示词；沉浸模式下节庆与生日**不计算**，
+│   │   │                                  连「显示选择」入口都不渲染（界面本身不该透露它们存在）
+│   │   │                               🔴 不展示世界书条目正文，只用 `keyDates` 上的名称与 `summary`
 │   │   ├── QuestsPanel.vue / PlotPanel.vue / MemoryPanel.vue / SnapshotPanel.vue / MiniPlayer.vue
 │   │   │                               🔴 SnapshotPanel 自**快照拆表 v22**（2026-08-17）起只读
 │   │   │                                  `SnapshotMeta.preview`（玩家台词 / 游戏时间），**不再拉整份

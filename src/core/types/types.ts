@@ -89,6 +89,56 @@ export interface WorldBookEntry {
  */
 export type LoreSection = 'fixed' | 'region' | 'turn';
 
+/** 关键日期里的「月-日」。历法 12 月 × 30 日；按月重复的项可以省略月份。 */
+export interface LoreKeyDateMonthDay {
+  month?: number; // 1-12
+  day: number; // 1-30
+}
+
+export type LoreKeyDateWhen =
+  /** 单日或连续多日；`end` 早于 `start` 表示跨年 */
+  | { precision: 'day'; start: LoreKeyDateMonthDay; end?: LoreKeyDateMonthDay }
+  /** 在某月，具体哪天不定（整月都是节庆请写成 1 日至 30 日的 `day` 范围） */
+  | { precision: 'month'; month: number }
+  | { precision: 'season'; season: 'spring' | 'summer' | 'autumn' | 'winter' }
+  /** 有这个日子，日期不定 */
+  | { precision: 'none' };
+
+export type LoreKeyDateRepeat =
+  /** `interval` 缺省 1；大于 1 时必须给 `anchorYear`，`(年 − anchorYear) % interval === 0` 的年份举办 */
+  | { unit: 'year'; interval?: number; anchorYear?: number }
+  | { unit: 'month' }
+  | { unit: 'once'; year: number };
+
+/**
+ * 世界书条目上的关键日期（节庆、纪念日等）。只供本地日历显示，**不进入任何提示词**；
+ * 给模型读的仍是条目正文。格式见 docs/planning/2026-11-13-key-date-lore-format-design.md。
+ */
+export interface LoreKeyDate {
+  /** 条目内唯一的 slug，定下后不改；全局稳定键 = `<条目 uid>#<id>` */
+  id: string;
+  name: string;
+  aliases?: string[];
+  when: LoreKeyDateWhen;
+  /** 缺省 = 每年 */
+  repeat?: LoreKeyDateRepeat;
+  /** 日期只是大约 */
+  approximate?: boolean;
+  /** 地区名，匹配规则同 `activation.locations`；缺省或空 = 通行全大陆 */
+  regions?: string[];
+  /** 给玩家看的一句话。纯文本，不执行 EJS */
+  summary?: string;
+  /** 时刻或时长的补充说明 */
+  timeNote?: string;
+  category?: string;
+  tags?: string[];
+  major?: boolean;
+  /** 节庆内日程；`day` 是节庆的第几天，从 1 起 */
+  highlights?: Array<{ day: number; title: string }>;
+  /** 缺省 true；false = 不自动出现在玩家日历上 */
+  public?: boolean;
+}
+
 /** Annual dates use the engine calendar (12 months of 30 days). */
 export interface LoreAnnualWindow {
   start: { month: number; day: number };
@@ -150,6 +200,8 @@ export interface LoreEntryMeta {
   priority?: number;
   /** 显式拆分来源：父条目 UID 与分片序号。 */
   source?: { parentUid: string; part: number };
+  /** 关键日期（本地日历用）。运行期读取走 `parseLoreKeyDates`，不直接信任这里的形状。 */
+  keyDates?: LoreKeyDate[];
 }
 
 /** 书级组织元数据：只承载分类与命名空间；读取范围 / Story 放置逐条目声明。 */

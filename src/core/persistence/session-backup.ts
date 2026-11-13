@@ -65,6 +65,8 @@ import type {
 } from '../types/types';
 import type { SceneImageRecord, CharacterSessionAppearance } from '../types/types-image';
 import type { CharacterChronicleEntry } from '../types/types-character';
+import type { SaveCalendar } from '../types/types-calendar';
+import { remapSaveCalendar } from '../calendar/calendar-store';
 
 // ═══════════════════════════════════════════════════════════
 // 类型
@@ -126,6 +128,8 @@ export interface SessionBackup {
   profile: SaveProfile | null;
   characters: CharacterState[];
   characterChronicle?: CharacterChronicleEntry[];
+  /** v33 起；本存档的日历行（至多一行）。旧备份缺席 = 导入后是默认日历 */
+  saveCalendar?: SaveCalendar | null;
   messages: ChatMessage[];
   /**
    * v22 拆表后是**元数据行**；整档载荷在下面的 `snapshotPayloads`。
@@ -339,6 +343,7 @@ export async function exportSessionSave(
   // 表清单与 deleteSaveSlot 同源，唯独不含 sceneImageBlobs（字节永不随行）
   const [
     profile,
+    saveCalendar,
     characterChronicle,
     characters,
     messages,
@@ -357,6 +362,7 @@ export async function exportSessionSave(
     packs,
   ] = await Promise.all([
     db.saveProfiles.get(saveId),
+    db.saveCalendars.get(saveId),
     db.characterChronicle.where('saveId').equals(saveId).toArray(),
     db.characters.where('saveId').equals(saveId).toArray(),
     db.messages.where('saveId').equals(saveId).toArray(),
@@ -417,6 +423,7 @@ export async function exportSessionSave(
     profile: profile ? structuredClone(profile) : null,
     characters: structuredClone(characters),
     characterChronicle: structuredClone(characterChronicle),
+    saveCalendar: saveCalendar ? structuredClone(saveCalendar) : null,
     messages: structuredClone(messages),
     snapshots: structuredClone(snapshots),
     snapshotPayloads: structuredClone(snapshotPayloads),
@@ -799,6 +806,10 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
         },
       ];
     });
+  // 日历：换新存档 id，隐藏的生日键随角色 id 重映射；备份里没有这一行就不写（读取侧回落默认值）
+  const nextSaveCalendar = asRecord(rec.saveCalendar)
+    ? remapSaveCalendar(rec.saveCalendar, newSaveId, (id) => charIds.peek(id))
+    : null;
   const nextCharacterChronicle = remapChronicle(
     characterChronicle,
     new Set(characters.map((c) => c.id)),
@@ -972,6 +983,7 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       db.sceneImages,
       db.characterAppearances,
       db.characterChronicle,
+      db.saveCalendars,
       db.storyTurnSummaries,
       db.storyArchives,
       db.storyArchiveRetries,
@@ -1005,6 +1017,7 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       if (nextCharacters.length > 0) await db.characters.bulkPut(nextCharacters);
       if (nextCharacterChronicle.length > 0)
         await db.characterChronicle.bulkPut(nextCharacterChronicle);
+      if (nextSaveCalendar) await db.saveCalendars.put(nextSaveCalendar);
       if (nextMessages.length > 0) await db.messages.bulkPut(nextMessages);
       if (nextSnapshots.length > 0) await db.snapshots.bulkPut(nextSnapshots);
       if (nextSnapshotPayloads.length > 0) await db.snapshotPayloads.bulkPut(nextSnapshotPayloads);

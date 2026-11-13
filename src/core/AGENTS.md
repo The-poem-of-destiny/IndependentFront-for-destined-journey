@@ -19,6 +19,8 @@
 - `content/lore-routing.ts`：双模式唯一 audiences 权限、停用/排除与依赖闭包共同判据（含 EJS 间接读取）、旧作者默认映射与诊断；Agent 世界书清单已退役。
 - `memory/story-memory-source.ts`：生成/读取/锁内提交共用完整来源与正文指纹；v29 `storyArchiveRetries` 绑定原判断回合自动恢复，不以后一轮证据替代。旧缺指纹记录失效可补建，语义未知不伪造。
 - `content/lore-selection.ts`：无正文目录、独立选择调用、区域快照键、依赖闭包；`content/lore-protocol.ts` 验证显式路由修订。
+- 日历 v1：`calendar/calendar-{sources,view,store}.ts` + `types/types-calendar.ts`。按存档隔离、完全本地；来源是世界书 `keyDates`、已登场角色生日与玩家条目。Dexie v33 `saveCalendars` 每存档一行，**不进快照**，进两种备份，删档级联。🔴 `prompts/` `agents/` `memory/` 不得引用日历模块（`tests/calendar-isolation-gate.test.ts`）。界面未做。设计见 [日历系统 v1](../../docs/planning/2026-11-13-calendar-system-v1-design.md)。
+- `content/lore-key-dates.ts`：条目元数据 `extra.lore.keyDates`（节庆等关键日期）的严格校验、容错解析与日期判定，每月 30 天。🔴 只供本地日历，**不进入任何提示词**，也不参与 `regionSnapshotKey`；内容包安装校验的字段白名单在 `lore-protocol.ts`，内容仓 `tools/lore-protocol-conditions.mjs` 另有一份。格式见 [关键日期格式设计](../../docs/planning/2026-11-13-key-date-lore-format-design.md)。
 - `content/lore-activation.ts`：仅 Story v2 的声明式组合读取门；`content/lore-definitions.ts`：独立 ST 定义环境与开局冻结结果；`persistence/create-journey.ts` 在建档事务内按主角地点与实际档案时间解析，随存档原子保存。契约见 [求值与读取门](../../docs/reference/lore-evaluation-and-read-gates.md)。
 - `prompts/story-context-v2.ts`：五区消息、EJS 前可选依赖组裁剪、每轮一次渲染；`agents/agent-orchestrator.ts` 按实际请求输出预留执行最终超限停止。
 - `content/content-pack-plan.ts`：显式父子来源映射只更新启用引用，不转换记忆与模式标记。细节和验收边界见 [交付说明](../../docs/reference/story-v2-routing-delivery.md)。

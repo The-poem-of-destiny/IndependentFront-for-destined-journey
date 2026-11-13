@@ -3,6 +3,7 @@ import type { WorldBook } from '../types/types';
 import { collectLoreRoutingIssues, loreEntryKey } from './lore-routing';
 import { validLoreReadWhen, validLoreDefinitions } from './lore-protocol-conditions';
 import { isWorldBookUid, uidPartition } from './worldbook-uid';
+import { loreKeyDateErrors } from './lore-key-dates';
 /** 合并后的真实 agent 名册（必须与 public/data/defaults/agent-config.json 的 agents 键一致）。 */
 const AGENTS = [
   'direct_main',
@@ -49,6 +50,7 @@ export function validateLoreProtocol(books: unknown): string[] {
           'definitions',
           'evaluation',
           'priority',
+          'keyDates',
         ]
       : ['audiences', 'section', 'category', 'namespace'];
     for (const key of Object.keys(value))
@@ -105,6 +107,8 @@ export function validateLoreProtocol(books: unknown): string[] {
             errors.push(`${scope}: invalid activation.${key}`);
         }
     }
+    if (entry)
+      for (const message of loreKeyDateErrors(value.keyDates)) errors.push(`${scope}: ${message}`);
     if (value.source !== undefined) {
       const s = value.source;
       if (

@@ -9,6 +9,26 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-13 日历系统 v1｜分支 `calendar-v1-key-dates`，待合并，界面已做浏览器走查（待真机游玩验证）
+
+- 按存档隔离的本地日历，两种模式：沉浸（只有玩家录入的条目）与普通（再加世界书关键日期与已登场角色的生日，可按类别 / 地区 / 逐项隐藏）。设计与实施记录见 [日历系统 v1 设计](planning/2026-11-13-calendar-system-v1-design.md)。
+- `src/core/calendar/`：`calendar-sources.ts`（三类来源归一）、`calendar-view.ts`（模式与显示选择、30 天月视图、近期列表）、`calendar-store.ts`（读写，进存档写队列）。类型在 `types/types-calendar.ts`。
+- Dexie **v33** 新增 `saveCalendars`（每存档一行）。不进快照；进整库备份与单存档导出（导入时隐藏的生日键随角色 id 重映射）；删档级联删除。旧备份缺该字段照常导入。🔴 `DB_VERSION` 升到 33，本版导出的备份旧版应用会拒绝导入。
+- 生日只显示「给定了生日」的角色（`character-age.ts` 新增 `hasGivenBirthday` / `ageTurningInYear`），兜底的 1 月 1 日不进日历。
+- 日历不进入任何提示词：新增结构闸门 `tests/calendar-isolation-gate.test.ts`，提示词 / Agent / 记忆三层不得引用日历模块。
+- 本分支叠在 `character-v1.1-age`（PR #145，未合并）之上，生日来源依赖其年龄锚点。
+- 界面：`components/game/CalendarPanel.vue`（月视图 / 当日详情 / 未来 30 天 / 日期未定 / 条目增删改 / 显示选择 / 模式切换）+ `calendar-panel.ts` + `stores/calendar-store.ts`。入口：侧边工具栏「日历」、场景栏日期行。`game.activeModal` 新增取值 `calendar`。
+- 未做：内容仓的关键日期转换（实际游玩时节庆来源目前为空）；具名月显示。
+
+### 2026-11-13 世界书关键日期格式（引擎侧）｜分支 `calendar-v1-key-dates`，待合并
+
+- 新增条目元数据 `extra.lore.keyDates`：节庆、纪念日等日期的结构化描述，支持日 / 月 / 季 / 不定四种精度，每年、多年一度、每月、仅一次四种重复，以及地区、简介、别名、类别、日程等。历法为每月 30 天、一年 360 天。格式与普查依据见 [关键日期格式设计](planning/2026-11-13-key-date-lore-format-design.md)。
+- `src/core/content/lore-key-dates.ts`：严格校验、容错解析、跨世界书汇总、「某年是否举办」「某天是否落在范围内」判定。内容包安装校验（`lore-protocol.ts`）的字段白名单加入 `keyDates` 并逐项校验。
+- `keyDates` 不进入任何提示词，并已从区域资料指纹中排除；本次不改变任何模型可见内容。
+- 范围说明：只做了格式的引擎侧。内容仓未改动（其白名单仍会拒绝该字段），日历系统尚未实现。
+- 公开仓只收录格式与去专名的能力清单；对私有内容的逐条普查不入本仓。
+- 验证：`tests/core/content/lore-key-dates.test.ts` 通过；除 `test:run` 外七道闸门通过；`test:run` 仅有 master 上既有的 6 个 UI 测试文件失败（本机 Node v25.9.0 的 `localStorage` 问题）。
+
 ### 2026-11-13 角色年龄与生日｜分支 `character-v1.1-age`，待合并，未做浏览器走查
 
 - 此前只有主角建号时的 `customFields.age` 快照，没有生日，年龄不随游戏时间变化；NPC 没有年龄字段。
