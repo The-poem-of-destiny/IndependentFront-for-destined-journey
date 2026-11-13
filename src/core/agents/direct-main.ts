@@ -4,6 +4,8 @@ import {
 } from '../prompts/direct-context-frame';
 import {
   DIRECT_CACHE_PROTOCOL,
+  discardDirectContext,
+  invalidateDirectContext,
   prepareDirectContext,
   serializeDirectContext,
   type DirectContextFrame,
@@ -243,13 +245,54 @@ export async function generateDirectTurn(
     request.cachePolicy = input.cache.policy;
     request.cacheKey = `direct-cache-v1:${input.cache.saveId}`;
   }
-  const estimatedInput = Math.ceil(
-    messages.reduce((sum, m) => sum + String(m.content ?? '').length, 0) / 1.5,
-  );
-  if (endpoint.contextWindowTokens && estimatedInput + budget > endpoint.contextWindowTokens)
-    throw new Error(
-      `直出上下文估算 ${estimatedInput} + 输出预留 ${budget} 超出模型窗口 ${endpoint.contextWindowTokens}，请缩短历史或调整输出预留`,
+  let rejectedOutput = false;
+  try {
+    const estimatedInput = Math.ceil(
+      messages.reduce((sum, m) => sum + String(m.content ?? '').length, 0) / 1.5,
     );
+    if (endpoint.contextWindowTokens && estimatedInput + budget > endpoint.contextWindowTokens)
+      throw new Error(
+        `直出上下文估算 ${estimatedInput} + 输出预留 ${budget} 超出模型窗口 ${endpoint.contextWindowTokens}，请缩短历史或调整输出预留`,
+      );
+    const { result, nativeAssistant } = await sendDirectRequest(
+      client,
+      request,
+      config,
+      !!input.cache,
+    );
+    if (ticket) {
+      result.promptSessionRevision = ticket.revision;
+      result.promptRebased = !!ticket.rebaseReason;
+      result.promptRebaseReason = ticket.rebaseReason;
+    }
+    result.agentId = 'direct_main';
+    result.requestMessages = messages;
+    if (result.error) throw new Error(result.error);
+    rejectedOutput = true;
+    const draft = parseDirectOutput(result.rawResponse, dice.length);
+    return {
+      draft,
+      result,
+      ...(ticket ? { cache: { ticket, rawResponse: result.rawResponse, nativeAssistant } } : {}),
+    };
+  } catch (error) {
+    if (ticket) {
+      // 模型已回复但输出被拒绝，或本次被取消：存档未变，上一份已接纳会话仍可复用，只丢弃本次尝试。
+      // 供应商/传输失败可能源自会话本身（如原生签名失效），整体失效让下一次冷建自愈。
+      if (rejectedOutput || config.abortSignal?.aborted) discardDirectContext(ticket);
+      else invalidateDirectContext(ticket.saveId);
+    }
+    throw error;
+  }
+}
+
+/** 发出本次生成唯一的主请求；不解析输出，也不碰缓存会话。 */
+async function sendDirectRequest(
+  client: AgentClient,
+  request: ChatRequest,
+  config: AgentConfig,
+  cached: boolean,
+): Promise<{ result: AgentResult; nativeAssistant?: NativeLlmContent }> {
   let result: AgentResult;
   let nativeAssistant: NativeLlmContent | undefined;
   if (config.streamCallbacks) {
@@ -272,7 +315,7 @@ export async function generateDirectTurn(
                 cacheMissTokens: stream.cacheMissTokens,
                 completionTokens: stream.completionTokens,
                 duration: stream.duration,
-                ...(input.cache
+                ...(cached
                   ? {
                       providerUsage: stream.usage,
                       promptTokens: stream.usage?.inputTokens,
@@ -295,18 +338,5 @@ export async function generateDirectTurn(
   } else result = await client.chat(request, config.abortSignal);
   nativeAssistant ??= (result as AgentResult & { _nativeAssistant?: NativeLlmContent })
     ._nativeAssistant;
-  if (ticket) {
-    result.promptSessionRevision = ticket.revision;
-    result.promptRebased = !!ticket.rebaseReason;
-    result.promptRebaseReason = ticket.rebaseReason;
-  }
-  result.agentId = 'direct_main';
-  result.requestMessages = messages;
-  if (result.error) throw new Error(result.error);
-  const draft = parseDirectOutput(result.rawResponse, dice.length);
-  return {
-    draft,
-    result,
-    ...(ticket ? { cache: { ticket, rawResponse: result.rawResponse, nativeAssistant } } : {}),
-  };
+  return { result, nativeAssistant };
 }

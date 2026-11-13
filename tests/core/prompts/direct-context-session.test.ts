@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acceptDirectContext,
+  discardDirectContext,
   installDirectCacheStore,
   invalidateDirectContext,
   prepareDirectContext,
@@ -74,6 +75,55 @@ describe('accepted direct context', () => {
     await acceptDirectContext(prepared, { rawResponse: 'bad', acceptedMessages: [] });
     expect(save).not.toHaveBeenCalled();
     expect((await prepareDirectContext(input())).rebaseReason).toBe('missing_session');
+  });
+
+  it('discarding a rejected attempt keeps the accepted session for the retry', async () => {
+    const save = vi.fn();
+    installDirectCacheStore({ load: async () => undefined, save, delete: async () => {} });
+    const first = await prepareDirectContext(input());
+    await acceptDirectContext(first, { rawResponse: 'accepted', acceptedMessages: [message()] });
+    expect(save).toHaveBeenCalledTimes(1);
+    const next = { ...input(), history: [message()], turn: 'rejected attempt' };
+    const rejected = await prepareDirectContext(next);
+    expect(rejected.rebaseReason).toBeUndefined();
+    discardDirectContext(rejected);
+    // 被丢弃的票据迟到接纳也不得推进会话
+    await acceptDirectContext(rejected, { rawResponse: 'late', acceptedMessages: [] });
+    expect(save).toHaveBeenCalledTimes(1);
+    const retry = await prepareDirectContext({ ...next, turn: 'retry' });
+    expect(retry.rebaseReason).toBeUndefined();
+    expect(retry.revision).toBe(2);
+    expect(retry.messages.slice(0, first.messages.length + 1)).toEqual([
+      ...first.messages,
+      { role: 'assistant', content: 'accepted' },
+    ]);
+    expect(JSON.stringify(retry.messages)).not.toContain('rejected attempt');
+    expect(retry.messages[retry.messages.length - 1]?.content).toContain('retry');
+  });
+
+  it('cold-rebuilds after two consecutive rejected attempts and resets on acceptance', async () => {
+    const first = await prepareDirectContext(input());
+    await acceptDirectContext(first, { rawResponse: 'accepted', acceptedMessages: [message()] });
+    const next = { ...input(), history: [message()] };
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const rejected = await prepareDirectContext({ ...next, turn: `rejected ${attempt}` });
+      expect(rejected.rebaseReason).toBeUndefined();
+      discardDirectContext(rejected);
+    }
+    const rebuilt = await prepareDirectContext({ ...next, turn: 'third try' });
+    expect(rebuilt.rebaseReason).toBe('repeated_rejection');
+    expect(rebuilt.revision).toBe(1);
+    await acceptDirectContext(rebuilt, {
+      rawResponse: 'recovered',
+      acceptedMessages: [{ ...message(), id: 'a2' }],
+    });
+    const after = await prepareDirectContext({
+      ...next,
+      history: [message(), { ...message(), id: 'a2' }],
+      turn: 'after recovery',
+    });
+    expect(after.rebaseReason).toBeUndefined();
+    expect(after.revision).toBe(2);
   });
 
   it.each(['history', 'configuration', 'budget'] as const)(

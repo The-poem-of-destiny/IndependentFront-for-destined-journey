@@ -35,6 +35,12 @@ export interface DirectCacheTicket {
 const sessions = new Map<string, DirectCacheRecord>();
 const pending = new Map<DirectCacheTicket, DirectCacheRecord>();
 const generations = new Map<string, object>();
+/**
+ * 自上次接纳以来连续丢弃的尝试数。供应商 200 却截断/安全拦截等「软失败」可能源于会话本身，
+ * 一直复用同一前缀会反复失败；连续达到上限后下一次冷建，与旧行为一样自愈。
+ */
+const MAX_CONSECUTIVE_DISCARDS = 2;
+const discards = new Map<string, number>();
 let store: DirectCacheStore | undefined;
 
 export function installDirectCacheStore(value?: DirectCacheStore): void {
@@ -115,15 +121,17 @@ export async function prepareDirectContext(input: {
       ? 'protocol_changed'
       : reentered
         ? 'reentered'
-        : previous.signature !== signature
-          ? 'configuration_or_lore_changed'
-          : previous.source.some(
-                (m, i) => serializeDirectContext(m) !== serializeDirectContext(currentSource[i]),
-              )
-            ? 'history_changed'
-            : previous.revision >= 8
-              ? 'turn_limit'
-              : undefined;
+        : (discards.get(input.saveId) ?? 0) >= MAX_CONSECUTIVE_DISCARDS
+          ? 'repeated_rejection'
+          : previous.signature !== signature
+            ? 'configuration_or_lore_changed'
+            : previous.source.some(
+                  (m, i) => serializeDirectContext(m) !== serializeDirectContext(currentSource[i]),
+                )
+              ? 'history_changed'
+              : previous.revision >= 8
+                ? 'turn_limit'
+                : undefined;
   let messages = fresh;
   if (previous && !reason) {
     const changed = Object.fromEntries(
@@ -195,6 +203,7 @@ export async function acceptDirectContext(
   const ids = new Set(record.source.map((m) => m.id));
   record.source.push(...source(result.acceptedMessages).filter((m) => !ids.has(m.id)));
   sessions.set(ticket.saveId, record);
+  discards.delete(ticket.saveId);
   try {
     await store?.save(record);
   } catch {
@@ -202,8 +211,19 @@ export async function acceptDirectContext(
   }
 }
 
+/**
+ * 丢弃一次未接纳的尝试：模型输出被拒绝、取消或提交前校验失败时，存档未变，
+ * 上一份已接纳的会话仍与历史一致，下一次尝试继续复用其前缀。已接纳或已丢弃的票据为空操作。
+ * 连续丢弃达到上限后，下一次准备改为冷建（`repeated_rejection`）。
+ */
+export function discardDirectContext(ticket: DirectCacheTicket): void {
+  if (!pending.delete(ticket)) return;
+  discards.set(ticket.saveId, (discards.get(ticket.saveId) ?? 0) + 1);
+}
+
 export function invalidateDirectContext(saveId: string): void {
   generations.delete(saveId);
+  discards.delete(saveId);
   sessions.delete(saveId);
   for (const ticket of pending.keys()) if (ticket.saveId === saveId) pending.delete(ticket);
   void store?.delete(saveId).catch(() => undefined);
