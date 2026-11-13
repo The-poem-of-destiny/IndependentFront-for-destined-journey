@@ -20,6 +20,7 @@ const allTools = [
   { id: 'characters', label: '角色', icon: 'fa-solid fa-users' },
   { id: 'quests', label: '任务', icon: 'fa-solid fa-scroll' },
   { id: 'map', label: '地图', icon: 'fa-solid fa-map' },
+  { id: 'calendar', label: '日历', icon: 'fa-solid fa-calendar-days' },
   { id: 'memory', label: '记忆', icon: 'fa-solid fa-brain' },
   { id: 'plot', label: '剧情', icon: 'fa-solid fa-book-open' },
   { id: 'snapshots', label: '快照', icon: 'fa-solid fa-clock-rotate-left' },

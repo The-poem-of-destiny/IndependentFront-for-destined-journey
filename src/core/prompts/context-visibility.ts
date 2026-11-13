@@ -21,6 +21,8 @@ import type {
   AgentContext,
   CharacterState,
 } from '../types/types';
+import type { GameTime } from '../time/time-system';
+import { formatCharacterAge } from '../character/character-age';
 
 // ═══════════════════════════════════════════════════════════
 // Group A: 可见性矩阵
@@ -392,7 +394,7 @@ function formatZoneNarrative(
   const parts: string[] = ['## 👥 在场角色\n'];
 
   for (const char of characters) {
-    parts.push(formatCharacterNarrative(char));
+    parts.push(formatCharacterNarrative(char, _ctx?.gameTime));
     parts.push(''); // blank line between characters
   }
 
@@ -405,7 +407,7 @@ function formatZoneNarrative(
 }
 
 /** 格式化单个角色为 NARRATIVE 视图 */
-function formatCharacterNarrative(char: CharacterState): string {
+function formatCharacterNarrative(char: CharacterState, now?: GameTime): string {
   const cf = char.customFields ?? {};
   const typeLabel = char.type === 'monster' ? '敌人' : char.name;
 
@@ -427,6 +429,8 @@ function formatCharacterNarrative(char: CharacterState): string {
 
   lines.push(`[${typeLabel}] ${char.name} · ${char.race} · ${tierLabel} · Lv.${char.level}`);
 
+  const ageStr = formatCharacterAge(char, now);
+  if (ageStr) lines.push(`  年龄: ${ageStr}`);
   if (appearanceStr) lines.push(appearanceStr);
   if (identityStr) lines.push(identityStr);
   if (backgroundStr) lines.push(backgroundStr);

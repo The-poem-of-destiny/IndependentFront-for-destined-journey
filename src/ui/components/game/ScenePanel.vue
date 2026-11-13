@@ -213,7 +213,14 @@ const viewingName = ref<string | null>(null);
       <!-- 时间 —— 无标题：纪元年 + 月日周合并一行，时段/时刻置于其下 -->
       <div class="scene-section scene-datetime">
         <template v-if="timeInfo">
-          <div class="scene-date-line">{{ timeInfo.era }} {{ timeInfo.date }}</div>
+          <button
+            class="scene-date-line scene-date-btn"
+            title="打开日历"
+            aria-label="打开日历"
+            @click="game.showModal('calendar')"
+          >
+            {{ timeInfo.era }} {{ timeInfo.date }}
+          </button>
           <div
             class="scene-tod-line"
             :style="{ '--tod-color': `var(${todMeta?.colorVar ?? '--theme-text-muted'})` }"
@@ -539,6 +546,21 @@ const viewingName = ref<string | null>(null);
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1.3;
+}
+/* 日期行是日历的入口：外观保持原样的一行字，只在悬停/聚焦时给出可点提示 */
+.scene-date-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: inherit;
+  cursor: pointer;
+  transition: color var(--theme-transition-fast);
+}
+.scene-date-btn:hover,
+.scene-date-btn:focus-visible {
+  color: var(--theme-primary);
 }
 .scene-tod-line {
   display: flex;

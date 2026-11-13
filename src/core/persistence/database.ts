@@ -229,7 +229,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 升版时这两处一起改。
  */
 // v30 = 战斗沙盒 combatSandboxes（本分支），在 master 的 v29 之后顺延。
-export const DB_VERSION = 32;
+export const DB_VERSION = 33;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -413,6 +413,8 @@ class AppDatabase extends Dexie {
   //   每存档至多一场（主键 saveId），存权威 CombatState + 会话 transcript，供刷新后续战。
   //   **rebuildable 的在办战斗缓存，不进 FullBackup / 单存档导出**；删存档级联删。
   combatSandboxes!: Table<CombatSandboxRecord>;
+  /** v33：每存档一行的本地日历（模式 / 玩家条目 / 显示选择）。不进快照，进两种备份，删档级联删 */
+  saveCalendars!: Table<import('../types/types-calendar').SaveCalendar>;
 
   constructor() {
     super(DB_NAME);
@@ -856,6 +858,8 @@ class AppDatabase extends Dexie {
     // New immutable generation mode: existing future-version gates keep older apps from
     // importing direct_cached saves and silently running them as Agent. No data rewrite.
     this.version(32).stores({});
+    // 日历 v1：每存档一行，主键 saveId。只加表，不改既有数据。
+    this.version(33).stores({ saveCalendars: 'saveId' });
   }
 }
 
@@ -900,6 +904,8 @@ export async function clearAllData(): Promise<void> {
 
 export interface FullBackup {
   characterChronicle?: import('../types/types-character').CharacterChronicleEntry[];
+  /** v33 起；旧备份缺席 = 保留本机仍有对应存档的日历行 */
+  saveCalendars?: import('../types/types-calendar').SaveCalendar[];
   version: number;
   exportedAt: number;
   lorebooks: Lorebook[];
@@ -973,6 +979,7 @@ export async function exportAllData(): Promise<FullBackup> {
   const db = getDatabase();
   const [
     characterChronicle,
+    saveCalendars,
     lorebooks,
     presets,
     memories,
@@ -998,6 +1005,7 @@ export async function exportAllData(): Promise<FullBackup> {
     storyArchiveRetries,
   ] = await Promise.all([
     db.characterChronicle.toArray(),
+    db.saveCalendars.toArray(),
     db.lorebooks.toArray(),
     db.presets.toArray(),
     db.memories.toArray(),
@@ -1025,6 +1033,7 @@ export async function exportAllData(): Promise<FullBackup> {
   return {
     version: DB_VERSION,
     characterChronicle,
+    saveCalendars,
     exportedAt: Date.now(),
     lorebooks,
     presets,
@@ -1112,6 +1121,7 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'imagePresets',
     'characterAppearances',
     'characterChronicle',
+    'saveCalendars',
     'storyTurnSummaries',
     'storyArchives',
     'storyArchiveRetries',
@@ -1323,6 +1333,19 @@ async function doImportAllData(
     await db.characterChronicle.clear();
     if (backup.characterChronicle?.length)
       await db.characterChronicle.bulkPut(backup.characterChronicle);
+  });
+  // v33 日历：字段缺席（旧备份）保留本机的行，给了就整表替换。
+  await db.transaction('rw', db.saveCalendars, db.saves, async () => {
+    if (backup.saveCalendars !== undefined) {
+      await db.saveCalendars.clear();
+      if (Array.isArray(backup.saveCalendars)) await db.saveCalendars.bulkPut(backup.saveCalendars);
+    }
+    // 存档表已被整表替换：不属于任何现存存档的日历行是孤儿（旧备份不带日历时尤其会留下），清掉。
+    const saveIds = new Set((await db.saves.toCollection().primaryKeys()) as string[]);
+    const orphans = ((await db.saveCalendars.toCollection().primaryKeys()) as string[]).filter(
+      (id) => !saveIds.has(id),
+    );
+    if (orphans.length > 0) await db.saveCalendars.bulkDelete(orphans);
   });
   await db.transaction('rw', db.characterAppearances, async () => {
     if (backup.characterAppearances !== undefined) {
@@ -2346,6 +2369,7 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       db.sceneImageBlobs,
       db.characterAppearances,
       db.characterChronicle,
+      db.saveCalendars,
       db.debugTurns,
       db.promptSessions,
       db.storyTurnSummaries,
@@ -2374,6 +2398,7 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       // v19 (D56): 会话外貌随存档走 —— 与 imagePresets（全局基线）刻意相反
       await db.characterAppearances.where('saveId').equals(id).delete();
       await db.characterChronicle.where('saveId').equals(id).delete();
+      await db.saveCalendars.delete(id);
       await db.debugTurns.where('saveId').equals(id).delete();
       // v26：Delta 会话是 rebuildable 缓存，但存档都没了没有理由留着
       await db.promptSessions.where('saveId').equals(id).delete();

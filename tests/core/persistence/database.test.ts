@@ -1151,7 +1151,7 @@ describe('exportAllData / importAllData', () => {
     // v28：storyArchives（Story 上下文 v2 阶段归档，同样随存档进 FullBackup）。
     // v29：storyArchiveRetries（归档/摘要草稿重试，同样随存档进 FullBackup）。
     // v30：combatSandboxes（战斗沙盒在办战斗；rebuildable 缓存，**不进** FullBackup）。
-    expect(backup.version).toBe(32);
+    expect(backup.version).toBe(33);
     expect(Array.isArray(backup.storyTurnSummaries)).toBe(true);
     expect(Array.isArray(backup.storyArchives)).toBe(true);
     expect(Array.isArray(backup.storyArchiveRetries)).toBe(true);
@@ -2966,7 +2966,7 @@ describe('Asset CRUD (v13)', () => {
     // v20=D18 contentPacks; v21=地图字节; v22=快照拆表; v23=API RPM; v24=调试历史
     // v25=独立出图连接; v26=Delta 会话持久化; v27=Story v2 每回合摘要; v28=Story v2 阶段归档;
     // v29=归档重试; v30=战斗沙盒在办战斗（原分支的 v27，撞号后顺延）
-    expect(db.verno).toBe(32);
+    expect(db.verno).toBe(33);
 
     // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
     //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）
@@ -2997,6 +2997,7 @@ describe('Asset CRUD (v13)', () => {
       'storyArchiveRetries',
       'combatSandboxes',
       'characterChronicle',
+      'saveCalendars',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 

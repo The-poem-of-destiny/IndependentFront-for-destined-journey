@@ -9,6 +9,7 @@ import {
 import { hasDynamic } from './worldbook-loader';
 import { splitLocationSegments } from '../map/map-index';
 import { hashContentDeterministic } from './content-source';
+import { withoutLoreKeyDates } from './lore-key-dates';
 import {
   createLoreReadContext,
   getLoreRecentMessages,
@@ -262,7 +263,8 @@ export async function selectStoryLore(
       entries: zones[3].map((r) => ({
         key: r.key,
         content: r.entry.content,
-        lore: r.entry.extra?.lore,
+        // 关键日期是日历元数据，不影响区域资料的渲染结果，不参与这枚指纹
+        lore: withoutLoreKeyDates(r.entry.extra?.lore),
         book: r.book.lore,
       })),
     }),
