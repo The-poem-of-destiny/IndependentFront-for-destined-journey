@@ -14,6 +14,7 @@
 - 缓存直出：`prompts/direct-context-session.ts` 管理独立的已接纳 transcript，`direct-context-frame.ts` 组装旧记忆布局、按角色拆分的绝对状态与按条拆分的记忆库（`memory/记忆编号`），`direct-context-store.ts` 复用可丢弃缓存表与权限门；`api/prompt-caching.ts` 只为显式调用者附加渠道参数。区域/本轮资料可替换，预设条目以 `directCachePlacement: "turn"` 显式选择动态位置。Dexie v32 无数据重写，阻止旧版误导入新模式。契约见 [缓存直出](../../docs/reference/direct-generation-cache.md)。
 
 - 原生角色：`types/types-character.ts` 定义内容、经历与主叙事更新；`character/character-definitions.ts` 只读兼容旧资料及素材；`character/character-updates.ts` 校验更新块；`character/character-chronicle.ts` 构造经历和重要上下文。`StateManager` 持有写锁与来源核验；Dexie v31、快照及两种备份携带经历。契约见 [角色系统](../../docs/reference/character-system.md)。
+- 角色年龄：`character/character-age.ts`。只存年龄锚点 `CharacterState.ageAnchor`（开局时的年龄 + 生日），年龄按游戏时间现算；`ensureCharacterAge` 是实例化闸门（`applyAddCharacter` / `createJourney` / 旧档回填），线索缺失或无效兜底实例化时 18 岁、生日 1 月 1 日。🔴 不要新增「当前年龄」或「出生年」落库字段，也不要加逐回合加一的逻辑。
 
 - `content/lore-routing.ts`：双模式唯一 audiences 权限、停用/排除与依赖闭包共同判据（含 EJS 间接读取）、旧作者默认映射与诊断；Agent 世界书清单已退役。
 - `memory/story-memory-source.ts`：生成/读取/锁内提交共用完整来源与正文指纹；v29 `storyArchiveRetries` 绑定原判断回合自动恢复，不以后一轮证据替代。旧缺指纹记录失效可补建，语义未知不伪造。

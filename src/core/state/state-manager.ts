@@ -72,6 +72,7 @@ import {
   attachCharacterDefinition,
   matchCharacterDefinition,
 } from '../character/character-definitions';
+import { ensureCharacterAge } from '../character/character-age';
 import { authorChronicle, turnChronicle } from '../character/character-chronicle';
 import { collectCompleteStoryTurns } from '../memory/memory-context';
 import { storyMemorySourceMatches, storyTurnGameTimeRange } from '../memory/story-memory-source';
@@ -375,6 +376,8 @@ export class StateManager {
     await withSaveWriteLock(this.saveId, async () => {
       assertCurrentTurn(isCurrent);
       const db = getDatabase();
+      // 事务不含 saveProfiles 表，游戏时间在事务外先读（仍在本存档写锁内）
+      const now = (await getProfile(this.saveId)).gameTime;
       await db.transaction(
         'rw',
         [db.saves, db.characters, db.messages, db.characterChronicle],
@@ -393,11 +396,14 @@ export class StateManager {
             const definition =
               character.definition ??
               matchCharacterDefinition(save.metadata.characterDefinitions ?? [], character.name);
+            const next =
+              definition && !character.definition
+                ? attachCharacterDefinition(character, definition)
+                : character;
+            // 旧存档回填：引入年龄系统之前落库的角色没有年龄锚点，按回填时刻补一次（幂等）
+            const backfilled = ensureCharacterAge(next, now);
+            if (next !== character || backfilled) await saveCharacter(next);
             if (!definition) continue;
-            const next = character.definition
-              ? character
-              : attachCharacterDefinition(character, definition);
-            if (!character.definition) await saveCharacter(next);
             const entries = authorChronicle(next);
             if (entries.length) await db.characterChronicle.bulkPut(entries);
           }
@@ -1886,6 +1892,10 @@ export class StateManager {
     // 铁律3: saveId 是账务字段，由 Code 无条件注入，不信任上游 patch 构造方 (#8/M2硬前置②)
     // M6 T2: customFields.saveId 双写已退役 — saveId 单源一等字段
     character.saveId = this.saveId;
+
+    // 实例化闸门：所有生成角色都经这里落库。年龄线索缺失或无效时兜底此刻 18 岁 / 生日 1 月 1 日；
+    // patch 自带合法 ageAnchor（如快照重放）则原样保留。
+    ensureCharacterAge(character, (await this.readProfile()).gameTime);
 
     await this.persistCharacter(character);
     return this.createEvent('system', patch);

@@ -726,6 +726,9 @@ export function assembleCharacterState(
     customFields: {
       likes: charData.likes,
       faction: charData.faction,
+      // 年龄线索：add_character 落库时换算成 ageAnchor（缺失/无效 → 此刻 18 岁、生日 1 月 1 日）
+      ...(charData.age !== undefined ? { age: charData.age } : {}),
+      ...(charData.birthday !== undefined ? { birthday: charData.birthday } : {}),
       ascensionPath: charData.ascension.path,
       ascensionDescription: charData.ascension.description,
     },

@@ -9,6 +9,15 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-13 角色年龄与生日｜分支 `character-v1.1-age`，待合并，未做浏览器走查
+
+- 此前只有主角建号时的 `customFields.age` 快照，没有生日，年龄不随游戏时间变化；NPC 没有年龄字段。
+- 新增 `CharacterState.ageAnchor`（开局时的年龄 + 生日，唯一真源）与 `src/core/character/character-age.ts`；当前年龄按游戏时间现算，不落库、不需要逐回合维护。不保存出生年（单纪元下长寿角色的出生年无意义）。
+- 原生角色定义新增可选的 `age`（开局年龄）/ `birthday`；`entity_gen` 解析层接受 `age` / `birthday`（XML 标签与 JSON 字段，表示生成那一刻的年龄），提示词侧尚未编写。
+- 所有新角色经 `applyAddCharacter` / `createJourney` 补锚点；线索缺失或无效时兜底实例化那一刻 18 岁、生日 1 月 1 日。旧存档角色在回合收尾时回填一次。
+- 在场角色上下文与角色列表面板显示推导年龄。契约见 [角色系统](reference/character-system.md)「年龄与生日」。
+- 验证：`tests/core/character/character-age.test.ts` 与 `state-manager.test.ts` 新增用例通过；除 `test:run` 外七道闸门通过。`test:run` 有 6 个 UI 测试文件失败（`localStorage.clear is not a function`），在未改动的 master 上同样失败，本机 Node v25.9.0 环境所致。
+
 ### 2026-11-12 UI 逻辑审查修复批次｜分支 `fix/ui-logic-review-20261112`，待合并，未做浏览器走查
 
 - 对应 [UI 逻辑复核报告](reviews/2026-11-08-ui-logic-review.md)；逐条状态见报告「修复状态回写（2026-11-12）」表，三个 P1 同步回写 [`known-issue.md`](known-issue.md)。

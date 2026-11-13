@@ -4,6 +4,7 @@ import { ASSET_TYPES } from '../types/types';
 import { getContentRegistry } from '../content/content-registry-runtime';
 import { extractRemoteAssetDecls } from '../assets/remote-asset-catalogue';
 import { isRecord, parseCharacterProfile, parseChronicleDraft } from './character-updates';
+import { extractLoreAge, parseAgeHint } from './character-age';
 
 /** Content boundary: bad definitions are diagnosed independently, never evaluated as scripts. */
 export function readCharacterDefinitions(raw: unknown): CharacterDefinition[] {
@@ -57,12 +58,20 @@ export function readCharacterDefinitions(raw: unknown): CharacterDefinition[] {
         ...(typeof asset.variant === 'string' ? { variant: asset.variant } : {}),
       });
     }
+    // 年龄线索写坏了只丢这一项（实例化时走兜底），不连累整份定义
+    const ageHint = parseAgeHint(row);
+    if (
+      (row.age !== undefined && ageHint.age === undefined) ||
+      (row.birthday !== undefined && !ageHint.birthday)
+    )
+      console.warn('[characters] 忽略无效的年龄/生日', row.id);
     definitions.push({
       id: row.id,
       name: row.name.trim(),
       profile,
       assets,
       past: past as CharacterPastEntry[],
+      ...ageHint,
       ...(typeof row.lore === 'string' ? { lore: row.lore } : {}),
     });
   }
@@ -88,7 +97,9 @@ export function legacyCharacterDefinitions(books: readonly WorldBook[]): Charact
         )
         .trim();
       if (!lore || /<%/.test(lore)) continue;
+      const age = extractLoreAge(lore);
       definitions.push({
+        ...(age !== undefined ? { age } : {}),
         id: `legacy:${book.id}:${entry.uid}`,
         name,
         profile: {},

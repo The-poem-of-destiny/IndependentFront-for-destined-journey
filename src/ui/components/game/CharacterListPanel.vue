@@ -5,6 +5,7 @@ import { useUIStore } from '../../stores/ui-store';
 import AssetMedia from '../shared/AssetMedia.vue';
 import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/assets/asset-resolve';
 import { getAffectionLabel } from '@engine/character/affection-system';
+import { formatCharacterAge } from '@engine/character/character-age';
 import ResourceBar from '../shared/ResourceBar.vue';
 import BuffChip from '../shared/BuffChip.vue';
 // 装备/技能/背包详情与玩家背包面板（ItemsPanel）**共用**同一份渲染（数据结构等价，避免显示分叉）
@@ -32,6 +33,10 @@ const affections = computed(() => game.saveProfile?.affections || {});
 const contracts = computed(() => game.saveProfile?.contracts || []);
 
 const selected = computed(() => npcs.value[selectedIdx.value] || null);
+// 年龄不落库：按年龄锚点与当前游戏时间现算，时间推进后自动变化
+const selectedAge = computed(() =>
+  selected.value ? formatCharacterAge(selected.value, game.gameTime) : '',
+);
 
 // 登神长阶：与 CharacterViewerModal 共用 buildAscensionTracks（唯一判定处）
 const selectedAscensionTracks = computed(() =>
@@ -397,8 +402,8 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
                 <div v-if="selected.gender" class="ov-kv">
                   <span>性别</span><span>{{ selected.gender }}</span>
                 </div>
-                <div v-if="(selected as any).customFields?.age" class="ov-kv">
-                  <span>年龄</span><span>{{ (selected as any).customFields.age }}</span>
+                <div v-if="selectedAge" class="ov-kv">
+                  <span>年龄</span><span>{{ selectedAge }}</span>
                 </div>
               </div>
             </div>

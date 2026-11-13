@@ -1,5 +1,11 @@
 # 《命定之诗》游戏数据字段规范（数据字典）
 
+## 角色年龄字段补充（2026-11-13）
+
+- `CharacterState.ageAnchor?: { startAge, month, day }`：开局时刻的周岁与生日，年龄的唯一真源；当前年龄由 `ageAt(ageAnchor, gameTime)` 推导，不落库，也不保存出生年。账务字段（铁律 3）：仅 Code 经 `ensureCharacterAge` 写入，不进 `update_character` 白名单。
+- `customFields.age`（主角建号年龄）与 `customFields.birthday` 降为**实例化线索**（表示实例化那一刻的年龄）：落库时折算成 `ageAnchor` 后不再读取，界面与提示词一律读推导值。
+- `CharacterDefinition.age?` / `birthday?`：作者线索，`age` 表示开局时的年龄。缺失或无效兜底实例化那一刻 18 岁、生日 1 月 1 日。详见 `docs/reference/character-system.md`「年龄与生日」。
+
 ## 原生角色与编年史字段补充（2026-10-31）
 
 完整契约见 [原生角色与编年史](../../reference/character-system.md)，类型唯一来源为 `src/core/types/types-character.ts`。

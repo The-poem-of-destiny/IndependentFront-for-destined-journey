@@ -16,6 +16,7 @@ import {
   withoutCharacterLore,
 } from '../character/character-definitions';
 import { authorChronicle } from '../character/character-chronicle';
+import { ensureCharacterAge } from '../character/character-age';
 
 /** Publish a complete new journey, or leave no records behind on failure. */
 export async function createJourney(input: {
@@ -74,9 +75,12 @@ export async function createJourney(input: {
         input.save.metadata.characterDefinitions ?? [],
         input.character.name,
       );
+      // 浅拷贝：下面要补 ageAnchor，不能改到调用方传进来的那份输入
       const character = definition
         ? attachCharacterDefinition(input.character, definition)
-        : input.character;
+        : { ...input.character };
+      // 建号年龄（customFields.age）在开局时刻换算成年龄锚点，此后年龄随游戏时间推导
+      ensureCharacterAge(character, profile.gameTime);
       await saveCharacter(character);
       const past = authorChronicle(character);
       if (past.length) await db.characterChronicle.bulkPut(past);

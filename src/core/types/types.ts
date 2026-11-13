@@ -1264,6 +1264,12 @@ export interface CharacterState {
   definition?: import('./types-character').CharacterDefinition;
   aliases?: string[];
   goals?: string;
+  /**
+   * 年龄锚点（开局时的年龄 + 生日）—— 年龄的唯一真源，当前年龄 = `ageAt(ageAnchor, gameTime)`，不落库。
+   * 账务字段：由 Code 在实例化时经 `ensureCharacterAge` 写入，AI 不可改。
+   * 仅旧存档里尚未回填的角色可能缺失。
+   */
+  ageAnchor?: import('./types-character').CharacterAgeAnchor;
   /** 初登场回合；只用于约束生成的过去，不交由模型填写。 */
   introducedBy?: string;
 
@@ -4104,6 +4110,10 @@ export interface CharGenOutput {
   likes: string;
   /** 🆕 心里话（40-80 tokens，角色内心独白/当前真实想法） */
   thoughts?: string;
+  /** 年龄线索（周岁）；原样透传，落库时由 `ensureCharacterAge` 校验，缺失/无效走兜底 */
+  age?: unknown;
+  /** 生日线索（`3月15日` / `03-15` / `{month,day}`）；同上 */
+  birthday?: unknown;
   /** 登神长阶 (Lv.13+ 可用) */
   ascension: {
     enabled: boolean;

@@ -2877,6 +2877,42 @@ describe('StateManager', () => {
       expect(got.find((c: CharacterState) => c.name === '妲丽安')!.saveId).toBe('save_inject');
     });
 
+    it('add_character 没有年龄线索时兜底 18 岁、生日 1 月 1 日', async () => {
+      const sm = createStateManager('save_age_fallback');
+      const npc = createDefaultCharacterState({ id: 'npc_age_a', name: '无名旅人' });
+      await sm!.commitChatState([
+        { op: 'add_character', target: 'characters.无名旅人', value: npc },
+      ]);
+      const got = (await db.getCharacters('save_age_fallback')).find(
+        (c: CharacterState) => c.name === '无名旅人',
+      )!;
+      // mock 的游戏时间就是开局时刻，所以此刻 18 岁 = 开局 18 岁
+      expect(got.ageAnchor).toEqual({ startAge: 18, month: 1, day: 1 });
+    });
+
+    it('add_character 的年龄线索无效时同样走兜底，有效时按线索换算', async () => {
+      const sm = createStateManager('save_age_hint');
+      const bad = createDefaultCharacterState({
+        id: 'npc_age_b',
+        name: '坏数据',
+        customFields: { age: '外貌约16岁', birthday: '13月40日' },
+      });
+      const good = createDefaultCharacterState({
+        id: 'npc_age_c',
+        name: '老兵',
+        customFields: { age: '34岁', birthday: '1月1日' },
+      });
+      await sm!.commitChatState([
+        { op: 'add_character', target: 'characters.坏数据', value: bad },
+        { op: 'add_character', target: 'characters.老兵', value: good },
+      ]);
+      const rows = await db.getCharacters('save_age_hint');
+      const anchorOf = (name: string) =>
+        rows.find((c: CharacterState) => c.name === name)!.ageAnchor;
+      expect(anchorOf('坏数据')).toEqual({ startAge: 18, month: 1, day: 1 });
+      expect(anchorOf('老兵')).toEqual({ startAge: 34, month: 1, day: 1 });
+    });
+
     it('add_character 携带非空但错误的 saveId 时也被覆写（铁律3: 不信任上游）', async () => {
       const sm = createStateManager('save_right');
       const npc = createDefaultCharacterState({ id: 'npc_y', name: '串档NPC' });
