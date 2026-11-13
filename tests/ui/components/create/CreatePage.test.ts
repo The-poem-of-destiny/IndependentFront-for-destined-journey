@@ -56,6 +56,8 @@ beforeEach(() => {
     loadWorldBookEntries: vi.fn(),
     nextStep: vi.fn(),
     startJourney: vi.fn(),
+    resetAll: vi.fn(),
+    prevStep: vi.fn(),
     plotMode: 'off',
     isCreating: false,
     showPresetModal: false,
@@ -96,6 +98,8 @@ describe('first journey readiness', () => {
     wrapper.findComponent({ name: 'CreateFooter' }).vm.$emit('next');
     await flushPromises();
     expect(navigate).toHaveBeenCalledWith('game', 'new-save');
+    // 建档成功才重置草稿；失败那一次没有重置（填写要保留给重试）
+    expect(create.resetAll).toHaveBeenCalledTimes(1);
     wrapper.unmount();
   });
   it('missing API is explained before any character step can advance', async () => {
@@ -147,6 +151,8 @@ describe('first journey readiness', () => {
     await btn.trigger('click');
     expect(back).toHaveBeenCalledWith('home');
     expect(navigate).not.toHaveBeenCalled();
+    // 未建档就离开：草稿保留，不重置
+    expect(create.resetAll).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
@@ -157,11 +163,24 @@ describe('first journey readiness', () => {
     const wrapper = await enterSteps();
     const footer = wrapper.findComponent({ name: 'CreateFooter' });
     expect(footer.props('canNext')).toBe(false);
-    expect(footer.props('blockedHint')).toBe('还需完成：角色名、基础属性点');
+    expect(footer.props('blocked')).toEqual({
+      prefix: '还需完成：',
+      currentStep: 1,
+      items: [
+        { label: '角色名', step: 1 },
+        { label: '基础属性点', step: 1 },
+      ],
+    });
     create.currentStep = 7;
     create.stepMissing = { 0: ['难度'], 1: [], 2: ['命定核心'] };
     await flushPromises();
-    expect(footer.props('blockedHint')).toBe('开始旅程前还需补全：难度、命定核心');
+    expect(footer.props('blocked').items).toEqual([
+      { label: '难度', step: 0 },
+      { label: '命定核心', step: 2 },
+    ]);
+    // 点缺项跳到所属步骤
+    footer.vm.$emit('jump', 2);
+    expect(create.currentStep).toBe(2);
     wrapper.unmount();
   });
 

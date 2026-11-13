@@ -538,35 +538,38 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 
       <!-- ═══════ 储物袋预览 ═══════ -->
       <div class="section">
-        <div
-          class="section-header clickable"
-          role="button"
-          tabindex="0"
-          :aria-expanded="inventoryOpen"
-          @click="inventoryOpen = !inventoryOpen"
-          @keydown.enter="inventoryOpen = !inventoryOpen"
-          @keydown.space.prevent="inventoryOpen = !inventoryOpen"
-        >
-          <span class="section-title">持有物</span>
-          <!-- 钱袋 / 命运点常驻标题行 —— 在 Transition 之外，折叠时依然可见 -->
-          <span class="hold-meta">
-            <span class="hold-money"><i class="fa-solid fa-coins" />{{ player.money }} G</span>
-            <span class="hold-fp"><i class="fa-solid fa-star" />{{ game.fp }} FP</span>
-          </span>
-          <!-- 常驻「›」入口直达完整物品面板（UIL-18）：标题行本身只管折叠，
-               「查看全部」又只在溢出时出现 —— 没有它就找不到完整面板。
-               `.stop` 防止冒泡到标题行触发折叠（键盘 Enter/Space 同理） -->
+        <!-- 标题行 = 折叠头 + 并列的「打开物品面板」按钮（UIL-18）。
+             二者是**兄弟**而非嵌套：role="button" 里再套 <button> 是嵌套交互控件，
+             读屏与键盘都会把两件事搅在一起 -->
+        <div class="hold-header-row">
+          <div
+            class="section-header clickable hold-header"
+            role="button"
+            tabindex="0"
+            :aria-expanded="inventoryOpen"
+            @click="inventoryOpen = !inventoryOpen"
+            @keydown.enter="inventoryOpen = !inventoryOpen"
+            @keydown.space.prevent="inventoryOpen = !inventoryOpen"
+          >
+            <span class="section-title">持有物</span>
+            <!-- 钱袋 / 命运点常驻标题行 —— 在 Transition 之外，折叠时依然可见 -->
+            <span class="hold-meta">
+              <span class="hold-money"><i class="fa-solid fa-coins" />{{ player.money }} G</span>
+              <span class="hold-fp"><i class="fa-solid fa-star" />{{ game.fp }} FP</span>
+            </span>
+            <i class="fa-solid" :class="inventoryOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
+          </div>
+          <!-- 常驻入口直达完整物品面板：折叠头只管折叠，「查看全部」又只在溢出时出现 ——
+             没有它就找不到完整面板。放在 Transition 之外，收起时依然可用 -->
           <button
+            type="button"
             class="hold-open-action"
             title="打开物品面板"
             aria-label="打开物品面板"
-            @click.stop="game.showModal('items')"
-            @keydown.enter.stop
-            @keydown.space.stop
+            @click="game.showModal('items')"
           >
-            ›
+            <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true" />
           </button>
-          <i class="fa-solid" :class="inventoryOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
         </div>
         <Transition name="collapse">
           <div v-if="inventoryOpen" class="hold-body">
@@ -1145,20 +1148,43 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 .hold-fp {
   color: var(--theme-primary);
 }
+.hold-header-row {
+  display: flex;
+  align-items: stretch;
+  padding-right: var(--theme-spacing-xs);
+}
+/* 折叠头吃掉余宽；右内边距交给并列的打开按钮，避免两层留白 */
+.hold-header {
+  flex: 1;
+  min-width: 0;
+  padding-right: var(--theme-spacing-xs);
+}
+/* 打开物品面板 —— 36px 见方触摸目标（design.md §8），图标与折叠 chevron 同为 FontAwesome */
 .hold-open-action {
-  margin-right: 10px;
-  padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
   border: none;
+  border-radius: var(--theme-radius-sm);
   background: none;
-  font-family: inherit;
-  font-size: 0.9rem;
-  line-height: 1;
   color: var(--theme-text-muted);
+  font-size: 0.75rem;
   cursor: pointer;
-  transition: color 150ms;
+  transition:
+    color var(--theme-transition-fast, 0.15s ease),
+    background var(--theme-transition-fast, 0.15s ease);
 }
 .hold-open-action:hover {
   color: var(--theme-text-secondary);
+  background: var(--theme-tab-hover-bg);
+}
+.hold-open-action:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: -2px;
 }
 .hold-meta i {
   font-size: 0.6875rem;

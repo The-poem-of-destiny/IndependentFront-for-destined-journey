@@ -53,6 +53,7 @@ beforeEach(() => {
     startLocationLabel: '翡翠之心',
     destinyCore: null,
     destinyCoreName: '',
+    destinyCoreAuthor: '',
     hpPreview: 10,
     mpPreview: 5,
     spPreview: 5,
@@ -120,7 +121,15 @@ describe('CreateStepConfirm — 起始地点与命定核心展示（UIL-12 / UIL
     await flushPromises();
 
     expect(wrapper.find('.hero-location').text()).toBe('起始: 雾港');
-    expect(wrapper.find('.hero-core').text()).toContain('星辰之约');
+    expect(wrapper.find('.hero-core').text()).toBe('命定之灵: 星辰之约');
+  });
+
+  it('核心有作者数据时显示「名字 (作者)」', async () => {
+    mockCreate.destinyCoreName = '异界律令';
+    mockCreate.destinyCoreAuthor = '作者C';
+    const wrapper = mount(CreateStepConfirm);
+    await flushPromises();
+    expect(wrapper.find('.hero-core').text()).toBe('命定之灵: 异界律令 (作者C)');
   });
 
   it('未选命定核心时不渲染核心行', async () => {

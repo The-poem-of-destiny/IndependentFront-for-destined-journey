@@ -654,7 +654,7 @@ async function clearAll() {
         <AppButton variant="danger" size="sm" class="card-action" @click="showClearConfirm = true"
           >清除所有数据</AppButton
         ></AppCard
-      ><AppCard padding="md" class="pack-card"
+      ><AppCard padding="md" class="pack-card" data-settings-anchor="content-pack"
         ><h4>内容包</h4>
         <DiscordPackAccess />
         <p class="text-muted text-sm">

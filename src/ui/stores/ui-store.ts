@@ -30,12 +30,19 @@ export type SettingsSection =
   | 'developer'
   | 'about';
 
+/**
+ * 设置页分区内可直达的卡片锚点；对应元素带 `data-settings-anchor="<锚点>"`。
+ * 跨页面入口要落到分区底部某张卡时用它，免得用户进了分区还得自己往下找。
+ */
+export type SettingsAnchor = 'content-pack';
+
 export const useUIStore = defineStore('ui', () => {
   // ===== 导航 =====
   const currentView = ref<AppView>('home');
   const activeSaveId = ref<string | null>(null);
   const viewHistory = ref<AppView[]>([]);
   const requestedSettingsSection = ref<SettingsSection | null>(null);
+  const requestedSettingsAnchor = ref<SettingsAnchor | null>(null);
 
   /**
    * 离开当前视图前它是谁 —— 保留给旧消费端读取；真正的多层返回由 viewHistory 承担。
@@ -45,12 +52,16 @@ export const useUIStore = defineStore('ui', () => {
 
   /**
    * 当前存档上下文的显示名 —— 设置页里按存档生效的卡片用它标明「作用于哪个存档」。
-   * 名字取自 game-store 已载入的存档行；没有活跃存档时为 null。
+   * 先查 game-store 的存档列表；列表里还没有这一行时（如刚建档的列表未刷新）退到
+   * game-store 当前载入的那份存档。都取不到才返回 null，由调用方显示通用占位。
    */
   const activeSaveName = computed<string | null>(() => {
     const id = activeSaveId.value;
     if (!id) return null;
-    return useGameStore().saves.find((save) => save.id === id)?.name ?? null;
+    const game = useGameStore();
+    const listed = game.saves.find((save) => save.id === id)?.name;
+    if (listed) return listed;
+    return game.activeSaveId === id ? (game.activeSave?.name ?? null) : null;
   });
 
   /**
@@ -73,8 +84,12 @@ export const useUIStore = defineStore('ui', () => {
     if (view === 'home') leaveSaveContext();
   }
 
-  /** 打开设置页的指定分区；SettingsPage 挂载时或已在设置页时立即消费该请求。 */
-  function openSettings(section: SettingsSection = 'api') {
+  /**
+   * 打开设置页的指定分区，可选地滚到分区内某张卡（anchor）。
+   * SettingsPage 挂载时或已在设置页时立即消费该请求。
+   */
+  function openSettings(section: SettingsSection = 'api', anchor: SettingsAnchor | null = null) {
+    requestedSettingsAnchor.value = anchor;
     requestedSettingsSection.value = section;
     navigate('settings');
   }
@@ -83,6 +98,13 @@ export const useUIStore = defineStore('ui', () => {
     const section = requestedSettingsSection.value;
     requestedSettingsSection.value = null;
     return section;
+  }
+
+  /** 与分区请求配套的卡片锚点；取一次即清，不让旧锚点滞留到下一次进入。 */
+  function consumeSettingsAnchorRequest(): SettingsAnchor | null {
+    const anchor = requestedSettingsAnchor.value;
+    requestedSettingsAnchor.value = null;
+    return anchor;
   }
 
   /** 应用级存档管理窗口；不参与页面导航，游戏页打开时保持当前叙事挂载。 */
@@ -155,10 +177,12 @@ export const useUIStore = defineStore('ui', () => {
     activeSaveId,
     activeSaveName,
     requestedSettingsSection,
+    requestedSettingsAnchor,
     saveManagerOpen,
     navigate,
     openSettings,
     consumeSettingsSectionRequest,
+    consumeSettingsAnchorRequest,
     openSaveManager,
     closeSaveManager,
     back,

@@ -144,10 +144,10 @@ export const useCreateStore = defineStore('create', () => {
       1: basic,
       // 命定核心：内置条目**或**工坊系统项目，二者择一即可放行。
       // 只认前者时，选了工坊核心的用户会卡死在这一步（按钮永远不亮，且没有任何提示）。
-      2:
-        selectedSystemCoreEntryUid.value === null && selectedWorkshopCoreProjectId.value === null
-          ? ['命定核心']
-          : [],
+      // 🔴 必须按**解析后**的条目判定：只看 id 非空时，预设里残留的、已卸载工坊项目或
+      //    已不存在条目的 id 也能放行，建出一个没有核心（或悬空核心）的存档。
+      // 内容确实没有任何核心候选（加载成功且名单为空）时豁免 —— 否则建档无路可走。
+      2: coreRequired.value && !hasResolvedCore.value ? ['命定核心'] : [],
     };
   });
 
@@ -467,6 +467,12 @@ export const useCreateStore = defineStore('create', () => {
   );
   const enabledCharacterDefinitionIds = ref<Set<string>>(new Set());
 
+  /**
+   * 命定核心名单（世界书 system_core 条目 + 工坊系统项目）的加载态。
+   * `failed` 时命定核心步骤给错误与重试；`loaded` 且名单为空时豁免核心必选。
+   */
+  const coreCatalogStatus = ref<'idle' | 'loading' | 'loaded' | 'failed'>('idle');
+
   /** 选中的命定核心 entry uid */
   const selectedSystemCoreEntryUid = ref<string | null>(null);
 
@@ -547,6 +553,7 @@ export const useCreateStore = defineStore('create', () => {
    * 进不了捏人页。store 为空（IndexedDB 不可用）时仍回落 fetch 本地 JSON。
    */
   async function loadWorldBookEntries() {
+    coreCatalogStatus.value = 'loading';
     try {
       const wb = useWorldBookStore();
       await wb.init();
@@ -574,12 +581,50 @@ export const useCreateStore = defineStore('create', () => {
       const ws = useWorkshopStore();
       await ws.init();
       workshopOptions.value = buildWorkshopEnableOptions(ws.projects, books);
-    } catch {
-      // fetch 不可用时静默跳过，保持空数组
+      coreCatalogStatus.value = 'loaded';
+      // 名单到了才能判断预设/草稿里的核心 id 是否仍有效（见 pruneUnresolvedCoreSelection）
+      pruneUnresolvedCoreSelection();
+    } catch (err) {
+      // 加载失败要让命定核心步骤显示错误 + 重试，而不是永远停在「正在加载」
+      console.warn('[create-store] 世界书条目加载失败:', err);
       systemCoreEntries.value = [];
       characterEntries.value = [];
       characterDefinitions.value = [];
       workshopOptions.value = [];
+      coreCatalogStatus.value = 'failed';
+    }
+  }
+
+  /** 当前选择能解析到真实候选（内置条目或已装工坊系统项目） */
+  const hasResolvedCore = computed(
+    () => selectedSystemCoreEntry.value !== null || selectedWorkshopCore.value !== null,
+  );
+
+  /** 命定核心候选总数（内置 system_core 条目 + 标「系统」的工坊项目） */
+  const coreCandidateCount = computed(
+    () => systemCoreEntries.value.length + workshopSystemOptions.value.length,
+  );
+
+  /**
+   * 命定核心是否必选。只有「名单已成功加载且确实为空」才豁免：
+   * 加载中 / 失败时名单为空不代表内容没有核心，豁免会放过本该选核心的存档。
+   */
+  const coreRequired = computed(
+    () => !(coreCatalogStatus.value === 'loaded' && coreCandidateCount.value === 0),
+  );
+
+  /**
+   * 清掉解析不到的核心 id（预设残留、工坊项目已卸载、条目已删除）。
+   * 🔴 只在名单**已加载**后做：名单未到时清 id 会把合法的预设选择误删，
+   *    所以加载完成时 {@link loadWorldBookEntries} 会再调一次。
+   */
+  function pruneUnresolvedCoreSelection() {
+    if (coreCatalogStatus.value !== 'loaded') return;
+    if (selectedSystemCoreEntryUid.value !== null && selectedSystemCoreEntry.value === null) {
+      selectedSystemCoreEntryUid.value = null;
+    }
+    if (selectedWorkshopCoreProjectId.value !== null && selectedWorkshopCore.value === null) {
+      selectedWorkshopCoreProjectId.value = null;
     }
   }
 
@@ -596,6 +641,13 @@ export const useCreateStore = defineStore('create', () => {
    * 只剩旧预设还可能写入，故仅作最后兜底。直接读旧字段的症状是：确认页永远不显示核心、
    * 带 `requiredDestinyCore` 的背景永远解不开。
    */
+  /** 当前命定核心的作者（工坊项目作者 / 旧目录字段作者）；内置条目没有作者数据时为空 */
+  const destinyCoreAuthor = computed<string>(() => {
+    if (selectedSystemCoreEntry.value) return '';
+    if (selectedWorkshopCore.value) return selectedWorkshopCore.value.authorName;
+    return destinyCore.value?.author ?? '';
+  });
+
   const destinyCoreName = computed<string>(
     () =>
       selectedSystemCoreEntry.value?.name ??
@@ -2060,15 +2112,18 @@ export const useCreateStore = defineStore('create', () => {
       } as any,
     };
 
+    // 剧情关闭时（含草稿恢复出的旧大纲）一律不落大纲：玩家在关闭模式下看不到它，
+    // 落成一份未确认大纲只会让存档带着一份谁都没确认过的剧情。
     const confirmed =
       (plotMode.value === 'main' || plotMode.value === 'side') && !!plotOutline.value;
-    const outline = plotOutline.value
-      ? ({
-          ...JSON.parse(JSON.stringify(plotOutline.value)),
-          saveId,
-          ...(confirmed ? { confirmed: true } : {}),
-        } as PlotOutline)
-      : undefined;
+    const outline =
+      confirmed && plotOutline.value
+        ? ({
+            ...JSON.parse(JSON.stringify(plotOutline.value)),
+            saveId,
+            confirmed: true,
+          } as PlotOutline)
+        : undefined;
     let openingWorldBooks: WorldBook[] = [];
     if (save.metadata.storyContextV2) {
       const wb = useWorldBookStore();
@@ -2244,6 +2299,8 @@ export const useCreateStore = defineStore('create', () => {
     if (data.destinyCoreId) selectDestinyCore(data.destinyCoreId);
     if (data.systemCoreEntryUid) selectSystemCoreEntry(data.systemCoreEntryUid);
     else if (data.workshopCoreProjectId) selectWorkshopCore(data.workshopCoreProjectId);
+    // 名单已加载时立即剔除解析不到的 id；未加载时留着，等加载完成再判
+    pruneUnresolvedCoreSelection();
     // 工坊扩展勾选是可选附加内容：旧预设没有这个字段时保留当前勾选（与大纲、角色勾选同口径），
     // 字段存在（哪怕是空数组）才覆盖。
     if (data.enabledWorkshopProjectIds !== undefined) {
@@ -2352,6 +2409,7 @@ export const useCreateStore = defineStore('create', () => {
     characterEntries.value = [];
     characterDefinitions.value = [];
     workshopOptions.value = [];
+    coreCatalogStatus.value = 'idle';
   }
 
   return {
@@ -2435,6 +2493,10 @@ export const useCreateStore = defineStore('create', () => {
     // 命定核心
     destinyCore,
     destinyCoreName,
+    destinyCoreAuthor,
+    coreCatalogStatus,
+    coreCandidateCount,
+    coreRequired,
     destinyCorePool,
     selectDestinyCore,
     // Phase 10h: 世界书驱动

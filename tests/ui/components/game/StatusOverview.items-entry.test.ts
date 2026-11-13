@@ -79,35 +79,39 @@ beforeEach(() => {
 });
 
 describe('StatusOverview — 持有物入口（UIL-18）', () => {
-  it('标题行常驻「›」按钮，点击打开物品面板且不触发折叠', async () => {
+  it('打开按钮与折叠头是兄弟而非嵌套，type=button，点击打开物品面板且不触发折叠', async () => {
     const wrapper = mountOverview();
     const open = wrapper.get('button[aria-label="打开物品面板"]');
+    expect(open.attributes('type')).toBe('button');
+    expect(open.element.closest('[role="button"]')).toBeNull();
+    expect(open.find('i.fa-solid').exists()).toBe(true);
     expect(wrapper.find('.hold-body').exists()).toBe(true);
 
     await open.trigger('click');
 
     expect(mockGame.showModal).toHaveBeenCalledWith('items');
-    // 冒泡被拦住：持有物区仍展开
     expect(wrapper.find('.hold-body').exists()).toBe(true);
   });
 
-  it('按钮上的 Enter 不会冒泡到标题行触发折叠', async () => {
+  it('折叠头仍可点击/回车切换折叠，且不会打开物品面板', async () => {
     const wrapper = mountOverview();
+    const header = wrapper.get('.hold-header');
 
-    await wrapper.get('button[aria-label="打开物品面板"]').trigger('keydown', { key: 'Enter' });
-
-    expect(wrapper.find('.hold-body').exists()).toBe(true);
-  });
-
-  it('收起后入口仍可见', async () => {
-    const wrapper = mountOverview();
-    const header = wrapper.get('.hold-open-action').element.closest('.section-header')!;
-
-    header.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await wrapper.vm.$nextTick();
-
+    await header.trigger('click');
     expect(wrapper.find('.hold-body').exists()).toBe(false);
-    expect(wrapper.find('button[aria-label="打开物品面板"]').exists()).toBe(true);
+    await header.trigger('keydown', { key: 'Enter' });
+    expect(wrapper.find('.hold-body').exists()).toBe(true);
+    expect(mockGame.showModal).not.toHaveBeenCalled();
+  });
+
+  it('收起后入口仍可见且可用', async () => {
+    const wrapper = mountOverview();
+
+    await wrapper.get('.hold-header').trigger('click');
+    expect(wrapper.find('.hold-body').exists()).toBe(false);
+
+    await wrapper.get('button[aria-label="打开物品面板"]').trigger('click');
+    expect(mockGame.showModal).toHaveBeenCalledWith('items');
   });
 
   it('子集页签叫「杂物」而非「背包」，避免与物品面板的全量「背包」同名', () => {

@@ -74,6 +74,15 @@ beforeEach(() => {
       mockCreate.enabledWorkshopProjectIds = next;
     },
 
+    coreCatalogStatus: 'loaded',
+    get coreCandidateCount() {
+      return this.systemCoreEntries.length + this.workshopSystemOptions.length;
+    },
+    get coreRequired() {
+      return !(this.coreCatalogStatus === 'loaded' && this.coreCandidateCount === 0);
+    },
+    loadWorldBookEntries: vi.fn(),
+
     // CreateStepCharacters 需要的最小面
     characterEntries: [{ uid: 'fated:character/lina', name: '莉娜', content: '旅店老板。' }],
     enabledCharacterEntryUids: new Set<string>(),
@@ -165,5 +174,41 @@ describe('CreateStepDestinyCore — 工坊项目与命定核心同屏', () => {
     await row.trigger('click');
     expect(mockCreate.selectedWorkshopCoreProjectId).toBe('sys1');
     expect(mockCreate.selectedSystemCoreEntryUid).toBeNull();
+  });
+});
+
+describe('CreateStepDestinyCore — 名单加载三态', () => {
+  it('加载中显示加载提示', () => {
+    mockCreate.coreCatalogStatus = 'loading';
+    mockCreate.systemCoreEntries = [];
+    const wrapper = mount(CreateStepDestinyCore);
+    expect(wrapper.find('.core-loading').text()).toContain('正在加载');
+  });
+
+  it('加载失败显示错误与重试按钮，点击重新加载', async () => {
+    mockCreate.coreCatalogStatus = 'failed';
+    mockCreate.systemCoreEntries = [];
+    const wrapper = mount(CreateStepDestinyCore);
+    expect(wrapper.find('[role="alert"]').text()).toContain('加载失败');
+    const retry = wrapper
+      .findAllComponents({ name: 'AppButton' })
+      .find((b) => b.text() === '重试')!;
+    retry.vm.$emit('click');
+    expect(mockCreate.loadWorldBookEntries).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('.axis-label').text()).toContain('必选');
+  });
+
+  it('加载成功但没有任何核心候选 → 空态说明可直接下一步，徽标改为可跳过', () => {
+    mockCreate.systemCoreEntries = [];
+    mockCreate.workshopOptions = [];
+    const wrapper = mount(CreateStepDestinyCore);
+    expect(wrapper.find('.core-empty').text()).toContain('当前内容包未提供命定核心');
+    expect(wrapper.find('.axis-label').text()).toContain('可跳过');
+    expect(wrapper.text()).not.toContain('正在加载');
+  });
+
+  it('有候选时不显示任何状态提示', () => {
+    const wrapper = mount(CreateStepDestinyCore);
+    expect(wrapper.find('.core-loading').exists()).toBe(false);
   });
 });

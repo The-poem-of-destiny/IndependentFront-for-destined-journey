@@ -38,3 +38,11 @@ export const PLOT_COUNT_MAX = 20;
  * 前者要把缺什么原样告诉玩家，后者只给通用的重试提示。
  */
 export const MISSING_FIELDS_PREFIX = '创建前请先补全：';
+
+/** 页脚「下一步」被禁用时的缺项提示：前缀 + 缺项（各带所属步骤，供跳转） */
+export interface BlockedHint {
+  prefix: string;
+  /** 当前所在步骤：同一步内的缺项不必再给跳转 */
+  currentStep: number;
+  items: Array<{ label: string; step: number }>;
+}

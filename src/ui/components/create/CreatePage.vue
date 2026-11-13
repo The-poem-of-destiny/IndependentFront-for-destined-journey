@@ -13,7 +13,7 @@ import { checkJourneyReadiness } from '../../lib/journey-readiness';
 import PresetModal from './PresetModal.vue';
 import FormSelect from '../shared/form/FormSelect.vue';
 import { initializeCachedDirectSettings } from '../../lib/direct-settings';
-import { MISSING_FIELDS_PREFIX } from '../../lib/create-options';
+import { MISSING_FIELDS_PREFIX, type BlockedHint } from '../../lib/create-options';
 
 const store = useCreateStore();
 const ui = useUIStore();
@@ -85,6 +85,10 @@ async function handleNext() {
   if (store.currentStep === 7) {
     try {
       const saveId = await store.startJourney();
+      // 建档成功即清空草稿（含步骤、选择、大纲与生成模式）：否则回首页再点「新建存档」
+      // 会直接落在第 8 步、上一个角色完整有效，一键就建出重复存档。
+      // 只在成功后重置 —— 经「← 返回」离开而未建档时草稿保留是有意为之。
+      store.resetAll();
       ui.navigate('game', saveId);
     } catch (err) {
       console.error('[CreatePage] 创建存档失败:', err);
@@ -103,16 +107,20 @@ function isMissingFieldsError(err: unknown): err is Error {
   return err instanceof Error && err.message.startsWith(MISSING_FIELDS_PREFIX);
 }
 
-/** 当前步骤下一步按钮被禁用的原因（仅必填步骤有） */
-const blockedHint = computed(() => {
-  if (store.isCreating) return '';
+/** 当前步骤下一步按钮被禁用的原因（仅必填步骤有）；缺项带所属步骤供页脚跳转 */
+const blockedHint = computed<BlockedHint | null>(() => {
+  if (store.isCreating) return null;
   const step = store.currentStep;
-  if (step === 7) {
-    const missing = [0, 1, 2].flatMap((s) => store.stepMissing[s] ?? []);
-    return missing.length ? `开始旅程前还需补全：${missing.join('、')}` : '';
-  }
-  const missing = store.stepMissing[step] ?? [];
-  return missing.length ? `还需完成：${missing.join('、')}` : '';
+  const steps = step === 7 ? [0, 1, 2] : [step];
+  const items = steps.flatMap((s) =>
+    (store.stepMissing[s] ?? []).map((label: string) => ({ label, step: s })),
+  );
+  if (items.length === 0) return null;
+  return {
+    prefix: step === 7 ? '开始旅程前还需补全：' : '还需完成：',
+    currentStep: step,
+    items,
+  };
 });
 
 function handleStepSelect(step: number) {
@@ -230,8 +238,9 @@ onMounted(() => {
       :can-prev="!store.isCreating && store.currentStep > 0"
       :can-next="!store.isCreating && (store.stepValid[store.currentStep] ?? true)"
       :next-label="nextLabel"
-      :blocked-hint="blockedHint"
+      :blocked="blockedHint"
       @prev="store.prevStep"
+      @jump="handleStepSelect"
       @next="handleNext"
       @open-preset="store.showPresetModal = true"
     />

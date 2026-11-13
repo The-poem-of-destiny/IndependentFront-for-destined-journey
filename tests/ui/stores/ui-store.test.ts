@@ -13,6 +13,8 @@ import { setActivePinia, createPinia } from 'pinia';
 const game = vi.hoisted(() => ({
   clearActive: vi.fn(),
   saves: [] as { id: string; name: string }[],
+  activeSaveId: null as string | null,
+  activeSave: null as { id: string; name: string } | null,
 }));
 vi.mock('@ui/stores/game-store', () => ({ useGameStore: () => game }));
 
@@ -81,6 +83,19 @@ describe('ui-store 设置分区入口', () => {
     expect(ui.consumeSettingsSectionRequest()).toBe('about');
     expect(ui.consumeSettingsSectionRequest()).toBeNull();
   });
+
+  it('可带卡片锚点：锚点随请求交付一次即清；不带锚点的请求会覆盖掉旧锚点', () => {
+    const ui = useUIStore();
+
+    ui.openSettings('data', 'content-pack');
+    expect(ui.consumeSettingsSectionRequest()).toBe('data');
+    expect(ui.consumeSettingsAnchorRequest()).toBe('content-pack');
+    expect(ui.consumeSettingsAnchorRequest()).toBeNull();
+
+    ui.openSettings('data', 'content-pack');
+    ui.openSettings('api');
+    expect(ui.consumeSettingsAnchorRequest()).toBeNull();
+  });
 });
 
 /** 存档管理是应用级窗口，打开和关闭都不能改变当前页面。 */
@@ -121,6 +136,8 @@ describe('ui-store 回到首页清空存档上下文', () => {
     setActivePinia(createPinia());
     game.clearActive.mockReset();
     game.saves = [{ id: 'save-1', name: '旧档' }];
+    game.activeSaveId = null;
+    game.activeSave = null;
   });
 
   it('navigate(home) 清空 activeSaveId 并让 game-store 卸下活跃存档', () => {
@@ -169,5 +186,34 @@ describe('ui-store 回到首页清空存档上下文', () => {
     ui.navigate('settings');
 
     expect(ui.activeSaveId).toBeNull();
+  });
+});
+
+describe('ui-store activeSaveName 回退', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    game.clearActive.mockReset();
+  });
+
+  it('存档列表里还没有这一行时，退到 game-store 当前载入的存档名', () => {
+    game.saves = [];
+    game.activeSaveId = 'save-new';
+    game.activeSave = { id: 'save-new', name: '新建档' };
+    const ui = useUIStore();
+
+    ui.navigate('game', 'save-new');
+
+    expect(ui.activeSaveName).toBe('新建档');
+  });
+
+  it('载入的是别的存档时不借用它的名字', () => {
+    game.saves = [];
+    game.activeSaveId = 'save-other';
+    game.activeSave = { id: 'save-other', name: '别的档' };
+    const ui = useUIStore();
+
+    ui.navigate('game', 'save-new');
+
+    expect(ui.activeSaveName).toBeNull();
   });
 });

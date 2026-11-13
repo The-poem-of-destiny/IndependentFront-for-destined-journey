@@ -119,7 +119,7 @@ function importPack() {
               '检测到与本地既有内容冲突的项，覆盖将丢弃这些修改。前往「设置 → 数据与备份 → 导入内容包」完成确认。',
             )
           ) {
-            ui.openSettings('data');
+            ui.openSettings('data', 'content-pack');
           }
         } else if (outcome.status === 'invalid') {
           ui.toast('内容包校验未通过', 'error');
@@ -185,7 +185,7 @@ async function uninstallPack() {
         v-if="content.protectedPack"
         variant="secondary"
         size="sm"
-        @click="ui.openSettings('data')"
+        @click="ui.openSettings('data', 'content-pack')"
         >管理 Discord 授权</AppButton
       >
       <AppButton

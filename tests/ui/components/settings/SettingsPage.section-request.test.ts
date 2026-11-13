@@ -14,8 +14,15 @@ import { defineComponent, h, nextTick } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 
-function stub(name: string) {
-  return { default: defineComponent({ name, render: () => h('div', { class: `stub-${name}` }) }) };
+/** 分区替身；anchor 给定时在里面放一张带该锚点的卡，验证跳转后滚到它 */
+function stub(name: string, anchor?: string) {
+  const render = () =>
+    h(
+      'div',
+      { class: `stub-${name}` },
+      anchor ? [h('div', { class: 'stub-pack-card', 'data-settings-anchor': anchor })] : [],
+    );
+  return { default: defineComponent({ name, render }) };
 }
 
 vi.mock('@ui/stores/game-store', () => ({
@@ -44,7 +51,7 @@ vi.mock('@ui/components/settings/BeautifierSection.vue', () => stub('BeautifierS
 vi.mock('@ui/components/settings/AudioSection.vue', () => stub('AudioSection'));
 vi.mock('@ui/components/settings/AssetSection.vue', () => stub('AssetSection'));
 vi.mock('@ui/components/settings/image/ImageSection.vue', () => stub('ImageSection'));
-vi.mock('@ui/components/settings/DataSection.vue', () => stub('DataSection'));
+vi.mock('@ui/components/settings/DataSection.vue', () => stub('DataSection', 'content-pack'));
 vi.mock('@ui/components/settings/DeveloperSection.vue', () => stub('DeveloperSection'));
 vi.mock('@ui/components/settings/AboutSection.vue', () => stub('AboutSection'));
 
@@ -55,9 +62,22 @@ function activeLabel(wrapper: ReturnType<typeof mount>): string {
   return wrapper.get('.nav-active').text();
 }
 
+const scrolled: { el: Element; opts: unknown }[] = [];
+
 beforeEach(() => {
   setActivePinia(createPinia());
+  scrolled.length = 0;
+  // jsdom 没有 scrollIntoView；录下被滚到的元素与参数
+  Element.prototype.scrollIntoView = function (this: Element, opts?: unknown) {
+    scrolled.push({ el: this, opts });
+  } as Element['scrollIntoView'];
 });
+
+/** 等分区切换渲染完、逐帧找锚点的那次尝试落地 */
+async function settle() {
+  await flushPromises();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+}
 
 describe('SettingsPage 分区跳转请求', () => {
   it('挂载时消费请求：从外面打开指定分区', async () => {
@@ -97,5 +117,42 @@ describe('SettingsPage 分区跳转请求', () => {
 
     expect(activeLabel(wrapper)).toBe('Agent 配置');
     expect(wrapper.find('.sub-nav').exists()).toBe(true);
+  });
+});
+
+describe('SettingsPage 卡片锚点', () => {
+  it('挂载时带锚点 → 切到数据分区并把内容包卡滚进视野', async () => {
+    const ui = useUIStore();
+    ui.openSettings('data', 'content-pack');
+
+    const wrapper = mount(SettingsPage, { attachTo: document.body });
+    await settle();
+
+    expect(activeLabel(wrapper)).toBe('数据与备份');
+    expect(scrolled.map((s) => s.el.className)).toEqual(['stub-pack-card']);
+    expect(ui.requestedSettingsAnchor).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('已在设置页时带锚点的请求同样滚到目标卡；减动效时不平滑滚动', async () => {
+    document.documentElement.setAttribute('data-reduced-motion', 'true');
+    try {
+      const ui = useUIStore();
+      ui.navigate('settings');
+      const wrapper = mount(SettingsPage, { attachTo: document.body });
+      await settle();
+      expect(scrolled).toHaveLength(0);
+
+      ui.openSettings('data', 'content-pack');
+      await settle();
+
+      expect(activeLabel(wrapper)).toBe('数据与备份');
+      expect(scrolled).toHaveLength(1);
+      expect(scrolled[0]?.opts).toMatchObject({ behavior: 'auto' });
+      expect(ui.requestedSettingsAnchor).toBeNull();
+      wrapper.unmount();
+    } finally {
+      document.documentElement.removeAttribute('data-reduced-motion');
+    }
   });
 });

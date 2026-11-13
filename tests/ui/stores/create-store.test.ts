@@ -203,6 +203,9 @@ beforeEach(() => {
 
 // ===== 辅助 =====
 
+/** 内置命定核心候选（step 2 按解析后的条目判定，裸 uid 不算数） */
+const FIXTURE_CORE_ENTRY = { uid: FIXTURE_CORE_UID, name: '占位核心条目', content: '' } as any;
+
 function makeStore() {
   setActivePinia(createPinia());
   // 🔴 必须在 `useCreateStore()` **之前**灌：store 构造时同步读一次注册表
@@ -210,6 +213,7 @@ function makeStore() {
   seedFixtureRegistry();
   const store = useCreateStore();
   store.generationMode = 'agent';
+  store.systemCoreEntries = [FIXTURE_CORE_ENTRY];
   return store;
 }
 
@@ -217,6 +221,9 @@ const TEST_ATTRIBUTES = ['力量', '敏捷', '体质', '智力', '精神'];
 
 /** 补齐建档必填的难度与命定核心（最终持久化边界会聚合校验它们） */
 function fillRequiredChoices(store: ReturnType<typeof useCreateStore>) {
+  if (!store.systemCoreEntries.some((e) => e.uid === FIXTURE_CORE_UID)) {
+    store.systemCoreEntries = [...store.systemCoreEntries, FIXTURE_CORE_ENTRY];
+  }
   store.selectDifficulty('normal');
   store.selectSystemCoreEntry(FIXTURE_CORE_UID);
 }
@@ -968,6 +975,17 @@ describe('stepValid 步骤验证', () => {
   });
 
   it('工坊命定核心同样满足 Step 2', () => {
+    store.workshopOptions = [
+      {
+        projectId: 'sys1',
+        name: '异界律令',
+        description: '',
+        authorName: '作者C',
+        version: '1',
+        tags: ['系统'],
+        entryUids: [],
+      },
+    ];
     store.selectWorkshopCore('sys1');
     expect(store.stepValid[2]).toBe(true);
     expect(store.stepMissing[2]).toEqual([]);
@@ -1583,6 +1601,7 @@ function setupPlotStore() {
   });
   const store = useCreateStore();
   store.generationMode = 'agent';
+  store.systemCoreEntries = [FIXTURE_CORE_ENTRY];
   store.plotMode = 'main';
   store.name = '艾琳';
   store.selectDifficulty('normal');
@@ -2622,5 +2641,126 @@ describe('generatePlotOutline 剧情关闭（UIL-14）', () => {
     expect(await store.generatePlotOutline()).toBe(false);
     expect(chatMock).not.toHaveBeenCalled();
     expect(store.isPlotGenerating).toBe(false);
+  });
+});
+
+// ===== 命定核心名单加载态与失效 id（复审修复） =====
+
+describe('命定核心名单加载态与失效选择', () => {
+  beforeEach(async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })) as any);
+    const { clearAllData, initializeDatabase } = await import('@engine/persistence/database');
+    try {
+      await clearAllData();
+    } catch {
+      /* db may not exist */
+    }
+    await initializeDatabase();
+  });
+
+  function presetWith(store: ReturnType<typeof useCreateStore>, over: Record<string, unknown>) {
+    return {
+      id: 'p',
+      name: 'p',
+      createdAt: 1,
+      updatedAt: 1,
+      ...store.getCurrentPresetData(),
+      ...over,
+    };
+  }
+
+  it('只有 id 没有对应条目时不算选了核心', () => {
+    const store = makeStore();
+    store.systemCoreEntries = [];
+    store.selectSystemCoreEntry('fated:system_core/gone');
+    expect(store.stepValid[2]).toBe(false);
+    store.selectWorkshopCore('uninstalled');
+    expect(store.stepValid[2]).toBe(false);
+  });
+
+  it('名单已加载时，预设里解析不到的核心 id 立即清空；能解析的保留', () => {
+    const store = makeStore();
+    store.coreCatalogStatus = 'loaded';
+    store.applyPresetData(presetWith(store, { systemCoreEntryUid: 'fated:system_core/gone' }));
+    expect(store.selectedSystemCoreEntryUid).toBeNull();
+    store.applyPresetData(
+      presetWith(store, { systemCoreEntryUid: null, workshopCoreProjectId: 'gone' }),
+    );
+    expect(store.selectedWorkshopCoreProjectId).toBeNull();
+    store.applyPresetData(presetWith(store, { systemCoreEntryUid: FIXTURE_CORE_UID }));
+    expect(store.selectedSystemCoreEntryUid).toBe(FIXTURE_CORE_UID);
+  });
+
+  it('名单未加载时先保留预设 id，加载完成后再按实际名单裁决', async () => {
+    const store = makeStore();
+    store.systemCoreEntries = [];
+    store.applyPresetData(presetWith(store, { systemCoreEntryUid: 'fated:system_core/gone' }));
+    expect(store.selectedSystemCoreEntryUid).toBe('fated:system_core/gone');
+    await store.loadWorldBookEntries();
+    expect(store.coreCatalogStatus).toBe('loaded');
+    expect(store.selectedSystemCoreEntryUid).toBeNull();
+  });
+
+  it('加载成功但内容未提供任何核心 → 豁免命定核心必选', async () => {
+    const store = makeStore();
+    store.systemCoreEntries = [];
+    await store.loadWorldBookEntries();
+    expect(store.coreCatalogStatus).toBe('loaded');
+    expect(store.coreCandidateCount).toBe(0);
+    expect(store.coreRequired).toBe(false);
+    expect(store.stepValid[2]).toBe(true);
+  });
+
+  it('加载失败 → 状态为 failed，命定核心仍必选，可重试', async () => {
+    const store = makeStore();
+    const { useWorldBookStore } = await import('../../../src/ui/stores/worldbook-store');
+    const wb = useWorldBookStore();
+    const spy = vi.spyOn(wb, 'init').mockRejectedValueOnce(new Error('idb down'));
+    await store.loadWorldBookEntries();
+    expect(store.coreCatalogStatus).toBe('failed');
+    expect(store.coreRequired).toBe(true);
+    expect(store.stepValid[2]).toBe(false);
+    spy.mockRestore();
+    await store.loadWorldBookEntries();
+    expect(store.coreCatalogStatus).toBe('loaded');
+  });
+
+  it('resetAll 把名单状态回到 idle，并清空生成模式与步骤', () => {
+    const store = makeStore();
+    store.coreCatalogStatus = 'loaded';
+    store.currentStep = 7;
+    store.resetAll();
+    expect(store.coreCatalogStatus).toBe('idle');
+    expect(store.currentStep).toBe(0);
+    expect(store.generationMode).toBe('');
+  });
+
+  it('destinyCoreAuthor 取工坊核心作者', () => {
+    const store = makeStore();
+    store.workshopOptions = [
+      {
+        projectId: 'sys1',
+        name: '异界律令',
+        description: '',
+        authorName: '作者C',
+        version: '1',
+        tags: ['系统'],
+        entryUids: [],
+      },
+    ];
+    store.selectWorkshopCore('sys1');
+    expect(store.destinyCoreName).toBe('异界律令');
+    expect(store.destinyCoreAuthor).toBe('作者C');
+    store.selectSystemCoreEntry(FIXTURE_CORE_UID);
+    expect(store.destinyCoreAuthor).toBe('');
+  });
+
+  it('剧情关闭时草稿里的旧大纲不随存档落库', async () => {
+    const store = setupPlotStore();
+    store.plotMode = 'off';
+    store.plotOutline = { id: 'o', title: '旧大纲', chapters: [] } as any;
+    const saveId = await store.startJourney();
+    const { getLatestPlotOutline } = await import('@engine/persistence/database');
+    expect(await getLatestPlotOutline(saveId)).toBeUndefined();
   });
 });

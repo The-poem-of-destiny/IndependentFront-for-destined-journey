@@ -51,7 +51,8 @@ const { url: portraitUrl, isVideo: portraitIsVideo } = useAssetImage(
           </span>
           <span class="hero-location">起始: {{ store.startLocationLabel || '自定义' }}</span>
           <span v-if="store.destinyCoreName" class="hero-core">
-            命定之灵: {{ store.destinyCoreName }}
+            命定之灵: {{ store.destinyCoreName
+            }}<template v-if="store.destinyCoreAuthor"> ({{ store.destinyCoreAuthor }})</template>
           </span>
         </div>
       </div>
