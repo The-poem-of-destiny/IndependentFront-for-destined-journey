@@ -17,6 +17,8 @@
       `CombatState`。待私有内容仓的 `combat_extra` 世界书随 pack 发布后，用真实 LLM 覆盖：单敌/多敌、
       玩家复杂意图、失败重试/退出、终局结算与「继续」续写、取消/重开、刷新续战，记录 usage、延迟及
       脱敏 wire evidence。
+      📌 2026-11-13：`combat_extra`（8 条）已在私有内容仓，但此后没有发过正式包，前置卡在下方
+      「内容包 ↔ 引擎能力缺口」的分发链路一条。
 
   - **未决点**：① 命运点数（FP）的**获取规则依赖其它世界书条目**，结算 `fpDelta` 暂恒 0；
     ② 结算面板的「战利品」暂恒空（沙盒尚未产出战利品清单）；③ 战斗内召唤走 `combat_add_unit`
@@ -64,13 +66,45 @@
 - [ ] **正式发布打包** —— 把当前的开发态收敛成可分发的正式版本：产物形态（桌面壳 / 纯静态站
       / 两者）、版本号与更新渠道、内容仓 pack 的随包策略、首次启动的资产落地流程。
 
-- [ ] **内容包更新** —— 更新并发布私有内容包，完成以下引擎功能的正式内容接入与真机验收。
+- [ ] **内容包 ↔ 引擎能力缺口（2026-11-13 普查）** —— 引擎已实现、但私有内容包尚未供给或尚未
+      接通的功能面。本条只记**引擎侧**要做的事与跨仓前置；内容侧逐条待办在私有内容仓根目录
+      `TODO.md`（同日建立，公开仓侧不可见）。普查口径：私有内容仓 `main@08c5bff` 用
+      `tools/build-pack.mjs` 临时构建的包（未发布）对照引擎 `master@fc52110`。该包过引擎装包契约
+      7/7，但契约只验结构：构建器只产出 10 个分节（worldBooks / agentDefaults / presets /
+      beautifierRules / mapMarkers / catalog / locations / bloodlines / namePools / branding），
+      引擎认的 `imageDialects` / `mapPack` / `randomEvents` / `remoteAssets` / `characters`
+      五节全部缺席，装上后这五面回落公开仓占位文件。
+
+  - [ ] **分发链路断档（阻塞玩家拿到任何新内容）** —— `7d5e3e4`（2026-11-07）起引擎只从 Discord
+        授权中心服拉取在线包（`POEM_PACK_SERVER_URL` / `VITE_PACK_SERVER_URL`），旧 `poem-dist`
+        公开 Release + 内嵌密钥通道已撤；但内容仓的发布工具 `build-release.mjs` 仍产旧格式
+        `pack.bin`，中心服（`discord-content-pack-server`）也不在本工作区任何仓。`poem-dist` 最后一个
+        正式包是 v2.12.1（2026-10-02），此后的内容（世界书 UID 命名空间、Story v2 条目级路由、
+        `combat_extra`、日常检定条目、地图归属对齐等）玩家一概拿不到。引擎侧待办：
+    - [ ] 中心服部署后，用真实 Discord OAuth + 真实包做端到端联调（`docs/reference/discord-content-pack-client.md`
+          「安全与验收边界」写明尚未验收）。
+    - [ ] `docs/planning/2026-11-07-discord-auth-content-pack-design.md` 状态行仍是「设计定稿（待实施）」，
+          客户端已在 `7d5e3e4` 实施，按文档维护守则第 1 条改状态行。
+    - [ ] 本仓 `AGENTS.md`「内容包发布 = `poem-dist`」一节已过时（`server/content-pack-release.ts` 里已无
+          `PACK_BLOB_KEY_B64`），待中心服发布流程定稿后重写。
+    - 🔴 下一个正式包的版本号必须**大于 2.12.1**（升级按 semver 判定，D40）。内容仓文档里记的 2.8.0
+      候选包与 `poem-dist` 上已发的 v2.8.0 撞号，如果原样发布，玩家端会把它判成旧包。
+
+  - [ ] **地图包不随内容包分发** —— 内容仓的 `data/content/map-pack.json`（v1.2.0）与 `provinces.png`
+        只在开发态经 `POEM_CONTENT_DIR` overlay 生效；`build-pack.mjs` 不产 `mapPack` 分节，装正式包的
+        玩家落回公开仓占位地图（十几块合成地块）。`provinces.png` 是二进制，JSON 包装不下，而引擎
+        目前**没有包内或远程的栅格通道**（`provincesRasterUrl` 只认同源 `/data/content/provinces.png`）。
+        引擎侧要先定方案（包内 base64 / 远程 URL + `contentHash` 校验 / 独立资产包，三选一），
+        内容侧再让构建器产出 `mapPack` 分节。
 
   - [ ] **地图系统集成收尾** —— v1 / v1.2 引擎、内容仓 map-pack v1.2.0 校验门，以及地图编辑器的
         发展度 / 初始建筑 / 主建筑创作面均已落地。当前缺口是同步私有内容仓：给
-        `request_dispatcher` 补 `{{MAP_CONTEXT}}` 与六个 `tile_ops`，并让世界书 uid 510 展示 v1.2
-        的状态 / 发展度 / 建筑 / 编年史。同步后需在当前主线完成真实 AI 轮次、浏览器内 EJS
-        地图投影、v1.2 UI 与时间结算的端到端真机走查。现行契约见
+        `request_dispatcher` 补 `{{MAP_CONTEXT}}` 与六个 `tile_ops`，并让世界书 uid 510（现
+        `fated:extra_setting/map_tile_context`）展示 v1.2 的状态 / 发展度 / 建筑 / 编年史。
+        📌 2026-11-13 复核：两项均未做（内容仓 dispatcher 模板仍无 `{{MAP_CONTEXT}}`，那条世界书
+        正文未提及 v1.2 任何字段；`daily_check` 已带 `{{MAP_CONTEXT}}`）。同步后需在当前主线完成
+        真实 AI 轮次、浏览器内 EJS 地图投影、v1.2 UI 与时间结算的端到端真机走查，并且依赖上一条
+        「地图包不随内容包分发」才能到达玩家。现行契约见
         `docs/planning/2026-08-11-map-system-v1-integration.md` 与
         `docs/planning/2026-08-18-map-tile-dynamics-v1.2-design.md`。
 
@@ -81,6 +115,32 @@
         `{{RANDOM_EVENTS}}` 与 `<event_trigger>` 教学。发布并导入新版 pack 后，需真机覆盖 MTTH / 首访
         入池、AI 认领、冷却与档案结算、开关、快照回退重放及候选过期。现行契约见
         `docs/planning/2026-08-15-random-event-system-design.md`。
+        📌 2026-11-13 复核：仍未接通。`randomEventsEnabled` 默认开，但正式预设里没有
+        `{{RANDOM_EVENTS}}`，调度照跑、注入无处落，对正式内容是死功能。
+
+  - [ ] **直出 / 缓存直出在正式内容下读不到世界书** —— `direct_main` 只读取明确授权它的条目
+        （`docs/reference/direct-generation.md`「内容包」节）。公开占位集有 22 条授权，私有内容仓
+        554 条里 **0 条**授权 `direct_main`，内容仓 `agent-config.json` 也没有 `direct_main` 项目默认。
+        正式包下建直出存档 = 主生成只有内置预设、没有世界设定。内容侧适配后，引擎侧需用真实包补
+        直出与缓存直出的真机验收（`#140` 标着「待真机验证」）。
+
+  - [ ] **原生角色（`characters` 分节）未供给** —— 内容仓没有 `data/content/characters.json`，作者
+        角色仍走 `character` 世界书的只读兼容转换（`docs/reference/character-system.md`「旧内容与存档」），
+        拿不到原生定义的过去经历、显式素材关联与资料目录。依赖内容侧先出迁移报告再显式迁移；
+        与本文件首条「Characters v1 与提示词集成」合并验收。
+
+  - [ ] **内置配乐对正式内容为空** —— 引擎读 `/audio/manifest.json`（公开仓那份是空清单），
+        dev overlay 只覆盖 `/data/*`；内容仓的曲目清单在 `data/audio/manifest.json`，路径对不上，
+        音频文件本身也不在任何仓或包里（包内 `provenance.audio` 写的是「经 importZip 独立分发」，
+        但没有产出这个 zip 的工具）。需要和内容侧一起定分发通道，再与「配乐重制/精选」合并。
+
+  - [ ] **世界书 UID 命名空间迁移的实机验证** —— 引擎 `399bfe6` 与内容仓 `08c5bff` 两侧都已切到
+        `<命名空间>:<bookId>/<slug>`，临时包契约测试通过；但存档里旧数字 UID 的迁移
+        （`content-pack-plan.ts` 的存档 uid 迁移）还没用「真实新包 + 旧存档」走过一次。等分发链路
+        通了，首个正式包装包时顺带验收。
+
+  - [ ] （低优先）`imageDialects` / `remoteAssets` 两节内容仓未提供，分别回落占位的两套通用方言与
+        世界书 char-info 载体，现状可用。只在要做世界观专用画风、或给非角色素材走远程 URL 时再补。
 
 - [ ] **文生图集成复验** —— 在当前主线重新走通完整游玩链路：story 产出 `<scene_image>` 标记 →
       `image_prompt` 侧链 → NovelAI / ComfyUI provider → 图片落库 → 正文就地渲染与 CG 图鉴，
