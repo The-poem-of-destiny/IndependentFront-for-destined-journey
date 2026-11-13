@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDirectCharacterSections,
+  buildDirectMemorySections,
   buildLegacyDirectCacheFrame,
 } from '../../../src/core/prompts/direct-context-frame';
 import { createCachedDirectPreset, DIRECT_TEMPLATE } from '../../../src/core/prompts/direct-prompt';
 import type { DirectGenerationInput } from '../../../src/core/agents/direct-main';
 import {
   createDefaultCharacterState,
+  type MemoryRecord,
   type WorldBook,
   type WorldBookEntry,
 } from '../../../src/core/types/types';
@@ -227,4 +229,76 @@ describe('legacy cached direct layout', () => {
       invalidateDirectContext(saveId);
     }
   });
+
+  it('keeps one section per memory out of the prefix', async () => {
+    const input = fixture();
+    input.context.memories = [memory(1), memory(2)];
+    const first = await buildLegacyDirectCacheFrame(input, [], '历史');
+    expect(first.sections).not.toHaveProperty('memoryEntries');
+    expect(first.sections['memory/MEM000001']).toBe(
+      '[MEM000001] 第1日~第1日 | 重要度:5\n正文: 第1条记忆',
+    );
+    expect(first.sections['memory/MEM000002']).toContain('第2条记忆');
+    input.context.memories = [memory(1), memory(2), memory(3)];
+    const next = await buildLegacyDirectCacheFrame(input, [], '历史');
+    expect(next.prefix).toEqual(first.prefix);
+    expect(JSON.stringify(next.prefix)).not.toContain('第3条记忆');
+    expect(next.sections['memory/MEM000003']).toContain('第3条记忆');
+  });
+
+  it('appends new memories, replaces edited ones and removes deleted ones without resending the library', async () => {
+    const saveId = 'direct-memories';
+    invalidateDirectContext(saveId);
+    const build = (memories: MemoryRecord[]) => ({
+      saveId,
+      signature: 'fixed',
+      history: [],
+      turn: '继续',
+      outputBudget: 100,
+      frame: {
+        prefix: [{ role: 'system' as const, content: '规则'.repeat(4000) }],
+        history: [],
+        sections: { ...buildDirectMemorySections(memories), combat: null },
+      },
+    });
+    const delta = (messages: { content?: string | null }[]) =>
+      JSON.parse(
+        messages[messages.length - 1].content!.match(
+          /<direct_context>\n([\s\S]*?)\n<\/direct_context>/,
+        )![1],
+      );
+    try {
+      const library = Array.from({ length: 30 }, (_, i) => memory(i + 1));
+      const first = await prepareDirectContext(build(library));
+      await acceptDirectContext(first, { rawResponse: '完成', acceptedMessages: [] });
+      const added = await prepareDirectContext(build([...library, memory(31)]));
+      expect(added.rebaseReason).toBeUndefined();
+      expect(Object.keys(delta(added.messages).set).sort()).toEqual(['combat', 'memory/MEM000031']);
+      await acceptDirectContext(added, { rawResponse: '完成', acceptedMessages: [] });
+      const edited = { ...memory(5), content: '第5条记忆已改写' };
+      const changed = [...library.slice(0, 4), edited, ...library.slice(5, 29), memory(31)];
+      const third = await prepareDirectContext(build(changed));
+      const next = delta(third.messages);
+      expect(Object.keys(next.set).sort()).toEqual(['combat', 'memory/MEM000005']);
+      expect(next.set['memory/MEM000005']).toContain('第5条记忆已改写');
+      expect(next.remove).toEqual(['memory/MEM000030']);
+    } finally {
+      invalidateDirectContext(saveId);
+    }
+  });
 });
+
+function memory(i: number): MemoryRecord {
+  return {
+    id: `MEM${String(i).padStart(6, '0')}`,
+    saveId: 'direct-memories',
+    createdAt: i,
+    realTimestamp: i,
+    timeRange: { start: `第${i}日`, end: `第${i}日` },
+    content: `第${i}条记忆`,
+    hiddenLine: '',
+    keywords: [],
+    relatedCharacterIds: [],
+    importance: 5,
+  };
+}

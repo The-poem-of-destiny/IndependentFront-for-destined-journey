@@ -1,7 +1,14 @@
 import type { DirectGenerationInput } from '../agents/direct-main';
-import type { AgentContext, CharacterState, ChatPreset, WorldBookEntry } from '../types/types';
+import type {
+  AgentContext,
+  CharacterState,
+  ChatPreset,
+  MemoryRecord,
+  WorldBookEntry,
+} from '../types/types';
 import { buildAgentMessagesAsync } from './agent-templates';
 import { resolveTemplateWithGlobals } from './template-resolver';
+import { formatMemoryEntry } from './placeholder-registry';
 import { buildCharacterContext } from '../character/character-chronicle';
 import type { DirectContextFrame } from './direct-context-session';
 import { DIRECT_TEMPLATE } from './direct-prompt';
@@ -62,6 +69,17 @@ export function buildDirectCharacterSections(
     resources.push({ name: character.name, hp, maxHp, mp, maxMp, sp, maxSp });
   }
   return { ...sections, resources };
+}
+
+/**
+ * 记忆库按条分区（`memory/记忆编号`）：新增记忆只追加一个键，删除走 `remove`，编辑只替换那一条。
+ * 整块一个键时，每楼新增一条记忆都会重发全库，长存档每一两楼就因 `transcript_growth` 重建。
+ * 规范化序列化按键的字典序排列，与原先按 Dexie 主键读出的顺序一致（6 位零填充流水号内即时间顺序）。
+ */
+export function buildDirectMemorySections(
+  memories: readonly MemoryRecord[],
+): Record<string, string> {
+  return Object.fromEntries(memories.map((m) => [`memory/${m.id}`, formatMemoryEntry(m)]));
 }
 
 /** Move engine-owned changing inputs out of the prefix; custom dynamic instructions still rebase. */
@@ -184,7 +202,7 @@ export async function buildLegacyDirectCacheFrame(
       currentLore: current.join('\n\n'),
       mapContext: resolve('{{MAP_CONTEXT}}'),
       randomEvents: resolve('{{RANDOM_EVENTS}}'),
-      memoryEntries: resolve('{{MEMORY_ENTRIES}}'),
+      ...buildDirectMemorySections(rendered.memories ?? []),
       characterContext: buildCharacterContext(input.context),
       ...(authoredTurn ? { authoredTurn } : {}),
     },

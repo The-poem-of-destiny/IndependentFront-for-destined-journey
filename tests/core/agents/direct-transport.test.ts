@@ -17,6 +17,7 @@ import {
   createDefaultCharacterState,
   type AgentConfig,
   type ApiEndpoint,
+  type MemoryRecord,
   type WorldBookEntry,
 } from '../../../src/core/types/types';
 
@@ -240,6 +241,69 @@ it.each([
     expect(prompt).not.toContain('失败的尝试');
     expect(prompt).not.toContain('缺少更新块');
     expect(prompt).toContain('再试一次');
+  } finally {
+    invalidateDirectContext(saveId);
+  }
+});
+
+it('legacy memory growth appends one memory per turn instead of rebuilding the session', async () => {
+  const saveId = 'cached-memory-growth';
+  invalidateDirectContext(saveId);
+  const { input, client } = setup(false);
+  input.cache = { saveId, policy: 'prefix' };
+  const memory = (i: number): MemoryRecord => ({
+    id: `MEM${String(i).padStart(6, '0')}`,
+    saveId,
+    createdAt: i,
+    realTimestamp: i,
+    timeRange: { start: '未知', end: '未知' },
+    content: `第${i}条记忆：`.padEnd(300, '旅人在城中行走，与人交谈，记下见闻。'),
+    hiddenLine: '',
+    keywords: [],
+    relatedCharacterIds: [],
+    importance: 5,
+  });
+  input.worldBooks = [
+    {
+      id: 'memory-growth',
+      name: '规则',
+      partition: 'world_setting',
+      entries: [
+        {
+          uid: 'memory-growth:world_setting/rules',
+          name: 'rules',
+          content: '固定世界规则。'.repeat(3000),
+          enabled: true,
+          key: [],
+          keysecondary: [],
+          selectiveLogic: 0,
+          order: 1,
+          position: 0,
+          extra: { lore: { audiences: ['direct_main'], section: 'fixed' } },
+        },
+      ],
+    },
+  ];
+  input.context.memories = Array.from({ length: 20 }, (_, i) => memory(i + 1));
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => streamResponse(true));
+  try {
+    const first = await generateDirectTurn(input, client);
+    expect(JSON.stringify(first.cache!.ticket.messages)).toContain('memory/MEM000020');
+    await acceptDirectContext(first.cache!.ticket, { ...first.cache!, acceptedMessages: [] });
+    // 整块重发记忆库时，这个规模下每楼增量约 8.5k 字、第 3 楼触发 transcript_growth：
+    // 下面的「不重建」与「增量 < 5000」两条断言各自都会拦住
+    for (let turn = 2; turn <= 5; turn++) {
+      input.context.memories = [...input.context.memories!, memory(19 + turn)];
+      input.context.userInput = `第${turn}楼`;
+      const next = await generateDirectTurn(input, client);
+      const ticket = next.cache!.ticket;
+      expect(ticket.rebaseReason).toBeUndefined();
+      const tail = ticket.messages[ticket.messages.length - 1].content!;
+      expect(tail).toContain(`memory/MEM0000${19 + turn}`);
+      expect(tail).not.toContain('memory/MEM000001');
+      expect(tail.length).toBeLessThan(5000);
+      await acceptDirectContext(ticket, { ...next.cache!, acceptedMessages: [] });
+    }
   } finally {
     invalidateDirectContext(saveId);
   }

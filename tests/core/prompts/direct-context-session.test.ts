@@ -181,4 +181,30 @@ describe('accepted direct context', () => {
       acceptDirectContext(second, { rawResponse: 'ok', acceptedMessages: [] }),
     ).resolves.toBeUndefined();
   });
+
+  it('cold-rebuilds a persisted session once the protocol prefix text changes', async () => {
+    let record: DirectCacheRecord | undefined;
+    installDirectCacheStore({
+      load: async () => record,
+      save: async (value) => {
+        record = structuredClone(value);
+      },
+      delete: async () => {},
+    });
+    // 旧协议 + 整块记忆库的已接纳会话，刷新后只剩持久化记录
+    const old = input();
+    old.frame.sections = { memoryEntries: '**记忆库:**\n[MEM000001] 旧记忆', combat: null };
+    const first = await prepareDirectContext(old);
+    await acceptDirectContext(first, { rawResponse: 'old reply', acceptedMessages: [message()] });
+    invalidateDirectContext(saveId);
+    const next = { ...input(), history: [message()] };
+    next.frame.prefix = [{ role: 'system', content: '新协议 ' + 'rules '.repeat(2000) }];
+    next.frame.sections = { 'memory/MEM000001': '[MEM000001] 旧记忆', combat: null };
+    const rebuilt = await prepareDirectContext(next);
+    expect(rebuilt.rebaseReason).toBe('configuration_or_lore_changed');
+    expect(JSON.stringify(rebuilt.messages)).not.toContain('old reply');
+    const tail = rebuilt.messages[rebuilt.messages.length - 1].content!;
+    expect(tail).toContain('memory/MEM000001');
+    expect(tail).not.toContain('memoryEntries');
+  });
 });

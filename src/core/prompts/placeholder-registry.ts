@@ -29,6 +29,7 @@ import type {
   WorldBookEntry,
   PlaceholderResolver,
   RecentCombatInfo,
+  MemoryRecord,
 } from '../types/types';
 import {
   getEntriesForAgent,
@@ -98,17 +99,16 @@ function bookNameOfUid(uid: string): string {
   return '?';
 }
 
-/** 记忆条目格式化（Q-05 起是唯一实现） */
+/** 单条记忆的注入格式（Q-05 起是唯一实现；缓存直出按条分区也复用它） */
+export function formatMemoryEntry(m: MemoryRecord): string {
+  return `[${m.id}] ${m.timeRange.start}~${m.timeRange.end} | 重要度:${m.importance}\n正文: ${m.content.slice(0, 300)}`;
+}
+
 function formatMemoriesEntries(ctx: AgentContext, topK?: number): string {
   const memories = ctx.memories ?? [];
   if (memories.length === 0) return '';
   const sliced = topK && topK > 0 ? memories.slice(0, topK) : memories;
-  return sliced
-    .map(
-      (m) =>
-        `[${m.id}] ${m.timeRange.start}~${m.timeRange.end} | 重要度:${m.importance}\n正文: ${m.content.slice(0, 300)}`,
-    )
-    .join('\n---\n');
+  return sliced.map(formatMemoryEntry).join('\n---\n');
 }
 
 /** 活跃剧情事件格式化（Q-05 起是唯一实现） */
