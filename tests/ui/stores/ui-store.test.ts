@@ -6,8 +6,18 @@
  *   2. 同视图重复 navigate 也覆盖 → previousView 变成自己，返回键就地失效
  *   3. 只在某几条路径上记 → 侧栏进来的那条忘了记，症状只在一个入口出现
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
+
+// game-store 真身会拉起整条引擎链；ui-store 只用到 clearActive 与 saves。
+const game = vi.hoisted(() => ({
+  clearActive: vi.fn(),
+  saves: [] as { id: string; name: string }[],
+  activeSaveId: null as string | null,
+  activeSave: null as { id: string; name: string } | null,
+}));
+vi.mock('@ui/stores/game-store', () => ({ useGameStore: () => game }));
+
 import { useUIStore } from '@ui/stores/ui-store';
 
 describe('ui-store previousView', () => {
@@ -73,6 +83,19 @@ describe('ui-store 设置分区入口', () => {
     expect(ui.consumeSettingsSectionRequest()).toBe('about');
     expect(ui.consumeSettingsSectionRequest()).toBeNull();
   });
+
+  it('可带卡片锚点：锚点随请求交付一次即清；不带锚点的请求会覆盖掉旧锚点', () => {
+    const ui = useUIStore();
+
+    ui.openSettings('data', 'content-pack');
+    expect(ui.consumeSettingsSectionRequest()).toBe('data');
+    expect(ui.consumeSettingsAnchorRequest()).toBe('content-pack');
+    expect(ui.consumeSettingsAnchorRequest()).toBeNull();
+
+    ui.openSettings('data', 'content-pack');
+    ui.openSettings('api');
+    expect(ui.consumeSettingsAnchorRequest()).toBeNull();
+  });
 });
 
 /** 存档管理是应用级窗口，打开和关闭都不能改变当前页面。 */
@@ -101,5 +124,96 @@ describe('ui-store 存档管理入口', () => {
 
     expect(ui.saveManagerOpen).toBe(false);
     expect(ui.currentView).toBe('game');
+  });
+});
+
+/**
+ * UIL-20：回到首页即离开存档上下文。
+ * 否则「首页 → 设置」里的单存档操作会写到刚离开的那个存档。
+ */
+describe('ui-store 回到首页清空存档上下文', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    game.clearActive.mockReset();
+    game.saves = [{ id: 'save-1', name: '旧档' }];
+    game.activeSaveId = null;
+    game.activeSave = null;
+  });
+
+  it('navigate(home) 清空 activeSaveId 并让 game-store 卸下活跃存档', () => {
+    const ui = useUIStore();
+    ui.navigate('game', 'save-1');
+
+    ui.navigate('home');
+
+    expect(ui.activeSaveId).toBeNull();
+    expect(ui.activeSaveName).toBeNull();
+    expect(game.clearActive).toHaveBeenCalledTimes(1);
+  });
+
+  it('back() 落到首页时同样清空', () => {
+    const ui = useUIStore();
+    ui.navigate('game', 'save-1');
+    ui.navigate('workshop');
+
+    ui.back();
+    expect(ui.currentView).toBe('game');
+    expect(ui.activeSaveId).toBe('save-1');
+    expect(game.clearActive).not.toHaveBeenCalled();
+
+    ui.back();
+    expect(ui.currentView).toBe('home');
+    expect(ui.activeSaveId).toBeNull();
+    expect(game.clearActive).toHaveBeenCalledTimes(1);
+  });
+
+  it('游戏页 → 设置保留存档上下文（档内设置仍作用于当前存档）', () => {
+    const ui = useUIStore();
+    ui.navigate('game', 'save-1');
+
+    ui.navigate('settings');
+
+    expect(ui.activeSaveId).toBe('save-1');
+    expect(ui.activeSaveName).toBe('旧档');
+    expect(game.clearActive).not.toHaveBeenCalled();
+  });
+
+  it('首页 → 设置时没有存档上下文', () => {
+    const ui = useUIStore();
+    ui.navigate('game', 'save-1');
+    ui.navigate('home');
+
+    ui.navigate('settings');
+
+    expect(ui.activeSaveId).toBeNull();
+  });
+});
+
+describe('ui-store activeSaveName 回退', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    game.clearActive.mockReset();
+  });
+
+  it('存档列表里还没有这一行时，退到 game-store 当前载入的存档名', () => {
+    game.saves = [];
+    game.activeSaveId = 'save-new';
+    game.activeSave = { id: 'save-new', name: '新建档' };
+    const ui = useUIStore();
+
+    ui.navigate('game', 'save-new');
+
+    expect(ui.activeSaveName).toBe('新建档');
+  });
+
+  it('载入的是别的存档时不借用它的名字', () => {
+    game.saves = [];
+    game.activeSaveId = 'save-other';
+    game.activeSave = { id: 'save-other', name: '别的档' };
+    const ui = useUIStore();
+
+    ui.navigate('game', 'save-new');
+
+    expect(ui.activeSaveName).toBeNull();
   });
 });

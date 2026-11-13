@@ -1,4 +1,3 @@
-import { isDirectMode } from '@engine/story/generation-mode';
 /**
  * 捏人页 Store — 角色创建状态管理
  *
@@ -86,6 +85,7 @@ import {
   buildWorkshopEnableOptions,
   type WorkshopEnableOption,
 } from '../lib/workshop-enable';
+import { MISSING_FIELDS_PREFIX } from '../lib/create-options';
 
 // ===== 类型 =====
 
@@ -123,21 +123,58 @@ export const useCreateStore = defineStore('create', () => {
   // ═══════════════════════════════════════════════════════
   const currentStep = ref(0);
 
+  /**
+   * 各必填步骤仍缺的项（中文短语，供页脚提示与最终提交报错共用）。
+   *
+   * 只有 Step 0~2 有必填项；3~6 是可选内容。🔴 这里是「缺什么」的**唯一真源**：
+   * `stepValid` 与 `persistJourney` 的最终边界都从它派生，避免两处校验各写一份后漂移。
+   */
+  const stepMissing = computed<Record<number, string[]>>(() => {
+    const basic: string[] = [];
+    if (generationMode.value === '') basic.push('生成模式');
+    if (name.value.trim().length === 0) basic.push('角色名');
+    if (race.value === '' || (race.value === '自定义' && customRace.value.trim() === '')) {
+      basic.push('种族');
+    }
+    if (startLocation.value === '' || isCustomStartLocationEmpty()) basic.push('起始地点');
+    if (remainingBP.value !== 0) basic.push('基础属性点');
+    if (remainingAP.value !== 0) basic.push('额外属性点');
+    return {
+      0: difficulty.value === null ? ['难度'] : [],
+      1: basic,
+      // 命定核心：内置条目**或**工坊系统项目，二者择一即可放行。
+      // 只认前者时，选了工坊核心的用户会卡死在这一步（按钮永远不亮，且没有任何提示）。
+      // 🔴 必须按**解析后**的条目判定：只看 id 非空时，预设里残留的、已卸载工坊项目或
+      //    已不存在条目的 id 也能放行，建出一个没有核心（或悬空核心）的存档。
+      // 内容确实没有任何核心候选（加载成功且名单为空）时豁免 —— 否则建档无路可走。
+      2: coreRequired.value && !hasResolvedCore.value ? ['命定核心'] : [],
+    };
+  });
+
+  /** 自定义起始地点选中但未填写名称 */
+  function isCustomStartLocationEmpty(): boolean {
+    return startLocation.value === '自定义' && customStartLocation.value.trim() === '';
+  }
+
+  /** 第一个仍有缺项的必填步骤；全部齐备时为 null */
+  const firstIncompleteStep = computed<number | null>(() => {
+    for (const step of [0, 1, 2]) {
+      if ((stepMissing.value[step] ?? []).length > 0) return step;
+    }
+    return null;
+  });
+
   const stepValid = computed<Record<number, boolean>>(() => ({
-    0: difficulty.value !== null,
-    1:
-      generationMode.value !== '' &&
-      name.value.trim().length > 0 &&
-      race.value !== '' &&
-      attributesFullyAllocated.value,
-    // 命定核心：内置条目**或**工坊系统项目，二者择一即可放行。
-    // 只认前者时，选了工坊核心的用户会卡死在这一步（按钮永远不亮，且没有任何提示）。
-    2: selectedSystemCoreEntryUid.value !== null || selectedWorkshopCoreProjectId.value !== null,
+    0: stepMissing.value[0].length === 0,
+    1: stepMissing.value[1].length === 0,
+    2: stepMissing.value[2].length === 0,
     3: true, // 角色启用（可选）
     4: true, // 装备选择
     5: true, // 背景故事
     6: true, // 剧情规划
-    7: generationMode.value !== '' && attributesFullyAllocated.value, // 确认提交前再次守住预设晚加载等绕过路径
+    // 确认提交：聚合全部必填步骤 —— 步骤条可自由跳转、预设可在任一步晚加载，
+    // 不能假设玩家「曾经通过过」前面的步骤。
+    7: firstIncompleteStep.value === null,
   }));
 
   function nextStep() {
@@ -430,6 +467,12 @@ export const useCreateStore = defineStore('create', () => {
   );
   const enabledCharacterDefinitionIds = ref<Set<string>>(new Set());
 
+  /**
+   * 命定核心名单（世界书 system_core 条目 + 工坊系统项目）的加载态。
+   * `failed` 时命定核心步骤给错误与重试；`loaded` 且名单为空时豁免核心必选。
+   */
+  const coreCatalogStatus = ref<'idle' | 'loading' | 'loaded' | 'failed'>('idle');
+
   /** 选中的命定核心 entry uid */
   const selectedSystemCoreEntryUid = ref<string | null>(null);
 
@@ -510,6 +553,7 @@ export const useCreateStore = defineStore('create', () => {
    * 进不了捏人页。store 为空（IndexedDB 不可用）时仍回落 fetch 本地 JSON。
    */
   async function loadWorldBookEntries() {
+    coreCatalogStatus.value = 'loading';
     try {
       const wb = useWorldBookStore();
       await wb.init();
@@ -537,12 +581,50 @@ export const useCreateStore = defineStore('create', () => {
       const ws = useWorkshopStore();
       await ws.init();
       workshopOptions.value = buildWorkshopEnableOptions(ws.projects, books);
-    } catch {
-      // fetch 不可用时静默跳过，保持空数组
+      coreCatalogStatus.value = 'loaded';
+      // 名单到了才能判断预设/草稿里的核心 id 是否仍有效（见 pruneUnresolvedCoreSelection）
+      pruneUnresolvedCoreSelection();
+    } catch (err) {
+      // 加载失败要让命定核心步骤显示错误 + 重试，而不是永远停在「正在加载」
+      console.warn('[create-store] 世界书条目加载失败:', err);
       systemCoreEntries.value = [];
       characterEntries.value = [];
       characterDefinitions.value = [];
       workshopOptions.value = [];
+      coreCatalogStatus.value = 'failed';
+    }
+  }
+
+  /** 当前选择能解析到真实候选（内置条目或已装工坊系统项目） */
+  const hasResolvedCore = computed(
+    () => selectedSystemCoreEntry.value !== null || selectedWorkshopCore.value !== null,
+  );
+
+  /** 命定核心候选总数（内置 system_core 条目 + 标「系统」的工坊项目） */
+  const coreCandidateCount = computed(
+    () => systemCoreEntries.value.length + workshopSystemOptions.value.length,
+  );
+
+  /**
+   * 命定核心是否必选。只有「名单已成功加载且确实为空」才豁免：
+   * 加载中 / 失败时名单为空不代表内容没有核心，豁免会放过本该选核心的存档。
+   */
+  const coreRequired = computed(
+    () => !(coreCatalogStatus.value === 'loaded' && coreCandidateCount.value === 0),
+  );
+
+  /**
+   * 清掉解析不到的核心 id（预设残留、工坊项目已卸载、条目已删除）。
+   * 🔴 只在名单**已加载**后做：名单未到时清 id 会把合法的预设选择误删，
+   *    所以加载完成时 {@link loadWorldBookEntries} 会再调一次。
+   */
+  function pruneUnresolvedCoreSelection() {
+    if (coreCatalogStatus.value !== 'loaded') return;
+    if (selectedSystemCoreEntryUid.value !== null && selectedSystemCoreEntry.value === null) {
+      selectedSystemCoreEntryUid.value = null;
+    }
+    if (selectedWorkshopCoreProjectId.value !== null && selectedWorkshopCore.value === null) {
+      selectedWorkshopCoreProjectId.value = null;
     }
   }
 
@@ -551,6 +633,33 @@ export const useCreateStore = defineStore('create', () => {
     selectedSystemCoreEntryUid.value = uid;
     if (uid !== null) selectedWorkshopCoreProjectId.value = null;
   }
+
+  /**
+   * 当前命定核心的展示名 —— 确认页与背景限定条件的**唯一**读取口。
+   *
+   * Phase 10h 起核心住在世界书条目（内置）或工坊系统项目里；旧目录字段 `destinyCore`
+   * 只剩旧预设还可能写入，故仅作最后兜底。直接读旧字段的症状是：确认页永远不显示核心、
+   * 带 `requiredDestinyCore` 的背景永远解不开。
+   */
+  /** 当前命定核心的作者（工坊项目作者 / 旧目录字段作者）；内置条目没有作者数据时为空 */
+  const destinyCoreAuthor = computed<string>(() => {
+    if (selectedSystemCoreEntry.value) return '';
+    if (selectedWorkshopCore.value) return selectedWorkshopCore.value.authorName;
+    return destinyCore.value?.author ?? '';
+  });
+
+  const destinyCoreName = computed<string>(
+    () =>
+      selectedSystemCoreEntry.value?.name ??
+      selectedWorkshopCore.value?.name ??
+      destinyCore.value?.name ??
+      '',
+  );
+
+  /** 起始地点的展示/落库名：选「自定义」时取玩家输入的地点名 */
+  const startLocationLabel = computed<string>(() =>
+    startLocation.value === '自定义' ? customStartLocation.value.trim() : startLocation.value,
+  );
 
   /** toggle 勾选角色 */
   function migrateCharacterSelections() {
@@ -864,7 +973,7 @@ export const useCreateStore = defineStore('create', () => {
       }
     }
     if (bg.requiredDestinyCore) {
-      const dc = destinyCore.value?.name;
+      const dc = destinyCoreName.value;
       if (!dc || !dc.includes(bg.requiredDestinyCore)) {
         missing.push(`命定核心需为「${bg.requiredDestinyCore}」`);
       }
@@ -1625,6 +1734,8 @@ export const useCreateStore = defineStore('create', () => {
   /** 生成剧情大纲（重新生成时旧版入栈 history 可回退） */
   async function generatePlotOutline(): Promise<boolean> {
     if (isPlotGenerating.value) return false;
+    // 剧情关闭时大纲不会落库成事件树，发请求只会白花费用 —— 直接不做。
+    if (plotMode.value === 'off') return false;
     // 简单的初始 user 消息 — 模板系统的 systemPrompt 已包含完整指令
     const message = '# 剧情大纲生成请求\n\n请根据角色背景和剧情配置，生成完整剧情大纲。';
     return runOutlineGeneration(message);
@@ -1745,7 +1856,7 @@ export const useCreateStore = defineStore('create', () => {
       inventory: [],
       statusEffects: [],
       money: money.value,
-      location: startLocation.value === '自定义' ? customStartLocation.value : startLocation.value,
+      location: startLocationLabel.value,
       present: true,
       adventurerRank: '未评级',
       currentAction: '',
@@ -1948,15 +2059,17 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   async function persistJourney(): Promise<string> {
-    if (generationMode.value !== 'agent' && !isDirectMode(generationMode.value)) {
-      currentStep.value = 1;
+    // 最终持久化边界必须聚合重验全部必填项：步骤条可自由跳转、角色预设可以在任一步加载，
+    // 不能只依赖「曾经通过过」前面的步骤。失败时跳回第一个缺项的步骤并说明缺什么。
+    // 生成模式也在缺项清单里，所以先跑聚合校验，玩家看到的是完整清单而不是单条模式报错。
+    const firstStep = firstIncompleteStep.value;
+    if (firstStep !== null) {
+      const missing = [0, 1, 2].flatMap((step) => stepMissing.value[step] ?? []);
+      currentStep.value = firstStep;
+      throw new Error(`${MISSING_FIELDS_PREFIX}${missing.join('、')}`);
     }
+    // 上面已保证模式非空；这里仅为类型收窄（以及防御未来改动漏掉清单项）
     requireGenerationMode(generationMode.value);
-    // 最终持久化边界必须重验；角色预设可以在任一步加载，不能只依赖曾经通过过 Step 1。
-    if (!attributesFullyAllocated.value) {
-      currentStep.value = 1;
-      throw new Error('请先分配全部基础属性点和额外属性点');
-    }
 
     const saveId = crypto.randomUUID();
     const charState = buildCharacterState(saveId);
@@ -1999,15 +2112,18 @@ export const useCreateStore = defineStore('create', () => {
       } as any,
     };
 
+    // 剧情关闭时（含草稿恢复出的旧大纲）一律不落大纲：玩家在关闭模式下看不到它，
+    // 落成一份未确认大纲只会让存档带着一份谁都没确认过的剧情。
     const confirmed =
       (plotMode.value === 'main' || plotMode.value === 'side') && !!plotOutline.value;
-    const outline = plotOutline.value
-      ? ({
-          ...JSON.parse(JSON.stringify(plotOutline.value)),
-          saveId,
-          ...(confirmed ? { confirmed: true } : {}),
-        } as PlotOutline)
-      : undefined;
+    const outline =
+      confirmed && plotOutline.value
+        ? ({
+            ...JSON.parse(JSON.stringify(plotOutline.value)),
+            saveId,
+            confirmed: true,
+          } as PlotOutline)
+        : undefined;
     let openingWorldBooks: WorldBook[] = [];
     if (save.metadata.storyContextV2) {
       const wb = useWorldBookStore();
@@ -2134,6 +2250,9 @@ export const useCreateStore = defineStore('create', () => {
       destinyCoreId: destinyCore.value?.id ?? null,
       plotSettings: plotSettings.value,
       systemCoreEntryUid: selectedSystemCoreEntryUid.value,
+      // 工坊命定核心与扩展勾选：此前漏存，保存预设后再加载就丢了这两项
+      workshopCoreProjectId: selectedWorkshopCoreProjectId.value,
+      enabledWorkshopProjectIds: [...enabledWorkshopProjectIds.value],
       enabledCharacterEntryUids: [...enabledCharacterEntryUids.value],
       enabledCharacterDefinitionIds: [...enabledCharacterDefinitionIds.value],
       personality: personality.value,
@@ -2171,8 +2290,22 @@ export const useCreateStore = defineStore('create', () => {
     data.skills.forEach((s) => addSkill(s));
     selectedBackground.value = data.background;
     customBackgroundText.value = data.customBackgroundText || '';
+    // 命定核心先整体清空再应用：预设定义的是一个完整角色，核心为 null / 缺省（含两个字段都没有的
+    // 旧预设）一律读作「该角色未选核心」—— 不清的话会把加载前的旧核心悄悄留下，
+    // 拼成一个谁都没保存过的组合。最终提交边界会把缺核心拦下来。
+    destinyCore.value = null;
+    selectedSystemCoreEntryUid.value = null;
+    selectedWorkshopCoreProjectId.value = null;
     if (data.destinyCoreId) selectDestinyCore(data.destinyCoreId);
     if (data.systemCoreEntryUid) selectSystemCoreEntry(data.systemCoreEntryUid);
+    else if (data.workshopCoreProjectId) selectWorkshopCore(data.workshopCoreProjectId);
+    // 名单已加载时立即剔除解析不到的 id；未加载时留着，等加载完成再判
+    pruneUnresolvedCoreSelection();
+    // 工坊扩展勾选是可选附加内容：旧预设没有这个字段时保留当前勾选（与大纲、角色勾选同口径），
+    // 字段存在（哪怕是空数组）才覆盖。
+    if (data.enabledWorkshopProjectIds !== undefined) {
+      enabledWorkshopProjectIds.value = new Set(data.enabledWorkshopProjectIds);
+    }
     if (data.enabledCharacterEntryUids) {
       enabledCharacterEntryUids.value = new Set(data.enabledCharacterEntryUids);
     }
@@ -2193,17 +2326,14 @@ export const useCreateStore = defineStore('create', () => {
         plotGenrePreference.value = data.plotSettings.main
           .genrePreference as typeof plotGenrePreference.value;
         plotCustomPreference.value = data.plotSettings.main.customPreference;
-        if (data.plotSettings.main.chapterCount)
-          plotChapterCount.value = data.plotSettings.main.chapterCount;
-        if (data.plotSettings.main.eventsPerChapter)
-          plotEventsPerChapter.value = data.plotSettings.main.eventsPerChapter;
+        // 0 = AI 自行判断，保存时该键被省略 → 缺省必须读回 0，不能留着草稿里的旧数
+        plotChapterCount.value = data.plotSettings.main.chapterCount ?? 0;
+        plotEventsPerChapter.value = data.plotSettings.main.eventsPerChapter ?? 0;
       }
       if (data.plotSettings.side) {
         plotFocusRegion.value = data.plotSettings.side.focusRegion;
-        if (data.plotSettings.side.chapterCount)
-          plotChapterCount.value = data.plotSettings.side.chapterCount;
-        if (data.plotSettings.side.eventsPerChapter)
-          plotEventsPerChapter.value = data.plotSettings.side.eventsPerChapter;
+        plotChapterCount.value = data.plotSettings.side.chapterCount ?? 0;
+        plotEventsPerChapter.value = data.plotSettings.side.eventsPerChapter ?? 0;
       }
     }
 
@@ -2279,6 +2409,7 @@ export const useCreateStore = defineStore('create', () => {
     characterEntries.value = [];
     characterDefinitions.value = [];
     workshopOptions.value = [];
+    coreCatalogStatus.value = 'idle';
   }
 
   return {
@@ -2291,6 +2422,8 @@ export const useCreateStore = defineStore('create', () => {
     // 步骤
     currentStep,
     stepValid,
+    stepMissing,
+    firstIncompleteStep,
     nextStep,
     prevStep,
     // 难度
@@ -2309,6 +2442,7 @@ export const useCreateStore = defineStore('create', () => {
     identityOptions,
     startLocation,
     customStartLocation,
+    startLocationLabel,
     // 起始地树：内容侧供给，名字保持 START_LOCATIONS 以免动 8 个模板消费点
     START_LOCATIONS: startLocationTree,
     flatLocationOptions,
@@ -2358,6 +2492,11 @@ export const useCreateStore = defineStore('create', () => {
     remainingPoints,
     // 命定核心
     destinyCore,
+    destinyCoreName,
+    destinyCoreAuthor,
+    coreCatalogStatus,
+    coreCandidateCount,
+    coreRequired,
     destinyCorePool,
     selectDestinyCore,
     // Phase 10h: 世界书驱动

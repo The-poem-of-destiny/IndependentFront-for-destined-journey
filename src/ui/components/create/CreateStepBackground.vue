@@ -68,7 +68,7 @@ function activateCustom() {
           :character-race="store.race"
           :character-identity="store.identity"
           :character-location="store.startLocation"
-          :destiny-core-name="store.destinyCore?.name ?? ''"
+          :destiny-core-name="store.destinyCoreName"
         />
       </template>
     </CategorySelectionLayout>

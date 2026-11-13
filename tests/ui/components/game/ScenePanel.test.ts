@@ -72,12 +72,12 @@ function makeNews(id: string, read: boolean) {
 }
 
 /**
- * 世界消息自 UI 改版起挂在「世界」页签下（页签序：角色 / 任务 / 世界 / 万象），
+ * 世界消息自 UI 改版起挂在「世界」页签下（页签序：角色 / 任务 / 世界；「万象」占位已移除），
  * 默认页签是「角色」，所以取 .news-item 之前必须先切过去。
  */
 async function openWorldTab(wrapper: ReturnType<typeof mount>) {
   const tabs = wrapper.findAll('.tab-item');
-  expect(tabs).toHaveLength(4);
+  expect(tabs).toHaveLength(3);
   await tabs[2].trigger('click');
   return wrapper;
 }
@@ -161,5 +161,16 @@ describe('ScenePanel — 新闻展开标记已读 (M6 #36)', () => {
     await flushPromises();
 
     expect(wrapper.findAll('.news-dot')).toHaveLength(0);
+  });
+});
+
+describe('ScenePanel — 页签（UIL-16）', () => {
+  it('只有角色 / 任务 / 世界三个页签，不再渲染「万象」占位', async () => {
+    const wrapper = mount(ScenePanel);
+    const labels = wrapper.findAll('.tab-item').map((tab) => tab.text());
+
+    expect(labels).toEqual(['角色', '任务', expect.stringContaining('世界')]);
+    expect(wrapper.text()).not.toContain('万象');
+    expect(wrapper.find('.misc-placeholder').exists()).toBe(false);
   });
 });

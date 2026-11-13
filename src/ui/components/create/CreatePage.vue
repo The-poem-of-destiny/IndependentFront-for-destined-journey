@@ -13,6 +13,7 @@ import { checkJourneyReadiness } from '../../lib/journey-readiness';
 import PresetModal from './PresetModal.vue';
 import FormSelect from '../shared/form/FormSelect.vue';
 import { initializeCachedDirectSettings } from '../../lib/direct-settings';
+import { MISSING_FIELDS_PREFIX, type BlockedHint } from '../../lib/create-options';
 
 const store = useCreateStore();
 const ui = useUIStore();
@@ -84,15 +85,43 @@ async function handleNext() {
   if (store.currentStep === 7) {
     try {
       const saveId = await store.startJourney();
+      // 建档成功即清空草稿（含步骤、选择、大纲与生成模式）：否则回首页再点「新建存档」
+      // 会直接落在第 8 步、上一个角色完整有效，一键就建出重复存档。
+      // 只在成功后重置 —— 经「← 返回」离开而未建档时草稿保留是有意为之。
+      store.resetAll();
       ui.navigate('game', saveId);
     } catch (err) {
       console.error('[CreatePage] 创建存档失败:', err);
-      creationError.value = '创建未完成，未保存新旅程。你的填写仍在，请重试。';
+      // 必填项缺失：store 已跳回第一个缺项的步骤，这里把缺什么原样告诉玩家
+      creationError.value = isMissingFieldsError(err)
+        ? `${err.message}。已跳转到需要补全的步骤。`
+        : '创建未完成，未保存新旅程。你的填写仍在，请重试。';
     }
   } else {
     store.nextStep();
   }
 }
+
+/** persistJourney 的必填校验失败（消息以固定前缀开头），区别于落库等其他失败 */
+function isMissingFieldsError(err: unknown): err is Error {
+  return err instanceof Error && err.message.startsWith(MISSING_FIELDS_PREFIX);
+}
+
+/** 当前步骤下一步按钮被禁用的原因（仅必填步骤有）；缺项带所属步骤供页脚跳转 */
+const blockedHint = computed<BlockedHint | null>(() => {
+  if (store.isCreating) return null;
+  const step = store.currentStep;
+  const steps = step === 7 ? [0, 1, 2] : [step];
+  const items = steps.flatMap((s) =>
+    (store.stepMissing[s] ?? []).map((label: string) => ({ label, step: s })),
+  );
+  if (items.length === 0) return null;
+  return {
+    prefix: step === 7 ? '开始旅程前还需补全：' : '还需完成：',
+    currentStep: step,
+    items,
+  };
+});
 
 function handleStepSelect(step: number) {
   if (store.isCreating || step < 0 || step >= stepComponents.length) return;
@@ -106,13 +135,14 @@ onMounted(() => {
 
 <template>
   <div class="create-page">
+    <!-- 原路返回：从游戏内开新档时取消应回到游戏页，而不是首页（UIL-05） -->
     <button
       class="back-btn"
-      title="返回首页"
+      title="返回上一页"
       :disabled="store.isCreating"
-      @click="ui.navigate('home')"
+      @click="ui.back('home')"
     >
-      ← 首页
+      ← 返回
     </button>
 
     <CreateSteps
@@ -197,15 +227,6 @@ onMounted(() => {
       >
         正在加载内容目录…
       </div>
-      <div
-        v-else-if="ready && store.contentStatus === 'empty'"
-        class="content-gate content-gate-empty"
-      >
-        <p class="gate-title">没有可用的内容目录</p>
-        <p class="gate-desc">
-          未能读取到起始装备、背景与出生地等内容。可在「创意工坊」安装内容包后重试。
-        </p>
-      </div>
       <Transition v-else-if="ready" name="step-fade" mode="out-in">
         <component :is="currentComponent" :key="store.currentStep" />
       </Transition>
@@ -217,7 +238,9 @@ onMounted(() => {
       :can-prev="!store.isCreating && store.currentStep > 0"
       :can-next="!store.isCreating && (store.stepValid[store.currentStep] ?? true)"
       :next-label="nextLabel"
+      :blocked="blockedHint"
       @prev="store.prevStep"
+      @jump="handleStepSelect"
       @next="handleNext"
       @open-preset="store.showPresetModal = true"
     />
@@ -319,7 +342,7 @@ onMounted(() => {
   font-size: 1rem;
 }
 
-/* 内容加载门（D24）—— 空态照 design.md §5.2：居中、克制、给下一步动作 */
+/* 内容加载门（D24）—— 加载态居中、克制 */
 .content-gate {
   display: flex;
   flex-direction: column;
@@ -332,18 +355,6 @@ onMounted(() => {
   font-size: 0.875rem;
   text-align: center;
 }
-.content-gate .gate-title {
-  margin: 0;
-  font-family: var(--theme-font-title, serif);
-  font-size: 1rem;
-  color: var(--theme-text-secondary);
-}
-.content-gate .gate-desc {
-  margin: 0;
-  max-width: 30rem;
-  line-height: 1.6;
-}
-
 /* 步骤切换动画 */
 .step-fade-enter-active,
 .step-fade-leave-active {

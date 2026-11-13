@@ -50,7 +50,10 @@ beforeEach(() => {
     tier: 1,
     tierName: '普通',
     startLocation: '翡翠之心',
+    startLocationLabel: '翡翠之心',
     destinyCore: null,
+    destinyCoreName: '',
+    destinyCoreAuthor: '',
     hpPreview: 10,
     mpPreview: 5,
     spPreview: 5,
@@ -106,5 +109,32 @@ describe('CreateStepConfirm — 头像素材', () => {
 
     expect(wrapper.find('input[type="file"]').exists()).toBe(false);
     expect(wrapper.find('.hero-row [role="button"]').exists()).toBe(false);
+  });
+});
+
+describe('CreateStepConfirm — 起始地点与命定核心展示（UIL-12 / UIL-15）', () => {
+  it('自定义起始地点显示玩家输入的名称，命定核心显示当前来源的名字', async () => {
+    mockCreate.startLocation = '自定义';
+    mockCreate.startLocationLabel = '雾港';
+    mockCreate.destinyCoreName = '星辰之约';
+    const wrapper = mount(CreateStepConfirm);
+    await flushPromises();
+
+    expect(wrapper.find('.hero-location').text()).toBe('起始: 雾港');
+    expect(wrapper.find('.hero-core').text()).toBe('命定之灵: 星辰之约');
+  });
+
+  it('核心有作者数据时显示「名字 (作者)」', async () => {
+    mockCreate.destinyCoreName = '异界律令';
+    mockCreate.destinyCoreAuthor = '作者C';
+    const wrapper = mount(CreateStepConfirm);
+    await flushPromises();
+    expect(wrapper.find('.hero-core').text()).toBe('命定之灵: 异界律令 (作者C)');
+  });
+
+  it('未选命定核心时不渲染核心行', async () => {
+    const wrapper = mount(CreateStepConfirm);
+    await flushPromises();
+    expect(wrapper.find('.hero-core').exists()).toBe(false);
   });
 });

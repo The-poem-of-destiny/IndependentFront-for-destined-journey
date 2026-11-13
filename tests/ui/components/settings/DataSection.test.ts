@@ -29,9 +29,12 @@ vi.mock('../../../../src/ui/stores/settings-store', () => ({
 
 // game-store：DataSection 的经验档位切换只用到 refreshFromDb（切完回读让战斗分档即时生效）。
 // 真实 game-store 构造会拉起整条前端链（IndexedDB / state-manager），本测试不碰它。
+// ui-store 用 saves 取存档显示名、回到首页时调 clearActive。
 vi.mock('../../../../src/ui/stores/game-store', () => ({
   useGameStore: () => ({
     refreshFromDb: async () => {},
+    clearActive: () => {},
+    saves: [{ id: 'save_1', name: '雪原之旅' }],
   }),
 }));
 
@@ -240,5 +243,30 @@ describe('DataSection —— 清理确认（D47）', () => {
     const toasts = useUIStore().toasts;
     expect(toasts.some((t) => t.type === 'error')).toBe(true);
     expect(dropSceneImageBlobs).not.toHaveBeenCalled();
+  });
+});
+
+describe('DataSection —— 按存档生效的卡片标明作用对象（UIL-20）', () => {
+  it('有活跃存档时，经验档位与插画两张卡都写出存档名，清理确认框也点名', async () => {
+    getSceneImageUsage.mockResolvedValue(usage({ records: 2, storedCount: 2, storedBytes: 2048 }));
+    const w = await mountWithSave('save_1');
+
+    expect(w.findAll('.save-scope').map((n) => n.text())).toEqual([
+      '作用于存档「雪原之旅」',
+      '作用于存档「雪原之旅」',
+    ]);
+
+    await w
+      .findAll('button')
+      .find((b) => b.text() === '清理图片文件')!
+      .trigger('click');
+    await flushPromises();
+    expect(w.text()).toContain('将清理存档「雪原之旅」中');
+  });
+
+  it('没有活跃存档（从首页进设置）时不标存档名，单存档操作禁用', async () => {
+    const w = await mountWithSave(null);
+    expect(w.find('.save-scope').exists()).toBe(false);
+    expect(w.text()).toContain('未载入存档');
   });
 });

@@ -11,9 +11,10 @@
  * 自己的模板与子组件的**根节点**，够不到根节点里面，所以那份共用规则由各分区
  * （含本页）各自 `<style scoped src>` 引入 —— 一份源码，各自作用域。
  */
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch, nextTick } from 'vue';
 import { useUIStore } from '../../stores/ui-store';
-import type { SettingsSection } from '../../stores/ui-store';
+import type { SettingsAnchor, SettingsSection } from '../../stores/ui-store';
+import { scrollBehavior } from '../../lib/reduced-motion';
 import { useSettingsStore } from '../../stores/settings-store';
 import { getAgentSettings } from '../../stores/agent-settings';
 import { useWorldBookStore } from '../../stores/worldbook-store';
@@ -54,6 +55,41 @@ const hasApi = computed(() => s.apiPool.some((entry) => !entry.kind || entry.kin
 // ============================================================
 type Section = SettingsSection;
 const activeSection = ref<Section>(ui.consumeSettingsSectionRequest() ?? 'api');
+const pageRoot = ref<HTMLElement | null>(null);
+/** 挂载时随分区请求一起带来的卡片锚点，等 DOM 就绪后再滚 */
+let initialAnchor: SettingsAnchor | null = ui.consumeSettingsAnchorRequest();
+
+/** 分区切换走 out-in 过渡，目标卡要等新分区真正渲染出来；最多等约一秒，找不到就算了 */
+const ANCHOR_MAX_FRAMES = 60;
+let anchorToken = 0;
+function scrollToAnchor(anchor: SettingsAnchor) {
+  const token = ++anchorToken;
+  let frames = 0;
+  const attempt = () => {
+    if (token !== anchorToken) return;
+    const el = pageRoot.value?.querySelector<HTMLElement>(`[data-settings-anchor="${anchor}"]`);
+    if (el) {
+      // 减动效时瞬移（scrollBehavior 同时看系统偏好与应用内开关）
+      el.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+      return;
+    }
+    if (++frames < ANCHOR_MAX_FRAMES) requestAnimationFrame(attempt);
+  };
+  attempt();
+}
+
+// 已在设置页时的跳转请求（如限流弹窗、横幅「去设置」）同样立即消费并切换分区，
+// 不让请求滞留到下一次进入设置页时把用户劫持到旧分区。
+watch(
+  () => ui.requestedSettingsSection,
+  (requested) => {
+    if (!requested) return;
+    const section = ui.consumeSettingsSectionRequest();
+    const anchor = ui.consumeSettingsAnchorRequest();
+    if (section) selectSection(section);
+    if (anchor) void nextTick(() => scrollToAnchor(anchor));
+  },
+);
 
 const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'api', label: 'API 配置', icon: 'fa-solid fa-plug' },
@@ -68,7 +104,7 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   // 媒体三分区相邻（音频 / 素材 / 图像生成），数据操作排在它们之后（设计 §7.1）
   { key: 'asset', label: '素材', icon: 'fa-solid fa-image' },
   { key: 'image', label: '图像生成', icon: 'fa-solid fa-wand-sparkles' },
-  { key: 'data', label: '存档数据', icon: 'fa-solid fa-database' },
+  { key: 'data', label: '数据与备份', icon: 'fa-solid fa-database' },
   { key: 'developer', label: '开发者模式', icon: 'fa-solid fa-code' },
   { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
 ];
@@ -123,6 +159,10 @@ function agentModelOf(agentId: string): string {
 // Agent 分区的"这个 Agent 能看哪几本"勾选列表要用它；API 密钥的解密改由
 // ApiSection 自己在挂载时踢（Q-25）。
 onMounted(() => {
+  if (initialAnchor) {
+    scrollToAnchor(initialAnchor);
+    initialAnchor = null;
+  }
   void wb.init().catch(() => {
     /* 世界书装不起来不该拦住设置页其它分区 */
   });
@@ -130,7 +170,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="settings-page">
+  <div ref="pageRoot" class="settings-page">
     <!-- 内容态徽标（波 1 T2 / §5.5）：占位 / error / 检测到本地真实内容 -->
     <ContentStatusBanner class="settings-content-banner" />
     <!-- 顶部栏 -->
@@ -240,7 +280,7 @@ onMounted(() => {
             <!-- ========== 图像生成 ========== -->
             <ImageSection v-if="activeSection === 'image'" />
 
-            <!-- ========== 存档数据 ========== -->
+            <!-- ========== 数据与备份 ========== -->
             <DataSection v-if="activeSection === 'data'" />
 
             <!-- ========== 开发者模式 ========== -->

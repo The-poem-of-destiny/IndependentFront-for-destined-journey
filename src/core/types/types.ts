@@ -1768,6 +1768,13 @@ export interface CreatePreset {
   plotSettings: PlotSettings | null;
   /** Phase 10h: 世界书驱动字段 */
   systemCoreEntryUid?: string | null;
+  /**
+   * 选作命定核心的工坊系统项目 id（与 `systemCoreEntryUid` 互斥）。
+   * 旧预设缺此字段 → 读作「未选工坊核心」。
+   */
+  workshopCoreProjectId?: string | null;
+  /** 勾选启用的工坊附加项目 id（不含被选作命定核心的那个）；旧预设缺省读作空 */
+  enabledWorkshopProjectIds?: string[];
   enabledCharacterEntryUids?: string[];
   enabledCharacterDefinitionIds?: string[];
   /** 角色补充信息 */

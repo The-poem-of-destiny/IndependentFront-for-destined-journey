@@ -71,7 +71,7 @@ const sessionAppearance = reactive({
   patchOf: vi.fn((): CharacterAppearancePatch | undefined => undefined),
 });
 
-const ui = { toast: vi.fn(), navigate: vi.fn() };
+const ui = { toast: vi.fn(), navigate: vi.fn(), openSettings: vi.fn() };
 
 vi.mock('../../../../src/ui/stores/scene-image-store', () => ({ useSceneImageStore: () => scene }));
 vi.mock('../../../../src/ui/stores/image-preset-store', () => ({
@@ -227,7 +227,7 @@ describe('SceneImageSegment', () => {
 
     expect(wrapper.text()).toContain('还没有外观预设');
     await wrapper.get('.si-link').trigger('click');
-    expect(ui.navigate).toHaveBeenCalledWith('settings');
+    expect(ui.openSettings).toHaveBeenCalledWith('image');
   });
 
   /**

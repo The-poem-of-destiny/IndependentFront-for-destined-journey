@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { useCreateStore } from '../../stores/create-store';
 import WorkshopEnableList from '../shared/WorkshopEnableList.vue';
+import AppButton from '../shared/AppButton.vue';
 
 const store = useCreateStore();
 
@@ -35,14 +36,30 @@ function summary(content: string, maxLen = 200): string {
     <div class="axis">
       <h3 class="axis-label">
         <span class="axis-name">一 · 命定核心</span>
-        <span class="axis-badge badge-single">单选 · 必选</span>
+        <span class="axis-badge badge-single">{{
+          store.coreRequired ? '单选 · 必选' : '单选 · 可跳过'
+        }}</span>
       </h3>
       <p class="axis-desc">
         命定之灵是寄宿于你灵魂中的存在，它将伴随整个命运之旅，影响叙事风格和特殊机制。请慎重选择。
       </p>
 
-      <div v-if="store.systemCoreEntries.length === 0" class="core-loading">
+      <!-- 名单加载三态：加载中 / 失败可重试 / 成功但内容未提供任何核心（豁免必选） -->
+      <div
+        v-if="store.coreCatalogStatus === 'idle' || store.coreCatalogStatus === 'loading'"
+        class="core-loading"
+        role="status"
+      >
         正在加载命定核心列表…
+      </div>
+      <div v-else-if="store.coreCatalogStatus === 'failed'" class="core-loading core-failed">
+        <p role="alert">命定核心列表加载失败，暂时无法选择。</p>
+        <AppButton variant="secondary" size="sm" @click="store.loadWorldBookEntries()">
+          重试
+        </AppButton>
+      </div>
+      <div v-else-if="store.coreCandidateCount === 0" class="core-loading core-empty">
+        当前内容包未提供命定核心，可直接进入下一步。
       </div>
 
       <!-- 选中条目的详情卡片 -->
@@ -261,6 +278,16 @@ function summary(content: string, maxLen = 200): string {
   padding: 2rem;
   color: var(--theme-text-muted);
   font-size: 0.875rem;
+}
+.core-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+}
+.core-failed p {
+  margin: 0;
+  color: var(--theme-error);
 }
 
 /* ── 详情卡片 ── */

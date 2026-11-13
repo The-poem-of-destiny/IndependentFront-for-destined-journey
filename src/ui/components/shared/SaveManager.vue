@@ -33,12 +33,10 @@ const selectedSave = computed(
 );
 const latestSave = computed(() => findLatestSave(game.saves));
 const selectedSaveData = ref<any>(null);
-const saveManagerIntent = ref<'browse' | 'export' | 'delete' | 'rename'>('browse');
+const saveManagerIntent = ref<'browse' | 'rename'>('browse');
 const renamingSaveId = ref<string | null>(null);
 const renameDraft = ref('');
 const saveManagerHint = computed(() => {
-  if (saveManagerIntent.value === 'export') return '请选择一个存档，然后使用右侧的“导出存档”。';
-  if (saveManagerIntent.value === 'delete') return '请选择要删除的存档，然后使用右侧的“删除存档”。';
   if (saveManagerIntent.value === 'rename') return '为选中的存档输入新名称并保存。';
   return '选择一个存档查看详情，或继续游戏。';
 });
@@ -131,6 +129,20 @@ function close() {
   saveManagerIntent.value = 'browse';
   cancelRenameSave();
   ui.closeSaveManager();
+}
+
+/**
+ * 是否是「正在游玩」的那个存档（UIL-19）。
+ * 必须同时守 `currentView === 'game'`：首页打开窗口时 activeSaveId 可能还残留上一局的 id，
+ * 那时没有任何存档在游玩，不能挂「游玩中」。
+ */
+function isPlayingSave(saveId: string): boolean {
+  return ui.currentView === 'game' && ui.activeSaveId === saveId;
+}
+
+/** 回到正在游玩的存档 = 只关窗口：GamePage 一直挂着，不重新载入，也不重跑准入检查 */
+function continuePlaying() {
+  close();
 }
 
 function newGame() {
@@ -412,6 +424,12 @@ function formatTime(timestamp: number) {
                       GENERATION_MODE_LABELS[resolveGenerationMode(save)]
                     }}</span>
                     <span
+                      v-if="isPlayingSave(save.id)"
+                      class="save-badge save-badge-playing"
+                      title="当前正在游玩这个存档"
+                      >游玩中</span
+                    >
+                    <span
                       v-if="isStoryContextV2Save(save)"
                       class="save-badge"
                       title="Story 上下文与记忆新模式的测试存档，只能在新模式开启时使用"
@@ -529,7 +547,15 @@ function formatTime(timestamp: number) {
               </div>
             </form>
             <div v-else class="save-preview-actions">
-              <AppButton variant="primary" size="md" @click="loadGame(selectedSave.id)">
+              <AppButton
+                v-if="isPlayingSave(selectedSave.id)"
+                variant="primary"
+                size="md"
+                @click="continuePlaying"
+              >
+                继续游戏
+              </AppButton>
+              <AppButton v-else variant="primary" size="md" @click="loadGame(selectedSave.id)">
                 进入游戏
               </AppButton>
               <AppButton variant="ghost" size="md" @click="beginRenameSave(selectedSave.id)">
@@ -752,6 +778,12 @@ function formatTime(timestamp: number) {
   font-weight: 500;
   line-height: 1.5;
   vertical-align: middle;
+}
+/* 「游玩中」徽章：同一配方换主色，与警示色的「测试方案」区分 */
+.save-badge-playing {
+  border-color: color-mix(in srgb, var(--theme-primary) 36%, var(--theme-card-border));
+  color: var(--theme-primary);
+  background: color-mix(in srgb, var(--theme-primary) 12%, transparent);
 }
 .save-meta {
   font-size: 0.72rem;

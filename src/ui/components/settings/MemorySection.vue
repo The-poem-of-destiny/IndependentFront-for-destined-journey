@@ -90,15 +90,20 @@ onMounted(() => void apiSources.initialize());
             max="50"
             class="form-input"
         /></label>
+        <!--
+          UIL-09：生产中没有任何调用方读取这个阈值（压缩流程尚未接入），
+          所以禁用并照实标注，保留已存的值，不让用户以为调了它会有效果。
+        -->
         <label class="form-label"
           >压缩阈值（轮）
-          <p class="form-hint">超过此轮数后，早期记忆会被压缩为摘要</p>
+          <p class="form-hint">暂未接入：当前版本不会自动压缩记忆，此项暂不生效</p>
           <input
             v-model.number="s.memoryCompressionThreshold"
             type="number"
             min="50"
             max="500"
             class="form-input"
+            disabled
         /></label>
         <label class="form-label"
           >每存档最大快照数

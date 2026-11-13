@@ -132,6 +132,27 @@ describe('HomePage 主存档按钮', () => {
 
     expect(mocks.ui.navigate).toHaveBeenCalledWith('game', 'latest-save');
   });
+
+  it('无存档时不显示次级「新建存档」按钮（主按钮已是新建）', async () => {
+    const home = await mountHome();
+
+    expect(home.find('.btn-new-save').exists()).toBe(false);
+  });
+
+  it('存在存档时在「继续」下方显示次级「新建存档」，点击进入创角页', async () => {
+    mocks.game.saves.push({ id: 'latest-save', updatedAt: 300 });
+    const home = await mountHome();
+    const labels = home
+      .get('.btn-column')
+      .findAll('button')
+      .map((button) => button.text().replace(/\s/g, ''));
+
+    expect(labels.slice(0, 3)).toEqual(['✦继续', '新建存档', '存档管理']);
+    await home.get('.btn-new-save').trigger('click');
+
+    expect(mocks.ui.navigate).toHaveBeenCalledWith('create');
+    expect(mocks.ui.navigate).not.toHaveBeenCalledWith('game', expect.anything());
+  });
 });
 
 describe('HomePage 扩展管理入口', () => {
