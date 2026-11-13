@@ -53,6 +53,7 @@ vi.mock('../../../../../src/ui/stores/image-preset-store', () => ({
 }));
 
 const sessionStore = reactive({
+  activeSaveId: null as string | null,
   rows: [] as { name: string; patch: Record<string, string>; updatedAt: number }[],
   load: vi.fn(async () => undefined),
   patchOf: vi.fn(() => undefined),
@@ -63,8 +64,14 @@ vi.mock('../../../../../src/ui/stores/character-appearance-store', () => ({
   useCharacterAppearanceStore: () => sessionStore,
 }));
 
+const uiStore = reactive({
+  activeSaveId: null as string | null,
+  activeSaveName: null as string | null,
+  toast: vi.fn(),
+  navigate: vi.fn(),
+});
 vi.mock('../../../../../src/ui/stores/ui-store', () => ({
-  useUIStore: () => ({ activeSaveId: null, toast: vi.fn(), navigate: vi.fn() }),
+  useUIStore: () => uiStore,
 }));
 
 import ImagePresetList from '../../../../../src/ui/components/settings/image/ImagePresetList.vue';
@@ -94,6 +101,9 @@ beforeEach(() => {
   for (const k of Object.keys(mockSettings)) delete mockSettings[k];
   Object.assign(mockSettings, { imageDialectId: 'danbooru-anime', imageDialectOverrides: {} });
   sessionStore.rows = [];
+  sessionStore.activeSaveId = null;
+  uiStore.activeSaveId = null;
+  uiStore.activeSaveName = null;
   presetStore.characters = [
     // 只有老 danbooru 标签、九个槽全空（D62 的那一格）
     preset({
@@ -168,5 +178,37 @@ describe('🔴 C15：方言表还在路上时挂载，提示行仍要活过来',
     const rows = wrapper.findAll('.preset-row');
     expect(rows[0]?.text()).toContain(PRESET_NO_FORM_HINT);
     expect(rows[1]?.text()).not.toContain(PRESET_NO_FORM_HINT);
+  });
+});
+
+describe('UIL-20：会话副本只作用于当前存档上下文', () => {
+  const changed = { name: '苏婉', patch: { outfit: 'red dress' }, updatedAt: 1 };
+
+  it('有活跃存档且会话副本属于它 → 标出存档名，可单行重置', async () => {
+    uiStore.activeSaveId = 'save-1';
+    uiStore.activeSaveName = '雪原之旅';
+    sessionStore.activeSaveId = 'save-1';
+    sessionStore.rows = [changed];
+    sessionStore.patchOf.mockImplementation(((name: string) =>
+      name === '苏婉' ? changed.patch : undefined) as never);
+
+    const wrapper = await mountList();
+
+    expect(wrapper.get('.session-bar').text()).toContain('存档「雪原之旅」有 1 个角色');
+    expect(wrapper.find('.reset-one-btn').exists()).toBe(true);
+  });
+
+  it('离开存档后（无活跃存档）会话 store 残留的旧档行不再展示、不给重置', async () => {
+    sessionStore.activeSaveId = 'save-1';
+    sessionStore.rows = [changed];
+    sessionStore.patchOf.mockImplementation(((name: string) =>
+      name === '苏婉' ? changed.patch : undefined) as never);
+
+    const wrapper = await mountList();
+
+    expect(wrapper.find('.session-bar').exists()).toBe(false);
+    expect(wrapper.find('.reset-one-btn').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('本档已变');
+    expect(sessionStore.load).not.toHaveBeenCalled();
   });
 });

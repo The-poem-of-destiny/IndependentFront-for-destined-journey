@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+// game-store 不反向引用 ui-store，静态导入不成环；只在函数体内取实例。
+import { useGameStore } from './game-store';
 
 export interface Toast {
   id: string;
@@ -41,6 +43,26 @@ export const useUIStore = defineStore('ui', () => {
    */
   const previousView = ref<AppView>('home');
 
+  /**
+   * 当前存档上下文的显示名 —— 设置页里按存档生效的卡片用它标明「作用于哪个存档」。
+   * 名字取自 game-store 已载入的存档行；没有活跃存档时为 null。
+   */
+  const activeSaveName = computed<string | null>(() => {
+    const id = activeSaveId.value;
+    if (!id) return null;
+    return useGameStore().saves.find((save) => save.id === id)?.name ?? null;
+  });
+
+  /**
+   * 回到首页即离开存档上下文：清掉 ui 与 game-store 两处的活跃存档。
+   * 否则「首页 → 设置」里的单存档操作（体验模式、清理场景图、外观预设）会写到刚离开的存档。
+   * 只在抵达 home 时清；游戏页 → 设置不经过这里，档内设置仍保有存档上下文。
+   */
+  function leaveSaveContext() {
+    activeSaveId.value = null;
+    useGameStore().clearActive();
+  }
+
   function navigate(view: AppView, saveId?: string) {
     if (saveId !== undefined) activeSaveId.value = saveId;
     if (view !== currentView.value) {
@@ -48,9 +70,10 @@ export const useUIStore = defineStore('ui', () => {
       viewHistory.value.push(currentView.value);
     }
     currentView.value = view;
+    if (view === 'home') leaveSaveContext();
   }
 
-  /** 从设置页外直接打开指定分区；请求由 SettingsPage 挂载时消费一次。 */
+  /** 打开设置页的指定分区；SettingsPage 挂载时或已在设置页时立即消费该请求。 */
   function openSettings(section: SettingsSection = 'api') {
     requestedSettingsSection.value = section;
     navigate('settings');
@@ -78,6 +101,7 @@ export const useUIStore = defineStore('ui', () => {
     const target = viewHistory.value.pop() ?? fallback;
     currentView.value = target;
     previousView.value = viewHistory.value[viewHistory.value.length - 1] ?? fallback;
+    if (target === 'home') leaveSaveContext();
   }
 
   // ===== UI 状态 =====
@@ -129,6 +153,7 @@ export const useUIStore = defineStore('ui', () => {
     previousView,
     viewHistory,
     activeSaveId,
+    activeSaveName,
     requestedSettingsSection,
     saveManagerOpen,
     navigate,

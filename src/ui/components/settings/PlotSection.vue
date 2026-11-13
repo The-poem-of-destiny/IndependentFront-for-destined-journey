@@ -8,6 +8,13 @@ import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useBranding } from '../../branding-defaults';
+import {
+  PLOT_COUNT_MAX,
+  PLOT_COUNT_MIN,
+  PLOT_DIFFICULTY_OPTIONS,
+  PLOT_DURATION_YEARS_MAX,
+  PLOT_DURATION_YEARS_MIN,
+} from '../../lib/create-options';
 
 const s = useSettingsStore().settings;
 
@@ -42,16 +49,14 @@ const randomEventFrequencyOptions = [
   { value: 1, label: '标准', hint: '按事件定义自带的平均间隔触发。' },
   { value: 2, label: '高', hint: '事件更密集，约为标准频率的两倍。' },
 ];
-const plotDifficultyOptions = [
-  { value: 'adaptive', label: '动态（根据玩家层级）' },
-  { value: '1', label: 'T1 普通' },
-  { value: '2', label: 'T2 中坚' },
-  { value: '3', label: 'T3 精英' },
-  { value: '4', label: 'T4 史诗' },
-  { value: '5', label: 'T5 传说' },
-  { value: '6', label: 'T6 神话' },
-  { value: '7', label: 'T7 神祇' },
-];
+/**
+ * 难度层级与捏人页「剧情规划」共用一份（UIL-10）。设置里该字段历史上存成字符串
+ * （'adaptive' / '1'…'7'），捏人 store 读入时再转数字，所以这里把选项值映射成字符串。
+ */
+const plotDifficultyOptions = PLOT_DIFFICULTY_OPTIONS.map((o) => ({
+  value: String(o.value),
+  label: o.desc ? `${o.label}（${o.desc}）` : o.label,
+}));
 </script>
 
 <template>
@@ -99,13 +104,13 @@ const plotDifficultyOptions = [
             <input
               v-model.number="s.plotDurationYears"
               type="number"
-              min="1"
-              max="50"
+              :min="PLOT_DURATION_YEARS_MIN"
+              :max="PLOT_DURATION_YEARS_MAX"
               class="form-input"
           /></label>
           <label class="form-label"
             >事件难度层级
-            <p class="form-hint">动态 = 根据玩家当前层级自动调整</p>
+            <p class="form-hint">自适应 = 根据玩家当前层级自动调整</p>
             <select v-model="s.plotDifficultyTier" class="form-input">
               <option v-for="o in plotDifficultyOptions" :key="o.value" :value="o.value">
                 {{ o.label }}
@@ -136,8 +141,8 @@ const plotDifficultyOptions = [
             <input
               v-model.number="s.plotChapterCount"
               type="number"
-              min="0"
-              max="20"
+              :min="PLOT_COUNT_MIN"
+              :max="PLOT_COUNT_MAX"
               class="form-input"
           /></label>
           <label class="form-label"
@@ -146,8 +151,8 @@ const plotDifficultyOptions = [
             <input
               v-model.number="s.plotEventsPerChapter"
               type="number"
-              min="0"
-              max="20"
+              :min="PLOT_COUNT_MIN"
+              :max="PLOT_COUNT_MAX"
               class="form-input"
           /></label>
         </template>
@@ -163,8 +168,8 @@ const plotDifficultyOptions = [
             <input
               v-model.number="s.plotChapterCount"
               type="number"
-              min="0"
-              max="20"
+              :min="PLOT_COUNT_MIN"
+              :max="PLOT_COUNT_MAX"
               class="form-input"
           /></label>
           <label class="form-label"
@@ -173,8 +178,8 @@ const plotDifficultyOptions = [
             <input
               v-model.number="s.plotEventsPerChapter"
               type="number"
-              min="0"
-              max="20"
+              :min="PLOT_COUNT_MIN"
+              :max="PLOT_COUNT_MAX"
               class="form-input"
           /></label>
         </template>

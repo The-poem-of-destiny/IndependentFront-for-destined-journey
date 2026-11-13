@@ -213,12 +213,14 @@ const equipmentList = computed(() =>
     })),
 );
 
-// ═══ 持有物页签：装备 / 背包 / 消耗品 / 技能 ═══
+// ═══ 持有物页签：装备 / 杂物 / 消耗品 / 技能 ═══
 type HoldTab = 'equipment' | 'bag' | 'consumable' | 'skills';
 const holdTab = ref<HoldTab>('equipment');
 const holdTabs: { key: HoldTab; label: string }[] = [
   { key: 'equipment', label: '装备' },
-  { key: 'bag', label: '背包' },
+  // 叫「杂物」而非「背包」（UIL-18）：这里只是未穿戴且非消耗品的子集，
+  // 「背包」在物品面板里指全部物品，同名不同义会让人以为东西丢了
+  { key: 'bag', label: '杂物' },
   { key: 'consumable', label: '消耗品' },
   { key: 'skills', label: '技能' },
 ];
@@ -228,7 +230,7 @@ const unequipped = computed(() => (player.value?.inventory ?? []).filter((i) => 
 const consumableList = computed(() =>
   unequipped.value.filter((i) => normalizeItemType(i.type ?? '') === '消耗品'),
 );
-/** 背包 = 未穿戴且非消耗品（材料/任务物品/特殊/未穿戴的装备都在这） */
+/** 杂物 = 未穿戴且非消耗品（材料/任务物品/特殊/未穿戴的装备都在这） */
 const bagList = computed(() =>
   unequipped.value.filter((i) => normalizeItemType(i.type ?? '') !== '消耗品'),
 );
@@ -551,6 +553,19 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
             <span class="hold-money"><i class="fa-solid fa-coins" />{{ player.money }} G</span>
             <span class="hold-fp"><i class="fa-solid fa-star" />{{ game.fp }} FP</span>
           </span>
+          <!-- 常驻「›」入口直达完整物品面板（UIL-18）：标题行本身只管折叠，
+               「查看全部」又只在溢出时出现 —— 没有它就找不到完整面板。
+               `.stop` 防止冒泡到标题行触发折叠（键盘 Enter/Space 同理） -->
+          <button
+            class="hold-open-action"
+            title="打开物品面板"
+            aria-label="打开物品面板"
+            @click.stop="game.showModal('items')"
+            @keydown.enter.stop
+            @keydown.space.stop
+          >
+            ›
+          </button>
           <i class="fa-solid" :class="inventoryOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
         </div>
         <Transition name="collapse">
@@ -1129,6 +1144,21 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
 }
 .hold-fp {
   color: var(--theme-primary);
+}
+.hold-open-action {
+  margin-right: 10px;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+  color: var(--theme-text-muted);
+  cursor: pointer;
+  transition: color 150ms;
+}
+.hold-open-action:hover {
+  color: var(--theme-text-secondary);
 }
 .hold-meta i {
   font-size: 0.6875rem;

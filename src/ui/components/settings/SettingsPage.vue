@@ -11,7 +11,7 @@
  * 自己的模板与子组件的**根节点**，够不到根节点里面，所以那份共用规则由各分区
  * （含本页）各自 `<style scoped src>` 引入 —— 一份源码，各自作用域。
  */
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useUIStore } from '../../stores/ui-store';
 import type { SettingsSection } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
@@ -55,6 +55,17 @@ const hasApi = computed(() => s.apiPool.some((entry) => !entry.kind || entry.kin
 type Section = SettingsSection;
 const activeSection = ref<Section>(ui.consumeSettingsSectionRequest() ?? 'api');
 
+// 已在设置页时的跳转请求（如限流弹窗、横幅「去设置」）同样立即消费并切换分区，
+// 不让请求滞留到下一次进入设置页时把用户劫持到旧分区。
+watch(
+  () => ui.requestedSettingsSection,
+  (requested) => {
+    if (!requested) return;
+    const section = ui.consumeSettingsSectionRequest();
+    if (section) selectSection(section);
+  },
+);
+
 const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'api', label: 'API 配置', icon: 'fa-solid fa-plug' },
   { key: 'agent', label: 'Agent 配置', icon: 'fa-solid fa-robot' },
@@ -68,7 +79,7 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   // 媒体三分区相邻（音频 / 素材 / 图像生成），数据操作排在它们之后（设计 §7.1）
   { key: 'asset', label: '素材', icon: 'fa-solid fa-image' },
   { key: 'image', label: '图像生成', icon: 'fa-solid fa-wand-sparkles' },
-  { key: 'data', label: '存档数据', icon: 'fa-solid fa-database' },
+  { key: 'data', label: '数据与备份', icon: 'fa-solid fa-database' },
   { key: 'developer', label: '开发者模式', icon: 'fa-solid fa-code' },
   { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
 ];
@@ -240,7 +251,7 @@ onMounted(() => {
             <!-- ========== 图像生成 ========== -->
             <ImageSection v-if="activeSection === 'image'" />
 
-            <!-- ========== 存档数据 ========== -->
+            <!-- ========== 数据与备份 ========== -->
             <DataSection v-if="activeSection === 'data'" />
 
             <!-- ========== 开发者模式 ========== -->

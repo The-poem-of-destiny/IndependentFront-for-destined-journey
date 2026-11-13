@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 存档数据分区 —— 导出 / 导入 / 存储用量 / 清除全部（Q-25 从 SettingsPage.vue 抽出）
+ * 数据与备份分区 —— 导出 / 导入 / 存储用量 / 清除全部（Q-25 从 SettingsPage.vue 抽出）
  *
  * 🔴 用量在**本分区挂载时**读一次，而不再是整页挂载时读一次。分区是 v-if 的，
  *    所以效果反而更准（每次点进来都是新数），代价是切走再切回会多问一次
@@ -344,9 +344,15 @@ async function loadStorageUsage() {
 
 // ═══════════ 经验档位（简单/普通模式，2026-08-24）═══════════
 // 当前存档的 experienceMode 下拉 + 命名写入口切换（persistExperienceMode，照 persistFocusQuest
-// 的 withSaveWriteLock 锁内重读窄改模式）。为什么在存档数据分区：它是**每存档**的设置，
+// 的 withSaveWriteLock 锁内重读窄改模式）。为什么在数据与备份分区：它是**每存档**的设置，
 // 与插画用量同一逻辑（图像生成设计 §7.5 / D47 同款理由），放这里找得到。
 const experienceMode = ref<'normal' | 'easy'>('normal');
+
+/**
+ * 按存档生效的卡片标明作用对象（UIL-20）：「经验档位」「本存档插画」都写到 ui.activeSaveId，
+ * 不写名字的话用户分不清改的是哪一个存档。
+ */
+const activeSaveLabel = computed(() => ui.activeSaveName ?? '当前存档');
 
 /** 读当前存档的经验档位（旧档缺字段兜底 normal） */
 async function loadExperienceMode() {
@@ -395,7 +401,7 @@ function fmtBytes(b: number) {
 /**
  * 本存档插画用量与清理（图像生成设计 §7.5 / D47）。
  *
- * 🔴 为什么这一行在**存档数据**分区而不是图像分区：用量是**每存档**的数字，而图像
+ * 🔴 为什么这一行在**数据与备份**分区而不是图像分区：用量是**每存档**的数字，而图像
  * 分区整个存的是全局 `UiSettings`。把「本存档 20 MB」摆在一屏全局设置里会被读成
  * 「总共 20 MB」。这里本来就有 saveId 上下文（`ui.activeSaveId`）。
  *
@@ -533,7 +539,7 @@ async function clearAll() {
 
 <template>
   <section class="section centered">
-    <h3>存档数据管理</h3>
+    <h3>数据与备份</h3>
     <p class="section-desc">导出、导入或清除所有数据。建议定期导出备份。</p>
     <!--
     两处遗漏必须明说（素材设计 §4.5）: 存档导出是一份 JSON，字节类的库进不去，
@@ -596,6 +602,7 @@ async function clearAll() {
         <p v-else class="text-muted text-sm">获取中…</p></AppCard
       ><AppCard padding="md" class="mode-card"
         ><h4>经验档位</h4>
+        <p v-if="ui.activeSaveId" class="save-scope text-xs">作用于存档「{{ activeSaveLabel }}」</p>
         <p class="text-muted text-sm">
           简单模式升级更快：一层约2倍、二层约1.8倍、三层约1.5倍战斗经验，层级越高差距越小，六层起与普通持平。
         </p>
@@ -613,6 +620,7 @@ async function clearAll() {
         </p></AppCard
       ><AppCard padding="md"
         ><h4>本存档插画</h4>
+        <p v-if="ui.activeSaveId" class="save-scope text-xs">作用于存档「{{ activeSaveLabel }}」</p>
         <!-- 一张都没有时照常显示「0 张 / 0 B」，不把这一行藏起来 ——
              它同时在回答"我这存档到底有没有在攒图" -->
         <div v-if="sceneUsage">
@@ -767,7 +775,8 @@ async function clearAll() {
       size="sm"
       @update:open="showImageCleanConfirm = $event"
       ><p>
-        将清理本存档 <strong>{{ cleanableCount }}</strong> 张插画的图片文件，释放约
+        将清理存档「{{ activeSaveLabel }}」中
+        <strong>{{ cleanableCount }}</strong> 张插画的图片文件，释放约
         <strong>{{ fmtBytes(cleanableBytes) }}</strong
         >。
       </p>
@@ -823,6 +832,11 @@ async function clearAll() {
 
 <style scoped>
 /* Data */
+/* 按存档生效的卡片：标题下一行标明作用于哪个存档 */
+.save-scope {
+  margin: 0 0 var(--theme-spacing-xs);
+  color: var(--theme-text-secondary);
+}
 /* 备份遗漏说明：正文档字号(0.8125rem)，语气与四张卡一致 —— 是告知，不是警告，
    所以不用 warning 色、不加边框，只把最后那句"会一并删除"提到正文色上 */
 .data-note {

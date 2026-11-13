@@ -215,6 +215,12 @@ function makeStore() {
 
 const TEST_ATTRIBUTES = ['力量', '敏捷', '体质', '智力', '精神'];
 
+/** 补齐建档必填的难度与命定核心（最终持久化边界会聚合校验它们） */
+function fillRequiredChoices(store: ReturnType<typeof useCreateStore>) {
+  store.selectDifficulty('normal');
+  store.selectSystemCoreEntry(FIXTURE_CORE_UID);
+}
+
 function allocateBasePoints(store: ReturnType<typeof useCreateStore>, count = 25) {
   for (let i = 0; i < count; i++) {
     store.addBasePoint(TEST_ATTRIBUTES[i % TEST_ATTRIBUTES.length]);
@@ -921,7 +927,7 @@ describe('stepValid 步骤验证', () => {
     expect(store.attributesFullyAllocated).toBe(false);
     expect(store.stepValid[7]).toBe(false);
     expect(store.currentStep).toBe(1);
-    await expect(store.startJourney()).rejects.toThrow('请先分配全部基础属性点和额外属性点');
+    await expect(store.startJourney()).rejects.toThrow('基础属性点');
   });
 
   it('Step 2: 未选命定核心时无效', () => {
@@ -931,14 +937,40 @@ describe('stepValid 步骤验证', () => {
     expect(store.stepValid[2]).toBe(true);
   });
 
-  it('Steps 3-6 始终有效；Step 7 仍须满足属性分配不变量', () => {
+  it('Steps 3-6 始终有效；Step 7 聚合难度/基础信息/命定核心全部必填项', () => {
     expect(store.stepValid[3]).toBe(true);
     expect(store.stepValid[4]).toBe(true);
     expect(store.stepValid[5]).toBe(true);
     expect(store.stepValid[6]).toBe(true);
     expect(store.stepValid[7]).toBe(false);
     allocateBasePoints(store);
+    expect(store.stepValid[7]).toBe(false);
+    store.name = '艾琳';
+    store.selectDifficulty('normal');
+    expect(store.stepValid[7]).toBe(false);
+    store.selectSystemCoreEntry(FIXTURE_CORE_UID);
     expect(store.stepValid[7]).toBe(true);
+  });
+
+  it('Step 1: 自定义种族/起始地点未填写名称时无效，并列出缺项', () => {
+    store.name = '艾琳';
+    allocateBasePoints(store);
+    expect(store.stepValid[1]).toBe(true);
+    store.race = '自定义';
+    store.startLocation = '自定义';
+    expect(store.stepValid[1]).toBe(false);
+    expect(store.stepMissing[1]).toEqual(['种族', '起始地点']);
+    store.customRace = '  ';
+    store.customStartLocation = '雾港';
+    expect(store.stepMissing[1]).toEqual(['种族']);
+    store.customRace = '星裔';
+    expect(store.stepValid[1]).toBe(true);
+  });
+
+  it('工坊命定核心同样满足 Step 2', () => {
+    store.selectWorkshopCore('sys1');
+    expect(store.stepValid[2]).toBe(true);
+    expect(store.stepMissing[2]).toEqual([]);
   });
 });
 
@@ -1553,6 +1585,8 @@ function setupPlotStore() {
   store.generationMode = 'agent';
   store.plotMode = 'main';
   store.name = '艾琳';
+  store.selectDifficulty('normal');
+  store.selectSystemCoreEntry(FIXTURE_CORE_UID);
   allocateBasePoints(store);
   return store;
 }
@@ -1966,6 +2000,7 @@ describe('startJourney 剧情落库', () => {
     store.generationMode = 'agent';
     store.name = '测试';
     allocateBasePoints(store);
+    fillRequiredChoices(store);
     const saveId = await store.startJourney();
     const { getLatestPlotOutline, getPlotEvents } = await import('@engine/persistence/database');
     expect(await getLatestPlotOutline(saveId)).toBeUndefined();
@@ -1980,6 +2015,7 @@ describe('startJourney 剧情落库', () => {
     store.experienceMode = 'easy';
     store.destinyPoints = 100;
     allocateBasePoints(store);
+    fillRequiredChoices(store);
     const saveId = await store.startJourney();
     const { getSaveProfile } = await import('@engine/persistence/database');
     const profile = await getSaveProfile(saveId);
@@ -1999,6 +2035,7 @@ describe('startJourney 剧情落库', () => {
     store.experienceMode = 'easy';
     // destinyPoints 默认 0
     allocateBasePoints(store);
+    fillRequiredChoices(store);
     const saveId = await store.startJourney();
     const { getSaveProfile } = await import('@engine/persistence/database');
     const profile = await getSaveProfile(saveId);
@@ -2382,6 +2419,8 @@ describe('save generation mode', () => {
     async (mode) => {
       const store = makeStore();
       store.generationMode = '';
+      store.name = '艾琳';
+      fillRequiredChoices(store);
       allocateBasePoints(store);
       expect(store.stepValid[1]).toBe(false);
       await expect(store.startJourney()).rejects.toThrow('生成模式');
@@ -2395,4 +2434,193 @@ describe('save generation mode', () => {
       expect(store.generationMode).toBe('');
     },
   );
+});
+
+// ===== UIL-11：最终持久化边界聚合必填校验 =====
+
+describe('startJourney 必填项聚合校验（UIL-11）', () => {
+  beforeEach(async () => {
+    chatMock.mockReset();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })) as any);
+    const { clearAllData, initializeDatabase } = await import('@engine/persistence/database');
+    try {
+      await clearAllData();
+    } catch {
+      /* db may not exist */
+    }
+    await initializeDatabase();
+  });
+
+  async function expectRejected(
+    store: ReturnType<typeof useCreateStore>,
+    message: string,
+    step: number,
+  ) {
+    store.currentStep = 7;
+    await expect(store.startJourney()).rejects.toThrow(message);
+    expect(store.currentStep).toBe(step);
+    const { getSaves } = await import('@engine/persistence/database');
+    expect(await getSaves()).toHaveLength(0);
+  }
+
+  it('空姓名（仅空白）被拒绝并跳回基础信息', async () => {
+    const store = setupPlotStore();
+    store.name = '   ';
+    await expectRejected(store, '角色名', 1);
+  });
+
+  it('未选命定核心被拒绝并跳回命定核心步骤', async () => {
+    const store = setupPlotStore();
+    store.selectSystemCoreEntry(null);
+    await expectRejected(store, '命定核心', 2);
+  });
+
+  it('未选难度被拒绝并跳回难度步骤，消息列出全部缺项', async () => {
+    const store = setupPlotStore();
+    store.difficulty = null;
+    store.name = '';
+    await expectRejected(store, '创建前请先补全：难度、角色名', 0);
+  });
+
+  it('自定义起始地点为空被拒绝', async () => {
+    const store = setupPlotStore();
+    store.startLocation = '自定义';
+    store.customStartLocation = '';
+    await expectRejected(store, '起始地点', 1);
+  });
+
+  it('自定义起始地点落库为玩家输入的地点名', async () => {
+    const store = setupPlotStore();
+    store.startLocation = '自定义';
+    store.customStartLocation = ' 雾港 ';
+    expect(store.startLocationLabel).toBe('雾港');
+    const saveId = await store.startJourney();
+    const { getCharacters } = await import('@engine/persistence/database');
+    const [player] = await getCharacters(saveId);
+    expect(player.location).toBe('雾港');
+  });
+});
+
+// ===== UIL-12：预设往返工坊核心/扩展，加载时清掉旧选择 =====
+
+describe('预设与命定核心来源（UIL-12）', () => {
+  it('预设往返保留工坊命定核心与工坊扩展勾选，但不携带生成模式', () => {
+    const store = makeStore();
+    store.generationMode = 'direct';
+    store.selectWorkshopCore('sys1');
+    store.toggleWorkshopProject('p1');
+    const data = store.getCurrentPresetData();
+    expect(data.workshopCoreProjectId).toBe('sys1');
+    expect(data.enabledWorkshopProjectIds).toEqual(['p1']);
+    // 生成模式是建档时在准备页显式选择的，不随角色预设保存
+    expect('generationMode' in data).toBe(false);
+
+    const store2 = makeStore();
+    store2.generationMode = 'agent';
+    store2.applyPresetData({ id: 'p', name: 'p', createdAt: 1, updatedAt: 1, ...data });
+    expect(store2.selectedWorkshopCoreProjectId).toBe('sys1');
+    expect(store2.selectedSystemCoreEntryUid).toBeNull();
+    expect([...store2.enabledWorkshopProjectIds]).toEqual(['p1']);
+    expect(store2.generationMode).toBe('agent');
+  });
+
+  it('加载核心为空的预设会清掉加载前的核心与工坊勾选', () => {
+    const store = makeStore();
+    const empty = store.getCurrentPresetData();
+    store.selectSystemCoreEntry(FIXTURE_CORE_UID);
+    store.toggleWorkshopProject('p1');
+    store.applyPresetData({ id: 'p', name: 'p', createdAt: 1, updatedAt: 1, ...empty });
+    expect(store.selectedSystemCoreEntryUid).toBeNull();
+    expect(store.selectedWorkshopCoreProjectId).toBeNull();
+    expect(store.enabledWorkshopProjectIds.size).toBe(0);
+
+    store.selectWorkshopCore('sys1');
+    store.applyPresetData({ id: 'p', name: 'p', createdAt: 1, updatedAt: 1, ...empty });
+    expect(store.selectedWorkshopCoreProjectId).toBeNull();
+  });
+
+  it('旧预设缺少新字段仍可加载，且不改动已选生成模式', () => {
+    const store = makeStore();
+    const data = store.getCurrentPresetData() as any;
+    delete data.workshopCoreProjectId;
+    delete data.enabledWorkshopProjectIds;
+    data.systemCoreEntryUid = FIXTURE_CORE_UID;
+    const store2 = makeStore();
+    store2.generationMode = 'direct_cached';
+    store2.toggleWorkshopProject('p1');
+    store2.selectWorkshopCore('sys1');
+    store2.applyPresetData({ id: 'old', name: 'old', createdAt: 1, updatedAt: 1, ...data });
+    // 旧预设没有工坊扩展字段 → 保留当前勾选；核心以预设为准（旧工坊核心被替换）
+    expect([...store2.enabledWorkshopProjectIds]).toEqual(['p1']);
+    expect(store2.selectedWorkshopCoreProjectId).toBeNull();
+    expect(store2.selectedSystemCoreEntryUid).toBe(FIXTURE_CORE_UID);
+    expect(store2.generationMode).toBe('direct_cached');
+  });
+
+  it('两种核心字段都缺的旧预设读作未选核心，清掉加载前的选择', () => {
+    const store = makeStore();
+    const data = store.getCurrentPresetData() as any;
+    delete data.systemCoreEntryUid;
+    delete data.workshopCoreProjectId;
+    store.selectSystemCoreEntry(FIXTURE_CORE_UID);
+    store.applyPresetData({ id: 'old', name: 'old', createdAt: 1, updatedAt: 1, ...data });
+    expect(store.selectedSystemCoreEntryUid).toBeNull();
+    expect(store.stepValid[2]).toBe(false);
+  });
+
+  it('剧情章节/事件数为 0（AI 自行判断）的预设加载后覆盖草稿里的旧数', () => {
+    const store = makeStore();
+    store.plotMode = 'main';
+    store.plotChapterCount = 0;
+    store.plotEventsPerChapter = 0;
+    const data = store.getCurrentPresetData();
+    expect(data.plotSettings?.main?.chapterCount).toBeUndefined();
+
+    const store2 = makeStore();
+    store2.plotChapterCount = 5;
+    store2.plotEventsPerChapter = 4;
+    store2.applyPresetData({ id: 'p', name: 'p', createdAt: 1, updatedAt: 1, ...data });
+    expect(store2.plotChapterCount).toBe(0);
+    expect(store2.plotEventsPerChapter).toBe(0);
+
+    store.plotMode = 'side';
+    const side = store.getCurrentPresetData();
+    store2.plotChapterCount = 3;
+    store2.applyPresetData({ id: 's', name: 's', createdAt: 1, updatedAt: 1, ...side });
+    expect(store2.plotChapterCount).toBe(0);
+  });
+
+  it('生成模式未选时最终提交给出完整缺项清单', async () => {
+    const store = makeStore();
+    store.generationMode = '';
+    store.currentStep = 7;
+    await expect(store.startJourney()).rejects.toThrow('创建前请先补全：难度、生成模式、角色名');
+    expect(store.currentStep).toBe(0);
+  });
+
+  it('destinyCoreName 取当前内置核心名，旧字段只作兜底；背景限定据此解锁', () => {
+    const store = makeStore();
+    expect(store.destinyCoreName).toBe('');
+    store.systemCoreEntries = [{ uid: FIXTURE_CORE_UID, name: '星辰之约', content: '' } as any];
+    store.selectSystemCoreEntry(FIXTURE_CORE_UID);
+    expect(store.destinyCoreName).toBe('星辰之约');
+    const bg = { id: 'b', name: 'b', description: '', fullText: '', requiredDestinyCore: '星辰' };
+    expect(store.checkBackgroundConditions(bg as any).valid).toBe(true);
+    store.selectSystemCoreEntry(null);
+    store.selectDestinyCore('dc_placeholder');
+    expect(store.destinyCoreName).toBe('占位核心');
+  });
+});
+
+// ===== UIL-14：剧情关闭时不发起大纲请求 =====
+
+describe('generatePlotOutline 剧情关闭（UIL-14）', () => {
+  it('plotMode 为 off 时直接返回 false 且不发请求', async () => {
+    chatMock.mockReset();
+    const store = setupPlotStore();
+    store.plotMode = 'off';
+    expect(await store.generatePlotOutline()).toBe(false);
+    expect(chatMock).not.toHaveBeenCalled();
+    expect(store.isPlotGenerating).toBe(false);
+  });
 });

@@ -69,6 +69,7 @@ onUnmounted(() => {
   document.body.classList.remove('home-entered');
 });
 
+/** 进入新建存档流程 —— 与存档管理窗口的 newGame 同一条路：只导航到创角页，不预先重置草稿 */
 function newGame() {
   ui.navigate('create');
 }
@@ -196,6 +197,18 @@ async function quickTestKeep() {
             @click="startOrContinue"
           >
             {{ latestSave ? '✦ 继 续' : '✦ 新 建 存 档' }}
+          </AppButton>
+          <!-- 主按钮在有存档时变成「继续」，这里补回一级「新建存档」入口（UIL-03），
+               否则开新档要绕进存档管理窗口 -->
+          <AppButton
+            v-if="latestSave"
+            variant="secondary"
+            size="lg"
+            block
+            class="btn-new-save"
+            @click="newGame"
+          >
+            <i class="btn-icon fa-solid fa-plus" aria-hidden="true"></i>新 建 存 档
           </AppButton>
           <AppButton
             variant="secondary"
@@ -624,6 +637,7 @@ async function quickTestKeep() {
   transform: translateY(0);
 }
 
+.btn-new-save,
 .btn-load,
 .btn-extensions,
 .btn-settings {
@@ -635,6 +649,7 @@ async function quickTestKeep() {
     transform 0.2s ease,
     box-shadow 0.2s ease;
 }
+.btn-new-save:hover,
 .btn-load:hover,
 .btn-extensions:hover,
 .btn-settings:hover {

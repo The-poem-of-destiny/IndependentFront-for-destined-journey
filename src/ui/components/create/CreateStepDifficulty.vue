@@ -12,7 +12,7 @@ const store = useCreateStore();
 <template>
   <section class="step-difficulty">
     <h2 class="step-title">选择游戏难度</h2>
-    <p class="step-desc">难度决定初始转生点数，转生点数用于购买属性、装备、技能、道具和伙伴。</p>
+    <p class="step-desc">难度决定初始转生点数，转生点数用于购买属性、装备、技能和道具。</p>
 
     <div class="difficulty-list">
       <AppCard

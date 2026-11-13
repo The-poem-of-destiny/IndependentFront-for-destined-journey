@@ -450,7 +450,7 @@ async function cancel(): Promise<void> {
 
 /** 缺预设那一行的「去设置」（D41）。角色名预填要等 §11 的图像分区落地 */
 function goPresets(): void {
-  ui.navigate('settings');
+  ui.openSettings('image');
 }
 </script>
 

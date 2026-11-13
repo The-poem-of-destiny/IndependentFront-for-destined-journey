@@ -75,7 +75,7 @@ const presentChars = computed(() => {
 });
 
 // ═══ 页签 ═══
-type SceneTab = 'chars' | 'quests' | 'world' | 'misc';
+type SceneTab = 'chars' | 'quests' | 'world';
 /** 默认落在「角色」—— 在场者是场景栏最即时的信息，不该藏在页签后面 */
 const activeTab = ref<SceneTab>('chars');
 
@@ -86,7 +86,6 @@ const sceneTabs = computed(() => [
   { key: 'chars' as SceneTab, label: '角色' },
   { key: 'quests' as SceneTab, label: '任务' },
   { key: 'world' as SceneTab, label: '世界', badge: unreadNews.value || undefined },
-  { key: 'misc' as SceneTab, label: '万象' },
 ]);
 
 // ═══ 任务（原在右侧状态栏「任务追踪」，M6 起改挂左栏页签） ═══
@@ -240,7 +239,7 @@ const viewingName = ref<string | null>(null);
       </div>
     </div>
 
-    <!-- ═══════ 页签：任务 / 角色 / 世界 / 万象 ═══════ -->
+    <!-- ═══════ 页签：角色 / 任务 / 世界 ═══════ -->
     <AppTabs :tabs="sceneTabs" :active="activeTab" @select="activeTab = $event" />
 
     <div class="scene-tab-body">
@@ -388,7 +387,9 @@ const viewingName = ref<string | null>(null);
       </template>
 
       <!-- ─── 世界 ─── -->
-      <template v-else-if="activeTab === 'world'">
+      <!-- 「万象」占位页签已移除（UIL-16）：开发占位文案不该给玩家看；
+           world 用兜底 v-else，任何意外的 activeTab 值都不会让面板空白 -->
+      <template v-else>
         <div class="scene-section-title">
           世界消息 · {{ timeInfo?.date || '' }} {{ timeInfo?.time || '' }}
         </div>
@@ -422,15 +423,6 @@ const viewingName = ref<string | null>(null);
 
         <div v-else class="empty-tab">四方无声，暂无新讯…</div>
       </template>
-
-      <!-- ─── 万象 ───
-           占位：日后收纳「资产」一类条目 —— 需要具体信息、但不隶属于世界本身的记载 -->
-      <div v-else class="empty-tab misc-placeholder">
-        <div>万象未启，此页尚空…</div>
-        <div class="misc-note">
-          此处日后收纳资产等条目 —— 需要具体信息、却独立于世界之外的记载。
-        </div>
-      </div>
     </div>
   </div>
 
@@ -710,7 +702,7 @@ const viewingName = ref<string | null>(null);
   flex-direction: column;
   gap: 4px;
 }
-/* 行本身不再可点（心声改悬停）—— cursor: help，别再用手型骗人说"可点" */
+/* 整行是 <button>，点击打开角色查看器（心声仍走悬停气泡）—— 用 cursor: pointer 表达可点 */
 /* 整行右对齐：画像在右，文字靠右排 —— 画像右缘贴近面板右缘，
    心声气泡从那里向右上方冒出，正好朝着正文区 */
 .scene-npc-item {
@@ -727,7 +719,7 @@ const viewingName = ref<string | null>(null);
   color: inherit;
   text-align: left;
   border-radius: var(--theme-radius-md, 6px);
-  cursor: help;
+  cursor: pointer;
   transition: background 120ms;
   user-select: none;
 }
@@ -1029,17 +1021,6 @@ const viewingName = ref<string | null>(null);
   margin-bottom: 8px;
   font-size: 1.25rem;
   opacity: 0.3;
-}
-.misc-placeholder {
-  padding-left: 8px;
-  padding-right: 8px;
-}
-.misc-note {
-  margin-top: 10px;
-  font-size: 0.6875rem;
-  font-style: normal;
-  line-height: 1.6;
-  color: color-mix(in srgb, var(--theme-text-muted) 80%, transparent);
 }
 .scene-empty-msg {
   font-size: 0.75rem;

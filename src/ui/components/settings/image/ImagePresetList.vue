@@ -106,11 +106,21 @@ const SLOT_LABELS: Record<keyof CharacterAppearance, string> = {
 };
 
 const slotOrder = APPEARANCE_SLOT_ORDER;
+/**
+ * 会话副本只在它属于**当前**存档上下文时才算数（UIL-20）：会话 store 不随离开存档而清空，
+ * 首页进设置时它可能还装着刚离开那个存档的行 —— 那时列出差异、提供重置，
+ * 就是在改一个用户已经离开的存档。
+ */
 const hasSave = computed(() => ui.activeSaveId !== null);
-const changedCount = computed(() => session.rows.length);
+const sessionLive = computed(() => hasSave.value && session.activeSaveId === ui.activeSaveId);
+const activeSaveLabel = computed(() => ui.activeSaveName ?? '当前存档');
+/** 载入中或属于别的存档时为空 —— 「全部重置」随之禁用，单行重置不出现 */
+const sessionRows = computed(() => (sessionLive.value ? session.rows : []));
+const changedCount = computed(() => sessionRows.value.length);
 
 /** 这个角色在本档里被 AI 改过哪些槽（空 = 没改过） */
 function sessionSlots(name: string): { slot: keyof CharacterAppearance; value: string }[] {
+  if (!sessionLive.value) return [];
   const patch = session.patchOf(name);
   if (!patch) return [];
   return slotOrder
@@ -147,7 +157,7 @@ interface SessionOnlyRow {
 const sessionOnlyRows = computed<SessionOnlyRow[]>(() => {
   const named = new Set(store.characters.map((p) => p.name));
   const out: SessionOnlyRow[] = [];
-  for (const row of session.rows) {
+  for (const row of sessionRows.value) {
     // 🔴 名字原样比较（铁律 1）
     if (named.has(row.name)) continue;
     const appearance = bootstrapAppearance(row.patch);
@@ -316,7 +326,7 @@ function summarize(row: ImagePreset): string {
 
     <div v-if="hasSave" class="session-bar">
       <span class="session-note">
-        本存档有 <strong>{{ changedCount }}</strong> 个角色的外貌被剧情改过
+        存档「{{ activeSaveLabel }}」有 <strong>{{ changedCount }}</strong> 个角色的外貌被剧情改过
       </span>
       <AppButton
         variant="ghost"

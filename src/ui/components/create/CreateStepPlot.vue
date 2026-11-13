@@ -5,6 +5,13 @@ import FormSelect from '../shared/form/FormSelect.vue';
 import FormStepper from '../shared/form/FormStepper.vue';
 import AppButton from '../shared/AppButton.vue';
 import PlotOutlinePreview from './PlotOutlinePreview.vue';
+import {
+  PLOT_COUNT_MAX,
+  PLOT_COUNT_MIN,
+  PLOT_DIFFICULTY_OPTIONS,
+  PLOT_DURATION_YEARS_MAX,
+  PLOT_DURATION_YEARS_MIN,
+} from '../../lib/create-options';
 
 const store = useCreateStore();
 
@@ -117,13 +124,8 @@ const GENRE_OPTIONS = [
   { label: '悲剧', value: 'tragedy', desc: '侧重命运无常与英雄陨落' },
 ];
 
-const DIFFICULTY_OPTIONS = [
-  { label: '自适应', value: 'adaptive' as const, desc: '根据玩家的生命层级自动适配' },
-  { label: 'T2 中坚', value: 2 as const },
-  { label: 'T3 精英', value: 3 as const },
-  { label: 'T4 史诗', value: 4 as const },
-  { label: 'T7 神祇', value: 7 as const },
-];
+// 难度层级与设置页「剧情系统」共用一份（UIL-10）
+const DIFFICULTY_OPTIONS = PLOT_DIFFICULTY_OPTIONS;
 </script>
 
 <template>
@@ -145,18 +147,30 @@ const DIFFICULTY_OPTIONS = [
         <div class="field-row field-row-triple">
           <div class="field-group">
             <label class="field-label">持续年份</label>
-            <FormStepper v-model="store.plotDurationYears" :min="1" :max="20" />
-            <p class="field-hint">推荐 1~20</p>
+            <FormStepper
+              v-model="store.plotDurationYears"
+              :min="PLOT_DURATION_YEARS_MIN"
+              :max="PLOT_DURATION_YEARS_MAX"
+            />
+            <p class="field-hint">推荐 1~20 年，最多 {{ PLOT_DURATION_YEARS_MAX }} 年</p>
           </div>
           <div class="field-group">
             <label class="field-label">章节数量</label>
-            <FormStepper v-model="store.plotChapterCount" :min="1" :max="20" />
-            <p class="field-hint">推荐 3~5 章</p>
+            <FormStepper
+              v-model="store.plotChapterCount"
+              :min="PLOT_COUNT_MIN"
+              :max="PLOT_COUNT_MAX"
+            />
+            <p class="field-hint">推荐 3~5 章，0 = AI 自行判断</p>
           </div>
           <div class="field-group">
             <label class="field-label">每章事件数</label>
-            <FormStepper v-model="store.plotEventsPerChapter" :min="1" :max="20" />
-            <p class="field-hint">推荐 3~5 个</p>
+            <FormStepper
+              v-model="store.plotEventsPerChapter"
+              :min="PLOT_COUNT_MIN"
+              :max="PLOT_COUNT_MAX"
+            />
+            <p class="field-hint">推荐 3~5 个，0 = AI 自行判断</p>
           </div>
         </div>
 
@@ -229,13 +243,21 @@ const DIFFICULTY_OPTIONS = [
         <div class="field-row field-row-triple">
           <div class="field-group">
             <label class="field-label">章节数量</label>
-            <FormStepper v-model="store.plotChapterCount" :min="1" :max="20" />
-            <p class="field-hint">推荐 1~3 章</p>
+            <FormStepper
+              v-model="store.plotChapterCount"
+              :min="PLOT_COUNT_MIN"
+              :max="PLOT_COUNT_MAX"
+            />
+            <p class="field-hint">推荐 1~3 章，0 = AI 自行判断</p>
           </div>
           <div class="field-group">
             <label class="field-label">每章事件数</label>
-            <FormStepper v-model="store.plotEventsPerChapter" :min="1" :max="20" />
-            <p class="field-hint">推荐 2~4 个</p>
+            <FormStepper
+              v-model="store.plotEventsPerChapter"
+              :min="PLOT_COUNT_MIN"
+              :max="PLOT_COUNT_MAX"
+            />
+            <p class="field-hint">推荐 2~4 个，0 = AI 自行判断</p>
           </div>
         </div>
       </template>
@@ -251,7 +273,8 @@ const DIFFICULTY_OPTIONS = [
       </div>
     </div>
 
-    <section class="outline-section">
+    <!-- 剧情关闭时大纲不会落库成事件树：预览与生成入口一并隐藏，免得白花请求费用（UIL-14） -->
+    <section v-if="store.plotMode !== 'off'" class="outline-section">
       <h3>大纲预览</h3>
       <PlotOutlinePreview
         :outline="store.plotOutline"
@@ -264,7 +287,7 @@ const DIFFICULTY_OPTIONS = [
       />
     </section>
 
-    <div class="generate-row">
+    <div v-if="store.plotMode !== 'off'" class="generate-row">
       <template v-if="!store.plotOutline">
         <AppButton
           variant="secondary"

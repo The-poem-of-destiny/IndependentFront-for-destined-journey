@@ -280,7 +280,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │      ui-store 的 `viewHistory` 负责页面级多层返回（例如设置 → 扩展管理 → 工坊），
 │   │      `previousView` 只作兼容投影；`back()` 直接弹栈，不能再经 `navigate()` 把当前页
 │   │      压回去。同视图重复 navigate 不入栈，否则返回目标会变成自己
+│   │      📌 2026-11-12（UIL-20）：经 navigate 或 back **抵达 home** 即离开存档上下文 ——
+│   │         清空 `activeSaveId` 并调 `game.clearActive()`；游戏页 → 设置不经过这里，仍保留档内上下文
 │   │      create-store 的 startJourney 合并并发提交；isCreating 贯穿持久化与错误恢复。
+│   │      📌 2026-11-12（UIL-11）：各步缺失项聚合校验，最后一步与 persistJourney 同一道闸门，
+│   │         失败跳到首个未通过的步骤（步骤条仍可自由跳转，落库边界才是保证）
 │   ├── game-store.ts                ← 时间线恢复唯一 UI 编排边界：rollbackOneTurn /
 │   │                                   restoreToSnapshot / restartCombat 共用私有 restoreTimeline；
 │   │                                   三态结果区分恢复前拒绝、完整恢复、权威已恢复但投影失败。
@@ -505,6 +509,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── ApiRateLimitWaitPopup.vue ← 全局 RPM 等待提示（端点 / 队列 / 倒计时；到时自动消失续发）
 │   │   ├── SaveManager.vue          ← 应用级存档管理窗口（列表 / 读取 / 导入导出 / 删除 / 改名）：
 │   │   │                               常驻 App.vue，不属于 HomePage；首页与游戏菜单打开同一 store 状态
+│   │   │                               📌 2026-11-12（UIL-19）：游戏内打开时正在游玩的存档标「游玩中」，
+│   │   │                                  主操作为「继续游戏」（只关窗、不重走准入检查）
 │   │   ├── ToastContainer.vue
 │   │   └── form/ (FormInput / FormSelect / FormStepper —— **只有这三个**；
 │   │             早期文档里的 Cascader / KeyValue 从未落地，别照着 import)
@@ -1019,14 +1025,14 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | 🤖 Agent 配置  | 11 个汉化 Agent、模型选择、世界书读取范围（只读，范围由条目 `extra.lore.audiences` 决定）、System Prompt 编辑；战斗为单一 `combat` DM 协议沙盒侧链                                                                                                        |
 | 📚 世界书      | **早已不是占位**：书列表 + 导入/新建/删除/恢复（`WorldBookSection.vue`，约 368 行）+ 条目编辑器（`WorldBookEditor.vue`，约 909 行：条目 CRUD / 关键词 / 插入位置与深度 / 触发策略 / EJS 正文）。数据在 Dexie（工坊 P0 起 `settings.worldBooks` 已不存在） |
 | 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                                                                                                                                                                                                 |
-| 🧠 记忆 & 缓存 | 显式 LLM/Embedding 召回模式、Embedding 与可选 Reranker 绑定、候选数/最终召回数、压缩阈值/快照上限/缓存策略                                                                                                                                                |
+| 🧠 记忆 & 缓存 | 显式 LLM/Embedding 召回模式、Embedding 与可选 Reranker 绑定、候选数/最终召回数、压缩阈值（📌 2026-11-12：未接入运行流程，控件已禁用并标「暂未接入」）/快照上限/缓存策略                                                                                   |
 | 🎨 外观主题    | 10 主题网格、字体风格、字体大小、悬停延迟、减少动态效果                                                                                                                                                                                                   |
 | 💬 消息显示    | 系统通知开关 + 7 种事件类型过滤                                                                                                                                                                                                                           |
 | ✨ 输出美化    | 预设规则库 (22条) + auto-enable 绑定 + 三段式 UI + CRUD                                                                                                                                                                                                   |
 | 🎵 音频        | 混音台 + 播放列表 + 音轨库（音乐文件夹条/上传/搜索/场景配乐开关）                                                                                                                                                                                         |
 | 🖼 素材         | 导入条 + 素材库（按角色分组/扁平表/多选批删）+ 变体抽屉（设主图/裁剪/改名）                                                                                                                                                                               |
 | 🖼 图像生成     | 四张卡：提示词生成 / 独立出图连接 / 出图参数 / 视觉预设；NovelAI 连接存 Dexie `imageApiConnections`，ComfyUI 地址与 provider 参数留在 `UiSettings`，`image_prompt` 仍绑定通用 LLM 源                                                                      |
-| 💾 存档数据    | 导出/导入/清除（排除音频库与素材库，各有独立导出口）                                                                                                                                                                                                      |
+| 💾 数据与备份  | 导出/导入/清除（排除音频库与素材库，各有独立导出口）                                                                                                                                                                                                      |
 | 🛠 开发者模式   | 持久开关（默认关闭）；控制调试工具栏、原始 Agent 请求/响应、reasoning、工具 payload、诊断导出与 `Alt + Shift + D` 抽屉                                                                                                                                    |
 | ℹ 关于         | 制作人员、项目与技术信息、内容包世界概览、版权与第三方许可证署名                                                                                                                                                                                          |
 

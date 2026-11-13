@@ -49,9 +49,9 @@ const { url: portraitUrl, isVideo: portraitIsVideo } = useAssetImage(
           <span class="hero-tier">
             Lv.{{ store.level }} T{{ store.tier }} {{ store.tierName }}
           </span>
-          <span class="hero-location">起始: {{ store.startLocation }}</span>
-          <span v-if="store.destinyCore" class="hero-core">
-            命定之灵: {{ store.destinyCore.name }} ({{ store.destinyCore.author }})
+          <span class="hero-location">起始: {{ store.startLocationLabel || '自定义' }}</span>
+          <span v-if="store.destinyCoreName" class="hero-core">
+            命定之灵: {{ store.destinyCoreName }}
           </span>
         </div>
       </div>

@@ -458,8 +458,9 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
 .points-status .divider {
   color: var(--theme-card-border);
 }
+/* 基础/额外点数必须清零才能进下一步：剩余未分配是「待办」，用警示色而非成功绿（UIL-13） */
 .points-status .remaining {
-  color: var(--theme-success);
+  color: var(--theme-warning);
   margin-left: 4px;
   font-weight: 600;
 }
