@@ -22,6 +22,11 @@ export function storyContextWindowInvalidMessage(configured: unknown): string {
   return `新模式的正文窗口必须是正整数（当前为 ${String(configured)}）。请在 设置 → Agent 配置 → 正文 的「历史层数」里填一个大于 0 的整数，本回合未发送。`;
 }
 
+/** 换窗批大小 K 不是正整数：和 N 一样明确报错、本回合不发送 */
+export function storyContextWindowBatchInvalidMessage(configured: unknown): string {
+  return `新模式的正文换窗批大小必须是正整数（当前为 ${String(configured)}）。请在 设置 → 开发者模式 的「正文换窗批大小 K」里填一个大于 0 的整数，本回合未发送。`;
+}
+
 /** 窗口外有回合缺少摘要：本轮以原文代替（不静默丢历史，计划 Q10） */
 export function storyContextMissingSummaryMessage(count: number): string {
   return `有 ${count} 个较早回合缺少摘要，本回合以这些回合的原文代替。`;

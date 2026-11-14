@@ -9,6 +9,9 @@
  *
  * 🔴 N 只按**完整回合**计：系统卡片、侧链输出不占名额；只有玩家输入没有 Story 正文的
  *    回合（失败草稿 / 本轮未完成输入）不算完整回合。不能拿消息总数除以二代替。
+ * 🔴 窗口起点只有 `storyWindowStart` 一份判据：超出 N 的回合按换窗批 K 成批退出，原文窗口在
+ *    [N, N+K-1] 之间循环；K = 1 即每回合滑一格。K > 1 时归档只在判断回合换出窗口后生效
+ *    （`resolveAppliedStoryArchives`），两次换窗之间前导 system 不变，前缀缓存可命中。
  * 🔴 窗口外未归档摘要**全部**保留：没有 M、Top K、重要度淘汰或隐含时间上限（D05/D33）。
  * 🔴 窗口内只给原文，不重复注入它们的摘要（D06），即使这些回合已经生成了摘要（D28）。
  * 🔴 窗口外某个回合**一条有效摘要片段都没有**时不静默跳过：整回合列进
@@ -51,8 +54,10 @@ export interface StoryZone4Input {
   messages: readonly ChatMessage[];
   /** 正文窗口 N，必须是正整数 */
   windowTurns: number;
+  /** 换窗批大小 K，必须是正整数；缺省 1（每回合滑动） */
+  windowBatchTurns?: number;
   segments: readonly StoryTurnSummarySegment[];
-  /** 已被有效归档覆盖的片段 id */
+  /** 已生效归档覆盖的片段 id（`resolveAppliedStoryArchives`） */
   archivedSegmentIds: ReadonlySet<string>;
 }
 
@@ -61,6 +66,8 @@ type StoryZone4HistoryItem =
   { kind: 'summary'; segment: StoryTurnSummarySegment } | { kind: 'missing'; turn: StoryTurn };
 
 export interface StoryZone4 {
+  /** 原文窗口起点（完整回合下标） */
+  windowStart: number;
   /** 窗口外历史，按来源回合时间顺序 */
   history: StoryZone4HistoryItem[];
   /** 最近 N 个完整回合的原文 */
@@ -178,6 +185,34 @@ export function findStoryTurnsMissingSummary(
   return turns.filter((t) => !covered.has(t.key));
 }
 
+/**
+ * 第 4 区原文窗口起点。超出 N 的回合按 K 成批退出：窗口在 [N, N+K-1] 之间循环。
+ * K = 1 时等于 max(0, T - N)（每回合滑动）。
+ */
+export function storyWindowStart(turnCount: number, windowTurns: number, batchTurns = 1): number {
+  const overflow = turnCount - windowTurns;
+  if (overflow <= 0) return 0;
+  return Math.floor(overflow / batchTurns) * batchTurns;
+}
+
+/**
+ * 分批换窗下「已生效」的归档：作出判断的回合已经换出原文窗口。
+ * K = 1 时原样返回全部有效归档。
+ *
+ * 归档覆盖的片段都来自判断回合及更早的回合，所以第 2 区新增概括与第 4 区移走片段在同一次
+ * 换窗中一起发生。未结事件、归档生成与重试仍用全部有效归档，不经此函数。
+ */
+export function resolveAppliedStoryArchives(
+  turns: readonly StoryTurn[],
+  activeArchives: readonly StoryArchiveRecord[],
+  windowStart: number,
+  batchTurns: number,
+): StoryArchiveRecord[] {
+  if (batchTurns === 1) return [...activeArchives];
+  const turnIndex = new Map(turns.map((turn, index) => [turn.key, index]));
+  return activeArchives.filter((a) => (turnIndex.get(a.sourceTurnKey) ?? Infinity) < windowStart);
+}
+
 /** 有效归档覆盖的片段 id 并集（这些片段退出第 4 区常驻范围）。 */
 export function archivedSegmentIdsOf(archives: readonly StoryArchiveRecord[]): Set<string> {
   return new Set(archives.flatMap((a) => a.coveredSegmentIds));
@@ -216,15 +251,19 @@ export function collectOpenStoryEvents(
   return [...byName].map(([eventName, list]) => ({ eventName, segments: list }));
 }
 
-/** 组装第 4 区。N 非法（含 N=0）直接抛 RangeError —— 不静默换成默认值。 */
+/** 组装第 4 区。N 或 K 非法（含 0）直接抛 RangeError —— 不静默换成默认值。 */
 export function buildStoryZone4(input: StoryZone4Input): StoryZone4 {
   const windowTurns = normalizeStoryWindowTurns(input.windowTurns);
   if (windowTurns === null) {
     throw new RangeError(`Story 正文窗口 N 必须是正整数，收到 ${String(input.windowTurns)}`);
   }
+  const batchTurns = normalizeStoryWindowTurns(input.windowBatchTurns ?? 1);
+  if (batchTurns === null) {
+    throw new RangeError(`Story 换窗批大小 K 必须是正整数，收到 ${String(input.windowBatchTurns)}`);
+  }
 
   const turns = collectCompleteStoryTurns(input.messages);
-  const windowStart = Math.max(0, turns.length - windowTurns);
+  const windowStart = storyWindowStart(turns.length, windowTurns, batchTurns);
   const outside = turns.slice(0, windowStart);
   const inside = turns.slice(windowStart);
 
@@ -254,5 +293,5 @@ export function buildStoryZone4(input: StoryZone4Input): StoryZone4 {
     }
   }
 
-  return { history, windowTurns: inside, missingSummaryTurns };
+  return { windowStart, history, windowTurns: inside, missingSummaryTurns };
 }

@@ -120,6 +120,8 @@ export interface OrchestratorOptions {
    */
   storyContext?: {
     windowTurns: number;
+    /** 换窗批大小 K（正整数）；缺省 1 = 每回合滑动 */
+    windowBatchTurns?: number;
     segments: readonly StoryRecallSegment[];
     archives: readonly StoryArchiveRecord[];
     /** 每次组装后回传诊断（各区用量、窗口、缺摘要回合），供调试面板 / 提示用 */
@@ -760,6 +762,7 @@ export class AgentOrchestrator {
           worldBooks: this.worldBooks,
           presets: this.presets,
           windowTurns: this.storyContext.windowTurns,
+          windowBatchTurns: this.storyContext.windowBatchTurns,
           segments: this.storyContext.segments,
           archives: this.storyContext.archives,
           onLore: this.storyContext.onLore,
@@ -1391,6 +1394,7 @@ export class AgentOrchestrator {
     const candidates = buildStoryRecallCandidates({
       messages: history,
       windowTurns: story.windowTurns,
+      windowBatchTurns: story.windowBatchTurns,
       segments: story.segments,
       archives: story.archives,
     });
@@ -1455,6 +1459,7 @@ export class AgentOrchestrator {
       selected: picked,
       messages: history,
       windowTurns: story.windowTurns,
+      windowBatchTurns: story.windowBatchTurns,
       segments: story.segments,
       rawMode: story.recall?.rawMode ?? 'turn',
       probe: query,

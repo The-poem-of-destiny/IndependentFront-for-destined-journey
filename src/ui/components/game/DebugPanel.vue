@@ -521,9 +521,11 @@ function formatJson(value: unknown): string {
         v-if="storyContextDebug.assembly"
         :class="{ 'debug-warn': storyContextDebug.assembly.overBudget }"
       >
-正文窗口 N = {{ storyContextDebug.assembly.windowTurns }} · 窗口内回合 {{
-          storyContextDebug.assembly.windowTurnKeys.length
-        }}
+正文窗口 N = {{ storyContextDebug.assembly.windowTurns }} · 换窗批 K = {{
+          storyContextDebug.assembly.windowBatchTurns ?? '未记录'
+        }} · 窗口内回合 {{ storyContextDebug.assembly.windowTurnKeys.length }} · 距下次换窗 {{
+          storyContextDebug.assembly.nextSwapInTurns ?? '?'
+        }} 回合 · 待生效归档 {{ storyContextDebug.assembly.pendingArchiveIds?.length ?? 0 }} 条
 各区字数: {{ formatZoneChars(storyContextDebug.assembly.zoneChars) }}
 整轮约 {{ storyContextDebug.assembly.estimatedTokens }} token（粗估）{{
           storyContextDebug.assembly.contextWindowTokens

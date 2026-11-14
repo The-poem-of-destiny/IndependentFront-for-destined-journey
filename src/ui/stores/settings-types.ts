@@ -230,6 +230,11 @@ export type UiSettings = {
    * `turn` = 整回合玩家输入与正文；`snippet` = 与本轮最相关的段落加前后文。只影响测试档。
    */
   storyRecallRawMode: 'turn' | 'snippet';
+  /**
+   * 新模式正文换窗批大小 K（正整数）：1 = 每回合滑动；K > 1 时原文窗口在 N 到 N+K−1 回合之间
+   * 循环，攒满 K 回合才整体换成摘要，两次换窗之间前缀缓存可命中。只影响测试档。
+   */
+  storyWindowBatchTurns: number;
 
   // ═══ 消息 & 系统事件可见性 ═══
   systemEventsVisible: boolean;

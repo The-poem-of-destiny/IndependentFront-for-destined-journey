@@ -263,6 +263,88 @@ describe('buildStoryContextV2Messages', () => {
   });
 });
 
+describe('分批换窗（K > 1）的前缀稳定性', () => {
+  /** N = 2、K = 3：5–7 回合时窗口起点都是 3，8 回合时换窗到 6 */
+  const N = 2;
+  const K = 3;
+  const all = turns(8);
+  const allTurns = collectCompleteStoryTurns(all);
+  const segs: StoryTurnSummarySegment[] = allTurns.map((t, i) => ({
+    id: `s${i + 1}`,
+    ...storyTurnSource(t),
+    order: 0,
+    content: `摘要${i + 1}`,
+    ...(i === 1 ? { eventName: '寻剑' } : {}),
+  }));
+  // 第 5 回合判断「寻剑」结束，覆盖第 2 回合的片段
+  const archive = {
+    id: 'ar1',
+    saveId: 's',
+    eventName: '寻剑',
+    outcome: 'completed' as const,
+    evidence: '正文5',
+    overview: '寻剑之事了结',
+    detail: { cause: '', process: '', ending: '', promises: '', impact: '' },
+    detailSource: 'summary' as const,
+    coveredSegmentIds: ['s2'],
+    ...storyTurnSource(allTurns[4]),
+    coveredSources: [storyTurnSource(allTurns[1])],
+    coveredSegmentFingerprints: { s2: storySegmentFingerprint(segs[1]) },
+    sequence: 0,
+    createdAt: 5,
+  };
+  const prompts = [entry('规则', '你是叙事者。', 10), zone(2, 20), zone(4, 30), zone(5, 40)];
+  const build = (turnCount: number, windowBatchTurns = K) =>
+    buildStoryContextV2Messages({
+      ctx: makeContext(all.slice(0, turnCount * 2)),
+      configs: [storyConfig],
+      worldBooks: [],
+      presets: [makePreset(prompts)],
+      windowTurns: N,
+      windowBatchTurns,
+      segments: segs,
+      archives: [archive],
+    });
+
+  it('两次换窗之间前导 system 字节相同，T+1 的消息以 T 的前导 system + 原文回合为前缀', async () => {
+    const a = await build(6);
+    const b = await build(7);
+    const leading = (m: typeof a.messages) => m.filter((x) => x.role === 'system');
+    expect(leading(b.messages)).toEqual(leading(a.messages));
+    const prefix = a.messages.slice(0, -1);
+    expect(b.messages.slice(0, prefix.length)).toEqual(prefix);
+    expect(b.diagnostics.windowStart).toBe(3);
+    expect(b.diagnostics.nextSwapInTurns).toBe(1);
+    expect(b.diagnostics.pendingArchiveIds).toEqual(['ar1']);
+    expect(b.diagnostics.archiveIds).toEqual([]);
+  });
+
+  it('对照：K = 1 时同样两轮的前导 system 不同（每回合滑窗）', async () => {
+    const a = await build(6, 1);
+    const b = await build(7, 1);
+    const system = (m: typeof a.messages) => m.filter((x) => x.role === 'system');
+    expect(system(b.messages)).not.toEqual(system(a.messages));
+  });
+
+  it('跨换窗边界：第 2 区新增概括与第 4 区移走覆盖片段在同一轮发生', async () => {
+    const before = await build(7);
+    const after = await build(8);
+    const system = (m: typeof before.messages) =>
+      m
+        .filter((x) => x.role === 'system')
+        .map((x) => x.content)
+        .join('\n');
+    expect(system(before.messages)).not.toContain('寻剑之事了结');
+    expect(system(before.messages)).toContain('【寻剑】摘要2');
+    expect(system(after.messages)).toContain('寻剑之事了结');
+    expect(system(after.messages)).not.toContain('【寻剑】摘要2');
+    expect(after.diagnostics.windowStart).toBe(6);
+    expect(after.diagnostics.windowTurnKeys).toEqual(['u7', 'u8']);
+    expect(after.diagnostics.archiveIds).toEqual(['ar1']);
+    expect(after.diagnostics.pendingArchiveIds).toEqual([]);
+  });
+});
+
 describe('三种 LLM 协议的最终消息顺序（计划 P3「校验三种协议」）', () => {
   async function v2Messages(history: ChatMessage[]) {
     const { messages } = await assemble(

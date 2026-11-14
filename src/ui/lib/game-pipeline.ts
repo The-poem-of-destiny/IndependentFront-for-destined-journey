@@ -218,6 +218,7 @@ import {
   storyContextRejectionMessage,
   storyContextSummaryFailedMessage,
   storyContextWindowInvalidMessage,
+  storyContextWindowBatchInvalidMessage,
 } from './story-context-admission';
 import {
   getAgentSettings,
@@ -2974,7 +2975,7 @@ export class GamePipeline {
    *
    * N 暂时复用 Story 的「历史注入层数」（计划 Q09 待定；一个可见设置、一个真源），
    * 未设置时取引擎对 story 的默认层数。非正整数（含 0）→ 明确报错并放弃本轮，
-   * 不静默换成别的值（D05）。
+   * 不静默换成别的值（D05）。换窗批大小 K 同一判据，非法时同样报错放弃本轮。
    */
   private async prepareStoryContextV2(
     agentDefaults: Record<string, Record<string, unknown>>,
@@ -2992,6 +2993,12 @@ export class GamePipeline {
     const windowTurns = normalizeStoryWindowTurns(configured ?? defaultHistoryLayers('story'));
     if (windowTurns === null) {
       this.notify(storyContextWindowInvalidMessage(configured), 'error');
+      return null;
+    }
+    const configuredBatch = this.settings.settings.storyWindowBatchTurns;
+    const windowBatchTurns = normalizeStoryWindowTurns(configuredBatch ?? 1);
+    if (windowBatchTurns === null) {
+      this.notify(storyContextWindowBatchInvalidMessage(configuredBatch), 'error');
       return null;
     }
 
@@ -3015,6 +3022,7 @@ export class GamePipeline {
 
     return {
       windowTurns,
+      windowBatchTurns,
       segments,
       archives,
       onLore: (lore) => this.recordStoryContextDebug({ lore }),
