@@ -742,11 +742,68 @@ export const useSettingsStore = defineStore('settings', () => {
       if (next !== runtimePayload) {
         runtimePayload = next;
         projectAgentDefaults.value = { version: 1, agents: {} };
+        // 📌 2026-11-14：清空之后**必须**重载。content-store 只在受保护包激活/锁定时
+        //    （refreshRuntimeConsumers）回调重载，安装/卸载等其他换载荷路径并不都保证 ——
+        //    漏一条就是「全体 Agent 默认层空白」直到下次刷新。这里统一补一次；
+        //    与在途加载的合并由 loadAgentProjectDefaults 自己负责（不会并发跑两份）。
+        //    不 await：本回调可能正处在 content-store 的 hydrate 里，而加载会等 hydrate。
+        void loadAgentProjectDefaults();
       }
     }),
   );
-  /** 从 data/defaults/agent-config.json 加载项目默认配置 */
-  async function loadAgentProjectDefaults() {
+
+  /** 单次加载最多重来几轮（运行时修订号一直在变时，最后一轮的结果照收） */
+  const PROJECT_DEFAULTS_MAX_ROUNDS = 5;
+  let projectDefaultsInFlight: Promise<void> | null = null;
+  let projectDefaultsRerun = false;
+
+  /**
+   * 从 data/defaults/agent-config.json 加载项目默认配置。
+   *
+   * 🔴 2026-11-14 修：此前在 `await loadProjectDefaults()` **之前**记下运行时修订号，
+   *    而那次调用自己就会经 `hydratePackState → installRuntimePack → notify()` 把修订号 +1
+   *    （世界书 `setRuntimePackBooks` 也会），于是结果被当成「过期」丢掉、且没人再排一次 ——
+   *    冷启动后全体 Agent 默认层空白、出厂预设没播种。现在修订号变了就**重来**（有上限），
+   *    永远不以「丢掉结果」收尾；并发调用合并成同一次加载（期间有新调用就再跑一轮）。
+   *
+   * 🔴 store 销毁后（`$dispose()` / HMR / 测试换 Pinia）**不再开新一轮**：每一轮都会经
+   *    `useContentStore()`（解析的是**当时活跃的** pinia）去 hydrate 并重拉内容注册表，
+   *    一个已销毁 store 的重试循环会把这些副作用带进下一个 store 的生命周期 ——
+   *    测试里的症状是下一条用例在装 fetch mock 之前就被它抢先 memo 了注册表首轮加载，
+   *    地图包 / 随机事件包落成空包。销毁后调用只返回在途那一轮（可 await 等它收尾）。
+   */
+  function loadAgentProjectDefaults(): Promise<void> {
+    if (projectDefaultsInFlight) {
+      if (!bootTaskCancelled) projectDefaultsRerun = true;
+      return projectDefaultsInFlight;
+    }
+    if (bootTaskCancelled) return Promise.resolve();
+    projectDefaultsInFlight = (async () => {
+      try {
+        let rounds = 0;
+        do {
+          projectDefaultsRerun = false;
+          rounds++;
+          const final = rounds >= PROJECT_DEFAULTS_MAX_ROUNDS;
+          const stale = await loadAgentProjectDefaultsOnce(final);
+          if (stale) projectDefaultsRerun = true;
+        } while (
+          projectDefaultsRerun &&
+          rounds < PROJECT_DEFAULTS_MAX_ROUNDS &&
+          !bootTaskCancelled
+        );
+      } finally {
+        projectDefaultsInFlight = null;
+      }
+    })();
+    return projectDefaultsInFlight;
+  }
+
+  /**
+   * 跑一轮加载。返回 true = 本轮期间运行时载荷变了、结果没采用（或后半程没做完），需要再来一轮。
+   * `acceptStale`（最后一轮）时不再判修订号，照常做完。
+   */
+  async function loadAgentProjectDefaultsOnce(acceptStale: boolean): Promise<boolean> {
     // 内容-引擎分离（波 1 T2 / D16）：经 ContentProvider 收口。
     // 🔴 `loadProjectDefaults()` 内部 `await contentReadyPromise`——保证 T7 的 pack 叠加层
     //    有机会在 fetch 落地前灌注。本波（T2）ready 立即 resolve，等价于直接 fetch。
@@ -757,7 +814,11 @@ export const useSettingsStore = defineStore('settings', () => {
       version?: number;
       agents?: Record<string, AgentDefaultEntry>;
     };
-    if (runtimeRevision !== getPackRuntimeRevision()) return;
+    // store 已销毁：结果不再有主，后半程（指纹迁移 / 播种 / 归一）一概不做
+    if (bootTaskCancelled) return false;
+    // 绝不采用对着旧运行时载荷解析出来的配置 —— 但也不丢下就走：交给外层再来一轮
+    const moved = () => !acceptStale && runtimeRevision !== getPackRuntimeRevision();
+    if (moved()) return true;
     try {
       if (config && config.agents) {
         projectAgentDefaults.value = config as AgentProjectDefaults;
@@ -806,10 +867,44 @@ export const useSettingsStore = defineStore('settings', () => {
     //    只是 pack 的输入，overlay 下那份额外默认预设根本进不来（症状：卸载后预设只剩一个）。
     //    播种规则逐 id：库里没有 → 补；有同 id → 只把 name 同步成出厂版（保留用户 prompts 编辑）。
     // Protected factory presets are supplied by the memory overlay, never boot-seeded to disk.
-    if (isProtectedContentInstalled()) return;
     const pd = projectAgentDefaults.value?.agents;
-    if (!pd) return;
+    if (!isProtectedContentInstalled() && pd) {
+      const seeded = await seedFactoryPresets(pd, acceptStale ? null : runtimeRevision);
+      if (!seeded) return true;
+    }
+    // 选择键不再在这里「补默认」：空串本身就是「跟随默认」，读取侧统一解析。
+    // 这里只做一次幂等归一（含旧版内置直出预设行的迁移）。
+    if (moved()) return true;
+    await normalizePresetSelections();
+    return false;
+  }
 
+  /**
+   * 预设选择键的唯一归一入口（幂等）：迁移旧版落盘的内置直出预设行，
+   * 再把「与默认等价」的选择键清成空串。不在目录里的 id 一律保留。
+   * 调用时机：默认层加载完成后、内容包安装/卸载/激活后。
+   */
+  async function normalizePresetSelections(): Promise<void> {
+    try {
+      const { loadPresets, migrateBuiltinPresetRows, normalizeSelections } =
+        await import('../composables/usePresets');
+      await migrateBuiltinPresetRows(settings.value);
+      const rows = await loadPresets();
+      normalizeSelections(settings.value, rows, projectAgentDefaults.value?.agents);
+    } catch (err) {
+      console.warn('[settings-store] 预设选择归一失败（读取侧仍按默认解析）:', err);
+    }
+  }
+
+  /**
+   * 预设播种：库里没有的出厂预设补进 Dexie；同 id 只同步名字（保留用户编辑）。
+   * 返回 false = 期间运行时载荷变了、没有播种（调用方再来一轮）；`runtimeRevision`
+   * 传 null 表示不再判修订号（最后一轮）。受保护内容已装时本就不播种，返回 true。
+   */
+  async function seedFactoryPresets(
+    pd: Record<string, AgentDefaultEntry>,
+    runtimeRevision: number | null,
+  ): Promise<boolean> {
     const factoryPresets: PresetItem[] = [];
     for (const entry of Object.values(pd)) {
       if (entry.preset && entry.presetId) {
@@ -817,6 +912,7 @@ export const useSettingsStore = defineStore('settings', () => {
       }
     }
     try {
+      const { useContentStore } = await import('./content-store');
       const providerPresets = (await useContentStore().resolveProjectPresets()) as PresetItem[];
       for (const p of providerPresets) {
         if (p && p.id && !factoryPresets.some((f) => f.id === p.id)) {
@@ -827,7 +923,15 @@ export const useSettingsStore = defineStore('settings', () => {
       /* provider 不可用时只用内嵌 story 预设 */
     }
 
-    if (runtimeRevision !== getPackRuntimeRevision() || isProtectedContentInstalled()) return;
+    if (isProtectedContentInstalled()) return true;
+    if (runtimeRevision !== null && runtimeRevision !== getPackRuntimeRevision()) return false;
+    // 📌 2026-11-14：出厂预设归内容所有（目录里是「内容包」、只读），哪怕它们落在 Dexie 里
+    try {
+      const { registerFactoryPresetIds } = await import('../composables/usePresets');
+      registerFactoryPresetIds(factoryPresets.map((p) => p.id));
+    } catch {
+      /* 登记失败只影响来源标注，不影响播种 */
+    }
     if (factoryPresets.length > 0) {
       try {
         const { getPresets, savePresets } = await import('@engine/persistence/database');
@@ -844,11 +948,7 @@ export const useSettingsStore = defineStore('settings', () => {
         /* IndexedDB 不可用时静默跳过 */
       }
     }
-
-    const storyPresetId = pd.story?.presetId;
-    if (storyPresetId && !settings.value.activePresetId) {
-      settings.value.activePresetId = storyPresetId;
-    }
+    return true;
   }
 
   /** 保存项目默认 Agent 配置到 data/defaults/agent-config.json */
@@ -903,6 +1003,7 @@ export const useSettingsStore = defineStore('settings', () => {
     getStorageUsage,
     projectAgentDefaults,
     loadAgentProjectDefaults,
+    normalizePresetSelections,
     saveAgentProjectDefaults,
   };
 });

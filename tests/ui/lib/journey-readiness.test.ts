@@ -24,7 +24,7 @@ describe('journey readiness', () => {
       expect(
         checkJourneyReadiness({ apiPool: [{ ...endpoint, ...invalid }] }, {}, 'off'),
       ).toContainEqual(
-        expect.objectContaining({ blocking: true, message: expect.stringContaining('story') }),
+        expect.objectContaining({ blocking: true, message: expect.stringContaining('正文生成') }),
       );
     },
   );
@@ -54,10 +54,10 @@ describe('journey readiness', () => {
       expect.objectContaining({
         blocking: true,
         section: 'agent',
-        message: expect.stringContaining('direct_cached'),
+        message: expect.stringContaining('直出主生成（缓存优化）'),
       }),
     ]);
-    expect(issues[0].message).not.toContain('direct_main');
+    expect(issues[0].message).not.toContain('direct_');
   });
   it('names the cached profile when the cached binding has no model', () => {
     const issues = checkJourneyReadiness(
@@ -70,7 +70,10 @@ describe('journey readiness', () => {
       'direct_cached',
     );
     expect(issues).toEqual([
-      expect.objectContaining({ blocking: true, message: 'direct_cached：尚未选择模型。' }),
+      expect.objectContaining({
+        blocking: true,
+        message: '直出主生成（缓存优化）：尚未选择模型。',
+      }),
     ]);
   });
   it('keeps optional helpers nonblocking when their model is empty', () => {

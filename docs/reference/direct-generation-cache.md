@@ -13,6 +13,8 @@
 
 旧档无标签仍按 Agent 运行。缓存主生成的配置键为 `direct_cached`，执行与世界书权限身份仍为 `direct_main`，无需另授一份世界书读取权限。
 
+2026-11-14 默认预设：内容包在 `agentDefaults.agents.direct_cached.presetId` 点名缓存直出的默认预设（预设本体放进包的 `presets` 或内嵌在同一条目），缺席时回退引擎内置的「直出 · 缓存优化」；与无缓存直出（`direct_main.presetId`）各自独立。story 的默认以 `agentDefaults.agents.story.presetId` 为准，不取 `presets[0]`。设置页「预设」下拉里引擎内置预设始终可选，详见[直出模式 · 各模式的默认预设怎么声明](direct-generation.md#各模式的默认预设怎么声明2026-11-14)。
+
 2026-11-10 权限修正：世界书整书与条目编辑器统一使用「直出主生成」读取范围，供两种直出模式共用，不再将缓存配置档案列为独立读取者。旧编辑器保存的 `direct_cached` 声明在读取时按 `direct_main` 识别，后续编辑权限时写回统一身份；显式空范围与其他 Agent 的权限保持原义，无数据库批量改写。
 
 ## 请求与记忆

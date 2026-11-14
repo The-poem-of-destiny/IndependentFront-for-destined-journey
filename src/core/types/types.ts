@@ -440,6 +440,11 @@ export interface ChatPreset {
   settings: Record<string, any>;
   createdAt: number;
   updatedAt: number;
+  /**
+   * 预设适用的生成方式（可选，无 Dexie 索引）。缺省 = 对所有方式可见；
+   * 归属判定见 `prompts/preset-resolution.ts` 的 `buildPresetCatalog`。
+   */
+  scope?: 'story' | 'direct';
 }
 
 // ========== Settings Types ==========

@@ -1,11 +1,10 @@
 <script setup lang="ts">
 /**
- * 设置页壳层 —— 导航 + Agent 分区（Q-25）
+ * 设置页壳层 —— 页头 + 主导航 + Agent 子导航（Q-25）
  *
- * 13 个分区里 12 个已经是一行子组件；只剩 **Agent 配置**还内联在这里，因为它
- * 要读写 13 张 per-Agent 并行 map（`agentModels` / `agentPrompts` / …），
- * 而那些 map 的形状正是 Q-18 要改的东西 —— 先拆再改等于拆两遍。
- * Q-18 落地后照 `settings/audio/` 的样子拆成 `settings/agent/` 目录。
+ * 每个分区都是一行子组件，本页只管导航与「当前在哪个分区 / 哪个 Agent」。
+ * Agent 分区的配置面在 `settings/agent/`（分区壳 AgentSection → AgentConfigPanel），
+ * 子导航的分组来自 `agent/agent-list.ts`。
  *
  * 分区共用的外壳样式在 `settings-chrome.css`：本页的 `<style scoped>` 只能命中
  * 自己的模板与子组件的**根节点**，够不到根节点里面，所以那份共用规则由各分区
@@ -18,11 +17,15 @@ import { scrollBehavior } from '../../lib/reduced-motion';
 import { useSettingsStore } from '../../stores/settings-store';
 import { getAgentSettings } from '../../stores/agent-settings';
 import { useWorldBookStore } from '../../stores/worldbook-store';
+import { useGameStore } from '../../stores/game-store';
+import { isDirectMode } from '@engine/story/generation-mode';
+import { isStoryContextV2Save } from '@engine/story/story-context-mode';
+import { agentIdsUsedBySave } from '../../lib/agent-roster';
 import AppButton from '../shared/AppButton.vue';
 import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
 import AgentSection from './agent/AgentSection.vue';
 import AgentUpdateCenter from './agent/AgentUpdateCenter.vue';
-import { AGENT_LIST, resolveAgentSelection } from './agent/agent-list';
+import { AGENT_GROUPS, resolveAgentSelection, type AgentGroupKey } from './agent/agent-list';
 import ApiSection from './ApiSection.vue';
 import WorldBookSection from './WorldBookSection.vue';
 import PlotSection from './PlotSection.vue';
@@ -147,6 +150,22 @@ function selectAgent(agentId: string) {
   s.activeAgent = agentId;
 }
 
+/**
+ * 当前存档实际会读哪些 Agent 配置（没有活跃存档 → null，子导航不打任何标记）。
+ * 只做**标记**、不重排：分组顺序固定，免得同一个 Agent 换个存档就换了位置。
+ */
+const game = useGameStore();
+const saveUsedAgents = computed<ReadonlySet<string> | null>(() => {
+  const save = game.activeSave;
+  if (!save) return null;
+  return agentIdsUsedBySave(game.generationMode, isStoryContextV2Save(save));
+});
+/** 与当前存档模式对应的那一组 */
+const saveModeGroup = computed<AgentGroupKey | null>(() => {
+  if (!game.activeSave) return null;
+  return isDirectMode(game.generationMode) ? 'direct' : 'agent';
+});
+
 /** 子导航角标要问「这个 Agent 选过 API 池没有」，问的不是当前选中的那个 */
 function agentModelOf(agentId: string): string {
   // D44 修正 1：合默认层 —— 用户没覆写 model 时，角标也能正确反映「默认层给了一个池」。
@@ -211,20 +230,50 @@ onMounted(() => {
       </nav>
 
       <!-- ====== Agent 子导航（仅当选中 Agent 配置时显示）====== -->
-      <nav v-if="activeSection === 'agent'" class="sub-nav">
-        <button
-          v-for="ag in AGENT_LIST"
-          :key="ag.id"
-          class="sub-nav-item"
-          :class="{ 'sub-nav-active': activeAgent === ag.id }"
-          @click="selectAgent(ag.id)"
+      <!--
+        按模式分三组（分组由 agent-list.ts 从引擎管线推导）。组标题只是文字，
+        不是可聚焦项；每一行仍是一个按钮。有活跃存档时，本存档会用到的行与
+        对应模式的组标题各挂一个小标记 —— 只标记、不重排。
+      -->
+      <nav v-if="activeSection === 'agent'" class="sub-nav" aria-label="Agent 列表">
+        <section
+          v-for="group in AGENT_GROUPS"
+          :key="group.key"
+          class="sub-nav-group"
+          :aria-labelledby="`sub-nav-group-${group.key}`"
         >
-          <span class="sub-nav-name">{{ ag.name }}</span>
-          <!-- 未配置 API 标红 -->
-          <span v-if="!hasApi" class="sub-nav-badge sub-nav-bad">!</span>
-          <span v-else-if="!agentModelOf(ag.id)" class="sub-nav-badge sub-nav-bad">&#10005;</span>
-          <span v-else class="sub-nav-badge sub-nav-ok">&#10003;</span>
-        </button>
+          <div class="sub-nav-group-head">
+            <h4 :id="`sub-nav-group-${group.key}`" class="sub-nav-group-title">
+              {{ group.label }}
+              <span v-if="saveModeGroup === group.key" class="sub-nav-tag sub-nav-tag-save">
+                本存档模式
+              </span>
+            </h4>
+            <p class="sub-nav-group-caption">{{ group.caption }}</p>
+          </div>
+          <button
+            v-for="ag in group.items"
+            :key="ag.id"
+            class="sub-nav-item"
+            :class="{ 'sub-nav-active': activeAgent === ag.id }"
+            :title="ag.desc"
+            @click="selectAgent(ag.id)"
+          >
+            <span class="sub-nav-text">
+              <span class="sub-nav-name">{{ ag.name }}</span>
+              <span v-if="ag.tags.length || saveUsedAgents?.has(ag.id)" class="sub-nav-tags">
+                <span v-if="saveUsedAgents?.has(ag.id)" class="sub-nav-tag sub-nav-tag-save">
+                  本存档使用
+                </span>
+                <span v-for="tag in ag.tags" :key="tag" class="sub-nav-tag">{{ tag }}</span>
+              </span>
+            </span>
+            <!-- 未配置 API 标红 -->
+            <span v-if="!hasApi" class="sub-nav-badge sub-nav-bad">!</span>
+            <span v-else-if="!agentModelOf(ag.id)" class="sub-nav-badge sub-nav-bad">&#10005;</span>
+            <span v-else class="sub-nav-badge sub-nav-ok">&#10003;</span>
+          </button>
+        </section>
       </nav>
 
       <!-- ====== 右侧内容（居中）====== -->
@@ -440,8 +489,65 @@ onMounted(() => {
   color: var(--theme-primary);
   font-weight: 600;
 }
-.sub-nav-name {
+.sub-nav-text {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sub-nav-name {
+  line-height: 1.5;
+}
+/* 分组：标题 + 一句白话说明；组与组之间留一段距离 */
+.sub-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sub-nav-group + .sub-nav-group {
+  margin-top: var(--theme-spacing-md);
+}
+.sub-nav-group-head {
+  padding: var(--theme-spacing-xs) var(--theme-spacing-sm);
+}
+.sub-nav-group-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--theme-spacing-xs);
+  margin: 0;
+  font-family: var(--theme-font-title);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--theme-text-secondary);
+  letter-spacing: 0.03em;
+}
+.sub-nav-group-caption {
+  margin: 2px 0 0;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--theme-text-muted);
+}
+.sub-nav-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--theme-spacing-xs);
+}
+.sub-nav-tag {
+  font-size: 0.625rem;
+  font-weight: 400;
+  line-height: 1.4;
+  padding: 0 var(--theme-spacing-xs);
+  border-radius: var(--theme-radius-sm);
+  border: 1px solid var(--theme-card-border);
+  color: var(--theme-text-muted);
+  white-space: nowrap;
+}
+.sub-nav-tag-save {
+  color: var(--theme-primary);
+  border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+  background: color-mix(in srgb, var(--theme-primary) 6%, transparent);
 }
 .sub-nav-badge {
   font-size: 0.65rem;
@@ -530,6 +636,26 @@ onMounted(() => {
   .nav-item,
   .sub-nav-item {
     flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  /* 横向滚动条里：每组排成一行，组说明收起，组标题留作分段提示 */
+  .sub-nav-group {
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .sub-nav-group + .sub-nav-group {
+    margin-top: 0;
+    margin-left: var(--theme-spacing-md);
+  }
+
+  .sub-nav-group-caption {
+    display: none;
+  }
+
+  .sub-nav-group-title {
     white-space: nowrap;
   }
 

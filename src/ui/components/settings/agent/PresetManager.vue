@@ -1,34 +1,29 @@
 <script setup lang="ts">
-import { isDirectSettingsProfile, resolveDirectPresetId } from '../../../lib/direct-settings';
+import { isDirectSettingsProfile } from '../../../lib/direct-settings';
 
 /**
- * 预设管理（正文 Agent 专用，Q-25 第 9 步）。
+ * 预设内容面（预设型 Agent：story / direct_main / direct_cached）。
  *
- * 仿 SillyTavern 的预设面板：选择器 / 采样器参数 / 子提示词条目列表，
- * 外加两个弹窗（条目编辑、预设编辑）。整块只在 `agentId === 'story'` 时渲染 ——
- * 其它 Agent 没有预设这回事，它们走 AgentPromptCard 的 systemPrompt + 模板。
+ * 只管**生效预设的内容**：条目列表（增删改序、启用开关）、预填充开关、模板/解析预览，
+ * 外加两个弹窗（条目编辑、删除条目确认）。选哪份预设、复制/导入/导出/重命名/删除
+ * 预设都在上方的 `AgentPresetBar`（2026-11-14 拆出）。
  *
  * 🔴 **单根**：两个 AppModal 放在根 AppCard **内层**。多根 fragment 会让 Vue
  *    既不做属性透传、也不把父组件的 scope id 盖上来。AppModal 自己
  *    `<Teleport to="body">`，所以嵌进来不改变它实际渲染的位置。
  *
- * 🔴 `loadPresets()` 改在**本组件挂载时**跑（原先是 `watch(activeSection)`，
- *    进 Agent 分区就跑，与选中哪个 Agent 无关）。它的副作用「没选预设就自动选上
- *    项目默认的那个」不会因此丢失 —— settings-store 的 `loadAgentProjectDefaults`
- *    在 store 构造期已经做过同一件事（`if (!settings.value.activePresetId) ...`）。
+ * 🔴 `loadPresets()` 在**本组件挂载时**跑，只读不写：选择键为空即「跟随默认」，
+ *    生效预设由 usePresets 的 `effectivePreset`（preset-resolution）解析。
  *
- * 🔴 **preset 级编辑今天点不到**：`openEditPreset` 没有任何按钮调它，于是
- *    `editingPresetId` 恒为 null，连带 `savePreset` 的整条编辑分支、createdAt
- *    保留三元、以及「预设已更新」那条 toast 都是**跟着它一起死的一组**。
- *    这几处要么一起留、要么一起删；单独删掉其中一个会把另一半变成看不懂的残骸。
- *    （可点的是**条目**级编辑 —— ✎ 按钮走的是 `openEntryEditor`，那条是活的。）
+ * 🔴 **写时复制**：内容包 / 出厂 / 引擎内置的预设是只读的。对它们的任何编辑
+ *    （条目增改删、移动、复制、启用开关、预填充开关）都先复制成「<原名>（我的修改）」、
+ *    切换到副本、把改动落在副本上 —— 原预设一字不动。见 `persistPreset`。
  */
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import AppCard from '../../shared/AppCard.vue';
 import AppButton from '../../shared/AppButton.vue';
 import AppModal from '../../shared/AppModal.vue';
 import TemplatePreview from '../TemplatePreview.vue';
-import { useSettingsStore } from '../../../stores/settings-store';
 import { useUIStore } from '../../../stores/ui-store';
 import { usePresets } from '../../../composables/usePresets';
 import {
@@ -42,33 +37,33 @@ import {
   isZonePlaceholderEntry,
 } from '../../../lib/preset-entries';
 import { preprocessPresetForPreview, findTailAssistantEntry } from '@engine/prompts/preset-loader';
-import {
-  createDirectPreset,
-  DIRECT_PRESET_ID,
-  DIRECT_CACHED_PRESET_ID,
-  createCachedDirectPreset,
-  DIRECT_PROTOCOL,
-  DIRECT_TEMPLATE,
-} from '@engine/prompts/direct-prompt';
+import { DIRECT_PROTOCOL, DIRECT_TEMPLATE } from '@engine/prompts/direct-prompt';
+import { presetProfileForAgent, profileScope } from '@engine/prompts/preset-resolution';
 import type { ChatPreset } from '@engine/types/types';
 
 const props = defineProps<{ agentId: string }>();
 
-const cfg = useSettingsStore();
-const s = cfg.settings;
 const ui = useUIStore();
+const {
+  catalog,
+  effectivePreset,
+  selectPreset: storeSelection,
+  duplicateAsUser,
+  loadPresets: loadPresetsFromDexie,
+  upsertPreset,
+} = usePresets();
+const profile = computed(() => presetProfileForAgent(props.agentId) ?? 'story');
+/** 生效预设 id（选择为空/失效时即默认）；写入经 usePresets，选默认那条存空串 */
 const selectedPresetId = computed({
-  get: () =>
-    isDirectSettingsProfile(props.agentId)
-      ? resolveDirectPresetId(s, props.agentId, cfg.projectAgentDefaults?.agents ?? {})
-      : s.activePresetId,
-  set: (id: string) => {
-    if (props.agentId === 'direct_cached') s.directCachedPresetId = id;
-    else if (props.agentId === 'direct_main') s.directPresetId = id;
-    else s.activePresetId = id;
-  },
+  get: () => effectivePreset(profile.value).presetId,
+  set: (id: string) => storeSelection(profile.value, id),
 });
-const { presets, loadPresets: loadPresetsFromDexie, upsertPreset, removePreset } = usePresets();
+/** 本生成方式可见的目录条目（内置直出预设不落盘，也在这里） */
+const presets = computed(() =>
+  catalog.value
+    .filter((entry) => entry.scope === undefined || entry.scope === profileScope(profile.value))
+    .map((entry) => entry.preset),
+);
 
 const showStoryPreview = ref(false);
 const showStoryResolvedPreview = ref(false);
@@ -126,13 +121,42 @@ function presetById(id: string): ChatPreset | null {
   return presets.value.find((p) => p.id === id) || null;
 }
 
-/** 统一落库：写 Dexie + 刷新内存 ref；失败时静默（兼容 IndexedDB 不可用环境）。 */
-async function persistPreset(next: ChatPreset): Promise<void> {
+/**
+ * 统一落库：写 Dexie + 刷新内存 ref；失败时静默（兼容 IndexedDB 不可用环境）。
+ *
+ * 🔴 写时复制：目标是只读预设（内容包 / 出厂 / 引擎内置）时，先复制成
+ *    「<原名>（我的修改）」（scope = 当前生成方式）、切换到副本，再把改动落在副本上；
+ *    原预设一个字节都不写。返回实际写入的 id。
+ */
+async function persistPreset(next: ChatPreset): Promise<string> {
   try {
+    const entry = catalog.value.find((e) => e.preset.id === next.id);
+    if (entry?.readonly) {
+      const copy = await duplicateAsUser(
+        next.id,
+        profileScope(profile.value),
+        `${entry.preset.name}（我的修改）`,
+      );
+      if (!copy) return next.id;
+      const edited: ChatPreset = {
+        ...next,
+        id: copy.id,
+        name: copy.name,
+        createdAt: copy.createdAt,
+        updatedAt: Date.now(),
+      };
+      if (copy.scope) edited.scope = copy.scope;
+      else delete edited.scope;
+      await upsertPreset(edited);
+      selectedPresetId.value = edited.id;
+      ui.toast('已复制为我的预设并切换；原预设保持不变', 'info');
+      return edited.id;
+    }
     await upsertPreset(next);
   } catch {
     /* DB 写入失败：upsertPreset 先写 Dexie 再改 ref，失败则 ref 也不变 */
   }
+  return next.id;
 }
 
 // 条目展开/折叠
@@ -200,10 +224,10 @@ async function saveEntry() {
   const next = isNewEntry.value
     ? appendPresetEntry(p, makeCustomPresetEntry(patch))
     : updatePresetEntry(p, editingEntryIdx.value, patch);
-  await persistPreset(next);
-  selectedPresetId.value = next.id;
+  const writtenId = await persistPreset(next);
   showEntryEditor.value = false;
-  ui.toast(isNewEntry.value ? '条目已新增' : '条目已保存', 'success');
+  // 写时复制已经报过一条 toast，这里不再叠第二条
+  if (writtenId === next.id) ui.toast(isNewEntry.value ? '条目已新增' : '条目已保存', 'success');
 }
 
 /** 上/下移一位（delta = ±1）；越界（顶部上移 / 底部下移）helper 返回原引用，不落库。 */
@@ -223,8 +247,7 @@ async function duplicateEntry(idx: number) {
   const next = duplicatePresetEntry(p, idx);
   if (next === p) return;
   expandedEntries.value.clear();
-  await persistPreset(next);
-  ui.toast('条目已复制', 'success');
+  if ((await persistPreset(next)) === next.id) ui.toast('条目已复制', 'success');
 }
 
 // 删除条目 — 二次确认
@@ -245,23 +268,12 @@ function openDeleteEntry(idx: number) {
 async function confirmDeleteEntry() {
   const p = presetById(selectedPresetId.value);
   if (!p) return;
-  await persistPreset(removePresetEntry(p, pendingDeleteIdx.value));
+  const next = removePresetEntry(p, pendingDeleteIdx.value);
+  const writtenId = await persistPreset(next);
   expandedEntries.value.clear();
   showDeleteEntry.value = false;
-  ui.toast('条目已删除', 'info');
+  if (writtenId === next.id) ui.toast('条目已删除', 'info');
 }
-const showPresetEditor = ref(false);
-const presetForm = reactive({
-  name: '',
-  description: '',
-  mainPrompt: '',
-  temperature: '0.8',
-  maxTokens: '4096',
-  topP: '1',
-  freqPen: '0',
-  presPen: '0',
-});
-const editingPresetId = ref<string | null>(null);
 
 /**
  * 预设末尾那条「启用且 role=assistant」的条目 —— 它是**预填充素材**。
@@ -310,180 +322,15 @@ async function onPrefillFieldChange(e: Event) {
 
 async function loadPresets() {
   try {
+    // 只读：不再往库里补内置预设、也不再「自动选中」—— 空选择本身就是跟随默认
     await loadPresetsFromDexie();
-    if (
-      props.agentId === 'direct_cached' &&
-      !presets.value.some((p) => p.id === DIRECT_CACHED_PRESET_ID)
-    )
-      await upsertPreset(createCachedDirectPreset());
-    if (!presets.value.some((p) => p.id === DIRECT_PRESET_ID))
-      await upsertPreset(createDirectPreset());
-    // 确保自动选中：如果还没选中且有可用预设，优先项目默认
-    if (!selectedPresetId.value && presets.value.length > 0) {
-      const pd = cfg.projectAgentDefaults?.agents?.[props.agentId];
-      if (pd?.presetId && presets.value.find((p) => p.id === pd.presetId)) {
-        selectedPresetId.value = pd.presetId;
-      }
-    }
   } catch {
     // 预设加载失败（存储损坏 / 格式不认）：保持当前选择，面板照常可用
   }
 }
-function selectPreset(id: string) {
-  selectedPresetId.value = id;
-  const p = presets.value.find((x) => x.id === id);
-  if (p) {
-    // 🔴 这里原本还有两行：`agentPromptDraft.value = ...` 与 `s.agentPromptEdited = true`。
-    //    经查是**惰性**的：草稿绑的两个 textarea 只在非 story 分支渲染，而本组件只在
-    //    story 分支存在；`saveAgentSettings` 与 `saveAsDefault` 对 story 都跳过草稿。
-    //    它同时是本区域唯一一处跨组件写（草稿归 AgentConfigPanel），删掉之后这条边界干净。
-  }
-}
-function openNewPreset() {
-  editingPresetId.value = null;
-  presetForm.name = '';
-  presetForm.description = '';
-  presetForm.mainPrompt = '';
-  presetForm.temperature = '0.8';
-  presetForm.maxTokens = '4096';
-  presetForm.topP = '1';
-  presetForm.freqPen = '0';
-  presetForm.presPen = '0';
-  showPresetEditor.value = true;
-}
-
-/**
- * 打开「编辑预设」弹窗（选中预设）—— 此前没有任何按钮调它，整条编辑分支是死的。
- *
- * 🔴 `settings` 是 ST 原始 JSON，采样字段同名有新旧两套（`temp_openai` vs `temperature`），
- *    读取时都兜一层；写回时仍按旧行为写 `*_openai` 那套。
- */
-function openEditPreset() {
-  const p = presetById(selectedPresetId.value);
-  if (!p) return;
-  const st = (p.settings ?? {}) as Record<string, any>;
-  editingPresetId.value = p.id;
-  presetForm.name = p.name || '';
-  presetForm.description = p.description || '';
-  const prompts = Array.isArray(st.prompts) ? st.prompts : [];
-  presetForm.mainPrompt = prompts[0]?.content || '';
-  presetForm.temperature = String(st.temp_openai ?? st.temperature ?? '0.8');
-  presetForm.maxTokens = String(st.openai_max_tokens ?? '4096');
-  presetForm.topP = String(st.top_p_openai ?? st.top_p ?? '1');
-  presetForm.freqPen = String(st.freq_pen_openai ?? st.frequency_penalty ?? '0');
-  presetForm.presPen = String(st.pres_pen_openai ?? st.presence_penalty ?? '0');
-  showPresetEditor.value = true;
-}
-async function savePreset() {
-  const now = Date.now();
-
-  let settings: Record<string, any>;
-  if (editingPresetId.value) {
-    // 编辑已有预设：基于原 settings 更新，不丢失原有数据
-    const original = presets.value.find((p) => p.id === editingPresetId.value);
-    settings = {
-      ...(original?.settings || {}), // 保留所有原有 ST 配置
-      temp_openai: presetForm.temperature,
-      openai_max_tokens: presetForm.maxTokens,
-      top_p_openai: presetForm.topP,
-      freq_pen_openai: presetForm.freqPen,
-      pres_pen_openai: presetForm.presPen,
-    };
-    // 更新 prompts[0] 的 Main Prompt 内容，保留其余所有条目
-    const prompts = [...(settings.prompts || [])];
-    if (prompts.length > 0) {
-      prompts[0] = {
-        ...prompts[0],
-        content: presetForm.mainPrompt,
-        name: prompts[0].name || 'Main Prompt',
-        role: prompts[0].role || 'system',
-      };
-    } else {
-      prompts.push({ name: 'Main Prompt', content: presetForm.mainPrompt, role: 'system' });
-    }
-    settings.prompts = prompts;
-  } else {
-    // 新建预设：从零构建
-    settings = {
-      temp_openai: presetForm.temperature,
-      openai_max_tokens: presetForm.maxTokens,
-      top_p_openai: presetForm.topP,
-      freq_pen_openai: presetForm.freqPen,
-      pres_pen_openai: presetForm.presPen,
-      prompts: [{ name: 'Main Prompt', content: presetForm.mainPrompt, role: 'system' }],
-    };
-  }
-
-  const item: ChatPreset = {
-    id: editingPresetId.value || crypto.randomUUID(),
-    name: presetForm.name,
-    description: presetForm.description,
-    settings,
-    createdAt: editingPresetId.value
-      ? presets.value.find((p) => p.id === editingPresetId.value)?.createdAt || now
-      : now,
-    updatedAt: now,
-  };
-  await upsertPreset(item);
-  showPresetEditor.value = false;
-  ui.toast(editingPresetId.value ? '预设已更新' : '预设已创建', 'success');
-}
-async function deletePreset(id: string) {
-  try {
-    await removePreset(id);
-    if (selectedPresetId.value === id) selectedPresetId.value = '';
-    ui.toast('预设已删除', 'info');
-  } catch {
-    // 删除失败（DB 写不进去）：列表下次加载还会看到这条，用户可以重试
-  }
-}
-async function importStPreset() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json';
-  input.onchange = async (e) => {
-    const f = (e.target as HTMLInputElement).files?.[0];
-    if (!f) return;
-    try {
-      const raw = JSON.parse(await f.text());
-      // 用导入的文件名作为预设名
-      const presetName = f.name.replace(/\.json$/i, '');
-      const now = Date.now();
-      const preset: ChatPreset = {
-        id: crypto.randomUUID(),
-        name: presetName,
-        description: raw.description || '',
-        settings: raw,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await upsertPreset(preset);
-      ui.toast(`已导入预设「${presetName}」(${raw.prompts?.length || 0} 个子提示词)`, 'success');
-    } catch {
-      ui.toast('导入失败，请检查文件格式', 'error');
-    }
-  };
-  input.click();
-}
-async function exportPresetDynamic(p: ChatPreset) {
-  const data = { ...p.settings, name: p.name, description: p.description };
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${p.name}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 onMounted(() => {
   void loadPresets();
 });
-
-// props 在模板里通过 agentId 使用；这里显式引一次避免 lint 误判
-void props;
-void watch;
-void reactive;
 </script>
 
 <template>
@@ -493,26 +340,13 @@ void reactive;
     padding="md"
     class="detail-card"
   >
-    <h4>预设管理（酒馆 ST 兼容）</h4>
+    <h4>预设内容</h4>
     <p class="form-hint">
-      仿 SillyTavern AI Response Configuration 面板布局。支持导入 SillyTavern 预设 JSON。
+      当前生效预设的条目（兼容 SillyTavern
+      预设格式）。选择、复制、导入其他预设请用上方「预设」一栏。
     </p>
 
-    <!-- 预设选择器栏 -->
-    <div class="preset-selector-bar">
-      <select
-        class="form-input preset-select"
-        :value="selectedPresetId"
-        @change="selectPreset(($event.target as HTMLSelectElement).value)"
-      >
-        <option value="">— 选择预设 —</option>
-        <option v-for="p in presets" :key="p.id" :value="p.id">{{ p.name }}</option>
-      </select>
-      <AppButton variant="ghost" size="sm" @click="importStPreset">导入</AppButton>
-      <AppButton variant="primary" size="sm" @click="openNewPreset">+ 新建</AppButton>
-    </div>
-
-    <!-- 选中预设的完整预览卡片 — 仿 ST 面板布局 -->
+    <!-- 生效预设的完整预览卡片 — 仿 ST 面板布局 -->
     <div v-if="activePreset" class="preset-viewer">
       <div class="preset-viewer-header">
         <div class="preset-viewer-title">
@@ -528,15 +362,6 @@ void reactive;
           <span v-if="activePreset.description" class="text-xs text-muted">{{
             activePreset.description
           }}</span>
-        </div>
-        <div class="preset-viewer-actions">
-          <AppButton variant="ghost" size="sm" @click="openEditPreset">编辑</AppButton>
-          <AppButton variant="ghost" size="sm" @click="exportPresetDynamic(activePreset!)"
-            >导出</AppButton
-          >
-          <AppButton variant="ghost" size="sm" @click="deletePreset(selectedPresetId)"
-            >删除</AppButton
-          >
         </div>
       </div>
 
@@ -682,7 +507,7 @@ void reactive;
 
     <!-- 未选择预设 -->
     <div v-else class="preset-empty">
-      <p class="text-muted">选择一个预设或新建/导入预设来配置正文 Agent</p>
+      <p class="text-muted">没有可用的预设：请在上方「预设」一栏导入一份</p>
     </div>
 
     <!-- Phase 10e: Story Agent template preview -->
@@ -800,94 +625,6 @@ void reactive;
         <AppButton variant="danger" size="sm" @click="confirmDeleteEntry">删除</AppButton>
       </template>
     </AppModal>
-
-    <AppModal
-      :open="showPresetEditor"
-      :title="editingPresetId ? '编辑预设' : '新建预设'"
-      size="md"
-      @update:open="showPresetEditor = $event"
-    >
-      <div class="api-form">
-        <label class="form-label"
-          >预设名称<input
-            v-model="presetForm.name"
-            class="form-input"
-            placeholder="如: 默认叙事风格"
-        /></label>
-        <label class="form-label"
-          >描述<input
-            v-model="presetForm.description"
-            class="form-input"
-            placeholder="简短描述此预设的风格"
-        /></label>
-        <label class="form-label">
-          System Prompt（主提示词）
-          <p class="form-hint">这是正文 AI 的核心人格和叙事指导</p>
-          <textarea
-            v-model="presetForm.mainPrompt"
-            class="form-textarea prompt-editor"
-            rows="8"
-            placeholder="Write {{char}}'s next reply in a fictional chat..."
-          />
-        </label>
-        <div class="form-grid">
-          <label class="form-label"
-            >Temperature<input
-              v-model="presetForm.temperature"
-              type="number"
-              step="0.1"
-              min="0"
-              max="2"
-              class="form-input"
-            />
-            <p class="form-hint">越高越随机，越低越稳定</p></label
-          >
-          <label class="form-label"
-            >Max Tokens<input
-              v-model="presetForm.maxTokens"
-              type="number"
-              min="100"
-              max="32768"
-              class="form-input"
-            />
-            <p class="form-hint">单次回复最大长度</p></label
-          >
-          <label class="form-label"
-            >Top P<input
-              v-model="presetForm.topP"
-              type="number"
-              step="0.1"
-              min="0"
-              max="1"
-              class="form-input"
-          /></label>
-          <label class="form-label"
-            >Frequency Penalty<input
-              v-model="presetForm.freqPen"
-              type="number"
-              step="0.1"
-              min="-2"
-              max="2"
-              class="form-input"
-          /></label>
-          <label class="form-label"
-            >Presence Penalty<input
-              v-model="presetForm.presPen"
-              type="number"
-              step="0.1"
-              min="-2"
-              max="2"
-              class="form-input"
-          /></label>
-        </div>
-      </div>
-      <template #footer>
-        <AppButton variant="ghost" size="sm" @click="showPresetEditor = false">取消</AppButton>
-        <AppButton variant="primary" size="sm" @click="savePreset">{{
-          editingPresetId ? '保存修改' : '创建预设'
-        }}</AppButton>
-      </template>
-    </AppModal>
   </AppCard>
 </template>
 
@@ -899,15 +636,6 @@ void reactive;
 
 <style scoped>
 /* Preset 预设系统 — 仿 ST 面板 */
-.preset-selector-bar {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 12px;
-}
-.preset-select {
-  flex: 1;
-}
 .preset-viewer {
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-lg);
@@ -924,11 +652,6 @@ void reactive;
 .preset-viewer-title h5 {
   margin: 0 0 2px;
   font-size: 1rem;
-}
-.preset-viewer-actions {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
 }
 /* 子 Prompt 列表 */
 .preset-prompts-list {

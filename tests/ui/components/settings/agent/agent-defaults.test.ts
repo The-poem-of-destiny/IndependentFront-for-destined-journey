@@ -42,8 +42,7 @@ describe('buildAgentDefaultEntry — 非 story', () => {
       settings: settings(),
       promptDraft: '只输出补丁',
       templateDraft: '{{HISTORY}}',
-      activePresetId: 'p1',
-      activePreset: preset(),
+      effectivePreset: preset(),
     });
     expect(e.systemPrompt).toBe('只输出补丁');
     expect(e.template).toBe('{{HISTORY}}');
@@ -58,8 +57,7 @@ describe('buildAgentDefaultEntry — 非 story', () => {
       settings: settings(),
       promptDraft: '',
       templateDraft: '',
-      activePresetId: '',
-      activePreset: null,
+      effectivePreset: null,
     });
     expect(e.temperature).toBe(1.2);
     expect(e.maxTokens).toBe(8192);
@@ -77,8 +75,7 @@ describe('buildAgentDefaultEntry — 非 story', () => {
       settings: settings(),
       promptDraft: '',
       templateDraft: '',
-      activePresetId: '',
-      activePreset: null,
+      effectivePreset: null,
     });
     expect(e.systemPrompt).toBe('');
     expect(e.template).toBe('');
@@ -92,8 +89,7 @@ describe('buildAgentDefaultEntry — story', () => {
       settings: settings(),
       promptDraft: '这段不该被存',
       templateDraft: '这段也不该',
-      activePresetId: 'p1',
-      activePreset: preset(),
+      effectivePreset: preset(),
     });
     expect(e.presetId).toBe('p1');
     expect(e.preset?.id).toBe('p1');
@@ -109,38 +105,35 @@ describe('buildAgentDefaultEntry — story', () => {
       settings: settings(),
       promptDraft: '',
       templateDraft: '',
-      activePresetId: 'p1',
-      activePreset: p,
+      effectivePreset: p,
     });
     (p.settings as Record<string, unknown>).prompts = [{ name: 'main', content: '被改掉了' }];
     expect((e.preset!.settings as any).prompts[0].content).toBe('第二人称叙事');
     expect(e.preset).not.toBe(p);
   });
 
-  it('没选预设 → presetId 空、preset 为 null（不塞一个半截对象）', () => {
+  it('连默认都解析不到 → presetId 空、preset 为 null（不塞一个半截对象）', () => {
     const e = buildAgentDefaultEntry({
       agentId: 'story',
       settings: settings(),
       promptDraft: '',
       templateDraft: '',
-      activePresetId: '',
-      activePreset: null,
+      effectivePreset: null,
     });
     expect(e.presetId).toBe('');
     expect(e.preset).toBeNull();
   });
 
-  it('activePresetId 有值但整份预设取不到 → 只存 id，不伪造 preset', () => {
+  it('直出档同样存生效预设的真实 id（选择为空跟随默认时也不写空 id）', () => {
     const e = buildAgentDefaultEntry({
-      agentId: 'story',
+      agentId: 'direct_cached',
       settings: settings(),
       promptDraft: '',
       templateDraft: '',
-      activePresetId: 'p_missing',
-      activePreset: null,
+      effectivePreset: { ...preset(), id: 'direct-generation-cache-v1' },
     });
-    expect(e.presetId).toBe('p_missing');
-    expect(e.preset).toBeNull();
+    expect(e.presetId).toBe('direct-generation-cache-v1');
+    expect(e.preset?.id).toBe('direct-generation-cache-v1');
   });
 });
 
@@ -155,8 +148,7 @@ describe('buildAgentDefaultEntry — 与 AgentSettingsEntry 同形', () => {
       },
       promptDraft: '',
       templateDraft: '',
-      activePresetId: '',
-      activePreset: null,
+      effectivePreset: null,
     });
     expect(e.temperature).toBe(AGENT_SETTINGS_DEFAULTS.temperature);
     expect(e.maxTokens).toBe(AGENT_SETTINGS_DEFAULTS.maxTokens);
@@ -168,8 +160,7 @@ describe('buildAgentDefaultEntry — 与 AgentSettingsEntry 同形', () => {
       settings: settings({ historyLayers: undefined, historySlice: undefined }),
       promptDraft: '',
       templateDraft: '',
-      activePresetId: '',
-      activePreset: null,
+      effectivePreset: null,
     });
     expect(e.historyLayers).toBeUndefined();
     expect(e.historySlice).toBeUndefined();

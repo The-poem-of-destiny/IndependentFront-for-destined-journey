@@ -9,6 +9,15 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-14 设置页预设管理重做｜分支 `claude/preset-management-redesign`，待真机验证
+
+- 每个 Agent 配置面的提示词区最上方新增「预设」状态条（`components/settings/agent/AgentPresetBar.vue`）。预设型 Agent（story / 直出两种）是分组下拉：默认（恰好一项「默认 · 名称」，选它即跟随默认）/ 内容包 / 引擎内置（仅直出）/ 我的预设，旁边标出生效预设的来源；原先选的预设不存在时提示「原先选择的预设已不存在，现使用默认预设」。动作：复制为我的预设、导入、导出、重命名与删除（仅我的预设，删除需确认）、恢复默认。其余 Agent 显示「默认（内容包 / 占位内容）」或「我的自定义（已改 N 处）」，恢复默认只清 systemPrompt 与上下文模板两项覆写。
+- 写时复制：内容包、出厂文件与引擎内置的预设只读。对它们的任何条目编辑先复制成「<原名>（我的修改）」、切换过去再改，原预设不动。受保护内容包的预设不再接受「只进内存、刷新即丢」的编辑，直接写会被拒绝。
+- 预设编辑弹窗缩成「重命名」（名称 + 描述）：删除引擎从不读取的采样字段（`temp_openai` / `top_p_openai` / `freq_pen_openai` / `pres_pen_openai`）与 Main Prompt 编辑框；删除「+ 新建」空白预设，新预设只能复制或导入（导入的预设归当前生成方式）。
+- 动作栏：预设型 Agent 去掉只弹 toast 的「保存设置」；其余 Agent 改名「保存提示词」。「恢复成最新」改名「全部恢复默认」，对所有 Agent 与内容包状态都是同一件事：清覆写层但保留 API 池绑定（`model`），预设型再把选择回到默认 —— 此前没有项目默认时会连 `model` 一起清掉。
+- 解析器跟进：引擎内置直出预设在内容包自带直出默认时仍可显式选中（`normalizePresetSelection` 不再清它，只在 `migrateBuiltinPresetRows` 删掉原样旧行时清）；出厂文件播种进 Dexie 的预设算内容所有，不再显示在「我的预设」。内容包如何声明各模式默认预设见 [直出模式](reference/direct-generation.md)。
+- 待真机验证：装包 / 开发叠加两种环境下的分组与来源角标、写时复制后的刷新保留、受保护内容包锁定时的提示。
+
 ### 2026-11-14 首页 Astral Drift 视觉升级｜分支 `homepage-enhance`，仅做浏览器逐帧静帧检查
 
 - 改动文件：`src/ui/components/home/drift/runtime.ts`、`AstralDriftBackdrop.vue`、`HomePage.vue`、`tests/ui/components/home/HomePage.test.ts`。完整记录见 [首页 Astral Drift 集成设计](planning/2026-08-09-home-astral-drift-integration-design.md) §8。

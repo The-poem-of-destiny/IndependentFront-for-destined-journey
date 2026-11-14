@@ -20,16 +20,14 @@ import {
   readDirectCombat,
 } from '@engine/combat/direct-combat';
 import {
-  createDirectPreset,
-  createCachedDirectPreset,
-  DIRECT_CACHED_PRESET_ID,
-  DIRECT_PRESET_ID,
-} from '@engine/prompts/direct-prompt';
-import {
-  initializeDirectSettings,
-  initializeCachedDirectSettings,
-  resolveDirectPresetId,
-} from './direct-settings';
+  buildPresetCatalog,
+  builtinDirectPresets,
+  PRESET_SELECTION_KEYS,
+  resolveEffectivePreset,
+  type PresetAgentDefaults,
+  type PresetProfile,
+} from '@engine/prompts/preset-resolution';
+import { initializeDirectSettings, initializeCachedDirectSettings } from './direct-settings';
 import { scanEventTriggers, scanPlayAudioMarkers } from '@engine/story/marker-protocol';
 // Q-05：从模型输出抢救 JSON 的唯一入口（裸 / 围栏 / <json> / 前后夹带解说四种形态）
 import { extractJsonPayload } from '@engine/utils/model-json';
@@ -41,6 +39,7 @@ import type {
   ApiEndpoint,
   AgentResult,
   AgentPreset,
+  ChatPreset,
   CombatTriggerMarker,
   CombatSummaryResult,
   CombatType,
@@ -968,6 +967,7 @@ export class GamePipeline {
         agentDefaults,
         onStoryChunk,
         isDirectMode(this.generationMode),
+        presets,
       );
 
       // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
@@ -1464,12 +1464,31 @@ export class GamePipeline {
 
   // ===== 私有方法 =====
 
+  /** 预设目录（存储行 + 默认层内嵌 + 内置直出预设），与设置页同一套装配 */
+  private presetCatalog(presets: readonly AgentPreset[], agentDefaults: PresetAgentDefaults) {
+    return buildPresetCatalog({
+      storedRows: presets as unknown as ChatPreset[],
+      agentDefaults,
+      builtins: builtinDirectPresets(),
+      contentOwnedIds: (getActivePackPayload()?.presets ?? []).map((preset) => preset.id),
+    });
+  }
+
   private buildAgentConfigs(
     agentDefaults: Record<string, Record<string, unknown>>,
     onStoryChunk?: StoryChunkCallback,
     direct = false,
+    presets: readonly AgentPreset[] = [],
   ): AgentConfig[] {
     const s = this.settings.settings;
+    const catalog = this.presetCatalog(presets, agentDefaults);
+    const effectivePresetId = (profile: PresetProfile): string | undefined =>
+      resolveEffectivePreset({
+        profile,
+        selection: s[PRESET_SELECTION_KEYS[profile]],
+        agentDefaults,
+        catalog,
+      }).presetId || undefined;
 
     // 需要参与管线的所有 Agent（不包括 plot_pre_check/plot_post_check — 剧情模式 off 时会自动禁用）
     if (direct) initializeDirectSettings(s, agentDefaults);
@@ -1590,18 +1609,13 @@ export class GamePipeline {
           ? 'direct_cached'
           : agentId;
       const agentCfg = getAgentSettings(s, settingsId, agentDefaults);
-      // 真机修(2026-07-17): story 预设尊重设置页选中项（s.activePresetId）——
-      // 此前硬绑 agent-config.json 出厂 presetId，用户导入/另存的预设（新 id）在设置页编辑得再对，
-      // 运行时也永远用旧的那份（"我保存了第二人称但 agent 没拿到"根因）。
+      // 预设 id 一律经 preset-resolution 解析（选择键 → 内容默认 → 内置/首个内容预设）：
+      // 空的或已失效的选择永远落到默认，不会拿着一个查不到的 id 去组装。
       const presetId: string | undefined =
         agentId === 'direct_main'
-          ? resolveDirectPresetId(
-              s,
-              this.generationMode === 'direct_cached' ? 'direct_cached' : 'direct_main',
-              agentDefaults,
-            )
-          : agentId === 'story' && s.activePresetId
-            ? s.activePresetId
+          ? effectivePresetId(this.generationMode === 'direct_cached' ? 'direct_cached' : 'direct')
+          : agentId === 'story'
+            ? effectivePresetId('story')
             : (defaults.presetId as string | undefined) || undefined;
       // 世界书读取范围不在 Agent 配置里（内容计划 §7.2）：条目路由元数据决定谁能读，
       // 见 loadActiveWorldBooks 与 @engine/content/lore-routing。
@@ -1863,16 +1877,15 @@ export class GamePipeline {
     presets: AgentPreset[];
     agentDefaults: Record<string, Record<string, unknown>>;
   }> {
-    let presets: AgentPreset[] = [];
+    let storedRows: ChatPreset[] = [];
     const agentDefaults: Record<string, Record<string, unknown>> = {};
+    // 原始默认层（含内嵌 preset），只用来装配预设目录
+    let rawAgents: Record<string, any> = {};
 
     // 1. DB 优先：用户可能通过设置页修改过预设
     try {
       const { getPresets } = await import('@engine/persistence/database');
-      const dbPresets = await getPresets();
-      if (dbPresets && dbPresets.length > 0) {
-        presets = dbPresets as unknown as AgentPreset[];
-      }
+      storedRows = (await getPresets()) ?? [];
     } catch {
       // IndexedDB 不可用时静默跳过
     }
@@ -1886,6 +1899,7 @@ export class GamePipeline {
         agents?: Record<string, any>;
       };
       const agents = config.agents || {};
+      rawAgents = agents;
       if (Object.keys(agents).length === 0) {
         // provider 返回空骨架 = 占位 fetch 失败或文件缺失。原行为是 console.warn。
         console.warn(
@@ -1894,18 +1908,10 @@ export class GamePipeline {
       }
       for (const [agentId, entry] of Object.entries(agents)) {
         const e = entry as any;
-        // 提取内嵌预设（story 等依赖 ST 预设的 Agent）
-        if (e.preset && !presets.some((p) => p.id === (e.preset as any).id)) {
-          presets.push(e.preset as unknown as AgentPreset);
-        } else if (e.preset) {
-          // 真机诊断(2026-07-17): DB 版预设（设置页编辑过的）优先于 agent-config.json 内嵌版 — 设计行为。
-          // 直接改 agent-config.json 不会生效于已存在的 DB 记录；要么在设置页编辑，要么删除 DB 预设回落出厂版。
-          console.warn(
-            `[GamePipeline] 预设 "${(e.preset as any).name ?? (e.preset as any).id}" 使用 DB 版本（设置页编辑优先），agent-config.json 内嵌版被忽略`,
-          );
-        }
+        // 内嵌预设（story 等依赖 ST 预设的 Agent）由下面的预设目录统一收进来：
+        // DB 版（设置页编辑过的）同 id 优先于 agent-config.json 内嵌版 —— 设计行为。
         // 提取各 agent 完整默认层（D44 修正 1）—— 收齐 AgentSettingsEntry 12 键 +
-        // presetId/ejsVarsCommit（preset 已在上面单独提进 presets[]）。
+        // presetId/ejsVarsCommit（preset 进预设目录，不进默认层）。
         // getAgentSettings 经此合「覆写 ?? 默认」，删 boot 播种后世界书/model/数值
         // 的唯一默认来源就是这里。原样保留 agent-config.json 给的字段（包括 undefined
         // 语义相关的 historyLayers/historySlice —— 不塌成默认）。
@@ -1937,10 +1943,10 @@ export class GamePipeline {
       );
     }
 
-    if (!presets.some((preset) => preset.id === DIRECT_PRESET_ID))
-      presets.push(createDirectPreset());
-    if (!presets.some((preset) => preset.id === DIRECT_CACHED_PRESET_ID))
-      presets.push(createCachedDirectPreset());
+    // 存储行 > 默认层内嵌预设 > 内置直出预设（同 id 只留优先者），与设置页同一套装配
+    const presets = this.presetCatalog(storedRows as unknown as AgentPreset[], rawAgents).map(
+      (entry) => entry.preset as unknown as AgentPreset,
+    );
     return { presets, agentDefaults };
   }
 
@@ -4481,7 +4487,7 @@ export class GamePipeline {
     if (this.chainData) return this.chainData;
     const { presets, agentDefaults } = await this.loadPresets();
     const worldBooks = await this.loadActiveWorldBooks();
-    const agentConfigs = this.buildAgentConfigs(agentDefaults);
+    const agentConfigs = this.buildAgentConfigs(agentDefaults, undefined, false, presets);
     this.chainData = { agentConfigs, worldBooks, presets, agentDefaults };
     return this.chainData;
   }

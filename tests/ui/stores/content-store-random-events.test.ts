@@ -32,6 +32,7 @@ import {
   resetPlaceholderHashesCache,
   CONTENT_REGISTRY_SOURCES,
 } from '../../../src/ui/stores/content-store';
+import { useSettingsStore } from '../../../src/ui/stores/settings-store';
 import { getDatabase } from '@engine/persistence/database';
 import { isEmptyRandomEventPack } from '@engine/random-events/random-event-pack';
 import {
@@ -140,6 +141,13 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // 🔴 先销毁本轮被间接建出来的 settings-store（hydrate → beautifier-store → settings-store），
+  //    并等它在途的默认层加载收尾。不销毁的话，它构造期的启动任务 / 默认层重试循环会活进
+  //    下一条用例：在下一条用例装 fetch mock 之前就抢先 memo 了注册表首轮加载（打的是真 fetch，
+  //    全部失败），于是下一条用例拿到的是空包。只在全量高负载下偶发。
+  const settings = useSettingsStore();
+  settings.$dispose();
+  await settings.loadAgentProjectDefaults();
   vi.restoreAllMocks();
   await cleanDb();
   resetPlaceholderHashesCache();
