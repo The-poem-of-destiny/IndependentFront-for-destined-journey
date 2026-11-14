@@ -585,6 +585,38 @@ describe('settings-store', () => {
       expect(await db.presets.get('story-preset')).toBeDefined();
     });
 
+    it('store 销毁后：在途那一轮收尾即止，不再重来、不再播种；之后的调用不再发起加载', async () => {
+      await drainMacrotasks(6);
+      const db = getDatabase();
+      await db.presets.clear();
+      const cs = await spyContent();
+      const { setRuntimePackBooks } = await import('@engine/content/pack-runtime');
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const spy = vi.spyOn(cs, 'loadProjectDefaults').mockImplementation(async () => {
+        // 每轮都把修订号 +1：没有销毁检查时会一路重来到上限
+        setRuntimePackBooks([]);
+        await gate;
+        return storyDefaults();
+      });
+
+      const pending = store.loadAgentProjectDefaults();
+      await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+      store.$dispose();
+      // 销毁后的调用只返回在途那一轮，不排下一轮
+      const tail = store.loadAgentProjectDefaults();
+      release();
+      await pending;
+      await tail;
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(store.projectAgentDefaults.agents).toEqual({});
+      expect(await db.presets.get('story-preset')).toBeUndefined();
+
+      await store.loadAgentProjectDefaults();
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
     it('运行时载荷换了：默认层先清空，随后自动重载', async () => {
       await drainMacrotasks(6);
       const cs = await spyContent();

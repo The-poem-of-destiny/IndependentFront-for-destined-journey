@@ -765,12 +765,19 @@ export const useSettingsStore = defineStore('settings', () => {
    *    （世界书 `setRuntimePackBooks` 也会），于是结果被当成「过期」丢掉、且没人再排一次 ——
    *    冷启动后全体 Agent 默认层空白、出厂预设没播种。现在修订号变了就**重来**（有上限），
    *    永远不以「丢掉结果」收尾；并发调用合并成同一次加载（期间有新调用就再跑一轮）。
+   *
+   * 🔴 store 销毁后（`$dispose()` / HMR / 测试换 Pinia）**不再开新一轮**：每一轮都会经
+   *    `useContentStore()`（解析的是**当时活跃的** pinia）去 hydrate 并重拉内容注册表，
+   *    一个已销毁 store 的重试循环会把这些副作用带进下一个 store 的生命周期 ——
+   *    测试里的症状是下一条用例在装 fetch mock 之前就被它抢先 memo 了注册表首轮加载，
+   *    地图包 / 随机事件包落成空包。销毁后调用只返回在途那一轮（可 await 等它收尾）。
    */
   function loadAgentProjectDefaults(): Promise<void> {
     if (projectDefaultsInFlight) {
-      projectDefaultsRerun = true;
+      if (!bootTaskCancelled) projectDefaultsRerun = true;
       return projectDefaultsInFlight;
     }
+    if (bootTaskCancelled) return Promise.resolve();
     projectDefaultsInFlight = (async () => {
       try {
         let rounds = 0;
@@ -780,7 +787,11 @@ export const useSettingsStore = defineStore('settings', () => {
           const final = rounds >= PROJECT_DEFAULTS_MAX_ROUNDS;
           const stale = await loadAgentProjectDefaultsOnce(final);
           if (stale) projectDefaultsRerun = true;
-        } while (projectDefaultsRerun && rounds < PROJECT_DEFAULTS_MAX_ROUNDS);
+        } while (
+          projectDefaultsRerun &&
+          rounds < PROJECT_DEFAULTS_MAX_ROUNDS &&
+          !bootTaskCancelled
+        );
       } finally {
         projectDefaultsInFlight = null;
       }
@@ -803,6 +814,8 @@ export const useSettingsStore = defineStore('settings', () => {
       version?: number;
       agents?: Record<string, AgentDefaultEntry>;
     };
+    // store 已销毁：结果不再有主，后半程（指纹迁移 / 播种 / 归一）一概不做
+    if (bootTaskCancelled) return false;
     // 绝不采用对着旧运行时载荷解析出来的配置 —— 但也不丢下就走：交给外层再来一轮
     const moved = () => !acceptStale && runtimeRevision !== getPackRuntimeRevision();
     if (moved()) return true;
