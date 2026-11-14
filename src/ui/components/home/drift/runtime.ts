@@ -1805,6 +1805,89 @@ export function createAstralDriftScene(
     return texture;
   }
 
+  // 中心多边形的「揭示时间图」：每个连线像素存它被画出的时刻（0..1，对应书写时间窗），
+  // 白色表示“不在中心多边形上”。三支笔同时各自连续描一圈 —— {7/1} 七边形、{7/2} 与
+  // {7/3} 七角星（7 是质数，每种步长都是一条闭合的 7 边回路，中途不抬笔）。
+  // 线宽画成 5 px 只为提供时间：形状与抗锯齿仍来自原有遮罩纹理，宽带保证整条真实线宽内
+  // 采到的时间都准确。全视口映射与 makeSvgTexture 一致（4096 → 1024），两张纹理共用 uv。
+  // 顶点不是恰好 7 个时返回 null，该层保持原有的角向扫开。
+  function bakeHubDrawMap(svgText) {
+    const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+    const seen = new Map();
+    for (const line of doc.querySelectorAll('line')) {
+      for (const [ax, ay] of [
+        ['x1', 'y1'],
+        ['x2', 'y2'],
+      ]) {
+        const x = Number(line.getAttribute(ax));
+        const y = Number(line.getAttribute(ay));
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const key = `${Math.round(x * 10) / 10},${Math.round(y * 10) / 10}`;
+        if (!seen.has(key)) seen.set(key, { x, y });
+      }
+    }
+    if (seen.size !== 7) return null;
+
+    // 以 (2048, 2048) 为中心，从正上方开始按顺时针排序。
+    const angleOf = (point) => {
+      const a = Math.atan2(point.x - 2048, -(point.y - 2048));
+      return a < 0 ? a + TAU : a;
+    };
+    const v = [...seen.values()].sort((a, b) => angleOf(a) - angleOf(b));
+
+    const SIZE = 1024;
+    const k = SIZE / 4096;
+    const canvas = document.createElement('canvas');
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    // darken：线条相交或相接处保留最早的时刻。
+    ctx.globalCompositeOperation = 'darken';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 5;
+
+    const grey = (t) => {
+      const g = Math.round(t * 0.94 * 255);
+      return `rgb(${g}, ${g}, ${g})`;
+    };
+    const cycles = [
+      { step: 1, win: [0.0, 0.62] },
+      { step: 2, win: [0.12, 0.8] },
+      { step: 3, win: [0.25, 1.0] },
+    ];
+    for (const { step, win } of cycles) {
+      for (let m = 0; m < 7; m += 1) {
+        const from = v[(m * step) % 7];
+        const to = v[((m + 1) * step) % 7];
+        const t0 = THREE.MathUtils.lerp(win[0], win[1], m / 7);
+        const t1 = THREE.MathUtils.lerp(win[0], win[1], (m + 1) / 7);
+        const x0 = from.x * k;
+        const y0 = from.y * k;
+        const x1 = to.x * k;
+        const y1 = to.y * k;
+        const gradient = ctx.createLinearGradient(x0, y0, x1, y1);
+        gradient.addColorStop(0, grey(t0));
+        gradient.addColorStop(1, grey(t1));
+        ctx.strokeStyle = gradient;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
+      }
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.NoColorSpace; // 存的是时间，不是颜色
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    // 不生成 mipmap：缩小时会把线上的时间与白色背景混在一起。
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+    return texture;
+  }
+
   // A quad material that samples an SVG mask and rotates the SAMPLE point by uSpin*uTime,
   // tinted gold with a charge bead on the rim (comet trail compatibility).
   function buildSpinningLayer(tex, spec) {
@@ -1830,6 +1913,12 @@ export function createAstralDriftScene(
         uRevealRange: { value: new THREE.Vector2(...(spec.revealRange ?? [0, 1])) },
         uRingR: { value: spec.ringR ?? 1 },
         tVeil: { value: veilTexture },
+        // 可选的揭示时间图（见 bakeHubDrawMap）：有图的像素按各自的时刻被“画”出来，
+        // 其余像素仍走上面的扫开。无图时给出不会除零的默认时间窗。
+        tDraw: { value: spec.drawMap ?? null },
+        uHasDraw: { value: spec.drawMap ? 1 : 0 },
+        uDrawStart: { value: spec.drawMap ? (spec.drawStart ?? 0) : 0 },
+        uDrawEnd: { value: spec.drawMap ? (spec.drawEnd ?? 1) : 1 },
       },
       vertexShader: /* glsl */ `
       varying vec2 vPos;
@@ -1855,6 +1944,10 @@ export function createAstralDriftScene(
       uniform vec2 uRevealRange;
       uniform float uRingR;
       uniform sampler2D tVeil;
+      uniform sampler2D tDraw;
+      uniform float uHasDraw;
+      uniform float uDrawStart;
+      uniform float uDrawEnd;
       varying vec2 vPos;
       void main() {
         float a = uTime * uSpin;
@@ -1875,6 +1968,14 @@ export function createAstralDriftScene(
         float front = p * 1.1;
         float written = smoothstep(front, front - 0.06, s);
         float pen = smoothstep(0.08, 0.0, abs(s - front)) * (1.0 - smoothstep(0.9, 1.0, p));
+        // 中心多边形：按揭示时间图逐线生长，生长端带亮笔尖（与遮罩同一个旋转后的 uv）。
+        float drawT = uHasDraw > 0.5 ? texture2D(tDraw, uv).r : 1.0;
+        float isDrawn = 1.0 - step(0.97, drawT);
+        float dp = clamp((uIntro - uDrawStart) / (uDrawEnd - uDrawStart), 0.0, 1.0) * 1.03;
+        float drawnWritten = smoothstep(dp, dp - 0.012, drawT);
+        float drawnPen = smoothstep(0.022, 0.0, abs(drawT - dp)) * (1.0 - smoothstep(0.97, 1.03, dp));
+        written = mix(written, drawnWritten, isDrawn);
+        pen = mix(pen, drawnPen, isDrawn);
         float shimmer = 0.72 + 0.56 * texture2D(tVeil, vec2(ang * 0.63661977 + uTime * 0.021, rq * 2.3 - uTime * 0.034)).r;
         // One charge bead on the rim, driven by the UNROTATED coordinate so the motes
         // that ride it never slide off their own head.
@@ -2279,6 +2380,10 @@ export function createAstralDriftScene(
       revealOrigin: -Math.PI / 2,
       revealStart: 1.1,
       revealEnd: 2.6,
+      // 中心多边形改为三支笔逐线描出，0.9 → 2.5 秒（最后一笔恰在星系点亮时合拢）。
+      drawMap: bakeHubDrawMap(MAGIC_CIRCLE_SVG),
+      drawStart: 0.9,
+      drawEnd: 2.5,
     });
     // Both inner bands are CHILDREN of the outer mesh: they inherit its position/scale/
     // tilt for free, and only their own spins differ (0 = static). The z-offsets keep
