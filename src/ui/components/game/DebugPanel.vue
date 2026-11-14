@@ -661,6 +661,12 @@ function formatJson(value: unknown): string {
 摘要补建: 成功 {{ storyContextDebug.backfill.turnKeys.length }} · 失败 {{
           storyContextDebug.backfill.failedTurnKeys.length
         }}</pre>
+      <pre v-if="storyContextDebug.repetition?.length">
+延续事件复读率: {{
+          storyContextDebug.repetition
+            .map((r) => `${r.eventName} ${Math.round(r.ratio * 100)}%`)
+            .join(' · ')
+        }}</pre>
     </div>
 
     <!-- Agent 调用日志 -->

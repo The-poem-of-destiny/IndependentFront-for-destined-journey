@@ -24,6 +24,19 @@ describe('buildStoryTurnBackfillMessages（补建较早回合摘要）', () => {
     expect(user.content).toContain('<该回合正文>\n铁匠答应三天交剑。');
     expect(user.content).toContain('【订剑】');
   });
+
+  it('补建同样按精简规则：结论不写过程、默认一段、至少一段', () => {
+    const [system] = buildStoryTurnBackfillMessages({
+      userInput: '',
+      storyText: '',
+      openEvents: '',
+    });
+    expect(system.content).toContain('不写过程与修辞');
+    expect(system.content).toContain('通常只输出 1 段');
+    expect(system.content).toContain('segments 至少一段');
+    expect(system.content).toContain('只写这一回合的新进展');
+    expect(system.content).not.toContain('篇幅随内容走');
+  });
 });
 
 describe('parseStoryTurnSummaryOutput', () => {
@@ -135,5 +148,54 @@ describe('parseStoryTurnSummaryOutput', () => {
     expect(STORY_TURN_SUMMARY_TEMPLATE).toContain('{{STORY_OPEN_EVENTS}}');
     expect(STORY_TURN_SUMMARY_TEMPLATE).toContain('{{AGENT.STORY}}');
     expect(STORY_TURN_SUMMARY_TEMPLATE).toContain('{{USER_INPUT}}');
+  });
+
+  it('延续事件纯增量：不复述已记录前情，无进展不写段，结局照写，并给出对照示例', () => {
+    const prompt = STORY_TURN_SUMMARY_SYSTEM_PROMPT;
+    expect(prompt).toContain('已经记录过的起因、背景、人物身份、地点和既有条件一律不再重复');
+    expect(prompt).toContain('没有新行动、新线索或新决定时，不为它写段落');
+    // 「无进展不写段」与「至少一段」的兜底同句给出，避免输出空 segments
+    expect(prompt).toContain('仍满足 segments 至少一段');
+    expect(prompt).toContain('结局本身就是新进展');
+    expect(prompt).toContain('精简：〔本回合行动〕，〔结果或状态变化〕。');
+  });
+
+  it('示例只用〔〕占位的因果骨架，不带具体名词，防止提示词污染', () => {
+    const backfill = buildStoryTurnBackfillMessages({
+      userInput: '',
+      storyText: '',
+      openEvents: '',
+    })[0].content;
+    for (const prompt of [STORY_TURN_SUMMARY_SYSTEM_PROMPT, backfill]) {
+      expect(prompt).toContain('不输出〔〕');
+      for (const concrete of ['铁匠', '玄铁', '北城', '酒保', '城主府', '金币']) {
+        expect(prompt).not.toContain(concrete);
+      }
+    }
+    // 示例区的每一行都是占位骨架，不夹带具体内容
+    const examples = STORY_TURN_SUMMARY_SYSTEM_PROMPT.slice(
+      STORY_TURN_SUMMARY_SYSTEM_PROMPT.indexOf('浓缩程度示例'),
+      STORY_TURN_SUMMARY_SYSTEM_PROMPT.indexOf('只输出一个 <json> 块'),
+    )
+      .split('\n')
+      .filter((line) => /^\s*(?:- )?(?:过细|精简|传闻与计划)：/.test(line));
+    expect(examples).toHaveLength(5);
+    for (const line of examples) expect(line).toContain('〔');
+  });
+
+  it('精简规则：索引定位、禁写清单、篇幅锚点、拆段收紧、至少一段', () => {
+    const prompt = STORY_TURN_SUMMARY_SYSTEM_PROMPT;
+    expect(prompt).toContain('不写过程与修辞');
+    expect(prompt).toContain('环境渲染、心理活动');
+    expect(prompt).toContain('1~2 句（约 30~80 字）');
+    expect(prompt).toContain('一回合通常只输出 1 段');
+    expect(prompt).toContain('segments 至少一段');
+    expect(prompt).toContain('overview：一句话（30~50 字）');
+    expect(prompt).toContain('每项最多一句话');
+    // 旧规则鼓励为闲聊单独拆段，已删除
+    expect(prompt).not.toContain('可以单独成段');
+    // 浓缩示例放在第二步之后、输出格式之前
+    expect(prompt.indexOf('浓缩程度示例')).toBeGreaterThan(prompt.indexOf('第二步：本回合摘要'));
+    expect(prompt.indexOf('浓缩程度示例')).toBeLessThan(prompt.indexOf('<json>'));
   });
 });

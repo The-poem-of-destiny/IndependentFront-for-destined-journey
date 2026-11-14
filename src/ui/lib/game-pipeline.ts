@@ -187,7 +187,11 @@ import {
   findStoryTurnsMissingSummary,
   type OpenStoryEvent,
 } from '@engine/memory/memory-context';
-import { buildStoryArchiveRecords, renderOpenEventsForSummary } from '@engine/memory/story-archive';
+import {
+  buildStoryArchiveRecords,
+  measureSegmentRepetition,
+  renderOpenEventsForSummary,
+} from '@engine/memory/story-archive';
 import {
   buildStoryArchiveDetailMessages,
   collectArchiveSourceTurns,
@@ -3082,6 +3086,9 @@ export class GamePipeline {
       this.notify(storyContextSummaryFailedMessage(), 'warning');
       return;
     }
+    // 延续事件复读率只进调试面板（对比精简前后），不影响落库
+    const repetition = measureSegmentRepetition(draft.segments, this.v2OpenEvents);
+    if (repetition.length > 0) this.recordStoryContextDebug({ repetition });
     const createdAt = Date.now();
     const source = storyTurnSource(turn);
     const records: StoryTurnSummaryRecord[] = draft.segments.map((segment, order) => ({

@@ -181,12 +181,46 @@ export function renderLongTermOverview(archives: readonly StoryArchiveRecord[]):
 /** 给总结 Agent 的未结事件清单（`{{STORY_OPEN_EVENTS}}`）。没有未结事件时写明「无」。 */
 export function renderOpenEventsForSummary(events: readonly OpenStoryEvent[]): string {
   if (events.length === 0) return '（当前没有未结束的事件）';
-  return events
+  // 用途说明紧贴数据、最后一条标「最近记录」：告诉模型这些已经写过，只从截止点往后写增量
+  const body = events
     .map((event) =>
       [
         `【${event.eventName}】`,
-        ...event.segments.map((s: StoryTurnSummarySegment) => `- ${s.content}`),
+        ...event.segments.map(
+          (s: StoryTurnSummarySegment, i) =>
+            `- ${s.content}${i === event.segments.length - 1 ? '（最近记录）' : ''}`,
+        ),
       ].join('\n'),
     )
     .join('\n\n');
+  return [
+    '以下是各事件已经记录过的内容，只用于沿用事件名和判断是否结束；本回合摘要只写这些记录之后的新进展。',
+    body,
+  ].join('\n\n');
+}
+
+/**
+ * 延续事件的复读率：本回合片段的字二元有多大比例已出现在该事件此前的记录里。
+ *
+ * 只作诊断（调试面板对比改动前后的均值），不参与任何判定、不据此删改片段 ——
+ * 人名地名在同一事件里本就反复出现，比例不会是 0；删段还会改变归档的覆盖认领。
+ * 只统计延续 `openEvents` 里事件的片段；新事件与闲聊段没有可比的前文。
+ */
+export function measureSegmentRepetition(
+  segments: ReadonlyArray<{ eventName?: string; content: string }>,
+  openEvents: readonly OpenStoryEvent[],
+): Array<{ eventName: string; ratio: number }> {
+  const prior = new Map(
+    openEvents.map((e) => [
+      e.eventName,
+      normalizedBigrams(e.segments.map((s) => s.content).join('\n')),
+    ]),
+  );
+  return segments.flatMap((segment) => {
+    const before = segment.eventName ? prior.get(segment.eventName) : undefined;
+    const grams = normalizedBigrams(segment.content);
+    if (!before || grams.size === 0) return [];
+    const hit = [...grams].filter((g) => before.has(g)).length;
+    return [{ eventName: segment.eventName as string, ratio: hit / grams.size }];
+  });
 }
