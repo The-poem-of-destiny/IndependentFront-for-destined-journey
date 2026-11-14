@@ -16,12 +16,22 @@ export interface AstralDriftScene {
   pause(): void;
   resume(): void;
   resize(): void;
+  // 首页界面联动：设置目标“能量”（0..1，悬停 / 聚焦按钮时提高法阵与光芒亮度）。
+  setEnergy(level: number): void;
+  // 首页界面联动：触发一次共鸣脉冲（按钮激活时调用）。
+  pulse(): void;
   dispose(): void;
 }
 
 export interface AstralDriftSceneOptions {
   themeId: string;
+  // 开场“召唤”动画：full 完整、short 加速简版、none 不播放。缺省时本页面生命周期内
+  // 首次为 full，之后为 short。
+  intro?: 'full' | 'short' | 'none';
 }
+
+// 模块级标记：完整开场是否已播放过（同一页面生命周期内只完整播放一次）。
+let fullIntroPlayed = false;
 
 /**
  * Production wrapper for AstralDriftHomeParticles.standalone.html.
@@ -38,8 +48,14 @@ export function createAstralDriftScene(
 ): AstralDriftScene {
   const TAU = Math.PI * 2;
   const reducedMotion = false;
+  const introKind = options.intro ?? (fullIntroPlayed ? 'short' : 'full');
+  fullIntroPlayed = true;
 
-  const dials = { bloom: 2, galaxy: 0.69, arc: 2, veils: 2, runes: 2, circle: 2 };
+  const dials = { bloom: 2, galaxy: 0.82, arc: 2, veils: 2, runes: 2, circle: 2 };
+  // 主题增益：浅色（星图）主题下压低体积雾、泛光、核心与光晕，避免纸面发灰发脏；
+  // 由 applyTheme() 写入，animate() 每帧乘到对应 uDial / bloom 上。
+  // shine 为体积光芒增益：浅色主题下关闭。
+  const themeGain = { volumetrics: 1, bloom: 1, core: 1, haze: 1, shine: 1 };
 
   // ----------------------------------------------------------------------------------
   // Palette.
@@ -83,7 +99,7 @@ export function createAstralDriftScene(
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.98;
+  renderer.toneMappingExposure = 0.8;
   renderer.setClearColor(PALETTE.field, 1);
   renderer.shadowMap.enabled = false;
 
@@ -311,6 +327,172 @@ export function createAstralDriftScene(
     }
   }
 
+  // ==================================================================================
+  // 体积光芒（Shine）后期：参照 GPU Gems 3 的光散射 / Trapcode Shine。
+  //
+  // 每个像素朝核心的屏幕位置步进，沿途累加泛光链已经算好的模糊亮部并逐步衰减，
+  // 于是符文、法阵线条、彗星头与冲击波这类亮处都会沿径向向外甩出光束。
+  // 直接复用泛光第 1 级 mip（泛光 pass 紧挨在前，纹理是新鲜的），以四分之一分辨率
+  // 计算，几乎没有额外开销。必须排在泛光之后、调色之前，让光芒与其他内容一起
+  // 走主题调色、色调映射与 FXAA。
+  // ==================================================================================
+  class ShinePass extends Pass {
+    constructor(bloomPass) {
+      super();
+      this.bloomPass = bloomPass;
+      this.strength = 0;
+      this.center = new THREE.Vector2(0.5, 0.5);
+      this.aspect = 1;
+      this.time = 0;
+      // 光芒安静区：横屏时为界面列右边缘的 uv x；竖屏时改为压低画面上部（标题与按钮区）。
+      this.calmEdge = 0;
+      this.portrait = false;
+      this.target = new THREE.WebGLRenderTarget(1, 1, {
+        type: THREE.HalfFloatType,
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        depthBuffer: false,
+      });
+      this.quad = new FullScreenQuad(null);
+
+      const vertexShader = /* glsl */ `
+      varying vec2 vUv;
+
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `;
+
+      this.raysMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          tSource: { value: null },
+          // 烘焙的体积噪声纹理在合成器建好之后才生成，届时再回填。
+          tVeil: { value: null },
+          uCenter: { value: new THREE.Vector2(0.5, 0.5) },
+          uAspect: { value: 1 },
+          uNorm: { value: 1 },
+          uTime: { value: 0 },
+        },
+        vertexShader,
+        fragmentShader: /* glsl */ `
+        uniform sampler2D tSource;
+        uniform sampler2D tVeil;
+        uniform vec2 uCenter;
+        uniform float uAspect;
+        uniform float uNorm;
+        uniform float uTime;
+        varying vec2 vUv;
+
+        float hash21(vec2 point) {
+          point = fract(point * vec2(123.34, 345.45));
+          point += dot(point, point + 34.345);
+          return fract(point.x * point.y);
+        }
+
+        void main() {
+          // 步进一直走到核心；nearCore 只保留源自核心附近的亮光，符文与彗头不再拖出光痕。
+          vec2 toCenter = uCenter - vUv;
+          vec2 stride = toCenter / 28.0;
+          vec2 p = vUv + stride * hash21(vUv * 917.0 + fract(uTime * 0.37) * 53.0);
+          vec3 acc = vec3(0.0);
+          float weight = 1.0;
+          float total = 0.0;
+          for (int i = 0; i < 28; i++) {
+            vec3 s = texture2D(tSource, p).rgb / uNorm;
+            float peak = max(s.r, max(s.g, s.b));
+            float nearCore = smoothstep(0.24, 0.03, length((p - uCenter) * vec2(uAspect, 1.0)));
+            acc += s * smoothstep(0.3, 1.1, peak) * nearCore * weight;
+            total += weight;
+            weight *= 0.95;
+            p += stride;
+          }
+          vec3 rays = acc / total;
+          vec2 away = (vUv - uCenter) * vec2(uAspect, 1.0);
+          float ang = atan(away.y, away.x);
+          // 0.79577472 = 5 / (2π)：绕一圈恰好五个周期，无接缝。
+          float shaft = texture2D(tVeil, vec2(ang * 0.79577472 + uTime * 0.0035, 0.31 + uTime * 0.0017)).r;
+          shaft = 0.12 + 1.1 * pow(smoothstep(0.25, 0.85, shaft), 1.5);
+          float reach = smoothstep(0.03, 0.2, length(away));
+          gl_FragColor = vec4(rays * shaft * reach, 1.0);
+        }
+      `,
+        depthTest: false,
+        depthWrite: false,
+      });
+
+      this.compositeMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          tDiffuse: { value: null },
+          tRays: { value: null },
+          uStrength: { value: 0 },
+          uCalmEdge: { value: 0 },
+          uPortrait: { value: 0 },
+        },
+        vertexShader,
+        fragmentShader: /* glsl */ `
+        uniform sampler2D tDiffuse;
+        uniform sampler2D tRays;
+        uniform float uStrength;
+        uniform float uCalmEdge;
+        uniform float uPortrait;
+        varying vec2 vUv;
+
+        void main() {
+          vec3 sceneColor = texture2D(tDiffuse, vUv).rgb;
+          vec3 rays = texture2D(tRays, vUv).rgb;
+          // 安静区：光芒在界面阅读区内压到三成，避免冲刷文字与按钮（uv y = 1 为画面顶部）。
+          float calm = uPortrait > 0.5
+            ? smoothstep(0.64, 0.4, vUv.y)
+            : smoothstep(uCalmEdge - 0.05, uCalmEdge + 0.14, vUv.x);
+          gl_FragColor = vec4(sceneColor + rays * uStrength * mix(0.3, 1.0, calm), 1.0);
+        }
+      `,
+        depthTest: false,
+        depthWrite: false,
+      });
+    }
+
+    setSize(width, height) {
+      this.target.setSize(Math.max(1, Math.floor(width / 4)), Math.max(1, Math.floor(height / 4)));
+    }
+
+    render(renderer, writeBuffer, readBuffer) {
+      const mips = this.bloomPass.mips;
+      const source = mips.length > 1 ? mips[1].target.texture : null;
+      if (source && this.strength > 0.001) {
+        // 第 1 级 mip 里是所有更小级别上采样累加的结果，按同样的几何级数归一化。
+        let norm = 0;
+        for (let k = 0; k <= mips.length - 2; k += 1) norm += Math.pow(this.bloomPass.radius, k);
+        const uniforms = this.raysMaterial.uniforms;
+        uniforms.tSource.value = source;
+        uniforms.uCenter.value.copy(this.center);
+        uniforms.uAspect.value = this.aspect;
+        uniforms.uTime.value = this.time;
+        uniforms.uNorm.value = norm;
+        this.quad.material = this.raysMaterial;
+        renderer.setRenderTarget(this.target);
+        this.quad.render(renderer);
+      }
+
+      this.quad.material = this.compositeMaterial;
+      this.compositeMaterial.uniforms.tDiffuse.value = readBuffer.texture;
+      this.compositeMaterial.uniforms.tRays.value = this.target.texture;
+      this.compositeMaterial.uniforms.uStrength.value = source ? this.strength : 0;
+      this.compositeMaterial.uniforms.uCalmEdge.value = this.calmEdge;
+      this.compositeMaterial.uniforms.uPortrait.value = this.portrait ? 1 : 0;
+      renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+      this.quad.render(renderer);
+    }
+
+    dispose() {
+      this.target.dispose();
+      this.raysMaterial.dispose();
+      this.compositeMaterial.dispose();
+      this.quad.dispose();
+    }
+  }
+
   const composerTarget = new THREE.WebGLRenderTarget(1, 1, {
     type: THREE.HalfFloatType,
     minFilter: THREE.LinearFilter,
@@ -323,6 +505,11 @@ export function createAstralDriftScene(
 
   const bloom = new MipBloomPass();
   composer.addPass(bloom);
+  // 光芒 pass 紧跟泛光、排在调色之前。
+  const shinePass = new ShinePass(bloom);
+  composer.addPass(shinePass);
+  // 光芒基础强度（深色主题下）。
+  const SHINE_BASE = 0.24;
 
   // ----------------------------------------------------------------------------------
   // Grade. The aberration term here is radial and grows with distance from centre, the
@@ -434,7 +621,7 @@ export function createAstralDriftScene(
       // age. Same term, a quarter of the strength.
       color *= 1.0 - smoothstep(0.12, 0.74, radial) * mix(0.3, 0.08, uInk);
 
-      gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+      gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
     }
   `,
   });
@@ -452,6 +639,55 @@ export function createAstralDriftScene(
   // ==================================================================================
   const uTime = { value: 0 };
   const uProjScale = { value: 1000 };
+  // 界面安静区：x 为界面列右边缘的屏幕 uv x，y 为 1 表示竖屏；由 placeLayout() 写入。
+  const uCalm = { value: new THREE.Vector3(0, 0, 0) };
+  // 场景实际渲染缓冲的像素尺寸（供 gl_FragCoord 换算屏幕 uv），由 applyScale() 写入。
+  const uViewport = { value: new THREE.Vector2(1, 1) };
+
+  // 安静区 GLSL 片段（仅片元阶段）：界面阅读区内把亮度压到三成，避免近景符文
+  // 随镜头漂移扫过标题与副标题。竖屏时压低画面上部（标题与按钮区）。
+  const CALM_HEAD = /* glsl */ `
+  uniform vec3 uCalm;
+  uniform vec2 uViewport;
+  float calmZone() {
+    vec2 suv = gl_FragCoord.xy / uViewport;
+    float open = uCalm.y > 0.5
+      ? smoothstep(0.66, 0.42, suv.y)
+      : smoothstep(uCalm.x - 0.03, uCalm.x + 0.12, suv.x);
+    return mix(0.3, 1.0, open);
+  }
+`;
+  // 共享时间线：uIntro 为开场时钟（秒，>= 6 即稳态）；uPulse 为当前共鸣脉冲进度
+  // （0..1，>= 1 表示无脉冲）；uPulseGain 为当前脉冲强度。
+  const uIntro = { value: 99 };
+  // 有开场时先置为起播时刻，免得首帧之前的预热渲染把稳态画面闪出来。
+  if (introKind === 'full') uIntro.value = 0;
+  else if (introKind === 'short') uIntro.value = 0.35;
+  const uPulse = { value: 1 };
+  const uPulseGain = { value: 0 };
+
+  // 时间线 GLSL 片段：用到这些名字的着色器阶段都要插值进去，且材质 uniforms 里
+  // 必须挂上同一组共享对象，否则 GLSL 中声明的 uniform 会静默读到 0。
+  // wavePos() 为冲击波前沿位置，单位是星系半径。
+  const TIMELINE_HEAD = /* glsl */ `
+  uniform float uIntro;
+  uniform float uPulse;
+  uniform float uPulseGain;
+  float introWin(float a, float b) { return smoothstep(a, b, uIntro); }
+  float wavePos() { return uPulse * 2.4; }
+  float waveEnv() { return (1.0 - smoothstep(0.6, 1.0, uPulse)) * uPulseGain; }
+  float waveHit(float r, float width) { float d = (wavePos() - r) / width; return exp(-d * d) * waveEnv(); }
+  // 汇聚前沿（星系半径）：此半径以内的星光尚未到达。0.8 秒时为 1.15，先慢后快地收缩，
+  // 2.5 秒归零并保持。
+  float gatherFront() {
+    float u = clamp((uIntro - 0.8) / 1.7, 0.0, 1.0);
+    return 1.15 * (1.0 - pow(u, 1.6));
+  }
+  // 汇聚完成后的整体点亮（2.3 → 2.7 秒）。
+  float ignite() {
+    return smoothstep(2.3, 2.7, uIntro);
+  }
+`;
 
   const POINT_HEAD = /* glsl */ `
   // Round soft sprite with a hot core, computed rather than sampled: a 32x32 alpha
@@ -556,6 +792,8 @@ export function createAstralDriftScene(
   }
 
   const veilTexture = bakeVeilTexture();
+  // 回填光芒 pass 的光束噪声（该纹理在合成器建好之后才生成）。
+  shinePass.raysMaterial.uniforms.tVeil.value = veilTexture;
 
   // ==================================================================================
   // Layer 1 — star shells.
@@ -566,9 +804,9 @@ export function createAstralDriftScene(
   // ==================================================================================
   function buildStars() {
     const SHELLS = [
-      { count: 900, near: 42, far: 62, size: 0.055, gain: 0.9 },
-      { count: 760, near: 66, far: 96, size: 0.075, gain: 0.68 },
-      { count: 620, near: 100, far: 150, size: 0.1, gain: 0.5 },
+      { count: 2600, near: 42, far: 62, size: 0.044, gain: 0.9 },
+      { count: 2200, near: 66, far: 96, size: 0.06, gain: 0.68 },
+      { count: 1800, near: 100, far: 150, size: 0.08, gain: 0.5 },
     ];
 
     const total = SHELLS.reduce((sum, shell) => sum + shell.count, 0);
@@ -591,7 +829,7 @@ export function createAstralDriftScene(
 
         const warmth = Math.pow(Math.random(), 2.6);
         color.copy(PALETTE.starCool).lerp(PALETTE.starWarm, warmth);
-        const brightness = 0.35 + Math.pow(Math.random(), 2.2) * 1.3;
+        const brightness = 0.2 + Math.pow(Math.random(), 3.4) * 1.7;
         colors[cursor * 3] = color.r * brightness;
         colors[cursor * 3 + 1] = color.g * brightness;
         colors[cursor * 3 + 2] = color.b * brightness;
@@ -609,8 +847,9 @@ export function createAstralDriftScene(
     geometry.setAttribute('aScalar', new THREE.BufferAttribute(scalars, 3));
 
     const material = new THREE.ShaderMaterial({
-      uniforms: { uTime, uProjScale },
+      uniforms: { uTime, uProjScale, uIntro, uPulse, uPulseGain },
       vertexShader: /* glsl */ `
+      ${TIMELINE_HEAD}
       attribute vec3 aColor;
       attribute vec3 aScalar;
       uniform float uTime;
@@ -623,6 +862,7 @@ export function createAstralDriftScene(
           + 0.28 * sin(uTime * 0.9 + seed)
           + 0.16 * sin(uTime * 1.63 + seed * 2.7);
         vColor = aColor * aScalar.z * max(0.05, twinkle);
+        vColor *= mix(0.3, 1.0, introWin(0.0, 3.2));
 
         vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * viewPos;
@@ -730,6 +970,9 @@ export function createAstralDriftScene(
           uDial: { value: 1 },
           uDrift: { value: spec.drift },
           uSeed: { value: Math.random() * 10 },
+          uIntro,
+          uPulse,
+          uPulseGain,
         },
         vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -739,6 +982,7 @@ export function createAstralDriftScene(
         }
       `,
         fragmentShader: /* glsl */ `
+        ${TIMELINE_HEAD}
         uniform sampler2D tVeil;
         uniform vec3 uTint;
         uniform float uAlpha;
@@ -759,7 +1003,10 @@ export function createAstralDriftScene(
           structure = mix(structure, texture2D(tVeil, flow2).r, 0.45);
 
           float density = envelope * (0.25 + 0.75 * structure);
-          gl_FragColor = vec4(uTint * density * uAlpha * uDial, 1.0);
+          gl_FragColor = vec4(
+            uTint * density * uAlpha * uDial * mix(0.25, 1.0, introWin(0.2, 3.8)),
+            1.0
+          );
         }
       `,
         transparent: true,
@@ -807,6 +1054,9 @@ export function createAstralDriftScene(
         uDeep: { value: new THREE.Color(0x0a1a4a) },
         uLit: { value: new THREE.Color(0x2b5fa8) },
         uWarm: { value: new THREE.Color(0x4a2f6b) },
+        uIntro,
+        uPulse,
+        uPulseGain,
       },
       vertexShader: /* glsl */ `
       varying vec2 vUv;
@@ -816,6 +1066,7 @@ export function createAstralDriftScene(
       }
     `,
       fragmentShader: /* glsl */ `
+      ${TIMELINE_HEAD}
       uniform sampler2D tVeil;
       uniform float uTime;
       uniform float uDial;
@@ -846,7 +1097,10 @@ export function createAstralDriftScene(
         // every pixel in the picture, so its gain is effectively a global exposure
         // control: at 0.5 it lifted the entire field to mid blue and there was no
         // black left anywhere for the galaxy to be bright against.
-        gl_FragColor = vec4(color * body * (0.28 + 0.72 * sky) * 0.14 * uDial, 1.0);
+        gl_FragColor = vec4(
+          color * body * (0.28 + 0.72 * sky) * 0.14 * uDial * mix(0.25, 1.0, introWin(0.2, 3.8)),
+          1.0
+        );
       }
     `,
       transparent: true,
@@ -907,8 +1161,9 @@ export function createAstralDriftScene(
     geometry.setAttribute('aScalar', new THREE.BufferAttribute(scalars, 3));
 
     const material = new THREE.ShaderMaterial({
-      uniforms: { uTime, uProjScale, uDial: { value: 1 } },
+      uniforms: { uTime, uProjScale, uDial: { value: 1 }, uIntro, uPulse, uPulseGain },
       vertexShader: /* glsl */ `
+      ${TIMELINE_HEAD}
       attribute vec3 aColor;
       attribute vec3 aScalar;
       uniform float uTime;
@@ -923,6 +1178,7 @@ export function createAstralDriftScene(
         p.y = mod(p.y + 11.0, 22.0) - 11.0;
 
         vColor = aColor * aScalar.z * (0.7 + 0.3 * sin(uTime * 0.29 + seed * 2.1));
+        vColor *= introWin(1.0, 4.0);
 
         vec4 viewPos = modelViewMatrix * vec4(p, 1.0);
         gl_Position = projectionMatrix * viewPos;
@@ -938,7 +1194,7 @@ export function createAstralDriftScene(
         // Flat interior, bright rim: the image of an aperture, not a gaussian.
         float disc = 1.0 - smoothstep(0.72, 1.0, d);
         float rim = smoothstep(0.5, 0.86, d) * (1.0 - smoothstep(0.9, 1.02, d));
-        gl_FragColor = vec4(vColor * (disc * 0.45 + rim * 0.85) * uDial, 1.0);
+        gl_FragColor = vec4(vColor * (disc * 0.45 + rim * 0.3) * uDial, 1.0);
       }
     `,
       transparent: true,
@@ -1046,8 +1302,12 @@ export function createAstralDriftScene(
         uArmViolet: { value: PALETTE.armViolet.clone() },
         uArmCyan: { value: PALETTE.armCyan.clone() },
         uArmEdge: { value: PALETTE.armEdge.clone() },
+        uIntro,
+        uPulse,
+        uPulseGain,
       },
       vertexShader: /* glsl */ `
+      ${TIMELINE_HEAD}
       attribute vec3 aScalar;
       uniform float uTime;
       uniform float uProjScale;
@@ -1063,6 +1323,16 @@ export function createAstralDriftScene(
       void main() {
         float q = aScalar.x;
         float seed = aScalar.y;
+
+        // 开场汇聚（纯径向下落 + 压平，无任何角向运动）：星光从盘缘之外向核心汇聚，
+        // 已到达的区域由外向内扩展并越来越快；星点到达时偏外、离开盘面、偏冷蓝，
+        // 随后落回原位并取回本色。逐星抖动让前沿不成一道硬环。
+        float igJitter = (fract(sin(seed * 91.7) * 43758.5453) - 0.5) * 0.12;
+        float igAge = (q + igJitter - gatherFront()) / 0.3;
+        float igLit = smoothstep(0.0, 0.25, igAge);
+        float igFall = clamp(igAge, 0.0, 1.0);
+        float igSettle = igFall * igFall * (3.0 - 2.0 * igFall);
+        float igGlint = exp(-max(igAge, 0.0) * 6.0) * step(0.0, igAge);
 
         // THE WINDING PROBLEM, and why this is not a differential rotation.
         //
@@ -1084,15 +1354,19 @@ export function createAstralDriftScene(
         float kappa = 0.55 + 0.85 / (0.25 + q * 1.6);
         float epi = uTime * kappa * 0.35 + seed * 6.2831853;
         float wobbleR = r * (1.0 + sin(epi) * 0.045);
+        wobbleR *= 1.0 + 0.55 * (1.0 - igSettle);
         float wobbleA = baseAngle + uTime * uPattern + cos(epi) * 0.05;
 
-        vec3 spun = vec3(cos(wobbleA) * wobbleR, sin(wobbleA) * wobbleR, position.z);
+        float igZ = position.z * (1.0 + 2.5 * (1.0 - igSettle))
+          + (fract(sin(seed * 57.3) * 43758.5453) - 0.5) * 0.5 * (1.0 - igSettle);
+        vec3 spun = vec3(cos(wobbleA) * wobbleR, sin(wobbleA) * wobbleR, igZ);
 
         // One exposure curve, four stops. Ordering is the whole look.
         vec3 tint = mix(uCoreHot, uCoreGold, smoothstep(0.0, 0.19, q));
         tint = mix(tint, uArmViolet, smoothstep(0.15, 0.46, q));
         tint = mix(tint, uArmCyan, smoothstep(0.40, 0.78, q));
         tint = mix(tint, uArmEdge, smoothstep(0.74, 1.0, q));
+        tint = mix(uArmCyan, tint, igSettle);
 
         // Gentle falloff. Draft two dropped to 0.5 by q=0.34 and left a dead annulus
         // between the gold bulge and the cyan rim — the disc read as a ring, not a
@@ -1101,6 +1375,8 @@ export function createAstralDriftScene(
         brightness *= 1.0 - smoothstep(0.78, 1.04, q) * 0.7;
         float flicker = 0.85 + 0.15 * sin(uTime * 1.7 + seed * 3.1);
         vColor = tint * brightness * flicker * uDial;
+        vColor *= igLit * (0.75 + 0.25 * igSettle + 1.0 * igGlint) * mix(0.8, 1.0, ignite())
+          * (1.0 + 0.5 * waveHit(q, 0.16));
 
         vec4 viewPos = modelViewMatrix * vec4(spun, 1.0);
         gl_Position = projectionMatrix * viewPos;
@@ -1108,6 +1384,7 @@ export function createAstralDriftScene(
         // thing in the frame, and letting them also be the largest turns the bulge
         // into one white blob the moment bloom touches it.
         float size = aScalar.z * (0.55 + q * 0.85);
+        size *= 1.0 + 0.4 * igGlint;
         gl_PointSize = clamp(size * uProjScale / -viewPos.z, 1.0, 7.0);
       }
     `,
@@ -1187,6 +1464,9 @@ export function createAstralDriftScene(
         uArmViolet: { value: PALETTE.armViolet.clone() },
         uArmCyan: { value: PALETTE.armCyan.clone() },
         uArmEdge: { value: PALETTE.armEdge.clone() },
+        uIntro,
+        uPulse,
+        uPulseGain,
       },
       vertexShader: /* glsl */ `
       varying vec2 vPos;
@@ -1197,6 +1477,7 @@ export function createAstralDriftScene(
       }
     `,
       fragmentShader: /* glsl */ `
+      ${TIMELINE_HEAD}
       uniform float uTime;
       uniform float uDial;
       uniform sampler2D tVeil;
@@ -1219,6 +1500,10 @@ export function createAstralDriftScene(
         // Points are rotated BY +uPattern*t, so the pattern this shader draws has to
         // be read at -uPattern*t to land in the same place. Same constant, no shear.
         float angle = atan(vPos.y, vPos.x) - uTime * uPattern;
+        // 开场汇聚：与星点共用 gatherFront()，星光已到达的区域才有光晕；
+        // 汇聚完成、整体点亮之前光晕保持半亮。
+        float burn = smoothstep(0.0, 0.4, q - gatherFront());
+        float lightUp = mix(0.5, 1.0, ignite());
 
         float wound = angle - log(1.0 + radius * uWindK) * uWindGain;
         float arms = cos(uArms * wound) * 0.5 + 0.5;
@@ -1232,8 +1517,9 @@ export function createAstralDriftScene(
 
         // Exponential body with a bulge floor, so the haze does not stop at the last arm.
         float body = exp(-q * 3.1) * 0.9 + exp(-q * 8.0) * 1.6;
-        float density = body * (0.3 + 0.7 * arms);
+        float density = body * (0.3 + 0.7 * arms) * burn * lightUp;
         density *= 1.0 - smoothstep(0.72, 1.0, q);
+        density *= 1.0 + 0.4 * waveHit(q, 0.18);
 
         vec3 tint = mix(uCoreHot, uCoreGold, smoothstep(0.0, 0.17, q));
         tint = mix(tint, uArmViolet, smoothstep(0.14, 0.44, q));
@@ -1284,7 +1570,8 @@ export function createAstralDriftScene(
   // The RNG is seeded, so the atlas is identical on every load — a piece that reshuffles
   // its own iconography between visits reads as unstable, not as varied.
   // ==================================================================================
-  function bakeGlyphAtlas({ cols = 32, rows = 3, cell = 64 } = {}) {
+  // 单元格 128（原 64）配更细的笔画：两倍分辨率下符文更精致。
+  function bakeGlyphAtlas({ cols = 32, rows = 3, cell = 128 } = {}) {
     const atlas = document.createElement('canvas');
     atlas.width = cols * cell;
     atlas.height = rows * cell;
@@ -1308,7 +1595,7 @@ export function createAstralDriftScene(
     for (let row = 0; row < rows; row += 1) {
       // Later rows are lighter: they are the outer registers, and an outer register at
       // the same stroke weight as an inner one flattens the whole figure.
-      ctx.lineWidth = Math.max(1.5, cell * (0.1 - row * 0.018));
+      ctx.lineWidth = Math.max(1.5, cell * (0.056 - row * 0.008));
       for (let col = 0; col < cols; col += 1) {
         // Glyphs occupy the middle 60% of the cell. The margin is what stops mipmap
         // minification from bleeding a neighbouring rune into this one.
@@ -1367,6 +1654,8 @@ export function createAstralDriftScene(
     texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.magFilter = THREE.LinearFilter;
     texture.generateMipmaps = true;
+    // 符文环同样以陡角度被观察，开各向异性过滤保住细笔画。
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     texture.colorSpace = THREE.NoColorSpace; // it is a mask, not a colour
     texture.needsUpdate = true;
     return { texture, cols, rows };
@@ -1374,112 +1663,6 @@ export function createAstralDriftScene(
 
   const glyphAtlas = bakeGlyphAtlas();
 
-  // ==================================================================================
-  // Rune atlas for the magic-circle registers (2026-08-19).
-  //
-  // Same stroke grammar as bakeGlyphAtlas — Elder-Futhark silhouettes generated from a
-  // seeded grammar rather than a typeface — but with a DIFFERENT seed and shape so the
-  // circle's registers do not reuse the galaxy's glyphs verbatim. cols=35 fits one
-  // register round the circle exactly (uRepeat stays an integer 1); row 0 is the outer
-  // ring's 35 runes, row 1 the inner ring's 23 (the last 12 cells are empty — the inner
-  // register only fills part of its lap, which is what a gap in a seal reads as).
-  // Outer row is drawn lighter, like the galaxy atlas, so an outer register at the same
-  // stroke weight as an inner one flattens the whole figure.
-  // ==================================================================================
-  function bakeRuneAtlas({ cols = 35, rows = 2, cellW = 96, cellH = 128 } = {}) {
-    const atlas = document.createElement('canvas');
-    atlas.width = cols * cellW;
-    atlas.height = rows * cellH;
-    const ctx = atlas.getContext('2d');
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, atlas.width, atlas.height);
-    ctx.strokeStyle = '#fff';
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    let state = 0x41c64e6d; // different seed than the galaxy atlas
-    const rnd = () => {
-      state ^= state << 13;
-      state ^= state >>> 17;
-      state ^= state << 5;
-      return ((state >>> 0) % 1000000) / 1000000;
-    };
-
-    const clamp01 = (value) => Math.min(0.98, Math.max(0.02, value));
-
-    // Row 1's glyphs also stop at 23 cells; the remaining cells stay black so the inner
-    // register's lap ends in a gap rather than a stray stroke.
-    const occupied = (row) => (row === 0 ? cols : 23);
-
-    for (let row = 0; row < rows; row += 1) {
-      // Stroke weight scales with the TALL dimension, where the glyph actually lives.
-      ctx.lineWidth = Math.max(1.5, cellH * (0.09 - row * 0.02));
-      for (let col = 0; col < occupied(row); col += 1) {
-        // The glyph is TALL and NARROW, matching how the SVG's runes read (font-size 64
-        // against ~30px width). A cell is one arc-length of the register: with 35 cells
-        // round a lap that arc is ~5x the band depth, so the glyph fills ~10% of the
-        // cell WIDTH (keeps its aspect) but ~90% of the cell HEIGHT (fills the band).
-        const padX = cellW * 0.45;
-        const padY = cellH * 0.05;
-        const originX = col * cellW + padX;
-        const originY = row * cellH + padY;
-        const spanX = cellW - padX * 2;
-        const spanY = cellH - padY * 2;
-        const at = (u, v) => [originX + clamp01(u) * spanX, originY + clamp01(v) * spanY];
-
-        ctx.beginPath();
-        const stems = rnd() < 0.24 ? 2 : 1;
-        const stemAt = [];
-        for (let index = 0; index < stems; index += 1) {
-          const u = stems === 1 ? 0.5 : index === 0 ? 0.3 : 0.7;
-          stemAt.push(u);
-          ctx.moveTo(...at(u, 0.04));
-          ctx.lineTo(...at(u, 0.96));
-        }
-
-        const branches = 1 + Math.floor(rnd() * 3);
-        for (let index = 0; index < branches; index += 1) {
-          const from = stemAt[Math.floor(rnd() * stemAt.length)];
-          const height = 0.1 + rnd() * 0.78;
-          const dirX = rnd() < 0.5 ? -1 : 1;
-          const dirY = rnd() < 0.5 ? 1 : -1;
-          const length = 0.2 + rnd() * 0.24;
-          ctx.moveTo(...at(from, height));
-          ctx.lineTo(...at(from + dirX * length, height + dirY * length * 0.95));
-        }
-
-        if (rnd() < 0.3) {
-          const flip = rnd() < 0.5;
-          ctx.moveTo(...at(flip ? 0.14 : 0.86, 0.12));
-          ctx.lineTo(...at(flip ? 0.86 : 0.14, 0.88));
-        }
-
-        if (rnd() < 0.24) {
-          const centre = 0.24 + rnd() * 0.52;
-          const r = 0.13;
-          ctx.moveTo(...at(0.5, centre - r));
-          ctx.lineTo(...at(0.5 + r, centre));
-          ctx.lineTo(...at(0.5, centre + r));
-          ctx.lineTo(...at(0.5 - r, centre));
-          ctx.closePath();
-        }
-
-        ctx.stroke();
-      }
-    }
-
-    const texture = new THREE.CanvasTexture(atlas);
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.minFilter = THREE.LinearMipmapLinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = true;
-    texture.colorSpace = THREE.NoColorSpace; // it is a mask, not a colour
-    texture.needsUpdate = true;
-    return { texture, cols, rows };
-  }
-
-  const runeAtlas = bakeRuneAtlas();
   const MAGIC_CIRCLE_SVG =
     '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="4096" height="4096" viewBox="0 0 4096 4096"><rect width="4096" height="4096" fill="#000000"/><defs><style>.font-reggae-one { font-family: "Reggae One", cursive; }\n</style></defs><g stroke="#ffffff" stroke-width="4" fill="none"><line x1="2048" y1="1228.8" x2="2688.47635043781" y2="1537.2371543173256"/><line x1="2048" y1="1228.8" x2="2846.66094565935" y2="2230.289149097013"/><line x1="2048" y1="1228.8" x2="2403.4375590851037" y2="2786.0736965856618"/><line x1="2048" y1="1228.8" x2="1692.5624409148961" y2="2786.0736965856618"/><line x1="2048" y1="1228.8" x2="1249.33905434065" y2="2230.289149097013"/><line x1="2048" y1="1228.8" x2="1407.5236495621898" y2="1537.2371543173256"/><line x1="2688.47635043781" y1="1537.2371543173256" x2="2846.66094565935" y2="2230.289149097013"/><line x1="2688.47635043781" y1="1537.2371543173256" x2="2403.4375590851037" y2="2786.0736965856618"/><line x1="2688.47635043781" y1="1537.2371543173256" x2="1692.5624409148961" y2="2786.0736965856618"/><line x1="2688.47635043781" y1="1537.2371543173256" x2="1249.33905434065" y2="2230.289149097013"/><line x1="2688.47635043781" y1="1537.2371543173256" x2="1407.5236495621898" y2="1537.2371543173256"/><line x1="2846.66094565935" y1="2230.289149097013" x2="2403.4375590851037" y2="2786.0736965856618"/><line x1="2846.66094565935" y1="2230.289149097013" x2="1692.5624409148961" y2="2786.0736965856618"/><line x1="2846.66094565935" y1="2230.289149097013" x2="1249.33905434065" y2="2230.289149097013"/><line x1="2846.66094565935" y1="2230.289149097013" x2="1407.5236495621898" y2="1537.2371543173256"/><line x1="2403.4375590851037" y1="2786.0736965856618" x2="1692.5624409148961" y2="2786.0736965856618"/><line x1="2403.4375590851037" y1="2786.0736965856618" x2="1249.33905434065" y2="2230.289149097013"/><line x1="2403.4375590851037" y1="2786.0736965856618" x2="1407.5236495621898" y2="1537.2371543173256"/><line x1="1692.5624409148961" y1="2786.0736965856618" x2="1249.33905434065" y2="2230.289149097013"/><line x1="1692.5624409148961" y1="2786.0736965856618" x2="1407.5236495621898" y2="1537.2371543173256"/><line x1="1249.33905434065" y1="2230.289149097013" x2="1407.5236495621898" y2="1537.2371543173256"/></g><g fill="#ffffff"><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1494.871109498628, 2759.3829382918325) rotate(217.86650415503348)">ᚹ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1317.652348928071, 2575.834787574404) rotate(234.1437142439773)">ᛞ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1198.9828517788426, 2349.972078885471) rotate(250.42092433292117)">ᛟ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1148.3759116700421, 2099.9013881942665) rotate(266.698134421865)">ᛗ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1169.8884993648785, 1845.6699556360081) rotate(282.97534451080884)">ᛒ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1261.7960304658113, 1607.658572595441) rotate(299.25255459975267)">ᚨ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1416.7306189518, 1404.9477292233373) rotate(315.52976468869656)">ᚦ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1622.2717332841626, 1253.7880022820552) rotate(331.8069747776404)">ᚢ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1861.9419043708901, 1166.2973066555433) rotate(348.0841848665842)">ᚠ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2116.5276631735105, 1149.4894470402821) rotate(364.36139495552806)">ᚨ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2365.6198132859327, 1204.7118472264601) rotate(380.6386050444719)">ᚹ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2589.249560543199, 1327.5375321282906) rotate(396.9158151334158)">ᛞ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2769.4893372153447, 1508.1200219636194) rotate(413.19302522235955)">ᛟ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2891.889988645832, 1731.9826880322269) rotate(429.47023531130344)">ᛗ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2946.6391084100933, 1981.1792903665903) rotate(445.7474454002473)">ᛒ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2929.347662559078, 2235.7326612543743) rotate(462.0246554891911)">ᚨ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2841.4018421985984, 2475.236200708543) rotate(478.301865578135)">ᚦ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2689.8519376876825, 2680.4897979308184) rotate(494.57907566707877)">ᚢ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2486.84714299945, 2835.039033009939) rotate(510.85628575602266)">ᚠ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2248.6615998834513, 2926.4942667611517) rotate(527.1334958449665)">ᚨ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1994.3897602580053, 2947.5238721650503) rotate(543.4107059339103)">ᚹ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1744.415654792623, 2896.4419837237006) rotate(559.6879160228542)">ᛞ</text><text x="0" y="0" font-size="64" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1518.778780743062, 2777.343647047261) rotate(575.965126111798)">ᛟ</text></g><circle cx="2048" cy="2048" r="962.56" fill="none" stroke="#ffffff" stroke-width="4"/><g fill="#ffffff" stroke="none" stroke-width="4"><polygon points="2023.8174152217155,839.6800000000001 2048,819.2 2072.1825847782843,839.6800000000001 2048,860.1600000000001"/><polygon points="2806.168189846781,1106.8289126248012 2837.85741478282,1106.6845882954 2843.218059226098,1137.9174443561521 2811.528834290059,1138.0617686855533"/><polygon points="3233.763642341686,1814.3622369839652 3258.1317669014015,1834.621119282876 3242.1621658977365,1861.9926309390241 3217.794041338021,1841.7337486401134"/><polygon points="3106.5271082899553,2631.2172672528345 3112.1720161703183,2662.3999999999996 3082.3445235116706,2673.102732747165 3076.6996156313076,2641.92"/><polygon points="2483.9939760509556,3175.1784564361747 2468.2743521185816,3202.6942924217237 2438.545583115588,3191.720318659882 2454.265207047962,3164.204482674333"/><polygon points="1657.4544168844116,3191.7203186598827 1627.7256478814184,3202.694292421724 1612.0060239490447,3175.178456436175 1641.7347929520379,3164.2044826743336"/><polygon points="1013.6554764883293,2673.102732747165 983.8279838296818,2662.3999999999996 989.4728917100448,2631.2172672528345 1019.3003843686923,2641.92"/><polygon points="853.8378341022637,1861.9926309390241 837.8682330985989,1834.621119282876 862.2363576583141,1814.3622369839652 878.2059586619789,1841.7337486401134"/><polygon points="1252.781940773902,1137.9174443561521 1258.1425852171803,1106.6845882954 1289.831810153219,1106.8289126248012 1284.4711657099408,1138.0617686855533"/></g><g stroke="#ffffff" stroke-width="4" fill="none"><polygon points="2669.427385685788,509.91324733624765 3575.007091295184,1399.8239455717135 3586.086752663752,2669.427385685788 2696.176054428287,3575.007091295184 1426.5726143142117,3586.086752663752 520.992908704816,2696.176054428287 509.91324733624765,1426.572614314212 1399.8239455717135,520.9929087048158" fill="none"/></g><g stroke="#ffffff" stroke-width="4" fill="none"><polygon points="2048,389.1199999999999 3221.00529717474,874.99470282526 3706.88,2048 3221.00529717474,3221.00529717474 2048,3706.88 874.99470282526,3221.00529717474 389.1199999999999,2048 874.9947028252598,874.99470282526" fill="none"/></g><g stroke="#ffffff" stroke-width="4" fill="none"><path d="M 2048 682.5094669867049 L 3392.7456635762655 1810.885057320796 L 2515.025267811051 3331.1413776256104 L 865.4505097833326 2730.7452665066476 L 1170.2796042347854 1001.973565053594 L 2925.7203957652146 1001.9735650535938 L 3230.5494902166674 2730.7452665066476 L 1580.974732188949 3331.1413776256104 L 703.2543364237345 1810.8850573207958 Z"/></g><g fill="#ffffff"><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(555.7025693511309, 1957.4849179485334) rotate(273.4710146472304)">ᚹ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(596.7094368290552, 1688.9731168130136) rotate(283.8951183685746)">ᛞ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(685.6221248682039, 1432.3124762094233) rotate(294.3192220899187)">ᛟ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(819.505704111969, 1195.9751373518668) rotate(304.7433258112629)">ᛗ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(993.940795777005, 987.7623872014415) rotate(315.16742953260706)">ᛒ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1203.1694514462654, 814.5471448691703) rotate(325.59153325395124)">ᚨ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1440.285217864201, 682.0470926222827) rotate(336.01563697529537)">ᚦ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1697.461112862998, 594.635940239077) rotate(346.43974069663955)">ᚢ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1966.2079871357369, 555.1990527094335) rotate(356.8638444179837)">ᚠ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2237.6547435623675, 565.038206883167) rotate(367.2879481393279)">ᚨ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2502.841164295894, 623.8286209651751) rotate(377.7120518606721)">ᚹ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2753.0136796450925, 729.6296752758399) rotate(388.1361555820163)">ᛞ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2979.9143156839937, 878.9489703938352) rotate(398.56025930336045)">ᛟ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(3176.053282682582, 1066.8576081785832) rotate(408.98436302470463)">ᛗ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(3334.956206455189, 1287.152890347562) rotate(419.4084667460488)">ᛒ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(3451.37784173799, 1532.5630640720242) rotate(429.83257046739294)">ᚨ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(3521.475213105641, 1794.9873561197282) rotate(440.2566741887371)">ᚦ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(3542.9344681982006, 2065.7633722294745) rotate(450.6807779100813)">ᚢ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(3515.0472559452983, 2335.95303510012) rotate(461.1048816314254)">ᚠ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(3438.734108609763, 2596.63762243343) rotate(471.5289853527696)">ᚨ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(3316.5140558301073, 2839.212166085337) rotate(481.9530890741138)">ᚹ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(3152.421473675484, 3055.6694944695273) rotate(492.377192795458)">ᛞ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2951.872913452443, 3238.8645422242585) rotate(502.80129651680215)">ᛟ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2721.4883061270243, 3382.750202513621) rotate(513.2254002381463)">ᛗ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2468.8724442464118, 3482.576936686928) rotate(523.6495039594905)">ᛒ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(2202.3639544490434, 3535.0495523575714) rotate(534.0736076808347)">ᚨ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1930.7600467590655, 3538.435974795316) rotate(544.4977114021789)">ᚦ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1663.0261264479725, 3492.6244211843946) rotate(554.9218151235231)">ᚢ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1407.9998539195853, 3399.1270904755957) rotate(565.3459188448672)">ᚠ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(1174.09942134037, 3261.0302470335864) rotate(575.7700225662113)">ᚨ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(969.0456755460125, 3082.892345774206) rotate(586.1941262875555)">ᚹ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(799.6072597019293, 2870.5935615910653) rotate(596.6182300088997)">ᛞ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(671.3771863664501, 2631.141689972213) rotate(607.0423337302439)">ᛟ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(588.588217082752, 2372.4408258562707) rotate(617.466437451588)">ᛗ</text><text x="0" y="0" font-size="68" class="font-reggae-one" text-anchor="middle" dominant-baseline="middle" transform="translate(553.973142656203, 2103.030456434754) rotate(627.8905411729322)">ᛒ</text></g><circle cx="2048" cy="2048" r="1454.08" fill="none" stroke="#ffffff" stroke-width="4"/><circle cx="2048" cy="2048" r="1658.88" fill="none" stroke="#ffffff" stroke-width="8"/></svg>';
   // ==================================================================================
@@ -1602,8 +1785,11 @@ export function createAstralDriftScene(
     const ctx = canvas.getContext('2d');
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.NoColorSpace; // it is a mask, not a colour
-    texture.minFilter = THREE.LinearFilter;
+    // 圆盘以很陡的角度被观察：开 mipmap 与各向异性过滤，细线才不会闪烁、粗细不均。
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     const img = new Image();
     img.onload = () => {
       // Full-viewBox map: viewBox 4096 → canvas SIZE. The SVG's 1659px outer ring lands
@@ -1616,6 +1802,89 @@ export function createAstralDriftScene(
     };
     img.onerror = () => console.warn('magic-circle svg layer failed to load');
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
+    return texture;
+  }
+
+  // 中心多边形的「揭示时间图」：每个连线像素存它被画出的时刻（0..1，对应书写时间窗），
+  // 白色表示“不在中心多边形上”。三支笔同时各自连续描一圈 —— {7/1} 七边形、{7/2} 与
+  // {7/3} 七角星（7 是质数，每种步长都是一条闭合的 7 边回路，中途不抬笔）。
+  // 线宽画成 5 px 只为提供时间：形状与抗锯齿仍来自原有遮罩纹理，宽带保证整条真实线宽内
+  // 采到的时间都准确。全视口映射与 makeSvgTexture 一致（4096 → 1024），两张纹理共用 uv。
+  // 顶点不是恰好 7 个时返回 null，该层保持原有的角向扫开。
+  function bakeHubDrawMap(svgText) {
+    const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+    const seen = new Map();
+    for (const line of doc.querySelectorAll('line')) {
+      for (const [ax, ay] of [
+        ['x1', 'y1'],
+        ['x2', 'y2'],
+      ]) {
+        const x = Number(line.getAttribute(ax));
+        const y = Number(line.getAttribute(ay));
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const key = `${Math.round(x * 10) / 10},${Math.round(y * 10) / 10}`;
+        if (!seen.has(key)) seen.set(key, { x, y });
+      }
+    }
+    if (seen.size !== 7) return null;
+
+    // 以 (2048, 2048) 为中心，从正上方开始按顺时针排序。
+    const angleOf = (point) => {
+      const a = Math.atan2(point.x - 2048, -(point.y - 2048));
+      return a < 0 ? a + TAU : a;
+    };
+    const v = [...seen.values()].sort((a, b) => angleOf(a) - angleOf(b));
+
+    const SIZE = 1024;
+    const k = SIZE / 4096;
+    const canvas = document.createElement('canvas');
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    // darken：线条相交或相接处保留最早的时刻。
+    ctx.globalCompositeOperation = 'darken';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 5;
+
+    const grey = (t) => {
+      const g = Math.round(t * 0.94 * 255);
+      return `rgb(${g}, ${g}, ${g})`;
+    };
+    const cycles = [
+      { step: 1, win: [0.0, 0.62] },
+      { step: 2, win: [0.12, 0.8] },
+      { step: 3, win: [0.25, 1.0] },
+    ];
+    for (const { step, win } of cycles) {
+      for (let m = 0; m < 7; m += 1) {
+        const from = v[(m * step) % 7];
+        const to = v[((m + 1) * step) % 7];
+        const t0 = THREE.MathUtils.lerp(win[0], win[1], m / 7);
+        const t1 = THREE.MathUtils.lerp(win[0], win[1], (m + 1) / 7);
+        const x0 = from.x * k;
+        const y0 = from.y * k;
+        const x1 = to.x * k;
+        const y1 = to.y * k;
+        const gradient = ctx.createLinearGradient(x0, y0, x1, y1);
+        gradient.addColorStop(0, grey(t0));
+        gradient.addColorStop(1, grey(t1));
+        ctx.strokeStyle = gradient;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
+      }
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.NoColorSpace; // 存的是时间，不是颜色
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    // 不生成 mipmap：缩小时会把线上的时间与白色背景混在一起。
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
     return texture;
   }
 
@@ -1632,6 +1901,24 @@ export function createAstralDriftScene(
         uRunRate: { value: spec.runRate },
         uIntensity: { value: spec.intensity },
         tSvg: { value: tex },
+        uIntro,
+        uPulse,
+        uPulseGain,
+        // 开场“书写”参数：时间窗（秒）、模式（0 角向 / 1 径向）、角向起点（弧度）、
+        // 径向范围（面片半径单位）；uRingR 为该层环半径（星系半径单位），供冲击波命中。
+        uRevealStart: { value: spec.revealStart ?? 0 },
+        uRevealEnd: { value: spec.revealEnd ?? 0.001 },
+        uRevealMode: { value: spec.revealMode ?? 0 },
+        uRevealOrigin: { value: spec.revealOrigin ?? 0 },
+        uRevealRange: { value: new THREE.Vector2(...(spec.revealRange ?? [0, 1])) },
+        uRingR: { value: spec.ringR ?? 1 },
+        tVeil: { value: veilTexture },
+        // 可选的揭示时间图（见 bakeHubDrawMap）：有图的像素按各自的时刻被“画”出来，
+        // 其余像素仍走上面的扫开。无图时给出不会除零的默认时间窗。
+        tDraw: { value: spec.drawMap ?? null },
+        uHasDraw: { value: spec.drawMap ? 1 : 0 },
+        uDrawStart: { value: spec.drawMap ? (spec.drawStart ?? 0) : 0 },
+        uDrawEnd: { value: spec.drawMap ? (spec.drawEnd ?? 1) : 1 },
       },
       vertexShader: /* glsl */ `
       varying vec2 vPos;
@@ -1641,6 +1928,7 @@ export function createAstralDriftScene(
       }
     `,
       fragmentShader: /* glsl */ `
+      ${TIMELINE_HEAD}
       uniform float uTime;
       uniform float uDial;
       uniform vec3 uTint;
@@ -1649,6 +1937,17 @@ export function createAstralDriftScene(
       uniform float uRunRate;
       uniform float uIntensity;
       uniform sampler2D tSvg;
+      uniform float uRevealStart;
+      uniform float uRevealEnd;
+      uniform float uRevealMode;
+      uniform float uRevealOrigin;
+      uniform vec2 uRevealRange;
+      uniform float uRingR;
+      uniform sampler2D tVeil;
+      uniform sampler2D tDraw;
+      uniform float uHasDraw;
+      uniform float uDrawStart;
+      uniform float uDrawEnd;
       varying vec2 vPos;
       void main() {
         float a = uTime * uSpin;
@@ -1658,6 +1957,26 @@ export function createAstralDriftScene(
         vec2 uv = q * 0.5 + 0.5;
         float mask = texture2D(tSvg, uv).r;
         if (mask < 0.02) discard;
+        // 开场书写：一支亮笔尖沿角向（向两侧对称扫开，在对侧合拢）或沿径向（向外展开）
+        // 把图形“写”出来；shimmer 用烘焙噪声给笔画加一点流动的明暗。
+        float ang = atan(vPos.y, vPos.x);
+        float rq = length(vPos);
+        float p = clamp((uIntro - uRevealStart) / (uRevealEnd - uRevealStart), 0.0, 1.0);
+        float s = uRevealMode < 0.5
+          ? abs(mod(ang - uRevealOrigin + 3.14159265, 6.28318530718) - 3.14159265) / 3.14159265
+          : clamp((rq - uRevealRange.x) / (uRevealRange.y - uRevealRange.x), 0.0, 1.0);
+        float front = p * 1.1;
+        float written = smoothstep(front, front - 0.06, s);
+        float pen = smoothstep(0.08, 0.0, abs(s - front)) * (1.0 - smoothstep(0.9, 1.0, p));
+        // 中心多边形：按揭示时间图逐线生长，生长端带亮笔尖（与遮罩同一个旋转后的 uv）。
+        float drawT = uHasDraw > 0.5 ? texture2D(tDraw, uv).r : 1.0;
+        float isDrawn = 1.0 - step(0.97, drawT);
+        float dp = clamp((uIntro - uDrawStart) / (uDrawEnd - uDrawStart), 0.0, 1.0) * 1.03;
+        float drawnWritten = smoothstep(dp, dp - 0.012, drawT);
+        float drawnPen = smoothstep(0.022, 0.0, abs(drawT - dp)) * (1.0 - smoothstep(0.97, 1.03, dp));
+        written = mix(written, drawnWritten, isDrawn);
+        pen = mix(pen, drawnPen, isDrawn);
+        float shimmer = 0.72 + 0.56 * texture2D(tVeil, vec2(ang * 0.63661977 + uTime * 0.021, rq * 2.3 - uTime * 0.034)).r;
         // One charge bead on the rim, driven by the UNROTATED coordinate so the motes
         // that ride it never slide off their own head.
         float head = fract(uTime * uRunRate);
@@ -1665,7 +1984,10 @@ export function createAstralDriftScene(
         float around = abs(fract(angle01 - head + 0.5) - 0.5);
         float travel = pow(max(0.0, 1.0 - around * 8.0), 3.0);
         float glow = exp(-abs(length(vPos) - 0.81) * 22.0) * 0.15;
-        vec3 color = uTint * (mask + glow) + uHot * travel * mask * 1.6;
+        vec3 color = uTint * (mask * shimmer + glow) * written
+          + uHot * travel * mask * 0.7 * written
+          + uHot * pen * mask * 1.6;
+        color *= 1.0 + 0.8 * waveHit(uRingR, 0.2);
         gl_FragColor = vec4(color * uIntensity * uDial, 1.0);
       }
     `,
@@ -1747,12 +2069,30 @@ export function createAstralDriftScene(
         uIntensity: { value: spec.intensity },
         uShift: { value: spec.shift },
         uChroma: { value: spec.chroma },
+        // 景深：作为符文采样的 LOD 偏置，前景环取正值让字形略微失焦。
+        uSoft: { value: spec.soft ?? 0 },
         uTint: { value: spec.tint.clone() },
         uHot: { value: spec.hot.clone() },
+        uIntro,
+        uPulse,
+        uPulseGain,
+        // 开场逐格点燃：时间窗（秒）、方向（+1 / -1）；uRingR 为环中心半径（星系半径）。
+        uIgniteStart: { value: spec.igniteStart ?? 0 },
+        uIgniteEnd: { value: spec.igniteEnd ?? 0.001 },
+        uIgniteDir: { value: spec.igniteDir ?? 1 },
+        uRingR: { value: 1 },
+        uCalm,
+        uViewport,
       },
       vertexShader: RING_VERTEX,
       fragmentShader: /* glsl */ `
       ${HASH_HEAD}
+      ${TIMELINE_HEAD}
+      ${CALM_HEAD}
+      uniform float uIgniteStart;
+      uniform float uIgniteEnd;
+      uniform float uIgniteDir;
+      uniform float uRingR;
       uniform sampler2D tGlyphs;
       uniform float uTime;
       uniform float uDial;
@@ -1765,6 +2105,7 @@ export function createAstralDriftScene(
       uniform float uIntensity;
       uniform float uShift;
       uniform float uChroma;
+      uniform float uSoft;
       uniform vec3 uTint;
       uniform vec3 uHot;
       varying vec2 vUv;
@@ -1787,9 +2128,9 @@ export function createAstralDriftScene(
         // channel, offset ACROSS the band. This is what a lens does to a bright thin
         // source, and doing it here rather than in the post chain means it can run at
         // full strength on the runes without smearing the whole frame to match.
-        float mr = texture2D(tGlyphs, vec2(u, rowV(vUv.y + uShift))).r;
-        float mg = texture2D(tGlyphs, vec2(u, rowV(vUv.y))).r;
-        float mb = texture2D(tGlyphs, vec2(u, rowV(vUv.y - uShift))).r;
+        float mr = texture2D(tGlyphs, vec2(u, rowV(vUv.y + uShift)), uSoft).r;
+        float mg = texture2D(tGlyphs, vec2(u, rowV(vUv.y)), uSoft).r;
+        float mb = texture2D(tGlyphs, vec2(u, rowV(vUv.y - uShift)), uSoft).r;
         float mask = mg;
         if (max(mr, max(mg, mb)) < 0.004) discard;
 
@@ -1801,6 +2142,13 @@ export function createAstralDriftScene(
         // Seed off the GLOBAL cell index, not the within-atlas one, so the repeats do
         // not light identically and the repetition stops being legible.
         float cell = floor(turn * uRepeat * uCols);
+        // 开场：符文逐格点燃，每格点亮瞬间闪一下。
+        float cells = uRepeat * uCols;
+        float order = fract(cell / cells * uIgniteDir + 0.25);
+        float ip = clamp((uIntro - uIgniteStart) / (uIgniteEnd - uIgniteStart), 0.0, 1.0);
+        float it = ip * 1.3 - order;
+        float lit = smoothstep(0.0, 0.03, it);
+        float flash = lit * exp(-max(it, 0.0) * 14.0) * (1.0 - smoothstep(0.95, 1.0, ip));
         float seed = hash11(cell + uRow * 31.7);
         float breath = 0.5 + 0.5 * sin(uTime * (0.28 + seed * 0.85) + seed * 24.0);
         float bright = (0.3 + pow(seed, 1.7) * 1.5) * (0.45 + 0.55 * breath);
@@ -1814,8 +2162,10 @@ export function createAstralDriftScene(
         // Soft radial edges so the band resolves into the field rather than ending.
         float edge = smoothstep(0.0, 0.12, vUv.y) * (1.0 - smoothstep(0.88, 1.0, vUv.y));
 
-        vec3 color = (uTint * mask + fringe) * bright + uHot * travel * 2.2 * mask;
-        gl_FragColor = vec4(color * edge * uIntensity * uDial, 1.0);
+        vec3 color = ((uTint * mask + fringe) * bright + uHot * travel * 0.9 * mask) * lit
+          + uHot * mask * flash * 1.8;
+        color *= 1.0 + 1.0 * waveHit(uRingR, 0.2);
+        gl_FragColor = vec4(color * edge * uIntensity * uDial * calmZone(), 1.0);
       }
     `,
       transparent: true,
@@ -1847,9 +2197,16 @@ export function createAstralDriftScene(
         uShift: { value: spec.shift },
         uSoft: { value: spec.soft },
         uRunRate: { value: spec.runRate || 0 },
+        uIntro,
+        uPulse,
+        uPulseGain,
+        // 导轨环半径（星系半径），由 applyRailRadius() 写入，供冲击波命中。
+        uRingR: { value: 1 },
       },
       vertexShader: RING_VERTEX,
       fragmentShader: /* glsl */ `
+      ${TIMELINE_HEAD}
+      uniform float uRingR;
       uniform float uTime;
       uniform float uDial;
       uniform vec3 uTint;
@@ -1874,10 +2231,17 @@ export function createAstralDriftScene(
         if (uRunRate > 0.0) {
           float head = fract(uTime * uRunRate);
           float around = abs(fract(vUv.x - head + 0.5) - 0.5);
-          travel = 1.0 + pow(max(0.0, 1.0 - around * 6.0), 3.0) * 2.2;
+          travel = 1.0 + pow(max(0.0, 1.0 - around * 6.0), 3.0) * 0.9;
         }
 
         vec3 color = vec3(r, g, b) * uTint + vec3(1.0) * core * 1.2;
+        // 开场：从 vUv.x = 0.25 处向两侧对称书写导轨。
+        float s = abs(fract(vUv.x - 0.25 + 0.5) - 0.5) * 2.0;
+        float rp = introWin(2.4, 3.9);
+        float front = rp * 1.1;
+        float written = smoothstep(front, front - 0.06, s);
+        float pen = smoothstep(0.06, 0.0, abs(s - front)) * (1.0 - smoothstep(0.9, 1.0, rp));
+        color *= (written + pen * 1.4) * (1.0 + 0.9 * waveHit(uRingR, 0.2));
         gl_FragColor = vec4(color * uIntensity * travel * uDial, 1.0);
       }
     `,
@@ -1897,6 +2261,61 @@ export function createAstralDriftScene(
   }
 
   // ==================================================================================
+  // 刻度环（“仪表盘”）：紧贴法阵外环外侧的一圈细刻度，每度一刻、每 5 度加长、
+  // 每 30 度最长。fwidth 让细线抗锯齿，并在远侧会产生走样的地方自然淡出。
+  // 开场与导轨同法从 uv.x = 0.25 处向两侧书写。半径与深度由 applyCircleRadius() /
+  // applyTuningDefaults() 跟随法阵设置，构建时的半径只是占位。
+  // ==================================================================================
+  function buildScale(spec) {
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uIntro,
+        uPulse,
+        uPulseGain,
+        uDial: { value: 1 },
+        uTint: { value: PALETTE.coreGold.clone() },
+        uIntensity: { value: 0.42 },
+        uRingR: { value: 1 },
+      },
+      vertexShader: RING_VERTEX,
+      fragmentShader: /* glsl */ `
+      ${TIMELINE_HEAD}
+      uniform float uDial;
+      uniform vec3 uTint;
+      uniform float uIntensity;
+      uniform float uRingR;
+      varying vec2 vUv;
+
+      void main() {
+        float a = vUv.x * 360.0;
+        float idx = floor(a);
+        float cell = fract(a);
+        float major = step(mod(idx, 30.0), 0.5);
+        float mid = step(mod(idx, 5.0), 0.5);
+        float len = mix(0.36, mix(0.64, 1.0, major), mid);
+        float fw = fwidth(a);
+        float line = 1.0 - smoothstep(0.0, fw * 1.3, abs(cell - 0.5) - 0.03);
+        line *= 1.0 - smoothstep(0.3, 0.65, fw);
+        float body = line * step(vUv.y, len) * mix(0.4, 1.0, mid);
+        float s = abs(fract(vUv.x - 0.25 + 0.5) - 0.5) * 2.0;
+        float rp = introWin(2.0, 3.6);
+        float written = smoothstep(rp * 1.1, rp * 1.1 - 0.06, s);
+        gl_FragColor = vec4(uTint * body * written * uIntensity * uDial * (1.0 + 0.8 * waveHit(uRingR, 0.2)), 1.0);
+      }
+    `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    const mesh = new THREE.Mesh(buildAnnulus(spec.inner, spec.outer), material);
+    mesh.frustumCulled = false;
+    return { mesh, material };
+  }
+
+  // ==================================================================================
   // Magic circle — the seal. (2026-08-19: rebuilt from the owner's magic-circle.svg.)
   //
   // Where v2 had "one circle with a pentagram inscribed in it", this is now a two-layer
@@ -1906,15 +2325,14 @@ export function createAstralDriftScene(
   //   OUTER half-ring (r > SPLIT, spinning CLOCKWISE via +uSpin): the heavy outer
   //     circle, the {8/1} octagon and the {8/3} star that share its rim, the middle
   //     circle, and the outer rune register (35 runes).
-  //   INNER half-ring (r <= SPLIT, spinning COUNTER-CLOCKWISE via uSpinInner): the inner
+  //   INNER half-ring (r <= SPLIT, spinning COUNTER-CLOCKWISE，转速取 spec.spinInner): the inner
   //     circle, an {8/3} star, eight diamonds on a ring, the hub (hexagon + spokes), and
   //     the inner rune register (23 runes — a broken seal, not a closed one).
   //
   // The spin split keys off the UNROTATED sample radius and is applied to the sample
-  // point, so each half turns independently while still being one draw call. The rune
-  // registers are sampled from `runeAtlas` in the same shader — row 0 (35 cols) for the
-  // outer ring, row 1 for the inner — so the figure and its inscription can never
-  // separate. All radii below are QUAD units with the outer ring at 0.9 (matching the
+  // point, so each half turns independently while still being one draw call.
+  // 符文环随 SVG 重建后直接画在图形里，不再另采样图集，故图形与铭文永不分离。
+  // All radii below are QUAD units with the outer ring at 0.9 (matching the
   // old build, so `mesh.scale` still lands the figure on spec.radius).
   //
   // One charge still runs the outer ring (driven by UNROTATED vPos so the comet trail
@@ -1929,6 +2347,11 @@ export function createAstralDriftScene(
       spin: spec.spin,
       runRate: spec.runRate,
       intensity: spec.intensity,
+      // 外环：从正上方向两侧对称书写，0.7 → 2.4 秒。
+      revealMode: 0,
+      revealOrigin: Math.PI / 2,
+      revealStart: 0.7,
+      revealEnd: 2.4,
     });
     // The static band holds still (spin 0): the owner wants the diamonds + 8-spike star
     // fixed while the inner seal and the outer ring both turn against it. All three
@@ -1940,6 +2363,11 @@ export function createAstralDriftScene(
       spin: 0,
       runRate: 0,
       intensity: spec.intensity * 0.8,
+      // 静态带：沿径向由内向外展开，1.5 → 2.5 秒。
+      revealMode: 1,
+      revealRange: [0.5, 0.68],
+      revealStart: 1.5,
+      revealEnd: 2.5,
     });
     const spinLayer = buildSpinningLayer(makeSvgTexture(innerSpin), {
       tint: PALETTE.coreGold,
@@ -1947,13 +2375,21 @@ export function createAstralDriftScene(
       spin: spec.spinInner,
       runRate: spec.runRate,
       intensity: spec.intensity * 0.72,
+      // 内层旋转封印：从正下方向两侧对称书写，1.1 → 2.6 秒。
+      revealMode: 0,
+      revealOrigin: -Math.PI / 2,
+      revealStart: 1.1,
+      revealEnd: 2.6,
+      // 中心多边形改为三支笔逐线描出，0.9 → 2.5 秒（最后一笔恰在星系点亮时合拢）。
+      drawMap: bakeHubDrawMap(MAGIC_CIRCLE_SVG),
+      drawStart: 0.9,
+      drawEnd: 2.5,
     });
     // Both inner bands are CHILDREN of the outer mesh: they inherit its position/scale/
     // tilt for free, and only their own spins differ (0 = static). The z-offsets keep
     // additive blending from smearing the three layers into one.
-    // Startup values only: setupTuning() sync()s every row before the first frame, so
-    // TUNING_DEFAULTS and the slider markup are what actually decide these. Kept in step
-    // with them so the build call is not a lie about where the layers sit.
+    // 仅为启动值：首帧前 applyTuningDefaults() 会用 TUNING_DEFAULTS 覆盖，
+    // 真正生效的是那份字面量；此处与之保持一致，免得构建调用误导层的位置。
     staticLayer.mesh.position.z = -0.06;
     spinLayer.mesh.position.z = -0.08;
     outerLayer.mesh.add(staticLayer.mesh);
@@ -1997,6 +2433,9 @@ export function createAstralDriftScene(
         uGold: { value: PALETTE.coreGold.clone() },
         uCyan: { value: PALETTE.armCyan.clone() },
         uHot: { value: PALETTE.coreHot.clone() },
+        uIntro,
+        uPulse,
+        uPulseGain,
       },
       vertexShader: /* glsl */ `
       varying vec2 vPos;
@@ -2006,6 +2445,7 @@ export function createAstralDriftScene(
       }
     `,
       fragmentShader: /* glsl */ `
+      ${TIMELINE_HEAD}
       uniform float uTime;
       uniform float uDial;
       uniform float uInner;
@@ -2064,6 +2504,10 @@ export function createAstralDriftScene(
         // as hard CG ellipses laid over the disc rather than as light moving through a
         // system. There is more in the frame now, so each element gets less of it.
         vec3 color = tint * bright + uHot * travel * 0.85;
+        // 开场：点燃之后环场由内向外亮起（rg 为星系半径单位）；冲击波经过时提亮。
+        float rg = r * 1.72;
+        float open = smoothstep(0.0, 0.3, introWin(2.5, 3.7) * 2.1 - rg);
+        color *= open * (1.0 + 0.9 * waveHit(rg, 0.2));
         gl_FragColor = vec4(color * line * gate * fade * (0.5 + travel * 1.1) * 0.5 * uDial, 1.0);
       }
     `,
@@ -2076,6 +2520,61 @@ export function createAstralDriftScene(
 
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
     mesh.scale.setScalar(spec.outer * 2);
+    mesh.frustumCulled = false;
+    return { mesh, material };
+  }
+
+  // ==================================================================================
+  // 共鸣冲击波：躺在圆盘平面上的一张面片，脉冲期间画出一道向外扩散的亮环及其尾迹。
+  // 面片半径为 2.6 个星系半径，与 wavePos() 的最远位置对应；无脉冲时直接隐藏。
+  // ==================================================================================
+  function buildWave() {
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uIntro,
+        uPulse,
+        uPulseGain,
+        uHot: { value: PALETTE.coreHot.clone() },
+        uTint: { value: PALETTE.coreGold.clone() },
+      },
+      vertexShader: /* glsl */ `
+      varying vec2 vPos;
+      void main() {
+        vPos = uv * 2.0 - 1.0;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+      fragmentShader: /* glsl */ `
+      ${TIMELINE_HEAD}
+      uniform vec3 uHot;
+      uniform vec3 uTint;
+      varying vec2 vPos;
+
+      void main() {
+        float r = length(vPos) * 2.6;
+        if (uPulse >= 1.0 || r > 2.6) discard;
+        float front = wavePos();
+        // 细而带色散的涟漪：三个通道的环位置各错开一点，取代原先的白色宽带。
+        float width = 0.012 + uPulse * 0.03;
+        vec3 offset = vec3(-0.014, 0.0, 0.014);
+        vec3 d = (vec3(r) - front + offset) / width;
+        vec3 ring = exp(-d * d);
+        float wake = smoothstep(front - 0.5, front, r) * step(r, front) * 0.035;
+        vec3 tint = mix(uHot, uTint, smoothstep(0.05, 0.7, uPulse));
+        gl_FragColor = vec4(tint * (ring * 0.85 + wake) * waveEnv(), 1.0);
+      }
+    `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+    mesh.position.z = 0.02;
+    mesh.scale.setScalar(galaxy.radius * 2.6 * 2);
+    // 初始保持可见，让预热阶段的 renderer.compile() 一并编译它；可见性由 animate() 每帧决定。
     mesh.frustumCulled = false;
     return { mesh, material };
   }
@@ -2094,6 +2593,9 @@ export function createAstralDriftScene(
         uDial: { value: 1 },
         uHot: { value: PALETTE.coreHot.clone() },
         uGold: { value: PALETTE.coreGold.clone() },
+        uIntro,
+        uPulse,
+        uPulseGain,
       },
       vertexShader: /* glsl */ `
       varying vec2 vUv;
@@ -2103,6 +2605,7 @@ export function createAstralDriftScene(
       }
     `,
       fragmentShader: /* glsl */ `
+      ${TIMELINE_HEAD}
       uniform float uTime;
       uniform float uDial;
       uniform vec3 uHot;
@@ -2116,7 +2619,14 @@ export function createAstralDriftScene(
         // Three nested falloffs: a broad halo, a tight core, and a pinpoint. Summing
         // powers of the same distance is what gives a glow a shoulder instead of a
         // linear ramp, and the shoulder is the part the eye reads as brightness.
-        float halo = pow(max(0.0, 1.0 - d), 3.0) * 0.34;
+        // 开场：星光汇聚期间核心只是一粒火种；汇聚完成时达到全亮并带一次过冲闪光，
+        // 光晕也在此时铺开；共鸣脉冲时核心随之搏动。
+        float born = introWin(0.25, 0.75);
+        float full = ignite();
+        float level = mix(0.3 * born, 1.0, full);
+        float flare = full * exp(-max(uIntro - 2.7, 0.0) * 1.6) * 1.1;
+        float beat = exp(-uPulse * 7.0) * uPulseGain;
+        float halo = pow(max(0.0, 1.0 - d), 3.0) * 0.34 * mix(0.35, 1.0, full);
         float core = pow(max(0.0, 1.0 - d), 9.0) * 0.8;
         float pin = pow(max(0.0, 1.0 - d), 40.0) * 1.7;
 
@@ -2127,6 +2637,7 @@ export function createAstralDriftScene(
 
         float breathe = 0.9 + 0.1 * sin(uTime * 0.42);
         vec3 color = uGold * (halo + streak * 0.55) + uHot * (core + pin + streak * 0.45);
+        color *= (level + flare) * (1.0 + 0.5 * beat);
         gl_FragColor = vec4(color * breathe * uDial, 1.0);
       }
     `,
@@ -2215,6 +2726,9 @@ export function createAstralDriftScene(
         uAmp: { value: spec.amp },
         uPhase: { value: spec.phase },
         uFade: { value: spec.fade === undefined ? 0.16 : spec.fade },
+        uIntro,
+        uPulse,
+        uPulseGain,
       },
       vertexShader: /* glsl */ `
       attribute vec2 aParam;
@@ -2241,6 +2755,7 @@ export function createAstralDriftScene(
       }
     `,
       fragmentShader: /* glsl */ `
+      ${TIMELINE_HEAD}
       uniform vec3 uTint;
       uniform float uIntensity;
       uniform float uShift;
@@ -2278,7 +2793,7 @@ export function createAstralDriftScene(
         vec3 color = split * uTint * (0.85 + travel * 0.9);
         color += vec3(1.0) * core * (1.1 + travel * 1.4);
 
-        gl_FragColor = vec4(color * uIntensity * ends * uDial, 1.0);
+        gl_FragColor = vec4(color * uIntensity * ends * uDial * introWin(3.0, 4.8), 1.0);
       }
     `,
       transparent: true,
@@ -2380,8 +2895,12 @@ export function createAstralDriftScene(
         uTint: { value: PALETTE.meteor.clone() },
         uWarm: { value: PALETTE.starWarm.clone() },
         uTail: { value: 4.2 },
+        uIntro,
+        uPulse,
+        uPulseGain,
       },
       vertexShader: /* glsl */ `
+      ${TIMELINE_HEAD}
       attribute vec3 aDir;
       attribute vec3 aPerp;
       attribute vec4 aParam;
@@ -2413,6 +2932,7 @@ export function createAstralDriftScene(
         // meteors that averages about two on screen, which is an event rather than
         // weather.
         vAlpha = smoothstep(0.0, 0.015, cycle) * (1.0 - smoothstep(0.10, 0.20, cycle));
+        vAlpha *= introWin(3.8, 5.0);
         vU = u;
         vV = aParam.y;
 
@@ -2478,8 +2998,12 @@ export function createAstralDriftScene(
         uTime,
         uProjScale,
         uTint: { value: PALETTE.starCool.clone() },
+        uIntro,
+        uPulse,
+        uPulseGain,
       },
       vertexShader: /* glsl */ `
+      ${TIMELINE_HEAD}
       attribute vec3 aScalar;
       uniform float uTime;
       uniform float uProjScale;
@@ -2495,6 +3019,7 @@ export function createAstralDriftScene(
         p.y = mod(p.y + 9.0, 18.0) - 9.0;
 
         vBright = aScalar.z * (0.55 + 0.45 * sin(uTime * 0.5 + seed * 3.7));
+        vBright *= introWin(0.8, 3.6);
 
         vec4 viewPos = modelViewMatrix * vec4(p, 1.0);
         gl_Position = projectionMatrix * viewPos;
@@ -2554,7 +3079,7 @@ export function createAstralDriftScene(
     // spark separates from the glyph it came off instead of sitting on it, and size —
     // which then had to be walked back to the galaxy's own scale, with the light it was
     // carrying moved into peak brightness instead. See gl_PointSize below.
-    const PER_BAND = 1200;
+    const PER_BAND = 480;
     const COUNT = PER_BAND * 2; // two bands; `band` is used as a mix() factor below
     const LIFE = 6.0; // seconds, before phase offset — shorter, so ignitions are frequent
 
@@ -2600,9 +3125,17 @@ export function createAstralDriftScene(
         uTintA: { value: a.uTint.value.clone() },
         uTintB: { value: b.uTint.value.clone() },
         uHot: { value: PALETTE.coreHot.clone() },
+        uIntro,
+        uPulse,
+        uPulseGain,
+        uGalaxyR: { value: galaxy.radius },
+        uCalm,
+        uViewport,
       },
       vertexShader: /* glsl */ `
       ${HASH_HEAD}
+      ${TIMELINE_HEAD}
+      uniform float uGalaxyR;
       attribute vec2 aSpark; // x: size random 0..1, y: band index (0 or 1)
       uniform float uTime;
       uniform float uProjScale;
@@ -2701,6 +3234,8 @@ export function createAstralDriftScene(
         // into nothing. That cancellation is the trap here: both curves look right in
         // isolation and their product is a shrug.
         float env = smoothstep(0.0, 0.02, life) * (1.0 - smoothstep(0.16, 1.0, life));
+        // 开场：符文点燃之后火花才开始迸出。
+        env *= introWin(2.6, 4.2);
         // IGNITION FLARE — the single change that took this layer from "faint dust"
         // to legible. A spark is briefly hot and briefly large as it comes off the
         // rune, then settles. Momentary events survive peripheral vision; a steady
@@ -2720,10 +3255,12 @@ export function createAstralDriftScene(
         // smudge. This is the "compensate with brightness, not size" rule made real.
         vec3 tint = mix(uTintA, uTintB, band);
         vColor = (
-            tint * bright * (0.5 + 2.6 * twinkle)
-          + uHot * travel * 5.0
-          + uHot * flare * 5.5
+            tint * bright * (0.4 + 1.8 * twinkle)
+          + uHot * travel * 2.0
+          + uHot * flare * 2.4
         ) * env * uDial;
+        // 冲击波扫过所在符文环时提亮（半径换算为星系半径单位）。
+        vColor *= 1.0 + 1.0 * waveHit(radius0 / uGalaxyR, 0.24);
 
         vec4 viewPos = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * viewPos;
@@ -2756,10 +3293,11 @@ export function createAstralDriftScene(
     `,
       fragmentShader: /* glsl */ `
       ${POINT_HEAD}
+      ${CALM_HEAD}
       varying vec3 vColor;
 
       void main() {
-        gl_FragColor = vec4(vColor * sprite(gl_PointCoord) * 2.0, 1.0);
+        gl_FragColor = vec4(vColor * sprite(gl_PointCoord) * 1.5 * calmZone(), 1.0);
       }
     `,
       transparent: true,
@@ -2795,22 +3333,18 @@ export function createAstralDriftScene(
   //     Each one holds a fixed lag behind the head, so the trail is rigid and the whole
   //     thing sweeps the ring once per lap with the charge it belongs to. It reads as
   //     the head having mass.
-  //   kind 1, EMBERS — slow drift off the five points where the pentagram's chords
-  //     cross. Those five points are where the figure's lines actually MEET, so light
-  //     collecting and coming off there reads as the drawing carrying current, where
-  //     embers scattered anywhere on the quad would read as dust.
+  //   kind 1, EMBERS — 从静态层九芒星的九个顶点缓慢飘出（外环半径 0.823 处，首顶点朝上，
+  //     间隔 40 度，不随任何层旋转）。顶点是图形线条真正交汇的地方，光在此聚集再脱出，
+  //     读起来像图形在导电；散落在整个面片上则只像灰尘。
   //
   // One system because they share a palette, a lifetime model and a dial; two would be
   // two draw calls to say one thing.
   //
   // TWO SIGNS ARE LOAD-BEARING AND NEITHER IS OBVIOUS:
-  //   - The circle's charge is driven by the UNROTATED quad coordinate (the shader
-  //     reads vPos, not the spun ps), so the comet trail must NOT be spun or it would
-  //     slide off its own head as the pentagram turns.
-  //   - The star IS spun, but the drawn figure turns the OTHER WAY from uSpin: the
-  //     shader rotates the sample point by +uSpin*t, which rotates the shape by -uSpin*t.
-  //     Get this backwards and the embers counter-rotate against the vertices they are
-  //     supposed to be leaving.
+  //   - 法阵的电荷由未旋转的面片坐标驱动（着色器读 vPos 而非旋转后的坐标），
+  //     所以彗尾绝不能跟着旋转，否则外环转动时彗尾会滑离自己的头部。
+  //   - 九芒星位于静态层，不旋转，所以余烬的发射角度不再叠加任何转速；
+  //     若误加旋转，余烬会滑离它们本该脱出的顶点。
   // ==================================================================================
   function buildCircleMotes(circle) {
     // BUFFED alongside the sparks (2026-08-10), and this layer had it worse: it sits on
@@ -2818,13 +3352,14 @@ export function createAstralDriftScene(
     // gets absorbed by the halo. A much longer and wider tail, a near-white bead at the
     // head, and an ignition flash on each ember. Sprite size stays on the galaxy's
     // ruler (see gl_PointSize below) — the brightness multipliers carry it instead.
-    const COMETS = 1500;
-    const EMBERS = 1100;
+    const COMETS = 520;
+    const EMBERS = 420;
     const COUNT = COMETS + EMBERS;
     // Trail length as a fraction of a lap. 0.075 was about 27 degrees of arc — short
     // enough that at this radius it read as a slightly thicker bit of ring rather than
     // as something travelling. 0.16 is a 58-degree comet with a visible head and end.
-    const TAIL_TURNS = 0.16;
+    // 现取 0.11（约 40 度）：更短、更克制的彗尾。
+    const TAIL_TURNS = 0.11;
     const EMBER_LIFE = 7.0;
 
     const carrier = new Float32Array(COUNT * 3);
@@ -2833,7 +3368,7 @@ export function createAstralDriftScene(
       const isEmber = index >= COMETS;
       // Comets: lag behind the head, biased toward the head so the trail tapers by
       // DENSITY as well as by brightness. A uniform lag gives an even bar of light.
-      // Embers: which of the five intersections this one belongs to.
+      // 余烬：决定它属于九芒星九个顶点中的哪一个。
       carrier[index * 3] = isEmber ? Math.random() : Math.pow(Math.random(), 1.6);
       carrier[index * 3 + 1] = Math.random();
       carrier[index * 3 + 2] = Math.random() * 97.3 + 0.13;
@@ -2854,28 +3389,28 @@ export function createAstralDriftScene(
         uDial: { value: 1 },
         // Startup value only; sync() overwrites from `tuning` on the first frame.
         uRadius: { value: galaxy.radius * 1.1 },
-        uSpin: { value: circleUniforms.uSpin.value },
-        // The inner layer is a separate material on the circle's child mesh, and its
-        // spin lives in ITS `uSpin` uniform (buildSpinningLayer names every layer's
-        // rotation uSpin; buildMagicCircle passes spinInner through as that value).
-        uSpinInner: {
-          value: circle.innerMaterial ? circle.innerMaterial.uniforms.uSpin.value : 0,
-        },
+        // 九芒星所在静态层相对圆盘平面的世界单位偏移（沿圆盘法线），sync() 每帧回写。
+        uStarZ: { value: 0 },
         uRunRate: { value: circleUniforms.uRunRate.value },
         uTail: { value: TAIL_TURNS },
         uEmberLife: { value: EMBER_LIFE },
         uTint: { value: PALETTE.coreGold.clone() },
         uHot: { value: PALETTE.coreHot.clone() },
+        uIntro,
+        uPulse,
+        uPulseGain,
+        uGalaxyR: { value: galaxy.radius },
       },
       vertexShader: /* glsl */ `
       ${HASH_HEAD}
+      ${TIMELINE_HEAD}
+      uniform float uGalaxyR;
       attribute vec2 aMote; // x: size random 0..1, y: kind (0 comet, 1 ember)
       uniform float uTime;
       uniform float uProjScale;
       uniform float uDial;
       uniform float uRadius;
-      uniform float uSpin;
-      uniform float uSpinInner;
+      uniform float uStarZ;
       uniform float uRunRate;
       uniform float uTail;
       uniform float uEmberLife;
@@ -2884,9 +3419,8 @@ export function createAstralDriftScene(
       varying vec3 vColor;
 
       const float TAU_F = 6.28318530718;
-      // The inner {8/3} star's vertices sit at 0.741 of the quad radius, which is
-      // 0.823 of the circle's 0.9 — where the embers collect and come off. Both are
-      // properties of the figure the circle shader draws, not free parameters.
+      // 静态层九芒星的顶点位于外环半径的 0.823 处，余烬从这里聚集并脱出。
+      // 这是 SVG 图形本身的属性，不是自由参数。
       const float INNER = 0.823;
 
       void main() {
@@ -2901,7 +3435,7 @@ export function createAstralDriftScene(
         float cAngle = (head - lag * uTail) * TAU_F;
         // The tail frays as it ages: spread grows with lag, so the head is a tight
         // bead and the end dissolves into the ring instead of stopping.
-        float fray = lag * lag * uRadius * 0.13;
+        float fray = lag * lag * uRadius * 0.07;
         float cRadius =
           uRadius
           + (hash11(seed * 4.1) - 0.5) * fray * 2.0
@@ -2921,10 +3455,10 @@ export function createAstralDriftScene(
           pow(1.0 - lag, 1.5)
           * (0.6 + 0.6 * sin(uTime * (2.4 + seed * 3.1) + seed * 29.0));
 
-        // ---- kind 1: embers off the inner {8/3} star's eight vertices -------------
-        float k = floor(param * 8.0);
-        float a0 = k * (TAU_F / 8.0) + 1.57079632679;
-        float spun = a0 - uSpinInner * uTime + (hash11(seed * 6.1) - 0.5) * 0.05;
+        // ---- kind 1: 余烬从静态九芒星的九个顶点脱出（首顶点朝上，间隔 40 度，不随内层旋转）
+        float k = floor(param * 9.0);
+        float a0 = k * (TAU_F / 9.0) + 1.57079632679;
+        float spun = a0 + (hash11(seed * 6.1) - 0.5) * 0.05;
         float life = fract(uTime / uEmberLife + phase);
         vec2 root = vec2(cos(spun), sin(spun)) * (uRadius * INNER);
         vec2 outward = normalize(root);
@@ -2937,7 +3471,7 @@ export function createAstralDriftScene(
         float sway = sin(life * 3.1 + seed * 13.0) * uRadius * 0.06;
         vec3 ePos = vec3(
           root + outward * rise + tangent * sway,
-          life * uRadius * (0.05 + hash11(seed * 12.7) * 0.16)
+          uStarZ + life * uRadius * (0.05 + hash11(seed * 12.7) * 0.16)
         );
         // The star's own breath, copied from the circle shader, so the embers swell
         // and fade with the figure they come off rather than on their own schedule.
@@ -2953,6 +3487,8 @@ export function createAstralDriftScene(
 
         vec3 pos = mix(cPos, ePos, kind);
         float env = mix(cEnv, eEnv, kind);
+        // 开场：法阵书写完成后彗尾与余烬才出现。
+        env *= introWin(2.3, 3.8);
 
         // Head near-white cooling into the figure's own gold down the trail; embers
         // ignite hot and cool as they leave. Same exposure logic as the galaxy: hue
@@ -2960,10 +3496,12 @@ export function createAstralDriftScene(
         // Raised to pay for the size cut below, same trade as the sparks: this layer
         // has to out-read the circle's own bloom, and it now has to do it on a
         // galaxy-star-sized sprite. Peak value, not area.
-        vec3 cColor = mix(uHot, uTint, smoothstep(0.0, 0.4, lag)) * 3.6 + uHot * bead * 5.5;
-        vec3 eColor = mix(uHot, uTint, smoothstep(0.0, 0.25, life)) * 2.4
-                    + uHot * eFlare * 4.0;
+        vec3 cColor = mix(uHot, uTint, smoothstep(0.0, 0.4, lag)) * 1.5 + uHot * bead * 2.2;
+        vec3 eColor = mix(uHot, uTint, smoothstep(0.0, 0.25, life)) * 1.3
+                    + uHot * eFlare * 1.6;
         vColor = mix(cColor, eColor, kind) * env * uDial;
+        // 冲击波扫过法阵外环时提亮。
+        vColor *= 1.0 + 0.8 * waveHit(uRadius / uGalaxyR, 0.24);
 
         vec4 viewPos = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * viewPos;
@@ -2983,7 +3521,7 @@ export function createAstralDriftScene(
       varying vec3 vColor;
 
       void main() {
-        gl_FragColor = vec4(vColor * sprite(gl_PointCoord) * 2.0, 1.0);
+        gl_FragColor = vec4(vColor * sprite(gl_PointCoord) * 1.4, 1.0);
       }
     `,
       transparent: true,
@@ -3011,12 +3549,9 @@ export function createAstralDriftScene(
       group.position.copy(circle.mesh.position);
       group.rotation.copy(circle.mesh.rotation);
       material.uniforms.uRadius.value = galaxy.radius * tuning.circleR;
-      // uSpin/uRunRate are build-time constants on the circle, but reading them back
-      // each frame costs nothing and means the two can never drift apart by hand.
-      material.uniforms.uSpin.value = circleUniforms.uSpin.value;
-      material.uniforms.uSpinInner.value = circle.innerMaterial
-        ? circle.innerMaterial.uniforms.uSpin.value
-        : circleUniforms.uSpin.value;
+      // uRunRate 是法阵的构建期常量，每帧回读几乎零成本，可保证两者永不手工失步。
+      // 静态层是圆盘网格的子节点，父级带缩放，故世界单位偏移 = 局部 z × 父级缩放。
+      material.uniforms.uStarZ.value = circle.staticMesh.position.z * circle.mesh.scale.x;
       material.uniforms.uRunRate.value = circleUniforms.uRunRate.value;
     };
 
@@ -3059,9 +3594,8 @@ export function createAstralDriftScene(
     runRate: 0.022,
     intensity: 0.85,
   });
-  // Startup value only: setupTuning() sync()s every row before the first frame, so
-  // TUNING_DEFAULTS and the slider markup are what actually decide this. Kept in step
-  // with them so the build call is not a lie about where the figure sits.
+  // 仅为启动值：首帧前 applyTuningDefaults() 会用 TUNING_DEFAULTS 覆盖，
+  // 真正生效的是那份字面量；此处与之保持一致，免得构建调用误导图形的位置。
   magicCircle.mesh.position.z = 2.7;
   galaxy.group.add(magicCircle.mesh);
 
@@ -3077,10 +3611,10 @@ export function createAstralDriftScene(
       inner: galaxy.radius * 1.455,
       outer: galaxy.radius * 1.545,
       row: 0,
-      repeat: 3, // 96 glyphs round a ~47-unit circumference -> ~0.49 per cell
+      repeat: 5, // 一圈 160 个符文、周长约 47 单位 -> 每格约 0.29
       spin: 0.0092,
       runRate: 0.048,
-      intensity: 1.15,
+      intensity: 0.8,
       // shift is in band-depth units, and it has to stay WELL under the stroke width or
       // this stops being a lens fringe and becomes an anaglyph. A stroke is ~0.1 of a
       // cell; at 0.055 the three channel samples barely overlapped, so outside the
@@ -3089,9 +3623,15 @@ export function createAstralDriftScene(
       // overlap almost everywhere and the disagreement is a ~1 px rim, which is what a
       // real lens does.
       shift: 0.018,
-      chroma: 0.9,
+      chroma: 0.45,
       tint: PALETTE.coreGold,
       hot: PALETTE.coreHot,
+      // 开场点燃：1.9 → 3.6 秒，正向。
+      igniteStart: 1.9,
+      igniteEnd: 3.6,
+      igniteDir: 1,
+      // 景深：这一环浮在圆盘前方，字形略微失焦。
+      soft: 1.3,
     }),
     buildRuneRegister({
       // Pulled inside row 0 by the hand-tune (2026-08-09), so the two registers no
@@ -3105,11 +3645,16 @@ export function createAstralDriftScene(
       repeat: 4, // 128 glyphs round a ~37-unit circumference -> ~0.29 per cell
       spin: -0.0058,
       runRate: -0.031,
-      intensity: 0.6,
+      intensity: 0.45,
       shift: 0.022,
-      chroma: 0.75,
+      chroma: 0.4,
       tint: PALETTE.starCool,
       hot: PALETTE.coreHot,
+      // 开场点燃：1.5 → 3.0 秒，反向。
+      igniteStart: 1.5,
+      igniteEnd: 3.0,
+      igniteDir: -1,
+      soft: 0,
     }),
   ];
   const runeRails = [
@@ -3117,7 +3662,7 @@ export function createAstralDriftScene(
       radius: galaxy.radius * 1.89,
       width: 0.028,
       tint: PALETTE.coreGold,
-      intensity: 0.62,
+      intensity: 0.5,
       shift: 0.2,
       soft: 2.2,
       runRate: 0.026,
@@ -3125,6 +3670,9 @@ export function createAstralDriftScene(
   ];
   for (const register of runeRegisters) galaxy.group.add(register.mesh);
   for (const rail of runeRails) galaxy.group.add(rail.mesh);
+  // 刻度环：占位半径，真实半径由 applyCircleRadius() 按法阵设置。
+  const scale = buildScale({ inner: galaxy.radius * 1.0, outer: galaxy.radius * 1.04 });
+  galaxy.group.add(scale.mesh);
 
   // The particle pass. Both go into the galaxy group, so they inherit the disc's tilt
   // and the layout offset for free and can never separate from the engraved work they
@@ -3138,6 +3686,8 @@ export function createAstralDriftScene(
   galaxy.group.add(runeSparks.points);
   const circleMotes = buildCircleMotes(magicCircle);
   galaxy.group.add(circleMotes.group);
+  const wave = buildWave();
+  galaxy.group.add(wave.mesh);
 
   const core = buildCore();
   // The two arcs, re-authored as the UI column's flanks (see header note 3). They are
@@ -3217,10 +3767,7 @@ export function createAstralDriftScene(
   // of -24) and swung hard on Y instead, which is the change that stopped it reading as
   // a diagram; the arcs are pushed to their widest so they clear the column entirely.
   //
-  // These values must agree with the slider `value` attributes above. setupDials()
-  // calls sync() on every dial at startup, so the HTML is what actually wins after the
-  // first frame — this literal only covers the single placeLayout() that resize() runs
-  // before the dials exist. Change one, change both, or the frame moves on load.
+  // 生产环境没有滑块面板，下面这份字面量就是最终生效的构图值。
   const layout = {
     offset: 0.61, // disc centre X, as a fraction of frame width
     height: -0.01, // disc centre Y, as a fraction of frame height (+ is up)
@@ -3230,6 +3777,12 @@ export function createAstralDriftScene(
     flank: 1, // 0 = arcs hug the column, 1 = arcs pushed wide
     portrait: false,
   };
+
+  // 竖屏构图：相机后拉到能完整容纳 fitWidth 世界单位宽的圆盘，而不是裁掉两侧。
+  // height 为圆盘中心 Y（占画面高度的比例），三个旋转单位均为度。
+  const PORTRAIT = { fitWidth: 11.5, height: -0.24, rotX: -40, rotY: -12, rotZ: 8 };
+  // 横屏时相机的基准距离（CAMERA_BASE.z）。
+  const CAMERA_LANDSCAPE_Z = 20.5;
 
   // Visible extent in world units at a given depth, for this camera.
   //
@@ -3265,7 +3818,7 @@ export function createAstralDriftScene(
     // would then compose with.
     core.mesh.position.x = x;
     // Portrait pushes the disc down instead of sideways, to clear the top band.
-    const y = viewSize(discZ).height * (layout.portrait ? -0.16 : layout.height);
+    const y = viewSize(discZ).height * (layout.portrait ? PORTRAIT.height : layout.height);
     galaxy.group.position.y = y;
     core.mesh.position.y = y;
 
@@ -3279,6 +3832,11 @@ export function createAstralDriftScene(
     const columnWidth =
       Number.parseFloat(homeLayout.getPropertyValue('--drift-column-width')) || 0.242;
     const spread = Math.max(0.075, columnWidth / 2 + layout.flank * 0.044);
+    // 光芒安静区跟随界面列：横屏取列右边缘，竖屏改为压低画面上部。
+    shinePass.calmEdge = centre + columnWidth / 2;
+    shinePass.portrait = layout.portrait;
+    // 符文环与符文火花共用同一个安静区。
+    uCalm.value.set(centre + columnWidth / 2, layout.portrait ? 1 : 0, 0);
     for (let i = 0; i < arcs.length; i += 1) {
       const arc = arcs[i];
       const side = i === 0 ? -1 : 1;
@@ -3294,9 +3852,9 @@ export function createAstralDriftScene(
   // The honest fix for "it cooks my laptop" is not a fixed pixel-ratio guess — v1's
   // clamp of 1.5 was a guess and it was wrong for an M4 Pro. This measures the actual
   // median frame cost and moves the render scale until the frame fits the budget, so the
-  // piece is as sharp as the machine can afford and never sharper. It starts at 1 and
-  // has to earn its way up, so a weak GPU never pays for a resolution it cannot hold
-  // even for the first second.
+  // piece is as sharp as the machine can afford and never sharper.
+  // 现在从设备像素比（上限 2）起步、只向下调：原先从 1 起步要约 8 秒才爬到设备比，
+  // HiDPI 屏上整段开场都是半分辨率放大后的模糊画面。弱 GPU 由下调逻辑兜底。
   // ==================================================================================
   //
   // ----------------------------------------------------------------------------------
@@ -3367,7 +3925,8 @@ export function createAstralDriftScene(
     // Consecutive 900 ms windows that have asked to go up. Reset by anything else.
     upStreak: 0,
   };
-  governor.scale = Math.min(1, governor.max);
+  // 从设备像素比起步，保证开场第一帧就清晰；之后只在超预算时向下调。
+  governor.scale = governor.max;
 
   let viewportWidth = 1;
   let viewportHeight = 1;
@@ -3382,6 +3941,8 @@ export function createAstralDriftScene(
       viewportWidth * pixelRatio,
       viewportHeight * pixelRatio,
     );
+    // 安静区按渲染缓冲像素换算 gl_FragCoord，与 uResolution 同一组数值。
+    uViewport.value.set(viewportWidth * pixelRatio, viewportHeight * pixelRatio);
     // FXAA reads neighbours by texel offset, so it needs DEVICE pixels. Feeding it CSS
     // pixels makes it sample 1/pixelRatio of a texel away — a no-op that still costs a
     // full pass, which is the quiet way this pass ends up doing nothing on hiDPI.
@@ -3404,6 +3965,18 @@ export function createAstralDriftScene(
     // and the column would sit half on the disc.
     layout.portrait = camera.aspect < 1.15;
     stage.classList.toggle('is-portrait', layout.portrait);
+    // 竖屏时按宽度反推相机距离，让整个圆盘落进画面；viewSize() 读 CAMERA_BASE.z，
+    // 所以 placeLayout() 的落位会自动跟随。
+    if (layout.portrait) {
+      const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+      CAMERA_BASE.z = THREE.MathUtils.clamp(
+        PORTRAIT.fitWidth / (2 * tanHalf * camera.aspect),
+        CAMERA_LANDSCAPE_Z,
+        56,
+      );
+    } else {
+      CAMERA_BASE.z = CAMERA_LANDSCAPE_Z;
+    }
     placeLayout();
   }
 
@@ -3483,6 +4056,15 @@ export function createAstralDriftScene(
     stage.dataset.astralTheme = theme.id;
     const light = theme.kind === 'light';
     gradePass.uniforms.uInk.value = light ? 1 : 0;
+    // 星图分支在 grade pass 内部已自行映射色调，再叠 ACES 会让纸面比主题的
+    // --theme-window-bg 暗约 8% 且发灰；OutputPass 每帧读取该值并自行重建。
+    renderer.toneMapping = light ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
+    Object.assign(
+      themeGain,
+      light
+        ? { volumetrics: 0.3, bloom: 0.55, core: 0.45, haze: 0.6, shine: 0 }
+        : { volumetrics: 1, bloom: 1, core: 1, haze: 1, shine: 1 },
+    );
     gradePass.uniforms.uAccent.value.set(primary);
     if (light) {
       // Paper is the theme's own window background; ink is its accent taken most of the
@@ -3493,96 +4075,6 @@ export function createAstralDriftScene(
     } else {
       gradePass.uniforms.uField.value.set(background).multiplyScalar(0.6);
     }
-  }
-
-  function setupDials() {
-    for (const key of ['bloom', 'galaxy', 'arc', 'veils', 'runes', 'circle']) {
-      const input = document.querySelector('#dial-' + key);
-      const label = document.querySelector('#val-' + key);
-      const sync = () => {
-        dials[key] = Number(input.value) / 100;
-        label.textContent = dials[key].toFixed(2);
-      };
-      input.addEventListener('input', sync);
-      sync();
-    }
-
-    // Layout dials re-place rather than re-build: placeLayout() is pure placement and
-    // the rotations are read fresh every frame, so dragging these is free.
-    //
-    // Each entry reads its slider in the unit PRINTED NEXT TO IT — percent for the two
-    // placement axes, degrees for the three rotations. Sliders carry step=0.5 and
-    // min/max in those same units, so the arrow keys step half a unit and the readout
-    // never needs mental arithmetic. The earlier single dial normalised everything to
-    // 0..1, which is why nudging it was guesswork.
-    const layoutDials = [
-      ['offset', (v) => (layout.offset = v / 100), (v) => v.toFixed(1) + '%'],
-      ['height', (v) => (layout.height = v / 100), (v) => v.toFixed(1) + '%'],
-      ['rotx', (v) => (layout.rotX = THREE.MathUtils.degToRad(v)), (v) => v.toFixed(1) + '°'],
-      ['roty', (v) => (layout.rotY = THREE.MathUtils.degToRad(v)), (v) => v.toFixed(1) + '°'],
-      ['rotz', (v) => (layout.rotZ = THREE.MathUtils.degToRad(v)), (v) => v.toFixed(1) + '°'],
-      ['flank', (v) => (layout.flank = v / 100), (v) => (v / 100).toFixed(2)],
-    ];
-    for (const [key, apply, format] of layoutDials) {
-      const input = document.querySelector('#dial-' + key);
-      const label = document.querySelector('#val-' + key);
-      const sync = () => {
-        const value = Number(input.value);
-        apply(value);
-        label.textContent = format(value);
-        placeLayout();
-      };
-      input.addEventListener('input', sync);
-      sync();
-    }
-
-    const tintInput = document.querySelector('#dial-tint');
-    const tintLabel = document.querySelector('#val-tint');
-    const syncTint = () => {
-      const value = Number(tintInput.value) / 100;
-      // One dial, two modes: how far astral pulls toward the accent, and how hard
-      // chart bites into the paper. They are never both visible, so sharing the
-      // slider costs nothing and keeps the panel short.
-      gradePass.uniforms.uThemeMix.value = value;
-      gradePass.uniforms.uInkGain.value = 0.8 + value * 4.0;
-      tintLabel.textContent = value.toFixed(2);
-    };
-    tintInput.addEventListener('input', syncTint);
-    syncTint();
-
-    const themeSelect = document.querySelector('#dial-theme');
-    for (const theme of THEMES) {
-      const option = document.createElement('option');
-      option.value = theme.id;
-      option.textContent = theme.label + ' · ' + theme.kind;
-      themeSelect.appendChild(option);
-    }
-    themeSelect.value = 'obsidian';
-    themeSelect.addEventListener('change', () => applyTheme(themeSelect.value));
-    applyTheme(themeSelect.value);
-
-    // Whole-panel collapse. Separate class from `tune-collapsed` and never written
-    // together, so the tuning section's own state survives a collapse/expand round
-    // trip — the panel comes back exactly as it was left.
-    //
-    // Not the same control as the H key: that hides the panel outright (nothing left to
-    // click), which is for screenshots. This leaves the chip behind, which is for
-    // looking at the scene and then carrying on tuning.
-    const hudPanel = document.querySelector('#hud');
-    const panelButton = document.querySelector('#hud-collapse');
-    panelButton.addEventListener('click', () => {
-      const collapsed = hudPanel.classList.toggle('hud-collapsed');
-      panelButton.textContent = collapsed ? 'show panel' : 'hide panel';
-    });
-
-    addEventListener('keydown', (event) => {
-      if (event.key === 'h' || event.key === 'H') {
-        document.querySelector('#hud').classList.toggle('hidden');
-      }
-      if (event.key === 't' || event.key === 'T') {
-        document.querySelector('#ui').classList.toggle('hidden');
-      }
-    });
   }
 
   // ==================================================================================
@@ -3605,8 +4097,8 @@ export function createAstralDriftScene(
   //
   // ONE literal, used both to seed `tuning` and to drive reset. Written twice it would
   // eventually be edited once, and the failure is silent: reset would quietly restore a
-  // composition that never shipped. The slider `value` attributes still have to agree
-  // with this — bindTuner sync()s on startup, so the markup is what wins on load.
+  // composition that never shipped.
+  // 生产环境由 applyTuningDefaults() 在启动时把这份字面量应用到网格上，它就是最终值。
   const TUNING_DEFAULTS = {
     circleR: 0.94,
     circleZ: 1.75,
@@ -3626,7 +4118,6 @@ export function createAstralDriftScene(
   };
 
   const tuning = { ...TUNING_DEFAULTS };
-  const tuningSync = {};
 
   // Dispose before replacing: the old attribute buffers live on the GPU and nothing else
   // holds a reference, so skipping this leaks a set of VBOs per slider tick — and a
@@ -3640,6 +4131,17 @@ export function createAstralDriftScene(
     // Radius is carried entirely by mesh scale — the SVG's outer ring sits at quad
     // radius 1659/2048, so there is no geometry to rebuild here at all.
     magicCircle.mesh.scale.setScalar((galaxy.radius * tuning.circleR * 2.0) / (1659 / 2048));
+    // 各层环半径（星系半径单位），供冲击波命中判定。
+    magicCircle.material.uniforms.uRingR.value = tuning.circleR;
+    magicCircle.staticMaterial.uniforms.uRingR.value = tuning.circleR * 0.823;
+    magicCircle.innerMaterial.uniforms.uRingR.value = tuning.circleR * 0.58;
+    // 刻度环紧贴外环外侧，随法阵半径一起重建。
+    retuneAnnulus(
+      scale.mesh,
+      galaxy.radius * tuning.circleR * 1.014,
+      galaxy.radius * tuning.circleR * 1.05,
+    );
+    scale.material.uniforms.uRingR.value = tuning.circleR * 1.03;
   }
 
   function applyRegisterRadius(index) {
@@ -3650,105 +4152,69 @@ export function createAstralDriftScene(
       galaxy.radius * (center - half),
       galaxy.radius * (center + half),
     );
+    // 环中心半径（星系半径单位），供冲击波命中判定。
+    runeRegisters[index].material.uniforms.uRingR.value = center;
   }
 
   function applyRailRadius() {
     const radius = galaxy.radius * tuning.railR;
     retuneAnnulus(runeRails[0].mesh, radius - TUNE_RAIL_HALF_WIDTH, radius + TUNE_RAIL_HALF_WIDTH);
+    runeRails[0].material.uniforms.uRingR.value = tuning.railR;
   }
 
-  // One binder for all ten rows. Range/step live in the input attributes, so the only
-  // things that vary per row are how the readout is printed and what to do with the
-  // value — same shape as the layout dials above.
-  function bindTuner(key, format, apply) {
-    const input = document.querySelector('#tune-' + key);
-    const label = document.querySelector('#tval-' + key);
-    const sync = () => {
-      tuning[key] = Number(input.value);
-      label.textContent = format(tuning[key]);
-      apply();
-    };
-    tuningSync[key] = sync;
-    input.addEventListener('input', sync);
-    sync();
+  // 把手调构图（tuning）一次性应用到法阵、符文环与导轨网格上，不依赖任何 DOM。
+  // 原型靠滑块面板在启动时做这件事，生产环境没有面板，漏掉它会让几何停在构建期字面量，
+  // 而每帧读取 tuning 的火花与微尘却已在调好的位置上，两者因此脱节。
+  function applyTuningDefaults() {
+    applyCircleRadius();
+    magicCircle.mesh.position.z = tuning.circleZ;
+    // 刻度环与法阵外层同一平面。
+    scale.mesh.position.z = tuning.circleZ;
+    magicCircle.staticMesh.position.z = tuning.circleStaticZ;
+    magicCircle.innerMesh.position.z = tuning.circleSpinZ;
+    magicCircle.mesh.rotation.x = THREE.MathUtils.degToRad(tuning.circleTiltX);
+    magicCircle.mesh.rotation.y = THREE.MathUtils.degToRad(tuning.circleTiltY);
+    applyRegisterRadius(0);
+    runeRegisters[0].mesh.position.z = tuning.rune1Z;
+    applyRegisterRadius(1);
+    runeRegisters[1].mesh.position.z = tuning.rune2Z;
+    applyRailRadius();
+    runeRails[0].mesh.position.z = tuning.railZ;
   }
 
-  const tuneRadius = (value) => value.toFixed(3);
-  const tuneDepth = (value) => value.toFixed(2);
-  const tuneAngle = (value) => value.toFixed(1) + '°';
-
-  // Programmatic entry point for the probe harness. It goes through the slider so the
-  // control, the readout and the scene can never disagree.
-  function setTuning(key, value) {
-    const input = document.querySelector('#tune-' + key);
-    if (!input || !tuningSync[key]) return false;
-    input.value = String(value);
-    tuningSync[key]();
-    return true;
-  }
-
-  function setupTuning() {
-    bindTuner('circleR', tuneRadius, applyCircleRadius);
-    bindTuner('circleZ', tuneDepth, () => {
-      magicCircle.mesh.position.z = tuning.circleZ;
-    });
-    bindTuner('circleStaticZ', tuneDepth, () => {
-      magicCircle.staticMesh.position.z = tuning.circleStaticZ;
-    });
-    bindTuner('circleSpinZ', tuneDepth, () => {
-      magicCircle.innerMesh.position.z = tuning.circleSpinZ;
-    });
-    bindTuner('circleTiltX', tuneAngle, () => {
-      magicCircle.mesh.rotation.x = THREE.MathUtils.degToRad(tuning.circleTiltX);
-    });
-    bindTuner('circleTiltY', tuneAngle, () => {
-      magicCircle.mesh.rotation.y = THREE.MathUtils.degToRad(tuning.circleTiltY);
-    });
-    bindTuner('rune1R', tuneRadius, () => applyRegisterRadius(0));
-    bindTuner('rune1Z', tuneDepth, () => {
-      runeRegisters[0].mesh.position.z = tuning.rune1Z;
-    });
-    bindTuner('rune2R', tuneRadius, () => applyRegisterRadius(1));
-    bindTuner('rune2Z', tuneDepth, () => {
-      runeRegisters[1].mesh.position.z = tuning.rune2Z;
-    });
-    bindTuner('railR', tuneRadius, applyRailRadius);
-    bindTuner('railZ', tuneDepth, () => {
-      runeRails[0].mesh.position.z = tuning.railZ;
-    });
-
-    // Reset goes through setTuning, not through `tuning`, for the same reason the probe
-    // harness does: writing the object moves the scene and leaves the slider and the
-    // readout showing the old value, which is worse than not resetting at all.
-    document.querySelector('#tune-reset').addEventListener('click', () => {
-      for (const [key, value] of Object.entries(TUNING_DEFAULTS)) setTuning(key, value);
-    });
-
-    // Collapse. Default expanded, and the head row never hides — a collapsed section
-    // with no visible handle is a section you cannot get back.
-    const hud = document.querySelector('#hud');
-    const collapseButton = document.querySelector('#tune-collapse');
-    collapseButton.addEventListener('click', () => {
-      const collapsed = hud.classList.toggle('tune-collapsed');
-      collapseButton.textContent = collapsed ? 'show' : 'hide';
-    });
-  }
-
-  const statFps = document.querySelector('#stat-fps');
-  const statMs = document.querySelector('#stat-ms');
-  const statCalls = document.querySelector('#stat-calls');
-  const statScale = document.querySelector('#stat-scale');
+  applyTuningDefaults();
 
   // ==================================================================================
   // Frame loop. 30 fps cap: this is a slow ambient piece and nothing in it benefits from
   // 60, let alone the 120 a ProMotion panel would otherwise drive. Scene time comes from
   // the wall clock, so the cap changes smoothness only, never tempo.
   // ==================================================================================
-  const clock = new THREE.Clock();
+  // 场景时钟：只在实际渲染的帧上累加墙钟增量，暂停期间不计时，恢复后从原处继续。
+  let sceneTime = 0;
+  let lastTickMs = performance.now();
   const REDUCED_MOTION_TIME = 26.0;
   let lastFrameStamp = -Infinity;
-  let fpsWindowStart = 0;
-  let fpsWindowFrames = 0;
+  // 开场动画：full 完整播放；short 加速并从 0.35 秒处起播；none 直接稳态。
+  const introRate = introKind === 'short' ? 2.4 : 1;
+  const introStart = introKind === 'short' ? 0.35 : 0;
+  // 共鸣脉冲调度状态。none 模式没有开场脉冲，首个周期脉冲排在 8–14 秒之间。
+  let pulseStart = -1e9;
+  let pulseGain = 0;
+  let nextPulseAt = introKind === 'none' ? 8 + Math.random() * 6 : Infinity;
+  let introPulseFired = introKind === 'none';
+  // 界面联动“能量”：目标值由 setEnergy() 写入，animate() 中平滑逼近。
+  let energyTarget = 0;
+  let energy = 0;
+  // animate() 最近一帧的场景时间，供在帧循环之外调用的 pulse() 使用。
+  let lastSceneTime = 0;
+
+  // 发出一次共鸣脉冲（时间为场景秒）。
+  function firePulse(time, gain) {
+    pulseStart = time;
+    pulseGain = gain;
+  }
+  // 核心屏幕位置投影用的复用向量，避免每帧分配。
+  const coreNdc = new THREE.Vector3();
   let animationFrameId = 0;
   let running = true;
   let disposed = false;
@@ -3760,8 +4226,35 @@ export function createAstralDriftScene(
     lastFrameStamp = frameStamp;
 
     const frameStart = performance.now();
-    const time = reducedMotion ? REDUCED_MOTION_TIME : clock.getElapsedTime();
+    const now = performance.now();
+    const deltaSeconds = (now - lastTickMs) / 1000;
+    sceneTime += deltaSeconds;
+    lastTickMs = now;
+    const time = reducedMotion ? REDUCED_MOTION_TIME : sceneTime;
+    lastSceneTime = time;
+    // 按真实时间缓动（约半秒到位），帧率再低也是同一个手感。
+    energy += (energyTarget - energy) * (1 - Math.exp(-deltaSeconds * 2.2));
     uTime.value = time;
+
+    // 开场时钟（秒，封顶 6 即稳态）。
+    const introT = introKind === 'none' ? 99 : Math.min(6.0, introStart + time * introRate);
+    uIntro.value = introT;
+    // 开场镜头：从更远、更高处带一点侧倾推入，4.6 秒内归位。
+    const introCam = (1 - THREE.MathUtils.clamp(introT / 4.6, 0, 1)) ** 3;
+
+    // 共鸣脉冲：开场在 2.6 秒处打一次强脉冲，此后每 14–20 秒一次。
+    if (!introPulseFired && introT >= 2.6) {
+      introPulseFired = true;
+      firePulse(time, 1.2);
+      nextPulseAt = time + 13 + Math.random() * 5;
+    } else if (time >= nextPulseAt) {
+      firePulse(time, 0.85);
+      nextPulseAt = time + 14 + Math.random() * 6;
+    }
+    const pulseP = Math.min(1, (time - pulseStart) / 2.8);
+    uPulse.value = pulseP;
+    uPulseGain.value = pulseP < 1 ? pulseGain : 0;
+    wave.mesh.visible = uPulse.value < 1;
 
     pointer.x += (pointer.targetX - pointer.x) * 0.045;
     pointer.y += (pointer.targetY - pointer.y) * 0.045;
@@ -3775,47 +4268,79 @@ export function createAstralDriftScene(
 
     camera.position.set(
       CAMERA_BASE.x + driftX - pointer.x * 1.15,
-      CAMERA_BASE.y + driftY + pointer.y * 0.7,
-      CAMERA_BASE.z + dolly,
+      CAMERA_BASE.y + driftY + pointer.y * 0.7 + introCam * 1.8,
+      CAMERA_BASE.z + dolly + introCam * 7.5,
     );
     camera.lookAt(CAMERA_TARGET);
     // Barely-there roll. At this amplitude it is not seen, it is only felt.
-    camera.rotation.z += Math.sin(time * 0.029) * 0.012;
+    camera.rotation.z += Math.sin(time * 0.029) * 0.012 + introCam * 0.07;
 
-    galaxy.group.rotation.x = layout.rotX;
-    galaxy.group.rotation.y = layout.rotY;
+    // 光芒：把核心投影到屏幕作为光束中心；开场 1.4 秒后渐入，脉冲时短暂增强。
+    camera.updateMatrixWorld();
+    coreNdc.copy(core.mesh.position).project(camera);
+    shinePass.center.set(coreNdc.x * 0.5 + 0.5, coreNdc.y * 0.5 + 0.5);
+    shinePass.aspect = camera.aspect;
+    shinePass.time = time;
+    shinePass.enabled = themeGain.shine > 0;
+    shinePass.strength =
+      SHINE_BASE *
+      themeGain.shine *
+      THREE.MathUtils.smoothstep((introT - 1.4) / 2.2, 0, 1) *
+      (1 + 0.6 * Math.exp(-pulseP * 3.5) * uPulseGain.value) *
+      (1 + 0.6 * energy);
+
+    // 竖屏使用 PORTRAIT 中的专用旋转（度 → 弧度）。
+    const degToRad = THREE.MathUtils.degToRad;
+    galaxy.group.rotation.x = layout.portrait ? degToRad(PORTRAIT.rotX) : layout.rotX;
+    galaxy.group.rotation.y = layout.portrait ? degToRad(PORTRAIT.rotY) : layout.rotY;
     // Breathing stays on Z only. On X it reads as the disc nodding, which is a
     // different and much more noticeable motion than the roll v2 intended.
-    galaxy.group.rotation.z = layout.rotZ + Math.sin(time * 0.02) * 0.03;
+    galaxy.group.rotation.z =
+      (layout.portrait ? degToRad(PORTRAIT.rotZ) : layout.rotZ) + Math.sin(time * 0.02) * 0.03;
     core.mesh.quaternion.copy(camera.quaternion);
     for (const child of veils.group.children) child.rotation.z += child.userData.spin * 0.016;
 
     galaxy.material.uniforms.uDial.value = dials.galaxy;
-    haze.material.uniforms.uDial.value = dials.galaxy;
+    haze.material.uniforms.uDial.value = dials.galaxy * themeGain.haze;
     rings.material.uniforms.uDial.value = dials.galaxy;
-    for (const register of runeRegisters) register.material.uniforms.uDial.value = dials.runes;
-    for (const rail of runeRails) rail.material.uniforms.uDial.value = dials.runes;
-    magicCircle.material.uniforms.uDial.value = dials.circle;
-    magicCircle.staticMaterial.uniforms.uDial.value = dials.circle;
-    magicCircle.innerMaterial.uniforms.uDial.value = dials.circle;
+    // 界面联动能量：法阵、符文、火花、核心随悬停 / 聚焦按钮额外提亮。
+    const runeEnergy = 1 + 0.28 * energy;
+    const circleEnergy = 1 + 0.22 * energy;
+    const particleEnergy = 1 + 0.5 * energy;
+    for (const register of runeRegisters) {
+      register.material.uniforms.uDial.value = dials.runes * runeEnergy;
+    }
+    for (const rail of runeRails) rail.material.uniforms.uDial.value = dials.runes * runeEnergy;
+    magicCircle.material.uniforms.uDial.value = dials.circle * circleEnergy;
+    magicCircle.staticMaterial.uniforms.uDial.value = dials.circle * circleEnergy;
+    magicCircle.innerMaterial.uniforms.uDial.value = dials.circle * circleEnergy;
+    scale.material.uniforms.uDial.value = dials.circle * circleEnergy;
     // The particle pass rides the dials of the layer it is shed from — one control per
     // idea, not one per object. Both shaders multiply their FINAL colour by uDial, so a
     // dial at 0 emits pure black into an additive blend: off, not merely dim.
-    runeSparks.material.uniforms.uDial.value = dials.runes;
-    circleMotes.material.uniforms.uDial.value = dials.circle;
+    runeSparks.material.uniforms.uDial.value = dials.runes * particleEnergy;
+    circleMotes.material.uniforms.uDial.value = dials.circle * particleEnergy;
     // ...and pick up wherever the tuner has dragged the bands and the figure to. Ordered
     // AFTER the group rotations above and before render, so a slider moved mid-frame is
     // never one frame out of step with the geometry it belongs to.
     runeSparks.sync();
     circleMotes.sync();
-    core.material.uniforms.uDial.value = dials.galaxy;
+    core.material.uniforms.uDial.value = dials.galaxy * themeGain.core * (1 + 0.15 * energy);
     for (const arc of arcs) arc.material.uniforms.uDial.value = dials.arc;
-    for (const material of veils.materials) material.uniforms.uDial.value = dials.veils;
-    storm.material.uniforms.uDial.value = dials.veils;
-    bokeh.material.uniforms.uDial.value = dials.veils;
+    for (const material of veils.materials) {
+      material.uniforms.uDial.value = dials.veils * themeGain.volumetrics;
+    }
+    storm.material.uniforms.uDial.value = dials.veils * themeGain.volumetrics;
+    bokeh.material.uniforms.uDial.value = dials.veils * themeGain.volumetrics;
 
-    bloom.strength = 0.28 * dials.bloom;
-    bloom.radius = 0.86;
+    // 共鸣脉冲起始瞬间泛光短暂增强。
+    bloom.strength =
+      0.17 *
+      dials.bloom *
+      themeGain.bloom *
+      (1 + 0.2 * Math.exp(-pulseP * 6) * uPulseGain.value) *
+      (1 + 0.06 * energy);
+    bloom.radius = 0.8;
     gradePass.uniforms.uTime.value = time;
 
     // THE GOVERNOR DECIDES BEFORE THE RENDER, NOT AFTER IT.
@@ -3837,7 +4362,7 @@ export function createAstralDriftScene(
 
     composer.render();
 
-    // ---- governor sampling + readout
+    // ---- 调速器采样（仅采样本帧耗时，读数面板已移除）
     //
     // A frame in which applyScale() ran carries the render-target rebuild in its cost.
     // That is honest — the rebuild really did happen — and one inflated sample in
@@ -3845,18 +4370,6 @@ export function createAstralDriftScene(
     const cost = performance.now() - frameStart;
     governor.samples.push(cost);
     if (governor.samples.length > 24) governor.samples.shift();
-    fpsWindowFrames += 1;
-    if (frameStamp - fpsWindowStart > 500) {
-      const fps = (fpsWindowFrames * 1000) / (frameStamp - fpsWindowStart);
-      if (statFps && statMs && statCalls && statScale) {
-        statFps.textContent = fps.toFixed(0);
-        statMs.textContent = cost.toFixed(1);
-        statCalls.textContent = renderer.info.render.calls;
-        statScale.textContent = governor.scale.toFixed(2);
-      }
-      fpsWindowStart = frameStamp;
-      fpsWindowFrames = 0;
-    }
   }
 
   const resizeObserver = new ResizeObserver(resize);
@@ -3885,20 +4398,34 @@ export function createAstralDriftScene(
   // The grace window is measured from HERE, so it covers the first real frames rather
   // than being eaten by module loading.
   governor.started = performance.now();
+  // 预热耗时不计入场景时间。
+  lastTickMs = performance.now();
   animate();
 
   return {
     applyTheme,
+    setEnergy(level) {
+      energyTarget = THREE.MathUtils.clamp(Number(level) || 0, 0, 1);
+    },
+    pulse() {
+      if (disposed) return;
+      // 正在进行且开始不足 1.2 秒的脉冲不打断；否则立即补一次，并把下一次周期脉冲
+      // 推到至少 10 秒之后，免得两次脉冲挤在一起。
+      const active = lastSceneTime - pulseStart < 2.8;
+      if (active && lastSceneTime - pulseStart <= 1.2) return;
+      firePulse(lastSceneTime, 1.0);
+      nextPulseAt = Math.max(nextPulseAt, lastSceneTime + 10);
+    },
     pause() {
       if (disposed || !running) return;
       running = false;
       cancelAnimationFrame(animationFrameId);
-      clock.stop();
     },
     resume() {
       if (disposed || running) return;
       running = true;
-      clock.start();
+      // 只重置增量基准，不清零 sceneTime，暂停的时长因此不计入场景时间。
+      lastTickMs = performance.now();
       animationFrameId = requestAnimationFrame(animate);
     },
     resize,
@@ -3924,6 +4451,7 @@ export function createAstralDriftScene(
         }
       });
       for (const texture of textures) texture.dispose();
+      shinePass.dispose();
       composer.dispose();
       renderer.dispose();
       renderer.forceContextLoss();

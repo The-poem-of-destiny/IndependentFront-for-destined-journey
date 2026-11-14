@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { defineComponent, h } from 'vue';
 import { flushPromises, shallowMount, type VueWrapper } from '@vue/test-utils';
 import HomePage from '../../../../src/ui/components/home/HomePage.vue';
 
@@ -152,6 +153,47 @@ describe('HomePage 主存档按钮', () => {
 
     expect(mocks.ui.navigate).toHaveBeenCalledWith('create');
     expect(mocks.ui.navigate).not.toHaveBeenCalledWith('game', expect.anything());
+  });
+});
+
+describe('HomePage 背景联动', () => {
+  it('悬停主按钮拉满能量、离开归零，点击触发共鸣脉冲', async () => {
+    const setEnergy = vi.fn();
+    const pulse = vi.fn();
+    const BackdropStub = defineComponent({
+      name: 'AstralDriftBackdrop',
+      setup(_props, { expose }) {
+        expose({ setEnergy, pulse });
+        return () => h('div', { class: 'backdrop-stub' });
+      },
+    });
+    wrapper = shallowMount(HomePage, {
+      global: {
+        stubs: {
+          AppButton: {
+            props: { block: Boolean },
+            template: '<button v-bind="$attrs" :class="{ \'btn-block\': block }"><slot /></button>',
+          },
+          AppModal: true,
+          AstralDriftBackdrop: BackdropStub,
+          ContentStatusBanner: true,
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    });
+    await flushPromises();
+    const button = wrapper.get('.btn-new-game');
+
+    await button.trigger('mouseover');
+    expect(setEnergy).toHaveBeenLastCalledWith(1);
+
+    await button.trigger('mouseout');
+    expect(setEnergy).toHaveBeenLastCalledWith(0);
+
+    await button.trigger('click');
+    expect(pulse).toHaveBeenCalledOnce();
+    expect(mocks.ui.navigate).toHaveBeenCalledWith('create');
   });
 });
 

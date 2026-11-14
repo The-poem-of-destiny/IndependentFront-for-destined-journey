@@ -1,3 +1,12 @@
+# Known issue: 首页 Astral Drift 背景的两处限制（2026-11-14 记档）
+
+状态：**已定位、暂不修**（2026-11-14 视觉升级时确认，分支 `homepage-enhance`）。设计与升级记录见 [首页 Astral Drift 集成设计](planning/2026-08-09-home-astral-drift-integration-design.md) §8.13。
+
+1. **分辨率调速器保护不了弱 GPU。** 现象：GPU 负载上升时调速器不降分辨率。根因：`drift/runtime.ts` 的 governor 计时的是 JS 侧提交耗时，不是 GPU 工作量。RTX 4090 上实测，渲染从 4 Mpix 到 25 Mpix，JS 耗时始终约 0.4 ms，而 GPU 同步耗时从 2–3 ms 升到 5–8 ms —— 它看到的帧耗时几乎不随画面规模变化，因此无法据此为弱 GPU 降分辨率。
+2. **调整窗口大小可能黑一帧。** 现象：调整窗口大小时首页背景可能闪黑一帧。根因：canvas 被 `setSize` 在帧循环之外清空，要到下一次渲染才重新画上。
+
+---
+
 # Known issue: UI 建档完整性与存档上下文（2026-11-09 记档）
 
 状态：**三条已修（2026-11-12，分支 `fix/ui-logic-review-20261112`，待合并、未做浏览器走查）**，见下方 📌 注记；原登记：未修复，P1 优先处理。基于 `master` / `8686806` 复核；完整证据、非 P1 子项及修复状态见 [UI 逻辑复核报告](reviews/2026-11-08-ui-logic-review.md)。本次仅登记问题，未实施代码修复。
