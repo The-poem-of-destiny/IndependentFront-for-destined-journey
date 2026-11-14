@@ -490,7 +490,152 @@ describe('settings-store', () => {
     const rows = await db.presets.toArray();
     expect(rows.map((p) => p.id).sort()).toEqual(['extra-preset', 'story-preset']);
     expect(rows.find((p) => p.id === 'story-preset')?.name).toBe('故事预设');
-    expect(store.settings.activePresetId).toBe('story-preset');
+    // 选择键不再被「补成默认」：空串即跟随默认，生效预设由读取侧解析
+    expect(store.settings.activePresetId).toBe('');
+    const { effectivePresetFrom, usePresets } =
+      await import('../../../src/ui/composables/usePresets');
+    expect(
+      effectivePresetFrom(store.settings, 'story', rows, store.projectAgentDefaults.agents)
+        .presetId,
+    ).toBe('story-preset');
+    // 📌 2026-11-14：出厂文件播种进 Dexie 的预设归内容所有（只读），不算「我的预设」
+    const origin = (id: string) => usePresets().catalog.value.find((e) => e.preset.id === id);
+    expect(origin('extra-preset')).toMatchObject({ origin: 'content', readonly: true });
+    expect(origin('story-preset')).toMatchObject({ origin: 'content', readonly: true });
+  });
+
+  it('预设选择归一：等于默认的清空，暂时缺席的 id 保留', async () => {
+    await drainMacrotasks(6);
+    await getDatabase().presets.clear();
+    const { useContentStore } = await import('../../../src/ui/stores/content-store');
+    const cs = useContentStore();
+    vi.spyOn(cs, 'loadProjectDefaults').mockResolvedValue({
+      version: 1,
+      agents: {
+        story: {
+          presetId: 'story-preset',
+          preset: { id: 'story-preset', name: '故事', settings: {}, createdAt: 1, updatedAt: 1 },
+        },
+      },
+    } as never);
+    vi.spyOn(cs, 'resolveProjectPresets').mockResolvedValue([] as never);
+
+    store.settings.activePresetId = 'story-preset';
+    store.settings.directPresetId = 'locked-pack-direct';
+    await store.loadAgentProjectDefaults();
+    expect(store.settings.activePresetId).toBe('');
+    expect(store.settings.directPresetId).toBe('locked-pack-direct');
+  });
+
+  describe('🔴 默认层加载不许以「丢掉结果」收尾（2026-11-14）', () => {
+    const storyDefaults = () =>
+      ({
+        version: 1,
+        agents: {
+          story: {
+            presetId: 'story-preset',
+            preset: { id: 'story-preset', name: '故事', settings: {}, createdAt: 1, updatedAt: 1 },
+          },
+        },
+      }) as never;
+
+    async function spyContent() {
+      const { useContentStore } = await import('../../../src/ui/stores/content-store');
+      const cs = useContentStore();
+      vi.spyOn(cs, 'resolveProjectPresets').mockResolvedValue([] as never);
+      return cs;
+    }
+
+    it('加载期间运行时修订号变了（hydrate / 世界书叠加层都会 +1）：再来一轮，默认层照收、出厂预设照播', async () => {
+      await drainMacrotasks(6);
+      const db = getDatabase();
+      await db.presets.clear();
+      const cs = await spyContent();
+      const { setRuntimePackBooks } = await import('@engine/content/pack-runtime');
+      let calls = 0;
+      vi.spyOn(cs, 'loadProjectDefaults').mockImplementation(async () => {
+        calls++;
+        // 模拟 loadProjectDefaults 自己的 hydrate 把修订号 +1（只在第一轮）
+        if (calls === 1) setRuntimePackBooks([]);
+        return storyDefaults();
+      });
+
+      await store.loadAgentProjectDefaults();
+
+      expect(Object.keys(store.projectAgentDefaults.agents)).toEqual(['story']);
+      expect(calls).toBeGreaterThanOrEqual(2);
+      expect(await db.presets.get('story-preset')).toBeDefined();
+    });
+
+    it('修订号每轮都在变：有上限地重来，最后一轮的结果照收', async () => {
+      await drainMacrotasks(6);
+      const db = getDatabase();
+      await db.presets.clear();
+      const cs = await spyContent();
+      const { setRuntimePackBooks } = await import('@engine/content/pack-runtime');
+      const spy = vi.spyOn(cs, 'loadProjectDefaults').mockImplementation(async () => {
+        setRuntimePackBooks([]);
+        return storyDefaults();
+      });
+
+      await store.loadAgentProjectDefaults();
+
+      expect(spy.mock.calls.length).toBeLessThanOrEqual(5);
+      expect(Object.keys(store.projectAgentDefaults.agents)).toEqual(['story']);
+      expect(await db.presets.get('story-preset')).toBeDefined();
+    });
+
+    it('运行时载荷换了：默认层先清空，随后自动重载', async () => {
+      await drainMacrotasks(6);
+      const cs = await spyContent();
+      const spy = vi.spyOn(cs, 'loadProjectDefaults').mockResolvedValue(storyDefaults());
+      await store.loadAgentProjectDefaults();
+      expect(Object.keys(store.projectAgentDefaults.agents)).toEqual(['story']);
+      const before = spy.mock.calls.length;
+
+      const { installRuntimePack } = await import('@engine/content/pack-runtime');
+      installRuntimePack({ packId: 'fixture-swap' } as never, false);
+      // 清空是同步的 —— 绝不拿对着旧载荷解析出来的默认层继续用
+      expect(store.projectAgentDefaults.agents).toEqual({});
+      await vi.waitFor(() =>
+        expect(Object.keys(store.projectAgentDefaults.agents)).toEqual(['story']),
+      );
+      expect(spy.mock.calls.length).toBeGreaterThan(before);
+
+      installRuntimePack(undefined, false);
+      await vi.waitFor(() =>
+        expect(Object.keys(store.projectAgentDefaults.agents)).toEqual(['story']),
+      );
+    });
+  });
+
+  it('旧版落盘的内置直出预设：原样的删掉，改过的另存为玩家预设并改指选择', async () => {
+    await drainMacrotasks(6);
+    const db = getDatabase();
+    await db.presets.clear();
+    const { createDirectPreset, createCachedDirectPreset } =
+      await import('../../../src/core/prompts/direct-prompt');
+    await db.presets.put({ ...createDirectPreset(), updatedAt: 123 });
+    const edited = { ...createCachedDirectPreset(), fixedSystem: '玩家改过的风格', updatedAt: 9 };
+    await db.presets.put(edited);
+    store.settings.directCachedPresetId = edited.id;
+    // 原样的旧落盘行被删时，指向它的选择键清回「跟随默认」（只在这次迁移里清）
+    store.settings.directPresetId = createDirectPreset().id;
+
+    await store.normalizePresetSelections();
+    expect(store.settings.directPresetId).toBeUndefined();
+
+    const rows = await db.presets.toArray();
+    expect(rows.some((p) => p.id === createDirectPreset().id)).toBe(false);
+    expect(rows.some((p) => p.id === edited.id)).toBe(false);
+    const copy = rows.find((p) => p.name === `${edited.name}（我的修改）`);
+    expect(copy).toMatchObject({ scope: 'direct', fixedSystem: '玩家改过的风格' });
+    expect(store.settings.directCachedPresetId).toBe(copy!.id);
+    // 幂等：再跑一次不再产生副本
+    await store.normalizePresetSelections();
+    expect(
+      (await db.presets.toArray()).filter((p) => p.name.endsWith('（我的修改）')),
+    ).toHaveLength(1);
   });
 
   it('已销毁的 store 不得再把自己的快照写回 localStorage', async () => {

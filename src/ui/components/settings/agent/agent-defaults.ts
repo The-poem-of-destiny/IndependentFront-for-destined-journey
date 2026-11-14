@@ -19,10 +19,11 @@ export interface AgentDefaultInput {
   promptDraft: string;
   /** Context Template 编辑框里的草稿 */
   templateDraft: string;
-  /** `settings.activePresetId` */
-  activePresetId: string;
-  /** 当前选中的预设整份（没有就传 null） */
-  activePreset: PresetItem | null;
+  /**
+   * **生效**的预设整份（preset-resolution 解析结果：选择键为空/失效时即默认那条）。
+   * 只有连默认都解析不到时才是 null —— 调用方应在那种情况下拒绝保存。
+   */
+  effectivePreset: PresetItem | null;
 }
 
 /**
@@ -39,7 +40,7 @@ export interface AgentDefaultInput {
  * 之后用户在设置页改预设不会顺手改掉已经"保存为默认"的那一份。
  */
 export function buildAgentDefaultEntry(input: AgentDefaultInput): AgentDefaultEntry {
-  const { agentId, settings, promptDraft, templateDraft, activePresetId, activePreset } = input;
+  const { agentId, settings, promptDraft, templateDraft, effectivePreset } = input;
 
   const base: AgentDefaultEntry = {
     ...settings,
@@ -50,9 +51,10 @@ export function buildAgentDefaultEntry(input: AgentDefaultInput): AgentDefaultEn
   };
 
   if (agentId === 'story' || isDirectSettingsProfile(agentId)) {
-    base.presetId = activePresetId || '';
-    if (activePresetId && activePreset) {
-      base.preset = JSON.parse(JSON.stringify(activePreset)) as PresetItem;
+    // 存的是生效预设本身：选择键为空（跟随默认）时也写出真实 id，绝不写空 id
+    if (effectivePreset) {
+      base.presetId = effectivePreset.id;
+      base.preset = JSON.parse(JSON.stringify(effectivePreset)) as PresetItem;
     }
     return base;
   }

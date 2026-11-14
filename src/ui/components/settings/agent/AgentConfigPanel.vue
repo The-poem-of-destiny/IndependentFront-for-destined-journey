@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isDirectSettingsProfile, resolveDirectPresetId } from '../../../lib/direct-settings';
+import { isDirectSettingsProfile } from '../../../lib/direct-settings';
 
 /**
  * 一个 Agent 的完整配置面（参数卡 + 提示词卡 + 动作栏）。
@@ -9,9 +9,13 @@ import { isDirectSettingsProfile, resolveDirectPresetId } from '../../../lib/dir
  * （例如图像生成分区）只要传一个不同的 `agentId` 就能复用整套配置面，不必再抄
  * 一遍两个草稿与三个动作。
  *
- * 持有**两个草稿**与**三个动作**，因为动作栏（保存设置 / 恢复默认 / 保存为项目默认）
- * 三个按钮全都要读写草稿 —— 把草稿推到 AgentPromptCard 里，就得三条向上 emit
- * 抬着提示词正文走，接口反而更宽。
+ * 持有**两个草稿**与几个动作，因为动作栏（保存提示词 / 全部恢复默认 / 保存为项目默认）
+ * 与预设条的「恢复默认」全都要读写草稿 —— 把草稿推到 AgentPromptCard 里，就得几条
+ * 向上 emit 抬着提示词正文走，接口反而更宽。
+ *
+ * 📌 2026-11-14：提示词区最上方是 `AgentPresetBar`（每个 Agent 都有）；预设型 Agent
+ *    不再有「保存」按钮（预设改动当场落库），「恢复成最新」改名「全部恢复默认」且只有
+ *    一个意思：清覆写层（保留 model）+ 预设选择回到默认。
  *
  * 🔴 **多根 fragment 是刻意的**：三张卡与动作栏原本就是 `.section` 的直接子节点，
  *    包一层 div 会平白改掉 DOM 层级。本组件不接受任何透传属性（只有一个声明过的
@@ -21,7 +25,7 @@ import { isDirectSettingsProfile, resolveDirectPresetId } from '../../../lib/dir
  * 🔴 草稿载入必须是 `watch(..., { immediate: true })`，**immediate 不是可选项**：
  *    整个 Agent 分区在 SettingsPage 里是 `v-if`，随 `activeSection` 挂载/卸载，
  *    所以每次进分区本组件都是**新挂载**的。普通 watch 在挂载时不触发，两个
- *    textarea 会空着渲染，接着「保存设置」把空串写进用户的提示词。抽壳之后这条
+ *    textarea 会空着渲染，接着「保存提示词」把空串写进用户的提示词。抽壳之后这条
  *    watch 必须留在**本组件**（草稿在这里，宿主看不见它们）——
  *    回归测试见 `AgentConfigPanel.test.ts` 第一条。
  *
@@ -33,6 +37,7 @@ import { computed, ref, watch } from 'vue';
 import AppButton from '../../shared/AppButton.vue';
 import AgentParamsCard from './AgentParamsCard.vue';
 import AgentPromptCard from './AgentPromptCard.vue';
+import AgentPresetBar from './AgentPresetBar.vue';
 import PresetManager from './PresetManager.vue';
 import { agentDisplayName, getDefaultTemplateForAgent } from './agent-list';
 import { buildAgentDefaultEntry } from './agent-defaults';
@@ -43,16 +48,10 @@ import {
   applyProjectDefaultToAgent,
   getAgentSettings,
   patchAgentSettings,
-  resetAgentSettings,
   type AgentDefaultsLayer,
 } from '../../../stores/agent-settings';
 import { initializeCachedDirectSettings } from '../../../lib/direct-settings';
-import {
-  createDirectPreset,
-  createCachedDirectPreset,
-  DIRECT_CACHED_PRESET_ID,
-  DIRECT_PRESET_ID,
-} from '@engine/prompts/direct-prompt';
+import { presetProfileForAgent } from '@engine/prompts/preset-resolution';
 import { useGameStore } from '../../../stores/game-store';
 import { GENERATION_MODE_LABELS } from '@engine/story/generation-mode';
 import { getAgentTemplate } from '@engine/prompts/agent-templates';
@@ -68,8 +67,8 @@ const props = defineProps<{
    *    .systemPrompt` 的框，就是 C6 点名的那种「切方言不跟着换」的静默漂移：改完看着
    *    生效了，换条方言又变回去，而两个框长得一模一样。
    *
-   * 默认 `false` —— Agent 分区一个字都不用改。旗子只藏**渲染**，草稿与
-   * 「保存设置」的 diff 写入照旧（草稿等于解析默认 → 不写覆写层，见 saveAgentSettings）。
+   * 默认 `false` —— Agent 分区一个字都不用改。旗子藏掉提示词卡、预设条与「保存提示词」
+   * （没有可保存的提示词），「全部恢复默认」照旧。
    */
   hidePrompt?: boolean;
 }>();
@@ -78,7 +77,7 @@ const cfg = useSettingsStore();
 const s = cfg.settings;
 const game = useGameStore();
 const ui = useUIStore();
-const { presets: presetList, upsertPreset } = usePresets();
+const { effectivePreset } = usePresets();
 
 const agentPromptDraft = ref('');
 const agentTemplateDraft = ref('');
@@ -108,21 +107,13 @@ const defaultsLayer = computed<AgentDefaultsLayer>(() => {
 });
 
 /**
- * 当前选中的预设 —— 与 PresetManager 各算一次（对 store 的一行派生，不穿 prop）。
- *
- * 内容-引擎分离波 1 / D22：预设真源是 Dexie（经 usePresets composable 的共享 ref），
- * 不再读 `s.presets` localStorage 镜像。
+ * 当前**生效**的预设（选择为空/失效时即默认）—— 与运行时同一个解析器。
+ * 不对应预设的 Agent 为 null。
  */
-const activePreset = computed(
-  () =>
-    presetList.value.find(
-      (p) =>
-        p.id ===
-        (isDirectSettingsProfile(props.agentId)
-          ? resolveDirectPresetId(s, props.agentId, defaultsLayer.value)
-          : s.activePresetId),
-    ) ?? null,
-);
+const activePreset = computed(() => {
+  const profile = presetProfileForAgent(props.agentId);
+  return profile ? effectivePreset(profile).preset : null;
+});
 
 /** 载入两个草稿：用户覆写 → 项目默认（agent-config.json）→ 引擎内置模板 */
 function loadDrafts(id: string) {
@@ -169,12 +160,15 @@ watch(
   { immediate: true, deep: true },
 );
 
+/** 预设型 Agent（story / direct_main / direct_cached）：提示词是预设，不是裸串 */
+const isPresetAgent = computed(() => presetProfileForAgent(props.agentId) !== null);
+
 function saveAgentSettings() {
-  // 非 story Agent：提交 System Prompt + Template 到覆写层
+  // 非预设 Agent：提交 System Prompt + Template 到覆写层
   // 🔴 D44 修正 4：diff 写入 —— 草稿与解析默认相等时**删键**（不是写进覆写层），
-  //    让默认层接管。这样「保存设置」不会把展示中的默认值固化成覆写，pack 后续
+  //    让默认层接管。这样「保存提示词」不会把展示中的默认值固化成覆写，pack 后续
   //    版本仍能透过覆写层够到这个 agent。
-  if (props.agentId !== 'story' && !isDirectSettingsProfile(props.agentId)) {
+  if (!isPresetAgent.value) {
     const resolved = getAgentSettings(s, props.agentId, defaultsLayer.value);
     const promptPatch: { systemPrompt: string | undefined } = {
       systemPrompt:
@@ -195,7 +189,23 @@ function saveAgentSettings() {
     }
   }
   s.agentDirty[props.agentId] = true;
-  ui.toast('Agent 设置已保存', 'success');
+  ui.toast('提示词已保存', 'success');
+}
+
+/**
+ * 预设条上的「恢复默认」（非预设 Agent）：**只**清 systemPrompt 与上下文模板两项覆写，
+ * 其余覆写（模型、数值旋钮、历史层数…）原样保留，然后按默认层重载草稿。
+ */
+function restorePromptDefaults() {
+  const id = props.agentId;
+  const entry = s.agents?.[id];
+  if (entry) {
+    patchAgentSettings(s, id, { systemPrompt: undefined, template: undefined });
+    // 只剩空壳时整条删掉 —— 不在覆写层留下「用户什么都没改」的脏条目
+    if (Object.keys(entry).length === 0) delete s.agents[id];
+  }
+  loadDrafts(id);
+  ui.toast('提示词已恢复默认', 'info');
 }
 
 async function saveAsDefault() {
@@ -211,18 +221,19 @@ async function saveAsDefault() {
     });
   }
 
+  // 预设型 Agent 存的是生效预设；连默认都解析不到就不写（否则会把空 presetId 写进默认文件）
+  if (presetProfileForAgent(agentId) && !activePreset.value) {
+    ui.toast('没有可用的预设，无法保存为项目默认', 'error');
+    return;
+  }
   const entry = buildAgentDefaultEntry({
     agentId,
     settings: getAgentSettings(s, agentId, defaultsLayer.value),
     promptDraft: agentPromptDraft.value,
     templateDraft: agentTemplateDraft.value,
-    activePresetId:
-      (isDirectSettingsProfile(agentId)
-        ? resolveDirectPresetId(s, agentId, defaultsLayer.value)
-        : s.activePresetId) || '',
     // ChatPreset 与 PresetItem 结构同形（id/name/description?/settings/createdAt/updatedAt）；
     // buildAgentDefaultEntry 内部用 JSON 深拷贝，此处对齐前端历史类型签名。
-    activePreset: activePreset.value as unknown as PresetItem | null,
+    effectivePreset: activePreset.value as unknown as PresetItem | null,
   });
 
   // 读取现有文件，更新当前 Agent，写回
@@ -244,74 +255,31 @@ async function saveAsDefault() {
   }
 }
 
-async function restoreAgentDefaults() {
+/**
+ * 「全部恢复默认」—— 对每个 Agent、每种内容包状态只有**一个**意思（2026-11-14）：
+ *   · 清掉这个 Agent 的整条覆写层，**永远保留 `model`**（用户选的 API 池不是「默认」能给的）；
+ *   · 预设型 Agent 的选择键清空（跟随默认，默认预设由读取侧解析，无需写库）；
+ *   · 按默认层重载两个草稿。
+ * 此前「无项目默认」那一支用 `resetAgentSettings` 连 model 一起清 —— 已删。
+ */
+function restoreAgentDefaults() {
   const id = props.agentId;
-  if (isDirectSettingsProfile(id)) {
-    applyProjectDefaultToAgent(s, id);
-    const presetId = resolveDirectPresetId({}, id, defaultsLayer.value);
-    if (id === 'direct_cached') delete s.directCachedPresetId;
-    else delete s.directPresetId;
-    if (id === 'direct_cached') {
-      // 渠道策略也属缓存直出配置：清掉后由初始化与读取侧的 ?? 'prefix' 回到默认
-      delete s.directCacheProvider;
-      s.directCachedInitialized = false;
-      initializeCachedDirectSettings(s, defaultsLayer.value);
-    }
-    const preset = cfg.projectAgentDefaults?.agents?.[id]?.preset;
-    if (!presetList.value.some((p) => p.id === presetId)) {
-      if (preset) await upsertPreset(preset as any);
-      else if (presetId === DIRECT_CACHED_PRESET_ID) await upsertPreset(createCachedDirectPreset());
-      else if (presetId === DIRECT_PRESET_ID) await upsertPreset(createDirectPreset());
-    }
-    s.agentDirty[id] = false;
-    ui.toast('已恢复直出默认', 'info');
-    return;
+  // 与「覆写差异面板」（AgentUpdateCenter）用同一个 helper —— 两处行为天然一致
+  applyProjectDefaultToAgent(s, id);
+  const profile = presetProfileForAgent(id);
+  if (profile === 'story') s.activePresetId = '';
+  else if (profile === 'direct') delete s.directPresetId;
+  else if (profile === 'direct_cached') {
+    delete s.directCachedPresetId;
+    // 渠道策略也属缓存直出配置：清掉后由初始化与读取侧的 ?? 'prefix' 回到默认
+    delete s.directCacheProvider;
+    s.directCachedInitialized = false;
+    initializeCachedDirectSettings(s, defaultsLayer.value);
   }
-
-  // 优先查项目默认
-  const pd = cfg.projectAgentDefaults?.agents?.[id];
-  if (pd) {
-    if (id === 'story') {
-      // story 走预设子系统：systemPrompt/template 由预设提供，这里只拉预设 + 世界书 + 旋钮
-      s.activePresetId = pd.presetId || '';
-      if (pd.preset) {
-        const existing = presetList.value.find((p) => p.id === pd.preset!.id);
-        if (!existing) {
-          // 🔒 P2-04: await 写 IndexedDB —— 此前 fire-and-forget + 空 catch，
-          // 刷新或页面销毁时 Promise 可能未完成，预设丢失且错误被吞。
-          try {
-            await upsertPreset(pd.preset as any);
-          } catch (err) {
-            console.error('[AgentConfigPanel] 恢复默认预设写 IndexedDB 失败:', err);
-          }
-        }
-      }
-      // 🔴 D44 修正 4：story「恢复默认」= 清覆写层（解析值自动回默认层 pack > 占位）。
-      //    不动 model（用户选的 API 池）。applyProjectDefaultToAgent 保留 model、清其余。
-      //    不写 systemPrompt/template —— story 的提示词是预设不是裸串。
-      applyProjectDefaultToAgent(s, id);
-    } else {
-      // 非 story：一键清覆写层（解析值回默认层，保留 model）。
-      // 与「覆写差异面板」（AgentUpdateCenter）用同一个 helper —— 两处行为天然一致。
-      applyProjectDefaultToAgent(s, id);
-
-      agentPromptDraft.value = pd.systemPrompt || '';
-      agentTemplateDraft.value = pd.template || '';
-    }
-    s.agentPromptEdited = false;
-    s.agentDirty[id] = false;
-    ui.toast('已恢复成最新', 'info');
-    return;
-  }
-
-  // 无项目默认 → 清覆写层（解析值落占位/兜底）。resetAgentSettings 连 model 一起清。
-  resetAgentSettings(s, id);
-  s.activePresetId = '';
-  agentPromptDraft.value = '';
-  agentTemplateDraft.value = '';
+  loadDrafts(id);
   s.agentPromptEdited = false;
   s.agentDirty[id] = false;
-  ui.toast('已恢复出厂默认', 'info');
+  ui.toast('已全部恢复默认', 'info');
 }
 </script>
 
@@ -323,12 +291,13 @@ async function restoreAgentDefaults() {
   </p>
   <AgentParamsCard :agent-id="agentId" />
 
-  <!-- story 走预设面板，其余 Agent 走 systemPrompt + 上下文模板（原 v-if/v-else 一对）；
-       hidePrompt 时两者都不出（提示词的真源在别处，见 props 上的注释） -->
-  <PresetManager
-    v-if="agentId === 'story' || isDirectSettingsProfile(agentId)"
-    :agent-id="agentId"
-  />
+  <!-- 「预设」状态条：每个 Agent 都有，说明现在用的是什么、从哪来、怎么回到默认。
+       hidePrompt 时不出（提示词的真源在别处，见 props 上的注释） -->
+  <AgentPresetBar v-if="!hidePrompt" :agent-id="agentId" @reset-prompt="restorePromptDefaults" />
+
+  <!-- 预设型 Agent 走预设内容面，其余 Agent 走 systemPrompt + 上下文模板；
+       hidePrompt 时两者都不出 -->
+  <PresetManager v-if="isPresetAgent" :agent-id="agentId" />
   <AgentPromptCard
     v-else-if="!hidePrompt"
     v-model:prompt="agentPromptDraft"
@@ -338,11 +307,31 @@ async function restoreAgentDefaults() {
 
   <!-- 操作按钮 -->
   <div class="detail-actions">
-    <AppButton v-if="canSaveAsDefault" variant="ghost" size="sm" @click="saveAsDefault">
+    <AppButton
+      v-if="canSaveAsDefault"
+      variant="ghost"
+      size="sm"
+      data-testid="save-as-default"
+      @click="saveAsDefault"
+    >
       保存为默认
     </AppButton>
-    <AppButton variant="ghost" size="sm" @click="restoreAgentDefaults">恢复成最新</AppButton>
-    <AppButton variant="primary" size="sm" @click="saveAgentSettings">保存设置</AppButton>
+    <AppButton
+      variant="ghost"
+      size="sm"
+      data-testid="restore-all-defaults"
+      @click="restoreAgentDefaults"
+      >全部恢复默认</AppButton
+    >
+    <!-- 预设型 Agent 没有「保存」：预设的改动当场落库，这颗按钮以前只弹一条 toast -->
+    <AppButton
+      v-if="!isPresetAgent && !hidePrompt"
+      variant="primary"
+      size="sm"
+      data-testid="save-prompt"
+      @click="saveAgentSettings"
+      >保存提示词</AppButton
+    >
   </div>
 </template>
 

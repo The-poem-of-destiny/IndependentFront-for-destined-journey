@@ -329,12 +329,48 @@ describe('direct preset defaults', () => {
         },
         undefined,
         true,
+        ['author-direct', 'author-cached'].map((id) => ({
+          id,
+          name: id,
+          settings: {},
+          createdAt: 0,
+          updatedAt: 0,
+        })),
       ) as AgentConfig[];
       expect(configs.find((config) => config.agentId === 'direct_main')?.presetId).toBe(
         mode === 'direct_cached' ? 'author-cached' : 'author-direct',
       );
     },
   );
+});
+
+describe('story 预设解析（经 preset-resolution）', () => {
+  const storyPreset = (id: string) => ({ id, name: id, settings: {}, createdAt: 0, updatedAt: 0 });
+
+  it.each([
+    ['空选择', ''],
+    ['失效选择', 'deleted-preset'],
+  ])('%s → 落到内容默认，而不是带着查不到的 id 去组装', (_label, selection) => {
+    const pipeline = makePipeline({}, { activePresetId: selection });
+    const configs = (pipeline as any).buildAgentConfigs(
+      { story: { presetId: 'pack-main' } },
+      undefined,
+      false,
+      [storyPreset('pack-first'), storyPreset('pack-main')],
+    ) as AgentConfig[];
+    expect(configs.find((config) => config.agentId === 'story')?.presetId).toBe('pack-main');
+  });
+
+  it('有效选择 → 用玩家选的那条', () => {
+    const pipeline = makePipeline({}, { activePresetId: 'mine' });
+    const configs = (pipeline as any).buildAgentConfigs(
+      { story: { presetId: 'pack-main' } },
+      undefined,
+      false,
+      [storyPreset('pack-main'), storyPreset('mine')],
+    ) as AgentConfig[];
+    expect(configs.find((config) => config.agentId === 'story')?.presetId).toBe('mine');
+  });
 });
 
 describe('侧链 Agent 调试调用身份', () => {

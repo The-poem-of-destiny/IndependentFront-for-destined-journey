@@ -88,6 +88,17 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   🔴 `presetsRef` 是**模块级单例**：挪进函数体会让 PresetManager
 │   │                                      与 AgentConfigPanel 各持一份，`saveAsDefault` 写完另一边看不到。
 │   │                                      `activePresetId` 仍留在 settings-store（D22：settings 只留它）
+│   │                                   📌 2026-11-14：目录（`catalog`）与生效预设（`effectivePreset` /
+│   │                                      `defaultPreset`）都经引擎 `prompts/preset-resolution.ts` 解析；
+│   │                                      选择键空串 = 跟随默认（`selectPreset` 选中默认那条时存空串）。
+│   │                                      🔴 只读预设一律不许写：内置直出预设与受保护内容包预设由模块级
+│   │                                      `upsertPreset`/`removePreset` 直接拒绝（受保护包预设**不再**有
+│   │                                      「只进内存」的编辑）；composable 返回的那对再按目录 `readonly`
+│   │                                      拒绝内容包 / 出厂预设。要改先 `duplicateAsUser(id, scope, name?)`。
+│   │                                      出厂文件播种进 Dexie 的预设经 `registerFactoryPresetIds`
+│   │                                      （settings-store 播种时登记）算内容所有，不显示成「我的预设」。
+│   │                                      `migrateBuiltinPresetRows` 删掉原样旧行时把指向它的选择键清空 ——
+│   │                                      平时显式选中引擎内置预设是合法的
 │   ├── useBeautify.ts               ← [工坊正则] 美化管线（从 ChatFlow.vue 抽出，CombatMessageFlow 复用）：
 │   │                                   按当前存档合并预设规则与用户规则，交给统一 narrative renderer 编译。
 │   │                                   autoEnable 解析与 BeautifierSection **同口径** ——
@@ -128,6 +139,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │                                          `tests/layering-gate.test.ts` 两道闸守着。**前端往引擎的方向
 │                                          不受限**，所以本目录是「值得收口的东西的家」，不是必经之路
 │   ├── journey-readiness.ts         ← 创角前本机配置检查；复用 endpoint-resolver 与主 DAG 名册，不发网络请求
+│   │                                   📌 2026-11-14：报错里的 Agent 改用中文名（取自 agent-roster.ts）
+│   ├── agent-roster.ts              ← 🆕 2026-11-14 Agent 中文名表 + 直出名册 + 「哪种存档模式会读哪些
+│   │                                   Agent 配置」的推导（主 DAG 成员与顺序直接摊平引擎管线，不手写）；
+│   │                                   设置页子导航分组与 journey-readiness 共用
 │   ├── game-pipeline.ts             ← GamePipeline（AgentConfig 组装/上下文/编排器/回调）
 │   │                                   [图像 v1] +onSceneImage（照 onPlayAudio 的形状）
 │   │                                   🔴 **自动档绝不追溯开火**（D15）：这个回调只在编排器**刚产出**
@@ -250,6 +265,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── agent-activity.ts            ← 14 个 Agent 的**中文活动文案**（「书写此刻」「辨认后续事件」…）
 │   │                                   ⚠️ 名册现在是 15 个：`lore_select` **尚无条目**（加它时漏的，
 │   │                                      Record 缺键不报错，只会让该 agent 的活动行落到兜底文案）
+│   │                                   📌 2026-11-14：已补 `lore_select`（挑选本轮资料）与 `direct_main`
+│   │                                      （书写此刻）；上面的计数不再维护
 │   │                                   + AgentToolActivity 的展示层投影；TurnActivityLedger 消费
 │   ├── chat-depth.ts                ← ST 兼容的消息深度（zero-based，从末尾倒数）。
 │   │                                   🔴 只有 user/assistant 占槽位 —— 应用自造的 system 事件**不占**，
@@ -563,6 +580,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   │                               新挂载，普通 watch 不触发 → 文本框空着渲染
 │   │   │   │                               → 「保存设置」把空串写进用户提示词
 │   │   │   │                               （回归测试 AgentConfigPanel.test.ts 第一条）
+│   │   │   │                            📌 2026-11-14：参数卡之后先是 AgentPresetBar（每个 Agent 都有），
+│   │   │   │                              再是 PresetManager（预设型）或 AgentPromptCard（其余）。
+│   │   │   │                              动作栏：[保存为默认（仅 dev）] [全部恢复默认] [保存提示词（仅非预设型）]。
+│   │   │   │                              「全部恢复默认」只有一个意思：清覆写层但**保留 model**，
+│   │   │   │                              预设型再把选择键清回跟随默认，然后重载草稿 —— 不再有
+│   │   │   │                              「无项目默认就连 model 一起清」那一支。预设型不再有
+│   │   │   │                              「保存设置」（它只弹 toast）；非预设型的改名「保存提示词」
+│   │   │   ├── AgentPresetBar.vue    ← 🆕 2026-11-14「预设」状态条：预设型 Agent 是分组下拉
+│   │   │   │                            （默认 / 内容包 / 引擎内置（仅直出）/ 我的预设，默认组只有一项
+│   │   │   │                            「默认 · 名称」且存空串）+ 来源角标 + 失效选择提示 + 复制为我的预设 /
+│   │   │   │                            导入（scope = 当前生成方式）/ 导出 / 重命名与删除（仅我的预设，删除
+│   │   │   │                            要确认）/ 恢复默认；其余 Agent 是只读状态行「默认（内容包|占位内容）」
+│   │   │   │                            或「我的自定义（已改 N 处）」，恢复默认 emit `reset-prompt`，由宿主只清
+│   │   │   │                            systemPrompt 与上下文模板两项覆写
 │   │   │   ├── AgentParamsCard.vue   ← API 池 + LLM 旋钮 + 世界书卡（共用 agentCfg/setAgentField）。
 │   │   │   │                            旋钮里除数值五参外还有 **失败重试次数**（`maxRetries`，
 │   │   │   │                            2026-08-16）与 **历史层数 / 历史截断字数**
@@ -584,12 +615,25 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               （前缀续写）」开关 +「填充位置」（content / reasoning_content）
 │   │   │                               选择，写预设 `settings.prefill`（判据复用引擎 `findTailAssistantEntry`）；
 │   │   │                               另补「编辑预设」入口（此前 preset 级编辑无按钮可达）。
+│   │   │                             📌 2026-11-14：选择器、导入/导出/删除与「编辑预设」都搬进
+│   │   │                               AgentPresetBar（编辑缩成「重命名」：名称 + 描述）；引擎从不读取的
+│   │   │                               采样字段（`temp_openai` 等）与 Main Prompt 编辑框已删，「+ 新建」
+│   │   │                               空白预设已删（新预设只能复制或导入）。本组件只管生效预设的内容，
+│   │   │                               且对只读预设**写时复制**：先复制成「<原名>（我的修改）」并切换，
+│   │   │                               改动落在副本，原预设不动（`persistPreset`）。
 │   │   │   ├── agent-list.ts         ← 9 个 Agent 的展示元数据 + getDefaultTemplateForAgent
 │   │   │   │                            （story 走 PresetManager、image_prompt 走 ImagePromptCard（D53）、
 │   │   │   │                              plot_* / memory_summary 走各自分区，故不在这张表里）
 │   │   │   │                            （combat 为单一 DM 协议沙盒侧链；`image_prompt` 按 D53 刻意
 │   │   │   │                              不入本表，故设置页 Agent 子导航少它一项；
 │   │   │   │                              `prose_rewrite` 是正文润色侧链，手动触发）
+│   │   │   │                            📌 2026-11-14：上面的「9 个」与「不在这张表里」已过时 —— 表里现含
+│   │   │   │                              story / plot_* / memory_summary / 直出两份配置等，只有 image_prompt
+│   │   │   │                              刻意不入。子导航分三组：「Agent 模式」（主 DAG，按管线阶段顺序，
+│   │   │   │                              含仅 Story v2 的 lore_select）/「直出模式」/「辅助 Agent」。
+│   │   │   │                              分组**由 `lib/agent-roster.ts` 推导**（摊平引擎两条管线 + 直出名册），
+│   │   │   │                              原 `stage` 字段已删；有活跃存档时本存档会用到的行标「本存档使用」。
+│   │   │   │                              漂移闸门：tests/ui/components/settings/agent/agent-list.groups.test.ts
 │   │   │   ├── placeholder-catalog.ts← 23 项占位符 + 按 Agent 过滤（DAG 偏序 + 侧链归属）
 │   │   │   ├── agent-defaults.ts     ← buildAgentDefaultEntry（纯装配；patch 副作用留调用方）
 │   │   │   └── agent-chrome.css      ← ★跨组件共用：.prompt-editor / .template-preview-panel
@@ -1059,6 +1103,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 ### 预设系统（正文 Agent 专用）
 
 仿 SillyTavern AI Response Configuration 面板：预设选择器 + 导入 ST JSON / 新建 / 导出 / 删除；采样器参数预览；条目列表（启用/名称/角色/字数/编辑）；ST 导入完整保留 `prompts[]`。
+
+📌 2026-11-14：上面这段是旧版形态。现在预设型 Agent（story / direct_main / direct_cached）的选择与预设级操作在
+`AgentPresetBar`（分组下拉 + 来源角标 + 复制 / 导入 / 导出 / 重命名 / 删除 / 恢复默认），条目列表在 `PresetManager`；
+没有「新建空白预设」，也没有采样器参数编辑。内容包 / 出厂 / 引擎内置预设只读，改动走写时复制。
 
 ### 2026-09-05 键盘契约补注
 

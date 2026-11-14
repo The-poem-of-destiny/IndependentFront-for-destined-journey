@@ -2,10 +2,37 @@ import { describe, expect, it } from 'vitest';
 import {
   initializeDirectSettings,
   initializeCachedDirectSettings,
-  resolveDirectPresetId,
 } from '../../../src/ui/lib/direct-settings';
+import {
+  buildPresetCatalog,
+  builtinDirectPresets,
+  resolveEffectivePreset,
+  type PresetAgentDefaults,
+} from '../../../src/core/prompts/preset-resolution';
 import { checkJourneyReadiness } from '../../../src/ui/lib/journey-readiness';
 import type { UiSettings } from '../../../src/ui/stores/settings-types';
+
+/** 直出预设的生效 id：与运行时同一个解析器（目录里放着测试用到的全部预设） */
+function resolveDirectPresetId(
+  settings: Pick<UiSettings, 'directPresetId' | 'directCachedPresetId'>,
+  profile: 'direct_main' | 'direct_cached',
+  agentDefaults: Record<string, Record<string, unknown>>,
+): string {
+  const defaults = agentDefaults as PresetAgentDefaults;
+  const ids = ['user-direct', 'user-cached', 'author-direct', 'author-cached', 'updated-cached'];
+  const catalog = buildPresetCatalog({
+    storedRows: ids.map((id) => ({ id, name: id, settings: {}, createdAt: 0, updatedAt: 0 })),
+    agentDefaults: defaults,
+    builtins: builtinDirectPresets(),
+  });
+  return resolveEffectivePreset({
+    profile: profile === 'direct_cached' ? 'direct_cached' : 'direct',
+    selection:
+      profile === 'direct_cached' ? settings.directCachedPresetId : settings.directPresetId,
+    agentDefaults: defaults,
+    catalog,
+  }).presetId;
+}
 
 describe('direct settings', () => {
   it.each([false, true])(

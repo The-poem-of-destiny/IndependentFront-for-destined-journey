@@ -1,5 +1,5 @@
 /**
- * 13 个 Agent 的清单（Q-25 第 9 步）。
+ * 设置页 Agent 子导航的清单与分组（Q-25 第 9 步；2026-11-14 改为按模式分组）。
  *
  * 为什么单独一个文件：它有**两个**消费者，且分居两侧 ——
  *   · 设置页壳层的 Agent 子导航（`.sub-nav`，它是三栏布局里 `.settings-content` 的
@@ -8,11 +8,25 @@
  *
  * 🔴 这**不是**「Agent 有哪些」的唯一真源 —— 真源是引擎侧的
  *    `agent-config.json` 与 `agent-templates.ts`。本表只是**设置页的展示元数据**
- *    （中文名、一句话说明、阶段号），用于渲染导航与页头。新增 Agent 时两边都要动：
+ *    （一句话说明 + 出现顺序）。新增 Agent 时两边都要动：
  *    引擎那边决定它跑不跑，这里决定它在设置页里看不看得见。
+ *    中文名与「哪个模式跑哪些 Agent」在 `lib/agent-roster.ts`，分组由它**推导**，不在这里手写
+ *    （漂移由 tests/ui/components/settings/agent/agent-list.groups.test.ts 钉住）。
  */
 
 import { getDefaultTemplate } from '@engine/prompts/placeholder-registry';
+import {
+  AGENT_DISPLAY_NAMES,
+  AGENT_MODE_AGENT_IDS,
+  DIRECT_MODE_AGENT_IDS,
+  DIRECT_PROFILE_IDS,
+  STORY_V2_ONLY_AGENT_IDS,
+} from '../../../lib/agent-roster';
+
+export { agentDisplayName } from '../../../lib/agent-roster';
+
+/** 子导航的三个分组 */
+export type AgentGroupKey = 'agent' | 'direct' | 'auxiliary';
 
 export interface AgentListEntry {
   /** 与 agent-config.json / agent-templates.ts 一致的 id */
@@ -21,88 +35,96 @@ export interface AgentListEntry {
   name: string;
   /** 子导航悬停与详情页头下方的一句话说明 */
   desc: string;
-  /**
-   * 编排阶段号（DAG 里的第几阶段）。
-   * 目前只用于阅读时理解顺序，UI 没有按它分组 —— 真正的编排顺序由
-   * `agent-orchestrator` 的 DAG 决定，不读这个字段。
-   */
-  stage: number;
+  /** 所属分组（由引擎管线与直出名册推导） */
+  group: AgentGroupKey;
+  /** 行内的次要标签（如「直出也使用」「仅 Story v2」） */
+  tags: readonly string[];
 }
 
-export const AGENT_LIST: readonly AgentListEntry[] = [
-  {
-    id: 'direct_main',
-    name: '直出主生成',
-    desc: '直出存档使用：一次完成叙事与演算，记忆仍独立调用；存档模式在创建时选择',
-    stage: 1,
-  },
+export interface AgentGroup {
+  key: AgentGroupKey;
+  label: string;
+  /** 分组标题下的一句白话说明 */
+  caption: string;
+  items: readonly AgentListEntry[];
+}
 
-  {
-    id: 'direct_cached',
-    name: '直出主生成（缓存优化）',
-    desc: '直出存档使用：一次完成叙事与演算，记忆仍独立调用；存档模式在创建时选择',
-    stage: 1,
-  },
-  {
-    id: 'memory_recall',
-    name: '记忆召回',
-    desc: '根据用户输入从记忆库中 Embedding 召回相关记忆',
-    stage: 0,
-  },
-  { id: 'plot_pre_check', name: '剧情预检', desc: '正文前检查需要触发的剧情事件和背景', stage: 0 },
-  {
-    id: 'lore_select',
-    name: '资料选择',
-    desc: '仅 Story 新模式使用，筛选本轮资料并有限补充；独立配置 API 池',
-    stage: 1,
-  },
-  { id: 'story', name: '正文生成', desc: '核心叙事 Agent，生成游戏正文内容', stage: 1 },
-  {
-    id: 'craft_gen',
-    name: '制作生成',
-    desc: '处理制作意图，调用 $craft 工具生成创意效果',
-    stage: 1,
-  },
-  {
-    id: 'combat',
-    name: '战斗主持人',
-    desc: '理解玩家意图，并负责战斗开场、结算与终局叙事',
-    stage: 1,
-  },
-  {
-    id: 'prose_rewrite',
-    name: '正文润色',
-    desc: '把最新一段正文按文风规范重写（DeepSeek beta 前缀续写，手动触发）',
-    stage: 1,
-  },
+/**
+ * 每个 Agent 的一句话说明。声明顺序只决定**直出 / 辅助**两组内的先后；
+ * Agent 模式组一律按管线阶段顺序排。
+ */
+const AGENT_DESCRIPTIONS: readonly { id: string; desc: string }[] = [
+  { id: 'memory_recall', desc: '根据用户输入从记忆库中 Embedding 召回相关记忆' },
+  { id: 'plot_pre_check', desc: '正文前检查需要触发的剧情事件和背景' },
+  { id: 'lore_select', desc: '仅 Story v2：筛选本轮资料并有限补充；独立配置 API 池' },
+  { id: 'story', desc: '核心叙事 Agent，生成游戏正文内容' },
   {
     id: 'request_dispatcher',
-    name: '请求调度',
     desc: '分析正文，判断新-vs-已有角色/物品/制作，输出 XML 标签调度下游 Agent',
-    stage: 2,
+  },
+  { id: 'memory_summary', desc: '生成本轮记忆摘要并计算 Embedding' },
+  { id: 'daily_check', desc: '结算状态倒计时/到期/周期与条件效果（不做社交/属性检定）' },
+  { id: 'vars_update', desc: '根据调度器标签更新角色状态、物品状态、环境效果' },
+  { id: 'plot_post_check', desc: '正文后检查世界线变动，修正剧情大纲' },
+  {
+    id: 'direct_main',
+    desc: '直出存档使用：一次完成叙事与演算，记忆仍独立调用；存档模式在创建时选择',
   },
   {
-    id: 'daily_check',
-    name: '日常检定',
-    desc: '结算状态倒计时/到期/周期与条件效果（不做社交/属性检定）',
-    stage: 2,
+    id: 'direct_cached',
+    desc: '缓存直出存档使用：运行时仍执行直出主生成，连接、参数与预设单独配置',
   },
+  { id: 'craft_gen', desc: '处理制作意图，调用 $craft 工具生成创意效果' },
+  { id: 'entity_gen', desc: '生成新角色/技能/装备/道具/状态/登神（原 char_gen + item_gen 合并）' },
+  { id: 'combat', desc: '理解玩家意图，并负责战斗开场、结算与终局叙事' },
   {
-    id: 'vars_update',
-    name: '变量更新',
-    desc: '根据调度器标签更新角色状态、物品状态、环境效果',
-    stage: 3,
+    id: 'prose_rewrite',
+    desc: '把最新一段正文按文风规范重写（DeepSeek beta 前缀续写，手动触发）',
   },
-  {
-    id: 'entity_gen',
-    name: '实体生成',
-    desc: '生成新角色/技能/装备/道具/状态/登神（原 char_gen + item_gen 合并）',
-    stage: 3,
-  },
-  { id: 'memory_summary', name: '记忆总结', desc: '生成本轮记忆摘要并计算 Embedding', stage: 4 },
-  { id: 'plot_post_check', name: '剧情修正', desc: '正文后检查世界线变动，修正剧情大纲', stage: 5 },
-  { id: 'plot_outline', name: '大纲生成', desc: '主线/支线模式下生成剧情大纲和事件树', stage: 5 },
+  { id: 'plot_outline', desc: '主线/支线模式下生成剧情大纲和事件树' },
 ];
+
+/** 判定分组：先看是不是主 DAG 成员，再看是不是直出配置，其余都是按需触发的辅助 Agent */
+function agentGroupOf(id: string): AgentGroupKey {
+  if (AGENT_MODE_AGENT_IDS.includes(id)) return 'agent';
+  if (DIRECT_PROFILE_IDS.includes(id)) return 'direct';
+  return 'auxiliary';
+}
+
+function tagsOf(id: string): string[] {
+  const tags: string[] = [];
+  if (AGENT_MODE_AGENT_IDS.includes(id) && DIRECT_MODE_AGENT_IDS.includes(id)) {
+    tags.push('直出也使用');
+  }
+  if (STORY_V2_ONLY_AGENT_IDS.includes(id)) tags.push('仅 Story v2');
+  return tags;
+}
+
+const GROUP_META: readonly Omit<AgentGroup, 'items'>[] = [
+  { key: 'agent', label: 'Agent 模式', caption: '每回合由多个 Agent 接力完成' },
+  { key: 'direct', label: '直出模式', caption: '单个模型一次写完整回合' },
+  { key: 'auxiliary', label: '辅助 Agent', caption: '按需触发，任何模式都会用到' },
+];
+
+const ENTRIES: AgentListEntry[] = AGENT_DESCRIPTIONS.map(({ id, desc }) => ({
+  id,
+  name: AGENT_DISPLAY_NAMES[id] ?? id,
+  desc,
+  group: agentGroupOf(id),
+  tags: tagsOf(id),
+}));
+
+/** 分好组、排好序的子导航（Agent 模式组按管线阶段顺序） */
+export const AGENT_GROUPS: readonly AgentGroup[] = GROUP_META.map((meta) => {
+  const items = ENTRIES.filter((e) => e.group === meta.key);
+  if (meta.key === 'agent') {
+    items.sort((a, b) => AGENT_MODE_AGENT_IDS.indexOf(a.id) - AGENT_MODE_AGENT_IDS.indexOf(b.id));
+  }
+  return { ...meta, items };
+});
+
+/** 扁平清单（与子导航同序）：选中校验、页头取名、世界书受众列表等消费方用 */
+export const AGENT_LIST: readonly AgentListEntry[] = AGENT_GROUPS.flatMap((g) => g.items);
 
 /**
  * 把**持久化的** Agent 选择解析成一个当前仍然有效的 id（查不到 → null）。
@@ -120,12 +142,6 @@ export const AGENT_LIST: readonly AgentListEntry[] = [
 export function resolveAgentSelection(persisted: string | null | undefined): string | null {
   if (!persisted) return null;
   return AGENT_LIST.some((a) => a.id === persisted) ? persisted : null;
-}
-
-/** 找一个 Agent 的展示名；查不到就把 id 原样显示出来，不吞掉未知 Agent */
-export function agentDisplayName(agentId: string | null): string {
-  if (!agentId) return '';
-  return AGENT_LIST.find((a) => a.id === agentId)?.name ?? agentId;
 }
 
 /**

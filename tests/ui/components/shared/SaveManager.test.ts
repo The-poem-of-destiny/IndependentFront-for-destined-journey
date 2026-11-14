@@ -30,8 +30,11 @@ const mocks = vi.hoisted(() => ({
   },
   settings: {
     settings: { activePresetId: null as string | null },
+    projectAgentDefaults: undefined as
+      { agents: Record<string, { presetId?: string; preset?: unknown }> } | undefined,
     reloadApiEntries: vi.fn(),
   },
+  exportSessionSave: vi.fn(),
   admission: vi.fn(),
   database: {
     getSave: vi.fn(),
@@ -49,6 +52,9 @@ vi.mock('../../../../src/ui/stores/settings-store', () => ({
   useSettingsStore: () => mocks.settings,
 }));
 vi.mock('@engine/persistence/database', () => mocks.database);
+vi.mock('@engine/persistence/session-backup', () => ({
+  exportSessionSave: mocks.exportSessionSave,
+}));
 vi.mock('@engine/story/story-context-mode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@engine/story/story-context-mode')>();
   return { ...actual, decideStoryContextAdmission: mocks.admission };
@@ -95,6 +101,9 @@ beforeEach(() => {
   mocks.database.saveSaveSlot.mockReset().mockResolvedValue('save-1');
   mocks.database.deleteSaveSlot.mockReset().mockResolvedValue(undefined);
   mocks.database.getPresets.mockReset().mockResolvedValue([]);
+  mocks.settings.settings.activePresetId = null;
+  mocks.settings.projectAgentDefaults = undefined;
+  mocks.exportSessionSave.mockReset().mockResolvedValue({ kind: 'session' });
   mocks.admission.mockReset().mockReturnValue({ ok: true });
 });
 
@@ -205,5 +214,41 @@ describe('SaveManager 应用级窗口', () => {
 
     expect(mocks.admission).toHaveBeenCalledOnce();
     expect(mocks.ui.navigate).toHaveBeenCalledWith('game', 'save-2');
+  });
+});
+
+describe('SaveManager 导出存档的 story 预设', () => {
+  const contentPreset = {
+    id: 'pack-story',
+    name: '内容默认',
+    settings: {},
+    createdAt: 0,
+    updatedAt: 0,
+  };
+
+  async function exportSelected() {
+    URL.createObjectURL = vi.fn(() => 'blob:x');
+    URL.revokeObjectURL = vi.fn();
+    await mountManager();
+    findButton('导出存档')!.click();
+    // 导出链里有几次动态 import，flushPromises 等不到它们落地
+    await vi.waitFor(() => expect(mocks.ui.toast).toHaveBeenCalled());
+    return mocks.exportSessionSave.mock.calls[0]?.[1];
+  }
+
+  it('选择为空时导出生效的内容默认预设', async () => {
+    mocks.settings.projectAgentDefaults = { agents: { story: { presetId: 'pack-story' } } };
+    mocks.database.getPresets.mockResolvedValue([contentPreset]);
+
+    expect(await exportSelected()).toEqual({ storyPreset: { id: 'pack-story', name: '内容默认' } });
+  });
+
+  it('选择已失效时同样回落到内容默认，而不是什么都不带', async () => {
+    mocks.settings.settings.activePresetId = 'deleted-preset';
+    mocks.settings.projectAgentDefaults = {
+      agents: { story: { presetId: 'pack-story', preset: contentPreset } },
+    };
+
+    expect(await exportSelected()).toEqual({ storyPreset: { id: 'pack-story', name: '内容默认' } });
   });
 });

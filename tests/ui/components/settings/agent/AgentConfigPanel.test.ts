@@ -6,7 +6,7 @@
  *   `watch(() => props.agentId, loadDrafts, { immediate: true })`
  *
  * Agent 分区在 SettingsPage 里是 `v-if`，每次进分区本组件都是新挂载的 ——
- * 少了 `immediate`，两个 textarea 会空着渲染，用户随手点一下「保存设置」就把
+ * 少了 `immediate`，两个 textarea 会空着渲染，用户随手点一下「保存提示词」就把
  * **空串**写进了自己的 systemPrompt。这条 bug 不会让类型检查变红、也不会让页面
  * 报错，只会静默吃掉用户的提示词。所以下面第一组用例是真正的看门人。
  *
@@ -47,13 +47,15 @@ const mockPresets = ref<any[]>([]);
 const upsertPreset = vi.fn(async (preset: any) => {
   mockPresets.value.push(preset);
 });
+const effectivePreset = vi.fn(() => ({ presetId: '', preset: null }));
 vi.mock('../../../../../src/ui/composables/usePresets', () => ({
-  usePresets: () => ({ presets: mockPresets, upsertPreset }),
+  usePresets: () => ({ presets: mockPresets, upsertPreset, effectivePreset }),
 }));
 
 import AgentConfigPanel from '../../../../../src/ui/components/settings/agent/AgentConfigPanel.vue';
 import AgentPromptCard from '../../../../../src/ui/components/settings/agent/AgentPromptCard.vue';
 import PresetManager from '../../../../../src/ui/components/settings/agent/PresetManager.vue';
+import AgentPresetBar from '../../../../../src/ui/components/settings/agent/AgentPresetBar.vue';
 import AgentSection from '../../../../../src/ui/components/settings/agent/AgentSection.vue';
 import AppButton from '../../../../../src/ui/components/shared/AppButton.vue';
 
@@ -80,6 +82,16 @@ beforeEach(() => {
 /** shallow：三张卡各自的内部实现不在本测试的射程内，只看接线 */
 function mountPanel(agentId: string) {
   return mount(AgentConfigPanel, { props: { agentId }, shallow: true });
+}
+
+/** 动作栏按钮按 data-testid 取（不按下标 —— 按钮的有无随 Agent 类型变化） */
+function button(w: ReturnType<typeof mountPanel>, testId: string) {
+  return w.findAllComponents(AppButton).find((b) => b.attributes('data-testid') === testId);
+}
+async function click(w: ReturnType<typeof mountPanel>, testId: string) {
+  const b = button(w, testId);
+  if (!b) throw new Error(`找不到按钮 ${testId}`);
+  await b.vm.$emit('click');
 }
 
 describe('AgentConfigPanel —— 草稿载入（immediate watch 看门人）', () => {
@@ -125,22 +137,52 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
   it.each([
     ['direct_main', 'directPresetId'],
     ['direct_cached', 'directCachedPresetId'],
-  ])('restores the %s project preset without pinning a user selection', async (agentId, field) => {
+  ])('恢复 %s 默认 = 清空选择键（跟随默认），不再往库里补预设', async (agentId, field) => {
     const preset = { id: `${agentId}-project`, name: 'Project preset', settings: {} };
     mockStore.projectAgentDefaults = { agents: { [agentId]: { presetId: preset.id, preset } } };
     mockSettings[field] = 'user-preset';
     const w = mountPanel(agentId);
-    await w.findAllComponents(AppButton)[0].vm.$emit('click');
+    await click(w, 'restore-all-defaults');
     expect(mockSettings[field]).toBeUndefined();
-    expect(upsertPreset).toHaveBeenCalledWith(preset);
-    expect(mockPresets.value).toContainEqual(preset);
+    expect(upsertPreset).not.toHaveBeenCalled();
   });
 
-  it('🔴 缓存直出「恢复成最新」同时清掉渠道策略（回到默认 prefix）', async () => {
+  it('恢复 story 默认 = 选择键置空串，不写库', async () => {
+    const preset = { id: 'story-project', name: 'Project preset', settings: {} };
+    mockStore.projectAgentDefaults = { agents: { story: { presetId: preset.id, preset } } };
+    mockSettings.activePresetId = 'user-preset';
+    const w = mountPanel('story');
+    await click(w, 'restore-all-defaults');
+    expect(mockSettings.activePresetId).toBe('');
+    expect(upsertPreset).not.toHaveBeenCalled();
+  });
+
+  it('🔴 缓存直出「全部恢复默认」同时清掉渠道策略（回到默认 prefix）', async () => {
     mockSettings.directCacheProvider = 'anthropic';
     const w = mountPanel('direct_cached');
-    await w.findAllComponents(AppButton)[0].vm.$emit('click');
+    await click(w, 'restore-all-defaults');
     expect(mockSettings.directCacheProvider ?? 'prefix').toBe('prefix');
+  });
+
+  it.each(['story', 'entity_gen', 'direct_main'])(
+    '🔴 「全部恢复默认」在没有任何项目默认时也保留 API 池绑定（model）：%s',
+    async (agentId) => {
+      mockStore.projectAgentDefaults = null;
+      mockSettings.agents[agentId] = { model: 'pool-1', temperature: 0.1, systemPrompt: 'x' };
+      mockSettings.activePresetId = 'user-preset';
+      const w = mountPanel(agentId);
+      await click(w, 'restore-all-defaults');
+      expect(mockSettings.agents[agentId]).toEqual({ model: 'pool-1' });
+    },
+  );
+
+  it('「全部恢复默认」后草稿按默认层重载', async () => {
+    mockStore.projectAgentDefaults = { agents: { entity_gen: { systemPrompt: '项目默认' } } };
+    mockSettings.agents.entity_gen = { systemPrompt: '用户版' };
+    const w = mountPanel('entity_gen');
+    expect(w.findComponent(AgentPromptCard).props('prompt')).toBe('用户版');
+    await click(w, 'restore-all-defaults');
+    expect(w.findComponent(AgentPromptCard).props('prompt')).toBe('项目默认');
   });
 
   it('story 走预设面板，不渲染提示词卡', () => {
@@ -155,6 +197,38 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     expect(w.findComponent(PresetManager).exists()).toBe(false);
   });
 
+  it.each(['story', 'direct_main', 'entity_gen', 'image_prompt'])(
+    '每个 Agent 都有「预设」状态条：%s',
+    (agentId) => {
+      expect(mountPanel(agentId).findComponent(AgentPresetBar).props('agentId')).toBe(agentId);
+    },
+  );
+
+  it('🔴 预设条的「恢复默认」（非预设 Agent）只清 systemPrompt / 上下文模板两项覆写', async () => {
+    mockStore.projectAgentDefaults = {
+      agents: { entity_gen: { systemPrompt: '项目默认提示词', template: '项目默认模板' } },
+    };
+    mockSettings.agents.entity_gen = {
+      model: 'pool-1',
+      temperature: 0.3,
+      systemPrompt: '用户提示词',
+      template: '用户模板',
+    };
+    const w = mountPanel('entity_gen');
+    await w.findComponent(AgentPresetBar).vm.$emit('reset-prompt');
+    expect(mockSettings.agents.entity_gen).toEqual({ model: 'pool-1', temperature: 0.3 });
+    const card = w.findComponent(AgentPromptCard);
+    expect(card.props('prompt')).toBe('项目默认提示词');
+    expect(card.props('template')).toBe('项目默认模板');
+  });
+
+  it('预设条恢复后只剩空壳时，覆写层整条删掉', async () => {
+    mockSettings.agents.entity_gen = { systemPrompt: '用户提示词' };
+    const w = mountPanel('entity_gen');
+    await w.findComponent(AgentPresetBar).vm.$emit('reset-prompt');
+    expect('entity_gen' in mockSettings.agents).toBe(false);
+  });
+
   it('🔴 hidePrompt 真的不渲染提示词卡（图像分区的 image_prompt 用）', () => {
     const w = mount(AgentConfigPanel, {
       props: { agentId: 'image_prompt', hidePrompt: true },
@@ -162,35 +236,43 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     });
 
     expect(w.findComponent(AgentPromptCard).exists()).toBe(false);
-    // 参数卡与动作栏照旧 —— 藏的只是提示词那一张
     expect(w.findComponent(PresetManager).exists()).toBe(false);
-    expect(w.findAllComponents(AppButton)).toHaveLength(2);
+    expect(w.findComponent(AgentPresetBar).exists()).toBe(false);
+    // 参数卡与「全部恢复默认」照旧；没有可保存的提示词，故无「保存提示词」
+    expect(button(w, 'restore-all-defaults')).toBeDefined();
+    expect(button(w, 'save-prompt')).toBeUndefined();
   });
 
   it('不传 hidePrompt 时一切照旧（默认 false，Agent 分区一个字不用改）', () => {
     expect(mountPanel('image_prompt').findComponent(AgentPromptCard).exists()).toBe(true);
   });
 
-  it('🔴 hidePrompt 只藏渲染：草稿等于解析默认时「保存设置」照旧不写覆写层', async () => {
-    mockStore.projectAgentDefaults = {
-      agents: { image_prompt: { systemPrompt: '项目默认提示词' } },
-    };
-    const w = mount(AgentConfigPanel, {
-      props: { agentId: 'image_prompt', hidePrompt: true },
+  it('非预设 Agent 动作栏：全部恢复默认 / 保存提示词 —— 占位态无「保存为默认」（D14）', () => {
+    const w = mountPanel('entity_gen');
+    expect(w.findAllComponents(AppButton).map((b) => b.attributes('data-testid'))).toEqual([
+      'restore-all-defaults',
+      'save-prompt',
+    ]);
+    // 按钮文字要真渲染 AppButton 才看得到（shallow 的桩不渲染插槽）
+    const real = mount(AgentConfigPanel, {
+      props: { agentId: 'entity_gen' },
       shallow: true,
+      global: { stubs: { AppButton: false } },
     });
-
-    await w.findAllComponents(AppButton)[1].vm.$emit('click');
-
-    // 藏起来的草稿没被当成「用户清空了提示词」写成空串 —— 那正是 immediate watch 那条 bug 的形状
-    expect(mockSettings.agents.image_prompt?.systemPrompt).toBeUndefined();
+    expect(real.find('[data-testid="save-prompt"]').text()).toBe('保存提示词');
+    expect(real.find('[data-testid="restore-all-defaults"]').text()).toBe('全部恢复默认');
   });
 
-  it('动作栏两个按钮（恢复默认 / 保存设置）—— 占位态无「保存为默认」（D14）', () => {
-    expect(mountPanel('entity_gen').findAllComponents(AppButton)).toHaveLength(2);
-  });
+  it.each(['story', 'direct_main', 'direct_cached'])(
+    '预设型 Agent 没有「保存」按钮（预设改动当场落库）：%s',
+    (agentId) => {
+      const w = mountPanel(agentId);
+      expect(button(w, 'save-prompt')).toBeUndefined();
+      expect(button(w, 'restore-all-defaults')).toBeDefined();
+    },
+  );
 
-  it('🔴「保存设置」提交的是载好的草稿，不是空串（草稿 ≠ 默认 → 写覆写）', async () => {
+  it('🔴「保存提示词」提交的是载好的草稿，不是空串（草稿 ≠ 默认 → 写覆写）', async () => {
     // 草稿 ≠ 默认时，diff-write 会把草稿写进覆写层
     mockStore.projectAgentDefaults = {
       agents: { entity_gen: { systemPrompt: '项目默认提示词', template: '项目默认模板' } },
@@ -200,8 +282,7 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     const card = w.findComponent(AgentPromptCard);
     await card.vm.$emit('update:prompt', '用户改过的提示词');
     await card.vm.$emit('update:template', '用户改过的模板');
-    // 动作栏顺序：恢复成最新 / 保存设置
-    await w.findAllComponents(AppButton)[1].vm.$emit('click');
+    await click(w, 'save-prompt');
 
     // 覆写层现在有用户版
     expect(mockSettings.agents.entity_gen.systemPrompt).toBe('用户改过的提示词');
@@ -214,8 +295,8 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
       agents: { entity_gen: { systemPrompt: '项目默认提示词', template: '项目默认模板' } },
     };
     const w = mountPanel('entity_gen');
-    // 草稿载好 = 默认层的值（没改过）。点「保存设置」→ diff 相等 → 不写覆写键
-    await w.findAllComponents(AppButton)[1].vm.$emit('click');
+    // 草稿载好 = 默认层的值（没改过）。点「保存提示词」→ diff 相等 → 不写覆写键
+    await click(w, 'save-prompt');
 
     // 🔴 覆写层**整条都不存在** —— 不只是键不存在，连空壳条目也不能留。
     //    （此前 patchAgentSettings 的 ensure 会在覆写层建 `{ entity_gen: {} }` 空壳，
@@ -223,14 +304,6 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     expect('entity_gen' in mockSettings.agents).toBe(false);
     expect(mockSettings.agents.entity_gen).toBeUndefined();
     expect(mockSettings.agentDirty.entity_gen).toBe(true);
-  });
-
-  it('story 的「保存设置」不写 systemPrompt（正文走预设子系统）', async () => {
-    const w = mountPanel('story');
-    await w.findAllComponents(AppButton)[1].vm.$emit('click');
-
-    expect(mockSettings.agents.story?.systemPrompt).toBeUndefined();
-    expect(mockSettings.agentDirty.story).toBe(true);
   });
 });
 
