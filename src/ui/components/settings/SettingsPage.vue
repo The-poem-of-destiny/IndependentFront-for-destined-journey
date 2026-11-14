@@ -38,7 +38,6 @@ import AssetSection from './AssetSection.vue';
 import ImageSection from './image/ImageSection.vue';
 import DataSection from './DataSection.vue';
 import DeveloperSection from './DeveloperSection.vue';
-import AboutSection from './AboutSection.vue';
 
 const ui = useUIStore();
 const cfg = useSettingsStore();
@@ -109,7 +108,6 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'image', label: '图像生成', icon: 'fa-solid fa-wand-sparkles' },
   { key: 'data', label: '数据与备份', icon: 'fa-solid fa-database' },
   { key: 'developer', label: '开发者模式', icon: 'fa-solid fa-code' },
-  { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
 ];
 
 /**
@@ -334,9 +332,6 @@ onMounted(() => {
 
             <!-- ========== 开发者模式 ========== -->
             <DeveloperSection v-if="activeSection === 'developer'" />
-
-            <!-- ========== 关于 ========== -->
-            <AboutSection v-if="activeSection === 'about'" />
           </div>
           <!-- /section-wrapper -->
         </Transition>

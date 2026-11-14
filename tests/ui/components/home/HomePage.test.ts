@@ -75,7 +75,12 @@ async function mountHome() {
           props: { block: Boolean },
           template: '<button v-bind="$attrs" :class="{ \'btn-block\': block }"><slot /></button>',
         },
-        AppModal: true,
+        AppModal: {
+          name: 'AppModal',
+          props: { open: Boolean, title: String, size: String },
+          emits: ['update:open', 'close'],
+          template: '<div v-if="open" class="modal-stub"><slot /></div>',
+        },
         AstralDriftBackdrop: true,
         ContentStatusBanner: true,
         Teleport: true,
@@ -227,14 +232,19 @@ describe('HomePage 次级入口布局', () => {
     expect(home.get('.btn-row').findAll('button')).toHaveLength(2);
   });
 
-  it('设置打开默认分区，关于直接打开设置页的关于分区', async () => {
+  it('设置打开默认分区，关于在首页原位打开关于弹窗而不跳转到设置页', async () => {
     const home = await mountHome();
+    expect(home.findComponent({ name: 'AppModal' }).props('open')).toBe(false);
 
     await home.get('.btn-settings').trigger('click');
+    expect(mocks.ui.openSettings).toHaveBeenCalledOnce();
     expect(mocks.ui.openSettings).toHaveBeenCalledWith();
 
     await home.get('.btn-about').trigger('click');
-    expect(mocks.ui.openSettings).toHaveBeenCalledWith('about');
+    expect(mocks.ui.openSettings).toHaveBeenCalledOnce();
+    expect(mocks.ui.navigate).not.toHaveBeenCalled();
+    expect(home.findComponent({ name: 'AppModal' }).props('open')).toBe(true);
+    expect(home.findComponent({ name: 'AboutSection' }).exists()).toBe(true);
   });
 
   it('存档管理按钮打开应用级窗口，不触发页面导航', async () => {
