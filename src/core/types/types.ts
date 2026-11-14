@@ -2506,6 +2506,8 @@ export interface StoryContextDebugRecord {
   lore?: StoryLoreSelectionDiagnostics;
   /** 本回合结束后补建的缺失摘要（回合 key）与补建失败的回合 */
   backfill?: { turnKeys: string[]; failedTurnKeys: string[] };
+  /** 本回合延续事件片段的复读率（`measureSegmentRepetition`，0–1；诊断用，不参与判定） */
+  repetition?: Array<{ eventName: string; ratio: number }>;
 }
 
 /** 玩家可见的单次 Agent 工具活动；只保留语义化文案，不携带原始参数或响应。 */

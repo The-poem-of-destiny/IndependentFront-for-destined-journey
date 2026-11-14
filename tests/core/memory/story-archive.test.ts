@@ -21,6 +21,7 @@ import {
 import {
   buildStoryArchiveRecords,
   evidenceAppearsInStory,
+  measureSegmentRepetition,
   renderLongTermOverview,
   renderOpenEventsForSummary,
 } from '../../../src/core/memory/story-archive';
@@ -246,13 +247,56 @@ describe('渲染', () => {
     expect(text).toBe('<长期记忆总览>\n- 【送信｜失败】信没送到\n</长期记忆总览>');
   });
 
-  it('未结事件清单：按事件列出摘要；没有时写明', () => {
+  it('未结事件清单：用途说明在前，按事件列出摘要并标出最近记录；没有时写明', () => {
     expect(renderOpenEventsForSummary([])).toBe('（当前没有未结束的事件）');
     expect(
       renderOpenEventsForSummary([
-        { eventName: '送信', segments: [seg('s1', 'u1', '送信', '接下送信委托')] },
+        {
+          eventName: '送信',
+          segments: [seg('s1', 'u1', '送信', '接下送信委托'), seg('s2', 'u2', '送信', '抵达北城')],
+        },
+        { eventName: '订剑', segments: [seg('s3', 'u2', '订剑', '付了定金')] },
       ]),
-    ).toBe('【送信】\n- 接下送信委托');
+    ).toBe(
+      [
+        '以下是各事件已经记录过的内容，只用于沿用事件名和判断是否结束；本回合摘要只写这些记录之后的新进展。',
+        '【送信】\n- 接下送信委托\n- 抵达北城（最近记录）',
+        '【订剑】\n- 付了定金（最近记录）',
+      ].join('\n\n'),
+    );
+  });
+});
+
+describe('measureSegmentRepetition（延续事件复读率，诊断用）', () => {
+  const openEvents = [
+    { eventName: '订剑', segments: [seg('s1', 'u1', '订剑', '在北城铁匠铺订制玄铁剑')] },
+  ];
+
+  it('只统计延续未结事件的片段；新事件、闲聊段与空内容不计', () => {
+    const result = measureSegmentRepetition(
+      [
+        { eventName: '订剑', content: '在北城铁匠铺订制玄铁剑' },
+        { eventName: '新事件', content: '在北城铁匠铺订制玄铁剑' },
+        { content: '与店主闲聊' },
+        { eventName: '订剑', content: '。' },
+      ],
+      openEvents,
+    );
+    expect(result).toEqual([{ eventName: '订剑', ratio: 1 }]);
+  });
+
+  it('纯增量写法的复读率明显低于复述前情', () => {
+    const [restated] = measureSegmentRepetition(
+      [{ eventName: '订剑', content: '此前在北城铁匠铺订制的玄铁剑完工，取回' }],
+      openEvents,
+    );
+    const [incremental] = measureSegmentRepetition(
+      [{ eventName: '订剑', content: '取回玄铁剑，付清尾款，交易完成' }],
+      openEvents,
+    );
+    expect(restated.ratio).toBeGreaterThan(0.5);
+    expect(incremental.ratio).toBeLessThan(restated.ratio);
+    expect(incremental.ratio).toBeLessThan(0.3);
   });
 });
 
@@ -295,6 +339,16 @@ describe('依据事件原文的详细记录（D29）', () => {
     expect(msgs[1].content).toContain('正文：你接下了送信的委托。');
     expect(msgs[1].content).toContain('委托就此完成。');
     expect(msgs[1].content).not.toContain('走失的猫');
+  });
+
+  it('详细记录只提炼关键转折，不按回合记流水账', () => {
+    const [system] = buildStoryArchiveDetailMessages({ archive, turns: [] });
+    expect(system.content).toContain('2~4 个关键转折节点');
+    expect(system.content).toContain('不要按回合记流水账');
+    expect(system.content).not.toContain('按时间顺序');
+    expect(system.content).toContain(
+      '{ "cause": "", "process": "", "ending": "", "promises": "", "impact": "" }',
+    );
   });
 
   it('解析详细记录；五项全空或认不出时返回 null', () => {
