@@ -129,6 +129,17 @@ onMounted(() => {
   scheduleScene();
 });
 
+// 首页界面联动：转发给当前场景；场景未就绪或已降级时什么也不做。
+function setEnergy(level: number) {
+  scene?.setEnergy(level);
+}
+
+function pulse() {
+  scene?.pulse();
+}
+
+defineExpose({ setEnergy, pulse });
+
 onUnmounted(() => {
   cancelled = true;
   document.removeEventListener('visibilitychange', onVisibilityChange);

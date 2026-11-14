@@ -9,6 +9,18 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-14 首页 Astral Drift 视觉升级｜分支 `homepage-enhance`，仅做浏览器逐帧静帧检查
+
+- 改动文件：`src/ui/components/home/drift/runtime.ts`、`AstralDriftBackdrop.vue`、`HomePage.vue`、`tests/ui/components/home/HomePage.test.ts`。完整记录见 [首页 Astral Drift 集成设计](planning/2026-08-09-home-astral-drift-integration-design.md) §8。
+- 修复移植遗漏：手调的 `TUNING_DEFAULTS` 在生产从未生效（原型靠 DOM 滑块应用）；现由 `applyTuningDefaults()` 在构建时应用，构图恢复为已批准原型，火花与微尘回到各自的环上。原型 HUD 死代码删除；余烬改从 SVG 的静态九芒星脱出。
+- 场景时钟改为累加器（移除 `THREE.Clock`），切回标签页不再打回 t=0。高光不再在色调映射前截断（最亮像素从 sRGB 226 到可达 255）；曝光 0.8，bloom 基础 0.17、半径 0.8。
+- 竖屏改为相机后拉，盘面按宽度入画并位于按钮列下方。light 主题（chart）绕过色调映射，纸色对齐 `--theme-window-bg`，体积层 / bloom 经 `themeGain` 压低、光芒关闭；**D6 方向仍未裁定**。
+- 新增：开场动画（`uIntro`；页面会话内首次完整版约 5 秒，之后简版；`AstralDriftSceneOptions.intro` 可强制 `'full' | 'short' | 'none'`），星系入场为「汇聚 → 点燃 → 释放」；共鸣脉冲（每 14–20 秒，`buildWave` 色散涟漪）；`ShinePass` 核心光芒（`SHINE_BASE` 0.24，light 主题关闭）；`setEnergy()` / `pulse()` 首页按钮联动（`.btn-column` 事件委托）；界面安静区；刻度环 `buildScale`（实现方添加，主人可去掉）。
+- 精细度：法阵纹理 mipmap + 各向异性，符文图集 128 px 单元，近景符文环景深，星空约三倍，粒子削至约 40%；render-scale governor 从设备像素比起步、只向下调。
+- 被否决并记档的方案（勿再拿回）：圆盘过度卷紧后松开的星系入场、由核心向外推进的点燃前沿、每个亮符文都甩光痕的第一版光芒。
+- 已知限制（未修，记入 `docs/known-issue.md`）：governor 只计 JS 提交耗时、保护不了弱 GPU；调整窗口大小可能黑一帧。
+- 验证：八道闸门全绿（412 个测试文件，9508 通过、12 跳过）。浏览器检查为节流预览面板逐帧静帧（obsidian / crimson / ocean / parchment / indigo，375×812 与 768×1024）。**未做**：实时动效流畅度、真机走查、设计文档 T6 的降级矩阵与主题接线测试。`*.standalone.html` 原型已与生产分叉。
+
 ### 2026-11-13 日历系统 v1｜分支 `calendar-v1-key-dates`，待合并，界面已做浏览器走查（待真机游玩验证）
 
 - 按存档隔离的本地日历，两种模式：沉浸（只有玩家录入的条目）与普通（再加世界书关键日期与已登场角色的生日，可按类别 / 地区 / 逐项隐藏）。设计与实施记录见 [日历系统 v1 设计](planning/2026-11-13-calendar-system-v1-design.md)。

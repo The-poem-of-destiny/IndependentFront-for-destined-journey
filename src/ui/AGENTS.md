@@ -516,8 +516,15 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │             早期文档里的 Cascader / KeyValue 从未落地，别照着 import)
 │   ├── home/
 │   │   ├── HomePage.vue             ← 游戏标题画面；DOM 操作列与 WebGL 背景分层，背景未就绪时保留 CSS 兜底
+│   │   │                               📌 2026-11-14：在 `.btn-column` 上事件委托驱动背景联动
+│   │   │                               （悬停 / 聚焦主操作 1、其余 0.55、离开 0；点击触发脉冲，不延迟原有点击）
 │   │   ├── AstralDriftBackdrop.vue  ← [星流首页] 懒加载 / WebGL2 与减动效降级 / 可见性暂停 / 销毁壳
+│   │   │                               📌 2026-11-14：`defineExpose({ setEnergy, pulse })` 转发给当前场景，无场景时空操作
 │   │   ├── drift/runtime.ts         ← [星流首页] Three.js 场景单文件运行时；工厂 + 主题切换 + 生命周期
+│   │   │                               📌 2026-11-14 视觉升级：对外接口新增 `setEnergy(level)` / `pulse()`，
+│   │   │                               选项新增 `intro?: 'full' | 'short' | 'none'`（缺省：页面会话内首次完整、之后简版）；
+│   │   │                               内含开场时间线（`uIntro`）、共鸣脉冲（`uPulse`）、`ShinePass` 光芒与界面安静区。
+│   │   │                               记录与被否决方案见设计文档 §8
 │   │   └── *.standalone.html        ← 🔴 8 个**设计原型**，不是生产界面（AstralDrift / AstralDriftHome /
 │   │                                   AstralDriftHomeParticles / AstralDriftHomeTuner / AstralDriftV2 /
 │   │                                   AstralDriftV2Tuner / MagicCircle / ObsidianAstrolabeV2）。
@@ -527,6 +534,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   `docs/planning/2026-08-09-home-astral-drift-integration-design.md`，
 │   │                                   **2026-08-20 已实施；D6 当前已落代码但主人保留意见仍待裁定，
 │   │                                   专项降级 / 生命周期 / 多宽高比验收仍在 TODO**
+│   │                                   📌 2026-11-14：原型已与生产分叉（生产带有设计文档 §8 的全部改动），
+│   │                                   不能再当作生产的等价参照
 │   ├── settings/                    ← [Q-25] 14 个分区**全部**是一行子组件
 │   │   ├── SettingsPage.vue         ← 纯壳层（1995 → 约 415 行）：页头 + 主导航 + Agent 子导航
 │   │   │                               ≤720px 时主导航与 Agent 子导航改为顶部横向滚动条，内容恢复全宽；

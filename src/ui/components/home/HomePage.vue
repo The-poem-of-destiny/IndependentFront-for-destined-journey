@@ -12,6 +12,40 @@ import { findLatestSave } from './latest-save';
 const game = useGameStore();
 const ui = useUIStore();
 const backdropReady = ref(false);
+const backdrop = ref<InstanceType<typeof AstralDriftBackdrop> | null>(null);
+
+// === 背景联动 ===
+// 在按钮列上做事件委托：悬停 / 聚焦主按钮时能量拉满，其余操作按钮取中档，离开归零；
+// 点击任一操作按钮再触发一次共鸣脉冲。只追加监听，不改动按钮本身的点击行为。
+// 背景未就绪（或测试替身没有这些方法）时一律静默跳过。
+function actionButtonOf(event: Event): HTMLElement | null {
+  const target = event.target;
+  if (!(target instanceof Element)) return null;
+  const button = target.closest('button');
+  // 开发用测试按钮不算首页操作。
+  if (!button || button.classList.contains('dev-test-btn')) return null;
+  return button;
+}
+
+function onActionEnter(event: Event) {
+  const button = actionButtonOf(event);
+  if (!button) return;
+  backdrop.value?.setEnergy?.(button.classList.contains('btn-new-game') ? 1 : 0.55);
+}
+
+function onActionLeave(event: MouseEvent | FocusEvent) {
+  const button = actionButtonOf(event);
+  if (!button) return;
+  // 指针只是在同一按钮内部的图标与文字之间移动时不算离开。
+  const next = event.relatedTarget;
+  if (next instanceof Node && button.contains(next)) return;
+  backdrop.value?.setEnergy?.(0);
+}
+
+function onActionClick(event: Event) {
+  if (!actionButtonOf(event)) return;
+  backdrop.value?.pulse?.();
+}
 
 /**
  * 扩展管理入口已开放（2026-08-20）。这个开关从来不是安全边界：入口关着的时候，
@@ -126,7 +160,7 @@ async function quickTestKeep() {
     @mouseenter="showDevButton = true"
     @mouseleave="showDevButton = false"
   >
-    <AstralDriftBackdrop @ready="backdropReady = $event" />
+    <AstralDriftBackdrop ref="backdrop" @ready="backdropReady = $event" />
     <!-- 内容态横幅（波 1 T2 / §5.8）：占位 / 检测到本地真实内容 / error -->
     <ContentStatusBanner class="home-content-banner" />
     <!-- 装饰性背景光晕 -->
@@ -188,7 +222,14 @@ async function quickTestKeep() {
 
       <!-- 操作按钮 -->
       <div class="action-section">
-        <div class="btn-column">
+        <div
+          class="btn-column"
+          @mouseover="onActionEnter"
+          @mouseout="onActionLeave"
+          @focusin="onActionEnter"
+          @focusout="onActionLeave"
+          @click="onActionClick"
+        >
           <AppButton
             variant="primary"
             size="lg"
