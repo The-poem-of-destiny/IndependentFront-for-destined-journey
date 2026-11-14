@@ -11,6 +11,14 @@
 
 - [ ] 实验性上下文方案的总结系统还需要微调一些，现在太详细了
 
+- [ ] **Claude（Anthropic Messages）协议源的提示缓存断点** —— 引擎只解析响应里的
+      `cache_read_input_tokens`（`src/core/api/anthropic-messages.ts:120`），请求侧从未写入
+      `cache_control`。Claude 的提示缓存需要显式断点，所以目前 Claude 源大概率没有缓存收益
+      （OpenAI 兼容 / DeepSeek 是自动前缀缓存，不受影响）。动手前先核实当前 Anthropic API 的
+      缓存规则（断点数量上限、最小可缓存长度、TTL）。断点候选位置：Story v2 前导 system 末尾、
+      第 4 区原文最后一回合末尾（配合 `docs/reference/story-v2-routing-delivery.md`
+      的分批换窗）。断点由 adapter 按协议写入，不进预设内容。
+
 - [ ] **战斗协议沙盒 真机验收** —— v3 内核与双角色（`combat` + `combat_enemy`）已随 Phase 2
       「战斗去代码化」整体删除，现役为**单一 DM 协议沙盒**（`src/core/combat/sandbox/`：AI 读 v1.4.2
       协议自算结算，Code 只做只读计算 + 终局写回 + Dexie v27 持久化/刷新续战），C6 新前端已直接吃
