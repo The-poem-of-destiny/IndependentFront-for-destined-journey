@@ -74,13 +74,13 @@ describe('ui-store 设置分区入口', () => {
     setActivePinia(createPinia());
   });
 
-  it('首页关于入口导航到设置页，并只交付一次 about 请求', () => {
+  it('跨页面设置入口导航到设置页，并只交付一次目标分区请求', () => {
     const ui = useUIStore();
 
-    ui.openSettings('about');
+    ui.openSettings('data');
 
     expect(ui.currentView).toBe('settings');
-    expect(ui.consumeSettingsSectionRequest()).toBe('about');
+    expect(ui.consumeSettingsSectionRequest()).toBe('data');
     expect(ui.consumeSettingsSectionRequest()).toBeNull();
   });
 

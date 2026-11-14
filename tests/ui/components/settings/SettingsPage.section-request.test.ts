@@ -53,7 +53,6 @@ vi.mock('@ui/components/settings/AssetSection.vue', () => stub('AssetSection'));
 vi.mock('@ui/components/settings/image/ImageSection.vue', () => stub('ImageSection'));
 vi.mock('@ui/components/settings/DataSection.vue', () => stub('DataSection', 'content-pack'));
 vi.mock('@ui/components/settings/DeveloperSection.vue', () => stub('DeveloperSection'));
-vi.mock('@ui/components/settings/AboutSection.vue', () => stub('AboutSection'));
 
 import SettingsPage from '@ui/components/settings/SettingsPage.vue';
 import { useUIStore } from '@ui/stores/ui-store';
@@ -117,6 +116,14 @@ describe('SettingsPage 分区跳转请求', () => {
 
     expect(activeLabel(wrapper)).toBe('Agent 配置');
     expect(wrapper.find('.sub-nav').exists()).toBe(true);
+  });
+
+  it('设置页左侧导航不再包含「关于」入口（UIL-01：关于已收归首页原位弹窗）', async () => {
+    const wrapper = mount(SettingsPage);
+    await flushPromises();
+
+    const labels = wrapper.findAll('.main-nav .nav-label').map((el) => el.text());
+    expect(labels).not.toContain('关于');
   });
 });
 

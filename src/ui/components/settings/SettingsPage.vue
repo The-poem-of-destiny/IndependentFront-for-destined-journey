@@ -2,7 +2,7 @@
 /**
  * 设置页壳层 —— 导航 + Agent 分区（Q-25）
  *
- * 14 个分区里 13 个已经是一行子组件；只剩 **Agent 配置**还内联在这里，因为它
+ * 13 个分区里 12 个已经是一行子组件；只剩 **Agent 配置**还内联在这里，因为它
  * 要读写 13 张 per-Agent 并行 map（`agentModels` / `agentPrompts` / …），
  * 而那些 map 的形状正是 Q-18 要改的东西 —— 先拆再改等于拆两遍。
  * Q-18 落地后照 `settings/audio/` 的样子拆成 `settings/agent/` 目录。
@@ -35,7 +35,6 @@ import AssetSection from './AssetSection.vue';
 import ImageSection from './image/ImageSection.vue';
 import DataSection from './DataSection.vue';
 import DeveloperSection from './DeveloperSection.vue';
-import AboutSection from './AboutSection.vue';
 
 const ui = useUIStore();
 const cfg = useSettingsStore();
@@ -106,7 +105,6 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'image', label: '图像生成', icon: 'fa-solid fa-wand-sparkles' },
   { key: 'data', label: '数据与备份', icon: 'fa-solid fa-database' },
   { key: 'developer', label: '开发者模式', icon: 'fa-solid fa-code' },
-  { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
 ];
 
 /**
@@ -285,9 +283,6 @@ onMounted(() => {
 
             <!-- ========== 开发者模式 ========== -->
             <DeveloperSection v-if="activeSection === 'developer'" />
-
-            <!-- ========== 关于 ========== -->
-            <AboutSection v-if="activeSection === 'about'" />
           </div>
           <!-- /section-wrapper -->
         </Transition>
