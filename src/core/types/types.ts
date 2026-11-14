@@ -2403,9 +2403,17 @@ export interface StoryContextBudgetRemoval extends StoryContextBudgetItem {
 /** 分区组装诊断（`buildStoryContextV2Messages` 产出，计划 §12.3）。 */
 export interface StoryContextV2Diagnostics {
   windowTurns: number;
+  /** 换窗批大小 K（旧诊断缺席） */
+  windowBatchTurns?: number;
+  /** 原文窗口起点（完整回合下标） */
+  windowStart?: number;
+  /** 距下次换窗的回合数 */
+  nextSwapInTurns?: number;
   loreDefinitions?: { deferredKeys: string[]; missing: Record<string, string[]> };
-  /** 进入第 2 区长期总览的有效归档 id（历史年表顺序） */
+  /** 进入第 2 区长期总览的已生效归档 id（历史年表顺序） */
   archiveIds: string[];
+  /** 已有效、判断回合仍在原文窗口内而尚未生效的归档 id（仅 K > 1） */
+  pendingArchiveIds?: string[];
   /** 进入第 4 区原文的回合 key */
   windowTurnKeys: string[];
   /** 进入第 4 区的摘要片段 id */

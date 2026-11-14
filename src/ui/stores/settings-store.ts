@@ -306,6 +306,8 @@ function getDefaults(): UiSettings {
     storyContextV2Enabled: false,
     // 新模式召回的原文粒度（D32）：默认整回合，开发者卡片里切换比较
     storyRecallRawMode: 'turn',
+    // 新模式正文换窗批大小 K：默认 1 = 每回合滑动（与引入前逐字节一致）
+    storyWindowBatchTurns: 1,
 
     // 消息 & 系统事件可见性
     systemEventsVisible: true,

@@ -3,7 +3,10 @@
  * （计划 §9 / D07 / D22 / D30–D33，T19/T20/T47）。
  */
 import { describe, it, expect } from 'vitest';
-import { collectCompleteStoryTurns } from '../../../src/core/memory/memory-context';
+import {
+  buildStoryZone4,
+  collectCompleteStoryTurns,
+} from '../../../src/core/memory/memory-context';
 import {
   storyTurnSource,
   storySegmentFingerprint,
@@ -127,6 +130,35 @@ describe('buildStoryRecallCandidates', () => {
     const candidates = buildStoryRecallCandidates({ ...base, messages: messages.slice(0, 4) });
     expect(candidates.some((c) => c.kind === 'archive')).toBe(false);
     expect(candidates.every((c) => c.kind === 'segment' && !c.archived)).toBe(true);
+  });
+
+  it('分批换窗：窗口外范围与第 4 区一致；未生效归档不进候选，它覆盖的片段不标已归档', () => {
+    // N = 2、K = 2：5 回合时起点 2，判断回合（第 3 回合）仍在窗口内，归档尚未生效
+    const batched = { ...base, windowBatchTurns: 2 };
+    const zone = buildStoryZone4({ ...batched, archivedSegmentIds: new Set() });
+    expect(zone.windowTurns.map((t) => t.key)).toEqual(['u3', 'u4', 'u5']);
+    const candidates = buildStoryRecallCandidates(batched);
+    expect(candidates.map((c) => (c.kind === 'segment' ? c.segment.id : c.archive.id))).toEqual([
+      's1',
+      's2',
+    ]);
+    expect(candidates.every((c) => c.kind === 'segment' && !c.archived)).toBe(true);
+    // 展开同一判据：归档来源第 3 回合在 K = 2 的窗口内，只写明原文在最近对话中；K = 1 时已在窗口外
+    const archiveCandidate = buildStoryRecallCandidates(base).filter((c) => c.kind === 'archive');
+    const expand = (windowBatchTurns: number) =>
+      expandStoryRecall({
+        ...base,
+        windowBatchTurns,
+        selected: archiveCandidate,
+        rawMode: 'turn',
+        probe: '',
+      }).diagnostics;
+    expect(expand(2).inWindowTurnKeys).toEqual(['u3']);
+    expect(expand(1).inWindowTurnKeys).toEqual([]);
+    expect(expand(1).rawTurnKeys).toContain('u3');
+    // K = 3：起点 3，判断回合已换出，归档生效
+    const applied = buildStoryRecallCandidates({ ...base, windowBatchTurns: 3 });
+    expect(applied[0].kind === 'archive' && applied[0].archive.id).toBe('ar1');
   });
 
   it('带上落库时存的向量', () => {

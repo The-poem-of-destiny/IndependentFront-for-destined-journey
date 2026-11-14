@@ -2,12 +2,19 @@
  * memory-context.test.ts — Story 上下文新模式第 4 区（计划 §3.2，T11–T15/T55）。
  */
 import { describe, it, expect } from 'vitest';
-import { storyTurnSource } from '../../../src/core/memory/story-memory-source';
-import type { ChatMessage } from '../../../src/core/types/types';
+import {
+  storySegmentFingerprint,
+  storyTurnSource,
+} from '../../../src/core/memory/story-memory-source';
+import type { ChatMessage, StoryArchiveRecord } from '../../../src/core/types/types';
 import {
   buildStoryZone4,
   collectCompleteStoryTurns,
+  collectOpenStoryEvents,
   findStoryTurnsMissingSummary,
+  resolveActiveStoryArchives,
+  resolveAppliedStoryArchives,
+  storyWindowStart,
   type StoryTurnSummarySegment,
 } from '../../../src/core/memory/memory-context';
 
@@ -225,5 +232,99 @@ describe('buildStoryZone4', () => {
         }),
       ).toThrow(RangeError);
     }
+  });
+});
+
+describe('storyWindowStart（分批换窗起点）', () => {
+  it('K = 1 时对所有 T 都等于 max(0, T - N)', () => {
+    for (const n of [1, 3, 6]) {
+      for (let t = 0; t <= 20; t++) {
+        expect(storyWindowStart(t, n, 1)).toBe(Math.max(0, t - n));
+        expect(storyWindowStart(t, n)).toBe(Math.max(0, t - n));
+      }
+    }
+  });
+
+  it('N = 6、K = 6 时窗口在 6–11 回合之间循环（计划 §3.1 表）', () => {
+    const expected: Array<[number, number]> = [
+      [1, 0],
+      [6, 0],
+      [7, 0],
+      [11, 0],
+      [12, 6],
+      [13, 6],
+      [17, 6],
+      [18, 12],
+    ];
+    for (const [t, start] of expected) expect(storyWindowStart(t, 6, 6)).toBe(start);
+  });
+
+  it('T ≤ N 时为 0', () => {
+    for (let t = 0; t <= 4; t++) expect(storyWindowStart(t, 4, 3)).toBe(0);
+  });
+
+  it('buildStoryZone4 按 K 成批换窗，并返回窗口起点', () => {
+    const zone = buildStoryZone4({
+      messages: turns(9),
+      windowTurns: 2,
+      windowBatchTurns: 3,
+      segments: [],
+      archivedSegmentIds: new Set(),
+    });
+    expect(zone.windowStart).toBe(6);
+    expect(zone.windowTurns.map((t) => t.key)).toEqual(['u7', 'u8', 'u9']);
+  });
+
+  it('K 非正整数直接抛错', () => {
+    for (const k of [0, -1, 1.5]) {
+      expect(() =>
+        buildStoryZone4({
+          messages: turns(2),
+          windowTurns: 1,
+          windowBatchTurns: k,
+          segments: [],
+          archivedSegmentIds: new Set(),
+        }),
+      ).toThrow(RangeError);
+    }
+  });
+});
+
+describe('resolveAppliedStoryArchives（归档与换窗对齐）', () => {
+  /** 5 个回合；第 1 回合片段带事件名，第 3 回合作出归档判断并覆盖它 */
+  const history = turns(5);
+  const historyTurns = collectCompleteStoryTurns(history);
+  const eventSeg: StoryTurnSummarySegment = { ...seg('u1'), eventName: '订剑' };
+  const archive: StoryArchiveRecord = {
+    id: 'ar1',
+    saveId: 's',
+    eventName: '订剑',
+    outcome: 'completed',
+    evidence: '正文3',
+    overview: '订剑并取到',
+    detail: { cause: '', process: '', ending: '', promises: '', impact: '' },
+    detailSource: 'summary',
+    coveredSegmentIds: [eventSeg.id],
+    ...storyTurnSource(historyTurns[2]),
+    coveredSources: [storyTurnSource(historyTurns[0])],
+    coveredSegmentFingerprints: { [eventSeg.id]: storySegmentFingerprint(eventSeg) },
+    sequence: 0,
+    createdAt: 3,
+  };
+  const active = resolveActiveStoryArchives(history, [archive], [eventSeg]);
+
+  it('K = 1 时原样返回全部有效归档', () => {
+    expect(active).toHaveLength(1);
+    expect(resolveAppliedStoryArchives(historyTurns, active, 0, 1)).toEqual(active);
+  });
+
+  it('K > 1 时判断回合仍在窗口内的归档不生效，换出窗口后生效', () => {
+    // 判断回合下标 2：窗口起点 2 时仍在窗口内，起点 3 时已换出
+    expect(resolveAppliedStoryArchives(historyTurns, active, 2, 2)).toEqual([]);
+    expect(resolveAppliedStoryArchives(historyTurns, active, 3, 3)).toEqual(active);
+  });
+
+  it('collectOpenStoryEvents 不受 K 影响：已归档、尚未生效的事件不出现在未结事件里', () => {
+    expect(collectOpenStoryEvents(history, [eventSeg], [archive])).toEqual([]);
   });
 });

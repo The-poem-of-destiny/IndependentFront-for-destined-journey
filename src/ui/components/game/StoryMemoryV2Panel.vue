@@ -7,9 +7,13 @@
  *
  * 🔴 判据一律复用引擎纯函数（有效归档、覆盖关系、未结事件、来源回合），面板不另写一份 ——
  *    两份判据的下场是「面板说已归档、上下文里却还在」。
+ *    换窗批 K > 1 时尚未进入第 2 区的归档标「换窗后生效」，判据同第 2 区
+ *    （`storyWindowStart` + `resolveAppliedStoryArchives`，N / K 与管线同源）。
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { useGameStore } from '../../stores/game-store';
+import { useSettingsStore } from '../../stores/settings-store';
+import { getAgentSettings } from '../../stores/agent-settings';
 import { getStoryArchives, getStoryTurnSummaries } from '@engine/persistence/database';
 import type { ChatMessage, StoryArchiveRecord, StoryTurnSummaryRecord } from '@engine/types/types';
 import {
@@ -17,14 +21,19 @@ import {
   collectCompleteStoryTurns,
   collectOpenStoryEvents,
   resolveActiveStoryArchives,
+  resolveAppliedStoryArchives,
   resolveValidStorySegments,
+  storyWindowStart,
   type StoryTurn,
 } from '@engine/memory/memory-context';
+import { normalizeStoryWindowTurns } from '@engine/story/story-context-mode';
+import { defaultHistoryLayers } from '@engine/prompts/agent-templates';
 import { storyArchiveOutcomeLabel } from '@engine/memory/story-archive';
 import { collectArchiveSourceTurns } from '@engine/memory/story-archive-detail';
 import { formatGameTime } from '@engine/time/time-system';
 
 const game = useGameStore();
+const settings = useSettingsStore();
 
 type Tab = 'overview' | 'open' | 'turns';
 const tab = ref<Tab>('overview');
@@ -69,6 +78,22 @@ const activeArchives = computed(() =>
   resolveActiveStoryArchives(messages.value, archives.value, summaries.value),
 );
 const coveredIds = computed(() => archivedSegmentIdsOf(activeArchives.value));
+/** 已有效、判断回合仍在原文窗口内的归档 id（下一回合的第 2 区还看不到它们） */
+const pendingArchiveIds = computed(() => {
+  const windowTurns = normalizeStoryWindowTurns(
+    getAgentSettings(settings.settings, 'story', settings.projectAgentDefaults?.agents ?? {})
+      .historyLayers ?? defaultHistoryLayers('story'),
+  );
+  const batchTurns = normalizeStoryWindowTurns(settings.settings.storyWindowBatchTurns ?? 1);
+  if (windowTurns === null || batchTurns === null) return new Set<string>();
+  const applied = resolveAppliedStoryArchives(
+    turns.value,
+    activeArchives.value,
+    storyWindowStart(turns.value.length, windowTurns, batchTurns),
+    batchTurns,
+  );
+  return new Set(activeArchives.value.filter((a) => !applied.includes(a)).map((a) => a.id));
+});
 const openEvents = computed(() =>
   collectOpenStoryEvents(messages.value, summaries.value, archives.value),
 );
@@ -204,8 +229,17 @@ function storyText(turn: StoryTurn): string {
         >
           <span class="card-head">
             <span class="card-name">{{ a.eventName }}</span>
-            <span class="outcome-chip" :class="`outcome-${a.outcome}`">
-              {{ storyArchiveOutcomeLabel(a.outcome) }}
+            <span class="card-tags">
+              <span
+                v-if="pendingArchiveIds.has(a.id)"
+                class="pending-tag"
+                title="结局所在回合仍在最近对话原文里，下次换窗时进入长期总览"
+              >
+                换窗后生效
+              </span>
+              <span class="outcome-chip" :class="`outcome-${a.outcome}`">
+                {{ storyArchiveOutcomeLabel(a.outcome) }}
+              </span>
             </span>
           </span>
           <span class="card-body">{{ a.overview }}</span>
@@ -404,9 +438,15 @@ function storyText(turn: StoryTurn): string {
   flex-direction: column;
   gap: 3px;
 }
+.card-tags {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-xs);
+}
 .outcome-chip,
 .event-tag,
 .archived-tag,
+.pending-tag,
 .turn-tag {
   display: inline-block;
   flex-shrink: 0;

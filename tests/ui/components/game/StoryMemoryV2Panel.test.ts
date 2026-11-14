@@ -20,7 +20,11 @@ const { getStoryTurnSummariesMock, getStoryArchivesMock } = vi.hoisted(() => ({
 }));
 
 let mockGame: Record<string, unknown>;
+let mockSettings: { settings: Record<string, unknown>; projectAgentDefaults: unknown };
 vi.mock('../../../../src/ui/stores/game-store', () => ({ useGameStore: () => mockGame }));
+vi.mock('../../../../src/ui/stores/settings-store', () => ({
+  useSettingsStore: () => mockSettings,
+}));
 vi.mock('@engine/persistence/database', () => ({
   getStoryTurnSummaries: getStoryTurnSummariesMock,
   getStoryArchives: getStoryArchivesMock,
@@ -81,6 +85,7 @@ beforeEach(() => {
     recentMemories: [],
     characters: [],
   };
+  mockSettings = { settings: { storyWindowBatchTurns: 1 }, projectAgentDefaults: null };
   getStoryTurnSummariesMock.mockReset();
   getStoryArchivesMock.mockReset();
   getStoryTurnSummariesMock.mockResolvedValue([
@@ -111,6 +116,19 @@ describe('StoryMemoryV2Panel', () => {
     expect(text).toContain('来源原文（2 个回合）');
     expect(text).toContain('老人托你送信。');
     expect(text).not.toContain('你在巷子里看见一只猫。');
+  });
+
+  it('换窗批 K > 1 时，判断回合仍在原文窗口内的归档标「换窗后生效」', async () => {
+    // N = 1、K = 3：3 个回合时窗口起点 0，判断回合（第 3 回合）仍在窗口内
+    mockSettings.settings = { storyWindowBatchTurns: 3, agents: { story: { historyLayers: 1 } } };
+    const pending = await mountPanel();
+    expect(pending.find('.pending-tag').text()).toBe('换窗后生效');
+
+    // K = 1：每回合滑动，归档照旧立即生效
+    mockSettings.settings = { storyWindowBatchTurns: 1, agents: { story: { historyLayers: 1 } } };
+    const applied = await mountPanel();
+    expect(applied.find('.pending-tag').exists()).toBe(false);
+    expect(applied.text()).toContain('把信送到了收信人手里');
   });
 
   it('回退掉的归档不显示', async () => {

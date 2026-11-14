@@ -328,6 +328,8 @@ src/core/                    ← 核心引擎
   │                                    无 Story 正文的回合不算）+ 最近 N 回合原文 + 窗口外**全部**未归档摘要片段
   │                                    + 缺摘要回合（以原文顶上并标注）。片段只在来源消息 id 仍属当前分支时有效
   │                                    + 有效归档 / 未结事件派生（`resolveActiveStoryArchives` / `collectOpenStoryEvents`）
+  │                                    + 分批换窗起点 `storyWindowStart`（N/K，第 4 区与召回唯一判据）+ 已生效归档
+  │                                    `resolveAppliedStoryArchives`（K>1 时判断回合换出窗口才进第 2 区/移走片段）
   ├── memory/story-turn-summary.ts        ← 🆕 [Story 上下文 v2 / P4·P5] 每回合总结契约：memory_summary 在新模式回合里
   │                                    **先做归档判断、再写摘要**（Q13），systemPrompt / 模板 + 解析器同源。🔴 旧契约
   │                                    （agent-config.json + memory-summarizer）一个字不动，新格式绝不交给旧处理器
