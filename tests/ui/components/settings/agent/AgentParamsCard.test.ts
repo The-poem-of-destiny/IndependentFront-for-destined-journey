@@ -163,3 +163,81 @@ describe('A03 Story v2 正文窗口设置', () => {
     expect(state.config.settings.agents[id].historySlice).toBe(1200);
   });
 });
+
+describe('S-08 API 绑定状态', () => {
+  const pool = [
+    { id: 'p1', name: '主力 API', model: 'm1', kind: 'llm' },
+    { id: 'p2', name: '备用 API', model: 'm2', kind: 'llm' },
+  ];
+
+  it('没绑定 → 不再挂红色「未选择」，显示「跟随默认：<第一个 API>」', () => {
+    state.config.settings.apiPool = pool;
+    const wrapper = card('vars_update');
+    expect(wrapper.text()).not.toContain('未选择');
+    expect(wrapper.get('.api-follow').text()).toBe('跟随默认：主力 API');
+    expect(wrapper.find('.api-warn').exists()).toBe(false);
+  });
+
+  it('内容包默认层带着本机不存在的池 id（S-00）→ 同样是跟随默认，不报失效', () => {
+    state.config.settings.apiPool = pool;
+    state.config.projectAgentDefaults.agents.story = { model: 'author-machine-uuid' };
+    const wrapper = card('story');
+    expect(wrapper.get('.api-follow').text()).toContain('主力 API');
+    expect(wrapper.text()).not.toContain('绑定失效');
+  });
+
+  it('用户指定的 API 已被删除 → 红字说明 + 下拉里有「（已删除的 API）」占位项，不是空白', () => {
+    state.config.settings.apiPool = pool;
+    state.config.settings.agents.vars_update = { model: 'deleted-id' };
+    const wrapper = card('vars_update');
+    expect(wrapper.get('.binding-stale-msg').text()).toContain('已被删除');
+    const option = wrapper.get('option[value="deleted-id"]');
+    expect(option.text()).toContain('已删除的 API');
+    expect(option.attributes('disabled')).toBeDefined();
+    expect((wrapper.get('select').element as HTMLSelectElement).value).toBe('deleted-id');
+  });
+
+  it('显式指定且存在 → ✓', () => {
+    state.config.settings.apiPool = pool;
+    state.config.settings.agents.vars_update = { model: 'p2' };
+    const wrapper = card('vars_update');
+    expect(wrapper.find('.api-ok').exists()).toBe(true);
+  });
+
+  it('没有任何 API → 请先配置 API', () => {
+    const wrapper = card('vars_update');
+    expect(wrapper.get('.api-warn').text()).toBe('请先配置 API');
+  });
+});
+
+describe('S-10 采样参数显示实际发送的值与来源', () => {
+  it('池默认盖过内容包默认时，框里是池的值，角标是「来自 API 池」；覆写的标「已覆写」', () => {
+    state.config.settings.apiPool = [
+      {
+        id: 'p1',
+        name: '主力 API',
+        model: 'm1',
+        kind: 'llm',
+        defaultParameters: { temperature: 1, topP: 1 },
+      },
+    ];
+    state.config.projectAgentDefaults.agents.vars_update = {
+      temperature: 0.3,
+      topP: 0.9,
+      freqPen: 0.1,
+    };
+    state.config.settings.agents.vars_update = { topP: 0.5 };
+    const wrapper = card('vars_update');
+    expect(wrapper.get('[data-param="temperature"]').text()).toBe('来自 API 池');
+    expect(wrapper.get('[data-param="topP"]').text()).toBe('已覆写');
+    expect(wrapper.get('[data-param="freqPen"]').text()).toBe('默认');
+    const temperatureInput = wrapper
+      .get('[data-param="temperature"]')
+      .element.parentElement!.querySelector('input') as HTMLInputElement;
+    expect(temperatureInput.value).toBe('1');
+    const topPInput = wrapper
+      .get('[data-param="topP"]')
+      .element.parentElement!.querySelector('input') as HTMLInputElement;
+    expect(topPInput.value).toBe('0.5');
+  });
+});

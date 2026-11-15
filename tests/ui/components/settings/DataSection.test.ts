@@ -84,6 +84,35 @@ beforeEach(() => {
   dropSceneImageBlobs.mockResolvedValue(0);
 });
 
+describe('DataSection —— 内容包搬走后的指路与危险区（S-01）', () => {
+  it('不再渲染内容包卡，只留一行指路，点按钮去「内容包」分区', async () => {
+    const w = await mountWithSave(null);
+    expect(w.find('[data-settings-anchor="content-pack"]').exists()).toBe(false);
+    expect(w.text()).toContain('内容包已移至「内容包」分区');
+    expect(w.findAll('button').some((b) => b.text() === '导入 / 升级内容包')).toBe(false);
+
+    const ui = useUIStore();
+    const spy = vi.spyOn(ui, 'openSettings').mockImplementation(() => {});
+    await w
+      .findAll('button')
+      .find((b) => b.text() === '前往内容包')!
+      .trigger('click');
+    expect(spy).toHaveBeenCalledWith('content-pack');
+  });
+
+  it('「清除所有数据」在网格之外的危险区里，排在分区最底部', async () => {
+    const w = await mountWithSave(null);
+    expect(w.find('.data-actions .data-danger').exists()).toBe(false);
+    const zone = w.get('.danger-zone');
+    expect(zone.find('.data-danger').text()).toContain('清除所有数据');
+    // 危险区在日常卡片网格之后
+    const grid = w.get('.data-actions').element;
+    expect(
+      grid.compareDocumentPosition(zone.element) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
+
 describe('DataSection —— 整库备份的 API 凭据边界', () => {
   it('导出与导入说明应明确排除 API 凭据、保留本机凭据并提示新设备重配', async () => {
     const w = await mountWithSave('save_1');

@@ -52,6 +52,43 @@ export interface ThreadDisplayView {
   hiddenCount: number;
 }
 
+// ═══ 大纲事件 / 章节的蒙版判定（PlotPanel 列表视图与 plot-timeline 共用）═══
+//
+// 🔴 PLT-01：章节标题与章节摘要此前从不打码，只有事件会变成「？？？」。
+//    这里是两者的**唯一**判据，与事件线节点同一口径：剧透模式不直接解除蒙版，
+//    只允许逐条 peek；peek 集合由组件持有（会话内存态，不写库）。
+//    总纲摘要（PlotOutline.summary）按类型契约是防剧透层下的可见部分，**不打码**。
+
+/** 大纲事件是否蒙版：未揭示且未被 peek */
+export function isOutlineEventMasked(
+  ev: { id: string; visibility: 'hidden' | 'revealed' },
+  peek: ReadonlySet<string>,
+): boolean {
+  return ev.visibility !== 'revealed' && !peek.has(ev.id);
+}
+
+/** 章节在 peek 集合里的键（加前缀，避免与事件 id 撞车） */
+export function chapterPeekKey(title: string): string {
+  return `chapter:${title}`;
+}
+
+/**
+ * 章节是否蒙版。当前章与已过去的章（状态不是 pending，或对应大事件已揭示）始终可见；
+ * 尚未到达的章蒙版，剧透模式下可逐条 peek。
+ */
+export function isChapterMasked(
+  chapter: { title: string; status: string; visibility?: 'hidden' | 'revealed' },
+  peek: ReadonlySet<string>,
+): boolean {
+  const reached = chapter.status !== 'pending' || chapter.visibility === 'revealed';
+  return !reached && !peek.has(chapterPeekKey(chapter.title));
+}
+
+/** 蒙版章节的占位标题：只暴露序号，不暴露章节名 */
+export function maskedChapterLabel(index: number): string {
+  return `第 ${index + 1} 章 · ？？？`;
+}
+
 /** 状态中文标签（唯一映射：引擎集中定义，UI 不内联第二份） */
 export function threadStatusLabel(status: PlotThreadStatus): string {
   return PLOT_THREAD_STATUS_LABELS[status] ?? status;

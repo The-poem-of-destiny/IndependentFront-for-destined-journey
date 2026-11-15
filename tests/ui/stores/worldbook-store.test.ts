@@ -264,4 +264,49 @@ describe('worldbook-store', () => {
     expect(useSettingsStore().settings.activeWorldBookId).toBeNull();
     expectSettingsFreeOfBooks(['《world_setting》', '《my-own》']);
   });
+
+  it('resetToDefaults 一本默认书都载不到时抛错，库与内存原样不动（S-22）', async () => {
+    const store = useWorldBookStore();
+    await store.init();
+    await store.upsertBook(makeBook('my-own', 2));
+    useSettingsStore().settings.activeWorldBookId = 'my-own';
+
+    builtInBooks.value = [];
+    await expect(store.resetToDefaults()).rejects.toThrow('未能载入任何默认世界书');
+
+    expect(store.books.map((b) => b.id)).toEqual(['my-own']);
+    expect(await getDatabase().worldBooks.count()).toBe(1);
+    expect(useSettingsStore().settings.activeWorldBookId).toBe('my-own');
+  });
+
+  it('resetToDefaults 载入默认书时出错 → 抛出且不清表（先载入再替换）', async () => {
+    const store = useWorldBookStore();
+    await store.init();
+    await store.upsertBook(makeBook('my-own', 2));
+    const { loadBuiltInWorldBooks } = await import('@engine/content/builtin-worldbooks');
+    vi.mocked(loadBuiltInWorldBooks).mockRejectedValueOnce(new Error('网络断开'));
+
+    await expect(store.resetToDefaults()).rejects.toThrow('网络断开');
+    expect(await getDatabase().worldBooks.get('my-own')).toBeDefined();
+    expect(store.getBook('my-own')).toBeDefined();
+  });
+
+  it('resetToDefaults 成功时返回恢复的默认书本数', async () => {
+    const store = useWorldBookStore();
+    await store.init();
+    builtInBooks.value = [makeBook('a', 1, true), makeBook('b', 1, true)];
+    await expect(store.resetToDefaults()).resolves.toBe(2);
+  });
+
+  // ── uniqueBookId（S-21）────────────────────────────────
+  it('uniqueBookId 生成可读 slug，被占用时追加序号，绝不与已有书撞 id', async () => {
+    const store = useWorldBookStore();
+    await store.init();
+    expect(store.uniqueBookId('My Book')).toBe('my_book');
+    await store.upsertBook(makeBook('my_book', 3));
+    expect(store.uniqueBookId('my book')).toBe('my_book_2');
+    await store.upsertBook(makeBook('my_book_2', 1));
+    expect(store.uniqueBookId('MY BOOK')).toBe('my_book_3');
+    expect(store.uniqueBookId('   ')).toBe('worldbook');
+  });
 });

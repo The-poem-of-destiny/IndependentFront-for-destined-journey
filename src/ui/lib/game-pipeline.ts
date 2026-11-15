@@ -869,6 +869,8 @@ export class GamePipeline {
     let activityRunId: string | null = null;
     let activityOutcome: 'completed' | 'failed' | 'cancelled' = 'failed';
     let activityMessage: string | undefined;
+    /** 回合级抛出的错误（GAME-05）：交给 store 归类成玩家看得懂的原因 */
+    let activityError: unknown;
 
     try {
       if (!(await this.admitPackLease()) || !this.isRunCurrent(controller)) return false;
@@ -1060,12 +1062,14 @@ export class GamePipeline {
         console.warn(
           '[GamePipeline] 管线未完成 (status=' + orchResult.status + ')，跳过回合推进/快照',
         );
+        // GAME-16：两条出路（保留已写内容重试 / 回退并重试）的说明由失败卡片给出，
+        //    这里只陈述发生了什么；失败原因由 store 从失败步骤归类（GAME-05）
         if (controller.signal.aborted) {
           activityOutcome = 'cancelled';
-          activityMessage = '本回合已停下，已写入的状态不会自动撤销；可回退或再次尝试。';
+          activityMessage = '本回合已停下，已写入的状态不会自动撤销。';
         } else {
           activityOutcome = 'failed';
-          activityMessage = '世界的回应在此中断，可以再次尝试。';
+          activityMessage = '世界的回应在此中断，已写入的状态不会自动撤销。';
         }
         return false;
       }
@@ -1170,7 +1174,7 @@ export class GamePipeline {
       if ((err as Error)?.name === 'AbortError') {
         console.log('[GamePipeline] 管线已中止');
         activityOutcome = 'cancelled';
-        activityMessage = '本回合已停下，已写入的状态不会自动撤销；可回退或再次尝试。';
+        activityMessage = '本回合已停下，已写入的状态不会自动撤销。';
         return false;
       }
       // 🔴 F10：显式端点绑定失效 = fail-stop。此时**任何 provider 都尚未收到请求**，
@@ -1178,7 +1182,8 @@ export class GamePipeline {
       if (err instanceof EndpointBindingError) {
         console.error('[GamePipeline] 端点绑定失效，本轮停发（fail-closed）:', err.message);
         activityOutcome = 'failed';
-        activityMessage = err.message;
+        activityMessage = '世界的回应在此中断，已写入的状态不会自动撤销。';
+        activityError = err;
         try {
           useUIStore().toast(err.message, 'error', 6000);
         } catch {
@@ -1190,7 +1195,8 @@ export class GamePipeline {
       if (isDirectMode(this.generationMode))
         this.notify(`直出未完成：${err instanceof Error ? err.message : String(err)}`, 'error');
       activityOutcome = 'failed';
-      activityMessage = '世界的回应在此中断，已写入的状态不会自动撤销；可回退后再次尝试。';
+      activityMessage = '世界的回应在此中断，已写入的状态不会自动撤销。';
+      activityError = err;
       return false;
     } finally {
       if (this.generationMode === 'direct_cached' && !this.directCommitted) {
@@ -1238,7 +1244,12 @@ export class GamePipeline {
       // 在 Stage 1 播，正文已经进了熔火裂谷，BGM 还在放上一座城的曲子。
       if (this.ownsActiveSave) this.flushPendingAudio();
       if (activityRunId) {
-        this.game.finishAgentActivityRun(activityRunId, activityOutcome, activityMessage);
+        this.game.finishAgentActivityRun(
+          activityRunId,
+          activityOutcome,
+          activityMessage,
+          activityError,
+        );
         this.game.finishAgentLogTurn(activityRunId, activityOutcome);
         const debugPrefix = `${activityRunId}\u0000`;
         for (const key of this.debugInvocationCounts.keys()) {

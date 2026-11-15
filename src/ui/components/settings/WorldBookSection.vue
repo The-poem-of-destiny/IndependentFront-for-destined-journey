@@ -7,7 +7,7 @@
  *    声明**（`lore.audiences`）。玩家自建书在编辑器顶部的「读取范围」里改，
  *    新建与导入时默认只给正文 Agent。
  */
-import { ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import WorldBookEditor from './WorldBookEditor.vue';
@@ -16,6 +16,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useWorldBookStore } from '../../stores/worldbook-store';
 import type { WorldBook } from '@engine/types/types';
 import { importUserWorldBookEntries } from '@engine/content/worldbook-import';
+import { confirmDialog } from '../../lib/confirm-dialog';
 
 /** 新建 / 导入的自建书默认读取范围（只给正文；玩家可在编辑器里加） */
 const DEFAULT_USER_BOOK_AUDIENCES = ['story'] as const;
@@ -55,7 +56,13 @@ async function saveWorldBookAsDefault(book: WorldBook) {
 async function resetSingleWorldBook(id: string) {
   const book = wb.getBook(id);
   if (!book?.builtIn) return;
-  if (!confirm(`确定将"${book.name}"恢复为默认吗？\n\n您对该书的所有修改将被清除。`)) return;
+  const ok = await confirmDialog({
+    title: '重置内置世界书',
+    message: `将《${book.name}》恢复为默认？您对该书的所有修改将被清除。`,
+    confirmLabel: '重置',
+    danger: true,
+  });
+  if (!ok) return;
   try {
     // 内容-引擎分离波 1 / §5.6：默认真源 = 已装 content pack 的 payload > 占位文件。
     // 导入真实包后 restore 不再把提示词打回占位。
@@ -73,46 +80,121 @@ async function resetSingleWorldBook(id: string) {
   }
 }
 
-async function importWorldBook() {
+/** 「导入 ST 世界书」：选文件 → 交给 importWorldBookFile */
+function importWorldBook() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.json';
-  input.onchange = async (e) => {
+  input.onchange = (e) => {
     const f = (e.target as HTMLInputElement).files?.[0];
-    if (!f) return;
-    try {
-      const raw = JSON.parse(await f.text());
-      const declared = Array.isArray(raw?.lore?.audiences)
-        ? (raw.lore.audiences as unknown[]).filter((id): id is string => typeof id === 'string')
-        : undefined;
-      const book: WorldBook = {
-        id: f.name.replace(/\.json$/i, ''),
-        name: raw.name || f.name.replace(/\.json$/i, ''),
-        partition: 'world_setting',
-        description: raw.description || '',
-        // 读取范围逐条目写入：条目自带声明就用它，否则用文件书级声明（旧格式）或默认只给正文
-        entries:
-          raw.entries && typeof raw.entries === 'object'
-            ? importUserWorldBookEntries(
-                raw.entries,
-                'world_setting',
-                declared ?? DEFAULT_USER_BOOK_AUDIENCES,
-              )
-            : [],
-      };
-      await wb.upsertBook(book);
-      ui.toast(`已导入 "${book.name}" (${book.entries.length} 条目)`, 'success');
-    } catch {
-      ui.toast('导入失败：文件格式错误', 'error');
-    }
+    if (f) void importWorldBookFile(f);
   };
   input.click();
 }
 
+/**
+ * 解析 + 冲突处理 + 落库（S-21 / S-28）。
+ * - 没有 `entries` 条目表的 JSON 直接拒绝（此前会「成功」导入一本 0 条目的书）；
+ * - id 与已有书相同 → 先问「覆盖」，不覆盖再问「导入为副本」（唯一 id），绝不静默覆盖。
+ */
+async function importWorldBookFile(f: File) {
+  const baseName = f.name.replace(/\.json$/i, '');
+  let raw: Record<string, unknown> & { lore?: { audiences?: unknown } };
+  try {
+    raw = JSON.parse(await f.text());
+  } catch {
+    ui.toast('导入失败：文件不是有效的 JSON', 'error');
+    return;
+  }
+  if (!raw || typeof raw !== 'object' || !raw.entries || typeof raw.entries !== 'object') {
+    ui.toast('导入失败：文件里没有 entries 条目表，不是 SillyTavern 世界书', 'error');
+    return;
+  }
+  let book: WorldBook;
+  try {
+    const declared = Array.isArray(raw.lore?.audiences)
+      ? (raw.lore.audiences as unknown[]).filter((id): id is string => typeof id === 'string')
+      : undefined;
+    book = {
+      id: baseName,
+      name: (typeof raw.name === 'string' && raw.name.trim()) || baseName,
+      partition: 'world_setting',
+      description: typeof raw.description === 'string' ? raw.description : '',
+      // 读取范围逐条目写入：条目自带声明就用它，否则用文件书级声明（旧格式）或默认只给正文
+      entries: importUserWorldBookEntries(
+        raw.entries as Parameters<typeof importUserWorldBookEntries>[0],
+        'world_setting',
+        declared ?? DEFAULT_USER_BOOK_AUDIENCES,
+      ),
+    };
+  } catch {
+    ui.toast('导入失败：条目格式无法识别', 'error');
+    return;
+  }
+
+  const existing = wb.getBook(book.id);
+  if (existing) {
+    const overwrite = await confirmDialog({
+      title: '已有同名世界书',
+      message: `覆盖已有的《${existing.name}》（${existing.entries?.length || 0} 条目）？覆盖后原内容无法找回。`,
+      confirmLabel: '覆盖',
+      cancelLabel: '不覆盖',
+      danger: true,
+    });
+    if (!overwrite) {
+      const asCopy = await confirmDialog({
+        title: '导入为副本？',
+        message: `保留原有的《${existing.name}》，把文件作为一本新书导入。`,
+        confirmLabel: '导入为副本',
+        cancelLabel: '取消导入',
+      });
+      if (!asCopy) return;
+      book = { ...book, id: wb.uniqueBookId(book.id) };
+    }
+  }
+
+  try {
+    await wb.upsertBook(book);
+  } catch {
+    ui.toast('导入失败：写入存储出错', 'error');
+    return;
+  }
+  ui.toast(`已导入 "${book.name}" (${book.entries.length} 条目)`, 'success');
+}
+
+// ===== 新建世界书（行内输入行，替代原生 prompt） =====
+
+const newBookOpen = ref(false);
+const newBookName = ref('');
+const newBookError = ref('');
+const newBookInput = ref<HTMLInputElement | null>(null);
+
 async function newWorldBook() {
-  const name = prompt('世界书名称：');
-  if (!name) return;
-  const id = name.toLowerCase().replace(/\s+/g, '_');
+  newBookOpen.value = true;
+  newBookName.value = '';
+  newBookError.value = '';
+  await nextTick();
+  newBookInput.value?.focus();
+}
+
+function cancelNewWorldBook() {
+  newBookOpen.value = false;
+  newBookError.value = '';
+}
+
+/** 提交新建：同名（去首尾空白后完全相同）拒绝；id 由名字生成且保证唯一，绝不覆盖已有书（S-21） */
+async function submitNewWorldBook() {
+  const name = newBookName.value.trim();
+  if (!name) {
+    newBookError.value = '请输入世界书名称';
+    return;
+  }
+  const dup = wb.books.find((b) => b.name.trim() === name);
+  if (dup) {
+    newBookError.value = `已有同名世界书《${dup.name}》，请换个名字`;
+    return;
+  }
+  const id = wb.uniqueBookId(name);
   const book: WorldBook = {
     id,
     name,
@@ -125,6 +207,7 @@ async function newWorldBook() {
     ui.toast('创建失败', 'error');
     return;
   }
+  newBookOpen.value = false;
   activeWorldBook.value = wb.getBook(id) ?? book;
   ui.toast(`已创建 "${name}"`, 'success');
 }
@@ -132,12 +215,13 @@ async function newWorldBook() {
 async function deleteWorldBook(id: string) {
   const book = wb.getBook(id);
   if (!book) return;
-  if (
-    !confirm(
-      `确定删除世界书"${book.name}"吗？将删除全部 ${book.entries?.length || 0} 条条目，此操作不可撤销。`,
-    )
-  )
-    return;
+  const ok = await confirmDialog({
+    title: '删除世界书',
+    message: `删除《${book.name}》及其全部 ${book.entries?.length || 0} 条条目？此操作不可撤销。`,
+    confirmLabel: '删除',
+    danger: true,
+  });
+  if (!ok) return;
   try {
     await wb.deleteBook(id);
   } catch {
@@ -152,20 +236,38 @@ function closeWorldBookEditor() {
   activeWorldBook.value = null;
 }
 
+/** 恢复默认会删掉的书（自建 / 导入 / 工坊）——确认框逐本点名 */
+const removableBooks = computed(() => wb.books.filter((b) => !b.builtIn));
+
+/**
+ * 全部恢复默认（S-22）：确认框点名将被删除的书；失败如实报错且数据不动。
+ * 直接调 worldbook-store（它在失败时抛出）——settings-store 的同名包装会吞掉错误。
+ */
 async function resetWorldBooks() {
-  if (
-    !confirm(
-      '确定恢复所有世界书为默认吗？\n\n这将清除所有修改和导入的世界书，重新加载内置版本。此操作不可撤销。',
-    )
-  )
-    return;
+  const doomed = removableBooks.value;
+  const shown = doomed.slice(0, 5).map((b) => `《${b.name}》（${b.entries?.length || 0} 条目）`);
+  if (doomed.length > shown.length) shown.push(`……另有 ${doomed.length - shown.length} 本`);
+  const ok = await confirmDialog({
+    title: '恢复全部世界书为默认',
+    message:
+      doomed.length > 0
+        ? `将删除以下 ${doomed.length} 本自建或导入的世界书，并清除对内置书的所有修改。此操作不可撤销。`
+        : '将清除对内置书的所有修改，重新载入默认版本。此操作不可撤销。',
+    details: shown,
+    confirmLabel: '删除并恢复默认',
+    danger: true,
+  });
+  if (!ok) return;
   try {
-    await cfg.resetWorldBooksToDefaults();
-    activeWorldBook.value = null;
-    ui.toast('世界书已恢复为默认', 'success');
-  } catch {
-    ui.toast('恢复失败，请检查 data/worldbooks/ 目录', 'error');
+    await wb.resetToDefaults();
+    cfg.saveNow();
+  } catch (err) {
+    const reason = err instanceof Error && err.message ? `：${err.message}` : '';
+    ui.toast(`恢复失败${reason}。现有世界书未改动`, 'error');
+    return;
   }
+  activeWorldBook.value = null;
+  ui.toast('世界书已恢复为默认', 'success');
 }
 
 async function handleWorldBookUpdate(updated: WorldBook) {
@@ -217,16 +319,34 @@ async function handleWorldBookUpdate(updated: WorldBook) {
               >导入ST世界书</AppButton
             >
             <AppButton variant="primary" size="sm" @click="newWorldBook">+ 新建世界书</AppButton>
-            <AppButton
-              variant="ghost"
-              size="sm"
-              style="color: var(--color-warning)"
-              @click="resetWorldBooks"
-              >⟳ 恢复默认</AppButton
-            >
           </div>
         </div>
       </div>
+
+      <!-- 新建世界书：行内输入行（替代原生 prompt） -->
+      <form v-if="newBookOpen" class="new-book-row" @submit.prevent="submitNewWorldBook">
+        <label class="form-label" for="new-book-name">新世界书名称</label>
+        <div class="new-book-controls">
+          <input
+            id="new-book-name"
+            ref="newBookInput"
+            v-model="newBookName"
+            class="form-input"
+            placeholder="例如：我的大陆设定"
+            :aria-invalid="newBookError ? 'true' : undefined"
+            aria-describedby="new-book-error"
+            @input="newBookError = ''"
+            @keydown.escape.prevent="cancelNewWorldBook"
+          />
+          <AppButton variant="primary" size="sm" type="submit">创建</AppButton>
+          <AppButton variant="ghost" size="sm" type="button" @click="cancelNewWorldBook"
+            >取消</AppButton
+          >
+        </div>
+        <p v-if="newBookError" id="new-book-error" class="new-book-error" role="alert">
+          {{ newBookError }}
+        </p>
+      </form>
 
       <AppCard v-if="wb.books.length === 0" padding="md">
         <div class="empty-tab">
@@ -258,6 +378,8 @@ async function handleWorldBookUpdate(updated: WorldBook) {
               v-if="!book.builtIn"
               variant="danger"
               size="sm"
+              :aria-label="`删除 ${book.name}`"
+              :title="`删除 ${book.name}`"
               @click="deleteWorldBook(book.id)"
             >
               <i class="fa-solid fa-trash" aria-hidden="true"></i>
@@ -291,6 +413,18 @@ async function handleWorldBookUpdate(updated: WorldBook) {
             </AppButton>
           </div>
         </AppCard>
+      </div>
+
+      <!-- 危险区（S-22）：与导入/新建分开，放在分区最底部 -->
+      <div class="danger-zone" role="group" aria-labelledby="wb-danger-title">
+        <div class="danger-zone-text">
+          <h4 id="wb-danger-title">恢复全部默认</h4>
+          <p>
+            删除所有自建、导入的世界书（当前
+            {{ removableBooks.length }} 本），并清除对内置书的修改。不可撤销。
+          </p>
+        </div>
+        <AppButton variant="danger" size="sm" @click="resetWorldBooks">恢复全部默认…</AppButton>
       </div>
     </template>
   </section>
@@ -357,6 +491,48 @@ async function handleWorldBookUpdate(updated: WorldBook) {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.new-book-row {
+  margin-bottom: var(--theme-spacing-md);
+  padding: var(--theme-spacing-md);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: var(--theme-card-bg);
+}
+.new-book-controls {
+  display: flex;
+  gap: var(--theme-spacing-sm);
+  align-items: center;
+}
+.new-book-controls .form-input {
+  flex: 1;
+}
+.new-book-error {
+  margin: var(--theme-spacing-xs) 0 0;
+  font-size: 0.8rem;
+  color: var(--theme-error);
+}
+/* 危险区：与常规操作隔开，error 色调描边 */
+.danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--theme-spacing-md);
+  margin-top: var(--theme-spacing-xl);
+  padding: var(--theme-spacing-md);
+  border: 1px solid color-mix(in srgb, var(--theme-error) 45%, var(--theme-card-border));
+  border-radius: var(--theme-radius-md);
+  background: color-mix(in srgb, var(--theme-error) 6%, transparent);
+}
+.danger-zone h4 {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  color: var(--theme-error);
+}
+.danger-zone p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--theme-text-secondary);
 }
 .builtin-badge {
   font-size: 11px;

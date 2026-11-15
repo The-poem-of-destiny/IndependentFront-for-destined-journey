@@ -37,4 +37,14 @@ describe('CreateFooter', () => {
     const wrapper = mount(CreateFooter, { props: { canNext: true, blocked } });
     expect(wrapper.find('.blocked-hint').exists()).toBe(false);
   });
+
+  it('「重新开始」按钮发出 restart；提交中禁用（H-04）', async () => {
+    const wrapper = mount(CreateFooter, { props: { canNext: true } });
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('重新开始'))!;
+    await btn.trigger('click');
+    expect(wrapper.emitted('restart')).toHaveLength(1);
+
+    await wrapper.setProps({ busy: true });
+    expect(btn.attributes('disabled')).toBeDefined();
+  });
 });

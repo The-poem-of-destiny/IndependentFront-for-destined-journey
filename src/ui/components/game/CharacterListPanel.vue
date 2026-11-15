@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import AssetMedia from '../shared/AssetMedia.vue';
@@ -16,12 +16,17 @@ import type { RewriteTarget } from '@engine/agents/entity-gen-agent';
 // 登神三档的渲染与 CharacterViewerModal 共用同一条判定入口（别各写一套 —— 一处跟了新形状、
 // 另一处没跟，症状就是本面板把要素对象 `JSON.stringify` 成一坨原始数据）
 import { buildAscensionTracks, hasAnyAscension } from './character-viewer';
+import CharacterViewerModal from './CharacterViewerModal.vue';
 
 const game = useGameStore();
 const ui = useUIStore();
 
 // ═══ NPC 列表 ═══
-const selectedIdx = ref(0);
+/**
+ * 选中项按**名字**记（审计 CHR-07）：此前记下标，NPC 数量一变（新角色登场、删除）就跳回第一个。
+ * 名字自 M4 起唯一；记着的名字不在列表里了（被删 / 改名）才退回第一个。
+ */
+const selectedName = ref<string | null>(null);
 const detailTab = ref<'equipment' | 'skills' | 'overview' | 'ascension' | 'status' | 'bag'>(
   'overview',
 );
@@ -32,7 +37,9 @@ const fp = computed(() => game.fp);
 const affections = computed(() => game.saveProfile?.affections || {});
 const contracts = computed(() => game.saveProfile?.contracts || []);
 
-const selected = computed(() => npcs.value[selectedIdx.value] || null);
+const selected = computed(
+  () => npcs.value.find((n) => n.name === selectedName.value) ?? npcs.value[0] ?? null,
+);
 // 年龄不落库：按年龄锚点与当前游戏时间现算，时间推进后自动变化
 const selectedAge = computed(() =>
   selected.value ? formatCharacterAge(selected.value, game.gameTime) : '',
@@ -44,12 +51,45 @@ const selectedAscensionTracks = computed(() =>
 );
 const ascensionUnlocked = computed(() => hasAnyAscension(selectedAscensionTracks.value));
 
-watch(
-  () => npcs.value.length,
-  () => {
-    selectedIdx.value = 0;
-  },
-);
+/** 选中一位 NPC（点击 / Enter / 空格 / 方向键共用）；换人时详情回到概览 */
+function selectNpc(name: string): void {
+  if (selected.value?.name !== name) detailTab.value = 'overview';
+  selectedName.value = name;
+}
+
+const npcListRef = ref<HTMLElement | null>(null);
+
+/**
+ * 列表的键盘导航（listbox 的 roving tabindex：只有选中那一行在 Tab 序里）：
+ * ↑/↓ 换到上一位/下一位，Home/End 到首尾，并把焦点跟过去。
+ */
+function onNpcListKeydown(event: KeyboardEvent): void {
+  const list = npcs.value;
+  if (list.length === 0) return;
+  const current = Math.max(
+    0,
+    list.findIndex((n) => n.name === selected.value?.name),
+  );
+  let next: number;
+  if (event.key === 'ArrowDown') next = Math.min(list.length - 1, current + 1);
+  else if (event.key === 'ArrowUp') next = Math.max(0, current - 1);
+  else if (event.key === 'Home') next = 0;
+  else if (event.key === 'End') next = list.length - 1;
+  else return;
+  event.preventDefault();
+  selectNpc(list[next].name);
+  void nextTick(() => {
+    npcListRef.value?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]')?.focus();
+  });
+}
+
+// ═══ 只读档案（审计 CHR-01）═══
+/**
+ * 角色查看器（档案 / 编年史 / 相册…）此前只能从场景栏「在场」那一行打开，不在场的 NPC 无路可去。
+ * 这里挂一个自己的实例：查看器收的是**名字**、每次从 store 回查（见它的文件头），
+ * 关掉回到本列表。AppModal 支持叠层，所以开在角色列表这个弹窗之上没问题。
+ */
+const viewingName = ref<string | null>(null);
 
 // ═══ NPC 标签 ═══
 function getTags(npc: any): string[] {
@@ -233,16 +273,25 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
     <!-- Master-Detail -->
     <div class="master-detail">
       <!-- 左: NPC 列表 -->
-      <div class="npc-list">
+      <!-- 键盘可达（审计 CHR-02）：listbox + 选中行在 Tab 序里，↑/↓/Home/End 换人，Enter/空格选中 -->
+      <div
+        ref="npcListRef"
+        class="npc-list"
+        role="listbox"
+        aria-label="角色列表"
+        @keydown="onNpcListKeydown"
+      >
         <div
-          v-for="(npc, i) in npcs"
+          v-for="npc in npcs"
           :key="npc.id"
           class="npc-card"
-          :class="{ selected: i === selectedIdx }"
-          @click="
-            selectedIdx = i;
-            detailTab = 'overview';
-          "
+          :class="{ selected: npc.name === selected?.name }"
+          role="option"
+          :aria-selected="npc.name === selected?.name"
+          :tabindex="npc.name === selected?.name ? 0 : -1"
+          @click="selectNpc(npc.name)"
+          @keydown.enter.prevent="selectNpc(npc.name)"
+          @keydown.space.prevent="selectNpc(npc.name)"
         >
           <!-- 2.5rem 圆 = 脸位，走脸位链 头像 → 立绘 → 立绘bg（只有立绘的角色也不留洞） -->
           <div class="npc-avatar">
@@ -297,6 +346,15 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
             </div>
             <div class="d-tier">{{ selected.tierName }} · Lv.{{ selected.level }}</div>
           </div>
+          <button
+            type="button"
+            class="d-view-btn"
+            title="打开完整档案：编年史、相册与全部资料"
+            @click="viewingName = selected.name"
+          >
+            <i class="fa-solid fa-book-open" aria-hidden="true" />
+            查看档案 / 编年史
+          </button>
           <button
             class="d-remove-btn"
             :disabled="removing"
@@ -490,10 +548,14 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
               该角色暂无状态效果
             </div>
             <div v-else class="status-list">
-              <div
+              <!-- 真按钮（审计 CHR-02）：Tab 可达、Enter/空格展开说明 -->
+              <button
                 v-for="fx in (selected as any).statusEffects"
                 :key="fx.name"
+                type="button"
                 class="status-row"
+                :class="{ inspected: selStatusInspected === fx.name }"
+                :aria-expanded="selStatusInspected === fx.name"
                 @click="selStatusInspected = selStatusInspected === fx.name ? null : fx.name"
               >
                 <BuffChip
@@ -507,7 +569,7 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
                 <span v-else-if="fx.remainingTime < 999" class="st-time"
                   >{{ fx.remainingTime }}{{ fx.timeUnit }}</span
                 >
-              </div>
+              </button>
             </div>
             <div
               v-if="
@@ -656,6 +718,9 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
     </div>
   </div>
   <div v-else class="empty">暂无角色数据</div>
+
+  <!-- 只读档案（CHR-01）：叠在本弹窗之上，关掉回到列表；自己 Teleport 到 body（见 AppModal） -->
+  <CharacterViewerModal :name="viewingName" @close="viewingName = null" />
 </template>
 
 <style scoped>
@@ -740,6 +805,10 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
 .npc-card:hover {
   background: var(--theme-surface-muted);
   border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+}
+.npc-card:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
 }
 .npc-card.selected {
   border-color: var(--theme-primary);
@@ -858,8 +927,31 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
   padding-bottom: 10px;
   border-bottom: 2px solid var(--theme-card-border);
 }
-.d-remove-btn {
+.d-view-btn {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  color: var(--theme-text-primary);
+  background: color-mix(in srgb, var(--theme-primary) 10%, var(--theme-card-bg));
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 40%, var(--theme-card-border));
+  border-radius: var(--theme-radius-sm, 4px);
+  cursor: pointer;
+  transition: background var(--theme-transition-fast);
+  flex-shrink: 0;
+}
+.d-view-btn:hover {
+  background: color-mix(in srgb, var(--theme-primary) 18%, var(--theme-card-bg));
+}
+.d-view-btn:focus-visible,
+.d-remove-btn:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 1px;
+}
+.d-remove-btn {
   padding: 5px 12px;
   font-size: 0.75rem;
   font-family: inherit;
@@ -1307,10 +1399,19 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
   padding: 4px 8px;
   border-radius: var(--theme-radius-sm, 4px);
   border: 1px solid transparent;
+  /* 按钮外壳复位：观感与原来的 div 一致 */
+  background: transparent;
+  color: inherit;
+  font: inherit;
   transition: border-color 0.12s;
 }
-.status-row:hover {
+.status-row:hover,
+.status-row.inspected {
   border-color: var(--theme-card-border);
+}
+.status-row:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 1px;
 }
 .st-time {
   font-size: 0.625rem;

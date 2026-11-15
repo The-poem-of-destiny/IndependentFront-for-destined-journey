@@ -10,7 +10,15 @@ import FormInput from '../shared/form/FormInput.vue';
 import FormSelect from '../shared/form/FormSelect.vue';
 import FormStepper from '../shared/form/FormStepper.vue';
 
-const props = defineProps<{ visible: boolean; editItem?: CatalogItem | null }>();
+const props = defineProps<{
+  visible: boolean;
+  editItem?: CatalogItem | null;
+  /**
+   * C-06：保存这一项前可用的转生点数（编辑时已加回该项原消耗）。
+   * 传入时，消耗超过它就在表单里就地写出保存后会超支多少；不传则不提示。
+   */
+  availablePoints?: number;
+}>();
 const emit = defineEmits<{
   save: [item: CatalogItem];
   close: [];
@@ -51,6 +59,13 @@ const itemConsume = ref('');
 const itemDescription = ref('');
 const itemQuantity = ref(1);
 const itemCost = ref(50);
+
+/** 保存后的超支额（道具按数量计）；0 = 不超支或未提供可用点数 */
+const overspendAfterSave = computed(() => {
+  if (props.availablePoints === undefined) return 0;
+  const total = itemCost.value * (category.value === 'item' ? itemQuantity.value : 1);
+  return Math.max(0, total - Math.max(0, props.availablePoints));
+});
 
 // 装备战斗数值（英文键对齐 combat-resolver，确保战斗里 weaponAtk/defense 等读得到）
 const EQUIPMENT_STATS = [
@@ -186,6 +201,9 @@ watch(
       <FormSelect v-model="itemType" label="类型" :options="subtypeOptions" />
       <FormSelect v-model="itemRarity" label="品质" :options="RARITY_OPTIONS" />
       <FormStepper v-model="itemCost" label="消耗转生点" :min="1" :max="9999" />
+      <p v-if="overspendAfterSave > 0" class="overspend-hint" role="status">
+        保存后转生点数将超支 {{ overspendAfterSave }} 点；超支时无法创建角色。
+      </p>
 
       <!-- 标签 -->
       <div class="tag-section">
@@ -362,5 +380,11 @@ watch(
   justify-content: center;
   gap: var(--theme-spacing-sm);
   margin-top: var(--theme-spacing-sm);
+}
+.overspend-hint {
+  margin: -4px 0 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--theme-error);
 }
 </style>

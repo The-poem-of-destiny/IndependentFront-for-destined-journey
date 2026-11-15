@@ -126,7 +126,17 @@ const { url: portraitUrl, isVideo: portraitIsVideo } = useAssetImage(
       </div>
     </div>
 
-    <p class="points-remaining">
+    <!-- C-06：超支时明说建档被挡、原因与去处，不再显示「点数将保留在存档中」 -->
+    <div v-if="store.overspentPoints > 0" class="points-overspent" role="alert">
+      <p>
+        转生点数超支 {{ store.overspentPoints }} 点（已花费 {{ store.totalCost }} /
+        {{ store.reincarnationPoints }}）。超支未解决前无法创建角色。
+      </p>
+      <button type="button" class="points-fix-link" @click="store.currentStep = 1">
+        前往基础信息调整开销
+      </button>
+    </div>
+    <p v-else class="points-remaining">
       剩余转生点数: {{ store.remainingPoints }} (未使用的点数将保留在存档中)
     </p>
   </section>
@@ -282,5 +292,29 @@ const { url: portraitUrl, isVideo: portraitIsVideo } = useAssetImage(
 }
 .points-remaining strong {
   color: var(--theme-primary);
+}
+.points-overspent {
+  margin-top: var(--theme-spacing-md);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  background: color-mix(in srgb, var(--theme-error) 8%, var(--theme-card-bg));
+  border: 1px solid var(--theme-error);
+  border-radius: var(--theme-radius-md);
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--theme-error);
+}
+.points-overspent p {
+  margin: 0 0 var(--theme-spacing-xs);
+  font-weight: 600;
+}
+.points-fix-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--theme-text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 </style>

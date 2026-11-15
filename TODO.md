@@ -147,6 +147,11 @@
         （`content-pack-plan.ts` 的存档 uid 迁移）还没用「真实新包 + 旧存档」走过一次。等分发链路
         通了，首个正式包装包时顺带验收。
 
+  - [ ] **清掉私有内容仓 `data/defaults/agent-config.json` 里 `story` / `prose_rewrite` 两个本机 API 池 id**
+        （UI/UX 普查 S-00 第 ③ 项，见 `docs/reviews/2026-11-14-ui-ux-audit.md`）。引擎侧已于 2026-11-14 让
+        默认层里本机不存在的池 id 读成「未设置」（PR #151），新玩家不再被拦；
+        但这两个值本就不该进默认值，下一次发包前置空。
+
   - [ ] （低优先）`imageDialects` / `remoteAssets` 两节内容仓未提供，分别回落占位的两套通用方言与
         世界书 char-info 载体，现状可用。只在要做世界观专用画风、或给非角色素材走远程 URL 时再补。
 

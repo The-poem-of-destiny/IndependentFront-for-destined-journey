@@ -95,4 +95,35 @@ describe('SelectableCard', () => {
     // epic → 经主题令牌 var(--theme-quality-epic) 注入到 --q-color（不再写死 hex，主题可换色）
     expect(card.attributes('style')).toContain('--q-color: var(--theme-quality-epic)');
   });
+
+  it('★ disabled 时「选择」按钮禁用且点击不 emit（C-05）', async () => {
+    const wrapper = mount(SelectableCard, {
+      props: { item: testItem, selected: false, disabled: true },
+    });
+    const button = wrapper.find('.card-action button');
+    expect(button.attributes('disabled')).toBeDefined();
+    await button.trigger('click');
+    expect(wrapper.emitted('select')).toBeUndefined();
+  });
+
+  it('★ disabled 时以可见文字写出原因（C-05）', () => {
+    const wrapper = mount(SelectableCard, {
+      props: {
+        item: testItem,
+        selected: false,
+        disabled: true,
+        disabledReason: '点数不足，还差 20 点',
+      },
+    });
+    expect(wrapper.find('.card-blocked').text()).toBe('点数不足，还差 20 点');
+  });
+
+  it('可选时按钮点击 emit select，且不显示原因', async () => {
+    const wrapper = mount(SelectableCard, {
+      props: { item: testItem, selected: false, disabledReason: null },
+    });
+    await wrapper.find('.card-action button').trigger('click');
+    expect(wrapper.emitted('select')).toHaveLength(1);
+    expect(wrapper.find('.card-blocked').exists()).toBe(false);
+  });
 });

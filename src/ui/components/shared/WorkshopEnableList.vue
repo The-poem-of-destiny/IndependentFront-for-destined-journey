@@ -88,11 +88,19 @@ function onToggle(option: WorkshopEnableOption) {
       </label>
     </div>
 
-    <p v-if="options.length > 0" class="wk-note">
-      工坊内容来自社区投稿，可能与内置设定（含命定核心）重叠 ——
-      请自行按标签与简介判断。勾选后其全部条目会随本存档启用；未勾选时按世界书默认规则参与关键词激活，
-      是否真正注入仍取决于设置页里各 Agent 的世界书可见性。
-    </p>
+    <!--
+      W-02（2026-11-14）：口径对着 lib/workshop-enable.ts + worldbook-loader 的
+      filterBooksByEnabledEntries + useBeautify 写 —— 存档里只要有任一工坊条目 token，
+      工坊分区就只放行勾选的条目；一个都没有时不过滤。美化规则只在项目被勾选时生效。
+    -->
+    <div v-if="options.length > 0" class="wk-note">
+      <p>工坊内容来自社区投稿，可能与内置设定（含命定核心）重叠，请按标签与简介自行判断。</p>
+      <p>勾选：该扩展的世界书条目和美化规则在本存档生效。</p>
+      <p>
+        不勾选：它的美化规则不生效；只要本存档勾选了任意一个扩展，未勾选的扩展就完全不参与。
+        一个都没勾选时，所有已安装扩展的世界书条目仍会按各自的关键词规则参与。
+      </p>
+    </div>
   </div>
 </template>
 
@@ -230,12 +238,17 @@ function onToggle(option: WorkshopEnableOption) {
 }
 
 .wk-note {
-  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-xs);
   padding-top: var(--theme-spacing-sm);
   border-top: 1px solid var(--theme-card-border);
   font-size: 0.6875rem;
   line-height: 1.5;
   color: var(--theme-text-muted);
+}
+.wk-note p {
+  margin: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

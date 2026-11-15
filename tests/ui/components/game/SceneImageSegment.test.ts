@@ -81,6 +81,11 @@ vi.mock('../../../../src/ui/stores/character-appearance-store', () => ({
   useCharacterAppearanceStore: () => sessionAppearance,
 }));
 vi.mock('../../../../src/ui/stores/ui-store', () => ({ useUIStore: () => ui }));
+// 离开游戏页确认（GAME-08）：默认放行，个别用例改成取消
+const leaveGuard = vi.hoisted(() => ({ confirm: vi.fn(async (_destination: string) => true) }));
+vi.mock('../../../../src/ui/lib/leave-game-guard', () => ({
+  confirmLeaveGame: leaveGuard.confirm,
+}));
 
 function record(over: Partial<SceneImageRecord> = {}): SceneImageRecord {
   return {
@@ -227,7 +232,22 @@ describe('SceneImageSegment', () => {
 
     expect(wrapper.text()).toContain('还没有外观预设');
     await wrapper.get('.si-link').trigger('click');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(leaveGuard.confirm).toHaveBeenCalledWith('设置');
     expect(ui.openSettings).toHaveBeenCalledWith('image');
+  });
+
+  it('「去设置」在离开确认被取消时留在游戏页（GAME-08）', async () => {
+    leaveGuard.confirm.mockResolvedValueOnce(false);
+    ui.openSettings.mockClear();
+    scene.records = [record()];
+    scene.blobOf.mockResolvedValue(new Blob(['x'], { type: 'image/png' }));
+    const wrapper = mountSegment({ marker: MARKER, mode: 'off' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await wrapper.get('.si-link').trigger('click');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(ui.openSettings).not.toHaveBeenCalled();
   });
 
   /**

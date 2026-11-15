@@ -98,7 +98,14 @@
         @keydown.enter="editEntry(idx)"
       >
         <span class="col-num">{{ idx + 1 }}</span>
-        <span class="col-name" :title="entry.name" role="button" tabindex="0">
+        <span
+          class="col-name"
+          :title="entry.name"
+          role="button"
+          tabindex="0"
+          @click="editEntry(idx)"
+          @keydown.enter.stop="editEntry(idx)"
+        >
           {{ entry.name || '(未命名)' }}
         </span>
         <label class="col-toggle toggle-label-inline" :title="entry.enabled ? '已启用' : '已禁用'">
@@ -119,13 +126,16 @@
           >
             <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
           </button>
+          <!-- S-23：不用 v-model —— 输入过程中不改 entry.order（行不随按键重排），
+               change（失焦 / 回车）时才提交并落库 -->
           <input
-            v-model.number="entry.order"
+            :value="entry.order"
             type="number"
             :disabled="readonly"
             class="order-input"
             :aria-label="`${entry.name} 排序`"
-            @change="markDirty"
+            @keydown.enter.stop
+            @change="commitOrder(entry, $event)"
           />
           <button
             class="order-btn"
@@ -156,8 +166,8 @@
     <div
       v-if="editingIndex !== null"
       class="modal-overlay"
-      @click.self="cancelEdit"
-      @keydown.escape="cancelEdit"
+      @click.self="requestCloseEdit"
+      @keydown.escape="requestCloseEdit"
     >
       <div class="edit-modal" role="dialog" aria-modal="true" aria-label="编辑条目">
         <h4>{{ readonly ? '查看条目' : '编辑条目' }}</h4>
@@ -253,7 +263,7 @@
         ></textarea>
 
         <div class="modal-actions">
-          <button class="btn-secondary" @click="cancelEdit">
+          <button class="btn-secondary" @click="requestCloseEdit">
             {{ readonly ? '关闭' : '取消' }}
           </button>
           <button v-if="!readonly" class="btn-primary" @click="saveEdit">保存</button>
@@ -269,6 +279,7 @@ import type { WorldBook, WorldBookEntry } from '@engine/types/types';
 import { createUserWorldBookUid } from '@engine/content/worldbook-uid';
 import { loreEntryAudiences } from '@engine/content/lore-routing';
 import { AGENT_LIST, agentDisplayName } from './agent/agent-list';
+import { confirmDialog } from '../../lib/confirm-dialog';
 
 /** 可勾选的读取方（战斗与出图侧链不读玩家自建书，不列） */
 const AUDIENCE_AGENTS = AGENT_LIST.filter(
@@ -350,8 +361,17 @@ function toggleEditAudience(agentId: string) {
     : [...list, agentId];
 }
 
-function markDirty() {
-  // automatic save via watch
+/** 排序号提交（S-23）：与上下移按钮同一条 saveBook 路径；非法输入回显原值 */
+function commitOrder(entry: WorldBookEntry, event: Event) {
+  const input = event.target as HTMLInputElement;
+  const next = Number(input.value);
+  if (input.value.trim() === '' || !Number.isFinite(next)) {
+    input.value = String(entry.order);
+    return;
+  }
+  if (next === entry.order) return;
+  entry.order = next;
+  saveBook();
 }
 
 function onToggleChange() {
@@ -410,6 +430,7 @@ async function editEntry(idx: number) {
         ? [...loreEntryAudiences(props.book, entry)]
         : [...bookAudiences.value],
   };
+  editBaseline = JSON.stringify(editForm.value);
   await nextTick();
   editNameInput.value?.focus();
 }
@@ -442,9 +463,44 @@ function cancelEdit() {
   editingIndex.value = null;
 }
 
-function deleteEntry(idx: number) {
-  if (!confirm('确定删除此条目？')) return;
-  const entry = sortedEntries.value[idx];
+/** 打开弹窗时的表单快照，用于脏检查（S-24） */
+let editBaseline = '';
+let closePromptOpen = false;
+
+/** 遮罩 / Esc / 取消：表单有改动时先确认，未改动直接关 */
+async function requestCloseEdit() {
+  if (editingIndex.value === null || closePromptOpen) return;
+  const dirty = !props.readonly && JSON.stringify(editForm.value) !== editBaseline;
+  if (!dirty) {
+    cancelEdit();
+    return;
+  }
+  closePromptOpen = true;
+  try {
+    const discard = await confirmDialog({
+      title: '放弃未保存的修改？',
+      message: `条目「${editForm.value.name || '(未命名)'}」的修改还没有保存，关闭后将丢失。`,
+      confirmLabel: '放弃修改',
+      cancelLabel: '继续编辑',
+      danger: true,
+    });
+    if (discard) cancelEdit();
+  } finally {
+    closePromptOpen = false;
+  }
+}
+
+async function deleteEntry(idx: number) {
+  const target = sortedEntries.value[idx];
+  if (!target) return;
+  const ok = await confirmDialog({
+    title: '删除条目',
+    message: `删除条目「${target.name || '(未命名)'}」？此操作不可撤销。`,
+    confirmLabel: '删除',
+    danger: true,
+  });
+  if (!ok) return;
+  const entry = target;
   const realIdx = entries.value.findIndex((e) => e.uid === entry.uid);
   if (realIdx >= 0) {
     entries.value.splice(realIdx, 1);

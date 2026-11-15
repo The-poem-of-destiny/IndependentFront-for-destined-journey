@@ -18,15 +18,22 @@ defineEmits<{
   prev: [];
   next: [];
   openPreset: [];
+  restart: [];
   jump: [step: number];
 }>();
 </script>
 
 <template>
   <footer class="create-footer">
-    <AppButton variant="ghost" size="sm" :disabled="busy" @click="$emit('openPreset')">
-      <i class="btn-icon fa-solid fa-bookmark" aria-hidden="true"></i>角色预设
-    </AppButton>
+    <div class="footer-left">
+      <AppButton variant="ghost" size="sm" :disabled="busy" @click="$emit('openPreset')">
+        <i class="btn-icon fa-solid fa-bookmark" aria-hidden="true"></i>角色预设
+      </AppButton>
+      <!-- H-04：草稿跨刷新保留后，放弃的角色要能一键丢弃（确认由页壳负责） -->
+      <AppButton variant="ghost" size="sm" :disabled="busy" @click="$emit('restart')">
+        <i class="btn-icon fa-solid fa-rotate-left" aria-hidden="true"></i>重新开始
+      </AppButton>
+    </div>
 
     <div class="footer-right">
       <p v-if="canNext === false && blocked?.items.length" class="blocked-hint" role="status">
@@ -70,6 +77,11 @@ defineEmits<{
   padding-bottom: max(var(--theme-spacing-md), env(safe-area-inset-bottom, 12px));
   background: var(--theme-card-bg);
   border-top: 1px solid var(--theme-card-border);
+  flex-shrink: 0;
+}
+.footer-left {
+  display: flex;
+  gap: var(--theme-spacing-xs);
   flex-shrink: 0;
 }
 .footer-right {

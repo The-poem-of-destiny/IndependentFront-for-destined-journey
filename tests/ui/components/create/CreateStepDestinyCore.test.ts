@@ -212,3 +212,62 @@ describe('CreateStepDestinyCore — 名单加载三态', () => {
     expect(wrapper.find('.core-loading').exists()).toBe(false);
   });
 });
+
+describe('CreateStepDestinyCore — 键盘可达（C-19）', () => {
+  it('名单是带 aria-label 的 radiogroup，aria-checked 反映选中', async () => {
+    const wrapper = mount(CreateStepDestinyCore);
+    const group = wrapper.find('.core-list');
+    expect(group.attributes('role')).toBe('radiogroup');
+    expect(group.attributes('aria-label')).toBe('命定核心');
+    mockCreate.selectSystemCoreEntry('fated:system_core/book');
+    await wrapper.vm.$nextTick();
+    const radios = wrapper.findAll('[role="radio"]');
+    expect(radios.map((r) => r.attributes('aria-checked'))).toEqual(['false', 'true']);
+  });
+
+  it('可聚焦的 radio 行本身响应回车与空格', async () => {
+    const wrapper = mount(CreateStepDestinyCore);
+    const radios = wrapper.findAll('[role="radio"]');
+    await radios[1].trigger('keydown', { key: 'Enter' });
+    expect(mockCreate.selectedSystemCoreEntryUid).toBe('fated:system_core/book');
+    await radios[0].trigger('keydown', { key: ' ' });
+    expect(mockCreate.selectedSystemCoreEntryUid).toBe('fated:system_core/sword');
+  });
+
+  it('roving tabindex：未选中时第一项可 Tab，选中后只有选中项可 Tab', async () => {
+    const wrapper = mount(CreateStepDestinyCore);
+    let radios = wrapper.findAll('[role="radio"]');
+    expect(radios.map((r) => r.attributes('tabindex'))).toEqual(['0', '-1']);
+    mockCreate.selectSystemCoreEntry('fated:system_core/book');
+    await wrapper.vm.$nextTick();
+    radios = wrapper.findAll('[role="radio"]');
+    expect(radios.map((r) => r.attributes('tabindex'))).toEqual(['-1', '0']);
+  });
+
+  it('方向键在组内移动并选中，跨内置与工坊核心、首尾循环', async () => {
+    mockCreate.workshopOptions = [
+      makeOption({ projectId: 'sys1', name: '异界律令', tags: ['系统'] }),
+    ];
+    const wrapper = mount(CreateStepDestinyCore, { attachTo: document.body });
+    const radios = () => wrapper.findAll('[role="radio"]');
+
+    await radios()[0].trigger('keydown', { key: 'ArrowDown' });
+    expect(mockCreate.selectedSystemCoreEntryUid).toBe('fated:system_core/book');
+    await radios()[1].trigger('keydown', { key: 'ArrowDown' });
+    expect(mockCreate.selectedWorkshopCoreProjectId).toBe('sys1');
+    expect(mockCreate.selectedSystemCoreEntryUid).toBeNull();
+    await radios()[2].trigger('keydown', { key: 'ArrowDown' });
+    expect(mockCreate.selectedSystemCoreEntryUid).toBe('fated:system_core/sword');
+    await radios()[0].trigger('keydown', { key: 'ArrowUp' });
+    expect(mockCreate.selectedWorkshopCoreProjectId).toBe('sys1');
+    await wrapper.vm.$nextTick();
+    expect(document.activeElement).toBe(radios()[2].element);
+    wrapper.unmount();
+  });
+
+  it('行内的展开按钮按回车不会触发选择', async () => {
+    const wrapper = mount(CreateStepDestinyCore);
+    await wrapper.find('.core-chevron').trigger('keydown', { key: 'Enter' });
+    expect(mockCreate.selectedSystemCoreEntryUid).toBeNull();
+  });
+});

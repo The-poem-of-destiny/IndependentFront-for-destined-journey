@@ -18,6 +18,8 @@ import {
   dialectIdOf,
   isGalleryVisible,
   isNearViewport,
+  pendingTakeStatusText,
+  pendingTakesAt,
   providerLabelOf,
   providerOf,
   soleCharacterOf,
@@ -219,5 +221,25 @@ describe('composeWarningLines — 装配告警的唯一消费面（C15）', () =
   it('空名字不入行 —— 免得出现「未入画角色: 、」这种读不懂的半句', () => {
     expect(composeWarningLines([{ kind: 'missing-preset', name: '' }])).toEqual([]);
     expect(composeWarningLines([{ kind: 'characters-truncated', dropped: [''] }])).toEqual([]);
+  });
+});
+
+describe('pendingTakesAt / pendingTakeStatusText（CG-01）', () => {
+  it('只取同一锚点下未完成的 take，按 take 升序；已完成与别处的都不进', () => {
+    const records = [
+      rec({ id: 'done', take: 0 }),
+      rec({ id: 'f', take: 3, status: 'failed' }),
+      rec({ id: 'q', take: 1, status: 'queued' }),
+      rec({ id: 'other', take: 2, status: 'queued', messageId: 'm-other' }),
+    ];
+    const key = anchorKeyOf(records[0]);
+    expect(pendingTakesAt(records, key).map((r) => r.id)).toEqual(['q', 'f']);
+  });
+
+  it('状态文字', () => {
+    expect(pendingTakeStatusText({ status: 'queued' })).toBe('排队中');
+    expect(pendingTakeStatusText({ status: 'generating' })).toBe('生成中');
+    expect(pendingTakeStatusText({ status: 'failed' })).toBe('失败');
+    expect(pendingTakeStatusText({ status: 'done' })).toBe('');
   });
 });

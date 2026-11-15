@@ -2,12 +2,13 @@
  * @vitest-environment jsdom
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import ExtensionManagementPage from '../../../../src/ui/components/workshop/ExtensionManagementPage.vue';
 
 const global = {
   stubs: {
     CommunityExtensionSettings: { template: '<div data-testid="community-settings" />' },
+    InstalledExtensionList: { template: '<div data-testid="installed-list" />' },
   },
 };
 
@@ -18,7 +19,8 @@ const h = vi.hoisted(() => ({
   },
   workshop: {
     ready: true,
-    projects: [{ id: 'p1' }, { id: 'p2' }],
+    initError: '',
+    projects: [{ id: 'p1' }, { id: 'p2' }] as Array<{ id: string }>,
     init: vi.fn(async () => {}),
   },
 }));
@@ -29,6 +31,8 @@ vi.mock('../../../../src/ui/stores/workshop-store', () => ({ useWorkshopStore: (
 beforeEach(() => {
   vi.clearAllMocks();
   h.workshop.ready = true;
+  h.workshop.initError = '';
+  h.workshop.init.mockImplementation(async () => {});
   h.workshop.projects = [{ id: 'p1' }, { id: 'p2' }];
 });
 
@@ -68,5 +72,44 @@ describe('ExtensionManagementPage', () => {
   it('把社区扩展启用设置放在扩展管理页', () => {
     const wrapper = mount(ExtensionManagementPage, { global });
     expect(wrapper.find('[data-testid="community-settings"]').exists()).toBe(true);
+  });
+
+  it('装过社区扩展时显示已安装列表（W-01）', () => {
+    const wrapper = mount(ExtensionManagementPage, { global });
+    expect(wrapper.find('[data-testid="installed-list"]').exists()).toBe(true);
+  });
+
+  it('没有安装任何社区扩展时不显示已安装列表', () => {
+    h.workshop.projects = [];
+    const wrapper = mount(ExtensionManagementPage, { global });
+    expect(wrapper.find('[data-testid="installed-list"]').exists()).toBe(false);
+  });
+
+  it('读取尚未完成时不显示已安装列表', () => {
+    h.workshop.ready = false;
+    const wrapper = mount(ExtensionManagementPage, { global });
+    expect(wrapper.text()).toContain('正在读取已安装项目');
+    expect(wrapper.find('[data-testid="installed-list"]').exists()).toBe(false);
+  });
+
+  it('workshop.init() 失败时显示错误态并可重试，而不是一直停在读取中', async () => {
+    h.workshop.ready = false;
+    h.workshop.initError = '数据库不可用';
+    h.workshop.init.mockImplementation(async () => {
+      throw new Error('数据库不可用');
+    });
+    const wrapper = mount(ExtensionManagementPage, { global });
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain('正在读取已安装项目');
+    expect(wrapper.text()).toContain('已安装项目读取失败');
+    const alert = wrapper.get('[data-testid="workshop-init-error"]');
+    expect(alert.text()).toContain('数据库不可用');
+
+    const retry = alert.findAll('button').find((b) => b.text().includes('重试'));
+    expect(retry).toBeTruthy();
+    await retry!.trigger('click');
+    await flushPromises();
+    expect(h.workshop.init).toHaveBeenCalledTimes(2);
   });
 });

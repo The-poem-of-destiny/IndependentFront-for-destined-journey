@@ -14,6 +14,10 @@ vi.mock('../../../../src/ui/stores/settings-store', () => ({ useSettingsStore: (
 vi.mock('../../../../src/ui/stores/content-store', () => ({
   useContentStore: () => ({ contentStatus: 'pack' }),
 }));
+const confirmDialog = vi.fn(async (_opts: { danger?: boolean }) => true);
+vi.mock('../../../../src/ui/lib/confirm-dialog', () => ({
+  confirmDialog: (opts: { danger?: boolean }) => confirmDialog(opts),
+}));
 vi.mock('../../../../src/ui/stores/ui-store', () => ({
   useUIStore: () => ({ navigate, back, openSettings }),
 }));
@@ -52,6 +56,7 @@ beforeEach(() => {
     contentStatus: 'ready',
     stepValid: Array(8).fill(true),
     stepMissing: { 0: [], 1: [], 2: [] },
+    missingItems: [],
     initContent: vi.fn(),
     loadWorldBookEntries: vi.fn(),
     nextStep: vi.fn(),
@@ -172,11 +177,17 @@ describe('first journey readiness', () => {
       ],
     });
     create.currentStep = 7;
-    create.stepMissing = { 0: ['难度'], 1: [], 2: ['命定核心'] };
+    create.missingItems = [
+      { label: '难度', step: 0 },
+      { label: '命定核心', step: 2 },
+      { label: '转生点数超支 50 点', step: 1 },
+    ];
     await flushPromises();
+    // 最后一步直接用 store 的聚合清单（含转生点数超支，C-06）
     expect(footer.props('blocked').items).toEqual([
       { label: '难度', step: 0 },
       { label: '命定核心', step: 2 },
+      { label: '转生点数超支 50 点', step: 1 },
     ]);
     // 点缺项跳到所属步骤
     footer.vm.$emit('jump', 2);
@@ -192,6 +203,25 @@ describe('first journey readiness', () => {
     await flushPromises();
     expect(wrapper.find('.creation-error').text()).toContain('创建前请先补全：角色名');
     expect(navigate).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('★ 「重新开始」经确认后清空草稿并重新加载命定核心名单（H-04）', async () => {
+    const wrapper = await enterSteps();
+    const footer = wrapper.findComponent({ name: 'CreateFooter' });
+
+    confirmDialog.mockResolvedValueOnce(false);
+    footer.vm.$emit('restart');
+    await flushPromises();
+    expect(confirmDialog).toHaveBeenCalledTimes(1);
+    expect(create.resetAll).not.toHaveBeenCalled();
+
+    confirmDialog.mockResolvedValueOnce(true);
+    footer.vm.$emit('restart');
+    await flushPromises();
+    expect(confirmDialog.mock.calls[1][0]).toMatchObject({ danger: true });
+    expect(create.resetAll).toHaveBeenCalledTimes(1);
+    expect(create.loadWorldBookEntries).toHaveBeenCalledTimes(2); // 进页一次 + 重新开始一次
     wrapper.unmount();
   });
 });

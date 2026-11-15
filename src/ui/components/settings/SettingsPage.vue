@@ -25,8 +25,20 @@ import AppButton from '../shared/AppButton.vue';
 import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
 import AgentSection from './agent/AgentSection.vue';
 import AgentUpdateCenter from './agent/AgentUpdateCenter.vue';
-import { AGENT_GROUPS, resolveAgentSelection, type AgentGroupKey } from './agent/agent-list';
+import {
+  AGENT_GROUPS,
+  AGENT_LIST,
+  resolveAgentSelection,
+  type AgentGroupKey,
+} from './agent/agent-list';
+import { confirmDiscardPromptEdits, promptDraftDirty } from './agent/prompt-dirty-guard';
+import {
+  buildApiEndpoints,
+  describeAgentBinding,
+  type AgentBindingState,
+} from '../../lib/endpoint-resolver';
 import ApiSection from './ApiSection.vue';
+import ContentPackSection from './ContentPackSection.vue';
 import WorldBookSection from './WorldBookSection.vue';
 import PlotSection from './PlotSection.vue';
 import MemorySection from './MemorySection.vue';
@@ -88,13 +100,15 @@ watch(
     if (!requested) return;
     const section = ui.consumeSettingsSectionRequest();
     const anchor = ui.consumeSettingsAnchorRequest();
-    if (section) selectSection(section);
+    if (section) void selectSection(section);
     if (anchor) void nextTick(() => scrollToAnchor(anchor));
   },
 );
 
 const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'api', label: 'API 配置', icon: 'fa-solid fa-plug' },
+  // S-01：内容包是新玩家必装的东西，紧跟 API 配置，不再埋在「数据与备份」底部
+  { key: 'content-pack', label: '内容包', icon: 'fa-solid fa-box-open' },
   { key: 'agent', label: 'Agent 配置', icon: 'fa-solid fa-robot' },
   { key: 'worldbook', label: '世界书', icon: 'fa-solid fa-book-open' },
   { key: 'plot', label: '剧情系统', icon: 'fa-solid fa-scroll' },
@@ -132,7 +146,11 @@ const activeAgent = ref<string | null>(resolveAgentSelection(s.activeAgent));
  *    永远是新挂载，`AgentConfigPanel` 的 `watch(..., { immediate: true })` 照常
  *    在挂载那一刻用正确的 agentId 触发。所以这里不需要拿一次用户点击去换它。
  */
-function selectSection(key: Section) {
+async function selectSection(key: Section) {
+  // S-15：换分区会卸载提示词草稿。没有未保存修改时**同步**放行（不多等一拍）
+  if (key !== activeSection.value && promptDraftDirty.value) {
+    if (!(await confirmDiscardPromptEdits())) return;
+  }
   activeSection.value = key;
   if (key === 'agent') activeAgent.value = resolveAgentSelection(s.activeAgent);
 }
@@ -145,9 +163,57 @@ function selectSection(key: Section) {
  * 分区整块是 `v-if`，进来时永远是新挂载，immediate 会在同一时刻触发；
  * 在分区内换 Agent 则走 prop 变化，同一条 watch 照常触发。
  */
-function selectAgent(agentId: string) {
+async function selectAgent(agentId: string) {
+  // S-15：换 Agent 会用存储里的值重新载入草稿 —— 有未保存修改先问一句
+  if (agentId !== activeAgent.value && promptDraftDirty.value) {
+    if (!(await confirmDiscardPromptEdits())) return;
+  }
   activeAgent.value = agentId;
   s.activeAgent = agentId;
+}
+
+/** 页头「← 返回」：同样会丢掉未保存的提示词修改（返回目标仍按真实来路，兜底首页） */
+async function goBack() {
+  if (promptDraftDirty.value && !(await confirmDiscardPromptEdits())) return;
+  ui.back('home');
+}
+
+/** 主导航「扩展管理」：整页离开设置，同样会丢掉未保存的提示词修改（S-15） */
+async function goExtensions() {
+  if (promptDraftDirty.value && !(await confirmDiscardPromptEdits())) return;
+  ui.navigate('extensions');
+}
+
+/**
+ * 子导航角标（S-08）：从 `resolveAgentEndpoint` 推导的四态，问的不是当前选中的那个。
+ *
+ * 🔴 此前角标只看 model 是否非空，于是方向整个说反了：没绑定的 Agent 本来自动用第一个
+ *    API（挂红叉、看着像要逐个去绑），绑到一个不存在的池的却挂绿勾（运行时才硬失败）。
+ *    现在与运行时同一个解析器：跟随默认是中性的，只有绑定失效才是红的。
+ */
+const llmPool = computed(() => buildApiEndpoints(s.apiPool));
+const agentBindings = computed<Record<string, AgentBindingState>>(() => {
+  const layer = cfg.projectAgentDefaults?.agents ?? {};
+  const out: Record<string, AgentBindingState> = {};
+  for (const ag of AGENT_LIST) {
+    out[ag.id] = describeAgentBinding(getAgentSettings(s, ag.id, layer).model, llmPool.value);
+  }
+  return out;
+});
+
+/** 角标的文字 / 样式 / 悬停说明（同一份说明也给 aria-label） */
+function badgeOf(agentId: string): { text: string; cls: string; title: string } {
+  const state = agentBindings.value[agentId];
+  if (!hasApi.value || !state || state.kind === 'no-api') {
+    return { text: '!', cls: 'sub-nav-bad', title: '尚未配置对话 API' };
+  }
+  if (state.kind === 'stale') {
+    return { text: '✕', cls: 'sub-nav-bad', title: '绑定失效：选中的 API 已被删除，请重新选择' };
+  }
+  if (state.kind === 'bound') {
+    return { text: '✓', cls: 'sub-nav-ok', title: `已指定：${state.endpoint.name}` };
+  }
+  return { text: '默', cls: 'sub-nav-default', title: `跟随默认：${state.endpoint.name}` };
 }
 
 /**
@@ -165,12 +231,6 @@ const saveModeGroup = computed<AgentGroupKey | null>(() => {
   if (!game.activeSave) return null;
   return isDirectMode(game.generationMode) ? 'direct' : 'agent';
 });
-
-/** 子导航角标要问「这个 Agent 选过 API 池没有」，问的不是当前选中的那个 */
-function agentModelOf(agentId: string): string {
-  // D44 修正 1：合默认层 —— 用户没覆写 model 时，角标也能正确反映「默认层给了一个池」。
-  return getAgentSettings(s, agentId, cfg.projectAgentDefaults?.agents ?? {}).model;
-}
 
 // Phase 0: 保证进设置页时世界书已就绪（init() 幂等，App.vue 已踢过一次）
 // Agent 分区的"这个 Agent 能看哪几本"勾选列表要用它；API 密钥的解密改由
@@ -192,7 +252,7 @@ onMounted(() => {
     <ContentStatusBanner class="settings-content-banner" />
     <!-- 顶部栏 -->
     <div class="settings-header">
-      <AppButton variant="ghost" size="sm" @click="ui.back('home')">← 返回</AppButton>
+      <AppButton variant="ghost" size="sm" @click="goBack">← 返回</AppButton>
       <h2 class="settings-title">系统设置</h2>
       <div class="header-spacer" />
     </div>
@@ -219,7 +279,7 @@ onMounted(() => {
           回来的路由扩展管理页的返回键负责（走 `ui.previousView`）。
         -->
         <div class="nav-divider" aria-hidden="true"></div>
-        <button class="nav-item nav-external" @click="ui.navigate('extensions')">
+        <button class="nav-item nav-external" @click="goExtensions">
           <span class="nav-icon"><i class="fa-solid fa-puzzle-piece" aria-hidden="true"></i></span>
           <span class="nav-label">扩展管理</span>
           <i
@@ -268,10 +328,15 @@ onMounted(() => {
                 <span v-for="tag in ag.tags" :key="tag" class="sub-nav-tag">{{ tag }}</span>
               </span>
             </span>
-            <!-- 未配置 API 标红 -->
-            <span v-if="!hasApi" class="sub-nav-badge sub-nav-bad">!</span>
-            <span v-else-if="!agentModelOf(ag.id)" class="sub-nav-badge sub-nav-bad">&#10005;</span>
-            <span v-else class="sub-nav-badge sub-nav-ok">&#10003;</span>
+            <!-- S-08：无 API「!」/ 跟随默认（中性）/ 已指定 ✓ / 绑定失效 ✕（红） -->
+            <span
+              class="sub-nav-badge"
+              :class="badgeOf(ag.id).cls"
+              :title="badgeOf(ag.id).title"
+              :aria-label="badgeOf(ag.id).title"
+              :data-binding="agentBindings[ag.id]?.kind"
+              >{{ badgeOf(ag.id).text }}</span
+            >
           </button>
         </section>
       </nav>
@@ -283,6 +348,9 @@ onMounted(() => {
             <!-- ========== API 池 ========== -->
             <ApiSection v-if="activeSection === 'api'" />
 
+            <!-- ========== 内容包 ========== -->
+            <ContentPackSection v-if="activeSection === 'content-pack'" />
+
             <!-- ========== Agent 详情 ========== -->
             <AgentSection v-if="activeSection === 'agent' && activeAgent" :agent-id="activeAgent" />
 
@@ -292,7 +360,9 @@ onMounted(() => {
                 <i class="fa-solid fa-robot empty-tab-icon" aria-hidden="true"></i>
                 请从左侧选择一个 Agent
                 <span class="empty-tab-hint">
-                  每个 Agent 单独配置 API 池、采样参数与可见的世界书；名字旁的角标是它配好了没有
+                  每个 Agent 可单独配置 API 池与采样参数。名字旁的角标：「默」=
+                  跟随默认（自动使用第一个 API，无需设置），✓ = 已指定，红色 ✕ = 指定的 API
+                  已被删除，需要重新选择
                 </span>
               </div>
               <!-- 提示词更新中心：项目默认更新后，用户存量配置不会自动跟新（fillMissing
@@ -563,6 +633,13 @@ onMounted(() => {
   background: color-mix(in srgb, var(--theme-error) 15%, var(--theme-card-bg));
   color: var(--theme-error);
   border: 1px solid color-mix(in srgb, var(--theme-error) 40%, var(--theme-card-border));
+}
+/* 跟随默认：中性，不是错误 —— 没绑定的 Agent 自动用第一个 API */
+.sub-nav-default {
+  background: color-mix(in srgb, var(--theme-text-muted) 12%, var(--theme-card-bg));
+  color: var(--theme-text-muted);
+  border: 1px solid var(--theme-card-border);
+  font-size: 0.6rem;
 }
 .sub-nav-ok {
   background: color-mix(in srgb, var(--theme-success) 15%, var(--theme-card-bg));

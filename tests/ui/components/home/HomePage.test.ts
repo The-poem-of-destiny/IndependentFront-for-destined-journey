@@ -5,6 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import { flushPromises, shallowMount, type VueWrapper } from '@vue/test-utils';
 import HomePage from '../../../../src/ui/components/home/HomePage.vue';
+import { useWorkshopStore } from '../../../../src/ui/stores/workshop-store';
+
+/** 取被替身的工坊 store（响应式），按替身形状读写 */
+function workshopMock(): { ready: boolean; projects: Array<{ id: string }> } {
+  return useWorkshopStore() as unknown as { ready: boolean; projects: Array<{ id: string }> };
+}
 
 const mocks = vi.hoisted(() => ({
   game: {
@@ -33,6 +39,11 @@ const mocks = vi.hoisted(() => ({
   settings: {
     settings: { activePresetId: null },
   },
+  workshop: {
+    ready: true,
+    projects: [{ id: 'p1' }] as Array<{ id: string }>,
+    init: vi.fn<() => Promise<void>>(),
+  },
   database: {
     getSave: vi.fn(),
     getCharacters: vi.fn(),
@@ -45,6 +56,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../../../src/ui/stores/game-store', () => ({ useGameStore: () => mocks.game }));
 vi.mock('../../../../src/ui/stores/ui-store', () => ({ useUIStore: () => mocks.ui }));
+vi.mock('../../../../src/ui/stores/workshop-store', async () => {
+  const { reactive } = await import('vue');
+  const store = reactive(mocks.workshop);
+  return { useWorkshopStore: () => store };
+});
 vi.mock('../../../../src/ui/stores/settings-store', () => ({
   useSettingsStore: () => mocks.settings,
 }));
@@ -99,6 +115,10 @@ beforeEach(() => {
   mocks.ui.openSettings.mockReset();
   mocks.ui.openSaveManager.mockReset();
   mocks.ui.toast.mockReset();
+  const workshop = workshopMock();
+  workshop.ready = true;
+  workshop.projects = [{ id: 'p1' }];
+  mocks.workshop.init.mockReset().mockResolvedValue();
   mocks.database.getSave.mockReset().mockResolvedValue(undefined);
   mocks.database.getCharacters.mockReset().mockResolvedValue([]);
   mocks.database.getSaveProfile.mockReset().mockResolvedValue(undefined);
@@ -203,14 +223,58 @@ describe('HomePage 背景联动', () => {
 });
 
 describe('HomePage 扩展管理入口', () => {
-  it('使用“扩展管理”命名并进入扩展管理页', async () => {
+  it('装过社区扩展时显示“扩展管理”并进入扩展管理页', async () => {
     const home = await mountHome();
     const button = home.get('.btn-extensions');
 
+    expect(mocks.workshop.init).toHaveBeenCalled();
     expect(button.text().replace(/\s/g, '')).toBe('扩展管理');
     await button.trigger('click');
 
     expect(mocks.ui.navigate).toHaveBeenCalledWith('extensions');
+  });
+
+  it('工坊锁定且没有安装任何社区扩展时隐藏入口，其余按钮依次紧接', async () => {
+    workshopMock().projects = [];
+    const home = await mountHome();
+
+    expect(home.find('.btn-extensions').exists()).toBe(false);
+    const labels = home
+      .get('.btn-column')
+      .findAll('button')
+      .map((button) => button.text().replace(/\s/g, ''));
+    expect(labels).toEqual(['✦新建存档', '存档管理', '设置', '关于', '退出']);
+  });
+
+  it('已安装项目还没读完时先不显示，读完且有项目后再出现（不闪烁）', async () => {
+    const workshop = workshopMock();
+    workshop.ready = false;
+    workshop.projects = [];
+    let resolveInit: () => void = () => {};
+    mocks.workshop.init.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveInit = resolve;
+      }),
+    );
+    const home = await mountHome();
+    expect(home.find('.btn-extensions').exists()).toBe(false);
+
+    workshop.projects = [{ id: 'p1' }];
+    workshop.ready = true;
+    resolveInit();
+    await flushPromises();
+    expect(home.find('.btn-extensions').exists()).toBe(true);
+  });
+
+  it('读取已安装项目失败时保持隐藏，不影响首页其余部分', async () => {
+    const workshop = workshopMock();
+    workshop.ready = false;
+    workshop.projects = [];
+    mocks.workshop.init.mockRejectedValue(new Error('读库失败'));
+    const home = await mountHome();
+
+    expect(home.find('.btn-extensions').exists()).toBe(false);
+    expect(home.find('.btn-settings').exists()).toBe(true);
   });
 });
 

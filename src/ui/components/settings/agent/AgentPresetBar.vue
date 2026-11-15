@@ -255,9 +255,18 @@ async function confirmDelete(): Promise<void> {
     // 选择键清回「跟随默认」，不留一个指向已删预设的失效选择
     if (wasSelected) selectPreset(p, defaultId.value);
     showDelete.value = false;
-    ui.toast('预设已删除', 'info');
-  } catch {
-    ui.toast('删除失败，请稍后重试', 'error');
+    // S-16：删掉的是正在用的那条时，说清楚现在改用了哪条
+    const fallbackName = wasSelected ? defaultEntry.value?.preset.name : undefined;
+    ui.toast(
+      fallbackName
+        ? `预设已删除，已改用默认预设「${fallbackName}」`
+        : wasSelected
+          ? '预设已删除，当前没有可用的默认预设，请导入或复制一个'
+          : '预设已删除',
+      wasSelected && !fallbackName ? 'warning' : 'info',
+    );
+  } catch (error) {
+    ui.toast(`删除失败：${error instanceof Error ? error.message : String(error)}`, 'error');
   }
 }
 </script>

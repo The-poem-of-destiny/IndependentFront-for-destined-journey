@@ -102,6 +102,35 @@ export function buildGalleryCells(records: readonly SceneImageRecord[]): Gallery
   );
 }
 
+// ═══ 未完成的 take（CG-01）═══
+
+/**
+ * 同一锚点下**还没画出来**的 take（排队中 / 生成中 / 失败），按 take 升序。
+ *
+ * 🔴 只给**详情栏的 take 切换条**用（只读）：图鉴网格仍然只列 `done`（见
+ * {@link isGalleryVisible}）—— 网格是战利品陈列。但玩家刚在图鉴里点了「重画」，
+ * 这一张的去向（排队 / 生成中 / 失败及原因）必须在原地看得见，否则只能回正文去找。
+ */
+export function pendingTakesAt(
+  records: readonly SceneImageRecord[],
+  anchorKey: string,
+): SceneImageRecord[] {
+  return records
+    .filter((r) => r.status !== 'done' && anchorKeyOf(r) === anchorKey)
+    .sort((a, b) => a.take - b.take || a.createdAt - b.createdAt);
+}
+
+/** 未完成 take 的状态文字 */
+export function pendingTakeStatusText(record: Pick<SceneImageRecord, 'status'>): string {
+  if (record.status === 'queued') return '排队中';
+  if (record.status === 'generating') return '生成中';
+  if (record.status === 'failed') return '失败';
+  return '';
+}
+
+/** 重画前确认框里的那一行费用说明（不猜具体扣多少：后端 / 档位 / 参数都会改变答案） */
+export const REDRAW_COST_NOTE = '将调用出图服务，可能产生费用。';
+
 /**
  * 图里**恰好一个**角色时给出他的名字，否则 null（§10.3 的「把这次的 seed 钉给他」）。
  *

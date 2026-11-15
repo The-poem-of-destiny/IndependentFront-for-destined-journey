@@ -1,4 +1,25 @@
-import type { AgentToolActivity } from '@engine/types/types';
+import type { AgentActivityRun, AgentToolActivity } from '@engine/types/types';
+
+/**
+ * 手动侧链在活动账本上的名字（审查 GAME-17）。这些 run 不是回合：
+ * 它们挂在最新输入下面，却不该写成「回合进程 / 本回合完成 / 本回合未完成」——
+ * 润色失败时显示「本回合未完成」，而那个回合其实是成功的。
+ */
+const SIDE_TASK_LABELS: Record<string, string> = {
+  prose_rewrite: '润色',
+};
+
+/**
+ * 独立 run 只由同一个手动侧链组成时，返回它的名字（如「润色」）；正式回合返回 null。
+ */
+export function activityRunSideTaskLabel(
+  run: Pick<AgentActivityRun, 'standalone' | 'steps'>,
+): string | null {
+  if (!run.standalone || run.steps.length === 0) return null;
+  const agentId = run.steps[0].agentId;
+  if (!run.steps.every((step) => step.agentId === agentId)) return null;
+  return SIDE_TASK_LABELS[agentId] ?? null;
+}
 
 const AGENT_ACTIVITY_LABELS: Record<string, string> = {
   memory_recall: '追忆相关经历',

@@ -71,6 +71,32 @@ describe('settings-store', () => {
     expect(store).toBeDefined();
   });
 
+  it('S-00：保存为项目默认时所有 agent 的 model（本机 API 池 id）一律写空串，键保留', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response('{}', { status: 200 }),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    try {
+      const ok = await store.saveAgentProjectDefaults({
+        version: 1,
+        agents: {
+          story: { model: 'author-machine-uuid', systemPrompt: '' } as never,
+          prose_rewrite: { model: 'another-uuid', systemPrompt: 'x' } as never,
+        },
+      });
+      expect(ok).toBe(true);
+      const init = fetchMock.mock.calls[0]?.[1];
+      const body = JSON.parse(String(init?.body));
+      expect(body.agents.story.model).toBe('');
+      expect(body.agents.prose_rewrite.model).toBe('');
+      expect(body.agents.prose_rewrite.systemPrompt).toBe('x');
+      expect(store.projectAgentDefaults.agents.story.model).toBe('');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('settings 应为响应式对象', () => {
     expect(store.settings).toBeDefined();
     expect(Array.isArray(store.settings.apiPool)).toBe(true);

@@ -214,26 +214,51 @@ export const useWorldBookStore = defineStore('worldbook', () => {
    *
    * 🔴 内容-引擎分离波 1：默认真源 = 已装 content pack 的 payload > 占位文件
    * （provider `loadAllDefaultBooks`）。导入真实包后 restore 不再把真实书打回占位。
-   * 语义与迁移前一致（含清 activeWorldBookId）；fetch 失败 → 什么都不动（绝不先清表再发现拿不回来）。
+   * 语义与迁移前一致（含清 activeWorldBookId）。
+   *
+   * 🔴 S-22：先把默认书**全部载入成功**，再在一个事务里清表 + 写入；任何一步失败都**抛出**
+   *    且库与内存都保持原样，由调用方如实报错（此前失败被吞、界面照报「已恢复」）。
+   *    `loadBuiltInWorldBooks` 逐本吞 fetch 失败，全挂时返回空数组 —— 一本默认书都拿不到
+   *    也按失败处理，绝不拿空集去清表。返回恢复后的默认书本数。
    */
-  async function resetToDefaults(): Promise<void> {
-    try {
-      // 先 await 确保 pack 已装载到模块缓存（boot 顺序：loadProjectDefaults → 这里）
-      const { loadAllDefaultBooks } = await import('./content-store');
-      const protectedPack = isProtectedContentInstalled() && !!getActivePackPayload();
-      if (protectedPack) setPackOverlayBooks((await loadAllDefaultBooks()).map(toRow));
-      const builtIn = protectedPack ? await loadBuiltInWorldBooks() : await loadAllDefaultBooks();
-      const rows = builtIn.map(toRow);
-      const db = getDatabase();
-      await db.transaction('rw', db.worldBooks, async () => {
-        await db.worldBooks.clear();
-        if (rows.length > 0) await db.worldBooks.bulkPut(rows);
-      });
-      diskBooks.value = rows;
-      useSettingsStore().settings.activeWorldBookId = null;
-    } catch {
-      return; // fetch / IndexedDB 不可用时静默跳过
+  async function resetToDefaults(): Promise<number> {
+    // 先 await 确保 pack 已装载到模块缓存（boot 顺序：loadProjectDefaults → 这里）
+    const { loadAllDefaultBooks } = await import('./content-store');
+    const protectedPack = isProtectedContentInstalled() && !!getActivePackPayload();
+    const overlay = protectedPack ? (await loadAllDefaultBooks()).map(toRow) : null;
+    const builtIn = protectedPack ? await loadBuiltInWorldBooks() : await loadAllDefaultBooks();
+    const rows = builtIn.map(toRow);
+    if (rows.length === 0 && (overlay?.length ?? 0) === 0) {
+      throw new Error('未能载入任何默认世界书');
     }
+    const db = getDatabase();
+    await db.transaction('rw', db.worldBooks, async () => {
+      await db.worldBooks.clear();
+      if (rows.length > 0) await db.worldBooks.bulkPut(rows);
+    });
+    // 落库成功后才动内存投影与授权包 overlay
+    if (overlay) setPackOverlayBooks(overlay);
+    diskBooks.value = rows;
+    useSettingsStore().settings.activeWorldBookId = null;
+    return rows.length + (overlay?.length ?? 0);
+  }
+
+  /**
+   * 「新建世界书」用的唯一 id（S-21）：可读的 slug，被占用时追加 `_2`、`_3`…
+   * 与磁盘行及授权包 overlay 都不撞，避免 `upsertBook` 的 put 悄悄整本覆盖。
+   */
+  function uniqueBookId(base: string): string {
+    const slug =
+      base
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_')
+        .replace(/[\\/?#%]/g, '') || 'worldbook';
+    const taken = new Set(books.value.map((b) => b.id));
+    if (!taken.has(slug)) return slug;
+    let n = 2;
+    while (taken.has(`${slug}_${n}`)) n++;
+    return `${slug}_${n}`;
   }
 
   return {
@@ -252,5 +277,6 @@ export const useWorldBookStore = defineStore('worldbook', () => {
     getBook,
     adoptLegacyAgentWorldBooks,
     resetToDefaults,
+    uniqueBookId,
   };
 });

@@ -138,3 +138,32 @@ describe('CreateStepConfirm — 起始地点与命定核心展示（UIL-12 / UIL
     expect(wrapper.find('.hero-core').exists()).toBe(false);
   });
 });
+
+describe('CreateStepConfirm — 转生点数超支（C-06）', () => {
+  it('未超支时照常显示剩余点数', async () => {
+    mockCreate.overspentPoints = 0;
+    mockCreate.remainingPoints = 30;
+    const wrapper = mount(CreateStepConfirm);
+    await flushPromises();
+    expect(wrapper.find('.points-remaining').text()).toContain('剩余转生点数: 30');
+    expect(wrapper.find('.points-overspent').exists()).toBe(false);
+  });
+
+  it('★ 超支时明说建档被挡，不再写「点数将保留在存档中」，并给出调整入口', async () => {
+    Object.assign(mockCreate, {
+      overspentPoints: 120,
+      remainingPoints: -120,
+      totalCost: 1120,
+      reincarnationPoints: 1000,
+      currentStep: 7,
+    });
+    const wrapper = mount(CreateStepConfirm);
+    await flushPromises();
+    const box = wrapper.find('.points-overspent');
+    expect(box.text()).toContain('转生点数超支 120 点');
+    expect(box.text()).toContain('无法创建角色');
+    expect(wrapper.text()).not.toContain('保留在存档中');
+    await box.find('button').trigger('click');
+    expect(mockCreate.currentStep).toBe(1);
+  });
+});

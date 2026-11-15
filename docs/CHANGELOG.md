@@ -9,6 +9,17 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-14 UI/UX 普查 P0/P1 修复批次｜PR #151，**未真机验证**
+
+- 对应 [全应用 UI/UX 普查](reviews/2026-11-14-ui-ux-audit.md)；逐条状态见报告第十节闭环表与各条行尾 📌。P0 1 条已修（引擎侧），P1 41 条修了 40 条，另顺手修了约 20 条 P2/P3；GAME-01（窄屏游戏页）按主人 2026-11-14 裁定「暂不做移动端适配，只考虑 PC / 笔记本显示器比例」不处理，同一裁定下纯窄屏条目一律暂缓。验证仅为各切片单测通过，**没有做真机游玩**。
+- 共享件：`lib/confirm-dialog.ts` + `shared/ConfirmDialogHost.vue`（应用内 Promise 确认，App.vue 挂载；新确认一律用它，不再写 `window.confirm`）；toast 缺省时长按类型（错误 8 秒、警告 5 秒，`0` 常驻），加关闭按钮、悬停暂停与「已复制」反馈；`lib/leave-game-guard.ts`（生成 / 润色 / 插画在跑时，离开游戏页先确认）；`lib/content-startup-chain.ts`（启动内容链，工坊读失败单独兜底）。
+- 回合循环：失败原因归类（`lib/turn-failure.ts`，原文脱敏）+ `TurnRecoveryPanel.vue`（「再次尝试」/「回退并重试」）；从持久化 `storyTurnStatus` 推导未完成回合（`lib/turn-recovery.ts`），废弃的尝试折叠；ChatFlow 最新一回合下加可见操作条，回退 / 重新生成先确认，开场回合写明不可回退；润色保留原文（`ChatMessage.preRewriteContent`，可「还原润色前」）并防重入（**停止按钮仍没有**）；输入法回车不再误发送；去掉消息原生悬停提示。类型侧新增 `AgentActivityStep.error`、`AgentActivityRun.failure`（只在内存）。
+- 设置：新增分区「内容包」（合并 master 的 UIL-01「关于」移出侧栏后共 14 个分区）（`ContentPackSection.vue`，左栏第二），卸载走 `pack-uninstall-flow.ts` 永远先确认；Agent 角标改 `describeAgentBinding` 四态；默认层里本机不存在的池 id 读成未设置、「存为项目默认」写 `model: ''`（S-00 引擎侧；私有内容仓那两个 id 未清，记入 `TODO.md`）；新建 API 源不预填采样参数，Agent 卡显示实际生效值与来源（`resolveAgentLlmParamSources`）；提示词未保存守卫（`prompt-dirty-guard.ts`）；删除 API 源 / 图像连接 / 正文预设 / 美化规则、导入覆盖规则、Story 新模式开关都先确认（开关仍在开发者模式）；世界书新建唯一 id、导入重名先问、「恢复默认」挪进危险区且失败如实报错、排序号可保存、条目编辑关闭前脏检查、点条目名打开编辑、拒收无 `entries` 的 JSON。
+- 创建：点数不足的卡片禁用并写「还差 N 点」（`selectCatalogItem`）、超支进缺失项并拦建档、消耗摘要列全、整份草稿持久化（`createWizardDraft_v1`）、加载预设先确认、页脚「重新开始」、命定核心键盘可选。
+- 游戏内面板：标记编辑串写修复（`useMarkerDraft.ts`）、「设为当前位置」确认、势力地图地名搜索（`lib/map-place-search.ts`）；角色列表可打开 `CharacterViewerModal`、键盘可达、选中按名字保持；任务筛选自动复位、失败任务不再能「标记完成」、写库失败回滚提示；未到达章节打码（总纲摘要按类型声明保持可见）；图鉴重画先确认并走正文同一条手动路径、显示排队 / 生成中 / 失败；快照行显示该回合输入与正文首句（`snapshot-turn-context.ts`）、读取失败态、生成中禁止恢复。
+- 扩展：首页「扩展管理」按钮只在有事可做时显示（`workshop/workshop-lock.ts`）；扩展管理页加纯本地已装列表与卸载（`InstalledExtensionList.vue`，确认列出受影响存档）；工坊读库失败显示错误态与重试；启用列表说明重写。
+- 删除测试文件 `tests/ui/components/settings/DataSection.pack-update.test.ts`（随内容包卡搬去新分区）。
+
 ### 2026-11-14 Story v2 分批换窗与归档生效对齐｜待真机验证
 
 - 新增正文换窗批大小 `storyWindowBatchTurns`（K），默认 1 保留逐回合滑动；K > 1 时原文窗口在 N 到 N+K−1 回合之间循环。第 4 区、召回候选和原文展开共用 `storyWindowStart` 判据。

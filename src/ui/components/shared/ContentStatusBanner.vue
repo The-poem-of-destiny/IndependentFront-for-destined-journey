@@ -18,6 +18,8 @@ import { computed, onMounted, ref } from 'vue';
 import { useContentStore } from '../../stores/content-store';
 import { useUIStore } from '../../stores/ui-store';
 import AppButton from './AppButton.vue';
+import { confirmDialog } from '../../lib/confirm-dialog';
+import { confirmAndUninstallPack } from '../settings/pack-uninstall-flow';
 
 const content = useContentStore();
 const ui = useUIStore();
@@ -113,14 +115,14 @@ function importPack() {
       const outcome = await content.installPack(raw);
       if (!outcome.ok) {
         if (outcome.status === 'needs_confirmation') {
-          // 横幅不内嵌复杂 Modal，引导去设置页数据分区完成两阶段确认
-          if (
-            window.confirm(
-              '检测到与本地既有内容冲突的项，覆盖将丢弃这些修改。前往「设置 → 数据与备份 → 导入内容包」完成确认。',
-            )
-          ) {
-            ui.openSettings('data', 'content-pack');
-          }
+          // 横幅不内嵌复杂 Modal，引导去设置页「内容包」分区完成两阶段确认（S-01）
+          const go = await confirmDialog({
+            title: '内容包与本地内容有冲突',
+            message:
+              '检测到与本地既有内容冲突的项，覆盖将丢弃这些修改。请前往「设置 → 内容包」重新导入，在那里逐项确认。',
+            confirmLabel: '前往内容包',
+          });
+          if (go) ui.openSettings('content-pack');
         } else if (outcome.status === 'invalid') {
           ui.toast('内容包校验未通过', 'error');
         }
@@ -136,27 +138,17 @@ function importPack() {
   input.click();
 }
 
-/** pack 态：卸载内容包（确认后执行） */
+/** pack 态：卸载内容包 —— 与「内容包」分区共用同一套确认流程（S-36） */
 async function uninstallPack() {
-  if (!window.confirm('确定卸载内容包吗？将恢复到演示级占位内容。')) return;
   busy.value = true;
   try {
-    const outcome = await content.uninstallPack();
-    if (!outcome.ok && outcome.status === 'needs_confirmation') {
-      if (
-        !window.confirm(
-          `有 ${(outcome.plan?.confirmations?.length ?? 0) as number} 本内容包世界书被编辑过，卸载会丢弃这些修改。确定卸载吗？`,
-        )
-      ) {
-        return;
-      }
-      const done = await content.uninstallPack({ confirmEdits: true });
-      if (done.ok) ui.toast('内容包已卸载', 'success');
-      else ui.toast('卸载失败', 'error');
-      return;
-    }
-    if (outcome.ok) ui.toast('内容包已卸载', 'success');
-    else if (outcome.status === 'busy') ui.toast('另一次内容包操作正在进行，请稍后再试', 'error');
+    const result = await confirmAndUninstallPack({
+      protectedPack: content.protectedPack,
+      uninstallPack: (opts) => content.uninstallPack(opts),
+    });
+    if (result.status === 'cancelled') return;
+    if (result.status === 'uninstalled') ui.toast('内容包已卸载，已回到演示级占位内容', 'success');
+    else if (result.status === 'busy') ui.toast('另一次内容包操作正在进行，请稍后再试', 'error');
     else ui.toast('卸载失败', 'error');
   } catch {
     ui.toast('卸载失败', 'error');
@@ -185,7 +177,7 @@ async function uninstallPack() {
         v-if="content.protectedPack"
         variant="secondary"
         size="sm"
-        @click="ui.openSettings('data', 'content-pack')"
+        @click="ui.openSettings('content-pack')"
         >管理 Discord 授权</AppButton
       >
       <AppButton

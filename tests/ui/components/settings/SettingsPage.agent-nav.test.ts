@@ -87,10 +87,10 @@ describe('SettingsPage Agent 子导航分组', () => {
     expect(template).toContain('@click="selectAgent(ag.id)"');
   });
 
-  it('每行保留 API 角标三态（! / ✕ / ✓）', () => {
-    expect(template).toContain('v-if="!hasApi" class="sub-nav-badge sub-nav-bad"');
-    expect(template).toContain('v-else-if="!agentModelOf(ag.id)"');
-    expect(template).toContain('class="sub-nav-badge sub-nav-ok"');
+  it('每行保留 API 角标，四态由 describeAgentBinding 推导（S-08，行为测试见 SettingsPage.binding-badges）', () => {
+    expect(template).toContain(':class="badgeOf(ag.id).cls"');
+    expect(template).toContain(':data-binding="agentBindings[ag.id]?.kind"');
+    expect(source).toContain('describeAgentBinding(');
   });
 
   it('「本存档使用」只在有活跃存档时出现', () => {

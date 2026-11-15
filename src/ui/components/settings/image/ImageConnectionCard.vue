@@ -6,6 +6,7 @@ import { useApiSourceStore } from '../../../stores/api-source-store';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { useUIStore } from '../../../stores/ui-store';
 import { NAI_IMAGE_API_BASE } from '../../../lib/image-client';
+import { confirmDialog } from '../../../lib/confirm-dialog';
 
 const apiSources = useApiSourceStore();
 const settings = useSettingsStore().settings;
@@ -46,9 +47,32 @@ async function save() {
   ui.toast('NovelAI 连接已保存', 'success');
 }
 
+/** 删除一个出图连接（S-09）：先确认；若是当前出图正在用的连接，弹窗里说清楚 */
 async function remove(id: string) {
-  await apiSources.removeImageConnection(id);
+  const connection = novelaiConnections.value.find((item) => item.id === id);
+  const name = connection?.name ?? '该连接';
+  const inUse = settings.imageNovelai.endpointId === id;
+  const confirmed = await confirmDialog({
+    title: '删除图像连接',
+    message: inUse
+      ? `「${name}」是当前出图使用的连接。删除后出图会停用，直到你重新选择一个 NovelAI 连接。`
+      : `确定删除「${name}」吗？此操作无法撤销。`,
+    confirmLabel: '删除',
+    cancelLabel: '取消',
+    danger: true,
+  });
+  if (!confirmed) return;
+  try {
+    await apiSources.removeImageConnection(id);
+  } catch (error) {
+    ui.toast(
+      `图像连接删除失败：${error instanceof Error ? error.message : String(error)}`,
+      'error',
+    );
+    return;
+  }
   if (settings.imageNovelai.endpointId === id) settings.imageNovelai.endpointId = null;
+  if (editingId.value === id) edit();
   ui.toast('图像连接已删除', 'info');
 }
 </script>

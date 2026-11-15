@@ -152,6 +152,19 @@ describe('AgentPresetBar —— 预设型 Agent 的分组下拉', () => {
     await vi.waitFor(() => expect(mockSettings.activePresetId).toBe(''));
     expect(await getDatabase().presets.get('mine')).toBeUndefined();
   });
+
+  it('S-16：删掉正在用的预设后，提示里说出改用了哪条默认预设', async () => {
+    const { useUIStore } = await import('../../../../../src/ui/stores/ui-store');
+    const toast = vi.spyOn(useUIStore(), 'toast');
+    mockSettings.activePresetId = 'mine';
+    const w = mountBar('story');
+    await w.find('[data-testid="preset-delete"]').trigger('click');
+    await flushPromises();
+    (document.body.querySelector('[data-testid="delete-confirm"]') as HTMLButtonElement).click();
+    await vi.waitFor(() =>
+      expect(toast).toHaveBeenCalledWith('预设已删除，已改用默认预设「内容默认」', 'info'),
+    );
+  });
 });
 
 describe('contentSourceLabel —— 默认内容从哪来', () => {

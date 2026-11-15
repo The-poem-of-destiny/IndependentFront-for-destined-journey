@@ -25,9 +25,10 @@ const props = defineProps<{ agentId: string }>();
 const promptDraft = defineModel<string>('prompt', { required: true });
 const templateDraft = defineModel<string>('template', { required: true });
 
-// 🔴 `agentPromptEdited` 全仓**只写不读**（Q-18 核查：9 写 0 读）——
-//    本该驱动一个「未保存」角标，那个角标没有被实现。搬迁期原样保留写入，
-//    不趁机删；要删就该连同 `agentDirty` 一起作为独立一刀。
+// 🔴 `agentPromptEdited` 全仓**只写不读**（Q-18 核查：9 写 0 读）。
+//    📌 2026-11-14（S-15）：「未保存」提示与导航拦截已经实现，但**不读它** —— 它会被 deep watch
+//    写进 localStorage，刷新后还亮着就是假话。真正的判据是 AgentConfigPanel 里草稿与基线的比较
+//    （经 `prompt-dirty-guard.ts` 交给壳层）。这里的写入原样保留，要删就连同 `agentDirty` 一起。
 const s = useSettingsStore().settings;
 
 const showTemplatePreview = ref(false);

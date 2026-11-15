@@ -5,18 +5,16 @@
  * 🔴 用量在**本分区挂载时**读一次，而不再是整页挂载时读一次。分区是 v-if 的，
  *    所以效果反而更准（每次点进来都是新数），代价是切走再切回会多问一次
  *    `navigator.storage.estimate()` —— 那是个便宜的浏览器查询。
+ *
+ * 📌 2026-11-14（S-01）：内容包卡已搬到独立的「内容包」分区（ContentPackSection），
+ *    这里只留一行指路；「清除所有数据」挪到分区底部单独的危险区，不再与日常卡片同网格。
  */
-import { ref, shallowRef, computed, onMounted, watch } from 'vue';
-import { discordAuthRevision } from '../../lib/discord-auth-client';
+import { ref, shallowRef, computed, onMounted } from 'vue';
 import type { SceneImageUsage } from '@engine/types/types-image';
 import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import FormSelect from '../shared/form/FormSelect.vue';
-import PackInstallConfirmModal from './PackInstallConfirmModal.vue';
-import DiscordPackAccess from './DiscordPackAccess.vue';
-import { useContentStore } from '../../stores/content-store';
-import type { ProtectedPackDownload } from '@engine/types/types-pack-auth';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useGameStore } from '../../stores/game-store';
@@ -25,309 +23,17 @@ import type { FullBackup } from '@engine/persistence/database';
 // Vitest 的 vi.mock 对同一模块的多次动态 import 有竞态（挂起到环境拆除、dexie 加载失败），
 // 静态 import 由 vi.mock 稳定拦截，规避之（2026-08-24）。
 import { getSaveProfile } from '@engine/persistence/database';
-import type { PackInstallPlan } from '@engine/types/types-content';
-import type { PackUpgradeDiff } from '@engine/content/content-pack-plan';
-import {
-  checkPackUpdate,
-  downloadLatestPack,
-  isPackUpdateAvailable,
-  type PackUpdateInfo,
-} from '../../lib/content-pack-updater';
 
 const cfg = useSettingsStore();
 const ui = useUIStore();
 const game = useGameStore();
 
-/** 内容态（内容包是否已装） */
-const content = useContentStore();
-const activeContent = computed(() => ({
-  packId: content.activePackId,
-  packVersion: content.activePackVersion,
-}));
-const hasActivePack = computed(() => activeContent.value.packId !== null);
-const activePackVersion = computed(() => activeContent.value.packVersion);
-
-/** 挂载时读一次内容态（content-store 的 store 状态） */
-onMounted(async () => {
-  // void：用量与内容态互不依赖，不必串成一条链；失败已在 loadStorageUsage 内自吞，
+onMounted(() => {
+  // void：用量与经验档位互不依赖，不必串成一条链；失败已在各自函数内自吞，
   // 裸调会漏成 unhandled rejection（.vue 不在类型感知 lint 档内，闸门看不见）
   void loadStorageUsage();
   void loadExperienceMode();
-  const { useContentStore } = await import('../../stores/content-store');
-  const c = useContentStore();
-  await c.hydratePackState();
 });
-
-// ═══════════ 内容包导入（波 1 T7 / D19 / §5.2）═══════════
-
-/**
- * 内容包导入入口：文件 picker（.json）→ installPack → 有 conflicted 弹两阶段确认；
- * 无冲突直接装。
- *
- * 🔴 两阶段提交（D19）：installPack 在无 `confirmConflicts` 时遇 conflicted 返回
- * `needs_confirmation`（带完整 plan），这里把 plan 塞给
- * `PackInstallConfirmModal`，用户确认后以 `{ confirmConflicts: true }` 重入。
- */
-const packPlan = ref<PackInstallPlan | null>(null);
-// 🔴 shallowRef：pack 是纯数据，绝不能进响应式系统——ref 深代理会让确认重入时
-//    取回 Proxy，savePreset 落库 IDB 结构化克隆拒绝 Proxy → DataCloneError
-//    （2026-08-07 真机根因；savePreset 侧已加 detach 双保险）。
-const packPending = shallowRef<unknown | null>(null); // 待确认的原始 pack JSON
-const onlinePending = shallowRef<ProtectedPackDownload | null>(null);
-watch(
-  discordAuthRevision,
-  () => {
-    if (onlinePending.value) {
-      onlinePending.value = null;
-      packPlan.value = null;
-    }
-  },
-  { flush: 'sync' },
-);
-const packDiff = ref<PackUpgradeDiff | null>(null);
-const packError = ref<string | null>(null);
-const packInstalling = ref(false);
-
-/** 在线更新仅下载密文；授权校验和运行时解密由 content-store 处理。 */
-const checkedPackUpdate = ref<PackUpdateInfo | null>(null);
-const packUpdate = computed(() => {
-  const info = checkedPackUpdate.value;
-  return info
-    ? {
-        ...info,
-        updateAvailable:
-          info.available && isPackUpdateAvailable(info.packVersion, activePackVersion.value),
-      }
-    : null;
-});
-const packCheckingUpdate = ref(false);
-
-async function checkForPackUpdate() {
-  packCheckingUpdate.value = true;
-  try {
-    const result = await checkPackUpdate(activePackVersion.value);
-    if (result.status === 'error') {
-      ui.toast(result.message, 'error');
-      return;
-    }
-    checkedPackUpdate.value = result.info;
-    if (!result.info.available) ui.toast('发布源暂无内容包', 'info');
-    else if (result.info.updateAvailable)
-      ui.toast(`发现新版本 ${result.info.packVersion}`, 'success');
-    else ui.toast('已是最新版本', 'info');
-  } finally {
-    packCheckingUpdate.value = false;
-  }
-}
-
-/** 下载最新包并复用 `runInstall`（同 packId 自动走升级 diff 两阶段） */
-async function applyPackUpdate() {
-  if (packInstalling.value) return;
-  packInstalling.value = true;
-  try {
-    const result = await downloadLatestPack();
-    if (result.status === 'error') {
-      ui.toast(result.message, 'error');
-      return;
-    }
-    const outcome = await content.installProtectedPack(result.download);
-    if (outcome.status === 'needs_confirmation') {
-      packPlan.value = outcome.plan ?? null;
-      onlinePending.value = result.download;
-      packPending.value = null;
-    } else if (outcome.ok) {
-      await afterPackApplied(outcome.notes ?? []);
-      ui.toast('授权内容包已安装，自动续期已启用', 'success');
-    } else ui.toast('内容包操作正在进行，请稍后重试', 'error');
-  } catch (error) {
-    ui.toast(error instanceof Error ? error.message : '获取内容包失败', 'error');
-  } finally {
-    packInstalling.value = false;
-  }
-}
-
-async function pickPackFile() {
-  const i = document.createElement('input');
-  i.type = 'file';
-  i.accept = '.json';
-  i.onchange = async (e) => {
-    const f = (e.target as HTMLInputElement).files?.[0];
-    if (!f) return;
-    let raw: unknown;
-    try {
-      raw = JSON.parse(await f.text());
-    } catch {
-      ui.toast('内容包格式无效：JSON 解析失败', 'error');
-      return;
-    }
-    await runInstall(raw);
-  };
-  i.click();
-}
-
-/** 执行安装（第一段：无冲突直接装；有冲突弹确认）。已装同 packId → 走升级路径（显示 diff） */
-async function runInstall(raw: unknown) {
-  packError.value = null;
-  onlinePending.value = null;
-  packDiff.value = null;
-  packInstalling.value = true;
-  try {
-    const { useContentStore } = await import('../../stores/content-store');
-    const c = useContentStore();
-    const packId = (raw as { packId?: string } | null)?.packId ?? '';
-    // 已是同 packId → 升级路径（diff 展示）；否则首次安装
-    if (activeContent.value.packId === packId) {
-      await runUpgradeRaw(c, raw);
-      return;
-    }
-    const outcome = await c.installPack(raw);
-    if (!outcome.ok) {
-      if (outcome.status === 'needs_confirmation') {
-        packPlan.value = outcome.plan ?? null;
-        packPending.value = raw;
-        packDiff.value = outcome.upgradeDiff ?? null;
-      } else if (outcome.status === 'invalid') {
-        packError.value =
-          (outcome.validationErrors ?? []).map((e: any) => e.text ?? String(e)).join('\n') ||
-          '内容包校验未通过';
-        ui.toast('内容包校验未通过', 'error');
-      }
-      return;
-    }
-    await afterPackApplied(outcome.notes ?? []);
-    ui.toast('内容包已安装', 'success');
-  } catch (err) {
-    // 🔴 安装异常必须留痕：此前空 catch 吞掉全部错误，只弹 toast、控制台零输出，
-    //    失败原因无从排查（2026-08-07 真机：导入 pack 报「安装失败」但无任何日志）。
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[content-pack] 内容包安装失败:', err);
-    packError.value = msg || '内容包安装失败（无错误信息）';
-    ui.toast('内容包安装失败', 'error');
-  } finally {
-    packInstalling.value = false;
-  }
-}
-
-/** 升级路径：查 diff → 展示 → 有冲突/变化则弹确认；无冲突直接装 */
-async function runUpgradeRaw(
-  store: {
-    upgradePack: (
-      raw: unknown,
-      opts?: { confirmConflicts?: boolean },
-    ) => Promise<{
-      ok: boolean;
-      status: string;
-      plan?: unknown;
-      upgradeDiff?: unknown;
-      notes?: unknown[];
-    }>;
-  },
-  raw: unknown,
-): Promise<void> {
-  const outcome = await store.upgradePack(raw);
-  if (!outcome.ok && outcome.status === 'needs_confirmation') {
-    packPlan.value = (outcome.plan as PackInstallPlan | null) ?? null;
-    packPending.value = raw;
-    packDiff.value = (outcome.upgradeDiff as PackUpgradeDiff | null) ?? null;
-    return;
-  }
-  if (outcome.ok) {
-    await afterPackApplied(outcome.notes ?? []);
-    ui.toast('内容包已升级', 'success');
-  } else if (outcome.status === 'invalid') {
-    packError.value =
-      ((outcome as { validationErrors?: unknown[] }).validationErrors ?? [])
-        .map((e: any) => e.text ?? String(e))
-        .join('\n') || '内容包校验未通过';
-    ui.toast('内容包校验未通过', 'error');
-  }
-}
-
-/** 用户在确认 Modal 点「确认」→ 以 confirmConflicts 重入 */
-async function confirmPackInstall() {
-  if (!packPending.value && !onlinePending.value) return;
-  const online = onlinePending.value;
-  const raw = packPending.value;
-  onlinePending.value = null;
-  const wasUpgrade = activeContent.value.packId === ((raw as { packId?: string })?.packId ?? '');
-  packPending.value = null;
-  packPlan.value = null;
-  packDiff.value = null;
-  packInstalling.value = true;
-  try {
-    const { useContentStore } = await import('../../stores/content-store');
-    const c = useContentStore();
-    const outcome = online
-      ? await c.installProtectedPack(online, { confirmConflicts: true })
-      : await (wasUpgrade
-          ? c.upgradePack(raw, { confirmConflicts: true })
-          : c.installPack(raw, { confirmConflicts: true }));
-    if (!outcome.ok) {
-      ui.toast('内容包安装失败', 'error');
-      return;
-    }
-    await afterPackApplied(outcome.notes ?? []);
-    ui.toast(wasUpgrade ? '内容包已升级' : '内容包已安装', 'success');
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[content-pack] 内容包安装失败（确认重入）:', err);
-    packError.value = msg || '内容包安装失败（无错误信息）';
-    ui.toast('内容包安装失败', 'error');
-  } finally {
-    packInstalling.value = false;
-  }
-}
-
-/** 装/卸/升后统一收尾：重载 Agent 默认 + 刷新内容态 */
-async function afterPackApplied(notes: unknown[]): Promise<void> {
-  showSuccessNotes(notes, null);
-  await cfg.loadAgentProjectDefaults();
-  const { useContentStore } = await import('../../stores/content-store');
-  const c = useContentStore();
-  await c.hydratePackState();
-}
-
-/** 卸载（带确认；编辑过的书需二次确认） */
-async function requestUninstall() {
-  const { useContentStore } = await import('../../stores/content-store');
-  const c = useContentStore();
-  const outcome = await c.uninstallPack();
-  if (!outcome.ok && outcome.status === 'needs_confirmation') {
-    // 有编辑过的书，弹 confirm
-    if (
-      window.confirm(
-        `有 ${outcome.plan?.confirmations.length ?? 0} 本内容包世界书被编辑过，卸载会丢弃这些修改。确定卸载吗？`,
-      )
-    ) {
-      const done = await c.uninstallPack({ confirmEdits: true });
-      if (done.ok) {
-        ui.toast('内容包已卸载', 'success');
-        await cfg.loadAgentProjectDefaults();
-      } else ui.toast('卸载失败', 'error');
-    }
-    return;
-  }
-  if (outcome.ok) {
-    ui.toast('内容包已卸载', 'success');
-    await cfg.loadAgentProjectDefaults();
-  } else if (outcome.status === 'busy') {
-    ui.toast('另一次内容包操作正在进行，请稍后再试', 'error');
-  } else ui.toast('卸载失败', 'error');
-}
-
-/** 安装结果的三类处置记录 toast（dropped/degraded/sideEffect） */
-function showSuccessNotes(notes: unknown[], _outcome: unknown): void {
-  const dropped = notes.filter((n: any) => n?.kind === 'dropped');
-  const degraded = notes.filter((n: any) => n?.kind === 'degraded');
-  const side = notes.filter((n: any) => n?.kind === 'sideEffect');
-  if (dropped.length || degraded.length || side.length) {
-    const parts: string[] = [];
-    if (dropped.length) parts.push(`${dropped.length} 项丢弃`);
-    if (degraded.length) parts.push(`${degraded.length} 项降级`);
-    if (side.length) parts.push(`${side.length} 项附带影响`);
-    ui.toast(`内容包已处理，注意：${parts.join('、')}`, 'warning');
-  }
-}
 
 const showClearConfirm = ref(false);
 const storageInfo = ref<{ used: number; quota: number; pct: number } | null>(null);
@@ -566,6 +272,14 @@ async function clearAll() {
       <strong>API 端点与 API 密钥不包含在备份中。</strong>
       导入不会覆盖本机已保存的 API 凭据；换到新设备后需要重新配置 API。
     </p>
+    <!-- S-01：内容包卡搬去独立分区后，留一行指路给按旧习惯来这里找的人 -->
+    <p class="pack-pointer">
+      <i class="fa-solid fa-box-open" aria-hidden="true"></i>
+      <span>内容包已移至「内容包」分区。</span>
+      <AppButton variant="ghost" size="sm" @click="ui.openSettings('content-pack')"
+        >前往内容包</AppButton
+      >
+    </p>
     <div class="data-actions">
       <AppCard padding="md"
         ><h4>导出数据</h4>
@@ -646,7 +360,17 @@ async function clearAll() {
         <p v-else class="text-muted text-sm">
           未载入存档 —— 插画用量按存档统计，进入游戏后可在此查看与清理。
         </p></AppCard
-      ><AppCard padding="md" class="data-danger"
+      >
+    </div>
+    <!--
+      危险区（S-01）：全应用破坏力最大的那个按钮单独放到分区底部，用分隔线与红色描边
+      和日常卡片拉开 —— 不再与导出 / 导入 / 内容包排在同一个网格里。
+    -->
+    <div class="danger-zone" role="group" aria-labelledby="data-danger-zone-title">
+      <h4 id="data-danger-zone-title" class="danger-zone-title">
+        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> 危险操作
+      </h4>
+      <AppCard padding="md" class="data-danger"
         ><h4>清除所有数据</h4>
         <p class="text-muted text-sm">
           永久删除所有存档、角色、记忆、设置，以及上传的音频曲库与播放列表、素材库。不可撤销。
@@ -654,58 +378,7 @@ async function clearAll() {
         <AppButton variant="danger" size="sm" class="card-action" @click="showClearConfirm = true"
           >清除所有数据</AppButton
         ></AppCard
-      ><AppCard padding="md" class="pack-card" data-settings-anchor="content-pack"
-        ><h4>内容包</h4>
-        <DiscordPackAccess />
-        <p class="text-muted text-sm">
-          导入内容包以加载完整的世界书、Agent 提示词、预设与目录数据。<template
-            v-if="activePackVersion"
-            >当前：{{ activePackVersion }}。</template
-          >未装包时运行在演示级占位内容上。
-        </p>
-        <div class="pack-actions">
-          <AppButton
-            variant="secondary"
-            size="sm"
-            class="card-action"
-            :loading="packInstalling"
-            @click="pickPackFile"
-            >导入 / 升级内容包</AppButton
-          >
-          <AppButton
-            v-if="hasActivePack"
-            variant="ghost"
-            size="sm"
-            class="card-action"
-            :disabled="packInstalling"
-            @click="requestUninstall"
-            >卸载内容包</AppButton
-          >
-          <AppButton
-            variant="ghost"
-            size="sm"
-            class="card-action"
-            :loading="packCheckingUpdate"
-            :disabled="packInstalling"
-            @click="checkForPackUpdate"
-            >检查更新</AppButton
-          >
-          <AppButton
-            v-if="packUpdate?.updateAvailable"
-            variant="primary"
-            size="sm"
-            class="card-action"
-            :loading="packInstalling"
-            @click="applyPackUpdate"
-            >更新到 {{ packUpdate.packVersion }}</AppButton
-          >
-        </div>
-        <p v-if="packUpdate && !packUpdate.updateAvailable" class="text-muted text-sm">
-          已是最新版本<template v-if="packUpdate.packVersion"
-            >（{{ packUpdate.packVersion }}）</template
-          >。
-        </p>
-      </AppCard>
+      >
     </div>
     <AppModal
       :open="showClearConfirm"
@@ -797,33 +470,6 @@ async function clearAll() {
         ></template
       ></AppModal
     >
-    <!--
-      内容包安装/升级的两阶段确认（波 1 T7 / D19 / §5.2）：
-      plan 非空时展示，确认后 confirmPackInstall 以 confirmConflicts:true 重入 installPack。
-    -->
-    <PackInstallConfirmModal
-      :open="!!(packPlan || packError)"
-      :plan="packPlan"
-      :upgrade-diff="packDiff"
-      :error-message="packError"
-      @update:open="
-        (v: boolean) => {
-          if (!v) {
-            packPlan = null;
-            packError = null;
-            packPending = null;
-            onlinePending = null;
-          }
-        }
-      "
-      @confirm="confirmPackInstall"
-      @cancel="
-        packPlan = null;
-        packError = null;
-        packPending = null;
-        onlinePending = null;
-      "
-    />
   </section>
 </template>
 
@@ -861,23 +507,42 @@ async function clearAll() {
   margin: 0 0 4px;
   font-size: 0.95rem;
 }
+/* 内容包指路：一行说明 + 一个跳转按钮，不做成卡片（它已经不是这里的东西了） */
+.pack-pointer {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+  margin: 0 0 var(--theme-spacing-lg);
+  font-size: 0.8125rem;
+  color: var(--theme-text-secondary);
+}
+.pack-pointer i {
+  color: var(--theme-quality-rare);
+}
+/* 危险区：与上方日常卡片用分隔线拉开，标题与描边都走 error 色 */
+.danger-zone {
+  margin-top: var(--theme-spacing-xl);
+  padding-top: var(--theme-spacing-lg);
+  border-top: 1px solid color-mix(in srgb, var(--theme-error) 30%, var(--theme-card-border));
+}
+.danger-zone-title {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-xs);
+  margin: 0 0 var(--theme-spacing-md);
+  font-size: 0.85rem;
+  color: var(--theme-error);
+}
+.data-danger h4 {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+}
 .data-danger {
   border-color: color-mix(in srgb, var(--theme-error) 25%, transparent) !important;
   background: color-mix(in srgb, var(--theme-error) 3%, transparent);
 }
 .data-danger:hover {
   border-color: color-mix(in srgb, var(--theme-error) 45%, transparent) !important;
-}
-/* 内容包卡片的按钮行（导入 + 卸载并排） */
-.pack-card {
-  border-color: color-mix(in srgb, var(--theme-quality-rare) 25%, transparent) !important;
-}
-.pack-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-  flex-wrap: wrap;
 }
 .storage-bar-track {
   height: 8px;

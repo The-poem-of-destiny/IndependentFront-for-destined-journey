@@ -9,6 +9,7 @@ import {
 import type { CreatePresetRecord } from '@engine/persistence/database';
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';
+import { confirmDialog } from '../../lib/confirm-dialog';
 
 const props = defineProps<{ visible: boolean }>();
 const emit = defineEmits<{ close: [] }>();
@@ -80,7 +81,32 @@ async function handleSave() {
   }
 }
 
+/**
+ * 「加载」会整份替换当前草稿（C-13）。草稿非空时先确认，并列出会被替换的内容；
+ * 预设带大纲且当前已有大纲时点明大纲也会被替换 —— 被替换的大纲进入大纲历史，
+ * 仍可在剧情规划步骤用「回退上一版」找回。
+ */
 async function handleLoad(preset: CreatePresetRecord) {
+  if (store.hasDraftContent) {
+    const data = preset.data;
+    const details = [
+      '难度、角色信息、属性分配、金钱与命运点数',
+      '已选装备、道具、技能与背景故事',
+      '命定核心、工坊与角色启用、剧情设置',
+    ];
+    const carriesOutline = data.plotOutline !== undefined || data.plotOutlineChapters !== undefined;
+    if (carriesOutline && store.plotOutline) {
+      details.push('当前剧情大纲（可在「剧情规划」步骤用「回退上一版」找回）');
+    }
+    const confirmed = await confirmDialog({
+      title: `加载预设「${preset.name}」？`,
+      message: '当前填写的内容将被预设替换。',
+      details,
+      confirmLabel: '加载并替换',
+      danger: true,
+    });
+    if (!confirmed) return;
+  }
   store.applyPresetData(preset.data);
   emit('close');
 }

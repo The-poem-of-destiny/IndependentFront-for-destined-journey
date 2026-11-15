@@ -5,7 +5,11 @@ import AppCard from '../shared/AppCard.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
-import { decideStoryContextAdmission } from '@engine/story/story-context-mode';
+import {
+  decideStoryContextAdmission,
+  isStoryContextV2Save,
+} from '@engine/story/story-context-mode';
+import { confirmDialog } from '../../lib/confirm-dialog';
 
 const s = useSettingsStore().settings;
 const game = useGameStore();
@@ -58,6 +62,58 @@ watch(
     ui.viewHistory = ui.viewHistory.filter((view) => view !== 'game');
   },
 );
+
+/** 开关下方常驻的一句：当前哪一类存档能进（S-04） */
+const openableSavesLine = computed(() =>
+  s.storyContextV2Enabled
+    ? '当前可进入：测试存档。普通存档需关闭本模式后才能进入。'
+    : '当前可进入：普通存档。测试存档需开启本模式后才能进入。',
+);
+
+/**
+ * 切换前确认（S-04）：这个开关会把人踢出当前存档、并锁住另一类存档，
+ * 所以开与关都要先按**当前情形**把后果说清楚；取消时开关保持原样。
+ */
+function buildStoryModeConfirm(next: boolean): { title: string; message: string } {
+  const save = game.activeSave;
+  const name = save?.name ?? '当前存档';
+  const willExit = !!save && !decideStoryContextAdmission(save, next).ok;
+  if (next) {
+    const lead = willExit
+      ? `当前存档《${name}》是普通存档，开启后会立即退出，且开启期间所有普通存档无法进入。`
+      : save && isStoryContextV2Save(save)
+        ? `当前存档《${name}》是测试存档，可以继续使用；开启期间所有普通存档无法进入。`
+        : '开启期间所有普通存档无法进入。';
+    return {
+      title: '开启 Story 上下文与记忆新模式？',
+      message: `${lead}之后新建的存档会被永久标记为「测试方案」，这些测试存档只能在开启本模式时进入。`,
+    };
+  }
+  const lead = willExit
+    ? `当前存档《${name}》是测试存档，关闭后会立即退出，且关闭期间所有测试存档无法进入。`
+    : '关闭期间所有测试存档无法进入。';
+  return {
+    title: '关闭 Story 上下文与记忆新模式？',
+    message: `${lead}普通存档恢复可用，之后新建的存档不再标记为测试方案。`,
+  };
+}
+
+async function onStoryModeChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const next = input.checked;
+  // 先把开关复位：确认前不改设置，取消时界面也不留下已切换的假象
+  input.checked = s.storyContextV2Enabled === true;
+  if (next === (s.storyContextV2Enabled === true)) return;
+  const { title, message } = buildStoryModeConfirm(next);
+  const ok = await confirmDialog({
+    title,
+    message,
+    confirmLabel: next ? '开启' : '关闭',
+    danger: true,
+  });
+  if (!ok || storyModeLocked.value) return;
+  s.storyContextV2Enabled = next;
+}
 </script>
 
 <template>
@@ -123,18 +179,21 @@ watch(
 
         <label class="toggle-label developer-toggle">
           <input
-            v-model="s.storyContextV2Enabled"
+            :checked="s.storyContextV2Enabled === true"
             type="checkbox"
             role="switch"
             class="toggle-input"
             aria-label="Story 上下文与记忆新模式"
             aria-describedby="story-context-v2-help"
             :disabled="storyModeLocked"
+            @change="onStoryModeChange"
           />
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <p class="story-mode-boundary">测试存档仅在开启时可用，普通存档仅在关闭时可用。</p>
+      <p class="story-mode-boundary" data-testid="story-mode-openable">
+        {{ openableSavesLine }}
+      </p>
 
       <div v-if="s.storyContextV2Enabled" class="story-settings">
         <label class="form-label story-field">

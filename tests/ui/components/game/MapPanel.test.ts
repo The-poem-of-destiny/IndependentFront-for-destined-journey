@@ -42,6 +42,8 @@ import type { ProvinceRasterResult } from '../../../../src/ui/lib/map-provinces-
 import { loadProvinceRaster } from '../../../../src/ui/lib/map-provinces-raster';
 import { removeMapMarker, setMapMarker, updateMapFlags } from '@engine/state/save-profile';
 import { findPath } from '@engine/map/map-path';
+import { confirmDialog } from '../../../../src/ui/lib/confirm-dialog';
+import { useUIStore } from '../../../../src/ui/stores/ui-store';
 
 enableAutoUnmount(afterEach);
 
@@ -96,6 +98,11 @@ vi.mock('@engine/state/save-profile', async (importOriginal) => {
     updateMapFlags: vi.fn(async (profile: unknown) => profile),
   };
 });
+
+// 应用内确认框换成 spy：默认「确认」，需要测取消的用例单独改返回值
+vi.mock('../../../../src/ui/lib/confirm-dialog', () => ({
+  confirmDialog: vi.fn(async () => true),
+}));
 
 // findPath 是引擎纯函数：默认透传真实实现，需要看入参的用例把它换成 spy
 vi.mock('@engine/map/map-path', async (importOriginal) => {
@@ -432,6 +439,7 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
     vi.mocked(setMapMarker).mockClear();
     vi.mocked(removeMapMarker).mockClear();
     vi.mocked(updateMapFlags).mockClear();
+    vi.mocked(confirmDialog).mockClear();
   });
 
   afterEach(() => {
@@ -1015,13 +1023,56 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
     expect(button()?.attributes('disabled')).toBeDefined();
     expect(wrapper.find('.pol-card').text()).toContain('不可通行');
 
-    // 普通地块（4 号，乙一）→ 可用，点一次走 store 的唯一写入口，传的是**地块名**
+    // 普通地块（4 号，乙一）→ 可用，确认后走 store 的唯一写入口，传的是**地块名**
     await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
     expect(button()?.attributes('disabled')).toBeUndefined();
     await clickButton(wrapper, '.pol-card', '设为当前位置');
     await flushPromises();
     expect(setPlayerLocation).toHaveBeenCalledTimes(1);
     expect(setPlayerLocation).toHaveBeenCalledWith('乙一');
+  });
+
+  it('「设为当前位置」先弹确认（写出旧 → 新），确认后提示成功；取消则一个字节不写（MAP-02）', async () => {
+    const setPlayerLocation = vi.fn(async () => ({ ok: true }));
+    await useGameStub({ saveProfile: makeProfile({ lastTileId: 1 }), setPlayerLocation });
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+    const ui = useUIStore();
+
+    // 取消 → 不写、不提示
+    vi.mocked(confirmDialog).mockResolvedValueOnce(false);
+    await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
+    await clickButton(wrapper, '.pol-card', '设为当前位置');
+    await flushPromises();
+    expect(confirmDialog).toHaveBeenCalledTimes(1);
+    const options = vi.mocked(confirmDialog).mock.calls[0][0];
+    expect(options.message).toBe('当前位置：甲一 → 乙一');
+    expect(options.details?.join('\n')).toContain('下一回合');
+    expect(setPlayerLocation).not.toHaveBeenCalled();
+    expect(ui.toasts).toHaveLength(0);
+
+    // 确认 → 写一次 + 成功提示
+    vi.mocked(confirmDialog).mockResolvedValueOnce(true);
+    await clickButton(wrapper, '.pol-card', '设为当前位置');
+    await flushPromises();
+    expect(setPlayerLocation).toHaveBeenCalledTimes(1);
+    expect(ui.toasts.map((t) => t.message)).toEqual(['当前位置已改为「乙一」']);
+  });
+
+  it('「设为当前位置」与路线按钮分开：不在路线按钮那一行，且是次要样式（MAP-02）', async () => {
+    await useGameStub({ saveProfile: makeProfile({ lastTileId: 1 }) });
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+    await wrapper.find('.pol-stage').trigger('click', { clientX: 3, clientY: 0 });
+
+    const routeRow = wrapper.find('.pol-card-actions').text();
+    expect(routeRow).toContain('查看路线');
+    expect(routeRow).not.toContain('设为当前位置');
+    const setButton = wrapper.find('.pol-card-manage button');
+    expect(setButton.text()).toContain('设为当前位置');
+    expect(setButton.classes()).not.toContain('pol-btn-primary');
   });
 
   it('路线折线按顺序连点，途经点画在线上（只标真的经过的）', async () => {
@@ -1116,6 +1167,103 @@ describe('MapPanel — 势力地图页签（地图 v1 / §9）', () => {
 
     wrapper.unmount();
     expect(bitmap.close).toHaveBeenCalledTimes(1);
+  });
+
+  // ═══ 地名搜索（审计 MAP-03） ═══
+
+  it('搜索：输入地名出下拉（势力/中层/地块），↓ + Enter 选中 = 打开信息卡并取景', async () => {
+    await useGameStub({});
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 600,
+      bottom: 400,
+      width: 600,
+      height: 400,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    // 减动效：取景直接落位，不用等动画帧
+    document.documentElement.setAttribute('data-reduced-motion', 'true');
+    try {
+      const wrapper = await mountPanel();
+      await openPoliticalTab(wrapper);
+      const worldBefore = wrapper.find('.pol-world').attributes('style');
+
+      const input = wrapper.find('.pol-search-input');
+      await input.setValue('甲');
+      const items = () => wrapper.findAll('.pol-search-item');
+      expect(items().map((li) => li.find('.pol-search-name').text())).toEqual([
+        '甲国',
+        '甲州',
+        '甲一',
+        '甲二',
+      ]);
+      // 首项默认高亮
+      expect(items()[0].attributes('aria-selected')).toBe('true');
+
+      // ↓↓↓ → 甲二；Enter 选中
+      for (let i = 0; i < 3; i++) await input.trigger('keydown', { key: 'ArrowDown' });
+      expect(items()[3].attributes('aria-selected')).toBe('true');
+      await input.trigger('keydown', { key: 'Enter' });
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.find('.pol-card-title').text()).toBe('甲二');
+      // 下拉收起、搜索框清空
+      expect(wrapper.find('.pol-search-list').exists()).toBe(false);
+      expect((input.element as HTMLInputElement).value).toBe('');
+      // 取景：世界层的 transform 变了（框到了甲二）
+      expect(wrapper.find('.pol-world').attributes('style')).not.toBe(worldBefore);
+    } finally {
+      document.documentElement.removeAttribute('data-reduced-motion');
+    }
+  });
+
+  it('搜索：选中中层 → 信息卡是它的锚地块；没有匹配时明说', async () => {
+    await useGameStub({});
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    const input = wrapper.find('.pol-search-input');
+    await input.setValue('州');
+    const item = wrapper.find('.pol-search-item');
+    expect(item.text()).toContain('甲州');
+    await item.trigger('mousedown');
+    expect(wrapper.find('.pol-card-title').text()).toBe('甲一');
+
+    await input.setValue('不存在的地方');
+    expect(wrapper.find('.pol-search-empty').text()).toContain('没有找到');
+  });
+
+  it('搜索框里按 Esc 只清空搜索、不关地图；空搜索框的 Esc 照旧放行', async () => {
+    await useGameStub({});
+    setContentRegistry({ ...emptyRegistry(), mapPack: MAP_PACK });
+    const wrapper = await mountPanel();
+    await openPoliticalTab(wrapper);
+
+    const input = wrapper.find('.pol-search-input');
+    (input.element as HTMLInputElement).focus();
+    await input.setValue('甲');
+    expect(wrapper.find('.pol-search-list').exists()).toBe(true);
+
+    // 弹窗外壳在 document capture 上吃 Esc；这里用一个同位置的监听器代表它
+    const shell = vi.fn();
+    document.addEventListener('keydown', shell, true);
+    try {
+      input.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await wrapper.vm.$nextTick();
+      expect(shell).not.toHaveBeenCalled();
+      expect((input.element as HTMLInputElement).value).toBe('');
+      expect(wrapper.find('.pol-search-list').exists()).toBe(false);
+
+      input.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(shell).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('keydown', shell, true);
+    }
   });
 });
 

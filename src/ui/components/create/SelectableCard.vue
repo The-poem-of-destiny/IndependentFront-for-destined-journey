@@ -7,8 +7,23 @@ import { computed } from 'vue';
 // 两处 `as QualityLevel` 强转；强转是因为 RARITY_TO_QUALITY 的值类型是裸 string）
 import { qualityLabelFromRarity, qualityVarFromRarity } from '../../lib/quality-colors';
 
-const props = defineProps<{ item: CatalogItem; selected: boolean; disabled?: boolean }>();
-defineEmits<{ select: [item: CatalogItem]; remove: [item: CatalogItem] }>();
+const props = defineProps<{
+  item: CatalogItem;
+  selected: boolean;
+  disabled?: boolean;
+  /**
+   * C-05：不可选的原因（如「点数不足，还差 N 点」）。禁用时以可见文字写在卡片上，
+   * 不只靠半透明与禁止光标让玩家猜。
+   */
+  disabledReason?: string | null;
+}>();
+const emit = defineEmits<{ select: [item: CatalogItem]; remove: [item: CatalogItem] }>();
+
+/** 整卡与「选择」按钮共用同一道闸：禁用或已选中时都不发 select */
+function trySelect() {
+  if (props.disabled || props.selected) return;
+  emit('select', props.item);
+}
 
 const qualityLabel = computed(() => qualityLabelFromRarity(props.item.rarity));
 const qualityColor = computed(() => qualityVarFromRarity(props.item.rarity));
@@ -23,7 +38,7 @@ const qualityColor = computed(() => qualityVarFromRarity(props.item.rarity));
       ['rarity-' + item.rarity]: true,
     }"
     :style="{ '--q-color': qualityColor }"
-    @click="!disabled && !selected ? $emit('select', item) : undefined"
+    @click="trySelect"
   >
     <div class="card-body">
       <!-- 头部: 色点 + 名称 + 稀有度 + 类型 -->
@@ -58,11 +73,16 @@ const qualityColor = computed(() => qualityVarFromRarity(props.item.rarity));
       <div class="card-cost">
         消耗: <strong>{{ item.cost }}</strong> 点
       </div>
+      <div v-if="disabled && !selected && disabledReason" class="card-blocked">
+        {{ disabledReason }}
+      </div>
     </div>
 
     <!-- 操作按钮 -->
     <div class="card-action">
-      <AppButton v-if="!selected" size="sm" @click.stop="$emit('select', item)"> 选择 </AppButton>
+      <AppButton v-if="!selected" size="sm" :disabled="disabled" @click.stop="trySelect">
+        选择
+      </AppButton>
       <AppButton v-else size="sm" variant="danger" @click.stop="$emit('remove', item)">
         移除
       </AppButton>
@@ -99,10 +119,18 @@ const qualityColor = computed(() => qualityVarFromRarity(props.item.rarity));
     0 0 12px color-mix(in srgb, var(--theme-color-primary) 25%, transparent);
 }
 
-/* 禁用态 */
+/* 禁用态：整卡压暗，但不可选原因要保持可读，所以只压正文 */
 .selectable-card.disabled {
-  opacity: 0.4;
   cursor: not-allowed;
+}
+.selectable-card.disabled .card-body > :not(.card-blocked) {
+  opacity: 0.45;
+}
+.card-blocked {
+  margin-top: 0.25em;
+  font-size: 0.75em;
+  font-weight: 600;
+  color: var(--theme-warning);
 }
 
 /* ===== 卡片内容 ===== */

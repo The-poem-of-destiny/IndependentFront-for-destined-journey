@@ -57,6 +57,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │                                       —— 后两个刻意在**这里**而不是各自的设置分区：曲库与素材库要在
 │                                       游戏页与捏人页渲染，而那两处都不经过设置页（此前只在
 │                                       AssetSection.onMounted 里 init，症状是「导入过的头像不显示」）
+│                                       📌 2026-11-14：世界书 → 工坊 → 远程素材这条链搬进
+│                                       `lib/content-startup-chain.ts`（App.vue 只 `void` 调它）。
+│                                       `workshop.init()` 读库失败现在会 reject（不再自吞），链里
+│                                       **单独兜底**，否则一次工坊读失败会让素材同步整个不跑。
+│                                       App.vue 另挂 `shared/ConfirmDialogHost.vue`（与 ToastContainer 并列）；
+│                                       启动期两条 API 迁移错误 toast 用 `duration: 0` 常驻（G-06）
 ├── env.d.ts
 │
 ├── composables/
@@ -80,6 +86,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      content-store 的 `provincesRasterUrl(hash)` 挂
 │   │                                      `?v=` 回源 + 取图 fetch `no-cache` 验新兜底 ——
 │   │                                      只堵内存层时，换包重建仍会拿浏览器缓存的旧像素
+│   ├── useMarkerDraft.ts            ← 🆕 [2026-11-14 / MAP-01] 标记工作台「编辑」页的表单草稿：
+│   │                                   **只按选中标记 id 监听**来填（列表选中 / 地图点 overlay / 新增标记
+│   │                                   三条路一视同仁）；不深监听标记本身，否则自己保存时会冲掉输入中的字
 │   ├── useHoverPopup.ts             ← 悬停浮层唯一实现（读 settings.hoverDelayMs）
 │   ├── usePresets.ts                ← 正文 Agent 预设（ChatPreset）的共享响应式状态 + Dexie 持久化
 │   │                                   🔴 Dexie `presets` 表是**唯一真源**：此前预设同时写 Dexie 与
@@ -159,6 +168,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   不持 UI 通知与网络 I/O；消费方自主处置 missing-pool / stale-binding。
 │   │                                   🔴 Agent 设置里那个叫 `model` 的键实际存 **API 池 id**（历史命名，
 │   │                                      不改名），传 `boundPoolId` 进解析器即可
+│   │                                   📌 2026-11-14（S-08）：+`describeAgentBinding` → 四态
+│   │                                   （no-api / follow-default / bound / stale），设置页 Agent 角标
+│   │                                   **只从它推导**，别再按 id 是否非空画 ✓/✕；+`isLlmPoolEntry`
 │   ├── audio-singleton.ts           ← AudioManager 应用级单例（setBlobResolver 注入缝）
 │   ├── audio-folder.ts              ← [Audio] 本地音乐文件夹（File System Access 唯一接触点，仅 Chromium）
 │   ├── asset-zip.ts                 ← [素材] 一键 zip 读写（流式 + SHA-256 + 体积上限）
@@ -285,6 +297,23 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── session-import-messages.ts   ← [存档互传] 单存档导入体检结果 → 中文告警行（纯函数，除类型零依赖）。
 │   │                                   它是「到底会缺什么」这句话的**唯一措辞来源**（散进模板 = 两个入口
 │   │                                   各说各的）；🔴 告警**不是错误**，缺内容照样导得进，语气一律陈述不阻拦
+│   ├── confirm-dialog.ts            ← 🆕 [2026-11-14] 应用内确认（Promise 风格，`await confirmDialog({ title,
+│   │                                   message, items?, danger? })`；取消 / Esc / 遮罩 = false，多次调用排队）。
+│   │                                   宿主是 `shared/ConfirmDialogHost.vue`。🔴 **新的确认一律用它，别再写
+│   │                                   `window.confirm`**（嵌入式 webview 里原生框直接返回 false）；
+│   │                                   未挂宿主（单测）时才回退原生框
+│   ├── leave-game-guard.ts          ← 🆕 [2026-11-14 / GAME-08·G-03] `confirmLeaveGame(去处)`：有在跑的回合 /
+│   │                                   润色 / 在飞或排队的插画时先危险确认，否则直接放行。凡是会卸载
+│   │                                   GamePage 的入口（菜单设置/扩展/首页、插画「去设置」、RPM 弹窗）都先过它
+│   ├── turn-failure.ts              ← 🆕 [2026-11-14 / GAME-05] 回合失败归类（auth/quota/rate_limit/network/
+│   │                                   server/rejected/config/unknown）与措辞的**唯一出处**；原文先
+│   │                                   `redactSecrets` 脱敏再截断（上游错误体可能回显密钥）
+│   ├── turn-recovery.ts             ← 🆕 [2026-11-14 / GAME-09·10] 从**已持久化**消息推导「上一回合未完成」
+│   │                                   （玩家消息 `storyTurnStatus`，旧消息退回「最新输入后无正文」）与
+│   │                                   「已废弃的尝试」分组（failed 的 assistant 正文）。纯函数
+│   ├── content-startup-chain.ts     ← 🆕 [2026-11-14] 启动期内容链（见上方 App.vue 注），永不 reject
+│   ├── map-place-search.ts          ← 🆕 [2026-11-14 / MAP-03] 势力地图按名字找地方：地块 / 中层 / 势力名
+│   │                                   **精确子串**匹配（不做拼音/模糊，ADR-31 落位契约），每条带选中块与取景块
 │   └── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
 │
 ├── themes/                          ← 🔴 主题 CSS **住在这里，不在 lib/**：
@@ -302,6 +331,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │      create-store 的 startJourney 合并并发提交；isCreating 贯穿持久化与错误恢复。
 │   │      📌 2026-11-12（UIL-11）：各步缺失项聚合校验，最后一步与 persistJourney 同一道闸门，
 │   │         失败跳到首个未通过的步骤（步骤条仍可自由跳转，落库边界才是保证）
+│   │      📌 2026-11-14：ui-store 的 toast 缺省时长按类型取（error 8s / warning 5s / 其余 3s，
+│   │         `duration: 0` = 常驻到手动关闭），另有 `pauseToast` / `resumeToast`（悬停暂停）。
+│   │         create-store 把**整份向导草稿**存 localStorage（`createWizardDraft_v1`，带版本号，
+│   │         结构不兼容就升版本让旧键作废）；`overspentPoints` 进缺失项（「转生点数超支 N 点」，C-06）；
+│   │         选择步骤的选中统一走 `selectCatalogItem`（点数不足返回 false，C-05），
+│   │         预设加载 / 自定义物品走 add* 原语不受此闸，超支由建档边界拦
 │   ├── game-store.ts                ← 时间线恢复唯一 UI 编排边界：rollbackOneTurn /
 │   │                                   restoreToSnapshot / restartCombat 共用私有 restoreTimeline；
 │   │                                   三态结果区分恢复前拒绝、完整恢复、权威已恢复但投影失败。
@@ -374,6 +409,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   **maxTokens 65536**（2026-08-08 由 16384 上调，大纲 5×5 等重输出
 │   │                                   不再贴边）/ **maxRetries 3**（2026-08-16，AgentClient.chat|chatStream
 │   │                                   的循环上限，外部取消永不重试））
+│   │                                   📌 2026-11-14（S-00）：默认层里的 `model`（池 id）在本机 `apiPool`
+│   │                                   里查不到时，`getAgentSettings` 读成**未设置**（跟随默认）而不是
+│   │                                   失效绑定；袋子里没有 `apiPool` 数组时原样返回。覆写层不做此处理
+│   │                                   （用户自己绑的失效仍是 stale）。「存为项目默认」写 `model: ''`
+│   │                                   📌 2026-11-14（S-10）：+`resolveAgentLlmParamSources` —— 五个采样参数
+│   │                                   的实际值与来源（override / pool / default），与运行时同一份实现，
+│   │                                   AgentParamsCard 据此显示「实际生效值 + 来源」
 │   │                                   一次性 **指纹迁移**（D44 修正 3）：`@engine/agent-defaults-fingerprints.json`
 │   │                                   逐 agent 逐字段 SHA-256，覆写层里命中历史默认指纹的键**删掉**，
 │   │                                   用户真改过的（指纹不匹配）保留。指纹不泄内容，首启在
@@ -528,13 +570,19 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               常驻 App.vue，不属于 HomePage；首页与游戏菜单打开同一 store 状态
 │   │   │                               📌 2026-11-12（UIL-19）：游戏内打开时正在游玩的存档标「游玩中」，
 │   │   │                                  主操作为「继续游戏」（只关窗、不重走准入检查）
-│   │   ├── ToastContainer.vue
+│   │   ├── ToastContainer.vue       ← 📌 2026-11-14（G-08）：每条有 × 关闭、悬停暂停；错误/警告点击复制后原地显示「已复制」
+│   │   ├── ConfirmDialogHost.vue    ← 🆕 [2026-11-14] `lib/confirm-dialog.ts` 的唯一宿主（App.vue 挂一次）。
+│   │   │                               按请求 `v-if` + `:key` 挂 AppModal，打开时 Teleport 锚点排在已开弹窗之后，
+│   │   │                               所以从别的弹窗里发起也盖在上面；危险确认默认聚焦「取消」
 │   │   └── form/ (FormInput / FormSelect / FormStepper —— **只有这三个**；
 │   │             早期文档里的 Cascader / KeyValue 从未落地，别照着 import)
 │   ├── home/
 │   │   ├── HomePage.vue             ← 游戏标题画面；DOM 操作列与 WebGL 背景分层，背景未就绪时保留 CSS 兜底
 │   │   │                               📌 2026-11-14：在 `.btn-column` 上事件委托驱动背景联动
 │   │   │                               （悬停 / 聚焦主操作 1、其余 0.55、离开 0；点击触发脉冲，不延迟原有点击）
+│   │   │                               📌 2026-11-14（H-02）：「扩展管理」按钮**有条件显示** —— 只在工坊解锁或
+│   │   │                               已装社区扩展时出现（`workshop/workshop-lock.ts` 的 `hasExtensionWork`），
+│   │   │                               工坊 store 读完前不显示；设置页左栏与游戏菜单的入口照旧
 │   │   ├── AstralDriftBackdrop.vue  ← [星流首页] 懒加载 / WebGL2 与减动效降级 / 可见性暂停 / 销毁壳
 │   │   │                               📌 2026-11-14：`defineExpose({ setEnergy, pulse })` 转发给当前场景，无场景时空操作
 │   │   ├── drift/runtime.ts         ← [星流首页] Three.js 场景单文件运行时；工厂 + 主题切换 + 生命周期
@@ -553,12 +601,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   专项降级 / 生命周期 / 多宽高比验收仍在 TODO**
 │   │                                   📌 2026-11-14：原型已与生产分叉（生产带有设计文档 §8 的全部改动），
 │   │                                   不能再当作生产的等价参照
-│   ├── settings/                    ← [Q-25] 13 个分区**全部**是一行子组件（UIL-01 起 AboutSection 改由首页弹窗承载）
+│   ├── settings/                    ← [Q-25] 14 个分区**全部**是一行子组件（2026-11-14 实测 `navItems`：
+│   │                                   UIL-01 起 AboutSection 改由首页弹窗承载、移出侧栏；S-01 新增「内容包」排左栏第二）
 │   │   ├── SettingsPage.vue         ← 纯壳层（1995 → 约 415 行）：页头 + 主导航 + Agent 子导航
 │   │   │                               ≤720px 时主导航与 Agent 子导航改为顶部横向滚动条，内容恢复全宽；
 │   │   │                               固定 180px 侧栏会把 390px 视口的设置表单压成逐字换行
 │   │   │                               只留 activeSection / activeAgent / selectSection /
-│   │   │                               selectAgent / restoreAgent / agentModelOf 与
+│   │   │                               selectAgent / restoreAgent / badgeOf（原 agentModelOf）与
 │   │   │                               wb.init()（世界书分区也靠它）
 │   │   │                               🔴 进 Agent 分区**恢复** `s.activeAgent`，别置 null：
 │   │   │                                  此前主导航每个按钮都无条件清掉它（含「Agent 配置」
@@ -569,6 +618,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 主导航末尾那条「扩展管理」**不是分区**：它 navigate 去
 │   │   │                                  扩展管理页，故不进 `navItems`、也没有对应的 `activeSection`
 │   │   │                                  值。塞进那张表 = 多一个点了只出现空白右栏的选项
+│   │   │                               📌 2026-11-14：Agent 子导航角标改为 `describeAgentBinding` 四态（S-08）；
+│   │   │                               换 Agent / 换分区 / 页头返回 / 「扩展管理」前过 `agent/prompt-dirty-guard.ts`（S-15）
 │   │   ├── agent/                    ← [Q-25] Agent 分区（照 settings/audio/ 的样子）
 │   │   │   ├── AgentSection.vue      ← 分区壳：**单根** section.section.centered + 页头，
 │   │   │   │                            其余全交给 AgentConfigPanel
@@ -587,6 +638,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   │                              预设型再把选择键清回跟随默认，然后重载草稿 —— 不再有
 │   │   │   │                              「无项目默认就连 model 一起清」那一支。预设型不再有
 │   │   │   │                              「保存设置」（它只弹 toast）；非预设型的改名「保存提示词」
+│   │   │   │                            📌 2026-11-14（S-15）：两个草稿有「干净基线」，与之不同即在「保存提示词」
+│   │   │   │                              左边挂「未保存」，并经 `prompt-dirty-guard.ts` 交给壳层拦导航；
+│   │   │   │                              载入 / 保存 / 两种恢复默认之后都重置基线
 │   │   │   ├── AgentPresetBar.vue    ← 🆕 2026-11-14「预设」状态条：预设型 Agent 是分组下拉
 │   │   │   │                            （默认 / 内容包 / 引擎内置（仅直出）/ 我的预设，默认组只有一项
 │   │   │   │                            「默认 · 名称」且存空串）+ 来源角标 + 失效选择提示 + 复制为我的预设 /
@@ -594,6 +648,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   │                            要确认）/ 恢复默认；其余 Agent 是只读状态行「默认（内容包|占位内容）」
 │   │   │   │                            或「我的自定义（已改 N 处）」，恢复默认 emit `reset-prompt`，由宿主只清
 │   │   │   │                            systemPrompt 与上下文模板两项覆写
+│   │   │   │                            📌 2026-11-14（S-16）：删掉正在用的预设后选择键回到「跟随默认」，
+│   │   │   │                              toast 点名改用的默认预设；删除失败带原因报错
 │   │   │   ├── AgentParamsCard.vue   ← API 池 + LLM 旋钮 + 世界书卡（共用 agentCfg/setAgentField）。
 │   │   │   │                            旋钮里除数值五参外还有 **失败重试次数**（`maxRetries`，
 │   │   │   │                            2026-08-16）与 **历史层数 / 历史截断字数**
@@ -636,6 +692,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   │                              漂移闸门：tests/ui/components/settings/agent/agent-list.groups.test.ts
 │   │   │   ├── placeholder-catalog.ts← 23 项占位符 + 按 Agent 过滤（DAG 偏序 + 侧链归属）
 │   │   │   ├── agent-defaults.ts     ← buildAgentDefaultEntry（纯装配；patch 副作用留调用方）
+│   │   │   │                            📌 2026-11-14（S-00）：`model` 恒写 `''` —— 本机池 id 换台机器必然悬空
+│   │   │   ├── prompt-dirty-guard.ts ← 🆕 [2026-11-14 / S-15] 提示词草稿「未保存」的**模块级**标志 +
+│   │   │   │                            `confirmDiscardPromptEdits()`。纯内存，🔴 别放进 settings 袋子
+│   │   │   │                            （会被持久化，刷新后草稿已没了标志还亮着）
 │   │   │   └── agent-chrome.css      ← ★跨组件共用：.prompt-editor / .template-preview-panel
 │   │   │                                🔴 @keyframes 必须与用它的规则同组件 —— Vue 的 scoped
 │   │   │                                   编译器按组件 hash 重命名关键帧，分家动画就停了
@@ -655,6 +715,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── BeautifierSection.vue    ← ✨ 输出美化分区（Phase 10i 三段式：自动管理 / 已启用 /
 │   │   │                               可用规则库折叠）。预设规则从 `beautifier-rules.json` 来，
 │   │   │                               用户规则完全可控
+│   │   ├── beautifier-import.ts     ← 🆕 [2026-11-14 / S-33]「导入规则」文件解析校验（纯函数）；裸数组 = 整体替换，调用方先确认
+│   │   ├── ContentPackSection.vue   ← 🆕 [2026-11-14 / S-01] 「内容包」分区：导入 / 升级 / 检查更新 / 卸载 +
+│   │   │                               Discord 在线授权，逻辑整体从 DataSection 搬来、行为不变
+│   │   ├── pack-uninstall-flow.ts   ← 🆕 [2026-11-14 / S-36] 卸载内容包的确认流程（分区与内容态横幅共用）：
+│   │   │                               **永远先确认**；改过包内世界书时 content-store 回 `needs_confirmation` 再问一次
 │   │   ├── RuleEditorModal.vue      ← 美化规则编辑弹窗；★预览直接挂 game/BeautifiedNarrative.vue
 │   │   │                               —— 与正文**同一条渲染链**，不另写一个「像正文」的预览
 │   │   ├── TemplatePreview.vue      ← 上下文模板的分段高亮（text / placeholder），AgentPromptCard 消费
@@ -662,6 +727,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               展示 `planPackInstall` 的计划（逐节 added/updated/removed/
 │   │   │                               conflicted + 存档 uid 迁移说明 + 三类处置记录），确认后由
 │   │   │                               DataSection 以 `{ confirmConflicts: true }` 重入 `installPack`。
+│   │   │                               （📌 2026-11-14：宿主已改为 ContentPackSection）
 │   │   │                               纯展示：不碰 store，也不判该不该显示（宿主决定传什么 plan）
 │   │   ├── PlotSection.vue / ThemeSection.vue / MessagesSection.vue
 │   │   ├── MemorySection.vue        ← 显式 LLM/Embedding 召回模式、Embedding/Reranker 源绑定、
@@ -670,6 +736,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               [图像 v1] +本存档插画用量与清理。🔴 这一行**刻意不在图像分区**：
 │   │   │                               用量是**每存档**的数字，而图像分区是全局设置；且「清理」与
 │   │   │                               旁边那些清除动作是同一类事，放一起才找得到
+│   │   │                               📌 2026-11-14：内容包卡已搬去「内容包」分区，这里只留一行指路
 │   │   ├── DeveloperSection.vue     ← 开发者模式开关 + 诊断能力说明 + 导出隐私警告
 │   │   ├── AboutSection.vue         ← 关于内容面板（UIL-01 起由首页「关于」弹窗原位挂载，路径保留供许可署名闸门扫描）
 │   │   ├── AudioSection.vue         ← [Audio] 音频分区（壳层 + 5 子组件）
@@ -894,9 +961,23 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 `off` 档下这一项**不出现** —— 功能整个关掉了、右键里却还留着
 │   │   │                                  一个能开始花钱的入口，是「关掉了但没完全关掉」那类最招人烦的 bug
 │   │   │                               锚点是 anchorKind:'message-end'，不做选中文本锚定（原文一改就丢）
+│   │   │                               📌 2026-11-14（GAME-04/06/07/10/15/22）：右键**不再是唯一入口** ——
+│   │   │                               最新一回合的最后一条消息下有可见操作条（正文：重新生成 / 回退 /
+│   │   │                               润色 / 配图 / 复制；只有输入：回退到这条输入），右键保留为快捷方式；
+│   │   │                               回退与重新生成先 `confirmDialog`，开场回合不给并写明原因；消息不再挂原生 title。
+│   │   │                               润色前的原文存 `ChatMessage.preRewriteContent`（只留第一次的），
+│   │   │                               「还原润色前」换回并删字段；`game.isRewriting` 期间不能再润色、不能发送。
+│   │   │                               failed 的 assistant 正文折成「已废弃的尝试（N）」；内存回合记录没了时
+│   │   │                               按 `lib/turn-recovery.ts` 画「上一回合未完成」横幅（GAME-09）
+│   │   │                               MapPanel 的编辑表单改走 `useMarkerDraft`（MAP-01）；MapPoliticalTab 加地名搜索
+│   │   │                               （MAP-03），「设为当前位置」先确认「旧 → 新」（MAP-02）；
+│   │   │                               InputBar 回车忽略 `isComposing` / keyCode 229（GAME-11）
 │   │   ├── StatusHUD.vue / StatusOverview.vue / ItemsPanel.vue / CharacterListPanel.vue
 │   │   ├── CharacterViewerModal.vue ← 非玩家角色的**通栏档案**（左画像 + 右信息面 6 页签：
 │   │   │                               档案/状态/装备/技能/背包/相册）。入口是场景栏「在场」那一行
+│   │   │                               📌 2026-11-14（CHR-01）：不再是唯一入口 —— 角色列表弹窗
+│   │   │                               （CharacterListPanel）也能打开它，不在场的 NPC 也看得到编年史与相册；
+│   │   │                               该列表改为 listbox + roving tabindex，选中项按名字保持（CHR-02）
 │   │   │                               🔴 分工按**角色归属**不按内容：StatusOverview 是**玩家自己的**面，
 │   │   │                                  本弹窗是**别人的**面。字段重叠但变更理由不同，不共用组件
 │   │   │                               🔴 画像位只认 `立绘bg → 立绘`，**刻意不复用**共享的两条链 ——
@@ -949,6 +1030,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 SnapshotPanel 自**快照拆表 v22**（2026-08-17）起只读
 │   │   │                                  `SnapshotMeta.preview`（玩家台词 / 游戏时间），**不再拉整份
 │   │   │                                  快照体** —— 列表渲染碰 body 会把拆表白拆
+│   │   │                               📌 2026-11-14（SNP-01）：每行的玩家输入与正文首句由
+│   │   │                               `snapshot-turn-context.ts` 从**已载入的 messages** 里找（turn 对齐 +
+│   │   │                               `timestamp <= createdAt`），同样不读快照体；生成中「恢复到此」禁用
+│   │   ├── TurnRecoveryPanel.vue    ← 🆕 [2026-11-14 / GAME-05·09·16] 回合没完成时的说明 + 两条出路：
+│   │   │                               「再次尝试」（不回退）/「回退并重试」；宿主是 TurnActivityLedger 与
+│   │   │                               ChatFlow 的未完成横幅，失败措辞只取 `lib/turn-failure.ts`
+│   │   ├── snapshot-turn-context.ts ← 🆕 上面 SNP-01 那段的纯函数
 │   │   ├── PlotThreadsPanel.vue     ← 🆕 [主线细化 ADR-35 / 2026-09-09] 事件线面板（挂在 PlotPanel 内、
 │   │   │                               有节点才渲染）：按主线锚分组节点卡 + 轻量方向连线（`A → B` 按钮）。
 │   │   │                               🔴 防剧透三件套全在 `plot-thread-view.ts`：蒙版判定（reveal + peek，
@@ -959,6 +1047,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                  不建第二份持久 store；motive 仅剧透模式显式展开可见
 │   │   ├── plot-thread-view.ts      ← 上者的展示层判定（纯函数，不 mount 可测）：分组/蒙版/边遮蔽/
 │   │   │                               状态中文标签（引用引擎集中映射，UI 不内联第二份）
+│   │   │                               📌 2026-11-14（PLT-01）：+章节蒙版 `isChapterMasked` / `chapterPeekKey` /
+│   │   │                               `maskedChapterLabel`、`isOutlineEventMasked`，PlotPanel 与时间线共用。
+│   │   │                               🔴 总纲 `PlotOutline.summary` **刻意不打码**（types.ts 声明它是防剧透可见层）
 │   │   ├── BeautifiedNarrative.vue  ← [工坊正则] 正文渲染入口：`compileBeautifierSegments` 分段 +
 │   │   │                               `splitSceneImageSegments` 切插画锚点，再分派给
 │   │   │                               BeautifierFrame（美化段）与 SceneImageSegment（插画格）。
@@ -1049,6 +1140,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │       ├── ExtensionManagementPage.vue
 │       │                               ← 首页/设置/游戏侧栏统一入口；原版扩展暂为明确占位，
 │       │                                  社区扩展的按存档启用设置归本页
+│       │                                  📌 2026-11-14：`workshop.init()` 失败时显示错误态与重试（W-03）
+│       ├── workshop-lock.ts           ← 🆕 [2026-11-14] 工坊入口锁定常量 `WORKSHOP_LOCKED` 的**唯一出处** +
+│       │                                 `hasExtensionWork`（首页按钮显隐）。不是安全边界，解锁只改这一处
+│       ├── InstalledExtensionList.vue ← 🆕 [2026-11-14 / W-01·W-08] 扩展管理页上的**纯本地**已装列表：
+│       │                                 版本 / 条目与规则数 + 卸载（确认里列出勾选启用了它的存档，
+│       │                                 执行走 `workshop-store.uninstall`）；刻意不放查更新 / 更新
 │       ├── CommunityExtensionSettings.vue
 │       │                               ← 已安装社区扩展启用面（选择存档 + 项目粒度勾选）
 │       ├── WorkshopPage.vue         ← 创意工坊子页面（浏览/安装/更新/卸载/投稿，不放启用设置）
@@ -1081,11 +1178,15 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
                                            本表不重定义任何 `--theme-*`，故这个位置对另外九个主题零影响
 ```
 
-### 设置页 13 分区
+### 设置页 14 分区
+
+> 📌 2026-11-14：UIL-01 把「关于」移出侧栏（14 → 13），S-01 新增「内容包」排左栏第二（13 → 14）。
+> 左栏末尾的「扩展管理」是跳页链接，不算分区。
 
 | 分区           | 内容                                                                                                                                                                                                                                                      |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 🔌 API 配置    | LLM / Embedding / Reranker 分类源 CRUD、三种 LLM 协议、请求体覆盖/省略、连接测试、分页模型列表、跨连接 RPM                                                                                                                                                |
+| 📦 内容包      | 导入 / 升级 / 检查更新 / 卸载（卸载永远先确认）+ Discord 在线授权（`ContentPackSection.vue`，2026-11-14 从「数据与备份」搬出）                                                                                                                            |
 | 🤖 Agent 配置  | 11 个汉化 Agent、模型选择、世界书读取范围（只读，范围由条目 `extra.lore.audiences` 决定）、System Prompt 编辑；战斗为单一 `combat` DM 协议沙盒侧链                                                                                                        |
 | 📚 世界书      | **早已不是占位**：书列表 + 导入/新建/删除/恢复（`WorldBookSection.vue`，约 368 行）+ 条目编辑器（`WorldBookEditor.vue`，约 909 行：条目 CRUD / 关键词 / 插入位置与深度 / 触发策略 / EJS 正文）。数据在 Dexie（工坊 P0 起 `settings.worldBooks` 已不存在） |
 | 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                                                                                                                                                                                                 |
@@ -1096,7 +1197,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | 🎵 音频        | 混音台 + 播放列表 + 音轨库（音乐文件夹条/上传/搜索/场景配乐开关）                                                                                                                                                                                         |
 | 🖼 素材         | 导入条 + 素材库（按角色分组/扁平表/多选批删）+ 变体抽屉（设主图/裁剪/改名）                                                                                                                                                                               |
 | 🖼 图像生成     | 四张卡：提示词生成 / 独立出图连接 / 出图参数 / 视觉预设；NovelAI 连接存 Dexie `imageApiConnections`，ComfyUI 地址与 provider 参数留在 `UiSettings`，`image_prompt` 仍绑定通用 LLM 源                                                                      |
-| 💾 数据与备份  | 导出/导入/清除（排除音频库与素材库，各有独立导出口）                                                                                                                                                                                                      |
+| 💾 数据与备份  | 导出/导入/清除（排除音频库与素材库，各有独立导出口）；📌 2026-11-14 内容包卡已移出，只留指路                                                                                                                                                              |
 | 🛠 开发者模式   | 持久开关（默认关闭）；控制调试工具栏、原始 Agent 请求/响应、reasoning、工具 payload、诊断导出与 `Alt + Shift + D` 抽屉                                                                                                                                    |
 
 > 📌 **UIL-01**：「关于」（`AboutSection.vue`：制作人员、项目与技术信息、版权与第三方许可证署名）已移出设置页侧栏，改由首页「关于」按钮原位打开 `AppModal` 展示。

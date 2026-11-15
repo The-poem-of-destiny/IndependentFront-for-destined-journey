@@ -15,7 +15,9 @@ import workshopSource from '@ui/components/workshop/WorkshopPage.vue?raw';
 describe('SettingsPage 扩展管理入口', () => {
   it('导航栏底部有一个跳扩展管理的按钮', () => {
     expect(source).toContain(`class="nav-item nav-external"`);
-    expect(source).toContain(`@click="ui.navigate('extensions')"`);
+    // S-15：先过「未保存提示词」守卫再跳扩展管理
+    expect(source).toContain(`@click="goExtensions"`);
+    expect(source).toContain(`ui.navigate('extensions')`);
     expect(source).toContain('扩展管理');
   });
 
@@ -41,7 +43,9 @@ describe('SettingsPage 扩展管理入口', () => {
 
 describe('SettingsPage 返回入口', () => {
   it('按真实页面来路返回，不用仍保留的存档导航目标猜测来源', () => {
-    expect(source).toContain(`@click="ui.back('home')"`);
+    // S-15：返回前先过「未保存提示词」守卫，再按真实来路返回
+    expect(source).toContain(`@click="goBack"`);
+    expect(source).toContain(`ui.back('home')`);
     expect(source).not.toContain(`ui.activeSaveId ? 'game' : 'home'`);
   });
 });

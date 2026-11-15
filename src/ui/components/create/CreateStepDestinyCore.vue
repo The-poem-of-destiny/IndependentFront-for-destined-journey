@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import { useCreateStore } from '../../stores/create-store';
 import WorkshopEnableList from '../shared/WorkshopEnableList.vue';
 import AppButton from '../shared/AppButton.vue';
@@ -11,6 +11,76 @@ const expandedUid = ref<string | null>(null);
 
 function toggleExpand(uid: string) {
   expandedUid.value = expandedUid.value === uid ? null : uid;
+}
+
+// ── C-19：命定核心单选组的键盘可达性（radiogroup + roving tabindex） ──
+const groupEl = ref<HTMLElement | null>(null);
+
+const builtinKey = (uid: string) => `b:${uid}`;
+const workshopKey = (projectId: string) => `w:${projectId}`;
+
+/** 组内全部候选，顺序与渲染顺序一致（内置在前、工坊在后） */
+const radioKeys = computed(() => [
+  ...store.systemCoreEntries.map((e) => builtinKey(e.uid)),
+  ...store.workshopSystemOptions.map((o) => workshopKey(o.projectId)),
+]);
+
+/** 当前选中项的 key；没有选中时为 null */
+const checkedKey = computed<string | null>(() => {
+  if (store.selectedSystemCoreEntryUid !== null) {
+    return builtinKey(store.selectedSystemCoreEntryUid);
+  }
+  if (store.selectedWorkshopCoreProjectId !== null) {
+    return workshopKey(store.selectedWorkshopCoreProjectId);
+  }
+  return null;
+});
+
+/** roving tabindex：选中项（或无选中时的第一项）可 Tab 进入，其余为 -1 */
+function tabIndexFor(key: string): number {
+  const keys = radioKeys.value;
+  const anchor = checkedKey.value && keys.includes(checkedKey.value) ? checkedKey.value : keys[0];
+  return key === anchor ? 0 : -1;
+}
+
+function selectByKey(key: string) {
+  if (key.startsWith('b:')) store.selectSystemCoreEntry(key.slice(2));
+  else store.selectWorkshopCore(key.slice(2));
+}
+
+function focusKey(key: string) {
+  const rows = groupEl.value?.querySelectorAll<HTMLElement>('[role="radio"]') ?? [];
+  for (const row of Array.from(rows)) {
+    if (row.dataset.coreKey === key) {
+      row.focus();
+      return;
+    }
+  }
+}
+
+/** 回车/空格选中；方向键按 WAI-ARIA radio 模式在组内移动并选中（首尾循环） */
+function onRadioKeydown(event: KeyboardEvent, key: string) {
+  // 行内的展开按钮自己处理按键，不当作选择
+  if (event.target !== event.currentTarget) return;
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    selectByKey(key);
+    return;
+  }
+  const keys = radioKeys.value;
+  const index = keys.indexOf(key);
+  if (index < 0 || keys.length === 0) return;
+  let next: number | null = null;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = (index + 1) % keys.length;
+  else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+    next = (index - 1 + keys.length) % keys.length;
+  } else if (event.key === 'Home') next = 0;
+  else if (event.key === 'End') next = keys.length - 1;
+  if (next === null) return;
+  event.preventDefault();
+  const target = keys[next];
+  selectByKey(target);
+  void nextTick(() => focusKey(target));
 }
 
 /** 提取条目内容的纯文本摘要（去掉 HTML/EJS 标签） */
@@ -79,23 +149,24 @@ function summary(content: string, maxLen = 200): string {
       </div>
 
       <!-- 紧凑单选列表（始终显示所有条目） -->
-      <div class="core-list">
+      <!-- C-19：可聚焦的是 role="radio" 行本身，点击/回车/空格都挂在它上面；
+           整个名单是一个 radiogroup（内置与工坊核心共用一个单选槽），方向键在组内移动，
+           roving tabindex 保证 Tab 只停在一行上。 -->
+      <div ref="groupEl" class="core-list" role="radiogroup" aria-label="命定核心">
         <div
           v-for="entry in store.systemCoreEntries"
           :key="entry.uid"
           class="core-row"
           :class="{ selected: store.selectedSystemCoreEntryUid === entry.uid }"
           role="radio"
-          :aria-checked="store.selectedSystemCoreEntryUid === entry.uid"
-          tabindex="0"
+          :aria-checked="store.selectedSystemCoreEntryUid === entry.uid ? 'true' : 'false'"
+          :tabindex="tabIndexFor(builtinKey(entry.uid))"
+          :data-core-key="builtinKey(entry.uid)"
+          @click="store.selectSystemCoreEntry(entry.uid)"
+          @keydown="onRadioKeydown($event, builtinKey(entry.uid))"
         >
-          <!-- 行主体：点击即选中 -->
-          <div
-            class="core-row-body"
-            @click="store.selectSystemCoreEntry(entry.uid)"
-            @keydown.enter="store.selectSystemCoreEntry(entry.uid)"
-            @keydown.space.prevent="store.selectSystemCoreEntry(entry.uid)"
-          >
+          <!-- 行主体：点击即选中（事件挂在外层 radio 上） -->
+          <div class="core-row-body">
             <span
               class="core-radio"
               :class="{ checked: store.selectedSystemCoreEntryUid === entry.uid }"
@@ -140,15 +211,13 @@ function summary(content: string, maxLen = 200): string {
           class="core-row core-row-workshop"
           :class="{ selected: store.selectedWorkshopCoreProjectId === opt.projectId }"
           role="radio"
-          :aria-checked="store.selectedWorkshopCoreProjectId === opt.projectId"
-          tabindex="0"
+          :aria-checked="store.selectedWorkshopCoreProjectId === opt.projectId ? 'true' : 'false'"
+          :tabindex="tabIndexFor(workshopKey(opt.projectId))"
+          :data-core-key="workshopKey(opt.projectId)"
+          @click="store.selectWorkshopCore(opt.projectId)"
+          @keydown="onRadioKeydown($event, workshopKey(opt.projectId))"
         >
-          <div
-            class="core-row-body"
-            @click="store.selectWorkshopCore(opt.projectId)"
-            @keydown.enter="store.selectWorkshopCore(opt.projectId)"
-            @keydown.space.prevent="store.selectWorkshopCore(opt.projectId)"
-          >
+          <div class="core-row-body">
             <span
               class="core-radio"
               :class="{ checked: store.selectedWorkshopCoreProjectId === opt.projectId }"
@@ -372,8 +441,12 @@ function summary(content: string, maxLen = 200): string {
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-sm, 6px);
   background: var(--theme-card-bg);
-  cursor: default;
+  cursor: pointer;
   transition: border-color 0.2s ease;
+}
+.core-row:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
 }
 .core-row:hover {
   border-color: var(--theme-text-muted);

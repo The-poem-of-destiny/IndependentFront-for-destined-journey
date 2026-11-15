@@ -13,12 +13,17 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mount, type VueWrapper } from '@vue/test-utils';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import GameMenu from '../../../../src/ui/components/game/GameMenu.vue';
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   openSaveManager: vi.fn(),
+  confirmLeaveGame: vi.fn(async (_destination: string) => true),
+}));
+
+vi.mock('../../../../src/ui/lib/leave-game-guard', () => ({
+  confirmLeaveGame: mocks.confirmLeaveGame,
 }));
 
 vi.mock('../../../../src/ui/stores/ui-store', () => ({
@@ -27,6 +32,7 @@ vi.mock('../../../../src/ui/stores/ui-store', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.confirmLeaveGame.mockResolvedValue(true);
 });
 
 let wrapper: VueWrapper | null = null;
@@ -65,7 +71,8 @@ describe('GameMenu — 主菜单', () => {
   it('点「设置」→ navigate 设置页并关菜单', async () => {
     menu();
     item('settings')!.click();
-    await wrapper!.vm.$nextTick();
+    await flushPromises();
+    expect(mocks.confirmLeaveGame).toHaveBeenCalledWith('设置');
     expect(mocks.navigate).toHaveBeenCalledWith('settings');
     expect(wrapper!.emitted('close')).toHaveLength(1);
   });
@@ -82,7 +89,7 @@ describe('GameMenu — 主菜单', () => {
   it('点「返回首页」→ navigate home 并关菜单', async () => {
     menu();
     item('home')!.click();
-    await wrapper!.vm.$nextTick();
+    await flushPromises();
     expect(mocks.navigate).toHaveBeenCalledWith('home');
     expect(wrapper!.emitted('close')).toHaveLength(1);
   });
@@ -91,9 +98,32 @@ describe('GameMenu — 主菜单', () => {
     menu();
     expect(label('extensions')).toBe('扩展');
     item('extensions')!.click();
-    await wrapper!.vm.$nextTick();
+    await flushPromises();
     expect(mocks.navigate).toHaveBeenCalledWith('extensions');
     expect(wrapper!.emitted('close')).toHaveLength(1);
+  });
+});
+
+describe('GameMenu — 离开游戏页确认（GAME-08）', () => {
+  it.each([
+    ['settings', '设置'],
+    ['extensions', '扩展'],
+    ['home', '首页'],
+  ])('「%s」在离开确认被取消时不导航，但菜单照样关掉', async (id, destination) => {
+    mocks.confirmLeaveGame.mockResolvedValueOnce(false);
+    menu();
+    item(id)!.click();
+    await flushPromises();
+    expect(mocks.confirmLeaveGame).toHaveBeenCalledWith(destination);
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(wrapper!.emitted('close')).toHaveLength(1);
+  });
+
+  it('「存档管理」不离开游戏页，不需要确认', async () => {
+    menu();
+    item('saves')!.click();
+    await flushPromises();
+    expect(mocks.confirmLeaveGame).not.toHaveBeenCalled();
   });
 });
 

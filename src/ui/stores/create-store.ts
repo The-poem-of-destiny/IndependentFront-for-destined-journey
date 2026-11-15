@@ -15,7 +15,7 @@
  */
 
 import { defineStore } from 'pinia';
-import { requireGenerationMode } from '@engine/story/generation-mode';
+import { requireGenerationMode, type GenerationMode } from '@engine/story/generation-mode';
 import { ref, computed, watch, onScopeDispose } from 'vue';
 import {
   getActivePackPayload,
@@ -114,6 +114,124 @@ function getTier(level: number): number {
 
 const TIER_NAMES = ['普通', '中坚', '精英', '史诗', '传说', '神话', '神祗'];
 
+// ===== 向导草稿（C-12）=====
+
+/** 整份向导草稿的 localStorage 键（带版本；结构不兼容时升版本号，旧键自然作废） */
+export const WIZARD_DRAFT_KEY = 'createWizardDraft_v1';
+const WIZARD_DRAFT_VERSION = 1;
+/** 旧版「只存大纲」的草稿键 —— 不知道属于哪个角色，构造时直接丢弃 */
+const LEGACY_OUTLINE_DRAFT_KEY = 'plotOutlineDraft_v1';
+const DRAFT_SAVE_DEBOUNCE_MS = 400;
+
+/**
+ * 最近一个 store 实例的「取消待写」句柄。新实例构造时先调它 ——
+ * 防的是旧实例（测试里的上一个 pinia、HMR 前的旧模块）的去抖计时器晚到，
+ * 把别人的草稿写进本实例刚恢复/清空的草稿位。
+ */
+let pendingWizardDraftSave: (() => void) | null = null;
+
+interface WizardDraft {
+  version: number;
+  draftId: string;
+  savedAt: number;
+  currentStep: number;
+  generationMode: string;
+  difficultyId: string | null;
+  character: Record<string, unknown>;
+  equipments: unknown;
+  items: unknown;
+  skills: unknown;
+  background: unknown;
+  customBackgroundText: unknown;
+  destinyCoreId: unknown;
+  systemCoreEntryUid: unknown;
+  workshopCoreProjectId: unknown;
+  enabledWorkshopProjectIds: unknown;
+  enabledCharacterEntryUids: unknown;
+  enabledCharacterDefinitionIds: unknown;
+  plot: Record<string, unknown>;
+  outline: {
+    draftId: string;
+    outline: unknown;
+    chapters: unknown;
+    outlineHistory: unknown;
+    chaptersHistory: unknown;
+  } | null;
+}
+
+function newDraftId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+}
+
+function isWizardDraft(v: unknown): v is WizardDraft {
+  if (!v || typeof v !== 'object') return false;
+  const d = v as Record<string, unknown>;
+  return (
+    d.version === WIZARD_DRAFT_VERSION &&
+    typeof d.draftId === 'string' &&
+    d.draftId !== '' &&
+    !!d.character &&
+    typeof d.character === 'object'
+  );
+}
+
+function isGenerationMode(v: unknown): v is GenerationMode {
+  return v === 'agent' || v === 'direct' || v === 'direct_cached';
+}
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+function str(v: unknown, fallback: string): string {
+  return typeof v === 'string' ? v : fallback;
+}
+
+function int(v: unknown, fallback: number, min: number, max: number): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(v)));
+}
+
+function strArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+}
+
+/** 五维分配表：缺键补 0，值夹到 [0, max] */
+function attrRecord(v: unknown, max: number): Record<string, number> {
+  const src = asRecord(v);
+  const out: Record<string, number> = {};
+  for (const attr of ATTRIBUTE_NAMES) out[attr] = int(src[attr], 0, 0, max);
+  return out;
+}
+
+/** 草稿里的目录物品：结构不对的条目丢弃 */
+function catalogItems(v: unknown, category: CatalogItem['category']): CatalogItem[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((raw): raw is CatalogItem => {
+    const r = asRecord(raw);
+    return (
+      typeof r.id === 'string' &&
+      typeof r.name === 'string' &&
+      r.category === category &&
+      typeof r.cost === 'number' &&
+      Array.isArray(r.tag) &&
+      !!r.effect &&
+      typeof r.effect === 'object'
+    );
+  });
+}
+
+function backgroundTemplate(v: unknown): BackgroundTemplate | null {
+  const r = asRecord(v);
+  return typeof r.id === 'string' && typeof r.name === 'string' && typeof r.fullText === 'string'
+    ? (r as unknown as BackgroundTemplate)
+    : null;
+}
+
 // ===== Store =====
 
 export const useCreateStore = defineStore('create', () => {
@@ -156,12 +274,32 @@ export const useCreateStore = defineStore('create', () => {
     return startLocation.value === '自定义' && customStartLocation.value.trim() === '';
   }
 
-  /** 第一个仍有缺项的必填步骤；全部齐备时为 null */
-  const firstIncompleteStep = computed<number | null>(() => {
-    for (const step of [0, 1, 2]) {
-      if ((stepMissing.value[step] ?? []).length > 0) return step;
+  /** 转生点数超支额（未超支为 0）。创造模式 100 万点下自然恒为 0 */
+  const overspentPoints = computed(() => Math.max(0, totalCost.value - reincarnationPoints.value));
+
+  /**
+   * 建档前的**聚合**缺项清单（带所属步骤，供页脚跳转）—— 最后一步与 `persistJourney`
+   * 共用的唯一闸门（UIL-11）。
+   *
+   * 在各必填步骤缺项之外，C-06 追加「转生点数超支 N 点」：等级/金钱/命运点数/种族身份/
+   * 换难度/自定义物品都可能把余额推成负数。它**只进聚合闸门、不进单步 stepValid** ——
+   * 步进器仍允许暂时超支以便玩家来回调整，只是超着支建不了档。
+   * 归到「基础信息」步骤：那里的消耗明细列全了所有开销项，是最直接的调整处。
+   */
+  const missingItems = computed<Array<{ label: string; step: number }>>(() => {
+    const items = [0, 1, 2].flatMap((step) =>
+      (stepMissing.value[step] ?? []).map((label) => ({ label, step })),
+    );
+    if (overspentPoints.value > 0) {
+      items.push({ label: `转生点数超支 ${overspentPoints.value} 点`, step: 1 });
     }
-    return null;
+    return items;
+  });
+
+  /** 第一个仍有缺项的步骤（含超支归属的步骤）；全部齐备时为 null */
+  const firstIncompleteStep = computed<number | null>(() => {
+    const steps = missingItems.value.map((item) => item.step);
+    return steps.length > 0 ? Math.min(...steps) : null;
   });
 
   const stepValid = computed<Record<number, boolean>>(() => ({
@@ -260,6 +398,7 @@ export const useCreateStore = defineStore('create', () => {
       bloodlineSet.value = getBloodlineSet();
       era.value = getBranding().era;
       contentStatus.value = isCatalogPopulated(catalog.value) ? 'ready' : 'empty';
+      pruneRestoredBackground();
     })();
     return contentPromise;
   }
@@ -797,6 +936,7 @@ export const useCreateStore = defineStore('create', () => {
       equipmentGroups.value = eq;
       itemGroups.value = it;
       skillGroups.value = sk;
+      pruneRestoredCatalogSelections();
     })
     .catch((err: unknown) => {
       console.error('[create-store] 目录预热失败，保持空目录:', err);
@@ -855,16 +995,48 @@ export const useCreateStore = defineStore('create', () => {
     }
   }
 
+  /** 选中这一项实际要花的点数（道具按数量计，与 itemCost 同口径） */
+  function selectionCost(item: CatalogItem): number {
+    const unit = item.cost || 0;
+    return item.category === 'item' ? unit * (item.quantity || 1) : unit;
+  }
+
+  /**
+   * 物品不可选的原因（可见文案）；可选时返回 null。
+   *
+   * C-05：选择步骤的卡片、按钮与 {@link selectCatalogItem} 共用这一处判定 ——
+   * 此前 canSelect 只用于样式，「选择」按钮无条件添加，预算形同虚设。
+   */
+  function selectBlockReason(item: CatalogItem): string | null {
+    if (isSelected(item)) return null; // 已选中 = 可以保留
+    const shortfall = selectionCost(item) - remainingPoints.value;
+    if (shortfall > 0) return `点数不足，还差 ${shortfall} 点`;
+    // 种族限制 (为未来数据扩展预留)
+    const requiredRace = (item as any).requiredRace as string | undefined;
+    if (requiredRace && requiredRace !== race.value) return `需要种族「${requiredRace}」`;
+    // 身份限制 (为未来数据扩展预留)
+    const requiredIdentity = (item as any).requiredIdentity as string | undefined;
+    if (requiredIdentity && requiredIdentity !== identity.value) {
+      return `需要身份「${requiredIdentity}」`;
+    }
+    return null;
+  }
+
   /** 检查物品是否可以选中: 点数足够 + 未选中 + 种族/身份限制 */
   function canSelect(item: CatalogItem): boolean {
-    if (isSelected(item)) return true; // 已选中 = 可以保留
-    const cost = item.cost || 0;
-    if (remainingPoints.value < cost) return false;
-    // 种族限制 (为未来数据扩展预留)
-    if ((item as any).requiredRace && (item as any).requiredRace !== race.value) return false;
-    // 身份限制 (为未来数据扩展预留)
-    if ((item as any).requiredIdentity && (item as any).requiredIdentity !== identity.value)
-      return false;
+    return selectBlockReason(item) === null;
+  }
+
+  /**
+   * 从目录选中一项（选择步骤的唯一入口）。不可选（点数不足/限制不符/已选中）时不加，返回 false。
+   * 预设加载与自定义物品走 add* 原语，不受此闸约束 —— 它们造成的超支由 stepMissing 的
+   * 「转生点数超支」在建档边界拦下（C-06）。
+   */
+  function selectCatalogItem(item: CatalogItem): boolean {
+    if (isSelected(item) || !canSelect(item)) return false;
+    if (item.category === 'equipment') addEquipment(item);
+    else if (item.category === 'item') addItem(item);
+    else addSkill(item);
     return true;
   }
 
@@ -1101,12 +1273,6 @@ export const useCreateStore = defineStore('create', () => {
   });
 
   // ═══════════════════════════════════════════════════════
-  // localStorage 草稿 key — 必须定义在 initPlotDefaultsFromSettings
-  // （会调用 tryRestoreDraft）之前，避免 TDZ 报错
-  // ═══════════════════════════════════════════════════════
-  const DRAFT_KEY = 'plotOutlineDraft_v1';
-
-  // ═══════════════════════════════════════════════════════
   // 剧情设置默认值 — 从设置页（settings-store）读入新档默认值
   // ═══════════════════════════════════════════════════════
 
@@ -1140,8 +1306,6 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   initPlotDefaultsFromSettings();
-  // 尝试恢复之前保存的大纲草稿（仅浏览器环境，Node 测试环境跳过）
-  if (typeof localStorage !== 'undefined') tryRestoreDraft();
 
   // ═══════════════════════════════════════════════════════
   // 剧情大纲生成 — 捏人页走模板系统 (buildAgentMessagesAsync)
@@ -2062,9 +2226,10 @@ export const useCreateStore = defineStore('create', () => {
     // 最终持久化边界必须聚合重验全部必填项：步骤条可自由跳转、角色预设可以在任一步加载，
     // 不能只依赖「曾经通过过」前面的步骤。失败时跳回第一个缺项的步骤并说明缺什么。
     // 生成模式也在缺项清单里，所以先跑聚合校验，玩家看到的是完整清单而不是单条模式报错。
+    // C-06：转生点数超支也在这份聚合清单里，超支时同样拦下。
     const firstStep = firstIncompleteStep.value;
     if (firstStep !== null) {
-      const missing = [0, 1, 2].flatMap((step) => stepMissing.value[step] ?? []);
+      const missing = missingItems.value.map((item) => item.label);
       currentStep.value = firstStep;
       throw new Error(`${MISSING_FIELDS_PREFIX}${missing.join('、')}`);
     }
@@ -2154,58 +2319,332 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   // ═══════════════════════════════════════════════════════
-  // localStorage 草稿 — 大纲自动保存/恢复/清除
+  // localStorage 草稿 — 整份向导草稿自动保存/恢复/清除（C-12）
   // ═══════════════════════════════════════════════════════
+  //
+  // 🔴 此前只有剧情大纲落 localStorage（`plotOutlineDraft_v1`），角色本身只在内存里：
+  //    刷新后姓名/属性/选择全没了，那份大纲却被悄悄挂到之后新建的任何角色上。
+  //    现在整份草稿（全部玩家填写项 + 当前步骤 + 大纲）存在同一个带版本的键里，
+  //    大纲带着所属草稿的 id 同生同灭；旧键在构造时直接丢弃。
 
-  /** 自动保存草稿（大纲生成/修改/回退后调用） */
-  function autoSaveDraft() {
-    try {
-      localStorage.setItem(
-        DRAFT_KEY,
-        JSON.stringify({
+  /** 本草稿的身份。大纲随草稿一起落盘并带同一个 id，恢复时 id 对不上就丢弃大纲 */
+  const draftId = ref(newDraftId());
+
+  /** 草稿里是否有玩家真正填过的内容（预设覆盖确认与草稿落盘共用） */
+  const hasDraftContent = computed(
+    () =>
+      difficulty.value !== null ||
+      name.value.trim() !== '' ||
+      usedBP.value > 0 ||
+      selectedSystemCoreEntryUid.value !== null ||
+      selectedWorkshopCoreProjectId.value !== null ||
+      selectedEquipments.value.length > 0 ||
+      selectedItems.value.length > 0 ||
+      selectedSkills.value.length > 0 ||
+      selectedBackground.value !== null ||
+      customBackgroundText.value.trim() !== '' ||
+      plotOutline.value !== null,
+  );
+
+  /** 当前草稿的可序列化快照（savedAt 落盘时再补，便于 watch 判变） */
+  const draftSnapshot = computed<WizardDraft>(() => ({
+    version: WIZARD_DRAFT_VERSION,
+    draftId: draftId.value,
+    savedAt: 0,
+    currentStep: currentStep.value,
+    generationMode: generationMode.value,
+    difficultyId: difficulty.value?.id ?? null,
+    character: {
+      name: name.value,
+      gender: gender.value,
+      customGender: customGender.value,
+      age: age.value,
+      race: race.value,
+      customRace: customRace.value,
+      identity: identity.value,
+      customIdentity: customIdentity.value,
+      startLocation: startLocation.value,
+      customStartLocation: customStartLocation.value,
+      personality: personality.value,
+      physics: physics.value,
+      backstory: backstory.value,
+      extra: extra.value,
+      level: level.value,
+      experienceMode: experienceMode.value,
+      basePoints: { ...basePoints.value },
+      attributePoints: { ...attributePoints.value },
+      money: money.value,
+      destinyPoints: destinyPoints.value,
+    },
+    equipments: selectedEquipments.value,
+    items: selectedItems.value,
+    skills: selectedSkills.value,
+    background: selectedBackground.value,
+    customBackgroundText: customBackgroundText.value,
+    destinyCoreId: destinyCore.value?.id ?? null,
+    systemCoreEntryUid: selectedSystemCoreEntryUid.value,
+    workshopCoreProjectId: selectedWorkshopCoreProjectId.value,
+    enabledWorkshopProjectIds: [...enabledWorkshopProjectIds.value],
+    enabledCharacterEntryUids: [...enabledCharacterEntryUids.value],
+    enabledCharacterDefinitionIds: [...enabledCharacterDefinitionIds.value],
+    plot: {
+      mode: plotMode.value,
+      durationYears: plotDurationYears.value,
+      allowNonWorldbookNpc: plotAllowNonWorldbookNpc.value,
+      difficultyTier: plotDifficultyTier.value,
+      genrePreference: [...plotGenrePreference.value],
+      customPreference: plotCustomPreference.value,
+      focusRegion: plotFocusRegion.value,
+      tabooContent: plotTabooContent.value,
+      chapterCount: plotChapterCount.value,
+      eventsPerChapter: plotEventsPerChapter.value,
+    },
+    outline: plotOutline.value
+      ? {
+          draftId: draftId.value,
           outline: plotOutline.value,
           chapters: plotOutlineChapters.value,
           outlineHistory: outlineHistory.value.slice(-5),
           chaptersHistory: chaptersHistory.value.slice(-5),
-          savedAt: Date.now(),
-        }),
+        }
+      : null,
+  }));
+
+  /** 草稿落盘的去抖计时器 */
+  let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function cancelPendingDraftSave() {
+    if (draftSaveTimer !== null) {
+      clearTimeout(draftSaveTimer);
+      draftSaveTimer = null;
+    }
+    if (pendingWizardDraftSave === cancelPendingDraftSave) pendingWizardDraftSave = null;
+  }
+
+  /**
+   * 立即把整份草稿写进 localStorage（大纲生成/修改/回退后也会直接调用）。
+   * 没有任何玩家填写内容时删掉键 —— 不留一份空草稿。
+   */
+  function autoSaveDraft() {
+    cancelPendingDraftSave();
+    try {
+      if (!hasDraftContent.value && generationMode.value === '') {
+        localStorage.removeItem(WIZARD_DRAFT_KEY);
+        return;
+      }
+      localStorage.setItem(
+        WIZARD_DRAFT_KEY,
+        JSON.stringify({ ...draftSnapshot.value, savedAt: Date.now() }),
       );
     } catch {
-      /* localStorage full — silently skip */
+      /* localStorage 不可用或已满 —— 草稿只是便利，静默跳过 */
     }
   }
 
-  /** 尝试恢复草稿，成功返回 true */
+  /** 去抖落盘：连续输入只写最后一次 */
+  function scheduleDraftSave() {
+    cancelPendingDraftSave();
+    draftSaveTimer = setTimeout(() => {
+      draftSaveTimer = null;
+      autoSaveDraft();
+    }, DRAFT_SAVE_DEBOUNCE_MS);
+    pendingWizardDraftSave = cancelPendingDraftSave;
+  }
+
+  /** 只对「从草稿恢复」的目录选择/背景做存在性复核（目录是异步加载的） */
+  let restoredCatalogSelectionsPending = false;
+  let restoredBackgroundPending = false;
+
+  /**
+   * 从 localStorage 恢复整份草稿，成功返回 true。
+   *
+   * 防御：解析失败 / 版本或结构不对 → 删键、从干净状态开始；单个字段类型不对就用默认值；
+   * 已不存在的难度/背景/目录物品丢弃（核心与工坊项目由 pruneUnresolvedCoreSelection 在
+   * 名单加载后剔除）。
+   */
   function tryRestoreDraft(): boolean {
+    let raw: string | null;
     try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (!raw) return false;
-      const draft = JSON.parse(raw);
-      if (!draft.outline?.title || !draft.chapters?.length) {
-        localStorage.removeItem(DRAFT_KEY);
-        return false;
-      }
-      plotOutline.value = draft.outline;
-      plotOutlineChapters.value = draft.chapters;
-      outlineHistory.value = Array.isArray(draft.outlineHistory) ? draft.outlineHistory : [];
-      chaptersHistory.value = Array.isArray(draft.chaptersHistory) ? draft.chaptersHistory : [];
-      return true;
+      raw = localStorage.getItem(WIZARD_DRAFT_KEY);
     } catch {
-      localStorage.removeItem(DRAFT_KEY);
+      return false;
+    }
+    if (!raw) return false;
+    let draft: unknown;
+    try {
+      draft = JSON.parse(raw);
+    } catch {
+      dropStoredDraft();
+      return false;
+    }
+    if (!isWizardDraft(draft)) {
+      dropStoredDraft();
+      return false;
+    }
+    try {
+      applyWizardDraft(draft);
+      return true;
+    } catch (err) {
+      console.warn('[create-store] 草稿恢复失败，已丢弃:', err);
+      resetAll();
       return false;
     }
   }
 
-  /** 清除草稿（开局成功后调用） */
-  function clearDraft() {
+  function dropStoredDraft() {
     try {
-      localStorage.removeItem(DRAFT_KEY);
+      localStorage.removeItem(WIZARD_DRAFT_KEY);
     } catch {
       /* silent */
     }
   }
 
-  /** 清除当前大纲（回到未生成状态）+ 清草稿；不动角色捏人数据 */
+  function applyWizardDraft(d: WizardDraft) {
+    draftId.value = d.draftId;
+    generationMode.value = isGenerationMode(d.generationMode) ? d.generationMode : '';
+    difficulty.value = null;
+    reincarnationPoints.value = 1000;
+    if (typeof d.difficultyId === 'string') selectDifficulty(d.difficultyId);
+
+    const c = asRecord(d.character);
+    name.value = str(c.name, '');
+    gender.value = str(c.gender, '男');
+    customGender.value = str(c.customGender, '');
+    age.value = int(c.age, 18, 1, 999);
+    race.value = str(c.race, '人类');
+    customRace.value = str(c.customRace, '');
+    identity.value = str(c.identity, '非贵族平民');
+    customIdentity.value = str(c.customIdentity, '');
+    startLocation.value = str(c.startLocation, startLocation.value);
+    customStartLocation.value = str(c.customStartLocation, '');
+    personality.value = str(c.personality, '');
+    physics.value = str(c.physics, '');
+    backstory.value = str(c.backstory, '');
+    extra.value = str(c.extra, '');
+    // level 的 watch（flush: sync）会清零额外属性点，所以先设 level 再恢复属性点
+    level.value = int(c.level, 1, 1, 25);
+    experienceMode.value = c.experienceMode === 'easy' ? 'easy' : 'normal';
+    basePoints.value = attrRecord(c.basePoints, BP_PER_ATTR_MAX);
+    attributePoints.value = attrRecord(c.attributePoints, 99);
+    money.value = int(c.money, 0, 0, 99999);
+    destinyPoints.value = int(c.destinyPoints, 0, 0, 9999);
+    // 被手改过的坏数据：基础点超上限 → 清零重分；额外点超上限 → 清零重分
+    if (usedBP.value > MAX_BP) basePoints.value = attrRecord(null, 0);
+    if (usedAP.value > maxAP.value) attributePoints.value = attrRecord(null, 0);
+
+    selectedEquipments.value = catalogItems(d.equipments, 'equipment');
+    selectedItems.value = catalogItems(d.items, 'item');
+    selectedSkills.value = catalogItems(d.skills, 'skill');
+    restoredCatalogSelectionsPending = true;
+    pruneRestoredCatalogSelections();
+
+    selectedBackground.value = backgroundTemplate(d.background);
+    customBackgroundText.value = str(d.customBackgroundText, '');
+    restoredBackgroundPending = selectedBackground.value !== null;
+    pruneRestoredBackground();
+
+    destinyCore.value = null;
+    if (typeof d.destinyCoreId === 'string') selectDestinyCore(d.destinyCoreId);
+    selectedSystemCoreEntryUid.value =
+      typeof d.systemCoreEntryUid === 'string' ? d.systemCoreEntryUid : null;
+    selectedWorkshopCoreProjectId.value =
+      selectedSystemCoreEntryUid.value === null && typeof d.workshopCoreProjectId === 'string'
+        ? d.workshopCoreProjectId
+        : null;
+    pruneUnresolvedCoreSelection();
+    enabledWorkshopProjectIds.value = new Set(strArray(d.enabledWorkshopProjectIds));
+    enabledCharacterEntryUids.value = new Set(strArray(d.enabledCharacterEntryUids));
+    enabledCharacterDefinitionIds.value = new Set(strArray(d.enabledCharacterDefinitionIds));
+
+    const pl = asRecord(d.plot);
+    if (pl.mode === 'off' || pl.mode === 'side' || pl.mode === 'main') plotMode.value = pl.mode;
+    plotDurationYears.value = int(pl.durationYears, plotDurationYears.value, 1, 1000);
+    if (typeof pl.allowNonWorldbookNpc === 'boolean') {
+      plotAllowNonWorldbookNpc.value = pl.allowNonWorldbookNpc;
+    }
+    if (pl.difficultyTier === 'adaptive' || typeof pl.difficultyTier === 'number') {
+      plotDifficultyTier.value = pl.difficultyTier;
+    }
+    const genres = strArray(pl.genrePreference);
+    if (genres.length > 0) plotGenrePreference.value = genres as typeof plotGenrePreference.value;
+    plotCustomPreference.value = str(pl.customPreference, plotCustomPreference.value);
+    plotFocusRegion.value = str(pl.focusRegion, plotFocusRegion.value);
+    plotTabooContent.value = str(pl.tabooContent, plotTabooContent.value);
+    plotChapterCount.value = int(pl.chapterCount, 0, 0, 100);
+    plotEventsPerChapter.value = int(pl.eventsPerChapter, 0, 0, 100);
+
+    // 大纲只认属于本草稿的那份：id 不符 / 结构不对一律丢弃，绝不挂到别的角色上
+    const o = d.outline ? asRecord(d.outline) : null;
+    const outline = o ? asRecord(o.outline) : null;
+    if (
+      o &&
+      outline &&
+      o.draftId === d.draftId &&
+      typeof outline.title === 'string' &&
+      outline.title !== '' &&
+      Array.isArray(o.chapters) &&
+      o.chapters.length > 0
+    ) {
+      plotOutline.value = outline as unknown as PlotOutline;
+      plotOutlineChapters.value = o.chapters as ParsedOutlineOutput['chapters'];
+      outlineHistory.value = Array.isArray(o.outlineHistory)
+        ? (o.outlineHistory as PlotOutline[])
+        : [];
+      chaptersHistory.value = Array.isArray(o.chaptersHistory)
+        ? (o.chaptersHistory as ParsedOutlineOutput['chapters'][])
+        : [];
+    } else {
+      plotOutline.value = null;
+      plotOutlineChapters.value = [];
+      outlineHistory.value = [];
+      chaptersHistory.value = [];
+    }
+
+    currentStep.value = int(d.currentStep, 0, 0, 7);
+  }
+
+  /**
+   * 复核从草稿恢复的目录物品：目录到了以后，不在目录里的（非自定义）物品丢弃。
+   * 只针对草稿恢复 —— 预设加载走自己的语义，不在这里被动改写。
+   */
+  function pruneRestoredCatalogSelections() {
+    if (!restoredCatalogSelectionsPending) return;
+    const pools: Array<[Record<string, CatalogItem[]>, typeof selectedEquipments]> = [
+      [equipmentGroups.value, selectedEquipments],
+      [itemGroups.value, selectedItems],
+      [skillGroups.value, selectedSkills],
+    ];
+    // 三类目录都还没到（离线 / 加载中）时不判 —— 空目录不等于「物品已不存在」
+    if (pools.every(([groups]) => Object.keys(groups).length === 0)) return;
+    restoredCatalogSelectionsPending = false;
+    for (const [groups, selected] of pools) {
+      if (Object.keys(groups).length === 0) continue;
+      const known = new Set(
+        Object.values(groups)
+          .flat()
+          .map((i) => i.id),
+      );
+      const kept = selected.value.filter((i) => i.id.startsWith('custom_') || known.has(i.id));
+      if (kept.length !== selected.value.length) selected.value = kept;
+    }
+  }
+
+  /** 复核从草稿恢复的背景：目录已就绪且找不到同 id 的背景时丢弃 */
+  function pruneRestoredBackground() {
+    if (!restoredBackgroundPending || !isCatalogPopulated(catalog.value)) return;
+    restoredBackgroundPending = false;
+    const bg = selectedBackground.value;
+    if (!bg) return;
+    selectedBackground.value = catalog.value.backgrounds.find((b) => b.id === bg.id) ?? null;
+  }
+
+  /** 清除草稿（开局成功、重新开始时调用） */
+  function clearDraft() {
+    cancelPendingDraftSave();
+    dropStoredDraft();
+  }
+
+  /** 清除当前大纲（回到未生成状态）；不动角色捏人数据 */
   function clearOutline() {
     plotOutline.value = null;
     plotOutlineChapters.value = [];
@@ -2213,7 +2652,7 @@ export const useCreateStore = defineStore('create', () => {
     chaptersHistory.value = [];
     plotGenerationError.value = null;
     isPlotGenerating.value = false;
-    clearDraft();
+    // 只清大纲，角色草稿保留（落盘交给去抖 watch）
   }
 
   // ═══════════════════════════════════════════════════════
@@ -2338,16 +2777,16 @@ export const useCreateStore = defineStore('create', () => {
     }
 
     // 剧情大纲本体：新预设带此字段（可能为 null = 存的时候就没大纲）；旧预设两字段都缺 →
-    // 保持当前大纲不动（A 口径，避免「加载旧预设反而清掉刚生成的大纲」）。恢复后清历史并刷新草稿。
+    // 保持当前大纲不动（A 口径，避免「加载旧预设反而清掉刚生成的大纲」）。
+    // C-13：被替换的当前大纲压进历史（而不是清空历史），「回退上一版」仍能找回它。
     if (data.plotOutline !== undefined || data.plotOutlineChapters !== undefined) {
+      pushOutlineHistory();
       plotOutline.value = data.plotOutline
         ? (JSON.parse(JSON.stringify(data.plotOutline)) as PlotOutline)
         : null;
       plotOutlineChapters.value = data.plotOutlineChapters
         ? (JSON.parse(JSON.stringify(data.plotOutlineChapters)) as typeof plotOutlineChapters.value)
         : [];
-      outlineHistory.value = [];
-      chaptersHistory.value = [];
       autoSaveDraft();
     }
 
@@ -2359,6 +2798,10 @@ export const useCreateStore = defineStore('create', () => {
   // 重置 — 对齐原版 resetCharacter
   // ═══════════════════════════════════════════════════════
   function resetAll() {
+    clearDraft();
+    draftId.value = newDraftId();
+    restoredCatalogSelectionsPending = false;
+    restoredBackgroundPending = false;
     currentStep.value = 0;
     difficulty.value = null;
     reincarnationPoints.value = 1000;
@@ -2412,6 +2855,21 @@ export const useCreateStore = defineStore('create', () => {
     coreCatalogStatus.value = 'idle';
   }
 
+  // ── 草稿：构造时恢复（版本化整份草稿），之后去抖自动落盘 ──
+  // 旧版只存大纲的键一律丢弃：它不知道自己属于哪个角色，留着就会挂到下一个角色上
+  try {
+    if (typeof localStorage !== 'undefined') {
+      // 上一个 store 实例（测试 / HMR）留下的待写计时器不能写进本实例的草稿位
+      pendingWizardDraftSave?.();
+      localStorage.removeItem(LEGACY_OUTLINE_DRAFT_KEY);
+      tryRestoreDraft();
+    }
+  } catch {
+    /* localStorage 不可用 —— 只是没有草稿 */
+  }
+  watch(draftSnapshot, scheduleDraftSave);
+  onScopeDispose(cancelPendingDraftSave);
+
   return {
     generationMode,
     // 内容加载门（D16/D24）
@@ -2423,6 +2881,8 @@ export const useCreateStore = defineStore('create', () => {
     currentStep,
     stepValid,
     stepMissing,
+    missingItems,
+    overspentPoints,
     firstIncompleteStep,
     nextStep,
     prevStep,
@@ -2532,6 +2992,8 @@ export const useCreateStore = defineStore('create', () => {
     filteredPool,
     isSelected,
     canSelect,
+    selectBlockReason,
+    selectCatalogItem,
     addEquipment,
     removeEquipment,
     addItem,
@@ -2587,6 +3049,8 @@ export const useCreateStore = defineStore('create', () => {
     autoSaveDraft,
     tryRestoreDraft,
     clearDraft,
+    draftId,
+    hasDraftContent,
     clearOutline,
     // 预设
     showPresetModal,

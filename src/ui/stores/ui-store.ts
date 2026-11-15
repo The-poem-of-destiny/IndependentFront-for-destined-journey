@@ -10,12 +10,21 @@ export interface Toast {
   duration: number;
 }
 
+/** 各类提示缺省停留时长（毫秒）；0 = 常驻直到手动关闭 */
+const TOAST_DEFAULT_DURATION: Record<Toast['type'], number> = {
+  info: 3000,
+  success: 3000,
+  warning: 5000,
+  error: 8000,
+};
+
 /** 所有页面视图 */
 export type AppView = 'home' | 'create' | 'game' | 'settings' | 'extensions' | 'workshop';
 
 /** 设置页主分区；跨页面入口通过这一类型传递目标。 */
 export type SettingsSection =
   | 'api'
+  | 'content-pack'
   | 'agent'
   | 'worldbook'
   | 'plot'
@@ -157,15 +166,57 @@ export const useUIStore = defineStore('ui', () => {
     activeModal.value = null;
   }
 
-  function toast(message: string, type: Toast['type'] = 'info', duration = 3000) {
+  /**
+   * 自动消失计时器（不进响应式状态）。`remaining` 为剩余毫秒，`startedAt` 非空表示正在计时；
+   * 悬停暂停时清掉句柄、扣掉已走的时间，恢复时按剩余时间重新计时。
+   */
+  const toastTimers = new Map<
+    string,
+    { handle: ReturnType<typeof setTimeout> | null; remaining: number; startedAt: number | null }
+  >();
+
+  function startToastTimer(id: string) {
+    const timer = toastTimers.get(id);
+    if (!timer || timer.handle !== null) return;
+    timer.startedAt = Date.now();
+    timer.handle = setTimeout(() => removeToast(id), timer.remaining);
+  }
+
+  /**
+   * 弹出提示。`duration` 缺省时按类型取默认值：错误 8 秒、警告 5 秒、其余 3 秒
+   * （重要错误不能 3 秒就消失，见审查 G-06）；显式传 0 表示常驻，直到用户手动关闭。
+   */
+  function toast(message: string, type: Toast['type'] = 'info', duration?: number) {
     const id = crypto.randomUUID();
-    toasts.value.push({ id, message, type, duration });
-    if (duration > 0) {
-      setTimeout(() => removeToast(id), duration);
+    const resolved = duration ?? TOAST_DEFAULT_DURATION[type];
+    toasts.value.push({ id, message, type, duration: resolved });
+    if (resolved > 0) {
+      toastTimers.set(id, { handle: null, remaining: resolved, startedAt: null });
+      startToastTimer(id);
     }
   }
 
+  /** 暂停自动消失（鼠标悬停 / 键盘聚焦时调用）；常驻提示无计时器，调用无副作用 */
+  function pauseToast(id: string) {
+    const timer = toastTimers.get(id);
+    if (!timer || timer.handle === null) return;
+    clearTimeout(timer.handle);
+    timer.handle = null;
+    if (timer.startedAt !== null) {
+      timer.remaining = Math.max(0, timer.remaining - (Date.now() - timer.startedAt));
+    }
+    timer.startedAt = null;
+  }
+
+  /** 恢复自动消失，按暂停时的剩余时间继续计时 */
+  function resumeToast(id: string) {
+    startToastTimer(id);
+  }
+
   function removeToast(id: string) {
+    const timer = toastTimers.get(id);
+    if (timer?.handle != null) clearTimeout(timer.handle);
+    toastTimers.delete(id);
     toasts.value = toasts.value.filter((t) => t.id !== id);
   }
 
@@ -199,5 +250,7 @@ export const useUIStore = defineStore('ui', () => {
     closeModal,
     toast,
     removeToast,
+    pauseToast,
+    resumeToast,
   };
 });
