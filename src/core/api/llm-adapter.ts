@@ -24,6 +24,10 @@ type LlmToolChoice =
 export interface LlmBuildInput {
   cachePolicy?: import('../types/types-api').DirectCachePolicy;
   cacheKey?: string;
+  /** 缓存直出：消息数组开头属于静态前缀的条数，供 Claude 断点定位。 */
+  cacheStaticSystemCount?: number;
+  /** 缓存直出：消息数组前多少条会留存进会话，供留存末尾断点定位。 */
+  cacheRetainedMessageCount?: number;
   protocol: LlmProtocol;
   model: string;
   messages: LlmMessage[];

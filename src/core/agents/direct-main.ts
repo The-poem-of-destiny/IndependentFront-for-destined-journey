@@ -11,7 +11,7 @@ import {
   type DirectContextFrame,
   type DirectCacheTicket,
 } from '../prompts/direct-context-session';
-import type { DirectCachePolicy, NativeLlmContent } from '../types/types-api';
+import type { DirectCachePolicy } from '../types/types-api';
 import type {
   AgentConfig,
   AgentContext,
@@ -65,7 +65,12 @@ export interface DirectGenerationInput {
     onAssembled?: (diagnostics: import('../types/types').StoryContextV2Diagnostics) => void;
   };
   dice?: DirectDie[];
-  cache?: { saveId: string; policy: DirectCachePolicy };
+  cache?: {
+    saveId: string;
+    policy: DirectCachePolicy;
+    /** 重建时机（用户设置）；不进会话签名 */
+    rebuild?: { maxTurns?: number; growthLimit?: number };
+  };
 }
 
 export async function generateDirectTurn(
@@ -74,7 +79,7 @@ export async function generateDirectTurn(
 ): Promise<{
   draft: DirectTurnDraft;
   result: AgentResult;
-  cache?: { ticket: DirectCacheTicket; rawResponse: string; nativeAssistant?: NativeLlmContent };
+  cache?: { ticket: DirectCacheTicket };
 }> {
   const { config, endpoint, configs, context, presets } = input;
   const dice = input.dice ?? rollDirectDice();
@@ -235,7 +240,13 @@ export async function generateDirectTurn(
       }),
       frame,
       history: context.history,
-      turn: `<turn_context>\n${serializeDirectContext({ playerInput: context.userInput, recall: context.agentOutputs.get('memory_recall') ?? '', dice_pool: dice.map(({ sides, value }) => [sides, value]), tailPrompt: config.tailPrompt ?? '' })}\n</turn_context>`,
+      playerInput: context.userInput,
+      turnContext: {
+        recall: context.agentOutputs.get('memory_recall') ?? '',
+        dice_pool: dice.map(({ sides, value }) => [sides, value]),
+        tailPrompt: config.tailPrompt ?? '',
+      },
+      rebuild: input.cache.rebuild,
       outputBudget: budget,
       contextWindowTokens: endpoint.contextWindowTokens,
       signal: config.abortSignal,
@@ -244,6 +255,10 @@ export async function generateDirectTurn(
     request.messages = messages;
     request.cachePolicy = input.cache.policy;
     request.cacheKey = `direct-cache-v1:${input.cache.saveId}`;
+    // ticket.messages 恒以 frame.prefix 原样开头（此时已含协议消息），静态断点落在它的末尾
+    request.cacheStaticSystemCount = frame.prefix.length;
+    // 留存末尾断点：不留存的本轮尾部每轮都换，不在它上面写缓存
+    request.cacheRetainedMessageCount = ticket.retainedCount;
   }
   let rejectedOutput = false;
   try {
@@ -254,16 +269,12 @@ export async function generateDirectTurn(
       throw new Error(
         `直出上下文估算 ${estimatedInput} + 输出预留 ${budget} 超出模型窗口 ${endpoint.contextWindowTokens}，请缩短历史或调整输出预留`,
       );
-    const { result, nativeAssistant } = await sendDirectRequest(
-      client,
-      request,
-      config,
-      !!input.cache,
-    );
+    const result = await sendDirectRequest(client, request, config, !!input.cache);
     if (ticket) {
       result.promptSessionRevision = ticket.revision;
       result.promptRebased = !!ticket.rebaseReason;
       result.promptRebaseReason = ticket.rebaseReason;
+      result.directCacheDiagnostics = ticket.diagnostics;
     }
     result.agentId = 'direct_main';
     result.requestMessages = messages;
@@ -273,7 +284,7 @@ export async function generateDirectTurn(
     return {
       draft,
       result,
-      ...(ticket ? { cache: { ticket, rawResponse: result.rawResponse, nativeAssistant } } : {}),
+      ...(ticket ? { cache: { ticket } } : {}),
     };
   } catch (error) {
     if (ticket) {
@@ -292,18 +303,15 @@ async function sendDirectRequest(
   request: ChatRequest,
   config: AgentConfig,
   cached: boolean,
-): Promise<{ result: AgentResult; nativeAssistant?: NativeLlmContent }> {
-  let result: AgentResult;
-  let nativeAssistant: NativeLlmContent | undefined;
+): Promise<AgentResult> {
   if (config.streamCallbacks) {
-    result = await new Promise<AgentResult>((resolve, reject) => {
+    return new Promise<AgentResult>((resolve, reject) => {
       void client
         .chatStream(
           request,
           {
             onChunk: config.streamCallbacks!.onChunk,
             onComplete: (stream) => {
-              nativeAssistant = stream.nativeAssistant;
               resolve({
                 agentId: 'direct_main',
                 output: stream.fullText,
@@ -335,8 +343,6 @@ async function sendDirectRequest(
         )
         .catch(reject);
     });
-  } else result = await client.chat(request, config.abortSignal);
-  nativeAssistant ??= (result as AgentResult & { _nativeAssistant?: NativeLlmContent })
-    ._nativeAssistant;
-  return { result, nativeAssistant };
+  }
+  return client.chat(request, config.abortSignal);
 }

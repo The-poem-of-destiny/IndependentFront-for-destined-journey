@@ -1,5 +1,5 @@
-import type { ChatMessage } from '../types/types';
-import type { LlmMessage, NativeLlmContent } from '../types/types-api';
+import type { ChatMessage, DirectCacheDiagnostics } from '../types/types';
+import type { LlmMessage } from '../types/types-api';
 
 export interface DirectContextFrame {
   prefix: LlmMessage[];
@@ -27,9 +27,13 @@ export interface DirectCacheStore {
 
 export interface DirectCacheTicket {
   saveId: string;
+  /** 本次实际发出的整份请求：已留存的会话 + 本轮留存消息 + 不留存的本轮尾部 */
   messages: LlmMessage[];
+  /** `messages` 前多少条会留存进会话（其后是不留存的尾部），供断点定位 */
+  retainedCount: number;
   revision: number;
   rebaseReason?: string;
+  diagnostics: DirectCacheDiagnostics;
 }
 
 const sessions = new Map<string, DirectCacheRecord>();
@@ -40,6 +44,47 @@ const generations = new Map<string, object>();
  * 一直复用同一前缀会反复失败；连续达到上限后下一次冷建，与旧行为一样自愈。
  */
 const MAX_CONSECUTIVE_DISCARDS = 2;
+/** 重建时机的默认值：一段会话最多接纳几楼、请求长度相对重建基线的倍数上限。 */
+export const DIRECT_CACHE_REBUILD_DEFAULTS = { maxTurns: 8, growthLimit: 1.4 } as const;
+/** 重建时机的可调范围；设置页滑块与引擎校验共用这一份。 */
+export const DIRECT_CACHE_REBUILD_RANGE = {
+  maxTurns: { min: 2, max: 24, step: 1 },
+  growthLimit: { min: 1.2, max: 3, step: 0.1 },
+} as const;
+
+/** 把用户设置收敛成合法的重建时机：缺席或非数字用默认值，越界夹到范围内，楼数取整。 */
+export function normalizeDirectCacheRebuild(input?: {
+  maxTurns?: unknown;
+  growthLimit?: unknown;
+}): { maxTurns: number; growthLimit: number } {
+  const pick = (value: unknown, fallback: number, range: { min: number; max: number }) =>
+    typeof value === 'number' && Number.isFinite(value)
+      ? Math.min(range.max, Math.max(range.min, value))
+      : fallback;
+  return {
+    maxTurns: Math.round(
+      pick(
+        input?.maxTurns,
+        DIRECT_CACHE_REBUILD_DEFAULTS.maxTurns,
+        DIRECT_CACHE_REBUILD_RANGE.maxTurns,
+      ),
+    ),
+    // 滑块步长 0.1，四舍五入掉浮点尾数
+    growthLimit:
+      Math.round(
+        pick(
+          input?.growthLimit,
+          DIRECT_CACHE_REBUILD_DEFAULTS.growthLimit,
+          DIRECT_CACHE_REBUILD_RANGE.growthLimit,
+        ) * 100,
+      ) / 100,
+  };
+}
+
+/** 诊断里逐条列出的分区上限，其余合并成一项。 */
+const MAX_DIAGNOSTIC_SECTIONS = 30;
+/** 尾部重申现值的分区：每轮都可能变，且以 app 状态为准。 */
+const CURRENT_SECTIONS = ['combat', 'resources'] as const;
 const discards = new Map<string, number>();
 let store: DirectCacheStore | undefined;
 
@@ -78,13 +123,45 @@ function size(messages: LlmMessage[]): number {
   );
 }
 
-export const DIRECT_CACHE_PROTOCOL = `上下文采用直出缓存会话。direct_context 是本轮权威输入：set 中的每个顶层字段整块替换旧值，remove 明确删除旧字段；禁止把替换解释成数值增减或追加物品。未变化的字段沿用最近值。character/角色名/profile、skills、inventory、statusEffects 分别是该角色的档案、技能、库存和状态效果；资源单列在 resources，按 name 对应角色。空数组表示已清空，remove 后该分区不再有效。若出现 memory/记忆编号 分区，每个分区是一条长期记忆，所有仍有效的 memory/ 分区合起来就是完整记忆库：新记忆只出现在当轮 set，未再出现的旧记忆依然有效，被 remove 的记忆已删除。currentLore、regionLore、turnLore 及 authoredTurn 只以最新分区为准，被替换或移除的旧条目不再是本轮激活规则。旧 assistant 中的状态声明只属于历史，不再执行或重复领奖。turn_context.dice_pool 的每项为 [骰面数,骰值]，数组下标就是 diceUsed.index。每轮只使用最新 turn_context 的玩家输入、骰池与召回，不使用旧轮骰池。战斗与资源以本轮 app 状态为准。`;
+export const DIRECT_CACHE_PROTOCOL = `上下文采用直出缓存会话。direct_context 是本轮权威输入：set 中的每个顶层字段整块替换旧值，remove 明确删除旧字段；禁止把替换解释成数值增减或追加物品。未变化的字段沿用最近值。character/角色名/profile、skills、inventory、statusEffects 分别是该角色的档案、技能、库存和状态效果，character/角色名/state 是该角色当前的位置、是否在场、当前行动、金钱、经验与心里话；资源单列在 resources，按 name 对应角色。空数组表示已清空，remove 后该分区不再有效。若出现 memory/记忆编号 分区，每个分区是一条长期记忆，所有仍有效的 memory/ 分区合起来就是完整记忆库：新记忆只出现在当轮 set，未再出现的旧记忆依然有效，被 remove 的记忆已删除。currentLore、regionLore、turnLore 及 authoredTurn 只以最新分区为准，被替换或移除的旧条目不再是本轮激活规则。历史中的 assistant 只保留正文，不含当时的状态声明；状态一律以 direct_context 与本轮 turn_context 为准。历史里只有正文不代表可以只输出正文，每轮仍须按输出协议输出完整结构。玩家输入在每轮 direct_context 之后的 player_input 中。turn_context 只随当前这一轮出现，历史里不保留旧轮的召回与骰池；只使用本轮 turn_context 的召回与骰池。turn_context.dice_pool 的每项为 [骰面数,骰值]，数组下标就是 diceUsed.index。turn_context.current 中的战斗与资源现值是本轮 app 状态，优先于历史中的旧值。`;
+
+function diagnoseSections(
+  set: Record<string, unknown>,
+  remove: string[],
+): Pick<DirectCacheDiagnostics, 'sections' | 'otherSections'> {
+  const all = [
+    ...Object.entries(set).map(([key, value]) => ({
+      key,
+      action: 'set' as const,
+      chars: serializeDirectContext(value).length,
+    })),
+    ...remove.map((key) => ({ key, action: 'remove' as const, chars: 0 })),
+  ].sort((a, b) => b.chars - a.chars || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const rest = all.slice(MAX_DIAGNOSTIC_SECTIONS);
+  return {
+    sections: all.slice(0, MAX_DIAGNOSTIC_SECTIONS),
+    ...(rest.length
+      ? { otherSections: { count: rest.length, chars: rest.reduce((n, s) => n + s.chars, 0) } }
+      : {}),
+  };
+}
 
 export async function prepareDirectContext(input: {
   saveId: string;
   signature: string;
   frame: DirectContextFrame;
-  turn: string;
+  /** 本轮玩家输入：随留存消息进入会话历史 */
+  playerInput: string;
+  /**
+   * 本轮资料（召回、骰池、尾部指令等）：只随本次请求的尾部发出，不留存进会话。
+   * 战斗与资源现值由本模块从分区补进 `current`，调用方不必重复。
+   */
+  turnContext: Record<string, unknown>;
+  /**
+   * 重建时机（用户设置）：先经 `normalizeDirectCacheRebuild` 收敛。
+   * 刻意不进会话签名：调阈值只影响之后的判定，不让当前会话立即重建。
+   */
+  rebuild?: { maxTurns?: number; growthLimit?: number };
   history: ChatMessage[];
   contextWindowTokens?: number;
   outputBudget: number;
@@ -105,6 +182,7 @@ export async function prepareDirectContext(input: {
   if (input.signal?.aborted || generations.get(input.saveId) !== generation)
     throw new DOMException('Context preparation cancelled', 'AbortError');
   const currentSource = source(input.history);
+  const rebuild = normalizeDirectCacheRebuild(input.rebuild);
   const signature = serializeDirectContext([input.signature, input.frame.prefix]);
   const sections = JSON.parse(serializeDirectContext(input.frame.sections)) as Record<
     string,
@@ -112,9 +190,21 @@ export async function prepareDirectContext(input: {
   >;
   const pack = (set: Record<string, unknown>, remove: string[]) => ({
     role: 'user' as const,
-    content: `<direct_context>\n${serializeDirectContext({ set, remove })}\n</direct_context>\n${input.turn}`,
+    content: `<direct_context>\n${serializeDirectContext({ set, remove })}\n</direct_context>\n<player_input>\n${input.playerInput}\n</player_input>`,
   });
-  const fresh = [...input.frame.prefix, ...input.frame.history, pack(sections, [])];
+  // 不留存的尾部：本轮资料 + 战斗与资源现值。现值每轮重申在这里，不再塞进留存消息的 set。
+  const tail = {
+    role: 'user' as const,
+    content: `<turn_context>\n${serializeDirectContext({
+      ...input.turnContext,
+      current: Object.fromEntries(
+        CURRENT_SECTIONS.filter((key) => key in sections).map((key) => [key, sections[key]]),
+      ),
+    })}\n</turn_context>`,
+  };
+  const fresh = [...input.frame.prefix, ...input.frame.history, pack(sections, []), tail];
+  let set = sections;
+  let remove: string[] = [];
   let reason = !previous
     ? 'missing_session'
     : previous.protocol !== 'direct-cache-v1'
@@ -129,7 +219,7 @@ export async function prepareDirectContext(input: {
                   (m, i) => serializeDirectContext(m) !== serializeDirectContext(currentSource[i]),
                 )
               ? 'history_changed'
-              : previous.revision >= 8
+              : previous.revision >= rebuild.maxTurns
                 ? 'turn_limit'
                 : undefined;
   let messages = fresh;
@@ -140,22 +230,20 @@ export async function prepareDirectContext(input: {
           serializeDirectContext(value) !== serializeDirectContext(previous!.sections[key]),
       ),
     );
-    // Always reaffirm combat and current resources, even if the model's last reply claimed otherwise.
-    for (const key of ['combat', 'resources']) if (key in sections) changed[key] = sections[key];
-    messages = [
-      ...previous.transcript,
-      pack(
-        changed,
-        Object.keys(previous.sections).filter((k) => !(k in sections)),
-      ),
-    ];
-    if (size(messages) > size(fresh) * 1.4) reason = 'transcript_growth';
+    const removed = Object.keys(previous.sections).filter((k) => !(k in sections));
+    // 增长与窗口预算都按实际会发出的整份请求（含尾部）计，与冷建请求同一口径
+    messages = [...previous.transcript, pack(changed, removed), tail];
+    if (size(messages) > size(fresh) * rebuild.growthLimit) reason = 'transcript_growth';
     else if (
       input.contextWindowTokens &&
       Math.ceil(size(messages) / 1.5) + input.outputBudget > input.contextWindowTokens
     )
       reason = 'context_budget';
     if (reason) messages = fresh;
+    else {
+      set = changed;
+      remove = removed;
+    }
   }
   if (
     input.contextWindowTokens &&
@@ -163,11 +251,21 @@ export async function prepareDirectContext(input: {
   )
     throw new Error('直出缓存基线上下文仍超出模型窗口，请缩短历史或调整输出预留');
   const revision = reason ? 1 : previous!.revision + 1;
+  const retainedCount = messages.length - 1;
   const ticket: DirectCacheTicket = {
     saveId: input.saveId,
     messages,
+    retainedCount,
     revision,
     rebaseReason: reason,
+    diagnostics: {
+      rebased: !!reason,
+      requestChars: size(messages),
+      baselineChars: size(fresh),
+      growthLimit: rebuild.growthLimit,
+      tailChars: tail.content.length,
+      ...diagnoseSections(set, remove),
+    },
   };
   pending.set(ticket, {
     key: directCacheKey(input.saveId),
@@ -175,7 +273,8 @@ export async function prepareDirectContext(input: {
     agentId: 'direct_cached',
     protocol: 'direct-cache-v1',
     signature,
-    transcript: structuredClone(messages),
+    // 尾部不留存：召回、骰池与现值每轮都换，留在历史里只会推高累计长度
+    transcript: structuredClone(messages.slice(0, retainedCount)),
     sections,
     source: currentSource,
     revision,
@@ -186,19 +285,18 @@ export async function prepareDirectContext(input: {
 /** Called only after the originating state/message transaction has been accepted. */
 export async function acceptDirectContext(
   ticket: DirectCacheTicket,
-  result: {
-    rawResponse: string;
-    nativeAssistant?: NativeLlmContent;
-    acceptedMessages: ChatMessage[];
-  },
+  result: { acceptedMessages: ChatMessage[] },
 ): Promise<void> {
   const record = pending.get(ticket);
   if (!record) return;
   pending.delete(ticket);
+  // 历史里只留玩家看到的正文；状态声明不进历史，现状一律由 direct_context 与本轮尾部给出
   record.transcript.push({
     role: 'assistant',
-    content: result.rawResponse,
-    native: result.nativeAssistant,
+    content: result.acceptedMessages
+      .filter((m) => m.role === 'assistant')
+      .map((m) => m.content)
+      .join('\n\n'),
   });
   const ids = new Set(record.source.map((m) => m.id));
   record.source.push(...source(result.acceptedMessages).filter((m) => !ids.has(m.id)));

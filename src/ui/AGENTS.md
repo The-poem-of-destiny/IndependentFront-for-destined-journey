@@ -651,6 +651,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   │                            📌 2026-11-14（S-16）：删掉正在用的预设后选择键回到「跟随默认」，
 │   │   │   │                              toast 点名改用的默认预设；删除失败带原因报错
 │   │   │   ├── AgentParamsCard.vue   ← API 池 + LLM 旋钮 + 世界书卡（共用 agentCfg/setAgentField）。
+│   │   │   │                            📌 2026-11-14：原「LLM 参数」拆成三张卡 ——「采样参数」「上下文」「缓存会话」
+│   │   │   │                              （后者仅 `direct_cached`：渠道缓存支持 + 两个重建时机滑块）。来源角标与
+│   │   │   │                              参数名同行、说明在输入框下方，用 subgrid 对齐同一行的输入框。
+│   │   │   │                              🔴 滑块的范围 / 步长 / 默认值只取引擎 `prompts/direct-context-session.ts` 的
+│   │   │   │                              `DIRECT_CACHE_REBUILD_RANGE` / `_DEFAULTS`，组件里不写数字；
+│   │   │   │                              回到默认 = **删键**（`directCacheRebuildTurns` / `directCacheGrowthLimit`），不写入默认值
 │   │   │   │                            旋钮里除数值五参外还有 **失败重试次数**（`maxRetries`，
 │   │   │   │                            2026-08-16）与 **历史层数 / 历史截断字数**
 │   │   │   │                            （`historyLayers` / `historySlice`）
@@ -1077,6 +1083,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 本区块回答的是「调度器会不会考虑它」，**不做过期/权重 0 的
 │   │   │                                  撤池判定**（`isPendingStillValid` 那一套）；`inPool` 只原样
 │   │   │                                  报告池里有没有这个名字，不替它判活
+│   │   ├── direct-cache-debug.ts    ← 🆕 [2026-11-14] DebugPanel「缓存直出记账」的展示层判定（纯函数）：
+│   │   │                               把引擎的 `DirectCacheDiagnostics` 变成累计倍数、距重建余量与分区行。
+│   │   │                               字符数与折算的 token 都是引擎估算，界面必须写明不是渠道用量
 │   │   ├── plot-thread-debug.ts     ← 🆕 [主线细化 ADR-35] DebugPanel 事件线区块的展示层判定（纯函数）：
 │   │   │                               节点状态计数/未揭示数/收口游标 + **下一轮闸门预览**（直接调生产
 │   │   │                               `evaluatePlotThreadGate`，不复制判据；纯函数无副作用，查看面板

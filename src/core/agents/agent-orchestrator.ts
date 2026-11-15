@@ -1,5 +1,9 @@
 import type { ChatMessage } from '../types/types';
-import { acceptDirectContext, discardDirectContext } from '../prompts/direct-context-session';
+import {
+  acceptDirectContext,
+  discardDirectContext,
+  type DirectCacheTicket,
+} from '../prompts/direct-context-session';
 import type { DirectCachePolicy } from '../types/types-api';
 /**
  * Agent 编排引擎 — DAG 依赖调度 + 并行/串行混合执行
@@ -380,25 +384,28 @@ export class AgentOrchestrator {
   // ========== Run ==========
 
   /** Direct generation shares memory implementations, never enters the Agent DAG. */
-  private directCache?: Awaited<ReturnType<typeof generateDirectTurn>>['cache'];
+  private directCache?: DirectCacheTicket;
 
+  /** 本回合已接纳：会话历史只追加本回合正文（取自 acceptedMessages）。 */
   async acceptDirectCache(acceptedMessages: ChatMessage[]): Promise<void> {
     if (!this.directCache) return;
-    const { ticket, ...result } = this.directCache;
+    const ticket = this.directCache;
     this.directCache = undefined;
-    await acceptDirectContext(ticket, { ...result, acceptedMessages });
+    await acceptDirectContext(ticket, { acceptedMessages });
   }
 
   /** 本次尝试未接纳（提交前失败或取消）：只丢弃它，保留上一份已接纳的缓存会话。 */
   discardDirectCache(): void {
     if (!this.directCache) return;
-    discardDirectContext(this.directCache.ticket);
+    discardDirectContext(this.directCache);
     this.directCache = undefined;
   }
 
   async runDirect(
     combat: DirectCombatRecord | null,
     cachePolicy?: DirectCachePolicy,
+    /** 缓存直出的重建时机（用户设置）；只在给了 cachePolicy 时生效 */
+    cacheRebuild?: { maxTurns?: number; growthLimit?: number },
   ): Promise<DirectTurnDraft> {
     this.assertCurrent();
     this.context.zones ??= buildZoneContext(this.context);
@@ -428,7 +435,9 @@ export class AgentOrchestrator {
           worldBooks: this.worldBooks,
           presets: this.presets,
           combat,
-          cache: cachePolicy ? { saveId: this.saveId, policy: cachePolicy } : undefined,
+          cache: cachePolicy
+            ? { saveId: this.saveId, policy: cachePolicy, rebuild: cacheRebuild }
+            : undefined,
           storyContext: this.storyContext,
         },
         new AgentClient({
@@ -439,7 +448,7 @@ export class AgentOrchestrator {
           maxRetries: 0,
         }),
       );
-      this.directCache = cache;
+      this.directCache = cache?.ticket;
       this.assertCurrent();
       this.results.set('direct_main', result);
       this.context.agentOutputs.set('story', draft.content);

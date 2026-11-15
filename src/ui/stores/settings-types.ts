@@ -141,6 +141,10 @@ export type UiSettings = {
   directCachedPresetId?: string;
   directCachedInitialized?: boolean;
   directCacheProvider?: import('@engine/types/types-api').DirectCachePolicy;
+  /** 缓存直出：一段会话最多接纳几楼就重建；缺席 = 引擎默认（`normalizeDirectCacheRebuild`） */
+  directCacheRebuildTurns?: number;
+  /** 缓存直出：请求长度超过重建基线的多少倍就重建；缺席 = 引擎默认 */
+  directCacheGrowthLimit?: number;
 
   // ═══ 内容-引擎分离波 1 / D42：占位内容版本戳 ═══
   // 占位集随引擎打包；戳前进时 content-store 对「hash 仍等于占位基线」的书重播种（D42）。

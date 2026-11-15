@@ -38,7 +38,11 @@ function hasDynamicMacros(text: string): boolean {
   );
 }
 
-/** Each group is an absolute value; changing HP never resends profiles or inventory. */
+/**
+ * 每个分区都是绝对值；改 HP 不会重发档案或库存。
+ * 位置、在场、当前行动、金钱、经验与心里话几乎每回合都变，单列进 `character/角色名/state`：
+ * 若与背景、外貌、性格等长文本同在 `profile`，整份档案会因这些易变字段每楼重发。
+ */
 export function buildDirectCharacterSections(
   characters: readonly CharacterState[],
 ): Record<string, unknown> {
@@ -59,10 +63,26 @@ export function buildDirectCharacterSections(
       skills,
       inventory,
       statusEffects,
+      location,
+      present,
+      currentAction,
+      money,
+      totalExp,
+      expToNext,
+      thoughts,
       ...profile
     } = character;
     const key = `character/${character.name}`;
     sections[`${key}/profile`] = profile;
+    sections[`${key}/state`] = {
+      location,
+      present,
+      currentAction,
+      money,
+      totalExp,
+      expToNext,
+      thoughts,
+    };
     sections[`${key}/skills`] = skills;
     sections[`${key}/inventory`] = inventory;
     sections[`${key}/statusEffects`] = statusEffects;

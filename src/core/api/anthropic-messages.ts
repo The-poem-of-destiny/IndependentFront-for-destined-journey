@@ -28,13 +28,28 @@ function assistantBlocks(message: LlmMessage): JsonObject[] {
   return blocks;
 }
 
+/** 输入消息在 Claude 请求体中最后一个内容块的位置（`messages[message].content[block]`）。 */
+export interface AnthropicBlockLocation {
+  message: number;
+  block: number;
+}
+
 function convertAnthropicMessages(messages: LlmMessage[]): {
   messages: JsonObject[];
   system?: string;
+  /** 与输入消息逐条对应；system 或未产出内容块的消息为 undefined */
+  locations: Array<AnthropicBlockLocation | undefined>;
 } {
   const system: string[] = [];
   const converted: JsonObject[] = [];
+  const locations: Array<AnthropicBlockLocation | undefined> = [];
   let sawConversation = false;
+  // 记下刚处理完的那条输入消息落在哪条 Claude 消息的哪个块上（取其最后一块）
+  const locate = () => {
+    const message = converted.length - 1;
+    const block = (converted[message].content as unknown[]).length - 1;
+    return block >= 0 ? { message, block } : undefined;
+  };
 
   for (const message of messages) {
     if (message.role === 'system') {
@@ -42,12 +57,14 @@ function convertAnthropicMessages(messages: LlmMessage[]): {
         throw new Error('Claude Messages does not support mid-conversation system messages');
       }
       if (message.content) system.push(message.content);
+      locations.push(undefined);
       continue;
     }
     sawConversation = true;
     if (message.role === 'assistant' && message.native?.protocol === 'anthropic-messages') {
       const value = message.native.value;
       converted.push({ role: 'assistant', content: value.content ?? [] });
+      locations.push(locate());
       continue;
     }
     if (message.role === 'tool') {
@@ -62,6 +79,7 @@ function convertAnthropicMessages(messages: LlmMessage[]): {
       } else {
         converted.push({ role: 'user', content: [block], __toolResults: true });
       }
+      locations.push(locate());
       continue;
     }
     const role = message.role === 'assistant' ? 'assistant' : 'user';
@@ -75,9 +93,25 @@ function convertAnthropicMessages(messages: LlmMessage[]): {
     } else {
       converted.push({ role, content });
     }
+    // 空内容合并进上一条时没有属于自己的块，不能借用前一条消息的位置
+    locations.push(content.length ? locate() : undefined);
   }
   for (const message of converted) delete message.__toolResults;
-  return { messages: converted, ...(system.length ? { system: system.join('\n\n') } : {}) };
+  return {
+    messages: converted,
+    ...(system.length ? { system: system.join('\n\n') } : {}),
+    locations,
+  };
+}
+
+/**
+ * 输入消息下标 → Claude 请求体内容块位置。与 `buildAnthropicBody` 走同一条转换，
+ * 连续同角色合并后仍能精确定位到某条输入消息自己的块。
+ */
+export function anthropicBlockLocations(
+  messages: LlmMessage[],
+): Array<AnthropicBlockLocation | undefined> {
+  return convertAnthropicMessages(messages).locations;
 }
 
 export function buildAnthropicBody(input: LlmBuildInput): JsonObject {

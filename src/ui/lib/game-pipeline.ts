@@ -366,6 +366,7 @@ function buildDebugEntry(input: DebugEntryInput): DebugAgentEntry {
     promptSessionRevision: result?.promptSessionRevision,
     promptRebased: result?.promptRebased,
     promptRebaseReason: result?.promptRebaseReason,
+    directCacheDiagnostics: result?.directCacheDiagnostics,
     error: result?.error,
     tokensUsed: result?.tokensUsed ?? 0,
     cacheHit: result?.cacheHit ?? false,
@@ -1039,10 +1040,15 @@ export class GamePipeline {
       this.orch = new AgentOrchestrator(options, events);
 
       if (isDirectMode(this.generationMode)) {
+        const cached = this.generationMode === 'direct_cached';
         const draft = await this.orch.runDirect(
           readDirectCombat(this.game.saveProfile),
-          this.generationMode === 'direct_cached'
-            ? (this.settings.settings.directCacheProvider ?? 'prefix')
+          cached ? (this.settings.settings.directCacheProvider ?? 'prefix') : undefined,
+          cached
+            ? {
+                maxTurns: this.settings.settings.directCacheRebuildTurns,
+                growthLimit: this.settings.settings.directCacheGrowthLimit,
+              }
             : undefined,
         );
         await this.acceptDirectTurn(draft, context, controller);

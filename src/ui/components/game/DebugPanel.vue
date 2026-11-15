@@ -25,6 +25,7 @@ import {
   plotThreadGateReasonLabel,
   type PlotThreadDebugInfo,
 } from './plot-thread-debug';
+import { buildDirectCacheDebugView, type DirectCacheDebugView } from './direct-cache-debug';
 
 const game = useGameStore();
 const settings = useSettingsStore();
@@ -39,6 +40,21 @@ const selectedTurn = computed(() => {
   );
 });
 const displayedAgentLog = computed(() => selectedTurn.value?.entries ?? []);
+
+/** 缓存直出主请求的会话记账（按调用 id 索引；其余请求缺席 → 整块不出） */
+const directCacheViews = computed(() => {
+  const views = new Map<string, DirectCacheDebugView>();
+  for (const entry of displayedAgentLog.value) {
+    const view = buildDirectCacheDebugView(entry.directCacheDiagnostics);
+    if (view) views.set(entry.invocationId, view);
+  }
+  return views;
+});
+/** 模板里借 v-for 绑定局部名：有记账给一项，没有给空数组 */
+function directCacheViewOf(entry: DebugAgentEntry): DirectCacheDebugView[] {
+  const view = directCacheViews.value.get(entry.invocationId);
+  return view ? [view] : [];
+}
 
 /** 所选回合的 Story 新模式诊断（旧模式回合缺席 → 整段不出） */
 const storyContextDebug = computed(() => selectedTurn.value?.storyContext ?? null);
@@ -724,6 +740,53 @@ function formatJson(value: unknown): string {
           Delta revision {{ entry.promptSessionRevision }} · 重基线
           {{ entry.promptRebased ? `是（${entry.promptRebaseReason ?? '未注明原因'}）` : '否' }}
         </div>
+        <template
+          v-for="(dc, dcIndex) in directCacheViewOf(entry)"
+          :key="`${entry.invocationId}:direct-cache:${dcIndex}`"
+        >
+          <div class="debug-agent-meta" data-testid="direct-cache-summary">
+            缓存直出记账 · 本楼{{ dc.rebased ? '重建基线' : '沿用会话' }} · 请求
+            {{ dc.requestChars }} 字符（估算约 {{ dc.requestTokens }} token）· 基线
+            {{ dc.baselineChars }} 字符 · {{ dc.growthSummary }}
+          </div>
+          <details class="debug-agent-details">
+            <summary>
+              本楼分区（{{ dc.rows.length }} 行）· 不留存尾部 {{ dc.tailChars }} 字符
+            </summary>
+            <p class="debug-budget-hint">
+              字符数为引擎估算口径；token 为字符数 / 1.5 向上取整的估算，不是渠道用量。
+            </p>
+            <div class="debug-dc-scroll">
+              <table class="debug-budget-table" aria-label="缓存直出本楼分区">
+                <thead>
+                  <tr>
+                    <th>分区</th>
+                    <th>动作</th>
+                    <th>字符数</th>
+                    <th>估算 token</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in dc.rows" :key="`${row.kind}:${row.key}`">
+                    <th>{{ row.key }}</th>
+                    <td>{{ row.actionLabel }}</td>
+                    <td>{{ row.chars }}</td>
+                    <td>{{ row.estimatedTokens }}</td>
+                  </tr>
+                  <tr v-if="dc.rows.length === 0">
+                    <td colspan="4" class="debug-empty-sub">本楼未发送任何分区</td>
+                  </tr>
+                  <tr>
+                    <th>不留存的本轮尾部（召回、骰池、尾部指令、战斗与资源现值）</th>
+                    <td>—</td>
+                    <td>{{ dc.tailChars }}</td>
+                    <td>{{ dc.tailTokens }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </template>
         <details class="debug-agent-details">
           <summary>请求 ({{ entry.messages.length }} 条消息) / 响应</summary>
           <div class="debug-section-split">
@@ -832,6 +895,11 @@ function formatJson(value: unknown): string {
   margin-top: var(--theme-spacing-xs);
   color: var(--theme-text-secondary);
   font-size: 0.75rem;
+}
+/* 缓存直出分区表：至多 30+1 行，限高内滚，不把面板撑长 */
+.debug-dc-scroll {
+  max-height: 240px;
+  overflow: auto;
 }
 .debug-provider-rounds {
   max-height: 60vh;

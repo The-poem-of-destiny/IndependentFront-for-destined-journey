@@ -5,6 +5,10 @@ import { reactive } from 'vue';
 import AgentParamsCard from '../../../../../src/ui/components/settings/agent/AgentParamsCard.vue';
 import type { WorldBook, WorldBookEntry } from '@engine/types/types';
 import type { AgentSettingsEntry } from '../../../../../src/ui/stores/agent-settings';
+import {
+  DIRECT_CACHE_REBUILD_DEFAULTS,
+  DIRECT_CACHE_REBUILD_RANGE,
+} from '@engine/prompts/direct-context-session';
 
 const state = vi.hoisted(() => ({
   config: null as unknown as {
@@ -233,11 +237,98 @@ describe('S-10 采样参数显示实际发送的值与来源', () => {
     expect(wrapper.get('[data-param="freqPen"]').text()).toBe('默认');
     const temperatureInput = wrapper
       .get('[data-param="temperature"]')
-      .element.parentElement!.querySelector('input') as HTMLInputElement;
+      .element.closest('label')!
+      .querySelector('input') as HTMLInputElement;
     expect(temperatureInput.value).toBe('1');
     const topPInput = wrapper
       .get('[data-param="topP"]')
-      .element.parentElement!.querySelector('input') as HTMLInputElement;
+      .element.closest('label')!
+      .querySelector('input') as HTMLInputElement;
     expect(topPInput.value).toBe('0.5');
+  });
+
+  it('来源角标与参数名在同一行（不再独占一行），说明在输入框下方', () => {
+    const wrapper = card('vars_update');
+    const badge = wrapper.get('[data-param="temperature"]').element;
+    expect(badge.parentElement!.classList.contains('param-head')).toBe(true);
+    const label = badge.closest('label')!;
+    const children = Array.from(label.children);
+    expect(children.map((el) => el.tagName)).toEqual(['SPAN', 'INPUT', 'SPAN']);
+    expect(children[2].textContent).toContain('越高越随机');
+  });
+
+  it('直出页的「不自动重试」是采样参数组里的一行说明，不占网格格子', () => {
+    const wrapper = card('direct_main');
+    const note = wrapper.get('.param-note');
+    expect(note.text()).toContain('不自动重试');
+    expect(note.element.closest('.param-grid')).toBeNull();
+    expect(wrapper.text()).not.toContain('失败重试次数');
+  });
+});
+
+describe('缓存直出：重建时机滑块', () => {
+  type CacheBag = {
+    directCacheRebuildTurns?: number;
+    directCacheGrowthLimit?: number;
+  };
+  const bag = () => state.config.settings as unknown as CacheBag;
+
+  it.each(['story', 'direct_main', 'vars_update'])('%s 页不出现缓存会话组与滑块', (id) => {
+    const wrapper = card(id);
+    expect(wrapper.find('input[type="range"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('渠道缓存支持');
+  });
+
+  it('direct_cached 页出现两个滑块，范围、步长、默认值取自引擎', () => {
+    const wrapper = card('direct_cached');
+    const turns = wrapper.get('input[aria-label="会话楼数上限"]');
+    const growth = wrapper.get('input[aria-label="增长倍数上限"]');
+    expect(turns.attributes()).toMatchObject({
+      min: String(DIRECT_CACHE_REBUILD_RANGE.maxTurns.min),
+      max: String(DIRECT_CACHE_REBUILD_RANGE.maxTurns.max),
+      step: String(DIRECT_CACHE_REBUILD_RANGE.maxTurns.step),
+    });
+    expect(growth.attributes()).toMatchObject({
+      min: String(DIRECT_CACHE_REBUILD_RANGE.growthLimit.min),
+      max: String(DIRECT_CACHE_REBUILD_RANGE.growthLimit.max),
+      step: String(DIRECT_CACHE_REBUILD_RANGE.growthLimit.step),
+    });
+    expect((turns.element as HTMLInputElement).value).toBe(
+      String(DIRECT_CACHE_REBUILD_DEFAULTS.maxTurns),
+    );
+    expect(wrapper.get('[data-testid="rebuild-turns"]').text()).toContain('默认');
+    expect(wrapper.find('.rebuild-reset').exists()).toBe(false);
+  });
+
+  it('拖动写入设置；拖回默认值即删键', async () => {
+    const wrapper = card('direct_cached');
+    await wrapper.get('input[aria-label="会话楼数上限"]').setValue('12');
+    expect(bag().directCacheRebuildTurns).toBe(12);
+    await wrapper.get('input[aria-label="增长倍数上限"]').setValue('2');
+    expect(bag().directCacheGrowthLimit).toBe(2);
+    expect(wrapper.get('[data-testid="rebuild-turns"]').text()).toContain('已覆写');
+    await wrapper
+      .get('input[aria-label="会话楼数上限"]')
+      .setValue(String(DIRECT_CACHE_REBUILD_DEFAULTS.maxTurns));
+    expect(bag()).not.toHaveProperty('directCacheRebuildTurns');
+  });
+
+  it('「恢复默认」删键而不是写入默认数字', async () => {
+    bag().directCacheRebuildTurns = 12;
+    bag().directCacheGrowthLimit = 2;
+    const wrapper = card('direct_cached');
+    await wrapper.get('[data-testid="rebuild-turns"] .rebuild-reset').trigger('click');
+    expect(bag()).not.toHaveProperty('directCacheRebuildTurns');
+    await wrapper.get('[data-testid="rebuild-growth"] .rebuild-reset').trigger('click');
+    expect(bag()).not.toHaveProperty('directCacheGrowthLimit');
+  });
+
+  it('渠道缓存提示里的楼数随设置变化', async () => {
+    const wrapper = card('direct_cached');
+    const hint = () => wrapper.get('[data-testid="cache-provider-hint"]').text();
+    expect(hint()).toContain(`${DIRECT_CACHE_REBUILD_DEFAULTS.maxTurns} 楼会话`);
+    bag().directCacheRebuildTurns = 15;
+    await wrapper.vm.$nextTick();
+    expect(hint()).toContain('15 楼会话');
   });
 });

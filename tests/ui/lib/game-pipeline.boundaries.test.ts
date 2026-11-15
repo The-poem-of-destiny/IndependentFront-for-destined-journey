@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { GamePipeline } from '../../../src/ui/lib/game-pipeline';
 import { useGameStore } from '../../../src/ui/stores/game-store';
 import { AgentClient } from '@engine/agents/agent-client';
+import { AgentOrchestrator } from '@engine/agents/agent-orchestrator';
 import {
   clearAllData,
   getDatabase,
@@ -574,6 +575,34 @@ describe.each(['direct', 'direct_cached'] as const)(
       const context = await p.prepareStoryContextV2({});
       expect(context.windowTurns).toBe(mode === 'direct_cached' ? 4 : 2);
     });
+    it('把设置里的重建时机传给引擎（仅缓存直出）', async () => {
+      const { pipeline } = await directFixture();
+      const p = pipeline as any;
+      Object.assign(p.settings.settings, {
+        directCacheRebuildTurns: 2,
+        directCacheGrowthLimit: 2.2,
+      });
+      const runDirect = vi.spyOn(AgentOrchestrator.prototype, 'runDirect');
+      const chat = directNetwork();
+      for (const input of ['前进', '继续前进', '再前进'])
+        expect(await pipeline.run(input)).toBe(true);
+      expect(runDirect).toHaveBeenCalledTimes(3);
+      for (const call of runDirect.mock.calls)
+        expect(call[2]).toEqual(
+          mode === 'direct_cached' ? { maxTurns: 2, growthLimit: 2.2 } : undefined,
+        );
+      if (mode === 'direct_cached') {
+        // 引擎确实按 2 楼上限执行：第 2 楼复用第 1 楼留存前缀，第 3 楼冷建
+        const main = chat.mock.calls
+          .filter((_, i) => (chat.mock.contexts[i] as any).agentId === 'direct_main')
+          .map((c) => c[0].messages);
+        const retained = main[0].length - 1;
+        const sameLead = (m: unknown[]) =>
+          JSON.stringify(m.slice(0, retained)) === JSON.stringify(main[0].slice(0, retained));
+        expect(sameLead(main[1])).toBe(true);
+        expect(sameLead(main[2])).toBe(false);
+      }
+    });
     it('continues from accepted history and current resources on the next turn', async () => {
       const { pipeline } = await directFixture();
       const chat = directNetwork();
@@ -585,7 +614,19 @@ describe.each(['direct', 'direct_cached'] as const)(
       expect(mainCalls).toHaveLength(2);
       const first = mainCalls[0][0].messages;
       const second = mainCalls[1][0].messages;
-      if (mode === 'direct_cached') expect(second.slice(0, first.length)).toEqual(first);
+      if (mode === 'direct_cached') {
+        // 最后一条是不留存的本轮尾部；其前的留存部分原样成为下一楼前缀，后接上一楼正文
+        const retained = first.length - 1;
+        expect(first[retained].content).toMatch(/^<turn_context>/);
+        expect(second.slice(0, retained)).toEqual(first.slice(0, retained));
+        expect(second[retained]).toEqual({ role: 'assistant', content: '旅人继续前行。' });
+        expect(second).not.toContainEqual(first[retained]);
+        // 资源现值由本轮尾部重申：第二楼请求时是第一楼接纳后的 70（开局 80），不是旧值
+        expect(first[retained].content).toContain('"hp":80');
+        const tail = second[second.length - 1].content;
+        expect(tail).toMatch(/^<turn_context>/);
+        expect(tail).toContain('"hp":70');
+      }
       expect(JSON.stringify(second)).toContain('旅人继续前行');
       expect((await getDatabase().characters.get('player'))?.hp).toBe(60);
     });
@@ -608,9 +649,11 @@ describe.each(['direct', 'direct_cached'] as const)(
         expect(mainCalls).toHaveLength(3);
         const first = mainCalls[0][0].messages;
         const retry = mainCalls[2][0].messages;
-        expect(retry.slice(0, first.length)).toEqual(first);
-        expect(retry[first.length]).toMatchObject({ role: 'assistant' });
-        expect(retry[first.length].content).toContain('<direct_updates>');
+        // 第一楼留存部分（不含尾部）原样复用，后接已接纳的正文；被拒的那次不留痕
+        const retained = first.length - 1;
+        expect(retry.slice(0, retained)).toEqual(first.slice(0, retained));
+        expect(retry[retained]).toEqual({ role: 'assistant', content: '旅人继续前行。' });
+        expect(retry).toHaveLength(retained + 3);
         expect((await getDatabase().characters.get('player'))?.hp).toBe(60);
       },
     );
@@ -636,12 +679,17 @@ describe.each(['direct', 'direct_cached'] as const)(
           (_, index) => (chat.mock.contexts[index] as any).agentId === 'direct_main',
         );
         expect(mainCalls).toHaveLength(3);
+        const first = mainCalls[0][0].messages;
         const retry = mainCalls[2][0].messages;
-        // 复用会话时上一楼原始回复（含控制块）原样留在 transcript；冷建只带正文
-        const reusesAcceptedRaw = retry.some(
-          (m: any) => m.role === 'assistant' && String(m.content).includes('<direct_updates>'),
-        );
-        expect(reusesAcceptedRaw).toBe(!started);
+        // 复用会话时第一楼的留存消息（带 player_input 标签的上一楼输入）原样在前缀里；
+        // 冷建时上一楼只以历史形式出现，留存消息只有本轮这一条
+        const retained = first.length - 1;
+        const reusesAcceptedSession =
+          JSON.stringify(retry.slice(0, retained)) === JSON.stringify(first.slice(0, retained));
+        expect(reusesAcceptedSession).toBe(!started);
+        expect(
+          retry.filter((m: any) => String(m.content).includes('<player_input>\n前进\n')),
+        ).toHaveLength(started ? 0 : 1);
         expect((await getDatabase().characters.get('player'))?.hp).toBe(60);
       },
     );

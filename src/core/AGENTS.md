@@ -11,7 +11,7 @@
 ## Story v2 / 内容路由速览
 
 - 直出：`agents/direct-main.ts` 负责单次主请求，`agents/direct-output.ts` 校验原生写回，`combat/direct-combat.ts` 保存跨楼战斗。`AgentOrchestrator.runDirect` 复用记忆而不进入 Agent DAG；`StateManager.commitDirectTurn` 原子接纳核心状态和消息。
-- 缓存直出：`prompts/direct-context-session.ts` 管理独立的已接纳 transcript，`direct-context-frame.ts` 组装旧记忆布局、按角色拆分的绝对状态与按条拆分的记忆库（`memory/记忆编号`），`direct-context-store.ts` 复用可丢弃缓存表与权限门；`api/prompt-caching.ts` 只为显式调用者附加渠道参数。区域/本轮资料可替换，预设条目以 `directCachePlacement: "turn"` 显式选择动态位置。Dexie v32 无数据重写，阻止旧版误导入新模式。契约见 [缓存直出](../../docs/reference/direct-generation-cache.md)。
+- 缓存直出：`prompts/direct-context-session.ts` 管理独立的已接纳 transcript，`direct-context-frame.ts` 组装旧记忆布局、按角色拆分的绝对状态与按条拆分的记忆库（`memory/记忆编号`），`direct-context-store.ts` 复用可丢弃缓存表与权限门；`api/prompt-caching.ts` 只为显式调用者附加渠道参数。区域/本轮资料可替换，预设条目以 `directCachePlacement: "turn"` 显式选择动态位置。Dexie v32 无数据重写，阻止旧版误导入新模式。📌 2026-11-14：请求末尾拆成留存消息（`direct_context` 加玩家输入）与不留存的 `turn_context`（召回、骰池、尾部指令、战斗与资源现值）；会话里的 assistant 只留正文；Claude 断点打在静态前缀末尾、最后一条 system 与最后一条留存消息上，不发顶层自动断点；每次主请求产出 `DirectCacheDiagnostics`（`types/types.ts`）。契约见 [缓存直出](../../docs/reference/direct-generation-cache.md)。
 
 - 原生角色：`types/types-character.ts` 定义内容、经历与主叙事更新；`character/character-definitions.ts` 只读兼容旧资料及素材；`character/character-updates.ts` 校验更新块；`character/character-chronicle.ts` 构造经历和重要上下文。`StateManager` 持有写锁与来源核验；Dexie v31、快照及两种备份携带经历。契约见 [角色系统](../../docs/reference/character-system.md)。
 - 角色年龄：`character/character-age.ts`。只存年龄锚点 `CharacterState.ageAnchor`（开局时的年龄 + 生日），年龄按游戏时间现算；`ensureCharacterAge` 是实例化闸门（`applyAddCharacter` / `createJourney` / 旧档回填），线索缺失或无效兜底实例化时 18 岁、生日 1 月 1 日。🔴 不要新增「当前年龄」或「出生年」落库字段，也不要加逐回合加一的逻辑。
