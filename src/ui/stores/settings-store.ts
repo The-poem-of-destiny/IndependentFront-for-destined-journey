@@ -852,7 +852,19 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /** 保存项目默认 Agent 配置到 data/defaults/agent-config.json */
-  async function saveAgentProjectDefaults(data: AgentProjectDefaults): Promise<boolean> {
+  async function saveAgentProjectDefaults(input: AgentProjectDefaults): Promise<boolean> {
+    // 🔴 S-00：项目默认里的 `model` 一律写空串。调用方是「读现有文件 → 改一个 agent → 整份写回」，
+    //    文件里**其它** agent 早先带进来的本机 API 池 id 也会跟着被原样写回去，所以在这个唯一
+    //    出口统一清，而不是只清当前那一条。键保留（打包脚本要求它是字符串）。
+    const data: AgentProjectDefaults = {
+      ...input,
+      agents: Object.fromEntries(
+        Object.entries(input.agents ?? {}).map(([id, entry]) => [
+          id,
+          entry && typeof entry === 'object' ? { ...entry, model: '' } : entry,
+        ]),
+      ),
+    };
     try {
       const res = await fetch('/api/defaults/agent-config', {
         method: 'PUT',

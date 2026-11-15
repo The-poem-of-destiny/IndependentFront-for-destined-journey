@@ -4,7 +4,7 @@ import { getPlotThreadFlags } from '@engine/state/save-profile';
 import { toEpochMinutes } from '@engine/time/time-system';
 import { useGameStore } from '../../stores/game-store';
 import { buildThreadDisplayView } from './plot-thread-view';
-import { buildPlotTimeline, type TimelineNodeBox } from './plot-timeline';
+import { buildPlotTimeline, type TimelineChapterBar, type TimelineNodeBox } from './plot-timeline';
 
 /**
  * PlotTimeline.vue — 剧情时间线（ComfyUI 式连线图铺在可按天缩放的时间轴上）
@@ -119,6 +119,14 @@ function peek(node: TimelineNodeBox) {
     next.add(node.id);
     peekedThreads.value = next;
   }
+}
+
+/** 剧透模式下揭示一条未到达的章节条（与事件共用同一个 peek 集合） */
+function peekChapter(bar: TimelineChapterBar) {
+  if (!spoilerMode.value) return;
+  const next = new Set(peekedEvents.value);
+  next.add(bar.peekKey);
+  peekedEvents.value = next;
 }
 
 /** 状态 → 语义色调 */
@@ -241,8 +249,14 @@ function tone(status: string): string {
           v-for="(b, i) in model.chapters"
           :key="'ch' + i"
           class="tl-chapter"
+          :class="{ masked: b.masked, peekable: canPeek(b.masked) }"
           :style="{ left: b.x + 'px', top: b.y + 'px', width: b.w + 'px' }"
           :title="b.name"
+          :role="canPeek(b.masked) ? 'button' : undefined"
+          :tabindex="canPeek(b.masked) ? 0 : undefined"
+          :aria-label="canPeek(b.masked) ? '点击揭示隐藏的章节' : undefined"
+          @click="canPeek(b.masked) ? peekChapter(b) : undefined"
+          @keydown.enter="canPeek(b.masked) ? peekChapter(b) : undefined"
         >
           <span class="tl-chapter-name">{{ b.name }}</span>
         </div>
@@ -514,6 +528,18 @@ function tone(status: string): string {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.tl-chapter.masked {
+  border-bottom-style: dashed;
+}
+.tl-chapter.masked .tl-chapter-name {
+  color: var(--theme-text-muted);
+}
+.tl-chapter.peekable {
+  cursor: pointer;
+}
+.tl-chapter.peekable:hover .tl-chapter-name {
+  color: var(--theme-primary);
 }
 
 .tl-now {

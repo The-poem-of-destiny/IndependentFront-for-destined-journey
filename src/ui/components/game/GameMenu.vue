@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import { useUIStore } from '../../stores/ui-store';
+import { confirmLeaveGame } from '../../lib/leave-game-guard';
 import AppModal from '../shared/AppModal.vue';
 
 /**
@@ -64,23 +65,30 @@ function close() {
   emit('close');
 }
 
+/**
+ * 跨页面导航会卸载 GamePage（中止在跑的回合与插画）—— 先过离开确认（GAME-08）。
+ * 菜单先关掉再弹确认，免得两层弹窗叠在一起；取消就留在游戏页。
+ */
+async function leaveTo(view: 'settings' | 'home' | 'extensions', destination: string) {
+  close();
+  if (!(await confirmLeaveGame(destination))) return;
+  ui.navigate(view);
+}
+
 function run(id: MenuAction) {
   switch (id) {
     case 'settings':
-      close();
-      ui.navigate('settings');
+      void leaveTo('settings', '设置');
       return;
     case 'saves':
       close();
       ui.openSaveManager();
       return;
     case 'home':
-      close();
-      ui.navigate('home');
+      void leaveTo('home', '首页');
       return;
     case 'extensions':
-      close();
-      ui.navigate('extensions');
+      void leaveTo('extensions', '扩展');
       return;
     case 'help':
       panel.value = 'help';
@@ -92,7 +100,11 @@ const helpGroups = [
   {
     title: '操作',
     rows: [
-      { keys: ['右键消息'], text: '回退本轮 / 回退到这条输入 / 为这一段配图' },
+      {
+        keys: ['最新一回合下方的按钮'],
+        text: '重新生成 / 回退 / 润色 / 配图 / 复制（第一回合不能回退）',
+      },
+      { keys: ['右键消息'], text: '同上，作为快捷方式；任意一段正文都可以配图' },
       {
         keys: ['点击侧栏图标'],
         text: '打开背包 / 角色 / 任务 / 地图 / 记忆 / 剧情 / 快照 / 图鉴等面板',

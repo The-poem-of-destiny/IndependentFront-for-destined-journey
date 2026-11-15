@@ -24,14 +24,19 @@ describe('ApiSection 源级默认采样参数', () => {
     expect(apiSource).toContain('<div v-if="isLlmEntry" class="default-params">');
   });
 
-  it('默认值预填为 temperature 1 / Top P 1 / 惩罚 0（maxTokens 留空 = 不设置）', () => {
-    expect(apiSource).toContain("defaultTemperature: '1'");
-    expect(apiSource).toContain("defaultTopP: '1'");
-    expect(apiSource).toContain("defaultFrequencyPenalty: '0'");
-    expect(apiSource).toContain("defaultPresencePenalty: '0'");
+  it('S-10：新建源的采样参数一律留空（不悄悄盖掉内容包为各 Agent 调好的默认）', () => {
+    expect(apiSource).toContain("defaultTemperature: ''");
+    expect(apiSource).toContain("defaultTopP: ''");
+    expect(apiSource).toContain("defaultFrequencyPenalty: ''");
+    expect(apiSource).toContain("defaultPresencePenalty: ''");
     expect(apiSource).toContain("defaultMaxTokens: ''");
-    // 编辑已有连接、且库里没存过采样参数时，也回落到同一组默认值
-    expect(apiSource).toContain("String(defaultParams.temperature) : '1'");
+    expect(apiSource).not.toContain("apiForm.defaultTemperature = '1'");
+    expect(apiSource).not.toContain("apiForm.defaultPresencePenalty = '0'");
+    // 编辑已有连接、且库里没存过采样参数时同样显示为空，保存后不会凭空写进池默认
+    expect(apiSource).toContain("String(defaultParams.temperature) : ''");
+    expect(apiSource).not.toContain("String(defaultParams.temperature) : '1'");
+    // 说明文字不再声称「默认为 temperature 1」
+    expect(apiSource).not.toContain('默认为 temperature 1');
   });
 
   it('保存时经 buildDefaultParameters() 写入 defaultParameters（并透传 headerOverrides）', () => {

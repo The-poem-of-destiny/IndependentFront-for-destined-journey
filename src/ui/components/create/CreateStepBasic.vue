@@ -131,6 +131,7 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
             </span>
           </div>
         </div>
+        <span class="cost-note">每升 1 级消耗 5 点（当前 {{ store.levelCost }} 点）</span>
 
         <!-- ★ 属性表格 (原版 5 列) -->
         <div class="attr-table-wrapper">
@@ -252,7 +253,7 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
                 :max="99999"
                 :step="100"
               />
-              <span class="cost-note">100G = 1 点</span>
+              <span class="cost-note">100G = 1 点（当前 {{ store.moneyCost }} 点）</span>
             </div>
             <div class="money-item">
               <FormStepper
@@ -261,19 +262,31 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
                 :min="0"
                 :max="9999"
               />
-              <span class="cost-note">2 FP = 1 点</span>
+              <span class="cost-note">2 FP = 1 点（当前 {{ store.destinyCost }} 点）</span>
             </div>
           </div>
         </div>
 
-        <!-- 消耗摘要 -->
-        <div class="cost-summary">
+        <!-- 消耗摘要：列全每一项开销（C-09），顶栏数字的每一点都能在这里对上 -->
+        <div class="cost-summary" :class="{ over: store.overspentPoints > 0 }">
           <span>种族「{{ store.race }}」{{ store.raceCost }}点</span>
           <span>身份「{{ store.identity }}」{{ store.identityCost }}点</span>
+          <span>等级 Lv.{{ store.level }} {{ store.levelCost }}点</span>
+          <span>额外属性点 {{ store.usedAP }}点</span>
+          <span>金钱 {{ store.moneyCost }}点</span>
+          <span>命运点数 {{ store.destinyCost }}点</span>
           <span
             >装备 {{ store.equipmentCost }} | 道具 {{ store.itemCost }} | 技能
             {{ store.skillCost }}</span
           >
+          <span class="cost-total"
+            >合计 {{ store.totalCost }} / {{ store.reincarnationPoints }} 点</span
+          >
+          <!-- C-06：超支就地说明，并指出能从哪里收回点数 -->
+          <p v-if="store.overspentPoints > 0" class="cost-over" role="status">
+            转生点数超支 {{ store.overspentPoints }}
+            点。请降低等级、金钱或命运点数，或减少已选的装备、道具、技能；超支时无法创建角色。
+          </p>
         </div>
       </div>
     </div>
@@ -536,5 +549,21 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
   color: var(--theme-text-secondary);
   border: 1px solid var(--theme-card-border);
   line-height: 1.6;
+}
+.cost-summary .cost-total {
+  font-weight: 700;
+  color: var(--theme-text-primary);
+}
+.cost-summary.over {
+  border-color: var(--theme-error);
+}
+.cost-summary.over .cost-total {
+  color: var(--theme-error);
+}
+.cost-over {
+  flex-basis: 100%;
+  margin: 0;
+  font-weight: 600;
+  color: var(--theme-error);
 }
 </style>

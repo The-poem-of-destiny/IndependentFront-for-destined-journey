@@ -51,7 +51,10 @@ vi.mock('@ui/components/settings/BeautifierSection.vue', () => stub('BeautifierS
 vi.mock('@ui/components/settings/AudioSection.vue', () => stub('AudioSection'));
 vi.mock('@ui/components/settings/AssetSection.vue', () => stub('AssetSection'));
 vi.mock('@ui/components/settings/image/ImageSection.vue', () => stub('ImageSection'));
-vi.mock('@ui/components/settings/DataSection.vue', () => stub('DataSection', 'content-pack'));
+vi.mock('@ui/components/settings/DataSection.vue', () => stub('DataSection'));
+vi.mock('@ui/components/settings/ContentPackSection.vue', () =>
+  stub('ContentPackSection', 'content-pack'),
+);
 vi.mock('@ui/components/settings/DeveloperSection.vue', () => stub('DeveloperSection'));
 vi.mock('@ui/components/settings/AboutSection.vue', () => stub('AboutSection'));
 
@@ -120,15 +123,45 @@ describe('SettingsPage 分区跳转请求', () => {
   });
 });
 
-describe('SettingsPage 卡片锚点', () => {
-  it('挂载时带锚点 → 切到数据分区并把内容包卡滚进视野', async () => {
+describe('SettingsPage 内容包分区（S-01）', () => {
+  it('「内容包」是独立分区，排在左栏第二位（紧跟 API 配置）', async () => {
+    const wrapper = mount(SettingsPage);
+    await flushPromises();
+    const labels = wrapper.findAll('.nav-item').map((el) => el.text());
+    expect(labels.slice(0, 2)).toEqual(['API 配置', '内容包']);
+  });
+
+  it('openSettings(content-pack) 切到内容包分区，渲染内容包组件', async () => {
     const ui = useUIStore();
-    ui.openSettings('data', 'content-pack');
+    ui.openSettings('content-pack');
+    const wrapper = mount(SettingsPage, { global: { stubs: { Transition: false } } });
+    await flushPromises();
+    expect(activeLabel(wrapper)).toBe('内容包');
+    expect(wrapper.find('.stub-ContentPackSection').exists()).toBe(true);
+    expect(wrapper.find('.stub-DataSection').exists()).toBe(false);
+  });
+
+  it('点左栏「内容包」同样走 selectSection 切换', async () => {
+    const wrapper = mount(SettingsPage, { global: { stubs: { Transition: false } } });
+    await flushPromises();
+    await wrapper
+      .findAll('.nav-item')
+      .find((el) => el.text() === '内容包')!
+      .trigger('click');
+    await flushPromises();
+    expect(activeLabel(wrapper)).toBe('内容包');
+  });
+});
+
+describe('SettingsPage 卡片锚点', () => {
+  it('挂载时带锚点 → 切到内容包分区并把内容包卡滚进视野', async () => {
+    const ui = useUIStore();
+    ui.openSettings('content-pack', 'content-pack');
 
     const wrapper = mount(SettingsPage, { attachTo: document.body });
     await settle();
 
-    expect(activeLabel(wrapper)).toBe('数据与备份');
+    expect(activeLabel(wrapper)).toBe('内容包');
     expect(scrolled.map((s) => s.el.className)).toEqual(['stub-pack-card']);
     expect(ui.requestedSettingsAnchor).toBeNull();
     wrapper.unmount();
@@ -143,10 +176,10 @@ describe('SettingsPage 卡片锚点', () => {
       await settle();
       expect(scrolled).toHaveLength(0);
 
-      ui.openSettings('data', 'content-pack');
+      ui.openSettings('content-pack', 'content-pack');
       await settle();
 
-      expect(activeLabel(wrapper)).toBe('数据与备份');
+      expect(activeLabel(wrapper)).toBe('内容包');
       expect(scrolled).toHaveLength(1);
       expect(scrolled[0]?.opts).toMatchObject({ behavior: 'auto' });
       expect(ui.requestedSettingsAnchor).toBeNull();

@@ -64,7 +64,8 @@ describe('buildAgentDefaultEntry — 非 story', () => {
     expect(e.temperature).toBe(1.2);
     expect(e.maxTokens).toBe(8192);
     expect(e.historyLayers).toBe(3);
-    expect(e.model).toBe('ep1');
+    // S-00：本机 API 池 id 不进项目默认（换台机器必然悬空）；键保留为空串
+    expect(e.model).toBe('');
     expect(e).not.toHaveProperty('worldBookIds');
     expect(e).not.toHaveProperty('worldBookEnabled');
   });

@@ -24,9 +24,13 @@ import { useWorldBookStore } from '../../../stores/worldbook-store';
 import {
   getAgentSettings,
   patchAgentSettings,
+  resolveAgentLlmParamSources,
   type AgentDefaultsLayer,
+  type AgentLlmParamField,
+  type AgentLlmParamSource,
   type AgentSettingsEntry,
 } from '../../../stores/agent-settings';
+import { buildApiEndpoints, describeAgentBinding } from '../../../lib/endpoint-resolver';
 import { isLoreEntryVisibleTo } from '@engine/content/lore-routing';
 
 const props = defineProps<{ agentId: string }>();
@@ -41,11 +45,10 @@ const cacheProvider = computed({
   },
 });
 
-/** 配过 API 池没有 —— 一行派生，与子导航那处各算各的（不穿成 prop） */
+/** 下拉里可选的对话 API —— 一行派生，与子导航那处各算各的（不穿成 prop） */
 const llmEndpoints = computed(() =>
   s.apiPool.filter((entry) => !entry.kind || entry.kind === 'llm'),
 );
-const hasApi = computed(() => llmEndpoints.value.length > 0);
 
 /** 当前 Agent 的默认层（pack > 占位）—— 传给 getAgentSettings 合覆写 ?? 默认 */
 const defaultsLayer = computed<AgentDefaultsLayer>(() => {
@@ -60,6 +63,37 @@ const defaultsLayer = computed<AgentDefaultsLayer>(() => {
 
 /** 当前 Agent 的完整设置（已合覆写 ?? 默认层） */
 const agentCfg = computed(() => getAgentSettings(s, props.agentId, defaultsLayer.value));
+
+/**
+ * S-08：API 绑定四态 —— 与运行时同一个解析器（`resolveAgentEndpoint`）。
+ * 没绑定 = 跟随默认（自动用第一个 API），不是错误；只有绑定失效才标红。
+ */
+const binding = computed(() =>
+  describeAgentBinding(agentCfg.value.model, buildApiEndpoints(s.apiPool)),
+);
+
+/**
+ * S-10：五个采样/长度参数**实际会发出去的值**与来源。优先级照搬运行时
+ * （`resolveAgentLlmParamSources` = `resolveAgentLlmParams` 的同一份实现）：
+ * Agent 覆写 > 当前所用 API 池的默认参数 > 内容包默认。
+ */
+const llmParams = computed(() => {
+  const state = binding.value;
+  const poolDefaults =
+    state.kind === 'bound' || state.kind === 'follow-default'
+      ? state.endpoint.defaultParameters
+      : undefined;
+  return resolveAgentLlmParamSources(s, props.agentId, defaultsLayer.value, poolDefaults);
+});
+
+const SOURCE_LABEL: Record<AgentLlmParamSource['source'], string> = {
+  override: '已覆写',
+  pool: '来自 API 池',
+  default: '默认',
+};
+function paramSourceLabel(field: AgentLlmParamField): string {
+  return SOURCE_LABEL[llmParams.value[field].source];
+}
 
 /**
  * `tailPrompt` 对**正文润色侧链**是另一层含义：它不是 Delta 会话的末尾指令，
@@ -164,29 +198,44 @@ const readableBooks = computed(() =>
         isOverridden('model') ? '已覆写' : '默认'
       }}</span>
     </h4>
-    <p class="form-hint">为此 Agent 指定一个已配置好的 API 池（含端点地址、密钥和默认模型）。</p>
+    <p class="form-hint">
+      不选时自动使用第一个 API，一般无需设置；想让这个 Agent 用别的 API 时再单独指定。
+    </p>
     <div class="key-row">
       <select
         class="form-input"
         :value="agentCfg.model"
         @change="setAgentField({ model: ($event.target as HTMLSelectElement).value })"
       >
-        <option value="">— 请选择 API 池 —</option>
+        <option value="">— 跟随默认（第一个 API）—</option>
+        <!-- 绑定失效时补一个占位项，否则下拉框是空白的，看不出发生了什么 -->
+        <option v-if="binding.kind === 'stale'" :value="binding.requestedId" disabled>
+          （已删除的 API）
+        </option>
         <option v-for="ep in llmEndpoints" :key="ep.id" :value="ep.id">
           {{ ep.name }} — {{ ep.model || '未选择模型' }}
         </option>
       </select>
-      <span v-if="!agentCfg.model && !hasApi" class="api-warn">请先配置 API</span>
-      <span v-else-if="!agentCfg.model" class="api-warn">未选择</span>
+      <span v-if="binding.kind === 'no-api'" class="api-warn">请先配置 API</span>
+      <span v-else-if="binding.kind === 'stale'" class="api-warn">绑定失效</span>
+      <span v-else-if="binding.kind === 'follow-default'" class="api-follow"
+        >跟随默认：{{ binding.endpoint.name }}</span
+      >
       <span v-else class="api-ok">✓</span>
     </div>
+    <p v-if="binding.kind === 'stale'" class="api-warn binding-stale-msg" role="alert">
+      这个 Agent 指定的 API 已被删除，运行时会直接失败（不会悄悄换成别的 API）。请重新选择一个
+      API，或选「跟随默认」。
+    </p>
   </AppCard>
 
   <!-- LLM 参数 (所有 Agent 通用) -->
   <AppCard padding="md" class="detail-card">
     <h4>LLM 参数</h4>
     <p class="form-hint">
-      控制此 Agent 的采样行为和生成长度。带「已覆写」徽标的参数是你改过的；清掉覆写即回默认。
+      控制此 Agent 的采样行为和生成长度。框里是实际会发送的值，旁边的标记说明它来自哪里：
+      「已覆写」是你在这里改过的；「来自 API 池」是当前所用 API
+      设置的默认参数；「默认」是内容包为这个 Agent 调好的值。
     </p>
     <div
       class="form-grid"
@@ -194,16 +243,19 @@ const readableBooks = computed(() =>
     >
       <label class="form-label"
         >Temperature
-        <span class="source-badge" :class="{ overridden: isOverridden('temperature') }">{{
-          isOverridden('temperature') ? '已覆写' : '默认'
-        }}</span>
+        <span
+          class="source-badge"
+          :class="`source-${llmParams.temperature.source}`"
+          data-param="temperature"
+          >{{ paramSourceLabel('temperature') }}</span
+        >
         <p class="form-hint">越高越随机 (0-2)</p>
         <input
           type="number"
           step="0.1"
           min="0"
           max="2"
-          :value="agentCfg.temperature"
+          :value="llmParams.temperature.value"
           class="form-input"
           @input="
             setAgentField({
@@ -214,8 +266,8 @@ const readableBooks = computed(() =>
       </label>
       <label class="form-label"
         >Top P
-        <span class="source-badge" :class="{ overridden: isOverridden('topP') }">{{
-          isOverridden('topP') ? '已覆写' : '默认'
+        <span class="source-badge" :class="`source-${llmParams.topP.source}`" data-param="topP">{{
+          paramSourceLabel('topP')
         }}</span>
         <p class="form-hint">核采样阈值 (0-1)</p>
         <input
@@ -223,23 +275,26 @@ const readableBooks = computed(() =>
           step="0.05"
           min="0"
           max="1"
-          :value="agentCfg.topP"
+          :value="llmParams.topP.value"
           class="form-input"
           @input="setAgentField({ topP: Number(($event.target as HTMLInputElement).value) })"
         />
       </label>
       <label class="form-label"
         >Frequency Penalty
-        <span class="source-badge" :class="{ overridden: isOverridden('freqPen') }">{{
-          isOverridden('freqPen') ? '已覆写' : '默认'
-        }}</span>
+        <span
+          class="source-badge"
+          :class="`source-${llmParams.freqPen.source}`"
+          data-param="freqPen"
+          >{{ paramSourceLabel('freqPen') }}</span
+        >
         <p class="form-hint">抑制重复 (-2 ~ 2)</p>
         <input
           type="number"
           step="0.1"
           min="-2"
           max="2"
-          :value="agentCfg.freqPen"
+          :value="llmParams.freqPen.value"
           class="form-input"
           @input="
             setAgentField({
@@ -250,16 +305,19 @@ const readableBooks = computed(() =>
       </label>
       <label class="form-label"
         >Presence Penalty
-        <span class="source-badge" :class="{ overridden: isOverridden('presPen') }">{{
-          isOverridden('presPen') ? '已覆写' : '默认'
-        }}</span>
+        <span
+          class="source-badge"
+          :class="`source-${llmParams.presPen.source}`"
+          data-param="presPen"
+          >{{ paramSourceLabel('presPen') }}</span
+        >
         <p class="form-hint">鼓励新话题 (-2 ~ 2)</p>
         <input
           type="number"
           step="0.1"
           min="-2"
           max="2"
-          :value="agentCfg.presPen"
+          :value="llmParams.presPen.value"
           class="form-input"
           @input="
             setAgentField({
@@ -270,16 +328,19 @@ const readableBooks = computed(() =>
       </label>
       <label class="form-label"
         >Max Tokens
-        <span class="source-badge" :class="{ overridden: isOverridden('maxTokens') }">{{
-          isOverridden('maxTokens') ? '已覆写' : '默认'
-        }}</span>
+        <span
+          class="source-badge"
+          :class="`source-${llmParams.maxTokens.source}`"
+          data-param="maxTokens"
+          >{{ paramSourceLabel('maxTokens') }}</span
+        >
         <p class="form-hint">单次回复最大长度</p>
         <input
           type="number"
           min="100"
           max="384000"
           step="100"
-          :value="agentCfg.maxTokens"
+          :value="llmParams.maxTokens.value"
           class="form-input"
           @input="
             setAgentField({
@@ -471,10 +532,26 @@ const readableBooks = computed(() =>
   border: 1px solid transparent;
   letter-spacing: 0.02em;
 }
-.source-badge.overridden {
+.source-badge.overridden,
+.source-badge.source-override {
   background: color-mix(in srgb, var(--theme-primary) 16%, transparent);
   color: var(--theme-primary);
   border-color: color-mix(in srgb, var(--theme-primary) 30%, transparent);
+}
+/* S-10：值来自 API 池的默认参数（盖过了内容包默认） */
+.source-badge.source-pool {
+  background: color-mix(in srgb, var(--theme-warning) 14%, transparent);
+  color: var(--theme-warning);
+  border-color: color-mix(in srgb, var(--theme-warning) 30%, transparent);
+}
+/* S-08：跟随默认是中性状态，不是警告 */
+.api-follow {
+  font-size: 0.8rem;
+  color: var(--theme-text-muted);
+  white-space: nowrap;
+}
+.binding-stale-msg {
+  margin: var(--theme-spacing-sm) 0 0;
 }
 @media (prefers-reduced-motion: reduce) {
   .source-badge {

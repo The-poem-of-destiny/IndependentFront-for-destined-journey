@@ -7,7 +7,15 @@ import type { AgentActivityRun, ChatMessage, SystemEvent } from '@engine/types/t
 import { escapeHtml } from '@engine/story/beautifier';
 import { splitSceneImageSegments } from '@engine/image/image-segments';
 import { useSettingsStore } from '../../stores/settings-store';
-import { useGameStore } from '../../stores/game-store';
+import { useGameStore, type TimelineRestoreResult } from '../../stores/game-store';
+import { confirmDialog } from '../../lib/confirm-dialog';
+import { activityRunSideTaskLabel } from '../../lib/agent-activity';
+import {
+  findUnfinishedTurn,
+  groupDiscardedAttempts,
+  isDiscardedAttempt,
+} from '../../lib/turn-recovery';
+import TurnRecoveryPanel from './TurnRecoveryPanel.vue';
 import { useUIStore } from '../../stores/ui-store';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useManualSceneImage } from '../../composables/useManualSceneImage';
@@ -185,16 +193,27 @@ const ctxMenu = ref<{
   canRollback: boolean;
   canImage: boolean;
   canRewrite: boolean;
+  canRestore: boolean;
 } | null>(null);
 
-/** 最新一条 assistant 消息（「回退本轮」仅对它生效） */
+/** 最新一条 assistant 消息（「回退本轮」仅对它生效）；已废弃的尝试不算（GAME-10） */
 const latestAssistantMsg = computed<ChatMessage | undefined>(() => {
   const list = props.messages ?? [];
   for (let i = list.length - 1; i >= 0; i--) {
-    if (list[i].role === 'assistant') return list[i];
+    if (list[i].role === 'assistant' && !isDiscardedAttempt(list[i])) return list[i];
   }
   return undefined;
 });
+
+/**
+ * 已废弃的尝试（GAME-10）：重试后旧输出被标成 failed 但仍在列表里。连续的几条折成
+ * 一行「已废弃的尝试（N）」，默认收起；它们没有操作条、没有右键、不画插画。
+ */
+const discarded = computed(() => groupDiscardedAttempts(props.messages ?? []));
+const discardedOpen = ref<Record<string, boolean>>({});
+function toggleDiscarded(id: string) {
+  discardedOpen.value = { ...discardedOpen.value, [id]: !discardedOpen.value[id] };
+}
 
 /** 最新一条 user 消息（user 消息上「回退到这条输入」仅对它生效） */
 const latestUserMsg = computed<ChatMessage | undefined>(() => {
@@ -229,35 +248,95 @@ const thinkingText = computed(() => {
 
 function canRetryRun(run: AgentActivityRun): boolean {
   const messageId = run.sourceMessageId;
-  if (!messageId || props.isGenerating || (run.status !== 'failed' && run.status !== 'cancelled')) {
+  if (
+    !messageId ||
+    props.isGenerating ||
+    game.isRewriting ||
+    (run.status !== 'failed' && run.status !== 'cancelled') ||
+    // 润色等手动侧链不是回合：它失败了「重试」会把整回合重发一遍（GAME-17）
+    activityRunSideTaskLabel(run) !== null
+  ) {
     return false;
   }
-  const messageRuns = activityRunsForMessage(messageId);
+  const messageRuns = activityRunsForMessage(messageId).filter(
+    (entry) => activityRunSideTaskLabel(entry) === null,
+  );
   return (
     latestUserMsg.value?.id === messageId && messageRuns[messageRuns.length - 1]?.id === run.id
   );
 }
 
-/** 「回退」项的文案：assistant = 回退本轮；user = 回退到这条输入 */
-function rollbackLabel(msg: ChatMessage): string {
-  return msg.role === 'user' ? '回退到这条输入' : '回退本轮';
+/**
+ * 回退 / 重新生成可不可用 —— 与 `game.rollbackOneTurn` 同一条判据：
+ * 要回到「上一回合结束时」的快照，当前回合至少得是第 2 回合。开场回合不提供这两项，
+ * 并在操作条上写明原因（GAME-15：此前是先给出入口、点了再 toast 拒绝）。
+ */
+const latestTurnRollbackable = computed(() => (latestUserMsg.value?.turn ?? 0) >= 2);
+const OPENING_TURN_NOTE = '开场回合不能回退或重新生成';
+
+/**
+ * 最新一回合的最后一条消息（跳过系统卡片）—— 可见操作条只挂在它下面（GAME-04）。
+ * 是正文 → 重新生成 / 回退 / 润色 / 配图 / 复制；是玩家输入（回合失败或被中止，
+ * 没有正文）→ 「回退到这条输入」。
+ */
+const latestTurnMsg = computed<ChatMessage | undefined>(() => {
+  const list = props.messages ?? [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const role = list[i].role;
+    if (role === 'user' || (role === 'assistant' && !isDiscardedAttempt(list[i]))) return list[i];
+  }
+  return undefined;
+});
+
+/**
+ * GAME-09：回合没完成、而内存里的回合记录已经没了（去过设置页 / 刷新 / 切过存档）——
+ * 从持久化状态推导出来，在那条输入下面立一条「上一回合未完成」横幅。
+ */
+const unfinishedTurn = computed(() =>
+  findUnfinishedTurn(props.messages ?? [], {
+    isGenerating: !!props.isGenerating,
+    hasLiveRecord: (id) =>
+      activityRunsForMessage(id).some((run) => activityRunSideTaskLabel(run) === null),
+  }),
+);
+
+const UNFINISHED_MESSAGES = {
+  failed: '上一回合没有完成。',
+  interrupted: '上一回合在生成途中被中断，没有完成。',
+  'no-reply': '这句输入还没有得到回应。',
+} as const;
+
+/** 操作条显示在这条消息下面吗（生成中 / 战斗中整条收起，那时一个都点不了） */
+function showTurnActions(msg: ChatMessage): boolean {
+  return latestTurnMsg.value?.id === msg.id && !props.isGenerating && !game.isAgentCombat;
 }
 
 function menuFor(msg: ChatMessage): {
   canRollback: boolean;
   canImage: boolean;
   canRewrite: boolean;
+  canRestore: boolean;
 } {
   // user 消息：只有最新一条能回退；「为这一段配图」是给正文的，user 上不出现
   if (msg.role === 'user') {
-    return { canRollback: latestUserMsg.value?.id === msg.id, canImage: false, canRewrite: false };
+    return {
+      canRollback: latestUserMsg.value?.id === msg.id && latestTurnRollbackable.value,
+      canImage: false,
+      canRewrite: false,
+      canRestore: false,
+    };
+  }
+  // 已废弃的尝试：什么都不给（不回退、不润色、不配图 —— 它已经不是故事的一部分）
+  if (isDiscardedAttempt(msg)) {
+    return { canRollback: false, canImage: false, canRewrite: false, canRestore: false };
   }
   const isLatest = latestAssistantMsg.value?.id === msg.id;
   return {
-    canRollback: isLatest,
+    canRollback: isLatest && latestTurnRollbackable.value,
     canImage: s.imageGenMode !== 'off',
     // 正文润色只对**最新一条**正文开放（改写的是「当前这一幕」，不是历史消息）
     canRewrite: isLatest && msg.content.trim().length > 0,
+    canRestore: msg.preRewriteContent !== undefined,
   };
 }
 
@@ -265,19 +344,16 @@ function menuFor(msg: ChatMessage): {
 function canOpenMenu(msg: ChatMessage): boolean {
   if (game.isAgentCombat || props.isGenerating) return false;
   const can = menuFor(msg);
-  return can.canRollback || can.canImage || can.canRewrite;
+  return can.canRollback || can.canImage || can.canRewrite || can.canRestore;
 }
 
-/** 悬停提示照着实际能做的事写 —— 写「回退本轮」却点不动是最没必要的一种困惑 */
-function ctxHint(msg: ChatMessage): string {
-  if (!canOpenMenu(msg)) return '';
-  const can = menuFor(msg);
-  const items: string[] = [];
-  if (can.canRollback) items.push(rollbackLabel(msg));
-  if (can.canImage) items.push('为这一段配图');
-  if (can.canRewrite) items.push('润色正文');
-  items.push('复制');
-  return `右键：${items.join(' / ')}`;
+const ctxMenuEl = ref<HTMLElement | null>(null);
+
+function ctxMenuItems(): HTMLButtonElement[] {
+  return [
+    ...(ctxMenuEl.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ??
+      []),
+  ];
 }
 
 function onContextMenu(e: MouseEvent, msg: ChatMessage) {
@@ -285,36 +361,126 @@ function onContextMenu(e: MouseEvent, msg: ChatMessage) {
   e.preventDefault();
   // 视口夹紧，避免菜单溢出屏幕
   const x = Math.min(e.clientX, window.innerWidth - 200);
-  const y = Math.min(e.clientY, window.innerHeight - 128);
+  const y = Math.min(e.clientY, window.innerHeight - 160);
   ctxMenu.value = { x, y, msgId: msg.id, role: msg.role, ...menuFor(msg) };
+  // 焦点移进菜单：键盘用户能直接上下选、回车执行（preventScroll —— 滚动会把菜单关掉）
+  nextTick(() => ctxMenuItems()[0]?.focus({ preventScroll: true }));
+}
+
+/** 菜单内方向键在项之间循环；Tab 离开即关菜单 */
+function onCtxMenuKeydown(e: KeyboardEvent) {
+  if (e.key === 'Tab') {
+    closeCtxMenu();
+    return;
+  }
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
+  e.preventDefault();
+  const items = ctxMenuItems();
+  if (items.length === 0) return;
+  const current = items.indexOf(document.activeElement as HTMLButtonElement);
+  let next = 0;
+  if (e.key === 'End') next = items.length - 1;
+  else if (e.key === 'ArrowDown') next = (current + 1) % items.length;
+  else if (e.key === 'ArrowUp') next = (current - 1 + items.length) % items.length;
+  items[next].focus({ preventScroll: true });
 }
 
 function closeCtxMenu() {
   ctxMenu.value = null;
 }
 
-async function ctxRollback() {
-  const result = await game.rollbackOneTurn();
-  closeCtxMenu();
+function findMessage(msgId: string | undefined): ChatMessage | undefined {
+  return msgId ? (props.messages ?? []).find((m) => m.id === msgId) : undefined;
+}
+
+/** 回退结果的统一出口；true = 已在本存档回到上一回合 */
+function reportRestore(result: TimelineRestoreResult): boolean {
   if (result.status === 'projection-failed') {
     ui.toast(result.error, 'error');
     ui.navigate('home');
-    return;
+    return false;
   }
-  if (result.status === 'rejected') ui.toast(result.error, 'warning');
-  else if (result.warning) ui.toast(result.warning, 'warning');
+  if (result.status === 'rejected') {
+    ui.toast(result.error, 'warning');
+    return false;
+  }
+  if (result.warning) ui.toast(result.warning, 'warning');
+  return result.continuation === 'same-save';
 }
 
-async function ctxCopy() {
-  const msgId = ctxMenu.value?.msgId;
-  closeCtxMenu();
-  const msg = (props.messages ?? []).find((m) => m.id === msgId);
+/**
+ * 「回退本轮」/「回退到这条输入」（GAME-06）：一个花钱生成的回合不能一点就没 ——
+ * 先确认，说清楚丢掉的是什么。
+ */
+async function rollbackTurn(role: ChatMessage['role']): Promise<void> {
+  const ok = await confirmDialog({
+    title: role === 'user' ? '回退到这条输入？' : '回退这一回合？',
+    message:
+      role === 'user'
+        ? '将回到上一回合结束时的状态，这句输入会填回输入框。'
+        : '将回到上一回合结束时的状态，这一回合的输入会填回输入框。',
+    details: [
+      ...(role === 'user' ? [] : ['这一回合的正文会被丢弃（已花费的生成费用不会退回）']),
+      '这一回合之后做的手动改动也会一并丢弃',
+    ],
+    confirmLabel: '回退',
+    danger: true,
+  });
+  if (!ok) return;
+  reportRestore(await game.rollbackOneTurn());
+}
+
+/**
+ * 「重新生成」（GAME-04）：确认 → 回退本轮 → 用同一句输入走发送缝重发。
+ * 🔴 不开第二条写路径：回退走 `rollbackOneTurn`，发送走与输入框同一个 `send` 事件
+ *    （GamePage.handleSend）。`refillInput: false` 让那句话不再残留在输入框里。
+ */
+async function regenerateTurn(mode: 'regenerate' | 'rollback-retry' = 'regenerate'): Promise<void> {
+  const input = latestUserMsg.value?.content;
+  if (!input) return;
+  const ok = await confirmDialog(
+    mode === 'regenerate'
+      ? {
+          title: '重新生成这一回合？',
+          message: '会丢弃这一回合的正文，用同一句输入重新调用模型（会再次计费）。',
+          details: ['这一回合之后做的手动改动也会一并丢弃'],
+          confirmLabel: '重新生成',
+          danger: true,
+        }
+      : {
+          // GAME-16：没完成的回合「回退并重试」—— 与不回退的「再次尝试」是两条不同的路
+          title: '回退并重试？',
+          message: '先回到上一回合结束时的状态，再用同一句输入重新调用模型（会再次计费）。',
+          details: ['这一回合已经写入的内容会被丢弃'],
+          confirmLabel: '回退并重试',
+          danger: true,
+        },
+  );
+  if (!ok) return;
+  if (reportRestore(await game.rollbackOneTurn({ refillInput: false }))) emit('send', input);
+}
+
+async function copyMessage(msg: ChatMessage | undefined): Promise<void> {
   if (!msg) return;
   try {
     await navigator.clipboard.writeText(msg.content);
+    ui.toast('已复制', 'success');
   } catch (e) {
     console.warn('[ChatFlow] 复制失败:', e);
+    ui.toast('复制失败', 'warning');
   }
+}
+
+async function ctxRollback() {
+  const role = ctxMenu.value?.role ?? 'assistant';
+  closeCtxMenu();
+  await rollbackTurn(role);
+}
+
+async function ctxCopy() {
+  const msg = findMessage(ctxMenu.value?.msgId);
+  closeCtxMenu();
+  await copyMessage(msg);
 }
 
 // ===== 「润色正文」（DeepSeek beta 前缀续写侧链，手动触发）=====
@@ -330,7 +496,15 @@ async function ctxCopy() {
 async function ctxRewriteProse() {
   const msgId = ctxMenu.value?.msgId;
   closeCtxMenu();
-  if (!msgId) return;
+  if (msgId) await rewriteProse(msgId);
+}
+
+/**
+ * 🔴 GAME-07：润色进行中（`game.isRewriting`）不能再点第二次、不能发送新回合；
+ *    原文由 store 留在消息上，「还原润色前」随时可换回去。
+ */
+async function rewriteProse(msgId: string) {
+  if (game.isRewriting) return;
   // 🔴 立刻给一次反馈：侧链要等 API 回来才有结果，中途毫无提示会让玩家以为功能坏了。
   ui.toast('正在润色正文…', 'info');
   try {
@@ -343,6 +517,17 @@ async function ctxRewriteProse() {
   } catch (e) {
     ui.toast(`润色失败：${e instanceof Error ? e.message : String(e)}`, 'error');
   }
+}
+
+/** 「还原润色前」：换回润色前的原文（只在消息上留着备份时出现） */
+async function restorePreRewrite(msgId: string) {
+  if (await game.restorePreRewrite(msgId)) ui.toast('已还原润色前的正文', 'success');
+}
+
+async function ctxRestorePreRewrite() {
+  const msgId = ctxMenu.value?.msgId;
+  closeCtxMenu();
+  if (msgId) await restorePreRewrite(msgId);
 }
 
 // ===== 「为这一段配图」（D33 / D34 / D24）=====
@@ -374,9 +559,12 @@ function strippedNarrativeOf(content: string): string {
 }
 
 async function ctxSceneImage() {
-  const msgId = ctxMenu.value?.msgId;
+  const msg = findMessage(ctxMenu.value?.msgId);
   closeCtxMenu();
-  const msg = (props.messages ?? []).find((m) => m.id === msgId);
+  await illustrate(msg);
+}
+
+async function illustrate(msg: ChatMessage | undefined) {
   if (!msg) return;
   const saveId = sceneImages.activeSaveId;
   if (saveId === null) {
@@ -447,11 +635,8 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
       <template v-for="msg in messages" :key="msg.id">
         <!-- 用户消息 -->
         <template v-if="msg.role === 'user'">
-          <div
-            class="bubble-row bubble-row-player"
-            :title="ctxHint(msg)"
-            @contextmenu="onContextMenu($event, msg)"
-          >
+          <!-- 不挂原生 title：右键提示反复弹在正文上（GAME-22），可见入口改为下方操作条 -->
+          <div class="bubble-row bubble-row-player" @contextmenu="onContextMenu($event, msg)">
             <div class="bubble bubble-player">
               <span class="bubble-prefix">你:</span>
               <!-- 内容先过 escapeHtml()，再只把换行还原成 <br>。别把 escapeHtml 摘掉 -->
@@ -466,18 +651,93 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
             :key="run.id"
             :run="run"
             :can-retry="canRetryRun(run)"
+            :can-rollback-retry="latestTurnRollbackable"
+            :rollback-blocked-reason="OPENING_TURN_NOTE"
             @retry="emit('retry-turn', msg.id)"
+            @rollback-retry="regenerateTurn('rollback-retry')"
             @resize="handleNarrativeResize"
           />
+
+          <!-- GAME-09：内存记录没了但存档里记着没完成 → 持久化推导出的横幅，出路与回合卡片一致 -->
+          <TurnRecoveryPanel
+            v-if="unfinishedTurn?.userMessageId === msg.id"
+            class="turn-unfinished"
+            :message="UNFINISHED_MESSAGES[unfinishedTurn.reason]"
+            :cause-unknown="unfinishedTurn.reason !== 'no-reply'"
+            :can-retry="!game.isRewriting && !game.isAgentCombat"
+            :can-rollback-retry="!game.isRewriting && !game.isAgentCombat && latestTurnRollbackable"
+            :can-rollback-edit="!game.isRewriting && !game.isAgentCombat && latestTurnRollbackable"
+            :rollback-blocked-reason="latestTurnRollbackable ? undefined : OPENING_TURN_NOTE"
+            @retry="emit('retry-turn', msg.id)"
+            @rollback-retry="regenerateTurn('rollback-retry')"
+            @rollback-edit="rollbackTurn('user')"
+          />
+
+          <!--
+            最新输入没有正文（失败 / 中止）：可见的「回退到这条输入」（GAME-04）。
+            「上一回合未完成」横幅在时，这一项已并进横幅的第三条出路，不再单独渲染一行
+          -->
+          <div
+            v-if="showTurnActions(msg) && unfinishedTurn?.userMessageId !== msg.id"
+            class="turn-actions turn-actions-player"
+            role="group"
+            aria-label="这条输入的操作"
+          >
+            <button
+              v-if="latestTurnRollbackable"
+              type="button"
+              class="turn-action"
+              :disabled="game.isRewriting"
+              @click="rollbackTurn('user')"
+            >
+              <i class="fa-solid fa-rotate-left" aria-hidden="true" /> 回退到这条输入
+            </button>
+            <span v-else class="turn-actions-note">{{ OPENING_TURN_NOTE }}</span>
+          </div>
         </template>
+
+        <!--
+          已废弃的尝试（GAME-10）：组首渲染一行可展开的「已废弃的尝试（N）」，其余组员不单独渲染。
+          展开后只读：不转发右键、不画插画（不传 message-id = 没有插画锚点，档位 off）、没有操作条
+        -->
+        <div
+          v-else-if="msg.role === 'assistant' && discarded.groups.has(msg.id)"
+          class="bubble-row bubble-row-discarded"
+        >
+          <div class="discarded-attempts">
+            <button
+              type="button"
+              class="discarded-toggle"
+              :aria-expanded="!!discardedOpen[msg.id]"
+              @click="toggleDiscarded(msg.id)"
+            >
+              <i
+                class="fa-solid fa-chevron-right discarded-chevron"
+                :class="{ 'is-open': discardedOpen[msg.id] }"
+                aria-hidden="true"
+              />
+              已废弃的尝试（{{ discarded.groups.get(msg.id)!.length }}）
+              <small>不属于故事，也不会交给模型</small>
+            </button>
+            <div v-if="discardedOpen[msg.id]" class="discarded-body">
+              <BeautifiedNarrative
+                v-for="attempt in discarded.groups.get(msg.id)"
+                :key="attempt.id"
+                class="narrative-body discarded-narrative"
+                :text="attempt.content"
+                image-mode="off"
+                @resize="handleNarrativeResize"
+              />
+            </div>
+          </div>
+        </div>
 
         <!-- AI 叙事消息 — 只渲染美化正文 -->
         <!-- data-message-id 是 CG 图鉴「跳回那条消息」的锚点（§10.3），别删 -->
         <div
-          v-else-if="msg.role === 'assistant'"
+          v-else-if="msg.role === 'assistant' && !discarded.memberIds.has(msg.id)"
           :data-message-id="msg.id"
           class="bubble-row bubble-row-narrative"
-          :title="ctxHint(msg)"
           @contextmenu="onContextMenu($event, msg)"
         >
           <div class="bubble bubble-narrative-full">
@@ -496,6 +756,73 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
               @resize="handleNarrativeResize"
             />
             <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
+
+            <!--
+              最新一回合的可见操作条（GAME-04）：常显但压低，悬停 / 聚焦时才提亮 ——
+              正文优先，这一行不跟叙事抢视线。右键菜单保留为快捷方式。
+            -->
+            <div
+              v-if="showTurnActions(msg)"
+              class="turn-actions"
+              role="group"
+              aria-label="这一回合的操作"
+            >
+              <template v-if="latestTurnRollbackable">
+                <button
+                  type="button"
+                  class="turn-action"
+                  :disabled="game.isRewriting"
+                  @click="regenerateTurn('regenerate')"
+                >
+                  <i class="fa-solid fa-arrows-rotate" aria-hidden="true" /> 重新生成
+                </button>
+                <button
+                  type="button"
+                  class="turn-action"
+                  :disabled="game.isRewriting"
+                  @click="rollbackTurn('assistant')"
+                >
+                  <i class="fa-solid fa-rotate-left" aria-hidden="true" /> 回退
+                </button>
+              </template>
+              <button
+                v-if="msg.content.trim().length > 0"
+                type="button"
+                class="turn-action"
+                :disabled="game.isRewriting"
+                @click="rewriteProse(msg.id)"
+              >
+                <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true" />
+                {{ game.isRewriting ? '润色中…' : '润色' }}
+              </button>
+              <button
+                v-if="msg.preRewriteContent !== undefined"
+                type="button"
+                class="turn-action"
+                :disabled="game.isRewriting"
+                @click="restorePreRewrite(msg.id)"
+              >
+                <i class="fa-solid fa-clock-rotate-left" aria-hidden="true" /> 还原润色前
+              </button>
+              <button
+                v-if="s.imageGenMode !== 'off'"
+                type="button"
+                class="turn-action"
+                :disabled="imageBusy"
+                @click="illustrate(msg)"
+              >
+                <i class="fa-solid fa-image" aria-hidden="true" /> 配图
+              </button>
+              <button type="button" class="turn-action" @click="copyMessage(msg)">
+                <i class="fa-solid fa-copy" aria-hidden="true" /> 复制
+              </button>
+              <span v-if="game.isRewriting" class="turn-actions-note" role="status">
+                <span class="turn-actions-spinner" aria-hidden="true" />正在润色正文…
+              </span>
+              <span v-else-if="!latestTurnRollbackable" class="turn-actions-note">
+                {{ OPENING_TURN_NOTE }}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -572,9 +899,11 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
       </div>
     </div>
 
+    <!-- 润色进行中锁住发送（GAME-07）：润色结果会写回最新正文，期间开新回合会两头打架 -->
     <InputBar
       :disabled="isGenerating"
       :stopping="game.currentAgentActivityRun?.status === 'stopping'"
+      :locked-reason="game.isRewriting ? '正在润色正文，完成后再继续…' : undefined"
       @send="(c) => emit('send', c)"
       @stop="emit('stop')"
     />
@@ -583,25 +912,56 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
     <Teleport to="body">
       <div
         v-if="ctxMenu"
+        ref="ctxMenuEl"
         class="ctx-menu"
+        role="menu"
+        aria-label="消息操作"
         :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+        @keydown="onCtxMenuKeydown"
       >
         <button
           v-if="ctxMenu.canRollback"
+          type="button"
+          role="menuitem"
           class="ctx-item"
-          :disabled="game.isAgentCombat"
+          :disabled="game.isAgentCombat || game.isRewriting"
           @click.stop="ctxRollback"
         >
-          <i class="fa-solid fa-rotate-left" />
+          <i class="fa-solid fa-rotate-left" aria-hidden="true" />
           {{ ctxMenu.role === 'user' ? '回退到这条输入' : '回退本轮' }}
         </button>
-        <button v-if="ctxMenu.canImage" class="ctx-item" @click.stop="ctxSceneImage">
-          <i class="fa-solid fa-image" /> 为这一段配图
+        <button
+          v-if="ctxMenu.canImage"
+          type="button"
+          role="menuitem"
+          class="ctx-item"
+          @click.stop="ctxSceneImage"
+        >
+          <i class="fa-solid fa-image" aria-hidden="true" /> 为这一段配图
         </button>
-        <button v-if="ctxMenu.canRewrite" class="ctx-item" @click.stop="ctxRewriteProse">
-          <i class="fa-solid fa-wand-magic-sparkles" /> 润色正文
+        <button
+          v-if="ctxMenu.canRewrite"
+          type="button"
+          role="menuitem"
+          class="ctx-item"
+          :disabled="game.isRewriting"
+          @click.stop="ctxRewriteProse"
+        >
+          <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true" /> 润色正文
         </button>
-        <button class="ctx-item" @click.stop="ctxCopy"><i class="fa-solid fa-copy" /> 复制</button>
+        <button
+          v-if="ctxMenu.canRestore"
+          type="button"
+          role="menuitem"
+          class="ctx-item"
+          :disabled="game.isRewriting"
+          @click.stop="ctxRestorePreRewrite"
+        >
+          <i class="fa-solid fa-clock-rotate-left" aria-hidden="true" /> 还原润色前
+        </button>
+        <button type="button" role="menuitem" class="ctx-item" @click.stop="ctxCopy">
+          <i class="fa-solid fa-copy" aria-hidden="true" /> 复制
+        </button>
       </div>
     </Teleport>
 
@@ -902,6 +1262,150 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
   width: 100%;
 }
 
+/* ===== 上一回合未完成横幅（GAME-09）===== */
+.turn-unfinished {
+  width: 100%;
+}
+
+/* ===== 已废弃的尝试（GAME-10）=====
+   压低到几乎只是一行旁注：默认收起，展开后正文也整体减淡，读得到但不像故事。 */
+.bubble-row-discarded {
+  justify-content: center;
+}
+.discarded-attempts {
+  width: 100%;
+  padding: 0 8px;
+}
+.discarded-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 1px dashed var(--theme-card-border);
+  border-radius: var(--theme-radius-sm, 4px);
+  background: none;
+  color: var(--theme-text-muted);
+  font-family: var(--theme-font-body, system-ui, sans-serif);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.discarded-toggle small {
+  font-size: 0.6875rem;
+  opacity: 0.8;
+}
+.discarded-toggle:hover {
+  color: var(--theme-text-secondary);
+}
+.discarded-toggle:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
+}
+.discarded-chevron {
+  font-size: 0.625rem;
+  transition: transform 150ms ease;
+}
+.discarded-chevron.is-open {
+  transform: rotate(90deg);
+}
+.discarded-body {
+  margin-top: var(--theme-spacing-sm, 8px);
+  padding-left: var(--theme-spacing-md, 12px);
+  border-left: 2px solid var(--theme-card-border);
+  opacity: 0.6;
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+.discarded-narrative + .discarded-narrative {
+  margin-top: var(--theme-spacing-md, 12px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .discarded-chevron {
+    transition: none;
+  }
+}
+
+/* ===== 最新一回合的操作条（GAME-04）=====
+   常显但压低（叙事优先）：悬停该回合 / 键盘聚焦进来时才提亮到正常对比度。 */
+.turn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--theme-spacing-xs, 4px);
+  margin-top: var(--theme-spacing-sm, 8px);
+  font-family: var(--theme-font-body, system-ui, sans-serif);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  opacity: 0.6;
+  transition: opacity 150ms ease;
+}
+.turn-actions-player {
+  justify-content: flex-start;
+  padding: 0 var(--theme-spacing-sm, 8px);
+}
+.bubble-row:hover .turn-actions,
+.turn-actions:hover,
+.turn-actions:focus-within {
+  opacity: 1;
+}
+.turn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-sm, 4px);
+  background: none;
+  color: var(--theme-text-muted);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    background 150ms ease,
+    border-color 150ms ease;
+}
+.turn-action:hover:not(:disabled) {
+  color: var(--theme-text-primary);
+  background: var(--theme-surface-hover, var(--theme-card-bg));
+  border-color: var(--theme-card-border);
+}
+.turn-action:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 1px;
+  color: var(--theme-text-primary);
+}
+.turn-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.turn-action i {
+  font-size: 0.6875rem;
+  opacity: 0.85;
+}
+.turn-actions-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  color: var(--theme-text-muted);
+}
+.turn-actions-spinner {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid color-mix(in srgb, var(--theme-primary) 25%, transparent);
+  border-top-color: var(--theme-primary);
+  border-radius: 50%;
+  animation: thinking-spin 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn-actions,
+  .turn-action {
+    transition: none;
+  }
+  .turn-actions-spinner {
+    animation: none;
+  }
+}
+
 /* ===== 右键菜单 ===== */
 .ctx-menu {
   position: fixed;
@@ -931,8 +1435,13 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
   border-radius: var(--theme-radius-sm, 4px);
   text-align: left;
 }
-.ctx-item:hover:not(:disabled) {
+.ctx-item:hover:not(:disabled),
+.ctx-item:focus-visible {
   background: var(--theme-surface-hover, var(--theme-card-bg));
+}
+.ctx-item:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: -2px;
 }
 .ctx-item:disabled {
   opacity: 0.4;

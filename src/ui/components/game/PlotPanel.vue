@@ -6,6 +6,12 @@ import { useGameStore } from '../../stores/game-store';
 import PlotThreadsPanel from './PlotThreadsPanel.vue';
 import PlotTimeline from './PlotTimeline.vue';
 import { OUTLINE_STATUS_LABELS } from './plot-timeline';
+import {
+  chapterPeekKey,
+  isChapterMasked,
+  isOutlineEventMasked,
+  maskedChapterLabel,
+} from './plot-thread-view';
 
 const game = useGameStore();
 
@@ -36,40 +42,68 @@ watch(spoilerMode, (on) => {
   if (!on) peeked.value = new Set();
 });
 
+// 蒙版判据全在 plot-thread-view.ts（事件 / 章节同一口径），组件不装第二份
 function isMasked(ev: PlotEvent): boolean {
-  return ev.visibility !== 'revealed' && !peeked.value.has(ev.id);
+  return isOutlineEventMasked(ev, peeked.value);
+}
+
+function peekKey(key: string) {
+  if (!spoilerMode.value) return;
+  const next = new Set(peeked.value);
+  next.add(key);
+  peeked.value = next;
 }
 
 function peekEvent(ev: PlotEvent) {
-  if (!spoilerMode.value) return;
-  const next = new Set(peeked.value);
-  next.add(ev.id);
-  peeked.value = next;
+  peekKey(ev.id);
 }
 
 // ═══ 章节分组 ═══
 interface ChapterGroup {
+  /** 分组键（章节真名）—— 仅作展开态 / :key，蒙版时**不渲染为文字** */
+  key: string;
+  /** 显示名；未到达的章节为「第 N 章 · ？？？」 */
   title: string;
+  /** 章节摘要；蒙版时为空串（不进 DOM） */
   summary: string;
   status: 'pending' | 'active' | 'completed';
   events: PlotEvent[];
   isOther: boolean;
+  masked: boolean;
 }
 
 const chapterGroups = computed<ChapterGroup[]>(() => {
   const chapters = outline.value?.chapters ?? [];
   const evs = events.value;
   const known = new Set(chapters.map((c) => c.title));
-  const groups: ChapterGroup[] = chapters.map((c) => ({
-    title: c.title,
-    summary: c.summary,
-    status: c.status,
-    events: evs.filter((e) => e.chapterTitle === c.title),
-    isOther: false,
-  }));
+  const groups: ChapterGroup[] = chapters.map((c, i) => {
+    // 对应的大事件（depth 0）已揭示时，章节也算已到达
+    const chapterEvent = evs.find((e) => e.depth === 0 && (e.chapterTitle || e.title) === c.title);
+    const masked = isChapterMasked(
+      { title: c.title, status: c.status, visibility: chapterEvent?.visibility },
+      peeked.value,
+    );
+    return {
+      key: c.title,
+      title: masked ? maskedChapterLabel(i) : c.title,
+      summary: masked ? '' : c.summary,
+      status: c.status,
+      events: evs.filter((e) => e.chapterTitle === c.title),
+      isOther: false,
+      masked,
+    };
+  });
   const others = evs.filter((e) => !e.chapterTitle || !known.has(e.chapterTitle));
   if (others.length > 0) {
-    groups.push({ title: '其他', summary: '', status: 'pending', events: others, isOther: true });
+    groups.push({
+      key: '其他',
+      title: '其他',
+      summary: '',
+      status: 'pending',
+      events: others,
+      isOther: true,
+      masked: false,
+    });
   }
   return groups;
 });
@@ -182,6 +216,7 @@ const emptyText = computed(() => EMPTY_TEXT[plotMode.value] ?? EMPTY_TEXT.off);
               <span>剧透模式</span>
             </button>
           </div>
+          <!-- 总纲摘要始终显示、不打码：types.ts 的 PlotOutline.summary 约定它就是「防剧透层下的可见部分」 -->
           <p v-if="outline.summary" class="oh-summary">{{ outline.summary }}</p>
           <div class="oh-meta">
             <span v-if="worldLineShifts > 0" class="oh-badge shift"
@@ -197,26 +232,38 @@ const emptyText = computed(() => EMPTY_TEXT[plotMode.value] ?? EMPTY_TEXT.off);
         <div class="chapter-list">
           <div
             v-for="group in chapterGroups"
-            :key="group.title"
+            :key="group.key"
             class="chapter-item"
-            :class="'ch-' + group.status"
+            :class="['ch-' + group.status, { 'ch-masked': group.masked }]"
           >
             <button
               class="chap-header"
-              :aria-expanded="expanded.has(group.title)"
-              @click="toggleChapter(group.title)"
+              :aria-expanded="expanded.has(group.key)"
+              @click="toggleChapter(group.key)"
             >
               <span class="chap-dot" :class="'dot-' + group.status" />
               <span class="chap-title">{{ group.title }}</span>
               <span v-if="group.events.length > 0" class="chap-count"
                 >{{ group.events.length }} 事件</span
               >
-              <span class="chap-chevron" :class="{ open: expanded.has(group.title) }">▸</span>
+              <span class="chap-chevron" :class="{ open: expanded.has(group.key) }">▸</span>
             </button>
 
-            <div class="chap-body" :class="{ open: expanded.has(group.title) }">
+            <div class="chap-body" :class="{ open: expanded.has(group.key) }">
               <div class="chap-inner">
-                <p v-if="group.summary" class="chap-summary">{{ group.summary }}</p>
+                <div
+                  v-if="group.masked"
+                  class="chap-masked"
+                  :class="{ peekable: spoilerMode }"
+                  :role="spoilerMode ? 'button' : undefined"
+                  :tabindex="spoilerMode ? 0 : undefined"
+                  :aria-label="spoilerMode ? '点击揭示本章' : '本章尚未到达'"
+                  @click="peekKey(chapterPeekKey(group.key))"
+                  @keydown.enter="peekKey(chapterPeekKey(group.key))"
+                >
+                  本章尚未到达<span v-if="spoilerMode" class="masked-hint">点击揭示</span>
+                </div>
+                <p v-else-if="group.summary" class="chap-summary">{{ group.summary }}</p>
 
                 <div v-if="group.events.length > 0" class="event-list">
                   <template v-for="ev in group.events" :key="ev.id">
@@ -487,6 +534,26 @@ const emptyText = computed(() => EMPTY_TEXT[plotMode.value] ?? EMPTY_TEXT.off);
   font-size: 0.75rem;
   color: var(--theme-text-secondary);
   line-height: 1.55;
+}
+
+/* ═══ 未揭示的章节摘要（与蒙版事件卡同一视觉语言）═══ */
+.chap-masked {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--theme-text-muted);
+  user-select: none;
+}
+.chap-masked.peekable {
+  cursor: pointer;
+}
+.chap-masked.peekable:hover {
+  color: var(--theme-text-secondary);
+}
+.ch-masked .chap-title {
+  color: var(--theme-text-muted);
 }
 
 /* ═══ 事件卡片 ═══ */

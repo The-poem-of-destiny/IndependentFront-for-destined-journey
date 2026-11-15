@@ -43,6 +43,10 @@ export function buildAgentDefaultEntry(input: AgentDefaultInput): AgentDefaultEn
 
   const base: AgentDefaultEntry = {
     ...settings,
+    // 🔴 S-00：`model` 存的是**本机** API 池 id，写进项目默认后换台机器必然悬空，
+    //    新玩家会被「story 绑定的 API 已不存在」挡在创角之外。默认值里永远留空串
+    //    （打包脚本要求该键是字符串，所以留键不删）。
+    model: '',
     systemPrompt: '',
     template: '',
     presetId: '',

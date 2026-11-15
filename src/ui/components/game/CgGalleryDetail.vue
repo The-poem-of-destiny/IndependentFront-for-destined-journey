@@ -29,7 +29,13 @@
  */
 import { computed, ref, watch } from 'vue';
 import AppButton from '../shared/AppButton.vue';
-import { composeWarningLines, dialectIdOf, providerLabelOf, soleCharacterOf } from './cg-gallery';
+import {
+  composeWarningLines,
+  dialectIdOf,
+  pendingTakeStatusText,
+  providerLabelOf,
+  soleCharacterOf,
+} from './cg-gallery';
 import { REDRAW_DIALECT_MISMATCH_HINT, isRedrawDialectMismatch } from './scene-image-actions';
 import type { SceneImageRecord } from '@engine/types/types-image';
 
@@ -38,6 +44,11 @@ const props = defineProps<{
   record: SceneImageRecord;
   /** 同锚点的全部 take，按 take 升序 */
   takes: SceneImageRecord[];
+  /**
+   * 同锚点下还没画出来的 take（排队中 / 生成中 / 失败，CG-01）。只读展示：
+   * 状态文字 + 失败原因 + 排队中的可取消；不可选中（没有图可看）。
+   */
+  pendingTakes?: SceneImageRecord[];
   /** 大图的 object URL；null = 还没装载好 / 字节已清理 */
   url: string | null;
   /** 有动作在飞（落库 / 入队），按钮转圈 */
@@ -54,6 +65,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   selectTake: [id: string];
+  /** 取消一张排队中的 take（只对 queued 发） */
+  cancelTake: [id: string];
   updateTitle: [value: string];
   updateDescription: [value: string];
   /** 只存提示词 */
@@ -117,6 +130,9 @@ function commitDesc(): void {
 }
 
 const promptDirty = computed(() => promptDraft.value !== effectivePrompt.value);
+
+/** 未完成的 take（缺省空） */
+const pending = computed(() => props.pendingTakes ?? []);
 
 // ═══ 元数据 ═══
 
@@ -232,7 +248,12 @@ function timeText(ts: number): string {
     </div>
 
     <!-- 同一处的多次重画 -->
-    <div v-if="takes.length > 1" class="cg-takes" role="group" aria-label="同一处的多张">
+    <div
+      v-if="takes.length > 1 || pending.length > 0"
+      class="cg-takes"
+      role="group"
+      aria-label="同一处的多张"
+    >
       <button
         v-for="(t, i) in takes"
         :key="t.id"
@@ -243,6 +264,25 @@ function timeText(ts: number): string {
       >
         第 {{ i + 1 }} 张<span v-if="t.pinned" class="cg-take-pin" aria-label="已钉住">◆</span>
       </button>
+      <!-- CG-01：还没画出来的那几张 —— 只读状态片，失败写原因，排队中可取消 -->
+      <span
+        v-for="t in pending"
+        :key="t.id"
+        class="cg-take cg-take-pending"
+        :class="'is-' + t.status"
+        :data-take-status="t.status"
+      >
+        {{ pendingTakeStatusText(t) }}
+        <span v-if="t.status === 'failed' && t.error" class="cg-take-error">：{{ t.error }}</span>
+        <button
+          v-if="t.status === 'queued'"
+          class="cg-take-cancel"
+          :disabled="busy"
+          @click="emit('cancelTake', t.id)"
+        >
+          取消
+        </button>
+      </span>
     </div>
 
     <div class="cg-meta">
@@ -503,6 +543,46 @@ function timeText(ts: number): string {
 .cg-take-pin {
   margin-left: 4px;
   color: var(--theme-primary);
+}
+/* 未完成的 take：只读状态片，不可选中 */
+.cg-take-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+  font-style: italic;
+  color: var(--theme-text-muted);
+  border-style: dashed;
+}
+.cg-take-pending:hover {
+  background: var(--theme-card-bg);
+  color: var(--theme-text-muted);
+}
+.cg-take-pending.is-generating {
+  color: var(--theme-primary);
+}
+.cg-take-pending.is-failed {
+  color: var(--theme-error);
+  border-color: color-mix(in srgb, var(--theme-error) 30%, var(--theme-card-border));
+}
+.cg-take-error {
+  font-style: normal;
+  color: var(--theme-text-secondary);
+}
+.cg-take-cancel {
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  font-style: normal;
+  color: var(--theme-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.cg-take-cancel:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .cg-meta {
   display: grid;

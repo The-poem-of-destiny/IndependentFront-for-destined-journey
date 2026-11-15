@@ -115,8 +115,15 @@ function describeError(err: unknown): string {
 export const useWorkshopStore = defineStore('workshop', () => {
   /** 已装项目 —— Dexie `workshopProjects` 的响应式投影 */
   const projects = ref<WorkshopProject[]>([]);
-  /** init() 是否已完成（含失败收场） */
+  /** init() 是否已**成功**完成；失败时保持 false，原因见 {@link initError} */
   const ready = ref(false);
+  /**
+   * 最近一次 init() 失败的原因（成功后清空）。
+   *
+   * 页面据此显示错误态，而不是永远停在「正在读取…」；读库失败也落在这里，
+   * 不再伪装成「尚未安装」。
+   */
+  const initError = ref('');
 
   let initPromise: Promise<void> | null = null;
 
@@ -126,6 +133,8 @@ export const useWorkshopStore = defineStore('workshop', () => {
    * 启动流程，幂等（并发调用共用同一个 Promise）。
    *
    * 先初始化世界书与美化规则，再读取项目元数据。
+   * 失败时记下 {@link initError} 并丢掉缓存的 Promise —— 下一次调用可以重试，
+   * 而不是永远拿到同一个被拒绝的结果。
    */
   async function init(): Promise<void> {
     if (!initPromise) initPromise = doInit();
@@ -133,19 +142,27 @@ export const useWorkshopStore = defineStore('workshop', () => {
   }
 
   async function doInit(): Promise<void> {
-    await useWorldBookStore().init();
-    await useBeautifierStore().init();
-    await hydrate();
-    ready.value = true;
+    try {
+      await useWorldBookStore().init();
+      await useBeautifierStore().init();
+      await hydrate();
+      initError.value = '';
+      ready.value = true;
+    } catch (err) {
+      initError.value = describeError(err);
+      initPromise = null;
+      throw err;
+    }
   }
 
-  /** 从 Dexie 读全表填 ref */
+  /**
+   * 从 Dexie 读全表填 ref。
+   *
+   * 读失败时**抛出**：吞掉错误会让页面把「读不出来」显示成「尚未安装」，
+   * 而那是一句对装过项目的用户撒的谎。由 init() 统一收进 {@link initError}。
+   */
   async function hydrate(): Promise<void> {
-    try {
-      projects.value = await getDatabase().workshopProjects.toArray();
-    } catch {
-      // IndexedDB 不可用 → 留空数组，工坊页显示「尚未安装」，不阻断其余功能
-    }
+    projects.value = await getDatabase().workshopProjects.toArray();
   }
 
   /** 本项目已装条目（按名称检测更新冲突）。 */
@@ -406,6 +423,7 @@ export const useWorkshopStore = defineStore('workshop', () => {
   return {
     projects,
     ready,
+    initError,
     previewUpdate,
     init,
     hydrate,

@@ -36,7 +36,11 @@ vi.mock('../../../src/ui/stores/settings-store', () => ({
   }),
 }));
 
-import { useApiSourceStore } from '../../../src/ui/stores/api-source-store';
+import {
+  clearApiSourceBindings,
+  findApiSourceBindings,
+  useApiSourceStore,
+} from '../../../src/ui/stores/api-source-store';
 
 describe('api-source-store Vue proxy boundaries', () => {
   beforeEach(() => {
@@ -141,5 +145,69 @@ describe('api-source-store Vue proxy boundaries', () => {
     expect(saveImageApiConnection).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'novelai-a', revision: 1 }),
     );
+  });
+});
+
+describe('S-09 删除 API 源：列出并清除指向它的用户绑定', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    getApiEndpoints.mockReset();
+    getImageApiConnections.mockReset();
+    getImageApiConnections.mockResolvedValue([]);
+  });
+
+  it('findApiSourceBindings 只列用户覆写层与检索绑定', () => {
+    const bindings = findApiSourceBindings(
+      {
+        agents: {
+          story: { model: 'x' },
+          vars_update: { model: 'y' },
+          image_prompt: { model: 'x' },
+        },
+        embeddingSourceId: 'x',
+        rerankerSourceId: 'z',
+      },
+      'x',
+    );
+    expect(bindings).toEqual({ agentIds: ['story', 'image_prompt'], retrieval: ['embedding'] });
+  });
+
+  it('clearApiSourceBindings：Agent 的 model 删键（回到跟随默认），其余字段保留；检索绑定置空', () => {
+    const settings = {
+      agents: { story: { model: 'x', temperature: 0.5 }, plot_outline: { model: 'x' } } as Record<
+        string,
+        Record<string, unknown>
+      >,
+      embeddingSourceId: 'x',
+      rerankerSourceId: 'x',
+    };
+    clearApiSourceBindings(settings, 'x');
+    expect(settings.agents.story).toEqual({ temperature: 0.5 });
+    expect(settings.agents).not.toHaveProperty('plot_outline');
+    expect(settings.embeddingSourceId).toBe('');
+    expect(settings.rerankerSourceId).toBe('');
+  });
+
+  it('removeSource 删除后清掉绑定，不再留下失效绑定', async () => {
+    getApiEndpoints.mockResolvedValue([
+      {
+        id: 'doomed',
+        name: 'Doomed',
+        kind: 'llm',
+        protocol: 'openai-chat',
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'k',
+        defaultModel: 'm',
+        models: ['m'],
+        timeoutMs: 60_000,
+      },
+    ]);
+    state.settings.agents = { story: { model: 'doomed' } };
+    state.settings.rerankerSourceId = 'doomed';
+    const store = useApiSourceStore();
+    await store.removeSource('doomed');
+    expect(deleteApiEndpoint).toHaveBeenCalledWith('doomed');
+    expect(state.settings.agents).toEqual({});
+    expect(state.settings.rerankerSourceId).toBe('');
   });
 });

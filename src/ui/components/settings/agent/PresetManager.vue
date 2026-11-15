@@ -31,6 +31,7 @@ import TemplatePreview from '../TemplatePreview.vue';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { useUIStore } from '../../../stores/ui-store';
 import { usePresets } from '../../../composables/usePresets';
+import { confirmDialog } from '../../../lib/confirm-dialog';
 import {
   canonicalPresetEntries,
   makeCustomPresetEntry,
@@ -428,14 +429,57 @@ async function savePreset() {
   showPresetEditor.value = false;
   ui.toast(editingPresetId.value ? '预设已更新' : '预设已创建', 'success');
 }
+/**
+ * 删除预设（S-16）：先确认（点名预设）；删掉的是当前选中的那条时，自动改选剩下的一条
+ * （优先项目默认），并告诉用户换成了哪条 —— 否则正文生成会落到「没有预设」。
+ * 数据库写失败要报出来，不能吞掉。
+ */
 async function deletePreset(id: string) {
+  const target = presets.value.find((p) => p.id === id);
+  if (!target) return;
+  const confirmed = await confirmDialog({
+    title: '删除预设',
+    message: `确定永久删除预设「${target.name}」吗？此操作无法撤销。`,
+    confirmLabel: '删除',
+    cancelLabel: '取消',
+    danger: true,
+  });
+  if (!confirmed) return;
+  const wasActive = selectedPresetId.value === id;
   try {
     await removePreset(id);
-    if (selectedPresetId.value === id) selectedPresetId.value = '';
-    ui.toast('预设已删除', 'info');
-  } catch {
-    // 删除失败（DB 写不进去）：列表下次加载还会看到这条，用户可以重试
+  } catch (error) {
+    ui.toast(`删除预设失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+    return;
   }
+  if (!wasActive) {
+    ui.toast(`预设「${target.name}」已删除`, 'info');
+    return;
+  }
+  const next = pickFallbackPreset(id);
+  selectedPresetId.value = next?.id ?? '';
+  ui.toast(
+    next
+      ? `预设「${target.name}」已删除，已改用「${next.name}」`
+      : `预设「${target.name}」已删除，当前没有可用的预设，请导入或新建一个`,
+    next ? 'info' : 'warning',
+  );
+}
+
+/** 删除当前预设后改选哪一条：项目默认 → 第一条非直出预设 → 任意剩下的一条 */
+function pickFallbackPreset(deletedId: string): ChatPreset | null {
+  const remaining = presets.value.filter((p) => p.id !== deletedId);
+  if (remaining.length === 0) return null;
+  const projectDefaultId = cfg.projectAgentDefaults?.agents?.[props.agentId]?.presetId;
+  const isDirectPreset = (p: ChatPreset) =>
+    p.id === DIRECT_PRESET_ID || p.id === DIRECT_CACHED_PRESET_ID;
+  return (
+    remaining.find((p) => p.id === projectDefaultId) ??
+    (isDirectSettingsProfile(props.agentId)
+      ? remaining.find(isDirectPreset)
+      : remaining.find((p) => !isDirectPreset(p))) ??
+    remaining[0]
+  );
 }
 async function importStPreset() {
   const input = document.createElement('input');

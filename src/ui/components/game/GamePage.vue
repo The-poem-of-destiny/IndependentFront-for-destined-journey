@@ -380,13 +380,14 @@ onBeforeUnmount(() => {
 });
 
 async function handleSend(content: string) {
-  if (game.isGenerating || !pipeline) return;
+  // 润色进行中不开新回合（GAME-07）：输入框已锁，这里是第二道闸
+  if (game.isGenerating || game.isRewriting || !pipeline) return;
   cancelStreamingPreview();
   await pipeline.run(content, handleStoryChunk);
 }
 
 async function handleRetry(messageId: string) {
-  if (game.isGenerating || !pipeline) return;
+  if (game.isGenerating || game.isRewriting || !pipeline) return;
   const message = game.messages.find((entry) => entry.id === messageId && entry.role === 'user');
   if (!message) return;
   cancelStreamingPreview();

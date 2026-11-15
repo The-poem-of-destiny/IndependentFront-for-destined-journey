@@ -54,6 +54,67 @@ function toProjection(source: ApiSource): ApiEntry {
   };
 }
 
+/**
+ * 一个 API 源当前被谁**显式**绑定着（S-09）—— 删除前要告诉用户的那张清单。
+ *
+ * 只看**用户覆写层**（`settings.agents[*].model`）与检索绑定；跟随默认的 Agent 不算
+ * （它们删完自动换到剩下的第一个源，不需要用户做什么）。
+ */
+export interface ApiSourceBindings {
+  /** 覆写层里 `model === sourceId` 的 Agent id（含 image_prompt / direct_* 等不在子导航里的） */
+  agentIds: string[];
+  /** 记忆检索绑定 */
+  retrieval: Array<'embedding' | 'reranker'>;
+}
+
+type BindingBag = {
+  agents?: unknown;
+  embeddingSourceId?: unknown;
+  rerankerSourceId?: unknown;
+  embeddingEndpointId?: unknown;
+};
+
+export function findApiSourceBindings(settings: BindingBag, sourceId: string): ApiSourceBindings {
+  const agents =
+    settings.agents && typeof settings.agents === 'object'
+      ? (settings.agents as Record<string, unknown>)
+      : {};
+  const agentIds = Object.entries(agents)
+    .filter(
+      ([, entry]) =>
+        Boolean(entry) &&
+        typeof entry === 'object' &&
+        (entry as { model?: unknown }).model === sourceId,
+    )
+    .map(([agentId]) => agentId);
+  const retrieval: Array<'embedding' | 'reranker'> = [];
+  if (settings.embeddingSourceId === sourceId || settings.embeddingEndpointId === sourceId) {
+    retrieval.push('embedding');
+  }
+  if (settings.rerankerSourceId === sourceId) retrieval.push('reranker');
+  return { agentIds, retrieval };
+}
+
+/**
+ * 删除源之后清掉指向它的用户绑定（S-09）：Agent 的 `model` 覆写删键 → 回到「跟随默认」；
+ * 检索绑定置空。🔴 不清的话这些 Agent 会变成失效绑定（F10 fail-closed），下一回合直接失败。
+ */
+export function clearApiSourceBindings(settings: BindingBag, sourceId: string): void {
+  const { agentIds, retrieval } = findApiSourceBindings(settings, sourceId);
+  const agents = (settings.agents ?? {}) as Record<string, Record<string, unknown>>;
+  for (const agentId of agentIds) {
+    const entry = agents[agentId];
+    if (!entry) continue;
+    delete entry.model;
+    if (Object.keys(entry).length === 0) delete agents[agentId];
+  }
+  if (retrieval.includes('embedding')) {
+    if (settings.embeddingSourceId === sourceId) settings.embeddingSourceId = '';
+    if (settings.embeddingEndpointId === sourceId) settings.embeddingEndpointId = null;
+  }
+  if (retrieval.includes('reranker')) settings.rerankerSourceId = '';
+}
+
 export const useApiSourceStore = defineStore('api-sources', () => {
   const sources = ref<ApiSource[]>([]);
   const imageConnections = ref<ImageApiConnection[]>([]);
@@ -185,6 +246,8 @@ export const useApiSourceStore = defineStore('api-sources', () => {
     const previous = sources.value.find((source) => source.id === id);
     await deleteApiEndpoint(id);
     sources.value = sources.value.filter((source) => source.id !== id);
+    // S-09：指向它的用户绑定一并清掉（Agent 回到跟随默认），否则下一回合 fail-closed
+    clearApiSourceBindings(useSettingsStore().settings, id);
     if (previous) {
       const previousId = await credentialId(previous);
       if (!(await credentialStillReferenced(previousId))) {

@@ -14,10 +14,14 @@ import type { BeautifierRule } from '@engine/types/types';
 import AppButton from '../shared/AppButton.vue';
 import AppCard from '../shared/AppCard.vue';
 import RuleEditorModal from './RuleEditorModal.vue';
+import { useUIStore } from '../../stores/ui-store';
+import { confirmDialog } from '../../lib/confirm-dialog';
+import { parseRuleImport } from './beautifier-import';
 
 const cfg = useSettingsStore();
 const s = cfg.settings;
 const game = useGameStore();
+const ui = useUIStore();
 // Phase 0b: 用户规则住在 Dexie（唯一入口 beautifier-store），预设规则是纯内存派生缓存。
 // `beautifierBuiltinDisabled` 仍在 settings（几个 id，体积无关紧要）。
 const beautifier = useBeautifierStore();
@@ -143,8 +147,22 @@ async function saveRule(rule: BeautifierRule) {
   showEditor.value = false;
 }
 
-function deleteRule(rule: BeautifierRule) {
-  void beautifier.deleteRule(rule.id);
+/** 删除自定义规则（S-32）：先确认，点名规则 */
+async function deleteRule(rule: BeautifierRule) {
+  const ok = await confirmDialog({
+    title: '删除规则',
+    message: `删除自定义规则「${rule.name || rule.id}」？此操作不可撤销。`,
+    confirmLabel: '删除',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await beautifier.deleteRule(rule.id);
+  } catch {
+    ui.toast('删除失败', 'error');
+    return;
+  }
+  ui.toast(`已删除规则「${rule.name || rule.id}」`, 'warning');
 }
 
 function refreshPresetRules() {
@@ -171,25 +189,71 @@ function importRules() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.json';
-  input.onchange = async (e) => {
+  input.onchange = (e) => {
     const f = (e.target as HTMLInputElement).files?.[0];
-    if (!f) return;
-    try {
-      const data = JSON.parse(await f.text());
-      if (Array.isArray(data.rules)) {
-        // 同 id 覆盖、否则追加 —— upsertRules 就是这个语义
-        await beautifier.upsertRules(data.rules as BeautifierRule[]);
-      } else if (Array.isArray(data)) {
-        await beautifier.replaceAllRules(data as BeautifierRule[]);
-      }
-      if (data.builtinDisabled && Array.isArray(data.builtinDisabled)) {
-        s.beautifierBuiltinDisabled = data.builtinDisabled;
-      }
-    } catch {
-      // 导入失败静默
-    }
+    if (f) void importRulesFile(f);
   };
   input.click();
+}
+
+/**
+ * 导入规则文件（S-33）：先解析校验，坏文件报原因；
+ * 裸数组格式（历史语义 = 整体替换）在已有自定义规则时先确认，可改为追加；成功报数量。
+ */
+async function importRulesFile(f: File) {
+  let data: unknown;
+  try {
+    data = JSON.parse(await f.text());
+  } catch {
+    ui.toast('导入失败：文件不是有效的 JSON', 'error');
+    return;
+  }
+  const parsed = parseRuleImport(data);
+  if (typeof parsed === 'string') {
+    ui.toast(`导入失败：${parsed}`, 'error');
+    return;
+  }
+  const { rules, replace, builtinDisabled: importedDisabled } = parsed;
+
+  let mode: 'replace' | 'append' = 'append';
+  const existing = beautifier.userRules.length;
+  if (replace && existing > 0) {
+    const ok = await confirmDialog({
+      title: '替换自定义规则？',
+      message: `将替换现有 ${existing} 条自定义规则，被替换的规则无法找回。`,
+      confirmLabel: '替换',
+      cancelLabel: '不替换',
+      danger: true,
+    });
+    if (!ok) {
+      const append = await confirmDialog({
+        title: '改为追加导入？',
+        message: `保留现有 ${existing} 条自定义规则，把文件里的 ${rules.length} 条追加进来（同 id 的会被更新）。`,
+        confirmLabel: '追加导入',
+        cancelLabel: '取消导入',
+      });
+      if (!append) return;
+    } else mode = 'replace';
+  }
+
+  const existingIds = new Set(beautifier.userRules.map((r) => r.id));
+  const updated = rules.filter((r) => existingIds.has(r.id)).length;
+  try {
+    if (mode === 'replace') await beautifier.replaceAllRules(rules);
+    else await beautifier.upsertRules(rules);
+  } catch {
+    ui.toast('导入失败：写入存储出错', 'error');
+    return;
+  }
+  if (importedDisabled) s.beautifierBuiltinDisabled = importedDisabled;
+  ui.toast(
+    mode === 'replace'
+      ? `已导入 ${rules.length} 条规则，替换了原有 ${existing} 条`
+      : updated > 0
+        ? `已导入 ${rules.length} 条规则（新增 ${rules.length - updated} 条，更新同 id ${updated} 条）`
+        : `已导入 ${rules.length} 条规则`,
+    'success',
+  );
 }
 </script>
 
@@ -352,12 +416,22 @@ function importRules() {
             </label>
             <span class="rule-name">{{ rule.name }}</span>
             <span class="rule-scope text-xs text-muted">{{ scopeLabel(rule.scope) }}</span>
-            <button class="rule-action-btn" title="编辑" @click="openEdit(rule)">✎</button>
+            <button
+              class="rule-action-btn"
+              title="编辑规则"
+              :aria-label="`编辑规则 ${rule.name}`"
+              @click="openEdit(rule)"
+            >
+              ✎
+            </button>
             <button
               class="rule-action-btn rule-delete-btn"
-              title="删除"
+              title="删除规则"
+              :aria-label="`删除规则 ${rule.name}`"
               @click="deleteRule(rule)"
-            ></button>
+            >
+              <i class="fa-solid fa-trash" aria-hidden="true"></i>
+            </button>
           </div>
           <div v-if="expanded[rule.id]" class="rule-detail">
             <div class="rule-field">

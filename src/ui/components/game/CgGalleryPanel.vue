@@ -22,7 +22,15 @@ import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useSceneImageUrls } from '../../composables/useSceneImageUrls';
-import { buildGalleryCells, isNearViewport, GALLERY_PRELOAD_MARGIN } from './cg-gallery';
+import { useManualSceneImage } from '../../composables/useManualSceneImage';
+import { confirmDialog } from '../../lib/confirm-dialog';
+import {
+  buildGalleryCells,
+  isNearViewport,
+  pendingTakesAt,
+  GALLERY_PRELOAD_MARGIN,
+  REDRAW_COST_NOTE,
+} from './cg-gallery';
 import CgGalleryDetail from './CgGalleryDetail.vue';
 import type { SceneImageRecord } from '@engine/types/types-image';
 
@@ -188,14 +196,33 @@ async function savePrompt(record: SceneImageRecord, value: string): Promise<void
   await store.update(record.id, { editedScenePrompt: trimmed === '' ? undefined : trimmed });
 }
 
+/**
+ * 🔴 CG-01 / CG-02：图鉴的重画与正文**走同一条手动路径**（`useManualSceneImage`）——
+ * 被限额拦下时弹「仍然生成」确认，而不是一条警告 toast 就结束（D24「手动永不被判成
+ * 不可用」）。请求形状里没有 source / quotaConfirmed，由 composable 恒填 manual。
+ */
+const manual = useManualSceneImage({
+  generate: (input) => store.generate(input),
+  notify: (message) => ui.toast(message, 'warning'),
+});
+
+/** 重画前的付费确认（单击不再直接排队） */
+function confirmRedraw(record: SceneImageRecord, withPrompt: boolean): Promise<boolean> {
+  return confirmDialog({
+    title: withPrompt ? '保存提示词并重画？' : '重画这一张？',
+    message: REDRAW_COST_NOTE,
+    details: [`「${record.title || '未命名插画'}」会新增一张，原图保留。`],
+    confirmLabel: withPrompt ? '保存并重画' : '重画',
+  });
+}
+
 async function redraw(record: SceneImageRecord): Promise<void> {
-  const result = await store.generate({
+  const result = await manual.request({
     saveId: record.saveId,
     messageId: record.messageId,
     turn: record.turn,
     anchorKind: record.anchorKind,
     occurrence: record.occurrence,
-    source: 'manual',
     intent: record.intent,
     title: record.title,
     description: record.description,
@@ -203,8 +230,20 @@ async function redraw(record: SceneImageRecord): Promise<void> {
     rating: record.rating,
     redrawFrom: record.id,
   });
-  if (result.ok) ui.toast('已排进生成队列', 'info');
-  else ui.toast(result.message, 'warning');
+  if (result.ok) {
+    ui.toast('已排进生成队列，进度见详情里的「同一处的多张」', 'info');
+    return;
+  }
+  const waiting = manual.pending.value;
+  if (waiting === null) return;
+  // 限额那句中文原样显示（§5.3 不变式），钱由玩家自己决定花不花
+  const go = await confirmDialog({
+    title: '超出出图限额',
+    message: waiting.message,
+    confirmLabel: '仍然生成',
+  });
+  if (go) await manual.confirm();
+  else manual.dismiss();
 }
 
 function onSavePrompt(value: string): void {
@@ -212,10 +251,11 @@ function onSavePrompt(value: string): void {
   if (r) void withBusy(() => savePrompt(r, value));
 }
 
-function onSaveAndRedraw(value: string): void {
+async function onSaveAndRedraw(value: string): Promise<void> {
   const r = selectedRecord.value;
-  if (!r) return;
-  void withBusy(async () => {
+  if (!r || busy.value) return;
+  if (!(await confirmRedraw(r, true))) return;
+  await withBusy(async () => {
     await savePrompt(r, value);
     // 🔴 必须**读回**落库后的那一行再重画: `redrawFrom` 继承的是库里的
     // `editedScenePrompt`，拿改之前的那份去继承等于用户白改一次（D26 那类挫败）。
@@ -223,9 +263,24 @@ function onSaveAndRedraw(value: string): void {
   });
 }
 
-function onRedraw(): void {
+async function onRedraw(): Promise<void> {
   const r = selectedRecord.value;
-  if (r) void withBusy(() => redraw(r));
+  if (!r || busy.value) return;
+  if (!(await confirmRedraw(r, false))) return;
+  await withBusy(() => redraw(r));
+}
+
+/** 选中格同一锚点下还没画出来的 take（排队 / 生成中 / 失败）—— 只读，给详情栏的切换条 */
+const pendingTakes = computed(() =>
+  selectedCell.value ? pendingTakesAt(store.records, selectedCell.value.key) : [],
+);
+
+/** 取消一张排队中的重画（排队取消不花钱；生成中的不在这里中止） */
+function onCancelTake(id: string): void {
+  void withBusy(async () => {
+    const outcome = await store.cancel(id);
+    if (outcome === 'cancelled') ui.toast('已取消排队', 'info');
+  });
 }
 
 function onPin(): void {
@@ -336,10 +391,12 @@ function onJump(): void {
         v-if="selectedCell && selectedRecord"
         :record="selectedRecord"
         :takes="selectedCell.takes"
+        :pending-takes="pendingTakes"
         :url="urls.urlFor(selectedRecord.id)"
-        :busy="busy"
+        :busy="busy || manual.busy.value"
         :dialect-id="settings.settings.imageDialectId"
         @select-take="selectedTakeId = $event"
+        @cancel-take="onCancelTake"
         @update-title="onUpdateTitle"
         @update-description="onUpdateDescription"
         @save-prompt="onSavePrompt"

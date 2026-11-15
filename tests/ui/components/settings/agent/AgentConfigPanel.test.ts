@@ -248,3 +248,41 @@ describe('AgentSection —— 分区壳', () => {
     expect(w.findComponent(AgentConfigPanel).props('agentId')).toBe('entity_gen');
   });
 });
+
+describe('S-15 未保存的提示词修改', () => {
+  it('改了草稿 → 显示「未保存」并通知壳层；保存后清掉', async () => {
+    const { promptDraftDirty } =
+      await import('../../../../../src/ui/components/settings/agent/prompt-dirty-guard');
+    mockSettings.agents.entity_gen = { systemPrompt: '原提示词', template: '原模板' };
+    const w = mountPanel('entity_gen');
+    expect(w.find('.unsaved-marker').exists()).toBe(false);
+    expect(promptDraftDirty.value).toBe(false);
+
+    await w.findComponent(AgentPromptCard).vm.$emit('update:prompt', '改过的提示词');
+    expect(w.get('.unsaved-marker').text()).toBe('未保存');
+    expect(promptDraftDirty.value).toBe(true);
+
+    // 动作栏最后一个按钮是「保存设置」
+    const buttons = w.findAllComponents(AppButton);
+    await buttons[buttons.length - 1].vm.$emit('click');
+    expect(mockSettings.agents.entity_gen.systemPrompt).toBe('改过的提示词');
+    expect(w.find('.unsaved-marker').exists()).toBe(false);
+    expect(promptDraftDirty.value).toBe(false);
+  });
+
+  it('改回原样 = 不算未保存；卸载时清掉标志，不带到下一次挂载', async () => {
+    const { promptDraftDirty } =
+      await import('../../../../../src/ui/components/settings/agent/prompt-dirty-guard');
+    mockSettings.agents.entity_gen = { systemPrompt: '原提示词', template: '原模板' };
+    const w = mountPanel('entity_gen');
+    const card = w.findComponent(AgentPromptCard);
+    await card.vm.$emit('update:template', '临时改动');
+    expect(promptDraftDirty.value).toBe(true);
+    await card.vm.$emit('update:template', '原模板');
+    expect(promptDraftDirty.value).toBe(false);
+    await card.vm.$emit('update:template', '又改了');
+    expect(promptDraftDirty.value).toBe(true);
+    w.unmount();
+    expect(promptDraftDirty.value).toBe(false);
+  });
+});

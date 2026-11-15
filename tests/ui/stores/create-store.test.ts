@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { setActivePinia, createPinia } from 'pinia';
-import { useCreateStore } from '../../../src/ui/stores/create-store';
+import { useCreateStore, WIZARD_DRAFT_KEY } from '../../../src/ui/stores/create-store';
 import { useSettingsStore } from '../../../src/ui/stores/settings-store';
 import { patchAgentSettings } from '../../../src/ui/stores/agent-settings';
 import {
@@ -1599,6 +1599,9 @@ function setupPlotStore() {
     model: 'ep1',
     systemPrompt: '你是剧情大纲生成 Agent',
   });
+  // 前面测试遗留的旧 store 实例可能仍有草稿去抖计时器（400ms），会在异步 beforeEach
+  // 等待期间把别的角色（如 5 级）写进草稿位；构造前同步清空，避免恢复出串档草稿
+  store_.clear();
   const store = useCreateStore();
   store.generationMode = 'agent';
   store.systemCoreEntries = [FIXTURE_CORE_ENTRY];
@@ -2065,220 +2068,245 @@ describe('startJourney 剧情落库', () => {
   });
 });
 
-// ===== localStorage 草稿 =====
+// ===== localStorage 草稿（C-12：整份向导草稿持久化） =====
 
-describe('localStorage 草稿 save/restore/clear', () => {
-  const DRAFT_KEY = 'plotOutlineDraft_v1';
+describe('localStorage 整份草稿 save/restore/clear', () => {
+  const LEGACY_KEY = 'plotOutlineDraft_v1';
 
-  function makePlotStore() {
-    setActivePinia(createPinia());
-    const settings = useSettingsStore();
-    settings.settings.apiPool = [
-      {
-        id: 'ep1',
-        name: 'test',
-        baseUrl: 'http://localhost',
-        apiKey: 'k',
-        maskedKey: '***',
-        model: 'test-model',
-        models: ['test-model'],
-        apiType: 'chat',
-      },
-    ];
-    patchAgentSettings(settings.settings, 'plot_outline', {
-      model: 'ep1',
-      systemPrompt: '你是剧情大纲生成 Agent',
-    });
-    return useCreateStore();
+  const OUTLINE = {
+    id: 'test-id',
+    saveId: '',
+    mode: 'main' as const,
+    title: '血色纹章',
+    summary: '一句话摘要',
+    content: '完整叙事大纲',
+    chapters: [{ title: '第一章 序幕', summary: '章节摘要', status: 'pending' as const }],
+    selfCritique: '评分: 8',
+    confirmed: false,
+    version: 1,
+    timeRange: { start: '占位纪元001年01月01日', end: '占位纪元005年12月30日' },
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const CHAPTERS = [
+    {
+      title: '第一章 序幕',
+      summary: '章节摘要',
+      keyEvents: [{ title: '初入王都', description: '主角抵达王都', triggerHint: '进入王都' }],
+    },
+  ];
+
+  function readDraft(): any {
+    const raw = localStorage.getItem(WIZARD_DRAFT_KEY);
+    return raw ? JSON.parse(raw) : null;
   }
 
-  beforeEach(() => {
-    // Ensure localStorage is clean
-    try {
-      localStorage.removeItem(DRAFT_KEY);
-    } catch {
-      // 测试环境未必有 localStorage；清不掉就算了，下面的用例自己会覆写
-    }
-  });
+  /** 构造一份已填写的草稿并立即落盘，返回落盘内容 */
+  function seedFilledDraft() {
+    const store = makeStore();
+    store.selectDifficulty('normal');
+    store.name = '艾琳';
+    store.race = '占位羽族';
+    store.level = 3;
+    store.basePoints = { 力量: 6, 敏捷: 6, 体质: 6, 智力: 4, 精神: 3 };
+    store.attributePoints = { 力量: 1, 敏捷: 1, 体质: 0, 智力: 0, 精神: 0 };
+    store.money = 300;
+    store.addEquipment(FIXTURE_EQUIPMENT_POOL[0]);
+    store.selectBackground(FIXTURE_BACKGROUNDS[0]);
+    store.plotMode = 'main';
+    store.currentStep = 4;
+    store.autoSaveDraft();
+    return { store, draft: readDraft() };
+  }
 
   afterEach(() => {
-    try {
-      localStorage.removeItem(DRAFT_KEY);
-    } catch {
-      // 同上：收尾清理是尽力而为
-    }
+    vi.useRealTimers();
   });
 
-  it('autoSaveDraft 写入 localStorage 并可被 tryRestoreDraft 恢复', () => {
-    const store = makePlotStore();
-    store.plotMode = 'main';
-    store.name = '艾琳';
+  it('★ 全部填写项与当前步骤落盘，刷新（新 store）后原样恢复', () => {
+    const { draft } = seedFilledDraft();
+    expect(draft.version).toBe(1);
+    expect(typeof draft.draftId).toBe('string');
 
-    // Set outline and chapters via store's own reactive API (not raw ref assignment)
-    // We can't directly assign to plotOutline (it's a computed from generatePlotOutline),
-    // so we simulate by directly calling the draft functions after setting via a known path.
-    // Instead, directly test by writing to localStorage and reading back.
-    const outline = {
-      id: 'test-id',
-      saveId: '',
-      mode: 'main' as const,
-      title: '血色纹章',
-      summary: '一句话摘要',
-      content: '完整叙事大纲',
-      chapters: [{ title: '第一章 序幕', summary: '章节摘要', status: 'pending' as const }],
-      selfCritique: '评分: 8',
-      confirmed: false,
-      version: 1,
-      timeRange: { start: '复兴纪元001年01月01日', end: '复兴纪元005年12月30日' },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    const chapters = [
-      {
-        title: '第一章 序幕',
-        summary: '章节摘要',
-        keyEvents: [
-          { title: '初入王都', description: '主角抵达艾瑟嘉德', triggerHint: '进入王都' },
-        ],
-      },
-    ];
+    const store2 = makeStore();
+    expect(store2.name).toBe('艾琳');
+    expect(store2.difficulty?.id).toBe('normal');
+    expect(store2.race).toBe('占位羽族');
+    expect(store2.level).toBe(3);
+    expect(store2.attributePoints['力量']).toBe(1); // level 的 watch 没把它清掉
+    expect(store2.usedBP).toBe(25);
+    expect(store2.money).toBe(300);
+    expect(store2.selectedEquipments.map((e) => e.id)).toEqual([FIXTURE_EQUIPMENT_POOL[0].id]);
+    expect(store2.selectedBackground?.id).toBe(FIXTURE_BACKGROUNDS[0].id);
+    expect(store2.plotMode).toBe('main');
+    expect(store2.currentStep).toBe(4);
+    expect(store2.draftId).toBe(draft.draftId);
+  });
 
-    // Use tryRestoreDraft with valid data to set the store state, then autoSaveDraft should work
-    localStorage.setItem(
-      DRAFT_KEY,
-      JSON.stringify({
-        outline,
-        chapters,
-        outlineHistory: [],
-        chaptersHistory: [],
-        savedAt: Date.now(),
-      }),
-    );
-    const restored = store.tryRestoreDraft();
-    expect(restored).toBe(true);
-    expect(store.plotOutline?.title).toBe('血色纹章');
+  it('改动经去抖后才落盘，连续输入只写最后一次', async () => {
+    vi.useFakeTimers();
+    const store = makeStore();
+    store.name = '甲';
+    await nextTick();
+    expect(readDraft()).toBeNull();
+    store.name = '乙';
+    await nextTick();
+    vi.advanceTimersByTime(399);
+    expect(readDraft()).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(readDraft().character.name).toBe('乙');
+  });
 
-    // Now autoSaveDraft should save the current state
+  it('没有任何填写内容时不留空草稿', () => {
+    const store = makeStore();
+    store.generationMode = '';
     store.autoSaveDraft();
-    const raw = localStorage.getItem(DRAFT_KEY);
-    expect(raw).not.toBeNull();
-    const draft = JSON.parse(raw!);
-    expect(draft.outline.title).toBe('血色纹章');
-    expect(draft.chapters).toHaveLength(1);
-    expect(draft.savedAt).toBeGreaterThan(0);
+    expect(readDraft()).toBeNull();
+  });
 
-    // Create a fresh store and restore
-    const store2 = makePlotStore();
-    const restored2 = store2.tryRestoreDraft();
-    expect(restored2).toBe(true);
+  it('大纲与草稿同存同取：恢复时大纲随所属草稿回来', () => {
+    const store = makeStore();
+    store.name = '艾琳';
+    store.plotMode = 'main';
+    store.plotOutline = OUTLINE as any;
+    store.plotOutlineChapters = CHAPTERS as any;
+    store.autoSaveDraft();
+    expect(readDraft().outline.draftId).toBe(store.draftId);
+
+    const store2 = makeStore();
     expect(store2.plotOutline?.title).toBe('血色纹章');
     expect(store2.plotOutlineChapters).toHaveLength(1);
   });
 
-  it('tryRestoreDraft 空 localStorage 时返回 false', () => {
-    const store = makePlotStore();
-    expect(store.tryRestoreDraft()).toBe(false);
+  it('★ 大纲所属草稿 id 对不上 → 丢弃大纲，其余照常恢复', () => {
+    const { draft } = seedFilledDraft();
+    draft.outline = {
+      draftId: 'someone-else',
+      outline: OUTLINE,
+      chapters: CHAPTERS,
+      outlineHistory: [],
+      chaptersHistory: [],
+    };
+    localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(draft));
+    const store = makeStore();
+    expect(store.name).toBe('艾琳');
+    expect(store.plotOutline).toBeNull();
   });
 
-  it('tryRestoreDraft 损坏 JSON 时返回 false 并清除 localStorage', () => {
-    localStorage.setItem(DRAFT_KEY, 'not valid json{{{');
-    const store = makePlotStore();
-    expect(store.tryRestoreDraft()).toBe(false);
-    expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
-  });
-
-  it('tryRestoreDraft 缺少 title 时返回 false 并清除', () => {
+  it('★ 旧版「只存大纲」的键在构造时被丢弃，不会挂到新角色上', () => {
     localStorage.setItem(
-      DRAFT_KEY,
-      JSON.stringify({
-        outline: { title: '', summary: '' },
-        chapters: [],
-        savedAt: Date.now(),
-      }),
+      LEGACY_KEY,
+      JSON.stringify({ outline: OUTLINE, chapters: CHAPTERS, savedAt: Date.now() }),
     );
-    const store = makePlotStore();
-    expect(store.tryRestoreDraft()).toBe(false);
-    expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
+    const store = makeStore();
+    expect(store.plotOutline).toBeNull();
+    expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
   });
 
-  it('tryRestoreDraft 缺少 chapters 时返回 false 并清除', () => {
-    localStorage.setItem(
-      DRAFT_KEY,
-      JSON.stringify({
-        outline: { title: '有标题' },
-        chapters: [],
-        savedAt: Date.now(),
-      }),
-    );
-    const store = makePlotStore();
-    expect(store.tryRestoreDraft()).toBe(false);
-    expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
+  it('损坏 JSON → 丢弃并从干净状态开始', () => {
+    localStorage.setItem(WIZARD_DRAFT_KEY, 'not valid json{{{');
+    const store = makeStore();
+    expect(store.name).toBe('');
+    expect(store.currentStep).toBe(0);
+    expect(localStorage.getItem(WIZARD_DRAFT_KEY)).toBeNull();
   });
 
-  it('clearDraft 应清除 localStorage key', () => {
-    localStorage.setItem(
-      DRAFT_KEY,
-      JSON.stringify({
-        outline: { title: '测试大纲' },
-        chapters: [{ title: '第一章', summary: '摘要', keyEvents: [] }],
-        savedAt: Date.now(),
-      }),
+  it('版本不符 → 丢弃并从干净状态开始', () => {
+    const { draft } = seedFilledDraft();
+    localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify({ ...draft, version: 999 }));
+    const store = makeStore();
+    expect(store.name).toBe('');
+    expect(localStorage.getItem(WIZARD_DRAFT_KEY)).toBeNull();
+  });
+
+  it('字段类型不对时落回默认值，不抛', () => {
+    const { draft } = seedFilledDraft();
+    draft.character.level = 'abc';
+    draft.character.basePoints = { 力量: 999 };
+    draft.equipments = [{ nope: true }, FIXTURE_EQUIPMENT_POOL[1]];
+    draft.difficultyId = '不存在的难度';
+    draft.currentStep = 42;
+    localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(draft));
+    const store = makeStore();
+    expect(store.level).toBe(1);
+    expect(store.basePoints['力量']).toBe(6); // 夹到单项上限
+    expect(store.selectedEquipments.map((e) => e.id)).toEqual([FIXTURE_EQUIPMENT_POOL[1].id]);
+    expect(store.difficulty).toBeNull();
+    expect(store.currentStep).toBe(7);
+  });
+
+  it('目录里已不存在的背景被丢弃', () => {
+    const { draft } = seedFilledDraft();
+    draft.background = { id: 'bg_已删除', name: '旧背景', description: '', fullText: '旧' };
+    localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(draft));
+    const store = makeStore();
+    expect(store.selectedBackground).toBeNull();
+  });
+
+  it('目录物品加载后，草稿里已不存在的目录物品被丢弃（自定义物品保留）', async () => {
+    const { draft } = seedFilledDraft();
+    const mk = (id: string) => ({ ...FIXTURE_EQUIPMENT_POOL[0], id });
+    draft.equipments = [mk('e_剑类_铁剑'), mk('e_剑类_旧剑'), mk('custom_equipment_ab12')];
+    localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(draft));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        text: async () =>
+          url.includes('equipments')
+            ? JSON.stringify({ 剑类: [{ name: '铁剑', type: '武器', cost: 10 }] })
+            : '{}',
+      })) as any,
     );
-    const store = makePlotStore();
+    try {
+      const store = makeStore();
+      expect(store.selectedEquipments).toHaveLength(3); // 目录未到时不判
+      await vi.waitFor(() =>
+        expect(store.selectedEquipments.map((e) => e.id)).toEqual([
+          'e_剑类_铁剑',
+          'custom_equipment_ab12',
+        ]),
+      );
+    } finally {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })) as any);
+    }
+  });
+
+  it('clearDraft 清除草稿键', () => {
+    const { store } = seedFilledDraft();
     store.clearDraft();
-    expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
+    expect(readDraft()).toBeNull();
   });
 
-  it('autoSaveDraft 应保留 outlineHistory 最多 5 版', () => {
-    // Pre-populate localStorage with a draft containing 6 history entries
-    localStorage.setItem(
-      DRAFT_KEY,
-      JSON.stringify({
-        outline: { title: '大纲1', chapters: [] },
-        chapters: [{ title: '第一章', summary: '摘要', keyEvents: [] }],
-        outlineHistory: [
-          { title: '旧版1' },
-          { title: '旧版2' },
-          { title: '旧版3' },
-          { title: '旧版4' },
-          { title: '旧版5' },
-          { title: '旧版6' },
-        ],
-        chaptersHistory: [],
-        savedAt: Date.now(),
-      }),
-    );
-    // Restore to load it into store
-    const store = makePlotStore();
-    const restored = store.tryRestoreDraft();
-    expect(restored).toBe(true);
-    // tryRestoreDraft restores all entries; autoSaveDraft slices to 5
-    expect(store.outlineHistory).toHaveLength(6); // restore doesn't slice
-    expect(store.outlineHistory[0].title).toBe('旧版1');
-    expect(store.outlineHistory[5].title).toBe('旧版6');
+  it('resetAll 清除草稿并换一个新的草稿 id', () => {
+    const { store, draft } = seedFilledDraft();
+    store.resetAll();
+    expect(readDraft()).toBeNull();
+    expect(store.draftId).not.toBe(draft.draftId);
+  });
 
-    // Now autoSaveDraft should slice to 5
+  it('清除大纲只清大纲，角色草稿保留', () => {
+    const { store } = seedFilledDraft();
+    store.plotOutline = OUTLINE as any;
+    store.plotOutlineChapters = CHAPTERS as any;
+    store.clearOutline();
     store.autoSaveDraft();
-    const draft = JSON.parse(localStorage.getItem(DRAFT_KEY)!);
-    expect(draft.outlineHistory).toHaveLength(5);
-    expect(draft.outlineHistory[0].title).toBe('旧版2'); // oldest dropped
-    expect(draft.outlineHistory[4].title).toBe('旧版6');
+    expect(readDraft().character.name).toBe('艾琳');
+    expect(readDraft().outline).toBeNull();
   });
 
-  it('startJourney 应包含 clearDraft 调用（手动验证 clearDraft）', () => {
-    // Test clearDraft independent of DB operations (startJourney requires DB setup)
-    localStorage.setItem(
-      DRAFT_KEY,
-      JSON.stringify({
-        outline: { title: '草稿大纲', chapters: [] },
-        chapters: [{ title: '第一章', summary: '摘要', keyEvents: [] }],
-        savedAt: Date.now(),
-      }),
-    );
-    const store = makePlotStore();
-    expect(localStorage.getItem(DRAFT_KEY)).not.toBeNull();
-    store.clearDraft();
-    expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
+  it('autoSaveDraft 只保留最近 5 版大纲历史', () => {
+    const store = makeStore();
+    store.name = '艾琳';
+    store.plotOutline = OUTLINE as any;
+    store.plotOutlineChapters = CHAPTERS as any;
+    store.outlineHistory = [1, 2, 3, 4, 5, 6].map((n) => ({
+      ...OUTLINE,
+      title: `旧版${n}`,
+    })) as any;
+    store.autoSaveDraft();
+    const saved = readDraft().outline.outlineHistory;
+    expect(saved).toHaveLength(5);
+    expect(saved[0].title).toBe('旧版2');
   });
 });
 
@@ -2762,5 +2790,151 @@ describe('命定核心名单加载态与失效选择', () => {
     const saveId = await store.startJourney();
     const { getLatestPlotOutline } = await import('@engine/persistence/database');
     expect(await getLatestPlotOutline(saveId)).toBeUndefined();
+  });
+});
+
+// ===== C-05：点数不足的目录物品不可选 =====
+
+describe('选择闸门（C-05）', () => {
+  it('点数不足时 selectBlockReason 写出差额，selectCatalogItem 拒绝添加', () => {
+    const store = makeStore();
+    store.selectDifficulty('hell'); // 100 点
+    const expensive = FIXTURE_EQUIPMENT_POOL.find((e) => e.cost === 5000)!;
+    expect(store.canSelect(expensive)).toBe(false);
+    expect(store.selectBlockReason(expensive)).toBe('点数不足，还差 4900 点');
+    expect(store.selectCatalogItem(expensive)).toBe(false);
+    expect(store.selectedEquipments).toHaveLength(0);
+  });
+
+  it('买得起时 selectCatalogItem 按类目添加；已选中不重复添加', () => {
+    const store = makeStore();
+    store.selectDifficulty('normal');
+    const sword = FIXTURE_EQUIPMENT_POOL[0];
+    expect(store.selectBlockReason(sword)).toBeNull();
+    expect(store.selectCatalogItem(sword)).toBe(true);
+    expect(store.selectCatalogItem(sword)).toBe(false);
+    expect(store.selectedEquipments).toHaveLength(1);
+    // 已选中的物品可以保留（不因余额变化被判为不可选）
+    expect(store.canSelect(sword)).toBe(true);
+  });
+
+  it('道具按数量计价，与 itemCost 同口径', () => {
+    const store = makeStore();
+    store.selectDifficulty('hell'); // 100 点
+    const bundle = { ...FIXTURE_ITEM_POOL[0], id: 'it_捆', cost: 30, quantity: 4 };
+    expect(store.selectBlockReason(bundle)).toBe('点数不足，还差 20 点');
+  });
+});
+
+// ===== C-06：转生点数超支挡住建档 =====
+
+describe('转生点数超支闸门（C-06）', () => {
+  function makeValidStore() {
+    const store = makeStore();
+    fillRequiredChoices(store);
+    store.name = '艾琳';
+    allocateBasePoints(store);
+    return store;
+  }
+
+  it('未超支时聚合清单为空，最后一步放行', () => {
+    const store = makeValidStore();
+    expect(store.overspentPoints).toBe(0);
+    expect(store.missingItems).toEqual([]);
+    expect(store.stepValid[7]).toBe(true);
+  });
+
+  it('★ 超支时聚合清单写出「转生点数超支 N 点」，最后一步被挡，单步不被挡', () => {
+    const store = makeValidStore();
+    store.destinyPoints = 2100; // 1050 点 > 普通档 1000 点
+    expect(store.remainingPoints).toBe(-50);
+    expect(store.overspentPoints).toBe(50);
+    expect(store.missingItems).toEqual([{ label: '转生点数超支 50 点', step: 1 }]);
+    expect(store.stepValid[7]).toBe(false);
+    // 步进器仍允许暂时超支：基础信息这一步本身不因预算被挡
+    expect(store.stepValid[1]).toBe(true);
+    expect(store.firstIncompleteStep).toBe(1);
+  });
+
+  it('★ 花完点后换成更低难度也会被拦下', () => {
+    const store = makeValidStore();
+    store.addEquipment(FIXTURE_EQUIPMENT_POOL[0]); // 30
+    store.selectDifficulty('hell'); // 100 点
+    store.level = 25; // 120 点
+    expect(store.overspentPoints).toBe(50);
+    expect(store.stepValid[7]).toBe(false);
+  });
+
+  it('★ 超支时 startJourney 拒绝建档并跳回基础信息步骤', async () => {
+    const store = makeValidStore();
+    store.money = 200000; // 金钱步进器本身上限 99999，这里直接写值模拟任意来源的超支
+    store.currentStep = 7;
+    await expect(store.startJourney()).rejects.toThrow('转生点数超支');
+    expect(store.currentStep).toBe(1);
+  });
+
+  it('创造模式 100 万点不受影响', () => {
+    const store = makeValidStore();
+    store.selectDifficulty('creative');
+    store.money = 99999;
+    store.destinyPoints = 9999;
+    store.addEquipment(FIXTURE_EQUIPMENT_POOL.find((e) => e.cost === 5000)!);
+    expect(store.overspentPoints).toBe(0);
+    expect(store.stepValid[7]).toBe(true);
+  });
+});
+
+// ===== C-13：加载预设时被替换的大纲进历史 =====
+
+describe('加载预设与大纲历史（C-13）', () => {
+  const mkOutline = (title: string) =>
+    ({
+      id: title,
+      saveId: '',
+      mode: 'main',
+      title,
+      summary: '',
+      content: '',
+      chapters: [],
+      confirmed: false,
+      version: 1,
+      timeRange: { start: '', end: '' },
+      createdAt: 1,
+      updatedAt: 1,
+    }) as any;
+  const chapters = [{ title: '第一章', summary: '', keyEvents: [] }] as any;
+
+  it('★ 预设带大纲时，当前大纲压进历史而不是清空历史，回退上一版可找回', () => {
+    const store = makeStore();
+    store.plotOutline = mkOutline('更早的大纲');
+    store.plotOutlineChapters = chapters;
+    store.outlineHistory = [mkOutline('更早的历史')];
+    store.plotOutline = mkOutline('当前大纲');
+
+    const current = store.getCurrentPresetData();
+    store.applyPresetData({
+      id: 'p',
+      name: '预设',
+      createdAt: 1,
+      updatedAt: 1,
+      ...current,
+      plotOutline: mkOutline('预设大纲'),
+      plotOutlineChapters: chapters,
+    });
+
+    expect(store.plotOutline?.title).toBe('预设大纲');
+    expect(store.outlineHistory.map((o) => o.title)).toEqual(['更早的历史', '当前大纲']);
+    expect(store.rollbackOutline()).toBe(true);
+    expect(store.plotOutline?.title).toBe('当前大纲');
+  });
+
+  it('hasDraftContent：空草稿为 false，填了名字或有大纲即为 true', () => {
+    const store = makeStore();
+    expect(store.hasDraftContent).toBe(false);
+    store.name = '艾琳';
+    expect(store.hasDraftContent).toBe(true);
+    store.name = '';
+    store.plotOutline = mkOutline('大纲');
+    expect(store.hasDraftContent).toBe(true);
   });
 });

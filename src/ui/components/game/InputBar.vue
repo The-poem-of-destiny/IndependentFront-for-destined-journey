@@ -7,7 +7,19 @@ const emit = defineEmits<{
   stop: [];
 }>();
 
-const props = defineProps<{ disabled?: boolean; stopping?: boolean }>();
+const props = defineProps<{
+  disabled?: boolean;
+  stopping?: boolean;
+  /**
+   * 非生成态下暂时不能发送的原因（如「正在润色正文…」，GAME-07）。
+   * 有值时输入框与发送键锁住、占位文字换成这句；不显示停止键 —— 那颗只停回合。
+   */
+  lockedReason?: string;
+}>();
+
+const placeholder = computed(
+  () => props.lockedReason || '输入你的行动…（Enter 发送 · Shift+Enter 换行）',
+);
 
 const game = useGameStore();
 const input = ref('');
@@ -41,6 +53,9 @@ function autoResize() {
 }
 
 function handleKeydown(e: KeyboardEvent) {
+  // 🔴 输入法选字时按回车是在确认候选词，不是发送（GAME-11）。macOS 的 Chrome/Safari
+  //    与部分 Linux 输入法此时仍报 `Enter`，只能靠 isComposing / keyCode 229 认出来
+  if (e.isComposing || e.keyCode === 229) return;
   // 纯 Enter（不带 Shift / Ctrl / Meta）= 发送；Shift+Enter 留给 textarea 原生换行
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
@@ -54,6 +69,7 @@ function selectOption(option: string) {
 }
 
 function handleSend() {
+  if (props.disabled || props.lockedReason) return;
   const text = input.value.trim();
   if (!text) return;
   emit('send', text);
@@ -99,14 +115,21 @@ function handleStop() {
       v-model="input"
       class="input-field"
       rows="1"
-      placeholder="输入你的行动…（Enter 发送 · Shift+Enter 换行）"
-      :disabled="props.disabled"
+      :placeholder="placeholder"
+      :disabled="props.disabled || !!props.lockedReason"
       @input="autoResize"
       @keydown="handleKeydown"
     />
 
     <!-- 非生成态：发送按钮 -->
-    <button v-if="!props.disabled" class="input-btn send-btn" title="发送" @click="handleSend">
+    <button
+      v-if="!props.disabled"
+      class="input-btn send-btn"
+      title="发送"
+      aria-label="发送"
+      :disabled="!!props.lockedReason"
+      @click="handleSend"
+    >
       <i class="fa-solid fa-paper-plane" />
     </button>
 
@@ -156,6 +179,10 @@ function handleStop() {
 }
 .send-btn {
   color: var(--theme-primary);
+}
+.send-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 .stop-btn {
   color: var(--theme-error);

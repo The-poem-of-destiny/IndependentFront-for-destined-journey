@@ -45,6 +45,7 @@ import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
 import { useCharacterAppearanceStore } from '../../stores/character-appearance-store';
 import { useUIStore } from '../../stores/ui-store';
+import { confirmLeaveGame } from '../../lib/leave-game-guard';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import {
@@ -448,8 +449,12 @@ async function cancel(): Promise<void> {
   await store.cancel(r.id);
 }
 
-/** 缺预设那一行的「去设置」（D41）。角色名预填要等 §11 的图像分区落地 */
-function goPresets(): void {
+/**
+ * 缺预设那一行的「去设置」（D41）。角色名预填要等 §11 的图像分区落地。
+ * 🔴 去设置会卸载游戏页、中止在跑的回合与插画 —— 先过离开确认（GAME-08）。
+ */
+async function goPresets(): Promise<void> {
+  if (!(await confirmLeaveGame('设置'))) return;
   ui.openSettings('image');
 }
 </script>

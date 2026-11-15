@@ -14,6 +14,7 @@ import PresetModal from './PresetModal.vue';
 import FormSelect from '../shared/form/FormSelect.vue';
 import { initializeCachedDirectSettings } from '../../lib/direct-settings';
 import { MISSING_FIELDS_PREFIX, type BlockedHint } from '../../lib/create-options';
+import { confirmDialog } from '../../lib/confirm-dialog';
 
 const store = useCreateStore();
 const ui = useUIStore();
@@ -111,10 +112,11 @@ function isMissingFieldsError(err: unknown): err is Error {
 const blockedHint = computed<BlockedHint | null>(() => {
   if (store.isCreating) return null;
   const step = store.currentStep;
-  const steps = step === 7 ? [0, 1, 2] : [step];
-  const items = steps.flatMap((s) =>
-    (store.stepMissing[s] ?? []).map((label: string) => ({ label, step: s })),
-  );
+  // 最后一步用 store 的聚合清单（含「转生点数超支」，C-06），与 persistJourney 同一道闸门
+  const items: BlockedHint['items'] =
+    step === 7
+      ? store.missingItems
+      : (store.stepMissing[step] ?? []).map((label: string) => ({ label, step }));
   if (items.length === 0) return null;
   return {
     prefix: step === 7 ? '开始旅程前还需补全：' : '还需完成：',
@@ -122,6 +124,29 @@ const blockedHint = computed<BlockedHint | null>(() => {
     items,
   };
 });
+
+/**
+ * 「重新开始」（H-04 / C-12）：草稿现在会跨刷新保留，放弃的角色必须有一个明确的丢弃入口。
+ * 清空后回到准备页（生成模式也一并清掉），命定核心名单随 resetAll 清空，这里重新加载。
+ */
+async function handleRestart() {
+  if (store.isCreating) return;
+  const confirmed = await confirmDialog({
+    title: '重新开始创建角色？',
+    message: '当前填写的角色草稿会被清空，且无法恢复。',
+    details: [
+      '难度、生成模式、角色信息与属性分配',
+      '已选装备、道具、技能与背景',
+      '命定核心与剧情设置、已生成的大纲',
+    ],
+    confirmLabel: '清空并重新开始',
+    danger: true,
+  });
+  if (!confirmed) return;
+  creationError.value = '';
+  store.resetAll();
+  void store.loadWorldBookEntries();
+}
 
 function handleStepSelect(step: number) {
   if (store.isCreating || step < 0 || step >= stepComponents.length) return;
@@ -243,6 +268,7 @@ onMounted(() => {
       @jump="handleStepSelect"
       @next="handleNext"
       @open-preset="store.showPresetModal = true"
+      @restart="handleRestart"
     />
 
     <PresetModal :visible="store.showPresetModal" @close="store.showPresetModal = false" />

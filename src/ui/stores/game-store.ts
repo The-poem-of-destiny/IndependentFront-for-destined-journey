@@ -55,6 +55,7 @@ import { allocateAttributePoint } from '@engine/character/attribute-allocation';
 import type { AllocatableAttr } from '@engine/character/attribute-allocation';
 import { detach } from './db-write';
 import { agentActivityLabel, presentToolActivity } from '../lib/agent-activity';
+import { buildTurnFailure, sanitizeFailureDetail } from '../lib/turn-failure';
 // 🆕 重铸（2026-08-24）：单条目重铸的类型 + 注入缝（实现由 GamePage 挂 GamePipeline.rewriteLoadoutItem）
 import type { RewriteTarget } from '@engine/agents/entity-gen-agent';
 
@@ -173,6 +174,11 @@ export const useGameStore = defineStore('game', () => {
   // === 对话 ===
   const messages = ref<ChatMessage[]>([]);
   const isGenerating = ref(false);
+  /**
+   * 🆕 正文润色进行中（审查 GAME-07，2026-11-14）。润色是不经 run() 的付费侧链，
+   * 不置 isGenerating；这一位挡住重复润色、润色期间发送新回合与回退。
+   */
+  const isRewriting = ref(false);
 
   const recentMemories = ref<MemoryRecord[]>([]);
   const activePlotEvents = ref<PlotEvent[]>([]);
@@ -647,6 +653,9 @@ export const useGameStore = defineStore('game', () => {
     if (!step) return;
     step.status = error ? 'failed' : 'completed';
     step.completedAt = Date.now();
+    // GAME-05：失败原因跟着步骤留下（脱敏截断），回合收尾时据此归类给玩家看
+    const detail = error ? sanitizeFailureDetail(error) : undefined;
+    if (detail) step.error = detail;
 
     if (run.standalone && !run.steps.some((entry) => entry.status === 'running')) {
       finishAgentActivityRun(run.id, error ? 'failed' : 'completed');
@@ -682,14 +691,30 @@ export const useGameStore = defineStore('game', () => {
     if (run?.status === 'running') run.status = 'stopping';
   }
 
+  /**
+   * @param error 回合级抛出的错误（GAME-05）。失败时据此或据第一个带原因的失败步骤
+   *              归类出 `run.failure`；两者都没有时归为「未知」。
+   */
   function finishAgentActivityRun(
     runId: string,
     status: 'completed' | 'failed' | 'cancelled',
     message?: string,
+    error?: unknown,
   ) {
     const run = activityRun(runId);
     if (!run || ['completed', 'failed', 'cancelled'].includes(run.status)) return;
     const completedAt = Date.now();
+    if (status === 'failed') {
+      const failedStep = run.steps.find((step) => step.status === 'failed' && step.error);
+      // 回合级抛错时，出错的多半是此刻还在跑的那一步
+      const runningStep = [...run.steps].reverse().find((step) => step.status === 'running');
+      run.failure =
+        error !== undefined
+          ? buildTurnFailure(error, (failedStep ?? runningStep)?.label)
+          : failedStep
+            ? buildTurnFailure(failedStep.error, failedStep.label)
+            : { category: 'unknown' };
+    }
     run.status = status;
     run.completedAt = completedAt;
     run.message = message;
@@ -1516,10 +1541,15 @@ export const useGameStore = defineStore('game', () => {
 
   /** 右键「回退」：撤回当前回合 → 恢复上一轮快照 + 把这轮玩家输入回填输入框。
    *  回退后原样发送 = 重新生成；编辑后发送 = 编辑重发。
-   *  不可回退（最早回合/生成中/战斗中/无存档/无快照）时返回 rejected。 */
-  async function rollbackOneTurn(): Promise<TimelineRestoreResult> {
+   *  不可回退（最早回合/生成中/润色中/战斗中/无存档/无快照）时返回 rejected。
+   *  `refillInput: false`：「重新生成」用 —— 调用方拿着原输入直接走发送缝，不回填输入框
+   *  （回填了再发送，那句话会在新回合跑完后还留在输入框里）。 */
+  async function rollbackOneTurn(
+    options: { refillInput?: boolean } = {},
+  ): Promise<TimelineRestoreResult> {
     if (!activeSaveId.value) return { status: 'rejected', error: '无活跃存档' };
     if (isGenerating.value) return { status: 'rejected', error: '生成进行中，无法回退' };
+    if (isRewriting.value) return { status: 'rejected', error: '正在润色正文，稍后再回退' };
     if (isAgentCombat.value) return { status: 'rejected', error: '战斗进行中，无法回退' };
 
     // 当前回合 = 最新一条 user 消息（删除前先捕获其输入）
@@ -1539,7 +1569,11 @@ export const useGameStore = defineStore('game', () => {
     if (!prevSnapshot) return { status: 'rejected', error: '找不到上一轮快照' };
 
     const result = await restoreTimeline(prevSnapshot.id);
-    if (result.status === 'restored' && result.continuation === 'same-save') {
+    if (
+      result.status === 'restored' &&
+      result.continuation === 'same-save' &&
+      options.refillInput !== false
+    ) {
       fillInput(capturedInput);
     }
     return result;
@@ -1632,13 +1666,61 @@ export const useGameStore = defineStore('game', () => {
   ): Promise<{ ok: boolean; reason?: string; warning?: string }> {
     if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
     if (!rewriteProseImpl) return { ok: false, reason: '游戏管线未就绪' };
+    // 🔴 GAME-07：一次只润色一段（重复点击 = 重复付费），回合生成中也不润色
+    if (isRewriting.value) return { ok: false, reason: '正在润色，请等这一次完成' };
+    if (isGenerating.value) return { ok: false, reason: '回合生成中，稍后再润色' };
     const msg = messages.value.find((m) => m.id === messageId);
     if (!msg || msg.role !== 'assistant') return { ok: false, reason: '只能润色正文消息' };
     if (!msg.content.trim()) return { ok: false, reason: '这条消息没有可改写的正文' };
-    const result = await rewriteProseImpl(msg.content);
-    if (!result.ok || !result.text) return { ok: false, reason: result.reason ?? '润色失败' };
-    await replaceMessageContent(messageId, result.text);
-    return { ok: true, ...(result.warning ? { warning: result.warning } : {}) };
+    const saveId = activeSaveId.value;
+    isRewriting.value = true;
+    try {
+      const result = await rewriteProseImpl(msg.content);
+      if (!result.ok || !result.text) return { ok: false, reason: result.reason ?? '润色失败' };
+      // 润色期间切了存档：结果属于旧存档，丢掉（不往新存档的同 id 消息上写）
+      if (activeSaveId.value !== saveId) return { ok: false, reason: '存档已切换，润色结果已丢弃' };
+      const current = messages.value.find((m) => m.id === messageId);
+      if (!current) return { ok: false, reason: '这条消息已不在当前时间线上' };
+      // 🔴 原文留在消息上可还原；多次润色只保留**第一次**润色前的原文
+      await writeMessage(messageId, {
+        content: result.text,
+        preRewriteContent: current.preRewriteContent ?? current.content,
+      });
+      return { ok: true, ...(result.warning ? { warning: result.warning } : {}) };
+    } finally {
+      isRewriting.value = false;
+    }
+  }
+
+  /**
+   * 「还原润色前」（GAME-07）：把正文换回润色前的原文并删掉备份字段。
+   * 没有备份（从没润色过 / 已还原）时什么都不做并返回 false。
+   */
+  async function restorePreRewrite(messageId: string): Promise<boolean> {
+    if (isRewriting.value || isGenerating.value) return false;
+    const msg = messages.value.find((m) => m.id === messageId);
+    if (!msg || msg.preRewriteContent === undefined) return false;
+    await writeMessage(messageId, { content: msg.preRewriteContent, preRewriteContent: undefined });
+    return true;
+  }
+
+  /** 就地改一条消息的若干字段并落库；值为 undefined 的字段从消息上删掉（不留 undefined 键） */
+  async function writeMessage(
+    messageId: string,
+    changes: Partial<Pick<ChatMessage, 'content' | 'preRewriteContent'>>,
+  ): Promise<void> {
+    const index = messages.value.findIndex((m) => m.id === messageId);
+    if (index < 0) return;
+    const next: ChatMessage = { ...messages.value[index] };
+    for (const [key, value] of Object.entries(changes) as [
+      keyof typeof changes,
+      string | undefined,
+    ][]) {
+      if (value === undefined) delete next[key];
+      else next[key] = value;
+    }
+    messages.value.splice(index, 1, next);
+    await persistMessage(next);
   }
 
   /**
@@ -1845,6 +1927,8 @@ export const useGameStore = defineStore('game', () => {
     rewriteLoadoutItem,
     replaceMessageContent,
     rewriteProse,
+    isRewriting,
+    restorePreRewrite,
     runAutosave,
     devArmRandomEvent,
   };

@@ -35,6 +35,11 @@ const store = useCreateStore();
       已选择「{{ store.difficulty.label }}」，获得
       {{ store.difficulty.points.toLocaleString() }} 转生点数
     </p>
+    <!-- C-06：花完点再换成更低难度时，在难度选择处就地说明超支 -->
+    <p v-if="store.overspentPoints > 0" class="overspent-hint" role="status">
+      当前已花费 {{ store.totalCost.toLocaleString() }} 点，超出本难度
+      {{ store.overspentPoints.toLocaleString() }} 点；需减少开销或换回更高难度才能创建角色。
+    </p>
   </section>
 </template>
 
@@ -103,5 +108,12 @@ const store = useCreateStore();
   font-size: 0.85rem;
   color: var(--theme-primary);
   font-weight: 500;
+}
+.overspent-hint {
+  margin-top: var(--theme-spacing-sm);
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--theme-error);
 }
 </style>

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { subscribeApiRpmWaits } from '@engine/api/api-rpm-limiter';
 import type { ApiRpmWaitItem } from '@engine/types/types';
 import { useUIStore } from '../../stores/ui-store';
+import { confirmLeaveGame } from '../../lib/leave-game-guard';
 import AppButton from './AppButton.vue';
 import AppCard from './AppCard.vue';
 
@@ -23,7 +24,12 @@ function countdown(resumeAt: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-function openSettings() {
+/**
+ * 🔴 这个弹窗往往正出现在回合进行中（请求在排队）。去设置会卸载游戏页、中止那一回合
+ *    与在飞的插画（G-03）—— 先过离开确认；不在游戏页时守卫直接放行。
+ */
+async function openSettings() {
+  if (!(await confirmLeaveGame('设置'))) return;
   ui.openSettings('api');
 }
 

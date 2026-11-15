@@ -28,11 +28,11 @@ import MapPoliticalTab from './MapPoliticalTab.vue';
 import {
   useMapMarkers,
   DEFAULT_MARKER_COLOR,
-  DEFAULT_MARKER_ICON,
   MARKER_ICON_LABELS,
   MARKER_ICON_OPTIONS,
   MARKER_COLOR_OPTIONS,
 } from '../../composables/useMapMarkers';
+import { useMarkerDraft } from '../../composables/useMarkerDraft';
 import { getLocationNode, getLocationNodes } from '@engine/map/location-db';
 import { getMapMarkers, removeMapMarker, setMapMarker } from '@engine/state/save-profile';
 import type { LocationNode, MapMarker } from '@engine/types/types';
@@ -168,14 +168,6 @@ const containerRef = ref<HTMLDivElement | null>(null);
 const workbenchOpen = ref(false);
 const activeTab = ref<'list' | 'editor'>('list');
 
-// 编辑表单
-const editingName = ref('');
-const editingGroup = ref('');
-const editingDescription = ref('');
-const editingImageUrls = ref<string[]>([]);
-const editingIcon = ref<string>(DEFAULT_MARKER_ICON);
-const editingColor = ref(DEFAULT_MARKER_COLOR);
-
 // 浮动卡片图片轮播
 const activeImageIndex = ref(0);
 
@@ -227,6 +219,17 @@ const {
   clearOverlays,
   syncActiveMarkerCardPosition,
 } = useMapMarkers(viewerRef);
+
+// 编辑表单：草稿只认「当前选中标记」这一个源头（MAP-01）—— 列表点选、地图上点标记、
+// 新增标记三条路都改的是同一个选中 id，表单跟着它走，不再由某一条路顺手去填
+const {
+  name: editingName,
+  group: editingGroup,
+  description: editingDescription,
+  icon: editingIcon,
+  color: editingColor,
+  toPatch: draftPatch,
+} = useMarkerDraft(activeMarker);
 
 // ═══ 角色当前位置 =========
 // (上面的 playerMarker 和 npcLocationMarkers 已替代旧的 playerLocationNode)
@@ -334,26 +337,8 @@ function handleSelectMarker(id: string | null) {
     selectMarker(null);
     return;
   }
+  // 表单不在这里填：useMarkerDraft 监听选中 id 统一灌草稿
   selectMarker(id);
-  // 填入编辑表单
-  if (id) {
-    const m = markers.value.find((mm) => mm.id === id);
-    if (m) {
-      editingName.value = m.name;
-      editingGroup.value = m.group ?? '';
-      editingDescription.value = m.description ?? '';
-      editingImageUrls.value = m.imageUrls ?? [];
-      editingIcon.value = m.icon ?? DEFAULT_MARKER_ICON;
-      editingColor.value = m.color ?? DEFAULT_MARKER_COLOR;
-    }
-  }
-  // unselect 时清空表单
-  if (!id) {
-    editingName.value = '';
-    editingGroup.value = '';
-    editingDescription.value = '';
-    editingImageUrls.value = [];
-  }
 }
 
 /** 工作台列表中点击 → 选中标记并切换到编辑 tab */
@@ -365,13 +350,7 @@ function handleWorkbenchSelect(id: string) {
 function handleSaveEditor() {
   const id = activeMarkerId.value;
   if (!id) return;
-  handleUpdateMarker(id, {
-    name: editingName.value,
-    group: editingGroup.value,
-    description: editingDescription.value,
-    icon: editingIcon.value as MapMarker['icon'],
-    color: editingColor.value,
-  });
+  handleUpdateMarker(id, draftPatch());
 }
 
 // ═══ 地图点击 → 添加标记/取消选中（见下方 onMapClick）

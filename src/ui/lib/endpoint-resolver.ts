@@ -23,6 +23,10 @@
  *    内容包默认层（`agentDefaults`）给的 = 设备本地 pool id、换机必然悬空 →
  *    由 `game-pipeline.getEndpointForAgent` 回落默认端点 + 可见 warn，不再静默掐掉整条链。
  *    来源判定在调用侧（`hasExplicitAgentModel`），本解析器仍只认「有效绑定」这一个维度。
+ *
+ * 📌 2026-11-14（S-00）更正前移到读取咽喉：`getAgentSettings` 在合并时就把**只来自默认层**、
+ *    且本机 API 池里不存在的池 id 当成「未设置」（空串）。于是主 DAG、创角准入、设置页角标
+ *    全部同口径走默认端点，不必各自判来源；用户覆写层的失效 id 仍原样到达本解析器 → stale-binding。
  */
 import type { ApiEndpoint } from '@engine/types/types';
 import type { LlmDefaultParameters } from '@engine/types/types-api';
@@ -77,6 +81,50 @@ export function resolveAgentEndpoint(input: ResolveEndpointInput): EndpointResol
     : { status: 'stale-binding', requestedId: boundPoolId };
 }
 
+/**
+ * 设置页角标 / 参数卡用的「这个 Agent 的 API 绑定处于什么状态」—— 四态判别联合（S-08）。
+ *
+ *   - `no-api`：池里没有任何对话 API（空池 + 未设置）
+ *   - `follow-default`：没绑定，运行时自动用 `endpoint`（池首项）—— **不是错误**
+ *   - `bound`：显式绑定且池里存在
+ *   - `stale`：显式绑定但池里已没有这个 id（运行时 fail-closed）
+ *
+ * 🔴 只是 `resolveAgentEndpoint` 的展示层投影，**不另写解析规则**：角标与运行时必须给出
+ *    同一个答案，否则又会回到「界面说配好了、运行时硬失败」那条老路（S-00 / S-08）。
+ *    `boundPoolId` 应是 `getAgentSettings(...).model`（默认层里本机不存在的池 id 已被它清成空）。
+ */
+export type AgentBindingState =
+  | { kind: 'no-api' }
+  | { kind: 'follow-default'; endpoint: ApiEndpoint }
+  | { kind: 'bound'; endpoint: ApiEndpoint }
+  | { kind: 'stale'; requestedId: string };
+
+export function describeAgentBinding(
+  boundPoolId: string | undefined | null,
+  apiPool: readonly ApiEndpoint[],
+): AgentBindingState {
+  const resolution = resolveAgentEndpoint({ boundPoolId, apiPool });
+  if (resolution.status === 'missing-pool') return { kind: 'no-api' };
+  if (resolution.status === 'stale-binding') {
+    return { kind: 'stale', requestedId: resolution.requestedId };
+  }
+  const unset = boundPoolId === undefined || boundPoolId === null || boundPoolId === '';
+  return unset
+    ? { kind: 'follow-default', endpoint: resolution.endpoint }
+    : { kind: 'bound', endpoint: resolution.endpoint };
+}
+
+/**
+ * 一条 settings 投影里的 API 池条目是不是**对话（LLM）源** —— 与 `buildApiEndpoints` 的筛选同一口径。
+ * 旧条目既无 `kind` 也无 `apiType` 时按 LLM 处理（历史默认）。
+ */
+export function isLlmPoolEntry(entry: unknown): boolean {
+  if (!entry || typeof entry !== 'object') return false;
+  const row = entry as { kind?: unknown; apiType?: unknown };
+  if (!row.kind && !row.apiType) return true;
+  return (row.kind ?? (row.apiType === 'chat' ? 'llm' : row.apiType)) === 'llm';
+}
+
 const LLM_DEFAULT_PARAMETER_KEYS = [
   'temperature',
   'topP',
@@ -112,11 +160,7 @@ export function buildApiEndpoints(apiPool: readonly unknown[]): ApiEndpoint[] {
   //    `DataCloneError`，症状是**所有 LLM Agent 在发请求前全挂**（plot_pre_check 首当其冲）。
   //    这是 API 配置重构（1fd73e2）引入的回归，`detach` 是本仓唯一一份切断实现的入口。
   return (apiPool as any[])
-    .filter((entry: any) =>
-      !entry?.kind && !entry?.apiType
-        ? true
-        : (entry.kind ?? (entry.apiType === 'chat' ? 'llm' : entry.apiType)) === 'llm',
-    )
+    .filter((entry: any) => isLlmPoolEntry(entry))
     .map((entry: any) =>
       detach({
         id: entry.id || '',

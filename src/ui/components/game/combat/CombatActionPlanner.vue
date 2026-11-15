@@ -117,6 +117,8 @@ function emitContinue() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // 输入法选字时的回车属于输入法，不是提交（GAME-11）
+  if (e.isComposing || e.keyCode === 229) return;
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     e.preventDefault();
     submit();

@@ -16,6 +16,7 @@ import {
   selectedWorkshopProjectIds,
 } from '../../lib/workshop-enable';
 import WorkshopEnableList from '../shared/WorkshopEnableList.vue';
+import { WORKSHOP_LOCKED } from './workshop-lock';
 
 const game = useGameStore();
 const workshop = useWorkshopStore();
@@ -37,6 +38,10 @@ const tokens = computed<string[]>(
   () => selectedSave.value?.metadata?.enabledWorldBookEntries ?? ([] as string[]),
 );
 const selectedIds = computed(() => selectedWorkshopProjectIds(options.value, tokens.value));
+/** 空态（W-02）：工坊锁定时不把人引向那张进不去的卡片 */
+const emptyText = WORKSHOP_LOCKED
+  ? '尚未安装社区扩展。创意工坊暂未开放，目前无法安装新的社区扩展。'
+  : '尚未安装社区扩展 —— 可进入创意工坊浏览并安装';
 
 function chooseDefaultSave() {
   if (selectedSaveId.value && game.saves.some((save) => save.id === selectedSaveId.value)) return;
@@ -105,7 +110,7 @@ onMounted(load);
       :options="options"
       :selected="selectedIds"
       :disabled="saving || !selectedSave"
-      empty-text="尚未安装社区扩展 —— 可进入创意工坊浏览并安装"
+      :empty-text="emptyText"
       @toggle="onToggle"
     />
   </div>

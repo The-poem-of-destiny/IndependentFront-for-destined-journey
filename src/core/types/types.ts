@@ -931,6 +931,12 @@ export interface ChatMessage {
   turn?: number;
   /** 🆕 系统事件数据 — 仅 role='system' 时有值，供前端渲染卡片 */
   systemEvent?: SystemEvent;
+  /**
+   * 🆕 正文润色前的原文（审查 GAME-07，2026-11-14）。仅 assistant 正文被「润色」改写后存在，
+   * 供玩家「还原润色前」；多次润色只保留**第一次**润色前的原文，还原后删除此字段。
+   * 不进任何提示词与摘要 —— 只是可还原的备份。
+   */
+  preRewriteContent?: string;
 }
 
 // ========== Constants ==========
@@ -2521,6 +2527,20 @@ export interface AgentActivityStep {
   startedAt: number;
   completedAt?: number;
   tools: AgentToolActivity[];
+  /** 🆕 失败原因原文（审查 GAME-05，2026-11-14）：已脱敏、已截断，仅 status='failed' 时有值 */
+  error?: string;
+}
+
+/** 🆕 回合失败原因的分类（审查 GAME-05）。措辞与下一步建议在 UI 的 `lib/turn-failure.ts`。 */
+export type TurnFailureCategory =
+  'auth' | 'quota' | 'rate_limit' | 'network' | 'server' | 'rejected' | 'config' | 'unknown';
+
+/** 🆕 失败回合给玩家看的原因（审查 GAME-05）。`detail` 已脱敏截断，只放进「技术详情」。 */
+export interface TurnFailureInfo {
+  category: TurnFailureCategory;
+  /** 出错步骤的中文名（如「书写此刻」）；判断不出是哪一步时缺席 */
+  stepLabel?: string;
+  detail?: string;
 }
 
 /** 与一条玩家消息绑定的回合活动记录。原始调用细节只进入 DebugAgentEntry。 */
@@ -2533,6 +2553,8 @@ export interface AgentActivityRun {
   message?: string;
   standalone: boolean;
   steps: AgentActivityStep[];
+  /** 🆕 status='failed' 时的归类原因（审查 GAME-05）；只在内存，不落库 */
+  failure?: TurnFailureInfo;
 }
 
 /** 编排器运行记录 */

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { useGameStore } from '../../stores/game-store';
+import { useUIStore } from '../../stores/ui-store';
+import { confirmDialog } from '../../lib/confirm-dialog';
 import {
   persistFocusQuest,
   persistQuestStatus,
@@ -10,6 +12,7 @@ import {
 import type { Quest } from '@engine/types/types';
 
 const game = useGameStore();
+const ui = useUIStore();
 
 const activeFilter = ref('全部');
 const focusQuest = ref(game.saveProfile?.focusQuest || '');
@@ -25,11 +28,16 @@ const inspectQuest = ref<string | null>(null);
 watch(focusQuest, async (v) => {
   const profile = game.saveProfile;
   if (!profile || profile.focusQuest === v) return;
+  const prev = profile.focusQuest;
   profile.focusQuest = v;
   try {
     await persistFocusQuest(profile.saveId, v);
   } catch (err) {
     console.error('[QuestsPanel] focusQuest 持久化失败:', err);
+    // QST-03：落库失败不再静默 —— 回滚内存与下拉选择，并提示玩家
+    profile.focusQuest = prev;
+    focusQuest.value = prev ?? '';
+    ui.toast('焦点任务保存失败，已还原，请重试', 'error');
   }
 });
 
@@ -59,6 +67,18 @@ const statusFilters = computed(() => {
   return ['全部', ...Array.from(statuses)];
 });
 
+// QST-01：可选状态收缩（例如最后一个进行中任务被标记完成）后，当前筛选值可能已不在
+// 可选集合里 —— 此时退回「全部」，否则列表会变空、筛选条又因只剩一种状态而消失，
+// 玩家找不到复位入口。
+watch(statusFilters, (filters) => {
+  if (!filters.includes(activeFilter.value)) activeFilter.value = '全部';
+});
+
+/** 筛选条显示条件：有两种以上状态可选，或当前停在某个非「全部」筛选上（保留复位入口） */
+const showFilterBar = computed(
+  () => statusFilters.value.length > 2 || activeFilter.value !== '全部',
+);
+
 const matchesFilter = (q: Quest): boolean =>
   activeFilter.value === '全部' || (q.status || '未开始') === activeFilter.value;
 
@@ -87,34 +107,62 @@ const focusQuestData = computed(() => {
 });
 
 /**
+ * 已收尾（已完成 / 失败）的任务：不再提供「标记完成」（否则会把失败改成成功），
+ * 改为提供「删除」。判据与 `getGroupedQuests` 的分段口径一致。
+ */
+function isSettled(q: Quest): boolean {
+  return q.status === '已完成' || q.status === '失败';
+}
+
+/**
  * 手动标记完成 —— 先改内存 reactive（即时分段移位、其他面板即时可见），
- * 再交给引擎的窄字段写入口落库。失败不致命，记日志即可（persistFocusQuest 同款）。
+ * 再交给引擎的窄字段写入口落库。落库失败时回滚内存改动并提示玩家（QST-03）。
  */
 async function markDone(name: string | null) {
   if (!name) return;
   const profile = game.saveProfile;
   const quest = profile?.quests?.[name];
-  if (!profile || !quest) return;
+  if (!profile || !quest || isSettled(quest)) return;
+  const prevStatus = quest.status;
   quest.status = '已完成';
   try {
     await persistQuestStatus(profile.saveId, name, '已完成');
   } catch (err) {
     console.error('[QuestsPanel] 标记任务完成持久化失败:', err);
+    quest.status = prevStatus;
+    ui.toast('保存失败，任务状态已还原，请重试', 'error');
   }
 }
 
 /**
- * 手动删除一个已完成任务 —— 先改内存 reactive，再交给引擎的窄字段写入口落库。
+ * 手动删除一个已收尾任务 —— 先确认，再改内存 reactive，最后交给引擎的窄字段写入口落库。
+ * 落库失败时把任务放回内存并提示玩家。
  */
 async function removeQuestEntry(name: string | null) {
   if (!name) return;
   const profile = game.saveProfile;
-  if (!profile || !profile.quests?.[name]) return;
-  delete profile.quests[name];
+  const quest = profile?.quests?.[name];
+  if (!profile || !quest) return;
+  const ok = await confirmDialog({
+    title: '删除任务',
+    message: `删除任务「${name}」？`,
+    details: ['删除后无法恢复。'],
+    confirmLabel: '删除',
+    danger: true,
+  });
+  if (!ok) return;
+  // 确认期间档案可能被替换（回合提交 / 换档），以当前那份为准
+  const current = game.saveProfile;
+  if (!current || current.saveId !== profile.saveId || !current.quests?.[name]) return;
+  const removed = current.quests[name];
+  delete current.quests[name];
+  if (inspectQuest.value === name) inspectQuest.value = null;
   try {
-    await persistRemoveQuest(profile.saveId, name);
+    await persistRemoveQuest(current.saveId, name);
   } catch (err) {
     console.error('[QuestsPanel] 删除任务持久化失败:', err);
+    current.quests[name] = removed;
+    ui.toast('删除失败，任务已还原，请重试', 'error');
   }
 }
 </script>
@@ -156,7 +204,7 @@ async function removeQuestEntry(name: string | null) {
     </div>
 
     <!-- ═══ 筛选栏 ═══ -->
-    <div v-if="statusFilters.length > 2" class="filter-bar">
+    <div v-if="showFilterBar" class="filter-bar">
       <button
         v-for="s in statusFilters"
         :key="s"
@@ -206,7 +254,7 @@ async function removeQuestEntry(name: string | null) {
           </div>
 
           <div class="qc-actions">
-            <button v-if="q.status !== '已完成'" class="qc-action-btn" @click.stop="markDone(name)">
+            <button v-if="!isSettled(q)" class="qc-action-btn" @click.stop="markDone(name)">
               标记完成
             </button>
             <button
@@ -277,11 +325,7 @@ async function removeQuestEntry(name: string | null) {
               <div class="im-text">{{ inspected.reward || '暂无奖励' }}</div>
             </div>
             <div class="im-actions">
-              <button
-                v-if="inspected.status !== '已完成'"
-                class="im-btn"
-                @click="markDone(inspectQuest)"
-              >
+              <button v-if="!isSettled(inspected)" class="im-btn" @click="markDone(inspectQuest)">
                 标记完成
               </button>
               <button v-else class="im-btn im-btn-danger" @click="removeQuestEntry(inspectQuest)">

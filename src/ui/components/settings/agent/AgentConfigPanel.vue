@@ -29,8 +29,9 @@ import { isDirectSettingsProfile, resolveDirectPresetId } from '../../../lib/dir
  *    置 null 已经删掉了 —— 它让持久化的 Agent 选择永远读不回来。结论没变，
  *    是 `v-if` 在保证新挂载，不是那次置 null。）
  */
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppButton from '../../shared/AppButton.vue';
+import { setPromptDraftDirty } from './prompt-dirty-guard';
 import AgentParamsCard from './AgentParamsCard.vue';
 import AgentPromptCard from './AgentPromptCard.vue';
 import PresetManager from './PresetManager.vue';
@@ -82,6 +83,25 @@ const { presets: presetList, upsertPreset } = usePresets();
 
 const agentPromptDraft = ref('');
 const agentTemplateDraft = ref('');
+
+/**
+ * S-15：两个草稿的「干净基线」—— 载入 / 保存 / 恢复之后各记一次，草稿与之不同即「未保存」。
+ * 结果经模块级 `promptDraftDirty` 交给 SettingsPage，换 Agent / 换分区 / 返回前据此拦一下。
+ */
+const cleanPrompt = ref('');
+const cleanTemplate = ref('');
+function markDraftsClean() {
+  cleanPrompt.value = agentPromptDraft.value;
+  cleanTemplate.value = agentTemplateDraft.value;
+}
+const draftsDirty = computed(
+  () =>
+    agentPromptDraft.value !== cleanPrompt.value ||
+    agentTemplateDraft.value !== cleanTemplate.value,
+);
+watch(draftsDirty, (dirty) => setPromptDraftDirty(dirty), { immediate: true });
+// 卸载即离开（导航前已确认过），别把「未保存」带到下一次挂载
+onBeforeUnmount(() => setPromptDraftDirty(false));
 
 // 内容-引擎分离波 4 / D14：真实内容 overlay 是否启用（vite define 注入）。
 // 未启用（公开占位态）时隐藏「保存为默认」—— 否则一次点击就把提示词写进公开仓占位文件。
@@ -156,6 +176,7 @@ function loadDrafts(id: string) {
       agentTemplateDraft.value = getDefaultTemplateForAgent(id);
     }
   }
+  markDraftsClean();
 }
 
 // immediate 必须留着 —— 理由见文件头
@@ -195,6 +216,7 @@ function saveAgentSettings() {
     }
   }
   s.agentDirty[props.agentId] = true;
+  markDraftsClean();
   ui.toast('Agent 设置已保存', 'success');
 }
 
@@ -209,6 +231,8 @@ async function saveAsDefault() {
       systemPrompt: agentPromptDraft.value,
       template: agentTemplateDraft.value,
     });
+    // 草稿已经落进本地设置 —— 无论下面写文件成不成功，都不再算「未保存」
+    markDraftsClean();
   }
 
   const entry = buildAgentDefaultEntry({
@@ -298,6 +322,7 @@ async function restoreAgentDefaults() {
       agentPromptDraft.value = pd.systemPrompt || '';
       agentTemplateDraft.value = pd.template || '';
     }
+    markDraftsClean();
     s.agentPromptEdited = false;
     s.agentDirty[id] = false;
     ui.toast('已恢复成最新', 'info');
@@ -309,6 +334,7 @@ async function restoreAgentDefaults() {
   s.activePresetId = '';
   agentPromptDraft.value = '';
   agentTemplateDraft.value = '';
+  markDraftsClean();
   s.agentPromptEdited = false;
   s.agentDirty[id] = false;
   ui.toast('已恢复出厂默认', 'info');
@@ -342,6 +368,7 @@ async function restoreAgentDefaults() {
       保存为默认
     </AppButton>
     <AppButton variant="ghost" size="sm" @click="restoreAgentDefaults">恢复成最新</AppButton>
+    <span v-if="draftsDirty" class="unsaved-marker" role="status">未保存</span>
     <AppButton variant="primary" size="sm" @click="saveAgentSettings">保存设置</AppButton>
   </div>
 </template>
@@ -356,5 +383,16 @@ async function restoreAgentDefaults() {
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid var(--theme-card-border);
+  align-items: center;
+}
+/* S-15：提示词 / 模板有未保存修改时贴在「保存设置」左边 */
+.unsaved-marker {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--theme-warning);
+  padding: 2px 8px;
+  border-radius: var(--theme-radius-sm);
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 40%, var(--theme-card-border));
+  background: color-mix(in srgb, var(--theme-warning) 12%, var(--theme-card-bg));
 }
 </style>

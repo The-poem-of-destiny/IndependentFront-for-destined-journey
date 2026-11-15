@@ -36,4 +36,17 @@ describe('PointsBar', () => {
     });
     expect(wrapper.text()).toContain('0 / 500');
   });
+
+  it('未超支时不显示超支提示', () => {
+    const wrapper = mount(PointsBar, { props: { total: 500, used: 500 } });
+    expect(wrapper.classes()).not.toContain('over');
+    expect(wrapper.find('.points-overspent').exists()).toBe(false);
+  });
+
+  it('超支时进入警示态并就地写出超支额（C-06）', () => {
+    const wrapper = mount(PointsBar, { props: { total: 1000, used: 1120 } });
+    expect(wrapper.classes()).toContain('over');
+    expect(wrapper.find('.points-remain').text()).toBe('-120');
+    expect(wrapper.find('.points-overspent').text()).toContain('转生点数超支 120 点');
+  });
 });

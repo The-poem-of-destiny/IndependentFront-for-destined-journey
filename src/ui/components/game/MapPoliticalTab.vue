@@ -30,6 +30,14 @@ import { resolveMapSources } from '../../composables/useMapViewer';
 import { useMapPolitical } from '../../composables/useMapPolitical';
 import { useAssetImage } from '../../composables/useAssetImage';
 import { isReducedMotion } from '../../lib/reduced-motion';
+import { confirmDialog } from '../../lib/confirm-dialog';
+import { useUIStore } from '../../stores/ui-store';
+import {
+  PLACE_KIND_LABEL,
+  searchMapPlaces,
+  stepHighlight,
+  type PlaceSearchResult,
+} from '../../lib/map-place-search';
 import {
   buildHighlightPatch,
   buildLabelsForMode,
@@ -119,6 +127,7 @@ const FRAME_MS = 260;
 const props = defineProps<{ active?: boolean }>();
 
 const game = useGameStore();
+const ui = useUIStore();
 // 解构成顶层绑定：模板里才会自动解包（`pol.status` 那种嵌套 ref 在模板里**不**解包，
 // 得写成 `pol.status.value` —— 写漏一个 `.value` 的表现是那一格永远为真）
 const {
@@ -833,12 +842,88 @@ function onStageClick(event: MouseEvent): void {
     lastDragMoved = 0;
     return;
   }
-  const tileId = tileAtClient(event.clientX, event.clientY);
-  if (tileId <= 0) {
-    selectedTileId.value = 0;
-    return;
+  selectTile(tileAtClient(event.clientX, event.clientY));
+}
+
+/** 选中一块地（打开信息卡）；≤0 = 收起。点画布与地名搜索走的都是这一个入口 */
+function selectTile(tileId: number): void {
+  selectedTileId.value = tileId > 0 ? tileId : 0;
+}
+
+// ═══ 地名搜索（审计 MAP-03） ═══
+
+const searchInputRef = ref<HTMLInputElement | null>(null);
+const searchQuery = ref('');
+const searchOpen = ref(false);
+/** 键盘高亮的那一项（-1 = 无） */
+const searchHighlight = ref(-1);
+const SEARCH_LIST_ID = 'pol-search-list';
+
+/** 匹配口径在纯函数 `searchMapPlaces`（地块 + 中层 + 势力名的子串匹配，至多 12 条） */
+const searchResults = computed<PlaceSearchResult[]>(() => {
+  const stage = polStage.value;
+  if (stage === null) return [];
+  return searchMapPlaces(stage.pack, searchQuery.value);
+});
+const searchListVisible = computed(() => searchOpen.value && searchQuery.value.trim().length > 0);
+
+watch(searchQuery, (query) => {
+  searchOpen.value = query.trim().length > 0;
+  searchHighlight.value = searchResults.value.length > 0 ? 0 : -1;
+});
+
+function clearSearch(): void {
+  searchQuery.value = '';
+  searchOpen.value = false;
+  searchHighlight.value = -1;
+}
+
+/**
+ * 选中一条搜索结果 = 与点画布同一条路（`selectTile`，打开信息卡）+ 取景框住它。
+ * 取景走 `frameTiles` → `animateView`，只改 `view`；分档/标签照旧等 settle（性能契约）。
+ */
+function pickSearchResult(result: PlaceSearchResult): void {
+  selectTile(result.tileId);
+  frameTiles(result.frameTileIds);
+  clearSearch();
+}
+
+function onSearchKeydown(event: KeyboardEvent): void {
+  const count = searchResults.value.length;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    searchOpen.value = true;
+    searchHighlight.value = stepHighlight(
+      searchHighlight.value,
+      event.key === 'ArrowDown' ? 1 : -1,
+      count,
+    );
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    const result = searchResults.value[searchHighlight.value] ?? searchResults.value[0];
+    if (result !== undefined) pickSearchResult(result);
   }
-  selectedTileId.value = tileId;
+}
+
+/**
+ * 搜索框里按 Esc = 清空搜索，**不关地图弹窗**。
+ *
+ * 🔴 必须挂在 **window 的 capture** 上：弹窗外壳（`lib/modal-focus.ts`）在 document 的
+ *    capture 阶段就吃掉 Esc 并关窗，输入框自己的 keydown 永远轮不到。window capture 比它早一步。
+ *    搜索框为空且下拉已收起时不拦 —— 那时的 Esc 照旧是「关地图」。
+ */
+function onWindowKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return;
+  const input = searchInputRef.value;
+  if (input === null || document.activeElement !== input) return;
+  if (searchQuery.value.length === 0 && !searchOpen.value) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  clearSearch();
+}
+
+function onSearchBlur(): void {
+  searchOpen.value = false;
 }
 
 // ═══ 信息卡动作 ═══
@@ -898,16 +983,32 @@ function depart(): void {
  *    「不开第二条写路径」，走引擎唯一写入口的这条不是第二条。
  * 🔴 天堑不可选：`findPath` 把不可通行块整个剔出邻接图，落位到那里之后从它出发的
  *    任何路线规划都恒为无解 —— 玩家会得到一张「哪都去不了」的地图，且看不出原因。
+ * 🔴 **先确认再写**（审计 MAP-02）：一点就改写存档里的位置真源，下一回合 AI 就从新地点写起，
+ *    唯一的撤销是回退快照。确认框写清「旧 → 新」，成功后给一条提示。
+ *    确认只加在写之前，写法本身（单条 `set_location`）一个字不动。
  */
 async function setHere(): Promise<void> {
   // 变量名刻意不叫 `view` —— 那是舞台视图的 ref，遮蔽它会让后面读代码的人看错一层
   const target = selectedView.value;
   if (target === null || !canSetLocation.value) return;
+  const from = playerTileView.value?.name || game.player?.location || '未定位';
+  const confirmed = await confirmDialog({
+    title: '修改当前位置',
+    message: `当前位置：${from} → ${target.name}`,
+    details: [
+      `下一回合的故事会从「${target.name}」接着讲`,
+      '这会直接改写存档里的位置，想撤回只能回退快照',
+    ],
+    confirmLabel: '设为当前位置',
+  });
+  // 等确认的这段时间里选中项或可用性可能变了 —— 以确认那一刻的目标为准，但仍要可用
+  if (!confirmed || !canSetLocation.value) return;
   settingLocation.value = true;
   try {
     const result = await game.setPlayerLocation(target.name);
     // 失败只说一句，不改任何界面状态（位置真源在存档里，这里没有本地副本要回滚）
     setLocationError.value = result.ok ? '' : (result.error ?? '落位失败');
+    if (result.ok) ui.toast(`当前位置已改为「${target.name}」`, 'success');
   } finally {
     settingLocation.value = false;
   }
@@ -1012,6 +1113,7 @@ watch(
 
 onMounted(() => {
   void loadBaseArt();
+  window.addEventListener('keydown', onWindowKeydown, true);
   if (typeof ResizeObserver === 'function' && stageRef.value !== null) {
     resizeObserver = new ResizeObserver(() => {
       const { vw, vh } = viewportSize();
@@ -1061,6 +1163,7 @@ watch(effectiveMode, () => {
 
 onBeforeUnmount(() => {
   disposed = true;
+  window.removeEventListener('keydown', onWindowKeydown, true);
   if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frameRaf);
   resizeObserver?.disconnect();
   resizeObserver = null;
@@ -1096,6 +1199,58 @@ onBeforeUnmount(() => {
         </span>
       </div>
       <div class="pol-actions">
+        <!-- 地名搜索：↑/↓ 选、Enter 定、Esc 清空（选中 = 点那块地 + 取景框住它） -->
+        <div class="pol-search">
+          <i class="fa-solid fa-magnifying-glass pol-search-icon" aria-hidden="true" />
+          <input
+            ref="searchInputRef"
+            v-model="searchQuery"
+            class="pol-search-input"
+            type="search"
+            placeholder="搜索地名"
+            aria-label="按名字搜索地块、中层或势力"
+            role="combobox"
+            aria-autocomplete="list"
+            :aria-expanded="searchListVisible"
+            :aria-controls="SEARCH_LIST_ID"
+            :aria-activedescendant="
+              searchListVisible && searchHighlight >= 0
+                ? `${SEARCH_LIST_ID}-${searchHighlight}`
+                : undefined
+            "
+            :disabled="polStatus !== 'ready'"
+            autocomplete="off"
+            @keydown="onSearchKeydown"
+            @focus="searchOpen = searchQuery.trim().length > 0"
+            @blur="onSearchBlur"
+          />
+          <ul
+            v-if="searchListVisible"
+            :id="SEARCH_LIST_ID"
+            class="pol-search-list"
+            role="listbox"
+            aria-label="搜索结果"
+          >
+            <li
+              v-for="(result, index) in searchResults"
+              :id="`${SEARCH_LIST_ID}-${index}`"
+              :key="result.key"
+              class="pol-search-item"
+              :class="{ 'pol-search-item-active': index === searchHighlight }"
+              role="option"
+              :aria-selected="index === searchHighlight"
+              @mousedown.prevent="pickSearchResult(result)"
+              @mouseenter="searchHighlight = index"
+            >
+              <span class="pol-search-kind">{{ PLACE_KIND_LABEL[result.kind] }}</span>
+              <span class="pol-search-name">{{ result.name }}</span>
+              <span v-if="result.context" class="pol-search-context">{{ result.context }}</span>
+            </li>
+            <li v-if="searchResults.length === 0" class="pol-search-empty" role="presentation">
+              没有找到「{{ searchQuery.trim() }}」
+            </li>
+          </ul>
+        </div>
         <!-- 着色方式：紧凑按钮组（design.md §4 的 Tab 语义，用 aria-pressed 表达当前档） -->
         <div class="pol-modes" role="group" aria-label="着色方式">
           <button
@@ -1405,7 +1560,6 @@ onBeforeUnmount(() => {
         </section>
 
         <div class="pol-card-actions">
-          <button class="pol-btn" :disabled="!canSetLocation" @click="setHere">设为当前位置</button>
           <button class="pol-btn" :disabled="!canRoute" @click="showRoute">查看路线</button>
           <button class="pol-btn" @click="toggleVia">
             {{ viaTileIds.includes(selectedTileId) ? '取消途经点' : '设为途经点' }}
@@ -1426,6 +1580,21 @@ onBeforeUnmount(() => {
             @click="clearPlan"
           >
             清空规划
+          </button>
+        </div>
+
+        <!--
+          改写存档位置的那一个动作**与路线类按钮分开**（审计 MAP-02）：路线按钮只是看，
+          它是真的写 —— 放在分隔线下、次要样式，点下去先弹确认。
+        -->
+        <div class="pol-card-manage">
+          <button
+            class="pol-btn pol-btn-subtle pol-btn-set-location"
+            :disabled="!canSetLocation"
+            @click="setHere"
+          >
+            <i class="fa-solid fa-location-crosshairs" aria-hidden="true" />
+            设为当前位置
           </button>
         </div>
 
@@ -2235,6 +2404,105 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: var(--theme-spacing-xs);
+}
+
+/* 写存档的那一个动作：分隔线下单独一行、次要样式（与上面「只是看」的路线按钮分开） */
+.pol-card-manage {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--theme-spacing-sm);
+  border-top: 1px dashed var(--theme-card-border);
+}
+.pol-btn-subtle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--theme-spacing-xs);
+  background: transparent;
+  color: var(--theme-text-muted);
+}
+
+/* ═══ 地名搜索 ═══ */
+.pol-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.pol-search-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
+  pointer-events: none;
+}
+.pol-search-input {
+  width: 12rem;
+  min-height: 36px;
+  padding: 6px 10px 6px 28px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-card-bg);
+  color: var(--theme-text-primary);
+  font-family: inherit;
+  font-size: 0.75rem;
+}
+.pol-search-input:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 1px;
+}
+.pol-search-input:disabled {
+  opacity: 0.45;
+}
+.pol-search-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 100%;
+  width: max-content;
+  max-width: 22rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--theme-spacing-xs) 0;
+  list-style: none;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  background: var(--theme-card-bg);
+  box-shadow: var(--theme-shadow-md);
+}
+.pol-search-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--theme-spacing-sm);
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  color: var(--theme-text-secondary);
+  cursor: pointer;
+}
+.pol-search-item-active {
+  background: var(--theme-tab-hover-bg);
+  color: var(--theme-text-primary);
+}
+.pol-search-kind {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: 999px;
+  color: var(--theme-text-muted);
+  font-size: 0.6875rem;
+}
+.pol-search-name {
+  color: var(--theme-text-primary);
+}
+.pol-search-context {
+  color: var(--theme-text-muted);
+  font-size: 0.6875rem;
+}
+.pol-search-empty {
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+  font-style: italic;
 }
 
 /* 窄屏：信息卡叠到舞台下方（min-height: 0 见 CharacterViewerModal 那条教训） */

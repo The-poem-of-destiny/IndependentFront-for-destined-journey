@@ -14,8 +14,15 @@ import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import { useSettingsStore, type ApiEntry } from '../../stores/settings-store';
-import { sourceForStorage, useApiSourceStore } from '../../stores/api-source-store';
+import {
+  findApiSourceBindings,
+  sourceForStorage,
+  useApiSourceStore,
+} from '../../stores/api-source-store';
 import { useUIStore } from '../../stores/ui-store';
+import { confirmDialog } from '../../lib/confirm-dialog';
+import { isLlmPoolEntry } from '../../lib/endpoint-resolver';
+import { agentDisplayName } from './agent/agent-list';
 import { fetchModels } from '@engine/api/api-tools';
 import { credentialIdFor } from '@engine/api/api-rpm-limiter';
 import { AgentClient } from '@engine/agents/agent-client';
@@ -51,11 +58,12 @@ const apiForm = reactive({
   bodyOverrides: '{}',
   bodyOmitPaths: '',
   /** 🆕 源级默认采样参数（「参数跟随模型」，仅 LLM）；空串 = 不设该键。
-   *  默认值：temperature 1 / topP 1 / 频率·存在惩罚 0（留空即表示不设置，回落内容包默认层）。 */
-  defaultTemperature: '1',
-  defaultTopP: '1',
-  defaultFrequencyPenalty: '0',
-  defaultPresencePenalty: '0',
+   *  🔴 S-10（2026-11-14）：新建源一律**留空**。池默认优先于内容包为各 Agent 调好的默认值，
+   *     预填 1 / 1 / 0 / 0 等于加任何一个池都悄悄换掉每个 Agent 的温度。 */
+  defaultTemperature: '',
+  defaultTopP: '',
+  defaultFrequencyPenalty: '',
+  defaultPresencePenalty: '',
   defaultMaxTokens: '',
   /** 🆕 源级自定义请求头（JSON 对象） */
   headerOverrides: '{}',
@@ -442,10 +450,11 @@ function openAddApi() {
   apiForm.timeoutMs = '60000';
   apiForm.bodyOverrides = '{}';
   apiForm.bodyOmitPaths = '';
-  apiForm.defaultTemperature = '1';
-  apiForm.defaultTopP = '1';
-  apiForm.defaultFrequencyPenalty = '0';
-  apiForm.defaultPresencePenalty = '0';
+  // S-10：新建源不预填采样参数（留空 = 不设置，Agent 走内容包默认）
+  apiForm.defaultTemperature = '';
+  apiForm.defaultTopP = '';
+  apiForm.defaultFrequencyPenalty = '';
+  apiForm.defaultPresencePenalty = '';
   apiForm.defaultMaxTokens = '';
   apiForm.headerOverrides = '{}';
   apiForm.anthropicVersion = '2023-06-01';
@@ -483,13 +492,14 @@ async function openEditApi(ep: ApiEntry) {
   apiForm.bodyOmitPaths = (source?.bodyOmitPaths ?? hydrated.bodyOmitPaths ?? []).join('\n');
   // 🆕 源级默认采样参数：只在 LLM 源上有意义；缺失 = 空串（不设该键）。
   const defaultParams = source?.kind === 'llm' ? source.defaultParameters : undefined;
+  //    S-10：缺失的键显示为空，而不是补 1 / 0 —— 否则编辑一次旧源再保存就会悄悄写进池默认。
   apiForm.defaultTemperature =
-    defaultParams?.temperature != null ? String(defaultParams.temperature) : '1';
-  apiForm.defaultTopP = defaultParams?.topP != null ? String(defaultParams.topP) : '1';
+    defaultParams?.temperature != null ? String(defaultParams.temperature) : '';
+  apiForm.defaultTopP = defaultParams?.topP != null ? String(defaultParams.topP) : '';
   apiForm.defaultFrequencyPenalty =
-    defaultParams?.frequencyPenalty != null ? String(defaultParams.frequencyPenalty) : '0';
+    defaultParams?.frequencyPenalty != null ? String(defaultParams.frequencyPenalty) : '';
   apiForm.defaultPresencePenalty =
-    defaultParams?.presencePenalty != null ? String(defaultParams.presencePenalty) : '0';
+    defaultParams?.presencePenalty != null ? String(defaultParams.presencePenalty) : '';
   apiForm.defaultMaxTokens =
     defaultParams?.maxTokens != null ? String(defaultParams.maxTokens) : '';
   apiForm.headerOverrides = JSON.stringify(
@@ -551,10 +561,43 @@ async function saveApi() {
     ui.toast(`API 配置无效：${message}`, 'error');
   }
 }
-async function deleteApi(id: string) {
+/** 绑定项的玩家可读名字（子导航里没有 image_prompt，单独给个名字） */
+function bindingLabel(agentId: string): string {
+  if (agentId === 'image_prompt') return '图像提示词生成';
+  return agentDisplayName(agentId);
+}
+
+/**
+ * 删除一个 API 源（S-09）：先确认，并列出**正在显式使用它**的 Agent 与检索绑定。
+ * 删除后这些用户绑定由 store 清掉（Agent 回到「跟随默认」），弹窗里先说清楚。
+ */
+async function deleteApi(ep: ApiEntry) {
+  const { agentIds, retrieval } = findApiSourceBindings(s, ep.id);
+  const details = [
+    ...agentIds.map((agentId) => `Agent：${bindingLabel(agentId)}`),
+    ...retrieval.map((kind) =>
+      kind === 'embedding' ? '记忆：Embedding 召回' : '记忆：Reranker 重排',
+    ),
+  ];
+  const remaining = s.apiPool.filter((entry) => entry.id !== ep.id && isLlmPoolEntry(entry));
+  const fallbackHint = remaining.length
+    ? `这些 Agent 会改为跟随默认（使用「${remaining[0].name}」）。`
+    : '删除后将没有可用的对话 API，需要重新添加。';
+  const message = details.length
+    ? `下列配置正在使用「${ep.name}」，删除后它们的选择会被清除。${agentIds.length ? fallbackHint : ''}`
+    : `确定删除「${ep.name}」吗？此操作无法撤销。`;
+  const confirmed = await confirmDialog({
+    title: '删除 API',
+    message,
+    details: details.length ? details : undefined,
+    confirmLabel: '删除',
+    cancelLabel: '取消',
+    danger: true,
+  });
+  if (!confirmed) return;
   try {
-    await sourceStore.removeSource(id);
-    ui.toast('API 已删除', 'info');
+    await sourceStore.removeSource(ep.id);
+    ui.toast(details.length ? `API 已删除，已清除 ${details.length} 处绑定` : 'API 已删除', 'info');
   } catch (error) {
     ui.toast(`API 删除失败：${String(error)}`, 'error');
   }
@@ -641,7 +684,7 @@ async function deleteApi(id: string) {
           </div>
           <div class="api-card-actions">
             <AppButton variant="ghost" size="sm" @click="openEditApi(ep)">编辑</AppButton
-            ><AppButton variant="ghost" size="sm" @click="deleteApi(ep.id)">删除</AppButton>
+            ><AppButton variant="ghost" size="sm" @click="deleteApi(ep)">删除</AppButton>
           </div>
         </div></AppCard
       >
@@ -859,9 +902,9 @@ async function deleteApi(id: string) {
             </label>
           </div>
           <p class="form-hint">
-            换模型（= 换 API 池）不必再逐个 Agent 重设采样参数。默认为 temperature 1 / Top P 1 /
-            惩罚 0；清空某一格 = 不设置该键（回落内容包默认层）。Agent
-            设置里显式覆写过的字段优先于这里。
+            一般留空即可：留空的项使用内容包为各 Agent 调好的默认值。只有想让所有用这个 API 的 Agent
+            统一换成某个值时才填写 —— 填了就会盖过内容包默认；Agent
+            设置里单独改过的项仍然优先于这里。
           </p>
         </div>
         <!-- 高级设置（可折叠） -->

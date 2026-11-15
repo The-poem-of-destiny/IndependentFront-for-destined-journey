@@ -28,10 +28,28 @@ describe('journey readiness', () => {
       );
     },
   );
-  it('uses project defaults and preserves explicit stale bindings', () => {
+  it('S-00：只来自默认层、本机不存在的池 id 按未设置处理，不拦创角', () => {
+    // 内容包作者机器上的池 id —— 用户从没绑过，应走第一个 API
     expect(
       checkJourneyReadiness({ apiPool: [endpoint] }, { story: { model: 'deleted' } }, 'off'),
-    ).toContainEqual(expect.objectContaining({ blocking: true, section: 'agent' }));
+    ).toEqual([]);
+  });
+  it('用户覆写层的失效绑定仍然拦住（F10 fail-closed）', () => {
+    expect(
+      checkJourneyReadiness(
+        { apiPool: [endpoint], agents: { story: { model: 'deleted' } } },
+        {},
+        'off',
+      ),
+    ).toContainEqual(
+      expect.objectContaining({
+        blocking: true,
+        section: 'agent',
+        message: expect.stringContaining('story'),
+      }),
+    );
+  });
+  it('uses project defaults and preserves explicit bindings', () => {
     expect(
       checkJourneyReadiness(
         { apiPool: [endpoint], agents: { story: { model: 'chat' } } },

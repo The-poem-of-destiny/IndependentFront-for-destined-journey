@@ -63,5 +63,51 @@ describe('game store agent activities', () => {
     game.finishAgentActivityRun(runId, 'cancelled');
     expect(game.currentAgentActivityRun).toBeNull();
     expect(game.agentActivityRuns[0].steps[0].status).toBe('cancelled');
+    expect(game.agentActivityRuns[0].failure).toBeUndefined();
+  });
+
+  // ===== GAME-05：失败原因留到界面上 =====
+
+  it('步骤失败的原文脱敏后留在步骤上，回合收尾按它归类并带上中文步骤名', () => {
+    const game = useGameStore();
+    const runId = game.startAgentActivityRun('message-4');
+    game.updateAgentStatus('story', runId);
+    game.clearAgentStatus(
+      'story',
+      'HTTP 401: Incorrect API key provided: sk-live-abcdef123',
+      runId,
+    );
+
+    const step = game.agentActivityRuns[0].steps[0];
+    expect(step.status).toBe('failed');
+    expect(step.error).toBe('HTTP 401: Incorrect API key provided: [已隐藏的密钥]');
+
+    game.finishAgentActivityRun(runId, 'failed', '世界的回应在此中断。');
+    expect(game.agentActivityRuns[0].failure).toEqual({
+      category: 'auth',
+      stepLabel: '书写此刻',
+      detail: 'HTTP 401: Incorrect API key provided: [已隐藏的密钥]',
+    });
+  });
+
+  it('回合级抛错优先归类，出错步骤取当时还在跑的那一步', () => {
+    const game = useGameStore();
+    const runId = game.startAgentActivityRun('message-5');
+    game.updateAgentStatus('memory_recall', runId);
+    game.clearAgentStatus('memory_recall', undefined, runId);
+    game.updateAgentStatus('request_dispatcher', runId);
+
+    game.finishAgentActivityRun(runId, 'failed', '中断', new Error('TypeError: Failed to fetch'));
+    expect(game.agentActivityRuns[0].failure).toMatchObject({
+      category: 'network',
+      stepLabel: '辨认后续事件',
+    });
+  });
+
+  it('既没有抛错也没有带原因的失败步骤 → 未知', () => {
+    const game = useGameStore();
+    const runId = game.startAgentActivityRun('message-6');
+    game.finishAgentActivityRun(runId, 'failed', '中断');
+    expect(game.agentActivityRuns[0].failure).toEqual({ category: 'unknown' });
   });
 });

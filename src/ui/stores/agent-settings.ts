@@ -27,6 +27,7 @@
  */
 
 import type { LlmDefaultParameters } from '@engine/types/types-api';
+import { isLlmPoolEntry } from '../lib/endpoint-resolver';
 
 /** 一个 Agent 的全部可调项 —— 与 `AgentDefaultEntry` 同形（后者是磁盘上的项目默认值） */
 export interface AgentSettingsEntry {
@@ -150,6 +151,28 @@ function normalizeTailPrompt(v: string | undefined): string | undefined {
 }
 
 /**
+ * 默认层给的 `model`（= API 池 id）在**本机**不存在时按「未设置」处理（S-00，2026-11-14）。
+ *
+ * 默认层来自内容包 / 占位文件，作者机器上的池 id 换台机器必然悬空。用户从没绑过任何东西，
+ * 却会因为它得到「story 绑定的 API 已不存在」并被挡在创角之外 —— 所以这里把它清成 `''`，
+ * 让解析器走默认端点（池首项）。
+ *
+ * 🔴 只清**默认层**的值：用户覆写层的失效 id 是用户的显式选择，必须继续 fail-closed（F10），
+ *    那一支在 `getAgentSettings` 里先于本函数命中，根本到不了这里。
+ * 🔴 袋子里没有 `apiPool` 数组（测试裸袋 / 旧调用方）时**原样返回** —— 不知道本机有哪些池，
+ *    就不替它下结论。判据只认对话（LLM）源，与 `buildApiEndpoints` 同口径。
+ */
+function sanitizeDefaultPoolId(bag: SettingsBag, value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(bag.apiPool)) return value as string;
+  if (typeof value !== 'string' || value.trim() === '') return '';
+  const known = (bag.apiPool as unknown[]).some(
+    (entry) => isLlmPoolEntry(entry) && (entry as { id?: unknown }).id === value,
+  );
+  return known ? value : '';
+}
+
+/**
  * 取一个 Agent 的完整设置 —— **唯一读取咽喉**（D44 修正 1）。
  *
  * 全部键走 `覆写层 ?? 默认层 ?? 兜底`：
@@ -172,7 +195,11 @@ export function getAgentSettings(
 ): AgentSettingsEntry {
   const layer = defaultsLayer;
   return {
-    model: resolve(readOverride(bag, agentId, 'model'), readDefault(layer, agentId, 'model')) ?? '',
+    model:
+      resolve(
+        readOverride<string>(bag, agentId, 'model'),
+        sanitizeDefaultPoolId(bag, readDefault<string>(layer, agentId, 'model')),
+      ) ?? '',
     systemPrompt:
       resolve(
         readOverride<string>(bag, agentId, 'systemPrompt'),
@@ -253,15 +280,60 @@ export function resolveAgentLlmParams(
   defaultsLayer?: AgentDefaultsLayer,
   poolDefaults?: LlmDefaultParameters,
 ): { temperature: number; topP: number; freqPen: number; presPen: number; maxTokens: number } {
-  const cfg = getAgentSettings(bag, agentId, defaultsLayer);
-  const override = (field: keyof AgentSettingsEntry): number | undefined =>
-    readOverride<number>(bag, agentId, field);
+  const sources = resolveAgentLlmParamSources(bag, agentId, defaultsLayer, poolDefaults);
   return {
-    temperature: override('temperature') ?? poolDefaults?.temperature ?? cfg.temperature,
-    topP: override('topP') ?? poolDefaults?.topP ?? cfg.topP,
-    freqPen: override('freqPen') ?? poolDefaults?.frequencyPenalty ?? cfg.freqPen,
-    presPen: override('presPen') ?? poolDefaults?.presencePenalty ?? cfg.presPen,
-    maxTokens: override('maxTokens') ?? poolDefaults?.maxTokens ?? cfg.maxTokens,
+    temperature: sources.temperature.value,
+    topP: sources.topP.value,
+    freqPen: sources.freqPen.value,
+    presPen: sources.presPen.value,
+    maxTokens: sources.maxTokens.value,
+  };
+}
+
+/** 采样/长度参数的五个键（`resolveAgentLlmParams` 的输出形状） */
+export type AgentLlmParamField = 'temperature' | 'topP' | 'freqPen' | 'presPen' | 'maxTokens';
+
+/** 一个采样参数实际会发出去的值 + 它从哪一层来（S-10：设置页据此挂「已覆写 / 来自 API 池 / 默认」） */
+export interface AgentLlmParamSource {
+  value: number;
+  source: 'override' | 'pool' | 'default';
+}
+
+/** Agent 字段名 → API 池 `defaultParameters` 的键名 */
+const POOL_PARAM_KEY: Record<AgentLlmParamField, keyof LlmDefaultParameters> = {
+  temperature: 'temperature',
+  topP: 'topP',
+  freqPen: 'frequencyPenalty',
+  presPen: 'presencePenalty',
+  maxTokens: 'maxTokens',
+};
+
+/**
+ * `resolveAgentLlmParams` 的**带来源**版本 —— 两者是同一份优先级实现
+ * （前者只是把本函数的 `value` 摘出来），设置页显示的值因此与运行时发出去的值不会漂移。
+ * `default` 涵盖「内容包/占位默认层」与「硬兜底」两层（对用户来说都是「没人改过」）。
+ */
+export function resolveAgentLlmParamSources(
+  bag: SettingsBag,
+  agentId: string,
+  defaultsLayer?: AgentDefaultsLayer,
+  poolDefaults?: LlmDefaultParameters,
+): Record<AgentLlmParamField, AgentLlmParamSource> {
+  const cfg = getAgentSettings(bag, agentId, defaultsLayer);
+  const pick = (field: AgentLlmParamField): AgentLlmParamSource => {
+    const override = readOverride<number>(bag, agentId, field);
+    // `!= null` 与原先的 `??` 链同口径（null 也算没给）
+    if (override != null) return { value: override, source: 'override' };
+    const pool = poolDefaults?.[POOL_PARAM_KEY[field]];
+    if (pool != null) return { value: pool, source: 'pool' };
+    return { value: cfg[field], source: 'default' };
+  };
+  return {
+    temperature: pick('temperature'),
+    topP: pick('topP'),
+    freqPen: pick('freqPen'),
+    presPen: pick('presPen'),
+    maxTokens: pick('maxTokens'),
   };
 }
 

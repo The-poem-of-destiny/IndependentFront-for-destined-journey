@@ -2748,7 +2748,32 @@ describe('F10 端点绑定 fail-closed（getEndpointForAgent 侧链热路径）'
     const endpoint = (pipeline as any).getEndpointForAgent('entity_gen');
     expect(endpoint?.id).toBe('B');
     expect(error).not.toHaveBeenCalled();
-    expect(warn.mock.calls.some((c) => String(c[0]).includes('entity_gen'))).toBe(true);
+    // 📌 S-00（2026-11-14）：悬空的默认层 id 已在读取咽喉 getAgentSettings 处按「未设置」处理，
+    //    直接解析到默认端点 —— 不再走 stale-binding 再回落那条 warn 分支。
+    void warn;
+    vi.restoreAllMocks();
+  });
+
+  it('S-00：主 DAG 的 story 只在默认层带悬空 id → 不停轮，走池首项', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    const configs = (pipeline as any).buildAgentConfigs({
+      story: { model: 'author-machine-uuid' },
+    });
+    const story = configs.find((config: any) => config.agentId === 'story');
+    expect(story.apiEndpointId).toBe('B');
+    vi.restoreAllMocks();
+  });
+
+  it('F10：主 DAG 的 story 用户覆写层绑了已删除的池 → 仍抛 EndpointBindingError', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    patchAgentSettings((pipeline as any).settings.settings, 'story', { model: 'deleted-A' });
+    expect(() => (pipeline as any).buildAgentConfigs({})).toThrow(EndpointBindingError);
     vi.restoreAllMocks();
   });
 

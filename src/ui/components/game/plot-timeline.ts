@@ -15,7 +15,13 @@
 import type { PlotEvent } from '@engine/types/types';
 import { fromEpochMinutes, parseMonthTime, toGameDay } from '@engine/time/time-system';
 import type { ThreadDisplayView } from './plot-thread-view';
-import { threadStatusLabel } from './plot-thread-view';
+import {
+  chapterPeekKey,
+  isChapterMasked,
+  isOutlineEventMasked,
+  maskedChapterLabel,
+  threadStatusLabel,
+} from './plot-thread-view';
 
 // ── 布局常量（px；画布几何，非主题间距）──
 const RULER_H = 34;
@@ -60,8 +66,15 @@ export interface TimelineNodeBox {
   h: number;
 }
 
-interface TimelineChapterBar {
+export interface TimelineChapterBar {
+  /** 路由键（章节真名）—— 仅作连线/分组匹配，**不渲染为文字** */
+  key: string;
+  /** 显示名；未到达的章节为「第 N 章 · ？？？」 */
   name: string;
+  /** 未到达且未 peek */
+  masked: boolean;
+  /** 剧透模式下 peek 这一章时加入 peek 集合的键 */
+  peekKey: string;
   x: number;
   w: number;
   y: number;
@@ -238,22 +251,33 @@ export function buildPlotTimeline(input: PlotTimelineInput): PlotTimelineModel {
   const peeked = input.peekedEventIds ?? new Set<string>();
 
   // ── 收集要点：章节定义 + 原始节点 ──
-  const chapters: Array<{ name: string; order: number }> = [];
+  // 🔴 PLT-01：章节条的**路由键**（`key`，匹配节点 lane / 父事件）与**显示名**（`name`）分开 ——
+  //    未到达的章节显示名换成「第 N 章 · ？？？」，真名只留在不渲染的 key 里。
+  const chapters: Array<{ key: string; name: string; masked: boolean; order: number }> = [];
   const seenChapter = new Set<string>();
   for (const ev of [...input.events]
     .filter((e) => e.depth === 0)
     .sort((a, b) => a.order - b.order)) {
-    const name = ev.chapterTitle || ev.title || OTHER_LANE;
-    if (!seenChapter.has(name)) {
-      seenChapter.add(name);
-      chapters.push({ name, order: ev.order });
+    const key = ev.chapterTitle || ev.title || OTHER_LANE;
+    if (!seenChapter.has(key)) {
+      seenChapter.add(key);
+      const masked = isChapterMasked(
+        { title: key, status: ev.status, visibility: ev.visibility },
+        peeked,
+      );
+      chapters.push({
+        key,
+        name: masked ? maskedChapterLabel(chapters.length) : key,
+        masked,
+        order: ev.order,
+      });
     }
   }
 
   const raw: RawNode[] = [];
   for (const ev of input.events) {
     if (ev.depth === 0) continue;
-    const masked = ev.visibility !== 'revealed' && !peeked.has(ev.id);
+    const masked = isOutlineEventMasked(ev, peeked);
     raw.push({
       kind: 'outline',
       id: ev.id,
@@ -302,18 +326,19 @@ export function buildPlotTimeline(input: PlotTimelineInput): PlotTimelineModel {
   const bars: TimelineChapterBar[] = chapters
     .map((c) => {
       const days = raw
-        .filter((n) => n.kind === 'outline' && n.lane === c.name && n.day !== null)
+        .filter((n) => n.kind === 'outline' && n.lane === c.key && n.day !== null)
         .map((n) => n.day as number);
+      const base = { key: c.key, name: c.name, masked: c.masked, peekKey: chapterPeekKey(c.key) };
       if (days.length === 0) {
         // 该章没有带日期的事件 → 条落在「未定时间」竖条上
-        return { name: c.name, x: PAD_X, w: CHAPTER_MIN_W, y: 0 };
+        return { ...base, x: PAD_X, w: CHAPTER_MIN_W, y: 0 };
       }
       const lo = Math.min(...days);
       const hi = Math.max(...days);
       const x = xOf(lo);
-      return { name: c.name, x, w: Math.max(CHAPTER_MIN_W, xOf(hi) + NODE_W - x), y: 0 };
+      return { ...base, x, w: Math.max(CHAPTER_MIN_W, xOf(hi) + NODE_W - x), y: 0 };
     })
-    .filter((b) => raw.some((n) => n.kind === 'outline' && n.lane === b.name));
+    .filter((b) => raw.some((n) => n.kind === 'outline' && n.lane === b.key));
   const chapterRows = packChapterRows(bars);
   const chapterTop = RULER_H + 8;
   for (const b of bars) b.y = chapterTop + b.y * (CHAPTER_H + CHAPTER_ROW_GAP);
@@ -367,7 +392,7 @@ export function buildPlotTimeline(input: PlotTimelineInput): PlotTimelineModel {
 
   const nodes = [...outlineNodes, ...threadNodes];
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
-  const barByName = new Map(bars.map((b) => [b.name, b]));
+  const barByName = new Map(bars.map((b) => [b.key, b]));
 
   // ── 连线（ComfyUI 式）──
   const eventsById = new Map(input.events.map((e) => [e.id, e]));

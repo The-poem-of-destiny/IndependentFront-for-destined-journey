@@ -10,7 +10,9 @@ import { useBeautifierStore } from './stores/beautifier-store';
 import { useWorkshopStore } from './stores/workshop-store';
 import { queryForView } from './lib/view-audio';
 import { applyReducedMotion } from './lib/reduced-motion';
+import { runContentStartupChain } from './lib/content-startup-chain';
 import ToastContainer from './components/shared/ToastContainer.vue';
+import ConfirmDialogHost from './components/shared/ConfirmDialogHost.vue';
 import ApiRateLimitWaitPopup from './components/shared/ApiRateLimitWaitPopup.vue';
 import SaveManager from './components/shared/SaveManager.vue';
 
@@ -28,11 +30,13 @@ void settings.initApiSecrets().then((outcome) => {
     ui.toast(
       'API 密钥无法迁移到安全存储；旧密钥仍保留，本次会话不会覆盖原设置。请检查浏览器存储后重试。',
       'error',
+      // 启动期关键错误常驻到用户手动关闭（审查 G-06）
+      0,
     );
     return;
   }
   void apiSources.initialize().catch(() => {
-    ui.toast('API 配置迁移失败；远端调用已暂停，请在设置页重试。', 'error');
+    ui.toast('API 配置迁移失败；远端调用已暂停，请在设置页重试。', 'error', 0);
   });
 });
 
@@ -52,14 +56,8 @@ void settings.initApiSecrets().then((outcome) => {
 // 在 `syncRemoteAssets()` 内部（那几个 init 都幂等，且设置页的「立即同步」不经过这条链，
 // 所以门必须在 action 里，不能只靠这里的顺序）。
 // 它自己永不抛、永不阻塞启动；失败只进 console.warn 与 store 的 `remoteSync` 状态。
-void worldbooks
-  .init()
-  .then(() => workshop.init())
-  .then(() => assets.syncRemoteAssets())
-  .catch(() => {
-    /* 迁移例程内部永不抛；这里兜 hydrate/内置合并/工坊元数据的意外，
-       不该拦住应用启动。工坊元数据缺失时规则保持关闭，不影响普通正文。 */
-  });
+// 工坊那一步单独兜底：它读库失败会 reject，但不能因此跳过远程素材同步（见 content-startup-chain.ts）。
+void runContentStartupChain({ worldbooks, workshop, assets });
 
 // ═══ 美化规则（Phase 0b）═════════════════════════════════
 //
@@ -157,6 +155,7 @@ const viewKey = computed(() =>
     </transition>
     <SaveManager />
     <ToastContainer />
+    <ConfirmDialogHost />
     <ApiRateLimitWaitPopup />
   </div>
 </template>

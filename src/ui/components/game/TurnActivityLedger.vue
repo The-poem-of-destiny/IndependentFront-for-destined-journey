@@ -1,14 +1,21 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { AgentActivityRun, AgentActivityStep } from '@engine/types/types';
+import { activityRunSideTaskLabel } from '../../lib/agent-activity';
+import TurnRecoveryPanel from './TurnRecoveryPanel.vue';
 
 const props = defineProps<{
   run: AgentActivityRun;
   canRetry?: boolean;
+  /** 能否「回退并重试」（开场回合不能，GAME-16） */
+  canRollbackRetry?: boolean;
+  /** 不能回退时给玩家看的原因 */
+  rollbackBlockedReason?: string;
 }>();
 
 const emit = defineEmits<{
   retry: [];
+  'rollback-retry': [];
   resize: [];
 }>();
 
@@ -27,7 +34,25 @@ const elapsed = computed(() => {
   return (props.run.completedAt ?? Date.now()) - props.run.startedAt;
 });
 
+/** 手动侧链（如润色）不是回合，标题用它自己的名字（GAME-17） */
+const sideTask = computed(() => activityRunSideTaskLabel(props.run));
+
 const heading = computed(() => {
+  const side = sideTask.value;
+  if (side) {
+    switch (props.run.status) {
+      case 'stopping':
+        return `正在停下${side}`;
+      case 'completed':
+        return `${side}完成`;
+      case 'failed':
+        return `${side}未完成`;
+      case 'cancelled':
+        return `${side}已中止`;
+      default:
+        return `${side}中`;
+    }
+  }
   switch (props.run.status) {
     case 'stopping':
       return '正在停下本回合';
@@ -215,10 +240,20 @@ onUnmounted(stopTimer);
             </ol>
           </div>
 
-          <div v-if="run.message" class="activity-recovery" role="status">
-            <span>{{ run.message }}</span>
-            <button v-if="canRetry" type="button" @click.stop="emit('retry')">再次尝试</button>
-          </div>
+          <!-- GAME-05/16：失败原因 + 两条说清楚的出路（同一组件也用于重载后的未完成横幅） -->
+          <TurnRecoveryPanel
+            v-if="run.message"
+            class="activity-recovery"
+            :message="run.message"
+            :failure="run.status === 'failed' ? (run.failure ?? null) : null"
+            :can-retry="canRetry"
+            :can-rollback-retry="canRetry && canRollbackRetry"
+            :rollback-blocked-reason="
+              canRetry && !canRollbackRetry ? rollbackBlockedReason : undefined
+            "
+            @retry="emit('retry')"
+            @rollback-retry="emit('rollback-retry')"
+          />
         </div>
       </div>
     </Transition>
@@ -432,38 +467,9 @@ onUnmounted(stopTimer);
   font-size: 0.8125rem;
 }
 
+/* 外观归 TurnRecoveryPanel 自己；这里只管它在卡片里的位置 */
 .activity-recovery {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--theme-spacing-md);
   margin: 0 var(--theme-spacing-md) var(--theme-spacing-md);
-  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
-  border: 1px solid color-mix(in srgb, var(--theme-error) 28%, var(--theme-card-border));
-  border-radius: var(--theme-radius-sm, 4px);
-  background-color: color-mix(in srgb, var(--theme-error) 7%, transparent);
-  color: var(--theme-text-secondary);
-  font-size: 0.75rem;
-}
-
-.activity-recovery button {
-  min-height: 2.25rem;
-  flex: 0 0 auto;
-  padding: 0 var(--theme-spacing-md);
-  border: 1px solid color-mix(in srgb, var(--theme-primary) 35%, var(--theme-card-border));
-  border-radius: var(--theme-radius-sm, 4px);
-  background-color: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
-  color: var(--theme-text-primary);
-  font: inherit;
-  cursor: pointer;
-  transition:
-    background-color var(--theme-transition-fast),
-    border-color var(--theme-transition-fast);
-}
-
-.activity-recovery button:hover {
-  background-color: color-mix(in srgb, var(--theme-primary) 14%, var(--theme-card-bg));
-  border-color: color-mix(in srgb, var(--theme-primary) 55%, var(--theme-card-border));
 }
 
 .turn-activity-completed .activity-heading-mark {
@@ -511,17 +517,11 @@ onUnmounted(stopTimer);
     grid-column: 2;
     white-space: normal;
   }
-
-  .activity-recovery {
-    align-items: stretch;
-    flex-direction: column;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .activity-heading,
   .activity-chevron,
-  .activity-recovery button,
   .activity-expand-enter-active,
   .activity-expand-leave-active {
     transition: none;

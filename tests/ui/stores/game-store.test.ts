@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
-import { useGameStore } from '../../../src/ui/stores/game-store';
+import { setRewriteProseImpl, useGameStore } from '../../../src/ui/stores/game-store';
 import * as database from '@engine/persistence/database';
 import {
   initializeDatabase,
@@ -599,6 +599,90 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     await store.loadSave(SAVE_ID);
     const result = await store.rollbackOneTurn();
     expect(result).toEqual({ status: 'rejected', error: '已是最早回合，无可回退' });
+  });
+
+  it('rollbackOneTurn({ refillInput: false })：「重新生成」用，回退但不回填输入框', async () => {
+    await seedTwoTurns();
+    const result = await store.rollbackOneTurn({ refillInput: false });
+    expect(result.status).toBe('restored');
+    expect(store.pendingInput).toBe('');
+    expect(store.messages.map((m) => m.id)).not.toContain('a2');
+  });
+
+  it('rollbackOneTurn: 润色进行中拒绝回退（GAME-07）', async () => {
+    await seedTwoTurns();
+    store.isRewriting = true;
+    const result = await store.rollbackOneTurn();
+    expect(result).toEqual({ status: 'rejected', error: '正在润色正文，稍后再回退' });
+    expect(store.messages.map((m) => m.id)).toContain('a2');
+  });
+
+  // ===== 正文润色（GAME-07）=====
+
+  it('rewriteProse: 原文留在 preRewriteContent 并落库；restorePreRewrite 还原并删掉备份', async () => {
+    await seedTwoTurns();
+    setRewriteProseImpl(async () => ({ ok: true, text: '润色后的第二轮正文' }));
+
+    const result = await store.rewriteProse('a2');
+    expect(result).toEqual({ ok: true });
+    expect(store.isRewriting).toBe(false);
+    const rewritten = store.messages.find((m) => m.id === 'a2')!;
+    expect(rewritten.content).toBe('润色后的第二轮正文');
+    expect(rewritten.preRewriteContent).toBe('第二轮正文');
+    expect((await getDatabase().messages.get('a2'))?.preRewriteContent).toBe('第二轮正文');
+
+    // 再润色一次：备份仍是**第一次**润色前的原文
+    setRewriteProseImpl(async () => ({ ok: true, text: '又润色了一遍' }));
+    await store.rewriteProse('a2');
+    expect(store.messages.find((m) => m.id === 'a2')!.preRewriteContent).toBe('第二轮正文');
+
+    expect(await store.restorePreRewrite('a2')).toBe(true);
+    const restored = store.messages.find((m) => m.id === 'a2')!;
+    expect(restored.content).toBe('第二轮正文');
+    expect('preRewriteContent' in restored).toBe(false);
+    const persisted = await getDatabase().messages.get('a2');
+    expect(persisted?.content).toBe('第二轮正文');
+    expect(persisted?.preRewriteContent).toBeUndefined();
+    // 已还原：再点一次什么都不做
+    expect(await store.restorePreRewrite('a2')).toBe(false);
+  });
+
+  it('rewriteProse: 进行中再次调用被拒（不重复付费），结束后 isRewriting 复位', async () => {
+    await seedTwoTurns();
+    let release!: (value: { ok: boolean; text?: string }) => void;
+    const impl = vi.fn(
+      () =>
+        new Promise<{ ok: boolean; text?: string }>((resolve) => {
+          release = resolve;
+        }),
+    );
+    setRewriteProseImpl(impl);
+
+    const first = store.rewriteProse('a2');
+    expect(store.isRewriting).toBe(true);
+    const second = await store.rewriteProse('a2');
+    expect(second).toEqual({ ok: false, reason: '正在润色，请等这一次完成' });
+    expect(impl).toHaveBeenCalledTimes(1);
+
+    release({ ok: false });
+    await first;
+    expect(store.isRewriting).toBe(false);
+    // 失败不动原文、不留备份
+    const msg = store.messages.find((m) => m.id === 'a2')!;
+    expect(msg.content).toBe('第二轮正文');
+    expect(msg.preRewriteContent).toBeUndefined();
+  });
+
+  it('rewriteProse: 回合生成中拒绝润色', async () => {
+    await seedTwoTurns();
+    const impl = vi.fn(async () => ({ ok: true, text: 'x' }));
+    setRewriteProseImpl(impl);
+    store.isGenerating = true;
+    expect(await store.rewriteProse('a2')).toEqual({
+      ok: false,
+      reason: '回合生成中，稍后再润色',
+    });
+    expect(impl).not.toHaveBeenCalled();
   });
 
   it('restoreToSnapshot: 恢复到指定历史快照(不回填输入) + 状态恢复', async () => {

@@ -4,23 +4,37 @@
  *
  * 原版扩展尚无运行时注册表，当前只展示诚实占位；社区扩展的按存档启用设置归本页，
  * WorkshopPage 只承担浏览、安装、更新、卸载与投稿等社区生命周期能力。
+ *
+ * 📌 2026-11-14（W-01）：工坊锁定期间（`workshop-lock.ts`），已装项目的本地卸载
+ * 由 InstalledExtensionList 承担；`workshop.init()` 失败时显示错误态与重试，
+ * 不再永远停在「正在读取…」。
  */
 import { computed, onMounted } from 'vue';
 import AppButton from '../shared/AppButton.vue';
 import { useUIStore } from '../../stores/ui-store';
 import { useWorkshopStore } from '../../stores/workshop-store';
 import CommunityExtensionSettings from './CommunityExtensionSettings.vue';
+import InstalledExtensionList from './InstalledExtensionList.vue';
+import { WORKSHOP_LOCKED } from './workshop-lock';
 
 const ui = useUIStore();
 const workshop = useWorkshopStore();
 
-const installedSummary = computed(() =>
-  workshop.ready ? `已安装 ${workshop.projects.length} 项` : '正在读取已安装项目…',
-);
-
-onMounted(() => {
-  void workshop.init();
+const installedSummary = computed(() => {
+  if (workshop.ready) return `已安装 ${workshop.projects.length} 项`;
+  if (workshop.initError) return '已安装项目读取失败';
+  return '正在读取已安装项目…';
 });
+
+const showInstalledList = computed(() => workshop.ready && workshop.projects.length > 0);
+
+function loadWorkshop() {
+  workshop.init().catch(() => {
+    /* 原因记在 workshop.initError，模板据此显示错误态 */
+  });
+}
+
+onMounted(loadWorkshop);
 
 function goBack() {
   ui.back('home');
@@ -58,7 +72,12 @@ function goBack() {
 
       <section class="extension-section" aria-labelledby="community-extension-title">
         <h3 id="community-extension-title" class="extension-section-title">社区扩展管理</h3>
+        <!--
+          锁定状态读 workshop-lock.ts 的 WORKSHOP_LOCKED（与首页按钮同源）。
+          锁定期间不绑定任何导航；解锁时在这里接回 ui.navigate('workshop')。
+        -->
         <article
+          v-if="WORKSHOP_LOCKED"
           class="extension-card extension-card-locked"
           aria-disabled="true"
           data-testid="workshop-entry"
@@ -83,6 +102,18 @@ function goBack() {
             <span>创意工坊暂未开放</span>
           </div>
         </article>
+
+        <div
+          v-if="workshop.initError && !workshop.ready"
+          class="extension-error"
+          role="alert"
+          data-testid="workshop-init-error"
+        >
+          <span>读取已安装的社区扩展失败：{{ workshop.initError }}</span>
+          <AppButton variant="secondary" size="sm" @click="loadWorkshop">重试</AppButton>
+        </div>
+
+        <InstalledExtensionList v-if="showInstalledList" />
 
         <CommunityExtensionSettings />
       </section>
@@ -261,6 +292,20 @@ function goBack() {
   color: var(--theme-warning);
   font-size: 0.6875rem;
   font-weight: 600;
+}
+
+.extension-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--theme-spacing-md);
+  padding: var(--theme-spacing-md) var(--theme-spacing-lg);
+  border: 1px solid color-mix(in srgb, var(--theme-error) 30%, var(--theme-card-border));
+  border-radius: var(--theme-radius-lg);
+  background: color-mix(in srgb, var(--theme-error) 6%, var(--theme-card-bg));
+  color: var(--theme-error);
+  font-size: 0.8125rem;
+  line-height: 1.6;
 }
 
 .extension-meta {

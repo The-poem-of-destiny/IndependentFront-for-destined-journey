@@ -93,4 +93,23 @@ describe('CommunityExtensionSettings', () => {
     expect(wrapper.text()).toContain('尚无可配置的存档');
     expect(wrapper.find('select').exists()).toBe(false);
   });
+
+  it('没装社区扩展时的空态不把人引向锁定的创意工坊（W-02）', async () => {
+    h.workshop.projects = [];
+    const wrapper = mount(CommunityExtensionSettings);
+    await flushPromises();
+    expect(wrapper.text()).toContain('尚未安装社区扩展');
+    expect(wrapper.text()).toContain('创意工坊暂未开放');
+    expect(wrapper.text()).not.toContain('可进入创意工坊');
+  });
+
+  it('启用说明如实描述勾选与不勾选的效果，不再提已删除的 Agent 世界书可见性（W-02）', async () => {
+    const wrapper = mount(CommunityExtensionSettings);
+    await flushPromises();
+    const note = wrapper.get('.wk-note').text();
+    expect(note).toContain('勾选：该扩展的世界书条目和美化规则在本存档生效');
+    expect(note).toContain('未勾选的扩展就完全不参与');
+    expect(note).not.toContain('可见性');
+    expect(note).not.toContain('Agent');
+  });
 });

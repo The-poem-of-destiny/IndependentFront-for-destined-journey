@@ -2,7 +2,9 @@
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
+import { useWorkshopStore } from '../../stores/workshop-store';
 import { VERSION } from '@engine/index';
+import { hasExtensionWork } from '../workshop/workshop-lock';
 import AppButton from '../shared/AppButton.vue';
 import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
 import AstralDriftBackdrop from './AstralDriftBackdrop.vue';
@@ -11,6 +13,7 @@ import { findLatestSave } from './latest-save';
 
 const game = useGameStore();
 const ui = useUIStore();
+const workshop = useWorkshopStore();
 const backdropReady = ref(false);
 const backdrop = ref<InstanceType<typeof AstralDriftBackdrop> | null>(null);
 
@@ -48,8 +51,14 @@ function onActionClick(event: Event) {
 }
 
 /**
- * 扩展管理入口已开放（2026-08-20）。这个开关从来不是安全边界：入口关着的时候，
- * 已安装项目照样能在游戏页启用 —— 它只挡首页那一个按钮。
+ * 扩展管理入口（H-02，2026-11-14）：只在扩展管理页上**有事可做**时显示 ——
+ * 工坊已解锁，或至少装过一个社区扩展（可启用 / 卸载）。判定在 `workshop-lock.ts`
+ * 的 `hasExtensionWork`，与扩展管理页读同一个锁定常量。工坊 store 还没读完时先不显示，
+ * 免得按钮闪一下又消失；按钮列是 flex + gap，整颗不渲染不会留下空隙。
+ * 设置页与游戏菜单里的入口不受这里影响。
+ *
+ * 这个开关从来不是安全边界：入口不显示时，已安装项目照样能在游戏页启用 ——
+ * 它只挡首页那一个按钮。
  *
  * 当前执行边界：**用户装过的**正则 replacement 在 opaque `sandbox="allow-scripts"` iframe
  * 中运行，可加载远程资源并调用网络 API，但拿不到父页面 DOM、Dexie、应用存储或 API Key；
@@ -59,7 +68,9 @@ function onActionClick(event: Event) {
  * fail-closed。网络开启意味着规则仍可发送该命中的 replacement/capture，
  * 详见 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
  */
-const EXTENSION_ENTRY_ENABLED = true;
+const showExtensionEntry = computed(() =>
+  hasExtensionWork({ ready: workshop.ready, installedCount: workshop.projects.length }),
+);
 
 const savesLoaded = ref(false);
 const latestSave = computed(() => findLatestSave(game.saves));
@@ -81,6 +92,11 @@ const isDev = import.meta.env.DEV;
 onMounted(async () => {
   await nextTick();
   document.body.classList.add('home-entered');
+  // 读取已装社区扩展（决定「扩展管理」按钮显隐）。与 App.vue 启动链共用同一个 Promise；
+  // 失败时按钮保持隐藏，不拦首页其余部分。
+  workshop.init().catch(() => {
+    /* 失败原因记在 workshop.initError，扩展管理页会显示 */
+  });
   // 加载存档列表
   try {
     await game.loadSaves();
@@ -260,9 +276,9 @@ async function quickTestKeep() {
           >
             <i class="btn-icon fa-solid fa-folder-tree" aria-hidden="true"></i>存 档 管 理
           </AppButton>
-          <!-- 入口开关：见 script 里的 EXTENSION_ENTRY_ENABLED -->
+          <!-- 入口显隐：见 script 里的 showExtensionEntry（H-02） -->
           <AppButton
-            v-if="EXTENSION_ENTRY_ENABLED"
+            v-if="showExtensionEntry"
             variant="secondary"
             size="lg"
             block

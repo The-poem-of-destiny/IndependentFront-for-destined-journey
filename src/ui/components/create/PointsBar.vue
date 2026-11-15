@@ -12,6 +12,11 @@ const percent = computed(() => {
   return Math.min(100, Math.max(0, ((props.total - props.used) / props.total) * 100));
 });
 
+/** 剩余点数（可为负） */
+const remain = computed(() => props.total - props.used);
+/** C-06：超支额；> 0 时整条进入警示态并写出超支多少，超着支建不了档 */
+const overspent = computed(() => Math.max(0, -remain.value));
+
 const barColor = computed(() => {
   // 剩余多→绿，剩余中→金，剩余少→红
   if (percent.value > 50) return 'var(--theme-success)';
@@ -21,7 +26,7 @@ const barColor = computed(() => {
 </script>
 
 <template>
-  <div class="points-bar">
+  <div class="points-bar" :class="{ over: overspent > 0 }">
     <div class="points-track">
       <div
         class="points-fill"
@@ -30,11 +35,14 @@ const barColor = computed(() => {
       <span class="points-text">
         <span class="points-label">转生点数</span>
         <span class="points-numbers">
-          <strong class="points-remain">{{ total - used }}</strong>
+          <strong class="points-remain">{{ remain }}</strong>
           <span class="points-sep"> / </span>
           <span class="points-total">{{ total }}</span>
         </span>
         <span v-if="difficultyLabel" class="difficulty-tag">{{ difficultyLabel }}</span>
+        <span v-if="overspent > 0" class="points-overspent" role="status">
+          转生点数超支 {{ overspent }} 点，需调整后才能创建角色
+        </span>
       </span>
     </div>
   </div>
@@ -104,6 +112,17 @@ const barColor = computed(() => {
 .points-total {
   color: var(--theme-text-muted);
   font-size: 0.75rem;
+}
+.points-bar.over .points-track {
+  border-color: var(--theme-error);
+}
+.points-bar.over .points-remain {
+  color: var(--theme-error);
+}
+.points-overspent {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--theme-error);
 }
 .difficulty-tag {
   font-size: 0.65rem;

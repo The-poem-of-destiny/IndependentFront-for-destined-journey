@@ -37,6 +37,8 @@ vi.mock('../../../../src/ui/stores/image-preset-store', () => ({
 vi.mock('../../../../src/ui/stores/settings-store', () => ({
   useSettingsStore: () => ({ settings: mockSettings }),
 }));
+const confirmDialog = vi.hoisted(() => vi.fn());
+vi.mock('../../../../src/ui/lib/confirm-dialog', () => ({ confirmDialog }));
 
 import CgGalleryPanel from '../../../../src/ui/components/game/CgGalleryPanel.vue';
 import { REDRAW_DIALECT_MISMATCH_HINT } from '../../../../src/ui/components/game/scene-image-actions';
@@ -70,6 +72,8 @@ function rec(over: Partial<SceneImageRecord> = {}): SceneImageRecord {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  confirmDialog.mockReset();
+  confirmDialog.mockResolvedValue(true);
   records.value = [];
   for (const k of Object.keys(mockSettings)) delete mockSettings[k];
   mockSettings.imageDialectId = 'danbooru-anime';
@@ -89,6 +93,7 @@ beforeEach(() => {
     pin: vi.fn(async () => undefined),
     remove: vi.fn(async () => undefined),
     generate: vi.fn(async () => ({ ok: true, id: 'new' })),
+    cancel: vi.fn(async () => 'cancelled'),
     find: vi.fn((id: string) => records.value.find((r) => r.id === id)),
   });
   mockGame = { activeSaveId: 's1', closeModal: vi.fn() };
@@ -275,6 +280,102 @@ describe('CgGalleryPanel', () => {
     await flushPromises();
     expect(w.findAll('.cg-cell')).toHaveLength(2);
     expect(w.findAll('.cg-thumb-img')).toHaveLength(2);
+    w.unmount();
+  });
+});
+
+describe('CgGalleryPanel 重画（CG-01 / CG-02）', () => {
+  async function openSelected(extra: SceneImageRecord[] = []) {
+    records.value = [rec({ id: 'a' }), ...extra];
+    const w = await mountPanel();
+    await w.find('.cg-cell').trigger('click');
+    await flushPromises();
+    return w;
+  }
+
+  function button(w: Awaited<ReturnType<typeof mountPanel>>, label: string) {
+    const b = w.findAll('button').find((x) => x.text() === label);
+    if (!b) throw new Error(`找不到按钮 ${label}`);
+    return b;
+  }
+
+  it('🔴 点「重画」先弹付费确认；取消则不排队', async () => {
+    confirmDialog.mockResolvedValueOnce(false);
+    const w = await openSelected();
+    await button(w, '重画').trigger('click');
+    await flushPromises();
+    expect(confirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('可能产生费用') }),
+    );
+    expect(mockScene.generate).not.toHaveBeenCalled();
+    w.unmount();
+  });
+
+  it('确认后经手动路径排队（source 恒为 manual，不带 quotaConfirmed）', async () => {
+    confirmDialog.mockResolvedValueOnce(true);
+    const w = await openSelected();
+    await button(w, '重画').trigger('click');
+    await flushPromises();
+    expect(mockScene.generate).toHaveBeenCalledTimes(1);
+    const input = (mockScene.generate as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(input).toMatchObject({ source: 'manual', redrawFrom: 'a' });
+    expect(input.quotaConfirmed).toBeUndefined();
+    w.unmount();
+  });
+
+  it('🔴 被限额拦下时弹「仍然生成」确认，确认后带 quotaConfirmed 重发（不再只给 toast）', async () => {
+    confirmDialog.mockResolvedValue(true);
+    (mockScene.generate as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ok: false, reason: 'hourly', message: '本小时已画满 10 张' })
+      .mockResolvedValueOnce({ ok: true, id: 'new' });
+    const w = await openSelected();
+    await button(w, '重画').trigger('click');
+    await flushPromises();
+    expect(confirmDialog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ message: '本小时已画满 10 张', confirmLabel: '仍然生成' }),
+    );
+    expect(mockScene.generate).toHaveBeenCalledTimes(2);
+    expect((mockScene.generate as ReturnType<typeof vi.fn>).mock.calls[1][0]).toMatchObject({
+      source: 'manual',
+      quotaConfirmed: true,
+    });
+    w.unmount();
+  });
+
+  it('「保存并重画」同样先确认；取消则提示词也不落库', async () => {
+    confirmDialog.mockResolvedValueOnce(false);
+    const w = await openSelected();
+    await w.find('.cg-prompt').setValue('new prompt');
+    await button(w, '保存并重画').trigger('click');
+    await flushPromises();
+    expect(mockScene.update).not.toHaveBeenCalled();
+    expect(mockScene.generate).not.toHaveBeenCalled();
+    w.unmount();
+  });
+
+  it('详情的切换条显示排队中 / 生成中 / 失败的 take，失败写原因，排队中可取消', async () => {
+    const w = await openSelected([
+      rec({ id: 'q', take: 1, status: 'queued' }),
+      rec({ id: 'g', take: 2, status: 'generating' }),
+      rec({ id: 'f', take: 3, status: 'failed', error: '连接超时' }),
+    ]);
+    // 网格仍只列已完成的那一张
+    expect(w.findAll('.cg-cell')).toHaveLength(1);
+    const chips = w.findAll('.cg-take-pending');
+    expect(chips.map((c) => c.attributes('data-take-status'))).toEqual([
+      'queued',
+      'generating',
+      'failed',
+    ]);
+    expect(chips[0].text()).toContain('排队中');
+    expect(chips[1].text()).toContain('生成中');
+    expect(chips[2].text()).toContain('失败');
+    expect(chips[2].text()).toContain('连接超时');
+    expect(chips[1].find('.cg-take-cancel').exists()).toBe(false);
+
+    await chips[0].get('.cg-take-cancel').trigger('click');
+    await flushPromises();
+    expect(mockScene.cancel).toHaveBeenCalledWith('q');
     w.unmount();
   });
 });

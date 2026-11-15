@@ -6,7 +6,12 @@
  */
 import { describe, it, expect } from 'vitest';
 import { reactive } from 'vue';
-import { resolveAgentEndpoint, buildApiEndpoints } from '../../../src/ui/lib/endpoint-resolver';
+import {
+  resolveAgentEndpoint,
+  buildApiEndpoints,
+  describeAgentBinding,
+  isLlmPoolEntry,
+} from '../../../src/ui/lib/endpoint-resolver';
 import type { ApiEndpoint } from '@engine/types/types';
 
 function endpoint(id: string): ApiEndpoint {
@@ -160,5 +165,38 @@ describe('buildApiEndpoints — 交给引擎的端点必须脱离 Vue 响应式'
     expect(endpoints[0].models).toEqual(['deepseek-chat', 'deepseek-reasoner']);
     expect(endpoints[0].bodyOverrides).toEqual({ thinking: { type: 'enabled' } });
     expect(endpoints[0].defaultModel).toBe('deepseek-chat');
+  });
+});
+
+describe('describeAgentBinding — 设置页角标四态（S-08）', () => {
+  it('空池 → no-api', () => {
+    expect(describeAgentBinding('', [])).toEqual({ kind: 'no-api' });
+  });
+
+  it('未设置 + 有池 → 跟随默认（带上实际会用的那个端点）', () => {
+    expect(describeAgentBinding('', poolAB)).toEqual({
+      kind: 'follow-default',
+      endpoint: poolAB[0],
+    });
+    expect(describeAgentBinding(undefined, poolAB).kind).toBe('follow-default');
+  });
+
+  it('显式绑定且存在 → bound', () => {
+    expect(describeAgentBinding('B', poolAB)).toEqual({ kind: 'bound', endpoint: poolAB[1] });
+  });
+
+  it('显式绑定但池里没有 → stale（带原 id），与运行时 stale-binding 同口径', () => {
+    expect(describeAgentBinding('gone', poolAB)).toEqual({ kind: 'stale', requestedId: 'gone' });
+  });
+});
+
+describe('isLlmPoolEntry — 与 buildApiEndpoints 同一口径', () => {
+  it('kind / apiType 判据', () => {
+    expect(isLlmPoolEntry({ kind: 'llm' })).toBe(true);
+    expect(isLlmPoolEntry({ apiType: 'chat' })).toBe(true);
+    expect(isLlmPoolEntry({})).toBe(true);
+    expect(isLlmPoolEntry({ kind: 'embedding' })).toBe(false);
+    expect(isLlmPoolEntry({ apiType: 'image' })).toBe(false);
+    expect(isLlmPoolEntry(null)).toBe(false);
   });
 });

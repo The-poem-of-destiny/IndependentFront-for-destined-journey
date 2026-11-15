@@ -40,10 +40,21 @@ function handleCustomClose() {
   showCustomForm.value = false;
   editingItem.value = null;
 }
+/**
+ * 自定义物品表单可用的点数：当前余额，编辑时加回该项原消耗（道具按数量计），
+ * 让表单能就地提示「保存后会超支多少」（C-06）。
+ */
+const customFormAvailablePoints = computed(() => {
+  const editing = editingItem.value;
+  const refund = editing
+    ? (editing.cost || 0) * (editing.category === 'item' ? editing.quantity || 1 : 1)
+    : 0;
+  return store.remainingPoints + refund;
+});
+
 function handleSelect(item: CatalogItem) {
-  if (item.category === 'equipment') store.addEquipment(item);
-  else if (item.category === 'item') store.addItem(item);
-  else store.addSkill(item);
+  // C-05：经 store 的统一闸门添加，点数不足/限制不符时什么都不加
+  store.selectCatalogItem(item);
 }
 function handleRemove(item: CatalogItem) {
   if (item.category === 'equipment') store.removeEquipment(item.id);
@@ -127,6 +138,7 @@ const visiblePool = computed(() => {
             :item="item"
             :selected="store.isSelected(item)"
             :disabled="!store.canSelect(item)"
+            :disabled-reason="store.selectBlockReason(item)"
             @select="handleSelect"
             @remove="handleRemove"
           />
@@ -165,6 +177,7 @@ const visiblePool = computed(() => {
     <CustomItemForm
       :visible="showCustomForm"
       :edit-item="editingItem"
+      :available-points="customFormAvailablePoints"
       @save="handleCustomSave"
       @close="handleCustomClose"
     />
