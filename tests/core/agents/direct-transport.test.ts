@@ -267,7 +267,8 @@ it('缓存模式交出留存条数并把会话诊断写进结果', async () => {
     );
     const tail = request.messages[request.messages.length - 1].content!;
     expect(tail).toMatch(/^<turn_context>/);
-    expect(tail).toContain('"current"');
+    // 冷建时战斗与资源已整份在留存消息的 set 里，尾部不重复现值
+    expect(tail).not.toContain('"current"');
     expect(turn.result.directCacheDiagnostics).toBe(turn.cache!.ticket.diagnostics);
     expect(turn.result.directCacheDiagnostics).toMatchObject({
       rebased: true,

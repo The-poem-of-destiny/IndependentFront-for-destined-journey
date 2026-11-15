@@ -53,13 +53,15 @@ export interface BuiltLlmRequest {
 }
 
 export function buildLlmRequest(input: LlmBuildInput): BuiltLlmRequest {
+  // Claude 的块位置与请求体出自同一次转换，转交给断点定位
+  let anthropic: ReturnType<typeof buildAnthropicBody> | undefined;
   const baseBody =
     input.protocol === 'openai-chat'
       ? buildOpenAiBody(input)
       : input.protocol === 'gemini'
         ? buildGeminiBody(input)
-        : buildAnthropicBody(input);
-  applyPromptCaching(baseBody, input);
+        : (anthropic = buildAnthropicBody(input)).body;
+  applyPromptCaching(baseBody, input, anthropic?.locations);
   return applyBodyParameters({
     protocol: input.protocol,
     baseBody,

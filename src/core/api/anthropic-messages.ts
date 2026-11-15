@@ -105,16 +105,13 @@ function convertAnthropicMessages(messages: LlmMessage[]): {
 }
 
 /**
- * 输入消息下标 → Claude 请求体内容块位置。与 `buildAnthropicBody` 走同一条转换，
- * 连续同角色合并后仍能精确定位到某条输入消息自己的块。
+ * 构建 Claude 请求体，并一并交出「输入消息下标 → 请求体内容块位置」。
+ * 位置与请求体出自同一次转换，连续同角色合并后仍能精确定位到某条输入消息自己的块。
  */
-export function anthropicBlockLocations(
-  messages: LlmMessage[],
-): Array<AnthropicBlockLocation | undefined> {
-  return convertAnthropicMessages(messages).locations;
-}
-
-export function buildAnthropicBody(input: LlmBuildInput): JsonObject {
+export function buildAnthropicBody(input: LlmBuildInput): {
+  body: JsonObject;
+  locations: Array<AnthropicBlockLocation | undefined>;
+} {
   const converted = convertAnthropicMessages(input.messages);
   const body: JsonObject = {
     model: input.model,
@@ -140,7 +137,7 @@ export function buildAnthropicBody(input: LlmBuildInput): JsonObject {
           ? { type: 'tool', name: choice.function.name }
           : { type: 'auto' };
   }
-  return body;
+  return { body, locations: converted.locations };
 }
 
 function anthropicUsage(raw: JsonObject) {

@@ -123,7 +123,7 @@ function size(messages: LlmMessage[]): number {
   );
 }
 
-export const DIRECT_CACHE_PROTOCOL = `上下文采用直出缓存会话。direct_context 是本轮权威输入：set 中的每个顶层字段整块替换旧值，remove 明确删除旧字段；禁止把替换解释成数值增减或追加物品。未变化的字段沿用最近值。character/角色名/profile、skills、inventory、statusEffects 分别是该角色的档案、技能、库存和状态效果，character/角色名/state 是该角色当前的位置、是否在场、当前行动、金钱、经验与心里话；资源单列在 resources，按 name 对应角色。空数组表示已清空，remove 后该分区不再有效。若出现 memory/记忆编号 分区，每个分区是一条长期记忆，所有仍有效的 memory/ 分区合起来就是完整记忆库：新记忆只出现在当轮 set，未再出现的旧记忆依然有效，被 remove 的记忆已删除。currentLore、regionLore、turnLore 及 authoredTurn 只以最新分区为准，被替换或移除的旧条目不再是本轮激活规则。历史中的 assistant 只保留正文，不含当时的状态声明；状态一律以 direct_context 与本轮 turn_context 为准。历史里只有正文不代表可以只输出正文，每轮仍须按输出协议输出完整结构。玩家输入在每轮 direct_context 之后的 player_input 中。turn_context 只随当前这一轮出现，历史里不保留旧轮的召回与骰池；只使用本轮 turn_context 的召回与骰池。turn_context.dice_pool 的每项为 [骰面数,骰值]，数组下标就是 diceUsed.index。turn_context.current 中的战斗与资源现值是本轮 app 状态，优先于历史中的旧值。`;
+export const DIRECT_CACHE_PROTOCOL = `上下文采用直出缓存会话。direct_context 是本轮权威输入：set 中的每个顶层字段整块替换旧值，remove 明确删除旧字段；禁止把替换解释成数值增减或追加物品。未变化的字段沿用最近值。character/角色名/profile、skills、inventory、statusEffects 分别是该角色的档案、技能、库存和状态效果，character/角色名/state 是该角色当前的位置、是否在场、当前行动、金钱、经验与心里话；资源单列在 resources，按 name 对应角色。空数组表示已清空，remove 后该分区不再有效。若出现 memory/记忆编号 分区，每个分区是一条长期记忆，所有仍有效的 memory/ 分区合起来就是完整记忆库：新记忆只出现在当轮 set，未再出现的旧记忆依然有效，被 remove 的记忆已删除。currentLore、regionLore、turnLore 及 authoredTurn 只以最新分区为准，被替换或移除的旧条目不再是本轮激活规则。历史中的 assistant 只保留正文，不含当时的状态声明；状态一律以 direct_context 与本轮 turn_context 为准。历史里只有正文不代表可以只输出正文，每轮仍须按输出协议输出完整结构。玩家输入在每轮 direct_context 之后的 player_input 中。turn_context 只随当前这一轮出现，历史里不保留旧轮的召回与骰池；只使用本轮 turn_context 的召回与骰池。turn_context.dice_pool 的每项为 [骰面数,骰值]，数组下标就是 diceUsed.index。turn_context.current 若出现，其中的战斗与资源现值是本轮 app 状态，优先于历史中的旧值；同一轮 direct_context.set 里给出的 combat 与 resources 同样是现值。`;
 
 function diagnoseSections(
   set: Record<string, unknown>,
@@ -154,7 +154,7 @@ export async function prepareDirectContext(input: {
   playerInput: string;
   /**
    * 本轮资料（召回、骰池、尾部指令等）：只随本次请求的尾部发出，不留存进会话。
-   * 战斗与资源现值由本模块从分区补进 `current`，调用方不必重复。
+   * 战斗与资源现值（不在本次 set 里时）由本模块从分区补进 `current`，调用方不必重复。
    */
   turnContext: Record<string, unknown>;
   /**
@@ -192,17 +192,26 @@ export async function prepareDirectContext(input: {
     role: 'user' as const,
     content: `<direct_context>\n${serializeDirectContext({ set, remove })}\n</direct_context>\n<player_input>\n${input.playerInput}\n</player_input>`,
   });
-  // 不留存的尾部：本轮资料 + 战斗与资源现值。现值每轮重申在这里，不再塞进留存消息的 set。
-  const tail = {
-    role: 'user' as const,
-    content: `<turn_context>\n${serializeDirectContext({
-      ...input.turnContext,
-      current: Object.fromEntries(
-        CURRENT_SECTIONS.filter((key) => key in sections).map((key) => [key, sections[key]]),
-      ),
-    })}\n</turn_context>`,
+  // 不留存的尾部：本轮资料 + 战斗与资源现值。现值只补「本次 set 里没给」的那些，
+  // 已在 set 里的不重复；一个都不缺时不出 current 键。故尾部随每份请求的 set 各自构造。
+  const tailFor = (set: Record<string, unknown>) => {
+    const current = Object.fromEntries(
+      CURRENT_SECTIONS.filter((key) => key in sections && !(key in set)).map((key) => [
+        key,
+        sections[key],
+      ]),
+    );
+    return {
+      role: 'user' as const,
+      content: `<turn_context>\n${serializeDirectContext({
+        ...input.turnContext,
+        ...(Object.keys(current).length ? { current } : {}),
+      })}\n</turn_context>`,
+    };
   };
-  const fresh = [...input.frame.prefix, ...input.frame.history, pack(sections, []), tail];
+  const freshTail = tailFor(sections);
+  const fresh = [...input.frame.prefix, ...input.frame.history, pack(sections, []), freshTail];
+  let tail = freshTail;
   let set = sections;
   let remove: string[] = [];
   let reason = !previous
@@ -232,7 +241,8 @@ export async function prepareDirectContext(input: {
     );
     const removed = Object.keys(previous.sections).filter((k) => !(k in sections));
     // 增长与窗口预算都按实际会发出的整份请求（含尾部）计，与冷建请求同一口径
-    messages = [...previous.transcript, pack(changed, removed), tail];
+    const reusedTail = tailFor(changed);
+    messages = [...previous.transcript, pack(changed, removed), reusedTail];
     if (size(messages) > size(fresh) * rebuild.growthLimit) reason = 'transcript_growth';
     else if (
       input.contextWindowTokens &&
@@ -243,6 +253,7 @@ export async function prepareDirectContext(input: {
     else {
       set = changed;
       remove = removed;
+      tail = reusedTail;
     }
   }
   if (

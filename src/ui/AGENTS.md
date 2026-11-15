@@ -350,6 +350,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   🔴 **加新设置要改两处**（Q-18）：先在 settings-types.ts
 │   │                                      的 `UiSettings` 上声明，再在 getDefaults() 给默认值。
 │   │                                      「任意新字段零改动」那条设计意图已于 2026-08-04 反转
+│   │                                      📌 2026-11-14 例外：**刻意以「键缺席」表示默认**的可选键只声明、不进
+│   │                                      getDefaults()，并在声明处写明缺席时由谁兜底（如 `directCacheProvider`、
+│   │                                      `directCacheRebuildTurns`、`directCacheGrowthLimit`；恢复默认 = 删键）
 │   ├── settings-types.ts            ← [Q-18] ★`UiSettings`（**type 不是 interface** —— 整份袋子
 │   │                                   要传进 5 处 `Record<string, unknown>` 参数，interface 没有
 │   │                                   隐式索引签名会当场编译不过；也**不能**加显式索引签名，

@@ -5,7 +5,7 @@ import type {
   LlmProtocol,
   NormalizedLlmUsage,
 } from '../types/types-api';
-import { anthropicBlockLocations } from './anthropic-messages';
+import type { AnthropicBlockLocation } from './anthropic-messages';
 
 /** Only explicit direct-cache callers opt into provider parameters. No model/URL guessing. */
 export function applyPromptCaching(
@@ -23,6 +23,8 @@ export function applyPromptCaching(
      */
     cacheRetainedMessageCount?: number;
   },
+  /** Claude：构建请求体时同一次转换得到的「输入消息下标 → 内容块位置」 */
+  anthropicLocations?: ReadonlyArray<AnthropicBlockLocation | undefined>,
 ): void {
   if (!input.cachePolicy || input.cachePolicy === 'prefix') return;
   const retainedEnd =
@@ -55,14 +57,19 @@ export function applyPromptCaching(
     }
     // 显式断点：静态前缀末尾 + 最后一块 system + 留存末尾，共至多 3 个（上限 4）。
     // 不设顶层自动断点：它会落在请求最后一块，也就是不留存的尾部上。
-    // 留存末尾与尾部同为 user 时会合并进同一条 Claude 消息，必须按块定位而不是按消息。
-    const locations = anthropicBlockLocations(input.messages);
-    let index = retainedEnd;
-    while (index >= 0 && !locations[index]) index--;
-    const location = index >= 0 ? locations[index] : undefined;
+    // 留存末尾与尾部同为 user 时会合并进同一条 Claude 消息，必须按块定位而不是按消息；
+    // 位置由构建请求体的那次转换交来。最后一条留存消息自己没有块就不打（不向前借位）。
+    const location = retainedEnd >= 0 ? anthropicLocations?.[retainedEnd] : undefined;
     if (location) {
-      const blocks = (body.messages as JsonObject[])[location.message].content as JsonObject[];
-      blocks[location.block] = { ...blocks[location.block], cache_control: { type: 'ephemeral' } };
+      const messages = body.messages as JsonObject[];
+      const target = messages[location.message];
+      // 换一份新的 content 数组：原生 assistant 的 content 直接引用已存会话里的数组，就地改会把断点写进存档
+      messages[location.message] = {
+        ...target,
+        content: (target.content as JsonObject[]).map((block, i) =>
+          i === location.block ? { ...block, cache_control: { type: 'ephemeral' } } : block,
+        ),
+      };
     }
   } else {
     if (input.protocol !== 'openai-chat')
@@ -70,8 +77,9 @@ export function applyPromptCaching(
     body.prompt_cache_key = input.cacheKey ?? 'direct-cache-v1';
     const messages = body.messages as JsonObject[];
     const lastSystem = input.messages.findIndex((m) => m.role !== 'system') - 1;
-    // 给了留存条数时，原本打在最后一条消息上的断点改打在最后一条留存消息上
-    const tail = retainedEnd ?? messages.length - 1;
+    // 下标按输入消息算，前提是请求体与输入消息一一对应；条数对不上时退回「最后一条消息」
+    const aligned = messages.length === input.messages.length;
+    const tail = retainedEnd !== undefined && aligned ? retainedEnd : messages.length - 1;
     for (const i of new Set([0, lastSystem, tail])) {
       if (i >= 0 && messages[i]) messages[i].prompt_cache_breakpoint = { mode: 'explicit' };
     }

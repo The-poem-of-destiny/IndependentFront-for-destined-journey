@@ -621,11 +621,16 @@ describe.each(['direct', 'direct_cached'] as const)(
         expect(second.slice(0, retained)).toEqual(first.slice(0, retained));
         expect(second[retained]).toEqual({ role: 'assistant', content: '旅人继续前行。' });
         expect(second).not.toContainEqual(first[retained]);
-        // 资源现值由本轮尾部重申：第二楼请求时是第一楼接纳后的 70（开局 80），不是旧值
-        expect(first[retained].content).toContain('"hp":80');
+        // 冷建时资源整份在留存消息的 set 里（开局 80），尾部不再重复
+        expect(first[retained - 1].content).toContain('"hp":80');
+        expect(first[retained].content).not.toContain('"current"');
+        // 第二楼资源变成第一楼接纳后的 70：只进本轮留存消息的 set，尾部不重复
+        const secondRetained = second[second.length - 2].content;
+        expect(secondRetained).toContain('"hp":70');
+        expect(secondRetained).not.toContain('"hp":80');
         const tail = second[second.length - 1].content;
         expect(tail).toMatch(/^<turn_context>/);
-        expect(tail).toContain('"hp":70');
+        expect(tail).not.toContain('"resources"');
       }
       expect(JSON.stringify(second)).toContain('旅人继续前行');
       expect((await getDatabase().characters.get('player'))?.hp).toBe(60);

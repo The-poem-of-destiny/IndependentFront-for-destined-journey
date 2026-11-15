@@ -126,12 +126,43 @@ describe('accepted direct context', () => {
     expect(assistant).not.toHaveProperty('native');
   });
 
+  it('冷建请求的尾部不带 current：现值已整份在 set 里', async () => {
+    const first = await prepareDirectContext(input());
+    const delta = directContext(first.messages[first.retainedCount - 1].content);
+    expect(delta.set).toMatchObject({ resources: { hp: 80 }, combat: null });
+    const tail = turnContext(first.messages[first.messages.length - 1].content);
+    expect(tail).not.toHaveProperty('current');
+    expect(first.diagnostics.tailChars).toBe(
+      first.messages[first.messages.length - 1].content!.length,
+    );
+  });
+
+  it('combat 当轮变化时只在 set 里，未变的 resources 由尾部 current 重申', async () => {
+    const first = await prepareDirectContext(input());
+    await acceptDirectContext(first, { acceptedMessages: [message()] });
+    const next = { ...input(), history: [message()] };
+    next.frame.sections = { ...next.frame.sections, combat: { round: 2 } };
+    const second = await prepareDirectContext(next);
+    expect(second.rebaseReason).toBeUndefined();
+    const delta = directContext(second.messages[second.retainedCount - 1].content);
+    expect(delta.set).toEqual({ combat: { round: 2 } });
+    const tail = turnContext(second.messages[second.messages.length - 1].content);
+    expect(tail.current).toEqual({ resources: { hp: 80 } });
+    expect(second.diagnostics.tailChars).toBe(
+      second.messages[second.messages.length - 1].content!.length,
+    );
+    // 基线按冷建那份尾部计（不带 current）：等于此刻真去冷建的整份请求
+    invalidateDirectContext(saveId);
+    const cold = await prepareDirectContext(next);
+    expect(cold.rebaseReason).toBe('missing_session');
+    expect(second.diagnostics.baselineChars).toBe(cold.diagnostics.requestChars);
+    expect(turnContext(cold.messages[cold.messages.length - 1].content)).not.toHaveProperty(
+      'current',
+    );
+  });
+
   it('combat 与 resources 未变时不进留存消息的 set，但现值出现在尾部', async () => {
     const first = await prepareDirectContext(input());
-    expect(turnContext(first.messages[first.messages.length - 1].content).current).toEqual({
-      resources: { hp: 80 },
-      combat: null,
-    });
     await acceptDirectContext(first, { acceptedMessages: [message()] });
     const next = { ...input(), history: [message()] };
     const second = await prepareDirectContext(next);

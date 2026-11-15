@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildLlmRequest } from '../../../src/core/api/llm-adapter';
-import { directCacheUsage } from '../../../src/core/api/prompt-caching';
+import { applyPromptCaching, directCacheUsage } from '../../../src/core/api/prompt-caching';
 
 describe('direct provider cache policy', () => {
   const base = {
@@ -163,6 +163,85 @@ describe('direct provider cache policy', () => {
       const body = claudeBody();
       expect(marked(body)).toEqual([]);
       expect(body.cache_control).toEqual({ type: 'ephemeral' });
+    });
+
+    describe('Claude：原生 assistant 与无块的留存末尾', () => {
+      const nativeContent = () => [{ type: 'text', text: '第一楼正文' }];
+      const withNative = (content: { type: string; text: string }[]) => [
+        { role: 'system' as const, content: '协议' },
+        { role: 'user' as const, content: '第一楼留存' },
+        {
+          role: 'assistant' as const,
+          content: '第一楼正文',
+          native: { protocol: 'anthropic-messages' as const, value: { content } },
+        },
+        { role: 'assistant' as const, content: '' },
+        { role: 'user' as const, content: '尾部' },
+      ];
+      const build = (messages: ReturnType<typeof withNative>, cacheRetainedMessageCount: number) =>
+        buildLlmRequest({
+          ...base,
+          protocol: 'anthropic-messages',
+          cachePolicy: 'anthropic',
+          messages,
+          cacheStaticSystemCount: 1,
+          cacheRetainedMessageCount,
+        }).body;
+
+      it('最后一条留存消息自己没有块时不打留存断点，也不向前借位', () => {
+        const content = nativeContent();
+        const messages = withNative(content);
+        const before = JSON.stringify(messages);
+        const body = build(messages, 4);
+        expect(marked(body)).toEqual([]);
+        expect(body.cache_control).toBeUndefined();
+        // 传入消息（含原生 content 数组）一字未改
+        expect(JSON.stringify(messages)).toBe(before);
+        expect(content).toEqual(nativeContent());
+      });
+
+      it('断点落在原生 assistant 上时换新的 content 数组，不写进已存消息', () => {
+        const content = nativeContent();
+        const messages = withNative(content);
+        const body = build(messages, 3);
+        expect(marked(body)).toEqual(['第一楼正文']);
+        const target = (body.messages as { content: unknown[] }[])[1];
+        expect(target.content).not.toBe(content);
+        expect(content).toEqual(nativeContent());
+        expect(content[0]).not.toHaveProperty('cache_control');
+      });
+    });
+
+    it('OpenAI：请求体与输入消息条数不等时退回最后一条消息', () => {
+      const body: Record<string, unknown> = {
+        messages: [{ role: 'system' }, { role: 'user' }, { role: 'user' }],
+      };
+      applyPromptCaching(body as never, {
+        protocol: 'openai-chat',
+        cachePolicy: 'openai',
+        messages: conversation,
+        cacheRetainedMessageCount: 2,
+      });
+      expect(
+        (body.messages as { prompt_cache_breakpoint?: unknown }[]).map(
+          (m) => !!m.prompt_cache_breakpoint,
+        ),
+      ).toEqual([true, true, true]);
+      // 对照：条数相等时第 2 条（下标 1）才是留存末尾
+      const aligned: Record<string, unknown> = {
+        messages: conversation.map((m) => ({ role: m.role })),
+      };
+      applyPromptCaching(aligned as never, {
+        protocol: 'openai-chat',
+        cachePolicy: 'openai',
+        messages: conversation,
+        cacheRetainedMessageCount: 3,
+      });
+      expect(
+        (aligned.messages as { prompt_cache_breakpoint?: unknown }[]).map(
+          (m) => !!m.prompt_cache_breakpoint,
+        ),
+      ).toEqual([true, true, true, false, false, false]);
     });
 
     it('OpenAI：原本打在最后一条消息上的断点改打在最后一条留存消息上', () => {

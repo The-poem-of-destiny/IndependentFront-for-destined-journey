@@ -41,18 +41,12 @@ const selectedTurn = computed(() => {
 });
 const displayedAgentLog = computed(() => selectedTurn.value?.entries ?? []);
 
-/** 缓存直出主请求的会话记账（按调用 id 索引；其余请求缺席 → 整块不出） */
-const directCacheViews = computed(() => {
-  const views = new Map<string, DirectCacheDebugView>();
-  for (const entry of displayedAgentLog.value) {
-    const view = buildDirectCacheDebugView(entry.directCacheDiagnostics);
-    if (view) views.set(entry.invocationId, view);
-  }
-  return views;
-});
-/** 模板里借 v-for 绑定局部名：有记账给一项，没有给空数组 */
+/**
+ * 缓存直出主请求的会话记账（其余请求缺席 → 整块不出）。
+ * 模板里借 v-for 绑定局部名：有记账给一项，没有给空数组。
+ */
 function directCacheViewOf(entry: DebugAgentEntry): DirectCacheDebugView[] {
-  const view = directCacheViews.value.get(entry.invocationId);
+  const view = buildDirectCacheDebugView(entry.directCacheDiagnostics);
   return view ? [view] : [];
 }
 
