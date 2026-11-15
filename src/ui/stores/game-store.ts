@@ -147,6 +147,11 @@ export const useGameStore = defineStore('game', () => {
   const saves = ref<SaveSlot[]>([]);
   const activeSaveId = ref<string | null>(null);
   let loadGeneration = 0;
+  /**
+   * 时间线恢复计数：每次快照恢复 / 回退 / 重开战斗把当前存档的投影整体换掉时 +1。
+   * 插件运行时据此向已打开的插件面重推视图（插件系统设计 §6.3）。
+   */
+  const timelineRestoreSeq = ref(0);
 
   function invalidatePendingLoads() {
     loadGeneration++;
@@ -1028,6 +1033,38 @@ export const useGameStore = defineStore('game', () => {
     );
   }
 
+  /**
+   * 改写指定存档的插件启用轴（`metadata.enabledPluginIds`，插件系统设计 §3.5）。
+   * 启用非空时顺手置 `pluginHardened = true`（决策 8：一旦启用过插件，本存档的美化帧
+   * 从此走加固模式）；🔴 永不清除 —— 停用全部插件后也保持加固。
+   * 必须经 `patchSaveMetadataFor`：它整行写回内存里的存档，绕开会被下一次整行写覆盖。
+   */
+  async function setSaveEnabledPlugins(saveId: string, ids: string[]): Promise<boolean> {
+    const patch: Record<string, unknown> = { enabledPluginIds: [...ids] };
+    if (ids.length > 0) patch.pluginHardened = true;
+    return patchSaveMetadataFor(saveId, patch, {
+      optimistic: false,
+      failMessage: '写入指定存档的插件启用轴失败',
+    });
+  }
+
+  /**
+   * 补齐粘滞加固（决策 8）：存档的 `enabledPluginIds` 非空、却没有 `pluginHardened` 时置真。
+   * 导入或手改的存档可能只列了插件 id 而缺这一位 —— 进入存档与玩家（重新）确认启用时都要调。
+   * 启用轴为空或已加固时不写库，直接返回 true；只有写库失败（或找不到存档）才返回 false。
+   */
+  async function ensureSaveHardened(saveId: string): Promise<boolean> {
+    const save = saves.value.find((s: SaveSlot) => s.id === saveId);
+    if (!save) return false;
+    const ids = save.metadata?.enabledPluginIds ?? [];
+    if (ids.length === 0 || save.metadata?.pluginHardened === true) return true;
+    return patchSaveMetadataFor(
+      saveId,
+      { pluginHardened: true },
+      { optimistic: false, failMessage: '写入指定存档的插件加固标记失败' },
+    );
+  }
+
   /** 在生成开始前原子认领开场 Prompt。 */
   async function markOpeningPromptConsumed(): Promise<boolean> {
     const current = activeSave.value;
@@ -1456,6 +1493,7 @@ export const useGameStore = defineStore('game', () => {
       plotOutline.value = projection.outline;
       messages.value = projection.messages;
       turnCounter = projection.turn;
+      timelineRestoreSeq.value += 1;
 
       return { status: 'restored', continuation: 'same-save' };
     } catch (err) {
@@ -1886,6 +1924,9 @@ export const useGameStore = defineStore('game', () => {
     releaseOpeningPromptClaim,
     setEnabledWorldBookEntries,
     setSaveEnabledWorldBookEntries,
+    setSaveEnabledPlugins,
+    ensureSaveHardened,
+    timelineRestoreSeq,
     pendingOptions,
     setPendingOptions,
     pendingItemFocus,

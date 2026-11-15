@@ -2,7 +2,8 @@
 /**
  * 扩展管理页 —— 首页与设置页的统一扩展入口。
  *
- * 原版扩展尚无运行时注册表，当前只展示诚实占位；社区扩展的按存档启用设置归本页，
+ * 插件（第三方插件系统，设计 §3.3）的发现、安装、自检与按存档启用归本页的「插件管理」一节
+ * （PluginManagerSection，替换了原来的「原版扩展」占位卡）；社区扩展的按存档启用设置也归本页，
  * WorkshopPage 只承担浏览、安装、更新、卸载与投稿等社区生命周期能力。
  *
  * 📌 2026-11-14（W-01）：工坊锁定期间（`workshop-lock.ts`），已装项目的本地卸载
@@ -15,6 +16,7 @@ import { useUIStore } from '../../stores/ui-store';
 import { useWorkshopStore } from '../../stores/workshop-store';
 import CommunityExtensionSettings from './CommunityExtensionSettings.vue';
 import InstalledExtensionList from './InstalledExtensionList.vue';
+import PluginManagerSection from './PluginManagerSection.vue';
 import { WORKSHOP_LOCKED } from './workshop-lock';
 
 const ui = useUIStore();
@@ -53,21 +55,9 @@ function goBack() {
         在这里统一管理扩展的启用状态与相关设置。创意工坊只负责发现、安装和维护社区项目。
       </p>
 
-      <section class="extension-section" aria-labelledby="builtin-extension-title">
-        <h3 id="builtin-extension-title" class="extension-section-title">原版扩展管理</h3>
-        <article class="extension-card extension-card-placeholder">
-          <div class="extension-icon" aria-hidden="true">
-            <i class="fa-solid fa-box-archive"></i>
-          </div>
-          <div class="extension-copy">
-            <div class="extension-name-row">
-              <h4>原版扩展</h4>
-              <span class="extension-badge">规划中</span>
-            </div>
-            <p>原版扩展的识别、状态展示与管理功能尚未实现，当前暂留此入口。</p>
-          </div>
-          <AppButton variant="secondary" size="sm" disabled>暂未开放</AppButton>
-        </article>
+      <section class="extension-section" aria-labelledby="plugin-section-title">
+        <h3 id="plugin-section-title" class="extension-section-title">插件管理</h3>
+        <PluginManagerSection />
       </section>
 
       <section class="extension-section" aria-labelledby="community-extension-title">
@@ -206,10 +196,6 @@ function goBack() {
 .extension-card-locked {
   position: relative;
   overflow: hidden;
-}
-
-.extension-card-placeholder {
-  background: color-mix(in srgb, var(--theme-card-bg) 92%, var(--theme-text-muted));
 }
 
 /*

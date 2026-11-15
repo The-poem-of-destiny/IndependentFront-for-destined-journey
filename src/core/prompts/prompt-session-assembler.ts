@@ -424,7 +424,53 @@ const APPEND_CURSOR_PLACEHOLDERS: ReadonlySet<string> = new Set(['NARRATIVE']);
  * `AGENT.*` 用正则前缀匹配；其余是精确名单。
  */
 const EPHEMERAL_PLACEHOLDER_RE =
-  /^(?:USER_INPUT|RANDOM_EVENTS|RECENT_COMBAT|DELTA_TIME|AGENT\.[A-Z_]+|ENTITY_REQUEST|CRAFT_RESULT|CRAFT_REQUEST|CHAR_DETECT|IMAGE_REQUEST|COMBAT_BRIEF|COMBAT_ROSTER|PLOT_THREAD_TURN|PLOT_THREAD_SURFACE|PLOT_CAST_PLAN)$/;
+  /^(?:USER_INPUT|RANDOM_EVENTS|PLUGIN_NOTES|PLUGIN_CONTEXT|RECENT_COMBAT|DELTA_TIME|AGENT\.[A-Z_]+|ENTITY_REQUEST|CRAFT_RESULT|CRAFT_REQUEST|CHAR_DETECT|IMAGE_REQUEST|COMBAT_BRIEF|COMBAT_ROSTER|PLOT_THREAD_TURN|PLOT_THREAD_SURFACE|PLOT_CAST_PLAN)$/;
+
+/**
+ * 插件两块（插件设计 §5.8）：ephemeral 之外再加一条硬规矩 —— **绝不进 baseline system**。
+ *
+ * 🔴 其余 ephemeral 占位符在首轮仍随 baseline system 渲染一次（之后才走 turn_context），
+ *    而 baseline 正是后续每一轮的缓存前缀；插件文本每轮都可能变、且是第三方不可信文本，
+ *    留在那里等于让它常驻。所以 baseline 渲染时这两格以 localParams 置空，
+ *    首轮改随首条 user 发出、后续轮随 turn_context 发出。
+ * 🔴 预设/模板没写这两个占位符也照发（兜底追加口径同 `buildAgentMessages`）。
+ *    顺序：常驻提示在前、一次性告知在后。
+ */
+const PLUGIN_TURN_PLACEHOLDERS = ['PLUGIN_CONTEXT', 'PLUGIN_NOTES'] as const;
+
+/** baseline 渲染用的 localParams：插件两格强制置空（见上）。 */
+function withoutPluginBlocks(
+  localParams: Record<string, string> | undefined,
+): Record<string, string> {
+  return {
+    ...(localParams ?? {}),
+    ...Object.fromEntries(PLUGIN_TURN_PLACEHOLDERS.map((name) => [name, ''])),
+  };
+}
+
+/** 本轮插件块（空输入 / 非 story·direct_main → 空串）。调用方 localParams 可覆盖。 */
+function renderPluginTurnBlocks(
+  agentId: string,
+  ctx: AgentContext,
+  config: AgentConfig | undefined,
+  configs: AgentConfig[] | undefined,
+  worldBooks: WorldBook[] | undefined,
+  localParams: Record<string, string> | undefined,
+): string {
+  return PLUGIN_TURN_PLACEHOLDERS.map((name) =>
+    resolveTemplateWithGlobals(
+      `{{${name}}}`,
+      agentId,
+      ctx,
+      config ?? ({ agentId } as AgentConfig),
+      worldBooks ?? [],
+      configs ?? [],
+      localParams ?? {},
+    ).trim(),
+  )
+    .filter(Boolean)
+    .join('\n\n');
+}
 
 /** 占位符分类（未注册的 → 'unknown'，按现有规则原样保留在 baseline）。 */
 function classifyPlaceholder(name: string): PlaceholderCategory {
@@ -589,14 +635,19 @@ function renderTurnContext(
   localParams: Record<string, string> | undefined,
 ): string {
   const template = effectiveTemplate(agentId, config, presets);
+  const pluginNames: ReadonlySet<string> = new Set(PLUGIN_TURN_PLACEHOLDERS);
   const ephemeralNames = [
     ...new Set(
-      extractPlaceholderNames(template).filter((n) => classifyPlaceholder(n) === 'ephemeral'),
+      extractPlaceholderNames(template).filter(
+        (n) => classifyPlaceholder(n) === 'ephemeral' && !pluginNames.has(n),
+      ),
     ),
   ];
   const characters =
     agentId === 'story' && ctx.characterDefinitions !== undefined ? buildCharacterContext(ctx) : '';
-  if (ephemeralNames.length === 0) return characters;
+  // 插件块不看模板里写没写：预设缺占位符时也要每轮送达（见 PLUGIN_TURN_PLACEHOLDERS）
+  const plugins = renderPluginTurnBlocks(agentId, ctx, config, configs, worldBooks, localParams);
+  if (ephemeralNames.length === 0) return [characters, plugins].filter(Boolean).join('\n\n');
   const miniTemplate = ephemeralNames.map((n) => `{{${n}}}`).join('\n');
   const resolved = resolveTemplateWithGlobals(
     miniTemplate,
@@ -607,16 +658,19 @@ function renderTurnContext(
     configs ?? [],
     localParams ?? {},
   );
-  return [resolved, characters].filter(Boolean).join('\n\n');
+  return [resolved, characters, plugins].filter(Boolean).join('\n\n');
 }
 
 // ═══════════════════════════════════════════════════════════
 // user 消息组装（设计 §6）
 // ═══════════════════════════════════════════════════════════
 
-/** 首轮 user：'继续'触发 + code 固定协议说明 + 可选 tail（tail 空则省略，非空位于最后）。 */
-function composeFirstUserMessage(tailPrompt: string | undefined): string {
-  return [USER_PLACEHOLDER_CONTENT, DELTA_PROTOCOL_NOTE, normalizeTail(tailPrompt)]
+/**
+ * 首轮 user：'继续'触发 + code 固定协议说明 + 本轮插件块 + 可选 tail（空的省略，tail 位于最后）。
+ * 插件块放这里而不放 baseline system：见 `PLUGIN_TURN_PLACEHOLDERS`。
+ */
+function composeFirstUserMessage(tailPrompt: string | undefined, pluginBlocks = ''): string {
+  return [USER_PLACEHOLDER_CONTENT, DELTA_PROTOCOL_NOTE, pluginBlocks, normalizeTail(tailPrompt)]
     .filter((s) => s !== '')
     .join('\n\n');
 }
@@ -692,7 +746,7 @@ function measureFreshPrompt(
     input.configs,
     input.worldBooks,
     input.presets,
-    input.localParams,
+    withoutPluginBlocks(input.localParams),
   );
   if (!raw || raw.length === 0) return 0;
   let total = composeFirstUserMessage(input.tailPrompt).length;
@@ -741,14 +795,17 @@ async function buildBaseline(
     configs,
     worldBooks,
     presets,
-    localParams,
+    withoutPluginBlocks(localParams),
   );
   if (!raw || raw.length === 0) {
     // 不在 v1 范围（无有效模板）—— 调用方走现有无状态路径。
     return { messages: [], handle: null, rebased: false };
   }
 
-  const firstUserContent = composeFirstUserMessage(tailPrompt);
+  const firstUserContent = composeFirstUserMessage(
+    tailPrompt,
+    renderPluginTurnBlocks(agentId, ctx, config, configs, worldBooks, localParams),
+  );
   const transcript: PromptWireMessage[] = [
     ...raw.map((m) => toWireMessage(m.role as ChatMessage['role'], m.content)),
     toWireMessage('user', firstUserContent),

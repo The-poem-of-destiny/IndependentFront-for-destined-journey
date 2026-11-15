@@ -6,7 +6,11 @@ import type { SessionBackup } from '@engine/persistence/session-backup';
 import { useGameStore } from '../../stores/game-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
-import { buildSessionImportWarnings } from '../../lib/session-import-messages';
+import { usePluginStore } from '../../stores/plugin-store';
+import {
+  buildSessionImportPluginNote,
+  buildSessionImportWarnings,
+} from '../../lib/session-import-messages';
 import {
   decideStoryContextAdmission,
   isStoryContextV2Save,
@@ -169,6 +173,12 @@ async function deleteSave(saveId: string) {
   try {
     const { deleteSaveSlot } = await import('@engine/persistence/database');
     await deleteSaveSlot(saveId);
+    // 存档没了，各插件里对它的本机确认也一并清掉（失败不影响删除结果）
+    try {
+      await usePluginStore().forgetSave(saveId);
+    } catch (err) {
+      console.warn('[save-manager] 清理插件确认失败:', err);
+    }
     await game.loadSaves();
     if (selectedSaveId.value === saveId) selectedSaveId.value = game.saves[0]?.id ?? null;
     ui.toast('存档已删除', 'success');
@@ -267,6 +277,8 @@ async function exportSave(saveId: string) {
 const pendingSessionBackup = shallowRef<SessionBackup | null>(null);
 const pendingFullBackup = shallowRef<FullBackup | null>(null);
 const sessionWarnings = ref<string[]>([]);
+/** 告警窗确认后导入时要补亮的插件提示（同意不随存档走） */
+const pendingPluginNote = ref<string | null>(null);
 const showSessionWarnModal = ref(false);
 const showFullBackupModal = ref(false);
 
@@ -309,11 +321,13 @@ async function beginSessionImport(backup: SessionBackup) {
   try {
     const { checkSessionSaveDependencies } = await import('@engine/persistence/session-backup');
     const check = await checkSessionSaveDependencies(backup);
+    const pluginNote = buildSessionImportPluginNote(check);
     if (check.ok) {
-      await runSessionImport(backup, false);
+      await runSessionImport(backup, false, pluginNote);
       return;
     }
     pendingSessionBackup.value = backup;
+    pendingPluginNote.value = pluginNote;
     sessionWarnings.value = buildSessionImportWarnings(check);
     showSessionWarnModal.value = true;
   } catch (err) {
@@ -322,13 +336,19 @@ async function beginSessionImport(backup: SessionBackup) {
   }
 }
 
-async function runSessionImport(backup: SessionBackup, withWarnings: boolean) {
+async function runSessionImport(
+  backup: SessionBackup,
+  withWarnings: boolean,
+  pluginNote: string | null,
+) {
   try {
     const { importSessionSave } = await import('@engine/persistence/session-backup');
     await importSessionSave(backup);
     await game.loadSaves();
     if (withWarnings) ui.toast('存档已导入（部分依赖内容缺失）', 'warning');
     else ui.toast('存档导入成功', 'success');
+    // 体检通过时没有告警窗，这句「插件要在本机重新确认」只能靠这里告诉玩家
+    if (pluginNote) ui.toast(pluginNote, 'warning', 8000);
   } catch (err) {
     console.error('[session-backup] 导入存档失败:', err);
     ui.toast(`导入失败：${errText(err)}`, 'error');
@@ -337,13 +357,15 @@ async function runSessionImport(backup: SessionBackup, withWarnings: boolean) {
 
 async function confirmSessionImport() {
   const backup = pendingSessionBackup.value;
+  const pluginNote = pendingPluginNote.value;
   closeSessionWarnModal();
-  if (backup) await runSessionImport(backup, true);
+  if (backup) await runSessionImport(backup, true, pluginNote);
 }
 
 function closeSessionWarnModal() {
   showSessionWarnModal.value = false;
   pendingSessionBackup.value = null;
+  pendingPluginNote.value = null;
   sessionWarnings.value = [];
 }
 

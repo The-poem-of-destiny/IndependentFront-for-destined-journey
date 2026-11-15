@@ -41,6 +41,8 @@ import DebugPanel from './DebugPanel.vue';
 import MiniPlayer from './MiniPlayer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
 import GameMenu from './GameMenu.vue';
+import PluginSurfaceLayer from './PluginSurfaceLayer.vue';
+import { usePluginRuntimeStore } from '../../stores/plugin-runtime-store';
 import { hasOpenDialog } from '../../lib/modal-focus';
 import { getSave } from '@engine/persistence/database';
 import { decideStoryContextAdmission } from '@engine/story/story-context-mode';
@@ -53,6 +55,8 @@ const apiSources = useApiSourceStore();
 const audio = useAudioStore();
 const sceneImages = useSceneImageStore();
 const imagePresets = useImagePresetStore();
+/** 插件运行时（§5.5 / §5.7）：进出存档、插件界面、回填输入框都归它 */
+const pluginRuntime = usePluginRuntimeStore();
 /** 角色外貌的会话副本（D56）—— 基线在 imagePresets，这一份随存档走 */
 const charAppearance = useCharacterAppearanceStore();
 const s = settings.settings;
@@ -119,6 +123,9 @@ onMounted(async () => {
         return;
       }
       if (!(await game.loadSave(requestedSaveId)) || !ownsPage()) return;
+      // 🧩 插件运行时进档（§5.5 `save.enter`）：活跃存档就绪后才进，锁 / 后台页面 / 提示词缓存
+      //    都按这个存档建。失败只记日志 —— 插件起不来不该拦住游戏本身。
+      enterPluginRuntime(requestedSaveId);
       // API endpoint construction is synchronous, so hydrate/migrate its secrets before creating it.
       await settings.initApiSecrets();
       if (!ownsPage()) return;
@@ -270,6 +277,43 @@ onMounted(async () => {
   }
 });
 
+// ===== 插件运行时（插件系统设计 §5.5、§5.7） =====
+
+/** 本页进过的存档；离开时只拆自己进的那一个（防御：新页先挂、旧页后卸时不误拆别人的） */
+let pluginSaveEntered: string | null = null;
+
+function enterPluginRuntime(saveId: string) {
+  pluginSaveEntered = saveId;
+  void pluginRuntime.enterSave(saveId).catch((err: unknown) => {
+    console.warn('[GamePage] 插件运行时进档失败（不影响游戏）:', err);
+  });
+}
+
+function leavePluginRuntime() {
+  if (pluginSaveEntered !== null && pluginRuntime.saveId === pluginSaveEntered) {
+    pluginRuntime.leaveSave();
+  }
+  pluginSaveEntered = null;
+}
+
+// 活跃存档在本页存续期间换掉（或被清空）：插件运行时跟着离开，不再对着旧存档跑
+watch(
+  () => game.activeSaveId,
+  (id) => {
+    if (pluginSaveEntered !== null && id !== pluginSaveEntered) leavePluginRuntime();
+  },
+);
+
+// 插件经 `ui.fillInput` 请求回填输入框：**只填不发**（§5.7），消费后置回 null
+watch(
+  () => pluginRuntime.pendingInputFill,
+  (text) => {
+    if (text === null) return;
+    game.fillInput(text);
+    pluginRuntime.pendingInputFill = null;
+  },
+);
+
 /** 🧪 开发用测试注入 — 仍限定 DEV 构建，且要求用户已开启开发者模式。 */
 async function injectChatFlowTest() {
   if (!s.developerMode) return;
@@ -283,6 +327,7 @@ async function injectChatFlowTest() {
     character_update: true,
     item_update: true,
     quest_update: true,
+    plugin_note: true,
   };
   // 动态 import：test-fixtures 只在调用时加载，不进生产首包
   const { injectTestData, buildScenePreviewMock } = await import('../../lib/test-fixtures');
@@ -318,6 +363,14 @@ function onEscapeCapture(e: KeyboardEvent) {
   if (e.key !== 'Escape') return;
   if (menuOpen.value) return; // 菜单开着：交给 AppModal 自己关，Esc 的开关两半走两条路
   if (hasOpenDialog() || game.activeModal !== null) return;
+  // 插件界面（§5.7）：有获得过焦点的插件界面时，Esc 关掉它（最近聚焦的那个），不开菜单。
+  // 焦点在插件帧**里面**时按键根本到不了宿主 —— 那时 Esc 归插件自己处理。
+  const focusedSurface = pluginRuntime.focusedSurfaceId;
+  if (focusedSurface !== null) {
+    e.preventDefault();
+    pluginRuntime.closeSurface(focusedSurface);
+    return;
+  }
   if (game.isAgentCombat || showMiniPlayer.value || chatFlowRef.value?.ctxMenuOpen) return;
   menuOpen.value = true;
 }
@@ -354,6 +407,8 @@ onBeforeUnmount(() => {
   game.invalidatePendingLoads();
   window.removeEventListener('keydown', onKeyDown);
   window.removeEventListener('keydown', onEscapeCapture, true);
+  // 🧩 插件运行时离档（§5.5 `save.leave`）：拆帧、放锁、摘提示词 provider
+  leavePluginRuntime();
   // 🔴 COR-02（2026-08-09 审查）：**先 abort 再清 isGenerating**。
   // 应用没有 KeepAlive（App.vue 用 `:key="ui.currentView"`），而「菜单 → 返回首页」
   // 是始终可达的入口（2026-09-13 之前是 TopBar 上的「← 首页」按钮）——
@@ -454,6 +509,8 @@ function onModalOpenChange(v: boolean) {
         @retry-turn="handleRetry"
       />
       <StatusHUD />
+      <!-- 插件界面图层（§5.7）：overlay 铺满游戏区，所以必须在这个定位容器里 -->
+      <PluginSurfaceLayer />
     </div>
 
     <MiniPlayer :open="showMiniPlayer" @close="showMiniPlayer = false" />
@@ -623,6 +680,8 @@ function onModalOpenChange(v: boolean) {
    所以侧栏折叠时场景栏自动吃掉让出的宽度，左块恒为 25%。 */
 .game-body {
   --rail-w: 4.2rem;
+  /* 插件 overlay（position:absolute; inset:0）的定位参照 */
+  position: relative;
   display: flex;
   flex: 1;
   overflow: hidden;

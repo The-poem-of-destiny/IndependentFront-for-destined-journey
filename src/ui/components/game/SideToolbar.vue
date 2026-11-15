@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useAudioStore } from '../../stores/audio-store';
 import { useSettingsStore } from '../../stores/settings-store';
+import { usePluginContributions } from '../../composables/usePluginContributions';
 
 const game = useGameStore();
 const audio = useAudioStore();
@@ -33,6 +34,14 @@ const tools = computed(() =>
   settings.developerMode ? allTools : allTools.filter((tool) => tool.id !== 'debug'),
 );
 
+/**
+ * 插件贡献的按钮（插件系统设计 §5.7）：追加在内置工具列末尾。
+ * `game.toolbar` 是本来的槽位；`game.overlay` 没有自己的入口位置，触发按钮也放在这里
+ * （点一下打开覆盖层，覆盖层自己带关闭）。标签只做文本插值，图标只认宿主重编码的 PNG。
+ */
+const pluginTools = usePluginContributions();
+const pluginButtons = pluginTools.entriesFor('game.toolbar', 'game.overlay');
+
 function handleClick(id: string) {
   emit('toolClick', id);
 }
@@ -51,6 +60,19 @@ function handleClick(id: string) {
     >
       <i :class="[tool.icon, { breathing: tool.id === 'audio' && musicPlaying }]" />
       <span v-show="!game.sidebarCollapsed" class="tool-label">{{ tool.label }}</span>
+    </button>
+    <button
+      v-for="entry in pluginButtons"
+      :key="entry.key"
+      class="tool-btn plugin-tool"
+      :data-plugin-tool="entry.key"
+      :title="`${entry.label}（插件：${entry.pluginName}）`"
+      :aria-label="`${entry.label}（插件：${entry.pluginName}）`"
+      @click="pluginTools.open(entry)"
+    >
+      <img v-if="entry.icon" class="plugin-tool-icon" :src="entry.icon" alt="" />
+      <i v-else class="fa-solid fa-puzzle-piece" aria-hidden="true" />
+      <span v-show="!game.sidebarCollapsed" class="tool-label">{{ entry.label }}</span>
     </button>
     <button
       class="collapse-toggle"
@@ -136,6 +158,17 @@ function handleClick(id: string) {
 .tool-label {
   white-space: nowrap;
   overflow: hidden;
+}
+/* 插件按钮：标签可能比内置两字长，截断不换行；图标与内置字形图标同尺寸 */
+.plugin-tool .tool-label {
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+.plugin-tool-icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  object-fit: contain;
 }
 .collapse-toggle {
   margin: auto 4px 0;

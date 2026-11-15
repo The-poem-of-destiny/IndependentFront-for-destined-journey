@@ -1,16 +1,33 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { qualityVar } from '../../lib/quality-colors';
 // 条目展示逻辑（品质/分类/详情字段/效果/战斗修正）收敛到 item-view —— 与 NPC 查看器共用同一份
 import { qualityOf, qualityRank, facetOf, listExtra, type PanelEntry } from '../../lib/item-view';
 import ItemDetailBody from './ItemDetailBody.vue';
+import PluginSurface from './PluginSurface.vue';
+import { usePluginContributions } from '../../composables/usePluginContributions';
 // 🆕 重铸（2026-08-24）：单条目重铸 —— 把当前条目的完整数据喂给 item_gen 重写
 import type { RewriteTarget } from '@engine/agents/entity-gen-agent';
 
 const game = useGameStore();
 const ui = useUIStore();
+
+// ═══ 插件插槽 `panel.items.footer`（插件系统设计 §5.7） ═══
+// 每个贡献先是一颗入口按钮（不随面板打开就自动建帧）；`panel` 形态点开后内联在这里，
+// 其余形态（window / overlay）交给游戏页的插件图层。内联的界面随本面板卸载一起关掉。
+const pluginSlot = usePluginContributions();
+const footerEntries = pluginSlot.entriesFor('panel.items.footer');
+const footerItems = computed(() =>
+  footerEntries.value.map((entry) => {
+    const surface = pluginSlot.surfaceOf(entry);
+    return { entry, inline: surface !== null && surface.mode === 'panel' ? surface : null };
+  }),
+);
+onBeforeUnmount(() => {
+  for (const item of footerItems.value) if (item.inline) pluginSlot.close(item.inline.surfaceId);
+});
 
 type Category = 'inventory' | 'equipment' | 'skills';
 const activeCategory = ref<Category>('inventory');
@@ -314,11 +331,111 @@ async function doRewrite() {
       </div>
       <div v-else class="detail-empty">选择一件物品查看详情</div>
     </div>
+
+    <!-- 插件插槽：panel.items.footer -->
+    <section v-if="footerItems.length > 0" class="plugin-footer" aria-label="插件">
+      <h4 class="plugin-footer-title">插件</h4>
+      <template v-for="item in footerItems" :key="item.entry.key">
+        <PluginSurface
+          v-if="item.inline"
+          :plugin-id="item.inline.pluginId"
+          :plugin-name="item.inline.pluginName"
+          :networked="item.inline.networked"
+          mode="panel"
+          :title="item.inline.title"
+          :width="item.inline.width"
+          :height="item.inline.height"
+          :requested-size="item.inline.requestedSize"
+          :mount-frame="pluginSlot.mountFrameFor(item.inline.surfaceId)"
+          @close="pluginSlot.close(item.inline.surfaceId)"
+        />
+        <button
+          v-else
+          type="button"
+          class="plugin-footer-btn"
+          :data-plugin-slot="item.entry.key"
+          @click="pluginSlot.open(item.entry)"
+        >
+          <img v-if="item.entry.icon" class="plugin-footer-icon" :src="item.entry.icon" alt="" />
+          <i v-else class="fa-solid fa-puzzle-piece" aria-hidden="true" />
+          <span class="plugin-footer-label">{{ item.entry.label }}</span>
+          <span class="plugin-footer-owner">{{ item.entry.pluginName }}</span>
+        </button>
+      </template>
+    </section>
   </div>
   <div v-else class="empty">未加载角色数据</div>
 </template>
 
 <style scoped>
+/* ═══ 插件插槽 panel.items.footer（§5.7） ═══ */
+.plugin-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+}
+/* Section 装饰线（design.md §5.1） */
+.plugin-footer-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-family: var(--theme-font-title);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--theme-text-primary);
+}
+.plugin-footer-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, var(--theme-card-border), transparent);
+}
+.plugin-footer-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+  min-height: 36px;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  color: var(--theme-text-primary);
+  background: var(--theme-card-bg);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  cursor: pointer;
+  transition:
+    background var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
+}
+.plugin-footer-btn:hover,
+.plugin-footer-btn:focus-visible {
+  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
+  border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
+}
+.plugin-footer-btn i,
+.plugin-footer-icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  object-fit: contain;
+  color: var(--theme-primary);
+  text-align: center;
+}
+.plugin-footer-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plugin-footer-owner {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+}
+
 /* ═══ 根 — 书页面板 ═══ */
 .items-panel {
   display: flex;

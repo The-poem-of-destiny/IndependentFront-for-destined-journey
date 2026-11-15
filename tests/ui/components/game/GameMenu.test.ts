@@ -15,6 +15,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import GameMenu from '../../../../src/ui/components/game/GameMenu.vue';
+import {
+  pluginEntriesFake,
+  pluginEntry,
+  pluginRuntimeFake,
+  resetPluginUiFakes,
+} from '../../../helpers/plugin-ui-fakes';
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
@@ -30,9 +36,18 @@ vi.mock('../../../../src/ui/stores/ui-store', () => ({
   useUIStore: () => ({ navigate: mocks.navigate, openSaveManager: mocks.openSaveManager }),
 }));
 
+// 插件运行时与贡献点用替身（真 store 会去读 game.saves，这里的 game-store 是精简 mock）
+vi.mock('../../../../src/ui/stores/plugin-runtime-store', async () =>
+  (await import('../../../helpers/plugin-ui-fakes')).pluginRuntimeStoreModule(),
+);
+vi.mock('../../../../src/ui/composables/usePluginContributions', async () =>
+  (await import('../../../helpers/plugin-ui-fakes')).pluginContributionsModule(),
+);
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.confirmLeaveGame.mockResolvedValue(true);
+  resetPluginUiFakes();
 });
 
 let wrapper: VueWrapper | null = null;
@@ -166,5 +181,48 @@ describe('GameMenu — 帮助说明（二级面板）', () => {
     await wrapper!.setProps({ open: true });
     expect(title()).toBe('游戏菜单');
     expect(item('help')).not.toBeNull();
+  });
+});
+
+/** 插件菜单项（插件系统设计 §5.7 `game.menu`）：排在内置五项之后，纯文本，点了先关菜单再开界面 */
+describe('GameMenu — 插件菜单项', () => {
+  it('只有 game.menu 贡献进菜单，排在内置五项之后', () => {
+    pluginEntriesFake.value = [
+      pluginEntry({ slot: 'game.menu', contributionId: 'ledger', label: '账本' }),
+      pluginEntry({ slot: 'game.toolbar', contributionId: 'shop' }),
+    ];
+    menu();
+    const pluginItems = [...document.querySelectorAll('[data-plugin-menu]')];
+    expect(pluginItems.map((el) => el.getAttribute('data-plugin-menu'))).toEqual(['shop/ledger']);
+    const all = [...document.querySelectorAll('.menu-list > button')];
+    expect(all[all.length - 1]).toBe(pluginItems[0]);
+    // 内置五项不受影响
+    expect(document.querySelectorAll('[data-menu]')).toHaveLength(5);
+  });
+
+  it('标签与插件名只做文本插值，不显示插件图标', () => {
+    pluginEntriesFake.value = [
+      pluginEntry({
+        slot: 'game.menu',
+        label: '<b>账本</b>',
+        icon: 'data:image/png;base64,iVBORw0KGgo=',
+      }),
+    ];
+    menu();
+    const el = document.querySelector('[data-plugin-menu="shop/main"]')!;
+    expect(el.querySelector('.menu-item-label')!.textContent).toBe('<b>账本</b>');
+    expect(el.querySelector('b')).toBeNull();
+    expect(el.querySelector('img')).toBeNull();
+    expect(el.querySelector('.menu-item-hint')!.textContent).toContain('杂货铺');
+  });
+
+  it('点插件项 → 先关菜单，再 openSurface', async () => {
+    pluginEntriesFake.value = [pluginEntry({ slot: 'game.menu', contributionId: 'ledger' })];
+    menu();
+    (document.querySelector('[data-plugin-menu="shop/ledger"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(wrapper!.emitted('close')).toHaveLength(1);
+    expect(pluginRuntimeFake.openSurface).toHaveBeenCalledWith('shop', 'ledger');
+    expect(mocks.navigate).not.toHaveBeenCalled();
   });
 });

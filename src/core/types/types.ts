@@ -1649,6 +1649,13 @@ export interface SaveSlot {
     generationMode?: 'agent' | 'direct' | 'direct_cached';
     /** 存档级启用的全局 UID（如 fated:system_core/dalian）。 */
     enabledWorldBookEntries?: string[];
+    /**
+     * 本存档勾选的插件 id（插件系统 §3.5）。只是「勾选」：实际生效还要本机的按存档确认
+     * （`PluginRecord.saveConsents`）与自检通过，所以导入的存档在本机一律要重新确认。
+     */
+    enabledPluginIds?: string[];
+    /** 首次启用插件时置上、永不清除：此后本存档的美化帧一律走加固模式（§4.4） */
+    pluginHardened?: true;
     /** 建档时冻结所选原生角色；旧存档缺席时从仍启用的旧资料兼容读取。 */
     characterDefinitions?: import('./types-character').CharacterDefinition[];
     /** Phase 10h: 创角时的开场提示词文本 */
@@ -2132,6 +2139,22 @@ export interface AgentContext {
    * 拿它当活跃位会让静默恰好发生在该恢复注入的那几轮。
    */
   combatActive?: boolean;
+
+  // --- 插件系统（设计 §5.8）: `{{PLUGIN_NOTES}}` / `{{PLUGIN_CONTEXT}}` 的两格输入 ---
+  /**
+   * 本回合待告知 AI 的插件一次性告知（`host.ai.note` 入队、回合接纳后清空的那条队列）。
+   *
+   * 🔴 只放**本机已启用**插件的条目；供值在 game-pipeline 的 `buildContext`（经
+   *    `plugin-run-signals` 的注入缝），resolver 不读任何 store。
+   * 🔴 `text` 是第三方插件写的**不可信文本**：转义与外壳全在 `PLACEHOLDER_REGISTRY.PLUGIN_NOTES`。
+   * 🔴 缺席 / 空数组 = 整段不出（零 token）。只注入 story 与 direct_main。
+   */
+  pluginNotes?: { pluginName: string; text: string }[];
+  /**
+   * 插件常驻提示块（`host.ai.context.set`，每回合注入直到插件清掉）。
+   * 约束同 `pluginNotes`；措辞与转义在 `PLACEHOLDER_REGISTRY.PLUGIN_CONTEXT`。
+   */
+  pluginContext?: { pluginName: string; text: string }[];
 
   // --- 运行时填充槽（buildZoneContext 的 craft / combat / outline 三区 + <剧情大纲> 块） ---
   /**
@@ -4473,7 +4496,8 @@ export type SystemEvent =
   | CombatSystemEvent
   | CharacterUpdateEvent
   | ItemUpdateEvent
-  | QuestUpdateEvent;
+  | QuestUpdateEvent
+  | PluginNoteSystemEvent;
 
 export interface CraftSystemEvent {
   type: 'craft';
@@ -4526,6 +4550,20 @@ export interface QuestUpdateEvent {
   type: 'quest_update';
   questName: string;
   status: string;
+  narrative: string;
+}
+
+/**
+ * 插件给玩家看的通知条（`host.ai.note(text, { visible: true })`，插件设计 §5.8）。
+ *
+ * 🔴 `text` / `pluginName` 是第三方插件写的不可信文本：UI 一律按纯文本渲染（插值，不走 v-html）。
+ * `narrative` 与其他变体同义（系统消息的 `content`），由宿主拼成「插件名：正文」。
+ */
+export interface PluginNoteSystemEvent {
+  type: 'plugin_note';
+  pluginId: string;
+  pluginName: string;
+  text: string;
   narrative: string;
 }
 

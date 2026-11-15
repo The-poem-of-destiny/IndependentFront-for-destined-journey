@@ -35,6 +35,9 @@ const mocks = vi.hoisted(() => ({
     reloadApiEntries: vi.fn(),
   },
   exportSessionSave: vi.fn(),
+  checkSessionSaveDependencies: vi.fn(),
+  importSessionSave: vi.fn(),
+  forgetSave: vi.fn<(saveId: string) => Promise<void>>(),
   admission: vi.fn(),
   database: {
     getSave: vi.fn(),
@@ -52,8 +55,16 @@ vi.mock('../../../../src/ui/stores/settings-store', () => ({
   useSettingsStore: () => mocks.settings,
 }));
 vi.mock('@engine/persistence/database', () => mocks.database);
+vi.mock('../../../../src/ui/stores/plugin-store', () => ({
+  usePluginStore: () => ({ forgetSave: mocks.forgetSave }),
+}));
 vi.mock('@engine/persistence/session-backup', () => ({
   exportSessionSave: mocks.exportSessionSave,
+  checkSessionSaveDependencies: mocks.checkSessionSaveDependencies,
+  importSessionSave: mocks.importSessionSave,
+  isSessionBackup: (data: unknown) =>
+    !!data && typeof data === 'object' && (data as { kind?: unknown }).kind === 'session',
+  isFullBackupFile: () => false,
 }));
 vi.mock('@engine/story/story-context-mode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@engine/story/story-context-mode')>();
@@ -104,6 +115,9 @@ beforeEach(() => {
   mocks.settings.settings.activePresetId = null;
   mocks.settings.projectAgentDefaults = undefined;
   mocks.exportSessionSave.mockReset().mockResolvedValue({ kind: 'session' });
+  mocks.checkSessionSaveDependencies.mockReset().mockResolvedValue({ ok: true });
+  mocks.importSessionSave.mockReset().mockResolvedValue(undefined);
+  mocks.forgetSave.mockReset().mockResolvedValue(undefined);
   mocks.admission.mockReset().mockReturnValue({ ok: true });
 });
 
@@ -250,5 +264,51 @@ describe('SaveManager 导出存档的 story 预设', () => {
     };
 
     expect(await exportSelected()).toEqual({ storyPreset: { id: 'pack-story', name: '内容默认' } });
+  });
+});
+
+describe('SaveManager 与插件', () => {
+  it('删除存档后清掉各插件里对它的本机确认（forgetSave）', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await mountManager();
+    const del = document.querySelector<HTMLButtonElement>('[aria-label^="删除存档"]')!;
+    del.click();
+    await flushPromises();
+
+    expect(mocks.database.deleteSaveSlot).toHaveBeenCalledTimes(1);
+    const deletedId = mocks.database.deleteSaveSlot.mock.calls[0]![0];
+    expect(mocks.forgetSave).toHaveBeenCalledWith(deletedId);
+    confirmSpy.mockRestore();
+  });
+
+  it('体检通过但存档勾选了插件时，导入后仍提示「需在本机重新确认」', async () => {
+    mocks.checkSessionSaveDependencies.mockResolvedValue({
+      ok: true,
+      enabledPlugins: [{ id: 'shop' }],
+    });
+    const realCreate = document.createElement.bind(document);
+    let input: HTMLInputElement | null = null;
+    const createSpy = vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      const el = realCreate(tag);
+      if (tag === 'input') {
+        input = el as HTMLInputElement;
+        input.click = () => {};
+      }
+      return el;
+    }) as typeof document.createElement);
+    await mountManager();
+    findButton('导入存档')!.click();
+    createSpy.mockRestore();
+    expect(input).not.toBeNull();
+
+    const file = { text: async () => JSON.stringify({ kind: 'session' }) };
+    Object.defineProperty(input!, 'files', { value: [file] });
+    input!.dispatchEvent(new Event('change'));
+    await flushPromises();
+
+    expect(mocks.importSessionSave).toHaveBeenCalledTimes(1);
+    const messages = mocks.ui.toast.mock.calls.map((c) => String(c[0]));
+    expect(messages).toContain('存档导入成功');
+    expect(messages.some((m) => m.includes('重新确认'))).toBe(true);
   });
 });

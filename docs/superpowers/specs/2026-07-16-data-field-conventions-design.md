@@ -1,5 +1,16 @@
 # 《命定之诗》游戏数据字段规范（数据字典）
 
+## 插件系统字段补充（2026-11-15）
+
+设计见 [插件系统 v1](../../planning/2026-11-15-plugin-system-design.md)，类型唯一来源 `src/core/types/types-plugin.ts`。
+
+- 新表三张（Dexie v34，全局共享，见 §1.1 补登）：`plugins`、`pluginFiles`、`pluginKv`。
+- `SaveSlot.metadata.enabledPluginIds?: string[]`：玩家在本存档勾选的插件 id。存档元数据（`saves` 行），随两种备份走；只是「勾选」，本机生效还要本机确认与自检通过。
+- `SaveSlot.metadata.pluginHardened?: true`：粘性标记，第一次在本存档启用插件或进入列了插件的存档时由 Code 置上，之后不清除；置上后本存档的美化帧走加固模式。
+- `SaveProfile.worldFlags.plugins[pluginId]`：`{ kv, context? }`。`kv` 是插件的存档数据（JSON，每插件 256KB），`context` 是常驻提示块（≤4000 字）。写入只经 `save-profile.ts` 的插件窄写入口。随快照、回退、两种备份走；卸载插件不清。
+- `SaveProfile.worldFlags.pluginNotes`：`{ pluginId, pluginName, text, turn, visible? }[]`，待告知队列（单条 ≤2000 字，每存档 ≤16 条），成功回合收口按回合号清空。随快照走。
+- 插件按逻辑键写状态：命令里的角色、物品、技能都按名字寻址（铁律 1），任意深度出现 `id` / `saveId` 即拒（铁律 3）；记忆 id 由引擎分配。
+
 ## 日历字段补充（2026-11-13）
 
 - 新表 `saveCalendars`（Dexie v33）：**存档私有**，主键 `saveId`，每存档至多一行；形状 `SaveCalendar { mode, entries, hiddenKinds, hiddenRegions, hiddenKeys, localRegionOnly, updatedAt }`。玩家经界面写入，AI 不读不写。不进快照载荷；进整库备份与单存档导出；删档级联。
@@ -127,6 +138,16 @@
 >
 > `apiEndpoints` 只接受 LLM / Embedding / Reranker 的显式 `kind + protocol` 联合；数据库升级与启动读取
 > 都不自动补旧字段或搬运旧图像行。设备本地连接及其自定义请求体不得因整库导入、单档导入或恢复操作被覆盖。
+>
+> **§1.1 补登（2026-11-15，插件系统 v1）**：Dexie v34（`DB_VERSION = 34`，当日实读 `database.ts`）增加三张全局表：
+>
+> | 表            | 身份         | 主键              | saveId  | 版本 | 说明                                                                                                        |
+> | ------------- | ------------ | ----------------- | ------- | ---- | ----------------------------------------------------------------------------------------------------------- |
+> | `plugins`     | **全局共享** | id                | ❌ 不设 | v34  | 插件安装记录（manifest、内容哈希、联网哈希、安装确认、本机按存档确认）。**不进 `FullBackup`**；卸载即删     |
+> | `pluginFiles` | **全局共享** | `[pluginId+path]` | ❌ 不设 | v34  | 插件包文件字节（另有 `pluginId` 索引）。**不进 `FullBackup`**（Q6：备份不夹带可执行的第三方代码）；卸载即删 |
+> | `pluginKv`    | **全局共享** | `[pluginId+key]`  | ❌ 不设 | v34  | 插件的全局数据（跨存档，不随回退，每插件 1MB）。**进 `FullBackup`**；卸载即删                               |
+>
+> 插件的存档数据不另建表，住 `SaveProfile.worldFlags.plugins` / `pluginNotes`（见文首「插件系统字段补充」）。
 
 ### 1.2 隔离三规则
 

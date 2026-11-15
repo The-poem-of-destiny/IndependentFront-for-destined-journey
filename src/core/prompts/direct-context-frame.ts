@@ -22,6 +22,23 @@ import { isStoryZonePlaceholder, type PresetEntryLike } from './story-zone-place
 
 const RANDOM_MACRO_RE = /\{\{random::/;
 
+/** 插件两块（插件设计 §5.8）：只进可替换分区，绝不进缓存前缀 */
+const PLUGIN_SECTION_PLACEHOLDERS = ['PLUGIN_CONTEXT', 'PLUGIN_NOTES'] as const;
+
+/**
+ * 插件块 → 分区（`pluginContext` / `pluginNotes`）。
+ * 🔴 空块**不出键**：分区缺席时会话层自动发 `remove`，插件撤下常驻提示 / 告知被消费后
+ *    旧值随之失效；而没装插件的存档分区与引入前逐字节一致。
+ */
+function buildPluginSections(resolve: (text: string) => string): Record<string, string> {
+  const context = resolve('{{PLUGIN_CONTEXT}}');
+  const notes = resolve('{{PLUGIN_NOTES}}');
+  return {
+    ...(context ? { pluginContext: context } : {}),
+    ...(notes ? { pluginNotes: notes } : {}),
+  };
+}
+
 /**
  * 预设原文是否含**逐轮变化**的宏，需要保留作者原位（authored layout）。
  *
@@ -167,7 +184,11 @@ export async function buildLegacyDirectCacheFrame(
     'MEMORY_ENTRIES',
     'AGENT.MEMORY_RECALL',
     'CHARACTER_CONTEXT',
+    ...PLUGIN_SECTION_PLACEHOLDERS,
   ];
+  // 插件两块无论哪种布局都挪出前缀（作者原布局保留其余占位符原位，唯独它俩不行：
+  // 第三方文本留在缓存前缀里 = 每变一次就整段重建，且常驻于会话签名）
+  const pluginBlank = Object.fromEntries(PLUGIN_SECTION_PLACEHOLDERS.map((k) => [k, '']));
   let rendered: AgentContext = input.context;
   let renderedEntries: ReadonlyMap<WorldBookEntry, string> = new Map();
   const prefix = await buildAgentMessagesAsync(
@@ -176,7 +197,9 @@ export async function buildLegacyDirectCacheFrame(
     input.configs,
     books,
     presets,
-    authoredLayout ? { NARRATIVE: history } : Object.fromEntries(moving.map((k) => [k, ''])),
+    authoredLayout
+      ? { NARRATIVE: history, ...pluginBlank }
+      : Object.fromEntries(moving.map((k) => [k, ''])),
     (ctx, entries) => {
       rendered = ctx;
       renderedEntries = entries;
@@ -194,11 +217,12 @@ export async function buildLegacyDirectCacheFrame(
       {},
     );
   const authoredTurn = dynamic.map(resolve).filter(Boolean).join('\n');
+  const pluginSections = buildPluginSections(resolve);
   if (authoredLayout)
     return {
       prefix: prefix.map((m) => ({ role: 'system', content: m.content })),
       history: [],
-      sections: authoredTurn ? { authoredTurn } : {},
+      sections: { ...(authoredTurn ? { authoredTurn } : {}), ...pluginSections },
     };
   const fixed: string[] = [];
   const current: string[] = [];
@@ -225,6 +249,7 @@ export async function buildLegacyDirectCacheFrame(
       ...buildDirectMemorySections(rendered.memories ?? []),
       characterContext: buildCharacterContext(input.context),
       ...(authoredTurn ? { authoredTurn } : {}),
+      ...pluginSections,
     },
   };
 }

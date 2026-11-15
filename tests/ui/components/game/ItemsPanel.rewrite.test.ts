@@ -12,6 +12,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import ItemsPanel from '../../../../src/ui/components/game/ItemsPanel.vue';
+import {
+  pluginEntriesFake,
+  pluginEntry,
+  pluginRuntimeFake,
+  pluginSurface,
+  resetPluginUiFakes,
+} from '../../../helpers/plugin-ui-fakes';
 
 // ---- Mocks ----
 
@@ -24,6 +31,14 @@ vi.mock('../../../../src/ui/stores/game-store', () => ({
 vi.mock('../../../../src/ui/stores/ui-store', () => ({
   useUIStore: () => mockUi,
 }));
+
+// 插件运行时与贡献点用替身（真 store 会去读 game.saves，这里的 game-store 是精简 mock）
+vi.mock('../../../../src/ui/stores/plugin-runtime-store', async () =>
+  (await import('../../../helpers/plugin-ui-fakes')).pluginRuntimeStoreModule(),
+);
+vi.mock('../../../../src/ui/composables/usePluginContributions', async () =>
+  (await import('../../../helpers/plugin-ui-fakes')).pluginContributionsModule(),
+);
 
 function makePlayer() {
   return {
@@ -56,6 +71,7 @@ function makePlayer() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetPluginUiFakes();
   mockGame = {
     player: makePlayer(),
     pendingItemFocus: null,
@@ -175,5 +191,69 @@ describe('ItemsPanel — 重铸', () => {
     await flushPromises();
 
     expect(wrapper.find('.rewrite-body').exists()).toBe(false);
+  });
+});
+
+/**
+ * 插件插槽 `panel.items.footer`（插件系统设计 §5.7）：每个贡献先是一颗入口按钮；
+ * panel 形态打开后内联成 PluginSurface，随面板卸载一起关掉；window / overlay 形态交给游戏页图层。
+ */
+describe('ItemsPanel — 插件插槽 panel.items.footer', () => {
+  it('没有贡献时不渲染插槽', () => {
+    const wrapper = mountPanel();
+    expect(wrapper.find('.plugin-footer').exists()).toBe(false);
+  });
+
+  it('只收 panel.items.footer 贡献：入口按钮文本插值，点了 openSurface', async () => {
+    pluginEntriesFake.value = [
+      pluginEntry({ slot: 'panel.items.footer', contributionId: 'appraise', label: '<i>鉴定</i>' }),
+      pluginEntry({ slot: 'game.toolbar', contributionId: 'shop' }),
+    ];
+    const wrapper = mountPanel();
+    const buttons = wrapper.findAll('[data-plugin-slot]');
+    expect(buttons.map((b) => b.attributes('data-plugin-slot'))).toEqual(['shop/appraise']);
+    expect(buttons[0].find('.plugin-footer-label').text()).toBe('<i>鉴定</i>');
+    expect(buttons[0].find('.plugin-footer-label i').exists()).toBe(false);
+    await buttons[0].trigger('click');
+    expect(pluginRuntimeFake.openSurface).toHaveBeenCalledWith('shop', 'appraise');
+  });
+
+  it('入口按钮的图标只用宿主重编码的 PNG', () => {
+    const png = 'data:image/png;base64,iVBORw0KGgo=';
+    pluginEntriesFake.value = [pluginEntry({ slot: 'panel.items.footer', icon: png })];
+    const wrapper = mountPanel();
+    expect(wrapper.get('[data-plugin-slot="shop/main"] img').attributes('src')).toBe(png);
+  });
+
+  it('panel 形态已打开 → 内联 PluginSurface 并挂帧，卸载面板时关掉它', async () => {
+    pluginEntriesFake.value = [
+      pluginEntry({ slot: 'panel.items.footer', contributionId: 'appraise', surface: 'panel' }),
+    ];
+    pluginRuntimeFake.openSurfaces = [
+      pluginSurface({ surfaceId: 's-panel', contributionId: 'appraise', mode: 'panel' }),
+    ];
+    const wrapper = mountPanel();
+    await flushPromises();
+    expect(wrapper.find('[data-plugin-slot]').exists()).toBe(false);
+    const surface = wrapper.get('.plugin-footer .plugin-surface');
+    expect(surface.classes()).toContain('ps-panel');
+    expect(pluginRuntimeFake.mountFrameFor).toHaveBeenCalledWith('s-panel');
+
+    wrapper.unmount();
+    expect(pluginRuntimeFake.closeSurface).toHaveBeenCalledWith('s-panel');
+  });
+
+  it('window 形态开着时插槽仍显示入口按钮（窗口归游戏页图层），卸载面板不关它', () => {
+    pluginEntriesFake.value = [
+      pluginEntry({ slot: 'panel.items.footer', contributionId: 'appraise', surface: 'window' }),
+    ];
+    pluginRuntimeFake.openSurfaces = [
+      pluginSurface({ surfaceId: 's-win', contributionId: 'appraise', mode: 'window' }),
+    ];
+    const wrapper = mountPanel();
+    expect(wrapper.find('[data-plugin-slot="shop/appraise"]').exists()).toBe(true);
+    expect(wrapper.find('.plugin-footer .plugin-surface').exists()).toBe(false);
+    wrapper.unmount();
+    expect(pluginRuntimeFake.closeSurface).not.toHaveBeenCalled();
   });
 });

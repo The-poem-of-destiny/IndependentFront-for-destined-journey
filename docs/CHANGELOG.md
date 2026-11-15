@@ -9,6 +9,19 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-15 插件系统 v1（ADR-36 暂定）：P1a / P1b / P2 自动化部分｜分支 `claude/plugin-system`，人工矩阵未跑，Chromium 上 S7 待人工验证
+
+- 设计见 [插件系统设计](planning/2026-11-15-plugin-system-design.md)（含「📌 2026-11-15 实施注记」），创作者文档新写 [插件创作者指南](reference/plugin-authoring-guide.md)。
+- 引擎：`src/core/plugins/`（名字表与上限、联网域名校验与 CSP 生成、manifest 解析、命令翻译与前置条件、读投影、安装计划，全部纯函数）；`types/types-plugin.ts`；`persistence/plugin-storage.ts`；Dexie v34 新表 `plugins` / `pluginFiles` / `pluginKv`（只有 `pluginKv` 进 FullBackup）；`StateManager.commitPluginCommand`（锁内复检运行态、事务内求值前置条件）；`save-profile.ts` 的插件存档数据、常驻提示块与告知队列窄写入口；占位符 `{{PLUGIN_NOTES}}` / `{{PLUGIN_CONTEXT}}`（只给 story 与 direct_main）；系统事件 `plugin_note`；单存档导出的依赖清单加「插件」；`redactSecrets` 搬进 `utils/redact-secrets.ts`。
+- BFF：`server/routes/plugins.ts`（本地插件目录只读列表与文件，只收同源请求，只回 octet-stream）、`server/plugin-dir.ts`（默认仓库上一级 `poem-plugins/`，逐段校验 + 拒链接）、`server/plugin-canary.ts`（自检金丝雀，含 WebSocket `upgrade`）；`vite.config.ts` 在 dev / preview 最前面挂插件目录拒绝中间件并列入 `server.fs.deny`。
+- 前端：双层牢笼帧（`lib/frame-cage.ts`、`lib/plugin-frame.ts`）、桥与宿主会话（`plugin-bridge` / `plugin-host` / `plugin-host-extensions`）、启动自检（`plugin-selfcheck`）、按存档 Web Locks、发送前等待在途写入、图标重编码、两个 store（`plugin-store` / `plugin-runtime-store`）；游戏页插件图层、浮动窗与标识边框、外链只复制、工具栏 / 菜单 / 物品面板三处贡献点、Esc 让路；扩展管理页「原版扩展」占位换成「插件管理」（安装与按存档启用的风险确认、自检面板、开发者模式的自动重载）。
+- 美化帧加固：存档粘性标记 `metadata.pluginHardened` 置上后，两档美化帧去掉 `http:` / `ws:` 并套牢笼帧；未置上的存档输出逐字节不变。
+- 主人当日裁定：Q2 接受、Q5 自检全过即启用（只保留 S7 选择器窄表）、Q6 备份不带包字节、Q8 玩家亲手交的文件不算破 C、Q9 默认目录 `../poem-plugins` 且自动重载默认关；新增 `browserBlocksLocal` 规则（浏览器自己拦 opaque 帧访问 loopback 时 S0 判通过）。
+- 真机自检（Claude 浏览器窗格，Chromium 156.0.8078.75，dev server）：CAGE、S0（经 `browserBlocksLocal`）、S1–S4、S6 通过，S5 跳过，**S7 失败**（有 `showSaveFilePicker`，已验表为空）→ 目前 Chromium 上插件保持禁用。Firefox / Safari / 真 Chrome / preview server / 两标签页 Web Locks / 界面走查均未测。
+- 设置页占位符面板补登两个新占位符（`placeholder-catalog.ts`）。
+- 测试：2026-11-15 实测 `npm run gates` 八道闸门全绿：490 个文件 / 10928 个用例，10914 通过、14 跳过、0 失败；knip 棘轮 149 条已知、无新增。（此前一轮的两处红已修：隔离闸门给 `plugin-selfcheck.ts` 登记的联网原语从 17 处改为 18 处（新增的管线孪生帧）；属性测试对 `localhost` 的断言改为按整段标签判，`home.arpalocalhost` 不再误报。）
+- 未做：P3（工坊入口仍锁）、P4、Q1 / Q7 / Q11 / Q12；P1a 人工矩阵（含 WebRTC 抓包与插件帧内文件选择器点测）。遗留缺陷登记在 [已知缺陷](known-issue.md)「插件系统 v1 交付时的遗留缺陷与未修风险」。
+
 ### 2026-11-14 缓存直出：断点位置、角色档案分区与三处借自 Story v2 的改造｜分支 `fix/direct-cache-breakpoint-and-profile`，真实渠道与真实模型均未验证
 
 - Claude Messages 缓存策略的静态断点从「第一条和最后一条 system」改为「静态前缀的最后一条 system 和最后一条 system」。此前最后一条 system 是每次重建都会变的历史块，重建那一楼读不到预设与固定世界书。

@@ -9,6 +9,7 @@ const global = {
   stubs: {
     CommunityExtensionSettings: { template: '<div data-testid="community-settings" />' },
     InstalledExtensionList: { template: '<div data-testid="installed-list" />' },
+    PluginManagerSection: { template: '<div data-testid="plugin-manager" />' },
   },
 };
 
@@ -37,13 +38,13 @@ beforeEach(() => {
 });
 
 describe('ExtensionManagementPage', () => {
-  it('为未实现的原版扩展显示明确占位，不渲染假开关', () => {
+  it('原版扩展占位卡已换成插件管理一节', () => {
     const wrapper = mount(ExtensionManagementPage, { global });
 
     expect(wrapper.get('h2').text()).toBe('扩展管理');
-    expect(wrapper.text()).toContain('原版扩展');
-    expect(wrapper.text()).toContain('功能尚未实现');
-    expect(wrapper.get('.extension-card-placeholder button').attributes('disabled')).toBeDefined();
+    expect(wrapper.text()).toContain('插件管理');
+    expect(wrapper.find('[data-testid="plugin-manager"]').exists()).toBe(true);
+    expect(wrapper.find('.extension-card-placeholder').exists()).toBe(false);
   });
 
   it('用蒙版封锁创意工坊入口，展示已安装数量但不允许进入', async () => {

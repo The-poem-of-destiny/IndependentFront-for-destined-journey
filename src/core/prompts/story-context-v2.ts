@@ -82,6 +82,8 @@ const ZONE_OWNED_PLACEHOLDERS = [
   'CHARACTER_STATE',
   'GAME_TIME',
   'RANDOM_EVENTS',
+  'PLUGIN_CONTEXT',
+  'PLUGIN_NOTES',
   'MEMORY_ENTRIES',
   'AGENT.MEMORY_RECALL',
   'AGENT.PLOT_PRE_CHECK',
@@ -95,6 +97,9 @@ const ZONE5_BLOCKS: ReadonlyArray<{ tag: string | null; placeholder: string }> =
   { tag: '角色状态', placeholder: 'CHARACTER_STATE' },
   { tag: '当前时空', placeholder: 'GAME_TIME' },
   { tag: null, placeholder: 'RANDOM_EVENTS' },
+  // 插件两块（插件设计 §5.8）：自带外壳、第 5 区本轮资料（不进缓存前缀，缓存布局下进可替换分区）
+  { tag: null, placeholder: 'PLUGIN_CONTEXT' },
+  { tag: null, placeholder: 'PLUGIN_NOTES' },
 ];
 
 type StoryContextV2Message = { role: 'system' | 'user' | 'assistant'; content: string };
@@ -401,7 +406,9 @@ export async function buildStoryContextV2Messages(
       zone5Blocks
         .filter(
           (block) =>
-            !['AGENT.MEMORY_RECALL', 'CHARACTER_STATE', 'GAME_TIME'].includes(block.placeholder),
+            !['AGENT.MEMORY_RECALL', 'CHARACTER_STATE', 'GAME_TIME'].includes(block.placeholder) &&
+            // 插件块空时不出键：缺席即 remove，没装插件的存档分区与引入前逐字节一致
+            !(block.placeholder.startsWith('PLUGIN_') && !block.text),
         )
         .map((block) => [block.placeholder, block.text]),
     ),

@@ -46,6 +46,11 @@ import {
   importSessionSave,
 } from '../../../src/core/persistence/session-backup';
 import type { SessionBackup } from '../../../src/core/persistence/session-backup';
+import type {
+  PluginConsent,
+  PluginManifest,
+  PluginRecord,
+} from '../../../src/core/types/types-plugin';
 import { preCheckPlot } from '../../../src/core/plot/plot-engine';
 import {
   filterBooksByEnabledEntries,
@@ -1802,5 +1807,120 @@ describe('importSessionSave — 不碰全局表', () => {
     expect(imgs[0].blobDropped).toBe(true);
     expect(imgs[0].status).toBe('done');
     expect(imgs[0].scenePrompt).toBe('1boy, bridge, rain');
+  });
+});
+
+// ========== 插件依赖（设计文档 §6.4）==========
+// 清单只记身份（id / 名字 / 版本）；同意是本机的，从不随存档走；缺插件只告警不拦。
+describe('插件依赖清单', () => {
+  const CONSENT: PluginConsent = { version: '1.0.0', contentHash: 'h', networkHash: 'n', at: 1 };
+  const makePluginRecord = (id: string, name: string, version: string): PluginRecord => ({
+    id,
+    manifest: { id, name, version } as PluginManifest,
+    source: 'local',
+    contentHash: 'h',
+    networkHash: 'n',
+    fileCount: 0,
+    totalBytes: 0,
+    installedAt: 1,
+    updatedAt: 1,
+    installConsent: CONSENT,
+    saveConsents: { [SAVE_ID]: CONSENT },
+  });
+
+  async function seedPluginSave(ids: string[]): Promise<void> {
+    await seedSave();
+    const db = getDatabase();
+    await db.plugins.clear();
+    const save = (await db.saves.get(SAVE_ID))!;
+    save.metadata.enabledPluginIds = ids;
+    await db.saves.put(save);
+    const profile = (await db.saveProfiles.get(SAVE_ID))!;
+    (profile.worldFlags as Record<string, unknown>).plugins = { shop: { stock: 3 } };
+    (profile.worldFlags as Record<string, unknown>).pluginNotes = { shop: '杂货铺备注' };
+    await db.saveProfiles.put(profile);
+  }
+
+  it('导出：清单列出存档勾选的插件，名字/版本取本机记录，查不到记录只留 id', async () => {
+    await seedPluginSave(['shop', 'ghost', 'shop']);
+    await getDatabase().plugins.put(makePluginRecord('shop', '杂货铺', '1.2.0'));
+
+    const backup = await exportSessionSave(SAVE_ID);
+    expect(backup.dependencies.plugins).toEqual([
+      { id: 'shop', name: '杂货铺', version: '1.2.0' },
+      { id: 'ghost' },
+    ]);
+  });
+
+  it('导出：存档没勾选插件时清单里没有这一项', async () => {
+    await seedSave();
+    const backup = await exportSessionSave(SAVE_ID);
+    expect(backup.dependencies.plugins).toBeUndefined();
+  });
+
+  it('导出文件里没有任何同意记录（同意是本机的）', async () => {
+    await seedPluginSave(['shop']);
+    await getDatabase().plugins.put(makePluginRecord('shop', '杂货铺', '1.2.0'));
+
+    const text = JSON.stringify(await exportSessionSave(SAVE_ID));
+    expect(text).not.toContain('saveConsents');
+    expect(text).not.toContain('installConsent');
+    expect(text).not.toContain('contentHash');
+    expect(text).not.toContain('networkHash');
+  });
+
+  it('体检：本机缺插件 → missingPlugins 告警、ok:false，已装的不算缺', async () => {
+    await seedPluginSave(['shop', 'ghost']);
+    await getDatabase().plugins.put(makePluginRecord('shop', '杂货铺', '1.2.0'));
+    const backup = await exportSessionSave(SAVE_ID);
+
+    await getDatabase().plugins.clear();
+    await getDatabase().plugins.put(makePluginRecord('shop', '杂货铺', '1.3.0'));
+    const check = await checkSessionSaveDependencies(backup);
+    expect(check.ok).toBe(false);
+    expect(check.missingPlugins).toEqual([{ id: 'ghost' }]);
+    expect(check.enabledPlugins).toEqual([
+      { id: 'shop', name: '杂货铺', version: '1.2.0' },
+      { id: 'ghost' },
+    ]);
+  });
+
+  it('体检：插件全装着 → ok:true，但仍报出 enabledPlugins 供「重新确认」提示', async () => {
+    await seedPluginSave(['shop']);
+    await seedContent();
+    await getDatabase().plugins.put(makePluginRecord('shop', '杂货铺', '1.2.0'));
+    const backup = await exportSessionSave(SAVE_ID);
+
+    const check = await checkSessionSaveDependencies(backup);
+    expect(check.ok).toBe(true);
+    expect(check.missingPlugins).toBeUndefined();
+    expect(check.enabledPlugins).toEqual([{ id: 'shop', name: '杂货铺', version: '1.2.0' }]);
+  });
+
+  it('体检：旧备份清单里没有插件项，仍按存档自己的勾选判缺', async () => {
+    await seedPluginSave(['ghost']);
+    const backup = await exportSessionSave(SAVE_ID);
+    delete backup.dependencies.plugins;
+
+    const check = await checkSessionSaveDependencies(backup);
+    expect(check.missingPlugins).toEqual([{ id: 'ghost' }]);
+  });
+
+  it('导入：缺插件照样导入成功，勾选与 worldFlags 里的插件数据原样保留', async () => {
+    await seedPluginSave(['ghost']);
+    const backup = await exportSessionSave(SAVE_ID);
+    const db = getDatabase();
+
+    expect((await checkSessionSaveDependencies(backup)).missingPlugins).toEqual([{ id: 'ghost' }]);
+    const { saveId } = await importSessionSave(backup);
+
+    expect(saveId).not.toBe(SAVE_ID);
+    const save = (await db.saves.get(saveId))!;
+    expect(save.metadata.enabledPluginIds).toEqual(['ghost']);
+    const flags = (await db.saveProfiles.get(saveId))!.worldFlags as Record<string, unknown>;
+    expect(flags.plugins).toEqual({ shop: { stock: 3 } });
+    expect(flags.pluginNotes).toEqual({ shop: '杂货铺备注' });
+    // 导入不碰插件表：本机没有凭空多出安装记录或同意
+    expect(await db.plugins.count()).toBe(0);
   });
 });

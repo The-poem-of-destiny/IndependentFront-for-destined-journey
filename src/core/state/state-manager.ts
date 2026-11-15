@@ -49,6 +49,7 @@ import {
   saveMessages,
   deleteMessagesBySaveId,
   getDatabase,
+  getAllMemoryIds,
 } from '../persistence/database';
 import { getVar, setVar, delVar, insertVar, applyPathOps } from '../variables/var-resolver';
 import { getTierConfig } from '../character/tier-constants';
@@ -65,8 +66,15 @@ import {
 import { getEngineSettings } from '../runtime/engine-settings';
 // 并行化改造（docs/planning/2026-08-16-pipeline-parallelism.md）：一切 Dexie 写入
 // 经 per-saveId FIFO 队列串行 —— 锁粒度 = 读-改-写区段，锁内禁止再入队列（铁律②）。
-import { withSaveWriteLock } from './state-write-queue';
+import { withGlobalWriteLock, withSaveWriteLock } from './state-write-queue';
 import type { CharacterDefinition, CharacterNarrativeUpdate } from '../types/types-character';
+import type {
+  PluginErrorCode,
+  PluginExpect,
+  PluginResult,
+  PluginRunGuard,
+} from '../types/types-plugin';
+import { evaluatePluginExpect } from '../plugins/plugin-commands';
 import type { StoryMemorySource } from '../types/types';
 import {
   attachCharacterDefinition,
@@ -75,6 +83,7 @@ import {
 import { ensureCharacterAge } from '../character/character-age';
 import { authorChronicle, turnChronicle } from '../character/character-chronicle';
 import { collectCompleteStoryTurns } from '../memory/memory-context';
+import { allocateMemoryIds } from '../memory/memory-summarizer';
 import { storyMemorySourceMatches, storyTurnGameTimeRange } from '../memory/story-memory-source';
 // Q-19：这三个模块此前在 14 处 handler 里各 `await import` 一次。它们都不 import
 // 本模块（已核实无环），动态化没有换来任何解耦，只是让每个 handler 多一次 await
@@ -99,7 +108,7 @@ import {
   setRandomEventFlagsInPlace,
 } from './save-profile';
 import { clampAffection } from '../character/affection-system';
-import { advanceTime, getSeason, toEpochMinutes } from '../time/time-system';
+import { advanceTime, formatGameTime, getSeason, toEpochMinutes } from '../time/time-system';
 // 地图 v1 接线（设计 §5 接线表）：落位 / 天气断言 / 在途旗三条钩子的依赖。
 // 全是纯函数叶 + 一条注入缝（`map-runtime`），没有一个会读注册表或碰 Dexie ——
 // 静态 import 因此不成环（map-* 一律不 import 本模块）。
@@ -199,6 +208,21 @@ function assertCurrentTurn(isCurrent?: () => boolean): void {
     error.name = 'AbortError';
     throw error;
   }
+}
+
+/** 插件提交在锁内/事务内的失败：抛出以回滚事务，出锁后转成 `PluginResult` */
+class PluginCommitError extends Error {
+  constructor(
+    readonly code: PluginErrorCode,
+    message: string,
+    readonly index?: number,
+  ) {
+    super(message);
+  }
+}
+
+function runGuardMessage(code: 'BUSY' | 'IN_COMBAT'): string {
+  return code === 'BUSY' ? '正在生成中，暂不能写入' : '战斗中，暂不能写入';
 }
 
 /** 单个 Patch 的应用结果 */
@@ -674,6 +698,165 @@ export class StateManager {
       this.events.push(...events);
       return events;
     });
+  }
+
+  /**
+   * 插件命令的提交入口（插件系统设计 §5.4、§6.1、§6.2）。结构照搬 `commitDomainCommand`：
+   * 进本存档写锁 → 锁内复检运行态 → 开事务 → 对新读的状态求值前置条件 → 逐条应用 → flush。
+   *
+   * - 整批原子：任何一条补丁失败（含 FP 账务）事务回滚，什么都不落，也不发布事件。
+   * - 失败一律返回 `PluginResult`，不抛出；`index` 是命令下标（给了 `commandIndexOfPatch`
+   *   时由补丁下标换算）或前置条件下标。
+   * - 🔴 锁内不调任何会再拿锁的函数：补写本轮快照（`amendCurrentTurnSnapshot`）由调用方
+   *   在本方法返回之后做。
+   * - 批里有 `add_memory`（`memory.add`）时先拿全局写锁、再拿本存档写锁，记忆 id 在事务里
+   *   分配并落库（state-write-queue：记忆 id 全库分配，分配与落库必须同一个全局锁段）。
+   *   顺序固定为「全局在外、存档在内」：现有的全局锁持有方（`summarizeAndSave`、压缩摘要发号、
+   *   剧情事件转记忆）锁内都不拿存档锁，存档锁持有方锁内也都不拿全局锁，所以不会成环。
+   *   不含记忆的批次不碰全局锁，照旧只排本存档的队。
+   */
+  async commitPluginCommand(input: {
+    saveId: string;
+    pluginId: string;
+    patches: readonly StatePatch[];
+    expect: readonly PluginExpect[];
+    isAllowed: PluginRunGuard;
+    /** `patches[i]` 来自第几条命令（`translatePluginCommands` 的产物）；缺省按补丁下标报 */
+    commandIndexOfPatch?: readonly number[];
+  }): Promise<PluginResult> {
+    if (input.saveId !== this.saveId) {
+      return { ok: false, code: 'NO_SAVE', message: '目标存档不是当前载入的存档' };
+    }
+    const commandIndex = (patchIndex: number): number =>
+      input.commandIndexOfPatch?.[patchIndex] ?? patchIndex;
+    const addsMemory = input.patches.some((patch) => patch.op === 'add_memory');
+    const withLocks = <T>(fn: () => Promise<T>): Promise<T> =>
+      addsMemory
+        ? withGlobalWriteLock(() => withSaveWriteLock(this.saveId, fn))
+        : withSaveWriteLock(this.saveId, fn);
+    try {
+      return await withLocks(async () => {
+        // 锁内复检（§6.1）：排队等锁期间回合可能已经开始或进了战斗
+        const guard = input.isAllowed();
+        if (guard !== 'ok') {
+          return { ok: false, code: guard, message: runGuardMessage(guard) } as const;
+        }
+        const db = getDatabase();
+        const events = await db.transaction(
+          'rw',
+          [db.characters, db.saveProfiles, db.saves, db.memories, db.plotEvents],
+          async () => {
+            const save = await getSave(this.saveId);
+            if (!save) throw new PluginCommitError('NO_SAVE', '存档不存在');
+            const scope = createCommitScope();
+            this.commitScope = scope;
+            try {
+              const verdict = evaluatePluginExpect(input.expect, {
+                characters: await this.readCharacters(),
+                profile: await this.readProfile(),
+              });
+              if (!verdict.ok) {
+                throw new PluginCommitError('PRECONDITION_FAILED', verdict.message, verdict.index);
+              }
+              const events: GameEvent[] = [];
+              for (let i = 0; i < input.patches.length; i++) {
+                const patch = input.patches[i];
+                try {
+                  // 翻译层只挡得住字面的主角名与「主角」「玩家」；别名要按引擎同一套解析
+                  // 在锁内对当前状态（含本批前面补丁的结果）再判一次
+                  if (patch.op === 'remove_character' || patch.op === 'rename_character') {
+                    const target = await this.resolveCharTarget(patch.target);
+                    if (target.type === 'player') {
+                      throw new PluginCommitError(
+                        'DENIED',
+                        patch.op === 'remove_character' ? '不能移除主角' : '不能给主角改名',
+                        commandIndex(i),
+                      );
+                    }
+                  }
+                  if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
+                    this.validatePatch(patch);
+                    const amount = patch.amount!;
+                    if (!Number.isFinite(amount)) throw new Error('FP 变化量必须是有限数');
+                    const profile = await this.readProfile();
+                    if (amount >= 0) await addFP(profile, amount, '插件命令');
+                    else await spendFP(profile, -amount, '插件命令');
+                    events.push(this.createEvent('variable_change', patch));
+                    continue;
+                  }
+                  if (patch.op === 'add_memory') {
+                    // 插件补丁里没有 id：在全局锁 + 本事务里现分配，同批多条依次发号
+                    // （事务内读得到本批前面刚写的记忆）；失败回滚时记忆一并撤销
+                    const memory = await this.buildPluginMemory(patch);
+                    const applied = await this.applyPatch({ ...patch, value: memory });
+                    if (applied.event) events.push(applied.event);
+                    continue;
+                  }
+                  const applied = await this.applyPatch(patch);
+                  if (applied.event) events.push(applied.event);
+                } catch (err) {
+                  if (err instanceof PluginCommitError) throw err;
+                  const message = err instanceof Error ? err.message : String(err);
+                  throw new PluginCommitError('INVALID', message, commandIndex(i));
+                }
+              }
+              // 落库前再问一次：应用补丁期间运行态翻转同样整批不落
+              const late = input.isAllowed();
+              if (late !== 'ok') throw new PluginCommitError(late, runGuardMessage(late));
+              await this.flushCommitScope(scope);
+              await saveSaveSlot(save);
+              return events;
+            } finally {
+              this.commitScope = null;
+            }
+          },
+        );
+        this.events.push(...events);
+        return { ok: true } as const;
+      });
+    } catch (err) {
+      if (err instanceof PluginCommitError) {
+        return err.index === undefined
+          ? { ok: false, code: err.code, message: err.message }
+          : { ok: false, code: err.code, message: err.message, index: err.index };
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, code: 'INVALID', message: `插件命令提交失败：${message}` };
+    }
+  }
+
+  /**
+   * 把插件 `memory.add` 的补丁补成完整的 `MemoryRecord`。只取插件能给的三项（正文、关键词、
+   * 重要度），其余字段一律由引擎填：id 扫全库发号（调用方须持有全局写锁且在事务内），
+   * 时间跨度取当前游戏时间，暗线与关联角色留空。
+   */
+  private async buildPluginMemory(patch: StatePatch): Promise<MemoryRecord> {
+    const value = patch.value as
+      { content?: unknown; keywords?: unknown; importance?: unknown } | undefined;
+    const content = typeof value?.content === 'string' ? value.content : '';
+    if (content.trim().length === 0) throw new Error('记忆正文不能为空');
+    const keywords = Array.isArray(value?.keywords)
+      ? value.keywords.filter((k): k is string => typeof k === 'string')
+      : [];
+    const importance =
+      typeof value?.importance === 'number' && Number.isFinite(value.importance)
+        ? value.importance
+        : 5;
+    const [id] = allocateMemoryIds(await getAllMemoryIds(), 1);
+    const gameTime = formatGameTime((await this.readProfile()).gameTime);
+    const now = Date.now();
+    return {
+      id,
+      saveId: this.saveId,
+      createdAt: now,
+      realTimestamp: now,
+      timeRange: { start: gameTime, end: gameTime },
+      content,
+      hiddenLine: '',
+      keywords,
+      relatedCharacterIds: [],
+      importance,
+    };
   }
 
   /** Compatibility entry point; AI batches retain valid patches when another is rejected. */

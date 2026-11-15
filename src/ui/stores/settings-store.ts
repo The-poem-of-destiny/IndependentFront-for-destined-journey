@@ -302,6 +302,8 @@ function getDefaults(): UiSettings {
     // 开发者模式 —— 默认关闭。只控制诊断入口与原始技术细节；玩家可见的回合活动账本
     // 始终保留游戏语言，不随这个开关消失或变成控制台。
     developerMode: false,
+    // 插件「跟随文件夹自动重载」—— 默认关闭（插件计划 Q9）；只在开发者模式下露出开关
+    pluginDevAutoReload: false,
     // Story 上下文与记忆新模式（实验）—— 默认关闭；仅开发者模式不会连带开启它
     storyContextV2Enabled: false,
     // 新模式召回的原文粒度（D32）：默认整回合，开发者卡片里切换比较
@@ -319,6 +321,8 @@ function getDefaults(): UiSettings {
       character_update: false,
       item_update: false,
       quest_update: false,
+      // 插件给玩家看的通知条（插件设计 §5.8）：插件作者显式要求可见才会产生，默认显示
+      plugin_note: true,
     },
 
     // 音频系统（全局环境属性，不属于存档状态 — 设计 §4.1）

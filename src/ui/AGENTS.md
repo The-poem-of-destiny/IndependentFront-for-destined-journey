@@ -128,6 +128,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   一处补了确认、另一处仍把人拦死在 toast 上
 │   │                                   🔴 请求形状里**没有** source / quotaConfirmed 字段，所以
 │   │                                      「顺手给自动档开个绕过口」在这一层是类型错误，不是代码审查
+│   ├── usePluginContributions.ts    ← 🆕 [插件 v1 / 2026-11-15] 游戏页各贡献点的入口列表：`entriesFor(...slots)` 只列
+│   │                                   当前存档本机生效插件的贡献（标签纯文本插值，图标是 `plugin-icon` 重编码的 PNG data URL），
+│   │                                   `open` / `close` / `surfaceOf` / `mountFrameFor` 转给 `plugin-runtime-store`。
+│   │                                   SideToolbar（`game.toolbar` + `game.overlay`）、GameMenu（`game.menu`）、
+│   │                                   ItemsPanel（`panel.items.footer`）三处共用
 │   └── useAutosave.ts               ← 🆕 [自动存档 2026-10-05] 游戏页监活表（消息/角色/档案/事件）
 │                                       改动，静默 5s（节流）后调 `game.runAutosave()` 把当前状态
 │                                       覆写进「本轮 turn 快照」—— 手动润色/重铸不再因回档丢失。
@@ -182,6 +187,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── image-crop.ts                ← [素材] 从源图切真字节（解码与画布两处注入缝）
 │   ├── crop-rects.ts                ← [素材] 裁剪框几何（纯函数，源图像素坐标系）
 │   ├── beautifier-frame.ts          ← [工坊正则] opaque iframe 文档/CSP/同步 storage 镜像与消息协议
+│   │                                   📌 2026-11-15（插件 v1，设计 §11）：+`hardened` 选项 —— CSP 去掉 `http:` 与 `ws:`、
+│   │                                   外面套一层 `frame-cage` 牢笼帧（relay 模式，消息协议与 `event.source` 校验不变）。
+│   │                                   🔴 不加固时产物与以前**逐字节一致**（测试钉住）；开关读 `beautifier-hardening.ts`
+│   ├── beautifier-hardening.ts      ← 🆕 [插件 v1] 美化帧加固的模块级开关：只读 ref `beautifierHardened` +
+│   │                                   `setBeautifierHardened`。由 `plugin-runtime-store` 按当前存档的粘性
+│   │                                   `metadata.pluginHardened`（或列了插件）置位；BeautifiedNarrative / BeautifierFrame 读它
 │   ├── beautifier-storage.ts        ← [Dexie v16] regexStorage hydrate / 有序 mutation / 跨 frame 广播 / 配额
 │   ├── workshop-client.ts           ← [工坊] 唯一网络接触点（判别联合永不抛穿 + 超时 + 取消）
 │   │                                   P4: +listMyProjects / 投稿写侧（create/update/visibility/delete/上传三口）
@@ -314,6 +325,37 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── content-startup-chain.ts     ← 🆕 [2026-11-14] 启动期内容链（见上方 App.vue 注），永不 reject
 │   ├── map-place-search.ts          ← 🆕 [2026-11-14 / MAP-03] 势力地图按名字找地方：地块 / 中层 / 势力名
 │   │                                   **精确子串**匹配（不做拼音/模糊，ADR-31 落位契约），每条带选中块与取景块
+│   ├── ── 插件系统 v1（2026-11-15，ADR-36 暂定；设计 docs/planning/2026-11-15-plugin-system-design.md）──
+│   │                                   🔴 `tests/plugin-isolation-gate.test.ts` 扫 `plugin-*.ts` 与插件 store：不得 import
+│   │                                      设置 / API 源 / Discord / 工坊社交模块，`fetch` 只许出现在登记的文件里且次数一致；
+│   │                                      任何新的 URL 汇点（`:src` / `setAttribute('src')` 等）必须登记进 `tests/ui-url-sink-gate.test.ts`
+│   ├── frame-cage.ts                ← 牢笼帧文档生成器（`buildCageDocument`）：内层帧运行时创建、不写 sandbox（继承外层）；
+│   │                                   两种连接：`port-handoff`（插件帧，宿主把 MessagePort 交给牢笼、牢笼在内层首次 boot 时转交）
+│   │                                   与 `relay`（美化帧，双向转发 window 消息）。内层第二次 `load` = 导航 → 拆掉内层并报 `cage-violation`
+│   ├── plugin-frame.ts              ← 插件帧：`PLUGIN_FRAME_SANDBOX = 'allow-scripts allow-forms allow-pointer-lock'`、
+│   │                                   `buildPluginFrameDocument`、`mountPluginFrame`（挂在 shadow tree 里）、帧内引导脚本与装载器
+│   │                                   （DOMParser 取节点、按序重建 `<script>`、包内文件建帧内 `blob:` URL，不用 document.write）、
+│   │                                   帧内全局 `host`；主题只下发 `--theme-*`（`filterPluginThemeValues`）
+│   ├── plugin-bridge.ts             ← 端口协议：校验 `req` 形状、每插件 60 条/秒（超了 `QUOTA`）、单条 256KB、按 manifest 能力
+│   │                                   放行（未声明 `DENIED`）；`subscribe` / `on` 在桥内处理，其余交给宿主 `invoke`。
+│   │                                   新方法名必须加进桥的方法表，否则 `INVALID`
+│   ├── plugin-host.ts               ← 每个界面一份宿主会话：写入门槛依次 `NO_SAVE` → 没拿到存档锁 `BUSY` → 运行态守卫；
+│   │                                   `commit` = 翻译 → `StateManager.commitPluginCommand` → 锁外 `amendCurrentTurnSnapshot` →
+│   │                                   回读刷新 → 推视图，整段包在 `trackPluginWrite` 里
+│   ├── plugin-host-extensions.ts    ← P2 方法：存储两档、`ai.note` / `ai.context.set`（可见告知另落一条 `plugin_note` 系统事件）、
+│   │                                   `ui.openExternal`（只弹复制链接窗，宿主不打开）
+│   ├── plugin-selfcheck.ts          ← 启动自检 CAGE + S0–S7（`runPluginSelfCheck`，永不抛）。`PICKER_VERIFIED_ENGINES` 发布为空；
+│   │                                   `browserBlocksLocal` 规则与核心 / 可选对照通道见设计 §4.8 短注。
+│   │                                   🔴 探针容器放屏幕外，**不能** `display:none`（否则 CSS / 字体请求不发）
+│   ├── plugin-save-lock.ts          ← 按存档的 Web Locks（`acquirePluginSaveLock`，永不抛；held / waiting / unsupported /
+│   │                                   released，只有 held 能写）。没有 `navigator.locks`（如局域网 IP 的 HTTP）= 插件写入全禁
+│   ├── plugin-run-signals.ts        ← 管线与插件之间的模块级缝：`trackPluginWrite` / `whenPluginWritesSettled`（发送前等在途写入）、
+│   │                                   回合信号 `turn.start` / `turn.end` / `turn.failed`、提示输入提供者。
+│   │                                   🔴 `game-pipeline.ts` 只经这里与插件打交道，不 import 插件 store
+│   ├── plugin-icon.ts               ← 贡献点图标：只收 PNG / JPEG / WebP / GIF（按文件头），解码、缩到 256 像素内、重编码成 PNG data URL；
+│   │                                   不收 SVG。宿主 origin 下不为插件字节建别的 blob URL（设计 §4.4 规则二）
+│   ├── plugin-client.ts             ← `/api/plugins` 的客户端：列目录、取文件并核对 sha256（判别联合，不抛）
+│   ├── plugin-risk-messages.ts      ← 安装 / 按存档启用两种风险确认的文案（纯函数，两个弹窗共用，模板里不另写）
 │   └── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
 │
 ├── themes/                          ← 🔴 主题 CSS **住在这里，不在 lib/**：
@@ -353,6 +395,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      📌 2026-11-14 例外：**刻意以「键缺席」表示默认**的可选键只声明、不进
 │   │                                      getDefaults()，并在声明处写明缺席时由谁兜底（如 `directCacheProvider`、
 │   │                                      `directCacheRebuildTurns`、`directCacheGrowthLimit`；恢复默认 = 删键）
+│   │                                   📌 2026-11-15（插件 v1）：+`pluginDevAutoReload`（默认 `false`；开发者模式下「跟随插件
+│   │                                      文件夹自动重载」，联网域名变了仍要重新确认；开发者模式关着时不生效）
 │   ├── settings-types.ts            ← [Q-18] ★`UiSettings`（**type 不是 interface** —— 整份袋子
 │   │                                   要传进 5 处 `Record<string, unknown>` 参数，interface 没有
 │   │                                   隐式索引签名会当场编译不过；也**不能**加显式索引签名，
@@ -545,6 +589,16 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      （铁律 1）。角色名真源在别处，这边偷偷改名只会让预设查不中；
 │   │                                      改名走 rename()（删旧建新），原地 upsert 会留下孤儿记录
 │   ├── workshop-store.ts            ← [工坊 P1] 执行器：拿 planInstall 的计划落 DB，不含转换逻辑
+│   ├── plugin-store.ts              ← 🆕 [插件 v1 / 2026-11-15] 注册表与生命周期：本地目录列表（`plugin-client`）、安装计划、
+│   │                                   安装 / 更新 / 卸载、按存档启用 / 停用（确认只记本机 `saveConsents`）、本机生效判定
+│   │                                   （存档启用清单 ∩ 本机确认且 networkHash 一致 ∩ 自检通过）、自检状态（`ensureSelfCheck` /
+│   │                                   重跑）、`forgetSave`（删档时清本机确认）、图标缓存。读 `settings.pluginDevAutoReload`
+│   │                                   （只在开发者模式下生效）。🔴 启用写存档元数据必须走 `game.setSaveEnabledPlugins`
+│   │                                   （`patchSaveMetadataFor` 会拿内存里的整行覆盖）
+│   ├── plugin-runtime-store.ts      ← 🆕 [插件 v1] 当前存档的运行时：`enterSave` / `leaveSave`（GamePage 调）、存档锁与重试、打开的界面
+│   │                                   （`openSurfaces` / 焦点 / z 序）、后台页面（≤8 个，屏幕外）、事件派发（save.* / turn.* /
+│   │                                   combat.* / timeline.restored / state.changed）、外链弹窗、`pendingInputFill`、美化帧加固置位。
+│   │                                   ⚠️ 已知缺口：主题实时切换不推给已开的帧；`save.leave` 可能到不了帧（见 known-issue）
 │   └── workshop-social-store.ts     ← [工坊 P3] 社交状态（Bearer JWT 弹窗+轮询登录 / JWT 本地解码 /
 │                                       toggle 乐观→校正→回滚 + 800ms 节流；纯内存展示层，零 Dexie，D22/D23）
 │
@@ -700,6 +754,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   │                              原 `stage` 字段已删；有活跃存档时本存档会用到的行标「本存档使用」。
 │   │   │   │                              漂移闸门：tests/ui/components/settings/agent/agent-list.groups.test.ts
 │   │   │   ├── placeholder-catalog.ts← 23 项占位符 + 按 Agent 过滤（DAG 偏序 + 侧链归属）
+│   │   │   │                            📌 2026-11-15：上面的计数已过时（不再维护）；新增 `PLUGIN_NOTES` / `PLUGIN_CONTEXT`
+│   │   │   │                              （分类「插件」），只给 story 与 direct_main
 │   │   │   ├── agent-defaults.ts     ← buildAgentDefaultEntry（纯装配；patch 副作用留调用方）
 │   │   │   │                            📌 2026-11-14（S-00）：`model` 恒写 `''` —— 本机池 id 换台机器必然悬空
 │   │   │   ├── prompt-dirty-guard.ts ← 🆕 [2026-11-14 / S-15] 提示词草稿「未保存」的**模块级**标志 +
@@ -1067,6 +1123,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               `lib/beautifier-frame.ts` 生成（sandbox / CSP / 主题变量注入 /
 │   │   │                               消息协议），storage 会话由 `lib/beautifier-storage.ts` 开。
 │   │   │                               🔴 本组件只**装**那两份契约，不在这里另写第二套消息协议
+│   │   │                               📌 2026-11-15（插件 v1）：+`hardened` prop（BeautifiedNarrative 按 `beautifierHardened` 传入），
+│   │   │                               走加固文档时消息经牢笼帧中转，`event.source` 比对的是牢笼帧的 contentWindow
 │   │   ├── DebugPanel.vue           ← 调试面板（`activeModal === 'debug'` 且 `developerMode`）：
 │   │   │                               Agent 请求/响应 + EJS 后端状态 + 引擎设置 + **随机事件区块**
 │   │   │                               战斗从就绪页延后启动时由 `game-pipeline` 建独立 Debug Turn；
@@ -1134,6 +1192,19 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                  他只看到画面里少了个人。措辞说**「出图时的方言」不是「当前方言」**：
 │   │   │                                  告警是那一次装配留下的，把历史事实说成现状会让排查走错方向。
 │   │   │                                  不做 toast（每张图都会响）、不阻断（AI 新造 NPC 无预设仍要画场景）
+│   │   ├── PluginSurface.vue        ← 🆕 [插件 v1 / 2026-11-15] 一个插件界面：宿主在帧外画的标识边框（插件名 + 「联网」标记 +
+│   │   │                               关闭）+ 帧容器；四种形态 window（`position:fixed`，可拖动 / 调大小，240×160..1600×1200）/
+│   │   │                               overlay（`position:absolute; inset:0`，宿主必须是定位容器）/ panel / hidden。
+│   │   │                               只在 `pluginId` 变时重挂帧；自己不绑 Esc
+│   │   ├── PluginSurfaceLayer.vue   ← 🆕 [插件 v1] GamePage 游戏区里的插件图层：按 `plugin-runtime-store.openSurfaces` 渲染
+│   │   │                               PluginSurface（`panel.items.footer` 的 panel 归 ItemsPanel 内联）、外链弹窗、跨标签页锁横幅
+│   │   │                               （「重试」）。🔴 插件窗**不占** `game.activeModal`；z 序按名次映射，永远压不过页面级弹窗
+│   │   ├── PluginExternalLinkModal.vue ← 🆕 [插件 v1] `host.ui.openExternal` 的宿主弹窗：显示完整地址 + 「复制链接」，**宿主不打开**（Q12）
+│   │   ├── 📌 2026-11-15 插件贡献点（经 `composables/usePluginContributions`）：SideToolbar 末尾追加 `game.toolbar` /
+│   │   │       `game.overlay` 按钮（标签写「插件：名字」）；GameMenu 追加 `game.menu` 项；ItemsPanel 底部 `panel.items.footer`
+│   │   │       一节（panel 形态内联渲染 PluginSurface）。GamePage 挂 PluginSurfaceLayer，载入存档后
+│   │   │       `pluginRuntime.enterSave`、卸载 / 切档时 `leaveSave`，并把 `pendingInputFill` 回填输入框（只填不发）；
+│   │   │       系统通知开关新增 `plugin_note`（SystemNotifBar / MessagesSection），插件可见告知按纯文本渲染
 │   │   ├── combat/                  ← [战斗去代码化 · C6] 直接吃沙盒 `CombatState`（唯一数据源），
 │   │   │                               组件内零写死单位名/技能名/数值（展示映射集中在 `combat-view.ts`）：
 │   │   │                               `CombatPanel.vue` 三态外壳（就绪/战斗/结算，右上角常驻「↺ 重开战斗」）；
@@ -1153,6 +1224,18 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │       │                               ← 首页/设置/游戏侧栏统一入口；原版扩展暂为明确占位，
 │       │                                  社区扩展的按存档启用设置归本页
 │       │                                  📌 2026-11-14：`workshop.init()` 失败时显示错误态与重试（W-03）
+│       │                                  📌 2026-11-15：「原版扩展」占位卡已删，原位换成「插件管理」一节（PluginManagerSection）
+│       ├── PluginManagerSection.vue   ← 🆕 [插件 v1 / 2026-11-15] 插件管理：本地插件目录状态（被 BFF 关掉时写原因）、插件列表
+│       │                                 （状态 / 联网域名 / 能力摘要）、安装与更新（**只在**风险确认点了确认后才装）、卸载（先确认）、
+│       │                                 自检面板、按存档启用（存档选择器 + PluginSaveEnableList）、开发者区「跟随文件夹自动重载」
+│       │                                 （设置键 `pluginDevAutoReload`，默认关，只在开发者模式生效）
+│       ├── PluginRiskConfirmModal.vue ← 🆕 [插件 v1] 风险确认弹窗（install 完整版 / save 短版；危险样式，默认焦点在「取消」，
+│       │                                 勾选框全勾才可确认，更新时高亮新增域名）；文案只取 `lib/plugin-risk-messages.ts`
+│       ├── PluginSelfCheckPanel.vue   ← 🆕 [插件 v1] 自检结果逐项列出（失败项在前）+「重新检查」；开发者模式下可打开
+│       │                                 「人工矩阵探针」（挂进生产插件帧，由人点按钮对照抓包，S7 文件选择器靠它验）
+│       ├── PluginSaveEnableList.vue   ← 🆕 [插件 v1] 某存档的插件开关：启用先过短版确认；标出「需要重新确认」（导入的存档 /
+│       │                                 联网变了）与「已启用但未安装」；「清除此插件在本存档的数据」先确认
+│       │                                 （删档时 SaveManager 调 `pluginStore.forgetSave` 清本机确认；单档导入后 toast 插件提示）
 │       ├── workshop-lock.ts           ← 🆕 [2026-11-14] 工坊入口锁定常量 `WORKSHOP_LOCKED` 的**唯一出处** +
 │       │                                 `hasExtensionWork`（首页按钮显隐）。不是安全边界，解锁只改这一处
 │       ├── InstalledExtensionList.vue ← 🆕 [2026-11-14 / W-01·W-08] 扩展管理页上的**纯本地**已装列表：
@@ -1235,4 +1318,5 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 - 🔴 **为什么非得是自己挂 window capture**：`modal-focus.ownModalFocus` 在 **document + capture** 上处理 Escape 并 `preventDefault` + `stopImmediatePropagation` —— 想「让路给浮层」就只能比它更早拿到事件，然后**主动**判断该不该开菜单。
 - 分层判据（自上而下，任一成立就让路）：`menuOpen`（菜单自己开着，关它归 `AppModal`）→ `hasOpenDialog()`（任意浮层在栈里）→ `game.activeModal !== null`（页面级弹窗位有值，注意 mock 里漏给这个字段时是 `undefined` → 判据恒真）→ `game.isInCombat` / `showMiniPlayer` / `ChatFlow` 暴露的 `ctxMenuOpen`（右键菜单）。
 - 「存档管理」是 `App.vue` 常驻的应用级 `shared/SaveManager.vue`：首页与游戏菜单只开同一 store 状态，不导航；从游戏页打开、关闭都保持 GamePage 挂载。选择另一存档进入时，App.vue 的 view key 随 `activeSaveId` 改变，才重挂 GamePage。
+- 📌 **2026-11-15 插件界面（插件 v1，设计 §5.7）**：判据在 `hasOpenDialog()` / `activeModal` 之后、战斗 / 迷你播放器之前多一档 —— `pluginRuntime.focusedSurfaceId !== null`（有获得过焦点的插件界面）时，Esc 关掉那个界面而不是开菜单。焦点在插件帧**里面**时按键到不了宿主，那时 Esc 归插件自己。
 - 测试注意：`Esc` 必须从 `document.body` 冒泡派发（`bubbles: true`），否则事件路径里没有 document、`modal-focus` 那条「浮层吃掉 Esc」的路会**假绿**；GamePage 的 `ChatFlow` 在 `v-else`（`loadingSave` 为 false 才渲染）后面，替身要等挂上再断言（`vi.waitFor`），否则 `chatFlowRef` 是 null、判据同样假绿。

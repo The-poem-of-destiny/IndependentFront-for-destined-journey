@@ -13,7 +13,7 @@
  *    陈述而不是阻拦语气。
  */
 
-import type { SessionImportCheck } from '@engine/persistence/session-backup';
+import type { SessionImportCheck, SessionPluginRef } from '@engine/persistence/session-backup';
 
 /** 条目标题一行最多列几个，多出来的用「等 N 条」收尾 */
 const MAX_TITLES_PER_BOOK = 5;
@@ -21,10 +21,32 @@ const MAX_TITLES_PER_BOOK = 5;
 /** 解析不出书名的条目归到这一组 —— 导出方自己都缺的条目，收件人更可能缺，不能藏起来 */
 const UNKNOWN_BOOK = '未知世界书';
 
+/** 缺失插件一行最多列几个 */
+const MAX_PLUGINS_LISTED = 5;
+
+/** 插件显示名：有名字用名字（带版本），没有就退回 id —— 给个能搜的标识 */
+function pluginLabel(ref: SessionPluginRef): string {
+  const name = ref.name || ref.id;
+  return ref.version ? `${name} v${ref.version}` : name;
+}
+
 /**
- * 体检结果 → 告警行（顺序：世界书条目 → 内容包 → 正文预设）。
+ * 「导入的存档要在本机重新确认插件」这句提示。存档没勾选插件时返回 null。
  *
- * 体检通过（`ok === true`，三项皆空）时返回空数组 —— 调用方据此决定连弹窗都不必开。
+ * 体检通过（不弹告警窗）时调用方也该在导入后把它亮给玩家：同意从不随存档走，
+ * 存档里勾着的插件导进来一律处于「待确认」状态。
+ */
+export function buildSessionImportPluginNote(check: SessionImportCheck): string | null {
+  const count = check.enabledPlugins?.length ?? 0;
+  if (count === 0) return null;
+  return `这份存档启用了 ${count} 个插件；插件授权不随存档迁移，导入后需在本机逐个重新确认才会启用`;
+}
+
+/**
+ * 体检结果 → 告警行（顺序：世界书条目 → 内容包 → 正文预设 → 插件）。
+ *
+ * 体检通过（`ok === true`，各项皆空）时返回空数组 —— 调用方据此决定连弹窗都不必开。
+ * 有告警且存档勾选了插件时，末尾附上重新确认的提示（`buildSessionImportPluginNote`）。
  */
 export function buildSessionImportWarnings(check: SessionImportCheck): string[] {
   const lines: string[] = [];
@@ -62,6 +84,22 @@ export function buildSessionImportWarnings(check: SessionImportCheck): string[] 
     lines.push(
       `本机没有导出端使用的正文预设『${check.missingStoryPreset.name}』（全局设置，不影响存档数据）`,
     );
+  }
+
+  // ── 插件：缺了只告警，存档里的插件数据原样保留，装上后可续用 ──
+  const missingPlugins = check.missingPlugins ?? [];
+  if (missingPlugins.length > 0) {
+    const shown = missingPlugins.slice(0, MAX_PLUGINS_LISTED).map(pluginLabel).join('、');
+    const tail =
+      missingPlugins.length > MAX_PLUGINS_LISTED ? ` 等 ${missingPlugins.length} 个` : '';
+    lines.push(
+      `本机未安装存档启用的 ${missingPlugins.length} 个插件：${shown}${tail}（插件数据会原样保留，安装后可继续使用）`,
+    );
+  }
+
+  if (lines.length > 0) {
+    const note = buildSessionImportPluginNote(check);
+    if (note) lines.push(note);
   }
 
   return lines;

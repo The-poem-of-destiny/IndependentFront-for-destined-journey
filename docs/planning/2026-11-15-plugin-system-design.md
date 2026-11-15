@@ -1,6 +1,6 @@
 # 插件系统设计 v1（ADR-36 暂定）
 
-> 状态：设计稿（2026-11-15），未实施。
+> 状态：已实施（2026-11-15）：P1a/P1b/P2 自动化部分；人工矩阵未跑，Chromium 上 S7 待人工验证。（原状态行：「设计稿（2026-11-15），未实施。」）P3（工坊接入）、P4 与 Q1/Q7/Q11/Q12 未做；实施注记见下方「📌 2026-11-15 实施注记」，创作者文档见 `docs/reference/plugin-authoring-guide.md`。
 > 修订 r2（2026-11-15）：浏览器实测推翻了「插件脚本跑在沙盒 iframe 里」的地基（CSP 拦不住 WebRTC）。本版改为「插件代码只跑在 Dedicated Worker，界面由宿主按声明式标记渲染」；启动自检改成带对照组的金丝雀探测；本地目录移出 Vite root；启用插件的存档里美化帧一律断网并停脚本；逐条处理独立审查的 16 条发现。
 > 修订 r3（2026-11-15）：处理复审 13 条（R2-1 至 R2-13）：插件存档的美化帧加牢笼帧并剥 `meta` / `link` / `base`；视图帧 nonce 改为运行时哈希；收紧 URL 白名单与 blob MIME；补齐金丝雀的方法、WebSocket、对照组与等待窗口；Web Locks 的安全上下文与接管；D10 改列为设计结论。
 > 修订 r4（2026-11-15）：主人改了红线。「不能联网」取消，新增「不得访问本机和局域网上的服务」（红线 D）。插件改回跑在 opaque 沙盒 iframe 里，可以用完整的 JS、DOM 和任意 UI 框架，可以按 manifest 声明的域名联网。删除 Worker 全局白名单、声明式界面协议、清洗器、OffscreenCanvas 通道和「插件存档里美化帧断网」。新增联网域名的校验与 CSP 生成、D 的逐条论证、安装与启用时的风险确认、现有美化帧风险一节。Worker 方案与实测记录压缩进附录 A。
@@ -8,6 +8,51 @@
 > 编号约定：D = 已裁定，Q = 待裁定，P = 分期，S = 自检项。路径相对仓库根，行号为 2026-11-15 实读。
 > 标注口径：「实测」= 2026-11-15 在 Chromium 156.0.8078.75 上测过；「规范」= 规范明文，未在本项目测过；「未验证」= 推断，由启动自检（§4.8）或人工矩阵证明。
 > 关联文档：`docs/planning/2026-07-31-creative-workshop-compat-design.md`（D16、附录 B）、`docs/planning/2026-08-27-timeline-restore-implementation-plan.md`、`docs/planning/2026-08-30-player-persona-editing-design.md`。
+
+## 📌 2026-11-15 实施注记
+
+本节记实施时的裁定与偏离，正文各节不改写，只在对应位置补带日期的短注。
+
+范围：
+
+- 已实施：P1a、P1b、P2 的自动化部分（`npm run gates` 全绿）。
+- 未做：P3（工坊入口仍锁）、P4、Q1、Q7、Q11、Q12；P1a 的人工矩阵（§4.8 末段、§9），包括 WebRTC 抓包和插件帧里文件选择器的人工点测。
+
+主人 2026-11-15 的裁定（详见 §10 的短注）：
+
+- Q2 接受 WebRTC 与资源提示的残余，写进风险说明。
+- Q5 自检全过即启用，不维护「已测大版本」表；只保留 S7 那张文件选择器的窄表。
+- Q6 FullBackup 不带插件包字节。
+- Q8 玩家亲手交给插件的文件不算破 C，写进风险说明。
+- Q9 默认目录 `../poem-plugins`（仓库上一级）；开发者模式的「跟随文件夹自动重载」默认关，且只在开发者模式打开时生效。
+- 新增裁定：浏览器自己就拦下 opaque origin 帧访问 loopback 时（带 `allow-same-origin` 的管线对照组命中、全部 opaque 核心对照组都不命中），S0 判通过并记 `browserBlocksLocal`。此时红线 D 由浏览器执行（§4.8 短注）。
+
+设计之外的实现决定：
+
+- 按存档启用的确认只记在本机（`PluginRecord.saveConsents[saveId]`，该表不进 FullBackup）。生效条件是三者同时成立：存档元数据 `enabledPluginIds` 里有它、本机确认的 `networkHash` 与当前一致、自检通过。导入的存档一律要在本机重新确认（偏离 §3.4「确认记录存在插件行和存档元数据里」）。
+- `metadata.pluginHardened` 是粘性标记：第一次在某存档启用插件时置上，进入一个列出了插件的存档时也置上，之后不清除。置上后该存档的两档美化帧走加固模式（§11 前两档）。
+- 上限：单条 `ai.note` 2000 字，每存档待告知队列 16 条，常驻提示块 4000 字，存档数据袋每插件 256KB，全局数据每插件 1MB。
+- 卸载插件删除它的全局数据（`pluginKv`），各存档里的 `worldFlags.plugins[id]` 保留（§6.4 的「重装后可续用」只对存档数据成立）。
+- `memory.add`（P2 开放）：全局写锁在外、存档写锁在内，记忆 id 由引擎在事务里分配；插件只给 `content`、`keywords`、`importance`。
+- `character.rename` 必须显式给 `target`，并且从不改主角的名字（主角改名仍走人设编辑）。`character.remove` 同样拒绝主角（按别名解析后在锁内复检）。
+- 自检的对照组分「核心」和「可选」两类通道：核心通道没命中判失败；可选通道没命中只记一条说明，不判失败。
+- 美化规则帧的探针里没有表单提交一项：规则帧的沙盒没有 `allow-forms`，表单本来就提交不了。
+- S5（重定向）是尽力而为：第二个 loopback 主机名不可达时标「跳过」。
+
+真机自检结果（2026-11-15，Claude 浏览器窗格，Chromium 156.0.8078.75，dev server 跑在 localhost）：
+
+- CAGE 通过（内层用 srcdoc）；S0 经 `browserBlocksLocal` 通过；S1–S4、S6 金丝雀零命中；S5 跳过；S7 失败（插件帧里有 `showSaveFilePicker`，`PICKER_VERIFIED_ENGINES` 为空）。
+- 所以目前在 Chromium 上插件保持禁用，要等人跑一次人工选择器探针（开发者模式 → 插件管理 → 人工矩阵），确认后把引擎和大版本加进那张表。
+- 没测过：Firefox、Safari、真正的 Chrome、preview server、经 Vite upgrade 的 WebSocket 金丝雀、真服务器上的 `/@fs/` 拒绝、两个标签页之间的 Web Locks、界面走查。
+
+已知缺口（缺陷登记在 `docs/known-issue.md`）：
+
+- 主题实时切换不会推给已打开的插件帧。
+- `save.leave` 可能到不了帧（帧随离开一起拆掉）。
+- 回合快照里可能还留着被该回合消费掉的告知。
+- RANDOM_EVENTS 的兜底追加只到 Delta 会话的基线回合（早于插件系统，与插件无关）。
+- `session-backup.ts` 分配记忆 id 时没拿全局锁（早于插件系统）。
+- `plot` 投影包含隐藏的剧情事件（待裁定）。
 
 ## 0. 已裁定
 
@@ -163,6 +208,8 @@ capabilities: { read: string[], commands: string[], events: string[], ai: string
 - 导入别人的存档时，里面勾选的插件在本机不自动启用，要在本机重新过一次按存档启用的确认。
 
 文案放在 `src/ui/lib/plugin-risk-messages.ts`（纯函数，先例 `src/ui/lib/session-import-messages.ts`），两个弹窗共用，不在模板里各写一份。
+
+> 📌 2026-11-15 实施偏离：按存档启用的确认**只记在本机**（`PluginRecord.saveConsents[saveId]`，`plugins` 表不进 FullBackup），存档元数据里只有 `enabledPluginIds`，不存确认记录。所以任何导入的存档（含自己导出再导入的）都要在本机重新确认。安装确认记在 `PluginRecord.installConsent`。删除存档时一并清掉对应的本机确认。
 
 ### 3.5 存储
 
@@ -382,6 +429,15 @@ BFF 路由 `server/routes/plugins.ts`，挂进路由表（`server/app.ts:40-58`�
 
 引擎门控：自检全过即启用。r2 的「未测过的引擎与大版本默认禁用」随红线 B 取消而放宽，理由和是否保留见 Q5。唯一保留的窄门控是 S7：只为文件选择器维护一张「人工矩阵已验」的引擎与大版本表，插件帧里没有 `showSaveFilePicker` 的引擎不受这张表约束。
 
+> 📌 2026-11-15 实施与真机结果（`src/ui/lib/plugin-selfcheck.ts`）：
+>
+> - 真机（Claude 浏览器窗格，Chromium 156.0.8078.75，dev server 跑在 localhost）：CAGE 通过（srcdoc）；S1–S4、S6 零命中；S5 跳过（没有第二个可达的 loopback 主机名）；S7 失败（有 `showSaveFilePicker`，`PICKER_VERIFIED_ENGINES` 为空）。所以目前 Chromium 上插件保持禁用，要等人在「开发者模式 → 插件管理 → 人工矩阵」跑一次选择器探针并把引擎与大版本加进表。
+> - S0 在这台 Chromium 上本来会恒失败：opaque origin 的帧访问 loopback 被浏览器自己拦掉（请求根本到不了服务器，与 Local Network Access 把 opaque origin 当公网的行为一致），没带 CSP 的对照组也打不中金丝雀。主人当日裁定：当带 `allow-same-origin` 的管线对照组能命中、而全部 opaque 的核心对照组都不命中时，S0 判通过并记 `browserBlocksLocal`，此时红线 D 由浏览器执行。
+>   - 📌 2026-11-15 二审收紧：`browserBlocksLocal` 还要求**任何**不透明来源对照组（核心与可选）都没命中、任何探针也没命中；只要有一条命中而核心通道全不中，说明浏览器只拦了一部分，S0 判失败（「浏览器只拦截了部分不透明来源通道，结果不可信」）。轮询阶段因「对照组一个不中」提前收尾时，不再拿孪生帧延迟顶替对照组延迟；之后对照组若又命中，也按部分拦截判失败。
+> - 对照组分「核心」与「可选」两类通道：核心通道不命中判 S0 失败；可选通道（部分浏览器不支持或不发请求的手段）不命中只在结果里记一条说明。
+> - 美化规则帧的 S6 探针没有表单提交一项：规则帧的沙盒没有 `allow-forms`。
+> - 自检每个页面会话在第一次需要时跑一次（装了插件或打开插件管理），结果只在内存里，插件管理里可以重跑。探针容器必须放在屏幕外而不是 `display:none`，否则 CSS 与字体加载不会发生。
+
 ## 5. 插件 API
 
 ### 5.1 桥协议
@@ -538,6 +594,8 @@ StateManager.commitPluginCommand(input: { pluginId, patches, expect, isAllowed: 
 
 `game.isGenerating`（`game-store.ts:176`）或正在润色、正在恢复时间线时，一切写入（命令、`storage.save`、`ai.note`）返回 `BUSY`。读与 `storage.global` 不受限。
 
+> 📌 2026-11-15 实施核对：「恢复时间线」没有单独的标志。`game-store.restoreTimeline` 在整个恢复过程里把 `isGenerating` 置真（回退、恢复快照、重开战斗都走它），运行态守卫 `plugin-runtime-store.runGuard` 只读 `isGenerating` / `isRewriting` / `isInCombat`，恢复期间的写入因此回 `BUSY`。`tests/ui/stores/game-store.test.ts` 钉住恢复中 `isGenerating` 为真。
+
 理由：写锁只解决交错，不解决陈旧。直出模式允许 AI 对 `money` 做绝对值替换（`src/core/prompts/direct-prompt.ts:44`），它依据的是回合开始时的上下文，会盖掉插件的扣款。
 
 守卫要做两处，缺一处都有竞态：
@@ -660,6 +718,15 @@ host.commit({ commands: [
 
 已取消的待裁定项：原 Q2、Q3（插件存档里美化帧是否放宽断网）、原 Q4（DNS 通道）、原 Q10（无脚本视图帧），都随红线 B 取消而失效。
 
+> 📌 2026-11-15 主人裁定：
+>
+> - Q2：接受，按建议写进所有插件的风险说明。
+> - Q5：按建议，自检全过即启用；只保留 S7 的文件选择器窄表（`PICKER_VERIFIED_ENGINES`，发布时为空）。另加 `browserBlocksLocal` 规则（§4.8 短注）。
+> - Q6：FullBackup 不带插件包字节，只带 `pluginKv` 与存档里的启用清单和数据。
+> - Q8：玩家亲手交给插件的文件不算破 C，写进风险说明。
+> - Q9：默认目录 `../poem-plugins`（仓库上一级）；开发者模式的「跟随文件夹自动重载」默认关，且只在开发者模式打开时生效（设置键 `pluginDevAutoReload`）。
+> - Q1、Q7、Q11、Q12 仍待裁定，未实施；Q12 维持只复制链接。
+
 风险：
 
 - §4.3 里「未验证」的几行（自身导航被 `frame-src` 拦、本地协议文档与 Worker 继承 CSP）是 D 的承重点。它们都在自检里，证明不了就禁用，但如果某个主流浏览器上证明不了，插件在那里就不可用。
@@ -697,6 +764,8 @@ host.commit({ commands: [
 - WebRTC 的残余与插件相同（Q2）。
 
 没启用插件的存档要不要同样修（全局修），见 Q11。建议把没启用插件时的这一条晋升到 `docs/known-issue.md`。
+
+> 📌 2026-11-15 实施：前两档已做，开关是存档元数据里的粘性标记 `metadata.pluginHardened`。第一次在某存档启用插件时置上，进入一个列出了插件的存档（例如导入的存档）时也补置；之后不清除，即使插件全部停用。置上后两档美化帧都走加固文档（`src/ui/lib/beautifier-frame.ts` 的 `hardened` 选项：去掉 `http:` 与 `ws:`，套牢笼帧），未置上的存档输出与以前逐字节一致。Q11（没启用插件的存档）未做，已登记到 `docs/known-issue.md`。
 
 ## 12. 审查闭环（r1、r2、r4 的发现在 r5 下的状态）
 

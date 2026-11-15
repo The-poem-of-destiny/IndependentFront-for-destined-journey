@@ -178,6 +178,8 @@ docs/
 │   ├── worldbook-ejs-regex-authoring-guide.md
 │   │                                   # 🆕 世界书 EJS + 输出美化正则创作者规范（作者入口）
 │   ├── story_preset_format.md           # 🆕 Story Agent 预设编写指南（输出标签顺序 + 占位符排列 + 可用宏）
+│   ├── plugin-authoring-guide.md       # 🆕 插件创作者指南（ADR-36）：包结构 / manifest / 帧内 `host` API /
+│   │                                   #    命令与前置条件 / 错误码 / 存储与 AI 手段 / 贡献点 / 本地目录与示例商店
 │   ├── system_card_spec.md             # 系统事件卡片视觉规格（写 `components/game/cards/*.vue` 时参照）
 │   ├── dev-bat-notes.md                # 🆕 dev.bat 说明书 ← **改启动器前必读**
 │                                       #    ①注释必须纯 ASCII（chcp 65001 让 cmd 字节偏移解析器错位，
@@ -273,6 +275,11 @@ docs/
 ├── planning/2026-11-13-calendar-system-v1-design.md
 │                                       # 🆕 日历系统 v1（✅ 已实施，界面已浏览器走查，待真机游玩验证）
 │                                       # 按存档隔离、完全本地；沉浸 / 普通两种模式；Dexie v33 `saveCalendars`
+├── planning/2026-11-15-plugin-system-design.md
+│                                       # 🆕 插件系统 v1（ADR-36 暂定）← 改插件 / 美化帧加固 / `/api/plugins` 必读
+│                                       # ✅ 已实施（2026-11-15）P1a/P1b/P2 自动化部分；人工矩阵未跑，
+│                                       #    Chromium 上 S7 待人工验证（在那之前插件在 Chromium 上保持禁用）
+│                                       # 红线 A/C/D + 双层牢笼帧 + 金丝雀自检；Dexie v34 三张新表
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
@@ -626,6 +633,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 条目级 lore 路由   | 退役 Agent 级世界书清单：读取范围改由条目 `extra.lore.audiences` 声明（双模式唯一权限 + 依赖闭包 + EJS 间接读取），`lore_select` 独立资料选择器 + 独立 ST 供值与开局冻结                                                 | ✅ 已实施                                                                                             |
 | 内置角色过滤       | 未选择任何内置角色时排除默认人物档案（`character` 世界书按存档 `enabledWorldBookEntries` 白名单过滤，不再沿用全局默认启用态）                                                                                            | ✅ 已实施                                                                                             |
 | 合并：战斗沙盒并入 | 18 天的战斗沙盒 / entity_gen 分支并入 master：DB 编号撞车顺延（`combatSandboxes` → v30）、agent 名册统一 15 个、世界书 `audiences` 重映射（`char_gen` → `entity_gen` 21 处）、`lore-protocol` 白名单同步                 | ✅ 8 道闸门全绿（2026-10-24）                                                                         |
+| 插件系统 v1        | ADR-36 第三方插件：双层牢笼帧 + 联网域名 CSP + 金丝雀自检 + 声明式命令 + 按存档启用（P1a/P1b/P2，Dexie v34）                                                                                                             | 🔄 自动化部分已实施（2026-11-15）；人工矩阵未跑，Chromium 上 S7 待人工验证；P3/P4 未做                |
 | 真机迭代           | debug loop 持续修复                                                                                                                                                                                                      | 🔄                                                                                                    |
 
 > 📦 **进度表长注已迁出（2026-08-13）**：原挂在此处的六条长注（🔓 工坊入口执行边界 / 🟡 工坊 P4 / 🩹 走查后修的三处 / 🟡 图像生成 v1 + 两条真机踩坑 / 🩹 实施中两处 / 🟡 工坊 P2 EJS）已按本文件「详细记录进 CHANGELOG」的规则**原文**迁入 `docs/CHANGELOG.md`「进度表长注归档」节。🔴 其中〔工坊入口已开放〕一条是工坊/正则的**安全执行边界**，读工坊/正则代码前仍必读（📌 2026-11-12：入口本身已于 `db9ee1e` 临时锁定，该条标题描述的开放状态已过时，执行边界仍有效）。

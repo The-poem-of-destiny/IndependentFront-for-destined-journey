@@ -1,0 +1,29 @@
+{
+  "manifestVersion": 1,
+  "id": "shop",
+  "name": "杂货铺",
+  "version": "1.0.0",
+  "author": "示例",
+  "description": "插件系统设计 §7 的商店示例：读主角余额，花钱买货架上的物品。",
+  "pluginApi": "^1.0",
+  "contributions": [
+    {
+      "slot": "game.toolbar",
+      "id": "shop",
+      "label": "杂货铺",
+      "icon": "icon.png",
+      "surface": "window",
+      "entry": "shop.html",
+      "width": 420,
+      "height": 520
+    }
+  ],
+  "network": [],
+  "capabilities": {
+    "read": ["player"],
+    "commands": ["money.spend", "item.grant"],
+    "events": [],
+    "ai": ["note"],
+    "storage": ["save"]
+  }
+}

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { buildSessionImportWarnings } from '../../../src/ui/lib/session-import-messages';
+import {
+  buildSessionImportPluginNote,
+  buildSessionImportWarnings,
+} from '../../../src/ui/lib/session-import-messages';
 import type { SessionImportCheck } from '@engine/persistence/session-backup';
 
 /** 体检结果的最小骨架 —— 每个用例只覆盖它关心的那一项 */
@@ -127,5 +130,48 @@ describe('buildSessionImportWarnings', () => {
     expect(lines[0]).toContain('世界书');
     expect(lines[1]).toContain('内容包');
     expect(lines[2]).toContain('正文预设');
+  });
+
+  it('缺插件：列出名字（带版本），没有名字退回 id，并说明数据保留、需重新确认', () => {
+    const lines = buildSessionImportWarnings(
+      check({
+        missingPlugins: [{ id: 'shop', name: '杂货铺', version: '1.2.0' }, { id: 'ghost' }],
+        enabledPlugins: [
+          { id: 'shop', name: '杂货铺', version: '1.2.0' },
+          { id: 'ghost' },
+          { id: 'here', name: '已装插件' },
+        ],
+      }),
+    );
+    expect(lines).toEqual([
+      '本机未安装存档启用的 2 个插件：杂货铺 v1.2.0、ghost（插件数据会原样保留，安装后可继续使用）',
+      '这份存档启用了 3 个插件；插件授权不随存档迁移，导入后需在本机逐个重新确认才会启用',
+    ]);
+  });
+
+  it('缺插件超过 5 个时用「等 N 个」收尾', () => {
+    const missing = Array.from({ length: 6 }, (_, i) => ({ id: `p${i}` }));
+    const lines = buildSessionImportWarnings(
+      check({ missingPlugins: missing, enabledPlugins: missing }),
+    );
+    expect(lines[0]).toBe(
+      '本机未安装存档启用的 6 个插件：p0、p1、p2、p3、p4 等 6 个（插件数据会原样保留，安装后可继续使用）',
+    );
+  });
+
+  it('体检通过时即使存档勾了插件也不出告警行，重新确认提示由单独函数给出', () => {
+    const passed = check({ ok: true, enabledPlugins: [{ id: 'shop', name: '杂货铺' }] });
+    expect(buildSessionImportWarnings(passed)).toEqual([]);
+    expect(buildSessionImportPluginNote(passed)).toBe(
+      '这份存档启用了 1 个插件；插件授权不随存档迁移，导入后需在本机逐个重新确认才会启用',
+    );
+  });
+
+  it('存档没勾选插件 → 没有重新确认提示', () => {
+    expect(buildSessionImportPluginNote(check())).toBeNull();
+    const lines = buildSessionImportWarnings(
+      check({ missingStoryPreset: { id: 'p1', name: '正文预设' } }),
+    );
+    expect(lines).toHaveLength(1);
   });
 });

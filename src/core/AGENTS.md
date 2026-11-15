@@ -49,7 +49,8 @@ src/core/                    ← 核心引擎
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
   ├── persistence/create-journey.ts             ← 新旅程唯一原子落库入口（角色/存档/档案/大纲/事件同一事务）
-  ├── persistence/database.ts                   ← Dexie/IndexedDB v30
+  ├── persistence/database.ts                   ← Dexie/IndexedDB v34（📌 2026-11-15 实读 `DB_VERSION = 34`；
+  │                                              v31 经历 / v32 缓存直出 / v33 日历见上方速览，v34 见本条末尾）
   │       🔴 `DB_VERSION` 常量必须等于最后一个 `this.version(n)`。它只出现在
   │          `FullBackup.version` 上、导入侧不拿它做判断，所以**对不上不会有任何报错**，
   │          只是每份导出的备份都盖了过期的戳。它曾经落后两版（v18/v19 忘了改），
@@ -137,8 +138,25 @@ src/core/                    ← 核心引擎
   │              `updatedAt` 索引；存权威 `CombatState` + 会话 transcript，供刷新续战。
   │              🔴 **rebuildable 缓存，与上面三张 story 表口径相反**：不进 FullBackup / 单存档导出，
   │                 删存档级联删。合并前它是原分支的 v27，与 Story v2 的 v27/v28/v29 撞号，顺延到 v30
+  │   └── v34+: plugins / pluginFiles / pluginKv（插件系统 v1，2026-11-15，ADR-36 暂定）—— 三张**全局**表：
+  │              `plugins`（主键 `id`，安装记录 `PluginRecord`：manifest / 内容哈希 / 联网哈希 /
+  │              安装确认 / 本机按存档确认 `saveConsents`）、`pluginFiles`（`[pluginId+path]`，包文件字节）、
+  │              `pluginKv`（`[pluginId+key]`，插件全局数据，每插件 1MB，超额 `QUOTA`）。
+  │              🔴 `plugins` / `pluginFiles` **不进 FullBackup**（Q6：备份里不夹带可执行的第三方代码，
+  │                 也因此按存档确认只在本机）；**`pluginKv` 进 FullBackup**（导入三态：字段缺席不动、
+  │                 数组则清空后整表替换）。卸载删安装记录、包文件与 `pluginKv`，各存档里的插件数据保留。
+  │              读写口只在 `persistence/plugin-storage.ts`
   │
+  ├── persistence/plugin-storage.ts             ← 🆕 [插件 v1 / 2026-11-15] 三张插件表的**唯一** Dexie 读写口：
+  │                                    list/get 安装记录、`getPluginFiles`（按 path 排序）、`putPluginInstall`
+  │                                    （一个事务整体替换文件 + 记录）、`deletePluginInstall`（连 pluginKv 一起删）、
+  │                                    `setPluginSaveConsent`、`pluginKvGet/Set/Remove`（返回 `PluginResult`，
+  │                                    配额在事务内检查）。🔴 `plugins/**` 保持纯函数，Dexie 只在这里
   ├── persistence/session-backup.ts             ← 单存档导出/导入：每存档表整取（清单同 deleteSaveSlot，字节不随行）+ 内容依赖清单（世界书 token / 工坊项目 / 内容包 / story 预设，导入前只读体检）+ 导入**一律重发 id**（不重发 = 第二次导入静默覆盖第一次），全局表一行不改
+  │                                              📌 2026-11-15：依赖清单加一类「插件」（`SessionPluginRef {id, name?, version?}`，来自
+  │                                              `metadata.enabledPluginIds`）；体检回 `missingPlugins` / `enabledPlugins`，缺插件只告警不拦
+  │                                              （措辞在前端 `session-import-messages.ts`）。⚠️ 既有问题（早于插件系统）：导入时
+  │                                              分配记忆 id 没拿全局写锁，见 `docs/known-issue.md`
   │
   ├── api/api-rpm-limiter.ts            ← [ADR-34] 应用级凭据桶：默认不限；达到上限后的请求按 FIFO
   │                                    暂停整 60 秒，发布等待快照后自动续发；网络 timeout 从放行后才计
@@ -207,6 +225,8 @@ src/core/                    ← 核心引擎
   │      🔴 不再有叫 `extractTag` 的东西 —— 曾有两个同名反义实现（一个取 `match[1]`、一个取
   │         `match[0]`），签名都是 `(string, string)`，连定义带调用抄过去**编译照过**，
   │         运行时把整块 XML 当字段值写进角色档案
+  ├── utils/redact-secrets.ts             ← 🆕 [插件 v1 / 2026-11-15] `redactSecrets(text)`：文本里疑似密钥的片段脱敏。
+  │                                    从前端 `lib/turn-failure.ts` 搬进引擎（那边留转发），插件 `messages` 投影要用
   ├── utils/model-json.ts                 ← [Q-05] 从模型输出里抢救 JSON 的**唯一**入口（整段直解 / ```json 围栏 /
   │                                    `<json>` 标签 / 括号切片，顺序即优先级）。剥壳只此一份，兜底由调用方
   │                                    传 `normalize` 回调 —— 形态上就长不出「两个分支两套兜底」
@@ -255,6 +275,14 @@ src/core/                    ← 核心引擎
   ├── state/save-profile.ts               ← [Phase 4.6] 存档级 FP 元货币（M5: +variables 变量唯一真源）
   │                                      [2026-09-09] +`worldFlags.plotThreads` 袋的读/写（getPlotThreadFlags /
   │                                    setPlotThreadFlagsInPlace + commitPlotThreadTurn 成功回合收口写入口）
+  │                                    🆕 [插件 v1 / 2026-11-15] 插件的存档侧窄写入口（锁内重读、只改那一格，
+  │                                    都收运行态守卫 → BUSY / IN_COMBAT）：`getPluginSaveBag` /
+  │                                    `writePluginSaveKv`（`worldFlags.plugins[id].kv`，每插件 256KB）/
+  │                                    `setPluginContext`（常驻提示块，≤4000 字）/ `enqueuePluginNote`
+  │                                    （`worldFlags.pluginNotes` 队列，单条 ≤2000 字、每存档 ≤16 条）/
+  │                                    `clearPluginNotesForTurn`（成功回合收口，**自己拿锁，别在锁内调**）/
+  │                                    `clearPluginSaveData` / `readPluginPromptInputs`（只读本机生效插件的文本）。
+  │                                    🔴 lib 目标低于 ES2022：别用 `Object.hasOwn` / `Array.at`
   ├── effects/effect-parser.ts / buff-registry.ts / effect-types.ts
   │      🪦 [2026-10-03] 同目录 `effect-runtime.ts` / `game-event.ts` / `effect-wiring.ts` /
   │         `subscription-manager.ts` / `status-api.ts` 已随脚本系统退役删除（详见下方 game-event 条）
@@ -309,6 +337,14 @@ src/core/                    ← 核心引擎
   │         `reason==='turn'` 的快照**（只换载荷 + preview，`id/createdAt/turn` 不变）—— 让本轮
   │         快照吸收「跑完之后的手动改动」（润色/重铸等），下一轮拍新快照后自然冻结。
   │         目标查询走 `database.getLatestTurnSnapshotMeta`（只认 turn，不碰 pre-combat）
+  │      🆕 [插件 v1 / 2026-11-15] `commitPluginCommand({saveId, pluginId, patches, expect, isAllowed,
+  │         commandIndexOfPatch?})`：插件命令的唯一提交入口，结构同 `commitDomainCommand`。**永不抛**，
+  │         返回 `PluginResult`：saveId 不是当前已载入存档 → `NO_SAVE`；**进锁后与落库前各复检一次**
+  │         `isAllowed`（→ `BUSY` / `IN_COMBAT`）；`expect` 在事务内求值，不满足 → `PRECONDITION_FAILED`
+  │         带下标；按别名解析后删除 / 改名主角 → `DENIED`；其余失败 → `INVALID`，整批不落。
+  │         含 `add_memory` 的批次在外层再拿全局写锁，记忆 id 在事务里分配（插件不给 id）。
+  │         成功后推送与 `commitDomainCommand` 相同的事件。🔴 调用方必须在它**返回之后**再调
+  │         `amendCurrentTurnSnapshot`（后者自己拿锁，放进锁内就是自等死锁）
   ├── character/attribute-allocation.ts       ← 自由属性点分配的引擎侧唯一入口（校验上限查 `getTierConfig`，
   │                                    落库走 `commitChatState`）。🔴 补丁只写 attributes + freeAttrPoints，
   │                                    **绝不碰 level/tier** —— 那两个字段的差值正是自动加点钩子的判据
@@ -369,6 +405,12 @@ src/core/                    ← 核心引擎
   │                                    文件头注释写 18 是旧的）+ 每 Agent 默认模板。
   │                                    地图 `{{MAP_CONTEXT}}` 与 `{{RANDOM_EVENTS}}` 的**中文措辞都在这里**
   │                                    （数据面是纯函数模块，措辞在 resolver —— 那两个子系统零中文字面量的原因）
+  │                                    🆕 [插件 v1 / 2026-11-15] +`{{PLUGIN_NOTES}}`（`<plugin_notes>`，一次性告知）与
+  │                                    `{{PLUGIN_CONTEXT}}`（`<plugin_context>`，常驻提示块）：只给 story 与 direct_main，
+  │                                    文本转义、不留存（ephemeral），预设里没写时照 `{{RANDOM_EVENTS}}` 兜底追加 ——
+  │                                    `buildAgentMessages`、Delta 会话的 `turn_context`、缓存直出的 `sections.pluginContext` /
+  │                                    `pluginNotes`、Story v2 第 5 区。数据经 `AgentContext.pluginNotes` / `pluginContext` 进来
+  │                                    （前端 `game-pipeline` 从 `lib/plugin-run-signals` 取）。上面「31 个」的计数已不再维护
   ├── prompts/template-resolver.ts          ← [Phase 10a] 模板解析：localParams（链上覆盖）→ 注册表 → 认不出的原样留着
   ├── prompts/story-zone-placeholders.ts    ← 🆕 [Story 上下文 v2 / P0] Story 预设五区占位条目（identifier
   │                                    `story_zone_1…5`）：补齐 / 去重 / 1→5 相对顺序修正 + 分段结构。
@@ -606,6 +648,31 @@ src/core/                    ← 核心引擎
   │      （引擎的 content-source 算 pack 分节 hash + 前端四处写入路径），住前端就只能反向 import。
   │      前端那个路径留了转发壳，asset-zip / asset-store / audio-store / scene-image-seams 的 import 一字未改
   │
+  ├── types/types-plugin.ts               ← 🆕 [插件 v1 / 2026-11-15，ADR-36 暂定] 插件类型分册：manifest / 贡献点 / 能力声明 /
+  │                                    安装记录与确认 / 包文件与 KV 行 / 8 个错误码 / `PluginResult` / 前置条件 `PluginExpect` /
+  │                                    运行态守卫 / 提示输入。**直接 import 本文件**，`types.ts` 不 re-export。
+  │                                    `SaveSlot.metadata` 另有 `enabledPluginIds?` 与粘性 `pluginHardened?: true`（在 types.ts）
+  ├── plugins/                            ← 🆕 [插件 v1 / 2026-11-15] ★全部纯函数：无 I/O、无 Dexie、无 Vue（同 workshop-install-plan）。
+  │   │                                    设计 `docs/planning/2026-11-15-plugin-system-design.md`，作者文档
+  │   │                                    `docs/reference/plugin-authoring-guide.md`
+  │   ├── plugin-surface.ts               ← 单一来源的名字表与上限：`PLUGIN_API_VERSION`、`PLUGIN_COMMANDS`（命令 → StatePatchOp）、
+  │   │                                    `PLUGIN_DEFERRED_OPS` / `PLUGIN_CLOSED_OPS`（现都为空）、投影 / 事件 / AI / 存储 / 槽位表、
+  │   │                                    `PLUGIN_FILE_TYPES`、`PLUGIN_LIMITS`、`isSafePluginRelPath`。
+  │   │                                    🔴 引擎新增 `StatePatchOp` 必须进命令表或两张名单之一（测试钉住）；
+  │   │                                    文件类型表与路径规则在 `server/plugin-dir.ts` 另有一份，一致性测试钉住
+  │   ├── plugin-network.ts               ← 联网域名校验（只收 ASCII 主机名，可带前导 `*.`；拒 IP / localhost / 单段名 /
+  │   │                                    保留后缀 / 已知解析到任意 IP 的服务；≤16 项）+ CSP 生成（只产 443 上的 `https://` 与
+  │   │                                    `wss://`，属性测试钉住不出现 `http:` `ws:` 裸 `https:` `*` IP 端口）+ `canonicalNetworkHash` +
+  │   │                                    `validateExternalUrl`（openExternal 用）
+  │   ├── plugin-manifest.ts              ← `coercePluginManifest`（永不抛，丢弃项记 droppedNotes，`network` 有一项不合规整包不可装）+
+  │   │                                    `satisfiesPluginApi`（`^` `~` `>=` 精确）
+  │   ├── plugin-commands.ts              ← `translatePluginCommands`（`{type,...}` 命令 → `StatePatch[]` + 前置条件，`money.spend` 隐含
+  │   │                                    「余额 ≥ 总额」；任意深度出现 `id` `saveId` `__proto__` `prototype` `constructor` → `INVALID`；
+  │   │                                    未声明 → `DENIED`）+ `evaluatePluginExpect`
+  │   ├── plugin-projection.ts            ← `buildPluginView`：白名单读投影（输入只有角色 / SaveProfile / 消息 / 剧情事件 / 运行态 / 天气），
+  │   │                                    `messages` 最近 50 条且过 `redactSecrets`，输出 JSON 往返。⚠️ `plot` 投影含隐藏事件（待裁定）
+  │   └── plugin-install-plan.ts          ← `planPluginInstall`（install / update / unchanged；联网变化 → 要重新确认并作废各存档确认；
+  │                                        `networkAdded` 只在 update 给）+ `computePluginContentHash`
   ├── workshop/workshop-types.ts             ← [工坊 P1] WorkshopProject / 载荷与安装计划类型 + 常量
   ├── workshop/workshop-manifest.ts          ← [工坊 P1] ★纯函数：上游 JSON → 内部形状（容忍字段增删，丢弃项记 droppedNotes）
   ├── workshop/workshop-regex-map.ts         ← [工坊 P1] ★纯函数：ST 正则 → BeautifierRule（裸 pattern 与 /p/flags 两形态都吃）
@@ -766,6 +833,12 @@ src/core/                    ← 核心引擎
   │   🪦 `api-router.ts` 已删（BFF 同源后端重构 Phase A+B）。路由改住 `server/routes/`
   │      （**7 个文件**：chat / models / image / embeddings / proxy / status / **content**），
   │      入口是 `server/app.ts`，引擎目录里不再有路由层，别按图找那个文件。
+  │      📌 2026-11-15：上面的「7 个文件」已过时（不再维护计数）。插件系统新增 `server/routes/plugins.ts`
+  │      （本地插件目录只读列表 / 文件 + 自检金丝雀登记、命中查询与记录）、`server/plugin-dir.ts`
+  │      （目录解析与路径逐段校验，lstat/readlink 逐级拒链接，不调 realpath）、`server/plugin-canary.ts`
+  │      （内存金丝雀，60 秒过期 + WebSocket `upgrade` 处理器）；`vite.config.ts` 在 dev/preview 最前面挂
+  │      插件目录拒绝中间件并列入 `server.fs.deny`。🔴 server 侧不 import `src/core`：路径规则与扩展名表
+  │      在 `plugins/plugin-surface.ts` 另有一份，由一致性测试钉住
   │
   └── (🪦 战斗 v2/v3 架构文档均已退役：纯计算公式可参考 docs/reference/combat-system-architecture.md
        的 §四/§五/§八/§九；现役战斗真源 = `combat/sandbox/` + docs/planning/2026-10-02-combat-decode-entitygen-plan.md)

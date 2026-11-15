@@ -1,3 +1,5 @@
+import { buildCageDocument, CAGE_MESSAGE_SOURCE } from './frame-cage';
+
 export const BEAUTIFIER_FRAME_SANDBOX = 'allow-scripts';
 
 export const BEAUTIFIER_FRAME_MESSAGE_SOURCE = 'fated-poem-beautifier';
@@ -24,10 +26,22 @@ export type BeautifierStorageEntry = readonly [key: string, value: string];
  */
 export type BeautifierFrameScriptPolicy = 'allow' | 'block';
 
+/**
+ * 加固档（插件系统设计 §4.4、§11 前两档）：远程来源只留 `https:` / `wss:`，去掉明文
+ * `http:` 与 `ws:` —— 本机与局域网服务几乎都是明文 HTTP，对内网地址发 HTTPS 也拿不出
+ * 有效证书。不加固时逐字节保持原策略串。
+ */
+export interface BeautifierFrameCspOptions {
+  hardened?: boolean;
+}
+
 export function buildBeautifierFrameCsp(
   scripts: BeautifierFrameScriptPolicy,
   scriptNonce: string,
+  { hardened = false }: BeautifierFrameCspOptions = {},
 ): string {
+  const remote = hardened ? 'https:' : 'http: https:';
+  const remoteSockets = hardened ? 'https: wss:' : 'http: https: ws: wss:';
   const shared = [
     "base-uri 'none'",
     "object-src 'none'",
@@ -35,10 +49,10 @@ export function buildBeautifierFrameCsp(
     "child-src 'none'",
     "form-action 'none'",
     "manifest-src 'none'",
-    "style-src http: https: data: blob: 'unsafe-inline'",
-    'img-src http: https: data: blob:',
-    'font-src http: https: data: blob:',
-    'media-src http: https: data: blob:',
+    `style-src ${remote} data: blob: 'unsafe-inline'`,
+    `img-src ${remote} data: blob:`,
+    `font-src ${remote} data: blob:`,
+    `media-src ${remote} data: blob:`,
   ];
 
   if (scripts === 'block') {
@@ -53,11 +67,11 @@ export function buildBeautifierFrameCsp(
   }
 
   return [
-    'default-src http: https: data: blob:',
+    `default-src ${remote} data: blob:`,
     ...shared,
-    'connect-src http: https: ws: wss: data: blob:',
+    `connect-src ${remoteSockets} data: blob:`,
     'worker-src blob:',
-    "script-src http: https: data: blob: 'unsafe-inline' 'unsafe-eval'",
+    `script-src ${remote} data: blob: 'unsafe-inline' 'unsafe-eval'`,
     "script-src-attr 'unsafe-inline'",
   ].join('; ');
 }
@@ -74,6 +88,11 @@ export interface BeautifierFrameDocumentOptions {
   scripts?: BeautifierFrameScriptPolicy;
   /** 仅用于测试注入确定性 nonce；生产走 `createBeautifierBridgeId()`。 */
   scriptNonce?: string;
+  /**
+   * 加固档（见 `beautifier-hardening.ts`）：CSP 去掉 `http:` / `ws:`，并把整份文档
+   * 套进 relay 牢笼帧（`frame-cage.ts`）。返回值是牢笼文档，美化文档作为它的内层帧。
+   */
+  hardened?: boolean;
 }
 
 export interface BeautifierFrameMessage {
@@ -166,14 +185,33 @@ export function recommendedFrameMinHeight(markup: string): number {
  * the markup. Either way parent/storage access, nested frames, forms, popups,
  * downloads, external anchor navigation, and top-level navigation are blocked.
  */
-export function buildBeautifierFrameDocument({
-  markup,
-  bridgeId,
-  forwardContextMenu = false,
-  storageEntries = [],
-  scripts = 'allow',
-  scriptNonce,
-}: BeautifierFrameDocumentOptions): string {
+export function buildBeautifierFrameDocument(options: BeautifierFrameDocumentOptions): string {
+  if (!options.hardened) return buildInnerFrameDocument(options, false);
+  // 牢笼与内层共用同一份 CSP 与同一个 nonce：srcdoc 内层继承牢笼的策略，两份策略取交集，
+  // 模型帧（nonce-only）的宿主引导脚本因此仍然放行。规则帧靠 'unsafe-inline'，nonce 无害。
+  const scripts = options.scripts ?? 'allow';
+  const nonce = options.scriptNonce ?? createBeautifierBridgeId();
+  return buildCageDocument({
+    csp: buildBeautifierFrameCsp(scripts, nonce, { hardened: true }),
+    inner: buildInnerFrameDocument({ ...options, scripts, scriptNonce: nonce }, true),
+    innerMode: 'srcdoc',
+    link: 'relay',
+    channel: options.bridgeId,
+    scriptNonce: nonce,
+  });
+}
+
+function buildInnerFrameDocument(
+  {
+    markup,
+    bridgeId,
+    forwardContextMenu = false,
+    storageEntries = [],
+    scripts = 'allow',
+    scriptNonce,
+  }: BeautifierFrameDocumentOptions,
+  hardened: boolean,
+): string {
   const parts = splitRichDocument(markup);
   const bridgeLiteral = JSON.stringify(bridgeId);
   const sourceLiteral = JSON.stringify(BEAUTIFIER_FRAME_MESSAGE_SOURCE);
@@ -193,7 +231,7 @@ export function buildBeautifierFrameDocument({
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="${buildBeautifierFrameCsp(scripts, nonce)}">
+<meta http-equiv="Content-Security-Policy" content="${buildBeautifierFrameCsp(scripts, nonce, { hardened })}">
 <style>
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; width: 100%; min-width: 0; background: transparent; }
@@ -552,6 +590,18 @@ export function isBeautifierFrameMessage(
       typeof mutation.value === 'string'
     );
   });
+}
+
+/**
+ * 加固档下牢笼帧报告「内层帧已加载」：relay 模式在内层加载前收到的宿主消息会丢，
+ * 宿主把它与美化帧自己的 `ready` 一样当作可以开始发主题 / 存储消息的信号。
+ */
+export function isBeautifierCageInnerReady(value: unknown, bridgeId: string): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const data = value as { source?: unknown; channel?: unknown; type?: unknown };
+  return (
+    data.source === CAGE_MESSAGE_SOURCE && data.channel === bridgeId && data.type === 'inner-ready'
+  );
 }
 
 export function collectThemeValues(style: CSSStyleDeclaration): Record<string, string> {

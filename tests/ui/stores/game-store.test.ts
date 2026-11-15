@@ -383,6 +383,44 @@ describe('refreshFromDb', () => {
 
 // ===== loadSave 剧情回读 =====
 
+describe('setSaveEnabledPlugins（插件启用轴）', () => {
+  beforeEach(async () => {
+    await initializeDatabase();
+    await clearAllData();
+  });
+
+  it('启用非空时置 pluginHardened；清空启用轴后它保持为 true', async () => {
+    const store = makeStore();
+    await saveSaveSlot(makeSaveSlot());
+    await store.loadSaves();
+
+    expect(await store.setSaveEnabledPlugins(SAVE_ID, ['example.shop'])).toBe(true);
+    let row = await getSave(SAVE_ID);
+    expect(row?.metadata?.enabledPluginIds).toEqual(['example.shop']);
+    expect(row?.metadata?.pluginHardened).toBe(true);
+
+    expect(await store.setSaveEnabledPlugins(SAVE_ID, [])).toBe(true);
+    row = await getSave(SAVE_ID);
+    expect(row?.metadata?.enabledPluginIds).toEqual([]);
+    expect(row?.metadata?.pluginHardened).toBe(true);
+    expect(store.saves[0].metadata?.pluginHardened).toBe(true);
+  });
+
+  it('从未启用过插件的存档写空启用轴不置 pluginHardened', async () => {
+    const store = makeStore();
+    await saveSaveSlot(makeSaveSlot());
+    await store.loadSaves();
+
+    expect(await store.setSaveEnabledPlugins(SAVE_ID, [])).toBe(true);
+    expect((await getSave(SAVE_ID))?.metadata?.pluginHardened).toBeUndefined();
+  });
+
+  it('存档不在内存里时返回 false', async () => {
+    const store = makeStore();
+    expect(await store.setSaveEnabledPlugins('missing', ['example.shop'])).toBe(false);
+  });
+});
+
 describe('loadSave 剧情回读', () => {
   beforeEach(async () => {
     try {
@@ -466,6 +504,8 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
     const result = await store.restoreToSnapshot('missing-snapshot');
 
     expect(result).toEqual({ status: 'rejected', error: '生成进行中，无法恢复' });
+    // 被拒绝的恢复不算一次时间线恢复
+    expect(store.timelineRestoreSeq).toBe(0);
   });
 
   it('rollbackOneTurn: 生成中在读取回退目标前拒绝时间线恢复', async () => {
@@ -545,10 +585,13 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
   it('rollbackOneTurn: 回退到上一轮 → 输入回填 + turn2消息删除 + 状态恢复 + totalTurns对齐', async () => {
     await seedTwoTurns();
     expect(store.messages.map((m) => m.id)).toContain('a2');
+    const seqBefore = store.timelineRestoreSeq;
 
     const result = await store.rollbackOneTurn();
 
     expect(result.status).toBe('restored');
+    // 插件运行时据此重推视图：恢复成功一次 +1
+    expect(store.timelineRestoreSeq).toBe(seqBefore + 1);
     // 输入框回填 turn2 的玩家输入
     expect(store.pendingInput).toBe('第二轮输入(待回填)');
     // turn2 消息删除，turn1 保留
@@ -734,6 +777,24 @@ describe('rollbackOneTurn / restoreToSnapshot', () => {
 
     await store.loadSave(SAVE_ID);
     expect(store.activeSave?.metadata?.totalTurns).toBe(1);
+  });
+
+  // 插件写入的运行态守卫（plugin-runtime-store.runGuard）只读 isGenerating / isRewriting /
+  // isInCombat：恢复时间线期间返回 BUSY 全靠这里把 isGenerating 置真，钉住它
+  it('restoreToSnapshot: 恢复进行中 isGenerating 为真，结束后复位', async () => {
+    await seedTwoTurns();
+    const seen: boolean[] = [];
+    const readMessages = vi.spyOn(database, 'getMessages').mockImplementation(async (...args) => {
+      seen.push(store.isGenerating);
+      readMessages.mockRestore();
+      return database.getMessages(...args);
+    });
+
+    const result = await store.restoreToSnapshot('snap-turn1');
+
+    expect(result.status).toBe('restored');
+    expect(seen).toEqual([true]);
+    expect(store.isGenerating).toBe(false);
   });
 
   it('restoreToSnapshot: 清除旧分支瞬态并保留布局偏好', async () => {

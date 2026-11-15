@@ -118,6 +118,10 @@ describe('settings-store', () => {
     expect(store.settings.developerMode).toBe(false);
   });
 
+  it('插件「跟随文件夹自动重载」默认关闭', () => {
+    expect(store.settings.pluginDevAutoReload).toBe(false);
+  });
+
   it('修改 settings 应自动写 localStorage', async () => {
     await store.initApiSecrets();
     store.settings.apiPool = [

@@ -137,4 +137,147 @@ describe('BeautifierFrame persistent storage bridge', () => {
 
     wrapper.unmount();
   });
+
+  describe('加固档（relay 牢笼）', () => {
+    async function mountHardened() {
+      const wrapper = mount(BeautifierFrame, {
+        attachTo: document.body,
+        props: {
+          markup: '<div>card</div>',
+          ruleName: 'Hardened rule',
+          hardened: true,
+        },
+      });
+      await flushPromises();
+      const iframe = wrapper.get('iframe');
+      const element = iframe.element as HTMLIFrameElement;
+      const srcdoc = iframe.attributes('srcdoc')!;
+      const config = JSON.parse(srcdoc.match(/const config = (\{.*\});\n/)![1]) as {
+        channel: string;
+        link: string;
+      };
+      return { wrapper, element, srcdoc, id: config.channel, link: config.link };
+    }
+
+    function fromFrame(element: HTMLIFrameElement, data: Record<string, unknown>): void {
+      // relay 模式下宿主看到的来源是牢笼窗口 —— 正是这个 iframe 元素的 contentWindow。
+      window.dispatchEvent(new MessageEvent('message', { source: element.contentWindow, data }));
+    }
+
+    it('srcdoc 是 relay 牢笼文档，内层的桥 id 与宿主一致', async () => {
+      const { wrapper, srcdoc, id, link } = await mountHardened();
+
+      expect(link).toBe('relay');
+      expect(srcdoc).not.toContain('<div>card</div>');
+      expect(srcdoc).toContain(JSON.stringify(id));
+      expect(wrapper.get('iframe').attributes('sandbox')).toBe('allow-scripts');
+
+      wrapper.unmount();
+    });
+
+    it('relay 的 ready 到达前不发宿主消息，就绪后补发主题与存储快照', async () => {
+      const { wrapper, element, id } = await mountHardened();
+      const postMessage = vi.spyOn(element.contentWindow!, 'postMessage');
+
+      // 牢笼加载、主题变化、同伴存储写入 —— 内层还没就绪，发出去也会被牢笼丢掉。
+      await wrapper.get('iframe').trigger('load');
+      storage.listener?.([{ kind: 'set', key: 'early', value: '1' }]);
+      await flushPromises();
+      expect(postMessage).not.toHaveBeenCalled();
+
+      fromFrame(element, { source: 'fated-poem-beautifier', bridgeId: id, type: 'ready' });
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ bridgeId: id, type: 'theme' }),
+        '*',
+      );
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ bridgeId: id, type: 'storage-reset' }),
+        '*',
+      );
+
+      // 就绪之后同伴写入照常经牢笼转发。
+      postMessage.mockClear();
+      const mutations = [{ kind: 'remove', key: 'theme' }] as const;
+      storage.listener?.(mutations);
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'storage-sync', mutations }),
+        '*',
+      );
+
+      wrapper.unmount();
+    });
+
+    it('牢笼的 inner-ready 也算就绪信号，且不会重复补发', async () => {
+      const { wrapper, element, id } = await mountHardened();
+      const postMessage = vi.spyOn(element.contentWindow!, 'postMessage');
+      const innerReady = { source: 'fated-poem-cage', channel: id, type: 'inner-ready' };
+
+      fromFrame(element, { ...innerReady, channel: 'other-frame' });
+      expect(postMessage).not.toHaveBeenCalled();
+
+      fromFrame(element, innerReady);
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ bridgeId: id, type: 'theme' }),
+        '*',
+      );
+      const calls = postMessage.mock.calls.length;
+      fromFrame(element, innerReady);
+      expect(postMessage.mock.calls.length).toBe(calls);
+
+      wrapper.unmount();
+    });
+
+    it('高度与存储写入经牢笼转发后照常生效，别的窗口发来的一律不认', async () => {
+      const { wrapper, element, id } = await mountHardened();
+
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: window,
+          data: { source: 'fated-poem-beautifier', bridgeId: id, type: 'height', height: 500 },
+        }),
+      );
+      expect(wrapper.emitted('resize')).toBeUndefined();
+
+      fromFrame(element, {
+        source: 'fated-poem-beautifier',
+        bridgeId: id,
+        type: 'height',
+        height: 420,
+      });
+      await flushPromises();
+      expect(wrapper.emitted('resize')).toEqual([[420]]);
+      expect(wrapper.get('iframe').attributes('style')).toContain('height: 420px');
+
+      const mutations = [{ kind: 'set', key: 'font', value: 'large' }] as const;
+      fromFrame(element, {
+        source: 'fated-poem-beautifier',
+        bridgeId: id,
+        type: 'storage-mutate',
+        sequence: 1,
+        mutations,
+      });
+      await flushPromises();
+      expect(storage.commit).toHaveBeenCalledWith(mutations);
+
+      wrapper.unmount();
+    });
+
+    it('切换加固档会重建文档并重新等待就绪', async () => {
+      const { wrapper, element, id } = await mountHardened();
+      fromFrame(element, { source: 'fated-poem-beautifier', bridgeId: id, type: 'ready' });
+
+      await wrapper.setProps({ markup: '<div>next</div>' });
+      const postMessage = vi.spyOn(element.contentWindow!, 'postMessage');
+      storage.listener?.([{ kind: 'set', key: 'late', value: '1' }]);
+      await flushPromises();
+      expect(postMessage).not.toHaveBeenCalled();
+
+      await wrapper.setProps({ hardened: false });
+      const plainSrcdoc = wrapper.get('iframe').attributes('srcdoc')!;
+      expect(plainSrcdoc).toContain('<div>next</div>');
+      expect(plainSrcdoc).not.toContain('fated-poem-cage');
+
+      wrapper.unmount();
+    });
+  });
 });

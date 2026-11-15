@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "ration",
+      "price": 10,
+      "limit": 5,
+      "item": {
+        "name": "干粮",
+        "type": "消耗品",
+        "rarity": "普通",
+        "description": "一份便于携带的口粮。"
+      }
+    },
+    {
+      "id": "bandage",
+      "price": 15,
+      "item": {
+        "name": "绷带",
+        "type": "消耗品",
+        "rarity": "普通",
+        "description": "用于简单包扎的布条。"
+      }
+    },
+    {
+      "id": "torch",
+      "price": 8,
+      "item": {
+        "name": "火把",
+        "type": "消耗品",
+        "rarity": "普通",
+        "description": "照明用的火把。"
+      }
+    },
+    {
+      "id": "rope",
+      "price": 20,
+      "limit": 2,
+      "item": {
+        "name": "麻绳",
+        "type": "材料",
+        "rarity": "普通",
+        "description": "一捆结实的绳子。"
+      }
+    }
+  ]
+}

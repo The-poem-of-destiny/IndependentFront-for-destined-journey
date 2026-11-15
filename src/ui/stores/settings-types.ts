@@ -224,6 +224,12 @@ export type UiSettings = {
   /** 解锁调试入口与原始 Agent 诊断；默认关闭，不影响玩家可见的语义活动账本 */
   developerMode: boolean;
   /**
+   * 插件「跟随文件夹自动重载」（插件设计 §3.3，开发者用）；默认关闭。
+   * 开着时本地文件夹里的插件更新在重新扫描时直接装上，但 `network` 变了仍要确认。
+   * plugin-store 只认 `=== true`；开关放在扩展管理页插件管理的开发者区。
+   */
+  pluginDevAutoReload: boolean;
+  /**
    * 「Story 上下文与记忆新模式」实验开关；默认关闭，**独立于** developerMode。
    * 开启：只能使用带 `metadata.storyContextV2` 标记的测试档；关闭：只能使用普通存档。
    * 判据统一走 `@engine/story/story-context-mode` 的 `decideStoryContextAdmission`。

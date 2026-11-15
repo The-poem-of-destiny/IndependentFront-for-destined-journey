@@ -60,8 +60,8 @@ describe('direct cache persistence', () => {
     await createDirectCacheStore().save(record);
     const full = await exportAllData();
     const single = await exportSessionSave(saveId);
-    expect(full.version).toBe(33);
-    expect(single.version).toBe(33);
+    expect(full.version).toBe(34);
+    expect(single.version).toBe(34);
     expect(JSON.stringify(full)).not.toContain('local lore');
     expect(JSON.stringify(single)).not.toContain('local lore');
     await deleteSaveSlot(saveId);

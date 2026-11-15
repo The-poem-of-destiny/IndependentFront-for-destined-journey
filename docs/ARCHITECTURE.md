@@ -132,6 +132,12 @@ API 配置由 `stores/api-source-store.ts` 水合 Dexie 中的类型化通用源
   「代码看着完全正确，请求 404」。加路由**只改这张表**。
 - **`Origin: null` 一律 403**。沙箱 srcdoc frame 会发这个头；放行等于把带凭据的 BFF 变成
   它的内网代理。
+  📌 2026-11-15 插件系统（ADR-36 暂定，[设计](planning/2026-11-15-plugin-system-design.md)）：新增
+  `/api/plugins` 前缀（`server/routes/plugins.ts`）—— 本地插件目录（`server/plugin-dir.ts`，默认仓库上一级
+  `poem-plugins/`，`POEM_PLUGINS_DIR` 覆盖）的只读列表与文件，只接受 `Sec-Fetch-Site: same-origin`，只回
+  `application/octet-stream`；外加自检金丝雀（`server/plugin-canary.ts`）。唯一例外：金丝雀两条记录路由
+  排在 `Origin: null` 拒绝之前（先记命中，Hono 与 vite dev 两层同序），WebSocket 握手经 `upgrade` 处理器记录。
+  `vite.config.ts` 在 dev 与 preview 最前面各挂一层「解析后落进插件目录即 403」的中间件，并把插件目录列进 `server.fs.deny`。
 - **SSRF 黑名单**在 `routes/proxy.ts`：只拒云厂商元数据端点（IMDS 等）。**不拒 localhost / 私有 IP**
   —— 本地 LLM（ollama 等）需要它们，且这是同源单租户 BFF。上云多租户时必须改成 DNS 解析后逐 IP 校验。
 - 唯一有状态的例外是 `/api/worldbooks` `/api/defaults` 两条**写回**路由，只在

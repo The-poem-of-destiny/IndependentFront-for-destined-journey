@@ -1,0 +1,63 @@
+/* 杂货铺示例样式：只用宿主下发的 --theme-* 变量，取不到时退回中性色 */
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  padding: 12px 16px;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  color: var(--theme-text, #2b2b2b);
+  background: var(--theme-bg, #faf8f4);
+}
+
+.shop-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--theme-border, #d8d2c6);
+  padding-bottom: 8px;
+}
+
+.shop-header h1 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.shop-stock {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.shop-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--theme-border, #d8d2c6);
+  border-radius: 6px;
+}
+
+.shop-item-desc {
+  grid-column: 1 / -1;
+  margin: 0;
+  opacity: 0.75;
+}
+
+.shop-item button {
+  min-width: 72px;
+}
+
+.shop-notice {
+  min-height: 1.5em;
+  margin: 0;
+}
+
+.shop-notice[data-kind='error'] {
+  color: var(--theme-danger, #b3261e);
+}

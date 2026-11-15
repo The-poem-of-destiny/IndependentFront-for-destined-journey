@@ -134,6 +134,14 @@ vi.mock('../../../../src/ui/stores/game-store', () => ({
   setAutosaveImpl: vi.fn(),
 }));
 
+// 插件运行时与贡献点用替身：真运行时进档会读 game.saves，而本文件的 game-store 是精简 mock
+vi.mock('../../../../src/ui/stores/plugin-runtime-store', async () =>
+  (await import('../../../helpers/plugin-ui-fakes')).pluginRuntimeStoreModule(),
+);
+vi.mock('../../../../src/ui/composables/usePluginContributions', async () =>
+  (await import('../../../helpers/plugin-ui-fakes')).pluginContributionsModule(),
+);
+
 vi.mock('../../../../src/ui/stores/ui-store', () => ({
   useUIStore: vi.fn(() => ({
     activeSaveId: 'save_seam_wiring',

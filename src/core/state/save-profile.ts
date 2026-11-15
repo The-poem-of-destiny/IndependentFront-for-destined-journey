@@ -14,6 +14,8 @@ import type {
 } from '../types/types';
 import { getSaveProfile, saveSaveProfile, createDefaultSaveProfile } from '../persistence/database';
 import { withSaveWriteLock } from './state-write-queue';
+import type { PluginPromptInputs, PluginResult, PluginRunGuard } from '../types/types-plugin';
+import { PLUGIN_LIMITS } from '../plugins/plugin-surface';
 
 // ========== Profile CRUD ==========
 
@@ -673,4 +675,306 @@ export async function commitPlotThreadTurn(
       revealedCount: afterRevealed.revealed.length,
     };
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+// 插件的存档数据：命名写入口（插件系统设计 §3.5 / §5.6 / §5.8 —— P1-09 受控例外扩展）
+// ═══════════════════════════════════════════════════════════
+//
+// 存放位置（随快照、回退、FullBackup 与单存档导出走，零新 Dexie 表）：
+//   worldFlags.plugins[pluginId] = { kv: Record<string, unknown>, context?: string }
+//     - `kv`：`host.storage.save` 的键值（值已过一次 JSON 往返）
+//     - `context`：`host.ai.context.set` 的常驻提示块，每回合注入，直到插件清掉
+//     - 整格（kv + context）序列化后的 UTF-8 字节计入 `PLUGIN_LIMITS.saveBagBytes`（每插件 256KB）
+//   worldFlags.pluginNotes = [{ pluginId, pluginName, text, turn, visible? }, …]
+//     - `host.ai.note` 的一次性告知队列，全存档合计至多 `PLUGIN_LIMITS.noteQueue` 条
+//     - `turn` = 入队时**已完成**的回合号（插件读投影里的 `run.turn`）。写入在生成中一律 `BUSY`，
+//       所以第 N 回合装配时队列里的每一条都满足 `turn < N`；第 N 回合成功收口后
+//       `clearPluginNotesForTurn(saveId, N)` 清掉 `turn < N` 的条目（重复调用无副作用）。
+//
+// 每个写入口都照 `persistFocusQuest` 的两条铁律：进 `withSaveWriteLock` + 锁内重读新鲜 profile、
+// 只改插件这两格；运行态守卫（`BUSY` / `IN_COMBAT`）在锁内再问一次（§6.1：等到锁时回合可能已开始）。
+// 别的插件的格子、别的 worldFlags 一格不碰。
+
+/** `worldFlags.plugins[pluginId]` 的形状 */
+interface PluginSaveBag {
+  kv: Record<string, unknown>;
+  context?: string;
+}
+
+/** `worldFlags.pluginNotes` 的一条 */
+interface PluginNoteEntry {
+  pluginId: string;
+  pluginName: string;
+  text: string;
+  turn: number;
+  visible?: true;
+}
+
+const pluginUtf8 = new TextEncoder();
+
+/** 会污染原型链的键，一律拒收（与 plugin-commands 的口径一致） */
+const UNSAFE_PLUGIN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function pluginFail(
+  code: 'BUSY' | 'IN_COMBAT' | 'INVALID' | 'QUOTA',
+  message: string,
+): PluginResult {
+  return { ok: false, code, message };
+}
+
+/** 锁内复检运行态；放行返回 `null` */
+function checkPluginGuard(guard: PluginRunGuard): PluginResult | null {
+  const state = guard();
+  if (state === 'BUSY') return pluginFail('BUSY', '正在生成，暂不能写入');
+  if (state === 'IN_COMBAT') return pluginFail('IN_COMBAT', '战斗中，暂不能写入');
+  return null;
+}
+
+/** 读出 `worldFlags.plugins` 里某插件那一格（认不出的形状当没有）；`kv` 是库里那份的引用 */
+function readPluginBag(profile: SaveProfile, pluginId: string): PluginSaveBag | undefined {
+  const bags: unknown = profile.worldFlags?.plugins;
+  if (!isPlainRecord(bags) || !Object.prototype.hasOwnProperty.call(bags, pluginId))
+    return undefined;
+  const raw = bags[pluginId];
+  if (!isPlainRecord(raw)) return undefined;
+  const bag: PluginSaveBag = { kv: isPlainRecord(raw.kv) ? raw.kv : {} };
+  if (typeof raw.context === 'string') bag.context = raw.context;
+  return bag;
+}
+
+/** 写回某插件那一格；空格（无键且无 context）整格删掉，`plugins` 空了也删 */
+function writePluginBag(profile: SaveProfile, pluginId: string, bag: PluginSaveBag | null): void {
+  profile.worldFlags ??= {};
+  const current: unknown = profile.worldFlags.plugins;
+  const bags: Record<string, unknown> = isPlainRecord(current) ? { ...current } : {};
+  const empty = bag === null || (Object.keys(bag.kv).length === 0 && bag.context === undefined);
+  if (empty) delete bags[pluginId];
+  else bags[pluginId] = bag;
+  if (Object.keys(bags).length === 0) delete profile.worldFlags.plugins;
+  else profile.worldFlags.plugins = bags;
+}
+
+function readPluginNotes(profile: SaveProfile): PluginNoteEntry[] {
+  const raw: unknown = profile.worldFlags?.pluginNotes;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (n): n is PluginNoteEntry =>
+      isPlainRecord(n) &&
+      typeof n.pluginId === 'string' &&
+      typeof n.pluginName === 'string' &&
+      typeof n.text === 'string' &&
+      typeof n.turn === 'number',
+  );
+}
+
+function writePluginNotes(profile: SaveProfile, notes: PluginNoteEntry[]): void {
+  profile.worldFlags ??= {};
+  if (notes.length === 0) delete profile.worldFlags.pluginNotes;
+  else profile.worldFlags.pluginNotes = notes;
+}
+
+function overSaveBagQuota(bag: PluginSaveBag): PluginResult | null {
+  const bytes = pluginUtf8.encode(JSON.stringify(bag)).length;
+  if (bytes <= PLUGIN_LIMITS.saveBagBytes) return null;
+  return pluginFail('QUOTA', `插件存档数据超过 ${PLUGIN_LIMITS.saveBagBytes} 字节上限`);
+}
+
+/**
+ * 读某插件在本存档的键值（`storage.save.get` 的数据源）。返回深拷贝，改它不影响库里那份。
+ * 只读不建档：存档档案不存在时返回空对象。读不受 `BUSY` / `IN_COMBAT` 限制（§6.1）。
+ */
+export async function getPluginSaveBag(
+  saveId: string,
+  pluginId: string,
+): Promise<Record<string, unknown>> {
+  const profile = await getSaveProfile(saveId);
+  const bag = profile ? readPluginBag(profile, pluginId) : undefined;
+  return bag ? (JSON.parse(JSON.stringify(bag.kv)) as Record<string, unknown>) : {};
+}
+
+/**
+ * `storage.save.set` / `storage.save.remove` 的落库入口。
+ * 值必须能 JSON 序列化，落库的是 JSON 往返后的规整值；写后整格超 256KB 返回 `QUOTA`、什么也不写。
+ * 删除不存在的键视为成功。
+ */
+export async function writePluginSaveKv(
+  saveId: string,
+  pluginId: string,
+  op: { set: [string, unknown] } | { remove: string },
+  guard: PluginRunGuard,
+): Promise<PluginResult> {
+  const key = 'set' in op ? op.set[0] : op.remove;
+  if (typeof key !== 'string' || key.length === 0) {
+    return pluginFail('INVALID', '键必须是非空字符串');
+  }
+  if (UNSAFE_PLUGIN_KEYS.has(key)) return pluginFail('INVALID', `键不能是 ${key}`);
+
+  let value: unknown;
+  if ('set' in op) {
+    let json: string | undefined;
+    try {
+      json = JSON.stringify(op.set[1]);
+    } catch {
+      return pluginFail('INVALID', '值必须能 JSON 序列化');
+    }
+    if (json === undefined) return pluginFail('INVALID', '值必须能 JSON 序列化');
+    value = JSON.parse(json) as unknown;
+  }
+
+  return withSaveWriteLock(saveId, async () => {
+    const blocked = checkPluginGuard(guard);
+    if (blocked) return blocked;
+    const fresh = await getProfile(saveId);
+    const bag = readPluginBag(fresh, pluginId) ?? { kv: {} };
+    const kv = { ...bag.kv };
+    if ('set' in op) {
+      kv[key] = value;
+    } else {
+      if (!Object.prototype.hasOwnProperty.call(kv, key)) return { ok: true };
+      delete kv[key];
+    }
+    const next: PluginSaveBag = { ...bag, kv };
+    const quota = overSaveBagQuota(next);
+    if (quota) return quota;
+    writePluginBag(fresh, pluginId, next);
+    await updateProfile(fresh);
+    return { ok: true };
+  });
+}
+
+/**
+ * `host.ai.context.set` 的落库入口：设置或清掉（`null` / 空串）本插件的常驻提示块。
+ * 非字符串返回 `INVALID`；超过 `PLUGIN_LIMITS.contextChars` 字或整格超 256KB 返回 `QUOTA`。
+ */
+export async function setPluginContext(
+  saveId: string,
+  pluginId: string,
+  text: string | null,
+  guard: PluginRunGuard,
+): Promise<PluginResult> {
+  if (text !== null && typeof text !== 'string') {
+    return pluginFail('INVALID', '提示块必须是字符串或 null');
+  }
+  if (text !== null && text.length > PLUGIN_LIMITS.contextChars) {
+    return pluginFail('QUOTA', `提示块超过 ${PLUGIN_LIMITS.contextChars} 字上限`);
+  }
+  return withSaveWriteLock(saveId, async () => {
+    const blocked = checkPluginGuard(guard);
+    if (blocked) return blocked;
+    const fresh = await getProfile(saveId);
+    const bag = readPluginBag(fresh, pluginId) ?? { kv: {} };
+    const next: PluginSaveBag = { kv: bag.kv };
+    if (text) next.context = text;
+    if (next.context === bag.context) return { ok: true };
+    const quota = overSaveBagQuota(next);
+    if (quota) return quota;
+    writePluginBag(fresh, pluginId, next);
+    await updateProfile(fresh);
+    return { ok: true };
+  });
+}
+
+/**
+ * `host.ai.note` 的落库入口：进待告知队列，下一回合装配时注入，回合成功收口后清掉。
+ * `opts.turn` 是入队时已完成的回合号（见本节开头的说明）；`opts.visible` 只是记录，
+ * 给玩家看的通知条由宿主另行落。空串 / 非字符串返回 `INVALID`；
+ * 超过 `PLUGIN_LIMITS.noteChars` 字或队列已满 `PLUGIN_LIMITS.noteQueue` 条返回 `QUOTA`。
+ */
+export async function enqueuePluginNote(
+  saveId: string,
+  pluginId: string,
+  pluginName: string,
+  text: string,
+  opts: { turn: number; visible?: boolean },
+  guard: PluginRunGuard,
+): Promise<PluginResult> {
+  if (typeof text !== 'string' || text.trim().length === 0) {
+    return pluginFail('INVALID', '告知内容必须是非空字符串');
+  }
+  if (text.length > PLUGIN_LIMITS.noteChars) {
+    return pluginFail('QUOTA', `告知内容超过 ${PLUGIN_LIMITS.noteChars} 字上限`);
+  }
+  if (!Number.isSafeInteger(opts.turn) || opts.turn < 0) {
+    return pluginFail('INVALID', '回合号必须是非负整数');
+  }
+  return withSaveWriteLock(saveId, async () => {
+    const blocked = checkPluginGuard(guard);
+    if (blocked) return blocked;
+    const fresh = await getProfile(saveId);
+    const notes = readPluginNotes(fresh);
+    if (notes.length >= PLUGIN_LIMITS.noteQueue) {
+      return pluginFail('QUOTA', `待告知队列已满（${PLUGIN_LIMITS.noteQueue} 条）`);
+    }
+    const entry: PluginNoteEntry = { pluginId, pluginName, text, turn: opts.turn };
+    if (opts.visible === true) entry.visible = true;
+    writePluginNotes(fresh, [...notes, entry]);
+    await updateProfile(fresh);
+    return { ok: true };
+  });
+}
+
+/**
+ * 第 `turnNo` 回合成功收口时调用：清掉本回合装配时已注入的告知（`turn < turnNo` 的条目）。
+ * 幂等：重复调用或队列已空时不写库。返回清掉的条数。
+ * 🔴 自己会进写锁 —— 别在 `withSaveWriteLock` 段里调它（同 saveId 自等死锁）。
+ */
+export async function clearPluginNotesForTurn(saveId: string, turnNo: number): Promise<number> {
+  return withSaveWriteLock(saveId, async () => {
+    const existing = await getSaveProfile(saveId);
+    if (!existing) return 0;
+    const notes = readPluginNotes(existing);
+    const kept = notes.filter((n) => n.turn >= turnNo);
+    const removed = notes.length - kept.length;
+    if (removed === 0) return 0;
+    writePluginNotes(existing, kept);
+    await updateProfile(existing);
+    return removed;
+  });
+}
+
+/**
+ * 「清除此插件在本存档的数据」（§6.4）：删掉该插件的键值、常驻提示块与待告知条目，
+ * 别的插件一格不动。玩家主动操作，不受运行态守卫限制。幂等：没有数据时不写库。
+ */
+export async function clearPluginSaveData(saveId: string, pluginId: string): Promise<void> {
+  await withSaveWriteLock(saveId, async () => {
+    const existing = await getSaveProfile(saveId);
+    if (!existing) return;
+    const hadBag = readPluginBag(existing, pluginId) !== undefined;
+    const notes = readPluginNotes(existing);
+    const kept = notes.filter((n) => n.pluginId !== pluginId);
+    if (!hadBag && kept.length === notes.length) return;
+    writePluginBag(existing, pluginId, null);
+    writePluginNotes(existing, kept);
+    await updateProfile(existing);
+  });
+}
+
+/**
+ * 本回合要注入提示词的插件文本（§5.8）：只收 `enabledPluginIds` 里的插件。
+ * 告知按入队顺序；常驻提示块按 `enabledPluginIds` 的顺序，名字取 `nameOf(pluginId)`。
+ * 只读不建档。
+ */
+export async function readPluginPromptInputs(
+  saveId: string,
+  enabledPluginIds: readonly string[],
+  nameOf: (pluginId: string) => string,
+): Promise<PluginPromptInputs> {
+  const profile = await getSaveProfile(saveId);
+  if (!profile || enabledPluginIds.length === 0) return { notes: [], contexts: [] };
+  const enabled = new Set(enabledPluginIds);
+  const notes = readPluginNotes(profile)
+    .filter((n) => enabled.has(n.pluginId))
+    .map((n) => ({ pluginName: n.pluginName, text: n.text }));
+  const contexts: PluginPromptInputs['contexts'] = [];
+  for (const pluginId of enabled) {
+    const context = readPluginBag(profile, pluginId)?.context;
+    if (context) contexts.push({ pluginName: nameOf(pluginId), text: context });
+  }
+  return { notes, contexts };
 }

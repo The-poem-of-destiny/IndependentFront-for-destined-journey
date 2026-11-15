@@ -45,6 +45,7 @@ import {
   expandSplitEntryTokens,
 } from '../content/content-pack-plan';
 import { uidPartition } from '../content/worldbook-uid';
+import { getPluginRecord } from './plugin-storage';
 import type {
   SaveSlot,
   SaveProfile,
@@ -112,6 +113,22 @@ interface SessionDependencies {
    * 选中的预设 id 是全局 UI 状态（localStorage 的 `activePresetId`），不在引擎的可见范围内。
    */
   storyPreset?: { id: string; name: string };
+  /**
+   * 本存档勾选的插件（`metadata.enabledPluginIds`），带导出侧解析出的名字/版本。
+   *
+   * 🔴 只有身份，**没有包字节**，也**没有任何同意记录**：同意是本机的（`PluginRecord`
+   *    的 `installConsent` / `saveConsents`），从不随存档走 —— 收件人必须在本机重新确认。
+   * 本机查不到记录的 id 照样进清单（只是没有名字/版本），理由同 `worldBookEntries`。
+   * 旧备份缺这一项 = 导出时还没有插件系统。
+   */
+  plugins?: SessionPluginRef[];
+}
+
+/** 依赖清单里的一个插件 —— 名字/版本是导出时点的观察，可能缺席 */
+export interface SessionPluginRef {
+  id: string;
+  name?: string;
+  version?: string;
 }
 
 /** 单存档备份文件的顶层结构 */
@@ -166,6 +183,16 @@ export interface SessionImportCheck {
     installedVersion: string | null;
   }>;
   missingStoryPreset?: { id: string; name: string };
+  /**
+   * 存档勾选了、本机却没装的插件。**只告警不拦**：存档里的插件数据原样导入，
+   * 装上之后可续用（设计文档 §6.4）。为空时字段缺席。
+   */
+  missingPlugins?: SessionPluginRef[];
+  /**
+   * 存档勾选的全部插件（含本机已装的）。导入后每一个都要在本机重新确认才启用 ——
+   * 同意不随存档走。为空时字段缺席；它本身不影响 `ok`。
+   */
+  enabledPlugins?: SessionPluginRef[];
 }
 
 const SESSION_BACKUP_KIND = 'fated-poem-session-save';
@@ -392,6 +419,7 @@ export async function exportSessionSave(
   }
 
   const entryIndex = buildEntryAnnotations(books);
+  const plugins = await resolvePluginRefs(save.metadata?.enabledPluginIds);
   const mapPackStamp =
     (profile?.worldFlags?.map as { packStamp?: unknown } | undefined)?.packStamp ?? undefined;
   const dependencies: SessionDependencies = {
@@ -413,6 +441,7 @@ export async function exportSessionSave(
     }),
     workshopProjects: resolveWorkshopProjects(tokens, entryIndex, projects),
     ...(opts?.storyPreset ? { storyPreset: { ...opts.storyPreset } } : {}),
+    ...(plugins.length > 0 ? { plugins } : {}),
   };
 
   return {
@@ -519,12 +548,61 @@ export async function checkSessionSaveDependencies(
     if (!hit) missingStoryPreset = { ...deps.storyPreset };
   }
 
+  // ── 插件：清单 ∪ 存档自己的勾选（手编或清单残缺时，存档里的勾选仍是权威）──
+  const enabledPlugins: SessionPluginRef[] = [];
+  const pluginSeen = new Set<string>();
+  for (const ref of deps.plugins ?? []) {
+    if (!ref || typeof ref.id !== 'string' || pluginSeen.has(ref.id)) continue;
+    pluginSeen.add(ref.id);
+    enabledPlugins.push({ ...ref });
+  }
+  const savedIds = backup?.save?.metadata?.enabledPluginIds;
+  for (const id of Array.isArray(savedIds) ? savedIds : []) {
+    if (typeof id !== 'string' || pluginSeen.has(id)) continue;
+    pluginSeen.add(id);
+    enabledPlugins.push({ id });
+  }
+  const missingPlugins: SessionPluginRef[] = [];
+  for (const ref of enabledPlugins) {
+    if (!(await getPluginRecord(ref.id))) missingPlugins.push(ref);
+  }
+
   return {
-    ok: missingEntries.length === 0 && packMismatches.length === 0 && !missingStoryPreset,
+    ok:
+      missingEntries.length === 0 &&
+      packMismatches.length === 0 &&
+      !missingStoryPreset &&
+      missingPlugins.length === 0,
     missingEntries,
     packMismatches,
     ...(missingStoryPreset ? { missingStoryPreset } : {}),
+    ...(missingPlugins.length > 0 ? { missingPlugins } : {}),
+    ...(enabledPlugins.length > 0 ? { enabledPlugins } : {}),
   };
+}
+
+/**
+ * 存档勾选的插件 id → 依赖清单项。名字/版本取本机安装记录的 manifest；
+ * 查不到记录（已卸载 / 手编存档）时只留 id，不抛错。
+ *
+ * 🔴 只拷 id / name / version 三个字段，**不碰** `installConsent` / `saveConsents`
+ *    —— 同意是本机的，导出文件里不许出现。
+ */
+async function resolvePluginRefs(ids: unknown): Promise<SessionPluginRef[]> {
+  const out: SessionPluginRef[] = [];
+  const seen = new Set<string>();
+  for (const id of Array.isArray(ids) ? ids : []) {
+    if (typeof id !== 'string' || seen.has(id)) continue;
+    seen.add(id);
+    const record = await getPluginRecord(id).catch(() => undefined);
+    const manifest = record?.manifest;
+    out.push({
+      id,
+      ...(typeof manifest?.name === 'string' ? { name: manifest.name } : {}),
+      ...(typeof manifest?.version === 'string' ? { version: manifest.version } : {}),
+    });
+  }
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════

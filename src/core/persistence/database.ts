@@ -67,6 +67,7 @@ import {
   overlayRows,
 } from '../content/pack-runtime';
 import type { ImageApiConnection } from '../types/types-api';
+import type { PluginFileRecord, PluginKvRecord, PluginRecord } from '../types/types-plugin';
 import { hashWorldBook } from '../content/content-source';
 import { applyExpFloor } from '../character/exp-table';
 // type-only：Dexie 表行形状复用 assembler 的快照类型（运行时不构成依赖边）
@@ -229,7 +230,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 升版时这两处一起改。
  */
 // v30 = 战斗沙盒 combatSandboxes（本分支），在 master 的 v29 之后顺延。
-export const DB_VERSION = 33;
+export const DB_VERSION = 34;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -415,6 +416,15 @@ class AppDatabase extends Dexie {
   combatSandboxes!: Table<CombatSandboxRecord>;
   /** v33：每存档一行的本地日历（模式 / 玩家条目 / 显示选择）。不进快照，进两种备份，删档级联删 */
   saveCalendars!: Table<import('../types/types-calendar').SaveCalendar>;
+  /**
+   * v34 插件系统（设计 §3.5）：
+   * - `plugins` / `pluginFiles`：安装记录与包文件字节，设备本地、**不进 FullBackup**（Q6）、卸载即删
+   * - `pluginKv`：插件的全局数据，跨存档、**进 FullBackup**，每插件 1MB
+   * 读写入口在 `persistence/plugin-storage.ts`。
+   */
+  plugins!: Table<PluginRecord>;
+  pluginFiles!: Table<PluginFileRecord>;
+  pluginKv!: Table<PluginKvRecord>;
 
   constructor() {
     super(DB_NAME);
@@ -860,6 +870,12 @@ class AppDatabase extends Dexie {
     this.version(32).stores({});
     // 日历 v1：每存档一行，主键 saveId。只加表，不改既有数据。
     this.version(33).stores({ saveCalendars: 'saveId' });
+    // 插件系统：只加三张表，不改既有数据。
+    this.version(34).stores({
+      plugins: 'id',
+      pluginFiles: '[pluginId+path], pluginId',
+      pluginKv: '[pluginId+key], pluginId',
+    });
   }
 }
 
@@ -906,6 +922,11 @@ export interface FullBackup {
   characterChronicle?: import('../types/types-character').CharacterChronicleEntry[];
   /** v33 起；旧备份缺席 = 保留本机仍有对应存档的日历行 */
   saveCalendars?: import('../types/types-calendar').SaveCalendar[];
+  /**
+   * v34 插件全局数据；旧备份缺席 = 保留本机的行。
+   * 🔴 `plugins` / `pluginFiles` 刻意不在备份里（Q6）：包字节进备份 = 每份日常备份都夹带可执行的第三方代码。
+   */
+  pluginKv?: PluginKvRecord[];
   version: number;
   exportedAt: number;
   lorebooks: Lorebook[];
@@ -1003,6 +1024,7 @@ export async function exportAllData(): Promise<FullBackup> {
     storyTurnSummaries,
     storyArchives,
     storyArchiveRetries,
+    pluginKv,
   ] = await Promise.all([
     db.characterChronicle.toArray(),
     db.saveCalendars.toArray(),
@@ -1029,6 +1051,7 @@ export async function exportAllData(): Promise<FullBackup> {
     db.storyTurnSummaries.toArray(),
     db.storyArchives.toArray(),
     db.storyArchiveRetries.toArray(),
+    db.pluginKv.toArray(),
   ]);
   return {
     version: DB_VERSION,
@@ -1058,6 +1081,7 @@ export async function exportAllData(): Promise<FullBackup> {
     storyTurnSummaries,
     storyArchives,
     storyArchiveRetries,
+    pluginKv,
   };
 }
 
@@ -1125,6 +1149,7 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'storyTurnSummaries',
     'storyArchives',
     'storyArchiveRetries',
+    'pluginKv',
   ];
   for (const f of arrayFields) {
     const v = backup[f];
@@ -1346,6 +1371,13 @@ async function doImportAllData(
       (id) => !saveIds.has(id),
     );
     if (orphans.length > 0) await db.saveCalendars.bulkDelete(orphans);
+  });
+  // v34 插件全局数据：字段缺席（旧备份）保留本机的行，给了就整表替换。插件安装记录与包文件不受导入影响。
+  await db.transaction('rw', db.pluginKv, async () => {
+    if (backup.pluginKv !== undefined) {
+      await db.pluginKv.clear();
+      if (Array.isArray(backup.pluginKv)) await db.pluginKv.bulkPut(backup.pluginKv);
+    }
   });
   await db.transaction('rw', db.characterAppearances, async () => {
     if (backup.characterAppearances !== undefined) {

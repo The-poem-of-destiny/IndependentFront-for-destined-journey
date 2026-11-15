@@ -657,7 +657,7 @@ const PLOT_AGENT_IDS = new Set(['plot_pre_check', 'plot_post_check', 'plot_outli
  * 未命中（纯 ST 预设 / 测试桩）→ 走默认 template 追加兜底。
  */
 const STORY_PRESET_PLACEHOLDER_RE =
-  /\{\{(?:LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|USER_INPUT|CHARACTER_STATE|GAME_TIME|NARRATIVE|RANDOM_EVENTS|AGENT\.MEMORY_RECALL|AGENT\.PLOT_PRE_CHECK)\}\}/;
+  /\{\{(?:LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|USER_INPUT|CHARACTER_STATE|GAME_TIME|NARRATIVE|RANDOM_EVENTS|PLUGIN_NOTES|PLUGIN_CONTEXT|AGENT\.MEMORY_RECALL|AGENT\.PLOT_PRE_CHECK)\}\}/;
 
 /**
  * `{{RANDOM_EVENTS}}` 这一个占位符本身（随机事件 v1 §5.1）。
@@ -669,6 +669,15 @@ const STORY_PRESET_PLACEHOLDER_RE =
  *    `story-preset.json` 里都已经写上了。症状：老用户永远看不到随机事件，且不报错。
  */
 const RANDOM_EVENTS_TOKEN_RE = /\{\{RANDOM_EVENTS\}\}/;
+
+/**
+ * 预设缺席时兜底追加的两个插件块（插件设计 §5.8，口径逐条照 `{{RANDOM_EVENTS}}`）。
+ * 顺序即追加顺序：常驻提示在前、一次性告知在后（越靠近末尾越「本回合」）。
+ */
+const PLUGIN_FALLBACK_TOKENS = [
+  { name: 'PLUGIN_CONTEXT', re: /\{\{PLUGIN_CONTEXT\}\}/ },
+  { name: 'PLUGIN_NOTES', re: /\{\{PLUGIN_NOTES\}\}/ },
+] as const;
 
 /**
  * Phase 10: Build agent messages using the placeholder template system.
@@ -727,6 +736,8 @@ export function buildAgentMessages(
   // 随机事件 v1: 预设原文里到底有没有 `{{RANDOM_EVENTS}}`（判据必须取**替换前**的原文，
   // 替换后拿到的是渲染结果，池空时它是空串，与「预设根本没写这个占位符」长得一模一样）
   let presetRendersRandomEvents = false;
+  // 插件块同理：判据取替换前的预设原文
+  const presetRendersPluginToken = new Set<string>();
 
   if ((agentId === 'story' || agentId === 'direct_main') && presets && config?.presetId) {
     // Story Agent: assemble from preset
@@ -740,6 +751,9 @@ export function buildAgentMessages(
       const presetContent = assemblePresetContent(preset, '');
       storyPresetHasPlaceholders = STORY_PRESET_PLACEHOLDER_RE.test(presetContent);
       presetRendersRandomEvents = RANDOM_EVENTS_TOKEN_RE.test(presetContent);
+      for (const token of PLUGIN_FALLBACK_TOKENS) {
+        if (token.re.test(presetContent)) presetRendersPluginToken.add(token.name);
+      }
       if (storyPresetHasPlaceholders) {
         // 规范预设内部写满 {{LORE_BOOK}}/{{CHARACTER_STATE}}/{{AGENT.MEMORY_RECALL}}/
         // {{NARRATIVE}}/{{USER_INPUT}} 等系统占位符。但 resolveTemplate 单层扫描只解析
@@ -844,7 +858,19 @@ export function buildAgentMessages(
     const block =
       localParams?.RANDOM_EVENTS ??
       PLACEHOLDER_REGISTRY['RANDOM_EVENTS'](tplCtx, config ?? ({ agentId } as AgentConfig), {});
-    if (block.trim().length > 0) return [{ role: 'system', content: `${resolved}\n${block}` }];
+    if (block.trim().length > 0) resolved = `${resolved}\n${block}`;
+  }
+
+  // 🧩 插件块（插件设计 §5.8）：与上面同一套兜底 —— 预设/模板没写占位符也照样送达。
+  //    空输入返空串、追加零成本；调用方以 localParams 置空（如缓存直出把它们挪出前缀）时同样不追加。
+  if (agentId === 'story' || agentId === 'direct_main') {
+    for (const token of PLUGIN_FALLBACK_TOKENS) {
+      if (presetRendersPluginToken.has(token.name) || token.re.test(template)) continue;
+      const block =
+        localParams?.[token.name] ??
+        PLACEHOLDER_REGISTRY[token.name](tplCtx, config ?? ({ agentId } as AgentConfig), {});
+      if (block.trim().length > 0) resolved = `${resolved}\n${block}`;
+    }
   }
 
   return [{ role: 'system', content: resolved }];

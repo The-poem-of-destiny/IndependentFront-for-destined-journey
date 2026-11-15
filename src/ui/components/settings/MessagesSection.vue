@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 消息显示分区 —— 系统通知总开关 + 七类事件过滤（Q-25 从 SettingsPage.vue 抽出）
+ * 消息显示分区 —— 系统通知总开关 + 八类事件过滤（Q-25 从 SettingsPage.vue 抽出）
  */
 import AppCard from '../shared/AppCard.vue';
 import { useSettingsStore } from '../../stores/settings-store';
@@ -17,6 +17,7 @@ function eventFilterLabel(key: string | number): string {
     character_update: '角色微调',
     item_update: '物品变动',
     quest_update: '任务进度',
+    plugin_note: '插件通知',
   };
   return labels[String(key)] ?? String(key);
 }

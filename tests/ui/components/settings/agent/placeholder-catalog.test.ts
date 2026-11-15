@@ -121,6 +121,26 @@ describe('getPlaceholdersForAgent — 按 Agent 定向的引擎块', () => {
     }
   });
 
+  it('🔴 PLUGIN_NOTES / PLUGIN_CONTEXT 只给 story 与 direct_main（插件设计 §5.8）', () => {
+    for (const agentId of ['story', 'direct_main']) {
+      expect(keysFor(agentId), agentId).toEqual(
+        expect.arrayContaining(['PLUGIN_NOTES', 'PLUGIN_CONTEXT']),
+      );
+    }
+    for (const agentId of [
+      'request_dispatcher',
+      'vars_update',
+      'memory_summary',
+      'plot_pre_check',
+      'entity_gen',
+      'combat',
+      '未来的新_agent',
+    ]) {
+      expect(keysFor(agentId), agentId).not.toContain('PLUGIN_NOTES');
+      expect(keysFor(agentId), agentId).not.toContain('PLUGIN_CONTEXT');
+    }
+  });
+
   it('它不是侧链标记：dispatcher 照样拿不到侧链那些键', () => {
     const k = keysFor('request_dispatcher');
     expect(k).not.toContain('CRAFT_REQUEST');

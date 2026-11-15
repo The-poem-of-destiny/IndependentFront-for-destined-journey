@@ -1,8 +1,13 @@
 /** @vitest-environment jsdom */
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { CAGE_MESSAGE_SOURCE } from '../../../src/ui/lib/frame-cage';
 import {
+  BEAUTIFIER_FRAME_CSP,
   BEAUTIFIER_FRAME_SANDBOX,
+  buildBeautifierFrameCsp,
   buildBeautifierFrameDocument,
+  isBeautifierCageInnerReady,
   isBeautifierFrameMessage,
   recommendedFrameMinHeight,
   splitRichDocument,
@@ -260,5 +265,145 @@ describe('beautifier iframe document', () => {
     expect(parts.bodyAttributes).toBe('class="viewer"');
     expect(parts.body).toContain('<StatusPlaceHolderImpl/>');
     expect(parts.body).toContain('<main>content</main>');
+  });
+});
+
+// ── 加固档（插件系统设计 §4.4、§11 前两档） ──────────────────────────────
+
+const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
+
+const FIXED_OPTIONS = {
+  markup:
+    '<!doctype html><html lang="en"><head><style>.c{color:red}</style></head>' +
+    '<body class="b"><div class="c" onclick="x()">卡片</div><script>window.ok=1</script></body></html>',
+  bridgeId: 'bridge-fixed',
+  forwardContextMenu: true,
+  storageEntries: [['k', 'v']] as [string, string][],
+  scriptNonce: 'nonce-fixed',
+};
+
+function cspOf(document: string): string {
+  return document.match(/Content-Security-Policy" content="([^"]+)/)?.[1] ?? '';
+}
+
+interface CageConfig {
+  source: string;
+  channel: string;
+  innerMode: string;
+  link: string;
+  inner: string;
+}
+
+/** 取出牢笼文档脚本里的配置字面量（内层文档以 JSON 字符串形式嵌在里面）。 */
+function cageConfig(document: string): CageConfig {
+  const literal = document.match(/const config = (\{.*\});\n/)?.[1];
+  if (!literal) throw new Error('不是牢笼文档');
+  return JSON.parse(literal) as CageConfig;
+}
+
+function remoteSources(policy: string): string[] {
+  return policy.split(/[\s;]+/).filter((token) => /^[a-z]+:$/.test(token));
+}
+
+describe('美化帧加固档', () => {
+  it('不加固时两档文档与改动前逐字节一致', () => {
+    // 哈希取自加固档落地前的实现输出（2026-11-15），非加固路径任何字节变化都会让它变红。
+    expect(sha256(buildBeautifierFrameDocument({ ...FIXED_OPTIONS, scripts: 'allow' }))).toBe(
+      'b1bfddee0d5891af3b42cc721cb783a74de5d272edf435c4a8a328ecc620f40b',
+    );
+    expect(sha256(buildBeautifierFrameDocument({ ...FIXED_OPTIONS, scripts: 'block' }))).toBe(
+      '655d8778269983d13afbc9504c18854aa891311e71c499f72bb40f7f919012c7',
+    );
+    expect(
+      buildBeautifierFrameDocument({ ...FIXED_OPTIONS, scripts: 'block', hardened: false }),
+    ).toBe(buildBeautifierFrameDocument({ ...FIXED_OPTIONS, scripts: 'block' }));
+  });
+
+  it('不加固时策略串与改动前一致', () => {
+    expect(BEAUTIFIER_FRAME_CSP).toBe(
+      "default-src http: https: data: blob:; base-uri 'none'; object-src 'none'; " +
+        "frame-src 'none'; child-src 'none'; form-action 'none'; manifest-src 'none'; " +
+        "style-src http: https: data: blob: 'unsafe-inline'; img-src http: https: data: blob:; " +
+        'font-src http: https: data: blob:; media-src http: https: data: blob:; ' +
+        'connect-src http: https: ws: wss: data: blob:; worker-src blob:; ' +
+        "script-src http: https: data: blob: 'unsafe-inline' 'unsafe-eval'; " +
+        "script-src-attr 'unsafe-inline'",
+    );
+    expect(buildBeautifierFrameCsp('block', 'n1')).toBe(
+      "default-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; " +
+        "child-src 'none'; form-action 'none'; manifest-src 'none'; " +
+        "style-src http: https: data: blob: 'unsafe-inline'; img-src http: https: data: blob:; " +
+        'font-src http: https: data: blob:; media-src http: https: data: blob:; ' +
+        "connect-src 'none'; worker-src 'none'; script-src 'nonce-n1'; script-src-attr 'none'",
+    );
+  });
+
+  it.each(['allow', 'block'] as const)('%s 档加固后 CSP 没有 http: 与 ws: 来源', (scripts) => {
+    const policy = buildBeautifierFrameCsp(scripts, 'n1', { hardened: true });
+    const sources = remoteSources(policy);
+    expect(sources).not.toContain('http:');
+    expect(sources).not.toContain('ws:');
+    expect(sources).toContain('https:');
+    expect(policy).toContain('img-src https: data: blob:');
+    if (scripts === 'allow') {
+      expect(policy).toContain('connect-src https: wss: data: blob:');
+      expect(policy).toContain("script-src https: data: blob: 'unsafe-inline' 'unsafe-eval'");
+    } else {
+      expect(policy).toContain("connect-src 'none'");
+      expect(policy).toContain("script-src 'nonce-n1'");
+    }
+  });
+
+  it.each(['allow', 'block'] as const)(
+    '%s 档加固后输出 relay 牢笼文档，内层就是加固策略下的原文档',
+    (scripts) => {
+      const hardened = buildBeautifierFrameDocument({ ...FIXED_OPTIONS, scripts, hardened: true });
+      const config = cageConfig(hardened);
+
+      expect(config.source).toBe(CAGE_MESSAGE_SOURCE);
+      expect(config.link).toBe('relay');
+      expect(config.innerMode).toBe('srcdoc');
+      expect(config.channel).toBe(FIXED_OPTIONS.bridgeId);
+
+      // 内层 = 改动前的文档，只把 CSP 换成加固档；markup 与引导脚本逐字保留。
+      const plain = buildBeautifierFrameDocument({ ...FIXED_OPTIONS, scripts });
+      const hardenedPolicy = buildBeautifierFrameCsp(scripts, FIXED_OPTIONS.scriptNonce, {
+        hardened: true,
+      });
+      expect(config.inner).toBe(plain.replace(cspOf(plain), hardenedPolicy));
+
+      // 牢笼与内层同一份策略、同一个 nonce（模型帧 nonce-only，牢笼脚本也要靠它放行）。
+      expect(cspOf(hardened)).toBe(hardenedPolicy);
+      for (const document of [hardened, config.inner]) {
+        const sources = remoteSources(cspOf(document));
+        expect(sources).not.toContain('http:');
+        expect(sources).not.toContain('ws:');
+      }
+      expect(hardened).toContain(`<script nonce="${FIXED_OPTIONS.scriptNonce}">`);
+      // 美化 markup 只在 JSON 字面量里，不进牢笼文档的 HTML 解析器。
+      expect(hardened).not.toContain('<div class="c" onclick="x()">');
+    },
+  );
+
+  it('未指定 nonce 时每份加固文档各自生成，且牢笼与内层一致', () => {
+    const options = { ...FIXED_OPTIONS, scriptNonce: undefined };
+    const first = buildBeautifierFrameDocument({ ...options, scripts: 'block', hardened: true });
+    const second = buildBeautifierFrameDocument({ ...options, scripts: 'block', hardened: true });
+    const nonceOf = (document: string) =>
+      document.match(/<script nonce="([^"]+)">/)?.[1] ?? 'missing';
+
+    expect(nonceOf(first)).not.toBe('missing');
+    expect(nonceOf(first)).not.toBe(nonceOf(second));
+    expect(nonceOf(cageConfig(first).inner)).toBe(nonceOf(first));
+    expect(cspOf(first)).toContain(`'nonce-${nonceOf(first)}'`);
+  });
+
+  it('只把本帧牢笼的 inner-ready 认作就绪信号', () => {
+    const ready = { source: CAGE_MESSAGE_SOURCE, channel: 'a', type: 'inner-ready' };
+    expect(isBeautifierCageInnerReady(ready, 'a')).toBe(true);
+    expect(isBeautifierCageInnerReady(ready, 'b')).toBe(false);
+    expect(isBeautifierCageInnerReady({ ...ready, type: 'cage-ready' }, 'a')).toBe(false);
+    expect(isBeautifierCageInnerReady({ ...ready, source: 'other' }, 'a')).toBe(false);
+    expect(isBeautifierCageInnerReady(null, 'a')).toBe(false);
   });
 });

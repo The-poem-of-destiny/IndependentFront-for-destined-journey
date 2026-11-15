@@ -6,6 +6,7 @@ import {
   buildBeautifierFrameDocument,
   collectThemeValues,
   createBeautifierBridgeId,
+  isBeautifierCageInnerReady,
   isBeautifierFrameMessage,
   recommendedFrameMinHeight,
   type BeautifierFrameScriptPolicy,
@@ -24,11 +25,14 @@ const props = withDefaults(
     forwardContextMenu?: boolean;
     /** 见 `BeautifierFrameScriptPolicy`：规则作者 = `allow`，模型输出 = `block`。 */
     scripts?: BeautifierFrameScriptPolicy;
+    /** 加固档（见 `lib/beautifier-hardening.ts`）：去掉 `http:` / `ws:` 并套 relay 牢笼帧。 */
+    hardened?: boolean;
   }>(),
   {
     ruleName: '',
     forwardContextMenu: false,
     scripts: 'allow',
+    hardened: false,
   },
 );
 
@@ -54,47 +58,51 @@ const srcdoc = computed(() => {
     forwardContextMenu: props.forwardContextMenu,
     storageEntries: storageEntries.value,
     scripts: props.scripts,
+    hardened: props.hardened,
   });
 });
+
+/**
+ * 当前文档的内层是否已就绪。加固档走 relay 牢笼：内层加载前宿主发出的消息会被牢笼
+ * 丢掉，所以宿主 → 帧的消息一律等美化帧的 `ready`（或牢笼的 `inner-ready`）之后再发；
+ * 之前丢掉的主题与存储状态由就绪时那一次 theme + storage-reset 补齐。非加固档行为不变。
+ */
+let innerReady = false;
+
+function postToFrame(message: Record<string, unknown>): void {
+  if (props.hardened && !innerReady) return;
+  frame.value?.contentWindow?.postMessage(message, '*');
+}
 
 function themeValues(): Record<string, string> {
   return collectThemeValues(getComputedStyle(document.documentElement));
 }
 
 function sendTheme(): void {
-  frame.value?.contentWindow?.postMessage(
-    {
-      source: BEAUTIFIER_FRAME_MESSAGE_SOURCE,
-      bridgeId: bridgeId.value,
-      type: 'theme',
-      values: themeValues(),
-    },
-    '*',
-  );
+  postToFrame({
+    source: BEAUTIFIER_FRAME_MESSAGE_SOURCE,
+    bridgeId: bridgeId.value,
+    type: 'theme',
+    values: themeValues(),
+  });
 }
 
 function sendStorageSync(mutations: readonly BeautifierStorageMutation[]): void {
-  frame.value?.contentWindow?.postMessage(
-    {
-      source: BEAUTIFIER_FRAME_MESSAGE_SOURCE,
-      bridgeId: bridgeId.value,
-      type: 'storage-sync',
-      mutations,
-    },
-    '*',
-  );
+  postToFrame({
+    source: BEAUTIFIER_FRAME_MESSAGE_SOURCE,
+    bridgeId: bridgeId.value,
+    type: 'storage-sync',
+    mutations,
+  });
 }
 
 function sendStorageReset(entries: readonly BeautifierStorageEntry[]): void {
-  frame.value?.contentWindow?.postMessage(
-    {
-      source: BEAUTIFIER_FRAME_MESSAGE_SOURCE,
-      bridgeId: bridgeId.value,
-      type: 'storage-reset',
-      entries,
-    },
-    '*',
-  );
+  postToFrame({
+    source: BEAUTIFIER_FRAME_MESSAGE_SOURCE,
+    bridgeId: bridgeId.value,
+    type: 'storage-reset',
+    entries,
+  });
 }
 
 let storageSession: BeautifierStorageSession | undefined;
@@ -116,13 +124,24 @@ async function commitStorage(mutations: readonly BeautifierStorageMutation[]): P
   }
 }
 
+function onFrameReady(): void {
+  innerReady = true;
+  sendTheme();
+  if (storageSession) sendStorageReset(storageSession.snapshot());
+}
+
 function onMessage(event: MessageEvent): void {
+  // 加固档下来源是牢笼帧窗口：它就是这个 iframe 元素的 contentWindow，校验照旧。
   if (event.source !== frame.value?.contentWindow) return;
+  if (props.hardened && isBeautifierCageInnerReady(event.data, bridgeId.value)) {
+    // 美化帧自己的 `ready` 通常先到；牢笼的 inner-ready 只是兜底，已就绪就不重复补发。
+    if (!innerReady) onFrameReady();
+    return;
+  }
   if (!isBeautifierFrameMessage(event.data, bridgeId.value)) return;
 
   if (event.data.type === 'ready') {
-    sendTheme();
-    if (storageSession) sendStorageReset(storageSession.snapshot());
+    onFrameReady();
     return;
   }
 
@@ -155,9 +174,10 @@ function onMessage(event: MessageEvent): void {
 }
 
 watch(
-  () => [props.markup, props.forwardContextMenu] as const,
+  () => [props.markup, props.forwardContextMenu, props.hardened] as const,
   () => {
     if (storageSession) storageEntries.value = storageSession.snapshot();
+    innerReady = false;
     bridgeId.value = createBeautifierBridgeId();
     height.value = Math.max(64, minimumHeight.value);
     nextTick(sendTheme);

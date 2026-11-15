@@ -85,6 +85,14 @@ import { buildPassSeed } from '@engine/ejs/ejs-rng';
 import { getMapFactsFlags, getMapFlags } from '@engine/state/save-profile';
 // 🎲 随机事件 v1 (§5.1 读侧)：`{{RANDOM_EVENTS}}` 的候选快照 —— 供值必须在 buildContext
 import { getRandomEventFlags } from '@engine/state/save-profile';
+// 🧩 插件（计划决定 12、13）：管线只经 plugin-run-signals 这条接缝与插件运行时交换信号，
+//    **不 import 任何插件 store**；成功回合收口时清掉本回合已消费的待告知条目
+import { clearPluginNotesForTurn } from '@engine/state/save-profile';
+import {
+  emitPluginTurnSignal,
+  getPluginPromptInputs,
+  whenPluginWritesSettled,
+} from './plugin-run-signals';
 import { buildRandomEventOffer } from '@engine/random-events/random-event-context';
 import type { RandomEventOfferEntry } from '@engine/random-events/random-event-context';
 // 地点键与条件上下文的**唯一**实现（与入池侧共用；此前这里有一份逐字拷贝）
@@ -475,6 +483,12 @@ export class GamePipeline {
   private currentTurnMessages: ChatMessage[] = [];
   /** 当前 run 的所有权标识；abort 后直到 finally 收尾前都保持，防止旧 run 清掉新 run。 */
   private activeRunId: string | null = null;
+  /**
+   * 🧩 本回合的回合号 N（回合开始时 `totalTurns + 1`）。插件待告知条目入队时记的是「最后完成的
+   * 回合」，所以本回合组装看到的都是 `turn < N` 的条目；成功收口后按 N 清掉恰好这一批。
+   * 失败回合不清，条目留给下一次尝试。
+   */
+  private pluginNotesTurnNo: number | null = null;
   /** Reject overlapping runs until cancellation, background writes and refresh have drained. */
   private runSeq = 0;
   private disposed = false;
@@ -756,6 +770,8 @@ export class GamePipeline {
     await auxiliary('剧情收尾', () => this.commitPlotThreadTurnIfAny());
     await auxiliary('随机事件收尾', () => manager.syncRandomEventsForTurn());
     await auxiliary('回合快照', () => manager.advanceTurn());
+    // 🧩 本楼已接纳：清掉本回合消费过的插件待告知条目（锁外调用，失败不致命）
+    await this.clearConsumedPluginNotes();
     // 收尾已完成；此后的记忆摘要是可选的尽力而为，取消/切档在这里才生效
     if (!this.isRunCurrent(controller)) return;
     await this.game.refreshFromDb(this.saveId);
@@ -867,6 +883,10 @@ export class GamePipeline {
     this.currentStoryTurnKey = undefined;
     this.currentTurnMessages = [];
     this.game.isGenerating = true;
+    // 🧩 回合开始：isGenerating 已为真，此后插件写入一律 BUSY（设计 §6.1）。
+    //    本回合必以 turn.end / turn.failed 之一收尾（见 finally 末尾）。
+    this.pluginNotesTurnNo = (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1;
+    emitPluginTurnSignal({ type: 'turn.start', saveId: this.saveId });
     let activityRunId: string | null = null;
     let activityOutcome: 'completed' | 'failed' | 'cancelled' = 'failed';
     let activityMessage: string | undefined;
@@ -874,6 +894,9 @@ export class GamePipeline {
     let activityError: unknown;
 
     try {
+      // 🧩 发送侧等待（设计 §6.1）：回合开始前已发起的插件提交（落库 + 快照修补）必须先落地，
+      //    再读状态组上下文 —— 否则本回合会拿着插件写入之前的陈旧状态。永不 reject。
+      await whenPluginWritesSettled();
       if (!(await this.admitPackLease()) || !this.isRunCurrent(controller)) return false;
       // 1. 先快照既有历史；当前输入只走 userInput，避免同时出现在 NARRATIVE 与 USER_INPUT。
       const existingSourceMessageId = isUserMessage
@@ -1165,6 +1188,8 @@ export class GamePipeline {
         console.error('[GamePipeline] advanceTurn 失败（已提交副作用不会自动撤销）:', err);
         throw err;
       }
+      // 🧩 回合已推进：清掉本回合消费过的插件待告知条目（锁外调用，失败不致命）
+      await this.clearConsumedPluginNotes();
 
       // 正式接纳及推进之后才保存摘要；网络仍在锁外，失败由补建/归档草稿重试承接。
       if (this.runMode === 'v2') {
@@ -1205,76 +1230,101 @@ export class GamePipeline {
       activityError = err;
       return false;
     } finally {
-      if (this.generationMode === 'direct_cached' && !this.directCommitted) {
-        // 核心提交已开始却未确认接纳：状态可能已落库而缓存缺这一楼，只能整体失效。
-        // 提交前失败（输出被拒、校验不过、取消）不改存档，失败楼也不进历史，
-        // 上一份已接纳会话仍与历史一致 —— 只丢弃本次尝试，重试与下一楼继续复用前缀。
-        if (this.finalTurnCommitStarted) invalidateDirectContext(this.saveId);
-        else this.orch?.discardDirectCache();
-      }
-      if (
-        !this.directCommitted &&
-        activityOutcome !== 'completed' &&
-        this.currentStoryTurnKey &&
-        this.currentTurnMessages.length > 0
-      ) {
-        await this.game
-          .setStoryTurnStatus(
-            this.currentTurnMessages,
-            'failed',
-            this.currentStoryTurnKey,
-            () => this.ownsActiveSave,
-          )
-          .catch((err) => console.warn('[GamePipeline] 失败尝试标记未保存:', err));
-      }
-      // 🔴 并行化改造（2026-08-16）：后台任务（memory_summary embedding 落库 /
-      // 剧情落库）不响应 abort，会在管线早退后悬空继续跑。回读之前统一收尾
-      // （allSettled：postCheckPlot 等任务自带 try/catch，不拒绝也要兜底），
-      // 否则 refreshFromDb 会读到任务写到一半的中间态。
-      // completed 路径的 await 在 4.5 处已跑过（advanceTurn 之前），这里幂等。
-      if (this.pendingPlotTasks.length > 0) {
-        await Promise.allSettled(this.pendingPlotTasks);
-        this.pendingPlotTasks = [];
-      }
-      // 🆕 管线中 StateManager / 侧链 (char_gen/item_gen/craft_gen) 直接写 Dexie，
-      // 这里统一回读，让 Pinia 内存态（characters/metadata/saveProfile）与 DB 对齐，
-      // DebugPanel 导出和右侧状态栏才能拿到最新数据。abort/报错时部分 patch 可能已提交，同样需要回读。
-      // 🔴 COR-02：存档已切走时**不回读** —— refreshFromDb 读的是 store 里那个（新的）
-      // activeSaveId，孤儿回合替新存档跑一次回读没有意义，还会跟新存档自己的加载打架。
-      if (this.ownsActiveSave) await this.game.refreshFromDb(this.saveId);
-      // 🎵 配乐放在**回读之后**才触发。
-      //
-      // story 在 Stage 1 就写下了标记，但那时 player.location / character.present
-      // 还是上一轮的值 —— 它们要等 Stage 2 的 request_dispatcher / vars_update 落库、
-      // 再经这里的 refreshFromDb 才更新。而**转场恰恰是唯一真正该换歌的时刻**：
-      // 在 Stage 1 播，正文已经进了熔火裂谷，BGM 还在放上一座城的曲子。
-      if (this.ownsActiveSave) this.flushPendingAudio();
-      if (activityRunId) {
-        this.game.finishAgentActivityRun(
-          activityRunId,
-          activityOutcome,
-          activityMessage,
-          activityError,
-        );
-        this.game.finishAgentLogTurn(activityRunId, activityOutcome);
-        const debugPrefix = `${activityRunId}\u0000`;
-        for (const key of this.debugInvocationCounts.keys()) {
-          if (key.startsWith(debugPrefix)) this.debugInvocationCounts.delete(key);
+      try {
+        if (this.generationMode === 'direct_cached' && !this.directCommitted) {
+          // 核心提交已开始却未确认接纳：状态可能已落库而缓存缺这一楼，只能整体失效。
+          // 提交前失败（输出被拒、校验不过、取消）不改存档，失败楼也不进历史，
+          // 上一份已接纳会话仍与历史一致 —— 只丢弃本次尝试，重试与下一楼继续复用前缀。
+          if (this.finalTurnCommitStarted) invalidateDirectContext(this.saveId);
+          else this.orch?.discardDirectCache();
         }
-        for (const key of this.mainInvocationIds.keys()) {
-          if (key.startsWith(debugPrefix)) this.mainInvocationIds.delete(key);
+        if (
+          !this.directCommitted &&
+          activityOutcome !== 'completed' &&
+          this.currentStoryTurnKey &&
+          this.currentTurnMessages.length > 0
+        ) {
+          await this.game
+            .setStoryTurnStatus(
+              this.currentTurnMessages,
+              'failed',
+              this.currentStoryTurnKey,
+              () => this.ownsActiveSave,
+            )
+            .catch((err) => console.warn('[GamePipeline] 失败尝试标记未保存:', err));
         }
+        // 🔴 并行化改造（2026-08-16）：后台任务（memory_summary embedding 落库 /
+        // 剧情落库）不响应 abort，会在管线早退后悬空继续跑。回读之前统一收尾
+        // （allSettled：postCheckPlot 等任务自带 try/catch，不拒绝也要兜底），
+        // 否则 refreshFromDb 会读到任务写到一半的中间态。
+        // completed 路径的 await 在 4.5 处已跑过（advanceTurn 之前），这里幂等。
+        if (this.pendingPlotTasks.length > 0) {
+          await Promise.allSettled(this.pendingPlotTasks);
+          this.pendingPlotTasks = [];
+        }
+        // 🆕 管线中 StateManager / 侧链 (char_gen/item_gen/craft_gen) 直接写 Dexie，
+        // 这里统一回读，让 Pinia 内存态（characters/metadata/saveProfile）与 DB 对齐，
+        // DebugPanel 导出和右侧状态栏才能拿到最新数据。abort/报错时部分 patch 可能已提交，同样需要回读。
+        // 🔴 COR-02：存档已切走时**不回读** —— refreshFromDb 读的是 store 里那个（新的）
+        // activeSaveId，孤儿回合替新存档跑一次回读没有意义，还会跟新存档自己的加载打架。
+        if (this.ownsActiveSave) await this.game.refreshFromDb(this.saveId);
+        // 🎵 配乐放在**回读之后**才触发。
+        //
+        // story 在 Stage 1 就写下了标记，但那时 player.location / character.present
+        // 还是上一轮的值 —— 它们要等 Stage 2 的 request_dispatcher / vars_update 落库、
+        // 再经这里的 refreshFromDb 才更新。而**转场恰恰是唯一真正该换歌的时刻**：
+        // 在 Stage 1 播，正文已经进了熔火裂谷，BGM 还在放上一座城的曲子。
+        if (this.ownsActiveSave) this.flushPendingAudio();
+        if (activityRunId) {
+          this.game.finishAgentActivityRun(
+            activityRunId,
+            activityOutcome,
+            activityMessage,
+            activityError,
+          );
+          this.game.finishAgentLogTurn(activityRunId, activityOutcome);
+          const debugPrefix = `${activityRunId}\u0000`;
+          for (const key of this.debugInvocationCounts.keys()) {
+            if (key.startsWith(debugPrefix)) this.debugInvocationCounts.delete(key);
+          }
+          for (const key of this.mainInvocationIds.keys()) {
+            if (key.startsWith(debugPrefix)) this.mainInvocationIds.delete(key);
+          }
+        }
+        if (this.activeRunId === activityRunId) {
+          this.activeRunId = null;
+        }
+        // 🔴 只有「我还是当前那一轮」才收拾这两样 —— 否则会解锁新一轮的输入框，
+        // 并且把新一轮的控制器抹成 null（「停止生成」从此静默失效）。见 runSeq 的注释。
+        if (this.runSeq === mySeq) {
+          if (this.ownsActiveSave) this.game.isGenerating = false;
+          this.abortController = null;
+          this.finalTurnCommitStarted = false;
+        }
+      } finally {
+        // 🧩 收尾信号放在最后：isGenerating 已复位，插件收到 turn.end 后的写入不会被判 BUSY。
+        //    包在 finally 里，收尾本身抛错也保证恰好一条 end / failed。
+        this.pluginNotesTurnNo = null;
+        emitPluginTurnSignal({
+          type: activityOutcome === 'completed' ? 'turn.end' : 'turn.failed',
+          saveId: this.saveId,
+        });
       }
-      if (this.activeRunId === activityRunId) {
-        this.activeRunId = null;
-      }
-      // 🔴 只有「我还是当前那一轮」才收拾这两样 —— 否则会解锁新一轮的输入框，
-      // 并且把新一轮的控制器抹成 null（「停止生成」从此静默失效）。见 runSeq 的注释。
-      if (this.runSeq === mySeq) {
-        if (this.ownsActiveSave) this.game.isGenerating = false;
-        this.abortController = null;
-        this.finalTurnCommitStarted = false;
-      }
+    }
+  }
+
+  /**
+   * 🧩 成功回合收口：清掉 `turn < N` 的插件待告知条目（N = 本回合回合号）—— 正是本回合组装时
+   * 注入的那一批。`clearPluginNotesForTurn` 自己进存档写锁，所以必须在任何
+   * `withSaveWriteLock` 之外调用。失败只记日志：最坏是下一回合再告知一次，不该打断已接纳的回合。
+   */
+  private async clearConsumedPluginNotes(): Promise<void> {
+    const turnNo = this.pluginNotesTurnNo;
+    if (turnNo === null) return;
+    try {
+      await clearPluginNotesForTurn(this.saveId, turnNo);
+    } catch (err) {
+      console.warn('[GamePipeline] 插件待告知条目清理失败（下一回合可能重复告知）:', err);
     }
   }
 
@@ -1770,6 +1820,9 @@ export class GamePipeline {
     // 步5: 读存档级剧情配置（捏人页 startJourney 落 metadata.plotSettings）；老存档无字段 → off 兜底
     const meta = this.game.activeSave?.metadata as Record<string, any> | undefined;
     const plotSettings = meta?.plotSettings ?? { mode: 'off', tabooContent: '' };
+    // 🧩 插件提示词输入（决定 13）：只经接缝取，provider 缺席或出错时为空列表。
+    //    是否注入由引擎按 Agent 把关（仅 story / direct_main），这里一律供值。
+    const pluginInputs = getPluginPromptInputs();
 
     return {
       userInput,
@@ -1786,6 +1839,8 @@ export class GamePipeline {
       quests: this.game.saveProfile?.quests,
       agentOutputs: new Map(),
       plotSettings,
+      pluginNotes: pluginInputs.notes,
+      pluginContext: pluginInputs.contexts,
       gameTime: this.game.gameTime ?? undefined,
       // 🗺 地图 v1 §8.1: `{{MAP_CONTEXT}}` 的两格可变输入。**必须在这里供值** ——
       //    占位符自己去读 Pinia 就把引擎的依赖方向反过来了（map-runtime 那条缝同理）。

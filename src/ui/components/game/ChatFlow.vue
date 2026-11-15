@@ -151,6 +151,7 @@ function eventIconClass(type: string): string {
     character_update: 'fa-solid fa-arrow-trend-up',
     item_update: 'fa-solid fa-boxes-stacked',
     quest_update: 'fa-solid fa-list-check',
+    plugin_note: 'fa-solid fa-puzzle-piece',
   };
   return icons[type] ?? 'fa-solid fa-circle-info';
 }

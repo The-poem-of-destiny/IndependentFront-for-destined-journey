@@ -4,6 +4,7 @@ import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import type { BeautifierRule } from '@engine/types/types';
 import BeautifiedNarrative from '../../../../src/ui/components/game/BeautifiedNarrative.vue';
+import { setBeautifierHardened } from '../../../../src/ui/lib/beautifier-hardening';
 
 const state = vi.hoisted(() => ({
   enabled: true,
@@ -47,7 +48,7 @@ function mountNarrative(text: string, extra: Record<string, unknown> = {}) {
       stubs: {
         BeautifierFrame: {
           name: 'BeautifierFrame',
-          props: ['markup', 'ruleName', 'forwardContextMenu', 'scripts'],
+          props: ['markup', 'ruleName', 'forwardContextMenu', 'scripts', 'hardened'],
           template:
             '<div class="frame-stub" :data-rule="ruleName" :data-scripts="scripts">{{ markup }}</div>',
         },
@@ -80,6 +81,7 @@ describe('BeautifiedNarrative', () => {
     // 带 messageId 的用法会去问 scene-image-store「这条消息有没有 message-end 的图」；
     // 空库即可（`byMessage` 只过滤内存投影，不碰 Dexie）。
     setActivePinia(createPinia());
+    setBeautifierHardened(false);
   });
 
   it('renders unmatched model HTML as text without a parent-DOM sanitizer', () => {
@@ -102,6 +104,20 @@ describe('BeautifiedNarrative', () => {
     expect(frames[1].props('scripts')).toBe('block');
     // 卡片 markup 不做消毒，拦截交给帧内 CSP。
     expect(frames[1].props('markup')).toContain('<script>leak()</script>');
+  });
+
+  it('两档美化帧都跟随模块级加固开关', async () => {
+    state.rules = [rule()];
+    const wrapper = mountNarrative('<card>rule owned</card>\n\n<item_info>model</item_info>');
+    const hardenedProps = () =>
+      wrapper
+        .findAllComponents({ name: 'BeautifierFrame' })
+        .map((frame) => frame.props('hardened'));
+
+    expect(hardenedProps()).toEqual([false, false]);
+    setBeautifierHardened(true);
+    await wrapper.vm.$nextTick();
+    expect(hardenedProps()).toEqual([true, true]);
   });
 
   it('keeps unmatched narrative native while isolating each rich match', () => {

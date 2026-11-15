@@ -1,7 +1,7 @@
 /**
  * 上下文模板占位符目录（Phase 10e，Q-25 第 9 步搬出）。
  *
- * 一张 27 项的数据表 + 一条「哪些 Agent 看得见哪些占位符」的纯筛选。此前它俩住在
+ * 一张数据表（条数以代码为准）+ 一条「哪些 Agent 看得见哪些占位符」的纯筛选。此前它俩住在
  * `SettingsPage.vue` 的 script 里，于是想验「vars_update 到底该看见几个占位符」
  * 得先挂起整个设置页。搬成纯模块之后是一行 import 一行断言。
  *
@@ -69,6 +69,18 @@ export const ALL_PLACEHOLDER_META: readonly PlaceholderBadge[] = [
     color: '#ff7043',
     desc: '随机事件候选 — 当前可触发的事件列表（池空/关闭/战斗中为空）',
     category: '剧情',
+  },
+  {
+    key: 'PLUGIN_NOTES',
+    color: '#26a69a',
+    desc: '插件一次性告知 — 本存档启用插件经 host.ai.note 排队的文本（下一回合注入，回合接纳后清空）',
+    category: '插件',
+  },
+  {
+    key: 'PLUGIN_CONTEXT',
+    color: '#26a69a',
+    desc: '插件常驻提示 — 本存档启用插件经 host.ai.context.set 设置的文本（每回合注入，直到插件清掉）',
+    category: '插件',
   },
   { key: 'ACTIVE_EFFECTS', color: '#ff9800', desc: '活跃效果 — Buff/Debuff', category: '角色' },
   { key: 'MEMORY_ENTRIES', color: '#ff7043', desc: '记忆条目 — embedding 召回', category: '记忆' },
@@ -187,11 +199,14 @@ const CHAIN_ONLY: Record<string, readonly string[]> = {
  * 🔴 `RANDOM_EVENTS` 反过来**只给 story**（随机事件 v1 §5.1 末段）：事件的消费者只有它一个，
  *    单通道免双写。story 有预设短路不假，但占位符**能穿透预设**（`STORY_PRESET_PLACEHOLDER_RE`
  *    命中后会就地预解析）—— 所以这个按钮对 story 是真的有用，与 MAP_CONTEXT 的情况不同。
+ * 🔴 `PLUGIN_NOTES` / `PLUGIN_CONTEXT`（插件系统设计 §5.8，2026-11-15）只给 story 与 direct_main：
+ *    引擎只在这两条主生成路径注入插件文本；预设里没写这两个占位符时由装配层兜底追加。
  */
 const AGENT_SCOPED: Record<string, readonly string[]> = {
   lore_select: ['LORE_CATALOG'],
   request_dispatcher: ['MAP_CONTEXT', 'PLOT_THREAD_SURFACE', 'PLOT_CAST_PLAN'],
-  story: ['RANDOM_EVENTS'],
+  story: ['RANDOM_EVENTS', 'PLUGIN_NOTES', 'PLUGIN_CONTEXT'],
+  direct_main: ['PLUGIN_NOTES', 'PLUGIN_CONTEXT'],
   plot_pre_check: ['PLOT_THREAD_TURN'],
   plot_post_check: ['PLOT_THREAD_TURN'],
   // daily_check（Phase 3）：{{DELTA_TIME}} 是它判断「过了多久」的依据；地图给环境类结算。

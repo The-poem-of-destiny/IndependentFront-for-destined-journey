@@ -3,6 +3,10 @@ import { ref, watch } from 'vue';
 import { useUIStore } from '../../stores/ui-store';
 import { confirmLeaveGame } from '../../lib/leave-game-guard';
 import AppModal from '../shared/AppModal.vue';
+import {
+  usePluginContributions,
+  type PluginContributionEntry,
+} from '../../composables/usePluginContributions';
 
 /**
  * 游戏页的二级菜单（2026-09-13）。
@@ -95,6 +99,18 @@ function run(id: MenuAction) {
   }
 }
 
+/**
+ * 插件贡献的菜单项（插件系统设计 §5.7 `game.menu`）：排在内置五项之后，只有文本（不显示插件图标），
+ * 标签只做文本插值。点下去先关菜单再打开插件界面 —— 插件窗不占弹窗位，叠在菜单下面会被挡住。
+ */
+const pluginMenu = usePluginContributions();
+const pluginItems = pluginMenu.entriesFor('game.menu');
+
+function runPlugin(entry: PluginContributionEntry) {
+  close();
+  pluginMenu.open(entry);
+}
+
 /** 帮助内容与代码逐条对齐（改键位/交互时两处一起改）。 */
 const helpGroups = [
   {
@@ -148,6 +164,19 @@ const helpGroups = [
         <span class="menu-item-main">
           <span class="menu-item-label">{{ item.label }}</span>
           <span class="menu-item-hint">{{ item.hint }}</span>
+        </span>
+      </button>
+      <button
+        v-for="entry in pluginItems"
+        :key="entry.key"
+        class="menu-item"
+        :data-plugin-menu="entry.key"
+        @click="runPlugin(entry)"
+      >
+        <i class="fa-solid fa-puzzle-piece" aria-hidden="true" />
+        <span class="menu-item-main">
+          <span class="menu-item-label">{{ entry.label }}</span>
+          <span class="menu-item-hint">插件：{{ entry.pluginName }}</span>
         </span>
       </button>
     </div>

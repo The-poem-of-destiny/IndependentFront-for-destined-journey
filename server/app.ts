@@ -9,6 +9,11 @@ import { createContentWriteRoutes } from './routes/content';
 import { contentPackRoutes } from './routes/content-pack';
 import { llmRoutes } from './routes/llm';
 import { rerankRoutes } from './routes/rerank';
+import { createCanaryRecorder, createPluginRoutes, isPluginCanaryPath } from './routes/plugins';
+import { createCanaryStore } from './plugin-canary';
+import type { CanaryStore } from './plugin-canary';
+import { resolvePluginsDir } from './plugin-dir';
+import type { ResolvePluginsDirResult } from './plugin-dir';
 
 export const OPAQUE_ORIGIN_ERROR = 'opaque sandbox origins cannot access application APIs';
 
@@ -22,6 +27,17 @@ export interface BffAppOptions {
    * `null` / 缺省 = 未配置：两条写回路由一律回 501（见 `routes/content.ts`）。
    */
   contentDir?: string | null;
+  /**
+   * 插件目录（`resolvePluginsDir(process.env, 仓库根)` 的结果，`POEM_PLUGINS_DIR` 覆盖）。
+   * 缺省 = 按当前进程的环境变量与工作目录现解析一次。`ok: false` 时插件路由回
+   * `enabled: false`（见 `routes/plugins.ts`）。
+   */
+  pluginsDir?: ResolvePluginsDirResult;
+  /**
+   * 金丝雀存储（设计文档 §4.8）。vite 要把同一份交给 WebSocket `upgrade` 处理器，
+   * 所以由调用方传入；缺省新建一份。
+   */
+  canaryStore?: CanaryStore;
 }
 
 interface BffRouteEntry {
@@ -55,6 +71,10 @@ const BFF_ROUTE_TABLE: readonly BffRouteEntry[] = [
     create: ({ contentDir }) =>
       createContentWriteRoutes({ contentDir, subDir: 'defaults', fallbackName: 'agent-config' }),
   },
+  {
+    prefix: '/api/plugins',
+    create: ({ pluginsDir, canaryStore }) => createPluginRoutes({ pluginsDir, canaryStore }),
+  },
 ];
 
 /** BFF 管辖的全部路由前缀（派生自 `BFF_ROUTE_TABLE`，勿另抄一份） */
@@ -78,14 +98,23 @@ export function isBffRoute(url: string): boolean {
  * 唯一的例外是 `contentDir` 那两条写回路由（内容 overlay，见 `routes/content.ts`）。
  */
 export function buildHonoApp(options: BffAppOptions = {}): Hono {
-  const resolved: Required<BffAppOptions> = { contentDir: options.contentDir ?? null };
+  const resolved: Required<BffAppOptions> = {
+    contentDir: options.contentDir ?? null,
+    pluginsDir: options.pluginsDir ?? resolvePluginsDir(process.env, process.cwd()),
+    canaryStore: options.canaryStore ?? createCanaryStore(),
+  };
   const app = new Hono();
+
+  // 🔴 金丝雀记录器必须是第一个中间件（插件设计 §4.8）：探针帧发来的请求带
+  //    `Origin: null`，要先记下命中，再交给下面的守卫与路由。
+  app.use('*', createCanaryRecorder(resolved.canaryStore));
 
   // Sandboxed srcdoc frames intentionally send `Origin: null`. They may use
   // the public network, but must not turn the app's credential-forwarding BFF
   // into a local-network proxy.
+  // 两条金丝雀路由例外：它们只回 204 / 302 到 loopback 金丝雀，不碰任何凭据或文件。
   app.use('*', async (c, next) => {
-    if (isOpaqueSandboxOrigin(c.req.header('Origin'))) {
+    if (isOpaqueSandboxOrigin(c.req.header('Origin')) && !isPluginCanaryPath(c.req.path)) {
       return c.json({ error: OPAQUE_ORIGIN_ERROR }, 403);
     }
     await next();

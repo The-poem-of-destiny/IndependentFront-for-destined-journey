@@ -55,8 +55,6 @@
   "exports|src/ui/composables/usePlayerPortrait.ts|assetMimeOf",
   "exports|src/ui/composables/useSceneImageUrls.ts|SCENE_IMAGE_URL_CAPACITY",
   "exports|src/ui/lib/asset-zip.ts|ASSET_ZIP_MAX_TOTAL_BYTES",
-  "exports|src/ui/lib/beautifier-frame.ts|BEAUTIFIER_FRAME_CSP",
-  "exports|src/ui/lib/beautifier-frame.ts|buildBeautifierFrameCsp",
   "exports|src/ui/lib/test-fixtures.ts|buildTestMessages",
   "exports|src/ui/lib/toSystemEvent.ts|charGenToEvent",
   "exports|src/ui/lib/toSystemEvent.ts|charUpdateToEvent",

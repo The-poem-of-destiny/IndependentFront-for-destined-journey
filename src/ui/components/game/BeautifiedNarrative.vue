@@ -9,6 +9,7 @@ import { splitSceneImageSegments } from '@engine/image/image-segments';
 import type { BeautifierRule } from '@engine/types/types';
 import type { ImageGenMode, ImageRating, SceneImageMarker } from '@engine/types/types-image';
 import { useBeautify } from '../../composables/useBeautify';
+import { beautifierHardened } from '../../lib/beautifier-hardening';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import BeautifierFrame from './BeautifierFrame.vue';
 import SceneImageSegment from './SceneImageSegment.vue';
@@ -191,6 +192,9 @@ function scriptPolicy(segment: BeautifierMatchSegment): 'allow' | 'block' {
   return segment.origin === 'model' ? 'block' : 'allow';
 }
 
+/** 加固档是模块级开关（插件运行时按当前存档置位），两档美化帧一起跟随。 */
+const hardened = computed(() => beautifierHardened.value);
+
 function paragraphs(text: string): string[] {
   // HTML 注释（<!-- ... -->）是元数据：AI 的 itemThink/taskThink 思考块、作者注释等，
   // 不应当正文显示。Vue 的 {{ }} 会把它当字面文本转义后原样显示，很诡异——这里先剥离。
@@ -237,6 +241,7 @@ function paragraphs(text: string): string[] {
           :rule-name="segment.ruleName"
           :forward-context-menu="forwardContextMenu"
           :scripts="scriptPolicy(segment)"
+          :hardened="hardened"
           @resize="emit('resize', $event)"
         />
         <div

@@ -17,6 +17,11 @@ import {
 import { useSettingsStore } from '../../../../src/ui/stores/settings-store';
 import { useGameStore } from '../../../../src/ui/stores/game-store';
 import { useUIStore } from '../../../../src/ui/stores/ui-store';
+import {
+  pluginRuntimeFake,
+  pluginSurface,
+  resetPluginUiFakes,
+} from '../../../helpers/plugin-ui-fakes';
 
 enableAutoUnmount(afterEach);
 
@@ -74,6 +79,14 @@ vi.mock('../../../../src/ui/stores/game-store', () => ({
   setRewriteProseImpl: vi.fn(),
   setAutosaveImpl: vi.fn(),
 }));
+
+// 插件运行时与贡献点用替身：真运行时进档会读 game.saves，而本文件的 game-store 是精简 mock
+vi.mock('../../../../src/ui/stores/plugin-runtime-store', async () =>
+  (await import('../../../helpers/plugin-ui-fakes')).pluginRuntimeStoreModule(),
+);
+vi.mock('../../../../src/ui/composables/usePluginContributions', async () =>
+  (await import('../../../helpers/plugin-ui-fakes')).pluginContributionsModule(),
+);
 
 vi.mock('../../../../src/ui/stores/ui-store', () => ({
   useUIStore: vi.fn(() => ({
@@ -577,6 +590,7 @@ describe('GamePage — 菜单 Esc 分层', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     useSettingsStore().settings.developerMode = false;
+    resetPluginUiFakes();
   });
 
   afterEach(() => {
@@ -681,6 +695,139 @@ describe('GamePage — 菜单 Esc 分层', () => {
     await flushPromises();
     expect(menuShown()).toBe(false);
 
+    wrapper.unmount();
+  });
+
+  /**
+   * 插件界面（§5.7）：Esc 分层的让路判据里加上「有插件界面获得过焦点」——
+   * 此时 Esc 关掉最近聚焦的那个插件界面，不开菜单；关完再按才轮到菜单。
+   */
+  it('插件界面获得焦点时 Esc 关掉它，不开菜单；再按一次才开菜单', async () => {
+    const wrapper = page();
+    await flushPromises();
+    pluginRuntimeFake.openSurfaces = [pluginSurface({ surfaceId: 's-1' })];
+    pluginRuntimeFake.focusedSurfaceId = 's-1';
+
+    pressEsc();
+    await flushPromises();
+    expect(pluginRuntimeFake.closeSurface).toHaveBeenCalledWith('s-1');
+    expect(menuShown()).toBe(false);
+
+    pressEsc();
+    await flushPromises();
+    expect(menuShown()).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it('页面级弹窗开着时 Esc 归弹窗，不去关插件界面', async () => {
+    const wrapper = page({ activeModal: 'items' });
+    await flushPromises();
+    pluginRuntimeFake.focusedSurfaceId = 's-1';
+
+    pressEsc();
+    await flushPromises();
+    expect(pluginRuntimeFake.closeSurface).not.toHaveBeenCalled();
+
+    wrapper.unmount();
+  });
+});
+
+/* ===== 插件运行时接线（插件系统设计 §5.5、§5.7） ===== */
+describe('GamePage — 插件运行时接线', () => {
+  const stubFor = (name: string) => ({ name, render: () => h('div') });
+  const stubs = {
+    TopBar: stubFor('TopBar'),
+    SideToolbar: stubFor('SideToolbar'),
+    ScenePanel: stubFor('ScenePanel'),
+    ChatFlow: stubFor('ChatFlow'),
+    StatusHUD: stubFor('StatusHUD'),
+    MiniPlayer: stubFor('MiniPlayer'),
+    CombatPanel: stubFor('CombatPanel'),
+    GameMenu: stubFor('GameMenu'),
+  };
+  let mockGame: any;
+
+  function page(over: Record<string, unknown> = {}) {
+    mockGame = {
+      player: null,
+      npcs: [],
+      characters: [],
+      messages: [],
+      isGenerating: false,
+      activePlotEvents: [],
+      activeModal: null,
+      isAgentCombat: false,
+      sidebarCollapsed: false,
+      activeSave: null,
+      activeSaveId: 'save-1',
+      pendingOptions: [],
+      hasOpeningPromptConsumed: true,
+      openingPrompt: null,
+      loadSave: vi.fn(async () => true),
+      invalidatePendingLoads: vi.fn(),
+      toggleSidebar: vi.fn(),
+      showModal: vi.fn(),
+      closeModal: vi.fn(),
+      fillInput: vi.fn(),
+      ...over,
+    };
+    (useGameStore as any).mockReturnValue(mockGame);
+    (useUIStore as any).mockReturnValue({
+      activeSaveId: 'save-1',
+      currentView: 'game',
+      navigate: vi.fn(),
+      toast: vi.fn(),
+    });
+    return mount(GamePage, { attachTo: document.body, global: { stubs } });
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    useSettingsStore().settings.developerMode = false;
+    resetPluginUiFakes();
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('存档载入后 enterSave(存档 id)，卸载时 leaveSave', async () => {
+    const wrapper = page();
+    await vi.waitFor(() => expect(pluginRuntimeFake.enterSave).toHaveBeenCalledWith('save-1'));
+    expect(mockGame.loadSave).toHaveBeenCalledWith('save-1');
+    expect(pluginRuntimeFake.leaveSave).not.toHaveBeenCalled();
+
+    wrapper.unmount();
+    expect(pluginRuntimeFake.leaveSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('存档载入失败时不进插件运行时', async () => {
+    const wrapper = page({ loadSave: vi.fn(async () => false) });
+    await flushPromises();
+    await flushPromises();
+    expect(mockGame.loadSave).toHaveBeenCalledWith('save-1');
+    expect(pluginRuntimeFake.enterSave).not.toHaveBeenCalled();
+    wrapper.unmount();
+    expect(pluginRuntimeFake.leaveSave).not.toHaveBeenCalled();
+  });
+
+  it('插件请求回填输入框：调 game.fillInput（只填不发），然后把请求清空', async () => {
+    const wrapper = page();
+    await flushPromises();
+
+    pluginRuntimeFake.pendingInputFill = '买两瓶生命药水';
+    await flushPromises();
+    expect(mockGame.fillInput).toHaveBeenCalledWith('买两瓶生命药水');
+    expect(pluginRuntimeFake.pendingInputFill).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('插件界面图层挂在游戏区的定位容器里', async () => {
+    const wrapper = page();
+    await flushPromises();
+    expect(wrapper.find('.game-body > .plugin-surface-layer').exists()).toBe(true);
     wrapper.unmount();
   });
 });

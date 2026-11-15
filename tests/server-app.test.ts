@@ -414,6 +414,7 @@ describe('BFF 路由前缀单一真源', () => {
       '/api/content-pack',
       '/api/worldbooks',
       '/api/defaults',
+      '/api/plugins',
     ]);
   });
 
@@ -439,9 +440,31 @@ describe('BFF 路由前缀单一真源', () => {
     expect(source.match(/startsWith\(['"]\/api\/\w/g)).toBeNull();
     expect(source).toContain('isBffRoute(');
 
-    // dev 与 preview 两处都必须注入 contentDir，否则「preview 下写回 404」原地复活
-    const injections = source.match(/buildHonoApp\(\s*\{\s*contentDir:\s*poemContentDir\s*\}/g);
-    expect(injections).toHaveLength(2);
+    // dev 与 preview 两处都必须拿同一份 options（contentDir + 插件目录 + 金丝雀存储），
+    // 否则「preview 下写回 404」或「金丝雀只在一边命中」原地复活
+    expect(source).toMatch(
+      /const bffOptions = \{\s*contentDir: poemContentDir,\s*pluginsDir: pluginsDirResult,\s*canaryStore\s*\}/,
+    );
+    expect(source.match(/buildHonoApp\(bffOptions\)/g)).toHaveLength(2);
+    expect(source.match(/buildHonoApp\(/g)).toHaveLength(2);
+  });
+
+  it('vite.config.ts 在 dev 与 preview 两处都最先挂插件目录拒绝、都挂金丝雀 upgrade 处理器', () => {
+    const source = readFileSync(resolve(__dirname, '..', 'vite.config.ts'), 'utf8');
+
+    // 两个分支各自第一条 middlewares.use 就是插件目录拒绝
+    for (const hook of ['configureServer(server) {', 'configurePreviewServer(server) {']) {
+      const body = source.slice(source.indexOf(hook));
+      const firstUse = body.indexOf('server.middlewares.use(');
+      expect(body.slice(firstUse, firstUse + 60)).toContain(
+        'server.middlewares.use(denyPluginsDirMiddleware)',
+      );
+    }
+    expect(source.match(/attachCanary\(server\.httpServer\)/g)).toHaveLength(2);
+    // 插件目录进 fs.deny，且保留 vite 的缺省四条
+    expect(source).toMatch(/deny: \[[^\]]*'\*\*\/\.git\/\*\*'[^\]]*pluginsDir/);
+    // dev 的 Origin-null 守卫豁免金丝雀两条路由
+    expect(source).toContain('!isPluginCanaryPath(u)');
   });
 });
 

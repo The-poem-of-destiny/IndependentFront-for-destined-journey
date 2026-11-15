@@ -4,6 +4,11 @@ import { resolve, relative, isAbsolute } from 'path';
 import fs from 'fs';
 import { buildHonoApp, isBffRoute, isOpaqueSandboxOrigin, OPAQUE_ORIGIN_ERROR } from './server/app';
 import { getRequestListener } from '@hono/node-server';
+import type { Server as HttpServer } from 'node:http';
+import type { Connect } from 'vite';
+import { isPluginCanaryPath, isPluginsApiPath } from './server/routes/plugins';
+import { isRequestIntoPluginsDir, resolvePluginsDir } from './server/plugin-dir';
+import { attachCanaryUpgradeHandler, createCanaryStore } from './server/plugin-canary';
 
 // 引擎版本 —— `package.json` 是唯一真源（D26/D40）。
 // 内容包的 `minEngineVersion` 拿它做门（`content-source.ts` 的 checkEngineVersion）。
@@ -20,6 +25,42 @@ const pkg = JSON.parse(fs.readFileSync(resolve(__dirname, 'package.json'), 'utf-
 // 会让探测失败开，见 D14）。
 const poemContentDir = process.env.POEM_CONTENT_DIR ? resolve(process.env.POEM_CONTENT_DIR) : null;
 
+// 插件系统（设计文档 §4.6 / §4.8）：插件目录由 POEM_PLUGINS_DIR 覆盖，缺省为仓库上一级的
+// poem-plugins/。解析失败（落在仓库根、public/、dist-ui/ 之内）时插件路由回 enabled:false，
+// 但下面的 fs.deny 与拒绝中间件照样按这个路径拦 —— 多拦不漏拦。
+const pluginsDirResult = resolvePluginsDir(process.env, __dirname);
+const pluginsDir = pluginsDirResult.dir;
+
+// 金丝雀存储只有一份：Hono 里的记录器与 http 服务的 WebSocket `upgrade` 处理器共用它，
+// 否则自检的对照组在某一路上恒不命中。
+const canaryStore = createCanaryStore();
+
+// dev 与 preview 两处 buildHonoApp 共用同一份 options（单一真源，别在两处各写一遍）
+const bffOptions = { contentDir: poemContentDir, pluginsDir: pluginsDirResult, canaryStore };
+
+/**
+ * 🔒 插件目录拒绝中间件（§4.6 第三层防线）—— dev 与 preview 都挂在**最前面**。
+ * 凡是解析后落进插件目录的请求（含 `/@fs/`、编码、反斜杠等形式）一律 403；
+ * `/api/plugins` 前缀本身交给 Hono（它只回 octet-stream，从不按扩展名服务文件）。
+ */
+const denyPluginsDirMiddleware: Connect.NextHandleFunction = (req, res, next) => {
+  const u = req.url || '';
+  if (!isPluginsApiPath(u) && isRequestIntoPluginsDir(u, pluginsDir, __dirname)) {
+    res.statusCode = 403;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.end('Forbidden');
+    return;
+  }
+  next();
+};
+
+/** 给 http 服务挂金丝雀的 WebSocket 握手处理器（中间件模式下没有 httpServer，跳过） */
+function attachCanary(httpServer: unknown): void {
+  // vite 的 httpServer 类型是 http.Server | Http2SecureServer 联合；两者都发 `upgrade` 事件
+  if (httpServer) attachCanaryUpgradeHandler(httpServer as HttpServer, canaryStore);
+}
+
 export default defineConfig({
   define: {
     __ENGINE_VERSION__: JSON.stringify(pkg.version),
@@ -35,9 +76,18 @@ export default defineConfig({
         // 不注册任何 /data 中间件，占位内容由 public/data 原生静态服务。
         const dataDir = poemContentDir ?? resolve(__dirname, 'data');
 
+        server.middlewares.use(denyPluginsDirMiddleware);
+        attachCanary(server.httpServer);
+
+        // 金丝雀两条路由例外：Hono 里的记录器要先看到 `Origin: null` 的探针请求，
+        // 与 preview（没有这一层）保持同一挂载顺序（§4.8）
         server.middlewares.use((req, res, next) => {
           const u = req.url || '';
-          if (u.startsWith('/api/') && isOpaqueSandboxOrigin(req.headers.origin)) {
+          if (
+            u.startsWith('/api/') &&
+            !isPluginCanaryPath(u) &&
+            isOpaqueSandboxOrigin(req.headers.origin)
+          ) {
             res.statusCode = 403;
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ error: OPAQUE_ORIGIN_ERROR }));
@@ -54,7 +104,7 @@ export default defineConfig({
         //    其中一处的症状是「代码看着完全正确，请求 404」。
         //    `/api/worldbooks`、`/api/defaults` 两条写回也已搬进 hono（server/routes/content.ts），
         //    contentDir 从这里注入，dev 与 preview 拿到同一份行为。
-        const honoListener = getRequestListener(buildHonoApp({ contentDir: poemContentDir }).fetch);
+        const honoListener = getRequestListener(buildHonoApp(bffOptions).fetch);
         server.middlewares.use((req, res, next) => {
           if (isBffRoute(req.url || '')) return honoListener(req, res);
           next();
@@ -122,7 +172,9 @@ export default defineConfig({
         //    前缀清单走 `isBffRoute`，contentDir 同样注入，于是 dev 与 preview
         //    再也不会出现「dev 通、preview 404」的分叉（`/api/worldbooks`、
         //    `/api/defaults` 此前就是这么少了半边的）。
-        const honoListener = getRequestListener(buildHonoApp({ contentDir: poemContentDir }).fetch);
+        server.middlewares.use(denyPluginsDirMiddleware);
+        attachCanary(server.httpServer);
+        const honoListener = getRequestListener(buildHonoApp(bffOptions).fetch);
         server.middlewares.use((req, res, next) => {
           if (isBffRoute(req.url || '')) return honoListener(req, res);
           next();
@@ -147,6 +199,10 @@ export default defineConfig({
   server: {
     port: 5173,
     open: true,
+    fs: {
+      // 🔒 插件目录列入 deny（§4.6）。自定义 deny 会整个替换 vite 的缺省值，所以缺省四条照抄
+      deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', `${pluginsDir.replace(/\\/g, '/')}/**`],
+    },
     watch: {
       // 内容-引擎分离波 4 / D14：真实内容在 overlay 目录（POEM_CONTENT_DIR），
       // 由服务端中间件按需读盘，不参与 Vite 热更新监视（改真实内容不触发前端重载）。
