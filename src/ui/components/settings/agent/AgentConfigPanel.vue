@@ -297,6 +297,9 @@ function restoreAgentDefaults() {
     delete s.directCachedPresetId;
     // 渠道策略也属缓存直出配置：清掉后由初始化与读取侧的 ?? 'prefix' 回到默认
     delete s.directCacheProvider;
+    // 重建时机同理：删键 = 回到引擎默认
+    delete s.directCacheRebuildTurns;
+    delete s.directCacheGrowthLimit;
     s.directCachedInitialized = false;
     initializeCachedDirectSettings(s, defaultsLayer.value);
   }

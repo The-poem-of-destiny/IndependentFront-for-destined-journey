@@ -16,6 +16,7 @@ import {
   prepareDirectContext,
   acceptDirectContext,
   invalidateDirectContext,
+  serializeDirectContext,
 } from '../../../src/core/prompts/direct-context-session';
 
 function fixture(): DirectGenerationInput {
@@ -187,7 +188,8 @@ describe('legacy cached direct layout', () => {
       saveId,
       signature: 'fixed',
       history: [],
-      turn: '继续',
+      playerInput: '继续',
+      turnContext: {},
       outputBudget: 100,
       frame: {
         prefix: [{ role: 'system' as const, content: '规则'.repeat(4000) }],
@@ -199,21 +201,22 @@ describe('legacy cached direct layout', () => {
       const first = await prepareDirectContext(build([player, npc]));
       expect(JSON.stringify(first.messages)).toContain('唯一设定');
       expect(JSON.stringify(first.messages)).toContain('材料规则');
-      await acceptDirectContext(first, { rawResponse: '完成', acceptedMessages: [] });
+      await acceptDirectContext(first, { acceptedMessages: [] });
       player.hp = 60;
       const second = await prepareDirectContext(build([player, npc]));
+      // 留存消息是尾部之前的那一条
       const delta = JSON.parse(
-        second.messages[second.messages.length - 1].content!.match(
+        second.messages[second.retainedCount - 1].content!.match(
           /<direct_context>\n([\s\S]*?)\n<\/direct_context>/,
         )![1],
       );
-      expect(Object.keys(delta.set).sort()).toEqual(['combat', 'resources']);
+      expect(Object.keys(delta.set).sort()).toEqual(['resources']);
       expect(delta.set.resources[0].hp).toBe(60);
-      await acceptDirectContext(second, { rawResponse: '完成', acceptedMessages: [] });
+      await acceptDirectContext(second, { acceptedMessages: [] });
       player.inventory = [];
       const third = await prepareDirectContext(build([player]));
       const cleared = JSON.parse(
-        third.messages[third.messages.length - 1].content!.match(
+        third.messages[third.retainedCount - 1].content!.match(
           /<direct_context>\n([\s\S]*?)\n<\/direct_context>/,
         )![1],
       );
@@ -222,12 +225,72 @@ describe('legacy cached direct layout', () => {
         'character/铁匠/inventory',
         'character/铁匠/profile',
         'character/铁匠/skills',
+        'character/铁匠/state',
         'character/铁匠/statusEffects',
       ]);
       expect(cleared.set.resources).toHaveLength(1);
     } finally {
       invalidateDirectContext(saveId);
     }
+  });
+
+  it('把易变字段拆进 state 分区，长文本仍留在 profile', () => {
+    const character = createDefaultCharacterState({
+      name: '旅人',
+      location: '王都/铁匠铺',
+      present: true,
+      currentAction: '挑选武器',
+      money: 30,
+      totalExp: 50,
+      expToNext: 120,
+      thoughts: '这把剑太贵了',
+      background: '出身边境的流浪剑士',
+    });
+    const sections = buildDirectCharacterSections([character]);
+    const state = sections['character/旅人/state'] as Record<string, unknown>;
+    const profile = sections['character/旅人/profile'] as Record<string, unknown>;
+    const volatile = [
+      'location',
+      'present',
+      'currentAction',
+      'money',
+      'totalExp',
+      'expToNext',
+      'thoughts',
+    ];
+    expect(Object.keys(state).sort()).toEqual([...volatile].sort());
+    expect(state).toMatchObject({
+      location: '王都/铁匠铺',
+      present: true,
+      currentAction: '挑选武器',
+      money: 30,
+      totalExp: 50,
+      expToNext: 120,
+      thoughts: '这把剑太贵了',
+    });
+    for (const field of volatile) expect(profile).not.toHaveProperty(field);
+    expect(profile.background).toBe('出身边境的流浪剑士');
+    expect(profile).toHaveProperty('level');
+    expect(profile).toHaveProperty('attributes');
+  });
+
+  it('只改当前行动或位置时 profile 分区的序列化结果不变', () => {
+    const character = createDefaultCharacterState({
+      name: '旅人',
+      location: '王都/铁匠铺',
+      currentAction: '挑选武器',
+      background: '出身边境的流浪剑士',
+    });
+    const before = buildDirectCharacterSections([character]);
+    const after = buildDirectCharacterSections([
+      { ...character, currentAction: '付钱离开', location: '王都/广场' },
+    ]);
+    expect(serializeDirectContext(after['character/旅人/profile'])).toBe(
+      serializeDirectContext(before['character/旅人/profile']),
+    );
+    expect(serializeDirectContext(after['character/旅人/state'])).not.toBe(
+      serializeDirectContext(before['character/旅人/state']),
+    );
   });
 
   it('keeps one section per memory out of the prefix', async () => {
@@ -253,7 +316,8 @@ describe('legacy cached direct layout', () => {
       saveId,
       signature: 'fixed',
       history: [],
-      turn: '继续',
+      playerInput: '继续',
+      turnContext: {},
       outputBudget: 100,
       frame: {
         prefix: [{ role: 'system' as const, content: '规则'.repeat(4000) }],
@@ -261,25 +325,26 @@ describe('legacy cached direct layout', () => {
         sections: { ...buildDirectMemorySections(memories), combat: null },
       },
     });
+    // 最后一条是不留存的尾部，direct_context 在它前一条留存消息里
     const delta = (messages: { content?: string | null }[]) =>
       JSON.parse(
-        messages[messages.length - 1].content!.match(
+        messages[messages.length - 2].content!.match(
           /<direct_context>\n([\s\S]*?)\n<\/direct_context>/,
         )![1],
       );
     try {
       const library = Array.from({ length: 30 }, (_, i) => memory(i + 1));
       const first = await prepareDirectContext(build(library));
-      await acceptDirectContext(first, { rawResponse: '完成', acceptedMessages: [] });
+      await acceptDirectContext(first, { acceptedMessages: [] });
       const added = await prepareDirectContext(build([...library, memory(31)]));
       expect(added.rebaseReason).toBeUndefined();
-      expect(Object.keys(delta(added.messages).set).sort()).toEqual(['combat', 'memory/MEM000031']);
-      await acceptDirectContext(added, { rawResponse: '完成', acceptedMessages: [] });
+      expect(Object.keys(delta(added.messages).set).sort()).toEqual(['memory/MEM000031']);
+      await acceptDirectContext(added, { acceptedMessages: [] });
       const edited = { ...memory(5), content: '第5条记忆已改写' };
       const changed = [...library.slice(0, 4), edited, ...library.slice(5, 29), memory(31)];
       const third = await prepareDirectContext(build(changed));
       const next = delta(third.messages);
-      expect(Object.keys(next.set).sort()).toEqual(['combat', 'memory/MEM000005']);
+      expect(Object.keys(next.set).sort()).toEqual(['memory/MEM000005']);
       expect(next.set['memory/MEM000005']).toContain('第5条记忆已改写');
       expect(next.remove).toEqual(['memory/MEM000030']);
     } finally {

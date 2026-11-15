@@ -12,6 +12,11 @@ import {
   projectDirectCombatCharacters,
 } from '../../../src/core/combat/direct-combat';
 import { createDirectPreset } from '../../../src/core/prompts/direct-prompt';
+import {
+  installDirectCacheStore,
+  invalidateDirectContext,
+  type DirectCacheRecord,
+} from '../../../src/core/prompts/direct-context-session';
 import { createStateManager } from '../../../src/core/state/state-manager';
 import { withSaveWriteLock } from '../../../src/core/state/state-write-queue';
 import {
@@ -567,6 +572,43 @@ describe('direct memory admission', () => {
       expect(context.agentOutputs.get('story')).toBe('你把材料交给铁匠。');
     },
   );
+
+  it('接纳缓存回合时会话历史只追加玩家看到的正文', async () => {
+    let record: DirectCacheRecord | undefined;
+    installDirectCacheStore({
+      load: async () => undefined,
+      save: async (value) => {
+        record = structuredClone(value);
+      },
+      delete: async () => {},
+    });
+    invalidateDirectContext(saveId);
+    try {
+      const { instance } = orchestrator(true);
+      vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
+        agentId: 'direct_main',
+        output: response(),
+        rawResponse: response(),
+        tokensUsed: 0,
+        cacheHit: false,
+        duration: 1,
+      });
+      await instance.runDirect(null, 'prefix');
+      await instance.acceptDirectCache([
+        { id: 'u1', role: 'user', content: '继续', timestamp: 1 },
+        { id: 'a1', role: 'assistant', content: '你把材料交给铁匠。', timestamp: 2 },
+      ]);
+      const last = record!.transcript[record!.transcript.length - 1];
+      expect(last).toEqual({ role: 'assistant', content: '你把材料交给铁匠。' });
+      // 原始回复（含 <maintext> 外壳与状态块）不进历史
+      const assistants = record!.transcript.filter((m) => m.role === 'assistant');
+      expect(assistants.some((m) => m.content?.includes('<maintext>') || m.native)).toBe(false);
+      expect(JSON.stringify(record!.transcript)).not.toContain('<turn_context>');
+    } finally {
+      installDirectCacheStore();
+      invalidateDirectContext(saveId);
+    }
+  });
 });
 
 it('persists active combat in snapshots and remaps its source when importing a direct save', async () => {

@@ -164,6 +164,15 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     expect(mockSettings.directCacheProvider ?? 'prefix').toBe('prefix');
   });
 
+  it('缓存直出「全部恢复默认」同时删掉两个重建时机键（回到引擎默认）', async () => {
+    mockSettings.directCacheRebuildTurns = 12;
+    mockSettings.directCacheGrowthLimit = 2;
+    const w = mountPanel('direct_cached');
+    await click(w, 'restore-all-defaults');
+    expect(mockSettings).not.toHaveProperty('directCacheRebuildTurns');
+    expect(mockSettings).not.toHaveProperty('directCacheGrowthLimit');
+  });
+
   it.each(['story', 'entity_gen', 'direct_main'])(
     '🔴 「全部恢复默认」在没有任何项目默认时也保留 API 池绑定（model）：%s',
     async (agentId) => {

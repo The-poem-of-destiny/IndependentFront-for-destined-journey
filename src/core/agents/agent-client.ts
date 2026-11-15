@@ -64,6 +64,10 @@ export function ensureUserMessage(messages: ChatRequest['messages']): ChatReques
 export interface ChatRequest {
   cachePolicy?: import('../types/types-api').DirectCachePolicy;
   cacheKey?: string;
+  /** 缓存直出：消息数组开头属于静态前缀的条数，供 Claude 断点定位。 */
+  cacheStaticSystemCount?: number;
+  /** 缓存直出：消息数组前多少条会留存进会话；其后为不留存的本轮尾部，断点落在留存末尾。 */
+  cacheRetainedMessageCount?: number;
   model?: string;
   messages: LlmMessage[];
   temperature?: number;
@@ -810,6 +814,8 @@ export class AgentClient {
       model: request.model || this.endpoint.defaultModel,
       cachePolicy: request.cachePolicy,
       cacheKey: request.cacheKey,
+      cacheStaticSystemCount: request.cacheStaticSystemCount,
+      cacheRetainedMessageCount: request.cacheRetainedMessageCount,
       messages: ensureUserMessage(request.messages),
       temperature: request.temperature ?? poolDefaults.temperature,
       maxTokens: request.maxTokens ?? poolDefaults.maxTokens,

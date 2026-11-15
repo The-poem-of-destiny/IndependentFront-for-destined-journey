@@ -1739,6 +1739,41 @@ describe('runImagePromptAgent — activity ledger', () => {
     );
   });
 
+  it('调试条目带上会话诊断字段（重基线原因与缓存直出记账）', () => {
+    const gameStore = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    const events = (pipeline as any).buildEventHandlers('activity-direct-cache');
+    const directCacheDiagnostics = {
+      rebased: true,
+      requestChars: 900,
+      baselineChars: 900,
+      growthLimit: 1.4,
+      tailChars: 40,
+      sections: [{ key: 'state/主角', action: 'set' as const, chars: 120 }],
+    };
+    const result = {
+      ...makeResult('direct_main', 'cached response'),
+      promptSessionRevision: 1,
+      promptRebased: true,
+      promptRebaseReason: 'transcript_growth',
+      directCacheDiagnostics,
+    };
+
+    events.onAgentStart('direct_main', { apiEndpointId: 'ep-direct', model: 'direct-model' });
+    events.onAgentError('direct_main', 'completion handler failed', result);
+
+    expect(gameStore.addAgentLogEntry).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        promptRebaseReason: 'transcript_growth',
+        directCacheDiagnostics,
+      }),
+    );
+  });
+
   it('records memory-summary embedding usage as its own billable invocation', async () => {
     const gameStore = makeGameStore();
     const settingsStore = makeSettingsStore({

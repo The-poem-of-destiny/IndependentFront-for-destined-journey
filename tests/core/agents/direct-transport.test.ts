@@ -4,6 +4,7 @@ import {
 } from '../../../src/core/prompts/direct-context-session';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentClient } from '../../../src/core/agents/agent-client';
+import { buildLlmRequest } from '../../../src/core/api/llm-adapter';
 import {
   generateDirectTurn,
   type DirectGenerationInput,
@@ -182,25 +183,111 @@ it.each([false, true])(
       .mockImplementation(async () => streamResponse(true));
     const first = await generateDirectTurn(input, client);
     expect(first.cache).toBeDefined();
-    await acceptDirectContext(first.cache!.ticket, { ...first.cache!, acceptedMessages: [] });
+    await acceptDirectContext(first.cache!.ticket, { acceptedMessages: [] });
     input.context.userInput = '离开铁匠铺';
     input.context.variables = { 地点: '街道' };
     const second = await generateDirectTurn(input, client);
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(second.result.promptRebased).toBe(false);
-    expect(second.result.requestMessages!.slice(0, first.result.requestMessages!.length)).toEqual(
-      first.result.requestMessages,
+    // 前缀到第一楼留存消息为止逐条一致；第一楼的不留存尾部不再出现
+    const retained = first.cache!.ticket.retainedCount;
+    expect(second.result.requestMessages!.slice(0, retained)).toEqual(
+      first.result.requestMessages!.slice(0, retained),
     );
+    const firstTail = first.result.requestMessages![first.result.requestMessages!.length - 1];
+    expect(firstTail.content).toContain('<turn_context>');
+    expect(second.result.requestMessages).not.toContainEqual(firstTail);
+    const secondRetained = second.result.requestMessages![second.cache!.ticket.retainedCount - 1];
+    expect(secondRetained.content).toContain('街道');
+    expect(secondRetained.content).toContain('<player_input>\n离开铁匠铺\n</player_input>');
     expect(
       second.result.requestMessages![second.result.requestMessages!.length - 1]!.content,
-    ).toContain('街道');
-    expect(
-      second.result.requestMessages![second.result.requestMessages!.length - 1]!.content,
-    ).toContain('离开铁匠铺');
+    ).toMatch(/^<turn_context>/);
     expect(second.result.providerUsage).toBeDefined();
     invalidateDirectContext('cached-wire');
   },
 );
+
+it('缓存模式把静态前缀条数（含协议消息）作为 cacheStaticSystemCount 交给客户端', async () => {
+  const saveId = 'cached-static-count';
+  invalidateDirectContext(saveId);
+  const { input, client } = setup(false);
+  input.cache = { saveId, policy: 'prefix' };
+  // 正文历史会以一条易变 system 紧跟在静态前缀之后，用来区分「静态末尾」与「最后一条 system」
+  input.context.history = [
+    { role: 'user', content: '走进铁匠铺' },
+    { role: 'assistant', content: '炉火正旺，铁匠抬头看你。' },
+  ] as typeof input.context.history;
+  const chatStream = vi.spyOn(client, 'chatStream');
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => streamResponse(true));
+  try {
+    await generateDirectTurn(input, client);
+    expect(chatStream).toHaveBeenCalledTimes(1);
+    const request = chatStream.mock.calls[0][0];
+    const count = request.cacheStaticSystemCount!;
+    // 静态前缀 = 协议消息 + 预设 system；不含紧随其后的正文历史 system
+    expect(count).toBe(2);
+    expect(request.messages.slice(0, count).every((m) => m.role === 'system')).toBe(true);
+    expect(request.messages[0].content).toContain('direct_updates');
+    expect(request.messages[count]).toMatchObject({ role: 'system' });
+    expect(request.messages[count].content).toContain('走进铁匠铺');
+    // 交给 Claude 协议时，断点落在静态末尾与最后一条 system 上
+    const body = buildLlmRequest({
+      protocol: 'anthropic-messages',
+      model: 'test',
+      stream: false,
+      userId: 'test',
+      messages: request.messages,
+      cachePolicy: 'anthropic',
+      cacheStaticSystemCount: count,
+    }).body;
+    expect((body.system as { cache_control?: unknown }[]).map((b) => !!b.cache_control)).toEqual([
+      false,
+      true,
+      true,
+    ]);
+  } finally {
+    invalidateDirectContext(saveId);
+  }
+});
+
+it('缓存模式交出留存条数并把会话诊断写进结果', async () => {
+  const saveId = 'cached-retained-count';
+  invalidateDirectContext(saveId);
+  const { input, client } = setup(false);
+  input.cache = { saveId, policy: 'prefix' };
+  const chatStream = vi.spyOn(client, 'chatStream');
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => streamResponse(true));
+  try {
+    const turn = await generateDirectTurn(input, client);
+    const request = chatStream.mock.calls[0][0];
+    expect(request.cacheRetainedMessageCount).toBe(request.messages.length - 1);
+    expect(request.messages[request.cacheRetainedMessageCount! - 1].content).toContain(
+      '<player_input>',
+    );
+    const tail = request.messages[request.messages.length - 1].content!;
+    expect(tail).toMatch(/^<turn_context>/);
+    // 冷建时战斗与资源已整份在留存消息的 set 里，尾部不重复现值
+    expect(tail).not.toContain('"current"');
+    expect(turn.result.directCacheDiagnostics).toBe(turn.cache!.ticket.diagnostics);
+    expect(turn.result.directCacheDiagnostics).toMatchObject({
+      rebased: true,
+      tailChars: tail.length,
+    });
+    expect(turn.cache).toEqual({ ticket: turn.cache!.ticket });
+  } finally {
+    invalidateDirectContext(saveId);
+  }
+});
+
+it('非缓存模式不设 cacheStaticSystemCount', async () => {
+  const { input, client } = setup(false);
+  const chatStream = vi.spyOn(client, 'chatStream');
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => streamResponse(true));
+  await generateDirectTurn(input, client);
+  expect(chatStream.mock.calls[0][0].cacheStaticSystemCount).toBeUndefined();
+  expect(chatStream.mock.calls[0][0].cacheRetainedMessageCount).toBeUndefined();
+});
 
 it.each([
   ['rejected output', 'keeps', false],
@@ -214,7 +301,7 @@ it.each([
   const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => streamResponse(true));
   try {
     const first = await generateDirectTurn(input, client);
-    await acceptDirectContext(first.cache!.ticket, { ...first.cache!, acceptedMessages: [] });
+    await acceptDirectContext(first.cache!.ticket, { acceptedMessages: [] });
     const controller = new AbortController();
     if (failure === 'cancelled') input.config.abortSignal = controller.signal;
     fetch.mockImplementationOnce(async () => {
@@ -233,10 +320,12 @@ it.each([
     const retry = await generateDirectTurn(input, client);
     expect(fetch).toHaveBeenCalledTimes(3);
     expect(retry.cache!.ticket.rebaseReason).toBe(rebuilds ? 'missing_session' : undefined);
-    if (!rebuilds)
-      expect(retry.result.requestMessages!.slice(0, first.result.requestMessages!.length)).toEqual(
-        first.result.requestMessages,
+    if (!rebuilds) {
+      const retained = first.cache!.ticket.retainedCount;
+      expect(retry.result.requestMessages!.slice(0, retained)).toEqual(
+        first.result.requestMessages!.slice(0, retained),
       );
+    }
     const prompt = JSON.stringify(retry.result.requestMessages);
     expect(prompt).not.toContain('失败的尝试');
     expect(prompt).not.toContain('缺少更新块');
@@ -289,7 +378,7 @@ it('legacy memory growth appends one memory per turn instead of rebuilding the s
   try {
     const first = await generateDirectTurn(input, client);
     expect(JSON.stringify(first.cache!.ticket.messages)).toContain('memory/MEM000020');
-    await acceptDirectContext(first.cache!.ticket, { ...first.cache!, acceptedMessages: [] });
+    await acceptDirectContext(first.cache!.ticket, { acceptedMessages: [] });
     // 整块重发记忆库时，这个规模下每楼增量约 8.5k 字、第 3 楼触发 transcript_growth：
     // 下面的「不重建」与「增量 < 5000」两条断言各自都会拦住
     for (let turn = 2; turn <= 5; turn++) {
@@ -298,11 +387,11 @@ it('legacy memory growth appends one memory per turn instead of rebuilding the s
       const next = await generateDirectTurn(input, client);
       const ticket = next.cache!.ticket;
       expect(ticket.rebaseReason).toBeUndefined();
-      const tail = ticket.messages[ticket.messages.length - 1].content!;
-      expect(tail).toContain(`memory/MEM0000${19 + turn}`);
-      expect(tail).not.toContain('memory/MEM000001');
-      expect(tail.length).toBeLessThan(5000);
-      await acceptDirectContext(ticket, { ...next.cache!, acceptedMessages: [] });
+      const retained = ticket.messages[ticket.retainedCount - 1].content!;
+      expect(retained).toContain(`memory/MEM0000${19 + turn}`);
+      expect(retained).not.toContain('memory/MEM000001');
+      expect(retained.length).toBeLessThan(5000);
+      await acceptDirectContext(ticket, { acceptedMessages: [] });
     }
   } finally {
     invalidateDirectContext(saveId);
@@ -378,7 +467,7 @@ it.each([false, true])(
       expect(prompt.match(/铁匠已收到材料/g)).toHaveLength(1);
       expect(prompt).toContain('当前变量1');
       expect(prompt).toContain('作者本轮输入 查看短剑');
-      await acceptDirectContext(first.cache!.ticket, { ...first.cache!, acceptedMessages: [] });
+      await acceptDirectContext(first.cache!.ticket, { acceptedMessages: [] });
       input.context.characters[0].location = '城外';
       input.context.variables = { 地点: '城外', sys: { tick: 2 } };
       input.context.userInput = '向城外走去';
@@ -386,15 +475,20 @@ it.each([false, true])(
       const second = await generateDirectTurn(input, client);
       const messages = second.cache!.ticket.messages;
       expect(second.cache!.ticket.rebaseReason).toBeUndefined();
-      expect(messages.slice(0, first.cache!.ticket.messages.length)).toEqual(
-        first.cache!.ticket.messages,
-      );
-      const tail = messages[messages.length - 1].content!;
-      expect(tail).toContain('当前变量2');
-      expect(tail).toContain('城外规则');
-      expect(tail).not.toContain('城内规则');
-      expect(tail.match(/新的召回/g)).toHaveLength(1);
-      expect(tail).toContain('作者本轮输入 向城外走去');
+      const retained = first.cache!.ticket.retainedCount;
+      expect(messages.slice(0, retained)).toEqual(first.cache!.ticket.messages.slice(0, retained));
+      // 本轮新增 = 留存消息 + 不留存尾部
+      const turn = messages
+        .slice(second.cache!.ticket.retainedCount - 1)
+        .map((m) => m.content)
+        .join('\n');
+      expect(turn).toContain('当前变量2');
+      expect(turn).toContain('城外规则');
+      expect(turn).not.toContain('城内规则');
+      expect(turn.match(/新的召回/g)).toHaveLength(1);
+      // 召回只在尾部
+      expect(messages[messages.length - 1].content).toContain('新的召回');
+      expect(turn).toContain('作者本轮输入 向城外走去');
       expect(fetch).toHaveBeenCalledTimes(2);
     } finally {
       invalidateDirectContext(saveId);

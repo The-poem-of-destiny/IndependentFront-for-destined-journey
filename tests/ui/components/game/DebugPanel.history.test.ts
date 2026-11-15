@@ -97,6 +97,40 @@ describe('DebugPanel · Agent 历史', () => {
   });
 });
 
+describe('DebugPanel · 缓存直出记账', () => {
+  it('条目带 directCacheDiagnostics 时渲染记账与分区表，缺席时整块不渲染', async () => {
+    const game = useGameStore();
+    const cached = entry('run-dc', 'direct_main', 5);
+    cached.directCacheDiagnostics = {
+      rebased: false,
+      requestChars: 1200,
+      baselineChars: 1000,
+      growthLimit: 1.4,
+      tailChars: 30,
+      sections: [{ key: 'state/主角', action: 'set', chars: 300 }],
+      otherSections: { count: 2, chars: 15 },
+    };
+    game.agentLogHistory.push(
+      turn('run-plain', 1, [entry('run-plain', 'story', 1)]),
+      turn('run-dc', 2, [cached]),
+    );
+
+    const wrapper = mount(DebugPanel);
+    expect(wrapper.get('[data-testid="direct-cache-summary"]').text()).toContain(
+      '累计 1.20 倍 / 上限 1.40 倍',
+    );
+    const table = wrapper.get('[aria-label="缓存直出本楼分区"]');
+    expect(table.text()).toContain('state/主角');
+    expect(table.text()).toContain('其余 2 项');
+    expect(table.text()).toContain('不留存的本轮尾部');
+    expect(wrapper.text()).toContain('不是渠道用量');
+
+    await wrapper.find('.debug-turn-select').setValue('run-plain');
+    expect(wrapper.find('[data-testid="direct-cache-summary"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="缓存直出本楼分区"]').exists()).toBe(false);
+  });
+});
+
 describe('DebugPanel · Story 分区（新模式）', () => {
   it('所选回合带 Story 新模式诊断时显示分区用量、召回与补建；旧模式回合不显示', async () => {
     const game = useGameStore();

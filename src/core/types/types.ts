@@ -2263,8 +2263,31 @@ export interface AgentContext {
   plotCastPlan?: import('../plot/plot-threads').PlotCastPlanEntry[];
 }
 
+/**
+ * 缓存直出：本次主请求的会话记账，只供调试面板展示。
+ * 字符数是引擎的估算口径（与重建判定同一口径），不是渠道用量。
+ */
+export interface DirectCacheDiagnostics {
+  /** 本次是否重建了完整基线 */
+  rebased: boolean;
+  /** 本次实际发出的请求总字符数（含不留存的本轮尾部） */
+  requestChars: number;
+  /** 若此刻重建，完整基线请求的字符数（增长判定的分母） */
+  baselineChars: number;
+  /** 触发重建的增长倍数上限（requestChars / baselineChars 超过它即重建） */
+  growthLimit: number;
+  /** 不留存的本轮尾部（召回、骰池、尾部指令、战斗与资源现值）字符数 */
+  tailChars: number;
+  /** 本次 direct_context 发送的分区，按字符数降序，至多 30 项；remove 的字符数记 0 */
+  sections: Array<{ key: string; action: 'set' | 'remove'; chars: number }>;
+  /** 超出 30 项未逐条列出的分区数与合计字符数 */
+  otherSections?: { count: number; chars: number };
+}
+
 /** 单个 Agent 的运行结果 */
 export interface AgentResult {
+  /** 缓存直出主请求的会话记账；其余请求缺席 */
+  directCacheDiagnostics?: DirectCacheDiagnostics;
   providerUsage?: import('./types-api').NormalizedLlmUsage;
   agentId: string;
   output: any; // 解析后的输出
@@ -2355,6 +2378,7 @@ export interface DebugAgentEntry {
   promptSessionRevision?: number;
   promptRebased?: boolean;
   promptRebaseReason?: string;
+  directCacheDiagnostics?: DirectCacheDiagnostics;
   error?: string;
   tokensUsed: number;
   cacheHit: boolean;
