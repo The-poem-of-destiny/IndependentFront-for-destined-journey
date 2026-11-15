@@ -14,11 +14,34 @@
 - 对应 [全应用 UI/UX 普查](reviews/2026-11-14-ui-ux-audit.md)；逐条状态见报告第十节闭环表与各条行尾 📌。P0 1 条已修（引擎侧），P1 41 条修了 40 条，另顺手修了约 20 条 P2/P3；GAME-01（窄屏游戏页）按主人 2026-11-14 裁定「暂不做移动端适配，只考虑 PC / 笔记本显示器比例」不处理，同一裁定下纯窄屏条目一律暂缓。验证仅为各切片单测通过，**没有做真机游玩**。
 - 共享件：`lib/confirm-dialog.ts` + `shared/ConfirmDialogHost.vue`（应用内 Promise 确认，App.vue 挂载；新确认一律用它，不再写 `window.confirm`）；toast 缺省时长按类型（错误 8 秒、警告 5 秒，`0` 常驻），加关闭按钮、悬停暂停与「已复制」反馈；`lib/leave-game-guard.ts`（生成 / 润色 / 插画在跑时，离开游戏页先确认）；`lib/content-startup-chain.ts`（启动内容链，工坊读失败单独兜底）。
 - 回合循环：失败原因归类（`lib/turn-failure.ts`，原文脱敏）+ `TurnRecoveryPanel.vue`（「再次尝试」/「回退并重试」）；从持久化 `storyTurnStatus` 推导未完成回合（`lib/turn-recovery.ts`），废弃的尝试折叠；ChatFlow 最新一回合下加可见操作条，回退 / 重新生成先确认，开场回合写明不可回退；润色保留原文（`ChatMessage.preRewriteContent`，可「还原润色前」）并防重入（**停止按钮仍没有**）；输入法回车不再误发送；去掉消息原生悬停提示。类型侧新增 `AgentActivityStep.error`、`AgentActivityRun.failure`（只在内存）。
-- 设置：新增第 15 个分区「内容包」（`ContentPackSection.vue`，左栏第二），卸载走 `pack-uninstall-flow.ts` 永远先确认；Agent 角标改 `describeAgentBinding` 四态；默认层里本机不存在的池 id 读成未设置、「存为项目默认」写 `model: ''`（S-00 引擎侧；私有内容仓那两个 id 未清，记入 `TODO.md`）；新建 API 源不预填采样参数，Agent 卡显示实际生效值与来源（`resolveAgentLlmParamSources`）；提示词未保存守卫（`prompt-dirty-guard.ts`）；删除 API 源 / 图像连接 / 正文预设 / 美化规则、导入覆盖规则、Story 新模式开关都先确认（开关仍在开发者模式）；世界书新建唯一 id、导入重名先问、「恢复默认」挪进危险区且失败如实报错、排序号可保存、条目编辑关闭前脏检查、点条目名打开编辑、拒收无 `entries` 的 JSON。
+- 设置：新增分区「内容包」（合并 master 的 UIL-01「关于」移出侧栏后共 14 个分区）（`ContentPackSection.vue`，左栏第二），卸载走 `pack-uninstall-flow.ts` 永远先确认；Agent 角标改 `describeAgentBinding` 四态；默认层里本机不存在的池 id 读成未设置、「存为项目默认」写 `model: ''`（S-00 引擎侧；私有内容仓那两个 id 未清，记入 `TODO.md`）；新建 API 源不预填采样参数，Agent 卡显示实际生效值与来源（`resolveAgentLlmParamSources`）；提示词未保存守卫（`prompt-dirty-guard.ts`）；删除 API 源 / 图像连接 / 正文预设 / 美化规则、导入覆盖规则、Story 新模式开关都先确认（开关仍在开发者模式）；世界书新建唯一 id、导入重名先问、「恢复默认」挪进危险区且失败如实报错、排序号可保存、条目编辑关闭前脏检查、点条目名打开编辑、拒收无 `entries` 的 JSON。
 - 创建：点数不足的卡片禁用并写「还差 N 点」（`selectCatalogItem`）、超支进缺失项并拦建档、消耗摘要列全、整份草稿持久化（`createWizardDraft_v1`）、加载预设先确认、页脚「重新开始」、命定核心键盘可选。
 - 游戏内面板：标记编辑串写修复（`useMarkerDraft.ts`）、「设为当前位置」确认、势力地图地名搜索（`lib/map-place-search.ts`）；角色列表可打开 `CharacterViewerModal`、键盘可达、选中按名字保持；任务筛选自动复位、失败任务不再能「标记完成」、写库失败回滚提示；未到达章节打码（总纲摘要按类型声明保持可见）；图鉴重画先确认并走正文同一条手动路径、显示排队 / 生成中 / 失败；快照行显示该回合输入与正文首句（`snapshot-turn-context.ts`）、读取失败态、生成中禁止恢复。
 - 扩展：首页「扩展管理」按钮只在有事可做时显示（`workshop/workshop-lock.ts`）；扩展管理页加纯本地已装列表与卸载（`InstalledExtensionList.vue`，确认列出受影响存档）；工坊读库失败显示错误态与重试；启用列表说明重写。
 - 删除测试文件 `tests/ui/components/settings/DataSection.pack-update.test.ts`（随内容包卡搬去新分区）。
+
+### 2026-11-14 Story v2 分批换窗与归档生效对齐｜待真机验证
+
+- 新增正文换窗批大小 `storyWindowBatchTurns`（K），默认 1 保留逐回合滑动；K > 1 时原文窗口在 N 到 N+K−1 回合之间循环。第 4 区、召回候选和原文展开共用 `storyWindowStart` 判据。
+- K > 1 时，归档在作出判断的回合换出原文窗口后进入长期总览，并同时移走覆盖片段；未结事件、归档生成与补建仍使用全部有效归档，不延迟事件结束事实。
+- 开发者设置校验 K 为正整数，非法值中止发送；调试面板展示窗口与待生效归档，记忆面板标注「换窗后生效」。不裁剪原文窗口，峰值预算超限仍停止请求。
+- 同步引擎索引与 [Story v2 交付说明](reference/story-v2-routing-delivery.md)，补齐窗口边界、前缀稳定性、召回及记忆面板回归测试。真实提供商缓存收益与界面真机走查尚未验证。
+
+### 2026-11-14 Story v2 摘要精简与延续事件复读诊断｜待真机验证
+
+- 正常摘要与历史补建统一为高浓缩事实索引：优先结论、变化和约定，默认一段，至少保留一段；延续事件只写本回合新进展，不复述已记录背景。示例仅使用结构占位符，避免具体名词污染摘要。
+- 阶段归档概括与兜底详情收紧篇幅；依据原文重写的详细记录只保留关键转折，承诺中的数字、条件和期限仍须忠于原文。
+- 未结事件清单说明增量用途并标注最近记录；新增字二元复读率诊断，仅展示于调试面板，不据此修改或丢弃摘要。
+- 配套摘要、补建、归档提示词及复读率回归测试；真实模型的摘要质量与复读率变化尚未验证。
+
+### 2026-11-14 设置页预设管理重做｜分支 `claude/preset-management-redesign`，待真机验证
+
+- 每个 Agent 配置面的提示词区最上方新增「预设」状态条（`components/settings/agent/AgentPresetBar.vue`）。预设型 Agent（story / 直出两种）是分组下拉：默认（恰好一项「默认 · 名称」，选它即跟随默认）/ 内容包 / 引擎内置（仅直出）/ 我的预设，旁边标出生效预设的来源；原先选的预设不存在时提示「原先选择的预设已不存在，现使用默认预设」。动作：复制为我的预设、导入、导出、重命名与删除（仅我的预设，删除需确认）、恢复默认。其余 Agent 显示「默认（内容包 / 占位内容）」或「我的自定义（已改 N 处）」，恢复默认只清 systemPrompt 与上下文模板两项覆写。
+- 写时复制：内容包、出厂文件与引擎内置的预设只读。对它们的任何条目编辑先复制成「<原名>（我的修改）」、切换过去再改，原预设不动。受保护内容包的预设不再接受「只进内存、刷新即丢」的编辑，直接写会被拒绝。
+- 预设编辑弹窗缩成「重命名」（名称 + 描述）：删除引擎从不读取的采样字段（`temp_openai` / `top_p_openai` / `freq_pen_openai` / `pres_pen_openai`）与 Main Prompt 编辑框；删除「+ 新建」空白预设，新预设只能复制或导入（导入的预设归当前生成方式）。
+- 动作栏：预设型 Agent 去掉只弹 toast 的「保存设置」；其余 Agent 改名「保存提示词」。「恢复成最新」改名「全部恢复默认」，对所有 Agent 与内容包状态都是同一件事：清覆写层但保留 API 池绑定（`model`），预设型再把选择回到默认 —— 此前没有项目默认时会连 `model` 一起清掉。
+- 解析器跟进：引擎内置直出预设在内容包自带直出默认时仍可显式选中（`normalizePresetSelection` 不再清它，只在 `migrateBuiltinPresetRows` 删掉原样旧行时清）；出厂文件播种进 Dexie 的预设算内容所有，不再显示在「我的预设」。内容包如何声明各模式默认预设见 [直出模式](reference/direct-generation.md)。
+- 待真机验证：装包 / 开发叠加两种环境下的分组与来源角标、写时复制后的刷新保留、受保护内容包锁定时的提示。
 
 ### 2026-11-14 首页 Astral Drift 视觉升级｜分支 `homepage-enhance`，仅做浏览器逐帧静帧检查
 

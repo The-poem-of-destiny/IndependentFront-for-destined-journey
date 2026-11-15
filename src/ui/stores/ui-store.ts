@@ -21,7 +21,7 @@ const TOAST_DEFAULT_DURATION: Record<Toast['type'], number> = {
 /** 所有页面视图 */
 export type AppView = 'home' | 'create' | 'game' | 'settings' | 'extensions' | 'workshop';
 
-/** 设置页主分区；首页“关于”等跨页面入口通过这一类型传递目标。 */
+/** 设置页主分区；跨页面入口通过这一类型传递目标。 */
 export type SettingsSection =
   | 'api'
   | 'content-pack'
@@ -36,8 +36,7 @@ export type SettingsSection =
   | 'asset'
   | 'image'
   | 'data'
-  | 'developer'
-  | 'about';
+  | 'developer';
 
 /**
  * 设置页分区内可直达的卡片锚点；对应元素带 `data-settings-anchor="<锚点>"`。

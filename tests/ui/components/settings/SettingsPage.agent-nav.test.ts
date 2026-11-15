@@ -76,6 +76,31 @@ describe('SettingsPage 主导航接线', () => {
   });
 });
 
+describe('SettingsPage Agent 子导航分组', () => {
+  const template = source.slice(source.indexOf('<template>'), source.indexOf('</template>'));
+
+  it('按 AGENT_GROUPS 分组渲染，组标题是文字不是按钮，行仍是按钮且点击走 selectAgent', () => {
+    expect(template).toContain('v-for="group in AGENT_GROUPS"');
+    expect(template).toContain('v-for="ag in group.items"');
+    expect(template).toMatch(/<h4[^>]*class="sub-nav-group-title"/);
+    expect(template).toMatch(/<button\s+v-for="ag in group\.items"/);
+    expect(template).toContain('@click="selectAgent(ag.id)"');
+  });
+
+  it('每行保留 API 角标，四态由 describeAgentBinding 推导（S-08，行为测试见 SettingsPage.binding-badges）', () => {
+    expect(template).toContain(':class="badgeOf(ag.id).cls"');
+    expect(template).toContain(':data-binding="agentBindings[ag.id]?.kind"');
+    expect(source).toContain('describeAgentBinding(');
+  });
+
+  it('「本存档使用」只在有活跃存档时出现', () => {
+    expect(template).toContain('saveUsedAgents?.has(ag.id)');
+    const start = source.indexOf('const saveUsedAgents');
+    const body = source.slice(start, source.indexOf('\n});', start));
+    expect(body).toContain('if (!save) return null;');
+  });
+});
+
 describe('双角色方案定案后的设置面', () => {
   it('不再渲染试运行开关或读取旧配置键', () => {
     expect(agentSectionSource).not.toContain('拆分主持人与敌方决策');

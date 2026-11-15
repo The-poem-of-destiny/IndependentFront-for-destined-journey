@@ -37,6 +37,12 @@
 
 公开演示内容已配置。旧私有内容包若没有这项授权，不会自动获得直出读取权限；需要内容作者适配。原卡与 Prime 仅作结构参考，未复制其私有正文，原 ST 脚本及变量路径不适用于 app。
 
+### 各模式的默认预设怎么声明（2026-11-14）
+
+- 内容包在 `agentDefaults.agents.direct_main.presetId`（无缓存直出）与 `agentDefaults.agents.direct_cached.presetId`（缓存直出）里点名默认预设，预设本体随包放进 `presets`（或作为同一条目的 `preset` 内嵌）。没有声明、或点名的 id 在包里找不到时，回退到引擎内置的那份直出预设。
+- story 的默认预设以 `agentDefaults.agents.story.presetId` 为准，**不是** `presets` 数组的第一项；只有它缺席时才取第一个 story 范围的内容预设。
+- 玩家侧：设置里选择键为空即「跟随默认」。内容包自带直出默认时，引擎内置预设仍在「预设」下拉的「引擎内置」组里可选；内容包与引擎内置的预设都是只读的，改动会先复制成玩家预设。解析实现见 `src/core/prompts/preset-resolution.ts`。
+
 ## 实现与验证
 
 - `src/core/agents/direct-main.ts`：完整上下文、骰池、单请求。

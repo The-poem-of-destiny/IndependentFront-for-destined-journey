@@ -48,6 +48,7 @@ vi.mock('../../../src/ui/stores/settings-store', () => ({
     projectAgentDefaults: { version: 1, agents: {} },
     saveNow: () => {},
     loadAgentProjectDefaults: async () => {},
+    normalizePresetSelections: async () => {},
   }),
 }));
 let pinia: Pinia;
@@ -126,7 +127,12 @@ describe('authenticated content lifecycle and plaintext boundary', () => {
       ...wb.books[0].entries[0],
       content: 'edited-private-text',
     });
-    await upsertPreset({ ...getRuntimePackPresets()[0], name: 'edited' });
+    // 📌 2026-11-14：内容包预设只读 —— 直接写被拒绝（界面会先复制成玩家预设），
+    //    不再出现「改了只进内存、刷新就丢」的那种编辑
+    await expect(upsertPreset({ ...getRuntimePackPresets()[0], name: 'edited' })).rejects.toThrow(
+      '只读',
+    );
+    expect(getRuntimePackPresets()[0].name).not.toBe('edited');
     expect(wb.books[0].entries[0].content).toBe('edited-private-text');
     expect(await getDatabase().worldBooks.count()).toBe(0);
     expect(await getDatabase().presets.count()).toBe(0);

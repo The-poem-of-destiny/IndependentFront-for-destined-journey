@@ -1,6 +1,7 @@
 import { isDirectMode } from '@engine/story/generation-mode';
 import { DEFAULT_AGENT_PIPELINE } from '@engine/types/types';
 import { getAgentSettings, type AgentDefaultsLayer } from '../stores/agent-settings';
+import { agentDisplayName, DIRECT_MODE_AGENT_IDS } from './agent-roster';
 import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
 
 export interface ReadinessIssue {
@@ -22,7 +23,7 @@ export function checkJourneyReadiness(
     if (rawPool.length > 0) {
       return [
         {
-          message: 'story：需要选择对话 API。',
+          message: `${agentDisplayName('story')}：需要选择对话 API。`,
           section: 'api',
           blocking: true,
         },
@@ -34,7 +35,7 @@ export function checkJourneyReadiness(
   }
   const issues: ReadinessIssue[] = [];
   const agentIds = isDirectMode(generationMode)
-    ? ['memory_recall', 'direct_main', 'memory_summary']
+    ? DIRECT_MODE_AGENT_IDS
     : DEFAULT_AGENT_PIPELINE.stages.flatMap((stage) => stage.agents);
   for (const id of agentIds) {
     // 缓存直出仍执行 direct_main，但连接配置读 direct_cached；提示要指向实际检查的配置
@@ -46,7 +47,7 @@ export function checkJourneyReadiness(
     });
     if (resolution.status === 'stale-binding') {
       issues.push({
-        message: `${profileId} 绑定的 API 已不存在，请重新选择。`,
+        message: `${agentDisplayName(profileId)} 绑定的 API 已不存在，请重新选择。`,
         section: 'agent',
         blocking: true,
       });
@@ -72,7 +73,13 @@ export function checkJourneyReadiness(
     ) {
       problem = '需要选择对话 API';
     }
-    if (problem) issues.push({ message: `${profileId}：${problem}。`, section: 'api', blocking });
+    if (problem) {
+      issues.push({
+        message: `${agentDisplayName(profileId)}：${problem}。`,
+        section: 'api',
+        blocking,
+      });
+    }
   }
   return issues;
 }

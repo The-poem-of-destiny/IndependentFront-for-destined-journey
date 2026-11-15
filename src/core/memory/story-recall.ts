@@ -5,8 +5,9 @@
  * 两步召回：先定位（LLM 按编号挑，或 Embedding 按向量排），再读详情 —— 最终交给 Story 的是
  * 摘要正文、事件详细记录和**来源原文**，不是 ID 与分数列表（§9.2）。
  *
- *   候选 = 当前分支上全部有效阶段归档（A1…）+ 来源在正文窗口**之外**的有效摘要片段（S1…，
+ *   候选 = 当前分支上已生效的阶段归档（A1…）+ 来源在正文窗口**之外**的有效摘要片段（S1…，
  *          含已被归档承接、退出第 4 区常驻的片段 —— 它们的原文仍可回查，D30）。
+ *          窗口起点与「已生效」判据与第 4 区同源（`storyWindowStart` / `resolveAppliedStoryArchives`）。
  *          窗口内回合的原文已在第 4 区，不作为候选。
  *   原文 = 两种粒度都实现（D32）：`turn` 整回合玩家输入 + 正文；`snippet` 与查询最相关的
  *          段落加前后各一段。粒度由开发者设置切换，用于比较效果与消耗。
@@ -32,7 +33,9 @@ import {
   archivedSegmentIdsOf,
   collectCompleteStoryTurns,
   resolveActiveStoryArchives,
+  resolveAppliedStoryArchives,
   resolveValidStorySegments,
+  storyWindowStart,
   type StoryTurn,
   type StoryTurnSummarySegment,
 } from './memory-context';
@@ -84,10 +87,6 @@ function turnLabel(index: number): string {
   return `第${index + 1}回合`;
 }
 
-function windowStartOf(turnCount: number, windowTurns: number): number {
-  return Math.max(0, turnCount - windowTurns);
-}
-
 /** 第 N 回合正文的拼接（回合内多条正文按序合并）。 */
 function storyTextOf(turn: StoryTurn): string {
   return turn.storyMessages.map((m) => m.content).join('\n\n');
@@ -98,17 +97,25 @@ function storyTextOf(turn: StoryTurn): string {
  *
  * @param messages   本轮之前的正式消息（不含本轮玩家输入）
  * @param windowTurns 正文窗口 N（调用方已校验为正整数）
+ * @param windowBatchTurns 换窗批大小 K（调用方已校验为正整数；缺省 1）
  */
 export function buildStoryRecallCandidates(input: {
   messages: readonly ChatMessage[];
   windowTurns: number;
+  windowBatchTurns?: number;
   segments: readonly StoryRecallSegment[];
   archives: readonly StoryArchiveRecord[];
 }): StoryRecallCandidate[] {
   const turns = collectCompleteStoryTurns(input.messages);
   const turnIndex = new Map(turns.map((t, i) => [t.key, i]));
-  const windowStart = windowStartOf(turns.length, input.windowTurns);
-  const active = resolveActiveStoryArchives(input.messages, input.archives, input.segments);
+  const batchTurns = input.windowBatchTurns ?? 1;
+  const windowStart = storyWindowStart(turns.length, input.windowTurns, batchTurns);
+  const active = resolveAppliedStoryArchives(
+    turns,
+    resolveActiveStoryArchives(input.messages, input.archives, input.segments),
+    windowStart,
+    batchTurns,
+  );
   const covered = archivedSegmentIdsOf(active);
 
   const archiveCandidates: StoryRecallCandidate[] = active.map((archive, i) => ({
@@ -436,6 +443,7 @@ export function expandStoryRecall(input: {
   selected: readonly StoryRecallCandidate[];
   messages: readonly ChatMessage[];
   windowTurns: number;
+  windowBatchTurns?: number;
   /** 本档全部摘要片段（归档的来源回合要靠它们定位） */
   segments: readonly StoryRecallSegment[];
   rawMode: StoryRecallRawMode;
@@ -444,7 +452,7 @@ export function expandStoryRecall(input: {
 }): StoryRecallExpansion {
   const turns = collectCompleteStoryTurns(input.messages);
   const turnIndex = new Map(turns.map((t, i) => [t.key, i]));
-  const windowStart = windowStartOf(turns.length, input.windowTurns);
+  const windowStart = storyWindowStart(turns.length, input.windowTurns, input.windowBatchTurns);
   const budget = input.rawCharBudget ?? STORY_RECALL_RAW_CHAR_BUDGET;
   const diagnostics: StoryRecallExpansionDiagnostics = {
     rawMode: input.rawMode,

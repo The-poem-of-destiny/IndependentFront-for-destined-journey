@@ -24,7 +24,9 @@ export function activityRunSideTaskLabel(
 const AGENT_ACTIVITY_LABELS: Record<string, string> = {
   memory_recall: '追忆相关经历',
   plot_pre_check: '推演剧情脉络',
+  lore_select: '挑选本轮资料',
   story: '书写此刻',
+  direct_main: '书写此刻',
   request_dispatcher: '辨认后续事件',
   daily_check: '结算时序流转',
   vars_update: '更新世界状态',

@@ -27,6 +27,18 @@ function updateLoreHistoryMessages(event: Event) {
   s.loreHistoryMessages = count;
 }
 
+function updateStoryWindowBatchTurns(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const count = input.valueAsNumber;
+  if (!Number.isSafeInteger(count) || count < 1) {
+    if (event.type === 'input') return;
+    input.value = String(s.storyWindowBatchTurns);
+    ui.toast('正文换窗批大小必须是正整数', 'warning');
+    return;
+  }
+  s.storyWindowBatchTurns = count;
+}
+
 /**
  * 回合进行中不许切换 Story 模式（T39）：一个回合在开跑时就固定了模式，
  * 这里把开关锁住，免得玩家以为切换对正在生成的这一轮生效。
@@ -213,6 +225,24 @@ async function onStoryModeChange(event: Event) {
           />
           <span id="lore-history-help" class="form-hint">
             默认 2 条玩家 / AI 消息，0 仅看当前输入。修改后下一轮生效。
+          </span>
+        </label>
+        <label class="form-label story-field">
+          <span>正文换窗批大小 K</span>
+          <input
+            :value="s.storyWindowBatchTurns"
+            type="number"
+            min="1"
+            step="1"
+            class="form-input"
+            aria-label="正文换窗批大小 K"
+            aria-describedby="story-window-batch-help"
+            @input="updateStoryWindowBatchTurns"
+            @change="updateStoryWindowBatchTurns"
+          />
+          <span id="story-window-batch-help" class="form-hint">
+            1 = 每回合滑动（默认）。K &gt; 1 时原文窗口在 N 到 N+K−1 回合之间循环，攒满 K
+            回合才整体换成摘要，期间前缀缓存可命中；最大的那一回合上下文最长。建议 K ≤ N。
           </span>
         </label>
       </div>

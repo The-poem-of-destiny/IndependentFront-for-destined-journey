@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * 关于分区 —— 零状态，纯展示（Q-25 从 SettingsPage.vue 抽出）
+ * 关于内容面板 —— 零状态，纯展示（Q-25 从 SettingsPage.vue 抽出，UIL-01 起由首页「关于」弹窗承载）
  *
- * 首页“关于”入口会直接落到本分区。制作人员、项目概览、技术信息和许可证统一在这里
- * 展示，避免首页再维护一份内容会漂移的弹窗。
+ * 首页“关于”按钮在原位打开弹窗渲染本组件。制作人员、项目信息、技术信息和许可证统一在这里
+ * 展示，既保持单真源不漂移，也不必跨页面跳进设置页。
  */
 import AppCard from '../shared/AppCard.vue';
 import { useBranding } from '../../branding-defaults';

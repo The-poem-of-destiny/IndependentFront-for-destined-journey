@@ -1264,18 +1264,6 @@ export const useContentStore = defineStore('content', () => {
     return notes;
   }
 
-  /**
-   * 解析「pack 的 story 预设 id」—— 用于装包后 activePresetId 切换（D20/D22）。
-   *
-   * pack presets 里名称为「占位 story 预设名」的那条，或第一条。占位 story 预设名
-   * 取自当前默认层（装包前是占位文件）的 projectAgentDefaults.agents.story.preset 名。
-   */
-  function resolvePackStoryPresetId(pack: ContentPack): string | undefined {
-    const packs = pack.presets;
-    if (!packs || packs.length === 0) return undefined;
-    return packs[0].id;
-  }
-
   /** 执行一次安装的写入序列（§5.2 第 5 步）。装入前**必须**已 exportAllData() 快照。 */
   async function applyInstall(
     pack: ContentPack,
@@ -1375,8 +1363,8 @@ export const useContentStore = defineStore('content', () => {
     // e. 存档 uid 迁移（D43）：rewrite 应用 + needsSelectionPartitions 标记
     await applySaveUidMigration(plan.saveUidMigration);
 
-    // f. activePresetId 切换（D20/D22）：原来指向占位预设/未设 → 切到 pack 预设
-    await switchActivePresetToPack(pack, settings);
+    // f. 预设选择键不再「切到 pack 预设」：空串即跟随默认，读取侧统一解析；
+    //    装包完成后（h 之后）只做一次幂等归一。
 
     // g. contentPacks.put（**最后**，失败回滚时不残留新 pack 行）
     await getDatabase().contentPacks.put({
@@ -1391,6 +1379,7 @@ export const useContentStore = defineStore('content', () => {
 
     // h. 缓存 + 内容态
     await finalizePackState(pack);
+    await settings.normalizePresetSelections();
 
     return notes;
   }
@@ -1434,36 +1423,6 @@ export const useContentStore = defineStore('content', () => {
   async function useBeautStore() {
     const { useBeautifierStore } = await import('./beautifier-store');
     return useBeautifierStore();
-  }
-
-  /** 装包后 activePresetId 切到 pack 预设（D20/D22） */
-  async function switchActivePresetToPack(
-    pack: ContentPack,
-    settings: SettingsStoreType,
-  ): Promise<void> {
-    const packPresetId = resolvePackStoryPresetId(pack);
-    if (!packPresetId) return;
-    const prev = settings.settings.activePresetId;
-    // 指向占位预设（当前默认层的 story presetId）或未设 → 切到 pack 预设；
-    // 指向用户第三方预设 → 不动
-    const placeholderStoryId = settings.projectAgentDefaults?.agents?.story?.presetId || '';
-    if (!prev || prev === placeholderStoryId) {
-      settings.settings.activePresetId = packPresetId;
-      settings.saveNow();
-    }
-  }
-
-  /** 卸载后 activePresetId 从 pack 预设切回占位 story 预设 */
-  async function switchActivePresetToPlaceholder(
-    placeholderStoryId: string,
-    packPresetIds: string[],
-  ): Promise<void> {
-    const settings = await useSettingsStoreLazy();
-    const prev = settings.settings.activePresetId;
-    if (prev && packPresetIds.includes(prev)) {
-      settings.settings.activePresetId = placeholderStoryId;
-      settings.saveNow();
-    }
   }
 
   /**
@@ -1661,7 +1620,7 @@ export const useContentStore = defineStore('content', () => {
       const { loadPresets } = await import('../composables/usePresets');
       await loadPresets();
       assertCurrent(epoch, revision);
-      await switchActivePresetToPack(pack, await useSettingsStoreLazy());
+      await (await useSettingsStoreLazy()).normalizePresetSelections();
       return {
         ok: true,
         status: 'installed',
@@ -1913,7 +1872,7 @@ export const useContentStore = defineStore('content', () => {
    * 卸载内容包（§5.2 卸载流）。
    *
    * 预检（planPackUninstall）→ 编辑确认 → exportAllData 快照 → 删 pack 拥有 id →
-   * upsert 占位书 → 删 pack 预设 → activePresetId 切回占位 → contentPacks.delete →
+   * upsert 占位书 → 删 pack 预设 → contentPacks.delete →
    * 注册表重灌 → 内容态回 placeholder；任一步 throw → 快照回滚。
    */
   async function uninstallPack(
@@ -1957,7 +1916,7 @@ export const useContentStore = defineStore('content', () => {
         // 反向语义用 planPackInstall 重新规划一次当前状态（占位基线命中 → 回占位书）
         await applySaveMigrationReverse();
 
-        // presets：删 pack 预设行；activePresetId 指向它时切回占位
+        // presets：删 pack 预设行。选择键不改写 —— 指向已删 id 的选择读取时自动回落默认
         const packPresetIds = (installedPack.presets ?? []).map((p) => p.id);
         if (packPresetIds.length > 0) {
           for (const id of packPresetIds) {
@@ -1968,9 +1927,6 @@ export const useContentStore = defineStore('content', () => {
             }
           }
         }
-        const settings = await useSettingsStoreLazy();
-        const placeholderStoryId = settings.projectAgentDefaults?.agents?.story?.presetId || '';
-        await switchActivePresetToPlaceholder(placeholderStoryId, packPresetIds);
 
         // agents/beautifier/catalog/sync registry：provider-owned，删 pack 行即回落
         // 注册表先清成空骨架（pack 各面立刻失效），占位 JSON 在下面 pack 缓存清掉之后重拉
@@ -1998,6 +1954,7 @@ export const useContentStore = defineStore('content', () => {
         await reloadContentRegistryPlaceholders();
 
         contentStatus.value = 'placeholder';
+        await (await useSettingsStoreLazy()).normalizePresetSelections();
 
         return {
           ok: true,
@@ -2110,13 +2067,6 @@ export const useContentStore = defineStore('content', () => {
     reseedPlaceholder,
   };
 });
-
-/** settings-store 返回实例类型（避免在 content-store 内引入静态循环依赖） */
-type SettingsStoreType = {
-  settings: { activePresetId: string; placeholderVersion?: string };
-  projectAgentDefaults?: { agents?: Record<string, { presetId?: string }> };
-  saveNow: () => void;
-};
 
 /** 安装/升级结果（两阶段提交各段共用） */
 export interface PackInstallOutcome {

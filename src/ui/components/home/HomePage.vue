@@ -6,6 +6,8 @@ import { useWorkshopStore } from '../../stores/workshop-store';
 import { VERSION } from '@engine/index';
 import { hasExtensionWork } from '../workshop/workshop-lock';
 import AppButton from '../shared/AppButton.vue';
+import AppModal from '../shared/AppModal.vue';
+import AboutSection from '../settings/AboutSection.vue';
 import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
 import AstralDriftBackdrop from './AstralDriftBackdrop.vue';
 import { useBranding } from '../../branding-defaults';
@@ -85,6 +87,7 @@ const quotes = computed(() => branding.value.subtitles);
 const currentQuote = ref(0);
 let quoteTimer: ReturnType<typeof setInterval> | null = null;
 
+const aboutOpen = ref(false);
 const showDevButton = ref(false);
 // 🔒 P1-14: 快速测试按钮仅 DEV 构建显示 —— 生产构建不应有可清库/建测试存档的入口
 const isDev = import.meta.env.DEV;
@@ -301,7 +304,7 @@ async function quickTestKeep() {
               variant="ghost"
               size="md"
               class="btn-ghost btn-about"
-              @click="ui.openSettings('about')"
+              @click="aboutOpen = true"
             >
               <i class="btn-icon fa-solid fa-circle-info" aria-hidden="true"></i>关 于
             </AppButton>
@@ -342,6 +345,11 @@ async function quickTestKeep() {
       <span class="footer-dot" aria-hidden="true">·</span>
       <span class="footer-era">复兴纪元</span>
     </footer>
+
+    <!-- 关于弹窗（UIL-01：首页原位打开，不跨页面跳进设置页） -->
+    <AppModal :open="aboutOpen" title="关于" size="lg" @update:open="aboutOpen = $event">
+      <AboutSection />
+    </AppModal>
   </div>
 </template>
 

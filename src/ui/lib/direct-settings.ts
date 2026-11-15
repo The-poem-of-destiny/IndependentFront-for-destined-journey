@@ -6,25 +6,9 @@ import {
   type AgentSettingsEntry,
 } from '../stores/agent-settings';
 import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
-import { DIRECT_PRESET_ID, DIRECT_CACHED_PRESET_ID } from '@engine/prompts/direct-prompt';
 import type { UiSettings } from '../stores/settings-types';
 
-type DirectPresetDefaults = AgentDefaultsLayer & Record<string, { presetId?: string }>;
-
-/** Project presets remain defaults until the player explicitly chooses a preset. */
-export function resolveDirectPresetId(
-  settings: Pick<UiSettings, 'directPresetId' | 'directCachedPresetId'>,
-  profile: 'direct_main' | 'direct_cached',
-  defaults: DirectPresetDefaults,
-): string {
-  const selected =
-    profile === 'direct_cached' ? settings.directCachedPresetId : settings.directPresetId;
-  return (
-    selected ||
-    defaults[profile]?.presetId ||
-    (profile === 'direct_cached' ? DIRECT_CACHED_PRESET_ID : DIRECT_PRESET_ID)
-  );
-}
+// 直出预设的选择与回退统一由 @engine/prompts/preset-resolution 解析，这里不再另算。
 
 /** One-time snapshot of the story connection and effective parameters, never its prompt. */
 export function initializeDirectSettings(settings: UiSettings, defaults: AgentDefaultsLayer): void {

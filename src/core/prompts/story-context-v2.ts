@@ -7,11 +7,13 @@
  * ── 分区内容（尚未冻结的部分都是临时规则，见计划 Q11 / P3 / P5）──
  *   第 1 区：`fixed` 分区条目（未声明分区、且无动态正文的条目按 `fixed` 处理）；没有可用
  *            普通条目（无预设 / 预设全空）时退回模板存根作为固定前缀。
- *   第 2 区：全部有效阶段归档的概括记录（历史年表），不按本轮话题筛选；被归档覆盖的摘要
- *            随之退出第 4 区。回退掉的归档按来源消息自动失效（计划 D20–D23）。
+ *   第 2 区：全部已生效阶段归档的概括记录（历史年表），不按本轮话题筛选；被归档覆盖的摘要
+ *            随之退出第 4 区。回退掉的归档按来源消息自动失效（计划 D20–D23）。换窗批 K > 1 时
+ *            归档等判断回合换出原文窗口才生效，与第 4 区换窗同一轮发生（`resolveAppliedStoryArchives`）。
  *   第 3 区：`region` 分区条目，`activation.locations` 被当前地理路径任一层级包含时才
  *            进入；未命中当地区域的 region 条目作为本轮候选归第 5 区（判定见 `lore-selection.ts`）。
- *   第 4 区：窗口外全部未归档摘要（缺摘要的回合以原文顶上并明确标注）+ 最近 N 个完整回合原文。
+ *   第 4 区：窗口外全部未归档摘要（缺摘要的回合以原文顶上并明确标注）+ 窗口内完整回合原文
+ *            （N 到 N+K-1 回合，按 K 成批换窗，见 `storyWindowStart`）。
  *   第 5 区：`lore_select` 筛选后的本轮候选与补充（含动态 EJS 条目）、剧情指引、相关回忆
  *            （新模式召回的展开结果）、角色状态、当前时空、随机事件候选（与旧预设
  *            `placeholder-context` 的本轮资料同一组来源，去掉了归第 4 区与玩家输入的部分）。
@@ -58,7 +60,10 @@ import {
 import {
   archivedSegmentIdsOf,
   buildStoryZone4,
+  collectCompleteStoryTurns,
   resolveActiveStoryArchives,
+  resolveAppliedStoryArchives,
+  storyWindowStart,
   type StoryTurn,
   type StoryTurnSummarySegment,
 } from '../memory/memory-context';
@@ -105,6 +110,8 @@ export interface StoryContextV2Input {
   presets: AgentPreset[];
   /** 正文窗口 N（正整数，非法时由 `buildStoryZone4` 抛 RangeError） */
   windowTurns: number;
+  /** 换窗批大小 K（正整数，缺省 1；非法时由 `buildStoryZone4` 抛 RangeError） */
+  windowBatchTurns?: number;
   segments: readonly StoryTurnSummarySegment[];
   /** 本档全部阶段归档；有效性按 `ctx.history` 派生（回退掉的归档自动不算） */
   archives: readonly StoryArchiveRecord[];
@@ -235,12 +242,21 @@ export async function buildStoryContextV2Messages(
 
   // ③ 各区内容
   const history = ctx.history ?? [];
+  const windowBatchTurns = input.windowBatchTurns ?? 1;
   const activeArchives = resolveActiveStoryArchives(history, input.archives, input.segments);
+  const historyTurns = collectCompleteStoryTurns(history);
+  const appliedArchives = resolveAppliedStoryArchives(
+    historyTurns,
+    activeArchives,
+    storyWindowStart(historyTurns.length, input.windowTurns, windowBatchTurns),
+    windowBatchTurns,
+  );
   const zone4 = buildStoryZone4({
     messages: history,
     windowTurns: input.windowTurns,
+    windowBatchTurns,
     segments: input.segments,
-    archivedSegmentIds: archivedSegmentIdsOf(activeArchives),
+    archivedSegmentIds: archivedSegmentIdsOf(appliedArchives),
   });
   const budgetDroppedLoreKeys: string[] = [];
   const budgetRemovals: StoryContextBudgetRemoval[] = [];
@@ -250,7 +266,7 @@ export async function buildStoryContextV2Messages(
       [
         fallbackPrefix,
         ...processed.map(renderEntryText),
-        renderLongTermOverview(activeArchives),
+        renderLongTermOverview(appliedArchives),
         renderZone4History(zone4.history),
         ...zone4.windowTurns.flatMap((t) => [turnUserText(t) || '（开始）', turnStoryText(t)]),
         wrapBlock('玩家输入', ctx.userInput ?? ''),
@@ -361,7 +377,7 @@ export async function buildStoryContextV2Messages(
   });
   const zoneText: Record<StoryZoneNumber, string> = {
     1: zone1Lore ? wrapBlock('世界设定', zone1Lore) : '',
-    2: renderLongTermOverview(activeArchives),
+    2: renderLongTermOverview(appliedArchives),
     3: zoneLore(3) ? wrapBlock('区域资料', zoneLore(3)) : '',
     4: renderZone4History(zone4.history),
     5: [
@@ -537,7 +553,14 @@ export async function buildStoryContextV2Messages(
         5: selection.zones[5].map((r) => r.key),
       },
       windowTurns: input.windowTurns,
-      archiveIds: activeArchives.map((a) => a.id),
+      windowBatchTurns,
+      windowStart: zone4.windowStart,
+      nextSwapInTurns:
+        zone4.windowStart + input.windowTurns + windowBatchTurns - historyTurns.length,
+      archiveIds: appliedArchives.map((a) => a.id),
+      pendingArchiveIds: activeArchives
+        .filter((a) => !appliedArchives.includes(a))
+        .map((a) => a.id),
       windowTurnKeys: zone4.windowTurns.map((t) => t.key),
       summarySegmentIds: zone4.history.flatMap((h) => (h.kind === 'summary' ? [h.segment.id] : [])),
       missingSummaryTurnKeys: zone4.missingSummaryTurns.map((t) => t.key),

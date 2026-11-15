@@ -236,12 +236,17 @@ async function exportSave(saveId: string) {
   try {
     const { exportSessionSave } = await import('@engine/persistence/session-backup');
     const opts: { storyPreset?: { id: string; name: string } } = {};
-    const presetId = cfg.settings.activePresetId;
-    if (presetId) {
-      const { getPresets } = await import('@engine/persistence/database');
-      const hit = (await getPresets()).find((preset) => preset.id === presetId);
-      if (hit) opts.storyPreset = { id: hit.id, name: hit.name };
-    }
+    // 导出的是**生效**的 story 预设（选择为空/失效时即内容默认），与运行时同一个解析器
+    const { getPresets } = await import('@engine/persistence/database');
+    const { effectivePresetFrom } = await import('../../composables/usePresets');
+    const effective = effectivePresetFrom(
+      cfg.settings,
+      'story',
+      (await getPresets()) ?? [],
+      cfg.projectAgentDefaults?.agents,
+    );
+    if (effective.preset)
+      opts.storyPreset = { id: effective.preset.id, name: effective.preset.name };
     const backup = await exportSessionSave(saveId, opts);
     const name = safeFileName(game.saves.find((save) => save.id === saveId)?.name || '未命名存档');
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
