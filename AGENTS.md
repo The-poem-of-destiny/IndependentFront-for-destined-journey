@@ -637,7 +637,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 分册                     | 覆盖范围                                                                                  | 位置                                       |
 | ------------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------------ |
 | 引擎层架构（已实现部分） | `src/core/**` —— 类型/数据库/Agent 编排/战斗/制作/效果系统/图像生成等全部引擎模块         | [`src/core/AGENTS.md`](src/core/AGENTS.md) |
-| 前端架构 (Phase 7)       | `src/ui/**` —— composables / lib 桥接层 / stores / components / 设置页 15 分区 / 预设系统 | [`src/ui/AGENTS.md`](src/ui/AGENTS.md)     |
+| 前端架构 (Phase 7)       | `src/ui/**` —— composables / lib 桥接层 / stores / components / 设置页 14 分区 / 预设系统 | [`src/ui/AGENTS.md`](src/ui/AGENTS.md)     |
 
 拆分理由：这两份地图加起来约 4.4 万字，占本文件六成，但**只在改对应目录的代码时才用得上**；
 留在根文件里会让每一次会话（哪怕只改文档）都付它们的上下文成本。

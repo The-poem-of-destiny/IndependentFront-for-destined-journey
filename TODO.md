@@ -149,7 +149,7 @@
 
   - [ ] **清掉私有内容仓 `data/defaults/agent-config.json` 里 `story` / `prose_rewrite` 两个本机 API 池 id**
         （UI/UX 普查 S-00 第 ③ 项，见 `docs/reviews/2026-11-14-ui-ux-audit.md`）。引擎侧已于 2026-11-14 让
-        默认层里本机不存在的池 id 读成「未设置」（分支 `fix/ui-ux-audit-p0-p1`，待合并），新玩家不再被拦；
+        默认层里本机不存在的池 id 读成「未设置」（PR #151），新玩家不再被拦；
         但这两个值本就不该进默认值，下一次发包前置空。
 
   - [ ] （低优先）`imageDialects` / `remoteAssets` 两节内容仓未提供，分别回落占位的两套通用方言与
