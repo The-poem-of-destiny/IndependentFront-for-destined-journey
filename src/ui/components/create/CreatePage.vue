@@ -1,17 +1,15 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 'vue';
 import { useCreateStore } from '../../stores/create-store';
 import { useUIStore } from '../../stores/ui-store';
 import CreateSteps from './CreateSteps.vue';
 import CreateFooter from './CreateFooter.vue';
 import PointsBar from './PointsBar.vue';
-import AppButton from '../shared/AppButton.vue';
-import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
+import CreateReadiness from './CreateReadiness.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useContentStore } from '../../stores/content-store';
 import { checkJourneyReadiness } from '../../lib/journey-readiness';
 import PresetModal from './PresetModal.vue';
-import FormSelect from '../shared/form/FormSelect.vue';
 import { initializeCachedDirectSettings } from '../../lib/direct-settings';
 import { MISSING_FIELDS_PREFIX, type BlockedHint } from '../../lib/create-options';
 import { confirmDialog } from '../../lib/confirm-dialog';
@@ -41,6 +39,17 @@ const blocked = computed(
     issues.value.some((issue) => issue.blocking),
 );
 const ready = computed(() => accepted.value && !blocked.value);
+
+/** 步骤内容的滚动容器：切步骤后要回到顶部，否则新步骤的必填项可能落在视野外 */
+const contentRef = ref<HTMLElement | null>(null);
+function resetContentScroll() {
+  if (contentRef.value) contentRef.value.scrollTop = 0;
+}
+// 准入页滚到底再点「开始创建角色」时，第 1 步会沿用准入页的滚动位置；进入后复位一次。
+// 步骤之间的复位挂在 <Transition> 的 after-leave 上（旧内容淡出完再跳，不在淡出中途闪动）。
+watch(ready, (isReady) => {
+  if (isReady) void nextTick(resetContentScroll);
+});
 
 async function checkReadiness() {
   checking.value = true;
@@ -185,64 +194,20 @@ onMounted(() => {
       :difficulty-label="store.difficulty?.label"
     />
 
-    <main class="create-content" :aria-busy="checking || store.isCreating">
-      <section v-if="!ready" class="readiness" aria-labelledby="readiness-title">
-        <h1 id="readiness-title">启程前的准备</h1>
-        <p>先确认内容与对话模型，再开始创建角色。</p>
-        <h3 class="section-label">本存档的生成模式</h3>
-        <FormSelect
-          v-model="store.generationMode"
-          label="生成模式（创建后不可更改）"
-          placeholder="请选择生成模式"
-          :options="[
-            { label: 'Agent 模式', value: 'agent' },
-            { label: '直出（无缓存优化）', value: 'direct' },
-            { label: '直出（缓存优化）', value: 'direct_cached' },
-          ]"
-        />
-        <ul class="mode-guidance">
-          <li><strong>Agent 模式：</strong>多个 AI 分工、多次调用，适合单价较低的模型。</li>
-          <li><strong>直出（无缓存优化）：</strong>一次主调用，适合按请求次数计费的渠道。</li>
-          <li>
-            <strong>直出（缓存优化）：</strong>一次主调用，适合较强的模型，以及按 Token
-            计费且支持缓存的渠道；实际命中与费用取决于渠道。
-          </li>
-        </ul>
-        <p class="form-hint">
-          两种直出都由主 AI 在一次回复中完成叙事、战斗、制作与状态变化，接近角色卡体验。
-          所有模式都保留独立记忆调用，因此整楼可能不止一次请求。
-        </p>
-        <ContentStatusBanner />
-        <p v-if="checking" role="status">正在检查本机配置…</p>
-        <template v-else>
-          <p v-if="checkError" role="alert">{{ checkError }}</p>
-          <p v-if="store.contentStatus !== 'ready'" role="alert">
-            没有可用的角色内容目录，请先导入内容包。
-          </p>
-          <ul v-if="issues.length" class="readiness-issues">
-            <li v-for="issue in issues" :key="issue.message">
-              <span>{{ issue.blocking ? '需要处理：' : '可选配置：' }}{{ issue.message }}</span>
-              <AppButton variant="secondary" size="sm" @click="ui.openSettings(issue.section)">
-                {{ issue.section === 'api' ? '配置 API' : '配置 Agent' }}
-              </AppButton>
-            </li>
-          </ul>
-          <p v-else>对话配置已齐备。</p>
-          <p class="readiness-note">
-            此处只检查本机配置，不发送模型请求。密钥权限与连接可在 API
-            设置中测试；实际生成可能产生费用。图像生成和额外的 Embedding 服务均为可选。
-          </p>
-        </template>
-        <div class="readiness-actions">
-          <AppButton :disabled="blocked" @click="accepted = true">{{
-            content.contentStatus === 'placeholder' ? '使用演示内容创建角色' : '开始创建角色'
-          }}</AppButton>
-          <AppButton variant="secondary" :disabled="checking" @click="checkReadiness"
-            >重新检查</AppButton
-          >
-          <AppButton variant="ghost" @click="ui.openSettings('api')">打开 API 设置</AppButton>
-        </div>
-      </section>
+    <main ref="contentRef" class="create-content" :aria-busy="checking || store.isCreating">
+      <CreateReadiness
+        v-if="!ready"
+        v-model:generation-mode="store.generationMode"
+        :issues="issues"
+        :checking="checking"
+        :check-error="checkError"
+        :catalog-status="store.contentStatus"
+        :content-source="content.contentStatus"
+        :blocked="blocked"
+        @accept="accepted = true"
+        @recheck="checkReadiness"
+        @open-settings="ui.openSettings"
+      />
       <p v-if="creationError" class="creation-error" role="alert">{{ creationError }}</p>
       <!-- 内容加载门（D24）：三态。加载失败与「内容确实为空」在这里不可区分，
            也不必区分 —— 两者都是「没有可选内容」，画同一个空态。**不崩**。 -->
@@ -252,7 +217,12 @@ onMounted(() => {
       >
         正在加载内容目录…
       </div>
-      <Transition v-else-if="ready" name="step-fade" mode="out-in">
+      <Transition
+        v-else-if="ready"
+        name="step-fade"
+        mode="out-in"
+        @after-leave="resetContentScroll"
+      >
         <component :is="currentComponent" :key="store.currentStep" />
       </Transition>
     </main>
@@ -276,49 +246,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.readiness {
-  max-width: 44rem;
-  margin: var(--theme-spacing-2xl) auto;
-  padding: var(--theme-spacing-xl);
-  background: var(--theme-card-bg);
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-md);
-  color: var(--theme-text-primary);
-  line-height: 1.6;
-}
-.readiness h1 {
-  font-family: var(--theme-font-title);
-  font-size: 1.125rem;
-  margin-top: 0;
-}
-.mode-guidance {
-  padding-left: var(--theme-spacing-xl);
-  margin-block: var(--theme-spacing-md);
-  font-size: 0.875rem;
-}
-.mode-guidance li + li {
-  margin-top: var(--theme-spacing-sm);
-}
-.readiness-issues {
-  padding-left: var(--theme-spacing-xl);
-}
-.readiness-issues li {
-  margin-block: var(--theme-spacing-lg);
-}
-.readiness-issues span {
-  display: block;
-  margin-bottom: var(--theme-spacing-sm);
-}
-.readiness-note {
-  color: var(--theme-text-secondary);
-  font-size: 0.8125rem;
-}
-.readiness-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--theme-spacing-sm);
-  margin-top: var(--theme-spacing-xl);
-}
 .creation-error {
   color: var(--theme-error);
 }

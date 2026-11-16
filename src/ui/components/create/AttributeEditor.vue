@@ -1,16 +1,40 @@
 <script setup lang="ts">
-defineProps<{
+import { nextTick } from 'vue';
+
+const props = defineProps<{
   attrKey: string;
   modelValue: number;
   max: number;
   remaining: number;
   label: string;
+  /** 数值位换成可直接输入的文本框（只给基础列用） */
+  editable?: boolean;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   inc: [attr: string];
   dec: [attr: string];
+  set: [attr: string, value: number];
 }>();
+
+function onFocus(e: FocusEvent) {
+  (e.target as HTMLInputElement).select();
+}
+
+/**
+ * 提交输入：空串 / 非数字恢复原值；否则发 set，由 store 钳制。
+ * 被钳回原值时 modelValue 不变、Vue 不会重渲染，所以等父组件重渲染那一拍之后
+ * 手动把 input.value 写回实际值。
+ */
+function commit(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const raw = input.value.trim();
+  const n = raw === '' ? NaN : Number(raw);
+  if (Number.isFinite(n)) emit('set', props.attrKey, n);
+  void nextTick(() => {
+    input.value = String(props.modelValue);
+  });
+}
 </script>
 
 <template>
@@ -26,7 +50,20 @@ defineEmits<{
       >
         −
       </button>
-      <span class="attr-value" :class="{ boosted: modelValue > 0 }">{{ modelValue }}</span>
+      <input
+        v-if="editable"
+        class="attr-value attr-input"
+        :class="{ boosted: modelValue > 0 }"
+        data-test="value-input"
+        type="text"
+        inputmode="numeric"
+        :value="modelValue"
+        :aria-label="`${attrKey}基础点数`"
+        @focus="onFocus"
+        @change="commit"
+        @keydown.enter.prevent="($event.target as HTMLInputElement).blur()"
+      />
+      <span v-else class="attr-value" :class="{ boosted: modelValue > 0 }">{{ modelValue }}</span>
       <button
         class="attr-btn"
         data-test="inc-btn"
@@ -88,6 +125,23 @@ defineEmits<{
   font-size: 0.9rem;
   font-weight: 700;
   color: var(--theme-text-primary);
+}
+.attr-input {
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--theme-radius-sm);
+  background: transparent;
+  font-family: inherit;
+  transition: border-color var(--theme-transition-fast);
+}
+.attr-input:hover,
+.attr-input:focus {
+  border-color: var(--theme-card-border);
+  outline: none;
+}
+.attr-input:focus-visible {
+  border-color: var(--theme-color-primary);
 }
 .attr-value.boosted {
   color: var(--theme-color-primary);

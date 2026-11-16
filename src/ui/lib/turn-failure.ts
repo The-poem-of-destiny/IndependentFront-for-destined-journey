@@ -10,6 +10,10 @@
  *   所以给玩家看的原文一律先过 {@link redactSecrets}。
  * - `EndpointBindingError`（game-pipeline）：显式绑定的 API 池已失效 → 配置类。
  * - missing-pool：主 DAG 空池时编排器报 `Endpoint "" not found` → 配置类。
+ * - 本地代理（server/routes/proxy.ts）连不上上游：`HTTP 502: {"error":"upstream unreachable: <原因>: <cause.code 或 cause.message>"}`
+ *   （如 `fetch failed: bad port`、`ECONNREFUSED`、`ENOTFOUND`），或上游 3xx 被拒：
+ *   `HTTP 502: {"error":"upstream redirect (3xx) rejected by proxy redirect policy…"}` →
+ *   网络类（多半是服务地址 / 端口填错），不能按 5xx 一律说成「服务端暂时出错」。
  * - 网络层：`Failed to fetch` / `NetworkError` / 超时字样 / `TypeError`。
  * - 中止：`AbortError` —— 那不是失败，调用方本就按「已停下」处理，这里兜底归网络类之外的 unknown。
  */
@@ -44,9 +48,9 @@ const COPY: Record<TurnFailureCategory, TurnFailureCopy> = {
     needsSettings: false,
   },
   network: {
-    summary: '网络连接失败或请求超时。',
-    hint: '检查网络与 API 地址是否可达，然后再试。',
-    needsSettings: false,
+    summary: '连不上模型服务，或请求超时。',
+    hint: '检查网络；到设置里确认这个 API 源的服务地址（含端口）是否正确，然后再试。',
+    needsSettings: true,
   },
   server: {
     summary: '模型服务那边出错了（服务端错误）。',
@@ -131,6 +135,11 @@ export function classifyTurnFailure(error: unknown): TurnFailureCategory {
     return 'config';
 
   const status = Number(/\bHTTP\s+(\d{3})\b/i.exec(text)?.[1] ?? NaN);
+
+  // 本地代理连不上上游 / 上游跳转被拒：代理统一报 502，但根因是地址或网络，不是服务端。
+  // 只认代理自己的错误体形状（`{"error":"upstream …`），别把服务商正文里顺带出现的字样当成它
+  if (status === 502 && /"error"\s*:\s*"upstream (?:unreachable|redirect)/i.test(text))
+    return 'network';
   // 余额的明确措辞优先于状态码（不少服务商把余额不足报成 429 或 403）
   if (
     status === 402 ||
@@ -144,7 +153,13 @@ export function classifyTurnFailure(error: unknown): TurnFailureCategory {
   if (status === 429 || /rate[_ ]?limit|too many requests/i.test(text)) return 'rate_limit';
   if (/quota|额度/i.test(text)) return 'quota';
   if (status === 408 || status === 504) return 'network';
-  if (status >= 500 && status < 600) return 'server';
+  if (status >= 500 && status < 600)
+    // 只认 Node 的连接错误码（带词边界：「reconnect later」这类服务端措辞不算）
+    return /\b(?:econn(?:refused|reset|aborted)|enotfound|eai_again|etimedout|ehostunreach)\b/i.test(
+      text,
+    )
+      ? 'network'
+      : 'server';
   if (status === 400 || status === 404 || status === 413 || status === 422) return 'rejected';
   if (/content[_ ]filter|safety|blocked|moderation|内容.*(拦截|审核)/i.test(text))
     return 'rejected';

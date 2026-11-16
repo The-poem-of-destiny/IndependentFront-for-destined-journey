@@ -50,6 +50,13 @@ describe('TurnRecoveryPanel', () => {
     expect(mocks.openSettings).not.toHaveBeenCalled();
   });
 
+  it('网络类失败（服务地址可能填错）也给「去设置」', () => {
+    const wrapper = mount(TurnRecoveryPanel, {
+      props: { failure: { category: 'network' as const }, message: '中断', canRetry: true },
+    });
+    expect(wrapper.findAll('button').map((b) => b.text())).toContain('去设置');
+  });
+
   it('原因未保留时如实说明，不编造分类', () => {
     const wrapper = mount(TurnRecoveryPanel, {
       props: { message: '上一回合没有完成。', causeUnknown: true, canRetry: true },

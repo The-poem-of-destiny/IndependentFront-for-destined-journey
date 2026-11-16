@@ -6,9 +6,12 @@ import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
 
 export interface ReadinessIssue {
   message: string;
-  section: 'api' | 'agent';
+  /** 处理入口所在的设置分区；没有对应入口（如「尚未选择生成模式」在本页就地处理）时省略 */
+  section?: 'api' | 'agent';
   blocking: boolean;
 }
+
+const MODE_MISSING_ISSUE: ReadinessIssue = { message: '尚未选择生成模式。', blocking: true };
 
 /** Local configuration checks only; this does not contact or choose a provider. */
 export function checkJourneyReadiness(
@@ -19,9 +22,12 @@ export function checkJourneyReadiness(
 ): ReadinessIssue[] {
   const rawPool = settings.apiPool ?? [];
   const apiPool = buildApiEndpoints(rawPool);
+  // 未选模式时不知道要查哪组 Agent：只报模式本身 + 池级问题，逐 Agent 检查等选定后再做
+  const modeIssues = generationMode === '' ? [MODE_MISSING_ISSUE] : [];
   if (!apiPool.length) {
     if (rawPool.length > 0) {
       return [
+        ...modeIssues,
         {
           message: `${agentDisplayName('story')}：需要选择对话 API。`,
           section: 'api',
@@ -30,9 +36,11 @@ export function checkJourneyReadiness(
       ];
     }
     return [
+      ...modeIssues,
       { message: '尚未配置 API，请添加服务地址并选择模型。', section: 'api', blocking: true },
     ];
   }
+  if (generationMode === '') return modeIssues;
   const issues: ReadinessIssue[] = [];
   const agentIds = isDirectMode(generationMode)
     ? DIRECT_MODE_AGENT_IDS

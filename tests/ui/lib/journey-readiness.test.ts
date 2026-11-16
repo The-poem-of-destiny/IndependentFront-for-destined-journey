@@ -105,4 +105,26 @@ describe('journey readiness', () => {
     );
     expect(issues).toEqual([expect.objectContaining({ blocking: false })]);
   });
+
+  it('未选模式且 API 池为空：模式项在前，随后是 API 项', () => {
+    const issues = checkJourneyReadiness({ apiPool: [] }, {}, 'off', '');
+    expect(issues).toEqual([
+      { message: '尚未选择生成模式。', blocking: true },
+      expect.objectContaining({ blocking: true, section: 'api' }),
+    ]);
+  });
+  it('未选模式但 API 池可用：只报模式项，且该项没有设置入口', () => {
+    const issues = checkJourneyReadiness({ apiPool: [endpoint] }, {}, 'off', '');
+    expect(issues).toEqual([{ message: '尚未选择生成模式。', blocking: true }]);
+    expect(issues[0]).not.toHaveProperty('section');
+  });
+  it('未选模式时跳过逐 Agent 检查，不报失效绑定', () => {
+    const issues = checkJourneyReadiness(
+      { apiPool: [endpoint], agents: { story: { model: 'deleted' } } },
+      {},
+      'off',
+      '',
+    );
+    expect(issues).toEqual([{ message: '尚未选择生成模式。', blocking: true }]);
+  });
 });
