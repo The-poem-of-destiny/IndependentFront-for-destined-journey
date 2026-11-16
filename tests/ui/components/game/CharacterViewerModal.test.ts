@@ -405,7 +405,9 @@ describe('CharacterViewerModal — 跟着数据走', () => {
     // 所以这条测的正是"回查"本身，不是换人时的重置
     mockGame.characters = [makeChar({ hp: 40, maxHp: 100 })];
     await flushPromises();
-    expect(document.body.textContent).toContain('40 / 100');
+    // 资源条读数经 useTweenedNumber 约半秒滚到新值（动效 v1）—— 等它落定；
+    // 若弹窗攥着旧对象，读数会一直停在 100，照样超时变红
+    await vi.waitFor(() => expect(document.body.textContent).toContain('40 / 100'));
   });
 
   it('★ 换人时展开态与页签归零（否则新角色身上留着上一位的展开区）', async () => {

@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
+import { useTweenedNumber } from '../../composables/useTweenedNumber';
 import AssetMedia from '../shared/AssetMedia.vue';
 import { ASSET_TYPE_AVATAR_CHAIN } from '@engine/assets/asset-resolve';
 import { getAffectionLabel } from '@engine/character/affection-system';
@@ -33,7 +34,8 @@ const detailTab = ref<'equipment' | 'skills' | 'overview' | 'ascension' | 'statu
 const selStatusInspected = ref<string | null>(null);
 
 const npcs = computed(() => game.npcs || []);
-const fp = computed(() => game.fp);
+/** 命运点变化时数字滚到新值、按涨跌短暂着色（动效 v1；只改显示，见 useTweenedNumber） */
+const { display: fpShown, trend: fpTrend } = useTweenedNumber(() => game.fp);
 const affections = computed(() => game.saveProfile?.affections || {});
 const contracts = computed(() => game.saveProfile?.contracts || []);
 
@@ -267,7 +269,9 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
     <!-- FP 点数 -->
     <div class="fp-bar">
       <span class="fp-label">命运点数</span>
-      <span class="fp-value"><i class="fa-solid fa-gem" /> {{ fp }}</span>
+      <span class="fp-value" :class="fpTrend && `is-${fpTrend}`">
+        <i class="fa-solid fa-gem" /> {{ fpShown }}
+      </span>
     </div>
 
     <!-- Master-Detail -->
@@ -760,9 +764,18 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
   align-items: center;
   gap: 6px;
   font-family: var(--theme-font-title, 'Cinzel', serif);
+  font-variant-numeric: tabular-nums;
+  transition: color var(--motion-duration-base) var(--motion-ease-standard);
 }
 .fp-value i {
   font-size: 0.875rem;
+}
+/* 数值滚动期间的涨跌着色（约半秒，滚完即回原色） */
+.fp-value.is-up {
+  color: var(--theme-success);
+}
+.fp-value.is-down {
+  color: var(--theme-error);
 }
 
 /* ═══ Master-Detail ═══ */

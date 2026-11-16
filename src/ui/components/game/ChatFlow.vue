@@ -844,31 +844,35 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
           v-else-if="msg.role === 'system' && msg.systemEvent && isEventVisible(msg.systemEvent)"
           class="bubble-row bubble-row-system"
         >
-          <!-- 折叠通知条 -->
-          <div
-            v-if="!expandedIds[msg.id]"
-            class="system-notif"
-            :class="`system-notif-${msg.systemEvent.type}`"
-            role="button"
-            tabindex="0"
-            :aria-expanded="false"
-            @click="toggleExpand(msg.id)"
-            @keydown.enter="toggleExpand(msg.id)"
-            @keydown.space.prevent="toggleExpand(msg.id)"
-          >
-            <i :class="'system-notif-icon fa-solid ' + eventIconClass(msg.systemEvent.type)" />
-            <span class="system-notif-text">{{ msg.content }}</span>
-            <span class="system-notif-chevron">▸</span>
-          </div>
+          <!-- 通知条 ⇄ 卡片：旧的一瞬淡出，新的自通知条处向下展开落定（design.md §4.6） -->
+          <Transition name="card-unfold" mode="out-in">
+            <!-- 折叠通知条 -->
+            <div
+              v-if="!expandedIds[msg.id]"
+              key="notif"
+              class="system-notif"
+              :class="`system-notif-${msg.systemEvent.type}`"
+              role="button"
+              tabindex="0"
+              :aria-expanded="false"
+              @click="toggleExpand(msg.id)"
+              @keydown.enter="toggleExpand(msg.id)"
+              @keydown.space.prevent="toggleExpand(msg.id)"
+            >
+              <i :class="'system-notif-icon fa-solid ' + eventIconClass(msg.systemEvent.type)" />
+              <span class="system-notif-text">{{ msg.content }}</span>
+              <span class="system-notif-chevron">▸</span>
+            </div>
 
-          <!-- 展开卡片 -->
-          <div v-else class="system-card-wrapper">
-            <component
-              :is="CARD_COMPONENTS[msg.systemEvent.type]"
-              :event="msg.systemEvent"
-              @collapse="collapseCard(msg.id)"
-            />
-          </div>
+            <!-- 展开卡片 -->
+            <div v-else key="card" class="system-card-wrapper">
+              <component
+                :is="CARD_COMPONENTS[msg.systemEvent.type]"
+                :event="msg.systemEvent"
+                @collapse="collapseCard(msg.id)"
+              />
+            </div>
+          </Transition>
         </div>
       </template>
 
@@ -1023,7 +1027,8 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
 }
 .bubble-row {
   display: flex;
-  animation: msg-enter 0.35s ease both;
+  /* 消息入场（design.md §6）：入场缓动 —— 迅速到位、长尾落定，像下一页纸放到桌面上 */
+  animation: msg-enter var(--motion-duration-slow) var(--motion-ease-enter) both;
 }
 @keyframes msg-enter {
   from {
@@ -1260,6 +1265,25 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
 .system-card-wrapper {
   max-width: 100%;
   width: 100%;
+}
+
+/* 通知条 ⇄ 卡片的切换（动效 v1）：只动 opacity / transform，行高的变化不做过渡
+   （design.md §1 禁止过渡布局属性）；原点在顶部，读起来是「从通知条处展开」 */
+.card-unfold-enter-active {
+  transform-origin: top center;
+  transition:
+    opacity var(--motion-duration-base) var(--motion-ease-standard),
+    transform var(--motion-duration-slow) var(--motion-ease-enter);
+}
+.card-unfold-leave-active {
+  transition: opacity var(--motion-duration-instant) var(--motion-ease-exit);
+}
+.card-unfold-enter-from {
+  opacity: 0;
+  transform: translateY(-4px) scaleY(0.96);
+}
+.card-unfold-leave-to {
+  opacity: 0;
 }
 
 /* ===== 上一回合未完成横幅（GAME-09）===== */

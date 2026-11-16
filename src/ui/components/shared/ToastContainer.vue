@@ -100,6 +100,13 @@ onUnmounted(() => {
           <button type="button" class="toast-close" aria-label="关闭提示" @click="close(t)">
             ×
           </button>
+          <!-- 剩余时间细线：时长与 store 的计时同源；悬停 / 聚焦时与计时一起停住。常驻提示没有 -->
+          <span
+            v-if="t.duration > 0"
+            class="toast-timer"
+            :style="{ animationDuration: `${t.duration}ms` }"
+            aria-hidden="true"
+          />
         </div>
       </transition-group>
     </div>
@@ -107,29 +114,42 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/*
+ * 动效 v1（2026-11-16）：提示从整块饱和色改为主题卡片底 + 语义色染底与整圈描边
+ * （design.md §1「激活态/强调徽章通用配方」），语义色只落在图标、描边与计时细线上。
+ *
+ * 容器刻意是**块级**布局而不是 flex：离场的提示要 `position: absolute` 脱离文档流，
+ * 好让其余提示用 FLIP（.toast-move）平滑补位；flex 容器里绝对定位子元素的静态位置
+ * 是容器起点，离场那条会先跳到最上面再淡出。
+ */
 .toast-container {
   position: fixed;
   top: 16px;
   right: 16px;
   z-index: 2000;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: min(560px, 92vw);
+  width: min(440px, calc(100vw - 32px));
+  pointer-events: none;
 }
 
 .toast-item {
+  --toast-accent: var(--theme-primary);
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 4px;
+  margin-bottom: var(--theme-spacing-sm);
   padding: 4px 4px 4px 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--toast-accent) 40%, var(--theme-card-border));
   border-radius: var(--theme-radius-md);
+  background: color-mix(in srgb, var(--toast-accent) 9%, var(--theme-card-bg));
+  color: var(--theme-text-primary);
   font-size: 0.88rem;
   line-height: 1.45;
-  box-shadow: var(--theme-shadow-md);
-  transition: all var(--theme-transition-fast);
+  box-shadow: var(--theme-shadow-lg);
   word-break: break-word;
   overflow-wrap: break-word;
+  pointer-events: auto;
 }
 
 .toast-body {
@@ -151,8 +171,19 @@ onUnmounted(() => {
 
 .toast-icon {
   flex-shrink: 0;
-  font-size: 1rem;
-  line-height: 1.45;
+  width: 1.375rem;
+  height: 1.375rem;
+  margin-top: 0.03rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--toast-accent) 45%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--toast-accent) 16%, transparent);
+  color: var(--toast-accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .toast-msg {
@@ -166,9 +197,9 @@ onUnmounted(() => {
   padding: 0 6px;
   font-size: 0.78rem;
   font-weight: 600;
+  color: var(--toast-accent);
   border: 1px solid currentColor;
   border-radius: var(--theme-radius-sm);
-  opacity: 0.9;
 }
 
 .toast-close {
@@ -180,48 +211,77 @@ onUnmounted(() => {
   justify-content: center;
   font-size: 1.15rem;
   line-height: 1;
-  color: inherit;
+  color: var(--theme-text-muted);
   background: none;
   border: none;
   border-radius: var(--theme-radius-sm);
   cursor: pointer;
-  opacity: 0.75;
-  transition: opacity var(--theme-transition-fast);
+  transition:
+    color var(--theme-transition-fast),
+    background var(--theme-transition-fast);
 }
 .toast-close:hover {
-  opacity: 1;
+  color: var(--theme-text-primary);
+  background: color-mix(in srgb, var(--toast-accent) 12%, transparent);
 }
 
-.toast-info {
-  background: var(--theme-primary);
-  color: var(--theme-primary-text);
-}
 .toast-success {
-  background: var(--theme-success);
-  color: #fff;
+  --toast-accent: var(--theme-success);
 }
 .toast-warning {
-  background: var(--theme-warning);
-  color: #1a1510;
+  --toast-accent: var(--theme-warning);
 }
 .toast-error {
-  background: var(--theme-error);
-  color: #fff;
+  --toast-accent: var(--theme-error);
 }
 
+/* 剩余时间细线：只缩 transform，悬停 / 聚焦时停住（与 store 的 pauseToast 同一时机） */
+.toast-timer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--toast-accent);
+  opacity: 0.55;
+  transform-origin: left center;
+  animation-name: toast-timer;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+.toast-item:hover .toast-timer,
+.toast-item:focus-within .toast-timer {
+  animation-play-state: paused;
+}
+@keyframes toast-timer {
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* 入场从右侧滑入并轻微放大落定；离场更短；其余提示用 FLIP 平滑补位 */
 .toast-enter-active {
-  transition: all 0.3s ease;
+  transition:
+    opacity var(--motion-duration-base) var(--motion-ease-standard),
+    transform var(--motion-duration-slow) var(--motion-ease-enter);
 }
 .toast-leave-active {
-  transition: all 0.2s ease;
+  position: absolute;
+  width: 100%;
+  transition:
+    opacity var(--motion-duration-fast) var(--motion-ease-exit),
+    transform var(--motion-duration-fast) var(--motion-ease-exit);
+}
+.toast-move {
+  transition: transform var(--motion-duration-base) var(--motion-ease-standard);
 }
 .toast-enter-from {
   opacity: 0;
-  transform: translateX(50px);
+  transform: translateX(24px) scale(0.98);
 }
 .toast-leave-to {
   opacity: 0;
-  transform: translateX(50px);
+  transform: translateX(16px);
 }
 /* 减少动态效果由 themes/variables.css 的全局规则统一处理（系统偏好 ∪ 应用内开关） */
 </style>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, watch } from 'vue';
-import { useUIStore } from './stores/ui-store';
+import { computed, onMounted, onUnmounted, watch } from 'vue';
+import { useUIStore, type AppView } from './stores/ui-store';
 import { useAudioStore } from './stores/audio-store';
 import { useAssetStore } from './stores/asset-store';
 import { useSettingsStore } from './stores/settings-store';
@@ -11,6 +11,8 @@ import { useWorkshopStore } from './stores/workshop-store';
 import { queryForView } from './lib/view-audio';
 import { applyReducedMotion } from './lib/reduced-motion';
 import { runContentStartupChain } from './lib/content-startup-chain';
+import { createViewRegistry } from './lib/view-loader';
+import ViewLoading from './components/shared/ViewLoading.vue';
 import ToastContainer from './components/shared/ToastContainer.vue';
 import ConfirmDialogHost from './components/shared/ConfirmDialogHost.vue';
 import ApiRateLimitWaitPopup from './components/shared/ApiRateLimitWaitPopup.vue';
@@ -115,43 +117,60 @@ watch(
   { immediate: true },
 );
 
-// 懒加载所有页面（和原来 router 一样的异步加载）
-const HomePage = defineAsyncComponent(() => import('./components/home/HomePage.vue'));
-const CreatePage = defineAsyncComponent(() => import('./components/create/CreatePage.vue'));
-const GamePage = defineAsyncComponent(() => import('./components/game/GamePage.vue'));
-const SettingsPage = defineAsyncComponent(() => import('./components/settings/SettingsPage.vue'));
-const ExtensionManagementPage = defineAsyncComponent(
-  () => import('./components/workshop/ExtensionManagementPage.vue'),
-);
-const WorkshopPage = defineAsyncComponent(() => import('./components/workshop/WorkshopPage.vue'));
-
-const viewComponent = computed(() => {
-  switch (ui.currentView) {
-    case 'create':
-      return CreatePage;
-    case 'game':
-      return GamePage;
-    case 'settings':
-      return SettingsPage;
-    case 'extensions':
-      return ExtensionManagementPage;
-    case 'workshop':
-      return WorkshopPage;
-    default:
-      return HomePage;
-  }
+// ═══ 页面懒加载（动效 v1，2026-11-16）═══════════════════════
+//
+// 六个页面仍按需加载，但「载好没有」由 lib/view-loader.ts 显式持有：没载好渲染
+// ViewLoading，载好后换成真页面 —— 这是 Transition 看得见的一次子节点变化，所以
+// 每次进入页面都有入场动画，也不再有「旧页淡出后一整段纯黑」。
+// 不用 defineAsyncComponent 的原因见 view-loader.ts 文件头。
+const views = createViewRegistry<AppView>({
+  home: () => import('./components/home/HomePage.vue'),
+  create: () => import('./components/create/CreatePage.vue'),
+  game: () => import('./components/game/GamePage.vue'),
+  settings: () => import('./components/settings/SettingsPage.vue'),
+  extensions: () => import('./components/workshop/ExtensionManagementPage.vue'),
+  workshop: () => import('./components/workshop/WorkshopPage.vue'),
 });
 
-/** 切换正在游玩的存档时重挂 GamePage；其它页面仍只按视图身份重挂。 */
-const viewKey = computed(() =>
-  ui.currentView === 'game' ? `game:${ui.activeSaveId ?? 'none'}` : ui.currentView,
+watch(
+  () => ui.currentView,
+  (view) => void views.ensure(view),
+  { immediate: true },
+);
+
+// 首页开场动画（星流）跑完之前不抢主线程；之后按「最可能的下一站」逐个空闲预取
+let stopPrefetch: (() => void) | undefined;
+onMounted(() => {
+  stopPrefetch = views.prefetch(['create', 'game', 'settings', 'extensions', 'workshop'], {
+    startDelayMs: 2500,
+  });
+});
+onUnmounted(() => stopPrefetch?.());
+
+const viewComponent = computed(() => views.resolved(ui.currentView) ?? ViewLoading);
+
+/**
+ * 切换正在游玩的存档时重挂 GamePage；其它页面仍只按视图身份重挂。
+ * 加载态单独一个 key：载好时 key 变化，Transition 才会把加载态换成真页面并播放入场。
+ */
+const viewKey = computed(() => {
+  const view = ui.currentView;
+  if (!views.resolved(view)) return `loading:${view}`;
+  return view === 'game' ? `game:${ui.activeSaveId ?? 'none'}` : view;
+});
+
+/** 只有加载态吃这两个 prop；真页面不收任何 prop（与旧实现一致） */
+const viewProps = computed(() =>
+  views.resolved(ui.currentView)
+    ? {}
+    : { failed: views.failed(ui.currentView), onRetry: () => void views.ensure(ui.currentView) },
 );
 </script>
 
 <template>
   <div class="app-shell">
-    <transition name="fade" mode="out-in">
-      <component :is="viewComponent" :key="viewKey" />
+    <transition name="view" mode="out-in">
+      <component :is="viewComponent" :key="viewKey" v-bind="viewProps" />
     </transition>
     <SaveManager />
     <ToastContainer />
@@ -167,7 +186,7 @@ const viewKey = computed(() =>
   color: var(--theme-text-primary);
   font-family: var(--theme-font-body);
   transition:
-    background 0.3s ease,
-    color 0.3s ease;
+    background var(--motion-duration-slow) var(--motion-ease-standard),
+    color var(--motion-duration-slow) var(--motion-ease-standard);
 }
 </style>

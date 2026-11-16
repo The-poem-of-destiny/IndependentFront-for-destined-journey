@@ -1,6 +1,7 @@
 # 命定之诗 — 前端设计规范
 
-> **最后更新:** 2026-08-05（§7.4 字体：设置严格压过主题 + 自托管字体；玄墨深度重设计同步于 2026-07-19）
+> **最后更新:** 2026-11-16（§6 动效 v1：`--motion-*` token、编排守则、页面/弹窗/提示/资源条动效）；
+> 2026-08-05（§7.4 字体：设置严格压过主题 + 自托管字体；玄墨深度重设计同步于 2026-07-19）
 > **适用范围:** 所有 `src/ui/` 下的页面和组件
 > **状态:** 玄墨（古籍/手稿沉浸奇幻风）体系已落地 — 本文档持续更新
 
@@ -283,18 +284,61 @@ import { qualityVar } from '../../lib/quality-colors'
 
 ## 6. 过渡与动画
 
+> 📌 **2026-11-16 动效 v1**：时长与缓动收进 `themes/variables.css` 的 `--motion-*` token，
+> 本节数值即 token 取值；旧名 `--theme-transition-fast` / `--theme-transition-normal`
+> 保留（200+ 处引用），改由新 token 组成 —— 时长不变，缓动由 `ease` 换成 standard 曲线。
+> 写新动效一律引用 token，不写裸秒数。
+
+### 6.0 Token 与编排守则
+
+| Token                       | 值                              | 用途                                     |
+| --------------------------- | ------------------------------- | ---------------------------------------- |
+| `--motion-ease-standard`    | `cubic-bezier(0.2, 0, 0, 1)`    | 状态切换：hover / 选中 / 展开 / 数值变化 |
+| `--motion-ease-enter`       | `cubic-bezier(0.16, 1, 0.3, 1)` | 入场：迅速到位、长尾落定                 |
+| `--motion-ease-exit`        | `cubic-bezier(0.4, 0, 1, 1)`    | 离场：起步缓、加速离开                   |
+| `--motion-duration-instant` | `90ms`                          | 即将被替换的旧内容一瞬淡出               |
+| `--motion-duration-fast`    | `150ms`                         | hover、按钮、一切离场                    |
+| `--motion-duration-base`    | `240ms`                         | 淡入、数值条、状态色                     |
+| `--motion-duration-slow`    | `360ms`                         | 入场位移、弹窗面板、交错入场的每一项     |
+| `--motion-duration-page`    | `420ms`                         | 顶层页面入场                             |
+| `--motion-stagger-step`     | `36ms`                          | 交错入场每一级的间隔                     |
+
+1. **只动 opacity / transform**（§1 禁令）。数值条用 `translateX`，描线用 `scaleX`。
+2. **离场比入场短**：入场 = enter 缓动 + slow/page；离场 = exit 缓动 + fast。
+3. **由交互或状态变化触发**，不做常驻循环的装饰动画（加载指示除外）。
+4. **嵌套过渡**：Vue 只读 `<Transition>` **根元素**的时长判断何时结束 —— 根的时长必须
+   不短于子元素，否则子元素会被半路摘掉 `*-active` 类、当场跳到终态。
+5. **一次性入场动画用 `backwards` 填充**，不用 `both`：`both` 会把终帧 `transform` 永久钉在
+   元素上，盖掉主题给它的位移，并让它常驻一个层叠上下文。
+6. 全局关键帧写在 `styles/transitions.css`（任何组件可直接引用）；组件 scoped 块里声明的
+   关键帧会被按组件改名，只能本组件用。
+
 ### 6.1 微交互
 
-| 场景          | 时长             | 效果                                                            |
-| ------------- | ---------------- | --------------------------------------------------------------- |
-| 按钮 hover    | `0.15s ease`     | 背景色/边框色过渡                                               |
-| Tab 切换      | `0.15-0.2s ease` | 颜色 + 下划线过渡                                               |
-| 卡片展开/折叠 | `0.25s ease`     | `grid-template-rows: 0fr→1fr` + opacity（禁止 max-height 过渡） |
-| 消息入场      | `0.35s ease`     | opacity + translateY(12px)                                      |
+| 场景           | 时长 / 缓动                          | 效果                                                                      |
+| -------------- | ------------------------------------ | ------------------------------------------------------------------------- |
+| 按钮 hover     | fast · standard                      | 背景色/边框色过渡                                                         |
+| Tab 切换       | fast · standard                      | 颜色 + 下划线过渡                                                         |
+| 卡片展开/折叠  | base · standard                      | `grid-template-rows: 0fr→1fr` + opacity（禁止 max-height 过渡）           |
+| 通知条 ⇄ 卡片  | 旧的 instant 淡出；新的 slow · enter | `<Transition name="card-unfold" mode="out-in">`，自顶部 scaleY(0.96) 展开 |
+| 消息入场       | slow · enter                         | opacity + translateY(12px)                                                |
+| 资源条数值变化 | base · standard                      | 填充层 `translateX`；下降时同色残影停留 320ms 后 640ms 追上（只读不改数） |
+| 提示（Toast）  | 入场 slow · enter；离场 fast · exit  | 右侧滑入 + 轻微放大；其余提示 FLIP 补位；底部细线显示剩余时间，悬停时停住 |
+| 数值滚动       | 480ms · ease-out cubic               | 金币 / 命运点 / 资源条读数滚到新值，期间按涨跌短暂染 success / error 色   |
 
-### 6.2 面板切换
+> 📌 **数值滚动与「一个真相来源」**（PRODUCT.md，2026-11-16 主人裁定可做）：只改**显示**、从不改
+> 数据 —— 终点恒等于源值，挂载时不滚，非整数不插值，减动效下直接到位。统一走
+> `composables/useTweenedNumber.ts`，别在组件里各写一个计时器。
 
-Modal 打开：`<Transition name="modal">` — fade + scale(0.97→1)
+### 6.2 面板与页面切换
+
+| 场景         | 过渡                                                | 说明                                                                            |
+| ------------ | --------------------------------------------------- | ------------------------------------------------------------------------------- |
+| 顶层页面     | `<transition name="view" mode="out-in">`（App.vue） | 离场 fast 淡出 + 上提 4px；入场 page · enter 自下 10px 落定                     |
+| 页面尚未载入 | `shared/ViewLoading.vue`                            | 前 200ms 不显示；失败给「重试」；离场瞬时。配合 `lib/view-loader.ts` 的空闲预取 |
+| Modal        | `<Transition name="modal">`（AppModal）             | 遮罩淡入；面板自下 12px、scale(0.98) 升起落定                                   |
+| 设置页分区   | `section-fade` + 分区根的 `.motion-stagger`         | 分区整体只淡入，标题 / 说明 / 各卡片依次升起                                    |
+| 列表首次出现 | 容器加 `.motion-stagger`（styles/transitions.css）  | 直接子元素依次升起，间隔 `--motion-stagger-step`，排到第 12 个为止              |
 
 ### 6.3 prefers-reduced-motion
 
@@ -421,6 +465,7 @@ Palatino Linotype / KaiTi / STKaiti）。它们只是兜底：本应用从不下
 - [ ] 没有 >1px 的彩色侧边条（border-left/right），品质用色点 + 名字着色
 - [ ] 没有渐变文字（`background-clip: text`）
 - [ ] 过渡不使用布局属性（width/height/max-height/padding）
+- [ ] 时长与缓动取 `--motion-*` token（§6.0），离场比入场短，一次性入场动画用 `backwards` 填充
 - [ ] 叙事/标题文字使用 `var(--theme-font-title)`（Noto Serif SC）
 - [ ] 间距使用 `--theme-spacing-*` 变量
 - [ ] 卡片使用 `--paper-stack` 阴影或等效纸叠效果

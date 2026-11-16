@@ -4,6 +4,7 @@ import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useHoverPopup } from '../../composables/useHoverPopup';
 import { usePlayerPortrait } from '../../composables/usePlayerPortrait';
+import { useTweenedNumber } from '../../composables/useTweenedNumber';
 import { normalizeItemType } from '@engine/content/field-enums';
 import { getTierConfig } from '@engine/character/tier-constants';
 import { getRequiredXpForLevel } from '@engine/character/exp-table';
@@ -27,6 +28,11 @@ const game = useGameStore();
 const ui = useUIStore();
 
 const player = computed(() => game.player);
+
+// ═══ 数值滚动（动效 v1，2026-11-16）══════════════════════════
+// 钱袋 / 命运点变化时显示值滚到新数，滚动期间按涨跌短暂着色；只改显示（见 useTweenedNumber）
+const { display: moneyShown, trend: moneyTrend } = useTweenedNumber(() => player.value?.money);
+const { display: fpShown, trend: fpTrend } = useTweenedNumber(() => game.fp);
 
 // ═══ 玩家叙事人设编辑 ════════════════════════════════════════
 const personaOpen = ref(false);
@@ -554,8 +560,12 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
             <span class="section-title">持有物</span>
             <!-- 钱袋 / 命运点常驻标题行 —— 在 Transition 之外，折叠时依然可见 -->
             <span class="hold-meta">
-              <span class="hold-money"><i class="fa-solid fa-coins" />{{ player.money }} G</span>
-              <span class="hold-fp"><i class="fa-solid fa-star" />{{ game.fp }} FP</span>
+              <span class="hold-money" :class="moneyTrend && `is-${moneyTrend}`"
+                ><i class="fa-solid fa-coins" />{{ moneyShown }} G</span
+              >
+              <span class="hold-fp" :class="fpTrend && `is-${fpTrend}`"
+                ><i class="fa-solid fa-star" />{{ fpShown }} FP</span
+              >
             </span>
             <i class="fa-solid" :class="inventoryOpen ? 'fa-chevron-up' : 'fa-chevron-down'" />
           </div>
@@ -1141,12 +1151,22 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   align-items: center;
   gap: 5px;
   font-weight: 600;
+  transition: color var(--motion-duration-base) var(--motion-ease-standard);
 }
 .hold-money {
   color: var(--theme-currency-gold);
 }
 .hold-fp {
   color: var(--theme-primary);
+}
+/* 数值滚动期间的涨跌着色（约半秒，滚完即回原色） */
+.hold-money.is-up,
+.hold-fp.is-up {
+  color: var(--theme-success);
+}
+.hold-money.is-down,
+.hold-fp.is-down {
+  color: var(--theme-error);
 }
 .hold-header-row {
   display: flex;

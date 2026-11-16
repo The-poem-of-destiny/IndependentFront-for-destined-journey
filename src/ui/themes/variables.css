@@ -118,9 +118,27 @@
     0 1px 0 0 color-mix(in srgb, var(--theme-card-border) 40%, transparent),
     0 4px 12px rgba(0, 0, 0, 0.1);
 
-  /* 过渡 */
-  --theme-transition-fast: 0.15s ease;
-  --theme-transition-normal: 0.25s ease;
+  /* 动效（动效 v1，2026-11-16；规则见 docs/design.md §6）
+     缓动三条，按「这一下在做什么」选，不按「想要多快」选：
+       standard —— 状态切换（hover / 选中 / 展开 / 数值变化）：起步快、收尾稳
+       enter    —— 元素入场：迅速到位、长尾落定，像一页纸落到桌面上
+       exit     —— 元素离场：起步缓、加速离开；离场一律比入场短
+     时长阶：instant 90 / fast 150 / base 240 / slow 360 / page 420（ms）
+     只许用于 opacity / transform（design.md §1 绝对禁令：不过渡布局属性） */
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --motion-duration-instant: 90ms;
+  --motion-duration-fast: 150ms;
+  --motion-duration-base: 240ms;
+  --motion-duration-slow: 360ms;
+  --motion-duration-page: 420ms;
+  /* 交错入场每一级的间隔（styles/transitions.css 的 .motion-stagger） */
+  --motion-stagger-step: 36ms;
+
+  /* 过渡 —— 两个旧名保留（200+ 处引用），改由上面的 token 组成：时长不变，缓动换成 standard */
+  --theme-transition-fast: var(--motion-duration-fast) var(--motion-ease-standard);
+  --theme-transition-normal: var(--motion-duration-base) var(--motion-ease-standard);
 
   /* z-index 语义阶 */
   --z-dropdown: 100;

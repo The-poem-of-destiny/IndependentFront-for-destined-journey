@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
+import { useTweenedNumber } from '../../composables/useTweenedNumber';
 import { qualityVar } from '../../lib/quality-colors';
 // 条目展示逻辑（品质/分类/详情字段/效果/战斗修正）收敛到 item-view —— 与 NPC 查看器共用同一份
 import { qualityOf, qualityRank, facetOf, listExtra, type PanelEntry } from '../../lib/item-view';
@@ -18,6 +19,9 @@ const activeFilter = ref('全部');
 const selectedIdx = ref(0);
 
 const player = computed(() => game.player);
+
+/** 金币变化时数字滚到新值、按涨跌短暂着色（动效 v1；只改显示，见 useTweenedNumber） */
+const { display: moneyShown, trend: moneyTrend } = useTweenedNumber(() => player.value?.money);
 
 // ═══ 数据 ═══
 // M6 完整重构: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3），最小适配 filter 惯用式
@@ -214,7 +218,9 @@ async function doRewrite() {
     <!-- 货币 -->
     <div class="money-bar">
       <span class="money-label">持有金币</span>
-      <span class="money-value"><i class="fa-solid fa-coins" /> {{ player.money }} G</span>
+      <span class="money-value" :class="moneyTrend && `is-${moneyTrend}`">
+        <i class="fa-solid fa-coins" /> {{ moneyShown }} G
+      </span>
     </div>
 
     <!-- 类别切换 -->
@@ -356,9 +362,18 @@ async function doRewrite() {
   align-items: center;
   gap: 6px;
   font-family: var(--theme-font-title, 'Cinzel', serif);
+  font-variant-numeric: tabular-nums;
+  transition: color var(--motion-duration-base) var(--motion-ease-standard);
 }
 .money-value i {
   font-size: 0.875rem;
+}
+/* 数值滚动期间的涨跌着色（约半秒，滚完即回金色） */
+.money-value.is-up {
+  color: var(--theme-success);
+}
+.money-value.is-down {
+  color: var(--theme-error);
 }
 
 /* ═══ 类别 Tab — 书签风格 ═══ */
