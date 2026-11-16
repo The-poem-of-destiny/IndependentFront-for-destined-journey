@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useGameStore } from '../../stores/game-store';
+import { useFxEnabled } from '../../lib/fx-gate';
+import { settledTurnOf } from '../../lib/fx-game-state';
+import FxTurnOrnament from '../fx/FxTurnOrnament.vue';
 
 const game = useGameStore();
 
@@ -18,6 +21,10 @@ const turnCount = computed(() => {
     .find((m) => m.role === 'user' || m.role === 'assistant');
   return last?.turn ?? 0;
 });
+
+// 界面特效：回合纹饰只在闸门打开时挂载；回合数取「已落定」口径（生成中 / 已废弃不算）
+const fxEnabled = useFxEnabled();
+const settledTurn = computed(() => (fxEnabled.value ? settledTurnOf(game.messages ?? []) : 0));
 </script>
 
 <template>
@@ -34,6 +41,7 @@ const turnCount = computed(() => {
       <span class="top-title-rule" aria-hidden="true" />
       <span class="top-title-text">第 {{ turnCount }} 轮对话</span>
       <span class="top-title-rule" aria-hidden="true" />
+      <FxTurnOrnament v-if="fxEnabled" :settled-turn="settledTurn" />
     </span>
 
     <!-- 右: 统一入口（菜单入口；内部条目见 GameMenu） -->

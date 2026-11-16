@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ItemGenSystemEvent } from '@engine/types/types';
 import { qualityVar } from '../../../lib/quality-colors';
+import { vFoil } from '../../../lib/fx-foil';
 
 // 模板里直接用 `event`，无需在 script 里持有引用 —— defineProps 只是声明
 defineProps<{ event: ItemGenSystemEvent }>();
@@ -14,7 +15,12 @@ function typeIcon(itemType: string): string {
 </script>
 
 <template>
-  <div class="sys-card" :style="{ '--sys-accent': qualityVar(event.quality) }">
+  <!-- 顶级品质（传说及以上）在特效闸门打开时才有箔光与轻微倾斜；其余品质零节点 -->
+  <div
+    v-foil="{ quality: event.quality, tilt: 2.5 }"
+    class="sys-card"
+    :style="{ '--sys-accent': qualityVar(event.quality) }"
+  >
     <div class="sys-card-header" @click="emit('collapse')">
       <span class="sys-card-dot" />
       <i :class="'sys-card-icon ' + typeIcon(event.itemType)" />

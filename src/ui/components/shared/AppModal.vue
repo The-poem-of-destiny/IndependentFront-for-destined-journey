@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { watch, onMounted, onUnmounted, ref, useId } from 'vue';
+import { watch, onMounted, onUnmounted, ref, shallowRef, useId } from 'vue';
 import { ownModalFocus } from '../../lib/modal-focus';
+import { useFxEnabled } from '../../lib/fx-gate';
+import FxFrameTrace from './FxFrameTrace.vue';
+import { FX_MODAL_ENTER_MS, type FxFrameRect } from './fx-frame-trace-timing';
 
 const props = withDefaults(
   defineProps<{
@@ -59,12 +62,52 @@ onUnmounted(() => releaseFocus?.());
 function onOverlayClick(e: MouseEvent) {
   if (e.target === e.currentTarget) doClose();
 }
+
+/*
+ * 特效闸门打开时的「描框入场」（docs/design.md §6 + fx-core.css 的闸门约定）。
+ * 闸门关着时：不传 duration（Vue 照旧读 CSS 时长）、不渲染描线、样式全部不命中 ——
+ * 与 v1 逐像素一致。焦点陷阱 / Esc / 滚动锁都不经过这里。
+ */
+const fxEnabled = useFxEnabled();
+/** 显式时长只在闸门打开时给；离场沿用 v1 的 fast（150ms，= --motion-duration-fast） */
+const FX_DURATION = { enter: FX_MODAL_ENTER_MS, leave: 150 } as const;
+const traceRect = shallowRef<FxFrameRect | null>(null);
+// `appear` 也只在闸门打开时给：ConfirmDialogHost 这类「挂载即 open」的调用方在 v1 里没有入场
+// 过渡（Transition 首次渲染不跑 enter），闸门打开时借 appear 让它们同样被「画出来」；
+// appear 的类名与钩子缺省即 enter 那一套，所以下面的样式与 onEnter 无需另写。
+
+/**
+ * 入场钩子：按面板尺寸摆描线。取 offset* 而不是 getBoundingClientRect ——
+ * 此刻面板还带着 enter-from 的 transform，offset* 读的是落定后的位置。
+ * 只收一个参数：Vue 据此仍按 CSS / duration 判定结束，不接管 done。
+ */
+function onEnter(el: Element) {
+  if (!fxEnabled.value) return;
+  const panel = (el as HTMLElement).querySelector<HTMLElement>('.modal-content');
+  if (!panel) return;
+  traceRect.value = {
+    left: panel.offsetLeft,
+    top: panel.offsetTop,
+    width: panel.offsetWidth,
+    height: panel.offsetHeight,
+  };
+}
+function clearTrace() {
+  traceRect.value = null;
+}
 </script>
 
 <template>
   <Teleport to="body">
-    <transition name="modal">
+    <transition
+      name="modal"
+      :appear="fxEnabled"
+      :duration="fxEnabled ? FX_DURATION : undefined"
+      @enter="onEnter"
+      @after-leave="clearTrace"
+    >
       <div v-if="open" class="modal-overlay" tabindex="-1" @click="onOverlayClick">
+        <FxFrameTrace v-if="fxEnabled && traceRect" :rect="traceRect" @done="clearTrace" />
         <div
           ref="dialog"
           role="dialog"
@@ -203,5 +246,43 @@ function onOverlayClick(e: MouseEvent) {
   display: flex;
   justify-content: flex-end;
   gap: var(--theme-spacing-sm);
+}
+
+/*
+ * ===== 特效闸门：描框入场 =====
+ * 时间表的唯一出处在 fx-frame-trace-timing.ts（FX_MODAL_*），这里的毫秒数与之逐一对应：
+ *   面板 280ms 起淡入 240ms（不再从下方升起 —— 轮廓已经先画出来了，实体只需「落下」）；
+ *   页头 / 正文 / 页脚 360ms 起依次上浮 6px，间隔 36ms，每段 360ms。
+ * 只在 `.modal-enter-active` 期间生效：离场与常态完全沿用 transitions.css 的 v1 规则。
+ */
+:root[data-fx='on'] .modal-enter-active .modal-content {
+  transition: opacity 240ms var(--motion-ease-standard) 280ms;
+}
+:root[data-fx='on'] .modal-enter-from .modal-content {
+  opacity: 0;
+  transform: none;
+}
+:root[data-fx='on'] .modal-enter-active .modal-header,
+:root[data-fx='on'] .modal-enter-active .modal-body,
+:root[data-fx='on'] .modal-enter-active .modal-footer {
+  animation: fx-modal-rise 360ms var(--motion-ease-enter) backwards;
+}
+:root[data-fx='on'] .modal-enter-active .modal-header {
+  animation-delay: 360ms;
+}
+:root[data-fx='on'] .modal-enter-active .modal-body {
+  animation-delay: 396ms;
+}
+:root[data-fx='on'] .modal-enter-active .modal-content > .modal-body:first-child {
+  animation-delay: 360ms;
+}
+:root[data-fx='on'] .modal-enter-active .modal-footer {
+  animation-delay: 432ms;
+}
+@keyframes fx-modal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 </style>

@@ -221,6 +221,8 @@ export type UiSettings = {
   reducedMotion: boolean;
   /** 首页 Astral Drift 动态背景；减动效开启时此值不生效且不会加载 WebGL 场景 */
   homeBackdrop: boolean;
+  /** 界面特效（光泽、粒子、视差等装饰层）；任一减动效来源为真时不生效，见 lib/fx-gate.ts */
+  visualEffects: boolean;
   /** 解锁调试入口与原始 Agent 诊断；默认关闭，不影响玩家可见的语义活动账本 */
   developerMode: boolean;
   /**

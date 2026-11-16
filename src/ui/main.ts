@@ -58,6 +58,9 @@ import './themes/parchment.css';
 //    本文件只含 `[data-theme='ivory']` 选择器、且 integrated 不重定义任何
 //    `--theme-*`，因此这一行的位置对另外九个主题零影响。
 import './themes/ivory.css';
+// 界面特效底座：规则全部挂在 `:root[data-fx='on']` 下（闸门见 lib/fx-gate.ts），关着时零命中。
+// 排在全部主题之后；覆盖主题的那几条另靠更高特异度取胜，不单靠顺序。
+import './styles/fx-core.css';
 
 const app = createApp(App);
 const pinia = createPinia();

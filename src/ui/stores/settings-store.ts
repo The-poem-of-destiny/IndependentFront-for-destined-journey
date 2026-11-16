@@ -299,6 +299,10 @@ function getDefaults(): UiSettings {
     // 首页 Astral Drift 动态背景。默认开；WebGL2 不可用或任一减动效来源为真时自动退回静态首页。
     homeBackdrop: true,
 
+    // 界面特效（装饰层）。默认开；减动效（系统偏好或应用内开关）为真时整层不挂载。
+    // 闸门唯一写入点见 lib/fx-gate.ts。
+    visualEffects: true,
+
     // 开发者模式 —— 默认关闭。只控制诊断入口与原始技术细节；玩家可见的回合活动账本
     // 始终保留游戏语言，不随这个开关消失或变成控制台。
     developerMode: false,

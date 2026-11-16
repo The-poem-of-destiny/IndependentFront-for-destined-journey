@@ -1,9 +1,12 @@
 /** @vitest-environment jsdom */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import type { BeautifierRule } from '@engine/types/types';
 import BeautifiedNarrative from '../../../../src/ui/components/game/BeautifiedNarrative.vue';
+import { useFxEnabled } from '../../../../src/ui/lib/fx-gate';
+import { buildNameIndex } from '../../../../src/ui/lib/narrative-names';
 
 const state = vi.hoisted(() => ({
   enabled: true,
@@ -262,4 +265,161 @@ it('renders direct action panels safely without changing the default Agent rende
   const legacy = mountNarrative(text);
   expect(legacy.find('.action-panel').exists()).toBe(false);
   legacy.unmount();
+});
+
+describe('BeautifiedNarrative 特效层（墨迹浮现 / 名字下划线 / 行末印记）', () => {
+  beforeEach(() => {
+    state.enabled = true;
+    state.rules = [];
+    setActivePinia(createPinia());
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance', 'Date'] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    setFx(false);
+  });
+
+  function setFx(on: boolean) {
+    if (on) document.documentElement.setAttribute('data-fx', 'on');
+    else document.documentElement.removeAttribute('data-fx');
+    useFxEnabled(); // 让共享镜像对齐 DOM
+  }
+
+  /** 闸门关时的基准 DOM（即改造前的输出） */
+  function baselineHtml(text: string, extra: Record<string, unknown> = {}): string {
+    setFx(false);
+    const wrapper = mountNarrative(text, extra);
+    const html = wrapper.html();
+    wrapper.unmount();
+    return html;
+  }
+
+  const mentions = (names: string[], known = names) => ({ names, index: buildNameIndex(known) });
+
+  it('闸门关：reveal / mentions / 行末印记一概不改变输出', () => {
+    const text = '洛恩推门。\n\n艾琳娜回头。';
+    const baseline = baselineHtml(text);
+    const wrapper = mount(BeautifiedNarrative, {
+      props: { text, reveal: 'once', mentions: mentions(['洛恩', '艾琳娜']), seal: 'pressed' },
+    });
+    expect(wrapper.html()).toBe(baseline);
+    expect(wrapper.find('.turn-seal').exists()).toBe(false);
+  });
+
+  it('闸门开 + 历史（reveal off）：零额外 span，DOM 与基准相同', () => {
+    const text = '第一段。\n\n第二段，较长的一段。';
+    const baseline = baselineHtml(text);
+    setFx(true);
+    const wrapper = mountNarrative(text);
+    expect(wrapper.findAll('span')).toHaveLength(0);
+    expect(wrapper.html()).toBe(baseline);
+  });
+
+  it('流式增长：已显示的字不重播，只有新尾巴成为动画片；落定后 DOM 等于基准', async () => {
+    setFx(true);
+    const wrapper = mountNarrative('alpha beta ', { streaming: true });
+    const firstSpans = wrapper.findAll('.fx-ink-chunk').map((span) => span.element);
+    expect(firstSpans.map((el) => el.textContent)).toEqual(['alpha ', 'beta ']);
+    expect(firstSpans.every((el) => el.getAttribute('role') === 'presentation')).toBe(true);
+
+    vi.advanceTimersByTime(100);
+    await wrapper.setProps({ text: 'alpha beta gamma' });
+    const spans = wrapper.findAll('.fx-ink-chunk').map((span) => span.element);
+    // 旧 span 是同一批 DOM 节点（动画没有重启），只多出新尾巴
+    expect(spans.slice(0, 2)).toEqual(firstSpans);
+    expect(spans.map((el) => el.textContent)).toEqual(['alpha ', 'beta ', 'gamma']);
+    expect(wrapper.find('p').element.textContent).toBe('alpha beta gamma');
+
+    vi.advanceTimersByTime(1000);
+    await nextTick();
+    expect(wrapper.findAll('span')).toHaveLength(0);
+    const settled = wrapper.html();
+    expect(settled).toBe(baselineHtml('alpha beta gamma', { streaming: true }));
+  });
+
+  it('流式新起一段时，上一段已显示的字不再动画', async () => {
+    setFx(true);
+    const wrapper = mountNarrative('第一段', { streaming: true });
+    vi.advanceTimersByTime(1000);
+    await nextTick();
+    await wrapper.setProps({ text: '第一段\n\n第二段' });
+    const paragraphs = wrapper.findAll('p');
+    expect(paragraphs).toHaveLength(2);
+    expect(paragraphs[0].findAll('.fx-ink-chunk')).toHaveLength(0);
+    expect(paragraphs[1].findAll('.fx-ink-chunk').length).toBeGreaterThan(0);
+  });
+
+  it('once：段落与卡片整块浮现，不逐词；动画放完后 DOM 等于基准', async () => {
+    const text = '店门口。\n\n<dialogue>店主|说|欢迎</dialogue>';
+    state.rules = [
+      rule({
+        id: 'builtin-dialogue-card',
+        pattern: '<dialogue>([^|]*)\|([^|]*)\|([^<]*)</dialogue>',
+        replacement: '<div>$1</div>',
+      }),
+    ];
+    const baseline = baselineHtml(text);
+    setFx(true);
+    const wrapper = mountNarrative(text, { reveal: 'once' });
+    expect(wrapper.find('p.fx-ink-para').exists()).toBe(true);
+    expect(wrapper.findAll('.fx-ink-chunk')).toHaveLength(0);
+    expect(wrapper.find('.beautifier-native-match').classes()).toContain('fx-ink-block');
+
+    vi.advanceTimersByTime(2000);
+    await nextTick();
+    expect(wrapper.html()).toBe(baseline);
+  });
+
+  it('名字下划线：每个名字只划第一次出现，不在更长的已知名字内部划，文本不变', () => {
+    setFx(true);
+    const text = '艾琳娜看向洛恩。\n\n洛恩点头，艾琳也笑了。';
+    const wrapper = mountNarrative(text, {
+      mentions: mentions(['洛恩', '艾琳'], ['洛恩', '艾琳', '艾琳娜']),
+    });
+    const marks = wrapper.findAll('.fx-first-name');
+    expect(marks.map((m) => m.text())).toEqual(['洛恩', '艾琳']);
+    // 第一段里的「洛恩」被划，第二段的「洛恩」不再划；「艾琳娜」里的「艾琳」不划
+    expect(wrapper.findAll('p')[0].find('.fx-first-name').text()).toBe('洛恩');
+    expect(wrapper.findAll('p').map((p) => p.element.textContent)).toEqual([
+      '艾琳娜看向洛恩。',
+      '洛恩点头，艾琳也笑了。',
+    ]);
+  });
+
+  it('行末印记挂进最后一个段落末尾，段落文字不变；pressed 档带按下态', () => {
+    setFx(true);
+    const wrapper = mount(BeautifiedNarrative, {
+      props: { text: '第一段\n\n最后一段', seal: 'pressed' },
+    });
+    const last = wrapper.findAll('p')[1];
+    expect(last.find('.turn-seal').exists()).toBe(true);
+    expect(last.find('.turn-seal').classes()).toContain('is-pressed');
+    expect(last.element.textContent).toBe('最后一段');
+    expect(wrapper.findAll('p')[0].find('.turn-seal').exists()).toBe(false);
+  });
+
+  it('印记在首次渲染之后才出现（pending → accepted 原地翻转）：经 prop 响应式挂上', async () => {
+    setFx(true);
+    const wrapper = mount(BeautifiedNarrative, { props: { text: '第一段\n\n最后一段' } });
+    expect(wrapper.find('.turn-seal').exists()).toBe(false);
+    await wrapper.setProps({ seal: 'still' });
+    const last = wrapper.findAll('p')[1];
+    expect(last.find('.turn-seal').exists()).toBe(true);
+    expect(last.find('.turn-seal').classes()).not.toContain('is-pressed');
+    expect(last.element.textContent).toBe('最后一段');
+  });
+
+  it('最后一块不是段落（美化框）时，行末印记另起一行', () => {
+    setFx(true);
+    state.rules = [rule()];
+    const wrapper = mountNarrative('前文\n\n<card>收尾</card>', {});
+    expect(wrapper.find('.narrative-end').exists()).toBe(false);
+    const withSeal = mount(BeautifiedNarrative, {
+      props: { text: '前文\n\n<card>收尾</card>', seal: 'still' },
+      global: { stubs: { BeautifierFrame: { template: '<div class="frame-stub" />' } } },
+    });
+    expect(withSeal.find('.narrative-end .turn-seal').exists()).toBe(true);
+    expect(withSeal.find('p .turn-seal').exists()).toBe(false);
+  });
 });

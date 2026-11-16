@@ -9,6 +9,17 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-16 界面特效层（实验）｜分支 `effects-experiment`，**实验分支，未在浏览器或真机上验证**
+
+- 起因：动效 v1 之后继续试「让界面更有质感」，单独开实验分支，整层可一键关掉。
+- 闸门：新设置「界面特效」（`visualEffects`，外观主题分区；本实验分支默认开，合并前由主人裁定默认值）。只有它开着且不处于减动效时，`<html>` 才带 `data-fx="on"`；判定唯一在 `lib/fx-gate.ts`。所有特效 CSS 挂在 `:root[data-fx='on']` 下，特效组件 `v-if` 在闸门上，关掉等于今天的界面。
+- 底座：`styles/fx-core.css`（覆盖层基类与层级变量）、`lib/fx-ticker.ts`（帧合并 + 偶发调度）、`lib/fx-pointer.ts`（全应用一个指针监听 + 视差）。特效住在 `components/fx/*` 的叶子覆盖层里，不写进主题样式表、不借主题伪元素，从不逐帧往 html / body 写变量。
+- 十四项：指针光泽；偶发闪光（40–90s，crimson 不播）；底盘视差（obsidian、misty-lilac）；主题招牌（obsidian 刻度环与回合指针、bronze 回合擒纵轮、ocean 焦散、misty-lilac 极光、forest 凝露、ivory 金线；crimson / sakura / parchment / indigo 无）；流式正文墨迹洇开（`NarrativeParagraph.vue`）；名字初次登场下划线（只活在本次会话）；回合印记（`TurnSeal.vue`）；资源条回升；传说 / 神话 / 唯一卡片箔光（`v-foil`）；物品飞入背包图标；时段与天气氛围；战斗暗角与接缝染色；弹窗四角描框入场（`FxFrameTrace.vue`）。
+- 设计规范：`docs/design.md` 新增 §6.4（闸门、覆盖层约定、主题表、登记例外、层级表），并在 §6.0 第 3 条加注：每个招牌主题至多一个超慢环境循环。另有三处非 transform / opacity 动画登记为例外（墨迹 `filter`、下划线 `background-size`、战斗接缝 `border-color`），都不是布局属性。墨迹的 blur 只作用于流式正文短暂存活的片段 span（同时至多 48 个），整段与整块浮现只动 opacity。
+- 强度上调（浏览器走查后）：深色 obsidian 上首版黄昏染色与雨丝几乎看不出。时段染色 alpha 由 ≤ 0.05 调到黎明 / 黄昏约 0.08、夜晚约 0.09，雨丝 opacity 调到约 0.135（1.5 倍）；顶栏纹饰环与刻度描边约 28%、指针与齿约 45%；光泽 puck 峰值约 0.15、描边环约 30%。战斗暗角不变。雾此前只有染色带遮罩，上下边带压在正文栏上，现在与染色共用 25 / 50 / 25 遮罩，任何主题下阅读栏背后都没有氛围层。
+- 测试：新增各 lib、composable 与 fx 组件单测（含 `useFxGameState`、`FxThemeAmbient`、`FxGlint` 的行为测试），ChatFlow / BeautifiedNarrative / AppModal / ResourceBar 测试补闸门开关两种情形；`tests/ui/App.fx-gate.test.ts` 钉 App 的闸门接线（设置、应用内减动效、系统偏好监听、卸载）。它逮到一处顺序缺陷：同一拍里同时改 `visualEffects` 与 `reducedMotion` 时闸门 watch 会读到上一拍的减动效属性，App.vue 现在在闸门 watch 里先写一遍减动效再开关闸。收尾时把 knip 报出的 13 个仅内部使用的导出改为不导出，删掉一个无人引用的常量。
+- 验证边界：只跑了本地闸门与单测，**观感、帧率与各主题下的实际渲染都没有在浏览器或真机上看过**；合并前需要逐主题走查。
+
 ### 2026-11-16 UI 动效 v1｜分支 `feat/ui-aesthetic-motion`，**动画手感未真机验证**
 
 - 起因：主人觉得界面偏朴素，要求从过渡、动效、版式入手。走查结论：全仓 200+ 处过渡都是默认 `ease` 与随手写的时长，全局过渡只有 3 组（其中 `slide-*` 零引用）；首次进入每个页面会「淡出 → 纯黑 1–3 秒 → 新页无入场地蹦出」；提示条是整块饱和色；资源条在过渡 `width`（违反 design.md 禁令）。

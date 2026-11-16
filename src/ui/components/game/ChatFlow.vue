@@ -6,6 +6,7 @@ import InputBar from './InputBar.vue';
 import type { AgentActivityRun, ChatMessage, SystemEvent } from '@engine/types/types';
 import { escapeHtml } from '@engine/story/beautifier';
 import { splitSceneImageSegments } from '@engine/image/image-segments';
+import { getMapPack } from '@engine/map/map-runtime';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useGameStore, type TimelineRestoreResult } from '../../stores/game-store';
 import { confirmDialog } from '../../lib/confirm-dialog';
@@ -20,6 +21,14 @@ import { useUIStore } from '../../stores/ui-store';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useManualSceneImage } from '../../composables/useManualSceneImage';
 import { computeConversationalDepths } from '../../lib/chat-depth';
+import { useFxEnabled } from '../../lib/fx-gate';
+import {
+  buildNameIndex,
+  collectKnownNames,
+  findFirstMentions,
+  type NameIndex,
+} from '../../lib/narrative-names';
+import { useFreshMessages } from '../../composables/useFreshMessages';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import BeautifiedNarrative from './BeautifiedNarrative.vue';
@@ -169,6 +178,139 @@ function handleNarrativeResize() {
     if (el) el.scrollTop = el.scrollHeight;
   });
 }
+
+// ===== 特效层（动效 v1）：新消息浮现 / 名字初次登场 / 回合印记 =====
+/**
+ * 🔴 闸门关闭时这一节对模板零影响：`revealFor` 回 off、`mentionsFor` 回 undefined、
+ *    不渲染印记、不加 `bubble-row-settled` —— 输出与改造前相同。
+ *
+ * 流式 → 提交的交接：草稿（`streamingText` 那一行）与正式消息是**两个不同的组件实例**。
+ * 草稿在提交前就被清空、那一行随之卸载；正式消息随后 push 进数组。`useFreshMessages`
+ * 记住它这一代生成流式过，于是正式消息不再浮现（`reveal = off`），也不重播
+ * `.bubble-row` 的 msg-enter —— 读者刚在草稿里看完这些字，提交只是静默换成正式版。
+ */
+const fxEnabled = useFxEnabled();
+const freshMessages = useFreshMessages({
+  messages: () => props.messages,
+  isGenerating: () => !!props.isGenerating,
+  streamingText: () => props.streamingText,
+});
+
+/** 新消息怎么浮现：整条一次到达 → once；流式过 / 历史 → off */
+function revealFor(msg: ChatMessage): 'off' | 'once' {
+  if (!fxEnabled.value || !freshMessages.isFresh(msg.id)) return 'off';
+  return freshMessages.wasStreamed(msg.id) ? 'off' : 'once';
+}
+
+/** 流式提交的那一条：跳过 msg-enter（草稿里已经看过一遍） */
+function skipsEnter(msg: ChatMessage): boolean {
+  return fxEnabled.value && freshMessages.wasStreamed(msg.id);
+}
+
+/**
+ * 「名字初次登场」只算一次、只给新消息，按 id 缓存在本组件实例里（会话内，不落库）。
+ * 已知名单与早先正文都在**第一次**判定时现取 —— 新消息很少，历史一条都不碰。
+ */
+const mentionCache = new Map<string, { names: readonly string[]; index: NameIndex } | null>();
+
+function mentionsFor(msg: ChatMessage): { names: readonly string[]; index: NameIndex } | undefined {
+  if (!fxEnabled.value || !freshMessages.isFresh(msg.id)) return undefined;
+  let cached = mentionCache.get(msg.id);
+  if (cached === undefined) {
+    const list = props.messages ?? [];
+    const at = list.findIndex((m) => m.id === msg.id);
+    const names = collectKnownNames({
+      characters: game.characters ?? [],
+      mapTileNames: getMapPack().tiles.map((tile) => tile.name),
+    });
+    const index = buildNameIndex(names);
+    const earlier = list.slice(0, at < 0 ? list.length : at).map((m) => m.content);
+    const found = findFirstMentions(msg.content, index, earlier);
+    cached = found.length > 0 ? { names: found, index } : null;
+    mentionCache.set(msg.id, cached);
+  }
+  return cached ?? undefined;
+}
+
+/**
+ * 战斗摘要行（game-pipeline 的战斗终局回注）。它显式传空标记落库，既无 `storyTurnStatus`
+ * 也无 `diagnostic`，结构上与旧存档里无状态的正文没有区别 —— 只能认它固定的前缀。
+ * 🔴 窄判据：只认行首这一个字面量，别扩成「含【…】」之类的模糊匹配（正文里完全可能出现）。
+ */
+const COMBAT_SUMMARY_PREFIX = '【战斗摘要】';
+
+/**
+ * 回合印记：完成了的、未作废的故事正文才盖。
+ * 不盖：pending / 已废弃的尝试；`diagnostic` 行（`[系统] …部分状态未能写入` 一类通知与
+ * craft_gen 叙述，都经 emitMessage 的默认标记带 `diagnostic: true`）；战斗摘要行。
+ */
+function showsSeal(msg: ChatMessage): boolean {
+  return (
+    fxEnabled.value &&
+    msg.role === 'assistant' &&
+    !msg.diagnostic &&
+    msg.storyTurnStatus !== 'pending' &&
+    !isDiscardedAttempt(msg) &&
+    !msg.content.startsWith(COMBAT_SUMMARY_PREFIX) &&
+    msg.content.trim().length > 0
+  );
+}
+
+/**
+ * 刚刚完成的那一回合：`isGenerating` 由真转假时盖一次印。
+ *
+ * 🔴 只盖**这一代生成里新到**、且已被正式接纳（`accepted`）的那条故事正文。生成开始时记下
+ *    当时最新一条 assistant 的 id，结束时只在它之后找 —— 回合失败 / 被中止时之后没有新的
+ *    accepted 正文，于是什么都不盖（否则会把上一回合的印再盖一遍）。
+ */
+const pressedSealId = ref<string | null>(null);
+let pressTimer: ReturnType<typeof setTimeout> | null = null;
+let generationBaselineId: string | null = null;
+
+/**
+ * 交给 BeautifiedNarrative 的印记档。🔴 走 prop 不走条件插槽：条件插槽让每条历史正文在
+ * ChatFlow 每次渲染时（流式时每帧）都被强制重渲染，闸门关着也一样。
+ */
+function sealFor(msg: ChatMessage): 'off' | 'still' | 'pressed' {
+  if (!showsSeal(msg)) return 'off';
+  return pressedSealId.value === msg.id ? 'pressed' : 'still';
+}
+
+function findPressTarget(): ChatMessage | undefined {
+  const list = props.messages ?? [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const msg = list[i];
+    if (msg.id === generationBaselineId) return undefined;
+    if (
+      msg.role === 'assistant' &&
+      msg.storyTurnStatus === 'accepted' &&
+      freshMessages.isFresh(msg.id) &&
+      showsSeal(msg)
+    ) {
+      return msg;
+    }
+  }
+  return undefined;
+}
+
+watch(
+  () => !!props.isGenerating,
+  (generating, wasGenerating) => {
+    if (generating) {
+      if (!wasGenerating) generationBaselineId = latestAssistantMsg.value?.id ?? null;
+      return;
+    }
+    if (!wasGenerating || !fxEnabled.value) return;
+    const msg = findPressTarget();
+    if (!msg) return;
+    pressedSealId.value = msg.id;
+    if (pressTimer !== null) clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => {
+      pressedSealId.value = null;
+      pressTimer = null;
+    }, 900);
+  },
+);
 
 // ===== 右键菜单（回退 / 复制 / 为这一段配图）=====
 /**
@@ -614,6 +756,7 @@ onUnmounted(() => {
   window.removeEventListener('click', handleGlobalClick);
   window.removeEventListener('keydown', handleEsc);
   window.removeEventListener('scroll', handleScrollClose, true);
+  if (pressTimer !== null) clearTimeout(pressTimer);
 });
 
 /**
@@ -738,6 +881,7 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
           v-else-if="msg.role === 'assistant' && !discarded.memberIds.has(msg.id)"
           :data-message-id="msg.id"
           class="bubble-row bubble-row-narrative"
+          :class="{ 'bubble-row-settled': skipsEnter(msg) }"
           @contextmenu="onContextMenu($event, msg)"
         >
           <div class="bubble bubble-narrative-full">
@@ -753,6 +897,9 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
               :image-max-rating="s.imageMaxRating"
               :image-blur-by-default="s.imageBlurByDefault"
               :image-dialect-id="s.imageDialectId"
+              :reveal="revealFor(msg)"
+              :mentions="mentionsFor(msg)"
+              :seal="sealFor(msg)"
               @resize="handleNarrativeResize"
             />
             <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
@@ -1044,6 +1191,10 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
   .bubble-row {
     animation: none;
   }
+}
+/* 流式提交的正式消息：读者刚在草稿里看完，静默换上，不再从下方升起一次（仅特效层开启时挂此类） */
+.bubble-row.bubble-row-settled {
+  animation: none;
 }
 .bubble-row-player,
 .bubble-row-narrative {

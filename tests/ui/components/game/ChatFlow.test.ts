@@ -12,10 +12,13 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { reactive } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import type { AgentActivityRun, ChatMessage } from '@engine/types/types';
 import ChatFlow from '../../../../src/ui/components/game/ChatFlow.vue';
+import BeautifiedNarrative from '../../../../src/ui/components/game/BeautifiedNarrative.vue';
 import { useSettingsStore } from '../../../../src/ui/stores/settings-store';
+import { useFxEnabled } from '../../../../src/ui/lib/fx-gate';
 import type { TimelineRestoreResult } from '../../../../src/ui/stores/game-store';
 
 enableAutoUnmount(afterEach);
@@ -24,6 +27,8 @@ const game = vi.hoisted(() => ({
   isInCombat: false,
   isAgentCombat: false,
   isRewriting: false,
+  generationMode: 'agent',
+  characters: [] as Array<{ type: string; name: string; location: string; inventory: [] }>,
   pendingOptions: [] as string[],
   pendingInput: null as string | null,
   agentActivityRuns: [] as AgentActivityRun[],
@@ -50,6 +55,7 @@ vi.mock('../../../../src/ui/stores/ui-store', () => ({ useUIStore: () => ui }));
 vi.mock('../../../../src/ui/stores/scene-image-store', () => ({
   useSceneImageStore: () => ({
     activeSaveId: 'save_1',
+    byMessage: () => [],
     generate: vi.fn(async () => ({ ok: true as const, id: 'simg_new' })),
   }),
 }));
@@ -790,5 +796,279 @@ describe('ChatFlow 右键「润色正文」', () => {
       'warning',
     );
     expect(ui.toast).not.toHaveBeenCalledWith('正文已润色', 'success');
+  });
+});
+
+describe('ChatFlow 特效层（新消息浮现 / 流式交接 / 名字下划线 / 回合印记）', () => {
+  function setFx(on: boolean) {
+    if (on) document.documentElement.setAttribute('data-fx', 'on');
+    else document.documentElement.removeAttribute('data-fx');
+    useFxEnabled();
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    game.agentActivityRuns = [];
+    game.characters = [];
+    useSettingsStore().settings.imageGenMode = 'off';
+  });
+
+  afterEach(() => setFx(false));
+
+  function narrativeRow(wrapper: ReturnType<typeof mount>, id: string) {
+    return wrapper.find(`.bubble-row-narrative[data-message-id="${id}"]`);
+  }
+
+  it('闸门关：没有印记、没有浮现类、没有 settled 类', async () => {
+    setFx(false);
+    const messages = reactive<ChatMessage[]>([
+      userMsg('u1', '走'),
+      assistantMsg('a1', '洛恩走了。'),
+    ]);
+    const wrapper = mount(ChatFlow, { global: { stubs: { teleport: true } }, props: { messages } });
+    messages.push(assistantMsg('a2', '新的一段。'));
+    await flushPromises();
+    expect(wrapper.find('.turn-seal').exists()).toBe(false);
+    expect(wrapper.find('.fx-ink-para').exists()).toBe(false);
+    expect(wrapper.find('.bubble-row-settled').exists()).toBe(false);
+  });
+
+  it('闸门开 + 载入的历史：零额外 span，只有静止的行末印记（pending / 已废弃不盖）', () => {
+    setFx(true);
+    const failed: ChatMessage = { ...assistantMsg('a0', '作废的尝试'), storyTurnStatus: 'failed' };
+    const pending: ChatMessage = { ...assistantMsg('a2', '生成中'), storyTurnStatus: 'pending' };
+    const wrapper = mount(ChatFlow, {
+      global: { stubs: { teleport: true } },
+      props: {
+        messages: [userMsg('u1', '走'), failed, assistantMsg('a1', '洛恩走了。'), pending],
+      },
+    });
+    expect(wrapper.findAll('.fx-ink-chunk')).toHaveLength(0);
+    expect(wrapper.findAll('.fx-first-name')).toHaveLength(0);
+    expect(wrapper.find('.fx-ink-para').exists()).toBe(false);
+    expect(narrativeRow(wrapper, 'a1').find('p .turn-seal').exists()).toBe(true);
+    expect(narrativeRow(wrapper, 'a1').find('.turn-seal').classes()).not.toContain('is-pressed');
+    expect(narrativeRow(wrapper, 'a2').find('.turn-seal').exists()).toBe(false);
+    expect(wrapper.findAll('.turn-seal')).toHaveLength(1);
+  });
+
+  it('流式 → 提交：草稿逐词洇开；正式消息静默换上（不浮现、不重播入场），生成结束时盖印', async () => {
+    setFx(true);
+    const messages = reactive<ChatMessage[]>([userMsg('u1', '走')]);
+    const wrapper = mount(ChatFlow, {
+      global: { stubs: { teleport: true } },
+      props: { messages, isGenerating: true, streamingText: '' },
+    });
+    await wrapper.setProps({ streamingText: '洛恩 推开 门' });
+    expect(wrapper.find('.streaming-content .fx-ink-chunk').exists()).toBe(true);
+
+    // 草稿先被清空，正式消息随后以 pending push 进同一个数组，接纳后原地翻成 accepted
+    await wrapper.setProps({ streamingText: '' });
+    messages.push({ ...assistantMsg('a1', '洛恩推开门。'), storyTurnStatus: 'pending' });
+    await flushPromises();
+    const row = narrativeRow(wrapper, 'a1');
+    expect(row.classes()).toContain('bubble-row-settled');
+    expect(row.find('.fx-ink-para').exists()).toBe(false);
+    expect(row.findAll('.fx-ink-chunk')).toHaveLength(0);
+    expect(row.find('.turn-seal').exists()).toBe(false);
+
+    messages[1].storyTurnStatus = 'accepted';
+    await flushPromises();
+    expect(narrativeRow(wrapper, 'a1').find('p .turn-seal').exists()).toBe(true);
+    expect(narrativeRow(wrapper, 'a1').find('.turn-seal').classes()).not.toContain('is-pressed');
+
+    await wrapper.setProps({ isGenerating: false });
+    expect(narrativeRow(wrapper, 'a1').find('.turn-seal').classes()).toContain('is-pressed');
+  });
+
+  it('真实流程（非流式）：pending → accepted → 生成结束，印记出现并且只盖一次', async () => {
+    vi.useFakeTimers();
+    try {
+      setFx(true);
+      const messages = reactive<ChatMessage[]>([userMsg('u1', '走')]);
+      const wrapper = mount(ChatFlow, {
+        global: { stubs: { teleport: true } },
+        props: { messages, isGenerating: true, streamingText: '' },
+      });
+      messages.push({ ...assistantMsg('a1', '洛恩推开门。'), storyTurnStatus: 'pending' });
+      await flushPromises();
+      expect(narrativeRow(wrapper, 'a1').find('.turn-seal').exists()).toBe(false);
+      messages[1].storyTurnStatus = 'accepted';
+      await flushPromises();
+
+      await wrapper.setProps({ isGenerating: false });
+      const seal = () => narrativeRow(wrapper, 'a1').find('.turn-seal');
+      expect(seal().exists()).toBe(true);
+      expect(seal().classes()).toContain('is-pressed');
+      vi.advanceTimersByTime(2000);
+      await flushPromises();
+      expect(seal().classes()).not.toContain('is-pressed');
+
+      // 同一回合不会因为别的 prop 变化再盖一次
+      await wrapper.setProps({ streamingText: '' });
+      expect(seal().classes()).not.toContain('is-pressed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('失败 / 中止的生成不把上一回合的印再盖一遍', async () => {
+    vi.useFakeTimers();
+    try {
+      setFx(true);
+      const messages = reactive<ChatMessage[]>([userMsg('u1', '走')]);
+      const wrapper = mount(ChatFlow, {
+        global: { stubs: { teleport: true } },
+        props: { messages, isGenerating: true, streamingText: '' },
+      });
+      messages.push({ ...assistantMsg('a1', '洛恩推开门。'), storyTurnStatus: 'pending' });
+      await flushPromises();
+      messages[1].storyTurnStatus = 'accepted';
+      await wrapper.setProps({ isGenerating: false });
+      const seal = () => narrativeRow(wrapper, 'a1').find('.turn-seal');
+      expect(seal().classes()).toContain('is-pressed');
+      vi.advanceTimersByTime(2000);
+      await flushPromises();
+      expect(seal().classes()).not.toContain('is-pressed');
+
+      // 第二回合：失败（正文以 pending 推入后被标 failed）
+      messages.push(userMsg('u2', '再走'));
+      await wrapper.setProps({ isGenerating: true });
+      messages.push({ ...assistantMsg('a2', '半截正文'), storyTurnStatus: 'pending' });
+      await flushPromises();
+      messages[3].storyTurnStatus = 'failed';
+      await wrapper.setProps({ isGenerating: false });
+      expect(seal().classes()).not.toContain('is-pressed');
+      expect(wrapper.findAll('.turn-seal.is-pressed')).toHaveLength(0);
+
+      // 第三回合：直接被中止，没有任何正文
+      messages.push(userMsg('u3', '又走'));
+      await wrapper.setProps({ isGenerating: true });
+      await wrapper.setProps({ isGenerating: false });
+      expect(wrapper.findAll('.turn-seal.is-pressed')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('通知行不盖印：状态写入失败通知（diagnostic）与战斗摘要', async () => {
+    setFx(true);
+    const messages = reactive<ChatMessage[]>([userMsg('u1', '走')]);
+    const wrapper = mount(ChatFlow, {
+      global: { stubs: { teleport: true } },
+      props: { messages, isGenerating: true, streamingText: '' },
+    });
+    messages.push(
+      { ...assistantMsg('a1', '洛恩推开门。'), storyTurnStatus: 'accepted' },
+      { ...assistantMsg('n1', '[系统] story 部分状态未能写入: x'), diagnostic: true },
+      assistantMsg('n2', '【战斗摘要】洛恩击退了狼群。'),
+    );
+    await flushPromises();
+    await wrapper.setProps({ isGenerating: false });
+    expect(narrativeRow(wrapper, 'n1').find('.turn-seal').exists()).toBe(false);
+    expect(narrativeRow(wrapper, 'n2').find('.turn-seal').exists()).toBe(false);
+    // 印盖在本回合的故事正文上，而不是盖在最后推进来的通知行上
+    expect(narrativeRow(wrapper, 'a1').find('.turn-seal').classes()).toContain('is-pressed');
+    expect(wrapper.findAll('.turn-seal')).toHaveLength(1);
+  });
+
+  /**
+   * 回归：印记曾是条件插槽 `<template v-if #end>`，带动态插槽标记的子组件在父组件每次渲染时
+   * 都被强制重渲染 —— 流式时 ChatFlow 每帧渲染一次，于是每条历史正文每帧重渲染一遍（闸门关也一样）。
+   */
+  it.each([false, true])('流式逐帧时历史正文零重渲染（闸门 %s，印记无变化）', async (fx) => {
+    setFx(fx);
+    const messages: ChatMessage[] = [];
+    for (let i = 1; i <= 10; i++) {
+      messages.push(userMsg(`u${i}`, '走'));
+      messages.push({
+        ...assistantMsg(`a${i}`, '第一段。\n\n第二段。'),
+        storyTurnStatus: 'accepted',
+      });
+    }
+    const wrapper = mount(ChatFlow, {
+      global: { stubs: { teleport: true } },
+      props: { messages, isGenerating: true, streamingText: '' },
+    });
+    await flushPromises();
+    const history = wrapper.findAllComponents(BeautifiedNarrative);
+    expect(history).toHaveLength(10);
+    if (fx) expect(wrapper.findAll('.turn-seal')).toHaveLength(10);
+    let renders = 0;
+    for (const narrative of history) {
+      const instance = (narrative.vm as unknown as { $: { render: (...a: unknown[]) => unknown } })
+        .$;
+      const original = instance.render;
+      instance.render = function (this: unknown, ...args: unknown[]) {
+        renders++;
+        return original.apply(this, args);
+      };
+    }
+    for (let frame = 1; frame <= 5; frame++) {
+      await wrapper.setProps({ streamingText: '草稿 '.repeat(frame) });
+      await flushPromises();
+    }
+    expect(wrapper.find('.streaming-content').exists()).toBe(true);
+    expect(renders).toBe(0);
+  });
+
+  it('流式提交之后推进来的非故事行照常播放入场（不挂 settled、整段浮现）', async () => {
+    setFx(true);
+    const messages = reactive<ChatMessage[]>([userMsg('u1', '走')]);
+    const wrapper = mount(ChatFlow, {
+      global: { stubs: { teleport: true } },
+      props: { messages, isGenerating: true, streamingText: '' },
+    });
+    await wrapper.setProps({ streamingText: '洛恩 推开 门' });
+    await wrapper.setProps({ streamingText: '' });
+    messages.push({ ...assistantMsg('a1', '洛恩推开门。'), storyTurnStatus: 'pending' });
+    await flushPromises();
+    messages.push({ ...assistantMsg('n1', '[系统] story 部分状态未能写入: x'), diagnostic: true });
+    await flushPromises();
+    expect(narrativeRow(wrapper, 'a1').classes()).toContain('bubble-row-settled');
+    const notice = narrativeRow(wrapper, 'n1');
+    expect(notice.classes()).not.toContain('bubble-row-settled');
+    expect(notice.find('p.fx-ink-para').exists()).toBe(true);
+
+    // 生成之外推进来的（战斗摘要）同样照常入场
+    await wrapper.setProps({ isGenerating: false });
+    messages.push(assistantMsg('n2', '【战斗摘要】洛恩击退了狼群。'));
+    await flushPromises();
+    const summary = narrativeRow(wrapper, 'n2');
+    expect(summary.classes()).not.toContain('bubble-row-settled');
+    expect(summary.find('p.fx-ink-para').exists()).toBe(true);
+  });
+
+  it('整条一次到达的新消息：段落整块浮现一次，保留入场动画', async () => {
+    setFx(true);
+    const messages = reactive<ChatMessage[]>([userMsg('u1', '走')]);
+    const wrapper = mount(ChatFlow, { global: { stubs: { teleport: true } }, props: { messages } });
+    messages.push(assistantMsg('a1', '第一段。\n\n第二段。'));
+    await flushPromises();
+    const row = narrativeRow(wrapper, 'a1');
+    expect(row.classes()).not.toContain('bubble-row-settled');
+    expect(row.findAll('p.fx-ink-para')).toHaveLength(2);
+    expect(row.findAll('.fx-ink-chunk')).toHaveLength(0);
+  });
+
+  it('名字初次登场只标新消息，且跳过早先出现过的名字', async () => {
+    setFx(true);
+    game.characters = [
+      { type: 'npc', name: '艾琳娜', location: '', inventory: [] },
+      { type: 'npc', name: '洛恩', location: '', inventory: [] },
+    ];
+    const messages = reactive<ChatMessage[]>([
+      userMsg('u1', '走'),
+      assistantMsg('a1', '洛恩醒来。'),
+    ]);
+    const wrapper = mount(ChatFlow, { global: { stubs: { teleport: true } }, props: { messages } });
+    expect(wrapper.findAll('.fx-first-name')).toHaveLength(0);
+
+    messages.push(userMsg('u2', '找人'), assistantMsg('a2', '洛恩遇见了艾琳娜。'));
+    await flushPromises();
+    const marks = narrativeRow(wrapper, 'a2').findAll('.fx-first-name');
+    expect(marks.map((m) => m.text())).toEqual(['艾琳娜']);
+    expect(narrativeRow(wrapper, 'a1').findAll('.fx-first-name')).toHaveLength(0);
   });
 });

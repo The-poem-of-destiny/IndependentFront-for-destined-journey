@@ -10,6 +10,7 @@
  */
 import { computed } from 'vue';
 import { qualityVar } from '../../lib/quality-colors';
+import { vFoil } from '../../lib/fx-foil';
 import {
   qualityOf,
   typeLabel,
@@ -29,7 +30,9 @@ const effects = computed(() => entryEffects(props.entry));
 </script>
 
 <template>
+  <!-- 顶级品质的箔光只在特效闸门打开时出现；详情面不倾斜（tilt 不传） -->
   <div
+    v-foil="{ quality }"
     class="item-detail-body"
     :style="{
       '--item-detail-border': qualityVar(quality),

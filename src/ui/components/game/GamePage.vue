@@ -41,6 +41,8 @@ import DebugPanel from './DebugPanel.vue';
 import MiniPlayer from './MiniPlayer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
 import GameMenu from './GameMenu.vue';
+import FxGameLayer from '../fx/FxGameLayer.vue';
+import { useFxEnabled } from '../../lib/fx-gate';
 import { hasOpenDialog } from '../../lib/modal-focus';
 import { getSave } from '@engine/persistence/database';
 import { decideStoryContextAdmission } from '@engine/story/story-context-mode';
@@ -48,6 +50,7 @@ import { storyContextRejectionMessage } from '../../lib/story-context-admission'
 
 const game = useGameStore();
 const ui = useUIStore();
+const fxEnabled = useFxEnabled();
 const settings = useSettingsStore();
 const apiSources = useApiSourceStore();
 const audio = useAudioStore();
@@ -433,6 +436,8 @@ function onModalOpenChange(v: boolean) {
 
 <template>
   <div class="game-page-layout">
+    <!-- 界面特效（闸门关时整段不渲染，布局与今天一致）；fixed 覆盖层，不是 flex 项 -->
+    <FxGameLayer v-if="fxEnabled" />
     <TopBar @open-menu="menuOpen = true" />
     <div class="game-body" :class="{ 'rail-collapsed': game.sidebarCollapsed }">
       <SideToolbar @tool-click="handleToolClick" />
