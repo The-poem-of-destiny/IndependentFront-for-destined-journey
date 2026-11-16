@@ -23,6 +23,18 @@
  *    核心对照组**全部**不命中 → 浏览器拦了不透明来源访问本机（Chromium 本地网络访问保护），
  *    S0 通过并记 `browserBlocksLocal`；只有一部分不命中 → 结果自相矛盾，S0 失败。
  *    任何一项失败，整轮失败，插件子系统禁用。
+ * 6. S7（文件选择器）：主探针帧挂载时带 `probePickers`，帧内引导脚本在插件代码运行前、
+ *    无用户激活地调用三种选择器，结局随 `ready` 报回；管线孪生帧里同样调用一次，
+ *    拿到本引擎「缺用户激活」那句拒绝作对照。插件帧的 SecurityError 原文与对照不同 ⇒
+ *    引擎在检查激活之前就按隔离条件拒绝了（Chromium 实测：先查沙盒 / 不透明来源再查激活），
+ *    有没有点击都一样 ⇒ 通过；判不出时回退到 `PICKER_VERIFIED_ENGINES`（见 `judgePicker`）。
+ *    🔴 只比对原文是否相同，不按报错文字内容匹配：与界面语言、引擎措辞无关。
+ *    🔴 安全前提：两种帧都放在屏幕外（容器 `pointer-events:none`）、从不接收输入；并且两边的探测脚本
+ *       在**每次**调用前都同步确认本帧 `navigator.userActivation.isActive === false`，读不到或为 true
+ *       就不调用（报 `skipped-active`，判不出）。
+ *       📌 2026-11-15 实测更正：原先写的「用户激活只沿祖先方向传播、不会从宿主页传给子帧」不成立 ——
+ *       Chromium 里宿主页点一下，`allow-same-origin` 的屏幕外孪生帧 isActive 也变 true，
+ *       `showOpenFilePicker()` 能越过激活检查（会弹真对话框）。所以安全只靠调用前的这道检查。
  *
  * 探针帧全部由生产生成器建：插件帧走 `mountPluginFrame`（内部是 `buildPluginFrameDocument`
  * → `buildPluginFrameCsp`），探针代码作为插件包的入口 HTML 经端口送进帧内，与真插件同路；
@@ -39,7 +51,15 @@ import {
   type BeautifierFrameScriptPolicy,
 } from './beautifier-frame';
 import type { CageInnerMode } from './frame-cage';
-import { PLUGIN_FRAME_SANDBOX, type mountPluginFrame, type PluginFrameEnv } from './plugin-frame';
+import {
+  normalizePickerProbe,
+  PICKER_NAMES,
+  PLUGIN_FRAME_SANDBOX,
+  type mountPluginFrame,
+  type PickerName,
+  type PickerProbeResult,
+  type PluginFrameEnv,
+} from './plugin-frame';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 对外类型
@@ -77,8 +97,9 @@ interface PickerVerifiedEngine {
 }
 
 /**
- * 文件选择器「人工矩阵已验」表（§4.8 S7、裁定 Q5）。出厂为空：插件帧里出现
- * `showSaveFilePicker` 的引擎，在有人跑完人工矩阵并把结果写进这里之前一律禁用插件子系统。
+ * 文件选择器「人工矩阵已验」表（§4.8 S7、裁定 Q5）。出厂为空。
+ * 📌 2026-11-15 起它只是**回退**：S7 先跑自动判定（插件帧与对照帧的拒绝原文对比），
+ * 判不出时才查这张表；插件帧里有选择器、自动判定又判不出、引擎也不在表里 ⇒ 禁用插件子系统。
  */
 export const PICKER_VERIFIED_ENGINES: readonly PickerVerifiedEngine[] = [];
 
@@ -99,8 +120,16 @@ export interface PluginSelfCheckDeps {
      * 字体这些手段不发请求，对照组会恒不命中。
      */
     plugin(options: PluginProbeMountOptions): SelfCheckMountHandle;
-    /** 挂一个 srcdoc 帧（对照帧、美化帧、S5）：生产实现建 iframe，设 `sandbox` 与 `srcdoc` */
-    document(options: { html: string; sandbox: string }): SelfCheckMountHandle;
+    /**
+     * 挂一个 srcdoc 帧（对照帧、美化帧、S5）：生产实现建 iframe，设 `sandbox` 与 `srcdoc`。
+     * 传了 `onMessage` 时，把**这个帧自己**（`event.source` 是它的 contentWindow）发给宿主窗口的
+     * 消息交给它 —— 只有管线孪生帧用（报 S7 对照结局）。
+     */
+    document(options: {
+      html: string;
+      sandbox: string;
+      onMessage?: (data: unknown) => void;
+    }): SelfCheckMountHandle;
   };
   /** `/api/plugins/__selfcheck/register`：登记成功返回 true（每批 ≤128 个） */
   register(nonces: string[]): Promise<boolean>;
@@ -140,6 +169,10 @@ const NONCE_BATCH = 100;
  */
 const PIPELINE_TWIN_SANDBOX = 'allow-scripts allow-same-origin';
 const PIPELINE_KEYS = ['fetch', 'img', 'cssUrl'] as const;
+/** 孪生帧报 S7 对照结局时的消息标记 */
+const TWIN_PICKER_SOURCE = 'fated-poem-selfcheck-twin';
+/** 等孪生帧报对照结局的上限（从挂帧起算）；帧内每种选择器自带 1.5 秒限时 */
+const TWIN_PICKER_WAIT_MS = 3000;
 const PARTIAL_BLOCK_DETAIL = '浏览器只拦截了部分不透明来源通道，结果不可信';
 
 const BROWSER_BLOCKS_LOCAL_DETAIL =
@@ -235,6 +268,30 @@ function inlineScript(values: Record<string, string>, body: string): string {
 ${body}
 })();
 </script>`;
+}
+
+/**
+ * 孪生帧里的 S7 对照脚本：无用户激活地调用三种选择器，把结局报给父窗口。
+ * 宿主自写，与插件帧引导脚本里的探测同形（结局格式见 `PickerProbeResult`）。
+ */
+function twinPickerScript(token: string): string {
+  return inlineScript(
+    { source: TWIN_PICKER_SOURCE, token },
+    [
+      `  const one = (name) => new Promise((resolve) => {`,
+      `    const fn = window[name];`,
+      `    if (typeof fn !== 'function') { resolve({ name, outcome: 'absent' }); return; }`,
+      // 宿主页的点击会让同源的本帧也带上激活（Chromium 实测）：每次调用前确认没有激活，否则不调用
+      `    const ua = navigator.userActivation;`,
+      `    if (!ua || ua.isActive !== false) { resolve({ name, outcome: 'skipped-active' }); return; }`,
+      `    const rejected = (e) => ({ name, outcome: 'rejected', errorName: e && typeof e.name === 'string' ? e.name : '', message: e && typeof e.message === 'string' ? e.message : String(e) });`,
+      `    setTimeout(() => resolve({ name, outcome: 'pending' }), 1500);`,
+      `    try { Promise.resolve(fn.call(window)).then(() => resolve({ name, outcome: 'resolved' }), (e) => resolve(rejected(e))); }`,
+      `    catch (e) { resolve(rejected(e)); }`,
+      `  });`,
+      `  T(() => Promise.all(${jsLiteral(PICKER_NAMES)}.map(one)).then((pickers) => parent.postMessage({ source: U.source, token: U.token, pickers }, '*')));`,
+    ].join('\n'),
+  );
 }
 
 /** 资源类手段的静态标记（模型帧没有脚本面，只能靠它们） */
@@ -706,7 +763,7 @@ export async function runPluginSelfCheck(
     const attempts: string[] = [];
     for (const mode of ['srcdoc', 'blob'] as const) {
       if (!main) break;
-      const probe = mountPluginProbe(deps, main.unit, main.probeUrls, mode, track);
+      const probe = mountPluginProbe(deps, main.unit, main.probeUrls, mode, track, true);
       const outcome = await awaitPluginProbe(deps, probe);
       if (outcome.kind === 'ready') {
         innerMode = mode;
@@ -720,11 +777,24 @@ export async function runPluginSelfCheck(
     // ── 其余探针帧 + 全部对照帧 + 管线孪生帧 ──
     const mountedAt = deps.now();
     const pipelineUrls = Object.fromEntries(pipeline.map((p) => [p.key, p.url]));
+    // 孪生帧顺带给 S7 的对照：本引擎「缺用户激活」时的拒绝原文
+    const twinToken = randomToken();
+    let twinPickers: PickerProbeResult[] | null = null;
     const pipelineHandle = deps.mount.document({
       html: wrapDocument(
-        [resources(pipelineUrls, ['img', 'cssUrl']), scripts(pipelineUrls, ['fetch'])].join('\n'),
+        [
+          resources(pipelineUrls, ['img', 'cssUrl']),
+          scripts(pipelineUrls, ['fetch']),
+          twinPickerScript(twinToken),
+        ].join('\n'),
       ),
       sandbox: PIPELINE_TWIN_SANDBOX,
+      onMessage: (data) => {
+        if (twinPickers !== null || !data || typeof data !== 'object') return;
+        const record = data as Record<string, unknown>;
+        if (record.source !== TWIN_PICKER_SOURCE || record.token !== twinToken) return;
+        twinPickers = normalizePickerProbe(record.pickers);
+      },
     });
     let pipelineDisposed = false;
     const disposePipeline = () => {
@@ -766,7 +836,8 @@ export async function runPluginSelfCheck(
       const elapsed = deps.now() - mountedAt;
       if (pipelineLatency === null && pipelineNonces.every((n) => hits[n] === true)) {
         pipelineLatency = elapsed;
-        disposePipeline();
+        // S7 对照还没报回时先留着它，轮询结束后再等一小会儿
+        if (twinPickers !== null) disposePipeline();
       }
       if (controlNonces.every((n) => hits[n] === true)) {
         controlLatency = elapsed;
@@ -781,6 +852,9 @@ export async function runPluginSelfCheck(
         break;
       }
       if (elapsed >= CONTROL_TIMEOUT_MS) break;
+      await deps.sleep(POLL_INTERVAL_MS);
+    }
+    while (twinPickers === null && deps.now() - mountedAt < TWIN_PICKER_WAIT_MS) {
       await deps.sleep(POLL_INTERVAL_MS);
     }
     disposePipeline();
@@ -817,6 +891,7 @@ export async function runPluginSelfCheck(
       secondHost,
       engine: engineOf(deps.userAgent),
       verified: deps.pickerVerifiedEngines ?? PICKER_VERIFIED_ENGINES,
+      twinPickers,
     });
     const s0 = items.find((i) => i.id === 'S0');
     return {
@@ -900,6 +975,7 @@ function mountPluginProbe(
   urls: Record<string, string>,
   innerMode: CageInnerMode,
   track: (handle: SelfCheckMountHandle) => SelfCheckMountHandle,
+  probePickers = false,
 ): PluginProbeMount {
   let outcome: PluginProbeOutcome | null = null;
   let outcomeAt: number | null = null;
@@ -928,6 +1004,7 @@ function mountPluginProbe(
       ],
       theme: {},
       innerMode,
+      ...(probePickers ? { probePickers: true } : {}),
       onReady: (env) => settle({ kind: 'ready', env }),
       onLoadError: (error) => settle({ kind: 'load-error', error }),
       onViolation: () => settle({ kind: 'violation' }),
@@ -991,6 +1068,8 @@ interface JudgeInput {
   secondHost: string | null;
   engine: PickerVerifiedEngine | null;
   verified: readonly PickerVerifiedEngine[];
+  /** 管线孪生帧报回的对照结局；没报回为 null */
+  twinPickers: readonly PickerProbeResult[] | null;
 }
 
 const PLUGIN_FRAME_ITEMS = new Set<PluginSelfCheckItemId>(['S1', 'S2', 'S3', 'S4']);
@@ -1110,7 +1189,7 @@ function judge(input: JudgeInput): PluginSelfCheckItem[] {
     );
   }
 
-  items.push(judgePicker(env, input.engine, input.verified));
+  items.push(judgePicker(env, input.engine, input.verified, input.twinPickers));
   return items;
 }
 
@@ -1133,29 +1212,124 @@ function judgeRedirect(
   return { id: 'S5', status: 'pass', detail: `金丝雀零命中（${own.length} 种手段）` };
 }
 
+type PickerVerdict =
+  | { name: PickerName; kind: 'absent' | 'isolated' }
+  | { name: PickerName; kind: 'escaped'; reason: string }
+  | { name: PickerName; kind: 'inconclusive'; reason: string };
+
+const ENV_PICKER_FLAG: Record<
+  PickerName,
+  'hasSaveFilePicker' | 'hasOpenFilePicker' | 'hasDirectoryPicker'
+> = {
+  showSaveFilePicker: 'hasSaveFilePicker',
+  showOpenFilePicker: 'hasOpenFilePicker',
+  showDirectoryPicker: 'hasDirectoryPicker',
+};
+
+/**
+ * 单种选择器的判定（§4.8 S7，2026-11-15 实测后改）：
+ * - 不存在 ⇒ absent；无激活调用居然兑现、或限时内没结果（对话框可能已经开着）⇒ escaped（整项直接失败）
+ * - 调用前读到本帧带激活而没调用（skipped-active）⇒ 判不出
+ * - 插件帧被拒且是 SecurityError，原文与孪生帧（同引擎、同源、无激活）的拒绝原文不同 ⇒
+ *   引擎在查激活之前就按隔离条件拒了，有没有点击都一样 ⇒ isolated
+ * - 其余（错误名不是 SecurityError、原文与对照相同、对照缺席 / 没调用 / 拒绝不是 SecurityError）⇒ 判不出
+ * 只比较两段原文是否相同，从不看原文写了什么。
+ */
+function judgeOnePicker(
+  name: PickerName,
+  env: PluginFrameEnv,
+  twin: readonly PickerProbeResult[] | null,
+): PickerVerdict {
+  const own = env.pickerProbe?.find((p) => p.name === name);
+  if (!own) {
+    return env[ENV_PICKER_FLAG[name]]
+      ? { name, kind: 'inconclusive', reason: '插件帧没有报回调用结果' }
+      : { name, kind: 'absent' };
+  }
+  if (own.outcome === 'absent') return { name, kind: 'absent' };
+  if (own.outcome === 'resolved') {
+    return { name, kind: 'escaped', reason: '在没有点击时返回了结果' };
+  }
+  if (own.outcome === 'pending') {
+    return { name, kind: 'escaped', reason: '调用在限时内既没返回也没被拒（对话框可能已打开）' };
+  }
+  if (own.outcome === 'skipped-active') {
+    return { name, kind: 'inconclusive', reason: '插件帧带着用户激活，为免弹窗没有调用' };
+  }
+  if (own.errorName !== 'SecurityError') {
+    return {
+      name,
+      kind: 'inconclusive',
+      reason: `报错不是 SecurityError（${own.errorName || '无名称'}）`,
+    };
+  }
+  if (twin === null) return { name, kind: 'inconclusive', reason: '对照帧没有报回结果' };
+  const control = twin.find((p) => p.name === name);
+  if (control?.outcome === 'skipped-active') {
+    return { name, kind: 'inconclusive', reason: '对照帧带着用户激活，为免弹窗没有调用' };
+  }
+  if (!control || control.outcome !== 'rejected') {
+    return { name, kind: 'inconclusive', reason: '对照帧里它没有被拒绝' };
+  }
+  if (control.errorName !== 'SecurityError') {
+    return {
+      name,
+      kind: 'inconclusive',
+      reason: `对照帧的拒绝不是 SecurityError（${control.errorName || '无名称'}）`,
+    };
+  }
+  if (!own.message || !control.message) {
+    return { name, kind: 'inconclusive', reason: '拒绝原文为空，无从比较' };
+  }
+  if (own.message === control.message) {
+    return { name, kind: 'inconclusive', reason: '与对照帧「缺用户激活」的拒绝原文相同' };
+  }
+  return { name, kind: 'isolated' };
+}
+
+/**
+ * S7：任何一种无激活调用兑现或悬而未决 ⇒ 失败（不看已验表）；每种都是 absent / isolated ⇒ 通过；
+ * 有判不出的 ⇒ 回退到人工已验表（引擎 + 大版本在表里才通过）。
+ */
 function judgePicker(
   env: PluginFrameEnv | null,
   engine: PickerVerifiedEngine | null,
   verified: readonly PickerVerifiedEngine[],
+  twin: readonly PickerProbeResult[] | null,
 ): PluginSelfCheckItem {
   if (!env) return { id: 'S7', status: 'fail', detail: '插件探针帧没能启动，读不到帧内环境' };
-  if (!env.hasSaveFilePicker) {
-    return { id: 'S7', status: 'pass', detail: '插件帧里没有 showSaveFilePicker' };
+  const verdicts = PICKER_NAMES.map((name) => judgeOnePicker(name, env, twin));
+  const escaped = verdicts.flatMap((v) => (v.kind === 'escaped' ? [`${v.name} ${v.reason}`] : []));
+  if (escaped.length > 0) {
+    return {
+      id: 'S7',
+      status: 'fail',
+      detail: `插件帧里 ${escaped.join('；')}，文件选择器没被隔离`,
+    };
+  }
+  const isolated = verdicts.filter((v) => v.kind === 'isolated').length;
+  const absent = verdicts.filter((v) => v.kind === 'absent').length;
+  const unsure = verdicts.flatMap((v) =>
+    v.kind === 'inconclusive' ? [`${v.name}：${v.reason}`] : [],
+  );
+  if (unsure.length === 0) {
+    const absentNote = absent > 0 ? `；另有 ${absent} 种插件帧里不存在` : '';
+    return {
+      id: 'S7',
+      status: 'pass',
+      detail:
+        isolated > 0
+          ? `文件选择器在插件帧里被隔离拒绝（无需点击即可确认），共 ${isolated} 种${absentNote}`
+          : `插件帧里没有文件选择器（${absent} 种都不存在）`,
+    };
   }
   const name = engine ? `${engine.engine} ${engine.major}` : '未识别的浏览器引擎';
   const listed =
     engine !== null && verified.some((v) => v.engine === engine.engine && v.major === engine.major);
+  const head = `无法自动判定（${unsure.join('；')}），回退到人工已验表`;
   return listed
-    ? {
-        id: 'S7',
-        status: 'pass',
-        detail: `插件帧里有 showSaveFilePicker，${name} 已通过人工矩阵的文件选择器一项`,
-      }
-    : {
-        id: 'S7',
-        status: 'fail',
-        detail: `插件帧里有 showSaveFilePicker，而 ${name} 不在人工矩阵已验表里`,
-      };
+    ? { id: 'S7', status: 'pass', detail: `${head}：${name} 已通过人工矩阵的文件选择器一项` }
+    : { id: 'S7', status: 'fail', detail: `${head}：${name} 不在人工矩阵已验表里` };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # 插件系统设计 v1（ADR-36 暂定）
 
-> 状态：已实施（2026-11-15）：P1a/P1b/P2 自动化部分；人工矩阵未跑，Chromium 上 S7 待人工验证。（原状态行：「设计稿（2026-11-15），未实施。」）P3（工坊接入）、P4 与 Q1/Q7/Q11/Q12 未做；实施注记见下方「📌 2026-11-15 实施注记」，创作者文档见 `docs/reference/plugin-authoring-guide.md`。
+> 状态：已实施（2026-11-15）：P1a/P1b/P2 自动化部分；人工矩阵未跑；S7 已改为自动判定（见 §4.8 的「📌 2026-11-15 S7 自动判定」注），Chromium 156 真机复跑自检全过。（原状态行：「设计稿（2026-11-15），未实施。」）P3（工坊接入）、P4 与 Q1/Q7/Q11/Q12 未做；实施注记见下方「📌 2026-11-15 实施注记」，创作者文档见 `docs/reference/plugin-authoring-guide.md`。
 > 修订 r2（2026-11-15）：浏览器实测推翻了「插件脚本跑在沙盒 iframe 里」的地基（CSP 拦不住 WebRTC）。本版改为「插件代码只跑在 Dedicated Worker，界面由宿主按声明式标记渲染」；启动自检改成带对照组的金丝雀探测；本地目录移出 Vite root；启用插件的存档里美化帧一律断网并停脚本；逐条处理独立审查的 16 条发现。
 > 修订 r3（2026-11-15）：处理复审 13 条（R2-1 至 R2-13）：插件存档的美化帧加牢笼帧并剥 `meta` / `link` / `base`；视图帧 nonce 改为运行时哈希；收紧 URL 白名单与 blob MIME；补齐金丝雀的方法、WebSocket、对照组与等待窗口；Web Locks 的安全上下文与接管；D10 改列为设计结论。
 > 修订 r4（2026-11-15）：主人改了红线。「不能联网」取消，新增「不得访问本机和局域网上的服务」（红线 D）。插件改回跑在 opaque 沙盒 iframe 里，可以用完整的 JS、DOM 和任意 UI 框架，可以按 manifest 声明的域名联网。删除 Worker 全局白名单、声明式界面协议、清洗器、OffscreenCanvas 通道和「插件存档里美化帧断网」。新增联网域名的校验与 CSP 生成、D 的逐条论证、安装与启用时的风险确认、现有美化帧风险一节。Worker 方案与实测记录压缩进附录 A。
@@ -389,6 +389,8 @@ BFF 路由 `server/routes/plugins.ts`，挂进路由表（`server/app.ts:40-58`�
 
 文件选择器的探针没法自动跑：没有用户激活时它一定抛 `NotAllowedError`，和「被 opaque origin 拒绝」的 `SecurityError` 分不开。所以放进人工矩阵，由人点一下再看错误名。自检只能查「有没有」：插件帧里存在 `showSaveFilePicker`，而本引擎与大版本没过人工矩阵的这一项，插件子系统禁用（§4.8 S7）。
 
+> 📌 2026-11-15 本段的前提被推翻：「没有用户激活时一定抛激活错误、与隔离拒绝分不开」不成立。Chromium 156.0.8078.75 实测（2026-11-15，无用户激活调用）：sandbox 只有 `allow-scripts` 的不透明帧、以及嵌在这种帧里的 srcdoc 子帧，三种选择器都抛 `SecurityError`，原文是「Sandboxed documents aren't allowed to show a file picker.」；`allow-scripts allow-same-origin` 或不加沙盒的帧抛的也是 `SecurityError`，原文却是「Must be handling a user gesture to show a file picker.」。也就是说 Chromium 先查沙盒 / 不透明来源、再查用户激活，两句报错不同。所以无激活调用在 Chromium 上就能区分「被隔离拒绝」与「只是缺激活」，S7 改为自动判定，规则见 §4.8 的「📌 2026-11-15 S7 自动判定」注。人工矩阵的选择器按钮保留，用于其他引擎与复核。
+
 ### 4.7 隔离与界面标识
 
 - 每个界面一对帧，各自 opaque origin，互相读不到 DOM 与存储。
@@ -429,9 +431,19 @@ BFF 路由 `server/routes/plugins.ts`，挂进路由表（`server/app.ts:40-58`�
 
 引擎门控：自检全过即启用。r2 的「未测过的引擎与大版本默认禁用」随红线 B 取消而放宽，理由和是否保留见 Q5。唯一保留的窄门控是 S7：只为文件选择器维护一张「人工矩阵已验」的引擎与大版本表，插件帧里没有 `showSaveFilePicker` 的引擎不受这张表约束。
 
+> 📌 2026-11-15 S7 自动判定（上表 S7 一行与本段的「只查有没有」已被取代）：
+>
+> - 证据：Chromium 156.0.8078.75 实测（2026-11-15，无用户激活调用）：sandbox 只有 `allow-scripts` 的不透明帧、以及嵌在这种帧里的 srcdoc 子帧，三种选择器都抛 `SecurityError`，原文是「Sandboxed documents aren't allowed to show a file picker.」；`allow-scripts allow-same-origin` 或不加沙盒的帧抛的也是 `SecurityError`，原文却是「Must be handling a user gesture to show a file picker.」。也就是说 Chromium 先查沙盒 / 不透明来源、再查用户激活，两句报错不同。
+> - 探测：主探针帧（生产 `mountPluginFrame` 挂的那个）挂载时带宿主专用选项 `probePickers`，随 `init` 下发；帧内引导脚本在装载插件代码**之前**、无用户激活地调用 `showSaveFilePicker` / `showOpenFilePicker` / `showDirectoryPicker`（有哪个调哪个，每个限时 1.5 秒），结局（不存在 / 兑现 / 被拒的错误名与原文 / 限时内无结果）随 `ready` 报回。插件可见的 API 不变。管线孪生帧（宿主自写、`allow-scripts allow-same-origin`、无 CSP、无插件代码）同样调用一次，拿到本引擎「缺用户激活」那句拒绝原文作对照，经 `postMessage` 报给宿主（只收该帧自己发来、token 相符的消息）。
+> - 判定（逐种）：不存在 ⇒ 可以；兑现 ⇒ S7 失败（不看已验表）；错误名不是 `SecurityError` ⇒ 判不出；`SecurityError` 且原文与孪生帧同一种选择器的拒绝原文**不同** ⇒ 引擎在查激活之前就按隔离条件拒了，有没有点击都一样 ⇒ 可以；原文相同、孪生帧缺席或没拒、原文为空、限时内无结果 ⇒ 判不出。三种都可以 ⇒ S7 通过；有判不出的 ⇒ 回退到 `PICKER_VERIFIED_ENGINES`（引擎与大版本在表里才通过），说明里写明走了哪条路。只比较原文是否相同，不按报错文字的内容匹配，所以与界面语言和引擎措辞无关。
+> - 安全前提：自检帧都在屏幕外（容器 `pointer-events:none`）、从不接收输入；用户激活只沿祖先方向传播，不会从宿主页传给子帧。所以这些调用都不带激活，弹不出对话框。
+>   - 📌 2026-11-15 审查实测更正：上一句的激活传播前提不成立。Chromium 里宿主页点一下，`allow-same-origin` 的屏幕外 srcdoc 孪生帧 `navigator.userActivation.isActive` 也变 `true`（同源激活可见性），它的 `showOpenFilePicker()` 能越过激活检查、会弹真的对话框。现在两边的探测脚本在**每次**调用前都同步确认本帧 `navigator.userActivation.isActive === false`，读不到或为 `true` 就不调用，报 `skipped-active`（判不出，回退已验表）。判定同时收紧：插件帧里限时内没结果（对话框可能已打开）与兑现同样判失败；对照帧的拒绝不是 `SecurityError` 时不拿它作对照。
+> - 状态：代码与单测已就位；2026-11-15 在 Chromium 156.0.8078.75 真机（dev，localhost）复跑，自检 `ok: true`，S7 详情「文件选择器在插件帧里被隔离拒绝（无需点击即可确认），共 3 种」；Firefox、Safari 未测（它们若报错原文与对照相同，会回退到已验表）。
+
 > 📌 2026-11-15 实施与真机结果（`src/ui/lib/plugin-selfcheck.ts`）：
 >
 > - 真机（Claude 浏览器窗格，Chromium 156.0.8078.75，dev server 跑在 localhost）：CAGE 通过（srcdoc）；S1–S4、S6 零命中；S5 跳过（没有第二个可达的 loopback 主机名）；S7 失败（有 `showSaveFilePicker`，`PICKER_VERIFIED_ENGINES` 为空）。所以目前 Chromium 上插件保持禁用，要等人在「开发者模式 → 插件管理 → 人工矩阵」跑一次选择器探针并把引擎与大版本加进表。
+>   - 📌 2026-11-15 本条结论已过时：S7 改为自动判定（见上方「📌 2026-11-15 S7 自动判定」注），2026-11-15 Chromium 156 真机复跑确认 S7 自动通过，自检全过。
 > - S0 在这台 Chromium 上本来会恒失败：opaque origin 的帧访问 loopback 被浏览器自己拦掉（请求根本到不了服务器，与 Local Network Access 把 opaque origin 当公网的行为一致），没带 CSP 的对照组也打不中金丝雀。主人当日裁定：当带 `allow-same-origin` 的管线对照组能命中、而全部 opaque 的核心对照组都不命中时，S0 判通过并记 `browserBlocksLocal`，此时红线 D 由浏览器执行。
 >   - 📌 2026-11-15 二审收紧：`browserBlocksLocal` 还要求**任何**不透明来源对照组（核心与可选）都没命中、任何探针也没命中；只要有一条命中而核心通道全不中，说明浏览器只拦了一部分，S0 判失败（「浏览器只拦截了部分不透明来源通道，结果不可信」）。轮询阶段因「对照组一个不中」提前收尾时，不再拿孪生帧延迟顶替对照组延迟；之后对照组若又命中，也按部分拦截判失败。
 > - 对照组分「核心」与「可选」两类通道：核心通道不命中判 S0 失败；可选通道（部分浏览器不支持或不发请求的手段）不命中只在结果里记一条说明。
@@ -703,6 +715,7 @@ host.commit({ commands: [
   - 建议：接受，并在所有插件的风险说明里写明（§3.4 已含；没声明 `network` 也能用 WebRTC）。
   - 不接受的话只有一条路：回到附录 A 的 Worker 方案，代价是插件失去 DOM 和 UI 框架。
 - Q5 引擎门控。建议：自检全过即启用，不再维护「已测大版本」表。理由是 D 依赖的 CSP 网络指令和沙盒标志在各引擎里都成熟，而自检每次启动都在本机实证。保留那张表的代价是浏览器每升一个大版本插件就停用。例外：文件选择器的拒绝没法自动探测（§4.6），所以对插件帧里存在 `showSaveFilePicker` 的引擎保留一张窄表（§4.8 S7），只管这一项。
+  - 📌 2026-11-15「没法自动探测」不成立（§4.6 注）：S7 先自动判定，判不出时才查这张窄表，表仍发布为空。
 - Q6 FullBackup 是否携带插件包字节。建议不带，只带启用清单和数据。
 - Q7 时间推进等非 `StatePatchOp` 的引擎能力是否以后开放成命令。
 - Q8 玩家亲手交给插件的文件算不算破 C。
@@ -722,6 +735,7 @@ host.commit({ commands: [
 >
 > - Q2：接受，按建议写进所有插件的风险说明。
 > - Q5：按建议，自检全过即启用；只保留 S7 的文件选择器窄表（`PICKER_VERIFIED_ENGINES`，发布时为空）。另加 `browserBlocksLocal` 规则（§4.8 短注）。
+>   - 📌 2026-11-15 补：窄表降为 S7 自动判定的回退（§4.8「S7 自动判定」注）。
 > - Q6：FullBackup 不带插件包字节，只带 `pluginKv` 与存档里的启用清单和数据。
 > - Q8：玩家亲手交给插件的文件不算破 C，写进风险说明。
 > - Q9：默认目录 `../poem-plugins`（仓库上一级）；开发者模式的「跟随文件夹自动重载」默认关，且只在开发者模式打开时生效（设置键 `pluginDevAutoReload`）。

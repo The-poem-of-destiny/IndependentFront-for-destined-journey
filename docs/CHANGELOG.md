@@ -20,6 +20,7 @@
 - 真机自检（Claude 浏览器窗格，Chromium 156.0.8078.75，dev server）：CAGE、S0（经 `browserBlocksLocal`）、S1–S4、S6 通过，S5 跳过，**S7 失败**（有 `showSaveFilePicker`，已验表为空）→ 目前 Chromium 上插件保持禁用。Firefox / Safari / 真 Chrome / preview server / 两标签页 Web Locks / 界面走查均未测。
 - 设置页占位符面板补登两个新占位符（`placeholder-catalog.ts`）。
 - 测试：2026-11-15 实测 `npm run gates` 八道闸门全绿：490 个文件 / 10928 个用例，10914 通过、14 跳过、0 失败；knip 棘轮 149 条已知、无新增。（此前一轮的两处红已修：隔离闸门给 `plugin-selfcheck.ts` 登记的联网原语从 17 处改为 18 处（新增的管线孪生帧）；属性测试对 `localhost` 的断言改为按整段标签判，`home.arpalocalhost` 不再误报。）
+- 📌 2026-11-15 S7 自动化：主探针帧带宿主专用的 `probePickers` 选项，帧内引导脚本在插件代码运行前无激活调用三种文件选择器，结局随 `ready` 报回；管线孪生帧同样调用取「缺用户激活」的拒绝原文作对照。插件帧的 `SecurityError` 原文与对照不同即判被隔离（Chromium 156 实测两句原文不同），任何调用兑现即失败，判不出才回退到已验表。2026-11-15 在 Chromium 156 真机（dev）复跑：自检全过（`ok: true`，S7 自动通过、S5 跳过），示例商店经确认后安装成功、未确认的安装被拒。审查发现同源孪生帧会继承宿主页的用户激活，补上「每次调用前确认 `navigator.userActivation.isActive === false`，否则跳过并判不出」的守卫，并收紧为：对照帧的拒绝须是 `SecurityError` 才作基线、插件帧里调用限时内无结果（可能已弹出对话框）同兑现一样直接判 S7 失败；之后再次真机复跑仍全过。闸门：490 文件 / 10945 用例，10931 通过、14 跳过、0 失败。
 - 未做：P3（工坊入口仍锁）、P4、Q1 / Q7 / Q11 / Q12；P1a 人工矩阵（含 WebRTC 抓包与插件帧内文件选择器点测）。遗留缺陷登记在 [已知缺陷](known-issue.md)「插件系统 v1 交付时的遗留缺陷与未修风险」。
 
 ### 2026-11-14 缓存直出：断点位置、角色档案分区与三处借自 Story v2 的改造｜分支 `fix/direct-cache-breakpoint-and-profile`，真实渠道与真实模型均未验证

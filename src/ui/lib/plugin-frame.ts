@@ -11,7 +11,8 @@
  * - 宿主 → 帧：`{type:'init', pluginId, apiVersion, entry, files, theme}`（本模块发，仅一次）、
  *   `{type:'res', id, ok, …}`、`{type:'event', name, payload}`、`{type:'view', view, value}`、
  *   `{type:'theme', values}`。
- * - 帧 → 宿主：`{type:'ready', env, error?}`、`{type:'req', id, method, args}`。
+ * - 帧 → 宿主：`{type:'ready', env, error?, pickers?}`、`{type:'req', id, method, args}`。
+ *   `pickers` 只在 init 带 `probePickers: true`（宿主自检专用）时出现，见 `PickerProbeResult`。
  *
  * 帧内全局 `host` 的方法全部是请求-响应：`commit` 兑现为完整的 `CommitResult`，
  * 其余方法成功时兑现 `value`，失败时以带 `code` / `index` 的 Error 拒绝。
@@ -41,11 +42,65 @@ export const PLUGIN_FRAME_SANDBOX = 'allow-scripts allow-forms allow-pointer-loc
 const LINK_MODE: CageLinkMode = 'port-handoff';
 const THEME_PREFIX = '--theme-';
 
-/** 帧内自报的运行环境：只用于自检与提示，不作安全判据 */
+/**
+ * 帧内自报的运行环境：只用于自检与提示，不作运行期安全判据。
+ * 由引导脚本在插件代码运行前取得；插件拿不到端口，伪造不了 `ready`。
+ */
 export interface PluginFrameEnv {
   hasSaveFilePicker: boolean;
   hasOpenFilePicker: boolean;
   hasDirectoryPicker: boolean;
+  /** 只在挂帧时 `probePickers: true` 才有：无用户激活时调用三种文件选择器的结局（§4.8 S7） */
+  pickerProbe?: PickerProbeResult[];
+}
+
+export const PICKER_NAMES = [
+  'showSaveFilePicker',
+  'showOpenFilePicker',
+  'showDirectoryPicker',
+] as const;
+export type PickerName = (typeof PICKER_NAMES)[number];
+
+/**
+ * 一种文件选择器在**无用户激活**时被调用的结局：
+ * absent = 方法不存在；resolved = 居然返回了结果；rejected = 被拒（带错误名与原文）；
+ * pending = 限时内既没兑现也没拒绝；skipped-active = 调用前读到本帧带着用户激活
+ * （或读不到 `navigator.userActivation`），为免弹出真对话框**没有调用**。
+ */
+export interface PickerProbeResult {
+  name: PickerName;
+  outcome: 'absent' | 'resolved' | 'rejected' | 'pending' | 'skipped-active';
+  errorName?: string;
+  message?: string;
+}
+
+/** 校验并规整帧（或对照帧）报回的选择器结局；形状不对返回 null */
+export function normalizePickerProbe(raw: unknown): PickerProbeResult[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: PickerProbeResult[] = [];
+  for (const item of raw as unknown[]) {
+    if (!item || typeof item !== 'object') return null;
+    const record = item as Record<string, unknown>;
+    const name = PICKER_NAMES.find((n) => n === record.name);
+    const outcome = record.outcome;
+    if (
+      name === undefined ||
+      (outcome !== 'absent' &&
+        outcome !== 'resolved' &&
+        outcome !== 'rejected' &&
+        outcome !== 'pending' &&
+        outcome !== 'skipped-active')
+    ) {
+      return null;
+    }
+    const result: PickerProbeResult = { name, outcome };
+    if (outcome === 'rejected') {
+      result.errorName = typeof record.errorName === 'string' ? record.errorName : '';
+      result.message = typeof record.message === 'string' ? record.message : '';
+    }
+    out.push(result);
+  }
+  return out;
 }
 
 /** 随 `init` 送进帧内的包内文件 */
@@ -71,6 +126,12 @@ interface MountPluginFrameOptions {
   innerMode?: CageInnerMode;
   /** 后台页面：不可见 */
   hidden?: boolean;
+  /**
+   * 仅供启动自检（§4.8 S7）：引导脚本在装载插件代码**之前**、无用户激活地调用三种文件选择器，
+   * 把结局随 `ready` 报回（`env.pickerProbe`）。随 `init` 下发，插件代码读不到也改不了。
+   * 🔴 只给离屏、永不接收输入的自检帧开；有可见界面的插件帧不得开。
+   */
+  probePickers?: boolean;
   /** 帧内装载成功（`ready` 不带 `error`）。装载失败时**不**调用它，改调 `onLoadError` */
   onReady?: (env: PluginFrameEnv) => void;
   /** 帧报告了 `ready.error`（入口缺失、装载抛错等）：插件没有正常起来 */
@@ -135,6 +196,13 @@ const BOOTSTRAP_BODY = String.raw`
     hasOpenFilePicker: 'showOpenFilePicker' in win,
     hasDirectoryPicker: 'showDirectoryPicker' in win,
   });
+  // 自检用（init.probePickers）：同样在插件代码运行前取好选择器函数本身。
+  const pickerFns = freeze({
+    showSaveFilePicker: win.showSaveFilePicker,
+    showOpenFilePicker: win.showOpenFilePicker,
+    showDirectoryPicker: win.showDirectoryPicker,
+  });
+  const setTimer = win.setTimeout;
 
   // 端口消息的 data 用缓存的原生 getter 读：插件改 MessageEvent.prototype 也拿不到事件（进而拿不到端口）。
   let dataGetter = null;
@@ -491,7 +559,48 @@ const BOOTSTRAP_BODY = String.raw`
     }
   };
 
+  // 无用户激活地调用三种文件选择器，收集结局（§4.8 S7）。只在宿主自检挂帧时跑，帧在屏幕外、不接收输入。
+  // 📌 2026-11-15 实测更正：「用户激活只沿祖先方向传播、不会传给子帧」不成立 —— Chromium 里宿主页点一下，
+  // 同源的屏幕外 srcdoc 子帧 navigator.userActivation.isActive 也变 true（同源激活可见性）。
+  // 所以每次调用前都同步确认本帧 isActive === false；读不到或为 true 就不调用，报 skipped-active。
+  const notActivated = () => {
+    try {
+      const ua = win.navigator.userActivation;
+      return !!ua && ua.isActive === false;
+    } catch (_) { return false; }
+  };
+  const pickerError = (name, err) => ({
+    name,
+    outcome: 'rejected',
+    errorName: err && typeof err.name === 'string' ? err.name : '',
+    message: err && typeof err.message === 'string' ? err.message : String(err),
+  });
+  const probeOne = (name) => new PromiseCtor((resolve) => {
+    const fn = pickerFns[name];
+    if (typeof fn !== 'function') { resolve({ name, outcome: 'absent' }); return; }
+    if (!notActivated()) { resolve({ name, outcome: 'skipped-active' }); return; }
+    let done = false;
+    const finish = (result) => { if (!done) { done = true; resolve(result); } };
+    try { apply(setTimer, win, [() => finish({ name, outcome: 'pending' }), 1500]); } catch (_) {}
+    let result;
+    try { result = apply(fn, win, []); } catch (err) { finish(pickerError(name, err)); return; }
+    PromiseCtor.resolve(result).then(
+      () => finish({ name, outcome: 'resolved' }),
+      (err) => finish(pickerError(name, err)),
+    );
+  });
+  const probePickers = () => PromiseCtor.all([
+    probeOne('showSaveFilePicker'),
+    probeOne('showOpenFilePicker'),
+    probeOne('showDirectoryPicker'),
+  ]);
+
   const start = async (init) => {
+    // 先于插件代码跑完：插件之后做什么都影响不了这份结局
+    let pickers;
+    if (init.probePickers === true) {
+      try { pickers = await probePickers(); } catch (err) { report(err); }
+    }
     indexFiles(init.files);
     applyTheme(init.theme);
     installHost(String(init.pluginId), String(init.apiVersion));
@@ -507,6 +616,7 @@ const BOOTSTRAP_BODY = String.raw`
     try { win.dispatchEvent(new Event('load')); } catch (err) { report(err); }
     const ready = { type: 'ready', env };
     if (error !== undefined) ready.error = error;
+    if (pickers !== undefined) ready.pickers = pickers;
     send(ready);
   };
 
@@ -666,6 +776,8 @@ export function mountPluginFrame(
     if (record.type !== 'ready') return;
     readyFired = true;
     const env = normalizeEnv(record.env);
+    const pickerProbe = normalizePickerProbe(record.pickers);
+    if (pickerProbe !== null) env.pickerProbe = pickerProbe;
     // 带 error 的 ready 只说明引导跑完了，不说明插件起来了：不能当成功报
     if (record.error !== undefined) {
       const error = typeof record.error === 'string' ? record.error : '插件装载失败';
@@ -717,6 +829,7 @@ export function mountPluginFrame(
     entry: options.entry,
     files: options.files.map((file) => ({ path: file.path, mime: file.mime, bytes: file.bytes })),
     theme: filterPluginThemeValues(options.theme),
+    ...(options.probePickers === true ? { probePickers: true } : {}),
   });
 
   shadow.appendChild(frame);

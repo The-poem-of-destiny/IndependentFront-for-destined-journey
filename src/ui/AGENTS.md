@@ -344,7 +344,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   回读刷新 → 推视图，整段包在 `trackPluginWrite` 里
 │   ├── plugin-host-extensions.ts    ← P2 方法：存储两档、`ai.note` / `ai.context.set`（可见告知另落一条 `plugin_note` 系统事件）、
 │   │                                   `ui.openExternal`（只弹复制链接窗，宿主不打开）
-│   ├── plugin-selfcheck.ts          ← 启动自检 CAGE + S0–S7（`runPluginSelfCheck`，永不抛）。`PICKER_VERIFIED_ENGINES` 发布为空；
+│   ├── plugin-selfcheck.ts          ← 启动自检 CAGE + S0–S7（`runPluginSelfCheck`，永不抛）。`PICKER_VERIFIED_ENGINES` 发布为空；📌 2026-11-15 起 S7 自动判定（主探针帧 `probePickers` + 管线孪生帧对照，比拒绝原文是否相同），判不出才回退到这张表；
 │   │                                   `browserBlocksLocal` 规则与核心 / 可选对照通道见设计 §4.8 短注。
 │   │                                   🔴 探针容器放屏幕外，**不能** `display:none`（否则 CSS / 字体请求不发）
 │   ├── plugin-save-lock.ts          ← 按存档的 Web Locks（`acquirePluginSaveLock`，永不抛；held / waiting / unsupported /

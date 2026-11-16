@@ -19,6 +19,7 @@ import type { CageInnerMode } from '../../../src/ui/lib/frame-cage';
 import {
   mountPluginFrame,
   PLUGIN_FRAME_SANDBOX,
+  type PickerProbeResult,
   type PluginFrameEnv,
 } from '../../../src/ui/lib/plugin-frame';
 import {
@@ -59,7 +60,23 @@ interface FakeOptions {
    * silent = 装载器没跑、什么都不报；load-error = ready 带 error；violation = 牢笼报导航
    */
   probeFrame?: (text: string) => 'ready' | 'silent' | 'load-error' | 'violation' | undefined;
+  /** 管线孪生帧报回的 S7 对照结局（默认三种都以「缺用户激活」被拒）；null = 不报 */
+  twinPickers?: PickerProbeResult[] | null;
 }
+
+const ACTIVATION_MESSAGE = 'Must be handling a user gesture to show a file picker.';
+const ISOLATION_MESSAGE = "Sandboxed documents aren't allowed to show a file picker.";
+const PICKERS = ['showSaveFilePicker', 'showOpenFilePicker', 'showDirectoryPicker'] as const;
+
+function rejectedAll(message: string, errorName = 'SecurityError'): PickerProbeResult[] {
+  return PICKERS.map((name) => ({ name, outcome: 'rejected', errorName, message }));
+}
+
+const ALL_PRESENT: Partial<PluginFrameEnv> = {
+  hasSaveFilePicker: true,
+  hasOpenFilePicker: true,
+  hasDirectoryPicker: true,
+};
 
 function fakeDeps(options: FakeOptions = {}) {
   let clock = 10_000;
@@ -99,6 +116,17 @@ function fakeDeps(options: FakeOptions = {}) {
       document(o) {
         const record = { ...o, disposed: false };
         documentMounts.push(record);
+        const token = /"source":"fated-poem-selfcheck-twin","token":"([0-9a-f]+)"/.exec(
+          o.html,
+        )?.[1];
+        const twin =
+          options.twinPickers === undefined ? rejectedAll(ACTIVATION_MESSAGE) : options.twinPickers;
+        if (token !== undefined && twin !== null) {
+          // 别的来源 / 错 token 的消息必须被忽略
+          o.onMessage?.({ source: 'other', token, pickers: rejectedAll('伪造') });
+          o.onMessage?.({ source: 'fated-poem-selfcheck-twin', token: 'bad', pickers: [] });
+          o.onMessage?.({ source: 'fated-poem-selfcheck-twin', token, pickers: twin });
+        }
         return {
           dispose: () => {
             record.disposed = true;
@@ -587,29 +615,291 @@ describe('S7 文件选择器门控', () => {
     expect(PICKER_VERIFIED_ENGINES).toEqual([]);
   });
 
-  it('插件帧里没有 showSaveFilePicker 即通过', async () => {
+  it('主探针帧挂载时要求帧内探测选择器，其余插件探针帧不要求', async () => {
+    const fake = fakeDeps();
+    await runPluginSelfCheck(fake.deps);
+    expect(fake.pluginMounts[0]?.options.probePickers).toBe(true);
+    expect(fake.pluginMounts.slice(1).every((m) => m.options.probePickers !== true)).toBe(true);
+    const twin = fake.documentMounts.find((m) => m.html.includes('q_pipeline-'));
+    expect(twin?.html).toContain('showDirectoryPicker');
+    expect(twin?.html).toContain('fated-poem-selfcheck-twin');
+  });
+
+  it('孪生帧的对照脚本真跑：无激活调用选择器，把结局连同 token 报给 parent', async () => {
+    const fake = fakeDeps();
+    await runPluginSelfCheck(fake.deps);
+    const twin = fake.documentMounts.find((m) => m.html.includes('q_pipeline-'));
+    const doc = new DOMParser().parseFromString(twin?.html ?? '', 'text/html');
+    const source = Array.from(doc.querySelectorAll('script'))
+      .map((s) => s.textContent ?? '')
+      .find((text) => text.includes('fated-poem-selfcheck-twin'));
+    expect(source).toBeDefined();
+    const token = /"token":"([0-9a-f]+)"/.exec(source ?? '')?.[1];
+    const fakeWindow = {
+      showSaveFilePicker: () => {
+        const err = new Error(ACTIVATION_MESSAGE);
+        err.name = 'SecurityError';
+        return Promise.reject(err);
+      },
+      showOpenFilePicker: () => {
+        throw new TypeError('sync');
+      },
+    };
+    const posted: unknown[] = [];
+    const fakeParent = { postMessage: (data: unknown) => posted.push(data) };
+    const run = new Function('window', 'parent', 'navigator', source ?? '') as (
+      w: unknown,
+      p: unknown,
+      n: unknown,
+    ) => void;
+    run(fakeWindow, fakeParent, { userActivation: { isActive: false } });
+    await vi.waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toEqual({
+      source: 'fated-poem-selfcheck-twin',
+      token,
+      pickers: [
+        {
+          name: 'showSaveFilePicker',
+          outcome: 'rejected',
+          errorName: 'SecurityError',
+          message: ACTIVATION_MESSAGE,
+        },
+        {
+          name: 'showOpenFilePicker',
+          outcome: 'rejected',
+          errorName: 'TypeError',
+          message: 'sync',
+        },
+        { name: 'showDirectoryPicker', outcome: 'absent' },
+      ],
+    });
+  });
+
+  it('孪生帧的对照脚本：本帧带着激活或读不到激活状态时一种都不调用，报 skipped-active', async () => {
+    const fake = fakeDeps();
+    await runPluginSelfCheck(fake.deps);
+    const twin = fake.documentMounts.find((m) => m.html.includes('q_pipeline-'));
+    const doc = new DOMParser().parseFromString(twin?.html ?? '', 'text/html');
+    const source =
+      Array.from(doc.querySelectorAll('script'))
+        .map((s) => s.textContent ?? '')
+        .find((text) => text.includes('fated-poem-selfcheck-twin')) ?? '';
+    for (const nav of [{ userActivation: { isActive: true } }, {}]) {
+      const picker = vi.fn(() => Promise.reject(new Error('x')));
+      const posted: { pickers: unknown }[] = [];
+      const run = new Function('window', 'parent', 'navigator', source) as (
+        w: unknown,
+        p: unknown,
+        n: unknown,
+      ) => void;
+      run(
+        { showSaveFilePicker: picker, showOpenFilePicker: picker, showDirectoryPicker: picker },
+        { postMessage: (data: { pickers: unknown }) => posted.push(data) },
+        nav,
+      );
+      await vi.waitFor(() => expect(posted).toHaveLength(1));
+      expect(picker).not.toHaveBeenCalled();
+      expect(posted[0]?.pickers).toEqual(
+        PICKERS.map((name) => ({ name, outcome: 'skipped-active' })),
+      );
+    }
+  });
+
+  it('插件帧里三种选择器都不存在即通过', async () => {
     const result = await runPluginSelfCheck(fakeDeps().deps);
+    expect(item(result, 'S7').status).toBe('pass');
+    expect(item(result, 'S7').detail).toContain('3 种都不存在');
+  });
+
+  it('帧内报回 absent 也算通过，即使对照帧缺席', async () => {
+    const absent: PickerProbeResult[] = PICKERS.map((name) => ({ name, outcome: 'absent' }));
+    const result = await runPluginSelfCheck(
+      fakeDeps({ env: { pickerProbe: absent }, twinPickers: null }).deps,
+    );
     expect(item(result, 'S7').status).toBe('pass');
   });
 
-  it('有 showSaveFilePicker 且引擎不在表里：失败并点名引擎与大版本', async () => {
+  it('三种都被隔离拒绝（原文与对照不同）：不查已验表直接通过', async () => {
+    const result = await runPluginSelfCheck(
+      fakeDeps({
+        env: { ...ALL_PRESENT, pickerProbe: rejectedAll(ISOLATION_MESSAGE) },
+      }).deps,
+    );
+    expect(result.ok).toBe(true);
+    expect(item(result, 'S7').status).toBe('pass');
+    expect(item(result, 'S7').detail).toContain('被隔离拒绝（无需点击即可确认），共 3 种');
+  });
+
+  it('部分不存在、其余被隔离拒绝：通过并注明', async () => {
+    const pickerProbe: PickerProbeResult[] = [
+      {
+        name: 'showSaveFilePicker',
+        outcome: 'rejected',
+        errorName: 'SecurityError',
+        message: ISOLATION_MESSAGE,
+      },
+      { name: 'showOpenFilePicker', outcome: 'absent' },
+      { name: 'showDirectoryPicker', outcome: 'absent' },
+    ];
+    const result = await runPluginSelfCheck(
+      fakeDeps({ env: { hasSaveFilePicker: true, pickerProbe } }).deps,
+    );
+    expect(item(result, 'S7').status).toBe('pass');
+    expect(item(result, 'S7').detail).toContain('共 1 种');
+    expect(item(result, 'S7').detail).toContain('另有 2 种插件帧里不存在');
+  });
+
+  it('原文与对照帧相同：回退到已验表，在表里通过、不在表里失败', async () => {
+    const env = { ...ALL_PRESENT, pickerProbe: rejectedAll(ACTIVATION_MESSAGE) };
+    const listed = await runPluginSelfCheck(
+      fakeDeps({ env, pickerVerifiedEngines: [{ engine: 'chromium', major: 131 }] }).deps,
+    );
+    expect(item(listed, 'S7').status).toBe('pass');
+    expect(item(listed, 'S7').detail).toContain('无法自动判定');
+    expect(item(listed, 'S7').detail).toContain('回退到人工已验表');
+    expect(item(listed, 'S7').detail).toContain('已通过人工矩阵');
+
+    const unlisted = await runPluginSelfCheck(fakeDeps({ env }).deps);
+    expect(unlisted.ok).toBe(false);
+    expect(item(unlisted, 'S7').status).toBe('fail');
+    expect(item(unlisted, 'S7').detail).toContain('拒绝原文相同');
+    expect(item(unlisted, 'S7').detail).toContain('chromium 131 不在人工矩阵已验表里');
+  });
+
+  it('对照帧没报回：回退到已验表', async () => {
+    const env = { ...ALL_PRESENT, pickerProbe: rejectedAll(ISOLATION_MESSAGE) };
+    const fake = fakeDeps({ env, twinPickers: null });
+    const unlisted = await runPluginSelfCheck(fake.deps);
+    expect(item(unlisted, 'S7').status).toBe('fail');
+    expect(item(unlisted, 'S7').detail).toContain('对照帧没有报回结果');
+    // 等对照有上限，等完照样拆掉孪生帧
+    expect(fake.documentMounts.every((m) => m.disposed)).toBe(true);
+
+    const listed = await runPluginSelfCheck(
+      fakeDeps({
+        env,
+        twinPickers: null,
+        pickerVerifiedEngines: [{ engine: 'chromium', major: 131 }],
+      }).deps,
+    );
+    expect(item(listed, 'S7').status).toBe('pass');
+  });
+
+  it('对照帧里没被拒、或插件帧报错不是 SecurityError：判不出，回退', async () => {
+    const env = { ...ALL_PRESENT, pickerProbe: rejectedAll(ISOLATION_MESSAGE) };
+    const twinAbsent = await runPluginSelfCheck(
+      fakeDeps({
+        env,
+        twinPickers: PICKERS.map((name) => ({ name, outcome: 'absent' })),
+      }).deps,
+    );
+    expect(item(twinAbsent, 'S7').status).toBe('fail');
+    expect(item(twinAbsent, 'S7').detail).toContain('对照帧里它没有被拒绝');
+
+    const notSecurity = await runPluginSelfCheck(
+      fakeDeps({
+        env: { ...ALL_PRESENT, pickerProbe: rejectedAll(ISOLATION_MESSAGE, 'AbortError') },
+      }).deps,
+    );
+    expect(item(notSecurity, 'S7').status).toBe('fail');
+    expect(item(notSecurity, 'S7').detail).toContain('报错不是 SecurityError（AbortError）');
+  });
+
+  it('有选择器但帧内没报回结果：判不出，回退到已验表', async () => {
     const result = await runPluginSelfCheck(fakeDeps({ env: { hasSaveFilePicker: true } }).deps);
     expect(result.ok).toBe(false);
     expect(item(result, 'S7').status).toBe('fail');
+    expect(item(result, 'S7').detail).toContain('插件帧没有报回调用结果');
     expect(item(result, 'S7').detail).toContain('chromium 131');
-  });
-
-  it('有 showSaveFilePicker 且引擎与大版本在表里：通过', async () => {
-    const result = await runPluginSelfCheck(
+    const listed = await runPluginSelfCheck(
       fakeDeps({
         env: { hasSaveFilePicker: true },
         pickerVerifiedEngines: [{ engine: 'chromium', major: 131 }],
       }).deps,
     );
-    expect(item(result, 'S7').status).toBe('pass');
+    expect(item(listed, 'S7').status).toBe('pass');
   });
 
-  it('大版本不同不算已验；Firefox 按 gecko 识别', async () => {
+  it('任何一种无激活调用兑现：失败，即使引擎在已验表里', async () => {
+    const pickerProbe: PickerProbeResult[] = [
+      { name: 'showSaveFilePicker', outcome: 'resolved' },
+      ...rejectedAll(ISOLATION_MESSAGE).slice(1),
+    ];
+    const result = await runPluginSelfCheck(
+      fakeDeps({
+        env: { ...ALL_PRESENT, pickerProbe },
+        pickerVerifiedEngines: [{ engine: 'chromium', major: 131 }],
+      }).deps,
+    );
+    expect(result.ok).toBe(false);
+    expect(item(result, 'S7').status).toBe('fail');
+    expect(item(result, 'S7').detail).toContain('showSaveFilePicker 在没有点击时返回了结果');
+  });
+
+  it('插件帧里限时内没结果（对话框可能已打开）：失败，即使引擎在已验表里', async () => {
+    const pickerProbe: PickerProbeResult[] = [
+      ...rejectedAll(ISOLATION_MESSAGE).slice(0, 2),
+      { name: 'showDirectoryPicker', outcome: 'pending' },
+    ];
+    const result = await runPluginSelfCheck(
+      fakeDeps({
+        env: { ...ALL_PRESENT, pickerProbe },
+        pickerVerifiedEngines: [{ engine: 'chromium', major: 131 }],
+      }).deps,
+    );
+    expect(item(result, 'S7').status).toBe('fail');
+    expect(item(result, 'S7').detail).toContain('showDirectoryPicker 调用在限时内既没返回也没被拒');
+  });
+
+  it('对照帧限时内没结果：只是判不出，回退到已验表', async () => {
+    const env = { ...ALL_PRESENT, pickerProbe: rejectedAll(ISOLATION_MESSAGE) };
+    const twinPickers: PickerProbeResult[] = PICKERS.map((name) => ({ name, outcome: 'pending' }));
+    const listed = await runPluginSelfCheck(
+      fakeDeps({ env, twinPickers, pickerVerifiedEngines: [{ engine: 'chromium', major: 131 }] })
+        .deps,
+    );
+    expect(item(listed, 'S7').status).toBe('pass');
+    expect(item(listed, 'S7').detail).toContain('回退到人工已验表');
+  });
+
+  it('插件帧或对照帧报 skipped-active：判不出，回退到已验表', async () => {
+    const skipped: PickerProbeResult[] = PICKERS.map((name) => ({
+      name,
+      outcome: 'skipped-active',
+    }));
+    const ownSkipped = await runPluginSelfCheck(
+      fakeDeps({ env: { ...ALL_PRESENT, pickerProbe: skipped } }).deps,
+    );
+    expect(item(ownSkipped, 'S7').status).toBe('fail');
+    expect(item(ownSkipped, 'S7').detail).toContain('插件帧带着用户激活，为免弹窗没有调用');
+    expect(item(ownSkipped, 'S7').detail).toContain('回退到人工已验表');
+
+    const env = { ...ALL_PRESENT, pickerProbe: rejectedAll(ISOLATION_MESSAGE) };
+    const twinSkipped = await runPluginSelfCheck(fakeDeps({ env, twinPickers: skipped }).deps);
+    expect(item(twinSkipped, 'S7').status).toBe('fail');
+    expect(item(twinSkipped, 'S7').detail).toContain('对照帧带着用户激活，为免弹窗没有调用');
+    const listed = await runPluginSelfCheck(
+      fakeDeps({
+        env,
+        twinPickers: skipped,
+        pickerVerifiedEngines: [{ engine: 'chromium', major: 131 }],
+      }).deps,
+    );
+    expect(item(listed, 'S7').status).toBe('pass');
+  });
+
+  it('对照帧的拒绝不是 SecurityError：不拿它作对照，判不出', async () => {
+    const env = { ...ALL_PRESENT, pickerProbe: rejectedAll(ISOLATION_MESSAGE) };
+    const result = await runPluginSelfCheck(
+      fakeDeps({ env, twinPickers: rejectedAll(ACTIVATION_MESSAGE, 'NotAllowedError') }).deps,
+    );
+    expect(item(result, 'S7').status).toBe('fail');
+    expect(item(result, 'S7').detail).toContain(
+      '对照帧的拒绝不是 SecurityError（NotAllowedError）',
+    );
+  });
+
+  it('回退时大版本不同不算已验；Firefox 按 gecko 识别', async () => {
     const chromeOld = await runPluginSelfCheck(
       fakeDeps({
         env: { hasSaveFilePicker: true },

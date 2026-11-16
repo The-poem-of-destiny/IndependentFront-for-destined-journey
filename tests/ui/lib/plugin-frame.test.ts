@@ -112,6 +112,14 @@ function bootBootstrap(options: { channel?: string; beforeRun?: (win: Window) =>
 
 type Booted = ReturnType<typeof bootBootstrap>;
 
+/** 给 jsdom 子窗口补 `navigator.userActivation`（jsdom 没实现） */
+function setUserActivation(win: Window, isActive: boolean) {
+  Object.defineProperty(win.navigator, 'userActivation', {
+    value: { isActive, hasBeenActive: isActive },
+    configurable: true,
+  });
+}
+
 /** 握手 + init，并替装载器把外部脚本的 load 依次补上，直到发出 ready */
 async function initFrame(booted: Booted, init: Record<string, unknown>) {
   booted.handOff();
@@ -303,6 +311,58 @@ describe('mountPluginFrame', () => {
     handle.dispose();
   });
 
+  it('probePickers 随 init 下发；ready 里的 pickers 规整进 env.pickerProbe，形状不对则丢弃', async () => {
+    const onReady = vi.fn();
+    const { frame, handle } = mount({ onReady, probePickers: true });
+    const post = (frame.contentWindow as unknown as { postMessage: ReturnType<typeof vi.fn> })
+      .postMessage;
+    const channel = /"channel":"([^"]+)"/.exec(frame.getAttribute('srcdoc') ?? '')?.[1];
+    cageSays(frame, { source: CAGE_MESSAGE_SOURCE, channel, type: 'cage-ready' });
+    const framePort = (post.mock.calls[0] as unknown as [unknown, string, MessagePort[]])[2][0];
+    const init = await new Promise<Record<string, unknown>>((resolve) => {
+      framePort.onmessage = (event) => resolve(event.data as Record<string, unknown>);
+    });
+    expect(init.probePickers).toBe(true);
+    framePort.postMessage({
+      type: 'ready',
+      env: {},
+      pickers: [
+        {
+          name: 'showSaveFilePicker',
+          outcome: 'rejected',
+          errorName: 'SecurityError',
+          message: 'm',
+        },
+        { name: 'showOpenFilePicker', outcome: 'absent', message: 'ignored' },
+      ],
+    });
+    await vi.waitFor(() => expect(onReady).toHaveBeenCalled());
+    expect((onReady.mock.calls[0] as [PluginFrameEnv])[0].pickerProbe).toEqual([
+      { name: 'showSaveFilePicker', outcome: 'rejected', errorName: 'SecurityError', message: 'm' },
+      { name: 'showOpenFilePicker', outcome: 'absent' },
+    ]);
+    framePort.close();
+    handle.dispose();
+
+    const bad = vi.fn();
+    const second = mount({ onReady: bad });
+    const post2 = (
+      second.frame.contentWindow as unknown as { postMessage: ReturnType<typeof vi.fn> }
+    ).postMessage;
+    const channel2 = /"channel":"([^"]+)"/.exec(second.frame.getAttribute('srcdoc') ?? '')?.[1];
+    cageSays(second.frame, { source: CAGE_MESSAGE_SOURCE, channel: channel2, type: 'cage-ready' });
+    const port2 = (post2.mock.calls[0] as unknown as [unknown, string, MessagePort[]])[2][0];
+    const init2 = await new Promise<Record<string, unknown>>((resolve) => {
+      port2.onmessage = (event) => resolve(event.data as Record<string, unknown>);
+    });
+    expect(init2.probePickers).toBeUndefined();
+    port2.postMessage({ type: 'ready', env: {}, pickers: [{ name: 'evil', outcome: 'resolved' }] });
+    await vi.waitFor(() => expect(bad).toHaveBeenCalled());
+    expect((bad.mock.calls[0] as [PluginFrameEnv])[0].pickerProbe).toBeUndefined();
+    port2.close();
+    second.handle.dispose();
+  });
+
   it('ready 带 error：不当成功回调 onReady，改调 onLoadError 并带上错误与环境', async () => {
     const onReady = vi.fn();
     const onLoadError = vi.fn();
@@ -424,6 +484,87 @@ describe('帧内引导脚本', () => {
       hasDirectoryPicker: false,
     });
     expect(ready.error).toBeUndefined();
+  });
+
+  it('init 带 probePickers：插件代码运行前无激活调用三种选择器，结局随 ready 报回', async () => {
+    const calls: string[] = [];
+    const booted = bootBootstrap({
+      beforeRun: (win) => {
+        setUserActivation(win, false);
+        const w = win as unknown as Record<string, unknown>;
+        w.showSaveFilePicker = () => {
+          calls.push('save');
+          const err = new Error('isolated');
+          err.name = 'SecurityError';
+          return Promise.reject(err);
+        };
+        w.showOpenFilePicker = () => {
+          calls.push('open');
+          return Promise.resolve([]);
+        };
+      },
+    });
+    const entry = [
+      file(
+        'index.html',
+        'text/html',
+        '<!doctype html><script>window.showSaveFilePicker = () => Promise.resolve("fake");</script>',
+      ),
+    ];
+    const ready = (await initFrame(booted, {
+      entry: 'index.html',
+      files: entry,
+      probePickers: true,
+    })) as { pickers?: unknown };
+    expect(calls).toEqual(['save', 'open']);
+    expect(ready.pickers).toEqual([
+      {
+        name: 'showSaveFilePicker',
+        outcome: 'rejected',
+        errorName: 'SecurityError',
+        message: 'isolated',
+      },
+      { name: 'showOpenFilePicker', outcome: 'resolved' },
+      { name: 'showDirectoryPicker', outcome: 'absent' },
+    ]);
+  });
+
+  it('probePickers 时本帧带着用户激活或读不到激活状态：一种都不调用，报 skipped-active', async () => {
+    for (const active of [true, undefined] as const) {
+      const save = vi.fn(() => Promise.reject(new Error('x')));
+      const booted = bootBootstrap({
+        beforeRun: (win) => {
+          if (active !== undefined) setUserActivation(win, active);
+          (win as unknown as Record<string, unknown>).showSaveFilePicker = save;
+          (win as unknown as Record<string, unknown>).showOpenFilePicker = save;
+        },
+      });
+      const ready = (await initFrame(booted, {
+        entry: 'index.html',
+        files: SIMPLE_ENTRY,
+        probePickers: true,
+      })) as { pickers?: unknown };
+      expect(save).not.toHaveBeenCalled();
+      expect(ready.pickers).toEqual([
+        { name: 'showSaveFilePicker', outcome: 'skipped-active' },
+        { name: 'showOpenFilePicker', outcome: 'skipped-active' },
+        { name: 'showDirectoryPicker', outcome: 'absent' },
+      ]);
+    }
+  });
+
+  it('init 不带 probePickers：不调用选择器，ready 不带 pickers', async () => {
+    const save = vi.fn(() => Promise.reject(new Error('x')));
+    const booted = bootBootstrap({
+      beforeRun: (win) => {
+        (win as unknown as Record<string, unknown>).showSaveFilePicker = save;
+      },
+    });
+    const ready = (await initFrame(booted, { entry: 'index.html', files: SIMPLE_ENTRY })) as {
+      pickers?: unknown;
+    };
+    expect(save).not.toHaveBeenCalled();
+    expect(ready.pickers).toBeUndefined();
   });
 
   it('入口不存在：仍发 ready 并带 error', async () => {

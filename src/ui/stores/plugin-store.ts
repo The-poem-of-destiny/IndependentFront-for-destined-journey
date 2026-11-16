@@ -180,7 +180,7 @@ function createBrowserSelfCheckDeps(
     origin: location.origin,
     mount: {
       plugin: (options) => mountPluginFrame(container, options),
-      document: ({ html, sandbox }) => {
+      document: ({ html, sandbox, onMessage }) => {
         const frame = document.createElement('iframe');
         frame.setAttribute('sandbox', sandbox);
         frame.setAttribute('referrerpolicy', 'no-referrer');
@@ -188,8 +188,20 @@ function createBrowserSelfCheckDeps(
         frame.style.height = '100%';
         frame.style.border = '0';
         frame.setAttribute('srcdoc', html);
+        // 只收这个帧自己发来的消息（管线孪生帧报 S7 对照结局）
+        const onWindowMessage = (event: MessageEvent) => {
+          if (event.source !== null && event.source === frame.contentWindow) {
+            onMessage?.(event.data);
+          }
+        };
+        if (onMessage) window.addEventListener('message', onWindowMessage);
         container.appendChild(frame);
-        return { dispose: () => frame.remove() };
+        return {
+          dispose: () => {
+            window.removeEventListener('message', onWindowMessage);
+            frame.remove();
+          },
+        };
       },
     },
     register: async (nonces) => {
