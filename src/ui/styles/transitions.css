@@ -1,59 +1,135 @@
-/* ===== Page Transitions ===== */
-.fade-enter-active,
-.fade-leave-active {
+/* ============================================================
+   全局过渡与入场（动效 v1，2026-11-16；规则见 docs/design.md §6）
+
+   - 时长与缓动一律取 themes/variables.css 的 `--motion-*` token，别在这里写裸秒数。
+   - 只动 opacity / transform —— design.md §1 绝对禁令：不过渡布局属性。
+   - 减动效（系统偏好 ∪ 应用内开关）由 variables.css 的全局规则统一压平，
+     这里不必再写 prefers-reduced-motion 媒体查询。
+   - 本文件是全局样式：这里声明的 @keyframes 不会被 Vue scoped 编译器改名，
+     任何组件都可以直接引用（反过来，组件 scoped 块里声明的关键帧只能本组件用）。
+   ============================================================ */
+
+/* ===== 视图切换（App.vue 顶层六个页面，mode="out-in"）=====
+   离场短而轻：只淡出并微微上提；入场长尾落定 —— 「翻过一页」，不是「整屏滑走」。
+   🔴 只给 opacity / transform：页面根上一旦挂 filter，游戏页这种大 DOM 会掉帧。 */
+.view-enter-active {
   transition:
-    opacity 0.3s ease,
-    transform 0.3s ease;
+    opacity var(--motion-duration-page) var(--motion-ease-enter),
+    transform var(--motion-duration-page) var(--motion-ease-enter);
 }
-.fade-enter-from {
+.view-leave-active {
+  transition:
+    opacity var(--motion-duration-fast) var(--motion-ease-exit),
+    transform var(--motion-duration-fast) var(--motion-ease-exit);
+}
+.view-enter-from {
   opacity: 0;
   transform: translateY(10px);
 }
+.view-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+/* 加载态（shared/ViewLoading.vue）离场瞬时：真页面一到就入场，不为它多等一段淡出。
+   Vue 读到零时长会在下一帧直接结束离场 */
+.view-loading.view-leave-active {
+  transition: none;
+}
+
+/* ===== 通用淡入淡出（小件的出现 / 消失）===== */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity var(--motion-duration-base) var(--motion-ease-standard);
+}
+.fade-enter-from,
 .fade-leave-to {
   opacity: 0;
-  transform: translateY(-10px);
 }
 
-/* Slide transitions for create steps */
-.slide-left-enter-active,
-.slide-left-leave-active,
-.slide-right-enter-active,
-.slide-right-leave-active {
-  transition: all 0.3s ease;
+/* ===== Modal（AppModal）=====
+   遮罩只淡入淡出；面板从略低处升起、轻微放大落定，离场更短且不回弹。
+   🔴 遮罩（Transition 的根）与面板的时长必须**相等**：Vue 只读根元素的
+      transition-duration 判断过渡何时结束，根比子短，`*-active` 类会在面板
+      还在半路时被摘掉，面板当场跳到终态。 */
+.modal-enter-active {
+  transition: opacity var(--motion-duration-slow) var(--motion-ease-standard);
 }
-.slide-left-enter-from {
-  opacity: 0;
-  transform: translateX(30px);
-}
-.slide-left-leave-to {
-  opacity: 0;
-  transform: translateX(-30px);
-}
-.slide-right-enter-from {
-  opacity: 0;
-  transform: translateX(-30px);
-}
-.slide-right-leave-to {
-  opacity: 0;
-  transform: translateX(30px);
-}
-
-/* ===== Modal ===== */
-.modal-enter-active,
 .modal-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-duration-fast) var(--motion-ease-exit);
 }
-.modal-enter-active .modal-content,
+.modal-enter-active .modal-content {
+  transition:
+    opacity var(--motion-duration-base) var(--motion-ease-standard),
+    transform var(--motion-duration-slow) var(--motion-ease-enter);
+}
 .modal-leave-active .modal-content {
-  transition: transform 0.2s ease;
+  transition:
+    opacity var(--motion-duration-fast) var(--motion-ease-exit),
+    transform var(--motion-duration-fast) var(--motion-ease-exit);
 }
 .modal-enter-from,
 .modal-leave-to {
   opacity: 0;
 }
 .modal-enter-from .modal-content {
-  transform: scale(0.95);
+  opacity: 0;
+  transform: translateY(12px) scale(0.98);
 }
 .modal-leave-to .modal-content {
-  transform: scale(0.95);
+  opacity: 0;
+  transform: translateY(6px) scale(0.99);
+}
+
+/* ===== 交错入场 =====
+   用法：容器加 `.motion-stagger`，它的直接子元素在挂载时依次升起落定。
+   - 只在元素**插入**时跑一次；之后的重渲染不重播，新插入的子元素会自己升起来。
+   - 延迟只排到第 12 个，之后同时入场 —— 长列表不该让人干等。
+   - 🔴 填充模式是 `backwards` 不是 `both`：动画结束后把 transform 交还给元素自己。
+     用 `both` 会把终帧的 `transform: none` 永久钉在元素上，盖掉主题给它的位移/缩放，
+     还会让每个子元素常驻一个新的层叠上下文。 */
+@keyframes motion-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.motion-stagger > * {
+  animation: motion-rise var(--motion-duration-slow) var(--motion-ease-enter) backwards;
+}
+.motion-stagger > :nth-child(2) {
+  animation-delay: var(--motion-stagger-step);
+}
+.motion-stagger > :nth-child(3) {
+  animation-delay: calc(var(--motion-stagger-step) * 2);
+}
+.motion-stagger > :nth-child(4) {
+  animation-delay: calc(var(--motion-stagger-step) * 3);
+}
+.motion-stagger > :nth-child(5) {
+  animation-delay: calc(var(--motion-stagger-step) * 4);
+}
+.motion-stagger > :nth-child(6) {
+  animation-delay: calc(var(--motion-stagger-step) * 5);
+}
+.motion-stagger > :nth-child(7) {
+  animation-delay: calc(var(--motion-stagger-step) * 6);
+}
+.motion-stagger > :nth-child(8) {
+  animation-delay: calc(var(--motion-stagger-step) * 7);
+}
+.motion-stagger > :nth-child(9) {
+  animation-delay: calc(var(--motion-stagger-step) * 8);
+}
+.motion-stagger > :nth-child(10) {
+  animation-delay: calc(var(--motion-stagger-step) * 9);
+}
+.motion-stagger > :nth-child(11) {
+  animation-delay: calc(var(--motion-stagger-step) * 10);
+}
+.motion-stagger > :nth-child(n + 12) {
+  animation-delay: calc(var(--motion-stagger-step) * 11);
 }

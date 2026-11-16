@@ -31,28 +31,46 @@ describe('ResourceBar', () => {
     expect(wrapper.find('.res-values').exists()).toBe(false);
   });
 
-  it('填充宽度 = current/max * 100%', () => {
+  // 条宽用 translateX 表达（design.md §1 不过渡 width）：填充层整条宽、左移 (100 - 百分比)%
+  it('填充位移 = current/max 对应的 translateX', () => {
     const wrapper = mount(ResourceBar, {
       props: { label: 'HP', current: 75, max: 100 },
     });
     const fill = wrapper.find('.res-fill');
-    expect(fill.attributes('style')).toContain('width: 75%');
+    expect(fill.attributes('style')).toContain('translateX(-25%)');
+    expect(fill.attributes('style')).not.toContain('width');
   });
 
-  it('current=0 时宽度 0%', () => {
+  it('current=0 时整条移出（-100%）', () => {
     const wrapper = mount(ResourceBar, {
       props: { label: 'HP', current: 0, max: 100 },
     });
     const fill = wrapper.find('.res-fill');
-    expect(fill.attributes('style')).toContain('width: 0%');
+    expect(fill.attributes('style')).toContain('translateX(-100%)');
   });
 
-  it('max=0 时宽度 0% (避免除零)', () => {
+  it('max=0 时整条移出 (避免除零)', () => {
     const wrapper = mount(ResourceBar, {
       props: { label: 'HP', current: 0, max: 0 },
     });
     const fill = wrapper.find('.res-fill');
-    expect(fill.attributes('style')).toContain('width: 0%');
+    expect(fill.attributes('style')).toContain('translateX(-100%)');
+  });
+
+  it('数值下降时轨道进入残影态，回升时退出', async () => {
+    const wrapper = mount(ResourceBar, {
+      props: { label: 'HP', current: 80, max: 100 },
+    });
+    const track = () => wrapper.find('.res-track');
+    expect(track().classes()).not.toContain('is-draining');
+
+    await wrapper.setProps({ current: 50 });
+    expect(track().classes()).toContain('is-draining');
+    // 残影与填充指向同一个目标位置 —— 残影只是晚到，不是另一个数
+    expect(wrapper.find('.res-ghost').attributes('style')).toContain('translateX(-50%)');
+
+    await wrapper.setProps({ current: 90 });
+    expect(track().classes()).not.toContain('is-draining');
   });
 
   it('使用自定义颜色', () => {

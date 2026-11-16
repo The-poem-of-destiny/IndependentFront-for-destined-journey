@@ -346,16 +346,24 @@ onMounted(() => {
         <Transition name="section-fade" mode="out-in">
           <div :key="activeSection" class="section-wrapper">
             <!-- ========== API 池 ========== -->
-            <ApiSection v-if="activeSection === 'api'" />
+            <!-- motion-stagger：分区根（单根 section.section）的直接子块依次入场（动效 v1） -->
+            <ApiSection v-if="activeSection === 'api'" class="motion-stagger" />
 
             <!-- ========== 内容包 ========== -->
-            <ContentPackSection v-if="activeSection === 'content-pack'" />
+            <ContentPackSection v-if="activeSection === 'content-pack'" class="motion-stagger" />
 
             <!-- ========== Agent 详情 ========== -->
-            <AgentSection v-if="activeSection === 'agent' && activeAgent" :agent-id="activeAgent" />
+            <AgentSection
+              v-if="activeSection === 'agent' && activeAgent"
+              class="motion-stagger"
+              :agent-id="activeAgent"
+            />
 
             <!-- Agent 未选择时的提示 -->
-            <section v-if="activeSection === 'agent' && !activeAgent" class="section centered">
+            <section
+              v-if="activeSection === 'agent' && !activeAgent"
+              class="section centered motion-stagger"
+            >
               <div class="empty-tab">
                 <i class="fa-solid fa-robot empty-tab-icon" aria-hidden="true"></i>
                 请从左侧选择一个 Agent
@@ -371,37 +379,37 @@ onMounted(() => {
             </section>
 
             <!-- ========== 世界书 (Phase 8) ========== -->
-            <WorldBookSection v-if="activeSection === 'worldbook'" />
+            <WorldBookSection v-if="activeSection === 'worldbook'" class="motion-stagger" />
 
             <!-- ========== 剧情系统 ========== -->
-            <PlotSection v-if="activeSection === 'plot'" />
+            <PlotSection v-if="activeSection === 'plot'" class="motion-stagger" />
 
             <!-- ========== 记忆 & 缓存 ========== -->
-            <MemorySection v-if="activeSection === 'memory'" />
+            <MemorySection v-if="activeSection === 'memory'" class="motion-stagger" />
 
             <!-- ========== 外观主题 ========== -->
-            <ThemeSection v-if="activeSection === 'theme'" />
+            <ThemeSection v-if="activeSection === 'theme'" class="motion-stagger" />
 
             <!-- ========== 消息显示 ========== -->
-            <MessagesSection v-if="activeSection === 'messages'" />
+            <MessagesSection v-if="activeSection === 'messages'" class="motion-stagger" />
 
             <!-- ========== 输出美化 ========== -->
-            <BeautifierSection v-if="activeSection === 'beautifier'" />
+            <BeautifierSection v-if="activeSection === 'beautifier'" class="motion-stagger" />
 
             <!-- ========== 音频 ========== -->
-            <AudioSection v-if="activeSection === 'audio'" />
+            <AudioSection v-if="activeSection === 'audio'" class="motion-stagger" />
 
             <!-- ========== 素材 ========== -->
-            <AssetSection v-if="activeSection === 'asset'" />
+            <AssetSection v-if="activeSection === 'asset'" class="motion-stagger" />
 
             <!-- ========== 图像生成 ========== -->
-            <ImageSection v-if="activeSection === 'image'" />
+            <ImageSection v-if="activeSection === 'image'" class="motion-stagger" />
 
             <!-- ========== 数据与备份 ========== -->
-            <DataSection v-if="activeSection === 'data'" />
+            <DataSection v-if="activeSection === 'data'" class="motion-stagger" />
 
             <!-- ========== 开发者模式 ========== -->
-            <DeveloperSection v-if="activeSection === 'developer'" />
+            <DeveloperSection v-if="activeSection === 'developer'" class="motion-stagger" />
           </div>
           <!-- /section-wrapper -->
         </Transition>
@@ -659,15 +667,18 @@ onMounted(() => {
   width: 100%;
 }
 /* 分区切换动画 */
-.section-fade-enter-active,
+/* 分区切换（动效 v1）：旧分区快速淡出；新分区整体只淡入，位移交给分区内的
+   motion-stagger（标题 / 说明 / 各卡片依次升起），两层都位移会显得发飘 */
+.section-fade-enter-active {
+  transition: opacity var(--motion-duration-base) var(--motion-ease-standard);
+}
 .section-fade-leave-active {
   transition:
-    opacity 0.2s ease,
-    transform 0.2s ease;
+    opacity var(--motion-duration-fast) var(--motion-ease-exit),
+    transform var(--motion-duration-fast) var(--motion-ease-exit);
 }
 .section-fade-enter-from {
   opacity: 0;
-  transform: translateY(8px);
 }
 .section-fade-leave-to {
   opacity: 0;

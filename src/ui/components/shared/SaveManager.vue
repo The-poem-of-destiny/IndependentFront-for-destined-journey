@@ -406,7 +406,7 @@ function formatTime(timestamp: number) {
             <p class="text-muted">还没有存档</p>
             <AppButton variant="primary" size="sm" @click="newGame">创建第一个存档</AppButton>
           </div>
-          <div v-else class="save-list">
+          <div v-else class="save-list motion-stagger">
             <div
               v-for="save in game.saves"
               :key="save.id"

@@ -9,6 +9,17 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-16 UI 动效 v1｜分支 `feat/ui-aesthetic-motion`，**动画手感未真机验证**
+
+- 起因：主人觉得界面偏朴素，要求从过渡、动效、版式入手。走查结论：全仓 200+ 处过渡都是默认 `ease` 与随手写的时长，全局过渡只有 3 组（其中 `slide-*` 零引用）；首次进入每个页面会「淡出 → 纯黑 1–3 秒 → 新页无入场地蹦出」；提示条是整块饱和色；资源条在过渡 `width`（违反 design.md 禁令）。
+- 动效 token：`themes/variables.css` 新增 `--motion-*`（standard / enter / exit 三条缓动、90–420ms 五档时长、交错间隔）；`--theme-transition-fast/normal` 改由它组成，时长不变、缓动换新。规则与编排守则见 `docs/design.md` §6.0。
+- 页面切换：新 `lib/view-loader.ts`（页面注册表 + 空闲预取）与 `shared/ViewLoading.vue`；`App.vue` 不再用 `defineAsyncComponent`，改为「载好再切换」，过渡名 `fade` → `view`。挂载 2.5 秒后逐个空闲预取其余页面，加载失败给「重试」。
+- `styles/transitions.css` 重写：`view`（页面）、`fade`、`modal`（遮罩与面板时长相等，面板自下升起落定）与 `.motion-stagger`（全局关键帧 `motion-rise`，`backwards` 填充）；删除零引用的 `slide-*`。
+- 共享件：提示条改为主题卡片底 + 语义色描边/图标，底部剩余时间细线（悬停停住），离场 FLIP 补位（容器改块级布局）；资源条改 `translateX` 并在下降时显示同色残影；读数与金币 / 命运点经新 `composables/useTweenedNumber.ts` 滚到新值并按涨跌短暂着色（只改显示，终点恒等于源值；主人 2026-11-16 裁定可做）。
+- 局部：捏人步骤条丝线描线 / 勾号盖章 / 当前步骤一次性光环；设置页 15 个分区、存档列表、难度卡片交错入场；对话流「通知条 ⇄ 卡片」改为 `card-unfold` 过渡。全部只动 opacity / transform，减动效下瞬时，无常驻循环装饰动画。
+- 测试：新增 `view-loader` 与 `useTweenedNumber` 单测，ResourceBar 测试改测 `translateX` 与残影；`DeveloperSection.test.ts` 的源码断言放宽为只钉分区接线（不钉展示类）。8 道闸门全过；本机 Node 25 的内置 `localStorage` 会让 6 个无关套件假红，需 `NODE_OPTIONS=--no-experimental-webstorage` 才与 CI（Node 20）等价。
+- 验证边界：浏览器里确认了导航、提示条、资源条、弹窗、卡片展开的终态；预览面板在后台时帧率被系统节流，**动画时序与手感未经真人观看验证**。
+
 ### 2026-11-16 首次启动与新建存档走查修复｜分支 `fix/first-run-ux`，**未真机验证**
 
 - 起因：2026-11-15 在浏览器里实走首次启动与新建存档（全新存储、1366×768、配一个连不上的假 API），主人选定修四项。

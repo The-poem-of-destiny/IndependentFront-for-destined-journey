@@ -68,16 +68,26 @@ const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八'];
   overflow-x: auto;
 }
 
-/* ===== 章节间丝线 ===== */
+/* ===== 章节间丝线 =====
+   完成的丝线由左向右「描」过去（scaleX，不动 width）；退回上一步时向左收回 */
 .step-connector {
+  position: relative;
   width: 24px;
   height: 1px;
   background: var(--theme-card-border);
   flex-shrink: 0;
-  transition: background 0.3s ease;
 }
-.connector-done {
+.step-connector::after {
+  content: '';
+  position: absolute;
+  inset: 0;
   background: color-mix(in srgb, var(--theme-primary) 55%, var(--theme-card-border));
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--motion-duration-slow) var(--motion-ease-standard);
+}
+.connector-done::after {
+  transform: scaleX(1);
 }
 
 /* ===== 章节印记 ===== */
@@ -108,6 +118,7 @@ const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八'];
 }
 
 .step-num {
+  position: relative;
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -119,10 +130,31 @@ const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八'];
   color: var(--theme-text-muted);
   border: 1px solid var(--theme-card-border);
   transition:
-    background 0.2s ease,
-    border-color 0.2s ease,
-    color 0.2s ease,
-    box-shadow 0.2s ease;
+    background var(--motion-duration-base) var(--motion-ease-standard),
+    border-color var(--motion-duration-base) var(--motion-ease-standard),
+    color var(--motion-duration-base) var(--motion-ease-standard),
+    box-shadow var(--motion-duration-base) var(--motion-ease-standard);
+}
+/* 落到当前步骤时，印记外扩散一圈即止的光环（一次性，不循环） */
+.active .step-num::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1px solid var(--theme-primary);
+  opacity: 0;
+  pointer-events: none;
+  animation: step-halo 720ms var(--motion-ease-enter);
+}
+@keyframes step-halo {
+  from {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.65);
+  }
 }
 .step-cn {
   font-family: var(--theme-font-title, 'Noto Serif SC', serif);
@@ -139,8 +171,17 @@ const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八'];
   color: color-mix(in srgb, var(--theme-primary) 75%, var(--theme-text-muted));
 }
 .step-check {
+  display: inline-block;
   font-size: 0.8rem;
   font-weight: 700;
+  /* 步骤完成时勾号「盖」上去：挂载即播一次 */
+  animation: step-check-in var(--motion-duration-slow) var(--motion-ease-enter) backwards;
+}
+@keyframes step-check-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4) rotate(-14deg);
+  }
 }
 
 .step-label {
@@ -157,10 +198,6 @@ const CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八'];
   color: var(--theme-text-secondary);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .step-connector,
-  .step-num {
-    transition: none;
-  }
-}
+/* 减动效：全局规则（themes/variables.css）把过渡与一次性动画压成瞬时 —— 光环停在透明终态、
+   勾号与丝线直接到位，这里不必再单独写媒体查询 */
 </style>

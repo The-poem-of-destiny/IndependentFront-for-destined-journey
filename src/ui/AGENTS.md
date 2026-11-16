@@ -42,6 +42,15 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │                                          「懒加载」是当年 router 留下的形状，路由本身已经不在了 ——
 │                                          `useRouter()` / `$route` 一个都没有，加回来等于新引入一套
 │                                          与 `ui.currentView` 并行的真源
+│                                       📌 2026-11-16（动效 v1）：六个页面**不再是 `defineAsyncComponent`**，
+│                                          改由 `lib/view-loader.ts` 的注册表显式持有「载好没有」——
+│                                          没载好渲染 `shared/ViewLoading.vue`（key 为 `loading:<view>`），
+│                                          载好后换成真页面；过渡名由 `fade` 改为 `view`。
+│                                          🔴 别改回 defineAsyncComponent：它的包装组件在模块到手前渲染
+│                                          空节点，Transition 只看得见包装层 —— 首次进每个页面都是
+│                                          「淡出 → 纯黑 1–3 秒（dev 按需编译）→ 无入场动画地蹦出」。
+│                                          挂载 2.5s 后按 create → game → settings → extensions → workshop
+│                                          逐个空闲预取（`views.prefetch`，卸载时取消）
 │                                       两个 watch：界面级场景配乐（`queryForView`，见 lib/view-audio.ts）
 │                                       + 减少动态效果（**必须 `immediate`** —— 设置从 localStorage
 │                                       水合回来不触发变更回调，少了它，开着该选项的用户重启后会先看
@@ -128,6 +137,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   一处补了确认、另一处仍把人拦死在 toast 上
 │   │                                   🔴 请求形状里**没有** source / quotaConfirmed 字段，所以
 │   │                                      「顺手给自动档开个绕过口」在这一层是类型错误，不是代码审查
+│   ├── useTweenedNumber.ts          ← 🆕 [2026-11-16 / 动效 v1 第 5 项] 数值滚动：`{ display, trend }`，
+│   │                                   源值变化时显示值约 480ms 滚到新数、`trend` 标涨跌（模板据此短暂着色）。
+│   │                                   🔴 只改显示：终点恒等于源值、挂载不滚、非整数不插值、减动效直接到位
+│   │                                   （PRODUCT.md「一个真相来源」）。帧驱动可注入（`frames`），无 rAF 时退 16ms 定时器。
+│   │                                   消费方：ResourceBar 读数、StatusOverview 钱袋/命运点、ItemsPanel 金币、
+│   │                                   CharacterListPanel 命运点
 │   └── useAutosave.ts               ← 🆕 [自动存档 2026-10-05] 游戏页监活表（消息/角色/档案/事件）
 │                                       改动，静默 5s（节流）后调 `game.runAutosave()` 把当前状态
 │                                       覆写进「本轮 turn 快照」—— 手动润色/重铸不再因回档丢失。
@@ -290,6 +305,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   调用方是 App.vue 的 watch）。离开游戏页**不 stop 而是换场景** ——
 │   │                                   突然死寂比继续放更突兀，与「未命中时保持当前播放」同一条道理。
 │   │                                   游戏页/设置页/工坊返回空 query = 不动音乐
+│   ├── view-loader.ts               ← 🆕 [2026-11-16 / 动效 v1] 顶层页面注册表：`resolved` / `failed` /
+│   │                                   `ensure`（**永不 reject**，失败记 `failed`、再调即重试；在途去重）
+│   │                                   + `prefetch(order, { startDelayMs, scheduler })`（一次一个、每个等空闲，
+│   │                                   返回取消函数）。App.vue 唯一调用方；为什么不用 defineAsyncComponent 见文件头
 │   ├── reduced-motion.ts            ← 「现在该不该动画」的唯一判定（系统 `prefers-reduced-motion`
 │   │                                   ∪ 应用内开关）。★读 DOM 的 `data-reduced-motion` 而**不是**
 │   │                                   import settings-store：本模块被组件直接调，走 store 会把纯查询
@@ -577,6 +596,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               📌 2026-11-12（UIL-19）：游戏内打开时正在游玩的存档标「游玩中」，
 │   │   │                                  主操作为「继续游戏」（只关窗、不重走准入检查）
 │   │   ├── ToastContainer.vue       ← 📌 2026-11-14（G-08）：每条有 × 关闭、悬停暂停；错误/警告点击复制后原地显示「已复制」
+│   │   │                               📌 2026-11-16（动效 v1）：外观改为主题卡片底 + 语义色染底/描边（`--toast-accent`），
+│   │   │                               底部细线显示剩余时间（与 store 计时同源，悬停/聚焦停住）；离场 FLIP 补位。
+│   │   │                               🔴 容器必须是**块级**布局：离场项 `position: absolute`，flex 容器里它会先跳到顶部
+│   │   ├── ViewLoading.vue          ← 🆕 [2026-11-16 / 动效 v1] 顶层页面加载态（App.vue 渲染）：前 200ms 不显示，
+│   │   │                               失败给「重试」（emit `retry`），离场瞬时（transitions.css `.view-loading.view-leave-active`）
+│   │   ├── ResourceBar.vue          ← 📌 2026-11-16（动效 v1）：填充层整条宽 + `translateX`（不再过渡 width）；
+│   │   │                               数值下降时 `.res-ghost` 同色残影停留后追上（`.is-draining`），只读 props 不改数
 │   │   ├── ConfirmDialogHost.vue    ← 🆕 [2026-11-14] `lib/confirm-dialog.ts` 的唯一宿主（App.vue 挂一次）。
 │   │   │                               按请求 `v-if` + `:key` 挂 AppModal，打开时 Teleport 锚点排在已开弹窗之后，
 │   │   │                               所以从别的弹窗里发起也盖在上面；危险确认默认聚焦「取消」
@@ -1186,6 +1212,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │       └── format.ts / failure-text.ts（展示层纯函数；P3: +unauthorized 分支 / Discord 头像与登录引导文案）
 │
 └── styles/                          ← base.css / transitions.css / utilities.css
+    │                                   📌 2026-11-16（动效 v1）：transitions.css 收全局过渡 `view`（顶层页面）/ `fade` /
+    │                                   `modal` 与交错入场 `.motion-stagger`（全局关键帧 `motion-rise`），时长缓动全取
+    │                                   variables.css 的 `--motion-*` token；规则见 docs/design.md §6.0。
+    │                                   死代码 `slide-left/right` 已删（零引用）
     ├── cards-shared.css             ← 系统卡片共享样式（game/cards/ 的 Craft / Combat / Item 卡引用）。
     │                                   强调色由消费方设 `--sys-accent`（品质色/结局色），骨架用整圈
     │                                   边框色调 + 头部色点表达 —— **禁用左侧色条**；颜色一律走变量
