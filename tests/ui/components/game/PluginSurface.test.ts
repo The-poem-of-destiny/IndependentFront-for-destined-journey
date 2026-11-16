@@ -191,6 +191,8 @@ describe('PluginSurface 插件界面外壳', () => {
     expect(size.height).toBeLessThanOrEqual(800);
     const frame = wrapper.find('[data-testid="plugin-surface-frame"]').element as HTMLElement;
     expect(px(frame.style.height)).toBe(size.height);
+    // 回归：帧容器的 `flex: 1` 曾让 height 失效（真机里窗口缩成 iframe 默认的 150px）
+    expect(frame.style.flex).toBe('0 0 auto');
   });
 
   it('键盘方向键可调整窗口大小', async () => {

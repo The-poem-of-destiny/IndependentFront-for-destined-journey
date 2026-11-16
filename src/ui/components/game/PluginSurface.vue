@@ -157,7 +157,12 @@ const rootStyle = computed<Record<string, string>>(() => {
 
 const frameStyle = computed<Record<string, string>>(() => {
   const style: Record<string, string> = {};
-  if (props.mode === 'window' || props.mode === 'panel') style.height = `${size.value.height}px`;
+  if (props.mode === 'window' || props.mode === 'panel') {
+    style.height = `${size.value.height}px`;
+    // .ps-frame 的 `flex: 1` 会让 flex-basis 0 盖过 height，外框高度不定时帧缩成 iframe 默认的 150px；
+    // 有明确高度的模式改为不伸缩，让 height 生效
+    style.flex = '0 0 auto';
+  }
   return style;
 });
 
