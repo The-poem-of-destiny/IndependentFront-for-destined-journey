@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { shallowMount } from '@vue/test-utils';
+import { shallowMount, mount } from '@vue/test-utils';
 import { reactive } from 'vue';
 import CreateStepBasic from '../../../../src/ui/components/create/CreateStepBasic.vue';
 
@@ -51,6 +51,12 @@ beforeEach(() => {
     totalCost: 72,
     reincarnationPoints: 1000,
     overspentPoints: 0,
+    addBasePoint: vi.fn(),
+    removeBasePoint: vi.fn(),
+    setBasePoint: vi.fn(),
+    distributeBasePointsEvenly: vi.fn(),
+    randomizeBasePoints: vi.fn(),
+    resetBasePoints: vi.fn(),
   });
 });
 
@@ -75,5 +81,69 @@ describe('CreateStepBasic — 消耗明细', () => {
     expect(wrapper.find('.cost-summary').classes()).toContain('over');
     expect(wrapper.find('.cost-over').text()).toContain('转生点数超支 120');
     expect(wrapper.find('.cost-over').text()).toContain('无法创建角色');
+  });
+});
+
+describe('CreateStepBasic — 基础点快捷分配', () => {
+  // 只挂真 AppButton，其余子组件仍 stub（mount 才点得到 <button>）
+  const mountQuick = () =>
+    mount(CreateStepBasic, {
+      global: {
+        stubs: {
+          FormInput: true,
+          FormSelect: true,
+          FormStepper: true,
+          ResourceBar: true,
+          AttributeEditor: true,
+        },
+      },
+    });
+
+  it('渲染平均分配 / 随机分配 / 重置三个按钮', () => {
+    const quick = mountQuick().find('[data-test="bp-quick"]');
+    expect(quick.text()).toContain('平均分配');
+    expect(quick.text()).toContain('随机分配');
+    expect(quick.text()).toContain('重置');
+  });
+
+  it('剩余为 0 时禁用平均分配；已用为 0 时禁用重置；随机分配始终可用', () => {
+    mockCreate.remainingBP = 0;
+    mockCreate.usedBP = 25;
+    let wrapper = mountQuick();
+    expect(wrapper.find('[data-test="bp-even"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.find('[data-test="bp-reset"]').attributes('disabled')).toBeUndefined();
+    expect(wrapper.find('[data-test="bp-random"]').attributes('disabled')).toBeUndefined();
+
+    mockCreate.remainingBP = 25;
+    mockCreate.usedBP = 0;
+    wrapper = mountQuick();
+    expect(wrapper.find('[data-test="bp-even"]').attributes('disabled')).toBeUndefined();
+    expect(wrapper.find('[data-test="bp-reset"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.find('[data-test="bp-random"]').attributes('disabled')).toBeUndefined();
+  });
+
+  it('点击按钮调用对应 store 动作；随机分配不把点击事件当 rng 传入', async () => {
+    mockCreate.remainingBP = 10;
+    mockCreate.usedBP = 15;
+    const wrapper = mountQuick();
+    await wrapper.find('[data-test="bp-even"]').trigger('click');
+    await wrapper.find('[data-test="bp-random"]').trigger('click');
+    await wrapper.find('[data-test="bp-reset"]').trigger('click');
+    expect(mockCreate.distributeBasePointsEvenly).toHaveBeenCalledTimes(1);
+    expect(mockCreate.randomizeBasePoints).toHaveBeenCalledTimes(1);
+    expect(mockCreate.randomizeBasePoints).toHaveBeenCalledWith();
+    expect(mockCreate.resetBasePoints).toHaveBeenCalledTimes(1);
+  });
+
+  it('基础列 AttributeEditor 带 editable，额外列不带', () => {
+    const wrapper = shallowMount(CreateStepBasic);
+    const editors = (sel: string) =>
+      wrapper.findAll(sel).map((td) => td.findComponent({ name: 'AttributeEditor' }));
+    const bpEditors = editors('.attr-bp');
+    const apEditors = editors('.attr-ap');
+    expect(bpEditors.length).toBe(5);
+    expect(apEditors.length).toBe(5);
+    expect(bpEditors.every((w) => w.props('editable') === true)).toBe(true);
+    expect(apEditors.every((w) => !w.props('editable'))).toBe(true);
   });
 });

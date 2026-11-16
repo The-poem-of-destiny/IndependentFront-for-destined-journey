@@ -24,6 +24,21 @@ describe('classifyTurnFailure', () => {
     ['HTTP 500: internal', 'server'],
     ['HTTP 503: overloaded', 'server'],
     ['HTTP 504: gateway timeout', 'network'],
+    ['HTTP 502: {"error":"upstream unreachable: fetch failed: bad port"}', 'network'],
+    ['HTTP 502: {"error":"upstream unreachable: fetch failed: ECONNREFUSED"}', 'network'],
+    ['HTTP 502: {"error":"upstream unreachable: fetch failed: ENOTFOUND"}', 'network'],
+    ['HTTP 502: {"error":"upstream redirect (3xx) rejected by proxy redirect policy"}', 'network'],
+    ['HTTP 503: connect ECONNREFUSED 127.0.0.1:8080', 'network'],
+    ['HTTP 502: Bad Gateway', 'server'],
+    // 服务端措辞里的「reconnect」不是连接错误码
+    [
+      'HTTP 503: {"error":{"message":"Service temporarily unavailable, please reconnect later"}}',
+      'server',
+    ],
+    // 中转站自报的 fetch failed 是它自己的上游问题，玩家改设置无济于事
+    ['HTTP 500: {"error":{"message":"fetch failed"}}', 'server'],
+    // 只认代理的错误体形状：服务商正文里顺带的字样不抢先于额度判断
+    ['HTTP 500: Insufficient credit balance; upstream unreachable', 'quota'],
     ['HTTP 400: invalid model', 'rejected'],
     ['response blocked by content_filter', 'rejected'],
     ['TypeError: Failed to fetch', 'network'],
@@ -84,8 +99,10 @@ describe('buildTurnFailure / turnFailureCopy', () => {
     });
   });
 
-  it('密钥 / 额度 / 配置三类给「去设置」，其余不给；每类都有一句话与下一步', () => {
+  it('密钥 / 额度 / 配置 / 网络（地址可能填错）给「去设置」，其余不给；每类都有一句话与下一步', () => {
     expect(turnFailureCopy('auth').needsSettings).toBe(true);
+    expect(turnFailureCopy('network').needsSettings).toBe(true);
+    expect(turnFailureCopy('server').needsSettings).toBe(false);
     expect(turnFailureCopy('config').needsSettings).toBe(true);
     expect(turnFailureCopy('quota').needsSettings).toBe(true);
     expect(turnFailureCopy('rate_limit').needsSettings).toBe(false);

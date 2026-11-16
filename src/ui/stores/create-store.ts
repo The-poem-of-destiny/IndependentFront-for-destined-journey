@@ -489,6 +489,54 @@ export const useCreateStore = defineStore('create', () => {
       basePoints.value = { ...basePoints.value, [attr]: (basePoints.value[attr] || 0) - 1 };
     }
   }
+  /**
+   * 直接设定某项基础点：取整，钳到 [0, min(单项上限, 当前值 + 剩余点)]，返回实际写入值。
+   * NaN 不改动，返回原值（输入框据此把显示值写回）。
+   */
+  function setBasePoint(attr: string, value: number): number {
+    const current = basePoints.value[attr] || 0;
+    const n = Math.round(value);
+    if (Number.isNaN(n)) return current;
+    const cap = Math.min(BP_PER_ATTR_MAX, current + remainingBP.value);
+    const next = Math.max(0, Math.min(cap, n));
+    if (next !== current) basePoints.value = { ...basePoints.value, [attr]: next };
+    return next;
+  }
+  /** 只分剩余点：按属性固定顺序逐轮给未满项 +1，余数落在靠前属性，保留已有差值 */
+  function distributeBasePointsEvenly() {
+    const next: Record<string, number> = { ...basePoints.value };
+    let left = remainingBP.value;
+    while (left > 0) {
+      let progressed = false;
+      for (const attr of ATTRIBUTE_NAMES) {
+        if (left <= 0) break;
+        if ((next[attr] || 0) < BP_PER_ATTR_MAX) {
+          next[attr] = (next[attr] || 0) + 1;
+          left--;
+          progressed = true;
+        }
+      }
+      if (!progressed) break;
+    }
+    basePoints.value = next;
+  }
+  /** 清零后重掷：重复 MAX_BP 次，每次在未满项里等概率取一项 +1 */
+  function randomizeBasePoints(rng: () => number = Math.random) {
+    const next: Record<string, number> = {};
+    for (const attr of ATTRIBUTE_NAMES) next[attr] = 0;
+    for (let i = 0; i < MAX_BP; i++) {
+      const open = ATTRIBUTE_NAMES.filter((attr) => next[attr] < BP_PER_ATTR_MAX);
+      if (open.length === 0) break;
+      const idx = Math.min(open.length - 1, Math.floor(rng() * open.length));
+      next[open[idx]]++;
+    }
+    basePoints.value = next;
+  }
+  function resetBasePoints() {
+    const next: Record<string, number> = {};
+    for (const attr of ATTRIBUTE_NAMES) next[attr] = 0;
+    basePoints.value = next;
+  }
 
   const maxAP = computed(() => Math.max(0, level.value - 1));
   const usedAP = computed(() => Object.values(attributePoints.value).reduce((a, b) => a + b, 0));
@@ -2931,6 +2979,10 @@ export const useCreateStore = defineStore('create', () => {
     attributesFullyAllocated,
     addBasePoint,
     removeBasePoint,
+    setBasePoint,
+    distributeBasePointsEvenly,
+    randomizeBasePoints,
+    resetBasePoints,
     addAttributePoint,
     removeAttributePoint,
     hpPreview,

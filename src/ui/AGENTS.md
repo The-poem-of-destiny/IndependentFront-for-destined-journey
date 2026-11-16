@@ -12,7 +12,7 @@
 
 ## Story v2 / 内容路由速览
 
-- 直出：`CreatePage.vue` 准备页明确选择存档模式，`create-store.ts` 必填校验并持久化；`game-store.ts` 从存档解析模式与战斗投影，`lib/game-pipeline.ts` 独立直出分支复用原有记忆。`lib/direct-settings.ts` 初始化独立模型配置，设置页不提供档内模式切换。
+- 直出：准备页（`CreateReadiness.vue`，状态由 `CreatePage.vue` 持有）明确选择存档模式，`create-store.ts` 必填校验并持久化；`game-store.ts` 从存档解析模式与战斗投影，`lib/game-pipeline.ts` 独立直出分支复用原有记忆。`lib/direct-settings.ts` 初始化独立模型配置，设置页不提供档内模式切换。
 - 缓存直出：建档第三项 `direct_cached`，配置页单列缓存主生成的连接、参数、预设与渠道策略；运行时仍是 `direct_main`。`DebugPanel` 区分缓存读取、写入、普通输入与总输入，缺字段保持未知。详见 [缓存直出](../../docs/reference/direct-generation-cache.md)。
 
 - 原生角色：`stores/content-store.ts` 载入 `characters` 分节；`create-store.ts` 选择并冻结作者定义；`lib/game-pipeline.ts` 暂存主叙事更新，在回合接纳后经 `StateManager` 提交。`CharacterViewerModal.vue` 内嵌 `CharacterChronicleTab.vue`，支持重要筛选、搜索、排序和来源详情；协议与边界见 [角色系统](../../docs/reference/character-system.md)。
@@ -307,7 +307,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   GamePage 的入口（菜单设置/扩展/首页、插画「去设置」、RPM 弹窗）都先过它
 │   ├── turn-failure.ts              ← 🆕 [2026-11-14 / GAME-05] 回合失败归类（auth/quota/rate_limit/network/
 │   │                                   server/rejected/config/unknown）与措辞的**唯一出处**；原文先
-│   │                                   `redactSecrets` 脱敏再截断（上游错误体可能回显密钥）
+│   │                                   `redactSecrets` 脱敏再截断（上游错误体可能回显密钥）。
+│   │                                   📌 2026-11-16：本地代理包出的 502「upstream unreachable /
+│   │                                   upstream redirect」与 5xx 里的连通性字样归 network（不再按
+│   │                                   状态码判 server），network 类也给「去设置」
 │   ├── turn-recovery.ts             ← 🆕 [2026-11-14 / GAME-09·10] 从**已持久化**消息推导「上一回合未完成」
 │   │                                   （玩家消息 `storyTurnStatus`，旧消息退回「最新输入后无正文」）与
 │   │                                   「已废弃的尝试」分组（failed 的 assistant 正文）。纯函数
@@ -842,7 +845,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── create/                      ← 捏人页（**不再是占位**：8 步向导，共 ~21 个组件 + 7 个测试）
 │   │   ├── CreatePage.vue           ← 页壳：8 个 `defineAsyncComponent` 步骤 + 进度条 + 页脚，
 │   │   │                               `store.currentStep` 决定渲染哪一步（与 App.vue 同一种
-│   │   │                               「computed 选组件」形状，同样没有 router）
+│   │   │                               「computed 选组件」形状，同样没有 router）。
+│   │   │                               切步骤在 `<Transition>` 的 after-leave 复位滚动（2026-11-16）
+│   │   ├── CreateReadiness.vue      ← 🆕 [2026-11-16] 准入页（启程前的准备）的模板与样式：
+│   │   │                               ①生成模式三张卡（空默认、无推荐）+ 计费说明收进 details
+│   │   │                               → ②本机配置检查（`lib/journey-readiness.ts`，未选模式时首条
+│   │   │                               即「尚未选择生成模式」）→ 操作行（置灰时写出原因，API 设置
+│   │   │                               入口不重复）。状态仍由 CreatePage 持有
 │   │   ├── CreateSteps.vue          ← 顶部进度条。★步骤名的**唯一出处** `STEP_LABELS`：
 │   │   │                               难度选择 / 基础信息 / 命定核心 / **角色启用** /
 │   │   │                               装备选择 / 背景故事 / 剧情规划 / 确认提交；八个步骤按钮
@@ -858,7 +867,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── CreateStepBackground.vue      ← ⑥ 背景故事
 │   │   ├── CreateStepPlot.vue            ← ⑦ 剧情规划
 │   │   ├── CreateStepConfirm.vue         ← ⑧ 确认提交（含素材/画像收尾）
-│   │   ├── AttributeEditor.vue / PointsBar.vue   ← 五维分配与点数条（点数余额的展示层）
+│   │   ├── AttributeEditor.vue / PointsBar.vue   ← 五维分配与点数条（点数余额的展示层）；2026-11-16 起基础列可直接键入（`editable` + `set` 事件），第 2 步另有平均 / 随机 / 重置三个快捷按钮，逻辑在 `create-store` 的 `setBasePoint` 等四个动作
 │   │   ├── QualityFilter.vue / CategoryTabs.vue / CategorySelectionLayout.vue
 │   │   │                                 ← 品质筛选 + 类目页签 + 「左类目 / 右列表」通用版式
 │   │   ├── SelectableCard.vue / SelectedPanel.vue ← 可选卡片 + 已选面板（选择步骤的两半）

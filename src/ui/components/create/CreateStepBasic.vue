@@ -7,6 +7,7 @@ import FormSelect from '../shared/form/FormSelect.vue';
 import FormStepper from '../shared/form/FormStepper.vue';
 import ResourceBar from '../shared/ResourceBar.vue';
 import AttributeEditor from './AttributeEditor.vue';
+import AppButton from '../shared/AppButton.vue';
 
 const store = useCreateStore();
 
@@ -135,6 +136,35 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
 
         <!-- ★ 属性表格 (原版 5 列) -->
         <div class="attr-table-wrapper">
+          <!-- 基础点快捷分配：只动「基础」列 -->
+          <div class="bp-quick" data-test="bp-quick">
+            <AppButton
+              variant="ghost"
+              size="sm"
+              data-test="bp-even"
+              :disabled="store.remainingBP === 0"
+              @click="store.distributeBasePointsEvenly()"
+            >
+              平均分配
+            </AppButton>
+            <AppButton
+              variant="ghost"
+              size="sm"
+              data-test="bp-random"
+              @click="store.randomizeBasePoints()"
+            >
+              随机分配
+            </AppButton>
+            <AppButton
+              variant="ghost"
+              size="sm"
+              data-test="bp-reset"
+              :disabled="store.usedBP === 0"
+              @click="store.resetBasePoints()"
+            >
+              重置
+            </AppButton>
+          </div>
           <table class="attr-table">
             <thead>
               <tr>
@@ -155,8 +185,10 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
                     :model-value="store.basePoints[attr] || 0"
                     :max="store.BP_PER_ATTR_MAX"
                     :remaining="store.remainingBP"
+                    editable
                     @inc="store.addBasePoint"
                     @dec="store.removeBasePoint"
+                    @set="store.setBasePoint"
                   />
                 </td>
                 <td class="attr-tier-cell">
@@ -392,6 +424,15 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-lg);
   padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+}
+.bp-quick {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--theme-spacing-xs);
+  padding-bottom: var(--theme-spacing-xs);
+  border-bottom: 1px solid var(--theme-card-border);
+  margin-bottom: var(--theme-spacing-xs);
 }
 .attr-table {
   width: 100%;

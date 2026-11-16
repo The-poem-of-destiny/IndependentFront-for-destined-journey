@@ -438,6 +438,116 @@ describe('基础属性 BP 分配', () => {
     for (let i = 0; i < 30; i++) store.addBasePoint('力量');
     expect(store.usedBP).toBeLessThanOrEqual(25);
   });
+
+  // ── 快捷分配：setBasePoint / 平均 / 随机 / 重置 ──
+
+  const ORDER = ['力量', '敏捷', '体质', '智力', '精神'];
+  const bp = () => ORDER.map((a) => store.basePoints[a]);
+
+  /** 固定序列 rng：循环吐出给定值 */
+  function seqRng(values: number[]) {
+    let i = 0;
+    return () => values[i++ % values.length];
+  }
+
+  /** 可复现的线性同余 rng（只用于不变量检查） */
+  function lcg(seed: number) {
+    let x = seed >>> 0;
+    return () => {
+      x = (Math.imul(x, 1664525) + 1013904223) >>> 0;
+      return x / 2 ** 32;
+    };
+  }
+
+  it('setBasePoint：超过单项上限钳到 6', () => {
+    expect(store.setBasePoint('力量', 9)).toBe(6);
+    expect(store.basePoints['力量']).toBe(6);
+  });
+
+  it('setBasePoint：剩余 2、当前 1 时输入 6 → 3', () => {
+    store.basePoints = { 力量: 1, 敏捷: 6, 体质: 6, 智力: 6, 精神: 4 };
+    expect(store.remainingBP).toBe(2);
+    expect(store.setBasePoint('力量', 6)).toBe(3);
+    expect(store.basePoints['力量']).toBe(3);
+    expect(store.remainingBP).toBe(0);
+  });
+
+  it('setBasePoint：取整、负数钳到 0、NaN 不改', () => {
+    store.setBasePoint('敏捷', 3);
+    expect(store.setBasePoint('敏捷', 4.6)).toBe(5);
+    expect(store.setBasePoint('敏捷', -2)).toBe(0);
+    store.setBasePoint('敏捷', 2);
+    expect(store.setBasePoint('敏捷', NaN)).toBe(2);
+    expect(store.basePoints['敏捷']).toBe(2);
+  });
+
+  it('平均分配：空表得 5/5/5/5/5', () => {
+    store.distributeBasePointsEvenly();
+    expect(bp()).toEqual([5, 5, 5, 5, 5]);
+    expect(store.remainingBP).toBe(0);
+  });
+
+  it('平均分配：{力量6, 智力6} → 敏捷5 体质4 精神4（保留已有差值）', () => {
+    store.basePoints = { 力量: 6, 敏捷: 0, 体质: 0, 智力: 6, 精神: 0 };
+    store.distributeBasePointsEvenly();
+    expect(bp()).toEqual([6, 5, 4, 6, 4]);
+    expect(store.usedBP).toBe(25);
+  });
+
+  it('平均分配：{力量4} → 6/5/5/5/4（余数落在靠前属性）', () => {
+    store.basePoints = { 力量: 4, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 };
+    store.distributeBasePointsEvenly();
+    expect(bp()).toEqual([6, 5, 5, 5, 4]);
+  });
+
+  it('平均分配：已分满时不变', () => {
+    store.distributeBasePointsEvenly();
+    const before = bp();
+    store.distributeBasePointsEvenly();
+    expect(bp()).toEqual(before);
+  });
+
+  it('随机分配：固定序列 rng 结果可复现，且先清零再重掷', () => {
+    store.basePoints = { 力量: 6, 敏捷: 6, 体质: 0, 智力: 0, 精神: 0 };
+    // rng 恒为 0 → 每次取未满项中最靠前的一项
+    store.randomizeBasePoints(seqRng([0]));
+    expect(bp()).toEqual([6, 6, 6, 6, 1]);
+    // rng 恒接近 1 → 每次取未满项中最靠后的一项
+    store.randomizeBasePoints(seqRng([0.999]));
+    expect(bp()).toEqual([1, 6, 6, 6, 6]);
+  });
+
+  it('随机分配：多个种子下总和恒为 25 且每项 ≤ 6', () => {
+    for (let seed = 1; seed <= 50; seed++) {
+      store.randomizeBasePoints(lcg(seed));
+      const vals = bp();
+      expect(vals.reduce((a, b) => a + b, 0)).toBe(25);
+      for (const v of vals) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(6);
+      }
+    }
+  });
+
+  it('重置：全部归 0', () => {
+    store.distributeBasePointsEvenly();
+    store.resetBasePoints();
+    expect(bp()).toEqual([0, 0, 0, 0, 0]);
+    expect(store.remainingBP).toBe(25);
+  });
+
+  it('四个快捷动作都不动额外属性点', () => {
+    store.level = 5;
+    store.addAttributePoint('力量');
+    store.addAttributePoint('精神');
+    const ap = { ...store.attributePoints };
+    expect(ap['力量']).toBe(1);
+    store.setBasePoint('力量', 4);
+    store.distributeBasePointsEvenly();
+    store.randomizeBasePoints(lcg(7));
+    store.resetBasePoints();
+    expect(store.attributePoints).toEqual(ap);
+  });
 });
 
 // ===== AP 分配 =====

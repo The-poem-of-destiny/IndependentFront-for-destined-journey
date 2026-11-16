@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { shallowMount, flushPromises } from '@vue/test-utils';
-import { defineComponent, reactive } from 'vue';
+import { defineComponent, h, reactive } from 'vue';
 import CreatePage from '../../../../src/ui/components/create/CreatePage.vue';
 
 let create: any;
@@ -25,9 +25,10 @@ vi.mock('../../../../src/ui/stores/ui-store', () => ({
 // Vue Test Utils 的布尔异步组件 stub 仍会调用 __asyncLoader() 来登记真实组件。
 // <script setup> 会把八个异步组件识别为 Step0–Step7，按这些绑定名使用具体组件替身
 // 才能在浅挂载入口截断动态 import，避免测试环境销毁后继续加载步骤依赖。
+// 替身渲染真实元素：out-in <Transition> 只有在旧节点是元素时才会走 leave 钩子（滚动复位用例依赖）
 const AsyncStepStub = defineComponent({
   name: 'AsyncStepStub',
-  render: () => null,
+  render: () => h('div', { class: 'step-stub' }),
 });
 
 function mountCreatePage(renderStubDefaultSlot = false) {
@@ -35,6 +36,8 @@ function mountCreatePage(renderStubDefaultSlot = false) {
     global: {
       renderStubDefaultSlot,
       stubs: {
+        // 准入页经真实的 CreateReadiness 驱动（其内部的 AppButton / AppCard 仍是浅挂载桩）
+        CreateReadiness: false,
         Step0: AsyncStepStub,
         Step1: AsyncStepStub,
         Step2: AsyncStepStub,
@@ -91,7 +94,7 @@ describe('first journey readiness', () => {
       .findAllComponents({ name: 'AppButton' })
       .find((button) => button.text() === '开始创建角色')!;
     expect(start.props('disabled')).toBe(true);
-    wrapper.findComponent({ name: 'FormSelect' }).vm.$emit('update:modelValue', 'direct');
+    wrapper.findComponent({ name: 'CreateReadiness' }).vm.$emit('update:generationMode', 'direct');
     await flushPromises();
     expect(start.props('disabled')).toBe(false);
     start.vm.$emit('click');
@@ -108,9 +111,14 @@ describe('first journey readiness', () => {
     wrapper.unmount();
   });
   it('missing API is explained before any character step can advance', async () => {
-    const wrapper = mountCreatePage();
+    const wrapper = mountCreatePage(true);
     await flushPromises();
     expect(wrapper.text()).toContain('配置 API');
+    wrapper
+      .findAllComponents({ name: 'AppButton' })
+      .find((button) => button.text() === '配置 API')!
+      .vm.$emit('click');
+    expect(openSettings).toHaveBeenCalledWith('api');
     expect(wrapper.findComponent({ name: 'CreateFooter' }).exists()).toBe(false);
     expect(create.nextStep).not.toHaveBeenCalled();
     wrapper.unmount();
@@ -223,5 +231,62 @@ describe('first journey readiness', () => {
     expect(create.resetAll).toHaveBeenCalledTimes(1);
     expect(create.loadWorldBookEntries).toHaveBeenCalledTimes(2); // 进页一次 + 重新开始一次
     wrapper.unmount();
+  });
+
+  describe('切步骤时滚动复位', () => {
+    function mountWithRealTransition() {
+      return shallowMount(CreatePage, {
+        global: {
+          renderStubDefaultSlot: true,
+          stubs: {
+            CreateReadiness: false,
+            Transition: false,
+            Step0: AsyncStepStub,
+            Step1: AsyncStepStub,
+            Step2: AsyncStepStub,
+            Step3: AsyncStepStub,
+            Step4: AsyncStepStub,
+            Step5: AsyncStepStub,
+            Step6: AsyncStepStub,
+            Step7: AsyncStepStub,
+          },
+        },
+      });
+    }
+    async function accept(wrapper: ReturnType<typeof mountWithRealTransition>) {
+      wrapper
+        .findAllComponents({ name: 'AppButton' })
+        .find((button) => button.text() === '开始创建角色')!
+        .vm.$emit('click');
+      await flushPromises();
+    }
+
+    beforeEach(() => {
+      settings.settings.apiPool = [
+        { id: 'chat', baseUrl: 'http://localhost:1234/v1', model: 'local', apiType: 'chat' },
+      ];
+    });
+
+    it('点步骤条换步后，内容区滚回顶部', async () => {
+      const wrapper = mountWithRealTransition();
+      await flushPromises();
+      await accept(wrapper);
+      const main = wrapper.find('main.create-content').element as HTMLElement;
+      main.scrollTop = 127;
+      wrapper.findComponent({ name: 'CreateSteps' }).vm.$emit('select', 1);
+      await vi.waitFor(() => expect(main.scrollTop).toBe(0));
+      expect(create.currentStep).toBe(1);
+      wrapper.unmount();
+    });
+
+    it('准入页滚动后点开始创建，第 1 步从顶部开始', async () => {
+      const wrapper = mountWithRealTransition();
+      await flushPromises();
+      const main = wrapper.find('main.create-content').element as HTMLElement;
+      main.scrollTop = 127;
+      await accept(wrapper);
+      expect(main.scrollTop).toBe(0);
+      wrapper.unmount();
+    });
   });
 });
