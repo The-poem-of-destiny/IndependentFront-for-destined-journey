@@ -133,6 +133,14 @@ import {
   deletePresets,
 } from '@engine/persistence/database';
 import type { ContentPackRecord } from '@engine/persistence/database';
+import {
+  readDevContentSourcePreference,
+  resolveDevContentSource,
+  type DevContentSourceResolution,
+} from '../lib/dev-content-source';
+
+/** 构建期常量：开发时是否配置了本地内容目录（vite define 注入，见 vite.config.ts） */
+declare const __POEM_CONTENT_DIR__: boolean;
 
 // ═══════════════════════════════════════════════════════════
 // 1. 模块级 ready promise（D16 时序契约）
@@ -713,6 +721,12 @@ export const useContentStore = defineStore('content', () => {
   const boundUserId = ref<string | null>(null);
   const leaseExpiresAt = ref<number | null>(null);
   const protectedPack = ref(false);
+  /**
+   * 开发期内容源决策（`lib/dev-content-source.ts`）。仅 `import.meta.env.DEV` 下由
+   * hydratePackState 写入；生产构建整块被摇掉，恒为 null。
+   * `suppressPack` 为真时已安装包保留在 Dexie 但不激活，装/升/卸一律拒绝。
+   */
+  const devContentSource = ref<DevContentSourceResolution | null>(null);
   let generation = 0;
   let disposed = false;
   let renewPromise: Promise<void> | null = null;
@@ -1155,6 +1169,30 @@ export const useContentStore = defineStore('content', () => {
         const row = records[records.length - 1] ?? null;
         const epoch = generation,
           revision = discordAuthRevision.value;
+        // 🔴 开发期内容源开关：必须写成 `if (import.meta.env.DEV)` 字面形式，生产构建才会整块摇掉。
+        //    放在 purgeProtectedPackPlaintext 之后（安全不变式照跑），激活任何包之前。
+        if (import.meta.env.DEV) {
+          const resolution = resolveDevContentSource({
+            preference: readDevContentSourcePreference(),
+            localDirConfigured: Boolean(__POEM_CONTENT_DIR__),
+            installedPack: row
+              ? {
+                  packId: row.packId,
+                  packVersion: row.packVersion,
+                  protected: !!row.encryptedEnvelope || row.source === 'legacy-locked',
+                }
+              : null,
+          });
+          devContentSource.value = resolution;
+          if (resolution.suppressPack) {
+            // 只是不激活：Dexie 行原样保留，切回「内容包」后刷新即恢复
+            setActivePackRecord(null);
+            syncPackMetadata(null);
+            leaseState.value = 'LOCAL';
+            contentStatus.value = 'placeholder';
+            return;
+          }
+        }
         setActivePackRecord(row);
         syncPackMetadata(row);
         if (!row) return;
@@ -1513,10 +1551,21 @@ export const useContentStore = defineStore('content', () => {
   // 一次性装包守卫：仅同一时刻允许一个装/卸进行（执行器自身可控；并发由调用方串行）
   let execBusy = false;
 
+  /** 开发期内容源选了「本地内容目录」时，装/升/卸一律拒绝（包行被压制，状态不可信）。 */
+  function assertPackOpsAllowed(): void {
+    // `import.meta.env.DEV &&` 字面前置：生产构建里整段判断被摇掉
+    if (import.meta.env.DEV && devContentSource.value?.suppressPack) {
+      throw new Error(
+        '开发模式下当前内容源为「本地内容目录」，已安装的内容包未激活；请先在设置页切回「内容包」后再安装、升级或卸载。',
+      );
+    }
+  }
+
   async function installProtectedPack(
     download: ProtectedPackDownload,
     opts: { confirmConflicts?: boolean } = {},
   ): Promise<PackInstallOutcome> {
+    assertPackOpsAllowed();
     const { envelope, keyLease } = download;
     validateEncryptedEnvelope(envelope);
     if (execBusy)
@@ -1635,6 +1684,7 @@ export const useContentStore = defineStore('content', () => {
   }
 
   async function uninstallProtectedPack(): Promise<PackUninstallOutcome> {
+    assertPackOpsAllowed();
     const row = activePackRecord;
     if (!row) return { ok: false, status: 'no_pack' };
     if (execBusy) return { ok: false, status: 'busy' };
@@ -1676,6 +1726,7 @@ export const useContentStore = defineStore('content', () => {
     rawPack: unknown,
     opts: { confirmConflicts?: boolean } = {},
   ): Promise<PackInstallOutcome> {
+    assertPackOpsAllowed();
     const validationErrors = validatePackOrThrow(rawPack);
     if (validationErrors.some((n) => n.level === 'error')) {
       return {
@@ -1818,6 +1869,7 @@ export const useContentStore = defineStore('content', () => {
     rawPack: unknown,
     opts: { confirmConflicts?: boolean } = {},
   ): Promise<PackInstallOutcome> {
+    assertPackOpsAllowed();
     const validationErrors = validatePackOrThrow(rawPack);
     if (validationErrors.some((n) => n.level === 'error')) {
       return {
@@ -1878,6 +1930,7 @@ export const useContentStore = defineStore('content', () => {
   async function uninstallPack(
     opts: { confirmEdits?: boolean } = {},
   ): Promise<PackUninstallOutcome> {
+    assertPackOpsAllowed();
     const active = getActivePackRecord();
     if (!active) {
       return { ok: false, status: 'no_pack' };
@@ -2058,6 +2111,7 @@ export const useContentStore = defineStore('content', () => {
     boundUserId,
     leaseExpiresAt,
     protectedPack,
+    devContentSource,
     installProtectedPack,
     renewPackLease,
     ensurePackLeaseActive,

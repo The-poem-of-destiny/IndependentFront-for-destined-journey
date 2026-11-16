@@ -313,6 +313,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   ∪ 应用内开关）。★读 DOM 的 `data-reduced-motion` 而**不是**
 │   │                                   import settings-store：本模块被组件直接调，走 store 会把纯查询
 │   │                                   变成对 Pinia 的依赖（单测就得摆 activePinia）
+│   ├── dev-content-source.ts        ← 🆕 [2026-11-16] **仅开发期**内容源选择的纯解析器：偏好（localStorage
+│   │                                   `poem_dev_content_source_v1`，`pack` 默认 = 现状 / `local`）+ 是否配了
+│   │                                   `POEM_CONTENT_DIR` + 已装包事实 → `{ suppressPack, suppressedPack, notices }`
+│   │                                   与中文提示。不读 `import.meta.env`、不碰 Vue/Dexie —— 「只在 dev 生效」的门归调用点
 │   ├── session-import-messages.ts   ← [存档互传] 单存档导入体检结果 → 中文告警行（纯函数，除类型零依赖）。
 │   │                                   它是「到底会缺什么」这句话的**唯一措辞来源**（散进模板 = 两个入口
 │   │                                   各说各的）；🔴 告警**不是错误**，缺内容照样导得进，语气一律陈述不阻拦
@@ -490,6 +494,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   ③ **内容注册表**：catalog/locations/bloodlines/namePools/markers/
 │   │                                      branding/imageDialects/mapPack 等分面的同步读取入口
 │   │                                      （`/data/content/<name>.json`）
+│   │                                   📌 2026-11-16：+`devContentSource`（`DevContentSourceResolution | null`，
+│   │                                      生产恒 null）。`hydratePackState` 在 `purgeProtectedPackPlaintext` 之后、
+│   │                                      激活任何包之前跑一段 `if (import.meta.env.DEV)` 块（字面形式不能改，
+│   │                                      否则生产摇不掉）：偏好 `local` 且有已装包时**不激活**它（Dexie 行不动、
+│   │                                      内容态 placeholder），此时 `installPack` / `installProtectedPack` /
+│   │                                      `upgradePack` / `uninstallPack` / `uninstallProtectedPack` 一律抛错。
+│   │                                      现状规则：已装内容包盖住 `/data/*`
 │   ├── character-appearance-store.ts← [图像 v1 / D56·D58] 角色外貌**会话副本**的 Dexie 唯一读写口。
 │   │                                   两份定义：**基线**在 `imagePresets.appearance`（全局、跨存档、
 │   │                                   只有用户能改）；**会话**在本店（按存档隔离、由出图 AI 自动写、
@@ -590,6 +601,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               消费 content-store 的 `contentStatus`，四态文案
 │   │   │                               （placeholder / placeholder+检测到本地真实内容 / error /
 │   │   │                               pack·needs_attention）。`activePackId` 为空时不渲染
+│   │   │                               📌 2026-11-16：开发期内容源压制了已装包或有提示时，额外显示一行开发提示
+│   │   │                               （读 content-store 的 `devContentSource`）；压制时正文改说「已被开关暂停」，不劝导入
 │   │   ├── ApiRateLimitWaitPopup.vue ← 全局 RPM 等待提示（端点 / 队列 / 倒计时；到时自动消失续发）
 │   │   ├── SaveManager.vue          ← 应用级存档管理窗口（列表 / 读取 / 导入导出 / 删除 / 改名）：
 │   │   │                               常驻 App.vue，不属于 HomePage；首页与游戏菜单打开同一 store 状态
@@ -756,6 +769,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── beautifier-import.ts     ← 🆕 [2026-11-14 / S-33]「导入规则」文件解析校验（纯函数）；裸数组 = 整体替换，调用方先确认
 │   │   ├── ContentPackSection.vue   ← 🆕 [2026-11-14 / S-01] 「内容包」分区：导入 / 升级 / 检查更新 / 卸载 +
 │   │   │                               Discord 在线授权，逻辑整体从 DataSection 搬来、行为不变
+│   │   │                               📌 2026-11-16：开发期在包卡**下方**多一张 `DevContentSourceCard.vue`（两选项开关
+│   │   │                               「本地内容目录 / 内容包」+ 提示行；切换 = 写偏好 + `confirmDialog` + 刷新页面），
+│   │   │                               以 `import.meta.env.DEV ? defineAsyncComponent(...) : null` 引入，生产不打包。
+│   │   │                               `devContentSource.suppressPack` 为真时标题写「已安装（id + 版本），已被开发内容源
+│   │   │                               开关暂停启用」，导入 / 检查更新禁用（卸载按钮跟随激活包，不渲染）。
+│   │   │                               🔴 未加密包的世界书与预设已物化进 Dexie，压制后预设显示为「我的预设」，此模式下勿编辑
 │   │   ├── pack-uninstall-flow.ts   ← 🆕 [2026-11-14 / S-36] 卸载内容包的确认流程（分区与内容态横幅共用）：
 │   │   │                               **永远先确认**；改过包内世界书时 content-store 回 `needs_confirmation` 再问一次
 │   │   ├── RuleEditorModal.vue      ← 美化规则编辑弹窗；★预览直接挂 game/BeautifiedNarrative.vue
