@@ -7,7 +7,7 @@
  *    最后一张卡，和「清除所有数据」挤在同一个网格里，左栏里找不到它的名字。
  *    逻辑整体从 DataSection 搬来，行为不变；卸载改为永远先确认（S-36）。
  */
-import { ref, shallowRef, computed, onMounted, watch } from 'vue';
+import { ref, shallowRef, computed, onMounted, watch, defineAsyncComponent } from 'vue';
 import { discordAuthRevision } from '../../lib/discord-auth-client';
 import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
@@ -34,6 +34,27 @@ const ui = useUIStore();
 const content = useContentStore();
 const hasActivePack = computed(() => content.activePackId !== null);
 const activePackVersion = computed(() => content.activePackVersion);
+
+/**
+ * 开发期内容源开关（仅 DEV）：生产构建里 `import.meta.env.DEV` 为字面量 false，
+ * 整个异步组件连同偏好键名被摇掉。
+ */
+const DevCard = import.meta.env.DEV
+  ? defineAsyncComponent(() => import('./DevContentSourceCard.vue'))
+  : null;
+/**
+ * 开发期选了「本地内容目录」且有已装包时，包未激活 —— 装/升/卸都会作用到一个没在用的包上，先禁用。
+ * `import.meta.env.DEV &&` 字面前置：生产构建里恒为 false，相关模板分支随之失效。
+ */
+const packSuppressed = computed(
+  () => import.meta.env.DEV && content.devContentSource?.suppressPack === true,
+);
+/** 被开发开关暂停的已装包身份（标题里点名，免得误以为「没装包」） */
+const suppressedPack = computed(() =>
+  import.meta.env.DEV && packSuppressed.value
+    ? (content.devContentSource?.suppressedPack ?? null)
+    : null,
+);
 
 /** 挂载时读一次内容态（content-store 的 store 状态） */
 onMounted(async () => {
@@ -302,6 +323,10 @@ function showSuccessNotes(notes: unknown[]): void {
       <h4>
         当前状态：<template v-if="hasActivePack"
           >已安装<template v-if="activePackVersion">（{{ activePackVersion }}）</template></template
+        ><template v-else-if="suppressedPack"
+          >已安装（{{ suppressedPack.packId }} v{{
+            suppressedPack.packVersion
+          }}），已被开发内容源开关暂停启用</template
         ><template v-else>未安装，正在使用演示级占位内容</template>
       </h4>
       <DiscordPackAccess />
@@ -317,6 +342,7 @@ function showSuccessNotes(notes: unknown[]): void {
           size="sm"
           class="card-action"
           :loading="packInstalling"
+          :disabled="packSuppressed"
           @click="pickPackFile"
           >导入 / 升级内容包</AppButton
         >
@@ -325,7 +351,7 @@ function showSuccessNotes(notes: unknown[]): void {
           size="sm"
           class="card-action"
           :loading="packCheckingUpdate"
-          :disabled="packInstalling"
+          :disabled="packInstalling || packSuppressed"
           @click="checkForPackUpdate"
           >检查更新</AppButton
         >
@@ -335,6 +361,7 @@ function showSuccessNotes(notes: unknown[]): void {
           size="sm"
           class="card-action"
           :loading="packInstalling"
+          :disabled="packSuppressed"
           @click="applyPackUpdate"
           >更新到 {{ packUpdate.packVersion }}</AppButton
         >
@@ -343,17 +370,21 @@ function showSuccessNotes(notes: unknown[]): void {
           variant="ghost"
           size="sm"
           class="card-action pack-uninstall"
-          :disabled="packInstalling"
+          :disabled="packInstalling || packSuppressed"
           @click="requestUninstall"
           >卸载内容包</AppButton
         >
       </div>
+      <p v-if="packSuppressed" class="pack-suppressed-reason text-sm" role="note">
+        开发内容源当前为「本地内容目录」，已安装的内容包未启用，导入 / 更新 / 卸载暂不可用。
+      </p>
       <p v-if="packUpdate && !packUpdate.updateAvailable" class="text-muted text-sm">
         已是最新版本<template v-if="packUpdate.packVersion"
           >（{{ packUpdate.packVersion }}）</template
         >。
       </p>
     </AppCard>
+    <component :is="DevCard" v-if="DevCard" />
     <!--
       内容包安装/升级的两阶段确认（波 1 T7 / D19 / §5.2）：
       plan 非空时展示，确认后 confirmPackInstall 以 confirmConflicts:true 重入 installPack。
@@ -402,6 +433,10 @@ function showSuccessNotes(notes: unknown[]): void {
   gap: 10px;
   margin-top: 10px;
   flex-wrap: wrap;
+}
+.pack-suppressed-reason {
+  margin: var(--theme-spacing-sm) 0 0;
+  color: var(--theme-warning);
 }
 /* 卸载推到行尾，与「导入」拉开距离，免得顺手误点 */
 .pack-uninstall {
