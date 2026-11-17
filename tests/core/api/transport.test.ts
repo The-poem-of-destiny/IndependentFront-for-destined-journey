@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ApiEndpoint } from '../../../src/core/types/types';
-import { buildLlmTransportHeaders, fetchLlmModels } from '../../../src/core/api/transport';
+import {
+  buildLlmTransportHeaders,
+  fetchLlmModels,
+  postLlmRequest,
+} from '../../../src/core/api/transport';
 
 function endpoint(overrides: Partial<ApiEndpoint> = {}): ApiEndpoint {
   return {
@@ -43,6 +47,29 @@ describe('LLM transport', () => {
       'anthropic-version': '2023-06-01',
       'anthropic-beta': 'tools-2024-04-04',
     });
+  });
+
+  it('X-Model-ID 取本次请求选定的模型，未给（或空白）时回退源默认模型', () => {
+    const gemini = endpoint({ protocol: 'gemini' });
+    expect(buildLlmTransportHeaders(gemini, false)['X-Model-ID']).toBe('model-a');
+    expect(buildLlmTransportHeaders(gemini, false, 'gemini-override')['X-Model-ID']).toBe(
+      'gemini-override',
+    );
+    expect(buildLlmTransportHeaders(gemini, false, '  ')['X-Model-ID']).toBe('model-a');
+  });
+
+  it('postLlmRequest 把请求选定的模型写进 X-Model-ID', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'));
+    await postLlmRequest({
+      endpoint: endpoint({ protocol: 'gemini' }),
+      body: {},
+      stream: false,
+      signal: new AbortController().signal,
+      model: 'gemini-override',
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/llm/gemini/generate');
+    expect((init!.headers as Record<string, string>)['X-Model-ID']).toBe('gemini-override');
   });
 
   it('源级自定义请求头打成 X-Custom-Headers 载荷（无自定义头时不出该头）', () => {

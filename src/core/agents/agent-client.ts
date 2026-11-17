@@ -599,7 +599,12 @@ export class AgentClient {
 
     try {
       const body = this.buildRequestBody(request, true);
-      const res = await this.postCompletions(body, controller.signal, true);
+      const res = await this.postCompletions(
+        body,
+        this.resolveRequestModel(request),
+        controller.signal,
+        true,
+      );
 
       // Parse SSE stream
       const reader = res.body?.getReader();
@@ -811,7 +816,7 @@ export class AgentClient {
     const poolDefaults = this.endpoint.defaultParameters ?? {};
     return buildLlmRequest({
       protocol,
-      model: request.model || this.endpoint.defaultModel,
+      model: this.resolveRequestModel(request),
       cachePolicy: request.cachePolicy,
       cacheKey: request.cacheKey,
       cacheStaticSystemCount: request.cacheStaticSystemCount,
@@ -833,12 +838,24 @@ export class AgentClient {
   }
 
   /**
+   * 本次请求实际选定的模型：请求值（Agent 覆写）> 源默认。请求体与传输头共用这一个判据。
+   *
+   * 🔴 不能从请求体反推：Gemini 请求体里没有 `model`，模型名只走 `X-Model-ID` 头
+   *    （BFF 用它拼上游 URL）。以前头里写死 `endpoint.defaultModel`，
+   *    Agent 级模型覆写在 Gemini 下静默失效。
+   */
+  private resolveRequestModel(request: ChatRequest): string {
+    return request.model?.trim() || this.endpoint.defaultModel;
+  }
+
+  /**
    * 发请求 + `!res.ok` 抛错 —— 流式与非流式共用（Q-17）。
    *
    * 只负责「发出去、确认 HTTP 层没炸」；响应体怎么读（SSE vs json）留给调用方。
    */
   private async postCompletions(
     body: Record<string, any>,
+    model: string,
     signal: AbortSignal,
     stream: boolean,
   ): Promise<Response> {
@@ -847,6 +864,7 @@ export class AgentClient {
       body,
       stream,
       signal,
+      model,
     });
 
     if (!res.ok) {
@@ -857,7 +875,7 @@ export class AgentClient {
         'body:',
         errorText.slice(0, 500),
       );
-      console.error('[AgentClient] Request model:', body.model, 'has model:', !!body.model);
+      console.error('[AgentClient] Request model:', model);
       throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 200)}`);
     }
     return res;
@@ -896,7 +914,12 @@ export class AgentClient {
 
     try {
       const body = this.buildRequestBody(request, false);
-      const res = await this.postCompletions(body, controller.signal, false);
+      const res = await this.postCompletions(
+        body,
+        this.resolveRequestModel(request),
+        controller.signal,
+        false,
+      );
 
       const raw = await res.json();
       const protocol = this.endpoint.protocol ?? 'openai-chat';
