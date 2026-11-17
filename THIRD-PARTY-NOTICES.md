@@ -17,6 +17,21 @@
 three.js 用于首页 Astral Drift 动态背景，并通过动态导入成为独立分块，不进入首屏主分块。
 MIT 不要求界面内可见署名；许可证全文随 `public/` 原样进入构建产物。
 
+## Windows 便携版额外分发的组件
+
+便携版 zip（`npm run release:portable`，见 `docs/reference/portable-release.md`）除上面的前端资源外，
+还分发一份 Node.js 运行时与打进本地服务器（`app/server.mjs`）的服务端依赖。许可证全文由打包脚本
+放进 zip，不在本仓库里。
+
+| 组件              | 版权方                           | 许可证                                    | 许可证全文（zip 内路径）                      |
+| ----------------- | -------------------------------- | ----------------------------------------- | --------------------------------------------- |
+| Node.js           | OpenJS Foundation 与 Node 贡献者 | MIT（另含所捆绑第三方组件各自的许可条款） | `runtime/NODE-LICENSE.txt`                    |
+| hono              | Yusuke Wada 与 Hono 贡献者       | MIT                                       | `app/licenses/hono-LICENSE.txt`               |
+| @hono/node-server | Yusuke Wada 与 Hono 贡献者       | MIT                                       | `app/licenses/@hono__node-server-LICENSE.txt` |
+
+Node.js 的版本即打包机当时的 node 版本，记录在 zip 内 `app/build-info.json`；zip 内另有一份打包时生成的
+`THIRD-PARTY-NOTICES.md`，按版本列出全部服务端与前端依赖。
+
 ## 分发中的字体
 
 | 字体                     | 版权方                     | 许可证                    | 许可证全文                                                                       |

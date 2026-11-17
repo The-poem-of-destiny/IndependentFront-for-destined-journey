@@ -71,7 +71,8 @@ export function isBffRoute(url: string): boolean {
 }
 
 /**
- * BFF Hono app —— dev（vite middleware）与未来 prod（独立 server）共享同一份路由代码。
+ * BFF Hono app —— dev / preview（vite middleware）与便携版独立服务器
+ * （`server/standalone-app.ts`）共享同一份路由代码。
  *
  * 路由契约见 docs/planning/2026-07-30-bff-api-refactor-plan.md §5。
  * 透传模式：前端持 key，BFF 只做"加 CORS 头的 fetch 转发器"，零状态 ——

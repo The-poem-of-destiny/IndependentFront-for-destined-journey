@@ -330,6 +330,10 @@ embedding / tools / 战斗 / 侧链 / regenerate 走原路径。设计见
 1. **BFF 没有生产入口**。`buildHonoApp()` 只在 `vite.config.ts` 的 `configureServer`（dev）与
    `configurePreviewServer`（preview）两处被挂起来；没有独立进程入口，也没有打包产物。
    对应根 `TODO.md` 的「正式打包」一条 —— 在那之前，发行形态仍依赖 vite。
+   > 📌 2026-11-17 更正：此条已部分落地 —— Windows 便携版有了独立进程入口 `server/standalone.ts`
+   > （装配见 `server/standalone-app.ts`，复用同一份 `buildHonoApp`），经 Vite SSR 打成单文件
+   > `app/server.mjs` 随 zip 分发，说明见 `docs/reference/portable-release.md`。
+   > 目前只有 Windows x64 便携包这一种生产形态，其他平台 / 部署形态仍未覆盖。
 2. **`src/ui/lib/` 是意图不是现状**。实测 `src/ui` 下有 134 个非测试文件直接 `import '@engine/*'`，
    其中只有 19 个住在 `lib/`，另外 115 个是 stores / components 自己直连引擎。
    「引擎只经 lib/ 触达」**没有任何闸门**，写代码时不要依赖它成立

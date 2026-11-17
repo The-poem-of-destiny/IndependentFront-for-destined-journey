@@ -185,6 +185,9 @@ docs/
 │                                       #    ②端口清理三细节（不写死 127.0.0.1 / 先筛 LISTENING /
 │                                       #      端口后那个空格必须配 `findstr /C:` 才生效）
 │                                       #    ③不要用 timeout /t   ④行尾必须 CRLF（见根目录 .gitattributes）
+│   ├── portable-release.md             # 🆕 Windows 便携版 zip（✅ 2026-11-16 已实施，测试版未发布、未真机双击）
+│                                       #    ← 改 server/standalone*.ts / scripts/portable/ / 打包脚本必读
+│                                       #    🔴 源固定 http://127.0.0.1:15173，永远不许改（IndexedDB 存档按源隔离）
 ├── planning/2026-07-29-asset-management-system-design.md
 │                                       # 🆕 素材管理系统设计 v1.0（D1-D23 决策表）← 改素材必读
 │                                       #    已实现；渲染面接通（§15.9）；大画像/裁剪台 §15.10
@@ -447,6 +450,12 @@ npm run dev            # 开发服务器（固定 5173 端口；占用时报错�
                        #    dev.bat 注释一律纯 ASCII（中文注释会让 cmd 把注释片段当命令执行）
                        #    且行尾必须 CRLF；dev.sh 反过来必须 LF（shebang 带 CR 会
                        #    报 bad interpreter）。两条都由根目录 .gitattributes 钉死
+npm run release:portable -- --pack-server-url <origin>
+                       # 打 Windows 便携版 zip → release/（仅 Windows x64；zip 自带当前 node.exe，
+                       #    正式发布用 node >= .nvmrc；不要内容包功能时改加 --no-pack-server）
+node scripts/smoke-portable.mjs release/<zip>
+                       # 便携版冒烟：双解压到空格+中文路径、无 node 环境跑 Start.bat（不在 CI 里）
+                       # 详见 docs/reference/portable-release.md
 ```
 
 仓库根还有一个**不是 npm 脚本**的入口（玩家侧双击用，非开发流程）：
