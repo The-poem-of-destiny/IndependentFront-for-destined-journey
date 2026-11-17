@@ -4,6 +4,8 @@ node_modules/
 # 编译输出
 dist/
 dist-ui/
+# 便携版打包产物（scripts/build-portable.mjs：release/staging/ 与 release/*.zip）
+release/
 
 # Claude Code 本地配置 / 外部 skill
 .claude/settings.local.json

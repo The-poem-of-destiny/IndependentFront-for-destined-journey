@@ -9,6 +9,18 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-16 Windows 便携版 zip（测试版）｜**未发布、未在干净机器上真机双击**
+
+- 目标：给不装 Node / 不用 git 的玩家一个「解压 → 双击 `Start.bat`」的 Windows x64 免安装包。说明书：`docs/reference/portable-release.md`。
+- 独立服务器：`server/standalone-app.ts`（纯函数装配的 Hono app，复用 `buildHonoApp` + 静态资源；SPA 路由回 index.html、带扩展名的缺失文件 404；`Origin: null` 与跨源 API 请求拒绝）+ `server/standalone.ts`（进程层：读 `app/config.json` 的 `packServerUrl`、监听、开浏览器、`--no-open`）。
+- 🔴 源永久固定 `http://127.0.0.1:15173`（IndexedDB 存档按源隔离，换端口 / 主机名 = 存档全丢）；`localhost:15173` 308 回规范源；只绑 `127.0.0.1`；端口已被自己占用时只重开浏览器并以 0 退出，被别的程序占用时给中文指引，绝不结束进程。
+- 启动器 `scripts/portable/Start.bat`（纯 ASCII，含 echo 文本，原因见 `docs/reference/dev-bat-notes.md` 第七节）+ 随包 `使用说明.txt`（源文件 `scripts/portable/README.txt`）。
+- 打包 `npm run release:portable`（`scripts/build-portable.mjs`）：必须给 `--pack-server-url <origin>` / `POEM_PACK_SERVER_URL` 或显式 `--no-pack-server`；`.env*` 里有 `VITE_PACK_SERVER_URL` 时拒绝打包；复制打包机当前 `node.exe`（低于 `.nvmrc` 只警告）；node 目录缺 LICENSE 时从 GitHub 下载；剔除 `public/` 下被 git 忽略的文件（57 首本机 bgm 因此不进包）。产物在 `release/`（已 gitignore）。
+- 冒烟 `scripts/smoke-portable.mjs`：`tar` 与 `Expand-Archive` 双解压到空格 + 中文路径，在无 node 的极简 `PATH` 下跑 `cmd /c Start.bat --no-open`，14 项检查。
+- 2026-11-16 实测（版本 1.0.0，Node v22.20.0，低于 `.nvmrc` 22.23.2，只能当内部测试包）：423 个文件，zip 54.3 MiB。
+- 测试：新增 `tests/server-standalone.test.ts`、`tests/build-portable.test.ts`、`tests/portable-launcher.test.ts`。
+- 未做 / 待办（已记入 `TODO.md`「正式发布打包」）：干净 VM 真机双击、SmartScreen、资源管理器「全部解压缩」、真实 Discord 登录（中心服需允许 `http://127.0.0.1:15173`）、用 node >= `.nvmrc` 打正式包、bgm 授权、代码签名（可选）。
+
 ### 2026-11-17 修复：出厂预设按播种指纹同步（内容仓更新的 prompts 到不了玩家库）｜**未真机验证**
 
 - 根因：`settings-store.seedFactoryPresets` 对「库里已有同 id」的出厂预设只同步 name、不同步 prompts。内容仓更新出厂预设后，玩家库里的旧行永远不更新，API 请求一直发旧预设（已用真实调试导出证实）。自 #148 起出厂预设在界面上只读，但旧版 app 可能留下就地改过的行，不能静默丢掉。

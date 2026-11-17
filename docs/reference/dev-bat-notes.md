@@ -61,6 +61,8 @@ MSYS_NO_PATHCONV=1 cmd.exe /c "C:\path\to\dev.bat" > out.txt 2> err.txt < /dev/n
 
 结论：**多字节文本出现在 `echo` 参数里是安全的，出现在 `::` 注释里是危险的。** 加注释时请写英文。
 
+> 📌 2026-11-16 更正：上面「`echo` 里的中文是安全的」**不能推广**。便携版启动器 `Start.bat` 的早期草稿在冒烟测试（`cmd /c` + 重定向标准输入输出）下，中文 `echo` 行的片段同样被当成命令执行。`dev.bat` 那几行在当年的调用姿势下没复现，只说明这个 bug 依赖调用方式，不说明 `echo` 安全。新写的批处理一律**注释和 echo 文本都用纯 ASCII**，见第七节；`dev.bat` / `update.bat` 现有的中文 echo 暂未改动。
+
 ---
 
 ## 二、端口清理那三个细节（都是踩出来的）
@@ -149,7 +151,7 @@ ERROR: Input redirection is not supported, exiting the process immediately.
 
 ### 坑：本段改动遵守第一节铁律
 
-内容仓分支的注释全部纯 ASCII，`echo` 行保留中文（实测安全）。参数解析用 `%~1`/`%~2` 判 `--no-content`、`if exist` 独立成块——避开 cmd 括号块内 `set` + `if defined` 的延迟展开陷阱（实测：同一块内 `set "NO_CONTENT="` 后 `if not defined NO_CONTENT` 恒真，会让 `--no-content` 失效）。
+内容仓分支的注释全部纯 ASCII，`echo` 行保留中文（实测安全；📌 2026-11-16：仅限当时的调用方式，见第一节末尾更正）。参数解析用 `%~1`/`%~2` 判 `--no-content`、`if exist` 独立成块——避开 cmd 括号块内 `set` + `if defined` 的延迟展开陷阱（实测：同一块内 `set "NO_CONTENT="` 后 `if not defined NO_CONTENT` 恒真，会让 `--no-content` 失效）。
 
 ---
 
@@ -201,3 +203,23 @@ npm 没有「按平台选 script」的机制，而我们不想为这件事引一
 ### 顺带：别在 Git Bash 里用 `dev.sh` 当日常启动器
 
 上面那次 Git Bash 实跑暴露了一个只在 Windows 上成立的问题：MSYS 把自动检测出的内容仓路径给成了 `/e/Projects/...`，而 `vite.config.ts` 里的 `resolve()` 按 Windows 语义会把它解成 `E:\e\Projects\...`（不存在），于是 `/data` overlay 静默指向空目录。**Windows 上请始终走 `npm run dev`（分发到 `dev.bat`）**；`dev.sh` 只为 macOS / Linux 存在。
+
+---
+
+## 七、便携版启动器 `scripts/portable/Start.bat`（2026-11-16）
+
+Windows 便携版 zip 里玩家双击的那个文件，打包时原样复制。整体说明见 `docs/reference/portable-release.md`。它只做一件事：用同目录的 `runtime\node.exe` 跑 `app\server.mjs`（参数原样透传，如 `--no-open`），失败时 `pause` 让玩家看得到报错；`runtime\node.exe` 不存在时提示「先完整解压」。
+
+### 整个文件纯 ASCII，包括 echo 文本
+
+早期草稿把给玩家看的提示写成中文 `echo`，冒烟测试（`cmd /c Start.bat` 且标准输入输出被重定向，与本文第一节的复现姿势同类）里这些 `echo` 行的片段被当成命令执行 —— 与第一节注释错位是同一个现象。这推翻了第一节「`echo` 里的中文是安全的」那条结论（已在原处加更正）。所以：
+
+- 注释与 `echo` 一律英文；给玩家的中文说明放在随包的 `使用说明.txt`（UTF-8 BOM + CRLF），不放在批处理里。
+- `tests/portable-launcher.test.ts` 钉住 CRLF、注释纯 ASCII、不杀进程 / 不用 `timeout`、不用括号块与 `cd`；📌 2026-11-17 起还钉住**整个文件纯 ASCII**（逐行检查，`echo` 行单独点名），echo 文本写成中文会直接挂测试。
+
+### 其余几条约束（都写在文件头注释里）
+
+- **CRLF 行尾**（同第四节）。
+- **不 `cd`**：一律用 `%~dp0` 拼路径，从 UNC 路径或带空格 / 中文的目录启动也不受影响。
+- **goto 式流程，不用括号块**：避开第五节那种括号块内延迟展开的坑。
+- **不结束任何进程、不用 `timeout /t`**：端口冲突由 `server.mjs` 自己判断并给中文指引（node 输出不受 cmd 解析影响）；`timeout` 的问题见第三节。

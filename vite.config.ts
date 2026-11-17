@@ -47,7 +47,7 @@ export default defineConfig({
         });
 
         // === BFF (hono)：同源 API 路由，dev 挂载（Phase A）===
-        // prod 走独立 server.js，见方案 §7
+        // 便携版（prod）走独立服务器 server/standalone.ts（同一份 buildHonoApp + 静态资源）
         //
         // 🔴 前缀清单由 server/app.ts 的 `isBffRoute` 派生，**不在这里再抄一份**：
         //    此前 dev 与 preview 各有一份逐字重复的五前缀白名单，加新路由忘改
