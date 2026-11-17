@@ -1,0 +1,84 @@
+/*
+ * fx-core.css — 界面特效层的共享底座
+ *
+ * 🔴 规则挂在 `:root[data-fx='on']` 下：闸门（lib/fx-gate.ts）关着时本表零命中，
+ *    界面与没有特效层时逐像素一致。特效组件本身也只在闸门打开时 v-if 渲染。
+ *    唯一例外是文末的减动效安全网：它只命中 fx 元素，闸门关时这些元素本就不存在。
+ * 🔴 特效只住在 `components/fx/*` 的覆盖层元素里，不写主题伪元素、不改主题样式表。
+ *
+ * 层级约定：
+ * - 应用级覆盖层（FxLayer：光泽 / 闪光 / 物品飞入）用 `--fx-z-front`：压在页面之上、
+ *   AppModal（1000）与 Toast（2000）之下。光泽与闪光在各自组件里再抬到 1500
+ *   （弹窗之上、Toast 之下），只有物品飞入留在 900。层级表见 docs/design.md §6.4。
+ * - 游戏页覆盖层（FxGameLayer：视差 / 主题氛围 / 天气）用 `--fx-z-back`：在
+ *   `.game-page-layout` 自己的层叠上下文里垫在全部内容之后、页面底色之上。
+ */
+
+:root[data-fx='on'] {
+  --fx-z-back: -1;
+  --fx-z-front: 900;
+}
+
+/* 覆盖层基类：铺满视口、不吃指针、强包含（布局/绘制/尺寸都不外溢） */
+:root[data-fx='on'] .fx-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  contain: strict;
+  overflow: hidden;
+}
+
+:root[data-fx='on'] .fx-overlay--front {
+  z-index: var(--fx-z-front);
+}
+
+:root[data-fx='on'] .fx-overlay--back {
+  z-index: var(--fx-z-back);
+}
+
+/*
+ * 游戏页：给 `.game-page-layout` 自己的层叠上下文，`--fx-z-back` 的负 z-index 才会垫在
+ * 内容之后而不是掉到页面底色之下。bronze 等主题本就 `isolation: isolate`，这里对它们是空操作。
+ */
+:root[data-fx='on'] body .game-page-layout {
+  isolation: isolate;
+}
+
+/*
+ * 五个主题（bronze / forest / indigo / obsidian / sakura）强制
+ * `.game-page-layout > * { position: relative; z-index: 1 }`（特异度 0,3,1）。
+ * 这里 0,4,1 稳赢：特效子层永远是 fixed 覆盖层，绝不成为 flex 项。
+ */
+:root[data-fx='on'] body .game-page-layout > .fx-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: var(--fx-z-back);
+}
+
+/* 顶栏回合纹饰：绝对定位，不参与 `.top-title` 的 flex 排布与 gap */
+:root[data-fx='on'] body .top-bar .top-title {
+  position: relative;
+}
+
+:root[data-fx='on'] .fx-turn-ornament {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/*
+ * 安全网：闸门本应在减动效时已关闭；万一属性残留（如系统偏好刚切换、监听尚未回调），
+ * 特效元素仍一律不显示。
+ */
+@media (prefers-reduced-motion: reduce) {
+  .fx-overlay,
+  .fx-turn-ornament {
+    display: none !important;
+  }
+}
+
+:root[data-reduced-motion='true'] .fx-overlay,
+:root[data-reduced-motion='true'] .fx-turn-ornament {
+  display: none !important;
+}

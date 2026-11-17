@@ -12,9 +12,17 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import AppModal from '../../../../src/ui/components/shared/AppModal.vue';
+import {
+  FX_MODAL_CHILD_COUNT,
+  FX_MODAL_CHILD_DELAY_MS,
+  FX_MODAL_CHILD_RISE_MS,
+  FX_MODAL_CHILD_STAGGER_MS,
+  FX_MODAL_ENTER_MS,
+  FX_TRACE_TOTAL_MS,
+} from '../../../../src/ui/components/shared/fx-frame-trace-timing';
 
 let wrapper: VueWrapper | null = null;
 afterEach(() => {
@@ -184,4 +192,68 @@ it('only the top nested dialog handles Escape and retains the outer scroll lock'
   } finally {
     inner.unmount();
   }
+});
+
+describe('AppModal — 特效闸门下的描框入场', () => {
+  function fxModal(props: Record<string, unknown> = {}) {
+    wrapper?.unmount();
+    wrapper = mount(AppModal, {
+      props: { open: true, title: '标题', ...props },
+      slots: { default: '<button class="probe">内容</button>' },
+      attachTo: document.body,
+      // 用真 Transition：入场钩子只在真过渡里被调用
+      global: { stubs: { transition: false } },
+    });
+    return wrapper;
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    document.documentElement.removeAttribute('data-fx');
+  });
+
+  it('闸门关闭时不渲染描线（与 v1 一致）', async () => {
+    const w = fxModal();
+    await w.vm.$nextTick();
+    await w.vm.$nextTick();
+    expect(document.querySelector('.modal-content')).not.toBeNull();
+    expect(document.querySelector('.fx-frame-trace')).toBeNull();
+  });
+
+  it('闸门打开时入场画出四角描线，结束后自行移除', async () => {
+    vi.useFakeTimers();
+    document.documentElement.setAttribute('data-fx', 'on');
+    const w = fxModal();
+    await w.vm.$nextTick();
+    await w.vm.$nextTick();
+    const trace = document.querySelector('.modal-overlay > .fx-frame-trace');
+    expect(trace).not.toBeNull();
+    expect(trace?.getAttribute('aria-hidden')).toBe('true');
+    expect(trace?.querySelectorAll('.fx-frame-trace__corner')).toHaveLength(4);
+    // 描线在对话框之外：不进焦点陷阱、不影响 aria 结构
+    expect(document.querySelector('[role="dialog"] .fx-frame-trace')).toBeNull();
+
+    vi.advanceTimersByTime(FX_TRACE_TOTAL_MS);
+    await w.vm.$nextTick();
+    expect(document.querySelector('.fx-frame-trace')).toBeNull();
+  });
+
+  it('★ 闸门打开时 Esc 与点遮罩照旧关闭', async () => {
+    document.documentElement.setAttribute('data-fx', 'on');
+    const w = fxModal();
+    await w.vm.$nextTick();
+    pressEscape();
+    expect(w.emitted('close')).toHaveLength(1);
+    clickInDocument('.modal-overlay');
+    expect(w.emitted('close')).toHaveLength(2);
+  });
+
+  it('根过渡的 enter 时长覆盖整段编排（描线 / 面板 / 子块上浮）', () => {
+    expect(FX_MODAL_ENTER_MS).toBeGreaterThanOrEqual(FX_TRACE_TOTAL_MS);
+    expect(FX_MODAL_ENTER_MS).toBeGreaterThanOrEqual(
+      FX_MODAL_CHILD_DELAY_MS +
+        (FX_MODAL_CHILD_COUNT - 1) * FX_MODAL_CHILD_STAGGER_MS +
+        FX_MODAL_CHILD_RISE_MS,
+    );
+  });
 });

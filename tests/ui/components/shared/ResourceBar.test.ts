@@ -2,9 +2,11 @@
  * ResourceBar.vue — HP/MP/SP 资源条测试
  * @vitest-environment jsdom
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 import ResourceBar from '../../../../src/ui/components/shared/ResourceBar.vue';
+import { syncFxGate, useFxEnabled } from '../../../../src/ui/lib/fx-gate';
 
 describe('ResourceBar', () => {
   it('渲染 label 标签', () => {
@@ -71,6 +73,87 @@ describe('ResourceBar', () => {
 
     await wrapper.setProps({ current: 90 });
     expect(track().classes()).not.toContain('is-draining');
+  });
+
+  it('特效关闭时上涨：不进入 is-rising、不渲染波峰（保持 v1 行为）', async () => {
+    const wrapper = mount(ResourceBar, {
+      props: { label: 'HP', current: 40, max: 100 },
+    });
+    await wrapper.setProps({ current: 90 });
+    expect(wrapper.find('.res-track').classes()).not.toContain('is-rising');
+    expect(wrapper.find('.res-crest').exists()).toBe(false);
+    expect(wrapper.find('.res-fill').attributes('style')).toContain('translateX(-10%)');
+  });
+
+  describe('特效开启（治疗上涨）', () => {
+    beforeEach(() => {
+      document.documentElement.setAttribute('data-fx', 'on');
+    });
+    afterEach(() => {
+      document.documentElement.removeAttribute('data-fx');
+      // 让共享镜像跟回 DOM，免得污染后续用例
+      useFxEnabled();
+    });
+
+    it('上涨时进入 is-rising，并在填充前沿渲染一次性波峰', async () => {
+      const wrapper = mount(ResourceBar, {
+        props: { label: 'HP', current: 40, max: 100 },
+      });
+      expect(wrapper.find('.res-crest').exists()).toBe(false);
+
+      await wrapper.setProps({ current: 70 });
+      expect(wrapper.find('.res-track').classes()).toContain('is-rising');
+      expect(wrapper.find('.res-track').classes()).not.toContain('is-draining');
+      // 波峰住在填充层里，随填充一起平移
+      expect(wrapper.find('.res-fill .res-crest').exists()).toBe(true);
+      // 残影与填充指向同一个目标 —— 只是先后到达
+      expect(wrapper.find('.res-ghost').attributes('style')).toContain('translateX(-30%)');
+      expect(wrapper.find('.res-fill').attributes('style')).toContain('translateX(-30%)');
+    });
+
+    it('连续上涨各自重挂波峰（重播一次）', async () => {
+      const wrapper = mount(ResourceBar, {
+        props: { label: 'HP', current: 10, max: 100 },
+      });
+      await wrapper.setProps({ current: 30 });
+      const first = wrapper.find('.res-crest').element;
+      await wrapper.setProps({ current: 60 });
+      expect(wrapper.find('.res-crest').element).not.toBe(first);
+    });
+
+    it('运行中闸门关闭：不等下一次数值变化就摘掉 is-rising 与波峰，再开闸也不重播', async () => {
+      syncFxGate(true);
+      const wrapper = mount(ResourceBar, {
+        props: { label: 'HP', current: 40, max: 100 },
+      });
+      await wrapper.setProps({ current: 70 });
+      expect(wrapper.find('.res-track').classes()).toContain('is-rising');
+      expect(wrapper.find('.res-crest').exists()).toBe(true);
+
+      syncFxGate(false);
+      await nextTick();
+      expect(wrapper.find('.res-track').classes()).not.toContain('is-rising');
+      expect(wrapper.find('.res-crest').exists()).toBe(false);
+      expect(wrapper.find('.res-fill').attributes('style')).toContain('translateX(-30%)');
+
+      syncFxGate(true);
+      await nextTick();
+      expect(wrapper.find('.res-track').classes()).not.toContain('is-rising');
+      expect(wrapper.find('.res-crest').exists()).toBe(false);
+      syncFxGate(false);
+    });
+
+    it('下降时退出 is-rising、摘掉波峰，残影态照旧', async () => {
+      const wrapper = mount(ResourceBar, {
+        props: { label: 'HP', current: 40, max: 100 },
+      });
+      await wrapper.setProps({ current: 80 });
+      await wrapper.setProps({ current: 20 });
+      const track = wrapper.find('.res-track');
+      expect(track.classes()).not.toContain('is-rising');
+      expect(track.classes()).toContain('is-draining');
+      expect(wrapper.find('.res-crest').exists()).toBe(false);
+    });
   });
 
   it('使用自定义颜色', () => {

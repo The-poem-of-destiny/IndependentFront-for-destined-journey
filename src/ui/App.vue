@@ -10,6 +10,7 @@ import { useBeautifierStore } from './stores/beautifier-store';
 import { useWorkshopStore } from './stores/workshop-store';
 import { queryForView } from './lib/view-audio';
 import { applyReducedMotion } from './lib/reduced-motion';
+import { syncFxGate, useFxEnabled } from './lib/fx-gate';
 import { runContentStartupChain } from './lib/content-startup-chain';
 import { createViewRegistry } from './lib/view-loader';
 import ViewLoading from './components/shared/ViewLoading.vue';
@@ -17,6 +18,7 @@ import ToastContainer from './components/shared/ToastContainer.vue';
 import ConfirmDialogHost from './components/shared/ConfirmDialogHost.vue';
 import ApiRateLimitWaitPopup from './components/shared/ApiRateLimitWaitPopup.vue';
 import SaveManager from './components/shared/SaveManager.vue';
+import FxLayer from './components/fx/FxLayer.vue';
 
 const ui = useUIStore();
 const audio = useAudioStore();
@@ -84,6 +86,42 @@ watch(
   (enabled) => applyReducedMotion(Boolean(enabled)),
   { immediate: true },
 );
+
+// ═══ 界面特效闸门 ═══════════════════════════════════════
+//
+// `<html data-fx="on">` = 设置 `visualEffects` 开 **且** 不处于减动效（系统偏好 ∪ 应用内开关）。
+// 判定与写入唯一在 lib/fx-gate.ts。🔴 本 watch 必须声明在上面那个减动效 watch **之后**：
+// 同为 pre 刷新的 watch 按创建顺序执行，syncFxGate 读的是刚写好的 `data-reduced-motion`。
+// `immediate` 的理由同上（水合不触发回调）。系统偏好不经过 settings，单独听 matchMedia。
+// 📌 只靠声明顺序不够：同一拍里两项都变时，队列按**触发**顺序排 —— 先改 visualEffects 会让本
+// watch 排在减动效 watch 前面、读到上一拍的属性。所以这里先把减动效写一遍（幂等）再开关闸。
+const fxEnabled = useFxEnabled();
+watch(
+  () => [settings.settings.visualEffects, settings.settings.reducedMotion] as const,
+  ([fxOn, reduced]) => {
+    applyReducedMotion(Boolean(reduced));
+    syncFxGate(fxOn !== false);
+  },
+  { immediate: true },
+);
+
+let reducedMotionQuery: MediaQueryList | undefined;
+function onSystemMotionChange(): void {
+  syncFxGate(settings.settings.visualEffects !== false);
+}
+onMounted(() => {
+  if (typeof matchMedia !== 'function') return;
+  try {
+    reducedMotionQuery = matchMedia('(prefers-reduced-motion: reduce)');
+    reducedMotionQuery.addEventListener?.('change', onSystemMotionChange);
+  } catch {
+    reducedMotionQuery = undefined;
+  }
+});
+onUnmounted(() => {
+  reducedMotionQuery?.removeEventListener?.('change', onSystemMotionChange);
+  syncFxGate(false);
+});
 
 // ═══ 界面级场景配乐 ═══════════════════════════════════════
 //
@@ -176,6 +214,7 @@ const viewProps = computed(() =>
     <ToastContainer />
     <ConfirmDialogHost />
     <ApiRateLimitWaitPopup />
+    <FxLayer v-if="fxEnabled" />
   </div>
 </template>
 

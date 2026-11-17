@@ -147,6 +147,15 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   （PRODUCT.md「一个真相来源」）。帧驱动可注入（`frames`），无 rAF 时退 16ms 定时器。
 │   │                                   消费方：ResourceBar 读数、StatusOverview 钱袋/命运点、ItemsPanel 金币、
 │   │                                   CharacterListPanel 命运点
+│   ├── useFxGameState.ts            ← 🆕 [2026-11-16 / 特效层，实验分支] 游戏状态 → `<html>` 氛围属性
+│   │                                   `data-fx-daypart`（dawn/dusk/night，白天不写）/ `data-fx-weather`（rain/fog）/
+│   │                                   `data-fx-combat`；闸门关或卸载即全部移除。判定在 `lib/fx-game-state.ts`。
+│   │                                   🔴 全应用只有 `fx/FxGameLayer.vue` 调它一次（属性是全局的，多处调用互相抢写）
+│   ├── useFreshMessages.ts          ← 🆕 [2026-11-16 / 特效层] 分辨「挂载后 push 进来的新消息」与「载入的历史」，
+│   │                                   并按 `isGenerating` 一代记下是否流式过（草稿在提交前就清空，不能看 push 那一刻）。
+│   │                                   整体换数组（读档 / 回退）一律算历史；ChatFlow 据此决定墨迹与印记。
+│   │                                   🔴「流式过」只记给本代**第一条**新 assistant 消息，`isGenerating` 一变就清；
+│   │                                   之后同代推入的系统行仍按普通消息入场
 │   └── useAutosave.ts               ← 🆕 [自动存档 2026-10-05] 游戏页监活表（消息/角色/档案/事件）
 │                                       改动，静默 5s（节流）后调 `game.runAutosave()` 把当前状态
 │                                       覆写进「本轮 turn 快照」—— 手动润色/重铸不再因回档丢失。
@@ -317,6 +326,32 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   ∪ 应用内开关）。★读 DOM 的 `data-reduced-motion` 而**不是**
 │   │                                   import settings-store：本模块被组件直接调，走 store 会把纯查询
 │   │                                   变成对 Pinia 的依赖（单测就得摆 activePinia）
+│   ├── fx-gate.ts                   ← 🆕 [2026-11-16 / 特效层，实验分支] 特效层**唯一闸门**：`<html data-fx="on">`
+│   │                                   = 设置 `visualEffects` 开 **且** `isReducedMotion()` 为假。`syncFxGate` 单点写
+│   │                                   （App.vue 的 watch，必须排在减动效 watch 之后），`isFxEnabled` 读 DOM（同
+│   │                                   reduced-motion.ts，不 import store），`useFxEnabled` 给组件共享响应式镜像。
+│   │                                   约定与例外见 docs/design.md §6.4
+│   ├── fx-ticker.ts                 ← 🆕 [特效层] 帧合并（全部订阅者每帧一次 rAF，页面隐藏不排帧）+
+│   │                                   `scheduleOccasional`（[min,max] 随机延时；隐藏或闸门关时跳过本次、不补发）
+│   ├── fx-pointer.ts                ← 🆕 [特效层] 全应用至多一个 `pointermove`（仅 `(hover: hover)` 设备）+
+│   │                                   `registerParallax`（只写元素自己的 transform，收敛后不再排帧）。
+│   │                                   🔴 永远不要逐帧往 html/body 写 CSS 变量
+│   ├── fx-sheen.ts                  ← 🆕 [特效层] 指针光泽的纯逻辑与控制器：控件 / 面板选择器、进入时量一次矩形、
+│   │                                   高光坐标只写在 puck / ring 自己身上；`.chat-flow` / `.turn-activity` 排除
+│   ├── fx-glint.ts                  ← 🆕 [特效层] 偶发闪光：40–90s 挑一个可见面板框沿一条边划过（约 900ms，不循环）；
+│   │                                   有弹窗时只挑弹窗框；crimson 跳过；无 `element.animate` 不播
+│   ├── fx-theme-signature.ts        ← 🆕 [特效层] 主题招牌**唯一一张表** `THEME_SIGNATURES`（顶栏纹饰 / 侧条氛围）
+│   │                                   + 回合角度、刻度、侧条落点等纯函数 + 主题 slug 观察。
+│   │                                   crimson / sakura / parchment / indigo 什么都不渲染
+│   ├── fx-game-state.ts             ← 🆕 [特效层] 时段 / 天气类别 / 已落定回合数的纯投影（不碰 store）
+│   ├── fx-foil.ts                   ← 🆕 [特效层] `v-foil` 指令：传说 / 神话 / 唯一（`RARITY_LEVELS` 下标 ≥ 4）
+│   │                                   往宿主追加一个 `.fx-foil`，坐标只写在它自己身上；样式表由本模块按需注入一次，
+│   │                                   规则挂在 `:root[data-fx='on']` 下。ItemSystemCard（带 2.5° 倾斜）与 ItemDetailBody 使用
+│   ├── fx-item-flight.ts            ← 🆕 [特效层] 获得物品消息出现时一道光沿弧线飞向侧栏背包按钮、按钮轻弹；
+│   │                                   闸门关 / 页面隐藏 / 目标不可见 / 已有一次在飞时整个跳过。只读 DOM、不碰数据
+│   ├── narrative-reveal.ts          ← 🆕 [特效层] 流式正文「墨迹洇开」纯状态机：只有新追加的尾巴成 chunk，
+│   │                                   各片拼接恒等于正文；单次至多 12 片、同时至多 48 片，420ms 后并回纯文本
+│   ├── narrative-names.ts           ← 🆕 [特效层] 「名字初次登场」纯判定：最长优先、每条至多 3 个、只活在本次会话
 │   ├── dev-content-source.ts        ← 🆕 [2026-11-16] **仅开发期**内容源选择的纯解析器：偏好（localStorage
 │   │                                   `poem_dev_content_source_v1`，`pack` 默认 = 现状 / `local`）+ 是否配了
 │   │                                   `POEM_CONTENT_DIR` + 已装包事实 → `{ suppressPack, suppressedPack, notices }`
@@ -632,6 +667,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               失败给「重试」（emit `retry`），离场瞬时（transitions.css `.view-loading.view-leave-active`）
 │   │   ├── ResourceBar.vue          ← 📌 2026-11-16（动效 v1）：填充层整条宽 + `translateX`（不再过渡 width）；
 │   │   │                               数值下降时 `.res-ghost` 同色残影停留后追上（`.is-draining`），只读 props 不改数
+│   │   │                               📌 2026-11-16（特效层）：闸门打开时数值回升加 `.is-rising` 与一道 `.res-crest` 一次性上扬
+│   │   ├── FxFrameTrace.vue         ← 🆕 [2026-11-16 / 特效层] AppModal 入场的四角描线（scaleX/scaleY 从角点长出后淡去、
+│   │   │                               定时器移除，不靠 animationend）。只在闸门打开时由 AppModal 渲染
+│   │   ├── fx-frame-trace-timing.ts ← 🆕 上者与 AppModal 共用的时间表（`FX_MODAL_ENTER_MS` 是根 Transition 的显式
+│   │   │                               enter 时长，必须不短于子元素 —— design.md §6.0 第 4 条）；独立成 .ts 是因为
+│   │   │                               测试经 `*.vue` 垫片 import 看不到具名导出
 │   │   ├── ConfirmDialogHost.vue    ← 🆕 [2026-11-14] `lib/confirm-dialog.ts` 的唯一宿主（App.vue 挂一次）。
 │   │   │                               按请求 `v-if` + `:key` 挂 AppModal，打开时 Teleport 锚点排在已开弹窗之后，
 │   │   │                               所以从别的弹窗里发起也盖在上面；危险确认默认聚焦「取消」
@@ -1135,6 +1176,15 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               `splitSceneImageSegments` 切插画锚点，再分派给
 │   │   │                               BeautifierFrame（美化段）与 SceneImageSegment（插画格）。
 │   │   │                               ★设置页的 RuleEditorModal 预览也挂它 —— 编辑器与正文同一条链
+│   │   │                               📌 2026-11-16（特效层）：闸门打开且需要动效的段落改交 NarrativeParagraph，
+│   │   │                               其余照旧渲染裸 `<p>`
+│   │   ├── NarrativeParagraph.vue   ← 🆕 [2026-11-16 / 特效层] 正文一个段落的三种呈现：`stream`（逐片墨迹洇开，
+│   │   │                               `lib/narrative-reveal.ts`）/ `ink`（整段一次浮现）/ `plain`，可叠加名字下划线。
+│   │   │                               🔴 根永远是一个 `<p>`，textContent 与裸 `<p>{{ text }}</p>` 逐字相同；落定后只剩一个文本节点
+│   │   ├── TurnSeal.vue             ← 🆕 [2026-11-16 / 特效层] ChatFlow 新一回合正文落定时盖下的印记（aria-hidden）；
+│   │   │                               由 BeautifiedNarrative 按 `seal` prop（off / still / pressed）渲染。
+│   │   │                               🔴 别改回 ChatFlow 里的条件插槽：条件插槽会让每条历史正文随流式逐帧重渲染（闸门关着也会）
+│   │   │                               主题 → 形制（方印 / 火漆 / 星芒）的唯一一张表在本文件
 │   │   ├── BeautifierFrame.vue      ← [工坊正则] opaque iframe 的渲染面：文档由
 │   │   │                               `lib/beautifier-frame.ts` 生成（sandbox / CSP / 主题变量注入 /
 │   │   │                               消息协议），storage 会话由 `lib/beautifier-storage.ts` 开。
@@ -1220,6 +1270,22 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                  旧 `CombatActionBar/ActionCard/Header` 组件一并删除。
 │   │   │                                  现行战斗真源 = `src/core/combat/sandbox/` +
 │   │   │                                  `docs/planning/2026-10-02-combat-decode-entitygen-plan.md`
+│   ├── fx/                          ← 🆕 [2026-11-16 / 特效层，实验分支] 界面特效的叶子覆盖层，全部 `aria-hidden`、
+│   │                                   `pointer-events: none`、只在 `useFxEnabled()` 为真时 `v-if` 挂载；
+│   │                                   🔴 特效不写进主题样式表、不借主题伪元素（约定与层级表见 docs/design.md §6.4）
+│   │   ├── FxLayer.vue              ← 应用级（App.vue 挂）：多根片段，不包容器（容器会多一个层叠上下文）
+│   │   ├── FxSheen.vue              ← 指针光泽（puck + 2px 描边环），z 1500：弹窗之上、Toast 之下
+│   │   ├── FxGlint.vue              ← 偶发闪光，z 1500；crimson 另有 `display: none` 兜底
+│   │   ├── FxItemFlight.vue         ← 物品飞入背包图标（`--fx-z-front` 900）；只对挂载后新推入的消息起飞
+│   │   ├── FxGameLayer.vue          ← 游戏页级（GamePage 挂为 `.game-page-layout` 最前几个子节点）；
+│   │   │                               全应用唯一调用 `useFxGameState()` 的地方
+│   │   ├── FxPlateParallax.vue      ← 底盘视差（至多 2px），只开 obsidian / misty-lilac（bronze、forest 的伪元素按底盘对位，会双影）
+│   │   ├── FxThemeAmbient.vue       ← 主题氛围（ocean 焦散 / misty-lilac 极光 / forest 凝露 / ivory 金线），
+│   │   │                               只住左右侧条与顶带，绝不垫在正文阅读栏背后
+│   │   ├── FxAtmosphere.vue         ← 时段 / 天气染色（`.game-page-layout` 内 z 2，侧栏不透明）+ 战斗暗角
+│   │   │                               （Teleport 到 body，z 1002）与接缝 `border-color` 一次性过渡
+│   │   └── FxTurnOrnament.vue       ← 顶栏轮数旁纹饰（TopBar 挂）：obsidian 刻度环 600s 一圈 + 指针每回合 6°；
+│   │                                   bronze 擒纵轮每回合一齿。挂载不动画
 │   └── workshop/                    ← 扩展管理 + [工坊 P1] 创意工坊子页面
 │       ├── ExtensionManagementPage.vue
 │       │                               ← 首页/设置/游戏侧栏统一入口；原版扩展暂为明确占位，
@@ -1253,6 +1319,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
     │                                   `modal` 与交错入场 `.motion-stagger`（全局关键帧 `motion-rise`），时长缓动全取
     │                                   variables.css 的 `--motion-*` token；规则见 docs/design.md §6.0。
     │                                   死代码 `slide-left/right` 已删（零引用）
+    ├── fx-core.css                  ← 🆕 [2026-11-16 / 特效层，实验分支] 特效层共享底座（main.ts 引入）：
+    │                                   `.fx-overlay` 基类、`--fx-z-back`（-1）/ `--fx-z-front`（900）、
+    │                                   `.game-page-layout` 的 isolate 与覆盖层特异度、减动效安全网。
+    │                                   🔴 规则挂在 `:root[data-fx='on']` 下，闸门关着时零命中；例外只有减动效安全网
+    │                                   与只命中 fx 元素的规则（这些元素本身只在闸门开时存在）
     ├── cards-shared.css             ← 系统卡片共享样式（game/cards/ 的 Craft / Combat / Item 卡引用）。
     │                                   强调色由消费方设 `--sys-accent`（品质色/结局色），骨架用整圈
     │                                   边框色调 + 头部色点表达 —— **禁用左侧色条**；颜色一律走变量
@@ -1279,7 +1350,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | 📚 世界书      | **早已不是占位**：书列表 + 导入/新建/删除/恢复（`WorldBookSection.vue`，约 368 行）+ 条目编辑器（`WorldBookEditor.vue`，约 909 行：条目 CRUD / 关键词 / 插入位置与深度 / 触发策略 / EJS 正文）。数据在 Dexie（工坊 P0 起 `settings.worldBooks` 已不存在） |
 | 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                                                                                                                                                                                                 |
 | 🧠 记忆 & 缓存 | 显式 LLM/Embedding 召回模式、Embedding 与可选 Reranker 绑定、候选数/最终召回数、压缩阈值（📌 2026-11-12：未接入运行流程，控件已禁用并标「暂未接入」）/快照上限/缓存策略                                                                                   |
-| 🎨 外观主题    | 10 主题网格、字体风格、字体大小、悬停延迟、减少动态效果                                                                                                                                                                                                   |
+| 🎨 外观主题    | 10 主题网格、字体风格、字体大小、悬停延迟、减少动态效果；📌 2026-11-16（实验分支）+「界面特效」开关（`visualEffects`，默认开）                                                                                                                            |
 | 💬 消息显示    | 系统通知开关 + 7 种事件类型过滤                                                                                                                                                                                                                           |
 | ✨ 输出美化    | 预设规则库 (22条) + auto-enable 绑定 + 三段式 UI + CRUD                                                                                                                                                                                                   |
 | 🎵 音频        | 混音台 + 播放列表 + 音轨库（音乐文件夹条/上传/搜索/场景配乐开关）                                                                                                                                                                                         |

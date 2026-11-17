@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, ref } from 'vue';
 import {
   compileBeautifierSegments,
   type BeautifierMatchSegment,
@@ -11,7 +11,12 @@ import type { ImageGenMode, ImageRating, SceneImageMarker } from '@engine/types/
 import { useBeautify } from '../../composables/useBeautify';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import BeautifierFrame from './BeautifierFrame.vue';
+import NarrativeParagraph, { type ParagraphMode, type TextRange } from './NarrativeParagraph.vue';
+import { useFxEnabled } from '../../lib/fx-gate';
+import { createRevealMemory, REVEAL_MS } from '../../lib/narrative-reveal';
+import { scanNames, type NameIndex } from '../../lib/narrative-names';
 import SceneImageSegment from './SceneImageSegment.vue';
+import TurnSeal from './TurnSeal.vue';
 import { parseCombatNarrative, type CombatFlowBlock } from './combat/combat-view';
 
 const props = withDefaults(
@@ -51,6 +56,24 @@ const props = withDefaults(
      * 而漏掉的那一处照样会拿着为另一方言写的提示词去重画。
      */
     imageDialectId?: string;
+    /**
+     * 特效层的正文浮现方式（动效 v1）。缺省 `off` = 与改造前逐字节相同。
+     * - `stream`：只让新追加的尾巴逐词洇开（`streaming` 为真时自动取这一档）
+     * - `once`：整条一次到达的新消息，段落与卡片按块浮现一次
+     * 特效闸门关闭时一律当 `off`。
+     */
+    reveal?: 'off' | 'stream' | 'once';
+    /**
+     * 这条新消息里「初次登场」的名字（ChatFlow 判定）。`index` 是全部已知名的索引，
+     * 段内定位用它做最长匹配，免得在更长的已知名字内部划线。
+     */
+    mentions?: { names: readonly string[]; index: NameIndex };
+    /**
+     * 行末回合印记（ChatFlow 判定）：`off` 不盖 / `still` 静止 / `pressed` 刚落定时盖一下。
+     * 🔴 是 prop 不是插槽：条件插槽会让父组件每次渲染都强制重渲染每一条历史正文
+     *    （流式时每帧一次，闸门关着也一样）。prop 只在这一条的值真的变了才触发重渲染。
+     */
+    seal?: 'off' | 'still' | 'pressed';
   }>(),
   {
     rules: undefined,
@@ -65,6 +88,9 @@ const props = withDefaults(
     imageMaxRating: 'general',
     imageBlurByDefault: false,
     imageDialectId: '',
+    reveal: 'off',
+    mentions: undefined,
+    seal: 'off',
   },
 );
 
@@ -170,6 +196,120 @@ const messageEndOccurrences = computed<number[]>(() => {
   return [...seen].sort((a, b) => a - b);
 });
 
+// ===== 特效层（动效 v1）：墨迹浮现 / 名字下划线 / 行末印记 =====
+
+const fxEnabled = useFxEnabled();
+
+/** 实际生效的浮现档：闸门关 → off；流式草稿 → stream */
+const effectiveReveal = computed<'off' | 'stream' | 'once'>(() => {
+  if (!fxEnabled.value) return 'off';
+  return props.streaming ? 'stream' : props.reveal;
+});
+
+/** 交错上限：第 8 块之后不再往后排（与 --motion-stagger-step 相乘） */
+const INK_ORDER_CAP = 8;
+/** 与 `--motion-stagger-step` 同值，只用来算撤类名的时机 */
+const STAGGER_STEP_MS = 36;
+
+/**
+ * `once` 只在挂载时生效一次：动画放完就撤掉类名，落定后的 DOM 与不开特效时相同。
+ * 之后 props 再变（润色、重渲染）也不重播。
+ */
+const onceActive = ref(effectiveReveal.value === 'once');
+let onceTimer: ReturnType<typeof setTimeout> | null = null;
+if (onceActive.value) {
+  onceTimer = setTimeout(
+    () => {
+      onceActive.value = false;
+      onceTimer = null;
+    },
+    REVEAL_MS + INK_ORDER_CAP * STAGGER_STEP_MS + 120,
+  );
+}
+onBeforeUnmount(() => {
+  if (onceTimer !== null) clearTimeout(onceTimer);
+});
+
+/** 流式段落的跨重挂记忆（每个草稿实例一份） */
+const revealMemory = createRevealMemory();
+
+function paragraphKey(partIndex: number, segmentIndex: number, paragraphIndex: number): string {
+  return `${partIndex}-${segmentIndex}-${paragraphIndex}`;
+}
+
+interface ParagraphPlan {
+  order: number;
+  marks: TextRange[];
+}
+
+/**
+ * 一次遍历给出每个正文段落的交错序号、名字下划线区间与末段 key。
+ * 闸门关时一步不走（历史消息不付这份成本）。
+ */
+const paragraphPlan = computed(() => {
+  const plans = new Map<string, ParagraphPlan>();
+  let lastKey: string | null = null;
+  let lastIsParagraph = false;
+  if (!fxEnabled.value) return { plans, lastKey };
+  const pending = new Set(props.mentions?.names ?? []);
+  const index = props.mentions?.index;
+  let order = 0;
+  parts.value.forEach((part, partIndex) => {
+    if (part.kind !== 'prose') {
+      lastIsParagraph = false;
+      return;
+    }
+    part.segments.forEach((segment, segmentIndex) => {
+      if (isMatch(segment)) {
+        lastIsParagraph = false;
+        return;
+      }
+      paragraphs(segment.text).forEach((paragraph, paragraphIndex) => {
+        const key = paragraphKey(partIndex, segmentIndex, paragraphIndex);
+        const marks: TextRange[] = [];
+        if (index && pending.size > 0) {
+          for (const match of scanNames(paragraph, index)) {
+            if (!pending.has(match.name)) continue;
+            pending.delete(match.name);
+            marks.push({ start: match.start, end: match.end });
+          }
+        }
+        plans.set(key, { order: Math.min(order++, INK_ORDER_CAP), marks });
+        lastKey = key;
+        lastIsParagraph = true;
+      });
+    });
+  });
+  return { plans, lastKey: lastIsParagraph ? lastKey : null };
+});
+
+/** 要不要盖行末印记：挂在最后一个正文段落末尾；最后一块不是段落时另起一行 */
+const hasSeal = computed(() => fxEnabled.value && props.seal !== 'off');
+
+/** 这个段落要不要交给 NarrativeParagraph（否则按原样渲染裸 `<p>`） */
+function paragraphNeedsFx(key: string): boolean {
+  if (!fxEnabled.value) return false;
+  if (effectiveReveal.value === 'stream') return true;
+  if (effectiveReveal.value === 'once' && onceActive.value) return true;
+  if (hasSeal.value && paragraphPlan.value.lastKey === key) return true;
+  return (paragraphPlan.value.plans.get(key)?.marks.length ?? 0) > 0;
+}
+
+function paragraphMode(): ParagraphMode {
+  if (effectiveReveal.value === 'stream') return 'stream';
+  if (effectiveReveal.value === 'once' && onceActive.value) return 'ink';
+  return 'plain';
+}
+
+function planOf(key: string): ParagraphPlan | undefined {
+  return paragraphPlan.value.plans.get(key);
+}
+
+/** 美化框 / 对话卡片 / 行动面板在 `once` 档整块浮现，不逐词 */
+const blockInkClass = computed(() =>
+  effectiveReveal.value === 'once' && onceActive.value ? 'fx-ink-block' : undefined,
+);
+
 function isMatch(segment: BeautifierSegment): segment is BeautifierMatchSegment {
   return segment.kind === 'match';
 }
@@ -205,7 +345,7 @@ function paragraphs(text: string): string[] {
 <template>
   <div class="beautified-narrative">
     <template v-for="(part, partIndex) in parts" :key="partIndex">
-      <div v-if="part.kind === 'panel'" class="action-panel">
+      <div v-if="part.kind === 'panel'" class="action-panel" :class="blockInkClass">
         <strong>{{ part.title || '行动详情' }}</strong>
         <div v-for="(row, rowIndex) in part.rows" :key="rowIndex">
           <span>{{ row.label }}</span> {{ row.value }}
@@ -227,21 +367,47 @@ function paragraphs(text: string): string[] {
       />
       <template v-for="(segment, index) in part.kind === 'prose' ? part.segments : []" :key="index">
         <template v-if="!isMatch(segment)">
-          <p v-for="(paragraph, paragraphIndex) in paragraphs(segment.text)" :key="paragraphIndex">
-            {{ paragraph }}
-          </p>
+          <template
+            v-for="(paragraph, paragraphIndex) in paragraphs(segment.text)"
+            :key="paragraphIndex"
+          >
+            <NarrativeParagraph
+              v-if="paragraphNeedsFx(paragraphKey(partIndex, index, paragraphIndex))"
+              :text="paragraph"
+              :mode="paragraphMode()"
+              :order="planOf(paragraphKey(partIndex, index, paragraphIndex))?.order ?? 0"
+              :marks="planOf(paragraphKey(partIndex, index, paragraphIndex))?.marks"
+              :memory="revealMemory"
+              :memory-key="paragraphKey(partIndex, index, paragraphIndex)"
+            >
+              <template
+                v-if="
+                  hasSeal &&
+                  paragraphPlan.lastKey === paragraphKey(partIndex, index, paragraphIndex)
+                "
+                #default
+              >
+                <TurnSeal :pressed="seal === 'pressed'" />
+              </template>
+            </NarrativeParagraph>
+            <p v-else>
+              {{ paragraph }}
+            </p>
+          </template>
         </template>
         <BeautifierFrame
           v-else-if="segment.replacement && !isNativeMatch(segment)"
           :markup="segment.replacement"
           :rule-name="segment.ruleName"
           :forward-context-menu="forwardContextMenu"
+          :class="blockInkClass"
           :scripts="scriptPolicy(segment)"
           @resize="emit('resize', $event)"
         />
         <div
           v-else-if="segment.replacement && isNativeMatch(segment)"
           class="beautifier-native-match"
+          :class="blockInkClass"
         >
           <div class="dialogue-card">
             <span class="dialogue-name">{{ segment.captures[0] }}</span>
@@ -250,6 +416,11 @@ function paragraphs(text: string): string[] {
         </div>
       </template>
     </template>
+
+    <!-- 行末印记：最后一块不是正文段落（美化框 / 卡片 / 插画）时另起一行，仍是行内元素 -->
+    <div v-if="hasSeal && paragraphPlan.lastKey === null && parts.length > 0" class="narrative-end">
+      <TurnSeal :pressed="seal === 'pressed'" />
+    </div>
 
     <!-- 🔴 记录驱动的图带，追加在段落之后（§10.2b）—— 不经过分段器 -->
     <SceneImageSegment
@@ -287,6 +458,11 @@ function paragraphs(text: string): string[] {
 }
 .beautified-narrative {
   min-width: 0;
+}
+
+.narrative-end {
+  text-align: end;
+  line-height: 1;
 }
 
 .beautified-narrative p {

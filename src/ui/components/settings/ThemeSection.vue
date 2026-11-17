@@ -125,6 +125,19 @@ function asFontChoice(e: Event): FontFamilyChoice {
           </div>
         </div>
         <div class="form-label">
+          界面特效
+          <p class="form-hint">
+            为界面加上光泽流转、场景氛围与轻微视差等装饰效果。关闭后界面与以往完全一致；减少动态效果开启时也会自动停用。
+          </p>
+          <div class="toggle-row">
+            <span>{{ s.visualEffects ? '已开启' : '已关闭' }}</span>
+            <label class="toggle-label">
+              <input v-model="s.visualEffects" type="checkbox" class="toggle-input" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="form-label">
           减少动态效果
           <p class="form-hint">
             关掉卡片入场、骨架屏脉动、折叠展开等过渡动画。若系统已开启「减少动态效果」，
