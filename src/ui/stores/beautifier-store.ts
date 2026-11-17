@@ -126,6 +126,9 @@ export const useBeautifierStore = defineStore('beautifier', () => {
     }
   }
 
+  /** 单次重算最多重来几轮（运行时修订号一直在变时，最后一轮的结果照收） */
+  const PRESET_RULES_MAX_ROUNDS = 5;
+
   /**
    * 重算预设规则（含 autoEnable 解析）。
    *
@@ -149,33 +152,52 @@ export const useBeautifierStore = defineStore('beautifier', () => {
     // 🔴 供测试/装包流程显式注入 pack 规则；生产路径不传，由 provider 惰性读（§5.6 恢复默认）
     packRulesOverride?: readonly BeautifierRule[],
   ): Promise<void> {
-    const revision = getPackRuntimeRevision();
     try {
-      // provider 内存层优先（D20）：pack 规则 > 占位文件。packRulesOverride 显式传入时
-      // 优先用它（装包瞬间 provider 注册与重算谁先谁都互斥，显式传最稳）。
-      const packRules = packRulesOverride ?? getPackRules();
-      // 🔴 pack 规则必须过 normalizeRuleRuntime（2026-08-07 真机）：构建器 JSON 是
-      //    `defaultEnabled` 形状，不经归一化则 enabled=undefined → 渲染侧全判不激活，
-      //    builtin-dialogue-card 这类出厂默认开的规则装包后也失效。
-      //    兼容下游 mergeRules / pruneLegacyBuiltinOverrides 的 mutable 参数，展开为可变数组
-      const preset: BeautifierRule[] =
-        packRules !== undefined && packRules.length >= 0
-          ? (packRules as BeautifierRule[]).map((r) => normalizeRuleRuntime(r as any))
-          : ((await loadPresetRules()) as BeautifierRule[]);
-      if (revision !== getPackRuntimeRevision()) return;
-      // 覆盖列表语义迁移：认得出出厂默认值才能做，所以挂在预设加载之后。
-      // 内部有标志位，重复调用是空转。
-      const settingsStore = useSettingsStore();
-      if (pruneLegacyBuiltinOverrides(settingsStore.settings, preset)) settingsStore.saveNow();
-      const merged = mergeRules(
-        preset,
-        userRules.value,
-        builtinDisabled(),
-        activeWorldBookIds,
-        activeEntryUids,
-        activeCharacterNames,
-      );
-      presetRules.value = merged.filter((r) => r.isBuiltin);
+      // 🔴 2026-11-17 修（症状：正文对话卡片 / 命定核心美化不生效、标签原样显示）：
+      //    此前在 `await loadPresetRules()` 之前记下运行时修订号，await 回来发现修订号变了
+      //    就直接 return 丢掉结果。而无内容包启动时 content-store `hydratePackState` 的
+      //    无包分支会 `setActivePackRecord(null)` → `installRuntimePack(undefined, false)`
+      //    → notify() 把修订号 +1，却没人再排一次重算（activePackVersion 的 watch 只认非 null）
+      //    —— presetRules 就此空着。现照 settings-store `loadAgentProjectDefaults` 的做法：
+      //    修订号变了就**重来**（有上限），永远不以「丢掉结果」收尾；最后一轮不再比修订号，
+      //    但采纳前同步再读一次 pack 规则，pack 已挂上就以 pack 为准。
+      for (let round = 1; round <= PRESET_RULES_MAX_ROUNDS; round++) {
+        const final = round === PRESET_RULES_MAX_ROUNDS;
+        const revision = getPackRuntimeRevision();
+        // provider 内存层优先（D20）：pack 规则 > 占位文件。packRulesOverride 显式传入时
+        // 优先用它（装包瞬间 provider 注册与重算谁先谁都互斥，显式传最稳）。
+        // 🔴 pack 规则这条路是同步的，不许在里面加 await（装包流程依赖它当拍生效）。
+        let packRules = packRulesOverride ?? getPackRules();
+        let fallback: BeautifierRule[] | undefined;
+        if (packRules === undefined) {
+          fallback = (await loadPresetRules()) as BeautifierRule[];
+          if (!final && revision !== getPackRuntimeRevision()) continue;
+          // 最后一轮不比修订号，但 await 期间 pack 可能已挂上 → 同步再读一次，pack 优先
+          if (final) packRules = getPackRules();
+        }
+        // 🔴 pack 规则必须过 normalizeRuleRuntime（2026-08-07 真机）：构建器 JSON 是
+        //    `defaultEnabled` 形状，不经归一化则 enabled=undefined → 渲染侧全判不激活，
+        //    builtin-dialogue-card 这类出厂默认开的规则装包后也失效。
+        //    兼容下游 mergeRules / pruneLegacyBuiltinOverrides 的 mutable 参数，展开为可变数组
+        const preset: BeautifierRule[] =
+          packRules !== undefined
+            ? (packRules as BeautifierRule[]).map((r) => normalizeRuleRuntime(r as any))
+            : (fallback ?? []);
+        // 以下只在采纳轮执行。覆盖列表语义迁移：认得出出厂默认值才能做，所以挂在预设加载之后。
+        // 内部有标志位，重复调用是空转。
+        const settingsStore = useSettingsStore();
+        if (pruneLegacyBuiltinOverrides(settingsStore.settings, preset)) settingsStore.saveNow();
+        const merged = mergeRules(
+          preset,
+          userRules.value,
+          builtinDisabled(),
+          activeWorldBookIds,
+          activeEntryUids,
+          activeCharacterNames,
+        );
+        presetRules.value = merged.filter((r) => r.isBuiltin);
+        return;
+      }
     } catch (err) {
       // 加载失败不阻断渲染（设置页打开时会兜底重算），但留痕便于诊断：
       // 2026-08-08 美化规则「只剩占位」真机复现后，这条曾全程静默。

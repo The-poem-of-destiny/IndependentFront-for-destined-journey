@@ -3,6 +3,9 @@
  *
  * 修正若干 AI 输出缺陷（仅对 story agent 生效）：
  *
+ * 正文信封认 `<maintext>` 与同义的 `<gametxt>`（见 story-output 的 STORY_ENVELOPE_TAGS），
+ * 下文写 <maintext> 处均指「任一种信封」。
+ *
  * 1. 【正文吞进思维链】(raw 空)
  *    AI 把 <maintext> 正文写进了 reasoning_content 通道，content 通道为空。
  *    → 从 reasoning 最后一个 '<maintext' 起截取到末尾，塞回 rawResponse。
@@ -34,6 +37,7 @@
  */
 
 import type { AgentResult } from '../types/types';
+import { STORY_ENVELOPE_TAG_SOURCE } from './story-output';
 
 /** 开头的代码块围栏（可能带语言标识如 ```xml） */
 const LEADING_FENCE = /^\s*```[^\n]*\n?/;
@@ -67,12 +71,13 @@ function stripCodeFences(text: string): string {
 }
 
 /**
- * 找 text 中最后一个 '<maintext' 词边界位置。
- * 用 \b 排除 <maintextual 之类的误匹配；未找到返回 -1。
+ * 找 text 中最后一个正文信封开标签（'<maintext' 或 '<gametxt'）的词边界位置。
+ * 用 \b 排除 <maintextual / <gametxtual 之类的误匹配；未找到返回 -1。
  */
 function lastMaintextIndex(text: string): number {
   let lastIdx = -1;
-  const re = /<maintext\b/g;
+  // 大小写不敏感，与 story-output 的信封投影口径一致（2026-11-17）
+  const re = new RegExp(String.raw`<${STORY_ENVELOPE_TAG_SOURCE}\b`, 'gi');
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     lastIdx = m.index;
@@ -95,7 +100,7 @@ function isThinkingPlan(block: string): boolean {
  * 安全保证：只剥 --- 分隔且命中思维链元语言的块；顶部第一个块就是正文时不动。
  */
 function stripThinkingInsideMaintext(text: string): string {
-  const open = /^<maintext\b[^>]*>\s*/.exec(text);
+  const open = new RegExp(String.raw`^<${STORY_ENVELOPE_TAG_SOURCE}\b[^>]*>\s*`, 'i').exec(text);
   if (!open) return text;
   const after = text.slice(open[0].length);
   // 独占一行的 --- 作为计划/正文分隔符

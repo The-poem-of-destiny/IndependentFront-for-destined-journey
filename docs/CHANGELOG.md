@@ -18,6 +18,13 @@
 - 文档：`docs/reference/direct-generation.md`、`docs/reference/direct-generation-cache.md`、`src/ui/AGENTS.md` 加 📌 2026-11-17 注记。
 - 测试：`tests/core/prompts/preset-resolution.test.ts`、`tests/ui/components/settings/agent/AgentPresetBar.test.ts`、`PresetManager.copy-on-write.test.ts` 补用例。
 
+### 2026-11-17 美化规则启动竞态 + `<gametxt>` 同义信封｜**未真机验证**
+
+- 起因：gemini-3.8-flash 自动试玩（Agent 模式、未装内容包）时，正文里的 `[名字]("台词")` 对话与命定核心的 `<lilith>` 块原样显示；重新加载后同一存档渲染正常。另有 `<gametxt>` / `</gametxt>` 每回合都原样显示。
+- 美化规则：`beautifier-store.ts` 的 `refreshPresetRules` 在取规则途中发现内容包修订号变了就直接丢弃结果，而未装包时 `hydratePackState` 恰好会让修订号 +1 且不再刷新，内置规则于是一直为空。改为过期即重来（最多 5 轮，末轮照收，末轮采纳前再读一次 pack 规则），写法照 settings-store 2026-11-14 的 `loadAgentProjectDefaults`。新增 3 条回归测试（旧代码上全红）。
+- `<gametxt>`：世界书要求模型用它包正文，引擎此前只认 `<maintext>`。现两者是同义信封，名单只在 `story/story-output.ts` 的 `STORY_ENVELOPE_TAGS` 定义一份，`story-rescue.ts` 与直出 `direct-output.ts` 引用它。两种同现时从最后一个开标签取到其后第一个闭标签，残留信封标签剥掉；直出校验允许两种各一个，同种两个仍拒绝。新增 18 条测试。
+- 未纳入：同版本重装内容包时规则可能被清空后不再重载（订阅回调只清不载），尚未核实，另行处理。
+
 ### 2026-11-16 Windows 便携版 zip（测试版）｜**未发布、未在干净机器上真机双击**
 
 - 目标：给不装 Node / 不用 git 的玩家一个「解压 → 双击 `Start.bat`」的 Windows x64 免安装包。说明书：`docs/reference/portable-release.md`。
