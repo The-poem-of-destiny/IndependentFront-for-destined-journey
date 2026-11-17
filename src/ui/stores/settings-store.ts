@@ -304,6 +304,9 @@ function getDefaults(): UiSettings {
     developerMode: false,
     // Story 上下文与记忆新模式（实验）—— 默认关闭；仅开发者模式不会连带开启它
     storyContextV2Enabled: false,
+    // 完整运行日志（引擎日志器）—— 默认关闭；开了才落盘，粒度默认全部
+    engineLogEnabled: false,
+    engineLogLevel: 'trace',
     // 新模式召回的原文粒度（D32）：默认整回合，开发者卡片里切换比较
     storyRecallRawMode: 'turn',
     // 新模式正文换窗批大小 K：默认 1 = 每回合滑动（与引入前逐字节一致）

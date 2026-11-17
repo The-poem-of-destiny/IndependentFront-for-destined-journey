@@ -31,7 +31,7 @@
 
 ```
 src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL 状态驱动）
-├── main.ts                          ← 应用入口（createApp + Pinia + 主题 + 音频手势解锁监听）
+├── main.ts                          ← 应用入口（createApp + Pinia + 主题 + 音频手势解锁监听 + 引擎日志 sink 与开关接线）
 ├── App.vue                          ← 根组件 = **视图状态机 + 全局存档窗口 + Toast + 启动链**
 │                                       🔴 **全应用没有 vue-router**（别照旧文档去找 `<router-view>`）：
 │                                          `viewComponent` 是对 `ui.currentView` 的 computed switch，
@@ -325,6 +325,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   宿主是 `shared/ConfirmDialogHost.vue`。🔴 **新的确认一律用它，别再写
 │   │                                   `window.confirm`**（嵌入式 webview 里原生框直接返回 false）；
 │   │                                   未挂宿主（单测）时才回退原生框
+│   ├── engine-log-export.ts         ← 🆕 [2026-11-16] 完整运行日志导出：flush → 按 seq 分页（每页 200）逐行
+│   │                                   JSONL，首行 header；优先 `showSaveFilePicker` 流式写入，否则每页一个 Blob
+│   │                                   分片再下载。🔴 不许把全部日志拼成一个字符串（可达几百 MB）。I/O 全经 deps 注入
+│   ├── engine-log-storage-full.ts   ← 🆕 [2026-11-16] 日志存储配额耗尽回调：把 `engineLogEnabled` 置 false（main.ts 的 watch 随即
+│   │                                   关掉日志器，开关与实际一致）+ 常驻错误提示；导出清空后重新打开即恢复
 │   ├── leave-game-guard.ts          ← 🆕 [2026-11-14 / GAME-08·G-03] `confirmLeaveGame(去处)`：有在跑的回合 /
 │   │                                   润色 / 在飞或排队的插画时先危险确认，否则直接放行。凡是会卸载
 │   │                                   GamePage 的入口（菜单设置/扩展/首页、插画「去设置」、RPM 弹窗）都先过它
@@ -795,6 +800,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               旁边那些清除动作是同一类事，放一起才找得到
 │   │   │                               📌 2026-11-14：内容包卡已搬去「内容包」分区，这里只留一行指路
 │   │   ├── DeveloperSection.vue     ← 开发者模式开关 + 诊断能力说明 + 导出隐私警告
+│   │   │                               📌 2026-11-16：+「完整运行日志」卡（开关 / 粒度 / 条数 / 导出 / 清空）；
+│   │   │                               开关推给引擎日志器的接线在 main.ts（`immediate` watch），不在本组件
 │   │   ├── AboutSection.vue         ← 关于内容面板（UIL-01 起由首页「关于」弹窗原位挂载，路径保留供许可署名闸门扫描）
 │   │   ├── AudioSection.vue         ← [Audio] 音频分区（壳层 + 5 子组件）
 │   │   ├── AssetSection.vue         ← [素材] 素材分区壳层 + 5 子组件（AssetImportStrip /
@@ -1268,7 +1275,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | 🖼 素材         | 导入条 + 素材库（按角色分组/扁平表/多选批删）+ 变体抽屉（设主图/裁剪/改名）                                                                                                                                                                               |
 | 🖼 图像生成     | 四张卡：提示词生成 / 独立出图连接 / 出图参数 / 视觉预设；NovelAI 连接存 Dexie `imageApiConnections`，ComfyUI 地址与 provider 参数留在 `UiSettings`，`image_prompt` 仍绑定通用 LLM 源                                                                      |
 | 💾 数据与备份  | 导出/导入/清除（排除音频库与素材库，各有独立导出口）；📌 2026-11-14 内容包卡已移出，只留指路                                                                                                                                                              |
-| 🛠 开发者模式   | 持久开关（默认关闭）；控制调试工具栏、原始 Agent 请求/响应、reasoning、工具 payload、诊断导出与 `Alt + Shift + D` 抽屉                                                                                                                                    |
+| 🛠 开发者模式   | 持久开关（默认关闭）；控制调试工具栏、原始 Agent 请求/响应、reasoning、工具 payload、诊断导出与 `Alt + Shift + D` 抽屉；📌 2026-11-16 +「完整运行日志」卡（`engineLogEnabled` / `engineLogLevel`，独立于开发者模式；条数 / 导出 JSONL / 清空）            |
 
 > 📌 **UIL-01**：「关于」（`AboutSection.vue`：制作人员、项目与技术信息、版权与第三方许可证署名）已移出设置页侧栏，改由首页「关于」按钮原位打开 `AppModal` 展示。
 

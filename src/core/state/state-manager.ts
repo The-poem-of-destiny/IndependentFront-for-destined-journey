@@ -63,6 +63,7 @@ import {
   applyExpFloor,
 } from '../character/exp-table';
 import { getEngineSettings } from '../runtime/engine-settings';
+import { logEngine } from '../runtime/engine-logger';
 // 并行化改造（docs/planning/2026-08-16-pipeline-parallelism.md）：一切 Dexie 写入
 // 经 per-saveId FIFO 队列串行 —— 锁粒度 = 读-改-写区段，锁内禁止再入队列（铁律②）。
 import { withSaveWriteLock } from './state-write-queue';
@@ -805,6 +806,25 @@ export class StateManager {
         this.commitScope = outerScope;
       }
     });
+
+    logEngine(
+      applied.errors.length === 0 ? 'debug' : 'warn',
+      'state.commit',
+      `提交 ${patches.length} 条补丁：成功 ${applied.results.filter((r) => r.success).length}`,
+      () => ({
+        patches,
+        ejsVarsDiffs: ejsDiffs,
+        results: applied.results.map((r) => ({
+          op: r.patch.op,
+          target: r.patch.target,
+          success: r.success,
+          ...(r.error ? { error: r.error } : {}),
+        })),
+        errors: applied.errors,
+        events: applied.newEvents,
+      }),
+      { saveId: this.saveId },
+    );
 
     return {
       success: applied.errors.length === 0,
@@ -2575,6 +2595,21 @@ export class StateManager {
       const { maxSnapshotsPerSave, snapshotRetentionMode } = getEngineSettings();
       await trimSnapshots(this.saveId, maxSnapshotsPerSave, snapshotRetentionMode);
 
+      logEngine(
+        'info',
+        'state.snapshot',
+        `打快照：${reason} / 回合 ${turn}`,
+        () => ({
+          snapshotId: snapshot.id,
+          reason,
+          turn,
+          characterCount: characters.length,
+          messageCount: messages.length,
+          plotEventCount: plotEvents.length,
+        }),
+        { saveId: this.saveId },
+      );
+
       return snapshot;
     });
   }
@@ -2750,6 +2785,14 @@ export class StateManager {
     } catch (err) {
       errors.push(err instanceof Error ? err.message : String(err));
     }
+
+    logEngine(
+      errors.length === 0 ? 'info' : 'error',
+      'state.restore',
+      errors.length === 0 ? `恢复快照 ${snapshotId}` : `恢复快照失败 ${snapshotId}`,
+      () => ({ snapshotId, errors }),
+      { saveId: this.saveId },
+    );
 
     return {
       success: errors.length === 0,

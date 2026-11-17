@@ -3,6 +3,8 @@ import type { JsonObject, RerankerApiSource } from '../types/types-api';
 import { applyBodyParameters } from './body-parameters';
 import { buildCustomHeadersValue } from './header-overrides';
 import { asObject } from './adapter-utils';
+import { logEngine, registerLogSecret } from '../runtime/engine-logger';
+import { redactSecrets } from '../utils/redact-secrets';
 
 export interface RerankScore {
   index: number;
@@ -76,6 +78,16 @@ export async function requestRerank(
   const body = buildRerankerBody(source, query, documents, topN);
   const baseUrl = source.baseUrl.replace(/\/+$/u, '');
   const customHeaders = buildCustomHeadersValue(source.headerOverrides);
+  registerLogSecret(source.apiKey);
+  for (const value of Object.values(source.headerOverrides ?? {})) registerLogSecret(value);
+  const startTime = Date.now();
+  logEngine('info', 'retrieval.rerank.request', `Rerank 请求：${source.name}`, () => ({
+    baseUrl,
+    model: body.model ?? source.defaultModel,
+    documentCount: documents.length,
+    topN,
+    body,
+  }));
   const response = await scheduleApiRequest(
     { baseUrl, apiKey: source.apiKey, label: source.name },
     signal,
@@ -92,7 +104,19 @@ export async function requestRerank(
         signal,
       }),
   );
-  if (!response.ok)
-    throw new Error(`Reranker API ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  return parseRerankerResponse(await response.json(), documents.length);
+  if (!response.ok) {
+    const errorText = await response.text();
+    logEngine('error', 'retrieval.rerank.error', `Rerank HTTP ${response.status}`, () => ({
+      status: response.status,
+      durationMs: Date.now() - startTime,
+      body: redactSecrets(errorText),
+    }));
+    throw new Error(`Reranker API ${response.status}: ${errorText.slice(0, 200)}`);
+  }
+  const scores = parseRerankerResponse(await response.json(), documents.length);
+  logEngine('info', 'retrieval.rerank.response', `Rerank 完成：${source.name}`, () => ({
+    durationMs: Date.now() - startTime,
+    scores,
+  }));
+  return scores;
 }

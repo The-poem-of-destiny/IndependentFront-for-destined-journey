@@ -13,6 +13,7 @@
 
 import { PLACEHOLDER_REGISTRY, setPlaceholderGlobals } from './placeholder-registry';
 import type { AgentContext, AgentConfig, WorldBook } from '../types/types';
+import { isEngineLogEnabled, logEngine } from '../runtime/engine-logger';
 
 // ═══════════════════════════════════════════════════════════
 // Regex & Parsing
@@ -153,6 +154,13 @@ export function resolveTemplate(
   let result = '';
   let lastIndex = 0;
   let match: RegExpExecArray | null;
+  // trace 级逐个记录占位符解析结果；关着时不收集
+  const traced: Array<{
+    name: string;
+    params: string;
+    source: string;
+    value: string | null;
+  }> | null = isEngineLogEnabled('trace') ? [] : null;
 
   while ((match = re.exec(template)) !== null) {
     const [fullMatch, name, rawParams] = match;
@@ -174,11 +182,33 @@ export function resolveTemplate(
       result += fullMatch;
     }
 
+    traced?.push({
+      name,
+      params: rawParams ?? '',
+      source:
+        localParams && name in localParams
+          ? 'local'
+          : PLACEHOLDER_REGISTRY[name]
+            ? 'registry'
+            : 'unknown',
+      value: resolved ?? null,
+    });
+
     lastIndex = matchIndex + fullMatch.length;
   }
 
   // Append remaining text after last match
   result += template.slice(lastIndex);
+
+  if (traced && traced.length > 0) {
+    logEngine(
+      'trace',
+      'prompt.placeholder',
+      `${agentId} 解析占位符 ${traced.length} 个`,
+      () => ({ agentId, templateLength: template.length, placeholders: traced }),
+      { agentId },
+    );
+  }
 
   return result;
 }

@@ -19,6 +19,7 @@ import {
   type SettleableCharacter,
 } from './settlement';
 import type { CombatOutcome, CombatSandboxMessage, CombatState } from './types';
+import { logEngine } from '../../runtime/engine-logger';
 
 // ═══════════════════════════════════════════════════════════
 // 会话消息 / 客户端契约
@@ -174,6 +175,40 @@ export interface CombatSandboxResult {
  * 终局时返回的 `patches` 才是写回补丁（未终局恒为空数组）。
  */
 export async function runCombatSandbox(opts: RunCombatSandboxOpts): Promise<CombatSandboxResult> {
+  const startTime = Date.now();
+  logEngine(
+    'info',
+    'sidechain.combat',
+    '战斗沙盒 exchange 开始',
+    () => ({
+      playerInput: opts.playerInput,
+      transcriptLength: opts.transcript?.length ?? 0,
+    }),
+    { agentId: 'combat' },
+  );
+  try {
+    const result = await runCombatSandboxInner(opts);
+    logEngine(
+      'info',
+      'sidechain.combat',
+      '战斗沙盒 exchange 结束',
+      () => ({ durationMs: Date.now() - startTime, result }),
+      { agentId: 'combat' },
+    );
+    return result;
+  } catch (error) {
+    logEngine(
+      'error',
+      'sidechain.combat',
+      '战斗沙盒 exchange 抛错',
+      () => ({ durationMs: Date.now() - startTime, error }),
+      { agentId: 'combat' },
+    );
+    throw error;
+  }
+}
+
+async function runCombatSandboxInner(opts: RunCombatSandboxOpts): Promise<CombatSandboxResult> {
   const client = opts.client;
   if (typeof client.chatWithTools !== 'function') {
     throw new Error('runCombatSandbox: client 缺少 chatWithTools');

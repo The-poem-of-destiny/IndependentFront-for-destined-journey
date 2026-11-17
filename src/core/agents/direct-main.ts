@@ -30,6 +30,7 @@ import { resolveTemplateWithGlobals } from '../prompts/template-resolver';
 import { buildLlmRequest } from '../api/llm-adapter';
 import { parseDirectOutput, type DirectTurnDraft } from './direct-output';
 import type { DirectCombatRecord } from '../combat/direct-combat';
+import { logEngine } from '../runtime/engine-logger';
 
 export interface DirectDie {
   index: number;
@@ -260,6 +261,29 @@ export async function generateDirectTurn(
     // 留存末尾断点：不留存的本轮尾部每轮都换，不在它上面写缓存
     request.cacheRetainedMessageCount = ticket.retainedCount;
   }
+  logEngine(
+    'debug',
+    'prompt.direct_frame',
+    `直出帧组装：${messages.length} 条消息`,
+    () => ({
+      contextMode: input.storyContext ? 'v2' : 'legacy',
+      cached: !!input.cache,
+      cachePolicy: input.cache?.policy,
+      outputBudget: budget,
+      diceCount: dice.length,
+      state,
+      ...(ticket
+        ? {
+            revision: ticket.revision,
+            rebaseReason: ticket.rebaseReason ?? null,
+            retainedCount: ticket.retainedCount,
+          }
+        : {}),
+      ...(frame ? { frame } : {}),
+      messages,
+    }),
+    { agentId: 'direct_main' },
+  );
   let rejectedOutput = false;
   try {
     const estimatedInput = Math.ceil(

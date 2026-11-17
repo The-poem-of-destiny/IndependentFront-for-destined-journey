@@ -1,6 +1,8 @@
 import { invalidateDirectContext } from '@engine/prompts/direct-context-session';
 import { isDirectMode } from '@engine/story/generation-mode';
 import type { StatePatch } from '@engine/types/types';
+import { beginLogScope, logEngine } from '@engine/runtime/engine-logger';
+import type { EngineLogScope } from '@engine/runtime/engine-logger';
 /**
  * GamePipeline — 前端 ↔ AgentOrchestrator 桥接层
  *
@@ -325,6 +327,44 @@ interface DebugEntryInput {
   startedAt: number;
   completedAt?: number;
   duration?: number;
+}
+
+/**
+ * 一次 Agent / Embedding 调用结束时记一条引擎日志（debug）。**只记元数据**：
+ * agentId、invocationId、耗时、tokens、错误 —— 完整请求与响应由引擎侧的 llm.* 埋点负责，
+ * 这里重复记一份只会让日志翻倍。与 debugTurns（buildDebugEntry）互不影响。
+ */
+function logAgentResult(input: {
+  agentId: string;
+  invocationId: string;
+  duration?: number;
+  result?: Partial<AgentResult> | { error?: unknown };
+}): void {
+  logEngine(
+    'debug',
+    'agent',
+    'agent.result',
+    () => {
+      const result = (input.result ?? {}) as Omit<Partial<AgentResult>, 'error'> & {
+        error?: unknown;
+      };
+      const error = result.error;
+      return {
+        durationMs: input.duration ?? result.duration ?? null,
+        tokensUsed: result.tokensUsed ?? null,
+        promptTokens: result.promptTokens ?? null,
+        completionTokens: result.completionTokens ?? null,
+        cacheHit: result.cacheHit ?? null,
+        error:
+          error === undefined || error === null || error === ''
+            ? null
+            : error instanceof Error
+              ? error.message
+              : String(error),
+      };
+    },
+    { agentId: input.agentId, invocationId: input.invocationId },
+  );
 }
 
 /** Agent/Embedding 共用的结果→持久化调试记录投影，避免字段在多条调用路径间漂移。 */
@@ -872,6 +912,8 @@ export class GamePipeline {
     let activityMessage: string | undefined;
     /** 回合级抛出的错误（GAME-05）：交给 store 归类成玩家看得懂的原因 */
     let activityError: unknown;
+    /** 引擎日志的回合作用域：与 activityRunId 同生同灭，finally 里随 finishAgentLogTurn 结束 */
+    let logScope: EngineLogScope | null = null;
 
     try {
       if (!(await this.admitPackLease()) || !this.isRunCurrent(controller)) return false;
@@ -922,11 +964,19 @@ export class GamePipeline {
       if (userMessage) this.currentTurnMessages.push({ ...userMessage });
       activityRunId = this.game.startAgentActivityRun(boundSourceMessageId);
       this.activeRunId = activityRunId;
+      const logTurn = (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1;
       this.game.startAgentLogTurn({
         id: activityRunId,
         saveId: this.saveId,
-        turn: (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1,
+        turn: logTurn,
         sourceMessageId: boundSourceMessageId,
+      });
+      // 层 = 一条玩家输入：重新生成同一条输入（同一个来源消息 id）归入当前层，不开新层
+      logScope = beginLogScope({
+        saveId: this.saveId,
+        turnId: activityRunId,
+        turn: logTurn,
+        ...(boundSourceMessageId ? { layerKey: boundSourceMessageId } : {}),
       });
       this.game.setPendingOptions([]); // 新一轮开始，清掉上一轮的行动选项
 
@@ -1257,6 +1307,7 @@ export class GamePipeline {
           activityError,
         );
         this.game.finishAgentLogTurn(activityRunId, activityOutcome);
+        logScope?.end(activityOutcome);
         const debugPrefix = `${activityRunId}\u0000`;
         for (const key of this.debugInvocationCounts.keys()) {
           if (key.startsWith(debugPrefix)) this.debugInvocationCounts.delete(key);
@@ -2093,6 +2144,12 @@ export class GamePipeline {
         result: Partial<AgentResult> | undefined,
         duration: number,
       ) => {
+        logAgentResult({
+          agentId,
+          invocationId: invocation.invocationId,
+          duration,
+          result,
+        });
         game.addAgentLogEntry(
           buildDebugEntry({
             invocationId: invocation.invocationId,
@@ -2475,6 +2532,10 @@ export class GamePipeline {
         const invocation = this.nextDebugInvocation(agentId, runActivityId);
         this.mainInvocationIds.set(`${debugTurnId}\u0000${agentId}`, invocation.invocationId);
         const endpoint = this.buildEndpoints().find((item) => item.id === config.apiEndpointId);
+        logEngine('debug', 'agent', 'agent.start', undefined, {
+          agentId,
+          invocationId: invocation.invocationId,
+        });
         // 初始化日志空条目 (等 complete 时补全 messages + result)
         this.game.addAgentLogEntry(
           buildDebugEntry({
@@ -2499,6 +2560,12 @@ export class GamePipeline {
         const prev = this.game.agentLog.find(
           (e: DebugAgentEntry) => e.invocationId === invocationId,
         );
+        logAgentResult({
+          agentId: result.agentId,
+          invocationId: invocationId ?? `${runActivityId}:${result.agentId}:unknown`,
+          duration: result.duration,
+          result,
+        });
         this.game.addAgentLogEntry(
           buildDebugEntry({
             invocationId: invocationId ?? `${runActivityId}:${result.agentId}:unknown`,
@@ -2525,6 +2592,12 @@ export class GamePipeline {
         const prev = this.game.agentLog.find(
           (e: DebugAgentEntry) => e.invocationId === invocationId,
         );
+        logAgentResult({
+          agentId,
+          invocationId: invocationId ?? `${runActivityId}:${agentId}:unknown`,
+          duration: result?.duration,
+          result: result ? { ...result, error } : { error },
+        });
         this.game.addAgentLogEntry(
           buildDebugEntry({
             invocationId: invocationId ?? `${runActivityId}:${agentId}:unknown`,
@@ -3489,6 +3562,17 @@ export class GamePipeline {
     if (!turnId) return;
     const invocation = this.nextDebugInvocation('memory_embedding', turnId);
     const duration = trace.completedAt - trace.startedAt;
+    logAgentResult({
+      agentId: 'memory_embedding',
+      invocationId: invocation.invocationId,
+      duration,
+      result: {
+        tokensUsed: trace.totalTokens ?? 0,
+        promptTokens: trace.promptTokens,
+        completionTokens: 0,
+        error: trace.error,
+      },
+    });
     this.game.addAgentLogEntry(
       buildDebugEntry({
         invocationId: invocation.invocationId,
@@ -3637,6 +3721,7 @@ export class GamePipeline {
     let combatRunId: string | null = null;
     let combatRunOutcome: 'completed' | 'failed' | 'cancelled' = 'failed';
     let combatRunMessage: string | undefined;
+    let combatLogScope: EngineLogScope | null = null;
     try {
       this.game.enterCombat();
 
@@ -3667,6 +3752,12 @@ export class GamePipeline {
         saveId: this.saveId,
         turn: this.game.activeSave?.metadata?.totalTurns ?? 0,
         sourceMessageId,
+      });
+      // 独立 run：不传 layerKey，归入当前层（触发战斗的那条输入所在的层）
+      combatLogScope = beginLogScope({
+        saveId: this.saveId,
+        turnId: combatRunId,
+        turn: this.game.activeSave?.metadata?.totalTurns ?? 0,
       });
       this.game.updateAgentStatus('combat', combatRunId);
 
@@ -3712,6 +3803,7 @@ export class GamePipeline {
       if (combatRunId) {
         this.game.finishAgentActivityRun(combatRunId, combatRunOutcome, combatRunMessage);
         this.game.finishAgentLogTurn(combatRunId, combatRunOutcome);
+        combatLogScope?.end(combatRunOutcome);
         const debugPrefix = combatRunId + String.fromCharCode(0);
         for (const key of this.debugInvocationCounts.keys()) {
           if (key.startsWith(debugPrefix)) this.debugInvocationCounts.delete(key);
@@ -3759,6 +3851,11 @@ export class GamePipeline {
       saveId: this.saveId,
       turn: this.game.activeSave?.metadata?.totalTurns ?? 0,
     });
+    const combatLogScope = beginLogScope({
+      saveId: this.saveId,
+      turnId: combatRunId,
+      turn: this.game.activeSave?.metadata?.totalTurns ?? 0,
+    });
     this.game.updateAgentStatus('combat', combatRunId);
 
     const client = this.getClientFactory(combatRunId)(
@@ -3778,17 +3875,22 @@ export class GamePipeline {
         ? GamePipeline.buildCombatOpeningInput(marker, '', buildCombatRosterText(stored.state))
         : undefined;
 
-    await this.beginCombatSandboxSession({
-      marker,
-      state: stored.state,
-      transcript: stored.transcript,
-      protocolText: await loadCombatProtocolText().catch(() => ''),
-      client,
-      combatRunId,
-      openingInput,
-      resume: true,
-      preSnapshotId: stored.preSnapshotId ?? null,
-    });
+    try {
+      await this.beginCombatSandboxSession({
+        marker,
+        state: stored.state,
+        transcript: stored.transcript,
+        protocolText: await loadCombatProtocolText().catch(() => ''),
+        client,
+        combatRunId,
+        openingInput,
+        resume: true,
+        preSnapshotId: stored.preSnapshotId ?? null,
+      });
+    } catch (err) {
+      combatLogScope.end('failed');
+      throw err;
+    }
 
     // 中栏历史：`combatFlow` 是内存态、随刷新丢失。从 transcript 重建 user / assistant 正文，
     // 免得续战后中间一片「战斗即将开始…」空着（回合号用当前值近似即可）。
@@ -3815,11 +3917,13 @@ export class GamePipeline {
             summary ? undefined : '战斗已放弃。',
           );
           this.game.finishAgentLogTurn(combatRunId, summary ? 'completed' : 'cancelled');
+          combatLogScope.end(summary ? 'completed' : 'cancelled');
         },
         (err) => {
           const message = err instanceof Error ? err.message : String(err);
           this.game.finishAgentActivityRun(combatRunId, 'failed', message);
           this.game.finishAgentLogTurn(combatRunId, 'failed');
+          combatLogScope.end('failed');
           console.error('[GamePipeline] combat 续战失败:', err);
         },
       )
@@ -4603,12 +4707,19 @@ export class GamePipeline {
     //    被 `addAgentLogEntry` 丢弃（game-store.ts），症状就是「点了润色但调试里没有」。
     const standalone = !this.activeRunId;
     const activityRunId = this.activeRunId ?? this.game.startAgentActivityRun(undefined, true);
+    let logScope: EngineLogScope | null = null;
     if (standalone) {
       this.game.startAgentLogTurn({
         id: activityRunId,
         saveId: this.saveId,
         turn: (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1,
         startedAt: Date.now(),
+      });
+      // 独立 run：不传 layerKey，归入当前层（被润色的那一楼）
+      logScope = beginLogScope({
+        saveId: this.saveId,
+        turnId: activityRunId,
+        turn: (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1,
       });
     }
     this.game.updateAgentStatus('prose_rewrite', activityRunId);
@@ -4645,6 +4756,7 @@ export class GamePipeline {
       this.game.clearAgentStatus('prose_rewrite', activityError, activityRunId);
       if (standalone) {
         this.game.finishAgentLogTurn(activityRunId, activityError ? 'failed' : 'completed');
+        logScope?.end(activityError ? 'failed' : 'completed');
       }
     }
   }

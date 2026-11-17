@@ -18,6 +18,7 @@
  * - 中止：`AbortError` —— 那不是失败，调用方本就按「已停下」处理，这里兜底归网络类之外的 unknown。
  */
 import type { TurnFailureCategory, TurnFailureInfo } from '@engine/types/types';
+import { redactSecrets } from '@engine/utils/redact-secrets';
 
 /** 技术详情的最大长度（字符） */
 export const TURN_FAILURE_DETAIL_MAX = 300;
@@ -91,23 +92,6 @@ function errorText(error: unknown): string {
   } catch {
     return '';
   }
-}
-
-/**
- * 抹掉可能出现在错误原文里的凭据：Authorization / Bearer 头、`sk-` 一类密钥、
- * `api_key=` / `key=` 查询参数、以及 32 位以上的长令牌串。宁可多抹，不可漏抹。
- */
-export function redactSecrets(text: string): string {
-  return text
-    .replace(/bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [已隐藏]')
-    .replace(
-      /(authorization|x-api-key|api-key)\s*[:=]\s*"?(?!Bearer \[已隐藏\])[^\s",}]+"?/gi,
-      '$1: [已隐藏]',
-    )
-    .replace(/([?&](?:api[_-]?key|key|token|access_token)=)[^&\s"']+/gi, '$1[已隐藏]')
-    .replace(/("?(?:api[_-]?key|token|secret)"?\s*[:=]\s*"?)[^\s",}]+/gi, '$1[已隐藏]')
-    .replace(/\b(?:sk|pk|rk|ak)-[A-Za-z0-9_*.-]{6,}/g, '[已隐藏的密钥]')
-    .replace(/\b[A-Za-z0-9_-]{32,}\b/g, '[已隐藏]');
 }
 
 /** 脱敏 + 截断，给「技术详情」用 */

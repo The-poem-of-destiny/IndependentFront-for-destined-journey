@@ -36,6 +36,7 @@ import type {
   ImageRating,
   SceneImageMarker,
 } from '../types/types-image';
+import { logEngine } from '../runtime/engine-logger';
 
 // ═══════════════════════════════════════════════════════════
 // ① 输入装配
@@ -183,6 +184,30 @@ export function formatImagePromptRequest(req: ImagePromptRequest): string {
  * 「重试 / 自己写一份」两条看得见的出路（D42）。
  */
 export async function callImagePromptAgent(
+  req: ImagePromptChainRequest,
+  deps: ImagePromptAgentDeps,
+): Promise<ImagePromptParseResult> {
+  const startTime = Date.now();
+  const ctx = { saveId: req.saveId, agentId: 'image_prompt' };
+  logEngine(
+    'info',
+    'sidechain.image_prompt',
+    'image_prompt 侧链开始',
+    () => ({ request: req.request, endpointName: req.endpoint.name }),
+    ctx,
+  );
+  const result = await callImagePromptAgentInner(req, deps);
+  logEngine(
+    'info',
+    'sidechain.image_prompt',
+    'image_prompt 侧链结束',
+    () => ({ durationMs: Date.now() - startTime, result }),
+    ctx,
+  );
+  return result;
+}
+
+async function callImagePromptAgentInner(
   req: ImagePromptChainRequest,
   deps: ImagePromptAgentDeps,
 ): Promise<ImagePromptParseResult> {

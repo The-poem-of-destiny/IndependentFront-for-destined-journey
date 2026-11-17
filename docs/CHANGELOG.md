@@ -19,6 +19,17 @@
 - 测试：新增 `tests/ui/stores/content-store-dev-source.test.ts`（压制、现状不变、压制期间操作被拒；加密包与 `legacy-locked` 包被压制时明文清理照跑、不解密、不启动租约调度器）。
 - 文档：内容-引擎分离设计 D14/D16 补注优先级与开关，`dev-bat-notes.md` 内容仓模式补一条。
 
+### 2026-11-16 完整运行日志（前端接线）｜**未在浏览器或真机上验证**
+
+- 起因：引擎日志器（`runtime/engine-logger.ts` + `persistence/engine-log-store.ts`，T1）只管「记」，开关、落盘安装、回合作用域与导出都在前端。
+- 设置：新增 `engineLogEnabled`（默认关）与 `engineLogLevel`（默认 `trace`，可选 trace / debug / info），独立于开发者模式。`main.ts` 安装 Dexie sink，`immediate` 监听两项设置推给 `configureEngineLogger`；`pagehide` 与页面隐藏时 `flushEngineLog()`；存储配额耗尽时日志器停写，前端同时把 `engineLogEnabled` 置为 false（开关与实际一致）并弹常驻错误提示，引导去开发者设置导出并清空后重新开启（`ui/lib/engine-log-storage-full.ts`）。装着受保护内容包时开关打开也照常落盘（主人裁定），设置说明里写明。
+- 设置页「开发者模式」新卡片「完整运行日志」：开关 + 体积 / 保留 100 回合 / 明文落盘警示、粒度下拉（全部 / 详细 / 概要）、当前条数、导出（显示已导出行数，期间两颗按钮禁用）、清空（危险确认）。
+- 导出：新 `lib/engine-log-export.ts`。先 flush，按 seq 每页 200 条读全部存档，逐行 JSONL，首行 header（应用版本、导出时间、条数、粒度）；优先 `showSaveFilePicker` 逐页流式写入，不支持时每页一个 Blob 分片再合成下载，不拼整份巨型字符串。文件名 `engine-log-YYYYMMDD-HHmmss.jsonl`。
+- 回合作用域：`lib/game-pipeline.ts` 在 `startAgentLogTurn` / `finishAgentLogTurn` 旁开关 `beginLogScope`。正式回合传 `layerKey` = 来源玩家消息 id（重新生成同一条输入归入当前层）；战斗延后启动、刷新续战、独立润色不传 layerKey。五处 `buildDebugEntry` 旁各记一条 `agent` 类 debug 元数据（agentId / invocationId / 耗时 / tokens / 错误），完整请求与响应留给引擎侧埋点；debugTurns 行为不变。
+- 存档事件：`game-store.ts` 的 `loadSave` 成功 / 失败、`restoreTimeline`（回退 / 恢复快照 / 重开战斗）各记一条 info。
+- 审查修复：entity_gen / craft_gen 的「侧链开始」条目原本在 info 级记录整份 request（含 `endpoint.apiKey` 与 `headerOverrides`，此时密钥尚未登记，短于 6 字符的头值永不登记，都会明文落盘），改为只记白名单字段（saveId / marker / 端点 id·name / model），上下文只在 trace 级记数量；日志器序列化另加按键名的结构化脱敏作纵深防御（`maxTokens` / `tokensUsed` 等计数键不受影响）。
+- 测试：`engine-log-export`（分页、header、两条写出路径、取消、写入失败中止）、`DeveloperSection.engine-log`、settings 默认值、`game-pipeline.engine-log`（layerKey 与成功 / 失败都会 end）。
+
 ### 2026-11-16 UI 动效 v1｜分支 `feat/ui-aesthetic-motion`，**动画手感未真机验证**
 
 - 起因：主人觉得界面偏朴素，要求从过渡、动效、版式入手。走查结论：全仓 200+ 处过渡都是默认 `ease` 与随手写的时长，全局过渡只有 3 组（其中 `slide-*` 零引用）；首次进入每个页面会「淡出 → 纯黑 1–3 秒 → 新页无入场地蹦出」；提示条是整块饱和色；资源条在过渡 `width`（违反 design.md 禁令）。
