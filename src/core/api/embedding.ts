@@ -3,6 +3,8 @@ import type { EmbeddingApiSource, JsonObject } from '../types/types-api';
 import { applyBodyParameters } from './body-parameters';
 import { buildCustomHeadersValue } from './header-overrides';
 import { asObject, finiteNumber } from './adapter-utils';
+import { logEngine, registerLogSecret } from '../runtime/engine-logger';
+import { redactSecrets } from '../utils/redact-secrets';
 
 export interface EmbeddingResult {
   embedding: number[];
@@ -54,6 +56,15 @@ export async function requestEmbedding(
   const body = buildEmbeddingBody(source, input);
   const baseUrl = source.baseUrl.replace(/\/+$/u, '');
   const customHeaders = buildCustomHeadersValue(source.headerOverrides);
+  registerLogSecret(source.apiKey);
+  for (const value of Object.values(source.headerOverrides ?? {})) registerLogSecret(value);
+  const startTime = Date.now();
+  logEngine('info', 'retrieval.embedding.request', `Embedding 请求：${source.name}`, () => ({
+    baseUrl,
+    model: body.model ?? source.defaultModel,
+    inputCount: Array.isArray(input) ? input.length : 1,
+    body,
+  }));
   const response = await scheduleApiRequest(
     { baseUrl, apiKey: source.apiKey, label: source.name },
     signal,
@@ -70,7 +81,23 @@ export async function requestEmbedding(
         signal,
       }),
   );
-  if (!response.ok)
-    throw new Error(`Embedding API ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  return parseEmbeddingResponse(await response.json());
+  if (!response.ok) {
+    const errorText = await response.text();
+    logEngine('error', 'retrieval.embedding.error', `Embedding HTTP ${response.status}`, () => ({
+      status: response.status,
+      durationMs: Date.now() - startTime,
+      body: redactSecrets(errorText),
+    }));
+    throw new Error(`Embedding API ${response.status}: ${errorText.slice(0, 200)}`);
+  }
+  const result = parseEmbeddingResponse(await response.json());
+  // 🔴 不记向量本体：只记维度、数量与 usage
+  logEngine('info', 'retrieval.embedding.response', `Embedding 完成：${source.name}`, () => ({
+    durationMs: Date.now() - startTime,
+    model: result.model,
+    dimensions: result.embedding.length,
+    vectorCount: Array.isArray(result.raw.data) ? result.raw.data.length : 1,
+    usage: result.usage,
+  }));
+  return result;
 }

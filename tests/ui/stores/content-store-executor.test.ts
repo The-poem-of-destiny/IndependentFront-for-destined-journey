@@ -218,6 +218,20 @@ describe('content-store 执行器 —— 1. 安装（含冲突确认路径）', 
     expect(presets.map((p) => p.id)).toContain('pack-story-preset');
   });
 
+  it('📌 2026-11-17：装包写入的预设带播种指纹，且指纹字段不让下一次装包把它判成「改过」', async () => {
+    const { factoryPresetFingerprint } = await import('@engine/prompts/factory-preset-sync');
+    const c = useContentStore();
+    await c.installPack(makePack('1.0.0'));
+    const row = await getDatabase().presets.get('pack-story-preset');
+    expect(row?.factorySeedHash).toBe(factoryPresetFingerprint(row!));
+
+    const next = await c.upgradePack(makePack('1.0.1'));
+    expect(next.plan?.sections.presets?.conflicted ?? []).toHaveLength(0);
+    expect(next.ok).toBe(true);
+    const after = await getDatabase().presets.get('pack-story-preset');
+    expect(after?.factorySeedHash).toBe(factoryPresetFingerprint(after!));
+  });
+
   it('已存在未编辑过的占位书 → 静默覆盖（updated），无冲突', async () => {
     await seedPlaceholderLibrary();
     const c = useContentStore();

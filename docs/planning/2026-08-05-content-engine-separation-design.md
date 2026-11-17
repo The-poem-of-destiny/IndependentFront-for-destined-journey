@@ -266,6 +266,27 @@ console.warn（census 见 §5.5）。
 | D44     | agents 层重设计（v1.1 新增；v1.2 大修——首版修复自身引入两处静默失内容路径，均已裁定，正文 §5.4） | pack 的 `agentDefaults` **永不写入 `settings.agents`**（v1.1 诊断不变：`fillMissingAgentSettings` 在启动过一次的安装上保证 no-op，且写入即无 provenance）。v1.2 修正四件：① **resolve 覆盖全部 12 键**（`model/worldBookEnabled/worldBookIds/systemPrompt/template/温度五参/maxTokens/historyLayers/historySlice`），改造点是**单一读取咽喉 `getAgentSettings`（`agent-settings.ts:104`）加默认层参数**，不是逐调用点打补丁——`worldBookEnabled/worldBookIds/model/数值参` 今天**只有** boot 播种在写（`game-pipeline.ts:507-508` 直读 settings，`agent-settings.ts:106-115` 硬兜底 `false/[]/''`），删播种不给默认层 = 全体 agent 静默失去世界书。② **名册迭代改源**：`listConfiguredAgents`/`updateAgentWorldBookIds`（`agent-settings.ts:252-276`）与工坊授权 `grantWorkshopBookToAgents`（`workshop-types.ts:438-443`）现按 `Object.keys(bag.agents)` 迭代——空覆写层会让工坊安装**授权给零个 agent**；改为迭代**解析名册**（默认层键 ∪ 覆写层键）。③ **precedence 是行为变更不是重构**：今天 `game-pipeline.ts:548` 是 `defaults                                                                                                                                                                                                                                                                                                                                                                  |     | settings`（**默认层优先**，覆写被无视；`:541` 又是第三种）——新 resolve 统一为**覆写 ?? 默认**，作为显式裁定记录。随之 v1.0「测试者九键保留视作覆写、无害」不成立（那会让 pack 后续版本永远够不到他们）：**一次性迁移变成必做**——引擎带**历史默认值指纹表（逐 agent 逐字段 SHA-256，私有构建生成，指纹不泄内容）**，首启时命中指纹的覆写键删除。④ **覆写制造面全列改造**：`saveAgentSettings`（`AgentConfigPanel.vue:102-105`，现整份落盘——改为与解析默认 diff，相等键删除）、`applyProjectDefaultToAgent`（`agent-settings.ts:184`，语义改「清覆写层」）、`resetAgentSettings`、**`AgentUpdateCenter.vue`**（`972d5a2`新增，本就为旧缺陷而生——重定位为「覆写层 vs 默认层」差异面板 + 「清除覆写」动作）。新增管线测试：空覆写层 + pack → story`worldBookIds` 非空 |
 | D45     | 快照卫生（v1.1 新增，D1 的执行面）                                                               | 波 0 前置（📌 v1.2 核实：合并冲突与字体/许可 WIP 已在 `e53f8c0` 提交完成，此两项闭环；保留「本仓 CI 全绿」为每波出口条件）。`.claude/agent-memory/`（30 个 tracked 文件，含真实语料统计）、`.codex/`、`.impeccable/`（一处 `命定之诗与黄昏之歌` 字面量）、`.playbook/` **默认不进公开快照**，逐目录 review 后才放行                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
+> 📌 **2026-11-16 补注（D14+D15 / D16 的优先级 + 开发期内容源开关）**：上表没写明两条内容源同时存在时谁赢。
+> 现行规则是**已安装内容包盖住 `/data/*`**：`hydratePackState` 只要在 Dexie `contentPacks` 里找到行就激活它，
+> 此时即便设置了 `POEM_CONTENT_DIR`，装载面读到的也是包内容，overlay 目录只剩「保存为默认」写回这一用途。
+> 为此新增**仅开发期**的内容源开关（`src/ui/lib/dev-content-source.ts`，localStorage 键
+> `poem_dev_content_source_v1`，取值 `pack`（默认 = 现状）/ `local`）：选 `local` 且有已装包时，
+> `content-store.ts` 在 `purgeProtectedPackPlaintext` 之后、激活任何包之前**不激活**该包（Dexie 行原样保留），
+> 内容态回 `placeholder`，装 / 升 / 卸一律拒绝；切回 `pack` 刷新即恢复。整块写在 `if (import.meta.env.DEV)` 里，
+> 生产构建摇掉，生产行为不变。未加密包的世界书与预设已物化进 Dexie（`worldBooks` / `presets`），不激活包也不会删掉它们；
+> 其中的预设此时不再被认作内容所有，会显示为可编辑的「我的预设」，这一模式下不要编辑它们（界面给提示）。
+> 开关入口在设置页「内容包」分区（`DevContentSourceCard.vue`）。
+
+> 📌 **2026-11-17 补注（D20 / D22 的预设落库）**：上表 D20 所说「name-only sync —— M5.1 只属于占位播种路径」
+> 那条播种规则（库里已有同 id 的出厂预设只同步 name、保留 prompts）**已推翻**：它让内容仓更新的出厂
+> prompts 永远到不了玩家库。现行规则：预设行带可选字段 `factorySeedHash`（播种指纹，无索引、不升 Dexie 版本），
+> 启动播种（`settings-store.seedFactoryPresets`）经引擎纯函数 `src/core/prompts/factory-preset-sync.ts` 逐 id 判定 ——
+> 没改过的行静默更新；无指纹的遗留行或被就地改过的行先另存「（更新前备份）」玩家副本再覆盖（同一次 bulkPut），
+> 选择键不动。D20 的 pack 安装「按 pack `presetId` 整行 upsert」不变，只是写入时同样盖上指纹；
+> 装包判定不受该字段影响（四态比较的 `hashPresetRow` 取 id / name / description / settings，`buildPackBaseline`
+> 的逐预设基线只取 id / name / settings）。出厂预设来源以 provider 列表（`presets.json` / `pack.presets`）优先于
+> agent-config 内嵌版，与装包同源；引擎内置直出预设 id 不播种。
+
 ### 2.4 测试与门（D29-D34）
 
 | #   | 决策                          | 裁定                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |

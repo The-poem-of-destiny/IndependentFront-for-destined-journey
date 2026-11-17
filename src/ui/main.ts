@@ -1,6 +1,6 @@
 import { installDirectCacheStore } from '@engine/prompts/direct-context-session';
 import { createDirectCacheStore } from '@engine/prompts/direct-context-store';
-import { createApp } from 'vue';
+import { createApp, watch } from 'vue';
 import { createPinia } from 'pinia';
 import App from './App.vue';
 import { useThemeStore } from './stores/theme-store';
@@ -10,7 +10,15 @@ import { installProductionEjsBackend } from '@engine/ejs/ejs-backend';
 import { setEngineSettingsProvider } from '@engine/runtime/engine-settings';
 import { installPromptSessionStore } from '@engine/prompts/prompt-session-assembler';
 import { createDexiePromptSessionStore } from '@engine/prompts/prompt-session-store';
+import {
+  configureEngineLogger,
+  flushEngineLog,
+  installEngineLogSink,
+  onEngineLogStorageFull,
+} from '@engine/runtime/engine-logger';
+import { createDexieEngineLogSink } from '@engine/persistence/engine-log-store';
 import { useSettingsStore } from './stores/settings-store';
+import { handleEngineLogStorageFull } from './lib/engine-log-storage-full';
 // 字体与图标 —— **自托管**，零外部请求（2026-08-05，替掉 index.html 里的两个 CDN）。
 //
 // 🔴 必须排在所有样式表**之前**：`@font-face` 得先登记，否则首屏那一瞬按兜底字体排版，
@@ -106,6 +114,40 @@ setEngineSettingsProvider(() => {
 // `deleteSaveSlot` 清理（引擎侧 `prompt-session-store.ts` / database v26）。
 installPromptSessionStore(createDexiePromptSessionStore());
 installDirectCacheStore(createDirectCacheStore());
+
+// 完整运行日志（引擎日志器，2026-11-16）。
+//
+// 落盘 sink 只在这里装（引擎默认不装，单测保持纯内存）。开关与粒度住 settings-store，
+// 由下面的 watch 推给日志器 —— 🔴 必须 `immediate`：设置从 localStorage 水合回来不触发
+// 变更回调，少了它，开着开关的用户重启后日志器仍是关的。
+// 装着受保护内容包时开关打开也照常落盘（设置页说明里写明了这一点）。
+installEngineLogSink(createDexieEngineLogSink());
+watch(
+  () => {
+    const s = useSettingsStore().settings;
+    return [s.engineLogEnabled === true, s.engineLogLevel] as const;
+  },
+  ([enabled, level]) => {
+    configureEngineLogger({ enabled, level: level ?? 'trace' });
+  },
+  { immediate: true },
+);
+// 页面隐藏 / 关闭前把缓冲交付掉（flushEngineLog 永不 reject）
+window.addEventListener('pagehide', () => {
+  void flushEngineLog();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') void flushEngineLog();
+});
+// 配额耗尽：日志器已自行停写；这里把设置里的开关也关掉（上面的 watch 随即推
+// configureEngineLogger({ enabled: false })），界面不再显示「开着却不记录」。
+// 用户导出并清空后重新打开开关即恢复记录。
+onEngineLogStorageFull(() => {
+  handleEngineLogStorageFull({
+    settings: useSettingsStore().settings,
+    toast: (message, type, duration) => useUIStore().toast(message, type, duration),
+  });
+});
 
 // 首次手势解锁监听 —— 必须在**应用启动时**就装，不能等到音频用起来才装。
 //

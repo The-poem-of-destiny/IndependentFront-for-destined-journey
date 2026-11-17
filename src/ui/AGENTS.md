@@ -31,7 +31,7 @@
 
 ```
 src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL 状态驱动）
-├── main.ts                          ← 应用入口（createApp + Pinia + 主题 + 音频手势解锁监听）
+├── main.ts                          ← 应用入口（createApp + Pinia + 主题 + 音频手势解锁监听 + 引擎日志 sink 与开关接线）
 ├── App.vue                          ← 根组件 = **视图状态机 + 全局存档窗口 + Toast + 启动链**
 │                                       🔴 **全应用没有 vue-router**（别照旧文档去找 `<router-view>`）：
 │                                          `viewComponent` 是对 `ui.currentView` 的 computed switch，
@@ -117,6 +117,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      （settings-store 播种时登记）算内容所有，不显示成「我的预设」。
 │   │                                      `migrateBuiltinPresetRows` 删掉原样旧行时把指向它的选择键清空 ——
 │   │                                      平时显式选中引擎内置预设是合法的
+│   │                                   📌 2026-11-17：出厂 / 装包行带播种指纹 `factorySeedHash`（见 settings-store 条）。
+│   │                                      🔴 凡是**复制出玩家预设**的路径（`duplicateAsUser`、
+│   │                                      `migrateBuiltinPresetRows` 的副本、PresetManager 写时复制）都必须删掉
+│   │                                      这个字段 —— 带着它的副本会被播种当成「没改过的出厂行」
 │   ├── useBeautify.ts               ← [工坊正则] 美化管线（从 ChatFlow.vue 抽出，CombatMessageFlow 复用）：
 │   │                                   按当前存档合并预设规则与用户规则，交给统一 narrative renderer 编译。
 │   │                                   autoEnable 解析与 BeautifierSection **同口径** ——
@@ -348,6 +352,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── narrative-reveal.ts          ← 🆕 [特效层] 流式正文「墨迹洇开」纯状态机：只有新追加的尾巴成 chunk，
 │   │                                   各片拼接恒等于正文；单次至多 12 片、同时至多 48 片，420ms 后并回纯文本
 │   ├── narrative-names.ts           ← 🆕 [特效层] 「名字初次登场」纯判定：最长优先、每条至多 3 个、只活在本次会话
+│   ├── dev-content-source.ts        ← 🆕 [2026-11-16] **仅开发期**内容源选择的纯解析器：偏好（localStorage
+│   │                                   `poem_dev_content_source_v1`，`pack` 默认 = 现状 / `local`）+ 是否配了
+│   │                                   `POEM_CONTENT_DIR` + 已装包事实 → `{ suppressPack, suppressedPack, notices }`
+│   │                                   与中文提示。不读 `import.meta.env`、不碰 Vue/Dexie —— 「只在 dev 生效」的门归调用点
 │   ├── session-import-messages.ts   ← [存档互传] 单存档导入体检结果 → 中文告警行（纯函数，除类型零依赖）。
 │   │                                   它是「到底会缺什么」这句话的**唯一措辞来源**（散进模板 = 两个入口
 │   │                                   各说各的）；🔴 告警**不是错误**，缺内容照样导得进，语气一律陈述不阻拦
@@ -356,6 +364,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   宿主是 `shared/ConfirmDialogHost.vue`。🔴 **新的确认一律用它，别再写
 │   │                                   `window.confirm`**（嵌入式 webview 里原生框直接返回 false）；
 │   │                                   未挂宿主（单测）时才回退原生框
+│   ├── engine-log-export.ts         ← 🆕 [2026-11-16] 完整运行日志导出：flush → 按 seq 分页（每页 200）逐行
+│   │                                   JSONL，首行 header；优先 `showSaveFilePicker` 流式写入，否则每页一个 Blob
+│   │                                   分片再下载。🔴 不许把全部日志拼成一个字符串（可达几百 MB）。I/O 全经 deps 注入
+│   ├── engine-log-storage-full.ts   ← 🆕 [2026-11-16] 日志存储配额耗尽回调：把 `engineLogEnabled` 置 false（main.ts 的 watch 随即
+│   │                                   关掉日志器，开关与实际一致）+ 常驻错误提示；导出清空后重新打开即恢复
 │   ├── leave-game-guard.ts          ← 🆕 [2026-11-14 / GAME-08·G-03] `confirmLeaveGame(去处)`：有在跑的回合 /
 │   │                                   润色 / 在飞或排队的插画时先危险确认，否则直接放行。凡是会卸载
 │   │                                   GamePage 的入口（菜单设置/扩展/首页、插画「去设置」、RPM 弹窗）都先过它
@@ -410,6 +423,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      📌 2026-11-14 例外：**刻意以「键缺席」表示默认**的可选键只声明、不进
 │   │                                      getDefaults()，并在声明处写明缺席时由谁兜底（如 `directCacheProvider`、
 │   │                                      `directCacheRebuildTurns`、`directCacheGrowthLimit`；恢复默认 = 删键）
+│   │                                   📌 2026-11-17：出厂预设播种（`seedFactoryPresets`）不再「同 id 只同步 name」，
+│   │                                      改按播种指纹 `factorySeedHash` 走引擎 `prompts/factory-preset-sync.ts` 的
+│   │                                      `planFactoryPresetSync`：没改过的行静默更新；无指纹或被就地改过的旧行先另存
+│   │                                      「（更新前备份）」玩家副本再覆盖（同一次 bulkPut），弹常驻 toast 点名副本；
+│   │                                      选择键不动。读库 / 计划 / 写库同一个 presets 读写事务，写前再判受保护内容
+│   │                                      与运行时修订号，变了不写。来源以 provider 列表（presets.json / pack.presets）
+│   │                                      优先于内嵌版（与装包同源）；引擎内置直出预设 id 不播种
 │   ├── settings-types.ts            ← [Q-18] ★`UiSettings`（**type 不是 interface** —— 整份袋子
 │   │                                   要传进 5 处 `Record<string, unknown>` 参数，interface 没有
 │   │                                   隐式索引签名会当场编译不过；也**不能**加显式索引签名，
@@ -525,6 +545,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   ③ **内容注册表**：catalog/locations/bloodlines/namePools/markers/
 │   │                                      branding/imageDialects/mapPack 等分面的同步读取入口
 │   │                                      （`/data/content/<name>.json`）
+│   │                                   📌 2026-11-16：+`devContentSource`（`DevContentSourceResolution | null`，
+│   │                                      生产恒 null）。`hydratePackState` 在 `purgeProtectedPackPlaintext` 之后、
+│   │                                      激活任何包之前跑一段 `if (import.meta.env.DEV)` 块（字面形式不能改，
+│   │                                      否则生产摇不掉）：偏好 `local` 且有已装包时**不激活**它（Dexie 行不动、
+│   │                                      内容态 placeholder），此时 `installPack` / `installProtectedPack` /
+│   │                                      `upgradePack` / `uninstallPack` / `uninstallProtectedPack` 一律抛错。
+│   │                                      现状规则：已装内容包盖住 `/data/*`
 │   ├── character-appearance-store.ts← [图像 v1 / D56·D58] 角色外貌**会话副本**的 Dexie 唯一读写口。
 │   │                                   两份定义：**基线**在 `imagePresets.appearance`（全局、跨存档、
 │   │                                   只有用户能改）；**会话**在本店（按存档隔离、由出图 AI 自动写、
@@ -625,6 +652,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               消费 content-store 的 `contentStatus`，四态文案
 │   │   │                               （placeholder / placeholder+检测到本地真实内容 / error /
 │   │   │                               pack·needs_attention）。`activePackId` 为空时不渲染
+│   │   │                               📌 2026-11-16：开发期内容源压制了已装包或有提示时，额外显示一行开发提示
+│   │   │                               （读 content-store 的 `devContentSource`）；压制时正文改说「已被开关暂停」，不劝导入
 │   │   ├── ApiRateLimitWaitPopup.vue ← 全局 RPM 等待提示（端点 / 队列 / 倒计时；到时自动消失续发）
 │   │   ├── SaveManager.vue          ← 应用级存档管理窗口（列表 / 读取 / 导入导出 / 删除 / 改名）：
 │   │   │                               常驻 App.vue，不属于 HomePage；首页与游戏菜单打开同一 store 状态
@@ -797,6 +826,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── beautifier-import.ts     ← 🆕 [2026-11-14 / S-33]「导入规则」文件解析校验（纯函数）；裸数组 = 整体替换，调用方先确认
 │   │   ├── ContentPackSection.vue   ← 🆕 [2026-11-14 / S-01] 「内容包」分区：导入 / 升级 / 检查更新 / 卸载 +
 │   │   │                               Discord 在线授权，逻辑整体从 DataSection 搬来、行为不变
+│   │   │                               📌 2026-11-16：开发期在包卡**下方**多一张 `DevContentSourceCard.vue`（两选项开关
+│   │   │                               「本地内容目录 / 内容包」+ 提示行；切换 = 写偏好 + `confirmDialog` + 刷新页面），
+│   │   │                               以 `import.meta.env.DEV ? defineAsyncComponent(...) : null` 引入，生产不打包。
+│   │   │                               `devContentSource.suppressPack` 为真时标题写「已安装（id + 版本），已被开发内容源
+│   │   │                               开关暂停启用」，导入 / 检查更新禁用（卸载按钮跟随激活包，不渲染）。
+│   │   │                               🔴 未加密包的世界书与预设已物化进 Dexie，压制后预设显示为「我的预设」，此模式下勿编辑
 │   │   ├── pack-uninstall-flow.ts   ← 🆕 [2026-11-14 / S-36] 卸载内容包的确认流程（分区与内容态横幅共用）：
 │   │   │                               **永远先确认**；改过包内世界书时 content-store 回 `needs_confirmation` 再问一次
 │   │   ├── RuleEditorModal.vue      ← 美化规则编辑弹窗；★预览直接挂 game/BeautifiedNarrative.vue
@@ -817,6 +852,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               旁边那些清除动作是同一类事，放一起才找得到
 │   │   │                               📌 2026-11-14：内容包卡已搬去「内容包」分区，这里只留一行指路
 │   │   ├── DeveloperSection.vue     ← 开发者模式开关 + 诊断能力说明 + 导出隐私警告
+│   │   │                               📌 2026-11-16：+「完整运行日志」卡（开关 / 粒度 / 条数 / 导出 / 清空）；
+│   │   │                               开关推给引擎日志器的接线在 main.ts（`immediate` watch），不在本组件
 │   │   ├── AboutSection.vue         ← 关于内容面板（UIL-01 起由首页「关于」弹窗原位挂载，路径保留供许可署名闸门扫描）
 │   │   ├── AudioSection.vue         ← [Audio] 音频分区（壳层 + 5 子组件）
 │   │   ├── AssetSection.vue         ← [素材] 素材分区壳层 + 5 子组件（AssetImportStrip /
@@ -1320,7 +1357,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | 🖼 素材         | 导入条 + 素材库（按角色分组/扁平表/多选批删）+ 变体抽屉（设主图/裁剪/改名）                                                                                                                                                                               |
 | 🖼 图像生成     | 四张卡：提示词生成 / 独立出图连接 / 出图参数 / 视觉预设；NovelAI 连接存 Dexie `imageApiConnections`，ComfyUI 地址与 provider 参数留在 `UiSettings`，`image_prompt` 仍绑定通用 LLM 源                                                                      |
 | 💾 数据与备份  | 导出/导入/清除（排除音频库与素材库，各有独立导出口）；📌 2026-11-14 内容包卡已移出，只留指路                                                                                                                                                              |
-| 🛠 开发者模式   | 持久开关（默认关闭）；控制调试工具栏、原始 Agent 请求/响应、reasoning、工具 payload、诊断导出与 `Alt + Shift + D` 抽屉                                                                                                                                    |
+| 🛠 开发者模式   | 持久开关（默认关闭）；控制调试工具栏、原始 Agent 请求/响应、reasoning、工具 payload、诊断导出与 `Alt + Shift + D` 抽屉；📌 2026-11-16 +「完整运行日志」卡（`engineLogEnabled` / `engineLogLevel`，独立于开发者模式；条数 / 导出 JSONL / 清空）            |
 
 > 📌 **UIL-01**：「关于」（`AboutSection.vue`：制作人员、项目与技术信息、版权与第三方许可证署名）已移出设置页侧栏，改由首页「关于」按钮原位打开 `AppModal` 展示。
 

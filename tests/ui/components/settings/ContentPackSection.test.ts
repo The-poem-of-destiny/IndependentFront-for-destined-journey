@@ -4,6 +4,9 @@
  * 更新状态那组用例随卡片一起从 DataSection.pack-update.test.ts 搬来；
  * 新增卸载确认（S-36）：永远先确认、说清回到占位内容与存档 / Agent 默认的去向，
  * 编辑过包内世界书时再确认一次「修改会丢」，取消则一步也不执行。
+ * 开发期内容源切到本地目录（包被压制）时，标题点名「已安装但被暂停」，导入 / 检查更新禁用并说明原因
+ * （卸载按钮跟随激活包，压制时不渲染）；
+ * 开发构建挂载内容源开关卡。
  *
  * @vitest-environment jsdom
  */
@@ -18,6 +21,7 @@ import { useUIStore } from '../../../../src/ui/stores/ui-store';
 import { checkPackUpdate, downloadLatestPack } from '../../../../src/ui/lib/content-pack-updater';
 import type { ConfirmDialogOptions } from '../../../../src/ui/lib/confirm-dialog';
 import { encryptPrivatePack, makePrivatePack } from '../../../helpers/pack-auth-fixture';
+import type { DevContentSourceResolution } from '../../../../src/ui/lib/dev-content-source';
 
 const confirmDialogMock = vi.fn<(o: ConfirmDialogOptions) => Promise<boolean>>(async () => true);
 vi.mock('../../../../src/ui/lib/confirm-dialog', () => ({
@@ -37,6 +41,7 @@ vi.mock('../../../../src/ui/stores/content-store', async () => {
     activePackId: 'fixture' as string | null,
     activePackVersion: '1.0.0' as string | null,
     protectedPack: false,
+    devContentSource: null as DevContentSourceResolution | null,
     hydratePackState: vi.fn().mockResolvedValue(undefined),
     installProtectedPack: vi.fn(),
     uninstallPack: vi.fn(),
@@ -79,6 +84,7 @@ beforeEach(() => {
   content.activePackId = 'fixture';
   content.activePackVersion = '1.0.0';
   content.protectedPack = false;
+  content.devContentSource = null;
   vi.mocked(content.hydratePackState).mockResolvedValue(undefined);
   vi.mocked(checkPackUpdate).mockResolvedValue({
     status: 'ok',
@@ -289,5 +295,63 @@ describe('ContentPackSection 卸载确认（S-36）', () => {
     expect((confirmDialogMock.mock.calls[0][0].details ?? []).join('\n')).toContain(
       '重新登录 Discord',
     );
+  });
+});
+
+describe('ContentPackSection 开发期内容源', () => {
+  function buttonByText(text: string) {
+    return wrapper.findAll('button').find((button) => button.text() === text)!;
+  }
+
+  it('包被压制时：标题点名已装包被暂停，导入 / 检查更新禁用并给出原因，卸载按钮不出现', async () => {
+    const content = useContentStore();
+    // 与真实 store 一致：压制时不激活包，activePackId / activePackVersion 为 null
+    content.activePackId = null;
+    content.activePackVersion = null;
+    content.devContentSource = {
+      preference: 'local',
+      suppressPack: true,
+      suppressedPack: { packId: 'fixture', packVersion: '1.0.0' },
+      notices: [],
+    };
+    mountSection();
+    await flushPromises();
+
+    const heading = wrapper.get('h4').text();
+    expect(heading).toContain('已安装（fixture v1.0.0）');
+    expect(heading).toContain('暂停启用');
+    expect(heading).not.toContain('未安装');
+
+    for (const text of ['导入 / 升级内容包', '检查更新']) {
+      expect(buttonByText(text).attributes('disabled')).toBeDefined();
+    }
+    // 卸载按钮只跟随「有激活包」，压制时根本不渲染（store 侧另有抛错兜底）
+    expect(buttonByText('卸载内容包')).toBeUndefined();
+    expect(wrapper.find('.pack-suppressed-reason').text()).toContain('本地内容目录');
+    await buttonByText('检查更新').trigger('click');
+    await flushPromises();
+    expect(confirmDialogMock).not.toHaveBeenCalled();
+    expect(checkPackUpdate).not.toHaveBeenCalled();
+  });
+
+  it('偏好为内容包时按钮照常可用、不显示原因', async () => {
+    useContentStore().devContentSource = {
+      preference: 'pack',
+      suppressPack: false,
+      suppressedPack: null,
+      notices: [],
+    };
+    mountSection();
+    await flushPromises();
+    expect(buttonByText('检查更新').attributes('disabled')).toBeUndefined();
+    expect(buttonByText('卸载内容包').attributes('disabled')).toBeUndefined();
+    expect(wrapper.find('.pack-suppressed-reason').exists()).toBe(false);
+  });
+
+  it('开发构建挂载内容源开关卡', async () => {
+    mountSection();
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-testid="dev-content-source-card"]').exists()).toBe(true);
+    });
   });
 });

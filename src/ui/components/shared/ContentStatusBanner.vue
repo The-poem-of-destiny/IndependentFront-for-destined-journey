@@ -20,9 +20,33 @@ import { useUIStore } from '../../stores/ui-store';
 import AppButton from './AppButton.vue';
 import { confirmDialog } from '../../lib/confirm-dialog';
 import { confirmAndUninstallPack } from '../settings/pack-uninstall-flow';
+import { describeDevContentNotices } from '../../lib/dev-content-source';
 
 const content = useContentStore();
 const ui = useUIStore();
+
+/**
+ * 开发期内容源提示行（仅 DEV）：内容源被切到本地目录、或解析出提示时，
+ * 在横幅里多一行说明，免得开发者忘了已装包此刻没被启用。
+ */
+const devLine = computed<string | null>(() => {
+  if (!import.meta.env.DEV) return null;
+  const dev = content.devContentSource;
+  if (!dev || (!dev.suppressPack && dev.notices.length === 0)) return null;
+  const source = dev.preference === 'local' ? '本地目录' : '内容包';
+  const pack = dev.suppressedPack
+    ? `（已装包 ${dev.suppressedPack.packId} v${dev.suppressedPack.packVersion} 未启用）`
+    : '';
+  const notes = describeDevContentNotices(dev.notices);
+  return `开发：内容源=${source}${pack}${notes.length ? ` · ${notes.join(' ')}` : ''}`;
+});
+/**
+ * 包被开发开关压制时，横幅不再提供导入 / 卸载入口（store 会直接拒绝），正文也不再劝人导入。
+ * `import.meta.env.DEV &&` 字面前置：生产构建里恒为 false。
+ */
+const packSuppressed = computed(
+  () => import.meta.env.DEV && content.devContentSource?.suppressPack === true,
+);
 
 /** 占位世界书条目规模阈值（§5.8）：超过则判定为「本地有真实内容」 */
 const PLACEHOLDER_ENTRY_THRESHOLD = 150;
@@ -55,7 +79,7 @@ const detectedLegacyContent = computed(() => localEntryScale.value > PLACEHOLDER
 const visible = computed(() => {
   const st = content.contentStatus;
   if (st === 'pack' || st === 'needs_attention') {
-    return content.activePackId !== null;
+    return content.activePackId !== null || devLine.value !== null;
   }
   return true; // placeholder / error 始终显示
 });
@@ -77,6 +101,10 @@ const message = computed(() => {
       : '内容加载失败，部分默认配置可能缺失';
   }
   // placeholder
+  if (packSuppressed.value) {
+    // 包其实装着，只是被开发开关暂停：别再让人去导入
+    return '已安装的内容包已被开发内容源开关暂停启用，当前使用本地 /data 内容';
+  }
   if (detectedLegacyContent.value) {
     return '检测到本地真实内容，导入内容包以恢复完整默认与后续更新';
   }
@@ -88,6 +116,7 @@ const level = computed<'info' | 'warn' | 'error'>(() => {
   if (content.protectedPack) return content.leaseState.startsWith('LOCKED_') ? 'warn' : 'info';
   const st = content.contentStatus;
   if (st === 'error') return 'error';
+  if (packSuppressed.value) return 'info';
   if (detectedLegacyContent.value) return 'warn';
   return 'info';
 });
@@ -171,7 +200,12 @@ async function uninstallPack() {
       "
       aria-hidden="true"
     />
-    <span class="content-banner-text">{{ message }}</span>
+    <span class="content-banner-text"
+      >{{ message
+      }}<span v-if="devLine" class="content-banner-dev" data-testid="content-banner-dev">{{
+        devLine
+      }}</span></span
+    >
     <span class="content-banner-actions">
       <AppButton
         v-if="content.protectedPack"
@@ -181,7 +215,7 @@ async function uninstallPack() {
         >管理 Discord 授权</AppButton
       >
       <AppButton
-        v-else-if="content.contentStatus === 'placeholder'"
+        v-else-if="content.contentStatus === 'placeholder' && !packSuppressed"
         variant="secondary"
         size="sm"
         :loading="busy"
@@ -219,6 +253,13 @@ async function uninstallPack() {
 }
 .content-banner-actions {
   flex-shrink: 0;
+}
+/* 开发期内容源提示：另起一行、小一号，警示色，与玩家可见文案区分开 */
+.content-banner-dev {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+  color: var(--theme-warning);
 }
 @media (max-width: 520px) {
   .content-banner-actions {

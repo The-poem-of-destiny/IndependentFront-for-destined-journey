@@ -44,6 +44,7 @@ import { xpToNextNumber } from '../character/exp-table';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { normalizeRarity, normalizeSlot } from '../content/field-enums';
 import { parseEntityGenOutput } from './entity-gen-parse';
+import { logEngine } from '../runtime/engine-logger';
 
 // ========== Types ==========
 
@@ -162,6 +163,73 @@ const EMPTY_OUTPUT: EntityGenOutput = { skills: [], equipment: [], inventory: []
  * - 其余 → 物品/技能/状态/登神路径（可批量）
  */
 export async function runEntityGenChain(
+  request: EntityGenRequest,
+  deps: EntityGenDeps,
+): Promise<EntityGenChainResult> {
+  const startTime = Date.now();
+  // 🔴 只记白名单字段：request.endpoint 带 apiKey / headerOverrides，记录时这些密钥还没登记，
+  //    整份 request 交进来就是明文落盘；worldBooks / presets / configs / context 也不整份记
+  logEngine(
+    'info',
+    'sidechain.entity_gen',
+    'entity_gen 侧链开始',
+    () => describeEntityGenRequest(request),
+    {
+      saveId: request.saveId,
+      agentId: 'entity_gen',
+    },
+  );
+  logEngine(
+    'trace',
+    'sidechain.entity_gen',
+    'entity_gen 侧链上下文概要',
+    () => ({
+      configs: request.configs?.length ?? 0,
+      worldBooks: request.worldBooks?.length ?? 0,
+      presets: request.presets?.length ?? 0,
+      storyOutputChars: request.storyOutput?.length ?? 0,
+    }),
+    { saveId: request.saveId, agentId: 'entity_gen' },
+  );
+  try {
+    const result = await runEntityGenChainInner(request, deps);
+    logEngine(
+      'info',
+      'sidechain.entity_gen',
+      `entity_gen 侧链结束：补丁 ${result.patches.length} 条`,
+      () => ({ durationMs: Date.now() - startTime, result }),
+      { agentId: 'entity_gen' },
+    );
+    return result;
+  } catch (error) {
+    logEngine(
+      'error',
+      'sidechain.entity_gen',
+      'entity_gen 侧链抛错',
+      () => ({ durationMs: Date.now() - startTime, error }),
+      { agentId: 'entity_gen' },
+    );
+    throw error;
+  }
+}
+
+/** 侧链开始条目的白名单字段（不含任何端点凭据） */
+function describeEntityGenRequest(request: EntityGenRequest): Record<string, unknown> {
+  return {
+    saveId: request.saveId,
+    agentId: 'entity_gen',
+    marker: request.marker,
+    markers: request.markers,
+    introducedBy: request.introducedBy,
+    hasNarrativeCharacter: request.narrativeCharacter !== undefined,
+    hasCharacterDefinition: request.characterDefinition !== undefined,
+    hasPlotThreadInjection: Boolean(request.plotThreadInjection),
+    endpoint: { id: request.endpoint?.id, name: request.endpoint?.name },
+    model: request.endpoint?.defaultModel,
+  };
+}
+
+async function runEntityGenChainInner(
   request: EntityGenRequest,
   deps: EntityGenDeps,
 ): Promise<EntityGenChainResult> {

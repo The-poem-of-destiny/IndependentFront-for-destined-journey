@@ -15,6 +15,7 @@
 
 import type { AgentPreset } from '../types/types';
 import { isStoryZonePlaceholder } from './story-zone-placeholders';
+import { logEngine } from '../runtime/engine-logger';
 
 // 🪦 D28（波 1 T2）: `PRESET_BASE = '/data/presets/'` 常量已删（死路径，见文件尾注释）。
 
@@ -330,13 +331,43 @@ export function assemblePresetContent(
       content,
     );
 
-  if (hasOurPlaceholders) {
-    return content;
-  }
-
   // Auto-append default context block for old presets
-  const contextBlock = defaultContextBlock || DEFAULT_STORY_CONTEXT_BLOCK;
-  return content + '\n' + contextBlock;
+  const assembled = hasOurPlaceholders
+    ? content
+    : content + '\n' + (defaultContextBlock || DEFAULT_STORY_CONTEXT_BLOCK);
+
+  logEngine(
+    'debug',
+    'prompt.preset',
+    `预设组装：启用 ${sorted.length} / ${prompts.length} 条`,
+    () => ({
+      presetId: (preset as { id?: unknown }).id,
+      presetName: (preset as { name?: unknown }).name,
+      enabledEntries: sorted.map((p: any) => ({
+        identifier: p.identifier,
+        name: p.name,
+        role: p.role,
+        injection_order: p.injection_order,
+        length: typeof p.content === 'string' ? p.content.length : 0,
+      })),
+      skippedEntries: prompts
+        .filter((p: any) => !sorted.includes(p))
+        .map((p: any) => ({
+          identifier: p?.identifier,
+          name: p?.name,
+          role: p?.role,
+          enabled: p?.enabled,
+        })),
+      macroPreprocessed: needsPreprocessing,
+      beforeMacros: sorted.map((p: any) => p.content || '').join('\n'),
+      afterMacros: content,
+      defaultContextAppended: !hasOurPlaceholders,
+      prefill: getPresetPrefill(preset),
+      result: assembled,
+    }),
+  );
+
+  return assembled;
 }
 
 /** Default context block for Story Agent — appended to old ST presets without placeholders */

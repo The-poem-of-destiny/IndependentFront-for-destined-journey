@@ -49,7 +49,7 @@ src/core/                    ← 核心引擎
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
   ├── persistence/create-journey.ts             ← 新旅程唯一原子落库入口（角色/存档/档案/大纲/事件同一事务）
-  ├── persistence/database.ts                   ← Dexie/IndexedDB v30
+  ├── persistence/database.ts                   ← Dexie/IndexedDB v34
   │       🔴 `DB_VERSION` 常量必须等于最后一个 `this.version(n)`。它只出现在
   │          `FullBackup.version` 上、导入侧不拿它做判断，所以**对不上不会有任何报错**，
   │          只是每份导出的备份都盖了过期的戳。它曾经落后两版（v18/v19 忘了改），
@@ -137,7 +137,15 @@ src/core/                    ← 核心引擎
   │              `updatedAt` 索引；存权威 `CombatState` + 会话 transcript，供刷新续战。
   │              🔴 **rebuildable 缓存，与上面三张 story 表口径相反**：不进 FullBackup / 单存档导出，
   │                 删存档级联删。合并前它是原分支的 v27，与 Story v2 的 v27/v28/v29 撞号，顺延到 v30
+  │   └── v34+: engineLogs（引擎日志，2026-11-16）—— `++seq, [saveId+layer]`；saveId 空串 = 应用级、
+  │              layer 0 = 无回合。每存档留最近 100 个回合层，层 0 每 (saveId, 0) 桶 ≤2000 条。
+  │              不进 FullBackup / 单存档导出，删档级联删。🔴 与 debugTurns 等派生表**相反**：
+  │              装着受保护内容包时**照常落盘**（主人裁定，明文风险写在开关说明里），每次启动的
+  │              `purgeProtectedPackPlaintext` 与内容包安装事务都**不清**它；只有一次性的旧包迁移会清
   │
+  ├── persistence/engine-log-store.ts           ← [引擎日志 / 2026-11-16] sink 的 Dexie 实现（`createDexieEngineLogSink`，
+  │      写入时按层淘汰）+ 导出分页 / JSONL 行 / 统计 / 清空 / 查最大层号。不进 withSaveWriteLock；
+  │      **唯一生产实现由前端在 `src/ui/main.ts` 安装**——引擎默认不装
   ├── persistence/session-backup.ts             ← 单存档导出/导入：每存档表整取（清单同 deleteSaveSlot，字节不随行）+ 内容依赖清单（世界书 token / 工坊项目 / 内容包 / story 预设，导入前只读体检）+ 导入**一律重发 id**（不重发 = 第二次导入静默覆盖第一次），全局表一行不改
   │
   ├── api/api-rpm-limiter.ts            ← [ADR-34] 应用级凭据桶：默认不限；达到上限后的请求按 FIFO
@@ -207,6 +215,8 @@ src/core/                    ← 核心引擎
   │      🔴 不再有叫 `extractTag` 的东西 —— 曾有两个同名反义实现（一个取 `match[1]`、一个取
   │         `match[0]`），签名都是 `(string, string)`，连定义带调用抄过去**编译照过**，
   │         运行时把整块 XML 当字段值写进角色档案
+  ├── utils/redact-secrets.ts             ← 错误原文凭据的启发式脱敏（2026-11-16 自 ui/lib/turn-failure 下沉，行为不变）。
+  │                                    🔴 只用于短错误文本；含「32 位以上长串一律抹」，别拿去处理提示词全文
   ├── utils/model-json.ts                 ← [Q-05] 从模型输出里抢救 JSON 的**唯一**入口（整段直解 / ```json 围栏 /
   │                                    `<json>` 标签 / 括号切片，顺序即优先级）。剥壳只此一份，兜底由调用方
   │                                    传 `normalize` 回调 —— 形态上就长不出「两个分支两套兜底」
@@ -380,6 +390,11 @@ src/core/                    ← 核心引擎
   │                                      + `getPresetPrefill`（读 `settings.prefill = {enabled, field}`，
   │                                      内容取自该 assistant 条目）；`assemblePresetContent` **把
   │                                      assistant 条目不并进 system**（它是预填充素材、要去消息末尾）
+  ├── prompts/factory-preset-sync.ts        ← 🆕 [2026-11-17] 出厂预设同步计划（纯函数，无 I/O、不读时钟、不调 crypto）：
+  │                                    `factoryPresetFingerprint`（去掉 createdAt/updatedAt/factorySeedHash 后键稳定 hash）/
+  │                                    `stampFactoryPreset` / `planFactoryPresetSync`（四条规则：补 / 只补指纹 / 没改过静默覆盖 /
+  │                                    无指纹或被就地改过先另存「（更新前备份）」副本再覆盖）。调用方是 settings-store 播种
+  │                                    与 content-store 装包。🔴 与 content-source / content-pack-plan 的导入只在函数体内用（运行时环）
   ├── content/worldbook-loader.ts           ← [Phase 8] 世界书加载/激活/排序/渲染（constant + keyword 双层激活），
   │                                    条目正文经 `executeEjsEntry` 求值（ADR-30）
   ├── content/builtin-worldbooks.ts         ← [Phase 8] 内置世界书运行期 fetch 预加载（刻意不用 `import.meta.glob` eager
@@ -471,6 +486,14 @@ src/core/                    ← 核心引擎
   │         `violatesZipEntryName`），不另立一套 —— 远程素材最终落成**普通素材行**，
   │         这里放进一个 `圣殿/内庭`，症状会推迟到半年后某次「导出再导入之后少了几张图」
   │
+  ├── runtime/engine-logger.ts              ← [引擎日志 / 2026-11-16] 统一分级日志器（trace<debug<info<warn<error）：
+  │      关闭时只比一次整数、thunk 不执行；payload 记录即序列化（切 Proxy / 环 / 2M 截断）；
+  │      脱敏两层：按键名结构化脱敏（apiKey / authorization / x-api-key 等完整键名 → `***`；刻意不含业务字段 `token` / `secret`，
+  │      `headerOverrides` / `headers` 只留头名）+ `registerLogSecret` 登记值精确替换，不跑启发式；
+  │      🔴 调用点只记白名单字段，别把整份 request / endpoint 交进来（侧链开始条目曾因此明文落 apiKey）；
+  │      `beginLogScope` 按 saveId 环境作用域 + layerKey 开层
+  │      （层号跨刷新从 sink 续接）；console tap；500ms / 2M 字符批量串行交付，配额耗尽停写并回调。
+  │      落盘经注入缝 `installEngineLogSink`（实现见 persistence/engine-log-store.ts）
   ├── runtime/engine-settings.ts            ← [Q-06] 引擎侧读设置的**唯一入口**（注入缝）。裁定：真源在前端
   │                                    localStorage，引擎经本缝读，**不是**搬进 Dexie —— 引擎要的是
   │                                    「当前生效的设置」这个能力，不是「某张表」这个位置；缝也让引擎在

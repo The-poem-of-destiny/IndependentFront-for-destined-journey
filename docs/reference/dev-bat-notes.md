@@ -141,6 +141,7 @@ ERROR: Input redirection is not supported, exiting the process immediately.
 1. **路径必须是内容仓的 `data` 子目录**，不是内容仓根。`vite.config.ts` 的 `dataDir = poemContentDir`，中间件 `resolve(dataDir, 'defaults/...')`——传错一级就写不进 `data/defaults/agent-config.json`。
 2. **「保存为默认」按钮的出现与否完全由它决定**：`AgentConfigPanel.vue` 的 `canSaveAsDefault = __POEM_CONTENT_DIR__`（vite 编译期布尔）。内容仓存在时按钮自动出现；`--no-content` 或内容仓缺失时按钮隐藏——这是刻意设计（占位内容不允许被 UI 写）。主人想改内容：直接 `npm run dev` 即可（内容仓存在时自动启用）。
 3. **跨仓库写入是设计内行为，且是安全的**：内容仓是独立 git 仓库（`E:\code\fated_poem_independent_assets`），写入 = 内容仓出现未提交改动，引擎仓零污染。改完记得去内容仓 git commit。写入路径有 P1-03 越界防御（`relative() startsWith('..') || isAbsolute`），Windows 绝对路径逃逸会被 400 拦下。
+4. **已安装内容包会盖住这个目录**（2026-11-16 补）：浏览器里装过内容包时，`/data/*` 的装载面读的是包内容而不是内容仓。要在开发时看内容仓的真实文件，到设置页「内容包」分区把仅开发期的「内容源」开关切到「本地内容目录」（不删包，切回即恢复），详见 `src/ui/lib/dev-content-source.ts`。
 
 ### 为什么不能无条件显示按钮
 

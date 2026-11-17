@@ -49,6 +49,7 @@ import { getDefaultTemplate, PLACEHOLDER_REGISTRY } from './placeholder-registry
 import { getMapPack } from '../map/map-runtime';
 import { buildMapSnapshot, buildRuntimeGeoData } from '../map/map-context';
 import { getLocationNodes } from '../map/location-db';
+import { isEngineLogEnabled, logEngine } from '../runtime/engine-logger';
 
 // ========== 通用工具 ==========
 
@@ -899,6 +900,51 @@ export async function buildAgentMessagesAsync(
       dynamicText: rendered.dynamicText,
       fallbackEntries: rendered.fallbackEntries,
     };
+    logEngine(
+      'debug',
+      'lore.activation',
+      `${agentId} 激活世界书条目 ${activeEntries.length} 条`,
+      () => ({
+        agentId,
+        entries: activeEntries.map((entry) => {
+          const text = rendered.entryTexts.get(entry);
+          return {
+            uid: entry.uid,
+            name: entry.name,
+            order: entry.order,
+            key: entry.key,
+            keysecondary: entry.keysecondary,
+            selectiveLogic: entry.selectiveLogic,
+            lore: entry.extra?.lore,
+            renderedLength: text?.length ?? null,
+            ejsChanged: text !== undefined && text !== entry.content,
+          };
+        }),
+        fallbackEntries: rendered.fallbackEntries,
+        staticLength: rendered.staticText.length,
+        dynamicLength: rendered.dynamicText.length,
+      }),
+      { agentId },
+    );
+    if (isEngineLogEnabled('trace')) {
+      logEngine(
+        'trace',
+        'lore.ejs',
+        `${agentId} 世界书 EJS 求值结果`,
+        () => ({
+          agentId,
+          results: activeEntries.map((entry) => ({
+            uid: entry.uid,
+            name: entry.name,
+            source: entry.content,
+            rendered: rendered.entryTexts.get(entry) ?? null,
+          })),
+          staticText: rendered.staticText,
+          dynamicText: rendered.dynamicText,
+        }),
+        { agentId },
+      );
+    }
     if (rendered.fallbackEntries.length > 0) {
       console.warn(
         `[LORE_BOOK] agent=${agentId} 有 ${rendered.fallbackEntries.length} 个条目 EJS 失败、已回退原文注入`,
@@ -909,7 +955,7 @@ export async function buildAgentMessagesAsync(
   }
 
   onRendered?.({ ...ctx, ejsPass }, entryTexts);
-  return buildAgentMessages(
+  const messages = buildAgentMessages(
     agentId,
     { ...ctx, ejsPass },
     configs,
@@ -917,4 +963,17 @@ export async function buildAgentMessagesAsync(
     presets,
     localParams,
   );
+  logEngine(
+    'debug',
+    'prompt.messages',
+    `${agentId} 组装消息 ${messages?.length ?? 0} 条`,
+    () => ({
+      agentId,
+      presetId: config?.presetId,
+      localParamNames: localParams ? Object.keys(localParams) : [],
+      messages,
+    }),
+    { agentId },
+  );
+  return messages;
 }

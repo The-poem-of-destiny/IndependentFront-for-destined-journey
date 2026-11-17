@@ -232,6 +232,13 @@ export type UiSettings = {
    */
   storyContextV2Enabled: boolean;
   /**
+   * 「完整运行日志」开关（引擎日志器，`@engine/runtime/engine-logger`）；默认关闭，**独立于** developerMode。
+   * 由 main.ts 监听后推给 `configureEngineLogger`；装着受保护内容包时开着也照常落盘。
+   */
+  engineLogEnabled: boolean;
+  /** 完整运行日志的最低记录级别：trace = 全部 / debug = 详细 / info = 概要 */
+  engineLogLevel: 'trace' | 'debug' | 'info';
+  /**
    * 新模式召回的原文读取粒度（计划 D32，两种方案都实现、靠测试比较）：
    * `turn` = 整回合玩家输入与正文；`snippet` = 与本轮最相关的段落加前后文。只影响测试档。
    */

@@ -118,6 +118,26 @@ describe('settings-store', () => {
     expect(store.settings.developerMode).toBe(false);
   });
 
+  it('完整运行日志默认关闭、粒度默认 trace，且独立于开发者模式', async () => {
+    expect(store.settings.engineLogEnabled).toBe(false);
+    expect(store.settings.engineLogLevel).toBe('trace');
+
+    store.settings.developerMode = true;
+    await nextTick();
+    expect(store.settings.engineLogEnabled).toBe(false);
+
+    store.settings.engineLogEnabled = true;
+    store.settings.engineLogLevel = 'info';
+    await nextTick();
+    const saved = JSON.parse(localStorage.getItem('fated-poem-settings')!);
+    expect(saved.engineLogEnabled).toBe(true);
+    expect(saved.engineLogLevel).toBe('info');
+
+    store.resetAll();
+    expect(store.settings.engineLogEnabled).toBe(false);
+    expect(store.settings.engineLogLevel).toBe('trace');
+  });
+
   it('修改 settings 应自动写 localStorage', async () => {
     await store.initApiSecrets();
     store.settings.apiPool = [
@@ -507,7 +527,8 @@ describe('settings-store', () => {
     } as never);
     vi.spyOn(cs, 'resolveProjectPresets').mockResolvedValue([
       presetOf('extra-preset', '额外默认'),
-      // 与内嵌 story 同 id 的一条：去重后不得覆盖内嵌版
+      // 与内嵌 story 同 id 的一条：📌 2026-11-17 起 provider 版优先（与装包写入的同源），
+      //    此前是内嵌版优先 —— 两份不一致时播种与装包互相覆盖、升级报虚假冲突
       presetOf('story-preset', '重复'),
     ] as never);
 
@@ -515,7 +536,7 @@ describe('settings-store', () => {
 
     const rows = await db.presets.toArray();
     expect(rows.map((p) => p.id).sort()).toEqual(['extra-preset', 'story-preset']);
-    expect(rows.find((p) => p.id === 'story-preset')?.name).toBe('故事预设');
+    expect(rows.find((p) => p.id === 'story-preset')?.name).toBe('重复');
     // 选择键不再被「补成默认」：空串即跟随默认，生效预设由读取侧解析
     expect(store.settings.activePresetId).toBe('');
     const { effectivePresetFrom, usePresets } =
@@ -551,6 +572,237 @@ describe('settings-store', () => {
     await store.loadAgentProjectDefaults();
     expect(store.settings.activePresetId).toBe('');
     expect(store.settings.directPresetId).toBe('locked-pack-direct');
+  });
+
+  describe('出厂预设按播种指纹同步（2026-11-17）', () => {
+    type Row = {
+      id: string;
+      name: string;
+      settings: Record<string, unknown>;
+      createdAt: number;
+      updatedAt: number;
+      scope?: 'story' | 'direct';
+      factorySeedHash?: string;
+    };
+    const factoryOf = (id: string, name: string, content: string, ts = 1): Row => ({
+      id,
+      name,
+      settings: { prompts: [{ identifier: 'main', content }] },
+      createdAt: ts,
+      updatedAt: ts,
+    });
+
+    /** 准备一组出厂预设：story-preset 内嵌在默认层，extra-preset 来自 presets.json */
+    async function arrange(story: Row, extra: Row) {
+      const { useContentStore } = await import('../../../src/ui/stores/content-store');
+      const cs = useContentStore();
+      const defaults = vi.spyOn(cs, 'loadProjectDefaults').mockResolvedValue({
+        version: 1,
+        agents: { story: { presetId: story.id, preset: story } },
+      } as never);
+      vi.spyOn(cs, 'resolveProjectPresets').mockResolvedValue([extra] as never);
+      return defaults;
+    }
+
+    async function stampOf(row: Row) {
+      const { stampFactoryPreset } = await import('@engine/prompts/factory-preset-sync');
+      return stampFactoryPreset(row as never) as unknown as Row;
+    }
+
+    async function originOf(id: string) {
+      const { usePresets } = await import('../../../src/ui/composables/usePresets');
+      return usePresets().catalog.value.find((e) => e.preset.id === id);
+    }
+
+    it('a：空库播种后每行带指纹，目录里算内容包', async () => {
+      await drainMacrotasks(6);
+      const db = getDatabase();
+      await db.presets.clear();
+      await arrange(
+        factoryOf('story-preset', '故事', '甲'),
+        factoryOf('extra-preset', '额外', '乙'),
+      );
+
+      await store.loadAgentProjectDefaults();
+
+      const { factoryPresetFingerprint } = await import('@engine/prompts/factory-preset-sync');
+      const rows = await db.presets.toArray();
+      expect(rows).toHaveLength(2);
+      for (const row of rows) expect(row.factorySeedHash).toBe(factoryPresetFingerprint(row));
+      expect(await originOf('story-preset')).toMatchObject({ origin: 'content', readonly: true });
+      expect(await originOf('extra-preset')).toMatchObject({ origin: 'content', readonly: true });
+    });
+
+    it('b：有指纹未改、出厂 prompts 变了 → 覆盖，行数不变', async () => {
+      await drainMacrotasks(6);
+      const db = getDatabase();
+      await db.presets.clear();
+      await db.presets.bulkPut([
+        (await stampOf(factoryOf('story-preset', '故事', '旧'))) as never,
+        (await stampOf(factoryOf('extra-preset', '额外', '乙'))) as never,
+      ]);
+      await arrange(
+        factoryOf('story-preset', '故事', '新'),
+        factoryOf('extra-preset', '额外', '乙'),
+      );
+
+      await store.loadAgentProjectDefaults();
+
+      const rows = await db.presets.toArray();
+      expect(rows).toHaveLength(2);
+      expect(rows.find((r) => r.id === 'story-preset')!.settings).toEqual({
+        prompts: [{ identifier: 'main', content: '新' }],
+      });
+    });
+
+    it('c：无指纹但内容相同（只有时间戳不同）→ 只补指纹，不留副本、不动时间戳', async () => {
+      await drainMacrotasks(6);
+      const db = getDatabase();
+      await db.presets.clear();
+      await db.presets.bulkPut([
+        factoryOf('story-preset', '故事', '甲', 77) as never,
+        factoryOf('extra-preset', '额外', '乙', 88) as never,
+      ]);
+      await arrange(
+        factoryOf('story-preset', '故事', '甲'),
+        factoryOf('extra-preset', '额外', '乙'),
+      );
+
+      await store.loadAgentProjectDefaults();
+
+      const rows = await db.presets.toArray();
+      expect(rows).toHaveLength(2);
+      const story = rows.find((r) => r.id === 'story-preset')!;
+      expect(story.factorySeedHash).toBeTruthy();
+      expect(story.updatedAt).toBe(77);
+      expect(rows.find((r) => r.id === 'extra-preset')!.updatedAt).toBe(88);
+    });
+
+    it('d：无指纹且内容不同 → 多一条玩家副本，出厂行换成新内容，选择键不变，再加载不再多副本', async () => {
+      await drainMacrotasks(6);
+      const db = getDatabase();
+      await db.presets.clear();
+      await db.presets.bulkPut([
+        factoryOf('story-preset', '故事', '甲') as never,
+        factoryOf('extra-preset', '额外', '玩家就地改过') as never,
+      ]);
+      await arrange(
+        factoryOf('story-preset', '故事', '甲'),
+        factoryOf('extra-preset', '额外', '新出厂'),
+      );
+      store.settings.activePresetId = 'extra-preset';
+      store.settings.directPresetId = 'extra-preset';
+      store.settings.directCachedPresetId = 'extra-preset';
+
+      await store.loadAgentProjectDefaults();
+
+      const rows = await db.presets.toArray();
+      expect(rows).toHaveLength(3);
+      const backup = rows.find((r) => r.name === '额外（更新前备份）')!;
+      expect(backup).toBeDefined();
+      expect(backup.factorySeedHash).toBeUndefined();
+      expect(backup.settings).toEqual({
+        prompts: [{ identifier: 'main', content: '玩家就地改过' }],
+      });
+      expect(rows.find((r) => r.id === 'extra-preset')!.settings).toEqual({
+        prompts: [{ identifier: 'main', content: '新出厂' }],
+      });
+      expect(await originOf(backup.id)).toMatchObject({ origin: 'user', readonly: false });
+      expect(store.settings.activePresetId).toBe('extra-preset');
+      expect(store.settings.directPresetId).toBe('extra-preset');
+      expect(store.settings.directCachedPresetId).toBe('extra-preset');
+      const { useUIStore } = await import('../../../src/ui/stores/ui-store');
+      const toast = useUIStore().toasts.find((t) => t.message.includes('额外（更新前备份）'));
+      expect(toast).toMatchObject({ type: 'warning', duration: 0 });
+
+      await store.loadAgentProjectDefaults();
+      expect(await db.presets.count()).toBe(3);
+    });
+
+    it('e：有指纹但内容被就地改过 → 同样先另存副本再覆盖', async () => {
+      await drainMacrotasks(6);
+      const db = getDatabase();
+      await db.presets.clear();
+      const stamped = await stampOf(factoryOf('extra-preset', '额外', '乙'));
+      await db.presets.bulkPut([
+        (await stampOf(factoryOf('story-preset', '故事', '甲'))) as never,
+        { ...stamped, settings: { prompts: [{ identifier: 'main', content: '改过' }] } } as never,
+      ]);
+      await arrange(
+        factoryOf('story-preset', '故事', '甲'),
+        factoryOf('extra-preset', '额外', '新'),
+      );
+      store.settings.activePresetId = 'extra-preset';
+
+      await store.loadAgentProjectDefaults();
+
+      const rows = await db.presets.toArray();
+      expect(rows).toHaveLength(3);
+      const backup = rows.find((r) => r.name === '额外（更新前备份）')!;
+      expect(backup.settings).toEqual({ prompts: [{ identifier: 'main', content: '改过' }] });
+      expect(backup.factorySeedHash).toBeUndefined();
+      expect(rows.find((r) => r.id === 'extra-preset')!.settings).toEqual({
+        prompts: [{ identifier: 'main', content: '新' }],
+      });
+      expect(store.settings.activePresetId).toBe('extra-preset');
+    });
+
+    it('f：只有 name 变了 → 覆盖，无副本', async () => {
+      await drainMacrotasks(6);
+      const db = getDatabase();
+      await db.presets.clear();
+      await db.presets.bulkPut([
+        (await stampOf(factoryOf('story-preset', '故事', '甲'))) as never,
+        (await stampOf(factoryOf('extra-preset', '额外', '乙'))) as never,
+      ]);
+      await arrange(
+        factoryOf('story-preset', '故事', '甲'),
+        factoryOf('extra-preset', '新名字', '乙'),
+      );
+
+      await store.loadAgentProjectDefaults();
+
+      const rows = await db.presets.toArray();
+      expect(rows).toHaveLength(2);
+      expect(rows.find((r) => r.id === 'extra-preset')!.name).toBe('新名字');
+    });
+
+    it('g：读库之后运行时修订号变了 → 这一轮不写，下一轮重读后再写', async () => {
+      await drainMacrotasks(6);
+      const db = getDatabase();
+      await db.presets.clear();
+      const defaults = await arrange(
+        factoryOf('story-preset', '故事', '甲'),
+        factoryOf('extra-preset', '额外', '乙'),
+      );
+      const { setRuntimePackBooks } = await import('@engine/content/pack-runtime');
+      const events: string[] = [];
+      const table = db.presets;
+      const originalToArray = table.toArray.bind(table);
+      const originalBulkPut = table.bulkPut.bind(table);
+      let reads = 0;
+      const readSpy = vi.spyOn(table, 'toArray').mockImplementation((async () => {
+        const rows = await originalToArray();
+        events.push('read');
+        // 第一次读库之后把修订号 +1：模拟读库那一拍里装包 / 叠加层更新
+        if (++reads === 1) setRuntimePackBooks([]);
+        return rows;
+      }) as never);
+      const writeSpy = vi.spyOn(table, 'bulkPut').mockImplementation(((rows: never) => {
+        events.push('write');
+        return originalBulkPut(rows);
+      }) as never);
+      try {
+        await store.loadAgentProjectDefaults();
+      } finally {
+        readSpy.mockRestore();
+        writeSpy.mockRestore();
+      }
+
+      expect(events.slice(0, 3)).toEqual(['read', 'read', 'write']);
+      expect(defaults.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(await db.presets.count()).toBe(2);
+    });
   });
 
   describe('🔴 默认层加载不许以「丢掉结果」收尾（2026-11-14）', () => {
@@ -674,7 +926,12 @@ describe('settings-store', () => {
     const { createDirectPreset, createCachedDirectPreset } =
       await import('../../../src/core/prompts/direct-prompt');
     await db.presets.put({ ...createDirectPreset(), updatedAt: 123 });
-    const edited = { ...createCachedDirectPreset(), fixedSystem: '玩家改过的风格', updatedAt: 9 };
+    const edited = {
+      ...createCachedDirectPreset(),
+      fixedSystem: '玩家改过的风格',
+      updatedAt: 9,
+      factorySeedHash: 'stale',
+    };
     await db.presets.put(edited);
     store.settings.directCachedPresetId = edited.id;
     // 原样的旧落盘行被删时，指向它的选择键清回「跟随默认」（只在这次迁移里清）
@@ -688,6 +945,8 @@ describe('settings-store', () => {
     expect(rows.some((p) => p.id === edited.id)).toBe(false);
     const copy = rows.find((p) => p.name === `${edited.name}（我的修改）`);
     expect(copy).toMatchObject({ scope: 'direct', fixedSystem: '玩家改过的风格' });
+    // 副本是玩家预设，不带播种指纹（2026-11-17）
+    expect('factorySeedHash' in copy!).toBe(false);
     expect(store.settings.directCachedPresetId).toBe(copy!.id);
     // 幂等：再跑一次不再产生副本
     await store.normalizePresetSelections();

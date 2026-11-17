@@ -16,6 +16,7 @@ import {
   locationPathMatches,
 } from './lore-activation';
 import { parseModelJson } from '../utils/model-json';
+import { logEngine } from '../runtime/engine-logger';
 
 const MAX_LORE_SUPPLEMENTS = 15;
 
@@ -267,6 +268,28 @@ export async function selectStoryLore(
         lore: withoutLoreKeyDates(r.entry.extra?.lore),
         book: r.book.lore,
       })),
+    }),
+  );
+  logEngine(
+    'debug',
+    'lore.selection',
+    `世界书选择：固定 ${zones[1].length} / 区域 ${zones[3].length} / 本轮 ${zones[5].length}`,
+    () => ({
+      agentId: options.agentId ?? 'story',
+      mode: options.mode,
+      location,
+      present,
+      allowedKeys: allowed.map((r) => r.key),
+      candidateKeys: candidates.map((r) => r.key),
+      requiredKeys: required.map((r) => r.key),
+      zoneKeys: {
+        1: zones[1].map((r) => r.key),
+        3: zones[3].map((r) => r.key),
+        5: zones[5].map((r) => r.key),
+      },
+      mandatoryKeys: [...mandatoryKeys],
+      optionalGroups,
+      diagnostics,
     }),
   );
   return { zones, diagnostics, mandatoryKeys: [...mandatoryKeys], optionalGroups };

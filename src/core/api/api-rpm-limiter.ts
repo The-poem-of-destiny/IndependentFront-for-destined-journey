@@ -4,6 +4,7 @@ import type {
   ApiRpmWaitItem,
   ApiRpmWaitSnapshot,
 } from '../types/types';
+import { logEngine } from '../runtime/engine-logger';
 
 const RPM_WINDOW_MS = 60_000;
 const CREDENTIAL_PREFIX = 'api-rpm-v1\0';
@@ -101,6 +102,13 @@ export class ApiRpmLimiter {
         signal?.addEventListener('abort', waiter.onAbort, { once: true });
         bucket.queue.push(waiter);
         if (bucket.pausedUntil === null) this.startPause(bucket, now);
+        // 只记标签与计数，不碰凭据
+        logEngine('debug', 'rpm.wait', `RPM 达限，请求排队：${bucket.label}`, () => ({
+          label: bucket.label,
+          rpmLimit: bucket.rpmLimit,
+          queuedCount: bucket.queue.length,
+          resumeAt: bucket.pausedUntil,
+        }));
         this.emit();
       });
     } finally {
@@ -199,7 +207,14 @@ export class ApiRpmLimiter {
     bucket.timer = null;
     bucket.pausedUntil = null;
     bucket.sentAt = [];
+    const queuedBefore = bucket.queue.length;
     this.release(bucket, bucket.rpmLimit, true);
+    logEngine('debug', 'rpm.resume', `RPM 暂停结束，续行：${bucket.label}`, () => ({
+      label: bucket.label,
+      rpmLimit: bucket.rpmLimit,
+      released: queuedBefore - bucket.queue.length,
+      stillQueued: bucket.queue.length,
+    }));
     if (bucket.queue.length > 0) this.startPause(bucket, Date.now());
     this.emit();
   }

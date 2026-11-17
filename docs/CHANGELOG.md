@@ -9,6 +9,48 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-17 修复：出厂预设按播种指纹同步（内容仓更新的 prompts 到不了玩家库）｜**未真机验证**
+
+- 根因：`settings-store.seedFactoryPresets` 对「库里已有同 id」的出厂预设只同步 name、不同步 prompts。内容仓更新出厂预设后，玩家库里的旧行永远不更新，API 请求一直发旧预设（已用真实调试导出证实）。自 #148 起出厂预设在界面上只读，但旧版 app 可能留下就地改过的行，不能静默丢掉。
+- 做法：预设行新增可选字段 `ChatPreset.factorySeedHash`（播种指纹，无索引，不升 Dexie 版本）= 去掉 createdAt / updatedAt / factorySeedHash 后键稳定序列化的 hash。新纯函数模块 `src/core/prompts/factory-preset-sync.ts`（`factoryPresetFingerprint` / `stampFactoryPreset` / `planFactoryPresetSync`，无 I/O、时间与新 id 由调用方注入），逐 id 四条规则：
+  1. 库里没有 → 写出厂行并盖指纹；
+  2. 行内容已等于出厂 → 至多补盖指纹，内容与时间戳不动、不留副本；
+  3. 有指纹且行内容仍等于指纹（没改过）→ 静默覆盖并盖新指纹；
+  4. 其余（无指纹的遗留行，或内容与指纹不符 = 被就地改过）→ 先另存玩家副本（新 id、名字加「（更新前备份）」、不带指纹、scope 取目录对该出厂行的判定），再覆盖。副本与覆盖同一个 presets 读写事务内的一次 `bulkPut`。
+- 选择键一律不改，仍指向出厂 id；发生规则 4 时弹一条常驻 warning toast 点名副本（失败静默）。读库、计划、写库放在同一个 Dexie `presets` 读写事务里（两个标签页同时启动不会各存一份副本）；事务内读的是盘上行叠受保护内容的内存层（叠加层只参与判定、不写），写之前再判一次受保护内容与运行时修订号，变了就不写、交外层重来。
+- 出厂预设来源：provider 列表（`/data/defaults/presets.json` 或已装包的 `pack.presets`）**优先于** agent-config 内嵌版（此前内嵌版优先）—— 与装包写入同源，否则同 id 两份内容不一致时播种与装包互相覆盖、升级报虚假冲突。引擎内置直出预设 id（`direct-generation-v1` / `direct-generation-cache-v1`）一律不播种，`migrateBuiltinPresetRows` 的「原样」判定也忽略 `factorySeedHash`，否则每次启动都会多一条「（我的修改）」副本并改写选择键。
+- 装包（`content-store.applyInstall`）写入的预设同样盖指纹；新字段不影响装包判定：四态比较用的 `hashPresetRow` 取 id / name / description / settings，`buildPackBaseline` 的逐预设基线只取 id / name / settings。`duplicateAsUser`、`migrateBuiltinPresetRows` 的副本、PresetManager 写时复制的副本与「保存为项目默认」写出的 preset 一律不带该字段。
+- 已知取舍：装包时玩家拒绝覆盖的「冲突预设」不再被永久保留 —— 下次启动播种会把它另存为备份副本后覆盖成包内版本。
+- 测试：新增 `tests/core/prompts/factory-preset-sync.test.ts`；`settings-store.test.ts` 补七条播种用例（空库 / 静默覆盖 / 只补指纹 / 遗留行另存副本 + 选择键不变 + 幂等 / 指纹不符另存 / 只改名 / 读库后修订号变不写）；`content-store-executor`、`agent-defaults`、`PresetManager.copy-on-write` 各补一条；评审回归 `tests/ui/stores/settings-store.factory-presets.test.ts`（内置 id 不播种且连续启动不涨行 / 带指纹的内置旧行仍视为原样 / 内嵌版与 pack.presets 不一致时升级无虚假冲突 / 两实例并发启动只留一份副本）。
+
+### 2026-11-16 修复：Gemini 下 `ChatRequest.model` 不进上游 URL（潜在缺陷）｜**未用真实 Gemini 验证**
+
+- 根因：Gemini 请求体不含 `model`，BFF（`server/routes/llm.ts`）只从 `X-Model-ID` 头拼上游 URL，而 `buildLlmTransportHeaders` 把这个头写死成 `endpoint.defaultModel`。调用方传入与源默认不同的 `ChatRequest.model` 时，Gemini 会静默改用源默认模型。OpenAI 兼容与 Anthropic 协议的模型写在请求体里，不受影响。
+- 影响面：**现行前端触发不到**。Agent 设置里的 `model` 键存的是 API 池 id，`game-pipeline` 给请求填的就是该池的 `defaultModel`，与头一致；只有引擎 API 层传入不同模型时才会出错。本次是防患修复。
+- 修复：`transport.ts` 的 `LlmTransportRequest` 加可选 `model`，`X-Model-ID` 优先取它、空值回退源默认；`AgentClient` 用 `resolveRequestModel`（trim 后为空回退源默认）统一决定本次模型，请求体与传输头共用。
+- 测试：新增 `tests/core/agents/agent-client.model-override.test.ts`（AgentClient 实际发出的请求原样交给真实 BFF，回显上游断言三协议 × 流式/非流式用的是覆写模型；撤掉修复时只有 Gemini 两条失败）；`transport.test.ts` 补头取值与回退单测。
+
+### 2026-11-16 开发期内容源开关｜仅开发构建生效，**未真机验证**
+
+- 起因：开发时浏览器里只要装过内容包，它就会静默盖住 `POEM_CONTENT_DIR` 挂在 `/data/*` 的本地内容目录，改内容仓文件看不到效果，也没有任何提示。
+- 新 `lib/dev-content-source.ts`：偏好（localStorage `poem_dev_content_source_v1`，`pack` 默认 = 现状 / `local`）+ 环境事实 → 是否压制已装包与提示文案，纯函数。
+- `stores/content-store.ts`：`hydratePackState` 在 `purgeProtectedPackPlaintext` 之后、激活包之前加一段 `if (import.meta.env.DEV)` 块，偏好 `local` 且有已装包时不激活它（Dexie 行不动，内容态回占位）；新增 `devContentSource` 状态；压制期间装 / 升 / 卸一律抛错。生产构建整块摇掉。
+- 设置页「内容包」分区在包卡下方新增开发期 `DevContentSourceCard.vue`（切换后确认并刷新）；压制时分区标题写「已安装（包 id + 版本），已被开发内容源开关暂停启用」，导入 / 检查更新禁用（卸载按钮跟随激活包，不出现）。内容态横幅压制时正文改为「已被开关暂停」、不再劝导入，并多一行开发提示。
+- 注意：未加密的本地文件包装包时已把世界书**与预设**写进 Dexie，压制后它们仍在；其中的预设此时不再被认作内容所有，会显示成可编辑的「我的预设」—— 这一模式下别编辑它们（提示文案同样写明）。
+- 测试：新增 `tests/ui/stores/content-store-dev-source.test.ts`（压制、现状不变、压制期间操作被拒；加密包与 `legacy-locked` 包被压制时明文清理照跑、不解密、不启动租约调度器）。
+- 文档：内容-引擎分离设计 D14/D16 补注优先级与开关，`dev-bat-notes.md` 内容仓模式补一条。
+
+### 2026-11-16 完整运行日志（前端接线）｜**未在浏览器或真机上验证**
+
+- 起因：引擎日志器（`runtime/engine-logger.ts` + `persistence/engine-log-store.ts`，T1）只管「记」，开关、落盘安装、回合作用域与导出都在前端。
+- 设置：新增 `engineLogEnabled`（默认关）与 `engineLogLevel`（默认 `trace`，可选 trace / debug / info），独立于开发者模式。`main.ts` 安装 Dexie sink，`immediate` 监听两项设置推给 `configureEngineLogger`；`pagehide` 与页面隐藏时 `flushEngineLog()`；存储配额耗尽时日志器停写，前端同时把 `engineLogEnabled` 置为 false（开关与实际一致）并弹常驻错误提示，引导去开发者设置导出并清空后重新开启（`ui/lib/engine-log-storage-full.ts`）。装着受保护内容包时开关打开也照常落盘（主人裁定），设置说明里写明。
+- 设置页「开发者模式」新卡片「完整运行日志」：开关 + 体积 / 保留 100 回合 / 明文落盘警示、粒度下拉（全部 / 详细 / 概要）、当前条数、导出（显示已导出行数，期间两颗按钮禁用）、清空（危险确认）。
+- 导出：新 `lib/engine-log-export.ts`。先 flush，按 seq 每页 200 条读全部存档，逐行 JSONL，首行 header（应用版本、导出时间、条数、粒度）；优先 `showSaveFilePicker` 逐页流式写入，不支持时每页一个 Blob 分片再合成下载，不拼整份巨型字符串。文件名 `engine-log-YYYYMMDD-HHmmss.jsonl`。
+- 回合作用域：`lib/game-pipeline.ts` 在 `startAgentLogTurn` / `finishAgentLogTurn` 旁开关 `beginLogScope`。正式回合传 `layerKey` = 来源玩家消息 id（重新生成同一条输入归入当前层）；战斗延后启动、刷新续战、独立润色不传 layerKey。五处 `buildDebugEntry` 旁各记一条 `agent` 类 debug 元数据（agentId / invocationId / 耗时 / tokens / 错误），完整请求与响应留给引擎侧埋点；debugTurns 行为不变。
+- 存档事件：`game-store.ts` 的 `loadSave` 成功 / 失败、`restoreTimeline`（回退 / 恢复快照 / 重开战斗）各记一条 info。
+- 审查修复：entity_gen / craft_gen 的「侧链开始」条目原本在 info 级记录整份 request（含 `endpoint.apiKey` 与 `headerOverrides`，此时密钥尚未登记，短于 6 字符的头值永不登记，都会明文落盘），改为只记白名单字段（saveId / marker / 端点 id·name / model），上下文只在 trace 级记数量；日志器序列化另加按键名的结构化脱敏作纵深防御（`maxTokens` / `tokensUsed` 等计数键不受影响）。
+- 测试：`engine-log-export`（分页、header、两条写出路径、取消、写入失败中止）、`DeveloperSection.engine-log`、settings 默认值、`game-pipeline.engine-log`（layerKey 与成功 / 失败都会 end）。
+
 ### 2026-11-16 界面特效层（实验）｜分支 `effects-experiment`，**实验分支，未在浏览器或真机上验证**
 
 - 起因：动效 v1 之后继续试「让界面更有质感」，单独开实验分支，整层可一键关掉。
@@ -805,6 +847,8 @@ system 提示词，而是被抽出来追加到消息**最末尾**、标 `prefix:
 - `settings-store.loadAgentProjectDefaults` 的播种改为：出厂预设 = agent-config 内嵌
   story 预设 ∪ provider 预设，**逐 id** 播种（库里没有 → 补；有同 id → 只同步 name，
   保留用户 prompts 编辑）。旧逻辑「DB 非空即整批不播种」连带把内嵌 story 预设也挡在外面。
+  > 📌 2026-11-17 已推翻「有同 id → 只同步 name」：它让内容仓更新的出厂 prompts 永远到不了
+  > 玩家库。现改为按播种指纹 `factorySeedHash` 同步整行，见顶部「2026-11-17 出厂预设按播种指纹同步」条目。
 - 于是无 pack 的 overlay 开发态与装包态拿到同一组默认预设；公开仓占位态行为不变（仍 1 条）。
 - 验证：8 道闸门全绿；`test:run` 355 文件 / 8704（8696 通过 / 8 跳过）；新增
   `resolveProjectPresets` 单测 + settings-store 播种集成测试。
