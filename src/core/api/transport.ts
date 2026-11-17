@@ -7,6 +7,12 @@ export interface LlmTransportRequest {
   body: JsonObject;
   stream: boolean;
   signal: AbortSignal;
+  /**
+   * 本次请求实际选定的模型（Agent 覆写 > 源默认）。缺省回退 `endpoint.defaultModel`。
+   * 🔴 Gemini 的模型名不在请求体里，BFF 只从 `X-Model-ID` 头拼上游 URL ——
+   *    不传它，Agent 级的模型覆写在 Gemini 下会静默落回源默认模型。
+   */
+  model?: string;
 }
 
 function protocolFor(endpoint: ApiEndpoint): LlmProtocol {
@@ -25,13 +31,15 @@ function protocolFor(endpoint: ApiEndpoint): LlmProtocol {
 export function buildLlmTransportHeaders(
   endpoint: ApiEndpoint,
   stream: boolean,
+  model?: string,
 ): Record<string, string> {
   const protocol = protocolFor(endpoint);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: stream ? 'text/event-stream' : 'application/json',
     'X-Target-Base-URL': endpoint.baseUrl.trim().replace(/\/+$/, ''),
-    'X-Model-ID': endpoint.defaultModel,
+    // 请求实际选定的模型优先；Gemini 上游 URL 的模型段只取这个头（见 server/routes/llm.ts）
+    'X-Model-ID': model?.trim() || endpoint.defaultModel,
     'X-LLM-Stream': String(stream),
   };
   if (protocol === 'openai-chat') headers.Authorization = `Bearer ${endpoint.apiKey}`;
@@ -54,7 +62,7 @@ export async function postLlmRequest(request: LlmTransportRequest): Promise<Resp
   const protocol = protocolFor(request.endpoint);
   return fetch(`/api/llm/${protocol}/generate`, {
     method: 'POST',
-    headers: buildLlmTransportHeaders(request.endpoint, request.stream),
+    headers: buildLlmTransportHeaders(request.endpoint, request.stream, request.model),
     body: JSON.stringify(request.body),
     signal: request.signal,
   });

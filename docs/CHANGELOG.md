@@ -9,6 +9,13 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-16 修复：Gemini 下 `ChatRequest.model` 不进上游 URL（潜在缺陷）｜**未用真实 Gemini 验证**
+
+- 根因：Gemini 请求体不含 `model`，BFF（`server/routes/llm.ts`）只从 `X-Model-ID` 头拼上游 URL，而 `buildLlmTransportHeaders` 把这个头写死成 `endpoint.defaultModel`。调用方传入与源默认不同的 `ChatRequest.model` 时，Gemini 会静默改用源默认模型。OpenAI 兼容与 Anthropic 协议的模型写在请求体里，不受影响。
+- 影响面：**现行前端触发不到**。Agent 设置里的 `model` 键存的是 API 池 id，`game-pipeline` 给请求填的就是该池的 `defaultModel`，与头一致；只有引擎 API 层传入不同模型时才会出错。本次是防患修复。
+- 修复：`transport.ts` 的 `LlmTransportRequest` 加可选 `model`，`X-Model-ID` 优先取它、空值回退源默认；`AgentClient` 用 `resolveRequestModel`（trim 后为空回退源默认）统一决定本次模型，请求体与传输头共用。
+- 测试：新增 `tests/core/agents/agent-client.model-override.test.ts`（AgentClient 实际发出的请求原样交给真实 BFF，回显上游断言三协议 × 流式/非流式用的是覆写模型；撤掉修复时只有 Gemini 两条失败）；`transport.test.ts` 补头取值与回退单测。
+
 ### 2026-11-16 开发期内容源开关｜仅开发构建生效，**未真机验证**
 
 - 起因：开发时浏览器里只要装过内容包，它就会静默盖住 `POEM_CONTENT_DIR` 挂在 `/data/*` 的本地内容目录，改内容仓文件看不到效果，也没有任何提示。
