@@ -71,6 +71,7 @@ import { renderLongTermOverview } from '../memory/story-archive';
 import { CHARACTER_UPDATE_PROTOCOL, buildCharacterContext } from '../character/character-chronicle';
 
 import { selectStoryLore, type LoreSelector } from '../content/lore-selection';
+import { logEngine } from '../runtime/engine-logger';
 
 /** 普通条目里归分区负责的旧占位符：新模式下渲染为空（见文件头）。 */
 const ZONE_OWNED_PLACEHOLDERS = [
@@ -521,7 +522,7 @@ export async function buildStoryContextV2Messages(
     ]),
   ) as NonNullable<StoryContextV2Diagnostics['budgetCategories']>;
 
-  return {
+  const result: StoryContextV2Result = {
     messages,
     ...(input.cacheLayout
       ? {
@@ -574,4 +575,22 @@ export async function buildStoryContextV2Messages(
       totalChars,
     },
   };
+  logEngine(
+    'debug',
+    'prompt.story_v2',
+    `${agentId} 五区组装：${messages.length} 条消息 / ${totalChars} 字`,
+    () => ({
+      agentId,
+      budgetChars: input.budgetChars,
+      outputReservedTokens: input.outputReservedTokens,
+      zones: zoneText,
+      fallbackPrefix,
+      conversationTurns: zone4.windowTurns.length,
+      diagnostics: result.diagnostics,
+      messages,
+      ...(result.cacheFrame ? { cacheFrame: result.cacheFrame } : {}),
+    }),
+    { agentId },
+  );
+  return result;
 }

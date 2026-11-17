@@ -14,8 +14,11 @@ import type { AgentProviderRound, ApiEndpoint, AgentResult, ToolDefinition } fro
 import { scheduleApiRequest } from '../api/api-rpm-limiter';
 import type { LlmMessage, JsonObject, NativeLlmContent } from '../types/types-api';
 import { buildLlmRequest, createLlmStreamAccumulator, parseLlmResponse } from '../api/llm-adapter';
-import { postLlmRequest } from '../api/transport';
+import { buildLlmTransportHeaders, postLlmRequest } from '../api/transport';
 import { directCacheUsage } from '../api/prompt-caching';
+import { isEngineLogEnabled, logEngine, registerLogSecret } from '../runtime/engine-logger';
+import type { EngineLogContext } from '../runtime/engine-logger';
+import { redactSecrets } from '../utils/redact-secrets';
 
 /** 内部扩展 — 包含原始 tool_calls 数据 */
 type InternalAgentResult = AgentResult & {
@@ -163,6 +166,20 @@ export interface StreamCallbacks {
   onError: (error: string) => void;
 }
 
+// ========== 引擎日志 ==========
+
+/** 进程内单调递增的调用序号：把同一次发送的 request / response / error 三条日志串起来 */
+let llmCallSeq = 0;
+
+function nextLlmCallId(): string {
+  llmCallSeq += 1;
+  return `llm-${Date.now().toString(36)}-${llmCallSeq}`;
+}
+
+function describeLogError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // ========== AgentClient ==========
 
 export class AgentClient {
@@ -180,6 +197,19 @@ export class AgentClient {
     this.saveId = options.saveId;
     this.timeout = options.timeout ?? 60000;
     this.maxRetries = options.maxRetries ?? 1;
+    // 引擎日志精确脱敏：密钥与自定义请求头的值一律登记（日志器只做精确替换，不做启发式）
+    registerLogSecret(this.endpoint.apiKey);
+    for (const value of Object.values(this.endpoint.headerOverrides ?? {})) {
+      registerLogSecret(value);
+    }
+  }
+
+  /** 日志上下文：带 agentId / callId；saveId 为空串时交给日志器落到活跃作用域 */
+  private logContext(callId?: string): EngineLogContext {
+    const ctx: EngineLogContext = { agentId: this.agentId };
+    if (this.saveId) ctx.saveId = this.saveId;
+    if (callId) ctx.callId = callId;
+    return ctx;
   }
 
   /** 标准化 baseUrl：去掉尾斜杠，避免拼接时出现双斜杠 */
@@ -239,6 +269,20 @@ export class AgentClient {
         // 用户取消 = 立即停。超时（callOnce 内部 controller）不受影响，仍可重试。
         if (signal?.aborted) break;
         if (attempt < this.maxRetries) {
+          const failedAttempt = attempt;
+          logEngine(
+            'warn',
+            'llm.retry',
+            `${this.agentId} 第 ${failedAttempt + 1} 次失败，准备重试`,
+            () => ({
+              mode: 'chat',
+              attempt: failedAttempt + 1,
+              maxRetries: this.maxRetries,
+              delayMs: Math.pow(2, failedAttempt) * 1000,
+              reason: describeLogError(e),
+            }),
+            this.logContext(),
+          );
           await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
         }
       }
@@ -356,6 +400,8 @@ export class AgentClient {
         });
 
         // 逐个执行工具调用
+        const roundLog: Array<{ id: string; name: string; arguments: unknown; result: unknown }> =
+          [];
         for (const tc of toolCalls) {
           const funcName = tc.function?.name ?? tc.name ?? '';
           const funcArgsStr = tc.function?.arguments ?? '{}';
@@ -381,6 +427,12 @@ export class AgentClient {
             arguments: args,
             result: toolError ? { error: toolError } : toolResult,
           });
+          roundLog.push({
+            id: tc.id ?? '',
+            name: funcName,
+            arguments: funcArgsStr,
+            result: toolError ? { error: toolError } : toolResult,
+          });
 
           // 追加 tool 结果消息
           conversation.push({
@@ -390,6 +442,15 @@ export class AgentClient {
             content: JSON.stringify(toolError ? { error: toolError } : toolResult),
           });
         }
+
+        const loggedRound = round + 1;
+        logEngine(
+          'info',
+          'llm.tool_round',
+          `${this.agentId} 工具轮 ${loggedRound}：${roundLog.map((c) => c.name).join(', ')}`,
+          () => ({ round: loggedRound, maxRounds, calls: roundLog }),
+          this.logContext(),
+        );
 
         // 继续下一轮 — AI 会看到工具结果并决定下一步
         continue;
@@ -419,6 +480,13 @@ export class AgentClient {
     }
 
     // 超出最大轮数
+    logEngine(
+      'warn',
+      'llm.tool_round',
+      `${this.agentId} 超出工具调用轮数上限 ${maxRounds}`,
+      () => ({ maxRounds, exceeded: true }),
+      this.logContext(),
+    );
     return {
       agentId: this.agentId,
       output: null,
@@ -523,6 +591,21 @@ export class AgentClient {
         callbacks.onError(outcome.error);
         return;
       }
+      const failedAttempt = attempt;
+      const reason = outcome.error;
+      logEngine(
+        'warn',
+        'llm.retry',
+        `${this.agentId} 流式第 ${failedAttempt + 1} 次失败，准备重试`,
+        () => ({
+          mode: 'stream',
+          attempt: failedAttempt + 1,
+          maxRetries: this.maxRetries,
+          delayMs: Math.pow(2, failedAttempt) * 1000,
+          reason,
+        }),
+        this.logContext(),
+      );
 
       // 🔴 重试前清玩家可见预览：onChunk('', true) 与正常收尾的「清理临时预览」
       // 同一条语义（game-pipeline 的 streamCallbacks 收到后重置 streamedRaw）。
@@ -559,6 +642,9 @@ export class AgentClient {
     signal?: AbortSignal,
   ): Promise<{ kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string }> {
     const startTime = Date.now();
+    const callId = nextLlmCallId();
+    // 原始 SSE 文本只在 trace 开着时才累积（关着时零开销）
+    const rawSse: string[] | null = isEngineLogEnabled('trace') ? [] : null;
     let settled = false;
     let outcome: { kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string } = {
       kind: 'error',
@@ -604,6 +690,7 @@ export class AgentClient {
         this.resolveRequestModel(request),
         controller.signal,
         true,
+        callId,
       );
 
       // Parse SSE stream
@@ -642,6 +729,31 @@ export class AgentClient {
         settled = true;
         clearPostFinishTimer();
         outcome = { kind: 'ok' };
+        logEngine(
+          'info',
+          'llm.response',
+          `${this.agentId} 流式响应完成`,
+          () => ({
+            stream: true,
+            protocol,
+            durationMs: Date.now() - startTime,
+            fullText: snapshot.fullText,
+            reasoning: snapshot.reasoning,
+            toolCalls: snapshot.toolCalls,
+            finishReason: snapshot.finishReason,
+            usage: snapshot.usage,
+          }),
+          this.logContext(callId),
+        );
+        if (rawSse) {
+          logEngine(
+            'trace',
+            'llm.response',
+            `${this.agentId} 原始 SSE 文本`,
+            () => ({ stream: true, raw: rawSse.join('') }),
+            this.logContext(callId),
+          );
+        }
         const inputTokens = snapshot.usage.inputTokens ?? 0;
         const outputTokens = snapshot.usage.outputTokens ?? 0;
         const cacheHitTokens = snapshot.usage.cacheReadTokens ?? 0;
@@ -747,12 +859,16 @@ export class AgentClient {
             clearTimeout(timeoutId);
           }
 
-          buffer += decoder.decode(value, { stream: true });
+          const text = decoder.decode(value, { stream: true });
+          rawSse?.push(text);
+          buffer += text;
           processCompleteEvents();
         }
 
         if (!settled) {
-          buffer += decoder.decode();
+          const tail = decoder.decode();
+          rawSse?.push(tail);
+          buffer += tail;
           processCompleteEvents();
           if (buffer.trim()) {
             processEvent(buffer);
@@ -787,6 +903,28 @@ export class AgentClient {
       clearTimeout(timeoutId);
       clearPostFinishTimer();
       signal?.removeEventListener('abort', onExternalAbort);
+    }
+
+    // outcome 在闭包里被改写，TS 的控制流收窄看不见 —— 这里显式放宽回三态联合
+    const finalOutcome = outcome as
+      { kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string };
+    if (finalOutcome.kind !== 'ok') {
+      const failed = finalOutcome;
+      logEngine(
+        failed.kind === 'aborted' ? 'warn' : 'error',
+        'llm.error',
+        failed.kind === 'aborted'
+          ? `${this.agentId} 流式请求已取消`
+          : `${this.agentId} 流式请求失败`,
+        () => ({
+          stream: true,
+          durationMs: Date.now() - startTime,
+          kind: failed.kind,
+          error: failed.kind === 'error' ? redactSecrets(failed.error) : 'Request aborted',
+          ...(rawSse ? { raw: rawSse.join('') } : {}),
+        }),
+        this.logContext(callId),
+      );
     }
 
     return outcome;
@@ -858,7 +996,26 @@ export class AgentClient {
     model: string,
     signal: AbortSignal,
     stream: boolean,
+    callId: string,
   ): Promise<Response> {
+    // 🔴 记的就是下面交给 postLlmRequest 的同一个 body 对象（transport 对它 JSON.stringify 后发出）；
+    //    日志器在此刻同步序列化，之后的任何改动都不会混进这条记录。请求头只记名字不记值。
+    logEngine(
+      'info',
+      'llm.request',
+      `${this.agentId} → ${this.endpoint.protocol ?? 'openai-chat'} ${model}`,
+      () => ({
+        protocol: this.endpoint.protocol ?? 'openai-chat',
+        baseUrl: this.baseUrl,
+        endpointName: this.endpoint.name,
+        model,
+        agentId: this.agentId,
+        stream,
+        headerNames: Object.keys(buildLlmTransportHeaders(this.endpoint, stream, model)),
+        body,
+      }),
+      this.logContext(callId),
+    );
     const res = await postLlmRequest({
       endpoint: this.endpoint,
       body,
@@ -876,6 +1033,13 @@ export class AgentClient {
         errorText.slice(0, 500),
       );
       console.error('[AgentClient] Request model:', model);
+      logEngine(
+        'error',
+        'llm.error',
+        `${this.agentId} 上游 HTTP ${res.status}`,
+        () => ({ stream, status: res.status, model, body: redactSecrets(errorText) }),
+        this.logContext(callId),
+      );
       throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 200)}`);
     }
     return res;
@@ -898,6 +1062,8 @@ export class AgentClient {
     request: ChatRequest,
     signal?: AbortSignal,
   ): Promise<InternalAgentResult> {
+    const startTime = Date.now();
+    const callId = nextLlmCallId();
     const controller = new AbortController();
     let abortedByTimeout = false;
     const timeoutId = setTimeout(() => {
@@ -919,9 +1085,23 @@ export class AgentClient {
         this.resolveRequestModel(request),
         controller.signal,
         false,
+        callId,
       );
 
       const raw = await res.json();
+      logEngine(
+        'info',
+        'llm.response',
+        `${this.agentId} 响应完成（HTTP ${res.status}）`,
+        () => ({
+          stream: false,
+          protocol: this.endpoint.protocol ?? 'openai-chat',
+          status: res.status,
+          durationMs: Date.now() - startTime,
+          raw,
+        }),
+        this.logContext(callId),
+      );
       const protocol = this.endpoint.protocol ?? 'openai-chat';
       if (
         protocol !== 'openai-chat' &&
@@ -971,6 +1151,19 @@ export class AgentClient {
         ...(request.cachePolicy ? { providerUsage: normalized.usage } : {}),
       };
     } catch (e) {
+      logEngine(
+        signal?.aborted ? 'warn' : 'error',
+        'llm.error',
+        `${this.agentId} 请求失败`,
+        () => ({
+          stream: false,
+          durationMs: Date.now() - startTime,
+          aborted: signal?.aborted === true,
+          timeout: abortedByTimeout,
+          error: redactSecrets(describeLogError(e)),
+        }),
+        this.logContext(callId),
+      );
       // 真机修(2026-07-21): 非流式路径原先只有 try/finally 无 catch，浏览器原生
       // "The user aborted a request." 直接冒泡 → 用户看不懂。翻译成友好信息（区分超时/外部取消）。
       if (e instanceof DOMException && e.name === 'AbortError') {

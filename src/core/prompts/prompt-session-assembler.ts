@@ -60,6 +60,7 @@ import { getPreset, assemblePresetContent } from './preset-loader';
 import { getDefaultTemplate } from './placeholder-registry';
 import { findNextPlaceholder, resolveTemplateWithGlobals } from './template-resolver';
 import { USER_PLACEHOLDER_CONTENT } from '../agents/agent-client';
+import { logEngine } from '../runtime/engine-logger';
 import {
   diffPromptState,
   projectPromptState,
@@ -772,6 +773,21 @@ async function buildBaseline(
   sessions.set(sessionKey(saveId, agentId), session);
 
   const handle: PromptSessionHandle = { saveId, agentId, sessionId, revision: 1 };
+  logEngine(
+    'debug',
+    'session.baseline',
+    `${agentId} Delta 会话重基线：${reason}`,
+    () => ({
+      agentId,
+      reason,
+      sessionId,
+      signature,
+      messageCount: transcript.length,
+      firstUserContent,
+      transcript,
+    }),
+    { saveId, agentId },
+  );
   // 🔴 返回 transcript 的**快照**（不是 session.transcript 的引用）：调用方拿到的
   //    messages 不得被随后的 complete（向 session.transcript push）污染 —— 它可能是
   //    已发送的 wire 记录 / 调试面板引用的同一份数组。
@@ -819,6 +835,22 @@ function buildDelta(
     sessionId: session.sessionId,
     revision: nextRevision,
   };
+  logEngine(
+    'debug',
+    'session.delta',
+    `${agentId} Delta 会话追加第 ${nextRevision} 轮（${ops.length} 项变更）`,
+    () => ({
+      agentId,
+      sessionId: session.sessionId,
+      revision: nextRevision,
+      transcriptLength: session.transcript.length,
+      ops,
+      deltaText,
+      turnContext,
+      userContent,
+    }),
+    { saveId, agentId },
+  );
   return { messages: [...session.transcript, userMessage], handle, rebased: false };
 }
 

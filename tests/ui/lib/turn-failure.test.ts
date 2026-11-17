@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTurnFailure,
   classifyTurnFailure,
-  redactSecrets,
   sanitizeFailureDetail,
   TURN_FAILURE_DETAIL_MAX,
   turnFailureCopy,
@@ -68,20 +67,7 @@ describe('classifyTurnFailure', () => {
   });
 });
 
-describe('redactSecrets / sanitizeFailureDetail', () => {
-  it('抹掉密钥、Bearer 头、查询参数里的 key 与长令牌', () => {
-    const raw =
-      'HTTP 401: Incorrect API key provided: sk-proj-AbCdEf123456. Authorization: Bearer abc.def.ghi ' +
-      'url=https://x.test/v1?key=SECRET123&x=1 "api_key":"zzz" token 0123456789abcdef0123456789abcdef99';
-    const out = redactSecrets(raw);
-    expect(out).not.toContain('sk-proj-AbCdEf123456');
-    expect(out).not.toContain('abc.def.ghi');
-    expect(out).not.toContain('SECRET123');
-    expect(out).not.toContain('zzz');
-    expect(out).not.toContain('0123456789abcdef0123456789abcdef99');
-    expect(out).toContain('HTTP 401');
-  });
-
+describe('sanitizeFailureDetail', () => {
   it('截断到上限并加省略号；空错误返回 undefined', () => {
     const detail = sanitizeFailureDetail(new Error('上游返回了很长的错误说明 '.repeat(40)));
     expect(detail!.length).toBe(TURN_FAILURE_DETAIL_MAX + 1);

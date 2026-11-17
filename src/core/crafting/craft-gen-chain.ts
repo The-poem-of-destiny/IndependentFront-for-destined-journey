@@ -40,6 +40,7 @@ import { callEntityGenForCraft } from '../agents/entity-gen-agent';
 // Q-05：XML / JSON 解析的唯一工具面（参数顺序一律 (source, tag)）
 import { tagInner, tagBlock, parseAttrsStr } from '../agents/agent-xml';
 import { extractJsonPayload } from '../utils/model-json';
+import { logEngine } from '../runtime/engine-logger';
 
 // ========== Types ==========
 
@@ -515,6 +516,68 @@ export function buildCraftPatches(
  *   - patches: 提交给 StateManager 的状态变更
  */
 export async function runCraftGenChain(
+  request: CraftGenRequest,
+  deps: CraftGenDeps,
+): Promise<CraftGenChainResult> {
+  const startTime = Date.now();
+  // 🔴 只记白名单字段：request.endpoint 带 apiKey / headerOverrides，记录时这些密钥还没登记，
+  //    整份 request 交进来就是明文落盘；worldBooks / presets / configs / context 也不整份记
+  logEngine(
+    'info',
+    'sidechain.craft_gen',
+    'craft_gen 侧链开始',
+    () => describeCraftGenRequest(request),
+    {
+      saveId: request.saveId,
+      agentId: 'craft_gen',
+    },
+  );
+  logEngine(
+    'trace',
+    'sidechain.craft_gen',
+    'craft_gen 侧链上下文概要',
+    () => ({
+      configs: request.configs?.length ?? 0,
+      worldBooks: request.worldBooks?.length ?? 0,
+      presets: request.presets?.length ?? 0,
+      storyOutputChars: request.storyOutput?.length ?? 0,
+    }),
+    { saveId: request.saveId, agentId: 'craft_gen' },
+  );
+  try {
+    const result = await runCraftGenChainInner(request, deps);
+    logEngine(
+      'info',
+      'sidechain.craft_gen',
+      `craft_gen 侧链结束：补丁 ${result.patches.length} 条`,
+      () => ({ durationMs: Date.now() - startTime, result }),
+      { agentId: 'craft_gen' },
+    );
+    return result;
+  } catch (error) {
+    logEngine(
+      'error',
+      'sidechain.craft_gen',
+      'craft_gen 侧链抛错',
+      () => ({ durationMs: Date.now() - startTime, error }),
+      { agentId: 'craft_gen' },
+    );
+    throw error;
+  }
+}
+
+/** 侧链开始条目的白名单字段（不含任何端点凭据） */
+function describeCraftGenRequest(request: CraftGenRequest): Record<string, unknown> {
+  return {
+    saveId: request.saveId,
+    agentId: 'craft_gen',
+    marker: request.marker,
+    endpoint: { id: request.endpoint?.id, name: request.endpoint?.name },
+    model: request.endpoint?.defaultModel,
+  };
+}
+
+async function runCraftGenChainInner(
   request: CraftGenRequest,
   deps: CraftGenDeps,
 ): Promise<CraftGenChainResult> {

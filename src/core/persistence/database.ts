@@ -73,6 +73,7 @@ import { applyExpFloor } from '../character/exp-table';
 import type { PersistedPromptSession } from '../prompts/prompt-session-assembler';
 // type-only：战斗沙盒在办战斗行（v27）—— sandbox/types.ts 是纯类型册，运行时不成环
 import type { CombatSandboxRecord } from '../combat/sandbox/types';
+import type { EngineLogEntry } from '../runtime/engine-logger';
 
 /** 捏人预设记录 (DB 存储格式) */
 export interface CreatePresetRecord {
@@ -131,6 +132,7 @@ export function migrateLegacyContentPacks(): Promise<void> {
         db.promptSessions,
         db.debugTurns,
         db.combatSandboxes,
+        db.engineLogs,
       ],
       async () => {
         const records = await db.contentPacks.toArray();
@@ -160,6 +162,7 @@ export function migrateLegacyContentPacks(): Promise<void> {
           await db.promptSessions.clear();
           await db.debugTurns.clear();
           await db.combatSandboxes.clear();
+          await db.engineLogs.clear();
         }
       },
     )
@@ -202,6 +205,9 @@ export async function purgeProtectedPackPlaintext(): Promise<void> {
         await db.promptSessions.clear();
         await db.debugTurns.clear();
         await db.combatSandboxes.clear();
+        // v34 engineLogs 刻意不清：本函数每次启动都会跑，清了会让受保护内容包下的日志
+        // 一刷新就丢。主人已裁定「开关打开即落盘」（明文风险写在开发者设置的开关说明里），
+        // 日志只由用户手动清空、删档级联与 100 层淘汰回收。
       }
     },
   );
@@ -229,7 +235,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 升版时这两处一起改。
  */
 // v30 = 战斗沙盒 combatSandboxes（本分支），在 master 的 v29 之后顺延。
-export const DB_VERSION = 33;
+export const DB_VERSION = 34;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -415,6 +421,14 @@ class AppDatabase extends Dexie {
   combatSandboxes!: Table<CombatSandboxRecord>;
   /** v33：每存档一行的本地日历（模式 / 玩家条目 / 显示选择）。不进快照，进两种备份，删档级联删 */
   saveCalendars!: Table<import('../types/types-calendar').SaveCalendar>;
+  /**
+   * v34：引擎日志（`runtime/engine-logger.ts` 的落盘表，sink 在 `engine-log-store.ts`）。
+   * 主键自增 `seq`（导出分页）；`[saveId+layer]` 供按存档/回合层淘汰与删档级联。
+   * **不进 FullBackup / 单存档导出**；删档级联删。装着受保护内容包时照常落盘（主人裁定）：
+   * 每次启动的 `purgeProtectedPackPlaintext` 与内容包安装事务都**不清**它，只有一次性的
+   * `migrateLegacyContentPacks` 会清。
+   */
+  engineLogs!: Table<EngineLogEntry, number>;
 
   constructor() {
     super(DB_NAME);
@@ -860,6 +874,8 @@ class AppDatabase extends Dexie {
     this.version(32).stores({});
     // 日历 v1：每存档一行，主键 saveId。只加表，不改既有数据。
     this.version(33).stores({ saveCalendars: 'saveId' });
+    // 引擎日志：只加表。saveId 为空串 = 应用级，layer 0 = 无回合（约定见 engine-logger.ts）
+    this.version(34).stores({ engineLogs: '++seq, [saveId+layer]' });
   }
 }
 
@@ -2376,6 +2392,7 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       db.storyArchives,
       db.storyArchiveRetries,
       db.combatSandboxes,
+      db.engineLogs,
     ],
     async () => {
       // v22 拆表：元数据与载荷各有 saveId 索引，两张表各删各的（载荷表不必先查 id）
@@ -2408,6 +2425,11 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       await db.storyArchiveRetries.where('saveId').equals(id).delete();
       // v30：在办战斗同 promptSessions —— rebuildable，随存档一起走
       await db.combatSandboxes.where('saveId').equals(id).delete();
+      // v34：引擎日志随存档走（含该存档的无回合条目）
+      await db.engineLogs
+        .where('[saveId+layer]')
+        .between([id, Dexie.minKey], [id, Dexie.maxKey], true, true)
+        .delete();
       await db.saves.delete(id);
     },
   );

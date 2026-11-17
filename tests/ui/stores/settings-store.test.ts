@@ -118,6 +118,26 @@ describe('settings-store', () => {
     expect(store.settings.developerMode).toBe(false);
   });
 
+  it('完整运行日志默认关闭、粒度默认 trace，且独立于开发者模式', async () => {
+    expect(store.settings.engineLogEnabled).toBe(false);
+    expect(store.settings.engineLogLevel).toBe('trace');
+
+    store.settings.developerMode = true;
+    await nextTick();
+    expect(store.settings.engineLogEnabled).toBe(false);
+
+    store.settings.engineLogEnabled = true;
+    store.settings.engineLogLevel = 'info';
+    await nextTick();
+    const saved = JSON.parse(localStorage.getItem('fated-poem-settings')!);
+    expect(saved.engineLogEnabled).toBe(true);
+    expect(saved.engineLogLevel).toBe('info');
+
+    store.resetAll();
+    expect(store.settings.engineLogEnabled).toBe(false);
+    expect(store.settings.engineLogLevel).toBe('trace');
+  });
+
   it('修改 settings 应自动写 localStorage', async () => {
     await store.initApiSecrets();
     store.settings.apiPool = [

@@ -1,5 +1,6 @@
 import type { ChatMessage, DirectCacheDiagnostics } from '../types/types';
 import type { LlmMessage } from '../types/types-api';
+import { logEngine } from '../runtime/engine-logger';
 
 export interface DirectContextFrame {
   prefix: LlmMessage[];
@@ -290,6 +291,22 @@ export async function prepareDirectContext(input: {
     source: currentSource,
     revision,
   });
+  logEngine(
+    'debug',
+    'session.direct_cache',
+    reason ? `缓存直出重建：${reason}` : `缓存直出追加第 ${revision} 轮`,
+    () => ({
+      revision,
+      rebaseReason: reason ?? null,
+      retainedCount,
+      diagnostics: ticket.diagnostics,
+      set,
+      remove,
+      tail: tail.content,
+      messages,
+    }),
+    { saveId: input.saveId, agentId: 'direct_cached' },
+  );
   return ticket;
 }
 

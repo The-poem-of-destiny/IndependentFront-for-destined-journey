@@ -1655,6 +1655,7 @@ export const useContentStore = defineStore('content', () => {
           await db.promptSessions.clear();
           await db.debugTurns.clear();
           await db.combatSandboxes.clear();
+          // engineLogs 刻意不清（同 purgeProtectedPackPlaintext 的注释）：升级内容包前后的日志正是排查要用的
           await applySaveUidMigration(plan.saveUidMigration, false);
           if (previous && previous.packId !== row.packId)
             await db.contentPacks.delete(previous.packId);

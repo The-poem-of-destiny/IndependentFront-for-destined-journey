@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /** 开发者模式分区 —— 单一开关 + 清晰的诊断边界。 */
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import AppCard from '../shared/AppCard.vue';
+import AppButton from '../shared/AppButton.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
@@ -10,6 +11,9 @@ import {
   isStoryContextV2Save,
 } from '@engine/story/story-context-mode';
 import { confirmDialog } from '../../lib/confirm-dialog';
+import { ENGINE_LOG_LEVELS } from '@engine/runtime/engine-logger';
+import { clearEngineLogs, countEngineLogs } from '@engine/persistence/engine-log-store';
+import { exportEngineLogs } from '../../lib/engine-log-export';
 
 const s = useSettingsStore().settings;
 const game = useGameStore();
@@ -113,6 +117,93 @@ async function onStoryModeChange(event: Event) {
   });
   if (!ok || storyModeLocked.value) return;
   s.storyContextV2Enabled = next;
+}
+
+// ═══ 完整运行日志（引擎日志器） ═══
+
+type EngineLogLevelSetting = 'trace' | 'debug' | 'info';
+const ENGINE_LOG_LEVEL_LABELS: Record<EngineLogLevelSetting, string> = {
+  trace: '全部（trace）',
+  debug: '详细（debug）',
+  info: '概要（info）',
+};
+/** 设置页只开放三档；warn / error 太少，不值得单独成档 */
+const engineLogLevelOptions = ENGINE_LOG_LEVELS.filter(
+  (level): level is EngineLogLevelSetting => level in ENGINE_LOG_LEVEL_LABELS,
+).map((value) => ({ value, label: ENGINE_LOG_LEVEL_LABELS[value] }));
+
+const engineLogCount = ref<number | null>(null);
+const engineLogExporting = ref(false);
+const engineLogExportedLines = ref(0);
+const engineLogClearing = ref(false);
+const engineLogBusy = computed(() => engineLogExporting.value || engineLogClearing.value);
+const engineLogCountText = computed(() =>
+  engineLogCount.value === null ? '读取中…' : `${engineLogCount.value.toLocaleString()} 条`,
+);
+const engineLogExportLabel = computed(() =>
+  engineLogExporting.value
+    ? `导出中… 已导出 ${engineLogExportedLines.value.toLocaleString()} 条`
+    : '导出日志',
+);
+
+async function refreshEngineLogCount() {
+  try {
+    engineLogCount.value = await countEngineLogs();
+  } catch (err) {
+    console.warn('[DeveloperSection] 读取运行日志条数失败:', err);
+  }
+}
+
+onMounted(() => {
+  void refreshEngineLogCount();
+});
+
+async function onExportEngineLogs() {
+  if (engineLogBusy.value) return;
+  engineLogExporting.value = true;
+  engineLogExportedLines.value = 0;
+  try {
+    const result = await exportEngineLogs({
+      level: s.engineLogLevel ?? 'trace',
+      onProgress: (lines) => {
+        engineLogExportedLines.value = lines;
+      },
+    });
+    if (result.status === 'done') {
+      ui.toast(
+        `已导出 ${result.lines.toLocaleString()} 条运行日志（${result.fileName}）`,
+        'success',
+      );
+    }
+  } catch (err) {
+    console.error('[DeveloperSection] 导出运行日志失败:', err);
+    ui.toast(`导出运行日志失败：${err instanceof Error ? err.message : String(err)}`, 'error');
+  } finally {
+    engineLogExporting.value = false;
+    await refreshEngineLogCount();
+  }
+}
+
+async function onClearEngineLogs() {
+  if (engineLogBusy.value) return;
+  const ok = await confirmDialog({
+    title: '清空全部运行日志？',
+    message: '会删除本机保存的所有完整运行日志（全部存档），无法恢复。需要留档请先导出。',
+    confirmLabel: '清空',
+    danger: true,
+  });
+  if (!ok) return;
+  engineLogClearing.value = true;
+  try {
+    await clearEngineLogs();
+    ui.toast('运行日志已清空', 'success');
+  } catch (err) {
+    console.error('[DeveloperSection] 清空运行日志失败:', err);
+    ui.toast(`清空运行日志失败：${err instanceof Error ? err.message : String(err)}`, 'error');
+  } finally {
+    engineLogClearing.value = false;
+    await refreshEngineLogCount();
+  }
 }
 </script>
 
@@ -273,6 +364,105 @@ async function onStoryModeChange(event: Event) {
       </p>
     </AppCard>
 
+    <AppCard
+      padding="md"
+      class="developer-mode-card engine-log-card"
+      :class="{ 'is-enabled': s.engineLogEnabled }"
+    >
+      <div class="developer-toggle-row story-mode-header">
+        <div class="developer-copy">
+          <div class="developer-title-row">
+            <h4>完整运行日志</h4>
+            <span class="developer-state" :class="{ 'is-enabled': s.engineLogEnabled }">
+              <i
+                :class="s.engineLogEnabled ? 'fa-solid fa-scroll' : 'fa-solid fa-lock'"
+                aria-hidden="true"
+              ></i>
+              {{ s.engineLogEnabled ? '记录中' : '已关闭' }}
+            </span>
+          </div>
+          <p id="engine-log-help" class="card-desc">
+            记录每次模型调用实际发出的完整请求、完整响应与提示词组装过程，作为排查问题的最后手段。
+          </p>
+        </div>
+
+        <label class="toggle-label developer-toggle">
+          <input
+            v-model="s.engineLogEnabled"
+            type="checkbox"
+            role="switch"
+            class="toggle-input"
+            aria-label="完整运行日志"
+            aria-describedby="engine-log-help engine-log-warning"
+          />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <p id="engine-log-warning" class="engine-log-warning" role="note">
+        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+        <span>
+          开启后日志会非常大，导出文件可能达到几十到几百
+          MB，并占用浏览器存储；只在需要排查问题时打开，用完请关闭并清空。每个存档保留最近 100
+          回合。日志包含正文与提示词明文（装了加密内容包时也会把内容包提示词明文存到本机），API
+          密钥已脱敏，分享前请检查。
+        </span>
+      </p>
+
+      <div class="story-settings">
+        <label class="form-label story-field">
+          <span>记录粒度</span>
+          <select
+            v-model="s.engineLogLevel"
+            class="form-input"
+            aria-label="记录粒度"
+            aria-describedby="engine-log-level-help"
+          >
+            <option
+              v-for="option in engineLogLevelOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+          <span id="engine-log-level-help" class="form-hint">
+            「全部」会额外记下提示词组装的每一步，体积约为「详细」的 2 到 3
+            倍；「概要」只记关键事件。
+          </span>
+        </label>
+        <div class="story-field engine-log-stats">
+          <span class="engine-log-stats-label">当前日志</span>
+          <p class="engine-log-count" data-testid="engine-log-count" aria-live="polite">
+            {{ engineLogCountText }}
+          </p>
+          <div class="engine-log-actions">
+            <AppButton
+              size="sm"
+              :loading="engineLogExporting"
+              :disabled="engineLogClearing"
+              data-testid="engine-log-export"
+              @click="onExportEngineLogs"
+            >
+              <i v-if="!engineLogExporting" class="fa-solid fa-file-export" aria-hidden="true"></i>
+              {{ engineLogExportLabel }}
+            </AppButton>
+            <AppButton
+              size="sm"
+              variant="ghost"
+              :loading="engineLogClearing"
+              :disabled="engineLogExporting"
+              data-testid="engine-log-clear"
+              @click="onClearEngineLogs"
+            >
+              <i v-if="!engineLogClearing" class="fa-solid fa-trash-can" aria-hidden="true"></i>
+              清空日志
+            </AppButton>
+          </div>
+        </div>
+      </div>
+    </AppCard>
+
     <AppCard padding="md">
       <h4>启用后可查看</h4>
       <ul class="developer-capabilities">
@@ -415,6 +605,54 @@ async function onStoryModeChange(event: Event) {
 
 .story-details-copy p {
   margin: 0;
+}
+
+.engine-log-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--theme-spacing-sm);
+  margin: var(--theme-spacing-md) 0 0;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 35%, var(--theme-card-border));
+  border-radius: var(--theme-radius-md);
+  color: var(--theme-text-secondary);
+  background: color-mix(in srgb, var(--theme-warning) 8%, var(--theme-card-bg));
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.engine-log-warning i {
+  margin-top: 0.2em;
+  color: var(--theme-warning);
+}
+
+.engine-log-stats {
+  display: flex;
+  flex-direction: column;
+}
+
+.engine-log-stats-label {
+  color: var(--theme-text-secondary);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.engine-log-count {
+  margin: 0;
+  color: var(--theme-text-primary);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.engine-log-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--theme-spacing-sm);
+}
+
+.engine-log-actions .app-btn {
+  min-height: 36px;
+  gap: var(--theme-spacing-xs);
 }
 
 .developer-state {

@@ -51,6 +51,7 @@ import {
 } from '@engine/state/state-manager';
 import { getExperienceMode } from '@engine/state/save-profile';
 import { invalidatePromptSession } from '@engine/prompts/prompt-session-assembler';
+import { logEngine } from '@engine/runtime/engine-logger';
 import { allocateAttributePoint } from '@engine/character/attribute-allocation';
 import type { AllocatableAttr } from '@engine/character/attribute-allocation';
 import { detach } from './db-write';
@@ -499,7 +500,7 @@ export const useGameStore = defineStore('game', () => {
     isGenerating.value = false;
 
     // ② 恢复开战前时间线；失败分类、投影与效果接线统一由公共 module 负责。
-    const result = await restoreTimeline(preSnapshotId);
+    const result = await restoreTimeline(preSnapshotId, 'restart-combat');
     if (result.status !== 'restored' || result.continuation === 'save-switched') return result;
 
     // ③ 重触发 combat_trigger（pipeline 持 marker；异常不阻断恢复本身）
@@ -1289,10 +1290,17 @@ export const useGameStore = defineStore('game', () => {
   async function loadSave(saveId: string): Promise<boolean> {
     clearActive();
     const generation = loadGeneration;
-    const projection = await readTimelineProjection(saveId);
-    if (generation !== loadGeneration) return false;
-    const debugTurns = await getDebugTurns(saveId);
-    if (generation !== loadGeneration) return false;
+    let projection: Awaited<ReturnType<typeof readTimelineProjection>>;
+    let debugTurns: Awaited<ReturnType<typeof getDebugTurns>>;
+    try {
+      projection = await readTimelineProjection(saveId);
+      if (generation !== loadGeneration) return false;
+      debugTurns = await getDebugTurns(saveId);
+      if (generation !== loadGeneration) return false;
+    } catch (err) {
+      logEngine('info', 'save', 'save.load.failed', () => ({ error: String(err) }), { saveId });
+      throw err;
+    }
 
     activeSaveId.value = saveId;
     saves.value = [projection.save];
@@ -1304,6 +1312,13 @@ export const useGameStore = defineStore('game', () => {
     messages.value = projection.messages;
     agentLogHistory.value = isProtectedContentInstalled() ? [] : debugTurns;
     turnCounter = projection.turn;
+    logEngine(
+      'info',
+      'save',
+      'save.load',
+      () => ({ turn: projection.turn, messages: projection.messages.length }),
+      { saveId },
+    );
     return true;
   }
 
@@ -1412,7 +1427,32 @@ export const useGameStore = defineStore('game', () => {
     activeSaveId.value = null;
   }
 
-  async function restoreTimeline(snapshotId: string): Promise<TimelineRestoreResult> {
+  /** 时间线恢复的三个入口（回退 / 恢复快照 / 重开战斗）；只用于引擎日志 */
+  type TimelineRestoreKind = 'rollback' | 'snapshot' | 'restart-combat';
+
+  async function restoreTimeline(
+    snapshotId: string,
+    kind: TimelineRestoreKind,
+  ): Promise<TimelineRestoreResult> {
+    const saveId = activeSaveId.value;
+    const result = await restoreTimelineUnlogged(snapshotId);
+    logEngine(
+      'info',
+      'save',
+      'timeline.restore',
+      () => ({
+        kind,
+        snapshotId,
+        status: result.status,
+        ...('continuation' in result ? { continuation: result.continuation } : {}),
+        ...('error' in result ? { error: result.error } : {}),
+      }),
+      saveId ? { saveId } : undefined,
+    );
+    return result;
+  }
+
+  async function restoreTimelineUnlogged(snapshotId: string): Promise<TimelineRestoreResult> {
     const saveId = activeSaveId.value;
     if (!saveId) return { status: 'rejected', error: '无活跃存档' };
     if (isGenerating.value) return { status: 'rejected', error: '生成进行中，无法恢复' };
@@ -1568,7 +1608,7 @@ export const useGameStore = defineStore('game', () => {
       .sort((a, b) => b.turn - a.turn)[0];
     if (!prevSnapshot) return { status: 'rejected', error: '找不到上一轮快照' };
 
-    const result = await restoreTimeline(prevSnapshot.id);
+    const result = await restoreTimeline(prevSnapshot.id, 'rollback');
     if (
       result.status === 'restored' &&
       result.continuation === 'same-save' &&
@@ -1581,7 +1621,7 @@ export const useGameStore = defineStore('game', () => {
 
   /** 快照面板「恢复」：恢复到指定历史快照（不回填输入，从该点继续游戏）。 */
   async function restoreToSnapshot(snapshotId: string): Promise<TimelineRestoreResult> {
-    return restoreTimeline(snapshotId);
+    return restoreTimeline(snapshotId, 'snapshot');
   }
 
   // === 玩家主动删除（物品/装备/技能/角色）—— 用户可自由清理持有物 ===

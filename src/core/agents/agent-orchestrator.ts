@@ -40,6 +40,7 @@ import type {
 import type { SceneImageMarker } from '../types/types-image';
 import { AgentClient, ensureUserMessage } from './agent-client';
 import { generateDirectTurn } from './direct-main';
+import { logEngine } from '../runtime/engine-logger';
 import type { DirectTurnDraft } from './direct-output';
 import type { DirectCombatRecord } from '../combat/direct-combat';
 import type { ChatRequest } from './agent-client';
@@ -489,6 +490,9 @@ export class AgentOrchestrator {
     const errors = this.validatePipeline();
     if (errors.length > 0) {
       this.status = 'failed';
+      logEngine('error', 'orchestrator.run', '管线校验失败', () => ({ errors }), {
+        saveId: this.saveId,
+      });
       return this.buildRun(startTime, errors);
     }
 
@@ -501,6 +505,18 @@ export class AgentOrchestrator {
     this.pendingSideChains = [];
     this.pendingCharGen = null;
 
+    logEngine(
+      'info',
+      'orchestrator.run',
+      `管线开始：${this.pipeline.stages.length} 个阶段`,
+      () => ({
+        stages: this.pipeline.stages.map((s) => ({ agents: s.agents, waitFor: s.waitFor })),
+        onlyAgents: this.onlyAgents ? [...this.onlyAgents] : null,
+        retryOnFail: this.pipeline.retryOnFail,
+      }),
+      { saveId: this.saveId },
+    );
+
     // 逐阶段执行
     for (let i = 0; i < this.pipeline.stages.length; i++) {
       if (this.cancelled) break;
@@ -510,15 +526,48 @@ export class AgentOrchestrator {
       // 检查依赖是否满足
       if (!this.stageDependenciesMet(stage)) {
         // 跳过此阶段（上游 Agent 全部失败）
+        logEngine(
+          'info',
+          'orchestrator.stage',
+          `阶段 ${i} 跳过：依赖未满足`,
+          () => ({ stage: i, agents: stage.agents, waitFor: stage.waitFor, status: 'skipped' }),
+          { saveId: this.saveId },
+        );
         continue;
       }
 
       this.events.onStageStart?.(i, stage.agents);
+      const stageStart = Date.now();
+      logEngine(
+        'info',
+        'orchestrator.stage',
+        `阶段 ${i} 开始：${stage.agents.join(', ')}`,
+        () => ({ stage: i, agents: stage.agents, status: 'start' }),
+        { saveId: this.saveId },
+      );
 
       try {
         await this.executeStage(stage, i);
         this.assertCurrent();
         this.completedStages.push(`stage_${i}`);
+        logEngine(
+          'info',
+          'orchestrator.stage',
+          `阶段 ${i} 完成`,
+          () => ({
+            stage: i,
+            agents: stage.agents,
+            status: 'completed',
+            durationMs: Date.now() - stageStart,
+            results: stage.agents.map((agentId) => {
+              const r = this.results.get(agentId);
+              return r
+                ? { agentId, error: r.error ?? null, duration: r.duration, tokens: r.tokensUsed }
+                : { agentId, ran: false };
+            }),
+          }),
+          { saveId: this.saveId },
+        );
 
         // 工坊 P2 (D5): EJS vars 差量在本 stage 的标记处理（= AI 补丁提交）之前落库。
         // 永不让 stage 失败 —— 簿记旁路出问题不该吞掉本轮正文。
@@ -533,7 +582,21 @@ export class AgentOrchestrator {
 
         // Phase 6e: 处理标记 (craft_request / combat_trigger / char_detect)
         await this.processStageMarkers(i);
-      } catch {
+      } catch (stageError) {
+        logEngine(
+          this.cancelled ? 'warn' : 'error',
+          'orchestrator.stage',
+          `阶段 ${i} 失败`,
+          () => ({
+            stage: i,
+            agents: stage.agents,
+            status: 'failed',
+            cancelled: this.cancelled,
+            durationMs: Date.now() - stageStart,
+            error: stageError instanceof Error ? stageError.message : String(stageError),
+          }),
+          { saveId: this.saveId },
+        );
         // 并行化改造（2026-08-16）：stage 失败/abort 路径也收尾侧链 —— 不悬空
         // 不产生未处理拒绝；abort 时侧链已响应 abort 信号，allSettled 等它们
         // resolve（毫秒级）。
@@ -567,6 +630,18 @@ export class AgentOrchestrator {
       !this.cancelled && this.completedStages.length > 0 && this.requiredAgentsSucceeded()
         ? 'completed'
         : 'failed';
+    logEngine(
+      this.status === 'completed' ? 'info' : 'warn',
+      'orchestrator.run',
+      `管线结束：${this.status}`,
+      () => ({
+        status: this.status,
+        cancelled: this.cancelled,
+        completedStages: this.completedStages,
+        durationMs: Date.now() - startTime,
+      }),
+      { saveId: this.saveId },
+    );
     return this.buildRun(startTime);
   }
 
@@ -700,6 +775,43 @@ export class AgentOrchestrator {
     config: AgentConfig,
     options?: { skipSession?: boolean },
   ): Promise<AgentResult> {
+    logEngine(
+      'debug',
+      'orchestrator.agent',
+      `调用 ${config.agentId}`,
+      () => {
+        const endpoint = this.endpoints.get(config.apiEndpointId);
+        // 只记白名单字段：配置里可能挂着回调/信号，端点只记身份不记密钥
+        return {
+          agentId: config.agentId,
+          apiEndpointId: config.apiEndpointId,
+          endpoint: endpoint
+            ? {
+                name: endpoint.name,
+                protocol: endpoint.protocol,
+                baseUrl: endpoint.baseUrl,
+                defaultModel: endpoint.defaultModel,
+              }
+            : null,
+          model: config.model,
+          temperature: config.temperature,
+          maxTokens: config.maxTokens,
+          topP: config.topP,
+          frequencyPenalty: config.frequencyPenalty,
+          presencePenalty: config.presencePenalty,
+          toolsEnabled: config.toolsEnabled,
+          presetId: config.presetId,
+          historyLayers: config.historyLayers,
+          maxRetries: config.maxRetries,
+          streaming: !!config.streamCallbacks,
+          skipSession: options?.skipSession === true,
+          memoryRetrievalMode:
+            config.agentId === 'memory_recall' ? this.memoryRetrieval?.mode : undefined,
+          storyContextV2: !!this.storyContext,
+        };
+      },
+      { saveId: this.saveId, agentId: config.agentId },
+    );
     // Story 上下文新模式（v2）：召回读每回合摘要与阶段归档，结果展开成正文（计划 §9）
     if (config.agentId === 'memory_recall' && this.storyContext) {
       return this.callStoryRecall(config);
@@ -1875,6 +1987,13 @@ export class AgentOrchestrator {
       if (!storyOutput) return;
 
       const scanResult = scanMarkers(storyOutput);
+      logEngine(
+        'debug',
+        'orchestrator.markers',
+        `story 标记 ${scanResult.markers.length} 个`,
+        () => ({ stage: stageIndex, source: 'story', markers: scanResult.markers }),
+        { saveId: this.saveId, agentId: 'story' },
+      );
 
       // 旧格式 craft_request（仍从 story 扫描，向后兼容）
       const craftMarkers = scanResult.markers.filter(
@@ -1947,6 +2066,18 @@ export class AgentOrchestrator {
 
       // Step B: scanMarkers 提取所有 request 标签
       const scanResult = scanMarkers(varsOutput);
+      logEngine(
+        'debug',
+        'orchestrator.markers',
+        `request_dispatcher 标记 ${scanResult.markers.length} 个`,
+        () => ({
+          stage: stageIndex,
+          source: 'request_dispatcher',
+          hasJsonBlock: !!jsonMatch,
+          markers: scanResult.markers,
+        }),
+        { saveId: this.saveId, agentId: 'request_dispatcher' },
+      );
       const markers = scanResult.markers;
 
       // Step C: 解析 <json> 块中的全局变量 → StatePatch（先执行）
@@ -2186,10 +2317,24 @@ export class AgentOrchestrator {
       this.assertCurrent();
       const sm = createStateManager(this.saveId);
       const r = await sm.commitChatState(patches, { isCurrent: () => !this.cancelled });
+      logEngine(
+        'info',
+        'orchestrator.commit',
+        `${source} 提交补丁 ${patches.length} 条`,
+        () => ({ source, patches, result: r }),
+        { saveId: this.saveId },
+      );
       this.reportCommitResult(r, patches.length, source);
     } catch (err) {
       if (this.cancelled) throw err;
       console.error(`[Orchestrator] ${source} 状态提交抛异常:`, err);
+      logEngine(
+        'error',
+        'orchestrator.commit',
+        `${source} 状态提交抛异常`,
+        () => ({ source, patches, error: err }),
+        { saveId: this.saveId },
+      );
       this.events.onStateCommitError?.(source, [String(err)]);
     }
   }
