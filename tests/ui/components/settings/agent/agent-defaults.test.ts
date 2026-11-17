@@ -99,6 +99,18 @@ describe('buildAgentDefaultEntry — story', () => {
     expect(e.template).toBe('');
   });
 
+  it('📌 2026-11-17：落库行的播种指纹不写进项目默认', () => {
+    const e = buildAgentDefaultEntry({
+      agentId: 'story',
+      settings: settings(),
+      promptDraft: '',
+      templateDraft: '',
+      effectivePreset: { ...preset(), factorySeedHash: 'abc' },
+    });
+    expect(e.preset).not.toBeNull();
+    expect('factorySeedHash' in e.preset!).toBe(false);
+  });
+
   it('🔴 preset 是深拷贝 —— 之后改 store 里那份不会动到已保存的默认', () => {
     const p = preset();
     const e = buildAgentDefaultEntry({

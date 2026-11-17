@@ -277,6 +277,16 @@ console.warn（census 见 §5.5）。
 > 其中的预设此时不再被认作内容所有，会显示为可编辑的「我的预设」，这一模式下不要编辑它们（界面给提示）。
 > 开关入口在设置页「内容包」分区（`DevContentSourceCard.vue`）。
 
+> 📌 **2026-11-17 补注（D20 / D22 的预设落库）**：上表 D20 所说「name-only sync —— M5.1 只属于占位播种路径」
+> 那条播种规则（库里已有同 id 的出厂预设只同步 name、保留 prompts）**已推翻**：它让内容仓更新的出厂
+> prompts 永远到不了玩家库。现行规则：预设行带可选字段 `factorySeedHash`（播种指纹，无索引、不升 Dexie 版本），
+> 启动播种（`settings-store.seedFactoryPresets`）经引擎纯函数 `src/core/prompts/factory-preset-sync.ts` 逐 id 判定 ——
+> 没改过的行静默更新；无指纹的遗留行或被就地改过的行先另存「（更新前备份）」玩家副本再覆盖（同一次 bulkPut），
+> 选择键不动。D20 的 pack 安装「按 pack `presetId` 整行 upsert」不变，只是写入时同样盖上指纹；
+> 装包判定不受该字段影响（四态比较的 `hashPresetRow` 取 id / name / description / settings，`buildPackBaseline`
+> 的逐预设基线只取 id / name / settings）。出厂预设来源以 provider 列表（`presets.json` / `pack.presets`）优先于
+> agent-config 内嵌版，与装包同源；引擎内置直出预设 id 不播种。
+
 ### 2.4 测试与门（D29-D34）
 
 | #   | 决策                          | 裁定                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |

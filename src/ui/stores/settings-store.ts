@@ -23,7 +23,10 @@ import { ref, watch, onScopeDispose } from 'vue';
 import {
   getActivePackPayload,
   getPackRuntimeRevision,
+  getRuntimePackPresets,
   isProtectedContentInstalled,
+  isProtectedPackPresetId,
+  overlayRows,
   subscribePackRuntime,
 } from '@engine/content/pack-runtime';
 import {
@@ -36,7 +39,7 @@ import {
   deleteApiRpmPolicy as persistDeleteApiRpmPolicy,
 } from '@engine/persistence/database';
 import { credentialIdFor, replaceApiRpmPolicies } from '@engine/api/api-rpm-limiter';
-import type { ApiRpmPolicy } from '@engine/types/types';
+import type { ApiRpmPolicy, ChatPreset } from '@engine/types/types';
 import {
   DEFAULT_IMAGE_MAX_PER_HOUR,
   DEFAULT_IMAGE_MAX_PER_MESSAGE,
@@ -44,6 +47,11 @@ import {
 } from '@engine/image/image-defaults';
 import { FALLBACK_IMAGE_DIALECT } from '@engine/image/image-dialect';
 import { DEFAULT_LORE_HISTORY_MESSAGES } from '@engine/content/lore-activation';
+import { buildPresetCatalog, isBuiltinPresetId } from '@engine/prompts/preset-resolution';
+import {
+  planFactoryPresetSync,
+  type FactoryPresetBackup,
+} from '@engine/prompts/factory-preset-sync';
 import { detach } from './db-write';
 import {
   LEGACY_AGENT_WORLDBOOK_STASH_KEY,
@@ -101,6 +109,10 @@ export interface PresetItem {
   settings: Record<string, any>;
   createdAt: number;
   updatedAt: number;
+  /** 适用的生成方式（同 `ChatPreset.scope`） */
+  scope?: 'story' | 'direct';
+  /** 出厂预设的播种指纹（同 `ChatPreset.factorySeedHash`；玩家预设不带） */
+  factorySeedHash?: string;
 }
 
 // ===== Phase 8: Agent 项目默认配置 =====
@@ -858,7 +870,8 @@ export const useSettingsStore = defineStore('settings', () => {
     }
 
     // 预设播种（与 agent 覆写层无关，仍走这一支）：DB 空 → seed 出厂预设；
-    // DB 有同 id → 同步出厂 name（保留用户 prompts 编辑）
+    // DB 有同 id → 按播种指纹同步出厂内容（就地改过的旧行先另存副本，见 seedFactoryPresets）
+    // 📌 2026-11-17：原先「同 id 只同步出厂 name（保留用户 prompts 编辑）」已推翻
     //
     // 🔴 内容-引擎分离波 1 / D22：预设只写 Dexie，不再碰 `settings.presets` 镜像。
     //    （此前这里还同步写镜像 —— 镜像删除后那段是死代码。）响应式视图由
@@ -871,6 +884,8 @@ export const useSettingsStore = defineStore('settings', () => {
     //    于是**无 pack 的 overlay 开发态与装包态拿到同一组默认预设** —— 此前 presets.json
     //    只是 pack 的输入，overlay 下那份额外默认预设根本进不来（症状：卸载后预设只剩一个）。
     //    播种规则逐 id：库里没有 → 补；有同 id → 只把 name 同步成出厂版（保留用户 prompts 编辑）。
+    //    📌 2026-11-17 上一行的同 id 规则已推翻：改为按 `factorySeedHash` 播种指纹同步整行内容，
+    //       无指纹或被就地改过的旧行先另存「（更新前备份）」玩家副本再覆盖（seedFactoryPresets）。
     // Protected factory presets are supplied by the memory overlay, never boot-seeded to disk.
     const pd = projectAgentDefaults.value?.agents;
     if (!isProtectedContentInstalled() && pd) {
@@ -902,7 +917,11 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   /**
-   * 预设播种：库里没有的出厂预设补进 Dexie；同 id 只同步名字（保留用户编辑）。
+   * 预设播种：按「播种指纹」把出厂预设同步进 Dexie（规则见 `@engine/prompts/factory-preset-sync`）：
+   * 没有 → 补；内容已是最新 → 至多补指纹；有指纹且未改 → 静默覆盖；
+   * 无指纹的遗留行或被就地改过 → 先另存玩家副本（「（更新前备份）」）再覆盖，并弹常驻提示。
+   * 📌 2026-11-17：旧规则「同 id 只同步名字（保留用户编辑）」已推翻 —— 它让内容仓更新的
+   *    出厂 prompts 永远到不了玩家库，API 请求一直发旧预设。
    * 返回 false = 期间运行时载荷变了、没有播种（调用方再来一轮）；`runtimeRevision`
    * 传 null 表示不再判修订号（最后一轮）。受保护内容已装时本就不播种，返回 true。
    */
@@ -911,21 +930,26 @@ export const useSettingsStore = defineStore('settings', () => {
     runtimeRevision: number | null,
   ): Promise<boolean> {
     const factoryPresets: PresetItem[] = [];
-    for (const entry of Object.values(pd)) {
-      if (entry.preset && entry.presetId) {
-        factoryPresets.push(JSON.parse(JSON.stringify(entry.preset)) as PresetItem);
-      }
-    }
+    // 🔴 引擎内置直出预设（direct-generation-v1 等）归引擎、不落盘 —— 默认层哪怕内嵌了它
+    //    （开发态「保存为默认」造得出来）也绝不播种，否则 `migrateBuiltinPresetRows` 每次启动
+    //    都会把它当成「旧版落盘行」处理（2026-11-17 评审修正）
+    const pushFactory = (p: PresetItem | null | undefined) => {
+      if (!p || !p.id || isBuiltinPresetId(p.id)) return;
+      if (factoryPresets.some((f) => f.id === p.id)) return;
+      factoryPresets.push(JSON.parse(JSON.stringify(p)) as PresetItem);
+    };
+    // 🔴 provider 列表（`presets.json` / `pack.presets`）**优先于**内嵌版：装包写入的就是
+    //    `pack.presets` 那份，同 id 两份内容不一致时若以内嵌版为准，播种会静默覆盖装包结果、
+    //    下次升级再报虚假冲突，循环往复（2026-11-17 评审修正；此前内嵌版优先）
     try {
       const { useContentStore } = await import('./content-store');
       const providerPresets = (await useContentStore().resolveProjectPresets()) as PresetItem[];
-      for (const p of providerPresets) {
-        if (p && p.id && !factoryPresets.some((f) => f.id === p.id)) {
-          factoryPresets.push(JSON.parse(JSON.stringify(p)) as PresetItem);
-        }
-      }
+      for (const p of providerPresets) pushFactory(p);
     } catch {
       /* provider 不可用时只用内嵌 story 预设 */
+    }
+    for (const entry of Object.values(pd)) {
+      if (entry.preset && entry.presetId) pushFactory(entry.preset);
     }
 
     if (isProtectedContentInstalled()) return true;
@@ -938,19 +962,63 @@ export const useSettingsStore = defineStore('settings', () => {
       /* 登记失败只影响来源标注，不影响播种 */
     }
     if (factoryPresets.length > 0) {
+      let backups: FactoryPresetBackup[] = [];
       try {
-        const { getPresets, savePresets } = await import('@engine/persistence/database');
-        const existing = await getPresets();
-        const byId = new Map(existing.map((p) => [p.id, p] as const));
-        const toWrite: PresetItem[] = [];
-        for (const fp of factoryPresets) {
-          const dbMatch = byId.get(fp.id);
-          if (!dbMatch) toWrite.push(fp);
-          else if (dbMatch.name !== fp.name) toWrite.push({ ...dbMatch, name: fp.name });
-        }
-        if (toWrite.length > 0) await savePresets(toWrite);
+        // 🔴 读库 → 计划 → 写库在**同一个** presets 读写事务里（2026-11-17 评审修正）：
+        //    两个标签页同时启动时，分开的读/写会让双方都读到无指纹的旧行、各存一份「（更新前备份）」。
+        //    IndexedDB 串行化同表的读写事务，后到的那个读到的已是盖过指纹的新行。
+        //    事务体内不许 await 任何非 Dexie 的 Promise（动态 import 先在外面做完），否则事务提前提交。
+        const { getDatabase } = await import('@engine/persistence/database');
+        const db = getDatabase();
+        const outcome = await db.transaction('rw', db.presets, async () => {
+          // 读的是盘上行再叠受保护内容的内存层（与 getPresets 同口径）；叠加层只参与判定，不参与写
+          const existing = overlayRows(await db.presets.toArray(), getRuntimePackPresets());
+          // 读库那一拍可能让出事件循环：期间装了受保护包或运行时载荷变了，就不拿这份结果写盘
+          if (isProtectedContentInstalled()) return 'skip' as const;
+          if (runtimeRevision !== null && runtimeRevision !== getPackRuntimeRevision()) {
+            return 'stale' as const;
+          }
+          // 副本的 scope 沿用目录对该出厂行的判定（与界面上看到的归属一致）
+          const catalog = buildPresetCatalog({
+            storedRows: existing,
+            agentDefaults: pd,
+            contentOwnedIds: factoryPresets.map((p) => p.id),
+          });
+          const plan = planFactoryPresetSync({
+            factory: factoryPresets,
+            existing,
+            scopeOf: (id) => catalog.find((entry) => entry.preset.id === id)?.scope,
+            newId: () => crypto.randomUUID(),
+            now: Date.now(),
+          });
+          // 副本与覆盖同一次 bulkPut：要么都落、要么都不落，绝不出现「覆盖了却没留副本」
+          const writes = plan.writes.filter((row) => !isProtectedPackPresetId(row.id));
+          if (writes.length > 0) {
+            await db.presets.bulkPut(
+              writes.map((p) => JSON.parse(JSON.stringify(p)) as ChatPreset),
+            );
+          }
+          return plan.backups;
+        });
+        if (outcome === 'skip') return true;
+        if (outcome === 'stale') return false;
+        backups = outcome;
       } catch {
         /* IndexedDB 不可用时静默跳过 */
+      }
+      // 选择键一律不改（仍指向出厂 id）；就地改过的旧行已另存，常驻提示点名副本
+      if (backups.length > 0) {
+        try {
+          const { useUIStore } = await import('./ui-store');
+          const list = backups.map((b) => `「${b.factoryName}」→「${b.backupName}」`).join('、');
+          useUIStore().toast(
+            `出厂预设已更新。你此前对它们的改动已另存为玩家预设：${list}`,
+            'warning',
+            0,
+          );
+        } catch {
+          /* 提示失败不影响播种 */
+        }
       }
     }
     return true;

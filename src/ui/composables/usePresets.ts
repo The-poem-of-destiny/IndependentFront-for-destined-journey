@@ -152,9 +152,10 @@ function stableEqual(a: unknown, b: unknown): boolean {
   return ka.every((k) => stableEqual((a as any)[k], (b as any)[k]));
 }
 
-/** 时间戳不算内容：只改过 updatedAt 的行仍视为原样 */
+/** 时间戳与播种指纹不算内容：只改过 updatedAt、或带着 factorySeedHash 的行仍视为原样 */
 function sameContent(row: ChatPreset, pristine: ChatPreset): boolean {
-  const strip = ({ createdAt: _c, updatedAt: _u, ...rest }: ChatPreset) => rest;
+  const strip = ({ createdAt: _c, updatedAt: _u, factorySeedHash: _f, ...rest }: ChatPreset) =>
+    rest;
   return stableEqual(strip(row), strip(pristine));
 }
 
@@ -181,6 +182,8 @@ export async function migrateBuiltinPresetRows(settings: SelectionBag): Promise<
         createdAt: now,
         updatedAt: now,
       };
+      // 副本是玩家预设，不带出厂播种指纹（2026-11-17）
+      delete copy.factorySeedHash;
       await savePreset(copy);
       for (const profile of PRESET_PROFILES) {
         if (presetSelection(settings, profile) === pristine.id) {
@@ -259,6 +262,8 @@ export function usePresets(): {
     };
     if (scope) copy.scope = scope;
     else delete copy.scope;
+    // 副本是玩家预设：不带出厂播种指纹，否则启动播种会把它当成出厂行（2026-11-17）
+    delete copy.factorySeedHash;
     await upsertPreset(copy);
     return copy;
   }

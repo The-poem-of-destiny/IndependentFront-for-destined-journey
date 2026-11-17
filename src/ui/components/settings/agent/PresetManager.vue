@@ -147,6 +147,8 @@ async function persistPreset(next: ChatPreset): Promise<string> {
       };
       if (copy.scope) edited.scope = copy.scope;
       else delete edited.scope;
+      // `next` 由原（出厂）行派生，会带回播种指纹；副本是玩家预设，一律不带（2026-11-17）
+      delete edited.factorySeedHash;
       await upsertPreset(edited);
       selectedPresetId.value = edited.id;
       ui.toast('已复制为我的预设并切换；原预设保持不变', 'info');
