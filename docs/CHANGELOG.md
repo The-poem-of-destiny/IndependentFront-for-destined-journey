@@ -9,6 +9,20 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-17 修复：出厂预设按播种指纹同步（内容仓更新的 prompts 到不了玩家库）｜**未真机验证**
+
+- 根因：`settings-store.seedFactoryPresets` 对「库里已有同 id」的出厂预设只同步 name、不同步 prompts。内容仓更新出厂预设后，玩家库里的旧行永远不更新，API 请求一直发旧预设（已用真实调试导出证实）。自 #148 起出厂预设在界面上只读，但旧版 app 可能留下就地改过的行，不能静默丢掉。
+- 做法：预设行新增可选字段 `ChatPreset.factorySeedHash`（播种指纹，无索引，不升 Dexie 版本）= 去掉 createdAt / updatedAt / factorySeedHash 后键稳定序列化的 hash。新纯函数模块 `src/core/prompts/factory-preset-sync.ts`（`factoryPresetFingerprint` / `stampFactoryPreset` / `planFactoryPresetSync`，无 I/O、时间与新 id 由调用方注入），逐 id 四条规则：
+  1. 库里没有 → 写出厂行并盖指纹；
+  2. 行内容已等于出厂 → 至多补盖指纹，内容与时间戳不动、不留副本；
+  3. 有指纹且行内容仍等于指纹（没改过）→ 静默覆盖并盖新指纹；
+  4. 其余（无指纹的遗留行，或内容与指纹不符 = 被就地改过）→ 先另存玩家副本（新 id、名字加「（更新前备份）」、不带指纹、scope 取目录对该出厂行的判定），再覆盖。副本与覆盖同一个 presets 读写事务内的一次 `bulkPut`。
+- 选择键一律不改，仍指向出厂 id；发生规则 4 时弹一条常驻 warning toast 点名副本（失败静默）。读库、计划、写库放在同一个 Dexie `presets` 读写事务里（两个标签页同时启动不会各存一份副本）；事务内读的是盘上行叠受保护内容的内存层（叠加层只参与判定、不写），写之前再判一次受保护内容与运行时修订号，变了就不写、交外层重来。
+- 出厂预设来源：provider 列表（`/data/defaults/presets.json` 或已装包的 `pack.presets`）**优先于** agent-config 内嵌版（此前内嵌版优先）—— 与装包写入同源，否则同 id 两份内容不一致时播种与装包互相覆盖、升级报虚假冲突。引擎内置直出预设 id（`direct-generation-v1` / `direct-generation-cache-v1`）一律不播种，`migrateBuiltinPresetRows` 的「原样」判定也忽略 `factorySeedHash`，否则每次启动都会多一条「（我的修改）」副本并改写选择键。
+- 装包（`content-store.applyInstall`）写入的预设同样盖指纹；新字段不影响装包判定：四态比较用的 `hashPresetRow` 取 id / name / description / settings，`buildPackBaseline` 的逐预设基线只取 id / name / settings。`duplicateAsUser`、`migrateBuiltinPresetRows` 的副本、PresetManager 写时复制的副本与「保存为项目默认」写出的 preset 一律不带该字段。
+- 已知取舍：装包时玩家拒绝覆盖的「冲突预设」不再被永久保留 —— 下次启动播种会把它另存为备份副本后覆盖成包内版本。
+- 测试：新增 `tests/core/prompts/factory-preset-sync.test.ts`；`settings-store.test.ts` 补七条播种用例（空库 / 静默覆盖 / 只补指纹 / 遗留行另存副本 + 选择键不变 + 幂等 / 指纹不符另存 / 只改名 / 读库后修订号变不写）；`content-store-executor`、`agent-defaults`、`PresetManager.copy-on-write` 各补一条；评审回归 `tests/ui/stores/settings-store.factory-presets.test.ts`（内置 id 不播种且连续启动不涨行 / 带指纹的内置旧行仍视为原样 / 内嵌版与 pack.presets 不一致时升级无虚假冲突 / 两实例并发启动只留一份副本）。
+
 ### 2026-11-16 修复：Gemini 下 `ChatRequest.model` 不进上游 URL（潜在缺陷）｜**未用真实 Gemini 验证**
 
 - 根因：Gemini 请求体不含 `model`，BFF（`server/routes/llm.ts`）只从 `X-Model-ID` 头拼上游 URL，而 `buildLlmTransportHeaders` 把这个头写死成 `endpoint.defaultModel`。调用方传入与源默认不同的 `ChatRequest.model` 时，Gemini 会静默改用源默认模型。OpenAI 兼容与 Anthropic 协议的模型写在请求体里，不受影响。
@@ -822,6 +836,8 @@ system 提示词，而是被抽出来追加到消息**最末尾**、标 `prefix:
 - `settings-store.loadAgentProjectDefaults` 的播种改为：出厂预设 = agent-config 内嵌
   story 预设 ∪ provider 预设，**逐 id** 播种（库里没有 → 补；有同 id → 只同步 name，
   保留用户 prompts 编辑）。旧逻辑「DB 非空即整批不播种」连带把内嵌 story 预设也挡在外面。
+  > 📌 2026-11-17 已推翻「有同 id → 只同步 name」：它让内容仓更新的出厂 prompts 永远到不了
+  > 玩家库。现改为按播种指纹 `factorySeedHash` 同步整行，见顶部「2026-11-17 出厂预设按播种指纹同步」条目。
 - 于是无 pack 的 overlay 开发态与装包态拿到同一组默认预设；公开仓占位态行为不变（仍 1 条）。
 - 验证：8 道闸门全绿；`test:run` 355 文件 / 8704（8696 通过 / 8 跳过）；新增
   `resolveProjectPresets` 单测 + settings-store 播种集成测试。

@@ -445,6 +445,13 @@ export interface ChatPreset {
    * 归属判定见 `prompts/preset-resolution.ts` 的 `buildPresetCatalog`。
    */
   scope?: 'story' | 'direct';
+  /**
+   * 出厂预设的「播种指纹」（可选，无 Dexie 索引，不升库版本）：上次播种/装包写进这一行的
+   * 出厂内容指纹（`prompts/factory-preset-sync.ts` 的 `factoryPresetFingerprint`）。
+   * 行内容仍等于它 = 玩家没改过，出厂更新可静默覆盖；不等 = 旧版 app 就地改过，覆盖前先另存副本。
+   * 玩家预设（含复制出来的副本）一律不带这个字段。
+   */
+  factorySeedHash?: string;
 }
 
 // ========== Settings Types ==========

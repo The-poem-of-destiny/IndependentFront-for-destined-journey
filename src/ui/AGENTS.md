@@ -117,6 +117,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      （settings-store 播种时登记）算内容所有，不显示成「我的预设」。
 │   │                                      `migrateBuiltinPresetRows` 删掉原样旧行时把指向它的选择键清空 ——
 │   │                                      平时显式选中引擎内置预设是合法的
+│   │                                   📌 2026-11-17：出厂 / 装包行带播种指纹 `factorySeedHash`（见 settings-store 条）。
+│   │                                      🔴 凡是**复制出玩家预设**的路径（`duplicateAsUser`、
+│   │                                      `migrateBuiltinPresetRows` 的副本、PresetManager 写时复制）都必须删掉
+│   │                                      这个字段 —— 带着它的副本会被播种当成「没改过的出厂行」
 │   ├── useBeautify.ts               ← [工坊正则] 美化管线（从 ChatFlow.vue 抽出，CombatMessageFlow 复用）：
 │   │                                   按当前存档合并预设规则与用户规则，交给统一 narrative renderer 编译。
 │   │                                   autoEnable 解析与 BeautifierSection **同口径** ——
@@ -384,6 +388,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      📌 2026-11-14 例外：**刻意以「键缺席」表示默认**的可选键只声明、不进
 │   │                                      getDefaults()，并在声明处写明缺席时由谁兜底（如 `directCacheProvider`、
 │   │                                      `directCacheRebuildTurns`、`directCacheGrowthLimit`；恢复默认 = 删键）
+│   │                                   📌 2026-11-17：出厂预设播种（`seedFactoryPresets`）不再「同 id 只同步 name」，
+│   │                                      改按播种指纹 `factorySeedHash` 走引擎 `prompts/factory-preset-sync.ts` 的
+│   │                                      `planFactoryPresetSync`：没改过的行静默更新；无指纹或被就地改过的旧行先另存
+│   │                                      「（更新前备份）」玩家副本再覆盖（同一次 bulkPut），弹常驻 toast 点名副本；
+│   │                                      选择键不动。读库 / 计划 / 写库同一个 presets 读写事务，写前再判受保护内容
+│   │                                      与运行时修订号，变了不写。来源以 provider 列表（presets.json / pack.presets）
+│   │                                      优先于内嵌版（与装包同源）；引擎内置直出预设 id 不播种
 │   ├── settings-types.ts            ← [Q-18] ★`UiSettings`（**type 不是 interface** —— 整份袋子
 │   │                                   要传进 5 处 `Record<string, unknown>` 参数，interface 没有
 │   │                                   隐式索引签名会当场编译不过；也**不能**加显式索引签名，

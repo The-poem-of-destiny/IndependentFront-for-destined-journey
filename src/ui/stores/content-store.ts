@@ -103,6 +103,7 @@ import {
 // 第 8 面 mapPack 的收窄口（永不抛）+ 引擎侧地图缝（见 `setContentRegistry`）
 import { coerceMapPack } from '@engine/map/map-pack';
 import { installMapPack } from '@engine/map/map-runtime';
+import { stampFactoryPreset } from '@engine/prompts/factory-preset-sync';
 // 第 13 面 randomEvents 的收窄口（永不抛）+ 引擎侧随机事件缝（见 `setContentRegistry`）
 import { coerceRandomEventPack } from '@engine/random-events/random-event-pack';
 import { installRandomEventPack } from '@engine/random-events/random-event-runtime';
@@ -1364,7 +1365,9 @@ export const useContentStore = defineStore('content', () => {
         }
       }
       await deletePresets(toDelete);
-      await savePresets(toUpsert);
+      // 📌 2026-11-17：装包写入的预设盖上播种指纹（出厂内容），启动播种据此判断「没改过、可静默更新」。
+      //    基线 / 四态判定的 hash 只取 id/name/description/settings，不受这个字段影响
+      await savePresets(toUpsert.map(stampFactoryPreset));
     }
 
     // c. beautifierRules（provider 内存层，不写用户表）—— 装包后重算 presetRules

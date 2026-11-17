@@ -80,6 +80,22 @@ describe('PresetManager —— 只读预设写时复制', () => {
     expect(toast).toHaveBeenCalledWith('已复制为我的预设并切换；原预设保持不变', 'info');
   });
 
+  it('📌 2026-11-17：出厂行带播种指纹时，副本不带（否则启动播种会把副本当成出厂行）', async () => {
+    const { stampFactoryPreset } = await import('@engine/prompts/factory-preset-sync');
+    const stamped = stampFactoryPreset(JSON.parse(JSON.stringify(PACK)));
+    await getDatabase().presets.put(stamped);
+    const w = mount(PresetManager, { props: { agentId: 'story' } });
+    await flushPromises();
+    await w.find('.subprompt-toggle').trigger('click');
+    await vi.waitFor(() => expect(mockSettings.activePresetId).not.toBe(''));
+    await flushPromises();
+
+    const rows = await getDatabase().presets.toArray();
+    expect(rows.find((r) => r.id === PACK.id)!.factorySeedHash).toBe(stamped.factorySeedHash);
+    const copy = rows.find((r) => r.id !== PACK.id)!;
+    expect('factorySeedHash' in copy).toBe(false);
+  });
+
   it('副本是玩家自己的：再改一次直接写副本，不再复制', async () => {
     const w = mount(PresetManager, { props: { agentId: 'story' } });
     await flushPromises();

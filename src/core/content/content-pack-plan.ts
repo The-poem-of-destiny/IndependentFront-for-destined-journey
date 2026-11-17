@@ -759,7 +759,7 @@ function hashRuleRow(r: BeautifierRule): string {
  * - 数组：保持顺序（数组顺序是语义的一部分），逐项递归
  * - 原始值：原样返回
  */
-function stableSerialize(value: unknown): unknown {
+export function stableSerialize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stableSerialize);
   if (value && typeof value === 'object') {
     const sorted: Record<string, unknown> = {};

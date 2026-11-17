@@ -59,6 +59,8 @@ export function buildAgentDefaultEntry(input: AgentDefaultInput): AgentDefaultEn
     if (effectivePreset) {
       base.presetId = effectivePreset.id;
       base.preset = JSON.parse(JSON.stringify(effectivePreset)) as PresetItem;
+      // 播种指纹是落库行的本机状态，不属于预设内容，不写进项目默认（2026-11-17）
+      delete base.preset.factorySeedHash;
     }
     return base;
   }

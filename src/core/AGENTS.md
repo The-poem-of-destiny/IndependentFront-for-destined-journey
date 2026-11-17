@@ -390,6 +390,11 @@ src/core/                    ← 核心引擎
   │                                      + `getPresetPrefill`（读 `settings.prefill = {enabled, field}`，
   │                                      内容取自该 assistant 条目）；`assemblePresetContent` **把
   │                                      assistant 条目不并进 system**（它是预填充素材、要去消息末尾）
+  ├── prompts/factory-preset-sync.ts        ← 🆕 [2026-11-17] 出厂预设同步计划（纯函数，无 I/O、不读时钟、不调 crypto）：
+  │                                    `factoryPresetFingerprint`（去掉 createdAt/updatedAt/factorySeedHash 后键稳定 hash）/
+  │                                    `stampFactoryPreset` / `planFactoryPresetSync`（四条规则：补 / 只补指纹 / 没改过静默覆盖 /
+  │                                    无指纹或被就地改过先另存「（更新前备份）」副本再覆盖）。调用方是 settings-store 播种
+  │                                    与 content-store 装包。🔴 与 content-source / content-pack-plan 的导入只在函数体内用（运行时环）
   ├── content/worldbook-loader.ts           ← [Phase 8] 世界书加载/激活/排序/渲染（constant + keyword 双层激活），
   │                                    条目正文经 `executeEjsEntry` 求值（ADR-30）
   ├── content/builtin-worldbooks.ts         ← [Phase 8] 内置世界书运行期 fetch 预加载（刻意不用 `import.meta.glob` eager
