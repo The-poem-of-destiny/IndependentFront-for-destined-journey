@@ -220,7 +220,8 @@ src/core/                    ← 核心引擎
   ├── utils/model-json.ts                 ← [Q-05] 从模型输出里抢救 JSON 的**唯一**入口（整段直解 / ```json 围栏 /
   │                                    `<json>` 标签 / 括号切片，顺序即优先级）。剥壳只此一份，兜底由调用方
   │                                    传 `normalize` 回调 —— 形态上就长不出「两个分支两套兜底」
-  ├── story/story-output.ts               ← Story 信封投影：`<maintext>`/`<options>` 等结构化外壳 → 玩家可见正文 +
+  ├── story/story-output.ts               ← 📌 2026-11-17：`<gametxt>` 与 `<maintext>` 为同义信封，名单 `STORY_ENVELOPE_TAGS` 只此一份（story-rescue / direct-output 引用）
+  │                                    Story 信封投影：`<maintext>`/`<options>` 等结构化外壳 → 玩家可见正文 +
   │                                    行动选项；流式与完成后共用这一条缝（流式期多剥一组控制标签）
   ├── story/prose-rewrite-agent.ts         ← 🆕 [2026-10-04] 正文润色侧链（DeepSeek beta 前缀续写，手动触发）：
   │                                    buildProseRewriteMessages（system + user 正文 + assistant 空前缀 `prefix:true`）/

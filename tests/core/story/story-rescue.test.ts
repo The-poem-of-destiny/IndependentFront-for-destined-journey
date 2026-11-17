@@ -228,3 +228,44 @@ describe('rescueStoryOutput', () => {
     });
   });
 });
+
+describe('rescueStoryOutput: gametxt 同义信封', () => {
+  it('场景 1：reasoning 里的 <gametxt> 正文被救回', () => {
+    const r = makeResult({
+      rawResponse: '',
+      reasoning: 'Step 1: 记得用 <gametxt> 包裹\n\n<gametxt>你走进了森林。</gametxt>',
+    });
+    expect(rescueStoryOutput(r)).toBe(true);
+    expect(r.rawResponse).toBe('<gametxt>你走进了森林。</gametxt>');
+  });
+
+  it('场景 2：截掉 <gametxt> 之前泄漏的思维链', () => {
+    const r = makeResult({ rawResponse: '首先确认格式……\n<gametxt>正文</gametxt>' });
+    expect(rescueStoryOutput(r)).toBe(true);
+    expect(r.rawResponse).toBe('<gametxt>正文</gametxt>');
+  });
+
+  it('场景 3：剥掉 <gametxt> 内部 --- 分隔的计划块', () => {
+    const raw =
+      '<gametxt>\nFinal step: 生成思维链闭合标签，开始正文。\n\n---\n\n卡牌在你掌心微微发烫。\n</gametxt>';
+    const r = makeResult({ rawResponse: raw });
+    expect(rescueStoryOutput(r)).toBe(true);
+    expect(r.rawResponse.startsWith('<gametxt>')).toBe(true);
+    expect(r.rawResponse).toContain('卡牌在你掌心');
+    expect(r.rawResponse).not.toContain('Final step');
+  });
+
+  it('以 <gametxt> 开头的正常轮不动', () => {
+    const raw = '<gametxt>正常正文。</gametxt>\n<options>\n1. 前进\n</options>';
+    const r = makeResult({ rawResponse: raw });
+    expect(rescueStoryOutput(r)).toBe(false);
+    expect(r.rawResponse).toBe(raw);
+  });
+
+  it('<gametxtual 不算信封', () => {
+    const r = makeResult({ rawResponse: '', reasoning: '思维链 <gametxtual> 不是信封' });
+    expect(rescueStoryOutput(r)).toBe(false);
+    const r2 = makeResult({ rawResponse: '前言 <gametxtual>正文' });
+    expect(rescueStoryOutput(r2)).toBe(false);
+  });
+});
