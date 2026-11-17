@@ -655,3 +655,33 @@ it('persists active combat in snapshots and remaps its source when importing a d
   expect((await manager.restoreSnapshot(baseline.id)).success).toBe(true);
   expect((await getProfile(saveId)).worldFlags.directCombat).toBeUndefined();
 });
+
+describe('direct protocol: gametxt 同义正文信封', () => {
+  const swap = (raw: string) => raw.replace(/maintext/g, 'gametxt');
+
+  it('只有 gametxt 的回复通过，内容与 maintext 版一致', () => {
+    const raw = response();
+    const { raw: gametxtRaw, ...gametxt } = parseDirectOutput(swap(raw), 1);
+    const { raw: maintextRaw, ...maintext } = parseDirectOutput(raw, 1);
+    expect(gametxt).toEqual(maintext);
+    expect(gametxtRaw).toBe(swap(maintextRaw));
+  });
+
+  it('maintext 包裹 gametxt 通过', () => {
+    const raw = response().replace(
+      '<maintext>你把材料交给铁匠。</maintext>',
+      '<maintext><gametxt>你把材料交给铁匠。</gametxt></maintext>',
+    );
+    expect(parseDirectOutput(raw, 1)).toMatchObject({ content: '你把材料交给铁匠。' });
+  });
+
+  it('两个 <gametxt 开标签被拒', () => {
+    const raw = swap(response()).replace('<gametxt>', '<gametxt>前文</gametxt><gametxt>');
+    expect(() => parseDirectOutput(raw, 1)).toThrow('需要一个完整的 maintext（或 gametxt）区块');
+  });
+
+  it('gametxt 缺闭标签被拒', () => {
+    const raw = swap(response()).replace('</gametxt>', '');
+    expect(() => parseDirectOutput(raw, 1)).toThrow('需要一个完整的 maintext（或 gametxt）区块');
+  });
+});

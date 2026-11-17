@@ -207,7 +207,7 @@ AI 每回合的输出必须按以下**固定顺序**排列：
 - **HTML 美化** `<style>` / `<item_info>` / `<task_info>` / 技能异域字符 / emoji / 文字发光 — 不需要
 - **防截断免责** `<disclaimer>` — 不需要
 - **ST RP 角色扮演框架** `Participant:` / `Recorder:` / `<Participant_input>` — 不需要
-- **老格式标签** `UpdateVariable` 块 / `<gametxt>` / `<action_options>` / `<summary>` — 已替换为 `<maintext>` / `<option>`，`<sum>` 和 `<vars>` 由其他 Agent 负责
+- **老格式标签** `UpdateVariable` 块 / `<gametxt>` / `<action_options>` / `<summary>` — 已替换为 `<maintext>` / `<option>`，`<sum>` 和 `<vars>` 由其他 Agent 负责（📌 2026-11-17：引擎现把 `<gametxt>` 当 `<maintext>` 的同义信封容忍，预设仍建议写 maintext）
 - **`{{lastUsermessage}}`** 等未注册占位符 — 会被引擎剥离
 - **正则脚本 / ChatSquash 配置** — 不需要
 
@@ -253,5 +253,5 @@ AI 每回合的输出必须按以下**固定顺序**排列：
 - [ ] 还在教 AI 写 `<char_detect>` 吗？（新预设不必写，识别新角色已归 request_dispatcher）
 - [ ] 有没有 `{{SYS_PROMPT}}`？（应该没有）
 - [ ] 有没有 EJS `<%` 或 `%>`？（应该没有）
-- [ ] 有没有 `<gametxt>` / `<action_options>` / `<summary>` 等老标签？（应该没有）
+- [ ] 有没有 `<gametxt>` / `<action_options>` / `<summary>` 等老标签？（应该没有；📌 2026-11-17 起 `<gametxt>` 写了也能显示，但仍建议用 maintext）
 - [ ] `{{setvar}}` 的变量名有无拼写错误？（否则 `{{getvar}}` 取不到值）

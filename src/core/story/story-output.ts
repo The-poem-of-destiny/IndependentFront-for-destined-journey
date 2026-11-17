@@ -15,9 +15,23 @@ export interface StoryProjection {
 
 const LEADING_FENCE = /^\s*```[^\n]*\n?/;
 const TRAILING_FENCE = /\n?\s*```\s*$/;
-const MAIN_TEXT_OPEN = /<maintext\b[^>]*>/gi;
-const MAIN_TEXT_CLOSE = /<\/maintext\s*>/i;
-const STREAM_MAIN_TEXT_OPEN = /(?:^|\r?\n)[ \t]*<maintext\b[^>]*>/gi;
+/**
+ * 正文信封的同义标签。`maintext` 是提示词约定的写法；`gametxt` 是部分内容世界书要求的写法，
+ * 模型有时会照世界书输出它 —— 两者一律按同一种正文信封处理。
+ * 同时出现时：取最后一个开标签（任一种），到其后第一个闭标签（任一种）为止，残留信封标签一并剥掉。
+ */
+export const STORY_ENVELOPE_TAGS = ['maintext', 'gametxt'] as const;
+/** 正则源片段 `(?:maintext|gametxt)`；边界（`\b` 等）由拼正则的调用方自己加 */
+export const STORY_ENVELOPE_TAG_SOURCE = `(?:${STORY_ENVELOPE_TAGS.join('|')})`;
+
+const MAIN_TEXT_OPEN = new RegExp(String.raw`<${STORY_ENVELOPE_TAG_SOURCE}\b[^>]*>`, 'gi');
+const MAIN_TEXT_CLOSE = new RegExp(String.raw`<\/${STORY_ENVELOPE_TAG_SOURCE}\s*>`, 'i');
+const STREAM_MAIN_TEXT_OPEN = new RegExp(
+  String.raw`(?:^|\r?\n)[ \t]*<${STORY_ENVELOPE_TAG_SOURCE}\b[^>]*>`,
+  'gi',
+);
+/** 残留的信封标签（嵌套 / 并列 / 开闭不配对时剩下的那些） */
+const ENVELOPE_TAG = new RegExp(String.raw`<\/?${STORY_ENVELOPE_TAG_SOURCE}\b[^>]*>`, 'gi');
 const CONTROL_TAGS = [
   'options',
   'option',
@@ -29,7 +43,12 @@ const CONTROL_TAGS = [
   'character_updates',
   'direct_updates',
 ];
-const STREAM_CONTROL_TAGS = ['maintext', 'play_audio', 'event_trigger', ...CONTROL_TAGS];
+const STREAM_CONTROL_TAGS = [
+  ...STORY_ENVELOPE_TAGS,
+  'play_audio',
+  'event_trigger',
+  ...CONTROL_TAGS,
+];
 
 /**
  * 剥掉 `<event_trigger>` 触发回执（随机事件 v1 / 设计 §5.2）。
@@ -148,7 +167,7 @@ function project(raw: string, partial: boolean): StoryProjection {
   if (partial) content = stripTrailingPartialControlTag(content);
 
   content = stripEventTriggerMarkers(stripPlayAudioMarkers(content))
-    .replace(/<\/?maintext\b[^>]*>/gi, '')
+    .replace(ENVELOPE_TAG, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
@@ -162,9 +181,9 @@ export function projectStoryOutput(raw: string): StoryProjection {
 
 /** Normalize the accumulated raw response while it is still streaming. */
 export function projectStreamingStory(raw: string): string {
-  // The story prompt requires a <maintext> envelope. Buffer everything before its
-  // opener so content-channel reasoning cannot flash in the player-facing preview.
-  // Completed output still keeps the bare-text compatibility fallback above.
+  // 正文提示词要求用 <maintext>（或同义的 <gametxt>）信封包住正文。开标签出现之前的内容一律先缓住，
+  // 免得走 content 通道的思维链在玩家看到的流式预览里一闪而过。
+  // 完成后的输出仍保留上面那条「裸文本」兼容兜底。
   if (!lastMatch(stripCodeFences(raw), STREAM_MAIN_TEXT_OPEN)) return '';
   return project(raw, true).content;
 }

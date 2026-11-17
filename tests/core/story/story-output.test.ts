@@ -80,3 +80,52 @@ describe('projectStreamingStory', () => {
     expect(projectStreamingStory(raw)).toBe(projectStoryOutput(raw).content);
   });
 });
+
+describe('gametxt 同义正文信封', () => {
+  it('完成态：gametxt 包裹的正文与选项正常提取', () => {
+    const result = projectStoryOutput(
+      '<gametxt>第一段。\n\n第二段。</gametxt>\n<options>\n1. 前进\n2、等待\n</options>',
+    );
+    expect(result).toEqual({ content: '第一段。\n\n第二段。', options: ['前进', '等待'] });
+  });
+
+  it('流式：半截标签 / 正在生成 / 半截闭标签都不漏尖括号', () => {
+    expect(projectStreamingStory('<game')).toBe('');
+    expect(projectStreamingStory('<gametxt>正在生成')).toBe('正在生成');
+    expect(projectStreamingStory('<gametxt>正文。</game')).toBe('正文。');
+    expect(projectStreamingStory('<gametxt>正文。</gametxt>\n<options>\n1. 选')).toBe('正文。');
+  });
+
+  it('流式：gametxt 信封到达后替换掉前面泄漏的文字', () => {
+    expect(projectStreamingStory('先分析格式……\n<gametxt>玩家可见正文')).toBe('玩家可见正文');
+  });
+
+  it('流式：行内提及 <gametxt> 不当作信封', () => {
+    expect(projectStreamingStory('要用 <gametxt> 包裹正文哦……')).toBe('');
+  });
+
+  it('两种信封嵌套（两种顺序）都只留正文、无残留标签', () => {
+    expect(projectStoryOutput('<maintext><gametxt>正文</gametxt></maintext>').content).toBe('正文');
+    expect(projectStoryOutput('<gametxt><maintext>正文</maintext></gametxt>').content).toBe('正文');
+  });
+
+  it('两种信封并列时取后一个', () => {
+    expect(projectStoryOutput('<maintext>前文</maintext>\n<gametxt>后文</gametxt>').content).toBe(
+      '后文',
+    );
+  });
+
+  it('开闭标签不配对时以任一种闭标签收尾', () => {
+    const result = projectStoryOutput('<gametxt>正文</maintext><options>1. 观察</options>');
+    expect(result).toEqual({ content: '正文', options: ['观察'] });
+  });
+
+  it('标签大小写不敏感', () => {
+    expect(projectStoryOutput('<GameTxt>正文。</GameTxt>').content).toBe('正文。');
+  });
+
+  it('gametxt 下流式与完成态一致', () => {
+    const raw = '<gametxt>夜色渐深。\n\n门被推开。</gametxt><options>\n1. 查看\n</options>';
+    expect(projectStreamingStory(raw)).toBe(projectStoryOutput(raw).content);
+  });
+});

@@ -508,6 +508,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── worldbook-store.ts           ← [工坊 P0] 🆕 世界书 Dexie 唯一入口（`settings.worldBooks` 已不存在）
 │   ├── worldbook-migration.ts       ← [工坊 P0] localStorage→Dexie 六步迁移（标志位判定→单事务 bulkPut→逐本回读校验→过了才删源→失败一律不动可重试；dedupeIds 防同 id 静默合并）
 │   ├── beautifier-store.ts          ← [工坊 P0b] 美化规则 Dexie 唯一入口（内置预设走纯内存 ref，不持久化）
+│   │                                   📌 2026-11-17：`refreshPresetRules` 遇内容包修订号变化改为重来（≤5 轮），不再丢弃结果 ——
+│   │                                   未装包时启动竞态曾让内置规则整组为空
 │   ├── beautifier-migration.ts      ← [工坊 P0b] 复用 P0 六步迁移
 │   ├── legacy-dexie-migration.ts    ← [Q-08] localStorage → Dexie 六步迁移的**唯一实现**
 │   │                                   （上面两个 migration 都调它，不再各存一份）

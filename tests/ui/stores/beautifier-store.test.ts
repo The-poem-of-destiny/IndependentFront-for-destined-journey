@@ -16,6 +16,8 @@ import { nextTick } from 'vue';
 import type { BeautifierRule } from '@engine/types/types';
 import { getDatabase } from '@engine/persistence/database';
 import { setPackRulesProvider } from '@engine/content/content-source';
+import { installRuntimePack } from '@engine/content/pack-runtime';
+import { loadPresetRules } from '@engine/story/beautifier';
 
 const presetPayload = vi.hoisted(() => ({ value: [] as unknown[] }));
 vi.mock('@engine/story/beautifier', async (importOriginal) => {
@@ -247,5 +249,101 @@ describe('beautifier-store', () => {
     // 不污染用户表 / 不写回 settings
     expect(await getDatabase().beautifierRules.toArray()).toHaveLength(0);
     setPackRulesProvider(null);
+  });
+
+  // ── 2026-11-17：修订号在加载途中变化时重来，不丢结果 ─────────────
+  describe('refreshPresetRules 修订号重来', () => {
+    const defaultLoad = async () => presetPayload.value as BeautifierRule[];
+
+    afterEach(() => {
+      // restoreAllMocks 不会还原 vi.fn 的实现，这里手动复位
+      vi.mocked(loadPresetRules).mockImplementation(defaultLoad);
+      setPackRulesProvider(null);
+    });
+
+    it('加载途中无包 hydrate（installRuntimePack(undefined,false)）→ 重来一轮并采纳占位规则', async () => {
+      setPackRulesProvider(null);
+      presetPayload.value = [makeRule('builtin-ph', { isBuiltin: true })];
+      const load = vi.mocked(loadPresetRules);
+      load.mockClear();
+      let first = true;
+      load.mockImplementation(async () => {
+        if (first) {
+          first = false;
+          // 真实的无包 hydrate 分支：notify() 把修订号 +1
+          installRuntimePack(undefined, false);
+        }
+        return presetPayload.value as BeautifierRule[];
+      });
+
+      const store = useBeautifierStore();
+      await store.init();
+
+      expect(store.presetRules.map((r) => r.id)).toEqual(['builtin-ph']);
+      expect(load).toHaveBeenCalledTimes(2);
+    });
+
+    it('加载途中 pack provider 挂上 + 修订号变化 → 收敛到 pack 规则，占位结果不覆盖', async () => {
+      setPackRulesProvider(null);
+      presetPayload.value = [makeRule('builtin-ph', { isBuiltin: true })];
+      const packRules = [
+        makeRule('builtin-pack-a', { isBuiltin: true }),
+        makeRule('builtin-pack-b', { isBuiltin: true }),
+      ];
+      const load = vi.mocked(loadPresetRules);
+      load.mockClear();
+      load.mockImplementation(async () => {
+        setPackRulesProvider(() => packRules as unknown as readonly BeautifierRule[]);
+        installRuntimePack(undefined, false);
+        return presetPayload.value as BeautifierRule[];
+      });
+
+      const store = useBeautifierStore();
+      await store.init();
+
+      expect(store.presetRules.map((r) => r.id)).toEqual(['builtin-pack-a', 'builtin-pack-b']);
+      expect(load).toHaveBeenCalledTimes(1);
+    });
+
+    it('每次加载都改修订号 → 恰好 5 轮，最后一轮结果照收', async () => {
+      setPackRulesProvider(null);
+      presetPayload.value = [makeRule('builtin-ph', { isBuiltin: true })];
+      const load = vi.mocked(loadPresetRules);
+      load.mockClear();
+      load.mockImplementation(async () => {
+        installRuntimePack(undefined, false);
+        return presetPayload.value as BeautifierRule[];
+      });
+
+      const store = useBeautifierStore();
+      await store.init();
+
+      expect(load).toHaveBeenCalledTimes(5);
+      expect(store.presetRules.map((r) => r.id)).toEqual(['builtin-ph']);
+    });
+
+    it('最后一轮加载途中才挂上 pack → 采纳前重读，以 pack 规则为准', async () => {
+      setPackRulesProvider(null);
+      presetPayload.value = [makeRule('builtin-ph', { isBuiltin: true })];
+      const packRules = [makeRule('builtin-pack-late', { isBuiltin: true })];
+      const load = vi.mocked(loadPresetRules);
+      load.mockClear();
+      let calls = 0;
+      load.mockImplementation(async () => {
+        calls++;
+        if (calls < 5) {
+          installRuntimePack(undefined, false);
+        } else {
+          setPackRulesProvider(() => packRules as unknown as readonly BeautifierRule[]);
+        }
+        return presetPayload.value as BeautifierRule[];
+      });
+
+      const store = useBeautifierStore();
+      await store.init();
+
+      expect(load).toHaveBeenCalledTimes(5);
+      expect(store.presetRules.map((r) => r.id)).toEqual(['builtin-pack-late']);
+    });
   });
 });

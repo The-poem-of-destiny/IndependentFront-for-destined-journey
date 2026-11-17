@@ -17,7 +17,7 @@ import {
   buildQuestPatches,
   buildVarsUpdatePatches,
 } from '../variables/vars-update-translator';
-import { projectStoryOutput } from '../story/story-output';
+import { projectStoryOutput, STORY_ENVELOPE_TAGS } from '../story/story-output';
 import type { DirectCombatOutput } from '../combat/direct-combat';
 
 type Row = Record<string, unknown>;
@@ -270,9 +270,19 @@ export function parseDirectOutput(raw: string, diceCount: number): DirectTurnDra
     blocks.length === 1 && [...raw.matchAll(/<direct_updates\b/gi)].length === 1,
     '需要一个完整的 direct_updates 区块',
   );
+  // 正文信封认 maintext 与同义的 gametxt：每种开标签至多一个、至少出现一种，
+  // 出现的那几种都要有对应闭标签（单 maintext / 单 gametxt / 两种各一嵌套或并列均可）
+  const envelopeCounts = STORY_ENVELOPE_TAGS.map((tag) => ({
+    tag,
+    opens: [...raw.matchAll(new RegExp(String.raw`<${tag}\b`, 'gi'))].length,
+  }));
   check(
-    [...raw.matchAll(/<maintext\b/gi)].length === 1 && /<\/maintext\s*>/i.test(raw),
-    '需要一个完整的 maintext 区块',
+    envelopeCounts.some(({ opens }) => opens > 0) &&
+      envelopeCounts.every(
+        ({ tag, opens }) =>
+          opens === 0 || (opens === 1 && new RegExp(String.raw`<\/${tag}\s*>`, 'i').test(raw)),
+      ),
+    '需要一个完整的 maintext（或 gametxt）区块',
   );
   const parsed = object(JSON.parse(blocks[0][1]), 'direct_updates');
   safeValues(parsed);
