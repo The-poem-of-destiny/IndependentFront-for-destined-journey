@@ -429,6 +429,14 @@ export interface SillyTavernLorebookExport {
 
 // ========== Preset Types ==========
 
+/**
+ * 预设适用的生成方式范围：
+ *   · story = 仅剧情；direct = 两种直出都可见（旧行沿用此义，免迁移）；
+ *   · direct_main = 仅直出（无缓存）；direct_cached = 仅缓存直出。
+ * 判定唯一入口见 `prompts/preset-resolution.ts` 的 `presetScopeMatches`。
+ */
+export type PresetScope = 'story' | 'direct' | 'direct_main' | 'direct_cached';
+
 /** SillyTavern-compatible chat completion preset.
  *  `settings` stores the raw SillyTavern preset JSON (temp_openai, prompt_order, prompts, etc.)
  */
@@ -444,7 +452,7 @@ export interface ChatPreset {
    * 预设适用的生成方式（可选，无 Dexie 索引）。缺省 = 对所有方式可见；
    * 归属判定见 `prompts/preset-resolution.ts` 的 `buildPresetCatalog`。
    */
-  scope?: 'story' | 'direct';
+  scope?: PresetScope;
   /**
    * 出厂预设的「播种指纹」（可选，无 Dexie 索引，不升库版本）：上次播种/装包写进这一行的
    * 出厂内容指纹（`prompts/factory-preset-sync.ts` 的 `factoryPresetFingerprint`）。

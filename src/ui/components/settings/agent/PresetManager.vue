@@ -38,7 +38,11 @@ import {
 } from '../../../lib/preset-entries';
 import { preprocessPresetForPreview, findTailAssistantEntry } from '@engine/prompts/preset-loader';
 import { DIRECT_PROTOCOL, DIRECT_TEMPLATE } from '@engine/prompts/direct-prompt';
-import { presetProfileForAgent, profileScope } from '@engine/prompts/preset-resolution';
+import {
+  copyScopeFor,
+  presetProfileForAgent,
+  presetScopeMatches,
+} from '@engine/prompts/preset-resolution';
 import type { ChatPreset } from '@engine/types/types';
 
 const props = defineProps<{ agentId: string }>();
@@ -61,7 +65,7 @@ const selectedPresetId = computed({
 /** 本生成方式可见的目录条目（内置直出预设不落盘，也在这里） */
 const presets = computed(() =>
   catalog.value
-    .filter((entry) => entry.scope === undefined || entry.scope === profileScope(profile.value))
+    .filter((entry) => presetScopeMatches(entry.scope, profile.value))
     .map((entry) => entry.preset),
 );
 
@@ -125,7 +129,7 @@ function presetById(id: string): ChatPreset | null {
  * 统一落库：写 Dexie + 刷新内存 ref；失败时静默（兼容 IndexedDB 不可用环境）。
  *
  * 🔴 写时复制：目标是只读预设（内容包 / 出厂 / 引擎内置）时，先复制成
- *    「<原名>（我的修改）」（scope = 当前生成方式）、切换到副本，再把改动落在副本上；
+ *    「<原名>（我的修改）」（scope 见 `copyScopeFor`：单一直出方式的来源保持原样，其余取当前生成方式）、切换到副本，再把改动落在副本上；
  *    原预设一个字节都不写。返回实际写入的 id。
  */
 async function persistPreset(next: ChatPreset): Promise<string> {
@@ -134,7 +138,7 @@ async function persistPreset(next: ChatPreset): Promise<string> {
     if (entry?.readonly) {
       const copy = await duplicateAsUser(
         next.id,
-        profileScope(profile.value),
+        copyScopeFor(entry, profile.value),
         `${entry.preset.name}（我的修改）`,
       );
       if (!copy) return next.id;

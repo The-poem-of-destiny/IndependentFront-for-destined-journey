@@ -9,7 +9,7 @@
  *   · 指向目录里不存在、或不属于该生成方式的 id = 读取时忽略、照常走默认，
  *     **但不从设置里删掉** —— 受保护内容包锁定时它的预设会暂时缺席，解锁后要回得来。
  */
-import type { ChatPreset } from '../types/types';
+import type { ChatPreset, PresetScope } from '../types/types';
 import {
   createCachedDirectPreset,
   createDirectPreset,
@@ -20,8 +20,8 @@ import {
 export type PresetProfile = 'story' | 'direct' | 'direct_cached';
 /** content = 内容包或占位内容；builtin = 引擎内置；user = 玩家自己的 */
 type PresetOrigin = 'content' | 'builtin' | 'user';
-/** direct 同时覆盖 direct 与 direct_cached 两种生成方式 */
-export type PresetScope = 'story' | 'direct';
+/** 定义在 types.ts；此处转出口，保留既有 import 路径 */
+export type { PresetScope };
 export type PresetSelectionKey = 'activePresetId' | 'directPresetId' | 'directCachedPresetId';
 type PresetDefaultsKey = 'story' | 'direct_main' | 'direct_cached';
 
@@ -56,6 +56,37 @@ export function isBuiltinPresetId(id: string): boolean {
 
 export function profileScope(profile: PresetProfile): PresetScope {
   return profile === 'story' ? 'story' : 'direct';
+}
+
+/**
+ * 预设 scope 是否对该生成方式可见（唯一判定处，UI 不许自己再写一遍）。
+ * 缺省 = 全部；direct = 两种直出；direct_main / direct_cached = 只对那一种。
+ */
+export function presetScopeMatches(
+  scope: PresetScope | undefined,
+  profile: PresetProfile,
+): boolean {
+  switch (scope) {
+    case undefined:
+      return true;
+    case 'story':
+      return profile === 'story';
+    case 'direct':
+      return profile === 'direct' || profile === 'direct_cached';
+    case 'direct_main':
+      return profile === 'direct';
+    case 'direct_cached':
+      return profile === 'direct_cached';
+  }
+}
+
+/**
+ * 复制预设（「复制为我的预设」/ 写时复制）时副本的 scope：
+ * 来源钉死在单一直出方式的保持原样，其余按当前生成方式取 `profileScope`。
+ */
+export function copyScopeFor(entry: { scope?: PresetScope }, profile: PresetProfile): PresetScope {
+  if (entry.scope === 'direct_main' || entry.scope === 'direct_cached') return entry.scope;
+  return profileScope(profile);
 }
 
 /** Agent 设置/默认层的 agentId → 预设生成方式（不对应预设的 agent 返回 null） */
@@ -166,7 +197,7 @@ export function buildPresetCatalog(input: BuildPresetCatalogInput): PresetCatalo
 }
 
 function inScope(entry: PresetCatalogEntry, profile: PresetProfile): boolean {
-  return entry.scope === undefined || entry.scope === profileScope(profile);
+  return presetScopeMatches(entry.scope, profile);
 }
 
 export interface ResolvePresetInput {

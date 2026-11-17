@@ -8,10 +8,14 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPresetCatalog,
   builtinDirectPresets,
+  copyScopeFor,
   normalizePresetSelection,
   PLACEHOLDER_STORY_PRESET_ID,
+  presetScopeMatches,
   resolveEffectivePreset,
   type PresetAgentDefaults,
+  type PresetProfile,
+  type PresetScope,
 } from '../../../src/core/prompts/preset-resolution';
 import { DIRECT_CACHED_PRESET_ID, DIRECT_PRESET_ID } from '../../../src/core/prompts/direct-prompt';
 import type { ChatPreset } from '../../../src/core/types/types';
@@ -206,6 +210,71 @@ describe('resolveEffectivePreset', () => {
         resolveEffectivePreset({ profile, selection: 'mine', agentDefaults: {}, catalog }).presetId,
       ).toBe('mine');
     }
+  });
+
+  it('钉死在 direct_cached 的预设在 direct 下被选中 → staleSelection，回落默认', () => {
+    const catalog = catalogOf([preset('pin-cached', { scope: 'direct_cached' })]);
+    const r = resolveEffectivePreset({
+      profile: 'direct',
+      selection: 'pin-cached',
+      agentDefaults: {},
+      catalog,
+    });
+    expect(r).toMatchObject({
+      presetId: DIRECT_PRESET_ID,
+      staleSelection: true,
+      followsDefault: true,
+      source: 'builtin-default',
+    });
+    const cached = resolveEffectivePreset({
+      profile: 'direct_cached',
+      selection: 'pin-cached',
+      agentDefaults: {},
+      catalog,
+    });
+    expect(cached).toMatchObject({ presetId: 'pin-cached', staleSelection: false });
+  });
+
+  it('旧版 scope=direct 的玩家行在两种直出下都生效（免迁移），story 下不生效', () => {
+    const catalog = catalogOf([preset('legacy', { scope: 'direct' })]);
+    for (const profile of ['direct', 'direct_cached'] as const) {
+      expect(
+        resolveEffectivePreset({ profile, selection: 'legacy', agentDefaults: {}, catalog }),
+      ).toMatchObject({ presetId: 'legacy', staleSelection: false });
+    }
+    expect(
+      resolveEffectivePreset({ profile: 'story', selection: 'legacy', agentDefaults: {}, catalog })
+        .staleSelection,
+    ).toBe(true);
+  });
+});
+
+describe('presetScopeMatches', () => {
+  const table: Array<[PresetScope | undefined, Record<PresetProfile, boolean>]> = [
+    [undefined, { story: true, direct: true, direct_cached: true }],
+    ['story', { story: true, direct: false, direct_cached: false }],
+    ['direct', { story: false, direct: true, direct_cached: true }],
+    ['direct_main', { story: false, direct: true, direct_cached: false }],
+    ['direct_cached', { story: false, direct: false, direct_cached: true }],
+  ];
+  it.each(table)('scope=%s 的可见性', (scope, expected) => {
+    for (const profile of ['story', 'direct', 'direct_cached'] as const) {
+      expect(presetScopeMatches(scope, profile)).toBe(expected[profile]);
+    }
+  });
+});
+
+describe('copyScopeFor', () => {
+  it('来源钉死在单一直出方式 → 保留原 scope', () => {
+    expect(copyScopeFor({ scope: 'direct_main' }, 'direct')).toBe('direct_main');
+    expect(copyScopeFor({ scope: 'direct_cached' }, 'direct_cached')).toBe('direct_cached');
+  });
+
+  it('其余来源 → 按当前生成方式取 profileScope', () => {
+    expect(copyScopeFor({}, 'story')).toBe('story');
+    expect(copyScopeFor({}, 'direct_cached')).toBe('direct');
+    expect(copyScopeFor({ scope: 'direct' }, 'direct')).toBe('direct');
+    expect(copyScopeFor({ scope: 'story' }, 'story')).toBe('story');
   });
 });
 
