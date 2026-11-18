@@ -13,6 +13,8 @@
 3. 新建存档，在准备页明确选择「Agent 模式」「直出（无缓存优化）」或「直出（缓存优化）」。初始为空，选择后才继续建档；确认页再次显示。创建后不可切换，模型和文风设置仍可调整。
 4. 正常聊天。战斗和制作由同一主回复裁定并叙述，战斗可跨楼持续；角色、背包、资源、地图和任务继续使用 app 的原生界面。
 
+📌 2026-11-17 更正（第 4 步，分支 `feat/direct-prose-combat`，未真机验证）：直出战斗默认改为**正文战斗**。新增全局设置 `directStructuredCombat`（默认关），在「Agent 配置 → 直出主生成」与「直出主生成（缓存优化）」两页的「战斗」卡里显示为开关「结构化战斗」，目前置灰不可点，提示「暂未开放」；代码路径保留在设置后面。关闭时战斗在正文里叙述，不再输出 `combat` 块，也不建立跨楼战斗记录；HP/MP/SP 走 `state.characters` 的 replace/delta，状态走 effects；临时敌人不入库，其状态留在正文与 action_info 里。制作不受影响。详见下文「正文战斗」。
+
 无 `metadata.generationMode` 的旧存档按 Agent 运行。新档写入 `agent`、`direct` 或 `direct_cached`，备份、导入与快照保留模式；不提供旧档转换。
 
 ## 请求预算与体验边界
@@ -22,6 +24,23 @@
 记忆回溯、摘要、Story v2 缺摘要补建、归档与维护继续使用现有代码和各自配置，因此一楼总请求数可能超过两次。Agent 模式继续原有多 Agent 流程。
 
 主 AI 一次输出正文、选项、角色档案／经历和结构化状态。代码检查格式、写入范围、引用、库存数量和战斗资源等，并将核心状态与来源消息一起提交；不会重新执行全部战斗／制作公式，也不保证模型算术正确。提供本地骰池供主 AI 使用。战斗终局只写回声明的资源与状态，不额外发放自动战斗经验或 FP。
+
+📌 2026-11-17 补充（请求预算不变）：`directStructuredCombat` 关闭（当前唯一可用状态）时，上段「战斗资源」检查与「战斗终局」写回不再发生，战斗相关的数值变化全部走普通状态写入。请求数不变：仍是每次楼生成尝试至多一次非记忆主请求，正文战斗不另开请求。
+
+### 正文战斗（2026-11-17）
+
+📌 2026-11-17 新增，分支 `feat/direct-prose-combat`，未真机验证。只作用于两种直出（`direct`、`direct_cached`）；Agent 模式的战斗沙盒不变。
+
+- **设置**：`directStructuredCombat` 是全局设置（`UiSettings`，引擎经 `runtime/engine-settings.ts` 注入缝读取，缺省按关）。判定入口 `isDirectStructuredCombatEnabled()`（`src/core/combat/direct-combat.ts`）。界面开关目前锁定为关。
+- **协议**：原 `DIRECT_PROTOCOL` 常量改为 `buildDirectProtocol(structuredCombat)`（`src/core/prompts/direct-prompt.ts`）。关闭时把战斗那一行换成正文战斗指令：战斗写进叙事、不输出战斗块，HP/MP/SP 用 `state.characters` 的 replace/delta，状态用 effects，临时敌人不入库、其状态由正文与 action_info 承载。`direct_state` 与缓存帧分区里去掉 `combat` 键。
+- **解析**：`parseDirectOutput` 新增选项 `structuredCombat`。关闭时模型若仍输出战斗块，整块丢弃，草稿标记 `combatIgnored`，引擎日志记 warn `direct.combat_ignored`；本楼照常接纳，不算失败。
+- **旧记录**：`readDirectCombat` 在关闭时返回 null，已存在的 `worldFlags.directCombat` 记录保持休眠、不删除；`commitDirectTurn` 收到的 combat 为 undefined 时原样保留它。`game-pipeline` 的 `acceptDirectTurn` 在关闭时跳过 `buildDirectCombat`。
+- **后果**：
+  - 缓存直出：静态前缀（协议文字）变了，每个 `direct_cached` 存档会冷建一次会话。
+  - 战斗中途的存档升级后，HP/MP/SP 与状态回到开战前已存的值（战斗投影不再读）。
+  - `isInCombat` 恒为 false，正文战斗期间随机事件与人设编辑锁不再拦截。
+  - 以后重新开放开关时，休眠的旧记录会重新浮现；届时需要定一条过期处理规则。
+  - 私有内容包的直出预设可能仍要求模型输出战斗块（会被丢弃并记 warn）；未用真实模型验证。
 
 新角色复用原生实体组装与作者定义绑定；新装备先入背包，穿戴需明确声明。角色经历、地图旅程、时间与随机事件维护接回既有系统。动作面板只展示结果，不能代替结构化入库。
 
@@ -58,6 +77,7 @@
 - `src/core/combat/direct-combat.ts`：跨楼战斗投影与终局结算。
 - `src/ui/lib/game-pipeline.ts`：独立分支及既有记忆调用。
 - `src/core/state/state-manager.ts`：核心状态与消息原子接纳。
+- 📌 2026-11-17：`src/core/prompts/direct-prompt.ts` 的 `buildDirectProtocol(structuredCombat)` 按设置生成协议；`direct-combat.ts` 的跨楼战斗只在 `directStructuredCombat` 开启时生效，见上文「正文战斗」。
 
 运行：`npm run dev`。Windows 测试如遇临时目录 EPERM，可先将 `TEMP` 与 `TMP` 指向仓内 `node_modules/.cache/vitest-tmp`。
 

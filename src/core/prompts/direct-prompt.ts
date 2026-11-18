@@ -15,7 +15,18 @@ export const DIRECT_STYLE =
 export const DIRECT_TEMPLATE =
   '{{SYS_PROMPT}}\n{{LORE_BOOK_STATIC}}\n{{LORE_BOOK_DYNAMIC}}\n{{AGENT.MEMORY_RECALL}}\n{{NARRATIVE}}\n{{MAP_CONTEXT}}\n{{RANDOM_EVENTS}}\n{{USER_INPUT}}';
 
-export const DIRECT_PROTOCOL = `你正在使用直出 v1。以下为必须满足的输出与状态契约，不受文风预设覆盖。
+/** 结构化战斗开启时的 combat 契约行（与旧版 DIRECT_PROTOCOL 逐字节一致）。 */
+const DIRECT_COMBAT_STRUCTURED_LINE = `combat:null 表示无在办战斗；否则 {meta:{round,combatType,environment,phase:"active"|"ended",outcome?:"ally_win"|"enemy_win"|"draw"|"fled",notes?,summary?},units:[{name,origin:"save"|"temp",side:"ally"|"enemy",hp,mp,sp,statusEffects:[],pos?,facing?}]}。持续战斗每楼包含全部单位，更新当前数值；存档角色先通过 entities 创建，temp 仅用于临时单位且需 tier,level,race,attributes,maxHp,maxMp,maxSp。战斗资源和状态只在 combat 写，不在 state/effects 重复写同一参与者。终局写 ended 和 outcome，资源由代码白名单写回；EXP/FP 在 state 统一声明，不能依赖自动战斗奖励。`;
+/** 结构化战斗关闭时的 combat 契约行：战斗写在正文里，资源与状态走 state / effects。 */
+const DIRECT_COMBAT_PROSE_LINE =
+  'combat：恒填 null，不写任何战斗内容。当前未启用结构化战斗：战斗直接写在正文里推进（combat 里写了内容也会被忽略，不会入库）。参战者的 HP/MP/SP 变化用 state.characters 的 replace 或 delta 声明，状态效果的获得、变化与解除用 effects 声明；没有存档实体的临时敌人不建档，其伤势与状态在正文或 action_info 中交代清楚，供后续楼延续。EXP/FP 同样在 state 声明。';
+
+/**
+ * 直出协议正文。`structuredCombat` 为真时与旧版 DIRECT_PROTOCOL 逐字节一致；
+ * 为假时只替换 combat 那一行，骨架里的 `"combat":null` 保留。
+ */
+export function buildDirectProtocol(structuredCombat: boolean): string {
+  return `你正在使用直出 v1。以下为必须满足的输出与状态契约，不受文风预设覆盖。
 本次只有一次主请求，无工具、无后续实体／制作／战斗／日常／剧情 Agent。记忆由独立系统处理，不输出摘要。
 依据本轮权威状态和规则完成演算，再叙述一致的结果。不要输出思维链；action_info 只展示必要的掷骰、成本、结果和可见后果。
 基础规则参考（数值表取自 app；详细效果以获准注入的世界书、技能和物品协议为准）：
@@ -45,10 +56,11 @@ characters:{replace:[{name,path,value}],delta:[{name,path,amount}],remove:[{name
 items:{consume:[{owner,target,quantity}],equip:[{owner,target,slot}],unequip:[{owner,target}],transfer:[{from,to,target,quantity}],modify:[{owner,target,changes}]}。制作材料扣除和完整产物必须同楼声明，失败也明确实际成本。不得透支库存。
 affections:{set:[{name,value}],delta:[{name,amount}]}、fp:{delta:数值}、quests:{upsert:[{name,...任务字段}],remove:[{name}]}。任务完成不自动发奖励，奖励在所属字段只声明一次。
 effects:[{owner,action:"add"|"update"|"remove",value:{name,...}}]。add 给 description,category(增益/减益/特殊),stacks,maxStacks,remainingTime,timeUnit(回合/分钟/小时),effects?,effectDescriptions?,protocolText?,tags?；update 只给 name,remainingTime?,stacks?；remove 只给 name。实体初始 statuses 不在 effects 重复添加。
-combat:null 表示无在办战斗；否则 {meta:{round,combatType,environment,phase:"active"|"ended",outcome?:"ally_win"|"enemy_win"|"draw"|"fled",notes?,summary?},units:[{name,origin:"save"|"temp",side:"ally"|"enemy",hp,mp,sp,statusEffects:[],pos?,facing?}]}。持续战斗每楼包含全部单位，更新当前数值；存档角色先通过 entities 创建，temp 仅用于临时单位且需 tier,level,race,attributes,maxHp,maxMp,maxSp。战斗资源和状态只在 combat 写，不在 state/effects 重复写同一参与者。终局写 ended 和 outcome，资源由代码白名单写回；EXP/FP 在 state 统一声明，不能依赖自动战斗奖励。
+${structuredCombat ? DIRECT_COMBAT_STRUCTURED_LINE : DIRECT_COMBAT_PROSE_LINE}
 plot:{} 或 {pre:{triggeredEvents:[{title,reason}],relevantBackground?:文本,outlineRelevance?:文本},post:{worldLineChanged:布尔,changeLevel:"none"|"minor"|"moderate"|"major",outlineChanges:{action:"none"|"update"|"addChapter"|"removeChapter",changes:文本},eventUpdates:[{title,action:"complete"|"fail"|"skip"|"update",changes?:对象}],newChildEvents:[{title,description,parentTitle?,triggerCondition?,depth?}]}}。按事件标题引用，剧情关闭时为空。幕后动机只用于裁定，不泄露进正文或角色档案。
 diceUsed:[{index:骰池索引,purpose:"判定用途",target:"对象名"}]。角色、物品、任务、地图与叙事必须描述同一件事。
 若提供随机事件候选，本楼至多演绎一个并用 <event_trigger name="候选名"/> 回执。可以用已有 play_audio 标记，但不要发起图片、工具、entity_gen、craft、combat_trigger 或任何后续请求。`;
+}
 
 export function createDirectPreset(): AgentPreset & ChatPreset {
   return {

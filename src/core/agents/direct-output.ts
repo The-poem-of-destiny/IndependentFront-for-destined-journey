@@ -50,6 +50,13 @@ export interface DirectTurnDraft {
   characterUpdates: CharacterNarrativeUpdate[];
   updates: DirectUpdates;
   raw: string;
+  /** 结构化战斗关闭时模型仍写了非 null 的 combat：已丢弃，仅供告警 */
+  combatIgnored?: true;
+}
+
+export interface ParseDirectOutputOptions {
+  /** 是否启用结构化战斗；缺省 true（严格校验 combat 区块） */
+  structuredCombat?: boolean;
 }
 
 function check(condition: unknown, message: string): asserts condition {
@@ -264,7 +271,12 @@ function validateState(value: Row): void {
   for (const list of Object.values(quests)) for (const row of rows(list, 'quests')) named(row.name);
 }
 
-export function parseDirectOutput(raw: string, diceCount: number): DirectTurnDraft {
+export function parseDirectOutput(
+  raw: string,
+  diceCount: number,
+  options: ParseDirectOutputOptions = {},
+): DirectTurnDraft {
+  const structuredCombat = options.structuredCombat ?? true;
   const blocks = [...raw.matchAll(/<direct_updates\s*>([\s\S]*?)<\/direct_updates\s*>/gi)];
   check(
     blocks.length === 1 && [...raw.matchAll(/<direct_updates\b/gi)].length === 1,
@@ -285,6 +297,15 @@ export function parseDirectOutput(raw: string, diceCount: number): DirectTurnDra
     '需要一个完整的 maintext（或 gametxt）区块',
   );
   const parsed = object(JSON.parse(blocks[0][1]), 'direct_updates');
+  // 结构化战斗关闭：combat 区块一律丢弃（不校验、不要求存在），只记下模型是否写了非 null 内容
+  let combatIgnored = false;
+  if (!structuredCombat) {
+    combatIgnored =
+      Object.prototype.hasOwnProperty.call(parsed, 'combat') &&
+      parsed.combat !== null &&
+      parsed.combat !== undefined;
+    delete parsed.combat;
+  }
   safeValues(parsed);
   const sections = [
     'version',
@@ -294,7 +315,7 @@ export function parseDirectOutput(raw: string, diceCount: number): DirectTurnDra
     'state',
     'effects',
     'plot',
-    'combat',
+    ...(structuredCombat ? ['combat'] : []),
     'diceUsed',
   ];
   keys(parsed, sections, 'direct_updates');
@@ -303,6 +324,7 @@ export function parseDirectOutput(raw: string, diceCount: number): DirectTurnDra
       parsed.version === 1,
     'v1 分区不完整',
   );
+  if (!structuredCombat) parsed.combat = null;
   const time = object(parsed.time, 'time');
   keys(time, ['delta_time'], 'time');
   check(typeof time.delta_time === 'number' && time.delta_time >= 0, 'delta_time 必须是非负分钟数');
@@ -405,6 +427,7 @@ export function parseDirectOutput(raw: string, diceCount: number): DirectTurnDra
     raw,
     characterUpdates: character.updates,
     updates: parsed as unknown as DirectUpdates,
+    ...(combatIgnored ? { combatIgnored: true as const } : {}),
   };
 }
 

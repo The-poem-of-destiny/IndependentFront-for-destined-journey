@@ -12,7 +12,7 @@
 
 ## Story v2 / 内容路由速览
 
-- 直出：准备页（`CreateReadiness.vue`，状态由 `CreatePage.vue` 持有）明确选择存档模式，`create-store.ts` 必填校验并持久化；`game-store.ts` 从存档解析模式与战斗投影，`lib/game-pipeline.ts` 独立直出分支复用原有记忆。`lib/direct-settings.ts` 初始化独立模型配置，设置页不提供档内模式切换。
+- 直出：准备页（`CreateReadiness.vue`，状态由 `CreatePage.vue` 持有）明确选择存档模式，`create-store.ts` 必填校验并持久化；`game-store.ts` 从存档解析模式与战斗投影，`lib/game-pipeline.ts` 独立直出分支复用原有记忆。`lib/direct-settings.ts` 初始化独立模型配置，设置页不提供档内模式切换。📌 2026-11-17：新增全局设置 `directStructuredCombat`（`UiSettings`，默认 false，经引擎 `runtime/engine-settings.ts` 注入缝读取）。「Agent 配置 → 直出主生成」与「直出主生成（缓存优化）」两页各有一张「战斗」卡，开关「结构化战斗」置灰不可点，提示「暂未开放」，功能锁定为关。关闭时 `lib/game-pipeline.ts` 的 `acceptDirectTurn` 跳过 `buildDirectCombat`，`isInCombat` 恒为 false，正文战斗期间随机事件与人设编辑锁不再拦截。契约见 [直出模式 · 正文战斗](../../docs/reference/direct-generation.md#正文战斗2026-11-17)。
 - 缓存直出：建档第三项 `direct_cached`，配置页单列缓存主生成的连接、参数、预设与渠道策略；运行时仍是 `direct_main`。`DebugPanel` 区分缓存读取、写入、普通输入与总输入，缺字段保持未知。详见 [缓存直出](../../docs/reference/direct-generation-cache.md)。
 
 - 原生角色：`stores/content-store.ts` 载入 `characters` 分节；`create-store.ts` 选择并冻结作者定义；`lib/game-pipeline.ts` 暂存主叙事更新，在回合接纳后经 `StateManager` 提交。`CharacterViewerModal.vue` 内嵌 `CharacterChronicleTab.vue`，支持重要筛选、搜索、排序和来源详情；协议与边界见 [角色系统](../../docs/reference/character-system.md)。

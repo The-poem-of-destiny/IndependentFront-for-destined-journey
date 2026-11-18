@@ -21,6 +21,8 @@ import { storyTurnSource } from '@engine/memory/story-memory-source';
 import { withSaveWriteLock } from '@engine/state/state-write-queue';
 import { StateManager } from '@engine/state/state-manager';
 import { resetPromptSessionsForTest } from '@engine/prompts/prompt-session-assembler';
+import { setEngineSettingsProvider } from '@engine/runtime/engine-settings';
+import type { DirectCombatRecord } from '@engine/combat/direct-combat';
 import type { ChatMessage, SaveSlot } from '@engine/types/types';
 import { createDefaultCharacterState } from '@engine/types/types';
 
@@ -171,6 +173,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await withSaveWriteLock(saveId, async () => {});
   vi.restoreAllMocks();
+  setEngineSettingsProvider(undefined);
 });
 
 describe('A05/A06: actual pipeline, orchestrator and message persistence', () => {
@@ -821,6 +824,8 @@ describe.each(['direct', 'direct_cached'] as const)(
     });
 
     it('carries crafted inventory and active combat into later turns, then settles combat once', async () => {
+      // 结构化战斗是显式开启的能力（默认关），本用例验证开启后的跨楼战斗路径
+      setEngineSettingsProvider(() => ({ directStructuredCombat: true }));
       const { game, pipeline } = await directFixture();
       await getDatabase().characters.update('player', { inventory: [{ name: '铁', quantity: 2 }] });
       await game.refreshFromDb(saveId);
@@ -937,6 +942,108 @@ describe.each(['direct', 'direct_cached'] as const)(
           .filter((client: any) => !client.agentId.startsWith('memory_'))
           .map((client: any) => client.agentId),
       ).toEqual(['direct_main', 'direct_main', 'direct_main']);
+    });
+
+    it('结构化战斗默认关：带完整战斗块的回复照常接纳，资源走 state，不建战斗记录', async () => {
+      const { game, pipeline } = await directFixture();
+      vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (this: any) {
+        if (this.agentId !== 'direct_main')
+          return result(
+            this.agentId,
+            JSON.stringify({ segments: [{ content: '旅人挨了一刀。' }] }),
+          );
+        const data = {
+          version: 1,
+          world: {},
+          time: { delta_time: 0 },
+          entities: [],
+          state: { characters: { delta: [{ name: '旅人', path: 'hp', amount: -10 }] } },
+          effects: [],
+          plot: {},
+          diceUsed: [],
+          combat: {
+            meta: { round: 1, combatType: '标准', environment: '街道', phase: 'active' },
+            units: [
+              {
+                name: '旅人',
+                origin: 'save',
+                side: 'ally',
+                hp: 50,
+                mp: 10,
+                sp: 10,
+                statusEffects: [],
+              },
+            ],
+          },
+        };
+        return result(
+          this.agentId,
+          `<maintext>旅人挨了一刀。</maintext><character_updates>{"characters":[]}</character_updates><direct_updates>${JSON.stringify(data)}</direct_updates>`,
+        );
+      });
+      expect(await pipeline.run('迎击敌人')).toBe(true);
+      expect((await getDatabase().characters.get('player'))!.hp).toBe(70);
+      expect(
+        (await getDatabase().saveProfiles.get(saveId))!.worldFlags.directCombat,
+      ).toBeUndefined();
+      expect(game.isInCombat).toBe(false);
+      expect(game.player!.hp).toBe(70);
+    });
+
+    it('结构化战斗默认关：存档里进行中的战斗记录只休眠，不投影、不拦接纳、不被清掉', async () => {
+      const { game, pipeline } = await directFixture();
+      const record: DirectCombatRecord = {
+        sourceTurnKey: 'earlier-turn',
+        state: {
+          meta: {
+            round: 2,
+            combatType: '标准',
+            environment: '街道',
+            coordinateRange: 8,
+            actionOrder: ['旅人'],
+            phase: 'active',
+            regions: [],
+          },
+          units: {
+            旅人: {
+              name: '旅人',
+              tier: 1,
+              level: 1,
+              race: '人类',
+              attributes: { str: 1, dex: 1, con: 1, int: 1, spi: 1 },
+              hp: 30,
+              maxHp: 100,
+              mp: 50,
+              maxMp: 50,
+              sp: 50,
+              maxSp: 50,
+              statusEffects: [],
+              origin: 'save',
+              side: 'ally',
+              pos: 1,
+              facing: 'right',
+              slots: { attack: 1, action: 1 },
+              alive: true,
+              canAct: true,
+              morale: 'steady',
+            },
+          },
+        },
+      };
+      const { getProfile } = await import('@engine/state/save-profile');
+      const profile = await getProfile(saveId);
+      profile.worldFlags.directCombat = record;
+      await getDatabase().saveProfiles.put(JSON.parse(JSON.stringify(profile)));
+      await game.refreshFromDb(saveId);
+      expect(game.player!.hp).toBe(80);
+      expect(game.isInCombat).toBe(false);
+      directNetwork();
+      expect(await pipeline.run('继续前进')).toBe(true);
+      expect((await getDatabase().characters.get('player'))!.hp).toBe(70);
+      expect((await getDatabase().saveProfiles.get(saveId))!.worldFlags.directCombat).toEqual(
+        record,
+      );
+      expect(game.isInCombat).toBe(false);
     });
   },
 );

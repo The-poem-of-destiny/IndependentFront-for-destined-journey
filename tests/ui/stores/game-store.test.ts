@@ -5,7 +5,7 @@
  * 回读必须用合并语义（DB 覆盖同 id / 追加本存档新角色 / 保留内存独有 mock）。
  * DB 层用 fake-indexeddb（tests/setup.ts 全局注入）。
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { setRewriteProseImpl, useGameStore } from '../../../src/ui/stores/game-store';
 import * as database from '@engine/persistence/database';
@@ -31,6 +31,7 @@ import type {
   PlotEvent,
 } from '@engine/types/types';
 import type { CombatMeta, CombatState, CombatUnit } from '@engine/combat/sandbox/types';
+import { setEngineSettingsProvider } from '@engine/runtime/engine-settings';
 
 /**
  * 引擎的 `allocateAttributePoint` 在这里被替身掉 —— 它自己的校验/落库有一整份真实 DB
@@ -261,6 +262,52 @@ function makePlotEvent(overrides: Partial<PlotEvent> = {}): PlotEvent {
 }
 
 // ===== refreshFromDb =====
+
+describe('直出结构化战斗开关（directStructuredCombat）', () => {
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    await initializeDatabase();
+    await clearAllData();
+  });
+  afterEach(() => setEngineSettingsProvider(undefined));
+
+  async function seedDirectSaveWithActiveCombat() {
+    await saveSaveSlot(
+      makeSaveSlot({
+        metadata: { ...makeSaveSlot().metadata, generationMode: 'direct' },
+      }),
+    );
+    await saveCharacter(makeChar({ id: 'hero', name: '理查德', type: 'player', hp: 80 }));
+    await saveSaveProfile(
+      makeProfile({
+        worldFlags: {
+          directCombat: {
+            sourceTurnKey: 'earlier-turn',
+            state: makeCombatState([makeCombatUnit('理查德', 'ally', { hp: 30 })]),
+          },
+        },
+      }),
+    );
+    const store = useGameStore();
+    await store.loadSave(SAVE_ID);
+    return store;
+  }
+
+  it('默认关：存档里进行中的战斗记录不投影，isInCombat 为 false，记录原样保留', async () => {
+    const store = await seedDirectSaveWithActiveCombat();
+    expect(store.directCombat).toBeNull();
+    expect(store.isInCombat).toBe(false);
+    expect(store.player?.hp).toBe(80);
+    expect(store.saveProfile?.worldFlags.directCombat).toBeDefined();
+  });
+
+  it('开启后：同一份记录恢复投影，isInCombat 为 true', async () => {
+    setEngineSettingsProvider(() => ({ directStructuredCombat: true }));
+    const store = await seedDirectSaveWithActiveCombat();
+    expect(store.isInCombat).toBe(true);
+    expect(store.player?.hp).toBe(30);
+  });
+});
 
 describe('refreshFromDb', () => {
   let store: ReturnType<typeof useGameStore>;

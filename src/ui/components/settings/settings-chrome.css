@@ -172,6 +172,15 @@
   outline: 2px solid var(--theme-primary);
   outline-offset: 3px;
 }
+/* 置灰锁定的开关（如「暂未开放」）：整行降透明度、不给手型，滑块不响应 */
+.toggle-label:has(.toggle-input:disabled) {
+  cursor: not-allowed;
+  color: var(--theme-text-muted);
+}
+.toggle-input:disabled + .toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .toggle-row {
   display: flex;
   justify-content: space-between;

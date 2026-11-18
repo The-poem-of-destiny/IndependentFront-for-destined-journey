@@ -538,7 +538,8 @@ export class StateManager {
     patches: StatePatch[];
     messages: readonly import('../types/types').ChatMessage[];
     turnKey: string;
-    combat: import('../combat/direct-combat').DirectCombatRecord | null;
+    /** undefined = 保留既有记录（结构化战斗关闭时休眠）；null = 清除 */
+    combat?: import('../combat/direct-combat').DirectCombatRecord | null;
     eventTrigger?: string;
     isCurrent: () => boolean;
     onCommitStart?: () => void;
@@ -592,7 +593,7 @@ export class StateManager {
               );
               if (settled) setRandomEventFlagsInPlace(profile, settled.flags);
             }
-            profile.worldFlags.directCombat = input.combat;
+            if (input.combat !== undefined) profile.worldFlags.directCombat = input.combat;
             await this.persistProfile(profile);
             for (const patch of input.patches) {
               if (patch.op === 'remove_item' || patch.op === 'transfer_item') {

@@ -37,7 +37,8 @@ import {
   isZonePlaceholderEntry,
 } from '../../../lib/preset-entries';
 import { preprocessPresetForPreview, findTailAssistantEntry } from '@engine/prompts/preset-loader';
-import { DIRECT_PROTOCOL, DIRECT_TEMPLATE } from '@engine/prompts/direct-prompt';
+import { buildDirectProtocol, DIRECT_TEMPLATE } from '@engine/prompts/direct-prompt';
+import { isDirectStructuredCombatEnabled } from '@engine/combat/direct-combat';
 import {
   copyScopeFor,
   presetProfileForAgent,
@@ -81,7 +82,8 @@ const resolvedPresetTemplate = computed(() => {
 
 // Get the context template for Story agent (from injected entries or default block)
 function getStoryContextTemplate(): string {
-  if (isDirectSettingsProfile(props.agentId)) return DIRECT_PROTOCOL + '\n' + DIRECT_TEMPLATE;
+  if (isDirectSettingsProfile(props.agentId))
+    return buildDirectProtocol(isDirectStructuredCombatEnabled()) + '\n' + DIRECT_TEMPLATE;
   const preset = activePreset.value;
   if (!preset?.settings?.prompts) return '';
   const dynamicEntry = preset.settings.prompts.find(

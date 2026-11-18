@@ -9,6 +9,20 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-17 直出正文战斗（结构化战斗锁定为关）｜分支 `feat/direct-prose-combat`，**进行中，未真机验证**
+
+- 新全局设置 `directStructuredCombat`（`UiSettings` + 经 `runtime/engine-settings.ts` 注入缝读取的引擎设置），默认 false，引擎缺省也按 false。只作用于两种直出（`direct`、`direct_cached`）；Agent 模式战斗沙盒不变。
+- 设置界面：「Agent 配置 → 直出主生成」与「直出主生成（缓存优化）」两页各加一张「战斗」卡，开关「结构化战斗」置灰不可点，提示「暂未开放」。功能锁定为关，代码路径保留在设置后面。
+- 协议：`src/core/prompts/direct-prompt.ts` 的 `DIRECT_PROTOCOL` 常量改为 `buildDirectProtocol(structuredCombat)`。关闭时战斗那一行换成正文战斗指令：战斗写进叙事、不输出战斗块；HP/MP/SP 走 `state.characters` 的 replace/delta，状态走 effects；临时敌人不入库，状态留在正文与 action_info。`direct_state` 与缓存帧分区去掉 `combat` 键。
+- 解析与接纳：`parseDirectOutput` 新选项 `structuredCombat`，关闭时丢弃模型给的战斗块（草稿标记 `combatIgnored`，引擎日志 warn `direct.combat_ignored`），本楼不判失败。`readDirectCombat` 关闭时返回 null，已有的 `worldFlags.directCombat` 只休眠不删；`commitDirectTurn` 收到 undefined 的 combat 时原样保留。判定入口 `isDirectStructuredCombatEnabled()`（`src/core/combat/direct-combat.ts`）；`game-pipeline` 的 `acceptDirectTurn` 关闭时跳过 `buildDirectCombat`。
+- 后果与已知取舍：
+  - 每个 `direct_cached` 存档会冷建一次会话（静态前缀变了）。
+  - 战斗中途的存档升级后，HP/MP/SP 与状态回到开战前已存的值。
+  - `isInCombat` 恒为 false，正文战斗期间随机事件与人设编辑锁不再拦截。
+  - 以后重新开放开关时，休眠的旧记录会重新浮现，需要届时定过期处理规则。
+  - 私有内容包的直出预设可能仍要求模型输出战斗块（会被丢弃并记 warn）；未用真实模型验证。
+- 文档：`docs/reference/direct-generation.md`（新增「正文战斗」节，使用第 4 步与请求预算段加 📌 注记）、`docs/reference/direct-generation-cache.md`、`src/core/AGENTS.md`、`src/ui/AGENTS.md` 加 📌 2026-11-17 注记。
+
 ### 2026-11-17 预设 scope 细分到单一直出模式｜分支 `feat/preset-mode-scope`，**未真机验证**
 
 - `PresetScope`（`src/core/types/types.ts`）从 `'story' | 'direct'` 扩为 `'story' | 'direct' | 'direct_main' | 'direct_cached'`：缺省 = 所有模式；`direct` = 两种直出都可见（旧含义，无迁移）；`direct_main` = 仅无缓存直出；`direct_cached` = 仅缓存直出。

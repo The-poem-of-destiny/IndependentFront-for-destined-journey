@@ -200,6 +200,15 @@ export type UiSettings = {
    */
   randomEventsFrequency: number;
 
+  // ═══ 直出战斗 ═══
+  /**
+   * 直出模式是否启用结构化战斗（全局设置，只对 direct_main / direct_cached 存档生效）。
+   * 关 = 战斗由正文直接叙述，资源与状态变化随普通状态更新写入。
+   * 引擎侧经 `engine-settings.ts` 的注入缝读（main.ts 的 provider 转发），不进 AppSettings。
+   * 当前设置页锁定为关（「暂未开放」）。
+   */
+  directStructuredCombat: boolean;
+
   // ═══ 记忆 & 缓存 ═══
   memoryRecallMode: 'llm' | 'embedding';
   embeddingSourceId: string;

@@ -610,6 +610,24 @@ const readableBooks = computed(() =>
     </div>
   </AppCard>
 
+  <!-- 战斗（仅直出两页）：全局设置 directStructuredCombat，暂未开放，锁定为关 -->
+  <AppCard v-if="isDirectSettingsProfile(agentId)" padding="md" class="detail-card">
+    <h4>战斗</h4>
+    <div class="toggle-row" data-testid="direct-structured-combat">
+      <label class="toggle-label"
+        ><input
+          type="checkbox"
+          class="toggle-input"
+          :checked="s.directStructuredCombat"
+          disabled
+        /><span class="toggle-slider" /><span>结构化战斗</span></label
+      >
+    </div>
+    <p class="form-hint combat-hint">
+      暂未开放：直出模式下战斗由正文直接叙述，生命、法力、体力与状态变化随普通状态更新写入。
+    </p>
+  </AppCard>
+
   <!-- 世界书读取范围（只读；由内容声明决定，内容计划 §7.2） -->
   <AppCard padding="md" class="detail-card">
     <h4>世界书读取范围</h4>
@@ -799,6 +817,9 @@ const readableBooks = computed(() =>
   font-size: 0.8rem;
   color: var(--theme-text-muted);
   white-space: nowrap;
+}
+.combat-hint {
+  margin: var(--theme-spacing-sm) 0 0;
 }
 .binding-stale-msg {
   margin: var(--theme-spacing-sm) 0 0;

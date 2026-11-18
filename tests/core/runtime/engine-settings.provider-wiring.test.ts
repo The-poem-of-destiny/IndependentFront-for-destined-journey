@@ -40,4 +40,14 @@ describe('EngineSettings provider 接线', () => {
       providerAt,
     );
   });
+
+  it('🔴 直出结构化战斗开关也在 provider 回调里面现读', () => {
+    const source = Object.values(UI_SOURCES)[0] ?? '';
+    const providerAt = source.indexOf('setEngineSettingsProvider(');
+    const providerEnd = source.indexOf('});', providerAt);
+    const fieldAt = source.indexOf('directStructuredCombat: s.directStructuredCombat');
+    expect(providerAt).toBeGreaterThanOrEqual(0);
+    expect(fieldAt).toBeGreaterThan(providerAt);
+    expect(fieldAt).toBeLessThan(providerEnd);
+  });
 });

@@ -26,6 +26,7 @@ describe('getEngineSettings', () => {
       snapshotRetentionMode: DEFAULT_SETTINGS.snapshotRetentionMode,
       randomEventsEnabled: true,
       randomEventsFrequency: 1,
+      directStructuredCombat: false,
     });
   });
 
@@ -35,12 +36,14 @@ describe('getEngineSettings', () => {
       snapshotRetentionMode: 'dense',
       randomEventsEnabled: false,
       randomEventsFrequency: 2,
+      directStructuredCombat: true,
     }));
     expect(getEngineSettings()).toEqual({
       maxSnapshotsPerSave: 7,
       snapshotRetentionMode: 'dense',
       randomEventsEnabled: false,
       randomEventsFrequency: 2,
+      directStructuredCombat: true,
     });
   });
 
@@ -58,6 +61,14 @@ describe('getEngineSettings', () => {
     expect(getEngineSettings().randomEventsFrequency).toBe(0.5);
   });
 
+  it('直出结构化战斗：没注册 / provider 未给时默认关（正文战斗）', () => {
+    expect(getEngineSettings().directStructuredCombat).toBe(false);
+    setEngineSettingsProvider(() => ({ maxSnapshotsPerSave: 3 }));
+    expect(getEngineSettings().directStructuredCombat).toBe(false);
+    setEngineSettingsProvider(() => ({ directStructuredCombat: true }));
+    expect(getEngineSettings().directStructuredCombat).toBe(true);
+  });
+
   it('每次调用都重新问 provider —— 设置页改完不必重启', () => {
     let limit = 10;
     setEngineSettingsProvider(() => ({ maxSnapshotsPerSave: limit }));
@@ -73,6 +84,7 @@ describe('getEngineSettings', () => {
       snapshotRetentionMode: 'dense',
       randomEventsEnabled: true,
       randomEventsFrequency: 1,
+      directStructuredCombat: false,
     });
   });
 

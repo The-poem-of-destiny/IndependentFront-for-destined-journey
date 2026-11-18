@@ -332,3 +332,36 @@ describe('缓存直出：重建时机滑块', () => {
     expect(hint()).toContain('15 楼会话');
   });
 });
+
+describe('直出：战斗卡（结构化战斗暂未开放）', () => {
+  const settingsBag = () => state.config.settings as unknown as Record<string, unknown>;
+  beforeEach(() => {
+    settingsBag().directStructuredCombat = false;
+  });
+
+  it.each(['direct_main', 'direct_cached'])('%s 页出现「战斗」卡，开关置灰且带说明', (agentId) => {
+    const wrapper = card(agentId);
+    const row = wrapper.get('[data-testid="direct-structured-combat"]');
+    expect(wrapper.text()).toContain('战斗');
+    expect(row.text()).toContain('结构化战斗');
+    const input = row.get('input[type="checkbox"]').element as HTMLInputElement;
+    expect(input.disabled).toBe(true);
+    expect(input.checked).toBe(false);
+    expect(wrapper.text()).toContain('暂未开放：直出模式下战斗由正文直接叙述');
+  });
+
+  it.each(['story', 'dispatcher', 'prose_rewrite'])('%s 页没有战斗卡', (agentId) => {
+    const wrapper = card(agentId);
+    expect(wrapper.find('[data-testid="direct-structured-combat"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('结构化战斗');
+  });
+
+  it('点击置灰的开关不会改动设置', async () => {
+    const wrapper = card('direct_main');
+    const row = wrapper.get('[data-testid="direct-structured-combat"]');
+    await row.get('input').trigger('click');
+    await row.get('label').trigger('click');
+    await row.get('input').trigger('change');
+    expect(settingsBag().directStructuredCombat).toBe(false);
+  });
+});
