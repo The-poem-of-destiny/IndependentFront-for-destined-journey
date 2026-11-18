@@ -118,6 +118,13 @@ describe('settings-store', () => {
     expect(store.settings.developerMode).toBe(false);
   });
 
+  it('直出结构化战斗默认关闭，恢复默认后仍为关', () => {
+    expect(store.settings.directStructuredCombat).toBe(false);
+    store.settings.directStructuredCombat = true;
+    store.resetAll();
+    expect(store.settings.directStructuredCombat).toBe(false);
+  });
+
   it('完整运行日志默认关闭、粒度默认 trace，且独立于开发者模式', async () => {
     expect(store.settings.engineLogEnabled).toBe(false);
     expect(store.settings.engineLogLevel).toBe('trace');

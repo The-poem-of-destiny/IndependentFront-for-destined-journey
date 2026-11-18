@@ -25,11 +25,11 @@ import type { ChatRequest } from './agent-client';
 import { buildAgentMessagesAsync } from '../prompts/agent-templates';
 import { buildStoryContextV2Messages, type StoryContextV2Input } from '../prompts/story-context-v2';
 import { selectStoryLore } from '../content/lore-selection';
-import { DIRECT_PROTOCOL } from '../prompts/direct-prompt';
+import { buildDirectProtocol } from '../prompts/direct-prompt';
 import { resolveTemplateWithGlobals } from '../prompts/template-resolver';
 import { buildLlmRequest } from '../api/llm-adapter';
 import { parseDirectOutput, type DirectTurnDraft } from './direct-output';
-import type { DirectCombatRecord } from '../combat/direct-combat';
+import { isDirectStructuredCombatEnabled, type DirectCombatRecord } from '../combat/direct-combat';
 import { logEngine } from '../runtime/engine-logger';
 
 export interface DirectDie {
@@ -83,6 +83,10 @@ export async function generateDirectTurn(
   cache?: { ticket: DirectCacheTicket };
 }> {
   const { config, endpoint, configs, context, presets } = input;
+  // 结构化战斗开关整轮只取一次：协议、状态、缓存分区与解析口径必须一致
+  const structuredCombat = isDirectStructuredCombatEnabled();
+  const protocol = buildDirectProtocol(structuredCombat);
+  const combatRecord = structuredCombat ? input.combat : null;
   const dice = input.dice ?? rollDirectDice();
   let messages: ChatRequest['messages'];
   let frame: DirectContextFrame | undefined;
@@ -142,7 +146,7 @@ export async function generateDirectTurn(
       c.type === 'player' ||
       c.present ||
       context.userInput.includes(c.name) ||
-      input.combat?.state.units[c.name],
+      combatRecord?.state.units[c.name],
   );
   const state = {
     characters: relevant.map(
@@ -159,12 +163,12 @@ export async function generateDirectTurn(
     fp: context.statData?.['命运点数'],
     affections: context.affections,
     openingPrompt: context.openingPrompt === context.userInput ? undefined : context.openingPrompt,
-    combat: input.combat?.state ?? null,
+    ...(structuredCombat ? { combat: combatRecord?.state ?? null } : {}),
     plotSettings: context.plotSettings,
     plot: { outline: context.plotOutline, events: context.plotEvents },
   };
   messages = ensureUserMessage([
-    { role: 'system', content: DIRECT_PROTOCOL },
+    { role: 'system', content: protocol },
     ...messages,
     {
       role: 'user',
@@ -195,15 +199,15 @@ export async function generateDirectTurn(
     }).outputBudget ?? 0;
   let ticket: DirectCacheTicket | undefined;
   if (input.cache && frame) {
-    const { characters: _characters, combat, ...rest } = state;
+    // 结构化战斗关闭时 state 不含 combat 键，sections 也就不会出现 combat 分区
+    const { characters: _characters, ...rest } = state;
     frame.prefix = [
-      { role: 'system', content: DIRECT_PROTOCOL + '\n' + DIRECT_CACHE_PROTOCOL },
+      { role: 'system', content: protocol + '\n' + DIRECT_CACHE_PROTOCOL },
       ...frame.prefix,
     ];
     frame.sections = {
       ...frame.sections,
       ...rest,
-      combat,
       ...buildDirectCharacterSections(relevant),
     };
     const endpointSignature = {
@@ -304,7 +308,15 @@ export async function generateDirectTurn(
     result.requestMessages = messages;
     if (result.error) throw new Error(result.error);
     rejectedOutput = true;
-    const draft = parseDirectOutput(result.rawResponse, dice.length);
+    const draft = parseDirectOutput(result.rawResponse, dice.length, { structuredCombat });
+    if (draft.combatIgnored)
+      logEngine(
+        'warn',
+        'direct.combat_ignored',
+        '结构化战斗未启用，已忽略模型输出的 combat 区块',
+        undefined,
+        { agentId: 'direct_main' },
+      );
     return {
       draft,
       result,

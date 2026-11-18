@@ -44,6 +44,11 @@ export interface EngineSettings {
   randomEventsEnabled: boolean;
   /** 随机事件频率系数（0.5 / 1 / 2），乘进每次 MTTH 掷骰的权重 */
   randomEventsFrequency: number;
+  /**
+   * 直出（`direct` / `direct_cached`）是否启用结构化 `combat` 区块。
+   * 关 = 战斗写在正文里推进，资源与状态走 `state.characters` / `effects`；Agent 模式不受影响。
+   */
+  directStructuredCombat: boolean;
 }
 
 /**
@@ -65,6 +70,8 @@ const FALLBACK: EngineSettings = {
   snapshotRetentionMode: DEFAULT_SETTINGS.snapshotRetentionMode,
   randomEventsEnabled: RANDOM_EVENTS_ENABLED_DEFAULT,
   randomEventsFrequency: RANDOM_EVENTS_FREQUENCY_DEFAULT,
+  // 直出结构化战斗默认关：真源同为前端 UiSettings，未接 provider 时按正文战斗处理
+  directStructuredCombat: false,
 };
 
 type Provider = () => Partial<EngineSettings> | undefined;
@@ -95,6 +102,7 @@ export function getEngineSettings(): EngineSettings {
       snapshotRetentionMode: partial.snapshotRetentionMode ?? FALLBACK.snapshotRetentionMode,
       randomEventsEnabled: partial.randomEventsEnabled ?? FALLBACK.randomEventsEnabled,
       randomEventsFrequency: partial.randomEventsFrequency ?? FALLBACK.randomEventsFrequency,
+      directStructuredCombat: partial.directStructuredCombat ?? FALLBACK.directStructuredCombat,
     };
   } catch (err) {
     console.error('[engine-settings] provider 抛异常，按缺省值继续:', err);

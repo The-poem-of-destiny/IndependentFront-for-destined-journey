@@ -2,6 +2,7 @@ import type { CharacterState, SaveProfile, StatePatch, StatusEffect } from '../t
 import type { CombatantInput, CombatMeta, CombatState, CombatStatusEffect } from './sandbox/types';
 import { collectInvariantViolations, createCombatState, toSaveStatus } from './sandbox/state';
 import { buildCombatSettlementPatches, isCombatOutcome } from './sandbox/settlement';
+import { getEngineSettings } from '../runtime/engine-settings';
 
 export interface DirectCombatOutput {
   meta: Pick<CombatMeta, 'round' | 'combatType' | 'environment' | 'phase'> &
@@ -22,9 +23,16 @@ export interface DirectCombatRecord {
   state: CombatState;
 }
 
+/** 直出是否启用结构化战斗（全局设置，经 engine-settings 注入缝读取）。 */
+export function isDirectStructuredCombatEnabled(): boolean {
+  return getEngineSettings().directStructuredCombat;
+}
+
 export function readDirectCombat(
   profile: Pick<SaveProfile, 'worldFlags'> | null | undefined,
 ): DirectCombatRecord | null {
+  // 结构化战斗关闭时按「无在办战斗」处理：存档里的记录只是休眠，不删除，重新开启后原样恢复
+  if (!isDirectStructuredCombatEnabled()) return null;
   return profile?.worldFlags.directCombat ?? null;
 }
 

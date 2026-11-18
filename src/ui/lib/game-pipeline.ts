@@ -18,6 +18,7 @@ import { buildDirectPatches } from '@engine/agents/direct-output';
 import type { DirectTurnDraft } from '@engine/agents/direct-output';
 import {
   buildDirectCombat,
+  isDirectStructuredCombatEnabled,
   projectDirectCombatCharacters,
   readDirectCombat,
 } from '@engine/combat/direct-combat';
@@ -698,13 +699,19 @@ export class GamePipeline {
       definitions: context.characterDefinitions ?? [],
       sourceTurnKey: this.currentStoryTurnKey,
     });
-    const combat = buildDirectCombat(
-      draft.updates.combat,
-      readDirectCombat(this.game.saveProfile),
-      built.characters,
-      built.patches,
-      this.currentStoryTurnKey,
-    );
+    // 结构化战斗关闭时不建战斗记录、不追加结算补丁，combat 传 undefined 让休眠记录原样保留
+    //（传 null 会清掉存档里的 worldFlags.directCombat）
+    const combat: Omit<ReturnType<typeof buildDirectCombat>, 'record'> & {
+      record: ReturnType<typeof buildDirectCombat>['record'] | undefined;
+    } = isDirectStructuredCombatEnabled()
+      ? buildDirectCombat(
+          draft.updates.combat,
+          readDirectCombat(this.game.saveProfile),
+          built.characters,
+          built.patches,
+          this.currentStoryTurnKey,
+        )
+      : { record: undefined, patches: [] };
     const manager = createStateManager(this.saveId, {
       onMaintenanceWarning: (warning) => this.notify(warning, 'warning'),
     });
