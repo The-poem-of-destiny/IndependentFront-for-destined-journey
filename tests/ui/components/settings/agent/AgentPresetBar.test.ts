@@ -117,6 +117,47 @@ describe('AgentPresetBar —— 预设型 Agent 的分组下拉', () => {
     expect(w.find('[data-testid="preset-origin"]').text()).toBe('引擎内置');
   });
 
+  it('单一直出方式的预设只在那一页列出；scope=direct 的玩家预设两页都列', async () => {
+    await savePreset(preset('pin-main', '只给直出', { scope: 'direct_main' }));
+    await savePreset(preset('pin-cached', '只给缓存直出', { scope: 'direct_cached' }));
+    await savePreset(preset('both-direct', '两种直出', { scope: 'direct' }));
+    await loadPresets();
+    const optionIds = (agentId: string) =>
+      mountBar(agentId)
+        .findAll('option')
+        .map((o) => o.attributes('value'));
+    const main = optionIds('direct_main');
+    expect(main).toEqual(expect.arrayContaining(['pin-main', 'both-direct']));
+    expect(main).not.toContain('pin-cached');
+    const cached = optionIds('direct_cached');
+    expect(cached).toEqual(expect.arrayContaining(['pin-cached', 'both-direct']));
+    expect(cached).not.toContain('pin-main');
+    const story = optionIds('story');
+    for (const id of ['pin-main', 'pin-cached', 'both-direct']) expect(story).not.toContain(id);
+  });
+
+  it('「复制为我的预设」：来源钉死单一直出方式时副本保持原 scope', async () => {
+    await savePreset(preset('pin-cached', '只给缓存直出', { scope: 'direct_cached' }));
+    await loadPresets();
+    mockSettings.directCachedPresetId = 'pin-cached';
+    const w = mountBar('direct_cached');
+    await w.find('[data-testid="preset-duplicate"]').trigger('click');
+    await vi.waitFor(() => expect(mockSettings.directCachedPresetId).not.toBe('pin-cached'));
+    const copy = await getDatabase().presets.get(mockSettings.directCachedPresetId);
+    expect(copy?.scope).toBe('direct_cached');
+  });
+
+  it('「复制为我的预设」：未钉死的来源按当前生成方式（直出 → direct）', async () => {
+    await savePreset(preset('free', '不限方式'));
+    await loadPresets();
+    mockSettings.directCachedPresetId = 'free';
+    const w = mountBar('direct_cached');
+    await w.find('[data-testid="preset-duplicate"]').trigger('click');
+    await vi.waitFor(() => expect(mockSettings.directCachedPresetId).not.toBe('free'));
+    const copy = await getDatabase().presets.get(mockSettings.directCachedPresetId);
+    expect(copy?.scope).toBe('direct');
+  });
+
   it('原先选的预设已不存在：给出一行提示，「恢复默认」可点并清掉选择', async () => {
     mockSettings.activePresetId = 'gone';
     const w = mountBar('story');

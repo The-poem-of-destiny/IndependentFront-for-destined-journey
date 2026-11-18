@@ -39,7 +39,7 @@ import {
   deleteApiRpmPolicy as persistDeleteApiRpmPolicy,
 } from '@engine/persistence/database';
 import { credentialIdFor, replaceApiRpmPolicies } from '@engine/api/api-rpm-limiter';
-import type { ApiRpmPolicy, ChatPreset } from '@engine/types/types';
+import type { ApiRpmPolicy, ChatPreset, PresetScope } from '@engine/types/types';
 import {
   DEFAULT_IMAGE_MAX_PER_HOUR,
   DEFAULT_IMAGE_MAX_PER_MESSAGE,
@@ -110,7 +110,7 @@ export interface PresetItem {
   createdAt: number;
   updatedAt: number;
   /** 适用的生成方式（同 `ChatPreset.scope`） */
-  scope?: 'story' | 'direct';
+  scope?: PresetScope;
   /** 出厂预设的播种指纹（同 `ChatPreset.factorySeedHash`；玩家预设不带） */
   factorySeedHash?: string;
 }

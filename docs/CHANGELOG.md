@@ -9,6 +9,15 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-17 预设 scope 细分到单一直出模式｜分支 `feat/preset-mode-scope`，**未真机验证**
+
+- `PresetScope`（`src/core/types/types.ts`）从 `'story' | 'direct'` 扩为 `'story' | 'direct' | 'direct_main' | 'direct_cached'`：缺省 = 所有模式；`direct` = 两种直出都可见（旧含义，无迁移）；`direct_main` = 仅无缓存直出；`direct_cached` = 仅缓存直出。
+- `src/core/prompts/preset-resolution.ts` 新增 `presetScopeMatches`（可见性唯一判定，目录解析、`AgentPresetBar`、`PresetManager` 共用）与 `copyScopeFor`（「复制为我的预设」与写时复制：单一模式的来源保持原 scope，其余取当前生成方式）。导入仍取 `profileScope`（两种直出共用 `direct`）；引擎内置直出预设保持 `direct`。`settings-store` 的 `PresetItem.scope` 改用同一类型。
+- 内容侧（私有仓）：内容包声明 `agentDefaults.agents.direct_cached = {name, model: "", presetId}`（仅设置档案，不是世界书 audiences 身份）；Prime 1.18 直出预设（`d1180001`，scope `direct_main`）为 `direct_main` 默认，Prime 1.18 直出缓存预设（`d1180002`，scope `direct_cached`）为 `direct_cached` 默认。
+- 🔴 兼容性：旧版引擎的下拉不列出单一模式 scope 的预设（默认解析仍有效），用到它们的内容包需要包含此改动的引擎版本。
+- 文档：`docs/reference/direct-generation.md`、`docs/reference/direct-generation-cache.md`、`src/ui/AGENTS.md` 加 📌 2026-11-17 注记。
+- 测试：`tests/core/prompts/preset-resolution.test.ts`、`tests/ui/components/settings/agent/AgentPresetBar.test.ts`、`PresetManager.copy-on-write.test.ts` 补用例。
+
 ### 2026-11-17 美化规则启动竞态 + `<gametxt>` 同义信封｜**未真机验证**
 
 - 起因：gemini-3.8-flash 自动试玩（Agent 模式、未装内容包）时，正文里的 `[名字]("台词")` 对话与命定核心的 `<lilith>` 块原样显示；重新加载后同一存档渲染正常。另有 `<gametxt>` / `</gametxt>` 每回合都原样显示。

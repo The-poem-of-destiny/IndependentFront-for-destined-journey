@@ -43,6 +43,14 @@
 - story 的默认预设以 `agentDefaults.agents.story.presetId` 为准，**不是** `presets` 数组的第一项；只有它缺席时才取第一个 story 范围的内容预设。
 - 玩家侧：设置里选择键为空即「跟随默认」。内容包自带直出默认时，引擎内置预设仍在「预设」下拉的「引擎内置」组里可选；内容包与引擎内置的预设都是只读的，改动会先复制成玩家预设。解析实现见 `src/core/prompts/preset-resolution.ts`。
 
+📌 2026-11-17 补充：预设的 `scope` 从两值扩成四值（`src/core/types/types.ts` 的 `PresetScope`），判定唯一入口是 `presetScopeMatches`：
+
+- 不写 `scope` = 所有生成方式可见；`story` = 仅剧情；`direct` = 两种直出都可见（旧含义不变，旧行无需迁移）；
+- `direct_main` = 仅无缓存直出；`direct_cached` = 仅缓存直出。
+- 内容包可以用后两者把直出预设钉在单一模式上，例如内容仓的 Prime 1.18 直出预设（`direct_main`，作 `direct_main` 的默认）与直出缓存预设（`direct_cached`，作 `direct_cached` 的默认）。`agentDefaults.agents.direct_cached` 只是设置档案，**不是**世界书 audiences 身份，读取权限仍按 `direct_main` 授予（见上文缓存直出说明）。
+- 复制（「复制为我的预设」与写时复制）单一模式的预设时副本保留原 `scope`，其余情况取当前生成方式的 scope（`copyScopeFor`）；导入仍按当前生成方式取 `direct`（两种直出共用）。引擎内置直出预设保持 `direct`。
+- 🔴 兼容性：旧版引擎不认识 `direct_main` / `direct_cached`，这类预设不会出现在下拉里（默认解析仍能命中）。用到这两个值的内容包需要包含此改动的引擎版本。
+
 ## 实现与验证
 
 - `src/core/agents/direct-main.ts`：完整上下文、骰池、单请求。

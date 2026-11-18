@@ -27,7 +27,9 @@ import { useContentStore } from '../../../stores/content-store';
 import { usePresets } from '../../../composables/usePresets';
 import { contentSourceLabel } from './preset-bar-labels';
 import {
+  copyScopeFor,
   presetProfileForAgent,
+  presetScopeMatches,
   profileScope,
   type PresetCatalogEntry,
 } from '@engine/prompts/preset-resolution';
@@ -85,7 +87,7 @@ const defaultEntry = computed<PresetCatalogEntry | null>(() => {
 
 function inScope(entry: PresetCatalogEntry): boolean {
   const p = profile.value;
-  return !!p && (entry.scope === undefined || entry.scope === profileScope(p));
+  return !!p && presetScopeMatches(entry.scope, p);
 }
 
 const defaultId = computed(() => defaultEntry.value?.preset.id ?? '');
@@ -148,7 +150,9 @@ async function duplicateEffective(): Promise<void> {
   const id = effective.value?.presetId;
   if (!p || !id) return;
   try {
-    const copy = await duplicateAsUser(id, profileScope(p));
+    // 来源钉死在单一直出方式时副本保持原 scope；其余按当前生成方式
+    const source = catalog.value.find((e) => e.preset.id === id);
+    const copy = await duplicateAsUser(id, copyScopeFor(source ?? {}, p));
     if (!copy) return;
     selectPreset(p, copy.id);
     ui.toast(`已复制为我的预设「${copy.name}」并切换`, 'success');

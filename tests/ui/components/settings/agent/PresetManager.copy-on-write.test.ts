@@ -96,6 +96,23 @@ describe('PresetManager —— 只读预设写时复制', () => {
     expect('factorySeedHash' in copy).toBe(false);
   });
 
+  it('来源钉死在 direct_cached 的只读预设：写时复制的副本保持 direct_cached', async () => {
+    const pinned: ChatPreset = { ...PACK, id: 'pack-cached', scope: 'direct_cached' };
+    mockStore.projectAgentDefaults = {
+      agents: { direct_cached: { presetId: pinned.id, preset: pinned } },
+    };
+    registerFactoryPresetIds([pinned.id]);
+    await savePreset(JSON.parse(JSON.stringify(pinned)));
+    const w = mount(PresetManager, { props: { agentId: 'direct_cached' } });
+    await flushPromises();
+    await w.find('.subprompt-toggle').trigger('click');
+    await vi.waitFor(() => expect(mockSettings.directCachedPresetId).toBeTruthy());
+    await flushPromises();
+    const copy = await getDatabase().presets.get(mockSettings.directCachedPresetId);
+    expect(copy?.name).toBe('内容默认（我的修改）');
+    expect(copy?.scope).toBe('direct_cached');
+  });
+
   it('副本是玩家自己的：再改一次直接写副本，不再复制', async () => {
     const w = mount(PresetManager, { props: { agentId: 'story' } });
     await flushPromises();

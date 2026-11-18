@@ -754,6 +754,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │   │                            systemPrompt 与上下文模板两项覆写
 │   │   │   │                            📌 2026-11-14（S-16）：删掉正在用的预设后选择键回到「跟随默认」，
 │   │   │   │                              toast 点名改用的默认预设；删除失败带原因报错
+│   │   │   │                            📌 2026-11-17：可见性改调引擎 `presetScopeMatches`（scope 四值：
+│   │   │   │                              缺省 / story / direct = 两种直出 / direct_main / direct_cached 各仅一种），
+│   │   │   │                              组件里不再自己比 `profileScope`；「复制为我的预设」的副本 scope 取
+│   │   │   │                              `copyScopeFor`（单一直出方式的来源保持原样）；导入仍取 `profileScope`
 │   │   │   ├── AgentParamsCard.vue   ← API 池 + LLM 旋钮 + 世界书卡（共用 agentCfg/setAgentField）。
 │   │   │   │                            📌 2026-11-14：原「LLM 参数」拆成三张卡 ——「采样参数」「上下文」「缓存会话」
 │   │   │   │                              （后者仅 `direct_cached`：渠道缓存支持 + 两个重建时机滑块）。来源角标与
@@ -787,6 +791,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               空白预设已删（新预设只能复制或导入）。本组件只管生效预设的内容，
 │   │   │                               且对只读预设**写时复制**：先复制成「<原名>（我的修改）」并切换，
 │   │   │                               改动落在副本，原预设不动（`persistPreset`）。
+│   │   │                             📌 2026-11-17：条目目录按引擎 `presetScopeMatches` 过滤；写时复制的副本
+│   │   │                               scope 取 `copyScopeFor`（来源是 direct_main / direct_cached 时保持原样）。
 │   │   │   ├── agent-list.ts         ← 9 个 Agent 的展示元数据 + getDefaultTemplateForAgent
 │   │   │   │                            （story 走 PresetManager、image_prompt 走 ImagePromptCard（D53）、
 │   │   │   │                              plot_* / memory_summary 走各自分区，故不在这张表里）
