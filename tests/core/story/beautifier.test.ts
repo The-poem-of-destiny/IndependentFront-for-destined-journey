@@ -13,6 +13,10 @@ import {
   collectActiveSignalsFromEntries,
   mergeRules,
   processRules,
+  getBuiltinRules,
+  DIALOGUE_CARD_RULE_ID,
+  DIALOGUE_CARD_PATTERN,
+  DIALOGUE_CARD_FLAGS,
 } from '../../../src/core/story/beautifier';
 import type { BeautifierRule } from '../../../src/core/types/types';
 
@@ -365,5 +369,91 @@ describe('processRules — item_info/task_info 卡片', () => {
     // 不崩溃，未匹配原文被转义成纯文本
     expect(typeof out).toBe('string');
     expect(out).toContain('&lt;item_info&gt;');
+  });
+});
+
+// ========== 对话卡片 pattern ==========
+
+describe('对话卡片 pattern（DIALOGUE_CARD_PATTERN）', () => {
+  const dialogueRegex = () => new RegExp(DIALOGUE_CARD_PATTERN, DIALOGUE_CARD_FLAGS);
+
+  it('内置规则引用同一组常量', () => {
+    const card = getBuiltinRules().find((r) => r.id === DIALOGUE_CARD_RULE_ID);
+    expect(card).toBeDefined();
+    expect(card?.pattern).toBe(DIALOGUE_CARD_PATTERN);
+    expect(card?.flags).toBe(DIALOGUE_CARD_FLAGS);
+  });
+
+  const hits: Array<{ text: string; name: string; mood?: string; body: string }> = [
+    { text: '[约翰]("你好。")', name: '约翰', body: '你好。' },
+    { text: '[约翰](“你好。”)', name: '约翰', body: '你好。' },
+    { text: '[约翰]（"你好。"）', name: '约翰', body: '你好。' },
+    { text: '[约翰] ("你好")', name: '约翰', body: '你好' },
+    { text: '**[约翰]**("你好")', name: '约翰', body: '你好' },
+    { text: '[约翰]{愤怒}("你好")', name: '约翰', mood: '愤怒', body: '你好' },
+    { text: '[约翰]｛低声｝（「你好」）', name: '约翰', mood: '低声', body: '你好' },
+    { text: '［约翰］(『你好』)', name: '约翰', body: '你好' },
+    { text: '[灰刃·科尔]("他说"走吧"。")', name: '灰刃·科尔', body: '他说"走吧"。' },
+  ];
+
+  it.each(hits)('命中：$text', ({ text, name, mood, body }) => {
+    const matches = [...text.matchAll(dialogueRegex())];
+    expect(matches).toHaveLength(1);
+    const m = matches[0]!;
+    // 整段文本是一张卡
+    expect(m[0]).toBe(text);
+    expect(m[1]).toBe(name);
+    expect(m[2]).toBe(mood);
+    expect(m[3]).toBe(body);
+  });
+
+  const misses = [
+    '[链接](http://x)',
+    '[约翰]："你好"',
+    '【约翰】("你好")',
+    '[约\n翰]("你好")',
+    '[约翰]\n("你好")',
+    '[约翰]("你好\n\n后文没有闭合',
+    // CRLF 的空行同样是段落边界
+    '[约翰]("你好\r\n\r\n下一段才闭合")',
+    '[约翰]("你好\r\n  \r\n下一段才闭合")',
+    // Markdown 图片不是对话卡片
+    '![图](“说明”)',
+    '![约翰]("你好")',
+    // 纯数字 / 空白的「名字」是脚注引文
+    '[1]("引文")',
+    '[ 12 ]("引文")',
+    '［３］("引文")',
+  ];
+
+  it('CRLF 单换行仍可跨行，名字不吞 \\r', () => {
+    const m = [...'[约翰]("第一行\r\n第二行")'.matchAll(dialogueRegex())];
+    expect(m).toHaveLength(1);
+    expect(m[0]![1]).toBe('约翰');
+    expect(m[0]![3]).toBe('第一行\r\n第二行');
+  });
+
+  it('名字里有数字但不全是数字照样命中', () => {
+    const m = [...'[卫兵2]("站住")'.matchAll(dialogueRegex())];
+    expect(m).toHaveLength(1);
+    expect(m[0]![1]).toBe('卫兵2');
+  });
+
+  it.each(misses)('不命中：%j', (text) => {
+    expect(dialogueRegex().test(text)).toBe(false);
+  });
+
+  it('性能护栏：20 万字无匹配文本与未闭合样本都能快速完成', () => {
+    const plain = '风吹过荒原，[旧地图]上没有标出这条路。'.repeat(10_000).slice(0, 200_000);
+    const unclosed = ('[约翰]("' + '他迟疑了一下，'.repeat(20) + '\n').repeat(1_000);
+
+    for (const text of [plain, unclosed]) {
+      const start = performance.now();
+      const count = [...text.matchAll(dialogueRegex())].length;
+      const elapsed = performance.now() - start;
+      expect(count).toBe(0);
+      // 护栏只拦灾难性回溯（秒级到分钟级），阈值放宽到 10 秒免得慢 CI 抖红
+      expect(elapsed).toBeLessThan(10_000);
+    }
   });
 });

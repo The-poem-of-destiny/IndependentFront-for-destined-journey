@@ -44,6 +44,25 @@ export function escapeHtmlBasic(str: string): string {
 
 // ========== Built-in Rules (Legacy) ==========
 
+/** 内置对话卡片规则的 id（native 渲染按此识别对话卡片匹配段）。 */
+export const DIALOGUE_CARD_RULE_ID = 'builtin-dialogue-card';
+
+/**
+ * 对话卡片规则的正则源码：`[名字]{情绪/动作}("台词")`。
+ *
+ * 捕获组：1 = 名字，2 = 情绪/动作（可空），3 = 台词。
+ * 兼容全角方括号/花括号/圆括号、中英文各式引号与「」『』、名字两侧的 Markdown 粗体星号，
+ * 以及名字与括号之间的空格；台词内可含引号与单个换行，但遇到空行（段落边界）即放弃匹配。
+ * 名字不可跨行，名字后接冒号或换行再接台词都不算对话卡片。
+ *
+ * 🔴 私有内容仓 `fated_poem_independent_assets` 的预设美化规则（`builtin-dialogue-card`）
+ *    使用同一个 pattern，两处**手工同步**：改这里必须同步改那边，反之亦然。
+ */
+export const DIALOGUE_CARD_PATTERN = String.raw`(?<!!)\*{0,2}[\[［](?![0-9０-９\s]+[\]］])\*{0,2}([^\[\]［］*\r\n]{1,40})\*{0,2}[\]］]\*{0,2}[ \t]*(?:[{｛]([^{}｛｝\r\n]{0,60})[}｝])?[ \t]*[(（][ \t]*["“”„「『＂]((?:(?!\r?\n[ \t]*\r?\n)[\s\S])*?)["”“」』＂][ \t]*[)）]`;
+
+/** 对话卡片规则的正则 flags（与内容仓同步）。 */
+export const DIALOGUE_CARD_FLAGS = 'gm';
+
 /**
  * 返回内置美化规则列表。
  *
@@ -54,11 +73,11 @@ export function escapeHtmlBasic(str: string): string {
 export function getBuiltinRules(): BeautifierRule[] {
   return [
     {
-      id: 'builtin-dialogue-card',
+      id: DIALOGUE_CARD_RULE_ID,
       name: '对话卡片',
       scope: 'maintext',
-      pattern: '\\[([^\\]]+)\\](?:\\{([^}]*)\\})?\\(\\"([^\\"]*)\\"\\)',
-      flags: 'gm',
+      pattern: DIALOGUE_CARD_PATTERN,
+      flags: DIALOGUE_CARD_FLAGS,
       replacement:
         '<div class="dialogue-card">' +
         '<div class="dialogue-header">' +

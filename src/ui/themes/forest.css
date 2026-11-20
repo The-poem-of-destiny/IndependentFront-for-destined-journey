@@ -28,6 +28,10 @@
   --theme-success: #3f7554;
   --theme-warning: #956c28;
   --theme-error: #a94747;
+  /* 行动面板分节色相（总览·准备 / 出手 / 检定；结算用 --theme-success） */
+  --theme-hue-info: #3d6488;
+  --theme-hue-strike: #a8452f;
+  --theme-hue-check: #6a4f8f;
 
   --theme-hp: #b95b5f;
   --theme-mp: #4d75ac;

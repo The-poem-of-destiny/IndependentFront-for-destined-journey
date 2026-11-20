@@ -125,6 +125,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   按当前存档合并预设规则与用户规则，交给统一 narrative renderer 编译。
 │   │                                   autoEnable 解析与 BeautifierSection **同口径** ——
 │   │                                   绑的是**启用的世界书条目 uid**，不是角色名
+│   │                                   📌 2026-11-19：上面「CombatMessageFlow 复用」不实 —— 战斗中栏从没接过美化管线，
+│   │                                   本文件的消费方只有 BeautifiedNarrative（含设置页规则预览）
 │   ├── useAssetImage.ts             ← [素材] 渲染缝：(name,type?) → {url,isVideo,row}，世代号守卫 + 引用计数索引
 │   │                                   `options.variant` 指定表情/差分（与 name/type 同属"要解析什么"，
 │   │                                   故收 getter）—— 位置参数已被注入缝占了，在 options 包**后面**
@@ -384,6 +386,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── content-startup-chain.ts     ← 🆕 [2026-11-14] 启动期内容链（见上方 App.vue 注），永不 reject
 │   ├── map-place-search.ts          ← 🆕 [2026-11-14 / MAP-03] 势力地图按名字找地方：地块 / 中层 / 势力名
 │   │                                   **精确子串**匹配（不做拼音/模糊，ADR-31 落位契约），每条带选中块与取景块
+│   ├── action-panel.ts              ← 🆕 [2026-11-19] `<action_info>` 行动面板的**纯解析器**（永不抛）：
+│   │                                   `splitActionInfo`（正文 → 文本 / 面板片段；`partial` 裁流式半截残标签，
+│   │                                   `bareSheets` 只给战斗流 —— 标签外整行 `{标题}` + 竖线行也当面板）/
+│   │                                   `parseActionPanel`（分节 / 行 / 格 + 结论色）/ `summaryCells` / `highlightValue` /
+│   │                                   `sectionHue` / `rulesClaimActionInfo`（启用规则能否整块匹配正文里的闭合面板）。
+│   │                                   渲染在 `components/game/ActionPanel.vue`；原 combat-view 的
+│   │                                   `parseCombatNarrative` 一族已删，用例迁到 tests/ui/lib/action-panel.test.ts
 │   └── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
 │
 ├── themes/                          ← 🔴 主题 CSS **住在这里，不在 lib/**：
@@ -1186,6 +1195,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               ★设置页的 RuleEditorModal 预览也挂它 —— 编辑器与正文同一条链
 │   │   │                               📌 2026-11-16（特效层）：闸门打开且需要动效的段落改交 NarrativeParagraph，
 │   │   │                               其余照旧渲染裸 `<p>`
+│   │   │                               📌 2026-11-19：`actionPanels` prop 已删，`<action_info>` 面板拆分**常开**（Agent 与
+│   │   │                               直出都生效，`lib/action-panel.ts` 的 `splitActionInfo` + ActionPanel 渲染，流式裁半截
+│   │   │                               残标签）。唯一例外：定稿消息、美化生效且有启用的 maintext 规则能整块匹配正文里的闭合面板
+│   │   │                               （`rulesClaimActionInfo`）时让位给规则、不拆。内置对话卡片的原生分支改交
+│   │   │                               DialogueCard；本文件与 ChatFlow 里的旧 `.dialogue-*` / `.action-panel` 样式已删。
+│   │   │                               特效层把面板当非段落块（once 档整块浮现）
+│   │   ├── ActionPanel.vue          ← 🆕 [2026-11-19] 行动面板渲染：每分节一个原生 `<details>`（默认收起，
+│   │   │                               `defaultOpen` 初始展开），标题条右侧 ≤3 个关键格 chip，展开体两列等宽网格；
+│   │   │                               色相取 `--theme-hue-*`。收 `raw` 或已解析的 `panel`，空面板不渲染。
+│   │   │                               🔴 全程文本插值、不走 v-html（面板是模型原文）
+│   │   ├── DialogueCard.vue         ← 🆕 [2026-11-19] 内置对话卡片（`DIALOGUE_CARD_RULE_ID`）的原生渲染：
+│   │   │                               props 名字 / 情绪（可空）/ 台词 = pattern 捕获组 1/2/3，文本插值。
+│   │   │                               🔴 `.dialogue-card/-header/-name/-mood/-body` 类名是契约（主题与
+│   │   │                               `styles/integrated-game-surfaces.css` 按全局类名覆盖），别改名
 │   │   ├── NarrativeParagraph.vue   ← 🆕 [2026-11-16 / 特效层] 正文一个段落的三种呈现：`stream`（逐片墨迹洇开，
 │   │   │                               `lib/narrative-reveal.ts`）/ `ink`（整段一次浮现）/ `plain`，可叠加名字下划线。
 │   │   │                               🔴 根永远是一个 `<p>`，textContent 与裸 `<p>{{ text }}</p>` 逐字相同；落定后只剩一个文本节点
@@ -1278,6 +1301,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                  旧 `CombatActionBar/ActionCard/Header` 组件一并删除。
 │   │   │                                  现行战斗真源 = `src/core/combat/sandbox/` +
 │   │   │                                  `docs/planning/2026-10-02-combat-decode-entitygen-plan.md`
+│   │   │                               📌 2026-11-19：CombatMessageFlow 的面板（含顶部「战况总览」，默认展开）改由
+│   │   │                               `ActionPanel.vue` 渲染，切分用 `splitActionInfo(text, { bareSheets: true })`；
+│   │   │                               `combat-view.ts` 的 `parseCombatNarrative` / `parsePanelRow` / `flowBlocksForChunk` /
+│   │   │                               `CombatFlowBlock` 已删
 │   ├── fx/                          ← 🆕 [2026-11-16 / 特效层，实验分支] 界面特效的叶子覆盖层，全部 `aria-hidden`、
 │   │                                   `pointer-events: none`、只在 `useFxEnabled()` 为真时 `v-if` 挂载；
 │   │                                   🔴 特效不写进主题样式表、不借主题伪元素（约定与层级表见 docs/design.md §6.4）

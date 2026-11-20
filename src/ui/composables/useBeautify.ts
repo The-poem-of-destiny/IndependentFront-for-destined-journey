@@ -1,5 +1,6 @@
 /**
- * useBeautify — 文本美化 composable（从 ChatFlow.vue 抽出，CombatMessageFlow 复用）
+ * useBeautify — 文本美化 composable（从 ChatFlow.vue 抽出；消费方是 BeautifiedNarrative，
+ * 含设置页规则预览。战斗中栏 CombatMessageFlow 不走美化管线）
  *
  * 职责：按当前存档合并预设规则与用户规则，供统一 narrative renderer 编译。
  * autoEnable 解析以当前存档为准（命定核心/启用角色的世界书条目 uid），

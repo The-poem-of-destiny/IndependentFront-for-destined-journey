@@ -1,5 +1,6 @@
 /**
- * combat-view.test.ts — C6 战斗展示层纯函数（数据源 CombatState → 视图投影 + AI 输出解析）。
+ * combat-view.test.ts — C6 战斗展示层纯函数（数据源 CombatState → 视图投影）。
+ * AI 输出的面板解析已迁到 lib/action-panel.ts，用例见 tests/ui/lib/action-panel.test.ts。
  */
 import { describe, expect, it } from 'vitest';
 import type { CombatState, CombatUnit } from '@engine/combat/sandbox/types';
@@ -8,8 +9,6 @@ import {
   currentActor,
   isAwaitingPlayer,
   orderedUnits,
-  parseCombatNarrative,
-  parsePanelRow,
   posToPercent,
   statusViewsOf,
 } from '../../../../../src/ui/components/game/combat/combat-view';
@@ -123,50 +122,5 @@ describe('statusViewsOf / axisTicks / posToPercent', () => {
     expect(posToPercent(4, 8)).toBe(50);
     expect(posToPercent(99, 8)).toBe(100);
     expect(posToPercent(-1, 8)).toBe(0);
-  });
-});
-
-describe('parseCombatNarrative — AI 输出 → 叙事 / 面板块', () => {
-  it('{标题} + | 行 | → 面板；纯文本 → 叙事', () => {
-    const blocks = parseCombatNarrative(
-      ['雨点砸在石栏上。', '{战况总览}', '| 理查德 | HP 78/100 |', '| 骷髅兵 | HP 40/40 |'].join(
-        '\n',
-      ),
-    );
-    expect(blocks[0]).toEqual({ kind: 'narrative', text: '雨点砸在石栏上。' });
-    expect(blocks[1]).toEqual({
-      kind: 'panel',
-      title: '战况总览',
-      rows: [
-        { label: '理查德', value: 'HP 78/100' },
-        { label: '骷髅兵', value: 'HP 40/40' },
-      ],
-    });
-  });
-
-  it('<action_info> 包裹 → 无标题面板；单格冒号行拆标签', () => {
-    const blocks = parseCombatNarrative('<action_info>\n| 检定: 17\n| 伤害: 620\n</action_info>');
-    expect(blocks).toHaveLength(1);
-    expect(blocks[0]).toMatchObject({ kind: 'panel' });
-    const panel = blocks[0] as Extract<(typeof blocks)[number], { kind: 'panel' }>;
-    expect(panel.rows).toEqual([
-      { label: '检定', value: '17' },
-      { label: '伤害', value: '620' },
-    ]);
-  });
-
-  it('空文本 / 坏格式永不抛', () => {
-    expect(parseCombatNarrative('')).toEqual([]);
-    expect(parseCombatNarrative('{')).toEqual([{ kind: 'narrative', text: '{' }]);
-  });
-});
-
-describe('parsePanelRow', () => {
-  it('两格 → 标签/值；单格冒号 → 拆分；单格无冒号 → 只值', () => {
-    expect(parsePanelRow('| 攻方 → 守方 | 理查德 → 骷髅兵 |')).toEqual([
-      { label: '攻方 → 守方', value: '理查德 → 骷髅兵' },
-    ]);
-    expect(parsePanelRow('| 伤害: 620 |')).toEqual([{ label: '伤害', value: '620' }]);
-    expect(parsePanelRow('| 状态: [胜利] |')).toEqual([{ label: '状态', value: '[胜利]' }]);
   });
 });

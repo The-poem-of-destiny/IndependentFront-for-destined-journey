@@ -9,6 +9,23 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-19 行动面板与对话卡片重做｜分支 `feat/action-panel-dialogue-card`，**未真机验证**
+
+- `<action_info>` 面板解析常开：`BeautifiedNarrative.vue` 删 `actionPanels` prop（ChatFlow 两处绑定随之删除），Agent 与直出两种模式都把面板切出来交给新组件 `ActionPanel.vue`；流式中裁掉结尾半截残标签。唯一例外：美化生效且有启用的、scope 覆盖 maintext、深度范围含本条、能整块匹配正文里闭合面板的规则时，让位给规则不拆（`rulesClaimActionInfo`）。
+- 新纯解析器 `src/ui/lib/action-panel.ts`（`splitActionInfo` / `parseActionPanel` / `summaryCells` / `highlightValue` / `sectionHue` / `rulesClaimActionInfo`）。`bareSheets` 选项只给战斗流：标签外整行 `{标题}` + 竖线行也算面板，保留原 `parseCombatNarrative` 的行为。
+- 战斗中栏 `CombatMessageFlow.vue`：AI 正文面板与顶部「战况总览」（默认展开）都改用 `ActionPanel`，删 `.panel-box/.pb-*` 样式；`combat-view.ts` 删 `parseCombatNarrative` / `parsePanelRow` / `flowBlocksForChunk` / `CombatFlowBlock`，用例迁到 `tests/ui/lib/action-panel.test.ts`。
+- 内置对话卡片：原生分支改交新组件 `DialogueCard.vue`（名字 / 情绪 / 台词 = 捕获组 1/2/3）；`beautifier.ts` 导出 `DIALOGUE_CARD_RULE_ID/PATTERN/FLAGS`，pattern 放宽。删 BeautifiedNarrative 与 ChatFlow 里的旧 `.dialogue-*` / `.action-panel` 样式（含硬编码 rgba 与 `#fff`）。主题新增 `--theme-hue-*` 变量。
+- `ActionPanel` 新增 `defaultOpen` prop（战况总览用）。`useBeautify.ts` 头注释更正：战斗中栏不复用美化管线。
+- 审查修复（同日）：
+  - 定稿消息里未闭合的 `<action_info>` 只吃到第一个空行或第一个不像面板的行为止，其后仍是正文（流式中仍吃到结尾）；闭标签前又出现开标签时，前一个按未闭合处理。
+  - 让位判据收紧：规则必须能编译，并且能把本条正文里一整块闭合的 `<action_info>…</action_info>` 从头到尾匹配下来；流式中不让位。
+  - 结论色：否定前缀（未 / 不 / 没 / 没有 / 未能 / 无法）接成功类词判失败；混合分句取最后一个结论词；闪避 / 格挡 / 招架标签下的裸结论按出手方翻转（`闪避: 失败` = 成功色）。
+  - 值高亮：箭头比较两侧第一个数（分数取分子、去千分位）；算式里的项、运算链、括号坐标、冒号后的负值不再当增减上色。箭头归一与去尾正则改成线性，加超长输入护栏测试。
+  - 对话卡片 pattern：CRLF 空行同样算段落边界；排除 Markdown 图片 `![…](…)` 与纯数字名（脚注引文）。私有内容仓 `builtin-dialogue-card/rule.json` 同步为逐字节相同的 pattern。
+  - 面板配色：标题条底 14%、标题字 12px 且向正文色收 50%；chip 底 10%、字向正文色收 60%。按 10 个主题 token 测算（面板底按 window/card 合成近似），标题最差 4.98:1、chip 最差 4.87:1（均为 misty-lilac）。
+- 文档：`src/ui/AGENTS.md` 加 📌 2026-11-19 注记与新文件行。
+- 验证：`npm run gates` 等，见 PR 描述；未在浏览器或真机上走查。
+
 ### 2026-11-17 直出正文战斗（结构化战斗锁定为关）｜分支 `feat/direct-prose-combat`，**进行中，未真机验证**
 
 - 新全局设置 `directStructuredCombat`（`UiSettings` + 经 `runtime/engine-settings.ts` 注入缝读取的引擎设置），默认 false，引擎缺省也按 false。只作用于两种直出（`direct`、`direct_cached`）；Agent 模式战斗沙盒不变。

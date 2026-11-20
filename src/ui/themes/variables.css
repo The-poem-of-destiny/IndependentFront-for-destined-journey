@@ -41,6 +41,10 @@
   --theme-success: #58b083;
   --theme-warning: #d9a441;
   --theme-error: #e0685c;
+  /* 行动面板分节色相（总览·准备 / 出手 / 检定；结算用 --theme-success） */
+  --theme-hue-info: #7c9fc4;
+  --theme-hue-strike: #d0735f;
+  --theme-hue-check: #a58bd0;
 
   /* 资源色 — 降饱和配暖底 */
   --theme-hp: #e2685c;

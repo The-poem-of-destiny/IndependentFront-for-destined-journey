@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { isDirectMode } from '@engine/story/generation-mode';
-
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import InputBar from './InputBar.vue';
 import type { AgentActivityRun, ChatMessage, SystemEvent } from '@engine/types/types';
@@ -886,7 +884,6 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
         >
           <div class="bubble bubble-narrative-full">
             <BeautifiedNarrative
-              :action-panels="isDirectMode(game.generationMode)"
               class="narrative-body"
               :text="msg.content"
               :depth="messageDepth(msg.id)"
@@ -1040,7 +1037,6 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
       <div v-if="isGenerating && streamingText" class="bubble-row bubble-row-narrative">
         <div class="bubble bubble-narrative-full">
           <BeautifiedNarrative
-            :action-panels="isDirectMode(game.generationMode)"
             class="narrative-body streaming-content"
             :text="streamingText"
             streaming
@@ -1284,52 +1280,6 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
 }
 .narrative-body :deep(p:last-child) {
   margin-bottom: 0;
-}
-/* 对话卡片内的段落不缩进（对话格式不需要首行缩进） */
-.narrative-body :deep(.dialogue-body p) {
-  text-indent: 0;
-}
-
-/* ===== 对话卡片 ===== */
-.narrative-body :deep(.dialogue-card) {
-  margin: 10px 0;
-  padding: 10px 14px;
-  border-radius: var(--theme-radius-md, 8px);
-  background: color-mix(in srgb, var(--theme-surface-muted) 80%, transparent);
-  border: 1px solid color-mix(in srgb, var(--theme-primary) 22%, var(--theme-card-border));
-}
-.narrative-body :deep(.dialogue-header) {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-.narrative-body :deep(.dialogue-avatar) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--theme-primary);
-  color: #fff;
-  font-size: 0.7rem;
-  font-weight: 700;
-  font-family: system-ui, sans-serif;
-  overflow: hidden;
-  white-space: nowrap;
-}
-.narrative-body :deep(.dialogue-name) {
-  font-weight: 700;
-  font-size: 0.82rem;
-  color: var(--theme-accent, var(--theme-primary));
-  font-family: system-ui, sans-serif;
-}
-.narrative-body :deep(.dialogue-body) {
-  font-size: 0.9rem;
-  color: var(--theme-text-primary);
-  line-height: 1.6;
-  padding-left: 36px;
 }
 
 .bubble-prefix {
