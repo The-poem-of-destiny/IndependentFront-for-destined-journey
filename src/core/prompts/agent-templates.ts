@@ -14,6 +14,7 @@
  *   const messages = buildAgentMessages(agentId, ctx, configs, worldBooks, presets);
  */
 
+import { filterNsfwMessages, nsfwEnabled } from '../content/nsfw-filter';
 import type {
   AgentPromptTemplate,
   AgentContext,
@@ -955,7 +956,7 @@ export async function buildAgentMessagesAsync(
   }
 
   onRendered?.({ ...ctx, ejsPass }, entryTexts);
-  const messages = buildAgentMessages(
+  const assembled = buildAgentMessages(
     agentId,
     { ...ctx, ejsPass },
     configs,
@@ -963,6 +964,9 @@ export async function buildAgentMessagesAsync(
     presets,
     localParams,
   );
+  // 露骨内容开关：组装完的整份消息再过一遍（角色档案 / CHARACTER_STATE / Agent 提示词等
+  // 不经世界书渲染的文本都在这里收口；调试面板看到的也是过滤后的版本）
+  const messages = assembled && filterNsfwMessages(assembled, nsfwEnabled());
   logEngine(
     'debug',
     'prompt.messages',

@@ -33,6 +33,8 @@
  * 🔴 不走 Delta 会话：本模块每轮从当前状态完整组装（计划 §10.3）。
  * 🔴 EJS 世界书本轮只预渲染一次，同一份 pass 供第 1 区与第 5 区挑段。
  */
+import { isPresetPromptActive } from '../content/nsfw-filter';
+import { filterNsfwText } from '../content/nsfw-filter';
 import type {
   AgentConfig,
   AgentContext,
@@ -228,7 +230,9 @@ export async function buildStoryContextV2Messages(
   const entries = ensureStoryZonePlaceholders(
     (Array.isArray(rawPrompts) ? rawPrompts : []) as PresetEntryLike[],
   ).entries;
-  const normalEntries = entries.filter((e) => !isStoryZonePlaceholder(e) && e.enabled !== false);
+  const normalEntries = entries.filter(
+    (e) => !isStoryZonePlaceholder(e) && isPresetPromptActive(e),
+  );
   const processed = preprocessPresetEntryContents(normalEntries);
   const processedByEntry = new Map(normalEntries.map((e, i) => [e, processed[i]]));
 
@@ -288,8 +292,8 @@ export async function buildStoryContextV2Messages(
           (sum, r) =>
             sum +
             (r.entry.extra?.lore?.evaluation === 'onCreate'
-              ? ctx.fixedLore![r.key].text.length
-              : r.entry.content.length) +
+              ? filterNsfwText(ctx.fixedLore![r.key].text).length
+              : filterNsfwText(r.entry.content).length) +
             2,
           0,
         );
@@ -359,7 +363,8 @@ export async function buildStoryContextV2Messages(
     activeRouted.map((routed) => {
       const entry = routed.entry;
       if (entry.extra?.lore?.evaluation === 'onCreate')
-        return [entry, ctx.fixedLore![routed.key].text] as const;
+        // 开局冻结的是原文，露骨内容开关在这里（读取时）过滤
+        return [entry, filterNsfwText(ctx.fixedLore![routed.key].text)] as const;
       const text = rendered.entryTexts.get(entry) ?? '';
       const missing = missingLoreDefinitions(text, definitions.values);
       if (missing.length) missingDefinitions[routed.key] = missing;

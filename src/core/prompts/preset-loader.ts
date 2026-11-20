@@ -13,6 +13,7 @@
  *   - EJS (<%.*%>) → 保留原样
  */
 
+import { isPresetPromptActive } from '../content/nsfw-filter';
 import type { AgentPreset } from '../types/types';
 import { isStoryZonePlaceholder } from './story-zone-placeholders';
 import { logEngine } from '../runtime/engine-logger';
@@ -220,7 +221,7 @@ export function findTailAssistantEntry(
   ]
     // 🔴 只认「对象」：`prompts` 是第三方可编辑的 ST JSON，可能混进 null/数字。直接读
     //    `.enabled` 会 throw —— 而本函数在 UI 的 computed 里，渲染期一炸就是白屏。
-    .filter((p) => p !== null && typeof p === 'object' && p.enabled !== false)
+    .filter((p) => p !== null && typeof p === 'object' && isPresetPromptActive(p))
     .sort((a, b) => (a.injection_order ?? 0) - (b.injection_order ?? 0));
   const tail = enabled[enabled.length - 1];
   if (!tail || tail.role !== 'assistant') return null;
@@ -292,7 +293,7 @@ export function assemblePresetContent(
   //    `getPresetPrefill` / orchestrator 抽出来追加到**消息末尾**（prefix 续写）；并进来会
   //    让同一段文字既在 system 又在末尾出现两次。开关在预设级（`settings.prefill`）。
   const sorted = [...prompts]
-    .filter((p: any) => p.enabled !== false && p.role !== 'assistant')
+    .filter((p: any) => isPresetPromptActive(p) && p.role !== 'assistant')
     .sort((a: any, b: any) => (a.injection_order ?? 0) - (b.injection_order ?? 0));
 
   // 快速检查：是否有任何条目需要预处理
@@ -407,7 +408,7 @@ export function preprocessPresetForPreview(
   if (!prompts || !Array.isArray(prompts)) return '';
 
   const sorted = [...prompts]
-    .filter((p: any) => p.enabled !== false && !isStoryZonePlaceholder(p))
+    .filter((p: any) => isPresetPromptActive(p) && !isStoryZonePlaceholder(p))
     .sort((a: any, b: any) => (a.injection_order ?? 0) - (b.injection_order ?? 0));
 
   // Pass 1: 收集所有 setvar → 变量表 (后者覆盖)

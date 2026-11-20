@@ -107,6 +107,16 @@
           @keydown.enter.stop="editEntry(idx)"
         >
           {{ entry.name || '(未命名)' }}
+          <span
+            v-if="nsfwBadge(entry)"
+            class="nsfw-badge"
+            :title="
+              nsfwBadge(entry) === 'entry'
+                ? '整条标记为露骨内容：露骨内容开关关闭时不进入游戏'
+                : '含露骨段落标记：露骨内容开关关闭时这些段落不进入游戏'
+            "
+            >{{ nsfwBadge(entry) === 'entry' ? 'NSFW' : 'NSFW 段落' }}</span
+          >
         </span>
         <label class="col-toggle toggle-label-inline" :title="entry.enabled ? '已启用' : '已禁用'">
           <input
@@ -278,6 +288,7 @@ import { ref, computed, watch, nextTick } from 'vue';
 import type { WorldBook, WorldBookEntry } from '@engine/types/types';
 import { createUserWorldBookUid } from '@engine/content/worldbook-uid';
 import { loreEntryAudiences } from '@engine/content/lore-routing';
+import { hasNsfwMarkup, isNsfwEntry } from '@engine/content/nsfw-filter';
 import { AGENT_LIST, agentDisplayName } from './agent/agent-list';
 import { confirmDialog } from '../../lib/confirm-dialog';
 
@@ -543,9 +554,30 @@ watch(
     entries.value = JSON.parse(JSON.stringify(props.book.entries));
   },
 );
+
+/**
+ * 露骨内容徽章（本编辑器是「直接查看条目」的入口，正文永远显示原文、不按开关过滤，
+ * 只用徽章告诉作者哪些条目受开关影响）。
+ */
+function nsfwBadge(entry: WorldBookEntry): 'entry' | 'inline' | null {
+  if (isNsfwEntry(entry)) return 'entry';
+  return hasNsfwMarkup(entry.content ?? '') ? 'inline' : null;
+}
 </script>
 
 <style scoped>
+.nsfw-badge {
+  display: inline-block;
+  margin-left: var(--theme-spacing-xs);
+  padding: 0 6px;
+  border: 1px solid var(--theme-error);
+  border-radius: var(--theme-radius-sm);
+  color: var(--theme-error);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+
 .audience-panel {
   margin: 0 0 var(--theme-spacing-md);
   padding: var(--theme-spacing-sm) var(--theme-spacing-md) var(--theme-spacing-md);

@@ -67,6 +67,8 @@ export interface CharacterDefinition extends CharacterAgeHint {
    * 选中定义即把该条目并入存档白名单。
    */
   loreEntry?: string;
+  /** 整条露骨标记：露骨内容开关关闭时，该角色不出现在建档选择与角色候选中。 */
+  nsfw?: boolean;
   assets: CharacterAssetRef[];
   past: CharacterPastEntry[];
   legacyEntry?: { bookId: string; uid: string; token: string };

@@ -209,6 +209,15 @@ export type UiSettings = {
    */
   directStructuredCombat: boolean;
 
+  // ═══ 内容分级 ═══
+  /**
+   * 露骨内容开关（全局）。关 = 内容包里 `<nsfw>` 段落与 `nsfw: true` 整条标记的内容
+   * 不发给模型、不在游戏界面显示（世界书编辑器与提示词编辑器仍显示原文），
+   * 同时把图像分级上限钳到 `sensitive`。引擎经 `engine-settings.ts` 注入缝读。
+   * 设计：docs/planning/2026-11-20-explicit-content-switch-design.md
+   */
+  nsfwContent: boolean;
+
   // ═══ 记忆 & 缓存 ═══
   memoryRecallMode: 'llm' | 'embedding';
   embeddingSourceId: string;

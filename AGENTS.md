@@ -279,6 +279,9 @@ docs/
 ├── planning/2026-11-19-interactive-progression-design.md
 │                                       # 🆕 交互式推进（✅ 2026-11-19 已实施，真机待验证）← 改直出正文分节 / 逐节演出必读
 │                                       # `<beat/>` 剥标记存 `ChatMessage.stage`；聊天流内逐节放出；新角色登场；战斗行为卡
+├── planning/2026-11-20-explicit-content-switch-design.md
+│                                       # 🆕 露骨内容开关（✅ 2026-11-20 已实施，真机待验证）← 改内容文本过滤 / 世界书显示必读
+│                                       # `<nsfw>`/`<sfw>` 行内包裹 + 整条 `nsfw: true`；使用时过滤、永不写回；世界书编辑器豁免
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 

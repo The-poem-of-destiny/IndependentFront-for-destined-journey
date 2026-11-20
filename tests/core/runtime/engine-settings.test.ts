@@ -27,6 +27,7 @@ describe('getEngineSettings', () => {
       randomEventsEnabled: true,
       randomEventsFrequency: 1,
       directStructuredCombat: false,
+      nsfwContent: false,
     });
   });
 
@@ -37,6 +38,7 @@ describe('getEngineSettings', () => {
       randomEventsEnabled: false,
       randomEventsFrequency: 2,
       directStructuredCombat: true,
+      nsfwContent: true,
     }));
     expect(getEngineSettings()).toEqual({
       maxSnapshotsPerSave: 7,
@@ -44,6 +46,7 @@ describe('getEngineSettings', () => {
       randomEventsEnabled: false,
       randomEventsFrequency: 2,
       directStructuredCombat: true,
+      nsfwContent: true,
     });
   });
 
@@ -85,6 +88,7 @@ describe('getEngineSettings', () => {
       randomEventsEnabled: true,
       randomEventsFrequency: 1,
       directStructuredCombat: false,
+      nsfwContent: false,
     });
   });
 

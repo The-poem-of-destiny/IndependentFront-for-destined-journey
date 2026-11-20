@@ -39,7 +39,7 @@
  */
 
 import { checkQuota } from '@engine/image/image-quota';
-import { composePrompt } from '@engine/image/image-prompt';
+import { composePrompt, effectiveMaxRating } from '@engine/image/image-prompt';
 import { buildWorldTags } from '@engine/image/image-world-tags';
 import { buildNaiRequest } from '@engine/image/providers/novelai';
 import { parseImageDialects, resolveImageDialect } from '@engine/image/image-dialect';
@@ -83,6 +83,7 @@ export type ImageRuntimeSettings = Pick<
   | 'apiPool'
   | 'imageExtraNegative'
   | 'imageMaxRating'
+  | 'nsfwContent'
   | 'imageWidth'
   | 'imageHeight'
   | 'imageSteps'
@@ -398,7 +399,7 @@ function composeFor(
       baseNegative: dialect.baseNegative,
       extraNegative: s.imageExtraNegative,
       // 🔴 上限而非默认（D38）—— 标记写的 rating 在这里被钳住
-      maxRating: s.imageMaxRating,
+      maxRating: effectiveMaxRating(s.imageMaxRating, s.nsfwContent),
       // 🔴 时段/天气由 Code 查引擎（D39），映射不中返空串
       worldTags: buildWorldTags(world.gameTime, world.weather),
       dialect,

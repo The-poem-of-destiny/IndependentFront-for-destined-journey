@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useNsfwText } from '../../composables/useNsfwText';
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { liveQuery } from 'dexie';
 import type { CharacterState } from '@engine/types/types';
@@ -9,6 +10,7 @@ import {
   chronicleTimeLabel,
   compareChronicleEntries,
 } from '@engine/character/character-chronicle';
+const nsfw = useNsfwText();
 
 const props = defineProps<{ character: CharacterState }>();
 const entries = ref<CharacterChronicleEntry[]>([]);
@@ -140,7 +142,7 @@ function clearFilters() {
               <h4>{{ entry.title }}</h4>
               <span class="entry-importance">重要度 {{ entry.importance }}</span>
             </div>
-            <p class="entry-summary">{{ entry.summary }}</p>
+            <p class="entry-summary">{{ nsfw(entry.summary) }}</p>
             <div v-if="entry.location || entry.people?.length" class="entry-meta">
               <span v-if="entry.location">{{ entry.location }}</span>
               <span v-if="entry.people?.length">{{ entry.people.join('、') }}</span>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useNsfwText } from '../../composables/useNsfwText';
 import { isDirectMode } from '@engine/story/generation-mode';
 
 /**
@@ -47,6 +48,8 @@ import {
 import ItemDetailBody from './ItemDetailBody.vue';
 import CharacterChronicleTab from './CharacterChronicleTab.vue';
 import { characterAssetRows } from '@engine/character/character-definitions';
+
+const nsfw = useNsfwText();
 
 /** 见文件头那条铁律 —— 这一位**没有**第三档兜底 */
 const VIEWER_PORTRAIT_CHAIN: readonly AssetType[] = ['立绘bg', '立绘'];
@@ -297,7 +300,7 @@ function toggleTile(tile: AlbumTile) {
               <div v-if="profileFields.length" class="prose-list">
                 <div v-for="f in profileFields" :key="f.label" class="prose-row">
                   <div class="prose-label">{{ f.label }}</div>
-                  <p class="prose-text">{{ f.text }}</p>
+                  <p class="prose-text">{{ nsfw(f.text) }}</p>
                 </div>
               </div>
               <div v-else class="empty-tab">此人来历不详…</div>
@@ -381,7 +384,7 @@ function toggleTile(tile: AlbumTile) {
             <!-- 背景故事 -->
             <section v-if="char.background" class="vw-sec">
               <h3 class="vw-sec-title">背景故事</h3>
-              <p class="story">{{ char.background }}</p>
+              <p class="story">{{ nsfw(char.background) }}</p>
             </section>
           </template>
 

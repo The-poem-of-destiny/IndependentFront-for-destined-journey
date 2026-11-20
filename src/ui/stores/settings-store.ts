@@ -288,6 +288,8 @@ function getDefaults(): UiSettings {
     randomEventsEnabled: true,
     randomEventsFrequency: 1,
     directStructuredCombat: false,
+    // 露骨内容默认关（安全默认）；与引擎 FALLBACK 一致
+    nsfwContent: false,
 
     // 记忆 & 缓存
     memoryRecallMode: 'llm',

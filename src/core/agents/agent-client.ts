@@ -10,6 +10,7 @@
  * - 🆕 Phase 8.5: chatWithTools() 多轮工具调用
  */
 
+import { filterNsfwMessages, nsfwEnabled } from '../content/nsfw-filter';
 import type { AgentProviderRound, ApiEndpoint, AgentResult, ToolDefinition } from '../types/types';
 import { scheduleApiRequest } from '../api/api-rpm-limiter';
 import type { LlmMessage, JsonObject, NativeLlmContent } from '../types/types-api';
@@ -959,7 +960,9 @@ export class AgentClient {
       cacheKey: request.cacheKey,
       cacheStaticSystemCount: request.cacheStaticSystemCount,
       cacheRetainedMessageCount: request.cacheRetainedMessageCount,
-      messages: ensureUserMessage(request.messages),
+      // 露骨内容开关的出口安全网：所有 /api/llm/* 流量都经过这里。源头（世界书渲染 / 预设 /
+      // 冻结文本）已按开关过滤，这一步兜住漏网的路径，并保证模型永远看不到 <nsfw>/<sfw> 标记。
+      messages: ensureUserMessage(filterNsfwMessages(request.messages, nsfwEnabled())),
       temperature: request.temperature ?? poolDefaults.temperature,
       maxTokens: request.maxTokens ?? poolDefaults.maxTokens,
       topP: request.topP ?? poolDefaults.topP,

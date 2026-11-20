@@ -49,6 +49,12 @@ export interface EngineSettings {
    * 关 = 战斗写在正文里推进，资源与状态走 `state.characters` / `effects`；Agent 模式不受影响。
    */
   directStructuredCombat: boolean;
+  /**
+   * 露骨内容开关（`docs/planning/2026-11-20-explicit-content-switch-design.md`）。
+   * 关 = 内容包中 `<nsfw>` 段落与整条 `nsfw: true` 标记的内容不发给模型、不在游戏界面显示。
+   * 读取入口是 `content/nsfw-filter.ts` 的 `nsfwEnabled()`，别在调用点直接读这个字段。
+   */
+  nsfwContent: boolean;
 }
 
 /**
@@ -72,6 +78,8 @@ const FALLBACK: EngineSettings = {
   randomEventsFrequency: RANDOM_EVENTS_FREQUENCY_DEFAULT,
   // 直出结构化战斗默认关：真源同为前端 UiSettings，未接 provider 时按正文战斗处理
   directStructuredCombat: false,
+  // 露骨内容默认关（安全默认）：未接 provider（headless / 测试）时同样按关处理
+  nsfwContent: false,
 };
 
 type Provider = () => Partial<EngineSettings> | undefined;
@@ -103,6 +111,7 @@ export function getEngineSettings(): EngineSettings {
       randomEventsEnabled: partial.randomEventsEnabled ?? FALLBACK.randomEventsEnabled,
       randomEventsFrequency: partial.randomEventsFrequency ?? FALLBACK.randomEventsFrequency,
       directStructuredCombat: partial.directStructuredCombat ?? FALLBACK.directStructuredCombat,
+      nsfwContent: partial.nsfwContent ?? FALLBACK.nsfwContent,
     };
   } catch (err) {
     console.error('[engine-settings] provider 抛异常，按缺省值继续:', err);

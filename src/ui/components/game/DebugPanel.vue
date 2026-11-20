@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useNsfwText } from '../../composables/useNsfwText';
 import { computed, ref, watch } from 'vue';
 import { useGameStore, type DebugAgentEntry } from '../../stores/game-store';
 import { useSettingsStore } from '../../stores/settings-store';
@@ -26,6 +27,8 @@ import {
   type PlotThreadDebugInfo,
 } from './plot-thread-debug';
 import { buildDirectCacheDebugView, type DirectCacheDebugView } from './direct-cache-debug';
+
+const nsfw = useNsfwText();
 
 const game = useGameStore();
 const settings = useSettingsStore();
@@ -789,7 +792,7 @@ function formatJson(value: unknown): string {
               <div v-for="(m, i) in entry.messages" :key="i" class="debug-msg">
                 <span class="debug-role">{{ m.role }}</span>
                 <span v-if="m.prefix" class="debug-prefix-badge">prefix 续写</span>
-                <pre>{{ m.content ?? '' }}</pre>
+                <pre>{{ nsfw(m.content) }}</pre>
                 <template v-if="m.reasoning_content">
                   <h6 class="debug-reasoning-h">思维链前缀注入 (reasoning_content)</h6>
                   <pre class="debug-reasoning-pre">{{ m.reasoning_content }}</pre>

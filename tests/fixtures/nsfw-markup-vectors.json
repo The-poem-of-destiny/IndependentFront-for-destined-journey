@@ -1,0 +1,87 @@
+{
+  "_comment": "露骨内容开关的跨仓测试向量。引擎 src/core/content/nsfw-filter.ts 与内容仓 tools/nsfw-markup.mjs 必须对每一条给出相同结果；改语义两边同改，本文件两仓各存一份且必须逐字相同。",
+  "apply": [
+    {
+      "name": "无标记原样返回",
+      "input": "普通文本\n第二行",
+      "on": "普通文本\n第二行",
+      "off": "普通文本\n第二行"
+    },
+    {
+      "name": "行内 nsfw",
+      "input": "前文。<nsfw>露骨。</nsfw>后文。",
+      "on": "前文。露骨。后文。",
+      "off": "前文。后文。"
+    },
+    {
+      "name": "nsfw 配 sfw 替身",
+      "input": "她穿斗篷。<nsfw>甲</nsfw><sfw>乙</sfw>完。",
+      "on": "她穿斗篷。甲完。",
+      "off": "她穿斗篷。乙完。"
+    },
+    {
+      "name": "单独 sfw",
+      "input": "规则A\n<sfw>全年龄约束</sfw>\n规则B",
+      "on": "规则A\n规则B",
+      "off": "规则A\n全年龄约束\n规则B"
+    },
+    {
+      "name": "独占行的标签连同换行吃掉",
+      "input": "行1\n<nsfw>\n行2\n</nsfw>\n行3",
+      "on": "行1\n行2\n行3",
+      "off": "行1\n行3"
+    },
+    {
+      "name": "段落删除后合并空行",
+      "input": "段1\n\n<nsfw>段2</nsfw>\n\n段3",
+      "on": "段1\n\n段2\n\n段3",
+      "off": "段1\n\n段3"
+    },
+    {
+      "name": "未闭合 nsfw：关模式删到末尾",
+      "input": "安全<nsfw>危险\n更多",
+      "on": "安全危险\n更多",
+      "off": "安全"
+    },
+    {
+      "name": "未闭合 sfw：开模式删到末尾",
+      "input": "共有<sfw>净版",
+      "on": "共有",
+      "off": "共有净版"
+    },
+    {
+      "name": "孤立闭标签只删标签",
+      "input": "甲</nsfw>乙</sfw>丙",
+      "on": "甲乙丙",
+      "off": "甲乙丙"
+    },
+    {
+      "name": "嵌套按外层整块处理",
+      "input": "A<nsfw>B<sfw>C</sfw>D</nsfw>E",
+      "on": "ABCDE",
+      "off": "AE"
+    },
+    {
+      "name": "不规范写法不当标记",
+      "input": "<NSFW_content>x</NSFW_content><Nsfw>y</Nsfw>",
+      "on": "<NSFW_content>x</NSFW_content><Nsfw>y</Nsfw>",
+      "off": "<NSFW_content>x</NSFW_content><Nsfw>y</Nsfw>"
+    },
+    { "name": "多个块", "input": "1<nsfw>2</nsfw>3<nsfw>4</nsfw>5", "on": "12345", "off": "135" }
+  ],
+  "lint": [
+    { "name": "合法", "input": "a<nsfw>b</nsfw><sfw>c</sfw>", "codes": [] },
+    { "name": "未闭合", "input": "a<nsfw>b", "codes": ["unclosed"] },
+    { "name": "孤立闭标签", "input": "a</sfw>", "codes": ["orphan-close"] },
+    { "name": "嵌套", "input": "<nsfw>a<sfw>b</sfw>c</nsfw>", "codes": ["nested", "nested"] },
+    { "name": "不规范", "input": "<nsfw >a</nsfw>", "codes": ["malformed", "orphan-close"] },
+    { "name": "大写不规范", "input": "<SFW>a</SFW>", "codes": ["malformed", "malformed"] },
+    { "name": "NSFW_content 不误报", "input": "<NSFW_content>a</NSFW_content>", "codes": [] },
+    {
+      "name": "EJS 代码内",
+      "input": "<% if (x) { %><nsfw>a</nsfw><% } %><% print('<nsfw>') %>",
+      "codes": ["inside-ejs"]
+    },
+    { "name": "空包裹警告", "input": "a<nsfw>  </nsfw>", "codes": ["empty"] }
+  ]
+}

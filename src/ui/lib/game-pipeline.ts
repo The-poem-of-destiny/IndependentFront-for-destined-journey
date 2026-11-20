@@ -1,3 +1,5 @@
+import { filterNsfwBooks, nsfwEnabled } from '@engine/content/nsfw-filter';
+import { effectiveMaxRating } from '@engine/image/image-prompt';
 import { invalidateDirectContext } from '@engine/prompts/direct-context-session';
 import { isDirectMode } from '@engine/story/generation-mode';
 import type { StatePatch } from '@engine/types/types';
@@ -2090,7 +2092,9 @@ export class GamePipeline {
         ...(metadata?.enabledWorldBookEntries ?? []),
         ...characterLoreEntryUids(linkCharacterDefinitions(metadata?.characterDefinitions ?? [])),
       ];
-      return filterBooksByEnabledEntries(all, enabledEntries);
+      // 露骨内容开关：剔除整条标记条目 + 过滤路由元数据文本（正文在 EJS 渲染后再剥）。
+      // 所有 Agent / 侧链 / 直出 / 图像链经 chainData.worldBooks 吃到的都是这份投影。
+      return filterBooksByEnabledEntries(filterNsfwBooks(all, nsfwEnabled()), enabledEntries);
     } catch {
       return [];
     }
@@ -2503,7 +2507,11 @@ export class GamePipeline {
     // 侧链要的是**剥掉全部标记**的正文（判断氛围/光线/时间）
     const narrative = stripMarkers(message.content).trim();
     const location = this.game.player?.location || undefined;
-    const maxRating = this.settings.settings.imageMaxRating;
+    // 露骨内容开关关闭时上限收紧到 sensitive
+    const maxRating = effectiveMaxRating(
+      this.settings.settings.imageMaxRating,
+      this.settings.settings.nsfwContent,
+    );
 
     for (const segment of segments) {
       if (segment.kind !== 'image') continue;
