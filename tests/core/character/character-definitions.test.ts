@@ -3,8 +3,10 @@ import {
   attachCharacterDefinition,
   characterAssetRows,
   legacyCharacterDefinitions,
+  characterLoreEntryUids,
+  linkCharacterDefinitions,
   readCharacterDefinitions,
-  withoutCharacterLore,
+  resolveCharacterLoreLinks,
 } from '../../../src/core/character/character-definitions';
 import { createDefaultCharacterState } from '../../../src/core/types/types';
 import type { AssetMetaRecord, WorldBook } from '../../../src/core/types/types';
@@ -67,10 +69,66 @@ describe('native character definitions', () => {
       uid: 'fated:character/guide',
       token: 'fated:character/guide',
     });
-    expect(withoutCharacterLore([book], definitions)[0].entries.map((e) => e.uid)).toEqual([
-      'fated:character/dynamic',
-      'fated:character/secret',
-    ]);
+    // 条目仍是给模型的人设：转换只建目录并链接，不把条目从书里拿掉
+    expect(definitions[0].loreEntry).toBe('fated:character/guide');
+    expect(resolveCharacterLoreLinks(definitions, [book])[0].loreEntry).toBe(
+      'fated:character/guide',
+    );
     expect(book.entries).toHaveLength(3);
+  });
+});
+
+describe('character lore entry links', () => {
+  const book = (uids: string[]) =>
+    ({
+      id: 'character',
+      partition: 'character',
+      entries: uids.map((uid) => ({ uid, enabled: true, content: '人设' })),
+    }) as unknown as WorldBook;
+  const definition = (id: string, extra: Record<string, unknown> = {}) =>
+    readCharacterDefinitions([{ id, name: id, profile: {}, assets: [], past: [], ...extra }])[0];
+
+  it('reads an explicit loreEntry and ignores blank links', () => {
+    expect(definition('a', { loreEntry: ' fated:character/a ' }).loreEntry).toBe(
+      'fated:character/a',
+    );
+    expect(definition('b', { loreEntry: '  ' }).loreEntry).toBeUndefined();
+  });
+
+  it('links frozen definitions via legacyEntry or the registry definition with the same id', () => {
+    const frozen = [
+      definition('hassan'),
+      {
+        ...definition('muir'),
+        legacyEntry: { bookId: 'character', uid: 'fated:character/muir', token: 'x' },
+      },
+      definition('stranger'),
+    ];
+    const linked = linkCharacterDefinitions(frozen, [
+      definition('hassan', { loreEntry: 'fated:character/hassan' }),
+    ]);
+    expect(linked.map((d) => d.loreEntry)).toEqual([
+      'fated:character/hassan',
+      'fated:character/muir',
+      undefined,
+    ]);
+    expect(frozen[0].loreEntry).toBeUndefined();
+    expect(characterLoreEntryUids(linked)).toEqual([
+      'fated:character/hassan',
+      'fated:character/muir',
+    ]);
+  });
+
+  it('drops links to entries that are not loaded so the fallback lore still applies', () => {
+    const [kept, dropped] = resolveCharacterLoreLinks(
+      [
+        definition('a', { loreEntry: 'fated:character/a', lore: '兜底' }),
+        definition('b', { loreEntry: 'fated:character/b', lore: '兜底' }),
+      ],
+      [book(['fated:character/a'])],
+    );
+    expect(kept.loreEntry).toBe('fated:character/a');
+    expect(dropped.loreEntry).toBeUndefined();
+    expect(dropped.lore).toBe('兜底');
   });
 });

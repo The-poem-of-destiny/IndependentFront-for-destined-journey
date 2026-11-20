@@ -9,6 +9,14 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-20 角色定义与人设条目并列｜分支 `feat/character-lore-link`，**已实施，未真机验证**
+
+- 主人裁定：`characters.json` 是给引擎用的结构化目录，世界书角色条目是给模型读的人设，二者并列；条目里的 EJS（如按好感度分档的反应）要能生效。私有内容仓同步改为每角色一个源目录（方案 D′：构建期从 `content/characters/<id>/` 生成目录与条目）。
+- 推翻 2026-10-31 的「原生定义替代旧人物 lore」：删除 `withoutCharacterLore`，不再把配上对的条目从所有 Agent 的世界书里剔除。
+- `CharacterDefinition.loreEntry`（链接条目 uid）。选中定义即把条目并入白名单（`create-store.buildEnabledWorldBookEntries`），捏人页不再单列被链接的条目。旧档读取期补链（`linkCharacterDefinitions`：`legacyEntry.uid` → 注册表同 id），`loadActiveWorldBooks` 与 `createJourney` 的固定资料快照并入链接条目，`resolveCharacterLoreLinks` 对没加载上的条目回落 `lore`。
+- 有链接条目时 `buildCharacterContext` 与 entity_gen 不再发 `lore`，避免重复注入。
+- 测试：`character-definitions` / `character-chronicle` / `create-store` 新增链接、补链、回落与白名单用例；8 道闸门全绿；与内容仓新构建的包跑 `tests/contract` 7/7 通过。未做：真机游玩、旧档实机打开、Delta 会话冷建观察、token 实测。
+
 ### 2026-11-20 演出控制条移到输入框上方｜分支 `feat/stage-controls-dock`
 
 - 主人反馈：逐节演出的小条「全文 / 演出 / 快进 / 全部显示」挂在正在演的正文末尾，随每节推进跟着跳，破坏沉浸。

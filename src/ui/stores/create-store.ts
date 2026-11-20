@@ -33,6 +33,7 @@ import type {
   ExperienceMode,
 } from '@engine/types/types';
 import { calcResources } from '@engine/character/tier-constants';
+import { characterLoreEntryUid } from '@engine/character/character-definitions';
 // 🆕 经验系统改造 v1：创建角色时 totalExp/expToNext 用累计表语义（旧 expCap 已退役）
 import { getRequiredXpForLevel, xpToNextNumber } from '@engine/character/exp-table';
 // Q-05：从模型输出抢救 JSON 的唯一入口
@@ -759,9 +760,8 @@ export const useCreateStore = defineStore('create', () => {
         .flatMap((b) =>
           b.entries.filter(
             (e) =>
-              !characterDefinitions.value.some(
-                (d) => d.legacyEntry?.bookId === b.id && d.legacyEntry.uid === e.uid,
-              ),
+              // 被某个角色定义链接的人设条目随定义一起选，不再单列一项
+              !characterDefinitions.value.some((d) => characterLoreEntryUid(d) === e.uid),
           ),
         );
       // P1-5: 工坊项目走自己的项目级列表（未安装的不出现）
@@ -853,7 +853,8 @@ export const useCreateStore = defineStore('create', () => {
     const legacy = new Set(enabledCharacterEntryUids.value);
     const native = new Set(enabledCharacterDefinitionIds.value);
     for (const definition of characterDefinitions.value) {
-      if (definition.legacyEntry && legacy.delete(definition.legacyEntry.uid)) {
+      const uid = characterLoreEntryUid(definition);
+      if (uid && legacy.delete(uid)) {
         native.add(definition.id);
       }
     }
@@ -890,6 +891,13 @@ export const useCreateStore = defineStore('create', () => {
 
     for (const uid of enabledCharacterEntryUids.value) {
       ids.push(uid);
+    }
+
+    // 选中的角色定义 → 其链接的人设条目（给模型读的那份）一并进白名单
+    for (const definition of characterDefinitions.value) {
+      if (!enabledCharacterDefinitionIds.value.has(definition.id)) continue;
+      const uid = characterLoreEntryUid(definition);
+      if (uid && !ids.includes(uid)) ids.push(uid);
     }
 
     // P1-5: 启用的工坊项目 → 展开成该项目全部条目的完整工坊 UID（D12）。

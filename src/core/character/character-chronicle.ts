@@ -81,17 +81,26 @@ export function buildCharacterContext(
   );
   const mentioned = (name: string, aliases: string[] = []) =>
     [name, ...aliases].some((n) => n && recent.includes(n));
+  // A linked worldbook entry is the model-facing profile (EJS / routing / activation apply there);
+  // the definition's own `lore` is only a fallback for definitions without a loaded entry.
+  // `ctx.characterDefinitions` carries the resolved links, so instantiated characters (whose
+  // `definition` copy may predate the link) are judged by their definition id.
+  const linked = (definition: { id: string; loreEntry?: string }) =>
+    (ctx.characterDefinitions ?? []).find((d) => d.id === definition.id)?.loreEntry !== undefined;
+  const fallbackLore = (definition: { id: string; lore?: string }) =>
+    linked(definition) ? undefined : definition.lore;
   const profiles = definitions.map((d) => {
     const selected = mentioned(d.name, d.profile.aliases);
     return {
       name: d.name,
       ...(selected
-        ? { ...d.profile, lore: d.lore }
-        : { background: (d.profile.background ?? d.lore)?.slice(0, 240) }),
+        ? { ...d.profile, lore: fallbackLore(d) }
+        : { background: (d.profile.background ?? fallbackLore(d))?.slice(0, 240) }),
     };
   });
   for (const c of relevant) {
-    if (c.definition?.lore) profiles.push({ name: c.name, lore: c.definition.lore });
+    const lore = c.definition ? fallbackLore(c.definition) : undefined;
+    if (lore) profiles.push({ name: c.name, lore });
   }
   const relevance = (e: CharacterChronicleEntry) =>
     (e.location && relevant.some((c) => c.location?.includes(e.location!)) ? 1 : 0) +

@@ -12,8 +12,8 @@ import { filterBooksByEnabledEntries } from '../content/worldbook-loader';
 import { createFixedLoreSnapshot } from '../content/lore-definitions';
 import {
   attachCharacterDefinition,
+  characterLoreEntryUids,
   matchCharacterDefinition,
-  withoutCharacterLore,
 } from '../character/character-definitions';
 import { authorChronicle } from '../character/character-chronicle';
 import { ensureCharacterAge } from '../character/character-age';
@@ -48,13 +48,10 @@ export async function createJourney(input: {
             metadata: {
               ...input.save.metadata,
               fixedLore: createFixedLoreSnapshot(
-                filterBooksByEnabledEntries(
-                  withoutCharacterLore(
-                    input.worldBooks ?? [],
-                    input.save.metadata.characterDefinitions ?? [],
-                  ),
-                  input.save.metadata.enabledWorldBookEntries ?? [],
-                ),
+                filterBooksByEnabledEntries(input.worldBooks ?? [], [
+                  ...(input.save.metadata.enabledWorldBookEntries ?? []),
+                  ...characterLoreEntryUids(input.save.metadata.characterDefinitions ?? []),
+                ]),
                 {
                   characterName: input.character.name,
                   userName: input.save.metadata.userName,
