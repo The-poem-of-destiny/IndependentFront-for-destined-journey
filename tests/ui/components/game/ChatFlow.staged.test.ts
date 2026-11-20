@@ -124,6 +124,7 @@ describe('ChatFlow 逐节演出', () => {
     game.pendingOptions = [];
     useSettingsStore().settings.imageGenMode = 'off';
     useSettingsStore().settings.stagedNarrative = true;
+    useSettingsStore().settings.stagedControlsCollapsed = false;
   });
 
   afterEach(() => {
@@ -185,6 +186,32 @@ describe('ChatFlow 逐节演出', () => {
       .find((button) => button.text().includes('全部显示'));
     await skip!.trigger('click');
     expect(sectionTexts(second.wrapper)).toEqual([S1, S2, S3]);
+  });
+
+  it('控制条挂在输入框正上方、不在正文里；收起后只剩标签且记进设置，推进照常', async () => {
+    const { wrapper } = await mountWithFresh(storyMsg('a1'), { isGenerating: false });
+    const settings = useSettingsStore().settings;
+    expect(wrapper.find('.staged-narrative .stage-bar').exists()).toBe(false);
+    const dock = wrapper.find('.stage-dock');
+    expect(dock.exists()).toBe(true);
+    // 在消息滚动区之外，紧排在输入框前面
+    expect(dock.element.closest('.chat-messages')).toBeNull();
+    const inputBar = wrapper.find('.input-bar').element;
+    expect(
+      dock.element.compareDocumentPosition(inputBar) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    await wrapper.find('button[aria-label="收起正文演出控制"]').trigger('click');
+    expect(settings.stagedControlsCollapsed).toBe(true);
+    expect(wrapper.find('.stage-bar').exists()).toBe(false);
+    expect(wrapper.find('.stage-dock-tab').exists()).toBe(true);
+
+    await wrapper.find('.chat-messages').trigger('click');
+    expect(sectionTexts(wrapper)).toEqual([S1, S2]);
+
+    await wrapper.find('.stage-dock-tab').trigger('click');
+    expect(settings.stagedControlsCollapsed).toBe(false);
+    expect(wrapper.find('.stage-bar').exists()).toBe(true);
   });
 
   it('让路：有选区、弹窗开着、焦点在输入框、点在按钮上都不推进', async () => {

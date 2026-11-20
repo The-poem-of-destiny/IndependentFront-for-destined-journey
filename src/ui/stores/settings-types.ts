@@ -237,6 +237,8 @@ export type UiSettings = {
    * 关掉 = 整段显示，DOM 与引入前一致。纯前端开关，不进提示词、不动缓存前缀。
    */
   stagedNarrative: boolean;
+  /** 演出控制条（输入框上方）是否收起；只藏按钮，推进照常。默认展开 */
+  stagedControlsCollapsed: boolean;
   /** 解锁调试入口与原始 Agent 诊断；默认关闭，不影响玩家可见的语义活动账本 */
   developerMode: boolean;
   /**

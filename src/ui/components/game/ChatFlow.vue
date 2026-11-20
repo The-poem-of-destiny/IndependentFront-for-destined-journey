@@ -39,6 +39,7 @@ import { resolveEntrances, type StageRosterEntry } from '../../lib/stage-entranc
 import type { StagePlaybackView } from '../../lib/stage-playback';
 import { hasOpenDialog } from '../../lib/modal-focus';
 import StagedNarrative from './StagedNarrative.vue';
+import StageControls from './StageControls.vue';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import BeautifiedNarrative from './BeautifiedNarrative.vue';
@@ -273,12 +274,6 @@ function stagedViewOf(msg: ChatMessage): StagePlaybackView | null {
 
 function stagedSettledEnd(msg: ChatMessage): number {
   return staged.recordFor(msg)?.settledEnd ?? 0;
-}
-
-function isActiveStage(target: StageTarget): boolean {
-  const active = staged.active.value?.target;
-  if (!active || active.kind !== target.kind) return false;
-  return active.kind === 'draft' || (target.kind === 'message' && active.id === target.id);
 }
 
 /** 登场名册条目：名字 + 别名 */
@@ -1269,12 +1264,7 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
               :image-dialect-id="s.imageDialectId"
               :mentions="mentionsFor(msg)"
               :seal="sealFor(msg)"
-              :controls="isActiveStage({ kind: 'message', id: msg.id })"
-              :fast-forwarding="fastForwarding !== null"
               @resize="handleNarrativeResize"
-              @show-full="showFullText"
-              @fast-forward="toggleFastForward"
-              @skip-all="skipStage({ kind: 'message', id: msg.id })"
             />
             <BeautifiedNarrative
               v-else
@@ -1455,18 +1445,27 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
             :entrances="draftEntrances.bySection"
             :still-entrances="draftEntrances.still"
             :waiting-text="thinkingText"
-            :controls="isActiveStage({ kind: 'draft' })"
-            :fast-forwarding="fastForwarding !== null"
             @resize="handleNarrativeResize"
-            @show-full="showFullText"
-            @fast-forward="toggleFastForward"
-            @skip-all="skipStage({ kind: 'draft' })"
           />
         </div>
       </div>
     </div>
 
     <!-- 润色进行中锁住发送（GAME-07）：润色结果会写回最新正文，期间开新回合会两头打架 -->
+    <!-- 演出控制条：浮在输入框上沿，只给正在演的那一条；可收起（设置 stagedControlsCollapsed） -->
+    <Transition name="stage-dock-fade">
+      <StageControls
+        v-if="staged.active.value"
+        :can-advance="staged.active.value.view.canAdvance"
+        :fast-forwarding="fastForwarding !== null"
+        :collapsed="s.stagedControlsCollapsed"
+        @update:collapsed="s.stagedControlsCollapsed = $event"
+        @show-full="showFullText"
+        @fast-forward="toggleFastForward"
+        @skip-all="skipStage()"
+      />
+    </Transition>
+
     <InputBar
       :disabled="isGenerating"
       :stopping="game.currentAgentActivityRun?.status === 'stopping'"
@@ -1554,6 +1553,23 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
 </template>
 
 <style scoped>
+.stage-dock-fade-enter-active,
+.stage-dock-fade-leave-active {
+  transition: opacity var(--motion-duration-base) var(--motion-ease-standard);
+}
+.stage-dock-fade-leave-active {
+  transition-duration: var(--motion-duration-fast);
+}
+.stage-dock-fade-enter-from,
+.stage-dock-fade-leave-to {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage-dock-fade-enter-active,
+  .stage-dock-fade-leave-active {
+    transition: none;
+  }
+}
 .chat-flow {
   flex: 1;
   display: flex;
@@ -1563,7 +1579,8 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 20px 32px;
+  /* 底部留够演出控制条的高度：它浮在输入框上沿，不能盖住最后一条消息的操作条 */
+  padding: 24px 20px 56px;
   display: flex;
   flex-direction: column;
   gap: 22px;
