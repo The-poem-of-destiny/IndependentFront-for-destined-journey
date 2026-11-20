@@ -41,7 +41,8 @@ describe('AboutSection', () => {
     expect(text).not.toContain('世界观设定');
     expect(text).not.toContain('测试世界观作者');
     expect(text).toContain('项目信息');
-    expect(text).toContain('1.0.0');
+    // 取 vitest define 注入的版本号（= package.json version），升版本不必改测试
+    expect(text).toContain(__ENGINE_VERSION__);
     expect(text).not.toContain('项目名称');
     expect(text).not.toContain('项目类型');
     expect(text).not.toContain('纪元');
