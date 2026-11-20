@@ -105,6 +105,8 @@ setEngineSettingsProvider(() => {
     randomEventsFrequency: s.randomEventsFrequency,
     // 直出结构化战斗（全局，仅直出模式读；设置页暂锁定为关）
     directStructuredCombat: s.directStructuredCombat,
+    // 露骨内容开关（同样每次现读，设置页拨动即时生效）
+    nsfwContent: s.nsfwContent,
   };
 });
 

@@ -1,4 +1,5 @@
 import type { DirectGenerationInput } from '../agents/direct-main';
+import { isPresetPromptActive } from '../content/nsfw-filter';
 import type {
   AgentContext,
   CharacterState,
@@ -113,10 +114,12 @@ export async function buildLegacyDirectCacheFrame(
   const presetSettings = (preset as ChatPreset | undefined)?.settings;
   const rawPrompts = presetSettings?.prompts;
   const prompts: PresetEntryLike[] | undefined = Array.isArray(rawPrompts) ? rawPrompts : undefined;
-  const marked = prompts?.some((p) => p.directCachePlacement === 'turn' && p.enabled !== false);
+  const marked = prompts?.some((p) => p.directCachePlacement === 'turn' && isPresetPromptActive(p));
   const ordered = marked
     ? prompts!
-        .filter((p) => p.enabled !== false && p.role !== 'assistant' && !isStoryZonePlaceholder(p))
+        .filter(
+          (p) => isPresetPromptActive(p) && p.role !== 'assistant' && !isStoryZonePlaceholder(p),
+        )
         .sort((a, b) => Number(a.injection_order ?? 0) - Number(b.injection_order ?? 0))
     : [];
   const processed = preprocessPresetEntryContents(ordered);
@@ -139,7 +142,7 @@ export async function buildLegacyDirectCacheFrame(
     ? prompts
         .filter(
           (p) =>
-            p.enabled !== false &&
+            isPresetPromptActive(p) &&
             p.directCachePlacement !== 'turn' &&
             p.role !== 'assistant' &&
             !isStoryZonePlaceholder(p),

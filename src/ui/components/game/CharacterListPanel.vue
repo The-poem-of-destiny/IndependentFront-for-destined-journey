@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useNsfwText } from '../../composables/useNsfwText';
 import { ref, computed, watch, nextTick } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
@@ -18,6 +19,8 @@ import type { RewriteTarget } from '@engine/agents/entity-gen-agent';
 // 另一处没跟，症状就是本面板把要素对象 `JSON.stringify` 成一坨原始数据）
 import { buildAscensionTracks, hasAnyAscension } from './character-viewer';
 import CharacterViewerModal from './CharacterViewerModal.vue';
+
+const nsfw = useNsfwText();
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -527,21 +530,21 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
               <template v-if="selected.appearance || selected.outfit">
                 <div v-if="selected.appearance" class="ov-dl-item">
                   <span class="ov-dl-label">外貌</span>
-                  <span class="ov-dl-text">{{ selected.appearance }}</span>
+                  <span class="ov-dl-text">{{ nsfw(selected.appearance) }}</span>
                 </div>
                 <div v-if="selected.outfit" class="ov-dl-item">
                   <span class="ov-dl-label">着装</span>
-                  <span class="ov-dl-text">{{ selected.outfit }}</span>
+                  <span class="ov-dl-text">{{ nsfw(selected.outfit) }}</span>
                 </div>
                 <div class="ov-dl-divider" />
               </template>
               <div v-if="selected.personality" class="ov-dl-item">
                 <span class="ov-dl-label">特征</span>
-                <span class="ov-dl-text">{{ selected.personality }}</span>
+                <span class="ov-dl-text">{{ nsfw(selected.personality) }}</span>
               </div>
               <div v-if="selected.background" class="ov-dl-item">
                 <span class="ov-dl-label">背景</span>
-                <span class="ov-dl-text">{{ selected.background }}</span>
+                <span class="ov-dl-text">{{ nsfw(selected.background) }}</span>
               </div>
             </div>
           </template>

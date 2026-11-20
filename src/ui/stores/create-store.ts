@@ -14,6 +14,7 @@
  * 组件必须看 `contentStatus` 决定画加载态/空态，而不是把空列表当成「没有内容」。
  */
 
+import { filterNsfwBooks, nsfwEnabled } from '@engine/content/nsfw-filter';
 import { defineStore } from 'pinia';
 import { requireGenerationMode, type GenerationMode } from '@engine/story/generation-mode';
 import { ref, computed, watch, onScopeDispose } from 'vue';
@@ -745,12 +746,14 @@ export const useCreateStore = defineStore('create', () => {
     try {
       const wb = useWorldBookStore();
       await wb.init();
-      const books = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
+      const rawBooks = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
       const { ensureContentRegistryLoaded } = await import('./content-store');
       await ensureContentRegistryLoaded();
       const { availableCharacterDefinitions } =
         await import('@engine/character/character-definitions');
-      characterDefinitions.value = availableCharacterDefinitions(books);
+      // 角色候选要看原书判断「链接到整条露骨人设条目」；列表展示用开关投影后的书
+      characterDefinitions.value = availableCharacterDefinitions(rawBooks);
+      const books = filterNsfwBooks(rawBooks, nsfwEnabled());
       migrateCharacterSelections();
       systemCoreEntries.value = books
         .filter((b) => b.partition === 'system_core')
@@ -1497,7 +1500,7 @@ export const useCreateStore = defineStore('create', () => {
       const all = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
       // 对齐游戏页面：只注入用户在捏人页勾选的角色 + 命定核心
       const enabledEntries = buildEnabledWorldBookEntries();
-      return filterBooksByEnabledEntries(all, enabledEntries);
+      return filterBooksByEnabledEntries(filterNsfwBooks(all, nsfwEnabled()), enabledEntries);
     } catch {
       return [];
     }
@@ -2349,6 +2352,8 @@ export const useCreateStore = defineStore('create', () => {
     if (save.metadata.storyContextV2) {
       const wb = useWorldBookStore();
       await wb.init();
+      // 开局冻结（fixedLore）存**原文**：露骨内容开关在读取时才过滤（story-context-v2），
+      // 否则建档那一刻的开关状态会被永久烧进存档。
       openingWorldBooks = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
     }
     const input = {

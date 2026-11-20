@@ -9,6 +9,15 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-20 露骨内容开关｜分支 `feat/nsfw-content-switch`（内容仓 `content/nsfw-switch`），**已实施，未真机验证**
+
+- 主人裁定：内容包用 `<nsfw>…</nsfw>` 包露骨段落、`<sfw>…</sfw>` 是可选的净版替身；整条标记用 `nsfw: true`（世界书 `extra.lore.nsfw` / 预设提示词 / 角色定义）。
+- 新模块 `src/core/content/nsfw-filter.ts`；全局设置 `nsfwContent`（默认关）经 `engine-settings` 注入缝读，开关在「设置 → 内容包」。
+- 发给模型：世界书在 EJS 渲染后逐条过滤、整条标记条目剔除（含依赖边）、fixedLore 读取时过滤、预设条目经 `isPresetPromptActive`、`AgentClient` 出口安全网。关模式下插画分级上限钳到 `sensitive`。
+- 显示：`useNsfwText()` 接到建档页、角色查看器 / 列表 / 编年史、地图标记、日历、调试面板；世界书编辑器显示原文并加 NSFW 徽章。
+- 内容仓：`tools/nsfw-markup.mjs` 镜像 + 共用测试向量；构建 / 编辑器保存 lint；编辑器加包裹按钮与 NSFW 复选框；混淆器保留标签。
+- 未做：真实内容迁移（作者工作）、编辑器 offset 跳转与关模式预览。设计：`docs/planning/2026-11-20-explicit-content-switch-design.md`。
+
 ### 2026-11-20 角色定义与人设条目并列｜分支 `feat/character-lore-link`，**已实施，未真机验证**
 
 - 主人裁定：`characters.json` 是给引擎用的结构化目录，世界书角色条目是给模型读的人设，二者并列；条目里的 EJS（如按好感度分档的反应）要能生效。私有内容仓同步改为每角色一个源目录（方案 D′：构建期从 `content/characters/<id>/` 生成目录与条目）。

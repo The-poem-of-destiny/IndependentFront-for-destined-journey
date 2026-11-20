@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useNsfwEnabled } from '../../composables/useNsfwText';
+import { filterNsfwBooks } from '@engine/content/nsfw-filter';
 /**
  * 日历（`game.activeModal === 'calendar'`）。按存档隔离、完全本地：这里的任何内容都不进提示词。
  *
@@ -39,6 +41,8 @@ import {
   type EntryDraft,
 } from './calendar-panel';
 
+const nsfwAllowed = useNsfwEnabled();
+
 const game = useGameStore();
 const ui = useUIStore();
 const worldbooks = useWorldBookStore();
@@ -75,7 +79,10 @@ const festivalSource = computed<CalendarItem[]>(() => {
   if (immersive.value) return [];
   const enabled = game.activeSave?.metadata?.enabledWorldBookEntries ?? [];
   return deriveFestivalItems(
-    collectLoreKeyDates(filterBooksByEnabledEntries(worldbooks.books, enabled)),
+    collectLoreKeyDates(
+      // 露骨内容开关关闭时，整条标记的条目上的节庆也不显示
+      filterBooksByEnabledEntries(filterNsfwBooks(worldbooks.books, nsfwAllowed()), enabled),
+    ),
   );
 });
 const birthdaySource = computed<CalendarItem[]>(() =>

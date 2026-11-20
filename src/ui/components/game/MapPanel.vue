@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useNsfwText } from '../../composables/useNsfwText';
 /**
  * MapPanel — 地图查看器面板（两个页签）
  *
@@ -37,6 +38,8 @@ import { getLocationNode, getLocationNodes } from '@engine/map/location-db';
 import { getMapMarkers, removeMapMarker, setMapMarker } from '@engine/state/save-profile';
 import type { LocationNode, MapMarker } from '@engine/types/types';
 import { getContentRegistry, ensureContentRegistryLoaded } from '../../stores/content-store';
+
+const nsfw = useNsfwText();
 
 // ═══ Stores ═══
 const game = useGameStore();
@@ -623,7 +626,7 @@ onBeforeUnmount(() => {
 
               <!-- Body -->
               <div class="card-body">
-                <p class="card-description">{{ activeMarker.description || '暂无说明' }}</p>
+                <p class="card-description">{{ nsfw(activeMarker.description) || '暂无说明' }}</p>
               </div>
             </article>
           </Teleport>

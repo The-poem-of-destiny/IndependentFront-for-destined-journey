@@ -24,6 +24,7 @@
  * 设计: docs/planning/2026-08-05-content-engine-separation-design.md §4 / §5.1 / §5.2 / D8 / D17 / D19 / D20
  */
 
+import { lintNsfwMarkup } from './nsfw-filter';
 import { validateLoreProtocol } from './lore-protocol';
 import { isWorldBookUid, uidPartition } from './worldbook-uid';
 import { isMediaHashAvailable, hashMediaBytes } from '../assets/media-hash';
@@ -338,6 +339,38 @@ export function validatePackOrThrow(pack: unknown): PackValidationNote[] {
     }
   }
 
+  notes.push(...validateNsfwMarkupInPack(pack));
+  return notes;
+}
+
+/**
+ * 露骨内容标记校验（`<nsfw>` / `<sfw>`，设计 2026-11-20）。只出 warning 不拦装包：
+ * 内容仓构建时已经按 error 拦过一次；运行期过滤器对写坏的标记本就 fail-closed。
+ * 扫描范围 = 会进提示词或界面的文本分节里的全部字符串。
+ */
+function validateNsfwMarkupInPack(pack: Record<string, unknown>): PackValidationNote[] {
+  const notes: PackValidationNote[] = [];
+  const walk = (value: unknown, path: string, depth: number) => {
+    if (depth > 12 || notes.length >= 50) return;
+    if (typeof value === 'string') {
+      for (const issue of lintNsfwMarkup(value))
+        if (issue.level === 'error')
+          notes.push({
+            level: 'warning',
+            code: 'bad-nsfw-markup',
+            text: `${path} @${issue.offset}：${issue.message}（关闭露骨内容时按 fail-closed 处理）`,
+          });
+      return;
+    }
+    if (Array.isArray(value)) value.forEach((v, i) => walk(v, `${path}[${i}]`, depth + 1));
+    else if (isPlainObject(value)) {
+      if ('nsfw' in value && value.nsfw !== undefined && typeof value.nsfw !== 'boolean')
+        notes.push({ level: 'warning', code: 'bad-nsfw-flag', text: `${path}.nsfw 必须是布尔值` });
+      for (const [k, v] of Object.entries(value)) walk(v, `${path}.${k}`, depth + 1);
+    }
+  };
+  for (const name of ['worldBooks', 'presets', 'agentDefaults', 'characters'] as const)
+    walk(pack[name], name, 0);
   return notes;
 }
 

@@ -5,6 +5,7 @@ import { getContentRegistry } from '../content/content-registry-runtime';
 import { extractRemoteAssetDecls } from '../assets/remote-asset-catalogue';
 import { isRecord, parseCharacterProfile, parseChronicleDraft } from './character-updates';
 import { extractLoreAge, parseAgeHint } from './character-age';
+import { isNsfwFlagged, nsfwEnabled } from '../content/nsfw-filter';
 
 /** Content boundary: bad definitions are diagnosed independently, never evaluated as scripts. */
 export function readCharacterDefinitions(raw: unknown): CharacterDefinition[] {
@@ -76,6 +77,7 @@ export function readCharacterDefinitions(raw: unknown): CharacterDefinition[] {
       ...(typeof row.loreEntry === 'string' && row.loreEntry.trim()
         ? { loreEntry: row.loreEntry.trim() }
         : {}),
+      ...(row.nsfw === true ? { nsfw: true } : {}),
     });
   }
   return definitions;
@@ -111,6 +113,7 @@ export function legacyCharacterDefinitions(books: readonly WorldBook[]): Charact
         name,
         profile: {},
         lore,
+        ...(isNsfwFlagged(entry.extra?.lore) ? { nsfw: true } : {}),
         past: [],
         assets: declarations.map(({ type, variant, url }) => ({ type, variant, url })),
         loreEntry: entry.uid,
@@ -122,6 +125,16 @@ export function legacyCharacterDefinitions(books: readonly WorldBook[]): Charact
 }
 
 export function availableCharacterDefinitions(books: readonly WorldBook[]): CharacterDefinition[] {
+  const all = allCharacterDefinitions(books);
+  if (nsfwEnabled()) return all;
+  // 露骨内容关：整条标记的角色、或链接到整条标记人设条目的角色，不进建档候选
+  const nsfwEntries = new Set(
+    books.flatMap((b) => b.entries.filter((e) => isNsfwFlagged(e.extra?.lore)).map((e) => e.uid)),
+  );
+  return all.filter((d) => !d.nsfw && !nsfwEntries.has(characterLoreEntryUid(d) ?? ''));
+}
+
+function allCharacterDefinitions(books: readonly WorldBook[]): CharacterDefinition[] {
   const native = readCharacterDefinitions(getContentRegistry().characters);
   const legacy = legacyCharacterDefinitions(books);
   const covers = (n: CharacterDefinition, l: CharacterDefinition) =>

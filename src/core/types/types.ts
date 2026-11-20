@@ -202,6 +202,11 @@ export interface LoreEntryMeta {
   source?: { parentUid: string; part: number };
   /** 关键日期（本地日历用）。运行期读取走 `parseLoreKeyDates`，不直接信任这里的形状。 */
   keyDates?: LoreKeyDate[];
+  /**
+   * 整条露骨标记：露骨内容开关关闭时，条目从游戏侧整体消失（不激活、不进目录/选择、
+   * 不做依赖目标、日历不收）。世界书编辑器仍显示。见 `content/nsfw-filter.ts`。
+   */
+  nsfw?: boolean;
 }
 
 /** 书级组织元数据：只承载分类与命名空间；读取范围 / Story 放置逐条目声明。 */

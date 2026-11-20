@@ -51,6 +51,7 @@ export function validateLoreProtocol(books: unknown): string[] {
           'evaluation',
           'priority',
           'keyDates',
+          'nsfw',
         ]
       : ['audiences', 'section', 'category', 'namespace'];
     for (const key of Object.keys(value))
@@ -76,6 +77,8 @@ export function validateLoreProtocol(books: unknown): string[] {
       errors.push(`${scope}: invalid dependsOn`);
     if (value.required !== undefined && typeof value.required !== 'boolean')
       errors.push(`${scope}: invalid required`);
+    if (value.nsfw !== undefined && typeof value.nsfw !== 'boolean')
+      errors.push(`${scope}: invalid nsfw`);
     if (
       value.priority !== undefined &&
       (typeof value.priority !== 'number' || !Number.isFinite(value.priority))

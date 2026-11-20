@@ -8,6 +8,7 @@
  * - 按 order 排序 + 格式化输出
  */
 
+import { filterNsfwText } from './nsfw-filter';
 import type { WorldBook, WorldBookEntry } from '../types/types';
 import { resolveLoreDependenciesForAgent } from './lore-routing';
 import { uidPartition } from './worldbook-uid';
@@ -275,7 +276,8 @@ function partitionEntries(entries: WorldBookEntry[]): {
   for (const entry of [...entries].sort((a, b) => a.order - b.order)) {
     const content = entry.content ?? '';
     if (!hasDynamic(content)) {
-      staticParts.push(content);
+      // 露骨内容开关：静态条目没有 EJS，直接按条过滤（逐条过滤，坏块不会吞掉下一条）
+      staticParts.push(filterNsfwText(content));
       continue;
     }
     slots.push({ uid: entry.uid, content, needsEval: content.includes('<%') });
@@ -303,7 +305,10 @@ function entryTextMap(
   const texts = new Map<WorldBookEntry, string>();
   let index = 0;
   for (const entry of [...entries].sort((a, b) => a.order - b.order))
-    texts.set(entry, hasDynamic(entry.content) ? dynamicParts[index++] : entry.content);
+    texts.set(
+      entry,
+      hasDynamic(entry.content) ? dynamicParts[index++] : filterNsfwText(entry.content),
+    );
   return texts;
 }
 export function renderWorldBookEntries(
@@ -363,9 +368,12 @@ export function renderWorldBookEntries(
     }
   }
 
+  // 露骨内容开关：动态条目在 EJS 渲染**之后**逐条过滤 —— EJS 整条编成一个函数，if/for 可以
+  // 跨越标签；`lore.get`/`getwi` 读进来的别条原文也嵌在这份输出里，一并剥掉。
+  const filteredDynamic = dynamicParts.map(filterNsfwText);
   return {
-    ...assembleResult(staticParts, dynamicParts, fallbackEntries),
-    entryTexts: entryTextMap(entries, dynamicParts),
+    ...assembleResult(staticParts, filteredDynamic, fallbackEntries),
+    entryTexts: entryTextMap(entries, filteredDynamic),
   };
 }
 
@@ -429,8 +437,11 @@ export async function prerenderWorldBookEntries(
     }
   }
 
+  // 露骨内容开关：动态条目在 EJS 渲染**之后**逐条过滤 —— EJS 整条编成一个函数，if/for 可以
+  // 跨越标签；`lore.get`/`getwi` 读进来的别条原文也嵌在这份输出里，一并剥掉。
+  const filteredDynamic = dynamicParts.map(filterNsfwText);
   return {
-    ...assembleResult(staticParts, dynamicParts, fallbackEntries),
-    entryTexts: entryTextMap(entries, dynamicParts),
+    ...assembleResult(staticParts, filteredDynamic, fallbackEntries),
+    entryTexts: entryTextMap(entries, filteredDynamic),
   };
 }

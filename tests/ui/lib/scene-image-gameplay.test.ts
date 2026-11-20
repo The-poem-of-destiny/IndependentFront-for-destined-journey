@@ -67,6 +67,8 @@ const PRESETS: ImagePreset[] = [
 
 function settingsSnapshot(over: Partial<ImageRuntimeSettings> = {}): ImageRuntimeSettings {
   return {
+    // 露骨内容开关开着 = 分级上限不额外收紧（这些用例测的是 imageMaxRating 本身）
+    nsfwContent: true,
     apiPool: [
       {
         id: 'ep_nai',

@@ -1,11 +1,14 @@
 <script setup lang="ts">
+import { useNsfwText } from '../../composables/useNsfwText';
 import { useCreateStore } from '../../stores/create-store';
+const nsfw = useNsfwText();
 
 const store = useCreateStore();
 
 /** 提取条目内容的纯文本摘要 */
 function summary(content: string, maxLen = 160): string {
-  const cleaned = content
+  // 先按露骨内容开关过滤：下面那步剥 HTML 标签会把 <nsfw> 标记剥掉、留下被包裹的内容
+  const cleaned = nsfw(content)
     .replace(/<[^>]+>/g, '')
     .replace(/\{\{[^}]+\}\}/g, '')
     .replace(/\s+/g, ' ')

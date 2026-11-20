@@ -389,6 +389,27 @@ function showSuccessNotes(notes: unknown[]): void {
       内容包安装/升级的两阶段确认（波 1 T7 / D19 / §5.2）：
       plan 非空时展示，确认后 confirmPackInstall 以 confirmConflicts:true 重入 installPack。
     -->
+    <AppCard v-if="cfg.settings" padding="md" class="pack-card" data-settings-anchor="nsfw-content">
+      <h4>露骨内容</h4>
+      <p class="card-desc">
+        内容包可以把露骨段落标记出来（<code>&lt;nsfw&gt;</code>），或给整条世界书条目 / 预设提示词 /
+        角色打上露骨标记。本项为<strong>全局设置</strong>，立即对所有存档生效。
+      </p>
+      <div class="toggle-row">
+        <label class="toggle-label"
+          ><input
+            v-model="cfg.settings.nsfwContent"
+            type="checkbox"
+            class="toggle-input"
+            data-testid="nsfw-content-toggle"
+          /><span class="toggle-slider" /><span>允许露骨内容</span></label
+        >
+      </div>
+      <p class="form-hint">
+        关闭后，标记的内容不会发送给模型，也不会在游戏界面显示（世界书编辑器与提示词编辑器仍显示原文），
+        插画分级上限同时限制在「敏感」以内。<strong>已经生成的聊天内容不受影响。</strong>
+      </p>
+    </AppCard>
     <PackInstallConfirmModal
       :open="!!(packPlan || packError)"
       :plan="packPlan"

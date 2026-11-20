@@ -201,6 +201,14 @@ const RATING_ORDER: readonly ImageRating[] = ['general', 'sensitive', 'questiona
  * `composePrompt` 之前就要把 rating 写进记录，而记录里那个值还会喂给 `image_prompt`
  * 侧链。钳位只在拼接时做的话，上限就管得住图、管不住送去侧链的那句话。
  */
+/**
+ * 露骨内容开关对图像分级上限的收紧：开关关闭时上限不超过 `sensitive`（不改用户存的值，只在读取时取小）。
+ * 开关打开时原样返回用户设置的上限。
+ */
+export function effectiveMaxRating(max: ImageRating, nsfwContent: boolean): ImageRating {
+  return nsfwContent ? max : clampRating(max, 'sensitive');
+}
+
 export function clampRating(requested: ImageRating | undefined, max: ImageRating): ImageRating {
   const maxIndex = RATING_ORDER.indexOf(max);
   const wantIndex = requested === undefined ? maxIndex : RATING_ORDER.indexOf(requested);

@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { useNsfwText } from '../../composables/useNsfwText';
 import { computed, nextTick, ref } from 'vue';
 import { useCreateStore } from '../../stores/create-store';
 import WorkshopEnableList from '../shared/WorkshopEnableList.vue';
 import AppButton from '../shared/AppButton.vue';
+const nsfw = useNsfwText();
 
 const store = useCreateStore();
 
@@ -85,7 +87,8 @@ function onRadioKeydown(event: KeyboardEvent, key: string) {
 
 /** 提取条目内容的纯文本摘要（去掉 HTML/EJS 标签） */
 function summary(content: string, maxLen = 200): string {
-  const cleaned = content
+  // 先按露骨内容开关过滤：下面那步剥 HTML 标签会把 <nsfw> 标记剥掉、留下被包裹的内容
+  const cleaned = nsfw(content)
     .replace(/<[^>]+>/g, '')
     .replace(/\{\{[^}]+\}\}/g, '')
     .replace(/\s+/g, ' ')

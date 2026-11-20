@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { effectiveMaxRating } from '@engine/image/image-prompt';
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import InputBar from './InputBar.vue';
 import type { AgentActivityRun, ChatMessage, SystemEvent } from '@engine/types/types';
@@ -1073,7 +1074,7 @@ async function illustrate(msg: ChatMessage | undefined) {
     // 没有标记就没有出场角色名单 —— 侧链自己从正文里看
     characters: [],
     // 没有标记可钳，rating 上限就是这一张的 rating（D38）
-    rating: s.imageMaxRating,
+    rating: effectiveMaxRating(s.imageMaxRating, s.nsfwContent),
     narrative,
   });
 }
@@ -1259,7 +1260,7 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
               :message-id="msg.id"
               :turn="msg.turn ?? 0"
               :image-mode="s.imageGenMode"
-              :image-max-rating="s.imageMaxRating"
+              :image-max-rating="effectiveMaxRating(s.imageMaxRating, s.nsfwContent)"
               :image-blur-by-default="s.imageBlurByDefault"
               :image-dialect-id="s.imageDialectId"
               :mentions="mentionsFor(msg)"
@@ -1275,7 +1276,7 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
               :message-id="msg.id"
               :turn="msg.turn ?? 0"
               :image-mode="s.imageGenMode"
-              :image-max-rating="s.imageMaxRating"
+              :image-max-rating="effectiveMaxRating(s.imageMaxRating, s.nsfwContent)"
               :image-blur-by-default="s.imageBlurByDefault"
               :image-dialect-id="s.imageDialectId"
               :reveal="revealFor(msg)"
