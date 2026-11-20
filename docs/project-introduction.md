@@ -114,7 +114,7 @@ craft_gen / char_gen / item_gen 通过 OpenAI function calling 调用真实 Code
 | **类型系统**        | types.ts，4100+ 行，180 个导出接口/类型，唯一类型来源（大型联合类型拆 types-\*.ts 分册）                        |
 | **数据库**          | Dexie/IndexedDB **v22，30 张表**（世界书/预设/对话/记忆/剧情/角色/快照与载荷/存档/音频/素材/工坊/插画/内容包…） |
 | **Agent 编排引擎**  | DAG 管线，层间串行 + 层内并行 + 逐 Agent 依赖，侧链旁路化，Agentic 多轮工具循环                                 |
-| **Agent 客户端**    | OpenAI 兼容协议，流式 SSE，失败自动重试（次数可配置）+ 指数退避，缓存命中检测                                   |
+| **Agent 客户端**    | OpenAI 兼容协议，流式 SSE，按错误类型重试（4xx 不重试）+ 退避，流式空闲超时，缓存命中                           |
 | **Prompt 模板系统** | **13 个 Agent** 全量迁入 agent-config.json，前端可视化编辑（story 例外：行为真源是预设条目）                    |
 
 ### 游戏系统

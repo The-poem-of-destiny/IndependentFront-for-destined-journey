@@ -139,6 +139,11 @@ src/core/                    ← 核心引擎
   │              `updatedAt` 索引；存权威 `CombatState` + 会话 transcript，供刷新续战。
   │              🔴 **rebuildable 缓存，与上面三张 story 表口径相反**：不进 FullBackup / 单存档导出，
   │                 删存档级联删。合并前它是原分支的 v27，与 Story v2 的 v27/v28/v29 撞号，顺延到 v30
+  │              📌 2026-11-20：整库恢复（`importAllData`）**成功后**清空 `combatSandboxes` /
+  │                 `promptSessions` / `debugTurns`（`clearSaveRuntimeCaches`）—— 全量备份保留原存档 id，
+  │                 不清的话恢复旧备份后会续上「未来」的战斗、沿用更晚的 delta transcript。
+  │                 放在导入成功之后而非 `doImportAllData` 内：失败回滚时这些缓存仍与回滚后的状态一致。
+  │                 `engineLogs`（诊断）与 `sceneImageBlobs`（备份不带字节）刻意不清
   │   └── v34+: engineLogs（引擎日志，2026-11-16）—— `++seq, [saveId+layer]`；saveId 空串 = 应用级、
   │              layer 0 = 无回合。每存档留最近 100 个回合层，层 0 每 (saveId, 0) 桶 ≤2000 条。
   │              不进 FullBackup / 单存档导出，删档级联删。🔴 与 debugTurns 等派生表**相反**：
@@ -167,6 +172,12 @@ src/core/                    ← 核心引擎
   │   └── embedding.ts / reranker.ts ← OpenAI 兼容检索请求；受保护字段、响应校验与候选重排
   ├── agents/agent-client.ts               ← [Phase 3 + API 重构] API 客户端（配置快照 / 重试 / 缓存 / RPM；
   │                                    协议适配、流式归一化、工具调度及 continuationMessages）
+  │      📌 2026-11-20 重试按错误类型判定（唯一判据 `decideRetry`）：HTTP 失败抛 `LlmHttpError`
+  │         （带 `status` / `retryAfterMs`，文案仍是 `HTTP <status>: …`，turn-failure 靠它分类）；
+  │         4xx 除 408/429 外不重试；429 照 Retry-After 等（封顶 60 秒），无则更大基数退避 + 抖动；
+  │         5xx / 网络 / 首字节超时照旧重试；流式**已收到输出增量后才失败的整次调用至多再重试 1 次**；
+  │         退避等待可被取消。流式收到首块后改由**空闲超时**（= `timeout`，每块重置）接管，
+  │         停滞不关闭的连接报「流式输出空闲超时」，不再永远挂住
   ├── prompts/agent-templates.ts            ← [Phase 3+9] Prompt 模板（systemPrompt 已迁 agent-config.json，留 stub + 动态上下文）
   ├── prompts/prompt-session-assembler.ts   ← [Delta 会话 v1 + API 重构] 主 DAG普通 chat/chatStream 的 delta session 深模块：
   │      独占 `(saveId, agentId)` 的 transcript / baselineSignature / revision / 投影 diff 起点，只开

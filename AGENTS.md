@@ -282,6 +282,8 @@ docs/
 ├── planning/2026-11-20-explicit-content-switch-design.md
 │                                       # 🆕 露骨内容开关（✅ 2026-11-20 已实施，真机待验证）← 改内容文本过滤 / 世界书显示必读
 │                                       # `<nsfw>`/`<sfw>` 行内包裹 + 整条 `nsfw: true`；使用时过滤、永不写回；世界书编辑器豁免
+├── planning/2026-11-20-pre-beta-release-checklist.md
+│                                       # 🆕 测试版发布前检查清单（在办）← 发 beta 前逐条过；阻塞项 / 应修项 / 可并行项
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 

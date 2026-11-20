@@ -51,6 +51,11 @@ import { hasOpenDialog } from '../../lib/modal-focus';
 import { getSave } from '@engine/persistence/database';
 import { decideStoryContextAdmission } from '@engine/story/story-context-mode';
 import { storyContextRejectionMessage } from '../../lib/story-context-admission';
+import {
+  acquireSaveTabLock,
+  SAVE_TAB_LOCKED_MESSAGE,
+  type SaveTabLockHandle,
+} from '../../lib/save-tab-lock';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -70,6 +75,8 @@ useAutosave();
 
 let pipeline: GamePipeline | null = null;
 let disposed = false;
+/** 存档单标签页锁（2026-11-20）：进入存档时取得，卸载时释放；见 lib/save-tab-lock.ts */
+let saveTabLock: SaveTabLockHandle | null = null;
 const requestedSaveId = ui.activeSaveId;
 const ownsPage = () =>
   !disposed && ui.currentView === 'game' && ui.activeSaveId === requestedSaveId;
@@ -121,6 +128,22 @@ onMounted(async () => {
   if (requestedSaveId) {
     try {
       console.log('[GamePage] loading save...');
+      // 跨标签页护栏：同一存档已在别的标签页打开时不进入（两边的写队列互不可见）。
+      // 必须排在任何读写之前 —— loadSave 会做进度归一化写回。
+      const lock = await acquireSaveTabLock(requestedSaveId);
+      if (disposed) {
+        lock?.release();
+        return;
+      }
+      if (!lock) {
+        if (ownsPage()) {
+          ui.toast(SAVE_TAB_LOCKED_MESSAGE, 'warning', 8000);
+          ui.navigate('home');
+        }
+        return;
+      }
+      saveTabLock = lock;
+      if (!ownsPage()) return;
       await waitForGameSaveIdle(requestedSaveId);
       if (!ownsPage()) return;
       // Story 上下文模式准入（计划 §11.3）：先读存档行判定，再走 loadSave ——
@@ -369,6 +392,13 @@ watch(
 
 onBeforeUnmount(() => {
   disposed = true;
+  // 等本档在飞的管线收尾再放锁：否则另一个标签页可能赶在本页最后几次写入落库前进档
+  const lock = saveTabLock;
+  saveTabLock = null;
+  if (lock && requestedSaveId) {
+    const release = () => lock.release();
+    void waitForGameSaveIdle(requestedSaveId).then(release, release);
+  }
   game.invalidatePendingLoads();
   window.removeEventListener('keydown', onKeyDown);
   window.removeEventListener('keydown', onEscapeCapture, true);

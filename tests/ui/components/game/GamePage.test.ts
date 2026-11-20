@@ -182,6 +182,52 @@ describe('GamePage', () => {
     expect(toast).toHaveBeenCalledWith(expect.stringContaining('测试存档'), 'warning', 6000);
   });
 
+  it('存档已在另一个标签页打开时不进入：loadSave 之前退回首页并提示（跨标签页锁）', async () => {
+    const { useUIStore } = await import('../../../../src/ui/stores/ui-store');
+    const { useGameStore } = await import('../../../../src/ui/stores/game-store');
+    const mockLoadSave = vi.fn(async () => true);
+    (useGameStore as any).mockReturnValue({
+      messages: [],
+      isGenerating: false,
+      loadSave: mockLoadSave,
+      invalidatePendingLoads: vi.fn(),
+      pendingOptions: [] as string[],
+      hasOpeningPromptConsumed: true,
+      openingPrompt: null,
+    });
+    const navigate = vi.fn();
+    const toast = vi.fn();
+    (useUIStore as any).mockReturnValue({
+      activeSaveId: 'locked-save',
+      currentView: 'game',
+      navigate,
+      toast,
+    });
+    // 假 Web Locks：别的标签页正占着这把锁
+    const request = vi.fn(async (_name: string, _opts: unknown, cb: (lock: null) => unknown) =>
+      cb(null),
+    );
+    Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true });
+    try {
+      mount(GamePage);
+      await flushPromises();
+    } finally {
+      delete (navigator as { locks?: unknown }).locks;
+    }
+    expect(request).toHaveBeenCalledWith(
+      'poem-save:locked-save',
+      { ifAvailable: true },
+      expect.any(Function),
+    );
+    expect(mockLoadSave).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith('home');
+    expect(toast).toHaveBeenCalledWith(
+      expect.stringContaining('此存档已在另一个标签页中打开'),
+      'warning',
+      8000,
+    );
+  });
+
   it('keeps the toolbar debug modal separate from the keyboard debug drawer', async () => {
     useSettingsStore().settings.developerMode = true;
     const { useGameStore } = await import('../../../../src/ui/stores/game-store');

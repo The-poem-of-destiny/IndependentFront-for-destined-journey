@@ -12,6 +12,7 @@ import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
 import AstralDriftBackdrop from './AstralDriftBackdrop.vue';
 import { useBranding } from '../../branding-defaults';
 import { findLatestSave } from './latest-save';
+import { confirmDialog } from '../../lib/confirm-dialog';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -158,6 +159,14 @@ async function startOrContinue() {
 // 🧪 开发用快速测试 (正式版移除)
 // ⚠️ 会先清空**整个数据库** —— 素材库与音频库不随存档隔离，会一并没
 async function quickTest() {
+  // 2026-11-20：clone 后跑 dev 的测试者也看得到这个按钮，误点就是整库清空 —— 必须二次确认。
+  const ok = await confirmDialog({
+    title: '清空数据库并创建测试存档？',
+    message: '这会删除本机全部存档、素材库与音频库，且无法撤销。',
+    confirmLabel: '清空并创建',
+    danger: true,
+  });
+  if (!ok) return;
   const { createTestSave } = await import('../../utils/test-save');
   const saveId = await createTestSave();
   ui.navigate('game', saveId);
