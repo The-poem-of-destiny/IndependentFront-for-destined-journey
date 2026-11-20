@@ -6,11 +6,26 @@
  * both while streaming and after completion.
  */
 
+import type { StoryStage, StoryStageEnter } from '../types/types';
 import { scanEventTriggers, stripPlayAudioMarkers } from './marker-protocol';
+import { extractStoryBeats, hasBeatMarkers } from './story-beats';
 
 export interface StoryProjection {
   content: string;
   options: string[];
+  /**
+   * 正文分节旁路数据（`<beat/>` 已从 content 剥掉）。只在正文里出现过分节标记时存在；
+   * 缺席 = 模型没分节，消费方按段落兜底（见 story-beats 的 `resolveBeatBreaks`）。
+   */
+  stage?: StoryStage;
+}
+
+/** 流式分节投影：content 与 `projectStreamingStory` 恒等；`closed` = 正文信封已闭合（末节已完整）。 */
+export interface StagedStreamingStory {
+  content: string;
+  breaks: number[];
+  enters: StoryStageEnter[];
+  closed: boolean;
 }
 
 const LEADING_FENCE = /^\s*```[^\n]*\n?/;
@@ -45,6 +60,7 @@ const CONTROL_TAGS = [
 ];
 const STREAM_CONTROL_TAGS = [
   ...STORY_ENVELOPE_TAGS,
+  'beat',
   'play_audio',
   'event_trigger',
   ...CONTROL_TAGS,
@@ -171,7 +187,14 @@ function project(raw: string, partial: boolean): StoryProjection {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  return { content, options };
+  // 分节标记最后剥：没有标记时 content 逐字节不变，也不带 stage 字段
+  if (!hasBeatMarkers(content)) return { content, options };
+  const beats = extractStoryBeats(content);
+  return {
+    content: beats.content,
+    options,
+    stage: { breaks: beats.breaks, enters: beats.enters },
+  };
 }
 
 /** Normalize a completed story response for persistence and rendering. */
@@ -186,4 +209,23 @@ export function projectStreamingStory(raw: string): string {
   // 完成后的输出仍保留上面那条「裸文本」兼容兜底。
   if (!lastMatch(stripCodeFences(raw), STREAM_MAIN_TEXT_OPEN)) return '';
   return project(raw, true).content;
+}
+
+/**
+ * 流式分节投影：在 `projectStreamingStory` 之上带出已见到的断点与登场锚点。
+ * 断点只来自模型写的 `<beat/>`（未见标记时为空，段落临时切分由前端负责）；
+ * 半截的 `<bea…` 由流式控制标签名单兜住，不会漏进 content。
+ */
+export function projectStreamingStoryStaged(raw: string): StagedStreamingStory {
+  const unfenced = stripCodeFences(raw);
+  const open = lastMatch(unfenced, STREAM_MAIN_TEXT_OPEN);
+  if (!open) return { content: '', breaks: [], enters: [], closed: false };
+  const closed = MAIN_TEXT_CLOSE.test(unfenced.slice(open.index + open[0].length));
+  const projection = project(raw, true);
+  return {
+    content: projection.content,
+    breaks: projection.stage?.breaks ?? [],
+    enters: projection.stage?.enters ?? [],
+    closed,
+  };
 }

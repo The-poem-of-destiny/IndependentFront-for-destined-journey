@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { projectStoryOutput, projectStreamingStory } from '../../../src/core/story/story-output';
+import {
+  projectStoryOutput,
+  projectStreamingStory,
+  projectStreamingStoryStaged,
+} from '../../../src/core/story/story-output';
 
 describe('projectStoryOutput', () => {
   it('extracts main text and numbered options through one interface', () => {
@@ -127,5 +131,55 @@ describe('gametxt 同义正文信封', () => {
   it('gametxt 下流式与完成态一致', () => {
     const raw = '<gametxt>夜色渐深。\n\n门被推开。</gametxt><options>\n1. 查看\n</options>';
     expect(projectStreamingStory(raw)).toBe(projectStoryOutput(raw).content);
+  });
+});
+
+describe('正文分节（<beat/>）', () => {
+  it('无标记时与现状一致，且不带 stage 字段', () => {
+    const raw = '<maintext>第一段。\n\n第二段。</maintext><options>1. 走</options>';
+    const result = projectStoryOutput(raw);
+    expect(result).toStrictEqual({ content: '第一段。\n\n第二段。', options: ['走'] });
+    expect('stage' in result).toBe(false);
+  });
+
+  it('剥掉标记、节间以空行拼接并记下断点与登场', () => {
+    const result = projectStoryOutput(
+      '<maintext>开场。\n<beat enter="艾琳"/>\n她走进来。\n<beat/>\n结尾。</maintext>',
+    );
+    expect(result.content).toBe('开场。\n\n她走进来。\n\n结尾。');
+    expect(result.stage).toEqual({ breaks: [5, 12], enters: [{ name: '艾琳', at: 5 }] });
+  });
+
+  it('流式：半截 <bea 与 <beat enter="… 不外漏', () => {
+    expect(projectStreamingStory('<maintext>第一节。\n<bea')).toBe('第一节。');
+    expect(projectStreamingStory('<maintext>第一节。\n<beat enter="艾')).toBe('第一节。');
+    expect(projectStreamingStory('<maintext>第一节。\n<b')).toBe('第一节。');
+  });
+
+  it('流式分节投影：content 与 projectStreamingStory 一致，闭合后 closed', () => {
+    const partial = '<maintext>一。\n<beat/>\n二。\n<beat enter="洛"/>\n三';
+    const staged = projectStreamingStoryStaged(partial);
+    expect(staged).toEqual({
+      content: '一。\n\n二。\n\n三',
+      breaks: [4, 8],
+      enters: [{ name: '洛', at: 8 }],
+      closed: false,
+    });
+    expect(staged.content).toBe(projectStreamingStory(partial));
+    expect(projectStreamingStoryStaged(`${partial}。</maintext>`).closed).toBe(true);
+    expect(projectStreamingStoryStaged('思考中')).toEqual({
+      content: '',
+      breaks: [],
+      enters: [],
+      closed: false,
+    });
+  });
+
+  it('流式与完成态的分节一致', () => {
+    const raw = '<maintext>一。\n<beat/>\n二。</maintext><options>1. 走</options>';
+    const done = projectStoryOutput(raw);
+    const staged = projectStreamingStoryStaged(raw);
+    expect(staged.content).toBe(done.content);
+    expect(staged.breaks).toEqual(done.stage?.breaks);
   });
 });

@@ -413,10 +413,22 @@ import { qualityVar } from '../../lib/quality-colors'
 | 墨迹洇开过渡 `filter: blur()`       | 只作用于流式正文短暂存活的片段 span（同时至多 48 个），强度 2px；整段与整块浮现只动 opacity |
 | 名字下划线过渡 `background-size`    | 一次性描线；不是布局属性                                                                    |
 | 战斗接缝过渡 `border-color`         | 进出战斗各一次；不是布局属性                                                                |
+| 角色登场遮罩动画 `mask-position`    | 📌 2026-11-19 增补，见表后说明                                                              |
 | 氛围层在 `.game-page-layout` 内 z 2 | 侧栏底色不透明，垫在 z -1 会被整个盖住；染色、雾与雨都遮掉中间阅读栏                        |
 | 光泽 / 闪光层 z 1500                | 压在弹窗之上（弹窗里也有光泽），提示条之下                                                  |
 | 战斗暗角 z 1002                     | 战斗遮罩 1000、其收起 / 返回按钮 1001 之上                                                  |
 | 箔光样式由 `lib/fx-foil.ts` 注入    | 指令按需注入一次，规则同样挂在 `:root[data-fx='on']` 下                                     |
+
+> 📌 **2026-11-19 增补（交互式推进，分支 `feat/interactive-progression`，未真机验证）**：
+> `game/CharacterEntrance.vue`（直出正文逐节演出里新角色首次登场的立绘或名字题签）用一条上实下虚的
+> 渐变遮罩自上而下扫过，同时淡入透明度，动画属性是 `mask-position` 加 `opacity`，不在 §6.0 第 1 条
+> 「只动 opacity / transform」之内。理由：主人要的是「被画出来」式浮现，不要旋转、发光或弹跳，
+> 只靠位移与透明度做不出自上而下显形；遮罩位置不是布局属性，不触发重排。范围：每个登场格只播一次
+> （立牌约 1000ms，题签 700ms），只在新放出的节且特效闸门打开时播；闸门关、减动效或已读过的节一律静态
+> 显示，`prefers-reduced-motion` 下撤掉遮罩与动画。与本节第 1、2 条的差异：该组件不在 `components/fx/*`，
+> 动画样式也不挂在 `:root[data-fx='on']` 下，而是由组件经 `useFxEnabled()` 决定是否加 `is-drawing` 类；
+> 闸门关时不加类，DOM 与静态显示相同。设计见
+> [交互式推进设计](planning/2026-11-19-interactive-progression-design.md)。
 
 **层级表。**
 

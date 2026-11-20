@@ -957,6 +957,24 @@ export interface ChatMessage {
    * 不进任何提示词与摘要 —— 只是可还原的备份。
    */
   preRewriteContent?: string;
+  /**
+   * 🆕 正文分节（交互式推进，2026-11-19）。模型在 `<maintext>` 内写的 `<beat/>` 已从 content 剥掉，
+   * 这里只存断点偏移与新角色登场锚点；缺席 = 旧档或模型没分节，前端按段落兜底。
+   * 偏移相对 content 计；润色等改写 content 后可能失效，读取方一律经 `resolveBeatBreaks` 自校验。
+   */
+  stage?: StoryStage;
+}
+
+/** 新角色登场锚点：`at` 为该人物首次现身那一节的起始偏移（第一节为 0）。 */
+export interface StoryStageEnter {
+  name: string;
+  at: number;
+}
+
+/** 正文分节旁路数据：`breaks` 为第 2 节起每节的起始偏移（严格递增，前两字符恒为 `\n\n`）。 */
+export interface StoryStage {
+  breaks: number[];
+  enters: StoryStageEnter[];
 }
 
 // ========== Constants ==========

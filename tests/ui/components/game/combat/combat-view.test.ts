@@ -9,9 +9,12 @@ import {
   currentActor,
   isAwaitingPlayer,
   orderedUnits,
+  parseCombatBeat,
   posToPercent,
+  splitBeatNames,
   statusViewsOf,
 } from '../../../../../src/ui/components/game/combat/combat-view';
+import { parseActionPanel } from '../../../../../src/ui/lib/action-panel';
 
 function unit(
   name: string,
@@ -122,5 +125,76 @@ describe('statusViewsOf / axisTicks / posToPercent', () => {
     expect(posToPercent(4, 8)).toBe(50);
     expect(posToPercent(99, 8)).toBe(100);
     expect(posToPercent(-1, 8)).toBe(0);
+  });
+});
+
+describe('parseCombatBeat（直出战斗逐拍 → 行为卡）', () => {
+  // 认行走 master 的 action-panel 解析（与 BeautifiedNarrative 同一条路）
+  const rowsOf = (raw: string) =>
+    parseActionPanel(raw).sections.flatMap((section) => section.rows.flatMap((row) => row.cells));
+
+  it('固定三行 + 判定/伤害/消耗/状态归位', () => {
+    const beat = parseCombatBeat(
+      rowsOf(
+        '<action_info>\n|行动者|艾琳|\n|目标|灰狼|\n|行动|裂风斩|\n|判定|14 ≥ 12 命中|\n|伤害|36|\n|消耗|SP 12|\n|状态|灰狼 HP 40/76，流血+1|\n</action_info>',
+      ),
+    );
+    expect(beat).toEqual({
+      actor: '艾琳',
+      target: '灰狼',
+      targets: ['灰狼'],
+      action: '裂风斩',
+      roll: '14 ≥ 12 命中',
+      damage: '36',
+      heal: null,
+      cost: 'SP 12',
+      status: ['灰狼 HP 40/76，流血+1'],
+      rest: [],
+    });
+  });
+
+  it('缺「行动者」行或值为空 → null（调用方退回通用面板）', () => {
+    expect(parseCombatBeat(rowsOf('<action_info>| 掷骰 | 12 |</action_info>'))).toBeNull();
+    expect(parseCombatBeat([{ label: '行动者', value: '' }])).toBeNull();
+    expect(parseCombatBeat([])).toBeNull();
+  });
+
+  it('目标写「无」→ null；多目标按顿号拆名', () => {
+    expect(
+      parseCombatBeat([
+        { label: '行动者', value: '甲' },
+        { label: '目标', value: '无' },
+      ])?.target,
+    ).toBeNull();
+    const multi = parseCombatBeat([
+      { label: '行动者', value: '甲' },
+      { label: '目标', value: '乙、丙' },
+    ]);
+    expect(multi?.target).toBe('乙、丙');
+    expect(multi?.targets).toEqual(['乙', '丙']);
+    expect(splitBeatNames('A, B／C')).toEqual(['A', 'B', 'C']);
+  });
+
+  it('同义标签、冒号形态、恢复行、多条状态与未知行', () => {
+    const beat = parseCombatBeat([
+      { label: '', value: '行动者：牧师' },
+      { label: '行动:', value: '圣愈' },
+      { label: '检定', value: '自动成功' },
+      { label: '治疗', value: '24' },
+      { label: '状态', value: '甲 HP 50/60' },
+      { label: '状态', value: '乙 祝福+1' },
+      { label: '行动者', value: '冒名者' },
+      { label: '备注', value: '光芒' },
+    ]);
+    expect(beat?.actor).toBe('牧师');
+    expect(beat?.action).toBe('圣愈');
+    expect(beat?.roll).toBe('自动成功');
+    expect(beat?.heal).toBe('24');
+    expect(beat?.damage).toBeNull();
+    expect(beat?.status).toEqual(['甲 HP 50/60', '乙 祝福+1']);
+    expect(beat?.rest).toEqual([
+      { label: '行动者', value: '冒名者' },
+      { label: '备注', value: '光芒' },
+    ]);
   });
 });

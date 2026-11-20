@@ -276,6 +276,9 @@ docs/
 ├── planning/2026-11-13-calendar-system-v1-design.md
 │                                       # 🆕 日历系统 v1（✅ 已实施，界面已浏览器走查，待真机游玩验证）
 │                                       # 按存档隔离、完全本地；沉浸 / 普通两种模式；Dexie v33 `saveCalendars`
+├── planning/2026-11-19-interactive-progression-design.md
+│                                       # 🆕 交互式推进（✅ 2026-11-19 已实施，真机待验证）← 改直出正文分节 / 逐节演出必读
+│                                       # `<beat/>` 剥标记存 `ChatMessage.stage`；聊天流内逐节放出；新角色登场；战斗行为卡
 └── 《命定之诗》内容二创与素材使用授权协议.md  # 项目需遵守的外部授权
 ```
 
@@ -635,6 +638,7 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 | 条目级 lore 路由   | 退役 Agent 级世界书清单：读取范围改由条目 `extra.lore.audiences` 声明（双模式唯一权限 + 依赖闭包 + EJS 间接读取），`lore_select` 独立资料选择器 + 独立 ST 供值与开局冻结                                                 | ✅ 已实施                                                                                             |
 | 内置角色过滤       | 未选择任何内置角色时排除默认人物档案（`character` 世界书按存档 `enabledWorldBookEntries` 白名单过滤，不再沿用全局默认启用态）                                                                                            | ✅ 已实施                                                                                             |
 | 合并：战斗沙盒并入 | 18 天的战斗沙盒 / entity_gen 分支并入 master：DB 编号撞车顺延（`combatSandboxes` → v30）、agent 名册统一 15 个、世界书 `audiences` 重映射（`char_gen` → `entity_gen` 21 处）、`lore-protocol` 白名单同步                 | ✅ 8 道闸门全绿（2026-10-24）                                                                         |
+| 交互式推进         | 直出正文 `<beat/>` 分节（断点存 `ChatMessage.stage`）+ 聊天流内逐节演出（设置 `stagedNarrative` 默认开）+ 新角色登场浮现 + 正文战斗行为卡                                                                                | ✅ 已实施，真机待验证（2026-11-19）                                                                   |
 | 真机迭代           | debug loop 持续修复                                                                                                                                                                                                      | 🔄                                                                                                    |
 
 > 📦 **进度表长注已迁出（2026-08-13）**：原挂在此处的六条长注（🔓 工坊入口执行边界 / 🟡 工坊 P4 / 🩹 走查后修的三处 / 🟡 图像生成 v1 + 两条真机踩坑 / 🩹 实施中两处 / 🟡 工坊 P2 EJS）已按本文件「详细记录进 CHANGELOG」的规则**原文**迁入 `docs/CHANGELOG.md`「进度表长注归档」节。🔴 其中〔工坊入口已开放〕一条是工坊/正则的**安全执行边界**，读工坊/正则代码前仍必读（📌 2026-11-12：入口本身已于 `db9ee1e` 临时锁定，该条标题描述的开放状态已过时，执行边界仍有效）。

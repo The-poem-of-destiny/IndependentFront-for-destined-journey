@@ -124,6 +124,23 @@ describe('设置与协议', () => {
     expect(onLines.filter((line, i) => line !== offLines[i])).toHaveLength(1);
   });
 
+  it('两种口径都带正文分节一行；战斗逐拍只进正文战斗行', () => {
+    const on = buildDirectProtocol(true);
+    const off = buildDirectProtocol(false);
+    for (const text of [on, off]) {
+      const beatLine = text.split('\n').find((line) => line.startsWith('正文分节：'));
+      expect(beatLine).toBeDefined();
+      expect(beatLine).toContain('独占一行的 <beat/>');
+      expect(beatLine).toContain('<beat enter="人物名"/>');
+      expect(beatLine).toContain('已有实体的人物不写 enter');
+    }
+    expect(on).not.toContain('战斗逐拍');
+    const proseLine = off.split('\n').find((line) => line.startsWith(PROSE_COMBAT_LINE_HEAD));
+    expect(proseLine).toContain('战斗逐拍：一名角色的一次行为单独成一节');
+    expect(proseLine).toContain('|行动者|名字|、|目标|名字或无|、|行动|技能或动作名|');
+    expect(proseLine?.endsWith('临时敌人称呼前后一致。')).toBe(true);
+  });
+
   it('关闭时 readDirectCombat 返回 null（记录休眠不删）', () => {
     const record = { sourceTurnKey: 'u', state: {} } as unknown as DirectCombatRecord;
     const profile = { worldFlags: { directCombat: record } } as never;

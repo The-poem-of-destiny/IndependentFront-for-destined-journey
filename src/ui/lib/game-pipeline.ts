@@ -77,7 +77,12 @@ import type { CharacterNarrativeUpdate } from '@engine/types/types-character';
 import { AgentClient } from '@engine/agents/agent-client';
 import type { StreamCallbacks } from '@engine/agents/agent-client';
 import { createStateManager } from '@engine/state/state-manager';
-import { projectStoryOutput, projectStreamingStory } from '@engine/story/story-output';
+import {
+  projectStoryOutput,
+  projectStreamingStory,
+  projectStreamingStoryStaged,
+  type StagedStreamingStory,
+} from '@engine/story/story-output';
 import { loadWorldBooksWithFallback } from '@engine/content/builtin-worldbooks';
 import { getActivePackPayload, subscribePackRuntime } from '@engine/content/pack-runtime';
 import { useContentStore } from '../stores/content-store';
@@ -238,8 +243,21 @@ export interface GamePipelineDeps {
   saveId: string;
 }
 
-/** 流式回调 — chunk 是累计的可见正文快照；isComplete=true 表示清理临时预览。 */
-export type StoryChunkCallback = (chunk: string, isComplete: boolean) => void;
+/**
+ * 流式分节快照（交互式推进，2026-11-19）：与 chunk 同一份投影带出的断点、登场锚点，
+ * 以及 `</maintext>` 是否已到（closed=true 表示正文不会再长，末节可以放出）。
+ */
+export type StreamingStoryStage = Omit<StagedStreamingStory, 'content'>;
+
+/**
+ * 流式回调 — chunk 是累计的可见正文快照；isComplete=true 表示清理临时预览。
+ * stage 只在直出模式（direct_main / direct_cached）给出，非直出与清预览信号一律缺席。
+ */
+export type StoryChunkCallback = (
+  chunk: string,
+  isComplete: boolean,
+  stage?: StreamingStoryStage,
+) => void;
 
 /**
  * 这个错误是不是「用户主动取消」（离开游戏页 / 按了停止生成）。
@@ -688,6 +706,8 @@ export class GamePipeline {
       storyTurnStatus: 'pending',
       storyTurnKey: this.currentStoryTurnKey,
       ...(context.gameTime ? { storyGameTime: { ...context.gameTime } } : {}),
+      // 分节断点随消息整体落库（Dexie 存整条 ChatMessage，无需迁移）；无标记时投影不带 stage
+      ...(draft.stage ? { stage: draft.stage } : {}),
     });
     if (!message) throw new DOMException('Turn cancelled', 'AbortError');
     this.currentStoryTurnKey ??= message.id;
@@ -1504,7 +1524,7 @@ export class GamePipeline {
     role: 'user' | 'assistant',
     markers: Pick<
       ChatMessage,
-      'storyTurnStatus' | 'storyTurnKey' | 'diagnostic' | 'storyGameTime'
+      'storyTurnStatus' | 'storyTurnKey' | 'diagnostic' | 'storyGameTime' | 'stage'
     > = role === 'assistant' ? { diagnostic: true } : {},
   ): ChatMessage | null {
     if (!this.ownsActiveSave) {
@@ -1666,6 +1686,12 @@ export class GamePipeline {
               return;
             }
             streamedRaw += text;
+            // 直出主笔额外带出分节信息；content 与 projectStreamingStory 逐字节一致
+            if (agentId === 'direct_main') {
+              const { content, ...stage } = projectStreamingStoryStaged(streamedRaw);
+              onStoryChunk(content, false, stage);
+              return;
+            }
             onStoryChunk(projectStreamingStory(streamedRaw), false);
           },
           onComplete: () => {

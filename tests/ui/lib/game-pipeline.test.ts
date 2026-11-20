@@ -930,6 +930,66 @@ describe('buildAgentConfigs — story 流式投影', () => {
   });
 });
 
+describe('buildAgentConfigs — 直出流式分节', () => {
+  function directStream(mode: 'direct' | 'direct_cached') {
+    const pipeline = makePipeline(
+      {},
+      {
+        directInitialized: true,
+        directCachedInitialized: true,
+        apiPool: [
+          {
+            id: 'ep',
+            name: 'test',
+            provider: 'openai',
+            baseUrl: 'https://example.test/v1',
+            apiKey: 'test',
+            defaultModel: 'model',
+          },
+        ],
+      },
+    );
+    (pipeline as any).generationMode = mode;
+    const chunks: unknown[][] = [];
+    const configs = (pipeline as any).buildAgentConfigs(
+      {},
+      (...args: unknown[]) => chunks.push(args),
+      true,
+    ) as AgentConfig[];
+    const stream = configs.find((config) => config.agentId === 'direct_main')!.streamCallbacks!;
+    return { stream, chunks };
+  }
+
+  it.each(['direct', 'direct_cached'] as const)(
+    '%s：direct_main 额外传出断点 / 登场 / 闭合，正文与非分节投影一致',
+    (mode) => {
+      const { stream, chunks } = directStream(mode);
+      stream.onChunk('<maintext>甲。\n<beat enter="乙"/>\n乙到', false);
+      stream.onChunk('。</maintext>', false);
+      stream.onChunk('', true);
+      // 断点指向下一节首字（前两字符为 \n\n）
+      const at = '甲。\n\n'.length;
+      expect(chunks).toEqual([
+        ['甲。\n\n乙到', false, { breaks: [at], enters: [{ name: '乙', at }], closed: false }],
+        ['甲。\n\n乙到。', false, { breaks: [at], enters: [{ name: '乙', at }], closed: true }],
+        ['', true],
+      ]);
+    },
+  );
+
+  it('重试清预览后分节从头累计，不与失败那次拼接', () => {
+    const { stream, chunks } = directStream('direct');
+    stream.onChunk('<maintext>旧的\n<beat/>\n半截', false);
+    stream.onChunk('', true);
+    stream.onChunk('<maintext>新的', false);
+    expect(chunks[chunks.length - 1]).toEqual([
+      '新的',
+      false,
+      { breaks: [], enters: [], closed: false },
+    ]);
+  });
+});
+
 describe('handleAgentResult — story 正文投影', () => {
   it('持久化正文与选项，但不持久化控制区块和音频标记', async () => {
     const addMessage = vi.fn((content: string) => ({ id: 'm1', turn: 1, content }));

@@ -606,6 +606,33 @@ describe.each(['direct', 'direct_cached'] as const)(
         expect(sameLead(main[2])).toBe(false);
       }
     });
+    it('分节断点随接纳后的正文消息落库（content 已剥标记）', async () => {
+      const { game, pipeline } = await directFixture();
+      vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (this: any) {
+        const raw =
+          this.agentId === 'direct_main'
+            ? `<maintext>旅人继续前行。\n<beat enter="艾拉"/>\n艾拉从林间走出。</maintext><character_updates>{"characters":[]}</character_updates><direct_updates>{"version":1,"world":{},"time":{"delta_time":0},"entities":[],"state":{},"effects":[],"plot":{},"combat":null,"diceUsed":[]}</direct_updates>`
+            : this.agentId === 'memory_summary'
+              ? JSON.stringify({ segments: [{ content: '旅人继续前行。' }] })
+              : '{}';
+        return result(this.agentId, raw);
+      });
+      expect(await pipeline.run('前进')).toBe(true);
+      const message = game.messages.find((m) => m.role === 'assistant')!;
+      expect(message.content).toBe('旅人继续前行。\n\n艾拉从林间走出。');
+      const at = message.content.indexOf('\n\n') + 2;
+      expect(message.stage).toEqual({ breaks: [at], enters: [{ name: '艾拉', at }] });
+      const stored = await getDatabase().messages.get(message.id);
+      expect(stored?.storyTurnStatus).toBe('accepted');
+      expect(stored?.stage).toEqual(message.stage);
+    });
+    it('没有分节标记时消息不带 stage 字段', async () => {
+      const { game, pipeline } = await directFixture();
+      directNetwork();
+      expect(await pipeline.run('前进')).toBe(true);
+      const message = game.messages.find((m) => m.role === 'assistant')!;
+      expect('stage' in message).toBe(false);
+    });
     it('continues from accepted history and current resources on the next turn', async () => {
       const { pipeline } = await directFixture();
       const chat = directNetwork();

@@ -15,15 +15,15 @@ export const DIRECT_STYLE =
 export const DIRECT_TEMPLATE =
   '{{SYS_PROMPT}}\n{{LORE_BOOK_STATIC}}\n{{LORE_BOOK_DYNAMIC}}\n{{AGENT.MEMORY_RECALL}}\n{{NARRATIVE}}\n{{MAP_CONTEXT}}\n{{RANDOM_EVENTS}}\n{{USER_INPUT}}';
 
-/** 结构化战斗开启时的 combat 契约行（与旧版 DIRECT_PROTOCOL 逐字节一致）。 */
+/** 结构化战斗开启时的 combat 契约行（与旧版 DIRECT_PROTOCOL 该行逐字节一致）。 */
 const DIRECT_COMBAT_STRUCTURED_LINE = `combat:null 表示无在办战斗；否则 {meta:{round,combatType,environment,phase:"active"|"ended",outcome?:"ally_win"|"enemy_win"|"draw"|"fled",notes?,summary?},units:[{name,origin:"save"|"temp",side:"ally"|"enemy",hp,mp,sp,statusEffects:[],pos?,facing?}]}。持续战斗每楼包含全部单位，更新当前数值；存档角色先通过 entities 创建，temp 仅用于临时单位且需 tier,level,race,attributes,maxHp,maxMp,maxSp。战斗资源和状态只在 combat 写，不在 state/effects 重复写同一参与者。终局写 ended 和 outcome，资源由代码白名单写回；EXP/FP 在 state 统一声明，不能依赖自动战斗奖励。`;
 /** 结构化战斗关闭时的 combat 契约行：战斗写在正文里，资源与状态走 state / effects。 */
 const DIRECT_COMBAT_PROSE_LINE =
-  'combat：恒填 null，不写任何战斗内容。当前未启用结构化战斗：战斗直接写在正文里推进（combat 里写了内容也会被忽略，不会入库）。参战者的 HP/MP/SP 变化用 state.characters 的 replace 或 delta 声明，状态效果的获得、变化与解除用 effects 声明；没有存档实体的临时敌人不建档，其伤势与状态在正文或 action_info 中交代清楚，供后续楼延续。EXP/FP 同样在 state 声明。';
+  'combat：恒填 null，不写任何战斗内容。当前未启用结构化战斗：战斗直接写在正文里推进（combat 里写了内容也会被忽略，不会入库）。参战者的 HP/MP/SP 变化用 state.characters 的 replace 或 delta 声明，状态效果的获得、变化与解除用 effects 声明；没有存档实体的临时敌人不建档，其伤势与状态在正文或 action_info 中交代清楚，供后续楼延续。EXP/FP 同样在 state 声明。战斗逐拍：一名角色的一次行为单独成一节，按行动顺序排列；每节一两句叙述加至多一个 action_info，前三行固定为 |行动者|名字|、|目标|名字或无|、|行动|技能或动作名|，其后按需写 |判定|、|伤害|（或 |恢复|）、|消耗|、|状态|（受影响者资源现值与状态增减）。名字与实体名逐字一致，临时敌人称呼前后一致。';
 
 /**
- * 直出协议正文。`structuredCombat` 为真时与旧版 DIRECT_PROTOCOL 逐字节一致；
- * 为假时只替换 combat 那一行，骨架里的 `"combat":null` 保留。
+ * 直出协议正文。两种口径都带「正文分节」（`<beat/>`）一行；
+ * `structuredCombat` 为假时只替换 combat 那一行（追加战斗逐拍要求），骨架里的 `"combat":null` 保留。
  */
 export function buildDirectProtocol(structuredCombat: boolean): string {
   return `你正在使用直出 v1。以下为必须满足的输出与状态契约，不受文风预设覆盖。
@@ -37,6 +37,7 @@ export function buildDirectProtocol(structuredCombat: boolean): string {
 仅用提供的骰池进行需要的随机判定，按索引顺序取对应骰式，每个索引至多消费一次；记录 diceUsed。池耗尽就停在尚未解决的行动前，不编造骰值。
 输出顺序：恰好一个 <maintext>正文，可含 <action_info>简洁行动面板</action_info> 和 <item_info>物品面板</item_info></maintext>；可选 <options>编号建议</options>；恰好一个 <character_updates>角色协议 JSON</character_updates>；最后恰好一个 <direct_updates>JSON</direct_updates>。
 action_info 面板每行用 |名称|值|，例如 |检定|d20=12，成功|；只呈现可核对的结果，不展示内部推理。
+正文分节：<maintext> 内用独占一行的 <beat/> 把正文切成节，玩家每次推进一节。一节是一个完整拍点，通常 1–3 段，全篇约 4–10 节；首尾不写，不写在 action_info／item_info 内。本楼经 entities 新建实体的人物，在其首次现身那一节之前写 <beat enter="人物名"/>（在第一节也写）；已有实体的人物不写 enter。
 direct_updates 所有顶层键都必需，无变化使用空对象、空数组或 null：
 {"version":1,"world":{},"time":{"delta_time":0},"entities":[],"state":{},"effects":[],"plot":{},"combat":null,"diceUsed":[]}
 禁止输出裸 StatePatch、数据库路径、任何 id/saveId/introducedBy/definition；所有对象按名字引用。展示卡片不能代替结构化入库。

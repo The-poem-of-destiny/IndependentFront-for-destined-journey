@@ -3,6 +3,7 @@ import type {
   EntityGenOutput,
   EntityStatusOutput,
   StatePatch,
+  StoryStage,
 } from '../types/types';
 import type { CharacterDefinition, CharacterNarrativeUpdate } from '../types/types-character';
 import { isRecord, parseCharacterUpdates } from '../character/character-updates';
@@ -47,6 +48,8 @@ export interface DirectUpdates {
 export interface DirectTurnDraft {
   content: string;
   options: string[];
+  /** 正文分节（来自 projectStoryOutput；模型没写 `<beat/>` 时缺席） */
+  stage?: StoryStage;
   characterUpdates: CharacterNarrativeUpdate[];
   updates: DirectUpdates;
   raw: string;

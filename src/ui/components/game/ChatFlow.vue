@@ -2,7 +2,9 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import InputBar from './InputBar.vue';
 import type { AgentActivityRun, ChatMessage, SystemEvent } from '@engine/types/types';
+import { isDirectMode } from '@engine/story/generation-mode';
 import { escapeHtml } from '@engine/story/beautifier';
+import { resolveStoryStage } from '@engine/story/story-beats';
 import { splitSceneImageSegments } from '@engine/image/image-segments';
 import { getMapPack } from '@engine/map/map-runtime';
 import { useSettingsStore } from '../../stores/settings-store';
@@ -27,6 +29,16 @@ import {
   type NameIndex,
 } from '../../lib/narrative-names';
 import { useFreshMessages } from '../../composables/useFreshMessages';
+import {
+  useStagedPlayback,
+  type PlaybackRecord,
+  type StageTarget,
+  type StreamingStageSnapshot,
+} from '../../composables/useStagedPlayback';
+import { resolveEntrances, type StageRosterEntry } from '../../lib/stage-entrance';
+import type { StagePlaybackView } from '../../lib/stage-playback';
+import { hasOpenDialog } from '../../lib/modal-focus';
+import StagedNarrative from './StagedNarrative.vue';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
 import BeautifiedNarrative from './BeautifiedNarrative.vue';
@@ -51,6 +63,8 @@ const props = defineProps<{
   systemEventsVisible?: boolean;
   systemEventFilters?: Record<string, boolean>;
   streamingText?: string;
+  /** 流式分节快照（交互式推进）：只在直出模式有值，见 GamePage 的 streamingStage */
+  streamingStage?: StreamingStageSnapshot | null;
 }>();
 
 const emit = defineEmits<{
@@ -228,6 +242,343 @@ function mentionsFor(msg: ChatMessage): { names: readonly string[]; index: NameI
     mentionCache.set(msg.id, cached);
   }
   return cached ?? undefined;
+}
+
+// ===== 逐节演出（交互式推进 T6）=====
+/**
+ * 只对「开关开 × 直出模式 × 本次会话新到的故事正文」演出；其余一律原渲染（关掉开关时 DOM 与引入前一致）。
+ * 进度簿在 `useStagedPlayback`，这里只管名册、输入与快进节拍。
+ */
+const stagedEnabled = () => s.stagedNarrative !== false && isDirectMode(game.generationMode);
+const staged = useStagedPlayback({
+  enabled: stagedEnabled,
+  messages: () => props.messages,
+  isGenerating: () => !!props.isGenerating,
+  streamingText: () => props.streamingText,
+  streamingStage: () => props.streamingStage,
+  fresh: freshMessages,
+});
+const { draftView, draftEpoch, holdOptions: holdStageOptions } = staged;
+
+/** 草稿行走演出：开关开、正在生成、草稿里有正文（流结束清预览后仍保留，直到正式消息领走） */
+const stagedDraft = computed<PlaybackRecord | null>(() => {
+  const record = staged.draft.value;
+  if (!stagedEnabled() || !props.isGenerating || record === null) return null;
+  return record.state.input.content.trim().length > 0 ? record : null;
+});
+
+function stagedViewOf(msg: ChatMessage): StagePlaybackView | null {
+  return staged.viewFor(msg);
+}
+
+function stagedSettledEnd(msg: ChatMessage): number {
+  return staged.recordFor(msg)?.settledEnd ?? 0;
+}
+
+function isActiveStage(target: StageTarget): boolean {
+  const active = staged.active.value?.target;
+  if (!active || active.kind !== target.kind) return false;
+  return active.kind === 'draft' || (target.kind === 'message' && active.id === target.id);
+}
+
+/** 登场名册条目：名字 + 别名 */
+function rosterEntryOf(character: { name: string; aliases?: string[] }): StageRosterEntry {
+  return { name: character.name, aliases: character.aliases };
+}
+
+/**
+ * 开楼时的名册（草稿用）：生成开始那一刻的全部角色。sync —— 赶在本回合任何建档之前拍下。
+ * 正式消息不用它：按 `introducedBy === 回合键` 把本楼新建的角色分出来（direct-output 的 add_character）。
+ */
+let generationRoster: StageRosterEntry[] | null = null;
+watch(
+  () => !!props.isGenerating,
+  (generating, was) => {
+    if (generating && !was) generationRoster = (game.characters ?? []).map(rosterEntryOf);
+  },
+  { flush: 'sync' },
+);
+
+/** 本条消息的登场名册：开楼名册 + 本楼新建（正式消息按 `introducedBy === 回合键` 分） */
+function entranceRosters(msg: ChatMessage | null): {
+  roster: StageRosterEntry[];
+  created: StageRosterEntry[];
+} {
+  const characters = game.characters ?? [];
+  if (!msg) return { roster: generationRoster ?? characters.map(rosterEntryOf), created: [] };
+  const key = msg.storyTurnKey ?? msg.id;
+  return {
+    roster: characters.filter((c) => c.introducedBy !== key).map(rosterEntryOf),
+    created: characters.filter((c) => c.introducedBy === key).map(rosterEntryOf),
+  };
+}
+
+/** 一个登场名连同名册里同一人物的全部名字（播出时钉住，之后靠它认人、去重） */
+function entranceNamesOf(name: string): string[] {
+  const owner = (game.characters ?? []).find(
+    (c) => c.name === name || (c.aliases ?? []).includes(name),
+  );
+  return [...new Set([name, ...(owner ? [owner.name, ...(owner.aliases ?? [])] : [])])];
+}
+
+/** 已钉住的登场卡当前该在哪一节：先认 enter 标记，再认名字首现，都没有就留在原处 */
+function locatePinned(
+  names: readonly string[],
+  fallback: number,
+  enters: readonly { name: string; at: number }[],
+  sections: StagePlaybackView['sections'],
+): number {
+  const mark = enters.find((enter) => names.includes(enter.name.trim()));
+  if (mark) {
+    const hit = sections.find((s) => mark.at >= s.start && mark.at < s.end);
+    return hit ? hit.index : sections.length - 1;
+  }
+  const mention = sections.find((s) => names.some((name) => s.text.includes(name)));
+  return mention ? mention.index : Math.min(fallback, sections.length - 1);
+}
+
+interface StageEntrances {
+  /** 节序号 → 该节之前登场的人物 */
+  bySection: ReadonlyMap<number, readonly string[]>;
+  /** 早先已经演过的名字（卡片换位重挂时静态显示） */
+  still: ReadonlySet<string>;
+}
+
+/**
+ * 已放出各节的登场卡 ——「演过就不再撤回」：
+ *
+ * - 已播出的卡钉在账本里（播出时的名字 + 同一人物的别名），之后无论名册回读、接纳状态、
+ *   是否在生成都保持显示；位置每次按当前的节重新定位（临时段落换模型断点、润色挪节起点都跟着走）；
+ * - 还没演的按现规则判定（名字不在开楼名册里就演，不拿新建名单过滤），且只在所在节是上次判定
+ *   之后才放出的时候演 ——「已读过就不演」；
+ * - 草稿交接时账本随记录带走。
+ */
+function entrancesFor(
+  record: PlaybackRecord,
+  view: StagePlaybackView,
+  msg: ChatMessage | null,
+): StageEntrances {
+  const book = record.entrances;
+  const still = new Set(book.pinned.keys());
+  const sections = view.sections;
+  const enters = msg ? resolveStoryStage(msg.content, msg.stage).enters : record.state.input.enters;
+  const bySection = new Map<number, string[]>();
+  const place = (index: number, name: string) => {
+    if (index < 0 || index >= view.revealedCount) return;
+    bySection.set(index, [...(bySection.get(index) ?? []), name]);
+  };
+
+  const taken = new Set<string>();
+  for (const [name, entry] of book.pinned) {
+    if (sections.length === 0) break;
+    entry.section = locatePinned(entry.names, entry.section, enters, sections);
+    for (const n of entry.names) taken.add(n);
+    place(entry.section, name);
+  }
+
+  const { roster, created } = entranceRosters(msg);
+  for (const entrance of resolveEntrances(enters, roster, created, sections)) {
+    const names = entranceNamesOf(entrance.name);
+    if (names.some((n) => taken.has(n))) continue;
+    const section = sections[entrance.sectionIndex];
+    if (entrance.sectionIndex >= view.revealedCount || section.start < book.evaluatedEnd) continue;
+    book.pinned.set(entrance.name, { names, section: entrance.sectionIndex });
+    for (const n of names) taken.add(n);
+    place(entrance.sectionIndex, entrance.name);
+  }
+
+  book.evaluatedEnd = Math.max(book.evaluatedEnd, view.visibleEnd);
+  return { bySection, still };
+}
+
+const NO_ENTRANCES: StageEntrances = { bySection: new Map(), still: new Set() };
+
+/**
+ * 同一份输入在多次渲染里只判定一次：判定会写账本，再判一次会把刚演的名字当成「早先演过」，
+ * 卡片就不画了。输入 = 视图 + 名册（store 可能原地 push，连长度一起比）。
+ */
+const entranceCache = new WeakMap<
+  PlaybackRecord,
+  { view: StagePlaybackView; characters: unknown; count: number; result: StageEntrances }
+>();
+
+function messageEntrances(msg: ChatMessage): StageEntrances {
+  const record = staged.recordFor(msg);
+  const view = staged.viewFor(msg);
+  if (!record || !view) return NO_ENTRANCES;
+  const characters = game.characters;
+  const count = characters?.length ?? 0;
+  const hit = entranceCache.get(record);
+  if (hit && hit.view === view && hit.characters === characters && hit.count === count) {
+    return hit.result;
+  }
+  const result = entrancesFor(record, view, msg);
+  entranceCache.set(record, { view, characters, count, result });
+  return result;
+}
+
+const draftEntrances = computed<StageEntrances>(() => {
+  const record = stagedDraft.value;
+  const view = draftView.value;
+  return record && view ? entrancesFor(record, view, null) : NO_ENTRANCES;
+});
+
+function advanceStage(): boolean {
+  const advanced = staged.advance();
+  if (advanced) handleNarrativeResize();
+  return advanced;
+}
+
+function skipStage(target?: StageTarget) {
+  stopFastForward();
+  staged.skipAll(target);
+  handleNarrativeResize();
+}
+
+/** 「全文」：关掉演出（全局设置），所有消息回到整段显示 */
+function showFullText() {
+  stopFastForward();
+  s.stagedNarrative = false;
+  ui.toast('已切换为全文显示，可在「设置 → 消息显示」重新开启演出', 'info');
+}
+
+/** 发送新输入：先把还在演的全部放完，再交给 GamePage */
+function sendInput(content: string) {
+  stopFastForward();
+  staged.skipEverything();
+  emit('send', content);
+}
+
+// ---- 快进：按住 Ctrl，或点小条上的「快进」 ----
+const FAST_FORWARD_MS = 220;
+const fastForwarding = ref<'key' | 'button' | null>(null);
+let fastForwardTimer: ReturnType<typeof setInterval> | null = null;
+
+function stepFastForward() {
+  const current = staged.active.value;
+  if (!current) {
+    stopFastForward();
+    return;
+  }
+  if (advanceStage()) return;
+  // 按钮快进放到追上就停；按住 Ctrl 时还在流式，就等下文到了接着放
+  if (fastForwarding.value === 'button' && !current.view.waiting) stopFastForward();
+}
+
+function startFastForward(source: 'key' | 'button') {
+  fastForwarding.value = source;
+  if (fastForwardTimer !== null) return;
+  stepFastForward();
+  if (fastForwarding.value !== null)
+    fastForwardTimer = setInterval(stepFastForward, FAST_FORWARD_MS);
+}
+
+function stopFastForward() {
+  fastForwarding.value = null;
+  if (fastForwardTimer !== null) clearInterval(fastForwardTimer);
+  fastForwardTimer = null;
+}
+
+function toggleFastForward() {
+  if (fastForwarding.value !== null) stopFastForward();
+  else startFastForward('button');
+}
+
+// ---- 输入：Space / Enter 推进、按住 Ctrl 快进、End 全部显示、左键点正文推进 ----
+/** 点在这些东西上 / 焦点在这些东西里时，按键与点击归它们自己 */
+const STAGE_YIELD_SELECTOR = [
+  'button',
+  'a[href]',
+  'input',
+  'textarea',
+  'select',
+  'label',
+  'summary',
+  'iframe',
+  '[contenteditable]:not([contenteditable="false"])',
+  '[role="button"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+  '[role="tab"]',
+  '[role="link"]',
+  '.system-notif',
+  '.system-card-wrapper',
+  '.combat-beat',
+  '.action-panel-card',
+  '.dialogue-card',
+  '.scene-image',
+  '.turn-actions',
+  '.stage-bar',
+  '.ctx-menu',
+].join(', ');
+
+function stageYields(target: EventTarget | null): boolean {
+  if (ctxMenu.value !== null || hasOpenDialog() || game.activeModal != null || game.isInCombat) {
+    return true;
+  }
+  const selection = typeof window.getSelection === 'function' ? window.getSelection() : null;
+  if (selection && !selection.isCollapsed && selection.toString().trim().length > 0) return true;
+  return target instanceof Element && target.closest(STAGE_YIELD_SELECTOR) !== null;
+}
+
+/**
+ * 按住 Ctrl 快进：单独按住超过 `CTRL_HOLD_MS`、期间没按别的键也没滚轮，才进入快进；松开即停。
+ * 🔴 单按一下 Ctrl 本身不推进 —— Ctrl+F / Ctrl+R / Ctrl+滚轮缩放都以 Ctrl 起手，
+ *    一按下就推进会把这些快捷键全变成误触。
+ */
+const CTRL_HOLD_MS = 300;
+let ctrlHoldTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelCtrlHold() {
+  if (ctrlHoldTimer !== null) clearTimeout(ctrlHoldTimer);
+  ctrlHoldTimer = null;
+  if (fastForwarding.value === 'key') stopFastForward();
+}
+
+function onStageKeydown(e: KeyboardEvent) {
+  if (e.key === 'Control') {
+    if (e.repeat || ctrlHoldTimer !== null || fastForwarding.value === 'key') return;
+    if (e.altKey || e.metaKey || e.shiftKey || e.isComposing) return;
+    if (!staged.active.value || stageYields(e.target)) return;
+    ctrlHoldTimer = setTimeout(() => {
+      ctrlHoldTimer = null;
+      if (staged.active.value && !stageYields(null)) startFastForward('key');
+    }, CTRL_HOLD_MS);
+    return;
+  }
+  // 按住 Ctrl 期间按了别的键 = 别的意图（复制、查找、刷新）：取消快进，不抢
+  cancelCtrlHold();
+  if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
+  if (!staged.active.value) return;
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (e.key !== ' ' && e.key !== 'Enter' && e.key !== 'End') return;
+  if (stageYields(e.target)) return;
+  if (e.key === 'End') {
+    e.preventDefault();
+    skipStage();
+    return;
+  }
+  if (advanceStage()) e.preventDefault();
+}
+
+function onStageKeyup(e: KeyboardEvent) {
+  if (e.key === 'Control') cancelCtrlHold();
+}
+
+/** 滚轮（含 Ctrl+滚轮缩放）一律取消按住 Ctrl 的快进 */
+function onStageWheel() {
+  if (ctrlHoldTimer !== null || fastForwarding.value === 'key') cancelCtrlHold();
+}
+
+function onStageBlur() {
+  cancelCtrlHold();
+}
+
+function onStageClick(e: MouseEvent) {
+  if (e.button !== 0 || e.defaultPrevented) return;
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (!staged.active.value || stageYields(e.target)) return;
+  advanceStage();
 }
 
 /**
@@ -746,6 +1097,10 @@ onMounted(() => {
   window.addEventListener('click', handleGlobalClick);
   window.addEventListener('keydown', handleEsc);
   window.addEventListener('scroll', handleScrollClose, true); // capture：捕获容器内滚动
+  window.addEventListener('keydown', onStageKeydown);
+  window.addEventListener('keyup', onStageKeyup);
+  window.addEventListener('blur', onStageBlur);
+  window.addEventListener('wheel', onStageWheel, { capture: true, passive: true });
   // 进存档时消息早已就位，两个 watcher 都不会触发 —— 必须显式滚一次。
   // 后续插画字节异步装载会触发 resize（pinnedToBottom 初值 true），自动保持钉底。
   scrollToBottom();
@@ -754,6 +1109,12 @@ onUnmounted(() => {
   window.removeEventListener('click', handleGlobalClick);
   window.removeEventListener('keydown', handleEsc);
   window.removeEventListener('scroll', handleScrollClose, true);
+  window.removeEventListener('keydown', onStageKeydown);
+  window.removeEventListener('keyup', onStageKeyup);
+  window.removeEventListener('blur', onStageBlur);
+  window.removeEventListener('wheel', onStageWheel, { capture: true });
+  cancelCtrlHold();
+  stopFastForward();
   if (pressTimer !== null) clearTimeout(pressTimer);
 });
 
@@ -766,7 +1127,13 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
 
 <template>
   <div class="chat-flow">
-    <div ref="container" class="chat-messages" tabindex="0" @scroll="handleChatScroll">
+    <div
+      ref="container"
+      class="chat-messages"
+      tabindex="0"
+      @scroll="handleChatScroll"
+      @click="onStageClick"
+    >
       <div v-if="!messages || messages.length === 0" class="chat-empty">
         <span class="chat-empty-glyph" aria-hidden="true">❦</span>
         <p>等待冒险开始...</p>
@@ -883,7 +1250,34 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
           @contextmenu="onContextMenu($event, msg)"
         >
           <div class="bubble bubble-narrative-full">
+            <!-- 逐节演出（交互式推进）：只给本次会话新到的直出正文；其余与引入前一致 -->
+            <StagedNarrative
+              v-if="stagedViewOf(msg)"
+              class="narrative-body"
+              :view="stagedViewOf(msg)!"
+              :content="msg.content"
+              :settled-end="stagedSettledEnd(msg)"
+              :entrances="messageEntrances(msg).bySection"
+              :still-entrances="messageEntrances(msg).still"
+              :depth="messageDepth(msg.id)"
+              :forward-context-menu="canOpenMenu(msg)"
+              :message-id="msg.id"
+              :turn="msg.turn ?? 0"
+              :image-mode="s.imageGenMode"
+              :image-max-rating="s.imageMaxRating"
+              :image-blur-by-default="s.imageBlurByDefault"
+              :image-dialect-id="s.imageDialectId"
+              :mentions="mentionsFor(msg)"
+              :seal="sealFor(msg)"
+              :controls="isActiveStage({ kind: 'message', id: msg.id })"
+              :fast-forwarding="fastForwarding !== null"
+              @resize="handleNarrativeResize"
+              @show-full="showFullText"
+              @fast-forward="toggleFastForward"
+              @skip-all="skipStage({ kind: 'message', id: msg.id })"
+            />
             <BeautifiedNarrative
+              v-else
               class="narrative-body"
               :text="msg.content"
               :depth="messageDepth(msg.id)"
@@ -1022,7 +1416,7 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
 
       <!-- 🆕 思考中指示（2026-08-12）：生成态、正文未出时显示当前 Agent 活动 -->
       <div
-        v-if="isGenerating && !streamingText"
+        v-if="isGenerating && !streamingText && !stagedDraft"
         class="bubble-row bubble-row-thinking"
         role="status"
         aria-live="polite"
@@ -1034,13 +1428,39 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
       </div>
 
       <!-- 🆕 流式正文实时渲染 -->
-      <div v-if="isGenerating && streamingText" class="bubble-row bubble-row-narrative">
+      <div
+        v-if="isGenerating && streamingText && !stagedDraft"
+        class="bubble-row bubble-row-narrative"
+      >
         <div class="bubble bubble-narrative-full">
           <BeautifiedNarrative
             class="narrative-body streaming-content"
             :text="streamingText"
             streaming
             @resize="handleNarrativeResize"
+          />
+        </div>
+      </div>
+      <!--
+        演出中的草稿：只放出完整的节；流结束清预览后仍留着，直到正式消息领走进度（不回退、不重放）。
+        重试会从头再流 —— draftEpoch 变了整块重挂
+      -->
+      <div v-else-if="stagedDraft && draftView" class="bubble-row bubble-row-narrative">
+        <div class="bubble bubble-narrative-full">
+          <StagedNarrative
+            :key="draftEpoch"
+            class="narrative-body"
+            :view="draftView"
+            :content="stagedDraft.state.input.content"
+            :entrances="draftEntrances.bySection"
+            :still-entrances="draftEntrances.still"
+            :waiting-text="thinkingText"
+            :controls="isActiveStage({ kind: 'draft' })"
+            :fast-forwarding="fastForwarding !== null"
+            @resize="handleNarrativeResize"
+            @show-full="showFullText"
+            @fast-forward="toggleFastForward"
+            @skip-all="skipStage({ kind: 'draft' })"
           />
         </div>
       </div>
@@ -1051,7 +1471,8 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
       :disabled="isGenerating"
       :stopping="game.currentAgentActivityRun?.status === 'stopping'"
       :locked-reason="game.isRewriting ? '正在润色正文，完成后再继续…' : undefined"
-      @send="(c) => emit('send', c)"
+      :hold-options="holdStageOptions"
+      @send="sendInput"
       @stop="emit('stop')"
     />
 

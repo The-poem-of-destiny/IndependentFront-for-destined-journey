@@ -1195,7 +1195,7 @@ export const useGameStore = defineStore('game', () => {
     role: 'user' | 'assistant',
     markers: Pick<
       ChatMessage,
-      'storyTurnStatus' | 'storyTurnKey' | 'diagnostic' | 'storyGameTime'
+      'storyTurnStatus' | 'storyTurnKey' | 'diagnostic' | 'storyGameTime' | 'stage'
     > = {},
   ): ChatMessage {
     const msg: ChatMessage = {
