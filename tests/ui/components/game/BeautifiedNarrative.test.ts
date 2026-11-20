@@ -251,20 +251,88 @@ describe('BeautifiedNarrative', () => {
     expect(wrapper.find('.dialogue-card').text()).toContain('店主');
     expect(wrapper.find('.dialogue-card').text()).toContain('欢迎');
   });
+
+  it('原生对话卡片交给 DialogueCard：捕获组依次是名字 / 情绪 / 台词', () => {
+    state.rules = [
+      rule({
+        id: 'builtin-dialogue-card',
+        pattern: '\\[([^\\]]+)\\](?:\\{([^}]*)\\})?\\("([^"]*)"\\)',
+        replacement: '<div class="dialogue-card"><b>$1</b><span>$3</span></div>',
+      }),
+    ];
+    const wrapper = mountNarrative('[店主]{擦着杯子}("<b>欢迎</b>")');
+
+    expect(wrapper.find('.dialogue-name').text()).toBe('店主');
+    expect(wrapper.find('.dialogue-mood').text()).toBe('擦着杯子');
+    // 台词是模型原文：文本插值，标签按字面显示
+    expect(wrapper.find('.dialogue-body').text()).toBe('<b>欢迎</b>');
+    expect(wrapper.find('.dialogue-body b').exists()).toBe(false);
+  });
 });
 
-it('renders direct action panels safely without changing the default Agent renderer', () => {
+describe('BeautifiedNarrative <action_info> 行动面板', () => {
+  beforeEach(() => {
+    state.enabled = true;
+    state.rules = [];
+    setActivePinia(createPinia());
+  });
+
   const text =
-    '挥剑。<action_info>| 掷骰 | 12 |\n| 结果 | <script>bad()</script> |</action_info>敌人后退。';
-  const wrapper = mountNarrative(text, { actionPanels: true });
-  expect(wrapper.find('.action-panel').text()).toContain('掷骰');
-  expect(wrapper.find('.action-panel').text()).toContain('12');
-  expect(wrapper.find('script').exists()).toBe(false);
-  expect(wrapper.text()).toContain('敌人后退');
-  wrapper.unmount();
-  const legacy = mountNarrative(text);
-  expect(legacy.find('.action-panel').exists()).toBe(false);
-  legacy.unmount();
+    '挥剑。\n<action_info>| 掷骰 | 12 |\n| 结果 | <script>bad()</script> |</action_info>\n敌人后退。';
+
+  it('常开：不需要任何 prop 就把面板切出来交给 ActionPanel，原文标签只按字面显示', () => {
+    const wrapper = mountNarrative(text);
+    const panel = wrapper.find('.action-panel-card');
+    expect(panel.exists()).toBe(true);
+    expect(panel.text()).toContain('掷骰');
+    expect(panel.text()).toContain('12');
+    expect(wrapper.find('script').exists()).toBe(false);
+    // 面板两侧的正文仍是段落，标签本身不漏成文字
+    expect(wrapper.findAll('p').map((p) => p.text())).toEqual(['挥剑。', '敌人后退。']);
+    expect(wrapper.text()).not.toContain('action_info');
+  });
+
+  it('美化关掉时照样拆面板（不依赖美化开关）', () => {
+    state.enabled = false;
+    const wrapper = mountNarrative(text);
+    expect(wrapper.find('.action-panel-card').exists()).toBe(true);
+  });
+
+  it('流式：未闭合面板照样渲染，结尾半截残标签不漏出', () => {
+    const streaming = mountNarrative('前文<action_info>{检定}\n| 掷骰: d20=15', {
+      streaming: true,
+    });
+    expect(streaming.find('.action-panel-card').text()).toContain('d20=15');
+    const half = mountNarrative('前文。<action_in', { streaming: true });
+    expect(half.text()).toBe('前文。');
+  });
+
+  it('让位：启用的 maintext 规则 pattern 提到 action_info 时不拆面板，整段交给规则', () => {
+    state.rules = [
+      rule({
+        id: 'panel-rule',
+        pattern: '<action_info>([^]*?)</action_info>',
+        replacement: '<div class="mine">$1</div>',
+      }),
+    ];
+    const wrapper = mountNarrative(text);
+    expect(wrapper.find('.action-panel-card').exists()).toBe(false);
+    expect(wrapper.find('.frame-stub').exists()).toBe(true);
+  });
+
+  it('不让位：规则未启用 / 美化关掉时仍拆面板', () => {
+    state.rules = [rule({ pattern: '<action_info>([^]*?)</action_info>', enabled: false })];
+    expect(mountNarrative(text).find('.action-panel-card').exists()).toBe(true);
+    state.rules = [rule({ pattern: '<action_info>([^]*?)</action_info>' })];
+    state.enabled = false;
+    expect(mountNarrative(text).find('.action-panel-card').exists()).toBe(true);
+  });
+
+  it('没有面板的正文与改造前一样只出段落', () => {
+    const wrapper = mountNarrative('第一段\n\n第二段');
+    expect(wrapper.find('.action-panel-card').exists()).toBe(false);
+    expect(wrapper.findAll('p')).toHaveLength(2);
+  });
 });
 
 describe('BeautifiedNarrative 特效层（墨迹浮现 / 名字下划线 / 行末印记）', () => {

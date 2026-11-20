@@ -2,15 +2,40 @@
 /**
  * CombatMessageFlow — 战斗中栏对话流（C6 · 数据源 = 沙盒 `CombatState` + 逐轮输出）
  *
- * 职责：把 pipeline 每轮追加的 AI 正文解析成「叙事 + 等宽面板」（`parseCombatNarrative`），
- * 顶部叠一份从权威状态现算的「战况总览」面板，底部在 AI 思考中时显示转圈。
+ * 职责：把 pipeline 每轮追加的 AI 正文切成「叙事 + 行动面板」（`splitActionInfo` 开
+ * `bareSheets`：战斗 DM 常不写外层 `<action_info>`，整行 `{标题}` + 竖线行也当面板），
+ * 面板交给与主线正文同一个 `ActionPanel` 渲染；顶部叠一份从权威状态现算的「战况总览」面板，
+ * 底部在 AI 思考中时显示转圈。
  *
  * 全部数据驱动：单位名/资源/位置来自 `CombatState`，面板行来自 AI 输出文本。
+ * 正文不走美化管线（`useBeautify` 不在这里用）。
  */
 import { computed, nextTick, ref, watch } from 'vue';
 import type { CombatState } from '@engine/combat/sandbox/types';
 import type { CombatFlowEntry } from '../../../stores/game-store';
-import { flowBlocksForChunk } from './combat-view';
+import {
+  parseActionPanel,
+  splitActionInfo,
+  type ActionPanel as ActionPanelData,
+} from '../../../lib/action-panel';
+import ActionPanel from '../ActionPanel.vue';
+
+/** 一轮 AI 正文切出来的渲染块：叙事段落或已解析的面板 */
+type FlowBlock = { kind: 'narrative'; text: string } | { kind: 'panel'; panel: ActionPanelData };
+
+function flowBlocks(text: string, partial = false): FlowBlock[] {
+  const blocks: FlowBlock[] = [];
+  for (const seg of splitActionInfo(text, { bareSheets: true, partial })) {
+    if (seg.kind === 'panel') {
+      const panel = parseActionPanel(seg.raw);
+      if (panel.sections.length > 0) blocks.push({ kind: 'panel', panel });
+    } else {
+      const narrative = seg.text.trim();
+      if (narrative) blocks.push({ kind: 'narrative', text: narrative });
+    }
+  }
+  return blocks;
+}
 
 const props = defineProps<{
   state: CombatState | null;
@@ -28,7 +53,7 @@ const rounds = computed(() =>
     text: entry.text,
     tool: entry.tool,
     durationMs: entry.durationMs,
-    blocks: entry.role === 'assistant' ? flowBlocksForChunk(entry.text) : [],
+    blocks: entry.role === 'assistant' ? flowBlocks(entry.text) : [],
   })),
 );
 
@@ -38,9 +63,26 @@ function seconds(ms?: number): string {
 }
 
 /** 流式预览的块序列（边想边说；定稿后由 flow 接替） */
-const streamBlocks = computed(() => (props.stream ? flowBlocksForChunk(props.stream) : []));
+const streamBlocks = computed(() => (props.stream ? flowBlocks(props.stream, true) : []));
 
-/** 战况总览（从权威状态现算） */
+/**
+ * 战况总览（从权威状态现算）：一个 info 色分节，每个单位一格。
+ * 默认展开 —— 它是中栏唯一的全局概览，收起就得每次多点一下。
+ */
+const overviewPanel = computed<ActionPanelData | null>(() => {
+  const rows = overviewRows.value;
+  if (rows.length === 0) return null;
+  return {
+    sections: [
+      {
+        title: '战况总览',
+        hue: 'info',
+        rows: rows.map((row) => ({ cells: [{ label: row.name, value: row.value }] })),
+      },
+    ],
+  };
+});
+
 const overviewRows = computed(() => {
   if (!props.state) return [];
   const order = props.state.meta.actionOrder ?? [];
@@ -84,13 +126,12 @@ watch([() => props.flow.length, () => (props.stream ?? '').length], () => {
   <div class="combat-message-flow">
     <div ref="container" class="combat-messages" @scroll="onScroll">
       <!-- 战况总览：从权威状态现算，永远是最新事实 -->
-      <div v-if="overviewRows.length" class="panel-box">
-        <div class="pb-title">{战况总览}</div>
-        <div v-for="row in overviewRows" :key="row.name" class="pb-row">
-          <span>{{ row.name }}</span
-          ><b>{{ row.value }}</b>
-        </div>
-      </div>
+      <ActionPanel
+        v-if="overviewPanel"
+        class="combat-panel combat-overview"
+        :panel="overviewPanel"
+        default-open
+      />
 
       <!-- 对话流：按时间顺序渲染（user / system / tool / reasoning / assistant），单一循环不带偏序 -->
       <template v-for="(chunk, ci) in rounds" :key="ci">
@@ -132,13 +173,7 @@ watch([() => props.flow.length, () => (props.stream ?? '').length], () => {
           </div>
           <template v-for="(block, bi) in chunk.blocks" :key="bi">
             <div v-if="block.kind === 'narrative'" class="narr">{{ block.text }}</div>
-            <div v-else class="panel-box">
-              <div v-if="block.title" class="pb-title">{{ '{' + block.title + '}' }}</div>
-              <div v-for="(row, ri) in block.rows" :key="ri" class="pb-row">
-                <span>{{ row.label }}</span
-                ><b>{{ row.value }}</b>
-              </div>
-            </div>
+            <ActionPanel v-else class="combat-panel" :panel="block.panel" />
           </template>
         </template>
       </template>
@@ -146,13 +181,7 @@ watch([() => props.flow.length, () => (props.stream ?? '').length], () => {
       <!-- 流式预览：当前 exchange 正在逐字输出的正文（未定稿） -->
       <template v-for="(block, bi) in streamBlocks" :key="'stream-' + bi">
         <div v-if="block.kind === 'narrative'" class="narr">{{ block.text }}</div>
-        <div v-else class="panel-box">
-          <div v-if="block.title" class="pb-title">{{ '{' + block.title + '}' }}</div>
-          <div v-for="(row, ri) in block.rows" :key="ri" class="pb-row">
-            <span>{{ row.label }}</span
-            ><b>{{ row.value }}</b>
-          </div>
-        </div>
+        <ActionPanel v-else class="combat-panel" :panel="block.panel" />
       </template>
 
       <div v-if="flow.length === 0 && !streamBlocks.length" class="empty-tab">战斗即将开始…</div>
@@ -308,35 +337,10 @@ watch([() => props.flow.length, () => (props.stream ?? '').length], () => {
   font-size: 0.75rem;
 }
 
-.panel-box {
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-sm);
-  background: color-mix(in srgb, var(--theme-window-bg) 70%, var(--theme-content-bg));
-  font-family: 'Cascadia Code', ui-monospace, Consolas, monospace;
-  font-size: 0.75rem;
-}
-.pb-title {
-  padding: 5px 10px;
-  border-bottom: 1px solid var(--theme-card-border);
-  color: var(--theme-primary);
-  letter-spacing: 0.08em;
-  font-size: 0.6875rem;
-}
-.pb-row {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--theme-spacing-md);
-  padding: 4px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border) 50%, transparent);
-  color: var(--theme-text-muted);
-  font-variant-numeric: tabular-nums;
-}
-.pb-row:last-child {
-  border-bottom: 0;
-}
-.pb-row b {
-  color: var(--theme-text-primary);
-  text-align: right;
+/* 行动面板：外观归 ActionPanel.vue；这里只把它的段落外边距换成对话流的 gap，并禁止被纵向压扁 */
+.combat-messages > .combat-panel {
+  flex-shrink: 0;
+  margin: 0;
 }
 
 .evt {

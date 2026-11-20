@@ -8,8 +8,9 @@
  * 🔴 全部集中映射（属性标签 / 状态类别 / 特殊动作卡）都在这里，组件模板里**禁止**
  *    再散落字面量；单位、技能、数值一律从传入的 `CombatState` 读取，绝不写死。
  *
- * 🔴 中文措辞（`{面板}` 解析、属性短标签、特殊动作说明）住在这一层 —— 它消费的是
- *    AI 自由文本与协议动作，不是数据面。数据面（单位名/技能名/数值）永远来自状态。
+ * 🔴 中文措辞（属性短标签、特殊动作说明）住在这一层 —— 它消费的是
+ *    协议动作，不是数据面（AI 正文里的面板解析在 `lib/action-panel.ts`）。
+ *    数据面（单位名/技能名/数值）永远来自状态。
  */
 
 import type {
@@ -196,104 +197,4 @@ export function posToPercent(pos: number, range: number): number {
   const n = Number.isFinite(range) && range > 0 ? range : 1;
   const clamped = Math.min(Math.max(Number.isFinite(pos) ? pos : 0, 0), n);
   return (clamped / n) * 100;
-}
-
-// ═══════════════════════════════════════════════════════════
-// AI 输出 → 中栏对话流块（叙事 + 面板）
-// ═══════════════════════════════════════════════════════════
-
-export type CombatFlowBlock =
-  | { kind: 'narrative'; text: string }
-  | { kind: 'panel'; title: string; rows: Array<{ label: string; value: string }> };
-
-/** 单行 `| a | b |` / `| 键: 值 |` → 面板行 */
-export function parsePanelRow(line: string): Array<{ label: string; value: string }> {
-  const inner = line
-    .replace(/^\|/, '')
-    .replace(/\|$/, '')
-    .split('|')
-    .map((s) => s.trim());
-  if (inner.length >= 2) {
-    return [{ label: inner[0], value: inner.slice(1).join(' · ') }];
-  }
-  const single = inner[0] ?? '';
-  const colon = single.indexOf(':');
-  if (colon > 0)
-    return [{ label: single.slice(0, colon).trim(), value: single.slice(colon + 1).trim() }];
-  return [{ label: '', value: single }];
-}
-
-/**
- * AI 每轮输出 → 中栏块序列（叙事 / 等宽面板）。
- *
- * 识别三种形态（AI 按协议写，格式不保证，认不出就当叙事）：
- *  1. `<action_info>…</action_info>` → 一个无标题面板；
- *  2. 整行的 `{标题}`（可一行多个，用分隔符合并）→ 面板标题；
- *  3. `| … |` 行 → 追加到当前面板的行；无面板时新建无标题面板。
- * 其余行按顺序累积成叙事段落。**永不抛**：坏格式退化成叙事。
- */
-export function parseCombatNarrative(raw: string): CombatFlowBlock[] {
-  const blocks: CombatFlowBlock[] = [];
-  let narrative: string[] = [];
-  let panel: { title: string; rows: Array<{ label: string; value: string }> } | null = null;
-
-  const flushNarrative = () => {
-    const text = narrative.join('\n').trim();
-    if (text) blocks.push({ kind: 'narrative', text });
-    narrative = [];
-  };
-  const flushPanel = () => {
-    if (panel) {
-      blocks.push({ kind: 'panel', title: panel.title, rows: panel.rows });
-      panel = null;
-    }
-  };
-
-  const normalized = raw.replace(
-    /<action_info>([\s\S]*?)<\/action_info>/gi,
-    (_m, inner: string) => {
-      return '{行动详情}\n' + String(inner).trim();
-    },
-  );
-
-  for (const rawLine of normalized.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    const braceMatches = line.match(/\{[^{}]+\}/g);
-    if (braceMatches && line.replace(/\{[^{}]+\}/g, '').trim() === '') {
-      flushNarrative();
-      flushPanel();
-      const title = braceMatches
-        .map((b) => b.slice(1, -1).trim())
-        .filter(Boolean)
-        .join(' · ');
-      panel = { title, rows: [] };
-      continue;
-    }
-
-    // 以竖线开头的行 = 面板行（尾竖线可有可无：`| a | b |` 与 `| a: b` 都吃）
-    if (line.startsWith('|')) {
-      flushNarrative();
-      if (!panel) panel = { title: '', rows: [] };
-      panel.rows.push(...parsePanelRow(line));
-      continue;
-    }
-
-    flushPanel();
-    narrative.push(rawLine);
-  }
-
-  flushPanel();
-  flushNarrative();
-  return blocks;
-}
-
-/**
- * 把一段 AI 输出切成「回合分隔 + 块」的渲染项。
- *
- * 纯展示：让组件只遍历，不自己判断回合切换。
- */
-export function flowBlocksForChunk(text: string): CombatFlowBlock[] {
-  return parseCombatNarrative(text);
 }

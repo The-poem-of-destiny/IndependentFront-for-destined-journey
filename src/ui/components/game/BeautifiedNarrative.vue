@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue';
 import {
   compileBeautifierSegments,
+  DIALOGUE_CARD_RULE_ID,
   type BeautifierMatchSegment,
   type BeautifierSegment,
 } from '@engine/story/beautifier';
@@ -17,7 +18,14 @@ import { createRevealMemory, REVEAL_MS } from '../../lib/narrative-reveal';
 import { scanNames, type NameIndex } from '../../lib/narrative-names';
 import SceneImageSegment from './SceneImageSegment.vue';
 import TurnSeal from './TurnSeal.vue';
-import { parseCombatNarrative, type CombatFlowBlock } from './combat/combat-view';
+import ActionPanel from './ActionPanel.vue';
+import DialogueCard from './DialogueCard.vue';
+import {
+  parseActionPanel,
+  rulesClaimActionInfo,
+  splitActionInfo,
+  type ActionPanel as ActionPanelData,
+} from '../../lib/action-panel';
 
 const props = withDefaults(
   defineProps<{
@@ -25,7 +33,6 @@ const props = withDefaults(
     rules?: BeautifierRule[];
     force?: boolean;
     streaming?: boolean;
-    actionPanels?: boolean;
     forwardContextMenu?: boolean;
     depth?: number;
     /**
@@ -79,7 +86,6 @@ const props = withDefaults(
     rules: undefined,
     force: false,
     streaming: false,
-    actionPanels: false,
     forwardContextMenu: false,
     depth: 0,
     messageId: undefined,
@@ -128,22 +134,50 @@ function beautify(text: string): BeautifierSegment[] {
   // Incomplete matches change on nearly every token. Keep streaming output
   // readable and promote it to rich frames once the committed message arrives;
   // this also prevents legacy scripts from executing repeatedly mid-generation.
-  if (props.streaming || (!props.force && !isBeautifierEnabled())) {
+  if (props.streaming || !beautifierActive()) {
     return [{ kind: 'text' as const, text }];
   }
-  return compileBeautifierSegments(text, 'maintext', props.rules ?? getBeautifierRules(), {
+  return compileBeautifierSegments(text, 'maintext', currentRules(), {
     depth: props.depth,
   });
 }
 
+function currentRules(): BeautifierRule[] {
+  return props.rules ?? getBeautifierRules();
+}
+
+function beautifierActive(): boolean {
+  return props.force || isBeautifierEnabled();
+}
+
+/**
+ * `<action_info>` 面板拆分**常开**（Agent 与直出两种模式都生效），唯一例外：
+ * 定稿消息、美化在生效（开关开或 `force`），且当前规则里有一条**启用的、scope 覆盖
+ * maintext、深度范围含本条、能把本条正文里一整块 `<action_info>…</action_info>` 从头到尾
+ * 匹配下来**的规则（判据见 `rulesClaimActionInfo`）—— 作者写了专门的面板美化，就让位给规则，
+ * 整段文本原样交给美化管线。流式中美化本来就不跑，所以照常拆面板，定稿后再交给规则。
+ */
+const panelsYieldToRules = computed(
+  () =>
+    !props.streaming &&
+    beautifierActive() &&
+    rulesClaimActionInfo(currentRules(), props.text, 'maintext', props.depth),
+);
+
 type RenderPart =
-  | Extract<CombatFlowBlock, { kind: 'panel' }>
+  | { kind: 'panel'; panel: ActionPanelData }
   | { kind: 'prose'; segments: BeautifierSegment[] }
   | { kind: 'image'; occurrence: number; marker: SceneImageMarker };
+
+/** 面板两侧的换行是标签外的排版字节，剥掉免得排出空段落（同 trimAroundImages 的道理） */
+function trimAroundPanels(text: string): string {
+  return text.replace(/^[\r\n]+|[\r\n]+$/g, '');
+}
 
 const parts = computed<RenderPart[]>(() => {
   if (!props.text) return [];
   const out: RenderPart[] = [];
+  const yieldToRules = panelsYieldToRules.value;
   for (const segment of narrativeSegments.value) {
     if (segment.kind === 'image') {
       out.push({ kind: 'image', occurrence: segment.occurrence, marker: segment.marker });
@@ -151,17 +185,26 @@ const parts = computed<RenderPart[]>(() => {
     }
     const text = trimAroundImages(segment.text);
     if (text === '') continue;
-    if (!props.actionPanels) {
+    if (yieldToRules) {
       out.push({ kind: 'prose', segments: beautify(text) });
       continue;
     }
-    for (const piece of text.split(/(<action_info>[\s\S]*?<\/action_info>)/gi)) {
-      if (/^<action_info>/i.test(piece)) {
-        for (const block of parseCombatNarrative(piece))
-          out.push(
-            block.kind === 'panel' ? block : { kind: 'prose', segments: beautify(block.text) },
-          );
-      } else if (piece) out.push({ kind: 'prose', segments: beautify(piece) });
+    const pieces = splitActionInfo(text, { partial: props.streaming });
+    if (!pieces.some((piece) => piece.kind === 'panel')) {
+      // 没有面板：整段照旧（流式中裁掉的半截残标签除外），与改造前逐字节一致
+      const prose = pieces.map((piece) => (piece.kind === 'text' ? piece.text : '')).join('');
+      const body = props.streaming ? prose : text;
+      if (body) out.push({ kind: 'prose', segments: beautify(body) });
+      continue;
+    }
+    for (const piece of pieces) {
+      if (piece.kind === 'panel') {
+        const panel = parseActionPanel(piece.raw);
+        if (panel.sections.length > 0) out.push({ kind: 'panel', panel });
+        continue;
+      }
+      const prose = trimAroundPanels(piece.text);
+      if (prose.trim()) out.push({ kind: 'prose', segments: beautify(prose) });
     }
   }
   return out;
@@ -315,9 +358,9 @@ function isMatch(segment: BeautifierSegment): segment is BeautifierMatchSegment 
 }
 
 function isNativeMatch(segment: BeautifierMatchSegment): boolean {
-  // This template is app-owned, contains only escaped captures, and relies on
-  // the host's dialogue-card CSS. Every imported/user rich rule stays isolated.
-  return segment.ruleId === 'builtin-dialogue-card';
+  // 内置对话卡片不走规则的 replacement，由宿主 DialogueCard 组件按捕获组文本插值渲染
+  // （名字 / 情绪 / 台词），吃宿主主题样式；其余导入 / 用户的富规则一律进隔离框。
+  return segment.ruleId === DIALOGUE_CARD_RULE_ID;
 }
 
 /**
@@ -336,6 +379,8 @@ function paragraphs(text: string): string[] {
   // 不应当正文显示。Vue 的 {{ }} 会把它当字面文本转义后原样显示，很诡异——这里先剥离。
   // 用 [\s\S]*? 懒惰匹配，跨多行 + 多条注释（/g）都能一次清掉。
   const stripped = text.replace(/<!--[\s\S]*?-->/g, '');
+  // 两张对话卡片 / 面板之间只剩换行时不出空段落，否则卡片之间多出一行空隙
+  if (stripped.trim() === '') return [];
   return stripped
     .split(/\n\n+/)
     .filter((part, index, list) => part.length > 0 || list.length === 1);
@@ -345,12 +390,8 @@ function paragraphs(text: string): string[] {
 <template>
   <div class="beautified-narrative">
     <template v-for="(part, partIndex) in parts" :key="partIndex">
-      <div v-if="part.kind === 'panel'" class="action-panel" :class="blockInkClass">
-        <strong>{{ part.title || '行动详情' }}</strong>
-        <div v-for="(row, rowIndex) in part.rows" :key="rowIndex">
-          <span>{{ row.label }}</span> {{ row.value }}
-        </div>
-      </div>
+      <!-- `<action_info>` 行动面板：特效层按非段落块处理（once 档整块浮现） -->
+      <ActionPanel v-if="part.kind === 'panel'" :panel="part.panel" :class="blockInkClass" />
       <!-- 正文标记切出来的图片段（anchorKind: 'marker'） -->
       <SceneImageSegment
         v-if="part.kind === 'image' && messageId !== undefined"
@@ -409,10 +450,11 @@ function paragraphs(text: string): string[] {
           class="beautifier-native-match"
           :class="blockInkClass"
         >
-          <div class="dialogue-card">
-            <span class="dialogue-name">{{ segment.captures[0] }}</span>
-            <div class="dialogue-body">{{ segment.captures[2] }}</div>
-          </div>
+          <DialogueCard
+            :name="segment.captures[0] ?? ''"
+            :mood="segment.captures[1]"
+            :body="segment.captures[2] ?? ''"
+          />
         </div>
       </template>
     </template>
@@ -440,22 +482,6 @@ function paragraphs(text: string): string[] {
 </template>
 
 <style scoped>
-.action-panel {
-  margin: 1em 0;
-  padding: 1em;
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-md);
-  background: var(--theme-bg-secondary);
-  font-family: monospace;
-  white-space: pre-wrap;
-}
-.action-panel strong {
-  display: block;
-  margin-bottom: 0.5em;
-}
-.action-panel span {
-  color: var(--theme-text-muted);
-}
 .beautified-narrative {
   min-width: 0;
 }
@@ -475,69 +501,5 @@ function paragraphs(text: string): string[] {
   margin-bottom: 0;
 }
 
-/* === 对话卡片 · 血色玫瑰窗 / 圣物匣风（仿 crimson reliquary） ===
-   走 native 渲染（宿主 DOM），直接用 --theme-* 变量。
-   拱形顶 + 双层描边（外卡边 + ::before 内嵌古金线）+ 顶部金色辉光 +
-   ::after 渐变血色短线 + 名字旁血红宝石点（::before on name）+ inset 层次 */
-.beautifier-native-match :deep(.dialogue-card) {
-  position: relative;
-  margin: var(--theme-spacing-md, 8px) 0;
-  padding: 10px 16px 8px;
-  background:
-    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(194, 163, 111, 0.08), transparent 70%),
-    var(--theme-card-bg);
-  border: 1px solid var(--theme-card-border);
-  border-radius: 12px 12px 3px 3px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
-    var(--theme-shadow-sm);
-}
-
-.beautifier-native-match :deep(.dialogue-card)::before {
-  content: '';
-  position: absolute;
-  inset: 3px;
-  border: 1px solid rgba(194, 163, 111, 0.28);
-  border-radius: 9px 9px 2px 2px;
-  pointer-events: none;
-}
-
-.beautifier-native-match :deep(.dialogue-card)::after {
-  content: '';
-  position: absolute;
-  top: -1px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 28px;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--theme-primary), transparent);
-  opacity: 0.6;
-}
-
-.beautifier-native-match :deep(.dialogue-name) {
-  display: block;
-  font-family: var(--theme-font-title, serif);
-  font-size: 0.85em;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  color: var(--theme-primary);
-  text-shadow: 0 0 10px rgba(194, 163, 111, 0.25);
-  margin-bottom: 4px;
-}
-
-.beautifier-native-match :deep(.dialogue-name)::before {
-  content: '◆';
-  color: var(--theme-primary);
-  margin-right: 7px;
-  font-size: 0.75em;
-  opacity: 0.85;
-}
-
-.beautifier-native-match :deep(.dialogue-body) {
-  color: var(--theme-text-primary);
-  font-family: var(--theme-font-body, var(--theme-font-title, serif));
-  line-height: 1.85;
-  text-indent: 0;
-}
+/* 对话卡片与行动面板的样式归各自组件（DialogueCard.vue / ActionPanel.vue），这里不再叠 :deep 规则 */
 </style>
