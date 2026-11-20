@@ -1435,6 +1435,26 @@ describe('exportAllData / importAllData', () => {
     expect((await getSnapshots('save_test'))[0].preview?.playerName).toBe('往返主角');
   });
 
+  it('importAllData 应清掉同 saveId 的运行时缓存（战斗沙盒 / delta 会话 / 调试回合），保留引擎日志', async () => {
+    // 全量备份保留原存档 id：恢复一份更旧的备份后，这些「未来」的缓存行不许续用到旧状态上
+    await saveSaveSlot(makeSaveSlot({ id: 'save_rt' }));
+    const backup = await exportAllData();
+
+    const db = getDatabase();
+    await db.combatSandboxes.put({ saveId: 'save_rt', updatedAt: 1 } as never);
+    await db.promptSessions.put({ key: 'save_rt::main', saveId: 'save_rt' } as never);
+    await db.debugTurns.put({ id: 'dt_rt', saveId: 'save_rt', startedAt: 1 } as never);
+    await db.engineLogs.add({ saveId: 'save_rt', layer: 1 } as never);
+
+    await importAllData(backup);
+
+    expect(await getSave('save_rt')).toBeDefined();
+    expect(await db.combatSandboxes.get('save_rt')).toBeUndefined();
+    expect(await db.promptSessions.where('saveId').equals('save_rt').count()).toBe(0);
+    expect(await db.debugTurns.where('saveId').equals('save_rt').count()).toBe(0);
+    expect(await db.engineLogs.count()).toBe(1);
+  });
+
   it('importAllData 无效格式应抛错', async () => {
     await expect(importAllData(null as any)).rejects.toThrow('备份格式无效');
     await expect(importAllData('string' as any)).rejects.toThrow('备份格式无效');

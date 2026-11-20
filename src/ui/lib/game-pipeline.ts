@@ -240,6 +240,7 @@ import {
 import type { EmbeddingRequestTrace } from '@engine/memory/memory-store';
 // 🆕 F10（2026-09-04）：Agent API 池绑定的 fail-closed 解析（pool id → ApiEndpoint 唯一纯实现）
 import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
+import { sanitizeFailureDetail } from './turn-failure';
 
 export interface GamePipelineDeps {
   gameStore: ReturnType<typeof useGameStore>;
@@ -1283,8 +1284,10 @@ export class GamePipeline {
         return false;
       }
       console.error('[GamePipeline] 管线运行失败:', err);
+      // 2026-11-20：toast 只给脱敏 + 截断后的摘要（原先直接拼 err.message，可能带出上游原文 / 密钥片段）；
+      // 完整分类与恢复入口仍在回合恢复面板。
       if (isDirectMode(this.generationMode))
-        this.notify(`直出未完成：${err instanceof Error ? err.message : String(err)}`, 'error');
+        this.notify(`直出未完成：${sanitizeFailureDetail(err) ?? '未知错误'}`, 'error');
       activityOutcome = 'failed';
       activityMessage = '世界的回应在此中断，已写入的状态不会自动撤销。';
       activityError = err;

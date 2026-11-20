@@ -1989,6 +1989,8 @@ PR 审查返工补齐：整库恢复后立即重载并激活 RPM 策略；队列
 - **设置接线五处**（Q-18 纪律，缺一处即静默失效）：`agent-config.json` 13 agent 全加 `maxRetries: 3`（纯插入 13 行，CRLF 逐行脚本保编码）；`agent-settings.ts` 的 `AgentSettingsEntry` + `AGENT_SETTINGS_DEFAULTS.maxRetries: 3` + `getAgentSettings` 解析；`game-pipeline.ts` 的 `buildAgentConfigs` 映射 + `loadPresets` 透传 + **streamCallbacks 的 `onChunk('', true)` 重置 `streamedRaw`**（重试清预览的 UI 半边）+ `getClientFactory` 侧链从 chainData 解析 maxRetries；`AgentParamsCard.vue` 加「失败重试次数」旋钮（0-5，带默认/已覆写徽标）。
 - **orchestrator**：`callAgent`/`callAgenticAgent` 的 `maxRetries: config.maxRetries ?? (retryOnFail ? 1 : 0)`。
 
+> 📌 **2026-11-20 更正**：上面「可重试错误」实际是**任何失败都重试**，已收紧为按错误类型判定（`agent-client.ts` 的 `decideRetry`）：4xx 除 408/429 外立即失败；429 照 Retry-After 等待（封顶 60 秒）；已收到输出增量后才失败的流式调用至多再重试 1 次；退避等待可取消；流式新增空闲超时（收到首块后每块重置，时长 = 单次请求超时）。默认 `maxRetries: 3` 不变。
+
 **顺带修掉一个真实产品 bug（settings-store 幽灵快照复活，测试驱动定位）**：
 `settings-store` 的 `saveNow()` 此前不检查 store 生命周期——`$dispose` 后构造期启动链（`loadAgentProjectDefaults → content-store → beautifier-store.refreshPresetRules`）经实例绑定的 `saveNow` 仍能把陈旧快照写回 localStorage。`saveNow` 加 `bootTaskCancelled` 检查（与 bootTimer 同一条防线，覆盖所有经实例的出写路径）。settings-store.test.ts 那条「已销毁的 store」用例的负载敏感失败（注释自证的「只在全量 + CPU 高负载下复现」）随之定位：**测试缺了「$dispose 后换活跃 pinia」这一步**（下一条用例 beforeEach 的形状），幽灵链在旧 pinia 上重建 store 并写入——测试补上 `setActivePinia(createPinia())`，断言从「localStorage 必须为 null」改为「污染不得进入新 store」（重建 store 写默认快照是合法行为，带幽灵条目才是缺陷）。
 

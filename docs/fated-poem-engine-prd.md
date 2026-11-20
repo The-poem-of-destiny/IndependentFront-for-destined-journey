@@ -174,6 +174,7 @@ IndependentFront-for-destined-journey（命定之诗独立前端）是一个独�
 - User flow: 用户输入 → Stage 0(memory_recall+plot_pre_check) → Stage 1(story) → Stage 2(vars_update) → Stage 3(char_update×N) → Stage 4(memory_summary) → Stage 5(plot_post_check) → 返回叙事
 - Edge cases: Stage 0 任一 Agent 失败不阻塞；Stage 1 依赖 Stage 0 全部完成；管线验证（未知 Agent/缺失依赖/DAG 合法性）
 - Error handling: Agent 失败自动重试（指数退避 1s/2s/4s），超时 AbortSignal 取消，secondary API 失败 → fallback primary
+  - 📌 2026-11-20：重试已按错误类型区分 —— 4xx（408/429 除外）不重试，429 照 Retry-After 等待，流式已出字后失败至多重试 1 次，退避带抖动且可取消。
 
 **Feature 2: 上下文缓存隔离**
 

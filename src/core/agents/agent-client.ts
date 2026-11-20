@@ -181,6 +181,147 @@ function describeLogError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// ========== 重试策略（2026-11-20 收紧） ==========
+
+/** 指数退避基数：第 n 次重试（0 起）基础等待 = 基数 × 2^n，再加至多 50% 随机抖动。 */
+const RETRY_BASE_DELAY_MS = 1000;
+/** 429 无 Retry-After 时的退避基数（比普通错误大一倍，别把限流中的供应商打得更狠）。 */
+const RATE_LIMIT_BASE_DELAY_MS = 2000;
+/** Retry-After 的等待上限：上游要求等更久时也只等这么久，再失败就交给上层报错。 */
+const MAX_RETRY_AFTER_MS = 60_000;
+/**
+ * 流式已收到正文/思维链/工具调用增量后（= 已开始计费）才失败的，整次调用至多再重试这么多次，
+ * 不按 maxRetries。理由：每次重试都会让供应商从头重新生成并重新计费整段输出。
+ */
+const MAX_MID_STREAM_RETRIES = 1;
+
+/**
+ * 上游 HTTP 非 2xx 的结构化错误。
+ *
+ * 🔴 `message` 保持旧文案 `HTTP <status>: <响应体前 200 字>` 一字不改 ——
+ * `src/ui/lib/turn-failure.ts` 等处按 `HTTP (\d{3})` 正则对文案分类，
+ * 改了文案那边会静默落入「未知错误」。重试判定读结构化的 `status`，不再解析文案。
+ */
+export class LlmHttpError extends Error {
+  readonly status: number;
+  /** 解析后的 Retry-After（毫秒）；上游没给或无法解析时为 undefined。 */
+  readonly retryAfterMs?: number;
+
+  constructor(status: number, bodySnippet: string, retryAfterMs?: number) {
+    super(`HTTP ${status}: ${bodySnippet}`);
+    this.name = 'LlmHttpError';
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/**
+ * 解析 Retry-After：先认 `retry-after-ms`（OpenAI 系会给），再认标准 `Retry-After`
+ * （秒数或 HTTP-date）。无法解析返回 undefined；过去的时间点按 0 处理。
+ */
+function parseRetryAfterMs(headers: Headers | undefined, now = Date.now()): number | undefined {
+  if (!headers || typeof headers.get !== 'function') return undefined;
+  const msRaw = headers.get('retry-after-ms');
+  if (msRaw !== null && msRaw.trim() !== '') {
+    const ms = Number(msRaw);
+    if (Number.isFinite(ms) && ms >= 0) return ms;
+  }
+  const raw = headers.get('retry-after');
+  if (raw === null || raw.trim() === '') return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return seconds >= 0 ? seconds * 1000 : undefined;
+  const at = Date.parse(raw);
+  if (Number.isNaN(at)) return undefined;
+  return Math.max(0, at - now);
+}
+
+/** 失败的可重试性要素（chat 与 chatStream 共用一套判定）。 */
+interface FailureInfo {
+  /** 上游 HTTP 状态码；网络错误 / 超时 / 流中断等没有状态码 */
+  status?: number;
+  retryAfterMs?: number;
+  /** 流式：本次尝试是否已收到过输出增量（计费已开始） */
+  receivedOutput?: boolean;
+}
+
+type RetryDecision = { retry: false } | { retry: true; delayMs: number };
+
+/**
+ * 重试判定（2026-11-20 起，取代「任何失败都重试 maxRetries 次」）：
+ *   1. 已用满 maxRetries → 不重试。
+ *   2. 4xx 除 408 / 429 外一律不重试（401/403 鉴权、402 余额、400 上下文超长、404 模型名错……
+ *      重发 N 遍结果不变，只是把同一个错误多报 N 遍、多耗 N 份 RPM 名额）。
+ *   3. 429：重试；有 Retry-After 就照它等（封顶 60 秒），没有就用更大基数的指数退避 + 抖动。
+ *   4. 5xx / 408 / 网络错误 / 超时（含首字节超时）：按原指数退避 + 抖动重试。
+ *   5. 流式已收到输出增量后才失败（含流式输出空闲超时）：整次调用至多再重试
+ *      `MAX_MID_STREAM_RETRIES` 次 —— 每次重试都是一整段重新生成、重新计费。
+ */
+function decideRetry(
+  info: FailureInfo,
+  attempt: number,
+  maxRetries: number,
+  midStreamRetriesUsed: number,
+): RetryDecision {
+  if (attempt >= maxRetries) return { retry: false };
+  const status = info.status;
+  if (status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 429) {
+    return { retry: false };
+  }
+  if (info.receivedOutput && midStreamRetriesUsed >= MAX_MID_STREAM_RETRIES) {
+    return { retry: false };
+  }
+  if (status === 429) {
+    if (info.retryAfterMs !== undefined) {
+      return { retry: true, delayMs: Math.min(info.retryAfterMs, MAX_RETRY_AFTER_MS) };
+    }
+    return { retry: true, delayMs: jitteredBackoff(RATE_LIMIT_BASE_DELAY_MS, attempt) };
+  }
+  return { retry: true, delayMs: jitteredBackoff(RETRY_BASE_DELAY_MS, attempt) };
+}
+
+function jitteredBackoff(baseMs: number, attempt: number): number {
+  const base = baseMs * Math.pow(2, attempt);
+  return Math.min(MAX_RETRY_AFTER_MS, Math.round(base + Math.random() * base * 0.5));
+}
+
+/** 从 chat() 捕获的异常里取结构化失败要素。非 HTTP 错误（网络 / 超时）不带状态码。 */
+function failureInfoOf(error: unknown): FailureInfo {
+  if (error instanceof LlmHttpError) {
+    return { status: error.status, retryAfterMs: error.retryAfterMs };
+  }
+  return {};
+}
+
+/**
+ * 可被 signal 打断的等待。返回 true = 等满；false = 等待期间被取消（立即返回，不等定时器）。
+ */
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve(true);
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** 流式单次尝试的结果。error 态带上重试判定需要的要素。 */
+type StreamOutcome =
+  | { kind: 'ok' }
+  | { kind: 'aborted' }
+  | {
+      kind: 'error';
+      error: string;
+      status?: number;
+      retryAfterMs?: number;
+      receivedOutput: boolean;
+    };
+
 // ========== AgentClient ==========
 
 export class AgentClient {
@@ -269,23 +410,26 @@ export class AgentClient {
         // 立刻失败，旧实现还会白等 1s/2s 的指数退避（重试次数可配置后更明显）。
         // 用户取消 = 立即停。超时（callOnce 内部 controller）不受影响，仍可重试。
         if (signal?.aborted) break;
-        if (attempt < this.maxRetries) {
-          const failedAttempt = attempt;
-          logEngine(
-            'warn',
-            'llm.retry',
-            `${this.agentId} 第 ${failedAttempt + 1} 次失败，准备重试`,
-            () => ({
-              mode: 'chat',
-              attempt: failedAttempt + 1,
-              maxRetries: this.maxRetries,
-              delayMs: Math.pow(2, failedAttempt) * 1000,
-              reason: describeLogError(e),
-            }),
-            this.logContext(),
-          );
-          await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
-        }
+        // 2026-11-20：按错误类型决定重不重试（见 decideRetry），不再一律重试
+        const decision = decideRetry(failureInfoOf(e), attempt, this.maxRetries, 0);
+        if (!decision.retry) break;
+        const failedAttempt = attempt;
+        const { delayMs } = decision;
+        logEngine(
+          'warn',
+          'llm.retry',
+          `${this.agentId} 第 ${failedAttempt + 1} 次失败，准备重试`,
+          () => ({
+            mode: 'chat',
+            attempt: failedAttempt + 1,
+            maxRetries: this.maxRetries,
+            delayMs,
+            reason: describeLogError(e),
+          }),
+          this.logContext(),
+        );
+        // 退避等待可被取消：用户取消后立即停，不白等
+        if (!(await sleepAbortable(delayMs, signal))) break;
       }
     }
 
@@ -567,6 +711,10 @@ export class AgentClient {
    *     指数退避后重试
    *   · 超限 → onError 最终失败
    *
+   * 📌 2026-11-20 收紧（判定全在 `decideRetry`）：4xx（408/429 除外）不重试；429 照
+   * Retry-After 等（封顶 60 秒）；**已收到输出增量后才失败的（含流式输出空闲超时），
+   * 整次调用至多再重试 1 次** —— 每次重试都是整段重新生成、重新计费。退避等待可被取消。
+   *
    * @param request ChatRequest（messages/temperature/tools 等）
    * @param callbacks StreamCallbacks（onChunk / onToolCall / onComplete / onError）
    * @param signal 可选的 AbortSignal 用于外部取消
@@ -576,6 +724,7 @@ export class AgentClient {
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
+    let midStreamRetriesUsed = 0;
     for (let attempt = 0; ; attempt++) {
       const outcome = await this.streamOnce(request, callbacks, signal);
 
@@ -588,12 +737,16 @@ export class AgentClient {
         callbacks.onError('Request aborted');
         return;
       }
-      if (attempt >= this.maxRetries) {
+      const decision = decideRetry(outcome, attempt, this.maxRetries, midStreamRetriesUsed);
+      if (!decision.retry) {
         callbacks.onError(outcome.error);
         return;
       }
+      if (outcome.receivedOutput) midStreamRetriesUsed++;
       const failedAttempt = attempt;
       const reason = outcome.error;
+      const { delayMs } = decision;
+      const midStream = outcome.receivedOutput;
       logEngine(
         'warn',
         'llm.retry',
@@ -602,7 +755,8 @@ export class AgentClient {
           mode: 'stream',
           attempt: failedAttempt + 1,
           maxRetries: this.maxRetries,
-          delayMs: Math.pow(2, failedAttempt) * 1000,
+          delayMs,
+          midStream,
           reason,
         }),
         this.logContext(),
@@ -612,7 +766,10 @@ export class AgentClient {
       // 同一条语义（game-pipeline 的 streamCallbacks 收到后重置 streamedRaw）。
       // 不清理的话，重试生成的新正文会与第一段失败前的半截拼接显示。
       callbacks.onChunk('', true);
-      await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
+      if (!(await sleepAbortable(delayMs, signal))) {
+        callbacks.onError('Request aborted');
+        return;
+      }
     }
   }
 
@@ -624,7 +781,7 @@ export class AgentClient {
     request: ChatRequest,
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
-  ): Promise<{ kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string }> {
+  ): Promise<StreamOutcome> {
     return scheduleApiRequest(
       {
         baseUrl: this.baseUrl,
@@ -641,16 +798,22 @@ export class AgentClient {
     request: ChatRequest,
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
-  ): Promise<{ kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string }> {
+  ): Promise<StreamOutcome> {
     const startTime = Date.now();
     const callId = nextLlmCallId();
     // 原始 SSE 文本只在 trace 开着时才累积（关着时零开销）
     const rawSse: string[] | null = isEngineLogEnabled('trace') ? [] : null;
     let settled = false;
-    let outcome: { kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string } = {
+    let outcome: StreamOutcome = {
       kind: 'error',
       error: 'Stream ended unexpectedly',
+      receivedOutput: false,
     };
+    // 本次尝试是否已收到输出增量（正文 / 思维链 / 工具调用）—— 计费已开始的判据
+    let receivedOutput = false;
+    // HTTP 层失败时由 postCompletions 抛出的结构化要素
+    let httpStatus: number | undefined;
+    let httpRetryAfterMs: number | undefined;
     let postFinishTimer: ReturnType<typeof setTimeout> | undefined;
 
     const clearPostFinishTimer = () => {
@@ -663,7 +826,16 @@ export class AgentClient {
       if (settled) return;
       settled = true;
       clearPostFinishTimer();
-      outcome = kind === 'aborted' ? { kind: 'aborted' } : { kind: 'error', error: message };
+      outcome =
+        kind === 'aborted'
+          ? { kind: 'aborted' }
+          : {
+              kind: 'error',
+              error: message,
+              status: httpStatus,
+              retryAfterMs: httpRetryAfterMs,
+              receivedOutput,
+            };
     };
 
     const controller = new AbortController();
@@ -676,6 +848,10 @@ export class AgentClient {
       abortedByTimeout = true;
       controller.abort();
     }, streamTimeout);
+
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let idleTimedOut = false;
+    const idleTimeoutMessage = `流式输出空闲超时（${Math.round(this.timeout / 1000)}秒内未收到新数据），连接可能已停滞`;
 
     const onExternalAbort = () => controller.abort();
     if (signal?.aborted) {
@@ -808,6 +984,7 @@ export class AgentClient {
             fail('error', event.error);
             return;
           }
+          if (event.textDelta || event.reasoningDelta || event.toolCall) receivedOutput = true;
           if (event.textDelta) callbacks.onChunk(event.textDelta, false);
           if (event.reasoningDelta) callbacks.onReasoning?.(event.reasoningDelta);
           if (event.toolCall) callbacks.onToolCall?.(event.toolCall);
@@ -843,6 +1020,20 @@ export class AgentClient {
         }
       };
 
+      // 🔴 2026-11-20：流式输出空闲超时。旧实现收到首块后直接清掉超时且不再设新的，
+      // 连接停止发送却不关闭时会**永远挂住**。现在每收到一块数据就重置一个空闲定时器
+      // （时长 = 单次请求超时 this.timeout）；到期则取消读取并按「流中途失败」处理
+      // （已有输出 → 至多再重试 1 次，见 decideRetry）。
+      const armIdleTimer = () => {
+        if (idleTimer !== undefined) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          idleTimedOut = true;
+          controller.abort();
+          // reader.cancel 让挂起的 read() 立即返回，不依赖底层流响应 abort
+          void reader.cancel().catch(() => undefined);
+        }, this.timeout);
+      };
+
       try {
         let firstChunkReceived = false;
         while (!settled) {
@@ -852,18 +1043,24 @@ export class AgentClient {
           }
 
           const { done, value } = await reader.read();
+          if (idleTimedOut) break;
           if (done) break;
 
-          // 收到首个数据块后清除超时 — 流式响应只要数据在流动就不应超时
+          // 收到首个数据块后清除首字节超时，改由空闲定时器接管（每块重置）
           if (!firstChunkReceived) {
             firstChunkReceived = true;
             clearTimeout(timeoutId);
           }
+          armIdleTimer();
 
           const text = decoder.decode(value, { stream: true });
           rawSse?.push(text);
           buffer += text;
           processCompleteEvents();
+        }
+
+        if (idleTimedOut && !settled) {
+          fail('error', idleTimeoutMessage);
         }
 
         if (!settled) {
@@ -888,7 +1085,13 @@ export class AgentClient {
         reader.releaseLock();
       }
     } catch (e) {
-      if (e instanceof DOMException && e.name === 'AbortError') {
+      if (e instanceof LlmHttpError) {
+        httpStatus = e.status;
+        httpRetryAfterMs = e.retryAfterMs;
+      }
+      if (idleTimedOut) {
+        fail('error', idleTimeoutMessage);
+      } else if (e instanceof DOMException && e.name === 'AbortError') {
         if (abortedByTimeout) {
           fail(
             'error',
@@ -902,13 +1105,13 @@ export class AgentClient {
       }
     } finally {
       clearTimeout(timeoutId);
+      if (idleTimer !== undefined) clearTimeout(idleTimer);
       clearPostFinishTimer();
       signal?.removeEventListener('abort', onExternalAbort);
     }
 
     // outcome 在闭包里被改写，TS 的控制流收窄看不见 —— 这里显式放宽回三态联合
-    const finalOutcome = outcome as
-      { kind: 'ok' } | { kind: 'aborted' } | { kind: 'error'; error: string };
+    const finalOutcome = outcome as StreamOutcome;
     if (finalOutcome.kind !== 'ok') {
       const failed = finalOutcome;
       logEngine(
@@ -1043,7 +1246,8 @@ export class AgentClient {
         () => ({ stream, status: res.status, model, body: redactSecrets(errorText) }),
         this.logContext(callId),
       );
-      throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 200)}`);
+      // 结构化状态码 + Retry-After 供重试判定；文案与旧版逐字一致
+      throw new LlmHttpError(res.status, errorText.slice(0, 200), parseRetryAfterMs(res.headers));
     }
     return res;
   }

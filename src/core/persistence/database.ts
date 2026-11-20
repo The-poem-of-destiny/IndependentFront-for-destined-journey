@@ -1171,6 +1171,12 @@ export async function importAllData(backup: FullBackup): Promise<ReconcileResult
     throw err;
   }
 
+  // 🔴 2026-11-20：导入**成功之后**才清每存档运行时缓存（见 clearSaveRuntimeCaches）。
+  //    放在 doImportAllData 外面是刻意的：导入失败 → 回滚到 previousData 时，这些缓存
+  //    本来就与回滚后的（= 导入前的）存档一致，原样保留即可；previousData 也不含它们，
+  //    在内核里清了反而回滚不回来（会白丢一场进行中的战斗）。
+  await clearSaveRuntimeCaches(db);
+
   // 内容-引擎分离波 1 / D18 / §5.7：恢复完成后跑对账。
   // contentPacks 不进备份，所以恢复可能让 pack 拥有的 worldBooks/presets 行与 payload
   // 失配（旧备份清了表 / 手编备份删了字段）。对账只读 + 报告，不自动改任何一边；
@@ -1178,6 +1184,27 @@ export async function importAllData(backup: FullBackup): Promise<ReconcileResult
   // 🔴 reconcile 自身绝不再调 importAllData（会递归），也不读 backup（只看现状 vs payload）。
   await purgeProtectedPackPlaintext();
   return reconcilePackState();
+}
+
+/**
+ * 整库恢复后清掉「不进 FullBackup、按 saveId 挂靠」的运行时缓存（2026-11-20）。
+ *
+ * 全量备份保留原存档 id，所以恢复一份**更旧**的备份后，这些表里同 saveId 的行描述的是
+ * 「未来」的状态：`combatSandboxes` 会被 resumeCombatSandbox 续上一场旧状态里尚未发生
+ * 的战斗并把结算写回旧存档；`promptSessions` 带着更晚的 delta transcript 续用；
+ * `debugTurns` 的调试回合指向已不存在的消息。三者都是可重建缓存，清空即安全。
+ *
+ * 刻意**不清**的同类表：
+ * - `engineLogs`：诊断日志，不参与任何状态续用；保留恢复前后的日志对排障更有用。
+ * - `sceneImageBlobs`：图片字节，备份不带（§7.3），清了无法重建。
+ * 其余按 saveId 隔离的表都进 FullBackup，已由 doImportAllData 整表替换。
+ */
+async function clearSaveRuntimeCaches(db: ReturnType<typeof getDatabase>): Promise<void> {
+  await db.transaction('rw', db.combatSandboxes, db.promptSessions, db.debugTurns, async () => {
+    await db.combatSandboxes.clear();
+    await db.promptSessions.clear();
+    await db.debugTurns.clear();
+  });
 }
 
 /** 纯导入内核（无验证、无预备份）— importAllData 与失败回滚共用 */

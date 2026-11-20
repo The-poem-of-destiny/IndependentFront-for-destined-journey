@@ -7,6 +7,8 @@
 
 ## 待办
 
+> 📌 2026-11-20：发 beta 前的闸门汇总见 [`docs/planning/2026-11-20-pre-beta-release-checklist.md`](docs/planning/2026-11-20-pre-beta-release-checklist.md)（只做索引，正文仍以本文件为准）。
+
 - [ ] **发布测试版前：重写 README「首次游玩配置」并补应用内首次上手路径** —— README 该节已过时
       （2026-11-16 已加过时提示）：推荐 API 组合、设置页分区名与路径都需对照现版本重写；
       其中「Embedding 必须」与准入页「额外的 Embedding 服务为可选」说法矛盾，需统一。

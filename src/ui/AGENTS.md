@@ -376,6 +376,12 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── leave-game-guard.ts          ← 🆕 [2026-11-14 / GAME-08·G-03] `confirmLeaveGame(去处)`：有在跑的回合 /
 │   │                                   润色 / 在飞或排队的插画时先危险确认，否则直接放行。凡是会卸载
 │   │                                   GamePage 的入口（菜单设置/扩展/首页、插画「去设置」、RPM 弹窗）都先过它
+│   ├── save-tab-lock.ts             ← 🆕 [2026-11-20] 存档单标签页锁：`acquireSaveTabLock(saveId)` 以 Web Locks
+│   │                                   `poem-save:<saveId>` + `ifAvailable` 申请，拿不到返回 null。唯一调用点是
+│   │                                   GamePage.onMounted（排在 loadSave 之前；失败 toast `SAVE_TAB_LOCKED_MESSAGE`
+│   │                                   并回首页），卸载时等 `waitForGameSaveIdle` 后释放。同标签页同存档引用计数共用一把锁；
+│   │                                   无 `navigator.locks` 或申请出错时放行。🔴 写队列只在本标签页内存里，
+│   │                                   这把锁是两个标签页同写一档（便携版重复启动）唯一的护栏
 │   ├── turn-failure.ts              ← 🆕 [2026-11-14 / GAME-05] 回合失败归类（auth/quota/rate_limit/network/
 │   │                                   server/rejected/config/unknown）与措辞的**唯一出处**；原文先
 │   │                                   `redactSecrets` 脱敏再截断（上游错误体可能回显密钥）。
@@ -500,6 +506,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   **maxTokens 65536**（2026-08-08 由 16384 上调，大纲 5×5 等重输出
 │   │                                   不再贴边）/ **maxRetries 3**（2026-08-16，AgentClient.chat|chatStream
 │   │                                   的循环上限，外部取消永不重试））
+│   │                                   📌 2026-11-20：`maxRetries` 只是**上限**，不再「失败必重试」——
+│   │                                   4xx（408/429 除外）不重试、429 按 Retry-After 等、已出字后断流至多 1 次；
+│   │                                   规则真源在 `src/core/agents/agent-client.ts` 的 `decideRetry`
 │   │                                   📌 2026-11-14（S-00）：默认层里的 `model`（池 id）在本机 `apiPool`
 │   │                                   里查不到时，`getAgentSettings` 读成**未设置**（跟随默认）而不是
 │   │                                   失效绑定；袋子里没有 `apiPool` 数组时原样返回。覆写层不做此处理
