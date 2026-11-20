@@ -353,7 +353,10 @@ function buildCharacterLocalParams(
               ...request.characterDefinition?.profile,
               ...request.narrativeCharacter?.profile_changes,
             },
-            lore: request.characterDefinition?.lore,
+            // 有链接条目时人设走世界书（entity_gen 在条目 audiences 内），不再重复塞一份原文
+            lore: request.characterDefinition?.loreEntry
+              ? undefined
+              : request.characterDefinition?.lore,
             past: [
               ...(request.characterDefinition?.past ?? []),
               ...(request.narrativeCharacter?.chronicle.filter((e) => e.time.kind === 'past') ??

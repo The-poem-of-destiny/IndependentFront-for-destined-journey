@@ -73,12 +73,19 @@ export function readCharacterDefinitions(raw: unknown): CharacterDefinition[] {
       past: past as CharacterPastEntry[],
       ...ageHint,
       ...(typeof row.lore === 'string' ? { lore: row.lore } : {}),
+      ...(typeof row.loreEntry === 'string' && row.loreEntry.trim()
+        ? { loreEntry: row.loreEntry.trim() }
+        : {}),
     });
   }
   return definitions;
 }
 
-/** Read-only compatibility conversion. Retain unrecognized/dynamic entries as lore. */
+/**
+ * Read-only conversion of worldbook character entries into catalogue definitions.
+ * The entry itself stays model-facing (linked via `loreEntry`); unrecognized/dynamic entries
+ * are simply left as ordinary entries.
+ */
 export function legacyCharacterDefinitions(books: readonly WorldBook[]): CharacterDefinition[] {
   const definitions: CharacterDefinition[] = [];
   for (const book of books) {
@@ -106,6 +113,7 @@ export function legacyCharacterDefinitions(books: readonly WorldBook[]): Charact
         lore,
         past: [],
         assets: declarations.map(({ type, variant, url }) => ({ type, variant, url })),
+        loreEntry: entry.uid,
         legacyEntry: { bookId: book.id, uid: entry.uid, token: entry.uid },
       });
     }
@@ -116,13 +124,59 @@ export function legacyCharacterDefinitions(books: readonly WorldBook[]): Charact
 export function availableCharacterDefinitions(books: readonly WorldBook[]): CharacterDefinition[] {
   const native = readCharacterDefinitions(getContentRegistry().characters);
   const legacy = legacyCharacterDefinitions(books);
+  const covers = (n: CharacterDefinition, l: CharacterDefinition) =>
+    n.name === l.name || (!!n.loreEntry && n.loreEntry === l.legacyEntry?.uid);
   return [
     ...native.map((d) => ({
       ...d,
-      legacyEntry: legacy.find((l) => l.name === d.name)?.legacyEntry,
+      legacyEntry: legacy.find((l) => covers(d, l))?.legacyEntry,
     })),
-    ...legacy.filter((d) => !native.some((n) => n.name === d.name)),
+    ...legacy.filter((l) => !native.some((n) => covers(n, l))),
   ];
+}
+
+/** The worldbook entry a definition is linked to (explicit link, else the converted legacy entry). */
+export function characterLoreEntryUid(definition: CharacterDefinition): string | undefined {
+  return definition.loreEntry ?? definition.legacyEntry?.uid;
+}
+
+/**
+ * Fill in each definition's model-facing entry link. Saves freeze definitions at creation, so
+ * older frozen copies may lack `loreEntry`; they inherit it from the converted legacy entry or,
+ * failing that, from the current registry definition with the same id. Pure; inputs untouched.
+ */
+export function linkCharacterDefinitions(
+  definitions: readonly CharacterDefinition[],
+  registry: readonly CharacterDefinition[] = readCharacterDefinitions(
+    getContentRegistry().characters,
+  ),
+): CharacterDefinition[] {
+  return definitions.map((definition) => {
+    const uid =
+      characterLoreEntryUid(definition) ?? registry.find((r) => r.id === definition.id)?.loreEntry;
+    return uid && uid !== definition.loreEntry ? { ...definition, loreEntry: uid } : definition;
+  });
+}
+
+/** Entry uids that selecting these definitions brings into the save's worldbook whitelist. */
+export function characterLoreEntryUids(definitions: readonly CharacterDefinition[]): string[] {
+  return [...new Set(definitions.flatMap((d) => characterLoreEntryUid(d) ?? []))];
+}
+
+/**
+ * Keep `loreEntry` only where that entry is actually loaded; otherwise drop the link so the
+ * definition's fallback `lore` is used instead of the character silently losing its profile.
+ */
+export function resolveCharacterLoreLinks(
+  definitions: readonly CharacterDefinition[],
+  books: readonly WorldBook[],
+): CharacterDefinition[] {
+  const loaded = new Set(books.flatMap((book) => book.entries.map((entry) => entry.uid)));
+  return definitions.map((definition) => {
+    if (!definition.loreEntry || loaded.has(definition.loreEntry)) return definition;
+    const { loreEntry: _unloaded, ...rest } = definition;
+    return rest;
+  });
 }
 
 export function characterAssetRows(
@@ -139,21 +193,6 @@ export function characterAssetRows(
     );
     return asset ? [asset] : [];
   });
-}
-
-export function withoutCharacterLore(
-  books: readonly WorldBook[],
-  definitions: readonly CharacterDefinition[],
-): WorldBook[] {
-  return books.map((book) => ({
-    ...book,
-    entries: book.entries.filter(
-      (entry) =>
-        !definitions.some(
-          (d) => d.legacyEntry?.bookId === book.id && d.legacyEntry.uid === entry.uid,
-        ),
-    ),
-  }));
 }
 
 export function matchCharacterDefinition(

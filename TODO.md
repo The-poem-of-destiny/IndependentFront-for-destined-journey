@@ -150,9 +150,10 @@
         正式包下建直出存档 = 主生成只有内置预设、没有世界设定。内容侧适配后，引擎侧需用真实包补
         直出与缓存直出的真机验收（`#140` 标着「待真机验证」）。
 
-  - [ ] **原生角色（`characters` 分节）未供给** —— 内容仓没有 `data/content/characters.json`，作者
-        角色仍走 `character` 世界书的只读兼容转换（`docs/reference/character-system.md`「旧内容与存档」），
-        拿不到原生定义的过去经历、显式素材关联与资料目录。依赖内容侧先出迁移报告再显式迁移；
+  - [ ] **原生角色真机验收** —— 内容仓已供给 `characters` 分节（2026-11-20 起由
+        `content/characters/<id>/` 生成，带 `loreEntry` 链接 `character` 世界书人设条目；引擎并列模型见
+        `docs/reference/character-system.md`「定义与人设条目并列」）。待做：真实包下新建存档选角色、
+        打开旧存档各一次，确认人设条目进白名单、`lore` 不重复注入、EJS 条目正常求值；
         与本文件首条「Characters v1 与提示词集成」合并验收。
 
   - [ ] **内置配乐对正式内容为空** —— 引擎读 `/audio/manifest.json`（公开仓那份是空清单），

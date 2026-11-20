@@ -100,6 +100,27 @@ describe('chronicle selection and prompt wiring', () => {
     expect(buildCharacterContext(ctx)).not.toContain('喝茶');
     expect(buildCharacterContext({ ...ctx, userInput: '继续旅行' })).not.toContain('失去师父');
   });
+  it('sends fallback lore only when no linked worldbook entry carries the profile', () => {
+    const definition = {
+      id: 'guide',
+      name: '向导',
+      profile: { background: '渡口向导' },
+      assets: [],
+      past: [],
+      lore: '兜底人设原文',
+    };
+    const ctx = context();
+    ctx.userInput = '去拜访向导';
+    ctx.characters = [];
+    ctx.characterDefinitions = [definition];
+    expect(buildCharacterContext(ctx)).toContain('兜底人设原文');
+    ctx.characterDefinitions = [{ ...definition, loreEntry: 'fated:character/guide' }];
+    expect(buildCharacterContext(ctx)).not.toContain('兜底人设原文');
+    expect(buildCharacterContext(ctx)).toContain('渡口向导');
+    // 已实体化：角色身上冻结的定义副本没有链接，按上下文里解析过的同 id 定义判断
+    ctx.characters = [{ ...character, definition }];
+    expect(buildCharacterContext(ctx)).not.toContain('兜底人设原文');
+  });
   it('hard-filters low importance and unrelated characters, honoring a separate budget', () => {
     expect(buildCharacterContext(context())).toContain('同行之约');
     expect(buildCharacterContext(context())).not.toContain('闲聊');

@@ -1375,6 +1375,23 @@ describe('预设系统', () => {
     expect(store.characterDefinitions).toEqual([]);
   });
 
+  it('选中角色定义会把它链接的人设条目带进存档白名单', () => {
+    store.characterDefinitions = [
+      {
+        id: 'hassan',
+        name: '哈桑',
+        profile: {},
+        assets: [],
+        past: [],
+        loreEntry: 'fated:character/hassan',
+      },
+    ];
+    expect(store.buildEnabledWorldBookEntries()).not.toContain('fated:character/hassan');
+    store.toggleCharacterDefinition('hassan');
+    expect(store.buildEnabledWorldBookEntries()).toContain('fated:character/hassan');
+    store.resetAll();
+  });
+
   it('getCurrentPresetData → applyPresetData 往返一致', () => {
     const data = store.getCurrentPresetData();
     expect(data.character.name).toBe('预设测试');

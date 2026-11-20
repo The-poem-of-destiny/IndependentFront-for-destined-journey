@@ -56,7 +56,17 @@ export interface CharacterDefinition extends CharacterAgeHint {
   id: string;
   name: string;
   profile: CharacterProfile;
+  /**
+   * 兜底人设文本：只在没有可用的链接条目（`loreEntry`）时才进提示词。
+   * 有链接条目时，模型读的是那条世界书条目（EJS / 路由 / 激活照常），本字段不发送。
+   */
   lore?: string;
+  /**
+   * 链接的世界书条目 uid（如 `fated:character/hassan`）：该角色**面向模型**的人设真源。
+   * 定义本身是给引擎用的结构化目录（界面 / 素材 / 编年史 / 年龄），条目给模型读，二者并列不互替。
+   * 选中定义即把该条目并入存档白名单。
+   */
+  loreEntry?: string;
   assets: CharacterAssetRef[];
   past: CharacterPastEntry[];
   legacyEntry?: { bookId: string; uid: string; token: string };

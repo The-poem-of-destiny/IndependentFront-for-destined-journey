@@ -69,9 +69,11 @@ import { splitSceneImageSegments } from '@engine/image/image-segments';
 import { stripMarkers } from '@engine/story/marker-protocol';
 import { parseCharacterUpdates } from '@engine/character/character-updates';
 import {
+  characterLoreEntryUids,
   legacyCharacterDefinitions,
+  linkCharacterDefinitions,
   matchCharacterDefinition,
-  withoutCharacterLore,
+  resolveCharacterLoreLinks,
 } from '@engine/character/character-definitions';
 import type { CharacterNarrativeUpdate } from '@engine/types/types-character';
 import { AgentClient } from '@engine/agents/agent-client';
@@ -1021,9 +1023,14 @@ export class GamePipeline {
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets();
       const worldBooks = await this.loadActiveWorldBooks();
-      context.characterDefinitions =
-        this.game.activeSave?.metadata.characterDefinitions ??
-        legacyCharacterDefinitions(worldBooks);
+      // 定义是给引擎的目录，链接的世界书条目才是给模型的人设：解析链接，条目没加载上时回落定义自带 lore
+      context.characterDefinitions = resolveCharacterLoreLinks(
+        linkCharacterDefinitions(
+          this.game.activeSave?.metadata.characterDefinitions ??
+            legacyCharacterDefinitions(worldBooks),
+        ),
+        worldBooks,
+      );
       await createStateManager(this.saveId).initializeCharacterDefinitions(
         context.characterDefinitions,
         () => this.isRunCurrent(controller),
@@ -1045,7 +1052,6 @@ export class GamePipeline {
             (turn) => entry.source.kind === 'turn' && storyMemorySourceMatches(entry.source, turn),
           ),
       );
-      const characterBooks = withoutCharacterLore(worldBooks, context.characterDefinitions);
 
       // 2.6 构建 Agent 配置（用已加载的 agentDefaults 替代 projectAgentDefaults）
       const agentConfigs = this.buildAgentConfigs(
@@ -1058,7 +1064,7 @@ export class GamePipeline {
       // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
       // configs/worldBooks/presets 才能拿到完整 systemPrompt + 世界书上下文，
       // 把这三个值挂实例传给事件回调（回调通过闭包捕获 run() 局部变量）。
-      this.chainData = { agentConfigs, worldBooks: characterBooks, presets, agentDefaults };
+      this.chainData = { agentConfigs, worldBooks, presets, agentDefaults };
 
       // 2.7 Story 上下文新模式（v2）：分区组装输入 + memory_summary 换用每回合摘要契约
       this.v2SummaryDraft = null;
@@ -1101,7 +1107,7 @@ export class GamePipeline {
         saveId: this.saveId,
         isCurrent: () => this.isRunCurrent(controller),
         presets,
-        worldBooks: characterBooks,
+        worldBooks,
         memoryRetrieval: {
           mode: this.settings.settings.memoryRecallMode ?? 'llm',
           embeddingEndpoint: this.buildRetrievalEndpoint('embedding'),
@@ -2077,7 +2083,13 @@ export class GamePipeline {
           unrouted.slice(0, 20).map((i) => `${i.bookName}/${i.entryName}`),
         );
       }
-      const enabledEntries = this.game.activeSave?.metadata?.enabledWorldBookEntries ?? [];
+      // 选中的角色定义把各自链接的人设条目带进白名单 —— 包括新链接之前建的旧档
+      // （冻结定义缺 loreEntry 时按 legacyEntry / 注册表同 id 定义补链）
+      const metadata = this.game.activeSave?.metadata;
+      const enabledEntries = [
+        ...(metadata?.enabledWorldBookEntries ?? []),
+        ...characterLoreEntryUids(linkCharacterDefinitions(metadata?.characterDefinitions ?? [])),
+      ];
       return filterBooksByEnabledEntries(all, enabledEntries);
     } catch {
       return [];
