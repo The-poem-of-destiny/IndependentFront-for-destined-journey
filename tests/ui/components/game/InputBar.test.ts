@@ -12,8 +12,16 @@ import InputBar from '../../../../src/ui/components/game/InputBar.vue';
 
 enableAutoUnmount(afterEach);
 
+const store = vi.hoisted(() => ({ pendingOptions: [] as string[] }));
+
 vi.mock('../../../../src/ui/stores/game-store', () => ({
-  useGameStore: () => ({ pendingOptions: [], pendingInput: '', clearPendingInput: vi.fn() }),
+  useGameStore: () => ({
+    get pendingOptions() {
+      return store.pendingOptions;
+    },
+    pendingInput: '',
+    clearPendingInput: vi.fn(),
+  }),
 }));
 
 async function typed(props: Record<string, unknown> = {}) {
@@ -57,5 +65,25 @@ describe('InputBar 回车发送', () => {
     await textarea.trigger('keydown', { key: 'Enter' });
     await wrapper.get('.send-btn').trigger('click');
     expect(wrapper.emitted('send')).toBeUndefined();
+  });
+});
+
+describe('InputBar 行动选项暂扣（交互式推进）', () => {
+  afterEach(() => {
+    store.pendingOptions = [];
+  });
+
+  it('holdOptions 为真时不出选项按钮，转假后出现；暂扣时已开的浮层收起', async () => {
+    store.pendingOptions = ['跟上去'];
+    const wrapper = mount(InputBar, { props: { holdOptions: false } });
+    await wrapper.get('.input-btn[title="可选行动"]').trigger('click');
+    expect(wrapper.find('.options-popup').exists()).toBe(true);
+
+    await wrapper.setProps({ holdOptions: true });
+    expect(wrapper.find('.input-btn[title="可选行动"]').exists()).toBe(false);
+    expect(wrapper.find('.options-popup').exists()).toBe(false);
+
+    await wrapper.setProps({ holdOptions: false });
+    expect(wrapper.find('.input-btn[title="可选行动"]').exists()).toBe(true);
   });
 });

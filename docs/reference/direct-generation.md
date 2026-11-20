@@ -42,6 +42,18 @@
   - 以后重新开放开关时，休眠的旧记录会重新浮现；届时需要定一条过期处理规则。
   - 私有内容包的直出预设可能仍要求模型输出战斗块（会被丢弃并记 warn）；未用真实模型验证。
 
+### 正文分节与逐节演出（2026-11-19）
+
+📌 2026-11-19 新增，分支 `feat/interactive-progression`，未真机验证。只作用于两种直出；Agent 模式不变。设计见[交互式推进设计](../planning/2026-11-19-interactive-progression-design.md)。
+
+- **协议**：`buildDirectProtocol` 两种战斗口径都带「正文分节」一行：模型在 `<maintext>` 内用独占一行的 `<beat/>` 切节，本楼经 entities 新建实体的人物在其首次现身那一节之前写 `<beat enter="人物名"/>`。正文战斗口径另加「战斗逐拍」：一名角色的一次行为单独成一节，`action_info` 前三行固定为 `|行动者|`、`|目标|`、`|行动|`。协议常驻，不随前端开关变化。
+- **解析**：`src/core/story/story-beats.ts` 把标记从正文剥掉，节间以 `\n\n` 拼接，断点偏移与登场锚点存进 `ChatMessage.stage`。记忆、摘要、缓存会话、复制与润色读到的都是剥过标记的正文。没有标记时正文逐字节不变、不带 `stage`。`parseDirectOutput` 不校验标记，写错不拒楼。读取方经 `resolveBeatBreaks` 自校验，断点失效（例如润色后）就按段落切。
+- **流式**：`game-pipeline` 的流式回调只在直出主笔给出第三参（断点、登场锚点、`</maintext>` 是否已到）。
+- **前端**：全局设置 `stagedNarrative`（默认开）。只对本次会话新到的直出正文逐节放出，历史消息整段显示；行动选项等末节放完且回合已接纳后才出现。键位 Space / Enter 推进、按住 Ctrl 快进、End 全部显示、鼠标左键点正文推进；小条「全文」直接关闭该设置，重新开启在「设置 → 消息显示」。
+- **新角色登场**：名字不在本楼开始时的名册里才演，立绘走立牌链，没有素材只浮现名字题签。
+- **战斗行为卡**：`action_info` 带 `|行动者|` 行时画成行为卡，否则沿用通用面板；与演出开关无关。卡里的数值是模型自述，不是权威值。
+- **后果**：每个 `direct_cached` 存档冷建一次会话（协议文字变了）；每节独立跑美化，跨节的美化规则不再匹配；真实模型是否稳定输出标记与固定行未验证。
+
 新角色复用原生实体组装与作者定义绑定；新装备先入背包，穿戴需明确声明。角色经历、地图旅程、时间与随机事件维护接回既有系统。动作面板只展示结果，不能代替结构化入库。
 
 格式或核心写入失败时本楼不接纳，允许手动重试一次新的生成尝试；已接纳楼不能直接重放，需要先回退。接纳后的时间、剧情、经历、快照或记忆失败会警告，不会重复消耗材料或发奖励。
@@ -78,6 +90,7 @@
 - `src/ui/lib/game-pipeline.ts`：独立分支及既有记忆调用。
 - `src/core/state/state-manager.ts`：核心状态与消息原子接纳。
 - 📌 2026-11-17：`src/core/prompts/direct-prompt.ts` 的 `buildDirectProtocol(structuredCombat)` 按设置生成协议；`direct-combat.ts` 的跨楼战斗只在 `directStructuredCombat` 开启时生效，见上文「正文战斗」。
+- 📌 2026-11-19：`src/core/story/story-beats.ts` 正文分节；前端演出在 `src/ui/composables/useStagedPlayback.ts`、`src/ui/lib/stage-playback.ts`、`src/ui/lib/stage-entrance.ts` 与 `StagedNarrative.vue`，见上文「正文分节与逐节演出」。
 
 运行：`npm run dev`。Windows 测试如遇临时目录 EPERM，可先将 `TEMP` 与 `TMP` 指向仓内 `node_modules/.cache/vitest-tmp`。
 

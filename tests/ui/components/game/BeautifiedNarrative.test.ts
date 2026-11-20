@@ -335,6 +335,35 @@ describe('BeautifiedNarrative <action_info> 行动面板', () => {
   });
 });
 
+it('action_info 带「行动者」行时画成战斗行为卡，否则交给 ActionPanel', () => {
+  const stubs = {
+    AssetMedia: {
+      name: 'AssetMedia',
+      props: ['name', 'type', 'variant'],
+      template: '<span class="am-stub" :data-name="name"><slot /></span>',
+    },
+  };
+  const text =
+    '剑光一闪。\n<action_info>\n|行动者|艾琳|\n|目标|灰狼|\n|行动|裂风斩|\n|伤害|36|\n</action_info>\n灰狼哀嚎。';
+  const wrapper = mount(BeautifiedNarrative, { props: { text }, global: { stubs } });
+  const card = wrapper.find('.combat-beat');
+  expect(card.exists()).toBe(true);
+  expect(wrapper.find('.action-panel-card').exists()).toBe(false);
+  expect(card.find('.beat-action-name').text()).toBe('裂风斩');
+  expect(card.findAll('.am-stub').map((n) => n.attributes('data-name'))).toEqual(['艾琳', '灰狼']);
+  expect(wrapper.text()).toContain('灰狼哀嚎');
+  wrapper.unmount();
+
+  // 没有「行动者」行：仍是 master 的 ActionPanel
+  const plain = mount(BeautifiedNarrative, {
+    props: { text: '他出剑。\n<action_info>\n|掷骰|14|\n|伤害|36|\n</action_info>' },
+    global: { stubs },
+  });
+  expect(plain.find('.combat-beat').exists()).toBe(false);
+  expect(plain.find('.action-panel-card').exists()).toBe(true);
+  plain.unmount();
+});
+
 describe('BeautifiedNarrative 特效层（墨迹浮现 / 名字下划线 / 行末印记）', () => {
   beforeEach(() => {
     state.enabled = true;

@@ -26,6 +26,8 @@ import {
   splitActionInfo,
   type ActionPanel as ActionPanelData,
 } from '../../lib/action-panel';
+import { parseCombatBeat, type CombatBeat } from './combat/combat-view';
+import CombatBeatCard from './combat/CombatBeatCard.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -81,6 +83,13 @@ const props = withDefaults(
      *    （流式时每帧一次，闸门关着也一样）。prop 只在这一条的值真的变了才触发重渲染。
      */
     seal?: 'off' | 'still' | 'pressed';
+    /**
+     * 🆕 逐节演出（交互式推进）：本实例只渲染整条消息的**一节**时由 StagedNarrative 传入。
+     * `<scene_image>` 的 occurrence 按整条消息计数（image-segments.ts 的不变式），所以要加上
+     * 本节之前的图片数 `base`；侧链的「所属消息正文」用整条的 `narrative`；记录驱动的
+     * message-end 图带只在 `tail`（末节）上画一次。缺省 = 本实例就是整条消息，行为不变。
+     */
+    imageSlice?: { base: number; narrative: string; tail: boolean };
   }>(),
   {
     rules: undefined,
@@ -97,6 +106,7 @@ const props = withDefaults(
     reveal: 'off',
     mentions: undefined,
     seal: 'off',
+    imageSlice: undefined,
   },
 );
 
@@ -166,6 +176,7 @@ const panelsYieldToRules = computed(
 
 type RenderPart =
   | { kind: 'panel'; panel: ActionPanelData }
+  | { kind: 'beat'; beat: CombatBeat }
   | { kind: 'prose'; segments: BeautifierSegment[] }
   | { kind: 'image'; occurrence: number; marker: SceneImageMarker };
 
@@ -200,7 +211,12 @@ const parts = computed<RenderPart[]>(() => {
     for (const piece of pieces) {
       if (piece.kind === 'panel') {
         const panel = parseActionPanel(piece.raw);
-        if (panel.sections.length > 0) out.push({ kind: 'panel', panel });
+        if (panel.sections.length === 0) continue;
+        // 有「行动者」行 = 直出正文战斗逐拍的一次行为，画成行为卡；否则一律交给 ActionPanel
+        const beat = parseCombatBeat(
+          panel.sections.flatMap((section) => section.rows.flatMap((row) => row.cells)),
+        );
+        out.push(beat ? { kind: 'beat', beat } : { kind: 'panel', panel });
         continue;
       }
       const prose = trimAroundPanels(piece.text);
@@ -230,7 +246,7 @@ const strippedNarrative = computed(() =>
  */
 const messageEndOccurrences = computed<number[]>(() => {
   const id = props.messageId;
-  if (id === undefined) return [];
+  if (id === undefined || props.imageSlice?.tail === false) return [];
   // 懒取 store: 没有 messageId 的用法（规则预览 / 流式草稿）根本不碰 Pinia
   const seen = new Set<number>();
   for (const record of useSceneImageStore().byMessage(id)) {
@@ -392,16 +408,17 @@ function paragraphs(text: string): string[] {
     <template v-for="(part, partIndex) in parts" :key="partIndex">
       <!-- `<action_info>` 行动面板：特效层按非段落块处理（once 档整块浮现） -->
       <ActionPanel v-if="part.kind === 'panel'" :panel="part.panel" :class="blockInkClass" />
+      <CombatBeatCard v-else-if="part.kind === 'beat'" :beat="part.beat" :class="blockInkClass" />
       <!-- 正文标记切出来的图片段（anchorKind: 'marker'） -->
       <SceneImageSegment
         v-if="part.kind === 'image' && messageId !== undefined"
         :message-id="messageId"
-        :occurrence="part.occurrence"
+        :occurrence="part.occurrence + (imageSlice?.base ?? 0)"
         anchor-kind="marker"
         :mode="imageMode"
         :turn="turn"
         :marker="part.marker"
-        :narrative="strippedNarrative"
+        :narrative="imageSlice?.narrative ?? strippedNarrative"
         :max-rating="imageMaxRating"
         :blur-by-default="imageBlurByDefault"
         :dialect-id="imageDialectId"
@@ -473,7 +490,7 @@ function paragraphs(text: string): string[] {
       anchor-kind="message-end"
       :mode="imageMode"
       :turn="turn"
-      :narrative="strippedNarrative"
+      :narrative="imageSlice?.narrative ?? strippedNarrative"
       :max-rating="imageMaxRating"
       :blur-by-default="imageBlurByDefault"
       :dialect-id="imageDialectId"

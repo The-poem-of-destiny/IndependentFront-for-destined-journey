@@ -9,6 +9,24 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-19 交互式推进（直出正文逐节演出）｜分支 `feat/interactive-progression`，**已实施，未真机验证**
+
+- 主人拍板：设置 `stagedNarrative` 默认开，关闭时 DOM 与引入前一致；聊天流内逐节放出，不做全屏舞台；新角色首次登场且无素材时只浮现名字题签；历史消息重看演出本期不做；登场只在本楼首次建档时触发（📌 同日修订：实现为「名字不在开楼名册里才演、演过就不再撤回」，不再用接纳后的新建名单过滤，模型误标 enter 的临时人物也会登场）；战斗以一名角色的一次行为为一节。
+- 引擎：新模块 `src/core/story/story-beats.ts`（不进 `MARKER_SPECS`）。`extractStoryBeats` 剥掉 `<beat/>` / `<beat enter="名"/>`，节间以 `\n\n` 拼接；`resolveBeatBreaks` / `resolveStoryStage` 自校验断点，失效或缺席时按段落切，不切开 `action_info` / `item_info`。`projectStoryOutput` 只在出现标记时带 `stage`，无标记时正文逐字节不变；新增 `projectStreamingStoryStaged`。`ChatMessage.stage?`（`breaks` + `enters`）随消息落库，无 Dexie 迁移；标记写错不拒楼。
+- 协议：`buildDirectProtocol` 两种战斗口径都加「正文分节」一行；正文战斗口径追加「战斗逐拍」（`action_info` 前三行固定为行动者 / 目标 / 行动）。`DIRECT_CACHE_PROTOCOL` 补「历史正文里的 `<beat/>` 已移除，每轮仍须照常分节」。
+- 管线与设置：`StoryChunkCallback` 加第三参 `stage`（仅直出主笔给出）；GamePage 同帧提交 `streamingStage`。设置 `stagedNarrative` 在「设置 → 消息显示 → 正文演出」。
+- 前端：纯函数 `src/ui/lib/stage-playback.ts`（字符偏移游标状态机，流式中只放出完整节）与 `stage-entrance.ts`（开楼名册里的名字不演；演过的登场卡按消息 + 名字钉住、不再撤回）；进度簿 `src/ui/composables/useStagedPlayback.ts`（只演本次会话新到的直出正文，草稿进度交接给正式消息不回退不重放，`holdOptions` 暂扣行动选项）；新组件 `StagedNarrative.vue`、`CharacterEntrance.vue`、`combat/CombatBeatCard.vue`（`combat-view.ts` 的 `parseCombatBeat`，有 `|行动者|` 行才成卡）。
+- 与行动面板（#164）的分工：`<action_info>` 默认一律交给 `ActionPanel` 渲染；只有面板里有 `|行动者|` 行（直出正文战斗逐拍契约）时由 `CombatBeatCard` 接管。认行复用 `lib/action-panel.ts` 的 `parseActionPanel`，`parseCombatBeat` 是吃它输出格的独立纯函数，旧的 `parseCombatNarrative` 不恢复。
+- 插画：`BeautifiedNarrative` 新增 `imageSlice` 属性，插画序号加上前面各节的图数，生图侧取整条正文，消息末尾图带只挂末节。
+- 输入：Space / Enter 推进、按住 Ctrl 快进、End 全部显示、鼠标左键点正文推进；在按钮、链接、表单控件、卡片、弹窗、输入法选字、选中文字时让路；发送新输入前全部显示。小条「全文」直接关闭全局设置 `stagedNarrative`，重新开启在设置页。GameMenu 键位说明同步。
+- 设计例外：登场遮罩用 `mask-position` 动画，已在 `docs/design.md` §6.4 登记。
+- 后果与已知取舍：
+  - 协议文字变了，每个 `direct_cached` 存档会冷建一次会话。
+  - 每节独立跑美化，跨节的美化规则不再匹配。
+  - 行为卡里的数值是模型自述，不是权威值。
+  - 真实模型是否稳定输出 `<beat/>` 与战斗固定行未验证；私有内容包的直出预设可能与固定行冲突。
+- 文档：新设计 `docs/planning/2026-11-19-interactive-progression-design.md`（根 `AGENTS.md` 导航树加行、进度表加速览一行）；`docs/reference/direct-generation.md`、`direct-generation-cache.md`、`src/core/AGENTS.md`、`src/ui/AGENTS.md` 加 📌 2026-11-19 注记。
+
 ### 2026-11-19 行动面板与对话卡片重做｜分支 `feat/action-panel-dialogue-card`，**未真机验证**
 
 - `<action_info>` 面板解析常开：`BeautifiedNarrative.vue` 删 `actionPanels` prop（ChatFlow 两处绑定随之删除），Agent 与直出两种模式都把面板切出来交给新组件 `ActionPanel.vue`；流式中裁掉结尾半截残标签。唯一例外：美化生效且有启用的、scope 覆盖 maintext、深度范围含本条、能整块匹配正文里闭合面板的规则时，让位给规则不拆（`rulesClaimActionInfo`）。

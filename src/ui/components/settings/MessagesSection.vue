@@ -25,7 +25,23 @@ function eventFilterLabel(key: string | number): string {
 <template>
   <section class="section centered">
     <h3>消息显示</h3>
-    <p class="section-desc">控制对话流中系统通知的可见性。关闭后对应类型的消息将不在正文中渲染。</p>
+    <p class="section-desc">
+      控制正文的呈现方式与对话流中系统通知的可见性。关闭后对应类型的消息将不在正文中渲染。
+    </p>
+
+    <AppCard padding="md">
+      <h4>正文演出</h4>
+      <p class="card-desc">
+        直出模式的新正文按节放出，点击正文或按空格推进；新角色首次登场时浮现立绘或名字。关闭后整段显示。
+      </p>
+      <div class="toggle-row">
+        <span>逐节演出正文</span>
+        <label class="toggle-label">
+          <input v-model="s.stagedNarrative" type="checkbox" class="toggle-input" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </AppCard>
 
     <AppCard padding="md">
       <h4>全局开关</h4>

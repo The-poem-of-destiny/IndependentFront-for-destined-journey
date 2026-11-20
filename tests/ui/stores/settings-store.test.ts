@@ -125,6 +125,34 @@ describe('settings-store', () => {
     expect(store.settings.directStructuredCombat).toBe(false);
   });
 
+  it('正文演出默认开启，随设置袋持久化，恢复默认后回到开', async () => {
+    expect(store.settings.stagedNarrative).toBe(true);
+
+    store.settings.stagedNarrative = false;
+    await nextTick();
+    const saved = JSON.parse(localStorage.getItem('fated-poem-settings')!);
+    expect(saved.stagedNarrative).toBe(false);
+
+    store.resetAll();
+    expect(store.settings.stagedNarrative).toBe(true);
+  });
+
+  it('旧设置缺 stagedNarrative 时取默认开，已存的关保持关', () => {
+    store.$dispose();
+    store_.clear();
+    store_.set('fated-poem-settings', JSON.stringify({ developerMode: true }));
+    setActivePinia(createPinia());
+    store = useSettingsStore();
+    expect(store.settings.stagedNarrative).toBe(true);
+
+    store.$dispose();
+    store_.clear();
+    store_.set('fated-poem-settings', JSON.stringify({ stagedNarrative: false }));
+    setActivePinia(createPinia());
+    store = useSettingsStore();
+    expect(store.settings.stagedNarrative).toBe(false);
+  });
+
   it('完整运行日志默认关闭、粒度默认 trace，且独立于开发者模式', async () => {
     expect(store.settings.engineLogEnabled).toBe(false);
     expect(store.settings.engineLogLevel).toBe('trace');

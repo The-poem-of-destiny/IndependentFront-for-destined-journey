@@ -12,7 +12,11 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useAudioStore } from '../../stores/audio-store';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
-import { GamePipeline, waitForGameSaveIdle } from '../../lib/game-pipeline';
+import {
+  GamePipeline,
+  waitForGameSaveIdle,
+  type StreamingStoryStage,
+} from '../../lib/game-pipeline';
 import { buildSceneImageSeams, resolveSceneWeather } from '../../lib/scene-image-seams';
 import { useApiSourceStore } from '../../stores/api-source-store';
 import { getContentRegistry } from '../../stores/content-store';
@@ -70,6 +74,11 @@ const requestedSaveId = ui.activeSaveId;
 const ownsPage = () =>
   !disposed && ui.currentView === 'game' && ui.activeSaveId === requestedSaveId;
 const streamingText = ref('');
+/**
+ * 流式分节快照（交互式推进）：与 streamingText 同帧提交；只在直出模式有值，
+ * 非直出与清预览时为 null（演出层据此退回整段预览）。
+ */
+const streamingStage = ref<StreamingStoryStage | null>(null);
 const loadingSave = ref(true);
 /** 二级菜单开合（顶栏统一入口按钮 / Esc 两处都能开）。 */
 const menuOpen = ref(false);
@@ -77,25 +86,31 @@ const menuOpen = ref(false);
 const chatFlowRef = ref<InstanceType<typeof ChatFlow> | null>(null);
 let streamingFrame: number | null = null;
 let pendingStreamingText = '';
+let pendingStreamingStage: StreamingStoryStage | null = null;
 
 function cancelStreamingPreview() {
   if (streamingFrame !== null) cancelAnimationFrame(streamingFrame);
   streamingFrame = null;
   pendingStreamingText = '';
+  pendingStreamingStage = null;
   streamingText.value = '';
+  streamingStage.value = null;
 }
 
 /** 网络 delta 可能远快于绘制；每帧只提交最新可见快照，避免整段正文重复重排。 */
-function handleStoryChunk(chunk: string, isComplete: boolean) {
+function handleStoryChunk(chunk: string, isComplete: boolean, stage?: StreamingStoryStage) {
   if (isComplete) {
+    // 重试前的 onChunk('', true) 也走这里：正文与分节快照一并清空
     cancelStreamingPreview();
     return;
   }
   pendingStreamingText = chunk;
+  pendingStreamingStage = stage ?? null;
   if (streamingFrame !== null) return;
   streamingFrame = requestAnimationFrame(() => {
     streamingFrame = null;
     streamingText.value = pendingStreamingText;
+    streamingStage.value = pendingStreamingStage;
   });
 }
 
@@ -453,6 +468,7 @@ function onModalOpenChange(v: boolean) {
         :system-events-visible="s.systemEventsVisible"
         :system-event-filters="s.systemEventFilters"
         :streaming-text="streamingText"
+        :streaming-stage="streamingStage"
         @send="handleSend"
         @select-option="handleSelectOption"
         @stop="handleStop"

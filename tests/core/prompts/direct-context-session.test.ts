@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   acceptDirectContext,
+  DIRECT_CACHE_PROTOCOL,
   DIRECT_CACHE_REBUILD_DEFAULTS,
   DIRECT_CACHE_REBUILD_RANGE,
   discardDirectContext,
@@ -323,6 +324,14 @@ describe('accepted direct context', () => {
     const retained = rebuilt.messages[rebuilt.retainedCount - 1].content!;
     expect(retained).toContain('memory/MEM000001');
     expect(retained).not.toContain('memoryEntries');
+  });
+});
+
+describe('缓存协议', () => {
+  it('提醒历史正文已剥 <beat/>、每轮仍须分节', () => {
+    expect(DIRECT_CACHE_PROTOCOL).toContain(
+      '每轮仍须按输出协议输出完整结构。历史正文里的 <beat/> 已移除，每轮仍须照常分节。',
+    );
   });
 });
 

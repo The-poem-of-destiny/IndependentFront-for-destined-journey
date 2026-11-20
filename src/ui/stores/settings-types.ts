@@ -232,6 +232,11 @@ export type UiSettings = {
   homeBackdrop: boolean;
   /** 界面特效（光泽、粒子、视差等装饰层）；任一减动效来源为真时不生效，见 lib/fx-gate.ts */
   visualEffects: boolean;
+  /**
+   * 正文演出（交互式推进，2026-11-19）：直出模式的新消息按 `<beat/>` 逐节放出，玩家推进下一节。
+   * 关掉 = 整段显示，DOM 与引入前一致。纯前端开关，不进提示词、不动缓存前缀。
+   */
+  stagedNarrative: boolean;
   /** 解锁调试入口与原始 Agent 诊断；默认关闭，不影响玩家可见的语义活动账本 */
   developerMode: boolean;
   /**

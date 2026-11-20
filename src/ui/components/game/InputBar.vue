@@ -15,6 +15,11 @@ const props = defineProps<{
    * 有值时输入框与发送键锁住、占位文字换成这句；不显示停止键 —— 那颗只停回合。
    */
   lockedReason?: string;
+  /**
+   * 暂扣行动选项（交互式推进）：本楼正文还在逐节演出、或尚未被接纳时为真 ——
+   * 选项要等末节放完且回合已接纳后才出现，免得玩家没读完就先看到下一步的选择。
+   */
+  holdOptions?: boolean;
 }>();
 
 const placeholder = computed(
@@ -28,6 +33,14 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null);
 
 /** vars_update 解析出的动态行动选项 */
 const dynamicOptions = computed(() => game.pendingOptions);
+
+// 演出开始暂扣时，已打开的选项浮层一并收起
+watch(
+  () => props.holdOptions,
+  (hold) => {
+    if (hold) showOptions.value = false;
+  },
+);
 
 // 监听 ChatFlow 选项点击 → 填入输入框
 watch(
@@ -100,7 +113,7 @@ function handleStop() {
 
     <!-- 非生成态：显示选项按钮 -->
     <button
-      v-if="!props.disabled && dynamicOptions.length > 0"
+      v-if="!props.disabled && !props.holdOptions && dynamicOptions.length > 0"
       class="input-btn"
       title="可选行动"
       :aria-expanded="showOptions"
