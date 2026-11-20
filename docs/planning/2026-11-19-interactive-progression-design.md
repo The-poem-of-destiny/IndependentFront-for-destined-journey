@@ -84,6 +84,7 @@
 ### 6.4 组件
 
 - `src/ui/components/game/StagedNarrative.vue`：每节一个 `BeautifiedNarrative` 实例。交接前已看过的节 `reveal="off"`，新放出的节 `reveal="once"`；追上进度时显示等待提示；正在演的那一条末尾有小条「全文 / 快进 / 全部显示」。
+  📌 2026-11-20 改：主人反馈小条夹在正文末尾太跳、破坏沉浸，已移出正文，改由 `StageControls.vue` 浮在输入框正上方（ChatFlow 挂载，高度 0 的锚，不推动正文与输入框），可收起成右下角一枚「演出」标签（还能推进时带呼吸点），收起状态存设置 `stagedControlsCollapsed`（默认展开）；收起只藏按钮，推进照常。
 - **插画**：`BeautifiedNarrative` 新增 `imageSlice` 属性 `{ base, narrative, tail }`。`<scene_image>` 的 occurrence 按整条消息计数，所以每节的插画序号加上前面各节的图数（`base`）；生图侧链取整条正文（`narrative`）；记录驱动的消息末尾图带只挂在末节（`tail`）。草稿不传 `messageId`，与原草稿一致。缺省 `imageSlice` 时行为不变。
 - `src/ui/components/game/CharacterEntrance.vue`：立绘走立牌链 `ASSET_TYPE_FALLBACK_CHAIN`（立绘 → 立绘bg → 头像）；一张素材都没有时只浮现名字题签。动效只有一种：自上而下的遮罩扫过加透明度，不旋转、不发光、不弹跳；只在新放出的节且特效闸门打开时播一次，闸门关、减动效、已读过的节一律静态显示。遮罩用到 `mask-position` 动画，已在 `docs/design.md` §6.4 登记为例外。
 - `src/ui/components/game/combat/CombatBeatCard.vue` + `combat-view.ts` 的 `parseCombatBeat(rows)`：`action_info` 里有 `|行动者|` 行时画成行为卡（行动者与目标头像走 `ASSET_TYPE_AVATAR_CHAIN`，至多三枚目标头像；判定、伤害 / 恢复、消耗、状态行；认不出的行照列），否则沿用通用面板。历史整段显示同样受益，不依赖演出开关。卡里的数值是模型自述，不是权威值。

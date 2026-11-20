@@ -11,6 +11,7 @@
  *   草稿不传 messageId（与原草稿一致：标记照剥，不画插画格）。
  * - 节内某段落正文只放出一半（临时段落切换成模型断点时）按游标截断，已放出的字不回退。
  * - 名字下划线只给该名字首次出现的那一节，避免每节各划一次。
+ * - 控制条（全文 / 快进 / 全部显示）不在这里：2026-11-20 起由 ChatFlow 挂在输入框上方（StageControls.vue）。
  */
 import { computed } from 'vue';
 import { splitSceneImageSegments } from '@engine/image/image-segments';
@@ -43,9 +44,6 @@ const props = withDefaults(
     seal?: 'off' | 'still' | 'pressed';
     /** 追上进度、下文未到时的提示（只有流式草稿会等） */
     waitingText?: string;
-    /** 末尾的小条（全文 / 快进 / 全部显示）—— 只给正在演的那一条 */
-    controls?: boolean;
-    fastForwarding?: boolean;
   }>(),
   {
     settledEnd: 0,
@@ -62,16 +60,11 @@ const props = withDefaults(
     mentions: undefined,
     seal: 'off',
     waitingText: '',
-    controls: false,
-    fastForwarding: false,
   },
 );
 
 const emit = defineEmits<{
   resize: [height: number];
-  'show-full': [];
-  'fast-forward': [];
-  'skip-all': [];
 }>();
 
 const revealed = computed(() => props.view.sections.slice(0, props.view.revealedCount));
@@ -172,32 +165,6 @@ function sealOf(section: StageSection): 'off' | 'still' | 'pressed' {
       <span class="stage-waiting-dots" aria-hidden="true">···</span>
       {{ waitingText }}
     </p>
-
-    <div v-if="controls" class="stage-bar" role="group" aria-label="正文演出">
-      <span v-if="view.canAdvance" class="stage-hint">点击正文或按空格继续</span>
-      <span class="stage-bar-actions">
-        <span class="stage-mode" role="group" aria-label="正文显示方式">
-          <button type="button" class="stage-btn" :aria-pressed="false" @click="emit('show-full')">
-            全文
-          </button>
-          <button type="button" class="stage-btn is-current" :aria-pressed="true" disabled>
-            演出
-          </button>
-        </span>
-        <button
-          type="button"
-          class="stage-btn"
-          :aria-pressed="fastForwarding"
-          :class="{ 'is-current': fastForwarding }"
-          @click="emit('fast-forward')"
-        >
-          <i class="fa-solid fa-forward" aria-hidden="true" /> 快进
-        </button>
-        <button type="button" class="stage-btn" @click="emit('skip-all')">
-          <i class="fa-solid fa-forward-fast" aria-hidden="true" /> 全部显示
-        </button>
-      </span>
-    </div>
   </div>
 </template>
 
@@ -232,75 +199,5 @@ function sealOf(section: StageSection): 'off' | 'still' | 'pressed' {
   .stage-waiting-dots {
     animation: none;
   }
-}
-
-.stage-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--theme-spacing-sm, 8px);
-  margin-top: 0.9em;
-  padding-top: 0.5em;
-  border-top: 1px solid color-mix(in srgb, var(--theme-primary) 14%, var(--theme-card-border));
-  font-family: var(--theme-font-body);
-  font-size: 0.75rem;
-  color: var(--theme-text-muted);
-  opacity: 0.72;
-  transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
-}
-.stage-bar:hover,
-.stage-bar:focus-within {
-  opacity: 1;
-}
-.stage-hint {
-  letter-spacing: 0.04em;
-}
-.stage-bar-actions {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-}
-.stage-mode {
-  display: inline-flex;
-}
-.stage-mode .stage-btn:first-child {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-.stage-mode .stage-btn:last-child {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  border-left-width: 0;
-}
-.stage-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 10px;
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-sm);
-  background: transparent;
-  color: var(--theme-text-secondary);
-  font: inherit;
-  cursor: pointer;
-  transition:
-    color var(--motion-duration-fast) var(--motion-ease-standard),
-    border-color var(--motion-duration-fast) var(--motion-ease-standard),
-    background-color var(--motion-duration-fast) var(--motion-ease-standard);
-}
-.stage-btn:hover:not(:disabled) {
-  color: var(--theme-text-primary);
-  border-color: color-mix(in srgb, var(--theme-primary) 40%, var(--theme-card-border));
-}
-.stage-btn.is-current {
-  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
-  border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
-  color: var(--theme-text-primary);
-}
-.stage-btn:disabled {
-  cursor: default;
 }
 </style>

@@ -318,6 +318,7 @@ function getDefaults(): UiSettings {
 
     // 正文演出（交互式推进）。默认开；旧设置缺这个键时由下方 `{ ...defaults, ...saved }` 补默认。
     stagedNarrative: true,
+    stagedControlsCollapsed: false,
 
     // 开发者模式 —— 默认关闭。只控制诊断入口与原始技术细节；玩家可见的回合活动账本
     // 始终保留游戏语言，不随这个开关消失或变成控制台。
