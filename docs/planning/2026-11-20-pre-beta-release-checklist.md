@@ -23,11 +23,12 @@
   - 待主人裁定：① 停用或改掉 `--upload` 默认目标；② `poem-dist` 旧 Release 是否下架 / 转私有（密钥已在公开历史里，轮换救不回已发的包）。
 - [ ] **测试者拿不到程序**：引擎仓没有任何 GitHub Release；Windows 便携 zip 只能在 Windows x64 上打（`scripts/build-portable.mjs` 平台检查）；macOS 没有任何打包产物。
   - [ ] 在 Windows 机上打便携 zip，并完成 `TODO.md`「正式发布打包」里的干净虚拟机冒烟。
-  - [ ] 决定 macOS 测试者的获取方式（便携包 / 仅源码运行 / 暂不支持），写进 README。
+  - [x] 决定 macOS 测试者的获取方式（便携包 / 仅源码运行 / 暂不支持），写进 README。（2026-11-20：主人裁定标为 WIP，已写进 README 平台表）
   - [ ] `dev.sh` 自动探测的仍是旧内容仓文件夹名 `../fated_poem_independent_assets/data`（`dev.sh:33`），对齐现在的 `Independend-Frontend-Assets`。
 - [ ] **测试者拿不到正式内容**：内容中心服 `The-poem-of-destiny/fate-content-pack-server` 是私有仓、只有一个提交、未部署。
       二选一：部署中心服并做真实 Discord OAuth 端到端联调；或明确 beta 期间改用「从 JSON 文件导入」明文包（等于无访问控制，需主人接受）。
 - [ ] **首次上手路径缺失**：应用内没有把「内容包 → 添加 API → 建角色」串起来；README「首次游玩配置」已过时，且与准入页对 Embedding 的说法矛盾。见 `TODO.md` 首条。
+  - 📌 2026-11-20：README 一半已完成 —— 「首次游玩」一节已对照现版本应用重写，并写明 Embedding 为可选；应用内首次上手引导仍未做。
 - [ ] **默认开启但未真机验证的功能**：`stagedNarrative`（正文演出）与 `visualEffects`（界面特效层）在 `src/ui/stores/settings-store.ts` 默认 `true`。
       演出若卡住，玩家看不到行动选项。二选一：真机（含低配笔记本）走查通过，或 beta 默认关闭。
 
@@ -51,6 +52,8 @@
 - [ ] **下一个内容包版本号必须大于 2.12.1**：内容仓 README 与中心服 README 的示例仍写 `2.8.0`，`build-pack` 默认 `1.0.0`。
 - [ ] **清掉内容仓默认配置里的两个本机 API 池 id**（`TODO.md` 已列）。
 - [ ] **第三方许可证**：`THIRD-PARTY-NOTICES.md` 与 `public/licenses/` 只覆盖 three.js 和字体；前端实际打包的 dexie（Apache-2.0）、openseadragon（BSD-3）、vue、pinia、fflate、quickjs-emscripten 等缺全文。仓库根目录也没有 `LICENSE` 文件（`package.json` 声明 MIT）。
+  - 📌 2026-11-20：第三方全文部分已完成 —— `public/licenses/` 新增 7 份许可证全文（从 `node_modules` 原样复制），`THIRD-PARTY-NOTICES.md` 表格同步扩充。
+    根目录 `LICENSE` / 本项目自身许可证的问题主人暂缓裁定，未做。
 - [ ] 更新 `TODO.md`「内容包 ↔ 引擎能力缺口」一节：当前分支构建已含 13 个分节，`mapPack` / `characters` / `randomEvents` 已在包内，真正缺的只剩 `imageDialects` / `remoteAssets`。
 
 ## 🟡 beta 期间可并行处理
@@ -63,7 +66,7 @@
 - [ ] 整库导入只在标签页存活期间可回滚；导入中途关页会留下半新半旧的库。
 - [ ] EJS 默认后端仍是无沙箱的 `LegacyBackend`，隔离只靠 `main.ts` 先装生产后端；改为默认 fail-closed。
 - [ ] 本地 BFF 的 SEC-02 补充：`text/plain` 的 POST 属于简单请求、不触发预检，开着 `POEM_CONTENT_DIR` 的 dev server 可被任意网页写回内容目录（仅开发态，便携版不受影响）。
-- [ ] README 写 Node 20.19+，`.nvmrc` 是 22.23.2，统一口径。
+- [x] README 写 Node 20.19+，`.nvmrc` 是 22.23.2，统一口径。（2026-11-20：README 改为按 `.nvmrc` 推荐 Node 22，最低版本以 `package.json` 的 `engines` 为准）
 - [ ] `TODO.md` 里各项「真机验收」（战斗沙盒、Delta 会话、文生图、原生角色、直出正式内容）在正式包可分发后集中跑一轮。
 
 ## 建议顺序
