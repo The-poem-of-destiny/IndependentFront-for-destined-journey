@@ -78,7 +78,7 @@ const cfg = useSettingsStore();
 const s = cfg.settings;
 const game = useGameStore();
 const ui = useUIStore();
-const { effectivePreset } = usePresets();
+const { pristineEffectivePreset } = usePresets();
 
 const agentPromptDraft = ref('');
 const agentTemplateDraft = ref('');
@@ -129,10 +129,11 @@ const defaultsLayer = computed<AgentDefaultsLayer>(() => {
 /**
  * 当前**生效**的预设（选择为空/失效时即默认）—— 与运行时同一个解析器。
  * 不对应预设的 Agent 为 null。
+ * 🔴 只给 `saveAsDefault` 用，取**原始行**：玩家的条目开关覆写不许写进项目默认文件（2026-11-21）。
  */
 const activePreset = computed(() => {
   const profile = presetProfileForAgent(props.agentId);
-  return profile ? effectivePreset(profile).preset : null;
+  return profile ? pristineEffectivePreset(profile).preset : null;
 });
 
 /** 载入两个草稿：用户覆写 → 项目默认（agent-config.json）→ 引擎内置模板 */

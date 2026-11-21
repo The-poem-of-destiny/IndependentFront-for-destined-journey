@@ -44,6 +44,16 @@ describe('SideToolbar developer gate', () => {
     expect(wrapper.get('[data-tool="debug"]').attributes('aria-label')).toBe('调试');
   });
 
+  /** 2026-11-21：游戏内「预设」抽屉的入口；点击照常经 toolClick 交给 GamePage 占 activeModal */
+  it('有预设入口，点击发出 toolClick(preset)', async () => {
+    const wrapper = mount(SideToolbar);
+    const btn = wrapper.get('[data-tool="preset"]');
+    expect(btn.attributes('aria-label')).toBe('预设');
+    expect(btn.find('i').classes()).toContain('fa-sliders');
+    await btn.trigger('click');
+    expect(wrapper.emitted('toolClick')).toEqual([['preset']]);
+  });
+
   it('不再有工坊入口（扩展管理才是它的去处）', () => {
     const wrapper = mount(SideToolbar);
     expect(wrapper.find('[data-tool="workshop"]').exists()).toBe(false);

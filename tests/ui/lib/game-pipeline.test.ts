@@ -307,6 +307,69 @@ function makeResult(agentId: string, rawResponse: string): AgentResult {
   return { agentId, output: rawResponse, rawResponse, tokensUsed: 0, cacheHit: false, duration: 0 };
 }
 
+describe('loadPresets —— 条目开关覆写层', () => {
+  const rowOf = (id: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    name: id,
+    settings: {
+      prompts: [
+        { identifier: 'a', content: 'A', enabled: true },
+        { identifier: 'b', content: 'B', enabled: false },
+      ],
+    },
+    createdAt: 1,
+    updatedAt: 1,
+    ...extra,
+  });
+
+  it('出厂行（带播种指纹）与内置直出预设套用覆写；原始行不被改；未知 identifier 忽略', async () => {
+    const { getPresets } = await import('@engine/persistence/database');
+    const factory = rowOf('factory-story', { factorySeedHash: 'seed-1' });
+    const snapshot = JSON.parse(JSON.stringify(factory));
+    vi.mocked(getPresets).mockResolvedValueOnce([factory] as never);
+    const { createDirectPreset } = await import('@engine/prompts/direct-prompt');
+    const builtin = createDirectPreset();
+    const builtinEntry = (
+      builtin.settings.prompts as Array<{ identifier: string; enabled?: boolean }>
+    ).find((p) => p.enabled !== false && !p.identifier.startsWith('story_zone_'))!;
+    const pipeline = makePipeline(
+      {},
+      {
+        presetEntryToggles: {
+          'factory-story': { a: false, b: true, ghost: true },
+          [builtin.id]: { [builtinEntry.identifier]: false },
+        },
+      },
+    );
+
+    const { presets } = await (pipeline as any).loadPresets();
+
+    const loaded = presets.find((p: { id: string }) => p.id === 'factory-story');
+    expect(loaded.settings.prompts.map((p: any) => [p.identifier, p.enabled])).toEqual([
+      ['a', false],
+      ['b', true],
+    ]);
+    expect(loaded.factorySeedHash).toBe('seed-1');
+    expect(factory).toEqual(snapshot);
+    const loadedBuiltin = presets.find((p: { id: string }) => p.id === builtin.id);
+    expect(
+      loadedBuiltin.settings.prompts.find((p: any) => p.identifier === builtinEntry.identifier)
+        .enabled,
+    ).toBe(false);
+  });
+
+  it('玩家预设（无指纹、非内容所有）不吃覆写层', async () => {
+    const { getPresets } = await import('@engine/persistence/database');
+    vi.mocked(getPresets).mockResolvedValueOnce([rowOf('mine')] as never);
+    const pipeline = makePipeline({}, { presetEntryToggles: { mine: { a: false } } });
+
+    const { presets } = await (pipeline as any).loadPresets();
+
+    const loaded = presets.find((p: { id: string }) => p.id === 'mine');
+    expect(loaded.settings.prompts[0].enabled).toBe(true);
+  });
+});
+
 describe('direct preset defaults', () => {
   it.each(['direct', 'direct_cached'])(
     'uses the %s project preset after settings initialization',

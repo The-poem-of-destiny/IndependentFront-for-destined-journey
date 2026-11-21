@@ -9,6 +9,15 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-21 预设互斥组 + 玩家开关覆写层 + 游戏内「预设」抽屉｜master 工作区，**已实施，未真机验证**
+
+- 互斥组：预设 `settings.extensions.poem.groups` 登记「几选一」的条目（`id` / `label` / `description?` / `allowNone?` / `options[{identifier,label}]`）。引擎纯函数 `src/core/prompts/preset-groups.ts`（读取容错清洗、组状态 ok / none / conflict、选项补丁）。选中状态就是条目自身的 `enabled`，装配逻辑不读组元数据；五区占位条目不能入组。
+- 开关覆写层：新设置 `UiSettings.presetEntryToggles[presetId][identifier]`（加载时 `normalizePresetEntryToggles` 收敛），只覆盖 `enabled`、全局按玩家存，作用于只读预设与带 `factorySeedHash` 的行（`lib/preset-entries.ts` 的 `presetUsesToggleLayer`）。只在 `usePresets().catalog` 与 `GamePipeline.loadPresets` 两处套用（`applyCatalogEntryToggles`）；出厂播种、播种指纹、装包、「保存为项目默认」（`pristineEffectivePreset`）读原始行。写入口 `setEntriesEnabled` / `resetEntryToggles`，与原样相同的键写入时丢掉。
+- 生效总览：`src/core/prompts/preset-insight.ts`（`summarizePresetEntries`，逐条 token 估算，setvar 成本按读取次数归因）+ `src/core/utils/token-estimate.ts`（字符数 / 1.5 向上取整）；`preset-loader.ts` 抽出判据 `isAssembledPresetPrompt`（模块内）并导出 `listActivePresetPrompts` / `PRESET_SYSTEM_PLACEHOLDER_RE`，`assemblePresetContent` 改用同一判据（行为不变）。
+- 界面：`composables/usePresetKnobs.ts` + `shared/PresetKnobGroup.vue` 共用；设置页 PresetManager 按组展示，只读预设拨开关不再复制「（我的修改）」，改文本仍写时复制（副本带当前开关）。游戏内新增「预设」抽屉 `game/PresetDrawer.vue`：侧栏新项 `preset`、`activeModal` 新取值 `'preset'`，改动从下一回合起生效。
+- 内容包（私有内容仓）：叙事人称第一 / 第二 / 第三人称做成互斥组 `narration-person`，默认第三人称。
+- 文档：`docs/reference/story_preset_format.md` 新增「互斥组」「玩家开关覆写层」两节；`src/ui/AGENTS.md`（含对 2026-11-14「只读一律写时复制」的 📌 2026-11-21 更正）与 `src/core/AGENTS.md` 补注记与新模块。
+
 ### 2026-11-20 直出空正文重发一次 + 明确报错｜分支 `fix/direct-empty-response`，**已实施，未真机验证**
 
 - 问题：gemini-3.8-flash 经 OpenAI 兼容代理，用了 6805 个输出 token、约 1.07 万字符原生思考，正文为空；被报成误导性的「直出结果无效：需要一个完整的 direct_updates 区块」，界面归为 unknown。

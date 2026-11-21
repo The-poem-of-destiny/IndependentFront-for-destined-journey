@@ -140,6 +140,14 @@ export type UiSettings = {
   directInitialized?: boolean;
   directCachedPresetId?: string;
   directCachedInitialized?: boolean;
+  /**
+   * 只读预设（内容包 / 出厂 / 引擎内置）的条目开关覆写：`presetId → identifier → enabled`。
+   * 全局按玩家存，只覆盖 `enabled`，不写回预设行。读写口只有 `usePresets`
+   * （`setEntriesEnabled` / `resetEntryToggles`）。
+   * 🔴 只许在 `usePresets().catalog` 与 `GamePipeline.loadPresets` 两处套用；
+   *    播种、播种指纹、装包、「保存为项目默认」一律读原始行。
+   */
+  presetEntryToggles: Record<string, import('@engine/prompts/preset-groups').PresetEntryToggles>;
   directCacheProvider?: import('@engine/types/types-api').DirectCachePolicy;
   /** 缓存直出：一段会话最多接纳几楼就重建；缺席 = 引擎默认（`normalizeDirectCacheRebuild`） */
   directCacheRebuildTurns?: number;

@@ -123,6 +123,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      🔴 凡是**复制出玩家预设**的路径（`duplicateAsUser`、
 │   │                                      `migrateBuiltinPresetRows` 的副本、PresetManager 写时复制）都必须删掉
 │   │                                      这个字段 —— 带着它的副本会被播种当成「没改过的出厂行」
+│   ├── usePresetKnobs.ts            ← 🆕 [2026-11-21] 某 profile（story / direct / direct_cached）生效预设的「旋钮」视图：
+│   │                                   互斥组及状态、生效总览（引擎 `preset-insight` 估 token）、已调整条数 + 三个动作。
+│   │                                   PresetManager 与游戏内 PresetDrawer 共用；🔴 写入只经 `usePresets().setEntriesEnabled` /
+│   │                                   `resetEntryToggles`，本文件不碰 Dexie / 设置袋
 │   ├── useBeautify.ts               ← [工坊正则] 美化管线（从 ChatFlow.vue 抽出，CombatMessageFlow 复用）：
 │   │                                   按当前存档合并预设规则与用户规则，交给统一 narrative renderer 编译。
 │   │                                   autoEnable 解析与 BeautifierSection **同口径** ——
@@ -687,6 +691,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │
 ├── components/
 │   ├── shared/                      ← 通用组件
+│   │   ├── PresetKnobGroup.vue      ← 🆕 [2026-11-21] 预设互斥组单选（纯呈现，原生 radio；none / conflict 不预选、
+│   │   │                               `allowNone` 多一项「不使用」）。不碰 store，选择由调用方写
 │   │   ├── AppButton / AppModal / AppCard / AppTabs / ResourceBar / QualityBadge / BuffChip
 │   │   │     AppModal 的 `size` 多一档 `full`（通栏两栏版式：**定死高度**而不是给
 │   │   │     max-height，里面"左栏铺满 + 右栏自己滚"要一个能百分比化的高度），
@@ -844,6 +850,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               改动落在副本，原预设不动（`persistPreset`）。
 │   │   │                             📌 2026-11-17：条目目录按引擎 `presetScopeMatches` 过滤；写时复制的副本
 │   │   │                               scope 取 `copyScopeFor`（来源是 direct_main / direct_cached 时保持原样）。
+│   │   │                             📌 2026-11-21 更正（上面 2026-11-14「只读一律写时复制」不再成立）：只读预设上**只拨开关**
+│   │   │                               （含互斥组单选）不复制，写玩家覆写层 `UiSettings.presetEntryToggles`；改正文 / 增删 / 重排
+│   │   │                               仍写时复制，副本带上当前看到的开关。条目按 `settings.extensions.poem.groups` 分组展示
+│   │   │                               （共享 `shared/PresetKnobGroup.vue` + `composables/usePresetKnobs.ts`），格式见
+│   │   │                               `docs/reference/story_preset_format.md`「互斥组」「玩家开关覆写层」两节。
 │   │   │   ├── agent-list.ts         ← 9 个 Agent 的展示元数据 + getDefaultTemplateForAgent
 │   │   │   │                            （story 走 PresetManager、image_prompt 走 ImagePromptCard（D53）、
 │   │   │   │                              plot_* / memory_summary 走各自分区，故不在这张表里）
@@ -1054,6 +1065,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               debug（最后一个还要 `s.developerMode`）
 │   │   │                               📌 2026-11-13：新增第十一个取值 `calendar`（日历 v1），
 │   │   │                                  侧栏工具相应多一项；场景栏日期行也打开它
+│   │   │                               📌 2026-11-21：新增取值 `preset`（游戏内「预设」抽屉 `game/PresetDrawer.vue`，
+│   │   │                                  焦点 / Esc 走 `ownModalFocus`），侧栏工具相应多一项「预设」
 │   │   │                               🔴 不占这个位的两类东西别顺手塞进来：迷你播放器是**浮动卡片**
 │   │   │                                  （§6.2，必须先于 showModal 拦下），CharacterViewerModal 是
 │   │   │                                  **场景栏自己的一层**
@@ -1073,6 +1086,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               [游戏菜单 2026-09-13] TopBar 只剩存档名 + 轮数 + 那颗入口按钮
 │   │   │                               （只 `emit('openMenu')`，**不 import ui-store** —— 有 `?raw`
 │   │   │                                  源码断言钉着）；SideToolbar 10 项工具（debug 仍要开发者模式），
+│   │   │                               📌 2026-11-21 实测 SideToolbar 定义 12 项工具（含 calendar / preset / audio / debug，debug 仍要开发者模式）
 │   │   │                               设置/退出/扩展不再各占一个入口（设置与扩展都收进菜单）
 │   │   │                               [地图 v1] MapPanel 加页签「标记地图 / 势力地图」：两个都靠
 │   │   │                               `v-show` 切（标记页签用 v-if 会拆掉 OSD 的挂载容器 ——
@@ -1205,6 +1219,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                                  三元组解析，而索引对同一个位只认一个胜出行。不去重就是
 │   │   │                                  两格标题与图都一样、界面上无从区分
 │   │   ├── portrait-messages.ts     ← [Q-25] 画像导入路径的文案层（纯函数，零副作用，不 mount 可测）
+│   │   ├── PresetDrawer.vue         ← 🆕 [2026-11-21] 游戏内「预设」抽屉（`activeModal === 'preset'`）：生效预设名 + 来源、
+│   │   │                               生效总览、各互斥组、全部条目（默认折叠）、「恢复出厂开关」；profile 按存档生成方式取。
+│   │   │                               生成中不锁开关（管线回合开始才读，下一回合生效）；去设置先过 `confirmLeaveGame`
 │   │   ├── CalendarPanel.vue        ← 🆕 [日历 v1 / 2026-11-13] 按存档的本地日历（`activeModal === 'calendar'`）：
 │   │   │                               月视图（固定 30 格）/ 当日详情 / 未来 30 天 / 条目增删改 / 显示选择 / 模式切换。
 │   │   │                               来源与视图计算全在 `@engine/calendar/*`，措辞与草稿转换在 `calendar-panel.ts`，
@@ -1452,6 +1469,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 📌 2026-11-14：上面这段是旧版形态。现在预设型 Agent（story / direct_main / direct_cached）的选择与预设级操作在
 `AgentPresetBar`（分组下拉 + 来源角标 + 复制 / 导入 / 导出 / 重命名 / 删除 / 恢复默认），条目列表在 `PresetManager`；
 没有「新建空白预设」，也没有采样器参数编辑。内容包 / 出厂 / 引擎内置预设只读，改动走写时复制。
+
+📌 2026-11-21 更正：只读预设**改文本**仍走写时复制，**只拨开关**改写玩家覆写层 `UiSettings.presetEntryToggles[presetId][identifier]`
+（只覆盖 `enabled`、全局按玩家存；作用于只读预设与带 `factorySeedHash` 的行，判据 `lib/preset-entries.ts` 的 `presetUsesToggleLayer`）。
+读写口只有 `usePresets().setEntriesEnabled` / `resetEntryToggles`。
+🔴 覆写层**只许在两处套用**：`usePresets().catalog` 与 `GamePipeline.loadPresets`（都经 `applyCatalogEntryToggles`）；
+出厂播种、播种指纹、内容包装包、「保存为项目默认」（`pristineEffectivePreset`）一律读原始行 —— 第三处套用会让
+指纹把出厂预设误判为「用户改过」，或把玩家开关写回内容。游戏内入口是「预设」抽屉（`activeModal === 'preset'`）。
 
 ### 2026-09-05 键盘契约补注
 

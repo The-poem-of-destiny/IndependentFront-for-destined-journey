@@ -15,17 +15,27 @@ import { isDirectSettingsProfile } from '../../../lib/direct-settings';
  * 🔴 `loadPresets()` 在**本组件挂载时**跑，只读不写：选择键为空即「跟随默认」，
  *    生效预设由 usePresets 的 `effectivePreset`（preset-resolution）解析。
  *
- * 🔴 **写时复制**：内容包 / 出厂 / 引擎内置的预设是只读的。对它们的任何编辑
- *    （条目增改删、移动、复制、启用开关、预填充开关）都先复制成「<原名>（我的修改）」、
+ * 🔴 **写时复制**：内容包 / 出厂 / 引擎内置的预设是只读的。对它们的**内容编辑**
+ *    （条目增改删、移动、复制、预填充开关）都先复制成「<原名>（我的修改）」、
  *    切换到副本、把改动落在副本上 —— 原预设一字不动。见 `persistPreset`。
+ *    副本取自套过开关覆写的目录，所以带着玩家当前的开关。
+ *
+ * 🔴 **开关不复制**（2026-11-21）：条目启用开关与互斥组单选一律经 `usePresetKnobs`
+ *    （→ `usePresets().setEntriesEnabled`）：只读预设写进玩家覆写层
+ *    （`settings.presetEntryToggles`），玩家预设直接改行。「恢复出厂开关」清覆写层。
+ *    互斥组成员从平铺列表里收走，放在列表顶部的组块里（PresetKnobGroup 单选），
+ *    组内条目仍可展开、编辑文本。
  */
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 import AppCard from '../../shared/AppCard.vue';
 import AppButton from '../../shared/AppButton.vue';
 import AppModal from '../../shared/AppModal.vue';
+import PresetKnobGroup from '../../shared/PresetKnobGroup.vue';
 import TemplatePreview from '../TemplatePreview.vue';
 import { useUIStore } from '../../../stores/ui-store';
 import { usePresets } from '../../../composables/usePresets';
+import { usePresetKnobs } from '../../../composables/usePresetKnobs';
+import type { PresetEntryInsight } from '@engine/prompts/preset-insight';
 import {
   canonicalPresetEntries,
   makeCustomPresetEntry,
@@ -35,6 +45,8 @@ import {
   movePresetEntry,
   duplicatePresetEntry,
   isZonePlaceholderEntry,
+  presetUsesToggleLayer,
+  type PresetPromptEntry,
 } from '../../../lib/preset-entries';
 import { preprocessPresetForPreview, findTailAssistantEntry } from '@engine/prompts/preset-loader';
 import { buildDirectProtocol, DIRECT_TEMPLATE } from '@engine/prompts/direct-prompt';
@@ -56,6 +68,7 @@ const {
   duplicateAsUser,
   loadPresets: loadPresetsFromDexie,
   upsertPreset,
+  resetEntryToggles,
 } = usePresets();
 const profile = computed(() => presetProfileForAgent(props.agentId) ?? 'story');
 /** 生效预设 id（选择为空/失效时即默认）；写入经 usePresets，选默认那条存空串 */
@@ -161,6 +174,9 @@ async function persistPreset(next: ChatPreset): Promise<string> {
       return edited.id;
     }
     await upsertPreset(next);
+    // 非只读、但带出厂播种指纹的行也走覆写层（`presetUsesToggleLayer`）：`next` 取自套过覆写的视图，
+    // 当前开关已经随整行写进去了，留着覆写键就成了双来源 —— 写成功后清掉
+    if (entry && presetUsesToggleLayer(entry)) resetEntryToggles(next.id);
   } catch {
     /* DB 写入失败：upsertPreset 先写 Dexie 再改 ref，失败则 ref 也不变 */
   }
@@ -169,19 +185,197 @@ async function persistPreset(next: ChatPreset): Promise<string> {
 
 // 条目展开/折叠
 const expandedEntries = ref(new Set<string>());
-function toggleEntry(presetId: string, idx: number) {
+function toggleExpanded(presetId: string, idx: number) {
   const key = `${presetId}:${idx}`;
   if (expandedEntries.value.has(key)) expandedEntries.value.delete(key);
   else expandedEntries.value.add(key);
 }
+function isExpanded(idx: number): boolean {
+  return expandedEntries.value.has(`${selectedPresetId.value}:${idx}`);
+}
 
-// 条目启用/禁用开关 — 自动保存
-async function togglePresetEntryEnabled(presetId: string, idx: number) {
-  const p = presetById(presetId);
+// ============================================================
+// 开关旋钮：总览 / 逐条 token / 互斥组 / 覆写层
+// ============================================================
+const knobs = usePresetKnobs(profile);
+const { summary: knobSummary, groups: knobGroups, adjustedCount } = knobs;
+
+/** identifier → 逐条估算（重复 identifier 取第一条，与引擎同口径） */
+const insightById = computed(() => {
+  const map = new Map<string, PresetEntryInsight>();
+  for (const e of knobSummary.value.entries) {
+    if (e.identifier && !map.has(e.identifier)) map.set(e.identifier, e);
+  }
+  return map;
+});
+
+interface EntryRow {
+  sp: PresetPromptEntry;
+  /** 生效顺序下的下标（增删改序的 helper 都按它取条目） */
+  idx: number;
+  insight: PresetEntryInsight | null;
+  /** 属于某个互斥组：开关交给组块的单选 */
+  grouped: boolean;
+}
+
+interface GroupView {
+  id: string;
+  label: string;
+  description?: string;
+  allowNone: boolean;
+  options: { id: string; label: string; tokens?: number }[];
+  status: 'ok' | 'none' | 'conflict';
+  selected: string | null;
+}
+
+interface EntrySection {
+  key: string;
+  group: GroupView | null;
+  rows: EntryRow[];
+}
+
+/**
+ * 列表分段：先是各互斥组块（组内成员按组选项顺序），最后是其余条目的平铺列表。
+ * 组块统一放在列表顶部 —— 组内成员在生效顺序里可能并不相邻，放在「第一条的位置」会让
+ * 后面的成员看起来跳了位置。
+ */
+const entrySections = computed<EntrySection[]>(() => {
+  const rows: EntryRow[] = activePrompts.value.map((sp, idx) => ({
+    sp,
+    idx,
+    insight: sp.identifier ? (insightById.value.get(sp.identifier) ?? null) : null,
+    grouped: false,
+  }));
+  const byId = new Map<string, EntryRow>();
+  for (const row of rows) {
+    if (row.sp.identifier && !byId.has(row.sp.identifier)) byId.set(row.sp.identifier, row);
+  }
+  const sections: EntrySection[] = [];
+  for (const { group, state } of knobGroups.value) {
+    const members = group.options
+      .map((o) => byId.get(o.identifier))
+      .filter((r): r is EntryRow => r !== undefined);
+    if (members.length === 0) continue;
+    for (const m of members) m.grouped = true;
+    sections.push({
+      key: `group:${group.id}`,
+      group: {
+        id: group.id,
+        label: group.label,
+        description: group.description,
+        allowNone: group.allowNone,
+        options: group.options.map((o) => ({
+          id: o.identifier,
+          label: o.label,
+          tokens: insightById.value.get(o.identifier)?.tokensIfEnabled,
+        })),
+        status: state.status,
+        selected: state.status === 'ok' ? state.selected : null,
+      },
+      rows: members,
+    });
+  }
+  sections.push({ key: 'flat', group: null, rows: rows.filter((r) => !r.grouped) });
+  return sections;
+});
+
+/** 这一行显示的 token：未生效时显示「启用后」的估算 */
+function rowTokens(row: EntryRow): number | null {
+  if (!row.insight) return null;
+  return row.insight.active ? row.insight.tokens : row.insight.tokensIfEnabled;
+}
+
+function defineLabel(name: string): string {
+  return `定义 {{${name}}}`;
+}
+
+/**
+ * 标题行最多直接显示几个「定义」标签；其余合并成一个「+N」。
+ * 内容包首条宏条目一口气定义五六十个变量，全铺开会把右侧 token 与操作按钮挤出去。
+ * 全部变量在「+N」的 title 与展开后的正文上方都能看到。
+ */
+const MAX_DEFINE_CHIPS = 2;
+
+function visibleDefines(row: EntryRow): string[] {
+  return (row.insight?.defines ?? []).slice(0, MAX_DEFINE_CHIPS);
+}
+
+function hiddenDefineCount(row: EntryRow): number {
+  return Math.max(0, (row.insight?.defines?.length ?? 0) - MAX_DEFINE_CHIPS);
+}
+
+function allDefinesText(row: EntryRow): string {
+  return (row.insight?.defines ?? []).map((n) => `{{${n}}}`).join('、');
+}
+
+/** 标题行小字（已被覆盖 / 无人读取 / 露骨内容关闭）的全文版，展开区恒显示 —— 窄宽下标题行会隐藏它们 */
+function entryNotes(row: EntryRow): string[] {
+  const notes: string[] = [];
+  if (row.insight?.overridden) notes.push('定义的变量已被后面的条目覆盖');
+  if (row.insight?.unread) notes.push('定义的变量无人读取');
+  if (row.insight?.inactiveReason === 'nsfw') notes.push('露骨内容关闭，未生效');
+  return notes;
+}
+
+function entryLabel(row: EntryRow): string {
+  return row.sp.name || `条目 #${row.idx + 1}`;
+}
+
+// 条目启用/禁用开关 — 只读预设写覆写层（不复制），玩家预设直接改行
+async function toggleEntryEnabled(idx: number) {
+  const p = presetById(selectedPresetId.value);
   if (!p) return;
   const entry = canonicalPresetEntries(p)[idx];
   if (!entry) return;
-  await persistPreset(updatePresetEntry(p, idx, { enabled: !(entry.enabled !== false) }));
+  try {
+    if (entry.identifier) {
+      await knobs.toggleEntry(entry.identifier);
+      return;
+    }
+    // 老式无 identifier 条目：覆写层按 identifier 寻址够不着，退回整行写（只读预设仍写时复制）
+    await persistPreset(updatePresetEntry(p, idx, { enabled: !(entry.enabled !== false) }));
+  } catch {
+    ui.toast('开关保存失败，请稍后重试', 'error');
+  }
+}
+
+/**
+ * 写入失败时的复位版本号（与 PresetDrawer 同一做法）：原生 radio 在点击时已经自己翻了状态，
+ * 写失败后绑定值没变、Vue 不会重渲染 —— 递增它让组块按 key 重挂，回到真实状态。
+ * 条目行开关不需要它：那颗 checkbox 的点击被 `@click.prevent` 取消，浏览器会自己撤回勾选。
+ */
+const failRev = ref(0);
+const viewerEl = ref<HTMLElement | null>(null);
+
+async function onGroupSelect(groupId: string, identifier: string | null) {
+  try {
+    await knobs.selectOption(groupId, identifier);
+  } catch {
+    const root = viewerEl.value;
+    const active = document.activeElement;
+    const hadFocus = !!root && active instanceof HTMLElement && root.contains(active);
+    failRev.value += 1;
+    ui.toast('开关保存失败，请稍后重试', 'error');
+    await nextTick();
+    // 重挂销毁了聚焦的单选：把焦点交给新组块里对应的那颗，找不到落到预设查看器上
+    const el = viewerEl.value;
+    if (!hadFocus || !el) return;
+    const now = document.activeElement;
+    if (now instanceof HTMLElement && now !== document.body && el.contains(now)) return;
+    let target: HTMLElement | null = null;
+    for (const block of el.querySelectorAll<HTMLElement>('[data-group-id]')) {
+      if (block.dataset.groupId !== groupId) continue;
+      const radios = [...block.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+      target = radios.find((r) => r.value === (identifier ?? '')) ?? radios[0] ?? null;
+      break;
+    }
+    (target ?? el).focus();
+  }
+}
+
+function resetToggles() {
+  knobs.resetToggles();
+  ui.toast('已恢复出厂开关', 'info');
 }
 
 // 条目编辑弹窗（新增 / 编辑共用）
@@ -355,7 +549,7 @@ onMounted(() => {
     </p>
 
     <!-- 生效预设的完整预览卡片 — 仿 ST 面板布局 -->
-    <div v-if="activePreset" class="preset-viewer">
+    <div v-if="activePreset" ref="viewerEl" class="preset-viewer" tabindex="-1">
       <div class="preset-viewer-header">
         <div class="preset-viewer-title">
           <h5>
@@ -376,104 +570,215 @@ onMounted(() => {
       <!-- 条目列表（子提示词） -->
       <div class="preset-prompts-list">
         <div class="preset-prompts-head">
-          <h4 class="text-sm text-muted">条目列表（{{ activePrompts.length }} 个）</h4>
-          <AppButton variant="ghost" size="sm" @click="openNewEntry">＋ 新增条目</AppButton>
+          <div class="preset-prompts-heading">
+            <h4 class="text-sm text-muted">条目列表（{{ activePrompts.length }} 个）</h4>
+            <span class="preset-summary" data-testid="preset-summary"
+              >已启用 {{ knobSummary.activeCount }}/{{ knobSummary.totalCount }} · 约
+              {{ knobSummary.totalTokens }} tokens</span
+            >
+          </div>
+          <div class="preset-prompts-actions">
+            <AppButton
+              v-if="adjustedCount > 0"
+              variant="ghost"
+              size="sm"
+              data-testid="preset-reset-toggles"
+              :aria-label="`已调整 ${adjustedCount} 项，恢复出厂开关`"
+              @click="resetToggles"
+              >已调整 {{ adjustedCount }} 项 · 恢复出厂开关</AppButton
+            >
+            <AppButton variant="ghost" size="sm" aria-label="新增条目" @click="openNewEntry"
+              >＋ 新增条目</AppButton
+            >
+          </div>
         </div>
         <div
-          v-for="(sp, idx) in activePrompts"
-          :key="sp.identifier || idx"
-          class="subprompt-item"
-          :class="{
-            'subprompt-disabled': sp.enabled === false,
-            'subprompt-zone': isZonePlaceholderEntry(sp),
-          }"
+          v-for="section in entrySections"
+          :key="section.key"
+          :class="section.group ? 'preset-group-block' : 'preset-flat-list'"
+          :data-testid="section.group ? `preset-group-${section.group.id}` : undefined"
         >
-          <div class="subprompt-header" @click="toggleEntry(selectedPresetId, Number(idx))">
-            <div class="subprompt-info">
-              <!-- 五区占位条目恒启用、不可停用：用锁标代替开关 -->
-              <span
-                v-if="isZonePlaceholderEntry(sp)"
-                class="subprompt-zone-lock"
-                title="上下文分区占位条目，不可删除或停用"
-              >
-                <i class="fa-solid fa-lock" aria-hidden="true"></i>
-              </span>
-              <label
-                v-else
-                class="subprompt-toggle"
-                @click.stop.prevent="togglePresetEntryEnabled(selectedPresetId, Number(idx))"
-              >
-                <input type="checkbox" :checked="sp.enabled !== false" class="toggle-input" />
-                <span class="toggle-slider toggle-sm"></span>
-              </label>
-              <span class="subprompt-name">{{ sp.name || `条目 #${Number(idx) + 1}` }}</span>
-              <span v-if="isZonePlaceholderEntry(sp)" class="subprompt-zone-badge">分区占位</span>
-              <span v-else class="subprompt-role text-xs text-muted">{{
-                sp.role || 'system'
-              }}</span>
+          <PresetKnobGroup
+            v-if="section.group"
+            :key="`${section.group.id}:${failRev}`"
+            class="preset-group-knob"
+            :data-group-id="section.group.id"
+            :label="section.group.label"
+            :description="section.group.description"
+            :options="section.group.options"
+            :selected="section.group.selected"
+            :status="section.group.status"
+            :allow-none="section.group.allowNone"
+            @select="onGroupSelect(section.group.id, $event)"
+          />
+          <div
+            v-for="row in section.rows"
+            :key="row.sp.identifier || row.idx"
+            class="subprompt-item"
+            :class="{
+              'subprompt-disabled': row.sp.enabled === false,
+              'subprompt-zone': isZonePlaceholderEntry(row.sp),
+              'subprompt-grouped': row.grouped,
+            }"
+            :data-identifier="row.sp.identifier"
+          >
+            <div class="subprompt-header" @click="toggleExpanded(selectedPresetId, row.idx)">
+              <div class="subprompt-info">
+                <!-- 五区占位条目恒启用、不可停用：用锁标代替开关 -->
+                <span
+                  v-if="isZonePlaceholderEntry(row.sp)"
+                  class="subprompt-zone-lock"
+                  title="上下文分区占位条目，不可删除或停用"
+                >
+                  <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                </span>
+                <!-- 互斥组成员：开关交给组块的单选 -->
+                <span v-else-if="row.grouped" class="subprompt-toggle-spacer" aria-hidden="true" />
+                <label
+                  v-else
+                  class="subprompt-toggle"
+                  @click.stop.prevent="toggleEntryEnabled(row.idx)"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="row.sp.enabled !== false"
+                    class="toggle-input"
+                    :aria-label="`启用「${entryLabel(row)}」`"
+                  />
+                  <span class="toggle-slider toggle-sm"></span>
+                </label>
+                <span class="subprompt-name">{{ entryLabel(row) }}</span>
+                <span v-if="isZonePlaceholderEntry(row.sp)" class="subprompt-zone-badge"
+                  >分区占位</span
+                >
+                <span v-else class="subprompt-role text-xs text-muted">{{
+                  row.sp.role || 'system'
+                }}</span>
+                <template v-if="row.insight">
+                  <span
+                    v-for="name in visibleDefines(row)"
+                    :key="name"
+                    class="subprompt-var"
+                    data-testid="entry-defines"
+                    >{{ defineLabel(name) }}</span
+                  >
+                  <span
+                    v-if="hiddenDefineCount(row) > 0"
+                    class="subprompt-var subprompt-var-more"
+                    data-testid="entry-defines-more"
+                    :title="`共定义 ${row.insight.defines?.length} 个变量：${allDefinesText(row)}`"
+                    >+{{ hiddenDefineCount(row) }}</span
+                  >
+                  <span v-if="row.insight.overridden" class="subprompt-note">已被覆盖</span>
+                  <span v-if="row.insight.unread" class="subprompt-note">无人读取</span>
+                  <span v-if="row.insight.inactiveReason === 'nsfw'" class="subprompt-note"
+                    >露骨内容关闭，未生效</span
+                  >
+                </template>
+              </div>
+              <div class="subprompt-meta">
+                <span
+                  v-if="rowTokens(row) !== null"
+                  class="subprompt-tokens"
+                  :class="{ 'is-inactive': !row.insight?.active }"
+                  data-testid="entry-tokens"
+                  :title="row.insight?.active ? '当前计入的大致 token' : '启用后大致增加的 token'"
+                  >≈{{ rowTokens(row) }} tokens</span
+                >
+                <button
+                  type="button"
+                  class="subprompt-edit-btn"
+                  title="上移"
+                  :aria-label="`上移「${entryLabel(row)}」`"
+                  :disabled="row.idx === 0"
+                  @click.stop="moveEntry(row.idx, -1)"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  class="subprompt-edit-btn"
+                  title="下移"
+                  :aria-label="`下移「${entryLabel(row)}」`"
+                  :disabled="row.idx === activePrompts.length - 1"
+                  @click.stop="moveEntry(row.idx, 1)"
+                >
+                  ↓
+                </button>
+                <template v-if="!isZonePlaceholderEntry(row.sp)">
+                  <button
+                    type="button"
+                    class="subprompt-edit-btn"
+                    title="编辑此条目"
+                    :aria-label="`编辑「${entryLabel(row)}」`"
+                    data-testid="entry-edit"
+                    @click.stop="openEntryEditor(selectedPresetId, row.idx)"
+                  >
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    class="subprompt-edit-btn"
+                    title="复制到下方"
+                    :aria-label="`复制「${entryLabel(row)}」到下方`"
+                    data-testid="entry-duplicate"
+                    @click.stop="duplicateEntry(row.idx)"
+                  >
+                    ⧉
+                  </button>
+                  <button
+                    type="button"
+                    class="subprompt-edit-btn subprompt-delete-btn"
+                    title="删除此条目"
+                    :aria-label="`删除「${entryLabel(row)}」`"
+                    @click.stop="openDeleteEntry(row.idx)"
+                  >
+                    🗑
+                  </button>
+                  <span class="subprompt-chars text-xs text-muted"
+                    >{{ (row.sp.content || '').length }} 字</span
+                  >
+                </template>
+                <button
+                  type="button"
+                  class="subprompt-edit-btn"
+                  :aria-expanded="isExpanded(row.idx)"
+                  :aria-label="`${isExpanded(row.idx) ? '收起' : '展开'}「${entryLabel(row)}」`"
+                  data-testid="entry-expand"
+                  @click.stop="toggleExpanded(selectedPresetId, row.idx)"
+                >
+                  <span class="subprompt-chevron" :class="{ 'chevron-open': isExpanded(row.idx) }"
+                    >▸</span
+                  >
+                </button>
+              </div>
             </div>
-            <div class="subprompt-meta">
-              <button
-                class="subprompt-edit-btn"
-                title="上移"
-                :disabled="Number(idx) === 0"
-                @click.stop="moveEntry(Number(idx), -1)"
+            <div v-if="isExpanded(row.idx)" class="subprompt-content">
+              <!-- 标题行的变量标签与小字在窄宽下会被隐藏，这里恒列全量，保证总有地方看得到 -->
+              <p
+                v-if="(row.insight?.defines?.length ?? 0) > 0"
+                class="subprompt-defines-all"
+                data-testid="entry-defines-all"
               >
-                ↑
-              </button>
-              <button
-                class="subprompt-edit-btn"
-                title="下移"
-                :disabled="Number(idx) === activePrompts.length - 1"
-                @click.stop="moveEntry(Number(idx), 1)"
+                定义 {{ row.insight?.defines?.length }} 个变量：{{ allDefinesText(row) }}
+              </p>
+              <p
+                v-if="entryNotes(row).length > 0"
+                class="subprompt-defines-all"
+                data-testid="entry-notes-all"
               >
-                ↓
-              </button>
-              <template v-if="!isZonePlaceholderEntry(sp)">
-                <button
-                  class="subprompt-edit-btn"
-                  title="编辑此条目"
-                  @click.stop="openEntryEditor(selectedPresetId, Number(idx))"
-                >
-                  ✎
-                </button>
-                <button
-                  class="subprompt-edit-btn"
-                  title="复制到下方"
-                  @click.stop="duplicateEntry(Number(idx))"
-                >
-                  ⧉
-                </button>
-                <button
-                  class="subprompt-edit-btn subprompt-delete-btn"
-                  title="删除此条目"
-                  @click.stop="openDeleteEntry(Number(idx))"
-                >
-                  🗑
-                </button>
-                <span class="subprompt-chars text-xs text-muted"
-                  >{{ (sp.content || '').length }} 字</span
-                >
+                {{ entryNotes(row).join('；') }}
+              </p>
+              <template v-if="isZonePlaceholderEntry(row.sp)">
+                开启「Story 上下文与记忆新模式」时，引擎在这个位置填入该分区组装好的消息；
+                关闭时这一条为空，不产生任何内容。五个分区的先后顺序固定为 1→5，
+                可以在它们之间插入普通条目。
               </template>
-              <span
-                class="subprompt-chevron"
-                :class="{
-                  'chevron-open': expandedEntries.has(`${selectedPresetId}:${idx}`),
-                }"
-                >▸</span
-              >
+              <template v-else>
+                {{ (row.sp.content || '(空)').slice(0, 300)
+                }}{{ (row.sp.content || '').length > 300 ? '...' : '' }}
+              </template>
             </div>
-          </div>
-          <div v-if="expandedEntries.has(`${selectedPresetId}:${idx}`)" class="subprompt-content">
-            <template v-if="isZonePlaceholderEntry(sp)">
-              开启「Story 上下文与记忆新模式」时，引擎在这个位置填入该分区组装好的消息；
-              关闭时这一条为空，不产生任何内容。五个分区的先后顺序固定为 1→5，
-              可以在它们之间插入普通条目。
-            </template>
-            <template v-else>
-              {{ (sp.content || '(空)').slice(0, 300)
-              }}{{ (sp.content || '').length > 300 ? '...' : '' }}
-            </template>
           </div>
         </div>
         <p v-if="activePrompts.length === 0" class="text-muted text-sm" style="padding: 12px 16px">
@@ -649,6 +954,10 @@ onMounted(() => {
   border-radius: var(--theme-radius-lg);
   overflow: hidden;
 }
+/* 只作写入失败后的焦点兜底落点（tabindex=-1），不画焦点框 */
+.preset-viewer:focus {
+  outline: none;
+}
 .preset-viewer-header {
   display: flex;
   align-items: flex-start;
@@ -676,7 +985,92 @@ onMounted(() => {
 .preset-prompts-head h4 {
   margin: 0;
 }
+.preset-prompts-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+/* 生效总览：辅助小字 */
+.preset-summary {
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+}
+.preset-prompts-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--theme-spacing-xs);
+}
+/* 互斥组块：全边 1px 混合边框 + 轻染底（design.md §1，禁侧边条） */
+.preset-group-block {
+  margin: 0 var(--theme-spacing-lg) var(--theme-spacing-sm);
+  border: 1px solid color-mix(in srgb, var(--theme-primary) 25%, var(--theme-card-border));
+  border-radius: var(--theme-radius-md);
+  background: color-mix(in srgb, var(--theme-primary) 4%, var(--theme-card-bg));
+  overflow: hidden;
+}
+.preset-group-knob {
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  border-bottom: 1px solid var(--theme-card-border);
+}
+.preset-group-block .subprompt-item {
+  padding: 6px var(--theme-spacing-md);
+}
+.preset-flat-list {
+  display: flex;
+  flex-direction: column;
+}
+/* 组成员没有自己的开关：占住同宽，名字与平铺条目对齐 */
+.subprompt-toggle-spacer {
+  width: 28px;
+  flex-shrink: 0;
+}
+.subprompt-tokens {
+  flex-shrink: 0;
+  font-size: 0.6875rem;
+  color: var(--theme-text-secondary);
+  white-space: nowrap;
+}
+/* 未生效条目的 token 是「启用后」的估算：再弱化一档 */
+.subprompt-tokens.is-inactive {
+  color: var(--theme-text-muted);
+  font-style: italic;
+}
+.subprompt-var {
+  /* 窄宽时标签先收缩省略，把位置让给条目名（名字才是辨认条目的依据） */
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 var(--theme-spacing-xs);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  color: var(--theme-text-secondary);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.subprompt-defines-all {
+  margin: 0 0 var(--theme-spacing-xs);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--theme-text-secondary);
+  white-space: normal;
+  word-break: break-all;
+}
+.subprompt-note {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.6875rem;
+  color: var(--theme-text-muted);
+  white-space: nowrap;
+}
 .subprompt-item {
+  /* 供下方容器查询：行宽不够时隐藏变量标签与小字，免得被压成残片 */
+  container-type: inline-size;
   padding: 8px 16px;
   border-bottom: 1px solid var(--theme-card-border);
   transition: background var(--theme-transition-fast);
@@ -721,6 +1115,8 @@ onMounted(() => {
   gap: 8px;
   flex: 1;
   min-width: 0;
+  /* 标签再多也只在本区内裁掉，不挤右侧 token 与操作按钮（.subprompt-meta 不收缩） */
+  overflow: hidden;
 }
 .subprompt-toggle {
   display: flex;
@@ -728,6 +1124,9 @@ onMounted(() => {
   cursor: default;
 }
 .subprompt-name {
+  /* 名字优先保住：标签与小字先收缩；名字本身过长时才省略，且最多占本区六成 */
+  flex-shrink: 0;
+  max-width: 60%;
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--theme-text-primary);
@@ -897,5 +1296,12 @@ onMounted(() => {
 .prefill-field-label {
   font-size: 0.75rem;
   color: var(--theme-text-secondary);
+}
+/* 行宽不足时标签与小字整枚隐藏，不显示被压扁的残片；展开区恒列变量全量与说明（entryNotes） */
+@container (max-width: 640px) {
+  .subprompt-var,
+  .subprompt-note {
+    display: none;
+  }
 }
 </style>

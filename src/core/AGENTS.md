@@ -236,6 +236,8 @@ src/core/                    ← 核心引擎
   │         运行时把整块 XML 当字段值写进角色档案
   ├── utils/redact-secrets.ts             ← 错误原文凭据的启发式脱敏（2026-11-16 自 ui/lib/turn-failure 下沉，行为不变）。
   │                                    🔴 只用于短错误文本；含「32 位以上长串一律抹」，别拿去处理提示词全文
+  ├── utils/token-estimate.ts             ← 🆕 [2026-11-21] `estimateTokens`：字符数 / 1.5 向上取整（与超限判断内联口径一致）。
+  │                                    🔴 只用于估算展示，不是 provider 计数；改系数要连同 story-context-v2 等内联处一起改
   ├── utils/model-json.ts                 ← [Q-05] 从模型输出里抢救 JSON 的**唯一**入口（整段直解 / ```json 围栏 /
   │                                    `<json>` 标签 / 括号切片，顺序即优先级）。剥壳只此一份，兜底由调用方
   │                                    传 `normalize` 回调 —— 形态上就长不出「两个分支两套兜底」
@@ -410,6 +412,15 @@ src/core/                    ← 核心引擎
   │                                      + `getPresetPrefill`（读 `settings.prefill = {enabled, field}`，
   │                                      内容取自该 assistant 条目）；`assemblePresetContent` **把
   │                                      assistant 条目不并进 system**（它是预填充素材、要去消息末尾）
+  │                                    📌 2026-11-21：+`listActivePresetPrompts` / `isAssembledPresetPrompt`（参与 system 拼接的条目判据，
+  │                                      `assemblePresetContent` 与生效总览共用，不读 `prompt_order`）+ `PRESET_SYSTEM_PLACEHOLDER_RE`
+  ├── prompts/preset-groups.ts              ← 🆕 [2026-11-21] 预设互斥组 + 开关覆写层（纯函数）：`readPresetGroups`（读
+  │                                    `settings.extensions.poem.groups`，容错清洗）/ `resolvePresetGroupState`（ok / none / conflict）/
+  │                                    `selectPresetGroupOption` / `applyPresetEntryToggles` / `diffPresetEntryToggles`。
+  │                                    🔴 选中状态就是条目自身 `enabled`，不存第二份；装配不读组元数据；五区占位不可入组、不受覆写
+  ├── prompts/preset-insight.ts             ← 🆕 [2026-11-21] 预设生效总览 + 逐条 token 估算（`summarizePresetEntries`，给 UI，纯读）：
+  │                                    生效判据复用 `listActivePresetPrompts`；setvar 成本按读取次数归因到定义条目，
+  │                                    random 取最长项，系统占位符 / 注释 / roll 记 0。不变式：各条 tokens 之和 = totalTokens
   ├── prompts/factory-preset-sync.ts        ← 🆕 [2026-11-17] 出厂预设同步计划（纯函数，无 I/O、不读时钟、不调 crypto）：
   │                                    `factoryPresetFingerprint`（去掉 createdAt/updatedAt/factorySeedHash 后键稳定 hash）/
   │                                    `stampFactoryPreset` / `planFactoryPresetSync`（四条规则：补 / 只补指纹 / 没改过静默覆盖 /
