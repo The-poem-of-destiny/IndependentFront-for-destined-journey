@@ -35,7 +35,7 @@ function input() {
       >,
     },
     playerInput: 'turn 1',
-    turnContext: { recall: 'recall-1', dice_pool: [[20, 7]], tailPrompt: '' } as Record<
+    turnContext: { recall: 'recall-1', dice_pool: ['d20: {7}'], tailPrompt: '' } as Record<
       string,
       unknown
     >,
@@ -83,7 +83,7 @@ describe('accepted direct context', () => {
     const next = input();
     next.history = [message('第一楼正文')];
     next.playerInput = 'turn 2';
-    next.turnContext = { recall: 'recall-2', dice_pool: [[6, 3]], tailPrompt: '' };
+    next.turnContext = { recall: 'recall-2', dice_pool: ['d6: {3}'], tailPrompt: '' };
     const second = await prepareDirectContext(next);
     expect(second.rebaseReason).toBeUndefined();
     expect(JSON.stringify(second.messages.slice(0, first.retainedCount))).toBe(
@@ -97,7 +97,7 @@ describe('accepted direct context', () => {
     expect(second.messages.some((m) => m.content === firstTail)).toBe(false);
     const tail = turnContext(second.messages[second.messages.length - 1].content);
     expect(tail.recall).toBe('recall-2');
-    expect(tail.dice_pool).toEqual([[6, 3]]);
+    expect(tail.dice_pool).toEqual(['d6: {3}']);
     expect(second.messages[second.retainedCount - 1].content).toContain(
       '<player_input>\nturn 2\n</player_input>',
     );
@@ -332,6 +332,13 @@ describe('缓存协议', () => {
     expect(DIRECT_CACHE_PROTOCOL).toContain(
       '每轮仍须按输出协议输出完整结构。历史正文里的 <beat/> 已移除，每轮仍须照常分节。',
     );
+  });
+
+  it('骰池说明为按骰式分行的字符串数组，diceUsed 以 sides + 行内位置寻址', () => {
+    expect(DIRECT_CACHE_PROTOCOL).toContain(
+      'turn_context.dice_pool 是按骰式分行的字符串数组，每项形如 "d20: {12, 5, 17}"；diceUsed.sides 为骰面数，diceUsed.index 为该骰在对应骰式花括号内从 0 起的位置。',
+    );
+    expect(DIRECT_CACHE_PROTOCOL).not.toContain('[骰面数,骰值]');
   });
 });
 

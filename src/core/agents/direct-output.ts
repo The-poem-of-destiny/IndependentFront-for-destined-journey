@@ -20,6 +20,7 @@ import {
 } from '../variables/vars-update-translator';
 import { projectStoryOutput, STORY_ENVELOPE_TAGS } from '../story/story-output';
 import type { DirectCombatOutput } from '../combat/direct-combat';
+import type { DirectDicePool } from './direct-dice';
 
 type Row = Record<string, unknown>;
 export interface DirectUpdates {
@@ -42,7 +43,8 @@ export interface DirectUpdates {
   }>;
   plot: { pre?: Row; post?: Row };
   combat: DirectCombatOutput | null;
-  diceUsed: Array<{ index: number; purpose: string; target: string }>;
+  /** 按 (骰面数, 组内下标) 定位骰池里的一颗骰 */
+  diceUsed: Array<{ sides: number; index: number; purpose: string; target: string }>;
 }
 
 export interface DirectTurnDraft {
@@ -55,6 +57,8 @@ export interface DirectTurnDraft {
   raw: string;
   /** 结构化战斗关闭时模型仍写了非 null 的 combat：已丢弃，仅供告警 */
   combatIgnored?: true;
+  /** 模型把人物字段平铺在 entities[i].output 上（未放进 output.character）：已自动归位，仅供告警 */
+  flattenedCharacters?: string[];
 }
 
 export interface ParseDirectOutputOptions {
@@ -291,9 +295,30 @@ function validateState(value: Row): void {
   for (const list of Object.values(quests)) for (const row of rows(list, 'quests')) named(row.name);
 }
 
+/** 实体外层（非人物）字段；平铺人物归位时留在 output 顶层 */
+const ENTITY_OUTER_KEYS = ['statuses', 'elements', 'authorities'];
+
+/**
+ * 模型常把人物字段直接平铺在 output 上（name、race… 与 skills/equipment/inventory/ascension 同层），
+ * 而不是放进 output.character。识别到这种形状时把人物字段（含随身技能/装备/背包/登神）
+ * 收进 output.character，顶层 skills/equipment/inventory 置空 —— 与规范嵌套形状
+ * 经 assembleCharacterState 组装出的人物一致。返回归位的人物名；不是平铺形状返回 undefined。
+ */
+function unflattenCharacterEntity(row: Row): string | undefined {
+  if (row.kind !== 'character' || !isRecord(row.output)) return undefined;
+  const output = row.output;
+  if (output.character !== undefined || typeof output.name !== 'string') return undefined;
+  const character: Row = {};
+  const outer: Row = {};
+  for (const [key, value] of Object.entries(output))
+    (ENTITY_OUTER_KEYS.includes(key) ? outer : character)[key] = value;
+  row.output = { ...outer, character, skills: [], equipment: [], inventory: [] };
+  return output.name;
+}
+
 export function parseDirectOutput(
   raw: string,
-  diceCount: number,
+  pool: DirectDicePool,
   options: ParseDirectOutputOptions = {},
 ): DirectTurnDraft {
   const structuredCombat = options.structuredCombat ?? true;
@@ -374,8 +399,11 @@ export function parseDirectOutput(
     buildDispatcherPatches({ tile_ops: tiles }).patches.length === tiles.length,
     '地块操作无效',
   );
+  const flattenedCharacters: string[] = [];
   for (const [i, row] of rows(parsed.entities, 'entities').entries()) {
     check(row.kind === 'character' || row.kind === 'loadout', '实体种类无效');
+    const flattened = unflattenCharacterEntity(row);
+    if (flattened !== undefined) flattenedCharacters.push(flattened);
     keys(
       row,
       row.kind === 'character' ? ['kind', 'placement', 'output'] : ['kind', 'owner', 'output'],
@@ -431,18 +459,22 @@ export function parseDirectOutput(
   keys(plot, ['pre', 'post'], 'plot');
   for (const value of Object.values(plot)) object(value, '剧情判断');
   if (parsed.combat !== null) object(parsed.combat, 'combat');
-  const consumed = new Set<number>();
-  for (const die of rows(parsed.diceUsed, 'diceUsed')) {
+  const consumed = new Set<string>();
+  for (const [i, die] of rows(parsed.diceUsed, 'diceUsed').entries()) {
+    const label = `diceUsed[${i}]`;
+    const group = Number.isInteger(die.sides) ? pool.find((g) => g.sides === die.sides) : undefined;
+    check(group, `${label} 的骰面数不在骰池中`);
     check(
       Number.isInteger(die.index) &&
         Number(die.index) >= 0 &&
-        Number(die.index) < diceCount &&
-        !consumed.has(Number(die.index)),
-      '骰索引无效或重复',
+        Number(die.index) < group.values.length,
+      `${label} 的骰索引超出 d${group.sides} 骰组范围`,
     );
+    const key = `${group.sides}/${Number(die.index)}`;
+    check(!consumed.has(key), `${label} 重复使用了同一颗骰`);
     named(die.purpose);
     named(die.target);
-    consumed.add(Number(die.index));
+    consumed.add(key);
   }
   const character = parseCharacterUpdates(raw);
   check(
@@ -457,6 +489,7 @@ export function parseDirectOutput(
     characterUpdates: character.updates,
     updates: parsed as unknown as DirectUpdates,
     ...(combatIgnored ? { combatIgnored: true as const } : {}),
+    ...(flattenedCharacters.length > 0 ? { flattenedCharacters } : {}),
   };
 }
 

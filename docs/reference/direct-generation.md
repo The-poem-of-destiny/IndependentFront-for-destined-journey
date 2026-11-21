@@ -56,6 +56,20 @@
 - **战斗行为卡**：`action_info` 带 `|行动者|` 行时画成行为卡，否则沿用通用面板；与演出开关无关。卡里的数值是模型自述，不是权威值。
 - **后果**：每个 `direct_cached` 存档冷建一次会话（协议文字变了）；每节独立跑美化，跨节的美化规则不再匹配；真实模型是否稳定输出标记与固定行未验证。
 
+### 实体扁平容错与分组骰池（2026-11-20）
+
+📌 2026-11-20 新增，分支 `fix/direct-dice-entity`，未用真实模型验证。两种直出（`direct`、`direct_cached`）共用。
+
+- **扁平角色实体**：触发是一次真实失败 —— 模型引入新 NPC 时把角色字段直接摊在 `output` 上，整楼以「entities[0].output 含未支持的字段：name、race…」被拒。现在 `direct_updates.entities` 的某项 `kind` 为 `"character"`、其 `output` 没有 `character` 却有字符串 `name` 时，`parseDirectOutput`（`src/core/agents/direct-output.ts`）把除 `statuses` / `elements` / `authorities` 以外的键全部移进 `output.character`，并把顶层 `skills` / `equipment` / `inventory` 置为 `[]`；结果与嵌套写法完全一致，此后照常校验。草稿带 `flattenedCharacters?: string[]`（被收拢的角色名），`direct-main.ts` 记 warn `direct.entity_flattened`，本楼不算失败。协议文字同时补了一个嵌套写法的示例。
+- **骰池缩小**：由 180 个（d4/d6/d8/d10/d12/d100 各 20 + d20 60）缩到 80 个（各 10 + d20 20）。实现搬到新模块 `src/core/agents/direct-dice.ts`（`DirectDicePool`、`rollDirectDice`、`formatDirectDicePool`）。
+- **按骰型分组的格式**：每种骰一行，形如 `d20: {12, 5, 17}`，顺序固定为 d4、d6、d8、d10、d12、d20、d100。无缓存直出把这些行放进 `<dice_pool>`；缓存直出的 `turn_context.dice_pool` 是同样字符串组成的数组（取代原来 `[骰面数, 骰值]` 对、以数组下标作 `diceUsed.index` 的写法）。此前无缓存路径每楼骰池约 6200 字符，现在是几百字符。
+- **`diceUsed` 登记**：每项为 `{sides, index, purpose, target}`，`index` 是该骰型那一行里从 0 起的位置。校验拒绝未知骰型、越界序号、重复的 (sides, index) 以及缺 `sides` 的项。
+- **后果**：
+  - 两份协议文字都变了，每个 `direct_cached` 存档会冷建一次会话。
+  - 私有内容包里的直出预设（`direct_combat_policy` 文本）已同步改写；🔴 引擎与内容包必须一起发布 —— 旧包会让模型只登记 `index`，缺 `sides` 的项被拒，整楼失败。
+  - 每楼 d20 从 60 个降到 20 个，较长的战斗回合可能把池用完，须按协议提前停下、留到下一楼。
+  - 真实模型是否稳定按新格式登记、扁平容错的触发频率，均未验证。
+
 新角色复用原生实体组装与作者定义绑定；新装备先入背包，穿戴需明确声明。角色经历、地图旅程、时间与随机事件维护接回既有系统。动作面板只展示结果，不能代替结构化入库。
 
 格式或核心写入失败时本楼不接纳，允许手动重试一次新的生成尝试；已接纳楼不能直接重放，需要先回退。接纳后的时间、剧情、经历、快照或记忆失败会警告，不会重复消耗材料或发奖励。
@@ -93,6 +107,7 @@
 - `src/core/state/state-manager.ts`：核心状态与消息原子接纳。
 - 📌 2026-11-17：`src/core/prompts/direct-prompt.ts` 的 `buildDirectProtocol(structuredCombat)` 按设置生成协议；`direct-combat.ts` 的跨楼战斗只在 `directStructuredCombat` 开启时生效，见上文「正文战斗」。
 - 📌 2026-11-19：`src/core/story/story-beats.ts` 正文分节；前端演出在 `src/ui/composables/useStagedPlayback.ts`、`src/ui/lib/stage-playback.ts`、`src/ui/lib/stage-entrance.ts` 与 `StagedNarrative.vue`，见上文「正文分节与逐节演出」。
+- 📌 2026-11-20：骰池移到 `src/core/agents/direct-dice.ts`（`DirectDicePool`、`rollDirectDice`、`formatDirectDicePool`），`direct-main.ts` 只调用它；扁平角色实体的收拢在 `direct-output.ts`，见上文「实体扁平容错与分组骰池」。
 
 运行：`npm run dev`。Windows 测试如遇临时目录 EPERM，可先将 `TEMP` 与 `TMP` 指向仓内 `node_modules/.cache/vitest-tmp`。
 
