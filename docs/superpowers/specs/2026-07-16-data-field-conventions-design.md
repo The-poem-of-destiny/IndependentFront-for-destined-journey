@@ -12,6 +12,12 @@
 - `customFields.age`（主角建号年龄）与 `customFields.birthday` 降为**实例化线索**（表示实例化那一刻的年龄）：落库时折算成 `ageAnchor` 后不再读取，界面与提示词一律读推导值。
 - `CharacterDefinition.age?` / `birthday?`：作者线索，`age` 表示开局时的年龄。缺失或无效兜底实例化那一刻 18 岁、生日 1 月 1 日。详见 `docs/reference/character-system.md`「年龄与生日」。
 
+## 主角生日与自制开局条目库字段补充（2026-11-20）
+
+- 主角生日：捏人页可选填（月 1-12、日 1-30）。填了才写 `customFields.birthday` 线索，落库时与 `customFields.age` 一起折算进 `ageAnchor`；不填不写，由 `ensureCharacterAge` 兜底 1 月 1 日，且不算「给定的生日」。`CreatePreset.character.birthday?: { month, day } | null` 随预设保存，旧预设缺省读作未填。
+- 直出投影（direct / direct_cached）：角色快照里的年龄改为按游戏时间现算的 `age`（给定生日时另带 `birthday: 'M月D日'`），不再发 `ageAnchor` 原值与冻结的 `customFields.age` / `customFields.birthday`。年龄对模型只读，不进任何补丁白名单。
+- 新表 `createCustomItems`（Dexie v35）：**全局共享**，主键 `id`（`custom_<category>_<uuid8>`），索引 `category` / `updatedAt`；行形状 `CreateCustomItemRecord { id, category, name, createdAt, updatedAt, data: CatalogItem }`。逻辑键是「类别 + 名称」，同名再存替换旧行。玩家经捏人页写入，AI 不读不写；不随存档删除。进 `FullBackup`（可选字段：缺席 = 整表不动，`[]` = 清空），不进单存档导出。
+
 ## 原生角色与编年史字段补充（2026-10-31）
 
 完整契约见 [原生角色与编年史](../../reference/character-system.md)，类型唯一来源为 `src/core/types/types-character.ts`。

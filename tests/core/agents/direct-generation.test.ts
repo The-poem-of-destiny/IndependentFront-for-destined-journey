@@ -22,6 +22,7 @@ import {
   type DirectCacheRecord,
 } from '../../../src/core/prompts/direct-context-session';
 import { createStateManager } from '../../../src/core/state/state-manager';
+import { GAME_EPOCH_YEAR, createDefaultTime } from '../../../src/core/time/time-system';
 import { withSaveWriteLock } from '../../../src/core/state/state-write-queue';
 import {
   getDatabase,
@@ -327,7 +328,7 @@ describe('direct rejected output keeps the raw reply', () => {
     models: ['test'],
     timeout: 30000,
   };
-  function generate() {
+  function generate(overrides: Partial<AgentContext> = {}) {
     const context: AgentContext = {
       userInput: '继续',
       characters: [player()],
@@ -337,6 +338,7 @@ describe('direct rejected output keeps the raw reply', () => {
       memories: [],
       plotEvents: [],
       agentOutputs: new Map(),
+      ...overrides,
     };
     return generateDirectTurn(
       {
@@ -385,6 +387,36 @@ describe('direct rejected output keeps the raw reply', () => {
     expect((error as DirectTurnError).message).toContain('HTTP 503');
     expect((error as DirectTurnError).result.error).toBe('HTTP 503');
     expect((error as DirectTurnError).result.requestMessages?.length).toBeGreaterThan(0);
+  });
+
+  it('direct_state 里的年龄按游戏时间现算，不带冻结年龄与原始锚点', async () => {
+    vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
+      agentId: 'direct_main',
+      output: null,
+      rawResponse: '',
+      tokensUsed: 0,
+      cacheHit: false,
+      duration: 1,
+      error: 'HTTP 503',
+    });
+    const aged = {
+      ...player(),
+      ageAnchor: { startAge: 18, month: 3, day: 15 },
+      customFields: { age: 18, birthday: '3月15日' },
+    };
+    const error = (await generate({
+      characters: [aged],
+      gameTime: { ...createDefaultTime(), year: GAME_EPOCH_YEAR + 1, month: 3, day: 15 },
+    }).catch((e: unknown) => e)) as DirectTurnError;
+    const messages = error.result.requestMessages!;
+    const last = messages[messages.length - 1];
+    const content = typeof last.content === 'string' ? last.content : '';
+    const state = JSON.parse(content.match(/<direct_state>\n([\s\S]*?)\n<\/direct_state>/)![1]);
+    const projected = state.characters[0];
+    expect(projected.age).toBe(20);
+    expect(projected.birthday).toBe('3月15日');
+    expect(projected).not.toHaveProperty('ageAnchor');
+    expect(projected.customFields).toEqual({});
   });
 });
 

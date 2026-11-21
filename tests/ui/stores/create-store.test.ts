@@ -7,7 +7,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { setActivePinia, createPinia } from 'pinia';
-import { useCreateStore, WIZARD_DRAFT_KEY } from '../../../src/ui/stores/create-store';
+import {
+  useCreateStore,
+  WIZARD_DRAFT_KEY,
+  CUSTOM_LIBRARY_GROUP,
+} from '../../../src/ui/stores/create-store';
+import { useCreateCustomLibraryStore } from '../../../src/ui/stores/create-custom-library-store';
+import { clearAllData } from '@engine/persistence/database';
 import { useSettingsStore } from '../../../src/ui/stores/settings-store';
 import { patchAgentSettings } from '../../../src/ui/stores/agent-settings';
 import {
@@ -3318,5 +3324,251 @@ describe('加载预设与大纲历史（C-13）', () => {
     store.name = '';
     store.plotOutline = mkOutline('大纲');
     expect(store.hasDraftContent).toBe(true);
+  });
+});
+
+// ===== 主角生日 / 人设预设 / 自制条目库 / resetAll 清文字设定（2026-11-20） =====
+
+function asPreset(data: ReturnType<ReturnType<typeof useCreateStore>['getCurrentPresetData']>) {
+  return { id: 'p', name: '预设', createdAt: 1, updatedAt: 1, ...data };
+}
+
+describe('主角生日 birthday', () => {
+  it('默认为 null', () => {
+    const store = makeStore();
+    expect(store.birthday).toBeNull();
+  });
+
+  it('随草稿往返；旧草稿缺字段读作 null；31 日并到 30 日', () => {
+    const store = makeStore();
+    store.name = '艾琳';
+    store.birthday = { month: 3, day: 15 };
+    store.autoSaveDraft();
+    const store2 = makeStore();
+    expect(store2.birthday).toEqual({ month: 3, day: 15 });
+
+    const raw = JSON.parse(localStorage.getItem(WIZARD_DRAFT_KEY)!);
+    delete raw.character.birthday;
+    localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(raw));
+    expect(makeStore().birthday).toBeNull();
+
+    raw.character.birthday = { month: 5, day: 31 };
+    localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(raw));
+    expect(makeStore().birthday).toEqual({ month: 5, day: 30 });
+
+    raw.character.birthday = { month: 13, day: 1 };
+    localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(raw));
+    expect(makeStore().birthday).toBeNull();
+  });
+
+  it('随预设往返；旧预设缺字段读作 null；31 日并到 30 日', () => {
+    const store = makeStore();
+    store.birthday = { month: 7, day: 8 };
+    const data = store.getCurrentPresetData();
+    expect(data.character.birthday).toEqual({ month: 7, day: 8 });
+
+    const store2 = makeStore();
+    store2.applyPresetData(asPreset(data));
+    expect(store2.birthday).toEqual({ month: 7, day: 8 });
+
+    const old = store.getCurrentPresetData();
+    delete (old.character as any).birthday;
+    store2.applyPresetData(asPreset(old));
+    expect(store2.birthday).toBeNull();
+
+    const odd = store.getCurrentPresetData();
+    odd.character.birthday = { month: 2, day: 31 };
+    store2.applyPresetData(asPreset(odd));
+    expect(store2.birthday).toEqual({ month: 2, day: 30 });
+  });
+
+  it('建档角色只在填了生日时带 customFields.birthday', () => {
+    const store = makeStore();
+    store.name = '测试';
+    expect(store.buildCharacterState('s').customFields).not.toHaveProperty('birthday');
+    store.birthday = { month: 4, day: 2 };
+    const state = store.buildCharacterState('s');
+    expect(state.customFields?.birthday).toEqual({ month: 4, day: 2 });
+    expect(state.customFields?.age).toBe(store.age);
+  });
+
+  it('开场提示词只在填了生日时写生日行', () => {
+    const store = makeStore();
+    store.name = '测试';
+    expect(store.buildOpeningPrompt()).not.toContain('生日');
+    store.birthday = { month: 4, day: 2 };
+    expect(store.buildOpeningPrompt()).toContain('生日: 4月2日');
+  });
+});
+
+describe('applyPresetData 人设范围（persona）', () => {
+  it('只套用人设与开局清单，难度 / 金钱 / 命运点 / 起始地 / 背景 / 核心 / 剧情不动', () => {
+    const source = makeStore();
+    source.selectDifficulty('creative');
+    source.name = '预设人';
+    source.gender = '女';
+    source.age = 30;
+    source.birthday = { month: 9, day: 9 };
+    source.race = '占位羽族';
+    source.identity = '自定义';
+    source.customIdentity = '游方学者';
+    source.level = 4;
+    source.basePoints = { 力量: 5, 敏捷: 5, 体质: 5, 智力: 5, 精神: 5 };
+    source.attributePoints = { 力量: 1, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 };
+    source.money = 999;
+    source.destinyPoints = 77;
+    source.startLocation = FIXTURE_START_LOCATION;
+    source.personality = '沉静';
+    source.physics = '瘦高';
+    source.backstory = '出身边境';
+    source.extra = '怕水';
+    source.addEquipment(FIXTURE_EQUIPMENT_POOL[0]);
+    source.addItem(FIXTURE_ITEM_POOL[0]);
+    source.selectBackground(FIXTURE_BACKGROUNDS[0]);
+    source.plotMode = 'main';
+    source.enabledWorkshopProjectIds = new Set(['proj_source']);
+    source.enabledCharacterEntryUids = new Set(['uid_source']);
+    source.enabledCharacterDefinitionIds = new Set(['def_source']);
+    const data = asPreset(source.getCurrentPresetData());
+
+    const store = makeStore();
+    fillRequiredChoices(store);
+    store.money = 10;
+    store.destinyPoints = 3;
+    store.selectBackground(FIXTURE_BACKGROUNDS[1]);
+    store.plotMode = 'side';
+    const outline = { title: '现有大纲' } as any;
+    store.plotOutline = outline;
+    const locationBefore = store.startLocation;
+    store.enabledWorkshopProjectIds = new Set(['proj_keep']);
+    store.enabledCharacterEntryUids = new Set(['uid_keep']);
+    store.enabledCharacterDefinitionIds = new Set(['def_keep']);
+    store.setOpeningPromptText('玩家改写的开场');
+
+    store.applyPresetData(data, 'persona');
+
+    expect(store.name).toBe('预设人');
+    expect(store.gender).toBe('女');
+    expect(store.age).toBe(30);
+    expect(store.birthday).toEqual({ month: 9, day: 9 });
+    expect(store.race).toBe('占位羽族');
+    expect(store.identity).toBe('自定义');
+    expect(store.customIdentity).toBe('游方学者');
+    expect(store.level).toBe(4);
+    expect(store.attributePoints['力量']).toBe(1);
+    expect(store.usedBP).toBe(25);
+    expect(store.personality).toBe('沉静');
+    expect(store.physics).toBe('瘦高');
+    expect(store.backstory).toBe('出身边境');
+    expect(store.extra).toBe('怕水');
+    expect(store.selectedEquipments.map((e) => e.id)).toEqual([FIXTURE_EQUIPMENT_POOL[0].id]);
+    expect(store.selectedItems.map((i) => i.id)).toEqual([FIXTURE_ITEM_POOL[0].id]);
+
+    expect(store.difficulty?.id).toBe('normal');
+    expect(store.money).toBe(10);
+    expect(store.destinyPoints).toBe(3);
+    expect(store.startLocation).toBe(locationBefore);
+    expect(store.selectedBackground?.id).toBe(FIXTURE_BACKGROUNDS[1].id);
+    expect(store.selectedSystemCoreEntryUid).toBe(FIXTURE_CORE_UID);
+    expect(store.plotMode).toBe('side');
+    expect(store.plotOutline?.title).toBe('现有大纲');
+    // 开局提示词改写与扩展 / 角色勾选同属「这次开局」，人设范围不碰
+    expect(store.openingPromptEdited).toBe(true);
+    expect(store.openingPromptText).toBe('玩家改写的开场');
+    expect([...store.enabledWorkshopProjectIds]).toEqual(['proj_keep']);
+    expect([...store.enabledCharacterEntryUids]).toEqual(['uid_keep']);
+    expect([...store.enabledCharacterDefinitionIds]).toEqual(['def_keep']);
+  });
+
+  it('缺省 scope 仍是整份套用', () => {
+    const source = makeStore();
+    source.selectDifficulty('creative');
+    source.money = 999;
+    const store = makeStore();
+    store.selectDifficulty('normal');
+    store.applyPresetData(asPreset(source.getCurrentPresetData()));
+    expect(store.difficulty?.id).toBe('creative');
+    expect(store.money).toBe(999);
+  });
+
+  it('人设范围同样截断超限等级并返回原等级', () => {
+    const source = makeStore();
+    const data = asPreset(source.getCurrentPresetData());
+    data.character.level = MAX_START_LEVEL + 5;
+    const store = makeStore();
+    expect(store.applyPresetData(data, 'persona')).toBe(MAX_START_LEVEL + 5);
+    expect(store.level).toBe(MAX_START_LEVEL);
+  });
+});
+
+describe('自制条目库并入选择步骤', () => {
+  afterEach(async () => {
+    await clearAllData();
+  });
+
+  const customSword: CatalogItem = {
+    id: 'custom_equipment_abcd1234',
+    name: '自制短剑',
+    category: 'equipment',
+    type: '武器',
+    rarity: 'rare',
+    tag: [],
+    effect: {},
+    description: '自己打的',
+    cost: 15,
+  };
+
+  it('当前大分类有库条目时出现在「我的自定义」组且排在最前；删除后消失', async () => {
+    const store = makeStore();
+    const library = useCreateCustomLibraryStore();
+    await library.init();
+    store.activeCategory = 'equipment';
+    expect(store.subCategories).not.toContain(CUSTOM_LIBRARY_GROUP);
+
+    const saved = await library.save(customSword);
+    expect(saved.ok).toBe(true);
+    expect(store.subCategories[0]).toBe(CUSTOM_LIBRARY_GROUP);
+    expect(store.filteredPool.map((i) => i.id)).toContain(customSword.id);
+    store.typeFilter = CUSTOM_LIBRARY_GROUP;
+    expect(store.filteredPool.map((i) => i.id)).toEqual([customSword.id]);
+
+    store.typeFilter = 'all';
+    store.activeCategory = 'item';
+    expect(store.subCategories).not.toContain(CUSTOM_LIBRARY_GROUP);
+    expect(store.filteredPool.map((i) => i.id)).not.toContain(customSword.id);
+
+    store.activeCategory = 'equipment';
+    store.selectDifficulty('creative');
+    const card = store.filteredPool.find((i) => i.id === customSword.id)!;
+    expect(store.selectCatalogItem(card)).toBe(true);
+    expect(store.selectedEquipments.map((e) => e.id)).toContain(customSword.id);
+
+    expect((await library.remove(customSword.id)).ok).toBe(true);
+    expect(store.subCategories).not.toContain(CUSTOM_LIBRARY_GROUP);
+    expect(store.filteredPool.map((i) => i.id)).not.toContain(customSword.id);
+  });
+});
+
+describe('resetAll 清空主角文字设定与生日', () => {
+  it('性格 / 身材 / 身世 / 补充说明 / 生日回到空，且不进新草稿', () => {
+    const store = makeStore();
+    store.personality = '旧性格';
+    store.physics = '旧身材';
+    store.backstory = '旧身世';
+    store.extra = '旧补充';
+    store.birthday = { month: 1, day: 2 };
+    store.resetAll();
+    expect(store.personality).toBe('');
+    expect(store.physics).toBe('');
+    expect(store.backstory).toBe('');
+    expect(store.extra).toBe('');
+    expect(store.birthday).toBeNull();
+
+    store.name = '新主角';
+    store.autoSaveDraft();
+    const store2 = makeStore();
+    expect(store2.name).toBe('新主角');
+    expect(store2.personality).toBe('');
+    expect(store2.backstory).toBe('');
   });
 });

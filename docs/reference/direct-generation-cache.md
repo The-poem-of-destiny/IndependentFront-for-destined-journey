@@ -58,6 +58,8 @@
 
 📌 2026-11-17 修正：上文「每轮重新确认当前战斗与人物资源」与 2026-11-14 条里的「战斗与资源」，在 `directStructuredCombat` 关闭（当前唯一可用状态）时只剩人物资源：`direct_context` 与 `turn_context.current` 都不再带 `combat` 键，战斗只在正文里。
 
+📌 2026-11-20 修正：`character/角色名/profile` 不再带 `ageAnchor` 原值，也不再带开局时冻结的 `customFields.age`，改为经 `projectCharacterAge`（`src/core/character/character-age.ts`）按当前游戏时间现算的 `age`；只有给定了生日才另带 `birthday: 'M月D日'`，兜底的 1 月 1 日不展示。协议文字加一句：`age` 与 `birthday` 由代码现算，只读。每过一个生日，该角色的 `profile` 分区重发一次。协议文字与 `profile` 内容都变了，已有 `direct_cached` 存档会自动冷建一次。
+
 普通内置预设把引擎追加的动态上下文移到末尾。静态世界书留在固定前缀；区域与本轮资料进入可替换分区。Story v2 复用五区装配与单次 EJS 渲染，记忆区进入可折叠基线。在优化布局中，最新召回仅由 `turn_context.recall` 提供，当前时间与资源从结构化状态提供；角色档案、编年史和随机事件继续保留。保留作者原布局的旧模板兼容路径仍可能存在重复数据。
 
 自定义模板或包含宏的旧预设默认保留作者布局；动态值仍位于前缀时会触发重建。预设作者可在 `settings.prompts` 的条目上明确设置 `directCachePlacement: "turn"`，允许缓存直出将该条目作为 `authoredTurn` 放到当前轮。未标记条目仍在原位置；Agent 和普通直出忽略此标记。条目间共享 ST 定义仍先统一处理，再分区。可通过预设 JSON 导入配置，例如：

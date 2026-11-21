@@ -1862,6 +1862,11 @@ export interface CreatePreset {
     gender: string;
     customGender?: string;
     age: number;
+    /**
+     * 主角生日（12 个月 × 30 天历法，月 1-12、日 1-30）。可选；旧预设缺省或 null 读作「未填」，
+     * 建档时由 `ensureCharacterAge` 兜底为 1 月 1 日。
+     */
+    birthday?: { month: number; day: number } | null;
     race: string;
     customRace?: string;
     identity: string;

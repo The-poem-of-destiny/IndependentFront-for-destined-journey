@@ -74,6 +74,7 @@ import type { PersistedPromptSession } from '../prompts/prompt-session-assembler
 // type-only：战斗沙盒在办战斗行（v27）—— sandbox/types.ts 是纯类型册，运行时不成环
 import type { CombatSandboxRecord } from '../combat/sandbox/types';
 import type { EngineLogEntry } from '../runtime/engine-logger';
+import type { CatalogItem } from '../content/start-catalog-mechanics';
 
 /** 捏人预设记录 (DB 存储格式) */
 export interface CreatePresetRecord {
@@ -82,6 +83,22 @@ export interface CreatePresetRecord {
   createdAt: number;
   updatedAt: number;
   data: CreatePreset;
+}
+
+/**
+ * 玩家自制开局条目（技能 / 物品 / 装备）全局库的行（v35）。
+ *
+ * **全局**：不随存档隔离、删存档不动它（与 imagePresets 同口径），进 FullBackup。
+ * 逻辑键是「类别 + 名称」：同名再存会替换旧行（规划见 `content/start-custom-entries.ts`
+ * 的 `planLibrarySave`）。`data` 读出后仍须经 `sanitizeCustomCatalogItem` 收窄。
+ */
+export interface CreateCustomItemRecord {
+  id: string;
+  category: CatalogItem['category'];
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  data: CatalogItem;
 }
 
 /**
@@ -235,7 +252,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 升版时这两处一起改。
  */
 // v30 = 战斗沙盒 combatSandboxes（本分支），在 master 的 v29 之后顺延。
-export const DB_VERSION = 34;
+export const DB_VERSION = 35;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -335,6 +352,8 @@ class AppDatabase extends Dexie {
 
   // v7 new table (Phase 7d)
   createPresets!: Table<CreatePresetRecord>;
+  // v35 自制开局条目全局库（不随存档删除，进 FullBackup）
+  createCustomItems!: Table<CreateCustomItemRecord>;
 
   // v8 new table (Phase 10h)
   messages!: Table<ChatMessage>;
@@ -876,6 +895,8 @@ class AppDatabase extends Dexie {
     this.version(33).stores({ saveCalendars: 'saveId' });
     // 引擎日志：只加表。saveId 为空串 = 应用级，layer 0 = 无回合（约定见 engine-logger.ts）
     this.version(34).stores({ engineLogs: '++seq, [saveId+layer]' });
+    // 自制开局条目全局库：只加表。主键是条目 id（`custom_<category>_<uuid8>`）
+    this.version(35).stores({ createCustomItems: 'id, category, updatedAt' });
   }
 }
 
@@ -953,6 +974,8 @@ export interface FullBackup {
   saveProfiles: SaveProfile[];
   // v7 Phase 7d
   createPresets: CreatePresetRecord[];
+  /** v35 自制开局条目全局库；旧备份缺席 = 导入时整表不动，[] = 清空 */
+  createCustomItems?: CreateCustomItemRecord[];
   // v8 Phase 10h
   messages: ChatMessage[];
   // v14 创意工坊 / 世界书迁出 localStorage（设计 D5）—— 旧备份缺这两个字段，导入侧必须容忍
@@ -1008,6 +1031,7 @@ export async function exportAllData(): Promise<FullBackup> {
     plotOutlines,
     saveProfiles,
     createPresets,
+    createCustomItems,
     messages,
     worldBooks,
     workshopProjects,
@@ -1034,6 +1058,7 @@ export async function exportAllData(): Promise<FullBackup> {
     db.plotOutlines.toArray(),
     db.saveProfiles.toArray(),
     db.createPresets.toArray(),
+    db.createCustomItems.toArray(),
     db.messages.toArray(),
     db.worldBooks.toArray(),
     db.workshopProjects.toArray(),
@@ -1063,6 +1088,7 @@ export async function exportAllData(): Promise<FullBackup> {
     plotOutlines,
     saveProfiles,
     createPresets,
+    createCustomItems,
     messages,
     worldBooks,
     workshopProjects,
@@ -1127,6 +1153,7 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'plotOutlines',
     'saveProfiles',
     'createPresets',
+    'createCustomItems',
     'messages',
     // v14 新增 —— 此循环只在字段**存在且非数组**时报错，旧备份缺这两个字段照常通过
     'worldBooks',
@@ -1294,6 +1321,16 @@ async function doImportAllData(
   await db.transaction('rw', db.createPresets, async () => {
     await db.createPresets.clear();
     if (Array.isArray(backup.createPresets)) await db.createPresets.bulkPut(backup.createPresets);
+  });
+
+  // v35 自制开局条目全局库 —— 三态语义：缺席（旧备份）整表不动 / [] 清空 / 有数据整表覆盖
+  await db.transaction('rw', db.createCustomItems, async () => {
+    if (backup.createCustomItems !== undefined) {
+      await db.createCustomItems.clear();
+      if (Array.isArray(backup.createCustomItems)) {
+        await db.createCustomItems.bulkPut(backup.createCustomItems);
+      }
+    }
   });
 
   await db.transaction('rw', db.messages, async () => {
@@ -2650,6 +2687,35 @@ export async function saveCreatePreset(preset: CreatePresetRecord): Promise<stri
 
 export async function deleteCreatePreset(id: string): Promise<void> {
   await getDatabase().createPresets.delete(id);
+}
+
+// ========== Create Custom Items (v35) ==========
+// 自制开局条目全局库：不随存档隔离、删存档不动它。
+
+/** 全部自制条目，最近更新在前 */
+export async function getCreateCustomItems(): Promise<CreateCustomItemRecord[]> {
+  return getDatabase().createCustomItems.orderBy('updatedAt').reverse().toArray();
+}
+
+/**
+ * 写入一条自制条目，并在**同一事务**里删掉被它替换的旧行（同类别同名，见 `planLibrarySave`）。
+ * `replaceIds` 里若混进 `record.id` 本身会被忽略，不会把刚写的行删掉。
+ */
+export async function saveCreateCustomItem(
+  record: CreateCustomItemRecord,
+  replaceIds: readonly string[] = [],
+): Promise<string> {
+  const db = getDatabase();
+  const stale = replaceIds.filter((id) => id !== record.id);
+  await db.transaction('rw', db.createCustomItems, async () => {
+    if (stale.length > 0) await db.createCustomItems.bulkDelete(stale);
+    await db.createCustomItems.put(record);
+  });
+  return record.id;
+}
+
+export async function deleteCreateCustomItem(id: string): Promise<void> {
+  await getDatabase().createCustomItems.delete(id);
 }
 
 // ═══════════════════════════════════════════════════════════

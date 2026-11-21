@@ -52,7 +52,7 @@ src/core/                    ← 核心引擎
   │
   ├── persistence/create-journey.ts             ← 新旅程唯一原子落库入口（角色/存档/档案/大纲/事件同一事务）
   │       📌 2026-11-20：开事务**之前**拒收不在 [1, `MAX_START_LEVEL`] 的整数初始等级（只拒收不截断，失败不留记录）
-  ├── persistence/database.ts                   ← Dexie/IndexedDB v34
+  ├── persistence/database.ts                   ← Dexie/IndexedDB v35
   │       🔴 `DB_VERSION` 常量必须等于最后一个 `this.version(n)`。它只出现在
   │          `FullBackup.version` 上、导入侧不拿它做判断，所以**对不上不会有任何报错**，
   │          只是每份导出的备份都盖了过期的戳。它曾经落后两版（v18/v19 忘了改），
@@ -145,11 +145,16 @@ src/core/                    ← 核心引擎
   │                 不清的话恢复旧备份后会续上「未来」的战斗、沿用更晚的 delta transcript。
   │                 放在导入成功之后而非 `doImportAllData` 内：失败回滚时这些缓存仍与回滚后的状态一致。
   │                 `engineLogs`（诊断）与 `sceneImageBlobs`（备份不带字节）刻意不清
-  │   └── v34+: engineLogs（引擎日志，2026-11-16）—— `++seq, [saveId+layer]`；saveId 空串 = 应用级、
+  │   ├── v34: engineLogs（引擎日志，2026-11-16）—— `++seq, [saveId+layer]`；saveId 空串 = 应用级、
   │              layer 0 = 无回合。每存档留最近 100 个回合层，层 0 每 (saveId, 0) 桶 ≤2000 条。
   │              不进 FullBackup / 单存档导出，删档级联删。🔴 与 debugTurns 等派生表**相反**：
   │              装着受保护内容包时**照常落盘**（主人裁定，明文风险写在开关说明里），每次启动的
   │              `purgeProtectedPackPlaintext` 与内容包安装事务都**不清**它；只有一次性的旧包迁移会清
+  │   └── v35+: createCustomItems（玩家自制开局条目全局库，2026-11-20）—— `id, category, updatedAt`；
+  │              **全局**（同 imagePresets：不随存档隔离、删存档不动），进 FullBackup，
+  │              可选字段三态导入：缺席（旧备份）整表不动 / `[]` 清空 / 有数据整表覆盖。
+  │              同「类别 + 名称」视为同一条目，替换与写入同事务（`saveCreateCustomItem` 的 `replaceIds`）；
+  │              纯函数 `content/start-custom-entries.ts`（`sanitizeCustomCatalogItem` / `planLibrarySave`）
   │
   ├── persistence/engine-log-store.ts           ← [引擎日志 / 2026-11-16] sink 的 Dexie 实现（`createDexieEngineLogSink`，
   │      写入时按层淘汰）+ 导出分页 / JSONL 行 / 统计 / 清空 / 查最大层号。不进 withSaveWriteLock；

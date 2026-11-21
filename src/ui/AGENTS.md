@@ -438,6 +438,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │           （改写后建档输入又变了）/ `setOpeningPromptText` / `restoreDefaultOpeningPrompt`；清空改写稿进缺失项。
 │   │           改写稿随向导草稿保存（`openingPromptDraft` / `openingPromptDraftBase` 可选字段，不升草稿版本），
 │   │           加载预设与重置都回到跟随默认
+│   │      📌 2026-11-20（角色预设 / 生日 / 自制条目库）：
+│   │         ①`birthday`（月 1-12、日 1-30，null = 未填）：填了才写 `customFields.birthday` 线索、进开场提示词「生日」行，
+│   │           随预设（`CreatePreset.character.birthday`）与草稿保存（可选字段，不升草稿版本）
+│   │         ②`applyPresetData(data, 'persona')` 只替换主角本人（身份 / 属性 / 性格外貌身世 / 已选装备道具技能），
+│   │           难度、金钱命运点、起始地点、背景、命定核心、剧情与开局提示词改写保持不动
+│   │         ③`resetAll` 清空性格 / 身材 / 身世 / 补充设定 / 生日 —— 此前上一个主角的文本会漏进下一个新档
+│   │         ④`activeGroups` 把自制条目库并成「我的自定义」组（`CUSTOM_LIBRARY_GROUP`），`subCategories` 恒排最前
 │   ├── game-store.ts                ← 时间线恢复唯一 UI 编排边界：rollbackOneTurn /
 │   │                                   restoreToSnapshot / restartCombat 共用私有 restoreTimeline；
 │   │                                   三态结果区分恢复前拒绝、完整恢复、权威已恢复但投影失败。
@@ -658,6 +665,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      getSceneImageUsage / listCleanableSceneImageIds /
 │   │                                      dropSceneImageBlobs。本店那份重复实现已删（生产零调用方，
 │   │                                      且与引擎那份类型同名、字段不同，import 写错就换了套语义）
+│   ├── create-custom-library-store.ts ← [2026-11-20] 玩家自制开局条目（技能 / 物品 / 装备）全局库唯一读写口，
+│   │                                   真源 Dexie v35 `createCustomItems`（全局，删存档不动，进 FullBackup）。
+│   │                                   读出逐行过 `sanitizeCustomCatalogItem`，坏行不显示也不删；写入走
+│   │                                   `planLibrarySave`（同类别同名替换旧行，同事务；替换对象按写入前现读的库算）。
+│   │                                   选择步骤每次挂载都 `refresh()`（整库导入不刷新页面）；读失败不算加载过。🔴 只收 `custom_` 前缀 id
 │   ├── image-preset-store.ts        ← [图像 v1] 角色视觉预设 CRUD。**地点已随 D59 废除**，
 │   │                                   `ImagePresetKind` 只剩 'character'（表结构不动，v18 删了那些行）
 │   │                                   🔴 主键 = `${kind}:${name}` —— 幻想设定里人名与地名撞车是会发生的
@@ -1024,7 +1036,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── SelectableCard.vue / SelectedPanel.vue ← 可选卡片 + 已选面板（选择步骤的两半）
 │   │   ├── BackgroundList.vue / CustomItemForm.vue / PlotOutlinePreview.vue
 │   │   │                                 ← 背景列表 / 自定义条目录入 / 大纲预览
-│   │   ├── PresetModal.vue          ← 捏人预设弹窗
+│   │   │                                   （📌 2026-11-20：CustomItemForm 有「保存到我的自定义库」勾选；
+│   │   │                                   库内卡片在 SelectableCard 上可删除）
+│   │   ├── PresetModal.vue          ← 捏人预设弹窗（📌 2026-11-20：+重命名 / 仅载入主角；详情显示年龄与生日）
 │   │   ├── CreateFooter.vue         ← 上一步/下一步/校验提示（各步共用，别在步骤里各画一套）
 │   │       测试位于 tests/ui/components/create/ ← AttributeEditor / PointsBar / SelectableCard / CreateSteps /
 │   │                                   CreateStepDestinyCore / CreateStepConfirm.assets

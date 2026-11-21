@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { shallowMount } from '@vue/test-utils';
 import { reactive } from 'vue';
+import { setActivePinia, createPinia } from 'pinia';
 import CreateStepSelections from '../../../../src/ui/components/create/CreateStepSelections.vue';
 import type { CatalogItem } from '@engine/content/start-catalog';
 
@@ -29,6 +30,8 @@ const cheap: CatalogItem = {
 const pricey: CatalogItem = { ...cheap, id: 'e_剑类_神兵', name: '神兵', cost: 5000 };
 
 beforeEach(() => {
+  // 「我的自定义」库 store 与 ui-store 是真 Pinia store（库挂载即 init，读 fake-indexeddb 空库）
+  setActivePinia(createPinia());
   mockCreate = reactive({
     activeCategory: 'equipment',
     rarityFilter: 'all',

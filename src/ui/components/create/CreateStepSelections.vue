@@ -4,8 +4,11 @@
  *
  * 布局: 选择区(固定高度,内部滚动) + 伙伴区(下方独立)
  */
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useCreateStore } from '../../stores/create-store';
+import { useCreateCustomLibraryStore } from '../../stores/create-custom-library-store';
+import { useUIStore } from '../../stores/ui-store';
+import { confirmDialog } from '../../lib/confirm-dialog';
 import type { CatalogItem } from '@engine/content/start-catalog';
 import CategorySelectionLayout from './CategorySelectionLayout.vue';
 import CategoryTabs from './CategoryTabs.vue';
@@ -16,11 +19,31 @@ import CustomItemForm from './CustomItemForm.vue';
 import AppButton from '../shared/AppButton.vue';
 
 const store = useCreateStore();
+const library = useCreateCustomLibraryStore();
+const ui = useUIStore();
 const showCustomForm = ref(false);
 
 const editingItem = ref<CatalogItem | null>(null);
 
-function handleCustomSave(item: CatalogItem) {
+// 「我的自定义」全局库：create-store 不负责加载，由本步骤每次挂载时重读。
+// 整库备份导入不刷新页面，只在首次挂载读一次会一直显示导入前的旧条目。
+onMounted(() => {
+  void library.refresh();
+});
+
+/** 编辑中的条目是否已在库里（决定表单里「保存到我的自定义库」的初始勾选） */
+const editingInLibrary = computed(() =>
+  editingItem.value ? library.has(editingItem.value.id) : false,
+);
+
+async function saveToLibrary(item: CatalogItem) {
+  const result = await library.save(item);
+  if (!result.ok) ui.toast(result.message, 'error');
+}
+
+function handleCustomSave(item: CatalogItem, options?: { toLibrary: boolean }) {
+  // 不勾选时绝不碰库；勾选时存一份（同类别同名替换旧条目）
+  if (options?.toLibrary) void saveToLibrary(item);
   if (editingItem.value) {
     if (item.category === 'equipment') store.updateEquipment(item);
     else if (item.category === 'item') store.updateItem(item);
@@ -56,6 +79,22 @@ function handleSelect(item: CatalogItem) {
   // C-05：经 store 的统一闸门添加，点数不足/限制不符时什么都不加
   store.selectCatalogItem(item);
 }
+/**
+ * 从「我的自定义」库删除一条：只删库里那份，当前配置里已选的同名副本保持选中
+ * （选中的是 create-store 里的独立副本，库删除不回头改它）。
+ */
+async function handleLibraryDelete(item: CatalogItem) {
+  const confirmed = await confirmDialog({
+    title: `从我的自定义库删除「${item.name}」？`,
+    message: '删除后它不再出现在「我的自定义」里；当前已选中的这一项不受影响。',
+    confirmLabel: '删除',
+    danger: true,
+  });
+  if (!confirmed) return;
+  const result = await library.remove(item.id);
+  if (!result.ok) ui.toast(result.message, 'error');
+}
+
 function handleRemove(item: CatalogItem) {
   if (item.category === 'equipment') store.removeEquipment(item.id);
   else if (item.category === 'item') store.removeItem(item.id);
@@ -139,8 +178,10 @@ const visiblePool = computed(() => {
             :selected="store.isSelected(item)"
             :disabled="!store.canSelect(item)"
             :disabled-reason="store.selectBlockReason(item)"
+            :deletable="library.has(item.id)"
             @select="handleSelect"
             @remove="handleRemove"
+            @delete="handleLibraryDelete"
           />
         </template>
 
@@ -178,6 +219,7 @@ const visiblePool = computed(() => {
       :visible="showCustomForm"
       :edit-item="editingItem"
       :available-points="customFormAvailablePoints"
+      :in-library="editingInLibrary"
       @save="handleCustomSave"
       @close="handleCustomClose"
     />

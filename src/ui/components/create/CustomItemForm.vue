@@ -18,9 +18,11 @@ const props = defineProps<{
    * 传入时，消耗超过它就在表单里就地写出保存后会超支多少；不传则不提示。
    */
   availablePoints?: number;
+  /** 编辑的条目已在「我的自定义」全局库里时为 true，决定「保存到我的自定义库」的初始勾选 */
+  inLibrary?: boolean;
 }>();
 const emit = defineEmits<{
-  save: [item: CatalogItem];
+  save: [item: CatalogItem, options: { toLibrary: boolean }];
   close: [];
 }>();
 
@@ -59,6 +61,10 @@ const itemConsume = ref('');
 const itemDescription = ref('');
 const itemQuantity = ref(1);
 const itemCost = ref(50);
+/** 保存时是否同时存进「我的自定义」全局库（不勾选时绝不碰库） */
+const saveToLibrary = ref(false);
+/** 库只收 `custom_` 开头的 id：编辑目录条目时不提供这个选项 */
+const canSaveToLibrary = computed(() => !props.editItem || props.editItem.id.startsWith('custom_'));
 
 /** 保存后的超支额（道具按数量计）；0 = 不超支或未提供可用点数 */
 const overspendAfterSave = computed(() => {
@@ -122,7 +128,7 @@ function handleSave() {
         ? Object.fromEntries(Object.entries(itemStats.value).filter(([, v]) => v && v > 0))
         : undefined,
   };
-  emit('save', item);
+  emit('save', item, { toLibrary: canSaveToLibrary.value && saveToLibrary.value });
   resetForm();
   emit('close');
 }
@@ -141,6 +147,7 @@ function resetForm() {
   itemQuantity.value = 1;
   itemCost.value = 50;
   itemStats.value = {};
+  saveToLibrary.value = false;
 }
 
 // 分类切换时重置类型
@@ -165,6 +172,15 @@ watch(
     itemQuantity.value = item.quantity ?? 1;
     itemCost.value = item.cost ?? 50;
     itemStats.value = { ...(item.stats || {}) };
+  },
+  { immediate: true },
+);
+
+// 勾选初值：打开表单 / 换编辑对象时按「是否已在库中」重置
+watch(
+  () => [props.visible, props.editItem, props.inLibrary] as const,
+  () => {
+    saveToLibrary.value = !!props.inLibrary;
   },
   { immediate: true },
 );
@@ -285,6 +301,11 @@ watch(
         />
       </div>
 
+      <label v-if="canSaveToLibrary" class="library-toggle">
+        <input v-model="saveToLibrary" type="checkbox" class="library-checkbox" />
+        <span>保存到我的自定义库</span>
+      </label>
+
       <div class="form-footer">
         <AppButton variant="primary" @click="handleSave">确认添加</AppButton>
         <AppButton variant="ghost" @click="emit('close')">取消</AppButton>
@@ -380,6 +401,14 @@ watch(
   justify-content: center;
   gap: var(--theme-spacing-sm);
   margin-top: var(--theme-spacing-sm);
+}
+.library-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-xs);
+  font-size: 0.8rem;
+  color: var(--theme-text-secondary);
+  cursor: pointer;
 }
 .overspend-hint {
   margin: -4px 0 0;

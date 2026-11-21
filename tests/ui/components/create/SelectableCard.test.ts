@@ -127,3 +127,29 @@ describe('SelectableCard', () => {
     expect(wrapper.find('.card-blocked').exists()).toBe(false);
   });
 });
+
+describe('SelectableCard — 我的自定义删除按钮', () => {
+  it('默认不显示删除按钮', () => {
+    const wrapper = mount(SelectableCard, { props: { item: testItem, selected: false } });
+    expect(wrapper.find('.card-delete').exists()).toBe(false);
+  });
+
+  it('★ deletable 时显示带无障碍名称的删除按钮，点击只 emit delete 不触发 select', async () => {
+    const wrapper = mount(SelectableCard, {
+      props: { item: testItem, selected: false, deletable: true },
+    });
+    const btn = wrapper.find('.card-delete');
+    expect(btn.attributes('aria-label')).toBe('从我的自定义库删除「测试剑」');
+    await btn.trigger('click');
+    expect(wrapper.emitted('delete')?.[0]).toEqual([testItem]);
+    expect(wrapper.emitted('select')).toBeUndefined();
+  });
+
+  it('禁用态下删除按钮仍可用', async () => {
+    const wrapper = mount(SelectableCard, {
+      props: { item: testItem, selected: false, disabled: true, deletable: true },
+    });
+    await wrapper.find('.card-delete').trigger('click');
+    expect(wrapper.emitted('delete')).toHaveLength(1);
+  });
+});

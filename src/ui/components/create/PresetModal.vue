@@ -116,13 +116,104 @@ async function handleLoad(preset: CreatePresetRecord) {
     if (!confirmed) return;
   }
   const clampedFrom = store.applyPresetData(preset.data);
-  if (clampedFrom != null) {
-    ui.toast(
-      `预设「${preset.name}」原为 Lv.${clampedFrom}，超过初始等级上限，已调整为 Lv.${MAX_START_LEVEL}；额外属性点已清空，请重新分配。`,
-      'warning',
-    );
-  }
+  warnIfClamped(preset, clampedFrom);
   emit('close');
+}
+
+/** 预设等级被截到开局上限时提示一次（整份载入与仅载入主角同一口径） */
+function warnIfClamped(preset: CreatePresetRecord, clampedFrom: number | null) {
+  if (clampedFrom == null) return;
+  ui.toast(
+    `预设「${preset.name}」原为 Lv.${clampedFrom}，超过初始等级上限，已调整为 Lv.${MAX_START_LEVEL}；额外属性点已清空，请重新分配。`,
+    'warning',
+  );
+}
+
+/**
+ * 「仅载入主角」：只替换主角本人（身份、属性、性格外貌身世与初始配置），
+ * 难度、金钱命运点、起始地点、背景、命定核心、剧情与开局提示词改写保持不动。
+ */
+async function handleLoadPersona(preset: CreatePresetRecord) {
+  if (store.hasDraftContent) {
+    const confirmed = await confirmDialog({
+      title: `仅载入预设「${preset.name}」的主角？`,
+      message: '只替换主角本人，其余设置保留当前填写。',
+      details: [
+        '替换：姓名、性别、年龄、生日、种族、身份、等级与属性分配',
+        '替换：性格、身材、身世、补充设定，以及已选装备、道具与技能',
+        '保留：难度、金钱与命运点数、起始地点、背景',
+        '保留：命定核心、剧情设置与大纲、开局提示词改写',
+      ],
+      confirmLabel: '载入主角',
+      danger: true,
+    });
+    if (!confirmed) return;
+  }
+  const clampedFrom = store.applyPresetData(preset.data, 'persona');
+  warnIfClamped(preset, clampedFrom);
+  emit('close');
+}
+
+// 重命名（行内编辑）
+const renamingId = ref<string | null>(null);
+const renameDraft = ref('');
+const renameError = ref('');
+
+function startRename(preset: CreatePresetRecord) {
+  deleteConfirmId.value = null;
+  overwriteConfirmId.value = null;
+  renamingId.value = preset.id;
+  renameDraft.value = preset.name;
+  renameError.value = '';
+}
+
+function cancelRename() {
+  renamingId.value = null;
+  renameDraft.value = '';
+  renameError.value = '';
+}
+
+async function handleRename(preset: CreatePresetRecord) {
+  const name = renameDraft.value.trim();
+  if (!name) {
+    renameError.value = '名称不能为空';
+    return;
+  }
+  if (name === preset.name) {
+    cancelRename();
+    return;
+  }
+  if (presets.value.some((p) => p.id !== preset.id && p.name === name)) {
+    renameError.value = `已有名为「${name}」的预设`;
+    return;
+  }
+  try {
+    busy.value = true;
+    const now = Date.now();
+    // 记录外壳与 data 内的名字同步改；id / createdAt 不动
+    const cleanData = JSON.parse(JSON.stringify(preset.data)) as CreatePreset;
+    await saveCreatePreset({
+      id: preset.id,
+      name,
+      createdAt: preset.createdAt,
+      updatedAt: now,
+      data: { ...cleanData, name, updatedAt: now },
+    });
+    cancelRename();
+    await loadPresets();
+  } catch (err) {
+    console.error('[PresetModal] 重命名预设失败:', err);
+    renameError.value = '重命名失败，请检查浏览器存储空间。';
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** 生日显示为「M月D日」，缺省为「未设置」 */
+function formatBirthday(p: CreatePresetRecord): string {
+  const b = p.data.character?.birthday;
+  if (!b || !b.month || !b.day) return '未设置';
+  return `${b.month}月${b.day}日`;
 }
 
 async function handleDelete(id: string) {
@@ -351,6 +442,13 @@ const busy = ref(false);
                 ><span>{{ p.data.character?.gender || '-' }}</span>
               </div>
               <div class="detail-row">
+                <span class="detail-label">年龄</span
+                ><span>{{ p.data.character?.age || '-' }}</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">生日</span><span>{{ formatBirthday(p) }}</span>
+              </div>
+              <div class="detail-row">
                 <span class="detail-label">种族</span
                 ><span>{{ p.data.character?.race || '-' }}</span>
               </div>
@@ -414,8 +512,37 @@ const busy = ref(false);
             >
             <AppButton size="sm" variant="ghost" @click="overwriteConfirmId = null">取消</AppButton>
           </template>
+          <template v-else-if="renamingId === p.id">
+            <div class="rename-row">
+              <input
+                v-model="renameDraft"
+                class="preset-input rename-input"
+                data-test="preset-rename-input"
+                aria-label="新的预设名称"
+                :disabled="busy"
+                @keyup.enter="handleRename(p)"
+                @input="renameError = ''"
+              />
+              <AppButton size="sm" :disabled="busy" @click="handleRename(p)">确认</AppButton>
+              <AppButton size="sm" variant="ghost" @click="cancelRename">取消</AppButton>
+            </div>
+            <span v-if="renameError" class="rename-error" data-test="preset-rename-error">{{
+              renameError
+            }}</span>
+          </template>
           <template v-else>
             <AppButton size="sm" :disabled="busy" @click="handleLoad(p)">加载</AppButton>
+            <AppButton
+              size="sm"
+              variant="ghost"
+              :disabled="busy"
+              title="只替换主角本人，其余设置保留"
+              @click="handleLoadPersona(p)"
+              >仅载入主角</AppButton
+            >
+            <AppButton size="sm" variant="ghost" :disabled="busy" @click="startRename(p)"
+              >重命名</AppButton
+            >
             <AppButton
               size="sm"
               variant="ghost"
@@ -634,6 +761,22 @@ const busy = ref(false);
   gap: var(--theme-spacing-xs);
   padding: var(--theme-spacing-xs) var(--theme-spacing-md) var(--theme-spacing-sm);
   justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.rename-row {
+  display: flex;
+  gap: var(--theme-spacing-xs);
+  flex: 1;
+  min-width: 0;
+}
+.rename-input {
+  min-width: 0;
+}
+.rename-error {
+  flex-basis: 100%;
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--theme-error);
 }
 
 /* ── 底部 ── */
