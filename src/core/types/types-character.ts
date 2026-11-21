@@ -88,6 +88,8 @@ export interface CharacterUpdatesParseResult {
   present: boolean;
   updates: CharacterNarrativeUpdate[];
   warnings: string[];
+  /** 解析前的无损形状纠正记录（如剥代码围栏、clothing→outfit），不算警告。 */
+  notes: string[];
 }
 
 export interface CharacterChronicleEntry extends Omit<CharacterChronicleDraft, 'time'> {

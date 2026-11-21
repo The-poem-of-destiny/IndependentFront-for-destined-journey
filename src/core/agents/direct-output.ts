@@ -22,6 +22,38 @@ import {
 import { projectStoryOutput, STORY_ENVELOPE_TAGS } from '../story/story-output';
 import type { DirectCombatOutput } from '../combat/direct-combat';
 import type { DirectDicePool } from './direct-dice';
+import { extractJsonPayload } from '../utils/model-json';
+import {
+  DIRECT_AFFECTION_OPERATIONS,
+  DIRECT_ASCENSION_LIST_KEYS,
+  DIRECT_ATTRIBUTE_KEYS,
+  DIRECT_CHARACTER_FIELDS,
+  DIRECT_CHARACTER_LIST_FIELDS,
+  DIRECT_CHARACTER_OPERATIONS,
+  DIRECT_CHARACTER_TEXT_FIELDS,
+  DIRECT_DELTA_PATHS,
+  DIRECT_EFFECT_ACTIONS,
+  DIRECT_EFFECT_CATEGORIES,
+  DIRECT_EFFECT_REMOVE_KEYS,
+  DIRECT_EFFECT_ROW_KEYS,
+  DIRECT_EFFECT_TIME_UNITS,
+  DIRECT_EFFECT_UPDATE_KEYS,
+  DIRECT_ENTITY_LIST_KEYS,
+  DIRECT_ENTITY_OUTPUT_KEYS,
+  DIRECT_ENTITY_ROW_KEYS,
+  DIRECT_FORBIDDEN_KEYS,
+  DIRECT_ITEM_MODIFY_KEYS,
+  DIRECT_ITEM_OPERATIONS,
+  DIRECT_PLOT_KEYS,
+  DIRECT_QUEST_OPERATIONS,
+  DIRECT_REMOVE_PATHS,
+  DIRECT_SECTIONS,
+  DIRECT_STATE_KEYS,
+  DIRECT_STRIPPED_KEYS,
+  DIRECT_WORLD_KEYS,
+  DIRECT_WORLD_RESERVED_SEGMENTS,
+} from './direct-contract';
+import { normalizeDirectUpdates } from './direct-normalize';
 
 type Row = Record<string, unknown>;
 export interface DirectUpdates {
@@ -60,11 +92,15 @@ export interface DirectTurnDraft {
   combatIgnored?: true;
   /** 模型把人物字段平铺在 entities[i].output 上（未放进 output.character）：已自动归位，仅供告警 */
   flattenedCharacters?: string[];
+  /** 严格校验前做过的无损纠正（中文，带路径），仅供告警；无纠正时缺席 */
+  normalized?: string[];
 }
 
 export interface ParseDirectOutputOptions {
   /** 是否启用结构化战斗；缺省 true（严格校验 combat 区块） */
   structuredCombat?: boolean;
+  /** 剧情系统是否启用；缺省 true。关闭时模型写的非空 plot 被丢弃（记入 normalized） */
+  plotEnabled?: boolean;
 }
 
 /** 模型可见正文为空（含纯空白）：常见于只产出原生思考、没写正文的回复 */
@@ -114,6 +150,11 @@ const MAX_LISTED_KEYS = 5;
 /** 单个键名在报错里的最大长度，超出截断加「…」 */
 const MAX_KEY_LENGTH = 24;
 
+/** 白名单常量是 readonly 元组；判定时按普通字符串集合用 */
+function among(list: readonly string[], value: unknown): boolean {
+  return list.includes(String(value));
+}
+
 function keys(value: Row, allowed: readonly string[], label: string): void {
   const extra = Object.keys(value).filter((key) => !allowed.includes(key));
   if (extra.length === 0) return;
@@ -129,8 +170,11 @@ function keys(value: Row, allowed: readonly string[], label: string): void {
   check(false, `${label} 含未支持的字段：${listed}${more}`);
 }
 
-function named(value: unknown): asserts value is string {
-  check(typeof value === 'string' && value.trim().length > 0, '名字／引用不能为空');
+function named(value: unknown, label?: string): asserts value is string {
+  check(
+    typeof value === 'string' && value.trim().length > 0,
+    label ? `${label} 名字／引用不能为空` : '名字／引用不能为空',
+  );
 }
 
 function rows(value: unknown, label: string): Row[] {
@@ -143,16 +187,9 @@ function safeValues(value: unknown): void {
   if (Array.isArray(value)) value.forEach(safeValues);
   else if (isRecord(value)) {
     for (const [key, child] of Object.entries(value)) {
+      // 结构化位置的 id 等账务键已在归一化预处理里剥除；剩下的（world value 内）与原型污染键直接拒收
       check(
-        ![
-          '__proto__',
-          'prototype',
-          'constructor',
-          'id',
-          'saveId',
-          'introducedBy',
-          'definition',
-        ].includes(key),
+        !among(DIRECT_FORBIDDEN_KEYS, key) && !among(DIRECT_STRIPPED_KEYS, key),
         `不允许模型填写 ${key}`,
       );
       safeValues(child);
@@ -160,30 +197,22 @@ function safeValues(value: unknown): void {
   }
 }
 
+/** world path 的禁用段：原型污染键 + 系统状态段 */
+const WORLD_RESERVED_PATH = new RegExp(
+  String.raw`(^|\.)(${[...DIRECT_FORBIDDEN_KEYS, ...DIRECT_WORLD_RESERVED_SEGMENTS].join('|')})(\.|$)`,
+);
+
 function validateEntity(value: unknown, character: boolean, label: string): void {
   const output = object(value, label);
-  keys(
-    output,
-    [
-      'character',
-      'skills',
-      'equipment',
-      'inventory',
-      'statuses',
-      'ascension',
-      'elements',
-      'authorities',
-    ],
-    label,
-  );
-  for (const key of ['skills', 'equipment', 'inventory']) {
-    for (const item of rows(output[key], `${label}.${key}`)) {
-      named(item.name);
+  keys(output, DIRECT_ENTITY_OUTPUT_KEYS, label);
+  for (const key of DIRECT_ENTITY_LIST_KEYS) {
+    for (const [i, item] of rows(output[key], `${label}.${key}`).entries()) {
+      named(item.name, `${label}.${key}[${i}].name`);
       check(typeof item.description === 'string', `${label}.${key} 缺少 description`);
       if (key === 'inventory')
         check(Number.isInteger(item.quantity) && Number(item.quantity) > 0, '物品数量必须为正整数');
       if (key === 'equipment') {
-        named(item.slot);
+        named(item.slot, `${label}.${key}[${i}].slot`);
         object(item.stats, '装备属性');
       }
       if (item.tags !== undefined)
@@ -197,26 +226,18 @@ function validateEntity(value: unknown, character: boolean, label: string): void
   }
   if (character) {
     const c = object(output.character, '人物');
-    named(c.name);
+    named(c.name, `${label}.character.name`);
     check(Number.isInteger(c.tier) && Number(c.tier) >= 1 && Number(c.tier) <= 7, '人物层级无效');
     check(
       Number.isInteger(c.level) && Number(c.level) >= 1 && Number(c.level) <= 25,
       '人物等级无效',
     );
     const attrs = object(c.attributes, '人物属性');
-    for (const attr of ['str', 'dex', 'con', 'int', 'spi'])
+    for (const attr of DIRECT_ATTRIBUTE_KEYS)
       check(typeof attrs[attr] === 'number' && Number(attrs[attr]) >= 0, `缺少属性 ${attr}`);
-    for (const key of [
-      'race',
-      'gender',
-      'background',
-      'appearance',
-      'clothing',
-      'personality',
-      'likes',
-    ])
+    for (const key of DIRECT_CHARACTER_TEXT_FIELDS)
       check(typeof c[key] === 'string', `人物缺少 ${key}`);
-    for (const key of ['identity', 'occupation'])
+    for (const key of DIRECT_CHARACTER_LIST_FIELDS)
       check(Array.isArray(c[key]) && c[key].every((v) => typeof v === 'string'), `人物缺少 ${key}`);
     validateEntity(
       { skills: c.skills, equipment: c.equipment, inventory: c.inventory },
@@ -230,93 +251,73 @@ function validateEntity(value: unknown, character: boolean, label: string): void
         typeof ascension.description === 'string',
       '登神状态不完整',
     );
-    for (const key of ['elements', 'authorities', 'laws']) rows(ascension[key], `ascension.${key}`);
+    // 缺名条目已在归一化 N5 丢弃（与 HEAD 一样不因无名条目整楼拒收）
+    for (const key of DIRECT_ASCENSION_LIST_KEYS) rows(ascension[key], `ascension.${key}`);
   } else check(output.character === undefined, '归属物不能再次创建人物');
-  for (const status of rows(output.statuses ?? [], `${label}.statuses`)) {
-    named(status.name);
-    named(status.owner);
+  for (const [i, status] of rows(output.statuses ?? [], `${label}.statuses`).entries()) {
+    named(status.name, `${label}.statuses[${i}].name`);
+    named(status.owner, `${label}.statuses[${i}].owner`);
   }
 }
 
-const CHARACTER_FIELDS = [
-  'hp',
-  'mp',
-  'sp',
-  'location',
-  'present',
-  'currentAction',
-  'thoughts',
-  'money',
-  'totalExp',
-];
-
 function validateState(value: Row): void {
-  keys(value, ['characters', 'items', 'affections', 'fp', 'quests'], 'state');
+  keys(value, DIRECT_STATE_KEYS, 'state');
   const chars = object(value.characters ?? {}, 'state.characters');
-  keys(chars, ['replace', 'delta', 'remove'], 'state.characters');
+  keys(chars, DIRECT_CHARACTER_OPERATIONS, 'state.characters');
   const owned = new Set<string>();
-  for (const operation of ['replace', 'delta', 'remove']) {
-    for (const row of rows(chars[operation] ?? [], operation)) {
-      named(row.name);
+  for (const operation of DIRECT_CHARACTER_OPERATIONS) {
+    for (const [i, row] of rows(chars[operation] ?? [], operation).entries()) {
+      named(row.name, `state.characters.${operation}[${i}].name`);
       const key = `${row.name}/${row.path}/${operation === 'remove' ? row.target : ''}`;
       check(!owned.has(key), '人物字段重复声明');
       owned.add(key);
       if (operation === 'remove') {
-        check(['skills', 'equipment'].includes(String(row.path)), '状态效果由 effects 唯一声明');
-        named(row.target);
+        check(
+          among(DIRECT_REMOVE_PATHS, row.path),
+          'state.characters.remove 只支持 skills／equipment（状态效果走 effects）',
+        );
+        named(row.target, `state.characters.remove[${i}].target`);
       } else {
-        check(CHARACTER_FIELDS.includes(String(row.path)), '人物字段不属于 direct state 白名单');
+        check(among(DIRECT_CHARACTER_FIELDS, row.path), '人物字段不属于 direct state 白名单');
         if (operation === 'delta')
           check(
-            ['hp', 'mp', 'sp', 'money', 'totalExp'].includes(String(row.path)) &&
-              typeof row.amount === 'number',
+            among(DIRECT_DELTA_PATHS, row.path) && typeof row.amount === 'number',
             'delta 只能用于资源／金钱／经验',
           );
         else if (row.path === 'present')
           check(typeof row.value === 'boolean', 'present 必须是布尔值');
-        else if (['hp', 'mp', 'sp', 'money', 'totalExp'].includes(String(row.path)))
+        else if (among(DIRECT_DELTA_PATHS, row.path))
           check(typeof row.value === 'number' && Number(row.value) >= 0, '资源值无效');
         else check(typeof row.value === 'string', '人物字段必须为文本');
       }
     }
   }
   const items = object(value.items ?? {}, 'state.items');
-  keys(items, ['consume', 'equip', 'unequip', 'transfer', 'modify'], 'state.items');
+  keys(items, DIRECT_ITEM_OPERATIONS, 'state.items');
   for (const [op, list] of Object.entries(items))
-    for (const row of rows(list, op)) {
-      named(row.target);
-      named(op === 'transfer' ? row.from : row.owner);
-      if (op === 'transfer') named(row.to);
+    for (const [i, row] of rows(list, op).entries()) {
+      const label = `state.items.${op}[${i}]`;
+      named(row.target, `${label}.target`);
+      if (op === 'transfer') {
+        named(row.from, `${label}.from`);
+        named(row.to, `${label}.to`);
+      } else named(row.owner, `${label}.owner`);
       if (op === 'consume' || op === 'transfer')
         check(
           Number.isInteger(row.quantity) && Number(row.quantity) > 0,
           '消耗／转移数量必须为正整数',
         );
-      if (op === 'equip') named(row.slot);
+      if (op === 'equip') named(row.slot, `${label}.slot`);
       if (op === 'modify') {
         const changes = object(row.changes, '物品修改');
-        keys(
-          changes,
-          [
-            'description',
-            'type',
-            'rarity',
-            'stats',
-            'durability',
-            'maxDurability',
-            'effects',
-            'protocolText',
-            'tags',
-          ],
-          '物品修改',
-        );
+        keys(changes, DIRECT_ITEM_MODIFY_KEYS, '物品修改');
       }
     }
   const affections = object(value.affections ?? {}, '好感度');
-  keys(affections, ['set', 'delta'], '好感度');
+  keys(affections, DIRECT_AFFECTION_OPERATIONS, '好感度');
   for (const [op, list] of Object.entries(affections))
-    for (const row of rows(list, op)) {
-      named(row.name);
+    for (const [i, row] of rows(list, op).entries()) {
+      named(row.name, `state.affections.${op}[${i}].name`);
       check(typeof row[op === 'set' ? 'value' : 'amount'] === 'number', '好感度必须为数值');
     }
   if (value.fp !== undefined) {
@@ -325,29 +326,10 @@ function validateState(value: Row): void {
     check(typeof fp.delta === 'number', 'fp.delta 必须为数值');
   }
   const quests = object(value.quests ?? {}, 'quests');
-  keys(quests, ['upsert', 'remove'], 'quests');
-  for (const list of Object.values(quests)) for (const row of rows(list, 'quests')) named(row.name);
-}
-
-/** 实体外层（非人物）字段；平铺人物归位时留在 output 顶层 */
-const ENTITY_OUTER_KEYS = ['statuses', 'elements', 'authorities'];
-
-/**
- * 模型常把人物字段直接平铺在 output 上（name、race… 与 skills/equipment/inventory/ascension 同层），
- * 而不是放进 output.character。识别到这种形状时把人物字段（含随身技能/装备/背包/登神）
- * 收进 output.character，顶层 skills/equipment/inventory 置空 —— 与规范嵌套形状
- * 经 assembleCharacterState 组装出的人物一致。返回归位的人物名；不是平铺形状返回 undefined。
- */
-function unflattenCharacterEntity(row: Row): string | undefined {
-  if (row.kind !== 'character' || !isRecord(row.output)) return undefined;
-  const output = row.output;
-  if (output.character !== undefined || typeof output.name !== 'string') return undefined;
-  const character: Row = {};
-  const outer: Row = {};
-  for (const [key, value] of Object.entries(output))
-    (ENTITY_OUTER_KEYS.includes(key) ? outer : character)[key] = value;
-  row.output = { ...outer, character, skills: [], equipment: [], inventory: [] };
-  return output.name;
+  keys(quests, DIRECT_QUEST_OPERATIONS, 'quests');
+  for (const [op, list] of Object.entries(quests))
+    for (const [i, row] of rows(list, 'quests').entries())
+      named(row.name, `state.quests.${op}[${i}].name`);
 }
 
 export function parseDirectOutput(
@@ -356,6 +338,7 @@ export function parseDirectOutput(
   options: ParseDirectOutputOptions = {},
 ): DirectTurnDraft {
   const structuredCombat = options.structuredCombat ?? true;
+  const plotEnabled = options.plotEnabled ?? true;
   const blocks = [...raw.matchAll(/<direct_updates\s*>([\s\S]*?)<\/direct_updates\s*>/gi)];
   check(
     blocks.length === 1 && [...raw.matchAll(/<direct_updates\b/gi)].length === 1,
@@ -375,9 +358,14 @@ export function parseDirectOutput(
       ),
     '需要一个完整的 maintext（或 gametxt）区块',
   );
+  // N1：内文先过 JSON 抢救入口，剥掉 ```json 围栏、<json> 标签或 JSON 之前夹带的说明文字
+  // （以 { 开头的内文按整段解析，JSON 之后跟文字不剥，照旧拒收为非法 JSON）
+  const inner = blocks[0][1];
+  const payload = extractJsonPayload(inner) ?? inner;
+  const notes = payload === inner.trim() ? [] : ['direct_updates：已剥除 JSON 外的围栏或说明文字'];
   let json: unknown;
   try {
-    json = JSON.parse(blocks[0][1]);
+    json = JSON.parse(payload);
   } catch (error) {
     check(
       false,
@@ -394,74 +382,53 @@ export function parseDirectOutput(
       parsed.combat !== undefined;
     delete parsed.combat;
   }
+  // 无损纠正：就地改写 parsed（buildDirectPatches 读的是同一个对象）；关闭战斗时这里补回 combat: null
+  const normalization = normalizeDirectUpdates(parsed, { structuredCombat, plotEnabled });
+  notes.push(...normalization.notes);
+  const { flattenedCharacters } = normalization;
   safeValues(parsed);
-  const sections = [
-    'version',
-    'world',
-    'time',
-    'entities',
-    'state',
-    'effects',
-    'plot',
-    ...(structuredCombat ? ['combat'] : []),
-    'diceUsed',
-  ];
-  keys(parsed, sections, 'direct_updates');
+  keys(parsed, DIRECT_SECTIONS, 'direct_updates');
   check(
-    sections.every((key) => Object.prototype.hasOwnProperty.call(parsed, key)) &&
+    DIRECT_SECTIONS.every((key) => Object.prototype.hasOwnProperty.call(parsed, key)) &&
       parsed.version === 1,
     'v1 分区不完整',
   );
-  if (!structuredCombat) parsed.combat = null;
   const time = object(parsed.time, 'time');
   keys(time, ['delta_time'], 'time');
   check(typeof time.delta_time === 'number' && time.delta_time >= 0, 'delta_time 必须是非负分钟数');
   const world = object(parsed.world, 'world');
-  keys(world, ['replace', 'insert', 'tile_ops'], 'world');
+  keys(world, DIRECT_WORLD_KEYS, 'world');
   for (const op of ['replace', 'insert'])
-    for (const row of rows(world[op] ?? [], op)) {
-      named(row.path);
-      check(
-        !/(^|\.)(__proto__|prototype|constructor|gameTime|worldFlags|directCombat|generationMode|profile|characters|fp)(\.|$)/.test(
-          row.path,
-        ),
-        'world 不能写系统状态',
-      );
+    for (const [i, row] of rows(world[op] ?? [], op).entries()) {
+      named(row.path, `world.${op}[${i}].path`);
+      check(!WORLD_RESERVED_PATH.test(row.path), 'world 不能写系统状态');
     }
   const tiles = rows(world.tile_ops ?? [], 'tile_ops');
   check(
     buildDispatcherPatches({ tile_ops: tiles }).patches.length === tiles.length,
     '地块操作无效',
   );
-  const flattenedCharacters: string[] = [];
   for (const [i, row] of rows(parsed.entities, 'entities').entries()) {
     check(row.kind === 'character' || row.kind === 'loadout', '实体种类无效');
-    const flattened = unflattenCharacterEntity(row);
-    if (flattened !== undefined) flattenedCharacters.push(flattened);
-    keys(
-      row,
-      row.kind === 'character' ? ['kind', 'placement', 'output'] : ['kind', 'owner', 'output'],
-      `entities[${i}]`,
-    );
+    keys(row, DIRECT_ENTITY_ROW_KEYS[row.kind], `entities[${i}]`);
     validateEntity(row.output, row.kind === 'character', `entities[${i}].output`);
-    if (row.kind === 'loadout') named(row.owner);
+    if (row.kind === 'loadout') named(row.owner, `entities[${i}].owner`);
     else {
       const placement = object(row.placement, 'placement');
-      named(placement.location);
+      named(placement.location, `entities[${i}].placement.location`);
       check(typeof placement.present === 'boolean', 'placement.present 缺失');
     }
   }
   validateState(object(parsed.state, 'state'));
-  for (const effect of rows(parsed.effects, 'effects')) {
-    keys(effect, ['owner', 'action', 'value'], 'effects');
-    named(effect.owner);
-    check(['add', 'update', 'remove'].includes(String(effect.action)), '效果动作无效');
+  for (const [i, effect] of rows(parsed.effects, 'effects').entries()) {
+    keys(effect, DIRECT_EFFECT_ROW_KEYS, 'effects');
+    named(effect.owner, `effects[${i}].owner`);
+    check(among(DIRECT_EFFECT_ACTIONS, effect.action), '效果动作无效');
     const value = object(effect.value, '效果');
-    named(value.name);
+    named(value.name, `effects[${i}].value.name`);
     if (effect.action === 'add') {
       check(
-        typeof value.description === 'string' &&
-          ['增益', '减益', '特殊'].includes(String(value.category)),
+        typeof value.description === 'string' && among(DIRECT_EFFECT_CATEGORIES, value.category),
         '效果缺少描述／分类',
       );
       check(typeof value.stacks === 'number' && value.stacks > 0, '效果层数无效');
@@ -470,10 +437,10 @@ export function parseDirectOutput(
           (typeof value.remainingTime === 'number' && value.remainingTime >= 0),
         '效果时长无效',
       );
-      check(['回合', '分钟', '小时'].includes(String(value.timeUnit)), '效果时间单位无效');
+      check(among(DIRECT_EFFECT_TIME_UNITS, value.timeUnit), '效果时间单位无效');
     }
-    if (effect.action === 'update') keys(value, ['name', 'remainingTime', 'stacks'], '效果更新');
-    if (effect.action === 'remove') keys(value, ['name'], '效果移除');
+    if (effect.action === 'update') keys(value, DIRECT_EFFECT_UPDATE_KEYS, '效果更新');
+    if (effect.action === 'remove') keys(value, DIRECT_EFFECT_REMOVE_KEYS, '效果移除');
   }
   const effectOwners = new Set<string>();
   for (const entity of parsed.entities as DirectUpdates['entities'])
@@ -490,7 +457,7 @@ export function parseDirectOutput(
     effectOwners.add(key);
   }
   const plot = object(parsed.plot, 'plot');
-  keys(plot, ['pre', 'post'], 'plot');
+  keys(plot, DIRECT_PLOT_KEYS, 'plot');
   for (const value of Object.values(plot)) object(value, '剧情判断');
   if (parsed.combat !== null) object(parsed.combat, 'combat');
   const consumed = new Set<string>();
@@ -506,8 +473,8 @@ export function parseDirectOutput(
     );
     const key = `${group.sides}/${Number(die.index)}`;
     check(!consumed.has(key), `${label} 重复使用了同一颗骰`);
-    named(die.purpose);
-    named(die.target);
+    named(die.purpose, `${label}.purpose`);
+    named(die.target, `${label}.target`);
     consumed.add(key);
   }
   const character = parseCharacterUpdates(raw);
@@ -515,6 +482,8 @@ export function parseDirectOutput(
     character.present && character.warnings.length === 0,
     character.warnings.join('；') || '缺少 character_updates',
   );
+  // character_updates 的无损纠正与 direct_updates 的同口径并入 normalized（同一条 warn）
+  notes.push(...character.notes.map((note) => `character_updates：${note}`));
   const projection = projectStoryOutput(raw);
   check(projection.content.length > 0, '正文为空');
   return {
@@ -524,6 +493,7 @@ export function parseDirectOutput(
     updates: parsed as unknown as DirectUpdates,
     ...(combatIgnored ? { combatIgnored: true as const } : {}),
     ...(flattenedCharacters.length > 0 ? { flattenedCharacters } : {}),
+    ...(notes.length > 0 ? { normalized: notes } : {}),
   };
 }
 

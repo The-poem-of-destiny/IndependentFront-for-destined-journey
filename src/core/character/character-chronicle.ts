@@ -2,6 +2,7 @@ import type { AgentContext, CharacterState, StoryMemorySource } from '../types/t
 import type { GameTime } from '../time/time-system';
 import type { CharacterChronicleEntry, CharacterNarrativeUpdate } from '../types/types-character';
 import { formatGameTime, toEpochMinutes } from '../time/time-system';
+import { LIST_FIELDS, TEXT_FIELDS } from './character-updates';
 
 export const CHRONICLE_IMPORTANCE_THRESHOLD = 7;
 const CHRONICLE_CONTEXT_BUDGET = 6000;
@@ -160,9 +161,11 @@ export function buildCharacterContext(
 }
 
 export const CHARACTER_UPDATE_PROTOCOL = `<character_system>
-在正文及其他输出之后输出一个 <character_updates> JSON 区块，属于同次回复，不调用额外记忆 Agent。
+在正文及其他输出之后输出一个 <character_updates> 区块，属于同次回复，不调用额外记忆 Agent。标签内直接写 JSON，不加代码围栏。
 格式：{"characters":[{"name":"角色真名","profile_changes":{},"chronicle":[{"title":"事件标题","summary":"该人物实际经历","time":{"kind":"this_turn"},"importance":7,"impact":"持续影响","location":"地点","people":["相关人物真名"]}]}]}。
-无更新时 characters 为 []。profile_changes 只允许 aliases/identity/occupation（字符串数组）及 race/appearance/background/personality/gender/outfit/goals（非空字符串），仅输出发生变化的字段。不要输出 ID、数值、物品、资源或战斗结算。
+无更新时 characters 为 []。角色项只有 name/profile_changes/chronicle 三个键，chronicle 必填（无经历写 []），同一角色只写一项。
+profile_changes 只允许 ${LIST_FIELDS.join('/')}（字符串数组）及 ${TEXT_FIELDS.join('/')}（非空字符串），仅输出发生变化的字段；clothing/likes/thoughts/age/数值不属于 profile_changes，换装写 outfit。不要输出 ID、数值、物品、资源或战斗结算。
+经历必填 title/summary（非空字符串）、time、importance；impact/location 可选字符串，people 可选字符串数组。
 初登场人物须在同块给出档案及数条塑造人物的粗略过去，过去用 time:{"kind":"past","label":"少年时期"}；已存在角色不得补造或重写过去。沿用原生角色资料，不另造冲突身世。
 重要度为 0–10 整数：0–3 日常，4–6 局部进展，7–8 持续影响，9–10 人生转折。闲聊通常低分，关键承诺按后果评分。只有 >=7 的相关经历会自动提供给后续叙事。
 记录人物亲历或获知的事实，不把计划/猜测/传闻当成已发生事实，不因提及某人就为其写亲历。未知时间保留大致描述。不要重复已经保存的事件；这不是正文摘要。所有保存条目玩家可见。

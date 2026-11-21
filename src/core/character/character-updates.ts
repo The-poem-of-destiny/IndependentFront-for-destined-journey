@@ -4,8 +4,10 @@ import type {
   CharacterUpdatesParseResult,
 } from '../types/types-character';
 import type { JsonObject, JsonValue, NativeLlmContent } from '../types/types-api';
+import { extractJsonPayload } from '../utils/model-json';
 
-const TEXT_FIELDS = [
+/** profile_changes 白名单：文本字段（非空字符串）。协议文本也由它拼出。 */
+export const TEXT_FIELDS = [
   'race',
   'appearance',
   'background',
@@ -14,7 +16,8 @@ const TEXT_FIELDS = [
   'outfit',
   'goals',
 ] as const;
-const LIST_FIELDS = ['aliases', 'identity', 'occupation'] as const;
+/** profile_changes 白名单：列表字段（字符串数组）。 */
+export const LIST_FIELDS = ['aliases', 'identity', 'occupation'] as const;
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -90,9 +93,62 @@ export function parseChronicleDraft(value: unknown): CharacterChronicleDraft | n
   };
 }
 
+/**
+ * 严格解析前的无损归一化：只纠正意图明确的常见形状偏差，并记入 notes（不算警告）。
+ * 作者内容的严格校验（parseCharacterProfile / parseChronicleDraft）口径不变。
+ */
+function normalizeUpdateRow(row: unknown, notes: string[]): unknown {
+  if (!isRecord(row)) return row;
+  const next: Record<string, unknown> = { ...row };
+  const label = typeof row.name === 'string' && row.name.trim() ? row.name.trim() : '未命名';
+  if (isRecord(row.profile_changes)) {
+    const profile: Record<string, unknown> = { ...row.profile_changes };
+    if (profile.clothing !== undefined && profile.outfit === undefined) {
+      profile.outfit = profile.clothing;
+      delete profile.clothing;
+      notes.push(`角色「${label}」的 clothing 已按 outfit 保存。`);
+    }
+    for (const key of TEXT_FIELDS) {
+      const value = profile[key];
+      if (value === null || (typeof value === 'string' && !value.trim())) {
+        delete profile[key];
+        notes.push(`角色「${label}」的空字段 ${key} 视为未变化。`);
+      }
+    }
+    for (const key of LIST_FIELDS) {
+      const value = profile[key];
+      if (typeof value === 'string') {
+        if (value.trim()) profile[key] = [value];
+        else delete profile[key];
+        notes.push(`角色「${label}」的 ${key} 字符串已转为列表。`);
+      }
+    }
+    next.profile_changes = profile;
+  }
+  if (row.chronicle === undefined || row.chronicle === null) {
+    next.chronicle = [];
+    notes.push(`角色「${label}」缺少 chronicle，按无经历处理。`);
+  } else if (Array.isArray(row.chronicle)) {
+    next.chronicle = row.chronicle.map((entry: unknown) => {
+      if (!isRecord(entry)) return entry;
+      const draft: Record<string, unknown> = { ...entry };
+      if (draft.time === undefined || draft.time === 'this_turn') {
+        draft.time = { kind: 'this_turn' };
+        notes.push(`角色「${label}」的经历时间已按本回合处理。`);
+      }
+      if (typeof draft.people === 'string') {
+        draft.people = [draft.people];
+        notes.push(`角色「${label}」的经历 people 字符串已转为列表。`);
+      }
+      return draft;
+    });
+  }
+  return next;
+}
+
 export function parseCharacterUpdates(raw: string): CharacterUpdatesParseResult {
   const present = /<character_updates\b/i.test(raw);
-  const result: CharacterUpdatesParseResult = { present, updates: [], warnings: [] };
+  const result: CharacterUpdatesParseResult = { present, updates: [], warnings: [], notes: [] };
   if (!present) return result;
   const blocks = [
     ...raw.matchAll(/<character_updates\b[^>]*>([\s\S]*?)<\/character_updates\s*>/gi),
@@ -101,9 +157,12 @@ export function parseCharacterUpdates(raw: string): CharacterUpdatesParseResult 
     result.warnings.push('角色更新未保存：需要一个完整的 character_updates 区块。');
     return result;
   }
+  const inner = blocks[0][1].trim();
+  const payload = extractJsonPayload(inner) ?? inner;
+  if (payload !== inner) result.notes.push('角色更新 JSON 外的代码围栏或夹带文字已剥除。');
   let parsed: unknown;
   try {
-    parsed = JSON.parse(blocks[0][1]);
+    parsed = JSON.parse(payload);
   } catch {
     result.warnings.push('角色更新未保存：JSON 格式无效。');
     return result;
@@ -113,7 +172,8 @@ export function parseCharacterUpdates(raw: string): CharacterUpdatesParseResult 
     return result;
   }
   const names = new Set<string>();
-  for (const row of parsed.characters) {
+  for (const rawRow of parsed.characters) {
+    const row = normalizeUpdateRow(rawRow, result.notes);
     if (!isRecord(row) || typeof row.name !== 'string' || !row.name.trim()) {
       result.warnings.push('跳过无有效名字的角色更新。');
       continue;

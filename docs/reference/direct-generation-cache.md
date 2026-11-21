@@ -17,6 +17,8 @@
 
 📌 2026-11-19 补充（分支 `feat/interactive-progression`，未真机验证）：直出协议新增「正文分节」（`<beat/>`）与正文战斗的「战斗逐拍」，`DIRECT_CACHE_PROTOCOL` 补一句「历史正文里的 `<beat/>` 已移除，每轮仍须照常分节」。固定前缀的协议文字因此改变，每个 `direct_cached` 存档会自动冷建一次会话；会话协议标识仍是 `direct-cache-v1`，无需改写存档。之后前端的「全文 / 演出」切换（设置 `stagedNarrative`）是纯前端开关，不进提示词，不再触发重建。会话里的 assistant 历史只含剥过标记的正文。规则见[直出模式 · 正文分节与逐节演出](direct-generation.md#正文分节与逐节演出2026-11-19)。
 
+📌 2026-11-21 补充（分支 `fix/ai-output-format-contracts`，未真机验证）：`buildDirectProtocol` 补齐了登神条目、状态、loadout 登神、装备槽、物品修改键、效果、剧情开关等形状说明，`CHARACTER_UPDATE_PROTOCOL` 也补了角色项与经历字段；`DIRECT_CACHE_PROTOCOL` 未改（它只描述输入帧）。固定前缀因此改变，每个 `direct_cached` 存档会自动冷建一次会话，会话协议标识仍是 `direct-cache-v1`。校验前的无损纠正（warn `direct.output_normalized`）与缓存直出同样适用。规则见[直出模式 · 格式容错与协议补全](direct-generation.md#格式容错与协议补全2026-11-21)。
+
 旧档无标签仍按 Agent 运行。缓存主生成的配置键为 `direct_cached`，执行与世界书权限身份仍为 `direct_main`，无需另授一份世界书读取权限。
 
 2026-11-14 默认预设：内容包在 `agentDefaults.agents.direct_cached.presetId` 点名缓存直出的默认预设（预设本体放进包的 `presets` 或内嵌在同一条目），缺席时回退引擎内置的「直出 · 缓存优化」；与无缓存直出（`direct_main.presetId`）各自独立。story 的默认以 `agentDefaults.agents.story.presetId` 为准，不取 `presets[0]`。设置页「预设」下拉里引擎内置预设始终可选，详见[直出模式 · 各模式的默认预设怎么声明](direct-generation.md#各模式的默认预设怎么声明2026-11-14)。

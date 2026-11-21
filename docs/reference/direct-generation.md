@@ -86,6 +86,78 @@
 
 直出不启动旧战斗覆盖层、制作链、角色生成子调用、自动插画、润色链或 EJS 变量提交。主回复承担这些非记忆裁定职责；自动插画本版停用。普通音频标记与既有显示设置保留。
 
+### 格式容错与协议补全（2026-11-21）
+
+📌 2026-11-21 新增，分支 `fix/ai-output-format-contracts`，未用真实模型验证。两种直出（`direct`、`direct_cached`）共用同一份 `buildDirectProtocol` 与同一套归一化／校验（缓存直出在协议后另接 `DIRECT_CACHE_PROTOCOL`）；两者的输入状态载体不同——非缓存直出是 `<direct_state>`，缓存直出是 `<direct_context>` 的 `set` 分区（`plotSettings` 是顶层分区，人物拆成 `character/名字/profile` 等分区，字段名仍是存档字段名）——协议里统一称「输入状态区块」；`character_updates` 的容错对 Agent 模式同样生效。
+
+触发：模型输出常因形状偏差被 `parseDirectOutput` 拒收、整轮作废（字符串当对象、缺默认字段、写了 id、用代码围栏包 JSON 等），而协议文字本身有多处形状没讲清。这次两头一起收：校验前做无损纠正，同时补齐协议缺口。
+
+- **契约常量唯一真源**：新模块 `src/core/agents/direct-contract.ts`（只依赖 `content/field-enums`）收齐 `direct_updates` 的全部白名单（分区、world 操作与 path 禁用段、实体键、人物字段、state 操作与可写字段、物品修改键、效果动作与键、分类与时间单位、剥除键）。校验器、归一化与协议文字共用它；协议里的人物可写字段、delta 路径、remove 路径、物品修改键、效果分类／时间单位／update 键、剥除键、world path 禁用段、实体 output 顶层键，以及装备槽、物品类型、品质、任务状态，均由常量插值。
+- **归一化**：`src/core/agents/direct-normalize.ts` 的 `normalizeDirectUpdates` 在严格校验前就地纠正，每处记一条带路径的中文 note。只纠正意思明确、不丢信息的偏差；给了值但类型或范围错的，原样交校验器拒收。唯一例外是状态效果的 `category`：枚举外的文本值映射到最接近的分类（认不出的落「特殊」），note 写明原值与映射后的值——分类只是归类，效果名照旧保留，比为一个分类词作废整楼划算。
+- **原型污染键先拒**：归一化之前先对整个 `direct_updates` 扫一遍 `__proto__` / `prototype` / `constructor`，任何层级出现即拒收（文案与校验器相同：「不允许模型填写 …」）；归一化里按动态键复制的两处（平铺人物收拢、平铺 effects 收进 `value`）也改为不经原型的写法。否则带 `__proto__` 的平铺输出会在复制时变成「设原型」、键随之消失，校验器就看不到了。
+- **告警**：有纠正时草稿带 `normalized?: string[]`（`character_updates` 的纠正加前缀 `character_updates：` 后一并并入），`direct-main.ts` 记 warn `direct.output_normalized`，本楼不算失败。平铺人物仍单独记 `direct.entity_flattened`。`ParseDirectOutputOptions` 新增 `plotEnabled?`（缺省 true），由 `plotSettings.mode !== 'off'` 给出。
+
+容错规则：
+
+| 编号 | 位置                       | 纠正                                                                                                                                                                                                                                                                             |
+| ---- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| N1   | `direct_updates` 内文      | 经 `extractJsonPayload` 剥掉代码围栏、`<json>` 标签，以及 JSON 之前夹带的说明文字（此时取首个 `{` 到末个 `}`，后面的文字一并切掉）。内文以 `{` 开头时按整段解析：JSON 之后跟说明文字不剥，照旧拒收为非法 JSON。                                                                                                                                                                                                                 |
+| N2   | 顶层分区                   | `version` 缺失补 1；其余分区缺失或 null 补空值；正文战斗口径下 `combat` 补 null。结构化战斗开启时缺 `combat` 仍拒，`version` 不为 1 仍拒。                                                                                                                                       |
+| N3   | `plot`                     | `pre` / `post` 为 null 删键；剧情关闭时非空 `plot` 整体丢弃。                                                                                                                                                                                                                    |
+| N4   | 随身列表                   | `output` 与 `output.character` 的 `skills` / `equipment` / `inventory` 缺失或 null 补 `[]`；`statuses` 为 null 补 `[]`。                                                                                                                                                         |
+| N5   | 登神                       | `kind` 为 character 时人物内没有 `ascension` 而 `output` 顶层有，搬进人物（记 note，再按本条纠正）；两处都有则拒收。人物内 `ascension` 缺失或 null（且顶层也没有）补未登神默认对象；`authority` / `law` 改名为 `authorities` / `laws`；`enabled` 缺失按条目推断；文本条目转 `{name,description:""}`；条目补 `description` / `effects` / `costDescription`；法则的 `effects` 并入 `passiveEffects`；`divineKingdom` 文本转对象。三类条目缺名（没有 `name`、为 null 或只含空白；纯文本条目为空串）丢弃并记 note「`…ascension.laws[i]`：缺少名字，已忽略」，人物内与 loadout 顶层同口径，note 下标指模型原文；`enabled` 推断看丢弃之后的条目。丢弃第 i 个要素 / 权能时，若实体 `output` 顶层的 `elements` / `authorities`（entity-gen `mapAscension` 按下标从这里取 `effectDescriptions`，人物与 loadout 都以实体 `output` 顶层为准）长度大于 i，同下标那一项连带删除（从后往前删）并记 note「`…output.elements[i]`：对应的登神条目缺少名字，已连带删除」，免得效果文本前移挂到错误条目上；法则没有对应的顶层数组，不处理。HEAD 的校验器接纳无名条目，这里不为它整楼拒收。 |
+| N6   | 实体初始状态               | `statuses[i].owner` 缺失时补本实体人物名（loadout 为其 `owner`），并按 N8 补默认字段（`remainingTime` 除外）。owner 给了但不符仍拒。                                                                                                                                                                     |
+| N7   | 人物字段                   | `identity` / `occupation` 文本转单元素数组、缺失补 `[]`；文本字段缺失或 null 补空串。                                                                                                                                                                                           |
+| N8   | `effects` 与状态默认值     | 平铺行（字段没包进 `value`）收进 `value`；`add` 与实体状态缺 `description` 补空串，`category` 缺失补默认，枚举外的文本经 `normalizeStatusCategory` 映射（如「诅咒」→「特殊」，note 写明原值与映射值；明确例外），`stacks` 补 1，`timeUnit` 补「分钟」；顶层 `effects` 的 `add` 缺 `remainingTime` 补 null，note 写明「按永久处理」；实体 `statuses` 缺 `remainingTime` 不补；`remove` 剥多余键。                                                    |
+| N9   | 条目默认值                 | 条目 `description` 补空串、装备 `stats` 补 `{}`、背包 `quantity` 补 1、`placement.present` 补 true。                                                                                                                                                                             |
+| N10  | 结构化位置                 | 在实体、state（含任务）、effects、plot、combat 等结构化位置剥除 `id` / `saveId` / `introducedBy` / `definition`；不进入 `world` 各操作的 `value` 子树（那里是自由内容，仍由校验器拒收，同旧版）。`__proto__` / `prototype` / `constructor` 在归一化前整体拒收。                                                                                                                                                                            |
+| N11  | `delta` 行                 | `state.characters.delta` 与 `state.affections.delta` 缺 `amount` 但 `value` 为数值时改用 `amount`。                                                                                                                                                                              |
+| U1   | `character_updates` 内文   | 同 N1：剥代码围栏、`<json>` 标签与 JSON 之前的夹带文字；JSON 之后的文字不剥。                                                                                                                                                                                                                                                         |
+| U2   | `profile_changes` 文本字段 | 只有 `clothing` 时按 `outfit` 保存；文本字段为 null 或空白视为未变化。                                                                                                                                                                                                           |
+| U3   | `profile_changes` 列表字段 | `aliases` / `identity` / `occupation` 为字符串时转单元素列表（空白串删去）。                                                                                                                                                                                                    |
+| U4   | `chronicle`                | 缺失或 null 按 `[]`（无经历）；经历 `time` 缺失或写成 `"this_turn"` 时转 `{kind:"this_turn"}`；`people` 字符串转列表。                                                                                                                                                           |
+
+与 HEAD 结果不同的三处（前两处有意，第三处已知、暂不改）：
+
+- **登神条目缺名被丢弃**：HEAD 的校验器接纳无名条目；现在归一化丢掉它并记 note，整楼照常接纳。名字给了但不是文本的照 HEAD 放行，校验器对登神条目只查「是对象数组」。
+- **loadout 的 `ascension` 缺 `enabled` 时按条目推断**：HEAD 把缺席的 `enabled` 原样交给下游，落库为未登神（`enabled` 缺席即假值）；现在按丢弃缺名条目后的 `elements` / `authorities` / `laws` 是否非空推断，给了条目就视为已登神。理由是给出登神条目本身就是在声明登神，与人物内 `ascension` 同口径。
+- **U 节：`character_updates` 同名多行时胜出的那一行可能变化（Agent 模式可见）**：`parseCharacterUpdates` 按顺序取第一条有效的同名行，后面的同名行记「重复名字」警告跳过。U2–U4 的纠正会让原本无效的行变有效（例如缺 `chronicle` 的那一行），于是 HEAD 下被跳过、由后一行胜出的情形，现在改由前一行胜出。直出模式不受影响（该块任一警告都使整楼作废，同名多行在两版都整楼作废）；Agent 模式警告不作废回合，保存下来的会是另一行。模型很少写同名多行，暂不改。
+
+四处刻意不补：
+
+- **loadout 缺 `ascension` 不补**：loadout 的 `ascension` 存在即整份替换该人物的登神状态，补一个默认对象等于把已登神的人物洗回凡人。
+- **`deityPosition` / `divineKingdom` / `statuses` 缺失不补**：组装与校验本来就按缺席处理，补了只多出 note。
+- **`remainingTime: null` 保留**：null 表示「永久」，不是缺失；只有顶层 `effects` 的 `add` 键缺席才补 null（旧版这种输出直接拒收，补 null 不改变任何原本接纳的输入的结果）。
+- **实体 `statuses` 缺 `remainingTime` 不补**：`state-manager` 的 `add_status_effect` 把 undefined 当「不动已有时长」、null 当「覆盖为永久」。给 loadout 补 null 会把人物已有的限时效果改成永久，而旧版接纳这种输出且保留原时长。
+
+协议补全（`buildDirectProtocol`，两种口径相同；结构化战斗行另补了 `round` 取值与 `statusEffects` 条目形状，两种口径仍只差一行、行数相同）：
+
+- 登神三类条目的对象形状，「条目是对象，不能只写名字」，人物必须带 `ascension`；人物字段除 `thoughts` 外全部必填。
+- `statuses` 条目形状与 owner 规则；loadout 的 `ascension` 整份替换、不写即不改。
+- 装备槽、物品类型、品质取值；`items.modify.changes` 可改键；`consume` / `transfer` 数量为正整数。
+- `effects` 必须包 `value`，`add` 的必填项与取值，`update` 允许的键。
+- 两个 JSON 标签内不加代码围栏与注释。
+- 剧情开关看输入状态区块的 `plotSettings.mode`（非缓存直出为 `direct_state.plotSettings`，缓存直出为 `direct_context` 的 `plotSettings` 分区）：off 时 `plot` 写 `{}`；`pre` / `post` 不需要就省略，不写 null。
+- `character_updates` 的每个名字须已有实体或本楼新建，该块任一警告都使整楼作废。
+- `state.characters.replace` 各路径的值类型、任务字段列表、`diceUsed` 的 `purpose` / `target` 非空。
+- 「输入状态区块（`direct_state`；缓存直出为 `direct_context`）里的人物用存档字段名（`outfit`、`statusEffects`、`ascension.authority/law`、带 `equippedSlot` 的 inventory），新建实体用本协议字段名，不要照抄」。
+- 实体结构列出 `elements?` / `authorities?`：`kind` 为 character 时 `output` 顶层只放 `statuses` / `elements` / `authorities` 与随身列表，`ascension` 写在 `character` 里，顶层 `ascension` 只给 loadout 用；顶层 `elements` / `authorities` 可省略，按下标为登神要素／权能条目补 `effectDescriptions`。
+- world：`path` 按「.」分段，任一段不能是 `gameTime` / `worldFlags` / `directCombat` / `generationMode` / `profile` / `characters` / `fp`（常量 `DIRECT_WORLD_RESERVED_SEGMENTS` 插值，校验器的禁用正则由同一常量与原型污染键拼成）；`value` 里同样不写账务键。
+- effects：同一角色的同名效果在本楼只写一行（实体初始 `statuses` 与 `effects` 合计；校验器报「状态效果重复声明」）；不要先 remove 再 add，改时长或层数用 update，对已有效果再 add 按叠层规则累加层数、时长取较长者。
+
+`CHARACTER_UPDATE_PROTOCOL`（`character-chronicle.ts`）同步补了角色项的键、`chronicle` 必填与经历字段，白名单由 `character-updates.ts` 导出的 `TEXT_FIELDS` / `LIST_FIELDS` 插值。
+
+漂移闸门 `tests/core/prompts/direct-contract-gate.test.ts`：每份契约清单（原型污染键除外）登记一条规则，指明它必须出现在协议的哪一行（按行首定位，且该行唯一）、以什么形式出现——独立标识符、`键:` 形式，或按常量插值拼出的整段片段（如 `path:"skills"或"equipment"`、`output 顶层只放 statuses/elements/authorities`）；新增常量不登记规则即红；骨架 JSON 顶层键恰为 `DIRECT_SECTIONS`，原型污染键不出现在协议里；field-enums 词表（装备槽、物品类型、品质、任务状态、状态分类）同样定位到插值它的那一行，断言整段插值片段在该行内（不做全文子串判断：品质词在层级表的 `qualityCap` 里也会出现，删掉品质枚举句全文判断仍是绿的；已自查删掉该句时闸门变红）；协议里的骨架 JSON 原样通过 `parseDirectOutput` 且无纠正；一份覆盖全部已文档化形状的最大样例（神话级人物含三类登神条目、实体状态、loadout 替换含登神、全部 state 操作、三种效果动作、任务、剧情、骰子）零纠正通过，且 `buildDirectPatches` 成功。
+
+协议长度（2026-11-21 实测，`buildDirectProtocol(...).length`）：结构化战斗开启 8200 → 9844 字符，关闭 8138 → 9752 字符，行数均为 35 → 36（含「输入状态区块」改为模式中立措辞后的长度）；`CHARACTER_UPDATE_PROTOCOL` 759 → 987 字符。
+
+后果：
+
+- 两份协议文字都变了，每个 `direct_cached` 存档冷建一次会话。
+- `CHARACTER_UPDATE_PROTOCOL` 也进 Agent 模式 story 与 Story v2 的提示词，这两种会话的基线会各重建一次。
+- 本次引擎协议是旧协议的超集，旧内容包照常可用，不要求与内容包同步发布。
+- 真实模型是否因此少被拒、各条纠正的触发频率，均未验证。
+
 ### 角色年龄（2026-11-20）
 
 📌 2026-11-20 修正，未真机验证。`direct_state` 的角色快照（`generateDirectTurn` 的 `state.characters`）不再带 `ageAnchor` 原值与开局时冻结的 `customFields.age`，改为经 `projectCharacterAge`（`src/core/character/character-age.ts`）按当前游戏时间现算的 `age`；只有给定了生日才另带 `birthday: 'M月D日'`，兜底的 1 月 1 日不展示。协议加一句：`age` 与 `birthday` 由代码现算，只读，模型不必也不应写回。缓存直出的 `profile` 分区同口径，协议文字变了，已有 `direct_cached` 存档会冷建一次，见[缓存直出](direct-generation-cache.md)。

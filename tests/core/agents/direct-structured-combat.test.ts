@@ -186,8 +186,11 @@ describe('开启（缺省参数）时解析口径不变', () => {
   it('combat 非对象被拒', () => {
     expect(() => parseDirectOutput(raw(updates('oops')), POOL)).toThrow('combat 必须是对象');
   });
-  it('combat 内含 id 被拒', () => {
-    expect(() => parseDirectOutput(raw(updates(FULL_COMBAT)), POOL)).toThrow('不允许模型填写 id');
+  it('combat 内含 id 时剥除并记入 normalized', () => {
+    const draft = parseDirectOutput(raw(updates(FULL_COMBAT)), POOL);
+    const { id: _id, ...unit } = FULL_COMBAT.units[0];
+    expect(draft.updates.combat).toEqual({ ...FULL_COMBAT, units: [unit] });
+    expect(draft.normalized).toEqual(['direct_updates.combat.units[0].id：模型不应填写，已剥除']);
   });
   it('combat 区块原样保留，不标记忽略', () => {
     const { id: _id, ...unit } = FULL_COMBAT.units[0];
