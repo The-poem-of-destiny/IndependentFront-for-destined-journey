@@ -1,4 +1,5 @@
 import type {
+  AgentResult,
   CharacterState,
   EntityGenOutput,
   EntityStatusOutput,
@@ -64,6 +65,39 @@ export interface DirectTurnDraft {
 export interface ParseDirectOutputOptions {
   /** 是否启用结构化战斗；缺省 true（严格校验 combat 区块） */
   structuredCombat?: boolean;
+}
+
+/** 模型可见正文为空（含纯空白）：常见于只产出原生思考、没写正文的回复 */
+export function isEmptyDirectReply(raw: string | null | undefined): boolean {
+  return !raw?.trim();
+}
+
+/** 结束原因表示输出预算已用尽（length / max_tokens）：重试会再烧一整份预算，故不重试 */
+export function isDirectOutputBudgetExhausted(finishReason: string | undefined): boolean {
+  const reason = finishReason?.toLowerCase();
+  return reason === 'length' || reason === 'max_tokens';
+}
+
+/**
+ * 空正文的报错文案。🔴 前缀「模型返回了空正文」是契约：UI 的失败分类按它识别，别改字。
+ * 写「输出 N token」而不是「token: N」——后者会被 redactSecrets 当凭据抹掉。
+ */
+export function describeEmptyDirectReply(
+  result: Pick<AgentResult, 'reasoning' | 'finishReason' | 'completionTokens'>,
+  retried: boolean,
+): string {
+  const reasoning = result.reasoning?.trim() ?? '';
+  const head = reasoning
+    ? `模型返回了空正文：只输出了思考（约 ${reasoning.length} 字），没有写出正文。`
+    : '模型返回了空正文：没有任何输出。';
+  const tokens =
+    typeof result.completionTokens === 'number' ? `；输出 ${result.completionTokens} token` : '';
+  const tail = retried
+    ? '已自动重试 1 次仍为空。'
+    : isDirectOutputBudgetExhausted(result.finishReason)
+      ? '已达到输出上限，未自动重试，可调高输出上限后重试。'
+      : '';
+  return `${head}结束原因：${result.finishReason || '未知'}${tokens}。${tail}`;
 }
 
 function check(condition: unknown, message: string): asserts condition {

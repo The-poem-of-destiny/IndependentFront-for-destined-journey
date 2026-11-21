@@ -1871,6 +1871,24 @@ describe('runImagePromptAgent — activity ledger', () => {
     );
   });
 
+  it('调试条目带上结束原因', () => {
+    const gameStore = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    const events = (pipeline as any).buildEventHandlers('activity-finish-reason');
+    const result = { ...makeResult('direct_main', ''), finishReason: 'length' };
+
+    events.onAgentStart('direct_main', { apiEndpointId: 'ep-direct', model: 'direct-model' });
+    events.onAgentError('direct_main', '模型返回了空正文：结束原因：length', result);
+
+    expect(gameStore.addAgentLogEntry).toHaveBeenLastCalledWith(
+      expect.objectContaining({ finishReason: 'length' }),
+    );
+  });
+
   it('records memory-summary embedding usage as its own billable invocation', async () => {
     const gameStore = makeGameStore();
     const settingsStore = makeSettingsStore({

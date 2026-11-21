@@ -431,6 +431,7 @@ function buildDebugEntry(input: DebugEntryInput): DebugAgentEntry {
     promptRebased: result?.promptRebased,
     promptRebaseReason: result?.promptRebaseReason,
     directCacheDiagnostics: result?.directCacheDiagnostics,
+    finishReason: result?.finishReason,
     error: result?.error,
     tokensUsed: result?.tokensUsed ?? 0,
     cacheHit: result?.cacheHit ?? false,

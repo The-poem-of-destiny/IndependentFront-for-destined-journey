@@ -47,6 +47,17 @@ describe('classifyTurnFailure', () => {
       'Agent「story」绑定的 API 池已失效（原 id: x）。本轮已停止发送请求（fail-closed，不会换用别的 provider）',
       'config',
     ],
+    [
+      '模型返回了空正文：只输出了思考（约 10700 字），没有写出正文。结束原因：stop；输出 6805 token。已自动重试 1 次仍为空。',
+      'empty_reply',
+    ],
+    [
+      '模型返回了空正文：只输出了思考（约 10700 字），没有写出正文。结束原因：length；输出 8192 token。',
+      'empty_reply',
+    ],
+    ['模型返回了空正文：没有写出正文。结束原因：SAFETY；输出 12 token。', 'rejected'],
+    ['模型返回了空正文：没有写出正文。结束原因：content_filter；输出 0 token。', 'rejected'],
+    ['直出结果无效：需要一个完整的 direct_updates 区块', 'unknown'],
     ['something odd', 'unknown'],
     ['', 'unknown'],
   ])('%s → %s', (message, category) => {
@@ -92,6 +103,7 @@ describe('buildTurnFailure / turnFailureCopy', () => {
     expect(turnFailureCopy('config').needsSettings).toBe(true);
     expect(turnFailureCopy('quota').needsSettings).toBe(true);
     expect(turnFailureCopy('rate_limit').needsSettings).toBe(false);
+    expect(turnFailureCopy('empty_reply').needsSettings).toBe(false);
     for (const category of [
       'auth',
       'quota',
@@ -100,6 +112,7 @@ describe('buildTurnFailure / turnFailureCopy', () => {
       'server',
       'rejected',
       'config',
+      'empty_reply',
       'unknown',
     ] as const) {
       expect(turnFailureCopy(category).summary.length).toBeGreaterThan(0);

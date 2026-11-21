@@ -21,6 +21,8 @@
 
 每次楼生成尝试至多一次非记忆请求，身份为 `direct_main`，不调用资料选择器或工具，不自动重试或修复主回复。无缓存优化模式不建立主生成 Delta 会话，供应商自动缓存不受此开关控制；缓存优化模式按[独立会话契约](direct-generation-cache.md)组装上下文。
 
+📌 2026-11-20 更正（分支 `fix/direct-empty-response`，未真机验证）：「不自动重试」已有一个例外 —— 模型可见正文为空时，同一请求原样重发一次，因此每次楼生成尝试至多两次计费主请求；详见下文「空正文重发一次」注记。修复主回复仍不做。
+
 记忆回溯、摘要、Story v2 缺摘要补建、归档与维护继续使用现有代码和各自配置，因此一楼总请求数可能超过两次。Agent 模式继续原有多 Agent 流程。
 
 主 AI 一次输出正文、选项、角色档案／经历和结构化状态。代码检查格式、写入范围、引用、库存数量和战斗资源等，并将核心状态与来源消息一起提交；不会重新执行全部战斗／制作公式，也不保证模型算术正确。提供本地骰池供主 AI 使用。战斗终局只写回声明的资源与状态，不额外发放自动战斗经验或 FP。
@@ -28,6 +30,14 @@
 📌 2026-11-17 补充（请求预算不变）：`directStructuredCombat` 关闭（当前唯一可用状态）时，上段「战斗资源」检查与「战斗终局」写回不再发生，战斗相关的数值变化全部走普通状态写入。请求数不变：仍是每次楼生成尝试至多一次非记忆主请求，正文战斗不另开请求。
 
 📌 2026-11-20 被拒输出的调试记录保留模型原文与请求消息；多余字段报错列出键名与路径。分支 `fix/direct-rejected-output-observability`，校验宽严不变。模型已回复但 `parseDirectOutput` 拒绝（或供应商返回 error 结果）时，`generateDirectTurn` 抛 `DirectTurnError`（`direct-main.ts`）携带本次 `AgentResult`；`AgentOrchestrator.runDirect` 把它作为 `onAgentError` 第三参交给调试记录，再向下游抛原始错误（取消判定不变）。多余字段报 `<路径> 含未支持的字段：a、b`，最多列 5 个、单键超 24 字符截断，超出追加「等 N 个」；实体路径形如 `entities[0].output.character.skills`。`direct_updates` 不是合法 JSON 时也明确报出。
+
+📌 2026-11-20 空正文重发一次（分支 `fix/direct-empty-response`，未真机验证）。起因：gemini-3.8-flash 经 OpenAI 兼容代理，用了 6805 个输出 token、约 1.07 万字符原生思考，正文为空；此前报成误导性的「直出结果无效：需要一个完整的 direct_updates 区块」，界面归为 unknown。
+
+- **重发**：`direct_main`（`direct_cached` 同样执行它）的可见正文为空或只有空白时，`generateDirectTurn` 把同一请求原样再发一次（同一缓存票据，不重新 prepare）。例外：结束原因是 length / max_tokens（输出预算耗尽）时不重发，直接失败。因此每次尝试至多两次计费主请求。其他拒绝（格式/解析失败、供应商 error 结果）照旧不重试；两次之间若已取消，不发第二次。
+- **报错**：仍为空时错误信息以「模型返回了空正文」开头，写明思考长度、结束原因、输出 token 数与是否已重发。判定与措辞在 `src/core/agents/direct-output.ts` 的 `isEmptyDirectReply` / `describeEmptyDirectReply`；引擎日志记 warn `direct.empty_reply`。
+- **调试**：被丢弃的那次尝试记入 `AgentResult.providerRounds`（调试面板「Provider 往返」可见）；顶层 usage 只算最后一次。流式 `StreamCallbacks.onComplete` 新带 `finishReason`，直出结果与调试记录（`DebugAgentEntry.finishReason`）保存它，调试面板显示「结束原因」。
+- **界面**：`src/ui/lib/turn-failure.ts` 新增失败类别 `empty_reply`（模型只思考没写正文，可重试；反复出现就调高最大输出、降低思考强度或换模型/来源）。空正文且结束原因含 safety / content_filter / blocked / blocklist / prohibited / recitation / spii / refusal 的归 `rejected`。
+- 缓存直出的票据处理见[缓存直出 · 请求与记忆](direct-generation-cache.md#请求与记忆)。
 
 ### 正文战斗（2026-11-17）
 
@@ -127,5 +137,7 @@ npm run knip:ratchet
 ```
 
 重点回归覆盖单次请求、旧档默认 Agent、显式建档选择、非法输出无写入、库存事务回滚、已接纳楼防重放、战斗跨楼与精确终局、定义绑定、备份／快照和后续维护失败。2026-11-09 推送后补测：旧记忆召回和摘要落库、三楼制作与战斗状态衔接、真实客户端 SSE 分片解析、HTTP 503／断流零自动重试，以及每轮发送完整上下文。干净副本的 knip 棘轮通过，未新增死代码。自动化使用模拟模型；真实模型的输出稳定性、原卡体验和成本需另行实测。
+
+📌 2026-11-20 更正（分支 `fix/direct-empty-response`）：「零自动重试」现只对 HTTP 错误、断流与被拒输出成立；可见正文为空（且结束原因不是 length / max_tokens）时会原样重发一次，见上文「空正文重发一次」注记。
 
 设计契约见 [直出 v1 设计](../planning/2026-11-09-direct-generation-v1-design.md)。

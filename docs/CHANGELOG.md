@@ -9,6 +9,16 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-20 直出空正文重发一次 + 明确报错｜分支 `fix/direct-empty-response`，**已实施，未真机验证**
+
+- 问题：gemini-3.8-flash 经 OpenAI 兼容代理，用了 6805 个输出 token、约 1.07 万字符原生思考，正文为空；被报成误导性的「直出结果无效：需要一个完整的 direct_updates 区块」，界面归为 unknown。
+- 重发：`direct-main.ts` 的 `generateDirectTurn` 在可见正文为空或只有空白时，把同一请求原样再发一次（同一缓存票据，不重新 prepare），`direct_main` 与 `direct_cached` 都适用；结束原因为 length / max_tokens 时不重发、直接失败。每次尝试至多两次计费主请求。格式/解析失败与供应商 error 结果照旧不重试；两次之间已取消则不发第二次。
+- 报错：仍为空时错误以「模型返回了空正文」开头，写明思考长度、结束原因、输出 token 数与是否已重发（`direct-output.ts` 的 `isEmptyDirectReply` / `describeEmptyDirectReply`，warn `direct.empty_reply`）。
+- 调试：丢弃的那次进 `AgentResult.providerRounds`（调试面板「Provider 往返」）；顶层 usage 只算最后一次。`StreamCallbacks.onComplete` 新带 `finishReason`，直出结果与 `DebugAgentEntry.finishReason` 保存，调试面板显示「结束原因」。
+- 缓存：重发沿用同一票据；两次都空只算一次丢弃（不计 `repeated_rejection`）；重发时传输失败照旧使会话失效。
+- 界面：`src/ui/lib/turn-failure.ts` 新增类别 `empty_reply`（只思考没写正文，可重试；反复出现就调高最大输出、降低思考强度或换模型/来源）；空正文且结束原因含 safety / content_filter / blocked / blocklist / prohibited / recitation / spii / refusal 的归 `rejected`。
+- 文档：`docs/reference/direct-generation.md`（新注记，并就地更正「不自动重试」「零自动重试」两处）、`docs/reference/direct-generation-cache.md`、`src/core/AGENTS.md`、`src/ui/AGENTS.md` 加 📌 2026-11-20 注记。
+
 ### 2026-11-20 直出扁平角色实体容错 + 骰池缩小分组｜分支 `fix/direct-dice-entity`，**已实施，未真机验证**
 
 - 问题：模型引入新 NPC 时把角色字段直接摊在 `entities[i].output` 上，整楼以「entities[0].output 含未支持的字段：name、race…」被拒；另外无缓存直出每楼骰池约 6200 字符，大多用不上。

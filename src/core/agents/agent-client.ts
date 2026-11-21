@@ -159,6 +159,8 @@ export interface StreamCallbacks {
     cacheMissTokens: number;
     completionTokens: number;
     duration: number;
+    /** provider 给出的结束原因（stop / length / max_tokens …）；没给则缺席 */
+    finishReason?: string;
     /** 仅供会话组装层续传 provider 原生签名，不进入普通结果或调试导出。 */
     nativeAssistant?: NativeLlmContent;
     usage?: import('../types/types-api').NormalizedLlmUsage;
@@ -950,6 +952,7 @@ export class AgentClient {
             cacheMissTokens,
             completionTokens: outputTokens,
             duration: Date.now() - startTime,
+            finishReason: snapshot.finishReason,
             nativeAssistant: snapshot.nativeAssistant,
             ...(request.cachePolicy ? { usage: directCacheUsage(protocol, snapshot.usage) } : {}),
           });
