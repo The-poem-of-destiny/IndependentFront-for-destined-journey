@@ -424,6 +424,20 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │         结构不兼容就升版本让旧键作废）；`overspentPoints` 进缺失项（「转生点数超支 N 点」，C-06）；
 │   │         选择步骤的选中统一走 `selectCatalogItem`（点数不足返回 false，C-05），
 │   │         预设加载 / 自定义物品走 add* 原语不受此闸，超支由建档边界拦
+│   │      📌 2026-11-20（开局清单落库 + 精简开场提示词）：
+│   │         ①初始等级上限 `MAX_START_LEVEL`（10，引擎 `content/start-catalog-mechanics.ts`，所有难度含创造模式）。
+│   │           超过上限进缺失项；`applyPresetData` 遇超限预设截到上限、额外属性点清零并返回原等级
+│   │           （PresetModal 据此 toast，列表行挂「超出等级上限」角标）；恢复草稿同理，经 `draftLevelClampedFrom`
+│   │           交 CreatePage toast 一次。真正的拒收在引擎 `createJourney`，这里只是提前拦下并说明
+│   │         ②`buildCharacterState` 经引擎 `content/start-loadout.ts` 的 `buildStartLoadout` 把选中的装备 / 道具 /
+│   │           技能**直接写进** `inventory` / `skills`（推翻 2026-07-23「开局留空、走 item_gen」的决定），
+│   │           并在 `metadata.startLoadoutPersisted: true`
+│   │         ③`buildOpeningPrompt` 只把捏人页选择解析成引擎 `prompts/opening-prompt.ts` 的输入，正文由引擎构造：
+│   │           不再列装备 / 技能 / 背包清单、金钱与天赋水平。玩家可在第 8 步改写：`openingPromptDraft`（null = 跟随
+│   │           默认）/ `openingPromptText`（建档实际写入的文本）/ `openingPromptEdited` / `openingPromptStale`
+│   │           （改写后建档输入又变了）/ `setOpeningPromptText` / `restoreDefaultOpeningPrompt`；清空改写稿进缺失项。
+│   │           改写稿随向导草稿保存（`openingPromptDraft` / `openingPromptDraftBase` 可选字段，不升草稿版本），
+│   │           加载预设与重置都回到跟随默认
 │   ├── game-store.ts                ← 时间线恢复唯一 UI 编排边界：rollbackOneTurn /
 │   │                                   restoreToSnapshot / restartCombat 共用私有 restoreTimeline；
 │   │                                   三态结果区分恢复前拒绝、完整恢复、权威已恢复但投影失败。
@@ -989,7 +1003,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               装备选择 / 背景故事 / 剧情规划 / 确认提交；八个步骤按钮
 │   │   │                               均可直接跳转，存档创建提交期间统一禁用
 │   │   ├── CreateStepDifficulty.vue      ← ① 难度
-│   │   ├── CreateStepBasic.vue           ← ② 基础信息（姓名/性别/种族/血脉…）
+│   │   ├── CreateStepBasic.vue           ← ② 基础信息（姓名/性别/种族/血脉…）；📌 2026-11-20 等级输入上限
+│   │   │                                    改为 `MAX_START_LEVEL`（原 25），下方提示「初始等级最高 Lv.10」
 │   │   ├── CreateStepDestinyCore.vue     ← ③ 命定核心（★工坊项目粒度的启用在**这一步**，
 │   │   │                                    复用 shared/WorkshopEnableList.vue）
 │   │   ├── CreateStepCharacters.vue      ← ④ 角色启用：按**世界书条目 uid** 勾选
@@ -998,7 +1013,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   ├── CreateStepSelections.vue      ← ⑤ 装备/技能/道具选择
 │   │   ├── CreateStepBackground.vue      ← ⑥ 背景故事
 │   │   ├── CreateStepPlot.vue            ← ⑦ 剧情规划
-│   │   ├── CreateStepConfirm.vue         ← ⑧ 确认提交（含素材/画像收尾）
+│   │   ├── CreateStepConfirm.vue         ← ⑧ 确认提交（含素材/画像收尾）；📌 2026-11-20 末尾挂 OpeningPromptEditor
+│   │   ├── OpeningPromptEditor.vue       ← 🆕 [2026-11-20] 开局提示词预览与编辑：显示 `store.openingPromptText`，
+│   │   │                                    输入即 `setOpeningPromptText`，「恢复默认」先 `confirmDialog`（没改过时禁用），
+│   │   │                                    `openingPromptStale` 时提示可恢复默认；`isCreating` 期间只读。
+│   │   │                                    这段文本原样作为新存档的第一条用户消息
 │   │   ├── AttributeEditor.vue / PointsBar.vue   ← 五维分配与点数条（点数余额的展示层）；2026-11-16 起基础列可直接键入（`editable` + `set` 事件），第 2 步另有平均 / 随机 / 重置三个快捷按钮，逻辑在 `create-store` 的 `setBasePoint` 等四个动作
 │   │   ├── QualityFilter.vue / CategoryTabs.vue / CategorySelectionLayout.vue
 │   │   │                                 ← 品质筛选 + 类目页签 + 「左类目 / 右列表」通用版式

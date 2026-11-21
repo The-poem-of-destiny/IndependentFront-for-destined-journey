@@ -10,11 +10,19 @@ import type { CreatePresetRecord } from '@engine/persistence/database';
 import AppModal from '../shared/AppModal.vue';
 import AppButton from '../shared/AppButton.vue';
 import { confirmDialog } from '../../lib/confirm-dialog';
+import { useUIStore } from '../../stores/ui-store';
+import { MAX_START_LEVEL } from '@engine/content/start-catalog-mechanics';
 
 const props = defineProps<{ visible: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 
 const store = useCreateStore();
+const ui = useUIStore();
+
+/** 预设等级超过开局上限：加载时会被截到上限、额外属性点清零（旧预设可能存着 Lv.11~25） */
+function exceedsLevelCap(p: CreatePresetRecord): boolean {
+  return (p.data.character?.level ?? 1) > MAX_START_LEVEL;
+}
 
 const presetName = ref('');
 const confirmName = ref<string | null>(null);
@@ -107,7 +115,13 @@ async function handleLoad(preset: CreatePresetRecord) {
     });
     if (!confirmed) return;
   }
-  store.applyPresetData(preset.data);
+  const clampedFrom = store.applyPresetData(preset.data);
+  if (clampedFrom != null) {
+    ui.toast(
+      `预设「${preset.name}」原为 Lv.${clampedFrom}，超过初始等级上限，已调整为 Lv.${MAX_START_LEVEL}；额外属性点已清空，请重新分配。`,
+      'warning',
+    );
+  }
   emit('close');
 }
 
@@ -310,6 +324,13 @@ const busy = ref(false);
           <div class="preset-header-main">
             <div class="preset-header-top">
               <span class="preset-name">{{ p.name }}</span>
+              <span
+                v-if="exceedsLevelCap(p)"
+                class="level-cap-badge"
+                data-test="preset-level-cap"
+                :title="`初始等级最高 Lv.${MAX_START_LEVEL}，加载时会调整为 Lv.${MAX_START_LEVEL} 并清空额外属性点`"
+                >超出等级上限</span
+              >
               <span class="preset-expand-icon">{{ expandedId === p.id ? '▾' : '▸' }}</span>
             </div>
             <span class="preset-summary">{{ getPresetSummary(p) }}</span>
@@ -339,7 +360,10 @@ const busy = ref(false);
               </div>
               <div class="detail-row">
                 <span class="detail-label">等级</span
-                ><span>Lv.{{ p.data.character?.level || 1 }}</span>
+                ><span :class="{ 'level-over-cap': exceedsLevelCap(p) }"
+                  >Lv.{{ p.data.character?.level || 1
+                  }}{{ exceedsLevelCap(p) ? `（加载后为 Lv.${MAX_START_LEVEL}）` : '' }}</span
+                >
               </div>
               <div class="detail-row">
                 <span class="detail-label">起始地点</span
@@ -521,6 +545,19 @@ const busy = ref(false);
   font-weight: 600;
   font-size: 0.9rem;
   color: var(--theme-text-primary);
+}
+.level-cap-badge {
+  flex-shrink: 0;
+  padding: 0 var(--theme-spacing-xs);
+  border-radius: var(--theme-radius-sm);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--theme-warning) 12%, transparent);
+  color: var(--theme-warning);
+  border: 1px solid color-mix(in srgb, var(--theme-warning) 30%, transparent);
+}
+.detail-row span.level-over-cap {
+  color: var(--theme-warning);
 }
 .preset-expand-icon {
   font-size: 0.7rem;

@@ -13,6 +13,7 @@ import PresetModal from './PresetModal.vue';
 import { initializeCachedDirectSettings } from '../../lib/direct-settings';
 import { MISSING_FIELDS_PREFIX, type BlockedHint } from '../../lib/create-options';
 import { confirmDialog } from '../../lib/confirm-dialog';
+import { MAX_START_LEVEL } from '@engine/content/start-catalog-mechanics';
 
 const store = useCreateStore();
 const ui = useUIStore();
@@ -39,6 +40,20 @@ const blocked = computed(
     issues.value.some((issue) => issue.blocking),
 );
 const ready = computed(() => accepted.value && !blocked.value);
+
+// 恢复的草稿等级超过开局上限时 store 已截到上限并清空额外属性点，这里告诉玩家一次后清掉标记
+watch(
+  () => store.draftLevelClampedFrom,
+  (from) => {
+    if (from == null) return;
+    ui.toast(
+      `上次未完成的草稿为 Lv.${from}，超过初始等级上限，已调整为 Lv.${MAX_START_LEVEL}；额外属性点已清空，请重新分配。`,
+      'warning',
+    );
+    store.draftLevelClampedFrom = null;
+  },
+  { immediate: true },
+);
 
 /** 步骤内容的滚动容器：切步骤后要回到顶部，否则新步骤的必填项可能落在视野外 */
 const contentRef = ref<HTMLElement | null>(null);

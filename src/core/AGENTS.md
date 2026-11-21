@@ -51,6 +51,7 @@ src/core/                    ← 核心引擎
   │   └── 辅助: createDefaultCharacterState() / resolvePlotTree()
   │
   ├── persistence/create-journey.ts             ← 新旅程唯一原子落库入口（角色/存档/档案/大纲/事件同一事务）
+  │       📌 2026-11-20：开事务**之前**拒收不在 [1, `MAX_START_LEVEL`] 的整数初始等级（只拒收不截断，失败不留记录）
   ├── persistence/database.ts                   ← Dexie/IndexedDB v34
   │       🔴 `DB_VERSION` 常量必须等于最后一个 `this.version(n)`。它只出现在
   │          `FullBackup.version` 上、导入侧不拿它做判断，所以**对不上不会有任何报错**，
@@ -587,6 +588,19 @@ src/core/                    ← 核心引擎
   │   └── content/start-catalog-mechanics.ts ← [D24] 机制半边：schema/类型 + 难度档位/性别枚举/限定覆盖表
   │                                     + 纯函数（parseCatalogData 容错解析 / lookupCost 查表 /
   │                                     flattenLocationTree / classifyBackground）
+  │                                     📌 2026-11-20：+`MAX_START_LEVEL`（10，初始等级上限，所有难度含创造模式）
+  ├── content/start-loadout.ts              ← 🆕 [2026-11-20] 开局装备 / 道具 / 技能 → `inventory` / `skills` 的纯函数
+  │                                     `buildStartLoadout`（形状对齐 entity_gen 的 add_item / add_skill；同槽首件穿上；
+  │                                     同名合并；`parseSkillCost` 从 consume 读 HP/MP/SP 消耗），为每条合成纯文本
+  │                                     `protocolText`（描述 / 标签 / 效果 / 消耗 / 数值）供战斗沙盒读取。
+  │                                     🔴 推翻 2026-07-23「开局清单不落库、走 item_gen」：新档建档即落库并打
+  │                                        `SaveSlot.metadata.startLoadoutPersisted`。取舍：初始技能**没有**
+  │                                        `skillPower` / `relevantAttribute` / `damageType`，战斗全靠 `protocolText`
+  ├── prompts/opening-prompt.ts             ← 🆕 [2026-11-20] 开局提示词（首轮玩家输入）纯函数构造器，ST 开局模板版式：
+  │                                     指明结构化区块（agent `<角色状态>` / direct `<direct_state>` /
+  │                                     direct_cached `<direct_context>`）+ 待创作的开局要素 + 第一轮须同步的时间与地点
+  │                                     + 开局剧情（预设 / 自定义 / 自由开局）。🔴 不复述金钱、装备 / 技能 / 背包清单、
+  │                                     天赋水平，也不写「不可改变既定事实」—— 重复一遍只会让模型拿叙事值覆盖面板
   │       🪦 `start-catalog-data.ts`（8704 行）已删。七个池（装备/物品/技能、背景、命定核心、
   │          种族/身份点数表、起始地树）住在 `public/data/content/catalog.json`，经内容注册表
   │          （content-store 的 `catalog` 面）供给、pack 可整份替换。

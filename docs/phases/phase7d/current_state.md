@@ -255,7 +255,15 @@ src/ui/components/create/
 | 种族 / 身份费用     | `catalog.raceCosts`（24 键）/ `catalog.identityCosts`（15 键）                                                                                                          | 经 `lookupCost` 查表                                                  |
 | 起始地点            | `catalog.startLocations`（树）→ `flattenLocationTree`                                                                                                                   | 公开仓占位集 1 棵                                                     |
 | 难度预设 / 性别     | `start-catalog-mechanics.ts` 的机制常量                                                                                                                                 | 机制半边，随代码走                                                    |
-| 角色 / 命定核心条目 | Dexie 世界书（`loadWorldBookEntries()` → `systemCoreEntries` / `characterEntries`）                                                                                     | 按条目 uid 勾选，落进开场提示词                                       |
+| 角色 / 命定核心条目 | Dexie 世界书（`loadWorldBookEntries()` → `systemCoreEntries` / `characterEntries`）                                                                                     | 按条目 uid 勾选；命定核心名写进开场提示词                             |
+
+> 📌 **2026-11-20 开局清单重新在建档时落库**：选中的装备 / 道具 / 技能经引擎
+> `content/start-loadout.ts` 的 `buildStartLoadout` 直接写进主角 `inventory` / `skills`（同槽首件穿上，
+> 每条合成纯文本 `protocolText`），存档打 `metadata.startLoadoutPersisted: true`。这推翻了 2026-07-23
+> 「开局留空、清单写进开场提示词、由 dispatcher 发 item_gen 生成」的做法；代价是初始技能没有
+> `skillPower` / `relevantAttribute` / `damageType`，战斗沙盒只靠 `protocolText`。
+> 开场提示词同时精简（引擎 `prompts/opening-prompt.ts`），不再列清单、金钱与天赋水平，
+> 并可在第 8 步（`OpeningPromptEditor.vue`）预览、改写、恢复默认。初始等级上限 `MAX_START_LEVEL` = 10。
 
 > 🔴 上表第一行与其余行**口径不同**：只有装备/道具/技能仍走硬编码的上游 CDN，其余走内容注册表
 > （`public/data/content/catalog.json`，内容包可整份替换）。公开仓那份是**零 IP 占位集**，
@@ -286,6 +294,8 @@ src/ui/components/create/
   `outlineHistory` / `chaptersHistory` + 草稿 `DRAFT_KEY = 'plotOutlineDraft_v1'`
 - **提交**: `buildCharacterState(saveId)` / `buildOpeningPrompt()` / `startJourney()` /
   `startJourneyAndClearDraft()` / `autoSaveDraft` / `tryRestoreDraft` / `clearDraft`
+  （📌 2026-11-20：+开场提示词改写 `openingPromptDraft` / `openingPromptText` / `openingPromptEdited` /
+  `openingPromptStale` / `setOpeningPromptText` / `restoreDefaultOpeningPrompt`；+`draftLevelClampedFrom`）
 - **预设**: `showPresetModal`, `presets`, `getCurrentPresetData` / `applyPresetData`
 - **重置**: `resetAll`
 

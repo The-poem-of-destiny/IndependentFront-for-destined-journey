@@ -9,6 +9,7 @@ let settings: any;
 const navigate = vi.fn();
 const back = vi.fn();
 const openSettings = vi.fn();
+const toast = vi.fn();
 vi.mock('../../../../src/ui/stores/create-store', () => ({ useCreateStore: () => create }));
 vi.mock('../../../../src/ui/stores/settings-store', () => ({ useSettingsStore: () => settings }));
 vi.mock('../../../../src/ui/stores/content-store', () => ({
@@ -19,7 +20,7 @@ vi.mock('../../../../src/ui/lib/confirm-dialog', () => ({
   confirmDialog: (opts: { danger?: boolean }) => confirmDialog(opts),
 }));
 vi.mock('../../../../src/ui/stores/ui-store', () => ({
-  useUIStore: () => ({ navigate, back, openSettings }),
+  useUIStore: () => ({ navigate, back, openSettings, toast }),
 }));
 
 // Vue Test Utils 的布尔异步组件 stub 仍会调用 __asyncLoader() 来登记真实组件。
@@ -288,5 +289,27 @@ describe('first journey readiness', () => {
       expect(main.scrollTop).toBe(0);
       wrapper.unmount();
     });
+  });
+});
+
+describe('草稿等级截断提示', () => {
+  it('★ 恢复的草稿等级被截到 Lv.10 时弹一次警告 toast 并清掉标记', async () => {
+    create.draftLevelClampedFrom = 20;
+    mountCreatePage();
+    await flushPromises();
+    expect(toast).toHaveBeenCalledTimes(1);
+    const [message, type] = toast.mock.calls[0];
+    expect(type).toBe('warning');
+    expect(message).toContain('Lv.20');
+    expect(message).toContain('Lv.10');
+    expect(message).toContain('属性点');
+    expect(create.draftLevelClampedFrom).toBeNull();
+  });
+
+  it('草稿未截断时不弹提示', async () => {
+    create.draftLevelClampedFrom = null;
+    mountCreatePage();
+    await flushPromises();
+    expect(toast).not.toHaveBeenCalled();
   });
 });

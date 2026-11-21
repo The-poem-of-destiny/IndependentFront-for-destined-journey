@@ -88,7 +88,7 @@ prompt 的拼装顺序与注入内容**。首轮 / 重基线仍由 `buildAgentMe
 | `{{USER_INPUT}}`        | `ctx.userInput`                                                            | registry ~L477 | —                                        |
 | `{{CHARACTER_STATE}}`   | `buildZoneContext` → `filterZoneContent` (npc zone, agent 可见性级别)      | registry ~L482 | —                                        |
 | `{{INVENTORY}}`         | 遍历 `ctx.characters[*].inventory`                                         | registry ~L493 | —                                        |
-| `{{SKILL_STATE}}`       | 各角色 `skills` + 开局 `--- 初始技能 ---` 声明段                           | registry ~L512 | —                                        |
+| `{{SKILL_STATE}}`       | 各角色 `skills` + 开局 `--- 初始技能 ---` 声明段（📌 2026-11-20 起仅旧档） | registry ~L512 | —                                        |
 | `{{QUEST_STATE}}`       | `ctx.quests`（Phase 10g）                                                  | registry ~L554 | —                                        |
 | `{{GAME_TIME}}`         | `formatGameTime(ctx.gameTime)` 优先，`ctx.variables` 的世界键补天气/季节等 | registry ~L582 | —                                        |
 | `{{MAP_CONTEXT}}`       | `buildMapSnapshot` → `<map_context>` 块（**没装地图包时是空串**）          | registry ~L623 | —                                        |
@@ -100,6 +100,12 @@ prompt 的拼装顺序与注入内容**。首轮 / 重基线仍由 `buildAgentMe
 
 > 🔴 `MAP_CONTEXT` / `RANDOM_EVENTS` / `RECENT_COMBAT` 三块**自带 XML 外壳**，模板里不要再包一层中文标签——
 > 包了就会在子系统未启用时留下一对空标签，把「零 token」那条设计意图静默作废。
+
+> 📌 **2026-11-20**：`{{SKILL_STATE}}` 的「开局声明段」来源（`ctx.openingPrompt`）**只对旧档生效**。
+> 新档建档时已把初始装备 / 道具 / 技能结构化落库（`content/start-loadout.ts`）并打
+> `metadata.startLoadoutPersisted: true`，`game-pipeline` 的 buildContext 对这类存档恒给
+> `openingPrompt: undefined` —— 不再从开场提示词重解析初始技能，直出模式也不在后续回合随
+> `direct_state` 重发开场提示词。开场提示词本身仍作首条用户消息（`{{USER_INPUT}}`）发送。
 
 ### Agent 通信占位符（6 个，从 `ctx.agentOutputs` 读取）
 

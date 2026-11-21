@@ -147,3 +147,14 @@ describe('CreateStepBasic — 基础点快捷分配', () => {
     expect(apEditors.every((w) => !w.props('editable'))).toBe(true);
   });
 });
+
+describe('CreateStepBasic — 初始等级上限', () => {
+  it('★ 等级步进器上限为 Lv.10，并提示「初始等级最高 Lv.10」', () => {
+    const wrapper = shallowMount(CreateStepBasic);
+    const stepper = wrapper
+      .findAllComponents({ name: 'FormStepper' })
+      .find((w) => w.props('label') === '等级')!;
+    expect(stepper.props('max')).toBe(10);
+    expect(wrapper.find('[data-test="level-cap-hint"]').text()).toBe('初始等级最高 Lv.10');
+  });
+});

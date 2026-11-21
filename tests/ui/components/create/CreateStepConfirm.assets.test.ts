@@ -65,6 +65,13 @@ beforeEach(() => {
     customBackgroundText: '',
     plotOutline: null,
     remainingPoints: 0,
+    // 开局提示词编辑器（OpeningPromptEditor）读取的字段
+    openingPromptText: '开场提示词正文',
+    openingPromptEdited: false,
+    openingPromptStale: false,
+    isCreating: false,
+    setOpeningPromptText: vi.fn(),
+    restoreDefaultOpeningPrompt: vi.fn(),
   };
   mockAssets = {
     assets: [] as AssetMetaRecord[],
@@ -165,5 +172,16 @@ describe('CreateStepConfirm — 转生点数超支（C-06）', () => {
     expect(wrapper.text()).not.toContain('保留在存档中');
     await box.find('button').trigger('click');
     expect(mockCreate.currentStep).toBe(1);
+  });
+});
+
+describe('CreateStepConfirm — 开局提示词', () => {
+  it('确认页挂出开局提示词编辑区，显示当前将发送的文本', async () => {
+    const wrapper = mount(CreateStepConfirm);
+    await flushPromises();
+    const section = wrapper.find('.opening-prompt');
+    expect(section.exists()).toBe(true);
+    expect(section.find('h3').text()).toBe('开局提示词');
+    expect((section.find('textarea').element as HTMLTextAreaElement).value).toBe('开场提示词正文');
   });
 });

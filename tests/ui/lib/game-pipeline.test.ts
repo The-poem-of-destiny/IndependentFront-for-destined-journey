@@ -515,6 +515,23 @@ describe('sendOpeningPrompt', () => {
     expect(run).toHaveBeenCalledWith('OPENING', undefined, false);
     expect(gameStore.releaseOpeningPromptClaim).not.toHaveBeenCalled();
   });
+
+  it('开局清单已落库的新档仍把开场提示词作为首条用户消息发送', async () => {
+    const gameStore = makeGameStore({
+      openingPrompt: 'OPENING',
+      activeSave: { id: 'save-test', metadata: { startLoadoutPersisted: true } },
+    });
+    const pipeline = new GamePipeline({
+      gameStore,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    const run = vi.spyOn(pipeline, 'run').mockResolvedValue(true);
+
+    await pipeline.sendOpeningPrompt();
+
+    expect(run).toHaveBeenCalledWith('OPENING', undefined, true);
+  });
 });
 
 describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () => {
@@ -888,6 +905,26 @@ describe('buildContext — plotSettings (步5)', () => {
     const pipeline = makePipeline({ activeSave: null });
     const ctx = (pipeline as any).buildContext('输入');
     expect(ctx.plotSettings.mode).toBe('off');
+  });
+});
+
+describe('buildContext — openingPrompt 与开局清单落库标记', () => {
+  it('新档（startLoadoutPersisted）不再供 openingPrompt', () => {
+    const pipeline = makePipeline({
+      openingPrompt: 'OPENING',
+      activeSave: { id: 'save-test', metadata: { startLoadoutPersisted: true } },
+    });
+    const ctx = (pipeline as any).buildContext('输入');
+    expect(ctx.openingPrompt).toBeUndefined();
+  });
+
+  it('旧档缺标记时照旧供 openingPrompt', () => {
+    const pipeline = makePipeline({
+      openingPrompt: 'OPENING',
+      activeSave: { id: 'save-test', metadata: { characterName: '主角' } },
+    });
+    const ctx = (pipeline as any).buildContext('输入');
+    expect(ctx.openingPrompt).toBe('OPENING');
   });
 });
 

@@ -21,6 +21,10 @@ vi.mock('../../../../src/ui/stores/create-store', () => ({
 vi.mock('../../../../src/ui/lib/confirm-dialog', () => ({
   confirmDialog: (opts: any) => confirmDialog(opts),
 }));
+const toast = vi.fn();
+vi.mock('../../../../src/ui/stores/ui-store', () => ({
+  useUIStore: () => ({ toast }),
+}));
 vi.mock('@engine/persistence/database', () => ({
   getCreatePresets: vi.fn(async () => presetRows),
   saveCreatePreset: vi.fn(async () => {}),
@@ -71,6 +75,7 @@ async function mountAndLoad() {
 
 beforeEach(() => {
   confirmDialog.mockClear();
+  toast.mockClear();
   confirmDialog.mockResolvedValue(true);
   presetRows = [makeRow()];
   mockCreate = reactive({
@@ -113,5 +118,44 @@ describe('PresetModal — 加载前确认（C-13）', () => {
     await mountAndLoad();
     const details: string[] = confirmDialog.mock.calls[0][0].details;
     expect(details.some((d) => d.includes('剧情大纲') && d.includes('回退上一版'))).toBe(true);
+  });
+});
+
+describe('PresetModal — 初始等级上限（Lv.10）', () => {
+  it('★ 预设被截断时弹警告 toast，写明原等级、新等级与需重分属性点', async () => {
+    mockCreate.hasDraftContent = false;
+    mockCreate.applyPresetData = vi.fn(() => 18);
+    const wrapper = await mountAndLoad();
+    expect(toast).toHaveBeenCalledTimes(1);
+    const [message, type] = toast.mock.calls[0];
+    expect(type).toBe('warning');
+    expect(message).toContain('Lv.18');
+    expect(message).toContain('Lv.10');
+    expect(message).toContain('属性点');
+    expect(wrapper.emitted('close')).toHaveLength(1);
+  });
+
+  it('未截断时不弹 toast', async () => {
+    mockCreate.hasDraftContent = false;
+    mockCreate.applyPresetData = vi.fn(() => null);
+    await mountAndLoad();
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it('★ 列表与详情标出等级超过上限的预设', async () => {
+    presetRows = [
+      makeRow({ character: { name: '高阶', race: '人类', level: 15 } }),
+      { ...makeRow(), id: 'p2', name: '新手' },
+    ];
+    const wrapper = mount(PresetModal, {
+      props: { visible: true },
+      global: { stubs: { AppModal: AppModalStub } },
+    });
+    await flushPromises();
+    const cards = wrapper.findAll('.preset-card');
+    expect(cards[0].find('[data-test="preset-level-cap"]').exists()).toBe(true);
+    expect(cards[1].find('[data-test="preset-level-cap"]').exists()).toBe(false);
+    await cards[0].find('.preset-header').trigger('click');
+    expect(wrapper.find('.preset-detail').text()).toContain('Lv.15（加载后为 Lv.10）');
   });
 });
