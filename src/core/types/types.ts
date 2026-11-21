@@ -2435,6 +2435,8 @@ export interface DebugAgentEntry {
   promptRebased?: boolean;
   promptRebaseReason?: string;
   directCacheDiagnostics?: DirectCacheDiagnostics;
+  /** 上游给的结束原因（stop / length / content_filter…）；旧记录缺席 */
+  finishReason?: string;
   error?: string;
   tokensUsed: number;
   cacheHit: boolean;
@@ -2628,7 +2630,16 @@ export interface AgentActivityStep {
 
 /** 🆕 回合失败原因的分类（审查 GAME-05）。措辞与下一步建议在 UI 的 `lib/turn-failure.ts`。 */
 export type TurnFailureCategory =
-  'auth' | 'quota' | 'rate_limit' | 'network' | 'server' | 'rejected' | 'config' | 'unknown';
+  | 'auth'
+  | 'quota'
+  | 'rate_limit'
+  | 'network'
+  | 'server'
+  | 'rejected'
+  | 'config'
+  /** 直出模型只输出了思考、没有写出正文（引擎抛「模型返回了空正文…」） */
+  | 'empty_reply'
+  | 'unknown';
 
 /** 🆕 失败回合给玩家看的原因（审查 GAME-05）。`detail` 已脱敏截断，只放进「技术详情」。 */
 export interface TurnFailureInfo {

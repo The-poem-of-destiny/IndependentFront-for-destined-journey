@@ -756,6 +756,28 @@ describe('AgentClient', () => {
       ]);
     });
 
+    it('流式 onComplete 带出 finishReason', async () => {
+      const onComplete = vi.fn();
+      const onError = vi.fn();
+      globalThis.fetch = mockStreamingFetch([
+        [
+          `data: ${JSON.stringify({ choices: [{ delta: { content: 'Hi' }, finish_reason: null }] })}\n\n`,
+          `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'length' }] })}\n\n`,
+          'data: [DONE]\n\n',
+        ].join(''),
+      ]);
+
+      await client.chatStream(
+        { messages: [{ role: 'user', content: 'test' }] },
+        { onChunk: vi.fn(), onComplete, onError },
+      );
+
+      expect(onError).not.toHaveBeenCalled();
+      expect(onComplete).toHaveBeenCalledWith(
+        expect.objectContaining({ fullText: 'Hi', finishReason: 'length' }),
+      );
+    });
+
     it('concatenates multiple CRLF data fields in one SSE event before parsing JSON', async () => {
       const onComplete = vi.fn();
       const onError = vi.fn();

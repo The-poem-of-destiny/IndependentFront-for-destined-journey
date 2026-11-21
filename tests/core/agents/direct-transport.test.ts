@@ -100,14 +100,21 @@ function setup(v2: boolean) {
   };
 }
 
-function streamResponse(complete: boolean, text = raw) {
+/** 流式 SSE 响应；`reasoning` 先以思维链增量发出，`finishReason` 在末尾单独一帧给出 */
+function streamResponse(
+  complete: boolean,
+  text = raw,
+  options: { reasoning?: string; finishReason?: string } = {},
+) {
+  const frame = (delta: Record<string, unknown>, finish: string | null = null) =>
+    `data: ${JSON.stringify({ choices: [{ delta, finish_reason: finish }] })}\n\n`;
   const events =
-    [text.slice(0, 11), text.slice(11, 70), text.slice(70)]
-      .map(
-        (content) =>
-          `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: null }] })}\n\n`,
-      )
-      .join('') + (complete ? 'data: [DONE]\n\n' : '');
+    (options.reasoning ? frame({ reasoning_content: options.reasoning }) : '') +
+    (text ? [text.slice(0, 11), text.slice(11, 70), text.slice(70)] : [])
+      .map((content) => frame({ content }))
+      .join('') +
+    (options.finishReason ? frame({}, options.finishReason) : '') +
+    (complete ? 'data: [DONE]\n\n' : '');
   const bytes = new TextEncoder().encode(events);
   return new Response(
     new ReadableStream<Uint8Array>({
@@ -170,6 +177,100 @@ describe('direct generation through the real client and stream parser', () => {
       expect(onError).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe('直出空正文自动重发（真实客户端与流解析）', () => {
+  /** 只有思考没有正文的流 */
+  const reasoningOnly = () =>
+    streamResponse(true, '', { reasoning: '先想想铁匠会怎么说。', finishReason: 'stop' });
+
+  it('流式结果带上 finishReason', async () => {
+    const { input, client } = setup(false);
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      streamResponse(true, raw, { finishReason: 'stop' }),
+    );
+    const generated = await generateDirectTurn(input, client);
+    expect(generated.result.finishReason).toBe('stop');
+    expect(generated.result.providerRounds).toBeUndefined();
+  });
+
+  it('流式只有思考没有正文：自动重发一次', async () => {
+    const { input, client, onError } = setup(true);
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(async () => reasoningOnly())
+      .mockImplementation(async () => streamResponse(true, raw, { finishReason: 'stop' }));
+    const generated = await generateDirectTurn(input, client);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(String(fetch.mock.calls[1][1]!.body)).toBe(String(fetch.mock.calls[0][1]!.body));
+    expect(onError).not.toHaveBeenCalled();
+    expect(generated.draft.content).toBe('铁匠收好短剑。');
+    const rounds = generated.result.providerRounds!;
+    expect(rounds).toHaveLength(2);
+    expect(rounds[0].finishReason).toBe('stop');
+    expect(rounds[0].error).toMatch(/^模型返回了空正文：只输出了思考/);
+  });
+
+  it('缓存直出空正文重试复用同一张票据，两次都空只记一次丢弃', async () => {
+    const saveId = 'cached-empty-twice';
+    invalidateDirectContext(saveId);
+    const { input, client } = setup(false);
+    input.cache = { saveId, policy: 'prefix' };
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => streamResponse(true));
+    try {
+      const first = await generateDirectTurn(input, client);
+      await acceptDirectContext(first.cache!.ticket, { acceptedMessages: [] });
+      fetch
+        .mockImplementationOnce(async () => reasoningOnly())
+        .mockImplementationOnce(async () => reasoningOnly());
+      input.context.userInput = '失败的尝试';
+      await expect(generateDirectTurn(input, client)).rejects.toThrow(/^模型返回了空正文/);
+      expect(fetch).toHaveBeenCalledTimes(3);
+      // 两次重发是同一份请求体（同一张票据，没有重新组装）
+      expect(String(fetch.mock.calls[2][1]!.body)).toBe(String(fetch.mock.calls[1][1]!.body));
+      input.context.userInput = '再试一次';
+      const next = await generateDirectTurn(input, client);
+      expect(fetch).toHaveBeenCalledTimes(4);
+      // 只记一次丢弃：没到连续丢弃上限，不会以 repeated_rejection 冷建
+      expect(next.cache!.ticket.rebaseReason).toBeUndefined();
+      const retained = first.cache!.ticket.retainedCount;
+      expect(next.result.requestMessages!.slice(0, retained)).toEqual(
+        first.result.requestMessages!.slice(0, retained),
+      );
+      expect(JSON.stringify(next.result.requestMessages)).not.toContain('失败的尝试');
+    } finally {
+      invalidateDirectContext(saveId);
+    }
+  });
+
+  it('缓存直出空正文重试成功后票据仍可接纳', async () => {
+    const saveId = 'cached-empty-recovered';
+    invalidateDirectContext(saveId);
+    const { input, client } = setup(false);
+    input.cache = { saveId, policy: 'prefix' };
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(async () => reasoningOnly())
+      .mockImplementation(async () => streamResponse(true));
+    try {
+      const first = await generateDirectTurn(input, client);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(first.result.providerRounds).toHaveLength(2);
+      await acceptDirectContext(first.cache!.ticket, { acceptedMessages: [] });
+      input.context.userInput = '离开铁匠铺';
+      const second = await generateDirectTurn(input, client);
+      expect(second.cache!.ticket.rebaseReason).toBeUndefined();
+      expect(second.result.promptRebased).toBe(false);
+      const retained = first.cache!.ticket.retainedCount;
+      expect(second.result.requestMessages!.slice(0, retained)).toEqual(
+        first.result.requestMessages!.slice(0, retained),
+      );
+    } finally {
+      invalidateDirectContext(saveId);
+    }
+  });
 });
 
 it.each([false, true])(

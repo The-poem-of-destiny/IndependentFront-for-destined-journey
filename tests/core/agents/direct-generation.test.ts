@@ -35,6 +35,7 @@ import {
   DEFAULT_AGENT_PIPELINE,
   type AgentContext,
   type AgentConfig,
+  type AgentResult,
   type ApiEndpoint,
   type SaveSlot,
   type ChatMessage,
@@ -329,7 +330,11 @@ describe('direct rejected output keeps the raw reply', () => {
     models: ['test'],
     timeout: 30000,
   };
-  function generate(overrides: Partial<AgentContext> = {}) {
+  function generate(
+    overrides: Partial<AgentContext> = {},
+    configOverrides: Partial<AgentConfig> = {},
+  ) {
+    const turnConfig = { ...config, ...configOverrides };
     const context: AgentContext = {
       userInput: '继续',
       characters: [player()],
@@ -343,10 +348,10 @@ describe('direct rejected output keeps the raw reply', () => {
     };
     return generateDirectTurn(
       {
-        config,
+        config: turnConfig,
         endpoint,
         context,
-        configs: [config],
+        configs: [turnConfig],
         worldBooks: [],
         presets: [createDirectPreset()],
         combat: null,
@@ -357,7 +362,7 @@ describe('direct rejected output keeps the raw reply', () => {
 
   it('被拒输出抛 DirectTurnError 并带原文与请求消息', async () => {
     const raw = '<maintext>只有正文</maintext>';
-    vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
+    const chat = vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
       agentId: 'direct_main',
       output: raw,
       rawResponse: raw,
@@ -366,6 +371,8 @@ describe('direct rejected output keeps the raw reply', () => {
       duration: 1,
     });
     const error = await generate().catch((e: unknown) => e);
+    // 其它解析失败不重试
+    expect(chat).toHaveBeenCalledTimes(1);
     expect(error).toBeInstanceOf(DirectTurnError);
     const failed = error as DirectTurnError;
     expect(failed.message).toContain('需要一个完整的 direct_updates 区块');
@@ -374,7 +381,7 @@ describe('direct rejected output keeps the raw reply', () => {
   });
 
   it('provider 返回 error 结果时同样带上 result', async () => {
-    vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
+    const chat = vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
       agentId: 'direct_main',
       output: null,
       rawResponse: '',
@@ -384,10 +391,124 @@ describe('direct rejected output keeps the raw reply', () => {
       error: 'HTTP 503',
     });
     const error = await generate().catch((e: unknown) => e);
+    // provider error 结果正文也为空，但不走空正文重试
+    expect(chat).toHaveBeenCalledTimes(1);
     expect(error).toBeInstanceOf(DirectTurnError);
     expect((error as DirectTurnError).message).toContain('HTTP 503');
     expect((error as DirectTurnError).result.error).toBe('HTTP 503');
     expect((error as DirectTurnError).result.requestMessages?.length).toBeGreaterThan(0);
+  });
+
+  /** 只有思考、没有正文的回复 */
+  function emptyReply(overrides: Partial<AgentResult> = {}): AgentResult {
+    return {
+      agentId: 'direct_main',
+      output: '',
+      rawResponse: '',
+      reasoning: '先想想铁匠会怎么回应。',
+      tokensUsed: 7000,
+      cacheHit: false,
+      completionTokens: 6805,
+      finishReason: 'stop',
+      duration: 5,
+      ...overrides,
+    };
+  }
+  function fullReply(): AgentResult {
+    const raw = response();
+    return {
+      agentId: 'direct_main',
+      output: raw,
+      rawResponse: raw,
+      tokensUsed: 100,
+      cacheHit: false,
+      completionTokens: 50,
+      finishReason: 'stop',
+      duration: 2,
+    };
+  }
+
+  it('空正文先自动重试一次，第二次有正文则正常接纳', async () => {
+    const chat = vi
+      .spyOn(AgentClient.prototype, 'chat')
+      .mockResolvedValueOnce(emptyReply())
+      .mockResolvedValueOnce(fullReply());
+    const generated = await generate();
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(chat.mock.calls[1][0]).toBe(chat.mock.calls[0][0]);
+    expect(generated.draft.content).toBe('你把材料交给铁匠。');
+    const rounds = generated.result.providerRounds!;
+    expect(rounds).toHaveLength(2);
+    expect(rounds[0]).toMatchObject({ round: 1, finishReason: 'stop', completionTokens: 6805 });
+    expect(rounds[0].error).toMatch(/^模型返回了空正文/);
+    expect(rounds[1]).toMatchObject({ round: 2, completionTokens: 50 });
+    expect(rounds[1].error).toBeUndefined();
+    // 顶层计量只记最终那次，不累加
+    expect(generated.result.tokensUsed).toBe(100);
+  });
+
+  it('两次都是空正文：抛 DirectTurnError，报错写明只有思考与结束原因', async () => {
+    const chat = vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue(emptyReply());
+    const error = await generate().catch((e: unknown) => e);
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(error).toBeInstanceOf(DirectTurnError);
+    const failed = error as DirectTurnError;
+    expect(failed.message).toMatch(/^模型返回了空正文：只输出了思考（约 \d+ 字）/);
+    expect(failed.message).toContain('结束原因：stop');
+    expect(failed.message).toContain('输出 6805 token');
+    expect(failed.message).toContain('已自动重试 1 次仍为空');
+    expect(failed.message).not.toContain('direct_updates');
+    expect(failed.message).not.toContain('直出结果无效');
+    expect(failed.result.reasoning).toBe('先想想铁匠会怎么回应。');
+    expect(failed.result.providerRounds).toHaveLength(2);
+    expect(failed.result.providerRounds![1].error).toBe(failed.message);
+  });
+
+  it('纯空白正文同样按空正文处理', async () => {
+    const chat = vi
+      .spyOn(AgentClient.prototype, 'chat')
+      .mockResolvedValue(emptyReply({ rawResponse: ' \n\t ', output: ' \n\t ', reasoning: '' }));
+    const error = await generate().catch((e: unknown) => e);
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect((error as Error).message).toMatch(/^模型返回了空正文：没有任何输出。/);
+  });
+
+  it('结束原因为 length 的空正文不重试', async () => {
+    const chat = vi
+      .spyOn(AgentClient.prototype, 'chat')
+      .mockResolvedValue(emptyReply({ finishReason: 'length' }));
+    const error = await generate().catch((e: unknown) => e);
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(error).toBeInstanceOf(DirectTurnError);
+    const failed = error as DirectTurnError;
+    expect(failed.message).toMatch(/^模型返回了空正文/);
+    expect(failed.message).toContain('结束原因：length');
+    expect(failed.message).toContain('已达到输出上限');
+    expect(failed.message).not.toContain('已自动重试');
+    expect(failed.result.providerRounds).toBeUndefined();
+  });
+
+  it('首次空正文后已取消：不再发第二次请求，原样抛取消错误', async () => {
+    const controller = new AbortController();
+    const chat = vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async () => {
+      controller.abort();
+      return emptyReply();
+    });
+    const error = await generate({}, { abortSignal: controller.signal }).catch((e: unknown) => e);
+    expect(chat).toHaveBeenCalledTimes(1);
+    expect(error).not.toBeInstanceOf(DirectTurnError);
+    expect((error as DOMException).name).toBe('AbortError');
+  });
+
+  it('重试请求传输失败：按普通传输失败上报，不带第一次的结果', async () => {
+    const chat = vi
+      .spyOn(AgentClient.prototype, 'chat')
+      .mockResolvedValueOnce(emptyReply())
+      .mockRejectedValueOnce(new Error('网络中断'));
+    const error = await generate().catch((e: unknown) => e);
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(error).not.toBeInstanceOf(DirectTurnError);
+    expect((error as Error).message).toBe('网络中断');
   });
 
   it('direct_state 里的年龄按游戏时间现算，不带冻结年龄与原始锚点', async () => {
@@ -732,6 +853,30 @@ describe('direct memory admission', () => {
       'direct_main',
       expect.stringContaining('直出结果无效'),
       expect.objectContaining({ rawResponse: raw, requestMessages: expect.any(Array) }),
+    );
+  });
+
+  it('runDirect: 空正文两次：调试回调收到思考与结束原因，向下游抛原始错误', async () => {
+    const { instance, onAgentError } = orchestrator(true);
+    vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
+      agentId: 'direct_main',
+      output: '',
+      rawResponse: '',
+      reasoning: '只想不写',
+      tokensUsed: 10,
+      cacheHit: false,
+      completionTokens: 8,
+      finishReason: 'stop',
+      duration: 1,
+    });
+    const error = await instance.runDirect(null).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(DirectTurnError);
+    expect((error as Error).message).toMatch(/^模型返回了空正文/);
+    expect(onAgentError).toHaveBeenCalledWith(
+      'direct_main',
+      expect.stringContaining('结束原因：stop'),
+      expect.objectContaining({ reasoning: '只想不写', finishReason: 'stop' }),
     );
   });
 

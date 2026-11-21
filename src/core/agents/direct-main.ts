@@ -16,6 +16,7 @@ import type {
   AgentConfig,
   AgentContext,
   AgentPreset,
+  AgentProviderRound,
   AgentResult,
   ApiEndpoint,
   WorldBook,
@@ -28,7 +29,13 @@ import { selectStoryLore } from '../content/lore-selection';
 import { buildDirectProtocol } from '../prompts/direct-prompt';
 import { resolveTemplateWithGlobals } from '../prompts/template-resolver';
 import { buildLlmRequest } from '../api/llm-adapter';
-import { parseDirectOutput, type DirectTurnDraft } from './direct-output';
+import {
+  describeEmptyDirectReply,
+  isDirectOutputBudgetExhausted,
+  isEmptyDirectReply,
+  parseDirectOutput,
+  type DirectTurnDraft,
+} from './direct-output';
 import { isDirectStructuredCombatEnabled, type DirectCombatRecord } from '../combat/direct-combat';
 import { logEngine } from '../runtime/engine-logger';
 import { projectCharacterAge } from '../character/character-age';
@@ -307,16 +314,54 @@ export async function generateDirectTurn(
       throw new Error(
         `直出上下文估算 ${estimatedInput} + 输出预留 ${budget} 超出模型窗口 ${endpoint.contextWindowTokens}，请缩短历史或调整输出预留`,
       );
-    result = await sendDirectRequest(client, request, config, !!input.cache);
-    if (ticket) {
-      result.promptSessionRevision = ticket.revision;
-      result.promptRebased = !!ticket.rebaseReason;
-      result.promptRebaseReason = ticket.rebaseReason;
-      result.directCacheDiagnostics = ticket.diagnostics;
+    // 空正文（常见于只出了原生思考）原样重发同一请求：同一张缓存票据，不重新组装上下文
+    const rounds: AgentProviderRound[] = [];
+    for (let attempt = 0; ; attempt++) {
+      result = await sendDirectRequest(client, request, config, !!input.cache);
+      if (ticket) {
+        result.promptSessionRevision = ticket.revision;
+        result.promptRebased = !!ticket.rebaseReason;
+        result.promptRebaseReason = ticket.rebaseReason;
+        result.directCacheDiagnostics = ticket.diagnostics;
+      }
+      result.agentId = 'direct_main';
+      result.requestMessages = messages;
+      const empty = !result.error && isEmptyDirectReply(result.rawResponse);
+      const emptyMessage = empty ? describeEmptyDirectReply(result, attempt > 0) : undefined;
+      if (
+        empty &&
+        attempt < DIRECT_EMPTY_REPLY_RETRIES &&
+        !isDirectOutputBudgetExhausted(result.finishReason)
+      ) {
+        if (config.abortSignal?.aborted)
+          throw new DOMException('Direct turn cancelled', 'AbortError');
+        rounds.push(directRound(result, attempt + 1, emptyMessage));
+        // 日志 payload 惰性求值，下面会清掉 result，先取值
+        const emptied = {
+          attempt: attempt + 1,
+          finishReason: result.finishReason ?? null,
+          completionTokens: result.completionTokens ?? null,
+          reasoningChars: result.reasoning?.length ?? 0,
+        };
+        logEngine('warn', 'direct.empty_reply', '直出回复没有正文，原样重发一次', () => emptied, {
+          agentId: 'direct_main',
+        });
+        // 清掉上一次结果：重试的传输失败不得带着它被包成 DirectTurnError
+        result = undefined;
+        continue;
+      }
+      if (rounds.length)
+        result.providerRounds = [
+          ...rounds,
+          directRound(result, rounds.length + 1, result.error ?? emptyMessage),
+        ];
+      if (result.error) throw new Error(result.error);
+      if (emptyMessage) {
+        rejectedOutput = true;
+        throw new Error(emptyMessage);
+      }
+      break;
     }
-    result.agentId = 'direct_main';
-    result.requestMessages = messages;
-    if (result.error) throw new Error(result.error);
     rejectedOutput = true;
     const draft = parseDirectOutput(result.rawResponse, dice, { structuredCombat });
     if (draft.combatIgnored)
@@ -354,7 +399,26 @@ export async function generateDirectTurn(
   }
 }
 
-/** 发出本次生成唯一的主请求；不解析输出，也不碰缓存会话。 */
+/** 空正文自动重发的次数（长度截断不重发）。 */
+const DIRECT_EMPTY_REPLY_RETRIES = 1;
+
+/** 一次主请求往返的计量快照（只在发生过空正文重发时记录）。 */
+function directRound(result: AgentResult, round: number, error?: string): AgentProviderRound {
+  return {
+    round,
+    tokensUsed: result.tokensUsed,
+    cacheHit: result.cacheHit,
+    cacheHitTokens: result.cacheHitTokens,
+    cacheMissTokens: result.cacheMissTokens,
+    promptTokens: result.promptTokens,
+    completionTokens: result.completionTokens,
+    duration: result.duration,
+    finishReason: result.finishReason,
+    ...(error ? { error } : {}),
+  };
+}
+
+/** 发出一次主请求；不解析输出，也不碰缓存会话。空正文重发由调用方决定。 */
 async function sendDirectRequest(
   client: AgentClient,
   request: ChatRequest,
@@ -380,6 +444,7 @@ async function sendDirectRequest(
                 cacheMissTokens: stream.cacheMissTokens,
                 completionTokens: stream.completionTokens,
                 duration: stream.duration,
+                finishReason: stream.finishReason,
                 ...(cached
                   ? {
                       providerUsage: stream.usage,

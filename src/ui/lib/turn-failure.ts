@@ -15,6 +15,8 @@
  *   `HTTP 502: {"error":"upstream redirect (3xx) rejected by proxy redirect policy…"}` →
  *   网络类（多半是服务地址 / 端口填错），不能按 5xx 一律说成「服务端暂时出错」。
  * - 网络层：`Failed to fetch` / `NetworkError` / 超时字样 / `TypeError`。
+ * - 直出空正文：引擎抛 `模型返回了空正文：…结束原因：<finish_reason>…` → empty_reply；
+ *   结束原因是安全拦截类（content_filter / SAFETY / blocked…）时归 rejected。
  * - 中止：`AbortError` —— 那不是失败，调用方本就按「已停下」处理，这里兜底归网络类之外的 unknown。
  */
 import type { TurnFailureCategory, TurnFailureInfo } from '@engine/types/types';
@@ -68,6 +70,11 @@ const COPY: Record<TurnFailureCategory, TurnFailureCopy> = {
     hint: '去设置里为各个 Agent 重新选择可用的 API 源。',
     needsSettings: true,
   },
+  empty_reply: {
+    summary: '模型这次只输出了思考，没有写出正文。',
+    hint: '通常已自动重试过一次。可以再试一次；反复出现请调高最大输出、降低思考强度，或换一个模型 / API 源。',
+    needsSettings: false,
+  },
   unknown: {
     summary: '出现了一个没能归类的错误。',
     hint: '可以再试一次；反复出现请展开技术详情反馈给作者。',
@@ -117,6 +124,14 @@ export function classifyTurnFailure(error: unknown): TurnFailureCategory {
     )
   )
     return 'config';
+
+  // 直出空正文：只写了思考没写正文。结束原因若是安全拦截，按「被拒」说更准
+  if (/模型返回了空正文/.test(text))
+    return /content[_ ]filter|safety|blocked|blocklist|prohibited|recitation|spii|refusal/i.test(
+      text,
+    )
+      ? 'rejected'
+      : 'empty_reply';
 
   const status = Number(/\bHTTP\s+(\d{3})\b/i.exec(text)?.[1] ?? NaN);
 

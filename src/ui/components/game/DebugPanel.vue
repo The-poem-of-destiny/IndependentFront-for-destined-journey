@@ -737,6 +737,9 @@ function formatJson(value: unknown): string {
           Delta revision {{ entry.promptSessionRevision }} · 重基线
           {{ entry.promptRebased ? `是（${entry.promptRebaseReason ?? '未注明原因'}）` : '否' }}
         </div>
+        <div v-if="entry.finishReason" class="debug-agent-meta">
+          结束原因 {{ entry.finishReason }}
+        </div>
         <template
           v-for="(dc, dcIndex) in directCacheViewOf(entry)"
           :key="`${entry.invocationId}:direct-cache:${dcIndex}`"

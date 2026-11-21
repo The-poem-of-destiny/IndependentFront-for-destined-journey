@@ -431,7 +431,7 @@ const readableBooks = computed(() =>
       </label>
     </div>
     <p v-if="isDirectSettingsProfile(agentId)" class="form-hint param-note">
-      直出主生成不自动重试；失败后可手动重试一次新的生成。
+      直出主生成只在模型返回空正文时自动重发一次（输出达上限时不重发），其余失败不自动重试；失败后可手动重试一次新的生成。
     </p>
   </AppCard>
 

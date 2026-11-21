@@ -388,6 +388,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   📌 2026-11-16：本地代理包出的 502「upstream unreachable /
 │   │                                   upstream redirect」与 5xx 里的连通性字样归 network（不再按
 │   │                                   状态码判 server），network 类也给「去设置」
+│   │                                   📌 2026-11-20（`fix/direct-empty-response`）：新类别
+│   │                                   `empty_reply`（直出「模型返回了空正文」：只思考没写正文，可重试；
+│   │                                   反复出现就调高最大输出、降低思考强度或换模型/来源）；空正文且
+│   │                                   结束原因含 safety/content_filter/blocked/blocklist/prohibited/recitation/spii/refusal
+│   │                                   的归 rejected
 │   ├── turn-recovery.ts             ← 🆕 [2026-11-14 / GAME-09·10] 从**已持久化**消息推导「上一回合未完成」
 │   │                                   （玩家消息 `storyTurnStatus`，旧消息退回「最新输入后无正文」）与
 │   │                                   「已废弃的尝试」分组（failed 的 assistant 正文）。纯函数
