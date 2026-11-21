@@ -175,6 +175,27 @@ export function formatCharacterAge(
 }
 
 /**
+ * 直出投影用：把冻结的开局年龄换成按 `now` 现算的年龄。
+ * 去掉原始 `ageAnchor` 与 `customFields.age` / `customFields.birthday`，补上 `age`；
+ * 生日是给定的（`hasGivenBirthday`）才补 `birthday: 'M月D日'`，兜底的 1 月 1 日不展示。
+ * 尚无合法锚点或缺游戏时间时原样返回（与旧行为一致）。纯函数，不改入参。
+ */
+export function projectCharacterAge<
+  T extends Pick<CharacterState, 'ageAnchor' | 'definition' | 'customFields'>,
+>(character: T, now: Now | null | undefined): T & { age?: number; birthday?: string } {
+  const age = characterAge(character, now);
+  if (age === null || !character.ageAnchor) return character;
+  const { ageAnchor, customFields, ...rest } = character;
+  const { age: _age, birthday: _birthday, ...fields } = customFields ?? {};
+  return {
+    ...rest,
+    customFields: fields,
+    age,
+    ...(hasGivenBirthday(character) ? { birthday: `${ageAnchor.month}月${ageAnchor.day}日` } : {}),
+  } as unknown as T & { age: number; birthday?: string };
+}
+
+/**
  * 从旧世界书人物资料里取年龄：只认整行就是「年龄: 20」/「年龄：约400岁」的写法。
  * 「外貌约16岁 (实际百年以上)」这类带限定语的一律不猜，交给兜底。
  */

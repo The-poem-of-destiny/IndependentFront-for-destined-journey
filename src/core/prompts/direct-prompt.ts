@@ -53,7 +53,7 @@ entities 项只有两种：
 装备：{name,description,slot,quality?,stats:{属性:数值},durability?,effects?,protocolText?,tags?,replace?}。
 物品：{name,description,quantity:正整数,type,rarity?,effects?,protocolText?,tags?,replace?}。完整保存规则文本，不只给展示描述。replace 明确替换旧条目；同名新增物品仅叠数量。给已有角色的新装备先入背包，明确穿戴另写 state.items.equip。
 state 可含：
-characters:{replace:[{name,path,value}],delta:[{name,path,amount}],remove:[{name,path:"skills"或"equipment",target:"条目名"}]}。replace 允许 hp/mp/sp/location/present/currentAction/thoughts/money/totalExp；delta 仅 hp/mp/sp/money/totalExp。不要同时 replace 和 delta 同一字段。经验只给 totalExp，升级和奖励属性点由代码处理。
+characters:{replace:[{name,path,value}],delta:[{name,path,amount}],remove:[{name,path:"skills"或"equipment",target:"条目名"}]}。replace 允许 hp/mp/sp/location/present/currentAction/thoughts/money/totalExp；delta 仅 hp/mp/sp/money/totalExp。不要同时 replace 和 delta 同一字段。经验只给 totalExp，升级和奖励属性点由代码处理。人物的 age／birthday 由代码按游戏时间与生日现算，只读，不要在任何补丁里写年龄。
 items:{consume:[{owner,target,quantity}],equip:[{owner,target,slot}],unequip:[{owner,target}],transfer:[{from,to,target,quantity}],modify:[{owner,target,changes}]}。制作材料扣除和完整产物必须同楼声明，失败也明确实际成本。不得透支库存。
 affections:{set:[{name,value}],delta:[{name,amount}]}、fp:{delta:数值}、quests:{upsert:[{name,...任务字段}],remove:[{name}]}。任务完成不自动发奖励，奖励在所属字段只声明一次。
 effects:[{owner,action:"add"|"update"|"remove",value:{name,...}}]。add 给 description,category(增益/减益/特殊),stacks,maxStacks,remainingTime,timeUnit(回合/分钟/小时),effects?,effectDescriptions?,protocolText?,tags?；update 只给 name,remainingTime?,stacks?；remove 只给 name。实体初始 statuses 不在 effects 重复添加。

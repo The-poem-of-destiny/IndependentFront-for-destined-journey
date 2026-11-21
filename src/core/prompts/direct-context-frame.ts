@@ -11,6 +11,8 @@ import { buildAgentMessagesAsync } from './agent-templates';
 import { resolveTemplateWithGlobals } from './template-resolver';
 import { formatMemoryEntry } from './placeholder-registry';
 import { buildCharacterContext } from '../character/character-chronicle';
+import { projectCharacterAge } from '../character/character-age';
+import type { GameTime } from '../time/time-system';
 import type { DirectContextFrame } from './direct-context-session';
 import { DIRECT_TEMPLATE } from './direct-prompt';
 import {
@@ -43,9 +45,11 @@ function hasDynamicMacros(text: string): boolean {
  * 每个分区都是绝对值；改 HP 不会重发档案或库存。
  * 位置、在场、当前行动、金钱、经验与心里话几乎每回合都变，单列进 `character/角色名/state`：
  * 若与背景、外貌、性格等长文本同在 `profile`，整份档案会因这些易变字段每楼重发。
+ * 年龄按 `now` 现算进 `profile`（不发冻结的开局年龄与原始锚点），每过一个生日该分区重发一次。
  */
 export function buildDirectCharacterSections(
   characters: readonly CharacterState[],
+  now: Pick<GameTime, 'year' | 'month' | 'day'> | null | undefined,
 ): Record<string, unknown> {
   const sections: Record<string, unknown> = {};
   const resources = [];
@@ -72,7 +76,7 @@ export function buildDirectCharacterSections(
       expToNext,
       thoughts,
       ...profile
-    } = character;
+    } = projectCharacterAge(character, now);
     const key = `character/${character.name}`;
     sections[`${key}/profile`] = profile;
     sections[`${key}/state`] = {

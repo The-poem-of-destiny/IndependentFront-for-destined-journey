@@ -16,8 +16,14 @@ const props = defineProps<{
    * 不只靠半透明与禁止光标让玩家猜。
    */
   disabledReason?: string | null;
+  /** 「我的自定义」库里的条目：显示删除按钮（只从库里删，不影响已选） */
+  deletable?: boolean;
 }>();
-const emit = defineEmits<{ select: [item: CatalogItem]; remove: [item: CatalogItem] }>();
+const emit = defineEmits<{
+  select: [item: CatalogItem];
+  remove: [item: CatalogItem];
+  delete: [item: CatalogItem];
+}>();
 
 /** 整卡与「选择」按钮共用同一道闸：禁用或已选中时都不发 select */
 function trySelect() {
@@ -86,6 +92,16 @@ const qualityColor = computed(() => qualityVarFromRarity(props.item.rarity));
       <AppButton v-else size="sm" variant="danger" @click.stop="$emit('remove', item)">
         移除
       </AppButton>
+      <button
+        v-if="deletable"
+        type="button"
+        class="card-delete"
+        :aria-label="`从我的自定义库删除「${item.name}」`"
+        :title="`从我的自定义库删除「${item.name}」`"
+        @click.stop="emit('delete', item)"
+      >
+        ✕
+      </button>
     </div>
   </div>
 </template>
@@ -219,6 +235,29 @@ const qualityColor = computed(() => qualityVarFromRarity(props.item.rarity));
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  gap: var(--theme-spacing-xs);
   padding-top: 2px;
+}
+.card-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8em;
+  height: 1.8em;
+  padding: 0;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  background: transparent;
+  color: var(--theme-text-muted);
+  font-size: 0.75em;
+  cursor: pointer;
+  transition:
+    color var(--theme-transition-fast),
+    border-color var(--theme-transition-fast);
+}
+.card-delete:hover,
+.card-delete:focus-visible {
+  color: var(--theme-error);
+  border-color: var(--theme-error);
 }
 </style>

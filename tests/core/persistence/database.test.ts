@@ -64,6 +64,10 @@ import {
   deleteMessagesAfterTurn,
   getDebugTurns,
   saveDebugTurn,
+  // Create custom items (v35)
+  getCreateCustomItems,
+  saveCreateCustomItem,
+  deleteCreateCustomItem,
   // Audio (v11)
   getAudioTracks,
   getAudioTrack,
@@ -91,7 +95,7 @@ import {
   saveCharacterAppearance,
   DB_VERSION,
 } from '../../../src/core/persistence/database';
-import type { FullBackup } from '../../../src/core/persistence/database';
+import type { CreateCustomItemRecord, FullBackup } from '../../../src/core/persistence/database';
 import type {
   ChatMessage,
   ChatPreset,
@@ -1152,7 +1156,9 @@ describe('exportAllData / importAllData', () => {
     // v29：storyArchiveRetries（归档/摘要草稿重试，同样随存档进 FullBackup）。
     // v30：combatSandboxes（战斗沙盒在办战斗；rebuildable 缓存，**不进** FullBackup）。
     // v34：engineLogs（引擎日志；**不进** FullBackup）。
-    expect(backup.version).toBe(34);
+    // v35：createCustomItems（自制开局条目全局库；进 FullBackup）。
+    expect(backup.version).toBe(35);
+    expect(Array.isArray(backup.createCustomItems)).toBe(true);
     expect('engineLogs' in backup).toBe(false);
     expect(Array.isArray(backup.storyTurnSummaries)).toBe(true);
     expect(Array.isArray(backup.storyArchives)).toBe(true);
@@ -2988,8 +2994,8 @@ describe('Asset CRUD (v13)', () => {
     // v20=D18 contentPacks; v21=地图字节; v22=快照拆表; v23=API RPM; v24=调试历史
     // v25=独立出图连接; v26=Delta 会话持久化; v27=Story v2 每回合摘要; v28=Story v2 阶段归档;
     // v29=归档重试; v30=战斗沙盒在办战斗（原分支的 v27，撞号后顺延）
-    // v31=角色编年史; v32=直出缓存模式闸; v33=日历; v34=引擎日志
-    expect(db.verno).toBe(34);
+    // v31=角色编年史; v32=直出缓存模式闸; v33=日历; v34=引擎日志; v35=自制开局条目库
+    expect(db.verno).toBe(35);
 
     // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
     //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）
@@ -3022,6 +3028,7 @@ describe('Asset CRUD (v13)', () => {
       'characterChronicle',
       'saveCalendars',
       'engineLogs',
+      'createCustomItems',
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 
@@ -3269,5 +3276,154 @@ describe('v22 升版 —— 快照拆表', () => {
     expect(db.verno).toBe(DB_VERSION);
     expect(await db.snapshots.count()).toBe(0);
     expect(await db.snapshotPayloads.count()).toBe(0);
+  });
+});
+
+// ========== v35 自制开局条目全局库 ==========
+
+function makeCustomItemRecord(
+  overrides: Partial<CreateCustomItemRecord> = {},
+): CreateCustomItemRecord {
+  const id = overrides.id ?? 'custom_skill_aaaa1111';
+  const name = overrides.name ?? '星火术';
+  const category = overrides.category ?? 'skill';
+  return {
+    id,
+    category,
+    name,
+    createdAt: 1,
+    updatedAt: 1,
+    data: {
+      id,
+      name,
+      category,
+      type: '主动',
+      rarity: 'rare',
+      tag: ['火焰'],
+      effect: { 伤害: '小幅' },
+      description: '指尖迸出一点星火。',
+      cost: 10,
+    },
+    ...overrides,
+  };
+}
+
+describe('createCustomItems 表 (v35)', () => {
+  it('保存 / 读取 / 删除往返，读取按 updatedAt 倒序', async () => {
+    await saveCreateCustomItem(makeCustomItemRecord({ id: 'custom_skill_a', updatedAt: 1 }));
+    await saveCreateCustomItem(
+      makeCustomItemRecord({ id: 'custom_item_b', category: 'item', name: '药剂', updatedAt: 5 }),
+    );
+
+    expect((await getCreateCustomItems()).map((r) => r.id)).toEqual([
+      'custom_item_b',
+      'custom_skill_a',
+    ]);
+
+    await deleteCreateCustomItem('custom_skill_a');
+    expect((await getCreateCustomItems()).map((r) => r.id)).toEqual(['custom_item_b']);
+  });
+
+  it('saveCreateCustomItem 在同一事务里删掉被替换的旧行，且不会删掉刚写的行', async () => {
+    await saveCreateCustomItem(makeCustomItemRecord({ id: 'custom_skill_old' }));
+    await saveCreateCustomItem(makeCustomItemRecord({ id: 'custom_skill_keep', name: '别的' }));
+
+    await saveCreateCustomItem(makeCustomItemRecord({ id: 'custom_skill_new', updatedAt: 9 }), [
+      'custom_skill_old',
+      'custom_skill_new',
+    ]);
+
+    const ids = (await getCreateCustomItems()).map((r) => r.id).sort();
+    expect(ids).toEqual(['custom_skill_keep', 'custom_skill_new']);
+  });
+
+  it('删存档不动自制条目库（全局表）', async () => {
+    await saveCreateCustomItem(makeCustomItemRecord());
+    await saveSaveSlot(makeSaveSlot({ id: 'save_custom', slot: 7 }));
+    await deleteSaveSlot('save_custom');
+    expect(await getDatabase().createCustomItems.count()).toBe(1);
+  });
+
+  describe('importAllData × v35 createCustomItems 三态语义', () => {
+    it('exportAllData / importAllData 往返保留自制条目', async () => {
+      const record = makeCustomItemRecord();
+      await saveCreateCustomItem(record);
+      const backup = await exportAllData();
+      expect(backup.createCustomItems).toEqual([record]);
+      await getDatabase().createCustomItems.clear();
+
+      await importAllData(backup);
+
+      expect(await getCreateCustomItems()).toEqual([record]);
+    });
+
+    it('缺 createCustomItems 字段（pre-v35 备份）：整张表原样保留', async () => {
+      await saveCreateCustomItem(makeCustomItemRecord());
+      const legacyBackup: Partial<FullBackup> = await exportAllData();
+      delete legacyBackup.createCustomItems;
+      legacyBackup.version = 34;
+
+      await importAllData(legacyBackup as FullBackup);
+
+      expect(await getDatabase().createCustomItems.count()).toBe(1);
+    });
+
+    it('createCustomItems: []：表被清空', async () => {
+      await saveCreateCustomItem(makeCustomItemRecord());
+      const backup = await exportAllData();
+      backup.createCustomItems = [];
+
+      await importAllData(backup);
+
+      expect(await getDatabase().createCustomItems.count()).toBe(0);
+    });
+
+    it('createCustomItems 不是数组：备份被拒，表不动', async () => {
+      await saveCreateCustomItem(makeCustomItemRecord());
+      const backup: any = await exportAllData();
+      backup.createCustomItems = { bad: true };
+
+      await expect(importAllData(backup)).rejects.toThrow(/createCustomItems/);
+      expect(await getDatabase().createCustomItems.count()).toBe(1);
+    });
+  });
+
+  it('v34 → v35 升版：旧表数据保留，新表就位且可写', async () => {
+    const dbName = getDatabase().name;
+    await clearAllData();
+
+    const legacy = new Dexie(dbName);
+    legacy.version(34).stores({
+      ...V21_STORES,
+      snapshotPayloads: 'id, saveId',
+      apiRateLimitPolicies: 'credentialId, updatedAt',
+      debugTurns: 'id, saveId, [saveId+startedAt]',
+      imageApiConnections: 'id, provider, name',
+      promptSessions: 'key, saveId',
+      storyTurnSummaries: 'id, saveId',
+      storyArchives: 'id, saveId',
+      storyArchiveRetries: 'id, saveId',
+      combatSandboxes: 'saveId, updatedAt',
+      characterChronicle: 'id, saveId, [saveId+characterId]',
+      saveCalendars: 'saveId',
+      engineLogs: '++seq, [saveId+layer]',
+    });
+    await legacy.open();
+    await legacy
+      .table('createPresets')
+      .put({ id: 'cp_v34', name: '旧捏人预设', createdAt: 1, updatedAt: 1, data: {} });
+    await legacy.table('lorebooks').put({ id: 'lb_v34', name: '旧世界书', updatedAt: 1 });
+    legacy.close();
+
+    await initializeDatabase();
+    const db = getDatabase();
+    expect(db.verno).toBe(35);
+    expect(DB_VERSION).toBe(35);
+    expect((await db.createPresets.get('cp_v34'))?.name).toBe('旧捏人预设');
+    expect((await db.lorebooks.get('lb_v34'))?.name).toBe('旧世界书');
+    expect(await db.createCustomItems.count()).toBe(0);
+
+    await saveCreateCustomItem(makeCustomItemRecord());
+    expect(await db.createCustomItems.where('category').equals('skill').count()).toBe(1);
   });
 });

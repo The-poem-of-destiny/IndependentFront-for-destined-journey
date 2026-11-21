@@ -31,6 +31,7 @@ import { buildLlmRequest } from '../api/llm-adapter';
 import { parseDirectOutput, type DirectTurnDraft } from './direct-output';
 import { isDirectStructuredCombatEnabled, type DirectCombatRecord } from '../combat/direct-combat';
 import { logEngine } from '../runtime/engine-logger';
+import { projectCharacterAge } from '../character/character-age';
 import {
   countDirectDice,
   formatDirectDicePool,
@@ -150,10 +151,17 @@ export async function generateDirectTurn(
       combatRecord?.state.units[c.name],
   );
   const state = {
-    characters: relevant.map(
-      ({ id: _id, saveId: _saveId, definition: _definition, introducedBy: _introducedBy, ...c }) =>
-        c,
-    ),
+    // 年龄按游戏时间现算，不发冻结的开局年龄与原始锚点
+    characters: relevant.map((character) => {
+      const {
+        id: _id,
+        saveId: _saveId,
+        definition: _definition,
+        introducedBy: _introducedBy,
+        ...c
+      } = projectCharacterAge(character, context.gameTime);
+      return c;
+    }),
     existingNames: context.characters.map((c) => c.name),
     variables: context.variables,
     gameTime: context.gameTime,
@@ -209,7 +217,7 @@ export async function generateDirectTurn(
     frame.sections = {
       ...frame.sections,
       ...rest,
-      ...buildDirectCharacterSections(relevant),
+      ...buildDirectCharacterSections(relevant, context.gameTime),
     };
     const endpointSignature = {
       id: endpoint.id,
