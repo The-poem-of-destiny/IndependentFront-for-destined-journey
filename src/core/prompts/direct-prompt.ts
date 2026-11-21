@@ -34,7 +34,7 @@ export function buildDirectProtocol(structuredCombat: boolean): string {
 战斗先攻=敏捷+d20+明确修正；命中评级表=${JSON.stringify(HIT_RATINGS)}。伤害先算关联属性×10×层级战斗系数+技能威力+武器攻击力；多段先均分向下取整。有效防御=防御×(1-穿透率)，装备减伤量向下取整(伤害×有效防御/(有效防御+2000))；类型减免：物理(体质+力量+敏捷)×0.25%，能量(精神+智力)×0.4%，精神×0.8%，真实类型此项为0，上限95%。再按评级、意图和明确词条修正，固定伤害加回，恢复多段总量，再扣 DR，集群目标最后×1.5取整。技能消耗逐次扣除，行动停在下一次玩家决策处。
 制作基础 DC=${JSON.stringify(CRAFT_DC_BASE)}；产业核心属性=${JSON.stringify(CRAFT_INDUSTRY_ATTRIBUTE)}；产能表=${JSON.stringify(CRAFT_PRODUCTION_BONUSES)}；基础经验=${JSON.stringify(CRAFT_QUALITY_EXP)}。
 制作检定=核心属性+技能+工具+身份+设施加值+d20；DC=max(1,基础DC+材料修正总和-设施加值-品质DC减免区间中点向下取整)。工具加值不再次减DC。层级高于目标品质对应层级用优势2d20取高，低于则劣势取低。品质对应层级：普通/优良1、稀有2、史诗3、传说4、神话5。至少两种对应品质投入物才保有该品质，否则降级；唯一品质不能制作。基础加工无检定无经验，成品需图纸。普通失败材料损耗50%，大失败100%，受产能失败保护限制；没有产物也声明实际消耗。日常恢复/消耗与状态到期必须根据实际时间和效果文本声明，不做无依据的满血恢复。
-仅用提供的骰池进行需要的随机判定，按索引顺序取对应骰式，每个索引至多消费一次；记录 diceUsed。池耗尽就停在尚未解决的行动前，不编造骰值。
+仅用提供的骰池进行需要的随机判定。骰池按骰式分行，每行形如 d20: {12, 5, 17}，依次为 d4、d6、d8、d10、d12、d20、d100；每种骰式在本行花括号内从左到右依次取用，每个位置至多消费一次，并在 diceUsed 记录 sides（骰面数）与 index（该骰在本行花括号内从 0 起的位置）。所需骰式用尽就停在尚未解决的行动前，不编造骰值。
 输出顺序：恰好一个 <maintext>正文，可含 <action_info>简洁行动面板</action_info> 和 <item_info>物品面板</item_info></maintext>；可选 <options>编号建议</options>；恰好一个 <character_updates>角色协议 JSON</character_updates>；最后恰好一个 <direct_updates>JSON</direct_updates>。
 action_info 面板每行用 |名称|值|，例如 |检定|d20=12，成功|；只呈现可核对的结果，不展示内部推理。
 正文分节：<maintext> 内用独占一行的 <beat/> 把正文切成节，玩家每次推进一节。一节是一个完整拍点，通常 1–3 段，全篇约 4–10 节；首尾不写，不写在 action_info／item_info 内。本楼经 entities 新建实体的人物，在其首次现身那一节之前写 <beat enter="人物名"/>（在第一节也写）；已有实体的人物不写 enter。
@@ -47,7 +47,7 @@ time.delta_time：本楼耗时的非负有限分钟，唯一时间推进来源�
 entities 项只有两种：
 1. {kind:"character",placement:{location:"本楼结束时地点",present:true},output:完整实体}。作者目录里尚未有存档实体的人物首次实际登场也需完整机械数据。已有角色不能重建。仅提及名字不必创建。角色档案／经历另外遵守 character_updates 协议。
 2. {kind:"loadout",owner:"人物名",output:实体}。所有者必须已存在或本楼已创建。
-实体结构：{skills:[],equipment:[],inventory:[],statuses:[],character?:人物,ascension?:登神}。
+实体结构：{skills:[],equipment:[],inventory:[],statuses:[],character?:人物,ascension?:登神}。kind 为 character 时人物字段全部写进 output.character，不平铺在 output 上；output 顶层的 skills/equipment/inventory 仍必填（通常为 []）。loadout 的 output 不含 character。例：{kind:"character",placement:{location:"…",present:true},output:{skills:[],equipment:[],inventory:[],statuses:[],character:{name:"…",race:"…",…,skills:[],equipment:[],inventory:[],ascension:{…}}}}。
 人物字段：name,race,gender,tier(1..7),level(1..25),attributes:{str,dex,con,int,spi},identity:文本数组,occupation:文本数组,background,appearance,clothing,personality,likes,thoughts?,skills:[],equipment:[],inventory:[],ascension:{enabled:false,path:"",description:"",elements:[],authorities:[],laws:[],deityPosition:"",divineKingdom:{name:"",description:""}}。资源上限由代码按现行规则初始化；需要受伤登场时用 state 声明当前资源。
 技能：{name,description,type:"active"或"passive",quality?,cost?:{type:"HP"或"MP"或"SP",amount},cooldown?,skillPower?,relevantAttribute?,damageType?,effects?:{词条名:效果文本},protocolText?,tags?:文本数组,replace?:旧条目名}。
 装备：{name,description,slot,quality?,stats:{属性:数值},durability?,effects?,protocolText?,tags?,replace?}。
@@ -59,7 +59,7 @@ affections:{set:[{name,value}],delta:[{name,amount}]}、fp:{delta:数值}、ques
 effects:[{owner,action:"add"|"update"|"remove",value:{name,...}}]。add 给 description,category(增益/减益/特殊),stacks,maxStacks,remainingTime,timeUnit(回合/分钟/小时),effects?,effectDescriptions?,protocolText?,tags?；update 只给 name,remainingTime?,stacks?；remove 只给 name。实体初始 statuses 不在 effects 重复添加。
 ${structuredCombat ? DIRECT_COMBAT_STRUCTURED_LINE : DIRECT_COMBAT_PROSE_LINE}
 plot:{} 或 {pre:{triggeredEvents:[{title,reason}],relevantBackground?:文本,outlineRelevance?:文本},post:{worldLineChanged:布尔,changeLevel:"none"|"minor"|"moderate"|"major",outlineChanges:{action:"none"|"update"|"addChapter"|"removeChapter",changes:文本},eventUpdates:[{title,action:"complete"|"fail"|"skip"|"update",changes?:对象}],newChildEvents:[{title,description,parentTitle?,triggerCondition?,depth?}]}}。按事件标题引用，剧情关闭时为空。幕后动机只用于裁定，不泄露进正文或角色档案。
-diceUsed:[{index:骰池索引,purpose:"判定用途",target:"对象名"}]。角色、物品、任务、地图与叙事必须描述同一件事。
+diceUsed:[{sides:骰面数,index:该骰式行内从 0 起的位置,purpose:"判定用途",target:"对象名"}]。角色、物品、任务、地图与叙事必须描述同一件事。
 若提供随机事件候选，本楼至多演绎一个并用 <event_trigger name="候选名"/> 回执。可以用已有 play_audio 标记，但不要发起图片、工具、entity_gen、craft、combat_trigger 或任何后续请求。`;
 }
 

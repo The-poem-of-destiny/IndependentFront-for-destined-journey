@@ -32,28 +32,12 @@ import { parseDirectOutput, type DirectTurnDraft } from './direct-output';
 import { isDirectStructuredCombatEnabled, type DirectCombatRecord } from '../combat/direct-combat';
 import { logEngine } from '../runtime/engine-logger';
 import { projectCharacterAge } from '../character/character-age';
-
-export interface DirectDie {
-  index: number;
-  sides: number;
-  value: number;
-}
-
-export function rollDirectDice(): DirectDie[] {
-  const dice: DirectDie[] = [];
-  for (const sides of [4, 6, 8, 10, 12, 20, 100]) {
-    const count = sides === 20 ? 60 : 20;
-    for (let i = 0; i < count; i++) {
-      const limit = Math.floor(0x100000000 / sides) * sides;
-      let n: number;
-      do {
-        n = crypto.getRandomValues(new Uint32Array(1))[0];
-      } while (n >= limit);
-      dice.push({ index: dice.length, sides, value: (n % sides) + 1 });
-    }
-  }
-  return dice;
-}
+import {
+  countDirectDice,
+  formatDirectDicePool,
+  rollDirectDice,
+  type DirectDicePool,
+} from './direct-dice';
 
 /**
  * 直出主请求已拿到模型回复、但随后失败（输出被拒或 provider 返回 error 结果）。
@@ -82,7 +66,7 @@ export interface DirectGenerationInput {
   storyContext?: Pick<StoryContextV2Input, 'windowTurns' | 'segments' | 'archives' | 'onLore'> & {
     onAssembled?: (diagnostics: import('../types/types').StoryContextV2Diagnostics) => void;
   };
-  dice?: DirectDie[];
+  dice?: DirectDicePool;
   cache?: {
     saveId: string;
     policy: DirectCachePolicy;
@@ -105,6 +89,7 @@ export async function generateDirectTurn(
   const protocol = buildDirectProtocol(structuredCombat);
   const combatRecord = structuredCombat ? input.combat : null;
   const dice = input.dice ?? rollDirectDice();
+  const diceLines = formatDirectDicePool(dice);
   let messages: ChatRequest['messages'];
   let frame: DirectContextFrame | undefined;
   if (input.storyContext) {
@@ -196,7 +181,7 @@ export async function generateDirectTurn(
     ...messages,
     {
       role: 'user',
-      content: `<direct_state>\n${JSON.stringify(state)}\n</direct_state>\n<dice_pool>\n${JSON.stringify(dice)}\n</dice_pool>${config.tailPrompt ? `\n${config.tailPrompt}` : ''}`,
+      content: `<direct_state>\n${JSON.stringify(state)}\n</direct_state>\n<dice_pool>\n${diceLines.join('\n')}\n</dice_pool>${config.tailPrompt ? `\n${config.tailPrompt}` : ''}`,
     },
   ]);
   const request: ChatRequest = {
@@ -272,7 +257,7 @@ export async function generateDirectTurn(
       playerInput: context.userInput,
       turnContext: {
         recall: context.agentOutputs.get('memory_recall') ?? '',
-        dice_pool: dice.map(({ sides, value }) => [sides, value]),
+        dice_pool: diceLines,
         tailPrompt: config.tailPrompt ?? '',
       },
       rebuild: input.cache.rebuild,
@@ -298,7 +283,7 @@ export async function generateDirectTurn(
       cached: !!input.cache,
       cachePolicy: input.cache?.policy,
       outputBudget: budget,
-      diceCount: dice.length,
+      diceCount: countDirectDice(dice),
       state,
       ...(ticket
         ? {
@@ -333,12 +318,20 @@ export async function generateDirectTurn(
     result.requestMessages = messages;
     if (result.error) throw new Error(result.error);
     rejectedOutput = true;
-    const draft = parseDirectOutput(result.rawResponse, dice.length, { structuredCombat });
+    const draft = parseDirectOutput(result.rawResponse, dice, { structuredCombat });
     if (draft.combatIgnored)
       logEngine(
         'warn',
         'direct.combat_ignored',
         '结构化战斗未启用，已忽略模型输出的 combat 区块',
+        undefined,
+        { agentId: 'direct_main' },
+      );
+    if (draft.flattenedCharacters)
+      logEngine(
+        'warn',
+        'direct.entity_flattened',
+        `角色实体字段未放进 output.character，已自动归位：${draft.flattenedCharacters.join('、')}`,
         undefined,
         { agentId: 'direct_main' },
       );

@@ -7,6 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseDirectOutput } from '../../../src/core/agents/direct-output';
+import type { DirectDicePool } from '../../../src/core/agents/direct-dice';
 import {
   generateDirectTurn,
   type DirectGenerationInput,
@@ -45,6 +46,8 @@ import {
 } from '../../../src/core/types/types';
 
 const saveId = 'direct-structured-combat';
+/** 解析用的最小骰池 */
+const POOL: DirectDicePool = [{ sides: 20, values: [7] }];
 const OLD_COMBAT_LINE_HEAD = 'combat:null 表示无在办战斗；否则 {meta:';
 const PROSE_COMBAT_LINE_HEAD = 'combat：恒填 null，不写任何战斗内容。当前未启用结构化战斗';
 
@@ -154,13 +157,13 @@ describe('关闭结构化战斗时的解析', () => {
   const off = { structuredCombat: false };
 
   it('缺少 combat 键也通过，combat 为 null 且不标记忽略', () => {
-    const draft = parseDirectOutput(raw(updates(undefined, false)), 1, off);
+    const draft = parseDirectOutput(raw(updates(undefined, false)), POOL, off);
     expect(draft.updates.combat).toBeNull();
     expect(draft.combatIgnored).toBeUndefined();
   });
 
   it('combat:null 通过且不标记忽略', () => {
-    const draft = parseDirectOutput(raw(updates(null)), 1, off);
+    const draft = parseDirectOutput(raw(updates(null)), POOL, off);
     expect(draft.updates.combat).toBeNull();
     expect(draft.combatIgnored).toBeUndefined();
   });
@@ -170,7 +173,7 @@ describe('关闭结构化战斗时的解析', () => {
     ['数字', 42],
     ['完整战斗区块（内含禁止字段 id）', FULL_COMBAT],
   ])('combat 为%s时丢弃并标记 combatIgnored', (_label, combat) => {
-    const draft = parseDirectOutput(raw(updates(combat)), 1, off);
+    const draft = parseDirectOutput(raw(updates(combat)), POOL, off);
     expect(draft.updates.combat).toBeNull();
     expect(draft.combatIgnored).toBe(true);
   });
@@ -178,18 +181,18 @@ describe('关闭结构化战斗时的解析', () => {
 
 describe('开启（缺省参数）时解析口径不变', () => {
   it('缺少 combat 键被拒', () => {
-    expect(() => parseDirectOutput(raw(updates(undefined, false)), 1)).toThrow('v1 分区不完整');
+    expect(() => parseDirectOutput(raw(updates(undefined, false)), POOL)).toThrow('v1 分区不完整');
   });
   it('combat 非对象被拒', () => {
-    expect(() => parseDirectOutput(raw(updates('oops')), 1)).toThrow('combat 必须是对象');
+    expect(() => parseDirectOutput(raw(updates('oops')), POOL)).toThrow('combat 必须是对象');
   });
   it('combat 内含 id 被拒', () => {
-    expect(() => parseDirectOutput(raw(updates(FULL_COMBAT)), 1)).toThrow('不允许模型填写 id');
+    expect(() => parseDirectOutput(raw(updates(FULL_COMBAT)), POOL)).toThrow('不允许模型填写 id');
   });
   it('combat 区块原样保留，不标记忽略', () => {
     const { id: _id, ...unit } = FULL_COMBAT.units[0];
     const combat = { ...FULL_COMBAT, units: [unit] };
-    const draft = parseDirectOutput(raw(updates(combat)), 1, { structuredCombat: true });
+    const draft = parseDirectOutput(raw(updates(combat)), POOL, { structuredCombat: true });
     expect(draft.updates.combat).toEqual(combat);
     expect(draft.combatIgnored).toBeUndefined();
   });

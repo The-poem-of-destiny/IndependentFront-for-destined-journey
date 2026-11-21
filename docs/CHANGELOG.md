@@ -9,6 +9,15 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-20 直出扁平角色实体容错 + 骰池缩小分组｜分支 `fix/direct-dice-entity`，**已实施，未真机验证**
+
+- 问题：模型引入新 NPC 时把角色字段直接摊在 `entities[i].output` 上，整楼以「entities[0].output 含未支持的字段：name、race…」被拒；另外无缓存直出每楼骰池约 6200 字符，大多用不上。
+- 扁平容错：`direct-output.ts` 的 `parseDirectOutput` 遇到 `kind: "character"`、`output` 无 `character` 但有字符串 `name` 的项，把除 `statuses` / `elements` / `authorities` 以外的键移进 `output.character`，顶层 `skills` / `equipment` / `inventory` 置 `[]`，结果与嵌套写法一致。草稿新增 `flattenedCharacters?: string[]`，`direct-main.ts` 记 warn `direct.entity_flattened`。协议文字补了嵌套写法示例。
+- 骰池：新模块 `src/core/agents/direct-dice.ts`（`DirectDicePool` / `rollDirectDice` / `formatDirectDicePool`）。由 180 个（六种骰各 20 + d20 60）缩到 80 个（各 10 + d20 20）；按骰型分组每行一种（`d20: {12, 5, 17}`，顺序 d4、d6、d8、d10、d12、d20、d100）。无缓存放进 `<dice_pool>`，缓存版 `turn_context.dice_pool` 改为同样字符串的数组（取代 `[骰面数, 骰值]` 对）。
+- `diceUsed`：项改为 `{sides, index, purpose, target}`，`index` 是该骰型行内从 0 起的序号；拒绝未知骰型、越界序号、重复 (sides, index) 与缺 `sides`。
+- 后果：两份协议文字变化，每个 `direct_cached` 存档冷建一次；私有内容包的直出预设（`direct_combat_policy`）同步改写，🔴 引擎与内容包须一起发布（旧包只让模型登记 `index`，整楼被拒）；每楼 d20 由 60 降到 20，长战斗回合可能耗尽骰池、须按协议提前停下；未用真实模型验证。
+- 文档：`docs/reference/direct-generation.md` 新增「实体扁平容错与分组骰池」节；`docs/reference/direct-generation-cache.md`、`docs/planning/2026-11-09-direct-generation-v1-design.md`、`src/core/AGENTS.md` 加 📌 2026-11-20 注记。
+
 ### 2026-11-20 角色预设增强 + 主角生日 + 自制开局条目库｜worktree `persona-presets`，**已实施，未真机验证**
 
 - 自制开局条目全局库：新表 `createCustomItems`（Dexie v35，全局，删存档不动）。纯函数 `content/start-custom-entries.ts`（`sanitizeCustomCatalogItem` 收窄任意输入；`planLibrarySave` 把同「类别 + 名称」视为同一条目，替换与写入同事务）；前端唯一读写口 `stores/create-custom-library-store.ts`（只收 `custom_` 前缀 id）。`CustomItemForm` 加「保存到我的自定义库」勾选；选择步骤「我的自定义」组排最前，卡片可从库里删除。`FullBackup.createCustomItems` 为可选字段，导入三态：缺席（旧备份）整表不动、`[]` 清空、有数据整表覆盖。不设品质上限。
