@@ -6,6 +6,7 @@ import {
   getDatabase,
   initializeDatabase,
 } from '../../../src/core/persistence/database';
+import { characterAge, hasGivenBirthday } from '../../../src/core/character/character-age';
 import { createDefaultCharacterState } from '../../../src/core/types/types';
 import type { SaveSlot } from '../../../src/core/types/types';
 
@@ -75,4 +76,20 @@ describe('createJourney 初始等级上限', () => {
       await expectNoRows();
     },
   );
+});
+
+describe('createJourney 主角生日', () => {
+  it('建号年龄 + 生日换算成年龄锚点，生日当天满岁', async () => {
+    const data = input(1);
+    data.character.customFields = {
+      ...data.character.customFields,
+      age: 18,
+      birthday: { month: 3, day: 15 },
+    };
+    await createJourney(data);
+    const stored = await getDatabase().characters.get('player');
+    expect(stored?.ageAnchor).toEqual({ startAge: 18, month: 3, day: 15 });
+    expect(hasGivenBirthday(stored!)).toBe(true);
+    expect(characterAge(stored!, { year: 488, month: 3, day: 15 })).toBe(19);
+  });
 });

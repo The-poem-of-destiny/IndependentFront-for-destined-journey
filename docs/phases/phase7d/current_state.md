@@ -215,7 +215,8 @@ src/ui/components/create/
     <input v-model="presetName" /><AppButton>保存当前配置 / 确认覆盖</AppButton>
   </div>
   <div class="preset-list">
-    <!-- 每行: 名称 · 角色名 Lv.N 装N 技N · 时间 | [加载] [导出] [删除→二次确认] -->
+    <!-- 每行: 名称 · 角色名 Lv.N 装N 技N · 时间 | [加载] [仅载入主角] [重命名] [导出] [删除→二次确认] -->
+    <!-- 详情: 姓名 / 性别 / 年龄 / 生日（未设置） / 种族 … -->
   </div>
   <div class="modal-footer">[导入预设文件] [全部导出] [关闭]</div>
 </AppModal>
@@ -265,6 +266,11 @@ src/ui/components/create/
 > 开场提示词同时精简（引擎 `prompts/opening-prompt.ts`），不再列清单、金钱与天赋水平，
 > 并可在第 8 步（`OpeningPromptEditor.vue`）预览、改写、恢复默认。初始等级上限 `MAX_START_LEVEL` = 10。
 
+> 📌 **2026-11-20 玩家自制开局条目全局库**：`CustomItemForm` 勾「保存到我的自定义库」时，自制的
+> 技能 / 物品 / 装备另存进 Dexie v35 `createCustomItems`（全局，删存档不动，进 FullBackup），
+> 之后每次捏人都出现在选择步骤的「我的自定义」组，卡片可从库里删除（不影响已选）。
+> 同类别同名再存替换旧条目。纯函数在引擎 `content/start-custom-entries.ts`。
+
 > 🔴 上表第一行与其余行**口径不同**：只有装备/道具/技能仍走硬编码的上游 CDN，其余走内容注册表
 > （`public/data/content/catalog.json`，内容包可整份替换）。公开仓那份是**零 IP 占位集**，
 > 数量（装备 10 / 道具 5 / 技能 0 / 背景 3 / 命定核心 3）不代表真实内容仓。
@@ -277,7 +283,8 @@ src/ui/components/create/
   `catalog` / `bloodlineSet` / `era` 从内容注册表解析
 - **步骤控制**: `currentStep` (0-7), `stepValid`, `nextStep/prevStep`
 - **难度**: `difficulty`, `selectDifficulty(id)`, `reincarnationPoints`
-- **角色 (→ 变量)**: name/gender/age/race/identity/startLocation/level + personality/physics/backstory/extra
+- **角色 (→ 变量)**: name/gender/age/birthday/race/identity/startLocation/level + personality/physics/backstory/extra
+  （📌 2026-11-20：`birthday` 可选，月 1-12、日 1-30，null = 未填）
 - **属性联动**: `tier`/`tierName`/`tierBonus`/`finalAttributes`/`hpPreview`/`mpPreview`/`spPreview`
 - **BP / AP**: `MAX_BP`, `usedBP/remainingBP`, `maxAP = max(0, level-1)`, `usedAP/remainingAP`
 - **经济**: `raceCost/identityCost/equipmentCost/itemCost/skillCost/moneyCost/destinyCost/levelCost`
@@ -288,6 +295,7 @@ src/ui/components/create/
   `buildEnabledWorldBookEntries()`
 - **选择**: `selectedEquipments/selectedItems/selectedSkills`, `activeCategory/rarityFilter/typeFilter`,
   `activeGroups` / `filteredPool` / `subCategories`, `isSelected` / `canSelect`, add/remove/update
+  （📌 2026-11-20：自制条目全局库 `create-custom-library-store.ts` 并成「我的自定义」组，排在子分类最前）
 - **背景**: `selectedBackground`, `customBackgroundText`, `activeBackgroundCategory` / `filteredBackgrounds`
 - **剧情**（本店最大的一块）: 偏好/章节数/禁忌等设置 + `generatePlotOutline` / `reviseOutline` /
   `rollbackOutline` / 流式 `streamOutlineChat` + `plotStreamStats` + `abortPlotGeneration` +
@@ -296,8 +304,9 @@ src/ui/components/create/
   `startJourneyAndClearDraft()` / `autoSaveDraft` / `tryRestoreDraft` / `clearDraft`
   （📌 2026-11-20：+开场提示词改写 `openingPromptDraft` / `openingPromptText` / `openingPromptEdited` /
   `openingPromptStale` / `setOpeningPromptText` / `restoreDefaultOpeningPrompt`；+`draftLevelClampedFrom`）
-- **预设**: `showPresetModal`, `presets`, `getCurrentPresetData` / `applyPresetData`
-- **重置**: `resetAll`
+- **预设**: `showPresetModal`, `presets`, `getCurrentPresetData` / `applyPresetData(data, scope?)`
+  （📌 2026-11-20：`scope = 'persona'` 只替换主角本人，难度 / 金钱命运点 / 起始地点 / 背景 / 命定核心 / 剧情 / 开局提示词改写不动）
+- **重置**: `resetAll`（📌 2026-11-20：同时清空 personality / physics / backstory / extra / birthday）
 
 ---
 

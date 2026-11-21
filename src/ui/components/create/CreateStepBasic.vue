@@ -14,6 +14,36 @@ const store = useCreateStore();
 
 /** 三条资源条的最大值，用于统一比例尺 */
 const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.spPreview, 1));
+
+/* ===== 生日（可选）：日历 12 个月 × 每月 30 天；0 表示「不设置」 ===== */
+const BIRTHDAY_MONTH_OPTIONS = [
+  { label: '不设置', value: 0 },
+  ...Array.from({ length: 12 }, (_, i) => ({ label: `${i + 1}月`, value: i + 1 })),
+];
+const BIRTHDAY_DAY_OPTIONS = Array.from({ length: 30 }, (_, i) => ({
+  label: `${i + 1}日`,
+  value: i + 1,
+}));
+
+const birthdayMonth = computed<number>({
+  get: () => store.birthday?.month ?? 0,
+  set: (month) => {
+    if (month < 1 || month > 12) {
+      store.birthday = null;
+      return;
+    }
+    // 从「不设置」切到某月时日默认 1；已设过则换月保留原日
+    store.birthday = { month, day: store.birthday?.day ?? 1 };
+  },
+});
+
+const birthdayDay = computed<number>({
+  get: () => store.birthday?.day ?? 1,
+  set: (day) => {
+    if (!store.birthday || day < 1 || day > 30) return;
+    store.birthday = { month: store.birthday.month, day };
+  },
+});
 </script>
 
 <template>
@@ -30,6 +60,27 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
           :options="store.GENDER_OPTIONS.map((g) => ({ label: g, value: g }))"
         />
         <FormStepper v-model="store.age" label="年龄" :min="1" :max="999" />
+        <!-- 生日（可选）：月、日两个下拉；未设月时日下拉禁用 -->
+        <div class="birthday-row" data-test="birthday">
+          <FormSelect
+            v-model="birthdayMonth"
+            label="生日（可选）"
+            :options="BIRTHDAY_MONTH_OPTIONS"
+            class="birthday-month"
+            data-test="birthday-month"
+          />
+          <FormSelect
+            v-model="birthdayDay"
+            label="日"
+            :options="BIRTHDAY_DAY_OPTIONS"
+            :disabled="!store.birthday"
+            class="birthday-day"
+            data-test="birthday-day"
+          />
+        </div>
+        <p class="form-hint" data-test="birthday-hint">
+          每月 30 天；不设置则按 1 月 1 日计龄且不进日历
+        </p>
         <FormSelect v-model="store.race" label="种族" :options="store.raceOptions" />
         <FormInput
           v-if="store.race === '自定义'"
@@ -381,6 +432,14 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
   font-size: 0.75rem;
   line-height: 1.6;
   color: var(--theme-text-muted);
+}
+
+/* 生日：月/日并排，窄屏仍并排（两个短下拉，各占一半） */
+.birthday-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--theme-spacing-sm);
+  align-items: end;
 }
 
 /* ===== 右侧 ===== */

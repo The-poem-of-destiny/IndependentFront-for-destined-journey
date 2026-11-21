@@ -51,6 +51,7 @@ beforeEach(() => {
     totalCost: 72,
     reincarnationPoints: 1000,
     overspentPoints: 0,
+    birthday: null,
     addBasePoint: vi.fn(),
     removeBasePoint: vi.fn(),
     setBasePoint: vi.fn(),
@@ -156,5 +157,63 @@ describe('CreateStepBasic — 初始等级上限', () => {
       .find((w) => w.props('label') === '等级')!;
     expect(stepper.props('max')).toBe(10);
     expect(wrapper.find('[data-test="level-cap-hint"]').text()).toBe('初始等级最高 Lv.10');
+  });
+});
+
+describe('CreateStepBasic — 生日（可选）', () => {
+  // 挂真 FormSelect 才拿得到 <select>，其余子组件 stub
+  const mountBirthday = () =>
+    mount(CreateStepBasic, {
+      global: {
+        stubs: {
+          FormInput: true,
+          FormStepper: true,
+          ResourceBar: true,
+          AttributeEditor: true,
+          AppButton: true,
+        },
+      },
+    });
+  const monthSelect = (w: ReturnType<typeof mountBirthday>) =>
+    w.find('[data-test="birthday-month"] select');
+  const daySelect = (w: ReturnType<typeof mountBirthday>) =>
+    w.find('[data-test="birthday-day"] select');
+
+  it('未设置时月份显示「不设置」，日下拉禁用且有 30 个选项，并显示说明', () => {
+    const wrapper = mountBirthday();
+    expect((monthSelect(wrapper).element as HTMLSelectElement).value).toBe('0');
+    expect(monthSelect(wrapper).findAll('option').length).toBe(13);
+    expect(monthSelect(wrapper).findAll('option')[0]!.text()).toBe('不设置');
+    expect(monthSelect(wrapper).findAll('option')[12]!.text()).toBe('12月');
+    expect(daySelect(wrapper).findAll('option').length).toBe(30);
+    expect(daySelect(wrapper).attributes('disabled')).toBeDefined();
+    expect(wrapper.find('[data-test="birthday-hint"]').text()).toBe(
+      '每月 30 天；不设置则按 1 月 1 日计龄且不进日历',
+    );
+  });
+
+  it('★ 从不设置选某月 → 生日为 {month, day: 1}，日下拉启用', async () => {
+    const wrapper = mountBirthday();
+    await monthSelect(wrapper).setValue('5');
+    expect(mockCreate.birthday).toEqual({ month: 5, day: 1 });
+    expect(daySelect(wrapper).attributes('disabled')).toBeUndefined();
+  });
+
+  it('换月保留已选的日；改日更新 store', async () => {
+    mockCreate.birthday = { month: 3, day: 17 };
+    const wrapper = mountBirthday();
+    expect((daySelect(wrapper).element as HTMLSelectElement).value).toBe('17');
+    await monthSelect(wrapper).setValue('8');
+    expect(mockCreate.birthday).toEqual({ month: 8, day: 17 });
+    await daySelect(wrapper).setValue('30');
+    expect(mockCreate.birthday).toEqual({ month: 8, day: 30 });
+  });
+
+  it('★ 选回「不设置」→ 生日为 null，日下拉重新禁用', async () => {
+    mockCreate.birthday = { month: 6, day: 9 };
+    const wrapper = mountBirthday();
+    await monthSelect(wrapper).setValue('0');
+    expect(mockCreate.birthday).toBeNull();
+    expect(daySelect(wrapper).attributes('disabled')).toBeDefined();
   });
 });

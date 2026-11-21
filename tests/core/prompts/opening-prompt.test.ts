@@ -132,6 +132,44 @@ describe('buildOpeningPrompt', () => {
     expect(out).not.toContain('命定核心');
   });
 
+  it('未给生日（缺省或 null）时与原版式逐字节一致', () => {
+    const expected = [
+      '【剧情生成上下文】',
+      '角色、属性、金钱、装备、背包、技能等结构化数据已写入 <direct_state>。',
+      '',
+      '以下只提供需要创作的开局。',
+      '姓名: 艾琳',
+      '身份: 流浪佣兵',
+      '性别: 女',
+      '年龄: 24岁',
+      '起始地点: 灰石镇',
+      '命定核心: 星辉之心',
+      '【第一轮变量更新要求】',
+      '第一轮 AI 回复必须同步更新 <direct_state> 中的以下字段：',
+      '',
+      '* 时间：在 direct_updates 的 time.delta_time 中写入开局这一幕实际经过的分钟数（非负有限数）。',
+      '* 地点：在 direct_updates 的 state.characters.replace 中以 path=location 写入主角本轮结束时所在的地点。',
+      '',
+      '【初始开局剧情】',
+      '边境驿站',
+      '描述: 艾琳在驿站醒来，艾琳的行囊还在身边。',
+      '根据以上内容，生成一个符合描述和情景的初始剧情！',
+      '（注意：生成初始剧情时，先检查上述内容是否完整，如不完整，必须参考相关设定进行完善。）',
+    ].join('\n');
+    const input = base('direct', SCENARIOS[0][1], '星辉之心');
+    expect(buildOpeningPrompt(input)).toBe(expected);
+    expect(buildOpeningPrompt({ ...input, birthday: null })).toBe(expected);
+    expect(buildOpeningPrompt({ ...input, birthday: undefined })).toBe(expected);
+  });
+
+  it('给了生日时紧跟年龄行写入「生日: M月D日」', () => {
+    for (const mode of MODES) {
+      const out = buildOpeningPrompt({ ...base(mode, null), birthday: { month: 3, day: 15 } });
+      expect(out).toContain('年龄: 24岁\n生日: 3月15日\n起始地点: 灰石镇');
+      expect(out.match(/生日:/g)).toHaveLength(1);
+    }
+  });
+
   it('姓名为空时兜底为「未命名」', () => {
     const out = buildOpeningPrompt({ ...base('agent', null), name: '  ' });
     expect(out).toContain('姓名: 未命名');

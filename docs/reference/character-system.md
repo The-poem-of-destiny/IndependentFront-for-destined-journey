@@ -72,6 +72,11 @@
 
 实现：`src/core/character/character-age.ts`；落库闸门在 `StateManager.applyAddCharacter` 与 `createJourney`。
 
+> 📌 **2026-11-20 补记（已实施，未真机验证）**
+>
+> - **主角生日输入**：捏人页第 2 步（基础信息）可选填生日（月、日两个下拉，每月 30 天）。填了才写 `customFields.birthday` 线索，与建号年龄一起折算进 `ageAnchor`，开场提示词多一行「生日: M月D日」；不填则按 1 月 1 日计龄，且不进日历。生日随角色预设保存。
+> - **直出模式的年龄**：direct / direct_cached 的角色快照（`generateDirectTurn` 的 `state.characters` 与 `buildDirectCharacterSections` 的 `profile` 分区）经 `projectCharacterAge` 改发按游戏时间现算的 `age`；给定生日时另带 `birthday: 'M月D日'`，兜底的 1 月 1 日不展示。不再发 `ageAnchor` 原值与冻结的开局年龄。直出协议加一句「age／birthday 由代码现算，只读」。缓存直出每过一个生日，该角色 `profile` 分区重发一次；本次升级后已有的 direct_cached 存档会冷重建一次。
+
 ## 叙事协议与提交
 
 正文及其他输出之后给出恰好一个完整区块；无变化也输出空 `characters` 数组。

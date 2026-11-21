@@ -62,6 +62,10 @@
 
 直出不启动旧战斗覆盖层、制作链、角色生成子调用、自动插画、润色链或 EJS 变量提交。主回复承担这些非记忆裁定职责；自动插画本版停用。普通音频标记与既有显示设置保留。
 
+### 角色年龄（2026-11-20）
+
+📌 2026-11-20 修正，未真机验证。`direct_state` 的角色快照（`generateDirectTurn` 的 `state.characters`）不再带 `ageAnchor` 原值与开局时冻结的 `customFields.age`，改为经 `projectCharacterAge`（`src/core/character/character-age.ts`）按当前游戏时间现算的 `age`；只有给定了生日才另带 `birthday: 'M月D日'`，兜底的 1 月 1 日不展示。协议加一句：`age` 与 `birthday` 由代码现算，只读，模型不必也不应写回。缓存直出的 `profile` 分区同口径，协议文字变了，已有 `direct_cached` 存档会冷建一次，见[缓存直出](direct-generation-cache.md)。
+
 ## 内容包
 
 世界书沿用现有开关、条件、分区和依赖，只读取明确授权 `direct_main` 的条目。在世界书编辑器为相关规则、世界设定、种族、区域、产业等配置读取范围；不要直接把各 Agent 的旧输出模板全部合并进来，它们会与直出契约冲突。

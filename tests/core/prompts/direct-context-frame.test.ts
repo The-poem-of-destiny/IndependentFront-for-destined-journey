@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { GAME_EPOCH_YEAR } from '../../../src/core/time/time-system';
 import {
   buildDirectCharacterSections,
   buildDirectMemorySections,
@@ -194,7 +195,7 @@ describe('legacy cached direct layout', () => {
       frame: {
         prefix: [{ role: 'system' as const, content: '规则'.repeat(4000) }],
         history: [],
-        sections: { ...buildDirectCharacterSections(characters), combat: null },
+        sections: { ...buildDirectCharacterSections(characters, null), combat: null },
       },
     });
     try {
@@ -246,7 +247,7 @@ describe('legacy cached direct layout', () => {
       thoughts: '这把剑太贵了',
       background: '出身边境的流浪剑士',
     });
-    const sections = buildDirectCharacterSections([character]);
+    const sections = buildDirectCharacterSections([character], null);
     const state = sections['character/旅人/state'] as Record<string, unknown>;
     const profile = sections['character/旅人/profile'] as Record<string, unknown>;
     const volatile = [
@@ -281,16 +282,58 @@ describe('legacy cached direct layout', () => {
       currentAction: '挑选武器',
       background: '出身边境的流浪剑士',
     });
-    const before = buildDirectCharacterSections([character]);
-    const after = buildDirectCharacterSections([
-      { ...character, currentAction: '付钱离开', location: '王都/广场' },
-    ]);
+    const before = buildDirectCharacterSections([character], null);
+    const after = buildDirectCharacterSections(
+      [{ ...character, currentAction: '付钱离开', location: '王都/广场' }],
+      null,
+    );
     expect(serializeDirectContext(after['character/旅人/profile'])).toBe(
       serializeDirectContext(before['character/旅人/profile']),
     );
     expect(serializeDirectContext(after['character/旅人/state'])).not.toBe(
       serializeDirectContext(before['character/旅人/state']),
     );
+  });
+
+  it('profile 分区按游戏时间现算年龄，不带冻结年龄与原始锚点', () => {
+    const character = createDefaultCharacterState({
+      name: '旅人',
+      ageAnchor: { startAge: 18, month: 3, day: 15 },
+      customFields: { age: 18, birthday: '3月15日', 口癖: '喵' },
+    });
+    const profileAt = (year: number, month: number, day: number) =>
+      buildDirectCharacterSections([character], { year, month, day })[
+        'character/旅人/profile'
+      ] as Record<string, unknown>;
+    const profile = profileAt(GAME_EPOCH_YEAR + 1, 3, 15);
+    expect(profile.age).toBe(20);
+    expect(profile.birthday).toBe('3月15日');
+    expect(profile).not.toHaveProperty('ageAnchor');
+    expect(profile.customFields).toEqual({ 口癖: '喵' });
+    expect(profileAt(GAME_EPOCH_YEAR + 1, 3, 14).age).toBe(19);
+  });
+
+  it('生日是兜底时不展示生日；无锚点的角色保持原样', () => {
+    const fallback = createDefaultCharacterState({
+      name: '旅人',
+      ageAnchor: { startAge: 20, month: 1, day: 1 },
+      customFields: { age: 20 },
+    });
+    const profile = buildDirectCharacterSections([fallback], {
+      year: GAME_EPOCH_YEAR,
+      month: 6,
+      day: 1,
+    })['character/旅人/profile'] as Record<string, unknown>;
+    expect(profile.age).toBe(20);
+    expect(profile).not.toHaveProperty('birthday');
+    const legacy = createDefaultCharacterState({ name: '老档', customFields: { age: 30 } });
+    const legacyProfile = buildDirectCharacterSections([legacy], {
+      year: GAME_EPOCH_YEAR,
+      month: 6,
+      day: 1,
+    })['character/老档/profile'] as Record<string, unknown>;
+    expect(legacyProfile).not.toHaveProperty('age');
+    expect(legacyProfile.customFields).toEqual({ age: 30 });
   });
 
   it('keeps one section per memory out of the prefix', async () => {

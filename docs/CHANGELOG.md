@@ -9,6 +9,16 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-20 角色预设增强 + 主角生日 + 自制开局条目库｜worktree `persona-presets`，**已实施，未真机验证**
+
+- 自制开局条目全局库：新表 `createCustomItems`（Dexie v35，全局，删存档不动）。纯函数 `content/start-custom-entries.ts`（`sanitizeCustomCatalogItem` 收窄任意输入；`planLibrarySave` 把同「类别 + 名称」视为同一条目，替换与写入同事务）；前端唯一读写口 `stores/create-custom-library-store.ts`（只收 `custom_` 前缀 id）。`CustomItemForm` 加「保存到我的自定义库」勾选；选择步骤「我的自定义」组排最前，卡片可从库里删除。`FullBackup.createCustomItems` 为可选字段，导入三态：缺席（旧备份）整表不动、`[]` 清空、有数据整表覆盖。不设品质上限。
+- 角色预设弹窗：加「重命名」（行内编辑，查重名）与「仅载入主角」（`applyPresetData(data, 'persona')`：只换主角本人，难度、金钱命运点、起始地点、背景、命定核心、剧情与开局提示词改写保持不动）；详情显示年龄与生日。
+- 主角生日（可选，12 月 × 30 日）：`CreateStepBasic` 月 / 日下拉。填了才写 `customFields.birthday` 线索，经 `ensureCharacterAge` 进 `ageAnchor`；开场提示词多一行「生日」；`CreatePreset.character.birthday` 随预设与草稿保存（可选字段，不升草稿版本）。
+- 直出年龄：direct / direct_cached 的角色投影经新函数 `projectCharacterAge`（`character/character-age.ts`）改发按游戏时间现算的 `age`（给定生日时带 `birthday`），不再发冻结的 `customFields.age` 与原始 `ageAnchor`；`direct-prompt.ts` 协议加一句「年龄由代码现算，只读」。协议与分区变化使已有 direct_cached 存档冷重建一次。
+- 修复：`create-store.resetAll` 未清空性格 / 身材 / 身世 / 补充设定，上一个主角的文本会漏进下一个新档；现在连同生日一起清空。
+- 测试：新增 `tests/core/content/start-custom-entries.test.ts`、`tests/ui/stores/create-custom-library-store.test.ts`、`tests/ui/components/create/CreateStepSelections.library.test.ts`；更新 database（v35 / 备份三态）、character-age、direct-context-frame、direct-generation、opening-prompt、create-journey、create-store 与捏人页组件用例。
+- 文档：`src/core/AGENTS.md`、`src/ui/AGENTS.md`、数据字段规范、`docs/reference/character-system.md`、`docs/phases/phase7d/current_state.md`。
+
 ### 2026-11-20 开局清单落库 + 精简开场提示词 + 初始等级上限，**已实施，未真机验证**
 
 - 初始等级上限：`content/start-catalog-mechanics.ts` 新增 `MAX_START_LEVEL = 10`（所有难度含创造模式）。`createJourney` 在开事务前拒收 [1, 10] 以外或非整数的等级（只拒收不截断）。捏人页等级输入上限由 25 改为 10 并加提示；超限进缺失项；加载超限预设或恢复超限草稿时截到 10、额外属性点清零并 toast 说明，预设列表挂「超出等级上限」角标。

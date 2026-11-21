@@ -53,6 +53,8 @@ import { buildOpeningPrompt as buildEngineOpeningPrompt } from '@engine/prompts/
 import { buildStartLoadout } from '@engine/content/start-loadout';
 import { MAX_START_LEVEL } from '@engine/content/start-catalog-mechanics';
 import { useSettingsStore } from './settings-store';
+import { useCreateCustomLibraryStore } from './create-custom-library-store';
+import { parseAgeHint } from '@engine/character/character-age';
 import { createStoryContextV2Marker } from '@engine/story/story-context-mode';
 import {
   type CatalogItem,
@@ -101,6 +103,17 @@ import { MISSING_FIELDS_PREFIX } from '../lib/create-options';
  * 这里 re-export 同一个名字，`PresetModal.vue` 等既有消费方的 import 路径一字未改。
  */
 export type { CreatePreset } from '@engine/types/types';
+
+/** 选择步骤里「玩家自制条目全局库」那一组的分组名；有条目时排在子分类最前 */
+export const CUSTOM_LIBRARY_GROUP = '我的自定义';
+
+/** 主角生日（月 1-12、日 1-30） */
+type Birthday = { month: number; day: number };
+
+/** 任意输入 → 合法生日或 null（与 `ensureCharacterAge` 同口径：31 日并到 30 日，其余越界丢弃） */
+function sanitizeBirthday(raw: unknown): Birthday | null {
+  return parseAgeHint({ birthday: raw }).birthday ?? null;
+}
 
 // ===== 原版常量 (custom_start_index.html) =====
 const MAX_BP = 25;
@@ -446,6 +459,8 @@ export const useCreateStore = defineStore('create', () => {
   const gender = ref('男');
   const customGender = ref('');
   const age = ref(18);
+  /** 主角生日；null = 未填（建档时由 ensureCharacterAge 兜底为 1 月 1 日） */
+  const birthday = ref<Birthday | null>(null);
   const race = ref('人类');
   const customRace = ref('');
   const identity = ref('非贵族平民');
@@ -1022,17 +1037,30 @@ export const useCreateStore = defineStore('create', () => {
     });
 
   /** 当前大分类对应的分组数据 */
+  const customLibrary = useCreateCustomLibraryStore();
+
   const activeGroups = computed<Record<string, CatalogItem[]>>(() => {
+    let groups: Record<string, CatalogItem[]>;
     switch (activeCategory.value) {
       case 'equipment':
-        return equipmentGroups.value;
+        groups = equipmentGroups.value;
+        break;
       case 'item':
-        return itemGroups.value;
+        groups = itemGroups.value;
+        break;
       case 'skill':
-        return skillGroups.value;
+        groups = skillGroups.value;
+        break;
       default:
         return {};
     }
+    // 玩家自制条目全局库：当前大分类下有条目时并成一组（选中仍走 selectCatalogItem）
+    const custom = customLibrary.byCategory(activeCategory.value);
+    if (custom.length === 0) return groups;
+    return {
+      ...groups,
+      [CUSTOM_LIBRARY_GROUP]: [...custom, ...(groups[CUSTOM_LIBRARY_GROUP] ?? [])],
+    };
   });
 
   const filteredPool = computed(() => {
@@ -1060,7 +1088,12 @@ export const useCreateStore = defineStore('create', () => {
    * 完全对齐参考仓库 Selections 的 Object.keys(data) 语义
    */
   const subCategories = computed(() =>
-    Object.keys(activeGroups.value).sort((a, b) => a.localeCompare(b, 'zh')),
+    Object.keys(activeGroups.value).sort((a, b) => {
+      // 「我的自定义」恒在最前，其余按中文排序
+      if (a === CUSTOM_LIBRARY_GROUP) return -1;
+      if (b === CUSTOM_LIBRARY_GROUP) return 1;
+      return a.localeCompare(b, 'zh');
+    }),
   );
 
   function isSelected(item: CatalogItem): boolean {
@@ -2115,6 +2148,8 @@ export const useCreateStore = defineStore('create', () => {
       customFields: {
         // M6 T2: saveId/gender/personality/physics/backstory 已升一等字段停写
         age: age.value,
+        // 只有玩家填了生日才写：缺席时 ensureCharacterAge 兜底 1 月 1 日，且不算「给定的生日」
+        ...(birthday.value ? { birthday: { ...birthday.value } } : {}),
         destinyCoreId: destinyCore.value?.id ?? null,
         destinyPoints: destinyPoints.value,
         extra: extra.value.trim(),
@@ -2143,6 +2178,7 @@ export const useCreateStore = defineStore('create', () => {
       identity: identity.value === '自定义' ? customIdentity.value || '非贵族平民' : identity.value,
       gender: gender.value === '自定义' ? customGender.value : gender.value,
       age: age.value,
+      birthday: birthday.value,
       startLocation: startLocationLabel.value,
       ...(coreName ? { coreName } : {}),
       scenario,
@@ -2351,6 +2387,7 @@ export const useCreateStore = defineStore('create', () => {
       gender: gender.value,
       customGender: customGender.value,
       age: age.value,
+      birthday: birthday.value ? { ...birthday.value } : null,
       race: race.value,
       customRace: customRace.value,
       identity: identity.value,
@@ -2505,6 +2542,8 @@ export const useCreateStore = defineStore('create', () => {
     gender.value = str(c.gender, '男');
     customGender.value = str(c.customGender, '');
     age.value = int(c.age, 18, 1, 999);
+    // 可选字段（2026-11-20 加入，不升草稿版本）：旧草稿缺席读作未填
+    birthday.value = sanitizeBirthday(c.birthday);
     race.value = str(c.race, '人类');
     customRace.value = str(c.customRace, '');
     identity.value = str(c.identity, '非贵族平民');
@@ -2677,6 +2716,7 @@ export const useCreateStore = defineStore('create', () => {
         gender: gender.value,
         customGender: customGender.value,
         age: age.value,
+        birthday: birthday.value ? { ...birthday.value } : null,
         race: race.value,
         customRace: customRace.value,
         identity: identity.value,
@@ -2717,19 +2757,28 @@ export const useCreateStore = defineStore('create', () => {
   /**
    * 应用捏人预设。预设里的等级超过开局上限（MAX_START_LEVEL）时截到上限、额外属性点清零重分，
    * 并返回预设里的原等级供捏人页提示；未截断返回 null。
+   *
+   * `scope = 'persona'` 只套用「这个人」：姓名 / 性别 / 年龄 / 生日 / 种族 / 身份 / 等级 /
+   * 基础与额外属性点 / 性格 / 身材 / 身世 / 补充说明 / 技能道具装备清单。难度、金钱、命运点、
+   * 起始地、开局背景、命定核心、扩展与角色勾选、剧情设置与大纲、开场提示词改写一概不动。
    */
-  function applyPresetData(data: CreatePreset): number | null {
-    selectDifficulty(data.difficulty);
+  function applyPresetData(data: CreatePreset, scope: 'all' | 'persona' = 'all'): number | null {
+    const full = scope === 'all';
+    if (full) selectDifficulty(data.difficulty);
     name.value = data.character.name;
     gender.value = data.character.gender;
     customGender.value = data.character.customGender || '';
     age.value = data.character.age;
+    // 旧预设没有这个字段：读作未填
+    birthday.value = sanitizeBirthday(data.character.birthday);
     race.value = data.character.race;
     customRace.value = data.character.customRace || '';
     identity.value = data.character.identity;
     customIdentity.value = data.character.customIdentity || '';
-    startLocation.value = data.character.startLocation;
-    customStartLocation.value = data.character.customStartLocation || '';
+    if (full) {
+      startLocation.value = data.character.startLocation;
+      customStartLocation.value = data.character.customStartLocation || '';
+    }
     // 预设可能来自导入文件：与草稿恢复同口径净化（非数字 / 缺失 → 1，小数取整，低于 1 → 1），
     // 不在这里设上限 —— 超过 MAX_START_LEVEL 的部分走下面的截断并把原等级报给调用方
     const presetLevel = int(data.character.level, 1, 1, Number.MAX_SAFE_INTEGER);
@@ -2739,12 +2788,21 @@ export const useCreateStore = defineStore('create', () => {
     attributePoints.value = levelClamped
       ? { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 }
       : { ...data.character.attributePoints };
-    money.value = data.character.money;
-    destinyPoints.value = data.character.destinyPoints;
     clearAllSelections();
     data.equipments.forEach((e) => addEquipment(e));
     data.items.forEach((i) => addItem(i));
     data.skills.forEach((s) => addSkill(s));
+    personality.value = data.personality || '';
+    physics.value = data.physics || '';
+    backstory.value = data.backstory || '';
+    extra.value = data.extra || '';
+    if (!full) {
+      if (!attributesFullyAllocated.value && currentStep.value > 1) currentStep.value = 1;
+      return levelClamped ? presetLevel : null;
+    }
+
+    money.value = data.character.money;
+    destinyPoints.value = data.character.destinyPoints;
     selectedBackground.value = data.background;
     customBackgroundText.value = data.customBackgroundText || '';
     // 预设定义的是另一个完整角色：此前对开场提示词的改写不属于它，回到跟随默认
@@ -2770,10 +2828,6 @@ export const useCreateStore = defineStore('create', () => {
     }
     enabledCharacterDefinitionIds.value = new Set(data.enabledCharacterDefinitionIds ?? []);
     migrateCharacterSelections();
-    personality.value = data.personality || '';
-    physics.value = data.physics || '';
-    backstory.value = data.backstory || '';
-    extra.value = data.extra || '';
     if (data.plotSettings) {
       plotMode.value = data.plotSettings.mode;
       plotTabooContent.value = data.plotSettings.tabooContent ?? '';
@@ -2830,6 +2884,7 @@ export const useCreateStore = defineStore('create', () => {
     gender.value = '男';
     customGender.value = '';
     age.value = 18;
+    birthday.value = null;
     generationMode.value = '';
     race.value = '人类';
     customRace.value = '';
@@ -2837,6 +2892,11 @@ export const useCreateStore = defineStore('create', () => {
     customIdentity.value = '';
     startLocation.value = '大陆中东部区域-奥古斯提姆帝国-艾瑟嘉德';
     customStartLocation.value = '';
+    // 主角的文字设定同样属于上一位主角：不清的话会漏进下一个新存档与草稿
+    personality.value = '';
+    physics.value = '';
+    backstory.value = '';
+    extra.value = '';
     level.value = 1;
     basePoints.value = { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 };
     attributePoints.value = { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 };
@@ -2935,6 +2995,7 @@ export const useCreateStore = defineStore('create', () => {
     physics,
     backstory,
     extra,
+    birthday,
     // 属性 (→ 变量)
     level,
     experienceMode,

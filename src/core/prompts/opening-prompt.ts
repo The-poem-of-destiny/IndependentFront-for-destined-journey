@@ -33,6 +33,8 @@ export interface OpeningPromptInput {
   identity: string;
   gender: string;
   age: number;
+  /** 主角生日（月 1-12、日 1-30）；缺省或 null 时不写这一行 */
+  birthday?: { month: number; day: number } | null;
   startLocation: string;
   /** 命定核心名；缺省或空串时不写这一行 */
   coreName?: string;
@@ -90,8 +92,9 @@ export function buildOpeningPrompt(input: OpeningPromptInput): string {
     `身份: ${input.identity}`,
     `性别: ${input.gender}`,
     `年龄: ${input.age}岁`,
-    `起始地点: ${input.startLocation}`,
   ];
+  if (input.birthday) lines.push(`生日: ${input.birthday.month}月${input.birthday.day}日`);
+  lines.push(`起始地点: ${input.startLocation}`);
   const coreName = input.coreName?.trim();
   if (coreName) lines.push(`命定核心: ${coreName}`);
 

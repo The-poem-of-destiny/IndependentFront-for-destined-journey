@@ -7,6 +7,7 @@ import {
   extractLoreAge,
   formatCharacterAge,
   parseAgeHint,
+  projectCharacterAge,
 } from '../../../src/core/character/character-age';
 import {
   legacyCharacterDefinitions,
@@ -175,6 +176,33 @@ describe('角色年龄：开局年龄 + 生日为真源', () => {
     expect(definitions[1].birthday).toEqual({ month: 4, day: 2 });
     expect(definitions[2].age).toBeUndefined();
     expect(definitions[2].birthday).toBeUndefined();
+  });
+
+  it('直出投影换成现算年龄，去掉冻结年龄与原始锚点，不改入参', () => {
+    const character = createDefaultCharacterState({
+      name: '旅人',
+      customFields: { age: 18, birthday: '3月15日', 口癖: '喵' },
+    });
+    ensureCharacterAge(character, at(START, 1, 1));
+    const projected = projectCharacterAge(character, at(START + 1, 3, 15));
+    expect(projected.age).toBe(20);
+    expect(projected.birthday).toBe('3月15日');
+    expect(projected).not.toHaveProperty('ageAnchor');
+    expect(projected.customFields).toEqual({ 口癖: '喵' });
+    expect(projectCharacterAge(character, at(START + 1, 3, 14)).age).toBe(19);
+    expect(character.customFields.age).toBe(18);
+    expect(character.ageAnchor).toBeDefined();
+  });
+
+  it('兜底生日不展示；无锚点或缺游戏时间时原样返回', () => {
+    const fallback = createDefaultCharacterState({ customFields: { age: 30 } });
+    ensureCharacterAge(fallback, at(START, 1, 1));
+    const projected = projectCharacterAge(fallback, at(START + 2, 6, 1));
+    expect(projected.age).toBe(32);
+    expect(projected).not.toHaveProperty('birthday');
+    const legacy = createDefaultCharacterState({ customFields: { age: 30 } });
+    expect(projectCharacterAge(legacy, at(START, 6, 1))).toBe(legacy);
+    expect(projectCharacterAge(fallback, null)).toBe(fallback);
   });
 
   it('旧世界书人物只认整行明确的年龄，带限定语的不猜', () => {
