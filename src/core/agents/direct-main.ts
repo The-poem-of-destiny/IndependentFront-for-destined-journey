@@ -54,6 +54,22 @@ export function rollDirectDice(): DirectDie[] {
   return dice;
 }
 
+/**
+ * 直出主请求已拿到模型回复、但随后失败（输出被拒或 provider 返回 error 结果）。
+ * 携带本次 `AgentResult` 供调试记录使用；`original` 是原始错误，调用方记录后应重新抛出它。
+ */
+export class DirectTurnError extends Error {
+  readonly result: AgentResult;
+  readonly original: unknown;
+
+  constructor(original: unknown, result: AgentResult) {
+    super(original instanceof Error ? original.message : String(original));
+    this.name = 'DirectTurnError';
+    this.result = result;
+    this.original = original;
+  }
+}
+
 export interface DirectGenerationInput {
   config: AgentConfig;
   endpoint: ApiEndpoint;
@@ -289,6 +305,7 @@ export async function generateDirectTurn(
     { agentId: 'direct_main' },
   );
   let rejectedOutput = false;
+  let result: AgentResult | undefined;
   try {
     const estimatedInput = Math.ceil(
       messages.reduce((sum, m) => sum + String(m.content ?? '').length, 0) / 1.5,
@@ -297,7 +314,7 @@ export async function generateDirectTurn(
       throw new Error(
         `直出上下文估算 ${estimatedInput} + 输出预留 ${budget} 超出模型窗口 ${endpoint.contextWindowTokens}，请缩短历史或调整输出预留`,
       );
-    const result = await sendDirectRequest(client, request, config, !!input.cache);
+    result = await sendDirectRequest(client, request, config, !!input.cache);
     if (ticket) {
       result.promptSessionRevision = ticket.revision;
       result.promptRebased = !!ticket.rebaseReason;
@@ -329,6 +346,9 @@ export async function generateDirectTurn(
       if (rejectedOutput || config.abortSignal?.aborted) discardDirectContext(ticket);
       else invalidateDirectContext(ticket.saveId);
     }
+    // 模型已回复（被拒或 provider 返回 error 结果）：带上本次结果，供调试记录保留原文与请求消息。
+    // 取消时原样抛出，下游靠原始错误判定取消。
+    if (result && !config.abortSignal?.aborted) throw new DirectTurnError(error, result);
     throw error;
   }
 }

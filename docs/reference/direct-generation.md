@@ -27,6 +27,8 @@
 
 📌 2026-11-17 补充（请求预算不变）：`directStructuredCombat` 关闭（当前唯一可用状态）时，上段「战斗资源」检查与「战斗终局」写回不再发生，战斗相关的数值变化全部走普通状态写入。请求数不变：仍是每次楼生成尝试至多一次非记忆主请求，正文战斗不另开请求。
 
+📌 2026-11-20 被拒输出的调试记录保留模型原文与请求消息；多余字段报错列出键名与路径。分支 `fix/direct-rejected-output-observability`，校验宽严不变。模型已回复但 `parseDirectOutput` 拒绝（或供应商返回 error 结果）时，`generateDirectTurn` 抛 `DirectTurnError`（`direct-main.ts`）携带本次 `AgentResult`；`AgentOrchestrator.runDirect` 把它作为 `onAgentError` 第三参交给调试记录，再向下游抛原始错误（取消判定不变）。多余字段报 `<路径> 含未支持的字段：a、b`，最多列 5 个、单键超 24 字符截断，超出追加「等 N 个」；实体路径形如 `entities[0].output.character.skills`。`direct_updates` 不是合法 JSON 时也明确报出。
+
 ### 正文战斗（2026-11-17）
 
 📌 2026-11-17 新增，分支 `feat/direct-prose-combat`，未真机验证。只作用于两种直出（`direct`、`direct_cached`）；Agent 模式的战斗沙盒不变。

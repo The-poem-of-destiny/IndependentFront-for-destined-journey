@@ -39,7 +39,7 @@ import type {
 } from '../types/types';
 import type { SceneImageMarker } from '../types/types-image';
 import { AgentClient, ensureUserMessage } from './agent-client';
-import { generateDirectTurn } from './direct-main';
+import { DirectTurnError, generateDirectTurn } from './direct-main';
 import { logEngine } from '../runtime/engine-logger';
 import type { DirectTurnDraft } from './direct-output';
 import type { DirectCombatRecord } from '../combat/direct-combat';
@@ -460,11 +460,14 @@ export class AgentOrchestrator {
       // generateDirectTurn 已自行处置本次票据（拒绝/取消丢弃，传输失败整体失效）；
       // 这里只兜住「生成成功但随后被取消」那一张。
       this.discardDirectCache();
+      // 模型已回复但失败时带上本次结果（原文与请求消息）进调试记录；下游仍拿到原始错误（取消判定靠它）。
+      const failed = error instanceof DirectTurnError ? error : undefined;
       this.events.onAgentError?.(
         'direct_main',
         error instanceof Error ? error.message : String(error),
+        failed?.result,
       );
-      throw error;
+      throw failed ? failed.original : error;
     }
   }
 

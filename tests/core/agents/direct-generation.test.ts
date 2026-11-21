@@ -4,7 +4,11 @@ import {
   buildDirectPatches,
   type DirectUpdates,
 } from '../../../src/core/agents/direct-output';
-import { generateDirectTurn, rollDirectDice } from '../../../src/core/agents/direct-main';
+import {
+  DirectTurnError,
+  generateDirectTurn,
+  rollDirectDice,
+} from '../../../src/core/agents/direct-main';
 import { AgentClient } from '../../../src/core/agents/agent-client';
 import { AgentOrchestrator } from '../../../src/core/agents/agent-orchestrator';
 import {
@@ -56,6 +60,44 @@ function updates(): DirectUpdates {
 }
 function response(data = updates(), characters: unknown[] = []) {
   return `<maintext>你把材料交给铁匠。</maintext><options>1. 等待\n2. 离开</options><character_updates>${JSON.stringify({ characters })}</character_updates><direct_updates>${JSON.stringify(data)}</direct_updates>`;
+}
+/** 一个完整的新人物实体（铁匠），供人物创建与路径报错用例共用 */
+function smithEntity(): DirectUpdates['entities'][number] {
+  return {
+    kind: 'character',
+    placement: { location: '铁匠铺', present: true },
+    output: {
+      skills: [],
+      equipment: [],
+      inventory: [],
+      character: {
+        name: '铁匠',
+        race: '人类',
+        gender: '男',
+        tier: 1,
+        level: 1,
+        attributes: { str: 5, dex: 5, con: 5, int: 5, spi: 5 },
+        identity: ['铁匠'],
+        occupation: [],
+        background: '在城里长大',
+        appearance: '围裙',
+        clothing: '工作服',
+        personality: '直率',
+        likes: '打铁',
+        skills: [],
+        equipment: [],
+        inventory: [],
+        ascension: {
+          enabled: false,
+          path: '',
+          description: '',
+          elements: [],
+          authorities: [],
+          laws: [],
+        } as any,
+      },
+    },
+  };
 }
 function player() {
   return createDefaultCharacterState({
@@ -151,41 +193,7 @@ describe('direct protocol and native entities', () => {
 
   it('creates a complete new NPC with author binding and rejects narrative-only NPC creation', () => {
     const data = updates();
-    data.entities.push({
-      kind: 'character',
-      placement: { location: '铁匠铺', present: true },
-      output: {
-        skills: [],
-        equipment: [],
-        inventory: [],
-        character: {
-          name: '铁匠',
-          race: '人类',
-          gender: '男',
-          tier: 1,
-          level: 1,
-          attributes: { str: 5, dex: 5, con: 5, int: 5, spi: 5 },
-          identity: ['铁匠'],
-          occupation: [],
-          background: '在城里长大',
-          appearance: '围裙',
-          clothing: '工作服',
-          personality: '直率',
-          likes: '打铁',
-          skills: [],
-          equipment: [],
-          inventory: [],
-          ascension: {
-            enabled: false,
-            path: '',
-            description: '',
-            elements: [],
-            authorities: [],
-            laws: [],
-          } as any,
-        },
-      },
-    });
+    data.entities.push(smithEntity());
     const narrative = [{ name: '铁匠', profile_changes: { personality: '直率' }, chronicle: [] }];
     const draft = parseDirectOutput(response(data, narrative), 1);
     const built = buildDirectPatches(draft, {
@@ -213,6 +221,170 @@ describe('direct protocol and native entities', () => {
     expect(() =>
       buildDirectPatches(noEntity, { characters: [player()], definitions: [], sourceTurnKey: 'u' }),
     ).toThrow('缺少完整实体');
+  });
+});
+
+describe('direct protocol: 被拒报错带键名与路径', () => {
+  it('direct_updates 顶层多余键列出键名', () => {
+    const data = { ...updates(), extraTop: 1 } as unknown as DirectUpdates;
+    expect(() => parseDirectOutput(response(data), 1)).toThrow(
+      'direct_updates 含未支持的字段：extraTop',
+    );
+  });
+
+  it('实体 output 多余键带下标路径', () => {
+    const data = updates();
+    const entity = smithEntity();
+    (entity.output as unknown as Record<string, unknown>).bogus = true;
+    data.entities.push(entity);
+    expect(() => parseDirectOutput(response(data), 1)).toThrow(
+      'entities[0].output 含未支持的字段：bogus',
+    );
+  });
+
+  it('skills 非数组时报出所在路径', () => {
+    const nested = updates();
+    const inner = smithEntity();
+    (inner.output.character as unknown as Record<string, unknown>).skills = '剑术';
+    nested.entities.push(inner);
+    expect(() => parseDirectOutput(response(nested), 1)).toThrow(
+      'entities[0].output.character.skills',
+    );
+
+    const top = updates();
+    const outer = smithEntity();
+    (outer.output as unknown as Record<string, unknown>).skills = '剑术';
+    top.entities.push(outer);
+    let message = '';
+    try {
+      parseDirectOutput(response(top), 1);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('entities[0].output.skills');
+    expect(message).not.toContain('character');
+  });
+
+  it('多余键最多列 5 个并截断超长键名', () => {
+    const extra: Record<string, number> = {};
+    for (let i = 1; i <= 8; i++) extra[`k${i}`] = i;
+    const many = { ...updates(), ...extra } as unknown as DirectUpdates;
+    let message = '';
+    try {
+      parseDirectOutput(response(many), 1);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('k1、k2、k3、k4、k5');
+    expect(message).not.toContain('k6');
+    expect(message).toContain('等 8 个');
+
+    const longKey = 'x'.repeat(100);
+    const long = { ...updates(), [longKey]: 1 } as unknown as DirectUpdates;
+    try {
+      parseDirectOutput(response(long), 1);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain(`${'x'.repeat(24)}…`);
+    expect(message).not.toContain('x'.repeat(25));
+  });
+
+  it('direct_updates 内容非法 JSON 时给出明确原因', () => {
+    const raw = response().replace(
+      /<direct_updates>[\s\S]*<\/direct_updates>/,
+      '<direct_updates>{坏掉的</direct_updates>',
+    );
+    expect(() => parseDirectOutput(raw, 1)).toThrow('直出结果无效：direct_updates 不是合法 JSON');
+  });
+});
+
+describe('direct rejected output keeps the raw reply', () => {
+  const config: AgentConfig = {
+    agentId: 'direct_main',
+    enabled: true,
+    apiEndpointId: 'ep',
+    model: 'test',
+    maxTokens: 1000,
+    temperature: 0.7,
+    topP: 1,
+    frequencyPenalty: 0,
+    presencePenalty: 0,
+    retryOnFail: false,
+    timeout: 30000,
+    userId: 'test',
+    historyLayers: 2,
+    presetId: createDirectPreset().id,
+    promptTemplate: { fixedSystem: '', fixedExamples: '' },
+  };
+  const endpoint = {
+    id: 'ep',
+    name: 'test',
+    provider: 'openai' as const,
+    baseUrl: 'https://invalid.example/v1',
+    apiKey: '',
+    defaultModel: 'test',
+    models: ['test'],
+    timeout: 30000,
+  };
+  function generate() {
+    const context: AgentContext = {
+      userInput: '继续',
+      characters: [player()],
+      variables: {},
+      history: [],
+      worldBooks: [],
+      memories: [],
+      plotEvents: [],
+      agentOutputs: new Map(),
+    };
+    return generateDirectTurn(
+      {
+        config,
+        endpoint,
+        context,
+        configs: [config],
+        worldBooks: [],
+        presets: [createDirectPreset()],
+        combat: null,
+      },
+      new AgentClient({ endpoint, agentId: 'direct_main', saveId, maxRetries: 0 }),
+    );
+  }
+
+  it('被拒输出抛 DirectTurnError 并带原文与请求消息', async () => {
+    const raw = '<maintext>只有正文</maintext>';
+    vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
+      agentId: 'direct_main',
+      output: raw,
+      rawResponse: raw,
+      tokensUsed: 0,
+      cacheHit: false,
+      duration: 1,
+    });
+    const error = await generate().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(DirectTurnError);
+    const failed = error as DirectTurnError;
+    expect(failed.message).toContain('需要一个完整的 direct_updates 区块');
+    expect(failed.result.rawResponse).toBe(raw);
+    expect(failed.result.requestMessages?.length).toBeGreaterThan(0);
+  });
+
+  it('provider 返回 error 结果时同样带上 result', async () => {
+    vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
+      agentId: 'direct_main',
+      output: null,
+      rawResponse: '',
+      tokensUsed: 0,
+      cacheHit: false,
+      duration: 1,
+      error: 'HTTP 503',
+    });
+    const error = await generate().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(DirectTurnError);
+    expect((error as DirectTurnError).message).toContain('HTTP 503');
+    expect((error as DirectTurnError).result.error).toBe('HTTP 503');
+    expect((error as DirectTurnError).result.requestMessages?.length).toBeGreaterThan(0);
   });
 });
 
@@ -501,6 +673,7 @@ describe('direct memory admission', () => {
     };
     const onAgentComplete = vi.fn();
     const onAgentStart = vi.fn();
+    const onAgentError = vi.fn();
     const instance = new AgentOrchestrator(
       {
         pipeline: DEFAULT_AGENT_PIPELINE,
@@ -510,10 +683,39 @@ describe('direct memory admission', () => {
         agentConfigs,
         ...(v2 ? { storyContext: { windowTurns: 2, segments: [], archives: [] } } : {}),
       },
-      { onAgentComplete, onAgentStart },
+      { onAgentComplete, onAgentStart, onAgentError },
     );
-    return { instance, context, onAgentComplete, onAgentStart };
+    return { instance, context, onAgentComplete, onAgentStart, onAgentError };
   }
+
+  it('被拒输出：调试回调收到原文与请求消息，向下游抛原始错误', async () => {
+    const { instance, onAgentError } = orchestrator(true);
+    const raw = '<maintext>只有正文</maintext>';
+    vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
+      agentId: 'direct_main',
+      output: raw,
+      rawResponse: raw,
+      tokensUsed: 0,
+      cacheHit: false,
+      duration: 1,
+    });
+    const error = await instance.runDirect(null).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(DirectTurnError);
+    expect((error as Error).message).toContain('直出结果无效');
+    expect(onAgentError).toHaveBeenCalledWith(
+      'direct_main',
+      expect.stringContaining('直出结果无效'),
+      expect.objectContaining({ rawResponse: raw, requestMessages: expect.any(Array) }),
+    );
+  });
+
+  it('请求直接失败（无回复）时调试回调第三参为 undefined', async () => {
+    const { instance, onAgentError } = orchestrator(true);
+    vi.spyOn(AgentClient.prototype, 'chat').mockRejectedValue(new Error('网络中断'));
+    await expect(instance.runDirect(null)).rejects.toThrow('网络中断');
+    expect(onAgentError).toHaveBeenCalledWith('direct_main', '网络中断', undefined);
+  });
 
   it.each([undefined, 'prefix'] as const)(
     'blocks main generation after legacy recall fails (cache=%s)',
