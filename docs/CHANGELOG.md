@@ -9,6 +9,13 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-20 直出被拒输出可观测｜分支 `fix/direct-rejected-output-observability`
+
+- 问题：直出模型回复了但被 `parseDirectOutput` 拒绝（或供应商返回 error 结果）时，调试记录是空的，看不到模型原文；多余字段报错只说「含未支持的字段」，不说是哪个键、在哪。
+- `direct-main.ts` 新增 `DirectTurnError`（带 `result` 与 `original`）；票据处置顺序不变，取消时仍原样抛出。`AgentOrchestrator.runDirect` 把 `result` 交给 `onAgentError` 第三参，向下游抛原始错误。
+- `direct-output.ts`：多余字段报错列出键名（最多 5 个、超长截断、超出追加「等 N 个」）；实体校验带路径（`entities[i].output…`）；`direct_updates` 非法 JSON 给出明确原因。校验宽严不变。
+- 测试：`tests/core/agents/direct-generation.test.ts` 新增报错路径、键名截断、非法 JSON、`DirectTurnError` 与编排器回调用例。未真机验证。
+
 ### 2026-11-20 露骨内容开关｜分支 `feat/nsfw-content-switch`（内容仓 `content/nsfw-switch`），**已实施，未真机验证**
 
 - 主人裁定：内容包用 `<nsfw>…</nsfw>` 包露骨段落、`<sfw>…</sfw>` 是可选的净版替身；整条标记用 `nsfw: true`（世界书 `extra.lore.nsfw` / 预设提示词 / 角色定义）。

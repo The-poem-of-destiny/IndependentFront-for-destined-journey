@@ -71,11 +71,24 @@ function object(value: unknown, label: string): Row {
   return value;
 }
 
+/** 报错里最多列出的多余键数 */
+const MAX_LISTED_KEYS = 5;
+/** 单个键名在报错里的最大长度，超出截断加「…」 */
+const MAX_KEY_LENGTH = 24;
+
 function keys(value: Row, allowed: readonly string[], label: string): void {
-  check(
-    Object.keys(value).every((key) => allowed.includes(key)),
-    `${label} 含未支持的字段`,
-  );
+  const extra = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (extra.length === 0) return;
+  const listed = extra
+    .slice(0, MAX_LISTED_KEYS)
+    .map((key) => {
+      // 按码点截断，避免切开代理对留下孤立代理项
+      const chars = Array.from(key);
+      return chars.length > MAX_KEY_LENGTH ? `${chars.slice(0, MAX_KEY_LENGTH).join('')}…` : key;
+    })
+    .join('、');
+  const more = extra.length > MAX_LISTED_KEYS ? ` 等 ${extra.length} 个` : '';
+  check(false, `${label} 含未支持的字段：${listed}${more}`);
 }
 
 function named(value: unknown): asserts value is string {
@@ -109,8 +122,8 @@ function safeValues(value: unknown): void {
   }
 }
 
-function validateEntity(value: unknown, character: boolean): void {
-  const output = object(value, '实体');
+function validateEntity(value: unknown, character: boolean, label: string): void {
+  const output = object(value, label);
   keys(
     output,
     [
@@ -123,12 +136,12 @@ function validateEntity(value: unknown, character: boolean): void {
       'elements',
       'authorities',
     ],
-    '实体',
+    label,
   );
   for (const key of ['skills', 'equipment', 'inventory']) {
-    for (const item of rows(output[key], key)) {
+    for (const item of rows(output[key], `${label}.${key}`)) {
       named(item.name);
-      check(typeof item.description === 'string', `${key} 缺少 description`);
+      check(typeof item.description === 'string', `${label}.${key} 缺少 description`);
       if (key === 'inventory')
         check(Number.isInteger(item.quantity) && Number(item.quantity) > 0, '物品数量必须为正整数');
       if (key === 'equipment') {
@@ -167,7 +180,11 @@ function validateEntity(value: unknown, character: boolean): void {
       check(typeof c[key] === 'string', `人物缺少 ${key}`);
     for (const key of ['identity', 'occupation'])
       check(Array.isArray(c[key]) && c[key].every((v) => typeof v === 'string'), `人物缺少 ${key}`);
-    validateEntity({ skills: c.skills, equipment: c.equipment, inventory: c.inventory }, false);
+    validateEntity(
+      { skills: c.skills, equipment: c.equipment, inventory: c.inventory },
+      false,
+      `${label}.character`,
+    );
     const ascension = object(c.ascension, '登神状态');
     check(
       typeof ascension.enabled === 'boolean' &&
@@ -177,7 +194,7 @@ function validateEntity(value: unknown, character: boolean): void {
     );
     for (const key of ['elements', 'authorities', 'laws']) rows(ascension[key], `ascension.${key}`);
   } else check(output.character === undefined, '归属物不能再次创建人物');
-  for (const status of rows(output.statuses ?? [], 'statuses')) {
+  for (const status of rows(output.statuses ?? [], `${label}.statuses`)) {
     named(status.name);
     named(status.owner);
   }
@@ -299,7 +316,16 @@ export function parseDirectOutput(
       ),
     '需要一个完整的 maintext（或 gametxt）区块',
   );
-  const parsed = object(JSON.parse(blocks[0][1]), 'direct_updates');
+  let json: unknown;
+  try {
+    json = JSON.parse(blocks[0][1]);
+  } catch (error) {
+    check(
+      false,
+      `direct_updates 不是合法 JSON（${error instanceof Error ? error.message : String(error)}）`,
+    );
+  }
+  const parsed = object(json, 'direct_updates');
   // 结构化战斗关闭：combat 区块一律丢弃（不校验、不要求存在），只记下模型是否写了非 null 内容
   let combatIgnored = false;
   if (!structuredCombat) {
@@ -348,14 +374,14 @@ export function parseDirectOutput(
     buildDispatcherPatches({ tile_ops: tiles }).patches.length === tiles.length,
     '地块操作无效',
   );
-  for (const row of rows(parsed.entities, 'entities')) {
+  for (const [i, row] of rows(parsed.entities, 'entities').entries()) {
     check(row.kind === 'character' || row.kind === 'loadout', '实体种类无效');
     keys(
       row,
       row.kind === 'character' ? ['kind', 'placement', 'output'] : ['kind', 'owner', 'output'],
-      '实体项',
+      `entities[${i}]`,
     );
-    validateEntity(row.output, row.kind === 'character');
+    validateEntity(row.output, row.kind === 'character', `entities[${i}].output`);
     if (row.kind === 'loadout') named(row.owner);
     else {
       const placement = object(row.placement, 'placement');
