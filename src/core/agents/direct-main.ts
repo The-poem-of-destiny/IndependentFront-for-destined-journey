@@ -363,7 +363,10 @@ export async function generateDirectTurn(
       break;
     }
     rejectedOutput = true;
-    const draft = parseDirectOutput(result.rawResponse, dice, { structuredCombat });
+    const draft = parseDirectOutput(result.rawResponse, dice, {
+      structuredCombat,
+      plotEnabled: context.plotSettings?.mode !== 'off',
+    });
     if (draft.combatIgnored)
       logEngine(
         'warn',
@@ -378,6 +381,14 @@ export async function generateDirectTurn(
         'direct.entity_flattened',
         `角色实体字段未放进 output.character，已自动归位：${draft.flattenedCharacters.join('、')}`,
         undefined,
+        { agentId: 'direct_main' },
+      );
+    if (draft.normalized)
+      logEngine(
+        'warn',
+        'direct.output_normalized',
+        `直出结果形状有偏差，已自动纠正 ${draft.normalized.length} 处`,
+        () => ({ notes: draft.normalized }),
         { agentId: 'direct_main' },
       );
     return {

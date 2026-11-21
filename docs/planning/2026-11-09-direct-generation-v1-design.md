@@ -129,6 +129,8 @@ flowchart LR
 
 📌 2026-11-20 更正 `diceUsed` 一行（分支 `fix/direct-dice-entity`）：每项为 `{sides, index, purpose, target}`，`index` 是该骰型那一行内从 0 起的位置（此前是整池数组下标）；未知骰型、越界序号、重复的 (sides, index) 与缺 `sides` 都拒楼。同日 `entities` 的角色项容忍扁平写法（`output` 无 `character` 但有字符串 `name` 时由解析收拢），见 [直出模式 · 实体扁平容错与分组骰池](../reference/direct-generation.md#实体扁平容错与分组骰池2026-11-20)。
 
+📌 2026-11-21 补注（分支 `fix/ai-output-format-contracts`）：上表「封闭的 v1 类型与校验器」现由 `src/core/agents/direct-contract.ts` 的契约常量统一供给（校验器、归一化与协议文字共用）；严格校验前加了一层无损归一化（`direct-normalize.ts`，记 `normalized` 与 warn `direct.output_normalized`），意思明确的形状偏差不再整楼作废。规则见 [直出模式 · 格式容错与协议补全](../reference/direct-generation.md#格式容错与协议补全2026-11-21)。
+
 `character_updates` 沿用现有协议：恰好一个完整块，无变化也给空 `characters`；只负责档案／经历，不承担数值实体。尚无 `CharacterState` 的首次登场人物，包括已选中的作者角色，必须同楼具备完整 entities 数据，否则本楼结构失败，不自动补调 entity_gen。仅在正文提及而不需要建立人物状态者，不强制创建实体。
 
 角色项的 placement 明确本楼提交后的初始位置与在场状态，传给现有组装函数的 overrides；本楼从 A 到 B 遇见的人物不能默认落在调用前的 A。角色 ID、saveId、作者定义绑定与 introducedBy 来源由代码填写，模型不产生这些元数据。

@@ -9,6 +9,16 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-21 直出格式契约：无损纠正 + 协议补全 + 漂移闸门｜分支 `fix/ai-output-format-contracts`，**已实施，未真机验证**
+
+- 契约常量：新模块 `src/core/agents/direct-contract.ts`（只依赖 `content/field-enums`）收齐 `direct_updates` 白名单，校验器 `direct-output.ts`、归一化与协议文字共用。
+- 无损纠正：`src/core/agents/direct-normalize.ts` 的 `normalizeDirectUpdates`（N1–N11：剥围栏、补分区、plot null、随身列表、登神、状态 owner、人物文本字段、effects 平铺与默认值、条目默认值、剥账务键、delta value→amount），草稿 `normalized?: string[]`，warn `direct.output_normalized`；`ParseDirectOutputOptions.plotEnabled?`。刻意不补：loadout 缺 `ascension`、`deityPosition` / `divineKingdom` / `statuses` 缺失、实体 `statuses` 缺 `remainingTime`（补 null 会把已有限时效果改成永久）；`remainingTime: null` 保留。审查后修正：归一化前整体拒收 `__proto__` / `prototype` / `constructor`，动态键复制改为不经原型的写法；人物实体顶层 `ascension` 搬进 `character`（两处都写则拒收）；N10 不进入 `world` 各操作的 `value` 子树（残留账务键照旧拒收）；顶层 effects add 缺时长补 null 并注明按永久处理；枚举外分类映射为「特殊」是明确例外，note 写明原值与映射值。复审后：登神条目缺名不再整楼拒收（HEAD 接纳），改为 N5 丢弃并记 note，人物内与 loadout 顶层同口径，同时连带删除实体 output 顶层 `elements` / `authorities` 的同下标项（`mapAscension` 按下标取 `effectDescriptions`，不删会错位）；loadout 登神缺 `enabled` 按条目推断是对 HEAD 结果的有意变化。
+- `character_updates`：`parseCharacterUpdates` 解析前纠正（U1–U4），结果新增 `notes`；`TEXT_FIELDS` / `LIST_FIELDS` 导出并插进 `CHARACTER_UPDATE_PROTOCOL`；直出把 notes 加前缀并入 `normalized`。
+- 协议补全：`buildDirectProtocol` 补登神三类条目形状、statuses、loadout 登神整份替换、装备槽 / 物品类型 / 品质、物品修改键、effects 的 value 包裹与必填项、人物必填、JSON 不加围栏、剧情开关、character_updates 名字规则、state 值类型、任务字段、diceUsed 非空；结构化战斗行补 `round` 与 `statusEffects` 形状；审查后再补：character 的 `ascension` 写在 `character` 里、顶层 `elements` / `authorities` 的用途、world path 禁用段（常量插值）、同名效果只写一行。复审后剧情开关与存档字段名两句改为模式中立的「输入状态区块（direct_state；缓存直出为 direct_context）」，缓存直出不再被指向不存在的 `direct_state`。2026-11-21 实测长度：开启 8200 → 9844、关闭 8138 → 9752 字符，行数 35 → 36。
+- 闸门：`tests/core/prompts/direct-contract-gate.test.ts`（每份契约清单与 field-enums 词表按登记规则在指定协议行内出现、骨架示例零纠正通过、最大样例零纠正通过并建补丁）；`tests/core/agents/direct-main-normalize.test.ts` 钉住 `plotSettings.mode` → `plotEnabled` 与 warn `direct.output_normalized` 的接线，以及两种直出的输入里确有协议所指的 `plotSettings` 与存档字段名。
+- 后果：每个 `direct_cached` 存档冷建一次；Agent 模式 story 与 Story v2 会话重基线一次；引擎协议是超集，不要求与内容包同步发布。
+- 文档：`docs/reference/direct-generation.md` 新节「格式容错与协议补全（2026-11-21）」；`direct-generation-cache.md`、`character-system.md`、直出 v1 设计稿与 `src/core/AGENTS.md` 加 📌 2026-11-21 注记。
+
 ### 2026-11-21 预设互斥组 + 玩家开关覆写层 + 游戏内「预设」抽屉｜master 工作区，**已实施，未真机验证**
 
 - 互斥组：预设 `settings.extensions.poem.groups` 登记「几选一」的条目（`id` / `label` / `description?` / `allowNone?` / `options[{identifier,label}]`）。引擎纯函数 `src/core/prompts/preset-groups.ts`（读取容错清洗、组状态 ok / none / conflict、选项补丁）。选中状态就是条目自身的 `enabled`，装配逻辑不读组元数据；五区占位条目不能入组。

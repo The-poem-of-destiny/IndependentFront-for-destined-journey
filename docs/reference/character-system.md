@@ -94,6 +94,8 @@
 - 正式回合接纳后，`StateManager` 在本存档写队列和按角色事务中更新档案与经历。代码核验来源回合、消息集合及正文指纹，并生成稳定条目 ID；已提交的同源经历不重复写入。
 - 只有 `introducedBy` 对应本回合的新人物可写初始过去。既有角色不能让模型事后补造或重写历史。普通聊天可记录为低分；提到另一个人不自动为其创建亲历。
 
+📌 2026-11-21 补充（分支 `fix/ai-output-format-contracts`，未真机验证）：`parseCharacterUpdates` 在严格解析前做无损纠正，结果带 `notes`（不算警告）：剥掉 JSON 外的代码围栏或夹带文字；`profile_changes` 只有 `clothing` 时按 `outfit` 保存，文本字段为 null 或空白视为未变化，`aliases` / `identity` / `occupation` 写成字符串时转单元素列表；`chronicle` 缺失或 null 按无经历处理，经历 `time` 缺失或写成 `"this_turn"` 时按本回合，`people` 字符串转列表。作者内容的严格校验口径不变。白名单 `TEXT_FIELDS` / `LIST_FIELDS` 由 `character-updates.ts` 导出，`CHARACTER_UPDATE_PROTOCOL` 由它插值，并补写了角色项只有 `name` / `profile_changes` / `chronicle` 三个键、`chronicle` 必填、经历必填与可选字段。直出模式把这些 notes 加前缀并入草稿 `normalized`（warn `direct.output_normalized`）。协议文字变了，Agent 模式 story 与 Story v2 的会话基线会各重建一次。规则表见[直出模式 · 格式容错与协议补全](direct-generation.md#格式容错与协议补全2026-11-21)。
+
 ## 上下文规则
 
 普通叙事、Delta 与 Story v2 共用输出协议和经历筛选。当前在场、玩家或最近输入／正文明确提及的角色为候选；初次相遇前，明确提及的作者角色也可提供重要初始经历。
