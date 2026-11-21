@@ -26,7 +26,14 @@
 - 直出模式：[`docs/reference/direct-generation.md`](docs/reference/direct-generation.md)。建档显式选择并固定模式，独立主生成复用原有记忆；入口为 `src/core/agents/direct-main.ts` 与 `src/core/combat/direct-combat.ts`。
 - 缓存直出：[`docs/reference/direct-generation-cache.md`](docs/reference/direct-generation-cache.md)。`direct_cached` 配置独立，仍执行 `direct_main`；缓存只在状态接纳后提交，保留既有记忆，Dexie v32 拦截旧 app 误读。
 
-**🔴 主人/用户说「提交」= 默认授权直接合并到 GitHub（squash merge，免 review），不要再问「要不要 review」。需要 review 时主人会明说。**
+**🔴 「提交」「推送」「合并」是三件事，各自只授权它自己（2026-11-21 更正）：**
+
+- **提交** = 本地 `git commit`，不推送、不开 PR、不合并。
+- **推送** = `git push` 到远程分支（需要时顺带开 PR），不合并。
+- **合并** = 把 PR 合进目标分支（默认 squash merge，免 review；需要 review 时主人会明说）。合并前先确认 CI 全绿。
+
+> 📌 2026-11-21 推翻旧条：此前这里写着「主人说『提交』= 默认授权直接合并到 GitHub」，已作废 ——
+> 听到「提交」只做本地提交，别顺手推送或合并。
 
 **每次 push 之前必须先检查是否有文档需要更新，包括但不限于:**
 
