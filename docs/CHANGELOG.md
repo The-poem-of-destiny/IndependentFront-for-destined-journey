@@ -9,6 +9,18 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-20 开局清单落库 + 精简开场提示词 + 初始等级上限，**已实施，未真机验证**
+
+- 初始等级上限：`content/start-catalog-mechanics.ts` 新增 `MAX_START_LEVEL = 10`（所有难度含创造模式）。`createJourney` 在开事务前拒收 [1, 10] 以外或非整数的等级（只拒收不截断）。捏人页等级输入上限由 25 改为 10 并加提示；超限进缺失项；加载超限预设或恢复超限草稿时截到 10、额外属性点清零并 toast 说明，预设列表挂「超出等级上限」角标。
+- 开局装备 / 道具 / 技能在建档时结构化落库：新模块 `content/start-loadout.ts`（`buildStartLoadout`，形状对齐 entity_gen 的 add_item / add_skill；同槽首件穿上，同名合并，`parseSkillCost` 从 consume 读消耗），为每条合成纯文本 `protocolText`（描述 / 标签 / 效果 / 消耗 / 数值）。
+- 📌 **推翻 2026-07-23 的决定**（f16fe5d：开局清单不落库，写进开场提示词，由 dispatcher 发 `item_gen_request` 正式生成）。当年的理由是直接落库的条目没有战斗数值、且会让 dispatcher 误判「已有物品」；现在战斗走协议沙盒，只读 `description` / `protocolText` / `tags`，那条链反而会改名、重掷数值。
+  - 取舍：初始技能**没有** `skillPower` / `relevantAttribute` / `damageType`，战斗沙盒只靠 `protocolText` 理解它们。
+- 新字段 `SaveSlot.metadata.startLoadoutPersisted`（新档为 true，与存档同一次写入）。`game-pipeline` 对带标记的存档不再给 `ctx.openingPrompt`：`{{SKILL_STATE}}` 不再从开场提示词重解析初始技能，直出模式后续回合不再重发开场提示词。旧档没有标记，行为不变。开场提示词本身仍作首条用户消息发送。
+- 精简开场提示词：新纯函数 `prompts/opening-prompt.ts`，版式沿用 SillyTavern 开局模板（指明结构化区块 → 待创作的开局要素 → 第一轮须同步的时间与地点 → 开局剧情）。区块名与写回口径按生成模式区分（agent `<角色状态>` / direct `<direct_state>` / direct_cached `<direct_context>`）。不再列装备 / 技能 / 背包清单、金钱与天赋水平，也不写「不可改变既定事实」。
+- 开场提示词可编辑：确认步新增 `create/OpeningPromptEditor.vue`（预览 / 改写 / 恢复默认，恢复先确认；改写后建档选择又变了时提示可能过期）。store 侧 `openingPromptDraft`（null = 跟随默认）等状态随向导草稿保存（可选字段，不升草稿版本）；改写稿清空进缺失项。
+- 测试：新增 `tests/core/content/start-loadout.test.ts`、`tests/core/persistence/create-journey.test.ts`、`tests/core/prompts/opening-prompt.test.ts`、`tests/ui/components/create/OpeningPromptEditor.test.ts`，并更新 create-store、game-pipeline 与捏人页组件用例。
+- 文档：`src/core/AGENTS.md`、`src/ui/AGENTS.md`、`docs/reference/agent_template_guide.md`（`{{SKILL_STATE}}` 开局声明段仅旧档）、`docs/phases/phase7d/current_state.md` 加 📌 2026-11-20 注记。
+
 ### 2026-11-20 直出被拒输出可观测｜分支 `fix/direct-rejected-output-observability`
 
 - 问题：直出模型回复了但被 `parseDirectOutput` 拒绝（或供应商返回 error 结果）时，调试记录是空的，看不到模型原文；多余字段报错只说「含未支持的字段」，不说是哪个键、在哪。

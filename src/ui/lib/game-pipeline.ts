@@ -1910,7 +1910,12 @@ export class GamePipeline {
       // 🔴 2026-08-02 修: 初始技能走 item_gen 链路 —— request_dispatcher 的 {{SKILL_STATE}}
       //    需要读到捏人页选的初始技能声明（存在 openingPrompt 里），否则主角 skills 落库为空的
       //    开局永远发不出 `<item_gen_request itemType="skill">`，技能没有 modifiers/automata。
-      openingPrompt: this.game.openingPrompt ?? undefined,
+      //    新档（metadata.startLoadoutPersisted）开局清单已在建档时结构化落库：不再供值，
+      //    {{SKILL_STATE}} 不重解析、直出后续回合不重发。开场提示词本身仍由 sendOpeningPrompt
+      //    作首条用户消息（userInput）发送，不受影响。旧档缺这个标记，行为不变。
+      openingPrompt: this.game.activeSave?.metadata?.startLoadoutPersisted
+        ? undefined
+        : (this.game.openingPrompt ?? undefined),
       // 工坊 P2 (ADR-30 D4/D9): stats 只读投影每回合构建一次，同回合多 Agent 装配复用
       //（各 pass 在 buildAgentMessages 内再克隆一份，杜绝跨 pass 写泄漏）
       statData: buildStatData({

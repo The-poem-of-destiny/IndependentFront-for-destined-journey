@@ -8,6 +8,7 @@ import FormStepper from '../shared/form/FormStepper.vue';
 import ResourceBar from '../shared/ResourceBar.vue';
 import AttributeEditor from './AttributeEditor.vue';
 import AppButton from '../shared/AppButton.vue';
+import { MAX_START_LEVEL } from '@engine/content/start-catalog-mechanics';
 
 const store = useCreateStore();
 
@@ -108,7 +109,7 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
             v-model="store.level"
             label="等级"
             :min="1"
-            :max="25"
+            :max="MAX_START_LEVEL"
             class="level-stepper"
           />
           <div class="tier-badge">
@@ -133,6 +134,8 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
           </div>
         </div>
         <span class="cost-note">每升 1 级消耗 5 点（当前 {{ store.levelCost }} 点）</span>
+        <!-- 开局等级上限（所有难度含创造模式）：建档入口拒收超过上限的等级 -->
+        <p class="form-hint" data-test="level-cap-hint">初始等级最高 Lv.{{ MAX_START_LEVEL }}</p>
 
         <!-- ★ 属性表格 (原版 5 列) -->
         <div class="attr-table-wrapper">

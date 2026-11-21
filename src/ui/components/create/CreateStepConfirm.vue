@@ -7,6 +7,7 @@ import { ATTRIBUTE_NAMES } from '@engine/content/start-catalog';
 // 换成归一化入口后返回类型已经是 Rarity，模板里不必再强转，也不必再 `|| '普通'`。
 import { qualityLabelFromRarity } from '../../lib/quality-colors';
 import AvatarPanel from '../shared/AvatarPanel.vue';
+import OpeningPromptEditor from './OpeningPromptEditor.vue';
 import QualityBadge from '../shared/QualityBadge.vue';
 import { GENERATION_MODE_LABELS } from '@engine/story/generation-mode';
 
@@ -139,6 +140,9 @@ const { url: portraitUrl, isVideo: portraitIsVideo } = useAssetImage(
     <p v-else class="points-remaining">
       剩余转生点数: {{ store.remainingPoints }} (未使用的点数将保留在存档中)
     </p>
+
+    <!-- 开局提示词：原样作为第一条消息发出，玩家可在提交前预览与修改 -->
+    <OpeningPromptEditor />
   </section>
 </template>
 

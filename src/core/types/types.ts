@@ -1694,6 +1694,14 @@ export interface SaveSlot {
     /** Phase 10h: 开场 Prompt 是否已发送给 AI */
     openingPromptConsumed?: boolean;
     /**
+     * 开局装备/道具/技能是否已在建档时结构化落库（`content/start-loadout.ts` 的 `buildStartLoadout`）。
+     *
+     * true = 新档：初始技能已在主角 `skills` 里，管线不再把 openingPrompt 交给
+     * `{{SKILL_STATE}}` 重解析、也不在直出后续回合重发（开场提示词仍作首条用户消息发送）。
+     * 缺席 = 旧档：沿用「开场提示词声明 → dispatcher 发 entity_gen 请求」的旧路径。
+     */
+    startLoadoutPersisted?: boolean;
+    /**
      * Story 上下文与记忆新模式（v2）的**永久**测试档标记。
      *
      * 🔴 只由代码在建档时写入（`createStoryContextV2Marker`），切换开关、重置配置、
@@ -2189,7 +2197,12 @@ export interface AgentContext {
   /**
    * 存档开局提示词原文（save.metadata.openingPrompt）——含捏人页选的初始技能/装备
    * 自然语言声明（兼容旧档的 `--- 初始技能 ---` 分隔段）。request_dispatcher 的 {{SKILL_STATE}} 用它
-   * 补出「主角落库 skills 为空」时的初始技能清单，引导发 `<item_gen_request itemType="skill">`。
+   * 补出「主角落库 skills 为空」时的初始技能清单，引导发 `<entity_gen_request type="skill">`；
+   * 直出模式在后续回合也会把它随 `direct_state` 重发。
+   *
+   * 🔴 只有旧档才供值：`metadata.startLoadoutPersisted === true` 的新档开局清单已在建档时落库，
+   * game-pipeline 的 buildContext 对它恒给 undefined（开场提示词本身仍经 sendOpeningPrompt 作首条
+   * 用户消息发送，走 `userInput`，不走这里）。
    */
   openingPrompt?: string;
 

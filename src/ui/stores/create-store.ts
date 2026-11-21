@@ -48,8 +48,10 @@ import {
   type ParsedOutlineOutput,
 } from '@engine/plot/plot-outline';
 import type { AgentContext } from '@engine/types/types';
-import { createDefaultTime, formatGameTime, GAME_EPOCH_YEAR } from '@engine/time/time-system';
-import { normalizeRarity } from '@engine/content/field-enums';
+import { GAME_EPOCH_YEAR } from '@engine/time/time-system';
+import { buildOpeningPrompt as buildEngineOpeningPrompt } from '@engine/prompts/opening-prompt';
+import { buildStartLoadout } from '@engine/content/start-loadout';
+import { MAX_START_LEVEL } from '@engine/content/start-catalog-mechanics';
 import { useSettingsStore } from './settings-store';
 import { createStoryContextV2Marker } from '@engine/story/story-context-mode';
 import {
@@ -159,6 +161,13 @@ interface WizardDraft {
     outlineHistory: unknown;
     chaptersHistory: unknown;
   } | null;
+  /**
+   * 玩家改过的开场提示词（null / 缺席 = 跟随默认）。2026-11-20 加入，可选字段不升版本：
+   * 旧草稿没有它就读作「未改过」。
+   */
+  openingPromptDraft?: unknown;
+  /** 玩家改写那一刻的默认提示词快照，用来判断之后建档输入是否又变了（过期提示） */
+  openingPromptDraftBase?: unknown;
 }
 
 function newDraftId(): string {
@@ -294,6 +303,17 @@ export const useCreateStore = defineStore('create', () => {
     );
     if (overspentPoints.value > 0) {
       items.push({ label: `转生点数超支 ${overspentPoints.value} 点`, step: 1 });
+    }
+    // 建档入口 createJourney 拒收超过上限的初始等级（创造模式同样受限），这里提前拦下并说明；
+    // 非整数 / 低于 1 的等级（理论上只可能来自外部写入）同样挡在落库之前
+    if (level.value > MAX_START_LEVEL) {
+      items.push({ label: `初始等级超过上限 ${MAX_START_LEVEL} 级`, step: 1 });
+    } else if (!Number.isInteger(level.value) || level.value < 1) {
+      items.push({ label: `初始等级必须是 1–${MAX_START_LEVEL} 的整数`, step: 1 });
+    }
+    // 玩家把开场提示词清空：首条用户消息不能是空的。默认提示词恒非空，所以只看改写稿
+    if (openingPromptDraft.value !== null && openingPromptDraft.value.trim() === '') {
+      items.push({ label: '开场提示词', step: 7 });
     }
     return items;
   });
@@ -2029,16 +2049,20 @@ export const useCreateStore = defineStore('create', () => {
       englishAttrs[ATTR_CN_TO_EN[attr]] = finalAttributes.value[attr];
     }
 
-    // ═══ 真机修（2026-07-23）: 开局装备/道具/技能不再直接结构化落库 ═══
-    // 此前直接落库的 inventory 只有 effects(描述字符串) 没有 stats(战斗数值)，且会让
-    // request_dispatcher 误判为「已有物品」→ 永不触发 item_gen → 战斗数值全 0。
-    // 现在改为：选中项全部写进 buildOpeningPrompt 开场正文 → 开局轮 {{USER_INPUT}} 把
-    // 这份开场提示词原样喂给 request_dispatcher（含「--- 初始装备 --- / --- 初始技能 ---」
-    // 原始清单）→ dispatcher 按原名/原描述发 <item_gen_request> → item_gen 正式生成
-    // stats+effects 落库（ADR: AI 填叙事字段，Code 补账务字段）。
-    // ⚠️ 不能依赖 story 正文复述物品名 —— story 会改写名字（法师长袍→深蓝色天鹅绒长袍），
-    //    dispatcher 必须从 {{USER_INPUT}} 的原始清单认物品，否则名字漂移、数值被 item_gen 重掷。
+    // ═══ 真机修（2026-07-23）→ 📌 2026-11-20 反转：开局装备/道具/技能重新结构化落库 ═══
+    // 2026-07-23 那次改成「选中项写进开场正文 → dispatcher 发 item_gen_request → item_gen 生成
+    // stats 落库」，理由是当年直接落库的条目没有战斗数值、且会让 dispatcher 误判「已有物品」。
+    // 现在战斗走协议沙盒，每件实体只读 description / protocolText / tags（combat/sandbox/state.ts），
+    // `buildStartLoadout` 为每一条合成可读的 protocolText，同槽首件直接穿上（equippedSlot），
+    // 不再需要经 item_gen 重掷 —— 那条链还会改名、重掷数值。
+    // 新档在 metadata 打 `startLoadoutPersisted: true`（persistJourney 同一次写入），
+    // 管线据此不再把开场提示词交给 {{SKILL_STATE}} 重解析；旧档（无此标记）仍走原来的开场提示词路径。
     // HP/MP/SP/五维等基础属性仍在此 Code 计算。
+    const loadout = buildStartLoadout({
+      equipments: selectedEquipments.value,
+      items: selectedItems.value,
+      skills: selectedSkills.value,
+    });
 
     return {
       id: charId,
@@ -2074,9 +2098,8 @@ export const useCreateStore = defineStore('create', () => {
         deityPosition: '',
         divineKingdom: { name: '', description: '' },
       },
-      // 开局 inventory/skills 留空 — 装备/道具/技能由开场正文经 item_gen 链正式生成落库
-      skills: [],
-      inventory: [],
+      skills: loadout.skills,
+      inventory: loadout.inventory,
       statusEffects: [],
       money: money.value,
       location: startLocationLabel.value,
@@ -2100,168 +2123,67 @@ export const useCreateStore = defineStore('create', () => {
   }
 
   // ═══════════════════════════════════════════════════════
-  // 提交: 开场提示词 — 组装自然语言叙事，作为首条用户消息注入管线
+  // 提交: 开场提示词 — 首条用户消息（📌 2026-11-20 精简）
   // ═══════════════════════════════════════════════════════
-  // 原则：
-  // - name / LV / 五维 / HP / race / identity / location → 写死在 CharacterState 字段
-  //   → {{CHARACTER_STATE}} system prompt 占位符自动格式化注入
-  // - 装备 / 技能 / 物品 / 背景 / 性格身材身世 → 下游 Agent 需要处理
-  //   → 组装为自然语言，作为开场 user 消息注入，走 story→request_dispatcher→vars_update 链路
-  // - 命定核心：既由已启用的 system_core 世界书条目注入，也在开场消息里补一段可读连接（防首轮意识不到）
+  // 角色、属性、金钱、装备、背包、技能都已结构化落库，经各模式的状态区块注入；
+  // 开场提示词只交代「需要创作的开局」，正文由引擎纯函数 `prompts/opening-prompt.ts` 构造，
+  // 这里只负责把捏人页的选择解析成它的输入（自定义身份 / 性别与 buildCharacterState 同口径）。
 
+  /** 当前建档输入对应的默认开场提示词（未选生成模式时按 agent 口径预览） */
   function buildOpeningPrompt(): string {
-    const charName = name.value.trim() || '未命名';
-    const lines: string[] = [];
+    const scenario = selectedBackground.value
+      ? { title: selectedBackground.value.name, text: selectedBackground.value.fullText }
+      : customBackgroundText.value.trim()
+        ? { title: '自定义开局', text: customBackgroundText.value.trim() }
+        : null;
+    const coreName = selectedSystemCoreEntry.value?.name || selectedWorkshopCore.value?.name || '';
+    return buildEngineOpeningPrompt({
+      generationMode: generationMode.value === '' ? 'agent' : generationMode.value,
+      name: name.value,
+      identity: identity.value === '自定义' ? customIdentity.value || '非贵族平民' : identity.value,
+      gender: gender.value === '自定义' ? customGender.value : gender.value,
+      age: age.value,
+      startLocation: startLocationLabel.value,
+      ...(coreName ? { coreName } : {}),
+      scenario,
+    });
+  }
 
-    const openingTime = formatGameTime(createDefaultTime(era.value)).replace(
-      /^(.+年)-(\d{2}月)-(\d{2}日)-(周.)-(\d{2}:\d{2})$/,
-      '$1$2$3，$4$5',
-    );
-    lines.push(`${openingTime}，${charName}的故事由此开始。`);
+  /**
+   * 玩家改写的开场提示词。null = 跟随默认（建档输入变了，默认提示词跟着变）。
+   * `openingPromptDraftBase` 是改写那一刻默认提示词的快照：之后建档输入又变了，
+   * 默认提示词与它不再相同，就提示玩家改写稿可能已过期（不自动覆盖玩家的改写）。
+   */
+  const openingPromptDraft = ref<string | null>(null);
+  const openingPromptDraftBase = ref<string | null>(null);
+  const defaultOpeningPrompt = computed(() => buildOpeningPrompt());
+  /** 建档时真正写进 metadata.openingPrompt 的文本 */
+  const openingPromptText = computed(() => openingPromptDraft.value ?? defaultOpeningPrompt.value);
+  /** 玩家改过且与当前默认不同 */
+  const openingPromptEdited = computed(
+    () =>
+      openingPromptDraft.value !== null && openingPromptDraft.value !== defaultOpeningPrompt.value,
+  );
+  /** 改过之后建档输入又变了（当前默认 ≠ 改写时的默认快照） */
+  const openingPromptStale = computed(
+    () => openingPromptEdited.value && defaultOpeningPrompt.value !== openingPromptDraftBase.value,
+  );
 
-    // 开局剧情是已经发生的事实。直接把场景交给 story，不用「数据」「区块」等元语言
-    // 给首轮定下清单式语气。
-    if (selectedBackground.value) {
-      lines.push('');
-      lines.push(substituteUser(selectedBackground.value.fullText));
-    } else if (customBackgroundText.value.trim()) {
-      lines.push('');
-      lines.push(substituteUser(customBackgroundText.value.trim()));
+  /** 保存玩家改写的开场提示词，并记下此刻的默认提示词作为过期判断基准；与默认相同时回到跟随默认 */
+  function setOpeningPromptText(text: string) {
+    // 与当前默认一字不差 = 没改：回到跟随默认，之后建档输入变化时文本继续跟着走
+    if (text === defaultOpeningPrompt.value) {
+      restoreDefaultOpeningPrompt();
+      return;
     }
+    openingPromptDraft.value = text;
+    openingPromptDraftBase.value = defaultOpeningPrompt.value;
+  }
 
-    // 初始金钱（2026-08-08）：把开局经济作为**既成事实**写进开场白，与初始装备同地位。
-    // 🔴 防的是「系统权威数值被 AI 叙事覆盖」：story prompt 的 CHARACTER_STATE 里明明有
-    //    金钱: N G，AI 却会因为它和「前文推导的金额」对不上，主动判面板为错误、改用叙事值。
-    //    保留精确金额，但用世界内语言表达，不把 G 与「开局财产」写成面板播报。
-    lines.push('');
-    if (money.value > 0) {
-      lines.push(`${charName}随身带着 ${money.value} 枚帝冕币，除此之外再无钱财。`);
-    } else {
-      lines.push(`${charName}身无分文，衣袋里连一枚帝冕币也没有。`);
-    }
-
-    // 装备
-    if (selectedEquipments.value.length > 0) {
-      lines.push('');
-      lines.push(`${charName}带着这些装备。`);
-      const STATS_CN: Record<string, string> = {
-        atk: '攻击力',
-        defense: '防御',
-        penetration: '穿透',
-        hit: '命中',
-        dodge: '闪避',
-        dr: '减伤',
-      };
-      for (const e of selectedEquipments.value) {
-        const rarity = normalizeRarity(e.rarity) ?? e.rarity;
-        const desc = e.description ? `，${e.description}` : '';
-        const effects =
-          e.effect && Object.keys(e.effect).length > 0
-            ? `；它的特性包括${Object.entries(e.effect)
-                .map(([k, v]) => `${k}（${v}）`)
-                .join('、')}`
-            : '';
-        const tags = e.tag?.length ? `，常被归为${e.tag.join('、')}` : '';
-        const statsStr =
-          e.stats && Object.keys(e.stats).length > 0
-            ? `；其${Object.entries(e.stats)
-                .map(([k, v]) => `${STATS_CN[k] ?? k}为${v}`)
-                .join('、')}`
-            : '';
-        lines.push(`${e.name}是一件${rarity}品质的${e.type}${desc}${tags}${effects}${statsStr}。`);
-      }
-    }
-
-    // 技能
-    if (selectedSkills.value.length > 0) {
-      lines.push('');
-      lines.push(`${charName}已经掌握这些本领。`);
-      for (const s of selectedSkills.value) {
-        const rarity = normalizeRarity(s.rarity) ?? s.rarity;
-        const desc = s.description ? `，${s.description}` : '';
-        const effects =
-          s.effect && Object.keys(s.effect).length > 0
-            ? `；它能带来${Object.entries(s.effect)
-                .map(([k, v]) => `${k}（${v}）`)
-                .join('、')}`
-            : '';
-        const consume = s.consume ? `；施展时需要${s.consume}` : '';
-        const tags = s.tag?.length ? `，属于${s.tag.join('、')}` : '';
-        lines.push(
-          `${s.name}是一项${rarity}品质的${s.type}本领${desc}${tags}${effects}${consume}。`,
-        );
-      }
-    }
-
-    // 背包物品
-    if (selectedItems.value.length > 0) {
-      lines.push('');
-      lines.push(`${charName}的行囊里还有这些东西。`);
-      for (const i of selectedItems.value) {
-        const rarity = normalizeRarity(i.rarity) ?? i.rarity;
-        const desc = i.description ? `，${i.description}` : '';
-        const effects =
-          i.effect && Object.keys(i.effect).length > 0
-            ? `；它的用途包括${Object.entries(i.effect)
-                .map(([k, v]) => `${k}（${v}）`)
-                .join('、')}`
-            : '';
-        const tags = i.tag?.length ? `，常被归为${i.tag.join('、')}` : '';
-        lines.push(
-          `${charName}有${i.quantity || 1}件${i.name}，那是${rarity}品质的${i.type}${desc}${tags}${effects}。`,
-        );
-      }
-    }
-
-    // 角色补充信息
-    if (personality.value.trim()) {
-      lines.push('');
-      lines.push(`${charName}生性${personality.value.trim()}。`);
-    }
-    if (physics.value.trim()) {
-      lines.push('');
-      lines.push(`${charName}的身形与外貌给人的印象是：${physics.value.trim()}。`);
-    }
-    if (backstory.value.trim() || extra.value.trim()) {
-      lines.push('');
-      lines.push(
-        `关于${charName}的来历，已知的是：\n${[backstory.value.trim(), extra.value.trim()].filter(Boolean).join('\n\n')}`,
-      );
-    }
-
-    // 命定核心：让**首轮正文**意识到主角灵魂里寄宿着什么。
-    // 🔴 核心条目本体（可能含 EJS）由世界书在装配期求值注入；这里再补一段**可读的连接**，
-    //    防的是「世界书里有、开场正文却把它当背景设定、意识不到这是主角的核心」。
-    //    含 EJS 的条目在此剥掉求值段只留可读正文；`<user>` 替换为主角名；截断防开场过重。
-    const coreEntry = selectedSystemCoreEntry.value;
-    const workshopCore = selectedWorkshopCore.value;
-    const coreName = coreEntry?.name || workshopCore?.name || '';
-    if (coreName) {
-      lines.push('');
-      lines.push(`${charName}的灵魂中寄宿着命定核心「${coreName}」。`);
-      const rawCore = coreEntry?.content ?? workshopCore?.description ?? '';
-      const readable = rawCore
-        .replace(/<%[\s\S]*?%>/g, '')
-        .replace(/<user>/g, charName)
-        .trim();
-      if (readable) {
-        const excerpt = readable.length > 2000 ? `${readable.slice(0, 2000)}……` : readable;
-        lines.push(excerpt);
-      }
-      lines.push(
-        '这是主角力量的根源与设定依据；首轮叙事应当意识到它的存在，并让它在剧情中自然显露痕迹（不必立刻显形或解释）。',
-      );
-    }
-
-    // 收尾：约束首轮叙事流程 —— 先以开局背景为舞台重新演绎（既定事实不变），再自然续写。
-    // 🔴 这一句同时是 `{{SKILL_STATE}}` 从开场消息里截取初始技能声明的结束边界
-    //    （placeholder-registry 的 isNaturalOpeningSkillEnd），改措辞要同步改那里。
-    lines.push('');
-    lines.push(
-      `以上是${charName}的角色设定与开局剧情。首轮叙事请以「开局剧情」描写的时间地点为舞台：先将这段开场以你的笔触重新演绎（可扩写细节与氛围，不可改变既定事实），再自然续写后续发展。`,
-    );
-
-    return lines.join('\n');
+  /** 放弃改写，回到跟随默认 */
+  function restoreDefaultOpeningPrompt() {
+    openingPromptDraft.value = null;
+    openingPromptDraftBase.value = null;
   }
 
   // ═══════════════════════════════════════════════════════
@@ -2297,7 +2219,8 @@ export const useCreateStore = defineStore('create', () => {
 
     const saveId = crypto.randomUUID();
     const charState = buildCharacterState(saveId);
-    const openingPrompt = buildOpeningPrompt();
+    // 玩家改写过就用改写稿（原样落库，不 trim）；空白稿已被上面的缺项闸门拦下
+    const openingPrompt = openingPromptText.value;
     console.log('[create-store] startJourney — openingPrompt:', openingPrompt.slice(0, 200));
     console.log('[create-store] startJourney — openingPrompt length:', openingPrompt.length);
 
@@ -2327,6 +2250,8 @@ export const useCreateStore = defineStore('create', () => {
         ),
         openingPrompt: openingPrompt, // 🆕
         openingPromptConsumed: false, // 🆕
+        // 2026-11-20：开局装备/道具/技能已随 charState 结构化落库（与本 metadata 同一次建档写入）
+        startLoadoutPersisted: true,
         plotSettings: JSON.parse(JSON.stringify(plotSettings.value)), // §5.2: 本档剧情配置随档落库（含雷点）
         // Story 上下文新模式：建档即永久打标（计划 §11.3），必须早于任何一次生成或记忆写入。
         // 开关只决定**新建**的档是哪种；之后关开关不会、也不能清掉这个标记。
@@ -2390,6 +2315,12 @@ export const useCreateStore = defineStore('create', () => {
 
   /** 本草稿的身份。大纲随草稿一起落盘并带同一个 id，恢复时 id 对不上就丢弃大纲 */
   const draftId = ref(newDraftId());
+
+  /**
+   * 草稿恢复时被截到开局上限的原等级（未截断为 null）。草稿在 store 构造时就恢复，
+   * 调用方拿不到返回值，所以经这个状态交给捏人页提示玩家。
+   */
+  const draftLevelClampedFrom = ref<number | null>(null);
 
   /** 草稿里是否有玩家真正填过的内容（预设覆盖确认与草稿落盘共用） */
   const hasDraftContent = computed(
@@ -2469,6 +2400,8 @@ export const useCreateStore = defineStore('create', () => {
           chaptersHistory: chaptersHistory.value.slice(-5),
         }
       : null,
+    openingPromptDraft: openingPromptDraft.value,
+    openingPromptDraftBase: openingPromptDraftBase.value,
   }));
 
   /** 草稿落盘的去抖计时器 */
@@ -2583,10 +2516,14 @@ export const useCreateStore = defineStore('create', () => {
     backstory.value = str(c.backstory, '');
     extra.value = str(c.extra, '');
     // level 的 watch（flush: sync）会清零额外属性点，所以先设 level 再恢复属性点
-    level.value = int(c.level, 1, 1, 25);
+    const rawLevel = int(c.level, 1, 1, 25);
+    level.value = Math.min(rawLevel, MAX_START_LEVEL);
     experienceMode.value = c.experienceMode === 'easy' ? 'easy' : 'normal';
     basePoints.value = attrRecord(c.basePoints, BP_PER_ATTR_MAX);
-    attributePoints.value = attrRecord(c.attributePoints, 99);
+    // 旧草稿的等级超过开局上限：截到上限，额外属性点清零让玩家重新分配
+    attributePoints.value =
+      rawLevel > MAX_START_LEVEL ? attrRecord(null, 0) : attrRecord(c.attributePoints, 99);
+    draftLevelClampedFrom.value = rawLevel > MAX_START_LEVEL ? rawLevel : null;
     money.value = int(c.money, 0, 0, 99999);
     destinyPoints.value = int(c.destinyPoints, 0, 0, 9999);
     // 被手改过的坏数据：基础点超上限 → 清零重分；额外点超上限 → 清零重分
@@ -2659,6 +2596,16 @@ export const useCreateStore = defineStore('create', () => {
       plotOutlineChapters.value = [];
       outlineHistory.value = [];
       chaptersHistory.value = [];
+    }
+
+    // 开场提示词改写稿：可选字段，缺席或类型不对一律读作「跟随默认」；基准缺席时用空串，
+    // 这样恢复出来的改写稿会被判为过期，提醒玩家核对
+    if (typeof d.openingPromptDraft === 'string') {
+      openingPromptDraft.value = d.openingPromptDraft;
+      openingPromptDraftBase.value = str(d.openingPromptDraftBase, '');
+    } else {
+      openingPromptDraft.value = null;
+      openingPromptDraftBase.value = null;
     }
 
     currentStep.value = int(d.currentStep, 0, 0, 7);
@@ -2767,7 +2714,11 @@ export const useCreateStore = defineStore('create', () => {
     };
   }
 
-  function applyPresetData(data: CreatePreset) {
+  /**
+   * 应用捏人预设。预设里的等级超过开局上限（MAX_START_LEVEL）时截到上限、额外属性点清零重分，
+   * 并返回预设里的原等级供捏人页提示；未截断返回 null。
+   */
+  function applyPresetData(data: CreatePreset): number | null {
     selectDifficulty(data.difficulty);
     name.value = data.character.name;
     gender.value = data.character.gender;
@@ -2779,9 +2730,15 @@ export const useCreateStore = defineStore('create', () => {
     customIdentity.value = data.character.customIdentity || '';
     startLocation.value = data.character.startLocation;
     customStartLocation.value = data.character.customStartLocation || '';
-    level.value = data.character.level;
+    // 预设可能来自导入文件：与草稿恢复同口径净化（非数字 / 缺失 → 1，小数取整，低于 1 → 1），
+    // 不在这里设上限 —— 超过 MAX_START_LEVEL 的部分走下面的截断并把原等级报给调用方
+    const presetLevel = int(data.character.level, 1, 1, Number.MAX_SAFE_INTEGER);
+    const levelClamped = presetLevel > MAX_START_LEVEL;
+    level.value = levelClamped ? MAX_START_LEVEL : presetLevel;
     basePoints.value = { ...data.character.basePoints };
-    attributePoints.value = { ...data.character.attributePoints };
+    attributePoints.value = levelClamped
+      ? { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 }
+      : { ...data.character.attributePoints };
     money.value = data.character.money;
     destinyPoints.value = data.character.destinyPoints;
     clearAllSelections();
@@ -2790,6 +2747,8 @@ export const useCreateStore = defineStore('create', () => {
     data.skills.forEach((s) => addSkill(s));
     selectedBackground.value = data.background;
     customBackgroundText.value = data.customBackgroundText || '';
+    // 预设定义的是另一个完整角色：此前对开场提示词的改写不属于它，回到跟随默认
+    restoreDefaultOpeningPrompt();
     // 命定核心先整体清空再应用：预设定义的是一个完整角色，核心为 null / 缺省（含两个字段都没有的
     // 旧预设）一律读作「该角色未选核心」—— 不清的话会把加载前的旧核心悄悄留下，
     // 拼成一个谁都没保存过的组合。最终提交边界会把缺核心拦下来。
@@ -2853,6 +2812,7 @@ export const useCreateStore = defineStore('create', () => {
 
     // 预设入口在全部步骤都可用；晚加载的旧预设若没有完整分配属性，立即返回基础信息页。
     if (!attributesFullyAllocated.value && currentStep.value > 1) currentStep.value = 1;
+    return levelClamped ? presetLevel : null;
   }
 
   // ═══════════════════════════════════════════════════════
@@ -2886,6 +2846,8 @@ export const useCreateStore = defineStore('create', () => {
     destinyCore.value = null;
     selectedBackground.value = null;
     customBackgroundText.value = '';
+    restoreDefaultOpeningPrompt();
+    draftLevelClampedFrom.value = null;
     plotOutline.value = null;
     isPlotGenerating.value = false;
     plotOutlineChapters.value = [];
@@ -3106,6 +3068,15 @@ export const useCreateStore = defineStore('create', () => {
     // 提交
     buildCharacterState,
     buildOpeningPrompt,
+    // 开场提示词改写（null = 跟随默认）
+    openingPromptDraft,
+    openingPromptDraftBase,
+    defaultOpeningPrompt,
+    openingPromptText,
+    openingPromptEdited,
+    openingPromptStale,
+    setOpeningPromptText,
+    restoreDefaultOpeningPrompt,
     startJourney: startJourneyAndClearDraft,
     isCreating,
     // 模板
@@ -3115,6 +3086,7 @@ export const useCreateStore = defineStore('create', () => {
     tryRestoreDraft,
     clearDraft,
     draftId,
+    draftLevelClampedFrom,
     hasDraftContent,
     clearOutline,
     // 预设

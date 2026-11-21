@@ -17,8 +17,8 @@ import {
   type DestinyCore,
   type CascaderOption,
 } from '@engine/content/start-catalog';
+import { MAX_START_LEVEL } from '@engine/content/start-catalog-mechanics';
 import { setContentRegistry } from '../../../src/ui/stores/content-store';
-import { NEUTRAL_BRANDING } from '../../../src/ui/branding-defaults';
 
 // ═══════════════════════════════════════════════════════════
 // 目录 fixture（D24）
@@ -1158,17 +1158,24 @@ describe('buildCharacterState', () => {
     expect(state.race).toBe('精灵混血');
   });
 
-  it('开局 inventory/skills 始终为空（装备/道具/技能交 item_gen 链经开场正文生成，不直接落库）', () => {
+  it('📌 2026-11-20 反转：开局装备/道具/技能结构化落库，同槽首件穿上', () => {
     store.selectDifficulty('creative');
-    // 即使选了装备/道具，buildCharacterState 也不再直接落库
-    store.addEquipment(FIXTURE_EQUIPMENT_POOL.find((e) => e.type === '武器')!);
-    store.addItem(FIXTURE_ITEM_POOL[0]);
+    const [sword, axe] = FIXTURE_EQUIPMENT_POOL.filter((e) => e.type === '武器');
+    const potion = FIXTURE_ITEM_POOL[0];
+    store.addEquipment(sword);
+    store.addEquipment(axe);
+    store.addItem(potion);
     const state = store.buildCharacterState('test-save-id');
-    expect(state.inventory).toEqual([]);
+    expect(state.inventory.map((i) => i.name)).toEqual([sword.name, axe.name, potion.name]);
+    const [first, second, third] = state.inventory;
+    expect(first.type).toBe('装备');
+    expect(first.equippedSlot).toBeTruthy(); // 武器槽第一件穿上
+    expect(second.equippedSlot).toBeNull(); // 同槽后来者躺背包
+    expect(third.quantity).toBe(1);
     expect(state.skills).toEqual([]);
   });
 
-  it('真机修(2026-07-23): 选中项写进开场正文而非直接落库（交 item_gen 生成 stats）', () => {
+  it('📌 2026-11-20 反转：技能落进 skills，开场提示词不再复述选中项名字', () => {
     store.selectDifficulty('creative');
     const sword = FIXTURE_EQUIPMENT_POOL.find((e) => e.type === '武器')!;
     const armor = FIXTURE_EQUIPMENT_POOL.find((e) => e.type === '防具')!;
@@ -1182,7 +1189,7 @@ describe('buildCharacterState', () => {
       rarity: 'uncommon' as const,
       tag: [],
       effect: { 灼烧: '造成持续伤害' },
-      consume: '',
+      consume: 'MP 10',
       description: '一道炽热凝练的能量射线',
       cost: 100,
     };
@@ -1191,19 +1198,25 @@ describe('buildCharacterState', () => {
     store.addItem(potion);
     store.addSkill(skill);
 
-    // 不直接落库 — inventory/skills 为空，交下游 item_gen 经开场正文生成
     const state = store.buildCharacterState('test-save-id');
-    expect(state.inventory).toEqual([]);
-    expect(state.skills).toEqual([]);
+    expect(state.skills).toHaveLength(1);
+    expect(state.skills[0]).toMatchObject({
+      name: '灼热射线',
+      type: 'active',
+      level: 1,
+      cost: { type: 'MP', amount: 10 },
+    });
+    expect(state.skills[0].protocolText).toContain('一道炽热凝练的能量射线');
+    expect(state.inventory.filter((i) => i.equippedSlot).map((i) => i.name)).toEqual([
+      sword.name,
+      armor.name,
+    ]);
 
-    // 装备/道具/技能信息写进开场正文（供 request_dispatcher 识别 → item_gen_request）
     const prompt = store.buildOpeningPrompt();
-    expect(prompt).toContain(sword.name);
-    expect(prompt).toContain(armor.name);
-    expect(prompt).toContain(potion.name);
-    expect(prompt).toContain(skill.name);
+    for (const n of [sword.name, armor.name, potion.name, skill.name]) {
+      expect(prompt).not.toContain(n);
+    }
   });
-
   it('HP/MP/SP 应正确写入', () => {
     const state = store.buildCharacterState('test-save-id');
     expect(state.hp).toBe(store.hpPreview);
@@ -1221,117 +1234,324 @@ describe('buildOpeningPrompt', () => {
     store.selectDifficulty('creative');
   });
 
-  it('空选择时返回自然叙述式开场，不含数据表分节', () => {
-    const prompt = store.buildOpeningPrompt();
-    expect(prompt).toContain('测试的故事由此开始。');
-    expect(prompt).not.toContain('创角完成');
-    expect(prompt).not.toContain('初始数据');
-    expect(prompt).not.toContain('---');
-    // 没有选择任何装备/技能/物品 → 不应生成对应的自然语言引导句
-    expect(prompt).not.toContain('测试带着这些装备');
-    expect(prompt).not.toContain('测试已经掌握这些本领');
-    expect(prompt).not.toContain('测试的行囊里还有这些东西');
-    // 初始金钱段总是存在（0 G 时写「身无分文」，>0 时写具体数）——开局经济是既成事实
-    expect(prompt).toContain('身无分文');
-    // 开局时间总是存在（纪元基准 488 年）；纪元名由内容侧 branding 面供给（D9）
-    expect(prompt).toContain(`${FIXTURE_ERA}0488年`);
-    expect(prompt).toContain('首轮叙事请以「开局剧情」');
-    expect(prompt).not.toContain('不要解释规则');
-  });
-
-  it('用户示例路径以故事语言交接剧情与人物特征，不输出核心说明', () => {
-    store.name = '阿黑';
-    store.customBackgroundText =
-      '帝国女皇命令圣女施展古魔法阵召唤异世勇者。四位勇者现身后，唯独阿黑身边没有任何异象。';
-    store.personality = '天真';
-    store.physics = '男娘';
-    store.selectDestinyCore(FIXTURE_DESTINY_CORES[0].id);
-
-    const prompt = store.buildOpeningPrompt();
-
-    expect(prompt).toContain(`${FIXTURE_ERA}0488年01月01日，周日08:00，阿黑的故事由此开始。`);
-    expect(prompt).toContain('帝国女皇命令圣女施展古魔法阵召唤异世勇者');
-    expect(prompt).toContain('阿黑身无分文，衣袋里连一枚帝冕币也没有。');
-    expect(prompt).toContain('阿黑生性天真。');
-    expect(prompt).toContain('阿黑的身形与外貌给人的印象是：男娘。');
-    expect(prompt).toContain('再自然续写后续发展');
-    expect(prompt).not.toContain('---');
-    expect(prompt).not.toContain('初始数据');
-    expect(prompt).not.toContain('起源印记');
-    expect(prompt).not.toContain(FIXTURE_DESTINY_CORES[0].name);
-    expect(prompt).not.toMatch(/(^|\n)你(?:身|生|随|带|有|的)/);
-  });
-
-  it('纪元名整条取自内容侧：内容缺席时落中性默认名，绝不出现 IP 纪元名', () => {
-    setContentRegistry({
-      catalog: FIXTURE_CATALOG,
-      locations: undefined,
-      bloodlines: undefined,
-      namePools: undefined,
-      markers: undefined,
-      branding: undefined,
-      imageDialects: undefined,
-      mapPack: undefined,
-      randomEvents: undefined,
-      remoteAssets: undefined,
-    });
-    setActivePinia(createPinia());
-    const bare = useCreateStore();
-    bare.name = '测试';
-    const prompt = bare.buildOpeningPrompt();
-    // 解析与兜底都归 branding-defaults（品牌面唯一解析处），这里只断言「跟着它走」
-    expect(prompt).toContain(`${NEUTRAL_BRANDING.era}0488年`);
-    expect(prompt).not.toContain(FIXTURE_ERA);
-  });
-
-  it('有装备应输出装备信息', () => {
-    const item = FIXTURE_EQUIPMENT_POOL[0];
-    store.addEquipment(item);
-    const prompt = store.buildOpeningPrompt();
-    expect(prompt).toContain('测试带着这些装备');
-    expect(prompt).toContain(item.name);
-  });
-
-  it('有起源印记时也不在开场消息中描述或指挥核心演出', () => {
-    const core = FIXTURE_DESTINY_CORES[0];
-    store.selectDestinyCore(core.id);
-    const prompt = store.buildOpeningPrompt();
-    expect(prompt).not.toContain(core.name);
-    expect(prompt).not.toContain('起源印记');
-    expect(prompt).not.toContain('苏醒');
-  });
-
-  it('🆕 初始金钱段：money>0 时写明具体数额（开局经济既成事实）', () => {
+  it('精简版式：只交代需要创作的开局，不复述金钱 / 装备 / 背包 / 技能', () => {
     store.money = 10012;
+    store.addEquipment(FIXTURE_EQUIPMENT_POOL[0]);
     const prompt = store.buildOpeningPrompt();
-    expect(prompt).toContain('10012 枚帝冕币');
-    expect(prompt).not.toContain('身无分文');
+    expect(prompt).toContain('【剧情生成上下文】');
+    expect(prompt).toContain('姓名: 测试');
+    expect(prompt).toContain('年龄: 18岁');
+    expect(prompt).toContain('起始地点: ');
+    expect(prompt).not.toContain('10012');
+    expect(prompt).not.toContain('帝冕币');
+    expect(prompt).not.toContain(FIXTURE_EQUIPMENT_POOL[0].name);
   });
 
-  it('选中 system_core 世界书条目时，开场消息带上命定核心（让首轮意识到它）', () => {
-    // 新的 UI 起源印记选择走 selectedSystemCoreEntry（system_core 世界书条目）
-    store.systemCoreEntries = [
-      {
-        uid: FIXTURE_CORE_UID,
-        name: '占位印记',
-        content: '寄宿于灵魂深处的占位设定，影响叙事风格。',
-        enabled: true,
-        constant: false,
-        key: [],
-        keysecondary: [],
-        selectiveLogic: 0,
-        order: 0,
-        position: 0,
-      } as any,
-    ];
-    store.selectSystemCoreEntry(FIXTURE_CORE_UID);
+  it('状态区块名按生成模式切换（未选模式时按 agent 预览）', () => {
+    store.generationMode = 'direct';
+    expect(store.buildOpeningPrompt()).toContain('<direct_state>');
+    store.generationMode = 'direct_cached';
+    expect(store.buildOpeningPrompt()).toContain('<direct_context>');
+    store.generationMode = '';
+    expect(store.buildOpeningPrompt()).toContain('<角色状态>');
+  });
+
+  it('自定义身份 / 性别与 buildCharacterState 同口径解析', () => {
+    store.identity = '自定义';
+    store.customIdentity = '流浪诗人';
+    store.gender = '自定义';
+    store.customGender = '无性别';
     const prompt = store.buildOpeningPrompt();
-    // 🔴 2026-10-03：核心条目本体仍由世界书通道注入
-    //    （buildEnabledWorldBookEntries → SaveSlot.metadata.enabledWorldBookEntries → worldbook-loader），
-    //    但开场消息**另加一段可读连接**，否则首轮正文会把核心当普通背景设定、意识不到它是主角的核心。
-    expect(prompt).toContain('命定核心');
-    expect(prompt).toContain('占位印记');
-    expect(prompt).toContain('寄宿于灵魂深处的占位设定');
+    expect(prompt).toContain('身份: 流浪诗人');
+    expect(prompt).toContain('性别: 无性别');
+    store.customIdentity = '';
+    expect(store.buildOpeningPrompt()).toContain('身份: 非贵族平民');
+  });
+
+  it('选中预设背景：标题取背景名，<user> 替换为主角名', () => {
+    store.selectBackground({
+      id: 'bg_x',
+      name: '占位开局标题',
+      description: '',
+      fullText: '<user>在城门口醒来',
+    });
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('占位开局标题');
+    expect(prompt).toContain('描述: 测试在城门口醒来');
+  });
+
+  it('只有自定义开局文本时标题为「自定义开局」', () => {
+    store.customBackgroundText = '  一场暴雨中的相遇  ';
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('自定义开局');
+    expect(prompt).toContain('描述: 一场暴雨中的相遇');
+  });
+
+  it('没有任何开局时改为自由开局', () => {
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('未选择预设开局');
+    expect(prompt).not.toContain('自定义开局');
+  });
+
+  it('选中命定核心时写出核心名，未选时不写这一行', () => {
+    expect(store.buildOpeningPrompt()).not.toContain('命定核心:');
+    store.systemCoreEntries = [{ ...FIXTURE_CORE_ENTRY, name: '占位印记' }];
+    store.selectSystemCoreEntry(FIXTURE_CORE_UID);
+    expect(store.buildOpeningPrompt()).toContain('命定核心: 占位印记');
+  });
+});
+
+// ===== 开场提示词改写 =====
+
+describe('开场提示词改写（openingPromptDraft）', () => {
+  let store: ReturnType<typeof useCreateStore>;
+  beforeEach(() => {
+    store = makeStore();
+    store.name = '测试';
+  });
+
+  it('未改写时跟随默认，输入变化默认随之变化', () => {
+    expect(store.openingPromptDraft).toBeNull();
+    expect(store.openingPromptText).toBe(store.buildOpeningPrompt());
+    store.name = '新名字';
+    expect(store.openingPromptText).toContain('姓名: 新名字');
+    expect(store.openingPromptEdited).toBe(false);
+    expect(store.openingPromptStale).toBe(false);
+  });
+
+  it('改写后文本取改写稿，标记为已改写但未过期', () => {
+    store.setOpeningPromptText('自写的开场');
+    expect(store.openingPromptText).toBe('自写的开场');
+    expect(store.openingPromptEdited).toBe(true);
+    expect(store.openingPromptStale).toBe(false);
+    expect(store.openingPromptDraftBase).toBe(store.defaultOpeningPrompt);
+  });
+
+  it('改写后建档输入又变了 → 标记过期，但不覆盖改写稿', () => {
+    store.setOpeningPromptText('自写的开场');
+    store.name = '改名了';
+    expect(store.openingPromptStale).toBe(true);
+    expect(store.openingPromptText).toBe('自写的开场');
+  });
+
+  it('改写稿与默认一字不差时不算改写', () => {
+    store.setOpeningPromptText(store.defaultOpeningPrompt);
+    expect(store.openingPromptEdited).toBe(false);
+    expect(store.openingPromptStale).toBe(false);
+  });
+
+  it('★ 改写稿改回与默认一字不差 → 回到跟随默认，之后随建档输入更新', () => {
+    store.setOpeningPromptText('自写的开场');
+    store.setOpeningPromptText(store.defaultOpeningPrompt);
+    expect(store.openingPromptDraft).toBeNull();
+    expect(store.openingPromptDraftBase).toBeNull();
+    store.name = '后来改的名字';
+    expect(store.openingPromptText).toContain('姓名: 后来改的名字');
+    expect(store.openingPromptText).toBe(store.defaultOpeningPrompt);
+  });
+
+  it('恢复默认清掉改写稿与基准', () => {
+    store.setOpeningPromptText('自写的开场');
+    store.restoreDefaultOpeningPrompt();
+    expect(store.openingPromptDraft).toBeNull();
+    expect(store.openingPromptDraftBase).toBeNull();
+    expect(store.openingPromptText).toBe(store.defaultOpeningPrompt);
+  });
+
+  it('★ 空白改写稿进缺项清单（最后一步），挡住建档', async () => {
+    fillRequiredChoices(store);
+    allocateBasePoints(store);
+    expect(store.missingItems).toEqual([]);
+    store.setOpeningPromptText('  \n ');
+    expect(store.missingItems).toEqual([{ label: '开场提示词', step: 7 }]);
+    expect(store.stepValid[7]).toBe(false);
+    await expect(store.startJourney()).rejects.toThrow('开场提示词');
+    expect(store.currentStep).toBe(7);
+  });
+
+  it('resetAll 与加载预设都回到跟随默认', () => {
+    store.setOpeningPromptText('自写的开场');
+    store.applyPresetData({
+      ...store.getCurrentPresetData(),
+      id: 'p',
+      name: 'p',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    expect(store.openingPromptDraft).toBeNull();
+    store.setOpeningPromptText('又写了一版');
+    store.resetAll();
+    expect(store.openingPromptDraft).toBeNull();
+    expect(store.openingPromptDraftBase).toBeNull();
+  });
+
+  it('改写稿随草稿往返：刷新后原样恢复，过期判断依旧成立', () => {
+    store.setOpeningPromptText('自写的开场');
+    const base = store.openingPromptDraftBase;
+    store.autoSaveDraft();
+    const raw = JSON.parse(localStorage.getItem(WIZARD_DRAFT_KEY)!);
+    expect(raw.openingPromptDraft).toBe('自写的开场');
+    expect(raw.openingPromptDraftBase).toBe(base);
+
+    const store2 = makeStore();
+    expect(store2.openingPromptDraft).toBe('自写的开场');
+    expect(store2.openingPromptDraftBase).toBe(base);
+    expect(store2.openingPromptText).toBe('自写的开场');
+    expect(store2.openingPromptStale).toBe(false);
+  });
+
+  it('旧草稿没有改写字段时读作跟随默认', () => {
+    store.autoSaveDraft();
+    const raw = JSON.parse(localStorage.getItem(WIZARD_DRAFT_KEY)!);
+    delete raw.openingPromptDraft;
+    delete raw.openingPromptDraftBase;
+    localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(raw));
+    const store2 = makeStore();
+    expect(store2.openingPromptDraft).toBeNull();
+    expect(store2.openingPromptDraftBase).toBeNull();
+  });
+});
+
+// ===== 开局等级上限 =====
+
+describe('开局等级上限（MAX_START_LEVEL）', () => {
+  it('等级超过上限时进缺项清单（基础信息步骤），创造模式同样受限', () => {
+    const store = makeStore();
+    store.selectDifficulty('creative');
+    store.level = MAX_START_LEVEL;
+    expect(store.missingItems.some((i) => i.label.includes('初始等级'))).toBe(false);
+    store.level = MAX_START_LEVEL + 1;
+    expect(store.missingItems).toContainEqual({
+      label: `初始等级超过上限 ${MAX_START_LEVEL} 级`,
+      step: 1,
+    });
+  });
+
+  it('★ 草稿恢复时等级截到上限，额外属性点清零，并记下原等级', () => {
+    const store = makeStore();
+    store.name = '艾琳';
+    store.level = 5;
+    store.attributePoints = { 力量: 2, 敏捷: 2, 体质: 0, 智力: 0, 精神: 0 };
+    store.autoSaveDraft();
+    const raw = JSON.parse(localStorage.getItem(WIZARD_DRAFT_KEY)!);
+    raw.character.level = 15;
+    localStorage.setItem(WIZARD_DRAFT_KEY, JSON.stringify(raw));
+
+    const store2 = makeStore();
+    expect(store2.level).toBe(MAX_START_LEVEL);
+    expect(store2.usedAP).toBe(0);
+    expect(store2.draftLevelClampedFrom).toBe(15);
+  });
+
+  it('草稿等级在上限内时原样恢复，不记截断', () => {
+    const store = makeStore();
+    store.name = '艾琳';
+    store.level = 5;
+    store.attributePoints = { 力量: 2, 敏捷: 2, 体质: 0, 智力: 0, 精神: 0 };
+    store.autoSaveDraft();
+    const store2 = makeStore();
+    expect(store2.level).toBe(5);
+    expect(store2.usedAP).toBe(4);
+    expect(store2.draftLevelClampedFrom).toBeNull();
+  });
+
+  it('★ 预设等级超过上限：截到上限、额外属性点清零，返回原等级', () => {
+    const store = makeStore();
+    store.selectDifficulty('creative');
+    const data = store.getCurrentPresetData();
+    const result = store.applyPresetData({
+      ...data,
+      character: {
+        ...data.character,
+        level: 20,
+        attributePoints: { 力量: 19, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 },
+      },
+      id: 'p',
+      name: 'p',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    expect(result).toBe(20);
+    expect(store.level).toBe(MAX_START_LEVEL);
+    expect(store.usedAP).toBe(0);
+  });
+
+  it('★ 预设等级非法时按草稿口径净化：非数字 / 缺失 → 1，小数取整，低于 1 → 1', () => {
+    const cases: Array<[unknown, number]> = [
+      ['7', 1],
+      [undefined, 1],
+      [Number.NaN, 1],
+      [3.4, 3],
+      [4.6, 5],
+      [0, 1],
+      [-3, 1],
+    ];
+    for (const [raw, expected] of cases) {
+      const store = makeStore();
+      const data = store.getCurrentPresetData();
+      const result = store.applyPresetData({
+        ...data,
+        character: { ...data.character, level: raw as number },
+        id: 'p',
+        name: 'p',
+        createdAt: 1,
+        updatedAt: 1,
+      });
+      expect(result).toBeNull();
+      expect(store.level).toBe(expected);
+      expect(store.missingItems.some((i) => i.label.includes('初始等级'))).toBe(false);
+    }
+  });
+
+  it('预设小数等级取整后超过上限：截到上限、属性点清零、返回取整后的等级', () => {
+    const store = makeStore();
+    const data = store.getCurrentPresetData();
+    const result = store.applyPresetData({
+      ...data,
+      character: {
+        ...data.character,
+        level: 10.6,
+        attributePoints: { 力量: 9, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 },
+      },
+      id: 'p',
+      name: 'p',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    expect(result).toBe(11);
+    expect(store.level).toBe(MAX_START_LEVEL);
+    expect(store.usedAP).toBe(0);
+  });
+
+  it('非整数或低于 1 的等级进缺项清单', () => {
+    const store = makeStore();
+    for (const bad of [2.5, 0, -1, Number.NaN]) {
+      store.level = bad;
+      expect(store.missingItems).toContainEqual({
+        label: `初始等级必须是 1–${MAX_START_LEVEL} 的整数`,
+        step: 1,
+      });
+    }
+    store.level = 1;
+    expect(store.missingItems.some((i) => i.label.includes('初始等级'))).toBe(false);
+  });
+
+  it('预设等级在上限内时返回 null，属性点原样保留', () => {
+    const store = makeStore();
+    store.level = 5;
+    store.attributePoints = { 力量: 4, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 };
+    const data = store.getCurrentPresetData();
+    const store2 = makeStore();
+    const result = store2.applyPresetData({
+      ...data,
+      id: 'p',
+      name: 'p',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    expect(result).toBeNull();
+    expect(store2.level).toBe(5);
+    expect(store2.attributePoints['力量']).toBe(4);
   });
 });
 
@@ -2174,6 +2394,41 @@ describe('startJourney 剧情落库', () => {
     expect(profile!.fpHistory).toHaveLength(1);
     expect(profile!.fpHistory[0].amount).toBe(100);
     expect(profile!.fpHistory[0].reason).toContain('开局');
+  });
+
+  it('📌 2026-11-20：开局装备落库并打 startLoadoutPersisted 标记，开场提示词取改写稿原文', async () => {
+    setActivePinia(createPinia());
+    const store = useCreateStore();
+    store.generationMode = 'direct';
+    store.name = '测试';
+    allocateBasePoints(store);
+    fillRequiredChoices(store);
+    const sword = FIXTURE_EQUIPMENT_POOL[0];
+    store.addEquipment(sword);
+    store.setOpeningPromptText('  玩家自写的开场\n');
+    const saveId = await store.startJourney();
+    const { getSave, getCharacters } = await import('@engine/persistence/database');
+    const save = await getSave(saveId);
+    expect(save?.metadata.startLoadoutPersisted).toBe(true);
+    expect(save?.metadata.openingPrompt).toBe('  玩家自写的开场\n');
+    expect(save?.metadata.openingPromptConsumed).toBe(false);
+    const [player] = await getCharacters(saveId);
+    expect(player.inventory).toHaveLength(1);
+    expect(player.inventory[0]).toMatchObject({ name: sword.name, type: '装备', quantity: 1 });
+    expect(player.inventory[0].equippedSlot).toBeTruthy();
+  });
+
+  it('未改写开场提示词时落库默认精简提示词', async () => {
+    setActivePinia(createPinia());
+    const store = useCreateStore();
+    store.generationMode = 'agent';
+    store.name = '测试';
+    allocateBasePoints(store);
+    fillRequiredChoices(store);
+    const expected = store.buildOpeningPrompt();
+    const saveId = await store.startJourney();
+    const { getSave } = await import('@engine/persistence/database');
+    expect((await getSave(saveId))?.metadata.openingPrompt).toBe(expected);
   });
 
   it('未兑换命运点时仍应创建 SaveProfile 并保存所选经验档位', async () => {

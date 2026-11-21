@@ -145,6 +145,12 @@ export const BACKGROUND_RESTRICTIONS: Record<string, Partial<BackgroundTemplate>
 /** 种族/身份查不到时的兜底点数（机制常量，原先散在 create-store 的两个 `?? 80`）。 */
 export const CUSTOM_COST_FALLBACK = 80;
 
+/**
+ * 建档时主角的初始等级上限（机制常量，所有难度档位含创造模式一律适用）。
+ * 建档入口 `createJourney` 拒收超出 [1, MAX_START_LEVEL] 的等级，不做截断。
+ */
+export const MAX_START_LEVEL = 10;
+
 /** 自定义选项的键名（种族/身份表里那一格） */
 export const CUSTOM_OPTION_KEY = '自定义';
 

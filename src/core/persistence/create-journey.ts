@@ -10,6 +10,7 @@ import { getProfile, addFP, updateProfile } from '../state/save-profile';
 import type { CharacterState, SaveSlot, PlotOutline, PlotEvent, WorldBook } from '../types/types';
 import { filterBooksByEnabledEntries } from '../content/worldbook-loader';
 import { createFixedLoreSnapshot } from '../content/lore-definitions';
+import { MAX_START_LEVEL } from '../content/start-catalog-mechanics';
 import {
   attachCharacterDefinition,
   characterLoreEntryUids,
@@ -29,6 +30,11 @@ export async function createJourney(input: {
   events: PlotEvent[];
   worldBooks?: WorldBook[];
 }): Promise<string> {
+  // 阶位/属性/生命都已按等级推导好，这里只拒收、不截断；必须在开事务之前，失败不留任何记录
+  const level = input.character.level;
+  if (!Number.isInteger(level) || level < 1 || level > MAX_START_LEVEL) {
+    throw new Error(`初始等级必须是 1 到 ${MAX_START_LEVEL} 之间的整数（收到 ${level}）`);
+  }
   const db = getDatabase();
   await db.transaction(
     'rw',
