@@ -495,6 +495,58 @@ describe('assembleCharacterState', () => {
     expect(char.statusEffects).toHaveLength(1);
     expect(char.statusEffects[0].name).toBe('祝福');
   });
+
+  it('装备 quality → 落库 rarity，背包 rarity 归一化（与 buildEntityGenPatches 对齐）', () => {
+    const out: EntityGenOutput = {
+      character: {
+        name: '维奥莱塔',
+        race: '人类',
+        gender: '女',
+        tier: 6,
+        level: 24,
+        attributes: { str: 10, dex: 10, con: 10, int: 10, spi: 10 },
+        identity: [],
+        occupation: [],
+        background: '',
+        appearance: '',
+        clothing: '',
+        personality: '',
+        likes: '',
+        ascension: {
+          enabled: false,
+          path: '',
+          description: '',
+          elements: [],
+          authorities: [],
+          laws: [],
+          deityPosition: '',
+          divineKingdom: { name: '', description: '' },
+        },
+        skills: [],
+        equipment: [
+          { slot: '武器', name: '皇权之杖', description: '杖', stats: {}, quality: '神话' },
+          { slot: 'armor', name: '星纹礼裙', description: '裙', stats: {}, quality: 'epic' },
+          { slot: '饰品', name: '旧戒指', description: '戒', stats: {}, quality: '不存在的品质' },
+        ],
+        inventory: [],
+      },
+      skills: [],
+      equipment: [],
+      inventory: [
+        { name: '药剂', description: '药', type: '消耗品', quantity: 2, rarity: 'rare' },
+        { name: '石子', description: '石', type: '杂物', quantity: 1, rarity: '乱写' },
+      ],
+      statuses: [],
+    };
+    const char = assembleCharacterState(out);
+    const byName = (n: string) => char.inventory.find((i) => i.name === n);
+    expect(byName('皇权之杖')?.rarity).toBe('神话');
+    expect(byName('星纹礼裙')?.rarity).toBe('史诗');
+    expect(byName('旧戒指')?.rarity).toBeUndefined();
+    expect(byName('旧戒指')).not.toHaveProperty('rarity');
+    expect(byName('药剂')?.rarity).toBe('稀有');
+    expect(byName('石子')?.rarity).toBeUndefined();
+  });
 });
 
 // ========== runEntityGenChain ==========

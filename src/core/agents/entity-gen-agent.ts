@@ -32,7 +32,6 @@ import type {
   CharGenOutput,
   ItemGenOutput,
   StatePatch,
-  QualityLevel,
   InventoryItem,
   ToolDefinition,
   ToolExecutionContext,
@@ -722,19 +721,24 @@ export function assembleCharacterState(
   const charEquipNames = new Set(charEquip.map((e) => e.name));
   const mergedEquip = [...extraEquip.filter((e) => !charEquipNames.has(e.name)), ...charEquip];
 
-  const equippedItems: InventoryItem[] = mergedEquip.map((e) => ({
-    name: e.name,
-    description: e.description,
-    quantity: 1,
-    type: '装备',
-    equippedSlot: normalizeSlot(e.slot),
-    stats: e.stats,
-    durability: e.durability,
-    maxDurability: e.durability,
-    effects: e.effects,
-    ...(e.protocolText ? { protocolText: e.protocolText } : {}),
-    ...(e.tags?.length ? { tags: e.tags } : {}),
-  }));
+  // 品质：与 buildEntityGenPatches 的 add_item 路径对齐（quality → rarity），并统一归一化
+  const equippedItems: InventoryItem[] = mergedEquip.map((e) => {
+    const rarity = normalizeRarity(e.quality ?? '');
+    return {
+      name: e.name,
+      description: e.description,
+      quantity: 1,
+      type: '装备',
+      ...(rarity ? { rarity } : {}),
+      equippedSlot: normalizeSlot(e.slot),
+      stats: e.stats,
+      durability: e.durability,
+      maxDurability: e.durability,
+      effects: e.effects,
+      ...(e.protocolText ? { protocolText: e.protocolText } : {}),
+      ...(e.tags?.length ? { tags: e.tags } : {}),
+    };
+  });
 
   // 背包：角色自带优先
   const charInv = charData.inventory ?? [];
@@ -748,7 +752,7 @@ export function assembleCharacterState(
       description: inv.description,
       type: inv.type,
       quantity: inv.quantity,
-      rarity: (inv.rarity as QualityLevel) || undefined,
+      rarity: normalizeRarity(inv.rarity ?? '') || undefined,
       effects: inv.effects,
       ...(inv.protocolText ? { protocolText: inv.protocolText } : {}),
       ...(inv.tags?.length ? { tags: inv.tags } : {}),
