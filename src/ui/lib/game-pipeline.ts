@@ -33,6 +33,7 @@ import {
   type PresetProfile,
 } from '@engine/prompts/preset-resolution';
 import { initializeDirectSettings, initializeCachedDirectSettings } from './direct-settings';
+import { applyCatalogEntryToggles } from './preset-entries';
 import { scanEventTriggers, scanPlayAudioMarkers } from '@engine/story/marker-protocol';
 // Q-05：从模型输出抢救 JSON 的唯一入口（裸 / 围栏 / <json> / 前后夹带解说四种形态）
 import { extractJsonPayload } from '@engine/utils/model-json';
@@ -2066,10 +2067,12 @@ export class GamePipeline {
       );
     }
 
-    // 存储行 > 默认层内嵌预设 > 内置直出预设（同 id 只留优先者），与设置页同一套装配
-    const presets = this.presetCatalog(storedRows as unknown as AgentPreset[], rawAgents).map(
-      (entry) => entry.preset as unknown as AgentPreset,
-    );
+    // 存储行 > 默认层内嵌预设 > 内置直出预设（同 id 只留优先者），与设置页同一套装配。
+    // 🔴 末尾套玩家的条目开关覆写（只读预设）—— 覆写层只在这里与 usePresets().catalog 两处套用
+    const presets = applyCatalogEntryToggles(
+      this.presetCatalog(storedRows as unknown as AgentPreset[], rawAgents),
+      this.settings.settings.presetEntryToggles,
+    ).map((entry) => entry.preset as unknown as AgentPreset);
     return { presets, agentDefaults };
   }
 

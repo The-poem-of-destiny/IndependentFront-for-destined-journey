@@ -43,6 +43,7 @@ import MapPanel from './MapPanel.vue';
 import CalendarPanel from './CalendarPanel.vue';
 import DebugPanel from './DebugPanel.vue';
 import MiniPlayer from './MiniPlayer.vue';
+import PresetDrawer from './PresetDrawer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
 import GameMenu from './GameMenu.vue';
 import FxGameLayer from '../fx/FxGameLayer.vue';
@@ -508,6 +509,9 @@ function onModalOpenChange(v: boolean) {
     </div>
 
     <MiniPlayer :open="showMiniPlayer" @close="showMiniPlayer = false" />
+
+    <!-- 「预设」抽屉：占 activeModal 单选位（取值 preset），焦点 / Esc 走 ownModalFocus -->
+    <PresetDrawer :open="game.activeModal === 'preset'" @close="game.closeModal()" />
 
     <!-- 二级菜单（顶栏统一入口 / Esc 呼出）→ 设置 / 扩展 / 存档管理 / 返回首页 / 帮助说明 -->
     <GameMenu :open="menuOpen" @close="menuOpen = false" />

@@ -105,6 +105,13 @@ export function replaceCharUser(
 }
 
 /**
+ * 预处理时保留不剥的系统占位符（由提示装配期再解析）。非全局正则，`test` 无状态。
+ * `preprocessEntry` 与预设生效总览（`preset-insight.ts`，系统占位符记 0 token）共用。
+ */
+export const PRESET_SYSTEM_PLACEHOLDER_RE =
+  /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|CHARACTER_STATE|AGENT\.\w+|INVENTORY|GAME_TIME|DELTA_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS|CRAFT_REQUEST|CHAR_DETECT|ENTITY_REQUEST|CRAFT_RESULT|USER_NAME|CHARACTER_NAME)\}\}/;
+
+/**
  * Phase 10: 单条目预处理管线
  *
  * 处理顺序:
@@ -147,10 +154,8 @@ export function preprocessEntry(
   result = result.replace(/\{\{roll\s+[^}]*\}\}/gi, '');
 
   // 7. 剥离其他非系统 {{...}} 占位符
-  const SYSTEM_RE =
-    /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|CHARACTER_STATE|AGENT\.\w+|INVENTORY|GAME_TIME|DELTA_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS|CRAFT_REQUEST|CHAR_DETECT|ENTITY_REQUEST|CRAFT_RESULT|USER_NAME|CHARACTER_NAME)\}\}/;
   result = result.replace(/\{\{([^}]+)\}\}/g, (match) => {
-    if (SYSTEM_RE.test(match)) return match;
+    if (PRESET_SYSTEM_PLACEHOLDER_RE.test(match)) return match;
     return '';
   });
 
@@ -257,6 +262,37 @@ export function getPresetPrefill(preset: AgentPreset | undefined | null): Preset
 }
 
 /**
+ * 条目是否并进 `assemblePresetContent` 的 system 正文（UI 生效总览与引擎共用这一判据）：
+ * 是对象、`isPresetPromptActive`（自身 enabled + 露骨内容开关）、非 assistant、非五区占位。
+ * 🔴 **不读 `prompt_order`** —— 只看条目自身字段。
+ * 🔴 `role === 'assistant'` 的条目**不并进 system 正文** —— 它是「预填充」素材，由
+ *    `getPresetPrefill` / orchestrator 抽出来追加到**消息末尾**（prefix 续写）；并进来会
+ *    让同一段文字既在 system 又在末尾出现两次。开关在预设级（`settings.prefill`）。
+ */
+function isAssembledPresetPrompt(p: unknown): boolean {
+  if (p === null || typeof p !== 'object') return false;
+  const entry = p as { role?: unknown; enabled?: unknown; nsfw?: unknown };
+  return (
+    !isStoryZonePlaceholder(entry) && isPresetPromptActive(entry) && entry.role !== 'assistant'
+  );
+}
+
+/**
+ * 按 `assemblePresetContent` 的口径挑出参与拼接的条目并按 `injection_order` 稳定排序。
+ * 返回新数组，元素是原条目引用。`prompts` 不是数组时返回空数组。
+ */
+export function listActivePresetPrompts<T>(prompts: readonly T[] | unknown): T[] {
+  if (!Array.isArray(prompts)) return [];
+  return (prompts as T[])
+    .filter((p) => isAssembledPresetPrompt(p))
+    .sort(
+      (a, b) =>
+        ((a as { injection_order?: number }).injection_order ?? 0) -
+        ((b as { injection_order?: number }).injection_order ?? 0),
+    );
+}
+
+/**
  * Phase 10: Assemble preset content from prompts[] entries.
  *
  * 两遍扫描管线:
@@ -288,13 +324,7 @@ export function assemblePresetContent(
     return [preset.fixedSystem, preset.fixedExamples].filter(Boolean).join('\n\n');
   }
 
-  // Sort by injection_order, filter enabled.
-  // 🔴 `role === 'assistant'` 的条目**不并进 system 正文** —— 它是「预填充」素材，由
-  //    `getPresetPrefill` / orchestrator 抽出来追加到**消息末尾**（prefix 续写）；并进来会
-  //    让同一段文字既在 system 又在末尾出现两次。开关在预设级（`settings.prefill`）。
-  const sorted = [...prompts]
-    .filter((p: any) => isPresetPromptActive(p) && p.role !== 'assistant')
-    .sort((a: any, b: any) => (a.injection_order ?? 0) - (b.injection_order ?? 0));
+  const sorted: any[] = listActivePresetPrompts(prompts);
 
   // 快速检查：是否有任何条目需要预处理
   const needsPreprocessing = sorted.some((p: any) => hasSTMacros(p.content || ''));

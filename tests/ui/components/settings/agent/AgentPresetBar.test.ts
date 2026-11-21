@@ -208,6 +208,58 @@ describe('AgentPresetBar —— 预设型 Agent 的分组下拉', () => {
   });
 });
 
+describe('AgentPresetBar —— 重命名带出厂指纹的行', () => {
+  // 非只读、但带 factorySeedHash 的行走覆写层：视图里的开关来自覆写
+  async function seedFingerprinted() {
+    await savePreset(
+      preset('seeded', '带指纹', {
+        factorySeedHash: 'h1',
+        settings: { prompts: [{ identifier: 'e1', name: '条目', enabled: true }] },
+      }),
+    );
+    await loadPresets();
+    mockSettings.activePresetId = 'seeded';
+    mockSettings.presetEntryToggles = { seeded: { e1: false } };
+  }
+
+  async function rename(w: ReturnType<typeof mountBar>, name: string) {
+    await w.find('[data-testid="preset-rename"]').trigger('click');
+    await flushPromises();
+    const input = document.body.querySelector<HTMLInputElement>('[data-testid="rename-name"]')!;
+    input.value = name;
+    input.dispatchEvent(new Event('input'));
+    await flushPromises();
+    document.body.querySelector<HTMLButtonElement>('[data-testid="rename-save"]')!.click();
+  }
+
+  it('🔴 写入成功：开关随整行烘进去，同时清掉覆写键（不留双来源）', async () => {
+    await seedFingerprinted();
+    const w = mountBar('story');
+    await rename(w, '新名字');
+    await vi.waitFor(async () =>
+      expect((await getDatabase().presets.get('seeded'))?.name).toBe('新名字'),
+    );
+    const row = await getDatabase().presets.get('seeded');
+    expect((row?.settings as { prompts: { enabled?: boolean }[] }).prompts[0].enabled).toBe(false);
+    await vi.waitFor(() => expect(mockSettings.presetEntryToggles?.seeded).toBeUndefined());
+  });
+
+  it('🔴 写入失败：覆写键原样保留', async () => {
+    await seedFingerprinted();
+    const { useUIStore } = await import('../../../../../src/ui/stores/ui-store');
+    const toast = vi.spyOn(useUIStore(), 'toast');
+    const put = vi
+      .spyOn(getDatabase().presets, 'put')
+      .mockRejectedValueOnce(new Error('Dexie 写入失败'));
+    const w = mountBar('story');
+    await rename(w, '新名字');
+    await vi.waitFor(() => expect(toast).toHaveBeenCalledWith('保存失败，请稍后重试', 'error'));
+    expect(mockSettings.presetEntryToggles).toEqual({ seeded: { e1: false } });
+    expect((await getDatabase().presets.get('seeded'))?.name).toBe('带指纹');
+    put.mockRestore();
+  });
+});
+
 describe('contentSourceLabel —— 默认内容从哪来', () => {
   it('内容包 / 开发叠加目录没装包 = 本地内容 / 公开仓 = 占位内容', () => {
     expect(contentSourceLabel({ packActive: true, localContentDir: true })).toBe('内容包');

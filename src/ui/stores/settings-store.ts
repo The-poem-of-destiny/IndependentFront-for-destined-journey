@@ -259,6 +259,8 @@ function getDefaults(): UiSettings {
     //    而 deep watch 又会把它写回 localStorage —— 与 worldBooks/beautifierRules 同口径。
     //    下面这项是「当前选中哪条预设」的 UI 状态，继续留在设置里。
     activePresetId: '',
+    // 只读预设的条目开关覆写层（presetId → identifier → enabled），空 = 全按预设原样
+    presetEntryToggles: {},
 
     // Phase 8: 世界书管理
     // 🔴 `worldBooks` 已迁出（Phase 0 / 设计 D2）：书本体在 Dexie `worldBooks` 表，
@@ -424,6 +426,28 @@ function getDefaults(): UiSettings {
   };
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * 收敛 `presetEntryToggles`（纯函数、幂等、永不抛）：非对象整体回落空表；
+ * 每个预设只留布尔值，留空的预设键删掉。是否与预设原始行相同由 usePresets 写入时归一。
+ */
+function normalizePresetEntryToggles(value: unknown): UiSettings['presetEntryToggles'] {
+  const out: UiSettings['presetEntryToggles'] = {};
+  if (!isPlainRecord(value)) return out;
+  for (const [presetId, toggles] of Object.entries(value)) {
+    if (!presetId || !isPlainRecord(toggles)) continue;
+    const kept: Record<string, boolean> = {};
+    for (const [identifier, enabled] of Object.entries(toggles)) {
+      if (typeof enabled === 'boolean') kept[identifier] = enabled;
+    }
+    if (Object.keys(kept).length > 0) out[presetId] = kept;
+  }
+  return out;
+}
+
 // ===== Store =====
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -473,6 +497,8 @@ export const useSettingsStore = defineStore('settings', () => {
   });
   // 一次性搬运：17 个平铺 `image*` → per-provider 袋子 + 方言覆盖（旧平铺键在不在就是信号）
   migrateImageSettings(merged);
+  // 预设条目开关覆写层：浅合并兜不住写坏的值（null / 数组 / 非布尔），同样在 ref() 之前收敛
+  merged.presetEntryToggles = normalizePresetEntryToggles(merged.presetEntryToggles);
 
   // Phase 0: 内置世界书合并已搬去 worldbook-store 的 init()（设计 D4 第 6 步）——
   // 必须在 localStorage→Dexie 迁移**之后**、针对 Dexie 执行，否则会把内置书写回

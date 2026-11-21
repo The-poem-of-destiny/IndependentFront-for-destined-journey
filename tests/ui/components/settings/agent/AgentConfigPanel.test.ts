@@ -49,7 +49,12 @@ const upsertPreset = vi.fn(async (preset: any) => {
 });
 const effectivePreset = vi.fn(() => ({ presetId: '', preset: null }));
 vi.mock('../../../../../src/ui/composables/usePresets', () => ({
-  usePresets: () => ({ presets: mockPresets, upsertPreset, effectivePreset }),
+  usePresets: () => ({
+    presets: mockPresets,
+    upsertPreset,
+    effectivePreset,
+    pristineEffectivePreset: effectivePreset,
+  }),
 }));
 
 import AgentConfigPanel from '../../../../../src/ui/components/settings/agent/AgentConfigPanel.vue';

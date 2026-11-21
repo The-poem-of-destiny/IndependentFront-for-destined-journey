@@ -12,8 +12,9 @@
  *     恢复只清 systemPrompt 与上下文模板两项覆写，由宿主执行（草稿在宿主手里），
  *     本组件只 emit `reset-prompt`。
  *
- * 🔴 内容包 / 引擎内置的预设是只读的：这里能做的只有「复制为我的预设」。
- *    重命名、删除只对玩家自己的预设出现。
+ * 🔴 内容包 / 引擎内置的预设是只读的：预设级操作只有「复制为我的预设」，
+ *    重命名、删除只对玩家自己的预设出现。条目开关可以直接拨（写进玩家覆写层，不复制）；
+ *    改条目文本等内容编辑时才由 PresetManager 自动复制一份。
  *
  * 🔴 单根：两个 AppModal 放在根卡内层（与 PresetManager 同一个理由）。
  */
@@ -26,6 +27,7 @@ import { useSettingsStore } from '../../../stores/settings-store';
 import { useContentStore } from '../../../stores/content-store';
 import { usePresets } from '../../../composables/usePresets';
 import { contentSourceLabel } from './preset-bar-labels';
+import { presetUsesToggleLayer } from '../../../lib/preset-entries';
 import {
   copyScopeFor,
   presetProfileForAgent,
@@ -49,6 +51,7 @@ const {
   duplicateAsUser,
   upsertPreset,
   removePreset,
+  resetEntryToggles,
 } = usePresets();
 
 const profile = computed(() => presetProfileForAgent(props.agentId));
@@ -223,6 +226,7 @@ async function saveRename(): Promise<void> {
   const preset = effective.value?.preset;
   const name = renameForm.name.trim();
   if (!preset || !name) return;
+  const entry = effectiveEntry.value;
   try {
     await upsertPreset({
       ...preset,
@@ -230,6 +234,10 @@ async function saveRename(): Promise<void> {
       description: renameForm.description,
       updatedAt: Date.now(),
     });
+    // 带出厂播种指纹的行走覆写层（`presetUsesToggleLayer`）：`preset` 取自套过覆写的视图，
+    // 当前开关已随整行写进去，留着覆写键就成了双来源 —— 写成功后清掉（与 PresetManager.persistPreset 同口径）；
+    // 写失败走 catch，覆写键原样保留
+    if (entry && presetUsesToggleLayer(entry)) resetEntryToggles(preset.id);
     showRename.value = false;
     ui.toast('预设已重命名', 'success');
   } catch {
@@ -359,7 +367,7 @@ async function confirmDelete(): Promise<void> {
         >
       </div>
       <p class="form-hint">
-        内容包与引擎内置的预设是只读的；改动它们时会自动复制一份到「我的预设」。
+        内容包与引擎内置的预设是只读的：条目开关可以直接拨，不会复制；改条目文本、增删或排序时会自动复制一份到「我的预设」。
       </p>
     </template>
 

@@ -24,6 +24,8 @@ import {
   isStoryZonePlaceholder,
   storyZoneOf,
 } from '@engine/prompts/story-zone-placeholders';
+import { applyPresetEntryToggles, type PresetEntryToggles } from '@engine/prompts/preset-groups';
+import type { PresetCatalogEntry } from '@engine/prompts/preset-resolution';
 
 /** `ChatPreset.settings.prompts` 里单条目的形状（SillyTavern 兼容，字段全可选）。 */
 export interface PresetPromptEntry {
@@ -154,4 +156,46 @@ export function movePresetEntry(preset: ChatPreset, index: number, delta: number
     .filter((zone): zone is NonNullable<typeof zone> => zone !== null);
   if (zones.some((zone, i) => i > 0 && zone < zones[i - 1])) return preset;
   return withEntries(preset, entries);
+}
+
+/**
+ * 按 identifier 批量改条目的 `enabled`（玩家自己的预设直接改行用），返回新预设
+ * （深克隆 + 盖 `updatedAt`）。未知 identifier、五区占位条目、非布尔值一律忽略；
+ * 没有任何条目变化时返回原引用，调用方据此不落库。不重排、不补占位。
+ */
+export function setPresetEntriesEnabled(
+  preset: ChatPreset,
+  patch: PresetEntryToggles | null | undefined,
+): ChatPreset {
+  const next = applyPresetEntryToggles(preset, patch);
+  if (next === preset) return preset;
+  return JSON.parse(JSON.stringify({ ...next, updatedAt: Date.now() })) as ChatPreset;
+}
+
+/**
+ * 这条目录项的开关走不走覆写层：只读（内容包 / 出厂 / 引擎内置），或带出厂播种指纹的行。
+ * 后一条是给管线兜底的 —— 管线的目录不登记出厂文件 id，出厂行在那边不算只读；
+ * 玩家副本一律删掉 `factorySeedHash`，所以不会被误判。
+ * 🔴 usePresets 的目录与 GamePipeline.loadPresets 必须共用这一判据，否则两边看到的开关不一致。
+ */
+export function presetUsesToggleLayer(entry: PresetCatalogEntry): boolean {
+  return entry.readonly || typeof entry.preset.factorySeedHash === 'string';
+}
+
+/**
+ * 把玩家的开关覆写套到目录上（只套 `presetUsesToggleLayer` 的条目）。
+ * 🔴 覆写层只许在这里被套用（调用方：`usePresets().catalog` 与 `GamePipeline.loadPresets`）。
+ *    播种、播种指纹、装包、「保存为项目默认」一律读原始行。
+ */
+export function applyCatalogEntryToggles(
+  catalog: readonly PresetCatalogEntry[],
+  togglesByPreset: Readonly<Record<string, PresetEntryToggles>> | null | undefined,
+): PresetCatalogEntry[] {
+  if (!togglesByPreset) return [...catalog];
+  return catalog.map((entry) => {
+    const toggles = togglesByPreset[entry.preset.id];
+    if (!toggles || !presetUsesToggleLayer(entry)) return entry;
+    const preset = applyPresetEntryToggles(entry.preset, toggles);
+    return preset === entry.preset ? entry : { ...entry, preset };
+  });
 }

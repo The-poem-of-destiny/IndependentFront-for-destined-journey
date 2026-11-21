@@ -719,6 +719,28 @@ describe('GamePage — 菜单 Esc 分层', () => {
     wrapper.unmount();
   });
 
+  /** 2026-11-21：「预设」抽屉占 activeModal === 'preset'，Esc 归它自己（ownModalFocus），菜单让路 */
+  it('预设抽屉开着时 Esc 关抽屉，菜单不冒出来', async () => {
+    const wrapper = page({ activeModal: 'preset' });
+    await flushPromises();
+    expect(document.body.querySelector('.pd-panel[role="dialog"]')).not.toBeNull();
+
+    pressEsc();
+    await flushPromises();
+    expect(mockGame.closeModal).toHaveBeenCalledTimes(1);
+    expect(menuShown()).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it('侧栏点「预设」走 showModal(preset)', async () => {
+    const wrapper = page();
+    await flushPromises();
+    wrapper.findComponent({ name: 'SideToolbar' }).vm.$emit('tool-click', 'preset');
+    expect(mockGame.showModal).toHaveBeenCalledWith('preset');
+    wrapper.unmount();
+  });
+
   it('有页面级弹窗位时不抢 Esc（activeModal 有值）', async () => {
     const wrapper = page({ activeModal: 'items' });
     await flushPromises();

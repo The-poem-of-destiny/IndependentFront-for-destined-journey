@@ -476,6 +476,24 @@ describe('settings-store', () => {
     expect(s.settings.imageNovelai.maxPerMessage).toBe(4);
   });
 
+  it('预设条目开关覆写层默认空表；存过的照常恢复，写坏的值在构造时收敛', () => {
+    expect(store.settings.presetEntryToggles).toEqual({});
+
+    const kept = bootWith({ presetEntryToggles: { p1: { a: false, b: true } } });
+    expect(kept.settings.presetEntryToggles).toEqual({ p1: { a: false, b: true } });
+    kept.$dispose();
+
+    const broken = bootWith({
+      presetEntryToggles: { p1: { a: 'no', b: false }, p2: null, p3: { x: 1 }, p4: [] },
+    });
+    expect(broken.settings.presetEntryToggles).toEqual({ p1: { b: false } });
+    broken.$dispose();
+
+    const garbage = bootWith({ presetEntryToggles: [1, 2] });
+    expect(garbage.settings.presetEntryToggles).toEqual({});
+    garbage.$dispose();
+  });
+
   it('剧情系统新档默认值形状对齐 create-store', () => {
     expect(store.settings.plotMode).toBe('off');
     expect(store.settings.plotDurationYears).toBe(5);

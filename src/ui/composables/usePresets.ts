@@ -22,7 +22,13 @@ import {
   type PresetProfile,
   type PresetScope,
 } from '@engine/prompts/preset-resolution';
+import { mergePresetEntryToggles, type PresetEntryToggles } from '@engine/prompts/preset-groups';
 import type { ChatPreset } from '@engine/types/types';
+import {
+  applyCatalogEntryToggles,
+  presetUsesToggleLayer,
+  setPresetEntriesEnabled,
+} from '../lib/preset-entries';
 import { useSettingsStore } from '../stores/settings-store';
 import type { UiSettings } from '../stores/settings-types';
 
@@ -207,27 +213,53 @@ export async function migrateBuiltinPresetRows(settings: SelectionBag): Promise<
 }
 
 export function usePresets(): {
+  /** 存储行原样（不套开关覆写） */
   presets: Readonly<Ref<ChatPreset[]>>;
+  /** 预设目录；只读条目已套玩家的开关覆写（`settings.presetEntryToggles`） */
   catalog: ComputedRef<PresetCatalogEntry[]>;
   effectivePreset: (profile: PresetProfile) => EffectivePreset;
+  /** 同 `effectivePreset`，但取原始行、不套开关覆写（「保存为项目默认」等写回内容的路径用） */
+  pristineEffectivePreset: (profile: PresetProfile) => EffectivePreset;
   defaultPreset: (profile: PresetProfile) => EffectivePreset;
   selectPreset: (profile: PresetProfile, id: string) => void;
   duplicateAsUser: (id: string, scope?: PresetScope, name?: string) => Promise<ChatPreset | null>;
+  setEntriesEnabled: (
+    presetId: string,
+    patch: PresetEntryToggles,
+    options?: { pin?: boolean },
+  ) => Promise<void>;
+  resetEntryToggles: (presetId: string) => void;
   loadPresets: typeof loadPresets;
   upsertPreset: typeof upsertPreset;
   removePreset: typeof removePreset;
 } {
   const cfg = useSettingsStore();
   const agentDefaults = (): PresetAgentDefaults | undefined => cfg.projectAgentDefaults?.agents;
-  const catalog = computed(() => buildUiPresetCatalog(presetsRef.value, agentDefaults()));
+  /** 原始目录：播种 / 装包 / 保存为默认 / 覆写归一都读它 */
+  const pristineCatalog = computed(() => buildUiPresetCatalog(presetsRef.value, agentDefaults()));
+  // 🔴 覆写层是 enabled 的第二来源，前端只在这里套用（另一处是 GamePipeline.loadPresets）
+  const catalog = computed(() =>
+    applyCatalogEntryToggles(pristineCatalog.value, cfg.settings.presetEntryToggles),
+  );
 
-  function effectivePreset(profile: PresetProfile): EffectivePreset {
+  function resolveFrom(
+    profile: PresetProfile,
+    entries: readonly PresetCatalogEntry[],
+  ): EffectivePreset {
     return resolveEffectivePreset({
       profile,
       selection: presetSelection(cfg.settings, profile),
       agentDefaults: agentDefaults(),
-      catalog: catalog.value,
+      catalog: entries,
     });
+  }
+
+  function effectivePreset(profile: PresetProfile): EffectivePreset {
+    return resolveFrom(profile, catalog.value);
+  }
+
+  function pristineEffectivePreset(profile: PresetProfile): EffectivePreset {
+    return resolveFrom(profile, pristineCatalog.value);
   }
 
   /** 不看选择键时的默认那一份（= 选择为空时的生效结果） */
@@ -250,6 +282,7 @@ export function usePresets(): {
     scope?: PresetScope,
     name?: string,
   ): Promise<ChatPreset | null> {
+    // 复制源取套过开关覆写的目录：副本带上玩家当前看到的开关（2026-11-21）
     const source = catalog.value.find((entry) => entry.preset.id === id)?.preset;
     if (!source) return null;
     const now = Date.now();
@@ -285,13 +318,52 @@ export function usePresets(): {
     await removePreset(id);
   }
 
+  /** 写覆写层的唯一出口：空表删键，换新对象让 deep watch 必然看见 */
+  function writeEntryToggles(presetId: string, toggles: PresetEntryToggles): void {
+    const { [presetId]: _dropped, ...rest } = cfg.settings.presetEntryToggles ?? {};
+    cfg.settings.presetEntryToggles =
+      Object.keys(toggles).length > 0 ? { ...rest, [presetId]: toggles } : rest;
+  }
+
+  /**
+   * 批量设置条目开关（identifier → enabled）。
+   * - 只读预设（内容包 / 出厂 / 内置）：只写覆写层，经 `mergePresetEntryToggles` 归一——
+   *   单条开关与原始行相同的键丢掉；`pin: true`（组选择）整组钉住、键全留；归一后为空就删掉该预设的键。
+   *   预设行、播种指纹、选择键都不动。
+   * - 玩家预设：按 identifier 直接改行再落库。
+   * 未知预设 id / 未知 identifier / 五区占位条目一律忽略。
+   */
+  async function setEntriesEnabled(
+    presetId: string,
+    patch: PresetEntryToggles,
+    options: { pin?: boolean } = {},
+  ): Promise<void> {
+    const entry = pristineCatalog.value.find((e) => e.preset.id === presetId);
+    if (!entry) return;
+    if (presetUsesToggleLayer(entry)) {
+      const current = cfg.settings.presetEntryToggles?.[presetId] ?? {};
+      writeEntryToggles(presetId, mergePresetEntryToggles(entry.preset, current, patch, options));
+      return;
+    }
+    const next = setPresetEntriesEnabled(entry.preset, patch);
+    if (next !== entry.preset) await upsertUserPreset(next);
+  }
+
+  /** 清掉某预设的全部开关覆写（回到预设原样） */
+  function resetEntryToggles(presetId: string): void {
+    if (cfg.settings.presetEntryToggles?.[presetId]) writeEntryToggles(presetId, {});
+  }
+
   return {
     presets: presetsRef,
     catalog,
     effectivePreset,
+    pristineEffectivePreset,
     defaultPreset,
     selectPreset,
     duplicateAsUser,
+    setEntriesEnabled,
+    resetEntryToggles,
     loadPresets,
     upsertPreset: upsertUserPreset,
     removePreset: removeUserPreset,
