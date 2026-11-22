@@ -433,6 +433,7 @@ function buildDebugEntry(input: DebugEntryInput): DebugAgentEntry {
     promptRebaseReason: result?.promptRebaseReason,
     directCacheDiagnostics: result?.directCacheDiagnostics,
     finishReason: result?.finishReason,
+    outputWarnings: result?.outputWarnings,
     error: result?.error,
     tokensUsed: result?.tokensUsed ?? 0,
     cacheHit: result?.cacheHit ?? false,
@@ -726,6 +727,7 @@ export class GamePipeline {
       definitions: context.characterDefinitions ?? [],
       sourceTurnKey: this.currentStoryTurnKey,
     });
+    if (built.dropped.length > 0) this.recordDirectBuildDropped(built.dropped);
     // 结构化战斗关闭时不建战斗记录、不追加结算补丁，combat 传 undefined 让休眠记录原样保留
     //（传 null 会清掉存档里的 worldFlags.directCombat）
     const combat: Omit<ReturnType<typeof buildDirectCombat>, 'record'> & {
@@ -764,6 +766,16 @@ export class GamePipeline {
       if (this.generationMode === 'direct_cached') invalidateDirectContext(this.saveId);
       return;
     }
+    // 本次调用真正提交了核心状态才提示（already-accepted 时本草稿的补丁没有应用）：
+    // 只提示一次，缺区块优先；否则合计解析与建补丁两处的丢弃数
+    const droppedCount = (draft.dropped?.length ?? 0) + built.dropped.length;
+    if (draft.updatesMissing)
+      this.notify('本楼只保存了正文：模型没有输出状态更新，可回退后重新生成', 'warning');
+    else if (droppedCount > 0)
+      this.notify(
+        `本楼已接纳；${droppedCount} 项状态更新格式有误已忽略（调试面板可查看）`,
+        'warning',
+      );
     await this.orch?.acceptDirectCache(this.currentTurnMessages);
     // 🔴 核心提交成功 = 本楼已接纳。之后的回合收尾（时间推进 / 角色经历 / 回合计数与快照）
     // 必须跑完，**不再**看取消信号或「是否仍是当前存档」：delta_time 是时间推进的唯一来源，
@@ -820,8 +832,9 @@ export class GamePipeline {
         (row) => row.key === this.currentStoryTurnKey,
       );
       if (!turn) throw new Error('找不到已接纳的来源回合');
+      // 用建补丁后过滤过的版本：指向不存在人物的条目已在 buildDirectPatches 里丢弃并计入提示
       const warnings = await manager.commitCharacterUpdates(
-        draft.characterUpdates,
+        built.characterUpdates,
         storyTurnSource(turn),
       );
       for (const warning of warnings) this.notify(warning, 'warning');
@@ -844,6 +857,31 @@ export class GamePipeline {
       await auxiliary('摘要保存', () => this.commitStoryTurnSummary());
       await auxiliary('历史摘要补建', () => this.backfillMissingStorySummaries());
     }
+  }
+
+  /**
+   * 建补丁时的连锁丢弃：记 warn `direct.output_dropped`，并追加到本回合 direct_main
+   * 调试记录的 outputWarnings（解析期的丢弃已由 generateDirectTurn 写进结果）。
+   */
+  private recordDirectBuildDropped(dropped: string[]): void {
+    logEngine(
+      'warn',
+      'direct.output_dropped',
+      `直出状态更新有 ${dropped.length} 项无法应用，已忽略`,
+      () => ({ notes: dropped }),
+      { agentId: 'direct_main' },
+    );
+    const turnId = this.activeRunId;
+    if (!turnId) return;
+    const invocationId = this.mainInvocationIds.get(`${turnId}\u0000direct_main`);
+    const entry = this.game.agentLogHistory
+      ?.find((turn) => turn.id === turnId)
+      ?.entries.find((e: DebugAgentEntry) => e.invocationId === invocationId);
+    if (!entry) return;
+    this.game.addAgentLogEntry({
+      ...entry,
+      outputWarnings: [...(entry.outputWarnings ?? []), ...dropped],
+    });
   }
 
   /** toast 失败不改变任何结论（单测里常常没有可用的 UI store） */

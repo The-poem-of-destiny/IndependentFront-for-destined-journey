@@ -67,6 +67,7 @@ import { logEngine } from '../runtime/engine-logger';
 // 并行化改造（docs/planning/2026-08-16-pipeline-parallelism.md）：一切 Dexie 写入
 // 经 per-saveId FIFO 队列串行 —— 锁粒度 = 读-改-写区段，锁内禁止再入队列（铁律②）。
 import { withSaveWriteLock } from './state-write-queue';
+import { resolveCharacterByName, validateStatePatch } from './patch-rules';
 import type { CharacterDefinition, CharacterNarrativeUpdate } from '../types/types-character';
 import type { StoryMemorySource } from '../types/types';
 import {
@@ -974,65 +975,8 @@ export class StateManager {
    * - 例外: update_character 允许 value 为空（metadata.action-only 场景）
    */
   private validatePatch(patch: StatePatch): void {
-    if (!patch.op) throw new Error('缺少 op 字段');
-    if (!patch.target) throw new Error('缺少 target 字段');
-
-    // amount 必填
-    const AMOUNT_REQUIRED_OPS: StatePatchOp[] = [
-      'delta_variable',
-      'delta_hp',
-      'delta_mp',
-      'delta_sp',
-      'delta_affection',
-    ];
-    if (AMOUNT_REQUIRED_OPS.includes(patch.op) && patch.amount === undefined) {
-      throw new Error(`${patch.op} 需要 amount 字段`);
-    }
-
-    // value 必填
-    const VALUE_REQUIRED_OPS: StatePatchOp[] = [
-      'set_variable',
-      'insert_variable',
-      'set_hp',
-      'set_mp',
-      'set_sp',
-      'set_location',
-      'update_quest',
-      'remove_quest',
-      'add_item',
-      'remove_item',
-      'update_item',
-      'transfer_item',
-      'equip_item',
-      'unequip_item',
-      'add_skill',
-      'update_skill',
-      'remove_skill',
-      'add_status_effect',
-      'remove_status_effect',
-      'add_character',
-      'rename_character',
-      'add_memory',
-      'update_plot_event',
-      'set_affection',
-      'add_news',
-      // 地图 v1.2：六个地块事实 op 的整份载荷都在 value 里（含寻址用的 `value.tile`），
-      // 缺 value 就连「改哪块地」都不知道 —— 这里拦下比在 handler 里各拦一次好
-      'tile_status_add',
-      'tile_status_remove',
-      'tile_building_add',
-      'tile_building_update',
-      'tile_dev_progress_add',
-      'tile_history_note',
-    ];
-    if (VALUE_REQUIRED_OPS.includes(patch.op) && patch.value === undefined) {
-      throw new Error(`${patch.op} 需要 value 字段`);
-    }
-
-    // move_variable 需要目标路径
-    if (patch.op === 'move_variable' && !patch.metadata?.toPath) {
-      throw new Error('move_variable 需要 metadata.toPath');
-    }
+    // 规则住 patch-rules.ts（直出建补丁时用同一份预判）
+    validateStatePatch(patch);
   }
 
   // ========== 名字解析 (M2 铁律2: 名字解析唯一入口) ==========
@@ -1047,23 +991,8 @@ export class StateManager {
    */
   private async resolveCharacter(key: string): Promise<CharacterState> {
     // 走提交作用域缓存：同一次提交里 patch N 必须解析得到 patch N-1 新增/改名的角色（不变式③）
-    const chars = await this.readCharacters();
-
-    // ① 名字精确匹配
-    const byName = chars.find((c) => c.name === key);
-    if (byName) return byName;
-    const aliases = chars.filter((c) => c.aliases?.includes(key));
-    if (aliases.length === 1) return aliases[0];
-    if (aliases.length > 1) throw new Error(`角色别名不唯一: ${key}`);
-
-    // ② 主角别名
-    if (key === '主角' || key === '玩家') {
-      const player = chars.find((c) => c.type === 'player');
-      if (player) return player;
-    }
-
-    // ③ 找不到
-    throw new Error(`角色不存在: ${key}`);
+    // 解析顺序住 patch-rules.ts（直出建补丁时用同一份预判）
+    return resolveCharacterByName(await this.readCharacters(), key);
   }
 
   /**

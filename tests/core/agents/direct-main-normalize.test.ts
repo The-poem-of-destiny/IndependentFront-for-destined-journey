@@ -184,6 +184,63 @@ describe('generateDirectTurn：剧情开关与纠正日志', () => {
   });
 });
 
+describe('generateDirectTurn：丢弃项与缺区块告警', () => {
+  it('有单元被丢弃时写入 result.outputWarnings，并记 warn direct.output_dropped', async () => {
+    const { input, client } = setup('main');
+    // effects[0] 动作无效 → 只丢这一行，其余照常接纳
+    mockChat(
+      raw({
+        ...updates({}),
+        effects: [{ owner: '旅人', action: 'explode', value: { name: '灼烧' } }],
+      }),
+    );
+    const { draft, result } = await generateDirectTurn(input, client);
+    expect(draft.dropped).toBeDefined();
+    expect(draft.dropped!.some((note) => note.startsWith('effects[0]'))).toBe(true);
+    expect(result.outputWarnings).toEqual(draft.dropped);
+    await flushEngineLog();
+    const [entry] = sink.byCat('direct.output_dropped');
+    expect(entry).toBeDefined();
+    expect(entry.level).toBe('warn');
+    expect(entry.agentId).toBe('direct_main');
+    expect(JSON.parse(entry.payload)).toEqual({ notes: draft.dropped });
+    expect(sink.byCat('direct.updates_missing')).toEqual([]);
+  });
+
+  it('合规输出既不写 outputWarnings 也不记丢弃 / 缺区块告警', async () => {
+    const { input, client } = setup('main');
+    mockChat(raw(updates({})));
+    const { draft, result } = await generateDirectTurn(input, client);
+    expect(draft.dropped).toBeUndefined();
+    expect(result.outputWarnings).toBeUndefined();
+    await flushEngineLog();
+    expect(sink.byCat('direct.output_dropped')).toEqual([]);
+    expect(sink.byCat('direct.updates_missing')).toEqual([]);
+  });
+
+  it('没写 direct_updates 区块时记 warn direct.updates_missing（带结束原因）', async () => {
+    const { input, client } = setup('main');
+    const text =
+      '<maintext>钟声响起。</maintext><character_updates>{"characters":[]}</character_updates>';
+    vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async (): Promise<AgentResult> => ({
+      agentId: 'direct_main',
+      output: text,
+      rawResponse: text,
+      tokensUsed: 0,
+      cacheHit: false,
+      duration: 1,
+      finishReason: 'length',
+    }));
+    const { draft } = await generateDirectTurn(input, client);
+    expect(draft.updatesMissing).toBe(true);
+    await flushEngineLog();
+    const [entry] = sink.byCat('direct.updates_missing');
+    expect(entry).toBeDefined();
+    expect(entry.level).toBe('warn');
+    expect(JSON.parse(entry.payload)).toEqual({ finishReason: 'length' });
+  });
+});
+
 describe('协议「输入状态区块」指向的字段在两种直出里都存在', () => {
   it('非缓存：direct_state.plotSettings.mode 与人物存档字段名', async () => {
     const { input, client } = setup('off');

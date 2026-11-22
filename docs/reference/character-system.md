@@ -96,6 +96,8 @@
 
 📌 2026-11-21 补充（分支 `fix/ai-output-format-contracts`，未真机验证）：`parseCharacterUpdates` 在严格解析前做无损纠正，结果带 `notes`（不算警告）：剥掉 JSON 外的代码围栏或夹带文字；`profile_changes` 只有 `clothing` 时按 `outfit` 保存，文本字段为 null 或空白视为未变化，`aliases` / `identity` / `occupation` 写成字符串时转单元素列表；`chronicle` 缺失或 null 按无经历处理，经历 `time` 缺失或写成 `"this_turn"` 时按本回合，`people` 字符串转列表。作者内容的严格校验口径不变。白名单 `TEXT_FIELDS` / `LIST_FIELDS` 由 `character-updates.ts` 导出，`CHARACTER_UPDATE_PROTOCOL` 由它插值，并补写了角色项只有 `name` / `profile_changes` / `chronicle` 三个键、`chronicle` 必填、经历必填与可选字段。直出模式把这些 notes 加前缀并入草稿 `normalized`（warn `direct.output_normalized`）。协议文字变了，Agent 模式 story 与 Story v2 的会话基线会各重建一次。规则表见[直出模式 · 格式容错与协议补全](direct-generation.md#格式容错与协议补全2026-11-21)。
 
+📌 2026-11-21 更正（同分支，坏项丢弃继续，未真机验证）：直出模式此前把 `character_updates` 缺块、坏 JSON 或任一警告都当作整楼作废；现在与 Agent 模式一样只给出警告（记入草稿 `dropped`，warn `direct.output_dropped`），有效人物照收。名字既无存档实体、本楼实体又被丢弃的行，在 `buildDirectPatches` 里一并丢弃，不会写进不存在的人物。直出协议对应句改为「否则该条更新不会入库」。见[直出模式 · 坏项丢弃继续](direct-generation.md#坏项丢弃继续2026-11-21)。
+
 ## 上下文规则
 
 普通叙事、Delta 与 Story v2 共用输出协议和经历筛选。当前在场、玩家或最近输入／正文明确提及的角色为候选；初次相遇前，明确提及的作者角色也可提供重要初始经历。

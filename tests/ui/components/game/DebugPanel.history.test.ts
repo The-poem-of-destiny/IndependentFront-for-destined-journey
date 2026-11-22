@@ -131,6 +131,33 @@ describe('DebugPanel · 缓存直出记账', () => {
   });
 });
 
+describe('DebugPanel · 已忽略项', () => {
+  it('条目带 outputWarnings 时在结束原因之后逐条列出，缺席时不渲染', async () => {
+    const game = useGameStore();
+    const dropped = entry('run-drop', 'direct_main', 0);
+    dropped.finishReason = 'stop';
+    dropped.outputWarnings = [
+      'effects[0]：效果动作无效，已忽略',
+      'character_updates：人物 幽灵 缺少完整实体，已忽略',
+    ];
+    game.agentLogHistory.push(
+      turn('run-ok', 1, [entry('run-ok', 'direct_main', 0)]),
+      turn('run-drop', 2, [dropped]),
+    );
+
+    const wrapper = mount(DebugPanel);
+    const block = wrapper.get('[data-testid="output-warnings"]');
+    expect(block.text()).toContain('已忽略 2 项');
+    expect(block.findAll('li').map((li) => li.text())).toEqual(dropped.outputWarnings);
+    expect(wrapper.html().indexOf('结束原因')).toBeLessThan(
+      wrapper.html().indexOf('data-testid="output-warnings"'),
+    );
+
+    await wrapper.find('.debug-turn-select').setValue('run-ok');
+    expect(wrapper.find('[data-testid="output-warnings"]').exists()).toBe(false);
+  });
+});
+
 describe('DebugPanel · Story 分区（新模式）', () => {
   it('所选回合带 Story 新模式诊断时显示分区用量、召回与补建；旧模式回合不显示', async () => {
     const game = useGameStore();

@@ -2377,6 +2377,8 @@ export interface AgentResult {
   promptRebaseReason?: string;
   /** 🆕 模型停止原因（stop=正常结束 / length=输出截断 / tool_calls=工具调用）—— 大纲诊断等用它区分「截断」与「格式坏」 */
   finishReason?: string;
+  /** 输出里被按单元丢弃的内容（中文，带路径，形如「路径：原因，已忽略」）；无丢弃时缺席 */
+  outputWarnings?: string[];
   duration: number; // ms
   error?: string;
   /** 🆕 Agentic: 本 Agent 产生的所有工具调用记录 */
@@ -2437,6 +2439,8 @@ export interface DebugAgentEntry {
   directCacheDiagnostics?: DirectCacheDiagnostics;
   /** 上游给的结束原因（stop / length / content_filter…）；旧记录缺席 */
   finishReason?: string;
+  /** 输出里被按单元丢弃、已忽略的内容（中文，带路径）；无丢弃或旧记录缺席 */
+  outputWarnings?: string[];
   error?: string;
   tokensUsed: number;
   cacheHit: boolean;

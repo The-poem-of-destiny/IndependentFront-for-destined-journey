@@ -19,6 +19,8 @@
 
 📌 2026-11-21 补充（分支 `fix/ai-output-format-contracts`，未真机验证）：`buildDirectProtocol` 补齐了登神条目、状态、loadout 登神、装备槽、物品修改键、效果、剧情开关等形状说明，`CHARACTER_UPDATE_PROTOCOL` 也补了角色项与经历字段；`DIRECT_CACHE_PROTOCOL` 未改（它只描述输入帧）。固定前缀因此改变，每个 `direct_cached` 存档会自动冷建一次会话，会话协议标识仍是 `direct-cache-v1`。校验前的无损纠正（warn `direct.output_normalized`）与缓存直出同样适用。规则见[直出模式 · 格式容错与协议补全](direct-generation.md#格式容错与协议补全2026-11-21)。
 
+📌 2026-11-21 再补（同分支，坏项丢弃继续，未真机验证）：`buildDirectProtocol` 的措辞又改了一次（无变化的 state 子键与 `fp` 整个省略、不写 `{}` 占位；`character_updates` 名字不存在改为「该条更新不会入库」），固定前缀再次改变，每个 `direct_cached` 存档会再冷建一次会话。坏项只丢最小单元、本楼照常接纳，因此这类输出不再算一次被拒输出；仍整楼拒收的情形与原先一样按被拒处理。规则见[直出模式 · 坏项丢弃继续](direct-generation.md#坏项丢弃继续2026-11-21)。
+
 旧档无标签仍按 Agent 运行。缓存主生成的配置键为 `direct_cached`，执行与世界书权限身份仍为 `direct_main`，无需另授一份世界书读取权限。
 
 2026-11-14 默认预设：内容包在 `agentDefaults.agents.direct_cached.presetId` 点名缓存直出的默认预设（预设本体放进包的 `presets` 或内嵌在同一条目），缺席时回退引擎内置的「直出 · 缓存优化」；与无缓存直出（`direct_main.presetId`）各自独立。story 的默认以 `agentDefaults.agents.story.presetId` 为准，不取 `presets[0]`。设置页「预设」下拉里引擎内置预设始终可选，详见[直出模式 · 各模式的默认预设怎么声明](direct-generation.md#各模式的默认预设怎么声明2026-11-14)。

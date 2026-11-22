@@ -131,6 +131,8 @@ flowchart LR
 
 📌 2026-11-21 补注（分支 `fix/ai-output-format-contracts`）：上表「封闭的 v1 类型与校验器」现由 `src/core/agents/direct-contract.ts` 的契约常量统一供给（校验器、归一化与协议文字共用）；严格校验前加了一层无损归一化（`direct-normalize.ts`，记 `normalized` 与 warn `direct.output_normalized`），意思明确的形状偏差不再整楼作废。规则见 [直出模式 · 格式容错与协议补全](../reference/direct-generation.md#格式容错与协议补全2026-11-21)。
 
+📌 2026-11-21 更正（同分支，坏项丢弃继续）：上文「所有顶层分区必须存在」与 2026-11-20 注记里的「拒楼」已收窄 —— 校验器只丢出错的最小单元（单行、单个子键、单个实体，记入草稿 `dropped`），正文与其余更新照常接纳；零个 `direct_updates` 开标签按空更新接纳。仍整楼拒收的只剩正文信封问题、`direct_updates` 区块不唯一或不是 JSON 对象、原型污染键、world 禁用段、结构化战斗下的坏 `combat` 与提交时的账本事务失败。见 [直出模式 · 坏项丢弃继续](../reference/direct-generation.md#坏项丢弃继续2026-11-21)。
+
 `character_updates` 沿用现有协议：恰好一个完整块，无变化也给空 `characters`；只负责档案／经历，不承担数值实体。尚无 `CharacterState` 的首次登场人物，包括已选中的作者角色，必须同楼具备完整 entities 数据，否则本楼结构失败，不自动补调 entity_gen。仅在正文提及而不需要建立人物状态者，不强制创建实体。
 
 角色项的 placement 明确本楼提交后的初始位置与在场状态，传给现有组装函数的 overrides；本楼从 A 到 B 遇见的人物不能默认落在调用前的 A。角色 ID、saveId、作者定义绑定与 introducedBy 来源由代码填写，模型不产生这些元数据。

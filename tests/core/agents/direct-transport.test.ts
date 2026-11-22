@@ -412,7 +412,10 @@ it.each([
       }
       return failure === 'provider failure'
         ? new Response('Unavailable', { status: 503 })
-        : streamResponse(true, '<maintext>缺少更新块的回复。</maintext>');
+        : streamResponse(
+            true,
+            '<maintext>缺少更新块的回复。</maintext><direct_updates>{坏掉的</direct_updates>',
+          );
     });
     input.context.userInput = '失败的尝试';
     await expect(generateDirectTurn(input, client)).rejects.toThrow();

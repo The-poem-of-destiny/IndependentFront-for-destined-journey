@@ -69,9 +69,10 @@ describe('直出协议：2026-11-21 格式契约补全', () => {
     expect(text).toContain('不写 null');
   });
 
-  it.each(variants)('%s：character_updates 名字须有实体，任一警告整楼作废', (_label, text) => {
+  it.each(variants)('%s：character_updates 名字须有实体，否则该条不入库', (_label, text) => {
     expect(text).toContain('character_updates 里的每个 name 必须已有实体或由本楼 entities 新建');
-    expect(text).toContain('该块任一警告同样作废');
+    expect(text).toContain('否则该条更新不会入库');
+    expect(text).not.toContain('整楼作废');
   });
 
   it.each(variants)('%s：state 取值类型与 diceUsed 非空', (_label, text) => {

@@ -549,7 +549,7 @@ describe.each(['direct', 'direct_cached'] as const)(
         const ok = typeof valid === 'function' ? valid() : valid;
         const raw =
           this.agentId === 'direct_main'
-            ? `<maintext>旅人继续前行。</maintext><character_updates>{"characters":[]}</character_updates>${ok ? '<direct_updates>{"version":1,"world":{},"time":{"delta_time":0},"entities":[],"state":{"characters":{"delta":[{"name":"旅人","path":"hp","amount":-10}]}},"effects":[],"plot":{},"combat":null,"diceUsed":[]}</direct_updates>' : ''}`
+            ? `<maintext>旅人继续前行。</maintext><character_updates>{"characters":[]}</character_updates>${ok ? '<direct_updates>{"version":1,"world":{},"time":{"delta_time":0},"entities":[],"state":{"characters":{"delta":[{"name":"旅人","path":"hp","amount":-10}]}},"effects":[],"plot":{},"combat":null,"diceUsed":[]}</direct_updates>' : '<direct_updates>{坏掉的</direct_updates>'}`
             : this.agentId === 'memory_summary'
               ? JSON.stringify({ segments: [{ content: '旅人继续前行。' }] })
               : '{}';
@@ -763,6 +763,108 @@ describe.each(['direct', 'direct_cached'] as const)(
           .every((m) => m.storyTurnStatus === 'accepted'),
       ).toBe(true);
       expect(toast).toHaveBeenCalledWith(expect.stringContaining('本楼已接纳'), 'warning', 6000);
+    });
+
+    function directReply(mainRaw: string) {
+      return vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (this: any) {
+        return result(
+          this.agentId,
+          this.agentId === 'direct_main'
+            ? mainRaw
+            : this.agentId === 'memory_summary'
+              ? JSON.stringify({ segments: [{ content: '旅人继续前行。' }] })
+              : '{}',
+        );
+      });
+    }
+
+    it('有丢弃项时接纳后只提示一次合计数，角色更新用过滤后的版本，调试记录带丢弃项', async () => {
+      const { game, pipeline } = await directFixture();
+      // 解析期丢 1 项（effects[0] 动作无效）+ 建补丁时丢 1 项（角色更新指向不存在的人物）
+      const characterUpdates = JSON.stringify({
+        characters: [{ name: '幽灵', profile_changes: { goals: '游荡' } }],
+      });
+      const updates = JSON.stringify({
+        version: 1,
+        world: {},
+        time: { delta_time: 0 },
+        entities: [],
+        state: { characters: { delta: [{ name: '旅人', path: 'hp', amount: -10 }] } },
+        effects: [{ owner: '旅人', action: 'explode', value: { name: '灼烧' } }],
+        plot: {},
+        combat: null,
+        diceUsed: [],
+      });
+      directReply(
+        `<maintext>旅人继续前行。</maintext><character_updates>${characterUpdates}</character_updates><direct_updates>${updates}</direct_updates>`,
+      );
+      const commitUpdates = vi.spyOn(StateManager.prototype, 'commitCharacterUpdates');
+      expect(await pipeline.run('前进')).toBe(true);
+      expect(toast).toHaveBeenCalledOnce();
+      expect(toast).toHaveBeenCalledWith(
+        '本楼已接纳；2 项状态更新格式有误已忽略（调试面板可查看）',
+        'warning',
+        6000,
+      );
+      expect(commitUpdates).toHaveBeenCalledOnce();
+      expect(commitUpdates.mock.calls[0][0]).toEqual([]);
+      // 其余更新照常接纳
+      expect((await getDatabase().characters.get('player'))?.hp).toBe(70);
+      const entry = game.agentLogHistory
+        .flatMap((turn) => turn.entries)
+        .find((e) => e.agentId === 'direct_main');
+      expect(entry?.outputWarnings).toHaveLength(2);
+      expect(entry?.outputWarnings?.[0]).toMatch(/^effects\[0\]/);
+      expect(entry?.outputWarnings?.[1]).toContain('幽灵');
+    });
+
+    it('本楼已被接纳过（already-accepted）时不提示丢弃项', async () => {
+      const { pipeline } = await directFixture();
+      const characterUpdates = JSON.stringify({
+        characters: [{ name: '幽灵', profile_changes: { goals: '游荡' } }],
+      });
+      const updates = JSON.stringify({
+        version: 1,
+        world: {},
+        time: { delta_time: 0 },
+        entities: [],
+        state: {},
+        effects: [{ owner: '旅人', action: 'explode', value: { name: '灼烧' } }],
+        plot: {},
+        combat: null,
+        diceUsed: [],
+      });
+      directReply(
+        `<maintext>旅人继续前行。</maintext><character_updates>${characterUpdates}</character_updates><direct_updates>${updates}</direct_updates>`,
+      );
+      const commit = vi
+        .spyOn(StateManager.prototype, 'commitDirectTurn')
+        .mockResolvedValueOnce('already-accepted');
+      expect(await pipeline.run('前进')).toBe(true);
+      expect(commit).toHaveBeenCalledOnce();
+      expect(toast).not.toHaveBeenCalled();
+    });
+
+    it('模型没写状态更新区块时只保存正文，并给出另一句提示', async () => {
+      const { pipeline } = await directFixture();
+      directReply(
+        '<maintext>旅人继续前行。</maintext><character_updates>{"characters":[]}</character_updates>',
+      );
+      expect(await pipeline.run('前进')).toBe(true);
+      expect(toast).toHaveBeenCalledOnce();
+      expect(toast).toHaveBeenCalledWith(
+        '本楼只保存了正文：模型没有输出状态更新，可回退后重新生成',
+        'warning',
+        6000,
+      );
+      expect((await getDatabase().characters.get('player'))?.hp).toBe(80);
+    });
+
+    it('没有丢弃项且有状态更新时不提示', async () => {
+      const { pipeline } = await directFixture();
+      directNetwork();
+      expect(await pipeline.run('前进')).toBe(true);
+      expect(toast).not.toHaveBeenCalled();
     });
 
     it('finishes turn bookkeeping when the run is cancelled right after the core commit', async () => {
