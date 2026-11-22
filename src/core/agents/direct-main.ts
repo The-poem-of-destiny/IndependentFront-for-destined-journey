@@ -26,7 +26,7 @@ import type { ChatRequest } from './agent-client';
 import { buildAgentMessagesAsync } from '../prompts/agent-templates';
 import { buildStoryContextV2Messages, type StoryContextV2Input } from '../prompts/story-context-v2';
 import { selectStoryLore } from '../content/lore-selection';
-import { buildDirectProtocol } from '../prompts/direct-prompt';
+import { buildDirectProtocol, DIRECT_OUTPUT_REMINDER } from '../prompts/direct-prompt';
 import { resolveTemplateWithGlobals } from '../prompts/template-resolver';
 import { buildLlmRequest } from '../api/llm-adapter';
 import {
@@ -188,7 +188,7 @@ export async function generateDirectTurn(
     ...messages,
     {
       role: 'user',
-      content: `<direct_state>\n${JSON.stringify(state)}\n</direct_state>\n<dice_pool>\n${diceLines.join('\n')}\n</dice_pool>${config.tailPrompt ? `\n${config.tailPrompt}` : ''}`,
+      content: `<direct_state>\n${JSON.stringify(state)}\n</direct_state>\n<dice_pool>\n${diceLines.join('\n')}\n</dice_pool>${config.tailPrompt ? `\n${config.tailPrompt}` : ''}\n${DIRECT_OUTPUT_REMINDER}`,
     },
   ]);
   const request: ChatRequest = {
@@ -267,6 +267,7 @@ export async function generateDirectTurn(
         dice_pool: diceLines,
         tailPrompt: config.tailPrompt ?? '',
       },
+      tailReminder: DIRECT_OUTPUT_REMINDER,
       rebuild: input.cache.rebuild,
       outputBudget: budget,
       contextWindowTokens: endpoint.contextWindowTokens,

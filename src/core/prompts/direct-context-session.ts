@@ -159,6 +159,11 @@ export async function prepareDirectContext(input: {
    */
   turnContext: Record<string, unknown>;
   /**
+   * 尾部提醒：原样接在 `</turn_context>` 之后，随不留存的尾部发出，不进签名、不进留存 transcript。
+   * 刻意不放进 `turnContext`（那里会被排序并按 JSON 转义）。不传时尾部逐字节不变。
+   */
+  tailReminder?: string;
+  /**
    * 重建时机（用户设置）：先经 `normalizeDirectCacheRebuild` 收敛。
    * 刻意不进会话签名：调阈值只影响之后的判定，不让当前会话立即重建。
    */
@@ -207,7 +212,7 @@ export async function prepareDirectContext(input: {
       content: `<turn_context>\n${serializeDirectContext({
         ...input.turnContext,
         ...(Object.keys(current).length ? { current } : {}),
-      })}\n</turn_context>`,
+      })}\n</turn_context>${input.tailReminder ? `\n${input.tailReminder}` : ''}`,
     };
   };
   const freshTail = tailFor(sections);

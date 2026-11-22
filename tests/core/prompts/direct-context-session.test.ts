@@ -127,6 +127,53 @@ describe('accepted direct context', () => {
     expect(assistant).not.toHaveProperty('native');
   });
 
+  it('不传 tailReminder 时尾部逐字节不变，以 </turn_context> 结尾', async () => {
+    const base = input();
+    const first = await prepareDirectContext(base);
+    const tail = first.messages[first.messages.length - 1].content!;
+    expect(tail).toBe(
+      `<turn_context>\n${serializeDirectContext(base.turnContext)}\n</turn_context>`,
+    );
+  });
+
+  it('传入 tailReminder 时原样接在 </turn_context> 之后，不进留存部分与接纳后的会话', async () => {
+    const plain = await prepareDirectContext(input());
+    invalidateDirectContext(saveId);
+    let record: DirectCacheRecord | undefined;
+    installDirectCacheStore({
+      load: async () => undefined,
+      save: async (value) => {
+        record = structuredClone(value);
+      },
+      delete: async () => {},
+    });
+    const reminder = '格式提醒 <maintext>"引号"\\反斜杠';
+    const first = await prepareDirectContext({ ...input(), tailReminder: reminder });
+    const tail = first.messages[first.messages.length - 1].content!;
+    expect(tail).toMatch(/^<turn_context>/);
+    expect(tail).toBe(`${plain.messages[plain.messages.length - 1].content}\n${reminder}`);
+    expect(first.diagnostics.tailChars).toBe(tail.length);
+    expect(first.retainedCount).toBe(first.messages.length - 1);
+    expect(first.messages.slice(0, first.retainedCount)).toEqual(
+      plain.messages.slice(0, plain.retainedCount),
+    );
+    await acceptDirectContext(first, { acceptedMessages: [message()] });
+    expect(JSON.stringify(record!.transcript)).not.toContain('格式提醒');
+    const next = { ...input(), tailReminder: reminder, playerInput: 'turn 2' };
+    next.history = [message()];
+    const second = await prepareDirectContext(next);
+    expect(second.rebaseReason).toBeUndefined();
+    expect(second.messages.slice(0, first.retainedCount)).toEqual(
+      first.messages.slice(0, first.retainedCount),
+    );
+    expect(second.messages[second.messages.length - 1].content!.endsWith(`\n${reminder}`)).toBe(
+      true,
+    );
+    expect(second.diagnostics.tailChars).toBe(
+      second.messages[second.messages.length - 1].content!.length,
+    );
+  });
+
   it('冷建请求的尾部不带 current：现值已整份在 set 里', async () => {
     const first = await prepareDirectContext(input());
     const delta = directContext(first.messages[first.retainedCount - 1].content);

@@ -1691,13 +1691,17 @@ export interface SaveSlot {
     characterDefinitions?: import('./types-character').CharacterDefinition[];
     /** Phase 10h: 创角时的开场提示词文本 */
     openingPrompt?: string;
-    /** Phase 10h: 开场 Prompt 是否已发送给 AI */
+    /**
+     * Phase 10h: 开场 Prompt 是否已发送给 AI。
+     * 直出模式下为 true 且历史里已有被接纳的 assistant 正文后，buildContext 不再供
+     * `ctx.openingPrompt`（不随 direct_state 重发）。
+     */
     openingPromptConsumed?: boolean;
     /**
      * 开局装备/道具/技能是否已在建档时结构化落库（`content/start-loadout.ts` 的 `buildStartLoadout`）。
      *
      * true = 新档：初始技能已在主角 `skills` 里，管线不再把 openingPrompt 交给
-     * `{{SKILL_STATE}}` 重解析、也不在直出后续回合重发（开场提示词仍作首条用户消息发送）。
+     * `{{SKILL_STATE}}` 重解析（开场提示词仍作首条用户消息发送）。
      * 缺席 = 旧档：沿用「开场提示词声明 → dispatcher 发 entity_gen 请求」的旧路径。
      */
     startLoadoutPersisted?: boolean;
@@ -2202,12 +2206,13 @@ export interface AgentContext {
   /**
    * 存档开局提示词原文（save.metadata.openingPrompt）——含捏人页选的初始技能/装备
    * 自然语言声明（兼容旧档的 `--- 初始技能 ---` 分隔段）。request_dispatcher 的 {{SKILL_STATE}} 用它
-   * 补出「主角落库 skills 为空」时的初始技能清单，引导发 `<entity_gen_request type="skill">`；
-   * 直出模式在后续回合也会把它随 `direct_state` 重发。
+   * 补出「主角落库 skills 为空」时的初始技能清单，引导发 `<entity_gen_request type="skill">`。
    *
    * 🔴 只有旧档才供值：`metadata.startLoadoutPersisted === true` 的新档开局清单已在建档时落库，
-   * game-pipeline 的 buildContext 对它恒给 undefined（开场提示词本身仍经 sendOpeningPrompt 作首条
-   * 用户消息发送，走 `userInput`，不走这里）。
+   * game-pipeline 的 buildContext 对它恒给 undefined；直出模式（direct / direct_cached）在
+   * `metadata.openingPromptConsumed === true` 且历史里已有被接纳的 assistant 正文后同样给 undefined，
+   * 不随 `direct_state` 重发（首轮中断、开局回合从未被接纳时仍供值；开场提示词本身仍经
+   * sendOpeningPrompt 作首条用户消息发送，走 `userInput`）。
    */
   openingPrompt?: string;
 
@@ -2332,7 +2337,7 @@ export interface DirectCacheDiagnostics {
   baselineChars: number;
   /** 触发重建的增长倍数上限（requestChars / baselineChars 超过它即重建） */
   growthLimit: number;
-  /** 不留存的本轮尾部（召回、骰池、尾部指令、战斗与资源现值）字符数 */
+  /** 不留存的本轮尾部（召回、骰池、尾部指令、战斗与资源现值、输出格式提醒）字符数 */
   tailChars: number;
   /** 本次 direct_context 发送的分区，按字符数降序，至多 30 项；remove 的字符数记 0 */
   sections: Array<{ key: string; action: 'set' | 'remove'; chars: number }>;

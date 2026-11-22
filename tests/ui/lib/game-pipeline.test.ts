@@ -989,6 +989,64 @@ describe('buildContext — openingPrompt 与开局清单落库标记', () => {
     const ctx = (pipeline as any).buildContext('输入');
     expect(ctx.openingPrompt).toBe('OPENING');
   });
+
+  const ACCEPTED_TURN = [
+    { id: 'u1', role: 'user', content: 'OPENING', storyTurnStatus: 'accepted' },
+    { id: 'a1', role: 'assistant', content: '开局正文', storyTurnStatus: 'accepted' },
+  ];
+
+  function legacyPipeline(
+    mode: 'agent' | 'direct' | 'direct_cached',
+    consumed: boolean,
+    messages: unknown[] = ACCEPTED_TURN,
+  ) {
+    const pipeline = makePipeline({
+      openingPrompt: 'OPENING',
+      messages,
+      activeSave: {
+        id: 'save-test',
+        metadata: { characterName: '主角', openingPromptConsumed: consumed },
+      },
+    });
+    (pipeline as any).generationMode = mode;
+    return pipeline;
+  }
+
+  it.each(['direct', 'direct_cached'] as const)(
+    '旧档 %s 模式开局提示词已认领且已有被接纳正文后不再供值',
+    (mode) => {
+      const ctx = (legacyPipeline(mode, true) as any).buildContext('第三轮输入');
+      expect(ctx.openingPrompt).toBeUndefined();
+    },
+  );
+
+  it.each(['direct', 'direct_cached'] as const)(
+    '旧档 %s 模式已认领但开局回合从未被接纳（首轮中断）时仍供原文',
+    (mode) => {
+      const ctx = (
+        legacyPipeline(mode, true, [
+          { id: 'u1', role: 'user', content: 'OPENING', storyTurnStatus: 'failed' },
+          { id: 'a1', role: 'assistant', content: '半截正文', storyTurnStatus: 'failed' },
+        ]) as any
+      ).buildContext('新输入');
+      expect(ctx.openingPrompt).toBe('OPENING');
+    },
+  );
+
+  it('旧档直出模式首轮（已认领、尚无历史）仍供值，由 direct-main 因与 userInput 等值省略', () => {
+    const ctx = (legacyPipeline('direct', true, []) as any).buildContext('OPENING');
+    expect(ctx.openingPrompt).toBe('OPENING');
+  });
+
+  it('旧档直出模式尚未认领时照旧供值', () => {
+    const ctx = (legacyPipeline('direct', false) as any).buildContext('输入');
+    expect(ctx.openingPrompt).toBe('OPENING');
+  });
+
+  it('Agent 模式即使已认领也照旧供值（{{SKILL_STATE}} 仍要读）', () => {
+    const ctx = (legacyPipeline('agent', true) as any).buildContext('输入');
+    expect(ctx.openingPrompt).toBe('OPENING');
+  });
 });
 
 describe('buildAgentConfigs — story 流式投影', () => {

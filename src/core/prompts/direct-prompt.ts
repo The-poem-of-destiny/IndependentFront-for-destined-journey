@@ -29,6 +29,15 @@ export const DIRECT_TEMPLATE =
   '{{SYS_PROMPT}}\n{{LORE_BOOK_STATIC}}\n{{LORE_BOOK_DYNAMIC}}\n{{AGENT.MEMORY_RECALL}}\n{{NARRATIVE}}\n{{MAP_CONTEXT}}\n{{RANDOM_EVENTS}}\n{{USER_INPUT}}';
 
 /**
+ * 直出请求（direct 与 direct_cached）的最后一段文字：简短的输出格式提醒。
+ * 请求末尾若只剩骰池数字，部分模型会输出缺外壳的裸正文、整楼被拒收；
+ * 细则仍以开头的输出契约为准，这里只重申外壳与顺序。
+ * 缓存直出中它随不留存的尾部发出，不进会话签名与留存 transcript。
+ */
+export const DIRECT_OUTPUT_REMINDER =
+  '输出格式提醒（本轮回复必须遵守，细则见开头的输出契约）：依次输出恰好一个 <maintext>正文</maintext>（正文内用独占一行的 <beat/> 分节）、可选的 <options>…</options>、恰好一个 <character_updates>JSON</character_updates>、最后恰好一个 <direct_updates>JSON</direct_updates>。每个外壳标签都要成对写出，不能省略，也不要只输出裸正文。若预设另要求在正文之前公开思考块，把它放在 <maintext> 之前。';
+
+/**
  * 结构化战斗开启时的 combat 契约行（源自旧版 DIRECT_PROTOCOL 该行；
  * 📌 2026-11-21 补了 round 取值与 statusEffects 条目形状，行首不变）。
  */

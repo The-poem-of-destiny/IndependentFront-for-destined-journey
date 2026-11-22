@@ -789,7 +789,7 @@ function formatJson(value: unknown): string {
                     <td colspan="4" class="debug-empty-sub">本楼未发送任何分区</td>
                   </tr>
                   <tr>
-                    <th>不留存的本轮尾部（召回、骰池、尾部指令、战斗与资源现值）</th>
+                    <th>不留存的本轮尾部（召回、骰池、尾部指令、战斗与资源现值、输出格式提醒）</th>
                     <td>—</td>
                     <td>{{ dc.tailChars }}</td>
                     <td>{{ dc.tailTokens }}</td>

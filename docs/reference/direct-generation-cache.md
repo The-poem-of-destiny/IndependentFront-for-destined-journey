@@ -64,6 +64,8 @@
 
 协议文字随之修改，已有缓存会话会自动冷建一次。真实模型下的输出格式稳定性与缓存收益尚未验证。
 
+📌 2026-11-22 更正（上一条「后一条是 `turn_context`」，分支 `fix/direct-tail-and-opening`，未真机验证）：不留存的尾部消息现在是 `turn_context` 后接一段固定的输出格式提醒（`direct-prompt.ts` 的 `DIRECT_OUTPUT_REMINDER`，经 `prepareDirectContext` 的可选参数 `tailReminder` 原样接在 `</turn_context>` 之后）。提醒和 `turn_context` 一样只随本轮发出，不留存进 transcript，不进会话签名，协议常量也没变，所以已有存档**不冷建**。尾部字符数诊断（`tailChars`）包含提醒。不传 `tailReminder` 时尾部逐字节不变。起因与提醒内容见[直出模式 · 尾部格式提醒与开局提示词不再重发](direct-generation.md#尾部格式提醒与开局提示词不再重发2026-11-22)。同一分支里直出旧档认领开局提示词后不再重发 `openingPrompt`，缓存直出旧档只会多一次 `direct_context.remove: ["openingPrompt"]`，也不冷建。
+
 📌 2026-11-17 修正：上文「每轮重新确认当前战斗与人物资源」与 2026-11-14 条里的「战斗与资源」，在 `directStructuredCombat` 关闭（当前唯一可用状态）时只剩人物资源：`direct_context` 与 `turn_context.current` 都不再带 `combat` 键，战斗只在正文里。
 
 📌 2026-11-20 修正：`character/角色名/profile` 不再带 `ageAnchor` 原值，也不再带开局时冻结的 `customFields.age`，改为经 `projectCharacterAge`（`src/core/character/character-age.ts`）按当前游戏时间现算的 `age`；只有给定了生日才另带 `birthday: 'M月D日'`，兜底的 1 月 1 日不展示。协议文字加一句：`age` 与 `birthday` 由代码现算，只读。每过一个生日，该角色的 `profile` 分区重发一次。协议文字与 `profile` 内容都变了，已有 `direct_cached` 存档会自动冷建一次。

@@ -106,6 +106,12 @@ prompt 的拼装顺序与注入内容**。首轮 / 重基线仍由 `buildAgentMe
 > `metadata.startLoadoutPersisted: true`，`game-pipeline` 的 buildContext 对这类存档恒给
 > `openingPrompt: undefined` —— 不再从开场提示词重解析初始技能，直出模式也不在后续回合随
 > `direct_state` 重发开场提示词。开场提示词本身仍作首条用户消息（`{{USER_INPUT}}`）发送。
+>
+> 📌 **2026-11-22**（分支 `fix/direct-tail-and-opening`，未真机验证）：直出模式（direct / direct_cached）
+> 下，旧档在 `metadata.openingPromptConsumed === true`（开局提示词已认领）**且**过滤后的历史里已有
+> 被接纳的 assistant 正文时，buildContext 也给 `openingPrompt: undefined`，不再每轮随 `direct_state` 重发
+> （首轮中断、开局回合从未被接纳的档仍供原文）。Agent 模式不变：`{{SKILL_STATE}}` 仍读它。
+> 已接受的局限：旧档开局清单若未结构化落库，此后只留在历史首条消息与记忆里，滚出窗口后模型看不到。
 
 ### Agent 通信占位符（6 个，从 `ctx.agentOutputs` 读取）
 
