@@ -11,7 +11,10 @@ import {
   type DirectTurnDraft,
 } from '../../../src/core/agents/direct-output';
 import type { DirectDicePool } from '../../../src/core/agents/direct-dice';
-import { buildDirectProtocol } from '../../../src/core/prompts/direct-prompt';
+import {
+  buildDirectProtocol,
+  DIRECT_OUTPUT_REMINDER,
+} from '../../../src/core/prompts/direct-prompt';
 import { CHARACTER_UPDATE_PROTOCOL } from '../../../src/core/character/character-chronicle';
 import { LIST_FIELDS, TEXT_FIELDS } from '../../../src/core/character/character-updates';
 import {
@@ -211,6 +214,30 @@ describe('闸门 1：协议覆盖契约常量与枚举词表', () => {
     const off = buildDirectProtocol(false).split('\n');
     expect(off).toHaveLength(on.length);
     expect(on.filter((line, i) => line !== off[i])).toHaveLength(1);
+  });
+});
+
+describe('闸门：直出请求末尾的输出格式提醒', () => {
+  const TAGS = ['maintext', 'options', 'character_updates', 'direct_updates'] as const;
+  const firstOrder = (text: string) =>
+    TAGS.map((tag) => ({ tag, at: text.indexOf(`<${tag}>`) }))
+      .filter((t) => t.at >= 0)
+      .sort((a, b) => a.at - b.at)
+      .map((t) => t.tag);
+
+  it.each(variants)('外壳标签首次出现顺序与协议「输出顺序：」行一致（%s）', (_, structured) => {
+    const line = buildDirectProtocol(structured)
+      .split('\n')
+      .find((l) => l.startsWith('输出顺序：'));
+    expect(line).toBeDefined();
+    expect(firstOrder(line!)).toEqual([...TAGS]);
+    expect(firstOrder(DIRECT_OUTPUT_REMINDER)).toEqual([...TAGS]);
+  });
+
+  it('提醒要求 <beat/> 分节、足够短，且不提「思维链」', () => {
+    expect(DIRECT_OUTPUT_REMINDER).toContain('<beat/>');
+    expect(DIRECT_OUTPUT_REMINDER.length).toBeLessThanOrEqual(300);
+    expect(DIRECT_OUTPUT_REMINDER).not.toContain('思维链');
   });
 });
 

@@ -1951,11 +1951,24 @@ export class GamePipeline {
       //    需要读到捏人页选的初始技能声明（存在 openingPrompt 里），否则主角 skills 落库为空的
       //    开局永远发不出 `<item_gen_request itemType="skill">`，技能没有 modifiers/automata。
       //    新档（metadata.startLoadoutPersisted）开局清单已在建档时结构化落库：不再供值，
-      //    {{SKILL_STATE}} 不重解析、直出后续回合不重发。开场提示词本身仍由 sendOpeningPrompt
-      //    作首条用户消息（userInput）发送，不受影响。旧档缺这个标记，行为不变。
-      openingPrompt: this.game.activeSave?.metadata?.startLoadoutPersisted
-        ? undefined
-        : (this.game.openingPrompt ?? undefined),
+      //    {{SKILL_STATE}} 不重解析。开场提示词本身仍由 sendOpeningPrompt 作首条用户消息
+      //    （userInput）发送，不受影响。
+      //    直出模式（direct / direct_cached）在开局提示词已被认领（openingPromptConsumed）
+      //    **且**上面过滤后的 history 里已有被接纳的 assistant 正文时也不再供值：旧档缺
+      //    startLoadoutPersisted，以前每轮都把整段开局提示词塞进 direct_state.openingPrompt，
+      //    其中「首轮叙事请以开局剧情为舞台…」到第 N 轮仍在说「这是首轮」。
+      //    只看认领标记不够：sendOpeningPrompt 先乐观认领再发，首轮生成中关页 / 刷新会留下
+      //    「已认领但开局回合从未被接纳」的档 —— 开局那条 user 消息是 pending/failed、被 history
+      //    过滤掉，若此时不供值，玩家直接输入新内容时模型就完全看不到开局设定。
+      //    首轮不受影响：此时 history 尚无被接纳正文，照旧供值，direct-main 因与 userInput 等值而省略。
+      //    Agent 模式行为不变：{{SKILL_STATE}} 仍要读它（直出不跑 request_dispatcher）。
+      openingPrompt:
+        this.game.activeSave?.metadata?.startLoadoutPersisted ||
+        (isDirectMode(this.generationMode) &&
+          this.game.activeSave?.metadata?.openingPromptConsumed === true &&
+          history.some((m) => m.role === 'assistant' && !!m.content?.trim()))
+          ? undefined
+          : (this.game.openingPrompt ?? undefined),
       // 工坊 P2 (ADR-30 D4/D9): stats 只读投影每回合构建一次，同回合多 Agent 装配复用
       //（各 pass 在 buildAgentMessages 内再克隆一份，杜绝跨 pass 写泄漏）
       statData: buildStatData({

@@ -12,6 +12,7 @@ import {
 import {
   createDirectPreset,
   createCachedDirectPreset,
+  DIRECT_OUTPUT_REMINDER,
 } from '../../../src/core/prompts/direct-prompt';
 import { projectStreamingStory } from '../../../src/core/story/story-output';
 import {
@@ -379,6 +380,73 @@ it('缓存模式交出留存条数并把会话诊断写进结果', async () => {
   } finally {
     invalidateDirectContext(saveId);
   }
+});
+
+describe('直出请求末尾固定为输出格式提醒', () => {
+  it('非缓存：末条 user 以提醒结尾', async () => {
+    const { input, client } = setup(false);
+    const chatStream = vi.spyOn(client, 'chatStream');
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => streamResponse(true));
+    await generateDirectTurn(input, client);
+    const messages = chatStream.mock.calls[0][0].messages;
+    const last = messages[messages.length - 1];
+    expect(last.role).toBe('user');
+    expect(last.content!.endsWith(`</dice_pool>\n${DIRECT_OUTPUT_REMINDER}`)).toBe(true);
+  });
+
+  it('非缓存带 tailPrompt：顺序为 </dice_pool> → tailPrompt → 提醒', async () => {
+    const { input, client } = setup(false);
+    input.config.tailPrompt = '尾部指令：保持冷静语气';
+    const chatStream = vi.spyOn(client, 'chatStream');
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => streamResponse(true));
+    await generateDirectTurn(input, client);
+    const messages = chatStream.mock.calls[0][0].messages;
+    expect(
+      messages[messages.length - 1].content!.endsWith(
+        `</dice_pool>\n尾部指令：保持冷静语气\n${DIRECT_OUTPUT_REMINDER}`,
+      ),
+    ).toBe(true);
+  });
+
+  it('缓存：提醒只在不留存的尾部，两楼不重基线且留存前缀逐条相等', async () => {
+    const saveId = 'cached-output-reminder';
+    invalidateDirectContext(saveId);
+    const { input, client } = setup(false);
+    input.cache = { saveId, policy: 'prefix' };
+    const chatStream = vi.spyOn(client, 'chatStream');
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => streamResponse(true));
+    try {
+      const first = await generateDirectTurn(input, client);
+      const request = chatStream.mock.calls[0][0];
+      const tail = request.messages[request.messages.length - 1].content!;
+      expect(tail).toMatch(/^<turn_context>/);
+      expect(tail.endsWith(`</turn_context>\n${DIRECT_OUTPUT_REMINDER}`)).toBe(true);
+      expect(request.cacheRetainedMessageCount).toBe(request.messages.length - 1);
+      expect(first.result.directCacheDiagnostics!.tailChars).toBe(tail.length);
+      const retained = first.cache!.ticket.retainedCount;
+      expect(JSON.stringify(request.messages.slice(0, retained))).not.toContain(
+        DIRECT_OUTPUT_REMINDER,
+      );
+      await acceptDirectContext(first.cache!.ticket, { acceptedMessages: [] });
+      input.context.userInput = '离开铁匠铺';
+      const second = await generateDirectTurn(input, client);
+      expect(second.result.promptRebased).toBe(false);
+      expect(second.result.requestMessages!.slice(0, retained)).toEqual(
+        first.result.requestMessages!.slice(0, retained),
+      );
+      const secondMessages = second.result.requestMessages!;
+      const secondRetained = second.cache!.ticket.retainedCount;
+      // 接纳后的 transcript（第二楼留存部分）不含提醒，只有第二楼尾部带它
+      expect(JSON.stringify(secondMessages.slice(0, secondRetained))).not.toContain(
+        DIRECT_OUTPUT_REMINDER,
+      );
+      const secondTail = secondMessages[secondMessages.length - 1].content!;
+      expect(secondTail).toMatch(/^<turn_context>/);
+      expect(secondTail.endsWith(`\n${DIRECT_OUTPUT_REMINDER}`)).toBe(true);
+    } finally {
+      invalidateDirectContext(saveId);
+    }
+  });
 });
 
 it('非缓存模式不设 cacheStaticSystemCount', async () => {

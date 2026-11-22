@@ -222,6 +222,27 @@
 
 📌 2026-11-20 修正，未真机验证。`direct_state` 的角色快照（`generateDirectTurn` 的 `state.characters`）不再带 `ageAnchor` 原值与开局时冻结的 `customFields.age`，改为经 `projectCharacterAge`（`src/core/character/character-age.ts`）按当前游戏时间现算的 `age`；只有给定了生日才另带 `birthday: 'M月D日'`，兜底的 1 月 1 日不展示。协议加一句：`age` 与 `birthday` 由代码现算，只读，模型不必也不应写回。缓存直出的 `profile` 分区同口径，协议文字变了，已有 `direct_cached` 存档会冷建一次，见[缓存直出](direct-generation-cache.md)。
 
+### 尾部格式提醒与开局提示词不再重发（2026-11-22）
+
+📌 2026-11-22 新增，分支 `fix/direct-tail-and-opening`，**两项均未真机验证**。
+
+**起因。** 真机上 gemini-3.8-flash 有一楼只输出了裸正文，没有 `<maintext>`、`<character_updates>` 与 `<direct_updates>` 外壳，`parseDirectOutput` 报「需要一个完整的 maintext（或 gametxt）区块」，整楼拒收。直出请求分三段：开头是协议 system（输出契约），中间是预设 system，最后一条 user 消息放状态与骰池。输出格式只在最前面讲过，请求最后是一串骰池数字，没有格式指令。对照 SillyTavern 的 Prime 预设与角色卡世界书，两者都把格式指令放在请求末尾。
+
+**A. 尾部格式提醒。** `src/core/prompts/direct-prompt.ts` 新增常量 `DIRECT_OUTPUT_REMINDER`：一段简短提醒，重申四个外壳的顺序（`<maintext>`（正文内用 `<beat/>` 分节）、可选 `<options>`、`<character_updates>`、`<direct_updates>`）、每个都要成对写出、不能只输出裸正文。细则仍以开头的输出契约为准。
+
+- 无缓存直出：末条 user 消息的顺序为 `</dice_pool>` → 尾部指令 `tailPrompt`（若有）→ 提醒。
+- 缓存直出：`prepareDirectContext` 新增可选参数 `tailReminder`，把提醒原样接在不留存的 `</turn_context>` 之后。它不进会话签名、不进留存 transcript，协议常量也没改，所以已有 `direct_cached` 存档**不会冷建**。不传 `tailReminder` 时尾部逐字节不变。
+- 思考块：提醒对思考块保持中立，不提「思维链」。若预设要求在正文前公开思考块，提醒只要求把它放在 `<maintext>` 之前。
+- 契约闸门（`tests/core/prompts/direct-contract-gate.test.ts`）钉住提醒里外壳标签的首次出现顺序与协议「输出顺序：」行一致，并限制长度不超过 300 字符。
+
+**B. 开局提示词不再重发。** `src/ui/lib/game-pipeline.ts` 的 `buildContext` 在直出模式（direct / direct_cached）下，在 `metadata.openingPromptConsumed === true` **且**本轮历史（buildContext 过滤后的 history：只含 `storyTurnStatus` 缺省或 accepted 的消息）里已有被接纳的 assistant 正文时，不再提供 `ctx.openingPrompt`。`startLoadoutPersisted` 为真的新档本来就不提供。11-09 至 11-20 建的旧直出档没有 `startLoadoutPersisted`，此前每轮都把整段开局提示词放进 `direct_state.openingPrompt`，其中「首轮叙事请……重新演绎」到第 N 轮还在说「这是首轮」。
+
+- 首轮不受影响：`sendOpeningPrompt` 先乐观认领再发送，开局原文照旧作首条用户消息（`userInput`）发出；此时历史里还没有被接纳正文，照旧供值，`direct-main` 因与 `userInput` 等值而省略。
+- 只看认领标记不够：首轮生成中关页或刷新，会留下「已认领但开局回合从未被接纳」的档。开局那条用户消息是 pending / failed，被历史过滤掉；若此时不供值，玩家不点「再次尝试」而直接输入新内容，模型就完全看不到开局设定。所以要等第一条被接纳的 assistant 正文出现后才停发。
+- Agent 模式不变：`{{SKILL_STATE}}` 仍要读 `ctx.openingPrompt`。
+- 缓存直出旧档只多一次 `direct_context.remove: ["openingPrompt"]`，不冷建。
+- 已接受的局限：旧档若开局清单没有结构化落库，此后开局清单只留在历史首条消息与记忆里。首条消息滚出历史窗口后，模型就看不到它了。
+
 ## 内容包
 
 世界书沿用现有开关、条件、分区和依赖，只读取明确授权 `direct_main` 的条目。在世界书编辑器为相关规则、世界设定、种族、区域、产业等配置读取范围；不要直接把各 Agent 的旧输出模板全部合并进来，它们会与直出契约冲突。
@@ -254,6 +275,7 @@
 - 📌 2026-11-17：`src/core/prompts/direct-prompt.ts` 的 `buildDirectProtocol(structuredCombat)` 按设置生成协议；`direct-combat.ts` 的跨楼战斗只在 `directStructuredCombat` 开启时生效，见上文「正文战斗」。
 - 📌 2026-11-19：`src/core/story/story-beats.ts` 正文分节；前端演出在 `src/ui/composables/useStagedPlayback.ts`、`src/ui/lib/stage-playback.ts`、`src/ui/lib/stage-entrance.ts` 与 `StagedNarrative.vue`，见上文「正文分节与逐节演出」。
 - 📌 2026-11-20：骰池移到 `src/core/agents/direct-dice.ts`（`DirectDicePool`、`rollDirectDice`、`formatDirectDicePool`），`direct-main.ts` 只调用它；扁平角色实体的收拢在 `direct-output.ts`，见上文「实体扁平容错与分组骰池」。
+- 📌 2026-11-22：请求末尾的输出格式提醒是 `direct-prompt.ts` 的 `DIRECT_OUTPUT_REMINDER`，由 `direct-main.ts` 接在两种直出的最后一条 user 消息末尾（缓存直出经 `prepareDirectContext` 的 `tailReminder`）；直出旧档认领开局提示词后不再重发，判定在 `game-pipeline.ts` 的 `buildContext`。见上文「尾部格式提醒与开局提示词不再重发」，未真机验证。
 
 运行：`npm run dev`。Windows 测试如遇临时目录 EPERM，可先将 `TEMP` 与 `TMP` 指向仓内 `node_modules/.cache/vitest-tmp`。
 

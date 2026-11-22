@@ -9,6 +9,14 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-22 直出尾部格式提醒 + 开局提示词不再重发｜分支 `fix/direct-tail-and-opening`，**已实施，未真机验证**
+
+- 起因：真机 gemini-3.8-flash 一楼只输出裸正文（无 `maintext` / `character_updates` / `direct_updates`），被 `parseDirectOutput` 以「需要一个完整的 maintext（或 gametxt）区块」整楼拒收。请求末尾只有骰池数字、没有格式指令；SillyTavern Prime 预设与角色卡世界书都把格式指令放在最后。
+- 尾部提醒：`src/core/prompts/direct-prompt.ts` 新增 `DIRECT_OUTPUT_REMINDER`（重申四个外壳的顺序与成对写出，对思考块中立：预设要求公开思考块时放在 `<maintext>` 之前）。无缓存直出末条 user 消息顺序为 `</dice_pool>` → `tailPrompt`（若有）→ 提醒；缓存直出经 `prepareDirectContext` 新增的可选 `tailReminder` 接在不留存的 `</turn_context>` 之后，不进签名、不进留存 transcript、不改协议常量，`direct_cached` 不冷建。
+- 开局提示词：`src/ui/lib/game-pipeline.ts` 的 `buildContext` 在直出模式、`metadata.openingPromptConsumed === true` 且过滤后的历史里已有被接纳的 assistant 正文时不再提供 `openingPrompt`（首轮中断、开局回合从未被接纳的档仍提供原文）。旧直出档（11-09 至 11-20 建、无 `startLoadoutPersisted`）此前每轮把整段开局提示词放进 `direct_state`。Agent 模式不变（`{{SKILL_STATE}}` 仍读它）；缓存直出旧档只多一次 `direct_context.remove: ["openingPrompt"]`，不冷建。已接受的局限：旧档开局清单未落库时，此后只在历史首条消息与记忆里，滚出窗口后模型看不到。
+- 测试：`direct-transport.test.ts`（两种直出的尾部顺序、缓存留存前缀不含提醒且不重基线）、`direct-context-session.test.ts`（`tailReminder` 缺省逐字节不变、不进接纳后 transcript）、契约闸门（提醒的外壳顺序与协议「输出顺序：」行一致、≤300 字符）、`game-pipeline.test.ts`（直出认领后不供值、Agent 模式照旧）、新增 `tests/core/agents/direct-opening-prompt.test.ts`。
+- 文档：`docs/reference/direct-generation.md` 新节「尾部格式提醒与开局提示词不再重发（2026-11-22）」；`direct-generation-cache.md`、`agent_template_guide.md`、`src/core/AGENTS.md`、`src/ui/AGENTS.md` 加 📌 注记。
+
 ### 2026-11-21 直出坏项丢弃继续：只丢最小坏单元，正文与其余更新照收｜分支 `fix/ai-output-format-contracts`，**已实施，未真机验证**
 
 - 机制：`src/core/agents/direct-output.ts` 新增 `DirectUnitError` 与 `attempt` / `salvageRows`，单行、单个子键、单个实体校验失败只删那一个并记「路径：原因，已忽略」；`fatal()` 仍整楼拒收；白名单外键由 `stripKeys` 剥除。草稿新增 `dropped?` 与 `updatesMissing?`。`direct-normalize.ts` 返回 `dropped`，登神形状偏差按单元处理，N5 缺名条目的记录移进 `dropped`。
