@@ -84,6 +84,8 @@
 
 格式或核心写入失败时本楼不接纳，允许手动重试一次新的生成尝试；已接纳楼不能直接重放，需要先回退。接纳后的时间、剧情、经历、快照或记忆失败会警告，不会重复消耗材料或发奖励。
 
+📌 2026-11-21 更正（分支 `fix/ai-output-format-contracts`，未真机验证）：「格式失败时本楼不接纳」已收窄 —— 多数格式错误现在只丢掉出错的最小单元，正文与其余更新照常接纳；仍整楼拒收的情形见下文「坏项丢弃继续（2026-11-21）」。核心写入（提交时的账本事务）失败仍整楼不接纳。
+
 直出不启动旧战斗覆盖层、制作链、角色生成子调用、自动插画、润色链或 EJS 变量提交。主回复承担这些非记忆裁定职责；自动插画本版停用。普通音频标记与既有显示设置保留。
 
 ### 格式容错与协议补全（2026-11-21）
@@ -95,6 +97,7 @@
 - **契约常量唯一真源**：新模块 `src/core/agents/direct-contract.ts`（只依赖 `content/field-enums`）收齐 `direct_updates` 的全部白名单（分区、world 操作与 path 禁用段、实体键、人物字段、state 操作与可写字段、物品修改键、效果动作与键、分类与时间单位、剥除键）。校验器、归一化与协议文字共用它；协议里的人物可写字段、delta 路径、remove 路径、物品修改键、效果分类／时间单位／update 键、剥除键、world path 禁用段、实体 output 顶层键，以及装备槽、物品类型、品质、任务状态，均由常量插值。
 - **归一化**：`src/core/agents/direct-normalize.ts` 的 `normalizeDirectUpdates` 在严格校验前就地纠正，每处记一条带路径的中文 note。只纠正意思明确、不丢信息的偏差；给了值但类型或范围错的，原样交校验器拒收。唯一例外是状态效果的 `category`：枚举外的文本值映射到最接近的分类（认不出的落「特殊」），note 写明原值与映射后的值——分类只是归类，效果名照旧保留，比为一个分类词作废整楼划算。
 - **原型污染键先拒**：归一化之前先对整个 `direct_updates` 扫一遍 `__proto__` / `prototype` / `constructor`，任何层级出现即拒收（文案与校验器相同：「不允许模型填写 …」）；归一化里按动态键复制的两处（平铺人物收拢、平铺 effects 收进 `value`）也改为不经原型的写法。否则带 `__proto__` 的平铺输出会在复制时变成「设原型」、键随之消失，校验器就看不到了。
+  - 📌 2026-11-21 更正（同分支，坏项丢弃继续）：「原样交校验器拒收」现指校验器丢掉那个最小单元并记入 `dropped`，不再整楼作废；登神形状偏差改在归一化里按单元丢弃。见下文「坏项丢弃继续（2026-11-21）」。
 - **告警**：有纠正时草稿带 `normalized?: string[]`（`character_updates` 的纠正加前缀 `character_updates：` 后一并并入），`direct-main.ts` 记 warn `direct.output_normalized`，本楼不算失败。平铺人物仍单独记 `direct.entity_flattened`。`ParseDirectOutputOptions` 新增 `plotEnabled?`（缺省 true），由 `plotSettings.mode !== 'off'` 给出。
 
 容错规则：
@@ -117,11 +120,14 @@
 | U3   | `profile_changes` 列表字段 | `aliases` / `identity` / `occupation` 为字符串时转单元素列表（空白串删去）。                                                                                                                                                                                                    |
 | U4   | `chronicle`                | 缺失或 null 按 `[]`（无经历）；经历 `time` 缺失或写成 `"this_turn"` 时转 `{kind:"this_turn"}`；`people` 字符串转列表。                                                                                                                                                           |
 
+📌 2026-11-21 更正（同分支，坏项丢弃继续）：上表里的「仍拒」「拒收」已大多改为按单元丢弃 —— N2 的 `version` 不为 1 改为记 dropped 后按 1 处理（结构化战斗开启时缺 `combat` 仍整楼拒收）；N5 的缺名条目 note 移进 `dropped`（「已连带删除」的顶层 `elements` / `authorities` 同下标项也记 `dropped`），给了名字但不是文本、条目不是对象、列表不是数组、`ascension` 本身不是对象，都按单元丢弃；N5「两处都有 `ascension`」现保留 `character` 内那份、丢弃 `output` 顶层那份（记 `dropped`）；N6「owner 给了但不符」现只丢那一行状态。原型污染键（N10）仍整楼拒收。见下文「坏项丢弃继续（2026-11-21）」。
+
 与 HEAD 结果不同的三处（前两处有意，第三处已知、暂不改）：
 
 - **登神条目缺名被丢弃**：HEAD 的校验器接纳无名条目；现在归一化丢掉它并记 note，整楼照常接纳。名字给了但不是文本的照 HEAD 放行，校验器对登神条目只查「是对象数组」。
 - **loadout 的 `ascension` 缺 `enabled` 时按条目推断**：HEAD 把缺席的 `enabled` 原样交给下游，落库为未登神（`enabled` 缺席即假值）；现在按丢弃缺名条目后的 `elements` / `authorities` / `laws` 是否非空推断，给了条目就视为已登神。理由是给出登神条目本身就是在声明登神，与人物内 `ascension` 同口径。
 - **U 节：`character_updates` 同名多行时胜出的那一行可能变化（Agent 模式可见）**：`parseCharacterUpdates` 按顺序取第一条有效的同名行，后面的同名行记「重复名字」警告跳过。U2–U4 的纠正会让原本无效的行变有效（例如缺 `chronicle` 的那一行），于是 HEAD 下被跳过、由后一行胜出的情形，现在改由前一行胜出。直出模式不受影响（该块任一警告都使整楼作废，同名多行在两版都整楼作废）；Agent 模式警告不作废回合，保存下来的会是另一行。模型很少写同名多行，暂不改。
+  - 📌 2026-11-21 更正（同分支，坏项丢弃继续）：「直出模式不受影响」已不成立 —— 直出也不再因 `character_updates` 的警告作废整楼，警告记入 `dropped`、其余有效行照收，于是同名多行时直出与 Agent 模式一样保存胜出的那一行。
 
 四处刻意不补：
 
@@ -139,11 +145,13 @@
 - 两个 JSON 标签内不加代码围栏与注释。
 - 剧情开关看输入状态区块的 `plotSettings.mode`（非缓存直出为 `direct_state.plotSettings`，缓存直出为 `direct_context` 的 `plotSettings` 分区）：off 时 `plot` 写 `{}`；`pre` / `post` 不需要就省略，不写 null。
 - `character_updates` 的每个名字须已有实体或本楼新建，该块任一警告都使整楼作废。
+  - 📌 2026-11-21 更正（同分支，坏项丢弃继续）：协议原句「否则整楼作废（该块任一警告同样作废）」已改为「否则该条更新不会入库」；缺块、坏 JSON 与任何警告都只记入 `dropped`，不再作废整楼。
 - `state.characters.replace` 各路径的值类型、任务字段列表、`diceUsed` 的 `purpose` / `target` 非空。
 - 「输入状态区块（`direct_state`；缓存直出为 `direct_context`）里的人物用存档字段名（`outfit`、`statusEffects`、`ascension.authority/law`、带 `equippedSlot` 的 inventory），新建实体用本协议字段名，不要照抄」。
 - 实体结构列出 `elements?` / `authorities?`：`kind` 为 character 时 `output` 顶层只放 `statuses` / `elements` / `authorities` 与随身列表，`ascension` 写在 `character` 里，顶层 `ascension` 只给 loadout 用；顶层 `elements` / `authorities` 可省略，按下标为登神要素／权能条目补 `effectDescriptions`。
 - world：`path` 按「.」分段，任一段不能是 `gameTime` / `worldFlags` / `directCombat` / `generationMode` / `profile` / `characters` / `fp`（常量 `DIRECT_WORLD_RESERVED_SEGMENTS` 插值，校验器的禁用正则由同一常量与原型污染键拼成）；`value` 里同样不写账务键。
 - effects：同一角色的同名效果在本楼只写一行（实体初始 `statuses` 与 `effects` 合计；校验器报「状态效果重复声明」）；不要先 remove 再 add，改时长或层数用 update，对已有效果再 add 按叠层规则累加层数、时长取较长者。
+  - 📌 2026-11-21 更正（同分支，坏项丢弃继续）：「状态效果重复声明」现只丢后出现的那一行（先登记的实体初始状态或效果行保留），不再整楼拒收；world `path` 命中禁用段仍整楼拒收。
 
 `CHARACTER_UPDATE_PROTOCOL`（`character-chronicle.ts`）同步补了角色项的键、`chronicle` 必填与经历字段，白名单由 `character-updates.ts` 导出的 `TEXT_FIELDS` / `LIST_FIELDS` 插值。
 
@@ -151,12 +159,64 @@
 
 协议长度（2026-11-21 实测，`buildDirectProtocol(...).length`）：结构化战斗开启 8200 → 9844 字符，关闭 8138 → 9752 字符，行数均为 35 → 36（含「输入状态区块」改为模式中立措辞后的长度）；`CHARACTER_UPDATE_PROTOCOL` 759 → 987 字符。
 
+📌 2026-11-21 再测（坏项丢弃继续之后）：开启 9925 字符、关闭 9833 字符，行数仍为 36；`CHARACTER_UPDATE_PROTOCOL` 未改。
+
 后果：
 
 - 两份协议文字都变了，每个 `direct_cached` 存档冷建一次会话。
 - `CHARACTER_UPDATE_PROTOCOL` 也进 Agent 模式 story 与 Story v2 的提示词，这两种会话的基线会各重建一次。
 - 本次引擎协议是旧协议的超集，旧内容包照常可用，不要求与内容包同步发布。
 - 真实模型是否因此少被拒、各条纠正的触发频率，均未验证。
+
+### 坏项丢弃继续（2026-11-21）
+
+📌 2026-11-21 新增，分支 `fix/ai-output-format-contracts`，未用真实模型验证。直出输出校验从「任一错误整楼作废」改为「丢掉出错的最小单元，正文与其余更新照常接纳」。两种直出相同。
+
+- **机制**（`src/core/agents/direct-output.ts`）：单元级校验失败抛 `DirectUnitError`，由最近的 `attempt`（单个分区或子键）或 `salvageRows`（数组逐行）接住，删掉那个单元并记一条「路径：原因，已忽略」（下标指模型原文）。`fatal()` 抛普通错误，不被接住，整楼拒收，文案前缀「直出结果无效：」不变。白名单外的键由 `stripKeys` 剥除并记「含未支持的字段 …，已剥除」，不再拒收。
+- **草稿字段**：`DirectTurnDraft.dropped?: string[]`（有损丢弃，与无损的 `normalized` 分开记）；`updatesMissing?: true`（一个 `direct_updates` 开标签都没有）。归一化 `normalizeDirectUpdates` 的结果也新增 `dropped`：登神形状偏差在那里按单元处理，N5 缺名条目的记录从 note 移进 `dropped`。
+- **连锁截断**：`buildDirectPatches` 返回 `dropped` 与过滤后的 `characterUpdates`。人物已存在或组装失败、loadout 归属人物不存在或组装失败，都只丢那一个实体；随后指向不存在人物的 `character_updates` 行与补丁一并丢弃并记录。`game-pipeline.ts` 提交叙事更新时用过滤后的版本。
+- **建补丁预演**：提交时的静态校验与按名寻址（含别名与「主角／玩家」）抽成纯函数 `src/core/state/patch-rules.ts`（`validateStatePatch` / `resolveCharacterByName`），`StateManager` 与 `buildDirectPatches` 共用这一份。建补丁时按补丁顺序（即提交顺序：新人物 → 归属物与替换组 → world → 人物字段 → 物品 consume → equip → unequip → transfer → modify → 好感度与 fp → 任务 → 效果）预演各角色的物品数量与技能，丢掉提交时注定抛错的补丁：形状不全、引用的人物不存在（含转移的接收方）、物品不存在或数量不足、自我转移、槽位无法识别、堆叠穿戴、技能不存在。记录格式为「op（target）：提交时的报错，已忽略」。
+- **替换成对**：loadout 里带 `replace` 的条目逐条成组（删旧 + 加新），同名的两条各自成组；预演时整组落下或整组丢弃，旧条目不在身上（含已被本楼前面的替换删掉）就连新的也不加，记录点名是哪一条（「`entities[i].output.<列表>[j]`（新名 替换 旧名）：op：报错，已忽略」）。
+- **实体状态与效果撞名**：解析阶段只在实体初始状态之间、效果行之间各自去重；效果行与实体初始状态撞名改在建补丁时判，只对真正留下的实体算重复。
+- **一个单元只记一条**：单元被丢时撤回它内部已记的剥键与子单元记录，只留最终那条。
+- **静默删除**：`state.fp` 为 null、`{}` 或 `{delta: null}` 时直接删掉，不记录、不产补丁；写了别的键却没有 `delta`（如 `{amount:-3}`）是有损的，记「state.fp：缺少 delta，已忽略」。
+- **告警**：`AgentResult.outputWarnings` 与 `DebugAgentEntry.outputWarnings` 带丢弃清单；warn `direct.output_dropped`（解析期由 `direct-main.ts` 记，建补丁期由 `game-pipeline.ts` 记并追加到本回合 `direct_main` 的调试记录）与 `direct.updates_missing`。本楼接纳后弹一次不阻塞的警告提示：缺区块时为「本楼只保存了正文…」，否则合计两处丢弃数「本楼已接纳；N 项状态更新格式有误已忽略（调试面板可查看）」。调试面板在「结束原因」之后列出「已忽略 N 项」。
+- **协议措辞**（`direct-prompt.ts`）：顶层键说明改为「对象段写 {}、数组段写 []，只有 combat 写 null，time 恒写 delta_time」；`state` 某个子键没有变化就整个省略，不写空对象占位；`fp` 无变化就省略，不写 `fp:{}`；`character_updates` 名字不存在时由「整楼作废（该块任一警告同样作废）」改为「该条更新不会入库」。协议文字变了，每个 `direct_cached` 存档冷建一次会话。
+
+单元边界（失败只丢这一层，上一层照收）：
+
+| 位置                                          | 丢弃单元                                                                                     |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 任一对象（顶层、分区、行、`value`、`changes`） | 白名单外的键（剥除并记录）                                                                   |
+| 顶层分区                                      | 非空但类型错的分区换成空值；`version` 不为 1 按 1 处理；`time.delta_time` 非法按 0 处理       |
+| `world`                                       | `replace` / `insert` / `tile_ops` 的单行（含缺 `value`、非有限数值、账务键）                  |
+| `entities`                                    | 单个实体；实体内 `statuses` 与随身条目的单行（含 `replace` 不是文本）；人物文本字段错类型置空串、列表字段错类型置空数组 |
+| 登神（归一化）                                | 单个条目；列表不是数组置 `[]`；`ascension` 不是对象时人物内按未登神、loadout 删键（不改登神）  |
+| `state.characters`                            | `replace` / `delta` / `remove` 的单行；操作值不是数组只删那一项                               |
+| `state.items` / `affections` / `quests`       | 各操作的单行；`items.equip` 槽位不在枚举（`field-enums.normalizeSlot`）；`items.modify` 剥掉未知改动键后什么都不剩时丢整行 |
+| `state.fp`                                    | 整个 `fp`（`delta` 不是数值、`fp` 不是对象、有别的键却无 `delta` 时记录；null / `{}` / `{delta:null}` 静默删除） |
+| `effects`                                     | 单行（含同名重复声明的后一行）                                                               |
+| `plot`                                        | 单个子键（`pre` / `post`）                                                                   |
+| `diceUsed`                                    | 单行（骰型不在池中、越界、重复用骰、`purpose` / `target` 为空）                              |
+| `character_updates`                           | 缺块、坏 JSON 或任一警告：只记录，有效人物照收；名字不存在的行在建补丁时丢                   |
+| 建补丁（`buildDirectPatches`）                 | 单个实体、单组替换（删旧 + 加新）、预演判定提交时会抛的单条补丁，以及引用被丢人物的叙事更新   |
+
+仍整楼拒收：
+
+- 正文信封（`maintext` / `gametxt`）缺失、不完整，或正文为空。
+- `direct_updates` 不是恰好一个完整区块（多个、未闭合），不是合法 JSON，或顶层不是对象。一个开标签都没有时不拒收：按空更新接纳，标 `updatesMissing`，本楼只保存正文。
+- 任何层级出现原型污染键（`__proto__` / `prototype` / `constructor`）。
+- world `path` 命中禁用段。
+- 结构化战斗开启时 `combat` 有问题（缺键、不是对象、含非有限数值）；关闭时坏 `combat` 照旧只被忽略。
+- 提交时的账本事务失败（由 `StateManager` 原子回滚）。建补丁预演已先丢掉能静态判出的库存 / 目标问题，剩下的多是预演不覆盖的（如 `update_character` 白名单、地块事实寻址）。
+
+已知风险：
+
+- 制作时丢掉一条坏的 `consume` 行而产物保留，等于白得物品；只能从调试记录与提示里看出来。
+- 被丢弃的新 NPC 实体已经出现在正文里；下一楼模型要重新建它（或继续把它当已存在）。
+- 真实模型下丢弃的频率与提示是否打扰，均未验证。
+
+测试：`tests/core/agents/direct-salvage.test.ts`（真机样本 `fp:{}`、各单元边界、连锁丢弃、建补丁预演、替换成对、零开标签、仍整楼拒收清单、合规输入三字段缺席）；`tests/core/state/patch-rules.test.ts`（按名寻址与静态校验各分支）；契约闸门 3 要求最大样例 `buildDirectPatches` 的 `dropped` 为空；既有直出、归一化、传输、契约闸门、调试面板与管线边界测试同步改为新口径。
 
 ### 角色年龄（2026-11-20）
 
@@ -208,7 +268,7 @@ npm run format:check
 npm run knip:ratchet
 ```
 
-重点回归覆盖单次请求、旧档默认 Agent、显式建档选择、非法输出无写入、库存事务回滚、已接纳楼防重放、战斗跨楼与精确终局、定义绑定、备份／快照和后续维护失败。2026-11-09 推送后补测：旧记忆召回和摘要落库、三楼制作与战斗状态衔接、真实客户端 SSE 分片解析、HTTP 503／断流零自动重试，以及每轮发送完整上下文。干净副本的 knip 棘轮通过，未新增死代码。自动化使用模拟模型；真实模型的输出稳定性、原卡体验和成本需另行实测。
+重点回归覆盖单次请求、旧档默认 Agent、显式建档选择、非法输出无写入（📌 2026-11-21：现只对上文「坏项丢弃继续」所列整楼拒收情形成立，其余坏项丢掉单元后照常写入）、库存事务回滚、已接纳楼防重放、战斗跨楼与精确终局、定义绑定、备份／快照和后续维护失败。2026-11-09 推送后补测：旧记忆召回和摘要落库、三楼制作与战斗状态衔接、真实客户端 SSE 分片解析、HTTP 503／断流零自动重试，以及每轮发送完整上下文。干净副本的 knip 棘轮通过，未新增死代码。自动化使用模拟模型；真实模型的输出稳定性、原卡体验和成本需另行实测。
 
 📌 2026-11-20 更正（分支 `fix/direct-empty-response`）：「零自动重试」现只对 HTTP 错误、断流与被拒输出成立；可见正文为空（且结束原因不是 length / max_tokens）时会原样重发一次，见上文「空正文重发一次」注记。
 

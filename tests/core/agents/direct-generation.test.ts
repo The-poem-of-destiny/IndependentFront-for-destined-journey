@@ -163,7 +163,7 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('direct protocol and native entities', () => {
-  it('projects prose, hides partial JSON, rejects incomplete and conflicting output', () => {
+  it('projects prose, hides partial JSON, rejects incomplete blocks, drops conflicting rows', () => {
     const raw = response();
     expect(parseDirectOutput(raw, POOL)).toMatchObject({
       content: '你把材料交给铁匠。',
@@ -179,20 +179,32 @@ describe('direct protocol and native entities', () => {
         delta: [{ name: '旅人', path: 'hp', amount: -10 }],
       },
     };
-    expect(() => parseDirectOutput(response(data), POOL)).toThrow('重复');
+    const conflict = parseDirectOutput(response(data), POOL);
+    expect(conflict.content).toBe('你把材料交给铁匠。');
+    expect((conflict.updates.state as any).characters).toEqual({
+      replace: [{ name: '旅人', path: 'hp', value: 70 }],
+      delta: [],
+    });
+    expect(conflict.dropped).toEqual(['state.characters.delta[0]：人物字段重复声明，已忽略']);
     data.state = {
       characters: { replace: [{ name: '旅人', path: 'generationMode', value: 'agent' }] },
     };
-    expect(() => parseDirectOutput(response(data), POOL)).toThrow('白名单');
+    expect(parseDirectOutput(response(data), POOL).dropped).toEqual([
+      'state.characters.replace[0]：人物字段不属于 direct state 白名单，已忽略',
+    ]);
     data.state = {};
     data.diceUsed = [
       { sides: 20, index: 0, purpose: '制作', target: '短剑' },
       { sides: 20, index: 0, purpose: '重投', target: '短剑' },
     ];
-    expect(() => parseDirectOutput(response(data), POOL)).toThrow('diceUsed[1] 重复使用了同一颗骰');
+    const dice = parseDirectOutput(response(data), POOL);
+    expect(dice.updates.diceUsed).toEqual([
+      { sides: 20, index: 0, purpose: '制作', target: '短剑' },
+    ]);
+    expect(dice.dropped).toEqual(['diceUsed[1]：重复使用了同一颗骰，已忽略']);
   });
 
-  it('creates a complete new NPC with author binding and rejects narrative-only NPC creation', () => {
+  it('creates a complete new NPC with author binding and drops narrative-only NPC updates', () => {
     const data = updates();
     data.entities.push(smithEntity());
     const narrative = [{ name: '铁匠', profile_changes: { personality: '直率' }, chronicle: [] }];
@@ -218,75 +230,73 @@ describe('direct protocol and native entities', () => {
       definition: { id: 'author-smith' },
     });
     expect(built.characters[1].maxHp).toBeGreaterThan(0);
+    expect(built.characterUpdates.map((update) => update.name)).toEqual(['铁匠']);
+    expect(built.dropped).toEqual([]);
     const noEntity = parseDirectOutput(response(updates(), narrative), POOL);
-    expect(() =>
-      buildDirectPatches(noEntity, { characters: [player()], definitions: [], sourceTurnKey: 'u' }),
-    ).toThrow('缺少完整实体');
+    const orphan = buildDirectPatches(noEntity, {
+      characters: [player()],
+      definitions: [],
+      sourceTurnKey: 'u',
+    });
+    expect(orphan.characterUpdates).toEqual([]);
+    expect(orphan.dropped).toEqual(['character_updates：人物 铁匠 缺少完整实体，已忽略']);
   });
 });
 
-describe('direct protocol: 被拒报错带键名与路径', () => {
-  it('direct_updates 顶层多余键列出键名', () => {
+describe('direct protocol: 丢弃说明带键名与路径', () => {
+  it('direct_updates 顶层多余键剥除并列出键名，其余照收', () => {
     const data = { ...updates(), extraTop: 1 } as unknown as DirectUpdates;
-    expect(() => parseDirectOutput(response(data), POOL)).toThrow(
-      'direct_updates 含未支持的字段：extraTop',
-    );
+    const draft = parseDirectOutput(response(data), POOL);
+    expect(draft.content).toBe('你把材料交给铁匠。');
+    expect(draft.updates).not.toHaveProperty('extraTop');
+    expect(draft.dropped).toEqual(['direct_updates：含未支持的字段 extraTop，已剥除']);
   });
 
-  it('实体 output 多余键带下标路径', () => {
+  it('实体 output 多余键带下标路径，实体照建', () => {
     const data = updates();
     const entity = smithEntity();
     (entity.output as unknown as Record<string, unknown>).bogus = true;
     data.entities.push(entity);
-    expect(() => parseDirectOutput(response(data), POOL)).toThrow(
-      'entities[0].output 含未支持的字段：bogus',
-    );
+    const draft = parseDirectOutput(response(data), POOL);
+    expect(draft.dropped).toEqual(['entities[0].output：含未支持的字段 bogus，已剥除']);
+    const built = buildDirectPatches(draft, {
+      characters: [player()],
+      definitions: [],
+      sourceTurnKey: 'u',
+    });
+    expect(built.characters.map((c) => c.name)).toEqual(['旅人', '铁匠']);
   });
 
-  it('skills 非数组时报出所在路径', () => {
+  it('skills 非数组时按所在路径换成 []', () => {
     const nested = updates();
     const inner = smithEntity();
     (inner.output.character as unknown as Record<string, unknown>).skills = '剑术';
     nested.entities.push(inner);
-    expect(() => parseDirectOutput(response(nested), POOL)).toThrow(
-      'entities[0].output.character.skills',
-    );
+    expect(parseDirectOutput(response(nested), POOL).dropped).toEqual([
+      'entities[0].output.character.skills：必须是数组，已忽略',
+    ]);
 
     const top = updates();
     const outer = smithEntity();
     (outer.output as unknown as Record<string, unknown>).skills = '剑术';
     top.entities.push(outer);
-    let message = '';
-    try {
-      parseDirectOutput(response(top), POOL);
-    } catch (error) {
-      message = (error as Error).message;
-    }
-    expect(message).toContain('entities[0].output.skills');
-    expect(message).not.toContain('character');
+    const draft = parseDirectOutput(response(top), POOL);
+    expect(draft.dropped).toEqual(['entities[0].output.skills：必须是数组，已忽略']);
+    expect(draft.updates.entities[0].output.skills).toEqual([]);
   });
 
   it('多余键最多列 5 个并截断超长键名', () => {
     const extra: Record<string, number> = {};
     for (let i = 1; i <= 8; i++) extra[`k${i}`] = i;
     const many = { ...updates(), ...extra } as unknown as DirectUpdates;
-    let message = '';
-    try {
-      parseDirectOutput(response(many), POOL);
-    } catch (error) {
-      message = (error as Error).message;
-    }
+    let message = parseDirectOutput(response(many), POOL).dropped!.join('\n');
     expect(message).toContain('k1、k2、k3、k4、k5');
     expect(message).not.toContain('k6');
     expect(message).toContain('等 8 个');
 
     const longKey = 'x'.repeat(100);
     const long = { ...updates(), [longKey]: 1 } as unknown as DirectUpdates;
-    try {
-      parseDirectOutput(response(long), POOL);
-    } catch (error) {
-      message = (error as Error).message;
-    }
+    message = parseDirectOutput(response(long), POOL).dropped!.join('\n');
     expect(message).toContain(`${'x'.repeat(24)}…`);
     expect(message).not.toContain('x'.repeat(25));
   });
@@ -361,7 +371,7 @@ describe('direct rejected output keeps the raw reply', () => {
   }
 
   it('被拒输出抛 DirectTurnError 并带原文与请求消息', async () => {
-    const raw = '<maintext>只有正文</maintext>';
+    const raw = '<maintext>只有正文</maintext><direct_updates>{坏掉的</direct_updates>';
     const chat = vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
       agentId: 'direct_main',
       output: raw,
@@ -375,7 +385,7 @@ describe('direct rejected output keeps the raw reply', () => {
     expect(chat).toHaveBeenCalledTimes(1);
     expect(error).toBeInstanceOf(DirectTurnError);
     const failed = error as DirectTurnError;
-    expect(failed.message).toContain('需要一个完整的 direct_updates 区块');
+    expect(failed.message).toContain('direct_updates 不是合法 JSON');
     expect(failed.result.rawResponse).toBe(raw);
     expect(failed.result.requestMessages?.length).toBeGreaterThan(0);
   });
@@ -836,7 +846,7 @@ describe('direct memory admission', () => {
 
   it('被拒输出：调试回调收到原文与请求消息，向下游抛原始错误', async () => {
     const { instance, onAgentError } = orchestrator(true);
-    const raw = '<maintext>只有正文</maintext>';
+    const raw = '<maintext>只有正文</maintext><direct_updates>{坏掉的</direct_updates>';
     vi.spyOn(AgentClient.prototype, 'chat').mockResolvedValue({
       agentId: 'direct_main',
       output: raw,
@@ -1083,34 +1093,43 @@ describe('直出骰池：按骰面分组定位', () => {
     ]);
   });
 
-  it('骰面数不在骰池中时拒绝', () => {
-    expect(() =>
-      parseDirectOutput(withDice([{ sides: 8, index: 0, purpose: '伤害', target: '狼' }]), pool),
-    ).toThrow('diceUsed[0] 的骰面数不在骰池中');
+  /** 一颗骰的行被丢弃：其余骰照收，正文照收 */
+  function droppedDice(rows: unknown[]): string[] {
+    const draft = parseDirectOutput(
+      withDice([...rows, { sides: 20, index: 1, purpose: '命中', target: '狼' }]),
+      pool,
+    );
+    expect(draft.content).toBe('你把材料交给铁匠。');
+    expect(draft.updates.diceUsed).toEqual([
+      { sides: 20, index: 1, purpose: '命中', target: '狼' },
+    ]);
+    return draft.dropped ?? [];
+  }
+
+  it('骰面数不在骰池中时丢那一行', () => {
+    expect(droppedDice([{ sides: 8, index: 0, purpose: '伤害', target: '狼' }])).toEqual([
+      'diceUsed[0]：骰面数不在骰池中，已忽略',
+    ]);
   });
 
-  it('缺少 sides 的行拒绝', () => {
-    expect(() =>
-      parseDirectOutput(withDice([{ index: 0, purpose: '命中', target: '狼' }]), pool),
-    ).toThrow('diceUsed[0] 的骰面数不在骰池中');
+  it('缺少 sides 的行丢弃', () => {
+    expect(droppedDice([{ index: 0, purpose: '命中', target: '狼' }])).toEqual([
+      'diceUsed[0]：骰面数不在骰池中，已忽略',
+    ]);
   });
 
-  it('下标超出对应骰组长度时拒绝', () => {
-    expect(() =>
-      parseDirectOutput(withDice([{ sides: 6, index: 2, purpose: '伤害', target: '狼' }]), pool),
-    ).toThrow('diceUsed[0] 的骰索引超出 d6 骰组范围');
-    expect(() =>
-      parseDirectOutput(withDice([{ sides: 20, index: -1, purpose: '命中', target: '狼' }]), pool),
-    ).toThrow('骰');
-    expect(() =>
-      parseDirectOutput(withDice([{ sides: 20, index: 0.5, purpose: '命中', target: '狼' }]), pool),
-    ).toThrow('骰');
+  it('下标超出对应骰组长度时丢那一行', () => {
+    expect(droppedDice([{ sides: 6, index: 2, purpose: '伤害', target: '狼' }])).toEqual([
+      'diceUsed[0]：骰索引超出 d6 骰组范围，已忽略',
+    ]);
+    expect(droppedDice([{ sides: 20, index: -1, purpose: '命中', target: '狼' }])).toHaveLength(1);
+    expect(droppedDice([{ sides: 20, index: 0.5, purpose: '命中', target: '狼' }])).toHaveLength(1);
   });
 
-  it('用途与对象仍须具名', () => {
-    expect(() =>
-      parseDirectOutput(withDice([{ sides: 20, index: 0, purpose: '', target: '狼' }]), pool),
-    ).toThrow('名字／引用不能为空');
+  it('用途与对象仍须具名，否则丢那一行', () => {
+    expect(droppedDice([{ sides: 20, index: 0, purpose: '', target: '狼' }])).toEqual([
+      'diceUsed[0]：purpose 名字／引用不能为空，已忽略',
+    ]);
   });
 });
 
@@ -1286,20 +1305,46 @@ describe('直出实体：容忍平铺的人物字段', () => {
     expect(build(draft).statusEffects.map((s) => s.name)).toEqual(['专注']);
   });
 
-  it('平铺但缺少 name 时不归位，照旧报未支持字段', () => {
+  it('平铺但缺少 name 时不归位：丢掉这个实体，另一个实体照建', () => {
     const entity = flatSmith();
     delete entity.output.name;
-    expect(() => parseDirectOutput(withEntity(entity), POOL)).toThrow(
-      'entities[0].output 含未支持的字段',
-    );
+    const data = updates();
+    const other = smithEntity();
+    other.output.character!.name = '学徒';
+    data.entities.push(entity as unknown as DirectUpdates['entities'][number], other);
+    const draft = parseDirectOutput(response(data), POOL);
+    expect(draft.content).toBe('你把材料交给铁匠。');
+    expect(draft.updates.entities.map((e) => e.output.character?.name)).toEqual(['学徒']);
+    expect(draft.dropped).toEqual(['entities[0]：人物 必须是对象，已忽略']);
+    expect(build(draft).name).toBe('学徒');
   });
 
-  it('loadout 里平铺人物字段不归位，带 character 仍被拒', () => {
-    const flat = { kind: 'loadout', owner: '旅人', output: flatSmith().output };
-    expect(() => parseDirectOutput(withEntity(flat), POOL)).toThrow(
-      'entities[0].output 含未支持的字段',
+  it('loadout 里平铺人物字段不归位：剥掉多余键、剥掉 character，物品照收', () => {
+    const flat = {
+      kind: 'loadout',
+      owner: '旅人',
+      output: {
+        ...flatSmith().output,
+        inventory: [{ name: '铁锭', description: '原料', quantity: 3 }],
+      },
+    };
+    const flatDraft = parseDirectOutput(withEntity(flat), POOL);
+    expect(flatDraft.dropped).toEqual([
+      expect.stringMatching(/^entities\[0\]\.output：含未支持的字段 .+ 等 \d+ 个，已剥除$/),
+    ]);
+    const built = buildDirectPatches(flatDraft, {
+      characters: [player()],
+      definitions: [],
+      sourceTurnKey: 'u',
+    });
+    expect(built.patches.some((p) => p.op === 'add_item' && (p.value as any).name === '铁锭')).toBe(
+      true,
     );
     const nested = { kind: 'loadout', owner: '旅人', output: nestedSmith().output };
-    expect(() => parseDirectOutput(withEntity(nested), POOL)).toThrow('归属物不能再次创建人物');
+    const nestedDraft = parseDirectOutput(withEntity(nested), POOL);
+    expect(nestedDraft.updates.entities[0].output).not.toHaveProperty('character');
+    expect(nestedDraft.dropped).toEqual([
+      'entities[0].output.character：归属物不能再次创建人物，已忽略',
+    ]);
   });
 });

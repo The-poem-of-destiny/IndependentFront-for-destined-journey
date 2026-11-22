@@ -740,6 +740,18 @@ function formatJson(value: unknown): string {
         <div v-if="entry.finishReason" class="debug-agent-meta">
           结束原因 {{ entry.finishReason }}
         </div>
+        <div
+          v-if="entry.outputWarnings?.length"
+          class="debug-agent-meta"
+          data-testid="output-warnings"
+        >
+          已忽略 {{ entry.outputWarnings.length }} 项
+          <ul class="debug-output-warnings">
+            <li v-for="(warning, wIndex) in entry.outputWarnings" :key="wIndex">
+              {{ warning }}
+            </li>
+          </ul>
+        </div>
         <template
           v-for="(dc, dcIndex) in directCacheViewOf(entry)"
           :key="`${entry.invocationId}:direct-cache:${dcIndex}`"
@@ -895,6 +907,12 @@ function formatJson(value: unknown): string {
   margin-top: var(--theme-spacing-xs);
   color: var(--theme-text-secondary);
   font-size: 0.75rem;
+}
+/* 已忽略项：模型原文路径 + 原因，逐条一行 */
+.debug-output-warnings {
+  margin: var(--theme-spacing-xs) 0 0;
+  padding-left: var(--theme-spacing-md);
+  overflow-wrap: anywhere;
 }
 /* 缓存直出分区表：至多 30+1 行，限高内滚，不把面板撑长 */
 .debug-dc-scroll {

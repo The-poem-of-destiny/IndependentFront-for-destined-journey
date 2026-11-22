@@ -9,6 +9,17 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-21 直出坏项丢弃继续：只丢最小坏单元，正文与其余更新照收｜分支 `fix/ai-output-format-contracts`，**已实施，未真机验证**
+
+- 机制：`src/core/agents/direct-output.ts` 新增 `DirectUnitError` 与 `attempt` / `salvageRows`，单行、单个子键、单个实体校验失败只删那一个并记「路径：原因，已忽略」；`fatal()` 仍整楼拒收；白名单外键由 `stripKeys` 剥除。草稿新增 `dropped?` 与 `updatesMissing?`。`direct-normalize.ts` 返回 `dropped`，登神形状偏差按单元处理，N5 缺名条目的记录移进 `dropped`。
+- 连锁截断：`buildDirectPatches` 返回 `dropped` 与过滤后的 `characterUpdates`，实体被丢时引用它的补丁（含 `transfer` 的 `to`/`from`、equip 被丢条目）与叙事更新一并丢弃；人物解析与提交期同用新模块 `src/core/state/patch-rules.ts`（精确名 / 唯一别名 / 「主角／玩家」，`StateManager` 私有方法改为转调，行为不变）。建补丁时先过同一份 `validateStatePatch`，再按提交顺序（consume → equip → unequip → transfer → modify）预演物品与技能，提交时必抛的补丁逐条丢弃，记录格式「op（target）：提交期报错，已忽略」；loadout 的 `replace` 按条目成「删旧 + 加新」一组预演，失败整组回滚并点名。实体初始状态与 effects 撞名改在建补丁时只对留下的实体判；一个单元只记一条。`fp` 为 null / `{}` / `{delta:null}` 静默删除，带其他键却无 `delta`（如 `{amount:-3}`）记 `dropped`；`character_updates` 缺块、坏 JSON 或任一警告不再作废整楼。
+- 仍整楼拒收：正文信封缺失 / 不完整 / 为空；`direct_updates` 不是恰好一个完整区块、非法 JSON 或顶层不是对象（零个开标签按空更新接纳并标 `updatesMissing`）；原型污染键；world `path` 命中禁用段；结构化战斗开启时的坏 `combat`；提交时账本事务失败。
+- 协议：`direct-prompt.ts` 改为无变化的 state 子键与 `fp` 整个省略、不写 `{}` 占位，「整楼作废」改为「该条更新不会入库」。2026-11-21 实测长度：开启 9844 → 9925、关闭 9752 → 9833 字符，行数仍为 36。每个 `direct_cached` 存档冷建一次。
+- 告警与界面：`AgentResult` / `DebugAgentEntry` 新增 `outputWarnings`；warn `direct.output_dropped` / `direct.updates_missing`；本楼接纳后弹一次不阻塞的 warning 提示；`DebugPanel` 在「结束原因」后列出已忽略项。
+- 已知风险：丢掉坏的 `consume` 行而保留制作产物 = 白得物品（只在提示与调试记录可见）；被丢弃的新 NPC 实体已出现在正文，下一楼模型须重建。
+- 测试：新增 `tests/core/agents/direct-salvage.test.ts`、`tests/core/state/patch-rules.test.ts`；闸门 3 钉住 `built.dropped` 为空；直出、归一化、传输、契约闸门、调试面板、管线边界测试同步改口径。
+- 文档：`docs/reference/direct-generation.md` 新节「坏项丢弃继续（2026-11-21）」（单元边界表 + 整楼拒收清单），原「整楼作废 / 拒收」各处加 📌 更正；`direct-generation-cache.md`、`character-system.md`、直出 v1 设计稿、`src/core/AGENTS.md`、`src/ui/AGENTS.md` 加 📌 注记。
+
 ### 2026-11-21 直出格式契约：无损纠正 + 协议补全 + 漂移闸门｜分支 `fix/ai-output-format-contracts`，**已实施，未真机验证**
 
 - 契约常量：新模块 `src/core/agents/direct-contract.ts`（只依赖 `content/field-enums`）收齐 `direct_updates` 白名单，校验器 `direct-output.ts`、归一化与协议文字共用。

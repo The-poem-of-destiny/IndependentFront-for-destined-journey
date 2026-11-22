@@ -3,8 +3,9 @@
  *
  * 模型输出形状稍有偏差（字符串当对象、缺默认字段、写了 id 等账务键）时，
  * 在严格校验之前就地纠正，并为每一处纠正记一条中文 note（带路径）。
- * 只做「意思明确、不丢信息」的纠正：给了但类型或范围错的值原样留给
- * direct-output.ts 的校验器拒收 —— 校验器仍是「真看不懂」的唯一裁决。
+ * notes 只收「意思明确、不丢信息」的纠正；给了但类型或范围错的值多数原样留给
+ * direct-output.ts 的校验器，由它按最小单元丢弃并记入 dropped。
+ * 登神状态是例外：这里直接按单元丢弃（坏条目 / 坏字段回落默认），丢弃记入 `dropped`，不进 notes。
  * 唯一例外是状态效果的 category：枚举外的文本值经 normalizeStatusCategory 映射到最接近的
  * 分类（认不出的落「特殊」），note 写明原值与映射后的值 —— 分类只是归类，效果名照旧保留，
  * 比为一个分类词作废整楼划算。
@@ -36,8 +37,10 @@ export interface NormalizeDirectOptions {
 }
 
 export interface NormalizeDirectResult {
-  /** 每处纠正一条（中文，带路径）；无纠正为空数组 */
+  /** 每处无损纠正一条（中文，带路径）；无纠正为空数组 */
   notes: string[];
+  /** 每处有损丢弃一条（中文，带路径，形如「路径：原因，已忽略」）；无丢弃为空数组 */
+  dropped: string[];
   /** 平铺在 output 上、已归位进 output.character 的人物名（独立告警，不计入 notes） */
   flattenedCharacters: string[];
 }
@@ -160,13 +163,14 @@ function textToList(row: Row, key: string, path: string, notes: string[]): void 
 }
 
 /**
- * N5：登神条目缺名（没有 name、为 null 或只含空白的文本；纯文本条目为空串）→ 丢弃。
- * HEAD 的校验器接纳无名条目，这里不为它整楼拒收，只丢掉那一条（人物内与 loadout 顶层同口径）。
+ * N5：登神条目的丢弃原因 —— 缺名（没有 name、不是文本或只含空白；纯文本条目为空串），
+ * 或既不是文本也不是对象；条目可用时返回 undefined。
+ * 只丢掉那一条，不整楼拒收（人物内与 loadout 顶层同口径）。
  */
-function isNamelessAscensionEntry(entry: unknown): boolean {
-  if (typeof entry === 'string') return entry.trim() === '';
-  if (!isRow(entry)) return false;
-  return absent(entry, 'name') || (typeof entry.name === 'string' && entry.name.trim() === '');
+function ascensionEntryProblem(entry: unknown): string | undefined {
+  if (typeof entry === 'string') return entry.trim() === '' ? '缺少名字' : undefined;
+  if (!isRow(entry)) return '不是对象';
+  return typeof entry.name !== 'string' || entry.name.trim() === '' ? '缺少名字' : undefined;
 }
 
 /** N5：登神条目（要素／权能／法则） */
@@ -230,6 +234,10 @@ interface AscensionExtra {
  * N5：登神状态。`fillMissing` 为 true（人物内）时缺失或 null 补未登神默认对象；
  * loadout 顶层的 ascension 缺席表示「不改登神」，故只纠正已给出的对象。
  *
+ * 给了但形状坏（全部记入 `dropped`）：不是对象 → 人物内按未登神处理、loadout 删键（不改登神）；
+ * 条目列表不是数组 → []；条目缺名或不是对象 → 丢那一条；enabled 不是布尔 → 按条目推断；
+ * path / description 不是文本 → 空串。
+ *
  * `extra` 是实体 output 顶层：entity-gen 的 mapAscension 按下标从 `extra.elements[i]` /
  * `extra.authorities[i]` 取 effectDescriptions，丢弃第 i 个缺名条目时同下标连带删掉那一项，
  * 否则后面的效果文本会前移挂到错误条目上。
@@ -239,6 +247,7 @@ function normalizeAscension(
   path: string,
   fillMissing: boolean,
   notes: string[],
+  dropped: string[],
   extra?: AscensionExtra,
 ): void {
   if (absent(container, 'ascension')) {
@@ -247,9 +256,18 @@ function normalizeAscension(
     notes.push(`${path}.ascension：缺失，已补未登神默认值`);
     return;
   }
-  const asc = container.ascension;
-  if (!isRow(asc)) return;
   const label = `${path}.ascension`;
+  if (!isRow(container.ascension)) {
+    if (fillMissing) {
+      container.ascension = emptyAscension();
+      dropped.push(`${label}：不是对象，已按未登神处理`);
+    } else {
+      delete container.ascension;
+      dropped.push(`${label}：不是对象，已忽略`);
+    }
+    return;
+  }
+  const asc = container.ascension;
   for (const [alias, key] of [
     ['authority', 'authorities'],
     ['law', 'laws'],
@@ -259,13 +277,19 @@ function normalizeAscension(
       delete asc[alias];
       notes.push(`${label}.${alias}：已改名为 ${key}`);
     }
-  // 条目先按原下标纠正，再丢掉缺名的（note 下标都指模型原文）；enabled 推断看丢弃之后的条目
+  // 条目先按原下标纠正，再丢掉坏条目（note 下标都指模型原文）；enabled 推断看丢弃之后的条目
   for (const key of DIRECT_ASCENSION_LIST_KEYS) {
+    if (absent(asc, key)) continue;
     const list = asc[key];
-    if (!Array.isArray(list)) continue;
-    const nameless = list.map(isNamelessAscensionEntry);
+    if (!Array.isArray(list)) {
+      asc[key] = [];
+      dropped.push(`${label}.${key}：不是数组，已忽略`);
+      continue;
+    }
+    const problems = list.map(ascensionEntryProblem);
+    const nameless = problems.map((problem) => problem !== undefined);
     for (let i = 0; i < list.length; i++) {
-      if (nameless[i]) notes.push(`${label}.${key}[${i}]：缺少名字，已忽略`);
+      if (problems[i]) dropped.push(`${label}.${key}[${i}]：${problems[i]}，已忽略`);
       else normalizeAscensionEntry(list, i, key, `${label}.${key}`, notes);
     }
     if (!nameless.includes(true)) continue;
@@ -277,17 +301,22 @@ function normalizeAscension(
     for (let i = Math.min(list.length, extraList.length) - 1; i >= 0; i--)
       if (nameless[i]) {
         extraList.splice(i, 1);
-        notes.push(`${extra.path}.${key}[${i}]：对应的登神条目缺少名字，已连带删除`);
+        dropped.push(`${extra.path}.${key}[${i}]：对应的登神条目已丢弃，已连带删除`);
       }
   }
-  if (absent(asc, 'enabled')) {
+  if (absent(asc, 'enabled') || typeof asc.enabled !== 'boolean') {
+    const missing = absent(asc, 'enabled');
     asc.enabled = DIRECT_ASCENSION_LIST_KEYS.some(
       (key) => Array.isArray(asc[key]) && (asc[key] as unknown[]).length > 0,
     );
-    notes.push(`${label}.enabled：缺失，已按条目推断`);
+    if (missing) notes.push(`${label}.enabled：缺失，已按条目推断`);
+    else dropped.push(`${label}.enabled：不是布尔值，已按条目推断`);
   }
-  fill(asc, 'path', '', label, notes);
-  fill(asc, 'description', '', label, notes);
+  for (const key of ['path', 'description'])
+    if (!absent(asc, key) && typeof asc[key] !== 'string') {
+      asc[key] = '';
+      dropped.push(`${label}.${key}：不是文本，已置为空串`);
+    } else fill(asc, key, '', label, notes);
   for (const key of DIRECT_ASCENSION_LIST_KEYS) fill(asc, key, [], label, notes);
   if (typeof asc.divineKingdom === 'string') {
     asc.divineKingdom = { name: asc.divineKingdom, description: '' };
@@ -352,6 +381,7 @@ function normalizeCharacter(
   character: Row,
   path: string,
   notes: string[],
+  dropped: string[],
   extra: AscensionExtra,
 ): void {
   for (const key of DIRECT_CHARACTER_LIST_FIELDS) {
@@ -360,25 +390,34 @@ function normalizeCharacter(
   }
   for (const key of DIRECT_CHARACTER_TEXT_FIELDS) fill(character, key, '', path, notes);
   normalizeLists(character, path, notes);
-  normalizeAscension(character, path, true, notes, extra);
+  normalizeAscension(character, path, true, notes, dropped, extra);
 }
 
 /**
  * kind 为 character 时登神只写在 output.character 里。模型若写在 output 顶层而人物内没有，
- * 搬进人物（随后按 N5 纠正）；两处都写则意图不明，拒收。
+ * 搬进人物（随后按 N5 纠正）；两处都写时保留人物内那份、丢弃顶层的（记入 dropped）。
  */
-function moveCharacterAscension(output: Row, character: Row, label: string, notes: string[]): void {
+function moveCharacterAscension(
+  output: Row,
+  character: Row,
+  label: string,
+  notes: string[],
+  dropped: string[],
+): void {
   if (absent(output, 'ascension')) return;
-  if (!absent(character, 'ascension'))
-    throw new Error(
-      `直出结果无效：${label}.ascension 与 ${label}.character.ascension 同时出现（kind 为 character 时登神只写在 character 里）`,
+  if (!absent(character, 'ascension')) {
+    delete output.ascension;
+    dropped.push(
+      `${label}.ascension：与 ${label}.character.ascension 同时出现（kind 为 character 时登神只写在 character 里），保留 character 内的，已忽略`,
     );
+    return;
+  }
   character.ascension = output.ascension;
   delete output.ascension;
   notes.push(`${label}.ascension：已搬进 ${label}.character.ascension`);
 }
 
-function normalizeEntityOutput(row: Row, path: string, notes: string[]): void {
+function normalizeEntityOutput(row: Row, path: string, notes: string[], dropped: string[]): void {
   const output = row.output;
   if (!isRow(output)) return;
   const label = `${path}.output`;
@@ -391,11 +430,11 @@ function normalizeEntityOutput(row: Row, path: string, notes: string[]): void {
   // 人物与 loadout 的 mapAscension 都以实体 output 顶层为 extra（见 entity-gen-agent）
   const extra: AscensionExtra = { output, path: label };
   if (row.kind === 'character' && isRow(output.character)) {
-    moveCharacterAscension(output, output.character, label, notes);
-    normalizeCharacter(output.character, `${label}.character`, notes, extra);
+    moveCharacterAscension(output, output.character, label, notes, dropped);
+    normalizeCharacter(output.character, `${label}.character`, notes, dropped, extra);
     ownerName = output.character.name;
   }
-  normalizeAscension(output, label, false, notes, extra);
+  normalizeAscension(output, label, false, notes, dropped, extra);
   if (Array.isArray(output.statuses))
     output.statuses.forEach((status, i) => {
       if (!isRow(status)) return;
@@ -482,6 +521,7 @@ export function normalizeDirectUpdates(
   options: NormalizeDirectOptions,
 ): NormalizeDirectResult {
   const notes: string[] = [];
+  const dropped: string[] = [];
   const flattenedCharacters: string[] = [];
   rejectForbiddenKeys(parsed);
   stripAccountKeys(parsed, 'direct_updates', notes);
@@ -492,7 +532,7 @@ export function normalizeDirectUpdates(
       if (!isRow(row)) return;
       const flattened = unflattenCharacterEntity(row);
       if (flattened !== undefined) flattenedCharacters.push(flattened);
-      normalizeEntityOutput(row, `entities[${i}]`, notes);
+      normalizeEntityOutput(row, `entities[${i}]`, notes, dropped);
     });
   normalizeEffects(parsed.effects, notes);
   if (isRow(parsed.state)) {
@@ -500,5 +540,5 @@ export function normalizeDirectUpdates(
     if (isRow(characters)) normalizeDeltaRows(characters.delta, 'state.characters.delta', notes);
     if (isRow(affections)) normalizeDeltaRows(affections.delta, 'state.affections.delta', notes);
   }
-  return { notes, flattenedCharacters };
+  return { notes, dropped, flattenedCharacters };
 }

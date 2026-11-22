@@ -391,6 +391,28 @@ export async function generateDirectTurn(
         () => ({ notes: draft.normalized }),
         { agentId: 'direct_main' },
       );
+    if (draft.dropped) {
+      const dropped = draft.dropped;
+      // 丢弃项随结果进调试记录（DebugAgentEntry.outputWarnings），UI 在接纳后汇总提示
+      result.outputWarnings = [...dropped];
+      logEngine(
+        'warn',
+        'direct.output_dropped',
+        `直出结果有 ${dropped.length} 项格式有误，已忽略`,
+        () => ({ notes: dropped }),
+        { agentId: 'direct_main' },
+      );
+    }
+    if (draft.updatesMissing) {
+      const finishReason = result.finishReason ?? null;
+      logEngine(
+        'warn',
+        'direct.updates_missing',
+        '直出结果没有 direct_updates 区块，本楼只保存正文',
+        () => ({ finishReason }),
+        { agentId: 'direct_main' },
+      );
+    }
     return {
       draft,
       result,

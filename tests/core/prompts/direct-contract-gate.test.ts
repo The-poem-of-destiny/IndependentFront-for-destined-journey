@@ -234,6 +234,7 @@ describe('闸门 2：协议里的骨架示例能过校验', () => {
       structuredCombat: structured,
     });
     expect(draft.normalized).toBeUndefined();
+    expect(draft.dropped).toBeUndefined();
     expect(draft.updates.version).toBe(1);
   });
 });
@@ -252,7 +253,13 @@ function existing(): CharacterState[] {
       saveId: 's',
       name: '旅人',
       type: 'player',
-      inventory: [{ name: '铁', quantity: 2 }],
+      // 最大样例引用的旧物品 / 旧技能（替换、脱下）须真在身上：建补丁会按库存预演，查不到的丢弃
+      inventory: [
+        { name: '铁', quantity: 2 },
+        { name: '旧盾', quantity: 1, equippedSlot: '副手' },
+        { name: '旧帽', quantity: 1, equippedSlot: '头部' },
+      ],
+      skills: [{ name: '旧剑技' } as CharacterState['skills'][number]],
     }),
     createDefaultCharacterState({ id: 'c', saveId: 's', name: '同伴', type: 'npc' }),
   ];
@@ -531,6 +538,7 @@ describe('闸门 3：最大样例零纠正通过并能建补丁', () => {
       );
       const draft: DirectTurnDraft = parseDirectOutput(raw, POOL, { structuredCombat: structured });
       expect(draft.normalized).toBeUndefined();
+      expect(draft.dropped).toBeUndefined();
       expect(draft.flattenedCharacters).toBeUndefined();
       expect(draft.combatIgnored).toBeUndefined();
       expect(draft.characterUpdates.map((u) => u.name)).toEqual(['神官', '旅人']);
@@ -539,6 +547,8 @@ describe('闸门 3：最大样例零纠正通过并能建补丁', () => {
         definitions: [],
         sourceTurnKey: 'u',
       });
+      // 最大样例必须一条不丢地建成补丁（预演把提交时会抛的补丁提前丢掉，这里不该有）
+      expect(built.dropped).toEqual([]);
       const priest = built.characters.find((c) => c.name === '神官');
       expect(priest?.ascension.law[0]?.name).toBe('昼夜轮转');
       expect(priest?.ascension.authority[0]?.costDescription).toBe('消耗大量 MP');
