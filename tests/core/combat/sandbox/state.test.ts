@@ -270,4 +270,66 @@ describe('clone / snapshot / 查询 / 状态转换', () => {
     expect(save.timeUnit).toBe('回合');
     expect((save as unknown as Record<string, unknown>).tempSource).toBeUndefined();
   });
+
+  it('带 durationText 的状态经 toCombatStatus → toSaveStatus 往返后文本仍在', () => {
+    const original = {
+      name: '圣殿庇护',
+      description: '受圣殿庇护',
+      category: '增益' as const,
+      stacks: 1,
+      remainingTime: null,
+      timeUnit: '回合' as const,
+      durationText: '直到离开圣殿',
+      source: '圣殿',
+      effects: {},
+    };
+    const combat = toCombatStatus(original);
+    expect(combat.durationText).toBe('直到离开圣殿');
+    expect(combat.remainingTime).toBeNull();
+    const save = toSaveStatus(combat);
+    expect(save.durationText).toBe('直到离开圣殿');
+    expect(save.remainingTime).toBeNull();
+  });
+
+  it('无 durationText 的状态往返不凭空多出该键；战斗中改成数值时长则不再带回文本', () => {
+    const combat = toCombatStatus({
+      name: '祝福',
+      description: '',
+      category: '增益',
+      stacks: 1,
+      remainingTime: 3,
+      timeUnit: '回合',
+      source: '',
+      effects: {},
+    });
+    expect('durationText' in combat).toBe(false);
+    expect('durationText' in toSaveStatus(combat)).toBe(false);
+    const changed = toSaveStatus({
+      name: '圣殿庇护',
+      remainingTime: 2,
+      durationText: '直到离开圣殿',
+    });
+    expect(changed.remainingTime).toBe(2);
+    expect(changed.durationText).toBeUndefined();
+  });
+
+  it('技能消耗字符串优先取 costText，否则按数值格式化', () => {
+    const state = createCombatState({
+      combatants: [
+        {
+          character: makeChar({
+            skills: [
+              { name: '献祭', type: 'active', costText: '一段记忆' },
+              { name: '火球术', type: 'active', cost: { type: 'MP', amount: 20 } },
+              { name: '冥想', type: 'passive' },
+            ] as never,
+          }),
+          side: 'ally',
+        },
+      ],
+      fillResources: false,
+    });
+    const skills = state.units['艾莉丝'].skills ?? [];
+    expect(skills.map((s) => s.cost)).toEqual(['一段记忆', 'MP 20', undefined]);
+  });
 });

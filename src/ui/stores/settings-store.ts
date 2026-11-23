@@ -290,6 +290,8 @@ function getDefaults(): UiSettings {
     randomEventsEnabled: true,
     randomEventsFrequency: 1,
     directStructuredCombat: false,
+    // 实验性变量协议默认旧协议；与引擎 FALLBACK 一致
+    stateProtocol: 'legacy',
     // 露骨内容默认关（安全默认）；与引擎 FALLBACK 一致
     nsfwContent: false,
 

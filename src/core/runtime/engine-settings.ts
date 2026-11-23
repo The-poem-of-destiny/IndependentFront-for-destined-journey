@@ -55,6 +55,12 @@ export interface EngineSettings {
    * 读取入口是 `content/nsfw-filter.ts` 的 `nsfwEnabled()`，别在调用点直接读这个字段。
    */
   nsfwContent: boolean;
+  /**
+   * 状态读写协议（`docs/planning/2026-11-22-mvu-projection-protocol-design.md` §2，全局设置、不钉在存档上）。
+   * `legacy` = 现行 direct_updates 协议；`tree` = 状态树投影 + 路径补丁。只影响两种直出，每轮只取一次。
+   * `direct_cached` 每切换一次冷建一次（协议文字进签名）。
+   */
+  stateProtocol: 'legacy' | 'tree';
 }
 
 /**
@@ -80,6 +86,8 @@ const FALLBACK: EngineSettings = {
   directStructuredCombat: false,
   // 露骨内容默认关（安全默认）：未接 provider（headless / 测试）时同样按关处理
   nsfwContent: false,
+  // 状态协议默认旧协议：真源同为前端 UiSettings，未接 provider 时沿用现行 direct_updates
+  stateProtocol: 'legacy',
 };
 
 type Provider = () => Partial<EngineSettings> | undefined;
@@ -112,6 +120,7 @@ export function getEngineSettings(): EngineSettings {
       randomEventsFrequency: partial.randomEventsFrequency ?? FALLBACK.randomEventsFrequency,
       directStructuredCombat: partial.directStructuredCombat ?? FALLBACK.directStructuredCombat,
       nsfwContent: partial.nsfwContent ?? FALLBACK.nsfwContent,
+      stateProtocol: partial.stateProtocol ?? FALLBACK.stateProtocol,
     };
   } catch (err) {
     console.error('[engine-settings] provider 抛异常，按缺省值继续:', err);

@@ -9,8 +9,9 @@
  *    模型拿叙事值去覆盖面板数值。
  *
  * 区块名与第一轮更新口径按生成模式区分，必须对上各模式真实的写回机制：
- * - direct：`<direct_state>`，`direct_updates` 的 `time.delta_time` 与
- *   `state.characters.replace path=location`（见 `direct-prompt.ts`）；
+ * - direct：`<direct_state>`，经 `direct_updates` 声明耗时与地点。措辞协议中立（不写字段路径）：
+ *   旧协议（`time.delta_time` / `state.characters.replace path=location`）与状态树协议
+ *   （`/世界/时间` / `/世界/地点`）共用这两行，开局提示词建档时落库，切协议也不会过期；
  * - direct_cached：`<direct_context>`，输出协议与 direct 相同；
  * - agent：`<角色状态>`。正文模型自己不输出数据，耗时与地点由请求调度器从正文读出后
  *   经 `delta_time` / `set_location` 写回（见 `vars-update-translator.ts`），所以这里只要求
@@ -49,8 +50,8 @@ const STATE_BLOCK: Record<GenerationMode, string> = {
 };
 
 const DIRECT_UPDATE_LINES = [
-  '* 时间：在 direct_updates 的 time.delta_time 中写入开局这一幕实际经过的分钟数（非负有限数）。',
-  '* 地点：在 direct_updates 的 state.characters.replace 中以 path=location 写入主角本轮结束时所在的地点。',
+  '* 时间：在 direct_updates 中声明开局这一幕实际经过的分钟数（非负），推进游戏时间。',
+  '* 地点：在 direct_updates 中声明主角本轮结束时所在的地点。',
 ];
 
 /** agent 模式：游戏时间在 `<当前时空>`，主角位置在 `<角色状态>`（见 story 预设的区块排布） */

@@ -357,6 +357,29 @@ describe('ChatFlow 逐节演出', () => {
     expect(optionsBtn().exists()).toBe(true);
   });
 
+  it('本楼状态更新块：与行动选项同一时机 —— 接纳且末节放完才出现，默认收起（T13）', async () => {
+    const stateUpdates = {
+      deltaMinutes: 0,
+      ops: [{ path: '/主角/金钱', op: 'delta' as const, value: 5, status: '已应用' as const }],
+    };
+    const { wrapper, messages } = await mountWithFresh(storyMsg('a1', { stateUpdates }), {
+      isGenerating: false,
+    });
+    Object.assign(game, { messages, isGenerating: false, agentLogHistory: [] });
+    const block = () => wrapper.find('[data-testid="state-update-block"]');
+    expect(block().exists()).toBe(false); // pending（流式 / 接纳前）
+
+    messages[1].storyTurnStatus = 'accepted';
+    await flushPromises();
+    expect(block().exists()).toBe(false); // 演出还没放完
+
+    pressKey('End');
+    await flushPromises();
+    expect(block().exists()).toBe(true);
+    expect(block().attributes('open')).toBeUndefined();
+    expect(block().text()).toContain('本楼状态更新 1 项');
+  });
+
   it('发送新输入前先全部显示', async () => {
     const { wrapper } = await mountWithFresh(storyMsg('a1', { storyTurnStatus: 'accepted' }), {
       isGenerating: false,

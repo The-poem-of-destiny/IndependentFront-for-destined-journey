@@ -243,6 +243,28 @@
 - 缓存直出旧档只多一次 `direct_context.remove: ["openingPrompt"]`，不冷建。
 - 已接受的局限：旧档若开局清单没有结构化落库，此后开局清单只留在历史首条消息与记忆里。首条消息滚出历史窗口后，模型就看不到它了。
 
+### 实验性变量协议（状态树，2026-11-22）
+
+📌 2026-11-22 新增，分支 `experimental-variables`，**未经真实模型与真机游玩验证**。设计与裁定见 [状态树投影协议设计](../planning/2026-11-22-mvu-projection-protocol-design.md)（实施出入见其 §13）。
+
+**开关。** 全局设置 `stateProtocol: 'legacy' | 'tree'`，入口「设置 → 开发者 → 实验性变量协议（状态树）」，缺省 `legacy`（逐字节沿用现行协议）。经 `runtime/engine-settings.ts` 注入缝读，`direct-main.ts` 每轮只取一次，读侧投影、协议文字、缓存分区与写侧解析同一口径。只影响两种直出，Agent 模式不变（第二期）。不钉在存档上：同一个档可来回切，内核存储形状不变。
+
+**读侧（tree）。** `direct_state` 里的 `characters` / `existingNames` / `variables` / `gameTime` / `quests` / `weather` / `fp` / `affections` 换成一棵中文键状态树 `stat_data`（`variables/state-tree-projection.ts` 的 `buildStateTree`）：`世界`（时间、主角地点、`_时段` 等只读键）、`命运点数`、`主角`、`关系列表`、`任务列表`、`新闻`、`变量`。全量人物集合沿用原判据（主角、在场、本轮点名、结构化战斗参战者），其余人物只给摘要 `{在场: false, 地点, 好感度}`。地图上下文、`openingPrompt`、`combat`、`plotSettings`、`plot` 仍是与 `stat_data` 并列的原有键。以 `_` 开头的键只读；上限投成 `{_基础, 额外}`。
+
+**写侧（tree）。** `<direct_updates>` 改为 `{"version": 2, "patch": [...]}`，op 只有 `replace` / `add` / `remove` / `delta` / `move`，路径就是树路径（`variables/state-tree-patch.ts` 解析，三种路径写法与 `stat_data` 前缀自动纠正，整段 JSON 坏时逐元素恢复）。每条 op 先纠正值、纠正不了才丢那一条，再由翻译层 `variables/state-tree-translator.ts` 映射成既有 `StatePatch`、经 `state/patch-rehearsal.ts` 预演后提交；`plot` / `diceUsed` / `tile_ops` / `combat` / `time` 仍是信封里的并列键。原型污染键或一条 op 都没救回时整楼拒收。并存期回落：tree 下模型仍写旧形状（有 `state` / `entities` / `effects` 而无 `patch`）时交给旧解析器并记一条纠正。协议的状态写入段由 `prompts/state-tree-prompt.ts` 从键词表生成。
+
+**每楼更新记录。** tree 下接纳一楼时，`buildDirectPatches` 返回的逐条记录（路径、动作、写入值、状态「已应用 / 已纠正 / 已丢弃」、说明、前值、后值）写到本楼 assistant 正文消息的 `ChatMessage.stateUpdates`，聊天流里显示为默认折叠的「本楼状态更新」块。**前值与后值只保留在最新一楼**：接纳新一楼时 `lib/game-pipeline.ts` 先清掉更早楼层记录里的 `before` / `after`，再拍回合快照（快照载荷带整份消息）。legacy 楼层没有记录，不显示更新块。
+
+**写入统计。** 每楼一条 `stateWriteStats {protocol, ops, applied, corrected, dropped, rejected, updatesMissing?}`，进 `AgentResult` 与调试记录 `DebugAgentEntry`，并记日志事件 `state.write_stats`（payload 带模型名）。口径见 `agents/direct-main.ts` 的 `summarizeStateWrites`；legacy 楼按写入单元近似计数，只作参考。离线汇总：
+
+```bash
+node scripts/analyze-state-writes.mjs <文件> [<文件> …]
+```
+
+输入可以是 DebugPanel 导出的 `fated-poem-debug-*.json`，也可以是完整运行日志 JSONL（「设置 → 开发者模式 → 完整运行日志 → 导出」）；按「协议 × 模型」分组输出楼数、整楼拒收率、每楼丢弃 / 纠正、丢弃率与缺区块率。
+
+**玩家手改。** 变量修改器（侧栏「变量」）与更新块修订走同一套路径 op 与翻译层，写入口是 `StateManager.commitPlayerEdit`（整批原子，补丁带 `metadata.source: 'player_edit'`，日志 `state.manual_edit`）。手改不另行告知模型，只经下一轮的状态树变化带过去。
+
 ## 内容包
 
 世界书沿用现有开关、条件、分区和依赖，只读取明确授权 `direct_main` 的条目。在世界书编辑器为相关规则、世界设定、种族、区域、产业等配置读取范围；不要直接把各 Agent 的旧输出模板全部合并进来，它们会与直出契约冲突。

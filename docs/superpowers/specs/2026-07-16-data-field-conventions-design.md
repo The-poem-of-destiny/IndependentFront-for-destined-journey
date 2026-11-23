@@ -1,5 +1,40 @@
 # 《命定之诗》游戏数据字段规范（数据字典）
 
+## 状态树投影与新字段补充（2026-11-22）
+
+> 第一期已实施（分支 `experimental-variables`），未经真实模型与真机游玩验证。设计全文：`docs/planning/2026-11-22-mvu-projection-protocol-design.md`。
+
+### 状态树投影（按附录 C 模板）
+
+**键规则**：树上一律中文键；人物、物品、技能、状态效果、任务按**名字**作键（铁律 1，AI 永不产 id），同一人物下物品名唯一，所以同名不会同时出现在 `背包` 与 `装备`。以 `_` 开头的键只读（由代码维护）；主角 `等级` 只读（改 `累计经验值`），NPC `等级` 可写。
+**存储**：**不落库**，纯投影。读侧由 `variables/state-tree-projection.ts` 的 `buildStateTree` 从 `CharacterState[]` + `SaveProfile` 现算；写侧经 `variables/state-tree-translator.ts` 翻译成既有 `StatePatch`，存储形状不变。只在 `stateProtocol: 'tree'`（全局设置，缺省 `legacy`）的两种直出里出现，变量修改器也用它（全部全量）。
+**字段表**（顶层）：
+
+| 键         | 来源                                                       | 可写                       |
+| ---------- | ---------------------------------------------------------- | -------------------------- |
+| `世界`     | 游戏时间、主角 `location`、`_时段` / `_天气` / `_回合`     | 时间只能前进；主角地点可写 |
+| `命运点数` | `SaveProfile.fp`                                           | 增减走账本，不足钳制       |
+| `主角`     | 主角 `CharacterState`（人物节点；**没有 `地点` 键**）      | 除只读键外可写             |
+| `关系列表` | 其余角色：全量人物节点 + `在场 / 地点 / 好感度`，或摘要块  | 同上；摘要角色的叶子也可写 |
+| `任务列表` | `SaveProfile.quests`                                       | 可写                       |
+| `新闻`     | `SaveProfile.news`（只投最近若干条）                       | AI 只增；修改器不改        |
+| `变量`     | `SaveProfile.variables` 原样（ADR-30 vars 空间，键不翻译） | 可写                       |
+
+人物节点子键：`档案`、`成长`、`生命值` / `法力值` / `体力值`（`{当前, 上限: {_基础, 额外}}`）、`金钱`、`当前行动`、`心里话`、`背包`（未穿戴物品，条目**不带** `位置`）、`装备`（已穿戴物品，`位置` = `equippedSlot`）、`技能`、`状态效果`、`登神长阶`。账务键（id / saveId / definition / ageAnchor 等）不出现。键词表唯一真源 `variables/state-tree-spec.ts`。
+**引用关系**：路径解析对的是完整内核状态，不是投影出来的那部分；缓存直出的分区键就是树路径（`variables/state-tree-sections.ts`）。人物改名仍走 `rename_character`（修改器第一期不开放人物改名）。
+**StatePatch 速查**：不新增 op。`replace` / `add` / `remove` / `delta` / `move` 五种路径 op 由翻译层映射到既有 op（`update_character`、`set_location`、`add_item` / `remove_item` / `equip_item`、`add_status_effect` / `update_status_effect`、`delta_variable profile.fp` 等），地点、时间、经验仍走各自的钩子 op。玩家编辑走 `StateManager.commitPlayerEdit`，补丁 `metadata.source: 'player_edit'`。
+**禁止**：把状态树落库或当第二个真源；在投影里放账务键；绕过翻译层直接改内核字段；在协议文字里手写词表（一律从 `state-tree-spec.ts` 插值）；给 AI 写只读键开口子。
+
+### 新字段登记
+
+| 字段                                                                | 类型                 | 谁填                           | 说明                                                                                                                                                                                                          |
+| ------------------------------------------------------------------- | -------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CharacterState.maxHpBonus?` / `maxMpBonus?` / `maxSpBonus?`        | number（整数，可负） | Code 固化；AI / 玩家写「额外」 | 资源上限的「额外」部分。基础 = `calcResources(tier, attributes)`，不落库；有效上限 = max(1, 基础 + 额外)，仍写回 `maxHp` 等。缺席读作「现上限 − 基础」，旧档总上限不变。唯一出处 `character/resource-caps.ts` |
+| `StatusEffect.durationText?`                                        | string               | AI / 玩家（经纠正层）          | 解析不了的时长原文（如「直到离开城镇」），此时 `remainingTime` 为 null；之后写数值时长即清掉。显示优先于数值时长；EJS `stats` 投影为「持续说明」键                                                            |
+| `Skill.costText?`                                                   | string               | AI / 玩家（经纠正层）          | 解析不了的消耗原文，与 `cost` 互斥（StateManager 把守）。显示优先于 `cost`                                                                                                                                    |
+| `ChatMessage.stateUpdates?`                                         | `StateUpdateRecord`  | Code（接纳流程）               | 本楼状态更新记录：逐条 op（路径、动作、写入值、状态、说明、前值、后值）+ `deltaMinutes`。只在 tree 楼层出现；前值 / 后值只保留在最新一楼。随消息整存整取，不升 Dexie 版本                                     |
+| `AgentResult.stateWriteStats?` / `DebugAgentEntry.stateWriteStats?` | `StateWriteStats`    | Code                           | 每楼状态写入统计 `{protocol, ops, applied, corrected, dropped, rejected, updatesMissing?}`，同时记日志 `state.write_stats`；只作参考                                                                          |
+
 ## 日历字段补充（2026-11-13）
 
 - 新表 `saveCalendars`（Dexie v33）：**存档私有**，主键 `saveId`，每存档至多一行；形状 `SaveCalendar { mode, entries, hiddenKinds, hiddenRegions, hiddenKeys, localRegionOnly, updatedAt }`。玩家经界面写入，AI 不读不写。不进快照载荷；进整库备份与单存档导出；删档级联。

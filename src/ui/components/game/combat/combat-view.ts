@@ -167,15 +167,28 @@ export interface CombatStatusView {
   name: string;
   stacks?: number;
   remainRounds: number | null;
+  /** 解析不了的时长原文（状态树协议 §5.7）；有值时 `remainRounds` 恒为 null，显示它 */
+  durationText: string | null;
 }
 
+/**
+ * 有 `durationText`（条件型时长，如「直到离开城镇」）时不算剩余回合，交出原文；
+ * 否则只有以「回合」计的数值时长才算剩余回合。
+ */
 export function statusViewsOf(unit: CombatUnit): CombatStatusView[] {
-  return (unit.statusEffects ?? []).map((fx) => ({
-    type: statusChipType(fx),
-    name: fx.name,
-    stacks: fx.stacks,
-    remainRounds: fx.timeUnit === '回合' && fx.remainingTime != null ? fx.remainingTime : null,
-  }));
+  return (unit.statusEffects ?? []).map((fx) => {
+    const durationText = fx.durationText?.trim() || null;
+    return {
+      type: statusChipType(fx),
+      name: fx.name,
+      stacks: fx.stacks,
+      remainRounds:
+        !durationText && fx.timeUnit === '回合' && fx.remainingTime != null
+          ? fx.remainingTime
+          : null,
+      durationText,
+    };
+  });
 }
 
 /** 位置槽位是否用尽 */

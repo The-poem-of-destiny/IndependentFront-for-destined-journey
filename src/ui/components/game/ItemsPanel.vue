@@ -5,7 +5,14 @@ import { useUIStore } from '../../stores/ui-store';
 import { useTweenedNumber } from '../../composables/useTweenedNumber';
 import { qualityVar } from '../../lib/quality-colors';
 // 条目展示逻辑（品质/分类/详情字段/效果/战斗修正）收敛到 item-view —— 与 NPC 查看器共用同一份
-import { qualityOf, qualityRank, facetOf, listExtra, type PanelEntry } from '../../lib/item-view';
+import {
+  qualityOf,
+  qualityRank,
+  facetOf,
+  listExtra,
+  skillRewriteEntry,
+  type PanelEntry,
+} from '../../lib/item-view';
 import ItemDetailBody from './ItemDetailBody.vue';
 // 🆕 重铸（2026-08-24）：单条目重铸 —— 把当前条目的完整数据喂给 item_gen 重写
 import type { RewriteTarget } from '@engine/agents/entity-gen-agent';
@@ -151,20 +158,7 @@ watch([selectedIdx, activeCategory], () => {
 function buildRewriteTarget(entry: PanelEntry): RewriteTarget {
   const row = entry.row as any;
   if (entry.kind === 'skill') {
-    return {
-      kind: 'skill',
-      entry: {
-        name: row.name,
-        description: row.description ?? '',
-        type: row.type === 'passive' ? 'passive' : 'active',
-        ...(row.cost ? { cost: row.cost } : {}),
-        ...(row.cooldown !== undefined ? { cooldown: row.cooldown } : {}),
-        ...(row.effects ? { effects: row.effects } : {}),
-        ...(row.skillPower !== undefined ? { skillPower: row.skillPower } : {}),
-        ...(row.relevantAttribute ? { relevantAttribute: row.relevantAttribute } : {}),
-        ...(row.damageType ? { damageType: row.damageType } : {}),
-      },
-    };
+    return { kind: 'skill', entry: skillRewriteEntry(entry.row) };
   }
   if (row.equippedSlot) {
     return {

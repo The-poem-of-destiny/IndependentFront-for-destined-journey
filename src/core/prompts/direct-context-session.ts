@@ -1,6 +1,7 @@
 import type { ChatMessage, DirectCacheDiagnostics } from '../types/types';
 import type { LlmMessage } from '../types/types-api';
 import { logEngine } from '../runtime/engine-logger';
+import { STATE_TREE_CACHE_PROTOCOL } from './state-tree-prompt';
 
 export interface DirectContextFrame {
   prefix: LlmMessage[];
@@ -84,7 +85,7 @@ export function normalizeDirectCacheRebuild(input?: {
 
 /** 诊断里逐条列出的分区上限，其余合并成一项。 */
 const MAX_DIAGNOSTIC_SECTIONS = 30;
-/** 尾部重申现值的分区：每轮都可能变，且以 app 状态为准。 */
+/** 尾部重申现值的分区（legacy 缺省）：每轮都可能变，且以 app 状态为准。 */
 const CURRENT_SECTIONS = ['combat', 'resources'] as const;
 const discards = new Map<string, number>();
 let store: DirectCacheStore | undefined;
@@ -124,7 +125,26 @@ function size(messages: LlmMessage[]): number {
   );
 }
 
-export const DIRECT_CACHE_PROTOCOL = `上下文采用直出缓存会话。direct_context 是本轮权威输入：set 中的每个顶层字段整块替换旧值，remove 明确删除旧字段；禁止把替换解释成数值增减或追加物品。未变化的字段沿用最近值。character/角色名/profile、skills、inventory、statusEffects 分别是该角色的档案、技能、库存和状态效果，character/角色名/state 是该角色当前的位置、是否在场、当前行动、金钱、经验与心里话；资源单列在 resources，按 name 对应角色。空数组表示已清空，remove 后该分区不再有效。若出现 memory/记忆编号 分区，每个分区是一条长期记忆，所有仍有效的 memory/ 分区合起来就是完整记忆库：新记忆只出现在当轮 set，未再出现的旧记忆依然有效，被 remove 的记忆已删除。currentLore、regionLore、turnLore 及 authoredTurn 只以最新分区为准，被替换或移除的旧条目不再是本轮激活规则。历史中的 assistant 只保留正文，不含当时的状态声明；状态一律以 direct_context 与本轮 turn_context 为准。历史里只有正文不代表可以只输出正文，每轮仍须按输出协议输出完整结构。历史正文里的 <beat/> 已移除，每轮仍须照常分节。玩家输入在每轮 direct_context 之后的 player_input 中。turn_context 只随当前这一轮出现，历史里不保留旧轮的召回与骰池；只使用本轮 turn_context 的召回与骰池。turn_context.dice_pool 是按骰式分行的字符串数组，每项形如 "d20: {12, 5, 17}"；diceUsed.sides 为骰面数，diceUsed.index 为该骰在对应骰式花括号内从 0 起的位置。turn_context.current 若出现，其中的战斗与资源现值是本轮 app 状态，优先于历史中的旧值；同一轮 direct_context.set 里给出的 combat 与 resources 同样是现值。`;
+/** 缓存协议里讲状态分区的那几句（legacy：按角色拆的 `character/…` 与 `resources`）。 */
+const LEGACY_CACHE_STATE_SENTENCES = `character/角色名/profile、skills、inventory、statusEffects 分别是该角色的档案、技能、库存和状态效果，character/角色名/state 是该角色当前的位置、是否在场、当前行动、金钱、经验与心里话；资源单列在 resources，按 name 对应角色。空数组表示已清空，remove 后该分区不再有效。`;
+/** 缓存协议里讲尾部现值的那一句（legacy）。 */
+const LEGACY_CACHE_CURRENT_SENTENCE = `turn_context.current 若出现，其中的战斗与资源现值是本轮 app 状态，优先于历史中的旧值；同一轮 direct_context.set 里给出的 combat 与 resources 同样是现值。`;
+/** 缓存协议的其余部分（两种状态协议共用），按原顺序拼回即 legacy 原文。 */
+const CACHE_PROTOCOL_HEAD = `上下文采用直出缓存会话。direct_context 是本轮权威输入：set 中的每个顶层字段整块替换旧值，remove 明确删除旧字段；禁止把替换解释成数值增减或追加物品。未变化的字段沿用最近值。`;
+const CACHE_PROTOCOL_MIDDLE = `若出现 memory/记忆编号 分区，每个分区是一条长期记忆，所有仍有效的 memory/ 分区合起来就是完整记忆库：新记忆只出现在当轮 set，未再出现的旧记忆依然有效，被 remove 的记忆已删除。currentLore、regionLore、turnLore 及 authoredTurn 只以最新分区为准，被替换或移除的旧条目不再是本轮激活规则。历史中的 assistant 只保留正文，不含当时的状态声明；状态一律以 direct_context 与本轮 turn_context 为准。历史里只有正文不代表可以只输出正文，每轮仍须按输出协议输出完整结构。历史正文里的 <beat/> 已移除，每轮仍须照常分节。玩家输入在每轮 direct_context 之后的 player_input 中。turn_context 只随当前这一轮出现，历史里不保留旧轮的召回与骰池；只使用本轮 turn_context 的召回与骰池。turn_context.dice_pool 是按骰式分行的字符串数组，每项形如 "d20: {12, 5, 17}"；diceUsed.sides 为骰面数，diceUsed.index 为该骰在对应骰式花括号内从 0 起的位置。`;
+
+export const DIRECT_CACHE_PROTOCOL = `${CACHE_PROTOCOL_HEAD}${LEGACY_CACHE_STATE_SENTENCES}${CACHE_PROTOCOL_MIDDLE}${LEGACY_CACHE_CURRENT_SENTENCE}`;
+
+/**
+ * 状态树协议（tree）下的缓存协议（设计 §3.4）：分区键即 stat_data 树路径。
+ * 同一角色在全量与摘要之间切换时，旧一侧的分区随同一轮 remove 下发，故明确「先 remove 后 set」。
+ */
+const DIRECT_CACHE_TREE_PROTOCOL = `${CACHE_PROTOCOL_HEAD}${STATE_TREE_CACHE_PROTOCOL}同一轮里先按 remove 删除路径，再按 set 写入：人物在全量与摘要之间切换时，旧一侧的分区会出现在 remove 中。${CACHE_PROTOCOL_MIDDLE}turn_context.current 若出现，其中的战斗与在场角色的 生命值/法力值/体力值 分区是本轮 app 状态，优先于历史中的旧值；同一轮 direct_context.set 里给出的这些分区同样是现值。`;
+
+/** 按状态协议取缓存协议文字（协议文字进会话签名，切协议时每档冷建一次）。 */
+export function buildDirectCacheProtocol(stateProtocol: 'legacy' | 'tree'): string {
+  return stateProtocol === 'tree' ? DIRECT_CACHE_TREE_PROTOCOL : DIRECT_CACHE_PROTOCOL;
+}
 
 function diagnoseSections(
   set: Record<string, unknown>,
@@ -164,6 +184,11 @@ export async function prepareDirectContext(input: {
    */
   tailReminder?: string;
   /**
+   * 尾部现值重申的分区键（本次 set 里没给的那些补进 `turn_context.current`）。
+   * 缺省 `['combat', 'resources']`（legacy）；状态树协议下由调用方传在场角色的资源分区与 combat。
+   */
+  currentSections?: readonly string[];
+  /**
    * 重建时机（用户设置）：先经 `normalizeDirectCacheRebuild` 收敛。
    * 刻意不进会话签名：调阈值只影响之后的判定，不让当前会话立即重建。
    */
@@ -189,6 +214,7 @@ export async function prepareDirectContext(input: {
     throw new DOMException('Context preparation cancelled', 'AbortError');
   const currentSource = source(input.history);
   const rebuild = normalizeDirectCacheRebuild(input.rebuild);
+  const currentKeys = input.currentSections ?? CURRENT_SECTIONS;
   const signature = serializeDirectContext([input.signature, input.frame.prefix]);
   const sections = JSON.parse(serializeDirectContext(input.frame.sections)) as Record<
     string,
@@ -202,10 +228,9 @@ export async function prepareDirectContext(input: {
   // 已在 set 里的不重复；一个都不缺时不出 current 键。故尾部随每份请求的 set 各自构造。
   const tailFor = (set: Record<string, unknown>) => {
     const current = Object.fromEntries(
-      CURRENT_SECTIONS.filter((key) => key in sections && !(key in set)).map((key) => [
-        key,
-        sections[key],
-      ]),
+      currentKeys
+        .filter((key) => key in sections && !(key in set))
+        .map((key) => [key, sections[key]]),
     );
     return {
       role: 'user' as const,

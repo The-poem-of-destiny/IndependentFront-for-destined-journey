@@ -46,6 +46,7 @@ import {
 } from './character-viewer';
 // 装备/技能/背包详情与玩家背包面板**共用**同一份渲染（数据结构等价，避免显示分叉）
 import ItemDetailBody from './ItemDetailBody.vue';
+import { statusDurationLabel } from '../../lib/status-view';
 import CharacterChronicleTab from './CharacterChronicleTab.vue';
 import { characterAssetRows } from '@engine/character/character-definitions';
 
@@ -185,10 +186,9 @@ function chipType(fx: StatusEffect): 'buff' | 'debuff' | 'special' {
  * 且**没有 v-else**，那种写法碰到 undefined 只是不显示，不会把这个词印出来。
  */
 function durationText(fx: StatusEffect): string {
-  if (fx.remainingTime == null) return '永久';
+  // 判定在 lib/status-view.ts：`durationText` 原文优先（§5.7）、`== null` 收成「永久」；
   // 999 是"实际上不会走完"的约定值（同 CharacterListPanel），照数字显示只会让人以为是 bug
-  if (fx.remainingTime >= 999) return '长期';
-  return `${fx.remainingTime}${fx.timeUnit ?? ''}`;
+  return statusDurationLabel(fx, '长期');
 }
 
 /** 同上一条的同类: `stacks` 缺席的遗留行不该在详情里印出「层数 undefined」 */

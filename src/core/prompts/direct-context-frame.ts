@@ -22,6 +22,8 @@ import {
   preprocessPresetEntryContents,
 } from './preset-loader';
 import { isStoryZonePlaceholder, type PresetEntryLike } from './story-zone-placeholders';
+import { isStateTreePersonSummary, type StateTreeObject } from '../variables/state-tree-projection';
+import { joinStateTreePath, splitStateTreeSections } from '../variables/state-tree-sections';
 
 const RANDOM_MACRO_RE = /\{\{random::/;
 
@@ -94,6 +96,37 @@ export function buildDirectCharacterSections(
     resources.push({ name: character.name, hp, maxHp, mp, maxMp, sp, maxSp });
   }
   return { ...sections, resources };
+}
+
+/** 尾部现值重申的三个资源分区（状态树协议，设计 §3.4）。 */
+const TREE_RESOURCE_KEYS = ['生命值', '法力值', '体力值'] as const;
+
+/**
+ * 状态树协议（tree）下的状态分区：分区键即 stat_data 树路径（`splitStateTreeSections` 的切点）。
+ * 与 legacy 的 `character/角色名/…` + `resources` 互斥，两种协议不会出现在同一份分区里。
+ * 全量 ↔ 摘要切换时，新旧分区路径不同，会话层按「上一轮有、本轮没有」自然下发 remove，
+ * 不会在缓存里留下重叠分区（`findOverlappingSections` 闸门测试钉住）。
+ */
+export function buildDirectTreeSections(tree: StateTreeObject): Record<string, unknown> {
+  return splitStateTreeSections(tree);
+}
+
+/**
+ * 状态树协议下尾部现值重申的分区键：主角与在场角色（全量节点且 `在场` 为真）的
+ * 生命值 / 法力值 / 体力值，加上 combat。不在场的摘要角色没有资源分区，自然不列。
+ */
+export function directTreeCurrentSections(tree: StateTreeObject): string[] {
+  const keys = ['combat'];
+  if (tree['主角'] && typeof tree['主角'] === 'object')
+    for (const key of TREE_RESOURCE_KEYS) keys.push(joinStateTreePath(['主角', key]));
+  const relations = tree['关系列表'];
+  if (relations && typeof relations === 'object' && !Array.isArray(relations))
+    for (const [name, node] of Object.entries(relations)) {
+      if (isStateTreePersonSummary(node)) continue;
+      if ((node as StateTreeObject)['在场'] !== true) continue;
+      for (const key of TREE_RESOURCE_KEYS) keys.push(joinStateTreePath(['关系列表', name, key]));
+    }
+  return keys;
 }
 
 /**

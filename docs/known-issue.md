@@ -1,3 +1,13 @@
+# Known issue: 战斗写回把缺席的状态描述补成空串（2026-11-22 记档）
+
+状态：**已定位、未修**（2026-11-22 实验性变量协议 T8a 读码时发现，**既有缺陷，非本次引入**）。低危：只丢叙事描述，不动数值。
+
+- **现象**：战斗结束写回后，存档里某些状态效果的描述变成空串。
+- **根因**：`src/core/combat/sandbox/state.ts` 的 `toSaveStatus` 把战斗状态转回落库形状时写 `description: fx.description ?? ''`。战斗中的状态效果 `description` 可缺席（`CombatStatusEffect` 上是可选字段）。终局写回（`combat/sandbox/settlement.ts` 对每个存档单位的全部终态状态发 `add_status_effect`；直出跨楼战斗 `combat/direct-combat.ts` 的合并）拿到的就是这个空串，于是存档里原有的描述被覆盖。
+- **修复方向**：缺席时不出 `description` 键，由写回侧沿用存档原值（或在合并时以存档值兜底）；补一条「存档状态带描述 → 战斗内改写时不带描述 → 写回后描述仍在」的往返用例。
+
+---
+
 # Known issue: 首页 Astral Drift 背景的两处限制（2026-11-14 记档）
 
 状态：**已定位、暂不修**（2026-11-14 视觉升级时确认，分支 `homepage-enhance`）。设计与升级记录见 [首页 Astral Drift 集成设计](planning/2026-08-09-home-astral-drift-integration-design.md) §8.13。

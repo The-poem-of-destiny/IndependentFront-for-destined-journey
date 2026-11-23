@@ -10,6 +10,8 @@ import {
   typeLabel,
   detailExtra,
   entryEffects,
+  skillCostLabel,
+  skillRewriteEntry,
   type PanelEntry,
 } from '../../../src/ui/lib/item-view';
 
@@ -88,5 +90,64 @@ describe('entryEffects', () => {
       减速: '移速下降',
     });
     expect(entryEffects(item())).toEqual({});
+  });
+});
+
+describe('skillCostLabel / costText 优先（状态树协议 §5.7）', () => {
+  it('有 costText 时原样显示，忽略数值格式', () => {
+    expect(skillCostLabel({ costText: '一缕寿元' })).toBe('一缕寿元');
+    expect(skillCostLabel({ costText: '一缕寿元' }, { typeFirst: true, sep: ' ' })).toBe(
+      '一缕寿元',
+    );
+    expect(detailExtra(skill({ costText: '一缕寿元' }), 'skills')).toBe('Lv.3 · 一缕寿元');
+  });
+  it('无 costText 时按 cost 格式化；三种排版', () => {
+    const s = { cost: { type: 'MP', amount: 10 } };
+    expect(skillCostLabel(s)).toBe('10MP');
+    expect(skillCostLabel(s, { sep: ' ' })).toBe('10 MP');
+    expect(skillCostLabel(s, { typeFirst: true, sep: ' ' })).toBe('MP 10');
+  });
+  it('空白 costText 视为没有；都没有返回空串', () => {
+    expect(skillCostLabel({ costText: '  ', cost: { type: 'SP', amount: 5 } })).toBe('5SP');
+    expect(skillCostLabel({})).toBe('');
+    expect(detailExtra(skill(), 'skills')).toBe('Lv.3');
+  });
+});
+
+describe('skillRewriteEntry（重铸交给 AI 的技能现状）', () => {
+  it('带上 costText，关键字段透传', () => {
+    const entry = skillRewriteEntry({
+      name: '血祭',
+      description: '以血换力',
+      type: 'active',
+      costText: '一缕寿元',
+      cooldown: 2,
+      skillPower: 30,
+      relevantAttribute: 'int',
+    });
+    expect(entry).toEqual({
+      name: '血祭',
+      description: '以血换力',
+      type: 'active',
+      costText: '一缕寿元',
+      cooldown: 2,
+      skillPower: 30,
+      relevantAttribute: 'int',
+    });
+  });
+  it('数值消耗照旧带 cost，不出现 costText 键', () => {
+    const entry = skillRewriteEntry({
+      name: '火球术',
+      description: '',
+      type: 'passive',
+      cost: { type: 'MP', amount: 10 },
+    });
+    expect(entry).toEqual({
+      name: '火球术',
+      description: '',
+      type: 'passive',
+      cost: { type: 'MP', amount: 10 },
+    });
+    expect('costText' in entry).toBe(false);
   });
 });

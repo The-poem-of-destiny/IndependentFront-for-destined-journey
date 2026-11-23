@@ -107,6 +107,8 @@ setEngineSettingsProvider(() => {
     directStructuredCombat: s.directStructuredCombat,
     // 露骨内容开关（同样每次现读，设置页拨动即时生效）
     nsfwContent: s.nsfwContent,
+    // 实验性变量协议（开发者设置，仅直出读；引擎每轮只取一次）
+    stateProtocol: s.stateProtocol,
   };
 });
 

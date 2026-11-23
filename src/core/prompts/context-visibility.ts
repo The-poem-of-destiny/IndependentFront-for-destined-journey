@@ -608,7 +608,8 @@ function formatNpcSummary(content: Record<string, any>): string {
       char.statusEffects
         ?.map(
           (s: any) =>
-            `${s.name}(${s.remainingTime != null ? `剩余${s.remainingTime}${s.timeUnit || '分钟'}` : '永久'})`,
+            // 文本时长（durationText）优先：条件型状态不能被说成「永久」
+            `${s.name}(${s.durationText ? s.durationText : s.remainingTime != null ? `剩余${s.remainingTime}${s.timeUnit || '分钟'}` : '永久'})`,
         )
         .join(', ') || '无';
     lines.push(

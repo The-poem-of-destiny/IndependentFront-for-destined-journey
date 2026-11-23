@@ -216,6 +216,12 @@ export type UiSettings = {
    * 当前设置页锁定为关（「暂未开放」）。
    */
   directStructuredCombat: boolean;
+  /**
+   * 实验性变量协议（全局设置，只对两种直出生效，设计 2026-11-22-mvu-projection-protocol-design §2）：
+   * `legacy` = 现行 direct_updates；`tree` = 状态树投影 + 路径补丁。默认 legacy。
+   * 引擎侧经 `engine-settings.ts` 的注入缝读（main.ts 的 provider 转发）；切换后缓存直出冷建一次。
+   */
+  stateProtocol: 'legacy' | 'tree';
 
   // ═══ 内容分级 ═══
   /**

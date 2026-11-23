@@ -28,6 +28,7 @@ describe('getEngineSettings', () => {
       randomEventsFrequency: 1,
       directStructuredCombat: false,
       nsfwContent: false,
+      stateProtocol: 'legacy',
     });
   });
 
@@ -39,6 +40,7 @@ describe('getEngineSettings', () => {
       randomEventsFrequency: 2,
       directStructuredCombat: true,
       nsfwContent: true,
+      stateProtocol: 'tree',
     }));
     expect(getEngineSettings()).toEqual({
       maxSnapshotsPerSave: 7,
@@ -47,6 +49,7 @@ describe('getEngineSettings', () => {
       randomEventsFrequency: 2,
       directStructuredCombat: true,
       nsfwContent: true,
+      stateProtocol: 'tree',
     });
   });
 
@@ -72,6 +75,14 @@ describe('getEngineSettings', () => {
     expect(getEngineSettings().directStructuredCombat).toBe(true);
   });
 
+  it('状态协议：没注册 / provider 未给时默认旧协议（legacy）', () => {
+    expect(getEngineSettings().stateProtocol).toBe('legacy');
+    setEngineSettingsProvider(() => ({ maxSnapshotsPerSave: 3 }));
+    expect(getEngineSettings().stateProtocol).toBe('legacy');
+    setEngineSettingsProvider(() => ({ stateProtocol: 'tree' }));
+    expect(getEngineSettings().stateProtocol).toBe('tree');
+  });
+
   it('每次调用都重新问 provider —— 设置页改完不必重启', () => {
     let limit = 10;
     setEngineSettingsProvider(() => ({ maxSnapshotsPerSave: limit }));
@@ -89,6 +100,7 @@ describe('getEngineSettings', () => {
       randomEventsFrequency: 1,
       directStructuredCombat: false,
       nsfwContent: false,
+      stateProtocol: 'legacy',
     });
   });
 

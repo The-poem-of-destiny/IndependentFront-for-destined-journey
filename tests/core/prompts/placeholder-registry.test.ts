@@ -654,6 +654,27 @@ describe('ACTIVE_EFFECTS', () => {
     expect(result).toContain('永久');
   });
 
+  it('文本时长（durationText）优先输出，不再说成永久', () => {
+    const effects: StatusEffect[] = [
+      {
+        id: 'se1',
+        name: '圣殿庇护',
+        description: '受圣殿庇护',
+        category: '增益',
+        stacks: 1,
+        remainingTime: null,
+        timeUnit: '回合',
+        durationText: '直到离开圣殿',
+        source: '圣殿',
+        effects: {},
+      },
+    ];
+    const ctx = mockCtx({ characters: [makeChar({ statusEffects: effects })] });
+    const result = PLACEHOLDER_REGISTRY['ACTIVE_EFFECTS'](ctx, mockConfig());
+    expect(result).toContain('圣殿庇护[增益] (直到离开圣殿)');
+    expect(result).not.toContain('永久');
+  });
+
   it('handles no effects', () => {
     const char = makeChar({ statusEffects: [] });
     const ctx = mockCtx({ characters: [char] });

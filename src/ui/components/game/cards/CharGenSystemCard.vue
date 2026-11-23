@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import type { CharGenSystemEvent } from '@engine/types/types';
 import { tierVar } from '../../../lib/quality-colors';
 import { nameColorVar } from '../../../utils/name-color';
+import { skillCostLabel } from '../../../lib/item-view';
 
 const props = defineProps<{ event: CharGenSystemEvent }>();
 const emit = defineEmits<{ collapse: [] }>();
@@ -206,7 +207,9 @@ const inventoryGroups = computed(() => {
             <span class="ci-item-type-badge">{{ sk.type === 'active' ? '主动' : '被动' }}</span>
           </div>
           <div class="ci-item-body">
-            <span v-if="sk.cost" class="ci-cost">消耗 {{ sk.cost.type }} {{ sk.cost.amount }}</span>
+            <span v-if="skillCostLabel(sk)" class="ci-cost"
+              >消耗 {{ skillCostLabel(sk, { typeFirst: true, sep: ' ' }) }}</span
+            >
             <span v-if="sk.cooldown" class="ci-cool">CD {{ sk.cooldown }}回合</span>
             <p class="ci-item-desc">{{ sk.description?.slice(0, 150) }}</p>
             <div v-if="sk.effects && Object.keys(sk.effects).length" class="ci-effects">

@@ -4,6 +4,7 @@ import type {
   EntityGenOutput,
   EntityStatusOutput,
   StatePatch,
+  StateUpdateRecord,
   StoryStage,
 } from '../types/types';
 import type { CharacterDefinition, CharacterNarrativeUpdate } from '../types/types-character';
@@ -54,11 +55,11 @@ import {
 } from './direct-contract';
 import { normalizeDirectUpdates } from './direct-normalize';
 import { normalizeSlot } from '../content/field-enums';
-import {
-  characterKeyOfTarget,
-  resolveCharacterByName,
-  validateStatePatch,
-} from '../state/patch-rules';
+import { resolveCharacterByName } from '../state/patch-rules';
+import { PatchRehearsal } from '../state/patch-rehearsal';
+import { parseTreePatchBlock, type TreeOp, type TreeOpIssue } from '../variables/state-tree-patch';
+import { translateTreeOps } from '../variables/state-tree-translator';
+import type { StateTreeProfile } from '../variables/state-tree-projection';
 
 type Row = Record<string, unknown>;
 export interface DirectUpdates {
@@ -106,9 +107,27 @@ export interface DirectTurnDraft {
   dropped?: string[];
   /** 模型没写 direct_updates 区块（零个开标签）：按空更新接纳，仅供告警 */
   updatesMissing?: true;
+  /**
+   * 状态树协议（`stateProtocol: 'tree'`）下解析出的路径补丁；此时 `updates` 的 entities / state /
+   * effects 恒为空，只承载 plot / diceUsed / tile_ops / combat 与旧写法 time。
+   * 缺席 = 旧协议形状（含 tree 下回落到旧解析器的楼）。
+   */
+  treePatch?: DirectTreePatch;
+}
+
+/** 状态树协议下一楼的路径补丁（`parseTreePatchBlock` 的产物，翻译在 `buildDirectPatches`）。 */
+interface DirectTreePatch {
+  ops: readonly TreeOp[];
+  /** 逐条 op 的解析期纠正（按 op 序号并进翻译记录）；整块级纠正已并入草稿 `normalized` */
+  normalized: readonly TreeOpIssue[];
 }
 
 export interface ParseDirectOutputOptions {
+  /**
+   * 状态协议；缺省 legacy（逐字节沿用 v1 解析）。tree 下认 `{"version":2,"patch":[…]}`，
+   * 旧形状回落到 v1 解析并记一条纠正，原型污染键或一条 op 都没救回时整楼拒收。
+   */
+  stateProtocol?: 'legacy' | 'tree';
   /** 是否启用结构化战斗；缺省 true（严格校验 combat 区块） */
   structuredCombat?: boolean;
   /** 剧情系统是否启用；缺省 true。关闭时模型写的非空 plot 被丢弃（记入 normalized） */
@@ -762,8 +781,39 @@ export function parseDirectOutput(
   let parsed: Row;
   let combatIgnored = false;
   let flattenedCharacters: string[] = [];
+  let treePatch: DirectTreePatch | undefined;
+  const tree = !updatesMissing && options.stateProtocol === 'tree';
+  const treeResult = tree ? parseTreePatchBlock(blocks[0][1]) : undefined;
+  if (treeResult?.kind === 'rejected') fatal(treeResult.reason);
+  if (treeResult?.kind === 'unparseable') fatal(`direct_updates ${treeResult.reason}`);
+  if (treeResult?.kind === 'legacy')
+    // 并存期回落（设计 §2）：tree 下模型仍写了旧形状，交给旧解析器，记一条纠正
+    notes.normalized.push(`direct_updates：${treeResult.note}`);
   if (updatesMissing) parsed = emptyUpdates();
-  else {
+  else if (treeResult?.kind === 'patch') {
+    // 只在整段 JSON 写坏、逐元素恢复后一条都没救回时整楼拒收（§5.4）；JSON 完好时坏 op 只丢那一条
+    if (treeResult.nothingRecovered)
+      fatal('direct_updates 整段 JSON 写坏了，逐条恢复后一条操作都没能救回');
+    for (const issue of treeResult.dropped)
+      notes.dropped.push(dropNote(treeIssueLabel(issue), issue.message));
+    // 整块级的纠正直接记；逐条的交给翻译层并进那条 op 的记录（translateTreeOps 的 parseNormalized）
+    for (const issue of treeResult.normalized)
+      if (issue.index < 0) notes.normalized.push(`direct_updates：${issue.message}`);
+    treePatch = {
+      ops: treeResult.ops,
+      normalized: treeResult.normalized.filter((issue) => issue.index >= 0),
+    };
+    // 信封（plot / diceUsed / tile_ops / combat / 旧写法 time）装进 v1 骨架，复用既有归一化与逐单元校验
+    parsed = treeEnvelopeUpdates(treeResult.envelope, notes, structuredCombat);
+    if (!structuredCombat) {
+      combatIgnored = parsed.combat !== null && parsed.combat !== undefined;
+      delete parsed.combat;
+    }
+    const normalization = normalizeDirectUpdates(parsed, { structuredCombat, plotEnabled });
+    notes.normalized.push(...normalization.notes);
+    notes.dropped.push(...normalization.dropped);
+    validateUpdates(parsed, pool, notes, structuredCombat);
+  } else {
     // N1：内文先过 JSON 抢救入口，剥掉 ```json 围栏、<json> 标签或 JSON 之前夹带的说明文字
     // （以 { 开头的内文按整段解析，JSON 之后跟文字不剥，照旧拒收为非法 JSON）
     const inner = blocks[0][1];
@@ -813,6 +863,54 @@ export function parseDirectOutput(
     ...(notes.normalized.length > 0 ? { normalized: notes.normalized } : {}),
     ...(notes.dropped.length > 0 ? { dropped: notes.dropped } : {}),
     ...(updatesMissing ? { updatesMissing: true as const } : {}),
+    ...(treePatch ? { treePatch } : {}),
+  };
+}
+
+/** 状态树信封里认的键：plot / diceUsed / tile_ops / combat 缺了按空处理；time 是旧写法 `time.delta_time`。 */
+const TREE_ENVELOPE_KEYS = ['version', 'plot', 'diceUsed', 'tile_ops', 'combat', 'time'] as const;
+/** 与 patch 并存的旧字段：区块解析已记过「只按 patch 处理」，这里静默剥掉不重复记 */
+const TREE_LEGACY_ENVELOPE_KEYS = ['state', 'entities', 'effects'] as const;
+
+/** 树补丁一条解析问题的原文路径（缺路径时按 patch 下标或整块标注） */
+function treeIssueLabel(issue: TreeOpIssue): string {
+  if (issue.path) return issue.path;
+  return issue.index >= 0 ? `direct_updates.patch[${issue.index}]` : 'direct_updates';
+}
+
+/**
+ * 状态树信封 → v1 形状的骨架（entities / state / effects 恒为空，状态变化全在 `treePatch`），
+ * 供 `normalizeDirectUpdates` + `validateUpdates` 复用 plot / diceUsed / tile_ops / combat 的既有校验。
+ * 逐元素恢复时信封为 null，按全空处理。
+ */
+function treeEnvelopeUpdates(
+  envelope: Readonly<Row> | null,
+  notes: Notes,
+  structuredCombat: boolean,
+): Row {
+  const source: Row = { ...(envelope ?? {}) };
+  for (const key of TREE_LEGACY_ENVELOPE_KEYS) delete source[key];
+  if (source.version !== undefined && source.version !== 2)
+    notes.normalized.push(
+      `direct_updates.version：状态树协议应为 2，收到 ${JSON.stringify(source.version)}，已按 2 处理`,
+    );
+  stripKeys(notes, source, TREE_ENVELOPE_KEYS, 'direct_updates');
+  const has = (key: string) => source[key] !== undefined && source[key] !== null;
+  return {
+    version: 1,
+    world: has('tile_ops') ? { tile_ops: source.tile_ops } : {},
+    time: has('time') ? source.time : { delta_time: 0 },
+    entities: [],
+    state: {},
+    effects: [],
+    plot: has('plot') ? source.plot : {},
+    // 结构化战斗开启时 v1 要求显式 combat；树协议缺了按 null（无在办战斗）处理
+    combat: Object.prototype.hasOwnProperty.call(source, 'combat')
+      ? source.combat
+      : structuredCombat
+        ? null
+        : undefined,
+    diceUsed: has('diceUsed') ? source.diceUsed : [],
   };
 }
 
@@ -832,130 +930,6 @@ function findCharacter(
   }
 }
 
-/** 本楼补丁逐条落下时，各角色持有的物品数量与技能名（只用于预判，不改真实角色） */
-interface Holdings {
-  items: Map<string, number>;
-  skills: Set<string>;
-}
-
-/**
- * 按补丁顺序预演物品 / 技能的增减，提前找出提交时必抛的补丁（物品不存在、数量不足、
- * 自我转移、槽位无法识别、堆叠穿戴、技能不存在）。预演只读角色快照，不改它们。
- */
-class PatchRehearsal {
-  private readonly holdings = new Map<CharacterState, Holdings>();
-
-  constructor(private readonly characters: readonly CharacterState[]) {}
-
-  private holdingOf(character: CharacterState): Holdings {
-    let holding = this.holdings.get(character);
-    if (!holding) {
-      const items = new Map<string, number>();
-      for (const item of character.inventory ?? [])
-        if (!items.has(item.name)) items.set(item.name, item.quantity);
-      holding = { items, skills: new Set((character.skills ?? []).map((skill) => skill.name)) };
-      this.holdings.set(character, holding);
-    }
-    return holding;
-  }
-
-  /** 记下当前预演进度，供一组补丁（替换的删旧 + 加新）失败时整组回滚 */
-  snapshot(): Map<CharacterState, Holdings> {
-    const copy = new Map<CharacterState, Holdings>();
-    for (const [character, holding] of this.holdings)
-      copy.set(character, { items: new Map(holding.items), skills: new Set(holding.skills) });
-    return copy;
-  }
-
-  restore(snapshot: Map<CharacterState, Holdings>): void {
-    this.holdings.clear();
-    for (const [character, holding] of snapshot) this.holdings.set(character, holding);
-  }
-
-  private resolve(key: string): CharacterState {
-    return resolveCharacterByName(this.characters, key);
-  }
-
-  /** 检查一条补丁；能落就返回「落下」的预演动作，不能落就抛错（文案对齐提交时的报错） */
-  vet(patch: StatePatch): () => void {
-    validateStatePatch(patch);
-    const key = characterKeyOfTarget(patch.target);
-    if (key === undefined) return () => undefined;
-    const owner = this.resolve(key);
-    const holding = this.holdingOf(owner);
-    const value = (isRecord(patch.value) ? patch.value : {}) as Row;
-    const name = typeof value.name === 'string' ? value.name : undefined;
-    const need = (op: string) => {
-      if (!name) throw new Error(`${op} 需要 value.name`);
-      return name;
-    };
-    const positive = (raw: unknown) => (typeof raw === 'number' && raw > 0 ? raw : 1);
-    switch (patch.op) {
-      case 'add_item': {
-        const item = need('add_item');
-        const qty = positive(value.quantity);
-        return () => holding.items.set(item, (holding.items.get(item) ?? 0) + qty);
-      }
-      case 'remove_item': {
-        const item = need('remove_item');
-        const qty = typeof value.quantity === 'number' ? value.quantity : 1;
-        const have = holding.items.get(item);
-        if (have === undefined) throw new Error(`物品不存在: ${item}`);
-        if (have < qty) throw new Error(`物品「${item}」库存不足: 持有 ${have}，需要 ${qty}`);
-        return () => {
-          if (have - qty === 0) holding.items.delete(item);
-          else holding.items.set(item, have - qty);
-        };
-      }
-      case 'transfer_item': {
-        const item = need('transfer_item');
-        if (typeof value.to !== 'string' || !value.to)
-          throw new Error('transfer_item 需要 value.to（接收方名字）');
-        const to = this.resolve(value.to);
-        if (to === owner) throw new Error(`transfer_item 不允许自我转移: ${owner.name}`);
-        const qty = positive(value.quantity);
-        const have = holding.items.get(item);
-        if (have === undefined) throw new Error(`物品不存在: ${item}`);
-        if (have < qty) throw new Error(`物品数量不足: ${item}（持有 ${have}，需 ${qty}）`);
-        const receiver = this.holdingOf(to);
-        return () => {
-          if (have - qty <= 0) holding.items.delete(item);
-          else holding.items.set(item, have - qty);
-          receiver.items.set(item, (receiver.items.get(item) ?? 0) + qty);
-        };
-      }
-      case 'equip_item': {
-        const item = need('equip_item');
-        if (typeof value.slot !== 'string' || !value.slot)
-          throw new Error('equip_item 需要 value.slot');
-        if (!normalizeSlot(value.slot)) throw new Error(`无法识别的装备槽位: ${value.slot}`);
-        const have = holding.items.get(item);
-        if (have === undefined) throw new Error(`物品不存在: ${item}`);
-        if (have > 1)
-          throw new Error(`堆叠物品不可直接穿戴: ${item}（数量 ${have}），请先拆分为单件`);
-        return () => undefined;
-      }
-      case 'unequip_item':
-      case 'update_item':
-        if (name !== undefined && !holding.items.has(name)) throw new Error(`物品不存在: ${name}`);
-        if (patch.op === 'update_item') need('update_item');
-        return () => undefined;
-      case 'add_skill': {
-        const skill = need('add_skill');
-        return () => holding.skills.add(skill);
-      }
-      case 'remove_skill':
-      case 'update_skill': {
-        const skill = need(patch.op);
-        if (!holding.skills.has(skill)) throw new Error(`技能不存在: ${skill}`);
-        return patch.op === 'remove_skill' ? () => holding.skills.delete(skill) : () => undefined;
-      }
-      default:
-        return () => undefined;
-    }
-  }
-}
-
 /** 只装一条替换条目用的空归属物输出 */
 const EMPTY_LOADOUT: EntityGenOutput = { skills: [], equipment: [], inventory: [], statuses: [] };
 
@@ -970,21 +944,119 @@ function statusNames(output: EntityGenOutput): string[] {
  * 以及提交时注定抛错的补丁（静态形状、引用的人物、物品 / 技能不存在等，规则与提交时同一份）——
  * 都只丢那一项并记入 `dropped`，由此截断「实体被丢 → 引用它的更新」的连锁。
  */
-export function buildDirectPatches(
-  draft: DirectTurnDraft,
-  input: {
-    characters: CharacterState[];
-    definitions: CharacterDefinition[];
-    sourceTurnKey: string;
-  },
-): {
+export interface DirectPatchInput {
+  characters: CharacterState[];
+  definitions: CharacterDefinition[];
+  sourceTurnKey: string;
+  /**
+   * 存档档案（命运点数 / 任务 / 新闻 / 变量 / 时间 / 好感度）。状态树协议的草稿（`draft.treePatch`）
+   * 必须提供：路径解析与翻译对的是完整内核状态；legacy 草稿忽略。
+   */
+  profile?: StateTreeProfile;
+}
+
+export interface DirectPatchResult {
   patches: StatePatch[];
+  /** 本楼结束时的角色（含本楼新建人物），供结构化战斗等后续步骤寻址 */
   characters: CharacterState[];
   /** 建补丁时丢弃的项（中文，带路径）；无丢弃为空数组 */
   dropped: string[];
-  /** 过滤后的主叙事角色更新（去掉指向不存在人物的条目） */
+  /** 建补丁时的纠正说明（状态树翻译层的「路径：纠正」）；legacy 恒为空数组 */
+  normalized: string[];
+  /**
+   * 过滤后的主叙事角色更新（去掉指向不存在人物的条目）；
+   * 状态树协议下已并入 `档案` 路径写入（同名人物合并，character_updates 显式写的字段优先）
+   */
   characterUpdates: CharacterNarrativeUpdate[];
-} {
+  /**
+   * 本楼推进的游戏分钟数，交给 `applyTimeAdvance`。legacy = `time.delta_time`；
+   * tree = `/世界/时间` 的汇总，没写时接受旧写法 `time.delta_time`。
+   */
+  deltaTime: number;
+  /** 本楼状态更新记录（§12.2，挂到本楼 assistant 消息上）；只有状态树协议的草稿才有 */
+  stateUpdates?: StateUpdateRecord;
+}
+
+export function buildDirectPatches(
+  draft: DirectTurnDraft,
+  input: DirectPatchInput,
+): DirectPatchResult {
+  if (draft.treePatch) return buildTreeDirectPatches(draft, draft.treePatch, input);
+  return {
+    ...buildLegacyDirectPatches(draft, input),
+    normalized: [],
+    deltaTime: draft.updates.time.delta_time,
+  };
+}
+
+/** 按名字合并档案路径写入与 character_updates：同名人物合并 profile_changes，显式写的优先 */
+function mergeProfileChanges(
+  updates: readonly CharacterNarrativeUpdate[],
+  changes: readonly CharacterNarrativeUpdate[],
+  characters: readonly CharacterState[],
+): CharacterNarrativeUpdate[] {
+  const merged = updates.map((update) => ({ ...update }));
+  const canonical = (name: string) => findCharacter(characters, name)?.name ?? name;
+  for (const change of changes) {
+    const target = merged.find((update) => canonical(update.name) === canonical(change.name));
+    if (target) target.profile_changes = { ...change.profile_changes, ...target.profile_changes };
+    else merged.push({ ...change, chronicle: [...change.chronicle] });
+  }
+  return merged;
+}
+
+/** 状态树协议：op → StatePatch 由翻译层完成（纠正、预演、成组丢弃都在那里），这里只做接线 */
+function buildTreeDirectPatches(
+  draft: DirectTurnDraft,
+  tree: DirectTreePatch,
+  input: DirectPatchInput,
+): DirectPatchResult {
+  if (!input.profile) throw new Error('状态树协议的直出草稿需要存档档案（profile）才能建补丁');
+  const translated = translateTreeOps(
+    tree.ops,
+    { characters: input.characters, profile: input.profile },
+    {
+      actor: 'ai',
+      sourceTurnKey: input.sourceTurnKey,
+      definitions: input.definitions,
+      characterUpdates: draft.characterUpdates,
+      parseNormalized: tree.normalized,
+    },
+  );
+  const dropped = [...translated.dropped];
+  const characters = [...input.characters, ...translated.newCharacters];
+  const legacyMinutes = draft.updates.time.delta_time;
+  let deltaTime = translated.deltaMinutes;
+  if (legacyMinutes > 0) {
+    if (deltaTime > 0) dropped.push('time.delta_time：本楼已用 /世界/时间 推进时间，旧写法已忽略');
+    else deltaTime = legacyMinutes;
+  }
+  const characterUpdates = mergeProfileChanges(
+    draft.characterUpdates,
+    translated.profileChanges,
+    characters,
+  ).filter((update) => {
+    const known = findCharacter(characters, update.name) !== undefined;
+    if (!known) dropped.push(`character_updates：人物 ${update.name} 缺少完整实体，已忽略`);
+    return known;
+  });
+  // 信封里的 tile_ops 仍走既有地块翻译（逐条校验已在解析期做过）
+  const patches = [...translated.patches, ...buildDispatcherPatches(draft.updates.world).patches];
+  return {
+    patches,
+    characters,
+    dropped,
+    normalized: [...translated.normalized],
+    characterUpdates,
+    deltaTime,
+    stateUpdates: { ops: translated.records, deltaMinutes: deltaTime },
+  };
+}
+
+function buildLegacyDirectPatches(
+  draft: DirectTurnDraft,
+  input: DirectPatchInput,
+): Omit<DirectPatchResult, 'normalized' | 'deltaTime' | 'stateUpdates'> {
   const characters = [...input.characters];
   /** 预演单元：普通补丁一条一组；替换（删旧 + 加新）一组，整组落或整组丢 */
   const units: Array<{ patches: StatePatch[]; label?: string }> = [];

@@ -49,6 +49,23 @@ describe('DeveloperSection', () => {
     expect(wrapper.get('.developer-mode-card').classes()).toContain('is-enabled');
   });
 
+  it('实验性变量协议开关：默认关（legacy），拨开写 tree，拨回写 legacy，并带冷建说明', async () => {
+    const wrapper = mount(DeveloperSection);
+    const card = wrapper.get('[data-testid="state-protocol-card"]');
+    const toggle = card.get<HTMLInputElement>('input[aria-label="实验性变量协议（状态树）"]');
+    expect(toggle.attributes('role')).toBe('switch');
+    expect(toggle.element.checked).toBe(false);
+    expect(card.text()).toContain('缓存直出会冷建一次');
+
+    await toggle.setValue(true);
+    expect(settings.settings.stateProtocol).toBe('tree');
+    expect(card.classes()).toContain('is-enabled');
+    expect(card.text()).toContain('已开启');
+
+    await toggle.setValue(false);
+    expect(settings.settings.stateProtocol).toBe('legacy');
+  });
+
   it('关闭新模式时退出当前打开的测试档，并从返回历史里拿掉游戏页', async () => {
     const game = useGameStore();
     const ui = useUIStore();

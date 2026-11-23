@@ -24,6 +24,8 @@ const allTools = [
   { id: 'memory', label: '记忆', icon: 'fa-solid fa-brain' },
   { id: 'plot', label: '剧情', icon: 'fa-solid fa-book-open' },
   { id: 'snapshots', label: '快照', icon: 'fa-solid fa-clock-rotate-left' },
+  // 变量修改器（状态树协议 T11）：常驻、不需要开发者模式（设计 §9 #13）
+  { id: 'variables', label: '变量', icon: 'fa-solid fa-table-list' },
   { id: 'gallery', label: '图鉴', icon: 'fa-solid fa-images' },
   { id: 'preset', label: '预设', icon: 'fa-solid fa-sliders' },
   { id: 'audio', label: '音乐', icon: 'fa-solid fa-music' },

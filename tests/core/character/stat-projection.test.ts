@@ -157,6 +157,37 @@ describe('buildStatData — 完整映射', () => {
     expect(buildStatData({ characters: [player] })['主角']['状态效果'][0]['剩余时间']).toBeNull();
   });
 
+  it('状态效果有 durationText 时追加「持续说明」，原有键不变；没有时不出该键', () => {
+    const player = makePlayer({
+      statusEffects: [
+        {
+          id: 'e1',
+          name: '圣殿庇护',
+          description: '',
+          category: '增益',
+          stacks: 1,
+          remainingTime: null,
+          timeUnit: '回合',
+          durationText: '直到离开圣殿',
+        } as never,
+        {
+          id: 'e2',
+          name: '祝福',
+          description: '',
+          category: '增益',
+          stacks: 1,
+          remainingTime: 3,
+          timeUnit: '回合',
+        } as never,
+      ],
+    });
+    const [withText, plain] = buildStatData({ characters: [player] })['主角']['状态效果'];
+    expect(withText['持续说明']).toBe('直到离开圣殿');
+    expect(withText['剩余时间']).toBeNull();
+    expect(withText['时间单位']).toBe('回合');
+    expect('持续说明' in plain).toBe(false);
+  });
+
   it('T3：不投效果编译输入（effects/modifiers/automata 不是对创作者的承诺）', () => {
     const player = makePlayer({
       inventory: [

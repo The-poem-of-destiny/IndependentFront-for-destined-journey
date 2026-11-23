@@ -54,6 +54,15 @@ describe('SideToolbar developer gate', () => {
     expect(wrapper.emitted('toolClick')).toEqual([['preset']]);
   });
 
+  /** 状态树协议 T11：变量修改器常驻侧栏，不需要开发者模式（设计 §9 #13） */
+  it('有变量入口（不需开发者模式），点击发出 toolClick(variables)', async () => {
+    const wrapper = mount(SideToolbar);
+    const btn = wrapper.get('[data-tool="variables"]');
+    expect(btn.attributes('aria-label')).toBe('变量');
+    await btn.trigger('click');
+    expect(wrapper.emitted('toolClick')).toEqual([['variables']]);
+  });
+
   it('不再有工坊入口（扩展管理才是它的去处）', () => {
     const wrapper = mount(SideToolbar);
     expect(wrapper.find('[data-tool="workshop"]').exists()).toBe(false);

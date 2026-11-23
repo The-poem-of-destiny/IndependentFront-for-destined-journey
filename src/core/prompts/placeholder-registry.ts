@@ -987,8 +987,12 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
       const effects = char.statusEffects ?? [];
       if (effects.length === 0) continue;
       const effectDescs = effects.map((e) => {
-        const timeStr =
-          e.remainingTime != null ? ` (剩余${e.remainingTime}${e.timeUnit || '分钟'})` : ' (永久)';
+        // 文本时长（durationText）优先：daily_check 读这里，条件型状态不能被当成永久
+        const timeStr = e.durationText
+          ? ` (${e.durationText})`
+          : e.remainingTime != null
+            ? ` (剩余${e.remainingTime}${e.timeUnit || '分钟'})`
+            : ' (永久)';
         return `${e.name}[${e.category}]${timeStr} — ${e.description || ''}`;
       });
       lines.push(`[${char.name}] 状态效果: ${effectDescs.join('; ')}`);

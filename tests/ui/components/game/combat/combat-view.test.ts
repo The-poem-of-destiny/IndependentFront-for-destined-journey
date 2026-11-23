@@ -115,6 +115,27 @@ describe('statusViewsOf / axisTicks / posToPercent', () => {
     expect(views[2]).toMatchObject({ type: 'special', name: '标记', remainRounds: null });
   });
 
+  it('有 durationText 时不算剩余回合，交出原文（状态树协议 §5.7）', () => {
+    const u = unit('甲', 'ally', {
+      statusEffects: [
+        { name: '诅咒', category: '减益', remainingTime: null, durationText: '直到离开城镇' },
+        // 防御：即便误带了回合数，文本仍优先
+        {
+          name: '迷雾',
+          category: '特殊',
+          remainingTime: 2,
+          timeUnit: '回合',
+          durationText: '雾散为止',
+        },
+        { name: '中毒', category: '减益', remainingTime: 3, timeUnit: '回合' },
+      ],
+    });
+    const views = statusViewsOf(u);
+    expect(views[0]).toMatchObject({ remainRounds: null, durationText: '直到离开城镇' });
+    expect(views[1]).toMatchObject({ remainRounds: null, durationText: '雾散为止' });
+    expect(views[2]).toMatchObject({ remainRounds: 3, durationText: null });
+  });
+
   it('axisTicks 含端点；非法范围退化单格', () => {
     expect(axisTicks(4)).toEqual([0, 1, 2, 3, 4]);
     expect(axisTicks(0)).toEqual([0]);

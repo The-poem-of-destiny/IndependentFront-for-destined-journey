@@ -867,6 +867,239 @@ describe.each(['direct', 'direct_cached'] as const)(
       expect(toast).not.toHaveBeenCalled();
     });
 
+    describe('状态树协议（stateProtocol: tree）', () => {
+      function treeReply(patch: unknown[]) {
+        return `<maintext>旅人继续前行。</maintext><character_updates>{"characters":[]}</character_updates><direct_updates>${JSON.stringify({ version: 2, patch, plot: {}, diceUsed: [] })}</direct_updates>`;
+      }
+      beforeEach(() => {
+        setEngineSettingsProvider(() => ({ stateProtocol: 'tree' }));
+      });
+
+      it('传入存档档案建补丁，时间按 /世界/时间 推进，更新记录落到本楼正文消息', async () => {
+        const { game, pipeline } = await directFixture();
+        const { getProfile } = await import('@engine/state/save-profile');
+        const before = { ...(await getProfile(saveId)).gameTime };
+        directReply(
+          treeReply([
+            { op: 'delta', path: '/世界/时间', value: 30 },
+            { op: 'delta', path: '/主角/生命值/当前', value: -10 },
+          ]),
+        );
+        expect(await pipeline.run('前进')).toBe(true);
+        expect((await getDatabase().characters.get('player'))?.hp).toBe(70);
+        const after = (await getDatabase().saveProfiles.get(saveId))!.gameTime;
+        expect(after.hour * 60 + after.minute - (before.hour * 60 + before.minute)).toBe(30);
+        const message = game.messages.find((m) => m.role === 'assistant')!;
+        const stored = await getDatabase().messages.get(message.id);
+        expect(stored?.storyTurnStatus).toBe('accepted');
+        expect(stored?.stateUpdates?.deltaMinutes).toBe(30);
+        expect(stored?.stateUpdates?.ops).toHaveLength(2);
+        const hp = stored!.stateUpdates!.ops.find((op) => op.path === '/主角/生命值/当前')!;
+        expect(hp).toMatchObject({ op: 'delta', value: -10, before: 80, after: 70 });
+        expect(message.stateUpdates).toEqual(stored?.stateUpdates);
+        // 用户消息不挂记录
+        const user = await getDatabase().messages.get(
+          game.messages.find((m) => m.role === 'user')!.id,
+        );
+        expect(user && 'stateUpdates' in user).toBe(false);
+      });
+
+      it('接纳新一楼时清掉上一楼记录的前值与后值，其余字段保留，最新一楼保留', async () => {
+        const { game, pipeline } = await directFixture();
+        directReply(treeReply([{ op: 'delta', path: '/主角/生命值/当前', value: -10 }]));
+        expect(await pipeline.run('前进')).toBe(true);
+        expect(await pipeline.run('继续前进')).toBe(true);
+        const [first, second] = game.messages.filter((m) => m.role === 'assistant');
+        const firstStored = await getDatabase().messages.get(first.id);
+        const secondStored = await getDatabase().messages.get(second.id);
+        expect(firstStored?.stateUpdates?.ops).toEqual([
+          { path: '/主角/生命值/当前', op: 'delta', value: -10, status: '已应用' },
+        ]);
+        expect(first.stateUpdates).toEqual(firstStored?.stateUpdates);
+        expect(secondStored?.stateUpdates?.ops[0]).toMatchObject({ before: 70, after: 60 });
+        expect((await getDatabase().characters.get('player'))?.hp).toBe(60);
+      });
+
+      it('建补丁期的纠正与丢弃一起进调试记录', async () => {
+        const { game, pipeline } = await directFixture();
+        directReply(
+          treeReply([
+            { op: 'delta', path: '/主角/生命值/当前', value: -1000 },
+            { op: 'delta', path: '/关系列表/幽灵/好感度', value: 5 },
+          ]),
+        );
+        expect(await pipeline.run('前进')).toBe(true);
+        const entry = game.agentLogHistory
+          .flatMap((turn) => turn.entries)
+          .find((e) => e.agentId === 'direct_main');
+        const stored = await getDatabase().messages.get(
+          game.messages.find((m) => m.role === 'assistant')!.id,
+        );
+        const statuses = stored!.stateUpdates!.ops.map((op) => op.status);
+        expect(statuses).toEqual(['已纠正', '已丢弃']);
+        const warnings = entry?.outputWarnings ?? [];
+        expect(warnings.filter((w) => w.startsWith('已纠正：'))).toHaveLength(1);
+        expect(warnings.some((w) => !w.startsWith('已纠正：') && w.includes('幽灵'))).toBe(true);
+      });
+
+      it('建补丁后补全状态写入统计（§7.1），写进 direct_main 结果与调试记录', async () => {
+        const { game, pipeline } = await directFixture();
+        directReply(
+          treeReply([
+            { op: 'delta', path: '/主角/生命值/当前', value: -1000 },
+            { op: 'delta', path: '/关系列表/幽灵/好感度', value: 5 },
+          ]),
+        );
+        expect(await pipeline.run('前进')).toBe(true);
+        const entry = game.agentLogHistory
+          .flatMap((turn) => turn.entries)
+          .find((e) => e.agentId === 'direct_main');
+        const expected = {
+          protocol: 'tree',
+          ops: 2,
+          applied: 0,
+          corrected: 1,
+          dropped: 1,
+          rejected: false,
+        };
+        expect(entry?.stateWriteStats).toEqual(expected);
+        expect((pipeline as any).orch.getResults().get('direct_main').stateWriteStats).toEqual(
+          expected,
+        );
+      });
+
+      it('存档新闻随 runDirect 进读侧投影的 新闻', async () => {
+        const { game, pipeline } = await directFixture();
+        const news = [
+          {
+            id: 'n1',
+            title: '王都戒严',
+            content: '城门午后关闭。',
+            category: '王都',
+            publishedAt: 1,
+            read: false,
+          },
+        ];
+        game.saveProfile = { ...game.saveProfile!, news };
+        const runDirect = vi.spyOn(AgentOrchestrator.prototype, 'runDirect');
+        directReply(treeReply([]));
+        expect(await pipeline.run('前进')).toBe(true);
+        expect(runDirect.mock.calls[0][3]).toEqual({ news });
+        const chat = vi.mocked(AgentClient.prototype.chat);
+        const index = chat.mock.contexts.findIndex(
+          (client: any) => client.agentId === 'direct_main',
+        );
+        expect(JSON.stringify(chat.mock.calls[index][0].messages)).toContain('王都戒严');
+      });
+    });
+
+    it('旧协议（legacy）楼层不挂状态更新记录', async () => {
+      const { game, pipeline } = await directFixture();
+      directNetwork();
+      expect(await pipeline.run('前进')).toBe(true);
+      const message = game.messages.find((m) => m.role === 'assistant')!;
+      expect('stateUpdates' in message).toBe(false);
+      const stored = await getDatabase().messages.get(message.id);
+      expect(stored && 'stateUpdates' in stored).toBe(false);
+    });
+
+    it('旧协议（legacy）楼层接纳时不为清理前后值读全档消息', async () => {
+      const { pipeline } = await directFixture();
+      const p = pipeline as any;
+      const strip = vi.spyOn(p, 'stripEarlierStateUpdateValues');
+      directNetwork();
+      expect(await pipeline.run('前进')).toBe(true);
+      expect(strip).toHaveBeenCalledWith(false);
+      // 本楼无记录、内存里也没有带前后值的记录：整个跳过，不进写锁读库
+      p.currentTurnMessages = [];
+      const where = vi.spyOn(getDatabase().messages, 'where');
+      await p.stripEarlierStateUpdateValues(false);
+      expect(where).not.toHaveBeenCalled();
+    });
+
+    it('更早楼层记录里的条目整对象前值（entryBefore）接纳新一楼时一并清掉，折叠字段保留', async () => {
+      const { game, pipeline } = await directFixture();
+      const p = pipeline as any;
+      directNetwork();
+      expect(await pipeline.run('前进')).toBe(true);
+      const message = game.messages.find((m) => m.role === 'assistant')!;
+      const record = {
+        deltaMinutes: 0,
+        ops: [
+          {
+            path: '/主角/背包/药水/数量',
+            op: 'delta',
+            value: -1,
+            status: '已应用',
+            mergedFrom: [1],
+          },
+          {
+            path: '/主角/背包/药水/数量',
+            op: 'delta',
+            value: -1,
+            status: '已应用',
+            foldedInto: 0,
+            foldKind: 'fold',
+            entryBefore: { name: '药水', quantity: 1, description: '一瓶红色药水' },
+          },
+        ],
+      };
+      const row = await getDatabase().messages.get(message.id);
+      await getDatabase().messages.put({ ...row!, stateUpdates: record as never });
+      message.stateUpdates = JSON.parse(JSON.stringify(record));
+      // 模拟下一楼（legacy）接纳：只有 entryBefore 也不能走快速跳过
+      p.currentTurnMessages = [];
+      await p.stripEarlierStateUpdateValues(false);
+      const expected = [
+        { path: '/主角/背包/药水/数量', op: 'delta', value: -1, status: '已应用', mergedFrom: [1] },
+        {
+          path: '/主角/背包/药水/数量',
+          op: 'delta',
+          value: -1,
+          status: '已应用',
+          foldedInto: 0,
+          foldKind: 'fold',
+        },
+      ];
+      const stored = await getDatabase().messages.get(message.id);
+      expect(stored?.stateUpdates?.ops).toEqual(expected);
+      expect(message.stateUpdates?.ops).toEqual(expected);
+    });
+
+    it('legacy 楼层但内存里还有更早的带前后值记录时照常清理', async () => {
+      const { game, pipeline } = await directFixture();
+      const p = pipeline as any;
+      directNetwork();
+      expect(await pipeline.run('前进')).toBe(true);
+      const message = game.messages.find((m) => m.role === 'assistant')!;
+      const record = {
+        deltaMinutes: 0,
+        ops: [
+          {
+            path: '/主角/生命值/当前',
+            op: 'delta',
+            value: -10,
+            status: '已应用',
+            before: 80,
+            after: 70,
+          },
+        ],
+      };
+      const row = await getDatabase().messages.get(message.id);
+      await getDatabase().messages.put({ ...row!, stateUpdates: record as never });
+      message.stateUpdates = JSON.parse(JSON.stringify(record));
+      // 模拟下一楼接纳：上面那楼已是「更早楼层」
+      p.currentTurnMessages = [];
+      const where = vi.spyOn(getDatabase().messages, 'where');
+      await p.stripEarlierStateUpdateValues(false);
+      expect(where).toHaveBeenCalled();
+      const stored = await getDatabase().messages.get(message.id);
+      expect(stored?.stateUpdates?.ops).toEqual([
+        { path: '/主角/生命值/当前', op: 'delta', value: -10, status: '已应用' },
+      ]);
+      expect(message.stateUpdates?.ops).toEqual(stored?.stateUpdates?.ops);
+    });
+
     it('finishes turn bookkeeping when the run is cancelled right after the core commit', async () => {
       const { game, pipeline } = await directFixture();
       const db = getDatabase();

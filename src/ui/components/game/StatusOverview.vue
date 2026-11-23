@@ -6,6 +6,8 @@ import { useHoverPopup } from '../../composables/useHoverPopup';
 import { usePlayerPortrait } from '../../composables/usePlayerPortrait';
 import { useTweenedNumber } from '../../composables/useTweenedNumber';
 import { normalizeItemType } from '@engine/content/field-enums';
+import { skillCostLabel } from '../../lib/item-view';
+import { statusChipDuration, statusDurationLabel } from '../../lib/status-view';
 import { getTierConfig } from '@engine/character/tier-constants';
 import { getRequiredXpForLevel } from '@engine/character/exp-table';
 import type { AllocatableAttr } from '@engine/character/attribute-allocation';
@@ -306,7 +308,10 @@ const holdRows = computed<HoldRow[]>(() => {
         trail: s.level ? `Lv.${s.level}` : undefined,
         description: s.description,
         meta: [
-          ...(s.cost ? [{ label: '消耗', value: `${s.cost.amount} ${s.cost.type}` }] : []),
+          // costText 优先，否则「数量 类型」（状态树协议 §5.7）
+          ...[skillCostLabel(s, { sep: ' ' })]
+            .filter(Boolean)
+            .map((value) => ({ label: '消耗', value })),
           ...(s.maxCooldown
             ? [{ label: '冷却', value: `${s.cooldown ?? 0}/${s.maxCooldown}` }]
             : []),
@@ -531,12 +536,9 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
               @blur="buffPop.hide"
             >
               <BuffChip :name="fx.name" :type="buffType(fx.category)" :stacks="fx.stacks" />
-              <span v-if="fx.remainingTime === null" class="buff-time">永久</span>
-              <span
-                v-else-if="fx.remainingTime !== null && fx.remainingTime < 999"
-                class="buff-time"
-                >{{ fx.remainingTime }}{{ fx.timeUnit }}</span
-              >
+              <span v-if="statusChipDuration(fx) !== null" class="buff-time">{{
+                statusChipDuration(fx)
+              }}</span>
             </button>
           </div>
         </div>
@@ -687,12 +689,7 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         <div class="bd-desc">{{ popBuff.description }}</div>
         <div class="bd-meta">
           <span>层数: {{ popBuff.stacks }}</span>
-          <span
-            >剩余:
-            {{
-              popBuff.remainingTime === null ? '永久' : popBuff.remainingTime + popBuff.timeUnit
-            }}</span
-          >
+          <span>剩余: {{ statusDurationLabel(popBuff) }}</span>
           <span>来源: {{ popBuff.source }}</span>
         </div>
       </div>
