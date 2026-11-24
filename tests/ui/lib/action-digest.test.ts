@@ -458,7 +458,8 @@ describe('digestActionPanel — 健壮性', () => {
     for (const raw of raws) {
       const t0 = performance.now();
       digestOf(raw);
-      expect(performance.now() - t0).toBeLessThan(1000);
+      // 防的是灾难性回溯（那会是数秒到数分钟）；CI 机器比本机慢 4–5 倍，1 秒上限会偶发误报
+      expect(performance.now() - t0).toBeLessThan(3000);
     }
   });
 
@@ -950,7 +951,8 @@ describe('digestActionPanel — 掷骰与目标证据的健壮性', () => {
     for (const raw of raws) {
       const t0 = performance.now();
       digestOf(raw);
-      expect(performance.now() - t0).toBeLessThan(1000);
+      // 防的是灾难性回溯（那会是数秒到数分钟）；CI 机器比本机慢 4–5 倍，1 秒上限会偶发误报
+      expect(performance.now() - t0).toBeLessThan(3000);
     }
   });
 
