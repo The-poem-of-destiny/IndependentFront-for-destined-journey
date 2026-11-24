@@ -141,7 +141,16 @@ describe('设置与协议', () => {
     const proseLine = off.split('\n').find((line) => line.startsWith(PROSE_COMBAT_LINE_HEAD));
     expect(proseLine).toContain('战斗逐拍：一名角色的一次行为单独成一节');
     expect(proseLine).toContain('|行动者|名字|、|目标|名字或无|、|行动|技能或动作名|');
+    expect(proseLine).toContain('|变更|名字 HP 旧值→新值|');
+    expect(proseLine).not.toContain('|消耗|');
     expect(proseLine?.endsWith('临时敌人称呼前后一致。')).toBe(true);
+  });
+
+  it('两种口径的 action_info 行都要求非战斗面板末行写 |结果|', () => {
+    for (const text of [buildDirectProtocol(true), buildDirectProtocol(false)]) {
+      const panelLine = text.split('\n').find((line) => line.startsWith('action_info 面板每行用'));
+      expect(panelLine).toContain('|结果|一句话结论|');
+    }
   });
 
   it('关闭时 readDirectCombat 返回 null（记录休眠不删）', () => {

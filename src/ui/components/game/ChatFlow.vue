@@ -499,7 +499,6 @@ const STAGE_YIELD_SELECTOR = [
   '[role="link"]',
   '.system-notif',
   '.system-card-wrapper',
-  '.combat-beat',
   '.action-panel-card',
   '.dialogue-card',
   '.scene-image',

@@ -6,15 +6,18 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import { mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import StagedNarrative from '../../../../src/ui/components/game/StagedNarrative.vue';
 import {
   createStagePlayback,
   deriveStagePlayback,
   stepStagePlayback,
 } from '../../../../src/ui/lib/stage-playback';
+import { useFxEnabled } from '../../../../src/ui/lib/fx-gate';
+import { ASSET_STUB } from './action-panel/fixtures';
 
 vi.mock('../../../../src/ui/composables/useBeautify', () => ({
   useBeautify: () => ({ getBeautifierRules: () => [], isBeautifierEnabled: () => false }),
@@ -91,5 +94,54 @@ describe('StagedNarrative 插画计数', () => {
     const wrapper = mountStaged(true);
     expect(wrapper.findAll('.img-stub')).toHaveLength(0);
     expect(wrapper.text()).not.toContain('<scene_image');
+  });
+});
+
+describe('StagedNarrative 行动面板入场', () => {
+  const PANEL = '<action_info>\n|行动者|艾琳|\n|目标|灰狼|\n|伤害|36|\n</action_info>';
+  const P_A = `第一节。\n${PANEL}`;
+  const P_B = `第二节。\n${PANEL}`;
+  const P_CONTENT = `${P_A}\n\n${P_B}`;
+  const P_BREAK = P_CONTENT.indexOf('第二节');
+
+  function setFx(on: boolean) {
+    if (on) document.documentElement.setAttribute('data-fx', 'on');
+    else document.documentElement.removeAttribute('data-fx');
+    useFxEnabled(); // 让共享镜像对齐 DOM
+  }
+
+  function mountPanels(settledEnd: number) {
+    let state = createStagePlayback({
+      content: P_CONTENT,
+      breaks: [P_BREAK],
+      enters: [],
+      closed: true,
+    });
+    state = stepStagePlayback(state, { type: 'advance' });
+    return mount(StagedNarrative, {
+      props: { view: deriveStagePlayback(state), content: P_CONTENT, settledEnd },
+      global: { stubs: { ...ASSET_STUB, SceneImageSegment: SceneImageStub } },
+    });
+  }
+
+  const entering = (wrapper: ReturnType<typeof mountPanels>) =>
+    wrapper.findAll('.action-panel-card').map((card) => card.classes().includes('is-entering'));
+
+  beforeEach(() => setActivePinia(createPinia()));
+  afterEach(() => setFx(false));
+
+  it('闸门开：settledEnd 之前的节静默，之后新放出的节播入场', () => {
+    setFx(true);
+    const wrapper = mountPanels(P_BREAK);
+    expect(wrapper.findAll('.action-panel-card').map((c) => c.attributes('data-kind'))).toEqual([
+      'exchange',
+      'exchange',
+    ]);
+    expect(entering(wrapper)).toEqual([false, true]);
+  });
+
+  it('闸门关：哪一节都不播', () => {
+    setFx(false);
+    expect(entering(mountPanels(0))).toEqual([false, false]);
   });
 });

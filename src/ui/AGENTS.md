@@ -14,7 +14,7 @@
 
 - 直出：准备页（`CreateReadiness.vue`，状态由 `CreatePage.vue` 持有）明确选择存档模式，`create-store.ts` 必填校验并持久化；`game-store.ts` 从存档解析模式与战斗投影，`lib/game-pipeline.ts` 独立直出分支复用原有记忆。`lib/direct-settings.ts` 初始化独立模型配置，设置页不提供档内模式切换。📌 2026-11-17：新增全局设置 `directStructuredCombat`（`UiSettings`，默认 false，经引擎 `runtime/engine-settings.ts` 注入缝读取）。「Agent 配置 → 直出主生成」与「直出主生成（缓存优化）」两页各有一张「战斗」卡，开关「结构化战斗」置灰不可点，提示「暂未开放」，功能锁定为关。关闭时 `lib/game-pipeline.ts` 的 `acceptDirectTurn` 跳过 `buildDirectCombat`，`isInCombat` 恒为 false，正文战斗期间随机事件与人设编辑锁不再拦截。契约见 [直出模式 · 正文战斗](../../docs/reference/direct-generation.md#正文战斗2026-11-17)。📌 2026-11-22（`fix/direct-tail-and-opening`，未真机验证）：`lib/game-pipeline.ts` 的 `buildContext` 在直出模式（`isDirectMode`）、`metadata.openingPromptConsumed === true` 且过滤后的历史里已有被接纳的 assistant 正文时不再供 `openingPrompt`（首轮中断、开局回合从未被接纳的档仍供原文），旧直出档不再每轮随 `direct_state` 重发开局提示词；Agent 模式照旧供值（`{{SKILL_STATE}}` 要读）。见 [直出模式 · 尾部格式提醒与开局提示词不再重发](../../docs/reference/direct-generation.md#尾部格式提醒与开局提示词不再重发2026-11-22)。
 - 📌 2026-11-21 直出坏项丢弃继续（`fix/ai-output-format-contracts`）：`lib/game-pipeline.ts` 提交叙事更新改用 `buildDirectPatches` 返回的过滤后 `characterUpdates`；建补丁期的连锁丢弃由 `recordDirectBuildDropped` 记 warn `direct.output_dropped` 并追加到本回合 `direct_main` 调试记录的 `outputWarnings`。核心提交成功后只弹一次不阻塞的 warning 提示：缺 `direct_updates` 区块（`updatesMissing`）优先，否则合计解析与建补丁两处的丢弃数。`DebugPanel.vue` 在「结束原因」之后列出「已忽略 N 项」（`data-testid="output-warnings"`）。契约见 [直出模式 · 坏项丢弃继续](../../docs/reference/direct-generation.md#坏项丢弃继续2026-11-21)。
-- 📌 2026-11-19 逐节演出（交互式推进）：全局设置 `stagedNarrative`（默认 true，「设置 → 消息显示 → 正文演出」）。纯状态机 `lib/stage-playback.ts`（字符偏移游标，流式中只放出完整节，断点缺席按段落临时切）与 `lib/stage-entrance.ts`（`resolveEntrances`：开楼名册里的名字不演，不拿本楼新建名单过滤）。登场规则是**演过就不再撤回**：卡片一旦播出就按当时的名字（含别名）钉进这条消息的账本，名册回读、接纳状态、是否在生成都不再撤掉它，位置按当前节重新定位、换位时静态显示；还没演的只在所在节是新放出的时候演；进度簿 `composables/useStagedPlayback.ts`（只演本次会话新到的直出正文，草稿进度交接给正式消息不回退不重放，`holdOptions` 让 `InputBar` 暂扣选项）。组件 `game/StagedNarrative.vue`（每节一个 `BeautifiedNarrative`）、`game/CharacterEntrance.vue`（立牌链，无素材只浮现名字题签，`mask-position` 动画是 `docs/design.md` §6.4 登记的例外）、`game/combat/CombatBeatCard.vue`（`combat-view.ts` 的 `parseCombatBeat`）。🔴 与 `ActionPanel` 的分工：`<action_info>` 默认一律交给 `ActionPanel`；只有面板里有 `|行动者|` 行（直出正文战斗逐拍契约）时由 `CombatBeatCard` 接管 —— 认行复用 `lib/action-panel.ts` 的 `parseActionPanel`，`parseCombatBeat` 只吃它摊平后的格，别再写第二个面板解析器。🔴 `BeautifiedNarrative` 的 `imageSlice` 属性：插画 occurrence 按整条消息计数，每节要加上前面各节的图数，生图侧取整条正文，消息末尾图带只挂末节；缺省时行为不变。`lib/game-pipeline.ts` 的 `StoryChunkCallback` 第三参 `stage` 只在直出主笔给出，`GamePage` 同帧提交 `streamingStage`。键盘与点击在 `ChatFlow.vue`：Space / Enter 推进、按住 Ctrl 快进（单独按住约 300ms 才进入，期间按别的键或滚轮即取消，单按一下不推进）、End 全部显示、左键点正文推进，让路清单 `STAGE_YIELD_SELECTOR` 加右键菜单 / `hasOpenDialog()` / `activeModal` / `isInCombat` / 选字 / 输入法。小条「全文」直接把 `stagedNarrative` 设为 false（关闭时 DOM 与引入前一致）。📌 2026-11-20：小条不再挂在 `StagedNarrative` 末尾，改为 `game/StageControls.vue`，由 ChatFlow 挂在 `InputBar` 正上方（`.stage-dock` 高度 0、内层绝对定位，出现 / 收起都不挤动布局；`.chat-messages` 底部留 56px 免得盖住最后一条消息的操作条）；可收起成「演出」标签，状态存 `UiSettings.stagedControlsCollapsed`（默认 false）。设计见 [交互式推进设计](../../docs/planning/2026-11-19-interactive-progression-design.md)。
+- 📌 2026-11-19 逐节演出（交互式推进）：全局设置 `stagedNarrative`（默认 true，「设置 → 消息显示 → 正文演出」）。纯状态机 `lib/stage-playback.ts`（字符偏移游标，流式中只放出完整节，断点缺席按段落临时切）与 `lib/stage-entrance.ts`（`resolveEntrances`：开楼名册里的名字不演，不拿本楼新建名单过滤）。登场规则是**演过就不再撤回**：卡片一旦播出就按当时的名字（含别名）钉进这条消息的账本，名册回读、接纳状态、是否在生成都不再撤掉它，位置按当前节重新定位、换位时静态显示；还没演的只在所在节是新放出的时候演；进度簿 `composables/useStagedPlayback.ts`（只演本次会话新到的直出正文，草稿进度交接给正式消息不回退不重放，`holdOptions` 让 `InputBar` 暂扣选项）。组件 `game/StagedNarrative.vue`（每节一个 `BeautifiedNarrative`）、`game/CharacterEntrance.vue`（立牌链，无素材只浮现名字题签，`mask-position` 动画是 `docs/design.md` §6.4 登记的例外）、`game/combat/CombatBeatCard.vue`（`combat-view.ts` 的 `parseCombatBeat`）。🔴 与 `ActionPanel` 的分工：`<action_info>` 默认一律交给 `ActionPanel`；只有面板里有 `|行动者|` 行（直出正文战斗逐拍契约）时由 `CombatBeatCard` 接管 —— 认行复用 `lib/action-panel.ts` 的 `parseActionPanel`，`parseCombatBeat` 只吃它摊平后的格，别再写第二个面板解析器。📌 2026-11-23（未真机验证）：上一句「CombatBeatCard 分工」已作废 —— `CombatBeatCard.vue` 与 `parseCombatBeat` 已删，`<action_info>` 一律交给 `ActionPanel`，有 `|行动者|` 行的面板由它按 `view.kind = exchange` 画成交锋；ChatFlow 的 `STAGE_YIELD_SELECTOR` 去掉了 `.combat-beat`（`.action-panel-card` 仍在）。`BeautifiedNarrative` 不再给面板叠 `fx-ink-block`，改传 `entrance`（`reveal === 'once' && onceActive`，闸门关 / 历史消息不播）让面板播当前样式自己的入场。认行仍只有 `parseActionPanel` 一个入口，别再写第二个面板解析器。🔴 `BeautifiedNarrative` 的 `imageSlice` 属性：插画 occurrence 按整条消息计数，每节要加上前面各节的图数，生图侧取整条正文，消息末尾图带只挂末节；缺省时行为不变。`lib/game-pipeline.ts` 的 `StoryChunkCallback` 第三参 `stage` 只在直出主笔给出，`GamePage` 同帧提交 `streamingStage`。键盘与点击在 `ChatFlow.vue`：Space / Enter 推进、按住 Ctrl 快进（单独按住约 300ms 才进入，期间按别的键或滚轮即取消，单按一下不推进）、End 全部显示、左键点正文推进，让路清单 `STAGE_YIELD_SELECTOR` 加右键菜单 / `hasOpenDialog()` / `activeModal` / `isInCombat` / 选字 / 输入法。小条「全文」直接把 `stagedNarrative` 设为 false（关闭时 DOM 与引入前一致）。📌 2026-11-20：小条不再挂在 `StagedNarrative` 末尾，改为 `game/StageControls.vue`，由 ChatFlow 挂在 `InputBar` 正上方（`.stage-dock` 高度 0、内层绝对定位，出现 / 收起都不挤动布局；`.chat-messages` 底部留 56px 免得盖住最后一条消息的操作条）；可收起成「演出」标签，状态存 `UiSettings.stagedControlsCollapsed`（默认 false）。设计见 [交互式推进设计](../../docs/planning/2026-11-19-interactive-progression-design.md)。
 - 📌 2026-11-20 露骨内容开关：全局设置 `nsfwContent`（默认 false，「设置 → 内容包 → 露骨内容」）。游戏界面显示内容包文本经 `composables/useNsfwText.ts`；🔴 世界书编辑器与 Agent / 预设提示词编辑器是「直接查看原文」，**不许**过滤（`WorldBookEditor` 只加 NSFW 徽章）。建档页的 `summary()` 必须先过滤再剥 HTML 标签。插画分级上限读 `effectiveMaxRating(imageMaxRating, nsfwContent)`，别直接读 `imageMaxRating`。`game-pipeline.loadActiveWorldBooks` 与 `create-store` 两处世界书加载经 `filterNsfwBooks`。设计见 [露骨内容开关](../../docs/planning/2026-11-20-explicit-content-switch-design.md)。
 - 缓存直出：建档第三项 `direct_cached`，配置页单列缓存主生成的连接、参数、预设与渠道策略；运行时仍是 `direct_main`。`DebugPanel` 区分缓存读取、写入、普通输入与总输入，缺字段保持未知。详见 [缓存直出](../../docs/reference/direct-generation-cache.md)。
 
@@ -165,6 +165,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   整体换数组（读档 / 回退）一律算历史；ChatFlow 据此决定墨迹与印记。
 │   │                                   🔴「流式过」只记给本代**第一条**新 assistant 消息，`isGenerating` 一变就清；
 │   │                                   之后同代推入的系统行仍按普通消息入场
+│   ├── useActionPanelStyle.ts       ← 🆕 [2026-11-23] 行动面板样式读写（`settings.actionPanelStyle`）：`style` 经
+│   │                                   `lib/action-panel-styles.ts` 的 `resolveActionPanelStyle` 归一（缺键 / 坏值回落对决条），
+│   │                                   `setStyle` 写回设置袋。设置页下拉框与面板齿轮菜单共用这一份
 │   └── useAutosave.ts               ← 🆕 [自动存档 2026-10-05] 游戏页监活表（消息/角色/档案/事件）
 │                                       改动，静默 5s（节流）后调 `game.runAutosave()` 把当前状态
 │                                       覆写进「本轮 turn 快照」—— 手动润色/重铸不再因回档丢失。
@@ -411,6 +414,17 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   `sectionHue` / `rulesClaimActionInfo`（启用规则能否整块匹配正文里的闭合面板）。
 │   │                                   渲染在 `components/game/ActionPanel.vue`；原 combat-view 的
 │   │                                   `parseCombatNarrative` 一族已删，用例迁到 tests/ui/lib/action-panel.test.ts
+│   ├── action-digest.ts             ← 🆕 [2026-11-23] 行动面板**摘要提取**（纯函数、永不抛）：在 `parseActionPanel`
+│   │                                   结构上读语义 —— `kind`（exchange > roster > outcome > generic）/ `actor` / `targets` /
+│   │                                   `verdict` / `deltas`（`|变更|` 等的 HP/MP/SP 增减，同人同资源合并）/ `roster` / `roll` /
+│   │                                   `targetResults` / `statuses` / `result`（`|结果|` 句）/ `facts`。generic 的 `facts` 恒等于
+│   │                                   旧 `summaryCells(第一节)`，认不出的老面板收起时与以前一样。🔴 资源记号手写游标扫，不写会回溯的正则
+│   ├── action-panel-view.ts         ← 🆕 [2026-11-23] 行动面板**视图模型** `buildActionView`（纯函数）：摘要 → 卡片该画什么
+│   │                                   （逐目标命中 / 资源变化 / 状态 / 掷骰、`ownDeltas`、`outcome`、展开体 `calc` 的高亮 token）。
+│   │                                   有 `|行动者|` 却无目标与对外 HP 变化的面板改判 outcome；样式组件只照着画，不自己推导
+│   ├── action-panel-styles.ts       ← 🆕 [2026-11-23] 行动面板样式目录（唯一一张表）：duel 对决条（缺省）/ afterimage 血条残影 /
+│   │                                   battlelog 战报行 / floating 跳字舞台 / card 打出的牌，各带中文名、说明、`entranceMs`；
+│   │                                   `resolveActionPanelStyle` 把任意值归一成合法 id
 │   └── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
 │
 ├── themes/                          ← 🔴 主题 CSS **住在这里，不在 lib/**：
@@ -1268,10 +1282,27 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               （`rulesClaimActionInfo`）时让位给规则、不拆。内置对话卡片的原生分支改交
 │   │   │                               DialogueCard；本文件与 ChatFlow 里的旧 `.dialogue-*` / `.action-panel` 样式已删。
 │   │   │                               特效层把面板当非段落块（once 档整块浮现）
+│   │   │                               📌 2026-11-23：面板不再叠 `fx-ink-block`，改传 `entrance`（once 档生效时）播样式自己的入场；
+│   │   │                               `|行动者|` 面板不再分流给 CombatBeatCard（已删），一律 ActionPanel
 │   │   ├── ActionPanel.vue          ← 🆕 [2026-11-19] 行动面板渲染：每分节一个原生 `<details>`（默认收起，
 │   │   │                               `defaultOpen` 初始展开），标题条右侧 ≤3 个关键格 chip，展开体两列等宽网格；
 │   │   │                               色相取 `--theme-hue-*`。收 `raw` 或已解析的 `panel`，空面板不渲染。
 │   │   │                               🔴 全程文本插值、不走 v-html（面板是模型原文）
+│   │   │                               📌 2026-11-23（未真机验证）：上面「每分节一个 `<details>` + ≤3 chip + 两列网格」已作废，
+│   │   │                               改为**每个面板一个** `<details>`：`<summary>` 画当前样式（`useActionPanelStyle`，五选一）的
+│   │   │                               收起视图，展开体是共用算式区 `action-panel/ActionPanelCalc.vue`；右上角齿轮
+│   │   │                               `ActionPanelStyleMenu` 是 details 的兄弟（点它不开合）。数据走 `buildActionView`。
+│   │   │                               新 prop `entrance`（只在 setup 读一次，过 `entranceMs` 定时撤掉，换样式立即撤）；
+│   │   │                               直出战斗逐拍（原 CombatBeatCard）也由它渲染。🔴 根类名 `.action-panel-card` 是
+│   │   │                               ChatFlow `STAGE_YIELD_SELECTOR` 的契约，别改名
+│   │   ├── action-panel/            ← 🆕 [2026-11-23] ActionPanel 的子组件：五种样式的收起视图 `ActionStyleDuel` /
+│   │   │                               `ActionStyleAfterimage` / `ActionStyleBattleLog` / `ActionStyleFloating` / `ActionStyleCard`
+│   │   │                               （统一入参 `{ view, open, entering }`，各按 kind 出四套视图）、`ActionPanelCalc`（展开体）、
+│   │   │                               `ActionPanelStyleMenu`（齿轮菜单，`ownModalFocus` 接管焦点，Esc / 点外面 / 卸载都要释放）、
+│   │   │                               `ActionBadge`（脸位链头像，无素材显示首字题签）、`ActionGauge`（资源条 + 残影段）、
+│   │   │                               `action-panel-base.css`（共用静态类，以 `<style scoped src>` 引入）。
+│   │   │                               🔴 入场只动 opacity / transform、`backwards` 填充、挂在 `.is-entering` 下，减动效不播；
+│   │   │                               @keyframes 必须写在各自组件里（scoped 改名），base.css 不写动画。登记见 docs/design.md §6.4
 │   │   ├── DialogueCard.vue         ← 🆕 [2026-11-19] 内置对话卡片（`DIALOGUE_CARD_RULE_ID`）的原生渲染：
 │   │   │                               props 名字 / 情绪（可空）/ 台词 = pattern 捕获组 1/2/3，文本插值。
 │   │   │                               🔴 `.dialogue-card/-header/-name/-mood/-body` 类名是契约（主题与
@@ -1453,7 +1484,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 | 📖 剧情系统    | 8 种剧情偏向、模式/年份/难度/外部NPC/自定义偏好、大纲预览                                                                                                                                                                                                 |
 | 🧠 记忆 & 缓存 | 显式 LLM/Embedding 召回模式、Embedding 与可选 Reranker 绑定、候选数/最终召回数、压缩阈值（📌 2026-11-12：未接入运行流程，控件已禁用并标「暂未接入」）/快照上限/缓存策略                                                                                   |
 | 🎨 外观主题    | 10 主题网格、字体风格、字体大小、悬停延迟、减少动态效果；📌 2026-11-16（实验分支）+「界面特效」开关（`visualEffects`，默认开）                                                                                                                            |
-| 💬 消息显示    | 系统通知开关 + 7 种事件类型过滤                                                                                                                                                                                                                           |
+| 💬 消息显示    | 系统通知开关 + 7 种事件类型过滤；📌 2026-11-23 +「行动面板样式」下拉框（`actionPanelStyle`，五选一，缺省对决条）                                                                                                                                          |
 | ✨ 输出美化    | 预设规则库 (22条) + auto-enable 绑定 + 三段式 UI + CRUD                                                                                                                                                                                                   |
 | 🎵 音频        | 混音台 + 播放列表 + 音轨库（音乐文件夹条/上传/搜索/场景配乐开关）                                                                                                                                                                                         |
 | 🖼 素材         | 导入条 + 素材库（按角色分组/扁平表/多选批删）+ 变体抽屉（设主图/裁剪/改名）                                                                                                                                                                               |
