@@ -46,6 +46,21 @@ function directStatusMetadata(effect: CombatStatusEffect | undefined): Partial<S
   };
 }
 
+/**
+ * 存档里的旧状态 + 战斗终局 / 进行中的状态合并。
+ * 战斗侧结果没带 `durationText`（即战斗里改成了数值时长或永久）时，旧存档的文本时长必须去掉：
+ * 否则落库时「文本与数值同给以文本为准」（状态树协议 §5.2）会把战斗里改出的数值时长吞掉。
+ */
+function mergeSavedStatus(
+  saved: StatusEffect | undefined,
+  fresh: StatusEffect,
+  metadata: Partial<StatusEffect>,
+): StatusEffect {
+  const merged: StatusEffect = { ...saved, ...fresh, ...metadata };
+  if (fresh.durationText === undefined) delete merged.durationText;
+  return merged;
+}
+
 export function projectDirectCombatCharacters(
   characters: readonly CharacterState[],
   record: DirectCombatRecord | null,
@@ -59,11 +74,13 @@ export function projectDirectCombatCharacters(
       hp: unit.hp,
       mp: unit.mp,
       sp: unit.sp,
-      statusEffects: unit.statusEffects.map((effect) => ({
-        ...character.statusEffects.find((saved) => saved.name === effect.name),
-        ...toSaveStatus(effect),
-        ...directStatusMetadata(effect),
-      })),
+      statusEffects: unit.statusEffects.map((effect) =>
+        mergeSavedStatus(
+          character.statusEffects.find((saved) => saved.name === effect.name),
+          toSaveStatus(effect),
+          directStatusMetadata(effect),
+        ),
+      ),
     };
   });
 }
@@ -179,15 +196,15 @@ export function buildDirectCombat(
       { op: 'remove_status_effect' as const, target: patch.target, value: { name } },
       {
         ...patch,
-        value: {
-          ...saved,
-          ...(patch.value as object),
-          ...directStatusMetadata(
+        value: mergeSavedStatus(
+          saved,
+          patch.value as StatusEffect,
+          directStatusMetadata(
             state.units[patch.target.slice('characters.'.length)]?.statusEffects.find(
               (effect) => effect.name === name,
             ),
           ),
-        },
+        ),
       },
     ];
   });

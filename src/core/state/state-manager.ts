@@ -61,12 +61,29 @@ import {
   tierNameForTier,
   MILESTONE_LEVELS,
   applyExpFloor,
+  getTierForLevel,
 } from '../character/exp-table';
+// 资源上限拆分（状态树协议 §5.6）：基础 + 额外的不变式唯一出处在 resource-caps，本文件只接触发点
+import {
+  RESOURCE_FIELDS as RESOURCE_CAP_FIELDS,
+  baseResourceCaps,
+  recomputeResourceCaps,
+  solidifyResourceBonuses,
+  type ResourceKey as ResourceCapKey,
+} from '../character/resource-caps';
 import { getEngineSettings } from '../runtime/engine-settings';
 import { logEngine } from '../runtime/engine-logger';
 // 并行化改造（docs/planning/2026-08-16-pipeline-parallelism.md）：一切 Dexie 写入
 // 经 per-saveId FIFO 队列串行 —— 锁粒度 = 读-改-写区段，锁内禁止再入队列（铁律②）。
 import { withSaveWriteLock } from './state-write-queue';
+// 状态树协议 T10：玩家编辑的试算 / 只读与时间闸门 / 撤销 op（纯函数，本文件只接写入口）
+import {
+  PLAYER_EDIT_SOURCE,
+  buildUndoOps,
+  previewPlayerEdit,
+  type PlayerEditCommitResult,
+  type PlayerEditOp,
+} from '../variables/state-tree-edit';
 import { resolveCharacterByName, validateStatePatch } from './patch-rules';
 import type { CharacterDefinition, CharacterNarrativeUpdate } from '../types/types-character';
 import type { StoryMemorySource } from '../types/types';
@@ -291,6 +308,10 @@ const UPDATE_CHAR_WHITELIST = new Set<string>([
   'maxMp',
   'sp',
   'maxSp',
+  // 资源上限的「额外」部分（§5.6）：有效上限 = 基础 + 额外，由代码重算后写回 max*
+  'maxHpBonus',
+  'maxMpBonus',
+  'maxSpBonus',
   // 登神长阶
   'ascension',
   // 经济 / 位置 / 冒险者等级 / 当前行为
@@ -338,12 +359,251 @@ const UPDATE_CHAR_NUMERIC_FIELDS = new Set<string>([
   'maxMp',
   'sp',
   'maxSp',
+  'maxHpBonus',
+  'maxMpBonus',
+  'maxSpBonus',
   'money',
   'quantity',
 ]);
 
 /** 五维属性键（英文，对齐 CharacterState.attributes；升层自动加点逐键遍历用） */
 const ATTRIBUTE_KEYS = ['str', 'dex', 'con', 'int', 'spi'] as const;
+
+// ========== 资源上限拆分（状态树协议 §5.6）==========
+
+const RESOURCE_CAP_KEYS: readonly ResourceCapKey[] = ['hp', 'mp', 'sp'];
+
+// ========== 文本时长 / 文本消耗互斥（状态树协议 §5.2）==========
+
+/** 非空文本时长 → 去首尾空白后的原文；其余（缺席、空串、非字符串）→ undefined。 */
+function readDurationText(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const t = v.trim();
+  return t ? t : undefined;
+}
+
+/** 非空文本消耗原文；口径同 `readDurationText`。 */
+const readCostText = readDurationText;
+
+/** `Skill.cost` 是否为可解析的结构化消耗（HP / MP / SP + 有限数量）。 */
+function isParsedSkillCost(v: unknown): v is NonNullable<Skill['cost']> {
+  if (!v || typeof v !== 'object') return false;
+  const c = v as { type?: unknown; amount?: unknown };
+  return (c.type === 'HP' || c.type === 'MP' || c.type === 'SP') && isFiniteNumber(c.amount);
+}
+
+/**
+ * 一份写入的消耗值 → 结构化消耗或可读文本；空值（空串、空对象）→ null。
+ * - HP / MP / SP（大小写不敏感）+ 有限数量 → 结构化 `cost`；
+ * - 其余带类型的对象（如 `{type:'信仰',amount:3}`）→「信仰 3」；
+ * - 非空字符串 / 有限数 → 原文；其余认不出的值 → JSON 文本（宁可难看也不丢）。
+ */
+function coerceSkillCost(
+  raw: unknown,
+): { cost: NonNullable<Skill['cost']> } | { text: string } | null {
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    return t ? { text: t } : null;
+  }
+  if (isFiniteNumber(raw)) return { text: String(raw) };
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const c = raw as { type?: unknown; amount?: unknown };
+    const type = typeof c.type === 'string' ? c.type.trim() : '';
+    const upper = type.toUpperCase();
+    if ((upper === 'HP' || upper === 'MP' || upper === 'SP') && isFiniteNumber(c.amount)) {
+      return { cost: { type: upper, amount: c.amount } };
+    }
+    if (type) {
+      const amount = c.amount === undefined || c.amount === null ? '' : String(c.amount).trim();
+      return { text: amount ? `${type} ${amount}` : type };
+    }
+  }
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(raw);
+  } catch {
+    json = undefined;
+  }
+  return json && json !== '{}' && json !== '[]' ? { text: json } : null;
+}
+
+/**
+ * 把本次写入的 `cost` 规整成 §5.2 互斥两形之一，认不出的消耗不丢（就地改 `written`）：
+ * 能解析成 HP / MP / SP 的写成结构化 `cost`，其余转成可读文本进 `costText`
+ * （本次另给了非空 `costText` 时以显式文本为准）。没写 `cost` 或写的是 null / undefined（清除）时不动。
+ * 新建与同名覆盖两支都先过这里，再交 `enforceSkillCostExclusion`，两支口径一致。
+ */
+function normalizeWrittenSkillCost(written: Partial<Skill>): void {
+  if (!('cost' in written)) return;
+  const raw: unknown = written.cost;
+  if (raw === null || raw === undefined || isParsedSkillCost(raw)) return;
+  const coerced = coerceSkillCost(raw);
+  if (coerced && 'cost' in coerced) {
+    written.cost = coerced.cost;
+    return;
+  }
+  delete written.cost;
+  if (coerced && readCostText(written.costText) === undefined) written.costText = coerced.text;
+}
+
+/**
+ * 技能消耗互斥（§5.2）：本次写入可解析的 `cost` → 清 `costText`；
+ * 写入文本消耗 → 清 `cost`。两者同给时以可解析的 `cost` 为准。
+ * 只看本次写入的字段，未写的一侧不动。
+ */
+function enforceSkillCostExclusion(skill: Skill, written: Partial<Skill>): void {
+  if (isParsedSkillCost(written.cost)) {
+    delete skill.costText;
+    return;
+  }
+  const text = readCostText(written.costText);
+  if (text !== undefined) {
+    skill.costText = text;
+    delete skill.cost;
+  } else if ('costText' in written) {
+    // 写了空文本 / 非字符串：不留脏值
+    delete skill.costText;
+  }
+}
+
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+/**
+ * 角色是否具备按公式管理上限的全部输入：层级、五维、三个上限都是有限数。
+ * 脏数据（缺五维 / 上限非数）一律不碰，保持旧行为 —— 算出 NaN 写回比不重算糟得多。
+ */
+function hasResourceCapInputs(char: CharacterState): boolean {
+  if (!isFiniteNumber(char.tier)) return false;
+  const attrs = char.attributes as Record<string, unknown> | undefined;
+  if (!attrs || typeof attrs !== 'object') return false;
+  if (!ATTRIBUTE_KEYS.every((k) => isFiniteNumber(attrs[k]))) return false;
+  return RESOURCE_CAP_KEYS.every((k) => isFiniteNumber(char[RESOURCE_CAP_FIELDS[k].max]));
+}
+
+/** `applyUpdateCharacter` 补丁落地前抓下的上限基准（§5.6 触发点第 1 步）。 */
+interface ResourceCapBaseline {
+  prevTier: number;
+  prevAttributes: Record<string, number>;
+  prevMax: Record<ResourceCapKey, number>;
+}
+
+/**
+ * §5.6 触发点第 1 步：补丁落地**之前**把缺席的额外按「现上限 − 旧基础」固化进字段。
+ * 必须早于属性 / 层级变化，否则差值会按新基础算错。返回落地后重算要用的基准；输入不全返回 null。
+ */
+function solidifyResourceCaps(char: CharacterState): ResourceCapBaseline | null {
+  if (!hasResourceCapInputs(char)) return null;
+  const solid = solidifyResourceBonuses(char);
+  const prevMax = {} as Record<ResourceCapKey, number>;
+  for (const key of RESOURCE_CAP_KEYS) {
+    const fields = RESOURCE_CAP_FIELDS[key];
+    if (!isFiniteNumber(char[fields.bonus])) char[fields.bonus] = solid[key];
+    prevMax[key] = char[fields.max];
+  }
+  return {
+    prevTier: char.tier,
+    prevAttributes: { ...(char.attributes as unknown as Record<string, number>) },
+    prevMax,
+  };
+}
+
+/**
+ * 把重算结果并回角色。当前值只在原本是有限数时才写（脏数据不被 NaN 化）。
+ */
+function applyRecomputedCaps(
+  char: CharacterState,
+  bonuses: Record<ResourceCapKey, number>,
+  previousMax: Record<ResourceCapKey, number>,
+  keys: readonly ResourceCapKey[] = RESOURCE_CAP_KEYS,
+): void {
+  const current = {} as Record<ResourceCapKey, number>;
+  for (const key of RESOURCE_CAP_KEYS) {
+    current[key] = isFiniteNumber(char[key]) ? char[key] : 0;
+  }
+  const r = recomputeResourceCaps({
+    tier: char.tier,
+    attributes: char.attributes,
+    bonuses,
+    previousMax,
+    current,
+  });
+  for (const key of keys) {
+    const fields = RESOURCE_CAP_FIELDS[key];
+    char[fields.max] = r[fields.max];
+    char[fields.bonus] = r[fields.bonus];
+    if (isFiniteNumber(char[key])) char[key] = r[key];
+  }
+}
+
+/**
+ * §5.6 触发点第 2 步：补丁落地、升级与登神推进都跑完**之后**，按新层级 / 五维重算有效上限。
+ *
+ * 额外的取值：
+ * - 本次写了 `max*Bonus`（替换或 delta）→ 用写后的字段值（第 1 步已固化，delta 从固化值起加）；
+ * - 本次只写了 `maxHp` 等（旧写法）→ 解释为「总上限设为 n」（delta 则为「旧总值 + d」），
+ *   换算成额外 = n − 新基础，所以同一补丁里属性 / 层级也变了，最终总上限仍是 n；
+ * - 都没写 → 保持固化值。
+ *
+ * 重算哪几项（重算会把有效上限抬到至少 1，上限为 0 的旧数据 —— 如无法力的怪物 —— 不该被无关写入改掉）：
+ * - 层级、五维、上限相关键都没变 → 一项都不重算（只留第 1 步的固化）；
+ * - 层级或五维变了 → 三项都重算，但原上限为 0 且本次没写到它上限键的项保持 0；
+ * - 只写到某几项的上限键（`maxHp` / `maxHpBonus` 等）→ 只重算那几项。
+ */
+function finishResourceCaps(
+  char: CharacterState,
+  baseline: ResourceCapBaseline,
+  touchedKeys: readonly string[],
+): void {
+  if (!hasResourceCapInputsAfterPatch(char)) return;
+  const attrs = char.attributes as unknown as Record<string, number>;
+  const shapeChanged =
+    char.tier !== baseline.prevTier ||
+    ATTRIBUTE_KEYS.some((k) => attrs[k] !== baseline.prevAttributes[k]);
+  const capTouchedKeys = RESOURCE_CAP_KEYS.filter((key) => {
+    const fields = RESOURCE_CAP_FIELDS[key];
+    return touchedKeys.includes(fields.max) || touchedKeys.includes(fields.bonus);
+  });
+  const keys = shapeChanged
+    ? RESOURCE_CAP_KEYS.filter((key) => capTouchedKeys.includes(key) || baseline.prevMax[key] !== 0)
+    : capTouchedKeys;
+  if (keys.length === 0 && !shapeChanged) return;
+
+  const bases = baseResourceCaps(char.tier, char.attributes);
+  if (shapeChanged) {
+    // 保持 0 的项按新基础重固化额外（= −新基础），使「基础 + 额外」恒为 0：
+    // 否则额外停在旧基础对应的值，之后一次 +d 的额外写入会让上限从 0 跳到「新旧基础差 + d」
+    for (const key of RESOURCE_CAP_KEYS) {
+      if (!keys.includes(key)) char[RESOURCE_CAP_FIELDS[key].bonus] = -bases[key];
+    }
+  }
+  if (keys.length === 0) return;
+  const bonuses = {} as Record<ResourceCapKey, number>;
+  for (const key of RESOURCE_CAP_KEYS) {
+    const fields = RESOURCE_CAP_FIELDS[key];
+    const writtenTotal = char[fields.max];
+    let bonus: unknown = char[fields.bonus];
+    if (
+      !touchedKeys.includes(fields.bonus) &&
+      touchedKeys.includes(fields.max) &&
+      isFiniteNumber(writtenTotal)
+    ) {
+      bonus = writtenTotal - bases[key];
+    }
+    // 补丁把额外写成了非数（白名单不查替换值类型）→ 退回落地前的有效值对应的额外
+    bonuses[key] = isFiniteNumber(bonus) ? bonus : baseline.prevMax[key] - bases[key];
+  }
+  applyRecomputedCaps(char, bonuses, baseline.prevMax, keys);
+}
+
+/** 落地后只校验层级与五维（上限字段会被重算覆盖，旧写法写进来的值另行读取）。 */
+function hasResourceCapInputsAfterPatch(char: CharacterState): boolean {
+  if (!isFiniteNumber(char.tier)) return false;
+  const attrs = char.attributes as Record<string, unknown> | undefined;
+  if (!attrs || typeof attrs !== 'object') return false;
+  return ATTRIBUTE_KEYS.every((k) => isFiniteNumber(attrs[k]));
+}
 
 /** 保留段落，只统一跨平台换行并清掉字段外围空白。 */
 function normalizePersonaText(value: string): string {
@@ -677,6 +937,127 @@ export class StateManager {
       this.events.push(...events);
       return events;
     });
+  }
+
+  /**
+   * 变量修改器 / 更新块修订的写入口（状态树协议 §11.2、§12.3）。
+   *
+   * 与 `commitChatState` 同一把 `withSaveWriteLock`、同一批 `applyPatch` 处理器（钳制、升级、
+   * 上限重算、地图落位钩子照常）；不同在于**整批原子**（语义同 `commitDomainCommand`）：
+   * 锁内重读新鲜状态 → 翻译（actor: player）→ 只读键 / 时间 / 任一条被丢弃 → 整批拒绝并回传原因；
+   * 应用中任一补丁抛错 → Dexie 事务回滚，状态零变化。
+   *
+   * 补丁带 `metadata.source: 'player_edit'`；档案文字改动（§5.5）按叙事更新同口径
+   * （`{...character, ...profile_changes}`）在同一事务里落。不产 deltaMinutes、不推进时间、
+   * 不告知模型（§11.5 裁定）。它**不属于** `persistFocusQuest` 那类受控例外：走完整补丁路径。
+   */
+  async commitPlayerEdit(
+    ops: readonly PlayerEditOp[],
+    options?: { isCurrent?: () => boolean },
+  ): Promise<PlayerEditCommitResult> {
+    const outcome = await withSaveWriteLock(this.saveId, async () => {
+      assertCurrentTurn(options?.isCurrent);
+      const snapshot = {
+        characters: await getCharacters(this.saveId),
+        profile: await getProfile(this.saveId),
+      };
+      const preview = previewPlayerEdit(ops, snapshot);
+      const translation = preview.translation;
+      if (!preview.ok || !translation) {
+        return {
+          ok: false as const,
+          reasons: preview.reasons,
+          records: preview.records,
+          dropped: preview.dropped,
+        };
+      }
+      const patches = translation.patches.map((p) => ({
+        ...p,
+        metadata: { ...(p.metadata ?? {}), source: PLAYER_EDIT_SOURCE },
+      }));
+      const db = getDatabase();
+      try {
+        const events = await db.transaction(
+          'rw',
+          [db.characters, db.saveProfiles, db.saves, db.memories, db.plotEvents],
+          async () => {
+            const scope = createCommitScope();
+            this.commitScope = scope;
+            try {
+              const events: GameEvent[] = [];
+              for (const patch of patches) {
+                if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
+                  this.validatePatch(patch);
+                  const amount = patch.amount!;
+                  if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
+                  const profile = await this.readProfile();
+                  if (amount >= 0) await addFP(profile, amount, '玩家修改');
+                  else await spendFP(profile, -amount, '玩家修改');
+                  events.push(this.createEvent('variable_change', patch));
+                  continue;
+                }
+                const result = await this.applyPatch(patch);
+                if (result.event) events.push(result.event);
+              }
+              for (const change of translation.profileChanges) {
+                const character = await this.resolveCharacter(change.name);
+                Object.assign(character, structuredClone(change.profile_changes));
+                await this.persistCharacter(character);
+              }
+              await this.flushCommitScope(scope);
+              const save = await getSave(this.saveId);
+              if (save) await saveSaveSlot(save);
+              return events;
+            } finally {
+              this.commitScope = null;
+            }
+          },
+        );
+        this.events.push(...events);
+        return {
+          ok: true as const,
+          records: translation.records,
+          normalized: translation.normalized,
+          undo: buildUndoOps(translation.records),
+          patches,
+        };
+      } catch (error) {
+        return {
+          ok: false as const,
+          reasons: [`提交失败：${error instanceof Error ? error.message : String(error)}`],
+          records: translation.records,
+          dropped: translation.dropped,
+        };
+      }
+    });
+
+    logEngine(
+      outcome.ok ? 'info' : 'warn',
+      'state.manual_edit',
+      outcome.ok
+        ? `玩家修改 ${ops.length} 条 op：已提交`
+        : `玩家修改 ${ops.length} 条 op：整批拒绝`,
+      () => ({
+        ops,
+        ...(outcome.ok
+          ? {
+              patches: outcome.patches.map((p) => ({
+                op: p.op,
+                target: p.target,
+                source: p.metadata.source,
+              })),
+              normalized: outcome.normalized,
+            }
+          : { reasons: outcome.reasons }),
+      }),
+      { saveId: this.saveId },
+    );
+
+    if (outcome.ok) {
+      const { patches: _patches, ...rest } = outcome;
+      return rest;
+    }
+    return outcome;
   }
 
   /** Compatibility entry point; AI batches retain valid patches when another is rejected. */
@@ -1084,6 +1465,8 @@ export class StateManager {
 
   private async applyUpdateCharacter(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
+    // §5.6 上限基准：在白名单校验通过之后、value 落地之前抓（见下方第 1 步）
+    let capBaseline: ResourceCapBaseline | null = null;
 
     if (patch.value && typeof patch.value === 'object') {
       const value = patch.value as Record<string, any>;
@@ -1131,6 +1514,9 @@ export class StateManager {
         }
       }
 
+      // ===== §5.6 第 1 步：落地前固化缺席的额外（按旧层级 / 旧五维）=====
+      capBaseline = solidifyResourceCaps(char);
+
       // ===== 全部合法 → 落地 =====
       if (isDelta) {
         // #20: delta 真加法（缺省/脏数据从 0 起加），不再退化为替换
@@ -1159,19 +1545,12 @@ export class StateManager {
         }
       }
 
-      // ===== hp/mp/sp 钳制: 与 set_hp 语义一致 [0, 对应 max]（终审修复）=====
-      // 仅在本次 patch 涉及资源或其 max 时钳制（若本次也写了 max* 则以写后值为准）
-      // Q-19: 字段对由 RESOURCE_MAX_FIELD 给（`satisfies` 保证两侧都真的在
-      // CharacterState 上），不再靠字符串拼 `max${...}` + `as` 断言。
-      for (const res of RESOURCE_KEYS) {
-        const maxField = RESOURCE_MAX_FIELD[res];
-        if (keys.includes(res) || keys.includes(maxField)) {
-          const cur = char[res];
-          const max = char[maxField];
-          if (typeof cur === 'number' && typeof max === 'number') {
-            char[res] = Math.max(0, Math.min(cur, max));
-          }
-        }
+      // ===== NPC 写等级 → 层级由代码按等级推出（§3.3 / §9 #2）=====
+      // 主角的等级 / 层级归经验表推进（下方 applyPlayerProgression），这里只管非主角。
+      // 本次补丁自带的 tier 被推导值覆盖：两者矛盾时以等级为准，层级名同步（补丁自己写了名字则不动）。
+      if (char.type !== 'player' && keys.includes('level') && isFiniteNumber(char.level)) {
+        char.tier = getTierForLevel(char.level);
+        if (!keys.includes('tierName')) char.tierName = tierNameForTier(char.tier);
       }
 
       // ===== 升级 / 升层自动加点（ADR-11：确定性数值规则归 Code，不交给 AI 算）=====
@@ -1236,6 +1615,30 @@ export class StateManager {
       (touchedKeys.includes('totalExp') || touchedKeys.includes('ascension'))
     ) {
       this.applyPlayerProgression(char);
+    }
+
+    // ===== §5.6 第 2 步：落地与推进都跑完后，按新层级 / 五维重算三个有效上限 =====
+    // 上限下降：当前值钳到新上限；上升：当前值不变（§9 #10）
+    if (capBaseline) finishResourceCaps(char, capBaseline, touchedKeys);
+
+    // ===== hp/mp/sp 钳制: 与 set_hp 语义一致 [0, 对应 max]（终审修复）=====
+    // 仅在本次 patch 涉及资源、其 max 或额外时钳制；放在重算之后，以最终有效上限为准。
+    // Q-19: 字段对由 RESOURCE_MAX_FIELD 给（`satisfies` 保证两侧都真的在
+    // CharacterState 上），不再靠字符串拼 `max${...}` + `as` 断言。
+    for (const res of RESOURCE_KEYS) {
+      const maxField = RESOURCE_MAX_FIELD[res];
+      const bonusField = RESOURCE_CAP_FIELDS[res].bonus;
+      if (
+        touchedKeys.includes(res) ||
+        touchedKeys.includes(maxField) ||
+        touchedKeys.includes(bonusField)
+      ) {
+        const cur = char[res];
+        const max = char[maxField];
+        if (typeof cur === 'number' && typeof max === 'number') {
+          char[res] = Math.max(0, Math.min(cur, max));
+        }
+      }
     }
     // metadata.action 保留原行为: 有则覆盖 currentAction（可与 value.currentAction 并存，metadata 优先）
     char.currentAction = patch.metadata?.action ?? char.currentAction;
@@ -1351,6 +1754,8 @@ export class StateManager {
     if (!value?.name) throw new Error('add_status_effect 需要 value.name');
 
     const incomingStacks = typeof value.stacks === 'number' && value.stacks > 0 ? value.stacks : 1;
+    // §5.2 时长互斥：有文本时长时 remainingTime 存 null；文本与数值同给时以文本为准
+    const incomingDurationText = readDurationText(value.durationText);
 
     // 刷新时长: 双方有限取 max；新效果永久(null) 覆盖为永久；未提供(undefined) 不动
     // F07：时长被真正拉长（取到了更大的新窗口）时 carryMinutes 归零 —— 余量属于旧窗口的
@@ -1376,19 +1781,38 @@ export class StateManager {
       }
     };
 
+    // 时长写入的总入口：文本时长 → 存文本、remainingTime=null；数值 / null → 清文本。
+    // 既有状态挂着文本时长时，数值不与「永久」取 max（那会把它永远钉成永久），而是直接取代。
+    const writeDuration = (existing: StatusEffect): void => {
+      if (incomingDurationText !== undefined) {
+        existing.durationText = incomingDurationText;
+        existing.remainingTime = null;
+        existing.carryMinutes = undefined;
+        return;
+      }
+      if (value.remainingTime === undefined) return;
+      if (existing.durationText !== undefined) {
+        existing.remainingTime = value.remainingTime;
+        existing.carryMinutes = undefined;
+        delete existing.durationText;
+        return;
+      }
+      refreshTime(existing);
+    };
+
     const existing = findByName(char.statusEffects, value.name);
     if (existing) {
       if (existing.stackable === false) {
         // 不可叠加: 同名再施加不重复插入，保持 1 层，只刷新时长
         existing.stacks = 1;
-        refreshTime(existing);
+        writeDuration(existing);
       } else {
         // 可叠加（含缺省）: 累加层数，有上限则封顶
         existing.stacks += incomingStacks;
         if (existing.maxStacks && existing.maxStacks > 0) {
           existing.stacks = Math.min(existing.stacks, existing.maxStacks);
         }
-        refreshTime(existing);
+        writeDuration(existing);
       }
     } else {
       // 新效果: 不写 id（铁律1，id 字段 @deprecated），category 归一，缺省补账务字段
@@ -1399,7 +1823,8 @@ export class StateManager {
         stacks: incomingStacks,
         maxStacks: value.maxStacks,
         stackable: value.stackable,
-        remainingTime: value.remainingTime ?? null,
+        remainingTime: incomingDurationText !== undefined ? null : (value.remainingTime ?? null),
+        ...(incomingDurationText !== undefined ? { durationText: incomingDurationText } : {}),
         timeUnit: value.timeUnit ?? '分钟',
         source: value.source ?? '',
         effects: value.effects ?? {},
@@ -1447,7 +1872,12 @@ export class StateManager {
   private async applyUpdateStatusEffect(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    const value = patch.value as { name?: string; remainingTime?: number | null; stacks?: number };
+    const value = patch.value as {
+      name?: string;
+      remainingTime?: number | null;
+      durationText?: string;
+      stacks?: number;
+    };
     const name = value?.name;
     if (!name) throw new Error('update_status_effect 需要 value.name');
 
@@ -1459,10 +1889,17 @@ export class StateManager {
       return this.createEvent('status_effect', patch);
     }
 
-    if (value.remainingTime !== undefined) {
+    // §5.2 时长互斥：写文本时长 → remainingTime 存 null；写数值或 null → 清文本（含 daily_check）
+    const durationText = readDurationText(value.durationText);
+    if (durationText !== undefined) {
+      existing.durationText = durationText;
+      existing.remainingTime = null;
+      existing.carryMinutes = undefined;
+    } else if (value.remainingTime !== undefined) {
       // null=永久；数值=取代（负数钳到 0，由 daily_check 决定何时改发 remove）
       existing.remainingTime =
         value.remainingTime === null ? null : Math.max(0, value.remainingTime);
+      delete existing.durationText;
       // F07 余量随脚本退役一并作废：时间口径全交 AI，不再维护 carryMinutes
       existing.carryMinutes = undefined;
     }
@@ -1724,18 +2161,25 @@ export class StateManager {
 
     // 剥离 id: 无论上游是否夹带，引擎不再读写技能 id（铁律1，id @deprecated）
     const { id: _ignoredId, ...fields } = value;
+    // §5.2：认不出的消耗转成可读文本而不是丢掉；新建与覆盖两支共用规整后的 fields
+    normalizeWrittenSkillCost(fields);
 
     const existing = findByName(char.skills, value.name);
     if (existing) {
       // 同名覆盖升级: 只覆盖提供的字段，未提供的保留
       Object.assign(existing, fields);
+      enforceSkillCostExclusion(existing, fields);
     } else {
       // 新技能: 不写 id，补账务缺省
       char.skills.push({
         name: value.name,
         description: value.description ?? '',
         type: value.type ?? 'active',
-        cost: value.cost,
+        // §5.2 消耗互斥：可解析的 cost 优先，否则留原文 costText
+        cost: isParsedSkillCost(fields.cost) ? fields.cost : undefined,
+        ...(!isParsedSkillCost(fields.cost) && readCostText(fields.costText) !== undefined
+          ? { costText: readCostText(fields.costText) }
+          : {}),
         cooldown: value.cooldown,
         protocolText: value.protocolText,
         tags: value.tags,
@@ -1778,7 +2222,9 @@ export class StateManager {
 
     // changes 里的 id 同样剥离（铁律1）
     const { id: _ignoredId, ...changes } = update.changes ?? {};
+    normalizeWrittenSkillCost(changes);
     Object.assign(skill, changes);
+    enforceSkillCostExclusion(skill, changes);
     await this.persistCharacter(char);
 
     return this.createEvent('skill_use', patch);
@@ -1846,6 +2292,36 @@ export class StateManager {
     // 实例化闸门：所有生成角色都经这里落库。年龄线索缺失或无效时兜底此刻 18 岁 / 生日 1 月 1 日；
     // patch 自带合法 ageAnchor（如快照重放）则原样保留。
     ensureCharacterAge(character, (await this.readProfile()).gameTime);
+
+    // §5.6 新建角色（协调者裁定 2026-11-22，偏离设计第 4 条的「置 0」）：缺席的额外与旧档同一读法，
+    // 固化为「带来的上限 − 公式基础」，所以带进来的总上限一分不变（导入 / 重建 / 手写上限的角色
+    // 不被悄悄改成公式值）；entity_gen / 直出按公式组装的角色额外自然是 0。
+    // 只重算角色**自带**了 *Bonus 的那几项 —— 其余项重算只会把上限为 0 的数据（无法力的怪物）抬成 1。
+    // 「自带」必须在固化之前判断：value 就是 character 本身，固化后字段一律在场。
+    const carried = RESOURCE_CAP_KEYS.filter((k) =>
+      isFiniteNumber(character[RESOURCE_CAP_FIELDS[k].bonus]),
+    );
+    const capBaseline = solidifyResourceCaps(character);
+    if (capBaseline && carried.length > 0) {
+      const bonuses = {} as Record<ResourceCapKey, number>;
+      const current = {} as Record<ResourceCapKey, number>;
+      for (const key of RESOURCE_CAP_KEYS) {
+        bonuses[key] = character[RESOURCE_CAP_FIELDS[key].bonus]!;
+        current[key] = isFiniteNumber(character[key]) ? character[key] : 0;
+      }
+      const r = recomputeResourceCaps({
+        tier: character.tier,
+        attributes: character.attributes,
+        bonuses,
+        previousMax: capBaseline.prevMax,
+        current,
+      });
+      for (const key of carried) {
+        const fields = RESOURCE_CAP_FIELDS[key];
+        character[fields.max] = r[fields.max];
+        if (isFiniteNumber(character[key])) character[key] = r[key];
+      }
+    }
 
     await this.persistCharacter(character);
     return this.createEvent('system', patch);

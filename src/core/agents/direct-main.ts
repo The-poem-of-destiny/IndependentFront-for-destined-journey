@@ -1,9 +1,11 @@
 import {
   buildDirectCharacterSections,
+  buildDirectTreeSections,
   buildLegacyDirectCacheFrame,
+  directTreeCurrentSections,
 } from '../prompts/direct-context-frame';
 import {
-  DIRECT_CACHE_PROTOCOL,
+  buildDirectCacheProtocol,
   discardDirectContext,
   invalidateDirectContext,
   prepareDirectContext,
@@ -19,6 +21,9 @@ import type {
   AgentProviderRound,
   AgentResult,
   ApiEndpoint,
+  CharacterState,
+  NewsItem,
+  StateWriteStats,
   WorldBook,
 } from '../types/types';
 import { AgentClient, ensureUserMessage } from './agent-client';
@@ -34,10 +39,13 @@ import {
   isDirectOutputBudgetExhausted,
   isEmptyDirectReply,
   parseDirectOutput,
+  type DirectPatchResult,
   type DirectTurnDraft,
 } from './direct-output';
 import { isDirectStructuredCombatEnabled, type DirectCombatRecord } from '../combat/direct-combat';
 import { logEngine } from '../runtime/engine-logger';
+import { getEngineSettings } from '../runtime/engine-settings';
+import { buildStateTree, type StateTreeObject } from '../variables/state-tree-projection';
 import { projectCharacterAge } from '../character/character-age';
 import {
   countDirectDice,
@@ -74,6 +82,11 @@ export interface DirectGenerationInput {
     onAssembled?: (diagnostics: import('../types/types').StoryContextV2Diagnostics) => void;
   };
   dice?: DirectDicePool;
+  /**
+   * 状态树协议（tree）读侧的补充输入：AgentContext 里没有的存档字段。缺省时新闻投影为空
+   * （legacy 的 direct_state 本来也不带新闻）。legacy 下忽略。
+   */
+  stateTree?: { news?: readonly NewsItem[] };
   cache?: {
     saveId: string;
     policy: DirectCachePolicy;
@@ -93,7 +106,9 @@ export async function generateDirectTurn(
   const { config, endpoint, configs, context, presets } = input;
   // 结构化战斗开关整轮只取一次：协议、状态、缓存分区与解析口径必须一致
   const structuredCombat = isDirectStructuredCombatEnabled();
-  const protocol = buildDirectProtocol(structuredCombat);
+  // 状态协议同样整轮只取一次：读侧投影、协议文字、缓存分区与写侧解析必须同一口径
+  const stateProtocol = getEngineSettings().stateProtocol;
+  const protocol = buildDirectProtocol(structuredCombat, stateProtocol);
   const combatRecord = structuredCombat ? input.combat : null;
   const dice = input.dice ?? rollDirectDice();
   const diceLines = formatDirectDicePool(dice);
@@ -157,7 +172,7 @@ export async function generateDirectTurn(
       context.userInput.includes(c.name) ||
       combatRecord?.state.units[c.name],
   );
-  const state = {
+  const legacyState = {
     // 年龄按游戏时间现算，不发冻结的开局年龄与原始锚点
     characters: relevant.map((character) => {
       const {
@@ -183,6 +198,24 @@ export async function generateDirectTurn(
     plotSettings: context.plotSettings,
     plot: { outline: context.plotOutline, events: context.plotEvents },
   };
+  // 状态树协议：stat_data 取代 characters / existingNames / variables / gameTime / quests /
+  // weather / fp / affections；地图上下文、openingPrompt、combat、plotSettings、plot 仍是并列原有键
+  const statData =
+    stateProtocol === 'tree'
+      ? buildDirectStateTree(context, relevant, input.stateTree?.news)
+      : undefined;
+  const { characters: _characters, ...legacyRest } = legacyState;
+  const {
+    existingNames: _existingNames,
+    variables: _variables,
+    gameTime: _gameTime,
+    quests: _quests,
+    weather: _weather,
+    fp: _fp,
+    affections: _affections,
+    ...parallel
+  } = legacyRest;
+  const state = statData ? { stat_data: statData, ...parallel } : legacyState;
   messages = ensureUserMessage([
     { role: 'system', content: protocol },
     ...messages,
@@ -216,16 +249,18 @@ export async function generateDirectTurn(
   let ticket: DirectCacheTicket | undefined;
   if (input.cache && frame) {
     // 结构化战斗关闭时 state 不含 combat 键，sections 也就不会出现 combat 分区
-    const { characters: _characters, ...rest } = state;
     frame.prefix = [
-      { role: 'system', content: protocol + '\n' + DIRECT_CACHE_PROTOCOL },
+      { role: 'system', content: protocol + '\n' + buildDirectCacheProtocol(stateProtocol) },
       ...frame.prefix,
     ];
-    frame.sections = {
-      ...frame.sections,
-      ...rest,
-      ...buildDirectCharacterSections(relevant, context.gameTime),
-    };
+    frame.sections = statData
+      ? // 状态树：分区键即树路径（全量人物的每个直接子键、摘要角色整块……），并列原有键照旧
+        { ...frame.sections, ...parallel, ...buildDirectTreeSections(statData) }
+      : {
+          ...frame.sections,
+          ...legacyRest,
+          ...buildDirectCharacterSections(relevant, context.gameTime),
+        };
     const endpointSignature = {
       id: endpoint.id,
       protocol: endpoint.protocol,
@@ -268,6 +303,7 @@ export async function generateDirectTurn(
         tailPrompt: config.tailPrompt ?? '',
       },
       tailReminder: DIRECT_OUTPUT_REMINDER,
+      ...(statData ? { currentSections: directTreeCurrentSections(statData) } : {}),
       rebuild: input.cache.rebuild,
       outputBudget: budget,
       contextWindowTokens: endpoint.contextWindowTokens,
@@ -364,10 +400,29 @@ export async function generateDirectTurn(
       break;
     }
     rejectedOutput = true;
-    const draft = parseDirectOutput(result.rawResponse, dice, {
-      structuredCombat,
-      plotEnabled: context.plotSettings?.mode !== 'off',
-    });
+    let draft: DirectTurnDraft;
+    try {
+      draft = parseDirectOutput(result.rawResponse, dice, {
+        structuredCombat,
+        plotEnabled: context.plotSettings?.mode !== 'off',
+        stateProtocol,
+      });
+    } catch (error) {
+      // 整楼拒收（§7.1）：本楼只记这一条统计；被接纳的楼由调用方在建补丁后补全并记日志
+      const rejected: StateWriteStats = {
+        protocol: stateProtocol,
+        ops: 0,
+        applied: 0,
+        corrected: 0,
+        dropped: 0,
+        rejected: true,
+      };
+      result.stateWriteStats = rejected;
+      logStateWriteStats(rejected, request.model ?? '');
+      throw error;
+    }
+    // 解析期的初步统计；建补丁阶段的丢弃与纠正由调用方经 summarizeStateWrites 补全
+    result.stateWriteStats = summarizeStateWrites(stateProtocol, draft);
     if (draft.combatIgnored)
       logEngine(
         'warn',
@@ -431,6 +486,118 @@ export async function generateDirectTurn(
     if (result && !config.abortSignal?.aborted) throw new DirectTurnError(error, result);
     throw error;
   }
+}
+
+/**
+ * 状态树协议的读侧投影（设计 §3.1、§3.4）。全量人物集合沿用 legacy 的判据（主角、在场、本轮输入点名、
+ * 结构化战斗参战者 —— 即调用方算好的 `relevant`），其余给摘要。
+ */
+function buildDirectStateTree(
+  context: AgentContext,
+  relevant: readonly CharacterState[],
+  news: readonly NewsItem[] | undefined,
+): StateTreeObject {
+  const world = context.statData?.['世界'] as Record<string, unknown> | undefined;
+  const turn = world?.['回合'];
+  const fp = context.statData?.['命运点数'];
+  return buildStateTree(
+    {
+      characters: context.characters,
+      profile: {
+        // 缺席时投影不出 命运点数 键（与 legacy direct_state 的 fp 缺省同口径）
+        fp: (typeof fp === 'number' ? fp : undefined) as number,
+        quests: context.quests ?? {},
+        news: [...(news ?? [])],
+        variables: context.variables,
+        gameTime: context.gameTime!,
+        affections: context.affections ?? {},
+      },
+      ...(context.weather ? { weather: context.weather } : {}),
+      ...(typeof turn === 'number' ? { turn } : {}),
+    },
+    { visibility: { mode: 'focus', fullNames: relevant.map((c) => c.name) } },
+  );
+}
+
+/**
+ * 一楼的状态写入统计（§7.1，只作参考，不设门槛）。`built` 缺席 = 只算解析期（建补丁之前的初步值）。
+ *
+ * 口径：
+ * - `dropped` = 解析期 + 建补丁期的丢弃说明条数，与调试面板「已忽略 N 项」、接纳后提示的数同一个数
+ *   （含 character_updates、信封里 plot / diceUsed / tile_ops 等非 op 单元的丢弃）。
+ * - tree：`ops` = 解析救回的 patch op 数 + `dropped`；建补丁后 `applied` / `corrected` 取翻译记录里
+ *   「已应用」/「已纠正」的条数（逐条 op 计），建补丁前按「解析期带纠正说明的 op」算 `corrected`。
+ * - legacy（含 tree 下回落旧形状的楼）没有逐条记录，按写入单元近似：`ops` = 解析后留下的
+ *   entities + effects + state 各操作行 + tile_ops + character_updates 条目 + 时间推进（>0 计 1）
+ *   + `dropped`；`corrected` = 无损纠正说明的处数（一个单元可能有多处，封顶到未丢弃的单元数），
+ *   `applied` = 其余。
+ * - 缺 direct_updates 区块的楼 `updatesMissing: true`，op 只来自 character_updates。
+ */
+export function summarizeStateWrites(
+  protocol: 'legacy' | 'tree',
+  draft: DirectTurnDraft,
+  built?: Pick<DirectPatchResult, 'dropped' | 'stateUpdates'>,
+): StateWriteStats {
+  const dropped = (draft.dropped?.length ?? 0) + (built?.dropped.length ?? 0);
+  let applied: number;
+  let corrected: number;
+  if (draft.treePatch) {
+    const records = built?.stateUpdates?.ops;
+    if (records) {
+      applied = records.filter((r) => r.status === '已应用' || r.status === '已手动修订').length;
+      corrected = records.filter((r) => r.status === '已纠正').length;
+    } else {
+      const recovered = draft.treePatch.ops.length;
+      corrected = Math.min(recovered, new Set(draft.treePatch.normalized.map((n) => n.index)).size);
+      applied = recovered - corrected;
+    }
+  } else {
+    const kept = Math.max(0, countLegacyWriteUnits(draft) - (built?.dropped.length ?? 0));
+    corrected = Math.min(kept, draft.normalized?.length ?? 0);
+    applied = kept - corrected;
+  }
+  return {
+    protocol,
+    ops: applied + corrected + dropped,
+    applied,
+    corrected,
+    dropped,
+    rejected: false,
+    ...(draft.updatesMissing ? { updatesMissing: true as const } : {}),
+  };
+}
+
+/** 旧形状一楼的写入单元数（解析期丢弃的单元已不在草稿里） */
+function countLegacyWriteUnits(draft: DirectTurnDraft): number {
+  const rows = (value: unknown): number => {
+    if (Array.isArray(value)) return value.length;
+    if (value && typeof value === 'object')
+      return Object.values(value).reduce<number>((sum, v) => sum + rows(v), 0);
+    return value === undefined || value === null ? 0 : 1;
+  };
+  const { updates } = draft;
+  const tileOps = (updates.world as { tile_ops?: unknown } | undefined)?.tile_ops;
+  return (
+    (updates.entities?.length ?? 0) +
+    (updates.effects?.length ?? 0) +
+    rows(updates.state) +
+    (Array.isArray(tileOps) ? tileOps.length : 0) +
+    draft.characterUpdates.length +
+    ((updates.time?.delta_time ?? 0) > 0 ? 1 : 0)
+  );
+}
+
+/** 记一楼的 `state.write_stats` 日志事件（每楼一条；payload 带模型名供离线脚本按模型分组） */
+export function logStateWriteStats(stats: StateWriteStats, model: string): void {
+  logEngine(
+    'info',
+    'state.write_stats',
+    stats.rejected
+      ? `状态写入统计（${stats.protocol}）：整楼拒收`
+      : `状态写入统计（${stats.protocol}）：${stats.ops} 条，应用 ${stats.applied}，纠正 ${stats.corrected}，丢弃 ${stats.dropped}`,
+    () => ({ ...stats, model }),
+    { agentId: 'direct_main' },
+  );
 }
 
 /** 空正文自动重发的次数（长度截断不重发）。 */

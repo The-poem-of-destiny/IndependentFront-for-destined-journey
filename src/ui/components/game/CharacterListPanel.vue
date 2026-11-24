@@ -12,7 +12,8 @@ import ResourceBar from '../shared/ResourceBar.vue';
 import BuffChip from '../shared/BuffChip.vue';
 // 装备/技能/背包详情与玩家背包面板（ItemsPanel）**共用**同一份渲染（数据结构等价，避免显示分叉）
 import ItemDetailBody from './ItemDetailBody.vue';
-import { type PanelEntry } from '../../lib/item-view';
+import { skillRewriteEntry, type PanelEntry } from '../../lib/item-view';
+import { statusChipDuration, statusDurationLabel } from '../../lib/status-view';
 // 🆕 重铸（2026-08-24）：单条目重铸 —— NPC 的装备/技能/背包条目都能重写
 import type { RewriteTarget } from '@engine/agents/entity-gen-agent';
 // 登神三档的渲染与 CharacterViewerModal 共用同一条判定入口（别各写一套 —— 一处跟了新形状、
@@ -201,20 +202,7 @@ function buildNpcRewriteTarget(
   if (kind === 'skills') {
     const sk = (c.skills ?? []).find((s: any) => s.name === name);
     if (!sk) return null;
-    return {
-      kind: 'skill',
-      entry: {
-        name: sk.name,
-        description: sk.description ?? '',
-        type: sk.type === 'passive' ? 'passive' : 'active',
-        ...(sk.cost ? { cost: sk.cost } : {}),
-        ...(sk.cooldown !== undefined ? { cooldown: sk.cooldown } : {}),
-        ...(sk.effects ? { effects: sk.effects } : {}),
-        ...(sk.skillPower !== undefined ? { skillPower: sk.skillPower } : {}),
-        ...(sk.relevantAttribute ? { relevantAttribute: sk.relevantAttribute } : {}),
-        ...(sk.damageType ? { damageType: sk.damageType } : {}),
-      },
-    };
+    return { kind: 'skill', entry: skillRewriteEntry(sk) };
   }
   const inv = (c.inventory ?? []).find((i: any) => i.name === name);
   if (!inv) return null;
@@ -572,10 +560,9 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
                   "
                   :stacks="fx.stacks"
                 />
-                <span v-if="fx.remainingTime === null" class="st-time">永久</span>
-                <span v-else-if="fx.remainingTime < 999" class="st-time"
-                  >{{ fx.remainingTime }}{{ fx.timeUnit }}</span
-                >
+                <span v-if="statusChipDuration(fx) !== null" class="st-time">{{
+                  statusChipDuration(fx)
+                }}</span>
               </button>
             </div>
             <div
@@ -597,10 +584,7 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
                   <span
                     >层数: {{ fx.stacks }}<span v-if="fx.maxStacks">/{{ fx.maxStacks }}</span></span
                   >
-                  <span
-                    >剩余:
-                    {{ fx.remainingTime === null ? '永久' : fx.remainingTime + fx.timeUnit }}</span
-                  >
+                  <span>剩余: {{ statusDurationLabel(fx) }}</span>
                   <span>来源: {{ fx.source }}</span>
                 </div>
               </template>

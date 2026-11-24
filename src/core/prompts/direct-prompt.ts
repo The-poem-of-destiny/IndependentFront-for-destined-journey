@@ -20,6 +20,7 @@ import {
   DIRECT_STRIPPED_KEYS,
   DIRECT_WORLD_RESERVED_SEGMENTS,
 } from '../agents/direct-contract';
+import { STATE_TREE_WRITE_PROTOCOL } from './state-tree-prompt';
 
 export const DIRECT_PRESET_ID = 'direct-generation-v1';
 export const DIRECT_CACHED_PRESET_ID = 'direct-generation-cache-v1';
@@ -46,11 +47,82 @@ const DIRECT_COMBAT_STRUCTURED_LINE = `combat:null 表示无在办战斗；否�
 const DIRECT_COMBAT_PROSE_LINE =
   'combat：恒填 null，不写任何战斗内容。当前未启用结构化战斗：战斗直接写在正文里推进（combat 里写了内容也会被忽略，不会入库）。参战者的 HP/MP/SP 变化用 state.characters 的 replace 或 delta 声明，状态效果的获得、变化与解除用 effects 声明；没有存档实体的临时敌人不建档，其伤势与状态在正文或 action_info 中交代清楚，供后续楼延续。EXP/FP 同样在 state 声明。战斗逐拍：一名角色的一次行为单独成一节，按行动顺序排列；每节一两句叙述加至多一个 action_info，前三行固定为 |行动者|名字|、|目标|名字或无|、|行动|技能或动作名|，其后先写计算行，全部算完后在面板末尾按需写结果行 |判定|、|伤害|（或 |恢复|）、|变更|名字 HP 旧值→新值|（HP/MP/SP 有增减的角色每人每种资源一行，含行动者自身消耗）、|状态|（状态效果增减），结果行只抄录上方已算出的数值。名字与实体名逐字一致，临时敌人称呼前后一致。';
 
+/** 状态协议：legacy = direct_updates v1（state/entities/effects）；tree = 状态树路径补丁（version 2）。 */
+export type DirectStateProtocol = 'legacy' | 'tree';
+
 /**
  * 直出协议正文。两种口径都带「正文分节」（`<beat/>`）一行；
  * `structuredCombat` 为假时只替换 combat 那一行（追加战斗逐拍要求），骨架里的 `"combat":null` 保留。
+ *
+ * `stateProtocol: 'tree'`（状态树协议 T9a，设计 docs/planning/2026-11-22-mvu-projection-protocol-design.md §4.2）：
+ * 「direct_updates 顶层键说明 → effects」那几行换成 `STATE_TREE_WRITE_PROTOCOL`，tile_ops 细则行原样保留；
+ * 正文分节与 combat 行只把对 entities / state / effects 的指称换成 patch。🔴 legacy 输出逐字节不变。
  */
-export function buildDirectProtocol(structuredCombat: boolean): string {
+export function buildDirectProtocol(
+  structuredCombat: boolean,
+  stateProtocol: DirectStateProtocol = 'legacy',
+): string {
+  const legacy = buildLegacyDirectProtocol(structuredCombat);
+  return stateProtocol === 'tree' ? deriveTreeProtocol(legacy, structuredCombat) : legacy;
+}
+
+/** 在 `text` 里把 `from` 换成 `to`；找不到说明旧协议措辞已改，必须同步这里（fail-fast）。 */
+function swap(text: string, from: string, to: string): string {
+  if (!text.includes(from)) throw new Error(`直出协议派生失败：找不到「${from}」`);
+  return text.replace(from, to);
+}
+
+/** tree 下的耗时结算与入库规则（旧协议 time / state 各行里与形状无关的规则，换成 patch 口径保留）。 */
+const TREE_SETTLEMENT_LINES = [
+  '耗时结算：天气、地图周期收益由本地代码处理，不能再重复奖励；日常消耗、恢复、状态到期由你依据楼初状态与耗时在 patch 里声明，新状态不扣创建前的耗时。',
+  '入库规则：展示卡片不能代替结构化入库。制作材料扣除和完整产物必须同楼声明，失败也明确实际成本，不得透支库存。经验只写累计经验值，升级和奖励属性点由代码处理；年龄由代码按游戏时间现算，不要写。任务完成不自动发奖励，奖励只声明一次。',
+];
+
+function deriveTreeProtocol(legacy: string, structuredCombat: boolean): string {
+  const lines = legacy.split('\n');
+  const start = lines.findIndex((line) => line.startsWith('direct_updates 所有顶层键都必需'));
+  const combatLine = structuredCombat ? DIRECT_COMBAT_STRUCTURED_LINE : DIRECT_COMBAT_PROSE_LINE;
+  const end = lines.indexOf(combatLine);
+  const tileOps = lines.findIndex((line) => line.startsWith('tile_ops 每项含'));
+  if (start < 0 || end <= start || tileOps <= start || tileOps >= end)
+    throw new Error('直出协议派生失败：状态写入段的定位行已改');
+  const treeCombat = structuredCombat
+    ? swap(
+        swap(
+          swap(combatLine, '存档角色先通过 entities 创建', '存档角色先经 patch 新建'),
+          '不在 state/effects 重复写同一参与者',
+          '不在 patch 里重复写同一参与者',
+        ),
+        'EXP/FP 在 state 统一声明',
+        'EXP/FP 在 patch 统一声明',
+      )
+    : swap(
+        swap(
+          combatLine,
+          '参战者的 HP/MP/SP 变化用 state.characters 的 replace 或 delta 声明，状态效果的获得、变化与解除用 effects 声明',
+          '参战者的 HP/MP/SP 变化与状态效果的获得、变化与解除都写进 patch',
+        ),
+        'EXP/FP 同样在 state 声明',
+        'EXP/FP 同样写进 patch',
+      );
+  const head = lines
+    .slice(0, start)
+    .map((line) =>
+      line.startsWith('正文分节：')
+        ? swap(line, '本楼经 entities 新建实体的人物', '本楼经 patch 新建的人物')
+        : line,
+    );
+  return [
+    ...head,
+    STATE_TREE_WRITE_PROTOCOL,
+    lines[tileOps],
+    ...TREE_SETTLEMENT_LINES,
+    treeCombat,
+    ...lines.slice(end + 1),
+  ].join('\n');
+}
+
+function buildLegacyDirectProtocol(structuredCombat: boolean): string {
   return `你正在使用直出 v1。以下为必须满足的输出与状态契约，不受文风预设覆盖。
 本次只有一次主请求，无工具、无后续实体／制作／战斗／日常／剧情 Agent。记忆由独立系统处理，不输出摘要。
 依据本轮权威状态和规则完成演算，再叙述一致的结果。不要输出思维链；action_info 只展示必要的掷骰、成本、结果和可见后果。

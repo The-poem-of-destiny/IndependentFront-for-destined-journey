@@ -40,6 +40,8 @@ import { resolveEntrances, type StageRosterEntry } from '../../lib/stage-entranc
 import type { StagePlaybackView } from '../../lib/stage-playback';
 import { hasOpenDialog } from '../../lib/modal-focus';
 import StagedNarrative from './StagedNarrative.vue';
+import StateUpdateBlock from './StateUpdateBlock.vue';
+import { shouldShowUpdateBlock } from './state-update-view';
 import StageControls from './StageControls.vue';
 import AppButton from '../shared/AppButton.vue';
 import AppModal from '../shared/AppModal.vue';
@@ -271,6 +273,15 @@ const stagedDraft = computed<PlaybackRecord | null>(() => {
 
 function stagedViewOf(msg: ChatMessage): StagePlaybackView | null {
   return staged.viewFor(msg);
+}
+
+/**
+ * 本楼状态更新块的显示时机（§12.4）：与行动选项相同 —— 逐节演出放完才出现；
+ * 流式期间消息还是 pending，`shouldShowUpdateBlock` 本身就不放行。
+ */
+function showsUpdateBlock(msg: ChatMessage): boolean {
+  const view = stagedViewOf(msg);
+  return shouldShowUpdateBlock(msg, !view || view.finished);
 }
 
 function stagedSettledEnd(msg: ChatMessage): number {
@@ -1284,6 +1295,9 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
               @resize="handleNarrativeResize"
             />
             <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
+
+            <!-- 本楼状态更新（状态树协议 §12）：已接纳、带记录、逐节演出放完才出现；默认收起 -->
+            <StateUpdateBlock v-if="showsUpdateBlock(msg)" :message="msg" />
 
             <!--
               最新一回合的可见操作条（GAME-04）：常显但压低，悬停 / 聚焦时才提亮 ——

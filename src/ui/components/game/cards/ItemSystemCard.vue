@@ -2,6 +2,7 @@
 import type { ItemGenSystemEvent } from '@engine/types/types';
 import { qualityVar } from '../../../lib/quality-colors';
 import { vFoil } from '../../../lib/fx-foil';
+import { skillCostLabel } from '../../../lib/item-view';
 
 // 模板里直接用 `event`，无需在 script 里持有引用 —— defineProps 只是声明
 defineProps<{ event: ItemGenSystemEvent }>();
@@ -59,7 +60,9 @@ function typeIcon(itemType: string): string {
           <span v-if="sk.description" class="skill-desc"
             >{{ sk.description.slice(0, 120) }}{{ sk.description.length > 120 ? '...' : '' }}</span
           >
-          <span v-if="sk.cost" class="skill-cost">{{ sk.cost.type }} {{ sk.cost.amount }}</span>
+          <span v-if="skillCostLabel(sk)" class="skill-cost">{{
+            skillCostLabel(sk, { typeFirst: true, sep: ' ' })
+          }}</span>
           <span v-if="sk.cooldown" class="skill-cd">CD {{ sk.cooldown }}回合</span>
         </div>
       </div>

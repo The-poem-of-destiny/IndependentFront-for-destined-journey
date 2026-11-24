@@ -119,6 +119,16 @@ async function onStoryModeChange(event: Event) {
   s.storyContextV2Enabled = next;
 }
 
+// ═══ 实验性变量协议（状态树） ═══
+
+/** 开关 ↔ `stateProtocol`：开 = tree，关 = legacy（缺省） */
+const stateTreeEnabled = computed({
+  get: () => s.stateProtocol === 'tree',
+  set: (enabled: boolean) => {
+    s.stateProtocol = enabled ? 'tree' : 'legacy';
+  },
+});
+
 // ═══ 完整运行日志（引擎日志器） ═══
 
 type EngineLogLevelSetting = 'trace' | 'debug' | 'info';
@@ -362,6 +372,43 @@ async function onClearEngineLogs() {
       <p v-if="exitedSaveName" class="story-mode-status" role="status">
         已退出存档「{{ exitedSaveName }}」：它不能在当前模式下继续，请从存档列表重新选择。
       </p>
+    </AppCard>
+
+    <AppCard
+      padding="md"
+      class="developer-mode-card"
+      :class="{ 'is-enabled': stateTreeEnabled }"
+      data-testid="state-protocol-card"
+    >
+      <div class="developer-toggle-row">
+        <div class="developer-copy">
+          <div class="developer-title-row">
+            <h4>实验性变量协议（状态树）</h4>
+            <span class="developer-state" :class="{ 'is-enabled': stateTreeEnabled }">
+              <i
+                :class="stateTreeEnabled ? 'fa-solid fa-flask' : 'fa-solid fa-lock'"
+                aria-hidden="true"
+              ></i>
+              {{ stateTreeEnabled ? '已开启' : '已关闭' }}
+            </span>
+          </div>
+          <p id="state-protocol-help" class="card-desc">
+            只对直出存档生效：模型读写一棵中文状态树，每楼正文下记录本楼的状态更新。下一回合起生效；切换后缓存直出会冷建一次。
+          </p>
+        </div>
+
+        <label class="toggle-label developer-toggle">
+          <input
+            v-model="stateTreeEnabled"
+            type="checkbox"
+            role="switch"
+            class="toggle-input"
+            aria-label="实验性变量协议（状态树）"
+            aria-describedby="state-protocol-help"
+          />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
     </AppCard>
 
     <AppCard

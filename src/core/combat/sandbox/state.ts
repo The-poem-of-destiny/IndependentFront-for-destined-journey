@@ -54,6 +54,7 @@ function toCombatSkill(skill: {
   name: string;
   type?: string;
   cost?: { type: string; amount: number };
+  costText?: string;
   description?: string;
   protocolText?: string;
   tags?: string[];
@@ -64,7 +65,12 @@ function toCombatSkill(skill: {
   return {
     name: skill.name,
     type: skill.type,
-    cost: skill.cost ? `${skill.cost.type} ${skill.cost.amount}` : undefined,
+    // 解析不了的消耗文本（costText）优先，否则按数值格式化
+    cost: skill.costText
+      ? skill.costText
+      : skill.cost
+        ? `${skill.cost.type} ${skill.cost.amount}`
+        : undefined,
     description: skill.description,
     protocolText: skill.protocolText,
     tags: skill.tags,
@@ -103,6 +109,7 @@ export function toCombatStatus(fx: StatusEffect): CombatStatusEffect {
     stackable: fx.stackable,
     remainingTime: fx.remainingTime,
     timeUnit: fx.timeUnit,
+    ...(fx.durationText ? { durationText: fx.durationText } : {}),
     source: fx.source,
     effects: fx.effects,
     effectDescriptions: fx.effectDescriptions,
@@ -120,6 +127,8 @@ export function toSaveStatus(fx: CombatStatusEffect): StatusEffect {
     stackable: fx.stackable,
     remainingTime: fx.remainingTime ?? null,
     timeUnit: fx.timeUnit ?? '回合',
+    // 文本时长只在「无数值时长」时带回：战斗中被改成数值时长即视为文本失效（同 §5.2 互斥规则）
+    ...(fx.durationText && fx.remainingTime == null ? { durationText: fx.durationText } : {}),
     source: fx.source ?? '',
     effects: fx.effects ?? {},
     effectDescriptions: fx.effectDescriptions,

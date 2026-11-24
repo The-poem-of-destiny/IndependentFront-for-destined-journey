@@ -2,7 +2,8 @@ import { filterNsfwBooks, nsfwEnabled } from '@engine/content/nsfw-filter';
 import { effectiveMaxRating } from '@engine/image/image-prompt';
 import { invalidateDirectContext } from '@engine/prompts/direct-context-session';
 import { isDirectMode } from '@engine/story/generation-mode';
-import type { StatePatch } from '@engine/types/types';
+import type { StatePatch, StateUpdateRecord } from '@engine/types/types';
+import { withSaveWriteLock } from '@engine/state/state-write-queue';
 import { beginLogScope, logEngine } from '@engine/runtime/engine-logger';
 import type { EngineLogScope } from '@engine/runtime/engine-logger';
 /**
@@ -17,6 +18,7 @@ import type { EngineLogScope } from '@engine/runtime/engine-logger';
 import { AgentOrchestrator } from '@engine/agents/agent-orchestrator';
 import { resolveGenerationMode, type GenerationMode } from '@engine/story/generation-mode';
 import { buildDirectPatches } from '@engine/agents/direct-output';
+import { logStateWriteStats, summarizeStateWrites } from '@engine/agents/direct-main';
 import type { DirectTurnDraft } from '@engine/agents/direct-output';
 import {
   buildDirectCombat,
@@ -434,6 +436,7 @@ function buildDebugEntry(input: DebugEntryInput): DebugAgentEntry {
     directCacheDiagnostics: result?.directCacheDiagnostics,
     finishReason: result?.finishReason,
     outputWarnings: result?.outputWarnings,
+    stateWriteStats: result?.stateWriteStats,
     error: result?.error,
     tokensUsed: result?.tokensUsed ?? 0,
     cacheHit: result?.cacheHit ?? false,
@@ -498,6 +501,25 @@ export function withImagePromptSystem(
   // 宁可补一条只带提示词的：没有它，方言的整段吃法会静默失效，而那是没有任何症状的。
   console.warn('[GamePipeline] configs 里没有 image_prompt，合成一条只带 systemPrompt 的');
   return [...configs, { agentId: 'image_prompt', systemPrompt: override } as AgentConfig];
+}
+
+/** 状态更新记录的独立副本（库内行、回合副本、展示投影各持一份，互不别名） */
+function cloneStateUpdates(record: StateUpdateRecord): StateUpdateRecord {
+  return JSON.parse(JSON.stringify(record)) as StateUpdateRecord;
+}
+
+function hasStateUpdateValues(record: StateUpdateRecord): boolean {
+  return record.ops.some((op) => 'before' in op || 'after' in op || 'entryBefore' in op);
+}
+
+/** 去掉每条的前值、后值与条目整对象前值（§12.2），其余字段（路径、动作、来源、写入值、状态、说明、折叠标记）原样保留 */
+function stripStateUpdateValues(record: StateUpdateRecord): StateUpdateRecord {
+  return {
+    ...record,
+    ops: record.ops.map(
+      ({ before: _before, after: _after, entryBefore: _entryBefore, ...rest }) => rest,
+    ),
+  };
 }
 
 const saveWork = new Map<
@@ -721,13 +743,19 @@ export class GamePipeline {
     this.currentStoryTurnKey ??= message.id;
     this.currentTurnMessages.push({ ...message });
     this.lastStoryMessage = { id: message.id, turn: message.turn ?? 0, content: message.content };
-    const { getCharacters } = await import('@engine/persistence/database');
+    const { getCharacters, getSaveProfile } = await import('@engine/persistence/database');
     const built = buildDirectPatches(draft, {
       characters: await getCharacters(this.saveId),
       definitions: context.characterDefinitions ?? [],
       sourceTurnKey: this.currentStoryTurnKey,
+      // 状态树协议的草稿要对着完整内核状态翻译；legacy 草稿不读档案，也就不多读这一次库
+      ...(draft.treePatch ? { profile: await getSaveProfile(this.saveId) } : {}),
     });
-    if (built.dropped.length > 0) this.recordDirectBuildDropped(built.dropped);
+    if (built.dropped.length > 0 || built.normalized.length > 0)
+      this.recordDirectBuildNotes(built.dropped, built.normalized);
+    this.recordDirectWriteStats(draft, built);
+    // 本楼更新记录随正文消息一起接纳（§12.2）：先落到 pending 行上，提交时整行改成 accepted
+    if (built.stateUpdates) await this.attachStateUpdates(message.id, built.stateUpdates);
     // 结构化战斗关闭时不建战斗记录、不追加结算补丁，combat 传 undefined 让休眠记录原样保留
     //（传 null 会清掉存档里的 worldFlags.directCombat）
     const combat: Omit<ReturnType<typeof buildDirectCombat>, 'record'> & {
@@ -792,7 +820,10 @@ export class GamePipeline {
         );
       }
     };
-    await auxiliary('时间推进', () => manager.applyTimeAdvance(draft.updates.time.delta_time));
+    // 只有最新一楼保留前值与后值（§12.2）：赶在回合快照之前清掉更早楼层的，快照载荷带整份消息
+    await this.stripEarlierStateUpdateValues(Boolean(built.stateUpdates));
+    // legacy 下 deltaTime 就是 time.delta_time；tree 下取 /世界/时间 的汇总
+    await auxiliary('时间推进', () => manager.applyTimeAdvance(built.deltaTime));
     await auxiliary('旅程更新', () => manager.syncMapJourney());
     const plotResult = (agentId: string, data: Record<string, unknown>): AgentResult => ({
       agentId,
@@ -860,28 +891,123 @@ export class GamePipeline {
   }
 
   /**
-   * 建补丁时的连锁丢弃：记 warn `direct.output_dropped`，并追加到本回合 direct_main
-   * 调试记录的 outputWarnings（解析期的丢弃已由 generateDirectTurn 写进结果）。
+   * 建补丁时的连锁丢弃与纠正：分别记 warn `direct.output_dropped` / `direct.output_normalized`，
+   * 并追加到本回合 direct_main 调试记录的 outputWarnings（解析期的丢弃已由 generateDirectTurn
+   * 写进结果）。纠正项带「已纠正：」前缀，与丢弃项区分；legacy 建补丁恒无纠正。
    */
-  private recordDirectBuildDropped(dropped: string[]): void {
-    logEngine(
-      'warn',
-      'direct.output_dropped',
-      `直出状态更新有 ${dropped.length} 项无法应用，已忽略`,
-      () => ({ notes: dropped }),
-      { agentId: 'direct_main' },
-    );
-    const turnId = this.activeRunId;
-    if (!turnId) return;
-    const invocationId = this.mainInvocationIds.get(`${turnId}\u0000direct_main`);
-    const entry = this.game.agentLogHistory
-      ?.find((turn) => turn.id === turnId)
-      ?.entries.find((e: DebugAgentEntry) => e.invocationId === invocationId);
+  private recordDirectBuildNotes(dropped: string[], normalized: string[]): void {
+    if (dropped.length > 0)
+      logEngine(
+        'warn',
+        'direct.output_dropped',
+        `直出状态更新有 ${dropped.length} 项无法应用，已忽略`,
+        () => ({ notes: dropped }),
+        { agentId: 'direct_main' },
+      );
+    if (normalized.length > 0)
+      logEngine(
+        'warn',
+        'direct.output_normalized',
+        `直出状态更新有 ${normalized.length} 处已自动纠正`,
+        () => ({ notes: normalized }),
+        { agentId: 'direct_main' },
+      );
+    const warnings = [...dropped, ...normalized.map((note) => `已纠正：${note}`)];
+    const entry = this.findDirectDebugEntry();
     if (!entry) return;
     this.game.addAgentLogEntry({
       ...entry,
-      outputWarnings: [...(entry.outputWarnings ?? []), ...dropped],
+      outputWarnings: [...(entry.outputWarnings ?? []), ...warnings],
     });
+  }
+
+  /** 本回合 direct_main 的调试记录（没有活动回合或记录时为 undefined） */
+  private findDirectDebugEntry(): DebugAgentEntry | undefined {
+    const turnId = this.activeRunId;
+    if (!turnId) return undefined;
+    const invocationId = this.mainInvocationIds.get(`${turnId}\u0000direct_main`);
+    return this.game.agentLogHistory
+      ?.find((turn) => turn.id === turnId)
+      ?.entries.find((e: DebugAgentEntry) => e.invocationId === invocationId);
+  }
+
+  /**
+   * 状态写入统计（§7.1）在建补丁之后才完整：把解析期的初步值补上建补丁期的丢弃与逐条记录，
+   * 写回本回合 direct_main 的结果与调试记录，并记本楼唯一一条 `state.write_stats`。
+   * 整楼拒收的楼不走这里（generateDirectTurn 已记）。
+   */
+  private recordDirectWriteStats(
+    draft: DirectTurnDraft,
+    built: ReturnType<typeof buildDirectPatches>,
+  ): void {
+    const result = this.orch?.getResults().get('direct_main');
+    const protocol = result?.stateWriteStats?.protocol ?? (draft.treePatch ? 'tree' : 'legacy');
+    const stats = summarizeStateWrites(protocol, draft, built);
+    if (result) result.stateWriteStats = stats;
+    const entry = this.findDirectDebugEntry();
+    logStateWriteStats(stats, entry?.model ?? '');
+    if (entry) this.game.addAgentLogEntry({ ...entry, stateWriteStats: stats });
+  }
+
+  /**
+   * 把本楼状态更新记录写到本楼 assistant 正文消息上（状态树协议，§12.2）。
+   * 库内那一行按读-改-写在存档写锁里只补这一个字段，再同步内存里的回合副本与展示投影；
+   * 核心提交随后按库内行整行改成 accepted，记录随行。
+   */
+  private async attachStateUpdates(messageId: string, record: StateUpdateRecord): Promise<void> {
+    const { getDatabase } = await import('@engine/persistence/database');
+    await withSaveWriteLock(this.saveId, async () => {
+      const table = getDatabase().messages;
+      const row = await table.get(messageId);
+      if (row && row.saveId === this.saveId)
+        await table.put({ ...row, stateUpdates: cloneStateUpdates(record) });
+    });
+    const copy = this.currentTurnMessages.find((m) => m.id === messageId);
+    if (copy) copy.stateUpdates = cloneStateUpdates(record);
+    const shown = this.game.messages.find((row) => row.id === messageId);
+    if (shown) shown.stateUpdates = cloneStateUpdates(record);
+  }
+
+  /**
+   * 接纳新一楼时清掉更早楼层记录里的前值与后值（§12.2：只有最新一楼保留，
+   * 快照载荷带整份消息，留着会被每张快照复制一遍）。只动带 before/after 的行，
+   * 本楼没有更新记录（legacy）且内存里的消息也没有任何带前后值的记录时整个跳过，
+   * 不进写锁读全档消息（legacy 存档每楼都会走到这里）。失败不影响本楼接纳，记 warn 即可，下一楼会再清。
+   */
+  private async stripEarlierStateUpdateValues(thisTurnHasRecord: boolean): Promise<void> {
+    const current = new Set(this.currentTurnMessages.map((m) => m.id));
+    if (
+      !thisTurnHasRecord &&
+      !this.game.messages.some(
+        (row) => !current.has(row.id) && row.stateUpdates && hasStateUpdateValues(row.stateUpdates),
+      )
+    )
+      return;
+    try {
+      const { getMessages, saveMessages } = await import('@engine/persistence/database');
+      const changed = await withSaveWriteLock(this.saveId, async () => {
+        const next = (await getMessages(this.saveId))
+          .filter(
+            (row) =>
+              !current.has(row.id) && row.stateUpdates && hasStateUpdateValues(row.stateUpdates),
+          )
+          .map((row) => ({ ...row, stateUpdates: stripStateUpdateValues(row.stateUpdates!) }));
+        if (next.length > 0) await saveMessages(next);
+        return next;
+      });
+      for (const row of changed) {
+        const shown = this.game.messages.find((m) => m.id === row.id);
+        if (shown) shown.stateUpdates = cloneStateUpdates(row.stateUpdates);
+      }
+    } catch (error) {
+      logEngine(
+        'warn',
+        'direct.state_updates_strip_failed',
+        '清理上一楼状态更新记录的前后值失败',
+        () => ({ error: error instanceof Error ? error.message : String(error) }),
+        { agentId: 'direct_main' },
+      );
+    }
   }
 
   /** toast 失败不改变任何结论（单测里常常没有可用的 UI store） */
@@ -1176,6 +1302,8 @@ export class GamePipeline {
                 growthLimit: this.settings.settings.directCacheGrowthLimit,
               }
             : undefined,
+          // 状态树协议的新闻投影来自存档档案（AgentContext 不带新闻）；legacy 下引擎忽略
+          { news: this.game.saveProfile?.news ?? [] },
         );
         await this.acceptDirectTurn(draft, context, controller);
         activityOutcome = 'completed';

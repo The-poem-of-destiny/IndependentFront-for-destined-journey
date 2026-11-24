@@ -1,0 +1,5 @@
+{"type":"header","app":"test","exportedAt":"2026-11-22T00:00:00.000Z"}
+{"seq":1,"ts":1,"level":"info","cat":"state.write_stats","saveId":"s","layer":1,"agentId":"direct_main","msg":"状态写入统计","payload":{"protocol":"legacy","ops":6,"applied":4,"corrected":1,"dropped":1,"rejected":false,"model":"deepseek-chat"}}
+{"seq":2,"ts":2,"level":"warn","cat":"direct.output_dropped","saveId":"s","layer":1,"msg":"x","payload":{"notes":["a"]}}
+{"seq":3,"ts":3,"level":"info","cat":"state.write_stats","saveId":"s","layer":2,"agentId":"direct_main","msg":"状态写入统计","payload":{"protocol":"legacy","ops":0,"applied":0,"corrected":0,"dropped":0,"rejected":false,"updatesMissing":true,"model":"deepseek-chat"}}
+{"seq":4,"ts":4,"level":"info","cat":"state.write_stats","saveId":"s","layer":3,"agentId":"direct_main","msg":"状态写入统计","payload":{"protocol":"legacy","ops":0,"applied":0,"corrected":0,"dropped":0,"rejected":true,"model":"deepseek-chat"}}

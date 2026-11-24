@@ -125,6 +125,31 @@ describe('settings-store', () => {
     expect(store.settings.directStructuredCombat).toBe(false);
   });
 
+  it('实验性变量协议默认旧协议，随设置袋持久化，旧设置缺键取默认，恢复默认后回到旧协议', async () => {
+    expect(store.settings.stateProtocol).toBe('legacy');
+
+    store.settings.stateProtocol = 'tree';
+    await nextTick();
+    const saved = JSON.parse(localStorage.getItem('fated-poem-settings')!);
+    expect(saved.stateProtocol).toBe('tree');
+
+    store.$dispose();
+    setActivePinia(createPinia());
+    store = useSettingsStore();
+    expect(store.settings.stateProtocol).toBe('tree');
+
+    store.$dispose();
+    store_.clear();
+    store_.set('fated-poem-settings', JSON.stringify({ developerMode: true }));
+    setActivePinia(createPinia());
+    store = useSettingsStore();
+    expect(store.settings.stateProtocol).toBe('legacy');
+
+    store.settings.stateProtocol = 'tree';
+    store.resetAll();
+    expect(store.settings.stateProtocol).toBe('legacy');
+  });
+
   it('正文演出默认开启，随设置袋持久化，恢复默认后回到开', async () => {
     expect(store.settings.stagedNarrative).toBe(true);
 

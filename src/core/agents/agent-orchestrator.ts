@@ -36,6 +36,7 @@ import type {
   StoryArchiveRecord,
   StoryContextV2Diagnostics,
   StoryRecallReport,
+  NewsItem,
 } from '../types/types';
 import type { SceneImageMarker } from '../types/types-image';
 import { AgentClient, ensureUserMessage } from './agent-client';
@@ -407,6 +408,8 @@ export class AgentOrchestrator {
     cachePolicy?: DirectCachePolicy,
     /** 缓存直出的重建时机（用户设置）；只在给了 cachePolicy 时生效 */
     cacheRebuild?: { maxTurns?: number; growthLimit?: number },
+    /** 状态树协议读侧的补充输入（存档新闻等），原样转给 generateDirectTurn；legacy 下忽略 */
+    stateTree?: { news?: readonly NewsItem[] },
   ): Promise<DirectTurnDraft> {
     this.assertCurrent();
     this.context.zones ??= buildZoneContext(this.context);
@@ -440,6 +443,7 @@ export class AgentOrchestrator {
             ? { saveId: this.saveId, policy: cachePolicy, rebuild: cacheRebuild }
             : undefined,
           storyContext: this.storyContext,
+          ...(stateTree ? { stateTree } : {}),
         },
         new AgentClient({
           endpoint,

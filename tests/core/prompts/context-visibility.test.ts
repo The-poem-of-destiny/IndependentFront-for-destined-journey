@@ -405,6 +405,26 @@ describe('filterZoneContent — SUMMARY', () => {
     expect(result).not.toContain('暗线内容');
   });
 
+  it('npc SUMMARY 的状态效果优先输出文本时长（durationText）', () => {
+    const content = {
+      characters: [
+        {
+          name: '艾莉丝',
+          type: 'player',
+          statusEffects: [
+            { name: '圣殿庇护', remainingTime: null, durationText: '直到离开圣殿' },
+            { name: '祝福', remainingTime: 3, timeUnit: '回合' },
+            { name: '诅咒', remainingTime: null },
+          ],
+        },
+      ],
+    };
+    const result = filterZoneContent('npc', content, 'SUMMARY', 'test') ?? '';
+    expect(result).toContain('圣殿庇护(直到离开圣殿)');
+    expect(result).toContain('祝福(剩余3回合)');
+    expect(result).toContain('诅咒(永久)');
+  });
+
   it('quest SUMMARY only shows active quests', () => {
     const content = {
       quests: {

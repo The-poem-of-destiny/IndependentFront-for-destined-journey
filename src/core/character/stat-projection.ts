@@ -98,6 +98,8 @@ function projectStatusEffects(effects: CharacterState['statusEffects'] | undefin
     剩余时间: e.remainingTime,
     时间单位: e.timeUnit,
     描述: e.description ?? '',
+    // 解析不了的时长文本（如「直到离开圣殿」）；有值才出，原有两个键不变
+    ...(e.durationText ? { 持续说明: e.durationText } : {}),
   }));
 }
 

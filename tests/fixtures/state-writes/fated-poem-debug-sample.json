@@ -1,0 +1,154 @@
+{
+  "exportedAt": "2026-11-22T00:00:00.000Z",
+  "agentLog": [
+    {
+      "invocationId": "i4",
+      "turnId": "t",
+      "agentId": "direct_main",
+      "label": "直出主生成",
+      "model": "deepseek-chat",
+      "rawResponse": "",
+      "messages": [],
+      "tokensUsed": 0,
+      "cacheHit": false,
+      "duration": 1,
+      "startedAt": 1,
+      "stateWriteStats": {
+        "protocol": "tree",
+        "ops": 4,
+        "applied": 3,
+        "corrected": 1,
+        "dropped": 0,
+        "rejected": false
+      }
+    }
+  ],
+  "agentHistory": [
+    {
+      "id": "t1",
+      "turn": 1,
+      "entries": [
+        {
+          "invocationId": "r1",
+          "agentId": "memory_recall",
+          "model": "x"
+        },
+        {
+          "invocationId": "i1",
+          "turnId": "t",
+          "agentId": "direct_main",
+          "label": "直出主生成",
+          "model": "deepseek-chat",
+          "rawResponse": "",
+          "messages": [],
+          "tokensUsed": 0,
+          "cacheHit": false,
+          "duration": 1,
+          "startedAt": 1,
+          "stateWriteStats": {
+            "protocol": "tree",
+            "ops": 5,
+            "applied": 3,
+            "corrected": 1,
+            "dropped": 1,
+            "rejected": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "t2",
+      "turn": 2,
+      "entries": [
+        {
+          "invocationId": "i2",
+          "turnId": "t",
+          "agentId": "direct_main",
+          "label": "直出主生成",
+          "model": "deepseek-chat",
+          "rawResponse": "",
+          "messages": [],
+          "tokensUsed": 0,
+          "cacheHit": false,
+          "duration": 1,
+          "startedAt": 1,
+          "stateWriteStats": {
+            "protocol": "tree",
+            "ops": 0,
+            "applied": 0,
+            "corrected": 0,
+            "dropped": 0,
+            "rejected": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "t3",
+      "turn": 3,
+      "entries": [
+        {
+          "invocationId": "i3",
+          "turnId": "t",
+          "agentId": "direct_main",
+          "label": "直出主生成",
+          "model": "claude-sonnet",
+          "rawResponse": "",
+          "messages": [],
+          "tokensUsed": 0,
+          "cacheHit": false,
+          "duration": 1,
+          "startedAt": 1,
+          "stateWriteStats": {
+            "protocol": "tree",
+            "ops": 2,
+            "applied": 2,
+            "corrected": 0,
+            "dropped": 0,
+            "rejected": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "t4",
+      "turn": 4,
+      "entries": [
+        {
+          "invocationId": "i4",
+          "turnId": "t",
+          "agentId": "direct_main",
+          "label": "直出主生成",
+          "model": "deepseek-chat",
+          "rawResponse": "",
+          "messages": [],
+          "tokensUsed": 0,
+          "cacheHit": false,
+          "duration": 1,
+          "startedAt": 1,
+          "stateWriteStats": {
+            "protocol": "tree",
+            "ops": 4,
+            "applied": 3,
+            "corrected": 1,
+            "dropped": 0,
+            "rejected": false
+          }
+        },
+        {
+          "invocationId": "i5",
+          "turnId": "t",
+          "agentId": "direct_main",
+          "label": "直出主生成",
+          "model": "deepseek-chat",
+          "rawResponse": "",
+          "messages": [],
+          "tokensUsed": 0,
+          "cacheHit": false,
+          "duration": 1,
+          "startedAt": 1
+        }
+      ]
+    }
+  ]
+}

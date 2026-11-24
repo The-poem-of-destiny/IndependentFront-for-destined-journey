@@ -10,7 +10,7 @@
  *    `inferQualityFromStats`（Q-11 起是全仓唯一一份，别再内联第二张阈值表）。
  */
 
-import type { InventoryItem, QualityLevel, Skill } from '@engine/types/types';
+import type { InventoryItem, ItemGenOutput, QualityLevel, Skill } from '@engine/types/types';
 import { QUALITY_RANK } from '@engine/types/types';
 import { inferQualityFromStats } from '@engine/crafting/quality-inference';
 import { normalizeEffects } from './item-effects';
@@ -60,8 +60,8 @@ export function typeLabel(entry: PanelEntry, category: ItemCategory): string {
 /** 详情头第二行（等级/消耗、耐久、数量） */
 export function detailExtra(entry: PanelEntry, category: ItemCategory): string {
   if (entry.kind === 'skill') {
-    const cost = entry.row.cost;
-    return `Lv.${entry.row.level || 1}${cost ? ` · ${cost.amount}${cost.type}` : ''}`;
+    const cost = skillCostLabel(entry.row);
+    return `Lv.${entry.row.level || 1}${cost ? ` · ${cost}` : ''}`;
   }
   if (category === 'equipment') {
     return `${entry.row.durability || '?'}/${entry.row.maxDurability || '?'} 耐久`;
@@ -72,4 +72,50 @@ export function detailExtra(entry: PanelEntry, category: ItemCategory): string {
 /** 效果词条：三种历史形态（对象 / 名字:描述分号串 / 数组）统一归一化 */
 export function entryEffects(entry: PanelEntry): Record<string, string> {
   return normalizeEffects(entry.row.effects);
+}
+
+/** 读技能消耗所需的最小形状（存档里的 `Skill` 与生成卡片里的技能条目都满足） */
+export interface SkillCostLike {
+  cost?: { type: string; amount: number } | null;
+  costText?: string | null;
+}
+
+/**
+ * 技能消耗的展示文案（状态树协议 §5.7，2026-11-22）：`costText` 有值时原样显示，
+ * 否则按 `cost` 格式化，都没有返回空串。各处原有的数值排版不同，由 `typeFirst` / `sep` 指定：
+ * 默认「10MP」，`{ sep: ' ' }` 为「10 MP」，`{ typeFirst: true, sep: ' ' }` 为「MP 10」。
+ */
+export function skillCostLabel(
+  skill: SkillCostLike,
+  opts: { typeFirst?: boolean; sep?: string } = {},
+): string {
+  const text = skill.costText?.trim();
+  if (text) return text;
+  const cost = skill.cost;
+  if (!cost) return '';
+  const sep = opts.sep ?? '';
+  return opts.typeFirst ? `${cost.type}${sep}${cost.amount}` : `${cost.amount}${sep}${cost.type}`;
+}
+
+/** 重铸时交给 AI 的技能现状：生成条目形状，另带原样的 `costText`（AI 看得到解析不了的消耗原文） */
+export type SkillRewriteEntry = ItemGenOutput['skills'][number] & { costText?: string };
+
+/**
+ * 把存档里的技能转成 entity_gen `<重铸目标>` 的条目。关键字段逐项透传，让 AI 能看到这条现状；
+ * `costText` 有值时一并带上（§5.7「重铸时交给 AI 的现状」）。玩家背包与 NPC 列表共用。
+ */
+export function skillRewriteEntry(sk: Skill): SkillRewriteEntry {
+  const costText = sk.costText?.trim();
+  return {
+    name: sk.name,
+    description: sk.description ?? '',
+    type: sk.type === 'passive' ? 'passive' : 'active',
+    ...(sk.cost ? { cost: sk.cost } : {}),
+    ...(costText ? { costText } : {}),
+    ...(sk.cooldown !== undefined ? { cooldown: sk.cooldown } : {}),
+    ...(sk.effects ? { effects: sk.effects } : {}),
+    ...(sk.skillPower !== undefined ? { skillPower: sk.skillPower } : {}),
+    ...(sk.relevantAttribute ? { relevantAttribute: sk.relevantAttribute } : {}),
+    ...(sk.damageType ? { damageType: sk.damageType } : {}),
+  };
 }

@@ -19,6 +19,19 @@
 - 测试：新增 `tests/ui/lib/action-digest.test.ts`、`action-panel-view.test.ts`、`action-panel-styles.test.ts`、`tests/ui/components/game/action-panel/`、`tests/ui/components/settings/MessagesSection.test.ts`；删除 `CombatBeatCard.test.ts`，相关组件与协议测试随改。未跑真实模型、未做真机游玩与浏览器走查。
 - 文档：`docs/reference/direct-generation.md`（2026-11-23 注记）、交互式推进设计稿 §4 / §6.4 / §6.5 / §7 更正注记、`docs/design.md` §6.4、`src/ui/AGENTS.md`。
 
+### 2026-11-22 实验性变量协议 v1（状态树投影 + 路径补丁）第一期｜分支 `experimental-variables`，**已实施，未经真实模型与真机游玩验证**
+
+- 范围：设计 `docs/planning/2026-11-22-mvu-projection-protocol-design.md` §8 第一期 T1–T14（共用内核 + 直出 + 变量修改器 + 每楼更新块 + 度量）。第二期（Agent 模式）与第三期（切默认值、删旧协议）未开始。
+- 开关：全局设置 `stateProtocol: 'legacy' | 'tree'`，「设置 → 开发者 → 实验性变量协议（状态树）」，缺省 `legacy`（行为与之前逐字节一致）；只影响两种直出，每切一次 `direct_cached` 存档冷建一次。
+- 引擎：新模块 `variables/state-tree-{spec,codecs,projection,sections,patch,translator,edit}.ts`、`state/patch-rehearsal.ts`（从 `direct-output.ts` 抽出预演）、`character/resource-caps.ts`、`prompts/state-tree-prompt.ts`；`direct-main` / `direct-output` / `direct-prompt` / `direct-context-{frame,session}` 按开关分支；`StateManager` 上限重算触发点、新字段落库、`commitPlayerEdit`（整批原子，`metadata.source: 'player_edit'`）。
+- 上限拆分：新字段 `maxHpBonus` / `maxMpBonus` / `maxSpBonus`，有效上限 = max(1, 基础 + 额外)；顺带修掉「上限不随升级重算」。新建角色缺席的额外固化为「带来的上限 − 基础」（协调者裁定，偏离设计 §5.6 第 4 条），上限为 0 的项不被抬成 1。
+- 文本字段：`StatusEffect.durationText`、`Skill.costText`；战斗沙盒往返、`ACTIVE_EFFECTS`、各状态 / 技能显示面、EJS `stats`（新增「持续说明」键）优先用文本。
+- 前端：变量修改器 `game/StateEditorPanel.vue`（`activeModal === 'variables'`，侧栏「变量」）与每楼更新块 `game/StateUpdateBlock.vue`（默认折叠，只有最新一楼可改），各配纯函数视图层；`lib/status-view.ts`；`game-store` 新增状态编辑 / 更新块修订方法；接纳时写 `ChatMessage.stateUpdates` 并清掉更早楼层的前值 / 后值。
+- 度量：每楼 `stateWriteStats` 进 `AgentResult` / `DebugAgentEntry` 与日志 `state.write_stats`；离线脚本 `node scripts/analyze-state-writes.mjs <文件…>`。
+- 已知限制：从修改器撤销一次更新块修订只还原状态、不还原该楼记录，之后再修订该行会按现值报冲突；修改器第一期不能穿戴 / 卸下装备、不改新闻、人物不可改名。
+- 测试：全量 `npx vitest run` 555 个文件、12236 通过 / 12 跳过（2026-11-22 T15 当场实测）。未跑真实模型、未做真机游玩与浏览器走查。
+- 文档：设计稿状态行改为已实施并补 📌 注记与 §13；`docs/reference/direct-generation.md` 新节「实验性变量协议（状态树，2026-11-22）」、`direct-generation-cache.md` 新节「状态树协议下的分区」；EJS 创作者规范补「持续说明」；数据字段规范补「状态树投影与新字段」；`src/core/AGENTS.md` / `src/ui/AGENTS.md`；`docs/known-issue.md` 登记一条既有缺陷（`toSaveStatus` 补空描述）；根 `AGENTS.md` 导航、进度表与 ADR-37。
+
 ### 2026-11-22 直出尾部格式提醒 + 开局提示词不再重发｜分支 `fix/direct-tail-and-opening`，**已实施，未真机验证**
 
 - 起因：真机 gemini-3.8-flash 一楼只输出裸正文（无 `maintext` / `character_updates` / `direct_updates`），被 `parseDirectOutput` 以「需要一个完整的 maintext（或 gametxt）区块」整楼拒收。请求末尾只有骰池数字、没有格式指令；SillyTavern Prime 预设与角色卡世界书都把格式指令放在最后。

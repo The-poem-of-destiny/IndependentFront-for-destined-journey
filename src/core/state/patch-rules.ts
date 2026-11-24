@@ -1,8 +1,8 @@
 /**
  * patch-rules.ts — StatePatch 的静态校验与按名寻址角色（纯函数，无 I/O）
  *
- * StateManager 提交时用这两条规则判补丁；直出建补丁（agents/direct-output.ts）在提交前
- * 用同一份规则预判，把注定在提交时抛错的补丁先丢掉，免得一条坏补丁连坐整楼。
+ * StateManager 提交时用这两条规则判补丁；建补丁预演（state/patch-rehearsal.ts，直出建补丁与
+ * 状态树翻译层共用）在提交前用同一份规则预判，把注定在提交时抛错的补丁先丢掉，免得一条坏补丁连坐整楼。
  * 🔴 规则只此一份：改这里两边一起变，别在调用方再写一份。
  */
 import type { CharacterState, StatePatch, StatePatchOp } from '../types/types';

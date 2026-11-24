@@ -87,6 +87,16 @@
 
 这段数组是 `settings.prompts` 的示例。世界书的动态条目使用现有 `extra.lore.section: "turn"`；明确声明为 `fixed` 的动态 EJS 不会被擅自改成动态区。旧分区被替换或移除后不再属于本轮激活规则。显式作者条目可以重复引用数据，引擎只去除自己添加的重复内容。
 
+### 状态树协议下的分区（2026-11-22）
+
+📌 2026-11-22 新增，分支 `experimental-variables`，**未经真实模型与真机游玩验证**。开关与读写形状见 [直出模式 · 实验性变量协议](direct-generation.md#实验性变量协议状态树2026-11-22)。
+
+- `stateProtocol: 'tree'` 时，`character/…` 与 `resources` 分区换成**以树路径为键**的分区（`variables/state-tree-sections.ts` 切分，`direct-context-frame.ts` 的 `buildDirectTreeSections` 接入），值整块替换该路径：`/世界`、`/命运点数`、`/新闻`、`/变量`、`/任务列表/<任务名>`、每个全量人物节点的每个直接子键（如 `/主角/生命值`、`/主角/背包`、`/主角/装备`）、每个摘要角色整块 `/关系列表/<人物名>`。路径段按 JSON Pointer 转义（`~` → `~0`、`/` → `~1`）。改 HP 只重发 `/主角/生命值`。记忆、世界书、地图等原有分区不变。
+- 人物在全量与摘要之间切换时，旧一侧的分区随同一轮 `remove` 下发；tree 版协议明确「同一轮先 remove 后 set」。
+- 尾部现值重申（`turn_context.current`）不再是 `combat` + `resources`，改由调用方传键（`directTreeCurrentSections`）：`combat` 加主角与在场全量人物的 `生命值` / `法力值` / `体力值` 三个分区。不传时仍是 legacy 的缺省。
+- 缓存协议文字按开关取（`buildDirectCacheProtocol`）；legacy 原文逐字节不变。协议文字进会话签名，所以**每切一次开关，每个 `direct_cached` 存档冷建一次**，不需要别的迁移。
+- 玩家手改（变量修改器、更新块修订）不改历史消息的 `content`，不影响缓存前缀、不冷建；状态变化经下一轮的分区差量带给模型。更新块记录不在会话 transcript 里。
+
 ## 重建与持久化
 
 以下情况重新建立完整基线：

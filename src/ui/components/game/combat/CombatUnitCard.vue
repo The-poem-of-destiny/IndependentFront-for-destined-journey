@@ -115,7 +115,8 @@ const equipment = computed(() => props.unit.equipment ?? []);
     <div v-if="statusViews.length" class="cu-buffs">
       <span v-for="(chip, i) in statusViews" :key="i" class="cu-buff-group">
         <BuffChip :type="chip.type" :name="chip.name" :stacks="chip.stacks" />
-        <span v-if="chip.remainRounds !== null" class="cu-remain"
+        <span v-if="chip.durationText" class="cu-remain">{{ chip.durationText }}</span>
+        <span v-else-if="chip.remainRounds !== null" class="cu-remain"
           >剩{{ chip.remainRounds }}回合</span
         >
       </span>

@@ -41,6 +41,7 @@ import SnapshotPanel from './SnapshotPanel.vue';
 import CgGalleryPanel from './CgGalleryPanel.vue';
 import MapPanel from './MapPanel.vue';
 import CalendarPanel from './CalendarPanel.vue';
+import StateEditorPanel from './StateEditorPanel.vue';
 import DebugPanel from './DebugPanel.vue';
 import MiniPlayer from './MiniPlayer.vue';
 import PresetDrawer from './PresetDrawer.vue';
@@ -401,6 +402,8 @@ onBeforeUnmount(() => {
     void waitForGameSaveIdle(requestedSaveId).then(release, release);
   }
   game.invalidatePendingLoads();
+  // 变量修改器的撤销栈只在内存里，离开游戏页即清空（设计 §11.4）
+  game.clearStateEditUndo?.();
   window.removeEventListener('keydown', onKeyDown);
   window.removeEventListener('keydown', onEscapeCapture, true);
   // 🔴 COR-02（2026-08-09 审查）：**先 abort 再清 isGenerating**。
@@ -608,6 +611,17 @@ function onModalOpenChange(v: boolean) {
       @update:open="onModalOpenChange"
     >
       <CalendarPanel />
+    </AppModal>
+    <!-- 变量修改器（状态树协议 T11）：通栏版式，页头与关闭按钮由面板自己画；Esc / 点遮罩照常关 -->
+    <AppModal
+      title="变量"
+      :open="game.activeModal === 'variables'"
+      size="full"
+      bare
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <StateEditorPanel @close="game.closeModal()" />
     </AppModal>
     <AppModal
       title="调试 & 导出"

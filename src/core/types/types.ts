@@ -968,6 +968,60 @@ export interface ChatMessage {
    * 偏移相对 content 计；润色等改写 content 后可能失效，读取方一律经 `resolveBeatBreaks` 自校验。
    */
   stage?: StoryStage;
+  /**
+   * 🆕 本楼状态更新记录（状态树协议，设计 2026-11-22-mvu-projection-protocol-design §12.2）。
+   * 只在新协议（`tree`）下由接纳流程写到本楼 assistant 正文消息上；旧协议楼层缺席。
+   * 随消息整存整取，不升 Dexie 版本（与 `stage`、`preRewriteContent` 同一先例）。
+   */
+  stateUpdates?: StateUpdateRecord;
+}
+
+/** 一条状态写入 op 的处理结果（§12.1 的状态标记）。 */
+export type StateUpdateOpStatus = '已应用' | '已纠正' | '已丢弃' | '已手动修订';
+
+/** 状态树写入的动作名（JSON Patch 形状，§4.3）。 */
+export type StateTreeOpAction = 'replace' | 'add' | 'remove' | 'delta' | 'move';
+
+/** 本楼单条状态写入 op 的记录（§12.2）。 */
+export interface StateUpdateOpRecord {
+  /** 纠正后的树路径（形如 `/主角/生命值/当前`）。 */
+  path: string;
+  /** 动作。 */
+  op: StateTreeOpAction;
+  /** `move` 的来源路径。 */
+  from?: string;
+  /** 写入值（纠正后）；`remove` 缺席。 */
+  value?: unknown;
+  status: StateUpdateOpStatus;
+  /** 纠正说明或丢弃原因（中文）；已应用且无说明时缺席。 */
+  note?: string;
+  /** 写入前的值。只保留在最新一楼，接纳下一楼时清掉（§12.2）。 */
+  before?: unknown;
+  /** 写入后的值。只保留在最新一楼，接纳下一楼时清掉（§12.2）。 */
+  after?: unknown;
+  /**
+   * 本条已并入同一份记录列表里的另一条，由那条代表落地（值为那条在 `StateUpdateRecord.ops` 里的下标，0 起）。
+   * 撤销与补差都跳过本条，改那一条。与对方的 `mergedFrom` 互指。
+   */
+  foldedInto?: number;
+  /** 并入方式：`fold` = 同批「删一边、加一边」折叠成一条 move；`slot` = 那条穿戴的位置取自本条。 */
+  foldKind?: 'fold' | 'slot';
+  /** 本条吸收了哪些记录（`ops` 下标，升序），与对方的 `foldedInto` 互指。 */
+  mergedFrom?: number[];
+  /**
+   * 条目整对象前值：本条（`数量` / `层数` 叶子上的 delta / replace）把一个名字字典条目
+   * （`背包` / `装备` / `状态效果`）减没了时，记该条目在投影里的整对象前值；条目路径 = `path` 去掉末段。
+   * 撤销据此整对象重建，改值先重建再按新值设置（§12.3）。只有这种情形才写。
+   * 与 `before` / `after` 同为大值：只保留在最新一楼，接纳下一楼时一并清掉（§12.2）。
+   */
+  entryBefore?: unknown;
+}
+
+/** 本楼状态更新记录：op 列表加本楼推进的游戏分钟数（§12.2）。 */
+export interface StateUpdateRecord {
+  ops: StateUpdateOpRecord[];
+  /** 本楼推进的游戏时间（分钟），无推进为 0。 */
+  deltaMinutes: number;
 }
 
 /** 新角色登场锚点：`at` 为该人物首次现身那一节的起始偏移（第一节为 0）。 */
@@ -1159,6 +1213,12 @@ export interface Skill {
    *  缺省 = 未定（UI 不再编造「史诗」，回落 `inferQuality` / 中性色） */
   rarity?: QualityLevel;
   cost?: { type: 'HP' | 'MP' | 'SP'; amount: number };
+  /**
+   * 🆕 解析不了的消耗原文（状态树协议 §5.2 / §5.7，2026-11-22）。与 `cost` 互斥：
+   * 写入可解析的消耗时设 `cost` 并清本字段，不可解析时设本字段并清 `cost`（由 StateManager 把守）。
+   * 显示时优先于 `cost`。
+   */
+  costText?: string;
   cooldown?: number; // 剩余冷却时间
   maxCooldown?: number;
   level?: number;
@@ -1219,6 +1279,12 @@ export interface StatusEffect {
   /** 🆕 是否可叠加层数, 默认 true. false=永远1层 */
   stackable?: boolean;
   remainingTime: number | null; // 剩余时间, null=永久
+  /**
+   * 🆕 解析不了的时长原文（状态树协议 §5.2 / §5.7，2026-11-22），如「直到离开城镇」。
+   * 有值时 `remainingTime` 为 null；之后任何一次写入 `remainingTime`（数值或 null）同时清掉本字段
+   * （由 StateManager 把守）。显示时优先于数值时长。
+   */
+  durationText?: string;
   /** 🆕 F07: 已流逝但不足一个时间单位的小数余量。当前仅供 timeUnit='小时' 使用——
    *   `applyTimeAdvance` 把本次推进的分钟累进这里，每满整小时才扣 remainingTime，
    *   避免「30 分钟×2 次两次 floor(30/60)=0、一小时效果永不到期」的分区依赖。
@@ -1307,6 +1373,16 @@ export interface CharacterState {
   maxMp: number;
   sp: number;
   maxSp: number;
+  /**
+   * 🆕 资源上限的「额外」部分（状态树协议 §5.6，2026-11-22）：整数，可为负。
+   * 有效上限 = max(1, 基础 + 额外)，基础恒由 `calcResources(tier, attributes)` 现算、不落库；
+   * `maxHp` 等仍存有效总值。缺席时读作 `maxHp − 基础`（旧档总上限不变），见 `character/resource-caps.ts`。
+   */
+  maxHpBonus?: number;
+  /** 🆕 法力上限的「额外」部分，语义同 `maxHpBonus`。 */
+  maxMpBonus?: number;
+  /** 🆕 体力上限的「额外」部分，语义同 `maxHpBonus`。 */
+  maxSpBonus?: number;
 
   // ===== 登神长阶 (Lv.13+) =====
   ascension: {
@@ -2394,6 +2470,26 @@ export interface AgentResult {
   providerRounds?: AgentProviderRound[];
   /** 🆕 Debug: 发送给 AI 的完整请求消息（含系统提示词+上下文），用于调试面板导出 */
   requestMessages?: Array<{ role: string; content: string | null }>;
+  /** 🆕 本楼状态写入统计（状态树协议 §7.1）；只在产出状态写入的请求上出现。 */
+  stateWriteStats?: StateWriteStats;
+}
+
+/** 每楼一条的状态写入统计（状态树协议 §7.1），进 `AgentResult` 与日志事件 `state.write_stats`。 */
+export interface StateWriteStats {
+  /** 本楼使用的状态协议。 */
+  protocol: 'legacy' | 'tree';
+  /** op 总数。 */
+  ops: number;
+  /** 原样应用的条数。 */
+  applied: number;
+  /** 纠正后应用的条数。 */
+  corrected: number;
+  /** 丢弃的条数。 */
+  dropped: number;
+  /** 整楼拒收时为 true。 */
+  rejected: boolean;
+  /** 模型没写 direct_updates 区块（按空更新接纳）时为 true；缺区块率的分子。 */
+  updatesMissing?: true;
 }
 
 /** 一次 agentic provider 往返的计量快照。 */
@@ -2446,6 +2542,8 @@ export interface DebugAgentEntry {
   finishReason?: string;
   /** 输出里被按单元丢弃、已忽略的内容（中文，带路径）；无丢弃或旧记录缺席 */
   outputWarnings?: string[];
+  /** 本楼状态写入统计（§7.1，直出主生成才有）；旧记录缺席 */
+  stateWriteStats?: StateWriteStats;
   error?: string;
   tokensUsed: number;
   cacheHit: boolean;

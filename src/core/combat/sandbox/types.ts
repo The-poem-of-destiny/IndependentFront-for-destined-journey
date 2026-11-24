@@ -66,6 +66,11 @@ export interface CombatStatusEffect {
   stackable?: boolean;
   remainingTime?: number | null;
   timeUnit?: '回合' | '分钟' | '小时';
+  /**
+   * 解析不了的时长文本（随落库 `StatusEffect.durationText` 往返）。有值时 `remainingTime` 为 null：
+   * 沙盒本就不由 Code 倒计时，DM 按文本条件判断何时移除，不当回合数扣减。
+   */
+  durationText?: string;
   source?: string;
   effects?: Record<string, number>;
   effectDescriptions?: Record<string, string>;

@@ -89,9 +89,11 @@ describe('buildOpeningPrompt', () => {
             expect(updateHead).toContain('* 地点：');
           } else {
             expect(updateHead).toContain('第一轮 AI 回复必须同步更新');
-            expect(updateHead).toContain('time.delta_time');
-            expect(updateHead).toContain('state.characters.replace');
-            expect(updateHead).toContain('path=location');
+            expect(updateHead).toContain('direct_updates');
+            // 协议中立：旧协议与状态树协议共用，不写任一协议的字段路径
+            expect(updateHead).not.toContain('time.delta_time');
+            expect(updateHead).not.toContain('state.characters');
+            expect(updateHead).not.toContain('/世界/');
           }
 
           // 开局剧情
@@ -147,8 +149,8 @@ describe('buildOpeningPrompt', () => {
       '【第一轮变量更新要求】',
       '第一轮 AI 回复必须同步更新 <direct_state> 中的以下字段：',
       '',
-      '* 时间：在 direct_updates 的 time.delta_time 中写入开局这一幕实际经过的分钟数（非负有限数）。',
-      '* 地点：在 direct_updates 的 state.characters.replace 中以 path=location 写入主角本轮结束时所在的地点。',
+      '* 时间：在 direct_updates 中声明开局这一幕实际经过的分钟数（非负），推进游戏时间。',
+      '* 地点：在 direct_updates 中声明主角本轮结束时所在的地点。',
       '',
       '【初始开局剧情】',
       '边境驿站',
