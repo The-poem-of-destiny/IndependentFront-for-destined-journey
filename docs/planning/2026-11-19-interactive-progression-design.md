@@ -40,6 +40,7 @@
 
 - `src/core/prompts/direct-prompt.ts` 的 `buildDirectProtocol`：两种战斗口径都加一行「正文分节」（节的粒度约 1–3 段、全篇约 4–10 节，首尾不写，不写进面板；本楼新建实体的人物在首次现身那一节之前写 `<beat enter="人物名"/>`）。
 - 正文战斗口径（`directStructuredCombat` 关）在战斗行末追加「战斗逐拍」：一名角色的一次行为单独成一节，每节至多一个 `action_info`，前三行固定为 `|行动者|`、`|目标|`、`|行动|`，其后按需写 `|判定|`、`|伤害|`（或 `|恢复|`）、`|消耗|`、`|状态|`。
+  📌 2026-11-23 更正（未真机验证）：本条行序与 `|消耗|` 已改 —— 前三行之后先写计算行，全部算完后在面板末尾按需写结果行 `|判定|`、`|伤害|`（或 `|恢复|`）、`|变更|名字 HP 旧值→新值|`、`|状态|`，结果行只抄录上方已算出的数值；`|消耗|` 与受影响者资源现值并入 `|变更|`（HP/MP/SP 有增减的角色每人每种资源一行，含行动者自身消耗），`|状态|` 只写状态效果增减。另外两种战斗口径都要求非战斗面板末行写 `|结果|一句话结论|`。现行契约见 [直出模式 · 正文分节与逐节演出](../reference/direct-generation.md#正文分节与逐节演出2026-11-19)。
 - `src/core/prompts/direct-context-session.ts` 的 `DIRECT_CACHE_PROTOCOL` 补一句：历史正文里的 `<beat/>` 已移除，每轮仍须照常分节（缓存会话的历史只留剥过标记的正文）。
 
 ## 5. 管线与设置
@@ -88,6 +89,7 @@
 - **插画**：`BeautifiedNarrative` 新增 `imageSlice` 属性 `{ base, narrative, tail }`。`<scene_image>` 的 occurrence 按整条消息计数，所以每节的插画序号加上前面各节的图数（`base`）；生图侧链取整条正文（`narrative`）；记录驱动的消息末尾图带只挂在末节（`tail`）。草稿不传 `messageId`，与原草稿一致。缺省 `imageSlice` 时行为不变。
 - `src/ui/components/game/CharacterEntrance.vue`：立绘走立牌链 `ASSET_TYPE_FALLBACK_CHAIN`（立绘 → 立绘bg → 头像）；一张素材都没有时只浮现名字题签。动效只有一种：自上而下的遮罩扫过加透明度，不旋转、不发光、不弹跳；只在新放出的节且特效闸门打开时播一次，闸门关、减动效、已读过的节一律静态显示。遮罩用到 `mask-position` 动画，已在 `docs/design.md` §6.4 登记为例外。
 - `src/ui/components/game/combat/CombatBeatCard.vue` + `combat-view.ts` 的 `parseCombatBeat(rows)`：`action_info` 里有 `|行动者|` 行时画成行为卡（行动者与目标头像走 `ASSET_TYPE_AVATAR_CHAIN`，至多三枚目标头像；判定、伤害 / 恢复、消耗、状态行；认不出的行照列），否则沿用通用面板。历史整段显示同样受益，不依赖演出开关。卡里的数值是模型自述，不是权威值。
+  📌 2026-11-23 更正（未真机验证）：本条已作废 —— `CombatBeatCard.vue` 与 `parseCombatBeat` 已删，行为卡并入 `src/ui/components/game/ActionPanel.vue`：带 `|行动者|` 的面板与其余面板一样由它渲染，收起时按全局设置 `actionPanelStyle`（「设置 → 消息显示 → 行动面板样式」：对决条 / 血条残影 / 战报行 / 跳字舞台 / 打出的牌，缺省对决条）画摘要（`lib/action-digest.ts` → `lib/action-panel-view.ts`，交锋即 `kind = exchange`），展开是算式行。逐节演出里新放出的节，面板经 `entrance` 播当前样式的入场，不再叠 `fx-ink-block`；入场登记在 `docs/design.md` §6.4。数值仍是模型自述。
 
 ### 6.5 输入
 
@@ -102,7 +104,7 @@ ChatFlow 在 window 上挂 keydown / keyup / blur，在消息容器上挂 click�
 | 小条「快进」 | 放到追上进度为止                                                                                                                      |
 | 小条「全文」 | 直接关闭全局设置 `stagedNarrative`（提示可在设置页重新开）                                                                            |
 
-让路条件（任一成立就不推进）：右键菜单开着、`hasOpenDialog()`、`game.activeModal`、`game.isInCombat`、正在选中文字、输入法选字中、带修饰键，或事件目标在按钮、链接、表单控件、iframe、卡片、插画、行为卡、操作条等元素里（清单见 `ChatFlow.vue` 的 `STAGE_YIELD_SELECTOR`）。
+让路条件（任一成立就不推进）：右键菜单开着、`hasOpenDialog()`、`game.activeModal`、`game.isInCombat`、正在选中文字、输入法选字中、带修饰键，或事件目标在按钮、链接、表单控件、iframe、卡片、插画、行为卡、操作条等元素里（清单见 `ChatFlow.vue` 的 `STAGE_YIELD_SELECTOR`）。📌 2026-11-23：行为卡已并入行动面板，清单去掉 `.combat-beat`，由 `.action-panel-card` 覆盖；面板右上角的样式齿轮是按钮，同样让路。
 
 「全文」没有做成单条消息的临时切换：关闭设置后所有消息回到整段显示，DOM 与引入前一致；重新开启在「设置 → 消息显示 → 正文演出」。
 
@@ -111,6 +113,6 @@ ChatFlow 在 window 上挂 keydown / keyup / blur，在消息容器上挂 click�
 - 真实模型是否稳定输出 `<beat/>` 与战斗固定行未验证；兜底是按段落切与通用面板。
 - 私有内容包的直出预设可能与战斗固定行要求冲突。
 - 每节独立跑美化，跨节的美化规则不再匹配。
-- 行为卡里的 HP 等数值是模型自述，不是权威值。
+- 行为卡里的 HP 等数值是模型自述，不是权威值。📌 2026-11-23：行为卡已并入行动面板，此条对行动面板同样成立。
 - 协议文字变了，每个 `direct_cached` 存档会冷建一次会话。
 - 润色改写正文后断点多半失效，读取时自动回退按段落切。

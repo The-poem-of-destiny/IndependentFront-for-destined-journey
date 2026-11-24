@@ -1,0 +1,144 @@
+/*
+ * 行动面板 — 各样式共用的静态类（对决条 / 血条残影 / 战报行 / 跳字舞台 / 打出的牌共用的基座）
+ *
+ * 由样式组件以 `<style scoped src="./action-panel-base.css">` 引入，每个组件各得一份带自己作用域的副本。
+ * 🔴 这里只放静态规则：不写 @keyframes、不写 animation —— scoped 块里的关键帧会按组件改名，
+ *    动画必须和用它的规则写在同一个组件里（docs/design.md §6.0 第 6 条）。
+ * 颜色一律取 `--theme-*`；不画左侧色条（§1 禁令）。
+ */
+
+.nm {
+  font-family: var(--theme-font-title);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ap-b {
+  font-weight: 600;
+}
+
+/* 只给读屏的文字（方向、检定说明等不能只靠颜色 / 图形表达的信息） */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 资源色与涨跌 */
+.r-hp {
+  --rc: var(--theme-hp);
+}
+
+.r-mp {
+  --rc: var(--theme-mp);
+}
+
+.r-sp {
+  --rc: var(--theme-sp);
+}
+
+.rl {
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--rc, var(--theme-text-secondary)) 70%, var(--theme-text-primary));
+}
+
+.down {
+  color: var(--theme-error);
+}
+
+.up {
+  color: var(--theme-success);
+}
+
+.cost {
+  color: color-mix(in srgb, var(--rc, var(--theme-text-secondary)) 65%, var(--theme-text-primary));
+}
+
+.rng {
+  color: var(--theme-text-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.rng-arrow {
+  margin: 0 2px;
+  opacity: 0.7;
+}
+
+.miss {
+  color: var(--theme-text-muted);
+  font-style: italic;
+}
+
+/* 结论徽章 */
+.vd {
+  --vc: var(--theme-text-secondary);
+  display: inline-block;
+  padding: 0 8px;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.7;
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--vc) 78%, var(--theme-text-primary));
+  background: color-mix(in srgb, var(--vc) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vc) 38%, transparent);
+  border-radius: var(--theme-radius-sm);
+}
+
+.t-ok {
+  --vc: var(--theme-success);
+}
+
+.t-bad {
+  --vc: var(--theme-error);
+}
+
+/* 品质：色点 + 名字着色（§5.3） */
+.q {
+  color: var(--qc, var(--theme-text-primary));
+  font-family: var(--theme-font-title);
+  font-weight: 600;
+}
+
+.q::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--qc, var(--theme-text-muted));
+  vertical-align: 0.05em;
+}
+
+/* 展开提示（文字由组件按 open 给出） */
+.more {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  color: var(--theme-text-muted);
+  white-space: nowrap;
+}
+
+.more-caret {
+  width: 5px;
+  height: 5px;
+  border: solid currentColor;
+  border-width: 0 1px 1px 0;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.more.is-open .more-caret {
+  transform: translateY(1px) rotate(-135deg);
+}

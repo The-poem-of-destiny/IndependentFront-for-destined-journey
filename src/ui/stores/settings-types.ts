@@ -43,6 +43,7 @@
  */
 import type { ApiEntry } from './settings-store';
 import type { AgentSettingsEntry } from './agent-settings';
+import type { ActionPanelStyleId } from '../lib/action-panel-styles';
 import type {
   ImageDialectOverride,
   ImageGenMode,
@@ -290,6 +291,12 @@ export type UiSettings = {
 
   // ═══ 消息 & 系统事件可见性 ═══
   systemEventsVisible: boolean;
+  /**
+   * `<action_info>` 行动面板的呈现样式（「设置 → 消息显示 → 行动面板样式」）。
+   * 🔴 存的是**原始值**，读取一律经 `lib/action-panel-styles.ts` 的 `resolveActionPanelStyle`
+   *    （或 `composables/useActionPanelStyle.ts`）——旧设置缺键、写坏的值都回落缺省样式。
+   */
+  actionPanelStyle: ActionPanelStyleId;
   /** 事件类型 → 是否在对话流里渲染。键是开放的（引擎可以新增事件类型） */
   systemEventFilters: Record<string, boolean>;
 

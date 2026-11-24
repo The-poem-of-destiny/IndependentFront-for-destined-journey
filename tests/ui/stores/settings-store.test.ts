@@ -178,6 +178,34 @@ describe('settings-store', () => {
     expect(store.settings.stagedNarrative).toBe(false);
   });
 
+  it('行动面板样式默认对决条，修改后落 localStorage，恢复默认回到对决条', async () => {
+    expect(store.settings.actionPanelStyle).toBe('duel');
+
+    store.settings.actionPanelStyle = 'floating';
+    await nextTick();
+    const saved = JSON.parse(localStorage.getItem('fated-poem-settings')!);
+    expect(saved.actionPanelStyle).toBe('floating');
+
+    store.resetAll();
+    expect(store.settings.actionPanelStyle).toBe('duel');
+  });
+
+  it('旧设置缺 actionPanelStyle 时取对决条，已存的样式保持', () => {
+    store.$dispose();
+    store_.clear();
+    store_.set('fated-poem-settings', JSON.stringify({ developerMode: true }));
+    setActivePinia(createPinia());
+    store = useSettingsStore();
+    expect(store.settings.actionPanelStyle).toBe('duel');
+
+    store.$dispose();
+    store_.clear();
+    store_.set('fated-poem-settings', JSON.stringify({ actionPanelStyle: 'card' }));
+    setActivePinia(createPinia());
+    store = useSettingsStore();
+    expect(store.settings.actionPanelStyle).toBe('card');
+  });
+
   it('完整运行日志默认关闭、粒度默认 trace，且独立于开发者模式', async () => {
     expect(store.settings.engineLogEnabled).toBe(false);
     expect(store.settings.engineLogLevel).toBe('trace');

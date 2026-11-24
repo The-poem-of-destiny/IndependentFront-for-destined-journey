@@ -7,8 +7,9 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import type { CombatState } from '@engine/combat/sandbox/types';
 import type { CombatFlowEntry } from '../../../../../src/ui/stores/game-store';
 import CombatMessageFlow from '../../../../../src/ui/components/game/combat/CombatMessageFlow.vue';
@@ -27,7 +28,19 @@ function state(): CombatState {
   } as unknown as CombatState;
 }
 
+const stubs = {
+  AssetMedia: {
+    name: 'AssetMedia',
+    props: ['name', 'type', 'variant'],
+    template: '<span class="am-stub"><slot /></span>',
+  },
+};
+
 describe('CombatMessageFlow', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
   it('裸 {标题} + 竖线表（无外层标签）也渲染成 ActionPanel，叙事是段落', () => {
     const text = [
       '莱恩踏前一步。',
@@ -36,11 +49,14 @@ describe('CombatMessageFlow', () => {
       '| 林狼 HP: 60 → 26 |',
       '林狼哀鸣。',
     ].join('\n');
-    const w = mount(CombatMessageFlow, { props: { state: null, flow: [assistant(text)] } });
+    const w = mount(CombatMessageFlow, {
+      props: { state: null, flow: [assistant(text)] },
+      global: { stubs },
+    });
     const panels = w.findAll('.action-panel-card');
     expect(panels).toHaveLength(1);
-    expect(panels[0].find('.ap-title-text').text()).toContain('林狼 · 斩击');
-    expect(panels[0].find('.ap-title-arrow').text()).toBe('→');
+    expect(panels[0].find('.calc-title').text()).toContain('林狼 · 斩击');
+    expect(panels[0].find('summary').text()).toContain('林狼');
     expect(w.findAll('.narr').map((n) => n.text())).toEqual(['莱恩踏前一步。', '林狼哀鸣。']);
   });
 
@@ -63,13 +79,19 @@ describe('CombatMessageFlow', () => {
   });
 
   it('战况总览：按行动顺序列出单位，默认展开', () => {
-    const w = mount(CombatMessageFlow, { props: { state: state(), flow: [] } });
+    const w = mount(CombatMessageFlow, {
+      props: { state: state(), flow: [] },
+      global: { stubs },
+    });
     const overview = w.find('.combat-overview');
     expect(overview.exists()).toBe(true);
-    expect(overview.find('.ap-title-text').text()).toBe('战况总览');
+    expect(overview.classes()).toContain('action-panel-card');
+    expect(overview.attributes('data-kind')).toBe('roster');
+    expect(overview.find('.calc-title').text()).toBe('战况总览');
     expect((overview.find('details').element as HTMLDetailsElement).open).toBe(true);
-    expect(overview.findAll('.ap-k').map((k) => k.text())).toEqual(['莱恩', '林狼']);
-    expect(overview.text()).toContain('HP 26/60');
+    expect(overview.findAll('.d1-u .nm').map((k) => k.text())).toEqual(['莱恩', '林狼']);
+    expect(overview.findAll('.calc-k').map((k) => k.text())).toEqual(['莱恩', '林狼']);
+    expect(overview.text()).toContain('26/60');
   });
 
   it('没有状态时不画战况总览', () => {

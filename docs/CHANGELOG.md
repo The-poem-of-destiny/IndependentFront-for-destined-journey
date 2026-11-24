@@ -9,6 +9,16 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-23 行动面板五种样式 + 战斗行为卡并入行动面板｜分支 `feat/action-info-beautify`，**已实施，未真机验证**
+
+- 摘要与视图：新增纯函数 `src/ui/lib/action-digest.ts`（`digestActionPanel`：kind / 行动者 / 目标 / 结论 / 资源增减 / 名册 / 掷骰 / 逐目标命中 / 状态 / 结果句，认不出的面板退回 generic，收起时与旧版一致）与 `src/ui/lib/action-panel-view.ts`（`buildActionView`：卡片该画什么）。
+- 样式：全局设置 `actionPanelStyle`（`src/ui/lib/action-panel-styles.ts` 唯一目录 + `composables/useActionPanelStyle.ts`）：对决条（缺省）/ 血条残影 / 战报行 / 跳字舞台 / 打出的牌；入口在「设置 → 消息显示 → 行动面板样式」与每个面板右上角的齿轮菜单（`ownModalFocus` 接管焦点）。旧设置缺键或坏值回落对决条。
+- `ActionPanel.vue` 重写：每个面板一个 `<details>`，收起视图由 `components/game/action-panel/ActionStyle*.vue` 之一渲染，展开体是共用算式区 `ActionPanelCalc`；新 prop `entrance` 由 `BeautifiedNarrative` 在 once 档（特效闸门开、新到正文）传入，播样式自己的入场，历史消息不播。入场只动 opacity / transform，登记见 `docs/design.md` §6.4。
+- 删除 `CombatBeatCard.vue` 与 `combat-view.ts` 的 `parseCombatBeat`：带 `|行动者|` 的直出战斗逐拍也交给 `ActionPanel`（交锋视图）；ChatFlow `STAGE_YIELD_SELECTOR` 去掉 `.combat-beat`。
+- 协议（`src/core/prompts/direct-prompt.ts`）：正文战斗逐拍先写计算行，面板末尾再写结果行 `|判定|`、`|伤害|`/`|恢复|`、`|变更|名字 HP 旧→新|`（取代 `|消耗|` 与资源现值，含行动者自身消耗）、`|状态|`；两种战斗口径的非战斗面板末行写 `|结果|一句话结论|`。每个 `direct_cached` 存档冷建一次。私有内容包的直出预设已同步同一约定。
+- 测试：新增 `tests/ui/lib/action-digest.test.ts`、`action-panel-view.test.ts`、`action-panel-styles.test.ts`、`tests/ui/components/game/action-panel/`、`tests/ui/components/settings/MessagesSection.test.ts`；删除 `CombatBeatCard.test.ts`，相关组件与协议测试随改。未跑真实模型、未做真机游玩与浏览器走查。
+- 文档：`docs/reference/direct-generation.md`（2026-11-23 注记）、交互式推进设计稿 §4 / §6.4 / §6.5 / §7 更正注记、`docs/design.md` §6.4、`src/ui/AGENTS.md`。
+
 ### 2026-11-22 实验性变量协议 v1（状态树投影 + 路径补丁）第一期｜分支 `experimental-variables`，**已实施，未经真实模型与真机游玩验证**
 
 - 范围：设计 `docs/planning/2026-11-22-mvu-projection-protocol-design.md` §8 第一期 T1–T14（共用内核 + 直出 + 变量修改器 + 每楼更新块 + 度量）。第二期（Agent 模式）与第三期（切默认值、删旧协议）未开始。

@@ -2,10 +2,23 @@
 /**
  * 消息显示分区 —— 系统通知总开关 + 七类事件过滤（Q-25 从 SettingsPage.vue 抽出）
  */
+import { computed } from 'vue';
 import AppCard from '../shared/AppCard.vue';
+import FormSelect from '../shared/form/FormSelect.vue';
 import { useSettingsStore } from '../../stores/settings-store';
+import { useActionPanelStyle } from '../../composables/useActionPanelStyle';
+import { ACTION_PANEL_STYLES, type ActionPanelStyleId } from '../../lib/action-panel-styles';
 
 const s = useSettingsStore().settings;
+
+const { style: actionPanelStyle, setStyle: setActionPanelStyle } = useActionPanelStyle();
+const actionPanelStyleOptions = ACTION_PANEL_STYLES.map((st) => ({
+  value: st.id,
+  label: st.label,
+}));
+const actionPanelStyleDesc = computed(
+  () => ACTION_PANEL_STYLES.find((st) => st.id === actionPanelStyle.value)?.description ?? '',
+);
 
 /** 事件键 → 中文名。查不到就把键原样显示出来，不吞掉未知类型 */
 function eventFilterLabel(key: string | number): string {
@@ -44,6 +57,18 @@ function eventFilterLabel(key: string | number): string {
     </AppCard>
 
     <AppCard padding="md">
+      <h4>行动面板样式</h4>
+      <p class="card-desc">正文里检定、伤害与结算面板的呈现方式。</p>
+      <FormSelect
+        :model-value="actionPanelStyle"
+        :options="actionPanelStyleOptions"
+        data-testid="action-panel-style"
+        @update:model-value="(v) => setActionPanelStyle(v as ActionPanelStyleId)"
+      />
+      <p class="card-desc action-panel-style-desc">{{ actionPanelStyleDesc }}</p>
+    </AppCard>
+
+    <AppCard padding="md">
       <h4>全局开关</h4>
       <div class="toggle-row">
         <span>显示系统通知</span>
@@ -74,6 +99,9 @@ function eventFilterLabel(key: string | number): string {
 <style scoped src="./settings-chrome.css"></style>
 
 <style scoped>
+.action-panel-style-desc {
+  margin: var(--theme-spacing-sm) 0 0;
+}
 .event-filter-grid {
   display: flex;
   flex-direction: column;

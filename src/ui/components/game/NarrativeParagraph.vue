@@ -157,7 +157,8 @@ export default defineComponent({
  * 🔴 一次性入场一律 `backwards` 填充，不用 `both`（design.md §6.0 第 5 条）。
  * filter 是规格点名的「由模糊到清晰」，强度压在 2px，**只**作用于短暂存活的流式 chunk span
  * （同时至多 48 个，design.md §6.4 记的例外）。
- * 🔴 整段（`.fx-ink-para`）与整块（`.fx-ink-block`，覆盖美化 iframe / 对话卡片 / 行动面板）
+ * 🔴 整段（`.fx-ink-para`）与整块（`.fx-ink-block`，覆盖美化 iframe / 对话卡片；行动面板不叠它，
+ *    改由 ActionPanel 的 `entrance` 播各样式自己的入场）
  *    一律只动 opacity：对整段 / 整块做 filter 动画会逐帧重栅格化大面积内容（含 iframe）。
  */
 @keyframes fx-ink-bleed {

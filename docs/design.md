@@ -430,6 +430,21 @@ import { qualityVar } from '../../lib/quality-colors'
 > 闸门关时不加类，DOM 与静态显示相同。设计见
 > [交互式推进设计](planning/2026-11-19-interactive-progression-design.md)。
 
+> 📌 **2026-11-23 增补（行动面板样式，未真机验证）**：`game/ActionPanel.vue` 的五种收起样式
+> （`game/action-panel/ActionStyle*.vue`，另有资源条 `ActionGauge.vue`）各带一段一次性入场，与
+> `CharacterEntrance` 同样由组件自己决定播不播，但**不新增任何属性例外**：关键帧只动 `opacity` / `transform`
+> （招式箭与资源条用 `scaleX`，行与数字用位移 / 缩放加淡入），`backwards` 填充，时长缓动取 `--motion-*`。
+> 对决条约 600ms（箭画出 → 目标行升起 → 结论印落定）；血条残影约 960ms（下降段先被同色盖片挡住，停 320ms
+> 后 640ms 收拢露出残影，即 §6.1「资源条数值变化」的同一节拍；回升段 `scaleX` 长出）；战报行各行依次淡入右移 4px
+> （间隔 140ms，只排前 8 行）；跳字舞台约 870ms（数字自下升起放大落定，暴击自 1.25 倍压回，
+> 失手只淡入）；打出的牌约 780ms（目标小牌最后一张落定）。以上是最长一段动画（延迟 + 时长），各样式的 `entranceMs` 再留约 60ms 余量（跳字 930ms、打牌 840ms，由 `tests/ui/lib/action-panel-styles.test.ts` 按 token 现算校验）。触发：`ActionPanel` 的 `entrance` prop 只在挂载时读一次，由
+> `BeautifiedNarrative` 在 once 档生效时传入（`reveal === 'once'` 且 `onceActive`，`effectiveReveal` 先过特效闸门
+> `useFxEnabled()`），所以闸门关、减动效、历史消息与重渲染一律静态；过了样式的 `entranceMs` 定时撤掉
+> `is-entering` 类（不等 animationend），换样式立即撤。各组件另写 `prefers-reduced-motion` 与
+> `:root[data-reduced-motion='true']` 兜底。面板不再叠 `fx-ink-block`（两段动画会互相覆盖）。展开体的淡入只在玩家
+> 亲手点开时播（§6.1「卡片展开/折叠」口径），`defaultOpen` 的初始展开不播。关键帧写在各样式组件的 scoped 块里
+> （§6.0 第 6 条），共用静态类 `action-panel-base.css` 不写动画。
+
 **层级表。**
 
 | 层                                   | z-index | 所在层叠上下文                       |
