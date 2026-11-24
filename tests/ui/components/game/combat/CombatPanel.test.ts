@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { reactive, nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import type { CombatState, CombatUnit } from '@engine/combat/sandbox/types';
 import type { TimelineRestoreResult } from '../../../../../src/ui/stores/game-store';
 
@@ -83,6 +84,8 @@ function makeState(
 }
 
 beforeEach(() => {
+  // 中栏的 ActionPanel 读样式设置（settings-store）
+  setActivePinia(createPinia());
   vi.clearAllMocks();
   restartCombat.mockResolvedValue({ status: 'restored', continuation: 'same-save' });
   mockGame = reactive({

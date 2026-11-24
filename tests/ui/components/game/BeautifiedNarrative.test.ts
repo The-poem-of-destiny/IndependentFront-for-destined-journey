@@ -7,6 +7,7 @@ import type { BeautifierRule } from '@engine/types/types';
 import BeautifiedNarrative from '../../../../src/ui/components/game/BeautifiedNarrative.vue';
 import { useFxEnabled } from '../../../../src/ui/lib/fx-gate';
 import { buildNameIndex } from '../../../../src/ui/lib/narrative-names';
+import { ASSET_STUB } from './action-panel/fixtures';
 
 const state = vi.hoisted(() => ({
   enabled: true,
@@ -335,33 +336,16 @@ describe('BeautifiedNarrative <action_info> 行动面板', () => {
   });
 });
 
-it('action_info 带「行动者」行时画成战斗行为卡，否则交给 ActionPanel', () => {
-  const stubs = {
-    AssetMedia: {
-      name: 'AssetMedia',
-      props: ['name', 'type', 'variant'],
-      template: '<span class="am-stub" :data-name="name"><slot /></span>',
-    },
-  };
+it('action_info 带「行动者」行时由 ActionPanel 画成交锋（不再另起行为卡）', () => {
+  setActivePinia(createPinia());
   const text =
     '剑光一闪。\n<action_info>\n|行动者|艾琳|\n|目标|灰狼|\n|行动|裂风斩|\n|伤害|36|\n</action_info>\n灰狼哀嚎。';
-  const wrapper = mount(BeautifiedNarrative, { props: { text }, global: { stubs } });
-  const card = wrapper.find('.combat-beat');
+  const wrapper = mount(BeautifiedNarrative, { props: { text }, global: { stubs: ASSET_STUB } });
+  const card = wrapper.find('.action-panel-card');
   expect(card.exists()).toBe(true);
-  expect(wrapper.find('.action-panel-card').exists()).toBe(false);
-  expect(card.find('.beat-action-name').text()).toBe('裂风斩');
-  expect(card.findAll('.am-stub').map((n) => n.attributes('data-name'))).toEqual(['艾琳', '灰狼']);
+  expect(card.attributes('data-kind')).toBe('exchange');
   expect(wrapper.text()).toContain('灰狼哀嚎');
   wrapper.unmount();
-
-  // 没有「行动者」行：仍是 master 的 ActionPanel
-  const plain = mount(BeautifiedNarrative, {
-    props: { text: '他出剑。\n<action_info>\n|掷骰|14|\n|伤害|36|\n</action_info>' },
-    global: { stubs },
-  });
-  expect(plain.find('.combat-beat').exists()).toBe(false);
-  expect(plain.find('.action-panel-card').exists()).toBe(true);
-  plain.unmount();
 });
 
 describe('BeautifiedNarrative 特效层（墨迹浮现 / 名字下划线 / 行末印记）', () => {
@@ -466,6 +450,25 @@ describe('BeautifiedNarrative 特效层（墨迹浮现 / 名字下划线 / 行�
     vi.advanceTimersByTime(2000);
     await nextTick();
     expect(wrapper.html()).toBe(baseline);
+  });
+
+  it('once：行动面板交给自己的样式入场，不叠 fx-ink-block；闸门关 / 历史不播', () => {
+    const text = '挥剑。\n<action_info>\n|行动者|艾琳|\n|目标|灰狼|\n|伤害|36|\n</action_info>';
+    setFx(true);
+    const once = mountNarrative(text, { reveal: 'once' });
+    const panel = once.find('.action-panel-card');
+    expect(panel.classes()).toContain('is-entering');
+    expect(panel.classes()).not.toContain('fx-ink-block');
+    once.unmount();
+
+    const history = mountNarrative(text);
+    expect(history.find('.action-panel-card').classes()).not.toContain('is-entering');
+    history.unmount();
+
+    setFx(false);
+    const gated = mountNarrative(text, { reveal: 'once' });
+    expect(gated.find('.action-panel-card').classes()).not.toContain('is-entering');
+    gated.unmount();
   });
 
   it('名字下划线：每个名字只划第一次出现，不在更长的已知名字内部划，文本不变', () => {

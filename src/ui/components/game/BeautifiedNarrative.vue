@@ -26,8 +26,6 @@ import {
   splitActionInfo,
   type ActionPanel as ActionPanelData,
 } from '../../lib/action-panel';
-import { parseCombatBeat, type CombatBeat } from './combat/combat-view';
-import CombatBeatCard from './combat/CombatBeatCard.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -176,7 +174,6 @@ const panelsYieldToRules = computed(
 
 type RenderPart =
   | { kind: 'panel'; panel: ActionPanelData }
-  | { kind: 'beat'; beat: CombatBeat }
   | { kind: 'prose'; segments: BeautifierSegment[] }
   | { kind: 'image'; occurrence: number; marker: SceneImageMarker };
 
@@ -212,11 +209,8 @@ const parts = computed<RenderPart[]>(() => {
       if (piece.kind === 'panel') {
         const panel = parseActionPanel(piece.raw);
         if (panel.sections.length === 0) continue;
-        // 有「行动者」行 = 直出正文战斗逐拍的一次行为，画成行为卡；否则一律交给 ActionPanel
-        const beat = parseCombatBeat(
-          panel.sections.flatMap((section) => section.rows.flatMap((row) => row.cells)),
-        );
-        out.push(beat ? { kind: 'beat', beat } : { kind: 'panel', panel });
+        // 有「行动者」行的直出战斗逐拍也交给 ActionPanel（它按 view.kind 画成交锋）
+        out.push({ kind: 'panel', panel });
         continue;
       }
       const prose = trimAroundPanels(piece.text);
@@ -364,7 +358,7 @@ function planOf(key: string): ParagraphPlan | undefined {
   return paragraphPlan.value.plans.get(key);
 }
 
-/** 美化框 / 对话卡片 / 行动面板在 `once` 档整块浮现，不逐词 */
+/** 美化框 / 对话卡片在 `once` 档整块浮现，不逐词（行动面板走自己的入场） */
 const blockInkClass = computed(() =>
   effectiveReveal.value === 'once' && onceActive.value ? 'fx-ink-block' : undefined,
 );
@@ -406,9 +400,12 @@ function paragraphs(text: string): string[] {
 <template>
   <div class="beautified-narrative">
     <template v-for="(part, partIndex) in parts" :key="partIndex">
-      <!-- `<action_info>` 行动面板：特效层按非段落块处理（once 档整块浮现） -->
-      <ActionPanel v-if="part.kind === 'panel'" :panel="part.panel" :class="blockInkClass" />
-      <CombatBeatCard v-else-if="part.kind === 'beat'" :beat="part.beat" :class="blockInkClass" />
+      <!-- `<action_info>` 行动面板：once 档交给面板自己的样式入场（不叠 fx-ink-block，两段动画会互相覆盖） -->
+      <ActionPanel
+        v-if="part.kind === 'panel'"
+        :panel="part.panel"
+        :entrance="effectiveReveal === 'once' && onceActive"
+      />
       <!-- 正文标记切出来的图片段（anchorKind: 'marker'） -->
       <SceneImageSegment
         v-if="part.kind === 'image' && messageId !== undefined"

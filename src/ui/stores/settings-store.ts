@@ -62,6 +62,7 @@ import {
 import { migrateLegacyAgentMaps } from './agent-settings-migration';
 import { migrateImageSettings, normalizeImageSettings } from './image-settings-migration';
 import type { UiSettings } from './settings-types';
+import { DEFAULT_ACTION_PANEL_STYLE } from '../lib/action-panel-styles';
 import {
   apiEndpointToEntry,
   apiEntryToEndpoint,
@@ -339,6 +340,8 @@ function getDefaults(): UiSettings {
 
     // 消息 & 系统事件可见性
     systemEventsVisible: true,
+    // 行动面板样式：默认对决条；旧设置缺键由 `{ ...defaults, ...saved }` 补，写坏的值在读取处归一
+    actionPanelStyle: DEFAULT_ACTION_PANEL_STYLE,
     systemEventFilters: {
       craft: true,
       char_gen: true,
