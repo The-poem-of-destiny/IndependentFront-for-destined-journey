@@ -14,6 +14,8 @@
  * - `skipAll` 之后进入「全部显示」：此刻与以后每次同步，凡完整的节都直接放出。
  */
 
+import { panelBlockRanges } from '@engine/story/story-beats';
+
 /** 登场标记（对应 `<beat enter="名"/>`，`at` 为剥标记后正文里的字符偏移）。
  * 📌 T1 会在 `src/core/story/story-beats.ts` 定义同形类型，届时改为从那里导入。 */
 export interface StageEnterMark {
@@ -71,27 +73,12 @@ export interface StagePlaybackView {
 
 /** 段落分隔：两个及以上换行（中间可夹空白） */
 const PARAGRAPH_GAP = /\n[^\S\n]*\n\s*/g;
-/** 不可切开的块：`<action_info>` / `<item_info>`（大小写不敏感，允许属性） */
-const BLOCK_TAG = /<(\/?)(action_info|item_info)\b[^>]*>/gi;
-
-/** 不可切开块所占的区间；未闭合的块一直保护到正文末尾（流式中常见） */
+/**
+ * 不可切开块所占的区间：`<action_info>` / `<item_info>`；未闭合的块一直保护到正文末尾（流式中常见）。
+ * 标签识别与引擎分节共用一份（`@engine/story/story-beats` 的 `PANEL_TAG_SOURCE`），别在这里另写正则。
+ */
 function protectedRanges(content: string): Array<[number, number]> {
-  const ranges: Array<[number, number]> = [];
-  let openTag: string | null = null;
-  let openAt = 0;
-  for (const match of content.matchAll(BLOCK_TAG)) {
-    const closing = match[1] === '/';
-    const tag = match[2].toLowerCase();
-    if (!closing && openTag === null) {
-      openTag = tag;
-      openAt = match.index;
-    } else if (closing && openTag === tag) {
-      ranges.push([openAt, match.index + match[0].length]);
-      openTag = null;
-    }
-  }
-  if (openTag !== null) ranges.push([openAt, content.length]);
-  return ranges;
+  return panelBlockRanges(content);
 }
 
 /** 按段落临时切出的节起点（不含 0）；分隔符后面必须已有正文，否则下一段还没开始 */
