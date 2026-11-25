@@ -2068,7 +2068,7 @@ describe('reconcilePackState (D18 / §5.7)', () => {
   it('无 pack 安装时返回空结果', async () => {
     const result = await reconcilePackState();
     expect(result.mismatches).toEqual([]);
-    expect(result.reimportedPresetId).toBeNull();
+    expect(Object.keys(result)).toEqual(['mismatches']);
   });
 
   it('pack 拥有项齐全且 hash 一致 → 无失配', async () => {
@@ -2079,7 +2079,7 @@ describe('reconcilePackState (D18 / §5.7)', () => {
 
     const result = await reconcilePackState();
     expect(result.mismatches).toEqual([]);
-    expect(result.reimportedPresetId).toBeNull();
+    expect(Object.keys(result)).toEqual(['mismatches']);
   });
 
   it('pack 拥有项缺失 → needs_attention (missing)', async () => {
@@ -2153,8 +2153,8 @@ describe('reconcilePackState (D18 / §5.7)', () => {
     await db.contentPacks.put(packWithPreset);
 
     const result = await reconcilePackState();
-    expect(result.reimportedPresetId).toBe('preset_pack_story');
-    // 重导后 presets 表里有了那条
+    // 结果只报失配（R7 删掉了零消费方的 reimportedPresetId）；重导动作照旧：presets 表里有了那条
+    expect(Object.keys(result)).toEqual(['mismatches']);
     expect(await db.presets.get('preset_pack_story')).toBeDefined();
   });
 

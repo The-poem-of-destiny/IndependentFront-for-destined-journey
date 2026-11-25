@@ -9,7 +9,6 @@ import {
   subscribePackRuntime,
 } from '@engine/content/pack-runtime';
 import {
-  buildPresetCatalog,
   builtinDirectPresets,
   isBuiltinPresetId,
   normalizePresetSelection,
@@ -29,6 +28,7 @@ import {
   presetUsesToggleLayer,
   setPresetEntriesEnabled,
 } from '../lib/preset-entries';
+import { buildUiPresetCatalog } from '../lib/preset-catalog';
 import { useSettingsStore } from '../stores/settings-store';
 import type { UiSettings } from '../stores/settings-types';
 
@@ -40,17 +40,6 @@ subscribePackRuntime(() => {
 });
 const presetsRef = computed(() => overlayRows(diskPresets.value, packOverlayPresets.value));
 let loaded = false;
-
-/**
- * 出厂预设 id（settings-store 播种时登记：agent-config 内嵌预设 ∪ `/data/defaults/presets.json`）。
- * 📌 2026-11-14：这些行虽然落在 Dexie 里，却归内容所有 —— 目录里算 `content`（只读），
- *    不能因为「在盘上」就显示成「我的预设」。
- */
-const factoryPresetIds = ref<ReadonlySet<string>>(new Set());
-
-export function registerFactoryPresetIds(ids: Iterable<string>): void {
-  factoryPresetIds.value = new Set(ids);
-}
 
 export async function loadPresets(): Promise<ChatPreset[]> {
   diskPresets.value = await getDatabase().presets.toArray();
@@ -83,27 +72,6 @@ export async function removePreset(id: string): Promise<void> {
   assertWritable(id);
   await deletePreset(id);
   diskPresets.value = diskPresets.value.filter((preset) => preset.id !== id);
-}
-
-/** 当前内容包（含受保护包解锁后的明文）与出厂文件拥有的预设 id */
-function contentPresetIds(): string[] {
-  return [
-    ...(getActivePackPayload()?.presets ?? []).map((preset) => preset.id),
-    ...factoryPresetIds.value,
-  ];
-}
-
-/** 前端各处共用的目录装配：存储行 + 默认层内嵌 + 内置直出预设 */
-function buildUiPresetCatalog(
-  storedRows: readonly ChatPreset[],
-  agentDefaults: PresetAgentDefaults | undefined,
-): PresetCatalogEntry[] {
-  return buildPresetCatalog({
-    storedRows,
-    agentDefaults,
-    builtins: builtinDirectPresets(),
-    contentOwnedIds: contentPresetIds(),
-  });
 }
 
 type SelectionBag = Pick<UiSettings, 'activePresetId' | 'directPresetId' | 'directCachedPresetId'>;
@@ -272,7 +240,10 @@ export function usePresets(): {
     });
   }
 
-  /** 选中默认那条 = 存空串（跟随默认），其余存 id */
+  /**
+   * 选择键的唯一写入口：选中默认那条 = 存空串（跟随默认），其余存 id。
+   * 传空串即「回到跟随默认」（「全部恢复默认」也走这里，不直接写选择键）。
+   */
   function selectPreset(profile: PresetProfile, id: string): void {
     writeSelection(cfg.settings, profile, id === defaultPreset(profile).presetId ? '' : id);
   }

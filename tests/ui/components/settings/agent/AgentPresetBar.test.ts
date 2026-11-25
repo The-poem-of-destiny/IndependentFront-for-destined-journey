@@ -35,10 +35,8 @@ vi.mock('../../../../../src/ui/stores/content-store', () => ({
 
 import AgentPresetBar from '../../../../../src/ui/components/settings/agent/AgentPresetBar.vue';
 import { contentSourceLabel } from '../../../../../src/ui/components/settings/agent/preset-bar-labels';
-import {
-  loadPresets,
-  registerFactoryPresetIds,
-} from '../../../../../src/ui/composables/usePresets';
+import { loadPresets } from '../../../../../src/ui/composables/usePresets';
+import { registerFactoryPresetIds } from '../../../../../src/ui/lib/preset-catalog';
 import { getDatabase, savePreset } from '../../../../../src/core/persistence/database';
 import { DIRECT_PRESET_ID } from '../../../../../src/core/prompts/direct-prompt';
 

@@ -368,6 +368,43 @@ describe('loadPresets —— 条目开关覆写层', () => {
     const loaded = presets.find((p: { id: string }) => p.id === 'mine');
     expect(loaded.settings.prompts[0].enabled).toBe(true);
   });
+
+  it('🔴 登记过的出厂行即使没有播种指纹也吃覆写层（管线目录登记出厂 id，R7 回归）', async () => {
+    const { getPresets } = await import('@engine/persistence/database');
+    const { registerFactoryPresetIds } = await import('../../../src/ui/lib/preset-catalog');
+    vi.mocked(getPresets).mockResolvedValueOnce([rowOf('factory-plain')] as never);
+    registerFactoryPresetIds(['factory-plain']);
+    try {
+      const pipeline = makePipeline({}, { presetEntryToggles: { 'factory-plain': { a: false } } });
+      const { presets } = await (pipeline as any).loadPresets();
+      const loaded = presets.find((p: { id: string }) => p.id === 'factory-plain');
+      expect(loaded.settings.prompts[0].enabled).toBe(false);
+    } finally {
+      registerFactoryPresetIds([]);
+    }
+  });
+});
+
+describe('预设目录工厂（R7）', () => {
+  it('管线目录与设置页共用的工厂同输入同输出（含出厂 id 与内置直出预设）', async () => {
+    const { buildUiPresetCatalog, registerFactoryPresetIds } =
+      await import('../../../src/ui/lib/preset-catalog');
+    const rows = [
+      { id: 'factory-x', name: 'x', settings: {}, createdAt: 1, updatedAt: 1 },
+      { id: 'mine', name: 'mine', settings: {}, createdAt: 1, updatedAt: 1 },
+    ];
+    const defaults = { story: { presetId: 'factory-y' } };
+    registerFactoryPresetIds(['factory-x']);
+    try {
+      const fromPipeline = (makePipeline() as any).presetCatalog(rows, defaults);
+      expect(fromPipeline).toEqual(buildUiPresetCatalog(rows as never, defaults));
+      const factory = fromPipeline.find((e: any) => e.preset.id === 'factory-x');
+      expect(factory.readonly).toBe(true);
+      expect(fromPipeline.some((e: any) => e.origin === 'builtin')).toBe(true);
+    } finally {
+      registerFactoryPresetIds([]);
+    }
+  });
 });
 
 describe('direct preset defaults', () => {
