@@ -118,6 +118,10 @@ export function toCombatStatus(fx: StatusEffect): CombatStatusEffect {
 
 /** 战斗状态效果 → 落库 StatusEffect（剥掉 tempSource + 补齐必填字段） */
 export function toSaveStatus(fx: CombatStatusEffect): StatusEffect {
+  // 非有限时长（存档里的 NaN / 字符串等脏值）归 null=无时长：落库校验拒收非有限值，
+  // 而终局结算是原子批，一条坏状态会让整场结算丢失
+  const time: unknown = fx.remainingTime;
+  const remainingTime = typeof time === 'number' && Number.isFinite(time) ? time : null;
   return {
     name: fx.name,
     description: fx.description ?? '',
@@ -125,10 +129,10 @@ export function toSaveStatus(fx: CombatStatusEffect): StatusEffect {
     stacks: fx.stacks ?? 1,
     maxStacks: fx.maxStacks,
     stackable: fx.stackable,
-    remainingTime: fx.remainingTime ?? null,
+    remainingTime,
     timeUnit: fx.timeUnit ?? '回合',
     // 文本时长只在「无数值时长」时带回：战斗中被改成数值时长即视为文本失效（同 §5.2 互斥规则）
-    ...(fx.durationText && fx.remainingTime == null ? { durationText: fx.durationText } : {}),
+    ...(fx.durationText && remainingTime === null ? { durationText: fx.durationText } : {}),
     source: fx.source ?? '',
     effects: fx.effects ?? {},
     effectDescriptions: fx.effectDescriptions,

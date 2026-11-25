@@ -83,6 +83,7 @@ function configure(game: ReturnType<typeof useGameStore>) {
   p.loadPlotData = async () => {};
   p.loadPresets = async () => ({ presets: [], agentDefaults: {}, legacyBookAudiences: {} });
   p.loadActiveWorldBooks = async () => [];
+  p.loadWorldBookSets = async () => ({ books: [], sourceBooks: undefined });
   p.getEndpointForAgent = () => endpoint;
   p.buildEmbeddingEndpoint = () => undefined;
   p.buildRetrievalEndpoint = () => undefined;

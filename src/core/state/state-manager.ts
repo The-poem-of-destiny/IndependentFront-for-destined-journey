@@ -1554,8 +1554,9 @@ export class StateManager {
         }
       }
 
-      // 金钱不为负（A9）：落地后钳到 0，旧协议 delta / 整值写与 Agent 模式同样受保护
-      if (keys.includes('money') && typeof char.money === 'number' && char.money < 0) {
+      // 金钱不为负（A9）：落地后钳到 0，旧协议 delta / 整值写与 Agent 模式同样受保护；
+      // 非有限值（NaN / Infinity / 非数值）同样归 0，免得脏值落库后续加减全变 NaN
+      if (keys.includes('money') && !(isFiniteNumber(char.money) && char.money >= 0)) {
         char.money = 0;
       }
 
