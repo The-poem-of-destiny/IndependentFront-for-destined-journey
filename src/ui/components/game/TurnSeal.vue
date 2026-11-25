@@ -1,5 +1,6 @@
 <script lang="ts">
 import { shallowRef, type Ref } from 'vue';
+import { observeThemeSlug, readThemeSlug } from '../../lib/fx-theme-signature';
 
 /** 印记的三种形制 */
 type SealShape = 'square' | 'wax' | 'star';
@@ -29,29 +30,20 @@ function sealShapeFor(theme: string | null | undefined): SealShape {
 }
 
 /*
- * 当前主题的共享镜像：所有印记共用一个 MutationObserver（按引用计数开关），
- * 不按印记各挂一个 —— 历史里可能有上百枚印记。
+ * 当前主题的共享镜像：所有印记共用一个主题观察（按引用计数开关），
+ * 不按印记各挂一个 —— 历史里可能有上百枚印记。读与观察复用 `lib/fx-theme-signature.ts`
+ * 的 `readThemeSlug` / `observeThemeSlug`，不另写一份 MutationObserver。
  */
 const themeRef = shallowRef<string | null>(null);
-let observer: MutationObserver | null = null;
+let stopObserve: (() => void) | null = null;
 let users = 0;
-
-function readTheme(): string | null {
-  return typeof document === 'undefined'
-    ? null
-    : document.documentElement.getAttribute('data-theme');
-}
 
 function acquireTheme(): Readonly<Ref<string | null>> {
   users++;
-  themeRef.value = readTheme();
-  if (!observer && typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
-    observer = new MutationObserver(() => {
-      themeRef.value = readTheme();
-    });
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme'],
+  themeRef.value = readThemeSlug();
+  if (!stopObserve) {
+    stopObserve = observeThemeSlug((slug) => {
+      themeRef.value = slug;
     });
   }
   return themeRef;
@@ -59,9 +51,9 @@ function acquireTheme(): Readonly<Ref<string | null>> {
 
 function releaseTheme(): void {
   users = Math.max(0, users - 1);
-  if (users === 0 && observer) {
-    observer.disconnect();
-    observer = null;
+  if (users === 0 && stopObserve) {
+    stopObserve();
+    stopObserve = null;
   }
 }
 </script>

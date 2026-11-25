@@ -30,6 +30,7 @@ import {
   type NameIndex,
 } from '../../lib/narrative-names';
 import { useFreshMessages } from '../../composables/useFreshMessages';
+import { useMessageKeyedCache } from '../../composables/useMessageKeyedCache';
 import {
   useStagedPlayback,
   type PlaybackRecord,
@@ -226,8 +227,11 @@ function skipsEnter(msg: ChatMessage): boolean {
 /**
  * 「名字初次登场」只算一次、只给新消息，按 id 缓存在本组件实例里（会话内，不落库）。
  * 已知名单与早先正文都在**第一次**判定时现取 —— 新消息很少，历史一条都不碰。
+ * 消息被移除（回退 / 切档 / 整体换数组）时随之清掉，见 useMessageKeyedCache。
  */
-const mentionCache = new Map<string, { names: readonly string[]; index: NameIndex } | null>();
+const mentionCache = useMessageKeyedCache<{ names: readonly string[]; index: NameIndex } | null>(
+  () => props.messages,
+);
 
 function mentionsFor(msg: ChatMessage): { names: readonly string[]; index: NameIndex } | undefined {
   if (!fxEnabled.value || !freshMessages.isFresh(msg.id)) return undefined;
@@ -1683,12 +1687,6 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
     transform: rotate(360deg);
   }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .thinking-spinner {
-    animation: none;
-  }
-}
 /* 正文列已经是屏宽 50%，宽度由布局决定而非 ch 上限 ——
    原先 72ch 会在宽屏上把正文钉在中间、两侧留出大片空白。 */
 .bubble {
@@ -1977,9 +1975,6 @@ defineExpose({ ctxMenuOpen: computed(() => ctxMenu.value !== null) });
   .turn-actions,
   .turn-action {
     transition: none;
-  }
-  .turn-actions-spinner {
-    animation: none;
   }
 }
 

@@ -766,9 +766,6 @@ async function goPresets(): Promise<void> {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .si-spinner {
-    animation: none;
-  }
   .si-offer,
   .si-img,
   .si-take,

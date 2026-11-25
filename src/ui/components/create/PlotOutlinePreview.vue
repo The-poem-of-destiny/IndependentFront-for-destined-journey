@@ -254,11 +254,6 @@ function formatRemaining(sec: number): string {
     background-position: -200% 0;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .shimmer {
-    animation: none;
-  }
-}
 
 /* Blur layer */
 .outline-blur-layer {

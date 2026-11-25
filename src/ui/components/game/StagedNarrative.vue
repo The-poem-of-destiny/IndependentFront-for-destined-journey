@@ -195,9 +195,4 @@ function sealOf(section: StageSection): 'off' | 'still' | 'pressed' {
     opacity: 1;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .stage-waiting-dots {
-    animation: none;
-  }
-}
 </style>

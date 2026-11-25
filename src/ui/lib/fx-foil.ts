@@ -14,10 +14,15 @@
  *    闸门关着时即使节点残留也零命中。
  * 🔴 每个绑定元素各自盯住闸门（`useFxEnabled()` 共享 ref）：运行中闸门翻转（如系统减动效
  *    偏好切换）时不等宿主重渲染，立刻挂上或摘掉节点、监听并还原内联样式。
+ * 🔴 指针坐标只从 `fx-pointer` 的全应用唯一 `pointermove` 拿，帧经 `fx-ticker` 合并
+ *    （docs/design.md §6.4 第 3 条）：宿主自己只挂 `pointerenter` / `pointerleave` 两个
+ *    边沿监听，悬停期间才订阅指针，离开即退订；不直接调 rAF。
  */
 import { watch, type Directive, type DirectiveBinding, type WatchStopHandle } from 'vue';
 import { RARITY_LEVELS, normalizeRarity } from '@engine/content/field-enums';
 import { isFxEnabled, useFxEnabled } from './fx-gate';
+import { subscribePointer } from './fx-pointer';
+import { requestFrame } from './fx-ticker';
 
 /** 顶级品质的起点下标：传说 */
 const TOP_QUALITY_INDEX = 4;
@@ -85,13 +90,15 @@ function ensureFoilStyles(doc: Document): void {
 interface FoilState {
   foil: HTMLElement;
   tilt: number;
-  frame: number | null;
+  /** 已排的合并帧（fx-ticker 的取消函数）；没排时为 null */
+  cancelFrame: (() => void) | null;
+  /** 悬停期间对全局指针源的订阅；不悬停时为 null */
+  unsubscribePointer: (() => void) | null;
   pending: { x: number; y: number } | null;
   prevPosition: string;
   prevTransform: string;
   prevTransition: string;
   onEnter: (e: PointerEvent) => void;
-  onMove: (e: PointerEvent) => void;
   onLeave: () => void;
 }
 
@@ -102,14 +109,13 @@ function clampTilt(tilt: number | undefined): number {
   return Math.min(tilt, MAX_FOIL_TILT_DEG);
 }
 
-function schedule(cb: () => void): number | null {
-  if (typeof requestAnimationFrame === 'function') return requestAnimationFrame(cb);
-  cb();
-  return null;
-}
-
-function cancel(handle: number | null): void {
-  if (handle !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(handle);
+/** 停掉悬停期间的一切：退订指针、撤掉已排的帧、丢弃待落的位置 */
+function stopTracking(state: FoilState): void {
+  state.unsubscribePointer?.();
+  state.unsubscribePointer = null;
+  state.cancelFrame?.();
+  state.cancelFrame = null;
+  state.pending = null;
 }
 
 /** 把一次指针位置落到箔光变量（与宿主倾斜）上 */
@@ -134,10 +140,24 @@ function attach(host: HTMLElement, tilt: number): void {
   foil.className = FOIL_CLASS;
   foil.setAttribute('aria-hidden', 'true');
 
+  /** 记下最新指针位置；本帧还没排就经 fx-ticker 排一帧（同帧多次移动只落最后一次） */
+  function queuePointer(x: number, y: number): void {
+    if (!foil.classList.contains('is-active')) return;
+    state.pending = { x, y };
+    if (state.cancelFrame !== null) return;
+    state.cancelFrame = requestFrame(() => {
+      state.cancelFrame = null;
+      const p = state.pending;
+      state.pending = null;
+      if (p && foil.classList.contains('is-active')) applyPointer(host, state, p.x, p.y);
+    });
+  }
+
   const state: FoilState = {
     foil,
     tilt,
-    frame: null,
+    cancelFrame: null,
+    unsubscribePointer: null,
     pending: null,
     prevPosition: host.style.position,
     prevTransform: host.style.transform,
@@ -148,23 +168,14 @@ function attach(host: HTMLElement, tilt: number): void {
       if (state.tilt > 0) {
         host.style.transition = 'transform var(--motion-duration-fast) var(--motion-ease-standard)';
       }
-      state.onMove(e);
-    },
-    onMove: (e) => {
-      if (!foil.classList.contains('is-active')) return;
-      state.pending = { x: e.clientX, y: e.clientY };
-      if (state.frame !== null) return;
-      state.frame = schedule(() => {
-        state.frame = null;
-        const p = state.pending;
-        state.pending = null;
-        if (p && foil.classList.contains('is-active')) applyPointer(host, state, p.x, p.y);
-      });
+      queuePointer(e.clientX, e.clientY);
+      // 悬停期间才订阅全局指针源（全应用唯一的 pointermove），离开即退订
+      if (state.unsubscribePointer === null) {
+        state.unsubscribePointer = subscribePointer((p) => queuePointer(p.x, p.y));
+      }
     },
     onLeave: () => {
-      cancel(state.frame);
-      state.frame = null;
-      state.pending = null;
+      stopTracking(state);
       foil.classList.remove('is-active');
       foil.style.removeProperty('--foil-x');
       foil.style.removeProperty('--foil-y');
@@ -178,7 +189,6 @@ function attach(host: HTMLElement, tilt: number): void {
 
   host.appendChild(foil);
   host.addEventListener('pointerenter', state.onEnter);
-  host.addEventListener('pointermove', state.onMove);
   host.addEventListener('pointerleave', state.onLeave);
   states.set(host, state);
 }
@@ -186,9 +196,8 @@ function attach(host: HTMLElement, tilt: number): void {
 function detach(host: HTMLElement): void {
   const state = states.get(host);
   if (!state) return;
-  cancel(state.frame);
+  stopTracking(state);
   host.removeEventListener('pointerenter', state.onEnter);
-  host.removeEventListener('pointermove', state.onMove);
   host.removeEventListener('pointerleave', state.onLeave);
   state.foil.remove();
   host.style.position = state.prevPosition;

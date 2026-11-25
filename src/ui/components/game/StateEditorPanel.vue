@@ -1381,9 +1381,6 @@ function statusClass(status: string): string {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .se-preview {
-    animation: none;
-  }
   .se-caret i,
   .se-row,
   .se-input,
