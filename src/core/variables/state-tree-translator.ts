@@ -134,7 +134,7 @@ export interface TreeTranslateResult {
   readonly patches: StatePatch[];
   /** 本楼推进的游戏分钟数（交给 applyTimeAdvance，不产补丁）。 */
   readonly deltaMinutes: number;
-  /** 档案文字字段的路径写入（§5.5），形状同 character_updates。 */
+  /** 恒为空：档案文字字段已改走 `update_character` 补丁（2026-11-25，审查 A8）；字段待后续任务删除。 */
   readonly profileChanges: CharacterNarrativeUpdate[];
   /** 本楼新建的人物（已组装，与 add_character 补丁里的是同一份）。 */
   readonly newCharacters: CharacterState[];
@@ -1164,7 +1164,6 @@ class TreeTranslator {
   private rehearsal: PatchRehearsal;
   private readonly patches: StatePatch[] = [];
   private deltaMinutes = 0;
-  private readonly profileChanges = new Map<string, CharacterNarrativeUpdate>();
   private readonly newCharacters: CharacterState[] = [];
   private readonly records = new Map<number, StateUpdateOpRecord>();
   private readonly dropped: string[] = [];
@@ -1297,7 +1296,7 @@ class TreeTranslator {
     return {
       patches: this.patches,
       deltaMinutes: this.deltaMinutes,
-      profileChanges: [...this.profileChanges.values()],
+      profileChanges: [],
       newCharacters: this.newCharacters,
       records: this.linkedRecords(),
       dropped: this.dropped,
@@ -1803,7 +1802,10 @@ class TreeTranslator {
     this.writeProfile(char, field, list);
   }
 
-  /** 档案文字字段 → character_updates 的 profile_changes（§5.5），同时作用到影子。 */
+  /**
+   * 档案文字字段 → `update_character` 补丁（八个字段都在白名单里），与改名、其余补丁同一事务落。
+   * 设计稿 §5.5 原定转成 profile_changes 旁路，2026-11-25 改走补丁（审查 A8：同批改名后旁路按旧名落空）。
+   */
   private writeProfile(
     char: CharacterState,
     field:
@@ -1817,15 +1819,13 @@ class TreeTranslator {
       | 'occupation',
     value: string | string[],
   ): void {
-    const entry = this.profileChanges.get(char.name) ?? {
-      name: char.name,
-      profile_changes: {},
-      chronicle: [],
-    };
-    (entry.profile_changes as Record<string, unknown>)[field] = jsonClone(value);
-    this.profileChanges.set(char.name, entry);
-    (char as unknown as Row)[field] = jsonClone(value);
-    this.version++;
+    this.commit([
+      {
+        op: 'update_character',
+        target: charTarget(char.name),
+        value: { [field]: jsonClone(value) },
+      },
+    ]);
   }
 
   private category(ctx: OpContext, char: CharacterState, op: TreeOpKind): void {

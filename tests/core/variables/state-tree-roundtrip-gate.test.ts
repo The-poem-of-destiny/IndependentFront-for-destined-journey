@@ -118,10 +118,8 @@ async function roundtrip(
   const sm = createStateManager(SAVE);
   await sm.commitDomainCommand(result.patches);
   if (result.deltaMinutes > 0) await sm.applyTimeAdvance(result.deltaMinutes);
-  for (const change of result.profileChanges) {
-    const c = (await getCharacters(SAVE)).find((x) => x.name === change.name)!;
-    await saveCharacter({ ...c, ...structuredClone(change.profile_changes) });
-  }
+  // 档案文字字段已随补丁落（审查 A8），翻译层不再产 profileChanges 旁路
+  expect(result.profileChanges).toEqual([]);
   return { tree: await loadTree(), result };
 }
 

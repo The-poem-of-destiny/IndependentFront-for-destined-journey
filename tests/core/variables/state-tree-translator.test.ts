@@ -509,19 +509,20 @@ describe('人物、时间、地点、档案', () => {
     expect(r.records[0]).toMatchObject({ path: '/世界/地点', status: '已纠正' });
   });
 
-  it('档案文字字段进 profileChanges（不产补丁）', () => {
+  it('档案文字字段产 update_character 补丁，profileChanges 恒空（审查 A8）', () => {
     const r = tr([
       { op: 'replace', path: '/关系列表/布兰/档案/外貌', value: '银发' },
       { op: 'replace', path: '/关系列表/布兰/档案/身份', value: '佣兵、向导' },
     ]);
-    expect(r.patches).toEqual([]);
-    expect(r.profileChanges).toEqual([
+    expect(r.patches).toEqual([
+      { op: 'update_character', target: 'characters.布兰', value: { appearance: '银发' } },
       {
-        name: '布兰',
-        profile_changes: { appearance: '银发', identity: ['佣兵', '向导'] },
-        chronicle: [],
+        op: 'update_character',
+        target: 'characters.布兰',
+        value: { identity: ['佣兵', '向导'] },
       },
     ]);
+    expect(r.profileChanges).toEqual([]);
     expect(r.records[0]).toMatchObject({ before: '高个子', after: '银发' });
   });
 
