@@ -19,7 +19,8 @@ import {
   buildQuestPatches,
   buildVarsUpdatePatches,
 } from '../variables/vars-update-translator';
-import { projectStoryOutput, STORY_ENVELOPE_TAGS } from '../story/story-output';
+import { projectStoryOutput } from '../story/story-output';
+import { locateDirectBlocks } from './direct-blocks';
 import type { DirectCombatOutput } from '../combat/direct-combat';
 import type { DirectDicePool } from './direct-dice';
 import { extractJsonPayload } from '../utils/model-json';
@@ -756,34 +757,23 @@ export function parseDirectOutput(
 ): DirectTurnDraft {
   const structuredCombat = options.structuredCombat ?? true;
   const plotEnabled = options.plotEnabled ?? true;
-  const opens = [...raw.matchAll(/<direct_updates\b/gi)].length;
-  const blocks = [...raw.matchAll(/<direct_updates\s*>([\s\S]*?)<\/direct_updates\s*>/gi)];
+  // 定位与计数只认完整块（A1）：思考块先剔除，孤立提及的开标签不计，详见 direct-blocks.ts
+  const layout = locateDirectBlocks(raw);
   // 一个开标签都没有：当作「本楼无状态变化」接纳（updatesMissing 供告警）；
   // 写了但不完整 / 多于一个，意图不明，整楼拒收
-  const updatesMissing = opens === 0;
-  if (!updatesMissing && (blocks.length !== 1 || opens !== 1))
-    fatal('需要一个完整的 direct_updates 区块');
-  // 正文信封认 maintext 与同义的 gametxt：每种开标签至多一个、至少出现一种，
-  // 出现的那几种都要有对应闭标签（单 maintext / 单 gametxt / 两种各一嵌套或并列均可）
-  const envelopeCounts = STORY_ENVELOPE_TAGS.map((tag) => ({
-    tag,
-    opens: [...raw.matchAll(new RegExp(String.raw`<${tag}\b`, 'gi'))].length,
-  }));
-  if (!(
-    envelopeCounts.some(({ opens }) => opens > 0) &&
-    envelopeCounts.every(
-      ({ tag, opens }) =>
-        opens === 0 || (opens === 1 && new RegExp(String.raw`<\/${tag}\s*>`, 'i').test(raw)),
-    )
-  ))
-    fatal('需要一个完整的 maintext（或 gametxt）区块');
+  const updatesMissing = layout.updatesOpens === 0;
+  if (!updatesMissing && layout.updatesInner === null) fatal('需要一个完整的 direct_updates 区块');
+  const updatesInner = layout.updatesInner ?? '';
+  // 正文信封认 maintext 与同义的 gametxt：每种至多一个完整块、至少一种有完整块、不许有截断
+  // （单 maintext / 单 gametxt / 两种各一嵌套或并列均可）
+  if (!layout.envelopeOk) fatal('需要一个完整的 maintext（或 gametxt）区块');
   const notes: Notes = { normalized: [], dropped: [] };
   let parsed: Row;
   let combatIgnored = false;
   let flattenedCharacters: string[] = [];
   let treePatch: DirectTreePatch | undefined;
   const tree = !updatesMissing && options.stateProtocol === 'tree';
-  const treeResult = tree ? parseTreePatchBlock(blocks[0][1]) : undefined;
+  const treeResult = tree ? parseTreePatchBlock(updatesInner) : undefined;
   if (treeResult?.kind === 'rejected') fatal(treeResult.reason);
   if (treeResult?.kind === 'unparseable') fatal(`direct_updates ${treeResult.reason}`);
   if (treeResult?.kind === 'legacy')
@@ -816,7 +806,7 @@ export function parseDirectOutput(
   } else {
     // N1：内文先过 JSON 抢救入口，剥掉 ```json 围栏、<json> 标签或 JSON 之前夹带的说明文字
     // （以 { 开头的内文按整段解析，JSON 之后跟文字不剥，照旧拒收为非法 JSON）
-    const inner = blocks[0][1];
+    const inner = updatesInner;
     const payload = extractJsonPayload(inner) ?? inner;
     if (payload !== inner.trim())
       notes.normalized.push('direct_updates：已剥除 JSON 外的围栏或说明文字');
@@ -851,7 +841,7 @@ export function parseDirectOutput(
     notes.dropped.push('character_updates：缺少 character_updates 区块，已忽略');
   notes.dropped.push(...character.warnings.map((warning) => `character_updates：${warning}`));
   notes.normalized.push(...character.notes.map((note) => `character_updates：${note}`));
-  const projection = projectStoryOutput(raw);
+  const projection = projectStoryOutput(layout.text);
   if (projection.content.length === 0) fatal('正文为空');
   return {
     ...projection,
