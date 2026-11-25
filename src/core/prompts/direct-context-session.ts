@@ -2,6 +2,10 @@ import type { ChatMessage, DirectCacheDiagnostics } from '../types/types';
 import type { LlmMessage } from '../types/types-api';
 import { logEngine } from '../runtime/engine-logger';
 import { STATE_TREE_CACHE_PROTOCOL } from './state-tree-prompt';
+import { nsfwEnabled } from '../content/nsfw-filter';
+
+/** 露骨内容开关为开时并入缓存直出会话签名的字段。 */
+const DIRECT_CACHE_NSFW_MARK = 'nsfw-content:on';
 
 export interface DirectContextFrame {
   prefix: LlmMessage[];
@@ -215,7 +219,14 @@ export async function prepareDirectContext(input: {
   const currentSource = source(input.history);
   const rebuild = normalizeDirectCacheRebuild(input.rebuild);
   const currentKeys = input.currentSections ?? CURRENT_SECTIONS;
-  const signature = serializeDirectContext([input.signature, input.frame.prefix]);
+  // 露骨内容开关：本轮资料 / 角色上下文 / turn 预设条目在可替换分区里，随留存消息进 transcript、
+  // 不进签名；开 → 关时更早留存消息里开模式渲染的露骨段会被回放。开时并入开关强制冷建。
+  // 🔴 只在开时追加：关（缺省）时签名与此前逐字节相同，避免全体缓存直出存档一次性冷建。
+  const signature = serializeDirectContext(
+    nsfwEnabled()
+      ? [input.signature, input.frame.prefix, DIRECT_CACHE_NSFW_MARK]
+      : [input.signature, input.frame.prefix],
+  );
   const sections = JSON.parse(serializeDirectContext(input.frame.sections)) as Record<
     string,
     unknown

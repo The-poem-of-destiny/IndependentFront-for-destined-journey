@@ -14,6 +14,7 @@ import {
   type DirectContextFrame,
 } from '../../../src/core/prompts/direct-context-session';
 import type { ChatMessage } from '../../../src/core/types/types';
+import { setEngineSettingsProvider } from '../../../src/core/runtime/engine-settings';
 
 const saveId = 'cached-context-test';
 const message = (content = 'accepted'): ChatMessage => ({
@@ -371,6 +372,54 @@ describe('accepted direct context', () => {
     const retained = rebuilt.messages[rebuilt.retainedCount - 1].content!;
     expect(retained).toContain('memory/MEM000001');
     expect(retained).not.toContain('memoryEntries');
+  });
+});
+
+describe('露骨内容开关并入缓存直出签名', () => {
+  const setNsfw = (value: boolean | undefined) =>
+    setEngineSettingsProvider(value === undefined ? undefined : () => ({ nsfwContent: value }));
+  afterEach(() => setEngineSettingsProvider(undefined));
+
+  async function signatureOf(nsfw: boolean | undefined): Promise<string> {
+    invalidateDirectContext(saveId);
+    let record: DirectCacheRecord | undefined;
+    installDirectCacheStore({
+      load: async () => undefined,
+      save: async (value) => {
+        record = structuredClone(value);
+      },
+      delete: async () => {},
+    });
+    setNsfw(nsfw);
+    const prepared = await prepareDirectContext(input());
+    await acceptDirectContext(prepared, { acceptedMessages: [] });
+    return record!.signature;
+  }
+
+  it('开关关（缺省）时签名与此前逐字节相同，开时才多一个字段', async () => {
+    const off = await signatureOf(false);
+    expect(await signatureOf(undefined)).toBe(off);
+    // 此前的签名就是这两项的序列化
+    expect(off).toBe(serializeDirectContext([input().signature, input().frame.prefix]));
+    expect(off).not.toContain('nsfw');
+    expect(await signatureOf(true)).toBe(
+      serializeDirectContext([input().signature, input().frame.prefix, 'nsfw-content:on']),
+    );
+  });
+
+  it('开 → 关后冷建，留存分区里开模式渲染的露骨段不再回放（前缀不变也一样）', async () => {
+    setNsfw(true);
+    const on = input();
+    on.frame.sections = { currentLore: '常驻资料。露骨段落', combat: null };
+    const first = await prepareDirectContext(on);
+    await acceptDirectContext(first, { acceptedMessages: [message('旧楼正文')] });
+
+    setNsfw(false);
+    const off = { ...input(), history: [message('旧楼正文')] };
+    off.frame.sections = { currentLore: '常驻资料。', combat: null };
+    const second = await prepareDirectContext(off);
+    expect(second.rebaseReason).toBe('configuration_or_lore_changed');
+    expect(JSON.stringify(second.messages)).not.toContain('露骨段落');
   });
 });
 

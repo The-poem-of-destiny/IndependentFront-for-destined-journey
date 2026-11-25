@@ -75,10 +75,9 @@ import { stripMarkers } from '@engine/story/marker-protocol';
 import { parseCharacterUpdates } from '@engine/character/character-updates';
 import {
   characterLoreEntryUids,
-  legacyCharacterDefinitions,
   linkCharacterDefinitions,
   matchCharacterDefinition,
-  resolveCharacterLoreLinks,
+  prepareTurnCharacterDefinitions,
 } from '@engine/character/character-definitions';
 import type { CharacterNarrativeUpdate } from '@engine/types/types-character';
 import { AgentClient } from '@engine/agents/agent-client';
@@ -1192,16 +1191,33 @@ export class GamePipeline {
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets();
       const worldBooks = await this.loadActiveWorldBooks();
-      // 定义是给引擎的目录，链接的世界书条目才是给模型的人设：解析链接，条目没加载上时回落定义自带 lore
-      context.characterDefinitions = resolveCharacterLoreLinks(
-        linkCharacterDefinitions(
-          this.game.activeSave?.metadata.characterDefinitions ??
-            legacyCharacterDefinitions(worldBooks),
-        ),
-        worldBooks,
-      );
+      // 定义是给引擎的目录，链接的世界书条目才是给模型的人设：解析链接，条目没加载上时回落定义自带 lore。
+      // 露骨内容开关：给模型的那份按开关投影（剔整条标记角色、因露骨被剔的链接不回落 lore）；
+      // 冻结 / 挂定义吃与开关无关的版本（旧档现转、链接解析都用开关过滤之前的书）—— 永不写回存档。
+      // 过滤前的书要按与 loadActiveWorldBooks 相同的存档白名单收窄，否则旧档会冻结进没选过的角色
+      const metadata = this.game.activeSave?.metadata;
+      const nsfwOn = nsfwEnabled();
+      const sourceBooks = nsfwOn
+        ? undefined
+        : await (async () =>
+            filterBooksByEnabledEntries(
+              await loadWorldBooksWithFallback(useWorldBookStore().books as WorldBook[]),
+              [
+                ...(metadata?.enabledWorldBookEntries ?? []),
+                ...characterLoreEntryUids(
+                  linkCharacterDefinitions(metadata?.characterDefinitions ?? []),
+                ),
+              ],
+            ))().catch(() => undefined);
+      const definitions = prepareTurnCharacterDefinitions({
+        frozen: metadata?.characterDefinitions,
+        books: worldBooks,
+        sourceBooks,
+        nsfwEnabled: nsfwOn,
+      });
+      context.characterDefinitions = definitions.forModel;
       await createStateManager(this.saveId).initializeCharacterDefinitions(
-        context.characterDefinitions,
+        definitions.toFreeze,
         () => this.isRunCurrent(controller),
       );
       const { getCharacters, getDatabase } = await import('@engine/persistence/database');
