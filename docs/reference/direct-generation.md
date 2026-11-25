@@ -206,6 +206,9 @@
 
 - 正文信封（`maintext` / `gametxt`）缺失、不完整，或正文为空。
 - `direct_updates` 不是恰好一个完整区块（多个、未闭合），不是合法 JSON，或顶层不是对象。一个开标签都没有时不拒收：按空更新接纳，标 `updatesMissing`，本楼只保存正文。
+
+  📌 2026-11-25 更正（审查 A1，分支 `fix/direct-tag-count`，未真机验证）：上一条与正文信封那条的「完整区块」改为只认完整块计数，定位在 `src/core/agents/direct-blocks.ts` 的 `locateDirectBlocks`。先剔除完整的 `<think>` / `<thinking>` 块；再按「闭标签向前配最近的同名开标签」配对，被后一个同名开标签越过、且排在本族最后一个闭标签之前的开标签是孤立提及，不计；排在最后一个闭标签之后的未配开标签算截断，仍拒收。此前正文前的思考块或无包裹的前置说明只要提到 `<maintext>` / `<direct_updates>` 就整楼拒收（#179 的尾部提醒扩大了触发面）。正文投影与 JSON 取同一次定位的块：投影用剔除思考块与孤立开标签后的文本，`raw` 仍存原文。两个完整块、真截断照旧拒收；剔除思考块后零个 `direct_updates` 开标签仍按 `updatesMissing` 接纳。测试见 `tests/core/agents/direct-blocks.test.ts`。
+
 - 任何层级出现原型污染键（`__proto__` / `prototype` / `constructor`）。
 - world `path` 命中禁用段。
 - 结构化战斗开启时 `combat` 有问题（缺键、不是对象、含非有限数值）；关闭时坏 `combat` 照旧只被忽略。
