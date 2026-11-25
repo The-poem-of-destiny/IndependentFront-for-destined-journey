@@ -11,6 +11,11 @@
  *   新实例可能在旧实例释放前申请，不能被自己挡在门外。
  * - `navigator.locks` 不存在（旧浏览器 / jsdom 单测）或申请本身出错时**放行**：
  *   这道锁是防误操作的护栏，不是数据正确性的唯一保证，不能因为环境缺能力把玩家关在门外。
+ *
+ * 2026-11-25（审查报告 R8）：删档与整库导入也要看这把锁 —— 否则另一个标签页正在玩时，
+ * 这边仍能把那个档删掉或整库覆盖。它们只**试探**（`navigator.locks.query()` 读快照，
+ * 不申请、不持锁），并把本标签页自己持有的锁排除在外：本标签页在玩 A 档时删 A 档 /
+ * 整库导入，沿用原来的行为（删完回首页），不被自己挡住。
  */
 
 /** 锁名前缀；与其他 Web Lock（如 `poem-discord-auth-request`）区分开 */
@@ -20,12 +25,21 @@ const LOCK_PREFIX = 'poem-save:';
 export const SAVE_TAB_LOCKED_MESSAGE =
   '此存档已在另一个标签页中打开。请先关闭那个标签页，或在那边返回首页后再试。';
 
+/** 删档时该档被别的标签页占着 */
+export const SAVE_DELETE_LOCKED_MESSAGE =
+  '此存档正在另一个标签页中游玩，不能删除。请先关闭那个标签页，或在那边返回首页后再试。';
+
+/** 整库导入时有存档被别的标签页占着 */
+export const FULL_IMPORT_LOCKED_MESSAGE =
+  '有存档正在另一个标签页中游玩，整库导入会覆盖它。请先关闭那个标签页，或在那边返回首页后再试。';
+
 /** 已取得的锁；`release()` 幂等 */
 export interface SaveTabLockHandle {
   release(): void;
 }
 
 type LockRequester = Pick<LockManager, 'request'>;
+type LockInspector = Partial<Pick<LockManager, 'query'>>;
 
 interface HeldEntry {
   refs: number;
@@ -36,7 +50,7 @@ interface HeldEntry {
 
 const held = new Map<string, HeldEntry>();
 
-function defaultLocks(): LockRequester | undefined {
+function defaultLocks(): LockManager | undefined {
   return typeof navigator !== 'undefined' ? navigator.locks : undefined;
 }
 
@@ -94,4 +108,44 @@ export async function acquireSaveTabLock(
     return null;
   }
   return { release };
+}
+
+/** 该存档的锁是否由本标签页持有（含同标签页引用计数中的那把） */
+async function heldByThisTab(saveId: string): Promise<boolean> {
+  const entry = held.get(saveId);
+  if (!entry) return false;
+  return await entry.ready;
+}
+
+/**
+ * 列出被**别的标签页**占着的存档 id（只读快照，不申请、不持锁）。
+ * 环境不支持 / 查询出错时返回空表 —— 与申请锁一样放行。
+ */
+export async function findSavesLockedElsewhere(
+  locks: LockInspector | undefined = defaultLocks(),
+): Promise<string[]> {
+  if (!locks || typeof locks.query !== 'function') return [];
+  let snapshot: LockManagerSnapshot;
+  try {
+    snapshot = await locks.query();
+  } catch {
+    return [];
+  }
+  const saveIds = new Set<string>();
+  for (const info of snapshot.held ?? []) {
+    if (info.name?.startsWith(LOCK_PREFIX)) saveIds.add(info.name.slice(LOCK_PREFIX.length));
+  }
+  const elsewhere: string[] = [];
+  for (const saveId of saveIds) {
+    if (!(await heldByThisTab(saveId))) elsewhere.push(saveId);
+  }
+  return elsewhere;
+}
+
+/** 某存档是否被别的标签页占着；本标签页自己持有的不算 */
+export async function isSaveLockedElsewhere(
+  saveId: string,
+  locks: LockInspector | undefined = defaultLocks(),
+): Promise<boolean> {
+  return (await findSavesLockedElsewhere(locks)).includes(saveId);
 }

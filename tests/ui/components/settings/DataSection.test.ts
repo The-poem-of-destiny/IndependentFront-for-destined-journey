@@ -13,7 +13,7 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import type { SceneImageUsage } from '@engine/types/types-image';
@@ -41,12 +41,13 @@ vi.mock('../../../../src/ui/stores/game-store', () => ({
 const getSceneImageUsage = vi.fn<(saveId: string) => Promise<SceneImageUsage>>();
 const listCleanableSceneImageIds = vi.fn<(saveId: string) => Promise<string[]>>();
 const dropSceneImageBlobs = vi.fn<(ids: readonly string[]) => Promise<number>>();
+const importAllData = vi.fn<(data: unknown) => Promise<void>>();
 vi.mock('@engine/persistence/database', () => ({
   getSceneImageUsage: (saveId: string) => getSceneImageUsage(saveId),
   listCleanableSceneImageIds: (saveId: string) => listCleanableSceneImageIds(saveId),
   dropSceneImageBlobs: (ids: readonly string[]) => dropSceneImageBlobs(ids),
   exportAllData: async () => ({}),
-  importAllData: async () => {},
+  importAllData: (data: unknown) => importAllData(data),
   clearAllData: async () => {},
   // 经验档位读取（loadExperienceMode）—— 返回一个含 experienceMode 的假 profile
   getSaveProfile: async () => ({ saveId: 'x', experienceMode: 'normal' }),
@@ -54,6 +55,10 @@ vi.mock('@engine/persistence/database', () => ({
 
 import DataSection from '../../../../src/ui/components/settings/DataSection.vue';
 import { useUIStore } from '../../../../src/ui/stores/ui-store';
+import {
+  acquireSaveTabLock,
+  FULL_IMPORT_LOCKED_MESSAGE,
+} from '../../../../src/ui/lib/save-tab-lock';
 
 function usage(over: Partial<SceneImageUsage> = {}): SceneImageUsage {
   return {
@@ -82,6 +87,7 @@ beforeEach(() => {
   getSceneImageUsage.mockResolvedValue(usage());
   listCleanableSceneImageIds.mockResolvedValue([]);
   dropSceneImageBlobs.mockResolvedValue(0);
+  importAllData.mockResolvedValue(undefined);
 });
 
 describe('DataSection —— 内容包搬走后的指路与危险区（S-01）', () => {
@@ -297,5 +303,89 @@ describe('DataSection —— 按存档生效的卡片标明作用对象（UIL-20
     const w = await mountWithSave(null);
     expect(w.find('.save-scope').exists()).toBe(false);
     expect(w.text()).toContain('未载入存档');
+  });
+});
+
+describe('DataSection —— 整库导入尊重存档标签页锁（R8）', () => {
+  /** 假 navigator.locks：`external` 为别的标签页占着的锁名，本标签页申请的锁也记在同一集合 */
+  function installFakeLocks(external: string[] = []) {
+    const held = new Set<string>(external);
+    const locks = {
+      request: vi.fn(
+        async (name: string, _options: LockOptions, callback: (lock: Lock | null) => unknown) => {
+          if (held.has(name)) return await callback(null);
+          held.add(name);
+          try {
+            return await callback({ name, mode: 'exclusive' } as Lock);
+          } finally {
+            held.delete(name);
+          }
+        },
+      ),
+      query: vi.fn(async () => ({
+        held: [...held].map((name) => ({ name, mode: 'exclusive', clientId: 'x' })),
+        pending: [],
+      })),
+    };
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: locks });
+  }
+
+  afterEach(() => {
+    delete (navigator as { locks?: unknown }).locks;
+  });
+
+  /** 选文件 → 确认导入；返回 toast 间谍 */
+  async function runImport() {
+    const w = await mountWithSave('save_1');
+    const toast = vi.spyOn(useUIStore(), 'toast');
+    const file = new File(['{"version":1,"saves":[]}'], 'backup.json', {
+      type: 'application/json',
+    });
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (
+      this: HTMLInputElement,
+    ) {
+      Object.defineProperty(this, 'files', { configurable: true, value: [file] });
+      this.dispatchEvent(new Event('change'));
+    });
+    try {
+      await w
+        .findAll('button')
+        .find((button) => button.text() === '导入数据')!
+        .trigger('click');
+      await flushPromises();
+    } finally {
+      clickSpy.mockRestore();
+    }
+    await w
+      .findAll('button')
+      .find((button) => button.text() === '替换备份数据并导入')!
+      .trigger('click');
+    await vi.waitFor(() => expect(toast).toHaveBeenCalled());
+    return toast;
+  }
+
+  it('别的标签页在玩任一存档时拒绝导入并提示，不碰数据库', async () => {
+    installFakeLocks(['poem-save:save_other']);
+    const toast = await runImport();
+    expect(toast).toHaveBeenCalledWith(FULL_IMPORT_LOCKED_MESSAGE, 'warning', 6000);
+    expect(importAllData).not.toHaveBeenCalled();
+  });
+
+  it('只有本标签页自己持锁时照常导入', async () => {
+    installFakeLocks();
+    const own = await acquireSaveTabLock('save_1');
+    try {
+      const toast = await runImport();
+      expect(importAllData).toHaveBeenCalledOnce();
+      expect(toast).toHaveBeenCalledWith('导入成功', 'success');
+    } finally {
+      own!.release();
+    }
+  });
+
+  it('环境没有 navigator.locks 时放行', async () => {
+    const toast = await runImport();
+    expect(importAllData).toHaveBeenCalledOnce();
+    expect(toast).toHaveBeenCalledWith('导入成功', 'success');
   });
 });

@@ -2,7 +2,11 @@
  * save-tab-lock —— 存档单标签页锁（Web Locks，ifAvailable）
  */
 import { describe, it, expect, vi } from 'vitest';
-import { acquireSaveTabLock } from '../../../src/ui/lib/save-tab-lock';
+import {
+  acquireSaveTabLock,
+  findSavesLockedElsewhere,
+  isSaveLockedElsewhere,
+} from '../../../src/ui/lib/save-tab-lock';
 
 /** 假 LockManager：一个名字同一时刻只给一个持有者；`external` 模拟别的标签页占着的锁 */
 function createFakeLocks(external: string[] = []) {
@@ -22,7 +26,11 @@ function createFakeLocks(external: string[] = []) {
       }
     },
   );
-  return { locks: { request } as unknown as LockManager, held, request };
+  const query = vi.fn(async (): Promise<LockManagerSnapshot> => ({
+    held: [...held].map((name) => ({ name, mode: 'exclusive' as const, clientId: 'x' })),
+    pending: [],
+  }));
+  return { locks: { request, query } as unknown as LockManager, held, request, query };
 }
 
 describe('acquireSaveTabLock', () => {
@@ -95,5 +103,43 @@ describe('acquireSaveTabLock', () => {
     const handle = await acquireSaveTabLock('s7', locks);
     expect(handle).not.toBeNull();
     handle!.release();
+  });
+});
+
+describe('findSavesLockedElsewhere / isSaveLockedElsewhere（删档与整库导入的试探，R8）', () => {
+  it('别的标签页占着的存档被列出，只读快照不申请锁', async () => {
+    const fake = createFakeLocks(['poem-save:t1', 'poem-discord-auth-request']);
+    expect(await findSavesLockedElsewhere(fake.locks)).toEqual(['t1']);
+    expect(await isSaveLockedElsewhere('t1', fake.locks)).toBe(true);
+    expect(await isSaveLockedElsewhere('t2', fake.locks)).toBe(false);
+    // 试探不得持锁：没有发起任何 request，占用集合原样
+    expect(fake.request).not.toHaveBeenCalled();
+    expect([...fake.held]).toEqual(['poem-save:t1', 'poem-discord-auth-request']);
+  });
+
+  it('本标签页自己持有的锁（含引用计数中的）不算被占', async () => {
+    const fake = createFakeLocks(['poem-save:t4']);
+    const own = await acquireSaveTabLock('t3', fake.locks);
+    const ownAgain = await acquireSaveTabLock('t3', fake.locks);
+    expect(await isSaveLockedElsewhere('t3', fake.locks)).toBe(false);
+    expect(await findSavesLockedElsewhere(fake.locks)).toEqual(['t4']);
+    own!.release();
+    ownAgain!.release();
+  });
+
+  it('环境不支持 navigator.locks 或没有 query 时放行', async () => {
+    expect(await findSavesLockedElsewhere(undefined)).toEqual([]);
+    expect(await isSaveLockedElsewhere('t5', undefined)).toBe(false);
+    const noQuery = { request: vi.fn() } as unknown as LockManager;
+    expect(await isSaveLockedElsewhere('t5', noQuery)).toBe(false);
+  });
+
+  it('查询本身出错时放行', async () => {
+    const locks = {
+      query: vi.fn(async () => {
+        throw new Error('SecurityError');
+      }),
+    } as unknown as LockManager;
+    expect(await findSavesLockedElsewhere(locks)).toEqual([]);
   });
 });

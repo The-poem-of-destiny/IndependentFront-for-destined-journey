@@ -12,6 +12,12 @@ import {
   isStoryContextV2Save,
 } from '@engine/story/story-context-mode';
 import { storyContextRejectionMessage } from '../../lib/story-context-admission';
+import {
+  FULL_IMPORT_LOCKED_MESSAGE,
+  SAVE_DELETE_LOCKED_MESSAGE,
+  findSavesLockedElsewhere,
+  isSaveLockedElsewhere,
+} from '../../lib/save-tab-lock';
 import { findLatestSave } from '../home/latest-save';
 import AppButton from './AppButton.vue';
 import AppModal from './AppModal.vue';
@@ -166,6 +172,11 @@ function loadGame(saveId: string) {
 
 async function deleteSave(saveId: string) {
   if (!confirm('确定要删除这个存档吗？此操作不可撤销。')) return;
+  // 标签页锁（R8）：别的标签页正在玩这个档就不删；本标签页自己在玩的照旧可删（删完回首页）
+  if (await isSaveLockedElsewhere(saveId)) {
+    ui.toast(SAVE_DELETE_LOCKED_MESSAGE, 'warning', 6000);
+    return;
+  }
   try {
     const { deleteSaveSlot } = await import('@engine/persistence/database');
     await deleteSaveSlot(saveId);
@@ -351,6 +362,11 @@ async function confirmFullBackupImport() {
   const data = pendingFullBackup.value;
   closeFullBackupModal();
   if (!data) return;
+  // 标签页锁（R8）：整库导入会覆盖所有存档，别的标签页在玩任一存档时拒绝
+  if ((await findSavesLockedElsewhere()).length > 0) {
+    ui.toast(FULL_IMPORT_LOCKED_MESSAGE, 'warning', 6000);
+    return;
+  }
   try {
     const { importAllData } = await import('@engine/persistence/database');
     await importAllData(data);

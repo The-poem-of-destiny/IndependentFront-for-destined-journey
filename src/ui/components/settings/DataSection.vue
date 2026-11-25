@@ -19,6 +19,7 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useGameStore } from '../../stores/game-store';
 import type { FullBackup } from '@engine/persistence/database';
+import { FULL_IMPORT_LOCKED_MESSAGE, findSavesLockedElsewhere } from '../../lib/save-tab-lock';
 // 经验档位读取（loadExperienceMode）走静态导入：与 loadSceneUsage 的动态 import 并存时，
 // Vitest 的 vi.mock 对同一模块的多次动态 import 有竞态（挂起到环境拆除、dexie 加载失败），
 // 静态 import 由 vi.mock 稳定拦截，规避之（2026-08-24）。
@@ -208,6 +209,11 @@ async function confirmImportAll() {
     const { isFullBackupFile } = await import('@engine/persistence/session-backup');
     if (!isFullBackupFile(raw)) {
       ui.toast('导入失败：这个文件看起来不是整库备份', 'error');
+      return;
+    }
+    // 标签页锁（R8）：整库导入会覆盖所有存档，别的标签页在玩任一存档时拒绝
+    if ((await findSavesLockedElsewhere()).length > 0) {
+      ui.toast(FULL_IMPORT_LOCKED_MESSAGE, 'warning', 6000);
       return;
     }
     const { importAllData } = await import('@engine/persistence/database');
