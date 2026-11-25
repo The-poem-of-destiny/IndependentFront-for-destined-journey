@@ -1042,6 +1042,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               → ②本机配置检查（`lib/journey-readiness.ts`，未选模式时首条
 │   │   │                               即「尚未选择生成模式」）→ 操作行（置灰时写出原因，API 设置
 │   │   │                               入口不重复）。状态仍由 CreatePage 持有
+│   │   │                               📌 2026-11-25：Agent 与直出（缓存优化）两张卡置灰、标「暂未开放」、不可点，
+│   │   │                               当前只主推直出（无缓存优化）（只锁新建入口，已有存档照常玩）。锁定表 `lib/create-options.ts` 的
+│   │   │                               `LOCKED_GENERATION_MODES` 是唯一出处；CreatePage 把旧草稿里残留的锁定模式清空
 │   │   ├── CreateSteps.vue          ← 顶部进度条。★步骤名的**唯一出处** `STEP_LABELS`：
 │   │   │                               难度选择 / 基础信息 / 命定核心 / **角色启用** /
 │   │   │                               装备选择 / 背景故事 / 剧情规划 / 确认提交；八个步骤按钮

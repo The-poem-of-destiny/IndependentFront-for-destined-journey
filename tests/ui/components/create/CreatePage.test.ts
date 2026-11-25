@@ -56,7 +56,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   create = reactive({
     currentStep: 0,
-    generationMode: 'agent',
+    generationMode: 'direct',
     contentStatus: 'ready',
     stepValid: Array(8).fill(true),
     stepMissing: { 0: [], 1: [], 2: [] },
@@ -311,5 +311,24 @@ describe('草稿等级截断提示', () => {
     mountCreatePage();
     await flushPromises();
     expect(toast).not.toHaveBeenCalled();
+  });
+});
+
+describe('暂不开放的生成模式', () => {
+  it.each(['agent', 'direct_cached'])(
+    '★ 旧草稿里残留的锁定模式 %s 被清空，等玩家重新选择',
+    async (mode) => {
+      create.generationMode = mode;
+      mountCreatePage();
+      await flushPromises();
+      expect(create.generationMode).toBe('');
+    },
+  );
+
+  it('开放的直出（无缓存优化）原样保留', async () => {
+    create.generationMode = 'direct';
+    mountCreatePage();
+    await flushPromises();
+    expect(create.generationMode).toBe('direct');
   });
 });
