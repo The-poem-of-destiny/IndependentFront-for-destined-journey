@@ -18,6 +18,7 @@ import {
   GENERIC,
   OUTCOME,
   ROSTER,
+  SETTLE,
   sheet,
   viewOf,
 } from './fixtures';
@@ -208,5 +209,17 @@ describe('ActionStyleDuel', () => {
     expect(subs[0].classes()).toEqual(expect.arrayContaining(['up', 'r-hp']));
     expect(subs[0].classes()).not.toContain('cost');
     expect(subs[1].classes()).toEqual(expect.arrayContaining(['cost', 'r-mp']));
+  });
+
+  it('结算（A4）：多人状态结算逐人列出资源变化，状态脚注带归属人名', () => {
+    const w = mountDuel(SETTLE);
+    expect(w.find('.duel').classes()).toContain('k-outcome');
+    const who = w.findAll('.d1-f .d1-who');
+    expect(who.map((s) => s.text().replace(/\s+/g, ' '))).toEqual([
+      '莱恩 HP −5 80→75',
+      '灰狼 HP −5 45→40',
+    ]);
+    expect(who[0].classes()).toEqual(expect.arrayContaining(['down', 'r-hp']));
+    expect(w.find('.d1-f .d1-st').text()).toBe('灰狼 流血(1回合)');
   });
 });

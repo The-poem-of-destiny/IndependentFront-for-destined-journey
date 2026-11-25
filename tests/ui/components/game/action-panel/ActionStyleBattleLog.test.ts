@@ -17,6 +17,7 @@ import {
   GENERIC,
   OUTCOME,
   ROSTER,
+  SETTLE,
   sheet,
   viewOf,
 } from './fixtures';
@@ -267,5 +268,16 @@ describe('ActionStyleBattleLog', () => {
     );
     expect(w.find('.bl-l.l-touched').exists()).toBe(false);
     expect(w.find('.bl-l.l-status .bl-tx').text()).toBe('灰狼 畏惧(1回合)。');
+  });
+
+  it('结算（A4）：多人状态结算逐人一行资源变化，状态带归属人名', () => {
+    const w = mountLog(SETTLE);
+    const deltas = w.findAll('.bl-l.l-delta');
+    expect(deltas.map((l) => l.find('.bl-tx').text().replace(/\s+/g, ' '))).toEqual([
+      '莱恩 的 HP 减少 5 点。',
+      '灰狼 的 HP 减少 5 点。',
+    ]);
+    expect(deltas.map((l) => l.find('.m').text())).toEqual(['HP 80→75', 'HP 45→40']);
+    expect(w.find('.bl-l.l-status .bl-tx').text()).toBe('灰狼 流血(1回合)。');
   });
 });

@@ -6,81 +6,42 @@
  *   - exchange：行动者（含全部自身消耗）· 招式箭 + 结论印 · 逐目标 HP 大字 + 其余资源小字 / 失手；
  *     脚注是状态
  *   - roster：标题 + 环境 · 单位格（三条资源条）
- *   - outcome：行动者 · 动作 → 产物（品质色点）+ 结论印 + 结果句；脚注是经验 / 消耗 / 检定骰
+ *   - outcome：行动者 · 动作 → 产物（品质色点）+ 结论印 + 结果句；脚注是经验 / 消耗 /
+ *     多人结算时逐人的资源变化（带人名）/ 检定骰 / 状态（带归属人名）
  *   - generic：标题 + 前三个关键格
  *
  * 入场（仅 `entering`）：招式箭 scaleX 画出 → 目标行依次升起 → 结论印落定。
  * 只动 opacity / transform，`backwards` 填充，时长缓动取 `--motion-*`；减动效下不播。
  * 🔴 @keyframes 必须留在本组件（scoped 会按组件改名）；共用静态类在 action-panel-base.css。
  */
-import { computed } from 'vue';
 import type { ActionView, ActionViewTarget } from '../../../lib/action-panel-view';
 import type { ResourceDelta } from '../../../lib/action-digest';
+import {
+  actionLabel,
+  deltaClass,
+  genericFacts,
+  hasRange,
+  ownClass,
+  rc,
+  rosterNote,
+  settledDeltas,
+  sgn,
+  statusLines,
+  verdictTone,
+} from '../../../lib/action-style-helpers';
 import ActionBadge from './ActionBadge.vue';
 import ActionGauge from './ActionGauge.vue';
+import ActionMoreHint from './ActionMoreHint.vue';
 import { staggerStyle } from './entrance-timing';
 
-const props = defineProps<{ view: ActionView; open: boolean; entering: boolean }>();
+defineProps<{ view: ActionView; open: boolean; entering: boolean }>();
 
 const ROSTER_RESOURCES = ['hp', 'mp', 'sp'] as const;
-
-function sgn(n: number | null): string {
-  if (n === null || !Number.isFinite(n)) return '±?';
-  return (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n);
-}
-
-function rc(resource: string): string {
-  return `r-${resource.toLowerCase()}`;
-}
-
-function hasRange(d: ResourceDelta): d is ResourceDelta & { from: number; to: number } {
-  return d.from !== undefined && d.to !== undefined;
-}
-
-/** 目标身上的变化：回升提亮、下降标红 */
-function deltaClass(d: ResourceDelta): string {
-  return (d.delta ?? 0) > 0 ? 'up' : 'down';
-}
-
-/** 出手方自己的变化：消耗用资源色，回升（自我治疗）用增益色 */
-function ownClass(d: ResourceDelta): string {
-  return (d.delta ?? 0) > 0 ? 'up' : 'cost';
-}
 
 /** 目标身上 HP 以外的变化（MP / SP …），在 HP 大字下面逐条写小字 */
 function otherDeltas(t: ActionViewTarget): ResourceDelta[] {
   return t.deltas.filter((d) => d !== t.hp);
 }
-
-const verdictTone = computed(() => {
-  const tone = props.view.verdict?.tone;
-  return tone === 'success' ? 't-ok' : tone === 'error' ? 't-bad' : '';
-});
-
-const actionLabel = computed(() => props.view.action || props.view.title || '行动');
-
-/** 脚注里的状态：目标的状态带上名字，认不出归属的原样列出 */
-const statusLines = computed(() => [
-  ...props.view.targets.flatMap((t) => t.statuses.map((s) => ({ who: t.name, text: s }))),
-  ...props.view.looseStatuses.map((s) => ({ who: '', text: s })),
-]);
-
-/**
- * 名册标题旁的小字（环境之类）：摘要的关键格优先；摘要没给时取算式区里不属于任何单位的短行，至多两条。
- */
-const rosterNote = computed(() => {
-  const fromFacts = props.view.facts.map((c) => c.value).filter(Boolean);
-  if (fromFacts.length > 0) return fromFacts.join(' · ');
-  const names = props.view.roster.map((u) => u.name);
-  return props.view.calc
-    .flatMap((s) => s.rows)
-    .filter((r) => r.label && !r.wide && !names.some((n) => r.label.startsWith(n)))
-    .slice(0, 2)
-    .map((r) => r.tokens.map((t) => t.text).join(''))
-    .join(' · ');
-});
-
-const genericFacts = computed(() => props.view.facts.slice(0, 3));
 </script>
 
 <template>
@@ -103,9 +64,9 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
           >
         </div>
         <div class="d1-m">
-          <span class="d1-act">{{ actionLabel }}</span>
+          <span class="d1-act">{{ actionLabel(view) }}</span>
           <span class="d1-arrow" aria-hidden="true" />
-          <span v-if="view.verdict" class="vd d1-seal" :class="verdictTone">{{
+          <span v-if="view.verdict" class="vd d1-seal" :class="verdictTone(view)">{{
             view.verdict.text
           }}</span>
         </div>
@@ -145,12 +106,8 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
         </div>
       </div>
       <div class="d1-f">
-        <span v-for="(s, i) in statusLines" :key="`st-${i}`" class="d1-st">{{
-          s.who ? `${s.who} ${s.text}` : s.text
-        }}</span>
-        <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-          >{{ open ? '收起' : '算式' }}<i class="more-caret"
-        /></span>
+        <span v-for="(s, i) in statusLines(view)" :key="`st-${i}`" class="d1-st">{{ s }}</span>
+        <ActionMoreHint :open="open" />
       </div>
     </template>
 
@@ -158,7 +115,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
     <template v-else-if="view.kind === 'roster'">
       <div class="d1-head">
         <span class="d1-head-t">{{ view.title || '战况' }}</span>
-        <small v-if="rosterNote">{{ rosterNote }}</small>
+        <small v-if="rosterNote(view)">{{ rosterNote(view) }}</small>
       </div>
       <div class="d1-units">
         <div v-for="(u, i) in view.roster" :key="`u-${i}`" class="d1-u" :style="staggerStyle(i)">
@@ -187,9 +144,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
         </div>
       </div>
       <div class="d1-f">
-        <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-          >{{ open ? '收起' : '算式' }}<i class="more-caret"
-        /></span>
+        <ActionMoreHint :open="open" />
       </div>
     </template>
 
@@ -198,7 +153,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
       <div class="d1-out">
         <ActionBadge v-if="view.actor" :name="view.actor" />
         <span v-if="view.actor" class="nm">{{ view.actor }}</span>
-        <span class="d1-act">{{ actionLabel }}</span>
+        <span class="d1-act">{{ actionLabel(view) }}</span>
         <span class="d1-arrow is-short" aria-hidden="true" />
         <template v-if="view.outcome?.product">
           <span
@@ -208,7 +163,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
           >
           <span v-if="view.outcome.quality" class="rng">{{ view.outcome.quality }}</span>
         </template>
-        <span v-if="view.verdict" class="vd d1-seal" :class="verdictTone">{{
+        <span v-if="view.verdict" class="vd d1-seal" :class="verdictTone(view)">{{
           view.verdict.text
         }}</span>
         <span v-if="view.outcome?.resultText" class="txt">{{ view.outcome.resultText }}</span>
@@ -222,11 +177,19 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
           :class="[ownClass(x), rc(x.resource)]"
           >{{ x.resource }} {{ sgn(x.delta) }}</span
         >
+        <span
+          v-for="(s, i) in settledDeltas(view)"
+          :key="`who-${i}`"
+          class="d1-cost d1-who"
+          :class="[deltaClass(s.delta), rc(s.delta.resource)]"
+          ><span class="nm">{{ s.who }}</span> {{ s.delta.resource }} {{ sgn(s.delta.delta)
+          }}<span v-if="hasRange(s.delta)" class="rng"
+            >{{ ' ' + s.delta.from }}<span class="rng-arrow">→</span>{{ s.delta.to }}</span
+          ></span
+        >
         <span v-if="view.outcome?.roll" class="rng">{{ view.outcome.roll.raw }}</span>
-        <span v-for="(s, i) in statusLines" :key="`st-${i}`" class="d1-st">{{ s.text }}</span>
-        <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-          >{{ open ? '收起' : '算式' }}<i class="more-caret"
-        /></span>
+        <span v-for="(s, i) in statusLines(view)" :key="`st-${i}`" class="d1-st">{{ s }}</span>
+        <ActionMoreHint :open="open" />
       </div>
     </template>
 
@@ -235,15 +198,13 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
       <div class="d1-head">
         <span class="d1-head-t">{{ view.title || '行动详情' }}</span>
       </div>
-      <div v-if="genericFacts.length > 0" class="d1-kv">
-        <span v-for="(c, i) in genericFacts" :key="`f-${i}`" class="d1-kv-item"
+      <div v-if="genericFacts(view).length > 0" class="d1-kv">
+        <span v-for="(c, i) in genericFacts(view)" :key="`f-${i}`" class="d1-kv-item"
           >{{ c.label }}<b class="d1-kv-v">{{ c.value }}</b></span
         >
       </div>
       <div class="d1-f">
-        <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-          >{{ open ? '收起' : '算式' }}<i class="more-caret"
-        /></span>
+        <ActionMoreHint :open="open" />
       </div>
     </template>
   </div>
