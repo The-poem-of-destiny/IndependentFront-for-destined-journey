@@ -1190,25 +1190,14 @@ export class GamePipeline {
 
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets();
-      const worldBooks = await this.loadActiveWorldBooks();
       // 定义是给引擎的目录，链接的世界书条目才是给模型的人设：解析链接，条目没加载上时回落定义自带 lore。
       // 露骨内容开关：给模型的那份按开关投影（剔整条标记角色、因露骨被剔的链接不回落 lore）；
       // 冻结 / 挂定义吃与开关无关的版本（旧档现转、链接解析都用开关过滤之前的书）—— 永不写回存档。
-      // 过滤前的书要按与 loadActiveWorldBooks 相同的存档白名单收窄，否则旧档会冻结进没选过的角色
+      // 过滤前 / 过滤后两份出自同一次读取、同一份存档白名单（loadWorldBookSets）：读失败时两份同为空，
+      // 空定义不冻结，本轮不冻结、下轮再试 —— 不会拿开关过滤后的书去冻结
       const metadata = this.game.activeSave?.metadata;
       const nsfwOn = nsfwEnabled();
-      const sourceBooks = nsfwOn
-        ? undefined
-        : await (async () =>
-            filterBooksByEnabledEntries(
-              await loadWorldBooksWithFallback(useWorldBookStore().books as WorldBook[]),
-              [
-                ...(metadata?.enabledWorldBookEntries ?? []),
-                ...characterLoreEntryUids(
-                  linkCharacterDefinitions(metadata?.characterDefinitions ?? []),
-                ),
-              ],
-            ))().catch(() => undefined);
+      const { books: worldBooks, sourceBooks } = await this.loadWorldBookSets(nsfwOn);
       const definitions = prepareTurnCharacterDefinitions({
         frozen: metadata?.characterDefinitions,
         books: worldBooks,
@@ -2278,10 +2267,21 @@ export class GamePipeline {
    * 并记一条可定位的诊断。
    */
   private async loadActiveWorldBooks(): Promise<WorldBook[]> {
+    return (await this.loadWorldBookSets(nsfwEnabled())).books;
+  }
+
+  /**
+   * 一次读取，给出同一份存档白名单下的两份世界书（白名单规则只此一处）：
+   * - `books`：再按露骨内容开关投影，所有 Agent / 侧链 / 直出 / 图像链吃这份；
+   * - `sourceBooks`：开关过滤之前的版本，供冻结 / 挂角色定义（开关为开时与 `books` 条目相同，给 undefined）。
+   * 读失败两份同为空（catch 兼顾单测里没有 activePinia 的场景 —— 与迁移前的空数组行为一致）。
+   */
+  private async loadWorldBookSets(
+    nsfwOn: boolean,
+  ): Promise<{ books: WorldBook[]; sourceBooks: WorldBook[] | undefined }> {
     try {
       // 统一数据源：worldbook-store 优先（Dexie，含用户在 WorldBookEditor 的 enabled 修改
       // + 自建书 + 工坊书）+ 文件兜底。init() 幂等，保证「消费必在迁移之后」。
-      // catch 兼顾单测里没有 activePinia 的场景 —— 与迁移前的空数组行为一致。
       const wb = useWorldBookStore();
       await wb.init();
       const all = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
@@ -2300,10 +2300,12 @@ export class GamePipeline {
         ...characterLoreEntryUids(linkCharacterDefinitions(metadata?.characterDefinitions ?? [])),
       ];
       // 露骨内容开关：剔除整条标记条目 + 过滤路由元数据文本（正文在 EJS 渲染后再剥）。
-      // 所有 Agent / 侧链 / 直出 / 图像链经 chainData.worldBooks 吃到的都是这份投影。
-      return filterBooksByEnabledEntries(filterNsfwBooks(all, nsfwEnabled()), enabledEntries);
+      return {
+        books: filterBooksByEnabledEntries(filterNsfwBooks(all, nsfwOn), enabledEntries),
+        sourceBooks: nsfwOn ? undefined : filterBooksByEnabledEntries(all, enabledEntries),
+      };
     } catch {
-      return [];
+      return { books: [], sourceBooks: [] };
     }
   }
 

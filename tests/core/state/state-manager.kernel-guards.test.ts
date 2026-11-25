@@ -182,6 +182,24 @@ describe('A9：金钱与命运点守卫下沉内核', () => {
     expect((await readPlayer()).money).toBe(0);
   });
 
+  it.each([
+    ['整值 NaN', { money: Number.NaN }, false],
+    ['整值 Infinity', { money: Number.POSITIVE_INFINITY }, false],
+    ['整值字符串', { money: '很多' }, false],
+    ['delta Infinity', { money: Number.POSITIVE_INFINITY }, true],
+  ])('金钱非有限值（%s）落地后归 0', async (_label, value, delta) => {
+    await fixture();
+    await createStateManager(saveId).commitChatState([
+      {
+        op: 'update_character',
+        target: 'characters.旅人',
+        value,
+        ...(delta ? { metadata: { delta: true } } : {}),
+      },
+    ]);
+    expect((await readPlayer()).money).toBe(0);
+  });
+
   it('AI 补丁 profile.fp −999（余 3）钳到 0，不报错', async () => {
     await fixture(3);
     const result = await createStateManager(saveId).commitChatState([

@@ -42,8 +42,10 @@ const ENTER_ATTR = /\benter\s*=\s*(?:"([^"]*)"|'([^']*)'|“([^”]*)”|([^\s"'
  * 与逐节演出（`ui/lib/stage-playback.ts`）都从这里取，别再各写一份 —— 三处口径一旦不同，
  * 同一块面板会一处当面板、一处漏成原文或被切成两节。
  * 写成 `<\s*(?:(\/)\s*)?` 而不是 `<\s*\/?\s*`：两段相邻的 `\s*` 在长空白上会平方级回溯。
+ * 属性段写 `[^<>]*` 而不是 `[^>]*`：大量没有 `>` 的 `<action_info ` 时，后者每次尝试都扫到文末，
+ * 整体平方级；遇到下一个 `<` 即止则是线性的（属性里本就不该出现 `<`）。
  */
-const PANEL_TAG_SOURCE = String.raw`<\s*(?:(\/)\s*)?(action_info|item_info)\b[^>]*>`;
+const PANEL_TAG_SOURCE = String.raw`<\s*(?:(\/)\s*)?(action_info|item_info)\b[^<>]*>`;
 
 /** 按 `PANEL_TAG_SOURCE` 新建一个正则（每次新建，免得共享 lastIndex）。 */
 export function panelTagPattern(flags = 'gi'): RegExp {

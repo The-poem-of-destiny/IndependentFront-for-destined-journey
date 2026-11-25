@@ -118,6 +118,22 @@ describe('parseDirectOutput：标签提及不再整楼拒收（A1）', () => {
     expect(draft.updatesMissing).toBe(true);
   });
 
+  it('正文内部再写一次 <maintext>：接纳但丢掉前半段（与前置提及结构上无法区分，已接受）', () => {
+    const raw = `<maintext>他提起笔，在纸上写下 <maintext> 这个词，又把笔放下。</maintext><options>1. 等待\n2. 离开</options>${TAIL}`;
+    const draft = parseDirectOutput(raw, POOL);
+    // 闭标签配最近的那个开标签，真正的开标签被当成孤立提及剔除：正文只剩后半段
+    expect(draft.content).toBe('这个词，又把笔放下。');
+    expect(draft.content).not.toContain('他提起笔');
+    expect(draft.updates.time).toEqual({ delta_time: 5 });
+    expect(draft.raw).toBe(raw);
+  });
+
+  it('整份输出包在闭合的 <think> 内 → 拒收（思考块整块剔除后没有正文）', () => {
+    expect(() => parseDirectOutput(`<think>${VALID}</think>`, POOL)).toThrow(
+      '需要一个完整的 maintext（或 gametxt）区块',
+    );
+  });
+
   it('只在思考块里提到 direct_updates 等同零个开标签', () => {
     const draft = parseDirectOutput(
       `<think>这轮不用写 <direct_updates></direct_updates></think>${BODY}<character_updates>{"characters":[]}</character_updates>`,

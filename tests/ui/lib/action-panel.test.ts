@@ -695,6 +695,15 @@ describe('性能护栏：超长输入不发生灾难性回溯', () => {
       expect(performance.now() - start).toBeLessThan(10_000);
     }
   });
+
+  it('1 万个无 `>` 的 `<action_info ` 不再平方级（第 1 波审查）', () => {
+    // 约 130KB；旧正则 `[^>]*>` 每次尝试都扫到文末，约 800ms；现在应远低于此
+    const text = '<action_info '.repeat(10_000);
+    const start = performance.now();
+    const segs = splitActionInfo(text);
+    expect(performance.now() - start).toBeLessThan(300);
+    expect(segs.map((s) => s.kind)).toEqual(['text']);
+  });
 });
 
 describe('审查 A6：action_info 标签三处判定一致', () => {

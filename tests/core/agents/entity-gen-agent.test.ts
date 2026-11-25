@@ -275,6 +275,20 @@ describe('parseEntityGenOutput', () => {
     expect(out[0].effects).toEqual({ dot: '10' });
   });
 
+  it('parseStatusEffectsXML：remainingTime 解析不出数值（"永久"）回落 60，不整条丢状态', () => {
+    const out = parseStatusEffectsXML(
+      '<effect owner="理查德" name="诅咒" category="减益" remainingTime="永久" timeUnit="回合">缠身</effect>' +
+        '<effect owner="理查德" name="眩晕" category="减益" remainingTime="0" timeUnit="回合">一瞬</effect>' +
+        '<effect owner="理查德" name="祝福" category="增益" timeUnit="回合">庇佑</effect>',
+    );
+    expect(out.map((e) => [e.name, e.remainingTime])).toEqual([
+      ['诅咒', 60],
+      ['眩晕', 0],
+      ['祝福', 60],
+    ]);
+    for (const e of out) expect(Number.isFinite(e.remainingTime)).toBe(true);
+  });
+
   it('extractPersonalityText 保留性格编码', () => {
     expect(
       extractPersonalityText(
