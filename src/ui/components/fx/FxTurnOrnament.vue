@@ -213,13 +213,4 @@ const gearStyle = computed(() => ({
     transform: rotate(360deg);
   }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .fx-orn-ring,
-  .fx-orn-pointer,
-  .fx-orn-gear {
-    animation: none !important;
-    transition: none !important;
-  }
-}
 </style>

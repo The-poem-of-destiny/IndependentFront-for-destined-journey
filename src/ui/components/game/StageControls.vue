@@ -216,9 +216,6 @@ const emit = defineEmits<{
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .stage-dock-pulse {
-    animation: none;
-  }
   .stage-dock-enter-active,
   .stage-dock-leave-active {
     transition: none;

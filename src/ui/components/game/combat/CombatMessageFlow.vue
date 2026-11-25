@@ -397,9 +397,4 @@ watch([() => props.flow.length, () => (props.stream ?? '').length], () => {
     transform: rotate(360deg);
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .thinking-spinner {
-    animation: none;
-  }
-}
 </style>
