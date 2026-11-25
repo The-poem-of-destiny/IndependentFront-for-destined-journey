@@ -375,7 +375,7 @@ export const PERSON_NODE_CHILDREN: readonly StateTreeNodeSpec[] = [
         relationOnly: true,
       }),
     ],
-    { note: '文字字段的路径写入转成 character_updates 的 profile_changes（§5.5）' },
+    { note: '文字字段的路径写入转成 update_character 补丁（§5.5，2026-11-25 更正）' },
   ),
   branch('成长', [
     leaf('_生命层级', 'number', { field: 'CharacterState.tier' }),

@@ -33,10 +33,13 @@ import { getProfile } from '../../../src/core/state/save-profile';
 import {
   clearAllData,
   getCharacters,
+  getMessages,
   saveCharacter,
   saveMessages,
   saveSaveSlot,
 } from '../../../src/core/persistence/database';
+import { collectCompleteStoryTurns } from '../../../src/core/memory/memory-context';
+import { storyTurnSource } from '../../../src/core/memory/story-memory-source';
 import { buildStateTree } from '../../../src/core/variables/state-tree-projection';
 import { findOverlappingSections } from '../../../src/core/variables/state-tree-sections';
 import { createDefaultTime } from '../../../src/core/time/time-system';
@@ -374,8 +377,9 @@ describe('端到端（tree）：解析 → 建补丁 → commitDirectTurn → �
     ]);
   });
 
-  it('档案路径写入并入叙事更新（同名合并，character_updates 显式字段优先）', async () => {
-    const { built } = await run(
+  // 回归（审查 A8）：档案路径写入曾走叙事更新旁路，不在 commitDirectTurn 事务内
+  it('档案路径写入产补丁、随 commitDirectTurn 落；character_updates 显式写的同字段后落生效', async () => {
+    const { built, outcome } = await run(
       [
         { op: 'replace', path: '/关系列表/艾拉/档案/外貌', value: '银发' },
         { op: 'replace', path: '/关系列表/艾拉/档案/性格', value: '冷淡' },
@@ -383,11 +387,62 @@ describe('端到端（tree）：解析 → 建补丁 → commitDirectTurn → �
       {},
       [{ name: '艾拉', profile_changes: { personality: '温和' }, chronicle: [] }],
     );
-    expect(built.characterUpdates).toHaveLength(1);
-    expect(built.characterUpdates[0].profile_changes).toMatchObject({
-      appearance: '银发',
-      personality: '温和',
+    expect(outcome).toBe('committed');
+    expect(built.patches).toEqual([
+      { op: 'update_character', target: 'characters.艾拉', value: { appearance: '银发' } },
+      { op: 'update_character', target: 'characters.艾拉', value: { personality: '冷淡' } },
+    ]);
+    // 叙事更新只剩显式写的那份，不再并入路径写入
+    expect(built.characterUpdates).toEqual([
+      { name: '艾拉', profile_changes: { personality: '温和' }, chronicle: [] },
+    ]);
+    const afterTurn = (await getCharacters(saveId)).find((c) => c.name === '艾拉')!;
+    expect(afterTurn).toMatchObject({ appearance: '银发', personality: '冷淡' });
+
+    // 管线在接纳后才落叙事更新：显式写的同字段后落覆盖
+    const turn = collectCompleteStoryTurns(await getMessages(saveId)).find((t) => t.key === 'u')!;
+    const warnings = await createStateManager(saveId).commitCharacterUpdates(
+      built.characterUpdates,
+      storyTurnSource(turn),
+    );
+    expect(warnings).toEqual([]);
+    const ella = (await getCharacters(saveId)).find((c) => c.name === '艾拉')!;
+    expect(ella).toMatchObject({ appearance: '银发', personality: '温和' });
+  });
+
+  it('档案路径写入在 commitDirectTurn 事务内：后续补丁抛错时一并回滚', async () => {
+    await fixture();
+    const draft = parseDirectOutput(
+      wrap({
+        version: 2,
+        patch: [{ op: 'replace', path: '/关系列表/艾拉/档案/外貌', value: '银发' }],
+      }),
+      POOL,
+      { stateProtocol: 'tree', structuredCombat: false },
+    );
+    const built = buildDirectPatches(draft, {
+      characters: await getCharacters(saveId),
+      definitions: [],
+      sourceTurnKey: 'u',
+      profile: await getProfile(saveId),
     });
+    expect(built.patches[0]).toMatchObject({ op: 'update_character', target: 'characters.艾拉' });
+    const before = (await getCharacters(saveId)).find((c) => c.name === '艾拉')!.appearance;
+    await expect(
+      createStateManager(saveId).commitDirectTurn({
+        patches: [
+          ...built.patches,
+          { op: 'update_character', target: 'characters.不存在的人', value: { hp: 1 } },
+        ],
+        messages: source(),
+        turnKey: 'u',
+        combat: null,
+        isCurrent: () => true,
+      }),
+    ).rejects.toThrow();
+    const ella = (await getCharacters(saveId)).find((c) => c.name === '艾拉')!;
+    expect(ella.appearance).toBe(before);
+    expect(ella.appearance).not.toBe('银发');
   });
 
   it('tree 草稿缺 profile 时明确报错', () => {

@@ -358,6 +358,34 @@ describe('玩家编辑往返（§7.2）', () => {
     expect(bran.money).toBe(33);
   });
 
+  // 回归（审查 A8）：档案写入曾走 profileChanges 旁路、按旧名落，同批改名后提交报「角色不存在: 布兰」
+  const renameBatches: Array<[string, PlayerEditOp[]]> = [
+    [
+      '先写档案再改名',
+      [
+        { op: 'replace', path: '/关系列表/布兰/档案/性格', value: '沉稳' },
+        { op: 'move', from: '/关系列表/布兰', path: '/关系列表/布兰特' },
+      ],
+    ],
+    [
+      '先改名再写档案',
+      [
+        { op: 'move', from: '/关系列表/布兰', path: '/关系列表/布兰特' },
+        { op: 'replace', path: '/关系列表/布兰特/档案/性格', value: '沉稳' },
+      ],
+    ],
+  ];
+  for (const [name, ops] of renameBatches) {
+    it(`同批档案写入与改名：${name}，试算与提交都通过，新名读回新值`, async () => {
+      const r = await createStateManager(SAVE).commitPlayerEdit(ops);
+      if (!r.ok) throw new Error(r.reasons.join('；'));
+      const chars = await getCharacters(SAVE);
+      expect(chars.some((c) => c.name === '布兰')).toBe(false);
+      expect(chars.find((c) => c.name === '布兰特')?.personality).toBe('沉稳');
+      expect(at(await loadTree(), '/关系列表/布兰特/档案/性格')).toBe('沉稳');
+    });
+  }
+
   it('补丁带 metadata.source = player_edit，记引擎日志 state.manual_edit', async () => {
     await createStateManager(SAVE).commitPlayerEdit([
       { op: 'replace', path: '/主角/金钱', value: 9 },

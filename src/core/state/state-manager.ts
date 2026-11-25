@@ -975,8 +975,8 @@ export class StateManager {
    * 锁内重读新鲜状态 → 翻译（actor: player）→ 只读键 / 时间 / 任一条被丢弃 → 整批拒绝并回传原因；
    * 应用中任一补丁抛错 → Dexie 事务回滚，状态零变化。
    *
-   * 补丁带 `metadata.source: 'player_edit'`；档案文字改动（§5.5）按叙事更新同口径
-   * （`{...character, ...profile_changes}`）在同一事务里落。不产 deltaMinutes、不推进时间、
+   * 补丁带 `metadata.source: 'player_edit'`；档案文字改动由翻译层产成 `update_character` 补丁，
+   * 与改名等同批补丁按序落（2026-11-25，审查 A8）。不产 deltaMinutes、不推进时间、
    * 不告知模型（§11.5 裁定）。它**不属于** `persistFocusQuest` 那类受控例外：走完整补丁路径。
    */
   async commitPlayerEdit(
@@ -1013,11 +1013,6 @@ export class StateManager {
             this.commitScope = scope;
             try {
               const events = await this.applyPatchesAtomic(patches, { fpReason: '玩家修改' });
-              for (const change of translation.profileChanges) {
-                const character = await this.resolveCharacter(change.name);
-                Object.assign(character, structuredClone(change.profile_changes));
-                await this.persistCharacter(character);
-              }
               await this.flushCommitScope(scope);
               const save = await getSave(this.saveId);
               if (save) await saveSaveSlot(save);

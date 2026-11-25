@@ -403,6 +403,8 @@ world 路径命中系统保留段不再整楼拒收：新协议里树外路径�
 - 树上的 `档案` 文字字段若被路径写入：翻译层转成一条 `CharacterNarrativeUpdate.profile_changes`，并进本楼的叙事更新，不丢。
 - 是否把它扶正为主写法、让 `character_updates` 只留经历：见 §9。
 
+> 📌 2026-11-25 更正（审查 2026-11-25 A8，主人裁定接受偏离本节）：第二条已推翻。树上的档案文字字段（种族 / 性别 / 外貌 / 着装 / 性格 / 背景故事 / 身份 / 职业，八个字段都在 `update_character` 白名单里）被路径写入时，翻译层直接产出 `update_character` 补丁，与改名及本楼其余补丁同批按序落：直出在 `commitDirectTurn` 事务内，玩家编辑在 `commitPlayerEdit` 事务内。原旁路有两处后果：同批「写档案再改名」试算通过、提交报「角色不存在」（旁路按旧名落）；直出下档案改动不在 `commitDirectTurn` 事务内，后续补丁抛错时不随之回滚。翻译结果的 `profileChanges` 现恒为空（字段暂留，后续任务删除）。`character_updates` 显式写的同字段仍在接纳后落，照旧覆盖路径写入的值。
+
 ### 5.6 资源上限拆分的内核设计（已裁定 2026-11-22）
 
 **字段**
@@ -877,3 +879,8 @@ world 路径命中系统保留段不再整楼拒收：新协议里树外路径�
 > - **整对象写资源不再依赖键序**：翻译层展开对象写入时先写「上限」「额外」、后写「当前」，`{当前:6000,上限:7000}` 与反序结果一致（此前前者被旧上限钳成 5000）。
 > - **金钱不为负、命运点不超扣下沉到 `StateManager`**：`update_character` 落地后金钱钳到 0；AI 来源（`commitAiPatches` / `commitDirectTurn`）扣命运点超出余额时钳到 0、整楼照常接纳；领域命令（制作、战斗扣费等）与玩家修改不足仍整批拒收。旧协议与 Agent 模式同样受保护，翻译层原有的钳制保留。
 > - **值类型在静态校验拦下**：`add_status_effect` / `update_status_effect` 的 `remainingTime` 非有限数值、`update_item` 的 `changes` 字段类型不符，由 `validateStatePatch` 拒掉，建补丁预演只丢该条，不再 NaN 落库或连坐整楼。
+
+> 📌 2026-11-25 档案写入改走补丁（分支 `fix/state-tree-profile-patch`，审查 2026-11-25 A8）：
+>
+> - **档案文字字段不再走 `profileChanges` 旁路**：翻译层产 `update_character` 补丁，与改名同批落；同批「写档案再改名」两种顺序都能提交，直出下档案改动在 `commitDirectTurn` 事务内、随后续补丁失败一并回滚。§5.5 第二条已就地加更正注记。
+> - `character_updates` 显式写的同字段仍后落生效（接纳后由叙事更新落）。翻译结果的 `profileChanges` 恒为空，字段与直出侧的合并函数待后续任务删除。
