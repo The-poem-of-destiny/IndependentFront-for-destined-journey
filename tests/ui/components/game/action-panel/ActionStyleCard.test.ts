@@ -18,6 +18,7 @@ import {
   GENERIC,
   OUTCOME,
   ROSTER,
+  SETTLE,
   sheet,
   viewOf,
 } from './fixtures';
@@ -292,5 +293,17 @@ describe('ActionStyleCard', () => {
       expect(gem.classes()).toContain('r-mp');
       expect(gem.find('.c10-gem-n').text()).toBe('10');
     }
+  });
+
+  it('结算（A4）：多人状态结算在牌面逐人写出资源变化，状态带归属人名', () => {
+    const w = mountCard(SETTLE);
+    expect(w.find('.cardx').classes()).toContain('k-outcome');
+    const settle = w.findAll('.c10-tx .c10-settle');
+    expect(settle.map((s) => s.text().replace(/\s+/g, ' '))).toEqual([
+      '莱恩 失去 5 点 HP。',
+      '灰狼 失去 5 点 HP。',
+    ]);
+    expect(settle[0].find('.c10-n').classes()).toContain('down');
+    expect(w.find('.c10-tx .c10-st').text()).toBe('灰狼 获得 流血(1回合)。');
   });
 });

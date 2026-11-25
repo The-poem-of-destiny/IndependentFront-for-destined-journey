@@ -105,6 +105,11 @@ export interface ActionView {
   heal: boolean;
   /** 主掷骰（摘要原样） */
   roll?: DigestRoll;
+  /**
+   * 交锋里是被打的人；结算（outcome）里没有单一出手方时（回合结束的多人状态结算），
+   * 是结算涉及的各人 —— 收起视图要逐人画出来（`action-style-helpers` 的 `settledDeltas`），
+   * 否则这些变化在收起态就看不见了。
+   */
   targets: ActionViewTarget[];
   ownDeltas: ResourceDelta[];
   looseStatuses: string[];

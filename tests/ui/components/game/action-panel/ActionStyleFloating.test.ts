@@ -19,6 +19,7 @@ import {
   GENERIC,
   OUTCOME,
   ROSTER,
+  SETTLE,
   sheet,
   viewOf,
 } from './fixtures';
@@ -279,5 +280,14 @@ describe('ActionStyleFloating', () => {
     expect(top.classes()).not.toContain('cost');
     const rest = w.find('.f8-tk.is-actor .f8-sub');
     expect(rest.classes()).toEqual(expect.arrayContaining(['cost', 'r-mp']));
+  });
+
+  it('结算（A4）：多人状态结算在脚注逐人写出资源变化，状态带归属人名', () => {
+    const w = mountFloating(SETTLE);
+    expect(w.find('.floating').classes()).toContain('k-outcome');
+    const who = w.findAll('.f8-ft .f8-who');
+    expect(who.map((s) => s.text().replace(/\s+/g, ' '))).toEqual(['莱恩 HP −5', '灰狼 HP −5']);
+    expect(who[1].classes()).toEqual(expect.arrayContaining(['down', 'r-hp']));
+    expect(w.find('.f8-ft .f8-status').text()).toBe('＋灰狼 流血(1回合)');
   });
 });

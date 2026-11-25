@@ -18,6 +18,7 @@ import {
   GENERIC,
   OUTCOME,
   ROSTER,
+  SETTLE,
   sheet,
   viewOf,
 } from './fixtures';
@@ -239,5 +240,17 @@ describe('ActionStyleAfterimage', () => {
     // 目标名原文以字面出现（摘要层对 `/` 的拆分与本组件无关，只看 `<b>` 没被当成标签）
     expect(w.find('.d2-tg').text()).toContain('<b>狼');
     expect(w.find('.d2-h .act').text()).toBe('<b>出手</b>');
+  });
+
+  it('结算（A4）：多人状态结算逐人一条残影条，状态带归属人名', () => {
+    const w = mountAfterimage(SETTLE);
+    expect(w.find('.d2').classes()).toContain('k-outcome');
+    const rows = w.find('.d2-rows');
+    expect(rows.findAll('.d2-who').map((n) => n.text())).toEqual(['莱恩', '灰狼']);
+    expect(rows.findAll('.d2-who.own')).toHaveLength(0);
+    expect(rows.findAll('.dv').map((n) => n.text())).toEqual(['−5', '−5']);
+    expect(rows.findAll('.dv')[0].classes()).toContain('down');
+    expect(rows.findAll('.rng').map((n) => n.text())).toEqual(['80→75', '45→40']);
+    expect(w.find('.d2-st').text()).toBe('灰狼 流血(1回合)');
   });
 });

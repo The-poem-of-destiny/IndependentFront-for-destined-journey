@@ -7,7 +7,8 @@
  *     末尾是出手方自己的消耗；脚注是状态
  *   - roster：标题 + 环境 · 每个单位一条 HP 主条，MP / SP 小条
  *   - outcome：行动者 ▸ 动作 + 结论印；d20 对抗检定画成刻度（DC 刻线 + 落点），
- *     制作类画产物与品质格；下方是自身消耗的残影条
+ *     制作类画产物与品质格；下方是残影条 —— 多人结算时逐人逐资源一条，再是自身消耗；
+ *     交锋与结算共用同一套残影条行与状态脚注
  *   - generic：标题 + 前三个关键格
  *
  * 入场（仅 `entering`）：下降段先被一截同色实心「盖片」挡住 —— 停留 320ms 后 640ms 收拢到新值，
@@ -19,8 +20,23 @@ import { computed } from 'vue';
 import { RARITY_LEVELS } from '@engine/content/field-enums';
 import type { ActionView, ActionViewTarget } from '../../../lib/action-panel-view';
 import type { DigestRoll, ResourceDelta } from '../../../lib/action-digest';
+import {
+  actionLabel,
+  deltaClass,
+  genericFacts,
+  hasRange,
+  ownClass,
+  rc,
+  rosterNote,
+  settledDeltas,
+  sgn,
+  statusLines,
+  verdictTone,
+  type RangedDelta,
+} from '../../../lib/action-style-helpers';
 import ActionBadge from './ActionBadge.vue';
 import ActionGauge from './ActionGauge.vue';
+import ActionMoreHint from './ActionMoreHint.vue';
 
 const props = defineProps<{ view: ActionView; open: boolean; entering: boolean }>();
 
@@ -28,26 +44,13 @@ const MINI_RESOURCES = ['mp', 'sp'] as const;
 /** 检定刻度只画 d20 */
 const TRACK_DIE = 20;
 
-function sgn(n: number | null): string {
-  if (n === null || !Number.isFinite(n)) return '±?';
-  return (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n);
-}
-
-function rc(resource: string): string {
-  return `r-${resource.toLowerCase()}`;
-}
-
 function pct(value: number, max: number): string {
   if (!Number.isFinite(value) || !Number.isFinite(max) || max <= 0) return '0%';
   return `${Math.max(0, Math.min(100, (value / max) * 100)).toFixed(1)}%`;
 }
 
-function hasRange(d: ResourceDelta): d is ResourceDelta & { from: number; to: number } {
-  return d.from !== undefined && d.to !== undefined;
-}
-
 /** 残影条的刻度上限：写了上限用上限，否则以起止里较大的那个为满条 */
-function barMax(d: ResourceDelta & { from: number; to: number }): number {
+function barMax(d: RangedDelta): number {
   return d.max !== undefined && d.max > 0 ? d.max : Math.max(d.from, d.to);
 }
 
@@ -56,7 +59,7 @@ function barDir(d: ResourceDelta): 'up' | 'down' {
 }
 
 /** 盖片：入场时挡住下降段的那截同色实心（起点 = 新值，宽 = 失去的量） */
-function coverStyle(d: ResourceDelta & { from: number; to: number }): Record<string, string> {
+function coverStyle(d: RangedDelta): Record<string, string> {
   const max = barMax(d);
   const lo = Math.min(d.from, d.to);
   return { left: pct(lo, max), width: pct(Math.abs(d.from - d.to), max) };
@@ -71,31 +74,10 @@ interface BarRow {
   hit?: ActionViewTarget['hit'];
 }
 
-function deltaClass(row: BarRow, d: ResourceDelta): string {
-  if ((d.delta ?? 0) > 0) return 'up';
-  return row.own ? 'cost' : 'down';
+/** 变化量着色：出手方自己的按消耗口径，其余按目标口径 */
+function rowClass(row: BarRow, d: ResourceDelta): string {
+  return row.own ? ownClass(d) : deltaClass(d);
 }
-
-const verdictTone = computed(() => {
-  const tone = props.view.verdict?.tone;
-  return tone === 'success' ? 't-ok' : tone === 'error' ? 't-bad' : '';
-});
-
-const actionLabel = computed(() => props.view.action || props.view.title || '行动');
-
-/** 交锋：逐目标逐资源一行；没有变化的目标留一行虚线槽；最后是出手方的消耗 */
-const exchangeRows = computed<BarRow[]>(() => [
-  ...props.view.targets.flatMap((t): BarRow[] =>
-    t.deltas.length > 0
-      ? t.deltas.map((delta) => ({ name: t.name, own: false, delta }))
-      : [{ name: t.name, own: false, hit: t.hit }],
-  ),
-  ...props.view.ownDeltas.map((delta) => ({
-    name: delta.who || props.view.actor || '',
-    own: true,
-    delta,
-  })),
-]);
 
 const ownRows = computed<BarRow[]>(() =>
   props.view.ownDeltas.map((delta) => ({
@@ -105,27 +87,25 @@ const ownRows = computed<BarRow[]>(() =>
   })),
 );
 
-/** 脚注里的状态：目标的状态带上名字，认不出归属的原样列出 */
-const statusLines = computed(() => [
-  ...props.view.targets.flatMap((t) => t.statuses.map((s) => `${t.name} ${s}`)),
-  ...props.view.looseStatuses,
+/** 交锋：逐目标逐资源一行；没有变化的目标留一行虚线槽；最后是出手方的消耗 */
+const exchangeRows = computed<BarRow[]>(() => [
+  ...props.view.targets.flatMap((t): BarRow[] =>
+    t.deltas.length > 0
+      ? t.deltas.map((delta) => ({ name: t.name, own: false, delta }))
+      : [{ name: t.name, own: false, hit: t.hit }],
+  ),
+  ...ownRows.value,
 ]);
 
-/**
- * 名册标题旁的小字（环境之类）：摘要的关键格优先；摘要没给时取算式区里不属于任何单位的短行，至多两条
- * （与对决条同一口径）。
- */
-const rosterNote = computed(() => {
-  const fromFacts = props.view.facts.map((c) => c.value).filter(Boolean);
-  if (fromFacts.length > 0) return fromFacts.join(' · ');
-  const names = props.view.roster.map((u) => u.name);
-  return props.view.calc
-    .flatMap((s) => s.rows)
-    .filter((r) => r.label && !r.wide && !names.some((n) => r.label.startsWith(n)))
-    .slice(0, 2)
-    .map((r) => r.tokens.map((t) => t.text).join(''))
-    .join(' · ');
-});
+/** 结算：多人结算时逐人逐资源一条（视图把各人放在 targets），最后是出手方自己的消耗 */
+const outcomeRows = computed<BarRow[]>(() => [
+  ...settledDeltas(props.view).map(({ who, delta }) => ({ name: who, own: false, delta })),
+  ...ownRows.value,
+]);
+
+const barRows = computed(() =>
+  props.view.kind === 'outcome' ? outcomeRows.value : exchangeRows.value,
+);
 
 /** 检定刻度：结算的检定骰（退到主掷骰），须是带对抗值的 d20 */
 const track = computed(() => {
@@ -155,34 +135,64 @@ const qualityPips = computed(() => {
 const qualityStyle = computed(() =>
   props.view.outcome?.qualityVar ? { '--qc': props.view.outcome.qualityVar } : undefined,
 );
-
-const genericFacts = computed(() => props.view.facts.slice(0, 3));
 </script>
 
 <template>
   <div class="d2" :class="[`k-${view.kind}`, { 'is-entering': entering, 'is-heal': view.heal }]">
-    <!-- ── 交锋 ── -->
-    <template v-if="view.kind === 'exchange'">
+    <!-- ── 交锋 / 结算：头行 · （结算）刻度或产物行 · 残影条 · 状态 ── -->
+    <template v-if="view.kind === 'exchange' || view.kind === 'outcome'">
       <div class="d2-h">
         <template v-if="view.actor">
           <ActionBadge :name="view.actor" size="sm" />
           <span class="nm">{{ view.actor }}</span>
           <span class="sep" aria-hidden="true">▸</span>
         </template>
-        <span class="act">{{ actionLabel }}</span>
-        <template v-if="view.targets.length > 0">
+        <span class="act">{{ actionLabel(view) }}</span>
+        <template v-if="view.kind === 'exchange' && view.targets.length > 0">
           <span class="sep" aria-hidden="true">▸</span>
           <span class="nm d2-tg">{{ view.targets.map((t) => t.name).join('、') }}</span>
         </template>
-        <span v-if="view.verdict" class="vd d2-seal" :class="verdictTone">{{
+        <span v-if="view.verdict" class="vd d2-seal" :class="verdictTone(view)">{{
           view.verdict.text
         }}</span>
-        <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-          >{{ open ? '收起' : '算式' }}<i class="more-caret"
-        /></span>
+        <ActionMoreHint :open="open" />
       </div>
-      <div v-if="exchangeRows.length > 0" class="d2-rows">
-        <template v-for="(row, i) in exchangeRows" :key="`r-${i}`">
+      <template v-if="view.kind === 'outcome'">
+        <template v-if="track">
+          <div class="d2-track" :class="verdictTone(view)" :style="track.style">
+            <span class="sr-only">{{ track.text }}</span>
+            <span class="dc" aria-hidden="true"
+              ><span class="dc-l">{{ track.label }}</span></span
+            >
+            <span class="pt" aria-hidden="true">{{ track.total }}</span>
+          </div>
+          <div v-if="view.outcome?.resultText" class="d2-line">
+            <span class="txt">{{ view.outcome.resultText }}</span>
+          </div>
+        </template>
+        <div v-else class="d2-line">
+          <template v-if="view.outcome?.product">
+            <span class="q d2-prod" :style="qualityStyle">{{ view.outcome.product }}</span>
+            <span
+              v-if="qualityPips.length > 0"
+              class="d2-pips"
+              :style="qualityStyle"
+              role="img"
+              :aria-label="`品质 ${view.outcome.quality ?? ''}`"
+            >
+              <i v-for="(on, i) in qualityPips" :key="`q-${i}`" :class="{ on }" />
+            </span>
+            <span v-if="view.outcome.quality" class="rng">{{ view.outcome.quality }}</span>
+          </template>
+          <span v-if="view.outcome?.exp" class="up d2-exp">经验 {{ view.outcome.exp }}</span>
+          <span v-if="view.outcome?.roll" class="rng d2-roll">{{ view.outcome.roll.raw }}</span>
+          <span v-if="!view.outcome?.product && view.outcome?.resultText" class="txt">{{
+            view.outcome.resultText
+          }}</span>
+        </div>
+      </template>
+      <div v-if="barRows.length > 0" class="d2-rows" :class="{ 'd2-own': view.kind === 'outcome' }">
+        <template v-for="(row, i) in barRows" :key="`r-${i}`">
           <span class="nm d2-who" :class="{ own: row.own }">{{ row.name }}</span>
           <template v-if="row.delta">
             <span class="rl" :class="rc(row.delta.resource)">{{ row.delta.resource }}</span>
@@ -207,7 +217,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
                 >{{ row.delta.from }}<span class="rng-arrow">→</span>{{ row.delta.to }}</template
               ></span
             >
-            <span class="dv" :class="[deltaClass(row, row.delta), rc(row.delta.resource)]">{{
+            <span class="dv" :class="[rowClass(row, row.delta), rc(row.delta.resource)]">{{
               sgn(row.delta.delta)
             }}</span>
           </template>
@@ -220,8 +230,8 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
           </template>
         </template>
       </div>
-      <div v-if="statusLines.length > 0" class="d2-st">
-        <span v-for="(s, i) in statusLines" :key="`st-${i}`">{{ s }}</span>
+      <div v-if="statusLines(view).length > 0" class="d2-st">
+        <span v-for="(s, i) in statusLines(view)" :key="`st-${i}`">{{ s }}</span>
       </div>
     </template>
 
@@ -229,10 +239,8 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
     <template v-else-if="view.kind === 'roster'">
       <div class="d2-h">
         <span class="nm">{{ view.title || '战况' }}</span>
-        <small v-if="rosterNote" class="d2-note">{{ rosterNote }}</small>
-        <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-          >{{ open ? '收起' : '算式' }}<i class="more-caret"
-        /></span>
+        <small v-if="rosterNote(view)" class="d2-note">{{ rosterNote(view) }}</small>
+        <ActionMoreHint :open="open" />
       </div>
       <div class="d2-ros">
         <template v-for="(u, i) in view.roster" :key="`u-${i}`">
@@ -274,101 +282,14 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
       </div>
     </template>
 
-    <!-- ── 结算 ── -->
-    <template v-else-if="view.kind === 'outcome'">
-      <div class="d2-h">
-        <template v-if="view.actor">
-          <ActionBadge :name="view.actor" size="sm" />
-          <span class="nm">{{ view.actor }}</span>
-          <span class="sep" aria-hidden="true">▸</span>
-        </template>
-        <span class="act">{{ actionLabel }}</span>
-        <span v-if="view.verdict" class="vd d2-seal" :class="verdictTone">{{
-          view.verdict.text
-        }}</span>
-        <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-          >{{ open ? '收起' : '算式' }}<i class="more-caret"
-        /></span>
-      </div>
-      <template v-if="track">
-        <div class="d2-track" :class="verdictTone" :style="track.style">
-          <span class="sr-only">{{ track.text }}</span>
-          <span class="dc" aria-hidden="true"
-            ><span class="dc-l">{{ track.label }}</span></span
-          >
-          <span class="pt" aria-hidden="true">{{ track.total }}</span>
-        </div>
-        <div v-if="view.outcome?.resultText" class="d2-line">
-          <span class="txt">{{ view.outcome.resultText }}</span>
-        </div>
-      </template>
-      <div v-else class="d2-line">
-        <template v-if="view.outcome?.product">
-          <span class="q d2-prod" :style="qualityStyle">{{ view.outcome.product }}</span>
-          <span
-            v-if="qualityPips.length > 0"
-            class="d2-pips"
-            :style="qualityStyle"
-            role="img"
-            :aria-label="`品质 ${view.outcome.quality ?? ''}`"
-          >
-            <i v-for="(on, i) in qualityPips" :key="`q-${i}`" :class="{ on }" />
-          </span>
-          <span v-if="view.outcome.quality" class="rng">{{ view.outcome.quality }}</span>
-        </template>
-        <span v-if="view.outcome?.exp" class="up d2-exp">经验 {{ view.outcome.exp }}</span>
-        <span v-if="view.outcome?.roll" class="rng d2-roll">{{ view.outcome.roll.raw }}</span>
-        <span v-if="!view.outcome?.product && view.outcome?.resultText" class="txt">{{
-          view.outcome.resultText
-        }}</span>
-      </div>
-      <div v-if="ownRows.length > 0" class="d2-rows d2-own">
-        <template v-for="(row, i) in ownRows" :key="`o-${i}`">
-          <template v-if="row.delta">
-            <span class="nm d2-who own">{{ row.name }}</span>
-            <span class="rl" :class="rc(row.delta.resource)">{{ row.delta.resource }}</span>
-            <span v-if="hasRange(row.delta)" class="d2-bar" :class="rc(row.delta.resource)">
-              <ActionGauge
-                :lo="row.delta.from"
-                :hi="row.delta.to"
-                :max="barMax(row.delta)"
-                :resource="row.delta.resource"
-                :dir="barDir(row.delta)"
-              />
-              <i
-                v-if="entering && barDir(row.delta) === 'down'"
-                class="d2-cover"
-                :style="coverStyle(row.delta)"
-                aria-hidden="true"
-              />
-            </span>
-            <span v-else class="dashed" aria-hidden="true" />
-            <span class="rng"
-              ><template v-if="hasRange(row.delta)"
-                >{{ row.delta.from }}<span class="rng-arrow">→</span>{{ row.delta.to }}</template
-              ></span
-            >
-            <span class="dv" :class="[deltaClass(row, row.delta), rc(row.delta.resource)]">{{
-              sgn(row.delta.delta)
-            }}</span>
-          </template>
-        </template>
-      </div>
-      <div v-if="statusLines.length > 0" class="d2-st">
-        <span v-for="(s, i) in statusLines" :key="`st-${i}`">{{ s }}</span>
-      </div>
-    </template>
-
     <!-- ── 通用 ── -->
     <template v-else>
       <div class="d2-h">
         <span class="nm">{{ view.title || '行动详情' }}</span>
-        <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-          >{{ open ? '收起' : '算式' }}<i class="more-caret"
-        /></span>
+        <ActionMoreHint :open="open" />
       </div>
-      <div v-if="genericFacts.length > 0" class="d2-kv">
-        <span v-for="(c, i) in genericFacts" :key="`f-${i}`" class="d2-kv-item"
+      <div v-if="genericFacts(view).length > 0" class="d2-kv">
+        <span v-for="(c, i) in genericFacts(view)" :key="`f-${i}`" class="d2-kv-item"
           ><small class="d2-kv-k">{{ c.label }}</small
           ><b class="d2-kv-v">{{ c.value }}</b></span
         >
