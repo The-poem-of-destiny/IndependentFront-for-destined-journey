@@ -20,10 +20,13 @@
 #   Node 自己容忍 shebang 后的 CR，只有打包器不容忍。第一次装完之所以没发现，是因为
 #   那份工作副本是脚本直接写出来的 LF，直到一次 `git checkout` 才被 autocrlf 换成 CRLF。
 # - `scripts/notify.sh` —— 同一类：CRLF 的 shell 脚本会以 `bad interpreter: ...^M` 失败。
+# - `scripts/analyze-state-writes.mjs` —— 2026-11-25 原样重演：新增时没人往这里补行，
+#   `tests/analyze-state-writes.test.ts` 在 Windows 上又是必红、CI 又是全绿。
 #
-# 依旧只点名具体文件、不写 `*.mjs`/`*.sh` 通配 —— 理由与上面那条相同，
-# 新增带 shebang 的脚本时**记得往这里补一行**。
-scripts/knip-ratchet.mjs text eol=lf
-scripts/build-placeholder-hashes.mjs text eol=lf
-scripts/notify.sh text eol=lf
-dev.sh text eol=lf
+# 📌 2026-11-25 改为 `*.mjs` / `*.sh` 通配（原先逐个点名、刻意不写通配）。
+# 「新增脚本时记得补一行」靠人记，已经漏过一次；而原先担心的全仓重规范化在这两类上
+# 不存在 —— 当日实测 `git ls-files --eol` 里所有 .mjs / .sh 的索引都已是 LF，
+# 加通配不会改动任何文件内容，只影响工作区检出。其他类型（.js / .ts 等）
+# 目前没有带 shebang 的，仍不加规则，理由同 *.bat 那条。
+*.mjs text eol=lf
+*.sh text eol=lf
