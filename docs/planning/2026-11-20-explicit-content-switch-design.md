@@ -239,3 +239,9 @@ P1 与 P3 的 lint 部分可并行（以共享测试向量为契约）；P4 依�
 | 显示           | `useNsfwText()`：建档页（摘要函数先过滤再剥 HTML，否则 `<nsfw>` 会被当 HTML 剥掉而内容留下）、角色查看器、角色列表、编年史、地图标记、日历、调试面板                                                                                                                            |
 | 未过滤的显示面 | 玩家自己的人设编辑（StatusOverview，玩家自写文本）、调试导出 JSON（开发数据保留原文）、势力地图的地块事实（AI 生成，无标记）                                                                                                                                                    |
 | 未做           | 内容编辑器「点检查报告跳到 offset」「以关模式预览」；内容迁移（给真实条目加标记）                                                                                                                                                                                               |
+
+📌 2026-11-25 更正（`fix/nsfw-switch-leaks`，审查 A10 / A11）：
+
+- **上表「Delta 签名：没改」的理由不成立。** 出口安全网只能剥还带着标记的文本；旧 transcript 是开模式渲染的结果，标记已剥、露骨段留在原文里，出口认不出。现在开关为开时往 baseline signature 末尾追加一个字段（`prompt-session-assembler.ts` 的 `computeBaselineSignature`），开 → 关（以及关 → 开）都会签名不符、重基线一次。开关为关（缺省）时不加字段，签名与此前逐字节相同，已有 Agent 存档不会集体重基线。
+- **冻结的角色定义此前运行期不按开关过滤**，且人设条目被 `filterNsfwBooks` 剔掉后反而回落发定义自带的 `lore` 原文。现在 `resolveCharacterLoreLinks` 多一个可选参数 `{ enabled, sourceBooks }`，只用于 `game-pipeline` 交给模型的 `context.characterDefinitions`：开关关时剔除整条 `nsfw: true` 的定义；链接条目在过滤前的书里带整条标记的，不回落 `lore`；其余回落的 `lore` 过开关过滤。冻结与挂定义（`initializeCharacterDefinitions`）仍吃与开关无关的版本，不写回存档。`buildCharacterContext` 在开关关时以这份投影为准，不再回读角色身上冻结副本里的 `lore`。开关开时三处行为都不变。
+- `direct_cached` 本次只核对、未改：§5.2「签名自然变化」只对前缀成立。本轮资料（`currentLore`）、角色上下文（`characterContext`）和 `directCachePlacement: "turn"` 的预设条目在可替换分区里，随留存的 `direct_context` 消息进 transcript，不进签名。开关由开到关时这些分区改发过滤后的值，但更早留存消息里开模式渲染的露骨段仍会回放，前缀没变时不会冷建。待议：照 Agent 模式的做法，只在开关为开时把开关并入 `prepareDirectContext` 的 `signature`。

@@ -121,6 +121,36 @@ describe('chronicle selection and prompt wiring', () => {
     ctx.characters = [{ ...character, definition }];
     expect(buildCharacterContext(ctx)).not.toContain('兜底人设原文');
   });
+  it('露骨内容关：已实体化角色不回读冻结副本里的 lore 原文（A11 回归）', () => {
+    // 未接设置 provider = 开关关（安全默认）
+    const explicit = {
+      id: 'guide',
+      name: '向导',
+      profile: {},
+      assets: [],
+      past: [],
+      lore: '整条露骨人设',
+      nsfw: true as const,
+    };
+    const ctx = context();
+    ctx.userInput = '去拜访向导';
+    // 整条标记角色被投影剔除：角色身上冻结的副本也不能回落
+    ctx.characterDefinitions = [];
+    ctx.characters = [{ ...character, definition: explicit }];
+    expect(buildCharacterContext(ctx)).not.toContain('整条露骨人设');
+    // 链接条目因露骨被剔：投影里的定义去掉了 lore，冻结副本里的原文同样不回落
+    const linked = { ...explicit, nsfw: undefined, lore: '露骨兜底原文' };
+    ctx.characterDefinitions = [{ ...linked, lore: undefined }];
+    ctx.characters = [{ ...character, definition: linked }];
+    expect(buildCharacterContext(ctx)).not.toContain('露骨兜底原文');
+    // 不在投影里的普通定义：lore 过开关过滤
+    ctx.characterDefinitions = [];
+    ctx.characters = [
+      { ...character, definition: { ...linked, lore: '前文<nsfw>露骨段</nsfw>后文' } },
+    ];
+    expect(buildCharacterContext(ctx)).toContain('前文后文');
+    expect(buildCharacterContext(ctx)).not.toContain('露骨段');
+  });
   it('hard-filters low importance and unrelated characters, honoring a separate budget', () => {
     expect(buildCharacterContext(context())).toContain('同行之约');
     expect(buildCharacterContext(context())).not.toContain('闲聊');

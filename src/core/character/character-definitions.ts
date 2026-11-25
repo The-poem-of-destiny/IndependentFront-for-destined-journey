@@ -5,7 +5,7 @@ import { getContentRegistry } from '../content/content-registry-runtime';
 import { extractRemoteAssetDecls } from '../assets/remote-asset-catalogue';
 import { isRecord, parseCharacterProfile, parseChronicleDraft } from './character-updates';
 import { extractLoreAge, parseAgeHint } from './character-age';
-import { isNsfwFlagged, nsfwEnabled } from '../content/nsfw-filter';
+import { applyNsfwMode, isNsfwFlagged, nsfwEnabled } from '../content/nsfw-filter';
 
 /** Content boundary: bad definitions are diagnosed independently, never evaluated as scripts. */
 export function readCharacterDefinitions(raw: unknown): CharacterDefinition[] {
@@ -128,9 +128,7 @@ export function availableCharacterDefinitions(books: readonly WorldBook[]): Char
   const all = allCharacterDefinitions(books);
   if (nsfwEnabled()) return all;
   // 露骨内容关：整条标记的角色、或链接到整条标记人设条目的角色，不进建档候选
-  const nsfwEntries = new Set(
-    books.flatMap((b) => b.entries.filter((e) => isNsfwFlagged(e.extra?.lore)).map((e) => e.uid)),
-  );
+  const nsfwEntries = nsfwEntryUids(books);
   return all.filter((d) => !d.nsfw && !nsfwEntries.has(characterLoreEntryUid(d) ?? ''));
 }
 
@@ -176,19 +174,47 @@ export function characterLoreEntryUids(definitions: readonly CharacterDefinition
   return [...new Set(definitions.flatMap((d) => characterLoreEntryUid(d) ?? []))];
 }
 
+/** 整条标记为露骨（`extra.lore.nsfw: true`）的世界书条目 uid。 */
+function nsfwEntryUids(books: readonly WorldBook[]): Set<string> {
+  return new Set(
+    books.flatMap((b) => b.entries.filter((e) => isNsfwFlagged(e.extra?.lore)).map((e) => e.uid)),
+  );
+}
+
 /**
  * Keep `loreEntry` only where that entry is actually loaded; otherwise drop the link so the
  * definition's fallback `lore` is used instead of the character silently losing its profile.
+ *
+ * 传 `nsfw` 且开关为关时，额外做「给模型用」的投影（只在使用时，永不写回存档）。
+ * `sourceBooks` 是开关过滤**之前**的书，用来认出「因露骨被剔」的链接条目（缺省用 `books`）：
+ * - 整条 `nsfw: true` 的定义整个剔除；
+ * - 链接条目因整条露骨标记被剔（在 `sourceBooks` 里有标记）的定义，不回落 `lore` 原文；
+ * - 其余回落的 `lore` 过 `applyNsfwMode`。
+ * 不传 `nsfw` 或开关为开：行为与原来逐字节相同（冻结 / 挂定义一律走这条）。
  */
 export function resolveCharacterLoreLinks(
   definitions: readonly CharacterDefinition[],
   books: readonly WorldBook[],
+  nsfw?: { enabled: boolean; sourceBooks?: readonly WorldBook[] },
 ): CharacterDefinition[] {
   const loaded = new Set(books.flatMap((book) => book.entries.map((entry) => entry.uid)));
-  return definitions.map((definition) => {
-    if (!definition.loreEntry || loaded.has(definition.loreEntry)) return definition;
-    const { loreEntry: _unloaded, ...rest } = definition;
-    return rest;
+  const hide = nsfw !== undefined && !nsfw.enabled;
+  const flagged = hide ? nsfwEntryUids(nsfw.sourceBooks ?? books) : new Set<string>();
+  return definitions.flatMap((definition) => {
+    if (hide && definition.nsfw) return [];
+    if (definition.loreEntry && loaded.has(definition.loreEntry)) return [definition];
+    let rest: CharacterDefinition = definition;
+    if (definition.loreEntry) {
+      const { loreEntry: _unloaded, ...unlinked } = definition;
+      rest = unlinked;
+    }
+    if (!hide || rest.lore === undefined) return [rest];
+    if (definition.loreEntry && flagged.has(definition.loreEntry)) {
+      const { lore: _explicit, ...withoutLore } = rest;
+      return [withoutLore];
+    }
+    const lore = applyNsfwMode(rest.lore, false);
+    return [lore === rest.lore ? rest : { ...rest, lore }];
   });
 }
 

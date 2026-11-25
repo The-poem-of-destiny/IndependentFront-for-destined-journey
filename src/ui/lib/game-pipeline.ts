@@ -1193,15 +1193,25 @@ export class GamePipeline {
       const { presets, agentDefaults } = await this.loadPresets();
       const worldBooks = await this.loadActiveWorldBooks();
       // 定义是给引擎的目录，链接的世界书条目才是给模型的人设：解析链接，条目没加载上时回落定义自带 lore
-      context.characterDefinitions = resolveCharacterLoreLinks(
-        linkCharacterDefinitions(
-          this.game.activeSave?.metadata.characterDefinitions ??
-            legacyCharacterDefinitions(worldBooks),
-        ),
-        worldBooks,
+      const linkedDefinitions = linkCharacterDefinitions(
+        this.game.activeSave?.metadata.characterDefinitions ??
+          legacyCharacterDefinitions(worldBooks),
       );
+      // 露骨内容开关：给模型的那份按开关投影（剔整条标记角色、因露骨被剔的链接不回落 lore）；
+      // 认「因露骨被剔」要看过滤前的书。冻结 / 挂定义仍吃与开关无关的版本 —— 永不写回存档
+      const nsfwOn = nsfwEnabled();
+      const sourceBooks = nsfwOn
+        ? undefined
+        : await (async () =>
+            loadWorldBooksWithFallback(useWorldBookStore().books as WorldBook[]))().catch(
+            () => undefined,
+          );
+      context.characterDefinitions = resolveCharacterLoreLinks(linkedDefinitions, worldBooks, {
+        enabled: nsfwOn,
+        sourceBooks,
+      });
       await createStateManager(this.saveId).initializeCharacterDefinitions(
-        context.characterDefinitions,
+        resolveCharacterLoreLinks(linkedDefinitions, worldBooks),
         () => this.isRunCurrent(controller),
       );
       const { getCharacters, getDatabase } = await import('@engine/persistence/database');

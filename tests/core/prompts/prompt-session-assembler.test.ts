@@ -17,10 +17,12 @@
  *   → 「historyLayers 播种窗口 + 新消息按 id 追加 + 重基线后重新收窄」
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setEngineSettingsProvider } from '../../../src/core/runtime/engine-settings';
 import {
   preparePromptSession,
   completePromptSession,
+  installPromptSessionStore,
   invalidatePromptSession,
   resetPromptSessionsForTest,
   activePromptSessionCount,
@@ -465,6 +467,79 @@ describe('prompt-session-assembler', () => {
     const p2 = await preparePromptSession(input({ tailPrompt: '新指令' }));
     expect(p2.rebased).toBe(true);
     expect(p2.rebaseReason).toBe('signature_changed');
+  });
+
+  describe('露骨内容开关并入签名（A10 回归）', () => {
+    const setNsfw = (value: boolean | undefined) =>
+      setEngineSettingsProvider(value === undefined ? undefined : () => ({ nsfwContent: value }));
+    afterEach(() => {
+      setEngineSettingsProvider(undefined);
+      installPromptSessionStore(null);
+    });
+
+    /** 装一个只记录落库行的会话存储，读出签名。 */
+    function captureSignatures(): string[] {
+      const saved: string[] = [];
+      installPromptSessionStore({
+        load: async () => null,
+        save: async (record) => {
+          saved.push(record.baselineSignature);
+        },
+        delete: async () => {},
+      });
+      return saved;
+    }
+
+    async function signatureOf(nsfw: boolean | undefined): Promise<string> {
+      resetPromptSessionsForTest();
+      const saved = captureSignatures();
+      setNsfw(nsfw);
+      const p = await preparePromptSession(input());
+      completePromptSession(p.handle!, { rawResponse: 'r' });
+      await vi.waitFor(() => expect(saved).toHaveLength(1));
+      return saved[0];
+    }
+
+    it('开关关（缺省）时签名不带开关字段，与未接设置时逐字节相同', async () => {
+      const unset = await signatureOf(undefined);
+      const off = await signatureOf(false);
+      expect(off).toBe(unset);
+      expect(off).not.toContain('nsfw');
+      // 开时只在末尾追加一个字段：关时签名就是加字段之前的原样
+      const on = await signatureOf(true);
+      expect(on).toBe(`${off}\u0000nsfw-content:on`);
+    });
+
+    it('开 → 关后重基线，旧 transcript 里开模式渲染出的露骨段不再回放', async () => {
+      const book: WorldBook = {
+        ...fixtureWorldBook,
+        entries: [
+          {
+            ...fixtureWorldBook.entries[0],
+            uid: 'fixture:system_core/explicit',
+            content: '常驻设定。<nsfw>露骨段落</nsfw><sfw>净版段落</sfw>',
+            extra: { lore: { audiences: ['vars_update'] } },
+          },
+        ],
+      };
+      const cfg = makeCfg('vars_update', {
+        template: '{{SYS_PROMPT}}\n{{LORE_BOOK_STATIC}}\n{{USER_INPUT}}',
+      });
+      const sessionInput = input({ agentId: 'vars_update', configs: [cfg], worldBooks: [book] });
+
+      setNsfw(true);
+      const p1 = await preparePromptSession(sessionInput);
+      expect(wireText(p1.messages)).toContain('露骨段落');
+      completePromptSession(p1.handle!, { rawResponse: '旧会话响应' });
+
+      setNsfw(false);
+      const p2 = await preparePromptSession(sessionInput);
+      expect(p2.rebased).toBe(true);
+      expect(p2.rebaseReason).toBe('signature_changed');
+      expect(wireText(p2.messages)).not.toContain('露骨段落');
+      expect(wireText(p2.messages)).toContain('净版段落');
+      expect(wireText(p2.messages)).not.toContain('旧会话响应');
+    });
   });
 
   // ── token 预算 ──
