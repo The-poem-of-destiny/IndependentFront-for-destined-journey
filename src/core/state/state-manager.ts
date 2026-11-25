@@ -856,26 +856,14 @@ export class StateManager {
             }
             if (input.combat !== undefined) profile.worldFlags.directCombat = input.combat;
             await this.persistProfile(profile);
-            for (const patch of input.patches) {
-              if (patch.op === 'remove_item' || patch.op === 'transfer_item') {
-                const character = await this.resolveCharTarget(patch.target);
-                const value = patch.value as { name: string; quantity?: number };
-                const item = character.inventory.find((row) => row.name === value.name);
-                if (!item || (value.quantity !== undefined && item.quantity < value.quantity))
-                  throw new Error(`物品「${value.name}」数量不足`);
-              }
-              if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
-                this.validatePatch(patch);
-                const amount = patch.amount!;
-                if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
-                if (amount >= 0) await addFP(profile, amount, '行动结算');
-                else await spendFP(profile, -amount, '行动结算');
-                events.push(this.createEvent('variable_change', patch));
-              } else {
-                const applied = await this.applyPatch(patch);
-                if (applied.event) events.push(applied.event);
-              }
-            }
+            // AI 来源（直出整楼）：扣命运点超出余额时钳到 0，不因此拒收整楼（A9）
+            events.push(
+              ...(await this.applyPatchesAtomic(input.patches, {
+                fpReason: '行动结算',
+                clampFpSpend: true,
+                checkItemStock: true,
+              })),
+            );
             assertCurrentTurn(input.isCurrent);
             input.onCommitStart?.();
             await this.flushCommitScope(scope);
@@ -898,6 +886,59 @@ export class StateManager {
     });
   }
 
+  /**
+   * 命运点补丁（`delta_variable profile.fp`）走 FP 账务（addFP / spendFP），真源是 `SaveProfile.fp`。
+   *
+   * `clampSpend`：AI 来源（commitAiPatches / commitDirectTurn）扣超余额时钳到 0（A9，
+   * 旧协议与 Agent 模式同样受保护）；领域命令与玩家修改传 false，不足照旧抛错。
+   */
+  private async applyFatePointPatch(
+    patch: StatePatch,
+    reason: string,
+    clampSpend: boolean,
+  ): Promise<GameEvent> {
+    this.validatePatch(patch);
+    const amount = patch.amount!;
+    if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
+    const profile = await this.readProfile();
+    if (amount >= 0) await addFP(profile, amount, reason);
+    else {
+      const balance = Number.isFinite(profile.fp) ? Math.max(0, profile.fp) : 0;
+      await spendFP(profile, clampSpend ? Math.min(-amount, balance) : -amount, reason);
+    }
+    return this.createEvent('variable_change', patch);
+  }
+
+  /**
+   * 整批原子提交的事务体（commitDirectTurn / commitDomainCommand / commitPlayerEdit 共用，R8）。
+   * 调用方负责开 Dexie 事务与提交作用域；任一补丁抛错即向上抛，由事务回滚。
+   * `checkItemStock`：消耗 / 转移物品前先核对数量（直出接纳沿用的前置校验）。
+   */
+  private async applyPatchesAtomic(
+    patches: readonly StatePatch[],
+    options: { fpReason: string; clampFpSpend?: boolean; checkItemStock?: boolean },
+  ): Promise<GameEvent[]> {
+    const events: GameEvent[] = [];
+    for (const patch of patches) {
+      if (options.checkItemStock && (patch.op === 'remove_item' || patch.op === 'transfer_item')) {
+        const character = await this.resolveCharTarget(patch.target);
+        const value = patch.value as { name: string; quantity?: number };
+        const item = character.inventory.find((row) => row.name === value.name);
+        if (!item || (value.quantity !== undefined && item.quantity < value.quantity))
+          throw new Error(`物品「${value.name}」数量不足`);
+      }
+      if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
+        events.push(
+          await this.applyFatePointPatch(patch, options.fpReason, options.clampFpSpend === true),
+        );
+        continue;
+      }
+      const result = await this.applyPatch(patch);
+      if (result.event) events.push(result.event);
+    }
+    return events;
+  }
+
   /** All required changes succeed together; rejection publishes no events or effects. */
   async commitDomainCommand(patches: StatePatch[]): Promise<void> {
     if (!patches.length) return;
@@ -910,21 +951,8 @@ export class StateManager {
           const scope = createCommitScope();
           this.commitScope = scope;
           try {
-            const events: GameEvent[] = [];
-            for (const patch of patches) {
-              if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
-                this.validatePatch(patch);
-                const amount = patch.amount!;
-                if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
-                const profile = await this.readProfile();
-                if (amount >= 0) await addFP(profile, amount, '行动结算');
-                else await spendFP(profile, -amount, '行动结算');
-                events.push(this.createEvent('variable_change', patch));
-                continue;
-              }
-              const result = await this.applyPatch(patch);
-              if (result.event) events.push(result.event);
-            }
+            // 领域命令（制作 / 战斗扣费等）：命运点不足照旧抛错，整批拒收
+            const events = await this.applyPatchesAtomic(patches, { fpReason: '行动结算' });
             await this.flushCommitScope(scope);
             const save = await getSave(this.saveId);
             if (save) await saveSaveSlot(save);
@@ -984,21 +1012,7 @@ export class StateManager {
             const scope = createCommitScope();
             this.commitScope = scope;
             try {
-              const events: GameEvent[] = [];
-              for (const patch of patches) {
-                if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
-                  this.validatePatch(patch);
-                  const amount = patch.amount!;
-                  if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
-                  const profile = await this.readProfile();
-                  if (amount >= 0) await addFP(profile, amount, '玩家修改');
-                  else await spendFP(profile, -amount, '玩家修改');
-                  events.push(this.createEvent('variable_change', patch));
-                  continue;
-                }
-                const result = await this.applyPatch(patch);
-                if (result.event) events.push(result.event);
-              }
+              const events = await this.applyPatchesAtomic(patches, { fpReason: '玩家修改' });
               for (const change of translation.profileChanges) {
                 const character = await this.resolveCharacter(change.name);
                 Object.assign(character, structuredClone(change.profile_changes));
@@ -1137,14 +1151,9 @@ export class StateManager {
             //    `delta_variable profile.fp` 必须走既有 FP 账务（addFP/spendFP），否则会被
             //    `applyDeltaVariable` 当成 `variables.profile.fp` 写进伪路径 —— AI 的
             //    `fp.delta` 看起来「提交成功」，真源却纹丝不动（与 commitDomainCommand 同口径）。
+            //    AI 来源扣超余额时钳到 0（A9），不抛错丢条。
             if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
-              this.validatePatch(patch);
-              const amount = patch.amount!;
-              if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
-              const profile = await this.readProfile();
-              if (amount >= 0) await addFP(profile, amount, '行动结算');
-              else await spendFP(profile, -amount, '行动结算');
-              const event = this.createEvent('variable_change', patch);
+              const event = await this.applyFatePointPatch(patch, '行动结算', true);
               results.push({ patch, success: true, event });
               this.events.push(event);
               newEvents.push(event);
@@ -1543,6 +1552,11 @@ export class StateManager {
         if (incomingAttrs && typeof incomingAttrs === 'object') {
           char.attributes = { ...char.attributes, ...incomingAttrs };
         }
+      }
+
+      // 金钱不为负（A9）：落地后钳到 0，旧协议 delta / 整值写与 Agent 模式同样受保护
+      if (keys.includes('money') && typeof char.money === 'number' && char.money < 0) {
+        char.money = 0;
       }
 
       // ===== NPC 写等级 → 层级由代码按等级推出（§3.3 / §9 #2）=====
