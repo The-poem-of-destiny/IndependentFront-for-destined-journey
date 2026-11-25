@@ -5,6 +5,7 @@ import {
   legacyCharacterDefinitions,
   characterLoreEntryUids,
   linkCharacterDefinitions,
+  prepareTurnCharacterDefinitions,
   readCharacterDefinitions,
   resolveCharacterLoreLinks,
 } from '../../../src/core/character/character-definitions';
@@ -176,6 +177,58 @@ describe('露骨内容开关下给模型的角色定义投影（A11 回归）', 
     expect(out[2].lore).toBe('前文净版后文');
     // 只在使用时投影，不改入参（冻结定义原样，永不写回）
     expect(input).toEqual(snapshot);
+  });
+
+  it('旧档首轮冻结：开关关时也用过滤前的书现转，冻结份含露骨角色、给模型的份不含', () => {
+    const profileBlock = (name: string) =>
+      `<%# char-info-ejs-builder:start %><% const profile = {"characterName":"${name}","avatarUrl":"https://example.com/${name}.png"}; %><%# char-info-ejs-builder:end %>`;
+    const legacyRaw = {
+      id: 'characters',
+      partition: 'character',
+      entries: [
+        { uid: 'fated:character/a', enabled: true, content: `甲的人设。${profileBlock('甲')}` },
+        {
+          uid: 'fated:character/b',
+          enabled: true,
+          content: `乙的露骨人设。${profileBlock('乙')}`,
+          extra: { lore: { nsfw: true } },
+        },
+      ],
+    } as unknown as WorldBook;
+    const legacyFiltered = { ...legacyRaw, entries: [legacyRaw.entries[0]] } as WorldBook;
+
+    const off = prepareTurnCharacterDefinitions({
+      frozen: undefined,
+      books: [legacyFiltered],
+      sourceBooks: [legacyRaw],
+      nsfwEnabled: false,
+    });
+    // 冻结份与开关无关：两个角色都在，链接按过滤前的书保留
+    expect(off.toFreeze.map((d) => d.name)).toEqual(['甲', '乙']);
+    expect(off.toFreeze[1].loreEntry).toBe('fated:character/b');
+    expect(off.toFreeze[1].nsfw).toBe(true);
+    // 给模型的份按开关投影
+    expect(off.forModel.map((d) => d.name)).toEqual(['甲']);
+
+    // 开关开时冻结份与关时相同（开关状态没写进存档）
+    const on = prepareTurnCharacterDefinitions({
+      frozen: undefined,
+      books: [legacyRaw],
+      nsfwEnabled: true,
+    });
+    expect(on.toFreeze).toEqual(off.toFreeze);
+    expect(on.forModel).toEqual(on.toFreeze);
+
+    // 已有冻结定义时原样沿用，不再现转
+    const frozen = [definition('kept')];
+    expect(
+      prepareTurnCharacterDefinitions({
+        frozen,
+        books: [legacyFiltered],
+        sourceBooks: [legacyRaw],
+        nsfwEnabled: false,
+      }).toFreeze.map((d) => d.id),
+    ).toEqual(['kept']);
   });
 
   it('开关开：与不传开关时逐项相同（行为不变）', () => {

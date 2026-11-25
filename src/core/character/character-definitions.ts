@@ -218,6 +218,32 @@ export function resolveCharacterLoreLinks(
   });
 }
 
+/**
+ * 本轮要用的角色定义（两份）：
+ * - `toFreeze`：交给 `initializeCharacterDefinitions` 冻结 / 挂定义，**与露骨内容开关无关** ——
+ *   旧档没有冻结定义时从开关过滤**之前**的书现转，链接也按过滤前的书解析，开关状态不写进存档；
+ * - `forModel`：给模型的那份，按当时的开关投影（见 `resolveCharacterLoreLinks`）。
+ *
+ * `books` 是开关过滤后的书；`sourceBooks` 是同一白名单下、开关过滤之前的书（缺省 = `books`，
+ * 开关为开时两者条目相同）。纯函数，不改入参。
+ */
+export function prepareTurnCharacterDefinitions(input: {
+  frozen: readonly CharacterDefinition[] | undefined;
+  books: readonly WorldBook[];
+  sourceBooks?: readonly WorldBook[];
+  nsfwEnabled: boolean;
+}): { toFreeze: CharacterDefinition[]; forModel: CharacterDefinition[] } {
+  const source = input.sourceBooks ?? input.books;
+  const linked = linkCharacterDefinitions(input.frozen ?? legacyCharacterDefinitions(source));
+  return {
+    toFreeze: resolveCharacterLoreLinks(linked, source),
+    forModel: resolveCharacterLoreLinks(linked, input.books, {
+      enabled: input.nsfwEnabled,
+      sourceBooks: source,
+    }),
+  };
+}
+
 export function characterAssetRows(
   definition: CharacterDefinition | undefined,
   assets: readonly AssetMetaRecord[],
