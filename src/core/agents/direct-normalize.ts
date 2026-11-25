@@ -3,15 +3,16 @@
  *
  * 模型输出形状稍有偏差（字符串当对象、缺默认字段、写了 id 等账务键）时，
  * 在严格校验之前就地纠正，并为每一处纠正记一条中文 note（带路径）。
- * notes 只收「意思明确、不丢信息」的纠正；给了但类型或范围错的值多数原样留给
- * direct-output.ts 的校验器，由它按最小单元丢弃并记入 dropped。
- * 登神状态是例外：这里直接按单元丢弃（坏条目 / 坏字段回落默认），丢弃记入 `dropped`，不进 notes。
+ * 这里只做「意思明确、不丢信息」的纠正；给了但类型或范围错的值一律原样留给
+ * direct-output.ts 的校验器，由它按最小单元丢弃并记入 dropped（📌 2026-11-25 起登神状态的
+ * 有损丢弃也归校验器，本模块不再产出 dropped）。
  * 唯一例外是状态效果的 category：枚举外的文本值经 normalizeStatusCategory 映射到最接近的
  * 分类（认不出的落「特殊」），note 写明原值与映射后的值 —— 分类只是归类，效果名照旧保留，
  * 比为一个分类词作废整楼划算。
  *
- * 🔴 原型污染键（`__proto__` / `prototype` / `constructor`）在任何纠正之前整体扫描并拒收：
- * 归一化里有按动态键复制的地方，带着这些键进去会把「设原型」混成普通赋值、键就此消失。
+ * 🔴 原型污染键（`__proto__` / `prototype` / `constructor`）由调用方 direct-output.ts 在调用本模块
+ * 之前整体扫描并拒收：归一化里有按动态键复制的地方，带着这些键进来会把「设原型」混成普通赋值、
+ * 键就此消失。别在没扫过的对象上调用 `normalizeDirectUpdates`。
  */
 import { normalizeStatusCategory } from '../content/field-enums';
 import {
@@ -22,9 +23,10 @@ import {
   DIRECT_EFFECT_REMOVE_KEYS,
   DIRECT_ENTITY_LIST_KEYS,
   DIRECT_ENTITY_OUTER_KEYS,
-  DIRECT_FORBIDDEN_KEYS,
   DIRECT_PLOT_KEYS,
+  DIRECT_QUEST_UPSERT_KEYS,
   DIRECT_STRIPPED_KEYS,
+  emptyDirectSections,
 } from './direct-contract';
 
 type Row = Record<string, unknown>;
@@ -39,8 +41,6 @@ export interface NormalizeDirectOptions {
 export interface NormalizeDirectResult {
   /** 每处无损纠正一条（中文，带路径）；无纠正为空数组 */
   notes: string[];
-  /** 每处有损丢弃一条（中文，带路径，形如「路径：原因，已忽略」）；无丢弃为空数组 */
-  dropped: string[];
   /** 平铺在 output 上、已归位进 output.character 的人物名（独立告警，不计入 notes） */
   flattenedCharacters: string[];
 }
@@ -66,29 +66,12 @@ function fill(row: Row, key: string, value: unknown, path: string, notes: string
   return true;
 }
 
-function isForbiddenKey(key: string): boolean {
-  return (DIRECT_FORBIDDEN_KEYS as readonly string[]).includes(key);
-}
-
-/** 不经原型链写入自有数据属性（键已过禁键扫描，这里再兜一层） */
+/**
+ * 不经原型链写入自有数据属性。键已过 direct-output.ts 的 `rejectForbidden`
+ * （归一化之前对整个 direct_updates 扫一遍原型污染键，任何层级出现即整楼拒收），这里再兜一层。
+ */
 function setOwn(row: Row, key: string, value: unknown): void {
   Object.defineProperty(row, key, { value, writable: true, enumerable: true, configurable: true });
-}
-
-/**
- * 归一化之前对整个 direct_updates 扫一遍原型污染键，任何层级出现即拒收
- * （文案与 direct-output.ts 的 safeValues 一致）。
- */
-function rejectForbiddenKeys(value: unknown): void {
-  if (Array.isArray(value)) {
-    value.forEach(rejectForbiddenKeys);
-    return;
-  }
-  if (!isRow(value)) return;
-  for (const key of Object.keys(value)) {
-    if (isForbiddenKey(key)) throw new Error(`直出结果无效：不允许模型填写 ${key}`);
-    rejectForbiddenKeys(value[key]);
-  }
 }
 
 /**
@@ -121,18 +104,9 @@ function fillSections(parsed: Row, options: NormalizeDirectOptions, notes: strin
     parsed.version = 1;
     notes.push('direct_updates.version：缺失，已补 1');
   }
-  const defaults: Array<[string, () => unknown]> = [
-    ['world', () => ({})],
-    ['time', () => ({ delta_time: 0 })],
-    ['entities', () => []],
-    ['state', () => ({})],
-    ['effects', () => []],
-    ['plot', () => ({})],
-    ['diceUsed', () => []],
-  ];
-  for (const [key, make] of defaults)
+  for (const [key, empty] of Object.entries(emptyDirectSections()))
     if (absent(parsed, key)) {
-      parsed[key] = make();
+      parsed[key] = empty;
       notes.push(`direct_updates.${key}：缺失，已补空值`);
     }
   // 结构化战斗开启时 combat 缺失仍拒（必须显式写 null）；关闭时调用方已丢弃，这里补 null
@@ -165,9 +139,9 @@ function textToList(row: Row, key: string, path: string, notes: string[]): void 
 /**
  * N5：登神条目的丢弃原因 —— 缺名（没有 name、不是文本或只含空白；纯文本条目为空串），
  * 或既不是文本也不是对象；条目可用时返回 undefined。
- * 只丢掉那一条，不整楼拒收（人物内与 loadout 顶层同口径）。
+ * 归一化只纠正可用条目、按可用条目推断 enabled；丢弃由校验器（direct-output.ts）按同一判据做。
  */
-function ascensionEntryProblem(entry: unknown): string | undefined {
+export function ascensionEntryProblem(entry: unknown): string | undefined {
   if (typeof entry === 'string') return entry.trim() === '' ? '缺少名字' : undefined;
   if (!isRow(entry)) return '不是对象';
   return typeof entry.name !== 'string' || entry.name.trim() === '' ? '缺少名字' : undefined;
@@ -207,8 +181,16 @@ function normalizeAscensionEntry(
   if (kind !== 'elements') fill(entry, 'costDescription', '', label, notes);
 }
 
+/** enabled 的推断依据：三个条目列表里有没有可用（不会被丢弃）的条目 */
+export function hasUsableAscensionEntry(asc: Row): boolean {
+  return DIRECT_ASCENSION_LIST_KEYS.some((key) => {
+    const list = asc[key];
+    return Array.isArray(list) && list.some((entry) => ascensionEntryProblem(entry) === undefined);
+  });
+}
+
 /** 未登神默认对象 */
-function emptyAscension(): Row {
+export function emptyAscension(): Row {
   return {
     enabled: false,
     path: '',
@@ -221,34 +203,19 @@ function emptyAscension(): Row {
   };
 }
 
-/** 实体 output 顶层与登神条目按下标对应的效果数组（laws 没有对应数组） */
-const ASCENSION_EXTRA_KEYS = ['elements', 'authorities'] as const;
-
-/** 实体 output 顶层的效果数组及其路径（mapAscension 的 extra 取自这里） */
-interface AscensionExtra {
-  output: Row;
-  path: string;
-}
-
 /**
- * N5：登神状态。`fillMissing` 为 true（人物内）时缺失或 null 补未登神默认对象；
+ * N5：登神状态的无损纠正。`fillMissing` 为 true（人物内）时缺失或 null 补未登神默认对象；
  * loadout 顶层的 ascension 缺席表示「不改登神」，故只纠正已给出的对象。
  *
- * 给了但形状坏（全部记入 `dropped`）：不是对象 → 人物内按未登神处理、loadout 删键（不改登神）；
- * 条目列表不是数组 → []；条目缺名或不是对象 → 丢那一条；enabled 不是布尔 → 按条目推断；
- * path / description 不是文本 → 空串。
- *
- * `extra` 是实体 output 顶层：entity-gen 的 mapAscension 按下标从 `extra.elements[i]` /
- * `extra.authorities[i]` 取 effectDescriptions，丢弃第 i 个缺名条目时同下标连带删掉那一项，
- * 否则后面的效果文本会前移挂到错误条目上。
+ * 给了但形状坏的部分原样留给校验器（direct-output.ts 的 `salvageAscension`）按单元丢弃：
+ * 不是对象、条目列表不是数组、条目缺名或不是对象、enabled 不是布尔、path / description 不是文本。
+ * 这里只纠正可用条目（note 下标指模型原文），enabled 缺失时只按可用条目推断。
  */
 function normalizeAscension(
   container: Row,
   path: string,
   fillMissing: boolean,
   notes: string[],
-  dropped: string[],
-  extra?: AscensionExtra,
 ): void {
   if (absent(container, 'ascension')) {
     if (!fillMissing) return;
@@ -257,16 +224,7 @@ function normalizeAscension(
     return;
   }
   const label = `${path}.ascension`;
-  if (!isRow(container.ascension)) {
-    if (fillMissing) {
-      container.ascension = emptyAscension();
-      dropped.push(`${label}：不是对象，已按未登神处理`);
-    } else {
-      delete container.ascension;
-      dropped.push(`${label}：不是对象，已忽略`);
-    }
-    return;
-  }
+  if (!isRow(container.ascension)) return;
   const asc = container.ascension;
   for (const [alias, key] of [
     ['authority', 'authorities'],
@@ -277,46 +235,19 @@ function normalizeAscension(
       delete asc[alias];
       notes.push(`${label}.${alias}：已改名为 ${key}`);
     }
-  // 条目先按原下标纠正，再丢掉坏条目（note 下标都指模型原文）；enabled 推断看丢弃之后的条目
+  // 只纠正可用条目，按模型原文下标记 note；坏条目留给校验器丢弃
   for (const key of DIRECT_ASCENSION_LIST_KEYS) {
-    if (absent(asc, key)) continue;
     const list = asc[key];
-    if (!Array.isArray(list)) {
-      asc[key] = [];
-      dropped.push(`${label}.${key}：不是数组，已忽略`);
-      continue;
-    }
-    const problems = list.map(ascensionEntryProblem);
-    const nameless = problems.map((problem) => problem !== undefined);
-    for (let i = 0; i < list.length; i++) {
-      if (problems[i]) dropped.push(`${label}.${key}[${i}]：${problems[i]}，已忽略`);
-      else normalizeAscensionEntry(list, i, key, `${label}.${key}`, notes);
-    }
-    if (!nameless.includes(true)) continue;
-    asc[key] = list.filter((_entry, i) => !nameless[i]);
-    if (!extra || !(ASCENSION_EXTRA_KEYS as readonly string[]).includes(key)) continue;
-    const extraList = extra.output[key];
-    if (!Array.isArray(extraList)) continue;
-    // 从后往前删，删掉的项不让前面的下标错位
-    for (let i = Math.min(list.length, extraList.length) - 1; i >= 0; i--)
-      if (nameless[i]) {
-        extraList.splice(i, 1);
-        dropped.push(`${extra.path}.${key}[${i}]：对应的登神条目已丢弃，已连带删除`);
-      }
+    if (!Array.isArray(list)) continue;
+    for (let i = 0; i < list.length; i++)
+      if (ascensionEntryProblem(list[i]) === undefined)
+        normalizeAscensionEntry(list, i, key, `${label}.${key}`, notes);
   }
-  if (absent(asc, 'enabled') || typeof asc.enabled !== 'boolean') {
-    const missing = absent(asc, 'enabled');
-    asc.enabled = DIRECT_ASCENSION_LIST_KEYS.some(
-      (key) => Array.isArray(asc[key]) && (asc[key] as unknown[]).length > 0,
-    );
-    if (missing) notes.push(`${label}.enabled：缺失，已按条目推断`);
-    else dropped.push(`${label}.enabled：不是布尔值，已按条目推断`);
+  if (absent(asc, 'enabled')) {
+    asc.enabled = hasUsableAscensionEntry(asc);
+    notes.push(`${label}.enabled：缺失，已按条目推断`);
   }
-  for (const key of ['path', 'description'])
-    if (!absent(asc, key) && typeof asc[key] !== 'string') {
-      asc[key] = '';
-      dropped.push(`${label}.${key}：不是文本，已置为空串`);
-    } else fill(asc, key, '', label, notes);
+  for (const key of ['path', 'description']) fill(asc, key, '', label, notes);
   for (const key of DIRECT_ASCENSION_LIST_KEYS) fill(asc, key, [], label, notes);
   if (typeof asc.divineKingdom === 'string') {
     asc.divineKingdom = { name: asc.divineKingdom, description: '' };
@@ -377,47 +308,36 @@ function normalizeLists(output: Row, path: string, notes: string[]): void {
 }
 
 /** N7：人物文本与列表字段 */
-function normalizeCharacter(
-  character: Row,
-  path: string,
-  notes: string[],
-  dropped: string[],
-  extra: AscensionExtra,
-): void {
+function normalizeCharacter(character: Row, path: string, notes: string[]): void {
   for (const key of DIRECT_CHARACTER_LIST_FIELDS) {
     textToList(character, key, path, notes);
     fill(character, key, [], path, notes);
   }
   for (const key of DIRECT_CHARACTER_TEXT_FIELDS) fill(character, key, '', path, notes);
   normalizeLists(character, path, notes);
-  normalizeAscension(character, path, true, notes, dropped, extra);
+  normalizeAscension(character, path, true, notes);
 }
 
 /**
  * kind 为 character 时登神只写在 output.character 里。模型若写在 output 顶层而人物内没有，
- * 搬进人物（随后按 N5 纠正）；两处都写时保留人物内那份、丢弃顶层的（记入 dropped）。
+ * 搬进人物（随后按 N5 纠正）并返回 false；两处都写时不动、返回 true ——
+ * 校验器保留人物内那份、丢弃顶层的（记入 dropped）。
  */
 function moveCharacterAscension(
   output: Row,
   character: Row,
   label: string,
   notes: string[],
-  dropped: string[],
-): void {
-  if (absent(output, 'ascension')) return;
-  if (!absent(character, 'ascension')) {
-    delete output.ascension;
-    dropped.push(
-      `${label}.ascension：与 ${label}.character.ascension 同时出现（kind 为 character 时登神只写在 character 里），保留 character 内的，已忽略`,
-    );
-    return;
-  }
+): boolean {
+  if (absent(output, 'ascension')) return false;
+  if (!absent(character, 'ascension')) return true;
   character.ascension = output.ascension;
   delete output.ascension;
   notes.push(`${label}.ascension：已搬进 ${label}.character.ascension`);
+  return false;
 }
 
-function normalizeEntityOutput(row: Row, path: string, notes: string[], dropped: string[]): void {
+function normalizeEntityOutput(row: Row, path: string, notes: string[]): void {
   const output = row.output;
   if (!isRow(output)) return;
   const label = `${path}.output`;
@@ -427,14 +347,14 @@ function normalizeEntityOutput(row: Row, path: string, notes: string[], dropped:
     notes.push(`${label}.statuses：为 null，已补空数组`);
   }
   let ownerName: unknown = row.owner;
-  // 人物与 loadout 的 mapAscension 都以实体 output 顶层为 extra（见 entity-gen-agent）
-  const extra: AscensionExtra = { output, path: label };
+  // 两处都写登神时顶层那份会被校验器丢弃，不为它记纠正
+  let duplicateAscension = false;
   if (row.kind === 'character' && isRow(output.character)) {
-    moveCharacterAscension(output, output.character, label, notes, dropped);
-    normalizeCharacter(output.character, `${label}.character`, notes, dropped, extra);
+    duplicateAscension = moveCharacterAscension(output, output.character, label, notes);
+    normalizeCharacter(output.character, `${label}.character`, notes);
     ownerName = output.character.name;
   }
-  normalizeAscension(output, label, false, notes, dropped, extra);
+  if (!duplicateAscension) normalizeAscension(output, label, false, notes);
   if (Array.isArray(output.statuses))
     output.statuses.forEach((status, i) => {
       if (!isRow(status)) return;
@@ -512,18 +432,30 @@ function normalizeDeltaRows(rows: unknown, path: string, notes: string[]): void 
   });
 }
 
+/** N12：任务 upsert 行剥除契约外的键（协议只列了这几个字段，多写的键不入库） */
+function normalizeQuestRows(rows: unknown, notes: string[]): void {
+  if (!Array.isArray(rows)) return;
+  rows.forEach((row, i) => {
+    if (!isRow(row)) return;
+    for (const key of Object.keys(row))
+      if (!(DIRECT_QUEST_UPSERT_KEYS as readonly string[]).includes(key)) {
+        delete row[key];
+        notes.push(`state.quests.upsert[${i}].${key}：任务没有此字段，已剥除`);
+      }
+  });
+}
+
 /**
  * 就地归一化已解析的 direct_updates 对象（调用方后续校验与建补丁都读这同一个对象）。
- * 顺序：原型污染键扫描（命中即抛）→ 账务键剥除 → 分区补齐 → plot → 实体（平铺归位后逐项补默认）→ effects → state delta。
+ * 前提：调用方已拒收原型污染键。
+ * 顺序：账务键剥除 → 分区补齐 → plot → 实体（平铺归位后逐项补默认）→ effects → state delta / 任务。
  */
 export function normalizeDirectUpdates(
   parsed: Row,
   options: NormalizeDirectOptions,
 ): NormalizeDirectResult {
   const notes: string[] = [];
-  const dropped: string[] = [];
   const flattenedCharacters: string[] = [];
-  rejectForbiddenKeys(parsed);
   stripAccountKeys(parsed, 'direct_updates', notes);
   fillSections(parsed, options, notes);
   normalizePlot(parsed, options, notes);
@@ -532,13 +464,14 @@ export function normalizeDirectUpdates(
       if (!isRow(row)) return;
       const flattened = unflattenCharacterEntity(row);
       if (flattened !== undefined) flattenedCharacters.push(flattened);
-      normalizeEntityOutput(row, `entities[${i}]`, notes, dropped);
+      normalizeEntityOutput(row, `entities[${i}]`, notes);
     });
   normalizeEffects(parsed.effects, notes);
   if (isRow(parsed.state)) {
-    const { characters, affections } = parsed.state;
+    const { characters, affections, quests } = parsed.state;
     if (isRow(characters)) normalizeDeltaRows(characters.delta, 'state.characters.delta', notes);
     if (isRow(affections)) normalizeDeltaRows(affections.delta, 'state.affections.delta', notes);
+    if (isRow(quests)) normalizeQuestRows(quests.upsert, notes);
   }
-  return { notes, dropped, flattenedCharacters };
+  return { notes, flattenedCharacters };
 }

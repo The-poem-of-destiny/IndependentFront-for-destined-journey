@@ -35,7 +35,6 @@ import {
   DIRECT_DELTA_PATHS,
   DIRECT_EFFECT_ACTIONS,
   DIRECT_EFFECT_CATEGORIES,
-  DIRECT_EFFECT_REMOVE_KEYS,
   DIRECT_EFFECT_ROW_KEYS,
   DIRECT_EFFECT_TIME_UNITS,
   DIRECT_EFFECT_UPDATE_KEYS,
@@ -51,10 +50,19 @@ import {
   DIRECT_SECTIONS,
   DIRECT_STATE_KEYS,
   DIRECT_STRIPPED_KEYS,
+  DIRECT_VALUE_TYPES,
   DIRECT_WORLD_KEYS,
   DIRECT_WORLD_RESERVED_SEGMENTS,
+  emptyDirectSections,
+  emptyDirectUpdates,
+  type DirectValueType,
 } from './direct-contract';
-import { normalizeDirectUpdates } from './direct-normalize';
+import {
+  ascensionEntryProblem,
+  emptyAscension,
+  hasUsableAscensionEntry,
+  normalizeDirectUpdates,
+} from './direct-normalize';
 import { normalizeSlot } from '../content/field-enums';
 import { resolveCharacterByName } from '../state/patch-rules';
 import { PatchRehearsal } from '../state/patch-rehearsal';
@@ -304,7 +312,63 @@ function object(value: unknown, label: string): Row {
   return value;
 }
 
-/** 原型污染键：任何层级出现即整楼拒收 */
+/** 值类型的判定（类型含义见 direct-contract.ts 的 DirectValueType） */
+function matchesType(type: DirectValueType, value: unknown): boolean {
+  const finite = typeof value === 'number' && Number.isFinite(value);
+  switch (type) {
+    case 'text':
+      return typeof value === 'string';
+    case 'name':
+      return typeof value === 'string' && value.trim().length > 0;
+    case 'textList':
+      return Array.isArray(value) && value.every((item) => typeof item === 'string');
+    case 'number':
+      return finite;
+    case 'nonNegative':
+      return finite && (value as number) >= 0;
+    case 'positive':
+      return finite && (value as number) > 0;
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'duration':
+      return value === null || (finite && (value as number) >= 0);
+    case 'numberRecord':
+      return (
+        isRecord(value) &&
+        Object.values(value).every((item) => typeof item === 'number' && Number.isFinite(item))
+      );
+    case 'textRecord':
+      return isRecord(value) && Object.values(value).every((item) => typeof item === 'string');
+  }
+}
+
+/** 类型不符时报错文案里的「必须是……」 */
+const TYPE_LABELS: Record<DirectValueType, string> = {
+  text: '文本',
+  name: '非空文本',
+  textList: '文本数组',
+  number: '数值',
+  nonNegative: '非负数值',
+  positive: '正数',
+  boolean: '布尔值',
+  duration: '非负数值或 null',
+  numberRecord: '值全为数值的对象',
+  textRecord: '值全为文本的对象',
+};
+
+/**
+ * 按契约类型表（DIRECT_VALUE_TYPES）逐键检查一个对象：缺席的键跳过，给了但类型不符的键
+ * 让整个单元失败（只丢该行）。name 型沿用 named 的文案。表外的键由调用方先行剥除。
+ */
+function checkTypes(row: Row, types: Readonly<Record<string, DirectValueType>>, label: string) {
+  for (const [key, type] of Object.entries(types)) {
+    if (row[key] === undefined) continue;
+    if (type === 'name') named(row[key], `${label}.${key}`);
+    else check(matchesType(type, row[key]), `${label}.${key} 必须是${TYPE_LABELS[type]}`);
+  }
+}
+
+/** 原型污染键：任何层级出现即整楼拒收（唯一一处；必须先于归一化，见 direct-normalize.ts 文件头） */
 function rejectForbidden(value: unknown): void {
   if (Array.isArray(value)) value.forEach(rejectForbidden);
   else if (isRecord(value))
@@ -372,6 +436,74 @@ function validateCarried(notes: Notes, output: Row, label: string): void {
   }
 }
 
+/** 实体 output 顶层与登神条目按下标对应的效果数组（laws 没有对应数组） */
+const ASCENSION_EXTRA_KEYS = ['elements', 'authorities'] as const;
+
+/**
+ * 登神状态的有损丢弃（无损纠正已在归一化 N5 做完）。`character` 为 true（人物内）时
+ * 不是对象按未登神处理；loadout 顶层不是对象删键（不改登神）。条目列表不是数组 → []；
+ * 条目缺名或不是对象 → 丢那一条；enabled 不是布尔 → 按留下的条目推断；path / description 不是文本 → 空串。
+ *
+ * `output` 是实体 output 顶层：entity-gen 的 mapAscension 按下标从 `output.elements[i]` /
+ * `output.authorities[i]` 取 effectDescriptions，丢弃第 i 个缺名条目时同下标连带删掉那一项，
+ * 否则后面的效果文本会前移挂到错误条目上。
+ */
+function salvageAscension(
+  notes: Notes,
+  container: Row,
+  label: string,
+  character: boolean,
+  output: Row,
+  outputLabel: string,
+): void {
+  if (container.ascension === undefined || container.ascension === null) return;
+  const ascLabel = `${label}.ascension`;
+  if (!isRecord(container.ascension)) {
+    if (character) {
+      container.ascension = emptyAscension();
+      notes.dropped.push(`${ascLabel}：不是对象，已按未登神处理`);
+    } else {
+      delete container.ascension;
+      notes.dropped.push(`${ascLabel}：不是对象，已忽略`);
+    }
+    return;
+  }
+  const asc = container.ascension;
+  for (const key of DIRECT_ASCENSION_LIST_KEYS) {
+    const list = asc[key];
+    if (list === undefined || list === null) continue;
+    if (!Array.isArray(list)) {
+      asc[key] = [];
+      notes.dropped.push(`${ascLabel}.${key}：不是数组，已忽略`);
+      continue;
+    }
+    const problems = list.map(ascensionEntryProblem);
+    problems.forEach((problem, i) => {
+      if (problem) notes.dropped.push(`${ascLabel}.${key}[${i}]：${problem}，已忽略`);
+    });
+    if (problems.every((problem) => problem === undefined)) continue;
+    asc[key] = list.filter((_entry, i) => problems[i] === undefined);
+    if (!among(ASCENSION_EXTRA_KEYS, key)) continue;
+    const extraList = output[key];
+    if (!Array.isArray(extraList)) continue;
+    // 从后往前删，删掉的项不让前面的下标错位
+    for (let i = Math.min(list.length, extraList.length) - 1; i >= 0; i--)
+      if (problems[i]) {
+        extraList.splice(i, 1);
+        notes.dropped.push(`${outputLabel}.${key}[${i}]：对应的登神条目已丢弃，已连带删除`);
+      }
+  }
+  if (typeof asc.enabled !== 'boolean') {
+    asc.enabled = hasUsableAscensionEntry(asc);
+    notes.dropped.push(`${ascLabel}.enabled：不是布尔值，已按条目推断`);
+  }
+  for (const key of ['path', 'description'])
+    if (typeof asc[key] !== 'string') {
+      asc[key] = '';
+      notes.dropped.push(`${ascLabel}.${key}：不是文本，已置为空串`);
+    }
+}
+
 /**
  * 一个实体行。种类 / 人物核心（name、tier、level、attributes）/ placement / loadout owner
  * 坏了整个实体丢弃；其余（多余键、随身条目、人物文本字段、状态）按更小单元丢。
@@ -405,7 +537,15 @@ function validateEntityRow(
     const attrs = object(c.attributes, '人物属性');
     for (const attr of DIRECT_ATTRIBUTE_KEYS)
       check(typeof attrs[attr] === 'number' && Number(attrs[attr]) >= 0, `缺少属性 ${attr}`);
-    // 登神形状已在归一化 N5 逐项纠正；仍不完整说明归一化之外的形状，丢整个实体
+    // kind 为 character 时登神只写在 output.character 里：两处都写时保留人物内的（归一化已把只写在顶层的搬进人物）
+    if (output.ascension !== undefined && output.ascension !== null) {
+      delete output.ascension;
+      notes.dropped.push(
+        `${outputLabel}.ascension：与 ${outputLabel}.character.ascension 同时出现（kind 为 character 时登神只写在 character 里），保留 character 内的，已忽略`,
+      );
+    }
+    salvageAscension(notes, c, `${outputLabel}.character`, true, output, outputLabel);
+    // 登神形状已由归一化 N5 纠正、上面逐单元丢弃；仍不完整说明是两者之外的形状，丢整个实体
     const ascension = object(c.ascension, '登神状态');
     check(
       typeof ascension.enabled === 'boolean' &&
@@ -418,6 +558,7 @@ function validateEntityRow(
   } else {
     named(row.owner, `${label}.owner`);
     owner = row.owner;
+    salvageAscension(notes, output, outputLabel, false, output, outputLabel);
     if (output.character !== undefined) {
       delete output.character;
       notes.dropped.push(dropNote(`${outputLabel}.character`, '归属物不能再次创建人物'));
@@ -453,6 +594,18 @@ function validateEntityRow(
   });
   return claimed;
 }
+
+/** state.characters.replace 按 path 取值类型（契约类型表） */
+const CHARACTER_REPLACE_TYPES = DIRECT_VALUE_TYPES.characterReplace;
+/** replace 值类型不符时的文案（沿用既有措辞，按类型区分） */
+const REPLACE_TYPE_MESSAGES: Record<
+  (typeof CHARACTER_REPLACE_TYPES)[keyof typeof CHARACTER_REPLACE_TYPES],
+  string
+> = {
+  nonNegative: '资源值无效',
+  boolean: 'present 必须是布尔值',
+  text: '人物字段必须为文本',
+};
 
 /** 一个 state 子键：不是对象删掉；剥未知操作键；操作值不是数组删掉那个操作 */
 function stateSection(
@@ -507,11 +660,10 @@ function validateState(notes: Notes, state: Row): void {
               among(DIRECT_DELTA_PATHS, row.path) && typeof row.amount === 'number',
               'delta 只能用于资源／金钱／经验',
             );
-          else if (row.path === 'present')
-            check(typeof row.value === 'boolean', 'present 必须是布尔值');
-          else if (among(DIRECT_DELTA_PATHS, row.path))
-            check(typeof row.value === 'number' && Number(row.value) >= 0, '资源值无效');
-          else check(typeof row.value === 'string', '人物字段必须为文本');
+          else {
+            const type = CHARACTER_REPLACE_TYPES[row.path as keyof typeof CHARACTER_REPLACE_TYPES];
+            check(matchesType(type, row.value), REPLACE_TYPE_MESSAGES[type]);
+          }
         }
         owned.add(key);
       });
@@ -539,6 +691,7 @@ function validateState(notes: Notes, state: Row): void {
           const changes = object(row.changes, '物品修改');
           stripKeys(notes, changes, DIRECT_ITEM_MODIFY_KEYS, `${label}.changes`);
           check(Object.keys(changes).length > 0, '物品修改没有可改的字段');
+          checkTypes(changes, DIRECT_VALUE_TYPES.itemModify, `${label}.changes`);
         }
       });
   const affections = stateSection(notes, state, 'affections', DIRECT_AFFECTION_OPERATIONS);
@@ -569,45 +722,37 @@ function validateState(notes: Notes, state: Row): void {
   const quests = stateSection(notes, state, 'quests', DIRECT_QUEST_OPERATIONS);
   if (quests)
     for (const [op, list] of Object.entries(quests))
-      salvageRows(notes, list as unknown[], `state.quests.${op}`, (row, label) =>
-        named(row.name, `${label}.name`),
-      );
+      salvageRows(notes, list as unknown[], `state.quests.${op}`, (row, label) => {
+        named(row.name, `${label}.name`);
+        // upsert 的契约外键已在归一化剥除，这里只查值类型
+        if (op === 'upsert') checkTypes(row, DIRECT_VALUE_TYPES.questUpsert, label);
+      });
 }
 
-/** 合规空白的 direct_updates（模型没写 direct_updates 区块时使用） */
-function emptyUpdates(): Row {
-  return {
-    version: 1,
-    world: {},
-    time: { delta_time: 0 },
-    entities: [],
-    state: {},
-    effects: [],
-    plot: {},
-    combat: null,
-    diceUsed: [],
-  };
+/**
+ * 原型污染键扫描 → 无损归一化 → 逐单元校验（就地改写 parsed）。
+ * 返回平铺归位的人物名（独立告警）。
+ */
+function normalizeAndValidate(
+  parsed: Row,
+  pool: DirectDicePool,
+  notes: Notes,
+  options: { structuredCombat: boolean; plotEnabled: boolean },
+): string[] {
+  rejectForbidden(parsed);
+  const normalization = normalizeDirectUpdates(parsed, options);
+  notes.normalized.push(...normalization.notes);
+  validateUpdates(parsed, pool, notes, options.structuredCombat);
+  return normalization.flattenedCharacters;
 }
 
-/** 顶层分区的期望形状 */
-const SECTION_SHAPES: Array<[string, 'object' | 'array', () => unknown]> = [
-  ['world', 'object', () => ({})],
-  ['time', 'object', () => ({ delta_time: 0 })],
-  ['entities', 'array', () => []],
-  ['state', 'object', () => ({})],
-  ['effects', 'array', () => []],
-  ['plot', 'object', () => ({})],
-  ['diceUsed', 'array', () => []],
-];
-
-/** 归一化之后的逐单元校验（就地改写 parsed） */
+/** 归一化之后的逐单元校验（就地改写 parsed）；有损丢弃全部在这里产出 */
 function validateUpdates(
   parsed: Row,
   pool: DirectDicePool,
   notes: Notes,
   structuredCombat: boolean,
 ): void {
-  rejectForbidden(parsed);
   stripKeys(notes, parsed, DIRECT_SECTIONS, 'direct_updates');
   if (parsed.version !== 1) {
     notes.dropped.push(
@@ -623,14 +768,15 @@ function validateUpdates(
       rejectUnsafeCombat(parsed.combat);
     }
   }
-  for (const [key, shape, make] of SECTION_SHAPES) {
+  for (const [key, fresh] of Object.entries(emptyDirectSections())) {
+    const shape = Array.isArray(fresh) ? 'array' : 'object';
     const value = parsed[key];
     if (shape === 'array' ? Array.isArray(value) : isRecord(value)) continue;
     // 空 {} / [] 写成另一种：无损纠正；非空的错类型：内容丢弃
     const empty =
       (Array.isArray(value) && value.length === 0) ||
       (isRecord(value) && Object.keys(value).length === 0);
-    parsed[key] = make();
+    parsed[key] = fresh;
     if (empty)
       notes.normalized.push(
         `direct_updates.${key}：空值类型不符，已改为空${shape === 'array' ? '数组' : '对象'}`,
@@ -710,9 +856,11 @@ function validateUpdates(
     if (effect.action === 'update') {
       stripKeys(notes, value, DIRECT_EFFECT_UPDATE_KEYS, `${label}.value`);
       check(Object.keys(value).length > 1, '效果更新只能改 remainingTime／stacks');
+      checkTypes(value, DIRECT_VALUE_TYPES.effectUpdate, `${label}.value`);
     }
+    // remove 的多余键已在归一化 N8 剥除（无损），这里只查值类型
     if (effect.action === 'remove')
-      stripKeys(notes, value, DIRECT_EFFECT_REMOVE_KEYS, `${label}.value`);
+      checkTypes(value, DIRECT_VALUE_TYPES.effectRemove, `${label}.value`);
     const key = `${effect.owner}/${value.name}`;
     check(!effectOwners.has(key), '状态效果重复声明');
     effectOwners.add(key);
@@ -779,7 +927,7 @@ export function parseDirectOutput(
   if (treeResult?.kind === 'legacy')
     // 并存期回落（设计 §2）：tree 下模型仍写了旧形状，交给旧解析器，记一条纠正
     notes.normalized.push(`direct_updates：${treeResult.note}`);
-  if (updatesMissing) parsed = emptyUpdates();
+  if (updatesMissing) parsed = emptyDirectUpdates();
   else if (treeResult?.kind === 'patch') {
     // 只在整段 JSON 写坏、逐元素恢复后一条都没救回时整楼拒收（§5.4）；JSON 完好时坏 op 只丢那一条
     if (treeResult.nothingRecovered)
@@ -799,10 +947,7 @@ export function parseDirectOutput(
       combatIgnored = parsed.combat !== null && parsed.combat !== undefined;
       delete parsed.combat;
     }
-    const normalization = normalizeDirectUpdates(parsed, { structuredCombat, plotEnabled });
-    notes.normalized.push(...normalization.notes);
-    notes.dropped.push(...normalization.dropped);
-    validateUpdates(parsed, pool, notes, structuredCombat);
+    normalizeAndValidate(parsed, pool, notes, { structuredCombat, plotEnabled });
   } else {
     // N1：内文先过 JSON 抢救入口，剥掉 ```json 围栏、<json> 标签或 JSON 之前夹带的说明文字
     // （以 { 开头的内文按整段解析，JSON 之后跟文字不剥，照旧拒收为非法 JSON）
@@ -828,12 +973,11 @@ export function parseDirectOutput(
         parsed.combat !== undefined;
       delete parsed.combat;
     }
-    // 无损纠正：就地改写 parsed（buildDirectPatches 读的是同一个对象）；关闭战斗时这里补回 combat: null
-    const normalization = normalizeDirectUpdates(parsed, { structuredCombat, plotEnabled });
-    notes.normalized.push(...normalization.notes);
-    notes.dropped.push(...normalization.dropped);
-    flattenedCharacters = normalization.flattenedCharacters;
-    validateUpdates(parsed, pool, notes, structuredCombat);
+    // 就地改写 parsed（buildDirectPatches 读的是同一个对象）；关闭战斗时归一化补回 combat: null
+    flattenedCharacters = normalizeAndValidate(parsed, pool, notes, {
+      structuredCombat,
+      plotEnabled,
+    });
   }
   // character_updates 坏了不再拒收整楼：解析告警记入 dropped，无损纠正并入 normalized
   const character = parseCharacterUpdates(raw);
@@ -886,21 +1030,22 @@ function treeEnvelopeUpdates(
     );
   stripKeys(notes, source, TREE_ENVELOPE_KEYS, 'direct_updates');
   const has = (key: string) => source[key] !== undefined && source[key] !== null;
+  const empty = emptyDirectSections();
   return {
     version: 1,
-    world: has('tile_ops') ? { tile_ops: source.tile_ops } : {},
-    time: has('time') ? source.time : { delta_time: 0 },
-    entities: [],
-    state: {},
-    effects: [],
-    plot: has('plot') ? source.plot : {},
+    world: has('tile_ops') ? { tile_ops: source.tile_ops } : empty.world,
+    time: has('time') ? source.time : empty.time,
+    entities: empty.entities,
+    state: empty.state,
+    effects: empty.effects,
+    plot: has('plot') ? source.plot : empty.plot,
     // 结构化战斗开启时 v1 要求显式 combat；树协议缺了按 null（无在办战斗）处理
     combat: Object.prototype.hasOwnProperty.call(source, 'combat')
       ? source.combat
       : structuredCombat
         ? null
         : undefined,
-    diceUsed: has('diceUsed') ? source.diceUsed : [],
+    diceUsed: has('diceUsed') ? source.diceUsed : empty.diceUsed,
   };
 }
 
