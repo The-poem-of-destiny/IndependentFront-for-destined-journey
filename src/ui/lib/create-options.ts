@@ -46,3 +46,11 @@ export interface BlockedHint {
   currentStep: number;
   items: Array<{ label: string; step: number }>;
 }
+
+/**
+ * 建档准入页暂不开放的生成模式（2026-11-25 主人裁定：当前只主推直出（无缓存优化），
+ * Agent 模式与直出（缓存优化）的新建入口先锁上）。
+ * 只锁**新建**入口：已有的这两类存档照常游玩。解锁只改这一处。
+ * 准入页据此把模式卡置灰；CreatePage 据此清掉旧草稿里残留的锁定模式。
+ */
+export const LOCKED_GENERATION_MODES: ReadonlySet<string> = new Set(['agent', 'direct_cached']);

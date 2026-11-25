@@ -13,6 +13,7 @@ import { computed } from 'vue';
 import type { GenerationMode } from '@engine/story/generation-mode';
 import type { SettingsSection } from '../../stores/ui-store';
 import type { ReadinessIssue } from '../../lib/journey-readiness';
+import { LOCKED_GENERATION_MODES } from '../../lib/create-options';
 import AppButton from '../shared/AppButton.vue';
 import AppCard from '../shared/AppCard.vue';
 import ContentStatusBanner from '../shared/ContentStatusBanner.vue';
@@ -111,12 +112,21 @@ const blockedReason = computed(() =>
         <AppCard
           v-for="mode in MODE_OPTIONS"
           :key="mode.value"
-          clickable
+          :clickable="!LOCKED_GENERATION_MODES.has(mode.value)"
           :selected="generationMode === mode.value"
           class="mode-card"
-          @click="emit('update:generationMode', mode.value)"
+          :class="{ 'is-locked': LOCKED_GENERATION_MODES.has(mode.value) }"
+          :aria-disabled="LOCKED_GENERATION_MODES.has(mode.value) ? 'true' : undefined"
+          @click="
+            !LOCKED_GENERATION_MODES.has(mode.value) && emit('update:generationMode', mode.value)
+          "
         >
-          <span class="mode-name">{{ mode.label }}</span>
+          <span class="mode-name"
+            >{{ mode.label
+            }}<span v-if="LOCKED_GENERATION_MODES.has(mode.value)" class="mode-locked-tag"
+              >暂未开放</span
+            ></span
+          >
           <span class="mode-desc">{{ mode.desc }}</span>
         </AppCard>
       </div>
@@ -239,6 +249,20 @@ const blockedReason = computed(() =>
   font-weight: 700;
   font-size: 0.95rem;
   color: var(--theme-text-primary);
+}
+.mode-card.is-locked {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mode-locked-tag {
+  margin-left: var(--theme-spacing-xs);
+  padding: 1px 6px;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--theme-text-muted);
+  vertical-align: middle;
 }
 .mode-desc {
   font-size: 0.75rem;

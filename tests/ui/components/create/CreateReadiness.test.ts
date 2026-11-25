@@ -44,6 +44,22 @@ describe('CreateReadiness 准入页', () => {
     expect(wrapper.emitted('update:generationMode')).toEqual([['direct']]);
   });
 
+  it('Agent 与直出（缓存优化）两张卡置灰、标「暂未开放」，点击不发事件', async () => {
+    const wrapper = mountReadiness();
+    const cards = wrapper.findAll('.mode-card');
+    expect(cards[0].text()).toContain('Agent 模式');
+    expect(cards[2].text()).toContain('直出（缓存优化）');
+    for (const card of [cards[0], cards[2]]) {
+      expect(card.text()).toContain('暂未开放');
+      expect(card.classes()).toContain('is-locked');
+      expect(card.attributes('aria-disabled')).toBe('true');
+      await card.trigger('click');
+    }
+    expect(wrapper.emitted('update:generationMode')).toBeUndefined();
+    expect(cards[1].text()).not.toContain('暂未开放');
+    expect(cards[1].classes()).not.toContain('is-locked');
+  });
+
   it('选中的模式卡带选中态', () => {
     const wrapper = mountReadiness({ generationMode: 'direct_cached' });
     const selected = wrapper.findAll('.card-selected');
@@ -65,7 +81,7 @@ describe('CreateReadiness 准入页', () => {
     const wrapper = mountReadiness({ issues: [modeIssue], blocked: true });
     expect(wrapper.find('.check-list').text()).toContain('尚未选择生成模式');
     expect(wrapper.text()).not.toContain('对话配置已齐备');
-    await wrapper.setProps({ generationMode: 'agent', issues: [], blocked: false });
+    await wrapper.setProps({ generationMode: 'direct', issues: [], blocked: false });
     expect(wrapper.text()).not.toContain('尚未选择生成模式');
     expect(wrapper.text()).toContain('对话配置已齐备');
     expect(wrapper.find('.blocked-reason').text()).toBe('');

@@ -11,7 +11,11 @@ import { useContentStore } from '../../stores/content-store';
 import { checkJourneyReadiness } from '../../lib/journey-readiness';
 import PresetModal from './PresetModal.vue';
 import { initializeCachedDirectSettings } from '../../lib/direct-settings';
-import { MISSING_FIELDS_PREFIX, type BlockedHint } from '../../lib/create-options';
+import {
+  LOCKED_GENERATION_MODES,
+  MISSING_FIELDS_PREFIX,
+  type BlockedHint,
+} from '../../lib/create-options';
 import { confirmDialog } from '../../lib/confirm-dialog';
 import { MAX_START_LEVEL } from '@engine/content/start-catalog-mechanics';
 
@@ -40,6 +44,15 @@ const blocked = computed(
     issues.value.some((issue) => issue.blocking),
 );
 const ready = computed(() => accepted.value && !blocked.value);
+
+// 暂不开放的生成模式（Agent、直出缓存优化）在准入页不可点；旧草稿里残留的选择在这里清掉，让玩家重新选
+watch(
+  () => store.generationMode,
+  (mode) => {
+    if (mode && LOCKED_GENERATION_MODES.has(mode)) store.generationMode = '';
+  },
+  { immediate: true },
+);
 
 // 恢复的草稿等级超过开局上限时 store 已截到上限并清空额外属性点，这里告诉玩家一次后清掉标记
 watch(
