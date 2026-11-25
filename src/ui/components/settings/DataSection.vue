@@ -19,7 +19,11 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useGameStore } from '../../stores/game-store';
 import type { FullBackup } from '@engine/persistence/database';
-import { FULL_IMPORT_LOCKED_MESSAGE, findSavesLockedElsewhere } from '../../lib/save-tab-lock';
+import {
+  CLEAR_ALL_LOCKED_MESSAGE,
+  FULL_IMPORT_LOCKED_MESSAGE,
+  findSavesLockedElsewhere,
+} from '../../lib/save-tab-lock';
 // 经验档位读取（loadExperienceMode）走静态导入：与 loadSceneUsage 的动态 import 并存时，
 // Vitest 的 vi.mock 对同一模块的多次动态 import 有竞态（挂起到环境拆除、dexie 加载失败），
 // 静态 import 由 vi.mock 稳定拦截，规避之（2026-08-24）。
@@ -240,6 +244,12 @@ async function confirmImportAll() {
  * assetBlobs / audio* 全部表）。守护测试见 SettingsPage.engine-imports.test.ts。
  */
 async function clearAll() {
+  // 标签页锁（R8）：清库会删掉所有存档，别的标签页在玩任一存档时拒绝；本标签页自持的不拦
+  if ((await findSavesLockedElsewhere()).length > 0) {
+    showClearConfirm.value = false;
+    ui.toast(CLEAR_ALL_LOCKED_MESSAGE, 'warning', 6000);
+    return;
+  }
   const { clearAllData } = await import('@engine/persistence/database');
   await clearAllData();
   cfg.resetAll();

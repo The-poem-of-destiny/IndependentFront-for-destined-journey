@@ -42,13 +42,14 @@ const getSceneImageUsage = vi.fn<(saveId: string) => Promise<SceneImageUsage>>()
 const listCleanableSceneImageIds = vi.fn<(saveId: string) => Promise<string[]>>();
 const dropSceneImageBlobs = vi.fn<(ids: readonly string[]) => Promise<number>>();
 const importAllData = vi.fn<(data: unknown) => Promise<void>>();
+const clearAllData = vi.fn<() => Promise<void>>();
 vi.mock('@engine/persistence/database', () => ({
   getSceneImageUsage: (saveId: string) => getSceneImageUsage(saveId),
   listCleanableSceneImageIds: (saveId: string) => listCleanableSceneImageIds(saveId),
   dropSceneImageBlobs: (ids: readonly string[]) => dropSceneImageBlobs(ids),
   exportAllData: async () => ({}),
   importAllData: (data: unknown) => importAllData(data),
-  clearAllData: async () => {},
+  clearAllData: () => clearAllData(),
   // 经验档位读取（loadExperienceMode）—— 返回一个含 experienceMode 的假 profile
   getSaveProfile: async () => ({ saveId: 'x', experienceMode: 'normal' }),
 }));
@@ -57,6 +58,7 @@ import DataSection from '../../../../src/ui/components/settings/DataSection.vue'
 import { useUIStore } from '../../../../src/ui/stores/ui-store';
 import {
   acquireSaveTabLock,
+  CLEAR_ALL_LOCKED_MESSAGE,
   FULL_IMPORT_LOCKED_MESSAGE,
 } from '../../../../src/ui/lib/save-tab-lock';
 
@@ -88,6 +90,7 @@ beforeEach(() => {
   listCleanableSceneImageIds.mockResolvedValue([]);
   dropSceneImageBlobs.mockResolvedValue(0);
   importAllData.mockResolvedValue(undefined);
+  clearAllData.mockResolvedValue(undefined);
 });
 
 describe('DataSection —— 内容包搬走后的指路与危险区（S-01）', () => {
@@ -387,5 +390,75 @@ describe('DataSection —— 整库导入尊重存档标签页锁（R8）', () =
     const toast = await runImport();
     expect(importAllData).toHaveBeenCalledOnce();
     expect(toast).toHaveBeenCalledWith('导入成功', 'success');
+  });
+});
+
+describe('DataSection —— 清除所有数据尊重存档标签页锁（R8）', () => {
+  function installFakeLocks(external: string[] = []) {
+    const held = new Set<string>(external);
+    const locks = {
+      request: vi.fn(
+        async (name: string, _options: LockOptions, callback: (lock: Lock | null) => unknown) => {
+          if (held.has(name)) return await callback(null);
+          held.add(name);
+          try {
+            return await callback({ name, mode: 'exclusive' } as Lock);
+          } finally {
+            held.delete(name);
+          }
+        },
+      ),
+      query: vi.fn(async () => ({
+        held: [...held].map((name) => ({ name, mode: 'exclusive', clientId: 'x' })),
+        pending: [],
+      })),
+    };
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: locks });
+  }
+
+  afterEach(() => {
+    delete (navigator as { locks?: unknown }).locks;
+    vi.useRealTimers();
+  });
+
+  /** 打开危险区确认框并点「确认清除」；返回 toast 间谍。假定时器挡住刷新页面那一拍 */
+  async function runClearAll() {
+    const w = await mountWithSave('save_1');
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const toast = vi.spyOn(useUIStore(), 'toast');
+    await w.get('.danger-zone .data-danger').find('button').trigger('click');
+    await w
+      .findAll('button')
+      .find((button) => button.text() === '确认清除')!
+      .trigger('click');
+    await vi.waitFor(() => expect(toast).toHaveBeenCalled());
+    return { w, toast };
+  }
+
+  it('别的标签页在玩任一存档时拒绝清除并提示，不碰数据库', async () => {
+    installFakeLocks(['poem-save:save_other']);
+    const { w, toast } = await runClearAll();
+    expect(toast).toHaveBeenCalledWith(CLEAR_ALL_LOCKED_MESSAGE, 'warning', 6000);
+    expect(clearAllData).not.toHaveBeenCalled();
+    // 确认框随之关闭
+    expect(w.findAll('button').some((button) => button.text() === '确认清除')).toBe(false);
+  });
+
+  it('只有本标签页自己持锁时照常清除', async () => {
+    installFakeLocks();
+    const own = await acquireSaveTabLock('save_1');
+    try {
+      const { toast } = await runClearAll();
+      expect(clearAllData).toHaveBeenCalledOnce();
+      expect(toast).toHaveBeenCalledWith('数据已清除，页面即将刷新', 'warning');
+    } finally {
+      own!.release();
+    }
+  });
+
+  it('环境没有 navigator.locks 时放行', async () => {
+    const { toast } = await runClearAll();
+    expect(clearAllData).toHaveBeenCalledOnce();
+    expect(toast).toHaveBeenCalledWith('数据已清除，页面即将刷新', 'warning');
   });
 });
