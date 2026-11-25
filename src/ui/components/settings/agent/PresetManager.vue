@@ -46,6 +46,7 @@ import {
   duplicatePresetEntry,
   isZonePlaceholderEntry,
   presetUsesToggleLayer,
+  storyContextTemplateOf,
   type PresetPromptEntry,
 } from '../../../lib/preset-entries';
 import { preprocessPresetForPreview, findTailAssistantEntry } from '@engine/prompts/preset-loader';
@@ -99,21 +100,7 @@ function getStoryContextTemplate(): string {
     return buildDirectProtocol(isDirectStructuredCombatEnabled()) + '\n' + DIRECT_TEMPLATE;
   const preset = activePreset.value;
   if (!preset?.settings?.prompts) return '';
-  const dynamicEntry = preset.settings.prompts.find(
-    (p: any) => p.name === '动态注入' && p.enabled !== false,
-  );
-  if (dynamicEntry?.content) return dynamicEntry.content;
-  // Fallback: the default block
-  return [
-    '{{AGENT.MEMORY_RECALL}}',
-    '{{AGENT.PLOT_PRE_CHECK}}',
-    '{{LORE_BOOK_STATIC}}',
-    '{{CHARACTER_STATE}}',
-    '{{LORE_BOOK_DYNAMIC}}',
-    '{{GAME_TIME}}',
-    '{{NARRATIVE}}',
-    '{{USER_INPUT}}',
-  ].join('\n');
+  return storyContextTemplateOf(preset.settings.prompts);
 }
 
 // ============================================================
@@ -849,8 +836,7 @@ onMounted(() => {
       "
     >
       <p class="form-hint">
-        以下为运行时
-        <code>动态注入</code> 条目或默认上下文块的内容。占位符最终会被替换。
+        以下为运行时含系统占位符的条目（没有时为默认上下文块）的内容。占位符最终会被替换。
       </p>
       <TemplatePreview :template="getStoryContextTemplate()" :agent-id="agentId" />
     </div>

@@ -48,12 +48,25 @@ const upsertPreset = vi.fn(async (preset: any) => {
   mockPresets.value.push(preset);
 });
 const effectivePreset = vi.fn(() => ({ presetId: '', preset: null }));
+// 替身照真实 writeSelection 的口径写选择键：story 存空串，其余空值删键
+const SELECTION_KEYS: Record<string, string> = {
+  story: 'activePresetId',
+  direct: 'directPresetId',
+  direct_cached: 'directCachedPresetId',
+};
+const selectPreset = vi.fn((profile: string, id: string) => {
+  const key = SELECTION_KEYS[profile];
+  if (key === 'activePresetId') mockSettings.activePresetId = id;
+  else if (id) mockSettings[key] = id;
+  else delete mockSettings[key];
+});
 vi.mock('../../../../../src/ui/composables/usePresets', () => ({
   usePresets: () => ({
     presets: mockPresets,
     upsertPreset,
     effectivePreset,
     pristineEffectivePreset: effectivePreset,
+    selectPreset,
   }),
 }));
 
@@ -150,6 +163,26 @@ describe('AgentConfigPanel —— 分叉与动作栏', () => {
     await click(w, 'restore-all-defaults');
     expect(mockSettings[field]).toBeUndefined();
     expect(upsertPreset).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['story', 'story'],
+    ['direct_main', 'direct'],
+    ['direct_cached', 'direct_cached'],
+  ])(
+    '🔴 恢复 %s 默认经 usePresets().selectPreset(profile, 空串)，不直接写选择键（R7）',
+    async (agentId, profile) => {
+      const w = mountPanel(agentId);
+      await click(w, 'restore-all-defaults');
+      expect(selectPreset).toHaveBeenCalledTimes(1);
+      expect(selectPreset).toHaveBeenCalledWith(profile, '');
+    },
+  );
+
+  it('非预设 Agent「全部恢复默认」不碰选择入口', async () => {
+    const w = mountPanel('entity_gen');
+    await click(w, 'restore-all-defaults');
+    expect(selectPreset).not.toHaveBeenCalled();
   });
 
   it('恢复 story 默认 = 选择键置空串，不写库', async () => {

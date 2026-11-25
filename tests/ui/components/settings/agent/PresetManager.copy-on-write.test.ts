@@ -29,7 +29,7 @@ vi.mock('../../../../../src/ui/stores/settings-store', () => ({
 }));
 
 import PresetManager from '../../../../../src/ui/components/settings/agent/PresetManager.vue';
-import { registerFactoryPresetIds } from '../../../../../src/ui/composables/usePresets';
+import { registerFactoryPresetIds } from '../../../../../src/ui/lib/preset-catalog';
 import { useUIStore } from '../../../../../src/ui/stores/ui-store';
 import { getDatabase, savePreset } from '../../../../../src/core/persistence/database';
 

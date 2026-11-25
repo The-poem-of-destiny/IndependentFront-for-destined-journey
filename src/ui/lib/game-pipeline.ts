@@ -27,8 +27,6 @@ import {
   readDirectCombat,
 } from '@engine/combat/direct-combat';
 import {
-  buildPresetCatalog,
-  builtinDirectPresets,
   PRESET_SELECTION_KEYS,
   resolveEffectivePreset,
   type PresetAgentDefaults,
@@ -36,6 +34,7 @@ import {
 } from '@engine/prompts/preset-resolution';
 import { initializeDirectSettings, initializeCachedDirectSettings } from './direct-settings';
 import { applyCatalogEntryToggles } from './preset-entries';
+import { buildUiPresetCatalog } from './preset-catalog';
 import { scanEventTriggers, scanPlayAudioMarkers } from '@engine/story/marker-protocol';
 // Q-05：从模型输出抢救 JSON 的唯一入口（裸 / 围栏 / <json> / 前后夹带解说四种形态）
 import { extractJsonPayload } from '@engine/utils/model-json';
@@ -1748,14 +1747,12 @@ export class GamePipeline {
 
   // ===== 私有方法 =====
 
-  /** 预设目录（存储行 + 默认层内嵌 + 内置直出预设），与设置页同一套装配 */
+  /**
+   * 预设目录（存储行 + 默认层内嵌 + 内置直出预设）：与设置页（usePresets）共用
+   * `lib/preset-catalog.ts` 的同一个工厂，内容所有 id 含出厂预设（2026-11-25 R7）。
+   */
   private presetCatalog(presets: readonly AgentPreset[], agentDefaults: PresetAgentDefaults) {
-    return buildPresetCatalog({
-      storedRows: presets as unknown as ChatPreset[],
-      agentDefaults,
-      builtins: builtinDirectPresets(),
-      contentOwnedIds: (getActivePackPayload()?.presets ?? []).map((preset) => preset.id),
-    });
+    return buildUiPresetCatalog(presets as unknown as ChatPreset[], agentDefaults);
   }
 
   private buildAgentConfigs(

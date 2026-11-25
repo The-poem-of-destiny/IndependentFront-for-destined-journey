@@ -998,7 +998,7 @@ export const useSettingsStore = defineStore('settings', () => {
     if (runtimeRevision !== null && runtimeRevision !== getPackRuntimeRevision()) return false;
     // 📌 2026-11-14：出厂预设归内容所有（目录里是「内容包」、只读），哪怕它们落在 Dexie 里
     try {
-      const { registerFactoryPresetIds } = await import('../composables/usePresets');
+      const { registerFactoryPresetIds } = await import('../lib/preset-catalog');
       registerFactoryPresetIds(factoryPresets.map((p) => p.id));
     } catch {
       /* 登记失败只影响来源标注，不影响播种 */
