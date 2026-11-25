@@ -6,6 +6,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { buildCraftPanelLines } from '@engine/crafting/craft-projection';
+import { extractStoryBeats, resolveBeatBreaks } from '@engine/story/story-beats';
+import { paragraphBreaks } from '../../../src/ui/lib/stage-playback';
 import type {
   CraftActionRequest,
   CraftCheckResult,
@@ -692,5 +694,73 @@ describe('性能护栏：超长输入不发生灾难性回溯', () => {
       splitActionInfo(`<action_info>${text}`);
       expect(performance.now() - start).toBeLessThan(10_000);
     }
+  });
+});
+
+describe('审查 A6：action_info 标签三处判定一致', () => {
+  const PANEL_BODY = '|检定|d20=12|\n\n|结果|成功|';
+  const variants = [
+    `<action_info type="a">\n${PANEL_BODY}\n</action_info>`,
+    `< action_info >\n${PANEL_BODY}\n</ action_info >`,
+    `<ACTION_INFO>\n${PANEL_BODY}\n</action_info>`,
+  ];
+
+  for (const block of variants) {
+    const text = `前文一段。\n\n${block}\n\n后文一段。`;
+    const from = text.indexOf(block);
+    const to = from + block.length;
+    const inside = (at: number): boolean => at > from && at < to;
+
+    it(`面板拆分：整块成一张面板、不漏原文（${block.split('\n')[0]}）`, () => {
+      const segs = splitActionInfo(text);
+      expect(segs.map((s) => s.kind)).toEqual(['text', 'panel', 'text']);
+      for (const s of segs) {
+        if (s.kind === 'text') expect(s.text).not.toMatch(/action_info/i);
+      }
+      const panel = segs[1];
+      if (panel.kind !== 'panel') throw new Error('不是面板');
+      const cells = parseActionPanel(panel.raw).sections.flatMap((sec) =>
+        sec.rows.flatMap((r) => r.cells),
+      );
+      expect(cells.map((c) => c.label)).toEqual(['检定', '结果']);
+    });
+
+    it(`逐节演出与引擎分节都不在面板里切（${block.split('\n')[0]}）`, () => {
+      const stageBreaks = paragraphBreaks(text);
+      const engineBreaks = resolveBeatBreaks(text, null);
+      expect(stageBreaks.length).toBeGreaterThan(0);
+      expect(stageBreaks.some(inside)).toBe(false);
+      expect(engineBreaks.length).toBeGreaterThan(0);
+      expect(engineBreaks.some(inside)).toBe(false);
+    });
+
+    it(`面板里的 <beat/> 只剥不切（${block.split('\n')[0]}）`, () => {
+      const withBeat = text.replace('\n\n|结果|', '\n<beat/>\n|结果|') + '\n<beat/>\n尾声。';
+      const { content, breaks } = extractStoryBeats(withBeat);
+      expect(breaks).toHaveLength(1);
+      expect(content.slice(breaks[0])).toBe('尾声。');
+    });
+  }
+
+  it('规则接管判定也认带属性 / 带空白的标签', () => {
+    const rule = {
+      id: 'r',
+      name: 'r',
+      enabled: true,
+      scope: 'maintext',
+      pattern: '<\\s*action_info[^>]*>[\\s\\S]*?<\\s*/\\s*action_info\\s*>',
+      replacement: '',
+    } as BeautifierRule;
+    expect(rulesClaimActionInfo([rule], `前文\n${variants[0]}\n后文`)).toBe(true);
+    expect(rulesClaimActionInfo([rule], `前文\n${variants[1]}\n后文`)).toBe(true);
+  });
+
+  it('流式中半截的带属性开标签被裁掉', () => {
+    const segs = splitActionInfo('正文。\n<action_info type="', { partial: true });
+    expect(segs).toEqual([{ kind: 'text', text: '正文。\n' }]);
+    // 别的标签写到一半不裁
+    expect(splitActionInfo('正文 <a href="', { partial: true })).toEqual([
+      { kind: 'text', text: '正文 <a href="' },
+    ]);
   });
 });

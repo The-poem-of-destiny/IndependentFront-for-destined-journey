@@ -35,24 +35,48 @@ export interface ResolvedStoryStage {
 /** 认 `<beat>`、`<beat/>`、`</beat>`、`<beat enter="..."/>`（大小写不敏感）。 */
 const BEAT_MARKER_SOURCE = String.raw`<\/?beat\b[^>]*>`;
 const ENTER_ATTR = /\benter\s*=\s*(?:"([^"]*)"|'([^']*)'|“([^”]*)”|([^\s"'/>]+))/i;
-/** 面板块：不可在其中切节；漏写闭合时视为延伸到文末。 */
-const PANEL_BLOCK = /<(action_info|item_info)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi;
+/**
+ * 面板标签（开 / 闭）识别的**唯一一份**正则源：`<action_info>`、`< action_info >`、
+ * `<action_info type="a">`、`</ action_info >`、`<item_info>`，大小写不敏感。
+ * 组 1 = `/`（闭标签）或缺席，组 2 = 标签名。前端的面板拆分（`ui/lib/action-panel.ts`）
+ * 与逐节演出（`ui/lib/stage-playback.ts`）都从这里取，别再各写一份 —— 三处口径一旦不同，
+ * 同一块面板会一处当面板、一处漏成原文或被切成两节。
+ * 写成 `<\s*(?:(\/)\s*)?` 而不是 `<\s*\/?\s*`：两段相邻的 `\s*` 在长空白上会平方级回溯。
+ */
+const PANEL_TAG_SOURCE = String.raw`<\s*(?:(\/)\s*)?(action_info|item_info)\b[^>]*>`;
+
+/** 按 `PANEL_TAG_SOURCE` 新建一个正则（每次新建，免得共享 lastIndex）。 */
+export function panelTagPattern(flags = 'gi'): RegExp {
+  return new RegExp(PANEL_TAG_SOURCE, flags);
+}
+
+/**
+ * 面板块所占区间 `[开标签起点, 闭标签终点)`：从一个开标签起到同名闭标签为止，
+ * 其间别的面板标签不算；漏写闭合时视为延伸到文末（流式中常见）。
+ */
+export function panelBlockRanges(text: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  let openTag: string | null = null;
+  let openAt = 0;
+  for (const match of text.matchAll(panelTagPattern())) {
+    const closing = match[1] === '/';
+    const tag = match[2].toLowerCase();
+    if (!closing && openTag === null) {
+      openTag = tag;
+      openAt = match.index ?? 0;
+    } else if (closing && openTag === tag) {
+      ranges.push([openAt, (match.index ?? 0) + match[0].length]);
+      openTag = null;
+    }
+  }
+  if (openTag !== null) ranges.push([openAt, text.length]);
+  return ranges;
+}
 const PARAGRAPH_GAP = /\n\n+/g;
 
 /** 文本里是否出现了分节标记（任一形态）。 */
 export function hasBeatMarkers(text: string): boolean {
   return new RegExp(BEAT_MARKER_SOURCE, 'i').test(text);
-}
-
-function panelRanges(text: string): Array<[number, number]> {
-  const ranges: Array<[number, number]> = [];
-  PANEL_BLOCK.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = PANEL_BLOCK.exec(text)) !== null) {
-    ranges.push([match.index, match.index + match[0].length]);
-    if (match[0].length === 0) PANEL_BLOCK.lastIndex += 1;
-  }
-  return ranges;
 }
 
 function insidePanel(ranges: Array<[number, number]>, offset: number): boolean {
@@ -81,7 +105,7 @@ function tidySegment(segment: string): string {
 export function extractStoryBeats(text: string): StoryBeatExtraction {
   if (!hasBeatMarkers(text)) return { content: text, breaks: [], enters: [] };
 
-  const panels = panelRanges(text);
+  const panels = panelBlockRanges(text);
   const segments: Array<{ text: string; enters: string[] }> = [];
   let current = '';
   let currentEnters: string[] = [];
@@ -135,7 +159,7 @@ export function extractStoryBeats(text: string): StoryBeatExtraction {
 }
 
 function paragraphBreaks(content: string): number[] {
-  const panels = panelRanges(content);
+  const panels = panelBlockRanges(content);
   const breaks: number[] = [];
   PARAGRAPH_GAP.lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -148,7 +172,7 @@ function paragraphBreaks(content: string): number[] {
 
 function breaksValid(content: string, breaks: readonly number[]): boolean {
   if (!Array.isArray(breaks) || breaks.length === 0) return false;
-  const panels = panelRanges(content);
+  const panels = panelBlockRanges(content);
   let previous = 0;
   for (const offset of breaks) {
     if (!Number.isInteger(offset) || offset <= previous || offset >= content.length) return false;

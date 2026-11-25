@@ -2,9 +2,37 @@ import { describe, expect, it } from 'vitest';
 import {
   extractStoryBeats,
   hasBeatMarkers,
+  panelBlockRanges,
+  panelTagPattern,
   resolveBeatBreaks,
   resolveStoryStage,
 } from '../../../src/core/story/story-beats';
+
+describe('面板标签识别（审查 A6：三处共用的唯一一份）', () => {
+  it('认属性、内部空白与大小写；不认同前缀的别的标签', () => {
+    const tags = (s: string) =>
+      [...s.matchAll(panelTagPattern())].map((m) => `${m[1] ?? ''}${m[2].toLowerCase()}`);
+    expect(tags('<action_info type="a">x</action_info>')).toEqual(['action_info', '/action_info']);
+    expect(tags('< action_info >x</ action_info >')).toEqual(['action_info', '/action_info']);
+    expect(tags('<ITEM_INFO>x</item_info>')).toEqual(['item_info', '/item_info']);
+    expect(tags('<action_info_x>x</action_infos>')).toEqual([]);
+  });
+
+  it('面板区间：同名闭标签收束，漏写闭合延伸到文末', () => {
+    const text = 'a<action_info>\n|x|1|\n\n|y|2|\n</ action_info >b<item_info>c';
+    expect(panelBlockRanges(text)).toEqual([
+      [1, text.indexOf('b')],
+      [text.indexOf('<item_info>'), text.length],
+    ]);
+  });
+
+  it('`<` 后接 10 万空白：很快结束', () => {
+    const text = `<${' '.repeat(100_000)}/${' '.repeat(100_000)}x`;
+    const t0 = performance.now();
+    expect(panelBlockRanges(text)).toEqual([]);
+    expect(performance.now() - t0).toBeLessThan(3000);
+  });
+});
 
 describe('extractStoryBeats', () => {
   it('无标记时原样返回（逐字节不变）', () => {

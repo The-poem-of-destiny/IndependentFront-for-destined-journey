@@ -1281,3 +1281,82 @@ describe('digestActionPanel — 名字认读的边角', () => {
     expect(d.deltas.map((x) => x.who)).toEqual(['盗匪甲']);
   });
 });
+
+describe('digestActionPanel — 审查 A3：千分位与分句逗号', () => {
+  it('`60→26,3回合流血` 读成 26（伤害，不是 263 的治疗）', () => {
+    const d = digestOf('|行动者|莱恩|\n|目标|灰狼|\n|变更|灰狼 HP 60→26,3回合流血|');
+    expect(d.deltas).toEqual([{ who: '灰狼', resource: 'HP', delta: -34, from: 60, to: 26 }]);
+  });
+
+  it('逗号后恰好三位数字才算千分位：`1,200` 仍是 1200', () => {
+    const d = digestOf('|行动者|莱恩|\n|目标|灰狼|\n|变更|灰狼 HP 2,000→1,200|');
+    expect(d.deltas).toEqual([{ who: '灰狼', resource: 'HP', delta: -800, from: 2000, to: 1200 }]);
+  });
+
+  it('`HP -15,2回合` 得 −15', () => {
+    const d = digestOf('|行动者|莱恩|\n|目标|灰狼|\n|变更|灰狼 HP -15,2回合|');
+    expect(d.deltas).toEqual([{ who: '灰狼', resource: 'HP', delta: -15 }]);
+  });
+
+  it('逗号后跟四位数字不算千分位：`HP -15,2000` 得 −15', () => {
+    const d = digestOf('|行动者|莱恩|\n|目标|灰狼|\n|变更|灰狼 HP -15,2000|');
+    expect(d.deltas).toEqual([{ who: '灰狼', resource: 'HP', delta: -15 }]);
+  });
+});
+
+describe('digestActionPanel — 审查 A5：长输入不回溯', () => {
+  it('10 万空格的 `|目标|` 格：很快结束', () => {
+    const raw = `|行动者|甲|\n|目标|乙${' '.repeat(100_000)}丙|`;
+    const t0 = performance.now();
+    digestOf(raw);
+    // 防的是灾难性回溯（原实测 5.7 s）；CI 机器比本机慢 4–5 倍
+    expect(performance.now() - t0).toBeLessThan(3000);
+  });
+
+  it('10 万个 `.` 的 `|结果|` 格：很快结束', () => {
+    const raws = [`|结果|${'.'.repeat(100_000)}命中|`, `|结果|命中${'.'.repeat(100_000)}|`];
+    for (const raw of raws) {
+      const t0 = performance.now();
+      digestOf(raw);
+      // 原实测 15 s
+      expect(performance.now() - t0).toBeLessThan(3000);
+    }
+  });
+
+  it('`甲 和 乙` 仍拆成两个目标，`和` 不夹空白时不拆', () => {
+    expect(digestOf('|行动者|莱恩|\n|目标|灰狼 和  黑熊|').targets).toEqual(['灰狼', '黑熊']);
+    expect(digestOf('|行动者|莱恩|\n|目标|灰狼和黑熊|').targets).toEqual(['灰狼和黑熊']);
+  });
+
+  it('结论末尾的句号 / 叹号照旧剥掉', () => {
+    expect(digestOf('|结果|命中！。..|').verdict?.text).toBe('命中');
+  });
+});
+
+describe('digestActionPanel — 审查 A6：交锋误判与百分比', () => {
+  it('标题 `{制作流程: 熔炼 → 锻打}` 不判交锋', () => {
+    const d = digestOf('{制作流程: 熔炼 → 锻打}\n|产物|铁剑|\n|结果|成功|');
+    expect(d.kind).not.toBe('exchange');
+    expect(d.actor).toBeUndefined();
+    expect(d.targets).toEqual([]);
+  });
+
+  it('名字形态的标题 `{莱恩 → 林狼 · 斩击}` 仍判交锋', () => {
+    const d = digestOf('{莱恩 → 林狼 · 斩击}\n| 结果: 命中 |');
+    expect(d.kind).toBe('exchange');
+    expect(d.actor).toBe('莱恩');
+    expect(d.targets).toEqual(['林狼']);
+    expect(d.action).toBe('斩击');
+  });
+
+  it('格子里已认出行动者时，标题左边不是名字也照样补目标', () => {
+    const d = digestOf('{第一回合: 莱恩 → 林狼}\n|行动者|莱恩|\n|结果|命中|');
+    expect(d.actor).toBe('莱恩');
+    expect(d.targets).toEqual(['林狼']);
+  });
+
+  it('`HP -10%` 不记成 −10', () => {
+    const d = digestOf('|行动者|莱恩|\n|目标|灰狼|\n|变更|灰狼 HP -10%|');
+    expect(d.deltas).toEqual([]);
+  });
+});
