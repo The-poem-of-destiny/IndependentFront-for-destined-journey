@@ -422,6 +422,9 @@ const RESOURCE_BY_LABEL: Readonly<Record<string, ResourceKey>> = {
   体力值: 'sp',
 };
 
+/** 整对象展开时先写的键：上限类键决定「当前」的钳制范围，必须先落（见 `expand`） */
+const CAP_FIRST_KEYS: ReadonlySet<string> = new Set(['上限', '额外']);
+
 const PROFILE_TEXT_FIELDS: Readonly<
   Record<string, 'race' | 'gender' | 'appearance' | 'outfit' | 'personality' | 'background'>
 > = {
@@ -1571,7 +1574,12 @@ class TreeTranslator {
     if (!isPlainObject(w.value)) throw new Drop('写入分支需要对象');
     if (note) ctx.notes.push(note);
     let ok = 0;
-    const keys = Object.keys(w.value);
+    // 「上限」「额外」先于「当前」展开：当前值按上限钳制，整对象写资源（如
+    // `{当前:6000,上限:7000}`）若先写当前，会被旧上限钳掉 —— 结果不能依赖模型写的键序（A7）。
+    // 稳定排序：其余键保持原有相对顺序。
+    const keys = Object.keys(w.value).sort(
+      (a, b) => Number(!CAP_FIRST_KEYS.has(a)) - Number(!CAP_FIRST_KEYS.has(b)),
+    );
     for (const key of keys) {
       const sub: OpContext = {
         op: {
