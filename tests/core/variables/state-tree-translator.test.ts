@@ -37,6 +37,17 @@ function tr(
 const ops = (r: TreeTranslateResult) => r.patches.map((p) => p.op);
 const player = () => makeInput().characters[0];
 
+describe('路径恰为 /关系列表（审查跟进）', () => {
+  it.each(['replace', 'add', 'remove'])('%s /关系列表：只丢这一条，不让整批翻译抛出', (op) => {
+    const r = tr([
+      { op, path: '/关系列表', value: {} },
+      { op: 'replace', path: '/主角/金钱', value: 7 },
+    ]);
+    expect(r.records[0].status).toBe('已丢弃');
+    expect(ops(r)).toContain('update_character');
+  });
+});
+
 describe('背包与装备（§5.3 整张表）', () => {
   it('add 背包：新物品 → add_item 不带槽位', () => {
     const r = tr([{ op: 'add', path: '/主角/背包/火把', value: { 类型: '消耗品', 数量: 2 } }]);

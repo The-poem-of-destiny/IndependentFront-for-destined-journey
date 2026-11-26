@@ -63,7 +63,9 @@ export function translatePerson(
   f: ResolvedTreePath | undefined,
 ): void {
   const w = ctx.op;
-  const p = t.person!;
+  // 路径恰为 `/关系列表`（没点名人物）时没有 person：丢这一条，不让整批翻译抛出
+  if (!t.person) throw new Drop('没有指明人物，不能整体写关系列表');
+  const p = t.person;
   const relSegs = t.segments.slice(p.isPlayer ? 1 : 2);
   if (relSegs.length === 0) return personRoot(h, ctx, t, f);
   if (!p.exists) throw new Drop(`人物「${p.name}」不存在`);
