@@ -1,8 +1,8 @@
 /**
  * 影子后值与真实落库的多 op 序列对照（审查报告 R5 前置安全网）
  *
- * 翻译层（`state-tree-translator.ts`）手写镜像 StateManager 各处理器维护一份「影子」状态，
- * 用它算出每条 op 的记录后值。本文件用多 op 序列逐条对照：
+ * 翻译层（`state-tree-translator.ts`）维护一份「影子」状态，用它算出每条 op 的记录后值。
+ * 本文件用多 op 序列逐条对照：
  *
  * 1. 整批翻译，拿到每条 op 的记录后值 `records[i].after`；
  * 2. 从同一份种子重新开始，把前 i+1 条 op 经翻译层 → 真实 `StateManager`（fake-indexeddb）
@@ -13,8 +13,8 @@
  * 这条记录的后值。序列都按自然顺序书写（不靠「新建人物先落」的重排，也不写会被折叠的删加对），
  * 前缀翻译与整批翻译的前 i+1 条处理过程一致。
  *
- * 现存分歧用 `it.fails` 标注，每条在注释里写清分歧点；后续抽共享 reducer 取代影子时，
- * 这些用例应当转绿，届时把 `it.fails` 改回 `it`。
+ * 2026-11-25（审查报告 R5b）：角色域影子改调 `state/patch-reducer.ts`（与 StateManager 同一份
+ * 纯变换），原先用 `it.fails` 钉住的三条角色域分歧已转绿，改回普通 `it`（见文末「原已知分歧」）。
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -143,32 +143,12 @@ async function parity(ops: RawOp[], extra: CharacterState[] = []): Promise<Parit
   return rows;
 }
 
-/** 删掉值里的一个子路径（两侧同删；只用于把已登记为 `it.fails` 的分歧点从主序列里摘出去）。 */
-function omitPath(value: unknown, path: string[]): unknown {
-  if (value === undefined) return value;
-  const copy = structuredClone(value) as Record<string, unknown>;
-  let node: Record<string, unknown> | undefined = copy;
-  for (const k of path.slice(0, -1)) node = node?.[k] as Record<string, unknown> | undefined;
-  if (node) delete node[path[path.length - 1]];
-  return copy;
-}
-
-/**
- * 断言整条序列每条 op 都落了（没有被丢），且记录后值与真实落库值逐条相等。
- * `omit`：第 i 条对照前两侧同删的子路径 —— 只许填已在下方「已知分歧」里用 `it.fails` 单独钉住的点。
- */
-async function expectParity(
-  ops: RawOp[],
-  extra: CharacterState[] = [],
-  omit: Record<number, string[]> = {},
-): Promise<void> {
+/** 断言整条序列每条 op 都落了（没有被丢），且记录后值与真实落库值逐条相等。 */
+async function expectParity(ops: RawOp[], extra: CharacterState[] = []): Promise<void> {
   const rows = await parity(ops, extra);
   expect(rows.filter((r) => r.status === '已丢弃')).toEqual([]);
   for (const r of rows) {
-    const sub = omit[r.index];
-    const recorded = sub ? omitPath(r.recorded, sub) : r.recorded;
-    const persisted = sub ? omitPath(r.persisted, sub) : r.persisted;
-    expect(recorded, `第 ${r.index + 1} 条（${r.path}）记录后值 vs 落库值`).toEqual(persisted);
+    expect(r.recorded, `第 ${r.index + 1} 条（${r.path}）记录后值 vs 落库值`).toEqual(r.persisted);
   }
 }
 
@@ -262,8 +242,7 @@ describe('影子后值 = 真实落库：多 op 序列', () => {
   });
 
   it('建人后续写：新人物 → 金钱 / 资源 / 背包 / 好感', async () => {
-    // 第 1 条的 `档案/_年龄` 是已知分歧，单独钉在下方「已知分歧」里
-    await expectParity(SMITH_OPS, [], { 0: ['档案', '_年龄'] });
+    await expectParity(SMITH_OPS);
   });
 
   it('任务 / 变量 / 好感 / 命运点', async () => {
@@ -314,30 +293,25 @@ describe('影子后值 = 真实落库：多 op 序列', () => {
   });
 
   it('装备改名后续写：改名 → 写描述 / 耐久', async () => {
-    // 第 1 条整件物品的 `类型` 是已知分歧（旧式 type），单独钉在下方「已知分歧」里
-    await expectParity(
-      [
-        { op: 'move', from: '/主角/装备/长剑', path: '/主角/装备/宝剑' },
-        { op: 'replace', path: '/主角/装备/宝剑/描述', value: '改名后的剑' },
-        { op: 'delta', path: '/主角/装备/宝剑/耐久/当前', value: -5 },
-      ],
-      [],
-      { 0: ['类型'] },
-    );
+    await expectParity([
+      { op: 'move', from: '/主角/装备/长剑', path: '/主角/装备/宝剑' },
+      { op: 'replace', path: '/主角/装备/宝剑/描述', value: '改名后的剑' },
+      { op: 'delta', path: '/主角/装备/宝剑/耐久/当前', value: -5 },
+    ]);
   });
 });
 
 /**
- * 已知分歧清单（共享 reducer 任务的验收依据）：每条只断言分歧那一个点，
- * 修好后 `it.fails` 会因「意外通过」而变红，届时改回 `it`。
+ * 原已知分歧（共享 reducer 任务 R5b 的验收依据，2026-11-25 已修复，由 `it.fails` 改回 `it`）：
+ * 每条只断言当初分歧的那一个点。
  */
-describe('影子后值 = 真实落库：已知分歧（待共享 reducer 修复）', () => {
+describe('影子后值 = 真实落库：原已知分歧（共享 reducer 已修复）', () => {
   beforeEach(() => seed());
 
-  // 分歧点：零上限怪物（maxMp=0）写法力当前值 5。翻译层按有效上限 max(1, 基础+额外)=1 纠正，
-  // 记录说明「已钳到 1」、记录值 1、补丁 set_mp 1；真实 StateManager 按 maxMp=0 钳成 0。
-  // 记录后值本身读影子得 0（影子 set_mp 也按 maxMp 钳），与落库一致 —— 分歧在记录的写入值与说明。
-  it.fails('零上限怪物写法力：记录写「已钳到 1」，落库为 0', async () => {
+  // 原分歧点：零上限怪物（maxMp=0）写法力当前值 5。翻译层曾按有效上限 max(1, 基础+额外)=1 纠正，
+  // 记录写「已钳到 1」、补丁 set_mp 1；真实 StateManager 按 maxMp=0 钳成 0。
+  // 现在翻译层纠正写入值与 reducer 用同一个钳制上限（`resourceCeiling`）。
+  it('零上限怪物写法力：记录写入值与落库同为 0', async () => {
     const op: RawOp = { op: 'replace', path: '/关系列表/史莱姆/法力值/当前', value: 5 };
     await seed([zeroCapMonster()]);
     const result = await translate([op]);
@@ -346,20 +320,20 @@ describe('影子后值 = 真实落库：已知分歧（待共享 reducer 修复�
     expect(result.records[0].value).toBe(persisted);
   });
 
-  // 分歧点：带旧式 `type`（「武器」，不在物品类型词表内）的已穿戴装备改名（move 到新名字）。
-  // 影子把整件物品 JSON 克隆过去，记录后值仍带 `类型: 武器`；真实 add_item 对 type 做
-  // normalizeItemType，认不出的旧式值归一成 undefined，落库再投影没有 `类型`。
-  it.fails('带旧式 type 的装备改名：记录后值含类型，落库丢类型', async () => {
+  // 原分歧点：带旧式 `type`（「武器」，不在物品类型词表内）的已穿戴装备改名（move 到新名字）。
+  // 影子曾把整件物品 JSON 克隆过去，记录后值仍带 `类型: 武器`；真实 add_item 对 type 做
+  // normalizeItemType，认不出的旧式值归一成 undefined。现在影子走同一个 add_item 变换。
+  it('带旧式 type 的装备改名：记录后值与落库同样不带旧式类型', async () => {
     const rows = await parity([{ op: 'move', from: '/主角/装备/长剑', path: '/主角/装备/宝剑' }]);
     const recorded = rows[0].recorded as Record<string, unknown>;
     const persisted = rows[0].persisted as Record<string, unknown>;
-    expect(recorded['类型']).toBe('武器');
+    expect(persisted['类型']).toBeUndefined();
     expect(recorded['类型']).toEqual(persisted['类型']);
   });
 
-  // 分歧点：新建人物。真实 applyAddCharacter 经 ensureCharacterAge 补年龄锚点，投影出只读
-  // `档案/_年龄`；影子直接 push 翻译层组装的人物，不补年龄锚点，记录后值没有 `_年龄`。
-  it.fails('新建人物：记录后值缺 档案/_年龄，落库有', async () => {
+  // 原分歧点：新建人物。真实 applyAddCharacter 经 ensureCharacterAge 补年龄锚点，投影出只读
+  // `档案/_年龄`；影子曾直接 push 翻译层组装的人物。现在影子建人走同一个 `prepareNewCharacter`。
+  it('新建人物：记录后值与落库同带 档案/_年龄', async () => {
     const rows = await parity(SMITH_OPS.slice(0, 1));
     const recorded = rows[0].recorded as { 档案: Record<string, unknown> };
     const persisted = rows[0].persisted as { 档案: Record<string, unknown> };
