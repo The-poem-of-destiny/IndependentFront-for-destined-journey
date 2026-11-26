@@ -12,10 +12,10 @@
 
 ## Story v2 / 内容路由速览
 
-- 直出：准备页（`CreateReadiness.vue`，状态由 `CreatePage.vue` 持有）明确选择存档模式，`create-store.ts` 必填校验并持久化；`game-store.ts` 从存档解析模式与战斗投影，`lib/game-pipeline.ts` 独立直出分支复用原有记忆。`lib/direct-settings.ts` 初始化独立模型配置，设置页不提供档内模式切换。📌 2026-11-17：新增全局设置 `directStructuredCombat`（`UiSettings`，默认 false，经引擎 `runtime/engine-settings.ts` 注入缝读取）。「Agent 配置 → 直出主生成」与「直出主生成（缓存优化）」两页各有一张「战斗」卡，开关「结构化战斗」置灰不可点，提示「暂未开放」，功能锁定为关。关闭时 `lib/game-pipeline.ts` 的 `acceptDirectTurn` 跳过 `buildDirectCombat`，`isInCombat` 恒为 false，正文战斗期间随机事件与人设编辑锁不再拦截。契约见 [直出模式 · 正文战斗](../../docs/reference/direct-generation.md#正文战斗2026-11-17)。📌 2026-11-22（`fix/direct-tail-and-opening`，未真机验证）：`lib/game-pipeline.ts` 的 `buildContext` 在直出模式（`isDirectMode`）、`metadata.openingPromptConsumed === true` 且过滤后的历史里已有被接纳的 assistant 正文时不再供 `openingPrompt`（首轮中断、开局回合从未被接纳的档仍供原文），旧直出档不再每轮随 `direct_state` 重发开局提示词；Agent 模式照旧供值（`{{SKILL_STATE}}` 要读）。见 [直出模式 · 尾部格式提醒与开局提示词不再重发](../../docs/reference/direct-generation.md#尾部格式提醒与开局提示词不再重发2026-11-22)。
-- 📌 2026-11-21 直出坏项丢弃继续（`fix/ai-output-format-contracts`）：`lib/game-pipeline.ts` 提交叙事更新改用 `buildDirectPatches` 返回的过滤后 `characterUpdates`；建补丁期的连锁丢弃由 `recordDirectBuildDropped` 记 warn `direct.output_dropped` 并追加到本回合 `direct_main` 调试记录的 `outputWarnings`。核心提交成功后只弹一次不阻塞的 warning 提示：缺 `direct_updates` 区块（`updatesMissing`）优先，否则合计解析与建补丁两处的丢弃数。`DebugPanel.vue` 在「结束原因」之后列出「已忽略 N 项」（`data-testid="output-warnings"`）。契约见 [直出模式 · 坏项丢弃继续](../../docs/reference/direct-generation.md#坏项丢弃继续2026-11-21)。
+- 直出：准备页（`CreateReadiness.vue`，状态由 `CreatePage.vue` 持有）明确选择存档模式，`create-store.ts` 必填校验并持久化；`game-store.ts` 从存档解析模式与战斗投影，`lib/game-pipeline.ts` 独立直出分支复用原有记忆。`lib/direct-settings.ts` 初始化独立模型配置，设置页不提供档内模式切换。📌 2026-11-17：新增全局设置 `directStructuredCombat`（`UiSettings`，默认 false，经引擎 `runtime/engine-settings.ts` 注入缝读取）。「Agent 配置 → 直出主生成」与「直出主生成（缓存优化）」两页各有一张「战斗」卡，开关「结构化战斗」置灰不可点，提示「暂未开放」，功能锁定为关。关闭时 `lib/game-pipeline.ts` 的 `acceptDirectTurn` 跳过 `buildDirectCombat`（📌 2026-11-25 审查 R2：按 `draft.structuredCombat`，生成时口径，不在接纳时重读开关），`isInCombat` 恒为 false，正文战斗期间随机事件与人设编辑锁不再拦截。契约见 [直出模式 · 正文战斗](../../docs/reference/direct-generation.md#正文战斗2026-11-17)。📌 2026-11-22（`fix/direct-tail-and-opening`，未真机验证）：`lib/game-pipeline.ts` 的 `buildContext` 在直出模式（`isDirectMode`）、`metadata.openingPromptConsumed === true` 且过滤后的历史里已有被接纳的 assistant 正文时不再供 `openingPrompt`（首轮中断、开局回合从未被接纳的档仍供原文），旧直出档不再每轮随 `direct_state` 重发开局提示词；Agent 模式照旧供值（`{{SKILL_STATE}}` 要读）。见 [直出模式 · 尾部格式提醒与开局提示词不再重发](../../docs/reference/direct-generation.md#尾部格式提醒与开局提示词不再重发2026-11-22)。
+- 📌 2026-11-21 直出坏项丢弃继续（`fix/ai-output-format-contracts`）：`lib/game-pipeline.ts` 提交叙事更新改用 `buildDirectPatches` 返回的过滤后 `characterUpdates`；建补丁期的连锁丢弃由 `recordDirectBuildNotes`（📌 2026-11-25 更正：原写 `recordDirectBuildDropped`，该名在代码里不存在；它同时记纠正 `direct.output_normalized`）记 warn `direct.output_dropped` 并追加到本回合 `direct_main` 调试记录的 `outputWarnings`。核心提交成功后只弹一次不阻塞的 warning 提示：缺 `direct_updates` 区块（`updatesMissing`）优先，否则合计解析与建补丁两处的丢弃数。`DebugPanel.vue` 在「结束原因」之后列出「已忽略 N 项」（`data-testid="output-warnings"`）。契约见 [直出模式 · 坏项丢弃继续](../../docs/reference/direct-generation.md#坏项丢弃继续2026-11-21)。
 - 📌 2026-11-19 逐节演出（交互式推进）：全局设置 `stagedNarrative`（默认 true，「设置 → 消息显示 → 正文演出」）。纯状态机 `lib/stage-playback.ts`（字符偏移游标，流式中只放出完整节，断点缺席按段落临时切）与 `lib/stage-entrance.ts`（`resolveEntrances`：开楼名册里的名字不演，不拿本楼新建名单过滤）。登场规则是**演过就不再撤回**：卡片一旦播出就按当时的名字（含别名）钉进这条消息的账本，名册回读、接纳状态、是否在生成都不再撤掉它，位置按当前节重新定位、换位时静态显示；还没演的只在所在节是新放出的时候演；进度簿 `composables/useStagedPlayback.ts`（只演本次会话新到的直出正文，草稿进度交接给正式消息不回退不重放，`holdOptions` 让 `InputBar` 暂扣选项）。组件 `game/StagedNarrative.vue`（每节一个 `BeautifiedNarrative`）、`game/CharacterEntrance.vue`（立牌链，无素材只浮现名字题签，`mask-position` 动画是 `docs/design.md` §6.4 登记的例外）、`game/combat/CombatBeatCard.vue`（`combat-view.ts` 的 `parseCombatBeat`）。🔴 与 `ActionPanel` 的分工：`<action_info>` 默认一律交给 `ActionPanel`；只有面板里有 `|行动者|` 行（直出正文战斗逐拍契约）时由 `CombatBeatCard` 接管 —— 认行复用 `lib/action-panel.ts` 的 `parseActionPanel`，`parseCombatBeat` 只吃它摊平后的格，别再写第二个面板解析器。📌 2026-11-23（未真机验证）：上一句「CombatBeatCard 分工」已作废 —— `CombatBeatCard.vue` 与 `parseCombatBeat` 已删，`<action_info>` 一律交给 `ActionPanel`，有 `|行动者|` 行的面板由它按 `view.kind = exchange` 画成交锋；ChatFlow 的 `STAGE_YIELD_SELECTOR` 去掉了 `.combat-beat`（`.action-panel-card` 仍在）。`BeautifiedNarrative` 不再给面板叠 `fx-ink-block`，改传 `entrance`（`reveal === 'once' && onceActive`，闸门关 / 历史消息不播）让面板播当前样式自己的入场。认行仍只有 `parseActionPanel` 一个入口，别再写第二个面板解析器。🔴 `BeautifiedNarrative` 的 `imageSlice` 属性：插画 occurrence 按整条消息计数，每节要加上前面各节的图数，生图侧取整条正文，消息末尾图带只挂末节；缺省时行为不变。`lib/game-pipeline.ts` 的 `StoryChunkCallback` 第三参 `stage` 只在直出主笔给出，`GamePage` 同帧提交 `streamingStage`。键盘与点击在 `ChatFlow.vue`：Space / Enter 推进、按住 Ctrl 快进（单独按住约 300ms 才进入，期间按别的键或滚轮即取消，单按一下不推进）、End 全部显示、左键点正文推进，让路清单 `STAGE_YIELD_SELECTOR` 加右键菜单 / `hasOpenDialog()` / `activeModal` / `isInCombat` / 选字 / 输入法。小条「全文」直接把 `stagedNarrative` 设为 false（关闭时 DOM 与引入前一致）。📌 2026-11-20：小条不再挂在 `StagedNarrative` 末尾，改为 `game/StageControls.vue`，由 ChatFlow 挂在 `InputBar` 正上方（`.stage-dock` 高度 0、内层绝对定位，出现 / 收起都不挤动布局；`.chat-messages` 底部留 56px 免得盖住最后一条消息的操作条）；可收起成「演出」标签，状态存 `UiSettings.stagedControlsCollapsed`（默认 false）。设计见 [交互式推进设计](../../docs/planning/2026-11-19-interactive-progression-design.md)。
-- 📌 2026-11-22 实验性变量协议（状态树，分支 `experimental-variables`，**未经真实模型与真机游玩验证**）：全局设置 `stateProtocol: 'legacy' | 'tree'`（`stores/settings-types.ts` + `settings-store.ts` 两处声明，经 `main.ts` 接到引擎设置缝；「设置 → 开发者 → 实验性变量协议（状态树）」开关，`DeveloperSection.vue`，缺省 legacy）。`lib/game-pipeline.ts` 接纳直出时把存档档案交给 `buildDirectPatches`、用返回的 `deltaTime`，tree 下把更新记录写到本楼 assistant 消息 `stateUpdates`，并在拍回合快照前清掉更早楼层记录里的前值 / 后值；`stateWriteStats` 补全后进调试记录。新组件 `game/StateEditorPanel.vue`（变量修改器，`activeModal === 'variables'`）与 `game/StateUpdateBlock.vue`（每楼更新块），各配纯函数 `state-editor-view.ts` / `state-update-view.ts`；`lib/status-view.ts` 是状态时长显示的唯一真源（`durationText` 优先）。`stores/game-store.ts` 新增：`readStateEditorSnapshot`、`commitStateEdit`、`undoLastStateEdit`（撤销栈 `stateEditUndoStack` 只在内存，换回合清空，`clearStateEditUndo`）、`openStateEditorAt` / `stateEditorFocusPath` / `consumeStateEditorFocus`、`planStateUpdateRevision`、`commitStateUpdateRevision`；写入全走引擎 `StateManager.commitPlayerEdit`。🔴 已知限制：从修改器撤销一次更新块修订只还原状态、不还原该楼记录，之后再修订该行会按现值报冲突。设计见 [状态树投影协议设计](../../docs/planning/2026-11-22-mvu-projection-protocol-design.md)。
+- 📌 2026-11-22 实验性变量协议（状态树，分支 `experimental-variables`，**未经真实模型与真机游玩验证**）：全局设置 `stateProtocol: 'legacy' | 'tree'`（`stores/settings-types.ts` + `settings-store.ts` 两处声明，经 `main.ts` 接到引擎设置缝；「设置 → 开发者 → 实验性变量协议（状态树）」开关，`DeveloperSection.vue`，缺省 legacy）。`lib/game-pipeline.ts` 接纳直出时把存档档案交给 `buildDirectPatches`、用返回的 `deltaTime`，tree 下把更新记录写到本楼 assistant 消息 `stateUpdates`，并在拍回合快照前清掉更早楼层记录里的前值 / 后值；`stateWriteStats` 补全后进调试记录。新组件 `game/StateEditorPanel.vue`（变量修改器，`activeModal === 'variables'`）与 `game/StateUpdateBlock.vue`（每楼更新块），各配纯函数 `state-editor-view.ts` / `state-update-view.ts`；`lib/status-view.ts` 是状态时长显示的唯一真源（`durationText` 优先）。`stores/game-store.ts` 新增：`readStateEditorSnapshot`、`commitStateEdit`、`undoLastStateEdit`（撤销栈 `stateEditUndoStack` 只在内存、存引擎撤销凭据，换回合清空，`clearStateEditUndo`；📌 2026-11-25 审查 R4 改）、`openStateEditorAt` / `stateEditorFocusPath` / `consumeStateEditorFocus`、`planStateUpdateRevision`、`commitStateUpdateRevision`；写入全走引擎 `StateManager.commitPlayerEdit`。🔴 已知限制：从修改器撤销一次更新块修订只还原状态、不还原该楼记录，之后再修订该行会按现值报冲突。📌 2026-11-25 此条已作废（审查 R4，`refactor/state-edit-snapshot-undo`）：修改器撤销改为内核快照整体还原（`StateManager.undoPlayerEdit`，指纹不符即拒绝）；更新块修订的状态提交与该楼记录写回在同一事务（`commitPlayerEdit` 的 `record` 参数），撤销时该楼记录一并还原，之后再修订该行不报冲突。📌 2026-11-25（审查 R6，`refactor/state-editor-split`）：`readStateEditorSnapshot` / `commitStateEdit` / `undoLastStateEdit` / `stateEditUndoStack` / `clearStateEditUndo` / `openStateEditorAt` / `stateEditorFocusPath` / `consumeStateEditorFocus` / `planStateUpdateRevision` / `commitStateUpdateRevision` 已从 `game-store` 搬到 `stores/state-edit-store.ts`（`useStateEditStore`），名字不变（上文「`stores/game-store.ts` 新增」按此读）。`game-store` 只留 `sessionEpoch` 世代号，切存档 / 时间线恢复时新 store 同步清空撤销栈与定位路径；提交在途时世代变了，旧撤销凭据不压进新会话。「最新一楼」只认 `state-update-view.ts` 的 `latestUpdateFloorId`。设计见 [状态树投影协议设计](../../docs/planning/2026-11-22-mvu-projection-protocol-design.md)。
 - 📌 2026-11-20 露骨内容开关：全局设置 `nsfwContent`（默认 false，「设置 → 内容包 → 露骨内容」）。游戏界面显示内容包文本经 `composables/useNsfwText.ts`；🔴 世界书编辑器与 Agent / 预设提示词编辑器是「直接查看原文」，**不许**过滤（`WorldBookEditor` 只加 NSFW 徽章）。建档页的 `summary()` 必须先过滤再剥 HTML 标签。插画分级上限读 `effectiveMaxRating(imageMaxRating, nsfwContent)`，别直接读 `imageMaxRating`。`game-pipeline.loadActiveWorldBooks` 与 `create-store` 两处世界书加载经 `filterNsfwBooks`。设计见 [露骨内容开关](../../docs/planning/2026-11-20-explicit-content-switch-design.md)。
 - 缓存直出：建档第三项 `direct_cached`，配置页单列缓存主生成的连接、参数、预设与渠道策略；运行时仍是 `direct_main`。`DebugPanel` 区分缓存读取、写入、普通输入与总输入，缺字段保持未知。详见 [缓存直出](../../docs/reference/direct-generation-cache.md)。
 
@@ -103,6 +103,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   **只按选中标记 id 监听**来填（列表选中 / 地图点 overlay / 新增标记
 │   │                                   三条路一视同仁）；不深监听标记本身，否则自己保存时会冲掉输入中的字
 │   ├── useHoverPopup.ts             ← 悬停浮层唯一实现（读 settings.hoverDelayMs）
+│   ├── useMessageKeyedCache.ts      ← 🆕 [2026-11-25 / 审查 R8] 按消息 id 的会话内缓存，消息移除（回退、切档、整体换数组）时随之清理；
+│   │                                   消费方：ChatFlow `mentionCache`、useStagedPlayback `inputCache`。别再写不随消息清理的模块级 Map
 │   ├── usePresets.ts                ← 正文 Agent 预设（ChatPreset）的共享响应式状态 + Dexie 持久化
 │   │                                   🔴 Dexie `presets` 表是**唯一真源**：此前预设同时写 Dexie 与
 │   │                                      `settings.presets` 镜像、UI 全读镜像 —— 装包写 Dexie、
@@ -125,6 +127,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                      🔴 凡是**复制出玩家预设**的路径（`duplicateAsUser`、
 │   │                                      `migrateBuiltinPresetRows` 的副本、PresetManager 写时复制）都必须删掉
 │   │                                      这个字段 —— 带着它的副本会被播种当成「没改过的出厂行」
+│   │                                   📌 2026-11-25（审查 R7，`refactor/preset-catalog-factory`）：目录装配只经 `lib/preset-catalog.ts` 的
+│   │                                      `buildUiPresetCatalog`（GamePipeline 与本文件共用，内容所有 id＝内容包 ∪ 出厂登记）；上文的
+│   │                                      `registerFactoryPresetIds` 已迁到该文件。选择键只经 `selectPreset` 写，传空串＝跟随默认
+│   │                                      （AgentConfigPanel「全部恢复默认」也走它）。`ReconcileResult.reimportedPresetId` 已删
 │   ├── usePresetKnobs.ts            ← 🆕 [2026-11-21] 某 profile（story / direct / direct_cached）生效预设的「旋钮」视图：
 │   │                                   互斥组及状态、生效总览（引擎 `preset-insight` 估 token）、已调整条数 + 三个动作。
 │   │                                   PresetManager 与游戏内 PresetDrawer 共用；🔴 写入只经 `usePresets().setEntriesEnabled` /
@@ -360,6 +366,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── fx-foil.ts                   ← 🆕 [特效层] `v-foil` 指令：传说 / 神话 / 唯一（`RARITY_LEVELS` 下标 ≥ 4）
 │   │                                   往宿主追加一个 `.fx-foil`，坐标只写在它自己身上；样式表由本模块按需注入一次，
 │   │                                   规则挂在 `:root[data-fx='on']` 下。ItemSystemCard（带 2.5° 倾斜）与 ItemDetailBody 使用
+│   │                                   📌 2026-11-25（审查 R8，`chore/ui-cleanup-batch`）：指针改经 fx-pointer 的全局源（悬停期间才订阅），
+│   │                                   帧经 fx-ticker 合并，宿主不再挂 pointermove、不直接调 rAF（只挂 pointerenter / pointerleave）
 │   ├── fx-item-flight.ts            ← 🆕 [特效层] 获得物品消息出现时一道光沿弧线飞向侧栏背包按钮、按钮轻弹；
 │   │                                   闸门关 / 页面隐藏 / 目标不可见 / 已有一次在飞时整个跳过。只读 DOM、不碰数据
 │   ├── narrative-reveal.ts          ← 🆕 [特效层] 流式正文「墨迹洇开」纯状态机：只有新追加的尾巴成 chunk，
@@ -391,6 +399,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   并回首页），卸载时等 `waitForGameSaveIdle` 后释放。同标签页同存档引用计数共用一把锁；
 │   │                                   无 `navigator.locks` 或申请出错时放行。🔴 写队列只在本标签页内存里，
 │   │                                   这把锁是两个标签页同写一档（便携版重复启动）唯一的护栏
+│   │                                   📌 2026-11-25（审查 R8，`fix/save-tab-lock-import-delete`）：另导出 `findSavesLockedElsewhere` /
+│   │                                   `isSaveLockedElsewhere`，经 `navigator.locks.query()` 只读试探；删档、整库导入、清除所有数据
+│   │                                   （存档管理窗口与设置页数据分区）被别的标签页占用时拒绝，本标签页自持的锁不拦。
+│   │                                   🔴 内容包装包失败的整库回滚尚未经此试探（见 docs/known-issue.md）
 │   ├── turn-failure.ts              ← 🆕 [2026-11-14 / GAME-05] 回合失败归类（auth/quota/rate_limit/network/
 │   │                                   server/rejected/config/unknown）与措辞的**唯一出处**；原文先
 │   │                                   `redactSecrets` 脱敏再截断（上游错误体可能回显密钥）。
@@ -415,6 +427,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   `sectionHue` / `rulesClaimActionInfo`（启用规则能否整块匹配正文里的闭合面板）。
 │   │                                   渲染在 `components/game/ActionPanel.vue`；原 combat-view 的
 │   │                                   `parseCombatNarrative` 一族已删，用例迁到 tests/ui/lib/action-panel.test.ts
+│   │                                   📌 2026-11-25（审查 A6）：`<action_info>` 标签识别只有引擎侧一份 —— `@engine/story/story-beats` 的
+│   │                                   `panelTagPattern()` / `panelBlockRanges()`（认属性、内部空白、大小写）。action-panel、stage-playback、
+│   │                                   story-beats 三处共用，别再各写正则
 │   ├── action-digest.ts             ← 🆕 [2026-11-23] 行动面板**摘要提取**（纯函数、永不抛）：在 `parseActionPanel`
 │   │                                   结构上读语义 —— `kind`（exchange > roster > outcome > generic）/ `actor` / `targets` /
 │   │                                   `verdict` / `deltas`（`|变更|` 等的 HP/MP/SP 增减，同人同资源合并）/ `roster` / `roll` /
@@ -426,6 +441,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── action-panel-styles.ts       ← 🆕 [2026-11-23] 行动面板样式目录（唯一一张表）：duel 对决条（缺省）/ afterimage 血条残影 /
 │   │                                   battlelog 战报行 / floating 跳字舞台 / card 打出的牌，各带中文名、说明、`entranceMs`；
 │   │                                   `resolveActionPanelStyle` 把任意值归一成合法 id
+│   ├── action-style-helpers.ts      ← 🆕 [2026-11-25 / 审查 R3] 五种样式共用的助手（`sgn` / `rc` / `hasRange` / `deltaClass` /
+│   │                                   `ownClass` / `abs` / `primaryOf` / `verdictTone` / `actionLabel` / `genericFacts` / `rosterNote` /
+│   │                                   `statusLines` / `settledDeltas`），样式组件里别再抄副本
+│   ├── preset-catalog.ts            ← 🆕 [2026-11-25 / 审查 R7] `buildUiPresetCatalog`（GamePipeline 与 usePresets 共用的目录工厂）
+│   │                                   + `registerFactoryPresetIds`（出厂登记）
 │   └── quality-colors.ts / test-fixtures.ts / toSystemEvent.ts
 │
 ├── themes/                          ← 🔴 主题 CSS **住在这里，不在 lib/**：
@@ -477,6 +497,10 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   projection-failed 必须清空当前会话并回首页重新进入存档
 │   │                                   loadSave 先读完整投影再按世代提交；离页使在途加载失效。
 │   │                                   ui.activeSaveId 只表达导航目标，活跃投影由 game-store 持有。
+│   │                                   📌 2026-11-25（审查 R6）：状态编辑段已搬到 `state-edit-store.ts`；本 store 只留 `sessionEpoch` 世代号
+│   ├── state-edit-store.ts          ← 🆕 [2026-11-25 / 审查 R6] `useStateEditStore`：变量修改器与更新块修订的状态与方法
+│   │                                   （快照读取、提交、撤销栈与撤销、定位路径、更新块补差），自 game-store 搬来、名字不变；
+│   │                                   按 game-store 的 `sessionEpoch` 清空撤销栈与定位路径
 │   ├── settings-store.ts            ← 全应用最热的状态；deep watch 自动落 localStorage
 │   │                                   API 完整连接不再住此处；只保留 Agent/记忆/图像绑定及兼容投影。
 │   │                                   API RPM 策略住 Dexie v23，按策略行保存并热更新全局 limiter
@@ -760,6 +784,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               📌 2026-11-14（H-02）：「扩展管理」按钮**有条件显示** —— 只在工坊解锁或
 │   │   │                               已装社区扩展时出现（`workshop/workshop-lock.ts` 的 `hasExtensionWork`），
 │   │   │                               工坊 store 读完前不显示；设置页左栏与游戏菜单的入口照旧
+│   │   │                               📌 2026-11-25（审查 R8，`chore/ui-cleanup-batch`）：快速测试住 `home/DevQuickTestRow.vue`，
+│   │   │                               以字面量 `import.meta.env.DEV` 门控异步引入，生产不打包
+│   │   ├── DevQuickTestRow.vue      ← 🆕 [2026-11-25] 首页开发用快速测试行（只在开发构建出现）
 │   │   ├── AstralDriftBackdrop.vue  ← [星流首页] 懒加载 / WebGL2 与减动效降级 / 可见性暂停 / 销毁壳
 │   │   │                               📌 2026-11-14：`defineExpose({ setEnergy, pulse })` 转发给当前场景，无场景时空操作
 │   │   ├── drift/runtime.ts         ← [星流首页] Three.js 场景单文件运行时；工厂 + 主题切换 + 生命周期
@@ -1246,17 +1273,22 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               生成中不锁开关（管线回合开始才读，下一回合生效）；去设置先过 `confirmLeaveGame`
 │   │   ├── StateEditorPanel.vue     ← 🆕 [状态树协议 T11 / 2026-11-22] 变量修改器（`activeModal === 'variables'`）：
 │   │   │                               左栏可折叠状态树 + 按名字 / 路径搜索，右栏选中节点的编辑表单；
-│   │   │                               编辑 → op → 试算「将要发生的变更」→ 确认 → `game.commitStateEdit`（整批原子）。
-│   │   │                               树每次打开从库里新读（`game.readStateEditorSnapshot` + `buildStateTree` 全部全量）。
+│   │   │                               编辑 → op → 试算「将要发生的变更」→ 确认 → `stateEdit.commitStateEdit`（整批原子）。
+│   │   │                               树每次打开从库里新读（`stateEdit.readStateEditorSnapshot` + `buildStateTree` 全部全量）。
 │   │   │                               判定全在纯函数 `state-editor-view.ts`（只读键、控件、草稿 → op、锁定原因）。
 │   │   │                               🔴 `_` 只读键与时间不可编辑；生成中 / 润色中 / 战斗中整面只读；
 │   │   │                                  第一期不能穿戴 / 卸下装备、不改新闻、人物不可改名；手改不告知模型
+│   │   │                               📌 2026-11-25（审查 R6，`refactor/state-editor-split`）：拆成壳 + `game/state-editor/` 下的 `StateEditorTree`（树导航）、
+│   │   │                               `StateEditorFieldForm`（字段表单，多根）、`StateEditorPreview`（预览确认），共用静态类在 `state-editor-shared.css`；
+│   │   │                               状态编辑接口改由 `stores/state-edit-store.ts`（`stateEdit.*`）提供，不再在 `game.*` 上
+│   │   ├── state-editor/            ← 🆕 [2026-11-25] StateEditorPanel 的子组件：StateEditorTree / StateEditorFieldForm /
+│   │   │                               StateEditorPreview + `state-editor-shared.css`
 │   │   ├── StateUpdateBlock.vue     ← 🆕 [状态树协议 T13 / 2026-11-22] 每楼「本楼状态更新」块（原生 `<details>`，默认收起），
 │   │   │                               ChatFlow 挂在已接纳正文消息下方，读 `ChatMessage.stateUpdates`；
 │   │   │                               显示时机同行动选项（逐节演出放完才出现）。判定在纯函数 `state-update-view.ts`
 │   │   │                               （显不显示、最新一楼、行视图、编辑输入解析、跳转落点）。
-│   │   │                               只有最新一楼可改（改值 / 撤销 / 重新应用 / 新增），经 `game.planStateUpdateRevision` →
-│   │   │                               `game.commitStateUpdateRevision`；现值与记录不符先提示冲突。更早楼层只读、可跳到修改器。
+│   │   │                               只有最新一楼可改（改值 / 撤销 / 重新应用 / 新增），经 `stateEdit.planStateUpdateRevision` →
+│   │   │                               `stateEdit.commitStateUpdateRevision`（📌 2026-11-25 审查 R6：原在 `game.*`）；现值与记录不符先提示冲突。更早楼层只读、可跳到修改器。
 │   │   │                               🔴 全程文本插值，不走 `v-html`；legacy 楼层没有记录，不显示
 │   │   ├── CalendarPanel.vue        ← 🆕 [日历 v1 / 2026-11-13] 按存档的本地日历（`activeModal === 'calendar'`）：
 │   │   │                               月视图（固定 30 格）/ 当日详情 / 未来 30 天 / 条目增删改 / 显示选择 / 模式切换。
@@ -1324,6 +1356,14 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               `action-panel-base.css`（共用静态类，以 `<style scoped src>` 引入）。
 │   │   │                               🔴 入场只动 opacity / transform、`backwards` 填充、挂在 `.is-entering` 下，减动效不播；
 │   │   │                               @keyframes 必须写在各自组件里（scoped 改名），base.css 不写动画。登记见 docs/design.md §6.4
+│   │   │                               📌 2026-11-25（审查 R3 / A4，`refactor/action-style-helpers`）：五种样式共用的助手收进 `lib/action-style-helpers.ts`，
+│   │   │                               组件里别再抄副本；展开提示统一用 `ActionMoreHint.vue`（`.more` 样式住在它里面，不在 base.css）。没有单一出手方的
+│   │   │                               多人结算面板，视图把各人放进 `targets`，五种样式的收起态都经 `settledDeltas` 逐人画出。
+│   │   │                               📌 2026-11-25（审查 R3 / R8，`refactor/action-style-shared-views`）：新增 `ActionViewGeneric.vue`（对决条 / 血条残影 /
+│   │   │                               跳字舞台的通用视图）与 `ActionViewRoster.vue`（对决条 / 跳字舞台 / 打出的牌的名册单位格，读数走 `#unit` 插槽）。
+│   │   │                               🔴 共用组件渲染的元素不带样式组件的 scoped 属性，给它们写规则要用 `:deep()`。交错上限与步长只出自
+│   │   │                               `entrance-timing.ts`（`STAGGER_INDEX_MAX` / `STAGGER_STEP_MS` / `BATTLELOG_STAGGER_LINES`）。结算资源标签正则
+│   │   │                               `PRODUCT_LABEL_RE` / `QUALITY_LABEL_RE` / `EXP_LABEL_RE` 只出自 `lib/action-digest.ts`；「经验」算结算类关键格
 │   │   ├── DialogueCard.vue         ← 🆕 [2026-11-19] 内置对话卡片（`DIALOGUE_CARD_RULE_ID`）的原生渲染：
 │   │   │                               props 名字 / 情绪（可空）/ 台词 = pattern 捕获组 1/2/3，文本插值。
 │   │   │                               🔴 `.dialogue-card/-header/-name/-mood/-body` 类名是契约（主题与
@@ -1335,6 +1375,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               由 BeautifiedNarrative 按 `seal` prop（off / still / pressed）渲染。
 │   │   │                               🔴 别改回 ChatFlow 里的条件插槽：条件插槽会让每条历史正文随流式逐帧重渲染（闸门关着也会）
 │   │   │                               主题 → 形制（方印 / 火漆 / 星芒）的唯一一张表在本文件
+│   │   │                               📌 2026-11-25（审查 R8）：主题观察复用 `lib/fx-theme-signature.ts` 的 `observeThemeSlug`
 │   │   ├── BeautifierFrame.vue      ← [工坊正则] opaque iframe 的渲染面：文档由
 │   │   │                               `lib/beautifier-frame.ts` 生成（sandbox / CSP / 主题变量注入 /
 │   │   │                               消息协议），storage 会话由 `lib/beautifier-storage.ts` 开。
@@ -1529,6 +1570,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 🔴 覆写层**只许在两处套用**：`usePresets().catalog` 与 `GamePipeline.loadPresets`（都经 `applyCatalogEntryToggles`）；
 出厂播种、播种指纹、内容包装包、「保存为项目默认」（`pristineEffectivePreset`）一律读原始行 —— 第三处套用会让
 指纹把出厂预设误判为「用户改过」，或把玩家开关写回内容。游戏内入口是「预设」抽屉（`activeModal === 'preset'`）。
+
+📌 2026-11-25（审查 R7，`refactor/preset-catalog-factory`）：目录装配只经 `lib/preset-catalog.ts` 的 `buildUiPresetCatalog`（GamePipeline 与 usePresets 共用，内容所有 id＝内容包 ∪ 出厂登记）；`registerFactoryPresetIds` 迁到该文件。选择键只经 `selectPreset` 写，传空串＝跟随默认（AgentConfigPanel「全部恢复默认」也走它）。上下文模板预览经 `preset-entries.ts` 的 `storyContextTemplateOf`，不再按名字找『动态注入』。`ReconcileResult.reimportedPresetId` 已删。
 
 ### 2026-09-05 键盘契约补注
 
