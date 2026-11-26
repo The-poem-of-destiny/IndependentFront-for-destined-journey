@@ -35,7 +35,10 @@ import {
 import type { EquipSlot } from '../content/field-enums';
 import {
   findByName,
+  isCharacterPatchOp,
+  readTransferItemRequest,
   reduceStatePatch,
+  resolveCharacterTarget,
   resourceCeiling,
   type ReducibleState,
   type StateReduceContext,
@@ -100,7 +103,21 @@ import {
   type StateTreeProfile,
   type StateTreeValue,
 } from './state-tree-projection';
-import { ATTRIBUTE_LABELS } from './state-tree-spec';
+import {
+  ATTRIBUTE_LABELS,
+  CHARACTER_CATEGORY_TYPES,
+  STATE_TREE_DEPLETABLE_LEAF,
+  listStateTreePaths,
+  stateTreeBranchAt,
+  stateTreeChildKeys,
+  stateTreeKernelOf,
+  stateTreeKeyOfKernel,
+  stateTreeRowAt,
+  stripReadonlyPrefix,
+  type StateTreeBranchSpec,
+  type StateTreeNodeSpec,
+  type StateTreeWriteRule,
+} from './state-tree-spec';
 import { VAR_NAMESPACES, getVar } from './var-resolver';
 
 // ========== 对外类型 ==========
@@ -143,173 +160,100 @@ export interface TreeTranslateResult {
   readonly normalized: string[];
 }
 
-// ========== 翻译规则登记（闸门测试用：词表里的每个叶子都必须在这里登记） ==========
-
-/** 翻译规则种类（人物相对路径模式 → 种类；顶层路径模式 → 种类）。 */
-export type TreeTranslationRule =
-  | 'expand'
-  | 'time'
-  | 'worldLocation'
-  | 'fatePoints'
-  | 'profileText'
-  | 'profileList'
-  | 'category'
-  | 'level'
-  | 'totalExp'
-  | 'resourceCurrent'
-  | 'capTotal'
-  | 'capBonus'
-  | 'money'
-  | 'personText'
-  | 'present'
-  | 'location'
-  | 'affection'
-  | 'groupQuantity'
-  | 'itemEntity'
-  | 'itemField'
-  | 'itemQuantity'
-  | 'itemSlot'
-  | 'skillEntity'
-  | 'skillField'
-  | 'statusEntity'
-  | 'statusField'
-  | 'statusStacks'
-  | 'statusDuration'
-  | 'ascension'
-  | 'characterEntity'
-  | 'questEntity'
-  | 'questField'
-  | 'news'
-  | 'variables'
-  | 'readonly';
-
-const ITEM_FIELD_KEYS = ['品质', '类型', '标签', '效果', '描述', '属性', '规则文本'] as const;
-const SKILL_FIELD_KEYS = [
-  '品质',
-  '类型',
-  '消耗',
-  '冷却',
-  '标签',
-  '效果',
-  '描述',
-  '威力',
-  '关联属性',
-  '伤害类型',
-  '规则文本',
-] as const;
-const STATUS_FIELD_KEYS = ['类型', '描述', '效果', '层数上限', '来源'] as const;
-
-function itemRules(dict: '背包' | '装备'): Record<string, TreeTranslationRule> {
-  const p = `/${dict}/{物品名}`;
-  const rules: Record<string, TreeTranslationRule> = {
-    [p]: 'itemEntity',
-    [`${p}/数量`]: 'itemQuantity',
-    [`${p}/耐久`]: 'itemField',
-    [`${p}/耐久/当前`]: 'itemField',
-    [`${p}/耐久/上限`]: 'itemField',
-  };
-  for (const k of ITEM_FIELD_KEYS) rules[`${p}/${k}`] = 'itemField';
-  if (dict === '装备') rules[`${p}/位置`] = 'itemSlot';
-  return rules;
-}
-
-/** 人物节点下的规则（路径模式相对人物根，主角与关系列表共用）。 */
-const PERSON_RULES: Readonly<Record<string, TreeTranslationRule>> = {
-  '': 'characterEntity',
-  '/档案': 'expand',
-  '/档案/种族': 'profileText',
-  '/档案/性别': 'profileText',
-  '/档案/身份': 'profileList',
-  '/档案/职业': 'profileList',
-  '/档案/_年龄': 'readonly',
-  '/档案/_生日': 'readonly',
-  '/档案/外貌': 'profileText',
-  '/档案/着装': 'profileText',
-  '/档案/性格': 'profileText',
-  '/档案/背景故事': 'profileText',
-  '/档案/类别': 'category',
-  '/成长': 'expand',
-  '/成长/_生命层级': 'readonly',
-  '/成长/等级': 'level',
-  '/成长/累计经验值': 'totalExp',
-  '/成长/_升级所需经验': 'readonly',
-  '/成长/_属性点': 'readonly',
-  '/成长/_属性': 'readonly',
-  ...Object.fromEntries(
-    Object.values(ATTRIBUTE_LABELS).map((l) => [`/成长/_属性/${l}`, 'readonly' as const]),
-  ),
-  ...Object.fromEntries(
-    (['生命值', '法力值', '体力值'] as const).flatMap((r) => [
-      [`/${r}`, 'expand' as const],
-      [`/${r}/当前`, 'resourceCurrent' as const],
-      [`/${r}/上限`, 'capTotal' as const],
-      [`/${r}/上限/_基础`, 'readonly' as const],
-      [`/${r}/上限/额外`, 'capBonus' as const],
-    ]),
-  ),
-  '/金钱': 'money',
-  '/当前行动': 'personText',
-  '/心里话': 'personText',
-  '/背包': 'expand',
-  ...itemRules('背包'),
-  '/装备': 'expand',
-  ...itemRules('装备'),
-  '/技能': 'expand',
-  '/技能/{技能名}': 'skillEntity',
-  ...Object.fromEntries(
-    SKILL_FIELD_KEYS.map((k) => [`/技能/{技能名}/${k}`, 'skillField' as const]),
-  ),
-  '/状态效果': 'expand',
-  '/状态效果/{状态名}': 'statusEntity',
-  ...Object.fromEntries(
-    STATUS_FIELD_KEYS.map((k) => [`/状态效果/{状态名}/${k}`, 'statusField' as const]),
-  ),
-  '/状态效果/{状态名}/层数': 'statusStacks',
-  '/状态效果/{状态名}/剩余时间': 'statusDuration',
-  '/在场': 'present',
-  '/地点': 'location',
-  '/好感度': 'affection',
-  '/数量': 'groupQuantity',
-};
-
-/** 顶层（非人物）路径模式的规则。 */
-const ROOT_RULES: Readonly<Record<string, TreeTranslationRule>> = {
-  '/世界': 'expand',
-  '/世界/时间': 'time',
-  '/世界/地点': 'worldLocation',
-  '/世界/_时段': 'readonly',
-  '/世界/_天气': 'readonly',
-  '/世界/_回合': 'readonly',
-  '/命运点数': 'fatePoints',
-  '/关系列表': 'expand',
-  '/任务列表': 'expand',
-  '/任务列表/{任务名}': 'questEntity',
-  '/任务列表/{任务名}/状态': 'questField',
-  '/任务列表/{任务名}/关注度': 'questField',
-  '/任务列表/{任务名}/进展': 'questField',
-  '/任务列表/{任务名}/详情': 'questField',
-  '/任务列表/{任务名}/目标': 'questField',
-  '/任务列表/{任务名}/奖励': 'questField',
-  '/新闻': 'news',
-  '/新闻/{栏目}': 'news',
-  '/新闻/{栏目}/{标题}': 'news',
-  '/变量': 'variables',
-};
-
-const PERSON_PREFIX_RE = /^\/(?:主角|关系列表\/\{人物名\})(?=\/|$)/;
+// ========== 词表映射（审查报告 R6a：键 → 规则 / 内核字段只从 state-tree-spec 读） ==========
 
 /**
- * 路径模式（`listStateTreePaths` 的 `pattern`）登记的翻译规则；没登记返回 undefined。
- * 登神长阶下任意路径都按「整份重建」处理。
+ * 路径模式（`listStateTreePaths` 的 `pattern`）的翻译规则，读自词表（`StateTreeWriteRule`，本模块不再另登记）；
+ * 不在词表里返回 undefined。登神长阶下任意路径都按「整份重建」处理（规则由 `登神长阶` 节点向下继承）。
  */
-export function stateTreeTranslationRuleOf(pattern: string): TreeTranslationRule | undefined {
-  const m = PERSON_PREFIX_RE.exec(pattern);
-  if (m) {
-    const rel = pattern.slice(m[0].length);
-    if (rel === '/登神长阶' || rel.startsWith('/登神长阶/')) return 'ascension';
-    return PERSON_RULES[rel];
+export function stateTreeTranslationRuleOf(pattern: string): StateTreeWriteRule | undefined {
+  return stateTreeRowAt(pattern)?.rule;
+}
+
+/** 路径模式对应的内核字段键（词表 `kernel`）；闸门测试据此核对「每个可写叶子都映射到内核字段」。 */
+export function stateTreeKernelFieldOf(pattern: string): string | undefined {
+  return stateTreeRowAt(pattern)?.spec.kernel;
+}
+
+// 各实体的形状（键、内核字段、规则）一律取自词表
+const PERSON_SPEC = stateTreeBranchAt('/关系列表/{人物名}');
+const PROFILE_SPEC = stateTreeBranchAt('/关系列表/{人物名}/档案');
+const GROWTH_SPEC = stateTreeBranchAt('/关系列表/{人物名}/成长');
+const EQUIP_ITEM_SPEC = stateTreeBranchAt('/主角/装备/{物品名}');
+const BAG_ITEM_SPEC = stateTreeBranchAt('/主角/背包/{物品名}');
+const SKILL_SPEC = stateTreeBranchAt('/主角/技能/{技能名}');
+const STATUS_SPEC = stateTreeBranchAt('/主角/状态效果/{状态名}');
+const ASCENSION_SPEC = stateTreeBranchAt('/主角/登神长阶');
+const QUEST_SPEC = stateTreeBranchAt('/任务列表/{任务名}');
+
+/** 档案文字 / 列表叶子的内核字段（词表 `档案` 下 profileText / profileList 规则的 `kernel`）。 */
+type ProfileTextField = 'race' | 'gender' | 'appearance' | 'outfit' | 'personality' | 'background';
+type ProfileListField = 'identity' | 'occupation';
+
+/** 分支下按键（精确）取子节点。 */
+function childOf(parent: StateTreeBranchSpec, key: string): StateTreeNodeSpec | undefined {
+  return parent.children.find((c) => c.key === key);
+}
+
+/** 分支下内核字段为 `kernel` 的子键；词表里没有即抛（编程错误）。 */
+function keyOf(parent: StateTreeBranchSpec, kernel: string): string {
+  const key = stateTreeKeyOfKernel(parent, kernel);
+  if (key === undefined) throw new Error(`词表「${parent.key}」下没有内核字段 ${kernel}`);
+  return key;
+}
+
+/** 装备条目的位置键（字符串值直写成 `{位置: 值}` 时用）。 */
+const SLOT_KEY = keyOf(EQUIP_ITEM_SPEC, 'equippedSlot');
+
+/** 人物节点下的资源分支（生命值 / 法力值 / 体力值）：键 → 资源与其子键。 */
+interface ResourceNode {
+  readonly label: string;
+  readonly key: ResourceKey;
+  readonly current: string;
+  readonly cap: string;
+  readonly bonus: string;
+}
+
+const RESOURCE_NODES: readonly ResourceNode[] = PERSON_SPEC.children.flatMap((node) => {
+  if (node.type !== 'branch') return [];
+  const current = node.children.find((c) => c.rule === 'resourceCurrent');
+  const cap = node.children.find((c) => c.rule === 'capTotal');
+  if (!current || !cap || cap.type !== 'branch') return [];
+  const bonus = cap.children.find((c) => c.rule === 'capBonus');
+  if (!bonus) return [];
+  return [
+    {
+      label: node.key,
+      key: node.kernel as ResourceKey,
+      current: current.key,
+      cap: cap.key,
+      bonus: bonus.key,
+    },
+  ];
+});
+
+function resourceOf(label: string): ResourceKey {
+  const r = RESOURCE_NODES.find((n) => n.label === label);
+  if (!r) throw new Drop(`「${label}」不是资源`);
+  return r.key;
+}
+
+/** 整对象展开时先写的键：上限类键决定「当前」的钳制范围，必须先落（见 `expand`） */
+const CAP_FIRST_KEYS: ReadonlySet<string> = new Set(
+  listStateTreePaths()
+    .filter((r) => r.rule === 'capTotal' || r.rule === 'capBonus')
+    .map((r) => r.spec.key),
+);
+
+/** 登神长阶的空树（键与顺序取自词表）：布尔 false、文本空串、字典空对象、分支递归。 */
+function emptyTree(spec: StateTreeBranchSpec): Row {
+  const out: Row = {};
+  for (const c of spec.children) {
+    if (c.type === 'branch') out[c.key] = emptyTree(c);
+    else if (c.type === 'record') out[c.key] = {};
+    else out[c.key] = c.leaf === 'boolean' ? false : '';
   }
-  return ROOT_RULES[pattern];
+  return out;
 }
 
 // ========== 内部类型 ==========
@@ -399,87 +343,8 @@ export function readStateTreeValue(
   return cur;
 }
 
-const RESOURCE_BY_LABEL: Readonly<Record<string, ResourceKey>> = {
-  生命值: 'hp',
-  法力值: 'mp',
-  体力值: 'sp',
-};
-
-/** 整对象展开时先写的键：上限类键决定「当前」的钳制范围，必须先落（见 `expand`） */
-const CAP_FIRST_KEYS: ReadonlySet<string> = new Set(['上限', '额外']);
-
-const PROFILE_TEXT_FIELDS: Readonly<
-  Record<string, 'race' | 'gender' | 'appearance' | 'outfit' | 'personality' | 'background'>
-> = {
-  种族: 'race',
-  性别: 'gender',
-  外貌: 'appearance',
-  着装: 'outfit',
-  性格: 'personality',
-  背景故事: 'background',
-};
-
-const PROFILE_LIST_FIELDS: Readonly<Record<string, 'identity' | 'occupation'>> = {
-  身份: 'identity',
-  职业: 'occupation',
-};
-
-const CATEGORY_TYPES: Readonly<Record<string, CharacterState['type']>> = {
-  怪物: 'monster',
-  召唤物: 'summon',
-  人物: 'npc',
-  NPC: 'npc',
-  npc: 'npc',
-  无: 'npc',
-  '': 'npc',
-};
-
-const QUEST_FIELDS: Readonly<Record<string, keyof Quest>> = {
-  状态: 'status',
-  关注度: 'priority',
-  进展: 'progress',
-  详情: 'detail',
-  目标: 'objective',
-  奖励: 'reward',
-};
-
 const NAMESPACES = new Set<string>(Object.values(VAR_NAMESPACES));
 const NAMESPACE_ROOT_REASON = '不能整块写或删变量命名空间，请写到 /变量/<命名空间>/<键>';
-
-const ITEM_ENTITY_KEYS = [
-  '品质',
-  '类型',
-  '数量',
-  '位置',
-  '标签',
-  '效果',
-  '描述',
-  '属性',
-  '耐久',
-  '规则文本',
-];
-const SKILL_ENTITY_KEYS: readonly string[] = SKILL_FIELD_KEYS;
-const STATUS_ENTITY_KEYS = ['类型', '描述', '效果', '层数', '层数上限', '剩余时间', '来源'];
-const QUEST_ENTITY_KEYS = Object.keys(QUEST_FIELDS);
-const PERSON_ENTITY_KEYS = [
-  '档案',
-  '成长',
-  '生命值',
-  '法力值',
-  '体力值',
-  '金钱',
-  '当前行动',
-  '心里话',
-  '背包',
-  '装备',
-  '技能',
-  '状态效果',
-  '登神长阶',
-  '在场',
-  '地点',
-  '好感度',
-  '数量',
-];
 
 /** 在字典 / 文本数组叶子上按子键编辑（`效果/<词条>`、`标签/<序号>`）。 */
 function editKeyed(
@@ -534,55 +399,64 @@ interface ItemFields {
   slot?: SlotValue;
 }
 
-/** 物品条目对象 → 内核字段。`lenient`：认不出的枚举省略而不是丢弃（整实体写入）。 */
+/**
+ * 物品条目对象 → 内核字段（键 → 内核字段取自词表）。`lenient`：认不出的枚举省略而不是丢弃（整实体写入）。
+ */
 function buildItemFields(raw: Row, notes: string[], lenient: boolean): ItemFields {
   const out: ItemFields = { fields: {} };
   const f = out.fields;
   for (const [k, v] of Object.entries(raw)) {
-    switch (k) {
-      case '品质': {
+    const node = childOf(EQUIP_ITEM_SPEC, k);
+    if (!node) continue;
+    if (node.type === 'branch') {
+      // 耐久：{当前, 上限} 两个数值叶子
+      if (!isPlainObject(v)) throw new Drop(`${k}要写成 {${stateTreeChildKeys(node).join(', ')}}`);
+      const d = take(pickKnownKeys(v, stateTreeChildKeys(node)), notes, k);
+      for (const c of node.children) {
+        if (d[c.key] === undefined || !c.kernel) continue;
+        (f as Row)[c.kernel] = take(
+          coerceNumber(d[c.key], { integer: true }),
+          notes,
+          `${k}.${c.key}`,
+        );
+      }
+      continue;
+    }
+    switch (node.kernel) {
+      case 'rarity': {
         const r = take(coerceRarity(v), notes, k);
-        if (r === undefined && !lenient) throw new Drop(`品质 ${JSON.stringify(v)} 认不出`);
+        if (r === undefined && !lenient) throw new Drop(`${k} ${JSON.stringify(v)} 认不出`);
         if (r !== undefined) f.rarity = r;
         break;
       }
-      case '类型': {
+      case 'type': {
         const t = take(coerceItemType(v), notes, k);
         if (t === undefined && !lenient) throw new Drop(`物品类型 ${JSON.stringify(v)} 认不出`);
         if (t !== undefined) f.type = t;
         break;
       }
-      case '数量': {
+      case 'quantity': {
         const q = take(coerceQuantity(v), notes, k);
-        if (q.remove) throw new Drop('数量 ≤ 0');
+        if (q.remove) throw new Drop(`${k} ≤ 0`);
         out.quantity = q.count;
         break;
       }
-      case '位置':
+      case 'equippedSlot':
         out.slot = take(coerceSlot(v), notes, k);
         break;
-      case '标签':
+      case 'tags':
         f.tags = take(coerceTextArray(v), notes, k);
         break;
-      case '效果':
+      case 'effects':
         f.effects = take(coerceEffectDict(v), notes, k);
         break;
-      case '描述':
+      case 'description':
         f.description = take(coerceText(v), notes, k);
         break;
-      case '属性':
+      case 'stats':
         f.stats = take(coerceNumberDict(v), notes, k);
         break;
-      case '耐久': {
-        if (!isPlainObject(v)) throw new Drop('耐久要写成 {当前, 上限}');
-        const d = take(pickKnownKeys(v, ['当前', '上限']), notes, k);
-        if (d.当前 !== undefined)
-          f.durability = take(coerceNumber(d.当前, { integer: true }), notes, '耐久.当前');
-        if (d.上限 !== undefined)
-          f.maxDurability = take(coerceNumber(d.上限, { integer: true }), notes, '耐久.上限');
-        break;
-      }
-      case '规则文本':
+      case 'protocolText':
         f.protocolText = take(coerceText(v), notes, k);
         break;
       default:
@@ -602,51 +476,51 @@ function buildSkillFields(raw: Row, notes: string[], lenient: boolean): SkillFie
   const out: SkillFields = { fields: {} };
   const f = out.fields;
   for (const [k, v] of Object.entries(raw)) {
-    switch (k) {
-      case '品质': {
+    switch (stateTreeKernelOf(SKILL_SPEC, k)) {
+      case 'rarity': {
         const r = take(coerceRarity(v), notes, k);
-        if (r === undefined && !lenient) throw new Drop(`品质 ${JSON.stringify(v)} 认不出`);
+        if (r === undefined && !lenient) throw new Drop(`${k} ${JSON.stringify(v)} 认不出`);
         if (r !== undefined) f.rarity = r;
         break;
       }
-      case '类型':
+      case 'type':
         f.type = take(coerceSkillType(v), notes, k);
         break;
-      case '消耗': {
+      case 'cost': {
         const c = take(parseSkillCost(v), notes, k);
         if (c.kind === 'cost') f.cost = c.cost;
         else if (c.kind === 'text') f.costText = c.costText;
         else out.clearCost = true;
         break;
       }
-      case '冷却':
+      case 'cooldown':
         f.cooldown = take(coerceNumber(v, { integer: true }), notes, k);
         break;
-      case '标签':
+      case 'tags':
         f.tags = take(coerceTextArray(v), notes, k);
         break;
-      case '效果':
+      case 'effects':
         f.effects = take(coerceEffectDict(v), notes, k);
         break;
-      case '描述':
+      case 'description':
         f.description = take(coerceText(v), notes, k);
         break;
-      case '威力':
+      case 'skillPower':
         f.skillPower = take(coerceNumber(v), notes, k);
         break;
-      case '关联属性': {
+      case 'relevantAttribute': {
         const a = take(coerceAttribute(v), notes, k);
-        if (a === undefined && !lenient) throw new Drop(`关联属性 ${JSON.stringify(v)} 认不出`);
+        if (a === undefined && !lenient) throw new Drop(`${k} ${JSON.stringify(v)} 认不出`);
         if (a !== undefined) f.relevantAttribute = a;
         break;
       }
-      case '伤害类型': {
+      case 'damageType': {
         const d = take(coerceDamageType(v), notes, k);
-        if (d === undefined && !lenient) throw new Drop(`伤害类型 ${JSON.stringify(v)} 认不出`);
+        if (d === undefined && !lenient) throw new Drop(`${k} ${JSON.stringify(v)} 认不出`);
         if (d !== undefined) f.damageType = d;
         break;
       }
-      case '规则文本':
+      case 'protocolText':
         f.protocolText = take(coerceText(v), notes, k);
         break;
       default:
@@ -664,32 +538,33 @@ interface StatusFields {
 function buildStatusFields(raw: Row, notes: string[], maxStacks: number | undefined): StatusFields {
   const out: StatusFields = { fields: {} };
   const f = out.fields;
+  const capKey = keyOf(STATUS_SPEC, 'maxStacks');
   const cap =
-    raw['层数上限'] !== undefined
-      ? take(coerceNumber(raw['层数上限'], { integer: true }), notes, '层数上限')
+    raw[capKey] !== undefined
+      ? take(coerceNumber(raw[capKey], { integer: true }), notes, capKey)
       : maxStacks;
   for (const [k, v] of Object.entries(raw)) {
-    switch (k) {
-      case '类型':
+    switch (stateTreeKernelOf(STATUS_SPEC, k)) {
+      case 'category':
         f.category = take(coerceStatusCategory(v), notes, k);
         break;
-      case '描述':
+      case 'description':
         f.description = take(coerceText(v), notes, k);
         break;
-      case '效果':
+      case 'effectDescriptions':
         f.effectDescriptions = take(coerceEffectDict(v), notes, k);
         break;
-      case '层数': {
+      case 'stacks': {
         const s = take(coerceStacks(v, cap), notes, k);
         if (s.remove) out.removeByStacks = true;
         else f.stacks = s.count;
         break;
       }
-      case '层数上限':
-        if (cap !== undefined && cap < 1) throw new Drop('层数上限要大于 0');
+      case 'maxStacks':
+        if (cap !== undefined && cap < 1) throw new Drop(`${k}要大于 0`);
         f.maxStacks = cap;
         break;
-      case '剩余时间': {
+      case 'remainingTime': {
         const d = take(parseDuration(v), notes, k);
         if (d.kind === 'timed') {
           f.remainingTime = d.remainingTime;
@@ -701,7 +576,7 @@ function buildStatusFields(raw: Row, notes: string[], maxStacks: number | undefi
         }
         break;
       }
-      case '来源':
+      case 'source':
         f.source = take(coerceText(v), notes, k);
         break;
       default:
@@ -749,6 +624,146 @@ function workingReduceContext(
   };
 }
 
+/**
+ * 写时复制：补丁作用前，把它要改的角色 / 档案分区在 `next` 里换成深拷副本（同一组里只拷一次）。
+ * `next` 的角色数组与档案对象本身已是浅拷；增删角色只动数组，命运点只改档案上的数值，不必再拷。
+ * 找不到目标角色时不拷（reducer 随后同样找不到、抛错，整组不落）。
+ */
+function cowTouch(next: ReducibleState, patch: StatePatch, copied: Set<object>): void {
+  const own = <T extends object>(v: T): T => {
+    if (copied.has(v)) return v;
+    const c = structuredClone(v);
+    copied.add(c);
+    return c;
+  };
+  const touchChar = (resolve: () => CharacterState): void => {
+    let char: CharacterState;
+    try {
+      char = resolve();
+    } catch {
+      return;
+    }
+    const at = next.characters.indexOf(char);
+    if (at >= 0) next.characters[at] = own(char);
+  };
+  const p = next.profile;
+  if (isCharacterPatchOp(patch.op)) {
+    touchChar(() => resolveCharacterTarget(next.characters, patch.target));
+    return;
+  }
+  switch (patch.op) {
+    case 'transfer_item':
+      touchChar(() => resolveCharacterTarget(next.characters, patch.target));
+      touchChar(() => resolveCharacterByName(next.characters, readTransferItemRequest(patch).to));
+      return;
+    case 'rename_character':
+      touchChar(() => resolveCharacterTarget(next.characters, patch.target));
+      if (!copied.has(p.affections)) {
+        p.affections = { ...p.affections };
+        copied.add(p.affections);
+      }
+      return;
+    case 'set_affection':
+    case 'delta_affection':
+      if (!copied.has(p.affections)) {
+        p.affections = { ...p.affections };
+        copied.add(p.affections);
+      }
+      return;
+    case 'update_quest':
+    case 'remove_quest':
+      if (!copied.has(p.quests)) {
+        p.quests = { ...p.quests };
+        copied.add(p.quests);
+      }
+      return;
+    case 'add_news':
+      if (!copied.has(p.news)) {
+        p.news = [...p.news];
+        copied.add(p.news);
+      }
+      return;
+    case 'set_variable':
+    case 'delta_variable':
+    case 'remove_variable':
+    case 'move_variable':
+    case 'insert_variable':
+      // 命运点（delta_variable profile.fp）只改档案上的 fp 数值，变量空间不动
+      if (patch.op === 'delta_variable' && patch.target === 'profile.fp') return;
+      p.variables = own(p.variables);
+      return;
+    default:
+      return;
+  }
+}
+
+// ========== 状态视图：只投影被读到的分区 ==========
+
+/** 顶层分区（状态树根下的键）。 */
+const WORLD_KEY = '世界';
+const PLAYER_KEY = '主角';
+const RELATION_KEY = '关系列表';
+const QUESTS_KEY = '任务列表';
+const NEWS_KEY = '新闻';
+const VARIABLES_KEY = '变量';
+
+/**
+ * 某一版工作状态的树视图（审查报告 R6a 性能修复）：按读到的路径只投影那一个分区 ——
+ * `关系列表/<名>` 只投那一个人物，`主角` / `世界` 只带主角，任务 / 新闻 / 变量只带那一份档案切片；
+ * 结果按分区缓存。工作状态按写时复制推进（见 `commit`），旧版本的对象永不被改，
+ * 视图读到的就是建视图那一刻的值。
+ */
+class StateView {
+  private readonly cache = new Map<string, StateTreeValue>();
+
+  constructor(private readonly state: ReducibleState) {}
+
+  read(segments: readonly string[]): StateTreeValue | undefined {
+    return readStateTreeValue(this.section(segments), segments);
+  }
+
+  private section(segments: readonly string[]): StateTreeValue {
+    const top: string | undefined = segments[0];
+    const personName = top === RELATION_KEY && segments.length >= 2 ? segments[1] : undefined;
+    const key = personName !== undefined ? `${RELATION_KEY}/${personName}` : (top ?? '');
+    let tree = this.cache.get(key);
+    if (tree === undefined) {
+      tree = this.project(top, personName);
+      this.cache.set(key, tree);
+    }
+    return tree;
+  }
+
+  private project(top: string | undefined, personName: string | undefined): StateTreeValue {
+    const { characters, profile } = this.state;
+    let chars: readonly CharacterState[];
+    if (personName !== undefined) {
+      chars = characters.filter((c) => c.type !== 'player' && c.name === personName);
+    } else if (top === PLAYER_KEY || top === WORLD_KEY) {
+      chars = characters.filter((c) => c.type === 'player');
+    } else if (top === undefined || top === RELATION_KEY) {
+      chars = characters;
+    } else {
+      chars = [];
+    }
+    const whole = top === undefined;
+    return buildStateTree(
+      {
+        characters: chars,
+        profile: {
+          fp: profile.fp,
+          gameTime: profile.gameTime,
+          affections: profile.affections,
+          quests: whole || top === QUESTS_KEY ? profile.quests : {},
+          news: whole || top === NEWS_KEY ? profile.news : [],
+          variables: whole || top === VARIABLES_KEY ? profile.variables : {},
+        },
+      },
+      { visibility: { mode: 'all' }, newsLimit: Number.MAX_SAFE_INTEGER },
+    );
+  }
+}
+
 // ========== 翻译器 ==========
 
 class TreeTranslator {
@@ -760,8 +775,8 @@ class TreeTranslator {
   private readonly records = new Map<number, StateUpdateOpRecord>();
   private readonly dropped: string[] = [];
   private readonly normalized: string[] = [];
-  private version = 0;
-  private cachedTree: { version: number; tree: StateTreeValue } | null = null;
+  /** 当前版本工作状态的视图（每次换状态时作废重建）。 */
+  private currentView: StateView | null = null;
   private queue: WorkOp[] = [];
   private readonly consumed = new Set<number>();
   /** 被折叠 / 被消费的 op 序号 → 代表它落地的那条 op 序号（记录里转成 `foldedInto` / `mergedFrom`）。 */
@@ -790,17 +805,16 @@ class TreeTranslator {
 
   // ---------- 读工作状态 ----------
 
-  private tree(): StateTreeValue {
-    if (!this.cachedTree || this.cachedTree.version !== this.version) {
-      this.cachedTree = {
-        version: this.version,
-        tree: buildStateTree(
-          { characters: this.state.characters, profile: this.state.profile },
-          { visibility: { mode: 'all' }, newsLimit: Number.MAX_SAFE_INTEGER },
-        ),
-      };
-    }
-    return this.cachedTree.tree;
+  /** 当前工作状态的树视图（按读到的分区惰性投影）。 */
+  private view(): StateView {
+    this.currentView ??= new StateView(this.state);
+    return this.currentView;
+  }
+
+  /** 换上新一版工作状态（旧版对象原样留给已建的视图读）。 */
+  private setState(next: ReducibleState): void {
+    this.state = next;
+    this.currentView = null;
   }
 
   private resolve(segments: readonly string[], style: TreePathStyle, notes: string[]) {
@@ -828,16 +842,24 @@ class TreeTranslator {
   // ---------- 落补丁 ----------
 
   /**
-   * 一组补丁：在工作状态的副本上逐条跑 `patch-reducer`（与 StateManager 提交时同一份纯变换），
+   * 一组补丁：在工作状态的写时副本上逐条跑 `patch-reducer`（与 StateManager 提交时同一份纯变换），
    * 全部成功才换上副本；任一条抛错整组不落，报错文案即提交时的报错。
+   *
+   * 写时复制（审查报告 R6a 性能修复）：副本只浅拷角色数组与档案，补丁要改的那几个角色 / 档案分区
+   * 在作用前才深拷一份（`cowTouch`），其余对象与旧版共享 —— 旧版对象因此永不被改。
    */
   private commit(group: readonly StatePatch[]): void {
     if (group.length === 0) return;
-    const next = structuredClone(this.state);
+    const next: ReducibleState = {
+      characters: [...this.state.characters],
+      profile: { ...this.state.profile },
+    };
+    const copied = new Set<object>();
     const ctx = workingReduceContext(this.options.actor, next);
     for (const patch of group) {
       try {
         validateStatePatch(patch);
+        cowTouch(next, patch, copied);
         // 补丁先深拷一份：reducer 会把补丁里的值并进状态，工作状态不与要提交的补丁共享引用
         // （structuredClone 保留 undefined 键，清除语义不丢）
         reduceStatePatch(next, structuredClone(patch), ctx);
@@ -845,9 +867,8 @@ class TreeTranslator {
         throw new Drop(`${patch.op}（${patch.target}）：${errorText(e)}`);
       }
     }
-    this.state = next;
+    this.setState(next);
     this.patches.push(...group);
-    this.version++;
   }
 
   // ---------- 入口 ----------
@@ -994,7 +1015,7 @@ class TreeTranslator {
       ...(w.hasValue ? { value: jsonClone(w.value) } : {}),
       consumed: [],
     };
-    const beforeTree = this.tree();
+    const beforeTree = this.view();
     try {
       this.translate(ctx);
     } catch (e) {
@@ -1012,7 +1033,7 @@ class TreeTranslator {
         );
       return;
     }
-    const afterTree = this.tree();
+    const afterTree = this.view();
     this.record(ctx, beforeTree, afterTree);
     if (w.foldedFrom !== undefined)
       this.recordSibling(
@@ -1040,8 +1061,8 @@ class TreeTranslator {
 
   private record(
     ctx: OpContext,
-    beforeTree: StateTreeValue,
-    afterTree: StateTreeValue,
+    beforeTree: StateView,
+    afterTree: StateView,
     dropReason?: string,
   ): void {
     const w = ctx.op;
@@ -1053,11 +1074,11 @@ class TreeTranslator {
     const fromSegs = ctx.fromSegments;
     const before =
       w.op === 'move' && fromSegs
-        ? readStateTreeValue(beforeTree, fromSegs)
+        ? beforeTree.read(fromSegs)
         : segs
-          ? readStateTreeValue(beforeTree, segs)
+          ? beforeTree.read(segs)
           : undefined;
-    const after = segs ? readStateTreeValue(afterTree, segs) : undefined;
+    const after = segs ? afterTree.read(segs) : undefined;
     if (before !== undefined) rec.before = jsonClone(before);
     if (
       dropReason === undefined &&
@@ -1088,8 +1109,8 @@ class TreeTranslator {
   private recordSibling(
     index: number,
     host: OpContext,
-    beforeTree: StateTreeValue,
-    afterTree: StateTreeValue,
+    beforeTree: StateView,
+    afterTree: StateView,
     note: string,
     dropped: boolean,
     kind: 'fold' | 'slot',
@@ -1106,8 +1127,8 @@ class TreeTranslator {
       note,
     };
     if (w?.hasValue) rec.value = jsonClone(w.value);
-    const before = segs ? readStateTreeValue(beforeTree, segs) : undefined;
-    const after = segs ? readStateTreeValue(dropped ? beforeTree : afterTree, segs) : undefined;
+    const before = segs ? beforeTree.read(segs) : undefined;
+    const after = segs ? (dropped ? beforeTree : afterTree).read(segs) : undefined;
     if (before !== undefined) rec.before = jsonClone(before);
     if (after !== undefined) rec.after = jsonClone(after);
     if (dropped) this.dropped.push(`${raw}：${note}，已忽略`);
@@ -1214,8 +1235,14 @@ class TreeTranslator {
       ctx.value = w.op === 'delta' ? minutes : w.value;
       if (minutes > 0) {
         this.deltaMinutes += minutes;
-        this.state.profile.gameTime = advanceTime(this.state.profile.gameTime, minutes);
-        this.version++;
+        // 写时复制：换一份档案，不改旧版对象（已建的视图还要读它）
+        this.setState({
+          characters: this.state.characters,
+          profile: {
+            ...this.state.profile,
+            gameTime: advanceTime(this.state.profile.gameTime, minutes),
+          },
+        });
       }
       return;
     }
@@ -1259,9 +1286,8 @@ class TreeTranslator {
     if (relSegs.length === 0) return this.personRoot(ctx, t, f);
     if (!p.exists) throw new Drop(`人物「${p.name}」不存在`);
     const char = this.character(p.name);
-    const m = PERSON_PREFIX_RE.exec(t.pattern);
-    const rel = m ? t.pattern.slice(m[0].length) : t.pattern;
-    if (rel === '/登神长阶' || rel.startsWith('/登神长阶/')) return this.ascension(ctx, t, f, char);
+    const rule = stateTreeTranslationRuleOf(t.pattern);
+    if (rule === 'ascension') return this.ascension(ctx, t, f, char);
     const inner = t.entries.find((e) => e.record !== '关系列表');
     if (inner) {
       if (inner.record === '背包' || inner.record === '装备') return this.item(ctx, t, f, char);
@@ -1269,7 +1295,6 @@ class TreeTranslator {
       if (inner.record === '状态效果') return this.status(ctx, t, f, char);
     }
     if (w.op === 'move') throw new Drop('move 只用于名字字典的条目');
-    const rule = PERSON_RULES[rel];
     if (rule === undefined) throw new Drop(`「${t.pattern}」没有翻译规则`);
     if (rule === 'expand') {
       if (t.spec.type === 'record' && w.op === 'replace')
@@ -1291,19 +1316,19 @@ class TreeTranslator {
       case 'totalExp':
         return this.totalExp(ctx, char, op);
       case 'resourceCurrent':
-        return this.resourceCurrent(ctx, char, RESOURCE_BY_LABEL[relSegs[0]], op);
+        return this.resourceCurrent(ctx, char, resourceOf(relSegs[0]), op);
       case 'capTotal':
         if (isPlainObject(w.value)) return this.expand(ctx, t);
-        return this.capBonus(ctx, char, RESOURCE_BY_LABEL[relSegs[0]], op, true);
+        return this.capBonus(ctx, char, resourceOf(relSegs[0]), op, true);
       case 'capBonus':
-        return this.capBonus(ctx, char, RESOURCE_BY_LABEL[relSegs[0]], op, false);
+        return this.capBonus(ctx, char, resourceOf(relSegs[0]), op, false);
       case 'money':
         return this.money(ctx, char, op);
       case 'personText':
         return this.personText(
           ctx,
           char,
-          relSegs[0] === '当前行动' ? 'currentAction' : 'thoughts',
+          stateTreeKernelOf(PERSON_SPEC, relSegs[0]) as 'currentAction' | 'thoughts',
           op,
         );
       case 'present':
@@ -1366,15 +1391,17 @@ class TreeTranslator {
     op: TreeOpKind,
   ): void {
     const key = t.segments[t.segments.length - (t.leafKey !== undefined ? 2 : 1)];
+    const kernel = stateTreeKernelOf(PROFILE_SPEC, key);
+    if (kernel === undefined) throw new Drop(`「${key}」不是档案字段`);
     if (rule === 'profileText') {
       if (op !== 'replace') throw new Drop('档案文字只能 replace');
       const text = take(coerceText(ctx.op.value), ctx.notes);
       if (!text) throw new Drop('档案文字不能为空');
       ctx.value = text;
-      this.writeProfile(char, PROFILE_TEXT_FIELDS[key], text);
+      this.writeProfile(char, kernel as ProfileTextField, text);
       return;
     }
-    const field = PROFILE_LIST_FIELDS[key];
+    const field = kernel as ProfileListField;
     let list: string[];
     if (t.leafKey !== undefined) {
       if (op === 'delta') throw new Drop('文本数组不能 delta');
@@ -1394,15 +1421,7 @@ class TreeTranslator {
    */
   private writeProfile(
     char: CharacterState,
-    field:
-      | 'race'
-      | 'gender'
-      | 'appearance'
-      | 'outfit'
-      | 'personality'
-      | 'background'
-      | 'identity'
-      | 'occupation',
+    field: ProfileTextField | ProfileListField,
     value: string | string[],
   ): void {
     this.commit([
@@ -1420,7 +1439,7 @@ class TreeTranslator {
     // AI 改已有人物的类别 = 绕过「只能删怪物 / 召唤物」（先改类别再删），对 AI 只读；新建人物整对象里的类别走组装管线
     if (this.options.actor === 'ai') throw new Drop('类别由代码维护，AI 不能改已有人物的类别');
     const text = take(coerceText(ctx.op.value), ctx.notes);
-    const type = CATEGORY_TYPES[text];
+    const type = CHARACTER_CATEGORY_TYPES[text];
     if (type === undefined) throw new Drop(`类别「${text}」认不出（怪物 / 召唤物）`);
     ctx.value = text;
     if (type !== char.type)
@@ -1682,16 +1701,18 @@ class TreeTranslator {
       }
       if (w.op === 'delta') throw new Drop('物品条目不能 delta');
       let raw: unknown = w.value;
-      if (dict === '装备' && typeof raw === 'string') raw = { 位置: raw };
+      if (dict === '装备' && typeof raw === 'string') raw = { [SLOT_KEY]: raw };
       if (!isPlainObject(raw)) throw new Drop('写入物品条目需要对象');
       const picked = take(
-        pickKnownKeys(
-          raw,
-          dict === '装备' ? ITEM_ENTITY_KEYS : ITEM_ENTITY_KEYS.filter((k) => k !== '位置'),
-        ),
+        pickKnownKeys(raw, stateTreeChildKeys(dict === '装备' ? EQUIP_ITEM_SPEC : BAG_ITEM_SPEC)),
         ctx.notes,
       );
-      if (dict === '背包' && hasOwn(raw, '位置') && raw['位置'] !== null && raw['位置'] !== '')
+      if (
+        dict === '背包' &&
+        hasOwn(raw, SLOT_KEY) &&
+        raw[SLOT_KEY] !== null &&
+        raw[SLOT_KEY] !== ''
+      )
         ctx.notes.push('背包物品不记位置，已忽略；穿戴请 move 到装备并写位置');
       const built = buildItemFields(picked, ctx.notes, true);
       ctx.value = picked;
@@ -1771,8 +1792,8 @@ class TreeTranslator {
     }
     // ---- 叶子 ----
     if (!item) throw new Drop(`物品「${name}」不存在`);
-    const field = t.subPath[0] ?? '';
-    if (field === '数量') {
+    const fieldRule = childOf(EQUIP_ITEM_SPEC, t.subPath[0] ?? '')?.rule;
+    if (fieldRule === 'itemQuantity') {
       if (w.op === 'remove') throw new Drop('数量不能删除，请写 0 或删条目');
       const op = w.op === 'add' ? 'replace' : w.op;
       if (op !== 'replace' && op !== 'delta') throw new Drop('数量只能 replace 或 delta');
@@ -1795,7 +1816,7 @@ class TreeTranslator {
       );
       return;
     }
-    if (field === '位置') {
+    if (fieldRule === 'itemSlot') {
       const slot =
         w.op === 'remove'
           ? ({ kind: 'unequip' } as SlotValue)
@@ -1830,48 +1851,43 @@ class TreeTranslator {
   ): Partial<InventoryItem> {
     const w = ctx.op;
     const field = t.subPath[0] ?? '';
-    if (field === '耐久') {
+    const node = childOf(EQUIP_ITEM_SPEC, field);
+    if (node?.type === 'branch') {
+      // 耐久：整份 {当前, 上限} 或其中一个数值叶子
       const sub = t.subPath[1];
+      const kernels = node.children.map((c) => c.kernel as keyof InventoryItem);
       if (sub === undefined) {
-        if (w.op === 'remove') return { durability: undefined, maxDurability: undefined };
-        if (!isPlainObject(w.value)) throw new Drop('耐久要写成 {当前, 上限}');
-        const built = buildItemFields({ 耐久: w.value }, ctx.notes, false).fields;
+        if (w.op === 'remove') return Object.fromEntries(kernels.map((k) => [k, undefined]));
+        if (!isPlainObject(w.value))
+          throw new Drop(`${field}要写成 {${stateTreeChildKeys(node).join(', ')}}`);
+        const built = buildItemFields({ [field]: w.value }, ctx.notes, false).fields;
         ctx.value = w.value;
         return built;
       }
-      const kernel = sub === '当前' ? 'durability' : 'maxDurability';
+      const kernel = stateTreeKernelOf(node, sub) as 'durability' | 'maxDurability';
       if (w.op === 'remove') return { [kernel]: undefined };
       const cur = typeof item[kernel] === 'number' ? item[kernel] : 0;
-      const next = this.numberWrite(ctx, w.op === 'add' ? 'replace' : w.op, cur, '耐久');
+      const next = this.numberWrite(ctx, w.op === 'add' ? 'replace' : w.op, cur, field);
       ctx.value = w.op === 'delta' ? next - cur : next;
       return { [kernel]: next };
     }
-    const kernelOf: Record<string, keyof InventoryItem> = {
-      品质: 'rarity',
-      类型: 'type',
-      标签: 'tags',
-      效果: 'effects',
-      描述: 'description',
-      属性: 'stats',
-      规则文本: 'protocolText',
-    };
-    const kernel = kernelOf[field];
+    const kernel = node?.rule === 'itemField' ? (node.kernel as keyof InventoryItem) : undefined;
     if (!kernel) throw new Drop(`「${field}」不可写`);
     if (w.op === 'remove' && t.leafKey === undefined) {
-      if (field === '品质' || field === '类型' || field === '描述')
+      if (kernel === 'rarity' || kernel === 'type' || kernel === 'description')
         throw new Drop(`${field}不能删除，请用 replace`);
       return { [kernel]: undefined };
     }
     if (w.op === 'delta' && t.leafKey === undefined) throw new Drop(`${field}不能 delta`);
     let raw: unknown = w.value;
     if (t.leafKey !== undefined) {
-      if (w.op === 'delta' && field !== '属性') throw new Drop(`${field}不能 delta`);
+      if (w.op === 'delta' && kernel !== 'stats') throw new Drop(`${field}不能 delta`);
       raw = editKeyed(
         item[kernel],
         w.op,
         t.leafKey,
         w.op === 'remove' ? undefined : w.value,
-        field === '标签',
+        kernel === 'tags',
       );
     }
     const built = buildItemFields({ [field]: raw }, ctx.notes, false).fields;
@@ -1933,7 +1949,7 @@ class TreeTranslator {
       if (typeof w.value === 'string' && dict === '装备')
         slotOwn = take(coerceSlot(w.value), ctx.notes, '位置');
       else if (isPlainObject(w.value)) {
-        const picked = take(pickKnownKeys(w.value, ITEM_ENTITY_KEYS), ctx.notes);
+        const picked = take(pickKnownKeys(w.value, stateTreeChildKeys(EQUIP_ITEM_SPEC)), ctx.notes);
         const built = buildItemFields(picked, ctx.notes, true);
         extra = built.fields;
         slotOwn = built.slot;
@@ -2088,7 +2104,7 @@ class TreeTranslator {
       }
       if (w.op === 'delta') throw new Drop('技能条目不能 delta');
       if (!isPlainObject(w.value)) throw new Drop('写入技能条目需要对象');
-      const picked = take(pickKnownKeys(w.value, SKILL_ENTITY_KEYS), ctx.notes);
+      const picked = take(pickKnownKeys(w.value, stateTreeChildKeys(SKILL_SPEC)), ctx.notes);
       const built = buildSkillFields(picked, ctx.notes, true);
       ctx.value = picked;
       if (!skill || w.op === 'add') {
@@ -2103,26 +2119,15 @@ class TreeTranslator {
     if (!skill) throw new Drop(`技能「${name}」不存在`);
     if (w.op === 'move') throw new Drop('move 只用于技能条目');
     const field = t.subPath[0] ?? '';
-    const kernelOf: Record<string, keyof Skill> = {
-      品质: 'rarity',
-      类型: 'type',
-      消耗: 'cost',
-      冷却: 'cooldown',
-      标签: 'tags',
-      效果: 'effects',
-      描述: 'description',
-      威力: 'skillPower',
-      关联属性: 'relevantAttribute',
-      伤害类型: 'damageType',
-      规则文本: 'protocolText',
-    };
-    const kernel = kernelOf[field];
+    const node = childOf(SKILL_SPEC, field);
+    const kernel = node?.rule === 'skillField' ? (node.kernel as keyof Skill) : undefined;
     if (!kernel) throw new Drop(`「${field}」不可写`);
     let changes: Partial<Skill>;
     if (w.op === 'remove' && t.leafKey === undefined) {
-      if (field === '类型' || field === '描述') throw new Drop(`${field}不能删除，请用 replace`);
+      if (kernel === 'type' || kernel === 'description')
+        throw new Drop(`${field}不能删除，请用 replace`);
       changes =
-        field === '消耗'
+        kernel === 'cost'
           ? ({ cost: undefined, costText: '' } as Partial<Skill>)
           : { [kernel]: undefined };
     } else if (t.leafKey !== undefined) {
@@ -2132,13 +2137,13 @@ class TreeTranslator {
         w.op,
         t.leafKey,
         w.op === 'remove' ? undefined : w.value,
-        field === '标签',
+        kernel === 'tags',
       );
       changes = buildSkillFields({ [field]: raw }, ctx.notes, false).fields;
     } else if (w.op === 'delta') {
-      if (field !== '冷却' && field !== '威力') throw new Drop(`${field}不能 delta`);
+      if (kernel !== 'cooldown' && kernel !== 'skillPower') throw new Drop(`${field}不能 delta`);
       const cur = typeof skill[kernel] === 'number' ? (skill[kernel] as number) : 0;
-      const n = take(coerceNumber(w.value, { integer: field === '冷却' }), ctx.notes);
+      const n = take(coerceNumber(w.value, { integer: kernel === 'cooldown' }), ctx.notes);
       changes = { [kernel]: cur + n };
       ctx.value = n;
     } else {
@@ -2183,10 +2188,10 @@ class TreeTranslator {
       }
       if (w.op === 'delta') throw new Drop('状态条目不能 delta');
       if (!isPlainObject(w.value)) throw new Drop('写入状态条目需要对象');
-      const picked = take(pickKnownKeys(w.value, STATUS_ENTITY_KEYS), ctx.notes);
+      const picked = take(pickKnownKeys(w.value, stateTreeChildKeys(STATUS_SPEC)), ctx.notes);
       const built = buildStatusFields(picked, ctx.notes, effect?.maxStacks);
       if (built.removeByStacks) throw new Drop('层数 ≤ 0，不施加');
-      if (picked['类型'] === undefined && !effect) {
+      if (picked[keyOf(STATUS_SPEC, 'category')] === undefined && !effect) {
         built.fields.category = '特殊';
         ctx.notes.push('缺少类型，兜底「特殊」');
       }
@@ -2206,7 +2211,8 @@ class TreeTranslator {
     if (!effect) throw new Drop(`状态「${name}」不存在`);
     if (w.op === 'move') throw new Drop('move 只用于状态条目');
     const field = t.subPath[0] ?? '';
-    if (field === '层数') {
+    const node = childOf(STATUS_SPEC, field);
+    if (node?.rule === 'statusStacks') {
       const op = w.op === 'add' ? 'replace' : w.op;
       if (op !== 'replace' && op !== 'delta') throw new Drop('层数只能 replace 或 delta');
       const n = take(coerceNumber(w.value, { integer: true }), ctx.notes);
@@ -2225,7 +2231,7 @@ class TreeTranslator {
         this.commit([{ op: 'update_status_effect', target, value: { name, stacks: s.count } }]);
       return;
     }
-    if (field === '剩余时间') {
+    if (node?.rule === 'statusDuration') {
       if (w.op === 'remove') throw new Drop('剩余时间不能删除，请写「永久」');
       if (w.op === 'delta') {
         if (effect.durationText || effect.remainingTime === null)
@@ -2264,25 +2270,18 @@ class TreeTranslator {
       return;
     }
     // 其余叶子：内核没有改描述的 op，读出现值后删旧加新（§5.3）
-    const kernelOf: Record<string, keyof StatusEffect> = {
-      类型: 'category',
-      描述: 'description',
-      效果: 'effectDescriptions',
-      层数上限: 'maxStacks',
-      来源: 'source',
-    };
-    const kernel = kernelOf[field];
+    const kernel = node?.rule === 'statusField' ? (node.kernel as keyof StatusEffect) : undefined;
     if (!kernel) throw new Drop(`「${field}」不可写`);
     const payload = statusPayload(effect);
     if (w.op === 'remove' && t.leafKey === undefined) {
-      if (field !== '效果' && field !== '层数上限')
+      if (kernel !== 'effectDescriptions' && kernel !== 'maxStacks')
         throw new Drop(`${field}不能删除，请用 replace`);
       delete (payload as Row)[kernel];
     } else if (w.op === 'delta' && t.leafKey === undefined) {
-      if (field !== '层数上限') throw new Drop(`${field}不能 delta`);
+      if (kernel !== 'maxStacks') throw new Drop(`${field}不能 delta`);
       const n = take(coerceNumber(w.value, { integer: true }), ctx.notes);
       const built = buildStatusFields(
-        { 层数上限: (effect.maxStacks ?? 0) + n },
+        { [field]: (effect.maxStacks ?? 0) + n },
         ctx.notes,
         undefined,
       );
@@ -2321,23 +2320,15 @@ class TreeTranslator {
     char: CharacterState,
   ): void {
     const w = ctx.op;
-    const at = t.segments.indexOf('登神长阶');
+    const at = t.segments.indexOf(ASCENSION_SPEC.key);
     const rel = t.segments.slice(at + 1);
     const base = t.segments.slice(0, at + 1);
-    const current = (jsonClone(readStateTreeValue(this.tree(), base)) ?? {}) as Row;
+    const current = (jsonClone(this.view().read(base)) ?? {}) as Row;
     const original = jsonClone(current);
-    const tree = {
-      是否开启: false,
-      要素: {},
-      权能: {},
-      法则: {},
-      神位: '',
-      神国: { 名称: '', 描述: '' },
-      ...current,
-    } as Row;
+    const tree: Row = { ...emptyTree(ASCENSION_SPEC), ...current };
     let fromValue: unknown;
     if (w.op === 'move') {
-      const fa = f?.segments.indexOf('登神长阶') ?? -1;
+      const fa = f?.segments.indexOf(ASCENSION_SPEC.key) ?? -1;
       if (!f || fa < 0 || f.person?.name !== char.name)
         throw new Drop('登神长阶只能在同一人物内 move');
       const fromRel = f.segments.slice(fa + 1);
@@ -2373,36 +2364,44 @@ class TreeTranslator {
     if (!name) throw new Drop('人物名不能为空');
     if (!isPlainObject(w.value)) throw new Drop('新建人物需要整对象');
     const notes = ctx.notes;
-    const v = take(pickKnownKeys(w.value, PERSON_ENTITY_KEYS), notes);
+    const v = take(pickKnownKeys(w.value, stateTreeChildKeys(PERSON_SPEC)), notes);
     ctx.value = v;
-    const growth = isPlainObject(v['成长']) ? v['成长'] : {};
+    // 人物整对象的键一律按内核字段从词表反查（PERSON / 档案 / 成长）
+    const pk = (kernel: string) => keyOf(PERSON_SPEC, kernel);
+    const growthRaw = v[GROWTH_SPEC.key];
+    const growth: Row = isPlainObject(growthRaw) ? growthRaw : {};
+    const g = GROWTH_SPEC.key;
+    const levelKey = keyOf(GROWTH_SPEC, 'level');
+    const attrsKey = keyOf(GROWTH_SPEC, 'attributes');
+    const attrsBare = stripReadonlyPrefix(attrsKey);
     const missing: string[] = [];
-    const levelRaw = growth['等级'];
-    const attrsRaw = isPlainObject(growth['属性'])
-      ? growth['属性']
-      : isPlainObject(growth['_属性'])
-        ? growth['_属性']
+    const levelRaw = growth[levelKey];
+    const attrsRaw = isPlainObject(growth[attrsBare])
+      ? growth[attrsBare]
+      : isPlainObject(growth[attrsKey])
+        ? growth[attrsKey]
         : undefined;
-    if (levelRaw === undefined) missing.push('成长.等级');
-    if (!attrsRaw) missing.push('成长.属性');
-    if (v['地点'] === undefined) missing.push('地点');
-    if (v['在场'] === undefined) missing.push('在场');
+    if (levelRaw === undefined) missing.push(`${g}.${levelKey}`);
+    if (!attrsRaw) missing.push(`${g}.${attrsBare}`);
+    if (v[pk('location')] === undefined) missing.push(pk('location'));
+    if (v[pk('present')] === undefined) missing.push(pk('present'));
     if (missing.length > 0) throw new Drop(`新建人物缺少核心字段：${missing.join('、')}`);
-    const level = take(coerceNumber(levelRaw, { integer: true }), notes, '等级');
-    if (level < 1 || level > 25) throw new Drop(`等级 ${level} 越界`);
+    const level = take(coerceNumber(levelRaw, { integer: true }), notes, levelKey);
+    if (level < 1 || level > 25) throw new Drop(`${levelKey} ${level} 越界`);
     const attributes = {} as CharacterState['attributes'];
     for (const [k, label] of Object.entries(ATTRIBUTE_LABELS) as Array<
       [keyof typeof ATTRIBUTE_LABELS, string]
     >) {
       const raw = attrsRaw![label] ?? attrsRaw![k];
-      if (raw === undefined) throw new Drop(`新建人物缺少核心字段：成长.属性.${label}`);
+      if (raw === undefined) throw new Drop(`新建人物缺少核心字段：${g}.${attrsBare}.${label}`);
       attributes[k] = take(coerceNumber(raw, { integer: true }), notes, label);
     }
-    const location = take(coerceText(v['地点']), notes, '地点');
-    if (!location) throw new Drop('新建人物缺少核心字段：地点');
-    const present = take(coerceBoolean(v['在场']), notes, '在场');
+    const location = take(coerceText(v[pk('location')]), notes, pk('location'));
+    if (!location) throw new Drop(`新建人物缺少核心字段：${pk('location')}`);
+    const present = take(coerceBoolean(v[pk('present')]), notes, pk('present'));
     const tier = getTierForLevel(level);
-    const profile = isPlainObject(v['档案']) ? v['档案'] : {};
+    const profileRaw = v[PROFILE_SPEC.key];
+    const profile: Row = isPlainObject(profileRaw) ? profileRaw : {};
     const text = (raw: unknown, label: string): string | undefined => {
       if (raw === undefined) return undefined;
       const r = coerceText(raw);
@@ -2415,22 +2414,32 @@ class TreeTranslator {
     };
     const list = (raw: unknown, label: string): string[] =>
       raw === undefined ? [] : take(coerceTextArray(raw), notes, label);
+    /** 档案文字 / 列表：按内核字段取键与值。 */
+    const profText = (kernel: ProfileTextField | 'type') => {
+      const key = keyOf(PROFILE_SPEC, kernel);
+      return text(profile[key], key);
+    };
+    const profList = (kernel: ProfileListField) => {
+      const key = keyOf(PROFILE_SPEC, kernel);
+      return list(profile[key], key);
+    };
+    const personText = (kernel: 'thoughts' | 'currentAction') => text(v[pk(kernel)], pk(kernel));
     const output: EntityGenOutput = {
       character: {
         name,
-        race: text(profile['种族'], '种族') ?? '人类',
-        gender: text(profile['性别'], '性别') ?? '',
+        race: profText('race') ?? '人类',
+        gender: profText('gender') ?? '',
         tier,
         level,
         attributes,
-        identity: list(profile['身份'], '身份'),
-        occupation: list(profile['职业'], '职业'),
-        background: text(profile['背景故事'], '背景故事') ?? '',
-        appearance: text(profile['外貌'], '外貌') ?? '',
-        clothing: text(profile['着装'], '着装') ?? '',
-        personality: text(profile['性格'], '性格') ?? '',
+        identity: profList('identity'),
+        occupation: profList('occupation'),
+        background: profText('background') ?? '',
+        appearance: profText('appearance') ?? '',
+        clothing: profText('outfit') ?? '',
+        personality: profText('personality') ?? '',
         likes: '',
-        thoughts: text(v['心里话'], '心里话'),
+        thoughts: personText('thoughts'),
         ascension: {
           enabled: false,
           path: '',
@@ -2449,53 +2458,54 @@ class TreeTranslator {
       equipment: [],
       inventory: [],
     };
-    const typeText = profile['类别'] !== undefined ? text(profile['类别'], '类别') : undefined;
-    const type = typeText !== undefined ? CATEGORY_TYPES[typeText] : 'npc';
-    if (type === undefined) notes.push(`类别「${typeText}」认不出，按普通人物处理`);
+    const typeKey = keyOf(PROFILE_SPEC, 'type');
+    const typeText = profile[typeKey] !== undefined ? profText('type') : undefined;
+    const type = typeText !== undefined ? CHARACTER_CATEGORY_TYPES[typeText] : 'npc';
+    if (type === undefined) notes.push(`${typeKey}「${typeText}」认不出，按普通人物处理`);
     const overrides: Partial<CharacterState> = {
       type: type ?? 'npc',
       location,
       present,
-      currentAction: text(v['当前行动'], '当前行动') ?? '',
+      currentAction: personText('currentAction') ?? '',
     };
-    if (v['金钱'] !== undefined)
+    const moneyKey = pk('money');
+    if (v[moneyKey] !== undefined)
       overrides.money = take(
-        coerceMoneyResult(take(coerceNumber(v['金钱'], { integer: true }), notes, '金钱')),
+        coerceMoneyResult(take(coerceNumber(v[moneyKey], { integer: true }), notes, moneyKey)),
         notes,
-        '金钱',
+        moneyKey,
       );
-    if (v['数量'] !== undefined && (type === 'monster' || type === 'summon')) {
-      const q = take(coerceQuantity(v['数量']), notes, '数量');
+    const qtyKey = pk('quantity');
+    if (v[qtyKey] !== undefined && (type === 'monster' || type === 'summon')) {
+      const q = take(coerceQuantity(v[qtyKey]), notes, qtyKey);
       if (!q.remove) overrides.quantity = q.count;
     }
     let character: CharacterState;
     try {
       character = assembleCharacterState(output, overrides);
-      if (growth['累计经验值'] !== undefined) {
-        const exp = take(
-          coerceNumber(growth['累计经验值'], { integer: true }),
-          notes,
-          '累计经验值',
-        );
+      const expKey = keyOf(GROWTH_SPEC, 'totalExp');
+      if (growth[expKey] !== undefined) {
+        const exp = take(coerceNumber(growth[expKey], { integer: true }), notes, expKey);
         character.totalExp = Math.max(0, exp);
       }
       // 资源：额外与当前值（基础由公式推导）
       const bases = baseResourceCaps(character.tier, character.attributes);
-      for (const [label, key] of Object.entries(RESOURCE_BY_LABEL)) {
+      for (const r of RESOURCE_NODES) {
+        const { label, key } = r;
         const res = isPlainObject(v[label]) ? v[label] : undefined;
         const fields = RESOURCE_FIELDS[key];
         let bonus = 0;
-        const capRaw = res?.['上限'];
-        if (isPlainObject(capRaw) && capRaw['额外'] !== undefined)
-          bonus = take(coerceCapBonus(capRaw['额外'], bases[key]), notes, `${label}.额外`);
+        const capRaw = res?.[r.cap];
+        if (isPlainObject(capRaw) && capRaw[r.bonus] !== undefined)
+          bonus = take(coerceCapBonus(capRaw[r.bonus], bases[key]), notes, `${label}.${r.bonus}`);
         else if (capRaw !== undefined && !isPlainObject(capRaw))
-          bonus = take(coerceCapTotal(capRaw, bases[key]), notes, `${label}.上限`);
+          bonus = take(coerceCapTotal(capRaw, bases[key]), notes, `${label}.${r.cap}`);
         const max = effectiveCap(bases[key], bonus);
         character[fields.bonus] = bonus;
         character[fields.max] = max;
         character[key] =
-          res?.['当前'] !== undefined
-            ? take(coerceResourceCurrent(res['当前'], max), notes, `${label}.当前`)
+          res?.[r.current] !== undefined
+            ? take(coerceResourceCurrent(res[r.current], max), notes, `${label}.${r.current}`)
             : max;
       }
       // 随身条目：坏的只丢那一条
@@ -2514,7 +2524,11 @@ class TreeTranslator {
       character.skills = this.entryList(v['技能'], '技能', notes, (n, raw) => {
         if (!isPlainObject(raw)) throw new Drop('需要对象');
         const sub: string[] = [];
-        const built = buildSkillFields(take(pickKnownKeys(raw, SKILL_ENTITY_KEYS), sub), sub, true);
+        const built = buildSkillFields(
+          take(pickKnownKeys(raw, stateTreeChildKeys(SKILL_SPEC)), sub),
+          sub,
+          true,
+        );
         notes.push(...sub.map((s) => `技能「${n}」：${s}`));
         return { description: '', type: 'active', ...built.fields, name: n } as Skill;
       });
@@ -2522,7 +2536,7 @@ class TreeTranslator {
         if (!isPlainObject(raw)) throw new Drop('需要对象');
         const sub: string[] = [];
         const built = buildStatusFields(
-          take(pickKnownKeys(raw, STATUS_ENTITY_KEYS), sub),
+          take(pickKnownKeys(raw, stateTreeChildKeys(STATUS_SPEC)), sub),
           sub,
           undefined,
         );
@@ -2543,16 +2557,9 @@ class TreeTranslator {
           ...(fx.effectDescriptions ? { effectDescriptions: fx.effectDescriptions } : {}),
         };
       });
-      if (isPlainObject(v['登神长阶'])) {
-        const asc = {
-          是否开启: false,
-          要素: {},
-          权能: {},
-          法则: {},
-          神位: '',
-          神国: { 名称: '', 描述: '' },
-          ...v['登神长阶'],
-        };
+      const ascRaw = v[ASCENSION_SPEC.key];
+      if (isPlainObject(ascRaw)) {
+        const asc: Row = { ...emptyTree(ASCENSION_SPEC), ...ascRaw };
         character.ascension = treeToAscension(asc, {}, character.ascension, notes);
       }
       bindGeneratedCharacter(character, {
@@ -2571,8 +2578,9 @@ class TreeTranslator {
     const group: StatePatch[] = [
       { op: 'add_character', target: charTarget(character.name), value: character },
     ];
-    if (v['好感度'] !== undefined) {
-      const aff = take(coerceAffection(v['好感度']), notes, '好感度');
+    const affKey = pk('affections');
+    if (v[affKey] !== undefined) {
+      const aff = take(coerceAffection(v[affKey]), notes, affKey);
       group.push({ op: 'set_affection', target: `affections.${character.name}`, value: aff });
     }
     this.commit(group);
@@ -2610,10 +2618,14 @@ class TreeTranslator {
 
   private newItem(name: string, raw: unknown, equipped: boolean, notes: string[]): InventoryItem {
     let obj = raw;
-    if (equipped && typeof obj === 'string') obj = { 位置: obj };
+    if (equipped && typeof obj === 'string') obj = { [SLOT_KEY]: obj };
     if (!isPlainObject(obj)) throw new Drop('需要对象');
     const sub: string[] = [];
-    const built = buildItemFields(take(pickKnownKeys(obj, ITEM_ENTITY_KEYS), sub), sub, true);
+    const built = buildItemFields(
+      take(pickKnownKeys(obj, stateTreeChildKeys(EQUIP_ITEM_SPEC)), sub),
+      sub,
+      true,
+    );
     notes.push(...sub.map((s) => `物品「${name}」：${s}`));
     let slot: string | null = null;
     if (equipped) {
@@ -2652,7 +2664,7 @@ class TreeTranslator {
       }
       if (w.op === 'delta') throw new Drop('任务不能 delta');
       if (!isPlainObject(w.value)) throw new Drop('写入任务需要对象');
-      const picked = take(pickKnownKeys(w.value, QUEST_ENTITY_KEYS), ctx.notes);
+      const picked = take(pickKnownKeys(w.value, stateTreeChildKeys(QUEST_SPEC)), ctx.notes);
       const fields: Partial<Quest> = {};
       for (const [k, v] of Object.entries(picked))
         Object.assign(fields, this.questField(k, v, ctx.notes));
@@ -2675,7 +2687,7 @@ class TreeTranslator {
   }
 
   private questField(key: string, raw: unknown, notes: string[]): Partial<Quest> {
-    const field = QUEST_FIELDS[key];
+    const field = stateTreeKernelOf(QUEST_SPEC, key) as keyof Quest | undefined;
     if (!field) throw new Drop(`「${key}」不是任务字段`);
     if (field === 'status') return { status: take(coerceQuestStatus(raw), notes, key) };
     if (field === 'priority') return { priority: take(coerceQuestPriority(raw), notes, key) };
@@ -2767,28 +2779,22 @@ class TreeTranslator {
   }
 }
 
-/** 会被 `数量` / `层数` 减没的名字字典（键 → 可减没的叶子）。 */
-const DEPLETABLE_LEAF: Readonly<Record<string, string>> = {
-  背包: '数量',
-  装备: '数量',
-  状态效果: '层数',
-};
-
 /**
  * 本条把条目减没了（`数量` / `层数` 叶子写入前条目在、写入后不在）时返回条目整对象前值（§12.3），否则 undefined。
  * 供撤销整对象重建、改值先重建再设置。
  */
 function depletedEntry(
   segs: readonly string[],
-  beforeTree: StateTreeValue,
-  afterTree: StateTreeValue,
+  beforeTree: StateView,
+  afterTree: StateView,
 ): unknown {
   const n = segs.length;
-  if (n < 4 || DEPLETABLE_LEAF[segs[n - 3]] !== segs[n - 1]) return undefined;
+  // 可减没的字典与叶子取自词表（`STATE_TREE_DEPLETABLE_LEAF`：背包 / 装备 → 数量，状态效果 → 层数）
+  if (n < 4 || STATE_TREE_DEPLETABLE_LEAF[segs[n - 3]] !== segs[n - 1]) return undefined;
   const entrySegs = segs.slice(0, -1);
-  const before = readStateTreeValue(beforeTree, entrySegs);
+  const before = beforeTree.read(entrySegs);
   if (before === undefined) return undefined;
-  return readStateTreeValue(afterTree, entrySegs) === undefined ? before : undefined;
+  return afterTree.read(entrySegs) === undefined ? before : undefined;
 }
 
 function isPersonRoot(root: ResolvedTreePath['root']): boolean {
@@ -2829,15 +2835,23 @@ function treeToAscension(
   existing: CharacterState['ascension'] | undefined,
   notes: string[],
 ): CharacterState['ascension'] {
-  const picked = take(
-    pickKnownKeys(tree, ['是否开启', '要素', '权能', '法则', '神位', '神国']),
-    notes,
-  );
-  const enabled = take(coerceBoolean(picked['是否开启'] ?? false), notes, '是否开启');
-  const kingdomRaw = picked['神国'] ?? {};
-  if (!isPlainObject(kingdomRaw)) throw new Drop('神国要写成 {名称, 描述}');
-  const kingdom = take(pickKnownKeys(kingdomRaw, ['名称', '描述']), notes, '神国');
-  const list = (key: string, kind: AscensionEntryKind, withCost: boolean) => {
+  const A = ASCENSION_SPEC;
+  const picked = take(pickKnownKeys(tree, stateTreeChildKeys(A)), notes);
+  const enabledKey = keyOf(A, 'enabled');
+  const enabled = take(coerceBoolean(picked[enabledKey] ?? false), notes, enabledKey);
+  const kingdomSpec = stateTreeBranchAt(`/主角/${A.key}/${keyOf(A, 'divineKingdom')}`);
+  const kingdomKeys = stateTreeChildKeys(kingdomSpec);
+  const kingdomRaw = picked[kingdomSpec.key] ?? {};
+  if (!isPlainObject(kingdomRaw))
+    throw new Drop(`${kingdomSpec.key}要写成 {${kingdomKeys.join(', ')}}`);
+  const kingdom = take(pickKnownKeys(kingdomRaw, kingdomKeys), notes, kingdomSpec.key);
+  /** 要素 / 权能 / 法则：名字字典 → 条目数组（条目键与内核字段取自词表的条目形状）。 */
+  const list = (kind: AscensionEntryKind) => {
+    const key = keyOf(A, kind);
+    const entrySpec = stateTreeBranchAt(`/主角/${A.key}/${key}`);
+    const descKey = keyOf(entrySpec, 'description');
+    const fxKey = keyOf(entrySpec, 'effectDescriptions');
+    const costKey = stateTreeKeyOfKernel(entrySpec, 'costDescription');
     const raw = picked[key] ?? {};
     if (!isPlainObject(raw)) throw new Drop(`${key}要写成名字字典`);
     const origDict = isPlainObject(original[key]) ? (original[key] as Row) : {};
@@ -2853,7 +2867,7 @@ function treeToAscension(
       if (old && JSON.stringify(origDict[name]) === JSON.stringify(entry)) return jsonClone(old);
       if (!isPlainObject(entry)) throw new Drop(`${key}「${name}」要写成对象`);
       const e = take(
-        pickKnownKeys(entry, withCost ? ['描述', '效果', '消耗'] : ['描述', '效果']),
+        pickKnownKeys(entry, stateTreeChildKeys(entrySpec)),
         notes,
         `${key}「${name}」`,
       );
@@ -2866,31 +2880,38 @@ function treeToAscension(
       } = {
         name,
         description:
-          e['描述'] !== undefined
-            ? take(coerceText(e['描述']), notes, `${name}.描述`)
+          e[descKey] !== undefined
+            ? take(coerceText(e[descKey]), notes, `${name}.${descKey}`)
             : (old?.description ?? ''),
         effects: old?.effects ?? [],
       };
-      if (e['效果'] !== undefined)
-        out.effectDescriptions = take(coerceEffectDict(e['效果']), notes, `${name}.效果`);
+      if (e[fxKey] !== undefined)
+        out.effectDescriptions = take(coerceEffectDict(e[fxKey]), notes, `${name}.${fxKey}`);
       else if (old?.effectDescriptions) out.effectDescriptions = old.effectDescriptions;
-      if (withCost)
+      if (costKey !== undefined)
         out.costDescription =
-          e['消耗'] !== undefined
-            ? take(coerceText(e['消耗']), notes, `${name}.消耗`)
+          e[costKey] !== undefined
+            ? take(coerceText(e[costKey]), notes, `${name}.${costKey}`)
             : (old?.costDescription ?? '');
       return out;
     });
   };
+  const deityKey = keyOf(A, 'deityPosition');
+  const kNameKey = keyOf(kingdomSpec, 'name');
+  const kDescKey = keyOf(kingdomSpec, 'description');
   return {
     enabled,
-    elements: list('要素', 'elements', false) as CharacterState['ascension']['elements'],
-    authority: list('权能', 'authority', true) as CharacterState['ascension']['authority'],
-    law: list('法则', 'law', true) as CharacterState['ascension']['law'],
-    deityPosition: take(coerceText(picked['神位'] ?? ''), notes, '神位'),
+    elements: list('elements') as CharacterState['ascension']['elements'],
+    authority: list('authority') as CharacterState['ascension']['authority'],
+    law: list('law') as CharacterState['ascension']['law'],
+    deityPosition: take(coerceText(picked[deityKey] ?? ''), notes, deityKey),
     divineKingdom: {
-      name: take(coerceText(kingdom['名称'] ?? ''), notes, '神国.名称'),
-      description: take(coerceText(kingdom['描述'] ?? ''), notes, '神国.描述'),
+      name: take(coerceText(kingdom[kNameKey] ?? ''), notes, `${kingdomSpec.key}.${kNameKey}`),
+      description: take(
+        coerceText(kingdom[kDescKey] ?? ''),
+        notes,
+        `${kingdomSpec.key}.${kDescKey}`,
+      ),
     },
   };
 }

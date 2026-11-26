@@ -28,7 +28,12 @@ import {
 } from './state-tree-patch';
 import { coerceNumber } from './state-tree-codecs';
 import { buildStateTree, type StateTreeValue } from './state-tree-projection';
-import { isReadonlyKey, type StateTreePatchOp } from './state-tree-spec';
+import {
+  STATE_TREE_DEPLETABLE_LEAF,
+  STATE_TREE_NAMED_RECORD_KEYS,
+  isReadonlyKey,
+  type StateTreePatchOp,
+} from './state-tree-spec';
 import {
   readStateTreeValue,
   translateTreeOps,
@@ -350,25 +355,12 @@ function writableValue(value: unknown, segments: readonly string[] | null): unkn
   return strip(jsonClone(value), 0, null);
 }
 
-/** 名字字典（Record）的键：路径倒数第二段是其中之一时，终点是条目根。 */
-const RECORD_KEYS = new Set([
-  '背包',
-  '装备',
-  '技能',
-  '状态效果',
-  '关系列表',
-  '任务列表',
-  '要素',
-  '权能',
-  '法则',
-]);
-
-/** 路径终点是不是一个名字字典的条目（整实体），或变量、新闻标题这类可删的键。 */
+/** 路径终点是不是一个名字字典的条目（整实体），或变量、新闻标题这类可删的键。字典键取自词表。 */
 function isEntryRootPath(segments: readonly string[] | null): boolean {
   if (!segments || segments.length < 2) return false;
   if (segments[0] === '变量') return true;
   if (segments[0] === '新闻') return segments.length === 3;
-  return RECORD_KEYS.has(segments[segments.length - 2]);
+  return STATE_TREE_NAMED_RECORD_KEYS.has(segments[segments.length - 2]);
 }
 
 /** 投影里缺席的叶子对应的空值（投影省略空值，`装备` 里的数量 1 也省略）。认不出类型返回 undefined。 */
@@ -386,20 +378,16 @@ function isSibling(record: StateUpdateOpRecord): boolean {
   return record.foldedInto !== undefined;
 }
 
-/** 可被 `数量` / `层数` 减没的名字字典 → 那个叶子（与翻译层写 `entryBefore` 的判据一致）。 */
-const DEPLETABLE_LEAF: Readonly<Record<string, string>> = {
-  背包: '数量',
-  装备: '数量',
-  状态效果: '层数',
-};
-
-/** 路径是不是「可减没条目」的 `数量` / `层数` 叶子；是则返回条目段与叶子键。 */
+/**
+ * 路径是不是「可减没条目」的 `数量` / `层数` 叶子；是则返回条目段与叶子键。
+ * 判据与翻译层写 `entryBefore` 的同一份（词表 `STATE_TREE_DEPLETABLE_LEAF`）。
+ */
 function depletableLeaf(
   segs: readonly string[] | null,
 ): { entrySegs: readonly string[]; leaf: string } | null {
   if (!segs || segs.length < 4) return null;
   const n = segs.length;
-  if (DEPLETABLE_LEAF[segs[n - 3]] !== segs[n - 1]) return null;
+  if (STATE_TREE_DEPLETABLE_LEAF[segs[n - 3]] !== segs[n - 1]) return null;
   return { entrySegs: segs.slice(0, -1), leaf: segs[n - 1] };
 }
 
