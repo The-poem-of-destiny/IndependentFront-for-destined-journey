@@ -20,6 +20,7 @@ import SceneImageSegment from './SceneImageSegment.vue';
 import TurnSeal from './TurnSeal.vue';
 import ActionPanel from './ActionPanel.vue';
 import DialogueCard from './DialogueCard.vue';
+import { STAGGER_STEP_MS } from './action-panel/entrance-timing';
 import {
   parseActionPanel,
   rulesClaimActionInfo,
@@ -259,11 +260,8 @@ const effectiveReveal = computed<'off' | 'stream' | 'once'>(() => {
   return props.streaming ? 'stream' : props.reveal;
 });
 
-/** 交错上限：第 8 块之后不再往后排（与 --motion-stagger-step 相乘） */
+/** 交错上限：第 8 块之后不再往后排（与 --motion-stagger-step 相乘；步长取 entrance-timing.ts 的 STAGGER_STEP_MS） */
 const INK_ORDER_CAP = 8;
-/** 与 `--motion-stagger-step` 同值，只用来算撤类名的时机 */
-const STAGGER_STEP_MS = 36;
-
 /**
  * `once` 只在挂载时生效一次：动画放完就撤掉类名，落定后的 DOM 与不开特效时相同。
  * 之后 props 再变（润色、重渲染）也不重播。

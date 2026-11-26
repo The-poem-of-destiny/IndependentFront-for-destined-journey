@@ -3,8 +3,9 @@
  *
  * 守的是：四种 kind 各画一张牌 —— 费用宝石（自身第一笔消耗 / 无费）、牌名与类型线、一句牌面效果、
  * 目标小牌（HP 变化 / 失手 / 无证据）、角上的结论绶带；名册是一排单位小牌；结算的产物品质色、
- * 经验与检定骰小牌；通用面板的前三个关键格。入场类只在 `entering` 时挂上；展开提示随 `open` 换字；
- * 全程文本插值。
+ * 经验与检定骰小牌；通用面板的牌面句子。
+ * 五种样式共有的契约（kind 类、通用面板、名册标题与名字、入场类、展开提示、不走 v-html、A4 状态）
+ * 在 action-style-shared.test.ts。
  *
  * @vitest-environment jsdom
  */
@@ -185,15 +186,12 @@ describe('ActionStyleCard', () => {
     expect(unit.findAll('.c10-mini').map((m) => m.text())).toEqual(['SP −5']);
   });
 
-  it('名册：标题、场面类型线、每个单位一张小牌（HP 条 + 读数）、集群人数', () => {
+  it('名册：无宝石与绶带，「场面」类型线，每个单位一张小牌（HP 条 + 读数）', () => {
     const w = mountCard(ROSTER);
-    expect(w.find('.cardx').classes()).toContain('k-roster');
     expect(w.find('.c10-gem').exists()).toBe(false);
     expect(w.find('.c10-rib').exists()).toBe(false);
-    expect(w.find('.c10-name').text()).toBe('第 3 回合 · 战况总览');
     expect(w.find('.c10-ty').text()).toContain('场面 · 夜雨 · 林道');
     const units = w.findAll('.c10-board .c10-u');
-    expect(units.map((u) => u.find('.nm').text())).toEqual(['艾琳', '灰狼', '盗匪喽啰2/3']);
     expect(units[0].findAll('.gbar')).toHaveLength(1);
     expect(units[0].findAll('.c10-sv').map((n) => n.text())).toEqual(['69/96', '20/40', '76/110']);
     expect(units[1].findAll('.c10-sv')).toHaveLength(2);
@@ -233,48 +231,15 @@ describe('ActionStyleCard', () => {
     expect(w.find('.c10-check .c10-hp').text()).toContain('15');
   });
 
-  it('通用：牌名是标题，牌面列前三个关键格；无标题时写「行动详情」', () => {
-    const view = viewOf(GENERIC);
+  it('通用：类型线写「行动详情」，没有目标小牌', () => {
     const w = mountCard(GENERIC);
-    expect(w.find('.cardx').classes()).toContain('k-generic');
-    expect(w.find('.c10-name').text()).toBe('潜行 · 穿过哨卡');
     expect(w.find('.c10-ty').text()).toBe('行动详情');
-    expect(w.findAll('.c10-kv')).toHaveLength(Math.min(3, view.facts.length));
-    expect(w.find('.c10-kv').text()).toBe('1d20(13)+4=17');
     expect(w.find('.c10-tg').exists()).toBe(false);
-    expect(mountCard('| 气味 | 潮湿的苔藓 |').find('.c10-name').text()).toBe('行动详情');
   });
 
-  it('入场类只在 entering 时挂上；资源条跟着播', () => {
-    for (const raw of [EXCHANGE, ROSTER, OUTCOME, GENERIC]) {
-      const still = mountCard(raw);
-      expect(still.find('.cardx').classes()).not.toContain('is-entering');
-      expect(still.find('.gbar.is-animate').exists()).toBe(false);
-      expect(mountCard(raw, { entering: true }).find('.cardx').classes()).toContain('is-entering');
-    }
+  it('入场：目标小牌的资源条跟着播', () => {
+    expect(mountCard(EXCHANGE).find('.gbar.is-animate').exists()).toBe(false);
     expect(mountCard(EXCHANGE, { entering: true }).find('.gbar.is-animate').exists()).toBe(true);
-    expect(mountCard(ROSTER, { entering: true }).find('.gbar.is-animate').exists()).toBe(true);
-  });
-
-  it('展开提示随 open 换字', () => {
-    expect(mountCard(EXCHANGE).find('.more').text()).toBe('算式');
-    const opened = mountCard(EXCHANGE, { open: true }).find('.more');
-    expect(opened.text()).toBe('收起');
-    expect(opened.classes()).toContain('is-open');
-  });
-
-  it('不走 v-html：名字与值里的标签按字面显示', () => {
-    const w = mountCard(
-      sheet('<b>出手</b>', [
-        ['行动者', '<script>x</script>'],
-        ['目标', '<b>狼</b>'],
-        ['变更', '<b>狼</b> HP 10→5'],
-      ]),
-    );
-    expect(w.find('script').exists()).toBe(false);
-    expect(w.findAll('b').filter((b) => b.classes().length === 0)).toHaveLength(0);
-    expect(w.text()).toContain('<script>x</script>');
-    expect(w.find('.c10-name').text()).toBe('<b>出手</b>');
   });
 
   it('`|目标|自身|` / `|目标|行动者|`：类型线写「自身」，宝石取 MP 消耗', () => {
@@ -295,15 +260,13 @@ describe('ActionStyleCard', () => {
     }
   });
 
-  it('结算（A4）：多人状态结算在牌面逐人写出资源变化，状态带归属人名', () => {
+  it('结算（A4）：多人状态结算在牌面逐人写出资源变化', () => {
     const w = mountCard(SETTLE);
-    expect(w.find('.cardx').classes()).toContain('k-outcome');
     const settle = w.findAll('.c10-tx .c10-settle');
     expect(settle.map((s) => s.text().replace(/\s+/g, ' '))).toEqual([
       '莱恩 失去 5 点 HP。',
       '灰狼 失去 5 点 HP。',
     ]);
     expect(settle[0].find('.c10-n').classes()).toContain('down');
-    expect(w.find('.c10-tx .c10-st').text()).toBe('灰狼 获得 流血(1回合)。');
   });
 });

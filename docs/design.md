@@ -456,6 +456,14 @@ import { qualityVar } from '../../lib/quality-colors'
 > `transform` 永久钉住（§6.0 第 5 条），只有 `animation: none` 才撤得掉（`ChatFlow` 的 `.bubble-row`、首页入场）；
 > ②同一条规则里还改了别的属性（`opacity`、`mask-image`、`transform` 等，如 `CgGalleryPanel`、`CharacterEntrance`、
 > `SideToolbar`、`AssetImportStrip`）；③`settings/agent/agent-chrome.css` 的那条随文件头「原样搬来、三件同进同出」约定保留。
+>
+> 📌 **2026-11-25 增补（`refactor/action-style-shared-views`）**：行动面板的「通用」与「名册」收起视图抽成两个共用
+> 组件 `game/action-panel/ActionViewGeneric.vue`（对决条 / 血条残影 / 跳字舞台）与 `ActionViewRoster.vue`
+> （对决条 / 跳字舞台 / 打出的牌；单位读数走插槽），DOM 类名与入场动画不变。🔴 共用组件渲染的元素不带样式组件的
+> scoped 属性，样式组件给它们写的规则（含入场的 `.is-entering …`）一律包 `:deep()`；@keyframes 仍留在样式组件里
+> （§6.0 第 6 条）。交错的上限与步长只出自 `game/action-panel/entrance-timing.ts`（`STAGGER_INDEX_MAX`、
+> `STAGGER_STEP_MS` = `--motion-stagger-step`、战报行的 `BATTLELOG_STAGGER_LINES`），`BeautifiedNarrative` 算撤类名
+> 时机也引它；常量与 token 同值由 `tests/ui/lib/action-panel-styles.test.ts` 断言。
 
 **层级表。**
 

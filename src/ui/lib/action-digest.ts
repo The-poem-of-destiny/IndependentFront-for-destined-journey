@@ -157,15 +157,22 @@ const VERDICT_LABEL_GROUPS: readonly RegExp[] = [
 /** `状态` 组只有带结论色时才算结论（否则多半是「林狼 流血」这类状态描述） */
 const STATUS_GROUP_INDEX = 3;
 
+/**
+ * 结算类资源标签 —— 唯一一份，摘要（这里）与视图模型（action-panel-view.ts）共用。
+ * 产物 / 品质 / 经验（`|经验|` 与 `|实得EXP|` 等英文写法同义）。
+ */
+export const PRODUCT_LABEL_RE = /^(?:产出列表|产出|产物)$/;
+export const QUALITY_LABEL_RE = /^品质$/;
+export const EXP_LABEL_RE = /^(?:经验|实得EXP|EXP合计|EXP)$/i;
+
 /** outcome 关键格，按重要度排序；每个取最后一次出现 */
-const QUALITY_LABEL_RE = /^品质$/;
 const OUTCOME_FACT_LABELS: readonly RegExp[] = [
-  /^(?:产出列表|产出|产物)$/,
+  PRODUCT_LABEL_RE,
   QUALITY_LABEL_RE,
   /^奖励$/,
   /^损失$/,
   /^掉落$/,
-  /^(?:实得EXP|EXP合计|EXP)$/i,
+  EXP_LABEL_RE,
   /^FP$/i,
   /^战果$/,
   /^序列$/,

@@ -11,7 +11,8 @@
  *   - generic：标题（首行）· 前三个关键格
  *
  * 所有行收成一张 `lines` 表，模板按 `t` 分派；全程文本插值。
- * 入场（仅 `entering`）：各行依次淡入并右移 4px 落定，间隔 140ms，只排前 8 行（之后的与第 8 行同时出现）。
+ * 入场（仅 `entering`）：各行依次淡入并右移 4px 落定，间隔 140ms，只排前 `BATTLELOG_STAGGER_LINES` 行
+ * （entrance-timing.ts；之后的与最后一行同时出现）。
  * 不做打字机。只动 opacity / transform，`backwards` 填充，缓动取 `--motion-*`；减动效下不播。
  * 🔴 @keyframes 必须留在本组件（scoped 会按组件改名）；共用静态类在 action-panel-base.css。
  */
@@ -31,11 +32,10 @@ import {
   type VerdictTone as Tone,
 } from '../../../lib/action-style-helpers';
 import ActionMoreHint from './ActionMoreHint.vue';
+import { BATTLELOG_STAGGER_LINES } from './entrance-timing';
 
 const props = defineProps<{ view: ActionView; open: boolean; entering: boolean }>();
 
-/** 入场只交错排前几行 */
-const STAGGER_MAX = 8;
 const ROSTER_RESOURCES = ['hp', 'mp', 'sp'] as const;
 
 type Line =
@@ -197,7 +197,7 @@ function lineClass(l: Line): string[] {
 }
 
 function stagger(i: number): Record<string, number> {
-  return { '--i': Math.min(i, STAGGER_MAX - 1) };
+  return { '--i': Math.min(i, BATTLELOG_STAGGER_LINES - 1) };
 }
 </script>
 
@@ -490,7 +490,7 @@ function stagger(i: number): Record<string, number> {
   }
 }
 
-/* ── 入场：逐行淡入落定，间隔 140ms，前 8 行交错（--i 已在模板里封顶） ── */
+/* ── 入场：逐行淡入落定，间隔 140ms，前 BATTLELOG_STAGGER_LINES 行交错（--i 已在模板里封顶，entrance-timing.ts） ── */
 @keyframes blog-line {
   from {
     opacity: 0;

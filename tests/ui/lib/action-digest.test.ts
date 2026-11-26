@@ -14,7 +14,13 @@ import type {
   CraftSettleResult,
 } from '@engine/types/types';
 import { parseActionPanel, summaryCells, type ActionPanel } from '../../../src/ui/lib/action-panel';
-import { digestActionPanel } from '../../../src/ui/lib/action-digest';
+import {
+  digestActionPanel,
+  EXP_LABEL_RE,
+  PRODUCT_LABEL_RE,
+  QUALITY_LABEL_RE,
+} from '../../../src/ui/lib/action-digest';
+import { buildActionView } from '../../../src/ui/lib/action-panel-view';
 
 function digestOf(raw: string) {
   return digestActionPanel(parseActionPanel(raw));
@@ -875,8 +881,8 @@ describe('digestActionPanel — 七类典型面板（自编名字）', () => {
     });
     expect(d.result).toBe('锻成一柄稀有品质的精钢短剑');
     expect(d.deltas).toEqual([{ who: '艾琳', resource: 'SP', delta: -15, from: 76, to: 61 }]);
-    // 已有结论时过长的结果句不进 facts（照旧），改由 result 给出
-    expect(d.facts.map((c) => c.label)).toEqual(['产物', '品质']);
+    // 已有结论时过长的结果句不进 facts（照旧），改由 result 给出；`|经验|` 与 `|EXP|` 同属结算资源标签
+    expect(d.facts.map((c) => c.label)).toEqual(['产物', '品质', '经验']);
   });
 
   it('⑥ 技能检定 · 失败（d20 对 DC）', () => {
@@ -1358,5 +1364,38 @@ describe('digestActionPanel — 审查 A6：交锋误判与百分比', () => {
   it('`HP -10%` 不记成 −10', () => {
     const d = digestOf('|行动者|莱恩|\n|目标|灰狼|\n|变更|灰狼 HP -10%|');
     expect(d.deltas).toEqual([]);
+  });
+});
+
+describe('结算资源标签表（摘要与视图共用一份，含「经验」）', () => {
+  it('标签表认得中文「经验」与英文 EXP 写法，产物 / 品质照旧', () => {
+    for (const label of ['经验', '实得EXP', 'EXP合计', 'EXP', 'exp']) {
+      expect(EXP_LABEL_RE.test(label), label).toBe(true);
+    }
+    expect(EXP_LABEL_RE.test('经验值上限')).toBe(false);
+    for (const label of ['产物', '产出', '产出列表'])
+      expect(PRODUCT_LABEL_RE.test(label)).toBe(true);
+    expect(QUALITY_LABEL_RE.test('品质')).toBe(true);
+    expect(QUALITY_LABEL_RE.test('材料品质')).toBe(false);
+  });
+
+  it('只写了「经验」的面板也算结算：摘要判 outcome、关键格里有经验（此前摘要那份表缺「经验」）', () => {
+    const d = digestOf(['{采药}', '|经验|+12|', '|备注|雨后的苔藓更湿滑|'].join('\n'));
+    expect(d.kind).toBe('outcome');
+    expect(d.facts.map((c) => c.label)).toEqual(['经验']);
+    expect(d.facts[0].value).toBe('+12');
+  });
+
+  it('摘要与视图对同一张面板读出同一笔经验', () => {
+    for (const label of ['经验', '实得EXP']) {
+      const panel = parseActionPanel(['{采药}', `|${label}|+12|`].join('\n'));
+      const d = digestActionPanel(panel);
+      expect(d.kind, label).toBe('outcome');
+      expect(
+        d.facts.map((c) => c.value),
+        label,
+      ).toEqual(['+12']);
+      expect(buildActionView(panel).outcome?.exp, label).toBe('+12');
+    }
   });
 });

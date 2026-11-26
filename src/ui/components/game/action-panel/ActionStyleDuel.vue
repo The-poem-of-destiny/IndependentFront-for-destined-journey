@@ -19,7 +19,6 @@ import type { ResourceDelta } from '../../../lib/action-digest';
 import {
   actionLabel,
   deltaClass,
-  genericFacts,
   hasRange,
   ownClass,
   rc,
@@ -32,6 +31,8 @@ import {
 import ActionBadge from './ActionBadge.vue';
 import ActionGauge from './ActionGauge.vue';
 import ActionMoreHint from './ActionMoreHint.vue';
+import ActionViewGeneric from './ActionViewGeneric.vue';
+import ActionViewRoster from './ActionViewRoster.vue';
 import { staggerStyle } from './entrance-timing';
 
 defineProps<{ view: ActionView; open: boolean; entering: boolean }>();
@@ -117,15 +118,12 @@ function otherDeltas(t: ActionViewTarget): ResourceDelta[] {
         <span class="d1-head-t">{{ view.title || '战况' }}</span>
         <small v-if="rosterNote(view)">{{ rosterNote(view) }}</small>
       </div>
-      <div class="d1-units">
-        <div v-for="(u, i) in view.roster" :key="`u-${i}`" class="d1-u" :style="staggerStyle(i)">
-          <ActionBadge :name="u.name" target size="sm" />
-          <span class="nm"
-            >{{ u.name
-            }}<small v-if="u.cluster" class="rng d1-cluster"
-              >{{ u.cluster.alive }}/{{ u.cluster.total }}</small
-            ></span
-          >
+      <ActionViewRoster
+        :view="view"
+        :classes="{ list: 'd1-units', unit: 'd1-u', cluster: 'd1-cluster' }"
+        badge-size="sm"
+      >
+        <template #unit="{ unit: u }">
           <div class="bars">
             <template v-for="k in ROSTER_RESOURCES" :key="k">
               <template v-if="u[k]">
@@ -141,8 +139,8 @@ function otherDeltas(t: ActionViewTarget): ResourceDelta[] {
               </template>
             </template>
           </div>
-        </div>
-      </div>
+        </template>
+      </ActionViewRoster>
       <div class="d1-f">
         <ActionMoreHint :open="open" />
       </div>
@@ -194,19 +192,19 @@ function otherDeltas(t: ActionViewTarget): ResourceDelta[] {
     </template>
 
     <!-- ── 通用 ── -->
-    <template v-else>
-      <div class="d1-head">
-        <span class="d1-head-t">{{ view.title || '行动详情' }}</span>
-      </div>
-      <div v-if="genericFacts(view).length > 0" class="d1-kv">
-        <span v-for="(c, i) in genericFacts(view)" :key="`f-${i}`" class="d1-kv-item"
-          >{{ c.label }}<b class="d1-kv-v">{{ c.value }}</b></span
-        >
-      </div>
-      <div class="d1-f">
-        <ActionMoreHint :open="open" />
-      </div>
-    </template>
+    <ActionViewGeneric
+      v-else
+      :view="view"
+      :open="open"
+      :classes="{
+        head: 'd1-head',
+        title: 'd1-head-t',
+        list: 'd1-kv',
+        item: 'd1-kv-item',
+        value: 'd1-kv-v',
+        foot: 'd1-f',
+      }"
+    />
   </div>
 </template>
 
@@ -320,7 +318,7 @@ function otherDeltas(t: ActionViewTarget): ResourceDelta[] {
   text-align: right;
 }
 
-.d1-f {
+:deep(.d1-f) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -330,7 +328,7 @@ function otherDeltas(t: ActionViewTarget): ResourceDelta[] {
   border-top: 1px solid color-mix(in srgb, var(--theme-card-border) 70%, transparent);
 }
 
-.d1-f .more {
+:deep(.d1-f .more) {
   margin-left: auto;
 }
 
@@ -352,7 +350,7 @@ function otherDeltas(t: ActionViewTarget): ResourceDelta[] {
 }
 
 /* 名册 */
-.d1-head {
+:deep(.d1-head) {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -376,14 +374,14 @@ function otherDeltas(t: ActionViewTarget): ResourceDelta[] {
   gap: 8px 14px;
 }
 
-.d1-u {
+:deep(.d1-u) {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
   gap: 2px 8px;
 }
 
-.d1-cluster {
+:deep(.d1-cluster) {
   margin-left: 4px;
   font-family: var(--theme-font-body);
   font-weight: 400;
@@ -418,17 +416,17 @@ function otherDeltas(t: ActionViewTarget): ResourceDelta[] {
 }
 
 /* 通用 */
-.d1-kv {
+:deep(.d1-kv) {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
 }
 
-.d1-kv-item {
+:deep(.d1-kv-item) {
   color: var(--theme-text-muted);
 }
 
-.d1-kv-v {
+:deep(.d1-kv-v) {
   margin-left: 6px;
   color: var(--theme-text-primary);
   font-family: var(--mono);
@@ -483,9 +481,9 @@ function otherDeltas(t: ActionViewTarget): ResourceDelta[] {
 }
 
 .duel.is-entering .d1-row,
-.duel.is-entering .d1-u,
+.duel.is-entering :deep(.d1-u),
 .duel.is-entering .d1-prod,
-.duel.is-entering .d1-kv {
+.duel.is-entering :deep(.d1-kv) {
   animation: duel-rise var(--motion-duration-base) var(--motion-ease-enter)
     calc(var(--motion-duration-fast) + var(--i, 0) * var(--motion-stagger-step)) backwards;
 }
@@ -498,9 +496,9 @@ function otherDeltas(t: ActionViewTarget): ResourceDelta[] {
 @media (prefers-reduced-motion: reduce) {
   .duel.is-entering .d1-arrow,
   .duel.is-entering .d1-row,
-  .duel.is-entering .d1-u,
+  .duel.is-entering :deep(.d1-u),
   .duel.is-entering .d1-prod,
-  .duel.is-entering .d1-kv,
+  .duel.is-entering :deep(.d1-kv),
   .duel.is-entering .d1-seal {
     animation: none;
   }
@@ -508,9 +506,9 @@ function otherDeltas(t: ActionViewTarget): ResourceDelta[] {
 
 :root[data-reduced-motion='true'] .duel.is-entering .d1-arrow,
 :root[data-reduced-motion='true'] .duel.is-entering .d1-row,
-:root[data-reduced-motion='true'] .duel.is-entering .d1-u,
+:root[data-reduced-motion='true'] .duel.is-entering :deep(.d1-u),
 :root[data-reduced-motion='true'] .duel.is-entering .d1-prod,
-:root[data-reduced-motion='true'] .duel.is-entering .d1-kv,
+:root[data-reduced-motion='true'] .duel.is-entering :deep(.d1-kv),
 :root[data-reduced-motion='true'] .duel.is-entering .d1-seal {
   animation: none;
 }

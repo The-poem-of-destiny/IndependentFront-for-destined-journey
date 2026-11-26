@@ -40,6 +40,7 @@ import {
 import ActionBadge from './ActionBadge.vue';
 import ActionGauge from './ActionGauge.vue';
 import ActionMoreHint from './ActionMoreHint.vue';
+import ActionViewRoster from './ActionViewRoster.vue';
 import { staggerStyle } from './entrance-timing';
 
 const props = defineProps<{ view: ActionView; open: boolean; entering: boolean }>();
@@ -202,15 +203,12 @@ const rollCaption = computed(() => {
         <strong class="c10-name">{{ view.title || '战况' }}</strong>
       </div>
       <div class="c10-ty">{{ rosterNote(view) ? `场面 · ${rosterNote(view)}` : '场面' }}</div>
-      <div class="c10-board">
-        <div v-for="(u, i) in view.roster" :key="`u-${i}`" class="c10-u" :style="staggerStyle(i)">
-          <ActionBadge :name="u.name" target size="sm" />
-          <span class="nm"
-            >{{ u.name
-            }}<small v-if="u.cluster" class="rng c10-cluster"
-              >{{ u.cluster.alive }}/{{ u.cluster.total }}</small
-            ></span
-          >
+      <ActionViewRoster
+        :view="view"
+        :classes="{ list: 'c10-board', unit: 'c10-u', cluster: 'c10-cluster' }"
+        badge-size="sm"
+      >
+        <template #unit="{ unit: u }">
           <ActionGauge
             v-if="u.hp"
             :lo="u.hp.cur"
@@ -228,8 +226,8 @@ const rollCaption = computed(() => {
               </template>
             </template>
           </div>
-        </div>
-      </div>
+        </template>
+      </ActionViewRoster>
     </template>
 
     <!-- ── 其余三种：宝石 · 牌面 · 小牌 ── -->
@@ -529,7 +527,7 @@ const rollCaption = computed(() => {
   margin-top: 1.75rem;
 }
 
-.c10-u {
+:deep(.c10-u) {
   display: grid;
   justify-items: center;
   align-content: start;
@@ -542,7 +540,7 @@ const rollCaption = computed(() => {
   text-align: center;
 }
 
-.c10-u .nm {
+:deep(.c10-u .nm) {
   font-size: 0.75rem;
   line-height: 1.3;
 }
@@ -624,11 +622,11 @@ const rollCaption = computed(() => {
   gap: 6px;
 }
 
-.c10-board .c10-u {
+:deep(.c10-board .c10-u) {
   width: 5.2rem;
 }
 
-.c10-cluster {
+:deep(.c10-cluster) {
   margin-left: 4px;
   font-family: var(--theme-font-body);
   font-weight: 400;
@@ -710,7 +708,7 @@ const rollCaption = computed(() => {
     var(--motion-duration-base) backwards;
 }
 
-.cardx.is-entering .c10-u {
+.cardx.is-entering :deep(.c10-u) {
   animation: card-rise var(--motion-duration-base) var(--motion-ease-enter)
     calc(var(--motion-duration-slow) + var(--i, 0) * var(--motion-stagger-step)) backwards;
 }
@@ -719,7 +717,7 @@ const rollCaption = computed(() => {
   .cardx.is-entering,
   .cardx.is-entering .c10-gem-d,
   .cardx.is-entering .c10-rib,
-  .cardx.is-entering .c10-u {
+  .cardx.is-entering :deep(.c10-u) {
     animation: none;
   }
 }
@@ -727,7 +725,7 @@ const rollCaption = computed(() => {
 :root[data-reduced-motion='true'] .cardx.is-entering,
 :root[data-reduced-motion='true'] .cardx.is-entering .c10-gem-d,
 :root[data-reduced-motion='true'] .cardx.is-entering .c10-rib,
-:root[data-reduced-motion='true'] .cardx.is-entering .c10-u {
+:root[data-reduced-motion='true'] .cardx.is-entering :deep(.c10-u) {
   animation: none;
 }
 </style>

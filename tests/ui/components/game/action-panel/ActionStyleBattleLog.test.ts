@@ -2,19 +2,21 @@
  * ActionStyleBattleLog — 战报行
  *
  * 守的是：一行一件事 —— 交锋的「使出了」/ 逐目标受到伤害或恢复生命 / 失手 / 状态 / 自身消耗，
- * 行尾 HP 起止；名册的标题与单位读数；结算（制作与检定）的尝试 / 掷骰 / 结论 / 产物 / 经验；
- * 通用面板的前三个关键格；入场类与交错序号只在 `entering` 时起作用（序号封顶 8 行）；全程文本插值。
+ * 行尾 HP 起止；名册的单位读数；结算（制作与检定）的尝试 / 掷骰 / 结论 / 产物 / 经验；
+ * 交错序号封顶 `BATTLELOG_STAGGER_LINES` 行（entrance-timing.ts）。
+ * 五种样式共有的契约（kind 类、通用面板、名册标题与名字、入场类、展开提示、不走 v-html、A4 状态）
+ * 在 action-style-shared.test.ts。
  *
  * @vitest-environment jsdom
  */
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import ActionStyleBattleLog from '../../../../../src/ui/components/game/action-panel/ActionStyleBattleLog.vue';
+import { BATTLELOG_STAGGER_LINES } from '../../../../../src/ui/components/game/action-panel/entrance-timing';
 import {
   ASSET_STUB,
   EXCHANGE,
   EXCHANGE_MISS,
-  GENERIC,
   OUTCOME,
   ROSTER,
   SETTLE,
@@ -100,14 +102,9 @@ describe('ActionStyleBattleLog', () => {
     expect(lineText(w, '.bl-l.l-cost')).toBe('莉娅 消耗 10 MP。');
   });
 
-  it('名册：标题 + 环境一行，每个单位一行读数（含集群人数）', () => {
+  it('名册：每个单位一行三格读数，缺的资源留空格子', () => {
     const w = mountLog(ROSTER);
-    expect(w.find('.blog').classes()).toContain('k-roster');
-    const title = w.find('.bl-l.l-title');
-    expect(title.find('.bl-title').text()).toBe('第 3 回合 · 战况总览');
-    expect(title.find('.m').text()).toContain('夜雨 · 林道');
     const units = w.findAll('.bl-l.l-unit');
-    expect(units.map((u) => u.find('.nm').text())).toEqual(['艾琳', '灰狼', '盗匪喽啰2/3']);
     expect(units[0].findAll('.c .rl').map((r) => r.text())).toEqual(['HP', 'MP', 'SP']);
     expect(units[0].find('.c').text()).toBe('HP69/96');
     // 缺的资源留空格子，列对齐不乱
@@ -137,24 +134,7 @@ describe('ActionStyleBattleLog', () => {
     expect(result.find('.bl-cry').classes()).toContain('t-bad');
   });
 
-  it('通用：标题 + 前三个关键格（标签左、值靠右）', () => {
-    const view = viewOf(GENERIC);
-    const w = mountLog(GENERIC);
-    expect(w.find('.blog').classes()).toContain('k-generic');
-    expect(w.find('.bl-title').text()).toBe('潜行 · 穿过哨卡');
-    const facts = w.findAll('.bl-l.l-fact');
-    expect(view.facts.length).toBeGreaterThan(0);
-    expect(facts).toHaveLength(Math.min(3, view.facts.length));
-    expect(facts[0].find('.m').text()).toBe('1d20(13)+4=17');
-  });
-
-  it('无标题的通用面板显示「行动详情」', () => {
-    expect(mountLog('| 气味 | 潮湿的苔藓 |').find('.bl-title').text()).toBe('行动详情');
-  });
-
-  it('入场类只在 entering 时挂上；交错序号封顶第 8 行', () => {
-    expect(mountLog(EXCHANGE).find('.blog').classes()).not.toContain('is-entering');
-    expect(mountLog(EXCHANGE, { entering: true }).find('.blog').classes()).toContain('is-entering');
+  it('交错序号封顶第 BATTLELOG_STAGGER_LINES 行', () => {
     const many = sheet(
       '出手 · 连环',
       [
@@ -171,7 +151,7 @@ describe('ActionStyleBattleLog', () => {
     const lines = mountLog(many, { entering: true }).findAll('.bl-l');
     expect(lines.length).toBe(8);
     expect(lines[0].attributes('style')).toContain('--i: 0');
-    expect(lines[7].attributes('style')).toContain('--i: 7');
+    expect(lines[7].attributes('style')).toContain(`--i: ${BATTLELOG_STAGGER_LINES - 1}`);
     const longer = mountLog(
       sheet('出手 · 连环', [
         ['行动者', '艾琳'],
@@ -185,28 +165,7 @@ describe('ActionStyleBattleLog', () => {
       { entering: true },
     ).findAll('.bl-l');
     expect(longer.length).toBe(10);
-    expect(longer[9].attributes('style')).toContain('--i: 7');
-  });
-
-  it('展开提示随 open 换字', () => {
-    expect(mountLog(EXCHANGE).find('.more').text()).toBe('算式');
-    const opened = mountLog(EXCHANGE, { open: true }).find('.more');
-    expect(opened.text()).toBe('收起');
-    expect(opened.classes()).toContain('is-open');
-  });
-
-  it('不走 v-html：名字与值里的标签按字面显示', () => {
-    const w = mountLog(
-      sheet('<b>出手</b>', [
-        ['行动者', '<script>x</script>'],
-        ['目标', '<b>狼</b>'],
-        ['变更', '<b>狼</b> HP 10→5'],
-      ]),
-    );
-    expect(w.find('script').exists()).toBe(false);
-    expect(w.findAll('b').filter((b) => b.classes().length === 0)).toHaveLength(0);
-    expect(w.text()).toContain('<script>x</script>');
-    expect(w.find('.bl-act').text()).toBe('<b>出手</b>');
+    expect(longer[9].attributes('style')).toContain(`--i: ${BATTLELOG_STAGGER_LINES - 1}`);
   });
 
   it('自我治疗：正的自身变化写「恢复了」（增益色），负的才写「消耗」', () => {
@@ -270,7 +229,7 @@ describe('ActionStyleBattleLog', () => {
     expect(w.find('.bl-l.l-status .bl-tx').text()).toBe('灰狼 畏惧(1回合)。');
   });
 
-  it('结算（A4）：多人状态结算逐人一行资源变化，状态带归属人名', () => {
+  it('结算（A4）：多人状态结算逐人一行资源变化', () => {
     const w = mountLog(SETTLE);
     const deltas = w.findAll('.bl-l.l-delta');
     expect(deltas.map((l) => l.find('.bl-tx').text().replace(/\s+/g, ' '))).toEqual([
@@ -278,6 +237,5 @@ describe('ActionStyleBattleLog', () => {
       '灰狼 的 HP 减少 5 点。',
     ]);
     expect(deltas.map((l) => l.find('.m').text())).toEqual(['HP 80→75', 'HP 45→40']);
-    expect(w.find('.bl-l.l-status .bl-tx').text()).toBe('灰狼 流血(1回合)。');
   });
 });
