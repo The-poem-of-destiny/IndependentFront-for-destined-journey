@@ -25,6 +25,8 @@ import type {
   Skill,
   InventoryItem,
   Snapshot,
+  StateUpdateOpRecord,
+  StateUpdateRecord,
 } from '../types/types';
 import {
   getCharacters,
@@ -79,10 +81,14 @@ import { withSaveWriteLock } from './state-write-queue';
 // 状态树协议 T10：玩家编辑的试算 / 只读与时间闸门 / 撤销 op（纯函数，本文件只接写入口）
 import {
   PLAYER_EDIT_SOURCE,
-  buildUndoOps,
+  applyRevisionToRecord,
+  playerEditFingerprint,
   previewPlayerEdit,
   type PlayerEditCommitResult,
   type PlayerEditOp,
+  type PlayerEditRecordWriteback,
+  type PlayerEditUndoResult,
+  type PlayerEditUndoToken,
 } from '../variables/state-tree-edit';
 import { resolveCharacterByName, validateStatePatch } from './patch-rules';
 import type { CharacterDefinition, CharacterNarrativeUpdate } from '../types/types-character';
@@ -218,6 +224,27 @@ function assertCurrentTurn(isCurrent?: () => boolean): void {
     error.name = 'AbortError';
     throw error;
   }
+}
+
+/** 表行深拷贝（结构化数据：JSON 往返即可；撤销凭据与写回都不能和库里的对象共用引用）。 */
+function cloneRow<T>(row: T): T {
+  return JSON.parse(JSON.stringify(row)) as T;
+}
+
+/** 撤销指纹不符时给玩家的说明：点名涉及的对象（R4）。 */
+function undoDriftReason(
+  token: PlayerEditUndoToken,
+  current: Record<string, CharacterState | null>,
+): string {
+  const parts: string[] = [];
+  const names = Object.keys(token.characters).map(
+    (id) => current[id]?.name ?? token.characters[id]?.name ?? id,
+  );
+  if (names.length) parts.push(`角色（${names.join('、')}）`);
+  if (token.profile) parts.push('存档档案');
+  if (token.message) parts.push('本楼更新记录');
+  const what = parts.length ? parts.join('、') : '相关状态';
+  return `${what}在这次修改之后又被别处改过，撤销会覆盖那些改动，已拒绝；需要时可用快照回退`;
 }
 
 /** 单个 Patch 的应用结果 */
@@ -978,10 +1005,14 @@ export class StateManager {
    * 补丁带 `metadata.source: 'player_edit'`；档案文字改动由翻译层产成 `update_character` 补丁，
    * 与改名等同批补丁按序落（2026-11-25，审查 A8）。不产 deltaMinutes、不推进时间、
    * 不告知模型（§11.5 裁定）。它**不属于** `persistFocusQuest` 那类受控例外：走完整补丁路径。
+   *
+   * 撤销凭据（2026-11-25 审查 R4）：同一事务里比对提交前后的角色与档案，记下被触及部分提交前的
+   * 整份内核快照与提交后的指纹，交 `undoPlayerEdit` 整体还原（不再生成反向 op）。
+   * 传 `record` 时（更新块修订）该楼记录的改写并入同一事务：记录写回失败，状态一并回滚。
    */
   async commitPlayerEdit(
     ops: readonly PlayerEditOp[],
-    options?: { isCurrent?: () => boolean },
+    options?: { isCurrent?: () => boolean; record?: PlayerEditRecordWriteback },
   ): Promise<PlayerEditCommitResult> {
     const outcome = await withSaveWriteLock(this.saveId, async () => {
       assertCurrentTurn(options?.isCurrent);
@@ -999,35 +1030,44 @@ export class StateManager {
           dropped: preview.dropped,
         };
       }
+      // 提交前的整份内核快照（深拷贝：之后的读写一律不碰它）
+      const beforeChars = new Map(snapshot.characters.map((c) => [c.id, cloneRow(c)]));
+      const beforeProfile = cloneRow(snapshot.profile);
       const patches = translation.patches.map((p) => ({
         ...p,
         metadata: { ...(p.metadata ?? {}), source: PLAYER_EDIT_SOURCE },
       }));
       const db = getDatabase();
       try {
-        const events = await db.transaction(
+        const committed = await db.transaction(
           'rw',
-          [db.characters, db.saveProfiles, db.saves, db.memories, db.plotEvents],
+          [db.characters, db.saveProfiles, db.saves, db.memories, db.plotEvents, db.messages],
           async () => {
             const scope = createCommitScope();
             this.commitScope = scope;
+            let events: GameEvent[];
             try {
-              const events = await this.applyPatchesAtomic(patches, { fpReason: '玩家修改' });
+              events = await this.applyPatchesAtomic(patches, { fpReason: '玩家修改' });
               await this.flushCommitScope(scope);
-              const save = await getSave(this.saveId);
-              if (save) await saveSaveSlot(save);
-              return events;
             } finally {
               this.commitScope = null;
             }
+            const writeback = options?.record
+              ? await this.writeStateUpdateRecord(options.record, translation.records)
+              : undefined;
+            const undo = await this.buildPlayerEditUndo(beforeChars, beforeProfile, writeback);
+            const save = await getSave(this.saveId);
+            if (save) await saveSaveSlot(save);
+            return { events, undo, stateUpdates: writeback?.after };
           },
         );
-        this.events.push(...events);
+        this.events.push(...committed.events);
         return {
           ok: true as const,
           records: translation.records,
           normalized: translation.normalized,
-          undo: buildUndoOps(translation.records),
+          undo: committed.undo,
+          ...(committed.stateUpdates ? { stateUpdates: committed.stateUpdates } : {}),
           patches,
         };
       } catch (error) {
@@ -1056,6 +1096,7 @@ export class StateManager {
                 source: p.metadata.source,
               })),
               normalized: outcome.normalized,
+              ...(options?.record ? { recordMessageId: options.record.messageId } : {}),
             }
           : { reasons: outcome.reasons }),
       }),
@@ -1066,6 +1107,144 @@ export class StateManager {
       const { patches: _patches, ...rest } = outcome;
       return rest;
     }
+    return outcome;
+  }
+
+  /**
+   * 更新块修订的记录写回（`commitPlayerEdit` 事务内）：读出该楼消息、只换 `stateUpdates`。
+   * 消息不在 / 不属本存档 / 没有记录 → 抛错，由事务把状态一并回滚。
+   */
+  private async writeStateUpdateRecord(
+    target: PlayerEditRecordWriteback,
+    committed: readonly StateUpdateOpRecord[],
+  ): Promise<{ id: string; before: StateUpdateRecord; after: StateUpdateRecord }> {
+    const table = getDatabase().messages;
+    const row = await table.get(target.messageId);
+    if (!row || row.saveId !== this.saveId || !row.stateUpdates)
+      throw new Error('本楼更新记录不存在，记录写回失败');
+    const before = cloneRow(row.stateUpdates);
+    const after = cloneRow(
+      applyRevisionToRecord(row.stateUpdates, target.index, target.revision, committed),
+    );
+    await table.put({ ...row, stateUpdates: after });
+    return { id: row.id, before, after };
+  }
+
+  /** 比对提交前后（事务内重读库），记下被触及部分提交前的快照与提交后的指纹。 */
+  private async buildPlayerEditUndo(
+    beforeChars: ReadonlyMap<string, CharacterState>,
+    beforeProfile: SaveProfile,
+    writeback?: { id: string; before: StateUpdateRecord; after: StateUpdateRecord },
+  ): Promise<PlayerEditUndoToken> {
+    const afterChars = new Map((await getCharacters(this.saveId)).map((c) => [c.id, c]));
+    const afterProfile = await getProfile(this.saveId);
+    const sameChar = (a: CharacterState | null, b: CharacterState | null) =>
+      playerEditFingerprint({ characters: { x: a } }) ===
+      playerEditFingerprint({ characters: { x: b } });
+    const characters: Record<string, CharacterState | null> = {};
+    const afterTouched: Record<string, CharacterState | null> = {};
+    for (const id of new Set([...beforeChars.keys(), ...afterChars.keys()])) {
+      const before = beforeChars.get(id) ?? null;
+      const after = afterChars.get(id) ?? null;
+      if (sameChar(before, after)) continue;
+      characters[id] = before;
+      afterTouched[id] = after;
+    }
+    const profileTouched =
+      playerEditFingerprint({ characters: {}, profile: beforeProfile }) !==
+      playerEditFingerprint({ characters: {}, profile: afterProfile });
+    return {
+      saveId: this.saveId,
+      characters,
+      ...(profileTouched ? { profile: beforeProfile } : {}),
+      ...(writeback ? { message: { id: writeback.id, stateUpdates: writeback.before } } : {}),
+      fingerprint: playerEditFingerprint({
+        characters: afterTouched,
+        ...(profileTouched ? { profile: afterProfile } : {}),
+        ...(writeback ? { stateUpdates: writeback.after } : {}),
+      }),
+    };
+  }
+
+  /**
+   * 修改器「撤销上一次修改」（§11.4；2026-11-25 审查 R4）：按 `commitPlayerEdit` 给的凭据整体还原。
+   *
+   * 与提交同一把锁、同一个事务：先按凭据重读被触及的角色、档案与该楼记录算指纹，与提交后的指纹
+   * 不符（之后又被别处改过）→ 拒绝并说明，什么都不写；相符 → 写回提交前的整份快照（角色 id、
+   * 年龄锚点、投影外的内部字段原样回来；本次新建的角色删掉），该楼记录一并还原。
+   * 直写表行、不经补丁处理器（不重算、不钳制、不触发钩子）—— 写回的就是提交前库里的样子。
+   */
+  async undoPlayerEdit(
+    token: PlayerEditUndoToken,
+    options?: { isCurrent?: () => boolean },
+  ): Promise<PlayerEditUndoResult> {
+    const outcome = await withSaveWriteLock(
+      this.saveId,
+      async (): Promise<PlayerEditUndoResult> => {
+        assertCurrentTurn(options?.isCurrent);
+        if (token.saveId !== this.saveId) return { ok: false, reasons: ['撤销凭据不属于当前存档'] };
+        const db = getDatabase();
+        try {
+          return await db.transaction(
+            'rw',
+            [db.characters, db.saveProfiles, db.saves, db.messages],
+            async (): Promise<PlayerEditUndoResult> => {
+              const ids = Object.keys(token.characters);
+              const rows = await db.characters.bulkGet(ids);
+              const current: Record<string, CharacterState | null> = {};
+              ids.forEach((id, i) => {
+                const row = rows[i];
+                current[id] = row && row.saveId === this.saveId ? row : null;
+              });
+              const profile = token.profile ? await getProfile(this.saveId) : undefined;
+              const message = token.message ? await db.messages.get(token.message.id) : undefined;
+              if (token.message && (!message || message.saveId !== this.saveId))
+                return { ok: false, reasons: ['本楼消息已不存在，无法撤销；可用快照回退'] };
+              const fingerprint = playerEditFingerprint({
+                characters: current,
+                ...(token.profile ? { profile } : {}),
+                ...(token.message ? { stateUpdates: message?.stateUpdates ?? null } : {}),
+              });
+              if (fingerprint !== token.fingerprint)
+                return { ok: false, reasons: [undoDriftReason(token, current)] };
+              for (const id of ids) {
+                const before = token.characters[id];
+                if (before) await db.characters.put(cloneRow(before));
+                else await db.characters.delete(id);
+              }
+              // 直写表行：updateProfile 会盖新的 updatedAt，栈里更早那次撤销的指纹就对不上了
+              if (token.profile) await db.saveProfiles.put(cloneRow(token.profile));
+              let restored: { id: string; stateUpdates: StateUpdateRecord } | undefined;
+              if (token.message && message) {
+                const stateUpdates = cloneRow(token.message.stateUpdates);
+                await db.messages.put({ ...message, stateUpdates });
+                restored = { id: message.id, stateUpdates };
+              }
+              const save = await getSave(this.saveId);
+              if (save) await saveSaveSlot(save);
+              return { ok: true, ...(restored ? { message: restored } : {}) };
+            },
+          );
+        } catch (error) {
+          return {
+            ok: false,
+            reasons: [`撤销失败：${error instanceof Error ? error.message : String(error)}`],
+          };
+        }
+      },
+    );
+    logEngine(
+      outcome.ok ? 'info' : 'warn',
+      'state.manual_edit',
+      outcome.ok ? '撤销玩家修改：已整体还原' : '撤销玩家修改：拒绝',
+      () => ({
+        characters: Object.keys(token.characters),
+        profile: token.profile !== undefined,
+        ...(token.message ? { recordMessageId: token.message.id } : {}),
+        ...(outcome.ok ? {} : { reasons: outcome.reasons }),
+      }),
+      { saveId: this.saveId },
+    );
     return outcome;
   }
 

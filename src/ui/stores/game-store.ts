@@ -2,7 +2,7 @@ import { isDirectMode } from '@engine/story/generation-mode';
 import { resolveGenerationMode } from '@engine/story/generation-mode';
 import { projectDirectCombatCharacters, readDirectCombat } from '@engine/combat/direct-combat';
 import { defineStore } from 'pinia';
-import { ref, computed, onScopeDispose, watch } from 'vue';
+import { ref, computed, markRaw, onScopeDispose, watch } from 'vue';
 import {
   getActivePackPayload,
   getPackRuntimeRevision,
@@ -51,10 +51,12 @@ import {
   type PlayerPersonaUpdateResult,
 } from '@engine/state/state-manager';
 import {
-  applyRevisionToRecord,
   planUpdateBlockRevision,
   type PlayerEditCommitResult,
   type PlayerEditOp,
+  type PlayerEditRecordWriteback,
+  type PlayerEditUndoResult,
+  type PlayerEditUndoToken,
   type RevisionOptions,
   type RevisionPlan,
   type UpdateBlockRevision,
@@ -1594,9 +1596,10 @@ export const useGameStore = defineStore('game', () => {
 
   /**
    * 撤销栈（§11.4）：只在内存里，换回合、切存档、离开游戏页即清空。更早的后悔药是快照。
-   * `undo` 为空数组的项表示那次修改不可自动撤销 —— 它压在栈顶时更早的项也不能撤。
+   * 每项是引擎给的撤销凭据（提交前的内核快照 + 提交后的指纹，2026-11-25 审查 R4），
+   * 撤销时由 `StateManager.undoPlayerEdit` 核对指纹后整体还原。
    */
-  const stateEditUndoStack = ref<{ label: string; undo: PlayerEditOp[] }[]>([]);
+  const stateEditUndoStack = ref<{ label: string; undo: PlayerEditUndoToken }[]>([]);
 
   function clearStateEditUndo() {
     stateEditUndoStack.value = [];
@@ -1646,7 +1649,10 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  async function runPlayerEdit(ops: readonly PlayerEditOp[]): Promise<PlayerEditCommitResult> {
+  async function runPlayerEdit(
+    ops: readonly PlayerEditOp[],
+    record?: PlayerEditRecordWriteback,
+  ): Promise<PlayerEditCommitResult> {
     const saveId = activeSaveId.value;
     if (!saveId) return { ok: false, reasons: ['无活跃存档'], records: [], dropped: [] };
     const blocked = stateEditBlocked();
@@ -1654,8 +1660,13 @@ export const useGameStore = defineStore('game', () => {
     try {
       const result = await createStateManager(saveId).commitPlayerEdit(ops, {
         isCurrent: () => activeSaveId.value === saveId,
+        ...(record ? { record } : {}),
       });
-      if (result.ok && activeSaveId.value === saveId) await reloadAfterStateEdit(saveId);
+      if (result.ok && activeSaveId.value === saveId) {
+        if (record && result.stateUpdates)
+          replaceMessageStateUpdates(record.messageId, result.stateUpdates);
+        await reloadAfterStateEdit(saveId);
+      }
       return result;
     } catch (error) {
       const aborted = error instanceof Error && error.name === 'AbortError';
@@ -1676,23 +1687,48 @@ export const useGameStore = defineStore('game', () => {
   async function commitStateEdit(
     ops: readonly PlayerEditOp[],
     label: string,
+    record?: PlayerEditRecordWriteback,
   ): Promise<PlayerEditCommitResult> {
-    const result = await runPlayerEdit(ops);
-    if (result.ok) stateEditUndoStack.value.push({ label, undo: [...result.undo] });
+    const result = await runPlayerEdit(ops, record);
+    // 凭据里是整份内核快照，不需要响应式（markRaw 免得深代理一遍）
+    if (result.ok) stateEditUndoStack.value.push({ label, undo: markRaw(result.undo) });
     return result;
   }
 
-  /** 撤销上一次修改（§11.4）：反向 op 同样走 commitPlayerEdit；成功才出栈。 */
-  async function undoLastStateEdit(): Promise<PlayerEditCommitResult> {
+  /**
+   * 撤销上一次修改（§11.4；2026-11-25 审查 R4）：引擎核对指纹后按快照整体还原，
+   * 更新块修订的那楼记录一并还原。成功才出栈；指纹不符时原样返回拒绝原因。
+   */
+  async function undoLastStateEdit(): Promise<PlayerEditUndoResult> {
     const top = stateEditUndoStack.value[stateEditUndoStack.value.length - 1];
-    if (!top) return { ok: false, reasons: ['没有可撤销的修改'], records: [], dropped: [] };
-    if (top.undo.length === 0)
-      return { ok: false, reasons: ['上一次修改无法自动撤销'], records: [], dropped: [] };
-    const result = await runPlayerEdit(top.undo);
-    if (result.ok && stateEditUndoStack.value[stateEditUndoStack.value.length - 1] === top) {
-      stateEditUndoStack.value.pop();
+    if (!top) return { ok: false, reasons: ['没有可撤销的修改'] };
+    const saveId = activeSaveId.value;
+    if (!saveId) return { ok: false, reasons: ['无活跃存档'] };
+    const blocked = stateEditBlocked();
+    if (blocked) return { ok: false, reasons: [blocked] };
+    let result: PlayerEditUndoResult;
+    try {
+      result = await createStateManager(saveId).undoPlayerEdit(top.undo, {
+        isCurrent: () => activeSaveId.value === saveId,
+      });
+    } catch (error) {
+      const aborted = error instanceof Error && error.name === 'AbortError';
+      if (!aborted) console.error('[game-store] 撤销变量修改失败:', error);
+      return { ok: false, reasons: [aborted ? '存档已切换，本次撤销未执行' : '撤销失败，请重试'] };
     }
+    if (!result.ok || activeSaveId.value !== saveId) return result;
+    if (stateEditUndoStack.value[stateEditUndoStack.value.length - 1] === top)
+      stateEditUndoStack.value.pop();
+    if (result.message) replaceMessageStateUpdates(result.message.id, result.message.stateUpdates);
+    await reloadAfterStateEdit(saveId);
     return result;
+  }
+
+  /** 同步内存里那条消息的 `stateUpdates` 展示副本（库已在引擎事务里写好）。 */
+  function replaceMessageStateUpdates(messageId: string, stateUpdates: StateUpdateRecord) {
+    const index = messages.value.findIndex((m) => m.id === messageId);
+    if (index >= 0)
+      messages.value.splice(index, 1, { ...messages.value[index], stateUpdates: stateUpdates });
   }
 
   // === 每楼变量更新块（状态树协议 T13，设计 §12） ===
@@ -1748,9 +1784,9 @@ export const useGameStore = defineStore('game', () => {
 
   /**
    * 提交一次更新块修订：补偿 op 走 `commitStateEdit`（整批原子，与变量修改器同一个写入口），
-   * 成功后用 `applyRevisionToRecord` 改写本楼记录并写回这条消息的 `stateUpdates`。
-   * 写回在存档写锁内读出消息行、只换这一个字段（照 game-pipeline 的 attachStateUpdates），
-   * 正文与其余字段一律不动（§12.3：正文不变）。
+   * 本楼记录的改写（`applyRevisionToRecord`，只换 `stateUpdates`，正文不变 §12.3）由引擎
+   * 并入同一事务：记录写回失败则状态一并回滚（2026-11-25 审查 R4）。撤销栈的凭据也带上
+   * 这楼记录，从修改器撤销时一并还原。
    */
   async function commitStateUpdateRevision(
     messageId: string,
@@ -1767,37 +1803,7 @@ export const useGameStore = defineStore('game', () => {
         records: [],
         dropped: [],
       };
-    const result = await commitStateEdit(ops, label);
-    if (!result.ok || activeSaveId.value !== saveId) return result;
-    try {
-      await writeStateUpdateRecord(saveId, messageId, (current) =>
-        applyRevisionToRecord(current, index, revision, result.records),
-      );
-    } catch (error) {
-      // 状态已落库，只是记录没写回：不回滚状态，提示一句即可（下次打开仍按现值核冲突）
-      console.error('[game-store] 更新块记录写回失败:', error);
-    }
-    return result;
-  }
-
-  /** 在存档写锁内读出消息行，只改 `stateUpdates` 再写回，并同步内存里的展示副本。 */
-  async function writeStateUpdateRecord(
-    saveId: string,
-    messageId: string,
-    update: (current: StateUpdateRecord) => StateUpdateRecord,
-  ): Promise<void> {
-    const next = await withSaveWriteLock(saveId, async () => {
-      const table = getDatabase().messages;
-      const row = await table.get(messageId);
-      if (!row || row.saveId !== saveId || !row.stateUpdates) return null;
-      const record = detach(update(row.stateUpdates));
-      await table.put({ ...row, stateUpdates: record });
-      return record;
-    });
-    if (!next || activeSaveId.value !== saveId) return;
-    const index = messages.value.findIndex((m) => m.id === messageId);
-    if (index >= 0)
-      messages.value.splice(index, 1, { ...messages.value[index], stateUpdates: next });
+    return commitStateEdit(ops, label, { messageId, index, revision });
   }
 
   // === 快照回退 (快照面板 + 右键回退重发) ===

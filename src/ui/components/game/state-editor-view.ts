@@ -30,7 +30,11 @@ import {
   type StateTreeRecordSpec,
 } from '@engine/variables/state-tree-spec';
 import type { StateTreeObject, StateTreeValue } from '@engine/variables/state-tree-projection';
-import type { PlayerEditOp, PlayerEditPreview } from '@engine/variables/state-tree-edit';
+import type {
+  PlayerEditOp,
+  PlayerEditPreview,
+  PlayerEditUndoToken,
+} from '@engine/variables/state-tree-edit';
 import type { StateUpdateOpStatus } from '@engine/types/types';
 
 // ═══════════════════════════════════════════════════════════
@@ -805,18 +809,19 @@ export function stateEditorLockReason(flags: {
 export interface StateEditUndoEntry {
   /** 这次修改的简述。 */
   readonly label: string;
-  /** 反向 op；空数组 = 这次修改不可撤销。 */
-  readonly undo: readonly PlayerEditOp[];
+  /** 引擎给的撤销凭据（提交前的内核快照 + 提交后的指纹，2026-11-25 审查 R4）。 */
+  readonly undo: PlayerEditUndoToken;
 }
 
-/** 「撤销上一次修改」可不可点；不可点时给原因。只看栈顶：更早的修改要先撤掉后来的。 */
+/**
+ * 「撤销上一次修改」可不可点；不可点时给原因。只看栈顶：更早的修改要先撤掉后来的。
+ * 快照还原对任何修改都成立，所以栈非空即可点；现状已被别处改过时由引擎在撤销时拒绝并说明。
+ */
 export function undoAvailability(stack: readonly StateEditUndoEntry[]): {
   readonly canUndo: boolean;
   readonly reason: string;
 } {
   const top = stack[stack.length - 1];
   if (!top) return { canUndo: false, reason: '本回合还没有可撤销的修改' };
-  if (top.undo.length === 0)
-    return { canUndo: false, reason: '上一次修改无法自动撤销，可用快照回退' };
   return { canUndo: true, reason: '' };
 }
