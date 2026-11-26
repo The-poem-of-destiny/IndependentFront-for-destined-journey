@@ -22,6 +22,9 @@
 import { RARITY_LEVELS } from '@engine/content/field-enums';
 import {
   digestActionPanel,
+  EXP_LABEL_RE,
+  PRODUCT_LABEL_RE,
+  QUALITY_LABEL_RE,
   type ActionDigest,
   type ActionDigestKind,
   type DigestRoll,
@@ -137,9 +140,6 @@ const RESULT_LABELS: ReadonlySet<string> = new Set([
 ]);
 /** 值超过这个长度就跨两列 */
 const WIDE_VALUE_LENGTH = 28;
-const PRODUCT_LABEL_RE = /^(?:产出列表|产出|产物)$/;
-const QUALITY_LABEL_RE = /^品质$/;
-const EXP_LABEL_RE = /^(?:经验|实得EXP|EXP合计|EXP)$/i;
 const RESULT_LABEL = '结果';
 const HUES: ReadonlySet<string> = new Set(['info', 'strike', 'check', 'gain']);
 const GAIN_PREFIX_RE = /^\s*获得\s*/;

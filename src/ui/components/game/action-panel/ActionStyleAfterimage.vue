@@ -23,7 +23,6 @@ import type { DigestRoll, ResourceDelta } from '../../../lib/action-digest';
 import {
   actionLabel,
   deltaClass,
-  genericFacts,
   hasRange,
   ownClass,
   rc,
@@ -37,6 +36,7 @@ import {
 import ActionBadge from './ActionBadge.vue';
 import ActionGauge from './ActionGauge.vue';
 import ActionMoreHint from './ActionMoreHint.vue';
+import ActionViewGeneric from './ActionViewGeneric.vue';
 
 const props = defineProps<{ view: ActionView; open: boolean; entering: boolean }>();
 
@@ -283,18 +283,19 @@ const qualityStyle = computed(() =>
     </template>
 
     <!-- ── 通用 ── -->
-    <template v-else>
-      <div class="d2-h">
-        <span class="nm">{{ view.title || '行动详情' }}</span>
-        <ActionMoreHint :open="open" />
-      </div>
-      <div v-if="genericFacts(view).length > 0" class="d2-kv">
-        <span v-for="(c, i) in genericFacts(view)" :key="`f-${i}`" class="d2-kv-item"
-          ><small class="d2-kv-k">{{ c.label }}</small
-          ><b class="d2-kv-v">{{ c.value }}</b></span
-        >
-      </div>
-    </template>
+    <ActionViewGeneric
+      v-else
+      :view="view"
+      :open="open"
+      :classes="{
+        head: 'd2-h',
+        title: 'nm',
+        list: 'd2-kv',
+        item: 'd2-kv-item',
+        label: 'd2-kv-k',
+        value: 'd2-kv-v',
+      }"
+    />
   </div>
 </template>
 
@@ -309,7 +310,7 @@ const qualityStyle = computed(() =>
 }
 
 /* 头行：行动者 ▸ 招式 ▸ 目标 + 结论印；展开提示靠右（齿轮的位置由外壳的右内边距让出） */
-.d2-h {
+:deep(.d2-h) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -329,7 +330,7 @@ const qualityStyle = computed(() =>
   overflow-wrap: anywhere;
 }
 
-.d2-h .more {
+:deep(.d2-h .more) {
   margin-left: auto;
 }
 
@@ -542,28 +543,28 @@ const qualityStyle = computed(() =>
 }
 
 /* 通用 */
-.d2-kv {
+:deep(.d2-kv) {
   display: flex;
   flex-wrap: wrap;
 }
 
-.d2-kv-item {
+:deep(.d2-kv-item) {
   padding: 0 12px;
   border-left: 1px solid var(--theme-card-border);
 }
 
-.d2-kv-item:first-child {
+:deep(.d2-kv-item:first-child) {
   padding-left: 0;
   border-left: 0;
 }
 
-.d2-kv-k {
+:deep(.d2-kv-k) {
   display: block;
   color: var(--theme-text-muted);
   font-size: 0.6875rem;
 }
 
-.d2-kv-v {
+:deep(.d2-kv-v) {
   font-family: var(--mono);
   font-size: 0.75rem;
   font-weight: 600;

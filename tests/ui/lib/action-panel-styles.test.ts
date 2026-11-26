@@ -6,7 +6,11 @@ import { reactive } from 'vue';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { STAGGER_INDEX_MAX } from '../../../src/ui/components/game/action-panel/entrance-timing';
+import {
+  BATTLELOG_STAGGER_LINES,
+  STAGGER_INDEX_MAX,
+  STAGGER_STEP_MS,
+} from '../../../src/ui/components/game/action-panel/entrance-timing';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 import {
@@ -50,7 +54,7 @@ describe('行动面板样式目录', () => {
 
   /**
    * entranceMs 必须盖住该样式最长的一段入场动画（延迟 + 时长），否则入场类撤得太早，动画被腰斩。
-   * token 现读 variables.css，各样式自有的定值现读组件源码；`--i` 封顶取 entrance-timing.ts。
+   * token 现读 variables.css，各样式自有的 CSS 定值现读组件源码；交错上限与步长直接 import entrance-timing.ts。
    * 资源条（ActionGauge）在四种样式里都会跟着播：fill slow、ghost 延迟 base + 时长 base。
    */
   it('每种样式的 entranceMs 不短于它最长一段入场动画，并留出余量', () => {
@@ -63,7 +67,7 @@ describe('行动面板样式目录', () => {
     const fast = ms(tokens, '--motion-duration-fast');
     const base = ms(tokens, '--motion-duration-base');
     const slow = ms(tokens, '--motion-duration-slow');
-    const step = ms(tokens, '--motion-stagger-step');
+    const step = STAGGER_STEP_MS;
     const comp = (name: string) =>
       readFileSync(resolve(ROOT, `src/ui/components/game/action-panel/${name}.vue`), 'utf8');
     const gauge = Math.max(slow, base + base);
@@ -71,15 +75,14 @@ describe('行动面板样式目录', () => {
 
     const afterimage = comp('ActionStyleAfterimage');
     const battlelog = comp('ActionStyleBattleLog');
-    const blMax = Number(/const STAGGER_MAX = (\d+);/.exec(battlelog)![1]);
 
     const longest: Record<string, number> = {
       // 箭 base；目标行 fast + i·step 延迟 + base；结论印 slow 延迟 + base
       duel: Math.max(base, fast + i * step + base, slow + base, gauge),
       // 盖片停留 --d2-hold 后 --d2-chase 收拢
       afterimage: Math.max(ms(afterimage, '--d2-hold') + ms(afterimage, '--d2-chase'), gauge),
-      // 逐行：(STAGGER_MAX − 1)·--bl-step 延迟 + base
-      battlelog: (blMax - 1) * ms(battlelog, '--bl-step') + base,
+      // 逐行：(BATTLELOG_STAGGER_LINES − 1)·--bl-step 延迟 + base
+      battlelog: (BATTLELOG_STAGGER_LINES - 1) * ms(battlelog, '--bl-step') + base,
       // 跳字：fast + i·2·step 延迟 + slow
       floating: Math.max(fast + i * step * 2 + slow, gauge),
       // 发牌 slow；宝石 fast + base；绶带 base + base；小牌 slow + i·step 延迟 + base
@@ -89,6 +92,13 @@ describe('行动面板样式目录', () => {
       expect(longest[s.id], s.id).toBeGreaterThan(0);
       expect(s.entranceMs, s.id).toBeGreaterThanOrEqual(longest[s.id]! + 20);
     }
+  });
+
+  it('交错步长常量与 --motion-stagger-step token 同值', () => {
+    const tokens = readFileSync(resolve(ROOT, 'src/ui/themes/variables.css'), 'utf8');
+    const m = /--motion-stagger-step:\s*(\d+)ms/.exec(tokens);
+    expect(m).not.toBeNull();
+    expect(STAGGER_STEP_MS).toBe(Number(m![1]));
   });
 
   it('缺省样式是对决条', () => {
