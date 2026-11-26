@@ -15,7 +15,11 @@
  * - 非法补丁在动角色之前抛错（文案对齐提交时的报错）；抛错时角色不被改动。
  * - 返回纠正说明（`notes`）：值被钳、找不到目标被忽略、登神封顶等。调用方决定记日志还是忽略。
  *
- * 档案域（变量、任务、好感、命运点、新闻、人物增删改名的查重与搬迁）不在本模块。
+ * 档案域（审查报告 R5c）：变量、任务、好感、命运点、新闻、人物增删与改名（含同名查重、
+ * 好感按名搬迁）同样只在这里写一次（见文末「档案域」一节）。`StateManager` 的对应 handler
+ * 「读 profile / 角色表 → 本模块 → 落库」；时间账本、地图钩子、saveId 注入、FP 账目的 id 与时间戳、
+ * 新闻的 id 与发布时间等 I/O 与副作用留在调用方（经入参传进来）。
+ * 翻译层的工作状态与建补丁预演（`state/patch-rehearsal.ts`）都经 `reduceStatePatch` 推进。
  */
 
 import { getTierConfig } from '../character/tier-constants';
@@ -44,15 +48,24 @@ import {
   normalizeSlot,
   normalizeStatusCategory,
 } from '../content/field-enums';
-import type {
-  CharacterState,
-  InventoryItem,
-  Skill,
-  StatePatch,
-  StatePatchOp,
-  StatusEffect,
+import { clampAffection } from '../character/affection-system';
+import { normalizeQuestStatus } from '../content/field-enums';
+import {
+  createDefaultQuest,
+  type CharacterState,
+  type FPTransaction,
+  type InventoryItem,
+  type NewsItem,
+  type Quest,
+  type SaveProfile,
+  type Skill,
+  type StatePatch,
+  type StatePatchOp,
+  type StatusEffect,
 } from '../types/types';
 import type { GameTime } from '../time/time-system';
+import { delVar, getVar, insertVar, setVar } from '../variables/var-resolver';
+import { resolveCharacterByName } from './patch-rules';
 
 // ========== 对外类型 ==========
 
@@ -379,6 +392,7 @@ function assertUpdateCharacterKeys(value: Record<string, unknown>, isDelta: bool
           `update_character delta=true 要求 "${k}" 的值为 number，实际为 ${typeof value[k]}`,
         );
       }
+      // NaN / ±Infinity 通过了 typeof 检查，落地时由 `isIgnoredDelta` 忽略（金钱除外）
     }
   }
 }
@@ -446,6 +460,14 @@ function applyPlayerProgression(char: CharacterState, notes: ReduceNote[]): void
   }
 }
 
+/** update_character delta 里被忽略的非有限增量的说明（warn）。 */
+function ignoredDeltaNote(char: CharacterState, key: string, raw: unknown): ReduceNote {
+  return {
+    level: 'warn',
+    text: `update_character delta 的 ${key} 不是有限数（${String(raw)}），已忽略（${char.name}）`,
+  };
+}
+
 function reduceUpdateCharacter(char: CharacterState, patch: StatePatch, notes: ReduceNote[]): void {
   // §5.6 上限基准：在白名单校验通过之后、value 落地之前抓（见下方第 1 步）
   let capBaseline: ResourceCapBaseline | null = null;
@@ -475,10 +497,19 @@ function reduceUpdateCharacter(char: CharacterState, patch: StatePatch, notes: R
           const base = (char.attributes ?? {}) as Record<string, number>;
           const next: Record<string, number> = { ...base };
           for (const attr of Object.keys(incoming)) {
+            const d = incoming[attr] ?? 0;
+            if (!isFiniteNumber(d)) {
+              notes.push(ignoredDeltaNote(char, `attributes.${attr}`, d));
+              continue;
+            }
             const cur = typeof base[attr] === 'number' ? base[attr] : 0;
-            next[attr] = cur + (incoming[attr] ?? 0);
+            next[attr] = cur + d;
           }
           char.attributes = next as CharacterState['attributes'];
+        } else if (k !== 'money' && !isFiniteNumber(value[k])) {
+          // 非有限增量（NaN / ±Infinity）忽略这一键并记 warn：NaN 的 totalExp 增量会让升级循环的
+          // 比较全为 false，主角从 Lv.1 一路直升到关键等级。金钱例外：沿 V1 口径落地后由下方守卫钳到 0
+          notes.push(ignoredDeltaNote(char, k, value[k]));
         } else {
           const current = (char as any)[k];
           (char as any)[k] = (typeof current === 'number' ? current : 0) + value[k];
@@ -1175,4 +1206,373 @@ export function prepareNewCharacter(
     applyRecomputedCaps(character, bonuses, capBaseline.prevMax, carried, false);
   }
   return { notes: [] };
+}
+
+// ========== 档案域（审查报告 R5c）==========
+
+/** 档案域补丁要读写的 SaveProfile 切片（翻译层工作状态没有 FP 账目时 `fpHistory` 缺席）。 */
+export type ReducibleProfile = Pick<
+  SaveProfile,
+  'fp' | 'quests' | 'news' | 'variables' | 'gameTime' | 'affections'
+> & { fpHistory?: FPTransaction[] };
+
+/** 一份完整的可推进状态：本存档全部角色 + 档案切片。 */
+export interface ReducibleState {
+  characters: CharacterState[];
+  profile: ReducibleProfile;
+}
+
+/** 命运点账目的落款（id 与时间戳由调用方给：本模块不读时钟、不取随机）。 */
+interface FatePointLedger {
+  reason: string;
+  id: string;
+  timestamp: number;
+}
+
+/** 命运点补丁的口径（V1）：AI 来源扣超余额钳到 0；领域命令与玩家编辑不足照旧抛错。 */
+export interface FatePointOptions {
+  clampSpend: boolean;
+  /** 给了就记一笔 `fpHistory`（StateManager）；不给不记（翻译层工作状态）。 */
+  ledger?: FatePointLedger;
+}
+
+/** `reduceStatePatch` 的上下文：档案域里那几处要调用方补的东西。 */
+export interface StateReduceContext {
+  fatePoints: FatePointOptions;
+  /** 新闻的账务字段（铁律3：Code 补 id / 发布时间）。 */
+  newsStamp: () => { id: string; publishedAt: number };
+}
+
+/**
+ * 从 `characters.<名>` 解析角色：剥前缀后只取第一段（防御子路径写法 `characters.X.skills`，#11），
+ * 再按名寻址（`patch-rules` 的别名与「主角／玩家」口径）。找不到 → throw。
+ */
+export function resolveCharacterTarget(
+  characters: readonly CharacterState[],
+  target: string,
+): CharacterState {
+  const raw = target.startsWith('characters.') ? target.slice('characters.'.length) : target;
+  const key = raw.split('.')[0];
+  if (!key) throw new Error(`无效的 character target: ${target}`);
+  return resolveCharacterByName(characters, key);
+}
+
+// ---------- 变量 ----------
+
+/** 变量补丁的路径：`variables.` 前缀可写可不写。 */
+function variablePath(target: string): string {
+  return target.startsWith('variables.') ? target.slice('variables.'.length) : target;
+}
+
+const VARIABLE_OPS = new Set<StatePatchOp>([
+  'set_variable',
+  'delta_variable',
+  'remove_variable',
+  'move_variable',
+  'insert_variable',
+]);
+
+/**
+ * 变量补丁（真源 `SaveProfile.variables`，M5）。按字面路径写：`delta_variable profile.fp`
+ * 在这里会写进 `variables.profile.fp` —— 命运点要走 `reduceFatePointPatch`，由调用方分流。
+ */
+export function reduceVariablePatch(
+  profile: Pick<ReducibleProfile, 'variables'>,
+  patch: StatePatch,
+): ReduceResult {
+  const vars = profile.variables ?? {};
+  const path = variablePath(patch.target);
+  switch (patch.op) {
+    case 'set_variable':
+      profile.variables = setVar(vars, path, patch.value);
+      break;
+    case 'delta_variable': {
+      const current = getVar(vars, path);
+      profile.variables = setVar(
+        vars,
+        path,
+        (typeof current === 'number' ? current : 0) + (patch.amount ?? 0),
+      );
+      break;
+    }
+    case 'remove_variable':
+      profile.variables = delVar(vars, path);
+      break;
+    case 'move_variable': {
+      const toPath = patch.metadata?.toPath as string;
+      if (!toPath) throw new Error('move_variable 需要 metadata.toPath');
+      const value = getVar(vars, path);
+      profile.variables = setVar(delVar(vars, path), toPath, value);
+      break;
+    }
+    case 'insert_variable':
+      profile.variables = insertVar(vars, path, patch.value, patch.metadata?.index as number);
+      break;
+    default:
+      throw new Error(`不是变量补丁: ${patch.op}`);
+  }
+  return { notes: [] };
+}
+
+// ---------- 命运点 ----------
+
+/**
+ * 命运点补丁（`delta_variable profile.fp`），真源 `SaveProfile.fp`。
+ * 增：直接加；减：`clampSpend` 时扣到 0 为止，否则余额不足抛错。增减为 0 时不动、不记账。
+ */
+export function reduceFatePointPatch(
+  profile: Pick<ReducibleProfile, 'fp' | 'fpHistory'>,
+  patch: StatePatch,
+  options: FatePointOptions,
+): ReduceResult {
+  const amount = patch.amount!;
+  if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
+  let change = amount;
+  if (amount < 0) {
+    const balance = Number.isFinite(profile.fp) ? Math.max(0, profile.fp) : 0;
+    const spend = options.clampSpend ? Math.min(-amount, balance) : -amount;
+    if (spend > 0 && profile.fp < spend) {
+      throw new Error(`FP 不足: 需要 ${spend}, 当前 ${profile.fp}`);
+    }
+    change = -spend;
+  }
+  if (change === 0) return { notes: [] };
+  profile.fp += change;
+  if (options.ledger) {
+    (profile.fpHistory ??= []).push({
+      id: options.ledger.id,
+      timestamp: options.ledger.timestamp,
+      amount: change,
+      reason: options.ledger.reason,
+      balance: profile.fp,
+      source: 'other',
+    });
+  }
+  return { notes: [] };
+}
+
+// ---------- 任务 ----------
+
+/** 任务 upsert 的合并语义（缺省任务补 `createDefaultQuest`）—— 全仓只此一份。 */
+export function upsertQuest(
+  profile: Pick<ReducibleProfile, 'quests'>,
+  name: string,
+  fields: Partial<Quest>,
+): void {
+  const existing = profile.quests[name] ?? createDefaultQuest();
+  profile.quests[name] = { ...existing, ...fields };
+}
+
+/** update_quest — value = { name(必), ...字段 }；status 自由字符串归一化（#32）。 */
+function reduceUpdateQuest(profile: Pick<ReducibleProfile, 'quests'>, patch: StatePatch): void {
+  const questData = patch.value as { name?: string } & Record<string, unknown>;
+  const questName = questData?.name;
+  if (!questName) throw new Error('缺少任务名称');
+  const questFields: Record<string, unknown> = { ...questData };
+  delete questFields.name;
+  if (questFields.status !== undefined) {
+    questFields.status = normalizeQuestStatus(questFields.status as string);
+  }
+  upsertQuest(profile, questName, questFields as Partial<Quest>);
+}
+
+/** update_quest / remove_quest（remove 的 value 统一为 { name } 对象，#40）。 */
+export function reduceQuestPatch(
+  profile: Pick<ReducibleProfile, 'quests'>,
+  patch: StatePatch,
+): ReduceResult {
+  if (patch.op === 'update_quest') {
+    reduceUpdateQuest(profile, patch);
+  } else if (patch.op === 'remove_quest') {
+    const questName = (patch.value as { name?: string })?.name;
+    if (!questName) throw new Error('缺少任务名称');
+    delete profile.quests[questName];
+  } else {
+    throw new Error(`不是任务补丁: ${patch.op}`);
+  }
+  return { notes: [] };
+}
+
+// ---------- 好感 / 新闻 ----------
+
+const AFFECTION_PREFIX = 'affections.';
+
+/**
+ * set_affection / delta_affection（规范 §7）。target = `affections.<角色名>`，名字是自由键
+ * （不要求角色实体存在）；结果取整并钳到 [-100, 100]。
+ */
+export function reduceAffectionPatch(
+  profile: Pick<ReducibleProfile, 'affections'>,
+  patch: StatePatch,
+): ReduceResult {
+  if (!patch.target.startsWith(AFFECTION_PREFIX)) {
+    throw new Error(`${patch.op} target 必须为 affections.<角色名> 格式: ${patch.target}`);
+  }
+  const charName = patch.target.slice(AFFECTION_PREFIX.length).trim();
+  if (!charName) throw new Error(`${patch.op} target 缺少角色名: ${patch.target}`);
+  if (patch.op === 'set_affection') {
+    if (typeof patch.value !== 'number' || Number.isNaN(patch.value)) {
+      throw new Error(`set_affection value 必须是数字: ${JSON.stringify(patch.value)}`);
+    }
+    profile.affections[charName] = clampAffection(patch.value);
+  } else if (patch.op === 'delta_affection') {
+    if (typeof patch.amount !== 'number' || Number.isNaN(patch.amount)) {
+      throw new Error(`delta_affection amount 必须是数字: ${JSON.stringify(patch.amount)}`);
+    }
+    const current = profile.affections[charName] ?? 0;
+    profile.affections[charName] = clampAffection(current + patch.amount);
+  } else {
+    throw new Error(`不是好感补丁: ${patch.op}`);
+  }
+  return { notes: [] };
+}
+
+/** add_news（规范 §8）：AI 只填 title(必) / content(必) / category?，账务字段由调用方给（铁律3）。 */
+export function reduceAddNews(
+  profile: { news: NewsItem[] },
+  patch: StatePatch,
+  stamp: { id: string; publishedAt: number },
+): ReduceResult {
+  const newsData = patch.value as { title?: string; content?: string; category?: string };
+  if (!newsData?.title) throw new Error('add_news 缺少 title');
+  if (!newsData.content) throw new Error('add_news 缺少 content');
+  profile.news.push({
+    title: newsData.title,
+    content: newsData.content,
+    category: newsData.category ?? '',
+    id: stamp.id,
+    publishedAt: stamp.publishedAt,
+    read: false,
+  });
+  return { notes: [] };
+}
+
+// ---------- 人物增删与改名 ----------
+
+/**
+ * add_character：校验（id、非空名字、同存档同名查重 —— 同 id 重放不算撞名）→ 人物内容整理
+ * （`prepareNewCharacter`）→ 追加进 `characters`（同 id 已在表里则不重复追加）。
+ * saveId 注入是账务字段，由调用方负责。
+ */
+export function reduceAddCharacter(
+  characters: CharacterState[],
+  character: CharacterState,
+  gameTime: Pick<GameTime, 'year' | 'month' | 'day'>,
+): ReduceResult {
+  if (!character?.id) throw new Error('缺少角色数据');
+  // 名字是逻辑键（铁律1）: 非空必填
+  const name = typeof character.name === 'string' ? character.name.trim() : '';
+  if (!name) throw new Error('add_character 需要非空 name（名字是逻辑键，铁律1）');
+  // 与 rename_character 查重口径一致；同一批里连着加两个同名角色，第二个在这里被拦下
+  if (characters.some((c) => c.name === name && c.id !== character.id)) {
+    throw new Error(`同名角色已存在: ${name}`);
+  }
+  const result = prepareNewCharacter(character, gameTime);
+  if (!characters.some((c) => c.id === character.id)) characters.push(character);
+  return result;
+}
+
+/** remove_character：把这个角色从 `characters` 里摘掉（按 id；生命周期策略在上游）。 */
+export function reduceRemoveCharacter(
+  characters: CharacterState[],
+  character: CharacterState,
+): ReduceResult {
+  const idx = characters.findIndex((c) => c.id === character.id);
+  if (idx >= 0) characters.splice(idx, 1);
+  return { notes: [] };
+}
+
+/** rename_character 的结果：改没改名、好感有没有跟着搬（调用方据此决定落不落库）。 */
+interface RenameResult extends ReduceResult {
+  renamed: boolean;
+  affectionMoved: boolean;
+}
+
+/**
+ * rename_character — value = 新名（裸字符串）。新名 trim 后非空；与旧名相同 → no-op；
+ * 同存档撞名（排除自身）→ throw；按名引用迁移：`affections[旧名]` 键搬到新名
+ * （当前按名引用仅好感；任务叙事文本不迁移，接受陈旧）。
+ */
+export function reduceRenameCharacter(
+  state: { characters: readonly CharacterState[]; profile: Pick<ReducibleProfile, 'affections'> },
+  character: CharacterState,
+  rawName: unknown,
+): RenameResult {
+  if (typeof rawName !== 'string') {
+    throw new Error(`rename_character value 必须是新名字符串: ${JSON.stringify(rawName)}`);
+  }
+  const newName = rawName.trim();
+  if (!newName) throw new Error('rename_character 新名不能为空');
+  const oldName = character.name;
+  if (newName === oldName) return { notes: [], renamed: false, affectionMoved: false };
+  if (state.characters.some((c) => c.name === newName && c.id !== character.id)) {
+    throw new Error(`rename_character 新名已被占用: ${newName}`);
+  }
+  character.name = newName;
+  const affections = state.profile.affections;
+  if (!affections || !Object.prototype.hasOwnProperty.call(affections, oldName)) {
+    return { notes: [], renamed: true, affectionMoved: false };
+  }
+  affections[newName] = affections[oldName];
+  delete affections[oldName];
+  return { notes: [], renamed: true, affectionMoved: true };
+}
+
+// ---------- 总分发 ----------
+
+/**
+ * 把任意一条（本模块覆盖的）补丁作用到一份完整状态上（就地）。翻译层的工作状态与建补丁预演
+ * 经这里推进；StateManager 的各 handler 直接调上面对应的单项函数（中间夹着各自的 I/O）。
+ * 记忆、剧情事件、地块事实等不在状态切片里的 op → throw。
+ */
+export function reduceStatePatch(
+  state: ReducibleState,
+  patch: StatePatch,
+  ctx: StateReduceContext,
+): ReduceResult {
+  if (isCharacterPatchOp(patch.op)) {
+    return reduceCharacterPatch(resolveCharacterTarget(state.characters, patch.target), patch);
+  }
+  if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
+    return reduceFatePointPatch(state.profile, patch, ctx.fatePoints);
+  }
+  if (VARIABLE_OPS.has(patch.op)) return reduceVariablePatch(state.profile, patch);
+  switch (patch.op) {
+    case 'transfer_item': {
+      const from = resolveCharacterTarget(state.characters, patch.target);
+      const request = readTransferItemRequest(patch);
+      return reduceTransferItem(
+        from,
+        resolveCharacterByName(state.characters, request.to),
+        request,
+      );
+    }
+    case 'add_character':
+      return reduceAddCharacter(
+        state.characters,
+        patch.value as CharacterState,
+        state.profile.gameTime,
+      );
+    case 'remove_character':
+      return reduceRemoveCharacter(
+        state.characters,
+        resolveCharacterTarget(state.characters, patch.target),
+      );
+    case 'rename_character':
+      return reduceRenameCharacter(
+        state,
+        resolveCharacterTarget(state.characters, patch.target),
+        patch.value,
+      );
+    case 'update_quest':
+    case 'remove_quest':
+      return reduceQuestPatch(state.profile, patch);
+    case 'set_affection':
+    case 'delta_affection':
+      return reduceAffectionPatch(state.profile, patch);
+    case 'add_news':
+      return reduceAddNews(state.profile, patch, ctx.newsStamp());
+    default:
+      throw new Error(`状态切片不认识 ${patch.op}`);
+  }
 }

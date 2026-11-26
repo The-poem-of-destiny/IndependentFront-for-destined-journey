@@ -277,7 +277,7 @@ export async function persistRemoveQuest(saveId: string, questName: string): Pro
 // ═══════════════════════════════════════════════════════════
 
 import type { Quest } from '../types/types';
-import { createDefaultQuest } from '../types/types';
+import { upsertQuest } from './patch-reducer';
 
 /** 获取所有任务 */
 export function getQuests(profile: SaveProfile): Record<string, Quest> {
@@ -294,12 +294,13 @@ export function getQuest(profile: SaveProfile, name: string): Quest | undefined 
  *
  * 🔴 `*InPlace` 这一族的存在理由只有一个：`StateManager.commitChatState` 的**提交作用域缓存**
  *    （见 state-manager.ts 的 `CommitScope` 注释）把「改」与「落」拆成了两拍 —— 一次提交里
- *    十个补丁改同一份 profile，出口只落一次库。合并语义（缺省任务补 `createDefaultQuest`）
- *    必须留在本文件一处：搬去 state-manager 抄一份，漂了不会报错，只会让两条路径产出不同形状的任务。
+ *    十个补丁改同一份 profile，出口只落一次库。
+ * 📌 2026-11-25（审查报告 R5c）：合并语义（缺省任务补 `createDefaultQuest`）的唯一出处搬进
+ *    `patch-reducer.ts` 的 `upsertQuest`（StateManager 的 update_quest、翻译层工作状态与本文件共用），
+ *    本函数只转调；漂了不会报错，只会让几条路径产出不同形状的任务，所以别在这里再抄一份。
  */
-export function setQuestInPlace(profile: SaveProfile, name: string, quest: Partial<Quest>): void {
-  const existing = profile.quests[name] ?? createDefaultQuest();
-  profile.quests[name] = { ...existing, ...quest };
+function setQuestInPlace(profile: SaveProfile, name: string, quest: Partial<Quest>): void {
+  upsertQuest(profile, name, quest);
 }
 
 /** 设置/更新任务 (upsert) —— 改内存 + 立即落库的命名写入口 */
@@ -314,7 +315,7 @@ export async function setQuest(
 }
 
 /** 删除任务 —— **只改内存不落库**（理由同 `setQuestInPlace`） */
-export function removeQuestInPlace(profile: SaveProfile, name: string): void {
+function removeQuestInPlace(profile: SaveProfile, name: string): void {
   delete profile.quests[name];
 }
 

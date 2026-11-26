@@ -5,21 +5,22 @@
  * 输出是交给 `StateManager` 的 `StatePatch[]`，外加本楼分钟数、档案文字改动、新人物与逐条结果记录。
  *
  * 流程（每条 op，§5.1）：
- * 1. 解析路径（`resolveTreePath`，对的是影子状态 —— 完整内核状态，不是投影）。
+ * 1. 解析路径（`resolveTreePath`，对的是工作状态 —— 完整内核状态，不是投影）。
  * 2. 按叶子类型纠正值（`state-tree-codecs.ts`）。
  * 3. 映射成 StatePatch（§5.3 全表）。
- * 4. `validateStatePatch` + `PatchRehearsal.vet` 核一遍；成组的补丁整组落或整组丢。
- * 5. 作用到影子状态，后面的 op 看得到前面的结果（「先 add 再穿戴」自然成立）。
+ * 4. `validateStatePatch` 核形状，再用 `state/patch-reducer.ts`（与 StateManager 提交时同一份纯变换，
+ *    审查报告 R5c）作用到工作状态 —— 提交时会抛的补丁在这里同样抛、被丢；成组的补丁整组落或整组丢。
+ * 5. 后面的 op 看得到前面的结果（「先 add 再穿戴」自然成立），记下的后值就是提交后真实落库的值。
  *
  * 顺序：按 AI 原顺序逐条作用；唯一例外是新建人物先落（§4.3）。翻译前先把同批的
  * 「删一边、加一边」（背包 ↔ 装备）折叠成一条 move（§5.3）。
  *
  * 每条 op 都产出一条 `StateUpdateOpRecord`：状态（已应用 / 已纠正 / 已丢弃）、说明、
- * 纠正后的写入值、前值与后值（取自影子状态的投影，§11 撤销与 §12 补差靠它）。
+ * 纠正后的写入值、前值与后值（取自工作状态的投影，§11 撤销与 §12 补差靠它）。
  *
  * 🔴 已裁定（§9）：不加 fitSlot（#9，穿戴槽位只从 op 自带或同批后续写入取）；不加槽位别名（#6）；
  *    从装备 remove = 物品离开人物（#11）；主角等级只读、NPC 等级可写（#2）；金钱钳到 0（#5）。
- * 🔴 本模块不碰 I/O：影子状态是入参的深拷贝，入参不被修改。新人物的 id 由 `createDefaultCharacterState` 生成。
+ * 🔴 本模块不碰 I/O：工作状态是入参的深拷贝，入参不被修改。新人物的 id 由 `createDefaultCharacterState` 生成。
  */
 
 import { assembleCharacterState, bindGeneratedCharacter } from '../agents/entity-gen-agent';
@@ -31,17 +32,14 @@ import {
   readResourceCaps,
   type ResourceKey,
 } from '../character/resource-caps';
-import { normalizeQuestStatus, type EquipSlot } from '../content/field-enums';
+import type { EquipSlot } from '../content/field-enums';
 import {
   findByName,
-  isCharacterPatchOp,
-  prepareNewCharacter,
-  readTransferItemRequest,
-  reduceCharacterPatch,
-  reduceTransferItem,
+  reduceStatePatch,
   resourceCeiling,
+  type ReducibleState,
+  type StateReduceContext,
 } from '../state/patch-reducer';
-import { PatchRehearsal } from '../state/patch-rehearsal';
 import { resolveCharacterByName, validateStatePatch } from '../state/patch-rules';
 import { advanceTime } from '../time/time-system';
 import {
@@ -103,7 +101,7 @@ import {
   type StateTreeValue,
 } from './state-tree-projection';
 import { ATTRIBUTE_LABELS } from './state-tree-spec';
-import { VAR_NAMESPACES, delVar, getVar, insertVar, setVar } from './var-resolver';
+import { VAR_NAMESPACES, getVar } from './var-resolver';
 
 // ========== 对外类型 ==========
 
@@ -350,20 +348,6 @@ interface OpContext {
   readonly consumed: number[];
   /** 记录里写的动作（纠正后与原动作不同时才给，如叠到已穿戴物品上的 add 记成 `装备/<物>/数量` 的 delta）。 */
   recordOp?: TreeOpKind;
-}
-
-interface MutableProfile {
-  fp: number;
-  quests: Record<string, Quest>;
-  news: StateTreeProfile['news'];
-  variables: Record<string, any>;
-  gameTime: StateTreeProfile['gameTime'];
-  affections: Record<string, number>;
-}
-
-interface Shadow {
-  characters: CharacterState[];
-  profile: MutableProfile;
 }
 
 type Row = Record<string, unknown>;
@@ -749,132 +733,27 @@ function statusPayload(e: StatusEffect): Partial<StatusEffect> {
   return p;
 }
 
-// ========== 影子状态：补丁的内存镜像 ==========
-
-function shadowVarPath(target: string): string {
-  return target.startsWith('variables.') ? target.slice('variables.'.length) : target;
-}
+// ========== 工作状态：经 patch-reducer 推进 ==========
 
 /**
- * 把一条补丁作用到影子状态。角色域补丁与 StateManager 共用 `state/patch-reducer.ts` 的纯变换
- * （不再手写镜像）；档案域（变量、任务、好感、命运点、新闻、人物增删改名）仍在这里镜像。
+ * 翻译层推进工作状态的上下文（审查报告 R5c）：命运点按提交口径（V1：AI 来源扣超余额钳到 0，
+ * 玩家编辑不足抛错 —— 抛错即这条 op 被丢）；新闻的账务字段只在工作状态里占位，真值由提交时补。
  */
-function applyShadowPatch(shadow: Shadow, patch: StatePatch): void {
-  const p = shadow.profile;
-  const v = (isPlainObject(patch.value) ? patch.value : {}) as Row;
-  const name = typeof v.name === 'string' ? v.name : '';
-  const charOf = (): CharacterState =>
-    resolveCharacterByName(shadow.characters, patch.target.slice('characters.'.length));
-  if (isCharacterPatchOp(patch.op)) {
-    // 角色域：与 StateManager 的 handler 同一份纯变换（patch-reducer）。补丁先深拷一份，
-    // 影子不与要提交给 StateManager 的补丁共享引用（structuredClone 保留 undefined 键，清除语义不丢）
-    reduceCharacterPatch(charOf(), structuredClone(patch));
-    return;
-  }
-  switch (patch.op) {
-    case 'transfer_item': {
-      const request = readTransferItemRequest(patch);
-      reduceTransferItem(charOf(), resolveCharacterByName(shadow.characters, request.to), request);
-      return;
-    }
-    case 'add_character': {
-      // 人物内容整理（年龄锚点、自带额外的上限规整）与 StateManager 同一份
-      const added = jsonClone(patch.value as CharacterState);
-      prepareNewCharacter(added, p.gameTime);
-      shadow.characters.push(added);
-      return;
-    }
-    case 'remove_character': {
-      const c = charOf();
-      shadow.characters = shadow.characters.filter((x) => x !== c);
-      return;
-    }
-    case 'rename_character': {
-      const c = charOf();
-      const old = c.name;
-      c.name = String(patch.value).trim();
-      if (hasOwn(p.affections, old)) {
-        p.affections[c.name] = p.affections[old];
-        delete p.affections[old];
-      }
-      return;
-    }
-    case 'set_affection':
-    case 'delta_affection': {
-      const who = patch.target.slice('affections.'.length);
-      const cur = p.affections[who] ?? 0;
-      const next = patch.op === 'set_affection' ? (patch.value as number) : cur + patch.amount!;
-      p.affections[who] = Math.max(-100, Math.min(100, Math.round(next)));
-      return;
-    }
-    case 'delta_variable':
-      if (patch.target === 'profile.fp') p.fp += patch.amount ?? 0;
-      else {
-        const path = shadowVarPath(patch.target);
-        const cur = getVar(p.variables, path);
-        p.variables = setVar(
-          p.variables,
-          path,
-          (typeof cur === 'number' ? cur : 0) + patch.amount!,
-        );
-      }
-      return;
-    case 'set_variable':
-      p.variables = setVar(p.variables, shadowVarPath(patch.target), jsonClone(patch.value));
-      return;
-    case 'remove_variable':
-      p.variables = delVar(p.variables, shadowVarPath(patch.target));
-      return;
-    case 'insert_variable':
-      p.variables = insertVar(
-        p.variables,
-        shadowVarPath(patch.target),
-        jsonClone(patch.value),
-        patch.metadata?.index as number | undefined,
-      );
-      return;
-    case 'move_variable': {
-      const from = shadowVarPath(patch.target);
-      const value = getVar(p.variables, from);
-      p.variables = setVar(delVar(p.variables, from), String(patch.metadata?.toPath), value);
-      return;
-    }
-    case 'update_quest': {
-      const fields = { ...v };
-      delete fields.name;
-      if (typeof fields.status === 'string') fields.status = normalizeQuestStatus(fields.status);
-      p.quests[name] = {
-        ...(p.quests[name] ?? createDefaultQuest()),
-        ...(fields as Partial<Quest>),
-      };
-      return;
-    }
-    case 'remove_quest':
-      delete p.quests[name];
-      return;
-    case 'add_news':
-      p.news = [
-        ...(p.news ?? []),
-        {
-          id: `shadow-${(p.news ?? []).length}`,
-          title: String(v.title),
-          content: String(v.content),
-          category: typeof v.category === 'string' ? v.category : '',
-          publishedAt: 0,
-          read: false,
-        },
-      ];
-      return;
-    default:
-      throw new Error(`影子状态不认识 ${patch.op}`);
-  }
+function workingReduceContext(
+  actor: TreeTranslateActor,
+  state: ReducibleState,
+): StateReduceContext {
+  return {
+    fatePoints: { clampSpend: actor === 'ai' },
+    newsStamp: () => ({ id: `pending-${state.profile.news.length}`, publishedAt: 0 }),
+  };
 }
 
 // ========== 翻译器 ==========
 
 class TreeTranslator {
-  private shadow: Shadow;
-  private rehearsal: PatchRehearsal;
+  /** 工作状态：入参的深拷贝，按补丁顺序经 patch-reducer 推进（后面的 op 看得到前面的结果）。 */
+  private state: ReducibleState;
   private readonly patches: StatePatch[] = [];
   private deltaMinutes = 0;
   private readonly newCharacters: CharacterState[] = [];
@@ -895,7 +774,7 @@ class TreeTranslator {
     private readonly options: TreeTranslateOptions,
   ) {
     const prof = snapshot.profile;
-    this.shadow = {
+    this.state = {
       characters: jsonClone([...snapshot.characters]),
       profile: {
         fp: typeof prof.fp === 'number' ? prof.fp : 0,
@@ -906,18 +785,17 @@ class TreeTranslator {
         affections: jsonClone(prof.affections ?? {}),
       },
     };
-    this.rehearsal = new PatchRehearsal(this.shadow.characters);
     for (const c of snapshot.characters) this.startTypes.set(c.name, c.type);
   }
 
-  // ---------- 读影子 ----------
+  // ---------- 读工作状态 ----------
 
   private tree(): StateTreeValue {
     if (!this.cachedTree || this.cachedTree.version !== this.version) {
       this.cachedTree = {
         version: this.version,
         tree: buildStateTree(
-          { characters: this.shadow.characters, profile: this.shadow.profile },
+          { characters: this.state.characters, profile: this.state.profile },
           { visibility: { mode: 'all' }, newsLimit: Number.MAX_SAFE_INTEGER },
         ),
       };
@@ -928,7 +806,7 @@ class TreeTranslator {
   private resolve(segments: readonly string[], style: TreePathStyle, notes: string[]) {
     const r = resolveTreePath(
       segments,
-      { characters: this.shadow.characters, profile: this.shadow.profile },
+      { characters: this.state.characters, profile: this.state.profile },
       style,
     );
     if (!r.ok) {
@@ -944,35 +822,30 @@ class TreeTranslator {
   }
 
   private character(name: string): CharacterState {
-    return resolveCharacterByName(this.shadow.characters, name);
+    return resolveCharacterByName(this.state.characters, name);
   }
 
   // ---------- 落补丁 ----------
 
-  /** 一组补丁：先整组预演，再整组作用到影子；任一失败整组不落。 */
+  /**
+   * 一组补丁：在工作状态的副本上逐条跑 `patch-reducer`（与 StateManager 提交时同一份纯变换），
+   * 全部成功才换上副本；任一条抛错整组不落，报错文案即提交时的报错。
+   */
   private commit(group: readonly StatePatch[]): void {
     if (group.length === 0) return;
-    const snap = this.rehearsal.snapshot();
+    const next = structuredClone(this.state);
+    const ctx = workingReduceContext(this.options.actor, next);
     for (const patch of group) {
       try {
-        if (patch.op === 'add_character') validateStatePatch(patch);
-        else this.rehearsal.vet(patch)();
+        validateStatePatch(patch);
+        // 补丁先深拷一份：reducer 会把补丁里的值并进状态，工作状态不与要提交的补丁共享引用
+        // （structuredClone 保留 undefined 键，清除语义不丢）
+        reduceStatePatch(next, structuredClone(patch), ctx);
       } catch (e) {
-        this.rehearsal.restore(snap);
         throw new Drop(`${patch.op}（${patch.target}）：${errorText(e)}`);
       }
     }
-    const backup = jsonClone(this.shadow);
-    try {
-      for (const patch of group) applyShadowPatch(this.shadow, patch);
-    } catch (e) {
-      this.shadow = backup;
-      this.rehearsal = new PatchRehearsal(this.shadow.characters);
-      throw new Drop(`影子状态无法应用：${errorText(e)}`);
-    }
-    // remove_character 换了数组引用：预演跟着换（持有量从影子重新读）
-    if (group.some((p) => p.op === 'remove_character'))
-      this.rehearsal = new PatchRehearsal(this.shadow.characters);
+    this.state = next;
     this.patches.push(...group);
     this.version++;
   }
@@ -1334,20 +1207,20 @@ class TreeTranslator {
         coerceTimeAdvance(
           w.op === 'delta' ? 'delta' : 'replace',
           w.value,
-          this.shadow.profile.gameTime,
+          this.state.profile.gameTime,
         ),
         ctx.notes,
       );
       ctx.value = w.op === 'delta' ? minutes : w.value;
       if (minutes > 0) {
         this.deltaMinutes += minutes;
-        this.shadow.profile.gameTime = advanceTime(this.shadow.profile.gameTime, minutes);
+        this.state.profile.gameTime = advanceTime(this.state.profile.gameTime, minutes);
         this.version++;
       }
       return;
     }
     if (key === '地点') {
-      const player = this.shadow.characters.find((c) => c.type === 'player');
+      const player = this.state.characters.find((c) => c.type === 'player');
       if (!player) throw new Drop('存档里没有主角');
       return this.setLocation(ctx, player);
     }
@@ -1358,7 +1231,7 @@ class TreeTranslator {
     const w = ctx.op;
     if (w.op !== 'delta' && w.op !== 'replace' && w.op !== 'add')
       throw new Drop('命运点数只能 replace 或 delta');
-    const cur = this.shadow.profile.fp;
+    const cur = this.state.profile.fp;
     const amount = take(
       coerceFatePointsDelta(cur, w.op === 'delta' ? 'delta' : 'replace', w.value),
       ctx.notes,
@@ -1702,7 +1575,7 @@ class TreeTranslator {
   }
 
   private affection(ctx: OpContext, char: CharacterState, op: TreeOpKind): void {
-    const aff = this.shadow.profile.affections;
+    const aff = this.state.profile.affections;
     const cur = hasOwn(aff, char.name) ? aff[char.name] : 0;
     const target = `affections.${char.name}`;
     if (op === 'replace') {
@@ -2693,7 +2566,7 @@ class TreeTranslator {
       if (e instanceof Drop) throw e;
       throw new Drop(`人物组装失败（${errorText(e)}）`);
     }
-    if (this.shadow.characters.some((c) => c.name === character.name))
+    if (this.state.characters.some((c) => c.name === character.name))
       throw new Drop(`人物「${character.name}」已存在`);
     const group: StatePatch[] = [
       { op: 'add_character', target: charTarget(character.name), value: character },
@@ -2757,7 +2630,7 @@ class TreeTranslator {
     const w = ctx.op;
     if (!t.entry) return this.expand(ctx, t);
     const name = t.entry.name;
-    const quests = this.shadow.profile.quests;
+    const quests = this.state.profile.quests;
     const exists = hasOwn(quests, name);
     if (t.subPath.length === 0) {
       if (w.op === 'remove') {
@@ -2820,7 +2693,7 @@ class TreeTranslator {
     const title = t.segments[2];
     const content = take(coerceText(w.value), ctx.notes);
     if (!content) throw new Drop('新闻正文不能为空');
-    const known = (this.shadow.profile.news ?? []).some((n) => n.category === column);
+    const known = (this.state.profile.news ?? []).some((n) => n.category === column);
     const category = column === UNCATEGORIZED_NEWS_COLUMN && !known ? '' : column;
     if (t.entry?.exists) ctx.notes.push('新闻只增不删，已追加一条同标题新闻');
     ctx.value = content;
@@ -2839,7 +2712,7 @@ class TreeTranslator {
     if (vp.length < 2) throw new Drop(NAMESPACE_ROOT_REASON);
     const path = vp.join('.');
     const target = `variables.${path}`;
-    const vars = this.shadow.profile.variables;
+    const vars = this.state.profile.variables;
     switch (w.op) {
       case 'replace':
         this.commit([{ op: 'set_variable', target, value: jsonClone(w.value) }]);
@@ -2947,7 +2820,7 @@ function setPlain(obj: Row, segs: readonly string[], value: unknown, remove: boo
 type AscensionEntryKind = 'elements' | 'authority' | 'law';
 
 /**
- * 登神长阶的树形 → 内核形状（「影子现值 + 本条」重建整份，§5.3）。
+ * 登神长阶的树形 → 内核形状（「工作状态现值 + 本条」重建整份，§5.3）。
  * 没被这次写入改动的条目原样保留内核数据（含旧的 `effects` 字符串数组）。
  */
 function treeToAscension(
