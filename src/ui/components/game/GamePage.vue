@@ -12,6 +12,7 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useAudioStore } from '../../stores/audio-store';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
+import { useStateEditStore } from '../../stores/state-edit-store';
 import {
   GamePipeline,
   waitForGameSaveIdle,
@@ -67,6 +68,7 @@ const apiSources = useApiSourceStore();
 const audio = useAudioStore();
 const sceneImages = useSceneImageStore();
 const imagePresets = useImagePresetStore();
+const stateEdit = useStateEditStore();
 /** 角色外貌的会话副本（D56）—— 基线在 imagePresets，这一份随存档走 */
 const charAppearance = useCharacterAppearanceStore();
 const s = settings.settings;
@@ -403,7 +405,7 @@ onBeforeUnmount(() => {
   }
   game.invalidatePendingLoads();
   // 变量修改器的撤销栈只在内存里，离开游戏页即清空（设计 §11.4）
-  game.clearStateEditUndo?.();
+  stateEdit.clearStateEditUndo();
   window.removeEventListener('keydown', onKeyDown);
   window.removeEventListener('keydown', onEscapeCapture, true);
   // 🔴 COR-02（2026-08-09 审查）：**先 abort 再清 isGenerating**。

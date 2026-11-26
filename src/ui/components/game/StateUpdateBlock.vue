@@ -6,7 +6,7 @@
  * （照 ActionPanel.vue 的先例）。展开后是纠正后的 op 列表：路径、动作、前值 → 后值、状态标记。
  *
  * - 最新一楼可改（逐条补差，§12.3）：改值 / 撤销 / 丢弃行改好后重新应用 / 新增一条。
- *   点后试算（`game.planStateUpdateRevision`）→ 预览 → 确认 → `game.commitStateUpdateRevision`
+ *   点后试算（`stateEdit.planStateUpdateRevision`）→ 预览 → 确认 → `stateEdit.commitStateUpdateRevision`
  *   （状态走变量修改器同一个写入口，成功后改写本楼记录）。冲突时让玩家选「仍然覆盖」或取消。
  * - 更早楼层只读，每行给「在变量修改器中打开此路径」。
  * - 「查看原文」只在调试记录里取得到本楼模型原文时出现（§9 #17：原文不落消息）。
@@ -23,6 +23,7 @@ import type {
   UpdateBlockRevision,
 } from '@engine/variables/state-tree-edit';
 import { useGameStore } from '../../stores/game-store';
+import { useStateEditStore } from '../../stores/state-edit-store';
 import { useUIStore } from '../../stores/ui-store';
 import AppButton from '../shared/AppButton.vue';
 import {
@@ -49,6 +50,7 @@ import {
 const props = defineProps<{ message: ChatMessage }>();
 
 const game = useGameStore();
+const stateEdit = useStateEditStore();
 const ui = useUIStore();
 
 const lockReason = computed(() =>
@@ -156,7 +158,7 @@ async function runPlan(force: boolean) {
   if (!revision) return;
   s.busy = true;
   try {
-    const plan = await game.planStateUpdateRevision(props.message.id, s.index, revision, {
+    const plan = await stateEdit.planStateUpdateRevision(props.message.id, s.index, revision, {
       force,
     });
     if (session.value !== s) return;
@@ -186,7 +188,7 @@ async function confirm() {
   if (!s || s.busy || s.plan?.kind !== 'ok' || !s.revision) return;
   s.busy = true;
   try {
-    const result = await game.commitStateUpdateRevision(
+    const result = await stateEdit.commitStateUpdateRevision(
       props.message.id,
       s.index,
       s.revision,
@@ -233,7 +235,7 @@ function needsValueInput(s: Session): boolean {
 }
 
 function openInEditor(row: UpdateRowView) {
-  game.openStateEditorAt(editorJumpPath(row));
+  stateEdit.openStateEditorAt(editorJumpPath(row));
 }
 
 function formatMinutes(min: number): string {

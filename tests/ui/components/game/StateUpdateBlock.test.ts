@@ -88,6 +88,11 @@ function makeGame() {
     isRewriting: false,
     isInCombat: false,
     agentLogHistory: [] as unknown[],
+  });
+}
+
+function makeStateEdit() {
+  return reactive({
     planStateUpdateRevision: vi.fn(async (): Promise<unknown> => ({
       kind: 'ok',
       ops: [{ op: 'delta', path: '/主角/生命值/当前', value: 20 }],
@@ -120,8 +125,12 @@ function makeGame() {
 }
 
 let game: ReturnType<typeof makeGame>;
+let stateEdit: ReturnType<typeof makeStateEdit>;
 
 vi.mock('../../../../src/ui/stores/game-store', () => ({ useGameStore: () => game }));
+vi.mock('../../../../src/ui/stores/state-edit-store', () => ({
+  useStateEditStore: () => stateEdit,
+}));
 vi.mock('../../../../src/ui/stores/ui-store', () => ({ useUIStore: () => ({ toast }) }));
 
 function mountBlock(id = 'a2') {
@@ -131,6 +140,7 @@ function mountBlock(id = 'a2') {
 
 beforeEach(() => {
   game = makeGame();
+  stateEdit = makeStateEdit();
   toast.mockReset();
 });
 
@@ -183,7 +193,7 @@ describe('StateUpdateBlock', () => {
     await input.setValue('-10');
     await wrapper.get('[data-testid="state-update-plan"]').trigger('click');
     await flushPromises();
-    expect(game.planStateUpdateRevision).toHaveBeenCalledWith(
+    expect(stateEdit.planStateUpdateRevision).toHaveBeenCalledWith(
       'a2',
       0,
       { kind: 'edit', value: -10 },
@@ -195,7 +205,7 @@ describe('StateUpdateBlock', () => {
 
     await wrapper.get('[data-testid="state-update-confirm"]').trigger('click');
     await flushPromises();
-    expect(game.commitStateUpdateRevision).toHaveBeenCalledWith(
+    expect(stateEdit.commitStateUpdateRevision).toHaveBeenCalledWith(
       'a2',
       0,
       { kind: 'edit', value: -10 },
@@ -216,12 +226,12 @@ describe('StateUpdateBlock', () => {
     await wrapper.get('[data-testid="state-update-input"]').setValue('很多');
     await wrapper.get('[data-testid="state-update-plan"]').trigger('click');
     await flushPromises();
-    expect(game.planStateUpdateRevision).not.toHaveBeenCalled();
+    expect(stateEdit.planStateUpdateRevision).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain('请输入数字');
   });
 
   it('冲突：提示现值与记录不符，「仍然覆盖」以 force 重新试算', async () => {
-    game.planStateUpdateRevision.mockResolvedValueOnce({
+    stateEdit.planStateUpdateRevision.mockResolvedValueOnce({
       kind: 'conflict',
       path: '/主角/生命值/当前',
       expected: 270,
@@ -239,7 +249,7 @@ describe('StateUpdateBlock', () => {
     expect(conflict.text()).toContain('现值 150');
     await wrapper.get('[data-testid="state-update-force"]').trigger('click');
     await flushPromises();
-    expect(game.planStateUpdateRevision).toHaveBeenLastCalledWith(
+    expect(stateEdit.planStateUpdateRevision).toHaveBeenLastCalledWith(
       'a2',
       0,
       { kind: 'revert' },
@@ -257,7 +267,7 @@ describe('StateUpdateBlock', () => {
     await wrapper.get('[data-testid="state-update-input"]').setValue('50');
     await wrapper.get('[data-testid="state-update-plan"]').trigger('click');
     await flushPromises();
-    expect(game.planStateUpdateRevision).toHaveBeenCalledWith(
+    expect(stateEdit.planStateUpdateRevision).toHaveBeenCalledWith(
       'a2',
       null,
       { kind: 'append', op: { op: 'replace', path: '/主角/金钱', value: 50 } },
@@ -279,7 +289,7 @@ describe('StateUpdateBlock', () => {
     expect(wrapper.find('[data-testid="state-update-append"]').exists()).toBe(false);
     const jump = wrapper.get('[data-testid="state-update-open-editor"]');
     await jump.trigger('click');
-    expect(game.openStateEditorAt).toHaveBeenCalledWith('/主角/金钱');
+    expect(stateEdit.openStateEditorAt).toHaveBeenCalledWith('/主角/金钱');
   });
 
   it('查看原文：调试记录里没有就不显示；有就按需展开', async () => {
