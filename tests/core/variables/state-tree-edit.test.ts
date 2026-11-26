@@ -1,15 +1,16 @@
 /**
  * 玩家编辑与更新块修订的规划层（状态树协议 T10，§11.2–11.4、§12.3、§7.2「更新块补差」）
  *
- * 纯函数：试算、撤销 op、补差规划、记录改写。落库往返见 tests/core/state/state-manager.player-edit.test.ts。
+ * 纯函数：试算、单行反向 op（更新块撤销）、补差规划、记录改写、撤销凭据指纹。落库往返见 tests/core/state/state-manager.player-edit.test.ts。
  */
 
 import { describe, expect, it } from 'vitest';
 import type { StateUpdateOpRecord, StateUpdateRecord } from '../../../src/core/types/types';
 import {
   applyRevisionToRecord,
-  buildUndoOps,
+  inverseOpsOf,
   planUpdateBlockRevision,
+  playerEditFingerprint,
   previewPlayerEdit,
   revisionBlockReason,
   type PlayerEditOp,
@@ -88,40 +89,44 @@ describe('previewPlayerEdit', () => {
   });
 });
 
-describe('buildUndoOps', () => {
-  it('增量按实际前后差反向；覆盖还原前值；逆序', () => {
-    const ops = buildUndoOps([
-      rec({ path: '/主角/生命值/当前', op: 'delta', value: -500, before: 300, after: 0 }),
-      rec({ path: '/主角/金钱', op: 'replace', value: 5, before: 120, after: 5 }),
-    ]);
-    expect(ops).toEqual([
-      { op: 'replace', path: '/主角/金钱', value: 120 },
-      { op: 'delta', path: '/主角/生命值/当前', value: 300 },
-    ]);
+describe('inverseOpsOf（更新块单行撤销）', () => {
+  it('增量按实际前后差反向；覆盖还原前值', () => {
+    expect(
+      inverseOpsOf(
+        rec({ path: '/主角/生命值/当前', op: 'delta', value: -500, before: 300, after: 0 }),
+      ),
+    ).toEqual([{ op: 'delta', path: '/主角/生命值/当前', value: 300 }]);
+    expect(
+      inverseOpsOf(rec({ path: '/主角/金钱', op: 'replace', value: 5, before: 120, after: 5 })),
+    ).toEqual([{ op: 'replace', path: '/主角/金钱', value: 120 }]);
   });
 
   it('add ↔ remove；被删条目按前值重建并剥只读键', () => {
-    const ops = buildUndoOps([
-      rec({ path: '/主角/背包/火把', op: 'add', value: { 数量: 1 }, after: { 数量: 1 } }),
-      rec({
-        path: '/关系列表/布兰',
-        op: 'remove',
-        before: { 档案: { _年龄: 20, 种族: '人类' }, 成长: { 等级: 3, _属性: { 力量: 5 } } },
-      }),
-    ]);
-    expect(ops).toEqual([
+    expect(
+      inverseOpsOf(
+        rec({ path: '/主角/背包/火把', op: 'add', value: { 数量: 1 }, after: { 数量: 1 } }),
+      ),
+    ).toEqual([{ op: 'remove', path: '/主角/背包/火把' }]);
+    expect(
+      inverseOpsOf(
+        rec({
+          path: '/关系列表/布兰',
+          op: 'remove',
+          before: { 档案: { _年龄: 20, 种族: '人类' }, 成长: { 等级: 3, _属性: { 力量: 5 } } },
+        }),
+      ),
+    ).toEqual([
       {
         op: 'add',
         path: '/关系列表/布兰',
         value: { 档案: { 种族: '人类' }, 成长: { 等级: 3, 属性: { 力量: 5 } } },
       },
-      { op: 'remove', path: '/主角/背包/火把' },
     ]);
   });
 
   it('move 反向：从装备移出的穿回原槽', () => {
     expect(
-      buildUndoOps([
+      inverseOpsOf(
         rec({
           path: '/主角/背包/长剑',
           from: '/主角/装备/长剑',
@@ -129,26 +134,46 @@ describe('buildUndoOps', () => {
           before: { 位置: '武器', 数量: 1 },
           after: { 数量: 1 },
         }),
-      ]),
+      ),
     ).toEqual([{ op: 'move', from: '/主角/背包/长剑', path: '/主角/装备/长剑', value: '武器' }]);
   });
 
   it('丢弃行、折叠兄弟行、时间行不产 op', () => {
-    expect(
-      buildUndoOps([
-        rec({ path: '/主角/金钱', op: 'replace', value: 1, status: '已丢弃', before: 1, after: 1 }),
-        rec({
-          path: '/主角/背包/长剑',
-          op: 'remove',
-          status: '已纠正',
-          note: '已与第 2 条折叠成 move',
-          foldedInto: 1,
-          foldKind: 'fold',
-          before: { 数量: 1 },
-        }),
-        rec({ path: '/世界/时间', op: 'delta', value: 30 }),
-      ]),
-    ).toEqual([]);
+    const rows = [
+      rec({ path: '/主角/金钱', op: 'replace', value: 1, status: '已丢弃', before: 1, after: 1 }),
+      rec({
+        path: '/主角/背包/长剑',
+        op: 'remove',
+        status: '已纠正',
+        note: '已与第 2 条折叠成 move',
+        foldedInto: 1,
+        foldKind: 'fold',
+        before: { 数量: 1 },
+      }),
+      rec({ path: '/世界/时间', op: 'delta', value: 30 }),
+    ];
+    for (const r of rows) expect(inverseOpsOf(r), r.path).toEqual([]);
+  });
+});
+
+describe('playerEditFingerprint（撤销凭据指纹，审查 R4）', () => {
+  it('键序无关、忽略 undefined 字段；值变了指纹就变', () => {
+    const a = playerEditFingerprint({
+      characters: { x: { name: '甲', hp: 1, note: undefined } as never },
+    });
+    const b = playerEditFingerprint({ characters: { x: { hp: 1, name: '甲' } as never } });
+    expect(a).toBe(b);
+    expect(playerEditFingerprint({ characters: { x: { hp: 2, name: '甲' } as never } })).not.toBe(
+      a,
+    );
+  });
+
+  it('角色不存在（null）与档案 / 记录是否参与，都会反映在指纹里', () => {
+    const none = playerEditFingerprint({ characters: { x: null } });
+    expect(none).not.toBe(playerEditFingerprint({ characters: {} }));
+    expect(playerEditFingerprint({ characters: {}, stateUpdates: null })).not.toBe(
+      playerEditFingerprint({ characters: {} }),
+    );
   });
 });
 
@@ -466,7 +491,7 @@ describe('审查修复：把条目减没的那条可撤销、可改值（第 5 �
 
   it('撤销：按条目整对象前值 add 回来', () => {
     const r = usedUp();
-    expect(buildUndoOps([r])).toEqual([
+    expect(inverseOpsOf(r)).toEqual([
       { op: 'add', path: '/主角/背包/治疗药水', value: expect.objectContaining({ 数量: 3 }) },
     ]);
     const plan = planUpdateBlockRevision(r, { kind: 'revert' }, noPotion());
@@ -513,9 +538,7 @@ describe('审查修复：变量数组插入的撤销（a）', () => {
   it('追加到末尾：记录父数组前后值，撤销把父数组整份写回（不再 replace …/-）', () => {
     const r = aiRecords([{ op: 'add', path: '/变量/user/线索/-', value: '地图' }])[0];
     expect(r).toMatchObject({ before: ['钥匙'], after: ['钥匙', '地图'] });
-    expect(buildUndoOps([r])).toEqual([
-      { op: 'replace', path: '/变量/user/线索', value: ['钥匙'] },
-    ]);
+    expect(inverseOpsOf(r)).toEqual([{ op: 'replace', path: '/变量/user/线索', value: ['钥匙'] }]);
     const plan = planUpdateBlockRevision(r, { kind: 'revert' }, withClues(['钥匙', '地图']));
     expect(plan.kind).toBe('ok');
     if (plan.kind !== 'ok') return;
@@ -527,9 +550,7 @@ describe('审查修复：变量数组插入的撤销（a）', () => {
   it('按下标插入：同样记父数组，撤销写回插入前', () => {
     const r = aiRecords([{ op: 'add', path: '/变量/user/线索/0', value: '地图' }])[0];
     expect(r).toMatchObject({ before: ['钥匙'], after: ['地图', '钥匙'] });
-    expect(buildUndoOps([r])).toEqual([
-      { op: 'replace', path: '/变量/user/线索', value: ['钥匙'] },
-    ]);
+    expect(inverseOpsOf(r)).toEqual([{ op: 'replace', path: '/变量/user/线索', value: ['钥匙'] }]);
     expect(planUpdateBlockRevision(r, { kind: 'revert' }, withClues(['地图', '钥匙'])).kind).toBe(
       'ok',
     );
@@ -577,7 +598,7 @@ describe('审查修复：叠到已穿戴物品上的背包 add（c）', () => {
       after: 3,
       status: '已纠正',
     });
-    expect(buildUndoOps([r])).toEqual([{ op: 'delta', path: '/主角/装备/旧护符/数量', value: -1 }]);
+    expect(inverseOpsOf(r)).toEqual([{ op: 'delta', path: '/主角/装备/旧护符/数量', value: -1 }]);
     const s = snapWithPlayer((p) => {
       p.inventory.find((i) => i.name === '旧护符')!.quantity = 3;
     });
@@ -592,7 +613,7 @@ describe('审查修复：叠到已穿戴物品上的背包 add（c）', () => {
   it('已穿戴的单件（投影省略数量 1）：撤销同样只减 1，不删整件', () => {
     const r = aiRecords([{ op: 'add', path: '/主角/背包/长剑', value: { 数量: 1 } }])[0];
     expect(r).toMatchObject({ path: '/主角/装备/长剑/数量', op: 'delta', after: 2 });
-    expect(buildUndoOps([r])).toEqual([{ op: 'delta', path: '/主角/装备/长剑/数量', value: -1 }]);
+    expect(inverseOpsOf(r)).toEqual([{ op: 'delta', path: '/主角/装备/长剑/数量', value: -1 }]);
   });
 });
 

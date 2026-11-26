@@ -322,10 +322,7 @@ async function confirmCommit() {
     pending.value = null;
     discardDrafts();
     await reload();
-    ui.toast(
-      result.undo.length > 0 ? '修改已提交' : '修改已提交（这次修改无法自动撤销）',
-      'success',
-    );
+    ui.toast('修改已提交', 'success');
   } finally {
     committing.value = false;
   }

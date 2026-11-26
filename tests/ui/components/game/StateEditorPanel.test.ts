@@ -21,7 +21,7 @@ function makeGame() {
     isGenerating: false,
     isRewriting: false,
     isInCombat: false,
-    stateEditUndoStack: [] as { label: string; undo: unknown[] }[],
+    stateEditUndoStack: [] as { label: string; undo: unknown }[],
     stateEditorFocusPath: null as string | null,
     consumeStateEditorFocus: vi.fn((): string | null => {
       const path = game.stateEditorFocusPath;
@@ -35,13 +35,13 @@ function makeGame() {
     commitStateEdit: vi.fn(async (_ops: unknown[], label: string) => {
       game.stateEditUndoStack.push({
         label,
-        undo: [{ op: 'replace', path: '/主角/生命值/当前', value: 300 }],
+        undo: { saveId: 's', characters: {}, fingerprint: '{}' },
       });
-      return { ok: true, records: [], normalized: [], undo: [{}] };
+      return { ok: true, records: [], normalized: [], undo: {} };
     }),
     undoLastStateEdit: vi.fn(async () => {
       game.stateEditUndoStack.pop();
-      return { ok: true, records: [], normalized: [], undo: [] };
+      return { ok: true };
     }),
   });
 }
@@ -192,7 +192,7 @@ describe('StateEditorPanel', () => {
     expect(wrapper.get('[data-testid="state-editor-undo"]').attributes('disabled')).toBeDefined();
     game.stateEditUndoStack.push({
       label: '修改 /主角/金钱',
-      undo: [{ op: 'replace', path: '/主角/金钱', value: 120 }],
+      undo: { saveId: 's', characters: {}, fingerprint: '{}' },
     });
     await flushPromises();
     expect(wrapper.get('.se-foot').text()).toContain('上一次：修改 /主角/金钱');

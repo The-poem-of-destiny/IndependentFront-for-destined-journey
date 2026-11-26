@@ -336,15 +336,11 @@ describe('锁定与撤销', () => {
     expect(stateEditorLockReason({ ...idle, isInCombat: true })).toContain('战斗');
   });
 
-  it('撤销只看栈顶；不可撤销的修改压在栈顶时给原因', () => {
-    expect(undoAvailability([]).canUndo).toBe(false);
-    const op = { op: 'replace' as const, path: '/主角/金钱', value: 1 };
-    expect(undoAvailability([{ label: 'a', undo: [op] }])).toEqual({ canUndo: true, reason: '' });
-    const blocked = undoAvailability([
-      { label: 'a', undo: [op] },
-      { label: 'b', undo: [] },
-    ]);
-    expect(blocked.canUndo).toBe(false);
-    expect(blocked.reason).toContain('无法自动撤销');
+  it('撤销只看栈顶：栈空不可点并给原因，有凭据即可点（快照还原对任何修改都成立）', () => {
+    const empty = undoAvailability([]);
+    expect(empty.canUndo).toBe(false);
+    expect(empty.reason).toContain('还没有可撤销的修改');
+    const token = { saveId: 's', characters: {}, fingerprint: '{}' };
+    expect(undoAvailability([{ label: 'a', undo: token }])).toEqual({ canUndo: true, reason: '' });
   });
 });

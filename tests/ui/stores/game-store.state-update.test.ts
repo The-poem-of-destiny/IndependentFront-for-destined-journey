@@ -158,6 +158,41 @@ describe('game-store 更新块修订', () => {
     expect(shown?.content).toBe('第 2 楼正文');
   });
 
+  it('修订后从修改器撤销：状态与本楼记录一并还原（库与展示副本），再修订该行不报冲突', async () => {
+    const store = await seedStore();
+    const revision = { kind: 'edit' as const, value: 5 };
+    const plan = await store.planStateUpdateRevision('a2', 0, revision);
+    if (plan.kind !== 'ok') throw new Error(plan.kind);
+    expect((await store.commitStateUpdateRevision('a2', 0, revision, plan.ops, 'x')).ok).toBe(true);
+    expect(await heroMoney()).toBe(15);
+
+    const undo = await store.undoLastStateEdit();
+    expect(undo.ok).toBe(true);
+    expect(await heroMoney()).toBe(30);
+    expect(store.stateEditUndoStack).toHaveLength(0);
+    expect((await getDatabase().messages.get('a2'))?.stateUpdates).toEqual(LATEST);
+    expect(store.messages.find((m) => m.id === 'a2')?.stateUpdates).toEqual(LATEST);
+
+    const again = await store.planStateUpdateRevision('a2', 0, revision);
+    expect(again.kind).toBe('ok');
+  });
+
+  it('本楼消息没有记录时修订整批失败：状态不变、不入撤销栈', async () => {
+    const store = await seedStore();
+    await getDatabase().messages.update('a2', { stateUpdates: undefined });
+    const result = await store.commitStateUpdateRevision(
+      'a2',
+      0,
+      { kind: 'revert' },
+      [{ op: 'delta', path: '/主角/金钱', value: -20 }],
+      'x',
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reasons[0]).toContain('记录写回失败');
+    expect(await heroMoney()).toBe(30);
+    expect(store.stateEditUndoStack).toHaveLength(0);
+  });
+
   it('新增一条：追加在末尾，不动原有下标', async () => {
     const store = await seedStore();
     const revision = {
