@@ -292,6 +292,59 @@ describe('影子后值 = 真实落库：多 op 序列', () => {
     );
   });
 
+  // ===== 档案域（审查报告 R5c：工作状态改走 patch-reducer 的档案域变换）=====
+
+  // 数组末尾追加（`/-`）的记录路径带 `-` 段，投影上读不出，故用整值写数组代替
+  it('档案域·变量：整值写 → 增量 → 写数组 → 搬移 → 删除 → 新建', async () => {
+    await expectParity([
+      { op: 'replace', path: '/变量/sys/计数', value: 5 },
+      { op: 'delta', path: '/变量/sys/计数', value: 2 },
+      { op: 'replace', path: '/变量/user/线索', value: ['钥匙', '地图'] },
+      { op: 'move', from: '/变量/sys/计数', path: '/变量/user/计数' },
+      { op: 'delta', path: '/变量/user/计数', value: -10 },
+      { op: 'remove', path: '/变量/user/线索' },
+      { op: 'add', path: '/变量/sys/旗标', value: { 开门: true } },
+    ]);
+  });
+
+  it('档案域·任务与命运点：新建 → 改状态 / 关注度 / 进展 → 删旧任务；命运点增 → 整值 → 扣', async () => {
+    await expectParity([
+      { op: 'add', path: '/任务列表/护送商队', value: { 目标: '护送到北境', 关注度: '中' } },
+      { op: 'replace', path: '/任务列表/护送商队/状态', value: '已完成' },
+      { op: 'replace', path: '/任务列表/护送商队/关注度', value: '高' },
+      { op: 'replace', path: '/任务列表/寻找钥匙/进展', value: '钥匙在井底' },
+      { op: 'remove', path: '/任务列表/寻找钥匙' },
+      { op: 'delta', path: '/命运点数', value: 5 },
+      { op: 'replace', path: '/命运点数', value: 10 },
+      { op: 'delta', path: '/命运点数', value: -3 },
+    ]);
+  });
+
+  it('档案域·好感、改名迁好感与新闻：增减 → 改名 → 超界被钳 → 新闻两栏', async () => {
+    await expectParity([
+      { op: 'delta', path: '/关系列表/布兰/好感度', value: -45 },
+      { op: 'delta', path: '/关系列表/卡拉/好感度', value: 7 },
+      { op: 'move', from: '/关系列表/卡拉', path: '/关系列表/卡拉丽' },
+      { op: 'replace', path: '/关系列表/卡拉丽/好感度', value: 200 },
+      { op: 'delta', path: '/关系列表/布兰/好感度', value: -300 },
+      { op: 'add', path: '/新闻/王都/号外', value: '城门今夜关闭' },
+      { op: 'add', path: '/新闻/未分类/快讯', value: '商队抵达' },
+    ]);
+  });
+
+  it('档案域·建人与删人：新人物 → 好感 → 改名 → 删掉另一个 NPC', async () => {
+    await expectParity(
+      [
+        ...SMITH_OPS.slice(0, 1),
+        { op: 'replace', path: '/关系列表/铁匠/好感度', value: 20 },
+        { op: 'move', from: '/关系列表/铁匠', path: '/关系列表/老铁匠' },
+        { op: 'delta', path: '/关系列表/老铁匠/好感度', value: 5 },
+        { op: 'remove', path: '/关系列表/史莱姆' },
+      ],
+      [zeroCapMonster()],
+    );
+  });
+
   it('装备改名后续写：改名 → 写描述 / 耐久', async () => {
     await expectParity([
       { op: 'move', from: '/主角/装备/长剑', path: '/主角/装备/宝剑' },

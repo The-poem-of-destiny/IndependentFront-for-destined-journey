@@ -49,13 +49,22 @@ import {
   deleteMessagesBySaveId,
   getDatabase,
 } from '../persistence/database';
-import { getVar, setVar, delVar, insertVar, applyPathOps } from '../variables/var-resolver';
-// 角色域补丁的纯变换（审查报告 R5b）：唯一实现在 patch-reducer，翻译层影子共用；本文件只「读 → 变换 → 写」
+import { getVar, setVar, applyPathOps } from '../variables/var-resolver';
+// 补丁的纯变换（审查报告 R5b 角色域 / R5c 档案域）：唯一实现在 patch-reducer，翻译层工作状态与
+// 建补丁预演共用；本文件只「读 → 变换 → 写」，I/O 与副作用（地图钩子、saveId、账目落款）留在这里
 import {
-  prepareNewCharacter,
   readTransferItemRequest,
+  reduceAddCharacter,
+  reduceAddNews,
+  reduceAffectionPatch,
   reduceCharacterPatch,
+  reduceFatePointPatch,
+  reduceQuestPatch,
+  reduceRemoveCharacter,
+  reduceRenameCharacter,
   reduceTransferItem,
+  reduceVariablePatch,
+  resolveCharacterTarget,
   type ReduceResult,
 } from './patch-reducer';
 import { getEngineSettings } from '../runtime/engine-settings';
@@ -92,11 +101,7 @@ import { storyMemorySourceMatches, storyTurnGameTimeRange } from '../memory/stor
 // 唯一可能成环的那个（沙盒会回调状态层），单独验证后再说。
 import {
   getProfile,
-  addFP,
-  spendFP,
   updateProfile,
-  setQuestInPlace,
-  removeQuestInPlace,
   getMapFlags,
   updateMapFlags,
   setMapFlagsInPlace,
@@ -108,7 +113,6 @@ import {
   updateRandomEventFlags,
   setRandomEventFlagsInPlace,
 } from './save-profile';
-import { clampAffection } from '../character/affection-system';
 import { advanceTime, getSeason, toEpochMinutes } from '../time/time-system';
 // 地图 v1 接线（设计 §5 接线表）：落位 / 天气断言 / 在途旗三条钩子的依赖。
 // 全是纯函数叶 + 一条注入缝（`map-runtime`），没有一个会读注册表或碰 Dexie ——
@@ -162,7 +166,6 @@ import {
 import { buildRandomEventRollContext } from '../random-events/random-event-snapshot';
 import type { RandomEventRollContext } from '../types/types-random-events';
 import type { EjsVarsDiff } from '../ejs/ejs-vars-diff';
-import { normalizeQuestStatus } from '../content/field-enums';
 
 // ========== Types ==========
 
@@ -567,7 +570,8 @@ export class StateManager {
   }
 
   /**
-   * 命运点补丁（`delta_variable profile.fp`）走 FP 账务（addFP / spendFP），真源是 `SaveProfile.fp`。
+   * 命运点补丁（`delta_variable profile.fp`）走 FP 账务，真源是 `SaveProfile.fp`。
+   * 增减与记账的纯变换在 patch-reducer（`reduceFatePointPatch`），账目 id / 时间戳在这里落款。
    *
    * `clampSpend`：AI 来源（commitAiPatches / commitDirectTurn）扣超余额时钳到 0（A9，
    * 旧协议与 Agent 模式同样受保护）；领域命令与玩家修改传 false，不足照旧抛错。
@@ -578,14 +582,13 @@ export class StateManager {
     clampSpend: boolean,
   ): Promise<GameEvent> {
     this.validatePatch(patch);
-    const amount = patch.amount!;
-    if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
     const profile = await this.readProfile();
-    if (amount >= 0) await addFP(profile, amount, reason);
-    else {
-      const balance = Number.isFinite(profile.fp) ? Math.max(0, profile.fp) : 0;
-      await spendFP(profile, clampSpend ? Math.min(-amount, balance) : -amount, reason);
-    }
+    const before = profile.fp;
+    reduceFatePointPatch(profile, patch, {
+      clampSpend,
+      ledger: { reason, id: crypto.randomUUID(), timestamp: Date.now() },
+    });
+    if (profile.fp !== before) await this.persistProfile(profile);
     return this.createEvent('variable_change', patch);
   }
 
@@ -976,7 +979,7 @@ export class StateManager {
           try {
             // 🔴 命运点数(FP) 的真源是 `SaveProfile.fp`（**不是**变量路径、也不在角色身上）：
             //    `delta_variable profile.fp` 必须走既有 FP 账务（addFP/spendFP），否则会被
-            //    `applyDeltaVariable` 当成 `variables.profile.fp` 写进伪路径 —— AI 的
+            //    `applyVariablePatch` 当成 `variables.profile.fp` 写进伪路径 —— AI 的
             //    `fp.delta` 看起来「提交成功」，真源却纹丝不动（与 commitDomainCommand 同口径）。
             //    AI 来源扣超余额时钳到 0（A9），不抛错丢条。
             if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
@@ -1217,68 +1220,20 @@ export class StateManager {
    * （防御子路径写法 'characters.X.skills'，#11 Code 侧防御）
    */
   private async resolveCharTarget(target: string): Promise<CharacterState> {
-    const raw = target.startsWith('characters.') ? target.slice('characters.'.length) : target;
-    const key = raw.split('.')[0];
-    if (!key) throw new Error(`无效的 character target: ${target}`);
-    return this.resolveCharacter(key);
+    // 剥前缀与取首段的口径住 patch-reducer（翻译层工作状态用同一份）
+    return resolveCharacterTarget(await this.readCharacters(), target);
   }
 
   // ========== Patch Handlers ==========
 
-  private async applySetVariable(patch: StatePatch): Promise<GameEvent> {
-    // 读取当前 save 的 variables（真源: SaveProfile.variables，M5）
-    const vars = await this.getCurrentVariables();
-    const path = patch.target.startsWith('variables.')
-      ? patch.target.slice('variables.'.length)
-      : patch.target;
-    const newVars = setVar(vars, path, patch.value);
-    await this.persistVariables(newVars);
-    return this.createEvent('variable_change', patch);
-  }
-
-  private async applyDeltaVariable(patch: StatePatch): Promise<GameEvent> {
-    const vars = await this.getCurrentVariables();
-    const path = patch.target.startsWith('variables.')
-      ? patch.target.slice('variables.'.length)
-      : patch.target;
-    const current = getVar(vars, path);
-    const newValue = (typeof current === 'number' ? current : 0) + (patch.amount ?? 0);
-    const newVars = setVar(vars, path, newValue);
-    await this.persistVariables(newVars);
-    return this.createEvent('variable_change', patch);
-  }
-
-  private async applyRemoveVariable(patch: StatePatch): Promise<GameEvent> {
-    const vars = await this.getCurrentVariables();
-    const path = patch.target.startsWith('variables.')
-      ? patch.target.slice('variables.'.length)
-      : patch.target;
-    const newVars = delVar(vars, path);
-    await this.persistVariables(newVars);
-    return this.createEvent('variable_change', patch);
-  }
-
-  private async applyMoveVariable(patch: StatePatch): Promise<GameEvent> {
-    const vars = await this.getCurrentVariables();
-    const fromPath = patch.target.startsWith('variables.')
-      ? patch.target.slice('variables.'.length)
-      : patch.target;
-    const toPath = patch.metadata?.toPath as string;
-    if (!toPath) throw new Error('move_variable 需要 metadata.toPath');
-    const value = getVar(vars, fromPath);
-    let newVars = delVar(vars, fromPath);
-    newVars = setVar(newVars, toPath, value);
-    await this.persistVariables(newVars);
-    return this.createEvent('variable_change', patch);
-  }
-
-  private async applyInsertVariable(patch: StatePatch): Promise<GameEvent> {
-    const vars = await this.getCurrentVariables();
-    const path = patch.target.startsWith('variables.')
-      ? patch.target.slice('variables.'.length)
-      : patch.target;
-    const newVars = insertVar(vars, path, patch.value, patch.metadata?.index as number);
-    await this.persistVariables(newVars);
+  /**
+   * set / delta / remove / move / insert_variable（真源 SaveProfile.variables，M5）：
+   * 读 profile → `reduceVariablePatch` → 落库。按字面路径写（命运点由调用方先分流）。
+   */
+  private async applyVariablePatch(patch: StatePatch): Promise<GameEvent> {
+    const profile = await this.readProfile();
+    reduceVariablePatch(profile, patch);
+    await this.persistProfile(profile);
     return this.createEvent('variable_change', patch);
   }
 
@@ -1416,23 +1371,17 @@ export class StateManager {
     const character = patch.value as CharacterState;
     if (!character?.id) throw new Error('缺少角色数据');
 
-    // 名字是逻辑键（铁律1）: 非空必填（终审修复）
-    const name = typeof character.name === 'string' ? character.name.trim() : '';
-    if (!name) throw new Error('add_character 需要非空 name（名字是逻辑键，铁律1）');
-
-    // 同存档同名查重（排除同 id 重放 — Dexie put 幂等覆盖无害），与 rename_character 查重口径一致（终审修复）
-    // 查的是缓存那份：同一次提交里连着加两个同名角色，第二个必须被这里拦下（不变式③）
+    // 校验（非空名字、同存档同名查重 —— 查的是缓存那份，同一次提交里连着加两个同名角色，
+    // 第二个必须被拦下，不变式③）与人物内容整理（年龄锚点、§5.6 自带额外的上限规整）都在
+    // patch-reducer 一处，翻译层工作状态建人走同一份。作用域外读来的是一份新数组，追加进去无害。
     const chars = await this.readCharacters();
-    const clash = chars.find((c) => c.name === name && c.id !== character.id);
-    if (clash) throw new Error(`同名角色已存在: ${name}`);
+    const gameTime = (await this.readProfile()).gameTime;
+
+    reduceAddCharacter(chars, character, gameTime);
 
     // 铁律3: saveId 是账务字段，由 Code 无条件注入，不信任上游 patch 构造方 (#8/M2硬前置②)
     // M6 T2: customFields.saveId 双写已退役 — saveId 单源一等字段
     character.saveId = this.saveId;
-
-    // 人物内容整理（年龄锚点实例化闸门 + §5.6 自带额外的上限规整）只在 patch-reducer 一处，
-    // 翻译层影子建人走同一份；查重与 saveId 注入是档案域的事，留在这里。
-    prepareNewCharacter(character, (await this.readProfile()).gameTime);
 
     await this.persistCharacter(character);
     return this.createEvent('system', patch);
@@ -1449,6 +1398,8 @@ export class StateManager {
   private async applyRemoveCharacter(patch: StatePatch): Promise<GameEvent> {
     // M4: resolveCharTarget 仅在本存档内按名解析，跨档命中已无可能（旧守卫随之拆除）
     const char = await this.resolveCharTarget(patch.target);
+    // 摘出缓存数组走 reducer（翻译层工作状态同一份）；删除表与落库在 dropCharacter
+    reduceRemoveCharacter(await this.readCharacters(), char);
     await this.dropCharacter(char.id);
     return this.createEvent('system', patch);
   }
@@ -1469,36 +1420,20 @@ export class StateManager {
     if (typeof patch.value !== 'string') {
       throw new Error(`rename_character value 必须是新名字符串: ${JSON.stringify(patch.value)}`);
     }
-    const newName = patch.value.trim();
-    if (!newName) throw new Error('rename_character 新名不能为空');
-
     // M4: resolveCharTarget 仅在本存档内按名解析，跨档命中已无可能（旧守卫随之拆除）
     const char = await this.resolveCharTarget(patch.target);
-    const oldName = char.name;
-
-    // 幂等: 新名等于旧名 → no-op 成功
-    if (newName === oldName) {
-      return this.createEvent('system', patch);
-    }
-
-    // 同存档新名查重（排除自身 — 自己改自己的名不算撞名，上面已 no-op 短路）
-    const chars = await this.readCharacters();
-    const clash = chars.find((c) => c.name === newName && c.id !== char.id);
-    if (clash) {
-      throw new Error(`rename_character 新名已被占用: ${newName}`);
-    }
-
-    // 改名落库
-    char.name = newName;
-    await this.persistCharacter(char);
-
-    // 按名引用迁移 — 当前仅 affections（M5/M6 新增按名引用时必须回来扩这里）
+    const characters = await this.readCharacters();
     const profile = await this.readProfile();
-    if (profile?.affections && Object.prototype.hasOwnProperty.call(profile.affections, oldName)) {
-      profile.affections[newName] = profile.affections[oldName];
-      delete profile.affections[oldName];
-      await this.persistProfile(profile);
-    }
+
+    // 校验、幂等（新名 = 旧名 no-op）、查重、改名与好感按名迁移都在 patch-reducer
+    // （M5/M6 新增按名引用时回那里扩）；这里只按结果决定落哪几样
+    const result = reduceRenameCharacter(
+      { characters, profile: { affections: profile?.affections ?? {} } },
+      char,
+      patch.value,
+    );
+    if (result.renamed) await this.persistCharacter(char);
+    if (result.affectionMoved) await this.persistProfile(profile);
 
     return this.createEvent('system', patch);
   }
@@ -1526,32 +1461,14 @@ export class StateManager {
     return this.createEvent('plot_trigger', patch);
   }
 
-  private async applyUpdateQuest(patch: StatePatch): Promise<GameEvent> {
-    const questData = patch.value as { name: string } & Record<string, any>;
-    const questName = questData.name;
-    if (!questName) throw new Error('缺少任务名称');
+  /**
+   * update_quest / remove_quest：名字校验、status 归一化（#32）与合并语义都在 patch-reducer
+   * （`reduceQuestPatch`），落库那一拍由提交出口统一做。
+   */
+  private async applyQuestPatch(patch: StatePatch): Promise<GameEvent> {
     const profile = await this.readProfile();
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
-    // M6 #52: 用 delete 剔除寻址键，替代 `{ name: _name, ...rest }` 的未用解构 + eslint-disable
-    const questFields: Record<string, any> = { ...questData };
-    delete questFields.name;
-    // #32: status 自由字符串归一化（'active'/'done' 等别名 → 中文枚举）
-    if (questFields.status !== undefined) {
-      questFields.status = normalizeQuestStatus(questFields.status);
-    }
-    // 合并语义留在 save-profile 一处（`setQuestInPlace`），落库那一拍由提交出口统一做
-    setQuestInPlace(profile, questName, questFields);
-    await this.persistProfile(profile);
-    return this.createEvent('quest_update', patch);
-  }
-
-  private async applyRemoveQuest(patch: StatePatch): Promise<GameEvent> {
-    // #40: value 形态统一为 {name} 对象（与 update_quest 对齐）
-    const questName = (patch.value as { name?: string })?.name;
-    if (!questName) throw new Error('缺少任务名称');
-    const profile = await this.readProfile();
-    if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
-    removeQuestInPlace(profile, questName);
+    reduceQuestPatch(profile, patch);
     await this.persistProfile(profile);
     return this.createEvent('quest_update', patch);
   }
@@ -1562,35 +1479,13 @@ export class StateManager {
    * set_affection / delta_affection — 好感度写入 (规范 §7)
    *
    * target 形态: `affections.<角色名>` — 名字是 profile.affections 的自由键，
-   * 不经 resolveCharacter（好感度键无需角色实体存在）。
-   * clamp 到 [-100, +100]（复用 affection-system 的 clampAffection）。
+   * 不经 resolveCharacter（好感度键无需角色实体存在）。target 校验、取整与
+   * clamp 到 [-100, +100] 都在 patch-reducer（`reduceAffectionPatch`）。
    */
   private async applyAffection(patch: StatePatch): Promise<GameEvent> {
-    // 解析 target: 必须是 affections.<名> 且名字非空
-    const AFFECTION_PREFIX = 'affections.';
-    if (!patch.target.startsWith(AFFECTION_PREFIX)) {
-      throw new Error(`${patch.op} target 必须为 affections.<角色名> 格式: ${patch.target}`);
-    }
-    const charName = patch.target.slice(AFFECTION_PREFIX.length).trim();
-    if (!charName) throw new Error(`${patch.op} target 缺少角色名: ${patch.target}`);
     const profile = await this.readProfile();
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
-
-    if (patch.op === 'set_affection') {
-      // 绝对值设置 — value 必须是数字
-      if (typeof patch.value !== 'number' || Number.isNaN(patch.value)) {
-        throw new Error(`set_affection value 必须是数字: ${JSON.stringify(patch.value)}`);
-      }
-      profile.affections[charName] = clampAffection(patch.value);
-    } else {
-      // 增量 — amount 必须是数字（与 set_affection 守卫一致，终审修复），现值缺省 0 起算，加完再 clamp（双向）
-      if (typeof patch.amount !== 'number' || Number.isNaN(patch.amount)) {
-        throw new Error(`delta_affection amount 必须是数字: ${JSON.stringify(patch.amount)}`);
-      }
-      const current = profile.affections[charName] ?? 0;
-      profile.affections[charName] = clampAffection(current + patch.amount);
-    }
-
+    reduceAffectionPatch(profile, patch);
     await this.persistProfile(profile);
     // GameEventType 无 affection 成员（M1 实测），走 'system'
     return this.createEvent('system', patch);
@@ -1600,25 +1495,13 @@ export class StateManager {
    * add_news — 追加世界新闻 (规范 §8)
    *
    * AI 只填叙事字段 {title(必), content(必), category?}；
-   * Code 补账务字段 id / publishedAt / read（铁律3）。
+   * Code 补账务字段 id / publishedAt / read（铁律3）：校验与追加在 patch-reducer，
+   * id 与发布时间在这里落款（reducer 不取随机、不读时钟）。
    */
   private async applyAddNews(patch: StatePatch): Promise<GameEvent> {
-    const newsData = patch.value as { title?: string; content?: string; category?: string };
-    if (!newsData?.title) throw new Error('add_news 缺少 title');
-    if (!newsData.content) throw new Error('add_news 缺少 content');
     const profile = await this.readProfile();
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
-
-    profile.news.push({
-      title: newsData.title,
-      content: newsData.content,
-      category: newsData.category ?? '',
-      // Code 补账务字段
-      id: crypto.randomUUID(),
-      publishedAt: Date.now(),
-      read: false,
-    });
-
+    reduceAddNews(profile, patch, { id: crypto.randomUUID(), publishedAt: Date.now() });
     await this.persistProfile(profile);
     return this.createEvent('system', patch);
   }
@@ -3416,11 +3299,11 @@ const PATCH_HANDLERS: Record<
   (sm: StateManager, patch: StatePatch) => Promise<GameEvent>
 > = {
   // 变量
-  set_variable: (sm, p) => sm['applySetVariable'](p),
-  delta_variable: (sm, p) => sm['applyDeltaVariable'](p),
-  remove_variable: (sm, p) => sm['applyRemoveVariable'](p),
-  move_variable: (sm, p) => sm['applyMoveVariable'](p),
-  insert_variable: (sm, p) => sm['applyInsertVariable'](p),
+  set_variable: (sm, p) => sm['applyVariablePatch'](p),
+  delta_variable: (sm, p) => sm['applyVariablePatch'](p),
+  remove_variable: (sm, p) => sm['applyVariablePatch'](p),
+  move_variable: (sm, p) => sm['applyVariablePatch'](p),
+  insert_variable: (sm, p) => sm['applyVariablePatch'](p),
   // 角色
   update_character: (sm, p) => sm['applyUpdateCharacter'](p),
   add_character: (sm, p) => sm['applyAddCharacter'](p),
@@ -3452,8 +3335,8 @@ const PATCH_HANDLERS: Record<
   // 记忆 / 剧情 / 任务
   add_memory: (sm, p) => sm['applyAddMemory'](p),
   update_plot_event: (sm, p) => sm['applyUpdatePlotEvent'](p),
-  update_quest: (sm, p) => sm['applyUpdateQuest'](p),
-  remove_quest: (sm, p) => sm['applyRemoveQuest'](p),
+  update_quest: (sm, p) => sm['applyQuestPatch'](p),
+  remove_quest: (sm, p) => sm['applyQuestPatch'](p),
   // 好感度（两个 op 共用，handler 内按 op 分绝对/增量）
   set_affection: (sm, p) => sm['applyAffection'](p),
   delta_affection: (sm, p) => sm['applyAffection'](p),
