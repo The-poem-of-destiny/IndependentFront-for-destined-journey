@@ -23,25 +23,24 @@
  */
 
 import { assembleCharacterState, bindGeneratedCharacter } from '../agents/entity-gen-agent';
-import {
-  applyExpFloor,
-  getTierForLevel,
-  MILESTONE_LEVELS,
-  resolveAscensionFlyup,
-  resolveLevelUps,
-  tierNameForTier,
-  xpToNextNumber,
-} from '../character/exp-table';
+import { getTierForLevel } from '../character/exp-table';
 import {
   RESOURCE_FIELDS,
-  RESOURCE_KEYS,
   baseResourceCaps,
   effectiveCap,
   readResourceCaps,
-  recomputeResourceCaps,
   type ResourceKey,
 } from '../character/resource-caps';
-import { normalizeQuestStatus, normalizeSlot, type EquipSlot } from '../content/field-enums';
+import { normalizeQuestStatus, type EquipSlot } from '../content/field-enums';
+import {
+  findByName,
+  isCharacterPatchOp,
+  prepareNewCharacter,
+  readTransferItemRequest,
+  reduceCharacterPatch,
+  reduceTransferItem,
+  resourceCeiling,
+} from '../state/patch-reducer';
 import { PatchRehearsal } from '../state/patch-rehearsal';
 import { resolveCharacterByName, validateStatePatch } from '../state/patch-rules';
 import { advanceTime } from '../time/time-system';
@@ -752,325 +751,39 @@ function statusPayload(e: StatusEffect): Partial<StatusEffect> {
 
 // ========== 影子状态：补丁的内存镜像 ==========
 
-function findByName<T extends { name: string }>(list: readonly T[], name: string): T | undefined {
-  return list.find((x) => x.name === name);
-}
-
-/** 主角经验 / 登神推进（镜像 StateManager.applyPlayerProgression）。 */
-function shadowProgression(char: CharacterState): void {
-  applyExpFloor(char);
-  const fly = resolveAscensionFlyup({ level: char.level, ascension: char.ascension });
-  if (fly.flyup && fly.nextLevel !== undefined && fly.nextTier !== undefined) {
-    const oldLevel = char.level;
-    char.level = fly.nextLevel;
-    char.tier = fly.nextTier;
-    char.tierName = tierNameForTier(fly.nextTier);
-    char.expToNext = xpToNextNumber(fly.nextLevel);
-    char.freeAttrPoints = (char.freeAttrPoints ?? 0) + (fly.nextLevel - oldLevel);
-    for (let lv = oldLevel + 1; lv <= fly.nextLevel; lv++) {
-      const milestone = MILESTONE_LEVELS[lv];
-      if (!milestone) continue;
-      const next = { ...char.attributes };
-      for (const k of Object.keys(next) as Array<keyof typeof next>)
-        next[k] = (next[k] ?? 0) + milestone.attributeBonus;
-      char.attributes = next;
-    }
-  }
-  const res = resolveLevelUps({
-    level: char.level,
-    totalExp: char.totalExp,
-    expToNext: char.expToNext,
-    freeAttrPoints: char.freeAttrPoints,
-    attributes: char.attributes,
-    tier: char.tier,
-    tierName: char.tierName,
-    ascension: char.ascension,
-  });
-  Object.assign(char, {
-    level: res.level,
-    totalExp: res.totalExp,
-    expToNext: res.expToNext,
-    freeAttrPoints: res.freeAttrPoints,
-    attributes: res.attributes,
-    tier: res.tier,
-    tierName: res.tierName,
-  });
-}
-
-/** update_character 的镜像（上限固化 → 落地 → NPC 等级推层级 → 主角推进 → 重算上限 → 钳当前值）。 */
-function shadowUpdateCharacter(char: CharacterState, value: Row, isDelta: boolean): void {
-  const before = readResourceCaps(char);
-  const prevMax = { hp: char.maxHp, mp: char.maxMp, sp: char.maxSp };
-  const prevTier = char.tier;
-  const prevAttrs = JSON.stringify(char.attributes);
-  for (const key of RESOURCE_KEYS) {
-    const bf = RESOURCE_FIELDS[key].bonus;
-    if (typeof char[bf] !== 'number') char[bf] = before[key].bonus;
-  }
-  const keys = Object.keys(value);
-  const target = char as unknown as Row;
-  for (const k of keys) {
-    if (isDelta) {
-      const cur = typeof target[k] === 'number' ? (target[k] as number) : 0;
-      target[k] = cur + (value[k] as number);
-    } else if (k === 'attributes' && isPlainObject(value[k])) {
-      char.attributes = {
-        ...char.attributes,
-        ...(value[k] as Partial<CharacterState['attributes']>),
-      };
-    } else {
-      target[k] = jsonClone(value[k]);
-    }
-  }
-  if (char.type !== 'player' && keys.includes('level') && Number.isFinite(char.level)) {
-    char.tier = getTierForLevel(char.level);
-    if (!keys.includes('tierName')) char.tierName = tierNameForTier(char.tier);
-  }
-  if (char.type === 'player' && (keys.includes('totalExp') || keys.includes('ascension'))) {
-    shadowProgression(char);
-  }
-  // 与 StateManager.finishResourceCaps 同一判据：只重算被写到上限键的项；层级 / 五维变了才三项都算，
-  // 但原上限为 0 且本次没写到它上限键的项保持 0（额外重固化为 −新基础，无法力的怪物不被抬成 1）
-  const capTouched = RESOURCE_KEYS.filter((key) => {
-    const f = RESOURCE_FIELDS[key];
-    return keys.includes(f.max) || keys.includes(f.bonus);
-  });
-  const shapeChanged = char.tier !== prevTier || JSON.stringify(char.attributes) !== prevAttrs;
-  const recompute = shapeChanged
-    ? RESOURCE_KEYS.filter((key) => capTouched.includes(key) || prevMax[key] !== 0)
-    : capTouched;
-  if (recompute.length > 0 || shapeChanged) {
-    const bases = baseResourceCaps(char.tier, char.attributes);
-    const bonuses = {} as Record<ResourceKey, number>;
-    for (const key of RESOURCE_KEYS) {
-      const f = RESOURCE_FIELDS[key];
-      const total = char[f.max];
-      // 旧写法只写总上限：额外 = 总上限 − 新基础
-      bonuses[key] =
-        !keys.includes(f.bonus) && keys.includes(f.max) && Number.isFinite(total)
-          ? total - bases[key]
-          : char[f.bonus]!;
-    }
-    const r = recomputeResourceCaps({
-      tier: char.tier,
-      attributes: char.attributes,
-      bonuses,
-      previousMax: prevMax,
-      current: { hp: char.hp, mp: char.mp, sp: char.sp },
-    });
-    for (const key of RESOURCE_KEYS) {
-      const f = RESOURCE_FIELDS[key];
-      if (recompute.includes(key)) {
-        char[f.max] = r[f.max];
-        char[f.bonus] = r[f.bonus];
-        char[key] = r[key];
-      } else if (shapeChanged && prevMax[key] === 0) {
-        char[f.bonus] = -bases[key];
-      }
-    }
-  }
-  for (const key of RESOURCE_KEYS) {
-    const maxField = RESOURCE_FIELDS[key].max;
-    if (keys.includes(key) || keys.includes(maxField) || keys.includes(RESOURCE_FIELDS[key].bonus))
-      char[key] = Math.max(0, Math.min(char[key], char[maxField]));
-  }
-}
-
-function shadowAddStatus(char: CharacterState, value: Partial<StatusEffect>): void {
-  const name = value.name!;
-  const stacks = typeof value.stacks === 'number' && value.stacks > 0 ? value.stacks : 1;
-  const text =
-    typeof value.durationText === 'string' && value.durationText.trim()
-      ? value.durationText.trim()
-      : undefined;
-  const existing = findByName(char.statusEffects, name);
-  if (existing) {
-    if (existing.stackable === false) existing.stacks = 1;
-    else {
-      existing.stacks += stacks;
-      if (existing.maxStacks && existing.maxStacks > 0)
-        existing.stacks = Math.min(existing.stacks, existing.maxStacks);
-    }
-    if (text !== undefined) {
-      existing.durationText = text;
-      existing.remainingTime = null;
-    } else if (value.remainingTime !== undefined) {
-      if (existing.durationText !== undefined) {
-        existing.remainingTime = value.remainingTime;
-        delete existing.durationText;
-      } else if (value.remainingTime === null) existing.remainingTime = null;
-      else if (existing.remainingTime === undefined) existing.remainingTime = value.remainingTime;
-      else if (existing.remainingTime !== null)
-        existing.remainingTime = Math.max(existing.remainingTime, value.remainingTime);
-    }
-    return;
-  }
-  const effect: StatusEffect = {
-    name,
-    description: value.description ?? '',
-    category: value.category ?? '特殊',
-    stacks,
-    maxStacks: value.maxStacks,
-    stackable: value.stackable,
-    remainingTime: text !== undefined ? null : (value.remainingTime ?? null),
-    ...(text !== undefined ? { durationText: text } : {}),
-    timeUnit: value.timeUnit ?? '分钟',
-    source: value.source ?? '',
-    effects: value.effects ?? {},
-    effectDescriptions: value.effectDescriptions,
-    protocolText: value.protocolText,
-    tags: value.tags,
-  };
-  if (effect.maxStacks && effect.maxStacks > 0)
-    effect.stacks = Math.min(effect.stacks, effect.maxStacks);
-  char.statusEffects.push(effect);
-}
-
-function shadowSkillCost(skill: Skill, written: Partial<Skill>): void {
-  if (written.cost && typeof written.cost === 'object') {
-    delete skill.costText;
-    return;
-  }
-  if (typeof written.costText === 'string' && written.costText.trim()) {
-    skill.costText = written.costText.trim();
-    delete skill.cost;
-  } else if ('costText' in written) delete skill.costText;
-}
-
 function shadowVarPath(target: string): string {
   return target.startsWith('variables.') ? target.slice('variables.'.length) : target;
 }
 
-/** 把一条补丁作用到影子状态（镜像 StateManager 各 handler 的结果形状；校验交给预演）。 */
+/**
+ * 把一条补丁作用到影子状态。角色域补丁与 StateManager 共用 `state/patch-reducer.ts` 的纯变换
+ * （不再手写镜像）；档案域（变量、任务、好感、命运点、新闻、人物增删改名）仍在这里镜像。
+ */
 function applyShadowPatch(shadow: Shadow, patch: StatePatch): void {
   const p = shadow.profile;
   const v = (isPlainObject(patch.value) ? patch.value : {}) as Row;
   const name = typeof v.name === 'string' ? v.name : '';
   const charOf = (): CharacterState =>
     resolveCharacterByName(shadow.characters, patch.target.slice('characters.'.length));
+  if (isCharacterPatchOp(patch.op)) {
+    // 角色域：与 StateManager 的 handler 同一份纯变换（patch-reducer）。补丁先深拷一份，
+    // 影子不与要提交给 StateManager 的补丁共享引用（structuredClone 保留 undefined 键，清除语义不丢）
+    reduceCharacterPatch(charOf(), structuredClone(patch));
+    return;
+  }
   switch (patch.op) {
-    case 'update_character':
-      shadowUpdateCharacter(charOf(), v, patch.metadata?.delta === true);
-      return;
-    case 'set_hp':
-    case 'set_mp':
-    case 'set_sp': {
-      const c = charOf();
-      const key = patch.op.slice(4) as ResourceKey;
-      c[key] = Math.max(0, Math.min(patch.value as number, c[RESOURCE_FIELDS[key].max]));
-      return;
-    }
-    case 'delta_hp':
-    case 'delta_mp':
-    case 'delta_sp': {
-      const c = charOf();
-      const key = patch.op.slice(6) as ResourceKey;
-      c[key] = Math.max(0, Math.min(c[key] + (patch.amount ?? 0), c[RESOURCE_FIELDS[key].max]));
-      return;
-    }
-    case 'set_location':
-      charOf().location = String(patch.value);
-      return;
-    case 'add_item': {
-      const c = charOf();
-      const q = typeof v.quantity === 'number' && v.quantity > 0 ? v.quantity : 1;
-      const existing = findByName(c.inventory, name);
-      if (existing) existing.quantity += q;
-      else {
-        const item = jsonClone(v) as unknown as InventoryItem;
-        item.quantity = q;
-        if (item.equippedSlot != null) item.equippedSlot = normalizeSlot(item.equippedSlot);
-        c.inventory.push(item);
-      }
-      return;
-    }
-    case 'remove_item': {
-      const c = charOf();
-      const idx = c.inventory.findIndex((i) => i.name === name);
-      const q = typeof v.quantity === 'number' ? v.quantity : 1;
-      c.inventory[idx].quantity -= q;
-      if (c.inventory[idx].quantity === 0) c.inventory.splice(idx, 1);
-      return;
-    }
-    case 'update_item':
-      Object.assign(findByName(charOf().inventory, name)!, v.changes as Row);
-      return;
     case 'transfer_item': {
-      const from = charOf();
-      const to = resolveCharacterByName(shadow.characters, String(v.to));
-      const q = typeof v.quantity === 'number' && v.quantity > 0 ? v.quantity : 1;
-      const idx = from.inventory.findIndex((i) => i.name === name);
-      const src = from.inventory[idx];
-      const got = findByName(to.inventory, name);
-      if (got) got.quantity += q;
-      else to.inventory.push({ ...jsonClone(src), quantity: q, equippedSlot: null });
-      src.quantity -= q;
-      if (src.quantity <= 0) from.inventory.splice(idx, 1);
+      const request = readTransferItemRequest(patch);
+      reduceTransferItem(charOf(), resolveCharacterByName(shadow.characters, request.to), request);
       return;
     }
-    case 'equip_item': {
-      const c = charOf();
-      const slot = normalizeSlot(String(v.slot));
-      const item = findByName(c.inventory, name)!;
-      for (const other of c.inventory)
-        if (other !== item && other.equippedSlot === slot) other.equippedSlot = null;
-      item.equippedSlot = slot;
+    case 'add_character': {
+      // 人物内容整理（年龄锚点、自带额外的上限规整）与 StateManager 同一份
+      const added = jsonClone(patch.value as CharacterState);
+      prepareNewCharacter(added, p.gameTime);
+      shadow.characters.push(added);
       return;
     }
-    case 'unequip_item':
-      findByName(charOf().inventory, name)!.equippedSlot = null;
-      return;
-    case 'add_skill': {
-      const c = charOf();
-      const fields = jsonClone(v) as Partial<Skill>;
-      const existing = findByName(c.skills, name);
-      if (existing) {
-        Object.assign(existing, fields);
-        shadowSkillCost(existing, fields);
-      } else {
-        c.skills.push({ description: '', type: 'active', ...fields, name } as Skill);
-      }
-      return;
-    }
-    case 'update_skill': {
-      const skill = findByName(charOf().skills, name)!;
-      const changes = (v.changes ?? {}) as Partial<Skill>;
-      Object.assign(skill, changes);
-      shadowSkillCost(skill, changes);
-      return;
-    }
-    case 'remove_skill': {
-      const c = charOf();
-      c.skills = c.skills.filter((s) => s.name !== name);
-      return;
-    }
-    case 'add_status_effect':
-      shadowAddStatus(charOf(), jsonClone(v) as Partial<StatusEffect>);
-      return;
-    case 'update_status_effect': {
-      const e = findByName(charOf().statusEffects, name);
-      if (!e) return;
-      if (typeof v.durationText === 'string' && v.durationText.trim()) {
-        e.durationText = v.durationText.trim();
-        e.remainingTime = null;
-      } else if (v.remainingTime !== undefined) {
-        e.remainingTime = v.remainingTime === null ? null : Math.max(0, v.remainingTime as number);
-        delete e.durationText;
-      }
-      if (typeof v.stacks === 'number' && v.stacks > 0) {
-        e.stacks = v.stacks;
-        if (e.maxStacks && e.maxStacks > 0) e.stacks = Math.min(e.stacks, e.maxStacks);
-      }
-      return;
-    }
-    case 'remove_status_effect': {
-      const c = charOf();
-      c.statusEffects = c.statusEffects.filter((e) => e.name !== name);
-      return;
-    }
-    case 'add_character':
-      shadow.characters.push(jsonClone(patch.value as CharacterState));
-      return;
     case 'remove_character': {
       const c = charOf();
       shadow.characters = shadow.characters.filter((x) => x !== c);
@@ -1883,7 +1596,8 @@ class TreeTranslator {
     key: ResourceKey,
     op: TreeOpKind,
   ): void {
-    const cap = readResourceCaps(char)[key].effective;
+    // 钳制口径与提交时同一个（角色身上的有效上限字段；上限为 0 的怪物只能写 0）
+    const cap = resourceCeiling(char, key);
     const cur = char[key];
     let next: number;
     if (op === 'replace') next = take(coerceResourceCurrent(ctx.op.value, cap), ctx.notes);
