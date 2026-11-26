@@ -20,6 +20,7 @@
 import { ATTRIBUTE_LABELS, findChildSpec, STATE_TREE_SPEC } from './state-tree-spec';
 import type { StateTreeBranchSpec, StateTreeNodeSpec } from './state-tree-spec';
 import { coerceEffectDict, formatDuration, formatSkillCost } from './state-tree-codecs';
+import { jsonClone } from './state-tree-utils';
 import { readResourceCaps, type ResourceKey } from '../character/resource-caps';
 import { characterAge, hasGivenBirthday } from '../character/character-age';
 import { formatGameTime, getTimeOfDay } from '../time/time-system';
@@ -168,12 +169,6 @@ function dictCopy<V extends StateTreeValue>(
   const out: StateTreeObject = {};
   for (const [k, v] of Object.entries(dict)) setEntry(out, k, v);
   return out;
-}
-
-/** 叙事变量空间原样深拷贝（JSON 往返：切断引用与 Proxy，丢掉 undefined）。 */
-function jsonClone(value: unknown): StateTreeValue {
-  if (value === undefined) return {};
-  return JSON.parse(JSON.stringify(value)) as StateTreeValue;
 }
 
 // ========== 词表节点（模块加载时从 spec 取一次） ==========
@@ -498,7 +493,8 @@ export function buildStateTree(
       return out;
     },
     新闻: () => projectNews(profile.news, newsLimit),
-    变量: () => jsonClone(profile.variables ?? {}),
+    // 叙事变量空间原样深拷贝（JSON 往返：切断引用与 Proxy，丢掉 undefined）
+    变量: () => jsonClone(profile.variables ?? {}) as StateTreeValue,
   });
 }
 
