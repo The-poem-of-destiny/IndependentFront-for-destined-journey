@@ -1,3 +1,16 @@
+# Known issue: 2026-11-25 整合审查修复的遗留缺陷（2026-11-25 记档）
+
+状态：**已定位、未修**。来自 [两周整合审查](reviews/2026-11-25-consolidation-review.md) 的修复轮（整合分支 `refactor/review-fixes-2026-11-25`），按文档维护守则第 6 条从报告「遗留问题」节晋升；编号与报告的 L 号对应，报告里另有几条非缺陷的遗留（待裁定语义、工具重复、建议未做）只留在报告。
+
+1. **L1 预演不预判按槽位卸下，提交时整楼失败。** 现象：模型只给槽位、不带名字的 `unequip_item`，在槽位为空时让整楼提交失败。根因：`src/core/state/patch-rehearsal.ts` 对不带名字的卸下直接放行（既有断言钉着），提交时内核抛「该槽位无穿戴」。修复方向：预演按槽位查当前穿戴，空槽只丢该条并记丢弃，同时改那条断言。
+2. **L2 装包失败回滚不看标签页锁。** 现象：内容包安装失败回滚时，另一标签页正在游玩的存档会被一起还原。根因：`src/ui/stores/content-store.ts` 的 `rollbackTo` 用 `importAllData(snapshot)` 整库还原，没有经过删档 / 整库导入已在用的标签页锁试探（`lib/save-tab-lock.ts` 的 `findSavesLockedElsewhere`）。修复方向：回滚前同样试探，或把回滚范围收窄到装包涉及的表。
+3. **L3 fx-foil 混合输入只落进入点。** 现象：主输入设备不支持悬停（如触屏 / 平板）但外接了鼠标时，`src/ui/lib/fx-foil.ts` 只在 `pointerenter` 进入点落一次光，之后不跟随指针移动。低危，只影响特效。根因：fx-pointer 只在 `(hover: hover)` 设备注册全局 `pointermove`，fx-foil 悬停期间订阅的全局源在这类设备上没有事件。修复方向：全局指针源改按实际指针类型（或 `any-hover`）决定是否注册。
+4. **L4 无标签箭头标题仍判交锋。** 现象：面板没有 `|行动者|` / `|目标|` 等标签行、标题带 `→` 且左边恰好呈名字形态时，收起态被画成交锋。根因：`src/ui/lib/action-digest.ts` 在 A6 修复后只要求左边是名字形态或已认出行动者。修复方向：无标签时要求箭头至少一侧是已知参与者。
+5. **L5 entity_gen 状态的 stacks / maxStacks 解析出 NaN。** 现象：模型给出非数字的 `stacks` / `maxStacks` 时，NaN 进 `add_status_effect`。根因：`src/core/agents/entity-gen-parse.ts` 状态块的 `parseInt(attrs.stacks …)` 无回落（同函数的 `remainingTime` 已有回落）。修复方向：非有限值回落 1，补回归用例。
+6. **L6 状态树投影仍有手写键 → 字段映射。** 现象：改词表 `kernel` 映射后，投影可能与翻译层 / 编辑层不一致，且没有闸门报错。根因：`src/core/variables/state-tree-projection.ts` 的键 → 内核字段对应没纳入 `state-tree-spec.ts` 真源。修复方向：投影也从词表读，并纳入 `tests/core/variables/state-tree-spec-source-gate.test.ts`。
+
+---
+
 # Known issue: 行动面板摘要的单位名识别（2026-11-23 记档）
 
 状态：**已定位、暂不修**（分支 `feat/action-info-beautify`，主人裁定先合并）。只影响行动面板**收起态**的摘要显示；展开后的算式行是模型原文，原样显示；这些数字也不写入存档。按新约定 `|变更|名字 HP 旧→新|` 逐人一行输出的面板基本不受影响。

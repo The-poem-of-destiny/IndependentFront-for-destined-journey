@@ -13,7 +13,35 @@ import {
   movePresetEntry,
   duplicatePresetEntry,
   isZonePlaceholderEntry,
+  storyContextTemplateOf,
 } from '../../../src/ui/lib/preset-entries';
+import { DEFAULT_STORY_CONTEXT_BLOCK } from '@engine/prompts/preset-loader';
+
+describe('storyContextTemplateOf（上下文模板预览，R7）', () => {
+  it('不再按条目名「动态注入」找：同名条目不含系统占位符时回落默认上下文块', () => {
+    expect(
+      storyContextTemplateOf([
+        { identifier: 'x', name: '动态注入', content: '纯文字', role: 'system', enabled: true },
+      ]),
+    ).toBe(DEFAULT_STORY_CONTEXT_BLOCK);
+  });
+
+  it('按生效顺序拼出含系统占位符的启用条目，与名字无关；停用条目与五区占位跳过', () => {
+    expect(
+      storyContextTemplateOf([
+        { identifier: 'late', name: '随便', content: '{{USER_INPUT}}', injection_order: 20 },
+        { identifier: 'off', content: '{{GAME_TIME}}', enabled: false, injection_order: 5 },
+        { identifier: 'story_zone_1', content: '{{NARRATIVE}}', injection_order: 1 },
+        { identifier: 'early', name: '别名', content: '{{NARRATIVE}}', injection_order: 10 },
+        { identifier: 'plain', content: '只是文字', injection_order: 15 },
+      ]),
+    ).toBe('{{NARRATIVE}}\n{{USER_INPUT}}');
+  });
+
+  it('prompts 不是数组时回落默认上下文块', () => {
+    expect(storyContextTemplateOf(undefined)).toBe(DEFAULT_STORY_CONTEXT_BLOCK);
+  });
+});
 
 function makePreset(
   prompts: Array<{ name: string; injection_order?: number; content?: string; identifier?: string }>,

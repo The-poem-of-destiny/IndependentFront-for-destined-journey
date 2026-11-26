@@ -18,17 +18,14 @@ import type { EngineLogScope } from '@engine/runtime/engine-logger';
 import { AgentOrchestrator } from '@engine/agents/agent-orchestrator';
 import { resolveGenerationMode, type GenerationMode } from '@engine/story/generation-mode';
 import { buildDirectPatches } from '@engine/agents/direct-output';
-import { logStateWriteStats, summarizeStateWrites } from '@engine/agents/direct-main';
+import { logStateWriteStats, summarizeStateWrites } from '@engine/agents/direct-write-stats';
 import type { DirectTurnDraft } from '@engine/agents/direct-output';
 import {
   buildDirectCombat,
-  isDirectStructuredCombatEnabled,
   projectDirectCombatCharacters,
   readDirectCombat,
 } from '@engine/combat/direct-combat';
 import {
-  buildPresetCatalog,
-  builtinDirectPresets,
   PRESET_SELECTION_KEYS,
   resolveEffectivePreset,
   type PresetAgentDefaults,
@@ -36,6 +33,7 @@ import {
 } from '@engine/prompts/preset-resolution';
 import { initializeDirectSettings, initializeCachedDirectSettings } from './direct-settings';
 import { applyCatalogEntryToggles } from './preset-entries';
+import { buildUiPresetCatalog } from './preset-catalog';
 import { scanEventTriggers, scanPlayAudioMarkers } from '@engine/story/marker-protocol';
 // Q-05：从模型输出抢救 JSON 的唯一入口（裸 / 围栏 / <json> / 前后夹带解说四种形态）
 import { extractJsonPayload } from '@engine/utils/model-json';
@@ -75,10 +73,9 @@ import { stripMarkers } from '@engine/story/marker-protocol';
 import { parseCharacterUpdates } from '@engine/character/character-updates';
 import {
   characterLoreEntryUids,
-  legacyCharacterDefinitions,
   linkCharacterDefinitions,
   matchCharacterDefinition,
-  resolveCharacterLoreLinks,
+  prepareTurnCharacterDefinitions,
 } from '@engine/character/character-definitions';
 import type { CharacterNarrativeUpdate } from '@engine/types/types-character';
 import { AgentClient } from '@engine/agents/agent-client';
@@ -730,8 +727,7 @@ export class GamePipeline {
     controller: AbortController,
   ): Promise<void> {
     if (!this.isRunCurrent(controller)) throw new DOMException('Turn cancelled', 'AbortError');
-    if (context.plotSettings?.mode === 'off' && Object.keys(draft.updates.plot).length)
-      throw new Error('剧情关闭时 direct plot 必须为空');
+    // 剧情关闭时的 plot 已在解析期清空（草稿 plotEnabled），这里不再复查
     const message = this.emitMessage(draft.content, 'assistant', {
       storyTurnStatus: 'pending',
       storyTurnKey: this.currentStoryTurnKey,
@@ -757,10 +753,10 @@ export class GamePipeline {
     // 本楼更新记录随正文消息一起接纳（§12.2）：先落到 pending 行上，提交时整行改成 accepted
     if (built.stateUpdates) await this.attachStateUpdates(message.id, built.stateUpdates);
     // 结构化战斗关闭时不建战斗记录、不追加结算补丁，combat 传 undefined 让休眠记录原样保留
-    //（传 null 会清掉存档里的 worldFlags.directCombat）
+    //（传 null 会清掉存档里的 worldFlags.directCombat）。开关按生成时口径（草稿携带），不重读
     const combat: Omit<ReturnType<typeof buildDirectCombat>, 'record'> & {
       record: ReturnType<typeof buildDirectCombat>['record'] | undefined;
-    } = isDirectStructuredCombatEnabled()
+    } = draft.structuredCombat
       ? buildDirectCombat(
           draft.updates.combat,
           readDirectCombat(this.game.saveProfile),
@@ -934,15 +930,14 @@ export class GamePipeline {
   /**
    * 状态写入统计（§7.1）在建补丁之后才完整：把解析期的初步值补上建补丁期的丢弃与逐条记录，
    * 写回本回合 direct_main 的结果与调试记录，并记本楼唯一一条 `state.write_stats`。
-   * 整楼拒收的楼不走这里（generateDirectTurn 已记）。
+   * 整楼拒收的楼不走这里（generateDirectTurn 已记）。协议取草稿携带的生成时口径，不重读开关。
    */
   private recordDirectWriteStats(
     draft: DirectTurnDraft,
     built: ReturnType<typeof buildDirectPatches>,
   ): void {
     const result = this.orch?.getResults().get('direct_main');
-    const protocol = result?.stateWriteStats?.protocol ?? (draft.treePatch ? 'tree' : 'legacy');
-    const stats = summarizeStateWrites(protocol, draft, built);
+    const stats = summarizeStateWrites(draft.stateProtocol, draft, built);
     if (result) result.stateWriteStats = stats;
     const entry = this.findDirectDebugEntry();
     logStateWriteStats(stats, entry?.model ?? '');
@@ -1191,17 +1186,23 @@ export class GamePipeline {
 
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets();
-      const worldBooks = await this.loadActiveWorldBooks();
-      // 定义是给引擎的目录，链接的世界书条目才是给模型的人设：解析链接，条目没加载上时回落定义自带 lore
-      context.characterDefinitions = resolveCharacterLoreLinks(
-        linkCharacterDefinitions(
-          this.game.activeSave?.metadata.characterDefinitions ??
-            legacyCharacterDefinitions(worldBooks),
-        ),
-        worldBooks,
-      );
+      // 定义是给引擎的目录，链接的世界书条目才是给模型的人设：解析链接，条目没加载上时回落定义自带 lore。
+      // 露骨内容开关：给模型的那份按开关投影（剔整条标记角色、因露骨被剔的链接不回落 lore）；
+      // 冻结 / 挂定义吃与开关无关的版本（旧档现转、链接解析都用开关过滤之前的书）—— 永不写回存档。
+      // 过滤前 / 过滤后两份出自同一次读取、同一份存档白名单（loadWorldBookSets）：读失败时两份同为空，
+      // 空定义不冻结，本轮不冻结、下轮再试 —— 不会拿开关过滤后的书去冻结
+      const metadata = this.game.activeSave?.metadata;
+      const nsfwOn = nsfwEnabled();
+      const { books: worldBooks, sourceBooks } = await this.loadWorldBookSets(nsfwOn);
+      const definitions = prepareTurnCharacterDefinitions({
+        frozen: metadata?.characterDefinitions,
+        books: worldBooks,
+        sourceBooks,
+        nsfwEnabled: nsfwOn,
+      });
+      context.characterDefinitions = definitions.forModel;
       await createStateManager(this.saveId).initializeCharacterDefinitions(
-        context.characterDefinitions,
+        definitions.toFreeze,
         () => this.isRunCurrent(controller),
       );
       const { getCharacters, getDatabase } = await import('@engine/persistence/database');
@@ -1743,14 +1744,12 @@ export class GamePipeline {
 
   // ===== 私有方法 =====
 
-  /** 预设目录（存储行 + 默认层内嵌 + 内置直出预设），与设置页同一套装配 */
+  /**
+   * 预设目录（存储行 + 默认层内嵌 + 内置直出预设）：与设置页（usePresets）共用
+   * `lib/preset-catalog.ts` 的同一个工厂，内容所有 id 含出厂预设（2026-11-25 R7）。
+   */
   private presetCatalog(presets: readonly AgentPreset[], agentDefaults: PresetAgentDefaults) {
-    return buildPresetCatalog({
-      storedRows: presets as unknown as ChatPreset[],
-      agentDefaults,
-      builtins: builtinDirectPresets(),
-      contentOwnedIds: (getActivePackPayload()?.presets ?? []).map((preset) => preset.id),
-    });
+    return buildUiPresetCatalog(presets as unknown as ChatPreset[], agentDefaults);
   }
 
   private buildAgentConfigs(
@@ -2262,10 +2261,21 @@ export class GamePipeline {
    * 并记一条可定位的诊断。
    */
   private async loadActiveWorldBooks(): Promise<WorldBook[]> {
+    return (await this.loadWorldBookSets(nsfwEnabled())).books;
+  }
+
+  /**
+   * 一次读取，给出同一份存档白名单下的两份世界书（白名单规则只此一处）：
+   * - `books`：再按露骨内容开关投影，所有 Agent / 侧链 / 直出 / 图像链吃这份；
+   * - `sourceBooks`：开关过滤之前的版本，供冻结 / 挂角色定义（开关为开时与 `books` 条目相同，给 undefined）。
+   * 读失败两份同为空（catch 兼顾单测里没有 activePinia 的场景 —— 与迁移前的空数组行为一致）。
+   */
+  private async loadWorldBookSets(
+    nsfwOn: boolean,
+  ): Promise<{ books: WorldBook[]; sourceBooks: WorldBook[] | undefined }> {
     try {
       // 统一数据源：worldbook-store 优先（Dexie，含用户在 WorldBookEditor 的 enabled 修改
       // + 自建书 + 工坊书）+ 文件兜底。init() 幂等，保证「消费必在迁移之后」。
-      // catch 兼顾单测里没有 activePinia 的场景 —— 与迁移前的空数组行为一致。
       const wb = useWorldBookStore();
       await wb.init();
       const all = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
@@ -2284,10 +2294,12 @@ export class GamePipeline {
         ...characterLoreEntryUids(linkCharacterDefinitions(metadata?.characterDefinitions ?? [])),
       ];
       // 露骨内容开关：剔除整条标记条目 + 过滤路由元数据文本（正文在 EJS 渲染后再剥）。
-      // 所有 Agent / 侧链 / 直出 / 图像链经 chainData.worldBooks 吃到的都是这份投影。
-      return filterBooksByEnabledEntries(filterNsfwBooks(all, nsfwEnabled()), enabledEntries);
+      return {
+        books: filterBooksByEnabledEntries(filterNsfwBooks(all, nsfwOn), enabledEntries),
+        sourceBooks: nsfwOn ? undefined : filterBooksByEnabledEntries(all, enabledEntries),
+      };
     } catch {
-      return [];
+      return { books: [], sourceBooks: [] };
     }
   }
 

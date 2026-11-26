@@ -37,6 +37,17 @@ function tr(
 const ops = (r: TreeTranslateResult) => r.patches.map((p) => p.op);
 const player = () => makeInput().characters[0];
 
+describe('路径恰为 /关系列表（审查跟进）', () => {
+  it.each(['replace', 'add', 'remove'])('%s /关系列表：只丢这一条，不让整批翻译抛出', (op) => {
+    const r = tr([
+      { op, path: '/关系列表', value: {} },
+      { op: 'replace', path: '/主角/金钱', value: 7 },
+    ]);
+    expect(r.records[0].status).toBe('已丢弃');
+    expect(ops(r)).toContain('update_character');
+  });
+});
+
 describe('背包与装备（§5.3 整张表）', () => {
   it('add 背包：新物品 → add_item 不带槽位', () => {
     const r = tr([{ op: 'add', path: '/主角/背包/火把', value: { 类型: '消耗品', 数量: 2 } }]);
@@ -509,19 +520,20 @@ describe('人物、时间、地点、档案', () => {
     expect(r.records[0]).toMatchObject({ path: '/世界/地点', status: '已纠正' });
   });
 
-  it('档案文字字段进 profileChanges（不产补丁）', () => {
+  it('档案文字字段产 update_character 补丁，不再带 profileChanges 旁路字段（审查 A8）', () => {
     const r = tr([
       { op: 'replace', path: '/关系列表/布兰/档案/外貌', value: '银发' },
       { op: 'replace', path: '/关系列表/布兰/档案/身份', value: '佣兵、向导' },
     ]);
-    expect(r.patches).toEqual([]);
-    expect(r.profileChanges).toEqual([
+    expect(r.patches).toEqual([
+      { op: 'update_character', target: 'characters.布兰', value: { appearance: '银发' } },
       {
-        name: '布兰',
-        profile_changes: { appearance: '银发', identity: ['佣兵', '向导'] },
-        chronicle: [],
+        op: 'update_character',
+        target: 'characters.布兰',
+        value: { identity: ['佣兵', '向导'] },
       },
     ]);
+    expect(r).not.toHaveProperty('profileChanges');
     expect(r.records[0]).toMatchObject({ before: '高个子', after: '银发' });
   });
 

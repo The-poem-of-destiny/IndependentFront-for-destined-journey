@@ -61,6 +61,7 @@ import { getDefaultTemplate } from './placeholder-registry';
 import { findNextPlaceholder, resolveTemplateWithGlobals } from './template-resolver';
 import { USER_PLACEHOLDER_CONTENT } from '../agents/agent-client';
 import { logEngine } from '../runtime/engine-logger';
+import { nsfwEnabled } from '../content/nsfw-filter';
 import {
   diffPromptState,
   projectPromptState,
@@ -483,7 +484,7 @@ function computeBaselineSignature(input: PreparePromptSessionInput): string {
   const template = config?.template || getDefaultTemplate(agentId);
   const historyLayers = config?.historyLayers ?? defaultHistoryLayers(agentId);
 
-  return [
+  const parts = [
     PROMPT_SESSION_PROTOCOL_VERSION,
     agentId === 'story' && input.ctx.characterDefinitions !== undefined
       ? 'character-system-v1'
@@ -496,8 +497,16 @@ function computeBaselineSignature(input: PreparePromptSessionInput): string {
     serializeVisibleWorldBooks(agentId, worldBooks ?? [], input.ctx),
     String(historyLayers),
     normalizeTail(tailPrompt),
-  ].join('\u0000');
+  ];
+  // 露骨内容开关：签名材料是条目原文（含 <nsfw> 标记），开关前后不变；而旧 transcript
+  // 里回放的是开模式渲染结果（标记已剥、露骨段留着），出口安全网认不出。开 → 关必须重基线。
+  // 🔴 只在开关为开时追加字段：关（缺省）时签名与加这段之前逐字节相同，避免全体 Agent 存档一次性重基线。
+  if (nsfwEnabled()) parts.push(NSFW_SIGNATURE_MARK);
+  return parts.join('\u0000');
 }
+
+/** 开关为开时追加进 baseline signature 的字段。 */
+const NSFW_SIGNATURE_MARK = 'nsfw-content:on';
 
 // ═══════════════════════════════════════════════════════════
 // 动态世界书求值（每轮同一 EJS pass 至多一次）

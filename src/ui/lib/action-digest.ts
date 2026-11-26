@@ -157,15 +157,22 @@ const VERDICT_LABEL_GROUPS: readonly RegExp[] = [
 /** `状态` 组只有带结论色时才算结论（否则多半是「林狼 流血」这类状态描述） */
 const STATUS_GROUP_INDEX = 3;
 
+/**
+ * 结算类资源标签 —— 唯一一份，摘要（这里）与视图模型（action-panel-view.ts）共用。
+ * 产物 / 品质 / 经验（`|经验|` 与 `|实得EXP|` 等英文写法同义）。
+ */
+export const PRODUCT_LABEL_RE = /^(?:产出列表|产出|产物)$/;
+export const QUALITY_LABEL_RE = /^品质$/;
+export const EXP_LABEL_RE = /^(?:经验|实得EXP|EXP合计|EXP)$/i;
+
 /** outcome 关键格，按重要度排序；每个取最后一次出现 */
-const QUALITY_LABEL_RE = /^品质$/;
 const OUTCOME_FACT_LABELS: readonly RegExp[] = [
-  /^(?:产出列表|产出|产物)$/,
+  PRODUCT_LABEL_RE,
   QUALITY_LABEL_RE,
   /^奖励$/,
   /^损失$/,
   /^掉落$/,
-  /^(?:实得EXP|EXP合计|EXP)$/i,
+  EXP_LABEL_RE,
   /^FP$/i,
   /^战果$/,
   /^序列$/,
@@ -329,12 +336,28 @@ function skip(text: string, p: number, chars: string): number {
 
 const SPACES = ' \t　';
 
+/**
+ * 千分位逗号：逗号后恰好三位数字、第四位不是数字才算（`1,200`）。
+ * `26,3回合`、`-15,2回合` 里的逗号是分句，不是千分位。
+ */
+function isThousandsComma(text: string, q: number): boolean {
+  return (
+    text[q] === ',' &&
+    isDigit(text[q + 1]) &&
+    isDigit(text[q + 2]) &&
+    isDigit(text[q + 3]) &&
+    !isDigit(text[q + 4])
+  );
+}
+
 /** 读一个非负数（千分位 / 小数）；读不到返回 null */
 function readNumber(text: string, p: number): { value: number; end: number } | null {
   if (!isDigit(text[p])) return null;
   let q = p;
-  while (q < text.length && (isDigit(text[q]) || (text[q] === ',' && isDigit(text[q + 1])))) {
-    q += 1;
+  while (q < text.length) {
+    if (isDigit(text[q])) q += 1;
+    else if (isThousandsComma(text, q)) q += 4;
+    else break;
   }
   if (text[q] === '.' && isDigit(text[q + 1])) {
     q += 1;
@@ -368,12 +391,47 @@ function cleanName(raw: string): string {
   return s.length <= MAX_NAME_LENGTH ? s : '';
 }
 
-/** 名字列表拆分（「甲、乙」「甲,乙」「甲/乙」） */
+const NAME_LIST_SEPARATORS = '、,，/／&＆';
+
+function isWhitespace(ch: string | undefined): boolean {
+  return ch !== undefined && /\s/.test(ch);
+}
+
+/**
+ * 名字列表拆分（「甲、乙」「甲,乙」「甲/乙」「甲 和 乙」）。
+ * 手写扫描：`\s+和\s+` 这种正则在超长空白上逐位回溯（10 万空格实测数秒），
+ * 这里每段空白只走一遍。
+ */
 function splitNames(text: string): string[] {
-  return text
-    .split(/[、,，/／&＆]|\s+和\s+/)
-    .map((s) => cleanName(s))
-    .filter(Boolean);
+  const pieces: string[] = [];
+  let start = 0;
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (NAME_LIST_SEPARATORS.includes(ch)) {
+      pieces.push(text.slice(start, i));
+      i += 1;
+      start = i;
+      continue;
+    }
+    if (!isWhitespace(ch)) {
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (isWhitespace(text[j])) j += 1;
+    if (text[j] === '和' && isWhitespace(text[j + 1])) {
+      let k = j + 1;
+      while (isWhitespace(text[k])) k += 1;
+      pieces.push(text.slice(start, i));
+      start = k;
+      i = k;
+    } else {
+      i = j;
+    }
+  }
+  pieces.push(text.slice(start));
+  return pieces.map((s) => cleanName(s)).filter(Boolean);
 }
 
 function isKnownLabel(label: string): boolean {
@@ -562,6 +620,10 @@ function readResource(
   if (sign) {
     const num = readNumber(text, skip(text, p + 1, SPACES));
     if (!num) return null;
+    // `HP -10%` 是百分比，不是点数：不记成 −10
+    if (text[skip(text, num.end, SPACES)] === '%' || text[skip(text, num.end, SPACES)] === '％') {
+      return null;
+    }
     tok.amount = sign * num.value;
     tok.end = readTrailingGroups(text, num.end, tok);
     return tok;
@@ -721,6 +783,19 @@ interface Participants {
   action?: string;
 }
 
+/**
+ * 一段文字像不像单位名：清洗后非空、不以数字开头、不是「目标 / 剩余」那类词，
+ * 且不含句读与分隔符（`制作流程: 熔炼` 带冒号，是「标签: 值」不是名字）。
+ */
+function isNameShaped(raw: string): boolean {
+  const name = cleanName(raw);
+  if (!name || isDigit(name[0]) || NOT_NAMES.has(name)) return false;
+  for (const ch of name) {
+    if (NAME_SEPARATORS.includes(ch)) return false;
+  }
+  return true;
+}
+
 function parseTargets(raw: string, actor: string | undefined, selfAllowed: boolean): string[] {
   const value = raw.trim();
   if (!value || EMPTY_TARGET.test(value)) return [];
@@ -775,12 +850,15 @@ function collectParticipants(panel: ActionPanel, rows: DigestCell[][]): Particip
 
   let targets = targetRaw ? parseTargets(targetRaw.value, actor, targetRaw.self) : [];
 
-  // 兜底：分节标题 `甲 → 乙 · 招式`
+  // 兜底：分节标题 `甲 → 乙 · 招式`。
+  // 带 `→` 的标题不一定是交锋（`制作流程: 熔炼 → 锻打` 是流程）：左边得是名字形态，
+  // 或者格子里已经认出了行动者（别的交锋证据），才从标题取。
   if (!actor || targets.length === 0 || !action) {
     const title = panel.sections.find((s) => s.title.includes('→'))?.title;
-    if (title) {
-      const arrow = title.indexOf('→');
-      const left = cleanName(title.slice(0, arrow));
+    const arrow = title ? title.indexOf('→') : -1;
+    const left = title ? cleanName(title.slice(0, arrow)) : '';
+    const leftIsName = isNameShaped(title ? title.slice(0, arrow) : '');
+    if (title && (leftIsName || actor)) {
       const right = title
         .slice(arrow + 1)
         .split(/[·・]/)
@@ -1071,12 +1149,21 @@ function isVerdictWord(word: string): boolean {
   return verdictWordTone(word) !== undefined || cellTone('结果', word) !== undefined;
 }
 
+const TRAILING_STOPS = '。！!.';
+
+/** 剥掉结尾的句号 / 叹号。手写从尾往回扫：`[。！!.]+$` 在一长串 `.` 后跟别的字时逐位回溯 */
+function trimTrailingStops(s: string): string {
+  let end = s.length;
+  while (end > 0 && TRAILING_STOPS.includes(s[end - 1])) end -= 1;
+  return s.slice(0, end);
+}
+
 /** 值 → 结论文字：取最后一个箭头之后，去括号括注；末尾是结论词就只取那个词 */
 function verdictText(value: string): string {
   let t = value;
   const arrow = t.lastIndexOf('→');
   if (arrow >= 0) t = t.slice(arrow + 1);
-  t = stripBrackets(t).replace(/[。！!.]+$/, '');
+  t = trimTrailingStops(stripBrackets(t));
   const last = t[t.length - 1];
   if (last === ')' || last === '）') {
     const open = Math.max(t.lastIndexOf('('), t.lastIndexOf('（'));

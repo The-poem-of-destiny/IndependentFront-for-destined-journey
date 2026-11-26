@@ -8,7 +8,7 @@
  *               牌面 = 逐目标逐资源的伤害/恢复/削减、闪开 + 宝石以外的自身变化 + 状态；
  *               小牌 = 每个目标的主变化（HP 优先）+ 其余资源小字（失手 / 无证据各有写法）
  *   - roster：标题 + 「场面 · 环境」类型线 + 一排单位小牌（HP 条 + 三项读数）
- *   - outcome：牌名 = 产物（品质色）或动作；牌面 = 结果句 + 经验；小牌 = 检定骰
+ *   - outcome：牌名 = 产物（品质色）或动作；牌面 = 结果句 + 经验 + 多人结算时逐人的资源变化 + 自身变化 + 状态；小牌 = 检定骰
  *   - generic：牌名 = 标题；牌面 = 前三个关键格
  *
  * 🔴 绶带绝对定位在牌框右上：标题行留出右内边距、目标小牌列下压一截，两者都不会被它压住；
@@ -23,47 +23,39 @@
 import { computed } from 'vue';
 import type { ActionView, ActionViewTarget } from '../../../lib/action-panel-view';
 import type { ResourceDelta } from '../../../lib/action-digest';
+import {
+  abs,
+  actionLabel,
+  deltaClass,
+  genericFacts,
+  hasRange,
+  primaryOf,
+  rosterNote,
+  settledDeltas,
+  sgn,
+  statusLines,
+  verdictTone,
+  type RangedDelta,
+} from '../../../lib/action-style-helpers';
 import ActionBadge from './ActionBadge.vue';
 import ActionGauge from './ActionGauge.vue';
+import ActionMoreHint from './ActionMoreHint.vue';
+import ActionViewRoster from './ActionViewRoster.vue';
 import { staggerStyle } from './entrance-timing';
 
 const props = defineProps<{ view: ActionView; open: boolean; entering: boolean }>();
 
 const ROSTER_RESOURCES = ['hp', 'mp', 'sp'] as const;
 
-function sgn(n: number | null): string {
-  if (n === null || !Number.isFinite(n)) return '±?';
-  return (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n);
-}
-
-function abs(n: number | null): string {
-  return n === null || !Number.isFinite(n) ? '?' : String(Math.abs(n));
-}
-
-function hasRange(d: ResourceDelta): d is ResourceDelta & { from: number; to: number } {
-  return d.from !== undefined && d.to !== undefined;
-}
-
-function deltaClass(d: ResourceDelta): string {
-  return (d.delta ?? 0) > 0 ? 'up' : 'down';
-}
-
-function gaugeMax(d: ResourceDelta & { from: number; to: number }): number {
+function gaugeMax(d: RangedDelta): number {
   return d.max ?? Math.max(d.from, d.to);
 }
-
-const verdictTone = computed(() => {
-  const tone = props.view.verdict?.tone;
-  return tone === 'success' ? 't-ok' : tone === 'error' ? 't-bad' : '';
-});
 
 /** 费用宝石：出手方自己的第一笔**消耗**（负的那种）；回升不是费用 */
 const cost = computed(() => props.view.ownDeltas.find((d) => (d.delta ?? 0) < 0));
 
 /** 宝石之外的自身变化（自我治疗、额外消耗），写进牌面效果 */
 const ownRest = computed(() => props.view.ownDeltas.filter((d) => d !== cost.value));
-
-const actionLabel = computed(() => props.view.action || props.view.title || '行动');
 
 // ── 交锋 ──
 
@@ -146,10 +138,6 @@ const clauses = computed(() => [
 ]);
 
 /** 目标小牌：主变化 HP 优先，没有就取第一条别的资源；其余逐条写小字 */
-function primaryOf(t: ActionViewTarget): ResourceDelta | undefined {
-  return t.hp ?? t.deltas[0];
-}
-
 const targetCards = computed(() =>
   props.view.targets.map((t) => {
     const p = primaryOf(t);
@@ -158,35 +146,37 @@ const targetCards = computed(() =>
 );
 
 /** 牌面末尾的状态句：目标的带上名字与「获得」，认不出归属的原样 */
-const statusSentences = computed(() => [
-  ...props.view.targets.flatMap((t) => t.statuses.map((s) => `${t.name} 获得 ${s}`)),
-  ...props.view.looseStatuses,
-]);
-
-// ── 名册 ──
-
-const rosterNote = computed(() => {
-  const fromFacts = props.view.facts.map((c) => c.value).filter(Boolean);
-  if (fromFacts.length > 0) return fromFacts.join(' · ');
-  const names = props.view.roster.map((u) => u.name);
-  return props.view.calc
-    .flatMap((s) => s.rows)
-    .filter((r) => r.label && !r.wide && !names.some((n) => r.label.startsWith(n)))
-    .slice(0, 2)
-    .map((r) => r.tokens.map((t) => t.text).join(''))
-    .join(' · ');
-});
+const statusSentences = computed(() => statusLines(props.view, ' 获得 '));
 
 // ── 结算 ──
 
 const outcomeType = computed(() => {
   const o = props.view.outcome;
   const actor = props.view.actor ?? '';
+  const label = actionLabel(props.view);
   const parts = o?.product
-    ? [`${actionLabel.value === o.product ? '' : actionLabel.value}产物`, o.quality ?? '', actor]
+    ? [`${label === o.product ? '' : label}产物`, o.quality ?? '', actor]
     : ['检定', actor];
   return parts.filter(Boolean).join(' · ');
 });
+
+/** 多人结算的一笔：`莱恩 失去 5 点 HP` / `莱恩 恢复 5 点 HP`（不是谁打谁，不写「对 / 造成」） */
+function settleClause(name: string, d: ResourceDelta): Clause {
+  const up = (d.delta ?? 0) > 0;
+  return {
+    name,
+    kind: 'delta',
+    verb: up ? '恢复' : '失去',
+    n: abs(d.delta),
+    unit: ` ${d.resource}`,
+    cls: deltaClass(d),
+  };
+}
+
+/** 结算牌面上逐人的资源变化（多人结算时视图把各人放在 targets） */
+const settleClauses = computed(() =>
+  settledDeltas(props.view).map(({ who, delta }) => settleClause(who, delta)),
+);
 
 /** 检定骰小牌的说明：`22 对 闪避 14`；没有对抗值就只写合计 */
 const rollCaption = computed(() => {
@@ -196,8 +186,6 @@ const rollCaption = computed(() => {
   if (!r.against) return `合计 ${total}`;
   return `${total} 对 ${r.against.label ? `${r.against.label} ` : ''}${r.against.value}`;
 });
-
-const genericFacts = computed(() => props.view.facts.slice(0, 3));
 </script>
 
 <template>
@@ -205,23 +193,22 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
     class="cardx"
     :class="[`k-${view.kind}`, { 'is-entering': entering, 'has-rib': !!view.verdict }]"
   >
-    <span v-if="view.verdict" class="c10-rib" :class="verdictTone">{{ view.verdict.text }}</span>
+    <span v-if="view.verdict" class="c10-rib" :class="verdictTone(view)">{{
+      view.verdict.text
+    }}</span>
 
     <!-- ── 名册：一排单位小牌 ── -->
     <template v-if="view.kind === 'roster'">
       <div class="c10-tt">
         <strong class="c10-name">{{ view.title || '战况' }}</strong>
       </div>
-      <div class="c10-ty">{{ rosterNote ? `场面 · ${rosterNote}` : '场面' }}</div>
-      <div class="c10-board">
-        <div v-for="(u, i) in view.roster" :key="`u-${i}`" class="c10-u" :style="staggerStyle(i)">
-          <ActionBadge :name="u.name" target size="sm" />
-          <span class="nm"
-            >{{ u.name
-            }}<small v-if="u.cluster" class="rng c10-cluster"
-              >{{ u.cluster.alive }}/{{ u.cluster.total }}</small
-            ></span
-          >
+      <div class="c10-ty">{{ rosterNote(view) ? `场面 · ${rosterNote(view)}` : '场面' }}</div>
+      <ActionViewRoster
+        :view="view"
+        :classes="{ list: 'c10-board', unit: 'c10-u', cluster: 'c10-cluster' }"
+        badge-size="sm"
+      >
+        <template #unit="{ unit: u }">
           <ActionGauge
             v-if="u.hp"
             :lo="u.hp.cur"
@@ -239,8 +226,8 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
               </template>
             </template>
           </div>
-        </div>
-      </div>
+        </template>
+      </ActionViewRoster>
     </template>
 
     <!-- ── 其余三种：宝石 · 牌面 · 小牌 ── -->
@@ -256,7 +243,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
         <!-- 交锋 -->
         <template v-if="view.kind === 'exchange'">
           <div class="c10-tt">
-            <strong class="c10-name">{{ actionLabel }}</strong>
+            <strong class="c10-name">{{ actionLabel(view) }}</strong>
           </div>
           <div class="c10-ty">{{ exchangeType }}</div>
           <div class="c10-tx">
@@ -284,7 +271,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
               :style="view.outcome.qualityVar ? { '--qc': view.outcome.qualityVar } : undefined"
               >{{ view.outcome.product }}</strong
             >
-            <strong v-else class="c10-name">{{ actionLabel }}</strong>
+            <strong v-else class="c10-name">{{ actionLabel(view) }}</strong>
           </div>
           <div class="c10-ty">{{ outcomeType }}</div>
           <div class="c10-tx">
@@ -292,6 +279,9 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
             ><template v-if="view.outcome?.exp">
               经验 <b class="c10-exp up">{{ view.outcome.exp }}</b
               >。</template
+            ><span v-for="(c, i) in settleClauses" :key="`w-${i}`" class="c10-settle"
+              ><b class="c10-who">{{ c.name }}</b> {{ c.verb }}
+              <span class="c10-n" :class="c.cls">{{ c.n }}</span> 点{{ c.unit }}。</span
             ><span v-for="(c, i) in ownRest.map(ownClause)" :key="`o-${i}`" class="c10-self"
               >{{ c.pre }}<b class="c10-who">{{ c.name }}</b> {{ c.verb }}
               <span class="c10-n" :class="c.cls">{{ c.n }}</span> 点{{ c.unit }}。</span
@@ -305,8 +295,8 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
             <strong class="c10-name">{{ view.title || '行动详情' }}</strong>
           </div>
           <div class="c10-ty">行动详情</div>
-          <div v-if="genericFacts.length > 0" class="c10-tx">
-            <template v-for="(c, i) in genericFacts" :key="`f-${i}`"
+          <div v-if="genericFacts(view).length > 0" class="c10-tx">
+            <template v-for="(c, i) in genericFacts(view)" :key="`f-${i}`"
               ><template v-if="i > 0">；</template>{{ c.label }}
               <b class="c10-kv">{{ c.value }}</b></template
             >。
@@ -359,7 +349,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
       </div>
       <div v-else-if="view.kind === 'outcome' && view.outcome?.roll" class="c10-tg">
         <div class="c10-u c10-check" :style="{ '--i': 0 }">
-          <span class="c10-die" :class="verdictTone"
+          <span class="c10-die" :class="verdictTone(view)"
             ><b class="c10-die-v">{{ view.outcome.roll.value }}</b
             ><small class="c10-die-l">d{{ view.outcome.roll.die }}</small></span
           >
@@ -369,9 +359,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
     </div>
 
     <div class="c10-ft">
-      <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-        >{{ open ? '收起' : '算式' }}<i class="more-caret"
-      /></span>
+      <ActionMoreHint :open="open" />
     </div>
   </div>
 </template>
@@ -539,7 +527,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
   margin-top: 1.75rem;
 }
 
-.c10-u {
+:deep(.c10-u) {
   display: grid;
   justify-items: center;
   align-content: start;
@@ -552,7 +540,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
   text-align: center;
 }
 
-.c10-u .nm {
+:deep(.c10-u .nm) {
   font-size: 0.75rem;
   line-height: 1.3;
 }
@@ -579,6 +567,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
   line-height: 1.3;
 }
 
+.c10-settle,
 .c10-self {
   margin-left: 2px;
 }
@@ -633,11 +622,11 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
   gap: 6px;
 }
 
-.c10-board .c10-u {
+:deep(.c10-board .c10-u) {
   width: 5.2rem;
 }
 
-.c10-cluster {
+:deep(.c10-cluster) {
   margin-left: 4px;
   font-family: var(--theme-font-body);
   font-weight: 400;
@@ -719,7 +708,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
     var(--motion-duration-base) backwards;
 }
 
-.cardx.is-entering .c10-u {
+.cardx.is-entering :deep(.c10-u) {
   animation: card-rise var(--motion-duration-base) var(--motion-ease-enter)
     calc(var(--motion-duration-slow) + var(--i, 0) * var(--motion-stagger-step)) backwards;
 }
@@ -728,7 +717,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
   .cardx.is-entering,
   .cardx.is-entering .c10-gem-d,
   .cardx.is-entering .c10-rib,
-  .cardx.is-entering .c10-u {
+  .cardx.is-entering :deep(.c10-u) {
     animation: none;
   }
 }
@@ -736,7 +725,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
 :root[data-reduced-motion='true'] .cardx.is-entering,
 :root[data-reduced-motion='true'] .cardx.is-entering .c10-gem-d,
 :root[data-reduced-motion='true'] .cardx.is-entering .c10-rib,
-:root[data-reduced-motion='true'] .cardx.is-entering .c10-u {
+:root[data-reduced-motion='true'] .cardx.is-entering :deep(.c10-u) {
   animation: none;
 }
 </style>

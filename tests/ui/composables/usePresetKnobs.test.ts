@@ -16,11 +16,8 @@ vi.mock('../../../src/ui/stores/settings-store', () => ({
   useSettingsStore: () => holder.store,
 }));
 
-import {
-  loadPresets,
-  registerFactoryPresetIds,
-  usePresets,
-} from '../../../src/ui/composables/usePresets';
+import { loadPresets, usePresets } from '../../../src/ui/composables/usePresets';
+import { registerFactoryPresetIds } from '../../../src/ui/lib/preset-catalog';
 import { usePresetKnobs } from '../../../src/ui/composables/usePresetKnobs';
 
 type FakeStore = {

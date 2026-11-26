@@ -341,14 +341,4 @@ const stripWidth = `${SIDE_STRIP_VW}vw`;
     transform: translateX(290%);
   }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .fx-amb-caustic,
-  .fx-amb-aurora,
-  .fx-amb-drop,
-  .fx-amb-thread,
-  .fx-amb-thread-glint {
-    animation: none !important;
-  }
-}
 </style>

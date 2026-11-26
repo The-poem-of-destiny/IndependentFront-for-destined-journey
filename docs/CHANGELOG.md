@@ -9,6 +9,20 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-11-25 两周整合审查修复｜整合分支 `refactor/review-fixes-2026-11-25`（PR #待定），**已实施，未真机验证**
+
+- 范围：[两周整合审查](reviews/2026-11-25-consolidation-review.md)（PR #142～#182）第一批 A1～A12 与第三批 R1～R8，分七波 20 个分支逐个合进整合分支，每波过一轮审查。逐条状态与遗留见报告「修复状态闭环表」与「遗留问题」节；其中 6 条缺陷晋升到 `docs/known-issue.md`。第二批发布事项（引擎版本、内容仓收口、真机验证）按裁定不排期。
+- 直出：`agents/direct-blocks.ts` 的 `locateDirectBlocks` 统一定位正文信封与 `direct_updates`，思考块里提到标签不再整楼拒收（A1；合法输出之后再提开标签名改按截断拒收）。校验改契约表驱动，值类型表 `DIRECT_VALUE_TYPES`，坏值只丢该行，归一化只做无损纠正（A2 / R1）。`direct-main.ts` 拆成 `direct-request` / `direct-send` / `direct-write-stats`，草稿携带开关与原文路径，接纳不再重读开关（R2）。
+- 变量协议与状态：资源整对象写入不依赖键序（A7）；AI 来源命运点超扣钳 0、金钱钳 0 且非有限值归 0，`validateStatePatch` 拒非有限时长与 `update_item` 值类型不符（A2 / A9）；三处原子事务体合一。档案字段改走 `update_character` 补丁，与改名同批、直出在 `commitDirectTurn` 事务内（A8）。新 `state/patch-reducer.ts` 成为角色域与档案域补丁纯变换的唯一实现，StateManager、翻译层与预演共用，影子镜像删除（R5，先落多 op 对照安全网）。修改器撤销改内核快照整体还原，更新块修订与记录写回同事务（R4）。词表 `kernel` / `rule` 成为键 → 字段映射真源，翻译 304 角色 × 40 op 约 514ms → 9ms；translator 拆进 `variables/translator/`，共用工具收进 `state-tree-utils.ts`（R6）。战斗结算脏时长归 null，`vars_update` / entity_gen 状态时长解析不出时回落 60。
+- 行动面板：千分位误读、两条回溯正则、带 `→` 标题误判交锋（A3 / A5 / A6）；`<action_info>` 标签识别只留引擎侧 `story-beats` 一份。五种样式共用 `lib/action-style-helpers.ts` 与 `ActionMoreHint`，多人结算在收起态逐人画出（A4），通用 / 名册视图收成 `ActionViewGeneric` / `ActionViewRoster`，时间常量与标签表各留唯一出口（R3）。「经验」算结算类关键格。
+- 露骨内容：开 → 关后 Agent 模式基线签名与 `direct_cached` 会话签名各重建一次，关时签名不变（A10）；给模型的角色定义按开关投影，旧档首轮冻结用过滤前的书，世界书白名单单一来源 `loadWorldBookSets`（A11）。
+- 预设：目录装配共用 `lib/preset-catalog.ts` 的 `buildUiPresetCatalog`，选择键只经 `selectPreset` 写，上下文模板预览按 `storyContextTemplateOf` 找，`reimportedPresetId` 删除（R7）。
+- 存档锁：删档、整库导入、清除所有数据经 `navigator.locks.query()` 试探，被别的标签页占用时拒绝（R8）。
+- 界面清理：首页快速测试拆成 `DevQuickTestRow.vue` 并以字面量 DEV 门控，生产不打包；删掉被全局规则覆盖的减动效 CSS；fx-foil 改走 fx-pointer / fx-ticker，TurnSeal 复用 `observeThemeSlug`；新增 `useMessageKeyedCache`，两处缓存随消息移除清理；变量修改器拆成三块子组件，状态编辑段独立成 `stores/state-edit-store.ts`（R6 / R8）。
+- 工具链：`.gitattributes` 追加 `*.mjs` / `*.sh` 通配 `eol=lf`（A12），本机 autocrlf 下 shebang 不再失效。
+- 验证：各条修复随分支补了回归用例；未跑真实模型、未做真机游玩与浏览器走查。
+- 文档：审查报告闭环表与遗留问题节、`docs/known-issue.md`、根 `AGENTS.md`、`src/core/AGENTS.md`、`src/ui/AGENTS.md`、`docs/design.md` §6.4、`docs/reference/direct-generation.md` 与 `direct-generation-cache.md` 的 2026-11-25 注记。
+
 ### 2026-11-23 行动面板五种样式 + 战斗行为卡并入行动面板｜分支 `feat/action-info-beautify`，**已实施，未真机验证**
 
 - 摘要与视图：新增纯函数 `src/ui/lib/action-digest.ts`（`digestActionPanel`：kind / 行动者 / 目标 / 结论 / 资源增减 / 名册 / 掷骰 / 逐目标命中 / 状态 / 结果句，认不出的面板退回 generic，收起时与旧版一致）与 `src/ui/lib/action-panel-view.ts`（`buildActionView`：卡片该画什么）。

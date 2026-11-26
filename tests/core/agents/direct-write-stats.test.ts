@@ -4,11 +4,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildDirectPatches, parseDirectOutput } from '../../../src/core/agents/direct-output';
-import {
-  DirectTurnError,
-  generateDirectTurn,
-  summarizeStateWrites,
-} from '../../../src/core/agents/direct-main';
+import { DirectTurnError, generateDirectTurn } from '../../../src/core/agents/direct-main';
+import { summarizeStateWrites } from '../../../src/core/agents/direct-write-stats';
 import type { DirectDicePool } from '../../../src/core/agents/direct-dice';
 import { AgentClient } from '../../../src/core/agents/agent-client';
 import { AgentOrchestrator } from '../../../src/core/agents/agent-orchestrator';

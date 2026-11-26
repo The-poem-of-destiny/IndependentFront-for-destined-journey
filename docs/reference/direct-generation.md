@@ -71,7 +71,7 @@
 
 📌 2026-11-20 新增，分支 `fix/direct-dice-entity`，未用真实模型验证。两种直出（`direct`、`direct_cached`）共用。
 
-- **扁平角色实体**：触发是一次真实失败 —— 模型引入新 NPC 时把角色字段直接摊在 `output` 上，整楼以「entities[0].output 含未支持的字段：name、race…」被拒。现在 `direct_updates.entities` 的某项 `kind` 为 `"character"`、其 `output` 没有 `character` 却有字符串 `name` 时，`parseDirectOutput`（`src/core/agents/direct-output.ts`）把除 `statuses` / `elements` / `authorities` 以外的键全部移进 `output.character`，并把顶层 `skills` / `equipment` / `inventory` 置为 `[]`；结果与嵌套写法完全一致，此后照常校验。草稿带 `flattenedCharacters?: string[]`（被收拢的角色名），`direct-main.ts` 记 warn `direct.entity_flattened`，本楼不算失败。协议文字同时补了一个嵌套写法的示例。
+- **扁平角色实体**：触发是一次真实失败 —— 模型引入新 NPC 时把角色字段直接摊在 `output` 上，整楼以「entities[0].output 含未支持的字段：name、race…」被拒。现在 `direct_updates.entities` 的某项 `kind` 为 `"character"`、其 `output` 没有 `character` 却有字符串 `name` 时，`parseDirectOutput`（`src/core/agents/direct-output.ts`）调用的归一化（`src/core/agents/direct-normalize.ts` 的 `unflattenCharacterEntity`；📌 2026-11-25 更正：此前写成收拢在 `direct-output.ts` 里，实际一直在归一化模块）把除 `statuses` / `elements` / `authorities` 以外的键全部移进 `output.character`，并把顶层 `skills` / `equipment` / `inventory` 置为 `[]`；结果与嵌套写法完全一致，此后照常校验。草稿带 `flattenedCharacters?: string[]`（被收拢的角色名），`direct-main.ts` 记 warn `direct.entity_flattened`，本楼不算失败。协议文字同时补了一个嵌套写法的示例。
 - **骰池缩小**：由 180 个（d4/d6/d8/d10/d12/d100 各 20 + d20 60）缩到 80 个（各 10 + d20 20）。实现搬到新模块 `src/core/agents/direct-dice.ts`（`DirectDicePool`、`rollDirectDice`、`formatDirectDicePool`）。
 - **按骰型分组的格式**：每种骰一行，形如 `d20: {12, 5, 17}`，顺序固定为 d4、d6、d8、d10、d12、d20、d100。无缓存直出把这些行放进 `<dice_pool>`；缓存直出的 `turn_context.dice_pool` 是同样字符串组成的数组（取代原来 `[骰面数, 骰值]` 对、以数组下标作 `diceUsed.index` 的写法）。此前无缓存路径每楼骰池约 6200 字符，现在是几百字符。
 - **`diceUsed` 登记**：每项为 `{sides, index, purpose, target}`，`index` 是该骰型那一行里从 0 起的位置。校验拒绝未知骰型、越界序号、重复的 (sides, index) 以及缺 `sides` 的项。
@@ -116,12 +116,15 @@
 | N9   | 条目默认值                 | 条目 `description` 补空串、装备 `stats` 补 `{}`、背包 `quantity` 补 1、`placement.present` 补 true。                                                                                                                                                                             |
 | N10  | 结构化位置                 | 在实体、state（含任务）、effects、plot、combat 等结构化位置剥除 `id` / `saveId` / `introducedBy` / `definition`；不进入 `world` 各操作的 `value` 子树（那里是自由内容，仍由校验器拒收，同旧版）。`__proto__` / `prototype` / `constructor` 在归一化前整体拒收。                                                                                                                                                                            |
 | N11  | `delta` 行                 | `state.characters.delta` 与 `state.affections.delta` 缺 `amount` 但 `value` 为数值时改用 `amount`。                                                                                                                                                                              |
+| N12  | 任务 `upsert` 行           | 📌 2026-11-25 新增：`state.quests.upsert` 行里 `DIRECT_QUEST_UPSERT_KEYS`（name / status / priority / progress / detail / objective / reward）之外的键剥除，每个记一条 note。                                                                                                     |
 | U1   | `character_updates` 内文   | 同 N1：剥代码围栏、`<json>` 标签与 JSON 之前的夹带文字；JSON 之后的文字不剥。                                                                                                                                                                                                                                                         |
 | U2   | `profile_changes` 文本字段 | 只有 `clothing` 时按 `outfit` 保存；文本字段为 null 或空白视为未变化。                                                                                                                                                                                                           |
 | U3   | `profile_changes` 列表字段 | `aliases` / `identity` / `occupation` 为字符串时转单元素列表（空白串删去）。                                                                                                                                                                                                    |
 | U4   | `chronicle`                | 缺失或 null 按 `[]`（无经历）；经历 `time` 缺失或写成 `"this_turn"` 时转 `{kind:"this_turn"}`；`people` 字符串转列表。                                                                                                                                                           |
 
 📌 2026-11-21 更正（同分支，坏项丢弃继续）：上表里的「仍拒」「拒收」已大多改为按单元丢弃 —— N2 的 `version` 不为 1 改为记 dropped 后按 1 处理（结构化战斗开启时缺 `combat` 仍整楼拒收）；N5 的缺名条目 note 移进 `dropped`（「已连带删除」的顶层 `elements` / `authorities` 同下标项也记 `dropped`），给了名字但不是文本、条目不是对象、列表不是数组、`ascension` 本身不是对象，都按单元丢弃；N5「两处都有 `ascension`」现保留 `character` 内那份、丢弃 `output` 顶层那份（记 `dropped`）；N6「owner 给了但不符」现只丢那一行状态。原型污染键（N10）仍整楼拒收。见下文「坏项丢弃继续（2026-11-21）」。
+
+📌 2026-11-25 更正（`refactor/direct-contract-validation`）：N5 的有损部分（缺名 / 不是对象的条目、列表不是数组、`ascension` 本身不是对象、`enabled` 不是布尔、`path` / `description` 不是文本、两处都写时丢顶层那份、顶层 `elements` / `authorities` 同下标连带删除）已从归一化移到校验器（`direct-output.ts` 的 `salvageAscension`），文案不变；归一化只纠正可用条目，`enabled` 缺失时只按可用条目推断。区别只在实体整条被丢时：登神的单元说明随之撤回，只记实体那一条。原型污染键扫描移到 `direct-output.ts`，仍在归一化之前、只做一次。
 
 与 HEAD 结果不同的三处（前两处有意，第三处已知、暂不改）：
 
@@ -206,6 +209,13 @@
 
 - 正文信封（`maintext` / `gametxt`）缺失、不完整，或正文为空。
 - `direct_updates` 不是恰好一个完整区块（多个、未闭合），不是合法 JSON，或顶层不是对象。一个开标签都没有时不拒收：按空更新接纳，标 `updatesMissing`，本楼只保存正文。
+
+  📌 2026-11-25 更正（审查 A1，分支 `fix/direct-tag-count`，未真机验证）：上一条与正文信封那条的「完整区块」改为只认完整块计数，定位在 `src/core/agents/direct-blocks.ts` 的 `locateDirectBlocks`。先剔除完整的 `<think>` / `<thinking>` 块；再按「闭标签向前配最近的同名开标签」配对，被后一个同名开标签越过、且排在本族最后一个闭标签之前的开标签是孤立提及，不计；排在最后一个闭标签之后的未配开标签算截断，仍拒收。此前正文前的思考块或无包裹的前置说明只要提到 `<maintext>` / `<direct_updates>` 就整楼拒收（#179 的尾部提醒扩大了触发面）。正文投影与 JSON 取同一次定位的块：投影用剔除思考块与孤立开标签后的文本，`raw` 仍存原文。两个完整块、真截断照旧拒收；剔除思考块后零个 `direct_updates` 开标签仍按 `updatesMissing` 接纳。测试见 `tests/core/agents/direct-blocks.test.ts`。
+
+  已知并接受的两处行为变化（第 1 波审查补记）：
+  - 正文内部再写一次开标签（如「他在纸上写下 `<maintext>` 这个词……」）会被接纳，但闭标签配的是里面那个开标签，真正的开标签被当成孤立提及剔掉，正文只剩里面那个标签之后的后半段。它与「前置文字提到标签名」在结构上无法区分，不再另行处理。
+  - 整份输出包在一个闭合的 `<think>` / `<thinking>` 块里时，剔除思考块后没有正文信封，改为拒收（此前全文计数不看思考块，这种输出会被接纳）。
+
 - 任何层级出现原型污染键（`__proto__` / `prototype` / `constructor`）。
 - world `path` 命中禁用段。
 - 结构化战斗开启时 `combat` 有问题（缺键、不是对象、含非有限数值）；关闭时坏 `combat` 照旧只被忽略。
@@ -256,7 +266,7 @@
 
 **每楼更新记录。** tree 下接纳一楼时，`buildDirectPatches` 返回的逐条记录（路径、动作、写入值、状态「已应用 / 已纠正 / 已丢弃」、说明、前值、后值）写到本楼 assistant 正文消息的 `ChatMessage.stateUpdates`，聊天流里显示为默认折叠的「本楼状态更新」块。**前值与后值只保留在最新一楼**：接纳新一楼时 `lib/game-pipeline.ts` 先清掉更早楼层记录里的 `before` / `after`，再拍回合快照（快照载荷带整份消息）。legacy 楼层没有记录，不显示更新块。
 
-**写入统计。** 每楼一条 `stateWriteStats {protocol, ops, applied, corrected, dropped, rejected, updatesMissing?}`，进 `AgentResult` 与调试记录 `DebugAgentEntry`，并记日志事件 `state.write_stats`（payload 带模型名）。口径见 `agents/direct-main.ts` 的 `summarizeStateWrites`；legacy 楼按写入单元近似计数，只作参考。离线汇总：
+**写入统计。** 每楼一条 `stateWriteStats {protocol, ops, applied, corrected, dropped, rejected, updatesMissing?}`，进 `AgentResult` 与调试记录 `DebugAgentEntry`，并记日志事件 `state.write_stats`（payload 带模型名）。口径见 `agents/direct-write-stats.ts` 的 `summarizeStateWrites`（📌 2026-11-25 自 `direct-main.ts` 迁出）；legacy 楼按写入单元近似计数，只作参考。离线汇总：
 
 ```bash
 node scripts/analyze-state-writes.mjs <文件> [<文件> …]
@@ -297,7 +307,9 @@ node scripts/analyze-state-writes.mjs <文件> [<文件> …]
 - `src/core/state/state-manager.ts`：核心状态与消息原子接纳。
 - 📌 2026-11-17：`src/core/prompts/direct-prompt.ts` 的 `buildDirectProtocol(structuredCombat)` 按设置生成协议；`direct-combat.ts` 的跨楼战斗只在 `directStructuredCombat` 开启时生效，见上文「正文战斗」。
 - 📌 2026-11-19：`src/core/story/story-beats.ts` 正文分节；前端演出在 `src/ui/composables/useStagedPlayback.ts`、`src/ui/lib/stage-playback.ts`、`src/ui/lib/stage-entrance.ts` 与 `StagedNarrative.vue`，见上文「正文分节与逐节演出」。
-- 📌 2026-11-20：骰池移到 `src/core/agents/direct-dice.ts`（`DirectDicePool`、`rollDirectDice`、`formatDirectDicePool`），`direct-main.ts` 只调用它；扁平角色实体的收拢在 `direct-output.ts`，见上文「实体扁平容错与分组骰池」。
+- 📌 2026-11-20：骰池移到 `src/core/agents/direct-dice.ts`（`DirectDicePool`、`rollDirectDice`、`formatDirectDicePool`），`direct-main.ts` 只调用它；扁平角色实体的收拢在 `direct-normalize.ts` 的 `unflattenCharacterEntity`（由 `direct-output.ts` 的 `parseDirectOutput` 经 `normalizeDirectUpdates` 调用；📌 2026-11-25 更正，原写 `direct-output.ts`），见上文「实体扁平容错与分组骰池」。
+- 📌 2026-11-25（`refactor/direct-contract-validation`，整合审查 R1 + A2）：`src/core/agents/direct-contract.ts` 新增 `DIRECT_VALUE_TYPES`，为 `state.characters.replace`、`state.items.modify` 的 `changes`、`state.quests.upsert`、`effects` 的 update / remove 声明「键 → 值类型」，校验器按表检查，类型不符只丢该行并记 `dropped`（例如 update 的 `remainingTime:"3小时"`、modify 的 `changes.stats:"abc"`，此前前者会让 `Math.max` 得出 NaN 落库、后者原样写进物品）。`quests.upsert` 新增键白名单 `DIRECT_QUEST_UPSERT_KEYS`，名单外的键在归一化时剥除并记 `normalized`。分工收口：归一化只做无损纠正、不再产出 `dropped`（登神状态的有损丢弃移到校验器的 `salvageAscension`，被整条丢弃的实体只记一条最终结果）；原型污染键扫描只在 `direct-output.ts` 归一化之前做一次；分区空值只由 `emptyDirectSections` / `emptyDirectUpdates` 产出；`effects` remove 的多余键只在归一化剥一次。值类型表不进协议文本，协议逐字节不变，`direct_cached` 不冷建。
+- 📌 2026-11-25（`refactor/direct-main-split`，整合审查 R2 + R8 直出项）：`direct-main.ts` 拆成四个文件 —— `direct-main.ts` 只编排（整轮取一次 `structuredCombat` / `stateProtocol` → 组装 → 发送 → 解析 → 告警与统计，失败时处置缓存会话并包 `DirectTurnError`）；`direct-request.ts` 组装（`DirectGenerationInput` 定义在这里，`direct-main.ts` 原名转出；缓存直出不再先拼一份无缓存消息与 `direct_state` JSON 再丢弃）；`direct-send.ts` 发送与空正文重发；`direct-write-stats.ts` 是 `summarizeStateWrites` / `logStateWriteStats` 的新住处（上文「写入统计」所指口径搬到这里，`game-pipeline.ts` 从这里引用）。窗口估算统一走 `utils/token-estimate.ts`：无缓存直出在组装时检查，缓存直出只由会话层检查（按含原生块的整份请求计）。草稿 `DirectTurnDraft` 新增必有字段 `stateProtocol` / `structuredCombat` / `plotEnabled`（生成时口径）与 `entityPaths` / `effectPaths`（各行模型原文路径，取代模块级 WeakMap，草稿被克隆后仍有效）；`game-pipeline.ts` 的 `acceptDirectTurn` 按 `draft.structuredCombat` 决定是否建战斗记录、`recordDirectWriteStats` 按 `draft.stateProtocol` 记统计，生成途中切换开关不影响本楼接纳。`parseDirectOutput` 的 tree / 旧形状两支共用「丢 combat → 原型污染扫描 → 归一化 → 校验」尾段；状态树翻译层的 `profileChanges` 恒空，合并步骤已删。顺带两条校验口径：`state.quests.upsert` / `state.items.modify` / `effects` 的可选键写成 null 时当缺席剥掉并记 `normalized`（`remainingTime: null` 仍表示永久，`name` 必填不剥），不再整行丢弃；`effects` update 的 `stacks` 只查是数值（非正层数照旧由 StateManager 忽略、时长照改），不再因 `stacks: 0` 丢整行。任务多余键每行合成一条 note，与 `stripKeys` 同样最多列 5 个、单键截断到 24 字。协议文字不变，`direct_cached` 不冷建。
 - 📌 2026-11-22：请求末尾的输出格式提醒是 `direct-prompt.ts` 的 `DIRECT_OUTPUT_REMINDER`，由 `direct-main.ts` 接在两种直出的最后一条 user 消息末尾（缓存直出经 `prepareDirectContext` 的 `tailReminder`）；直出旧档认领开局提示词后不再重发，判定在 `game-pipeline.ts` 的 `buildContext`。见上文「尾部格式提醒与开局提示词不再重发」，未真机验证。
 
 运行：`npm run dev`。Windows 测试如遇临时目录 EPERM，可先将 `TEMP` 与 `TMP` 指向仓内 `node_modules/.cache/vitest-tmp`。

@@ -3,8 +3,10 @@
  *
  * 守的是：四种 kind 各画各的收起视图 —— 交锋的行动者头顶自身消耗 / 招式箭 / 目标头顶跳字
  * （暴击放大、失手淡写、拿不出证据的目标不写「失手」）/ 单目标结论写在数字下、多目标结论进脚注 / 状态，
- * 回复类的跳字带「+」，名册的单位与 HP 条，结算的大结论字、产物品质色、经验 / 检定骰 / 消耗，
- * 通用面板的前三个关键格；入场类只在 `entering` 时挂上（历史面板静止）；全程文本插值。
+ * 回复类的跳字带「+」，名册单位的 HP 条与读数，结算的大结论字、产物品质色、经验 / 检定骰 / 消耗，
+ * 通用面板值在上、标签在下。
+ * 五种样式共有的契约（kind 类、通用面板、名册标题与名字、入场类、展开提示、不走 v-html、A4 状态）
+ * 在 action-style-shared.test.ts。
  *
  * @vitest-environment jsdom
  */
@@ -19,6 +21,7 @@ import {
   GENERIC,
   OUTCOME,
   ROSTER,
+  SETTLE,
   sheet,
   viewOf,
 } from './fixtures';
@@ -176,12 +179,9 @@ describe('ActionStyleFloating', () => {
     expect(styles[8]).toContain(`--i: ${STAGGER_INDEX_MAX}`);
   });
 
-  it('名册：标题、每个单位的 HP 条与读数、集群人数', () => {
+  it('名册：每个单位的 HP 条与读数，不写跳字', () => {
     const w = mountFloating(ROSTER);
-    expect(w.find('.floating').classes()).toContain('k-roster');
-    expect(w.find('.f8-title').text()).toBe('第 3 回合 · 战况总览');
     const units = w.findAll('.f8-st.is-roster .f8-tk');
-    expect(units.map((u) => u.find('.nm').text())).toEqual(['艾琳', '灰狼', '盗匪喽啰2/3']);
     expect(units[0].findAll('.gbar')).toHaveLength(1);
     expect(units[0].find('.hp').text()).toBe('69/96');
     expect(units[2].find('.hp').text()).toBe('27/110');
@@ -214,53 +214,11 @@ describe('ActionStyleFloating', () => {
     expect(w.find('.f8-roll').text()).toContain('d20=6');
   });
 
-  it('通用：标题 + 摘要关键格（至多三个，值在上标签在下）', () => {
-    const view = viewOf(GENERIC);
-    const w = mountFloating(GENERIC);
-    expect(w.find('.floating').classes()).toContain('k-generic');
-    expect(w.find('.f8-title').text()).toBe('潜行 · 穿过哨卡');
-    expect(view.facts.length).toBeGreaterThan(0);
-    expect(w.findAll('.f8-tile')).toHaveLength(Math.min(3, view.facts.length));
-    expect(w.find('.f8-tile-v').text()).toBe('1d20(13)+4=17');
-    expect(w.find('.f8-tile-l').text()).toBe('潜行');
-  });
-
-  it('无标题的通用面板显示「行动详情」', () => {
-    expect(mountFloating('| 气味 | 潮湿的苔藓 |').find('.f8-title').text()).toBe('行动详情');
-  });
-
-  it('入场类只在 entering 时挂上：历史面板不带任何动画钩子', () => {
-    for (const raw of [EXCHANGE, EXCHANGE_MISS, ROSTER, OUTCOME, GENERIC]) {
-      const still = mountFloating(raw);
-      expect(still.find('.floating').classes()).not.toContain('is-entering');
-      expect(still.find('.is-entering').exists()).toBe(false);
-      expect(still.find('.gbar.is-animate').exists()).toBe(false);
-      expect(mountFloating(raw, { entering: true }).find('.floating').classes()).toContain(
-        'is-entering',
-      );
-    }
-    expect(mountFloating(ROSTER, { entering: true }).find('.gbar.is-animate').exists()).toBe(true);
-  });
-
-  it('展开提示随 open 换字', () => {
-    expect(mountFloating(EXCHANGE).find('.more').text()).toBe('算式');
-    const opened = mountFloating(EXCHANGE, { open: true }).find('.more');
-    expect(opened.text()).toBe('收起');
-    expect(opened.classes()).toContain('is-open');
-  });
-
-  it('不走 v-html：名字与值里的标签按字面显示', () => {
-    const w = mountFloating(
-      sheet('<b>出手</b>', [
-        ['行动者', '<script>x</script>'],
-        ['目标', '<b>狼</b>'],
-        ['变更', '<b>狼</b> HP 10→5'],
-      ]),
-    );
-    expect(w.find('script').exists()).toBe(false);
-    expect(w.findAll('b').filter((b) => b.classes().length === 0)).toHaveLength(0);
-    expect(w.text()).toContain('<script>x</script>');
-    expect(w.find('.f8-act').text()).toBe('<b>出手</b>');
+  it('通用：关键格值在上、标签在下', () => {
+    const tile = mountFloating(GENERIC).find('.f8-tile');
+    expect(tile.find('.f8-tile-v').text()).toBe('1d20(13)+4=17');
+    expect(tile.find('.f8-tile-l').text()).toBe('潜行');
+    expect(tile.element.firstElementChild?.classList.contains('f8-tile-v')).toBe(true);
   });
 
   it('自身变化着色：头顶第一笔是回升时用增益色，其余消耗仍用资源色', () => {
@@ -279,5 +237,12 @@ describe('ActionStyleFloating', () => {
     expect(top.classes()).not.toContain('cost');
     const rest = w.find('.f8-tk.is-actor .f8-sub');
     expect(rest.classes()).toEqual(expect.arrayContaining(['cost', 'r-mp']));
+  });
+
+  it('结算（A4）：多人状态结算在脚注逐人写出资源变化', () => {
+    const w = mountFloating(SETTLE);
+    const who = w.findAll('.f8-ft .f8-who');
+    expect(who.map((s) => s.text().replace(/\s+/g, ' '))).toEqual(['莱恩 HP −5', '灰狼 HP −5']);
+    expect(who[1].classes()).toEqual(expect.arrayContaining(['down', 'r-hp']));
   });
 });

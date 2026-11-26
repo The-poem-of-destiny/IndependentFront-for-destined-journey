@@ -2,16 +2,49 @@
  * fx-foil.ts — 顶级品质箔光
  *
  * 守的是：品质判定沿用 RARITY_LEVELS 顺序（传说及以上）；低品质与闸门关着时零节点；
- * 悬停才亮、离开复位；变量只写在箔光元素自己身上；倾斜不超过 2.5°；品质变化时挂 / 摘。
+ * 悬停才亮、离开复位；变量只写在箔光元素自己身上；倾斜不超过 2.5°；品质变化时挂 / 摘；
+ * 指针只经 fx-pointer 的全局源订阅（宿主不挂 pointermove）、帧只经 fx-ticker 合并（不直接调 rAF）。
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { defineComponent, h, ref, withDirectives, nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 import { isTopQuality, vFoil, MAX_FOIL_TILT_DEG } from '../../../src/ui/lib/fx-foil';
 import { RARITY_LEVELS } from '@engine/content/field-enums';
 import { syncFxGate, useFxEnabled } from '../../../src/ui/lib/fx-gate';
+
+/** 全局指针源与合帧调度的替身：订阅者与排着的帧都由用例手动驱动 */
+const fx = vi.hoisted(() => ({
+  pointerSubs: new Set<(p: { x: number; y: number; nx: number; ny: number }) => void>(),
+  frames: new Set<(time: number) => void>(),
+}));
+
+vi.mock('../../../src/ui/lib/fx-pointer', () => ({
+  subscribePointer: (cb: (p: { x: number; y: number; nx: number; ny: number }) => void) => {
+    fx.pointerSubs.add(cb);
+    return () => fx.pointerSubs.delete(cb);
+  },
+}));
+
+vi.mock('../../../src/ui/lib/fx-ticker', () => ({
+  requestFrame: (cb: (time: number) => void) => {
+    fx.frames.add(cb);
+    return () => fx.frames.delete(cb);
+  },
+}));
+
+/** 跑完当前排着的一帧 */
+function flushFrame(): void {
+  const batch = Array.from(fx.frames);
+  fx.frames.clear();
+  for (const cb of batch) cb(0);
+}
+
+/** 全局指针源广播一次移动 */
+function emitPointer(x: number, y: number): void {
+  for (const cb of Array.from(fx.pointerSubs)) cb({ x, y, nx: 0, ny: 0 });
+}
 
 function setFx(on: boolean): void {
   if (on) document.documentElement.setAttribute('data-fx', 'on');
@@ -40,12 +73,9 @@ function stubRect(el: Element): void {
     ({ left: 0, top: 0, width: 200, height: 100, right: 200, bottom: 100, x: 0, y: 0 }) as DOMRect;
 }
 
-beforeEach(() => {
-  // 同步执行帧回调，免得测试里等 rAF
-  (globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame = undefined;
-});
-
 afterEach(() => {
+  fx.pointerSubs.clear();
+  fx.frames.clear();
   setFx(false);
   // 让共享镜像跟回 DOM，免得污染后续用例
   useFxEnabled();
@@ -107,6 +137,7 @@ describe('vFoil', () => {
 
     host.dispatchEvent(pointer('pointerenter', { clientX: 50, clientY: 25 }));
     expect(foil.classList.contains('is-active')).toBe(true);
+    flushFrame();
     expect(foil.style.getPropertyValue('--foil-x')).toBe('25.0%');
     expect(foil.style.getPropertyValue('--foil-y')).toBe('25.0%');
     expect(host.style.getPropertyValue('--foil-x')).toBe('');
@@ -135,6 +166,7 @@ describe('vFoil', () => {
     const host = w.element as HTMLElement;
     stubRect(host);
     host.dispatchEvent(pointer('pointerenter', { clientX: 200, clientY: 0 }));
+    flushFrame();
     const m = /rotateX\((-?[\d.]+)deg\) rotateY\((-?[\d.]+)deg\)/.exec(host.style.transform);
     expect(m).not.toBeNull();
     expect(Math.abs(Number(m![1]))).toBeLessThanOrEqual(MAX_FOIL_TILT_DEG);
@@ -152,7 +184,9 @@ describe('vFoil', () => {
     stubRect(host);
     expect(host.style.position).toBe('relative');
     host.dispatchEvent(pointer('pointerenter', { clientX: 200, clientY: 0 }));
+    flushFrame();
     expect(host.style.transform).not.toBe('');
+    expect(fx.pointerSubs.size).toBe(1);
     const removeSpy = vi.spyOn(host, 'removeEventListener');
 
     syncFxGate(false);
@@ -162,15 +196,70 @@ describe('vFoil', () => {
     expect(host.style.transform).toBe('');
     expect(host.style.transition).toBe('');
     const removed = removeSpy.mock.calls.map((c) => c[0]);
-    expect(removed).toEqual(
-      expect.arrayContaining(['pointerenter', 'pointermove', 'pointerleave']),
-    );
+    expect(removed).toEqual(expect.arrayContaining(['pointerenter', 'pointerleave']));
+    // 闸门关闭即退订全局指针源，不留排着的帧
+    expect(fx.pointerSubs.size).toBe(0);
+    expect(fx.frames.size).toBe(0);
 
     syncFxGate(true);
     await nextTick();
     expect(host.querySelectorAll('.fx-foil')).toHaveLength(1);
     w.unmount();
     syncFxGate(false);
+  });
+
+  it('宿主不挂 pointermove：悬停期间经全局指针源订阅，同帧多次移动只落最后一次', () => {
+    setFx(true);
+    const w = mount(makeHost({ value: '传说' }), { attachTo: document.body });
+    const host = w.element as HTMLElement;
+    stubRect(host);
+    // 未悬停时不订阅、不排帧
+    expect(fx.pointerSubs.size).toBe(0);
+    expect(fx.frames.size).toBe(0);
+
+    host.dispatchEvent(pointer('pointerenter', { clientX: 0, clientY: 0 }));
+    expect(fx.pointerSubs.size).toBe(1);
+    flushFrame();
+    // 宿主自己的 pointermove 不再有人处理：不排帧
+    host.dispatchEvent(pointer('pointermove', { clientX: 100, clientY: 50 }));
+    expect(fx.frames.size).toBe(0);
+    emitPointer(100, 50);
+    emitPointer(150, 75);
+    // 两次位置合成一帧
+    expect(fx.frames.size).toBe(1);
+    flushFrame();
+    const foil = host.querySelector('.fx-foil') as HTMLElement;
+    expect(foil.style.getPropertyValue('--foil-x')).toBe('75.0%');
+    expect(foil.style.getPropertyValue('--foil-y')).toBe('75.0%');
+
+    // 下一次移动另排一帧
+    emitPointer(20, 10);
+    expect(fx.frames.size).toBe(1);
+    flushFrame();
+    expect(foil.style.getPropertyValue('--foil-x')).toBe('10.0%');
+
+    // 离开即退订，已排的帧撤掉，之后的全局移动不再落到箔光上
+    emitPointer(200, 100);
+    host.dispatchEvent(pointer('pointerleave', {}));
+    expect(fx.pointerSubs.size).toBe(0);
+    expect(fx.frames.size).toBe(0);
+    emitPointer(200, 100);
+    expect(fx.frames.size).toBe(0);
+    w.unmount();
+  });
+
+  it('悬停中卸载：退订全局指针源、撤掉排着的帧', () => {
+    setFx(true);
+    const w = mount(makeHost({ value: '神话' }, 2.5), { attachTo: document.body });
+    const host = w.element as HTMLElement;
+    stubRect(host);
+    host.dispatchEvent(pointer('pointerenter', { clientX: 10, clientY: 10 }));
+    expect(fx.pointerSubs.size).toBe(1);
+    expect(fx.frames.size).toBe(1);
+    w.unmount();
+    expect(fx.pointerSubs.size).toBe(0);
+    expect(fx.frames.size).toBe(0);
+    expect(host.querySelector('.fx-foil')).toBeNull();
   });
 
   it('卸载后闸门再翻转不会给旧宿主挂节点', async () => {

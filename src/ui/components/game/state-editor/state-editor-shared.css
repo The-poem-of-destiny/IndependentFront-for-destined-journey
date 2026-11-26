@@ -1,0 +1,31 @@
+/*
+ * 变量修改器几个组件共用的静态类（StateEditorPanel 与 state-editor/ 下的子组件以
+ * `<style scoped src>` 各自引入，一份源码、各自作用域）。只放多处都用到的类，不写动画。
+ */
+
+.se-errors {
+  width: 100%;
+  margin: 0;
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  list-style: none;
+  font-size: 0.75rem;
+  color: var(--theme-error);
+  background: color-mix(in srgb, var(--theme-error) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-error) 30%, transparent);
+  border-radius: var(--theme-radius-sm);
+}
+
+.empty-tab {
+  padding: 32px 0;
+  text-align: center;
+  color: var(--theme-text-muted);
+  font-size: 0.8125rem;
+  font-style: italic;
+}
+.empty-tab::before {
+  content: '—';
+  display: block;
+  margin-bottom: 8px;
+  font-size: 1.25rem;
+  opacity: 0.3;
+}

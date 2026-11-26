@@ -7,7 +7,8 @@
  *     跳字是 HP，没有 HP 时是第一条别的资源，其余资源变化写在读数下；跳字的方向另有读屏文字；
  *     单目标时结论写在数字下，多目标时结论进脚注；没打中写「失手」，拿不出证据时浮它身上的状态或「—」
  *   - roster：标题 · 单位徽章 + HP 条与读数
- *   - outcome：斜写的大结论字 · 行动者与动作 · 产物（品质色点）或结果句；脚注是经验 / 检定骰 / 消耗
+ *   - outcome：斜写的大结论字 · 行动者与动作 · 产物（品质色点）或结果句；脚注是经验 / 检定骰 / 消耗 /
+ *     多人结算时逐人的资源变化（带人名）/ 状态
  *   - generic：标题 + 前三个关键格（值在上、标签在下）
  *
  * 入场（仅 `entering`）：数字自下升起放大落定，暴击自 1.25 倍压回，目标间依次错开；失手只淡入。
@@ -18,27 +19,32 @@
 import { computed } from 'vue';
 import type { ActionView, ActionViewTarget } from '../../../lib/action-panel-view';
 import type { ResourceDelta } from '../../../lib/action-digest';
+import {
+  actionLabel,
+  deltaClass,
+  ownClass,
+  primaryOf,
+  rc,
+  settledDeltas,
+  sgn,
+  statusLines,
+  verdictTone,
+} from '../../../lib/action-style-helpers';
 import ActionBadge from './ActionBadge.vue';
 import ActionGauge from './ActionGauge.vue';
+import ActionMoreHint from './ActionMoreHint.vue';
+import ActionViewGeneric from './ActionViewGeneric.vue';
+import ActionViewRoster from './ActionViewRoster.vue';
 import { staggerStyle } from './entrance-timing';
 
 const props = defineProps<{ view: ActionView; open: boolean; entering: boolean }>();
 
 type Gauged = ResourceDelta & { from: number; to: number; max: number };
 
-function sgn(n: number | null): string {
-  if (n === null || !Number.isFinite(n)) return '±?';
-  return (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n);
-}
-
 /** 跳字：伤害只写量（不带负号），回升带「+」 */
 function floatNum(n: number | null): string {
   if (n === null || !Number.isFinite(n)) return '?';
   return n > 0 ? `+${n}` : String(Math.abs(n));
-}
-
-function rc(resource: string): string {
-  return `r-${resource.toLowerCase()}`;
 }
 
 function isGauged(d: ResourceDelta | undefined): d is Gauged {
@@ -57,38 +63,17 @@ function gaugeOf(d: ResourceDelta | undefined) {
   };
 }
 
-function deltaClass(d: ResourceDelta): string {
-  return (d.delta ?? 0) > 0 ? 'up' : 'down';
-}
-
 /** 徽章下的读数：`HP 26/72`；不知道上限时只写现值 */
 function readout(d: ResourceDelta | undefined): string {
   if (!d || d.to === undefined) return '';
   return d.max !== undefined ? `${d.resource} ${d.to}/${d.max}` : `${d.resource} ${d.to}`;
 }
 
-const verdictTone = computed(() => {
-  const tone = props.view.verdict?.tone;
-  return tone === 'success' ? 't-ok' : tone === 'error' ? 't-bad' : '';
-});
-
-const actionLabel = computed(() => props.view.action || props.view.title || '行动');
-
 const singleTarget = computed(() => props.view.targets.length === 1);
 
 /** 行动者头顶浮第一笔自身变化，其余逐条写在读数下面 */
 const actorCost = computed(() => props.view.ownDeltas[0]);
 const actorRest = computed(() => props.view.ownDeltas.slice(1));
-
-/** 出手方自己的变化：消耗用资源色，回升（自我治疗）用增益色 */
-function ownClass(d: ResourceDelta): string {
-  return (d.delta ?? 0) > 0 ? 'up' : 'cost';
-}
-
-/** 目标的主变化：HP 优先，没有 HP 时取第一条别的资源（法力灼烧之类） */
-function primaryOf(t: ActionViewTarget): ResourceDelta | undefined {
-  return t.hp ?? t.deltas[0];
-}
 
 /** 主变化以外的资源变化，逐条写在读数下面 */
 function restOf(t: ActionViewTarget): ResourceDelta[] {
@@ -105,14 +90,6 @@ function srDir(d: ResourceDelta): string {
 function quietFloat(t: ActionViewTarget): string {
   return t.statuses[0] ?? '';
 }
-
-/** 脚注里的状态：目标的状态带上名字，认不出归属的原样列出 */
-const statusLines = computed(() => [
-  ...props.view.targets.flatMap((t) => t.statuses.map((s) => `${t.name} ${s}`)),
-  ...props.view.looseStatuses,
-]);
-
-const genericFacts = computed(() => props.view.facts.slice(0, 3));
 </script>
 
 <template>
@@ -140,7 +117,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
           >
         </div>
         <div class="f8-via">
-          <span class="f8-act">{{ actionLabel }}</span>
+          <span class="f8-act">{{ actionLabel(view) }}</span>
           <span class="f8-arrow" aria-hidden="true" />
         </div>
         <div
@@ -188,28 +165,25 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
         </div>
       </div>
       <div class="f8-ft">
-        <span v-if="!singleTarget && view.verdict" class="vd" :class="verdictTone">{{
+        <span v-if="!singleTarget && view.verdict" class="vd" :class="verdictTone(view)">{{
           view.verdict.text
         }}</span>
-        <span v-for="(s, i) in statusLines" :key="`st-${i}`" class="f8-status">＋{{ s }}</span>
-        <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-          >{{ open ? '收起' : '算式' }}<i class="more-caret"
-        /></span>
+        <span v-for="(s, i) in statusLines(view)" :key="`st-${i}`" class="f8-status"
+          >＋{{ s }}</span
+        >
+        <ActionMoreHint :open="open" />
       </div>
     </template>
 
     <!-- ── 名册 ── -->
     <template v-else-if="view.kind === 'roster'">
       <div class="f8-title">{{ view.title || '战况' }}</div>
-      <div class="f8-st is-roster">
-        <div v-for="(u, i) in view.roster" :key="`u-${i}`" class="f8-tk" :style="staggerStyle(i)">
-          <ActionBadge :name="u.name" target size="lg" />
-          <span class="nm"
-            >{{ u.name
-            }}<small v-if="u.cluster" class="rng f8-cluster"
-              >{{ u.cluster.alive }}/{{ u.cluster.total }}</small
-            ></span
-          >
+      <ActionViewRoster
+        :view="view"
+        :classes="{ list: 'f8-st is-roster', unit: 'f8-tk', cluster: 'f8-cluster' }"
+        badge-size="lg"
+      >
+        <template #unit="{ unit: u }">
           <template v-if="u.hp">
             <ActionGauge
               :lo="u.hp.cur"
@@ -221,25 +195,23 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
             <span class="hp">{{ u.hp.cur }}/{{ u.hp.max }}</span>
           </template>
           <span v-else class="hp">{{ ' ' }}</span>
-        </div>
-      </div>
+        </template>
+      </ActionViewRoster>
       <div class="f8-ft">
-        <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-          >{{ open ? '收起' : '算式' }}<i class="more-caret"
-        /></span>
+        <ActionMoreHint :open="open" />
       </div>
     </template>
 
     <!-- ── 结算 ── -->
     <template v-else-if="view.kind === 'outcome'">
       <div class="f8-st is-outcome">
-        <div v-if="view.verdict" class="f8-word" :class="verdictTone">
+        <div v-if="view.verdict" class="f8-word" :class="verdictTone(view)">
           <strong class="f8-word-t">{{ view.verdict.text }}</strong>
         </div>
         <div class="f8-info">
           <span
             ><span v-if="view.actor" class="nm">{{ view.actor }}</span
-            ><template v-if="view.actor"> · </template>{{ actionLabel }}</span
+            ><template v-if="view.actor"> · </template>{{ actionLabel(view) }}</span
           >
           <span v-if="view.outcome?.product"
             ><span
@@ -267,28 +239,36 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
           :class="[ownClass(x), rc(x.resource)]"
           >{{ x.resource }} {{ sgn(x.delta) }}</span
         >
-        <span v-for="(s, i) in statusLines" :key="`st-${i}`" class="f8-status">＋{{ s }}</span>
-        <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-          >{{ open ? '收起' : '算式' }}<i class="more-caret"
-        /></span>
+        <span
+          v-for="(s, i) in settledDeltas(view)"
+          :key="`who-${i}`"
+          class="f8-cost f8-who"
+          :class="[deltaClass(s.delta), rc(s.delta.resource)]"
+          ><span class="nm">{{ s.who }}</span> {{ s.delta.resource }} {{ sgn(s.delta.delta) }}</span
+        >
+        <span v-for="(s, i) in statusLines(view)" :key="`st-${i}`" class="f8-status"
+          >＋{{ s }}</span
+        >
+        <ActionMoreHint :open="open" />
       </div>
     </template>
 
     <!-- ── 通用 ── -->
-    <template v-else>
-      <div class="f8-title">{{ view.title || '行动详情' }}</div>
-      <div v-if="genericFacts.length > 0" class="f8-tiles">
-        <div v-for="(c, i) in genericFacts" :key="`f-${i}`" class="f8-tile">
-          <b class="f8-tile-v">{{ c.value }}</b>
-          <small class="f8-tile-l">{{ c.label }}</small>
-        </div>
-      </div>
-      <div class="f8-ft">
-        <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-          >{{ open ? '收起' : '算式' }}<i class="more-caret"
-        /></span>
-      </div>
-    </template>
+    <ActionViewGeneric
+      v-else
+      :view="view"
+      :open="open"
+      :classes="{
+        head: 'f8-title',
+        list: 'f8-tiles',
+        item: 'f8-tile',
+        itemTag: 'div',
+        label: 'f8-tile-l',
+        value: 'f8-tile-v',
+        foot: 'f8-ft',
+      }"
+      value-first
+    />
   </div>
 </template>
 
@@ -311,7 +291,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
   padding-inline: var(--gear-gap);
 }
 
-.f8-tk {
+:deep(.f8-tk) {
   position: relative;
   display: grid;
   justify-items: center;
@@ -321,7 +301,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
   text-align: center;
 }
 
-.f8-tk .nm {
+:deep(.f8-tk .nm) {
   font-size: 0.8125rem;
   line-height: 1.3;
 }
@@ -344,11 +324,11 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
   line-height: 1.3;
 }
 
-.f8-st.is-roster .f8-tk {
+:deep(.f8-st.is-roster .f8-tk) {
   padding-top: 0.4rem;
 }
 
-.f8-cluster {
+:deep(.f8-cluster) {
   margin-left: 4px;
   font-family: var(--theme-font-body);
   font-weight: 400;
@@ -465,7 +445,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
 }
 
 /* 脚注 */
-.f8-ft {
+:deep(.f8-ft) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -477,7 +457,7 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
 }
 
 /* 标题（名册 / 通用） */
-.f8-title {
+:deep(.f8-title) {
   margin: 4px 0 6px;
   padding-inline: var(--gear-gap);
   font-family: var(--theme-font-title);
@@ -525,26 +505,26 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
 }
 
 /* 通用 */
-.f8-tiles {
+:deep(.f8-tiles) {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 6px 22px;
 }
 
-.f8-tile {
+:deep(.f8-tile) {
   display: grid;
   justify-items: center;
 }
 
-.f8-tile-v {
+:deep(.f8-tile-v) {
   color: var(--theme-text-primary);
   font-family: var(--mono);
   font-size: 0.875rem;
   overflow-wrap: anywhere;
 }
 
-.f8-tile-l {
+:deep(.f8-tile-l) {
   color: var(--theme-text-muted);
   font-size: 0.6875rem;
 }
@@ -557,11 +537,11 @@ const genericFacts = computed(() => props.view.facts.slice(0, 3));
 
   /* 窄卡上只给第一排的右侧让出齿轮位 */
   .f8-st:first-child,
-  .f8-title {
+  :deep(.f8-title) {
     padding-inline: 0 var(--gear-gap);
   }
 
-  .f8-tk {
+  :deep(.f8-tk) {
     width: 4.5rem;
   }
 

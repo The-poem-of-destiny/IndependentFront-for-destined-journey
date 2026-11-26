@@ -22,6 +22,9 @@
 import { RARITY_LEVELS } from '@engine/content/field-enums';
 import {
   digestActionPanel,
+  EXP_LABEL_RE,
+  PRODUCT_LABEL_RE,
+  QUALITY_LABEL_RE,
   type ActionDigest,
   type ActionDigestKind,
   type DigestRoll,
@@ -105,6 +108,11 @@ export interface ActionView {
   heal: boolean;
   /** 主掷骰（摘要原样） */
   roll?: DigestRoll;
+  /**
+   * 交锋里是被打的人；结算（outcome）里没有单一出手方时（回合结束的多人状态结算），
+   * 是结算涉及的各人 —— 收起视图要逐人画出来（`action-style-helpers` 的 `settledDeltas`），
+   * 否则这些变化在收起态就看不见了。
+   */
   targets: ActionViewTarget[];
   ownDeltas: ResourceDelta[];
   looseStatuses: string[];
@@ -132,9 +140,6 @@ const RESULT_LABELS: ReadonlySet<string> = new Set([
 ]);
 /** 值超过这个长度就跨两列 */
 const WIDE_VALUE_LENGTH = 28;
-const PRODUCT_LABEL_RE = /^(?:产出列表|产出|产物)$/;
-const QUALITY_LABEL_RE = /^品质$/;
-const EXP_LABEL_RE = /^(?:经验|实得EXP|EXP合计|EXP)$/i;
 const RESULT_LABEL = '结果';
 const HUES: ReadonlySet<string> = new Set(['info', 'strike', 'check', 'gain']);
 const GAIN_PREFIX_RE = /^\s*获得\s*/;

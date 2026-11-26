@@ -3,8 +3,9 @@
  *
  * 守的是：每个受影响的人一条资源条 —— 下降段是斜纹残影、回升段提亮、失手 / 看不出的目标画虚线槽；
  * 出手方消耗排在目标之后；结算的 d20 对抗检定画成刻度（DC 刻线 + 落点），制作类画产物与品质格；
- * 名册是 HP 主条 + MP / SP 小条；通用面板是前三个关键格；
- * 盖片与入场类只在 `entering` 时出现；展开提示随 `open` 换字；全程文本插值。
+ * 名册是 HP 主条 + MP / SP 小条；盖片只在 `entering` 时出现。
+ * 五种样式共有的契约（kind 类、通用面板、名册标题与名字、入场类、展开提示、不走 v-html、A4 状态）
+ * 在 action-style-shared.test.ts。
  *
  * @vitest-environment jsdom
  */
@@ -15,9 +16,9 @@ import {
   ASSET_STUB,
   EXCHANGE,
   EXCHANGE_MISS,
-  GENERIC,
   OUTCOME,
   ROSTER,
+  SETTLE,
   sheet,
   viewOf,
 } from './fixtures';
@@ -121,13 +122,8 @@ describe('ActionStyleAfterimage', () => {
     expect(dv[1].classes()).toContain('cost');
   });
 
-  it('名册：标题与环境，HP 主条 + MP / SP 小条与读数，集群人数', () => {
+  it('名册：HP 主条 + MP / SP 小条与读数', () => {
     const w = mountAfterimage(ROSTER);
-    expect(w.find('.d2').classes()).toContain('k-roster');
-    expect(w.find('.d2-h .nm').text()).toBe('第 3 回合 · 战况总览');
-    expect(w.find('.d2-note').text()).toContain('夜雨 · 林道');
-    const names = w.findAll('.d2-ros .d2-who').map((n) => n.text());
-    expect(names).toEqual(['艾琳', '灰狼', '盗匪喽啰2/3']);
     expect(w.findAll('.d2-ros .n').map((n) => n.text())).toEqual(['69/96', '26/72', '27/110']);
     const minis = w.findAll('.d2-ros .mini');
     expect(minis).toHaveLength(6);
@@ -181,18 +177,7 @@ describe('ActionStyleAfterimage', () => {
     expect(w.find('.d2-seal').text()).toBe('失败');
   });
 
-  it('通用：标题 + 摘要关键格（至多三个）；无标题显示「行动详情」', () => {
-    const view = viewOf(GENERIC);
-    const w = mountAfterimage(GENERIC);
-    expect(w.find('.d2').classes()).toContain('k-generic');
-    expect(w.find('.d2-h .nm').text()).toBe('潜行 · 穿过哨卡');
-    expect(view.facts.length).toBeGreaterThan(0);
-    expect(w.findAll('.d2-kv-item')).toHaveLength(Math.min(3, view.facts.length));
-    expect(w.find('.d2-kv-v').text()).toBe('1d20(13)+4=17');
-    expect(mountAfterimage('| 气味 | 潮湿的苔藓 |').find('.d2-h .nm').text()).toBe('行动详情');
-  });
-
-  it('入场：entering=false 时没有任何入场类与盖片', () => {
+  it('入场：entering=false 时没有盖片（治疗面板也没有入场类）', () => {
     for (const raw of [EXCHANGE, HEAL, ROSTER, OUTCOME]) {
       const w = mountAfterimage(raw);
       expect(w.find('.d2').classes()).not.toContain('is-entering');
@@ -201,7 +186,7 @@ describe('ActionStyleAfterimage', () => {
     }
   });
 
-  it('入场：entering=true 时下降段挂盖片（宽 = 失去的量），回升段不挂；名册资源条跟着播', () => {
+  it('入场：entering=true 时下降段挂盖片（宽 = 失去的量），回升段不挂', () => {
     const w = mountAfterimage(EXCHANGE, { entering: true });
     expect(w.find('.d2').classes()).toContain('is-entering');
     const covers = w.findAll('.d2-cover');
@@ -212,20 +197,9 @@ describe('ActionStyleAfterimage', () => {
 
     const heal = mountAfterimage(HEAL, { entering: true });
     expect(heal.findAll('.d2-cover')).toHaveLength(1);
-
-    expect(mountAfterimage(ROSTER, { entering: true }).find('.gbar.is-animate').exists()).toBe(
-      true,
-    );
   });
 
-  it('展开提示随 open 换字', () => {
-    expect(mountAfterimage(EXCHANGE).find('.more').text()).toBe('算式');
-    const opened = mountAfterimage(EXCHANGE, { open: true }).find('.more');
-    expect(opened.text()).toBe('收起');
-    expect(opened.classes()).toContain('is-open');
-  });
-
-  it('不走 v-html：名字与值里的标签按字面显示', () => {
+  it('不走 v-html：头行的目标名原文以字面出现', () => {
     const w = mountAfterimage(
       sheet('<b>出手</b>', [
         ['行动者', '<script>x</script>'],
@@ -233,11 +207,17 @@ describe('ActionStyleAfterimage', () => {
         ['变更', '<b>狼</b> HP 10→5'],
       ]),
     );
-    expect(w.find('script').exists()).toBe(false);
-    expect(w.findAll('b').filter((b) => b.classes().length === 0)).toHaveLength(0);
-    expect(w.text()).toContain('<script>x</script>');
     // 目标名原文以字面出现（摘要层对 `/` 的拆分与本组件无关，只看 `<b>` 没被当成标签）
     expect(w.find('.d2-tg').text()).toContain('<b>狼');
-    expect(w.find('.d2-h .act').text()).toBe('<b>出手</b>');
+  });
+
+  it('结算（A4）：多人状态结算逐人一条残影条', () => {
+    const w = mountAfterimage(SETTLE);
+    const rows = w.find('.d2-rows');
+    expect(rows.findAll('.d2-who').map((n) => n.text())).toEqual(['莱恩', '灰狼']);
+    expect(rows.findAll('.d2-who.own')).toHaveLength(0);
+    expect(rows.findAll('.dv').map((n) => n.text())).toEqual(['−5', '−5']);
+    expect(rows.findAll('.dv')[0].classes()).toContain('down');
+    expect(rows.findAll('.rng').map((n) => n.text())).toEqual(['80→75', '45→40']);
   });
 });

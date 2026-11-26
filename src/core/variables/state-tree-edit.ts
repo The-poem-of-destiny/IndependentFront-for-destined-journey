@@ -3,16 +3,22 @@
  *
  * 纯函数，不碰 I/O。写入口是 `StateManager.commitPlayerEdit`，本模块只负责：
  * - `previewPlayerEdit`：不落库试算（面板「将要发生的变更」），并给出整批会不会被拒及原因；
- * - `buildUndoOps`：由翻译层记录的前值生成反向 op（撤销上一次修改）；
- * - `planUpdateBlockRevision`：更新块逐条补差（§12.3），产出作用在**当前状态**上的补偿 op；
- * - `applyRevisionToRecord`：提交成功后改写本楼记录（被修订行标「已手动修订」）。
+ * - `planUpdateBlockRevision`：更新块逐条补差（§12.3），产出作用在**当前状态**上的补偿 op
+ *   （其中「撤销一行」仍是逐条反向 op，`inverseOpsOf`）；
+ * - `applyRevisionToRecord`：提交成功后改写本楼记录（被修订行标「已手动修订」）；
+ * - `playerEditFingerprint`：撤销凭据的指纹（修改器撤销改为内核快照整体还原，2026-11-25 审查 R4）。
  *
  * 🔴 已裁定（§9）：修改器不能强改只读键（#14）、不能改时间（#15）；更新块逐条补差、不从前置快照重放（#16）；
  *    手改不告知模型（#18）—— 本模块不产任何「玩家修正」清单。
  * 🔴 只有最新一楼可改由调用方（UI）把守；本模块只看传进来的那一条记录。
  */
 
-import type { StateUpdateOpRecord, StateUpdateRecord } from '../types/types';
+import type {
+  CharacterState,
+  SaveProfile,
+  StateUpdateOpRecord,
+  StateUpdateRecord,
+} from '../types/types';
 import {
   normalizeTreePath,
   parseTreePatchBlock,
@@ -22,13 +28,19 @@ import {
 } from './state-tree-patch';
 import { coerceNumber } from './state-tree-codecs';
 import { buildStateTree, type StateTreeValue } from './state-tree-projection';
-import { isReadonlyKey, type StateTreePatchOp } from './state-tree-spec';
+import {
+  STATE_TREE_DEPLETABLE_LEAF,
+  STATE_TREE_NAMED_RECORD_KEYS,
+  isReadonlyKey,
+  type StateTreePatchOp,
+} from './state-tree-spec';
 import {
   readStateTreeValue,
   translateTreeOps,
   type TreeTranslateResult,
   type TreeTranslateSnapshot,
 } from './state-tree-translator';
+import { canonical, isPlainObject, jsonClone } from './state-tree-utils';
 
 // ========== 对外类型 ==========
 
@@ -58,14 +70,52 @@ export interface PlayerEditPreview {
   readonly translation: TreeTranslateResult | null;
 }
 
+/**
+ * 修改器「撤销上一次修改」的凭据（§11.4；2026-11-25 审查 R4 改为内核快照整体还原）。
+ *
+ * `commitPlayerEdit` 在锁内记下提交前被触及的角色与档案（整份内核形状，含投影里没有的内部字段），
+ * 以及更新块修订时该楼的记录；`undoPlayerEdit` 在同锁同事务里核对指纹后整体写回。
+ * 不再由前值生成反向 op —— 反向 op 不是真逆（钳制、顶替、新建 id 都还原不了）。
+ */
+export interface PlayerEditUndoToken {
+  readonly saveId: string;
+  /** 提交前被触及角色的整份快照：id → 角色；null = 这次提交新建的角色（撤销时删除）。 */
+  readonly characters: Readonly<Record<string, CharacterState | null>>;
+  /** 提交前的档案；这次提交没改档案时缺席。 */
+  readonly profile?: SaveProfile;
+  /** 提交前该楼的更新记录（更新块修订时才有）。 */
+  readonly message?: { readonly id: string; readonly stateUpdates: StateUpdateRecord };
+  /** 提交后被触及部分的指纹；撤销前现状必须与它一致。 */
+  readonly fingerprint: string;
+}
+
+/** `undoPlayerEdit` 的结果。 */
+export type PlayerEditUndoResult =
+  | {
+      readonly ok: true;
+      /** 一并还原的本楼记录（UI 据此刷新展示副本）。 */
+      readonly message?: { readonly id: string; readonly stateUpdates: StateUpdateRecord };
+    }
+  | { readonly ok: false; readonly reasons: string[] };
+
+/** 更新块修订时随状态同事务写回的本楼记录（`commitPlayerEdit` 的可选参数）。 */
+export interface PlayerEditRecordWriteback {
+  readonly messageId: string;
+  /** 被修订行的下标；`append` 时为 null。 */
+  readonly index: number | null;
+  readonly revision: UpdateBlockRevision;
+}
+
 /** `commitPlayerEdit` 的结果。 */
 export type PlayerEditCommitResult =
   | {
       readonly ok: true;
       readonly records: StateUpdateOpRecord[];
       readonly normalized: string[];
-      /** 撤销这次修改的反向 op（尽力而为，§11.4），同样交给 `commitPlayerEdit`。 */
-      readonly undo: PlayerEditOp[];
+      /** 撤销凭据，交给 `undoPlayerEdit`。 */
+      readonly undo: PlayerEditUndoToken;
+      /** 同事务写回后的本楼记录（传了 `record` 时才有）。 */
+      readonly stateUpdates?: StateUpdateRecord;
     }
   | {
       readonly ok: false;
@@ -116,27 +166,7 @@ const TIME_POINTER = '/世界/时间';
 const TIME_REASON = '时间在修改器里只读（只能前进，且会触发天气、随机事件、地块结算）';
 const READONLY_SUFFIX = '修改器不能改只读键';
 
-function jsonClone<T>(v: T): T {
-  return v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T);
-}
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === 'object' && !Array.isArray(v);
-}
-
 /** 键序无关的深比较（投影键序固定，但记录可能来自旧序列化）。 */
-function canonical(v: unknown): string {
-  if (v === undefined) return 'undefined';
-  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
-  if (isPlainObject(v)) {
-    return `{${Object.keys(v)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(v);
-}
-
 function sameValue(a: unknown, b: unknown): boolean {
   return canonical(a) === canonical(b);
 }
@@ -305,25 +335,12 @@ function writableValue(value: unknown, segments: readonly string[] | null): unkn
   return strip(jsonClone(value), 0, null);
 }
 
-/** 名字字典（Record）的键：路径倒数第二段是其中之一时，终点是条目根。 */
-const RECORD_KEYS = new Set([
-  '背包',
-  '装备',
-  '技能',
-  '状态效果',
-  '关系列表',
-  '任务列表',
-  '要素',
-  '权能',
-  '法则',
-]);
-
-/** 路径终点是不是一个名字字典的条目（整实体），或变量、新闻标题这类可删的键。 */
+/** 路径终点是不是一个名字字典的条目（整实体），或变量、新闻标题这类可删的键。字典键取自词表。 */
 function isEntryRootPath(segments: readonly string[] | null): boolean {
   if (!segments || segments.length < 2) return false;
   if (segments[0] === '变量') return true;
   if (segments[0] === '新闻') return segments.length === 3;
-  return RECORD_KEYS.has(segments[segments.length - 2]);
+  return STATE_TREE_NAMED_RECORD_KEYS.has(segments[segments.length - 2]);
 }
 
 /** 投影里缺席的叶子对应的空值（投影省略空值，`装备` 里的数量 1 也省略）。认不出类型返回 undefined。 */
@@ -341,20 +358,16 @@ function isSibling(record: StateUpdateOpRecord): boolean {
   return record.foldedInto !== undefined;
 }
 
-/** 可被 `数量` / `层数` 减没的名字字典 → 那个叶子（与翻译层写 `entryBefore` 的判据一致）。 */
-const DEPLETABLE_LEAF: Readonly<Record<string, string>> = {
-  背包: '数量',
-  装备: '数量',
-  状态效果: '层数',
-};
-
-/** 路径是不是「可减没条目」的 `数量` / `层数` 叶子；是则返回条目段与叶子键。 */
+/**
+ * 路径是不是「可减没条目」的 `数量` / `层数` 叶子；是则返回条目段与叶子键。
+ * 判据与翻译层写 `entryBefore` 的同一份（词表 `STATE_TREE_DEPLETABLE_LEAF`）。
+ */
 function depletableLeaf(
   segs: readonly string[] | null,
 ): { entrySegs: readonly string[]; leaf: string } | null {
   if (!segs || segs.length < 4) return null;
   const n = segs.length;
-  if (DEPLETABLE_LEAF[segs[n - 3]] !== segs[n - 1]) return null;
+  if (STATE_TREE_DEPLETABLE_LEAF[segs[n - 3]] !== segs[n - 1]) return null;
   return { entrySegs: segs.slice(0, -1), leaf: segs[n - 1] };
 }
 
@@ -465,18 +478,33 @@ function inverseOf(record: StateUpdateOpRecord, tree?: StateTreeValue): PlayerEd
 }
 
 /**
- * 由翻译层记录的前值生成撤销 op（§11.4）。逆序排列：后写的先撤。
+ * 单行反向 op（更新块「撤销这一行」的基础，不看当前状态）：
+ * 数值增量按实际前后差反向；覆盖还原前值、新建 → remove；remove ↔ add 按前值整对象重建（只读键剥除）；
+ * move 反向（从装备移出的穿回原槽）。丢弃行、折叠兄弟行与时间行返回空。
  *
- * - 数值增量：按实际前后差反向（钳制过的也能撤回原值）；
- * - 覆盖：还原前值；新建（前值缺席）→ remove；
- * - remove ↔ add：被删条目按记录的前值整对象重建（只读键剥除；投影里没有的内部字段不保证）；
- * - move：反向 move，从装备移出的穿回原槽。
- * 丢弃行、折叠兄弟行与时间行不产 op。
+ * 🔴 变量修改器的撤销**不走这里**：它在 `StateManager.undoPlayerEdit` 里按内核快照整体还原
+ *    （2026-11-25 审查 R4）。逐条反向 op 只留给更新块逐行撤销（主人裁定）。
  */
-export function buildUndoOps(records: readonly StateUpdateOpRecord[]): PlayerEditOp[] {
-  const out: PlayerEditOp[] = [];
-  for (let i = records.length - 1; i >= 0; i--) out.push(...inverseOf(records[i]));
-  return out;
+export function inverseOpsOf(record: StateUpdateOpRecord): PlayerEditOp[] {
+  return inverseOf(record);
+}
+
+/**
+ * 撤销凭据的指纹：被触及角色（id → 现状；null = 不存在）、档案、本楼记录的键序无关序列化。
+ * `commitPlayerEdit` 用提交后的现状算一次，`undoPlayerEdit` 用撤销前的现状再算一次，不等即拒绝。
+ */
+export function playerEditFingerprint(parts: {
+  readonly characters: Readonly<Record<string, CharacterState | null | undefined>>;
+  readonly profile?: SaveProfile | null;
+  readonly stateUpdates?: StateUpdateRecord | null;
+}): string {
+  const chars: Record<string, unknown> = {};
+  for (const id of Object.keys(parts.characters)) chars[id] = parts.characters[id] ?? null;
+  return canonical({
+    characters: chars,
+    ...(parts.profile !== undefined ? { profile: parts.profile ?? null } : {}),
+    ...(parts.stateUpdates !== undefined ? { stateUpdates: parts.stateUpdates ?? null } : {}),
+  });
 }
 
 // ========== 更新块补差 ==========
@@ -616,7 +644,7 @@ function finish(ops: PlayerEditOp[], snapshot: TreeTranslateSnapshot): RevisionP
  * - 改值：数值增量按差额补（原 −30 改 −10 就补 +20；钳制过的按「前值 + 新增量」与现值求差）；
  *   覆盖型按目标值设；新增条目改成整对象覆盖；叠在已有背包物品上的 add 按数量差额补；
  *   把条目减没的那条先按整对象前值重建、再设成新数量 / 层数。
- * - 撤销：同 `buildUndoOps` 的单条反向。
+ * - 撤销：同 `inverseOpsOf` 的单条反向。
  * - 重新应用 / 新增：原样（或改好后）的那条 op。
  *
  * 改值与撤销先核现值：已不等于记录的后值 → 返回冲突（含现值），`force` 时跳过。

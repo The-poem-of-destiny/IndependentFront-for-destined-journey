@@ -2,6 +2,11 @@ import type { ChatMessage, DirectCacheDiagnostics } from '../types/types';
 import type { LlmMessage } from '../types/types-api';
 import { logEngine } from '../runtime/engine-logger';
 import { STATE_TREE_CACHE_PROTOCOL } from './state-tree-prompt';
+import { nsfwEnabled } from '../content/nsfw-filter';
+import { estimateTokensFromChars } from '../utils/token-estimate';
+
+/** 露骨内容开关为开时并入缓存直出会话签名的字段。 */
+const DIRECT_CACHE_NSFW_MARK = 'nsfw-content:on';
 
 export interface DirectContextFrame {
   prefix: LlmMessage[];
@@ -215,7 +220,14 @@ export async function prepareDirectContext(input: {
   const currentSource = source(input.history);
   const rebuild = normalizeDirectCacheRebuild(input.rebuild);
   const currentKeys = input.currentSections ?? CURRENT_SECTIONS;
-  const signature = serializeDirectContext([input.signature, input.frame.prefix]);
+  // 露骨内容开关：本轮资料 / 角色上下文 / turn 预设条目在可替换分区里，随留存消息进 transcript、
+  // 不进签名；开 → 关时更早留存消息里开模式渲染的露骨段会被回放。开时并入开关强制冷建。
+  // 🔴 只在开时追加：关（缺省）时签名与此前逐字节相同，避免全体缓存直出存档一次性冷建。
+  const signature = serializeDirectContext(
+    nsfwEnabled()
+      ? [input.signature, input.frame.prefix, DIRECT_CACHE_NSFW_MARK]
+      : [input.signature, input.frame.prefix],
+  );
   const sections = JSON.parse(serializeDirectContext(input.frame.sections)) as Record<
     string,
     unknown
@@ -240,6 +252,10 @@ export async function prepareDirectContext(input: {
       })}\n</turn_context>${input.tailReminder ? `\n${input.tailReminder}` : ''}`,
     };
   };
+  // 整份请求（含尾部与原生块）的估算加输出预留是否超出模型窗口；未配置窗口时恒为 false
+  const overWindow = (list: LlmMessage[]) =>
+    !!input.contextWindowTokens &&
+    estimateTokensFromChars(size(list)) + input.outputBudget > input.contextWindowTokens;
   const freshTail = tailFor(sections);
   const fresh = [...input.frame.prefix, ...input.frame.history, pack(sections, []), freshTail];
   let tail = freshTail;
@@ -275,11 +291,7 @@ export async function prepareDirectContext(input: {
     const reusedTail = tailFor(changed);
     messages = [...previous.transcript, pack(changed, removed), reusedTail];
     if (size(messages) > size(fresh) * rebuild.growthLimit) reason = 'transcript_growth';
-    else if (
-      input.contextWindowTokens &&
-      Math.ceil(size(messages) / 1.5) + input.outputBudget > input.contextWindowTokens
-    )
-      reason = 'context_budget';
+    else if (overWindow(messages)) reason = 'context_budget';
     if (reason) messages = fresh;
     else {
       set = changed;
@@ -287,10 +299,7 @@ export async function prepareDirectContext(input: {
       tail = reusedTail;
     }
   }
-  if (
-    input.contextWindowTokens &&
-    Math.ceil(size(messages) / 1.5) + input.outputBudget > input.contextWindowTokens
-  )
+  if (overWindow(messages))
     throw new Error('直出缓存基线上下文仍超出模型窗口，请缩短历史或调整输出预留');
   const revision = reason ? 1 : previous!.revision + 1;
   const retainedCount = messages.length - 1;

@@ -368,6 +368,43 @@ describe('loadPresets —— 条目开关覆写层', () => {
     const loaded = presets.find((p: { id: string }) => p.id === 'mine');
     expect(loaded.settings.prompts[0].enabled).toBe(true);
   });
+
+  it('🔴 登记过的出厂行即使没有播种指纹也吃覆写层（管线目录登记出厂 id，R7 回归）', async () => {
+    const { getPresets } = await import('@engine/persistence/database');
+    const { registerFactoryPresetIds } = await import('../../../src/ui/lib/preset-catalog');
+    vi.mocked(getPresets).mockResolvedValueOnce([rowOf('factory-plain')] as never);
+    registerFactoryPresetIds(['factory-plain']);
+    try {
+      const pipeline = makePipeline({}, { presetEntryToggles: { 'factory-plain': { a: false } } });
+      const { presets } = await (pipeline as any).loadPresets();
+      const loaded = presets.find((p: { id: string }) => p.id === 'factory-plain');
+      expect(loaded.settings.prompts[0].enabled).toBe(false);
+    } finally {
+      registerFactoryPresetIds([]);
+    }
+  });
+});
+
+describe('预设目录工厂（R7）', () => {
+  it('管线目录与设置页共用的工厂同输入同输出（含出厂 id 与内置直出预设）', async () => {
+    const { buildUiPresetCatalog, registerFactoryPresetIds } =
+      await import('../../../src/ui/lib/preset-catalog');
+    const rows = [
+      { id: 'factory-x', name: 'x', settings: {}, createdAt: 1, updatedAt: 1 },
+      { id: 'mine', name: 'mine', settings: {}, createdAt: 1, updatedAt: 1 },
+    ];
+    const defaults = { story: { presetId: 'factory-y' } };
+    registerFactoryPresetIds(['factory-x']);
+    try {
+      const fromPipeline = (makePipeline() as any).presetCatalog(rows, defaults);
+      expect(fromPipeline).toEqual(buildUiPresetCatalog(rows as never, defaults));
+      const factory = fromPipeline.find((e: any) => e.preset.id === 'factory-x');
+      expect(factory.readonly).toBe(true);
+      expect(fromPipeline.some((e: any) => e.origin === 'builtin')).toBe(true);
+    } finally {
+      registerFactoryPresetIds([]);
+    }
+  });
 });
 
 describe('direct preset defaults', () => {
@@ -666,6 +703,57 @@ describe('loadActiveWorldBooks — 装入与权限（内容计划 §7.1）', () 
     expect(uidsFor('story')).toEqual(['fated:world_setting/story']);
     expect(uidsFor('entity_gen')).toEqual(['fated:world_setting/entity']);
     expect(uidsFor('lore_select')).toEqual([]);
+  });
+
+  it('loadWorldBookSets：过滤前、过滤后两份同一份存档白名单，开关只影响过滤后那份', async () => {
+    worldBookStoreState.books = [
+      {
+        id: 'character',
+        name: '人物',
+        partition: 'character',
+        builtIn: true,
+        entries: [
+          {
+            ...entry('fated:character/picked'),
+            extra: { lore: { audiences: ['story', 'entity_gen'], nsfw: true } },
+          },
+          entry('fated:character/unpicked'),
+        ],
+      },
+    ];
+    const pipeline = makePipeline({
+      activeSave: { metadata: { enabledWorldBookEntries: ['fated:character/picked'] } },
+    });
+    const off = await (pipeline as any).loadWorldBookSets(false);
+    const uids = (books: WorldBook[]) => books.flatMap((b) => b.entries.map((e) => e.uid));
+    // 没选过的角色两份都不出现（旧档冻结不会带进它）
+    expect(uids(off.sourceBooks)).toEqual(['fated:character/picked']);
+    // 开关关闭：整条标记的露骨条目只从过滤后那份剔除
+    expect(uids(off.books)).toEqual([]);
+    // 开关为开：过滤后的书即全部，不另给过滤前那份
+    const on = await (pipeline as any).loadWorldBookSets(true);
+    expect(on.sourceBooks).toBeUndefined();
+    expect(uids(on.books)).toEqual(['fated:character/picked']);
+  });
+
+  it('loadWorldBookSets 读失败：两份同为空，不退回到过滤后的书', async () => {
+    const pipeline = makePipeline();
+    Object.defineProperty(worldBookStoreState, 'books', {
+      configurable: true,
+      get() {
+        throw new Error('读失败');
+      },
+    });
+    try {
+      const sets = await (pipeline as any).loadWorldBookSets(false);
+      expect(sets).toEqual({ books: [], sourceBooks: [] });
+    } finally {
+      Object.defineProperty(worldBookStoreState, 'books', {
+        configurable: true,
+        writable: true,
+        value: [],
+      });
+    }
   });
 
   it('buildAgentConfigs 不再带世界书清单', () => {

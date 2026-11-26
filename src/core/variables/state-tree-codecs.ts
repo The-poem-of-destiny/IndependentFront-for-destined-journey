@@ -35,6 +35,7 @@ import {
   stripReadonlyPrefix,
   type StateTreeEnumKind,
 } from './state-tree-spec';
+import { isPlainObject } from './state-tree-utils';
 
 // ========== 结果类型 ==========
 
@@ -670,10 +671,4 @@ export function pickKnownKeys(
       readonly.length > 0 ? `只读键 ${readonly.join('、')} 由代码维护，已剥除` : undefined,
     ),
   );
-}
-
-// ========== 内部 ==========
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }

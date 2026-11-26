@@ -21,10 +21,9 @@ import type {
   MemoryRecord,
   PlotEvent,
   SaveProfile,
-  StatusEffect,
-  Skill,
-  InventoryItem,
   Snapshot,
+  StateUpdateOpRecord,
+  StateUpdateRecord,
 } from '../types/types';
 import {
   getCharacters,
@@ -50,27 +49,24 @@ import {
   deleteMessagesBySaveId,
   getDatabase,
 } from '../persistence/database';
-import { getVar, setVar, delVar, insertVar, applyPathOps } from '../variables/var-resolver';
-import { getTierConfig } from '../character/tier-constants';
-// 经验系统改造 v1（2026-08-24）：升级/登神判定归 Code（ADR-11）。resolveAscensionFlyup
-// 负责「持物即飞升」，resolveLevelUps 负责 totalExp 驱动的升级循环。
+import { getVar, setVar, applyPathOps } from '../variables/var-resolver';
+// 补丁的纯变换（审查报告 R5b 角色域 / R5c 档案域）：唯一实现在 patch-reducer，翻译层工作状态与
+// 建补丁预演共用；本文件只「读 → 变换 → 写」，I/O 与副作用（地图钩子、saveId、账目落款）留在这里
 import {
-  resolveAscensionFlyup,
-  resolveLevelUps,
-  xpToNextNumber,
-  tierNameForTier,
-  MILESTONE_LEVELS,
-  applyExpFloor,
-  getTierForLevel,
-} from '../character/exp-table';
-// 资源上限拆分（状态树协议 §5.6）：基础 + 额外的不变式唯一出处在 resource-caps，本文件只接触发点
-import {
-  RESOURCE_FIELDS as RESOURCE_CAP_FIELDS,
-  baseResourceCaps,
-  recomputeResourceCaps,
-  solidifyResourceBonuses,
-  type ResourceKey as ResourceCapKey,
-} from '../character/resource-caps';
+  readTransferItemRequest,
+  reduceAddCharacter,
+  reduceAddNews,
+  reduceAffectionPatch,
+  reduceCharacterPatch,
+  reduceFatePointPatch,
+  reduceQuestPatch,
+  reduceRemoveCharacter,
+  reduceRenameCharacter,
+  reduceTransferItem,
+  reduceVariablePatch,
+  resolveCharacterTarget,
+  type ReduceResult,
+} from './patch-reducer';
 import { getEngineSettings } from '../runtime/engine-settings';
 import { logEngine } from '../runtime/engine-logger';
 // 并行化改造（docs/planning/2026-08-16-pipeline-parallelism.md）：一切 Dexie 写入
@@ -79,10 +75,14 @@ import { withSaveWriteLock } from './state-write-queue';
 // 状态树协议 T10：玩家编辑的试算 / 只读与时间闸门 / 撤销 op（纯函数，本文件只接写入口）
 import {
   PLAYER_EDIT_SOURCE,
-  buildUndoOps,
+  applyRevisionToRecord,
+  playerEditFingerprint,
   previewPlayerEdit,
   type PlayerEditCommitResult,
   type PlayerEditOp,
+  type PlayerEditRecordWriteback,
+  type PlayerEditUndoResult,
+  type PlayerEditUndoToken,
 } from '../variables/state-tree-edit';
 import { resolveCharacterByName, validateStatePatch } from './patch-rules';
 import type { CharacterDefinition, CharacterNarrativeUpdate } from '../types/types-character';
@@ -101,11 +101,7 @@ import { storyMemorySourceMatches, storyTurnGameTimeRange } from '../memory/stor
 // 唯一可能成环的那个（沙盒会回调状态层），单独验证后再说。
 import {
   getProfile,
-  addFP,
-  spendFP,
   updateProfile,
-  setQuestInPlace,
-  removeQuestInPlace,
   getMapFlags,
   updateMapFlags,
   setMapFlagsInPlace,
@@ -117,7 +113,6 @@ import {
   updateRandomEventFlags,
   setRandomEventFlagsInPlace,
 } from './save-profile';
-import { clampAffection } from '../character/affection-system';
 import { advanceTime, getSeason, toEpochMinutes } from '../time/time-system';
 // 地图 v1 接线（设计 §5 接线表）：落位 / 天气断言 / 在途旗三条钩子的依赖。
 // 全是纯函数叶 + 一条注入缝（`map-runtime`），没有一个会读注册表或碰 Dexie ——
@@ -171,13 +166,6 @@ import {
 import { buildRandomEventRollContext } from '../random-events/random-event-snapshot';
 import type { RandomEventRollContext } from '../types/types-random-events';
 import type { EjsVarsDiff } from '../ejs/ejs-vars-diff';
-import {
-  normalizeQuestStatus,
-  normalizeStatusCategory,
-  normalizeItemType,
-  normalizeRarity,
-  normalizeSlot,
-} from '../content/field-enums';
 
 // ========== Types ==========
 
@@ -218,6 +206,27 @@ function assertCurrentTurn(isCurrent?: () => boolean): void {
     error.name = 'AbortError';
     throw error;
   }
+}
+
+/** 表行深拷贝（结构化数据：JSON 往返即可；撤销凭据与写回都不能和库里的对象共用引用）。 */
+function cloneRow<T>(row: T): T {
+  return JSON.parse(JSON.stringify(row)) as T;
+}
+
+/** 撤销指纹不符时给玩家的说明：点名涉及的对象（R4）。 */
+function undoDriftReason(
+  token: PlayerEditUndoToken,
+  current: Record<string, CharacterState | null>,
+): string {
+  const parts: string[] = [];
+  const names = Object.keys(token.characters).map(
+    (id) => current[id]?.name ?? token.characters[id]?.name ?? id,
+  );
+  if (names.length) parts.push(`角色（${names.join('、')}）`);
+  if (token.profile) parts.push('存档档案');
+  if (token.message) parts.push('本楼更新记录');
+  const what = parts.length ? parts.join('、') : '相关状态';
+  return `${what}在这次修改之后又被别处改过，撤销会覆盖那些改动，已拒绝；需要时可用快照回退`;
 }
 
 /** 单个 Patch 的应用结果 */
@@ -277,332 +286,6 @@ function createCommitScope(): CommitScope {
     dirtyCharacters: new Map(),
     deletedCharacterIds: new Set(),
   };
-}
-
-// ========== update_character 白名单 (M2 T9, #19 #20 #21) ==========
-
-/**
- * update_character value 白名单 — 从 CharacterState (types.ts) 逐字段推导:
- * 全部字段 MINUS 禁止项（数组实体 / name / 账务字段）。
- * 白名单外的未知键一律 loud 拒绝（大概率 AI 拼写错误）。
- */
-const UPDATE_CHAR_WHITELIST = new Set<string>([
-  // 基础信息（name 除外 — 改名走 rename_character）
-  'type',
-  'race',
-  'identity',
-  'occupation',
-  // 生命层级
-  'tier',
-  'tierName',
-  'level',
-  'totalExp',
-  'expToNext',
-  // 五维属性
-  'attributes',
-  'freeAttrPoints',
-  // 资源
-  'hp',
-  'maxHp',
-  'mp',
-  'maxMp',
-  'sp',
-  'maxSp',
-  // 资源上限的「额外」部分（§5.6）：有效上限 = 基础 + 额外，由代码重算后写回 max*
-  'maxHpBonus',
-  'maxMpBonus',
-  'maxSpBonus',
-  // 登神长阶
-  'ascension',
-  // 经济 / 位置 / 冒险者等级 / 当前行为
-  'money',
-  'location',
-  'present',
-  'adventurerRank',
-  'currentAction',
-  // 血脉 / 集群数量 / 叙事字段
-  'bloodlineIds',
-  'quantity',
-  'appearance',
-  'background',
-  'personality',
-  'gender',
-  'outfit',
-  'thoughts',
-  // 🔴 `customFields` **刻意不在白名单**（2026-09-26）：它是建号快照 / 真扩展数据袋
-  //    （age / destinyCoreId / destinyPoints / extra）。此前 AI 会写 `customFields.destinyPoints`
-  //    （点路径被拒）或整对象 `customFields`（Object.assign 会连带盖掉其余键）。
-  //    命运点数(FP) 的真源是 SaveProfile.fp，走 `fp.delta → delta_variable profile.fp`。
-]);
-
-/** 禁止的数组实体字段 → 必须走各自专用 op（杀 #21 假字段污染） */
-const UPDATE_CHAR_FORBIDDEN_ARRAY_FIELDS = new Set<string>([
-  'inventory',
-  'skills',
-  'statusEffects',
-  'equipment', // equipment 在 M2 T12 删除前同样禁止
-]);
-
-/** 禁止的账务字段 — 仅 Code 层维护（铁律3） */
-const UPDATE_CHAR_FORBIDDEN_LEDGER_FIELDS = new Set<string>(['id', 'saveId']);
-
-/** 可 delta 加法的数值字段（metadata.delta=true 时仅允许这些键，杀 #20 delta 变替换） */
-const UPDATE_CHAR_NUMERIC_FIELDS = new Set<string>([
-  'tier',
-  'level',
-  'totalExp',
-  'expToNext',
-  'freeAttrPoints',
-  'hp',
-  'maxHp',
-  'mp',
-  'maxMp',
-  'sp',
-  'maxSp',
-  'maxHpBonus',
-  'maxMpBonus',
-  'maxSpBonus',
-  'money',
-  'quantity',
-]);
-
-/** 五维属性键（英文，对齐 CharacterState.attributes；升层自动加点逐键遍历用） */
-const ATTRIBUTE_KEYS = ['str', 'dex', 'con', 'int', 'spi'] as const;
-
-// ========== 资源上限拆分（状态树协议 §5.6）==========
-
-const RESOURCE_CAP_KEYS: readonly ResourceCapKey[] = ['hp', 'mp', 'sp'];
-
-// ========== 文本时长 / 文本消耗互斥（状态树协议 §5.2）==========
-
-/** 非空文本时长 → 去首尾空白后的原文；其余（缺席、空串、非字符串）→ undefined。 */
-function readDurationText(v: unknown): string | undefined {
-  if (typeof v !== 'string') return undefined;
-  const t = v.trim();
-  return t ? t : undefined;
-}
-
-/** 非空文本消耗原文；口径同 `readDurationText`。 */
-const readCostText = readDurationText;
-
-/** `Skill.cost` 是否为可解析的结构化消耗（HP / MP / SP + 有限数量）。 */
-function isParsedSkillCost(v: unknown): v is NonNullable<Skill['cost']> {
-  if (!v || typeof v !== 'object') return false;
-  const c = v as { type?: unknown; amount?: unknown };
-  return (c.type === 'HP' || c.type === 'MP' || c.type === 'SP') && isFiniteNumber(c.amount);
-}
-
-/**
- * 一份写入的消耗值 → 结构化消耗或可读文本；空值（空串、空对象）→ null。
- * - HP / MP / SP（大小写不敏感）+ 有限数量 → 结构化 `cost`；
- * - 其余带类型的对象（如 `{type:'信仰',amount:3}`）→「信仰 3」；
- * - 非空字符串 / 有限数 → 原文；其余认不出的值 → JSON 文本（宁可难看也不丢）。
- */
-function coerceSkillCost(
-  raw: unknown,
-): { cost: NonNullable<Skill['cost']> } | { text: string } | null {
-  if (typeof raw === 'string') {
-    const t = raw.trim();
-    return t ? { text: t } : null;
-  }
-  if (isFiniteNumber(raw)) return { text: String(raw) };
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    const c = raw as { type?: unknown; amount?: unknown };
-    const type = typeof c.type === 'string' ? c.type.trim() : '';
-    const upper = type.toUpperCase();
-    if ((upper === 'HP' || upper === 'MP' || upper === 'SP') && isFiniteNumber(c.amount)) {
-      return { cost: { type: upper, amount: c.amount } };
-    }
-    if (type) {
-      const amount = c.amount === undefined || c.amount === null ? '' : String(c.amount).trim();
-      return { text: amount ? `${type} ${amount}` : type };
-    }
-  }
-  let json: string | undefined;
-  try {
-    json = JSON.stringify(raw);
-  } catch {
-    json = undefined;
-  }
-  return json && json !== '{}' && json !== '[]' ? { text: json } : null;
-}
-
-/**
- * 把本次写入的 `cost` 规整成 §5.2 互斥两形之一，认不出的消耗不丢（就地改 `written`）：
- * 能解析成 HP / MP / SP 的写成结构化 `cost`，其余转成可读文本进 `costText`
- * （本次另给了非空 `costText` 时以显式文本为准）。没写 `cost` 或写的是 null / undefined（清除）时不动。
- * 新建与同名覆盖两支都先过这里，再交 `enforceSkillCostExclusion`，两支口径一致。
- */
-function normalizeWrittenSkillCost(written: Partial<Skill>): void {
-  if (!('cost' in written)) return;
-  const raw: unknown = written.cost;
-  if (raw === null || raw === undefined || isParsedSkillCost(raw)) return;
-  const coerced = coerceSkillCost(raw);
-  if (coerced && 'cost' in coerced) {
-    written.cost = coerced.cost;
-    return;
-  }
-  delete written.cost;
-  if (coerced && readCostText(written.costText) === undefined) written.costText = coerced.text;
-}
-
-/**
- * 技能消耗互斥（§5.2）：本次写入可解析的 `cost` → 清 `costText`；
- * 写入文本消耗 → 清 `cost`。两者同给时以可解析的 `cost` 为准。
- * 只看本次写入的字段，未写的一侧不动。
- */
-function enforceSkillCostExclusion(skill: Skill, written: Partial<Skill>): void {
-  if (isParsedSkillCost(written.cost)) {
-    delete skill.costText;
-    return;
-  }
-  const text = readCostText(written.costText);
-  if (text !== undefined) {
-    skill.costText = text;
-    delete skill.cost;
-  } else if ('costText' in written) {
-    // 写了空文本 / 非字符串：不留脏值
-    delete skill.costText;
-  }
-}
-
-function isFiniteNumber(v: unknown): v is number {
-  return typeof v === 'number' && Number.isFinite(v);
-}
-
-/**
- * 角色是否具备按公式管理上限的全部输入：层级、五维、三个上限都是有限数。
- * 脏数据（缺五维 / 上限非数）一律不碰，保持旧行为 —— 算出 NaN 写回比不重算糟得多。
- */
-function hasResourceCapInputs(char: CharacterState): boolean {
-  if (!isFiniteNumber(char.tier)) return false;
-  const attrs = char.attributes as Record<string, unknown> | undefined;
-  if (!attrs || typeof attrs !== 'object') return false;
-  if (!ATTRIBUTE_KEYS.every((k) => isFiniteNumber(attrs[k]))) return false;
-  return RESOURCE_CAP_KEYS.every((k) => isFiniteNumber(char[RESOURCE_CAP_FIELDS[k].max]));
-}
-
-/** `applyUpdateCharacter` 补丁落地前抓下的上限基准（§5.6 触发点第 1 步）。 */
-interface ResourceCapBaseline {
-  prevTier: number;
-  prevAttributes: Record<string, number>;
-  prevMax: Record<ResourceCapKey, number>;
-}
-
-/**
- * §5.6 触发点第 1 步：补丁落地**之前**把缺席的额外按「现上限 − 旧基础」固化进字段。
- * 必须早于属性 / 层级变化，否则差值会按新基础算错。返回落地后重算要用的基准；输入不全返回 null。
- */
-function solidifyResourceCaps(char: CharacterState): ResourceCapBaseline | null {
-  if (!hasResourceCapInputs(char)) return null;
-  const solid = solidifyResourceBonuses(char);
-  const prevMax = {} as Record<ResourceCapKey, number>;
-  for (const key of RESOURCE_CAP_KEYS) {
-    const fields = RESOURCE_CAP_FIELDS[key];
-    if (!isFiniteNumber(char[fields.bonus])) char[fields.bonus] = solid[key];
-    prevMax[key] = char[fields.max];
-  }
-  return {
-    prevTier: char.tier,
-    prevAttributes: { ...(char.attributes as unknown as Record<string, number>) },
-    prevMax,
-  };
-}
-
-/**
- * 把重算结果并回角色。当前值只在原本是有限数时才写（脏数据不被 NaN 化）。
- */
-function applyRecomputedCaps(
-  char: CharacterState,
-  bonuses: Record<ResourceCapKey, number>,
-  previousMax: Record<ResourceCapKey, number>,
-  keys: readonly ResourceCapKey[] = RESOURCE_CAP_KEYS,
-): void {
-  const current = {} as Record<ResourceCapKey, number>;
-  for (const key of RESOURCE_CAP_KEYS) {
-    current[key] = isFiniteNumber(char[key]) ? char[key] : 0;
-  }
-  const r = recomputeResourceCaps({
-    tier: char.tier,
-    attributes: char.attributes,
-    bonuses,
-    previousMax,
-    current,
-  });
-  for (const key of keys) {
-    const fields = RESOURCE_CAP_FIELDS[key];
-    char[fields.max] = r[fields.max];
-    char[fields.bonus] = r[fields.bonus];
-    if (isFiniteNumber(char[key])) char[key] = r[key];
-  }
-}
-
-/**
- * §5.6 触发点第 2 步：补丁落地、升级与登神推进都跑完**之后**，按新层级 / 五维重算有效上限。
- *
- * 额外的取值：
- * - 本次写了 `max*Bonus`（替换或 delta）→ 用写后的字段值（第 1 步已固化，delta 从固化值起加）；
- * - 本次只写了 `maxHp` 等（旧写法）→ 解释为「总上限设为 n」（delta 则为「旧总值 + d」），
- *   换算成额外 = n − 新基础，所以同一补丁里属性 / 层级也变了，最终总上限仍是 n；
- * - 都没写 → 保持固化值。
- *
- * 重算哪几项（重算会把有效上限抬到至少 1，上限为 0 的旧数据 —— 如无法力的怪物 —— 不该被无关写入改掉）：
- * - 层级、五维、上限相关键都没变 → 一项都不重算（只留第 1 步的固化）；
- * - 层级或五维变了 → 三项都重算，但原上限为 0 且本次没写到它上限键的项保持 0；
- * - 只写到某几项的上限键（`maxHp` / `maxHpBonus` 等）→ 只重算那几项。
- */
-function finishResourceCaps(
-  char: CharacterState,
-  baseline: ResourceCapBaseline,
-  touchedKeys: readonly string[],
-): void {
-  if (!hasResourceCapInputsAfterPatch(char)) return;
-  const attrs = char.attributes as unknown as Record<string, number>;
-  const shapeChanged =
-    char.tier !== baseline.prevTier ||
-    ATTRIBUTE_KEYS.some((k) => attrs[k] !== baseline.prevAttributes[k]);
-  const capTouchedKeys = RESOURCE_CAP_KEYS.filter((key) => {
-    const fields = RESOURCE_CAP_FIELDS[key];
-    return touchedKeys.includes(fields.max) || touchedKeys.includes(fields.bonus);
-  });
-  const keys = shapeChanged
-    ? RESOURCE_CAP_KEYS.filter((key) => capTouchedKeys.includes(key) || baseline.prevMax[key] !== 0)
-    : capTouchedKeys;
-  if (keys.length === 0 && !shapeChanged) return;
-
-  const bases = baseResourceCaps(char.tier, char.attributes);
-  if (shapeChanged) {
-    // 保持 0 的项按新基础重固化额外（= −新基础），使「基础 + 额外」恒为 0：
-    // 否则额外停在旧基础对应的值，之后一次 +d 的额外写入会让上限从 0 跳到「新旧基础差 + d」
-    for (const key of RESOURCE_CAP_KEYS) {
-      if (!keys.includes(key)) char[RESOURCE_CAP_FIELDS[key].bonus] = -bases[key];
-    }
-  }
-  if (keys.length === 0) return;
-  const bonuses = {} as Record<ResourceCapKey, number>;
-  for (const key of RESOURCE_CAP_KEYS) {
-    const fields = RESOURCE_CAP_FIELDS[key];
-    const writtenTotal = char[fields.max];
-    let bonus: unknown = char[fields.bonus];
-    if (
-      !touchedKeys.includes(fields.bonus) &&
-      touchedKeys.includes(fields.max) &&
-      isFiniteNumber(writtenTotal)
-    ) {
-      bonus = writtenTotal - bases[key];
-    }
-    // 补丁把额外写成了非数（白名单不查替换值类型）→ 退回落地前的有效值对应的额外
-    bonuses[key] = isFiniteNumber(bonus) ? bonus : baseline.prevMax[key] - bases[key];
-  }
-  applyRecomputedCaps(char, bonuses, baseline.prevMax, keys);
-}
-
-/** 落地后只校验层级与五维（上限字段会被重算覆盖，旧写法写进来的值另行读取）。 */
-function hasResourceCapInputsAfterPatch(char: CharacterState): boolean {
-  if (!isFiniteNumber(char.tier)) return false;
-  const attrs = char.attributes as Record<string, unknown> | undefined;
-  if (!attrs || typeof attrs !== 'object') return false;
-  return ATTRIBUTE_KEYS.every((k) => isFiniteNumber(attrs[k]));
 }
 
 /** 保留段落，只统一跨平台换行并清掉字段外围空白。 */
@@ -856,26 +539,14 @@ export class StateManager {
             }
             if (input.combat !== undefined) profile.worldFlags.directCombat = input.combat;
             await this.persistProfile(profile);
-            for (const patch of input.patches) {
-              if (patch.op === 'remove_item' || patch.op === 'transfer_item') {
-                const character = await this.resolveCharTarget(patch.target);
-                const value = patch.value as { name: string; quantity?: number };
-                const item = character.inventory.find((row) => row.name === value.name);
-                if (!item || (value.quantity !== undefined && item.quantity < value.quantity))
-                  throw new Error(`物品「${value.name}」数量不足`);
-              }
-              if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
-                this.validatePatch(patch);
-                const amount = patch.amount!;
-                if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
-                if (amount >= 0) await addFP(profile, amount, '行动结算');
-                else await spendFP(profile, -amount, '行动结算');
-                events.push(this.createEvent('variable_change', patch));
-              } else {
-                const applied = await this.applyPatch(patch);
-                if (applied.event) events.push(applied.event);
-              }
-            }
+            // AI 来源（直出整楼）：扣命运点超出余额时钳到 0，不因此拒收整楼（A9）
+            events.push(
+              ...(await this.applyPatchesAtomic(input.patches, {
+                fpReason: '行动结算',
+                clampFpSpend: true,
+                checkItemStock: true,
+              })),
+            );
             assertCurrentTurn(input.isCurrent);
             input.onCommitStart?.();
             await this.flushCommitScope(scope);
@@ -898,6 +569,59 @@ export class StateManager {
     });
   }
 
+  /**
+   * 命运点补丁（`delta_variable profile.fp`）走 FP 账务，真源是 `SaveProfile.fp`。
+   * 增减与记账的纯变换在 patch-reducer（`reduceFatePointPatch`），账目 id / 时间戳在这里落款。
+   *
+   * `clampSpend`：AI 来源（commitAiPatches / commitDirectTurn）扣超余额时钳到 0（A9，
+   * 旧协议与 Agent 模式同样受保护）；领域命令与玩家修改传 false，不足照旧抛错。
+   */
+  private async applyFatePointPatch(
+    patch: StatePatch,
+    reason: string,
+    clampSpend: boolean,
+  ): Promise<GameEvent> {
+    this.validatePatch(patch);
+    const profile = await this.readProfile();
+    const before = profile.fp;
+    reduceFatePointPatch(profile, patch, {
+      clampSpend,
+      ledger: { reason, id: crypto.randomUUID(), timestamp: Date.now() },
+    });
+    if (profile.fp !== before) await this.persistProfile(profile);
+    return this.createEvent('variable_change', patch);
+  }
+
+  /**
+   * 整批原子提交的事务体（commitDirectTurn / commitDomainCommand / commitPlayerEdit 共用，R8）。
+   * 调用方负责开 Dexie 事务与提交作用域；任一补丁抛错即向上抛，由事务回滚。
+   * `checkItemStock`：消耗 / 转移物品前先核对数量（直出接纳沿用的前置校验）。
+   */
+  private async applyPatchesAtomic(
+    patches: readonly StatePatch[],
+    options: { fpReason: string; clampFpSpend?: boolean; checkItemStock?: boolean },
+  ): Promise<GameEvent[]> {
+    const events: GameEvent[] = [];
+    for (const patch of patches) {
+      if (options.checkItemStock && (patch.op === 'remove_item' || patch.op === 'transfer_item')) {
+        const character = await this.resolveCharTarget(patch.target);
+        const value = patch.value as { name: string; quantity?: number };
+        const item = character.inventory.find((row) => row.name === value.name);
+        if (!item || (value.quantity !== undefined && item.quantity < value.quantity))
+          throw new Error(`物品「${value.name}」数量不足`);
+      }
+      if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
+        events.push(
+          await this.applyFatePointPatch(patch, options.fpReason, options.clampFpSpend === true),
+        );
+        continue;
+      }
+      const result = await this.applyPatch(patch);
+      if (result.event) events.push(result.event);
+    }
+    return events;
+  }
+
   /** All required changes succeed together; rejection publishes no events or effects. */
   async commitDomainCommand(patches: StatePatch[]): Promise<void> {
     if (!patches.length) return;
@@ -910,21 +634,8 @@ export class StateManager {
           const scope = createCommitScope();
           this.commitScope = scope;
           try {
-            const events: GameEvent[] = [];
-            for (const patch of patches) {
-              if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
-                this.validatePatch(patch);
-                const amount = patch.amount!;
-                if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
-                const profile = await this.readProfile();
-                if (amount >= 0) await addFP(profile, amount, '行动结算');
-                else await spendFP(profile, -amount, '行动结算');
-                events.push(this.createEvent('variable_change', patch));
-                continue;
-              }
-              const result = await this.applyPatch(patch);
-              if (result.event) events.push(result.event);
-            }
+            // 领域命令（制作 / 战斗扣费等）：命运点不足照旧抛错，整批拒收
+            const events = await this.applyPatchesAtomic(patches, { fpReason: '行动结算' });
             await this.flushCommitScope(scope);
             const save = await getSave(this.saveId);
             if (save) await saveSaveSlot(save);
@@ -947,13 +658,17 @@ export class StateManager {
    * 锁内重读新鲜状态 → 翻译（actor: player）→ 只读键 / 时间 / 任一条被丢弃 → 整批拒绝并回传原因；
    * 应用中任一补丁抛错 → Dexie 事务回滚，状态零变化。
    *
-   * 补丁带 `metadata.source: 'player_edit'`；档案文字改动（§5.5）按叙事更新同口径
-   * （`{...character, ...profile_changes}`）在同一事务里落。不产 deltaMinutes、不推进时间、
+   * 补丁带 `metadata.source: 'player_edit'`；档案文字改动由翻译层产成 `update_character` 补丁，
+   * 与改名等同批补丁按序落（2026-11-25，审查 A8）。不产 deltaMinutes、不推进时间、
    * 不告知模型（§11.5 裁定）。它**不属于** `persistFocusQuest` 那类受控例外：走完整补丁路径。
+   *
+   * 撤销凭据（2026-11-25 审查 R4）：同一事务里比对提交前后的角色与档案，记下被触及部分提交前的
+   * 整份内核快照与提交后的指纹，交 `undoPlayerEdit` 整体还原（不再生成反向 op）。
+   * 传 `record` 时（更新块修订）该楼记录的改写并入同一事务：记录写回失败，状态一并回滚。
    */
   async commitPlayerEdit(
     ops: readonly PlayerEditOp[],
-    options?: { isCurrent?: () => boolean },
+    options?: { isCurrent?: () => boolean; record?: PlayerEditRecordWriteback },
   ): Promise<PlayerEditCommitResult> {
     const outcome = await withSaveWriteLock(this.saveId, async () => {
       assertCurrentTurn(options?.isCurrent);
@@ -971,54 +686,44 @@ export class StateManager {
           dropped: preview.dropped,
         };
       }
+      // 提交前的整份内核快照（深拷贝：之后的读写一律不碰它）
+      const beforeChars = new Map(snapshot.characters.map((c) => [c.id, cloneRow(c)]));
+      const beforeProfile = cloneRow(snapshot.profile);
       const patches = translation.patches.map((p) => ({
         ...p,
         metadata: { ...(p.metadata ?? {}), source: PLAYER_EDIT_SOURCE },
       }));
       const db = getDatabase();
       try {
-        const events = await db.transaction(
+        const committed = await db.transaction(
           'rw',
-          [db.characters, db.saveProfiles, db.saves, db.memories, db.plotEvents],
+          [db.characters, db.saveProfiles, db.saves, db.memories, db.plotEvents, db.messages],
           async () => {
             const scope = createCommitScope();
             this.commitScope = scope;
+            let events: GameEvent[];
             try {
-              const events: GameEvent[] = [];
-              for (const patch of patches) {
-                if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
-                  this.validatePatch(patch);
-                  const amount = patch.amount!;
-                  if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
-                  const profile = await this.readProfile();
-                  if (amount >= 0) await addFP(profile, amount, '玩家修改');
-                  else await spendFP(profile, -amount, '玩家修改');
-                  events.push(this.createEvent('variable_change', patch));
-                  continue;
-                }
-                const result = await this.applyPatch(patch);
-                if (result.event) events.push(result.event);
-              }
-              for (const change of translation.profileChanges) {
-                const character = await this.resolveCharacter(change.name);
-                Object.assign(character, structuredClone(change.profile_changes));
-                await this.persistCharacter(character);
-              }
+              events = await this.applyPatchesAtomic(patches, { fpReason: '玩家修改' });
               await this.flushCommitScope(scope);
-              const save = await getSave(this.saveId);
-              if (save) await saveSaveSlot(save);
-              return events;
             } finally {
               this.commitScope = null;
             }
+            const writeback = options?.record
+              ? await this.writeStateUpdateRecord(options.record, translation.records)
+              : undefined;
+            const undo = await this.buildPlayerEditUndo(beforeChars, beforeProfile, writeback);
+            const save = await getSave(this.saveId);
+            if (save) await saveSaveSlot(save);
+            return { events, undo, stateUpdates: writeback?.after };
           },
         );
-        this.events.push(...events);
+        this.events.push(...committed.events);
         return {
           ok: true as const,
           records: translation.records,
           normalized: translation.normalized,
-          undo: buildUndoOps(translation.records),
+          undo: committed.undo,
+          ...(committed.stateUpdates ? { stateUpdates: committed.stateUpdates } : {}),
           patches,
         };
       } catch (error) {
@@ -1047,6 +752,7 @@ export class StateManager {
                 source: p.metadata.source,
               })),
               normalized: outcome.normalized,
+              ...(options?.record ? { recordMessageId: options.record.messageId } : {}),
             }
           : { reasons: outcome.reasons }),
       }),
@@ -1057,6 +763,144 @@ export class StateManager {
       const { patches: _patches, ...rest } = outcome;
       return rest;
     }
+    return outcome;
+  }
+
+  /**
+   * 更新块修订的记录写回（`commitPlayerEdit` 事务内）：读出该楼消息、只换 `stateUpdates`。
+   * 消息不在 / 不属本存档 / 没有记录 → 抛错，由事务把状态一并回滚。
+   */
+  private async writeStateUpdateRecord(
+    target: PlayerEditRecordWriteback,
+    committed: readonly StateUpdateOpRecord[],
+  ): Promise<{ id: string; before: StateUpdateRecord; after: StateUpdateRecord }> {
+    const table = getDatabase().messages;
+    const row = await table.get(target.messageId);
+    if (!row || row.saveId !== this.saveId || !row.stateUpdates)
+      throw new Error('本楼更新记录不存在，记录写回失败');
+    const before = cloneRow(row.stateUpdates);
+    const after = cloneRow(
+      applyRevisionToRecord(row.stateUpdates, target.index, target.revision, committed),
+    );
+    await table.put({ ...row, stateUpdates: after });
+    return { id: row.id, before, after };
+  }
+
+  /** 比对提交前后（事务内重读库），记下被触及部分提交前的快照与提交后的指纹。 */
+  private async buildPlayerEditUndo(
+    beforeChars: ReadonlyMap<string, CharacterState>,
+    beforeProfile: SaveProfile,
+    writeback?: { id: string; before: StateUpdateRecord; after: StateUpdateRecord },
+  ): Promise<PlayerEditUndoToken> {
+    const afterChars = new Map((await getCharacters(this.saveId)).map((c) => [c.id, c]));
+    const afterProfile = await getProfile(this.saveId);
+    const sameChar = (a: CharacterState | null, b: CharacterState | null) =>
+      playerEditFingerprint({ characters: { x: a } }) ===
+      playerEditFingerprint({ characters: { x: b } });
+    const characters: Record<string, CharacterState | null> = {};
+    const afterTouched: Record<string, CharacterState | null> = {};
+    for (const id of new Set([...beforeChars.keys(), ...afterChars.keys()])) {
+      const before = beforeChars.get(id) ?? null;
+      const after = afterChars.get(id) ?? null;
+      if (sameChar(before, after)) continue;
+      characters[id] = before;
+      afterTouched[id] = after;
+    }
+    const profileTouched =
+      playerEditFingerprint({ characters: {}, profile: beforeProfile }) !==
+      playerEditFingerprint({ characters: {}, profile: afterProfile });
+    return {
+      saveId: this.saveId,
+      characters,
+      ...(profileTouched ? { profile: beforeProfile } : {}),
+      ...(writeback ? { message: { id: writeback.id, stateUpdates: writeback.before } } : {}),
+      fingerprint: playerEditFingerprint({
+        characters: afterTouched,
+        ...(profileTouched ? { profile: afterProfile } : {}),
+        ...(writeback ? { stateUpdates: writeback.after } : {}),
+      }),
+    };
+  }
+
+  /**
+   * 修改器「撤销上一次修改」（§11.4；2026-11-25 审查 R4）：按 `commitPlayerEdit` 给的凭据整体还原。
+   *
+   * 与提交同一把锁、同一个事务：先按凭据重读被触及的角色、档案与该楼记录算指纹，与提交后的指纹
+   * 不符（之后又被别处改过）→ 拒绝并说明，什么都不写；相符 → 写回提交前的整份快照（角色 id、
+   * 年龄锚点、投影外的内部字段原样回来；本次新建的角色删掉），该楼记录一并还原。
+   * 直写表行、不经补丁处理器（不重算、不钳制、不触发钩子）—— 写回的就是提交前库里的样子。
+   */
+  async undoPlayerEdit(
+    token: PlayerEditUndoToken,
+    options?: { isCurrent?: () => boolean },
+  ): Promise<PlayerEditUndoResult> {
+    const outcome = await withSaveWriteLock(
+      this.saveId,
+      async (): Promise<PlayerEditUndoResult> => {
+        assertCurrentTurn(options?.isCurrent);
+        if (token.saveId !== this.saveId) return { ok: false, reasons: ['撤销凭据不属于当前存档'] };
+        const db = getDatabase();
+        try {
+          return await db.transaction(
+            'rw',
+            [db.characters, db.saveProfiles, db.saves, db.messages],
+            async (): Promise<PlayerEditUndoResult> => {
+              const ids = Object.keys(token.characters);
+              const rows = await db.characters.bulkGet(ids);
+              const current: Record<string, CharacterState | null> = {};
+              ids.forEach((id, i) => {
+                const row = rows[i];
+                current[id] = row && row.saveId === this.saveId ? row : null;
+              });
+              const profile = token.profile ? await getProfile(this.saveId) : undefined;
+              const message = token.message ? await db.messages.get(token.message.id) : undefined;
+              if (token.message && (!message || message.saveId !== this.saveId))
+                return { ok: false, reasons: ['本楼消息已不存在，无法撤销；可用快照回退'] };
+              const fingerprint = playerEditFingerprint({
+                characters: current,
+                ...(token.profile ? { profile } : {}),
+                ...(token.message ? { stateUpdates: message?.stateUpdates ?? null } : {}),
+              });
+              if (fingerprint !== token.fingerprint)
+                return { ok: false, reasons: [undoDriftReason(token, current)] };
+              for (const id of ids) {
+                const before = token.characters[id];
+                if (before) await db.characters.put(cloneRow(before));
+                else await db.characters.delete(id);
+              }
+              // 直写表行：updateProfile 会盖新的 updatedAt，栈里更早那次撤销的指纹就对不上了
+              if (token.profile) await db.saveProfiles.put(cloneRow(token.profile));
+              let restored: { id: string; stateUpdates: StateUpdateRecord } | undefined;
+              if (token.message && message) {
+                const stateUpdates = cloneRow(token.message.stateUpdates);
+                await db.messages.put({ ...message, stateUpdates });
+                restored = { id: message.id, stateUpdates };
+              }
+              const save = await getSave(this.saveId);
+              if (save) await saveSaveSlot(save);
+              return { ok: true, ...(restored ? { message: restored } : {}) };
+            },
+          );
+        } catch (error) {
+          return {
+            ok: false,
+            reasons: [`撤销失败：${error instanceof Error ? error.message : String(error)}`],
+          };
+        }
+      },
+    );
+    logEngine(
+      outcome.ok ? 'info' : 'warn',
+      'state.manual_edit',
+      outcome.ok ? '撤销玩家修改：已整体还原' : '撤销玩家修改：拒绝',
+      () => ({
+        characters: Object.keys(token.characters),
+        profile: token.profile !== undefined,
+        ...(token.message ? { recordMessageId: token.message.id } : {}),
+        ...(outcome.ok ? {} : { reasons: outcome.reasons }),
+      }),
+      { saveId: this.saveId },
+    );
     return outcome;
   }
 
@@ -1135,16 +979,11 @@ export class StateManager {
           try {
             // 🔴 命运点数(FP) 的真源是 `SaveProfile.fp`（**不是**变量路径、也不在角色身上）：
             //    `delta_variable profile.fp` 必须走既有 FP 账务（addFP/spendFP），否则会被
-            //    `applyDeltaVariable` 当成 `variables.profile.fp` 写进伪路径 —— AI 的
+            //    `applyVariablePatch` 当成 `variables.profile.fp` 写进伪路径 —— AI 的
             //    `fp.delta` 看起来「提交成功」，真源却纹丝不动（与 commitDomainCommand 同口径）。
+            //    AI 来源扣超余额时钳到 0（A9），不抛错丢条。
             if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
-              this.validatePatch(patch);
-              const amount = patch.amount!;
-              if (!Number.isFinite(amount)) throw new Error('FP change must be finite');
-              const profile = await this.readProfile();
-              if (amount >= 0) await addFP(profile, amount, '行动结算');
-              else await spendFP(profile, -amount, '行动结算');
-              const event = this.createEvent('variable_change', patch);
+              const event = await this.applyFatePointPatch(patch, '行动结算', true);
               results.push({ patch, success: true, event });
               this.events.push(event);
               newEvents.push(event);
@@ -1381,68 +1220,20 @@ export class StateManager {
    * （防御子路径写法 'characters.X.skills'，#11 Code 侧防御）
    */
   private async resolveCharTarget(target: string): Promise<CharacterState> {
-    const raw = target.startsWith('characters.') ? target.slice('characters.'.length) : target;
-    const key = raw.split('.')[0];
-    if (!key) throw new Error(`无效的 character target: ${target}`);
-    return this.resolveCharacter(key);
+    // 剥前缀与取首段的口径住 patch-reducer（翻译层工作状态用同一份）
+    return resolveCharacterTarget(await this.readCharacters(), target);
   }
 
   // ========== Patch Handlers ==========
 
-  private async applySetVariable(patch: StatePatch): Promise<GameEvent> {
-    // 读取当前 save 的 variables（真源: SaveProfile.variables，M5）
-    const vars = await this.getCurrentVariables();
-    const path = patch.target.startsWith('variables.')
-      ? patch.target.slice('variables.'.length)
-      : patch.target;
-    const newVars = setVar(vars, path, patch.value);
-    await this.persistVariables(newVars);
-    return this.createEvent('variable_change', patch);
-  }
-
-  private async applyDeltaVariable(patch: StatePatch): Promise<GameEvent> {
-    const vars = await this.getCurrentVariables();
-    const path = patch.target.startsWith('variables.')
-      ? patch.target.slice('variables.'.length)
-      : patch.target;
-    const current = getVar(vars, path);
-    const newValue = (typeof current === 'number' ? current : 0) + (patch.amount ?? 0);
-    const newVars = setVar(vars, path, newValue);
-    await this.persistVariables(newVars);
-    return this.createEvent('variable_change', patch);
-  }
-
-  private async applyRemoveVariable(patch: StatePatch): Promise<GameEvent> {
-    const vars = await this.getCurrentVariables();
-    const path = patch.target.startsWith('variables.')
-      ? patch.target.slice('variables.'.length)
-      : patch.target;
-    const newVars = delVar(vars, path);
-    await this.persistVariables(newVars);
-    return this.createEvent('variable_change', patch);
-  }
-
-  private async applyMoveVariable(patch: StatePatch): Promise<GameEvent> {
-    const vars = await this.getCurrentVariables();
-    const fromPath = patch.target.startsWith('variables.')
-      ? patch.target.slice('variables.'.length)
-      : patch.target;
-    const toPath = patch.metadata?.toPath as string;
-    if (!toPath) throw new Error('move_variable 需要 metadata.toPath');
-    const value = getVar(vars, fromPath);
-    let newVars = delVar(vars, fromPath);
-    newVars = setVar(newVars, toPath, value);
-    await this.persistVariables(newVars);
-    return this.createEvent('variable_change', patch);
-  }
-
-  private async applyInsertVariable(patch: StatePatch): Promise<GameEvent> {
-    const vars = await this.getCurrentVariables();
-    const path = patch.target.startsWith('variables.')
-      ? patch.target.slice('variables.'.length)
-      : patch.target;
-    const newVars = insertVar(vars, path, patch.value, patch.metadata?.index as number);
-    await this.persistVariables(newVars);
+  /**
+   * set / delta / remove / move / insert_variable（真源 SaveProfile.variables，M5）：
+   * 读 profile → `reduceVariablePatch` → 落库。按字面路径写（命运点由调用方先分流）。
+   */
+  private async applyVariablePatch(patch: StatePatch): Promise<GameEvent> {
+    const profile = await this.readProfile();
+    reduceVariablePatch(profile, patch);
+    await this.persistProfile(profile);
     return this.createEvent('variable_change', patch);
   }
 
@@ -1463,797 +1254,102 @@ export class StateManager {
     await this.persistProfile(profile);
   }
 
-  private async applyUpdateCharacter(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-    // §5.6 上限基准：在白名单校验通过之后、value 落地之前抓（见下方第 1 步）
-    let capBaseline: ResourceCapBaseline | null = null;
+  // ---------- 角色域：读 → reducer（`patch-reducer.ts`，翻译层影子共用）→ 写 ----------
 
-    if (patch.value && typeof patch.value === 'object') {
-      const value = patch.value as Record<string, any>;
-      const keys = Object.keys(value);
-      const isDelta = patch.metadata?.delta === true;
-
-      // 升级/升层自动加点的取值基准 —— 必须在 value 落地**之前**抓，
-      // 否则 delta 与 set 两条路径都会把旧值就地改掉，差值恒为 0（ADR-11：数值规则归 Code）
-      const prevLevel = char.level;
-      const prevTier = char.tier;
-
-      // ===== 白名单校验（先验证后赋值 — 原子拒绝，任一非法键则整个 value 不落地）=====
-      for (const k of keys) {
-        if (UPDATE_CHAR_FORBIDDEN_ARRAY_FIELDS.has(k)) {
-          // #21: 数组实体禁走 update_character，防假字段污染
-          throw new Error(
-            `update_character 禁止写数组字段 "${k}" — 请使用专用 op（add/update/remove_status_effect、add/update/remove_skill、add/update/remove_item、equip/unequip_item）`,
-          );
-        }
-        if (k === 'name') {
-          // 改名唯一途径 rename_character（名字是逻辑键，铁律1）
-          throw new Error(`update_character 禁止改 name — 改名请使用 rename_character`);
-        }
-        if (UPDATE_CHAR_FORBIDDEN_LEDGER_FIELDS.has(k)) {
-          // 账务字段仅 Code 层维护（铁律3）
-          throw new Error(`update_character 禁止写账务字段 "${k}"（仅引擎内部维护）`);
-        }
-        if (!UPDATE_CHAR_WHITELIST.has(k)) {
-          // 未知键 = 大概率 AI 拼写错误，loud 拒绝优于静默吞掉
-          throw new Error(`update_character 不认识的字段 "${k}" — 白名单外的键一律拒绝`);
-        }
-        if (isDelta) {
-          // delta 模式: 数值字段直接加；attributes 为嵌套对象（五维），其内部数值键各自加法
-          if (k === 'attributes') {
-            if (typeof value[k] !== 'object' || value[k] === null) {
-              throw new Error(`update_character delta=true 的 attributes 必须是对象`);
-            }
-          } else if (!UPDATE_CHAR_NUMERIC_FIELDS.has(k)) {
-            throw new Error(`update_character delta=true 仅支持数值字段，"${k}" 不是数值字段`);
-          } else if (typeof value[k] !== 'number') {
-            throw new Error(
-              `update_character delta=true 要求 "${k}" 的值为 number，实际为 ${typeof value[k]}`,
-            );
-          }
-        }
-      }
-
-      // ===== §5.6 第 1 步：落地前固化缺席的额外（按旧层级 / 旧五维）=====
-      capBaseline = solidifyResourceCaps(char);
-
-      // ===== 全部合法 → 落地 =====
-      if (isDelta) {
-        // #20: delta 真加法（缺省/脏数据从 0 起加），不再退化为替换
-        for (const k of keys) {
-          if (k === 'attributes') {
-            // 五维属性 delta：逐键加法（读缺省 0），不动未提及的维度
-            const incoming = (value as Record<string, any>).attributes as Record<string, number>;
-            const base = (char.attributes ?? {}) as Record<string, number>;
-            const next: Record<string, number> = { ...base };
-            for (const attr of Object.keys(incoming)) {
-              const cur = typeof base[attr] === 'number' ? base[attr] : 0;
-              next[attr] = cur + (incoming[attr] ?? 0);
-            }
-            char.attributes = next as CharacterState['attributes'];
-          } else {
-            const current = (char as any)[k];
-            (char as any)[k] = (typeof current === 'number' ? current : 0) + value[k];
-          }
-        }
-      } else {
-        // attributes 深合并: AI 只发 {attributes:{力量:12}} 不得抹掉其余维度（终审修复）
-        const { attributes: incomingAttrs, ...rest } = value;
-        Object.assign(char, rest);
-        if (incomingAttrs && typeof incomingAttrs === 'object') {
-          char.attributes = { ...char.attributes, ...incomingAttrs };
-        }
-      }
-
-      // ===== NPC 写等级 → 层级由代码按等级推出（§3.3 / §9 #2）=====
-      // 主角的等级 / 层级归经验表推进（下方 applyPlayerProgression），这里只管非主角。
-      // 本次补丁自带的 tier 被推导值覆盖：两者矛盾时以等级为准，层级名同步（补丁自己写了名字则不动）。
-      if (char.type !== 'player' && keys.includes('level') && isFiniteNumber(char.level)) {
-        char.tier = getTierForLevel(char.level);
-        if (!keys.includes('tierName')) char.tierName = tierNameForTier(char.tier);
-      }
-
-      // ===== 升级 / 升层自动加点（ADR-11：确定性数值规则归 Code，不交给 AI 算）=====
-      // 只认主角：NPC/怪物/召唤物的等级由生成器一次性给定，没有「攒点数分配」这回事。
-      //
-      // 🔴 两条路径互斥（防双发放，经验系统改造 v1 2026-08-24）：
-      //  · 本次 patch 触及 totalExp 或 ascension → 走下面的 applyPlayerProgression ——
-      //    升级/登神全部由 exp-table 的纯函数判定，属性点/里程碑统一发放；
-      //  · 否则 → 保留下面的旧兜底逻辑（兼容 AI 直接写 level/tier 的存量行为）。
-      if (char.type === 'player' && !keys.includes('totalExp') && !keys.includes('ascension')) {
-        // ① 升级：每升 1 级 +1 自由属性点
-        //    双重发放 guard —— patch 自己写了 freeAttrPoints 时不再叠加，
-        //    否则 AI 一边发点数一边升级，玩家会白拿一倍。
-        if (
-          typeof prevLevel === 'number' &&
-          typeof char.level === 'number' &&
-          !keys.includes('freeAttrPoints')
-        ) {
-          const levelGain = char.level - prevLevel;
-          // 降级不回收（剧情降级/数据修正不该没收玩家已到手的点数）
-          if (levelGain > 0) {
-            char.freeAttrPoints = (char.freeAttrPoints ?? 0) + levelGain;
-          }
-        }
-
-        // ② 升层：每升 1 层五维各 +1，钳到**新层级**上限
-        //    同样的双重发放 guard —— patch 自己写了 attributes 时不再叠加。
-        if (
-          typeof prevTier === 'number' &&
-          typeof char.tier === 'number' &&
-          !keys.includes('attributes')
-        ) {
-          const tierGain = char.tier - prevTier;
-          if (tierGain > 0) {
-            // 层级配置查不到（越界层级/脏数据）时只加不钳 —— 少给上限强于把属性削掉
-            const cap = getTierConfig(char.tier)?.attributeCap;
-            const base = (char.attributes ?? {}) as Record<string, number>;
-            const next: Record<string, number> = { ...base };
-            for (const attr of ATTRIBUTE_KEYS) {
-              const cur = typeof base[attr] === 'number' ? base[attr] : 0;
-              const raw = cur + tierGain;
-              // 钳制只封顶不回削 —— delta 五维加法不钳上限，已超上限的属性升层时不得被静默压低
-              next[attr] = typeof cap === 'number' ? Math.max(cur, Math.min(raw, cap)) : raw;
-            }
-            char.attributes = next as CharacterState['attributes'];
-          }
-        }
-      }
+  /** reducer 的说明里原先就记日志的两级照旧打出来；`fix`（值被纠正）不记。 */
+  private logReduceNotes(result: ReduceResult): void {
+    for (const note of result.notes) {
+      if (note.level === 'warn') console.warn(`[StateManager] ${note.text}`);
+      else if (note.level === 'info') console.info(`[StateManager] ${note.text}`);
     }
-
-    // ===== 经验系统改造 v1：totalExp / ascension 驱动的主角推进（升级循环 + 登神飞升）=====
-    // 战斗（combat）与制作（craft_gen）的经验都经 update_character delta 累加 totalExp；
-    // 登神物（ascension 字段）由 AI 写入。这两条变化一落地，升级/登神就由 Code 统一接管。
-    // 放在旧自动加点块之外、且在 value 落地之后 —— resolveLevelUps 读的是「落地后」的新状态。
-    // 🔴 keys 是上面 `if (patch.value ...)` 块内的局部变量，这里在块外要用得重取一份。
-    const touchedKeys =
-      patch.value && typeof patch.value === 'object'
-        ? Object.keys(patch.value as Record<string, any>)
-        : [];
-    if (
-      char.type === 'player' &&
-      (touchedKeys.includes('totalExp') || touchedKeys.includes('ascension'))
-    ) {
-      this.applyPlayerProgression(char);
-    }
-
-    // ===== §5.6 第 2 步：落地与推进都跑完后，按新层级 / 五维重算三个有效上限 =====
-    // 上限下降：当前值钳到新上限；上升：当前值不变（§9 #10）
-    if (capBaseline) finishResourceCaps(char, capBaseline, touchedKeys);
-
-    // ===== hp/mp/sp 钳制: 与 set_hp 语义一致 [0, 对应 max]（终审修复）=====
-    // 仅在本次 patch 涉及资源、其 max 或额外时钳制；放在重算之后，以最终有效上限为准。
-    // Q-19: 字段对由 RESOURCE_MAX_FIELD 给（`satisfies` 保证两侧都真的在
-    // CharacterState 上），不再靠字符串拼 `max${...}` + `as` 断言。
-    for (const res of RESOURCE_KEYS) {
-      const maxField = RESOURCE_MAX_FIELD[res];
-      const bonusField = RESOURCE_CAP_FIELDS[res].bonus;
-      if (
-        touchedKeys.includes(res) ||
-        touchedKeys.includes(maxField) ||
-        touchedKeys.includes(bonusField)
-      ) {
-        const cur = char[res];
-        const max = char[maxField];
-        if (typeof cur === 'number' && typeof max === 'number') {
-          char[res] = Math.max(0, Math.min(cur, max));
-        }
-      }
-    }
-    // metadata.action 保留原行为: 有则覆盖 currentAction（可与 value.currentAction 并存，metadata 优先）
-    char.currentAction = patch.metadata?.action ?? char.currentAction;
-    await this.persistCharacter(char);
-
-    return this.createEvent('character_action', patch);
   }
 
-  /**
-   * 主角经验/登神推进（经验系统改造 v1，2026-08-24）。
-   *
-   * 由 `applyUpdateCharacter` 在本次 patch 触及主角 `totalExp` 或 `ascension` 时调用。
-   * 两段式（ADR-11：确定性数值规则归 Code，不交给 AI 算）：
-   *  ① 登神飞升（`resolveAscensionFlyup`，主人裁定放宽版）：持物即飞升 + 层级-1 硬性限制 ——
-   *     等级跳到目标层起点（13/17/21/25）、tier 同步，**顺便升级**（每级 +1 属性点 + 里程碑全属性+1）；
-   *  ② 升级循环（`resolveLevelUps`）：totalExp 攒够就逐级升，里程碑全属性+1 且 tier 提升，
-   *     关键等级（12/16/20/24）登神条件不满足时 totalExp 截断到当前级门槛。
-   */
-  private applyPlayerProgression(char: CharacterState): void {
-    // 旧档经验保底归一化（幂等兜底，方案 A）：totalExp 抬到「升当前等级门槛」、expToNext 重算。
-    // 加载时（game-store）已做过一次，这里再兜一道——任何 totalExp/ascension 提交路径都自愈。
-    applyExpFloor(char);
-    // ① 登神飞升（放宽版）
-    const fly = resolveAscensionFlyup({ level: char.level, ascension: char.ascension });
-    if (fly.flyup && fly.nextLevel !== undefined && fly.nextTier !== undefined) {
-      const oldLevel = char.level;
-      char.level = fly.nextLevel;
-      char.tier = fly.nextTier;
-      char.tierName = tierNameForTier(fly.nextTier);
-      char.expToNext = xpToNextNumber(fly.nextLevel);
-      // 顺便升级：每级 +1 自由属性点 + 里程碑全属性+1
-      char.freeAttrPoints = (char.freeAttrPoints ?? 0) + (fly.nextLevel - oldLevel);
-      for (let lv = oldLevel + 1; lv <= fly.nextLevel; lv++) {
-        const milestone = MILESTONE_LEVELS[lv];
-        if (milestone) {
-          const base = (char.attributes ?? {}) as Record<string, number>;
-          const next: Record<string, number> = { ...base };
-          for (const attr of ATTRIBUTE_KEYS) {
-            next[attr] =
-              (typeof base[attr] === 'number' ? base[attr] : 0) + milestone.attributeBonus;
-          }
-          char.attributes = next as CharacterState['attributes'];
-        }
-      }
-    }
+  /** 单角色补丁的公共形状：按 target 解析角色 → 纯变换 → 落库 → 事件。 */
+  private async applyCharacterReducer(
+    patch: StatePatch,
+    eventType: GameEvent['type'],
+  ): Promise<GameEvent> {
+    const char = await this.resolveCharTarget(patch.target);
+    this.logReduceNotes(reduceCharacterPatch(char, patch));
+    await this.persistCharacter(char);
+    return this.createEvent(eventType, patch);
+  }
 
-    // ② 升级循环（totalExp 驱动）
-    const res = resolveLevelUps({
-      level: char.level,
-      totalExp: char.totalExp,
-      expToNext: char.expToNext,
-      freeAttrPoints: char.freeAttrPoints,
-      attributes: char.attributes,
-      tier: char.tier,
-      tierName: char.tierName,
-      ascension: char.ascension,
-    });
-    char.level = res.level;
-    char.totalExp = res.totalExp;
-    char.expToNext = res.expToNext;
-    char.freeAttrPoints = res.freeAttrPoints;
-    char.attributes = res.attributes;
-    char.tier = res.tier;
-    char.tierName = res.tierName;
-    if (res.ascensionBlocked) {
-      console.info(
-        `[StateManager] 登神长阶未开启，${char.name} 经验已封顶于 Lv.${res.level}（需持有对应登神物突破）`,
-      );
-    }
+  /** update_character（白名单、上限固化与重算、主角推进、NPC 层级、金钱钳 0 全在 reducer）。 */
+  private async applyUpdateCharacter(patch: StatePatch): Promise<GameEvent> {
+    return this.applyCharacterReducer(patch, 'character_action');
   }
 
   private async applySetResource(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const resource = patch.op.replace('set_', '') as ResourceKey;
-    const maxField = RESOURCE_MAX_FIELD[resource];
-
-    const newValue = Math.max(0, Math.min(patch.value as number, char[maxField]));
-    char[resource] = newValue;
-    await this.persistCharacter(char);
-
-    return this.createEvent('character_action', patch);
+    return this.applyCharacterReducer(patch, 'character_action');
   }
 
   private async applyDeltaResource(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const resource = patch.op.replace('delta_', '') as ResourceKey;
-    const maxField = RESOURCE_MAX_FIELD[resource];
-
-    const current = char[resource];
-    const delta = patch.amount ?? 0;
-    const newValue = Math.max(0, Math.min(current + delta, char[maxField]));
-    char[resource] = newValue;
-    await this.persistCharacter(char);
-
-    return this.createEvent('character_action', patch);
+    return this.applyCharacterReducer(patch, 'character_action');
   }
 
-  /**
-   * add_status_effect — M2 按名寻址 (#4)
-   *
-   * value = { name(必), ... } — 不要求 id（AI 永不产 id，铁律1/3）
-   * 同名叠层规则:
-   * - stackable=false: 永远 1 层，只刷新时长（取 max；新效果永久则覆盖为永久）
-   * - 其他（含缺省）: stacks 累加（缺省视作 1 层），有 maxStacks 则封顶
-   * category 过 normalizeStatusCategory 归一（'buff' → '增益' 等，铁律5）
-   */
+  /** add / update / remove_status_effect（update 找不到状态名 warn 忽略、不抛）。 */
   private async applyAddStatusEffect(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const value = patch.value as Partial<StatusEffect>;
-    if (!value?.name) throw new Error('add_status_effect 需要 value.name');
-
-    const incomingStacks = typeof value.stacks === 'number' && value.stacks > 0 ? value.stacks : 1;
-    // §5.2 时长互斥：有文本时长时 remainingTime 存 null；文本与数值同给时以文本为准
-    const incomingDurationText = readDurationText(value.durationText);
-
-    // 刷新时长: 双方有限取 max；新效果永久(null) 覆盖为永久；未提供(undefined) 不动
-    // F07：时长被真正拉长（取到了更大的新窗口）时 carryMinutes 归零 —— 余量属于旧窗口的
-    // 已流逝分钟，新起点不应继承；反之保留现有时长则保留其已累积余量。
-    const refreshTime = (existing: StatusEffect): void => {
-      if (value.remainingTime === undefined) return;
-      if (value.remainingTime === null) {
-        existing.remainingTime = null;
-        existing.carryMinutes = undefined;
-      } else if (existing.remainingTime == null) {
-        // 遗留数据 remainingTime === undefined → 直接取来值，防 Math.max(undefined, n) 产 NaN（终审修复）
-        // existing 已是永久(null) → 保持永久不覆盖
-        if (existing.remainingTime === undefined) {
-          existing.remainingTime = value.remainingTime;
-          existing.carryMinutes = undefined;
-        }
-      } else {
-        const prev = existing.remainingTime;
-        existing.remainingTime = Math.max(existing.remainingTime, value.remainingTime);
-        if (existing.remainingTime !== prev) {
-          existing.carryMinutes = undefined;
-        }
-      }
-    };
-
-    // 时长写入的总入口：文本时长 → 存文本、remainingTime=null；数值 / null → 清文本。
-    // 既有状态挂着文本时长时，数值不与「永久」取 max（那会把它永远钉成永久），而是直接取代。
-    const writeDuration = (existing: StatusEffect): void => {
-      if (incomingDurationText !== undefined) {
-        existing.durationText = incomingDurationText;
-        existing.remainingTime = null;
-        existing.carryMinutes = undefined;
-        return;
-      }
-      if (value.remainingTime === undefined) return;
-      if (existing.durationText !== undefined) {
-        existing.remainingTime = value.remainingTime;
-        existing.carryMinutes = undefined;
-        delete existing.durationText;
-        return;
-      }
-      refreshTime(existing);
-    };
-
-    const existing = findByName(char.statusEffects, value.name);
-    if (existing) {
-      if (existing.stackable === false) {
-        // 不可叠加: 同名再施加不重复插入，保持 1 层，只刷新时长
-        existing.stacks = 1;
-        writeDuration(existing);
-      } else {
-        // 可叠加（含缺省）: 累加层数，有上限则封顶
-        existing.stacks += incomingStacks;
-        if (existing.maxStacks && existing.maxStacks > 0) {
-          existing.stacks = Math.min(existing.stacks, existing.maxStacks);
-        }
-        writeDuration(existing);
-      }
-    } else {
-      // 新效果: 不写 id（铁律1，id 字段 @deprecated），category 归一，缺省补账务字段
-      const effect: StatusEffect = {
-        name: value.name,
-        description: value.description ?? '',
-        category: normalizeStatusCategory(value.category ?? ''),
-        stacks: incomingStacks,
-        maxStacks: value.maxStacks,
-        stackable: value.stackable,
-        remainingTime: incomingDurationText !== undefined ? null : (value.remainingTime ?? null),
-        ...(incomingDurationText !== undefined ? { durationText: incomingDurationText } : {}),
-        timeUnit: value.timeUnit ?? '分钟',
-        source: value.source ?? '',
-        effects: value.effects ?? {},
-        effectDescriptions: value.effectDescriptions,
-        protocolText: value.protocolText,
-        tags: value.tags,
-      };
-      if (effect.maxStacks && effect.maxStacks > 0) {
-        effect.stacks = Math.min(effect.stacks, effect.maxStacks);
-      }
-      char.statusEffects.push(effect);
-    }
-    await this.persistCharacter(char);
-
-    return this.createEvent('status_effect', patch);
+    return this.applyCharacterReducer(patch, 'status_effect');
   }
 
-  /**
-   * remove_status_effect — M2 按名删除 (#22) / M3 统一 {name} 对象形态
-   */
   private async applyRemoveStatusEffect(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const name = (patch.value as { name?: string })?.name;
-    if (!name) throw new Error('remove_status_effect 需要 value.name');
-
-    char.statusEffects = char.statusEffects.filter((e) => e.name !== name);
-    await this.persistCharacter(char);
-
-    return this.createEvent('status_effect', patch);
+    return this.applyCharacterReducer(patch, 'status_effect');
   }
 
-  /**
-   * update_status_effect — daily_check（Phase 3）按名改既有状态。
-   *
-   * value = { name(必), remainingTime?, stacks? }：
-   *   · `remainingTime`：数值=剩余量（timeUnit 口径，**取代**旧值，不是取 max —— daily_check 是
-   *     在结算推进后的新值）；`null`=改为永久；缺省不动。
-   *   · `stacks`：正数才生效，有 `maxStacks` 则封顶；缺省不动。
-   *   · 只改这两个字段，别的（描述/来源/层数上限）不动 —— 那属于 add/update_character。
-   *
-   * 🔴 **找不到该状态名 → warn 忽略、不抛**（照地图落位「按名寻址失败不否决」口径）：
-   *    AI 报的一条倒计时可能对应已被同回合 remove 掉的状态，硬抛会连坐整批补丁。
-   */
   private async applyUpdateStatusEffect(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const value = patch.value as {
-      name?: string;
-      remainingTime?: number | null;
-      durationText?: string;
-      stacks?: number;
-    };
-    const name = value?.name;
-    if (!name) throw new Error('update_status_effect 需要 value.name');
-
-    const existing = findByName(char.statusEffects, name);
-    if (!existing) {
-      console.warn(
-        `[StateManager] update_status_effect 找不到状态 "${name}"（${char.name}），忽略该条`,
-      );
-      return this.createEvent('status_effect', patch);
-    }
-
-    // §5.2 时长互斥：写文本时长 → remainingTime 存 null；写数值或 null → 清文本（含 daily_check）
-    const durationText = readDurationText(value.durationText);
-    if (durationText !== undefined) {
-      existing.durationText = durationText;
-      existing.remainingTime = null;
-      existing.carryMinutes = undefined;
-    } else if (value.remainingTime !== undefined) {
-      // null=永久；数值=取代（负数钳到 0，由 daily_check 决定何时改发 remove）
-      existing.remainingTime =
-        value.remainingTime === null ? null : Math.max(0, value.remainingTime);
-      delete existing.durationText;
-      // F07 余量随脚本退役一并作废：时间口径全交 AI，不再维护 carryMinutes
-      existing.carryMinutes = undefined;
-    }
-    if (typeof value.stacks === 'number' && value.stacks > 0) {
-      existing.stacks = value.stacks;
-      if (existing.maxStacks && existing.maxStacks > 0) {
-        existing.stacks = Math.min(existing.stacks, existing.maxStacks);
-      }
-    }
-    await this.persistCharacter(char);
-
-    return this.createEvent('status_effect', patch);
+    return this.applyCharacterReducer(patch, 'status_effect');
   }
 
-  /**
-   * add_item — M2 按名寻址 + 同名合并 (#5)
-   *
-   * value = { name(必), quantity?=1, type?, rarity?, description?, stats?,
-   *           effects?, equippedSlot?, durability?, maxDurability?, data? }
-   * 同名合并: 只累加 quantity，既有字段不覆盖（改字段走 update_item）。
-   * 归一化（铁律5）: type→normalizeItemType / rarity→normalizeRarity / equippedSlot→normalizeSlot
-   * （equippedSlot 无法识别 → null，不 throw，物品视作躺背包）。
-   */
   private async applyAddItem(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const value = patch.value as Partial<InventoryItem>;
-    if (!value?.name) throw new Error('add_item 需要 value.name');
-
-    const quantity = typeof value.quantity === 'number' && value.quantity > 0 ? value.quantity : 1;
-
-    const existing = findByName(char.inventory, value.name);
-    if (existing) {
-      // 同名合并: 只累加数量，不动既有字段
-      existing.quantity += quantity;
-    } else {
-      // 新物品: 不写 id（铁律1，id @deprecated），枚举字段归一
-      char.inventory.push({
-        name: value.name,
-        quantity,
-        description: value.description,
-        type: value.type !== undefined ? normalizeItemType(value.type) : undefined,
-        rarity: value.rarity !== undefined ? normalizeRarity(value.rarity) : undefined,
-        equippedSlot:
-          value.equippedSlot != null ? normalizeSlot(value.equippedSlot) : value.equippedSlot,
-        stats: value.stats,
-        durability: value.durability,
-        maxDurability: value.maxDurability,
-        protocolText: value.protocolText,
-        tags: value.tags,
-        data: value.data,
-        effects: value.effects,
-      });
-    }
-    await this.persistCharacter(char);
-
-    return this.createEvent('item_use', patch);
+    return this.applyCharacterReducer(patch, 'item_use');
   }
 
-  /**
-   * remove_item — M2 按名寻址 / M3 统一 {name, quantity?} 对象形态 (#5 #35)
-   *
-   * 扣减 ≤0 时 splice 删除条目；找不到 → throw 进 errors[]（杀静默失败）。
-   */
   private async applyRemoveItem(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const value = patch.value as { name?: string; quantity?: number };
-    const name = value?.name;
-    const qty = value?.quantity ?? 1;
-    if (!name) throw new Error('remove_item 需要 value.name');
-
-    const idx = char.inventory.findIndex((i) => i.name === name);
-    if (idx < 0) throw new Error(`物品不存在: ${name}`);
-
-    // 🔒 P1-07: 删除前验证库存总量 —— 此前 qty > 持有时扣到负数再 splice，静默吞错，
-    // 上游（craft_settle 等）拿到的 patchesApplied 无法反映材料不够。现在库存不足直接抛错。
-    if (char.inventory[idx].quantity < qty) {
-      throw new Error(`物品「${name}」库存不足: 持有 ${char.inventory[idx].quantity}，需要 ${qty}`);
-    }
-    char.inventory[idx].quantity -= qty;
-    if (char.inventory[idx].quantity === 0) {
-      char.inventory.splice(idx, 1);
-    }
-    await this.persistCharacter(char);
-
-    return this.createEvent('item_use', patch);
+    return this.applyCharacterReducer(patch, 'item_use');
   }
 
-  /**
-   * update_item — M2 新增，按名修改 (#5 #21)
-   *
-   * value = { name(必), changes: Partial<InventoryItem> }
-   * changes 白名单禁 name/quantity（改名走删加，数量走 add/remove）→ throw 进 errors[]。
-   * changes 里的 id 剥离（铁律1）；type/rarity/equippedSlot 归一化（铁律5）。
-   */
   private async applyUpdateItem(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const update = patch.value as { name?: string; changes?: Partial<InventoryItem> };
-    if (!update?.name) throw new Error('update_item 需要 value.name');
-
-    const item = findByName(char.inventory, update.name);
-    if (!item) throw new Error(`物品不存在: ${update.name}`);
-
-    const rawChanges = update.changes ?? {};
-    if ('name' in rawChanges)
-      throw new Error('update_item 禁止改 name（改名走 remove_item + add_item）');
-    if ('quantity' in rawChanges)
-      throw new Error('update_item 禁止改 quantity（数量走 add_item / remove_item）');
-
-    // id 剥离（铁律1）+ 枚举字段归一化（铁律5）
-    const { id: _ignoredId, ...changes } = rawChanges;
-    if (changes.type !== undefined) changes.type = normalizeItemType(changes.type);
-    if (changes.rarity !== undefined) changes.rarity = normalizeRarity(changes.rarity);
-    if (changes.equippedSlot != null) changes.equippedSlot = normalizeSlot(changes.equippedSlot);
-    Object.assign(item, changes);
-    await this.persistCharacter(char);
-
-    return this.createEvent('item_use', patch);
+    return this.applyCharacterReducer(patch, 'item_use');
   }
 
   /**
-   * transfer_item — M2 新增，原子转移 (#5)
-   *
-   * target = characters.<甲>  value = { name(必), to: '<乙名>', quantity?=1 }
-   * 原子性: 先全部校验（甲乙都解析成功 + 甲有该物品且数量足够）再变更，
-   * 任一校验失败整体不动 → throw 进 errors[]；双方通过 saveCharacters 一次事务落库。
+   * transfer_item — 原子转移 (#5)：先读请求、解析接收方（乙不存在 → throw，甲不动），
+   * 校验与变换在 reducer；双方进同一份脏表 → 出口那次 bulkPut 仍是单事务。
    */
   private async applyTransferItem(patch: StatePatch): Promise<GameEvent> {
     const from = await this.resolveCharTarget(patch.target);
-
-    const value = patch.value as { name?: string; to?: string; quantity?: number };
-    if (!value?.name) throw new Error('transfer_item 需要 value.name');
-    if (!value.to) throw new Error('transfer_item 需要 value.to（接收方名字）');
-    const qty = typeof value.quantity === 'number' && value.quantity > 0 ? value.quantity : 1;
-
-    // ── 校验阶段: 任一失败在此 throw，尚未发生任何变更 ──
-    const to = await this.resolveCharacter(value.to); // 乙不存在 → throw，甲不动
-
-    // 自转移防复制: 甲乙为同一角色时 bulkPut 同主键后写覆盖前写，会凭空复制物品
-    if (to.id === from.id) {
-      throw new Error(`transfer_item 不允许自我转移: ${from.name}`);
-    }
-    const idx = from.inventory.findIndex((i) => i.name === value.name);
-    if (idx < 0) throw new Error(`物品不存在: ${value.name}`);
-    if (from.inventory[idx].quantity < qty) {
-      throw new Error(
-        `物品数量不足: ${value.name}（持有 ${from.inventory[idx].quantity}，需 ${qty}）`,
-      );
-    }
-
-    // ── 变更阶段: 校验全过后才动内存，双方一次事务落库 ──
-    const source = from.inventory[idx];
-    const received = findByName(to.inventory, value.name);
-    if (received) {
-      received.quantity += qty; // 乙同名合并
-    } else {
-      // 乙新增: 物品字段随转移带过去，剥离 id（铁律1）
-      const { id: _ignoredId, ...fields } = source;
-      to.inventory.push({ ...fields, quantity: qty, equippedSlot: null });
-    }
-    source.quantity -= qty;
-    if (source.quantity <= 0) {
-      from.inventory.splice(idx, 1);
-    }
-    // 双方进同一份脏表 → 出口那次 bulkPut 仍是 Dexie 单事务，避免半持久化
+    const request = readTransferItemRequest(patch);
+    const to = await this.resolveCharacter(request.to);
+    this.logReduceNotes(reduceTransferItem(from, to, request));
     await this.persistCharacters([from, to]);
-
     return this.createEvent('item_use', patch);
   }
 
-  /**
-   * equip_item — M2 equippedSlot 单真源 (#10 #23 #24, 规范 §3)
-   *
-   * value = { name(必), slot(必) }
-   * 装备不是独立实体，是物品的状态: 穿=设 inventory[].equippedSlot，零数据搬运。
-   * slot 过 normalizeSlot（铁律5），无法识别 → throw 进 errors[]。
-   * quantity>1 拒绝直接穿（堆叠穿戴互斥，提示先拆分）。
-   * 同槽已有穿戴者 → 自动脱下（仅清其 equippedSlot，字段无损）。
-   */
   private async applyEquipItem(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const value = patch.value as { name?: string; slot?: string };
-    if (!value?.name) throw new Error('equip_item 需要 value.name');
-    if (!value.slot) throw new Error('equip_item 需要 value.slot');
-
-    const slot = normalizeSlot(value.slot);
-    if (!slot) throw new Error(`无法识别的装备槽位: ${value.slot}`);
-
-    const item = findByName(char.inventory, value.name);
-    if (!item) throw new Error(`物品不存在: ${value.name}`);
-
-    // 堆叠穿戴互斥: 堆叠物品穿上后 quantity 语义会撕裂（穿 1 件还是 5 件？）
-    if (item.quantity > 1) {
-      throw new Error(
-        `堆叠物品不可直接穿戴: ${value.name}（数量 ${item.quantity}），请先拆分为单件`,
-      );
-    }
-
-    // 同槽顶替: 仅清旧穿戴者的 equippedSlot，物品留在背包字段无损（杀 #10 有损穿脱）
-    for (const other of char.inventory) {
-      if (other !== item && other.equippedSlot === slot) {
-        other.equippedSlot = null;
-      }
-    }
-
-    item.equippedSlot = slot;
-    await this.persistCharacter(char);
-
-    return this.createEvent('item_use', patch);
+    return this.applyCharacterReducer(patch, 'item_use');
   }
 
-  /**
-   * unequip_item — M2/M3 equippedSlot 单真源 (#10 #23 #24, 规范 §3)
-   *
-   * value = { name } 或 { slot }（按 slot 找当前穿戴者，slot 先归一化）
-   * 脱=清 equippedSlot，零数据搬运。找不到（无此物品 / 该槽无穿戴）→ throw 进 errors[]。
-   */
   private async applyUnequipItem(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const value = patch.value as { name?: string; slot?: string };
-    let item: InventoryItem | undefined;
-
-    if (value?.name) {
-      // 按名脱
-      item = findByName(char.inventory, value.name);
-      if (!item) throw new Error(`物品不存在: ${value.name}`);
-    } else if (value?.slot) {
-      // 按槽脱: slot 先归一化再匹配穿戴者（铁律5）
-      const slot = normalizeSlot(value.slot);
-      if (!slot) throw new Error(`无法识别的装备槽位: ${value.slot}`);
-      item = char.inventory.find((i) => i.equippedSlot === slot);
-      if (!item) throw new Error(`该槽位无穿戴: ${slot}`);
-    } else {
-      throw new Error('unequip_item 需要 value.name 或 value.slot');
-    }
-
-    item.equippedSlot = null;
-    await this.persistCharacter(char);
-
-    return this.createEvent('item_use', patch);
+    return this.applyCharacterReducer(patch, 'item_use');
   }
 
-  /**
-   * add_skill — M2 按名寻址 (#4)
-   *
-   * value = { name(必), ... } — 不要求 id（AI 永不产 id，铁律1/3）
-   * 同名 = 覆盖升级（规范 §4）: 提供的字段逐一覆盖既有技能，
-   * 未提供的字段保留原值（merge 语义，不整体替换、不重复插入）。
-   */
   private async applyAddSkill(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const value = patch.value as Partial<Skill>;
-    if (!value?.name) throw new Error('add_skill 需要 value.name');
-
-    // 剥离 id: 无论上游是否夹带，引擎不再读写技能 id（铁律1，id @deprecated）
-    const { id: _ignoredId, ...fields } = value;
-    // §5.2：认不出的消耗转成可读文本而不是丢掉；新建与覆盖两支共用规整后的 fields
-    normalizeWrittenSkillCost(fields);
-
-    const existing = findByName(char.skills, value.name);
-    if (existing) {
-      // 同名覆盖升级: 只覆盖提供的字段，未提供的保留
-      Object.assign(existing, fields);
-      enforceSkillCostExclusion(existing, fields);
-    } else {
-      // 新技能: 不写 id，补账务缺省
-      char.skills.push({
-        name: value.name,
-        description: value.description ?? '',
-        type: value.type ?? 'active',
-        // §5.2 消耗互斥：可解析的 cost 优先，否则留原文 costText
-        cost: isParsedSkillCost(fields.cost) ? fields.cost : undefined,
-        ...(!isParsedSkillCost(fields.cost) && readCostText(fields.costText) !== undefined
-          ? { costText: readCostText(fields.costText) }
-          : {}),
-        cooldown: value.cooldown,
-        protocolText: value.protocolText,
-        tags: value.tags,
-        maxCooldown: value.maxCooldown,
-        level: value.level,
-        effects: value.effects,
-        // 🆕 2026-09-11: 技能品质（item_gen `<skill quality>` → rarity）。白名单此前漏收本字段，
-        //   开局初始技能经 item_gen 独立链 add_skill 落库即丢 → UI 一律显示「史诗」。
-        //   归一化口径同 applyAddItem（normalizeRarity）。
-        rarity: value.rarity !== undefined ? normalizeRarity(value.rarity) : undefined,
-        // 🆕 skillPower 链路修复 (2026-08-04 漏网 2026-08-12): 主体威力三字段透传。
-        //   0694453 只补了 char_gen 链路的 assembleCharacterState，本入口（request_dispatcher →
-        //   item_gen 独立链的 add_skill patch 同样带这三字段）的新技能白名单漏收 →
-        //   开局初始技能（火球术等）落库后 skillPower/relevantAttribute/damageType 全丢，
-        //   characterToCombatParticipant 按 typeof 过滤踢出 activeSkills，战斗兜底 0 伤害。
-        skillPower: value.skillPower,
-        relevantAttribute: value.relevantAttribute,
-        damageType: value.damageType,
-      });
-    }
-    await this.persistCharacter(char);
-
-    return this.createEvent('skill_use', patch);
+    return this.applyCharacterReducer(patch, 'skill_use');
   }
 
-  /**
-   * update_skill — M2 按名寻址 (#4)
-   *
-   * value = { name, changes } — 旧 { skillId, changes } 形状不再支持。
-   * 技能不存在 → throw 进 errors[]。
-   */
   private async applyUpdateSkill(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const update = patch.value as { name?: string; changes?: Partial<Skill> };
-    if (!update?.name) throw new Error('update_skill 需要 value.name');
-
-    const skill = findByName(char.skills, update.name);
-    if (!skill) throw new Error(`技能不存在: ${update.name}`);
-
-    // changes 里的 id 同样剥离（铁律1）
-    const { id: _ignoredId, ...changes } = update.changes ?? {};
-    normalizeWrittenSkillCost(changes);
-    Object.assign(skill, changes);
-    enforceSkillCostExclusion(skill, changes);
-    await this.persistCharacter(char);
-
-    return this.createEvent('skill_use', patch);
+    return this.applyCharacterReducer(patch, 'skill_use');
   }
 
-  /**
-   * remove_skill — M2 新增，按名删除 (#4 #21)
-   *
-   * value = { name } — 删除不存在的技能 throw 进 errors[]
-   * （替代旧世界的 removeSkill 假字段路径，#21）。
-   */
   private async applyRemoveSkill(patch: StatePatch): Promise<GameEvent> {
-    const char = await this.resolveCharTarget(patch.target);
-
-    const name = (patch.value as { name?: string })?.name;
-    if (!name) throw new Error('remove_skill 需要 value.name');
-
-    if (!findByName(char.skills, name)) throw new Error(`技能不存在: ${name}`);
-
-    char.skills = char.skills.filter((s) => s.name !== name);
-    await this.persistCharacter(char);
-
-    return this.createEvent('skill_use', patch);
+    return this.applyCharacterReducer(patch, 'skill_use');
   }
 
   private async applySetLocation(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
-    char.location = String(patch.value);
+    this.logReduceNotes(reduceCharacterPatch(char, patch));
     await this.persistCharacter(char);
 
     // 地图 v1（§8.2）：位置路径先落库，**然后**才投影成地块 —— 顺序是契约的一部分，
@@ -2275,53 +1371,17 @@ export class StateManager {
     const character = patch.value as CharacterState;
     if (!character?.id) throw new Error('缺少角色数据');
 
-    // 名字是逻辑键（铁律1）: 非空必填（终审修复）
-    const name = typeof character.name === 'string' ? character.name.trim() : '';
-    if (!name) throw new Error('add_character 需要非空 name（名字是逻辑键，铁律1）');
-
-    // 同存档同名查重（排除同 id 重放 — Dexie put 幂等覆盖无害），与 rename_character 查重口径一致（终审修复）
-    // 查的是缓存那份：同一次提交里连着加两个同名角色，第二个必须被这里拦下（不变式③）
+    // 校验（非空名字、同存档同名查重 —— 查的是缓存那份，同一次提交里连着加两个同名角色，
+    // 第二个必须被拦下，不变式③）与人物内容整理（年龄锚点、§5.6 自带额外的上限规整）都在
+    // patch-reducer 一处，翻译层工作状态建人走同一份。作用域外读来的是一份新数组，追加进去无害。
     const chars = await this.readCharacters();
-    const clash = chars.find((c) => c.name === name && c.id !== character.id);
-    if (clash) throw new Error(`同名角色已存在: ${name}`);
+    const gameTime = (await this.readProfile()).gameTime;
+
+    reduceAddCharacter(chars, character, gameTime);
 
     // 铁律3: saveId 是账务字段，由 Code 无条件注入，不信任上游 patch 构造方 (#8/M2硬前置②)
     // M6 T2: customFields.saveId 双写已退役 — saveId 单源一等字段
     character.saveId = this.saveId;
-
-    // 实例化闸门：所有生成角色都经这里落库。年龄线索缺失或无效时兜底此刻 18 岁 / 生日 1 月 1 日；
-    // patch 自带合法 ageAnchor（如快照重放）则原样保留。
-    ensureCharacterAge(character, (await this.readProfile()).gameTime);
-
-    // §5.6 新建角色（协调者裁定 2026-11-22，偏离设计第 4 条的「置 0」）：缺席的额外与旧档同一读法，
-    // 固化为「带来的上限 − 公式基础」，所以带进来的总上限一分不变（导入 / 重建 / 手写上限的角色
-    // 不被悄悄改成公式值）；entity_gen / 直出按公式组装的角色额外自然是 0。
-    // 只重算角色**自带**了 *Bonus 的那几项 —— 其余项重算只会把上限为 0 的数据（无法力的怪物）抬成 1。
-    // 「自带」必须在固化之前判断：value 就是 character 本身，固化后字段一律在场。
-    const carried = RESOURCE_CAP_KEYS.filter((k) =>
-      isFiniteNumber(character[RESOURCE_CAP_FIELDS[k].bonus]),
-    );
-    const capBaseline = solidifyResourceCaps(character);
-    if (capBaseline && carried.length > 0) {
-      const bonuses = {} as Record<ResourceCapKey, number>;
-      const current = {} as Record<ResourceCapKey, number>;
-      for (const key of RESOURCE_CAP_KEYS) {
-        bonuses[key] = character[RESOURCE_CAP_FIELDS[key].bonus]!;
-        current[key] = isFiniteNumber(character[key]) ? character[key] : 0;
-      }
-      const r = recomputeResourceCaps({
-        tier: character.tier,
-        attributes: character.attributes,
-        bonuses,
-        previousMax: capBaseline.prevMax,
-        current,
-      });
-      for (const key of carried) {
-        const fields = RESOURCE_CAP_FIELDS[key];
-        character[fields.max] = r[fields.max];
-        if (isFiniteNumber(character[key])) character[key] = r[key];
-      }
-    }
 
     await this.persistCharacter(character);
     return this.createEvent('system', patch);
@@ -2338,6 +1398,8 @@ export class StateManager {
   private async applyRemoveCharacter(patch: StatePatch): Promise<GameEvent> {
     // M4: resolveCharTarget 仅在本存档内按名解析，跨档命中已无可能（旧守卫随之拆除）
     const char = await this.resolveCharTarget(patch.target);
+    // 摘出缓存数组走 reducer（翻译层工作状态同一份）；删除表与落库在 dropCharacter
+    reduceRemoveCharacter(await this.readCharacters(), char);
     await this.dropCharacter(char.id);
     return this.createEvent('system', patch);
   }
@@ -2358,36 +1420,20 @@ export class StateManager {
     if (typeof patch.value !== 'string') {
       throw new Error(`rename_character value 必须是新名字符串: ${JSON.stringify(patch.value)}`);
     }
-    const newName = patch.value.trim();
-    if (!newName) throw new Error('rename_character 新名不能为空');
-
     // M4: resolveCharTarget 仅在本存档内按名解析，跨档命中已无可能（旧守卫随之拆除）
     const char = await this.resolveCharTarget(patch.target);
-    const oldName = char.name;
-
-    // 幂等: 新名等于旧名 → no-op 成功
-    if (newName === oldName) {
-      return this.createEvent('system', patch);
-    }
-
-    // 同存档新名查重（排除自身 — 自己改自己的名不算撞名，上面已 no-op 短路）
-    const chars = await this.readCharacters();
-    const clash = chars.find((c) => c.name === newName && c.id !== char.id);
-    if (clash) {
-      throw new Error(`rename_character 新名已被占用: ${newName}`);
-    }
-
-    // 改名落库
-    char.name = newName;
-    await this.persistCharacter(char);
-
-    // 按名引用迁移 — 当前仅 affections（M5/M6 新增按名引用时必须回来扩这里）
+    const characters = await this.readCharacters();
     const profile = await this.readProfile();
-    if (profile?.affections && Object.prototype.hasOwnProperty.call(profile.affections, oldName)) {
-      profile.affections[newName] = profile.affections[oldName];
-      delete profile.affections[oldName];
-      await this.persistProfile(profile);
-    }
+
+    // 校验、幂等（新名 = 旧名 no-op）、查重、改名与好感按名迁移都在 patch-reducer
+    // （M5/M6 新增按名引用时回那里扩）；这里只按结果决定落哪几样
+    const result = reduceRenameCharacter(
+      { characters, profile: { affections: profile?.affections ?? {} } },
+      char,
+      patch.value,
+    );
+    if (result.renamed) await this.persistCharacter(char);
+    if (result.affectionMoved) await this.persistProfile(profile);
 
     return this.createEvent('system', patch);
   }
@@ -2415,32 +1461,14 @@ export class StateManager {
     return this.createEvent('plot_trigger', patch);
   }
 
-  private async applyUpdateQuest(patch: StatePatch): Promise<GameEvent> {
-    const questData = patch.value as { name: string } & Record<string, any>;
-    const questName = questData.name;
-    if (!questName) throw new Error('缺少任务名称');
+  /**
+   * update_quest / remove_quest：名字校验、status 归一化（#32）与合并语义都在 patch-reducer
+   * （`reduceQuestPatch`），落库那一拍由提交出口统一做。
+   */
+  private async applyQuestPatch(patch: StatePatch): Promise<GameEvent> {
     const profile = await this.readProfile();
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
-    // M6 #52: 用 delete 剔除寻址键，替代 `{ name: _name, ...rest }` 的未用解构 + eslint-disable
-    const questFields: Record<string, any> = { ...questData };
-    delete questFields.name;
-    // #32: status 自由字符串归一化（'active'/'done' 等别名 → 中文枚举）
-    if (questFields.status !== undefined) {
-      questFields.status = normalizeQuestStatus(questFields.status);
-    }
-    // 合并语义留在 save-profile 一处（`setQuestInPlace`），落库那一拍由提交出口统一做
-    setQuestInPlace(profile, questName, questFields);
-    await this.persistProfile(profile);
-    return this.createEvent('quest_update', patch);
-  }
-
-  private async applyRemoveQuest(patch: StatePatch): Promise<GameEvent> {
-    // #40: value 形态统一为 {name} 对象（与 update_quest 对齐）
-    const questName = (patch.value as { name?: string })?.name;
-    if (!questName) throw new Error('缺少任务名称');
-    const profile = await this.readProfile();
-    if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
-    removeQuestInPlace(profile, questName);
+    reduceQuestPatch(profile, patch);
     await this.persistProfile(profile);
     return this.createEvent('quest_update', patch);
   }
@@ -2451,35 +1479,13 @@ export class StateManager {
    * set_affection / delta_affection — 好感度写入 (规范 §7)
    *
    * target 形态: `affections.<角色名>` — 名字是 profile.affections 的自由键，
-   * 不经 resolveCharacter（好感度键无需角色实体存在）。
-   * clamp 到 [-100, +100]（复用 affection-system 的 clampAffection）。
+   * 不经 resolveCharacter（好感度键无需角色实体存在）。target 校验、取整与
+   * clamp 到 [-100, +100] 都在 patch-reducer（`reduceAffectionPatch`）。
    */
   private async applyAffection(patch: StatePatch): Promise<GameEvent> {
-    // 解析 target: 必须是 affections.<名> 且名字非空
-    const AFFECTION_PREFIX = 'affections.';
-    if (!patch.target.startsWith(AFFECTION_PREFIX)) {
-      throw new Error(`${patch.op} target 必须为 affections.<角色名> 格式: ${patch.target}`);
-    }
-    const charName = patch.target.slice(AFFECTION_PREFIX.length).trim();
-    if (!charName) throw new Error(`${patch.op} target 缺少角色名: ${patch.target}`);
     const profile = await this.readProfile();
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
-
-    if (patch.op === 'set_affection') {
-      // 绝对值设置 — value 必须是数字
-      if (typeof patch.value !== 'number' || Number.isNaN(patch.value)) {
-        throw new Error(`set_affection value 必须是数字: ${JSON.stringify(patch.value)}`);
-      }
-      profile.affections[charName] = clampAffection(patch.value);
-    } else {
-      // 增量 — amount 必须是数字（与 set_affection 守卫一致，终审修复），现值缺省 0 起算，加完再 clamp（双向）
-      if (typeof patch.amount !== 'number' || Number.isNaN(patch.amount)) {
-        throw new Error(`delta_affection amount 必须是数字: ${JSON.stringify(patch.amount)}`);
-      }
-      const current = profile.affections[charName] ?? 0;
-      profile.affections[charName] = clampAffection(current + patch.amount);
-    }
-
+    reduceAffectionPatch(profile, patch);
     await this.persistProfile(profile);
     // GameEventType 无 affection 成员（M1 实测），走 'system'
     return this.createEvent('system', patch);
@@ -2489,25 +1495,13 @@ export class StateManager {
    * add_news — 追加世界新闻 (规范 §8)
    *
    * AI 只填叙事字段 {title(必), content(必), category?}；
-   * Code 补账务字段 id / publishedAt / read（铁律3）。
+   * Code 补账务字段 id / publishedAt / read（铁律3）：校验与追加在 patch-reducer，
+   * id 与发布时间在这里落款（reducer 不取随机、不读时钟）。
    */
   private async applyAddNews(patch: StatePatch): Promise<GameEvent> {
-    const newsData = patch.value as { title?: string; content?: string; category?: string };
-    if (!newsData?.title) throw new Error('add_news 缺少 title');
-    if (!newsData.content) throw new Error('add_news 缺少 content');
     const profile = await this.readProfile();
     if (!profile) throw new Error(`SaveProfile 不存在: ${this.saveId}`);
-
-    profile.news.push({
-      title: newsData.title,
-      content: newsData.content,
-      category: newsData.category ?? '',
-      // Code 补账务字段
-      id: crypto.randomUUID(),
-      publishedAt: Date.now(),
-      read: false,
-    });
-
+    reduceAddNews(profile, patch, { id: crypto.randomUUID(), publishedAt: Date.now() });
     await this.persistProfile(profile);
     return this.createEvent('system', patch);
   }
@@ -3860,18 +2854,6 @@ export function createStateManager(
 }
 
 // ═══════════════════════════════════════════════════════════
-// 辅助
-// ═══════════════════════════════════════════════════════════
-
-/**
- * 集合内按名字查找 — M2 铁律1（逻辑键=名字）的集合级辅助
- * 供各 op handler 在 inventory/skills/statusEffects 等列表中按名寻址。
- */
-export function findByName<T extends { name: string }>(list: T[], name: string): T | undefined {
-  return list.find((item) => item.name === name);
-}
-
-// ═══════════════════════════════════════════════════════════
 // 🗺 地图策略（纯函数；上面三条钩子的全部判定都在这里）
 // ═══════════════════════════════════════════════════════════
 
@@ -4298,27 +3280,6 @@ function planJourneyFlags(
 }
 
 // ═══════════════════════════════════════════════════════════
-// 资源字段对（Q-19）
-// ═══════════════════════════════════════════════════════════
-
-/** 三种资源 */
-const RESOURCE_KEYS = ['hp', 'mp', 'sp'] as const;
-type ResourceKey = (typeof RESOURCE_KEYS)[number];
-
-/**
- * 资源 → 它的上限字段。
- *
- * Q-19：此前是三处 `\`max\${res.charAt(0).toUpperCase()}…\`` 字符串拼接 + `as` 断言，
- * 读写一律 `(char as any)[k]`（10 处）。`satisfies` 让「字段名写错」变成编译错误 ——
- * 拼字符串那种写法编译器一个字都看不懂。
- */
-const RESOURCE_MAX_FIELD = {
-  hp: 'maxHp',
-  mp: 'maxMp',
-  sp: 'maxSp',
-} as const satisfies Record<ResourceKey, keyof CharacterState>;
-
-// ═══════════════════════════════════════════════════════════
 // op → handler 分发表（Q-19）
 // ═══════════════════════════════════════════════════════════
 
@@ -4338,11 +3299,11 @@ const PATCH_HANDLERS: Record<
   (sm: StateManager, patch: StatePatch) => Promise<GameEvent>
 > = {
   // 变量
-  set_variable: (sm, p) => sm['applySetVariable'](p),
-  delta_variable: (sm, p) => sm['applyDeltaVariable'](p),
-  remove_variable: (sm, p) => sm['applyRemoveVariable'](p),
-  move_variable: (sm, p) => sm['applyMoveVariable'](p),
-  insert_variable: (sm, p) => sm['applyInsertVariable'](p),
+  set_variable: (sm, p) => sm['applyVariablePatch'](p),
+  delta_variable: (sm, p) => sm['applyVariablePatch'](p),
+  remove_variable: (sm, p) => sm['applyVariablePatch'](p),
+  move_variable: (sm, p) => sm['applyVariablePatch'](p),
+  insert_variable: (sm, p) => sm['applyVariablePatch'](p),
   // 角色
   update_character: (sm, p) => sm['applyUpdateCharacter'](p),
   add_character: (sm, p) => sm['applyAddCharacter'](p),
@@ -4374,8 +3335,8 @@ const PATCH_HANDLERS: Record<
   // 记忆 / 剧情 / 任务
   add_memory: (sm, p) => sm['applyAddMemory'](p),
   update_plot_event: (sm, p) => sm['applyUpdatePlotEvent'](p),
-  update_quest: (sm, p) => sm['applyUpdateQuest'](p),
-  remove_quest: (sm, p) => sm['applyRemoveQuest'](p),
+  update_quest: (sm, p) => sm['applyQuestPatch'](p),
+  remove_quest: (sm, p) => sm['applyQuestPatch'](p),
   // 好感度（两个 op 共用，handler 内按 op 分绝对/增量）
   set_affection: (sm, p) => sm['applyAffection'](p),
   delta_affection: (sm, p) => sm['applyAffection'](p),

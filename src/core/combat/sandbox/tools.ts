@@ -444,7 +444,9 @@ function statusFromArgs(raw: unknown): CombatStatusEffect {
   if (r.category !== undefined) out.category = r.category as CombatStatusEffect['category'];
   if (r.stacks !== undefined) out.stacks = Number(r.stacks);
   if (r.remainingTime !== undefined) {
-    out.remainingTime = r.remainingTime === null ? null : Number(r.remainingTime);
+    // 解析不出有限数值（如 `"3回合"`）归 null=无时长，免得 NaN 让终局结算整批被拒
+    const time = r.remainingTime === null ? null : Number(r.remainingTime);
+    out.remainingTime = time !== null && Number.isFinite(time) ? time : null;
   }
   if (r.timeUnit !== undefined) out.timeUnit = r.timeUnit as CombatStatusEffect['timeUnit'];
   if (r.source !== undefined) out.source = String(r.source);

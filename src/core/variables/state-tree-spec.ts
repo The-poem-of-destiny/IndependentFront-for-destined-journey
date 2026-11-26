@@ -7,7 +7,10 @@
  * 约定：
  * - 以 `_` 开头的键只读（§3.3），`isReadonlyKey` 是唯一判据；路径解析时忽略 `_` 前缀（`findChildSpec`）。
  * - `等级` 例外：键名不带 `_`，NPC 可写、主角只读（§9 #2），由 `playerReadonly` 标出。
- * - `field` 是给人看的内核字段说明（`CharacterState.hp` 之类），不是可执行路径；映射规则在翻译层。
+ * - `field` 是给人看的内核字段说明（`CharacterState.hp` 之类），不是可执行路径。
+ * - `kernel`（内核字段键）与 `rule`（写入规则）是可执行映射：翻译层与编辑层只从这里读键 → 字段 / 规则，
+ *   不另写对照表（审查报告 R6a，`tests/core/variables/state-tree-spec-source-gate.test.ts` 钉住）。
+ *   这两项不进协议文字，改它们不会让 `direct_cached` 冷建。
  *
  * 🔴 只许依赖 `content/field-enums.ts`（与 `agents/direct-contract.ts` 同一规矩）：本文件要被协议文字生成器读，
  *    一旦拉进 state-manager / types 运行时值就会成环。
@@ -92,11 +95,63 @@ type StateTreeEntityKind =
   | 'ascensionAuthority'
   | 'ascensionLaw';
 
+/**
+ * 写入规则种类：翻译层按它分派（审查报告 R6a：键 → 规则 / 内核字段只从本词表读，翻译层与编辑层不另写映射）。
+ * 只读键（含祖先只读）一律是 `readonly`；未声明规则的分支 / 字典是 `expand`（整对象按键展开）；
+ * `ascension` 与 `news` 由声明它的节点向下继承。
+ */
+export type StateTreeWriteRule =
+  | 'expand'
+  | 'time'
+  | 'worldLocation'
+  | 'fatePoints'
+  | 'profileText'
+  | 'profileList'
+  | 'category'
+  | 'level'
+  | 'totalExp'
+  | 'resourceCurrent'
+  | 'capTotal'
+  | 'capBonus'
+  | 'money'
+  | 'personText'
+  | 'present'
+  | 'location'
+  | 'affection'
+  | 'groupQuantity'
+  | 'itemEntity'
+  | 'itemField'
+  | 'itemQuantity'
+  | 'itemSlot'
+  | 'skillEntity'
+  | 'skillField'
+  | 'statusEntity'
+  | 'statusField'
+  | 'statusStacks'
+  | 'statusDuration'
+  | 'ascension'
+  | 'characterEntity'
+  | 'questEntity'
+  | 'questField'
+  | 'news'
+  | 'variables'
+  | 'readonly';
+
+/** 向下继承的规则（子树整体按同一种方式处理）。 */
+const INHERITED_RULES: ReadonlySet<StateTreeWriteRule> = new Set(['ascension', 'news']);
+
 interface NodeBase {
   /** 中文键；只读键带 `_` 前缀。`record` 条目的键是名字占位（形如 `{物品名}`）。 */
   readonly key: string;
   /** 对应内核字段说明（给人与协议生成器看）。 */
   readonly field?: string;
+  /**
+   * 内核字段键（可执行映射，翻译层据此读写）：相对所在实体（`InventoryItem` / `Skill` / `StatusEffect` /
+   * `Quest` / `CharacterState` / 登神条目 …）的属性名，如 `rarity`、`maxHpBonus`。
+   */
+  readonly kernel?: string;
+  /** 写入规则（见 `StateTreeWriteRule`）。 */
+  readonly rule?: StateTreeWriteRule;
   /** 键名不带 `_` 但对主角只读（`成长.等级`，§3.3）。 */
   readonly playerReadonly?: boolean;
   /** 只在 `关系列表` 的人物上出现（在场 / 地点 / 好感度 / 数量）。 */
@@ -160,6 +215,20 @@ export const ATTRIBUTE_LABELS = {
   spi: '精神',
 } as const;
 
+/**
+ * 人物 `档案/类别` 的中文 → 内核 `CharacterState.type`（写入时用；投影只出前两项）。
+ * 空串 / `无` / `人物` / `NPC` 都读作普通人物。
+ */
+export const CHARACTER_CATEGORY_TYPES: Readonly<Record<string, 'monster' | 'summon' | 'npc'>> = {
+  怪物: 'monster',
+  召唤物: 'summon',
+  人物: 'npc',
+  NPC: 'npc',
+  npc: 'npc',
+  无: 'npc',
+  '': 'npc',
+};
+
 /** 伤害类型（内核 `DamageType` 的取值，本身就是中文）。 */
 export const DAMAGE_TYPES = ['物理', '能量', '精神', '真实'] as const;
 
@@ -213,143 +282,222 @@ function record(
 /** 资源节点：`{当前, 上限: {_基础, 额外}}`（§3.1、§5.6）。 */
 function resource(key: string, cur: 'hp' | 'mp' | 'sp'): StateTreeBranchSpec {
   const cap = `max${cur.charAt(0).toUpperCase()}${cur.slice(1)}`;
-  return branch(key, [
-    leaf('当前', 'resourceCurrent', { field: `CharacterState.${cur}` }),
-    branch(
-      '上限',
-      [
-        leaf('_基础', 'capBase', { field: `calcResources(tier, attributes).${cap}（不落库）` }),
-        leaf('额外', 'capBonus', { field: `CharacterState.${cap}Bonus` }),
-      ],
-      {
-        field: `CharacterState.${cap}（有效总值 = max(1, 基础 + 额外)）`,
-        scalarLeaf: 'capBonus',
-        note: '写成单个数时按「额外 = 该数 − 基础」纠正',
-      },
-    ),
-  ]);
+  return branch(
+    key,
+    [
+      leaf('当前', 'resourceCurrent', {
+        field: `CharacterState.${cur}`,
+        kernel: cur,
+        rule: 'resourceCurrent',
+      }),
+      branch(
+        '上限',
+        [
+          leaf('_基础', 'capBase', { field: `calcResources(tier, attributes).${cap}（不落库）` }),
+          leaf('额外', 'capBonus', {
+            field: `CharacterState.${cap}Bonus`,
+            kernel: `${cap}Bonus`,
+            rule: 'capBonus',
+          }),
+        ],
+        {
+          field: `CharacterState.${cap}（有效总值 = max(1, 基础 + 额外)）`,
+          kernel: cap,
+          rule: 'capTotal',
+          scalarLeaf: 'capBonus',
+          note: '写成单个数时按「额外 = 该数 − 基础」纠正',
+        },
+      ),
+    ],
+    { kernel: cur },
+  );
 }
 
 /** 物品条目的公共叶子；`withSlot` 为装备字典（带 `位置`）。 */
 function itemEntry(withSlot: boolean): StateTreeBranchSpec {
+  const f = (kernel: string) => ({
+    field: `InventoryItem.${kernel}`,
+    kernel,
+    rule: 'itemField' as const,
+  });
   return branch(
     '{物品名}',
     [
-      enumLeaf('品质', 'rarity', { field: 'InventoryItem.rarity' }),
-      enumLeaf('类型', 'itemType', { field: 'InventoryItem.type' }),
+      enumLeaf('品质', 'rarity', f('rarity')),
+      enumLeaf('类型', 'itemType', f('type')),
       leaf('数量', 'quantity', {
         field: 'InventoryItem.quantity',
+        kernel: 'quantity',
+        rule: 'itemQuantity',
         ...(withSlot ? { optional: true, note: '只在大于 1 时投影' } : {}),
       }),
-      ...(withSlot ? [leaf('位置', 'slot', { field: 'InventoryItem.equippedSlot' })] : []),
-      leaf('标签', 'textArray', { field: 'InventoryItem.tags' }),
-      leaf('效果', 'effectDict', { field: 'InventoryItem.effects' }),
-      leaf('描述', 'text', { field: 'InventoryItem.description' }),
-      leaf('属性', 'numberDict', { field: 'InventoryItem.stats', optional: true }),
+      ...(withSlot
+        ? [
+            leaf('位置', 'slot', {
+              field: 'InventoryItem.equippedSlot',
+              kernel: 'equippedSlot',
+              rule: 'itemSlot',
+            }),
+          ]
+        : []),
+      leaf('标签', 'textArray', f('tags')),
+      leaf('效果', 'effectDict', f('effects')),
+      leaf('描述', 'text', f('description')),
+      leaf('属性', 'numberDict', { ...f('stats'), optional: true }),
       branch(
         '耐久',
         [
-          leaf('当前', 'number', { field: 'InventoryItem.durability' }),
-          leaf('上限', 'number', { field: 'InventoryItem.maxDurability' }),
+          leaf('当前', 'number', { ...f('durability'), field: 'InventoryItem.durability' }),
+          leaf('上限', 'number', { ...f('maxDurability'), field: 'InventoryItem.maxDurability' }),
         ],
-        { optional: true },
+        { optional: true, rule: 'itemField' },
       ),
-      leaf('规则文本', 'text', { field: 'InventoryItem.protocolText', optional: true }),
+      leaf('规则文本', 'text', { ...f('protocolText'), optional: true }),
     ],
-    { entity: 'item', field: 'InventoryItem' },
+    { entity: 'item', field: 'InventoryItem', rule: 'itemEntity' },
   );
 }
+
+/** 技能叶子的映射（字段说明 = `Skill.<内核键>`）。 */
+const skillField = (kernel: string) => ({
+  field: `Skill.${kernel}`,
+  kernel,
+  rule: 'skillField' as const,
+});
 
 const SKILL_ENTRY = branch(
   '{技能名}',
   [
-    enumLeaf('品质', 'rarity', { field: 'Skill.rarity' }),
-    enumLeaf('类型', 'skillType', { field: 'Skill.type' }),
-    leaf('消耗', 'skillCost', { field: 'Skill.cost / Skill.costText' }),
-    leaf('冷却', 'number', { field: 'Skill.cooldown', optional: true }),
-    leaf('标签', 'textArray', { field: 'Skill.tags' }),
-    leaf('效果', 'effectDict', { field: 'Skill.effects' }),
-    leaf('描述', 'text', { field: 'Skill.description' }),
-    leaf('威力', 'number', { field: 'Skill.skillPower', optional: true }),
-    enumLeaf('关联属性', 'attribute', { field: 'Skill.relevantAttribute', optional: true }),
-    enumLeaf('伤害类型', 'damageType', { field: 'Skill.damageType', optional: true }),
-    leaf('规则文本', 'text', { field: 'Skill.protocolText', optional: true }),
+    enumLeaf('品质', 'rarity', skillField('rarity')),
+    enumLeaf('类型', 'skillType', skillField('type')),
+    leaf('消耗', 'skillCost', { ...skillField('cost'), field: 'Skill.cost / Skill.costText' }),
+    leaf('冷却', 'number', { ...skillField('cooldown'), optional: true }),
+    leaf('标签', 'textArray', skillField('tags')),
+    leaf('效果', 'effectDict', skillField('effects')),
+    leaf('描述', 'text', skillField('description')),
+    leaf('威力', 'number', { ...skillField('skillPower'), optional: true }),
+    enumLeaf('关联属性', 'attribute', { ...skillField('relevantAttribute'), optional: true }),
+    enumLeaf('伤害类型', 'damageType', { ...skillField('damageType'), optional: true }),
+    leaf('规则文本', 'text', { ...skillField('protocolText'), optional: true }),
   ],
-  { entity: 'skill', field: 'Skill' },
+  { entity: 'skill', field: 'Skill', rule: 'skillEntity' },
 );
+
+/** 状态叶子的映射（字段说明 = `StatusEffect.<内核键>`）。 */
+const statusField = (kernel: string) => ({
+  field: `StatusEffect.${kernel}`,
+  kernel,
+  rule: 'statusField' as const,
+});
 
 const STATUS_ENTRY = branch(
   '{状态名}',
   [
-    enumLeaf('类型', 'statusCategory', { field: 'StatusEffect.category' }),
-    leaf('描述', 'text', { field: 'StatusEffect.description' }),
-    leaf('效果', 'effectDict', { field: 'StatusEffect.effectDescriptions' }),
-    leaf('层数', 'stacks', { field: 'StatusEffect.stacks' }),
-    leaf('层数上限', 'number', { field: 'StatusEffect.maxStacks', optional: true }),
+    enumLeaf('类型', 'statusCategory', statusField('category')),
+    leaf('描述', 'text', statusField('description')),
+    leaf('效果', 'effectDict', statusField('effectDescriptions')),
+    leaf('层数', 'stacks', { ...statusField('stacks'), rule: 'statusStacks' }),
+    leaf('层数上限', 'number', { ...statusField('maxStacks'), optional: true }),
     leaf('剩余时间', 'duration', {
       field: 'StatusEffect.remainingTime + timeUnit / StatusEffect.durationText',
+      kernel: 'remainingTime',
+      rule: 'statusDuration',
     }),
-    leaf('来源', 'text', { field: 'StatusEffect.source' }),
+    leaf('来源', 'text', statusField('source')),
   ],
-  { entity: 'statusEffect', field: 'StatusEffect' },
+  { entity: 'statusEffect', field: 'StatusEffect', rule: 'statusEntity' },
 );
 
 const ASCENSION_SPEC = branch(
   '登神长阶',
   [
-    leaf('是否开启', 'boolean', { field: 'ascension.enabled' }),
+    leaf('是否开启', 'boolean', { field: 'ascension.enabled', kernel: 'enabled' }),
     record(
       '要素',
       branch(
         '{要素名}',
         [
-          leaf('描述', 'text', { field: 'ElementDetail.description' }),
-          leaf('效果', 'effectDict', { field: 'ElementDetail.effectDescriptions' }),
+          leaf('描述', 'text', { field: 'ElementDetail.description', kernel: 'description' }),
+          leaf('效果', 'effectDict', {
+            field: 'ElementDetail.effectDescriptions',
+            kernel: 'effectDescriptions',
+          }),
         ],
         { entity: 'ascensionElement' },
       ),
-      { field: 'ascension.elements' },
+      { field: 'ascension.elements', kernel: 'elements' },
     ),
     record(
       '权能',
       branch(
         '{权能名}',
         [
-          leaf('描述', 'text', { field: 'AuthorityDetail.description' }),
-          leaf('效果', 'effectDict', { field: 'AuthorityDetail.effectDescriptions' }),
-          leaf('消耗', 'text', { field: 'AuthorityDetail.costDescription' }),
+          leaf('描述', 'text', { field: 'AuthorityDetail.description', kernel: 'description' }),
+          leaf('效果', 'effectDict', {
+            field: 'AuthorityDetail.effectDescriptions',
+            kernel: 'effectDescriptions',
+          }),
+          leaf('消耗', 'text', {
+            field: 'AuthorityDetail.costDescription',
+            kernel: 'costDescription',
+          }),
         ],
         { entity: 'ascensionAuthority' },
       ),
-      { field: 'ascension.authority' },
+      { field: 'ascension.authority', kernel: 'authority' },
     ),
     record(
       '法则',
       branch(
         '{法则名}',
         [
-          leaf('描述', 'text', { field: 'LawDetail.description' }),
-          leaf('效果', 'effectDict', { field: 'LawDetail.effectDescriptions' }),
-          leaf('消耗', 'text', { field: 'LawDetail.costDescription' }),
+          leaf('描述', 'text', { field: 'LawDetail.description', kernel: 'description' }),
+          leaf('效果', 'effectDict', {
+            field: 'LawDetail.effectDescriptions',
+            kernel: 'effectDescriptions',
+          }),
+          leaf('消耗', 'text', { field: 'LawDetail.costDescription', kernel: 'costDescription' }),
         ],
         { entity: 'ascensionLaw' },
       ),
-      { field: 'ascension.law' },
+      { field: 'ascension.law', kernel: 'law' },
     ),
-    leaf('神位', 'text', { field: 'ascension.deityPosition' }),
+    leaf('神位', 'text', { field: 'ascension.deityPosition', kernel: 'deityPosition' }),
     branch(
       '神国',
       [
-        leaf('名称', 'text', { field: 'ascension.divineKingdom.name' }),
-        leaf('描述', 'text', { field: 'ascension.divineKingdom.description' }),
+        leaf('名称', 'text', { field: 'ascension.divineKingdom.name', kernel: 'name' }),
+        leaf('描述', 'text', {
+          field: 'ascension.divineKingdom.description',
+          kernel: 'description',
+        }),
       ],
-      { field: 'ascension.divineKingdom' },
+      { field: 'ascension.divineKingdom', kernel: 'divineKingdom' },
     ),
   ],
-  { field: 'CharacterState.ascension', note: '任意写都按「影子现值 + 本条」重建整份' },
+  {
+    field: 'CharacterState.ascension',
+    kernel: 'ascension',
+    rule: 'ascension',
+    note: '任意写都按「影子现值 + 本条」重建整份',
+  },
 );
 
 // ========== 人物节点 ==========
+
+/** 档案文字叶子（`CharacterState.<内核键>`）。 */
+const profileText = (kernel: string) => ({
+  field: `CharacterState.${kernel}`,
+  kernel,
+  rule: 'profileText' as const,
+});
+
+/** 档案列表叶子。 */
+const profileList = (kernel: string) => ({
+  field: `CharacterState.${kernel}`,
+  kernel,
+  rule: 'profileList' as const,
+});
 
 /**
  * 人物节点的子键（主角与关系列表共用；每个直接子键是一个缓存分区，§3.4）。
@@ -359,48 +507,64 @@ export const PERSON_NODE_CHILDREN: readonly StateTreeNodeSpec[] = [
   branch(
     '档案',
     [
-      leaf('种族', 'text', { field: 'CharacterState.race' }),
-      leaf('性别', 'text', { field: 'CharacterState.gender' }),
-      leaf('身份', 'textArray', { field: 'CharacterState.identity' }),
-      leaf('职业', 'textArray', { field: 'CharacterState.occupation' }),
+      leaf('种族', 'text', profileText('race')),
+      leaf('性别', 'text', profileText('gender')),
+      leaf('身份', 'textArray', profileList('identity')),
+      leaf('职业', 'textArray', profileList('occupation')),
       leaf('_年龄', 'number', { field: 'ageAt(ageAnchor, gameTime)（现算）' }),
       leaf('_生日', 'text', { field: 'CharacterState.ageAnchor 的生日' }),
-      leaf('外貌', 'text', { field: 'CharacterState.appearance' }),
-      leaf('着装', 'text', { field: 'CharacterState.outfit' }),
-      leaf('性格', 'text', { field: 'CharacterState.personality' }),
-      leaf('背景故事', 'text', { field: 'CharacterState.background' }),
+      leaf('外貌', 'text', profileText('appearance')),
+      leaf('着装', 'text', profileText('outfit')),
+      leaf('性格', 'text', profileText('personality')),
+      leaf('背景故事', 'text', profileText('background')),
       leaf('类别', 'text', {
         field: 'CharacterState.type（怪物 / 召唤物）',
+        kernel: 'type',
+        rule: 'category',
         optional: true,
         relationOnly: true,
       }),
     ],
-    { note: '文字字段的路径写入转成 character_updates 的 profile_changes（§5.5）' },
+    { note: '文字字段的路径写入转成 update_character 补丁（§5.5，2026-11-25 更正）' },
   ),
   branch('成长', [
     leaf('_生命层级', 'number', { field: 'CharacterState.tier' }),
     leaf('等级', 'number', {
       field: 'CharacterState.level',
+      kernel: 'level',
+      rule: 'level',
       playerReadonly: true,
       note: 'NPC 可写（代码随之推出层级、重算基础上限）；主角只读，请改累计经验值',
     }),
-    leaf('累计经验值', 'number', { field: 'CharacterState.totalExp' }),
+    leaf('累计经验值', 'number', {
+      field: 'CharacterState.totalExp',
+      kernel: 'totalExp',
+      rule: 'totalExp',
+    }),
     leaf('_升级所需经验', 'number', { field: 'CharacterState.expToNext' }),
     leaf('_属性点', 'number', { field: 'CharacterState.freeAttrPoints' }),
     branch(
       '_属性',
       (Object.keys(ATTRIBUTE_LABELS) as Array<keyof typeof ATTRIBUTE_LABELS>).map((k) =>
-        leaf(ATTRIBUTE_LABELS[k], 'number', { field: `CharacterState.attributes.${k}` }),
+        leaf(ATTRIBUTE_LABELS[k], 'number', { field: `CharacterState.attributes.${k}`, kernel: k }),
       ),
-      { field: 'CharacterState.attributes' },
+      { field: 'CharacterState.attributes', kernel: 'attributes' },
     ),
   ]),
   resource('生命值', 'hp'),
   resource('法力值', 'mp'),
   resource('体力值', 'sp'),
-  leaf('金钱', 'money', { field: 'CharacterState.money' }),
-  leaf('当前行动', 'text', { field: 'CharacterState.currentAction' }),
-  leaf('心里话', 'text', { field: 'CharacterState.thoughts' }),
+  leaf('金钱', 'money', { field: 'CharacterState.money', kernel: 'money', rule: 'money' }),
+  leaf('当前行动', 'text', {
+    field: 'CharacterState.currentAction',
+    kernel: 'currentAction',
+    rule: 'personText',
+  }),
+  leaf('心里话', 'text', {
+    field: 'CharacterState.thoughts',
+    kernel: 'thoughts',
+    rule: 'personText',
+  }),
   record('背包', itemEntry(false), {
     field: 'CharacterState.inventory（equippedSlot 为空）',
   }),
@@ -410,15 +574,29 @@ export const PERSON_NODE_CHILDREN: readonly StateTreeNodeSpec[] = [
   record('技能', SKILL_ENTRY, { field: 'CharacterState.skills' }),
   record('状态效果', STATUS_ENTRY, { field: 'CharacterState.statusEffects' }),
   ASCENSION_SPEC,
-  leaf('在场', 'boolean', { field: 'CharacterState.present', relationOnly: true }),
+  leaf('在场', 'boolean', {
+    field: 'CharacterState.present',
+    kernel: 'present',
+    rule: 'present',
+    relationOnly: true,
+  }),
   leaf('地点', 'location', {
     field: 'CharacterState.location',
+    kernel: 'location',
+    rule: 'location',
     relationOnly: true,
     note: '主角的地点投影在 /世界/地点',
   }),
-  leaf('好感度', 'affection', { field: 'SaveProfile.affections[名]', relationOnly: true }),
+  leaf('好感度', 'affection', {
+    field: 'SaveProfile.affections[名]',
+    kernel: 'affections',
+    rule: 'affection',
+    relationOnly: true,
+  }),
   leaf('数量', 'quantity', {
     field: 'CharacterState.quantity（怪物 / 召唤物集群）',
+    kernel: 'quantity',
+    rule: 'groupQuantity',
     relationOnly: true,
     optional: true,
   }),
@@ -428,25 +606,42 @@ function personNode(key: string, relation: boolean): StateTreeBranchSpec {
   return branch(
     key,
     PERSON_NODE_CHILDREN.filter((c) => relation || !c.relationOnly),
-    { entity: 'character', field: 'CharacterState' },
+    { entity: 'character', field: 'CharacterState', rule: 'characterEntity' },
   );
 }
 
 // ========== 整棵树 ==========
+
+/** 任务叶子（`Quest.<内核键>`）。 */
+const questField = (kernel: string) => ({
+  field: `Quest.${kernel}`,
+  kernel,
+  rule: 'questField' as const,
+});
 
 /** `stat_data` 的根（§3.1 骨架）。 */
 export const STATE_TREE_SPEC: StateTreeBranchSpec = branch('stat_data', [
   branch('世界', [
     leaf('时间', 'gameTime', {
       field: 'SaveProfile.gameTime（formatGameTime 规范串）',
+      kernel: 'gameTime',
+      rule: 'time',
       note: '只能前进，汇总成本楼分钟数交给 applyTimeAdvance',
     }),
-    leaf('地点', 'location', { field: '主角 CharacterState.location' }),
+    leaf('地点', 'location', {
+      field: '主角 CharacterState.location',
+      kernel: 'location',
+      rule: 'worldLocation',
+    }),
     leaf('_时段', 'text', { field: '由游戏时间推导' }),
     leaf('_天气', 'text', { field: 'worldFlags.map 天气' }),
     leaf('_回合', 'number', { field: '当前回合号' }),
   ]),
-  leaf('命运点数', 'fatePoints', { field: 'SaveProfile.fp（走账本）' }),
+  leaf('命运点数', 'fatePoints', {
+    field: 'SaveProfile.fp（走账本）',
+    kernel: 'fp',
+    rule: 'fatePoints',
+  }),
   personNode('主角', false),
   record('关系列表', personNode('{人物名}', true), {
     field: 'CharacterState[]（type ≠ player）',
@@ -457,25 +652,35 @@ export const STATE_TREE_SPEC: StateTreeBranchSpec = branch('stat_data', [
     branch(
       '{任务名}',
       [
-        enumLeaf('状态', 'questStatus', { field: 'Quest.status' }),
-        enumLeaf('关注度', 'questPriority', { field: 'Quest.priority' }),
-        leaf('进展', 'text', { field: 'Quest.progress' }),
-        leaf('详情', 'text', { field: 'Quest.detail' }),
-        leaf('目标', 'text', { field: 'Quest.objective' }),
-        leaf('奖励', 'text', { field: 'Quest.reward' }),
+        enumLeaf('状态', 'questStatus', questField('status')),
+        enumLeaf('关注度', 'questPriority', questField('priority')),
+        leaf('进展', 'text', questField('progress')),
+        leaf('详情', 'text', questField('detail')),
+        leaf('目标', 'text', questField('objective')),
+        leaf('奖励', 'text', questField('reward')),
       ],
-      { entity: 'quest', field: 'Quest' },
+      { entity: 'quest', field: 'Quest', rule: 'questEntity' },
     ),
     { field: 'SaveProfile.quests' },
   ),
   record(
     '新闻',
-    record('{栏目}', leaf('{标题}', 'text', { field: 'NewsItem.content' }), {
+    record('{栏目}', leaf('{标题}', 'text', { field: 'NewsItem.content', kernel: 'content' }), {
       field: 'NewsItem.category',
+      kernel: 'category',
     }),
-    { field: 'SaveProfile.news', note: '只投最近若干条，只增不删' },
+    {
+      field: 'SaveProfile.news',
+      kernel: 'news',
+      rule: 'news',
+      note: '只投最近若干条，只增不删',
+    },
   ),
-  leaf('变量', 'variables', { field: 'SaveProfile.variables（ADR-30 vars 空间，键不翻译）' }),
+  leaf('变量', 'variables', {
+    field: 'SaveProfile.variables（ADR-30 vars 空间，键不翻译）',
+    kernel: 'variables',
+    rule: 'variables',
+  }),
 ]);
 
 // ========== 查询 ==========
@@ -513,23 +718,98 @@ export interface StateTreePathRow {
   readonly spec: StateTreeNodeSpec;
   /** 路径上任一键只读（`_` 前缀）即只读；不含 playerReadonly（那要看是不是主角）。 */
   readonly readonly: boolean;
+  /**
+   * 写入规则：只读 → `readonly`；否则取节点声明的 `rule`，再取祖先向下继承的规则（`ascension` / `news`），
+   * 分支 / 字典缺省 `expand`。可写叶子没声明规则时为 undefined（闸门测试拦下）。
+   */
+  readonly rule: StateTreeWriteRule | undefined;
 }
 
-/** 把整棵树展平成路径模式清单（深度优先，根自身不列）。协议文字与闸门测试用。 */
+/** 把整棵树展平成路径模式清单（深度优先，根自身不列）。协议文字、翻译层与闸门测试用。 */
 export function listStateTreePaths(
   root: StateTreeBranchSpec = STATE_TREE_SPEC,
 ): StateTreePathRow[] {
   const rows: StateTreePathRow[] = [];
-  const walk = (node: StateTreeNodeSpec, prefix: string, inheritedReadonly: boolean): void => {
+  const walk = (
+    node: StateTreeNodeSpec,
+    prefix: string,
+    inheritedReadonly: boolean,
+    inheritedRule: StateTreeWriteRule | undefined,
+  ): void => {
     const pattern = `${prefix}/${node.key}`;
     const readonly = inheritedReadonly || isReadonlyKey(node.key);
-    rows.push({ pattern, spec: node, readonly });
+    const own = node.rule ?? inheritedRule;
+    const rule: StateTreeWriteRule | undefined = readonly
+      ? 'readonly'
+      : (own ?? (node.type === 'leaf' ? undefined : 'expand'));
+    rows.push({ pattern, spec: node, readonly, rule });
+    const pass = own !== undefined && INHERITED_RULES.has(own) ? own : undefined;
     if (node.type === 'branch') {
-      for (const c of node.children) walk(c, pattern, readonly);
+      for (const c of node.children) walk(c, pattern, readonly, pass);
     } else if (node.type === 'record') {
-      walk(node.entry, pattern, readonly);
+      walk(node.entry, pattern, readonly, pass);
     }
   };
-  for (const c of root.children) walk(c, '', false);
+  for (const c of root.children) walk(c, '', false, undefined);
   return rows;
 }
+
+let rowIndex: ReadonlyMap<string, StateTreePathRow> | null = null;
+
+/** 按路径模式取词表行（模式即 `listStateTreePaths` 的 `pattern`）；不在词表里返回 undefined。 */
+export function stateTreeRowAt(pattern: string): StateTreePathRow | undefined {
+  rowIndex ??= new Map(listStateTreePaths().map((r) => [r.pattern, r]));
+  return rowIndex.get(pattern);
+}
+
+/** 取一个分支节点（翻译层按路径模式拿实体形状用）；不是分支即抛 —— 词表与调用方脱节是编程错误。 */
+export function stateTreeBranchAt(pattern: string): StateTreeBranchSpec {
+  const spec = stateTreeRowAt(pattern)?.spec;
+  if (spec?.type === 'branch') return spec;
+  if (spec?.type === 'record' && spec.entry.type === 'branch') return spec.entry;
+  throw new Error(`词表里没有分支 ${pattern}`);
+}
+
+/** 分支下的子键（按词表顺序）。 */
+export function stateTreeChildKeys(parent: StateTreeBranchSpec): string[] {
+  return parent.children.map((c) => c.key);
+}
+
+/** 分支下某个键（精确匹配）对应的内核字段键；不是该分支的键或没有内核映射时返回 undefined。 */
+export function stateTreeKernelOf(parent: StateTreeBranchSpec, key: string): string | undefined {
+  return parent.children.find((c) => c.key === key)?.kernel;
+}
+
+/** 分支下内核字段为 `kernel` 的子键（反查）。 */
+export function stateTreeKeyOfKernel(
+  parent: StateTreeBranchSpec,
+  kernel: string,
+): string | undefined {
+  return parent.children.find((c) => c.kernel === kernel)?.key;
+}
+
+/**
+ * 名字字典的键：路径倒数第二段是其中之一时，终点是条目根（背包 / 装备 / 技能 / 状态效果 / 关系列表 /
+ * 任务列表 / 要素 / 权能 / 法则）。不含 `{…}` 占位的字典与 `新闻` 子树（新闻按栏目 / 标题两层另判）。
+ */
+export const STATE_TREE_NAMED_RECORD_KEYS: ReadonlySet<string> = new Set(
+  listStateTreePaths()
+    .filter((r) => r.spec.type === 'record' && !r.spec.key.startsWith('{') && r.rule !== 'news')
+    .map((r) => r.spec.key),
+);
+
+/**
+ * 会被 `数量` / `层数` 减没的名字字典（字典键 → 可减没的叶子键）：物品与状态条目下
+ * 叶子类型为 `quantity` / `stacks` 的那一个。
+ */
+export const STATE_TREE_DEPLETABLE_LEAF: Readonly<Record<string, string>> = Object.fromEntries(
+  listStateTreePaths().flatMap((r) => {
+    if (r.spec.type !== 'record' || r.spec.entry.type !== 'branch') return [];
+    const entity = r.spec.entry.entity;
+    if (entity !== 'item' && entity !== 'statusEffect') return [];
+    const leafNode = r.spec.entry.children.find(
+      (c) => c.type === 'leaf' && (c.leaf === 'quantity' || c.leaf === 'stacks'),
+    );
+    return leafNode ? [[r.spec.key, leafNode.key] as const] : [];
+  }),
+);

@@ -119,26 +119,4 @@
   vertical-align: 0.05em;
 }
 
-/* 展开提示（文字由组件按 open 给出） */
-.more {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.6875rem;
-  letter-spacing: 0.1em;
-  color: var(--theme-text-muted);
-  white-space: nowrap;
-}
-
-.more-caret {
-  width: 5px;
-  height: 5px;
-  border: solid currentColor;
-  border-width: 0 1px 1px 0;
-  transform: translateY(-2px) rotate(45deg);
-  transition: transform var(--motion-duration-fast) var(--motion-ease-standard);
-}
-
-.more.is-open .more-caret {
-  transform: translateY(1px) rotate(-135deg);
-}
+/* 展开提示（`.more` / `.more-caret`）的样式住在 ActionMoreHint.vue，这里不再写 */

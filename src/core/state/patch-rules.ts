@@ -64,6 +64,48 @@ export function validateStatePatch(patch: StatePatch): void {
   // move_variable 需要目标路径
   if (patch.op === 'move_variable' && !patch.metadata?.toPath)
     throw new Error('move_variable 需要 metadata.toPath');
+  // 状态时长：null=永久，数值须有限（A2：`"3小时"` 进 Math.max 得 NaN 落库）
+  if (patch.op === 'add_status_effect' || patch.op === 'update_status_effect') {
+    const value = patch.value as { remainingTime?: unknown } | undefined;
+    const time = isRecord(value) ? value.remainingTime : undefined;
+    if (time !== undefined && time !== null && !(typeof time === 'number' && Number.isFinite(time)))
+      throw new Error(`${patch.op} 的 remainingTime 必须是有限数值或 null`);
+  }
+  if (patch.op === 'update_item') validateUpdateItemValue(patch.value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** update_item 的 changes 各字段期望的值类型（与 InventoryItem 对齐）；表外键不在此判 */
+const UPDATE_ITEM_FIELD_CHECKS: Readonly<Record<string, (v: unknown) => boolean>> = {
+  description: (v) => typeof v === 'string',
+  type: (v) => typeof v === 'string',
+  rarity: (v) => typeof v === 'string',
+  equippedSlot: (v) => v === null || typeof v === 'string',
+  stats: (v) =>
+    isRecord(v) && Object.values(v).every((n) => typeof n === 'number' && Number.isFinite(n)),
+  durability: (v) => typeof v === 'number' && Number.isFinite(v),
+  maxDurability: (v) => typeof v === 'number' && Number.isFinite(v),
+  data: isRecord,
+  effects: (v) => isRecord(v) && Object.values(v).every((s) => typeof s === 'string'),
+  protocolText: (v) => typeof v === 'string',
+  tags: (v) => Array.isArray(v) && v.every((s) => typeof s === 'string'),
+};
+
+/** update_item 值类型校验（A2：`changes.stats:"abc"` 曾原样写进物品） */
+function validateUpdateItemValue(value: unknown): void {
+  if (!isRecord(value)) throw new Error('update_item 的 value 必须是对象');
+  if (typeof value.name !== 'string' || !value.name) throw new Error('update_item 需要 value.name');
+  if (value.changes === undefined) return;
+  if (!isRecord(value.changes)) throw new Error('update_item 的 changes 必须是对象');
+  for (const [key, v] of Object.entries(value.changes)) {
+    // undefined 等于没写（Object.assign 照样会落 undefined，与既有行为一致，不在此拦）
+    if (v === undefined) continue;
+    const check = UPDATE_ITEM_FIELD_CHECKS[key];
+    if (check && !check(v)) throw new Error(`update_item 的 changes.${key} 值类型不符`);
+  }
 }
 
 /**

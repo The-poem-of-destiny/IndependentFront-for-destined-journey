@@ -9,6 +9,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import SaveManager from '../../../../src/ui/components/shared/SaveManager.vue';
+import {
+  acquireSaveTabLock,
+  FULL_IMPORT_LOCKED_MESSAGE,
+  SAVE_DELETE_LOCKED_MESSAGE,
+} from '../../../../src/ui/lib/save-tab-lock';
 
 const mocks = vi.hoisted(() => ({
   game: {
@@ -43,6 +48,7 @@ const mocks = vi.hoisted(() => ({
     saveSaveSlot: vi.fn(),
     deleteSaveSlot: vi.fn(),
     getPresets: vi.fn(),
+    importAllData: vi.fn(),
   },
 }));
 
@@ -54,6 +60,8 @@ vi.mock('../../../../src/ui/stores/settings-store', () => ({
 vi.mock('@engine/persistence/database', () => mocks.database);
 vi.mock('@engine/persistence/session-backup', () => ({
   exportSessionSave: mocks.exportSessionSave,
+  isSessionBackup: () => false,
+  isFullBackupFile: () => true,
 }));
 vi.mock('@engine/story/story-context-mode', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@engine/story/story-context-mode')>();
@@ -101,6 +109,7 @@ beforeEach(() => {
   mocks.database.saveSaveSlot.mockReset().mockResolvedValue('save-1');
   mocks.database.deleteSaveSlot.mockReset().mockResolvedValue(undefined);
   mocks.database.getPresets.mockReset().mockResolvedValue([]);
+  mocks.database.importAllData.mockReset().mockResolvedValue(undefined);
   mocks.settings.settings.activePresetId = null;
   mocks.settings.projectAgentDefaults = undefined;
   mocks.exportSessionSave.mockReset().mockResolvedValue({ kind: 'session' });
@@ -114,6 +123,8 @@ function findButton(text: string) {
 }
 
 afterEach(() => {
+  uninstallFakeLocks();
+  vi.restoreAllMocks();
   wrapper?.unmount();
   wrapper = null;
   document.body.innerHTML = '';
@@ -250,5 +261,113 @@ describe('SaveManager 导出存档的 story 预设', () => {
     };
 
     expect(await exportSelected()).toEqual({ storyPreset: { id: 'pack-story', name: '内容默认' } });
+  });
+});
+
+/**
+ * 假 navigator.locks：`external` 是别的标签页占着的锁名；本标签页经 acquireSaveTabLock
+ * 申请到的锁也记在同一个集合里，query() 一并报出（与真实快照一致，不分标签页）。
+ */
+function installFakeLocks(external: string[] = []) {
+  const held = new Set<string>(external);
+  const locks = {
+    request: vi.fn(
+      async (name: string, _options: LockOptions, callback: (lock: Lock | null) => unknown) => {
+        if (held.has(name)) return await callback(null);
+        held.add(name);
+        try {
+          return await callback({ name, mode: 'exclusive' } as Lock);
+        } finally {
+          held.delete(name);
+        }
+      },
+    ),
+    query: vi.fn(async () => ({
+      held: [...held].map((name) => ({ name, mode: 'exclusive', clientId: 'x' })),
+      pending: [],
+    })),
+  };
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: locks });
+  return locks;
+}
+
+function uninstallFakeLocks() {
+  delete (navigator as { locks?: unknown }).locks;
+}
+
+describe('SaveManager 删档与整库导入尊重标签页锁（R8）', () => {
+  it('别的标签页正在玩的存档：删档被拒并提示，不动数据库', async () => {
+    installFakeLocks(['poem-save:save-2']);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await mountManager();
+
+    (document.querySelector('[aria-label="删除存档：较新的存档"]') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(mocks.ui.toast).toHaveBeenCalled());
+
+    expect(mocks.ui.toast).toHaveBeenCalledWith(SAVE_DELETE_LOCKED_MESSAGE, 'warning', 6000);
+    expect(mocks.database.deleteSaveSlot).not.toHaveBeenCalled();
+  });
+
+  it('本标签页正在玩 A 档时删 A 档：照原行为删掉并回首页，不被自己的锁挡住', async () => {
+    installFakeLocks();
+    const own = await acquireSaveTabLock('save-1');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+      await mountManager();
+      findButton('删除存档')!.click();
+      await vi.waitFor(() => expect(mocks.ui.navigate).toHaveBeenCalledWith('home'));
+
+      expect(mocks.database.deleteSaveSlot).toHaveBeenCalledWith('save-1');
+      expect(mocks.ui.toast).toHaveBeenCalledWith('存档已删除', 'success');
+      expect(mocks.ui.activeSaveId).toBeNull();
+    } finally {
+      own!.release();
+    }
+  });
+
+  it('环境没有 navigator.locks 时删档放行', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await mountManager();
+
+    (document.querySelector('[aria-label="删除存档：较新的存档"]') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(mocks.database.deleteSaveSlot).toHaveBeenCalledWith('save-2'));
+  });
+
+  async function importFullBackup() {
+    const file = new File(['{"version":1,"saves":[]}'], 'backup.json', {
+      type: 'application/json',
+    });
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (
+      this: HTMLInputElement,
+    ) {
+      Object.defineProperty(this, 'files', { configurable: true, value: [file] });
+      this.dispatchEvent(new Event('change'));
+    });
+    await mountManager();
+    findButton('导入存档')!.click();
+    await vi.waitFor(() => expect(findButton('替换备份数据并导入')).toBeDefined());
+    clickSpy.mockRestore();
+    findButton('替换备份数据并导入')!.click();
+    await vi.waitFor(() => expect(mocks.ui.toast).toHaveBeenCalled());
+  }
+
+  it('别的标签页在玩任一存档时，整库导入被拒并提示', async () => {
+    installFakeLocks(['poem-save:save-2']);
+    await importFullBackup();
+
+    expect(mocks.ui.toast).toHaveBeenCalledWith(FULL_IMPORT_LOCKED_MESSAGE, 'warning', 6000);
+    expect(mocks.database.importAllData).not.toHaveBeenCalled();
+  });
+
+  it('只有本标签页自己持锁时，整库导入照常进行', async () => {
+    installFakeLocks();
+    const own = await acquireSaveTabLock('save-1');
+    try {
+      await importFullBackup();
+      expect(mocks.database.importAllData).toHaveBeenCalledOnce();
+      expect(mocks.ui.toast).toHaveBeenCalledWith('整库备份恢复成功', 'success');
+    } finally {
+      own!.release();
+    }
   });
 });

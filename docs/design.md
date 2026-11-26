@@ -444,6 +444,26 @@ import { qualityVar } from '../../lib/quality-colors'
 > `:root[data-reduced-motion='true']` 兜底。面板不再叠 `fx-ink-block`（两段动画会互相覆盖）。展开体的淡入只在玩家
 > 亲手点开时播（§6.1「卡片展开/折叠」口径），`defaultOpen` 的初始展开不播。关键帧写在各样式组件的 scoped 块里
 > （§6.0 第 6 条），共用静态类 `action-panel-base.css` 不写动画。
+>
+> 📌 **2026-11-25 更正（`chore/ui-cleanup-batch`）**：上一条「各组件另写减动效兜底」只对五个 `ActionStyle*.vue`
+> 仍成立；`ActionPanel.vue` 展开体那两条 `animation: none`（`@media` 与 `data-reduced-motion` 各一）已删 ——
+> 它是 `backwards` 填充，`themes/variables.css` 的全局减动效规则（时长与延迟压到 0.01ms、只跑一轮）瞬间跑完即回到
+> 静态，与 `animation: none` 观感一致，且全局规则两种减动效来源都管。同批删掉的还有其他组件里被全局规则**完全覆盖**的
+> `animation: none`：无填充或 `backwards` 填充的循环转圈 / 呼吸 / 骨架闪烁与一次性入场（`ChatFlow` 两处转圈、
+> `CombatMessageFlow`、`SceneImageSegment`、`StageControls`、`StagedNarrative`、`StateEditorPanel`、`PlotOutlinePreview`），
+> 以及 `fx/FxThemeAmbient`、`fx/FxTurnOrnament` 的兜底（减动效下闸门已关，`styles/fx-core.css` 的安全网再把整层
+> `display: none`）。**仍保留**、写新规则时照此判断：①动画是 `both` / `forwards` 填充 —— 全局规则会把终帧
+> `transform` 永久钉住（§6.0 第 5 条），只有 `animation: none` 才撤得掉（`ChatFlow` 的 `.bubble-row`、首页入场）；
+> ②同一条规则里还改了别的属性（`opacity`、`mask-image`、`transform` 等，如 `CgGalleryPanel`、`CharacterEntrance`、
+> `SideToolbar`、`AssetImportStrip`）；③`settings/agent/agent-chrome.css` 的那条随文件头「原样搬来、三件同进同出」约定保留。
+>
+> 📌 **2026-11-25 增补（`refactor/action-style-shared-views`）**：行动面板的「通用」与「名册」收起视图抽成两个共用
+> 组件 `game/action-panel/ActionViewGeneric.vue`（对决条 / 血条残影 / 跳字舞台）与 `ActionViewRoster.vue`
+> （对决条 / 跳字舞台 / 打出的牌；单位读数走插槽），DOM 类名与入场动画不变。🔴 共用组件渲染的元素不带样式组件的
+> scoped 属性，样式组件给它们写的规则（含入场的 `.is-entering …`）一律包 `:deep()`；@keyframes 仍留在样式组件里
+> （§6.0 第 6 条）。交错的上限与步长只出自 `game/action-panel/entrance-timing.ts`（`STAGGER_INDEX_MAX`、
+> `STAGGER_STEP_MS` = `--motion-stagger-step`、战报行的 `BATTLELOG_STAGGER_LINES`），`BeautifiedNarrative` 算撤类名
+> 时机也引它；常量与 token 同值由 `tests/ui/lib/action-panel-styles.test.ts` 断言。
 
 **层级表。**
 

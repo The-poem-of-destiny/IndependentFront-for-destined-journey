@@ -148,17 +148,8 @@ function onToggle(event: Event): void {
   }
 }
 
+/* 减动效由 themes/variables.css 的全局规则兜住（`backwards` 填充，瞬间跑完即回到静态），不再单写 */
 .action-panel-card.is-user-toggled .ai-details[open] > .ai-body {
   animation: ai-in var(--motion-duration-base) var(--motion-ease-enter) backwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .action-panel-card.is-user-toggled .ai-details[open] > .ai-body {
-    animation: none;
-  }
-}
-
-:root[data-reduced-motion='true'] .action-panel-card.is-user-toggled .ai-details[open] > .ai-body {
-  animation: none;
 }
 </style>

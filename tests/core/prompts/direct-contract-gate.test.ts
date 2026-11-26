@@ -33,8 +33,12 @@ const variants = [
   ['结构化战斗关闭', false],
 ] as const;
 
-/** 契约常量里不进协议文本的清单：原型污染键只由校验器拒收，不该教给模型 */
-const NOT_IN_PROTOCOL = new Set<string>(['DIRECT_FORBIDDEN_KEYS']);
+/**
+ * 契约常量里不进协议文本的清单：原型污染键只由校验器拒收，不该教给模型；
+ * 值类型表只给校验器用，键集合与各白名单的对应由 `satisfies` 在编译期钉住
+ * （见 tests/core/agents/direct-contract-validation.test.ts）。
+ */
+const NOT_IN_PROTOCOL = new Set<string>(['DIRECT_FORBIDDEN_KEYS', 'DIRECT_VALUE_TYPES']);
 
 /** 把契约模块的每个导出展平成「常量名（对象按子键展开为 名.子键）→ 词表」 */
 function contractLists(): Array<[string, readonly string[]]> {
@@ -92,6 +96,7 @@ const RULES: Record<string, Rule> = {
   DIRECT_ITEM_MODIFY_KEYS: { lines: ['items:{'], form: (list) => `changes 只含 ${slash(list)}` },
   DIRECT_AFFECTION_OPERATIONS: { lines: ['affections:{'], form: 'key' },
   DIRECT_QUEST_OPERATIONS: { lines: ['affections:{'], form: 'key' },
+  DIRECT_QUEST_UPSERT_KEYS: { lines: ['affections:{'], form: 'token' },
   DIRECT_EFFECT_ROW_KEYS: { lines: ['effects:['], form: 'token' },
   DIRECT_EFFECT_ACTIONS: {
     lines: ['effects:['],

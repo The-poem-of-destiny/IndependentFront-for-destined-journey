@@ -78,7 +78,7 @@ const cfg = useSettingsStore();
 const s = cfg.settings;
 const game = useGameStore();
 const ui = useUIStore();
-const { pristineEffectivePreset } = usePresets();
+const { pristineEffectivePreset, selectPreset } = usePresets();
 
 const agentPromptDraft = ref('');
 const agentTemplateDraft = ref('');
@@ -292,10 +292,9 @@ function restoreAgentDefaults() {
   // 与「覆写差异面板」（AgentUpdateCenter）用同一个 helper —— 两处行为天然一致
   applyProjectDefaultToAgent(s, id);
   const profile = presetProfileForAgent(id);
-  if (profile === 'story') s.activePresetId = '';
-  else if (profile === 'direct') delete s.directPresetId;
-  else if (profile === 'direct_cached') {
-    delete s.directCachedPresetId;
+  // 选择键只经 usePresets 的选择入口写：空串 = 回到跟随默认（2026-11-25 R7）
+  if (profile) selectPreset(profile, '');
+  if (profile === 'direct_cached') {
     // 渠道策略也属缓存直出配置：清掉后由初始化与读取侧的 ?? 'prefix' 回到默认
     delete s.directCacheProvider;
     // 重建时机同理：删键 = 回到引擎默认

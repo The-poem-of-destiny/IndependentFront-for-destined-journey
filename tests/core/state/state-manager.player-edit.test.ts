@@ -2,7 +2,7 @@
  * StateManager.commitPlayerEdit —— 玩家编辑写入口（状态树协议 T10，§11.2、§12.3、§7.2）
  *
  * 走真实 StateManager + fake-indexeddb：
- * - 玩家编辑往返：每个可写叶子编辑提交后读回新值；撤销后读回旧值；
+ * - 玩家编辑往返：每个可写叶子编辑提交后读回新值；撤销（内核快照整体还原，审查 R4）后整档回到原样；
  * - 整批失败时状态零变化（只读键 / 时间 / 被丢弃 / 落库中途抛错回滚）；
  * - 更新块补差：改值、撤销、重新应用的补偿 op 提交后读回正确；现值不符给冲突；
  * - 补丁带 metadata.source = player_edit，记引擎日志 state.manual_edit。
@@ -33,10 +33,11 @@ import {
   getSaveProfile,
   initializeDatabase,
   saveCharacter,
+  saveMessage,
   saveSaveProfile,
 } from '../../../src/core/persistence/database';
 import { createStateManager } from '../../../src/core/state/state-manager';
-import type { CharacterState } from '../../../src/core/types/types';
+import type { CharacterState, StateUpdateRecord } from '../../../src/core/types/types';
 import {
   buildStateTree,
   type StateTreeValue,
@@ -246,30 +247,6 @@ for (const [rel, c] of Object.entries(PERSON_CASES)) {
 for (const [pattern, c] of Object.entries(ROOT_CASES))
   CASES.push({ pattern, path: c.path, c, rejected: false });
 
-/**
- * 撤销后读回旧值的豁免：新闻只增不删（撤销一条新闻由快照兜底）；
- * 累计经验值升级不可逆，撤销后经验值回来了、等级不会降（§12.3 同口径）。
- */
-const UNDO_EXEMPT = new Set([
-  '/新闻/{栏目}/{标题}',
-  '/主角/成长/累计经验值',
-  '/关系列表/{人物名}/成长/累计经验值',
-  // 夹具里长剑的类型是旧值「武器」（不在物品类型词表里）：写回前值会被纠正层拒绝
-  '/主角/装备/{物品名}/类型',
-  '/关系列表/{人物名}/装备/{物品名}/类型',
-]);
-
-/** 投影省略空值：前值缺席时，撤销写回的空串 / 空数组 / 空对象视同原样。 */
-function sameAsBefore(now: unknown, before: unknown): boolean {
-  if (before !== undefined) return JSON.stringify(now) === JSON.stringify(before);
-  return (
-    now === undefined ||
-    now === '' ||
-    (Array.isArray(now) && now.length === 0) ||
-    (typeof now === 'object' && now !== null && Object.keys(now).length === 0)
-  );
-}
-
 beforeEach(async () => {
   logCalls.length = 0;
   await seed();
@@ -286,12 +263,12 @@ describe('玩家编辑往返（§7.2）', () => {
   });
 
   for (const cc of CASES) {
-    it(`${cc.pattern}（${cc.path}）：提交读回新值，撤销读回旧值`, async () => {
+    it(`${cc.pattern}（${cc.path}）：提交读回新值，撤销后整档回到原样`, async () => {
       const sm = createStateManager(SAVE);
-      const before = await loadTree();
       const op: PlayerEditOp = { op: 'replace', path: cc.path, value: cc.c.value };
+      const original = await dump();
       if (cc.rejected) {
-        const snap = await dump();
+        const snap = original;
         const r = await sm.commitPlayerEdit([op]);
         expect(r.ok).toBe(false);
         expect(await dump()).toEqual(snap);
@@ -303,16 +280,10 @@ describe('玩家编辑往返（§7.2）', () => {
       const tree = await loadTree();
       expect(at(tree, cc.path)).toEqual(want);
       expect(r.records[0].after).toEqual(want);
-      if (UNDO_EXEMPT.has(cc.pattern)) return;
-      if (r.undo.length === 0) {
-        // 已知限制：前值缺席的可选字段（NPC 未填的档案文字、无耐久物品的耐久）协议里清不回去
-        expect(at(before, cc.path), '只有前值缺席时才允许撤销为空').toBeUndefined();
-        return;
-      }
-      const u = await sm.commitPlayerEdit(r.undo);
+      // 快照整体还原：新闻、升级、前值缺席的可选字段也一并回去（不再有豁免）
+      const u = await sm.undoPlayerEdit(r.undo);
       if (!u.ok) throw new Error(`撤销失败：${u.reasons.join('；')}`);
-      const now = at(await loadTree(), cc.path);
-      expect(sameAsBefore(now, at(before, cc.path)), JSON.stringify(now)).toBe(true);
+      expect(await dump()).toEqual(original);
     });
   }
 
@@ -328,22 +299,14 @@ describe('玩家编辑往返（§7.2）', () => {
       [{ op: 'remove', path: '/关系列表/卡拉' }],
     ];
     for (const ops of batches) {
-      const before = await loadTree();
+      const before = await dump();
       const r = await sm.commitPlayerEdit(ops);
       if (!r.ok) throw new Error(`${ops[0].path}：${r.reasons.join('；')}`);
-      expect(await loadTree(), ops[0].path).not.toEqual(before);
-      const u = await sm.commitPlayerEdit(r.undo);
+      expect(await dump(), ops[0].path).not.toEqual(before);
+      const u = await sm.undoPlayerEdit(r.undo);
       if (!u.ok) throw new Error(`撤销 ${ops[0].path}：${u.reasons.join('；')}`);
-      const after = await loadTree();
-      // 被删人物按投影重建（尽力而为）：比对叙事上可见的核心字段
-      if (ops[0].path === '/关系列表/卡拉') {
-        expect(at(after, '/关系列表/卡拉')).toMatchObject({
-          地点: at(before, '/关系列表/卡拉/地点'),
-          好感度: -10,
-        });
-        continue;
-      }
-      expect(after, ops[0].path).toEqual(before);
+      // 快照整体还原：被删人物连同 id、内部字段一起回来
+      expect(await dump(), ops[0].path).toEqual(before);
     }
   });
 
@@ -357,6 +320,34 @@ describe('玩家编辑往返（§7.2）', () => {
     expect(bran.appearance).toBe('银发');
     expect(bran.money).toBe(33);
   });
+
+  // 回归（审查 A8）：档案写入曾走 profileChanges 旁路、按旧名落，同批改名后提交报「角色不存在: 布兰」
+  const renameBatches: Array<[string, PlayerEditOp[]]> = [
+    [
+      '先写档案再改名',
+      [
+        { op: 'replace', path: '/关系列表/布兰/档案/性格', value: '沉稳' },
+        { op: 'move', from: '/关系列表/布兰', path: '/关系列表/布兰特' },
+      ],
+    ],
+    [
+      '先改名再写档案',
+      [
+        { op: 'move', from: '/关系列表/布兰', path: '/关系列表/布兰特' },
+        { op: 'replace', path: '/关系列表/布兰特/档案/性格', value: '沉稳' },
+      ],
+    ],
+  ];
+  for (const [name, ops] of renameBatches) {
+    it(`同批档案写入与改名：${name}，试算与提交都通过，新名读回新值`, async () => {
+      const r = await createStateManager(SAVE).commitPlayerEdit(ops);
+      if (!r.ok) throw new Error(r.reasons.join('；'));
+      const chars = await getCharacters(SAVE);
+      expect(chars.some((c) => c.name === '布兰')).toBe(false);
+      expect(chars.find((c) => c.name === '布兰特')?.personality).toBe('沉稳');
+      expect(at(await loadTree(), '/关系列表/布兰特/档案/性格')).toBe('沉稳');
+    });
+  }
 
   it('补丁带 metadata.source = player_edit，记引擎日志 state.manual_edit', async () => {
     await createStateManager(SAVE).commitPlayerEdit([
@@ -509,6 +500,209 @@ describe('更新块补差（§7.2）', () => {
     expect(plan).toEqual({ kind: 'conflict', path: '/主角/金钱', expected: 100, current: 5 });
     expect(at(await loadTree(), '/主角/金钱')).toBe(5);
   });
+});
+
+describe('修改器撤销：内核快照整体还原（审查 R4）', () => {
+  const player = async () => (await getCharacters(SAVE)).find((c) => c.id === 'player-id')!;
+
+  it('额外改 −9999（当前值被钳到 1）后撤销：当前值回到 300、上限回原值', async () => {
+    const sm = createStateManager(SAVE);
+    const original = await dump();
+    const before = await player();
+    const r = await sm.commitPlayerEdit([
+      { op: 'replace', path: '/主角/生命值/上限/额外', value: -9999 },
+    ]);
+    if (!r.ok) throw new Error(r.reasons.join('；'));
+    expect((await player()).hp).toBe(1);
+    const u = await sm.undoPlayerEdit(r.undo);
+    expect(u.ok).toBe(true);
+    const after = await player();
+    expect(after.hp).toBe(300);
+    expect(after.maxHp).toBe(before.maxHp);
+    expect(await dump()).toEqual(original);
+  });
+
+  it('穿戴顶替后撤销：被顶下的长剑回到装备位，新武器消失', async () => {
+    const sm = createStateManager(SAVE);
+    const original = await dump();
+    const r = await sm.commitPlayerEdit([
+      {
+        op: 'add',
+        path: '/主角/装备/短剑',
+        value: { 位置: '武器', 类型: '武器', 描述: '轻巧的短剑' },
+      },
+    ]);
+    if (!r.ok) throw new Error(r.reasons.join('；'));
+    const displaced = (await player()).inventory;
+    expect(displaced.find((i) => i.name === '短剑')?.equippedSlot).toBe('武器');
+    expect(displaced.find((i) => i.name === '长剑')?.equippedSlot ?? null).toBeNull();
+    const u = await sm.undoPlayerEdit(r.undo);
+    expect(u.ok).toBe(true);
+    const inv = (await player()).inventory;
+    expect(inv.find((i) => i.name === '长剑')?.equippedSlot).toBe('武器');
+    expect(inv.some((i) => i.name === '短剑')).toBe(false);
+    expect(await dump()).toEqual(original);
+  });
+
+  it('删 NPC 后撤销：id、年龄锚点、投影外的内部字段原样回来', async () => {
+    const bran = (await getCharacters(SAVE)).find((c) => c.name === '布兰')!;
+    await saveCharacter({
+      ...bran,
+      ageAnchor: { startAge: 31, month: 5, day: 2 },
+      customFields: { secret: '内部字段' },
+      introducedBy: 'turn-3',
+    });
+    const original = (await getCharacters(SAVE)).find((c) => c.name === '布兰')!;
+    const sm = createStateManager(SAVE);
+    const r = await sm.commitPlayerEdit([{ op: 'remove', path: '/关系列表/布兰' }]);
+    if (!r.ok) throw new Error(r.reasons.join('；'));
+    expect((await getCharacters(SAVE)).some((c) => c.name === '布兰')).toBe(false);
+    const u = await sm.undoPlayerEdit(r.undo);
+    expect(u.ok).toBe(true);
+    const back = (await getCharacters(SAVE)).find((c) => c.name === '布兰')!;
+    expect(back.id).toBe(original.id);
+    expect(back.ageAnchor).toEqual({ startAge: 31, month: 5, day: 2 });
+    expect(back.customFields).toEqual({ secret: '内部字段' });
+    expect(back).toEqual(original);
+  });
+
+  it('撤销前状态已被别处改过（指纹不符）：拒绝并说明，状态一字不动', async () => {
+    const sm = createStateManager(SAVE);
+    const r = await sm.commitPlayerEdit([{ op: 'replace', path: '/主角/金钱', value: 500 }]);
+    if (!r.ok) throw new Error(r.reasons.join('；'));
+    // 别处（AI 补丁）又改了主角
+    await sm.commitChatState([
+      { op: 'update_character', target: 'characters.艾琳', value: { money: 42 } },
+    ]);
+    const snap = await dump();
+    const u = await sm.undoPlayerEdit(r.undo);
+    expect(u.ok).toBe(false);
+    if (!u.ok) {
+      expect(u.reasons[0]).toContain('艾琳');
+      expect(u.reasons[0]).toContain('又被别处改过');
+    }
+    expect(await dump()).toEqual(snap);
+    expect((await player()).money).toBe(42);
+  });
+
+  it('凭据不属于当前存档：拒绝', async () => {
+    const r = await createStateManager(SAVE).commitPlayerEdit([
+      { op: 'replace', path: '/主角/金钱', value: 500 },
+    ]);
+    if (!r.ok) throw new Error(r.reasons.join('；'));
+    const u = await createStateManager('另一个存档').undoPlayerEdit(r.undo);
+    expect(u.ok).toBe(false);
+    expect((await player()).money).toBe(500);
+  });
+
+  it('连续两次修改按栈序撤销：逐次回到每一步之前', async () => {
+    const sm = createStateManager(SAVE);
+    const s0 = await dump();
+    const r1 = await sm.commitPlayerEdit([{ op: 'replace', path: '/主角/金钱', value: 1 }]);
+    if (!r1.ok) throw new Error(r1.reasons.join('；'));
+    const s1 = await dump();
+    const r2 = await sm.commitPlayerEdit([
+      { op: 'replace', path: '/主角/金钱', value: 2 },
+      { op: 'delta', path: '/命运点数', value: 3 },
+    ]);
+    if (!r2.ok) throw new Error(r2.reasons.join('；'));
+    expect((await sm.undoPlayerEdit(r2.undo)).ok).toBe(true);
+    expect(await dump()).toEqual(s1);
+    expect((await sm.undoPlayerEdit(r1.undo)).ok).toBe(true);
+    expect(await dump()).toEqual(s0);
+  });
+});
+
+describe('更新块修订：状态提交与本楼记录写回同一事务（审查 R4）', () => {
+  /** 一楼 AI 写入（金钱 120 → 100），记录写在 assistant 消息 a2 上。 */
+  async function seedFloor(): Promise<StateUpdateRecord> {
+    const r = await createStateManager(SAVE).commitPlayerEdit([
+      { op: 'replace', path: '/主角/金钱', value: 100 },
+    ]);
+    if (!r.ok) throw new Error(r.reasons.join());
+    const update: StateUpdateRecord = { deltaMinutes: 0, ops: r.records };
+    await saveMessage({
+      id: 'a2',
+      role: 'assistant',
+      content: '第 2 楼正文',
+      timestamp: 2,
+      saveId: SAVE,
+      turn: 2,
+      storyTurnStatus: 'accepted',
+      stateUpdates: update,
+    });
+    return update;
+  }
+
+  it('记录写回失败（本楼消息不存在 / 没有记录）：状态一并回滚', async () => {
+    await seedFloor();
+    await saveMessage({
+      id: 'a-no-record',
+      role: 'assistant',
+      content: '没有记录的一楼',
+      timestamp: 3,
+      saveId: SAVE,
+    });
+    const snap = await dump();
+    for (const messageId of ['不存在的楼', 'a-no-record']) {
+      const r = await createStateManager(SAVE).commitPlayerEdit(
+        [{ op: 'replace', path: '/主角/金钱', value: 7 }],
+        { record: { messageId, index: 0, revision: { kind: 'revert' } } },
+      );
+      expect(r.ok, messageId).toBe(false);
+      if (!r.ok) expect(r.reasons[0]).toContain('记录写回失败');
+      expect(await dump(), messageId).toEqual(snap);
+    }
+  });
+
+  it('修订后从修改器撤销：状态与该楼记录一并还原，之后再修订该行不报冲突', async () => {
+    const update = await seedFloor();
+    const sm = createStateManager(SAVE);
+    const revision = { kind: 'revert' as const };
+    const plan = planUpdateBlockRevision(update.ops[0], revision, await loadSnapshot());
+    if (plan.kind !== 'ok') throw new Error(JSON.stringify(plan));
+    const r = await sm.commitPlayerEdit(plan.ops, {
+      record: { messageId: 'a2', index: 0, revision },
+    });
+    if (!r.ok) throw new Error(r.reasons.join('；'));
+    expect((await player()).money).toBe(120);
+    const revised = (await getDatabase().messages.get('a2'))!.stateUpdates!;
+    expect(revised.ops[0]).toMatchObject({ status: '已手动修订', after: 120 });
+    expect(r.stateUpdates).toEqual(revised);
+    // 正文不变（§12.3）
+    expect((await getDatabase().messages.get('a2'))!.content).toBe('第 2 楼正文');
+
+    const u = await sm.undoPlayerEdit(r.undo);
+    expect(u.ok).toBe(true);
+    if (u.ok) expect(u.message).toEqual({ id: 'a2', stateUpdates: update });
+    expect((await player()).money).toBe(100);
+    const restored = (await getDatabase().messages.get('a2'))!.stateUpdates!;
+    expect(restored).toEqual(update);
+
+    // 记录与状态一致：再修订这一行不再按现值报冲突（ui/AGENTS.md 旧「已知限制」作废）
+    const again = planUpdateBlockRevision(restored.ops[0], revision, await loadSnapshot());
+    expect(again.kind).toBe('ok');
+  });
+
+  it('本楼记录在撤销前又被改过：指纹不符，拒绝', async () => {
+    const update = await seedFloor();
+    const sm = createStateManager(SAVE);
+    const revision = { kind: 'revert' as const };
+    const plan = planUpdateBlockRevision(update.ops[0], revision, await loadSnapshot());
+    if (plan.kind !== 'ok') throw new Error(plan.kind);
+    const r = await sm.commitPlayerEdit(plan.ops, {
+      record: { messageId: 'a2', index: 0, revision },
+    });
+    if (!r.ok) throw new Error(r.reasons.join('；'));
+    const row = (await getDatabase().messages.get('a2'))!;
+    await getDatabase().messages.put({ ...row, stateUpdates: { deltaMinutes: 0, ops: [] } });
+    const u = await sm.undoPlayerEdit(r.undo);
+    expect(u.ok).toBe(false);
+    if (!u.ok) expect(u.reasons[0]).toContain('本楼更新记录');
+    expect((await player()).money).toBe(120);
+  });
+
+  const player = async () => (await getCharacters(SAVE)).find((c) => c.id === 'player-id')!;
 });
 
 afterEach(() => {

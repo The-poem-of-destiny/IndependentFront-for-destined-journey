@@ -290,7 +290,10 @@ export function parseStatusEffectsXML(xmlBody: string): Array<{
     const category = (attrs.category as '增益' | '减益' | '特殊') || '减益';
     const stacks = parseInt(attrs.stacks || '1', 10);
     const maxStacks = parseInt(attrs.maxStacks || attrs.stacks || '1', 10);
-    const remainingTime = parseInt(attrs.remainingTime || '60', 10);
+    // 解析不出数值（如 `remainingTime="永久"`）回落 60，与缺省同口径（原 `|| 60` 的意图）；
+    // 否则 NaN 进 add_status_effect 会被内核时长校验拒掉，整条状态丢失。显式 0 保留
+    const parsedTime = parseInt(attrs.remainingTime || '60', 10);
+    const remainingTime = Number.isFinite(parsedTime) ? parsedTime : 60;
     const timeUnit = (attrs.timeUnit as '回合' | '分钟' | '小时') || '回合';
 
     const effects: Record<string, string> = {};

@@ -15,17 +15,22 @@ import StateEditorPanel from '../../../../src/ui/components/game/StateEditorPane
 const toast = vi.fn();
 
 function makeGame() {
-  const input = makeInput();
   return reactive({
     messages: [] as { role: string; turn?: number }[],
     isGenerating: false,
     isRewriting: false,
     isInCombat: false,
-    stateEditUndoStack: [] as { label: string; undo: unknown[] }[],
+  });
+}
+
+function makeStateEdit() {
+  const input = makeInput();
+  return reactive({
+    stateEditUndoStack: [] as { label: string; undo: unknown }[],
     stateEditorFocusPath: null as string | null,
     consumeStateEditorFocus: vi.fn((): string | null => {
-      const path = game.stateEditorFocusPath;
-      game.stateEditorFocusPath = null;
+      const path = stateEdit.stateEditorFocusPath;
+      stateEdit.stateEditorFocusPath = null;
       return path;
     }),
     readStateEditorSnapshot: vi.fn(async () => ({
@@ -33,23 +38,27 @@ function makeGame() {
       profile: input.profile,
     })),
     commitStateEdit: vi.fn(async (_ops: unknown[], label: string) => {
-      game.stateEditUndoStack.push({
+      stateEdit.stateEditUndoStack.push({
         label,
-        undo: [{ op: 'replace', path: '/主角/生命值/当前', value: 300 }],
+        undo: { saveId: 's', characters: {}, fingerprint: '{}' },
       });
-      return { ok: true, records: [], normalized: [], undo: [{}] };
+      return { ok: true, records: [], normalized: [], undo: {} };
     }),
     undoLastStateEdit: vi.fn(async () => {
-      game.stateEditUndoStack.pop();
-      return { ok: true, records: [], normalized: [], undo: [] };
+      stateEdit.stateEditUndoStack.pop();
+      return { ok: true };
     }),
   });
 }
 
 let game: ReturnType<typeof makeGame>;
+let stateEdit: ReturnType<typeof makeStateEdit>;
 
 vi.mock('../../../../src/ui/stores/game-store', () => ({
   useGameStore: () => game,
+}));
+vi.mock('../../../../src/ui/stores/state-edit-store', () => ({
+  useStateEditStore: () => stateEdit,
 }));
 vi.mock('../../../../src/ui/stores/ui-store', () => ({
   useUIStore: () => ({ toast }),
@@ -67,21 +76,22 @@ function fieldEl(wrapper: ReturnType<typeof mount>, path: string) {
 
 beforeEach(() => {
   game = makeGame();
+  stateEdit = makeStateEdit();
   toast.mockReset();
 });
 
 describe('StateEditorPanel', () => {
   it('从更新块跳过来：定位到持有该路径的节点并高亮那一格，定位只生效一次（T13）', async () => {
-    game.stateEditorFocusPath = '/主角/生命值/当前';
+    stateEdit.stateEditorFocusPath = '/主角/生命值/当前';
     const wrapper = await mountPanel();
-    expect(game.consumeStateEditorFocus).toHaveBeenCalledTimes(1);
+    expect(stateEdit.consumeStateEditorFocus).toHaveBeenCalledTimes(1);
     expect(fieldEl(wrapper, '/主角/生命值/当前').classes()).toContain('is-focused');
-    expect(game.stateEditorFocusPath).toBeNull();
+    expect(stateEdit.stateEditorFocusPath).toBeNull();
   });
 
   it('打开时从库读一次快照，默认选中主角', async () => {
     const wrapper = await mountPanel();
-    expect(game.readStateEditorSnapshot).toHaveBeenCalledTimes(1);
+    expect(stateEdit.readStateEditorSnapshot).toHaveBeenCalledTimes(1);
     expect(wrapper.get('.se-node-name').text()).toBe('主角');
     const labels = wrapper.findAll('.se-row-name').map((b) => b.text());
     expect(labels).toEqual(
@@ -125,11 +135,11 @@ describe('StateEditorPanel', () => {
 
     await wrapper.get('[data-testid="state-editor-confirm"]').trigger('click');
     await flushPromises();
-    expect(game.commitStateEdit).toHaveBeenCalledWith(
+    expect(stateEdit.commitStateEdit).toHaveBeenCalledWith(
       [{ op: 'replace', path: '/主角/生命值/当前', value: 120 }],
       '修改 /主角/生命值/当前',
     );
-    expect(game.readStateEditorSnapshot).toHaveBeenCalledTimes(2);
+    expect(stateEdit.readStateEditorSnapshot).toHaveBeenCalledTimes(2);
     expect(wrapper.find('[data-testid="state-editor-preview-panel"]').exists()).toBe(false);
     expect(toast).toHaveBeenCalledWith('修改已提交', 'success');
   });
@@ -142,7 +152,7 @@ describe('StateEditorPanel', () => {
     const panel = wrapper.get('[data-testid="state-editor-preview-panel"]');
     expect(panel.text()).toContain('删除');
     expect(panel.text()).toContain('/关系列表/布兰');
-    expect(game.commitStateEdit).not.toHaveBeenCalled();
+    expect(stateEdit.commitStateEdit).not.toHaveBeenCalled();
     expect(
       wrapper.get('[data-testid="state-editor-confirm"]').attributes('disabled'),
     ).toBeUndefined();
@@ -159,7 +169,7 @@ describe('StateEditorPanel', () => {
   });
 
   it('提交失败时把原因显示出来', async () => {
-    game.commitStateEdit.mockImplementationOnce(
+    stateEdit.commitStateEdit.mockImplementationOnce(
       async () =>
         ({
           ok: false,
@@ -190,15 +200,15 @@ describe('StateEditorPanel', () => {
     const wrapper = await mountPanel();
     expect(wrapper.get('.se-foot').text()).toContain('回退本轮会连同本轮之后的手改一起丢');
     expect(wrapper.get('[data-testid="state-editor-undo"]').attributes('disabled')).toBeDefined();
-    game.stateEditUndoStack.push({
+    stateEdit.stateEditUndoStack.push({
       label: '修改 /主角/金钱',
-      undo: [{ op: 'replace', path: '/主角/金钱', value: 120 }],
+      undo: { saveId: 's', characters: {}, fingerprint: '{}' },
     });
     await flushPromises();
     expect(wrapper.get('.se-foot').text()).toContain('上一次：修改 /主角/金钱');
     await wrapper.get('[data-testid="state-editor-undo"]').trigger('click');
     await flushPromises();
-    expect(game.undoLastStateEdit).toHaveBeenCalledTimes(1);
+    expect(stateEdit.undoLastStateEdit).toHaveBeenCalledTimes(1);
     expect(toast).toHaveBeenCalledWith('已撤销上一次修改', 'success');
   });
 
@@ -214,5 +224,14 @@ describe('StateEditorPanel', () => {
     const { default: src } =
       await import('../../../../src/ui/components/game/StateEditorPanel.vue?raw');
     expect(src).not.toMatch(/\sv-html=/);
+  });
+
+  it('拆出的三个子组件也不使用 v-html', async () => {
+    const sources = await Promise.all([
+      import('../../../../src/ui/components/game/state-editor/StateEditorTree.vue?raw'),
+      import('../../../../src/ui/components/game/state-editor/StateEditorFieldForm.vue?raw'),
+      import('../../../../src/ui/components/game/state-editor/StateEditorPreview.vue?raw'),
+    ]);
+    for (const { default: src } of sources) expect(src).not.toMatch(/\sv-html=/);
   });
 });

@@ -26,6 +26,11 @@ import {
 } from '@engine/prompts/story-zone-placeholders';
 import { applyPresetEntryToggles, type PresetEntryToggles } from '@engine/prompts/preset-groups';
 import type { PresetCatalogEntry } from '@engine/prompts/preset-resolution';
+import {
+  DEFAULT_STORY_CONTEXT_BLOCK,
+  listActivePresetPrompts,
+  PRESET_SYSTEM_PLACEHOLDER_RE,
+} from '@engine/prompts/preset-loader';
 
 /** `ChatPreset.settings.prompts` 里单条目的形状（SillyTavern 兼容，字段全可选）。 */
 export interface PresetPromptEntry {
@@ -174,7 +179,8 @@ export function setPresetEntriesEnabled(
 
 /**
  * 这条目录项的开关走不走覆写层：只读（内容包 / 出厂 / 引擎内置），或带出厂播种指纹的行。
- * 后一条是给管线兜底的 —— 管线的目录不登记出厂文件 id，出厂行在那边不算只读；
+ * 后一条是兜底：2026-11-25（R7）起管线与设置页共用 `preset-catalog.ts` 的工厂、都登记出厂 id，
+ * 但出厂 id 要等 settings-store 播种时才登记，登记前出厂行仍不算只读，靠指纹认出来；
  * 玩家副本一律删掉 `factorySeedHash`，所以不会被误判。
  * 🔴 usePresets 的目录与 GamePipeline.loadPresets 必须共用这一判据，否则两边看到的开关不一致。
  */
@@ -198,4 +204,20 @@ export function applyCatalogEntryToggles(
     const preset = applyPresetEntryToggles(entry.preset, toggles);
     return preset === entry.preset ? entry : { ...entry, preset };
   });
+}
+
+/**
+ * 设置页「上下文模板」预览：Story 预设里哪段文字承担上下文块。
+ * 口径跟引擎 `assemblePresetContent` 走：按生效条目（`listActivePresetPrompts`，已排除五区占位与
+ * assistant 预填充）找**含系统占位符**的条目，原文按生效顺序拼起来；一条都没有时引擎会追加
+ * `DEFAULT_STORY_CONTEXT_BLOCK`，预览也显示它。
+ * 📌 2026-11-25（R7）：此前按条目名「动态注入」找，名字只是展示、引擎从不认它 —— 改按条目内容判定。
+ */
+export function storyContextTemplateOf(prompts: unknown): string {
+  const carriers = listActivePresetPrompts<PresetPromptEntry>(prompts).filter(
+    (entry) =>
+      typeof entry.content === 'string' && PRESET_SYSTEM_PLACEHOLDER_RE.test(entry.content),
+  );
+  if (carriers.length === 0) return DEFAULT_STORY_CONTEXT_BLOCK;
+  return carriers.map((entry) => entry.content as string).join('\n');
 }

@@ -13,6 +13,7 @@
  * 全部是纯函数，任何输入都**不抛**：AI 输出什么样都有可能，面板解析失败不能拖垮整条消息。
  */
 
+import { panelTagPattern } from '@engine/story/story-beats';
 import type { BeautifierRule } from '@engine/types/types';
 
 // ── 类型 ──────────────────────────────────────────────────────
@@ -158,18 +159,34 @@ const UNTITLED_HUE: ActionPanelHue = 'info';
 
 // ── splitActionInfo ───────────────────────────────────────────
 
-const OPEN_TAG_RE = /<\s*action_info\s*>/i;
-const CLOSE_TAG_RE = /<\s*\/\s*action_info\s*>/i;
-const ANY_TAG_RE = /<\s*(\/?)\s*action_info\s*>/gi;
 const TAG_NAME = 'action_info';
 
-/** 结尾若是半截的 `<action_info` / `</action_info` 残标签就裁掉 */
+/**
+ * 找 text 里第一个 `<action_info>`（`closing` = false）或 `</action_info>`（true）。
+ * 标签识别用引擎分节那一份（`PANEL_TAG_SOURCE`：允许内部空白与属性），三处口径一致；
+ * 同一份正则也认 `<item_info>`，这里跳过。
+ */
+function findActionTag(text: string, closing: boolean): RegExpExecArray | null {
+  const re = panelTagPattern();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m[2].toLowerCase() === TAG_NAME && (m[1] === '/') === closing) return m;
+  }
+  return null;
+}
+
+/** 结尾若是半截的 `<action_info` / `</action_info` / `<action_info type="…` 残标签就裁掉 */
 function trimPartialTag(text: string): string {
   const lt = text.lastIndexOf('<');
   if (lt < 0) return text;
   const tail = text.slice(lt + 1);
   if (tail.includes('>')) return text;
-  const name = tail.replace(/\s+/g, '').replace(/^\//, '').toLowerCase();
+  const body = tail.trimStart().replace(/^\//, '').trimStart();
+  let nameEnd = 0;
+  while (nameEnd < body.length && !/\s/.test(body[nameEnd])) nameEnd += 1;
+  const name = body.slice(0, nameEnd).toLowerCase();
+  // 名字之后还有内容（属性写到一半）时，名字必须完整
+  if (nameEnd < body.length) return name === TAG_NAME ? text.slice(0, lt) : text;
   return TAG_NAME.startsWith(name) ? text.slice(0, lt) : text;
 }
 
@@ -222,8 +239,8 @@ export function splitActionInfo(
 
     let rest = source;
     while (rest) {
-      const open = OPEN_TAG_RE.exec(rest);
-      const close = CLOSE_TAG_RE.exec(rest);
+      const open = findActionTag(rest, false);
+      const close = findActionTag(rest, true);
       // 孤立的闭标签：先于任何开标签出现 → 丢掉标签，前面算文本
       if (close && (!open || close.index < open.index)) {
         pushText(rest.slice(0, close.index));
@@ -236,9 +253,9 @@ export function splitActionInfo(
       }
       pushText(rest.slice(0, open.index));
       const afterOpen = rest.slice(open.index + open[0].length);
-      const end = CLOSE_TAG_RE.exec(afterOpen);
+      const end = findActionTag(afterOpen, true);
       // 闭标签之前又出现开标签：这一个也算没闭合（闭标签属于后面那个）
-      const nextOpen = OPEN_TAG_RE.exec(afterOpen);
+      const nextOpen = findActionTag(afterOpen, false);
       if (!end || (nextOpen && nextOpen.index < end.index)) {
         if (options.partial && !nextOpen) {
           // 流式中未闭合：其后全部算面板（闭标签还没到）
@@ -330,8 +347,29 @@ const LINE_BREAK_RE = /\r?\n/;
 /** 规则 pattern 里提到 `action_info`（大小写不敏感）就算接管 */
 const ACTION_INFO_IN_PATTERN_RE = /action_info/i;
 
-/** 正文里闭合的整块 `<action_info>…</action_info>`（含标签） */
-const CLOSED_BLOCK_RE = /<\s*action_info\s*>[\s\S]*?<\s*\/\s*action_info\s*>/gi;
+/** 正文里闭合的整块 `<action_info>…</action_info>`（含标签）；开标签后取第一个闭标签 */
+function closedActionBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  let rest = text;
+  for (;;) {
+    const open = findActionTag(rest, false);
+    if (!open) break;
+    const afterOpen = rest.slice(open.index + open[0].length);
+    const close = findActionTag(afterOpen, true);
+    if (!close) break;
+    const end = open.index + open[0].length + close.index + close[0].length;
+    blocks.push(rest.slice(open.index, end));
+    rest = rest.slice(end);
+  }
+  return blocks;
+}
+
+/** 面板原文里的 `<action_info>` 开 / 闭标签换成换行（`<item_info>` 不动） */
+function replaceActionTags(text: string): string {
+  return text.replace(panelTagPattern(), (tag, _slash: unknown, name: string) =>
+    name.toLowerCase() === TAG_NAME ? '\n' : tag,
+  );
+}
 
 /** 规则能不能把这一整块吃下来：从块首开始匹配，且匹配到的正是整块 */
 function matchesWholeBlock(rule: BeautifierRule, block: string): boolean {
@@ -362,7 +400,7 @@ export function rulesClaimActionInfo(
   depth = 0,
 ): boolean {
   try {
-    const blocks = typeof text === 'string' ? (text.match(CLOSED_BLOCK_RE) ?? []) : [];
+    const blocks = typeof text === 'string' ? closedActionBlocks(text) : [];
     if (blocks.length === 0) return false;
     return (rules ?? []).some(
       (rule) =>
@@ -505,7 +543,7 @@ function parsePipeLine(line: string): ActionPanelRow | null {
 }
 
 function parsePanel(raw: string): ActionPanel {
-  const text = normalizeArrows(stripComments(raw).replace(ANY_TAG_RE, '\n'));
+  const text = normalizeArrows(replaceActionTags(stripComments(raw)));
   const sections: ActionPanelSection[] = [];
   let current: ActionPanelSection | null = null;
   const ensure = (): ActionPanelSection => {

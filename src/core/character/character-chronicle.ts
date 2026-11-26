@@ -3,6 +3,7 @@ import type { GameTime } from '../time/time-system';
 import type { CharacterChronicleEntry, CharacterNarrativeUpdate } from '../types/types-character';
 import { formatGameTime, toEpochMinutes } from '../time/time-system';
 import { LIST_FIELDS, TEXT_FIELDS } from './character-updates';
+import { filterNsfwText, nsfwEnabled } from '../content/nsfw-filter';
 
 export const CHRONICLE_IMPORTANCE_THRESHOLD = 7;
 const CHRONICLE_CONTEXT_BUDGET = 6000;
@@ -88,8 +89,17 @@ export function buildCharacterContext(
   // `definition` copy may predate the link) are judged by their definition id.
   const linked = (definition: { id: string; loreEntry?: string }) =>
     (ctx.characterDefinitions ?? []).find((d) => d.id === definition.id)?.loreEntry !== undefined;
-  const fallbackLore = (definition: { id: string; lore?: string }) =>
-    linked(definition) ? undefined : definition.lore;
+  const fallbackLore = (definition: { id: string; lore?: string; nsfw?: boolean }) => {
+    if (linked(definition)) return undefined;
+    if (nsfwEnabled()) return definition.lore;
+    // 露骨内容关：以按开关投影过的定义为准（整条标记角色被剔、因露骨被剔的链接不回落原文），
+    // 别回读角色身上冻结的那份原文
+    const projected = (ctx.characterDefinitions ?? []).find((d) => d.id === definition.id);
+    if (projected) return projected.lore;
+    return definition.nsfw || definition.lore === undefined
+      ? undefined
+      : filterNsfwText(definition.lore);
+  };
   const profiles = definitions.map((d) => {
     const selected = mentioned(d.name, d.profile.aliases);
     return {

@@ -17,6 +17,7 @@
 
 import { isStateTreePersonSummary } from './state-tree-projection';
 import type { StateTreeObject, StateTreeValue } from './state-tree-projection';
+import { escapeStateTreeSegment, unescapeStateTreeSegment } from './state-tree-utils';
 
 /** 分区：路径 → 该路径下的整块值。 */
 export type StateTreeSections = Record<string, StateTreeValue>;
@@ -29,15 +30,8 @@ const RELATION_KEY = '关系列表';
 
 // ========== 路径 ==========
 
-/** 路径段转义（JSON Pointer，RFC 6901）。 */
-export function escapeStateTreeSegment(segment: string): string {
-  return segment.replace(/~/g, '~0').replace(/\//g, '~1');
-}
-
-/** 路径段反转义。 */
-function unescapeStateTreeSegment(segment: string): string {
-  return segment.replace(/~1/g, '/').replace(/~0/g, '~');
-}
+/** 路径段转义（JSON Pointer，RFC 6901）；实现在 `state-tree-utils.ts`，此处原名转出。 */
+export { escapeStateTreeSegment };
 
 /** 段数组 → `/a/b/c`。 */
 export function joinStateTreePath(segments: readonly string[]): string {

@@ -1487,23 +1487,15 @@ export interface ReconcileMismatch {
 /**
  * 恢复后对账结果（reconcilePackState 产出）。
  *
- * 🔴 `needsAttention` 为空且 `reimportedPresetId === null` → 一切正常，调用方无需提示。
+ * 🔴 `mismatches` 为空 → 一切正常，调用方无需提示。
  *    有任意一项 → 调用方（content-store / DataSection）应把 `contentStatus` 置为
  *    `'needs_attention'` 并展示项列表 + 二选动作（D18：**不自动做任何一边**）。
  */
 export interface ReconcileResult {
   /** 全部 pack 合计的失配项（跨 pack 跨 section）；空数组 = 无失配 */
   mismatches: ReconcileMismatch[];
-  /**
-   * activePresetId 悬空时从 payload 重导的 story 预设 id（D18 明确分支）；
-   * `null` = 未触发重导（activePresetId 仍指向存在的预设，或没有任何 pack / pack 无 presets）。
-   *
-   * 🔴 这是 reconcile 唯一的写动作：旧备份清了 presets 表会让 activePresetId 指向不存在的
-   *    预设；从 contentPacks.payload 把 story 预设重新 put 进 presets 表。
-   *    重导后 activePresetId 的真源（settings-store localStorage）由调用方另行同步，
-   *    本函数只负责 DB 层 presets 行存在。
-   */
-  reimportedPresetId: string | null;
+  // 📌 2026-11-25（R7）：原 `reimportedPresetId` 字段已删 —— 生产零消费方。重导动作本身保留（见下）；
+  //    选择键悬空由 usePresets 的选择解析回落默认，不需要调用方据此同步。
 }
 
 /**
@@ -1521,7 +1513,7 @@ export interface ReconcileResult {
  *
  * 🔴 唯一的写动作：`activePresetId` 悬空 → 从 payload 重导 story 预设（D18 明确分支）。
  *
- * @returns 对账结果；`mismatches` 为空且 `reimportedPresetId === null` 即一切正常
+ * @returns 对账结果；`mismatches` 为空即一切正常
  */
 export async function reconcilePackState(): Promise<ReconcileResult> {
   const db = getDatabase();
@@ -1529,7 +1521,7 @@ export async function reconcilePackState(): Promise<ReconcileResult> {
 
   // 无 pack 安装 → 无从对账（也无需重导预设）
   if (packs.length === 0) {
-    return { mismatches: [], reimportedPresetId: null };
+    return { mismatches: [] };
   }
 
   const mismatches: ReconcileMismatch[] = [];
@@ -1591,9 +1583,7 @@ export async function reconcilePackState(): Promise<ReconcileResult> {
 
   // ── 3. activePresetId 悬空 → 从 payload 重导 story 预设（D18 明确分支） ──
   // activePresetId 的真源在 settings-store (localStorage)，本函数读不到它；
-  // 这里只保证「DB 层 presets 表里有至少一条 pack 预设可供指向」。调用方据
-  // reimportedPresetId 自行同步 activePresetId（若它原本悬空）。
-  let reimportedPresetId: string | null = null;
+  // 这里只保证「DB 层 presets 表里有至少一条 pack 预设可供指向」。
   if (allPresets.length === 0) {
     // presets 表被旧备份清空 → 从第一个含 presets 的 pack 重导第一条预设。
     // 🔴 只重导一条（story 预设通常一条；多 pack 各自预设的完整重放走 needs_attention
@@ -1605,13 +1595,12 @@ export async function reconcilePackState(): Promise<ReconcileResult> {
       if (packPresets && packPresets.length > 0) {
         const seed = packPresets[0];
         await db.presets.put({ ...seed });
-        reimportedPresetId = seed.id;
         break;
       }
     }
   }
 
-  return { mismatches, reimportedPresetId };
+  return { mismatches };
 }
 
 // ========== v1-v3 CRUD (unchanged) ==========

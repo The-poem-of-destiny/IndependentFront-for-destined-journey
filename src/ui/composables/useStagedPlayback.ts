@@ -27,6 +27,7 @@ import {
 } from '../lib/stage-playback';
 import { isDiscardedAttempt } from '../lib/turn-recovery';
 import type { FreshMessages } from './useFreshMessages';
+import { useMessageKeyedCache } from './useMessageKeyedCache';
 
 /** 流式分节快照（与 game-pipeline 的 StreamingStoryStage 同形，这里只读） */
 export interface StreamingStageSnapshot {
@@ -106,11 +107,15 @@ export function useStagedPlayback(options: StagedPlaybackOptions): StagedPlaybac
   const draft = shallowRef<PlaybackRecord | null>(null);
   const draftEpoch = ref(0);
 
-  /** 消息正文 → 演出输入；按 (content, stage) 引用记忆，避免每次渲染重新校验断点 */
-  const inputCache = new Map<
-    string,
-    { content: string; stage: unknown; input: StagePlaybackInput }
-  >();
+  /**
+   * 消息正文 → 演出输入；按 (content, stage) 引用记忆，避免每次渲染重新校验断点。
+   * 消息被移除（回退 / 切档 / 整体换数组）时随之清掉，见 useMessageKeyedCache。
+   */
+  const inputCache = useMessageKeyedCache<{
+    content: string;
+    stage: unknown;
+    input: StagePlaybackInput;
+  }>(options.messages);
   function inputOf(msg: ChatMessage): StagePlaybackInput {
     const hit = inputCache.get(msg.id);
     if (hit && hit.content === msg.content && hit.stage === msg.stage) return hit.input;

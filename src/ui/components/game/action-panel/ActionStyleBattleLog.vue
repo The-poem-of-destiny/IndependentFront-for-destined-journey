@@ -6,25 +6,37 @@
  *   - exchange：使出了（首行）· 逐目标 受到伤害 / 恢复生命 / 闪开 / 受到影响 · 其余资源 · 状态 ·
  *     自身变化（负的写「消耗」，正的写「恢复了」）
  *   - roster：标题 + 环境（首行）· 每个单位一行三格读数
- *   - outcome：尝试（首行）· 掷骰 · 结论 + 产物 / 结果句 · 经验 · 状态 · 消耗
+ *   - outcome：尝试（首行）· 掷骰 · 结论 + 产物 / 结果句 · 经验 ·
+ *     多人结算时逐人逐资源一行（「莱恩 的 HP 减少 5 点。」）· 状态 · 消耗
  *   - generic：标题（首行）· 前三个关键格
  *
  * 所有行收成一张 `lines` 表，模板按 `t` 分派；全程文本插值。
- * 入场（仅 `entering`）：各行依次淡入并右移 4px 落定，间隔 140ms，只排前 8 行（之后的与第 8 行同时出现）。
+ * 入场（仅 `entering`）：各行依次淡入并右移 4px 落定，间隔 140ms，只排前 `BATTLELOG_STAGGER_LINES` 行
+ * （entrance-timing.ts；之后的与最后一行同时出现）。
  * 不做打字机。只动 opacity / transform，`backwards` 填充，缓动取 `--motion-*`；减动效下不播。
  * 🔴 @keyframes 必须留在本组件（scoped 会按组件改名）；共用静态类在 action-panel-base.css。
  */
 import { computed } from 'vue';
 import type { ActionView } from '../../../lib/action-panel-view';
 import type { ResourceDelta, RosterUnit } from '../../../lib/action-digest';
+import {
+  abs,
+  actionLabel,
+  genericFacts,
+  rc,
+  rosterNote,
+  settledDeltas,
+  sgn,
+  statusLines,
+  verdictTone,
+  type VerdictTone as Tone,
+} from '../../../lib/action-style-helpers';
+import ActionMoreHint from './ActionMoreHint.vue';
+import { BATTLELOG_STAGGER_LINES } from './entrance-timing';
 
 const props = defineProps<{ view: ActionView; open: boolean; entering: boolean }>();
 
-/** 入场只交错排前几行 */
-const STAGGER_MAX = 8;
 const ROSTER_RESOURCES = ['hp', 'mp', 'sp'] as const;
-
-type Tone = '' | 't-ok' | 't-bad';
 
 type Line =
   | { t: 'use'; actor?: string; action: string; meta: string; tone: Tone }
@@ -50,32 +62,12 @@ type Line =
   | { t: 'exp'; amount: string }
   | { t: 'fact'; label: string; value: string };
 
-function sgn(n: number | null): string {
-  if (n === null || !Number.isFinite(n)) return '±?';
-  return (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n);
-}
-
-function abs(n: number | null): string {
-  return n === null || !Number.isFinite(n) ? '?' : String(Math.abs(n));
-}
-
 /** 行尾小字：有起止写 `HP 60→26`，否则写变化量 */
 function rangeMeta(d: ResourceDelta): string {
   return d.from !== undefined && d.to !== undefined
     ? `${d.resource} ${d.from}→${d.to}`
     : `${d.resource} ${sgn(d.delta)}`;
 }
-
-function rc(resource: string): string {
-  return `r-${resource.toLowerCase()}`;
-}
-
-const tone = computed<Tone>(() => {
-  const t = props.view.verdict?.tone;
-  return t === 'success' ? 't-ok' : t === 'error' ? 't-bad' : '';
-});
-
-const actionLabel = computed(() => props.view.action || props.view.title || '行动');
 
 /** 出手方自己的变化：负的是消耗，正的（自我治疗、回蓝）是恢复 */
 function costLines(v: ActionView): Line[] {
@@ -88,17 +80,34 @@ function costLines(v: ActionView): Line[] {
   }));
 }
 
+/** 某人某项资源「回复 / 减少 N 点」的旁白行 */
+function deltaLine(name: string, x: ResourceDelta): Line {
+  return {
+    t: 'delta',
+    name,
+    resource: x.resource,
+    amount: abs(x.delta),
+    meta: rangeMeta(x),
+    dir: (x.delta ?? 0) > 0 ? 'up' : 'down',
+  };
+}
+
+function statusLinesOf(v: ActionView): Line[] {
+  return statusLines(v).map((text): Line => ({ t: 'status', text }));
+}
+
 function exchangeLines(v: ActionView): Line[] {
   const out: Line[] = [];
   const single = v.targets.length === 1;
   const verdictText = v.verdict?.text ?? '';
+  const tone = verdictTone(v);
   // 单目标：结论喊在伤害行开头；多目标 / 无目标：结论挂在首行行尾
   out.push({
     t: 'use',
     actor: v.actor,
-    action: actionLabel.value,
+    action: actionLabel(v),
     meta: single ? '' : verdictText,
-    tone: tone.value,
+    tone,
   });
   for (const tg of v.targets) {
     if (tg.hp) {
@@ -108,7 +117,7 @@ function exchangeLines(v: ActionView): Line[] {
         name: tg.name,
         amount: abs(tg.hp.delta),
         cry: single ? verdictText : '',
-        tone: tone.value,
+        tone,
         meta: rangeMeta(tg.hp),
       });
     } else if (tg.hit === 'miss') {
@@ -119,59 +128,36 @@ function exchangeLines(v: ActionView): Line[] {
     }
     for (const x of tg.deltas) {
       if (x.resource === 'HP') continue;
-      out.push({
-        t: 'delta',
-        name: tg.name,
-        resource: x.resource,
-        amount: abs(x.delta),
-        meta: rangeMeta(x),
-        dir: (x.delta ?? 0) > 0 ? 'up' : 'down',
-      });
+      out.push(deltaLine(tg.name, x));
     }
   }
-  for (const tg of v.targets) {
-    for (const s of tg.statuses) out.push({ t: 'status', text: `${tg.name} ${s}` });
-  }
-  for (const s of v.looseStatuses) out.push({ t: 'status', text: s });
+  out.push(...statusLinesOf(v));
   out.push(...costLines(v));
   return out;
 }
 
-/** 名册标题旁的小字：摘要的关键格优先；没给时取算式区里不属于任何单位的短行，至多两条 */
-function rosterNote(v: ActionView): string {
-  const fromFacts = v.facts.map((c) => c.value).filter(Boolean);
-  if (fromFacts.length > 0) return fromFacts.join(' · ');
-  const names = v.roster.map((u) => u.name);
-  return v.calc
-    .flatMap((s) => s.rows)
-    .filter((r) => r.label && !r.wide && !names.some((n) => r.label.startsWith(n)))
-    .slice(0, 2)
-    .map((r) => r.tokens.map((t) => t.text).join(''))
-    .join(' · ');
-}
-
 function outcomeLines(v: ActionView): Line[] {
   const o = v.outcome;
-  const out: Line[] = [{ t: 'try', actor: v.actor, action: actionLabel.value }];
+  const tone = verdictTone(v);
+  const out: Line[] = [{ t: 'try', actor: v.actor, action: actionLabel(v) }];
   if (o?.roll) out.push({ t: 'roll', raw: o.roll.raw });
   const verdictText = v.verdict?.text ?? '';
   if (o?.product) {
     out.push({
       t: 'result',
       cry: verdictText,
-      tone: tone.value,
+      tone,
       product: o.product,
       quality: o.quality,
       qv: o.qualityVar,
     });
   } else if (verdictText || o?.resultText) {
-    out.push({ t: 'result', cry: verdictText, tone: tone.value, text: o?.resultText });
+    out.push({ t: 'result', cry: verdictText, tone, text: o?.resultText });
   }
   if (o?.exp) out.push({ t: 'exp', amount: o.exp.replace(/^\+/, '') });
-  for (const tg of v.targets) {
-    for (const s of tg.statuses) out.push({ t: 'status', text: `${tg.name} ${s}` });
-  }
-  for (const s of v.looseStatuses) out.push({ t: 'status', text: s });
+  // 多人结算（回合结束的状态结算之类）：逐人逐资源一行
+  for (const { who, delta } of settledDeltas(v)) out.push(deltaLine(who, delta));
+  out.push(...statusLinesOf(v));
   out.push(...costLines(v));
   return out;
 }
@@ -188,7 +174,7 @@ const lines = computed<Line[]>(() => {
   }
   return [
     { t: 'title', text: v.title || '行动详情', meta: '' },
-    ...v.facts.slice(0, 3).map((c): Line => ({ t: 'fact', label: c.label, value: c.value })),
+    ...genericFacts(v).map((c): Line => ({ t: 'fact', label: c.label, value: c.value })),
   ];
 });
 
@@ -211,7 +197,7 @@ function lineClass(l: Line): string[] {
 }
 
 function stagger(i: number): Record<string, number> {
-  return { '--i': Math.min(i, STAGGER_MAX - 1) };
+  return { '--i': Math.min(i, BATTLELOG_STAGGER_LINES - 1) };
 }
 </script>
 
@@ -358,9 +344,7 @@ function stagger(i: number): Record<string, number> {
       </template>
     </div>
     <div class="bl-more" :style="stagger(lines.length - 1)">
-      <span class="more" :class="{ 'is-open': open }" aria-hidden="true"
-        >{{ open ? '收起' : '算式' }}<i class="more-caret"
-      /></span>
+      <ActionMoreHint :open="open" />
     </div>
   </div>
 </template>
@@ -506,7 +490,7 @@ function stagger(i: number): Record<string, number> {
   }
 }
 
-/* ── 入场：逐行淡入落定，间隔 140ms，前 8 行交错（--i 已在模板里封顶） ── */
+/* ── 入场：逐行淡入落定，间隔 140ms，前 BATTLELOG_STAGGER_LINES 行交错（--i 已在模板里封顶，entrance-timing.ts） ── */
 @keyframes blog-line {
   from {
     opacity: 0;
