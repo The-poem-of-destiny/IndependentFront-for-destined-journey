@@ -61,6 +61,7 @@ import {
   ascensionEntryProblem,
   emptyAscension,
   hasUsableAscensionEntry,
+  listKeys,
   normalizeDirectUpdates,
 } from './direct-normalize';
 import { normalizeSlot } from '../content/field-enums';
@@ -122,6 +123,19 @@ export interface DirectTurnDraft {
    * 缺席 = 旧协议形状（含 tree 下回落到旧解析器的楼）。
    */
   treePatch?: DirectTreePatch;
+  /**
+   * 本楼的解析口径（生成时整轮取一次）：接纳、建战斗记录与写入统计都读这里，不重读开关。
+   * stateProtocol 是生成时的设置（tree 下回落旧形状的楼仍是 tree）。
+   */
+  stateProtocol: 'legacy' | 'tree';
+  structuredCombat: boolean;
+  plotEnabled: boolean;
+  /**
+   * `updates.entities` / `updates.effects` 各行在模型原文中的路径（与数组逐项对应），
+   * 建补丁时丢弃写 note 用。是普通数据，草稿被克隆后仍有效。
+   */
+  entityPaths: string[];
+  effectPaths: string[];
 }
 
 /** 状态树协议下一楼的路径补丁（`parseTreePatchBlock` 的产物，翻译在 `buildDirectPatches`）。 */
@@ -273,11 +287,6 @@ function arrayField(
   return [];
 }
 
-/** 报错里最多列出的多余键数 */
-const MAX_LISTED_KEYS = 5;
-/** 单个键名在报错里的最大长度，超出截断加「…」 */
-const MAX_KEY_LENGTH = 24;
-
 /** 白名单常量是 readonly 元组；判定时按普通字符串集合用 */
 function among(list: readonly string[], value: unknown): boolean {
   return list.includes(String(value));
@@ -288,16 +297,7 @@ function stripKeys(notes: Notes, value: Row, allowed: readonly string[], label: 
   const extra = Object.keys(value).filter((key) => !allowed.includes(key));
   if (extra.length === 0) return;
   for (const key of extra) delete value[key];
-  const listed = extra
-    .slice(0, MAX_LISTED_KEYS)
-    .map((key) => {
-      // 按码点截断，避免切开代理对留下孤立代理项
-      const chars = Array.from(key);
-      return chars.length > MAX_KEY_LENGTH ? `${chars.slice(0, MAX_KEY_LENGTH).join('')}…` : key;
-    })
-    .join('、');
-  const more = extra.length > MAX_LISTED_KEYS ? ` 等 ${extra.length} 个` : '';
-  notes.dropped.push(`${label}：含未支持的字段 ${listed}${more}，已剥除`);
+  notes.dropped.push(`${label}：含未支持的字段 ${listKeys(extra)}，已剥除`);
 }
 
 function named(value: unknown, label?: string): asserts value is string {
@@ -326,8 +326,6 @@ function matchesType(type: DirectValueType, value: unknown): boolean {
       return finite;
     case 'nonNegative':
       return finite && (value as number) >= 0;
-    case 'positive':
-      return finite && (value as number) > 0;
     case 'boolean':
       return typeof value === 'boolean';
     case 'duration':
@@ -349,7 +347,6 @@ const TYPE_LABELS: Record<DirectValueType, string> = {
   textList: '文本数组',
   number: '数值',
   nonNegative: '非负数值',
-  positive: '正数',
   boolean: '布尔值',
   duration: '非负数值或 null',
   numberRecord: '值全为数值的对象',
@@ -366,6 +363,23 @@ function checkTypes(row: Row, types: Readonly<Record<string, DirectValueType>>, 
     if (type === 'name') named(row[key], `${label}.${key}`);
     else check(matchesType(type, row[key]), `${label}.${key} 必须是${TYPE_LABELS[type]}`);
   }
+}
+
+/**
+ * 校验前把可选键写成的 null 当缺席剥掉，并记一条纠正（不丢整行）。name 型是必填，
+ * duration 型的 null 表示「改为永久」，两者都不剥。须在「至少改一个字段」之类的计数检查之前调用。
+ */
+function stripNullOptionals(
+  notes: Notes,
+  row: Row,
+  types: Readonly<Record<string, DirectValueType>>,
+  label: string,
+): void {
+  for (const [key, type] of Object.entries(types))
+    if (row[key] === null && type !== 'name' && type !== 'duration') {
+      delete row[key];
+      notes.normalized.push(`${label}.${key}：为 null，已按未填写处理`);
+    }
 }
 
 /** 原型污染键：任何层级出现即整楼拒收（唯一一处；必须先于归一化，见 direct-normalize.ts 文件头） */
@@ -403,11 +417,6 @@ function rejectUnsafeCombat(value: unknown): void {
 const WORLD_RESERVED_PATH = new RegExp(
   String.raw`(^|\.)(${[...DIRECT_FORBIDDEN_KEYS, ...DIRECT_WORLD_RESERVED_SEGMENTS].join('|')})(\.|$)`,
 );
-
-/** 原样记下实体行在模型原文中的路径，供 buildDirectPatches 丢弃时写 note */
-const ENTITY_PATHS = new WeakMap<object, string>();
-/** 同上，effects 行 */
-const EFFECT_PATHS = new WeakMap<object, string>();
 
 /** 随身条目（技能／装备／背包）：列表不是数组换成 []，坏条目逐条丢 */
 function validateCarried(notes: Notes, output: Row, label: string): void {
@@ -690,6 +699,7 @@ function validateState(notes: Notes, state: Row): void {
         if (op === 'modify') {
           const changes = object(row.changes, '物品修改');
           stripKeys(notes, changes, DIRECT_ITEM_MODIFY_KEYS, `${label}.changes`);
+          stripNullOptionals(notes, changes, DIRECT_VALUE_TYPES.itemModify, `${label}.changes`);
           check(Object.keys(changes).length > 0, '物品修改没有可改的字段');
           checkTypes(changes, DIRECT_VALUE_TYPES.itemModify, `${label}.changes`);
         }
@@ -725,25 +735,38 @@ function validateState(notes: Notes, state: Row): void {
       salvageRows(notes, list as unknown[], `state.quests.${op}`, (row, label) => {
         named(row.name, `${label}.name`);
         // upsert 的契约外键已在归一化剥除，这里只查值类型
-        if (op === 'upsert') checkTypes(row, DIRECT_VALUE_TYPES.questUpsert, label);
+        if (op === 'upsert') {
+          stripNullOptionals(notes, row, DIRECT_VALUE_TYPES.questUpsert, label);
+          checkTypes(row, DIRECT_VALUE_TYPES.questUpsert, label);
+        }
       });
 }
 
 /**
- * 原型污染键扫描 → 无损归一化 → 逐单元校验（就地改写 parsed）。
- * 返回平铺归位的人物名（独立告警）。
+ * 两种形状共用的尾段：结构化战斗关闭时先丢 combat（只记模型是否写了非 null 内容）→
+ * 原型污染键扫描 → 无损归一化 → 逐单元校验（就地改写 parsed，buildDirectPatches 读同一个对象）。
  */
 function normalizeAndValidate(
   parsed: Row,
   pool: DirectDicePool,
   notes: Notes,
   options: { structuredCombat: boolean; plotEnabled: boolean },
-): string[] {
+): RowPaths & { flattenedCharacters: string[]; combatIgnored: boolean } {
+  // 结构化战斗关闭：combat 区块一律丢弃（不校验、不要求存在）；归一化随后补回 combat: null
+  const combatIgnored =
+    !options.structuredCombat && parsed.combat !== null && parsed.combat !== undefined;
+  if (!options.structuredCombat) delete parsed.combat;
   rejectForbidden(parsed);
   const normalization = normalizeDirectUpdates(parsed, options);
   notes.normalized.push(...normalization.notes);
-  validateUpdates(parsed, pool, notes, options.structuredCombat);
-  return normalization.flattenedCharacters;
+  const paths = validateUpdates(parsed, pool, notes, options.structuredCombat);
+  return { ...paths, flattenedCharacters: normalization.flattenedCharacters, combatIgnored };
+}
+
+/** 留下的 entities / effects 行在模型原文中的路径（与校验后的数组逐项对应） */
+interface RowPaths {
+  entityPaths: string[];
+  effectPaths: string[];
 }
 
 /** 归一化之后的逐单元校验（就地改写 parsed）；有损丢弃全部在这里产出 */
@@ -752,7 +775,8 @@ function validateUpdates(
   pool: DirectDicePool,
   notes: Notes,
   structuredCombat: boolean,
-): void {
+): RowPaths {
+  const paths: RowPaths = { entityPaths: [], effectPaths: [] };
   stripKeys(notes, parsed, DIRECT_SECTIONS, 'direct_updates');
   if (parsed.version !== 1) {
     notes.dropped.push(
@@ -828,7 +852,7 @@ function validateUpdates(
   salvageRows(notes, parsed.entities as unknown[], 'entities', (row, label) => {
     const claimed = validateEntityRow(notes, row, label, statusOwners);
     for (const key of claimed) statusOwners.add(key);
-    ENTITY_PATHS.set(row, label);
+    paths.entityPaths.push(label);
   });
   const effectOwners = new Set<string>();
 
@@ -855,6 +879,7 @@ function validateUpdates(
     }
     if (effect.action === 'update') {
       stripKeys(notes, value, DIRECT_EFFECT_UPDATE_KEYS, `${label}.value`);
+      stripNullOptionals(notes, value, DIRECT_VALUE_TYPES.effectUpdate, `${label}.value`);
       check(Object.keys(value).length > 1, '效果更新只能改 remainingTime／stacks');
       checkTypes(value, DIRECT_VALUE_TYPES.effectUpdate, `${label}.value`);
     }
@@ -864,7 +889,7 @@ function validateUpdates(
     const key = `${effect.owner}/${value.name}`;
     check(!effectOwners.has(key), '状态效果重复声明');
     effectOwners.add(key);
-    EFFECT_PATHS.set(effect, label);
+    paths.effectPaths.push(label);
   });
 
   const plot = parsed.plot as Row;
@@ -896,6 +921,7 @@ function validateUpdates(
     named(die.target, `${label}.target`);
     consumed.add(key);
   });
+  return paths;
 }
 
 export function parseDirectOutput(
@@ -917,9 +943,8 @@ export function parseDirectOutput(
   if (!layout.envelopeOk) fatal('需要一个完整的 maintext（或 gametxt）区块');
   const notes: Notes = { normalized: [], dropped: [] };
   let parsed: Row;
-  let combatIgnored = false;
-  let flattenedCharacters: string[] = [];
   let treePatch: DirectTreePatch | undefined;
+  let validated: ReturnType<typeof normalizeAndValidate> | undefined;
   const tree = !updatesMissing && options.stateProtocol === 'tree';
   const treeResult = tree ? parseTreePatchBlock(updatesInner) : undefined;
   if (treeResult?.kind === 'rejected') fatal(treeResult.reason);
@@ -928,56 +953,24 @@ export function parseDirectOutput(
     // 并存期回落（设计 §2）：tree 下模型仍写了旧形状，交给旧解析器，记一条纠正
     notes.normalized.push(`direct_updates：${treeResult.note}`);
   if (updatesMissing) parsed = emptyDirectUpdates();
-  else if (treeResult?.kind === 'patch') {
-    // 只在整段 JSON 写坏、逐元素恢复后一条都没救回时整楼拒收（§5.4）；JSON 完好时坏 op 只丢那一条
-    if (treeResult.nothingRecovered)
-      fatal('direct_updates 整段 JSON 写坏了，逐条恢复后一条操作都没能救回');
-    for (const issue of treeResult.dropped)
-      notes.dropped.push(dropNote(treeIssueLabel(issue), issue.message));
-    // 整块级的纠正直接记；逐条的交给翻译层并进那条 op 的记录（translateTreeOps 的 parseNormalized）
-    for (const issue of treeResult.normalized)
-      if (issue.index < 0) notes.normalized.push(`direct_updates：${issue.message}`);
-    treePatch = {
-      ops: treeResult.ops,
-      normalized: treeResult.normalized.filter((issue) => issue.index >= 0),
-    };
-    // 信封（plot / diceUsed / tile_ops / combat / 旧写法 time）装进 v1 骨架，复用既有归一化与逐单元校验
-    parsed = treeEnvelopeUpdates(treeResult.envelope, notes, structuredCombat);
-    if (!structuredCombat) {
-      combatIgnored = parsed.combat !== null && parsed.combat !== undefined;
-      delete parsed.combat;
-    }
-    normalizeAndValidate(parsed, pool, notes, { structuredCombat, plotEnabled });
-  } else {
-    // N1：内文先过 JSON 抢救入口，剥掉 ```json 围栏、<json> 标签或 JSON 之前夹带的说明文字
-    // （以 { 开头的内文按整段解析，JSON 之后跟文字不剥，照旧拒收为非法 JSON）
-    const inner = updatesInner;
-    const payload = extractJsonPayload(inner) ?? inner;
-    if (payload !== inner.trim())
-      notes.normalized.push('direct_updates：已剥除 JSON 外的围栏或说明文字');
-    let json: unknown;
-    try {
-      json = JSON.parse(payload);
-    } catch (error) {
-      fatal(
-        `direct_updates 不是合法 JSON（${error instanceof Error ? error.message : String(error)}）`,
-      );
-    }
-    if (!isRecord(json)) fatal('direct_updates 必须是对象');
-    parsed = json;
-    // 结构化战斗关闭：combat 区块一律丢弃（不校验、不要求存在），只记下模型是否写了非 null 内容
-    if (!structuredCombat) {
-      combatIgnored =
-        Object.prototype.hasOwnProperty.call(parsed, 'combat') &&
-        parsed.combat !== null &&
-        parsed.combat !== undefined;
-      delete parsed.combat;
-    }
-    // 就地改写 parsed（buildDirectPatches 读的是同一个对象）；关闭战斗时归一化补回 combat: null
-    flattenedCharacters = normalizeAndValidate(parsed, pool, notes, {
-      structuredCombat,
-      plotEnabled,
-    });
+  else {
+    if (treeResult?.kind === 'patch') {
+      // 只在整段 JSON 写坏、逐元素恢复后一条都没救回时整楼拒收（§5.4）；JSON 完好时坏 op 只丢那一条
+      if (treeResult.nothingRecovered)
+        fatal('direct_updates 整段 JSON 写坏了，逐条恢复后一条操作都没能救回');
+      for (const issue of treeResult.dropped)
+        notes.dropped.push(dropNote(treeIssueLabel(issue), issue.message));
+      // 整块级的纠正直接记；逐条的交给翻译层并进那条 op 的记录（translateTreeOps 的 parseNormalized）
+      for (const issue of treeResult.normalized)
+        if (issue.index < 0) notes.normalized.push(`direct_updates：${issue.message}`);
+      treePatch = {
+        ops: treeResult.ops,
+        normalized: treeResult.normalized.filter((issue) => issue.index >= 0),
+      };
+      // 信封（plot / diceUsed / tile_ops / combat / 旧写法 time）装进 v1 骨架，复用既有归一化与逐单元校验
+      parsed = treeEnvelopeUpdates(treeResult.envelope, notes, structuredCombat);
+    } else parsed = parseLegacyUpdates(updatesInner, notes);
+    validated = normalizeAndValidate(parsed, pool, notes, { structuredCombat, plotEnabled });
   }
   // character_updates 坏了不再拒收整楼：解析告警记入 dropped，无损纠正并入 normalized
   const character = parseCharacterUpdates(raw);
@@ -992,13 +985,40 @@ export function parseDirectOutput(
     raw,
     characterUpdates: character.updates,
     updates: parsed as unknown as DirectUpdates,
-    ...(combatIgnored ? { combatIgnored: true as const } : {}),
-    ...(flattenedCharacters.length > 0 ? { flattenedCharacters } : {}),
+    ...(validated?.combatIgnored ? { combatIgnored: true as const } : {}),
+    ...(validated?.flattenedCharacters.length
+      ? { flattenedCharacters: validated.flattenedCharacters }
+      : {}),
     ...(notes.normalized.length > 0 ? { normalized: notes.normalized } : {}),
     ...(notes.dropped.length > 0 ? { dropped: notes.dropped } : {}),
     ...(updatesMissing ? { updatesMissing: true as const } : {}),
     ...(treePatch ? { treePatch } : {}),
+    stateProtocol: options.stateProtocol ?? 'legacy',
+    structuredCombat,
+    plotEnabled,
+    entityPaths: validated?.entityPaths ?? [],
+    effectPaths: validated?.effectPaths ?? [],
   };
+}
+
+/**
+ * 旧形状 direct_updates 内文 → 对象。N1：先过 JSON 抢救入口，剥掉 ```json 围栏、<json> 标签或
+ * JSON 之前夹带的说明文字（以 { 开头的内文按整段解析，JSON 之后跟文字不剥，照旧拒收为非法 JSON）。
+ */
+function parseLegacyUpdates(inner: string, notes: Notes): Row {
+  const payload = extractJsonPayload(inner) ?? inner;
+  if (payload !== inner.trim())
+    notes.normalized.push('direct_updates：已剥除 JSON 外的围栏或说明文字');
+  let json: unknown;
+  try {
+    json = JSON.parse(payload);
+  } catch (error) {
+    fatal(
+      `direct_updates 不是合法 JSON（${error instanceof Error ? error.message : String(error)}）`,
+    );
+  }
+  if (!isRecord(json)) fatal('direct_updates 必须是对象');
+  return json;
 }
 
 /** 状态树信封里认的键：plot / diceUsed / tile_ops / combat 缺了按空处理；time 是旧写法 `time.delta_time`。 */
@@ -1124,22 +1144,6 @@ export function buildDirectPatches(
   };
 }
 
-/** 按名字合并档案路径写入与 character_updates：同名人物合并 profile_changes，显式写的优先 */
-function mergeProfileChanges(
-  updates: readonly CharacterNarrativeUpdate[],
-  changes: readonly CharacterNarrativeUpdate[],
-  characters: readonly CharacterState[],
-): CharacterNarrativeUpdate[] {
-  const merged = updates.map((update) => ({ ...update }));
-  const canonical = (name: string) => findCharacter(characters, name)?.name ?? name;
-  for (const change of changes) {
-    const target = merged.find((update) => canonical(update.name) === canonical(change.name));
-    if (target) target.profile_changes = { ...change.profile_changes, ...target.profile_changes };
-    else merged.push({ ...change, chronicle: [...change.chronicle] });
-  }
-  return merged;
-}
-
 /** 状态树协议：op → StatePatch 由翻译层完成（纠正、预演、成组丢弃都在那里），这里只做接线 */
 function buildTreeDirectPatches(
   draft: DirectTurnDraft,
@@ -1166,11 +1170,8 @@ function buildTreeDirectPatches(
     if (deltaTime > 0) dropped.push('time.delta_time：本楼已用 /世界/时间 推进时间，旧写法已忽略');
     else deltaTime = legacyMinutes;
   }
-  const characterUpdates = mergeProfileChanges(
-    draft.characterUpdates,
-    translated.profileChanges,
-    characters,
-  ).filter((update) => {
+  // 档案文字字段已随补丁落（审查 A8），翻译层的 profileChanges 恒空，不再与 character_updates 合并
+  const characterUpdates = draft.characterUpdates.filter((update) => {
     const known = findCharacter(characters, update.name) !== undefined;
     if (!known) dropped.push(`character_updates：人物 ${update.name} 缺少完整实体，已忽略`);
     return known;
@@ -1201,12 +1202,12 @@ function buildLegacyDirectPatches(
   const dropped: string[] = [];
   /** 真正留下的实体的初始状态（「角色名/状态名」），effects 行与之撞名才算重复 */
   const keptStatuses = new Set<string>();
-  const pathOf = (entity: object, i: number) => ENTITY_PATHS.get(entity) ?? `entities[${i}]`;
+  const pathOf = (i: number) => draft.entityPaths[i] ?? `entities[${i}]`;
   draft.updates.entities.forEach((entity, i) => {
     if (entity.kind !== 'character') return;
     const name = entity.output.character!.name;
     if (characters.some((c) => c.name === name)) {
-      dropped.push(dropNote(pathOf(entity, i), `人物 ${name} 已存在`));
+      dropped.push(dropNote(pathOf(i), `人物 ${name} 已存在`));
       return;
     }
     const narrativeCharacter = draft.characterUpdates.find((update) => update.name === name);
@@ -1222,11 +1223,11 @@ function buildLegacyDirectPatches(
         introducedBy: input.sourceTurnKey,
       });
     } catch (error) {
-      dropped.push(dropNote(pathOf(entity, i), `人物组装失败（${errorText(error)}）`));
+      dropped.push(dropNote(pathOf(i), `人物组装失败（${errorText(error)}）`));
       return;
     }
     if (characters.some((c) => c.name === character.name)) {
-      dropped.push(dropNote(pathOf(entity, i), `人物 ${character.name} 已存在`));
+      dropped.push(dropNote(pathOf(i), `人物 ${character.name} 已存在`));
       return;
     }
     characters.push(character);
@@ -1241,7 +1242,7 @@ function buildLegacyDirectPatches(
   });
   draft.updates.entities.forEach((entity, i) => {
     if (entity.kind !== 'loadout') return;
-    const path = pathOf(entity, i);
+    const path = pathOf(i);
     const owner = findCharacter(characters, entity.owner);
     if (!owner) {
       dropped.push(dropNote(path, `物品归属人物 ${entity.owner} 不存在`));
@@ -1301,10 +1302,7 @@ function buildLegacyDirectPatches(
     const owner = findCharacter(characters, effect.owner);
     if (owner && keptStatuses.has(`${owner.name}/${effect.value.name}`)) {
       dropped.push(
-        dropNote(
-          EFFECT_PATHS.get(effect) ?? `effects[${i}]`,
-          '状态效果重复声明（实体初始状态已写过）',
-        ),
+        dropNote(draft.effectPaths[i] ?? `effects[${i}]`, '状态效果重复声明（实体初始状态已写过）'),
       );
       return;
     }

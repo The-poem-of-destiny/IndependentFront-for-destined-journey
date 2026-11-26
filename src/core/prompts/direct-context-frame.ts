@@ -1,4 +1,4 @@
-import type { DirectGenerationInput } from '../agents/direct-main';
+import type { DirectGenerationInput } from '../agents/direct-request';
 import { isPresetPromptActive } from '../content/nsfw-filter';
 import type {
   AgentContext,

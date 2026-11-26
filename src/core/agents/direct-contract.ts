@@ -178,9 +178,10 @@ export const DIRECT_FORBIDDEN_KEYS = ['__proto__', 'prototype', 'constructor'] a
 /**
  * 可写位置的值类型（校验器按 `DIRECT_VALUE_TYPES` 逐键检查，坏值只丢所在那一行）：
  * - text：字符串；name：非空白字符串；textList：字符串数组；
- * - number：有限数；nonNegative：≥0 有限数；positive：>0 有限数；boolean：布尔；
+ * - number：有限数；nonNegative：≥0 有限数；boolean：布尔；
  * - duration：null（永久）或 ≥0 有限数；
  * - numberRecord：值全为有限数的对象；textRecord：值全为字符串的对象。
+ * 可选键写成 null 当缺席（剥掉并记纠正）；name 型必填，duration 型的 null 表示永久，都不剥。
  */
 export type DirectValueType =
   | 'text'
@@ -188,7 +189,6 @@ export type DirectValueType =
   | 'textList'
   | 'number'
   | 'nonNegative'
-  | 'positive'
   | 'boolean'
   | 'duration'
   | 'numberRecord'
@@ -239,7 +239,8 @@ export const DIRECT_VALUE_TYPES = {
   effectUpdate: {
     name: 'name',
     remainingTime: 'duration',
-    stacks: 'positive',
+    // 只查是数值：非正层数照旧行收下，由 StateManager 忽略该字段（时长照改），不丢整行
+    stacks: 'number',
   } satisfies TypeTable<typeof DIRECT_EFFECT_UPDATE_KEYS>,
   /** effects 行 action 为 remove 时的 value */
   effectRemove: { name: 'name' } satisfies TypeTable<typeof DIRECT_EFFECT_REMOVE_KEYS>,

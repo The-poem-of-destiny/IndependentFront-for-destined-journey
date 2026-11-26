@@ -106,6 +106,7 @@
 - 预计输入加输出预留超过端点配置窗口；若完整基线仍超限，则在请求前停止并提示缩短历史或调整输出预算。估算采用现有字符口径，不是真实 tokenizer。
 - 模型、端点版本、请求体参数、文风/预设、记忆窗口、世界书内容或渲染后的固定前缀变化。普通区域切换和本轮条目激活变化由当前分区替换，不单独要求重建。
 - 历史原文被编辑/截断，回退或内容授权变更使会话失效；缓存记录不存在或协议版本不符。
+- 📌 2026-11-25 补注（此前漏列）：同一存档上一张票据还没接纳也没丢弃时又准备了一次（重入，例如上一次尝试尚未收尾就再发一次），本次按完整基线冷建，重建原因 `reentered`（`direct-context-session.ts` 的 `prepareDirectContext`）。判定顺序：`missing_session` → `protocol_changed` → `reentered` → `repeated_rejection` → `configuration_or_lore_changed` → `history_changed` → `turn_limit`；增长与窗口两条（`transcript_growth` / `context_budget`）在复用路径上再判。
 
 📌 2026-11-14 新增：上面第一、二条的两个阈值可在「设置 → Agent 配置 → 直出主生成（缓存优化）→ 缓存会话」用滑块调整。会话楼数上限范围 2–24，默认 8；增长倍数上限范围 1.2–3，默认 1.4。范围、步长与默认值的唯一出处是 `direct-context-session.ts` 的 `DIRECT_CACHE_REBUILD_RANGE` / `DIRECT_CACHE_REBUILD_DEFAULTS`，设置缺席或越界时由 `normalizeDirectCacheRebuild` 收敛。阈值不进会话签名：调整本身不触发重建，只影响之后的判定。调大会让会话保持更久、重复利用的前缀更多，但旧正文更晚折叠、单次请求更长。
 
