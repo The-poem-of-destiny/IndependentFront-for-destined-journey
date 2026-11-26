@@ -128,9 +128,12 @@ export const useStateEditStore = defineStore('state-edit', () => {
     label: string,
     record?: PlayerEditRecordWriteback,
   ): Promise<PlayerEditCommitResult> {
+    // 提交在途时若切档 / 时间线恢复（sessionEpoch 变了），撤销栈已清空，旧凭据不能再压进新会话
+    const epoch = game.sessionEpoch;
     const result = await runPlayerEdit(ops, record);
     // 凭据里是整份内核快照，不需要响应式（markRaw 免得深代理一遍）
-    if (result.ok) stateEditUndoStack.value.push({ label, undo: markRaw(result.undo) });
+    if (result.ok && game.sessionEpoch === epoch)
+      stateEditUndoStack.value.push({ label, undo: markRaw(result.undo) });
     return result;
   }
 

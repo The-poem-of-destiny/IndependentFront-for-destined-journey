@@ -114,6 +114,17 @@ describe('state-edit-store 变量修改器', () => {
     expect(edit.stateEditUndoStack).toHaveLength(0);
   });
 
+  it('提交在途时会话世代变了（切档 / 时间线恢复）：旧凭据不压进新会话的撤销栈', async () => {
+    const { store, edit } = await seedStore();
+    const pending = edit.commitStateEdit(
+      [{ op: 'replace', path: '/主角/金钱', value: 500 }],
+      '修改 /主角/金钱',
+    );
+    store.sessionEpoch++;
+    expect((await pending).ok).toBe(true);
+    expect(edit.stateEditUndoStack).toHaveLength(0);
+  });
+
   it('删除 NPC 后内存角色表同步移除（合并回读留不住删除）', async () => {
     const { store, edit } = await seedStore();
     const result = await edit.commitStateEdit(
