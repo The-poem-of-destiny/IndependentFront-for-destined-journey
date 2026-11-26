@@ -36,6 +36,7 @@ import type {
   PlayerEditUndoToken,
 } from '@engine/variables/state-tree-edit';
 import type { StateUpdateOpStatus } from '@engine/types/types';
+import { canonical, escapeStateTreeSegment } from '@engine/variables/state-tree-utils';
 
 // ═══════════════════════════════════════════════════════════
 // 类型
@@ -91,10 +92,8 @@ export interface EditorNode {
 // 路径
 // ═══════════════════════════════════════════════════════════
 
-/** JSON Pointer 单段转义（RFC 6901：`~` → `~0`，`/` → `~1`）。名字里可能含 `/`。 */
-export function encodePointerSegment(segment: string): string {
-  return segment.replace(/~/g, '~0').replace(/\//g, '~1');
-}
+/** JSON Pointer 单段转义（RFC 6901：`~` → `~0`，`/` → `~1`）。名字里可能含 `/`。实现取引擎唯一一份。 */
+export const encodePointerSegment = escapeStateTreeSegment;
 
 /** 段 → JSON Pointer。 */
 export function pointerOf(segments: readonly string[]): string {
@@ -623,19 +622,6 @@ export function parseDraft(field: EditorField, draft: FieldDraft): DraftParse {
       return { ok: true, value: text };
     }
   }
-}
-
-/** 键序无关的深比较。 */
-function canonical(v: unknown): string {
-  if (v === undefined) return 'undefined';
-  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
-  if (isObject(v)) {
-    return `{${Object.keys(v)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(v);
 }
 
 /** 字段草稿是否与现值不同（解析失败也算改动，由预览把原因报出来）。 */

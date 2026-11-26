@@ -6,7 +6,7 @@
  * 2. 翻译层 / 编辑层源码里不再出现词表外的硬编码键映射：中文键 → 内核字段的对象字面量、
  *    按中文键分派的 `case '…'`、成串的中文键清单（`*_FIELD_KEYS` / `*_ENTITY_KEYS` 一类）。
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -20,10 +20,18 @@ import {
   stateTreeTranslationRuleOf,
 } from '../../../src/core/variables/state-tree-translator';
 
-const SOURCES = ['state-tree-translator.ts', 'state-tree-edit.ts'].map((name) => ({
+const VARIABLES_DIR = resolve(__dirname, '../../../src/core/variables');
+// 翻译层自 R6b 起拆到 translator/ 目录：入口、编辑层与该目录下每个模块都扫
+const SOURCES = [
+  'state-tree-translator.ts',
+  'state-tree-edit.ts',
+  ...readdirSync(resolve(VARIABLES_DIR, 'translator'))
+    .filter((f) => f.endsWith('.ts'))
+    .map((f) => `translator/${f}`),
+].map((name) => ({
   name,
   // 去掉注释再扫：注释里举例写到中文键不算映射
-  code: readFileSync(resolve(__dirname, '../../../src/core/variables', name), 'utf8')
+  code: readFileSync(resolve(VARIABLES_DIR, name), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/.*$/gm, ''),
 }));

@@ -40,6 +40,7 @@ import {
   type TreeTranslateResult,
   type TreeTranslateSnapshot,
 } from './state-tree-translator';
+import { canonical, isPlainObject, jsonClone } from './state-tree-utils';
 
 // ========== 对外类型 ==========
 
@@ -165,28 +166,7 @@ const TIME_POINTER = '/世界/时间';
 const TIME_REASON = '时间在修改器里只读（只能前进，且会触发天气、随机事件、地块结算）';
 const READONLY_SUFFIX = '修改器不能改只读键';
 
-function jsonClone<T>(v: T): T {
-  return v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T);
-}
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === 'object' && !Array.isArray(v);
-}
-
 /** 键序无关的深比较（投影键序固定，但记录可能来自旧序列化）。 */
-function canonical(v: unknown): string {
-  if (v === undefined) return 'undefined';
-  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
-  if (isPlainObject(v)) {
-    return `{${Object.keys(v)
-      .filter((k) => v[k] !== undefined)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(v);
-}
-
 function sameValue(a: unknown, b: unknown): boolean {
   return canonical(a) === canonical(b);
 }

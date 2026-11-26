@@ -1173,7 +1173,7 @@ function buildTreeDirectPatches(
     if (deltaTime > 0) dropped.push('time.delta_time：本楼已用 /世界/时间 推进时间，旧写法已忽略');
     else deltaTime = legacyMinutes;
   }
-  // 档案文字字段已随补丁落（审查 A8），翻译层的 profileChanges 恒空，不再与 character_updates 合并
+  // 档案文字字段已随补丁落（审查 A8），翻译层不产档案旁路，不再与 character_updates 合并
   const characterUpdates = draft.characterUpdates.filter((update) => {
     const known = findCharacter(characters, update.name) !== undefined;
     if (!known) dropped.push(`character_updates：人物 ${update.name} 缺少完整实体，已忽略`);

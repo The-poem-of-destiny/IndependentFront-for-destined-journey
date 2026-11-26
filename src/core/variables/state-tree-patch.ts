@@ -34,6 +34,7 @@ import {
   type StateTreePatchOp,
   type StateTreeRecordSpec,
 } from './state-tree-spec';
+import { isPlainObject } from './state-tree-utils';
 
 // ========== 类型：区块解析 ==========
 
@@ -372,10 +373,6 @@ export function normalizeTreePath(raw: unknown): TreePathNormalization {
 }
 
 // ========== op 规范化 ==========
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
 
 function rawPathText(p: unknown): string {
   if (typeof p === 'string') return p;
