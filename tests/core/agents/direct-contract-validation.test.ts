@@ -150,15 +150,55 @@ describe('effects update 值类型', () => {
     expect(mentions(patchesOf(draft), '鼓舞')).toBe(false);
   });
 
-  it('remainingTime 为 null（改为永久）照收；stacks 非正数只丢该行', () => {
+  // 第 2 波审查跟进：非正 stacks 按旧行为收下（StateManager 忽略非正层数、时长照改），不丢整行
+  it('remainingTime 为 null（改为永久）照收；stacks 非正数照收不丢行，stacks 不是数值才丢', () => {
     const data = updates();
     data.effects.push(
       { owner: '旅人', action: 'update', value: { name: '鼓舞', remainingTime: null } },
       { owner: '旅人', action: 'update', value: { name: '专注', stacks: -1 } },
+      { owner: '旅人', action: 'update', value: { name: '迟缓', stacks: '两层' } },
     );
     const draft = parse(data);
-    expect(draft.updates.effects.map((effect) => effect.value.name)).toEqual(['鼓舞']);
-    expect(draft.dropped).toEqual(['effects[1]：value.stacks 必须是正数，已忽略']);
+    expect(draft.updates.effects.map((effect) => effect.value.name)).toEqual(['鼓舞', '专注']);
+    expect(draft.dropped).toEqual(['effects[2]：value.stacks 必须是数值，已忽略']);
+  });
+
+  it('update 的 stacks 为 null 当缺席剥掉、记纠正，remainingTime 照改', () => {
+    const data = updates();
+    data.effects.push({
+      owner: '旅人',
+      action: 'update',
+      value: { name: '鼓舞', remainingTime: 3, stacks: null },
+    });
+    const draft = parse(data);
+    expect(draft.dropped).toBeUndefined();
+    expect(draft.updates.effects).toEqual([
+      { owner: '旅人', action: 'update', value: { name: '鼓舞', remainingTime: 3 } },
+    ]);
+    expect(draft.normalized).toEqual(['effects[0].value.stacks：为 null，已按未填写处理']);
+    const patch = patchesOf(draft).find((p) => p.op === 'update_status_effect');
+    expect(patch?.value).toEqual({ name: '鼓舞', remainingTime: 3 });
+  });
+
+  it('update 的 stacks 为 0 照常落补丁（层数由 StateManager 忽略，时长照改）', () => {
+    const data = updates();
+    data.effects.push({
+      owner: '旅人',
+      action: 'update',
+      value: { name: '鼓舞', remainingTime: 3, stacks: 0 },
+    });
+    const draft = parse(data);
+    expect(draft.dropped).toBeUndefined();
+    const patch = patchesOf(draft).find((p) => p.op === 'update_status_effect');
+    expect(patch?.value).toEqual({ name: '鼓舞', remainingTime: 3, stacks: 0 });
+  });
+
+  it('只写 stacks: null 时没有可改字段：丢该行', () => {
+    const data = updates();
+    data.effects.push({ owner: '旅人', action: 'update', value: { name: '鼓舞', stacks: null } });
+    const draft = parse(data);
+    expect(draft.updates.effects).toEqual([]);
+    expect(draft.dropped).toEqual(['effects[0]：效果更新只能改 remainingTime／stacks，已忽略']);
   });
 });
 
@@ -206,7 +246,7 @@ describe('items.modify changes 值类型', () => {
 });
 
 describe('quests.upsert 白名单与值类型', () => {
-  it('白名单外的键被剥除并记 note，不记 dropped', () => {
+  it('白名单外的键被剥除并记 note（每行合成一条），不记 dropped', () => {
     const data = updates();
     data.state = {
       quests: { upsert: [{ name: '寻剑', progress: '已到铁匠铺', secret: '幕后', level: 3 }] },
@@ -216,8 +256,7 @@ describe('quests.upsert 白名单与值类型', () => {
       { name: '寻剑', progress: '已到铁匠铺' },
     ]);
     expect(draft.normalized).toEqual([
-      'state.quests.upsert[0].secret：任务没有此字段，已剥除',
-      'state.quests.upsert[0].level：任务没有此字段，已剥除',
+      'state.quests.upsert[0]：任务没有字段 secret、level，已剥除',
     ]);
     expect(draft.dropped).toBeUndefined();
     const quest = patchesOf(draft).find((patch) => patch.op === 'update_quest');
@@ -239,6 +278,33 @@ describe('quests.upsert 白名单与值类型', () => {
       { name: '护送', status: '进行中' },
     ]);
     expect(draft.dropped).toEqual(['state.quests.upsert[0]：progress 必须是文本，已忽略']);
+  });
+
+  it('可选字段为 null（reward: null）当缺席剥掉、记纠正，该行照常落', () => {
+    const data = updates();
+    data.state = {
+      quests: { upsert: [{ name: '寻剑', status: '已完成', reward: null }] },
+    };
+    const draft = parse(data);
+    expect(draft.dropped).toBeUndefined();
+    expect(draft.normalized).toEqual(['state.quests.upsert[0].reward：为 null，已按未填写处理']);
+    const quest = patchesOf(draft).find((patch) => patch.op === 'update_quest');
+    expect(quest?.value).toEqual({ name: '寻剑', status: '已完成' });
+  });
+
+  it('多余键很多时一行只记一条，按 5 个键与单键 24 字截断', () => {
+    const long = '很'.repeat(30);
+    const row: Row = { name: '寻剑', status: '进行中' };
+    for (const key of ['a', 'b', 'c', 'd', long, 'f', 'g']) row[key] = 1;
+    const data = updates();
+    data.state = { quests: { upsert: [row] } };
+    const draft = parse(data);
+    expect((draft.updates.state as Row).quests.upsert).toEqual([
+      { name: '寻剑', status: '进行中' },
+    ]);
+    expect(draft.normalized).toEqual([
+      `state.quests.upsert[0]：任务没有字段 a、b、c、d、${'很'.repeat(24)}… 等 7 个，已剥除`,
+    ]);
   });
 });
 

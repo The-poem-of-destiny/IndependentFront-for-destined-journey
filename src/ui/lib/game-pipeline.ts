@@ -18,11 +18,10 @@ import type { EngineLogScope } from '@engine/runtime/engine-logger';
 import { AgentOrchestrator } from '@engine/agents/agent-orchestrator';
 import { resolveGenerationMode, type GenerationMode } from '@engine/story/generation-mode';
 import { buildDirectPatches } from '@engine/agents/direct-output';
-import { logStateWriteStats, summarizeStateWrites } from '@engine/agents/direct-main';
+import { logStateWriteStats, summarizeStateWrites } from '@engine/agents/direct-write-stats';
 import type { DirectTurnDraft } from '@engine/agents/direct-output';
 import {
   buildDirectCombat,
-  isDirectStructuredCombatEnabled,
   projectDirectCombatCharacters,
   readDirectCombat,
 } from '@engine/combat/direct-combat';
@@ -728,8 +727,7 @@ export class GamePipeline {
     controller: AbortController,
   ): Promise<void> {
     if (!this.isRunCurrent(controller)) throw new DOMException('Turn cancelled', 'AbortError');
-    if (context.plotSettings?.mode === 'off' && Object.keys(draft.updates.plot).length)
-      throw new Error('剧情关闭时 direct plot 必须为空');
+    // 剧情关闭时的 plot 已在解析期清空（草稿 plotEnabled），这里不再复查
     const message = this.emitMessage(draft.content, 'assistant', {
       storyTurnStatus: 'pending',
       storyTurnKey: this.currentStoryTurnKey,
@@ -755,10 +753,10 @@ export class GamePipeline {
     // 本楼更新记录随正文消息一起接纳（§12.2）：先落到 pending 行上，提交时整行改成 accepted
     if (built.stateUpdates) await this.attachStateUpdates(message.id, built.stateUpdates);
     // 结构化战斗关闭时不建战斗记录、不追加结算补丁，combat 传 undefined 让休眠记录原样保留
-    //（传 null 会清掉存档里的 worldFlags.directCombat）
+    //（传 null 会清掉存档里的 worldFlags.directCombat）。开关按生成时口径（草稿携带），不重读
     const combat: Omit<ReturnType<typeof buildDirectCombat>, 'record'> & {
       record: ReturnType<typeof buildDirectCombat>['record'] | undefined;
-    } = isDirectStructuredCombatEnabled()
+    } = draft.structuredCombat
       ? buildDirectCombat(
           draft.updates.combat,
           readDirectCombat(this.game.saveProfile),
@@ -932,15 +930,14 @@ export class GamePipeline {
   /**
    * 状态写入统计（§7.1）在建补丁之后才完整：把解析期的初步值补上建补丁期的丢弃与逐条记录，
    * 写回本回合 direct_main 的结果与调试记录，并记本楼唯一一条 `state.write_stats`。
-   * 整楼拒收的楼不走这里（generateDirectTurn 已记）。
+   * 整楼拒收的楼不走这里（generateDirectTurn 已记）。协议取草稿携带的生成时口径，不重读开关。
    */
   private recordDirectWriteStats(
     draft: DirectTurnDraft,
     built: ReturnType<typeof buildDirectPatches>,
   ): void {
     const result = this.orch?.getResults().get('direct_main');
-    const protocol = result?.stateWriteStats?.protocol ?? (draft.treePatch ? 'tree' : 'legacy');
-    const stats = summarizeStateWrites(protocol, draft, built);
+    const stats = summarizeStateWrites(draft.stateProtocol, draft, built);
     if (result) result.stateWriteStats = stats;
     const entry = this.findDirectDebugEntry();
     logStateWriteStats(stats, entry?.model ?? '');

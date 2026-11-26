@@ -677,6 +677,45 @@ describe('复审补充：提交时必抛的补丁在建补丁阶段先丢', () =
     expect(built.dropped).toEqual(['effects[0]：状态效果重复声明（实体初始状态已写过），已忽略']);
     expect(built.patches.map((p) => p.op)).not.toContain('remove_status_effect');
   });
+  // 审查 R2：原文路径曾靠模块级 WeakMap 按对象身份传递，草稿被克隆（如跨 worker / 存草稿）后退化成校验后下标
+  it('草稿被克隆后建补丁的丢弃说明仍指模型原文路径（实体与 effects 行）', () => {
+    const data = withSentinel(updates());
+    const twin = smith('旅人');
+    const keeper = smith();
+    keeper.output.statuses = [{ name: '专注', owner: '铁匠' }];
+    // entities[0] 解析期就被丢，留下的两行原文下标是 1、2
+    data.entities.push({ kind: 'nonsense' }, twin, keeper);
+    data.effects.push(
+      { owner: '铁匠', action: 'explode', value: { name: '灼烧' } },
+      { owner: '铁匠', action: 'remove', value: { name: '专注' } },
+    );
+    const draft = parse(data);
+    expect(draft.entityPaths).toEqual(['entities[1]', 'entities[2]']);
+    expect(draft.effectPaths).toEqual(['effects[1]']);
+    const built = build(structuredClone(draft));
+    expect(built.dropped).toEqual([
+      'entities[1]：人物 旅人 已存在，已忽略',
+      'effects[1]：状态效果重复声明（实体初始状态已写过），已忽略',
+    ]);
+  });
+  it('草稿携带解析口径：stateProtocol / structuredCombat / plotEnabled', () => {
+    const draft = parse(updates(), { structuredCombat: false, plotEnabled: false });
+    expect(draft).toMatchObject({
+      stateProtocol: 'legacy',
+      structuredCombat: false,
+      plotEnabled: false,
+    });
+    const tree = parseDirectOutput(
+      reply(JSON.stringify({ version: 2, patch: [], plot: {}, diceUsed: [] })),
+      POOL,
+      { stateProtocol: 'tree' },
+    );
+    expect(tree).toMatchObject({
+      stateProtocol: 'tree',
+      structuredCombat: true,
+      plotEnabled: true,
+    });
+  });
   it('一个单元只记一条 note：effects update 剥键后只剩 name 被丢时只记丢弃', () => {
     const data = withSentinel(updates());
     data.effects.push({ owner: '旅人', action: 'update', value: { name: '专注', foo: 1 } });

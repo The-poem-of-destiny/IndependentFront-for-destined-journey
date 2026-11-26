@@ -1353,6 +1353,103 @@ describe.each(['direct', 'direct_cached'] as const)(
       expect(game.player!.hp).toBe(70);
     });
 
+    describe('生成后、接纳前切换开关：接纳按生成时口径（草稿携带，不重读）', () => {
+      const combatBlock = {
+        meta: { round: 1, combatType: '标准', environment: '街道', phase: 'active' },
+        units: [
+          {
+            name: '旅人',
+            origin: 'save',
+            side: 'ally',
+            hp: 50,
+            mp: 10,
+            sp: 10,
+            statusEffects: [],
+          },
+        ],
+      };
+      /** 主请求发出时（开关已在生成开始时取过）改写开关，模拟玩家在生成途中切换设置 */
+      function switchingReply(raw: string, onMain: () => void) {
+        vi.spyOn(AgentClient.prototype, 'chat').mockImplementation(async function (this: any) {
+          if (this.agentId !== 'direct_main')
+            return result(
+              this.agentId,
+              JSON.stringify({ segments: [{ content: '旅人继续前行。' }] }),
+            );
+          onMain();
+          return result(this.agentId, raw);
+        });
+      }
+      // 结构化战斗开启时参战者资源只能由 combat 声明，故那条用例不带 state
+      function legacyRaw(combat: unknown, state: unknown = {}): string {
+        const data = {
+          version: 1,
+          world: {},
+          time: { delta_time: 0 },
+          entities: [],
+          state,
+          effects: [],
+          plot: {},
+          diceUsed: [],
+          combat,
+        };
+        return `<maintext>旅人迎击敌人。</maintext><character_updates>{"characters":[]}</character_updates><direct_updates>${JSON.stringify(data)}</direct_updates>`;
+      }
+
+      it('结构化战斗：生成时开、接纳前关 → 仍建战斗记录', async () => {
+        let structured = true;
+        setEngineSettingsProvider(() => ({ directStructuredCombat: structured }));
+        const { pipeline } = await directFixture();
+        switchingReply(legacyRaw(combatBlock), () => {
+          structured = false;
+        });
+        expect(await pipeline.run('迎击敌人')).toBe(true);
+        const combat = (await getDatabase().saveProfiles.get(saveId))!.worldFlags.directCombat as
+          DirectCombatRecord | undefined;
+        expect(combat?.state.meta.phase).toBe('active');
+        expect(combat?.state.units['旅人']).toBeDefined();
+      });
+
+      it('结构化战斗：生成时关、接纳前开 → 战斗块已丢弃，不建战斗记录，资源走 state', async () => {
+        let structured = false;
+        setEngineSettingsProvider(() => ({ directStructuredCombat: structured }));
+        const { pipeline } = await directFixture();
+        switchingReply(
+          legacyRaw(combatBlock, {
+            characters: { delta: [{ name: '旅人', path: 'hp', amount: -10 }] },
+          }),
+          () => {
+            structured = true;
+          },
+        );
+        expect(await pipeline.run('迎击敌人')).toBe(true);
+        expect(
+          (await getDatabase().saveProfiles.get(saveId))!.worldFlags.directCombat,
+        ).toBeUndefined();
+        expect((await getDatabase().characters.get('player'))!.hp).toBe(70);
+      });
+
+      it('状态协议：生成时 tree、接纳前改 legacy → 仍按路径补丁建补丁，统计记 tree', async () => {
+        let protocol: 'tree' | 'legacy' = 'tree';
+        setEngineSettingsProvider(() => ({ stateProtocol: protocol }));
+        const { game, pipeline } = await directFixture();
+        const raw = `<maintext>旅人继续前行。</maintext><character_updates>{"characters":[]}</character_updates><direct_updates>${JSON.stringify({ version: 2, patch: [{ op: 'delta', path: '/主角/生命值/当前', value: -10 }], plot: {}, diceUsed: [] })}</direct_updates>`;
+        switchingReply(raw, () => {
+          protocol = 'legacy';
+        });
+        expect(await pipeline.run('前进')).toBe(true);
+        expect((await getDatabase().characters.get('player'))!.hp).toBe(70);
+        const stored = await getDatabase().messages.get(
+          game.messages.find((m) => m.role === 'assistant')!.id,
+        );
+        expect(stored?.stateUpdates?.ops).toHaveLength(1);
+        const entry = game.agentLogHistory
+          .flatMap((turn) => turn.entries)
+          .find((e) => e.agentId === 'direct_main');
+        expect(entry?.stateWriteStats?.protocol).toBe('tree');
+      });
+    });
+
     it('结构化战斗默认关：存档里进行中的战斗记录只休眠，不投影、不拦接纳、不被清掉', async () => {
       const { game, pipeline } = await directFixture();
       const record: DirectCombatRecord = {

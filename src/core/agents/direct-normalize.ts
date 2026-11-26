@@ -432,16 +432,38 @@ function normalizeDeltaRows(rows: unknown, path: string, notes: string[]): void 
   });
 }
 
-/** N12：任务 upsert 行剥除契约外的键（协议只列了这几个字段，多写的键不入库） */
+/** 说明里最多列出的键数 */
+const MAX_LISTED_KEYS = 5;
+/** 单个键名在说明里的最大长度，超出截断加「…」 */
+const MAX_KEY_LENGTH = 24;
+
+/**
+ * 说明文字里的键名清单：最多列 5 个、单个键名按码点截断到 24 字，多出的写「等 N 个」。
+ * 剥键说明（这里的任务行与 direct-output.ts 的 stripKeys）共用，免得模型乱写一堆键时刷屏。
+ */
+export function listKeys(keys: readonly string[]): string {
+  const listed = keys
+    .slice(0, MAX_LISTED_KEYS)
+    .map((key) => {
+      // 按码点截断，避免切开代理对留下孤立代理项
+      const chars = Array.from(key);
+      return chars.length > MAX_KEY_LENGTH ? `${chars.slice(0, MAX_KEY_LENGTH).join('')}…` : key;
+    })
+    .join('、');
+  return keys.length > MAX_LISTED_KEYS ? `${listed} 等 ${keys.length} 个` : listed;
+}
+
+/** N12：任务 upsert 行剥除契约外的键（协议只列了这几个字段，多写的键不入库）；每行合成一条 note */
 function normalizeQuestRows(rows: unknown, notes: string[]): void {
   if (!Array.isArray(rows)) return;
   rows.forEach((row, i) => {
     if (!isRow(row)) return;
-    for (const key of Object.keys(row))
-      if (!(DIRECT_QUEST_UPSERT_KEYS as readonly string[]).includes(key)) {
-        delete row[key];
-        notes.push(`state.quests.upsert[${i}].${key}：任务没有此字段，已剥除`);
-      }
+    const extra = Object.keys(row).filter(
+      (key) => !(DIRECT_QUEST_UPSERT_KEYS as readonly string[]).includes(key),
+    );
+    if (extra.length === 0) return;
+    for (const key of extra) delete row[key];
+    notes.push(`state.quests.upsert[${i}]：任务没有字段 ${listKeys(extra)}，已剥除`);
   });
 }
 
