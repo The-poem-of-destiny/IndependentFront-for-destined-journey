@@ -15,7 +15,7 @@
  * - 每楼丢弃 / 每楼纠正：Σdropped / Σcorrected ÷ 被接纳的楼数。
  * - 丢弃率：Σdropped ÷ Σops（被接纳的楼）。
  * - 缺区块率：updatesMissing ÷ 被接纳的楼数。
- * 各字段口径见 `src/core/agents/direct-main.ts` 的 `summarizeStateWrites`。
+ * 各字段口径见 `src/core/agents/direct-write-stats.ts` 的 `summarizeStateWrites`。
  *
  * 用法：
  *   node scripts/analyze-state-writes.mjs <文件> [<文件> …]
@@ -222,7 +222,7 @@ function main() {
   console.log('');
   console.log(formatStateWriteTable(summarizeStateWriteRecords(records)));
   console.log('');
-  console.log('只作参考：口径见 src/core/agents/direct-main.ts 的 summarizeStateWrites。');
+  console.log('只作参考：口径见 src/core/agents/direct-write-stats.ts 的 summarizeStateWrites。');
 }
 
 // 只有直接执行时才跑；被测试 import 时不跑。

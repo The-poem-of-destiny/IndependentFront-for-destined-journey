@@ -199,6 +199,21 @@ describe('effects update 值类型', () => {
     const draft = parse(data);
     expect(draft.updates.effects).toEqual([]);
     expect(draft.dropped).toEqual(['effects[0]：效果更新只能改 remainingTime／stacks，已忽略']);
+    // 被丢的行不再留「null 已按未填写处理」的纠正（一个单元只记一条）
+    expect(draft.normalized).toBeUndefined();
+  });
+
+  it('stacks: null 与坏时长同行：整行丢弃，单元内纠正一并撤回', () => {
+    const data = updates();
+    data.effects.push({
+      owner: '旅人',
+      action: 'update',
+      value: { name: '专注', stacks: null, remainingTime: '3小时' },
+    });
+    const draft = parse(data);
+    expect(draft.updates.effects).toEqual([]);
+    expect(draft.dropped).toHaveLength(1);
+    expect(draft.normalized).toBeUndefined();
   });
 });
 

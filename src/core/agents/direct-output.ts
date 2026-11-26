@@ -227,6 +227,7 @@ function dropNote(path: string, reason: string): string {
  */
 function attempt(notes: Notes, path: string, run: () => void, onFail?: () => void): boolean {
   const mark = notes.dropped.length;
+  const normalizedMark = notes.normalized.length;
   try {
     run();
     return true;
@@ -234,6 +235,8 @@ function attempt(notes: Notes, path: string, run: () => void, onFail?: () => voi
     if (!(error instanceof DirectUnitError)) throw error;
     onFail?.();
     notes.dropped.length = mark;
+    // 单元内已记的纠正（如可选键 null 剥除）随单元一起撤回，免得被丢的行还留一条「已纠正」
+    notes.normalized.length = normalizedMark;
     notes.dropped.push(dropNote(path, error.message));
     return false;
   }
