@@ -686,7 +686,8 @@ describe('content-store 执行器 —— 7. 装 / 升 / 卸前试探存档标签
         pending: [],
       })),
     };
-    Object.defineProperty(navigator, 'locks', { configurable: true, value: locks });
+    // CI 跑 Node 20 的 node 环境没有全局 navigator：用 stubGlobal 注入，afterEach 统一还原
+    vi.stubGlobal('navigator', { ...(globalThis.navigator ?? {}), locks });
     return held;
   }
 
@@ -708,7 +709,7 @@ describe('content-store 执行器 —— 7. 装 / 升 / 卸前试探存档标签
     installContentFetchMock();
   });
   afterEach(() => {
-    delete (navigator as { locks?: unknown }).locks;
+    vi.unstubAllGlobals();
     setActivePackRecord(null);
     resetPlaceholderHashesCache();
     vi.restoreAllMocks();
@@ -724,7 +725,7 @@ describe('content-store 执行器 —— 7. 装 / 升 / 卸前试探存档标签
     expect(await libraryFingerprint()).toBe(before);
     expect(c.contentStatus).not.toBe('pack');
     // 锁已放开：别的标签页退出后可以照常安装
-    delete (navigator as { locks?: unknown }).locks;
+    vi.unstubAllGlobals();
     expect((await c.installPack(makePack())).status).toBe('installed');
   });
 
